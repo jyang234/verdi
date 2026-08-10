@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"unicode/utf8"
 )
 
 // DecodeExactJSON adds duplicate-key rejection to DecodeStrictJSON's unknown
@@ -13,6 +14,9 @@ import (
 // content-addressed JSON contracts where accepting two spellings of one
 // object would make the decoded meaning parser-dependent.
 func DecodeExactJSON(data []byte, out any) error {
+	if !utf8.Valid(data) {
+		return fmt.Errorf("artifact: exact JSON must be valid UTF-8")
+	}
 	if err := checkNoDuplicateJSONKeys(data); err != nil {
 		return err
 	}

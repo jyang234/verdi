@@ -138,4 +138,9 @@ func TestDecodeRequestExcerptBounds(t *testing.T) {
 	if !artifact.ValidDigest(DigestBytes([]byte(baseSpec))) {
 		t.Fatal("DigestBytes did not return a canonical digest")
 	}
+
+	badTarget := bytes.Replace(validRequestBytes(t), []byte(`"operations":`), []byte(`"excerpts":[{"target":"link/spec/depends-on/spec%2Fbase","classification":"unresolved","representation":"paraphrase","text":"bad"}],"operations":`), 1)
+	if _, err := DecodeRequest(badTarget); err == nil || !strings.Contains(err.Error(), "target") {
+		t.Fatalf("DecodeRequest relationship excerpt error = %v", err)
+	}
 }

@@ -3,6 +3,7 @@ package designprovenance
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 	"unicode/utf8"
 
 	"github.com/jyang234/verdi/internal/artifact"
@@ -198,6 +199,11 @@ func (o Operation) validateFields(fields map[string]json.RawMessage) error {
 			return err
 		}
 	}
+	for _, pair := range [][2]string{{"after_id", o.AfterID}, {"after_slug", o.AfterSlug}, {"note", o.Note}} {
+		if _, present := fields[pair[0]]; present && pair[1] == "" {
+			return fmt.Errorf("designprovenance: operation %q field %q must be nonempty when present", o.Op, pair[0])
+		}
+	}
 	if (o.Op == OpAddLink || o.Op == OpRemoveLink) && !o.Type.Valid() {
 		return fmt.Errorf("designprovenance: operation %q has unknown link type %q", o.Op, o.Type)
 	}
@@ -342,8 +348,8 @@ type Excerpt struct {
 }
 
 func (e Excerpt) validate() error {
-	if e.Target == "" || e.Text == "" || !utf8.ValidString(e.Text) {
-		return fmt.Errorf("designprovenance: excerpt target/text must be nonempty valid UTF-8")
+	if !ValidExcerptTarget(e.Target) || e.Text == "" || !utf8.ValidString(e.Text) {
+		return fmt.Errorf("designprovenance: excerpt target must be problem, outcome, or an object ID, and text must be nonempty valid UTF-8")
 	}
 	if utf8.RuneCountInString(e.Text) > MaxExcerptScalars {
 		return fmt.Errorf("designprovenance: excerpt text exceeds 600 Unicode scalars")
@@ -362,6 +368,17 @@ func (e Excerpt) validate() error {
 		return fmt.Errorf("designprovenance: unknown excerpt representation %q", e.Representation)
 	}
 	return nil
+}
+
+// ValidExcerptTarget reports whether target is a problem, outcome, or
+// syntactically valid declared-object ID. Relationship/group IDs are not
+// attachable provenance excerpt targets.
+func ValidExcerptTarget(target string) bool {
+	if target == "problem" || target == "outcome" {
+		return true
+	}
+	ref, err := artifact.ParseRef("spec/excerpt-target#" + target)
+	return err == nil && ref.Fragment()
 }
 
 // Entry is one canonical JSONL sidecar record.
@@ -435,8 +452,11 @@ func (e Entry) validate(checkDigest bool) error {
 		return err
 	}
 	if e.Attribution.Unauthenticated {
-		if e.Harness == "" {
-			return fmt.Errorf("designprovenance: unauthenticated CLI attribution requires harness")
+		if strings.TrimSpace(e.Harness) == "" || !utf8.ValidString(e.Harness) {
+			return fmt.Errorf("designprovenance: unauthenticated CLI attribution requires a nonblank valid UTF-8 harness")
+		}
+		if e.Session != "" && (strings.TrimSpace(e.Session) == "" || !utf8.ValidString(e.Session)) {
+			return fmt.Errorf("designprovenance: session must be nonblank valid UTF-8 when present")
 		}
 	} else if e.Harness != "" || e.Session != "" {
 		return fmt.Errorf("designprovenance: principal attribution must omit harness and session")

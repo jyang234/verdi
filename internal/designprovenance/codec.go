@@ -52,8 +52,15 @@ func DecodeLog(data []byte) ([]Entry, error) {
 			return nil, fmt.Errorf("designprovenance: duplicate entry digest %q", entry.Digest)
 		}
 		seen[entry.Digest] = true
-		if i > 0 {
+		if i == 0 {
+			if entry.UnclassifiedGap != nil {
+				return nil, fmt.Errorf("designprovenance: first JSONL entry cannot declare an unclassified gap")
+			}
+		} else {
 			prior := entries[i-1]
+			if entry.Spec != prior.Spec {
+				return nil, fmt.Errorf("designprovenance: JSONL spec identity changed from %q to %q", prior.Spec, entry.Spec)
+			}
 			if entry.PreviousDigest == prior.ResultDigest {
 				if entry.UnclassifiedGap != nil {
 					return nil, fmt.Errorf("designprovenance: unclassified gap is invalid when the typed chain is continuous")

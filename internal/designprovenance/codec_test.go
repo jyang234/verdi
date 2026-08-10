@@ -151,6 +151,20 @@ func TestJSONLChain(t *testing.T) {
 			raw, _ := EncodeEntry(broken)
 			return append(append([]byte{}, firstRaw...), raw...)
 		}(), "gap"},
+		{"first entry cannot claim gap", func() []byte {
+			broken := first
+			broken.UnclassifiedGap = &UnclassifiedGap{FromDigest: digestC, ToDigest: broken.PreviousDigest}
+			_ = broken.Seal()
+			raw, _ := EncodeEntry(broken)
+			return raw
+		}(), "first"},
+		{"mixed spec identities", func() []byte {
+			broken := second
+			broken.Spec = "spec/other"
+			_ = broken.Seal()
+			raw, _ := EncodeEntry(broken)
+			return append(append([]byte{}, firstRaw...), raw...)
+		}(), "spec"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -180,6 +194,12 @@ func TestOperationAndExcerptValidation(t *testing.T) {
 		t.Fatalf("Seal oversized excerpt error = %v, want scalar bound", err)
 	}
 
+	e.Excerpts[0].Target = "link/spec/depends-on/spec%2Fbase"
+	e.Excerpts[0].Text = "bounded"
+	if err := e.Seal(); err == nil || !strings.Contains(err.Error(), "object ID") {
+		t.Fatalf("Seal relationship excerpt target error = %v, want object target refusal", err)
+	}
+
 	for _, tt := range []struct {
 		name string
 		op   Operation
@@ -199,6 +219,30 @@ func TestOperationAndExcerptValidation(t *testing.T) {
 				t.Fatalf("Validate error = %v, want %q", err, tt.want)
 			}
 		})
+	}
+
+	for _, raw := range []string{
+		`{"op":"reorder-ac","id":"ac-1","after_id":""}`,
+		`{"op":"reorder-stub","slug":"story","after_slug":""}`,
+		`{"op":"add-link","source":"spec","type":"depends-on","ref":"spec/other","note":""}`,
+	} {
+		var operation Operation
+		if err := decodeStrictJSON([]byte(raw), &operation); err == nil || !strings.Contains(err.Error(), "nonempty") {
+			t.Fatalf("empty optional operation field accepted: %s (%v)", raw, err)
+		}
+	}
+}
+
+func TestEntryRejectsBlankHarnessAndSession(t *testing.T) {
+	for _, mutate := range []func(*Entry){
+		func(entry *Entry) { entry.Harness = "   " },
+		func(entry *Entry) { entry.Session = "   " },
+	} {
+		entry := validEntry(t)
+		mutate(&entry)
+		if err := entry.Seal(); err == nil || !strings.Contains(err.Error(), "nonblank") {
+			t.Fatalf("Seal blank harness/session error = %v", err)
+		}
 	}
 }
 

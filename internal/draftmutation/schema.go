@@ -68,8 +68,8 @@ type ExcerptRequest struct {
 }
 
 func (e ExcerptRequest) validate() error {
-	if e.Target == "" || e.Text == "" || !utf8.ValidString(e.Target) || !utf8.ValidString(e.Text) {
-		return fmt.Errorf("draftmutation: excerpt target/text must be nonempty valid UTF-8")
+	if !designprovenance.ValidExcerptTarget(e.Target) || e.Text == "" || !utf8.ValidString(e.Text) {
+		return fmt.Errorf("draftmutation: excerpt target must be problem, outcome, or an object ID, and text must be nonempty valid UTF-8")
 	}
 	if utf8.RuneCountInString(e.Text) > designprovenance.MaxExcerptScalars {
 		return fmt.Errorf("draftmutation: excerpt text exceeds 600 Unicode scalars")
