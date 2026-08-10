@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -91,6 +92,79 @@ func TestTransactionFaultMatrixNeverSpecAheadAndRecoversOldOrNew(t *testing.T) {
 			assertCompleteOldOrNew(t, root)
 			if _, err := os.Stat(store.DraftMutationDir(root, transactionSpecName)); !os.IsNotExist(err) {
 				t.Fatalf("transaction root remains after recovery: %v", err)
+			}
+		})
+	}
+}
+
+func TestTransactionSyncsEachNewDirectoryEntryBeforeJournal(t *testing.T) {
+	tests := []struct {
+		name        string
+		removeData  bool
+		wantCreates []string
+	}{
+		{
+			name: "transaction directories",
+			wantCreates: []string{
+				"created-directory-parent-fsync:.verdi/data/draft-mutation",
+				"created-directory-parent-fsync:.verdi/data/draft-mutation/sample",
+			},
+		},
+		{
+			name:       "missing data ancestor",
+			removeData: true,
+			wantCreates: []string{
+				"created-directory-parent-fsync:.verdi/data",
+				"created-directory-parent-fsync:.verdi/data/draft-mutation",
+				"created-directory-parent-fsync:.verdi/data/draft-mutation/sample",
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			newRoot := func(t *testing.T) string {
+				t.Helper()
+				root := transactionRoot(t)
+				if tt.removeData {
+					if err := os.Remove(filepath.Join(root, ".verdi", "data")); err != nil {
+						t.Fatal(err)
+					}
+				}
+				return root
+			}
+			root := newRoot(t)
+			var steps []string
+			if err := runTransaction(t, root, Coordinator{After: func(step string) error {
+				steps = append(steps, step)
+				return nil
+			}}); err != nil {
+				t.Fatalf("probe transaction: %v", err)
+			}
+			if len(steps) < len(tt.wantCreates)+1 || !reflect.DeepEqual(steps[:len(tt.wantCreates)], tt.wantCreates) || steps[len(tt.wantCreates)] != StepJournalWrite {
+				t.Fatalf("durability order = %v, want %v before %q", steps, tt.wantCreates, StepJournalWrite)
+			}
+
+			for _, failStep := range tt.wantCreates {
+				t.Run(failStep, func(t *testing.T) {
+					root := newRoot(t)
+					stop := errors.New("injected directory crash")
+					err := runTransaction(t, root, Coordinator{After: func(step string) error {
+						if step == failStep {
+							return stop
+						}
+						return nil
+					}})
+					if !errors.Is(err, stop) {
+						t.Fatalf("transaction error = %v, want injected crash", err)
+					}
+					if _, err := os.Stat(store.DraftMutationJournalPath(root, transactionSpecName)); !os.IsNotExist(err) {
+						t.Fatalf("journal became reachable before directory durability: %v", err)
+					}
+					if err := runTransaction(t, root, Coordinator{}); err != nil {
+						t.Fatalf("retry after directory crash: %v", err)
+					}
+					assertCompleteOldOrNew(t, root)
+				})
 			}
 		})
 	}

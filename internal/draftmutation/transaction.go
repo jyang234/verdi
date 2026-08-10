@@ -20,23 +20,24 @@ const (
 	journalSchema = "verdi.draftmutation-journal/v1"
 	phasePrepared = "prepared"
 
-	StepJournalWrite            = "journal-write"
-	StepJournalSync             = "journal-fsync"
-	StepJournalDirectorySync    = "journal-directory-fsync"
-	StepSpecStageWrite          = "spec-stage-write"
-	StepSpecStageSync           = "spec-stage-fsync"
-	StepProvenanceStageWrite    = "provenance-stage-write"
-	StepProvenanceStageSync     = "provenance-stage-fsync"
-	StepStageDirectorySync      = "stage-directory-fsync"
-	StepProvenanceRename        = "provenance-rename"
-	StepProvenanceDirectorySync = "provenance-directory-fsync"
-	StepSpecRename              = "spec-rename"
-	StepSpecDirectorySync       = "spec-directory-fsync"
-	StepCleanupJournal          = "cleanup-journal"
-	StepCleanupStage            = "cleanup-stage"
-	StepCleanupDirectorySync    = "cleanup-directory-fsync"
-	StepCleanupTransactionRoot  = "cleanup-transaction-root"
-	StepCleanupParentDirectory  = "cleanup-parent-directory-fsync"
+	StepJournalWrite               = "journal-write"
+	StepJournalSync                = "journal-fsync"
+	StepJournalDirectorySync       = "journal-directory-fsync"
+	StepSpecStageWrite             = "spec-stage-write"
+	StepSpecStageSync              = "spec-stage-fsync"
+	StepProvenanceStageWrite       = "provenance-stage-write"
+	StepProvenanceStageSync        = "provenance-stage-fsync"
+	StepStageDirectorySync         = "stage-directory-fsync"
+	StepProvenanceRename           = "provenance-rename"
+	StepProvenanceDirectorySync    = "provenance-directory-fsync"
+	StepSpecRename                 = "spec-rename"
+	StepSpecDirectorySync          = "spec-directory-fsync"
+	StepCleanupJournal             = "cleanup-journal"
+	StepCleanupStage               = "cleanup-stage"
+	StepCleanupDirectorySync       = "cleanup-directory-fsync"
+	StepCleanupTransactionRoot     = "cleanup-transaction-root"
+	StepCleanupParentDirectory     = "cleanup-parent-directory-fsync"
+	StepCreatedDirectoryParentSync = "created-directory-parent-fsync:"
 )
 
 // Coordinator exposes deterministic post-boundary fault injection for tests.
@@ -72,8 +73,9 @@ func WithWriterLock(ctx context.Context, root string, coordinator Coordinator, w
 	if work == nil {
 		return fmt.Errorf("draftmutation: nil writer callback")
 	}
+	writer := &LockedWriter{ctx: ctx, root: root, coordinator: coordinator}
 	dataDir := filepath.Join(root, ".verdi", "data")
-	if err := ensureDirectory(root, dataDir); err != nil {
+	if err := writer.ensureDirectory(dataDir); err != nil {
 		return err
 	}
 	if err := ctx.Err(); err != nil {
@@ -92,7 +94,7 @@ func WithWriterLock(ctx context.Context, root string, coordinator Coordinator, w
 			resultErr = releaseErr
 		}
 	}()
-	return work(&LockedWriter{ctx: ctx, root: root, coordinator: coordinator})
+	return work(writer)
 }
 
 // Transaction carries exact old/new bytes for one spec and its complete
@@ -176,7 +178,7 @@ func (w *LockedWriter) Commit(transaction Transaction) error {
 		return fmt.Errorf("draftmutation: current provenance does not match transaction old bytes/presence")
 	}
 	txDir := store.DraftMutationDir(w.root, name)
-	if err := ensureDirectory(w.root, txDir); err != nil {
+	if err := w.ensureDirectory(txDir); err != nil {
 		return err
 	}
 	entries, err := os.ReadDir(txDir)
@@ -281,8 +283,8 @@ func (w *LockedWriter) syncDirectory(path, step string) error {
 	return w.coordinator.after(step)
 }
 
-func ensureDirectory(root, target string) error {
-	absoluteRoot, err := filepath.Abs(root)
+func (w *LockedWriter) ensureDirectory(target string) error {
+	absoluteRoot, err := filepath.Abs(w.root)
 	if err != nil {
 		return err
 	}
@@ -307,6 +309,13 @@ func ensureDirectory(root, target string) error {
 		info, statErr := os.Lstat(current)
 		if errors.Is(statErr, os.ErrNotExist) {
 			if err := os.Mkdir(current, 0o755); err == nil {
+				created, relErr := filepath.Rel(absoluteRoot, current)
+				if relErr != nil {
+					return fmt.Errorf("draftmutation: resolving created directory %s: %w", current, relErr)
+				}
+				if err := w.syncDirectory(filepath.Dir(current), StepCreatedDirectoryParentSync+filepath.ToSlash(created)); err != nil {
+					return err
+				}
 				continue
 			} else if !errors.Is(err, os.ErrExist) {
 				return fmt.Errorf("draftmutation: creating directory %s: %w", current, err)
