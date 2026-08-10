@@ -2,11 +2,17 @@ package journey
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 
+	"github.com/jyang234/verdi/internal/artifact"
+	"github.com/jyang234/verdi/internal/evidence"
 	"github.com/jyang234/verdi/internal/gitx"
 	"github.com/jyang234/verdi/internal/policyauthority"
 	"github.com/jyang234/verdi/internal/specstate"
+	"github.com/jyang234/verdi/internal/store"
 )
 
 // GitReader is the read-only Git-plumbing surface fact-gathering depends on
@@ -177,6 +183,125 @@ func (policyAuthorityProfileLoader) Load(_ context.Context, root string) (Profil
 // function.
 type DefaultBranchResolver func(ctx context.Context, root string) (specstate.Branch, bool)
 
+// ObligationQualityFact is journey's consumer-owned projection of the shared
+// evidence assessment for one declared (AC, kind) pair. PositiveCandidate is
+// true only when a current positive record was evaluated; a structurally
+// elaborated build declaration with no evidence yet is not design debt.
+type ObligationQualityFact struct {
+	ACID              string
+	Kind              artifact.EvidenceKind
+	Assessment        evidence.ObligationAssessment
+	PositiveCandidate bool
+}
+
+// ObligationQualityReader is journey's read-only port to the shared
+// obligation-quality loader and exact record matcher.
+type ObligationQualityReader interface {
+	Assess(ctx context.Context, root, targetPath, targetClass, targetCommit, evaluationCommit, specLandingCommit string) ([]ObligationQualityFact, error)
+}
+
+type obligationQualityGitReader interface {
+	evidence.ObligationAncestryReader
+	Show(ctx context.Context, dir, ref, path string) ([]byte, error)
+}
+
+type evidenceObligationQualityReader struct {
+	git obligationQualityGitReader
+}
+
+// NewObligationQualityReader returns the production adapter. It performs no
+// mutation and delegates all structural and record semantics to evidence.
+func NewObligationQualityReader() ObligationQualityReader {
+	return evidenceObligationQualityReader{git: gitxReader{}}
+}
+
+func (r evidenceObligationQualityReader) Assess(ctx context.Context, root, targetPath, targetClass, targetCommit, evaluationCommit, specLandingCommit string) ([]ObligationQualityFact, error) {
+	// Only stories own obligation artifacts. Feature and initiative targets can
+	// be projected from a remote ref without a corresponding working-tree file,
+	// so reject them at the already-resolved target-class boundary before I/O.
+	if targetClass != string(artifact.ClassStory) {
+		return []ObligationQualityFact{}, nil
+	}
+	raw, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(targetPath)))
+	if errors.Is(err, os.ErrNotExist) && targetCommit != "" && r.git != nil {
+		raw, err = r.git.Show(ctx, root, targetCommit, targetPath)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("journey: reading obligation-quality target %s: %w", targetPath, err)
+	}
+	fm, _, err := artifact.SplitFrontmatter(raw)
+	if err != nil {
+		return nil, fmt.Errorf("journey: decoding obligation-quality target %s: %w", targetPath, err)
+	}
+	spec, err := artifact.DecodeSpec(fm)
+	if err != nil {
+		return nil, fmt.Errorf("journey: decoding obligation-quality target %s: %w", targetPath, err)
+	}
+	if spec.Class != artifact.ClassStory {
+		return nil, fmt.Errorf("journey: obligation-quality target %s resolved as %q but decoded as %q", targetPath, targetClass, spec.Class)
+	}
+
+	var records []artifact.Evidence
+	if evaluationCommit != "" {
+		derivedRoot := store.DerivedSpecDir(root, store.RefSlug(spec.ID))
+		records, err = evidence.LoadRecords(ctx, root, derivedRoot, evaluationCommit)
+		if err != nil {
+			return nil, fmt.Errorf("journey: loading obligation-quality evidence for %s: %w", spec.ID, err)
+		}
+	}
+
+	facts := make([]ObligationQualityFact, 0)
+	for _, ac := range spec.AcceptanceCriteria {
+		current := evidence.Current(evidence.RecordsForAC(records, ac.ID))
+		for _, kind := range ac.Evidence {
+			assessment, err := evidence.AssessObligation(ctx, evidence.ObligationAssessmentInput{
+				StoreRoot: root,
+				SpecName:  specNameFromRelPath(targetPath),
+				ACID:      ac.ID,
+				Kind:      kind,
+			})
+			if err != nil {
+				return nil, err
+			}
+
+			fact := ObligationQualityFact{ACID: ac.ID, Kind: kind, Assessment: assessment}
+			if assessment.StructuralState == evidence.ObligationElaborated && kind == artifact.EvidenceAttestation {
+				// The current schema has no authenticated-human/governed-source
+				// receipt, so attestation remains explicitly unmatched.
+				fact.PositiveCandidate = true
+			}
+			for i := range current {
+				if current[i].Kind != kind || current[i].Verdict != artifact.VerdictPass {
+					continue
+				}
+				fact.PositiveCandidate = true
+				candidate, matchErr := evidence.MatchObligation(ctx, assessment, evidence.ObligationAssessmentInput{
+					StoreRoot:         root,
+					SpecName:          specNameFromRelPath(targetPath),
+					ACID:              ac.ID,
+					Kind:              kind,
+					Record:            &current[i],
+					EvaluationCommit:  evaluationCommit,
+					SpecLandingCommit: specLandingCommit,
+					Git:               r.git,
+				})
+				if matchErr != nil {
+					return nil, matchErr
+				}
+				if candidate.MatchState == evidence.ObligationMatched {
+					fact.Assessment = candidate
+					break
+				}
+				if fact.Assessment.Reason == evidence.ObligationReasonProducerMissing {
+					fact.Assessment = candidate
+				}
+			}
+			facts = append(facts, fact)
+		}
+	}
+	return facts, nil
+}
+
 // Projector gathers repository and lifecycle facts and (a later stage,
 // Project) derives the complete journey Record from them. Its zero value
 // is not useful — construct it via NewProjector (production) or the
@@ -186,6 +311,7 @@ type Projector struct {
 	git                  GitReader
 	state                StateResolver
 	profiles             ProfileLoader
+	obligations          ObligationQualityReader
 	resolveDefaultBranch DefaultBranchResolver
 }
 
@@ -198,6 +324,7 @@ func NewProjector() Projector {
 		git:                  NewGitReader(),
 		state:                NewStateResolver(),
 		profiles:             NewProfileLoader(),
+		obligations:          NewObligationQualityReader(),
 		resolveDefaultBranch: specstate.ResolveDefaultBranch,
 	}
 }
@@ -205,5 +332,5 @@ func NewProjector() Projector {
 // newProjector is the test-only seam: package tests construct a Projector
 // over in-process fakes.
 func newProjector(git GitReader, state StateResolver, resolveDefaultBranch DefaultBranchResolver) Projector {
-	return Projector{git: git, state: state, profiles: NewProfileLoader(), resolveDefaultBranch: resolveDefaultBranch}
+	return Projector{git: git, state: state, profiles: NewProfileLoader(), obligations: evidenceObligationQualityReader{git: git}, resolveDefaultBranch: resolveDefaultBranch}
 }

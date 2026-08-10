@@ -954,6 +954,74 @@ func TestCmdJourney_StoryRef_StoryClassTarget(t *testing.T) {
 	}
 }
 
+func TestCmdJourney_ObligationQualityBlockerExitsZero(t *testing.T) {
+	buildJourneyRepo(t, map[string]string{".verdi/specs/active/loan-api/spec.md": journeyStoryClassMD})
+
+	var stdout, stderr bytes.Buffer
+	got := cmdJourney([]string{"jira:LOAN-1482"}, &stdout, &stderr)
+	if got != 0 {
+		t.Fatalf("cmdJourney = %d, want successful blocked projection exit 0; stderr=%s", got, stderr.String())
+	}
+	rec, err := journey.Decode([]byte(strings.TrimRight(stdout.String(), "\n")))
+	if err != nil {
+		t.Fatalf("journey.Decode(stdout): %v\nstdout=%s", err, stdout.String())
+	}
+	blocker := journeyFindBlocker(rec.Blockers.Current, "obligation-quality/ac-1/static")
+	if blocker == nil {
+		t.Fatalf("blockers = %v, want obligation-quality/ac-1/static", journeyBlockerIDs(rec.Blockers.Current))
+	}
+	if blocker.Reason != journey.ReasonObligationDesignUnresolved || blocker.Class != journey.ClassMechanical || blocker.Transition != "build:start" {
+		t.Fatalf("quality blocker = %+v, want exact reason/class/action", blocker)
+	}
+	if len(blocker.Witnesses) != 1 || blocker.Witnesses[0] != ".verdi/obligations/loan-api/ac-1--static.md: missing" {
+		t.Fatalf("quality blocker witnesses = %v, want stable missing-obligation witness", blocker.Witnesses)
+	}
+	if blocker.Owner.Declared != "platform-team" || blocker.Owner.Attribution.PrincipalID != "" {
+		t.Fatalf("quality blocker owner = %+v, want declared platform-team and unauthenticated attribution", blocker.Owner)
+	}
+	if len(rec.Actions.Safe) != 0 {
+		t.Fatalf("Actions.Safe = %+v, quality projection must not invent a build action", rec.Actions.Safe)
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("stderr = %q, want empty for an exit-0 blocked projection", stderr.String())
+	}
+}
+
+const journeyMalformedQualityObligationMD = `---
+id: obligation/loan-api--ac-1--static
+kind: obligation
+title: "Quality"
+owners: [platform-team]
+for_kind: static
+quality:
+  state: unresolved-design-debt
+  unknown: true
+links:
+  - { type: verifies, ref: "spec/loan-api" }
+frozen: { at: 2026-08-10, commit: deadbeefdeadbeefdeadbeefdeadbeefdeadbeef }
+---
+# Quality
+`
+
+func TestCmdJourney_MalformedObligationQualityExitsTwo(t *testing.T) {
+	buildJourneyRepo(t, map[string]string{
+		".verdi/specs/active/loan-api/spec.md":        journeyStoryClassMD,
+		".verdi/obligations/loan-api/ac-1--static.md": journeyMalformedQualityObligationMD,
+	})
+
+	var stdout, stderr bytes.Buffer
+	got := cmdJourney([]string{"jira:LOAN-1482"}, &stdout, &stderr)
+	if got != 2 {
+		t.Fatalf("cmdJourney = %d, want operational exit 2; stdout=%s stderr=%s", got, stdout.String(), stderr.String())
+	}
+	if stdout.Len() != 0 {
+		t.Fatalf("stdout = %q, want empty on an operational failure", stdout.String())
+	}
+	if !strings.Contains(stderr.String(), "obligation quality") || !strings.Contains(stderr.String(), "field unknown not found") {
+		t.Fatalf("stderr = %q, want obligation-quality strict-decode failure", stderr.String())
+	}
+}
+
 // TestCmdJourney_StoryRef_AmbiguousExitsTwo proves the fail-closed half at
 // the CLI surface: a ref two active specs answer to is operational exit 2
 // naming both, never a silently-picked one of them.

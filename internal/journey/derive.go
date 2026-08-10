@@ -3,7 +3,10 @@ package journey
 import (
 	"fmt"
 	"sort"
+	"strings"
 
+	"github.com/jyang234/verdi/internal/artifact"
+	"github.com/jyang234/verdi/internal/evidence"
 	"github.com/jyang234/verdi/internal/model"
 	"github.com/jyang234/verdi/internal/specstate"
 )
@@ -41,6 +44,67 @@ func candidateTransitions(mdl *model.Model, class string, result specstate.Resul
 	}
 	sort.Slice(transitions, func(i, j int) bool { return transitions[i].Verb < transitions[j].Verb })
 	return transitions, true
+}
+
+func obligationQualityBlockerID(acID string, kind artifact.EvidenceKind) string {
+	return obligationQualityBlockerPrefix + acID + "/" + string(kind)
+}
+
+// deriveObligationQualityBlockers emits one mechanical blocker for each
+// non-elaborated pair, and for an elaborated pair only when a current positive
+// candidate exists but cannot match the declaration. Input order is the source
+// spec's AC-then-kind declaration order and is preserved exactly.
+func deriveObligationQualityBlockers(facts []ObligationQualityFact, owner Owner) []Blocker {
+	out := make([]Blocker, 0)
+	seen := map[string]bool{}
+	for _, fact := range facts {
+		assessment := fact.Assessment
+		blocks := assessment.StructuralState != evidence.ObligationElaborated ||
+			(fact.PositiveCandidate && assessment.MatchState != evidence.ObligationMatched)
+		if !blocks {
+			continue
+		}
+		id := obligationQualityBlockerID(fact.ACID, fact.Kind)
+		if seen[id] {
+			continue
+		}
+		seen[id] = true
+		detail := string(assessment.StructuralState)
+		if assessment.Reason != "" {
+			detail += "/" + string(assessment.Reason)
+		}
+		out = append(out, Blocker{
+			ID:                id,
+			Reason:            ReasonObligationDesignUnresolved,
+			Class:             ClassMechanical,
+			Witnesses:         []string{assessment.WitnessPath + ": " + detail},
+			Owner:             owner,
+			ClearingCondition: fmt.Sprintf("the obligation quality for %s/%s is elaborated and any positive evidence matches its producer, source, and freshness declaration", fact.ACID, fact.Kind),
+			Transition:        buildStartActionIdentity,
+		})
+	}
+	if out == nil {
+		return []Blocker{}
+	}
+	return out
+}
+
+// mergeObligationQualityBlockers keeps every incumbent blocker ordered by ID
+// and inserts the declaration-ordered quality group at its lexical prefix
+// position. Stable sorting deliberately preserves the group's internal order.
+func mergeObligationQualityBlockers(current, quality []Blocker) []Blocker {
+	out := append(append([]Blocker(nil), current...), quality...)
+	orderKey := func(blocker Blocker) string {
+		if strings.HasPrefix(blocker.ID, obligationQualityBlockerPrefix) {
+			return obligationQualityBlockerPrefix
+		}
+		return blocker.ID
+	}
+	sort.SliceStable(out, func(i, j int) bool { return orderKey(out[i]) < orderKey(out[j]) })
+	if out == nil {
+		return []Blocker{}
+	}
+	return out
 }
 
 // classUndeclaredMessage is F4's shared text: the record-level disclosure

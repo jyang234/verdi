@@ -31,6 +31,15 @@ func goldenRecord(t *testing.T) Record {
 	r := validRecord(t)
 	r.Repository.Worktree = WorktreeFact{Managed: true, Name: "glg-journey-projection"}
 	r.Blockers.Current[0].Owner = Owner{Declared: "Jane Doe", Attribution: attr}
+	r.Blockers.Current = append(r.Blockers.Current, Blocker{
+		ID:                "obligation-quality/ac-2/runtime",
+		Reason:            ReasonObligationDesignUnresolved,
+		Class:             ClassMechanical,
+		Witnesses:         []string{".verdi/obligations/example/ac-2--runtime.md: unresolved-design-debt"},
+		Owner:             Owner{Declared: "Jane Doe", Attribution: attr},
+		ClearingCondition: "elaborate the obligation quality for ac-2/runtime",
+		Transition:        "build:start",
+	})
 	r.Principals.ProfileAdopted = true
 	r.Principals.SelectedProfileID = "solo-default"
 	r.Principals.SelectedProfileDigest = testSelectedProfileDigest
