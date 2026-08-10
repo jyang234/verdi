@@ -342,7 +342,7 @@ func TestProject_Integration_ObligationQualityMatching(t *testing.T) {
 		producer   string
 		wantReason string
 	}{
-		{name: "elaborated with no evidence has no blocker"},
+		{name: "elaborated with no evidence blocks", wantReason: "producer-missing"},
 		{name: "exact producer source and freshness match", producer: "verify:behavioral"},
 		{name: "producer mismatch blocks", producer: "other:behavioral", wantReason: "producer-mismatch"},
 	}

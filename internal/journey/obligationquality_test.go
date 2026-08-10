@@ -98,9 +98,9 @@ func TestDeriveObligationQualityBlockers(t *testing.T) {
 	facts := []ObligationQualityFact{
 		{ACID: "ac-2", Kind: artifact.EvidenceRuntime, Assessment: evidence.ObligationAssessment{StructuralState: evidence.ObligationUnresolvedDesignDebt, WitnessPath: ".verdi/obligations/story/ac-2--runtime.md"}},
 		{ACID: "ac-2", Kind: artifact.EvidenceStatic, Assessment: evidence.ObligationAssessment{StructuralState: evidence.ObligationMissing, WitnessPath: ".verdi/obligations/story/ac-2--static.md"}},
-		{ACID: "ac-1", Kind: artifact.EvidenceBehavioral, PositiveCandidate: true, Assessment: evidence.ObligationAssessment{StructuralState: evidence.ObligationElaborated, MatchState: evidence.ObligationUnproven, Reason: evidence.ObligationReasonProducerMismatch, WitnessPath: ".verdi/obligations/story/ac-1--behavioral.md"}},
+		{ACID: "ac-1", Kind: artifact.EvidenceBehavioral, Assessment: evidence.ObligationAssessment{StructuralState: evidence.ObligationElaborated, MatchState: evidence.ObligationUnproven, Reason: evidence.ObligationReasonProducerMismatch, WitnessPath: ".verdi/obligations/story/ac-1--behavioral.md"}},
 		{ACID: "ac-1", Kind: artifact.EvidenceStatic, Assessment: evidence.ObligationAssessment{StructuralState: evidence.ObligationElaborated, MatchState: evidence.ObligationUnproven, Reason: evidence.ObligationReasonProducerMissing, WitnessPath: ".verdi/obligations/story/ac-1--static.md"}},
-		{ACID: "ac-3", Kind: artifact.EvidenceStatic, PositiveCandidate: true, Assessment: evidence.ObligationAssessment{StructuralState: evidence.ObligationElaborated, MatchState: evidence.ObligationMatched, WitnessPath: ".verdi/obligations/story/ac-3--static.md"}},
+		{ACID: "ac-3", Kind: artifact.EvidenceStatic, Assessment: evidence.ObligationAssessment{StructuralState: evidence.ObligationElaborated, MatchState: evidence.ObligationMatched, WitnessPath: ".verdi/obligations/story/ac-3--static.md"}},
 	}
 
 	got := deriveObligationQualityBlockers(facts, owner)
@@ -108,6 +108,7 @@ func TestDeriveObligationQualityBlockers(t *testing.T) {
 		"obligation-quality/ac-2/runtime",
 		"obligation-quality/ac-2/static",
 		"obligation-quality/ac-1/behavioral",
+		"obligation-quality/ac-1/static",
 	}
 	if ids := blockerIDs(got); !reflect.DeepEqual(ids, wantIDs) {
 		t.Fatalf("ids = %v, want declaration order %v", ids, wantIDs)

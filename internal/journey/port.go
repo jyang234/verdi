@@ -184,14 +184,11 @@ func (policyAuthorityProfileLoader) Load(_ context.Context, root string) (Profil
 type DefaultBranchResolver func(ctx context.Context, root string) (specstate.Branch, bool)
 
 // ObligationQualityFact is journey's consumer-owned projection of the shared
-// evidence assessment for one declared (AC, kind) pair. PositiveCandidate is
-// true only when a current positive record was evaluated; a structurally
-// elaborated build declaration with no evidence yet is not design debt.
+// evidence assessment for one declared (AC, kind) pair.
 type ObligationQualityFact struct {
-	ACID              string
-	Kind              artifact.EvidenceKind
-	Assessment        evidence.ObligationAssessment
-	PositiveCandidate bool
+	ACID       string
+	Kind       artifact.EvidenceKind
+	Assessment evidence.ObligationAssessment
 }
 
 // ObligationQualityReader is journey's read-only port to the shared
@@ -265,16 +262,10 @@ func (r evidenceObligationQualityReader) Assess(ctx context.Context, root, targe
 			}
 
 			fact := ObligationQualityFact{ACID: ac.ID, Kind: kind, Assessment: assessment}
-			if assessment.StructuralState == evidence.ObligationElaborated && kind == artifact.EvidenceAttestation {
-				// The current schema has no authenticated-human/governed-source
-				// receipt, so attestation remains explicitly unmatched.
-				fact.PositiveCandidate = true
-			}
 			for i := range current {
 				if current[i].Kind != kind || current[i].Verdict != artifact.VerdictPass {
 					continue
 				}
-				fact.PositiveCandidate = true
 				candidate, matchErr := evidence.MatchObligation(ctx, assessment, evidence.ObligationAssessmentInput{
 					StoreRoot:         root,
 					SpecName:          specNameFromRelPath(targetPath),

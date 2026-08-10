@@ -51,8 +51,7 @@ func obligationQualityBlockerID(acID string, kind artifact.EvidenceKind) string 
 }
 
 // deriveObligationQualityBlockers emits one mechanical blocker for each
-// non-elaborated pair, and for an elaborated pair only when a current positive
-// candidate exists but cannot match the declaration. Input order is the source
+// non-elaborated or elaborated-but-unmatched pair. Input order is the source
 // spec's AC-then-kind declaration order and is preserved exactly.
 func deriveObligationQualityBlockers(facts []ObligationQualityFact, owner Owner) []Blocker {
 	out := make([]Blocker, 0)
@@ -60,7 +59,7 @@ func deriveObligationQualityBlockers(facts []ObligationQualityFact, owner Owner)
 	for _, fact := range facts {
 		assessment := fact.Assessment
 		blocks := assessment.StructuralState != evidence.ObligationElaborated ||
-			(fact.PositiveCandidate && assessment.MatchState != evidence.ObligationMatched)
+			assessment.MatchState != evidence.ObligationMatched
 		if !blocks {
 			continue
 		}
