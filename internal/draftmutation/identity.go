@@ -50,15 +50,13 @@ func ResolveCanonicalIdentity(ctx context.Context, start, spec string, reader Id
 	if err != nil {
 		return Identity{}, err
 	}
-	if rawRoot == "" || strings.Contains(rawRoot, `\`) {
-		return Identity{}, fmt.Errorf("draftmutation: checkout root %q is empty or non-POSIX", rawRoot)
+	if rawRoot == "" || strings.Contains(rawRoot, `\`) || !filepath.IsAbs(rawRoot) {
+		return Identity{}, fmt.Errorf("draftmutation: checkout root %q must be an absolute POSIX path", rawRoot)
 	}
-	absolute, err := filepath.Abs(rawRoot)
-	if err != nil {
-		return Identity{}, fmt.Errorf("draftmutation: making checkout root absolute: %w", err)
+	if filepath.Clean(rawRoot) != rawRoot {
+		return Identity{}, fmt.Errorf("draftmutation: checkout root %q must be clean", rawRoot)
 	}
-	absolute = filepath.Clean(absolute)
-	resolved, err := filepath.EvalSymlinks(absolute)
+	resolved, err := filepath.EvalSymlinks(rawRoot)
 	if err != nil {
 		return Identity{}, fmt.Errorf("draftmutation: resolving checkout root symlinks: %w", err)
 	}

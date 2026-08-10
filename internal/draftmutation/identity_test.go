@@ -70,6 +70,13 @@ func TestIdentityDetachedAndInvalidRoots(t *testing.T) {
 	if _, err := ResolveCanonicalIdentity(context.Background(), root, "spec/sample", fakeIdentityReader{root: filepath.Join(root, "missing"), branch: "design/sample", head: strings.Repeat("a", 40)}); err == nil {
 		t.Fatal("unresolvable checkout accepted")
 	}
+	if _, err := ResolveCanonicalIdentity(context.Background(), root, "spec/sample", fakeIdentityReader{root: ".", branch: "design/sample", head: strings.Repeat("a", 40)}); err == nil || !strings.Contains(err.Error(), "absolute") {
+		t.Fatalf("relative checkout error = %v", err)
+	}
+	dirtyRoot := root + string(filepath.Separator) + ".." + string(filepath.Separator) + filepath.Base(root)
+	if _, err := ResolveCanonicalIdentity(context.Background(), root, "spec/sample", fakeIdentityReader{root: dirtyRoot, branch: "design/sample", head: strings.Repeat("a", 40)}); err == nil || !strings.Contains(err.Error(), "clean") {
+		t.Fatalf("unclean checkout error = %v", err)
+	}
 }
 
 type fakeStateProjector struct {
