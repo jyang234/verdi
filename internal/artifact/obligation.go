@@ -38,6 +38,99 @@ import (
 type ObligationFrontmatter struct {
 	Base    `yaml:",inline"`
 	ForKind EvidenceKind `yaml:"for_kind"`
+	// Quality is optional only for compatibility with obligations frozen
+	// before the obligation-quality adoption commit. A present block is a
+	// strict unresolved/elaborated union; absence is legacy-unelaborated and
+	// is interpreted prospectively by internal/evidence.
+	Quality *ObligationQuality `yaml:"quality,omitempty"`
+}
+
+// ObligationQualityState is the closed discriminator for an obligation's
+// quality declaration. Elaboration makes a declaration eligible for exact
+// evidence matching; it never proves the declaration by shape alone.
+type ObligationQualityState string
+
+const (
+	ObligationQualityUnresolved ObligationQualityState = "unresolved-design-debt"
+	ObligationQualityElaborated ObligationQualityState = "elaborated"
+)
+
+// ObligationProducerKind identifies the kind of producer an elaborated
+// obligation requires.
+type ObligationProducerKind string
+
+const (
+	ObligationProducerTest               ObligationProducerKind = "test"
+	ObligationProducerChecker            ObligationProducerKind = "checker"
+	ObligationProducerAuthenticatedHuman ObligationProducerKind = "authenticated-human"
+)
+
+// ObligationSourceKind identifies the authoritative source required by an
+// elaborated obligation.
+type ObligationSourceKind string
+
+const (
+	ObligationSourceCIJob               ObligationSourceKind = "ci-job"
+	ObligationSourceGovernedAttestation ObligationSourceKind = "governed-attestation"
+)
+
+// ObligationInvalidator is a freshness dimension whose change invalidates an
+// elaborated obligation's evidence.
+type ObligationInvalidator string
+
+const (
+	ObligationInvalidatorSpec        ObligationInvalidator = "spec"
+	ObligationInvalidatorCode        ObligationInvalidator = "code"
+	ObligationInvalidatorDependency  ObligationInvalidator = "dependency"
+	ObligationInvalidatorEnvironment ObligationInvalidator = "environment"
+	ObligationInvalidatorPolicy      ObligationInvalidator = "policy"
+)
+
+var validObligationProducerKinds = map[ObligationProducerKind]bool{
+	ObligationProducerTest: true, ObligationProducerChecker: true,
+	ObligationProducerAuthenticatedHuman: true,
+}
+
+var validObligationSourceKinds = map[ObligationSourceKind]bool{
+	ObligationSourceCIJob: true, ObligationSourceGovernedAttestation: true,
+}
+
+var validObligationInvalidators = map[ObligationInvalidator]bool{
+	ObligationInvalidatorSpec: true, ObligationInvalidatorCode: true,
+	ObligationInvalidatorDependency: true, ObligationInvalidatorEnvironment: true,
+	ObligationInvalidatorPolicy: true,
+}
+
+// ObligationProducer is the exact producer identity required by an elaborated
+// obligation.
+type ObligationProducer struct {
+	Kind ObligationProducerKind `yaml:"kind"`
+	Ref  string                 `yaml:"ref"`
+}
+
+// ObligationAuthoritativeSource is the exact authoritative source identity
+// required by an elaborated obligation.
+type ObligationAuthoritativeSource struct {
+	Kind ObligationSourceKind `yaml:"kind"`
+	Ref  string               `yaml:"ref"`
+}
+
+// ObligationFreshness declares the closed freshness dimensions and their
+// human-readable rule. InvalidatedBy preserves declaration order.
+type ObligationFreshness struct {
+	InvalidatedBy []ObligationInvalidator `yaml:"invalidated_by"`
+	Rule          string                  `yaml:"rule"`
+}
+
+// ObligationQuality is a strict unresolved/elaborated union.
+type ObligationQuality struct {
+	State               ObligationQualityState        `yaml:"state"`
+	Claim               string                        `yaml:"claim,omitempty"`
+	Falsifier           string                        `yaml:"falsifier,omitempty"`
+	Scope               string                        `yaml:"scope,omitempty"`
+	Producer            ObligationProducer            `yaml:"producer,omitempty"`
+	AuthoritativeSource ObligationAuthoritativeSource `yaml:"authoritative_source,omitempty"`
+	Freshness           ObligationFreshness           `yaml:"freshness,omitempty"`
 }
 
 // DecodeObligation strict-decodes and validates obligation frontmatter.
@@ -107,8 +200,77 @@ func (fm ObligationFrontmatter) Validate() error {
 	if len(fm.Links) != 1 || fm.Links[0].Type != LinkVerifies {
 		return fmt.Errorf("artifact: obligation must carry exactly one links entry of type verifies, got %d", len(fm.Links))
 	}
+	if fm.Quality != nil {
+		if err := fm.Quality.validate(fm.ForKind); err != nil {
+			return err
+		}
+	}
 
 	return requireFrozen(fm.Frozen, true, "obligation", "")
+}
+
+func (q ObligationQuality) validate(forKind EvidenceKind) error {
+	switch q.State {
+	case ObligationQualityUnresolved:
+		if q.Claim != "" || q.Falsifier != "" || q.Scope != "" ||
+			q.Producer != (ObligationProducer{}) ||
+			q.AuthoritativeSource != (ObligationAuthoritativeSource{}) ||
+			len(q.Freshness.InvalidatedBy) != 0 || q.Freshness.Rule != "" {
+			return fmt.Errorf("artifact: unresolved obligation quality permits only state")
+		}
+		return nil
+	case ObligationQualityElaborated:
+		// Continue below.
+	default:
+		return fmt.Errorf("artifact: obligation quality state %q is not known", q.State)
+	}
+
+	for name, value := range map[string]string{
+		"claim": q.Claim, "falsifier": q.Falsifier, "scope": q.Scope,
+		"producer.ref":             q.Producer.Ref,
+		"authoritative_source.ref": q.AuthoritativeSource.Ref,
+		"freshness.rule":           q.Freshness.Rule,
+	} {
+		if strings.TrimSpace(value) == "" {
+			return fmt.Errorf("artifact: elaborated obligation quality %s must be nonblank", name)
+		}
+		if strings.TrimSpace(value) != value {
+			return fmt.Errorf("artifact: elaborated obligation quality %s must be normalized", name)
+		}
+	}
+	if !validObligationProducerKinds[q.Producer.Kind] {
+		return fmt.Errorf("artifact: obligation quality producer kind %q is not known", q.Producer.Kind)
+	}
+	if !validObligationSourceKinds[q.AuthoritativeSource.Kind] {
+		return fmt.Errorf("artifact: obligation quality authoritative source kind %q is not known", q.AuthoritativeSource.Kind)
+	}
+	if len(q.Freshness.InvalidatedBy) == 0 {
+		return fmt.Errorf("artifact: elaborated obligation quality freshness.invalidated_by must not be empty")
+	}
+	seen := make(map[ObligationInvalidator]bool, len(q.Freshness.InvalidatedBy))
+	for _, invalidator := range q.Freshness.InvalidatedBy {
+		if !validObligationInvalidators[invalidator] {
+			return fmt.Errorf("artifact: obligation quality freshness invalidator %q is not known", invalidator)
+		}
+		if seen[invalidator] {
+			return fmt.Errorf("artifact: obligation quality freshness invalidator %q is duplicated", invalidator)
+		}
+		seen[invalidator] = true
+	}
+
+	if forKind == EvidenceAttestation {
+		if q.Producer.Kind != ObligationProducerAuthenticatedHuman || q.AuthoritativeSource.Kind != ObligationSourceGovernedAttestation {
+			return fmt.Errorf("artifact: attestation obligation quality requires authenticated-human producer and governed-attestation source")
+		}
+		return nil
+	}
+	if q.Producer.Kind != ObligationProducerTest && q.Producer.Kind != ObligationProducerChecker {
+		return fmt.Errorf("artifact: %s obligation quality requires test or checker producer", forKind)
+	}
+	if q.AuthoritativeSource.Kind != ObligationSourceCIJob {
+		return fmt.Errorf("artifact: %s obligation quality requires ci-job source", forKind)
+	}
+	return nil
 }
 
 // SplitObligationName splits an obligation ref's compound name
