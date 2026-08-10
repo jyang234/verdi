@@ -3,6 +3,8 @@ package artifact
 import (
 	"fmt"
 	"strings"
+
+	"gopkg.in/yaml.v3"
 )
 
 // ObligationFrontmatter is the frontmatter schema for kind "obligation"
@@ -136,13 +138,49 @@ type ObligationQuality struct {
 // DecodeObligation strict-decodes and validates obligation frontmatter.
 func DecodeObligation(data []byte) (*ObligationFrontmatter, error) {
 	var fm ObligationFrontmatter
-	if err := DecodeStrict(data, &fm); err != nil {
+	root, err := decodeStrictWithRoot(data, &fm)
+	if err != nil {
+		return nil, err
+	}
+	if err := validateObligationQualityUnionPresence(root, fm.Quality); err != nil {
 		return nil, err
 	}
 	if err := fm.Validate(); err != nil {
 		return nil, err
 	}
 	return &fm, nil
+}
+
+// validateObligationQualityUnionPresence enforces unresolved quality as a
+// union by mapping-key presence, not by decoded Go zero values. DecodeStrict's
+// KnownFields and duplicate-key rejection have already succeeded on root, so
+// this semantic check cannot make the YAML seam looser: an unresolved mapping
+// may contain exactly the discriminator and no meaning keys, even when a
+// meaning key's YAML value is empty or null.
+func validateObligationQualityUnionPresence(root *yaml.Node, quality *ObligationQuality) error {
+	if quality == nil || quality.State != ObligationQualityUnresolved || root == nil || len(root.Content) == 0 {
+		return nil
+	}
+	doc := root.Content[0]
+	if doc.Kind != yaml.MappingNode {
+		return nil // the strict struct decode already rejects this shape
+	}
+	for i := 0; i+1 < len(doc.Content); i += 2 {
+		if doc.Content[i].Value != "quality" {
+			continue
+		}
+		qualityNode := doc.Content[i+1]
+		if qualityNode.Kind != yaml.MappingNode {
+			return nil // the strict struct decode already rejects this shape
+		}
+		for j := 0; j+1 < len(qualityNode.Content); j += 2 {
+			if qualityNode.Content[j].Value != "state" {
+				return fmt.Errorf("artifact: unresolved obligation quality permits only state; key %q is present", qualityNode.Content[j].Value)
+			}
+		}
+		return nil
+	}
+	return nil
 }
 
 // Validate checks the common fields (including, via validateBase, that the
