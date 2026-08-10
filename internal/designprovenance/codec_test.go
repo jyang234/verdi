@@ -64,6 +64,8 @@ func TestEntryStrictDecode(t *testing.T) {
 		{"trailing data", string(raw) + `{}`, "trailing"},
 		{"duplicate envelope key", strings.Replace(string(raw), `"schema":`, `"schema":"verdi.design-provenance/v1","schema":`, 1), "duplicate"},
 		{"unknown operation field", strings.Replace(string(raw), `"text":"customers`, `"surprise":true,"text":"customers`, 1), "surprise"},
+		{"noncanonical whitespace", strings.Replace(string(bytes.TrimSuffix(raw, []byte("\n"))), `{`, `{ `, 1), "canonical"},
+		{"optional null", strings.Replace(string(bytes.TrimSuffix(raw, []byte("\n"))), `"spec":`, `"session":null,"spec":`, 1), "canonical"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

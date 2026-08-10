@@ -25,6 +25,13 @@ func DecodeEntry(data []byte) (Entry, error) {
 	if err := entry.Validate(); err != nil {
 		return Entry{}, err
 	}
+	canonical, err := EncodeEntry(entry)
+	if err != nil {
+		return Entry{}, err
+	}
+	if !bytes.Equal(data, bytes.TrimSuffix(canonical, []byte("\n"))) {
+		return Entry{}, fmt.Errorf("designprovenance: entry is not canonical JSON")
+	}
 	return entry, nil
 }
 

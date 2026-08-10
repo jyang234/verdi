@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
-	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -13,6 +12,7 @@ import (
 
 	"github.com/jyang234/verdi/internal/artifact"
 	"github.com/jyang234/verdi/internal/artifact/splice"
+	"github.com/jyang234/verdi/internal/canonjson"
 	"github.com/jyang234/verdi/internal/designprovenance"
 	"github.com/jyang234/verdi/internal/policyauthority"
 	"github.com/jyang234/verdi/internal/specstate"
@@ -62,7 +62,7 @@ func requestFor(t *testing.T, root string, base []byte, operations []Operation) 
 		"expected":      map[string]any{"checkout": filepath.ToSlash(root), "branch": "design/sample", "head": strings.Repeat("a", 40)},
 		"operations":    operations,
 	}
-	raw, err := json.Marshal(doc)
+	raw, err := canonjson.Marshal(doc)
 	if err != nil {
 		t.Fatal(err)
 	}

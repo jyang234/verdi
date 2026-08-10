@@ -3,11 +3,11 @@ package draftmutation
 import (
 	"bytes"
 	"encoding/base64"
-	"encoding/json"
 	"strings"
 	"testing"
 
 	"github.com/jyang234/verdi/internal/artifact"
+	"github.com/jyang234/verdi/internal/canonjson"
 )
 
 const baseSpec = `---
@@ -81,7 +81,7 @@ func validRequestBytes(t *testing.T) []byte {
 			"op": "set-problem", "text": "new problem", "anchor": "#problem",
 		}},
 	}
-	raw, err := json.Marshal(request)
+	raw, err := canonjson.Marshal(request)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -106,6 +106,7 @@ func TestDecodeRequestStrictAndBaseSnapshot(t *testing.T) {
 		{"unknown", bytes.Replace(raw, []byte(`"schema":`), []byte(`"unknown":true,"schema":`), 1), "unknown"},
 		{"duplicate", bytes.Replace(raw, []byte(`"schema":`), []byte(`"schema":"verdi.draftmutation/v1","schema":`), 1), "duplicate"},
 		{"trailing", append(append([]byte{}, raw...), []byte(`{}`)...), "trailing"},
+		{"noncanonical", bytes.TrimSuffix(raw, []byte("\n")), "canonical"},
 		{"request attribution", bytes.Replace(raw, []byte(`"operations":`), []byte(`"attribution":{"unauthenticated":true},"operations":`), 1), "attribution"},
 		{"operation foreign field", bytes.Replace(raw, []byte(`"text":"new problem"`), []byte(`"id":"ac-forged","text":"new problem"`), 1), "id"},
 		{"base spec identity", bytes.Replace(raw, []byte(`"spec":"spec/sample"`), []byte(`"spec":"spec/other"`), 1), "base spec id"},

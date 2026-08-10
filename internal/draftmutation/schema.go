@@ -1,6 +1,7 @@
 package draftmutation
 
 import (
+	"bytes"
 	"encoding/base64"
 	"fmt"
 	"path/filepath"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/jyang234/verdi/internal/artifact"
 	"github.com/jyang234/verdi/internal/artifact/splice"
+	"github.com/jyang234/verdi/internal/canonjson"
 	"github.com/jyang234/verdi/internal/designprovenance"
 )
 
@@ -112,6 +114,13 @@ func DecodeRequest(data []byte) (Request, error) {
 	}
 	if err := request.validate(); err != nil {
 		return Request{}, err
+	}
+	canonical, err := canonjson.Marshal(request)
+	if err != nil {
+		return Request{}, fmt.Errorf("draftmutation: canonicalizing request: %w", err)
+	}
+	if !bytes.Equal(data, canonical) {
+		return Request{}, fmt.Errorf("draftmutation: request is not canonical JSON")
 	}
 	return request, nil
 }
