@@ -141,6 +141,40 @@ func TestRunBuildStart_ObligationQualityIOErrorOperational(t *testing.T) {
 	}
 }
 
+func TestRunBuildStart_ObligationQualityMisbindingIsOperationalBeforeMutation(t *testing.T) {
+	doc := buildQualityObligationDocument("widget-story", "ac-1", artifact.EvidenceStatic, buildQualityBlock())
+	doc = strings.Replace(doc, "obligation/widget-story--", "obligation/other-story--", 1)
+	repo := fixturegit.Build(t, []fixturegit.Layer{{Files: map[string]string{
+		".verdi/verdi.yaml":                               phase7ManifestYAML,
+		".verdi/specs/active/widget-story/spec.md":        statuslessBuildStorySpecMD,
+		".verdi/obligations/widget-story/ac-1--static.md": doc,
+	}, Message: "accepted story with a misbound obligation"}})
+	beforeHead, err := gitx.RevParse(context.Background(), repo.Dir, "HEAD")
+	if err != nil {
+		t.Fatal(err)
+	}
+	beforeBranch, err := gitx.CurrentBranch(context.Background(), repo.Dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	beforeStatus := gitTestOutput(t, repo.Dir, "status", "--porcelain=v1", "--untracked-files=all")
+
+	var stdout, stderr bytes.Buffer
+	got := runBuildStart(context.Background(), repo.Dir, "spec/widget-story",
+		fakeScaffoldResolver{result: specstate.Result{State: specstate.AcceptedPendingBuild}},
+		syncDeps{Runner: nil, GoTest: fakeGoTest{}, Model: phase7Model(t)}, &stdout, &stderr)
+	if got != 2 {
+		t.Errorf("runBuildStart = %d, want operational 2; stdout=%s stderr=%s", got, stdout.String(), stderr.String())
+	}
+
+	afterHead, _ := gitx.RevParse(context.Background(), repo.Dir, "HEAD")
+	afterBranch, _ := gitx.CurrentBranch(context.Background(), repo.Dir)
+	afterStatus := gitTestOutput(t, repo.Dir, "status", "--porcelain=v1", "--untracked-files=all")
+	if afterHead != beforeHead || afterBranch != beforeBranch || afterStatus != beforeStatus {
+		t.Fatalf("misbinding refusal mutated git state: head %s→%s branch %s→%s status %q→%q", beforeHead, afterHead, beforeBranch, afterBranch, beforeStatus, afterStatus)
+	}
+}
+
 func writeBuildQualityObligation(t *testing.T, root, specName, acID string, kind artifact.EvidenceKind, quality string) {
 	t.Helper()
 	path := filepath.Join(root, ".verdi", "obligations", specName, acID+"--"+string(kind)+".md")

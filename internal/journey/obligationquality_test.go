@@ -182,6 +182,29 @@ func TestEvidenceObligationQualityReaderMalformedIsOperational(t *testing.T) {
 	}
 }
 
+func TestEvidenceObligationQualityReaderMisbindingIsOperational(t *testing.T) {
+	root := t.TempDir()
+	writeJourneyQualitySpec(t, root)
+	writeJourneyQualityObligation(t, root, "ac-2", artifact.EvidenceRuntime, "quality:\n  state: unresolved-design-debt\n")
+	path := filepath.Join(root, ".verdi", "obligations", "quality-story", "ac-2--runtime.md")
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw = []byte(strings.Replace(string(raw), "obligation/quality-story--", "obligation/other-story--", 1))
+	if err := os.WriteFile(path, raw, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	facts, err := (evidenceObligationQualityReader{}).Assess(context.Background(), root, ".verdi/specs/active/quality-story/spec.md", "story", "", "", "")
+	if err == nil {
+		t.Fatalf("Assess = %+v, nil error; want operational misbinding refusal", facts)
+	}
+	if facts != nil {
+		t.Fatalf("Assess facts = %+v, want no journey projection on operational misbinding", facts)
+	}
+}
+
 func writeJourneyQualitySpec(t *testing.T, root string) {
 	t.Helper()
 	path := filepath.Join(root, ".verdi", "specs", "active", "quality-story", "spec.md")

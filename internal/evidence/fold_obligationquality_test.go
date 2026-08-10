@@ -89,6 +89,34 @@ func TestFold_ObligationQualityWaiverPrecedence(t *testing.T) {
 	}
 }
 
+func TestFold_ObligationQualityMisbindingIsOperational(t *testing.T) {
+	root := t.TempDir()
+	writeFoldQualityObligation(t, root, artifact.EvidenceStatic, foldQualityBlock("verify:static", "verify", "[code]"))
+	path := filepath.Join(root, ".verdi", "obligations", "test-story", "ac-1--static.md")
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw = []byte(strings.Replace(string(raw), "obligation/test-story--", "obligation/other-story--", 1))
+	if err := os.WriteFile(path, raw, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	record := testEvidence(artifact.EvidenceStatic, artifact.VerdictPass, "ac-1",
+		withProducer("verify:static"), withJob("verify"), withCommit(qualityAfterCommit))
+
+	result, err := Fold(Input{
+		Spec: testSpec("jira:TEST-1", ac("ac-1", artifact.EvidenceStatic)), Records: []artifact.Evidence{record},
+		StoreRoot: root, StorySlug: "test-1", EvaluationCommit: qualityAfterCommit,
+		SpecLandingCommit: qualityLandingCommit, Git: qualityGitStub{},
+	})
+	if err == nil {
+		t.Fatalf("Fold = %+v, nil error; want operational misbinding refusal", result)
+	}
+	if result.Eligible {
+		t.Fatalf("Fold result = %+v, misbound obligation authorized the story", result)
+	}
+}
+
 func TestFold_ObligationQualityAttestationAndFreshnessRemainUnproven(t *testing.T) {
 	tests := []struct {
 		name    string

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/jyang234/verdi/internal/artifact"
@@ -97,6 +98,66 @@ func TestAssessObligation_StructuralStates(t *testing.T) {
 			wantPath := filepath.ToSlash(filepath.Join(".verdi", "obligations", "loan-refi", "ac-2--behavioral.md"))
 			if got.WitnessPath != wantPath {
 				t.Fatalf("WitnessPath = %q, want %q", got.WitnessPath, wantPath)
+			}
+		})
+	}
+}
+
+func TestAssessObligation_RejectsMisbindingAtConventionPath(t *testing.T) {
+	tests := []struct {
+		name   string
+		mutate func(string) string
+	}{
+		{
+			name: "obligation id names another story",
+			mutate: func(doc string) string {
+				return strings.Replace(doc, "obligation/loan-refi--", "obligation/other-story--", 1)
+			},
+		},
+		{
+			name: "obligation id names another acceptance criterion",
+			mutate: func(doc string) string {
+				return strings.Replace(doc, "--ac-2--", "--ac-1--", 1)
+			},
+		},
+		{
+			name: "obligation id and for_kind name another evidence kind",
+			mutate: func(doc string) string {
+				doc = strings.Replace(doc, "--behavioral", "--static", 1)
+				return strings.Replace(doc, "for_kind: behavioral", "for_kind: static", 1)
+			},
+		},
+		{
+			name: "verifies link names another story",
+			mutate: func(doc string) string {
+				return strings.Replace(doc, "ref: \"spec/loan-refi\"", "ref: \"spec/other-story\"", 1)
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			root := t.TempDir()
+			path := filepath.Join(root, ".verdi", "obligations", "loan-refi", "ac-2--behavioral.md")
+			if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			doc := "---\n" + obligationYAMLForQuality(artifact.EvidenceBehavioral, elaboratedQualityYAML()) + "---\n# Foo\n\nAuthored.\n"
+			if err := os.WriteFile(path, []byte(tt.mutate(doc)), 0o644); err != nil {
+				t.Fatal(err)
+			}
+
+			got, err := AssessObligation(context.Background(), ObligationAssessmentInput{
+				StoreRoot: root,
+				SpecName:  "loan-refi",
+				ACID:      "ac-2",
+				Kind:      artifact.EvidenceBehavioral,
+			})
+			if err == nil {
+				t.Fatalf("AssessObligation = %+v, nil error; want operational misbinding refusal", got)
+			}
+			if got != (ObligationAssessment{}) {
+				t.Fatalf("AssessObligation result = %+v, want no assessment on operational misbinding", got)
 			}
 		})
 	}

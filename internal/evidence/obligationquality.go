@@ -144,8 +144,26 @@ func AssessObligation(ctx context.Context, in ObligationAssessmentInput) (Obliga
 	if err != nil {
 		return ObligationAssessment{}, fmt.Errorf("evidence: obligation quality %s: %w", path, err)
 	}
+	obligationRef, err := artifact.ParseRef(obligation.ID)
+	if err != nil {
+		return ObligationAssessment{}, fmt.Errorf("evidence: obligation quality %s has invalid id %q: %w", path, obligation.ID, err)
+	}
+	storyName, acID, kind, ok := artifact.SplitObligationName(obligationRef.Name)
+	if !ok {
+		return ObligationAssessment{}, fmt.Errorf("evidence: obligation quality %s has unsplittable id %q", path, obligation.ID)
+	}
+	if storyName != in.SpecName || acID != in.ACID || kind != string(in.Kind) {
+		return ObligationAssessment{}, fmt.Errorf(
+			"evidence: obligation quality %s binds (%s, %s, %s), want (%s, %s, %s)",
+			path, storyName, acID, kind, in.SpecName, in.ACID, in.Kind,
+		)
+	}
 	if obligation.ForKind != in.Kind {
 		return ObligationAssessment{}, fmt.Errorf("evidence: obligation quality %s declares for_kind %q, want %q", path, obligation.ForKind, in.Kind)
+	}
+	wantVerifies := "spec/" + in.SpecName
+	if obligation.Links[0].Ref != wantVerifies {
+		return ObligationAssessment{}, fmt.Errorf("evidence: obligation quality %s verifies %q, want %q", path, obligation.Links[0].Ref, wantVerifies)
 	}
 	result.Quality = obligation.Quality
 	switch {
