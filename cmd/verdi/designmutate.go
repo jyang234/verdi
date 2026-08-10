@@ -121,7 +121,7 @@ func parseDesignMutateFlags(args []string) (designMutateFlags, error) {
 	return flags, nil
 }
 
-func readDesignMutationRequest(path string, stdin io.Reader) ([]byte, error) {
+func readDesignMutationRequest(path string, stdin io.Reader) (_ []byte, resultErr error) {
 	var reader io.Reader
 	var file *os.File
 	if path == "-" {
@@ -135,7 +135,11 @@ func readDesignMutationRequest(path string, stdin io.Reader) ([]byte, error) {
 		if err != nil {
 			return nil, fmt.Errorf("opening request %q: %w", path, err)
 		}
-		defer file.Close()
+		defer func() {
+			if closeErr := file.Close(); closeErr != nil && resultErr == nil {
+				resultErr = fmt.Errorf("closing request %q: %w", path, closeErr)
+			}
+		}()
 		reader = file
 	}
 	raw, err := io.ReadAll(io.LimitReader(reader, draftmutation.MaxRequestBytes+1))

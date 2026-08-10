@@ -393,7 +393,13 @@ func readOptionalRegular(path string) ([]byte, bool, error) {
 	if err != nil {
 		return nil, false, err
 	}
-	defer file.Close()
-	data, err := io.ReadAll(file)
-	return data, true, err
+	data, readErr := io.ReadAll(file)
+	closeErr := file.Close()
+	if readErr != nil {
+		return nil, true, fmt.Errorf("draftmutation: reading %s: %w", path, readErr)
+	}
+	if closeErr != nil {
+		return nil, true, fmt.Errorf("draftmutation: closing %s: %w", path, closeErr)
+	}
+	return data, true, nil
 }

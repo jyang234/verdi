@@ -163,21 +163,22 @@ func TestRecoveryMalformedTamperedAndSymlinkStateIsRetained(t *testing.T) {
 		t.Run("symlink "+target, func(t *testing.T) {
 			root := transactionRoot(t)
 			outside := t.TempDir()
-			if target == "transaction root" {
+			switch target {
+			case "transaction root":
 				if err := os.MkdirAll(filepath.Dir(store.DraftMutationDir(root, transactionSpecName)), 0o755); err != nil {
 					t.Fatal(err)
 				}
 				if err := os.Symlink(outside, store.DraftMutationDir(root, transactionSpecName)); err != nil {
 					t.Fatal(err)
 				}
-			} else if target == "transaction parent" {
+			case "transaction parent":
 				if err := os.Mkdir(filepath.Join(outside, transactionSpecName), 0o755); err != nil {
 					t.Fatal(err)
 				}
 				if err := os.Symlink(outside, filepath.Dir(store.DraftMutationDir(root, transactionSpecName))); err != nil {
 					t.Fatal(err)
 				}
-			} else if target == "spec" {
+			case "spec":
 				path := store.SpecPath(root, store.ZoneActive, transactionSpecName)
 				if err := os.Remove(path); err != nil {
 					t.Fatal(err)
@@ -185,7 +186,7 @@ func TestRecoveryMalformedTamperedAndSymlinkStateIsRetained(t *testing.T) {
 				if err := os.Symlink(filepath.Join(outside, "spec.md"), path); err != nil {
 					t.Fatal(err)
 				}
-			} else if target == "sidecar" {
+			case "sidecar":
 				path := store.DesignProvenancePath(root, store.ZoneActive, transactionSpecName)
 				if err := os.Remove(path); err != nil {
 					t.Fatal(err)
@@ -193,7 +194,7 @@ func TestRecoveryMalformedTamperedAndSymlinkStateIsRetained(t *testing.T) {
 				if err := os.Symlink(filepath.Join(outside, "design-provenance.jsonl"), path); err != nil {
 					t.Fatal(err)
 				}
-			} else if target == "writer lock" {
+			case "writer lock":
 				outsideLock := filepath.Join(outside, "writer.lock")
 				lockBytes, err := json.Marshal(filelock.Info{PID: 999999999, Start: 1})
 				if err != nil {
@@ -205,7 +206,7 @@ func TestRecoveryMalformedTamperedAndSymlinkStateIsRetained(t *testing.T) {
 				if err := os.Symlink(outsideLock, store.WriterLockPath(root)); err != nil {
 					t.Fatal(err)
 				}
-			} else {
+			case "spec parent":
 				specDir := store.SpecDir(root, store.ZoneActive, transactionSpecName)
 				if err := os.RemoveAll(specDir); err != nil {
 					t.Fatal(err)
