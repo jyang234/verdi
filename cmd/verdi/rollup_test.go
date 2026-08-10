@@ -45,7 +45,10 @@ func buildRollupFixtureRepo(t *testing.T) *fixturegit.Repo {
 	t.Helper()
 	repo := fixturegit.Build(t, []fixturegit.Layer{
 		{
-			Files:   map[string]string{".verdi/specs/active/rollup-fixture/spec.md": rollupFixtureSpec},
+			Files: map[string]string{
+				".verdi/specs/active/rollup-fixture/spec.md":        rollupFixtureSpec,
+				".verdi/obligations/rollup-fixture/ac-1--static.md": buildQualityObligationDocument("rollup-fixture", "ac-1", "static", strings.Replace(buildQualityBlock(), "verify:static", "rollup-check", 1)),
+			},
 			Message: "rollup fixture spec",
 		},
 	})
@@ -68,7 +71,8 @@ func evidenceRecordJSON(verdict, commit string) string {
     "kind": "static",
     "verdict": %q,
     "witness": "obligation @ site",
-    "provenance": {"source": "ci", "pipeline": "p1", "commit": %q},
+    "producer": "rollup-check",
+    "provenance": {"source": "ci", "pipeline": "p1", "job": "verify", "commit": %q},
     "digest": "sha256:%s"
   }
 ]

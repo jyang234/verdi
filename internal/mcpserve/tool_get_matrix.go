@@ -3,9 +3,12 @@ package mcpserve
 import (
 	"context"
 	"encoding/json"
+	"os"
 
+	"github.com/jyang234/verdi/internal/artifact"
 	"github.com/jyang234/verdi/internal/evidence"
 	"github.com/jyang234/verdi/internal/gitx"
+	"github.com/jyang234/verdi/internal/specstate"
 	"github.com/jyang234/verdi/internal/store"
 	"github.com/jyang234/verdi/internal/storyresolve"
 )
@@ -72,13 +75,34 @@ func (b *Backend) GetMatrix(ctx context.Context, argsRaw json.RawMessage) map[st
 		return toolError("get_matrix: " + err.Error())
 	}
 
+	ref, err := artifact.ParseRef(spec.ID)
+	if err != nil {
+		return toolError("get_matrix: " + err.Error())
+	}
+	relPath := store.ActiveSpecRelPath(ref.Name)
+	content, err := os.ReadFile(store.ActiveSpecPath(b.Root, ref.Name))
+	if err != nil {
+		return toolError("get_matrix: " + err.Error())
+	}
+	state, err := specstate.NewProjector().Resolve(ctx, b.Root, specstate.Candidate{Path: relPath, Content: content})
+	if err != nil {
+		return toolError("get_matrix: " + err.Error())
+	}
+	landing := ""
+	if state.Baseline != nil {
+		landing = state.Baseline.LandingCommit
+	}
 	slug := store.RefSlug(spec.Story)
 	result, err := evidence.Fold(evidence.Input{
-		Spec:      spec,
-		Records:   records,
-		Preview:   args.Preview,
-		StoreRoot: b.Root,
-		StorySlug: slug,
+		Context:           ctx,
+		Spec:              spec,
+		Records:           records,
+		Preview:           args.Preview,
+		StoreRoot:         b.Root,
+		StorySlug:         slug,
+		EvaluationCommit:  commit,
+		SpecLandingCommit: landing,
+		Git:               mcpObligationAncestry{},
 	})
 	if err != nil {
 		return toolError("get_matrix: " + err.Error())
@@ -92,4 +116,10 @@ func (b *Backend) GetMatrix(ctx context.Context, argsRaw json.RawMessage) map[st
 		out.ACs = []acRow{}
 	}
 	return toolJSON(out)
+}
+
+type mcpObligationAncestry struct{}
+
+func (mcpObligationAncestry) IsAncestor(ctx context.Context, dir, ancestor, descendant string) (bool, error) {
+	return gitx.IsAncestor(ctx, dir, ancestor, descendant)
 }

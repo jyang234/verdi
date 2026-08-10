@@ -161,6 +161,16 @@ func AssessObligation(ctx context.Context, in ObligationAssessmentInput) (Obliga
 		return ObligationAssessment{}, fmt.Errorf("evidence: obligation quality %s decoded unknown state %q", path, obligation.Quality.State)
 	}
 
+	return MatchObligation(ctx, result, in)
+}
+
+// MatchObligation applies one candidate record to an already-loaded pair
+// assessment. Fold uses it to load the obligation exactly once, then evaluate
+// every current record without a second filesystem read.
+func MatchObligation(ctx context.Context, result ObligationAssessment, in ObligationAssessmentInput) (ObligationAssessment, error) {
+	result.MatchState = ObligationUnproven
+	result.Reason = ""
+	result.Violating = nil
 	if preserved := preserveViolation(result, in.Record); preserved.MatchState == ObligationViolatedWithWitness {
 		return preserved, nil
 	}
@@ -181,15 +191,15 @@ func preserveViolation(result ObligationAssessment, record *artifact.Evidence) O
 
 func matchElaborated(ctx context.Context, in ObligationAssessmentInput, result ObligationAssessment) (ObligationAssessment, error) {
 	q := result.Quality
-	if in.Record == nil || in.Record.Producer == "" {
-		result.Reason = ObligationReasonProducerMissing
-		return result, nil
-	}
 	if in.Kind == artifact.EvidenceAttestation {
 		// verdi.evidence/v1 has neither an authenticated principal nor a
 		// governed-attestation identity. Never parse free-text witness fields as
 		// either identity.
 		result.Reason = ObligationReasonSourceRefMissing
+		return result, nil
+	}
+	if in.Record == nil || in.Record.Producer == "" {
+		result.Reason = ObligationReasonProducerMissing
 		return result, nil
 	}
 	if in.Record.Producer != q.Producer.Ref {

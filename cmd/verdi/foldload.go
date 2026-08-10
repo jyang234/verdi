@@ -24,8 +24,49 @@ import (
 
 	"github.com/jyang234/verdi/internal/artifact"
 	"github.com/jyang234/verdi/internal/evidence"
+	"github.com/jyang234/verdi/internal/gitx"
+	"github.com/jyang234/verdi/internal/specstate"
 	"github.com/jyang234/verdi/internal/store"
 )
+
+type commandObligationAncestry struct{}
+
+func (commandObligationAncestry) IsAncestor(ctx context.Context, dir, ancestor, descendant string) (bool, error) {
+	return gitx.IsAncestor(ctx, dir, ancestor, descendant)
+}
+
+// storyFoldInput attaches the exact evaluation commit and, when proven, the
+// source spec's first-parent acceptance landing. Every cmd/verdi story-fold
+// consumer uses this constructor so none silently remains on legacy semantics.
+func storyFoldInput(ctx context.Context, root string, spec *artifact.SpecFrontmatter, commit string, records []artifact.Evidence, preview bool) (evidence.Input, error) {
+	ref, err := artifact.ParseRef(spec.ID)
+	if err != nil {
+		return evidence.Input{}, err
+	}
+	_, relPath, content, err := loadSpecBytesWithZone(root, ref.Name)
+	if err != nil {
+		return evidence.Input{}, err
+	}
+	state, err := specstate.NewProjector().Resolve(ctx, root, specstate.Candidate{Path: relPath, Content: content})
+	if err != nil {
+		return evidence.Input{}, err
+	}
+	landing := ""
+	if state.Baseline != nil {
+		landing = state.Baseline.LandingCommit
+	}
+	return evidence.Input{
+		Context:           ctx,
+		Spec:              spec,
+		Records:           records,
+		Preview:           preview,
+		StoreRoot:         root,
+		StorySlug:         store.RefSlug(spec.Story),
+		EvaluationCommit:  commit,
+		SpecLandingCommit: landing,
+		Git:               commandObligationAncestry{},
+	}, nil
+}
 
 // foldStoryEvidence loads spec's derived evidence records at commit and
 // folds them (internal/evidence.Fold), consulting spec's own story-slug
@@ -37,8 +78,11 @@ func foldStoryEvidence(ctx context.Context, root string, spec *artifact.SpecFron
 	if err != nil {
 		return evidence.StoryResult{}, fmt.Errorf("loading evidence records: %w", err)
 	}
-	slug := store.RefSlug(spec.Story)
-	result, err := evidence.Fold(evidence.Input{Spec: spec, Records: records, Preview: preview, StoreRoot: root, StorySlug: slug})
+	in, err := storyFoldInput(ctx, root, spec, commit, records, preview)
+	if err != nil {
+		return evidence.StoryResult{}, fmt.Errorf("preparing obligation-quality fold: %w", err)
+	}
+	result, err := evidence.Fold(in)
 	if err != nil {
 		return evidence.StoryResult{}, fmt.Errorf("folding evidence: %w", err)
 	}

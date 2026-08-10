@@ -73,9 +73,10 @@ func buildStatuslessCloseFixtureRepo(t *testing.T) *fixturegit.Repo {
 	t.Setenv("CI_DEFAULT_BRANCH", "main")
 	return fixturegit.Build(t, []fixturegit.Layer{{
 		Files: map[string]string{
-			".verdi/verdi.yaml":                            "schema: verdi.layout/v1\nforge: github\n",
-			".verdi/specs/active/loan-mgmt/spec.md":        featureV1SpecMD,
-			".verdi/specs/active/statusless-close/spec.md": statuslessCloseStorySpecMD,
+			".verdi/verdi.yaml":                                    "schema: verdi.layout/v1\nforge: github\n",
+			".verdi/specs/active/loan-mgmt/spec.md":                featureV1SpecMD,
+			".verdi/specs/active/statusless-close/spec.md":         statuslessCloseStorySpecMD,
+			".verdi/obligations/statusless-close/ac-1--runtime.md": fixtureElaboratedObligationMD("statusless-close", "ac-1", artifact.EvidenceRuntime, "runtime-probe:jira:SL-CLOSE-1:ac-1", "7", gateFakeFrozenCommit),
 		},
 		Message: "statusless close fixture: feature + statusless merge-accepted story",
 	}})

@@ -196,20 +196,7 @@ z
 // (evidence-obligations wave 2, added after this fixture was first written)
 // requires one for every non-draft story AC's declared kind.
 func closeFeatureStoryObligationMD(name, scaffoldSHA string) string {
-	return `---
-id: obligation/` + name + `--ac-1--static
-kind: obligation
-title: "Fixture ` + name + ` ac-1 static obligation"
-owners: [platform-team]
-for_kind: static
-links:
-  - { type: verifies, ref: "spec/` + name + `" }
-frozen: { at: 2024-01-01, commit: ` + scaffoldSHA + ` }
----
-# Fixture ` + name + ` ac-1 static obligation
-
-What the static evidence must specifically show.
-`
+	return fixtureElaboratedObligationMD(name, "ac-1", artifact.EvidenceStatic, "fixture-static", "1", scaffoldSHA)
 }
 
 // storyDirFor returns the specs/{active,archive} zone a story spec at
@@ -311,7 +298,7 @@ digest: sha256:%s
 // rollup_test.go's own evidenceRecordJSON (a different, ac-1-only,
 // full-array-returning helper) to avoid colliding in this package.
 func featureFixtureEvidenceJSON(ac, kind, verdict, commit string) string {
-	return `{"schema":"verdi.evidence/v1","evidence_for":["` + ac + `"],"kind":"` + kind + `","verdict":"` + verdict + `","witness":"fixture witness","provenance":{"source":"ci","pipeline":"1","job":"1","commit":"` + commit + `"},"digest":"sha256:` + strings.Repeat("a", 64) + `"}`
+	return `{"schema":"verdi.evidence/v1","evidence_for":["` + ac + `"],"kind":"` + kind + `","verdict":"` + verdict + `","witness":"fixture witness","producer":"fixture-` + kind + `","provenance":{"source":"ci","pipeline":"1","job":"1","commit":"` + commit + `"},"digest":"sha256:` + strings.Repeat("a", 64) + `"}`
 }
 
 // writeFixtureVerdicts writes records (already-rendered JSON objects) as a

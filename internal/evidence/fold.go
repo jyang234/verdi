@@ -1,6 +1,7 @@
 package evidence
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
@@ -12,6 +13,10 @@ import (
 // Fold itself applies the authoritative-vs-preview filter), and enough
 // store context to consult waivers and attestations.
 type Input struct {
+	// Context scopes Git ancestry checks used by obligation quality. A nil
+	// context defaults to context.Background for compatibility with pure unit
+	// callers.
+	Context context.Context
 	// Spec is the feature spec whose acceptance_criteria the fold
 	// evaluates. Required.
 	Spec *artifact.SpecFrontmatter
@@ -34,6 +39,16 @@ type Input struct {
 	// the caller's job (cmd/verdi/matrix.go) — Fold takes it as given so
 	// this package stays free of ref-resolution policy.
 	StorySlug string
+	// EvaluationCommit is the exact commit whose authoritative evidence is
+	// being folded. Production consumers always set it. An empty value keeps
+	// the pre-adoption compatibility posture for legacy direct callers; an
+	// explicitly present quality block still uses new semantics.
+	EvaluationCommit string
+	// SpecLandingCommit is the first-parent acceptance landing of Spec and is
+	// required when an elaborated obligation declares spec freshness.
+	SpecLandingCommit string
+	// Git supplies only ancestry, defined at this consumer.
+	Git ObligationAncestryReader
 }
 
 // Fold implements 03 §The fold for one story/spec: precedence is total,
@@ -50,6 +65,14 @@ func Fold(in Input) (StoryResult, error) {
 	}
 	if len(in.Spec.AcceptanceCriteria) == 0 {
 		return StoryResult{}, fmt.Errorf("evidence: Fold: spec %q declares no acceptance criteria", in.Spec.ID)
+	}
+	ctx := in.Context
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	specRef, err := artifact.ParseRef(in.Spec.ID)
+	if err != nil {
+		return StoryResult{}, fmt.Errorf("evidence: Fold: invalid spec id %q: %w", in.Spec.ID, err)
 	}
 
 	acSet := make(map[string]bool, len(in.Spec.AcceptanceCriteria))
@@ -87,12 +110,15 @@ func Fold(in Input) (StoryResult, error) {
 			attState = state
 		}
 
-		status, kinds := foldAC(ac, current, waived, attState)
+		status, kinds, qualityBlocking, err := foldAC(ctx, in, specRef.Name, ac, current, waived, attState)
+		if err != nil {
+			return StoryResult{}, err
+		}
 		result.ACs = append(result.ACs, ACResult{
 			ID:      ac.ID,
 			Text:    ac.Text,
 			Status:  status,
-			Summary: summarize(ac, current, attState == AttestationAuthored),
+			Summary: summarize(ac, current, attState == AttestationAuthored, kinds, qualityBlocking),
 			Kinds:   kinds,
 		})
 		if status == StatusViolated {
@@ -123,21 +149,132 @@ func Fold(in Input) (StoryResult, error) {
 // still scans ALL current records — not just declared kinds — and the
 // waived short-circuit still wins. No verdict changes; only the KindResult
 // projection is new.
-func foldAC(ac artifact.AcceptanceCriterion, current []artifact.Evidence, waived bool, attState AttestationState) (Status, []KindResult) {
+func foldAC(ctx context.Context, in Input, specName string, ac artifact.AcceptanceCriterion, current []artifact.Evidence, waived bool, attState AttestationState) (Status, []KindResult, []bool, error) {
 	attested := attState == AttestationAuthored
 
 	kinds := make([]KindResult, 0, len(ac.Evidence))
+	qualityBlocking := make([]bool, 0, len(ac.Evidence))
 	allSatisfied := true
 	anySignal := false
 	for _, kind := range ac.Evidence {
-		satisfied, hasRecords := kindStatus(kind, current, attested)
+		incumbentSatisfied, hasRecords := kindStatus(kind, current, attested)
+		assessment, err := AssessObligation(ctx, ObligationAssessmentInput{
+			StoreRoot: in.StoreRoot,
+			SpecName:  specName,
+			ACID:      ac.ID,
+			Kind:      kind,
+		})
+		if err != nil {
+			return "", nil, nil, err
+		}
+
+		enforce := true
+		historicalLegacy := false
+		switch assessment.StructuralState {
+		case ObligationLegacyUnelaborated:
+			if in.EvaluationCommit == "" {
+				enforce = false
+			} else {
+				class, err := ClassifyObligationEvaluation(ctx, in.Git, in.StoreRoot, in.EvaluationCommit)
+				if err != nil {
+					return "", nil, nil, err
+				}
+				enforce = class == ObligationEvaluationPostAdoption
+				historicalLegacy = class == ObligationEvaluationHistorical
+			}
+		case ObligationMissing:
+			// Legacy callers that do not identify an evaluation commit retain the
+			// incumbent fold. Production consumers always identify the commit.
+			enforce = in.EvaluationCommit != ""
+		}
+		if historicalLegacy && incumbentSatisfied && kind != artifact.EvidenceAttestation {
+			// Compatibility belongs to historical proof, not merely historical
+			// evaluation. A later positive record cannot borrow an old obligation's
+			// undefined meaning, even if a direct caller supplies a record that
+			// production LoadRecords would reject as outside the evaluation ancestry.
+			historicalPass := false
+			for i := range current {
+				if current[i].Kind != kind || current[i].Verdict != artifact.VerdictPass {
+					continue
+				}
+				recordClass, classErr := ClassifyObligationEvaluation(ctx, in.Git, in.StoreRoot, current[i].Provenance.Commit)
+				if classErr != nil {
+					return "", nil, nil, classErr
+				}
+				if recordClass == ObligationEvaluationHistorical {
+					historicalPass = true
+				}
+			}
+			if !historicalPass {
+				enforce = true
+			}
+		}
+
+		selected := assessment
+		matchedPass := false
+		if enforce {
+			selected, err = MatchObligation(ctx, assessment, ObligationAssessmentInput{
+				StoreRoot:         in.StoreRoot,
+				SpecName:          specName,
+				ACID:              ac.ID,
+				Kind:              kind,
+				EvaluationCommit:  in.EvaluationCommit,
+				SpecLandingCommit: in.SpecLandingCommit,
+				Git:               in.Git,
+			})
+			if err != nil {
+				return "", nil, nil, err
+			}
+			for i := range current {
+				if current[i].Kind != kind {
+					continue
+				}
+				candidate, matchErr := MatchObligation(ctx, assessment, ObligationAssessmentInput{
+					StoreRoot:         in.StoreRoot,
+					SpecName:          specName,
+					ACID:              ac.ID,
+					Kind:              kind,
+					Record:            &current[i],
+					EvaluationCommit:  in.EvaluationCommit,
+					SpecLandingCommit: in.SpecLandingCommit,
+					Git:               in.Git,
+				})
+				if matchErr != nil {
+					return "", nil, nil, matchErr
+				}
+				if candidate.MatchState == ObligationViolatedWithWitness {
+					selected = candidate
+					break
+				}
+				if candidate.MatchState == ObligationMatched && current[i].Verdict == artifact.VerdictPass {
+					selected = candidate
+					matchedPass = true
+					continue
+				}
+				if selected.Reason == ObligationReasonProducerMissing {
+					selected = candidate
+				}
+			}
+		}
+
+		satisfied := incumbentSatisfied
+		if enforce {
+			satisfied = assessment.StructuralState == ObligationElaborated && matchedPass
+		}
 		kr := KindResult{Kind: kind, Satisfied: satisfied}
+		kr.ObligationQuality = ObligationQualityProjection{
+			StructuralState: selected.StructuralState,
+			MatchState:      selected.MatchState,
+			Reason:          selected.Reason,
+			WitnessPath:     selected.WitnessPath,
+		}
 		if kind == artifact.EvidenceAttestation {
 			kr.Attestation = attState
 		} else {
 			kr.Violating = firstFailingOfKind(current, kind)
 		}
 		kinds = append(kinds, kr)
+		qualityBlocking = append(qualityBlocking, enforce && !satisfied)
 
 		if hasRecords {
 			anySignal = true
@@ -151,27 +288,30 @@ func foldAC(ac artifact.AcceptanceCriterion, current []artifact.Evidence, waived
 		if kind == artifact.EvidenceRuntime {
 			anySignal = true
 		}
+		if enforce && !satisfied {
+			anySignal = true
+		}
 		if !satisfied {
 			allSatisfied = false
 		}
 	}
 
 	if waived {
-		return StatusWaived, kinds
+		return StatusWaived, kinds, qualityBlocking, nil
 	}
 	for _, r := range current {
 		if r.Verdict == artifact.VerdictFail {
-			return StatusViolated, kinds
+			return StatusViolated, kinds, qualityBlocking, nil
 		}
 	}
 
 	switch {
 	case allSatisfied:
-		return StatusEvidenced, kinds
+		return StatusEvidenced, kinds, qualityBlocking, nil
 	case anySignal:
-		return StatusPending, kinds
+		return StatusPending, kinds, qualityBlocking, nil
 	default:
-		return StatusNoSignal, kinds
+		return StatusNoSignal, kinds, qualityBlocking, nil
 	}
 }
 
@@ -256,10 +396,26 @@ func declaresKind(ac artifact.AcceptanceCriterion, kind artifact.EvidenceKind) b
 
 // summarize renders a one-line, per-kind evidence summary for one AC's
 // matrix row, e.g. "static:pass; behavioral:pending".
-func summarize(ac artifact.AcceptanceCriterion, current []artifact.Evidence, attested bool) string {
+func summarize(ac artifact.AcceptanceCriterion, current []artifact.Evidence, attested bool, kinds []KindResult, qualityBlocking []bool) string {
 	parts := make([]string, 0, len(ac.Evidence))
-	for _, kind := range ac.Evidence {
-		parts = append(parts, string(kind)+":"+summarizeKind(kind, current, attested))
+	for i, kind := range ac.Evidence {
+		incumbent := summarizeKind(kind, current, attested)
+		// Design debt can block positive satisfaction, but it must never hide
+		// an observed failure or replace its existing matrix witness.
+		if incumbent == "fail" {
+			parts = append(parts, string(kind)+":"+incumbent)
+			continue
+		}
+		if i < len(qualityBlocking) && qualityBlocking[i] {
+			q := kinds[i].ObligationQuality
+			value := "pending(obligation-quality:" + string(q.StructuralState)
+			if q.Reason != "" {
+				value += "/" + string(q.Reason)
+			}
+			parts = append(parts, string(kind)+":"+value+")")
+			continue
+		}
+		parts = append(parts, string(kind)+":"+incumbent)
 	}
 	return strings.Join(parts, "; ")
 }
