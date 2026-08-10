@@ -71,6 +71,46 @@ func TestApplyDraftMutationsEveryOperation(t *testing.T) {
 	}
 }
 
+func TestApplyDraftMutationsEveryOperationNegative(t *testing.T) {
+	tests := []struct {
+		name string
+		op   designprovenance.Operation
+		want string
+	}{
+		{"set-problem invalid", designprovenance.Operation{Op: designprovenance.OpSetProblem, Anchor: "#problem"}, "text"},
+		{"set-outcome invalid", designprovenance.Operation{Op: designprovenance.OpSetOutcome, Text: "outcome"}, "anchor"},
+		{"add-ac duplicate", designprovenance.Operation{Op: designprovenance.OpAddAC, ID: "ac-1", Text: "duplicate", Evidence: []artifact.EvidenceKind{artifact.EvidenceStatic}, Anchor: "#ac-1"}, "duplicate"},
+		{"edit-ac missing", designprovenance.Operation{Op: designprovenance.OpEditAC, ID: "ac-missing", Text: "missing", Evidence: []artifact.EvidenceKind{artifact.EvidenceStatic}, Anchor: "#ac-missing"}, "no object"},
+		{"remove-ac missing", designprovenance.Operation{Op: designprovenance.OpRemoveAC, ID: "ac-missing"}, "no object"},
+		{"reorder-ac invalid anchor", designprovenance.Operation{Op: designprovenance.OpReorderAC, ID: "ac-2", AfterID: "ac-missing"}, "after target"},
+		{"set-ac-evidence missing", designprovenance.Operation{Op: designprovenance.OpSetACEvidence, ID: "ac-missing", Evidence: []artifact.EvidenceKind{artifact.EvidenceStatic}}, "no object"},
+		{"add-constraint duplicate", designprovenance.Operation{Op: designprovenance.OpAddConstraint, ID: "co-1", Text: "duplicate", Anchor: "#co-1"}, "duplicate"},
+		{"edit-constraint missing", designprovenance.Operation{Op: designprovenance.OpEditConstraint, ID: "co-missing", Text: "missing", Anchor: "#co-missing"}, "no object"},
+		{"remove-constraint missing", designprovenance.Operation{Op: designprovenance.OpRemoveConstraint, ID: "co-missing"}, "no object"},
+		{"add-decision duplicate", designprovenance.Operation{Op: designprovenance.OpAddDecision, ID: "dc-1", Text: "duplicate", Anchor: "#dc-1"}, "duplicate"},
+		{"edit-decision missing", designprovenance.Operation{Op: designprovenance.OpEditDecision, ID: "dc-missing", Text: "missing", Anchor: "#dc-missing"}, "no object"},
+		{"remove-decision missing", designprovenance.Operation{Op: designprovenance.OpRemoveDecision, ID: "dc-missing"}, "no object"},
+		{"add-question duplicate", designprovenance.Operation{Op: designprovenance.OpAddQuestion, ID: "oq-1", Text: "duplicate", Anchor: "#oq-1"}, "duplicate"},
+		{"edit-question missing", designprovenance.Operation{Op: designprovenance.OpEditQuestion, ID: "oq-missing", Text: "missing", Anchor: "#oq-missing"}, "no object"},
+		{"remove-question missing", designprovenance.Operation{Op: designprovenance.OpRemoveQuestion, ID: "oq-missing"}, "no object"},
+		{"add-link duplicate", designprovenance.Operation{Op: designprovenance.OpAddLink, Source: "spec", Type: artifact.LinkDependsOn, Ref: "spec/base"}, "duplicate"},
+		{"remove-link missing exact tuple", designprovenance.Operation{Op: designprovenance.OpRemoveLink, Source: "spec", Type: artifact.LinkImpacts, Ref: "spec/missing"}, "exact"},
+		{"add-stub duplicate", designprovenance.Operation{Op: designprovenance.OpAddStub, Slug: "existing-stub", AcceptanceCriteria: []string{"ac-1"}}, "duplicate"},
+		{"edit-stub missing", designprovenance.Operation{Op: designprovenance.OpEditStub, Slug: "missing-stub", AcceptanceCriteria: []string{"ac-1"}}, "no stub"},
+		{"remove-stub missing", designprovenance.Operation{Op: designprovenance.OpRemoveStub, Slug: "missing-stub"}, "no stubs target"},
+		{"reorder-stub invalid anchor", designprovenance.Operation{Op: designprovenance.OpReorderStub, Slug: "existing-stub", AfterSlug: "missing-stub"}, "after target"},
+		{"add-context-ref duplicate", designprovenance.Operation{Op: designprovenance.OpAddContextRef, Ref: "spec/base@abcdef0"}, "duplicate"},
+		{"remove-context-ref missing", designprovenance.Operation{Op: designprovenance.OpRemoveContextRef, Ref: "spec/missing@abcdef2"}, "no context target"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if _, err := ApplyDraftMutations(draftFixture(), []designprovenance.Operation{tt.op}); err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("ApplyDraftMutations error = %v, want %q", err, tt.want)
+			}
+		})
+	}
+}
+
 func TestApplyDraftMutationsDecisionLinksAndExactRemoval(t *testing.T) {
 	add := designprovenance.Operation{Op: designprovenance.OpAddLink, Source: "dc-2", Type: artifact.LinkDependsOn, Ref: "spec/other", Note: "why"}
 	withLink, err := ApplyDraftMutations(draftFixture(), []designprovenance.Operation{add})
