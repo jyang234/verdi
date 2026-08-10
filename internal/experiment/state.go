@@ -154,7 +154,7 @@ func DeriveState(repoRoot, experimentDir string, verify ResultVerifier) (State, 
 		rung = StateRecommended
 	}
 
-	_, ok, err = readRatification(dir, res)
+	_, ok, err = readRatification(dir, def, res)
 	if err != nil {
 		return "", nil, err
 	}
@@ -266,10 +266,14 @@ func readResult(dir, defDigest string, def Definition, obs []Observation, verify
 	return res, true, nil
 }
 
-// readRatification reads and decodes ratification.yaml, and checks that
-// its result_digest equals ResultDigest(res). ok is false only when the
-// file itself is absent.
-func readRatification(dir string, res Result) (r Ratification, ok bool, err error) {
+// readRatification reads and decodes ratification.yaml, checks that its
+// result_digest equals ResultDigest(res), and requires its disposition's
+// def/result-bound preconditions to hold (ValidateRatificationBinding,
+// SI-44). ok is false only when the file itself is absent; a present
+// ratification whose disposition cannot be true of this definition and
+// result is an error under the same absence-vs-invalidity doctrine
+// DeriveState applies to every other artifact.
+func readRatification(dir string, def Definition, res Result) (r Ratification, ok bool, err error) {
 	path := filepath.Join(dir, ratificationFile)
 	raw, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
@@ -288,6 +292,9 @@ func readRatification(dir string, res Result) (r Ratification, ok bool, err erro
 	}
 	if r.ResultDigest != want {
 		return Ratification{}, false, fmt.Errorf("experiment: %s: result_digest %q does not match the result's own digest %q", path, r.ResultDigest, want)
+	}
+	if err := ValidateRatificationBinding(def, res, r); err != nil {
+		return Ratification{}, false, fmt.Errorf("experiment: %s: %w", path, err)
 	}
 	return r, true, nil
 }

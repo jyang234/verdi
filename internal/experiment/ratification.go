@@ -73,3 +73,63 @@ func (r Ratification) Validate() error {
 	}
 	return nil
 }
+
+// ValidateRatificationBinding checks the preconditions AC-5's disposition
+// list IMPLIES but its grammar cannot express (invention ledger SI-44),
+// for one ratification bound to the definition and result it responds to:
+//
+//   - select-recommended ("select the recommended candidate") requires the
+//     bound result to actually recommend one, i.e. a proven-winner
+//     verdict. Against a disclosed-unproven or violated-with-witness
+//     result there is no recommendation to select, and accepting the
+//     record would record a human decision that names nothing.
+//   - select-other ("select a different candidate with an explicit
+//     reason") requires the named candidate to be one the definition
+//     REGISTERED — a candidate outside the locked contract was never
+//     compared — and, when the result does name a winner, to be a
+//     different one, because "other" is meaningless otherwise.
+//
+// Every other disposition (reject-all, misframed, request-new-revision)
+// responds to the result as a whole and binds no candidate, so this check
+// imposes nothing on it.
+//
+// It LAYERS over the record's own grammar validation the way
+// ValidateComplete layers over ValidateObservations: r.Validate runs
+// first, and stays free of any definition or result knowledge. def and res
+// are the caller's already-validated context — DeriveState has decoded
+// both and pinned res to def's digest before it gets here.
+//
+// Callers bind a ratification to its context in more than one place over
+// time (state derivation now, adapter surfaces later); every one of them
+// runs this check, because a disposition's meaning does not change with
+// the surface that records it.
+func ValidateRatificationBinding(def Definition, res Result, r Ratification) error {
+	if err := r.Validate(); err != nil {
+		return err
+	}
+
+	switch r.Disposition {
+	case DispositionSelectRecommended:
+		if res.Verdict != VerdictProvenWinner {
+			return fmt.Errorf("experiment: ratification disposition %q requires a %q result, but the bound result's verdict is %q",
+				DispositionSelectRecommended, VerdictProvenWinner, res.Verdict)
+		}
+	case DispositionSelectOther:
+		registered := false
+		for _, c := range def.Candidates {
+			if c.ID == r.Candidate {
+				registered = true
+				break
+			}
+		}
+		if !registered {
+			return fmt.Errorf("experiment: ratification candidate %q does not name a registered candidate of definition %q",
+				r.Candidate, def.ID)
+		}
+		if res.Winner != "" && r.Candidate == res.Winner {
+			return fmt.Errorf("experiment: ratification disposition %q names candidate %q, which IS the result's recommended winner",
+				DispositionSelectOther, r.Candidate)
+		}
+	}
+	return nil
+}

@@ -491,6 +491,104 @@ func TestDeriveStateVerifierReceivesDecodedArtifacts(t *testing.T) {
 	}
 }
 
+// TestDeriveStateRatificationBindingIsEnforced proves SI-44's
+// preconditions are wired into the ratified rung and not merely available
+// as a helper: a ratification whose disposition cannot be true of the
+// definition and result it is bound to is a hard error, exactly like every
+// other present-but-invalid artifact.
+func TestDeriveStateRatificationBindingIsEnforced(t *testing.T) {
+	// ratificationFor writes result.json for verdict and a ratification
+	// bound to that result's own digest, then returns the derived state.
+	ratificationFor := func(t *testing.T, verdict Verdict, dispositionBlock string) (State, error) {
+		t.Helper()
+		dir := t.TempDir()
+		doc, digest := lockedDefinitionDoc(t)
+		writeExperimentFile(t, dir, "experiment.yaml", doc)
+		writeCandidatePatches(t, dir)
+		writeExperimentFile(t, dir, "observations.jsonl", completeObservationsJSONLForDigest(digest))
+		resultDoc := validResultJSONForDigest(digest, verdict)
+		writeExperimentFile(t, dir, "result.json", resultDoc)
+
+		res, err := DecodeResult([]byte(resultDoc))
+		if err != nil {
+			t.Fatalf("DecodeResult() unexpected error: %v", err)
+		}
+		resultDigest, err := ResultDigest(res)
+		if err != nil {
+			t.Fatalf("ResultDigest() unexpected error: %v", err)
+		}
+		writeExperimentFile(t, dir, "ratification.yaml", "schema: verdi.experiment-ratification/v1\n"+
+			"result_digest: "+resultDigest+"\n"+
+			"actor: "+validActor+"\n"+
+			dispositionBlock)
+
+		state, _, err := DeriveState(dir, testExperimentDir, acceptResult)
+		return state, err
+	}
+
+	tests := []struct {
+		name             string
+		verdict          Verdict
+		dispositionBlock string
+		wantErr          bool
+	}{
+		{
+			name:             "select-recommended over a proven winner",
+			verdict:          VerdictProvenWinner,
+			dispositionBlock: "disposition: select-recommended\n",
+		},
+		{
+			name:             "select-recommended over an inconclusive result",
+			verdict:          VerdictDisclosedUnproven,
+			dispositionBlock: "disposition: select-recommended\n",
+			wantErr:          true,
+		},
+		{
+			name:             "select-other naming the other registered candidate",
+			verdict:          VerdictProvenWinner,
+			dispositionBlock: "disposition: select-other\ncandidate: baseline\nreason: lower operational risk\n",
+		},
+		{
+			name:             "select-other naming the recommended winner",
+			verdict:          VerdictProvenWinner,
+			dispositionBlock: "disposition: select-other\ncandidate: facts-cache\nreason: lower operational risk\n",
+			wantErr:          true,
+		},
+		{
+			name:             "select-other naming an unregistered candidate",
+			verdict:          VerdictProvenWinner,
+			dispositionBlock: "disposition: select-other\ncandidate: nonexistent\nreason: lower operational risk\n",
+			wantErr:          true,
+		},
+		{
+			name:             "reject-all over an inconclusive result",
+			verdict:          VerdictDisclosedUnproven,
+			dispositionBlock: "disposition: reject-all\n",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			state, err := ratificationFor(t, tt.verdict, tt.dispositionBlock)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("DeriveState() = (%q, nil error), want an operational error", state)
+				}
+				if state != "" {
+					t.Errorf("DeriveState() = %q alongside an error, want the zero State", state)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("DeriveState() unexpected error: %v", err)
+			}
+			if state != StateRatified {
+				t.Errorf("DeriveState() = %q, want %q", state, StateRatified)
+			}
+		})
+	}
+}
+
 // TestDeriveStateTamperedCandidatePatchIsError proves the commit-3
 // demotion->error behavior: a locked definition whose candidate patch
 // bytes on disk no longer match the registered digest is a hard error,
