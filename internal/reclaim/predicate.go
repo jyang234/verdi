@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/jyang234/verdi/internal/execworkspace"
 	"github.com/jyang234/verdi/internal/residue"
 	"github.com/jyang234/verdi/internal/wtmanager"
 )
@@ -203,13 +204,27 @@ func Compute(res *residue.Result, invokingRoot, invokingBranch, defaultBranch st
 // default (the caller refuses that whole run upstream) can never make a
 // detached (empty-Branch) row read as default-branch instead of detached.
 //
-// The "managed" step is wt.Managed OR looksManagedAnywhere(wt.Path): the
-// former is residue's own answer, resolved against the INVOKING checkout's
-// WorktreesRoot; the latter is defense-in-depth for a worktree managed by
-// ANOTHER linked checkout, which the invoking-root survey necessarily
-// misses (see looksManagedAnywhere — align finding
-// judged-managed-jurisdiction-is-invoking-root-relative, R4-I-82). The
-// kept reason is KeptManaged either way — the closed vocabulary is untouched.
+// The "managed" step is wt.Managed OR looksManagedAnywhere(wt.Path) OR
+// looksExecutionAnywhere(wt.Path): the first is residue's own answer,
+// resolved against the INVOKING checkout's WorktreesRoot; the second is
+// defense-in-depth for a worktree managed by ANOTHER linked checkout, which
+// the invoking-root survey necessarily misses (see looksManagedAnywhere —
+// align finding judged-managed-jurisdiction-is-invoking-root-relative,
+// R4-I-82); the third is spec/execution-workspace §GC slice's own
+// cross-slice exclusion (data-loss guard) — data/execution/ is a MANAGED
+// root this predicate must never classify as unmanaged residue (see
+// looksExecutionAnywhere). The kept reason is KeptManaged in every case —
+// the closed vocabulary is untouched.
+//
+// ORDERING NOTE: an execution workspace is always a DETACHED worktree (spec
+// §Exact workspace materialization cuts every unit via WorktreeAddDetached),
+// so a live one would already keep via the "detached" arm above this one —
+// the managed exclusion below is added anyway, defense-in-depth, because
+// the spec demands the exclusion independent of any other row property
+// this predicate happens to already catch it by, and because reordering
+// this switch to promote "managed" above "detached" would change the
+// disclosed reason for every OTHER already-shipped detached-but-unmanaged
+// row, which is out of scope here.
 //
 // canonicalInvokingRoot must already be canonicalPath-resolved by the
 // caller (Compute resolves it once, not per row).
@@ -225,7 +240,7 @@ func classifyWorktreeRow(wt residue.Worktree, canonicalInvokingRoot, defaultBran
 		return false, KeptDirty, ""
 	case wt.Branch == "":
 		return false, KeptDetached, ""
-	case wt.Managed || looksManagedAnywhere(wt.Path):
+	case wt.Managed || looksManagedAnywhere(wt.Path) || looksExecutionAnywhere(wt.Path):
 		return false, KeptManaged, ""
 	case canonicalPath(wt.Path) == canonicalInvokingRoot:
 		return false, KeptInvoking, ""
@@ -269,6 +284,38 @@ func looksManagedAnywhere(path string) bool {
 	}
 	sep := string(filepath.Separator)
 	segment := sep + wtmanager.WorktreesRoot("") + sep // e.g. "/.verdi/data/worktrees/"
+	return strings.Contains(filepath.Clean(path), segment)
+}
+
+// looksExecutionAnywhere mirrors looksManagedAnywhere for the execution-
+// workspace root (spec/execution-workspace §GC slice, "Cross-slice
+// exclusion (data-loss guard)"): "data/execution/ is a MANAGED root
+// excluded from the unmanaged-residue sweep ... without the exclusion a
+// live CSE candidate workspace would be unmanaged residue to
+// `verdi gc --reclaim-unmanaged --apply` and destroyable mid-run." Matching
+// the execution-workspace path segment keeps such a row kept:managed
+// WITHOUT internal/residue changing at all (co-2, mirrored here for the
+// execution root exactly as looksManagedAnywhere already honors it for
+// data/worktrees/) and WITHOUT re-deriving any git eligibility fact here
+// (dc-1: internal/reclaim calls zero gitx primitives itself).
+//
+// The segment is DERIVED from execworkspace.ExecutionRoot(""), never a
+// second hardcoded literal: internal/execworkspace/grammar.go is the single
+// source of truth for the .verdi/data/execution/ mapping, and
+// ExecutionRoot("") yields exactly that package's own relative data-zone
+// path (OS-native separators) — the same single-source-of-truth discipline
+// looksManagedAnywhere already follows for wtmanager.WorktreesRoot. The
+// match is bracketed by filepath.Separator on both sides, so neither a
+// trailing-boundary collision (".../execution-scratch/x") nor a
+// leading-boundary one (".../prefix.verdi/data/execution/x") can
+// spuriously match — only a full
+// "<sep>.verdi<sep>data<sep>execution<sep>" path segment does.
+func looksExecutionAnywhere(path string) bool {
+	if path == "" {
+		return false
+	}
+	sep := string(filepath.Separator)
+	segment := sep + execworkspace.ExecutionRoot("") + sep // e.g. "/.verdi/data/execution/"
 	return strings.Contains(filepath.Clean(path), segment)
 }
 

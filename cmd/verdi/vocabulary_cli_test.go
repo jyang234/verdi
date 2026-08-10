@@ -5,7 +5,7 @@
 // the proof covers cmd*'s real wiring, never a package-internal stand-in.
 //
 // The fixture model is internal/model/testdata/vocab-rename.yaml —
-// model-schema's own frontier fixture (accept -> "Sign off",
+// model-schema's own frontier fixture (merge -> "Sign off",
 // accepted-pending-build -> "Ready to build", feature -> "Initiative") —
 // read at test runtime and planted as the store's .verdi/model.yaml:
 // reused, never duplicated.

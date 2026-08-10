@@ -128,6 +128,7 @@ func scanWorktrees(ctx context.Context, root, defaultTip string) ([]Worktree, er
 		// but any failure is disclosed on this entry, never propagated.
 		if merged, err := gitx.IsAncestor(ctx, root, e.Head, defaultTip); err != nil {
 			wt.MergedUnresolved = true
+			// vocab:identity — non-vocabulary homograph: git's own merge-base/merge state, never the `merge` lifecycle transition word
 			wt.Reason = worktreeUnresolvedReason(e, fmt.Sprintf("merge state: %v", err))
 		} else {
 			wt.Merged = merged

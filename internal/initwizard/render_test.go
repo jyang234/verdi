@@ -34,7 +34,7 @@ func TestVocabularyEmpty_Table(t *testing.T) {
 		{"empty maps", model.Vocabulary{Classes: map[string]string{}, States: map[string]string{}, Verbs: map[string]string{}}, true},
 		{"one class rename", model.Vocabulary{Classes: map[string]string{"story": "Task"}}, false},
 		{"one state rename", model.Vocabulary{States: map[string]string{"draft": "Idea"}}, false},
-		{"one verb rename", model.Vocabulary{Verbs: map[string]string{"accept": "Sign off"}}, false},
+		{"one verb rename", model.Vocabulary{Verbs: map[string]string{"merge": "Sign off"}}, false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -90,11 +90,11 @@ func TestRenderModelYAML_RoundTrips(t *testing.T) {
 	}{
 		{"classes only", model.Vocabulary{Classes: map[string]string{"story": "Task", "spike": "Spike"}}},
 		{"states only", model.Vocabulary{States: map[string]string{"draft": "Idea", "closed": "Done"}}},
-		{"verbs only", model.Vocabulary{Verbs: map[string]string{"accept": "Sign off", "close": "Ship"}}},
+		{"verbs only", model.Vocabulary{Verbs: map[string]string{"merge": "Sign off", "close": "Ship"}}},
 		{"all three", model.Vocabulary{
 			Classes: map[string]string{"feature": "Epic"},
 			States:  map[string]string{"accepted-pending-build": "In progress"},
-			Verbs:   map[string]string{"accept": "Sign off"},
+			Verbs:   map[string]string{"merge": "Sign off"},
 		}},
 	}
 	for _, tc := range cases {

@@ -557,6 +557,7 @@ func renderBoardRegion(p *BoardProjection, git *boardGitState) string {
 		writeGuide(&b, p)
 	case modeReview:
 		b.WriteString(`<section class="mirror-note"><h2>Review mirror</h2>` +
+			// vocab:identity — non-vocabulary homograph: the forge's merge request/merge gate, never the `merge` lifecycle transition word
 			`<p class="ritual-note">This board mirrors the merge request. Comments that name a card ride on it; everything else lands in the tray below &#8212; nothing is dropped.</p></section>`)
 		writeInboxTray(&b, p.Tray)
 		writeYarnKey(&b, p)
@@ -626,7 +627,7 @@ func writeCreateDialog(b *strings.Builder, p *BoardProjection) {
 	b.WriteString(`<div role="dialog" aria-label="` + esc("New "+storyWord) + `" class="board-dialog create-dialog" id="create-dialog" hidden`)
 	b.WriteString(` data-receipt-title="` + esc(model.Capitalize(storyWord)+" created") + `"`)
 	b.WriteString(` data-receipt-body="` + esc("Branch {branch} now carries spec/{name}, scaffolded from the "+storyWord+" template with the acceptance criteria you chose.") + `"`)
-	b.WriteString(` data-receipt-tracker="` + esc("Its tracker ref is still the placeholder todo:REPLACE-ME — fill it in on the branch before "+p.words.verb("accept")+".") + `"`)
+	b.WriteString(` data-receipt-tracker="` + esc("Its tracker ref is still the placeholder todo:REPLACE-ME — fill it in on the branch before "+p.words.verb("merge")+".") + `"`)
 	b.WriteString(` data-receipt-tail="` + esc("This wall (the serving checkout) has not moved.") + `"`)
 	b.WriteString(` data-error-acs="` + esc("Choose at least one acceptance criterion — the coverage claim the new "+storyWord+" is born with.") + `">`)
 	b.WriteString(`<span class="stub-tab create-branch-tab" id="create-branch-tab" aria-hidden="true">design/&#8230;</span>`)

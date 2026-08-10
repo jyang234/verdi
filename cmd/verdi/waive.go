@@ -224,8 +224,10 @@ func runWaive(ctx context.Context, root, storyRefArg, acID string, reaffirm bool
 	}
 
 	if reaffirm {
+		// vocab:identity — non-vocabulary homograph: the forge's merge request/merge gate, never the `merge` lifecycle transition word
 		fmt.Fprintf(stdout, "waive: reaffirmed %s — commit and merge to keep it active\n", displayPath)
 	} else {
+		// vocab:identity — non-vocabulary homograph: the forge's merge request/merge gate, never the `merge` lifecycle transition word
 		fmt.Fprintf(stdout, "waive: created %s — commit and merge to activate\n", displayPath)
 	}
 	fmt.Fprintf(stdout, "waive: fold for %s will show waived (not evidenced) until discharged or expired\n", acID)

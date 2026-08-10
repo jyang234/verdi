@@ -9,8 +9,12 @@ import (
 // "Ref slugging is normative"): the ref lowercased, with "/" mapped to
 // "--" and every remaining byte outside [a-z0-9._-] mapped to "-". Order
 // matters: lowercasing and the "/" -> "--" substitution happen first, then
-// every byte still outside the allowed set — including a literal
-// underscore, which the allowed set excludes — is mapped to "-".
+// every byte still outside the allowed set is mapped to "-".
+//
+// The allowed set CONTAINS the underscore, so an underscore is preserved
+// verbatim: "ci_run" and "ci-run" are two different slugs. Mapping '_' to
+// '-' would collapse them into one — precisely the silent merge the same
+// normative paragraph forbids.
 //
 // RefSlug alone cannot detect a collision between two different refs that
 // happen to map to the same slug; CheckSlugCollisions does that over a
@@ -41,11 +45,11 @@ func isSlugByte(r rune) bool {
 		return true
 	case r >= '0' && r <= '9':
 		return true
-	case r == '.' || r == '-':
+	case r == '.' || r == '_' || r == '-':
 		return true
 	default:
-		// Everything else — including '_', which the allowed set
-		// [a-z0-9._-] deliberately excludes — maps to '-'.
+		// Everything else maps to '-'. Note that '_' is NOT here: the
+		// allowed set [a-z0-9._-] includes it, so it is preserved above.
 		return false
 	}
 }

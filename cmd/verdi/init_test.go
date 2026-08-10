@@ -263,10 +263,10 @@ func TestInit_Wizard_RealRenames_AndTemplateCopy(t *testing.T) {
 	dir := t.TempDir()
 
 	// Order: classes [feature, spike, story], states [accepted-pending-build,
-	// closed, draft, superseded], verbs [accept, close].
+	// closed, draft, superseded], verbs [close, merge].
 	script := "Epic\n\nTask\n" +
 		"\n\n\n\n" +
-		"Sign off\n\n" +
+		"\nSign off\n" +
 		"y\n" + // copy templates
 		"n\n" + // structural probe
 		"y\n" // confirm write
@@ -286,7 +286,7 @@ func TestInit_Wizard_RealRenames_AndTemplateCopy(t *testing.T) {
 	}
 	wantVocab := model.Vocabulary{
 		Classes: map[string]string{"feature": "Epic", "story": "Task"},
-		Verbs:   map[string]string{"accept": "Sign off"},
+		Verbs:   map[string]string{"merge": "Sign off"},
 	}
 	if !reflect.DeepEqual(decoded.Vocabulary, wantVocab) {
 		t.Fatalf("promoted model.yaml Vocabulary = %+v, want %+v", decoded.Vocabulary, wantVocab)

@@ -191,6 +191,7 @@ func cmdObligationAuthor(args []string, stdout, stderr io.Writer) int {
 		// what a merge to main may have frozen. (A default branch that cannot
 		// be resolved at all is a different case: base is "" and we proceed,
 		// the disclosed hermetic posture.)
+		// vocab:identity — non-vocabulary homograph: git's own merge-base/merge state, never the `merge` lifecycle transition word
 		fmt.Fprintf(stderr, "obligation author: cannot determine whether the target obligation is already frozen (the merge-base with the default branch failed): %v\n", probeErr)
 		return 2
 	}
@@ -277,6 +278,7 @@ func runObligationAuthor(ctx context.Context, root, storyRefArg, acID, kindArg, 
 	if diffBase != "" {
 		frozen, existsErr := gitx.PathExistsAt(ctx, root, diffBase, relPath)
 		if existsErr != nil {
+			// vocab:identity — non-vocabulary homograph: git's own merge-base/merge state, never the `merge` lifecycle transition word
 			fmt.Fprintf(stderr, "obligation author: cannot determine whether %s is already frozen (the git probe against the merge-base failed): %v\n", relPath, existsErr)
 			return 2
 		}
@@ -288,6 +290,7 @@ func runObligationAuthor(ctx context.Context, root, storyRefArg, acID, kindArg, 
 			// vocab:identity-marked, since a hardcoded vocabulary word
 			// would read wrong for a store that renamed it
 			// (TestVocabProseWitness, L-M13a's enumeration rule).
+			// vocab:identity — non-vocabulary homograph: git's own merge-base/merge state, never the `merge` lifecycle transition word
 			fmt.Fprintf(stderr, "obligation author: %s is already frozen (reachable from the merge-base with the default branch) — a frozen obligation is replaced through the normal amendment ladder, never refined in place\n", relPath)
 			return 2
 		}
@@ -352,6 +355,7 @@ const obligationAuthorScaffoldBody = "%s\n" +
 	"statement of what that evidence must specifically show before this\n" +
 	"acceptance criterion can rely on it. Re-running\n" +
 	"`verdi obligation author %s %s %s` before this file is frozen by a\n" +
+	// vocab:identity — non-vocabulary homograph: git's own merge-base/merge state, never the `merge` lifecycle transition word
 	"merge to main regenerates this scaffold from scratch, discarding any\n" +
 	"authoring done in the meantime — the design branch is the safety net\n" +
 	"(git diff/checkout), not this verb.\n"

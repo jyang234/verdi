@@ -76,6 +76,17 @@
 // v1-argument-shape variant `obligation scaffold <story-ref>` (bare, no
 // store root) is proven separately in TestV1CLIVerbForms below, mirroring
 // design start's own kind-variant proofs.
+//
+// GLG v3 AC-1 (guided-lifecycle-governance-v3, journey-projection
+// delivery unit): `journey` is a brand-new, entirely read-only verb —
+// dispatch.go's verbPhase gains a `journey` key (phase 22) in the same
+// change this inV0 addition rides. `verdi journey <feature-or-story-ref>`
+// never flips a status, writes a stamp, stages, commits, or calls a
+// forge — it only projects internal/journey's canonical record. A bare
+// `verdi journey` (no argument) fails on usage parsing alone
+// (cmd/verdi/journey.go's cmdJourney) before resolving a store root or
+// reading any file, falling straight into the plain default case below —
+// the same safety property model/spec/board already rely on there.
 package specalign
 
 import "testing"
@@ -91,6 +102,7 @@ func TestV0CLIVerbInventory(t *testing.T) {
 		"lint", "design", "accept", "feature", "build", "align", "sync",
 		"serve", "mcp", "matrix", "rollup", "dex", "gate", "board", "audit",
 		"close", "gc", "attest", "disposition", "model", "spec", "obligation",
+		"journey",
 	}
 	// PLAN.md §5 scope discipline, verbatim (as amended: `close`/`gc`
 	// graduated to real, round 6): "Explicitly out of v0 (not stubbed —
