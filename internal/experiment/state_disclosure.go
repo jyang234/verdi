@@ -77,6 +77,7 @@ func lockWitnessDisclosure() StateDisclosure {
 	return StateDisclosure{
 		Code: DisclosureRegistrationLockWitness,
 		Detail: "the lock block's digest matches the registered definition, but the human moment AC-5 requires behind it " +
+			// vocab:identity — "merge" names the git pull-request merge event AC-5 fixes as the solo-mode transport witness, a mechanism identity, not renameable display vocabulary.
 			"is witnessed by the pull-request merge, a git-layer fact these artifact bytes cannot exhibit",
 	}
 }
