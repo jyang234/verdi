@@ -97,26 +97,43 @@ func TestTransactionFaultMatrixNeverSpecAheadAndRecoversOldOrNew(t *testing.T) {
 	}
 }
 
-func TestTransactionSyncsEachNewDirectoryEntryBeforeJournal(t *testing.T) {
+func TestTransactionSyncsDirectoryEntryParentsBeforeJournal(t *testing.T) {
 	tests := []struct {
-		name        string
-		removeData  bool
-		wantCreates []string
+		name              string
+		removeData        bool
+		wantBeforeJournal []string
+		failSteps         []string
 	}{
 		{
 			name: "transaction directories",
-			wantCreates: []string{
-				"created-directory-parent-fsync:.verdi/data/draft-mutation",
-				"created-directory-parent-fsync:.verdi/data/draft-mutation/sample",
+			wantBeforeJournal: []string{
+				"directory-parent-fsync:.verdi",
+				"directory-parent-fsync:.verdi/data",
+				"directory-parent-fsync:.verdi",
+				"directory-parent-fsync:.verdi/data",
+				"directory-parent-fsync:.verdi/data/draft-mutation",
+				"directory-parent-fsync:.verdi/data/draft-mutation/sample",
+			},
+			failSteps: []string{
+				"directory-parent-fsync:.verdi/data/draft-mutation",
+				"directory-parent-fsync:.verdi/data/draft-mutation/sample",
 			},
 		},
 		{
 			name:       "missing data ancestor",
 			removeData: true,
-			wantCreates: []string{
-				"created-directory-parent-fsync:.verdi/data",
-				"created-directory-parent-fsync:.verdi/data/draft-mutation",
-				"created-directory-parent-fsync:.verdi/data/draft-mutation/sample",
+			wantBeforeJournal: []string{
+				"directory-parent-fsync:.verdi",
+				"directory-parent-fsync:.verdi/data",
+				"directory-parent-fsync:.verdi",
+				"directory-parent-fsync:.verdi/data",
+				"directory-parent-fsync:.verdi/data/draft-mutation",
+				"directory-parent-fsync:.verdi/data/draft-mutation/sample",
+			},
+			failSteps: []string{
+				"directory-parent-fsync:.verdi/data",
+				"directory-parent-fsync:.verdi/data/draft-mutation",
+				"directory-parent-fsync:.verdi/data/draft-mutation/sample",
 			},
 		},
 	}
@@ -140,11 +157,11 @@ func TestTransactionSyncsEachNewDirectoryEntryBeforeJournal(t *testing.T) {
 			}}); err != nil {
 				t.Fatalf("probe transaction: %v", err)
 			}
-			if len(steps) < len(tt.wantCreates)+1 || !reflect.DeepEqual(steps[:len(tt.wantCreates)], tt.wantCreates) || steps[len(tt.wantCreates)] != StepJournalWrite {
-				t.Fatalf("durability order = %v, want %v before %q", steps, tt.wantCreates, StepJournalWrite)
+			if len(steps) < len(tt.wantBeforeJournal)+1 || !reflect.DeepEqual(steps[:len(tt.wantBeforeJournal)], tt.wantBeforeJournal) || steps[len(tt.wantBeforeJournal)] != StepJournalWrite {
+				t.Fatalf("durability order = %v, want %v before %q", steps, tt.wantBeforeJournal, StepJournalWrite)
 			}
 
-			for _, failStep := range tt.wantCreates {
+			for _, failStep := range tt.failSteps {
 				t.Run(failStep, func(t *testing.T) {
 					root := newRoot(t)
 					stop := errors.New("injected directory crash")
@@ -168,6 +185,49 @@ func TestTransactionSyncsEachNewDirectoryEntryBeforeJournal(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestTransactionRetriesVisibleDirectoryParentSyncBeforeJournal(t *testing.T) {
+	root := transactionRoot(t)
+	parent := filepath.Join(root, ".verdi", "data")
+	created := filepath.Join(parent, "draft-mutation")
+	journalPath := store.DraftMutationJournalPath(root, transactionSpecName)
+	stop := errors.New("injected directory sync failure")
+	syncAttempts := 0
+	retrySyncBeforeJournal := false
+	coordinator := Coordinator{DirectorySync: func(directory *os.File) error {
+		if directory.Name() != parent {
+			return directory.Sync()
+		}
+		syncAttempts++
+		if syncAttempts == 1 {
+			return stop
+		}
+		if _, err := os.Stat(journalPath); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("journal exists before retried parent sync: %v", err)
+		}
+		retrySyncBeforeJournal = true
+		return directory.Sync()
+	}}
+
+	if err := runTransaction(t, root, coordinator); !errors.Is(err, stop) {
+		t.Fatalf("first transaction error = %v, want directory sync failure", err)
+	}
+	info, err := os.Lstat(created)
+	if err != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+		t.Fatalf("created directory is not visibly retained: info=%v err=%v", info, err)
+	}
+	if _, err := os.Stat(journalPath); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("journal became reachable after failed parent sync: %v", err)
+	}
+
+	if err := runTransaction(t, root, coordinator); err != nil {
+		t.Fatalf("retry transaction: %v", err)
+	}
+	if syncAttempts != 2 || !retrySyncBeforeJournal {
+		t.Fatalf("parent sync attempts = %d, before journal = %t; want two attempts with retry before journal", syncAttempts, retrySyncBeforeJournal)
+	}
+	assertCompleteOldOrNew(t, root)
 }
 
 func assertNeverSpecAhead(t *testing.T, root string) {

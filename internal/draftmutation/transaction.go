@@ -20,30 +20,31 @@ const (
 	journalSchema = "verdi.draftmutation-journal/v1"
 	phasePrepared = "prepared"
 
-	StepJournalWrite               = "journal-write"
-	StepJournalSync                = "journal-fsync"
-	StepJournalDirectorySync       = "journal-directory-fsync"
-	StepSpecStageWrite             = "spec-stage-write"
-	StepSpecStageSync              = "spec-stage-fsync"
-	StepProvenanceStageWrite       = "provenance-stage-write"
-	StepProvenanceStageSync        = "provenance-stage-fsync"
-	StepStageDirectorySync         = "stage-directory-fsync"
-	StepProvenanceRename           = "provenance-rename"
-	StepProvenanceDirectorySync    = "provenance-directory-fsync"
-	StepSpecRename                 = "spec-rename"
-	StepSpecDirectorySync          = "spec-directory-fsync"
-	StepCleanupJournal             = "cleanup-journal"
-	StepCleanupStage               = "cleanup-stage"
-	StepCleanupDirectorySync       = "cleanup-directory-fsync"
-	StepCleanupTransactionRoot     = "cleanup-transaction-root"
-	StepCleanupParentDirectory     = "cleanup-parent-directory-fsync"
-	StepCreatedDirectoryParentSync = "created-directory-parent-fsync:"
+	StepJournalWrite            = "journal-write"
+	StepJournalSync             = "journal-fsync"
+	StepJournalDirectorySync    = "journal-directory-fsync"
+	StepSpecStageWrite          = "spec-stage-write"
+	StepSpecStageSync           = "spec-stage-fsync"
+	StepProvenanceStageWrite    = "provenance-stage-write"
+	StepProvenanceStageSync     = "provenance-stage-fsync"
+	StepStageDirectorySync      = "stage-directory-fsync"
+	StepProvenanceRename        = "provenance-rename"
+	StepProvenanceDirectorySync = "provenance-directory-fsync"
+	StepSpecRename              = "spec-rename"
+	StepSpecDirectorySync       = "spec-directory-fsync"
+	StepCleanupJournal          = "cleanup-journal"
+	StepCleanupStage            = "cleanup-stage"
+	StepCleanupDirectorySync    = "cleanup-directory-fsync"
+	StepCleanupTransactionRoot  = "cleanup-transaction-root"
+	StepCleanupParentDirectory  = "cleanup-parent-directory-fsync"
+	StepDirectoryParentSync     = "directory-parent-fsync:"
 )
 
-// Coordinator exposes deterministic post-boundary fault injection for tests.
-// A nil After is the production zero value.
+// Coordinator exposes deterministic boundary fault injection for tests.
+// Nil hooks make the production zero value use real filesystem operations.
 type Coordinator struct {
-	After func(step string) error
+	After         func(step string) error
+	DirectorySync func(directory *os.File) error
 }
 
 func (c Coordinator) after(step string) error {
@@ -54,6 +55,13 @@ func (c Coordinator) after(step string) error {
 		return fmt.Errorf("draftmutation: after %s: %w", step, err)
 	}
 	return nil
+}
+
+func (c Coordinator) syncDirectory(directory *os.File) error {
+	if c.DirectorySync != nil {
+		return c.DirectorySync(directory)
+	}
+	return directory.Sync()
 }
 
 // LockedWriter is only handed to callbacks after acquisition of D3's one
@@ -272,7 +280,7 @@ func (w *LockedWriter) syncDirectory(path, step string) error {
 	if err != nil {
 		return fmt.Errorf("draftmutation: opening directory %s for fsync: %w", path, err)
 	}
-	err = directory.Sync()
+	err = w.coordinator.syncDirectory(directory)
 	closeErr := directory.Close()
 	if err != nil {
 		return fmt.Errorf("draftmutation: syncing directory %s: %w", path, err)
@@ -308,25 +316,23 @@ func (w *LockedWriter) ensureDirectory(target string) error {
 		current = filepath.Join(current, component)
 		info, statErr := os.Lstat(current)
 		if errors.Is(statErr, os.ErrNotExist) {
-			if err := os.Mkdir(current, 0o755); err == nil {
-				created, relErr := filepath.Rel(absoluteRoot, current)
-				if relErr != nil {
-					return fmt.Errorf("draftmutation: resolving created directory %s: %w", current, relErr)
-				}
-				if err := w.syncDirectory(filepath.Dir(current), StepCreatedDirectoryParentSync+filepath.ToSlash(created)); err != nil {
-					return err
-				}
-				continue
-			} else if !errors.Is(err, os.ErrExist) {
+			if err := os.Mkdir(current, 0o755); err != nil && !errors.Is(err, os.ErrExist) {
 				return fmt.Errorf("draftmutation: creating directory %s: %w", current, err)
 			}
-			// Another process may have created this shared ancestor between
-			// Lstat and Mkdir. Re-read it and apply the same symlink/type
-			// checks; EEXIST alone is never sufficient authority.
+			// Re-read entries created here or by a racing process and apply
+			// the same symlink/type checks; Mkdir success or EEXIST alone is
+			// never sufficient authority.
 			info, statErr = os.Lstat(current)
 		}
 		if statErr != nil || info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
 			return fmt.Errorf("draftmutation: directory %s is a symlink or not a directory", current)
+		}
+		ensured, relErr := filepath.Rel(absoluteRoot, current)
+		if relErr != nil {
+			return fmt.Errorf("draftmutation: resolving ensured directory %s: %w", current, relErr)
+		}
+		if err := w.syncDirectory(filepath.Dir(current), StepDirectoryParentSync+filepath.ToSlash(ensured)); err != nil {
+			return err
 		}
 	}
 	return nil
