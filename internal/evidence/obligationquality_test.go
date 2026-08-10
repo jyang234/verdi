@@ -144,6 +144,23 @@ func TestAssessObligation_ExactMatching(t *testing.T) {
 	}
 }
 
+func TestAssessObligation_CodeEvaluationCommitUnavailableIsOperational(t *testing.T) {
+	root := t.TempDir()
+	writeQualityObligation(t, root, artifact.EvidenceBehavioral, elaboratedQualityYAML(), "authored")
+	record := artifact.Evidence{
+		Kind: artifact.EvidenceBehavioral, Verdict: artifact.VerdictPass,
+		Producer:   "verify:behavioral",
+		Provenance: artifact.EvidenceProvenance{Source: artifact.SourceCI, Job: "verify", Commit: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
+	}
+	_, err := AssessObligation(context.Background(), ObligationAssessmentInput{
+		StoreRoot: root, SpecName: "loan-refi", ACID: "ac-2", Kind: artifact.EvidenceBehavioral,
+		Record: &record, SpecLandingCommit: record.Provenance.Commit,
+	})
+	if err == nil {
+		t.Fatal("AssessObligation = nil error, want unavailable code evaluation commit to be operational")
+	}
+}
+
 func TestAssessObligation_PreservesFailingWitness(t *testing.T) {
 	record := artifact.Evidence{Kind: artifact.EvidenceBehavioral, Verdict: artifact.VerdictFail, Witness: "failure witness"}
 	got, err := AssessObligation(context.Background(), ObligationAssessmentInput{

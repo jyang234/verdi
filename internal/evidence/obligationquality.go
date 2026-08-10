@@ -222,7 +222,10 @@ func matchElaborated(ctx context.Context, in ObligationAssessmentInput, result O
 	for _, invalidator := range q.Freshness.InvalidatedBy {
 		switch invalidator {
 		case artifact.ObligationInvalidatorCode:
-			if in.EvaluationCommit == "" || in.Record.Provenance.Commit != in.EvaluationCommit {
+			if in.EvaluationCommit == "" {
+				return ObligationAssessment{}, fmt.Errorf("evidence: code freshness requires an evaluation commit for %s/%s", in.ACID, in.Kind)
+			}
+			if in.Record.Provenance.Commit != in.EvaluationCommit {
 				result.Reason = ObligationReasonFreshnessStale
 				return result, nil
 			}
