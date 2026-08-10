@@ -164,17 +164,6 @@ This attestation was scaffolded by ` + "`verdi attest`" + ` for jira:PREFLIGHT-1
 and has not been authored.
 `
 
-const preflightAuthoredAttestationMD = `---
-id: attestation/jira-preflight-1--ac-1
-kind: attestation
-title: "ac-1"
-owners: [platform-team]
-frozen: { at: 2024-01-01, commit: ` + gateFakeFrozenCommit + ` }
----
-# ac-1
-Verified by hand, per the fixture's own test narrative.
-`
-
 // writePreflightGateReport writes deviation-report.md directly into the
 // preflight-fixture spec's own directory — writeGateReport (gate_test.go)
 // hardcodes "stale-decline" (that file's own fixture family), so this
