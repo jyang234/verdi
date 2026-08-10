@@ -44,7 +44,7 @@ func NewService() Service {
 func (s Service) Mutate(ctx context.Context, start string, request Request, actor Actor) (Response, *Error) {
 	identity, err := ResolveCanonicalIdentity(ctx, start, request.Spec, s.Identity)
 	if err != nil {
-		return Response{}, WrapError(CodeIdentityInvalid, Identity{}, "constructing canonical identity", err)
+		return Response{}, NewIdentityUnavailableError("constructing canonical identity", err)
 	}
 	if typed := VerifyExpected(identity, request.Expected); typed != nil {
 		return Response{}, typed

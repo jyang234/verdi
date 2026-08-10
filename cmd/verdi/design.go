@@ -37,15 +37,23 @@ import (
 	"golang.org/x/term"
 )
 
-// runDesignVerb dispatches `verdi design <subcommand>`. There is exactly
-// one subcommand, `start` (05 §CLI); anything else is a usage error.
+// runDesignVerb dispatches the scaffold `start` and ASD's structured
+// `mutate` adapter; anything else is a usage error.
 func runDesignVerb(args []string, stdout, stderr io.Writer) int {
-	if len(args) == 0 || args[0] != "start" {
+	if len(args) == 0 {
 		// vocab:identity — CLI usage/flag grammar (--kind enum values, identity)
-		fmt.Fprintln(stderr, "usage: verdi design start [<ref>] --kind feature|story --name <name> (or: verdi design start --from-stub <feature> <stub>)")
+		fmt.Fprintln(stderr, "usage: verdi design start [<ref>] --kind feature|story --name <name> | verdi design mutate --request <path|-> --harness <id> [--session <id>]")
 		return 2
 	}
-	return cmdDesignStart(args[1:], stdout, stderr)
+	switch args[0] {
+	case "start":
+		return cmdDesignStart(args[1:], stdout, stderr)
+	case "mutate":
+		return cmdDesignMutate(args[1:], stdout, stderr)
+	default:
+		fmt.Fprintln(stderr, "usage: verdi design start [<ref>] --kind feature|story --name <name> | verdi design mutate --request <path|-> --harness <id> [--session <id>]")
+		return 2
+	}
 }
 
 // extractFlags pulls "--name"/"-name", "--kind"/"-kind", "--problem"/

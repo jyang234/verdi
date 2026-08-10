@@ -24,22 +24,35 @@ var verdictCodes = map[Code]bool{
 	CodeActorForbidden: true, CodeOperationInvalid: true, CodeResultInvalid: true,
 }
 
-// Error is a service-typed failure. Once request decode yields a valid spec,
-// Identity is always the one service-constructed value.
+// Error is a closed service diagnostic. Once canonical Git identity is
+// constructed, Identity is always that one value. IdentityAvailable is false
+// only for an operational failure that prevented construction itself.
 type Error struct {
-	Code     Code
-	Identity Identity
-	Detail   string
-	Cause    error
+	Code              Code
+	Identity          Identity
+	Detail            string
+	Cause             error
+	identityAvailable bool
 }
 
 func NewError(code Code, identity Identity, detail string) *Error {
-	return &Error{Code: code, Identity: identity, Detail: detail}
+	return &Error{Code: code, Identity: identity, Detail: detail, identityAvailable: identity.Validate() == nil}
 }
 
 func WrapError(code Code, identity Identity, detail string, cause error) *Error {
-	return &Error{Code: code, Identity: identity, Detail: detail, Cause: cause}
+	return &Error{Code: code, Identity: identity, Detail: detail, Cause: cause, identityAvailable: identity.Validate() == nil}
 }
+
+// NewIdentityUnavailableError reports a failure that prevented the service
+// from constructing canonical Git identity. Its zero Identity is explicitly
+// unavailable, never a projection of caller-supplied expected operands.
+func NewIdentityUnavailableError(detail string, cause error) *Error {
+	return &Error{Code: CodeIdentityInvalid, Detail: detail, Cause: cause}
+}
+
+// IdentityAvailable distinguishes a service-constructed canonical identity
+// from a pre-construction operational diagnostic.
+func (e *Error) IdentityAvailable() bool { return e != nil && e.identityAvailable }
 
 func (e *Error) Error() string {
 	if e == nil {

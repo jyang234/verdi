@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -17,6 +18,21 @@ import (
 	"github.com/jyang234/verdi/internal/specstate"
 	"github.com/jyang234/verdi/internal/store"
 )
+
+func TestServiceIdentityResolutionFailureDisclosesIdentityUnavailable(t *testing.T) {
+	root := serviceRoot(t, []byte(baseSpec))
+	request := requestFor(t, root, []byte(baseSpec), []Operation{{Op: OpSetProblem, Text: "changed", Anchor: "#problem"}})
+	service := testService(root, resolvedPolicy(t, "draft-write", true), specstate.Proposed)
+	service.Identity = fakeIdentityReader{err: errors.New("git facts unavailable")}
+
+	response, diagnostic := service.Mutate(context.Background(), root, request, testAgent(t))
+	if diagnostic == nil || diagnostic.Code != CodeIdentityInvalid || diagnostic.IdentityAvailable() || response.Result != nil || response.Stale != nil {
+		t.Fatalf("response/diagnostic = %+v, %v", response, diagnostic)
+	}
+	if diagnostic.Identity != (Identity{}) {
+		t.Fatalf("unavailable identity diagnostic fabricated identity %+v", diagnostic.Identity)
+	}
+}
 
 func serviceRoot(t *testing.T, specBytes []byte) string {
 	t.Helper()

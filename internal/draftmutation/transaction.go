@@ -303,10 +303,15 @@ func ensureDirectory(root, target string) error {
 		current = filepath.Join(current, component)
 		info, statErr := os.Lstat(current)
 		if errors.Is(statErr, os.ErrNotExist) {
-			if err := os.Mkdir(current, 0o755); err != nil {
+			if err := os.Mkdir(current, 0o755); err == nil {
+				continue
+			} else if !errors.Is(err, os.ErrExist) {
 				return fmt.Errorf("draftmutation: creating directory %s: %w", current, err)
 			}
-			continue
+			// Another process may have created this shared ancestor between
+			// Lstat and Mkdir. Re-read it and apply the same symlink/type
+			// checks; EEXIST alone is never sufficient authority.
+			info, statErr = os.Lstat(current)
 		}
 		if statErr != nil || info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
 			return fmt.Errorf("draftmutation: directory %s is a symlink or not a directory", current)
