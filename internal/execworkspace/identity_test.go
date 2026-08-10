@@ -135,10 +135,11 @@ func TestWorkspaceID_PatchShape(t *testing.T) {
 }
 
 func TestWorkspaceID_UsesStoreRefSlug(t *testing.T) {
-	// RefSlug maps '/' to '--' and lowercases; verify execworkspace reuses
-	// store.RefSlug rather than a second scheme, by checking an underscore
-	// (excluded from the slug alphabet) maps to '-'.
-	id, err := NewExactIdentity("weird_run/name", validSHA)
+	// RefSlug maps '/' to '--', lowercases, and PRESERVES '_' (the
+	// normative alphabet [a-z0-9._-] contains it); verify execworkspace
+	// reuses store.RefSlug rather than a second scheme, by checking both
+	// the '/' mapping and the underscore's survival in one id.
+	id, err := NewExactIdentity("weird_run/Name", validSHA)
 	if err != nil {
 		t.Fatalf("NewExactIdentity: %v", err)
 	}
@@ -146,9 +147,45 @@ func TestWorkspaceID_UsesStoreRefSlug(t *testing.T) {
 	if err != nil {
 		t.Fatalf("WorkspaceID: %v", err)
 	}
-	want := "weird-run--name--" + validSHA[:12]
+	want := "weird_run--name--" + validSHA[:12]
 	if got != want {
 		t.Fatalf("WorkspaceID() = %q, want %q", got, want)
+	}
+	if !ValidWorkspaceID(got) {
+		t.Fatalf("ValidWorkspaceID(%q) = false for an id this package itself produced from an underscored run id", got)
+	}
+}
+
+// TestWorkspaceID_UnderscoreAndDashRunIDsDoNotCollide is the workspace-id
+// half of 01 §notes' no-silent-merge rule: two run ids differing only in
+// '_' vs '-' must address two different workspaces.
+func TestWorkspaceID_UnderscoreAndDashRunIDsDoNotCollide(t *testing.T) {
+	underscored, err := NewExactIdentity("ci_run", validSHA)
+	if err != nil {
+		t.Fatalf("NewExactIdentity(ci_run): %v", err)
+	}
+	dashed, err := NewExactIdentity("ci-run", validSHA)
+	if err != nil {
+		t.Fatalf("NewExactIdentity(ci-run): %v", err)
+	}
+	a, err := underscored.WorkspaceID()
+	if err != nil {
+		t.Fatalf("WorkspaceID(ci_run): %v", err)
+	}
+	b, err := dashed.WorkspaceID()
+	if err != nil {
+		t.Fatalf("WorkspaceID(ci-run): %v", err)
+	}
+	if a == b {
+		t.Fatalf("run ids %q and %q both address workspace id %q: a silent merge of two distinct runs", "ci_run", "ci-run", a)
+	}
+	// And the underscored id round-trips through the grammar classifier.
+	ce, ok := ClassifyEntry(a)
+	if !ok {
+		t.Fatalf("ClassifyEntry(%q) = grammar-external for an id this package produced", a)
+	}
+	if ce.WorkspaceID != a || ce.Form != FormUnit {
+		t.Fatalf("ClassifyEntry(%q) = %+v, want the same id as a unit", a, ce)
 	}
 }
 

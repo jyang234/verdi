@@ -248,7 +248,12 @@ func lowerHexOnly(s string) bool {
 // [a-z0-9._-]. This rejects an empty string, every path separator ("/" and
 // "\" — a raw ReadDir name never legitimately carries one, so a classifier
 // handed a nested location or a full path fails closed), uppercase, spaces,
-// "_", and every other byte RefSlug would itself have mapped away.
+// and every other byte RefSlug would itself have mapped away.
+//
+// "_" is ACCEPTED: the normative alphabet contains it and RefSlug preserves
+// it, so a run id like "ci_run" produces the workspace id
+// "ci_run--<sha12>", which this predicate must recognize as its own
+// package's output.
 func slugAlphabetOnly(s string) bool {
 	if s == "" {
 		return false
@@ -258,7 +263,7 @@ func slugAlphabetOnly(s string) bool {
 		switch {
 		case c >= 'a' && c <= 'z':
 		case c >= '0' && c <= '9':
-		case c == '.' || c == '-':
+		case c == '.' || c == '_' || c == '-':
 		default:
 			return false
 		}

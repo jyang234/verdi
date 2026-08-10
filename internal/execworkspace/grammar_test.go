@@ -174,6 +174,10 @@ func TestValidWorkspaceID(t *testing.T) {
 		"..--abcdef012345",
 		"-.--abcdef012345",
 		"x--abcdef012345--abcdef012345",
+		// The normative alphabet [a-z0-9._-] CONTAINS '_', and RefSlug
+		// preserves it, so an underscored run slug is a well-formed id.
+		"wid_x--abcdef012345",
+		"ci_run--abcdef012345-pdeadbeef0123",
 	}
 	for _, id := range valid {
 		t.Run("valid/"+id, func(t *testing.T) {
@@ -194,7 +198,6 @@ func TestValidWorkspaceID(t *testing.T) {
 		"long hex group":        "x--abcdef0123456",
 		"single dash separator": "x-abcdef012345",
 		"space byte":            " wid--abcdef012345",
-		"underscore byte":       "wid_x--abcdef012345",
 		"slash byte":            "a/b--abcdef012345",
 		"backslash byte":        "a\\b--abcdef012345",
 		"patch group only":      "x-pabcdef012345",
