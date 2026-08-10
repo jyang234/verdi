@@ -88,11 +88,27 @@ shared component never rewrites a pre-start report into post-start proof.
 ## 4. Platform mechanism
 
 The Linux backend owns construction of `SysProcAttr`; no consumer composes a
-second value. It uses the invoking effective UID and GID in explicit mappings,
-disables setgroups for the GID mapping, and combines the user and network
-clone flags in the one child creation. The implementation must prove the
-exact mapping with table tests and keep all platform code in `_linux.go` and
-`_unsupported.go` files.
+second value. The exact value is:
+
+```go
+&syscall.SysProcAttr{
+    Cloneflags: syscall.CLONE_NEWUSER | syscall.CLONE_NEWNET,
+    UidMappings: []syscall.SysProcIDMap{
+        {ContainerID: 0, HostID: os.Geteuid(), Size: 1},
+    },
+    GidMappings: []syscall.SysProcIDMap{
+        {ContainerID: 0, HostID: os.Getegid(), Size: 1},
+    },
+    GidMappingsEnableSetgroups: false,
+}
+```
+
+`Credential` is nil. The child is uid/gid 0 only inside the newly-created user
+namespace and receives capabilities over the child-owned network namespace; it
+does not receive host-root authority. No supplementary group mapping is
+created. The implementation must prove the entire tuple, the nil credential
+and the absence of extra flags/mappings with table tests, and keep all platform
+code in `_linux.go` and `_unsupported.go` files.
 
 Primary mechanism sources:
 
@@ -124,7 +140,8 @@ The later runtime unit may change only `internal/execworkspace` plus its CSE
 consumer integration. It must TDD:
 
 1. absent/present grant polarity and the always-present report fact;
-2. exact Linux `SysProcAttr` flags and mappings without starting a process;
+2. exact Linux `SysProcAttr` flags, one-id mappings, disabled setgroups and nil
+   credential without starting a process;
 3. unsupported-platform operational refusal;
 4. a Linux integration probe that attempts real start and proves the child
    cannot create an outbound IP connection or observe host interfaces; when

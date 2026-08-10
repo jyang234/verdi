@@ -45,8 +45,13 @@ Implement exactly the eight TDD tasks in the approved plan. The core belongs in
 internal/draftmutation; the shared sidecar contract belongs in
 internal/designprovenance; cmd/verdi is a thin adapter. Use the exact request,
 operation, digest, provenance, policy, recovery, warning, path and exit
-contracts recorded in SI-65..SI-70. Do not substitute a simpler two-file write
-for the journaled recovery protocol.
+contracts recorded in SI-65..SI-70. In particular: the request carries a
+digest-verified base snapshot for stale changed-target computation; the CLI is
+always an unauthenticated delegated-agent and requires --harness (optional
+--session), never environment-selected human/principal attribution; a direct
+edit is the exact unclassified-gap arm; and recovery/mutation uses only the
+checkout-wide data/writer.lock plus the ratified data/draft-mutation root. Do
+not substitute a simpler two-file write or create a per-spec lock.
 
 Do not implement workbench or MCP adapters, capabilities/context compiler,
 semantic review UI, Playwright changes, Git publication/governance verbs, a new
@@ -106,7 +111,13 @@ Implement exactly the six TDD tasks in the approved plan. Use one strict
 quality union, one evidence assessment, the existing evidence writer consuming
 humanartifact, one pre-mutation build gate, and one journey consumer port.
 Preserve failing evidence witnesses and waiver precedence while preventing
-unelaborated positive evidence from satisfying a kind.
+unelaborated positive evidence from satisfying a kind. Pin the exact planning
+owner-merge commit as the prospective adoption cutoff: preserve historical
+legacy folds at/behind it and refuse post-adoption positive satisfaction from
+legacy absence. An elaborated block is only eligible: implement the plan's
+exact producer/source matching and commit-based freshness checks; keep
+attestation and dependency/environment/policy freshness disclosed unproven
+until their missing receipts exist.
 
 Do not edit any frozen obligation, spec, plan or ledger; add a new CLI/MCP verb,
 lifecycle state, transition, store root or evidence-record obligation_id;
@@ -130,7 +141,8 @@ witness and run fresh, unpiped:
 Push the branch and open one draft PR. Its body must include exact base/head,
 the GLG spec path/blob identity, plan path and commit, SI IDs, requirement-to-
 test mapping, commit list, changed files, corpus witness for 282 legacy/27
-marker files, full command output, three-valued disclosures and revert posture.
+marker files plus pre/post-adoption behavior, full command output, three-valued
+disclosures and revert posture.
 Do not claim experimental advisory execution, frontend presentation or frozen
 legacy remediation complete.
 ```
@@ -140,8 +152,10 @@ legacy remediation complete.
 Do not launch until one Wave 2 slot is free. Its authority is
 `docs/superpowers/specs/2026-08-10-default-deny-network-enforcement-design.md`
 and SI-75..SI-76. The later producer owns only the Linux execution-workspace
-backend and report contract. CSE isolated execution begins only after that
-backend is owner-merged and independently reviewed.
+backend and report contract, including the exact container-0 to invoking
+effective uid/gid mappings, disabled setgroups and nil credential. CSE isolated
+execution begins only after that backend is owner-merged and independently
+reviewed.
 
 ## Controller/reviewer sequence
 
