@@ -15,6 +15,7 @@ import (
 // result is observable when any operation or final validation fails.
 func ApplyDraftMutations(src []byte, operations []designprovenance.Operation) ([]byte, error) {
 	if len(operations) == 0 {
+		// vocab:identity — ASD protocol operation name in a machinery diagnostic
 		return nil, fmt.Errorf("splice: draft mutation requires at least one operation")
 	}
 	result := append([]byte(nil), src...)
@@ -162,6 +163,7 @@ func (d *Doc) draftEdits(op designprovenance.Operation) ([]Edit, error) {
 		edit, err := d.removeByField("context", "", op.Ref)
 		return oneEdit(edit, err)
 	default:
+		// vocab:identity — ASD protocol operation name in a machinery diagnostic
 		return nil, fmt.Errorf("unknown draft operation %q", op.Op)
 	}
 }

@@ -57,6 +57,7 @@ func (s Service) Mutate(ctx context.Context, start string, request Request, acto
 	var response Response
 	transactionErr := WithWriterLock(ctx, filepath.FromSlash(identity.Checkout), s.Coordinator, func(writer *LockedWriter) error {
 		if err := writer.Recover(ref.Name); err != nil {
+			// vocab:identity — ASD protocol/transaction name in a machinery diagnostic
 			return WrapError(CodeRecoveryInvalid, identity, "recovering prior draft mutation", err)
 		}
 
@@ -150,6 +151,7 @@ func (s Service) Mutate(ctx context.Context, start string, request Request, acto
 			Spec: identity.Spec, OldSpec: current, NewSpec: applied.Spec,
 			OldProvenance: provenance, OldProvenanceExists: provenanceExists, NewProvenance: newProvenance,
 		}); err != nil {
+			// vocab:identity — ASD protocol/transaction name in a machinery diagnostic
 			return WrapError(CodeIOFailure, identity, "committing coordinated draft mutation", err)
 		}
 		result := applied.Result
@@ -163,6 +165,7 @@ func (s Service) Mutate(ctx context.Context, start string, request Request, acto
 	if errors.As(transactionErr, &typed) {
 		return response, typed
 	}
+	// vocab:identity — ASD protocol/transaction name in a machinery diagnostic
 	return response, WrapError(CodeIOFailure, identity, "running checkout-wide draft mutation transaction", transactionErr)
 }
 

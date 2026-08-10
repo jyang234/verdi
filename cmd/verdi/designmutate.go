@@ -47,6 +47,7 @@ func runDesignMutate(ctx context.Context, start string, args []string, stdin io.
 		return renderDesignMutateInputError(stderr, err)
 	}
 	if service == nil {
+		// vocab:identity — ASD protocol/command name in an operational diagnostic
 		fmt.Fprintln(stderr, "io-failure: draft mutation service is unavailable")
 		return 2
 	}
@@ -66,6 +67,7 @@ func runDesignMutate(ctx context.Context, start string, args []string, stdin io.
 		return renderDesignMutateDiagnostic(stderr, request, diagnostic)
 	}
 	if response.Result == nil || response.Stale != nil {
+		// vocab:identity — ASD protocol/command name in an operational diagnostic
 		fmt.Fprintln(stderr, "result-invalid: draft mutation service returned an invalid response union")
 		return 2
 	}

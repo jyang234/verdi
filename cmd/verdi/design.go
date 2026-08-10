@@ -51,6 +51,7 @@ func runDesignVerb(args []string, stdout, stderr io.Writer) int {
 	case "mutate":
 		return cmdDesignMutate(args[1:], stdout, stderr)
 	default:
+		// vocab:identity — CLI usage/flag grammar (--kind enum values, identity)
 		fmt.Fprintln(stderr, "usage: verdi design start [<ref>] --kind feature|story --name <name> | verdi design mutate --request <path|-> --harness <id> [--session <id>]")
 		return 2
 	}

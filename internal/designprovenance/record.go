@@ -227,10 +227,12 @@ func (o Operation) validateFields(fields map[string]json.RawMessage) error {
 	if o.Op == OpAddStub || o.Op == OpEditStub {
 		spike := o.Spike != nil && *o.Spike
 		if o.Spike != nil && !*o.Spike {
+			// vocab:identity — exact ASD operation-union field name
 			return fmt.Errorf("designprovenance: operation %q spike, when present, must be true", o.Op)
 		}
 		if spike {
 			if len(o.Resolves) == 0 || o.AcceptanceCriteria != nil {
+				// vocab:identity — exact ASD operation-union arm and field names
 				return fmt.Errorf("designprovenance: operation %q spike arm requires resolves and omits acceptance_criteria", o.Op)
 			}
 		} else if len(o.AcceptanceCriteria) == 0 || o.Resolves != nil {
