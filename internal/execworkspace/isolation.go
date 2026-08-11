@@ -507,10 +507,11 @@ type enforcementReportDoc struct {
 }
 
 // enforcementReportDocFor projects a validated EnforcementReport onto its
-// wire shape. Rows is built via make(..., 0, ...) rather than left nil, so
-// a report with no rows still encodes "rows":[] rather than "rows":null —
-// the same non-nil-slice discipline grantSetDocFor already uses for
-// GrantSet (grants.go).
+// wire shape. Rows is built via make([]enforcementReportRowDoc, len(r.Rows))
+// rather than left nil; make returns a non-nil slice even at length 0, so a
+// report with no rows still encodes "rows":[] rather than "rows":null — the
+// same non-nil-slice discipline grantSetDocFor already uses for GrantSet
+// (grants.go).
 func enforcementReportDocFor(r EnforcementReport) enforcementReportDoc {
 	rows := make([]enforcementReportRowDoc, len(r.Rows))
 	for i, row := range r.Rows {

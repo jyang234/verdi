@@ -45,6 +45,34 @@ func TestBuildProfile_NetworkPolarity_AbsentGrant_Linux(t *testing.T) {
 	}
 }
 
+// TestBuildProfile_NetworkPolarity_AbsentGrant_EmptyGrantSet_Linux is the
+// Linux half of the empty-grant-set pin the base test
+// TestBuildProfile_EmptyGrantSet_NoErrorEmptyReport used to carry before
+// the SI-75/SI-76 migration (its unsupported-platform half is
+// TestBuildProfile_NetworkPolarity_AbsentGrant_EmptyGrantSet in
+// network_unsupported_test.go): an entirely empty GrantSet is an ABSENT
+// network grant, which Linux CAN configure, so it stays a nil error and a
+// non-nil report — and, since no other grant was requested, a ZERO-ROW one
+// (the mandatory deny is the Network fact, never a row).
+func TestBuildProfile_NetworkPolarity_AbsentGrant_EmptyGrantSet_Linux(t *testing.T) {
+	_, report, err := BuildProfile(t.TempDir(), t.TempDir(), GrantSet{}, nil)
+	if err != nil {
+		t.Fatalf("BuildProfile: unexpected error: %v", err)
+	}
+	if report == nil {
+		t.Fatalf("BuildProfile: report is nil, want a non-nil report")
+	}
+	if len(report.Rows) != 0 {
+		t.Fatalf("report.Rows = %+v, want zero rows (no grants requested at all)", report.Rows)
+	}
+	if report.Network.Mode != NetworkDeny || !report.Network.Configured {
+		t.Fatalf("report.Network = %+v, want configured deny on Linux", report.Network)
+	}
+	if report.Network.Reason == "" {
+		t.Fatalf("report.Network.Reason is empty")
+	}
+}
+
 func wantDenySysProcAttr() *syscall.SysProcAttr {
 	return &syscall.SysProcAttr{
 		Cloneflags: syscall.CLONE_NEWUSER | syscall.CLONE_NEWNET,

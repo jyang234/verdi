@@ -95,6 +95,16 @@ func TestProfileCommand_RefusesMalformedNetworkState(t *testing.T) {
 			if cmd != nil || ctx != nil || cancel != nil {
 				t.Fatalf("Command: refused but returned cmd=%v ctx=%v cancel!=nil=%v", cmd, ctx, cancel != nil)
 			}
+			// The refusal must keep naming the control and the reason
+			// (networkNotLaunchableError, network.go): a future edit that
+			// strips the operator-facing disclosure fails here rather than
+			// silently degrading it.
+			msg := err.Error()
+			for _, want := range []string{"network", "no launchable mechanism"} {
+				if !strings.Contains(msg, want) {
+					t.Fatalf("Command: refusal error %q does not name %q", msg, want)
+				}
+			}
 		})
 	}
 }
