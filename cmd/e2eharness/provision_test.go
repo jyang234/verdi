@@ -131,6 +131,97 @@ func TestAttachObligationQualityAdoptionAncestry(t *testing.T) {
 	}
 }
 
+func TestAttachObligationQualityAdoptionAncestryFromShallowSource(t *testing.T) {
+	moduleRoot, err := filepath.Abs(filepath.Join("..", ".."))
+	if err != nil {
+		t.Fatal(err)
+	}
+	sourceRoot := filepath.Join(t.TempDir(), "source")
+	if err := os.MkdirAll(sourceRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := runGit(t.Context(), sourceRoot, nil, "init", "--quiet", "--initial-branch=main"); err != nil {
+		t.Fatal(err)
+	}
+	if err := runGit(t.Context(), sourceRoot, nil, "fetch", "--quiet", "--no-tags", "--depth=1", moduleRoot, evidence.ObligationQualityAdoptionCommit); err != nil {
+		t.Fatalf("creating shallow adoption source: %v", err)
+	}
+	sourceShallow, err := gitOutput(t.Context(), sourceRoot, "rev-parse", "--is-shallow-repository")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sourceShallow != "true" {
+		t.Fatalf("source shallow state = %q, want true", sourceShallow)
+	}
+	if err := runGit(t.Context(), sourceRoot, nil, "cat-file", "-e", evidence.ObligationQualityAdoptionCommit+"^"); err == nil {
+		t.Fatal("shallow source contains adoption parent, want it unavailable")
+	}
+	sourceAdoptionTree, err := gitOutput(t.Context(), sourceRoot, "rev-parse", evidence.ObligationQualityAdoptionCommit+"^{tree}")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	storeRoot := filepath.Join(t.TempDir(), "store")
+	if err := os.MkdirAll(storeRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(storeRoot, "fixture.txt"), []byte("fixture\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := gitInitAndCommit(t.Context(), storeRoot); err != nil {
+		t.Fatal(err)
+	}
+	beforeHead, err := gitOutput(t.Context(), storeRoot, "rev-parse", "HEAD")
+	if err != nil {
+		t.Fatal(err)
+	}
+	beforeTree, err := gitOutput(t.Context(), storeRoot, "rev-parse", "HEAD^{tree}")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := attachObligationQualityAdoptionAncestry(t.Context(), sourceRoot, storeRoot); err != nil {
+		t.Fatalf("attachObligationQualityAdoptionAncestry from shallow source: %v", err)
+	}
+	if err := runGit(t.Context(), storeRoot, nil, "--no-replace-objects", "cat-file", "-e", evidence.ObligationQualityAdoptionCommit+"^"); err == nil {
+		t.Fatal("scratch store contains adoption parent, want exact adoption imported as a boundary")
+	}
+	rawAdoption, err := gitOutput(t.Context(), storeRoot, "--no-replace-objects", "rev-parse", evidence.ObligationQualityAdoptionCommit+"^{commit}")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rawAdoptionTree, err := gitOutput(t.Context(), storeRoot, "--no-replace-objects", "rev-parse", evidence.ObligationQualityAdoptionCommit+"^{tree}")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rawAdoption != evidence.ObligationQualityAdoptionCommit || rawAdoptionTree != sourceAdoptionTree {
+		t.Fatalf("raw adoption identity/tree changed: commit %s, tree %s; want commit %s, tree %s", rawAdoption, rawAdoptionTree, evidence.ObligationQualityAdoptionCommit, sourceAdoptionTree)
+	}
+	// The adoption-root graft stops traversal at the available proof horizon;
+	// the scratch-HEAD graft makes that exact adoption its synthetic parent.
+	if err := runGit(t.Context(), storeRoot, nil, "merge-base", "--is-ancestor", evidence.ObligationQualityAdoptionCommit, "HEAD"); err != nil {
+		t.Fatalf("boundary adoption is not an ancestor of scratch HEAD: %v", err)
+	}
+	shallow, err := gitOutput(t.Context(), storeRoot, "rev-parse", "--is-shallow-repository")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if shallow != "false" {
+		t.Fatalf("scratch shallow state = %q, want false for fixture-wide ancestry honesty", shallow)
+	}
+	afterHead, err := gitOutput(t.Context(), storeRoot, "rev-parse", "HEAD")
+	if err != nil {
+		t.Fatal(err)
+	}
+	afterTree, err := gitOutput(t.Context(), storeRoot, "rev-parse", "HEAD^{tree}")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if afterHead != beforeHead || afterTree != beforeTree {
+		t.Fatalf("boundary import changed scratch identity/tree: head %s -> %s, tree %s -> %s", beforeHead, afterHead, beforeTree, afterTree)
+	}
+}
+
 func TestAttachObligationQualityAdoptionAncestryRejectsMissingSource(t *testing.T) {
 	storeRoot := filepath.Join(t.TempDir(), "store")
 	if err := os.MkdirAll(storeRoot, 0o755); err != nil {

@@ -162,8 +162,10 @@ func provisionStore(ctx context.Context, moduleRoot, storeRoot string) error {
 // commit a real descendant of the exact owner-merge that adopted obligation
 // quality. The e2e store is assembled after adoption from copied showcase
 // bytes, but its synthetic root otherwise has no repository ancestry at all.
-// A local replacement graft records that true relationship without changing
-// the scratch ref, tree, or production ancestry classifier.
+// Local replacement grafts make the exact adoption commit a root boundary and
+// record the scratch root after it. This needs only the ratified adoption
+// object, even when a synthetic merge checkout lacks its parents, without
+// marking the whole scratch repository shallow or changing its ref or tree.
 func attachObligationQualityAdoptionAncestry(ctx context.Context, moduleRoot, storeRoot string) error {
 	head, err := gitOutput(ctx, storeRoot, "rev-parse", "HEAD")
 	if err != nil {
@@ -171,6 +173,9 @@ func attachObligationQualityAdoptionAncestry(ctx context.Context, moduleRoot, st
 	}
 	if err := runGit(ctx, storeRoot, nil, "fetch", "--quiet", "--no-tags", moduleRoot, evidence.ObligationQualityAdoptionCommit); err != nil {
 		return fmt.Errorf("importing adoption commit %s: %w", evidence.ObligationQualityAdoptionCommit, err)
+	}
+	if err := runGit(ctx, storeRoot, nil, "replace", "--graft", evidence.ObligationQualityAdoptionCommit); err != nil {
+		return fmt.Errorf("grafting adoption %s as scratch ancestry root: %w", evidence.ObligationQualityAdoptionCommit, err)
 	}
 	if err := runGit(ctx, storeRoot, nil, "replace", "--graft", head, evidence.ObligationQualityAdoptionCommit); err != nil {
 		return fmt.Errorf("grafting scratch root %s after adoption %s: %w", head, evidence.ObligationQualityAdoptionCommit, err)
