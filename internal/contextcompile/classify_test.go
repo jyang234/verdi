@@ -133,6 +133,7 @@ func TestClassify(t *testing.T) {
 		Phase:        PhaseBuild,
 		Environment:  "",
 		RequestScope: explicitUniversalScope(),
+		TargetRef:    "spec/story",
 		Adapter:      AdapterRef{ID: "codex", Version: "1"},
 	})
 	if err != nil {
@@ -285,6 +286,30 @@ func TestClassifyRejectsDuplicatesAndDataDescendants(t *testing.T) {
 			}},
 			want: "cannot carry included kind",
 		},
+		{
+			name: "store authority candidate rejects path traversal as ref",
+			candidates: []Candidate{
+				{Source: SourceStoreAuthority, ID: "ref:../x", Ref: "../x"},
+				{Source: SourceOpaque, ID: "opaque:harness-vendor-base/codex/1"},
+			},
+			materials: []CandidateMaterial{{
+				Source: SourceStoreAuthority, ID: "ref:../x", Kind: IncludedAcceptedSpec,
+				PolicyScope: explicitUniversalScope(), Content: []byte("spec\n"),
+			}},
+			want: "artifact ref",
+		},
+		{
+			name: "declared context candidate rejects malformed fragment ref",
+			candidates: []Candidate{
+				{Source: SourceDeclaredContext, ID: "ref:spec/story#", Ref: "spec/story#"},
+				{Source: SourceOpaque, ID: "opaque:harness-vendor-base/codex/1"},
+			},
+			materials: []CandidateMaterial{{
+				Source: SourceDeclaredContext, ID: "ref:spec/story#", Kind: IncludedDeclaredContextRef,
+				PolicyScope: explicitUniversalScope(), Content: []byte("context\n"),
+			}},
+			want: "artifact ref",
+		},
 	}
 
 	for _, tt := range tests {
@@ -292,10 +317,62 @@ func TestClassifyRejectsDuplicatesAndDataDescendants(t *testing.T) {
 			t.Parallel()
 			_, err := Classify(context.Background(), &classifyGit{}, "/repo", head, ClassificationInput{
 				Candidates: tt.candidates, Materials: tt.materials, Phase: PhaseBuild,
-				RequestScope: explicitUniversalScope(), Adapter: AdapterRef{ID: "codex", Version: "1"},
+				RequestScope: explicitUniversalScope(), TargetRef: "spec/story",
+				Adapter: AdapterRef{ID: "codex", Version: "1"},
 			})
 			if err == nil || !strings.Contains(err.Error(), tt.want) {
 				t.Fatalf("Classify() error = %v, want containing %q", err, tt.want)
+			}
+		})
+	}
+}
+
+func TestClassifyEvaluatesPolicyScopeAgainstTargetRef(t *testing.T) {
+	t.Parallel()
+
+	const head = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	policyCandidate := Candidate{Source: SourceStoreAuthority, ID: "ref:policy/build", Ref: "policy/build"}
+	policyMaterial := CandidateMaterial{
+		Source: SourceStoreAuthority, ID: policyCandidate.ID, Kind: IncludedPolicyArtifact,
+		PolicyScope: scopeWithRefs("spec/story"), Content: []byte("policy\n"),
+	}
+	candidates := []Candidate{
+		policyCandidate,
+		{Source: SourceOpaque, ID: "opaque:harness-vendor-base/codex/1"},
+	}
+	tests := []struct {
+		name       string
+		targetRef  string
+		wantLedger string
+	}{
+		{name: "matching target includes scoped policy", targetRef: "spec/story", wantLedger: "included"},
+		{name: "different target excludes scoped policy", targetRef: "spec/other", wantLedger: "excluded"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got, err := Classify(context.Background(), &classifyGit{}, "/repo", head, ClassificationInput{
+				Candidates: candidates, Materials: []CandidateMaterial{policyMaterial}, Phase: PhaseBuild,
+				RequestScope: explicitUniversalScope(), TargetRef: tt.targetRef,
+				Adapter: AdapterRef{ID: "codex", Version: "1"},
+			})
+			if err != nil {
+				t.Fatalf("Classify() error = %v", err)
+			}
+			switch tt.wantLedger {
+			case "included":
+				row := findIncluded(t, got.Included, SourceStoreAuthority, policyCandidate.ID)
+				if row.Applicability != ApplicabilityApplicable {
+					t.Fatalf("policy applicability = %q, want applicable", row.Applicability)
+				}
+			case "excluded":
+				row := findExcluded(t, got.Excluded, SourceStoreAuthority, policyCandidate.ID)
+				if row.Reason != ExclusionOutOfDeclaredScope || row.Applicability != ApplicabilityInapplicable {
+					t.Fatalf("policy exclusion = %#v, want out-of-declared-scope/inapplicable", row)
+				}
+			default:
+				t.Fatalf("test setup: unknown ledger %q", tt.wantLedger)
 			}
 		})
 	}

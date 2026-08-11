@@ -89,12 +89,22 @@ func validateDataCandidate(candidate Candidate, kind IncludedKind) error {
 		if candidate.Ref == "" || candidate.ID != refID(candidate.Ref) || candidate.Path != "" {
 			return fmt.Errorf("contextcompile: BuildDataItem: source %q candidate is not canonical ref identity", candidate.Source)
 		}
+		validateRef := validateArtifactRef
+		if kind == IncludedPolicyArtifact {
+			validateRef = validatePolicyArtifactRef
+		}
+		if err := validateRef("BuildDataItem candidate ref", candidate.Ref); err != nil {
+			return err
+		}
 	case SourceDeclaredContext:
 		if kind != IncludedDeclaredContextRef {
 			return fmt.Errorf("contextcompile: BuildDataItem: source %q requires kind %q, got %q", candidate.Source, IncludedDeclaredContextRef, kind)
 		}
 		if candidate.Ref == "" || candidate.ID != refID(candidate.Ref) || candidate.Path != "" {
 			return fmt.Errorf("contextcompile: BuildDataItem: source %q candidate is not canonical ref identity", candidate.Source)
+		}
+		if err := validateArtifactRef("BuildDataItem candidate ref", candidate.Ref); err != nil {
+			return err
 		}
 	default:
 		return fmt.Errorf("contextcompile: BuildDataItem: source %q cannot carry a data item", candidate.Source)

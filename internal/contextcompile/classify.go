@@ -44,7 +44,11 @@ type ClassificationInput struct {
 	Phase        Phase
 	Environment  string
 	RequestScope policyartifact.Scope
-	Adapter      AdapterRef
+	// TargetRef is the compile request's canonical whole spec ref. Scope
+	// ref dimensions apply to this operand, never to an authority payload's
+	// own identity (for example, policy/build).
+	TargetRef string
+	Adapter   AdapterRef
 }
 
 // ClassificationResult is the exact total partition plus its in-memory data
@@ -79,6 +83,9 @@ func Classify(ctx context.Context, git GitReader, root, head string, in Classifi
 	}
 	if err := in.RequestScope.Validate(); err != nil {
 		return ClassificationResult{}, fmt.Errorf("contextcompile: Classify request scope: %w", err)
+	}
+	if err := validateSpecWholeRef("Classify target ref", in.TargetRef); err != nil {
+		return ClassificationResult{}, err
 	}
 	if err := in.Adapter.validate("Classify adapter"); err != nil {
 		return ClassificationResult{}, err
@@ -139,6 +146,15 @@ func Classify(ctx context.Context, git GitReader, root, head string, in Classifi
 
 	for _, candidate := range candidates {
 		material, hasMaterial := materials[candidateKey(candidate.Source, candidate.ID)]
+		if candidate.Ref != "" {
+			validateRef := validateArtifactRef
+			if candidate.Source == SourceStoreAuthority && hasMaterial && material.Kind == IncludedPolicyArtifact {
+				validateRef = validatePolicyArtifactRef
+			}
+			if err := validateRef("classification candidate ref", candidate.Ref); err != nil {
+				return ClassificationResult{}, err
+			}
+		}
 		if candidate.Source == SourceOpaque {
 			if hasMaterial {
 				return ClassificationResult{}, fmt.Errorf("contextcompile: Classify: opaque candidate %s must not carry material", candidate.ID)
@@ -156,7 +172,7 @@ func Classify(ctx context.Context, git GitReader, root, head string, in Classifi
 		}
 		applicability, err := evaluateApplicability(ApplicabilityInput{
 			Policy: policyScope, Request: in.RequestScope, CandidatePath: candidate.Path,
-			CandidateRef: candidate.Ref, Phase: in.Phase, Environment: in.Environment,
+			CandidateRef: in.TargetRef, Phase: in.Phase, Environment: in.Environment,
 		})
 		if err != nil {
 			return ClassificationResult{}, fmt.Errorf("contextcompile: Classify %s/%s applicability: %w", candidate.Source, candidate.ID, err)

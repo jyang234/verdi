@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"regexp"
+	"strings"
 
 	"github.com/jyang234/verdi/internal/artifact"
 	"github.com/jyang234/verdi/internal/governanceprincipal"
@@ -48,6 +49,47 @@ func validateGitHash(field, value string) error {
 func validateNonEmpty(field, value string) error {
 	if value == "" {
 		return fmt.Errorf("contextcompile: %s: must be non-empty", field)
+	}
+	return nil
+}
+
+func validateArtifactRef(field, ref string) error {
+	if _, err := artifact.ParseRef(ref); err != nil {
+		return fmt.Errorf("contextcompile: %s: invalid artifact ref: %w", field, err)
+	}
+	return nil
+}
+
+func validatePolicyArtifactRef(field, ref string) error {
+	kind, name, ok := strings.Cut(ref, "/")
+	if !ok || name == "" || strings.Contains(name, "/") {
+		return fmt.Errorf("contextcompile: %s: invalid policy artifact ref %q", field, ref)
+	}
+
+	var rel string
+	switch kind {
+	case policyartifact.KindPolicy:
+		rel = policyartifact.DirPolicies + "/" + name + ".md"
+	case policyartifact.KindOverlay:
+		rel = policyartifact.DirOverlays + "/" + name + ".md"
+	case policyartifact.KindExemption:
+		rel = policyartifact.DirExemptions + "/" + name + ".md"
+	case policyartifact.KindConstitution:
+		if name != policyartifact.ConstitutionName {
+			return fmt.Errorf("contextcompile: %s: invalid policy artifact ref %q", field, ref)
+		}
+		rel = policyartifact.ConstitutionName + ".md"
+	case policyartifact.KindProfileStorage:
+		rel = policyartifact.DirProfiles + "/" + name + ".md"
+	default:
+		return fmt.Errorf("contextcompile: %s: invalid policy artifact ref %q: unknown policy kind %q", field, ref, kind)
+	}
+	parsedKind, parsedName, err := policyartifact.ClassifyPolicyPath(rel)
+	if err != nil {
+		return fmt.Errorf("contextcompile: %s: invalid policy artifact ref %q: %w", field, ref, err)
+	}
+	if parsedKind != kind || parsedName != name {
+		return fmt.Errorf("contextcompile: %s: invalid policy artifact ref %q", field, ref)
 	}
 	return nil
 }
@@ -894,8 +936,20 @@ func (item DataItem) Validate() error {
 	if item.Ref != nil && *item.Ref == "" {
 		return fmt.Errorf("contextcompile: data item.ref: present but empty")
 	}
+	if item.Ref != nil {
+		validateRef := validateArtifactRef
+		if item.Kind == IncludedPolicyArtifact {
+			validateRef = validatePolicyArtifactRef
+		}
+		if err := validateRef("data item.ref", *item.Ref); err != nil {
+			return err
+		}
+	}
 	if item.Classification != DataItemClassification {
 		return fmt.Errorf("contextcompile: data item.classification: must be %q, got %q", DataItemClassification, item.Classification)
+	}
+	if nonTextContent([]byte(item.Content)) {
+		return fmt.Errorf("contextcompile: data item.content: not text (invalid UTF-8 or contains NUL)")
 	}
 	if err := validateDigest("data item.content_digest", item.ContentDigest); err != nil {
 		return err
