@@ -96,6 +96,7 @@ type ExclusionReason string // the ten §5.2 values
 type Applicability string // applicable, inapplicable, unknown
 type Resolution string // proven, violated-with-witness, unproven
 type PayloadChannel string // data, authority
+type DisclosureCode string // the closed manifest vocabulary in authority §8.2
 ```
 
 Use `policyartifact.Scope` and `execworkspace.GrantSet` as decoded domain
@@ -132,6 +133,12 @@ by re-encoding that exact nested document canonically and calling
 and require byte equality with the original input. Manifest and data-item
 decode follow the same exact-byte gate.
 
+A canonical, schema-valid request whose `phase` is outside a nonempty
+`scope.phases` is not malformed. Declare a typed `PhaseScopeRefusal` in
+`validate.go` and return that refusal from request validation so callers can
+map it to exit 1. All other grammar, canonicality, and enum failures remain
+operational/malformed errors and map to exit 2.
+
 Do not hand-roll JSON sorting. Use `canonjson.Marshal`. Do not expose a
 constructor that permits a caller-supplied self digest; encoding recomputes it
 from a digestless copy and validation checks it.
@@ -163,7 +170,8 @@ Define context compiler wire contracts
 - Modify: `internal/journey/facts.go`
 - Modify: `internal/journey/facts_test.go`
 - Modify: `internal/journey/record_test.go`
-- Modify: journey canonical golden fixtures only if their bytes change
+- Modify: journey canonical golden fixtures only if their bytes change — and
+  only after the stop-and-adjudicate step below authorizes that change
 
 ### Step 1: Pin byte-compatible shared fact types
 
@@ -204,8 +212,12 @@ type Snapshot struct {
 }
 ```
 
-Use closed, machine-stable disclosure codes in the shared result. Preserve the
-current journey prose by mapping those codes in journey; do not make prose the
+Use closed, machine-stable, per-cause disclosure codes in the shared result.
+They must be finer-grained than the compiler manifest vocabulary so each
+current journey prose variant—including the three distinct remote-origin
+causes—retains a unique source code. Preserve the current journey prose by
+mapping shared code to prose in journey; map shared codes separately to the
+coarser authority §8.2 manifest codes in the compiler. Do not make prose the
 compiler's protocol.
 
 ### Step 2: Move gathering behind a shared consumer-owned port
@@ -324,7 +336,7 @@ type UniverseInput struct {
     LiftedStorePaths map[string]string
     LiftedContextPaths map[string]string
     ProjectionPaths []string
-    Adapter Adapter
+    Adapter policyartifact.Adapter
 }
 
 func BuildUniverse(in UniverseInput) ([]Candidate, error)
@@ -685,8 +697,9 @@ Use hermetic Git repositories and an installed policy store to prove:
   payloads, projections, revisions, and digests across two roots;
 - design, multi-parent build story, multi-parent spike, and review capsules;
 - no constitution, adapter mismatch, expected branch mismatch, expected HEAD
-  mismatch, unaccepted target, wrong target class, and projection drift return
-  typed refusals;
+  mismatch, request phase outside nonempty `scope.phases`, another declared
+  phase/scope refusal, unaccepted target, wrong target class, and projection
+  drift return typed refusals;
 - malformed authority, Git failure needed for classification, and broken port
   facts return operational errors;
 - missing actors completes with exit-0-capable unproven posture and mandatory
@@ -761,7 +774,8 @@ Cover:
   present;
 - data items and projection bytes are not written anywhere;
 - exit 0 for completed manifests carrying advisory/unproven facts;
-- exit 1 for each typed refusal family;
+- exit 1 for each typed refusal family, including a canonical request whose
+  phase is outside nonempty `scope.phases`;
 - exit 2 for malformed request and operational failure;
 - stderr contains deterministic diagnostics without absolute checkout paths,
   raw remote URLs, credentials, payload content, or uncommitted path content;
@@ -875,4 +889,3 @@ Report:
 - explicit statements that no push, PR, store persistence, process execution,
   receipt, MCP surface, frontend, frozen artifact, or frozen spec was added
   unless the main agent separately authorized it.
-
