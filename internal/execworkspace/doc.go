@@ -41,9 +41,8 @@
 //     user+network namespace; on every other platform it is an operational
 //     error, with no weaker fallback — and a present, payload-free grant is
 //     an explicit ambient-allow bit. EnforcementReport's always-present
-//     Network fact and EncodeEnforcementReport's canonical bytes make that
-//     posture, and any could-not-apply grant alongside it, one disclosed,
-//     three-valued-honest report.
+//     Network fact makes that posture, and any could-not-apply grant
+//     alongside it, one disclosed, three-valued-honest report.
 //   - Fingerprint: CollectFingerprint records the environment actually
 //     constructed, for the consuming feature's own environment comparison.
 //

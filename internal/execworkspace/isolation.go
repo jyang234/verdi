@@ -72,8 +72,6 @@ import (
 	"sort"
 	"strings"
 	"time"
-
-	"github.com/jyang234/verdi/internal/canonjson"
 )
 
 // profileOwnedEnvKeys are the four environment keys BuildProfile itself
@@ -454,94 +452,6 @@ func buildEnforcementReport(grants GrantSet) (*EnforcementReport, []string) {
 		unapplied = append(unapplied, k.String())
 	}
 	return &EnforcementReport{Rows: rows}, unapplied
-}
-
-// Validate reports whether r is well-formed, fail-closed: Network.Mode must
-// be one of the closed two values NetworkDeny/NetworkAllow; Network.Reason
-// must be non-empty; every row's Kind must be a member of the closed
-// six-kind GrantKind vocabulary (grants.go); and every row's Reason must be
-// non-empty. An empty Rows slice always validates — "no requested grants"
-// is a legitimate report, never an error. EncodeEnforcementReport calls
-// this first (mirroring EncodeGrantSet's own validate-then-encode gate,
-// grants.go), so a malformed report is never serialized.
-func (r EnforcementReport) Validate() error {
-	switch r.Network.Mode {
-	case NetworkDeny, NetworkAllow:
-	default:
-		return fmt.Errorf("execworkspace: enforcement report: unknown network mode %q", r.Network.Mode)
-	}
-	if r.Network.Reason == "" {
-		return fmt.Errorf("execworkspace: enforcement report: network reason is empty")
-	}
-	for i, row := range r.Rows {
-		if row.Kind < 0 || row.Kind >= numGrantKinds {
-			return fmt.Errorf("execworkspace: enforcement report: rows[%d]: unknown grant kind %d", i, row.Kind)
-		}
-		if row.Reason == "" {
-			return fmt.Errorf("execworkspace: enforcement report: rows[%d]: reason is empty", i)
-		}
-	}
-	return nil
-}
-
-// networkEnforcementDoc, enforcementReportRowDoc and enforcementReportDoc
-// are EncodeEnforcementReport's on-disk JSON shape: SCHEMA-LESS, following
-// CollectFingerprint's own AD-8 precedent (fingerprint.go's package doc
-// comment: "COLLECTION IS SHARED; SCHEMAS ARE NOT") — this package states
-// only the shared fields, never a feature-owned outer schema tag.
-type networkEnforcementDoc struct {
-	Configured bool   `json:"configured"`
-	Mode       string `json:"mode"`
-	Reason     string `json:"reason"`
-}
-
-type enforcementReportRowDoc struct {
-	Applied bool   `json:"applied"`
-	Kind    string `json:"kind"`
-	Reason  string `json:"reason"`
-}
-
-type enforcementReportDoc struct {
-	Network networkEnforcementDoc     `json:"network"`
-	Rows    []enforcementReportRowDoc `json:"rows"`
-}
-
-// enforcementReportDocFor projects a validated EnforcementReport onto its
-// wire shape. Rows is built via make([]enforcementReportRowDoc, len(r.Rows))
-// rather than left nil; make returns a non-nil slice even at length 0, so a
-// report with no rows still encodes "rows":[] rather than "rows":null — the
-// same non-nil-slice discipline grantSetDocFor already uses for GrantSet
-// (grants.go).
-func enforcementReportDocFor(r EnforcementReport) enforcementReportDoc {
-	rows := make([]enforcementReportRowDoc, len(r.Rows))
-	for i, row := range r.Rows {
-		rows[i] = enforcementReportRowDoc{Applied: row.Applied, Kind: row.Kind.String(), Reason: row.Reason}
-	}
-	return enforcementReportDoc{
-		Network: networkEnforcementDoc{
-			Configured: r.Network.Configured,
-			Mode:       string(r.Network.Mode),
-			Reason:     r.Network.Reason,
-		},
-		Rows: rows,
-	}
-}
-
-// EncodeEnforcementReport renders r as canonical JSON bytes
-// (internal/canonjson: sorted keys, no HTML escaping, a trailing newline):
-// {"network":{"configured":…,"mode":…,"reason":…},"rows":[{"applied":…,
-// "kind":…,"reason":…}]}. It validates r first (r.Validate) and fails
-// closed on any invalid report — a malformed report is never serialized
-// (mirrors EncodeGrantSet's validate-then-encode gate, grants.go).
-func EncodeEnforcementReport(r EnforcementReport) ([]byte, error) {
-	if err := r.Validate(); err != nil {
-		return nil, fmt.Errorf("execworkspace: encoding enforcement report: %w", err)
-	}
-	data, err := canonjson.Marshal(enforcementReportDocFor(r))
-	if err != nil {
-		return nil, fmt.Errorf("execworkspace: encoding enforcement report: %w", err)
-	}
-	return data, nil
 }
 
 // validateEnvKey enforces BuildProfile's declared-env key rules: non-empty,
