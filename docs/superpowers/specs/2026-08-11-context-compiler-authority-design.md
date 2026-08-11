@@ -503,7 +503,7 @@ audit. The mapping is lossless by group:
 | Source group | Count | Destination |
 |---|---:|---|
 | Audit items 1–20: AC-2 inputs, compiler operations, manifest fields, phase capsules, revisions and expansion ledger | 20 | §§1–3, 5–9 |
-| Audit items 21–33: DC-1, DC-2, DC-15, DC-16, DC-18–DC-24 and CO-1–CO-6 | 13 | §§1–11 |
+| Audit items 21–33: DC-1; DC-2; DC-15; DC-16; DC-18; DC-19; DC-20–DC-24 as one custody cluster; and CO-1, CO-2, CO-3, CO-4, CO-5, CO-6 | 13 | §§1–11 |
 | Audit items 34–41: OD-8 and SI-25, SI-28, SI-33, SI-35/SI-38, SI-60, SI-61 and SI-67–SI-70 | 8 | §§3–11 |
 | Audit items 42–46: orchestration provenance, merge-signaled acceptance, store layout, artifact refs/fragments and evidence/obligations | 5 | §§4–9, 11 |
 | Audit items 47–51: later conflict, execution, receipt and workbench units plus the forbidden journey dependency | 5 | §§1, 4, 6, 10–11 |
@@ -523,7 +523,7 @@ Intentional omissions are:
   enforcement, expansion, or resume (sealed execution);
 - no result-diff, evidence-bundle or builder-receipt wire invented before its
   owning Wave-4 unit;
-- no receipt authentication or independent review (Wave 5);
+- no receipt authentication or independent review (`context-receipts-review`);
 - no workbench or browser surface (Wave 6); and
 - no mutation of accepted specs, frozen artifacts, policy authority, generated
   projections, or the store.
