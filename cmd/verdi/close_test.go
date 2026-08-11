@@ -79,10 +79,12 @@ func buildCloseFixtureRepo(t *testing.T) *fixturegit.Repo {
 	t.Setenv("CI_DEFAULT_BRANCH", "main")
 	return fixturegit.Build(t, []fixturegit.Layer{{
 		Files: map[string]string{
-			".verdi/verdi.yaml":                         "schema: verdi.layout/v1\nforge: github\n",
-			".verdi/specs/active/loan-mgmt/spec.md":     featureV1SpecMD,
-			".verdi/specs/active/close-fixture/spec.md": closeFixtureStorySpecMD,
-			"verdi.bindings.yaml":                       closeFixtureBindingsYAML,
+			".verdi/verdi.yaml":                                    "schema: verdi.layout/v1\nforge: github\n",
+			".verdi/specs/active/loan-mgmt/spec.md":                featureV1SpecMD,
+			".verdi/specs/active/close-fixture/spec.md":            closeFixtureStorySpecMD,
+			".verdi/obligations/close-fixture/ac-1--static.md":     fixtureElaboratedObligationMD("close-fixture", "ac-1", artifact.EvidenceStatic, selfHostedStaticProducer, "1", gateFakeFrozenCommit),
+			".verdi/obligations/close-fixture/ac-1--behavioral.md": fixtureElaboratedObligationMD("close-fixture", "ac-1", artifact.EvidenceBehavioral, selfHostedBehavioralProducer, "1", gateFakeFrozenCommit),
+			"verdi.bindings.yaml":                                  closeFixtureBindingsYAML,
 		},
 		Message: "close fixture: feature + story + self-hosted bindings",
 	}})

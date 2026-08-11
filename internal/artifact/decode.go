@@ -99,20 +99,29 @@ func FrontmatterRange(doc []byte) (start, end int, err error) {
 //
 // This is the package's — and the module's — single YAML decode seam.
 func DecodeStrict(data []byte, out interface{}) error {
+	_, err := decodeStrictWithRoot(data, out)
+	return err
+}
+
+// decodeStrictWithRoot is DecodeStrict's package-private form for artifact
+// decoders that must validate semantic key presence after the strict typed
+// decode. It returns the same dialect-checked syntax tree DecodeStrict already
+// builds; callers must not use it as a second or looser decode seam.
+func decodeStrictWithRoot(data []byte, out interface{}) (*yaml.Node, error) {
 	var root yaml.Node
 	if err := yaml.Unmarshal(data, &root); err != nil {
-		return fmt.Errorf("artifact: yaml parse: %w", err)
+		return nil, fmt.Errorf("artifact: yaml parse: %w", err)
 	}
 	if err := checkDialect(&root); err != nil {
-		return err
+		return nil, err
 	}
 
 	dec := yaml.NewDecoder(bytes.NewReader(data))
 	dec.KnownFields(true)
 	if err := dec.Decode(out); err != nil {
-		return fmt.Errorf("artifact: strict decode: %w", err)
+		return nil, fmt.Errorf("artifact: strict decode: %w", err)
 	}
-	return nil
+	return &root, nil
 }
 
 // checkDialect walks n and every descendant, failing on the first anchor,

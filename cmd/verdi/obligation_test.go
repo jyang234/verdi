@@ -52,6 +52,7 @@ func TestRunObligationAuthor_Create(t *testing.T) {
 	if ob.ForKind != artifact.EvidenceStatic {
 		t.Errorf("for_kind = %q, want static", ob.ForKind)
 	}
+	assertUnresolvedObligationQuality(t, ob)
 	if len(ob.Owners) != 1 || ob.Owners[0] != "platform-team" {
 		t.Errorf("owners = %v, want [platform-team] (copied verbatim from the story spec)", ob.Owners)
 	}
@@ -464,6 +465,7 @@ func TestRunObligationScaffold_Happy(t *testing.T) {
 		if ob.ForKind != artifact.EvidenceKind(tc.kind) {
 			t.Errorf("%s: for_kind = %q, want %q", path, ob.ForKind, tc.kind)
 		}
+		assertUnresolvedObligationQuality(t, ob)
 		if len(ob.Owners) != 1 || ob.Owners[0] != "test-operator" {
 			t.Errorf("%s: owners = %v, want [test-operator] (O-6)", path, ob.Owners)
 		}
@@ -476,6 +478,16 @@ func TestRunObligationScaffold_Happy(t *testing.T) {
 		if !contains(stdout.String(), "created "+path) {
 			t.Errorf("stdout = %q, want it to report %s as created", stdout.String(), path)
 		}
+	}
+}
+
+func assertUnresolvedObligationQuality(t *testing.T, ob *artifact.ObligationFrontmatter) {
+	t.Helper()
+	if ob.Quality == nil || ob.Quality.State != artifact.ObligationQualityUnresolved {
+		t.Fatalf("quality = %+v, want explicit unresolved-design-debt", ob.Quality)
+	}
+	if ob.Quality.Claim != "" || ob.Quality.Falsifier != "" || ob.Quality.Scope != "" || ob.Quality.Producer.Ref != "" || ob.Quality.AuthoritativeSource.Ref != "" || len(ob.Quality.Freshness.InvalidatedBy) != 0 || ob.Quality.Freshness.Rule != "" {
+		t.Fatalf("unresolved scaffold fabricated quality meanings: %+v", ob.Quality)
 	}
 }
 

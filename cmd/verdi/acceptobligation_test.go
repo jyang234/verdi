@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/jyang234/verdi/internal/artifact"
+	"github.com/jyang234/verdi/internal/evidence"
 	"github.com/jyang234/verdi/internal/fixturegit"
 )
 
@@ -389,6 +390,9 @@ func TestOperatorOwner(t *testing.T) {
 // shows.
 func TestBackstopObligationBody(t *testing.T) {
 	got := backstopObligationBody("spec/widget-story", "ac-1", artifact.EvidenceBehavioral, "the retry proves end to end")
+	if !contains(got, evidence.UnauthoredObligationMarker) {
+		t.Errorf("body missing the shared unauthored marker:\n%s", got)
+	}
 	if !contains(got, obligationBackstopDisclosureLine()) {
 		t.Errorf("body missing the disclosure line verbatim:\n%s", got)
 	}

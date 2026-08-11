@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"testing"
 
+	"github.com/jyang234/verdi/internal/artifact"
 	"github.com/jyang234/verdi/internal/fixturegit"
 	"github.com/jyang234/verdi/internal/gitx"
 )
@@ -56,8 +57,9 @@ func buildFeatureAliasRepo(t *testing.T, status string) *fixturegit.Repo {
 	repo := fixturegit.Build(t, []fixturegit.Layer{
 		{
 			Files: map[string]string{
-				".verdi/verdi.yaml":                         phase7ManifestYAML,
-				".verdi/specs/active/stale-decline/spec.md": featureAliasStorySpecMD(status),
+				".verdi/verdi.yaml":                                phase7ManifestYAML,
+				".verdi/specs/active/stale-decline/spec.md":        featureAliasStorySpecMD(status),
+				".verdi/obligations/stale-decline/ac-1--static.md": fixtureElaboratedObligationMD("stale-decline", "ac-1", artifact.EvidenceStatic, "fixture-static", "1", featureAliasFrozenCommit),
 			},
 			Message: "init store with story spec at " + status,
 		},

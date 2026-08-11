@@ -355,13 +355,12 @@ func foldImplementingStory(ctx context.Context, root, commit string, storySpec *
 		// vocab:identity — operational diagnostic naming ids (exit-2 machinery, not verdict prose)
 		return evidence.StoryResult{}, fmt.Errorf("matrix: loading evidence for implementing story %s: %w", storySpec.ID, err)
 	}
-	slug := store.RefSlug(storySpec.Story)
-	result, err := evidence.Fold(evidence.Input{
-		Spec:      storySpec,
-		Records:   records,
-		StoreRoot: root,
-		StorySlug: slug,
-	})
+	in, err := storyFoldInput(ctx, root, storySpec, commit, records, false)
+	if err != nil {
+		// vocab:identity — machinery diagnostic names the fixed implementing-story role and spec id
+		return evidence.StoryResult{}, fmt.Errorf("matrix: preparing obligation quality for implementing story %s: %w", storySpec.ID, err)
+	}
+	result, err := evidence.Fold(in)
 	if err != nil {
 		// vocab:identity — operational diagnostic naming ids (exit-2 machinery, not verdict prose)
 		return evidence.StoryResult{}, fmt.Errorf("matrix: folding implementing story %s: %w", storySpec.ID, err)

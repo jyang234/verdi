@@ -65,9 +65,10 @@ func buildRuntimeCloseFixtureRepo(t *testing.T) *fixturegit.Repo {
 	t.Setenv("CI_DEFAULT_BRANCH", "main")
 	return fixturegit.Build(t, []fixturegit.Layer{{
 		Files: map[string]string{
-			".verdi/verdi.yaml":                                 "schema: verdi.layout/v1\nforge: github\n",
-			".verdi/specs/active/loan-mgmt/spec.md":             featureV1SpecMD,
-			".verdi/specs/active/runtime-close-fixture/spec.md": runtimeCloseFixtureStorySpecMD,
+			".verdi/verdi.yaml":                                         "schema: verdi.layout/v1\nforge: github\n",
+			".verdi/specs/active/loan-mgmt/spec.md":                     featureV1SpecMD,
+			".verdi/specs/active/runtime-close-fixture/spec.md":         runtimeCloseFixtureStorySpecMD,
+			".verdi/obligations/runtime-close-fixture/ac-1--runtime.md": fixtureElaboratedObligationMD("runtime-close-fixture", "ac-1", artifact.EvidenceRuntime, "runtime-probe:jira:RUNTIME-CLOSE-1:ac-1", "7", gateFakeFrozenCommit),
 		},
 		Message: "runtime close fixture: feature + story declaring evidence: [runtime]",
 	}})

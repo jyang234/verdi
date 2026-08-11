@@ -134,6 +134,12 @@ func TestBoardSpec_ObligationGraduate(t *testing.T) {
 	if ob.ForKind != artifact.EvidenceBehavioral {
 		t.Errorf("for_kind = %q, want behavioral", ob.ForKind)
 	}
+	if ob.Quality == nil || ob.Quality.State != artifact.ObligationQualityUnresolved {
+		t.Fatalf("quality = %+v, want explicit unresolved-design-debt", ob.Quality)
+	}
+	if ob.Quality.Claim != "" || ob.Quality.Falsifier != "" || ob.Quality.Scope != "" || ob.Quality.Producer.Ref != "" || ob.Quality.AuthoritativeSource.Ref != "" || len(ob.Quality.Freshness.InvalidatedBy) != 0 {
+		t.Errorf("unresolved workbench artifact fabricated quality meanings: %+v", ob.Quality)
+	}
 	if len(ob.Links) != 1 || ob.Links[0].Type != artifact.LinkVerifies || ob.Links[0].Ref != "spec/refi-decline-audit" {
 		t.Errorf("links = %+v, want a single verifies edge → spec/refi-decline-audit (the WHOLE story spec, no fragment)", ob.Links)
 	}

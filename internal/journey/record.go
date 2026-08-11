@@ -18,8 +18,14 @@ package journey
 import (
 	"fmt"
 	"regexp"
+	"strings"
 
 	"github.com/jyang234/verdi/internal/governanceprincipal"
+)
+
+const (
+	buildStartActionIdentity       = "build:start"
+	obligationQualityBlockerPrefix = "obligation-quality/"
 )
 
 // SchemaID is the only accepted Record.Schema value.
@@ -562,10 +568,14 @@ func (b Blocker) validate(field string) error {
 	if b.ClearingCondition == "" {
 		return fmt.Errorf("journey: %s: clearing_condition must be non-empty", field)
 	}
-	if !idRe.MatchString(b.Transition) {
-		return fmt.Errorf("journey: %s: transition %q must be a lowercase-kebab token (a catalog verb or the literal \"unknown\")", field, b.Transition)
+	if !validBlockerTransition(b.Transition) {
+		return fmt.Errorf("journey: %s: transition %q must be a lowercase-kebab catalog verb, the literal \"unknown\", or the registered CLI action identity %q", field, b.Transition, buildStartActionIdentity)
 	}
 	return nil
+}
+
+func validBlockerTransition(value string) bool {
+	return idRe.MatchString(value) || value == buildStartActionIdentity
 }
 
 func (eb EventualBlockers) validate() error {
@@ -612,8 +622,8 @@ func (bs Blockers) validate() error {
 		}
 		seen[blk.ID] = true
 	}
-	if !isSortedDeduped(mapStrings(bs.Current, func(b Blocker) string { return b.ID })) {
-		return fmt.Errorf("journey: blockers.current: must be strictly ascending by id (unique and ordered)")
+	if err := validateCurrentBlockerOrder(bs.Current); err != nil {
+		return err
 	}
 	if err := bs.Eventual.validate(); err != nil {
 		return err
@@ -623,6 +633,50 @@ func (bs Blockers) validate() error {
 			return fmt.Errorf("journey: blockers: duplicate blocker id %q", blk.ID)
 		}
 		seen[blk.ID] = true
+	}
+	return nil
+}
+
+// validateCurrentBlockerOrder preserves the v1 record's existing lexical
+// order while admitting the one owner-ratified exception whose exact IDs
+// cannot encode their source declaration order. obligation-quality blockers
+// form one contiguous group at their lexical prefix position; their internal
+// order is the originating spec's AC-then-kind declaration order, which this
+// schema-only validator cannot reconstruct. Every other ID remains strictly
+// ascending.
+func validateCurrentBlockerOrder(blockers []Blocker) error {
+	const (
+		beforeQuality = iota
+		inQuality
+		afterQuality
+	)
+	state := beforeQuality
+	lastNonQuality := ""
+	for _, blocker := range blockers {
+		isQuality := strings.HasPrefix(blocker.ID, obligationQualityBlockerPrefix)
+		if isQuality {
+			if state == afterQuality {
+				return fmt.Errorf("journey: blockers.current: obligation-quality blockers must form one contiguous declaration-ordered group")
+			}
+			if state == beforeQuality {
+				if lastNonQuality != "" && lastNonQuality >= obligationQualityBlockerPrefix {
+					return fmt.Errorf("journey: blockers.current: non-quality ids and the obligation-quality group must remain ordered at the group's lexical prefix position")
+				}
+				state = inQuality
+			}
+			continue
+		}
+
+		if lastNonQuality != "" && blocker.ID <= lastNonQuality {
+			return fmt.Errorf("journey: blockers.current: non-quality ids must remain strictly ordered by id")
+		}
+		if state == inQuality {
+			state = afterQuality
+		}
+		if state == afterQuality && blocker.ID <= obligationQualityBlockerPrefix {
+			return fmt.Errorf("journey: blockers.current: non-quality ids and the obligation-quality group must remain ordered at the group's lexical prefix position")
+		}
+		lastNonQuality = blocker.ID
 	}
 	return nil
 }

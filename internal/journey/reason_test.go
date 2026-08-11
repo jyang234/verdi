@@ -14,6 +14,7 @@ func TestReasonCodeClass(t *testing.T) {
 		{"obligation-author-vouch-unproven", ClassJudgmental},
 		{"obligation-countersign-unproven", ClassGovernance},
 		{"obligation-fold-green-unproven", ClassMechanical},
+		{"obligation-design-unresolved", ClassMechanical},
 		{"obligation-unknown-kind", ClassUnknown},
 	}
 	for _, tt := range tests {
@@ -47,6 +48,7 @@ func TestReasonCodes(t *testing.T) {
 		"lifecycle-state-unproven",
 		"obligation-author-vouch-unproven",
 		"obligation-countersign-unproven",
+		"obligation-design-unresolved",
 		"obligation-fold-green-unproven",
 		"obligation-unknown-kind",
 		"principal-resolution-unproven",

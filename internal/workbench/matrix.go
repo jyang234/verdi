@@ -9,14 +9,18 @@ package workbench
 
 import (
 	"bytes"
+	"context"
 	stdhtml "html"
 	"html/template"
 	"net/http"
+	"os"
 	"strings"
 
+	"github.com/jyang234/verdi/internal/artifact"
 	"github.com/jyang234/verdi/internal/disclosure"
 	"github.com/jyang234/verdi/internal/evidence"
 	"github.com/jyang234/verdi/internal/gitx"
+	"github.com/jyang234/verdi/internal/specstate"
 	"github.com/jyang234/verdi/internal/store"
 	"github.com/jyang234/verdi/internal/storyresolve"
 )
@@ -52,9 +56,31 @@ func matrixHandler(root string) http.HandlerFunc {
 			return
 		}
 
+		landing := ""
+		ref, err := artifact.ParseRef(spec.ID)
+		if err != nil {
+			renderError(w, http.StatusInternalServerError, err)
+			return
+		}
+		relPath := store.ActiveSpecRelPath(ref.Name)
+		content, err := os.ReadFile(store.ActiveSpecPath(root, ref.Name))
+		if err != nil {
+			renderError(w, http.StatusInternalServerError, err)
+			return
+		}
+		state, err := specstate.NewProjector().Resolve(ctx, root, specstate.Candidate{Path: relPath, Content: content})
+		if err != nil {
+			renderError(w, http.StatusInternalServerError, err)
+			return
+		}
+		if state.Baseline != nil {
+			landing = state.Baseline.LandingCommit
+		}
 		result, err := evidence.Fold(evidence.Input{
-			Spec: spec, Records: records, Preview: true,
+			Context: ctx, Spec: spec, Records: records, Preview: true,
 			StoreRoot: root, StorySlug: store.RefSlug(spec.Story),
+			EvaluationCommit: commit, SpecLandingCommit: landing,
+			Git: workbenchObligationAncestry{},
 		})
 		if err != nil {
 			renderError(w, http.StatusInternalServerError, err)
@@ -74,6 +100,12 @@ func matrixHandler(root string) http.HandlerFunc {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		_, _ = w.Write(out) // response body write; post-header error is unactionable
 	}
+}
+
+type workbenchObligationAncestry struct{}
+
+func (workbenchObligationAncestry) IsAncestor(ctx context.Context, dir, ancestor, descendant string) (bool, error) {
+	return gitx.IsAncestor(ctx, dir, ancestor, descendant)
 }
 
 // renderMatrixHTML renders result as an HTML table behind the mandatory

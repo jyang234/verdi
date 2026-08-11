@@ -20,6 +20,7 @@ import (
 	"testing"
 
 	"github.com/jyang234/verdi/internal/artifact"
+	"github.com/jyang234/verdi/internal/evidence"
 	"github.com/jyang234/verdi/internal/fixturegit"
 )
 
@@ -81,12 +82,17 @@ func TestObligationSeamE2E_ScaffoldsMissingObligations(t *testing.T) {
 		if err != nil {
 			t.Fatalf("obligation not written at %s: %v", p, err)
 		}
-		fm, _, err := artifact.SplitFrontmatter(raw)
+		fm, body, err := artifact.SplitFrontmatter(raw)
 		if err != nil {
 			t.Fatalf("split %s: %v", p, err)
 		}
-		if _, err := artifact.DecodeObligation(fm); err != nil {
+		ob, err := artifact.DecodeObligation(fm)
+		if err != nil {
 			t.Fatalf("decode %s: %v\n%s", p, err, raw)
+		}
+		assertUnresolvedObligationQuality(t, ob)
+		if !bytes.Contains(body, []byte(evidence.UnauthoredObligationMarker)) {
+			t.Fatalf("body missing the shared unauthored marker:\n%s", body)
 		}
 	}
 }
@@ -112,11 +118,13 @@ func TestObligationSeamE2E_ObligationAuthorCreate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("split %s: %v", path, err)
 	}
-	if _, err := artifact.DecodeObligation(fm); err != nil {
+	ob, err := artifact.DecodeObligation(fm)
+	if err != nil {
 		t.Fatalf("decode %s: %v\n%s", path, err, raw)
 	}
-	if !contains(string(body), "verdi:obligation-unauthored") {
-		t.Fatalf("body missing the unauthored marker:\n%s", body)
+	assertUnresolvedObligationQuality(t, ob)
+	if !bytes.Contains(body, []byte(evidence.UnauthoredObligationMarker)) {
+		t.Fatalf("body missing the shared unauthored marker:\n%s", body)
 	}
 }
 

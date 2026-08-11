@@ -274,6 +274,188 @@ func TestProject_Integration_RemoteOnly(t *testing.T) {
 	}
 }
 
+func TestProject_Integration_RemoteOnlyStoryProjectsQuality(t *testing.T) {
+	repo := buildFactsRepo(t, map[string]string{".verdi/specs/active/quality-story/spec.md": projectQualityStorySpecMD})
+	cfg := openConfig(t, repo.Dir)
+
+	if err := os.Remove(repo.Dir + "/.verdi/specs/active/quality-story/spec.md"); err != nil {
+		t.Fatalf("removing working-tree copy: %v", err)
+	}
+
+	rec, err := NewProjector().Project(context.Background(), cfg, "spec/quality-story")
+	if err != nil {
+		t.Fatalf("Project: %v", err)
+	}
+	if rec.Repository.Source != "remote-ref" {
+		t.Fatalf("Source = %q, want remote-ref", rec.Repository.Source)
+	}
+	if findBlocker(rec.Blockers.Current, "obligation-quality/ac-1/behavioral") == nil {
+		t.Fatalf("blockers = %v, want remote story's declared obligation pair projected", blockerIDs(rec.Blockers.Current))
+	}
+}
+
+const projectQualityStorySpecMD = `---
+id: spec/quality-story
+kind: spec
+class: story
+title: "Quality story"
+owners: [platform-team]
+problem: { text: "p", anchor: "#problem" }
+outcome: { text: "o", anchor: "#outcome" }
+story: jira:QUALITY-1
+links:
+  - { type: implements, ref: "spec/feature#ac-1" }
+acceptance_criteria:
+  - { id: ac-1, text: "behavior is verified", evidence: [behavioral] }
+---
+# body
+`
+
+const projectElaboratedObligationMD = `---
+id: obligation/quality-story--ac-1--behavioral
+kind: obligation
+title: "Quality"
+owners: [platform-team]
+for_kind: behavioral
+quality:
+  state: elaborated
+  claim: "the behavior holds"
+  falsifier: "the behavior does not hold"
+  scope: "quality story"
+  producer: { kind: checker, ref: "verify:behavioral" }
+  authoritative_source: { kind: ci-job, ref: "verify" }
+  freshness:
+    invalidated_by: [spec, code]
+    rule: "rerun after spec or code change"
+links:
+  - { type: verifies, ref: "spec/quality-story" }
+frozen: { at: 2026-08-10, commit: deadbeefdeadbeefdeadbeefdeadbeefdeadbeef }
+---
+# Quality
+
+Authored obligation.
+`
+
+const projectUnresolvedObligationMD = `---
+id: obligation/quality-story--ac-1--behavioral
+kind: obligation
+title: "Quality"
+owners: [platform-team]
+for_kind: behavioral
+quality:
+  state: unresolved-design-debt
+links:
+  - { type: verifies, ref: "spec/quality-story" }
+frozen: { at: 2026-08-10, commit: deadbeefdeadbeefdeadbeefdeadbeefdeadbeef }
+---
+# Quality
+
+<!-- verdi:obligation-unauthored -->
+`
+
+func TestProject_Integration_ObligationQualityMatching(t *testing.T) {
+	tests := []struct {
+		name       string
+		producer   string
+		wantReason string
+	}{
+		{name: "elaborated with no evidence blocks", wantReason: "producer-missing"},
+		{name: "exact producer source and freshness match", producer: "verify:behavioral"},
+		{name: "producer mismatch blocks", producer: "other:behavioral", wantReason: "producer-mismatch"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := buildFactsRepo(t, map[string]string{
+				".verdi/specs/active/quality-story/spec.md":            projectQualityStorySpecMD,
+				".verdi/obligations/quality-story/ac-1--behavioral.md": projectElaboratedObligationMD,
+			})
+			if tt.producer != "" {
+				writeJourneyEvidenceRecord(t, repo.Dir, repo.Head, tt.producer)
+			}
+
+			rec, err := NewProjector().Project(context.Background(), openConfig(t, repo.Dir), "spec/quality-story")
+			if err != nil {
+				t.Fatalf("Project: %v", err)
+			}
+			blocker := findBlocker(rec.Blockers.Current, "obligation-quality/ac-1/behavioral")
+			if tt.wantReason == "" {
+				if blocker != nil {
+					t.Fatalf("quality blocker = %+v, want none", blocker)
+				}
+				return
+			}
+			if blocker == nil {
+				t.Fatalf("blockers = %v, want obligation-quality/ac-1/behavioral", blockerIDs(rec.Blockers.Current))
+			}
+			if blocker.Reason != ReasonObligationDesignUnresolved || blocker.Class != ClassMechanical || blocker.Transition != "build:start" {
+				t.Fatalf("quality blocker = %+v, want exact reason/class/action", blocker)
+			}
+			if len(blocker.Witnesses) != 1 || blocker.Witnesses[0] != ".verdi/obligations/quality-story/ac-1--behavioral.md: elaborated/"+tt.wantReason {
+				t.Fatalf("quality blocker witnesses = %v, want stable mismatch witness", blocker.Witnesses)
+			}
+			if blocker.Owner.Declared != "platform-team" || blocker.Owner.Attribution.PrincipalID != "" {
+				t.Fatalf("quality blocker owner = %+v, want declared platform-team and disclosed unauthenticated attribution", blocker.Owner)
+			}
+			if len(rec.Actions.Safe) != 0 {
+				t.Fatalf("Actions.Safe = %+v, quality projection must not invent a build action", rec.Actions.Safe)
+			}
+		})
+	}
+}
+
+func TestProject_Integration_ObligationQualityFailuresRemainBlockers(t *testing.T) {
+	tests := []struct {
+		name       string
+		obligation string
+		state      string
+	}{
+		{name: "elaborated", obligation: projectElaboratedObligationMD, state: "elaborated"},
+		{name: "missing", state: "missing"},
+		{name: "unresolved", obligation: projectUnresolvedObligationMD, state: "unresolved-design-debt"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			files := map[string]string{".verdi/specs/active/quality-story/spec.md": projectQualityStorySpecMD}
+			if tt.obligation != "" {
+				files[".verdi/obligations/quality-story/ac-1--behavioral.md"] = tt.obligation
+			}
+			repo := buildFactsRepo(t, files)
+			writeJourneyEvidenceRecordWithVerdict(t, repo.Dir, repo.Head, "failing:behavioral", "fail", "ci failure witness")
+
+			rec, err := NewProjector().Project(context.Background(), openConfig(t, repo.Dir), "spec/quality-story")
+			if err != nil {
+				t.Fatalf("Project: %v", err)
+			}
+			blocker := findBlocker(rec.Blockers.Current, "obligation-quality/ac-1/behavioral")
+			if blocker == nil {
+				t.Fatalf("blockers = %v, want obligation-quality/ac-1/behavioral", blockerIDs(rec.Blockers.Current))
+			}
+			structural := ".verdi/obligations/quality-story/ac-1--behavioral.md: " + tt.state
+			if len(blocker.Witnesses) != 2 || blocker.Witnesses[0] != structural || blocker.Witnesses[1] != "ci failure witness" {
+				t.Fatalf("quality blocker witnesses = %v, want [%q %q]", blocker.Witnesses, structural, "ci failure witness")
+			}
+		})
+	}
+}
+
+func writeJourneyEvidenceRecord(t *testing.T, root, commit, producer string) {
+	writeJourneyEvidenceRecordWithVerdict(t, root, commit, producer, "pass", "ci proof")
+}
+
+func writeJourneyEvidenceRecordWithVerdict(t *testing.T, root, commit, producer, verdict, witness string) {
+	t.Helper()
+	dir := filepath.Join(root, ".verdi", "data", "derived", "spec--quality-story", commit)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	record := `[{"schema":"verdi.evidence/v1","evidence_for":["ac-1"],"kind":"behavioral","verdict":"` + verdict + `","witness":"` + witness + `","producer":"` + producer + `","provenance":{"source":"ci","pipeline":"pipeline-1","job":"verify","commit":"` + commit + `"},"digest":"sha256:` + strings.Repeat("a", 64) + `"}]`
+	if err := os.WriteFile(filepath.Join(dir, "verdicts.json"), []byte(record), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
 // TestProject_Integration_MissingRef_NotFound proves a ref resolving
 // nowhere at all (no working tree, no default branch) surfaces the typed
 // *NotFoundError a CLI lane maps to exit 2.

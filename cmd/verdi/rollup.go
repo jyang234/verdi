@@ -136,14 +136,12 @@ func runRollup(ctx context.Context, root, storyArg string, deps rollupDeps) int 
 	// Rollups publish AUTHORITATIVE evidence only (03 §The fold: "over
 	// authoritative records only") — Preview stays false, unlike matrix's
 	// --preview escape hatch, which has no rollup equivalent.
-	slug := store.RefSlug(spec.Story)
-	result, err := evidence.Fold(evidence.Input{
-		Spec:      spec,
-		Records:   records,
-		Preview:   false,
-		StoreRoot: root,
-		StorySlug: slug,
-	})
+	in, err := storyFoldInput(ctx, root, spec, commit, records, false)
+	if err != nil {
+		fmt.Fprintln(deps.Stderr, "rollup:", err)
+		return 2
+	}
+	result, err := evidence.Fold(in)
 	if err != nil {
 		fmt.Fprintln(deps.Stderr, "rollup:", err)
 		return 2

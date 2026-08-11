@@ -62,6 +62,20 @@ type KindResult struct {
 	// Kind failed (attestation kinds never populate it — an attestation has no
 	// verdict, only presence/authorship).
 	Violating *artifact.Evidence
+	// ObligationQuality is the exact structural-and-record projection the
+	// fold used for this kind. Consumers render this result; none reloads or
+	// re-derives obligation quality.
+	ObligationQuality ObligationQualityProjection
+}
+
+// ObligationQualityProjection is the stable consumer projection of the
+// shared assessment. It deliberately excludes the decoded declaration prose;
+// those bytes remain authority in the obligation artifact itself.
+type ObligationQualityProjection struct {
+	StructuralState ObligationStructuralState
+	MatchState      ObligationMatchState
+	Reason          ObligationMatchReason
+	WitnessPath     string
 }
 
 // ACResult is one acceptance criterion's folded outcome, enough to render

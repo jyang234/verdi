@@ -14,6 +14,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/jyang234/verdi/internal/artifact"
 )
 
 const (
@@ -442,6 +444,52 @@ attestation file's mere presence, and the behavioral kind — genuinely
 un-evidenced so far — reads as empty rather than silently omitted.
 `
 
+// slotWallObligation gives each declared slot an exact elaborated quality
+// contract. The static record is intentionally older than the mutable serving
+// checkout and therefore freshness-stale; behavioral has no candidate record;
+// and attestation remains unproven because verdi.evidence/v1 carries no
+// authenticated-human/governed-source identity. The preview must disclose
+// those three distinct reasons rather than borrowing pre-adoption meanings.
+func slotWallObligation(kind artifact.EvidenceKind) string {
+	producerKind := artifact.ObligationProducerChecker
+	producerRef := "slot-" + string(kind) + "-check"
+	sourceKind := artifact.ObligationSourceCIJob
+	sourceRef := string(kind) + "-verify"
+	if kind == artifact.EvidenceBehavioral {
+		producerKind = artifact.ObligationProducerTest
+	}
+	if kind == artifact.EvidenceAttestation {
+		producerKind = artifact.ObligationProducerAuthenticatedHuman
+		producerRef = "role:qa-lead"
+		sourceKind = artifact.ObligationSourceGovernedAttestation
+		sourceRef = "approval:qa-lead"
+	}
+	return fmt.Sprintf(`---
+id: obligation/%s--ac-1--%s
+kind: obligation
+title: "Exact %s evidence-slot quality"
+owners: [platform-team]
+for_kind: %s
+quality:
+  state: elaborated
+  claim: "the %s slot reports evidence bound to its declared producer and source"
+  falsifier: "the %s slot reports absent, stale, or differently sourced evidence"
+  scope: "spec/%s ac-1 at the evaluated commit"
+  producer: { kind: %s, ref: %q }
+  authoritative_source: { kind: %s, ref: %q }
+  freshness:
+    invalidated_by: [code]
+    rule: "rerun for the evaluated commit"
+links:
+  - { type: verifies, ref: "spec/%s" }
+frozen: { at: 2026-08-10, commit: 000000000000000000000000000000000000000a }
+---
+# Exact %s evidence-slot quality
+
+The fixture exercises the production obligation-quality matcher.
+`, slotWallSpecName, kind, kind, kind, kind, kind, slotWallSpecName, producerKind, producerRef, sourceKind, sourceRef, slotWallSpecName, kind)
+}
+
 // slotWallAttestation fills decline-slot-wall ac-1's attestation slot:
 // a fully valid attestation artifact at the fold's own on-disk home
 // (.verdi/attestations/<story-slug>/<ac>.md, evidence.AttestationExists'
@@ -822,8 +870,11 @@ func provisionBoard(ctx context.Context, scratch, storeRoot string) (feedPath st
 		// The evidence-slot wall (spec/evidence-slot ac-1): the story spec
 		// plus the attestation that fills its attestation slot; its derived
 		// tree is written UNTRACKED below (data/ is gitignored, VL-013).
-		filepath.Join(".verdi", "specs", "active", slotWallSpecName, "spec.md"): slotWallSpec,
-		filepath.Join(".verdi", "attestations", "jira-loan-2204", "ac-1.md"):    slotWallAttestation(mainSHA),
+		filepath.Join(".verdi", "specs", "active", slotWallSpecName, "spec.md"):          slotWallSpec,
+		filepath.Join(".verdi", "attestations", "jira-loan-2204", "ac-1.md"):             slotWallAttestation(mainSHA),
+		filepath.Join(".verdi", "obligations", slotWallSpecName, "ac-1--static.md"):      slotWallObligation(artifact.EvidenceStatic),
+		filepath.Join(".verdi", "obligations", slotWallSpecName, "ac-1--behavioral.md"):  slotWallObligation(artifact.EvidenceBehavioral),
+		filepath.Join(".verdi", "obligations", slotWallSpecName, "ac-1--attestation.md"): slotWallObligation(artifact.EvidenceAttestation),
 		// Two of the three wall-badge fixtures (spec/badge-computes ac-5):
 		// the authoring and review instances, same badge-triggering state.
 		// The sealed instance is a LANDED fixture (mainFixtures above) —

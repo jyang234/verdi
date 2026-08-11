@@ -83,9 +83,10 @@ func buildBodyStatusLineRepo(t *testing.T, specMD string) *fixturegit.Repo {
 	t.Setenv("CI_DEFAULT_BRANCH", "main")
 	return fixturegit.Build(t, []fixturegit.Layer{{
 		Files: map[string]string{
-			".verdi/verdi.yaml":                            "schema: verdi.layout/v1\nforge: github\n",
-			".verdi/specs/active/loan-mgmt/spec.md":        featureV1SpecMD,
-			".verdi/specs/active/body-status-line/spec.md": specMD,
+			".verdi/verdi.yaml":                                    "schema: verdi.layout/v1\nforge: github\n",
+			".verdi/specs/active/loan-mgmt/spec.md":                featureV1SpecMD,
+			".verdi/specs/active/body-status-line/spec.md":         specMD,
+			".verdi/obligations/body-status-line/ac-1--runtime.md": fixtureElaboratedObligationMD("body-status-line", "ac-1", artifact.EvidenceRuntime, "runtime-probe:jira:BODY-STATUS-1:ac-1", "7", gateFakeFrozenCommit),
 		},
 		Message: "body status-line fixture: feature + story whose body quotes the legacy status field",
 	}})

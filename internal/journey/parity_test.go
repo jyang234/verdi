@@ -4,8 +4,18 @@ import (
 	"sort"
 	"testing"
 
+	"github.com/jyang234/verdi/internal/artifact"
 	"github.com/jyang234/verdi/internal/specstate"
 )
+
+func TestObligationQualityBlockerKindParityWithArtifact(t *testing.T) {
+	for _, kind := range []artifact.EvidenceKind{artifact.EvidenceStatic, artifact.EvidenceBehavioral, artifact.EvidenceRuntime, artifact.EvidenceAttestation} {
+		id := obligationQualityBlockerID("ac-1", kind)
+		if !blockerIDRe.MatchString(id) {
+			t.Errorf("obligationQualityBlockerID(ac-1, %q) = %q, invalid blocker id", kind, id)
+		}
+	}
+}
 
 // TestLifecycleStateParityWithSpecstate proves journey's closed lifecycle
 // state vocabulary is exactly internal/specstate.State's constant set —

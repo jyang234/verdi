@@ -151,6 +151,9 @@ func TestGetMatrix_Happy(t *testing.T) {
 	if len(out.ACs) != 1 || out.ACs[0].ID != "ac-1" {
 		t.Fatalf("ACs = %+v, want one ac-1", out.ACs)
 	}
+	if !strings.Contains(out.ACs[0].Summary, "obligation-quality:missing") {
+		t.Fatalf("Summary = %q, want shared fold obligation-quality projection", out.ACs[0].Summary)
+	}
 
 	// Also resolvable by spec ref, per I-30's two accepted forms.
 	bySpec := b.GetMatrix(context.Background(), mustArgs(t, map[string]any{"story": "spec/widget-retry"}))

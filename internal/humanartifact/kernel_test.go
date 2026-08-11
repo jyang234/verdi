@@ -26,7 +26,7 @@ func TestKernelFields_KnownKinds(t *testing.T) {
 		{"attestation", []string{"id", "kind", "title", "owners", "schema", "links", "frozen", "provenance"}},
 		{"waiver", []string{"id", "kind", "title", "owners", "schema", "links", "frozen", "provenance", "status", "reason", "expiry"}},
 		{"reaffirmation", []string{"id", "kind", "title", "owners", "schema", "links", "frozen", "provenance", "object", "hash"}},
-		{"obligation", []string{"id", "kind", "title", "owners", "schema", "links", "frozen", "provenance", "for_kind"}},
+		{"obligation", []string{"id", "kind", "title", "owners", "schema", "links", "frozen", "provenance", "for_kind", "quality"}},
 		{"policy", []string{"schema", "id", "kind", "title", "owners", "template", "scope", "claims", "instructions", "payloads"}},
 		{"policy-overlay", []string{"schema", "id", "kind", "title", "owners", "template", "refines", "scope", "refinements"}},
 		{"policy-exemption", []string{"schema", "id", "kind", "title", "owners", "template", "scope", "witnesses", "compensating_controls", "approvals", "expiry", "review_condition"}},

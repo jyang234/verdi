@@ -31,6 +31,8 @@ kind: obligation
 title: "the retry proves end to end"
 owners: ["platform-team"]
 for_kind: behavioral
+quality:
+  state: unresolved-design-debt
 links:
   - { type: verifies, ref: "spec/widget-story" }
 frozen: { at: 2026-07-21, commit: deadbeefdeadbeefdeadbeefdeadbeefdeadbeef }
@@ -56,6 +58,12 @@ The behavioral evidence must show an e2e test.
 	}
 	if ob.ForKind != artifact.EvidenceBehavioral {
 		t.Errorf("for_kind = %q, want behavioral", ob.ForKind)
+	}
+	if ob.Quality == nil || ob.Quality.State != artifact.ObligationQualityUnresolved {
+		t.Fatalf("quality = %+v, want explicit unresolved-design-debt", ob.Quality)
+	}
+	if ob.Quality.Claim != "" || ob.Quality.Falsifier != "" || ob.Quality.Scope != "" || ob.Quality.Producer.Ref != "" || ob.Quality.AuthoritativeSource.Ref != "" || len(ob.Quality.Freshness.InvalidatedBy) != 0 {
+		t.Errorf("unresolved scaffold fabricated quality meanings: %+v", ob.Quality)
 	}
 	if !strings.Contains(string(body), "The behavioral evidence must show an e2e test.") {
 		t.Errorf("body missing input prose: %q", body)
