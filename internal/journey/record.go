@@ -21,6 +21,7 @@ import (
 	"strings"
 
 	"github.com/jyang234/verdi/internal/governanceprincipal"
+	"github.com/jyang234/verdi/internal/repositoryfacts"
 )
 
 const (
@@ -64,58 +65,25 @@ type Target struct {
 	Path  string `json:"path"`
 }
 
-// StringFact is a string-valued fact whose presence is itself proven or
-// unproven: Value must be "" whenever Known is false, so an unproven fact
-// can never smuggle a stale or guessed value through.
-type StringFact struct {
-	Known bool   `json:"known"`
-	Value string `json:"value"`
-}
-
-// BoolFact is a boolean-valued fact with the same known/unproven
-// discipline as StringFact: Value must be false whenever Known is false.
-type BoolFact struct {
-	Known bool `json:"known"`
-	Value bool `json:"value"`
-}
-
-// DefaultBranchFact is the configured default branch's identity: Name,
-// Ref, and Head must all be "" whenever Known is false.
-type DefaultBranchFact struct {
-	Known bool   `json:"known"`
-	Name  string `json:"name"`
-	Ref   string `json:"ref"`
-	Head  string `json:"head"`
-}
-
-// WorktreeFact is the active worktree's identity: Name must be ""
-// whenever Managed is false.
-type WorktreeFact struct {
-	Managed bool   `json:"managed"`
-	Name    string `json:"name"`
-}
-
+// StringFact, BoolFact, DefaultBranchFact, WorktreeFact, and
+// RepositoryFacts are the shared repository-identity fact shape SI-85
+// extracts into internal/repositoryfacts (context-compiler authority
+// design §4): internal/journey and a later internal/contextcompile task
+// both consume that single leaf so the two consumers cannot silently
+// diverge in fact shape or canonical remote-identity rule. These aliases
+// keep every existing field/tag/reference in this package unchanged;
+// repositoryfacts.Facts's own doc comment is now the shape's source of
+// truth.
+//
 // RepositoryFacts is the record's repository-identity section (AC-1): the
 // canonical repository identity, branch, HEAD, default-branch HEAD, and
 // their relationship stay visible because hiding them recreates the
 // wrong-checkout ambiguity the feature exists to eliminate (DC-2).
-//
-// RemoteOrigin is the CANONICAL repository identity — "host[:port]/path",
-// no scheme and no userinfo (gitx.CanonicalRemoteIdentity) — never the raw
-// origin URL: a raw URL may carry credentials, which this record must
-// never contain, and its ssh and https spellings of one repository differ,
-// which would make identity and every digest over it checkout-dependent.
-type RepositoryFacts struct {
-	RemoteOrigin  StringFact        `json:"remote_origin"`
-	Branch        StringFact        `json:"branch"`
-	Head          StringFact        `json:"head"`
-	DefaultBranch DefaultBranchFact `json:"default_branch"`
-	Relationship  string            `json:"relationship"`
-	Dirty         BoolFact          `json:"dirty"`
-	Staged        BoolFact          `json:"staged"`
-	Worktree      WorktreeFact      `json:"worktree"`
-	Source        string            `json:"source"`
-}
+type StringFact = repositoryfacts.StringFact
+type BoolFact = repositoryfacts.BoolFact
+type DefaultBranchFact = repositoryfacts.DefaultBranchFact
+type WorktreeFact = repositoryfacts.WorktreeFact
+type RepositoryFacts = repositoryfacts.Facts
 
 // Baseline is the accepted-baseline identity: path, blob, and landing
 // commit. It mirrors internal/specstate.Baseline's JSON shape but is this
@@ -298,8 +266,6 @@ var (
 	}
 	validLifecycleRelation = map[string]bool{"new": true, "exact": true, "diverged": true, "unproven": true}
 	validPosture           = map[string]bool{"authoritative": true, "advisory": true, "unknown": true}
-	validRelationship      = map[string]bool{"equal": true, "ahead": true, "behind": true, "diverged": true, "unknown": true}
-	validSource            = map[string]bool{"head": true, "working-tree": true, "remote-ref": true, "receipt-bound": true}
 	validConfirmation      = map[string]bool{"none": true, "explicit-confirmation": true}
 	validResolution        = map[string]bool{"authenticated": true, "violated-with-witness": true, "unproven": true}
 
@@ -334,8 +300,8 @@ func (r Record) Validate() error {
 	if err := r.Target.validate(); err != nil {
 		return err
 	}
-	if err := r.Repository.validate(); err != nil {
-		return err
+	if err := r.Repository.Validate(); err != nil {
+		return fmt.Errorf("journey: repository: %w", err)
 	}
 	if err := r.Lifecycle.validate(r.Target.Class); err != nil {
 		return err
@@ -377,73 +343,12 @@ func (t Target) validate() error {
 	return nil
 }
 
-func (f StringFact) validate(field string) error {
-	if f.Known && f.Value == "" {
-		return fmt.Errorf("journey: %s: known is true but value is empty", field)
-	}
-	if !f.Known && f.Value != "" {
-		return fmt.Errorf("journey: %s: known is false but value %q is non-empty", field, f.Value)
-	}
-	return nil
-}
-
-func (f BoolFact) validate(field string) error {
-	if !f.Known && f.Value {
-		return fmt.Errorf("journey: %s: known is false but value is true", field)
-	}
-	return nil
-}
-
-func (f DefaultBranchFact) validate(field string) error {
-	if f.Known && (f.Name == "" || f.Ref == "" || f.Head == "") {
-		return fmt.Errorf("journey: %s: known is true but name/ref/head are not all non-empty", field)
-	}
-	if !f.Known && (f.Name != "" || f.Ref != "" || f.Head != "") {
-		return fmt.Errorf("journey: %s: known is false but name/ref/head are non-empty", field)
-	}
-	return nil
-}
-
-func (f WorktreeFact) validate(field string) error {
-	if f.Managed && f.Name == "" {
-		return fmt.Errorf("journey: %s: managed is true but name is empty", field)
-	}
-	if !f.Managed && f.Name != "" {
-		return fmt.Errorf("journey: %s: managed is false but name %q is non-empty", field, f.Name)
-	}
-	return nil
-}
-
-func (rf RepositoryFacts) validate() error {
-	if err := rf.RemoteOrigin.validate("repository.remote_origin"); err != nil {
-		return err
-	}
-	if err := rf.Branch.validate("repository.branch"); err != nil {
-		return err
-	}
-	if err := rf.Head.validate("repository.head"); err != nil {
-		return err
-	}
-	if err := rf.DefaultBranch.validate("repository.default_branch"); err != nil {
-		return err
-	}
-	if !validRelationship[rf.Relationship] {
-		return fmt.Errorf("journey: repository: unknown relationship %q", rf.Relationship)
-	}
-	if err := rf.Dirty.validate("repository.dirty"); err != nil {
-		return err
-	}
-	if err := rf.Staged.validate("repository.staged"); err != nil {
-		return err
-	}
-	if err := rf.Worktree.validate("repository.worktree"); err != nil {
-		return err
-	}
-	if !validSource[rf.Source] {
-		return fmt.Errorf("journey: repository: unknown source %q", rf.Source)
-	}
-	return nil
-}
+// StringFact, BoolFact, DefaultBranchFact, and RepositoryFacts's own
+// known/value and closed-relationship/source invariants are now validated
+// by repositoryfacts.Facts.Validate() (called from Record.Validate()
+// above): these types are aliases for repositoryfacts's own types, and Go
+// forbids defining new methods on a type whose underlying type is
+// declared in another package. WorktreeFact's invariant lives there too.
 
 func (lf LifecycleFacts) validate(targetClass string) error {
 	if !validTargetClass[lf.Class] {
@@ -473,8 +378,8 @@ func (lf LifecycleFacts) validate(targetClass string) error {
 			return fmt.Errorf("journey: lifecycle.frozen: at and commit must both be non-empty")
 		}
 	}
-	if err := lf.ActiveBranch.validate("lifecycle.active_branch"); err != nil {
-		return err
+	if err := lf.ActiveBranch.Validate(); err != nil {
+		return fmt.Errorf("journey: lifecycle.active_branch: %w", err)
 	}
 	if lf.Disclosures == nil {
 		return fmt.Errorf("journey: lifecycle: disclosures must be non-nil (an explicitly empty set is [])")

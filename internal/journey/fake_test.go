@@ -3,6 +3,7 @@ package journey
 import (
 	"context"
 
+	"github.com/jyang234/verdi/internal/repositoryfacts"
 	"github.com/jyang234/verdi/internal/specstate"
 )
 
@@ -72,6 +73,32 @@ func (f *fakeStateResolver) Resolve(ctx context.Context, root string, candidate 
 }
 
 var _ StateResolver = (*fakeStateResolver)(nil)
+
+// fakeRepositoryFactsGatherer is the in-process RepositoryFactsGatherer
+// double journey's own tests substitute for the real
+// internal/repositoryfacts leaf, mirroring fakeGitReader/
+// fakeStateResolver's identical convention.
+type fakeRepositoryFactsGatherer struct {
+	gatherFn func(ctx context.Context, in repositoryfacts.GatherInput) (repositoryfacts.Snapshot, error)
+}
+
+func (f *fakeRepositoryFactsGatherer) Gather(ctx context.Context, in repositoryfacts.GatherInput) (repositoryfacts.Snapshot, error) {
+	return f.gatherFn(ctx, in)
+}
+
+var _ RepositoryFactsGatherer = (*fakeRepositoryFactsGatherer)(nil)
+
+// noOpRepositoryFactsGatherer returns a fake that panics if Gather is
+// called with no fn wired — the same "fails loudly if forgotten"
+// convention as noOpGitReader, for the majority of tests that exercise
+// target/lifecycle-fact logic without ever reaching gatherRepositoryFacts.
+func noOpRepositoryFactsGatherer() *fakeRepositoryFactsGatherer {
+	return &fakeRepositoryFactsGatherer{
+		gatherFn: func(context.Context, repositoryfacts.GatherInput) (repositoryfacts.Snapshot, error) {
+			panic("journey: fake repository-facts gatherer called with no fn wired")
+		},
+	}
+}
 
 // noOpGitReader satisfies GitReader with functions that panic if called —
 // a base to override individual fields from in a table-driven test that

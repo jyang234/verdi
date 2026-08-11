@@ -1,21 +1,18 @@
 package journey
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 	"sort"
 	"strings"
 
 	"github.com/jyang234/verdi/internal/artifact"
-	"github.com/jyang234/verdi/internal/gitx"
+	"github.com/jyang234/verdi/internal/repositoryfacts"
 	"github.com/jyang234/verdi/internal/specstate"
 	"github.com/jyang234/verdi/internal/store"
 	"github.com/jyang234/verdi/internal/storyresolve"
-	"github.com/jyang234/verdi/internal/wtmanager"
 )
 
 // Searched phrases name, per ref form, EXACTLY what resolution looked in
@@ -281,175 +278,76 @@ func decodeTargetSpec(ref string, content []byte) (*artifact.SpecFrontmatter, er
 // --- repository facts -----------------------------------------------------
 
 // gatherRepositoryFacts gathers RepositoryFacts (AC-1's repository-identity
-// section). Every fact that goes Known == false because a git call itself
-// failed (as opposed to a legitimately unprovable state like "no origin
-// remote is configured" or "unresolved default branch") is paired with a
-// deterministic disclosure appended to the returned list — never an
-// invented value. Disclosures are returned unsorted; Project sorts and
-// dedupes them once, together with every other source, at final assembly.
+// section) by delegating to the shared internal/repositoryfacts leaf
+// (SI-85: "internal/journey and the context compiler consume that
+// package"). journey's own remaining job here is exactly two things:
+// pass through the computed Facts unchanged (RepositoryFacts is a type
+// alias for repositoryfacts.Facts, so no conversion exists to omit), and
+// map the shared leaf's closed, machine-stable DisclosureCode vocabulary
+// to this projection's OWN byte-identical prose
+// (repositoryDisclosureProse) — preserving every disclosure string a
+// caller of GatherFacts already observes, without journey re-deriving or
+// reinterpreting how any fact was established. Disclosures are returned
+// unsorted (repositoryDisclosureProse preserves Gather's own sorted
+// order, but Project sorts and dedupes every disclosure source together
+// once at final assembly regardless).
 func (p Projector) gatherRepositoryFacts(ctx context.Context, root, relPath string, content []byte, foundOnDisk bool) (RepositoryFacts, []string, error) {
-	var disclosures []string
-	var rf RepositoryFacts
+	snap, err := p.repoFacts.Gather(ctx, repositoryfacts.GatherInput{
+		Root:              root,
+		TargetPath:        relPath,
+		TargetContent:     content,
+		TargetFoundOnDisk: foundOnDisk,
+	})
+	if err != nil {
+		return RepositoryFacts{}, nil, fmt.Errorf("journey: gathering repository facts: %w", err)
+	}
 
-	switch url, rerr := p.git.RemoteURL(ctx, root, "origin"); {
-	case rerr == nil:
-		// AC-1's repository section reports a CANONICAL repository
-		// identity, never the raw origin URL: the raw URL may carry
-		// credentials (GLG v3's security decision — a journey projection
-		// contains no credentials or secrets), and its ssh and https
-		// spellings of one repository differ, which would make identity
-		// and every digest over it checkout-dependent. Canonicalization
-		// is gitx's (CanonicalRemoteIdentity); gitx.RemoteURL itself still
-		// returns the raw URL for the callers that need it.
-		if identity, ok := gitx.CanonicalRemoteIdentity(url); ok {
-			rf.RemoteOrigin = StringFact{Known: true, Value: identity}
-		} else {
-			// Same F1(a) posture as a read failure: the raw URL is never
-			// routed into the record OR into the disclosure (it is exactly
-			// the string that may carry the credential), so the disclosure
-			// names only the cause class, fixed and machine-independent.
-			rf.RemoteOrigin = StringFact{Known: false}
-			disclosures = append(disclosures, "the origin remote URL could not be canonicalized to a repository identity")
+	disclosures := make([]string, 0, len(snap.Disclosures))
+	for _, code := range snap.Disclosures {
+		prose, ok := repositoryDisclosureProse(code)
+		if !ok {
+			// A shared-leaf disclosure code this projection's own mapping
+			// table does not recognize is a contract-drift bug between
+			// internal/repositoryfacts and this package, not an ordinary
+			// unprovable repository fact — fail closed rather than
+			// silently dropping the disclosure (CO-1: silence is never a
+			// pass).
+			return RepositoryFacts{}, nil, fmt.Errorf("journey: unmapped repository disclosure code %q", code)
 		}
-	case errors.Is(rerr, gitx.ErrNoSuchRemote):
-		rf.RemoteOrigin = StringFact{Known: false}
-		disclosures = append(disclosures, "no origin remote is configured")
+		disclosures = append(disclosures, prose)
+	}
+
+	return snap.Facts, disclosures, nil
+}
+
+// repositoryDisclosureProse maps a repositoryfacts.DisclosureCode to this
+// projection's own fixed, machine-independent prose — byte-identical to
+// what internal/journey's pre-extraction gatherRepositoryFacts produced
+// for the same cause, so the SI-85 extraction changes no observable
+// journey output. ok is false for a code this table does not recognize.
+func repositoryDisclosureProse(code repositoryfacts.DisclosureCode) (string, bool) {
+	switch code {
+	case repositoryfacts.DisclosureRemoteOriginUncanonicalizable:
+		return "the origin remote URL could not be canonicalized to a repository identity", true
+	case repositoryfacts.DisclosureRemoteOriginNotConfigured:
+		return "no origin remote is configured", true
+	case repositoryfacts.DisclosureRemoteOriginReadFailed:
+		return "remote origin could not be read from this checkout", true
+	case repositoryfacts.DisclosureBranchUnresolved:
+		return "the current branch could not be determined from this checkout", true
+	case repositoryfacts.DisclosureBranchDetached:
+		return "the repository is in a detached HEAD state; the current branch is unknown", true
+	case repositoryfacts.DisclosureHeadUnresolved:
+		return "HEAD could not be resolved from this checkout", true
+	case repositoryfacts.DisclosureDefaultBranchRefUnresolved:
+		return "the resolved default branch ref could not be resolved to a commit", true
+	case repositoryfacts.DisclosureDirtyUnknown:
+		return "working-tree dirty state could not be determined from this checkout", true
+	case repositoryfacts.DisclosureStagedUnknown:
+		return "staged paths could not be determined from this checkout", true
 	default:
-		// F1(a): the underlying gitx error (which may itself carry an
-		// absolute path or raw git stderr text) is never routed into the
-		// record — Known == false already carries the honesty; the
-		// disclosure names only the cause class, fixed and machine-
-		// independent.
-		rf.RemoteOrigin = StringFact{Known: false}
-		disclosures = append(disclosures, "remote origin could not be read from this checkout")
+		return "", false
 	}
-
-	branch, berr := p.git.CurrentBranch(ctx, root)
-	switch {
-	case berr != nil:
-		rf.Branch = StringFact{Known: false}
-		disclosures = append(disclosures, "the current branch could not be determined from this checkout")
-	case branch == "":
-		rf.Branch = StringFact{Known: false}
-		disclosures = append(disclosures, "the repository is in a detached HEAD state; the current branch is unknown")
-	default:
-		rf.Branch = StringFact{Known: true, Value: branch}
-	}
-
-	head, herr := p.git.RevParse(ctx, root, "HEAD")
-	if herr != nil {
-		rf.Head = StringFact{Known: false}
-		disclosures = append(disclosures, "HEAD could not be resolved from this checkout")
-	} else {
-		rf.Head = StringFact{Known: true, Value: head}
-	}
-
-	var defaultHead string
-	var defaultKnown bool
-	if db, ok := p.resolveDefaultBranch(ctx, root); ok {
-		if dh, derr := p.git.RevParse(ctx, root, db.Ref); derr == nil {
-			rf.DefaultBranch = DefaultBranchFact{Known: true, Name: db.Name, Ref: db.Ref, Head: dh}
-			defaultHead, defaultKnown = dh, true
-		} else {
-			// F2: the default branch NAME resolved, but its ref could not
-			// be turned into a commit — a distinct, disclosed failure from
-			// "no default branch resolves at all" (below/in derive.go),
-			// never silently folded into the same unknown.
-			disclosures = append(disclosures, "the resolved default branch ref could not be resolved to a commit")
-		}
-	}
-	if !defaultKnown {
-		rf.DefaultBranch = DefaultBranchFact{Known: false}
-	}
-
-	rf.Relationship = relationship(ctx, p.git, root, rf.Head, defaultHead, defaultKnown)
-
-	dirty, derr := p.git.StatusDirty(ctx, root)
-	if derr != nil {
-		rf.Dirty = BoolFact{Known: false}
-		disclosures = append(disclosures, "working-tree dirty state could not be determined from this checkout")
-	} else {
-		rf.Dirty = BoolFact{Known: true, Value: dirty}
-	}
-
-	staged, serr := p.git.StagedPaths(ctx, root)
-	if serr != nil {
-		rf.Staged = BoolFact{Known: false}
-		disclosures = append(disclosures, "staged paths could not be determined from this checkout")
-	} else {
-		rf.Staged = BoolFact{Known: true, Value: len(staged) > 0}
-	}
-
-	rf.Worktree = worktreeFact(root)
-
-	if !foundOnDisk {
-		rf.Source = "remote-ref"
-	} else {
-		headBytes, serr := p.git.Show(ctx, root, "HEAD", relPath)
-		if serr == nil && bytes.Equal(headBytes, content) {
-			rf.Source = "head"
-		} else {
-			rf.Source = "working-tree"
-		}
-	}
-
-	return rf, disclosures, nil
-}
-
-// relationship classifies HEAD against the default branch's HEAD: "equal"
-// on identical shas; otherwise IsAncestor(default, HEAD) -> "ahead",
-// IsAncestor(HEAD, default) -> "behind", neither -> "diverged"; unknown
-// whenever either HEAD is itself unknown or an ancestry check errors.
-func relationship(ctx context.Context, git GitReader, root string, head StringFact, defaultHead string, defaultKnown bool) string {
-	if !head.Known || !defaultKnown {
-		return "unknown"
-	}
-	if head.Value == defaultHead {
-		return "equal"
-	}
-	ahead, aerr := git.IsAncestor(ctx, root, defaultHead, head.Value)
-	if aerr != nil {
-		return "unknown"
-	}
-	if ahead {
-		return "ahead"
-	}
-	behind, berr := git.IsAncestor(ctx, root, head.Value, defaultHead)
-	if berr != nil {
-		return "unknown"
-	}
-	if behind {
-		return "behind"
-	}
-	return "diverged"
-}
-
-// worktreeMarker is the "/.verdi/data/worktrees/" path segment a store
-// root's managed-worktree membership is decided against, derived from
-// wtmanager.WorktreesRoot (its own single home for the managed-worktree
-// layout — CLAUDE.md: never a second hardcoded copy of that literal)
-// rather than a second literal of this package's own.
-func worktreeMarker() string {
-	return "/" + filepath.ToSlash(wtmanager.WorktreesRoot("")) + "/"
-}
-
-// worktreeFact classifies root as a managed worktree iff its slash-
-// normalized path contains worktreeMarker's segment; Name is the path
-// segment immediately after it (wtmanager's own <name> == a design
-// branch's spec name, naming.go's worktreeName).
-func worktreeFact(root string) WorktreeFact {
-	norm := filepath.ToSlash(root)
-	marker := worktreeMarker()
-	idx := strings.Index(norm, marker)
-	if idx < 0 {
-		return WorktreeFact{Managed: false}
-	}
-	rest := norm[idx+len(marker):]
-	name, _, _ := strings.Cut(rest, "/")
-	if name == "" {
-		return WorktreeFact{Managed: false}
-	}
-	return WorktreeFact{Managed: true, Name: name}
 }
 
 // --- evidence facts --------------------------------------------------------
