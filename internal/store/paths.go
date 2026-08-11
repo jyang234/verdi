@@ -49,17 +49,23 @@ const (
 // Layout segments — the literals every accessor below is built from, named
 // once so the strings appear in exactly one place.
 const (
-	verdiDir        = ".verdi"
-	specsDir        = "specs"
-	attestationsDir = "attestations"
-	obligationsDir  = "obligations"
-	waiversDir      = "waivers"
-	dataDir         = "data"
-	derivedDir      = "derived"
+	verdiDir         = ".verdi"
+	specsDir         = "specs"
+	attestationsDir  = "attestations"
+	obligationsDir   = "obligations"
+	waiversDir       = "waivers"
+	dataDir          = "data"
+	derivedDir       = "derived"
+	draftMutationDir = "draft-mutation"
 
-	specFile             = "spec.md"
-	deviationReportFile  = "deviation-report.md"
-	decisionConflictFile = "decision-conflict-report.md"
+	specFile                 = "spec.md"
+	designProvenanceFile     = "design-provenance.jsonl"
+	deviationReportFile      = "deviation-report.md"
+	decisionConflictFile     = "decision-conflict-report.md"
+	writerLockFile           = "writer.lock"
+	draftJournalFile         = "journal.json"
+	draftSpecStageFile       = "spec.new"
+	draftProvenanceStageFile = "provenance.new"
 )
 
 // --- absolute (root-joined, host-native separator) ---
@@ -89,6 +95,38 @@ func ArchiveSpecDir(root, name string) string { return SpecDir(root, ZoneArchive
 
 // ArchiveSpecPath is SpecPath in the archive zone.
 func ArchiveSpecPath(root, name string) string { return SpecPath(root, ZoneArchive, name) }
+
+// DesignProvenancePath is the committed, non-authoritative ASD sidecar
+// beside a spec in either lifecycle zone.
+func DesignProvenancePath(root, zone, name string) string {
+	return filepath.Join(SpecDir(root, zone, name), designProvenanceFile)
+}
+
+// WriterLockPath is D3's one checkout-wide writer lock. Draft mutation
+// recovery and mutation use this lock and never introduce a per-spec lock.
+func WriterLockPath(root string) string {
+	return filepath.Join(root, verdiDir, dataDir, writerLockFile)
+}
+
+// DraftMutationDir is the ratified per-spec recovery and staging root.
+func DraftMutationDir(root, name string) string {
+	return filepath.Join(root, verdiDir, dataDir, draftMutationDir, name)
+}
+
+// DraftMutationJournalPath is the transaction journal inside DraftMutationDir.
+func DraftMutationJournalPath(root, name string) string {
+	return filepath.Join(DraftMutationDir(root, name), draftJournalFile)
+}
+
+// DraftMutationSpecStagePath is the staged spec bytes inside DraftMutationDir.
+func DraftMutationSpecStagePath(root, name string) string {
+	return filepath.Join(DraftMutationDir(root, name), draftSpecStageFile)
+}
+
+// DraftMutationProvenanceStagePath is the staged sidecar bytes inside DraftMutationDir.
+func DraftMutationProvenanceStagePath(root, name string) string {
+	return filepath.Join(DraftMutationDir(root, name), draftProvenanceStageFile)
+}
 
 // DeviationReportPath is a spec directory's deviation-report.md — align's
 // per-feature-spec computed/preserved report (04 §Alignment report).
@@ -207,6 +245,21 @@ func SpecRelPath(zone, name string) string {
 
 // ActiveSpecRelPath is SpecRelPath in the active zone.
 func ActiveSpecRelPath(name string) string { return SpecRelPath(ZoneActive, name) }
+
+// DesignProvenanceRelPath is DesignProvenancePath's slash-canonical form.
+func DesignProvenanceRelPath(zone, name string) string {
+	return path.Join(verdiDir, specsDir, zone, name, designProvenanceFile)
+}
+
+// WriterLockRelPath is WriterLockPath's slash-canonical form.
+func WriterLockRelPath() string {
+	return path.Join(verdiDir, dataDir, writerLockFile)
+}
+
+// DraftMutationRelDir is DraftMutationDir's slash-canonical form.
+func DraftMutationRelDir(name string) string {
+	return path.Join(verdiDir, dataDir, draftMutationDir, name)
+}
 
 // DeviationReportRelPath is DeviationReportPath's store-relative,
 // slash-canonical form.

@@ -16,7 +16,7 @@ locking seams, fixturegit, built-binary CLI tests.
 
 **Planning authority:** ASD blob `364c4888a21b9e234786c59c3ebfd42f2c1d8205`,
 first-parent promotion `f72612d7bca3de2d37a6570240dc75dbbe728864`;
-new SI-65..SI-70; orchestration Wave 2 and OD-3/5/8/10/12.
+new SI-65..SI-70 and SI-77; orchestration Wave 2 and OD-3/5/8/10/12.
 
 ## Global constraints
 
@@ -31,7 +31,7 @@ new SI-65..SI-70; orchestration Wave 2 and OD-3/5/8/10/12.
   sidecar, transaction directory, lock or any parent below the store root are
   operational refusals.
 
-## Contract fixed by SI-65..SI-70
+## Contract fixed by SI-65..SI-70 and SI-77
 
 The CLI is `verdi design mutate --request <path|->`. Input and output are
 strict canonical JSON. `-` means stdin; the maximum request is 1 MiB. Success
@@ -87,8 +87,10 @@ contains no actor, operations or excerpts and is not a retroactive provenance
 record. Any other mismatch fails operationally. Excerpts are at
 most 600 Unicode scalar values and three per target, and carry target, target
 digest, classification, representation (`verbatim|paraphrase`) and text.
-Removal/redaction appends a tombstone in a later transaction; history is never
-rewritten.
+This Wave-2 adapter accepts positive bounded excerpts only. Callers must omit
+sensitive full text. SI-77 defers the undefined tombstone wire and later
+removal/redaction adapter; history is never rewritten, and this unit does not
+claim that part of AC-4 or CO-5 complete.
 
 Policy v1 consumes only the landed `mode` and `layout=false`. An unadopted
 policy store or absent ASD payload refuses the v1 delegated-agent CLI; future
@@ -406,7 +408,7 @@ git status --short
 
 Commit only test/doc corrections required by the gate. Report AC-1..4 as
 partial exactly as follows: core/CLI delivered; workbench/MCP, capabilities,
-context and semantic review remain pending.
+context, semantic review and excerpt tombstones remain pending.
 
 ## Source-coverage witness
 
@@ -420,7 +422,7 @@ canonical promotion independently preserves **166/166** source elements.
 | 1 | ASD AC-1 atomic mutation | contract; T2/T5/T6 | fault and rollback tests |
 | 2 | ASD AC-2 attribution | contract; T1/T4/T7 | spoofing and sealed-resolution tests |
 | 3 | ASD AC-3 policy control | contract; T4 | mode/absence tables |
-| 4 | ASD AC-4 provenance | contract; T1/T6 | chain/digest/excerpt tests |
+| 4 | ASD AC-4 provenance | contract; T1/T6 | chain/digest/positive-excerpt tests; tombstones intentionally deferred by SI-77 |
 | 5 | ASD DC-1 one coordinated mutation | T5/T6 | old-or-new recovery witness |
 | 6 | ASD DC-2 actor attribution | trusted-actor contract | CLI cannot claim human |
 | 7 | ASD DC-3 semantic operations | wire table; T2/T3 | every arm positive/negative |
@@ -440,7 +442,7 @@ canonical promotion independently preserves **166/166** source elements.
 | 21 | ASD CO-2 no partial transaction | provenance-first recovery; T5 | no spec-ahead witness |
 | 22 | ASD CO-3 draft-only | T4 | accepted/closed refusal |
 | 23 | ASD CO-4 caller cannot self-promote | trusted actor; T3/T7 | actor fields/env rejected |
-| 24 | ASD CO-5 provenance honesty | gap/unavailable contract; T1/T6 | no fabricated context/chain |
+| 24 | ASD CO-5 provenance honesty | gap/unavailable contract; T1/T6 | no fabricated context/chain; tombstones intentionally deferred by SI-77 |
 | 25 | ASD CO-6 governed assistance | policy contract; T4 | absent/off/proposal/draft-write |
 | 26 | ASD CO-9 fail-closed recovery | T5 | malformed journal retained |
 | 27 | ASD relationship to CI | policy digest/port; T4/T6 | one sealed policy seam |

@@ -35,6 +35,13 @@ func TestAbsolutePaths(t *testing.T) {
 		{"WaiverPath", WaiverPath(root, "story-7", "ac-2"), "/store/.verdi/waivers/story-7/ac-2.md"},
 		{"DerivedRoot", DerivedRoot(root), "/store/.verdi/data/derived"},
 		{"DerivedSpecDir", DerivedSpecDir(root, "spec--widget"), "/store/.verdi/data/derived/spec--widget"},
+		{"DesignProvenancePath/active", DesignProvenancePath(root, ZoneActive, "widget"), "/store/.verdi/specs/active/widget/design-provenance.jsonl"},
+		{"DesignProvenancePath/archive", DesignProvenancePath(root, ZoneArchive, "widget"), "/store/.verdi/specs/archive/widget/design-provenance.jsonl"},
+		{"WriterLockPath", WriterLockPath(root), "/store/.verdi/data/writer.lock"},
+		{"DraftMutationDir", DraftMutationDir(root, "widget"), "/store/.verdi/data/draft-mutation/widget"},
+		{"DraftMutationJournalPath", DraftMutationJournalPath(root, "widget"), "/store/.verdi/data/draft-mutation/widget/journal.json"},
+		{"DraftMutationSpecStagePath", DraftMutationSpecStagePath(root, "widget"), "/store/.verdi/data/draft-mutation/widget/spec.new"},
+		{"DraftMutationProvenanceStagePath", DraftMutationProvenanceStagePath(root, "widget"), "/store/.verdi/data/draft-mutation/widget/provenance.new"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -66,6 +73,10 @@ func TestRelativePaths(t *testing.T) {
 		{"DecisionConflictReportRelPath", DecisionConflictReportRelPath(ZoneActive, "widget"), ".verdi/specs/active/widget/decision-conflict-report.md"},
 		{"AttestationDirRelPath", AttestationDirRelPath("story-7"), ".verdi/attestations/story-7"},
 		{"DerivedSpecRelDir", DerivedSpecRelDir("spec--widget"), ".verdi/data/derived/spec--widget"},
+		{"DesignProvenanceRelPath/active", DesignProvenanceRelPath(ZoneActive, "widget"), ".verdi/specs/active/widget/design-provenance.jsonl"},
+		{"DesignProvenanceRelPath/archive", DesignProvenanceRelPath(ZoneArchive, "widget"), ".verdi/specs/archive/widget/design-provenance.jsonl"},
+		{"WriterLockRelPath", WriterLockRelPath(), ".verdi/data/writer.lock"},
+		{"DraftMutationRelDir", DraftMutationRelDir("widget"), ".verdi/data/draft-mutation/widget"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -125,6 +136,10 @@ func TestRelIsSlashOfAbsBelowRoot(t *testing.T) {
 		{"decisionconflict", DecisionConflictReportPath(root, ZoneActive, name), DecisionConflictReportRelPath(ZoneActive, name)},
 		{"attestationdir", AttestationDir(root, "story-7"), AttestationDirRelPath("story-7")},
 		{"derivedspecdir", DerivedSpecDir(root, "spec--widget"), DerivedSpecRelDir("spec--widget")},
+		{"designprovenance/active", DesignProvenancePath(root, ZoneActive, name), DesignProvenanceRelPath(ZoneActive, name)},
+		{"designprovenance/archive", DesignProvenancePath(root, ZoneArchive, name), DesignProvenanceRelPath(ZoneArchive, name)},
+		{"writerlock", WriterLockPath(root), WriterLockRelPath()},
+		{"draftmutation", DraftMutationDir(root, name), DraftMutationRelDir(name)},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
