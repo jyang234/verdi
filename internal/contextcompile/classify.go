@@ -299,9 +299,11 @@ func validateCandidateMaterial(material CandidateMaterial) error {
 	}
 	if material.Kind == IncludedParentFeatureFragment {
 		if material.Fragment == nil || material.Content != nil {
+			// vocab:identity — SI-84/SI-88 schema diagnostic naming the fixed parent-feature-fragment identity
 			return fmt.Errorf("parent-feature-fragment material requires Fragment and no Content")
 		}
 	} else if material.Fragment != nil {
+		// vocab:identity — SI-84/SI-88 schema diagnostic naming the fixed feature-fragment identity
 		return fmt.Errorf("material kind %q must not carry a feature fragment", material.Kind)
 	}
 	if material.Source == SourceHeadTree {
