@@ -765,6 +765,13 @@ func TestRunSync_CIFetch_ReachableByReaderFold(t *testing.T) {
 	repo := buildCloseFixtureRepo(t)
 	ctx := context.Background()
 	const specRef = "spec/close-fixture"
+	for _, kind := range []artifact.EvidenceKind{artifact.EvidenceStatic, artifact.EvidenceBehavioral} {
+		producer := selfHostedStaticProducer
+		if kind == artifact.EvidenceBehavioral {
+			producer = selfHostedBehavioralProducer
+		}
+		writeTestFile(t, filepath.Join(repo.Dir, ".verdi", "obligations", "close-fixture", "ac-1--"+string(kind)+".md"), []byte(fixtureElaboratedObligationMD("close-fixture", "ac-1", kind, producer, "7", gateFakeFrozenCommit)))
+	}
 
 	// The authoritative (source: ci) records a genuine verdi-evidence CI
 	// run would have produced and uploaded, keyed per spec — assembled
@@ -820,20 +827,22 @@ func TestRunSync_CIFetch_ReachableByReaderFold(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadRecords at the reader key: %v", err)
 	}
-	result, err := evidence.Fold(evidence.Input{Spec: spec, Records: records, Preview: false, StoreRoot: repo.Dir, StorySlug: store.RefSlug(spec.Story)})
+	result, err := evidence.Fold(evidence.Input{Spec: spec, Records: records, Preview: false, StoreRoot: repo.Dir, StorySlug: store.RefSlug(spec.Story), EvaluationCommit: repo.Head})
 	if err != nil {
 		t.Fatalf("Fold: %v", err)
 	}
 	if !result.Eligible {
-		t.Errorf("reader fold over the forge-fetched bundle: eligible=false, want true (loaded %d authoritative records) — the pulled evidence was NOT reachable by the fold", len(records))
+		t.Errorf("reader fold over the forge-fetched bundle: eligible=false, want true (loaded %d authoritative records) — the pulled evidence was NOT reachable by the fold: %+v", len(records), result)
 	}
 }
 
 // TestRunSync_ForceLocalRecords_IgnoredByAuthoritativeFold proves Part 2's
 // trust floor with a witness: records a local (--force-local) --produce run
 // wrote are stamped source: local and are therefore INVISIBLE to an
-// authoritative fold (Preview false) — only a --preview fold sees them. A
-// locally fabricated bundle can never fold as trusted.
+// authoritative fold (Preview false). Preview exposes them as advisory
+// signal, but an elaborated obligation's exact ci-job source requirement
+// still prevents them from becoming positive proof. A locally fabricated
+// bundle can never fold as trusted.
 func TestRunSync_ForceLocalRecords_IgnoredByAuthoritativeFold(t *testing.T) {
 	repo := buildCloseFixtureRepo(t)
 	ctx := context.Background()
@@ -858,7 +867,7 @@ func TestRunSync_ForceLocalRecords_IgnoredByAuthoritativeFold(t *testing.T) {
 
 	// Authoritative fold (Preview false): the source: local records are
 	// ignored, so the story cannot be eligible from them.
-	auth, err := evidence.Fold(evidence.Input{Spec: spec, Records: records, Preview: false, StoreRoot: repo.Dir, StorySlug: store.RefSlug(spec.Story)})
+	auth, err := evidence.Fold(evidence.Input{Spec: spec, Records: records, Preview: false, StoreRoot: repo.Dir, StorySlug: store.RefSlug(spec.Story), EvaluationCommit: repo.Head})
 	if err != nil {
 		t.Fatalf("authoritative Fold: %v", err)
 	}
@@ -866,14 +875,20 @@ func TestRunSync_ForceLocalRecords_IgnoredByAuthoritativeFold(t *testing.T) {
 		t.Error("authoritative fold folded local (advisory) records as evidence — the trust boundary leaked")
 	}
 
-	// Preview fold: the same advisory records ARE folded in, proving they
-	// were written correctly and are only gated by provenance, not absent.
-	preview, err := evidence.Fold(evidence.Input{Spec: spec, Records: records, Preview: true, StoreRoot: repo.Dir, StorySlug: store.RefSlug(spec.Story)})
+	// Preview fold: the same advisory records are considered, but exact
+	// obligation source matching keeps the story pending rather than letting
+	// source:local borrow source:ci authority.
+	preview, err := evidence.Fold(evidence.Input{Spec: spec, Records: records, Preview: true, StoreRoot: repo.Dir, StorySlug: store.RefSlug(spec.Story), EvaluationCommit: repo.Head})
 	if err != nil {
 		t.Fatalf("preview Fold: %v", err)
 	}
-	if !preview.Eligible {
-		t.Errorf("preview fold: eligible=false, want true (the advisory records should satisfy the ACs under --preview)")
+	if preview.Eligible || preview.ACs[0].Status != evidence.StatusPending {
+		t.Errorf("preview fold = %+v, want pending and ineligible because local evidence cannot match ci-job authority", preview)
+	}
+	for _, result := range preview.ACs[0].Kinds {
+		if result.ObligationQuality.Reason != evidence.ObligationReasonSourceMismatch {
+			t.Errorf("preview %s quality reason = %q, want %q", result.Kind, result.ObligationQuality.Reason, evidence.ObligationReasonSourceMismatch)
+		}
 	}
 }
 

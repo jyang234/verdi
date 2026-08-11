@@ -145,9 +145,12 @@ witness and run fresh, unpiped:
 
 Push the branch and open one draft PR. Its body must include exact base/head,
 the GLG spec path/blob identity, plan path and commit, SI IDs, requirement-to-
-test mapping, commit list, changed files, corpus witness for 282 legacy/27
-marker files plus pre/post-adoption behavior, full command output, three-valued
-disclosures and revert posture.
+test mapping, commit list, changed files, corpus witness for 282 legacy files
+and zero persisted unauthored-marker bodies, creation-surface marker behavior,
+pre/post-adoption behavior, full command output, three-valued disclosures and
+revert posture. This exact-tree audit corrects the earlier planning count of 27;
+the marker witness belongs to deterministic scaffolds, not invented corpus
+files.
 Do not claim experimental advisory execution, frontend presentation or frozen
 legacy remediation complete.
 ```

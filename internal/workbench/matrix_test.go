@@ -43,6 +43,9 @@ func TestMatrixHandler_Happy(t *testing.T) {
 	if !strings.Contains(body, "ac-1") {
 		t.Fatalf("missing AC rows, got: %s", body)
 	}
+	if !strings.Contains(body, "obligation-quality:missing") {
+		t.Fatalf("missing shared fold obligation-quality projection, got: %s", body)
+	}
 	if !strings.Contains(body, "story.violated") || !strings.Contains(body, "story.eligible") {
 		t.Fatalf("missing story eligibility summary, got: %s", body)
 	}

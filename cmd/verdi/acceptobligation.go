@@ -25,6 +25,7 @@ import (
 	"os"
 
 	"github.com/jyang234/verdi/internal/artifact"
+	"github.com/jyang234/verdi/internal/evidence"
 )
 
 // fallbackOperatorOwner is the disclosed sentinel operatorOwner falls back
@@ -60,12 +61,12 @@ func obligationBackstopDisclosureLine() string {
 // whole point of the disclosure is that nobody has said that yet.
 func backstopObligationBody(specRef, acID string, kind artifact.EvidenceKind, acText string) string {
 	return fmt.Sprintf(
-		"%s It is a placeholder for %s's %s evidence, written by `verdi\n"+
+		"%s\n%s It is a placeholder for %s's %s evidence, written by `verdi\n"+
 			"obligation scaffold` because no obligation existed for this pair yet\n"+
 			"(spec/creation-surfaces#ac-4). Replace this body with a first-person\n"+
 			"statement of what that evidence must specifically show before relying\n"+
 			"on it — by hand, or via `verdi obligation author %s %s %s` on this\n"+
 			"same design branch, before this pull request merges.\n"+
 			"The acceptance criterion's own declared text, for reference:\n\n%s\n",
-		obligationBackstopDisclosureLine(), acID, kind, specRef, acID, kind, acText)
+		evidence.UnauthoredObligationMarker, obligationBackstopDisclosureLine(), acID, kind, specRef, acID, kind, acText)
 }

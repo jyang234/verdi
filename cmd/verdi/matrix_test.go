@@ -75,6 +75,7 @@ func buildCorpusRepo(t *testing.T) *fixturegit.Repo {
 	// data/derived/ tree, preserving the corpus's commit-named
 	// subdirectories.
 	copyDerivedTree(t, filepath.Join(corpusTestdataDir, "derived"), filepath.Join(repo.Dir, ".verdi", "data", "derived"))
+	markFixtureLegacyObligationsUnresolved(t, repo.Dir)
 
 	return repo
 }
@@ -263,8 +264,8 @@ func TestCmdMatrix_RoundFourStory_RendersStoryFold(t *testing.T) {
 spec:  spec/borrower-update-api
 status: draft
 
-AC    STATUS     EVIDENCE                      TEXT                                                         OBLIGATION
-ac-1  no-signal  static:none; behavioral:none  PUT /applications/:id/update returns 200 with the new state  static: (no obligation); behavioral: (no obligation)
+AC    STATUS   EVIDENCE                                                                                    TEXT                                                         OBLIGATION
+ac-1  pending  static:pending(obligation-quality:missing); behavioral:pending(obligation-quality:missing)  PUT /applications/:id/update returns 200 with the new state  static: (no obligation); behavioral: (no obligation)
 
 story.violated: false
 story.eligible: false
@@ -500,6 +501,8 @@ kind: obligation
 title: "Static analysis obligation for AC-1"
 owners: [platform-team]
 for_kind: static
+quality:
+  state: unresolved-design-debt
 links:
   - { type: verifies, ref: "spec/matrix-obligation-fixture" }
 frozen: { at: 2026-01-01, commit: 3e91ab2 }
@@ -551,9 +554,9 @@ func TestCmdMatrix_ObligationColumn(t *testing.T) {
 spec:  spec/matrix-obligation-fixture
 status: accepted-pending-build
 
-AC    STATUS     EVIDENCE                      TEXT                               OBLIGATION
-ac-1  no-signal  static:none; behavioral:none  widget can be edited and saved     static: Static analysis obligation for AC-1; behavioral: (no obligation)
-ac-2  pending    runtime:awaited               widget edit is probed post-deploy  runtime: (no obligation)
+AC    STATUS   EVIDENCE                                                                                                   TEXT                               OBLIGATION
+ac-1  pending  static:pending(obligation-quality:unresolved-design-debt); behavioral:pending(obligation-quality:missing)  widget can be edited and saved     static: Static analysis obligation for AC-1; behavioral: (no obligation)
+ac-2  pending  runtime:pending(obligation-quality:missing)                                                                widget edit is probed post-deploy  runtime: (no obligation)
 
 story.violated: false
 story.eligible: false

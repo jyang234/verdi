@@ -49,6 +49,7 @@ const (
 	ReasonPrincipalResolutionUnproven   ReasonCode = "principal-resolution-unproven"
 	ReasonObligationAuthorVouchUnproven ReasonCode = "obligation-author-vouch-unproven"
 	ReasonObligationCountersignUnproven ReasonCode = "obligation-countersign-unproven"
+	ReasonObligationDesignUnresolved    ReasonCode = "obligation-design-unresolved"
 	ReasonObligationFoldGreenUnproven   ReasonCode = "obligation-fold-green-unproven"
 	ReasonObligationUnknownKind         ReasonCode = "obligation-unknown-kind"
 )
@@ -63,6 +64,7 @@ var reasonClasses = map[ReasonCode]BlockerClass{
 	ReasonPrincipalResolutionUnproven:   ClassGovernance,
 	ReasonObligationAuthorVouchUnproven: ClassJudgmental,
 	ReasonObligationCountersignUnproven: ClassGovernance,
+	ReasonObligationDesignUnresolved:    ClassMechanical,
 	ReasonObligationFoldGreenUnproven:   ClassMechanical,
 	ReasonObligationUnknownKind:         ClassUnknown,
 }

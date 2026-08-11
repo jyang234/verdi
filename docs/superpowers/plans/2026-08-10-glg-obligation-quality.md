@@ -27,8 +27,10 @@ new SI-71..SI-74; inherited obligation artifact/gate/seam/wall authority.
   ACs remain exempt. Evidence records gain no `obligation_id`.
 - No new CLI verb, MCP tool, lifecycle state, store root or operating-model
   transition.
-- No frontend markup/CSS/JS/Playwright change. Backend workbench writer tests
-  may change; a later FABLE unit owns presentation.
+- No frontend markup/CSS/JS or new presentation behavior. Backend workbench
+  writer tests may change, and existing Playwright assertions may be ratcheted
+  only when this backend truth changes an incumbent surface's output; a later
+  FABLE unit owns presentation implementation.
 - Do not edit 282 frozen legacy obligation files. Do not call missing fields
   elaborated. Do not make unresolved scaffolds fail acceptance-time VL-020.
 
@@ -67,11 +69,14 @@ validation never claims the prose is substantively sufficient.
 The implementation pins `ObligationQualityAdoptionCommit` to the exact
 first-parent owner-merge commit that makes this plan and SI-71..SI-74 reachable.
 An absent `quality` block is `legacy-unelaborated`, a valid compatibility
-decode but never elaborated. The 27 known marker bodies also assess unresolved.
-Every new scaffold writer emits explicit unresolved state. Frozen legacy or
-unresolved obligations are remedied only by a new replacement obligation on a
-successor story/spec through the normal specification amendment ladder; this
-unit does not mutate them in place or invent an obligation-supersession edge.
+decode but never elaborated. Exact-tree audit at the planning base found zero
+persisted bodies carrying the unauthored marker, correcting the earlier
+planning count of 27. Marker-bearing bodies still assess unresolved, and every
+new scaffold writer emits the marker plus explicit unresolved state. Frozen
+legacy or unresolved obligations are remedied only by a new replacement
+obligation on a successor story/spec through the normal specification
+amendment ladder; this unit does not mutate them in place or invent an
+obligation-supersession edge.
 
 Adoption is prospective, not retroactive. When an authoritative fold is
 explicitly evaluated at a commit that is an ancestor of or equal to the
@@ -242,10 +247,11 @@ Commit: `Project obligation quality blockers`
 ## Task 6: Prove compatibility and gates
 
 Add a corpus witness: exactly 282 legacy files remain unmodified, every absent
-quality field assesses legacy-unelaborated, all 27 marker bodies remain visible
-unresolved, historical folds at/before the adoption commit retain incumbent
-results, and post-adoption positive evidence cannot borrow legacy meaning. Run
-fresh, unpiped:
+quality field assesses legacy-unelaborated, the exact base contains zero
+persisted unauthored-marker bodies, every creation-surface scaffold emits the
+marker and assesses unresolved, historical folds at/before the adoption commit
+retain incumbent results, and post-adoption positive evidence cannot borrow
+legacy meaning. Run fresh, unpiped:
 
 ```sh
 make test

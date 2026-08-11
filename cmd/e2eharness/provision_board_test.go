@@ -54,6 +54,38 @@ func TestBadgeSpecDecodes(t *testing.T) {
 	}
 }
 
+func TestSlotWallObligationQualityDecodes(t *testing.T) {
+	tests := []struct {
+		kind         artifact.EvidenceKind
+		producerKind artifact.ObligationProducerKind
+		sourceKind   artifact.ObligationSourceKind
+	}{
+		{artifact.EvidenceStatic, artifact.ObligationProducerChecker, artifact.ObligationSourceCIJob},
+		{artifact.EvidenceBehavioral, artifact.ObligationProducerTest, artifact.ObligationSourceCIJob},
+		{artifact.EvidenceAttestation, artifact.ObligationProducerAuthenticatedHuman, artifact.ObligationSourceGovernedAttestation},
+	}
+	for _, tt := range tests {
+		t.Run(string(tt.kind), func(t *testing.T) {
+			fmBytes, _, err := artifact.SplitFrontmatter([]byte(slotWallObligation(tt.kind)))
+			if err != nil {
+				t.Fatalf("SplitFrontmatter: %v", err)
+			}
+			obligation, err := artifact.DecodeObligation(fmBytes)
+			if err != nil {
+				t.Fatalf("DecodeObligation: %v", err)
+			}
+			if obligation.ForKind != tt.kind || obligation.Quality == nil {
+				t.Fatalf("decoded obligation = %+v, want %s with quality", obligation, tt.kind)
+			}
+			if obligation.Quality.State != artifact.ObligationQualityElaborated ||
+				obligation.Quality.Producer.Kind != tt.producerKind ||
+				obligation.Quality.AuthoritativeSource.Kind != tt.sourceKind {
+				t.Errorf("quality = %+v, want elaborated %s/%s declaration", obligation.Quality, tt.producerKind, tt.sourceKind)
+			}
+		})
+	}
+}
+
 // TestACCountSpecDecodesAndStraddlesTheThreshold proves the size-smell
 // fixture pair (spec/case-file-flags ac-2/ac-3) is valid and HONEST:
 // both instances strict-decode with exactly their declared AC counts,

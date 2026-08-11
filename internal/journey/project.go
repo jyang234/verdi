@@ -34,9 +34,26 @@ func (p Projector) Project(ctx context.Context, cfg *store.Config, arg string) (
 		Declared:    strings.Join(facts.Owners, ","),
 		Attribution: governanceprincipal.NewUnauthenticatedAttribution(),
 	}
+	evaluationCommit := ""
+	if facts.Repository.Head.Known {
+		evaluationCommit = facts.Repository.Head.Value
+	}
+	specLandingCommit := ""
+	if facts.Lifecycle.AcceptedBaseline != nil {
+		specLandingCommit = facts.Lifecycle.AcceptedBaseline.LandingCommit
+	}
+	targetCommit := evaluationCommit
+	if facts.Repository.Source == "remote-ref" && facts.Repository.DefaultBranch.Known {
+		targetCommit = facts.Repository.DefaultBranch.Head
+	}
+	qualityFacts, err := p.obligations.Assess(ctx, cfg.Root, facts.Target.Path, facts.Target.Class, targetCommit, evaluationCommit, specLandingCommit)
+	if err != nil {
+		return Record{}, fmt.Errorf("journey: assessing obligation quality: %w", err)
+	}
 
 	candidates, classDeclared := candidateTransitions(cfg.Model, facts.Target.Class, facts.LifecycleResult)
 	current := deriveBlockers(facts.Repository.DefaultBranch.Known, profileAdopted, facts.LifecycleResult, candidates, owner)
+	current = mergeObligationQualityBlockers(current, deriveObligationQualityBlockers(qualityFacts, owner))
 	principals := derivePrincipals(candidates)
 	if profileAdopted {
 		principals.ProfileAdopted = true

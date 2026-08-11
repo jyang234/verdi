@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/jyang234/verdi/internal/artifact"
 	"github.com/jyang234/verdi/internal/evidence"
 	"github.com/jyang234/verdi/internal/fixturegit"
 	"github.com/jyang234/verdi/internal/forge"
@@ -29,7 +30,7 @@ story: jira:LOAN-1482
 problem: { text: "x", anchor: problem }
 outcome: { text: "y", anchor: outcome }
 acceptance_criteria:
-  - { id: ac-1, text: "static obligation holds", evidence: [attestation] }
+  - { id: ac-1, text: "static obligation holds", evidence: [static] }
 links:
   - { type: implements, ref: "spec/loan-mgmt#ac-1" }
 frozen: { at: 2024-01-01, commit: ` + gateFakeFrozenCommit + `}
@@ -75,8 +76,9 @@ func buildClosureGateQuarantineRepo(t *testing.T) *fixturegit.Repo {
 	t.Helper()
 	repo := fixturegit.Build(t, []fixturegit.Layer{{
 		Files: map[string]string{
-			".verdi/verdi.yaml":                            "schema: verdi.layout/v1\nforge: gitlab\n",
-			".verdi/specs/active/quarantine-story/spec.md": closureGateQuarantineStorySpecMD,
+			".verdi/verdi.yaml":                                   "schema: verdi.layout/v1\nforge: gitlab\n",
+			".verdi/specs/active/quarantine-story/spec.md":        closureGateQuarantineStorySpecMD,
+			".verdi/obligations/quarantine-story/ac-1--static.md": fixtureElaboratedObligationMD("quarantine-story", "ac-1", artifact.EvidenceStatic, "closure-gate-static", "1", gateFakeFrozenCommit),
 		},
 		Message: "closure gate quarantine fixture",
 	}})
@@ -103,7 +105,7 @@ func writeClosureGateDerivedRecord(t *testing.T, root, specID, commitDir, record
 // spec/quarantine-story's ac-1, at provenance.commit commit.
 func closureGateQuarantineRecordJSON(commit string) string {
 	return `[{"schema":"verdi.evidence/v1","evidence_for":["ac-1"],"kind":"static","verdict":"pass",` +
-		`"witness":"someFunc @ site","provenance":{"source":"ci","pipeline":"1","commit":"` + commit + `"},` +
+		`"witness":"someFunc @ site","producer":"closure-gate-static","provenance":{"source":"ci","pipeline":"1","job":"1","commit":"` + commit + `"},` +
 		`"digest":"sha256:` + strings.Repeat("ab", 32) + `"}]`
 }
 
@@ -154,7 +156,7 @@ func TestRunClosureGate_UnreachableCommitRecord_NeverOperational(t *testing.T) {
 // disclosure naming it is unambiguous).
 func closureGateQuarantineFailRecordJSON(commit string) string {
 	return `[{"schema":"verdi.evidence/v1","evidence_for":["ac-1"],"kind":"static","verdict":"fail",` +
-		`"witness":"adverseFailWitness @ site","provenance":{"source":"ci","pipeline":"1","commit":"` + commit + `"},` +
+		`"witness":"adverseFailWitness @ site","producer":"closure-gate-static","provenance":{"source":"ci","pipeline":"1","job":"1","commit":"` + commit + `"},` +
 		`"digest":"sha256:` + strings.Repeat("ab", 32) + `"}]`
 }
 
@@ -393,14 +395,40 @@ func buildClosureGateRepo(t *testing.T) *fixturegit.Repo {
 	t.Setenv("CI_DEFAULT_BRANCH", "main")
 	repo := fixturegit.Build(t, []fixturegit.Layer{{
 		Files: map[string]string{
-			".verdi/verdi.yaml":                         "schema: verdi.layout/v1\nforge: gitlab\n",
-			".verdi/specs/active/stale-decline/spec.md": closureGateStorySpecMD,
-			".verdi/specs/active/loan-mgmt/spec.md":     featureV1SpecMD,
+			".verdi/verdi.yaml":                                "schema: verdi.layout/v1\nforge: gitlab\n",
+			".verdi/specs/active/stale-decline/spec.md":        closureGateStorySpecMD,
+			".verdi/specs/active/loan-mgmt/spec.md":            featureV1SpecMD,
+			".verdi/obligations/stale-decline/ac-1--static.md": fixtureElaboratedObligationMD("stale-decline", "ac-1", artifact.EvidenceStatic, "fixture-static", "1", gateFakeFrozenCommit),
 		},
 		Message: "closure gate fixture",
 	}})
 	checkoutBranch(t, repo.Dir, "feature/stale-decline")
 	return repo
+}
+
+// buildClosureGateAttestationRepo keeps the attestation declaration only for
+// the read-error regression below. Authored attestation is not a post-adoption
+// success fixture: this unit has no authenticated-human source identity and
+// must leave such positive satisfaction unproven.
+func buildClosureGateAttestationRepo(t *testing.T) *fixturegit.Repo {
+	t.Helper()
+	t.Setenv("CI_DEFAULT_BRANCH", "main")
+	spec := strings.Replace(closureGateStorySpecMD, "evidence: [static]", "evidence: [attestation]", 1)
+	repo := fixturegit.Build(t, []fixturegit.Layer{{
+		Files: map[string]string{
+			".verdi/verdi.yaml":                         "schema: verdi.layout/v1\nforge: gitlab\n",
+			".verdi/specs/active/stale-decline/spec.md": spec,
+			".verdi/specs/active/loan-mgmt/spec.md":     featureV1SpecMD,
+		},
+		Message: "closure gate unreadable-attestation fixture",
+	}})
+	checkoutBranch(t, repo.Dir, "feature/stale-decline")
+	return repo
+}
+
+func seedClosureGateEvidence(t *testing.T, root, commit string) {
+	t.Helper()
+	writeFixtureVerdicts(t, root, "spec/stale-decline", commit, featureFixtureEvidenceJSON("ac-1", "static", "pass", commit))
 }
 
 func seedAttestation(t *testing.T, root string) {
@@ -416,28 +444,28 @@ func seedAttestation(t *testing.T, root string) {
 }
 
 // TestRunClosureGate_EligibleCondition proves the closure gate's condition
-// 1: not eligible without the attestation, eligible with it.
+// 1: not eligible without matching evidence, eligible with it.
 func TestRunClosureGate_EligibleCondition(t *testing.T) {
 	repo := buildClosureGateRepo(t)
 	spec, _ := readSpec(t, repo.Dir, "stale-decline")
 	ctx := context.Background()
 
-	t.Run("no attestation: not eligible", func(t *testing.T) {
+	t.Run("no evidence: not eligible", func(t *testing.T) {
 		var stdout bytes.Buffer
 		ok, err := runClosureGate(ctx, repo.Dir, spec, nil, "main", nil, nil, repo.Head, &stdout)
 		if err != nil {
 			t.Fatal(err)
 		}
 		if ok {
-			t.Fatal("runClosureGate() = true, want false (no attestation, not eligible)")
+			t.Fatal("runClosureGate() = true, want false (no evidence, not eligible)")
 		}
 		if !contains(stdout.String(), "[FAIL] closure: 1.") {
 			t.Fatalf("stdout = %q, want condition 1 to FAIL", stdout.String())
 		}
 	})
 
-	t.Run("attestation present: eligible, closure gate passes", func(t *testing.T) {
-		seedAttestation(t, repo.Dir)
+	t.Run("matching evidence present: eligible, closure gate passes", func(t *testing.T) {
+		seedClosureGateEvidence(t, repo.Dir, repo.Head)
 		// Condition 4 (X-13/X-16/X-17): a living, fully-dispositioned report
 		// already covering head, so the gate genuinely holds overall.
 		writeGateReport(t, repo.Dir, repo.Head, dispositionedFindingYAML)
@@ -457,7 +485,7 @@ func TestRunClosureGate_EligibleCondition(t *testing.T) {
 // counter-pressure) and passes once no such flag is raised.
 func TestRunClosureGate_SpecStaleCondition(t *testing.T) {
 	repo := buildClosureGateRepo(t)
-	seedAttestation(t, repo.Dir)
+	seedClosureGateEvidence(t, repo.Dir, repo.Head)
 	spec, _ := readSpec(t, repo.Dir, "stale-decline")
 	ctx := context.Background()
 
@@ -596,7 +624,7 @@ func TestClosureGate_LaunderingReplay_SpecStaleCountUnchangedAcrossReroll(t *tes
 // exit criterion.
 func TestRunClosureGate_PendingSupersessionCondition(t *testing.T) {
 	repo := buildClosureGateRepo(t)
-	seedAttestation(t, repo.Dir)
+	seedClosureGateEvidence(t, repo.Dir, repo.Head)
 	spec, _ := readSpec(t, repo.Dir, "stale-decline")
 	writeGateReport(t, repo.Dir, repo.Head, dispositionedFindingYAML)
 	ctx := context.Background()
@@ -656,7 +684,7 @@ func TestRunClosureGate_PendingSupersessionDisclosedUnproven(t *testing.T) {
 
 	t.Run("nil forge: disclosed-unproven notice, not a silent pass", func(t *testing.T) {
 		repo := buildClosureGateRepo(t)
-		seedAttestation(t, repo.Dir)
+		seedClosureGateEvidence(t, repo.Dir, repo.Head)
 		spec, _ := readSpec(t, repo.Dir, "stale-decline")
 		// Condition 4 (X-13/X-16/X-17): so the disclosure on condition 3 is
 		// the only thing keeping this gate from a full PASS.
@@ -682,7 +710,7 @@ func TestRunClosureGate_PendingSupersessionDisclosedUnproven(t *testing.T) {
 
 	t.Run("reachable forge, no open MR: condition 3 passes", func(t *testing.T) {
 		repo := buildClosureGateRepo(t)
-		seedAttestation(t, repo.Dir)
+		seedClosureGateEvidence(t, repo.Dir, repo.Head)
 		spec, _ := readSpec(t, repo.Dir, "stale-decline")
 		writeGateReport(t, repo.Dir, repo.Head, dispositionedFindingYAML)
 
@@ -708,7 +736,7 @@ func TestRunClosureGate_PendingSupersessionDisclosedUnproven(t *testing.T) {
 // detail turns an otherwise-ready gate into a refusal.
 func TestRunClosureGateOutcome_CountsConditionAndRecordDisclosuresWithoutChangingReady(t *testing.T) {
 	repo := buildClosureGateRepo(t)
-	seedAttestation(t, repo.Dir)
+	seedClosureGateEvidence(t, repo.Dir, repo.Head)
 	spec, _ := readSpec(t, repo.Dir, "stale-decline")
 	writeGateReport(t, repo.Dir, repo.Head, dispositionedFindingYAML)
 
@@ -736,9 +764,10 @@ func freshClosureGateRepoForBuildStart(t *testing.T) *fixturegit.Repo {
 	t.Helper()
 	return fixturegit.Build(t, []fixturegit.Layer{{
 		Files: map[string]string{
-			".verdi/verdi.yaml":                         "schema: verdi.layout/v1\nforge: gitlab\n",
-			".verdi/specs/active/stale-decline/spec.md": closureGateStorySpecMD,
-			".verdi/specs/active/loan-mgmt/spec.md":     featureV1SpecMD,
+			".verdi/verdi.yaml":                                "schema: verdi.layout/v1\nforge: gitlab\n",
+			".verdi/specs/active/stale-decline/spec.md":        closureGateStorySpecMD,
+			".verdi/specs/active/loan-mgmt/spec.md":            featureV1SpecMD,
+			".verdi/obligations/stale-decline/ac-1--static.md": fixtureElaboratedObligationMD("stale-decline", "ac-1", artifact.EvidenceStatic, "fixture-static", "1", gateFakeFrozenCommit),
 		},
 		Message: "closure gate fixture, no build branch yet",
 	}})
@@ -794,7 +823,7 @@ func TestRunClosureGate_DispositionCompleteCondition(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			repo := buildClosureGateRepo(t)
-			seedAttestation(t, repo.Dir) // condition 1 holds regardless
+			seedClosureGateEvidence(t, repo.Dir, repo.Head) // condition 1 holds regardless
 			spec, _ := readSpec(t, repo.Dir, "stale-decline")
 			tc.setup(t, repo.Dir, repo.Head)
 
@@ -840,7 +869,7 @@ func TestRunClosureGate_UnreadableAttestation_OperationalFailure(t *testing.T) {
 	if os.Geteuid() == 0 {
 		t.Skip("DISCLOSURE: running as root — os.Chmod(0o000) does not restrict root's own reads, so this permission-based negative test cannot exercise the unreadable-attestation path under this user")
 	}
-	repo := buildClosureGateRepo(t)
+	repo := buildClosureGateAttestationRepo(t)
 	seedAttestation(t, repo.Dir) // authored attestation at attestations/jira-loan-1482/ac-1.md
 	spec, _ := readSpec(t, repo.Dir, "stale-decline")
 	ctx := context.Background()

@@ -122,6 +122,29 @@ func editSpecField(t *testing.T, ctx context.Context, root, name string, re *reg
 	}
 }
 
+// elaborateRitualObligation replaces a design-start unresolved scaffold (or
+// supplies the hand-written successor's missing declaration) before the
+// specification branch lands. These build-success fixtures are deliberately
+// post-adoption, so they must carry executable obligation design rather than
+// borrowing legacy or unresolved meaning.
+func elaborateRitualObligation(t *testing.T, ctx context.Context, root, specName string) {
+	t.Helper()
+	path := filepath.Join(root, ".verdi", "obligations", specName, "ac-1--static.md")
+	content := fixtureElaboratedObligationMD(specName, "ac-1", artifact.EvidenceStatic, "fixture-static", "1", gateFakeFrozenCommit)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("mkdir %s: %v", filepath.Dir(path), err)
+	}
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("writing %s: %v", path, err)
+	}
+	if err := gitx.AddAll(ctx, root); err != nil {
+		t.Fatalf("AddAll: %v", err)
+	}
+	if _, err := gitx.CreateCommit(ctx, root, "elaborate obligation for "+specName); err != nil {
+		t.Fatalf("CreateCommit: %v", err)
+	}
+}
+
 // fileConflict writes .verdi/conflicts/<name>.md and commits it directly
 // on whatever branch is currently checked out — 03 §Challenging closed
 // decisions step 1, "this is also the rung-3/4 blocker record". Conflict
@@ -300,6 +323,7 @@ func TestRoundFourRitual_FullLoop(t *testing.T) {
 	if got := runDesignStart(ctx, repo.Dir, artifact.ClassStory, "jira:LOAN-1482", "stale-decline-story", manifest, phase7Model(t), designDepsV, &stdout, &stderr); got != 0 {
 		t.Fatalf("design start (story) = %d, want 0; stderr=%s", got, stderr.String())
 	}
+	elaborateRitualObligation(t, ctx, repo.Dir, "stale-decline-story")
 	story, _ := readSpec(t, repo.Dir, "stale-decline-story")
 	if story.Title != "Stale Decline" {
 		t.Fatalf("story.Title = %q, want the provider-resolved title Stale Decline", story.Title)
@@ -365,6 +389,7 @@ x
 x
 `
 	writeDraftSpec(t, ctx, repo.Dir, "stale-decline-story-v2", storyV2)
+	elaborateRitualObligation(t, ctx, repo.Dir, "stale-decline-story-v2")
 
 	// --- 10. merge spec/stale-decline-story-v2's design branch into main ---
 	mergeIntoMain(t, ctx, repo.Dir, "design/stale-decline-story-v2")

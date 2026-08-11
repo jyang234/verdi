@@ -9,6 +9,7 @@ import (
 
 	"github.com/jyang234/verdi/internal/artifact"
 	"github.com/jyang234/verdi/internal/atomicfile"
+	"github.com/jyang234/verdi/internal/humanartifact"
 )
 
 // Obligation is what a caller needs to render one (AC, evidence-kind)
@@ -193,6 +194,17 @@ type ObligationInput struct {
 // internal/workbench/obligationauthor_test.go's existing suite passing
 // unmodified.
 func RenderObligation(in ObligationInput) string {
+	// Obligation creation remains on the shared human-artifact contract:
+	// validate the registered kernel before materializing its required quality
+	// default. The renderer stays deterministic and fixed-shape; this is not
+	// a second configurable renderer or a project-selected proof schema.
+	contract, ok := humanartifact.ContractFor(string(artifact.KindObligation))
+	if !ok {
+		panic("evidence: obligation human-artifact contract is not registered")
+	}
+	if err := contract.Validate(); err != nil {
+		panic("evidence: invalid obligation human-artifact contract: " + err.Error())
+	}
 	var b strings.Builder
 	b.WriteString("---\n")
 	fmt.Fprintf(&b, "id: %s\n", in.ID)
@@ -204,6 +216,8 @@ func RenderObligation(in ObligationInput) string {
 	}
 	fmt.Fprintf(&b, "owners: [%s]\n", strings.Join(quotedOwners, ", "))
 	fmt.Fprintf(&b, "for_kind: %s\n", in.ForKind)
+	b.WriteString("quality:\n")
+	fmt.Fprintf(&b, "  state: %s\n", artifact.ObligationQualityUnresolved)
 	b.WriteString("links:\n")
 	fmt.Fprintf(&b, "  - { type: verifies, ref: %q }\n", in.VerifiesRef)
 	fmt.Fprintf(&b, "frozen: { at: %s, commit: %s }\n", in.Frozen.At, in.Frozen.Commit)

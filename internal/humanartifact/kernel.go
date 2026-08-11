@@ -76,7 +76,7 @@ var kernelFieldTable = map[string][]string{
 	string(artifact.KindAttestation):   specBaseFields,
 	string(artifact.KindWaiver):        withFields(withStatus(specBaseFields), "reason", "expiry"),
 	string(artifact.KindReaffirmation): withFields(specBaseFields, "object", "hash"),
-	string(artifact.KindObligation):    withFields(specBaseFields, "for_kind"),
+	string(artifact.KindObligation):    withFields(specBaseFields, "for_kind", "quality"),
 
 	policyartifact.KindPolicy:    {"schema", "id", "kind", "title", "owners", "template", "scope", "claims", "instructions", "payloads"},
 	policyartifact.KindOverlay:   {"schema", "id", "kind", "title", "owners", "template", "refines", "scope", "refinements"},
