@@ -17,7 +17,10 @@ package execworkspace
 // (EPERM/EACCES/EINVAL/ENOSYS/EOPNOTSUPP) — asserted and logged as the
 // named operational refusal leg, never a silent pass and never
 // isolation-success in that leg. Any other Start failure, or an isolation
-// witness that does not hold on success, fails the test outright.
+// witness that does not hold on success, fails the test outright. A witness
+// leg that cannot be EVIDENCED — the child failing to enumerate interfaces
+// at all — is disclosed as unproven and fails the test as well; it is never
+// rendered as the no-non-loopback success.
 //
 // No external network: the only endpoint this test ever touches is the
 // listener it opens itself on 127.0.0.1:0.
@@ -46,11 +49,22 @@ import (
 var helperNetProbeAddr = flag.String("execworkspace.helper.netprobe", "",
 	"internal: when non-empty, TestExecworkspaceHelperNetProbe dials this loopback address and reports the outcome on stdout (re-exec helper for the hermetic Linux network start probe)")
 
+// The helper's stdout markers. Every pair is mutually NON-SUBSTRING, so the
+// parent's strings.Contains assertions can never cross-match — in
+// particular NETPROBE_INTERFACES_UNPROVEN is not a substring of, and does
+// not contain, either NETPROBE_NO_NON_LOOPBACK or
+// NETPROBE_NON_LOOPBACK_FOUND.
 const (
 	netProbeDialFailed       = "NETPROBE_DIAL_FAILED"
 	netProbeDialSucceeded    = "NETPROBE_DIAL_SUCCEEDED"
 	netProbeNonLoopbackFound = "NETPROBE_NON_LOOPBACK_FOUND"
 	netProbeNoNonLoopback    = "NETPROBE_NO_NON_LOOPBACK"
+	// netProbeInterfacesUnproven is the host-interface leg's
+	// disclosed-as-unproven marker (CLAUDE.md three-valued honesty): the
+	// child could not enumerate, so that leg produced NO evidence and must
+	// never be rendered as the no-non-loopback success. Printed with the
+	// error detail after a colon; the parent rejects it outright.
+	netProbeInterfacesUnproven = "NETPROBE_INTERFACES_UNPROVEN"
 )
 
 // TestExecworkspaceHelperNetProbe is not a test of this package; it is the
@@ -74,28 +88,45 @@ func TestExecworkspaceHelperNetProbe(t *testing.T) {
 	}
 
 	nonLoopback := false
+	unproven := false
 	ifaces, ierr := net.Interfaces()
 	if ierr != nil {
-		// Cannot enumerate: cannot claim isolation either way, so report
-		// explicitly rather than silently assuming success either
-		// direction (the parent's NoNonLoopback check below then fails,
-		// disclosed, rather than passing on an unproven claim).
-		fmt.Println("NETPROBE_INTERFACES_ERROR:", ierr)
+		// Cannot enumerate at all: this leg has NO evidence, so it is
+		// disclosed as unproven and the success marker is withheld below.
+		unproven = true
+		fmt.Println(netProbeInterfacesUnproven+":", ierr)
 	} else {
 		for _, iface := range ifaces {
 			if iface.Flags&net.FlagLoopback != 0 {
 				continue
 			}
 			addrs, aerr := iface.Addrs()
-			if aerr != nil || len(addrs) == 0 {
+			if aerr != nil {
+				// This interface exists but its addresses are unreadable:
+				// it can be neither confirmed nor ruled out as a host
+				// interface, so the leg is unproven too.
+				unproven = true
+				fmt.Println(netProbeInterfacesUnproven+":", aerr)
+				continue
+			}
+			if len(addrs) == 0 {
 				continue
 			}
 			nonLoopback = true
 		}
 	}
-	if nonLoopback {
+	switch {
+	case nonLoopback:
+		// A host interface was genuinely OBSERVED: that is a positive
+		// isolation failure, reported even when some other interface was
+		// unreadable, so the parent's failure assertion stays reachable.
 		fmt.Println(netProbeNonLoopbackFound)
-	} else {
+	case unproven:
+		// No host interface was found, but enumeration itself failed, so
+		// "found none" is not a proven claim: print NO success marker.
+		// The parent fatals on the unproven marker, and would fatal on the
+		// missing success marker regardless — never a silent pass.
+	default:
 		fmt.Println(netProbeNoNonLoopback)
 	}
 }
@@ -177,6 +208,9 @@ func TestHermeticLinuxNetworkStartProbe(t *testing.T) {
 	}
 	if strings.Contains(out, netProbeDialSucceeded) {
 		t.Fatalf("helper reported %s (stdout=%q): the network namespace did not isolate the child", netProbeDialSucceeded, out)
+	}
+	if strings.Contains(out, netProbeInterfacesUnproven) {
+		t.Fatalf("helper reported %s (stdout=%q): the host-interface leg produced no evidence, which is disclosed-as-unproven and never a pass", netProbeInterfacesUnproven, out)
 	}
 	if !strings.Contains(out, netProbeNoNonLoopback) {
 		t.Fatalf("helper did not report %s (stdout=%q): the child must see no non-loopback interface", netProbeNoNonLoopback, out)
