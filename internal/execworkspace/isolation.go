@@ -23,20 +23,34 @@ package execworkspace
 // argv0 allowlist, enforced when the launch is constructed) and timeouts (a
 // deadline, applied to the constructed launch's context), plus the base
 // profile every grant set gets regardless of which grants it names — a
-// clean environment with controlled HOME/XDG discovery. network, path-read,
+// clean environment with controlled HOME/XDG discovery. path-read,
 // path-write, and resource-ceilings have no v0 mechanism.
+//
+// SI-75/SI-76 (network.go, network_linux.go, network_unsupported.go) give
+// network its own mechanism, orthogonal to AD-9's row-based model: a
+// PRESENT network grant is mechanically appliable exactly like
+// process-execution/timeouts above (an applied row, explicit ambient
+// permission enforced by Profile.Command attaching no namespace); an
+// ABSENT grant is a MANDATORY control the row model cannot represent at
+// all, since a row only exists for a grant that was requested — so
+// EnforcementReport gains a separate, always-present Network fact instead
+// (this file, EnforcementReport.Network) that names the default-deny
+// posture whether or not network was ever requested.
 //
 // AD-5 makes every granted control REQUIRED: a control the component
 // cannot apply is not a silent partial success. BuildProfile always
 // returns its EnforcementReport (the facts survive), but when any row is
-// could-not-apply it ALSO returns a non-nil error — reusing this package's
-// existing *OperationalError type from materialize.go, which is its one
-// shared retryable-disclosed-failure type. That type's Error() prefixes
-// only "execworkspace: " and lets the Op name the subsystem, so this
-// failure renders as "execworkspace: isolation-profile: apply-grants: ..."
-// and is never mislabelled as a materialization failure. The Op and Err
-// fields carry the specific content (which grant kinds could not be
-// applied), and errors.As reaches the typed value through any wrap.
+// could-not-apply — or the mandatory network deny cannot be configured
+// (SI-75/SI-76, the same failure class) — it ALSO returns a non-nil error
+// — reusing this package's existing *OperationalError type from
+// materialize.go, which is its one shared retryable-disclosed-failure
+// type. That type's Error() prefixes only "execworkspace: " and lets the
+// Op name the subsystem, so this failure renders as "execworkspace:
+// isolation-profile: apply-grants: ..." and is never mislabelled as a
+// materialization failure. The Op and Err fields carry the specific
+// content (which grant kinds could not be applied, and whether network's
+// deny is among them), and errors.As reaches the typed value through any
+// wrap.
 //
 // Grounding for the fail-closed posture (spec §Isolation-control
 // application, quoted there): CI dc-10 — "authoritative launch fails when
@@ -80,6 +94,7 @@ var profileOwnedEnvKeys = map[string]bool{
 // BuildProfile constructs a Profile actually backed by a workspace.
 type Profile struct {
 	env           map[string]string
+	network       NetworkEnforcement
 	Timeout       time.Duration
 	AllowedArgv0s []string
 }
@@ -119,6 +134,18 @@ func (p Profile) Env() []string {
 //     prefix, base-name, symlink or path-normalization matching, since any
 //     looser rule would silently widen a ratified allowlist. A miss is an
 //     operational error naming argv0 and the whole allowlist.
+//   - The profile's network enforcement fact (p.network, set by
+//     BuildProfile — design §3, ledger SI-75/SI-76) must have a launchable
+//     mechanism: networkSysProcAttr (network_linux.go/network_
+//     unsupported.go, the platform seam) maps an explicit ambient allow to
+//     a nil SysProcAttr and a configured deny to the platform's exact
+//     namespace attrs, and refuses (operational error, no Cmd) every other
+//     state — an unconfigured deny or a zero/unset mode is never started
+//     (design §5). This check runs LAST, after the two checks above, so
+//     the pre-existing execution-allowance and allowlist refusals keep
+//     their exact original failure reasons on a zero-value or
+//     network-less Profile; only a Profile that already cleared both earlier
+//     gates ever reaches it.
 //
 // On success: when Timeout > 0 (a GrantTimeouts grant), the returned
 // context is context.WithTimeout(ctx, Timeout) and the Cmd is built with
@@ -132,7 +159,11 @@ func (p Profile) Env() []string {
 // cmd.Env is set to exactly Env(): the profile environment and nothing
 // inherited. cmd.Dir is deliberately NOT set — the working directory is the
 // consumer's choice (it may want the unit path, a subdirectory of it, or
-// somewhere else entirely), and this seam never guesses it.
+// somewhere else entirely), and this seam never guesses it. cmd.SysProcAttr
+// is set to networkSysProcAttr's result and NOTHING ELSE composes a second
+// value onto it (design §4: "no consumer composes a second value").
+// cmd.ExtraFiles is never set (design §2: "Profile.Command creates no
+// ExtraFiles"), so it is always nil on the returned Cmd.
 //
 // DISCLOSED LIMIT: os/exec resolves an argv0 containing no path separator
 // through LookPath against the CALLING PROCESS's PATH, not cmd.Env, so for
@@ -157,6 +188,12 @@ func (p Profile) Command(ctx context.Context, argv0 string, args ...string) (*ex
 			argv0, strings.Join(p.AllowedArgv0s, ", ")))
 	}
 
+	sysProcAttr, npErr := networkSysProcAttr(p.network)
+	if npErr != nil {
+		return nil, nil, nil, operationalError("isolation-profile: launch", fmt.Errorf(
+			"network enforcement not launchable for %q: %w (SI-75/SI-76)", argv0, npErr))
+	}
+
 	runCtx := ctx
 	cancel := context.CancelFunc(func() {})
 	if p.Timeout > 0 {
@@ -165,6 +202,7 @@ func (p Profile) Command(ctx context.Context, argv0 string, args ...string) (*ex
 
 	cmd := exec.CommandContext(runCtx, argv0, args...)
 	cmd.Env = p.Env()
+	cmd.SysProcAttr = sysProcAttr
 	return cmd, runCtx, cancel, nil
 }
 
@@ -194,22 +232,33 @@ type EnforcementReportRow struct {
 // row per GrantKind present in the requested GrantSet, in deterministic
 // GrantKind declaration order — never the input grant list's own order —
 // so two GrantSets differing only in JSON array order produce
-// byte-identical row ordering.
+// byte-identical row ordering. Network is a SEPARATE, always-present fact
+// (design §3, ledger SI-75/SI-76): unlike every row above, it is populated
+// on EVERY BuildProfile call that reaches it regardless of whether a
+// network grant was ever requested, because network's ABSENCE is itself
+// what triggers the mandatory default-deny control — a row keyed to
+// requested-grant presence could never represent that.
 type EnforcementReport struct {
-	Rows []EnforcementReportRow
+	Rows    []EnforcementReportRow
+	Network NetworkEnforcement
 }
 
-// appliedReasons names the v0 mechanism actually used for each
-// mechanically appliable kind (AD-9).
+// appliedReasons names the mechanism actually used for each mechanically
+// appliable kind. Process-execution and timeouts are AD-9's v0 set;
+// network joined them under SI-75/SI-76 — a PRESENT network grant is
+// always applied (explicit ambient permission needs no platform
+// mechanism), never could-not-apply.
 var appliedReasons = map[GrantKind]string{
+	GrantNetwork:          "applied: " + networkAllowReason,
 	GrantProcessExecution: "applied: argv0 allowlist enforced by Profile.Command, the package's one launch-construction seam, which refuses any argv0 outside the allowlist and refuses to construct a launch at all without this grant (AD-9, SI-40)",
 	GrantTimeouts:         "applied: deadline derived by Profile.Command into the context the constructed *exec.Cmd is bound to, so an overrunning child is killed (AD-9, SI-40)",
 }
 
 // couldNotApplyReasons names the missing v0 mechanism for each kind AD-9
-// leaves unimplemented, cited in every could-not-apply row.
+// leaves unimplemented, cited in every could-not-apply row. GrantNetwork
+// is NOT a member: SI-75/SI-76 gave it a mechanism (a present grant is
+// always applied), so it moved to appliedReasons above.
 var couldNotApplyReasons = map[GrantKind]string{
-	GrantNetwork:          "no v0 mechanism to enforce network policy (AD-9)",
 	GrantPathRead:         "no v0 mechanism to enforce path-read scoping (AD-9)",
 	GrantPathWrite:        "no v0 mechanism to enforce path-write scoping (AD-9)",
 	GrantResourceCeilings: "no v0 mechanism to enforce resource ceilings (AD-9)",
@@ -273,6 +322,17 @@ var couldNotApplyReasons = map[GrantKind]string{
 // Profile and EnforcementReport are still returned alongside it, since the
 // facts survive the error and a caller inspecting the report should never
 // need to special-case the error path to see them.
+//
+// Network (design §3, ledger SI-75/SI-76) is a SEPARATE, always-present
+// report fact, never a row: a PRESENT network grant is unconditionally
+// allow/configured (an applied row too — GrantNetwork joined AD-9's
+// mechanically-appliable set); an ABSENT grant is the mandatory deny, whose
+// Configured truth is platform-owned — true on Linux after constructing a
+// profile capable of attaching the namespace attributes, false everywhere
+// else. A deny that cannot be configured is folded into the SAME combined
+// operational error as any could-not-apply row, naming everything in one
+// deterministic message — never two separate errors, never a silently
+// dropped fact.
 //
 // No wall clock, no randomness: BuildProfile's output depends only on its
 // four inputs.
@@ -339,14 +399,30 @@ func BuildProfile(workspacePath, envRoot string, grants GrantSet, declaredEnv ma
 		sort.Strings(argv0s)
 		profile.AllowedArgv0s = argv0s
 	}
+	_, networkGranted := grants.Get(GrantNetwork)
+	profile.network = computeNetworkEnforcement(networkGranted)
 
 	report, unapplied := buildEnforcementReport(grants)
-	if len(unapplied) > 0 {
+	report.Network = profile.network
+
+	// AD-5's could-not-apply failure and design §3's deny-unconfigured
+	// failure are the SAME failure class (a required control this call
+	// could not provide), so a combined problem set names BOTH in ONE
+	// deterministic operational error rather than two: the network problem
+	// (when present) is always listed first, then the requested-grant
+	// kinds in their fixed declaration order — never map iteration, never
+	// randomness.
+	var problems []string
+	if profile.network.Mode == NetworkDeny && !profile.network.Configured {
+		problems = append(problems, "network (deny unconfigurable on this platform)")
+	}
+	problems = append(problems, unapplied...)
+	if len(problems) > 0 {
 		return profile, report, operationalError(
 			"isolation-profile: apply-grants",
 			fmt.Errorf(
 				"required execution grant(s) could not be applied: %s (CI dc-10: authoritative launch fails when isolation cannot be proven; CSE operational-error clause: unavailable required isolation control invalidates the run)",
-				strings.Join(unapplied, ", "),
+				strings.Join(problems, ", "),
 			),
 		)
 	}
