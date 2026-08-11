@@ -11,7 +11,10 @@ import (
 
 func TestCollectFingerprint_GoldenBytes(t *testing.T) {
 	dir := t.TempDir()
-	profile, _, err := BuildProfile(dir, dir, GrantSet{}, map[string]string{"FOO": "bar"})
+	// Explicit ambient network allow: constructible on every platform (lane
+	// contract task i); this test is about golden fingerprint bytes, not
+	// network.
+	profile, _, err := BuildProfile(dir, dir, GrantSet{Grants: []Grant{{Kind: GrantNetwork}}}, map[string]string{"FOO": "bar"})
 	if err != nil {
 		t.Fatalf("BuildProfile: %v", err)
 	}
@@ -45,7 +48,10 @@ func TestCollectFingerprint_GoldenBytes(t *testing.T) {
 
 func TestCollectFingerprint_DeterministicUnderHostileMapOrdering(t *testing.T) {
 	dir := t.TempDir()
-	profile, _, err := BuildProfile(dir, dir, GrantSet{}, map[string]string{"A": "1", "B": "2", "C": "3"})
+	// Explicit ambient network allow: constructible on every platform (lane
+	// contract task i); this test is about determinism under hostile map
+	// ordering, not network.
+	profile, _, err := BuildProfile(dir, dir, GrantSet{Grants: []Grant{{Kind: GrantNetwork}}}, map[string]string{"A": "1", "B": "2", "C": "3"})
 	if err != nil {
 		t.Fatalf("BuildProfile: %v", err)
 	}
@@ -75,7 +81,10 @@ func TestCollectFingerprint_DeterministicUnderHostileMapOrdering(t *testing.T) {
 
 func TestCollectFingerprint_AbsentEnvNameRecordedExplicitly(t *testing.T) {
 	dir := t.TempDir()
-	profile, _, err := BuildProfile(dir, dir, GrantSet{}, nil)
+	// Explicit ambient network allow: constructible on every platform (lane
+	// contract task i); these fingerprint tests are about env/tool/digest
+	// fields, not network.
+	profile, _, err := BuildProfile(dir, dir, GrantSet{Grants: []Grant{{Kind: GrantNetwork}}}, nil)
 	if err != nil {
 		t.Fatalf("BuildProfile: %v", err)
 	}
@@ -102,7 +111,10 @@ func TestCollectFingerprint_AbsentEnvNameRecordedExplicitly(t *testing.T) {
 
 func TestCollectFingerprint_RejectsInvalidToolVersion(t *testing.T) {
 	dir := t.TempDir()
-	profile, _, err := BuildProfile(dir, dir, GrantSet{}, nil)
+	// Explicit ambient network allow: constructible on every platform (lane
+	// contract task i); these fingerprint tests are about env/tool/digest
+	// fields, not network.
+	profile, _, err := BuildProfile(dir, dir, GrantSet{Grants: []Grant{{Kind: GrantNetwork}}}, nil)
 	if err != nil {
 		t.Fatalf("BuildProfile: %v", err)
 	}
@@ -121,7 +133,10 @@ func TestCollectFingerprint_RejectsInvalidToolVersion(t *testing.T) {
 
 func TestCollectFingerprint_RejectsInvalidDigest(t *testing.T) {
 	dir := t.TempDir()
-	profile, _, err := BuildProfile(dir, dir, GrantSet{}, nil)
+	// Explicit ambient network allow: constructible on every platform (lane
+	// contract task i); these fingerprint tests are about env/tool/digest
+	// fields, not network.
+	profile, _, err := BuildProfile(dir, dir, GrantSet{Grants: []Grant{{Kind: GrantNetwork}}}, nil)
 	if err != nil {
 		t.Fatalf("BuildProfile: %v", err)
 	}
@@ -146,7 +161,10 @@ func TestCollectFingerprint_RejectsInvalidDigest(t *testing.T) {
 // fingerprint stops being a stable identity for identical inputs.
 func TestCollectFingerprint_RejectsNonLowercaseHexDigest(t *testing.T) {
 	dir := t.TempDir()
-	profile, _, err := BuildProfile(dir, dir, GrantSet{}, nil)
+	// Explicit ambient network allow: constructible on every platform (lane
+	// contract task i); these fingerprint tests are about env/tool/digest
+	// fields, not network.
+	profile, _, err := BuildProfile(dir, dir, GrantSet{Grants: []Grant{{Kind: GrantNetwork}}}, nil)
 	if err != nil {
 		t.Fatalf("BuildProfile: %v", err)
 	}
@@ -180,7 +198,10 @@ func TestCollectFingerprint_RejectsNonLowercaseHexDigest(t *testing.T) {
 // which reads as "asked for and absent" rather than "never askable".
 func TestCollectFingerprint_RejectsInvalidEnvVarName(t *testing.T) {
 	dir := t.TempDir()
-	profile, _, err := BuildProfile(dir, dir, GrantSet{}, nil)
+	// Explicit ambient network allow: constructible on every platform (lane
+	// contract task i); these fingerprint tests are about env/tool/digest
+	// fields, not network.
+	profile, _, err := BuildProfile(dir, dir, GrantSet{Grants: []Grant{{Kind: GrantNetwork}}}, nil)
 	if err != nil {
 		t.Fatalf("BuildProfile: %v", err)
 	}
@@ -202,7 +223,10 @@ func TestCollectFingerprint_RejectsInvalidEnvVarName(t *testing.T) {
 
 func TestCollectFingerprint_RejectsEmptyEnvVarName(t *testing.T) {
 	dir := t.TempDir()
-	profile, _, err := BuildProfile(dir, dir, GrantSet{}, nil)
+	// Explicit ambient network allow: constructible on every platform (lane
+	// contract task i); these fingerprint tests are about env/tool/digest
+	// fields, not network.
+	profile, _, err := BuildProfile(dir, dir, GrantSet{Grants: []Grant{{Kind: GrantNetwork}}}, nil)
 	if err != nil {
 		t.Fatalf("BuildProfile: %v", err)
 	}
@@ -213,7 +237,10 @@ func TestCollectFingerprint_RejectsEmptyEnvVarName(t *testing.T) {
 
 func TestCollectFingerprint_OSArchMatchRuntime(t *testing.T) {
 	dir := t.TempDir()
-	profile, _, err := BuildProfile(dir, dir, GrantSet{}, nil)
+	// Explicit ambient network allow: constructible on every platform (lane
+	// contract task i); these fingerprint tests are about env/tool/digest
+	// fields, not network.
+	profile, _, err := BuildProfile(dir, dir, GrantSet{Grants: []Grant{{Kind: GrantNetwork}}}, nil)
 	if err != nil {
 		t.Fatalf("BuildProfile: %v", err)
 	}
@@ -235,7 +262,10 @@ func TestCollectFingerprint_OSArchMatchRuntime(t *testing.T) {
 
 func TestCollectFingerprint_EmptyInputsStillProduceObjects(t *testing.T) {
 	dir := t.TempDir()
-	profile, _, err := BuildProfile(dir, dir, GrantSet{}, nil)
+	// Explicit ambient network allow: constructible on every platform (lane
+	// contract task i); these fingerprint tests are about env/tool/digest
+	// fields, not network.
+	profile, _, err := BuildProfile(dir, dir, GrantSet{Grants: []Grant{{Kind: GrantNetwork}}}, nil)
 	if err != nil {
 		t.Fatalf("BuildProfile: %v", err)
 	}
