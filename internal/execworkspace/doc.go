@@ -35,7 +35,15 @@
 //     per-grant enforcement report, and Profile.Command is the package's one
 //     launch-construction seam (AD-5, AD-9, SI-40) — it enforces the granted
 //     argv0 allowlist and deadline while still never STARTING the consumer's
-//     process, which remains the consumer's own act.
+//     process, which remains the consumer's own act. It also builds the
+//     default-deny network posture (SI-75, SI-76): an absent network grant
+//     is a mandatory deny — on Linux, Profile.Command attaches a new
+//     user+network namespace; on every other platform it is an operational
+//     error, with no weaker fallback — and a present, payload-free grant is
+//     an explicit ambient-allow bit. EnforcementReport's always-present
+//     Network fact and EncodeEnforcementReport's canonical bytes make that
+//     posture, and any could-not-apply grant alongside it, one disclosed,
+//     three-valued-honest report.
 //   - Fingerprint: CollectFingerprint records the environment actually
 //     constructed, for the consuming feature's own environment comparison.
 //
