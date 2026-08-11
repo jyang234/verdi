@@ -13,7 +13,12 @@ import (
 
 func TestBuildProfile_EnvDeterministic(t *testing.T) {
 	dir := t.TempDir()
-	grants := GrantSet{}
+	// Explicit ambient network allow (never network-absent-deny): this test
+	// is about Env() determinism, unrelated to network semantics, and an
+	// explicit allow is the one grant set shape BuildProfile can construct
+	// on every platform, including this darwin (unsupported-platform) dev
+	// machine (lane contract task i).
+	grants := GrantSet{Grants: []Grant{{Kind: GrantNetwork}}}
 	declared := map[string]string{"FOO": "bar", "PATH": "/usr/bin"}
 
 	p1, _, err := BuildProfile(dir, dir, grants, declared)
@@ -42,7 +47,9 @@ func TestBuildProfile_EnvDeterministic(t *testing.T) {
 func TestBuildProfile_ExactEnvContents(t *testing.T) {
 	workspacePath := t.TempDir()
 	dir := t.TempDir() // envRoot: deliberately NOT the workspace path (AD-13)
-	p, _, err := BuildProfile(workspacePath, dir, GrantSet{}, map[string]string{"FOO": "bar"})
+	// Explicit ambient network allow: constructible on every platform (lane
+	// contract task i); this test is about Env() contents, not network.
+	p, _, err := BuildProfile(workspacePath, dir, GrantSet{Grants: []Grant{{Kind: GrantNetwork}}}, map[string]string{"FOO": "bar"})
 	if err != nil {
 		t.Fatalf("BuildProfile: %v", err)
 	}
@@ -72,7 +79,9 @@ func TestBuildProfile_ExactEnvContents(t *testing.T) {
 func TestBuildProfile_NoProcessEnvLeakage(t *testing.T) {
 	t.Setenv("VERDI_TEST_LEAK_PROBE", "should-never-appear")
 	dir := t.TempDir()
-	p, _, err := BuildProfile(dir, dir, GrantSet{}, map[string]string{"FOO": "bar"})
+	// Explicit ambient network allow: constructible on every platform (lane
+	// contract task i); this test is about env leakage, not network.
+	p, _, err := BuildProfile(dir, dir, GrantSet{Grants: []Grant{{Kind: GrantNetwork}}}, map[string]string{"FOO": "bar"})
 	if err != nil {
 		t.Fatalf("BuildProfile: %v", err)
 	}
@@ -124,7 +133,9 @@ func TestBuildProfile_RejectsInvalidDeclaredEnvKey(t *testing.T) {
 
 func TestBuildProfile_CreatesDirs(t *testing.T) {
 	dir := t.TempDir() // envRoot: the four dirs are created under it, not under the workspace
-	_, _, err := BuildProfile(t.TempDir(), dir, GrantSet{}, nil)
+	// Explicit ambient network allow: constructible on every platform (lane
+	// contract task i); this test is about directory creation, not network.
+	_, _, err := BuildProfile(t.TempDir(), dir, GrantSet{Grants: []Grant{{Kind: GrantNetwork}}}, nil)
 	if err != nil {
 		t.Fatalf("BuildProfile: %v", err)
 	}
@@ -146,7 +157,12 @@ func TestBuildProfile_CreatesDirs(t *testing.T) {
 
 func TestBuildProfile_TimeoutWired(t *testing.T) {
 	dir := t.TempDir()
-	set := GrantSet{Grants: []Grant{{Kind: GrantTimeouts, Seconds: 90}}}
+	// Explicit ambient network allow alongside timeouts: constructible on
+	// every platform (lane contract task i); this test is about Timeout
+	// wiring, not network. Adding it means the report also gains a network
+	// row (kind-ordered ahead of timeouts), so the row assertion below
+	// looks up by kind rather than assuming a single-row report.
+	set := GrantSet{Grants: []Grant{{Kind: GrantNetwork}, {Kind: GrantTimeouts, Seconds: 90}}}
 	p, report, err := BuildProfile(dir, dir, set, nil)
 	if err != nil {
 		t.Fatalf("BuildProfile: %v", err)
@@ -154,14 +170,27 @@ func TestBuildProfile_TimeoutWired(t *testing.T) {
 	if p.Timeout != 90*time.Second {
 		t.Fatalf("Timeout = %v, want 90s", p.Timeout)
 	}
-	if len(report.Rows) != 1 || !report.Rows[0].Applied || report.Rows[0].Kind != GrantTimeouts {
-		t.Fatalf("report = %+v, want one applied timeouts row", report.Rows)
+	if len(report.Rows) != 2 {
+		t.Fatalf("report.Rows = %+v, want 2 rows (network, timeouts)", report.Rows)
+	}
+	byKind := map[GrantKind]EnforcementReportRow{}
+	for _, row := range report.Rows {
+		byKind[row.Kind] = row
+	}
+	if !byKind[GrantTimeouts].Applied || byKind[GrantTimeouts].Kind != GrantTimeouts {
+		t.Fatalf("report = %+v, want an applied timeouts row", report.Rows)
+	}
+	if !byKind[GrantNetwork].Applied {
+		t.Fatalf("report = %+v, want an applied network row", report.Rows)
 	}
 }
 
 func TestBuildProfile_NoTimeoutGrantLeavesZeroTimeout(t *testing.T) {
 	dir := t.TempDir()
-	p, _, err := BuildProfile(dir, dir, GrantSet{}, nil)
+	// Explicit ambient network allow: constructible on every platform (lane
+	// contract task i); this test is about the absence of a timeouts
+	// grant, not network.
+	p, _, err := BuildProfile(dir, dir, GrantSet{Grants: []Grant{{Kind: GrantNetwork}}}, nil)
 	if err != nil {
 		t.Fatalf("BuildProfile: %v", err)
 	}
@@ -172,7 +201,13 @@ func TestBuildProfile_NoTimeoutGrantLeavesZeroTimeout(t *testing.T) {
 
 func TestBuildProfile_ProcessExecutionAllowlistSortedCopy(t *testing.T) {
 	dir := t.TempDir()
-	set := GrantSet{Grants: []Grant{{Kind: GrantProcessExecution, Argv0s: []string{"git", "go"}}}}
+	// Explicit ambient network allow alongside process-execution:
+	// constructible on every platform (lane contract task i); this test is
+	// about the AllowedArgv0s sorted copy, not network.
+	set := GrantSet{Grants: []Grant{
+		{Kind: GrantNetwork},
+		{Kind: GrantProcessExecution, Argv0s: []string{"git", "go"}},
+	}}
 	p, _, err := BuildProfile(dir, dir, set, nil)
 	if err != nil {
 		t.Fatalf("BuildProfile: %v", err)
@@ -190,7 +225,10 @@ func TestBuildProfile_ProcessExecutionAllowlistSortedCopy(t *testing.T) {
 
 func TestBuildProfile_NoProcessExecutionGrantLeavesNilAllowlist(t *testing.T) {
 	dir := t.TempDir()
-	p, _, err := BuildProfile(dir, dir, GrantSet{}, nil)
+	// Explicit ambient network allow: constructible on every platform (lane
+	// contract task i); this test is about the absence of a
+	// process-execution grant, not network.
+	p, _, err := BuildProfile(dir, dir, GrantSet{Grants: []Grant{{Kind: GrantNetwork}}}, nil)
 	if err != nil {
 		t.Fatalf("BuildProfile: %v", err)
 	}
@@ -199,14 +237,28 @@ func TestBuildProfile_NoProcessExecutionGrantLeavesNilAllowlist(t *testing.T) {
 	}
 }
 
-func TestBuildProfile_EmptyGrantSet_NoErrorEmptyReport(t *testing.T) {
+// TestBuildProfile_NetworkAllowOnlyGrantSet_NoErrorOneRow is the migrated
+// form of what used to be a literally EMPTY grant set (lane contract task
+// i): since SI-75/SI-76, an empty GrantSet means an ABSENT network grant,
+// which is a mandatory control this darwin (unsupported-platform) dev
+// machine cannot configure — see
+// TestBuildProfile_NetworkPolarity_AbsentGrant_EmptyGrantSet
+// (network_unsupported_test.go) for that behavior. The smallest grant set
+// BuildProfile can still construct successfully on every platform is
+// "network allow and nothing else", which is what this test now pins:
+// exactly one (network) row, no error.
+func TestBuildProfile_NetworkAllowOnlyGrantSet_NoErrorOneRow(t *testing.T) {
 	dir := t.TempDir()
-	_, report, err := BuildProfile(dir, dir, GrantSet{}, nil)
+	set := GrantSet{Grants: []Grant{{Kind: GrantNetwork}}}
+	_, report, err := BuildProfile(dir, dir, set, nil)
 	if err != nil {
 		t.Fatalf("BuildProfile: unexpected error: %v", err)
 	}
-	if report == nil || len(report.Rows) != 0 {
-		t.Fatalf("report = %+v, want non-nil empty report", report)
+	if report == nil || len(report.Rows) != 1 {
+		t.Fatalf("report = %+v, want non-nil report with exactly one (network) row", report)
+	}
+	if !report.Rows[0].Applied || report.Rows[0].Kind != GrantNetwork {
+		t.Fatalf("report.Rows[0] = %+v, want an applied network row", report.Rows[0])
 	}
 }
 
@@ -241,11 +293,13 @@ func TestBuildProfile_ReportRowsExactForMixedGrantSet(t *testing.T) {
 	for _, row := range report.Rows {
 		byKind[row.Kind] = row
 	}
-	if byKind[GrantNetwork].Applied {
-		t.Fatalf("network row Applied = true, want false")
+	// SI-75/SI-76: a PRESENT network grant is an explicit ambient allow,
+	// always applied — it is no longer among AD-9's could-not-apply kinds.
+	if !byKind[GrantNetwork].Applied {
+		t.Fatalf("network row Applied = false, want true: a present grant is an explicit ambient allow")
 	}
 	if byKind[GrantNetwork].Reason == "" {
-		t.Fatalf("network row Reason is empty, want it to name the missing mechanism")
+		t.Fatalf("network row Reason is empty, want it to name the explicit ambient permission")
 	}
 	if byKind[GrantPathRead].Applied {
 		t.Fatalf("path-read row Applied = true, want false")
@@ -276,13 +330,19 @@ func TestBuildProfile_AD5_OperationalErrorNamesExactlyUnappliedKinds(t *testing.
 		t.Fatalf("error is not *OperationalError: %v (%T)", err, err)
 	}
 	msg := err.Error()
-	for _, name := range []string{"network", "path-read", "path-write", "resource-ceilings"} {
+	for _, name := range []string{"path-read", "path-write", "resource-ceilings"} {
 		if !strings.Contains(msg, name) {
 			t.Fatalf("error %q does not name unapplied kind %q", msg, name)
 		}
 	}
 	if strings.Contains(msg, "process-execution") {
 		t.Fatalf("error %q names process-execution, which WAS applied and must not be listed as unapplied", msg)
+	}
+	// SI-75/SI-76: the present network grant in this set is an explicit
+	// ambient allow, always applied — it must not be listed as unapplied
+	// either, exactly like process-execution above.
+	if strings.Contains(msg, "network") {
+		t.Fatalf("error %q names network, which WAS applied (explicit ambient allow) and must not be listed as unapplied", msg)
 	}
 	if report == nil || len(report.Rows) != 5 {
 		t.Fatalf("report = %+v, want all 5 grant rows still returned alongside the error", report)
@@ -322,7 +382,11 @@ func TestBuildProfile_RejectsNULInDeclaredEnvValue(t *testing.T) {
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
 			dir := t.TempDir()
-			profile, _, err := BuildProfile(dir, dir, GrantSet{}, map[string]string{"DECLARED": tc.value})
+			// Explicit ambient network allow: constructible on every
+			// platform (lane contract task i) so the "accepted" cases
+			// below reach err == nil here too; the "rejected" cases still
+			// fail at the earlier NUL check regardless of the grant set.
+			profile, _, err := BuildProfile(dir, dir, GrantSet{Grants: []Grant{{Kind: GrantNetwork}}}, map[string]string{"DECLARED": tc.value})
 			if tc.wantErr && err == nil {
 				t.Fatalf("BuildProfile(value %q) = env %v, want error", tc.value, profile.Env())
 			}
@@ -341,7 +405,13 @@ func TestBuildProfile_RejectsNULInDeclaredEnvValue(t *testing.T) {
 // one.
 func TestBuildProfile_AD5_ErrorRenderingIsNotMislabelledAsMaterialization(t *testing.T) {
 	dir := t.TempDir()
-	set := GrantSet{Grants: []Grant{{Kind: GrantNetwork}}}
+	// GrantPathRead, not GrantNetwork: this test pins the generic AD-5
+	// Op-prefix rendering, unrelated to network semantics. Since SI-75/
+	// SI-76 a present network grant is always applied (never
+	// could-not-apply), so it no longer reaches this error path on its
+	// own — path-read still has no v0 mechanism and keeps this test
+	// meaningful (lane contract task i).
+	set := GrantSet{Grants: []Grant{{Kind: GrantPathRead, Paths: []string{"src"}}}}
 	_, _, err := BuildProfile(dir, dir, set, nil)
 	if err == nil {
 		t.Fatalf("BuildProfile: want error, got nil")
@@ -461,7 +531,11 @@ func TestBuildProfile_RejectsRelativeRoots(t *testing.T) {
 // above: absolute roots remain accepted, so the new check rejects only the
 // non-absolute case and does not narrow BuildProfile's contract further.
 func TestBuildProfile_AcceptsAbsoluteRoots(t *testing.T) {
-	if _, _, err := BuildProfile(t.TempDir(), t.TempDir(), GrantSet{}, nil); err != nil {
+	// Explicit ambient network allow: constructible on every platform (lane
+	// contract task i); this test is about absolute-root acceptance, not
+	// network.
+	set := GrantSet{Grants: []Grant{{Kind: GrantNetwork}}}
+	if _, _, err := BuildProfile(t.TempDir(), t.TempDir(), set, nil); err != nil {
 		t.Fatalf("BuildProfile(absolute, absolute) = %v, want nil", err)
 	}
 }
@@ -472,7 +546,10 @@ func TestBuildProfile_AcceptsAbsoluteRoots(t *testing.T) {
 func TestBuildProfile_EnvRootSeparateFromWorkspacePath(t *testing.T) {
 	workspacePath := t.TempDir()
 	envRoot := t.TempDir()
-	p, _, err := BuildProfile(workspacePath, envRoot, GrantSet{}, nil)
+	// Explicit ambient network allow: constructible on every platform (lane
+	// contract task i); this test is about envRoot/workspacePath
+	// separation, not network.
+	p, _, err := BuildProfile(workspacePath, envRoot, GrantSet{Grants: []Grant{{Kind: GrantNetwork}}}, nil)
 	if err != nil {
 		t.Fatalf("BuildProfile: %v", err)
 	}
@@ -541,7 +618,10 @@ func TestBuildProfile_EnvRootComposition_GcConvergence(t *testing.T) {
 	t.Run("env root outside the unit path converges through gc", func(t *testing.T) {
 		storeRoot, repoDir, workspaceID, unitPath := newReleasedWorkspace(t, "run-envroot-outside")
 		envRoot := t.TempDir() // the consumer's own lifecycle territory
-		p, _, err := BuildProfile(unitPath, envRoot, GrantSet{}, nil)
+		// Explicit ambient network allow: constructible on every platform
+		// (lane contract task i); this test is about gc convergence, not
+		// network.
+		p, _, err := BuildProfile(unitPath, envRoot, GrantSet{Grants: []Grant{{Kind: GrantNetwork}}}, nil)
 		if err != nil {
 			t.Fatalf("BuildProfile: %v", err)
 		}
@@ -579,7 +659,10 @@ func TestBuildProfile_EnvRootComposition_GcConvergence(t *testing.T) {
 
 	t.Run("env root inside the unit path keeps dirty by design", func(t *testing.T) {
 		storeRoot, repoDir, workspaceID, unitPath := newReleasedWorkspace(t, "run-envroot-inside")
-		if _, _, err := BuildProfile(unitPath, unitPath, GrantSet{}, nil); err != nil {
+		// Explicit ambient network allow: constructible on every platform
+		// (lane contract task i); this test is about gc convergence, not
+		// network.
+		if _, _, err := BuildProfile(unitPath, unitPath, GrantSet{Grants: []Grant{{Kind: GrantNetwork}}}, nil); err != nil {
 			t.Fatalf("BuildProfile: %v", err)
 		}
 		if werr := os.WriteFile(filepath.Join(unitPath, ".home", "state.json"), []byte("{}\n"), 0o644); werr != nil {

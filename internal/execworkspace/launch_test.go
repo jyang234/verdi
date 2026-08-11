@@ -153,8 +153,12 @@ func TestProfileCommand_AllowedLaunchMatchesTheProfile(t *testing.T) {
 		wantDeadline bool
 	}{
 		{
+			// Explicit ambient network allow: constructible on every
+			// platform (lane contract task i); this test is about
+			// argv0/args/env/deadline wiring, not network.
 			name: "process-execution grant only: no deadline added",
 			grants: GrantSet{Grants: []Grant{
+				{Kind: GrantNetwork},
 				{Kind: GrantProcessExecution, Argv0s: []string{argv0, filepath.Join(dir, "other")}},
 			}},
 			wantDeadline: false,
@@ -162,6 +166,7 @@ func TestProfileCommand_AllowedLaunchMatchesTheProfile(t *testing.T) {
 		{
 			name: "process-execution plus timeouts: deadline derived",
 			grants: GrantSet{Grants: []Grant{
+				{Kind: GrantNetwork},
 				{Kind: GrantProcessExecution, Argv0s: []string{argv0}},
 				{Kind: GrantTimeouts, Seconds: 30},
 			}},
@@ -229,7 +234,16 @@ func TestProfileCommand_DeadlineActuallyKillsTheProcess(t *testing.T) {
 		t.Skipf("os.Executable unavailable: %v", err)
 	}
 
-	p := Profile{Timeout: 300 * time.Millisecond, AllowedArgv0s: []string{self}}
+	// network is unexported (same-package white-box construction, like
+	// AllowedArgv0s/Timeout above): an explicit ambient allow, since this
+	// test is about deadline enforcement, not network, and a zero-value
+	// network field now fails Command's fail-closed network check (lane
+	// contract task i).
+	p := Profile{
+		Timeout:       300 * time.Millisecond,
+		AllowedArgv0s: []string{self},
+		network:       NetworkEnforcement{Mode: NetworkAllow, Configured: true, Reason: "test: ambient allow"},
+	}
 	cmd, _, cancel, err := p.Command(context.Background(), self,
 		"-test.run=^TestExecworkspaceHelperSleep$",
 		"-execworkspace.helper.sleep=60s",
