@@ -572,6 +572,82 @@ func TestCmdContextCompile_OutIsManagedProjectionFile_Refused(t *testing.T) {
 	}
 }
 
+// contextFailingWriter is a stdout stand-in whose every Write fails, the
+// in-process equivalent of a closed pipe or a full disk.
+type contextFailingWriter struct{}
+
+func (contextFailingWriter) Write(p []byte) (int, error) {
+	return 0, errors.New("stdout unavailable")
+}
+
+// TestCmdContextCompile_StdoutWriteFailure_ExitTwo proves Task 8 Step 2's
+// "a stdout write failure is operational": a manifest that compiled
+// cleanly but could not be delivered exits 2, never 0 (a caller reading a
+// truncated stream must not see success) and never 1 (nothing was
+// refused).
+func TestCmdContextCompile_StdoutWriteFailure_ExitTwo(t *testing.T) {
+	repo := buildContextCompileRepo(t, map[string]string{
+		".verdi/specs/active/feature-alpha/spec.md": contextFeatureAlphaSpec(t),
+	})
+	t.Chdir(repo.Dir)
+	reqPath := writeContextRequestFile(t, repo.Dir, "request.json", contextRequestBytes(t, "spec/feature-alpha", contextcompile.PhaseDesign, nil))
+
+	var stderr bytes.Buffer
+	got := cmdContextCompile([]string{"--request", reqPath}, strings.NewReader(""), contextFailingWriter{}, &stderr)
+	if got != 2 {
+		t.Fatalf("cmdContextCompile(failing stdout) = %d, want 2; stderr=%s", got, stderr.String())
+	}
+	if stderr.Len() == 0 {
+		t.Fatal("stderr is empty, want an operational diagnostic")
+	}
+}
+
+// TestCmdContextCompile_OutWriteFailure_NoPartialFile proves Task 8 Step
+// 2's "no partial file may remain after an output failure": --out naming
+// an existing DIRECTORY makes atomicfile.Write's final rename fail, which
+// must exit 2 and leave no partial manifest and no temp-file debris in the
+// destination's parent — the whole point of routing the write through the
+// atomic seam.
+func TestCmdContextCompile_OutWriteFailure_NoPartialFile(t *testing.T) {
+	repo := buildContextCompileRepo(t, map[string]string{
+		".verdi/specs/active/feature-alpha/spec.md": contextFeatureAlphaSpec(t),
+	})
+	t.Chdir(repo.Dir)
+	reqPath := writeContextRequestFile(t, repo.Dir, "request.json", contextRequestBytes(t, "spec/feature-alpha", contextcompile.PhaseDesign, nil))
+	outParent := t.TempDir()
+	outPath := filepath.Join(outParent, "manifest.json")
+	if err := os.Mkdir(outPath, 0o755); err != nil {
+		t.Fatalf("creating the directory that blocks --out: %v", err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	got := cmdContextCompile([]string{"--request", reqPath, "--out", outPath}, strings.NewReader(""), &stdout, &stderr)
+	if got != 2 {
+		t.Fatalf("cmdContextCompile(--out <existing dir>) = %d, want 2; stderr=%s", got, stderr.String())
+	}
+	if stdout.Len() != 0 {
+		t.Fatalf("stdout = %q, want empty when --out is present", stdout.String())
+	}
+	if stderr.Len() == 0 {
+		t.Fatal("stderr is empty, want an operational diagnostic")
+	}
+
+	entries, err := os.ReadDir(outParent)
+	if err != nil {
+		t.Fatalf("ReadDir(outParent): %v", err)
+	}
+	if len(entries) != 1 || entries[0].Name() != "manifest.json" || !entries[0].IsDir() {
+		t.Fatalf("outParent entries = %v, want exactly the pre-existing manifest.json directory (no partial file, no temp debris)", entries)
+	}
+	inner, err := os.ReadDir(outPath)
+	if err != nil {
+		t.Fatalf("ReadDir(outPath): %v", err)
+	}
+	if len(inner) != 0 {
+		t.Fatalf("the blocking directory gained entries %v, want none", inner)
+	}
+}
+
 // contextFilesystemIsCaseInsensitive probes dir once for case-insensitive
 // name resolution (APFS/HFS+ default, NTFS) by writing a lowercase file and
 // stat'ing its uppercase spelling. Case-variant alias subtests are only
