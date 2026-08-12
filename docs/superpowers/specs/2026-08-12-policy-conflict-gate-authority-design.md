@@ -238,7 +238,7 @@ each dimension are canonical lexical order.
 ## 5. Mechanical satisfiability
 
 Claims interact only inside one `(family, subject)` group, except that an
-identity group additionally keys on its ordered `(left-role, right-role)` pair.
+identity group additionally keys on its canonical unordered role pair.
 Every group uses exactly one of four Verdi-owned operand domains. A group
 containing operators from more than one domain is invalid authority and fails
 operationally; Verdi does not choose a meaning per pair.
@@ -294,8 +294,9 @@ already rejects non-integers and overflow.
 ### 5.3 Principal-relation domain
 
 The operators are `same-principal` and `different-principal`. For these two
-operators, the existing claim `values` field contains exactly two ordered role
-IDs: `[left-role, right-role]`; `subject` is the governed transition ID. This is
+operators, the existing claim `values` field contains exactly two distinct role
+IDs; `subject` is the governed transition ID. The two roles are a semantic set
+and normalize lexically, because both kernel relations are symmetric. This is
 a narrow operand rule inside the existing claim schema, not a new identity
 type or resolver. It prospectively replaces the policy-artifact validator's
 placeholder empty-values rule for these two previously uninterpreted
@@ -305,7 +306,7 @@ validates the transition and both roles through the existing kernel catalog.
 
 The evaluator never compares principal strings. It constructs one kernel
 authorization request over the exact authenticated resolutions, transition,
-ordered roles, profile, and separation mode. Requiring both relations for the
+canonical role pair, profile, and separation mode. Requiring both relations for the
 same transition and role pair is a mechanical conflict. Requiring one relation
 is proven only when the kernel returns that conclusion; violated and unproven
 kernel results remain violated-with-witness or unproven respectively.
@@ -420,7 +421,11 @@ canonical prompt and normalized semantic input independently; neither receives
 the other's output. A recommendation difference, an inconclusive result, or a
 difference between their sorted finding-witness sets is disagreement and
 requires human disposition. A challenger cannot turn a primary result into an
-automatic pass.
+automatic pass. The local CLI constructs only the primary port from
+`align.judge_cmd`; this unit adds no second project-config command. A managed
+caller may inject an independently configured challenger port. Consequently a
+local high-assurance semantic evaluation is explicitly `blocked-unproven`
+until a later authority defines a trusted challenger transport.
 
 ## 7. Semantic judgment reuse
 
@@ -521,9 +526,8 @@ Compensating controls, when present, remain nonempty author-ordered single-line
 prose. Owners and approvals normalize under their existing policy-artifact
 rules. The body is the nonblank rationale, and at least one approval is always
 required. A `human-fallback` must carry a real calendar-date expiry or nonblank
-review condition; when that fallback concludes `no-conflict`, it also requires
-at least one compensating control. A judge-result disposition and a conflict
-confirmation need no invented control or time bound: under AC-3 they remain
+review condition and at least one compensating control. A judge-result
+disposition needs no fallback-only control or time bound: under AC-3 it remains
 current only while the complete semantic-input witness remains unchanged.
 Unknown fields, conclusions, origins, or witness categories fail closed.
 
@@ -674,8 +678,13 @@ synthetic passing condition. Once constitution adoption is present, every
 integration above is mandatory.
 
 Missing judge or principal infrastructure blocks only when the actual
-evaluation needs semantic judgment, an exemption, or a disposition. A clean,
-purely mechanical satisfiable authority set can pass through the local CLI.
+evaluation needs semantic judgment, an exemption, or a disposition. Current
+accepted specifications contribute problem/outcome prose, so an adopted
+repository's local lifecycle commands reach semantic evaluation and cannot
+pass without authenticated disposition approvals; this unit supplies no local
+identity fact reader. Managed callers with kernel-authenticated principal facts
+can pass, and pre-adoption local behavior remains unchanged under the preceding
+compatibility rule.
 No existing accepted, frozen, archived, alignment, deviation, evidence,
 waiver, or conflict artifact is rewritten or reinterpreted.
 
@@ -737,7 +746,7 @@ Implementation is TDD and proves at least:
    including non-transitive overlap, segment boundaries, unknown artifact
    relationships, and conservative higher-order refusal;
 4. complete operator-pair and multi-claim satisfiability tables for all four
-   operand domains, including `not-equals` membership exclusion, ordered
+   operand domains, including `not-equals` membership exclusion, symmetric
    identity-role operands, kernel delegation, and mixed-domain rejection;
 5. pre- and post-exemption proof with stale, partial-scope, expired,
    review-unproven, and unauthorized cases;
