@@ -1,7 +1,7 @@
 # Policy Conflict Gate Authority Design
 
 **Status:** Owner-approved design; repository authority becomes effective when
-the reviewed commit carrying this document and SI-93 through SI-99 reaches the
+the reviewed commit carrying this document and SI-93 through SI-102 reaches the
 configured default branch.
 
 **Planning base:** `bfaa8e2715678cbe8cd71137f23d743666caf1c4`
@@ -644,7 +644,39 @@ is a candidate until an effective conflict disposition confirms it.
 ## 11. Lifecycle integration and compatibility
 
 Every integration receives a `VerdictProvider`; none imports solver internals.
-It evaluates before its first effect:
+The lifecycle commands obtain request operands explicitly rather than guessing
+an adapter, capability grant, environment, or scope. Their additive grammar is:
+
+```text
+verdi gate [--context-request <path>]
+verdi build start <story-spec | story-ref> [--context-request <path>]
+verdi close <story-ref> [--force-local] [--context-request <path>]
+verdi close --preflight <story-ref> [--force-local] [--context-request <path>]
+verdi close --prepare <story-ref> [--force-local] [--context-request <path>]
+```
+
+`--context-request` accepts a filesystem path, not `-`, and names an existing
+strict canonical `verdi.context-compile-request/v1` document. The explicit
+`context conflict` inspection surface remains the only stdin consumer. A
+lifecycle adapter strict-decodes the document through `contextcompile`,
+requires its phase and spec to match the actual command target, compares an
+optional caller `expected` claim to the computed branch and HEAD when present,
+and then replaces or fills that optional claim with the computed exact facts.
+For a design gate it converts the remaining adapter, grants, scope, and spec
+operands into the `acceptance-candidate` arm. For build and review it constructs
+the `accepted-context` arm. The caller's request never substitutes for branch,
+HEAD, lifecycle phase, or resolved target identity.
+
+Argument parsing admits the optional flag without reading it before adoption
+is known. When the constitution is absent, an invocation without the flag
+retains the exact legacy grammar, output, and behavior. Supplying the new flag
+without adoption is operational misuse, not an ignored input. Once the
+constitution exists, the flag is mandatory; an absent, unreadable, malformed,
+noncanonical, mismatched, or symlink-resolved request is operational exit 2
+before the first effect. This is one shared loader/adapter used by every
+lifecycle consumer, not four decoders or four request grammars.
+
+The provider evaluates before the command's first effect:
 
 1. Design-branch `verdi gate` builds the acceptance-candidate request and adds
    one numbered `constitutional conflict verdict` condition to the spec-MR
@@ -655,9 +687,10 @@ It evaluates before its first effect:
 3. Build-branch `verdi gate` builds the accepted build request and adds the
    report as its conflict condition beside the existing evidence fold. It does
    not change evidence semantics.
-4. `verdi close` and `verdi close --preflight` build the accepted review
-   request before branch creation, archive movement, report freezing, staging,
-   commit, or publication. Both modes evaluate the same conflict result.
+4. `verdi close`, `verdi close --preflight`, and `verdi close --prepare` build
+   the accepted review request before branch creation, alignment-report
+   refresh, archive movement, report freezing, staging, commit, or publication.
+   All three modes evaluate the same conflict result.
 
 The later sealed-execution adapter consumes the same provider and accepted
 request. It does not gain a weaker verdict or a second evaluator.
@@ -774,7 +807,7 @@ no browser behavior and adds no Playwright case.
 
 ## 14. Source coverage and losslessness
 
-Coverage is **8/8** implicated authority source groups. The mapping is
+Coverage is **9/9** implicated authority source groups. The mapping is
 lossless; each row names the complete clause range used rather than assigning
 inconsistent per-clause counts across differently structured sources:
 
@@ -788,6 +821,7 @@ inconsistent per-clause counts across differently structured sources:
 | Owner rulings OD-2, OD-5, OD-10, OD-12 as one custody/recording cluster | 1 | §§1, 8–9, 13 |
 | Store-layout policy/data custody and human-artifact renderer/kernel | 1 | §§7–9, 13 |
 | Wave-3 orchestration unit, exit gate, review cadence, and delivery exclusions | 1 | §§1, 11, 13 |
+| Owner-approved lifecycle operand acquisition and current `gate`/`build start`/`close` grammars, including the effectful `close --prepare` path | 1 | §11, SI-102 |
 
 The transformations are explicit:
 
@@ -807,7 +841,10 @@ The transformations are explicit:
 - existing claim-level exemptions are applied by exact scoped removal and
   solver recomputation rather than treated as generic conflict waivers; and
 - the spec's one verdict becomes four current thin consumers and one later
-  sealed consumer, never five implementations.
+  sealed consumer, never five implementations; and
+- lifecycle request operands reuse the existing strict context request document
+  through one shared adapter instead of adding manifest defaults, selecting an
+  arbitrary constitution adapter, or widening a missing environment/scope.
 
 Intentional omissions are:
 
