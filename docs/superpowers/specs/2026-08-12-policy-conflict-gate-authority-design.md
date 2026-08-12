@@ -395,11 +395,16 @@ semantic-input ID from the complete normalized witness identity; it never
 trusts a model-supplied ID or model identity. An unknown, missing, duplicate,
 or digest-mismatched witness invalidates the result.
 
-The recorded exchange contains the adapter-declared transport/model posture,
-command digest, prompt digest, semantic-input digest, raw result bytes and
-digest, parsed result, validation state/reasons, and process outcome. Judge
-output cannot override adapter-declared model identity. Raw bytes never enter
-command construction or a human artifact. The CLI uses the existing
+The recorded exchange contains only a completed, successfully validated
+exchange: the adapter-declared transport/model posture, command digest, prompt
+digest, semantic-input digest, raw result bytes and digest, and parsed result.
+Its presence proves the single successful process/validation state, so the
+canonical record does not carry single-value process or validation enums or an
+always-empty validation-reasons field. Start, exit, timeout, cancellation, and
+validation failures remain typed operational errors with redacted diagnostic
+metadata and are never persisted as judgment records. Judge output cannot
+override adapter-declared model identity. Raw bytes never enter command
+construction or a human artifact. The CLI uses the existing
 `align.judge_cmd` argv only as process transport; it does not reuse legacy
 align prompts, finding IDs, permissive wrappers, disposition types, or
 `judge_required`. Missing transport is a completed blocking-unproven semantic
@@ -452,16 +457,20 @@ process. A changed bound component selects another key. A malformed,
 noncanonical, mismatched, symlinked, or post-write-mutated record is an
 operational failure, not a cache miss.
 
-On a miss the adapter executes once, validates the exchange, and writes a
-temporary file followed by an atomic create/rename of the immutable target.
-Concurrent writers may converge only on byte-identical content. A different
-winner at the same key is a collision and fails operationally. Directory
-creation and parent durability use the existing store writer and atomic-file
-discipline; no second broad writer authority is created. Failed, timed-out,
-cancelled, or invalid process attempts return the structured operational error
-defined in §6 and are not cached as successful judgments. Failure to persist a
-validated successful exchange is also operational; the adapter never silently
-returns an uncached result whose later reuse posture differs.
+On a miss the adapter executes and validates without holding the checkout-wide
+writer lock. Cache directory creation and immutable publication then acquire
+the existing nonblocking D3 `data/writer.lock`, use a temporary file followed
+by an atomic no-clobber publication, and release it before returning. A process
+that cannot acquire that existing lock fails operationally; it never creates a
+second or narrower write authority. Another process may have published the
+same key before this process acquires the lock. That winner is accepted only
+after strict decode, canonical re-encoding, path-key verification, and
+byte-identity with this validated exchange; a different winner is a collision
+and fails operationally. Failed, timed-out, cancelled, or invalid process
+attempts return the structured operational error defined in §6 and are not
+cached as successful judgments. Failure to persist a validated successful
+exchange is also operational; the adapter never silently returns an uncached
+result whose later reuse posture differs.
 
 The cache is gitignored, disposable, and never authority. It reuses the
 existing D4 cache zone rather than introducing a new data-zone root. Deleting
@@ -546,6 +555,17 @@ cross-reference validation, and inclusion in the effective-authority digest.
 governs the current semantic input. Existing legacy `.verdi/conflicts/`,
 `decision-conflict-report.md`, deviation findings, and spec-frontmatter
 dispositions remain unchanged and never satisfy this schema.
+
+`verdi.effective-policy/v1` gains one always-present `dispositions` array,
+sorted by canonical disposition ID. An authority store with no dispositions
+encodes it as `[]`, not by omission, so the v1 shape has one deterministic
+post-adoption form. Adding that field intentionally changes existing
+effective-policy digests and every context authority revision and golden that
+binds them; implementation updates those ratchets together. The existing
+`verdi.context-manifest/v1` reservation remains an explicit empty
+`dispositions: []` and rejects nonempty values. V1 therefore binds the exact
+effective-policy digest but does not enumerate disposition identities; direct
+manifest enumeration is deferred to a later recorded manifest version.
 
 ## 9. Bounds and authenticated principals
 
@@ -736,9 +756,11 @@ A consumer cannot suppress a reason or translate `blocked-unproven` into pass.
 Provider operational failure stays exit 2; either blocking verdict stays exit
 1 before mutation.
 
-Capability adoption is prospective. When
-`.verdi/policy/constitution.md` is absent, production returns a typed
-`not-adopted` result before requiring conflict request operands. Explicit
+Capability adoption is prospective. Only absence of the `.verdi/policy/`
+directory — `policyauthority.ErrNotAdopted` — returns a typed `not-adopted`
+result before requiring conflict request operands. A present policy directory
+whose `constitution.md` is absent is incomplete adoption and fails
+operationally, as do malformed or symlinked policy stores. Explicit
 `verdi context conflict` reports that refusal at exit 1, matching explicit
 context compilation. Existing design gate, build start, build gate, and close
 retain their exact pre-adoption behavior and output; they do not add a
@@ -761,8 +783,9 @@ waiver, or conflict artifact is rewritten or reinterpreted.
 | State | Classification |
 |---|---|
 | Identical complete declared inputs, including date and reused judge records | Byte-identical report and digest |
-| Constitution not adopted, explicit conflict invocation | Exit-1 typed refusal |
-| Constitution not adopted, existing lifecycle consumer | Exact legacy behavior |
+| Policy directory absent (`ErrNotAdopted`), explicit conflict invocation | Exit-1 typed refusal |
+| Policy directory absent (`ErrNotAdopted`), existing lifecycle consumer | Exact legacy behavior |
+| Policy directory present but constitution missing, malformed, or symlinked | Exit-2 operational failure |
 | Proven disjoint scopes or satisfiable mechanical group | Proven no-conflict row |
 | Unsatisfiable overlapping group without effective exemption | Blocked-violated |
 | Unsatisfiable higher-order group whose conflict scope is not proven | Blocking-unproven semantic evaluation |
@@ -891,6 +914,11 @@ Intentional omissions are:
 - no automatic disposition authoring, agent-authored human judgment, or
   authority mutation;
 - no legacy report migration or reinterpretation;
+- no nonempty semantic-disposition enumeration in
+  `verdi.context-manifest/v1`: the manifest retains SI-80's explicit empty
+  field, while its authority revision binds the disposition-bearing
+  effective-policy digest; enumeration requires a later recorded manifest
+  version;
 - no MCP or browser/workbench surface; and
 - no layout-version bump, new data-zone root, new GC mode, or second writer
   authority in the canonical store-layout amendment.

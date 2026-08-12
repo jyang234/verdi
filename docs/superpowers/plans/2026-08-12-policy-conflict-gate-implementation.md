@@ -31,8 +31,8 @@ Git, and built-binary Go tests.
 - Binding authority is
   `docs/superpowers/specs/2026-08-12-policy-conflict-gate-authority-design.md`,
   Context Integrity AC-3/DC-3–DC-8/DC-15/DC-17–DC-24/CO-1–CO-6, and
-  invention-ledger SI-93–SI-103 at authority head
-  `16394012e4ab4110371e231faf5e6d495e70b4c1`.
+  invention-ledger SI-93–SI-103 as consolidated by the independently reviewed
+  exact head carrying this plan.
 - Do not edit frozen artifacts or `docs/design/specs/`; do not add a layout
   root, UI, MCP tool, receipt, sealed-execution behavior, forge network call, or
   generic policy language.
@@ -196,6 +196,8 @@ git commit -m "Define policy disposition artifacts"
 - Modify: `internal/policyauthority/resolve.go`
 - Modify: `internal/policyauthority/{store_test.go,load_negative_test.go,resolve_test.go,resolve_negative_test.go}`
 - Modify: `internal/policyauthority/testdata/golden-effective-policy.json`
+- Modify: `internal/contextcompile/integration_test.go`
+- Modify: `internal/contextcompile/testdata/golden/*.json`
 - Modify: `internal/humanartifact/{kernel.go,kernel_test.go,policy.go,policy_test.go}`
 - Create: `internal/designscaffold/templates/policy-disposition.md`
 
@@ -242,16 +244,18 @@ func RenderDisposition(Scaffold, DispositionScaffoldData) (string, error)
 - [ ] **Step 1: Write path/load/digest/kernel/render RED tests**
 
 Prove path/ID parity, disposition-directory and file symlink refusal, wrong
-kind/name and duplicate ID refusal, mutation-after-load refusal, effective
-authority digest change when one disposition byte changes, the complete kernel
-field inventory, canonical embedded/override scaffold resolution, and exact
-render/decode round-trip. The scaffold is a minimal judge-result skeleton and
-is not exposed by a creation verb.
+kind/name and duplicate ID refusal, mutation-after-load refusal, the
+always-present sorted effective-policy `dispositions` field, effective
+authority digest change both from the new empty field and when one disposition
+byte changes, the resulting context authority-revision/golden ripple, the
+complete kernel field inventory, canonical embedded/override scaffold
+resolution, and exact render/decode round-trip. The scaffold is a minimal
+judge-result skeleton and is not exposed by a creation verb.
 
 - [ ] **Step 2: Run the focused RED**
 
 ~~~bash
-go test ./internal/store ./internal/policyauthority ./internal/humanartifact -run 'Test.*(Disposition|KernelFields)' -count=1
+go test ./internal/store ./internal/policyauthority ./internal/humanartifact ./internal/contextcompile -run 'Test.*(Disposition|KernelFields|Golden_BuildStoryMultiParent)' -count=1
 ~~~
 
 Expected: undefined path/store/renderer symbols and kernel mismatch.
@@ -269,16 +273,19 @@ decoder.
 - [ ] **Step 4: Update ratchets and run race GREEN**
 
 ~~~bash
-go test -race ./internal/store ./internal/policyauthority ./internal/humanartifact -count=1
+go test -race ./internal/store ./internal/policyauthority ./internal/humanartifact ./internal/contextcompile -count=1
 ~~~
 
-Expected: exit 0; the effective-policy golden changes only for the sorted
-disposition field and resulting authority digest.
+Expected: exit 0; the effective-policy golden gains an always-present sorted
+`dispositions` field and changes digest even for the empty fixture. Every
+context-compiler authority revision and committed golden that binds that digest
+changes in the same commit; unrelated manifest fields and data-item bytes do
+not drift.
 
 - [ ] **Step 5: Commit**
 
 ~~~bash
-git add internal/store internal/policyauthority internal/humanartifact internal/designscaffold/templates/policy-disposition.md
+git add internal/store internal/policyauthority internal/humanartifact internal/contextcompile internal/designscaffold/templates/policy-disposition.md
 git commit -m "Load policy disposition authority"
 ~~~
 
@@ -416,19 +423,12 @@ const (
     JudgePrimary JudgeRole = "primary"
     JudgeChallenger JudgeRole = "challenger"
 )
-type ValidationState string
-const ValidationValid ValidationState = "valid"
-type ProcessState string
-const ProcessCompleted ProcessState = "completed"
 type JudgmentExchange struct {
     Role JudgeRole
     Adapter contextcompile.AdapterRef
     Model, CommandDigest, PromptDigest, InputDigest string
     RawResult, RawDigest string
     Result JudgeResult
-    Validation ValidationState
-    ValidationReasons []string
-    Process ProcessState
 }
 type Judgment struct {
     Schema, TreeHash, InputDigest string
@@ -610,7 +610,6 @@ type ConflictView struct {
     TypedClaims []TypedClaim
     ProseClaims []ProseClaim
     Exemptions []policyartifact.Exemption
-    Dispositions []policyartifact.Disposition
     Profile governanceprincipal.Profile
     Actors []governanceprincipal.PrincipalResolution
 }
@@ -666,8 +665,8 @@ go test -race ./internal/contextcompile ./internal/policyconflict -run 'Test.*(C
 go test -race ./internal/contextcompile ./internal/policyconflict -count=1
 ~~~
 
-Expected: both exit 0; existing context manifest/data-item goldens are
-byte-identical.
+Expected: both exit 0; relative to Task 2's intentional authority-digest
+ratchet, context manifest/data-item goldens are byte-identical.
 
 - [ ] **Step 5: Commit**
 
@@ -893,10 +892,16 @@ Expected: undefined semantic/judge/cache/immutable-create APIs.
 
 Build one complete input, invoke primary/challenger independently with identical
 bytes, take model identity from adapter configuration only, and validate the
-strict inner result rather than legacy align wrappers. Cache only a validated
-successful exchange. Use `CreateImmutable` under the existing writer lock; if
-another writer wins, strict-decode and require byte identity. Do not cache
-blocked state, add a cache daemon, or introduce another lock.
+strict inner result rather than legacy align wrappers. Cache only a completed,
+validated successful exchange; its persisted presence is the successful
+process/validation state, so do not add single-value success enums or an
+always-empty reasons field. Run the judge without the checkout writer lock.
+For cache directory creation and publication only, acquire the existing
+nonblocking D3 `data/writer.lock`, call `CreateImmutable`, and release before
+returning. A lock-holder refusal is operational. If another process published
+the key before acquisition, strict-decode, canonical-reencode, verify the key,
+and require byte identity. Do not cache blocked state, add a cache daemon, or
+introduce another lock.
 
 - [ ] **Step 4: Run focused and package race GREEN**
 
