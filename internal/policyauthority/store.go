@@ -254,9 +254,9 @@ func walkPolicyDir(policyDir string) ([]string, error) {
 // merely with their own self-contained grammar: selected-profile
 // resolution, claim-subject registration, scope-environment
 // registration, overlay refinement targets and operand-kind agreement,
-// exemption witness freshness, approval-role registration, and
-// payload-kind uniqueness across policies. Every failure names the
-// offending artifact and field (co-1's three-valued honesty: a cross-
+// exemption witness freshness, exemption and disposition approval-role
+// registration, and payload-kind uniqueness across policies. Every
+// failure names the offending artifact and field (co-1's three-valued honesty: a cross-
 // validation gap is never a silent pass).
 func crossValidate(s *Store) error {
 	if err := checkMapKeyIdentity(s); err != nil {
@@ -337,6 +337,32 @@ func crossValidate(s *Store) error {
 		for _, a := range e.Approvals {
 			if !roles[a.Role] {
 				return fmt.Errorf("policyauthority: exemption %s approval: role %q is not a member of the constitution catalog's roles", eid, a.Role)
+			}
+		}
+	}
+
+	// Dispositions carry the same two STRUCTURAL cross-references an
+	// exemption does — a scope bounded by constitution environments and
+	// approvals drawn from the constitution catalog's roles — and §8
+	// assigns "cross-reference validation" here, so a disposition naming
+	// an unregistered environment or an uncataloged approval role must be
+	// refused rather than sealed into the effective-authority digest with
+	// intact seals (the exact defect the exemption loop above prevents).
+	//
+	// Nothing further belongs here: §8 gives internal/policyconflict ALONE
+	// the interpretation of whether a disposition matches and governs the
+	// current semantic input, so witness claim/exemption existence,
+	// witness digest currency, staleness, and semantic-input agreement are
+	// deliberately NOT checked at load. A disposition witnesses prose
+	// claims and a target capsule, neither of which this store holds.
+	for _, did := range sortedKeys(s.Dispositions) {
+		d := s.Dispositions[did]
+		if err := checkScopeEnvironments("disposition "+did+" scope", d.Scope, environments); err != nil {
+			return err
+		}
+		for _, a := range d.Approvals {
+			if !roles[a.Role] {
+				return fmt.Errorf("policyauthority: disposition %s approval: role %q is not a member of the constitution catalog's roles", did, a.Role)
 			}
 		}
 	}
