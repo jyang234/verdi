@@ -87,6 +87,19 @@
 // (cmd/verdi/journey.go's cmdJourney) before resolving a store root or
 // reading any file, falling straight into the plain default case below —
 // the same safety property model/spec/board already rely on there.
+//
+// Context Integrity Wave-3 (docs/superpowers/specs/2026-08-11-context-
+// compiler-authority-design.md §2, ledger SI-78..SI-87): `context` is
+// another brand-new, entirely read-only verb — dispatch.go's verbPhase
+// gains a `context` key (phase 23) in the same change this inV0 addition
+// rides. `verdi context compile --request <path|-> [--out <path>]` never
+// flips a status, writes a stamp, stages, commits, or calls a forge; it
+// only writes its own explicit --out destination, which a bare
+// invocation never names. A bare `verdi context` (no "compile"
+// subcommand) fails on usage parsing alone (cmd/verdi/context.go's
+// cmdContext) BEFORE resolving a store root or reading any file, falling
+// straight into the plain default case below — the same safety property
+// model/spec/journey already rely on there.
 package specalign
 
 import "testing"
@@ -102,7 +115,7 @@ func TestV0CLIVerbInventory(t *testing.T) {
 		"lint", "design", "accept", "feature", "build", "align", "sync",
 		"serve", "mcp", "matrix", "rollup", "dex", "gate", "board", "audit",
 		"close", "gc", "attest", "disposition", "model", "spec", "obligation",
-		"journey",
+		"journey", "context",
 	}
 	// PLAN.md §5 scope discipline, verbatim (as amended: `close`/`gc`
 	// graduated to real, round 6): "Explicitly out of v0 (not stubbed —
