@@ -121,14 +121,14 @@ claims:
     family: identity
     operator: same-principal
     subject: exemption-approval
-    values: []
+    values: ["author", "reviewer"]
     scope: {phases: [], environments: [], paths: [], refs: []}
     overridable: true
   - id: diff-owner
     family: identity
     operator: different-principal
     subject: exemption-approval
-    values: []
+    values: ["author", "policy-owner"]
     scope: {phases: [], environments: [], paths: [], refs: []}
     overridable: true
   - id: locked-region
