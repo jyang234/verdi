@@ -16,6 +16,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -429,6 +430,26 @@ func TestCmdContextCompile_StdoutOnSuccess(t *testing.T) {
 	if manifest.Phase != contextcompile.PhaseDesign {
 		t.Fatalf("Phase = %q, want design", manifest.Phase)
 	}
+	// Task 8 Step 1's "exit 0 for completed manifests carrying advisory/
+	// unproven facts": a clean compile is not a claim of proven evidence
+	// or a resolved principal. The CLI supplies no principal-resolution
+	// port in v1 (authority design §2), so the actor posture is always
+	// explicitly unproven and says so in its own disclosures, and v1's one
+	// legal evidence authority is advisory.
+	if manifest.Evidence.Authority != contextcompile.EvidenceAuthorityAdvisory {
+		t.Fatalf("evidence.authority = %q, want %q", manifest.Evidence.Authority, contextcompile.EvidenceAuthorityAdvisory)
+	}
+	if manifest.Actors.Posture != contextcompile.ResolutionUnproven {
+		t.Fatalf("actors.posture = %q, want %q", manifest.Actors.Posture, contextcompile.ResolutionUnproven)
+	}
+	if len(manifest.Actors.Resolutions) != 0 {
+		t.Fatalf("actors.resolutions = %v, want none from a CLI compile", manifest.Actors.Resolutions)
+	}
+	wantDisclosure := contextcompile.DisclosureActorResolutionUnproven
+	if !slices.Contains(manifest.Actors.Disclosures, wantDisclosure) {
+		t.Fatalf("actors.disclosures = %v, want to contain %q", manifest.Actors.Disclosures, wantDisclosure)
+	}
+
 	reEncoded, err := contextcompile.EncodeManifest(manifest)
 	if err != nil {
 		t.Fatalf("EncodeManifest: %v", err)
