@@ -396,7 +396,7 @@ func TestResolveBoundObligations_WrongVerifiesCount(t *testing.T) {
 	}
 
 	got, gotErr := ResolveBoundObligations(context.Background(), git, root, head, target)
-	mustOperationalError(t, got, gotErr)
+	_ = mustOperationalError(t, got, gotErr)
 }
 
 func TestResolveBoundObligations_FragmentVerifiesRef(t *testing.T) {
@@ -415,7 +415,7 @@ func TestResolveBoundObligations_FragmentVerifiesRef(t *testing.T) {
 	}
 
 	got, gotErr := ResolveBoundObligations(context.Background(), git, root, head, target)
-	mustOperationalError(t, got, gotErr)
+	_ = mustOperationalError(t, got, gotErr)
 }
 
 func TestResolveBoundObligations_NonRegularEntry(t *testing.T) {
@@ -442,7 +442,7 @@ func TestResolveBoundObligations_NonRegularEntry(t *testing.T) {
 				},
 			}
 			got, gotErr := ResolveBoundObligations(context.Background(), git, root, head, target)
-			mustOperationalError(t, got, gotErr)
+			_ = mustOperationalError(t, got, gotErr)
 		})
 	}
 }
