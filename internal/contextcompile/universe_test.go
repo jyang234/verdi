@@ -248,20 +248,129 @@ func TestBuildUniverse_DataZoneBoundary(t *testing.T) {
 		t.Fatalf("BuildUniverse: %v", err)
 	}
 
+	requireSoleDataZoneBoundary(t, got)
+}
+
+// requireSoleDataZoneBoundary asserts candidates carry EXACTLY one
+// `.verdi/data` boundary candidate, that it is a worktree-overlay candidate
+// bearing path identity and nothing else, and that no descendant of the
+// zone appears at all.
+func requireSoleDataZoneBoundary(t *testing.T, candidates []Candidate) {
+	t.Helper()
 	var boundaryCount int
-	for _, c := range got {
+	for _, c := range candidates {
 		if strings.HasPrefix(c.Path, ".verdi/data/") {
 			t.Fatalf("descendant candidate %#v leaked past the .verdi/data/ boundary", c)
 		}
 		if c.Path == ".verdi/data" {
 			boundaryCount++
-			if c.Object != "" || c.Mode != "" || c.Type != "" {
-				t.Fatalf("boundary candidate %#v carries object/mode/type, want none", c)
+			if c.Source != SourceWorktreeOverlay {
+				t.Fatalf("boundary candidate source = %q, want worktree-overlay: the mandated row carries path identity and exclusion facts only, never a head-tree object identity the gitignored zone can never have", c.Source)
+			}
+			if c.ID != "path:.verdi/data" {
+				t.Fatalf("boundary candidate id = %q, want %q", c.ID, "path:.verdi/data")
+			}
+			if c.Object != "" || c.Mode != "" || c.Type != "" || c.Ref != "" {
+				t.Fatalf("boundary candidate %#v carries object/mode/type/ref, want none", c)
 			}
 		}
 	}
 	if boundaryCount != 1 {
 		t.Fatalf("data-zone boundary candidates = %d, want exactly 1", boundaryCount)
+	}
+}
+
+// TestBuildUniverse_DataZoneBoundaryIsUnconditional proves the boundary row
+// is emitted even when NO data-zone path was ever reported by either git
+// port. Authority design §5 states the rule with no precondition —
+// "`.verdi/data/` is represented by one excluded subtree-boundary
+// candidate" — and in a conformant store `.verdi/.gitignore` ignores
+// `data/`, so neither `git ls-tree` nor `git status --porcelain` (without
+// `--ignored`) ever surfaces a data-zone path. Gating the row on having
+// SEEN one therefore omitted it from every real manifest, which is the one
+// case the sentence exists to cover.
+func TestBuildUniverse_DataZoneBoundaryIsUnconditional(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		in   UniverseInput
+	}{
+		{"no inputs at all", UniverseInput{Adapter: testAdapter()}},
+		{
+			name: "ordinary tracked and dirty paths, none in the data zone",
+			in: UniverseInput{
+				Tree:          []gitx.TreeEntry{{Mode: "100644", Type: "blob", Object: "aaa", Path: "ordinary.txt"}},
+				WorktreePaths: []string{"dirty.txt"},
+				Adapter:       testAdapter(),
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := BuildUniverse(tc.in)
+			if err != nil {
+				t.Fatalf("BuildUniverse: %v", err)
+			}
+			requireSoleDataZoneBoundary(t, got)
+		})
+	}
+}
+
+// TestBuildUniverse_DataZoneBoundaryNeverDuplicates proves the
+// unconditional emission still yields exactly ONE boundary candidate when
+// the zone IS visible — including the pathological spellings where the
+// boundary path itself, rather than a descendant, is reported by a git
+// port. A literal `.verdi/data` entry must collapse INTO the boundary, not
+// race the unconditional append into a duplicate (source, logical-id).
+func TestBuildUniverse_DataZoneBoundaryNeverDuplicates(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		in   UniverseInput
+	}{
+		{
+			name: "descendants reported by both ports",
+			in: UniverseInput{
+				Tree:          []gitx.TreeEntry{{Mode: "100644", Type: "blob", Object: "aaa", Path: ".verdi/data/tracked.json"}},
+				WorktreePaths: []string{".verdi/data/dirty.json", ".verdi/data/nested/deep.json"},
+				Adapter:       testAdapter(),
+			},
+		},
+		{
+			name: "the boundary path itself reported as a worktree path",
+			in: UniverseInput{
+				WorktreePaths: []string{".verdi/data"},
+				Adapter:       testAdapter(),
+			},
+		},
+		{
+			name: "the boundary path itself reported as a tree entry",
+			in: UniverseInput{
+				Tree:    []gitx.TreeEntry{{Mode: "100644", Type: "blob", Object: "aaa", Path: ".verdi/data"}},
+				Adapter: testAdapter(),
+			},
+		},
+		{
+			name: "the boundary path reported by both ports at once",
+			in: UniverseInput{
+				Tree:          []gitx.TreeEntry{{Mode: "100644", Type: "blob", Object: "aaa", Path: ".verdi/data"}},
+				WorktreePaths: []string{".verdi/data", ".verdi/data/nested/deep.json"},
+				Adapter:       testAdapter(),
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := BuildUniverse(tc.in)
+			if err != nil {
+				t.Fatalf("BuildUniverse: %v", err)
+			}
+			requireSoleDataZoneBoundary(t, got)
+			seen := map[string]bool{}
+			for _, c := range got {
+				key := string(c.Source) + "/" + c.ID
+				if seen[key] {
+					t.Fatalf("duplicate candidate identity %s", key)
+				}
+				seen[key] = true
+			}
+		})
 	}
 }
 

@@ -27,6 +27,26 @@ const dataZonePrefix = ".verdi/data/"
 // candidate is addressed by.
 const dataZoneBoundaryPath = ".verdi/data"
 
+// dataZoneBoundaryCandidate is the one mandated subtree-boundary candidate.
+// Authority design §5 states its existence with no precondition, so
+// BuildUniverse emits it on every call — see the emission site for why the
+// alternative (emitting it only once a data-zone path had been observed)
+// made it unreachable in a conformant store.
+//
+// Its source is `worktree-overlay`: the Wave-3 plan's binding constraint
+// "Worktree-overlay candidates contain path identity and exclusion facts
+// only" is exactly this row's mandated shape — no descendant, no content,
+// no digest — whereas a head-tree candidate is a HEAD tree entry carrying
+// blob object identity, which a gitignored, untracked data zone can never
+// have.
+func dataZoneBoundaryCandidate() Candidate {
+	return Candidate{
+		Source: SourceWorktreeOverlay,
+		ID:     pathID(dataZoneBoundaryPath),
+		Path:   dataZoneBoundaryPath,
+	}
+}
+
 // Candidate is the compiler-local raw candidate the universe union
 // produces before any applicability or classification decision (authority
 // design §5). Object/Mode/Type are set only for head-tree candidates; every
@@ -92,14 +112,12 @@ func BuildUniverse(in UniverseInput) ([]Candidate, error) {
 	}
 	candidates = append(candidates, contextCandidates...)
 
-	sawDataZone := false
 	seenHeadTree := map[string]bool{}
 	for _, e := range in.Tree {
 		if err := validateCandidatePath(e.Path); err != nil {
 			return nil, fmt.Errorf("contextcompile: BuildUniverse: head-tree: %w", err)
 		}
-		if inDataZone(e.Path) {
-			sawDataZone = true
+		if atOrInDataZone(e.Path) {
 			continue
 		}
 		if lift[e.Path] {
@@ -126,8 +144,7 @@ func BuildUniverse(in UniverseInput) ([]Candidate, error) {
 		if err := validateCandidatePath(p); err != nil {
 			return nil, fmt.Errorf("contextcompile: BuildUniverse: worktree-overlay: %w", err)
 		}
-		if inDataZone(p) {
-			sawDataZone = true
+		if atOrInDataZone(p) {
 			continue
 		}
 		if seenWorktree[p] {
@@ -141,13 +158,22 @@ func BuildUniverse(in UniverseInput) ([]Candidate, error) {
 		})
 	}
 
-	if sawDataZone {
-		candidates = append(candidates, Candidate{
-			Source: SourceWorktreeOverlay,
-			ID:     pathID(dataZoneBoundaryPath),
-			Path:   dataZoneBoundaryPath,
-		})
-	}
+	// The boundary candidate is UNCONDITIONAL (authority design §5:
+	// "`.verdi/data/` is represented by one excluded subtree-boundary
+	// candidate"; no precondition is stated). Emitting it only after a
+	// data-zone path had been observed made it unreachable in exactly the
+	// stores it exists to describe: a conformant `.verdi/.gitignore`
+	// ignores `data/`, so `git ls-tree` never lists the zone and the
+	// `git status --porcelain` this compiler runs — deliberately without
+	// `--ignored` — never reports it either. The proof must state that the
+	// whole subtree was outside inspection whether or not the zone happens
+	// to be populated, which is precisely a fact no observation can supply.
+	//
+	// Exactly one such candidate is ever produced: both loops above route
+	// the boundary path itself, and every descendant of it, through
+	// atOrInDataZone and drop them, so this append can never collide with
+	// a path-derived candidate of the same (source, logical-id).
+	candidates = append(candidates, dataZoneBoundaryCandidate())
 
 	seenProjection := map[string]bool{}
 	for _, p := range in.ProjectionPaths {
@@ -251,10 +277,23 @@ func liftedCandidates(source Source, lifts map[string]string) ([]Candidate, erro
 	return candidates, nil
 }
 
-// inDataZone reports whether p falls under the one excluded `.verdi/data/`
-// subtree boundary.
+// inDataZone reports whether p is a strict DESCENDANT of the one excluded
+// `.verdi/data/` subtree boundary. The boundary path itself is not a
+// descendant of itself, which is what lets Classify use this predicate to
+// reject any leaked descendant while still admitting the boundary
+// candidate.
 func inDataZone(p string) bool {
 	return strings.HasPrefix(p, dataZonePrefix)
+}
+
+// atOrInDataZone reports whether p is the boundary path itself or a
+// descendant of it — the exact set of git-reported paths that collapse
+// into the single unconditional boundary candidate. Collapsing the
+// boundary path itself matters for dedup, not only for tidiness: without
+// it, a git port that reported a literal `.verdi/data` entry would produce
+// a second candidate sharing the unconditional one's (source, logical-id).
+func atOrInDataZone(p string) bool {
+	return p == dataZoneBoundaryPath || inDataZone(p)
 }
 
 // pathID and refID spell the two canonical logical-ID forms authority

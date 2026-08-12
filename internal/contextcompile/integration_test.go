@@ -947,7 +947,24 @@ func TestCompile_Integration_Golden_BuildStoryMultiParent(t *testing.T) {
 	if !bytes.Equal(result.ManifestBytes, golden) {
 		t.Fatalf("manifest bytes drifted from the committed golden ratchet\ngot:  %s\nwant: %s", result.ManifestBytes, golden)
 	}
+
+	if got := string(result.Manifest.Revisions.Authority); got != goldenAuthorityRevision {
+		t.Fatalf("revisions.authority = %s, want %s", got, goldenAuthorityRevision)
+	}
 }
+
+// goldenAuthorityRevision is the authority revision the golden fixture
+// carried BEFORE the `.verdi/data` boundary row became unconditional, kept
+// here as an independent, hand-transcribed constant rather than read back
+// out of the fixture. Authority design §9 enumerates the authority
+// revision's private preimage exhaustively — effective policy, accepted
+// spec, parent fragments, decisions, obligations — and states outright that
+// "repository state ... and payload classification ... are bound by the
+// manifest self digest, not folded into authority identity". Adding an
+// excluded repository-state row is therefore required to move the self
+// digest and required NOT to move this value; a regeneration that moved
+// both would mean the preimage had silently absorbed classification.
+const goldenAuthorityRevision = "sha256:45ab861faa1f9a4c01b5dd16d3da4604c9b990faec29883779cc033a0cef5fb1"
 
 // TestCompile_Integration_DeterministicAcrossTwoRoots proves identical
 // trusted inputs (HEAD, request, authority) built independently under two
@@ -1077,6 +1094,154 @@ func (g countingRepoFactsGatherer) Gather(ctx context.Context, in repositoryfact
 	}
 	snapshot.Facts.Branch = repositoryfacts.StringFact{Known: true, Value: "poisoned-second-gather"}
 	return snapshot, nil
+}
+
+// --- .verdi/data/ subtree privacy over a real, gitignored zone ----------
+
+// dataZoneSentinel is written into every file in the hermetic data zone
+// below, so "no data-zone byte reached the manifest" is an assertion with
+// something recognizable to find rather than a vacuous one.
+const dataZoneSentinel = "SENTINEL-DATA-ZONE-BYTES"
+
+// dataZoneGuardGitReader wraps a GitReader and panics the moment any port
+// is asked about a path at or under the `.verdi/data` boundary — extending
+// this package's existing panicking-fake discipline (compiler_test.go's
+// panicGitReader, classify_test.go's forbidden-Show fake) from "this stage
+// must not run" to "this SUBTREE must never be read". The manifest's
+// boundary row must be produced from the fixed path identity alone, never
+// from an inspection of the zone.
+type dataZoneGuardGitReader struct {
+	GitReader
+}
+
+func (g dataZoneGuardGitReader) Show(ctx context.Context, root, ref, path string) ([]byte, error) {
+	if path == ".verdi/data" || strings.HasPrefix(path, ".verdi/data/") {
+		panic("contextcompile: the compiler read a byte at or under the .verdi/data boundary: " + path)
+	}
+	return g.GitReader.Show(ctx, root, ref, path)
+}
+
+// gitignoredDataZoneRepo builds the conformant-store fixture: the standard
+// multi-parent story repository plus a committed `.verdi/.gitignore` that
+// ignores `data/`, and a populated `.verdi/data/` tree created AFTER the
+// commits — exactly the shape a real store has. Because the zone is
+// gitignored, `git ls-tree` never lists it and `git status --porcelain`
+// (which the compiler runs without `--ignored`) never reports it, so NO
+// git port can tell the compiler the zone exists.
+func gitignoredDataZoneRepo(t *testing.T) *fixturegit.Repo {
+	t.Helper()
+	storyData, storyFM := decodeFragmentSpecFixture(t, "story-multi-parent.md")
+	alphaData, _ := decodeFragmentSpecFixture(t, "feature-alpha.md")
+	betaData, _ := decodeFragmentSpecFixture(t, "feature-beta.md")
+	repo := buildCompilerRepo(t, map[string]string{
+		".verdi/.gitignore": "data/\n",
+		".verdi/specs/active/" + strings.TrimPrefix(storyFM.ID, "spec/") + "/spec.md": string(storyData),
+		".verdi/specs/active/feature-alpha/spec.md":                                   string(alphaData),
+		".verdi/specs/active/feature-beta/spec.md":                                    string(betaData),
+	})
+
+	nested := filepath.Join(repo.Dir, ".verdi", "data", "nested")
+	if err := os.MkdirAll(nested, 0o755); err != nil {
+		t.Fatalf("creating the data zone: %v", err)
+	}
+	for _, f := range []struct{ path, body string }{
+		{filepath.Join(repo.Dir, ".verdi", "data", "secret-one.json"), `{"secret":"` + dataZoneSentinel + `"}` + "\n"},
+		{filepath.Join(nested, "secret-two.json"), `{"secret":"` + dataZoneSentinel + `"}` + "\n"},
+	} {
+		if err := os.WriteFile(f.path, []byte(f.body), 0o644); err != nil {
+			t.Fatalf("writing %s: %v", f.path, err)
+		}
+	}
+	return repo
+}
+
+// TestCompile_Integration_DataZoneBoundaryRow_GitignoredZone proves
+// authority design §5's UNCONDITIONAL sentence — "`.verdi/data/` is
+// represented by one excluded subtree-boundary candidate; its descendants
+// are neither enumerated nor named" — holds in the store shape that
+// actually ships: a `.verdi/.gitignore` ignoring `data/`. Gating the row on
+// having observed a data-zone path made it unreachable here, since a
+// gitignored zone is invisible to both `git ls-tree` and `git status
+// --porcelain`.
+//
+// The row's source is `worktree-overlay`: the Wave-3 plan's binding
+// constraint "Worktree-overlay candidates contain path identity and
+// exclusion facts only" is exactly the boundary row's mandated shape, while
+// head-tree candidates are HEAD tree entries carrying blob object identity
+// — which a gitignored zone can never have.
+func TestCompile_Integration_DataZoneBoundaryRow_GitignoredZone(t *testing.T) {
+	repo := gitignoredDataZoneRepo(t)
+
+	// Precondition: prove the zone really is invisible to both git ports,
+	// so the boundary row below cannot have come from an observation.
+	tree := runIntegrationGit(t, repo.Dir, "ls-tree", "-r", "--name-only", "HEAD")
+	if strings.Contains(tree, ".verdi/data") {
+		t.Fatalf("fixture is not a gitignored zone: ls-tree lists a data-zone path:\n%s", tree)
+	}
+	if status := gitPorcelainStatus(t, repo.Dir); strings.Contains(status, ".verdi/data") {
+		t.Fatalf("fixture is not a gitignored zone: porcelain status reports a data-zone path:\n%s", status)
+	}
+
+	c := newCompilerWithPorts(
+		dataZoneGuardGitReader{gitxGitReader{}},
+		specstate.NewProjector(),
+		defaultAuthorityLoader{},
+		nil,
+		repositoryfacts.NewGatherer(),
+		defaultProjectionVerifier{},
+	)
+	result, err := c.Compile(context.Background(), repo.Dir, integrationBuildRequest("spec/story-multi-parent"))
+	if err != nil {
+		t.Fatalf("Compile: unexpected error: %v", err)
+	}
+
+	entry := requireExcludedEntry(t, result.Manifest.Excluded, "path:"+dataZoneBoundaryPath)
+	if entry.Source != SourceWorktreeOverlay {
+		t.Fatalf("boundary row source = %q, want %q", entry.Source, SourceWorktreeOverlay)
+	}
+	if entry.Reason != ExclusionDataZoneDisposable {
+		t.Fatalf("boundary row reason = %q, want %q", entry.Reason, ExclusionDataZoneDisposable)
+	}
+	if entry.Path == nil || *entry.Path != dataZoneBoundaryPath {
+		t.Fatalf("boundary row path = %v, want %q", entry.Path, dataZoneBoundaryPath)
+	}
+	if entry.Ref != nil {
+		t.Fatalf("boundary row carries ref %q, want none", *entry.Ref)
+	}
+
+	// The boundary appears exactly once, across ALL three ledgers.
+	var boundaryRows int
+	for _, e := range result.Manifest.Excluded {
+		if e.ID == "path:"+dataZoneBoundaryPath {
+			boundaryRows++
+		}
+	}
+	for _, e := range result.Manifest.Included {
+		if e.ID == "path:"+dataZoneBoundaryPath {
+			t.Fatalf("the data-zone boundary appears in `included`: %+v", e)
+		}
+	}
+	if boundaryRows != 1 {
+		t.Fatalf("data-zone boundary rows = %d, want exactly 1", boundaryRows)
+	}
+
+	// No descendant is enumerated OR named, anywhere in the manifest or in
+	// any data payload — and no data-zone byte was read.
+	for _, forbidden := range []string{".verdi/data/", "secret-one", "secret-two", "nested", dataZoneSentinel} {
+		if bytes.Contains(result.ManifestBytes, []byte(forbidden)) {
+			t.Fatalf("manifest names %q, violating the collapsed-boundary privacy rule", forbidden)
+		}
+		for i, item := range result.DataItemBytes {
+			if bytes.Contains(item, []byte(forbidden)) {
+				t.Fatalf("data item %d names %q, violating the collapsed-boundary privacy rule", i, forbidden)
+			}
+		}
+		for _, projection := range result.ProjectionFiles {
+			if bytes.Contains(projection.Content, []byte(forbidden)) {
+				t.Fatalf("projection %s names %q, violating the collapsed-boundary privacy rule", projection.Path, forbidden)
+			}
+		}
+	}
 }
 
 // requireExcludedEntry returns the sole ExcludedEntry in entries whose ID
