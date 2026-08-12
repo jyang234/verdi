@@ -193,6 +193,28 @@ func managedPathOwners(adapters []policyartifact.Adapter) (map[string]string, er
 	return owners, nil
 }
 
+// ManagedPaths returns the sorted, de-duplicated set of every managed
+// projection path adapters declares, across ALL of them — not just one
+// requested adapter — wrapping managedPathOwners' own collision-detection
+// (ErrOverlappingManagedPath) so a caller that only needs the full path
+// set (never the owning adapter id) gets the same fail-closed posture
+// Generate and Verify already apply, without reaching into this
+// package's unexported map. adapters need not already be sorted; this
+// sorts its own copy first (sortedAdapters), matching managedPathOwners'
+// own deterministic-pairing precondition.
+func ManagedPaths(adapters []policyartifact.Adapter) ([]string, error) {
+	owners, err := managedPathOwners(sortedAdapters(adapters))
+	if err != nil {
+		return nil, err
+	}
+	paths := make([]string, 0, len(owners))
+	for rel := range owners {
+		paths = append(paths, rel)
+	}
+	sort.Strings(paths)
+	return paths, nil
+}
+
 // sortedAdapters returns a copy of adapters sorted by id.
 // policyartifact.DecodeConstitution already normalizes this order, but
 // the contract's own "sorted by id" rule is restated here defensively —

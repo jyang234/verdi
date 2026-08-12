@@ -23,12 +23,22 @@ type ProjectionFile struct {
 
 // Result is the compiled context: the decoded manifest and data items plus
 // their exact wire bytes, and the rendered projection files.
+//
+// ManagedProjectionPaths is an in-memory-only field (never part of the
+// wire manifest — EncodeManifest/DecodeManifest never touch Result): the
+// sorted, de-duplicated set of every managed instruction-projection path
+// declared by ANY adapter in the resolved constitution, not only the one
+// this request named. A caller enforcing "never overwrite a managed
+// projection file" (e.g. `verdi context compile --out`) must guard against
+// EVERY adapter's managed path, since a two-adapter constitution's other
+// adapter file is exactly as reserved as the requested adapter's own.
 type Result struct {
-	Manifest        Manifest
-	ManifestBytes   []byte
-	DataItems       []DataItem
-	DataItemBytes   [][]byte
-	ProjectionFiles []ProjectionFile
+	Manifest               Manifest
+	ManifestBytes          []byte
+	DataItems              []DataItem
+	DataItemBytes          [][]byte
+	ProjectionFiles        []ProjectionFile
+	ManagedProjectionPaths []string
 }
 
 // RepositoryFactsGatherer computes the shared repository-identity Snapshot
@@ -262,6 +272,16 @@ func (c Compiler) Compile(ctx context.Context, root string, request Request) (Re
 		return Result{}, &ProjectionDriftRefusal{Paths: driftedPaths, Reasons: driftReasons}
 	}
 
+	// Stage 5b: compute the full managed-projection path set across EVERY
+	// adapter the resolved constitution declares — not only the requested
+	// one — for Result.ManagedProjectionPaths (see its doc comment). Uses
+	// the SAME resolved authority.Store.Constitution.Adapters stage 2
+	// already loaded, so this never re-loads authority a second time.
+	managedProjectionPaths, err := instructionprojection.ManagedPaths(authority.Store.Constitution.Adapters)
+	if err != nil {
+		return Result{}, fmt.Errorf("contextcompile: stage 5b compute managed projection paths: %w", err)
+	}
+
 	// Stage 7 (evaluated ahead of the stage-6 BuildUniverse call — see the
 	// construction note above): evaluate applicability and select the
 	// applicable authority operands and policy ids.
@@ -389,11 +409,12 @@ func (c Compiler) Compile(ctx context.Context, root string, request Request) (Re
 	}
 
 	return Result{
-		Manifest:        finalManifest,
-		ManifestBytes:   append([]byte(nil), manifestBytes...),
-		DataItems:       append([]DataItem(nil), classification.DataItems...),
-		DataItemBytes:   dataItemBytes,
-		ProjectionFiles: resultProjectionFiles,
+		Manifest:               finalManifest,
+		ManifestBytes:          append([]byte(nil), manifestBytes...),
+		DataItems:              append([]DataItem(nil), classification.DataItems...),
+		DataItemBytes:          dataItemBytes,
+		ProjectionFiles:        resultProjectionFiles,
+		ManagedProjectionPaths: append([]string(nil), managedProjectionPaths...),
 	}, nil
 }
 

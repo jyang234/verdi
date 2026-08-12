@@ -605,6 +605,102 @@ func TestCmdContextCompile_OutIsManagedProjectionFile_Refused(t *testing.T) {
 	}
 }
 
+// contextTwoAdapterPolicyStoreFiles reads the real two-adapter policy
+// fixture internal/instructionprojection's own multiadapter tests install
+// (testdata/multi-store/.verdi/policy), keyed by repo-relative
+// .verdi/policy/ path: codex manages AGENTS.md, claude-code manages
+// CLAUDE.md — never a hand-authored duplicate of a governed constitution.
+func contextTwoAdapterPolicyStoreFiles(t *testing.T) map[string]string {
+	t.Helper()
+	rels := []string{
+		"constitution.md",
+		"policies/go-toolchain.md",
+		"profiles/solo-default.md",
+	}
+	out := make(map[string]string, len(rels))
+	for _, rel := range rels {
+		data, err := os.ReadFile(filepath.Join("..", "..", "internal", "instructionprojection", "testdata", "multi-store", ".verdi", "policy", filepath.FromSlash(rel)))
+		if err != nil {
+			t.Fatalf("read two-adapter policy fixture %s: %v", rel, err)
+		}
+		out[".verdi/policy/"+rel] = string(data)
+	}
+	return out
+}
+
+// buildContextCompileRepoTwoAdapter mirrors buildContextCompileRepo but
+// installs the two-adapter constitution (codex/AGENTS.md, claude-code/
+// CLAUDE.md) in place of the single-adapter fixture, so a test can prove
+// --out is refused when it names the OTHER (non-requested) adapter's
+// managed file.
+func buildContextCompileRepoTwoAdapter(t *testing.T, specFiles map[string]string) *fixturegit.Repo {
+	t.Helper()
+	files := contextTwoAdapterPolicyStoreFiles(t)
+	files[".verdi/verdi.yaml"] = "schema: verdi.layout/v1\n"
+	for path, content := range specFiles {
+		files[path] = content
+	}
+	repo := fixturegit.Build(t, []fixturegit.Layer{{Files: files, Message: "scaffold"}})
+	t.Setenv("CI_DEFAULT_BRANCH", "main")
+
+	if _, err := instructionprojection.Generate(repo.Dir); err != nil {
+		t.Fatalf("instructionprojection.Generate: %v", err)
+	}
+	repo.Head = commitAllOnCurrentBranch(t, repo.Dir, "generate instruction projection")
+	return repo
+}
+
+// TestCmdContextCompile_OutIsOtherAdapterManagedFile_Refused proves the
+// --out guard covers EVERY adapter's managed projection path, not only
+// the REQUESTED adapter's own: with a two-adapter constitution (codex
+// manages AGENTS.md, claude-code manages CLAUDE.md), a codex-adapter
+// request naming --out CLAUDE.md must be refused exactly like naming its
+// own AGENTS.md would (TestCmdContextCompile_OutIsManagedProjectionFile_
+// Refused above) — CLAUDE.md is exactly as reserved, and clobbering it
+// would violate CLAUDE.md/the plan's "never writes ... managed projection
+// files" regardless of which adapter this particular request targeted.
+// The case-variant subtest pins the same alias-safety canonicalGuardPath
+// already gives every other reserved-path guard.
+func TestCmdContextCompile_OutIsOtherAdapterManagedFile_Refused(t *testing.T) {
+	repo := buildContextCompileRepoTwoAdapter(t, map[string]string{
+		".verdi/specs/active/feature-alpha/spec.md": contextFeatureAlphaSpec(t),
+	})
+	t.Chdir(repo.Dir)
+	reqPath := writeContextRequestFile(t, repo.Dir, "request.json", contextRequestBytes(t, "spec/feature-alpha", contextcompile.PhaseDesign, nil))
+	caseInsensitive := contextFilesystemIsCaseInsensitive(t, repo.Dir)
+
+	cases := map[string]string{
+		"other adapter's exact managed path": filepath.Join(repo.Dir, "CLAUDE.md"),
+	}
+	if caseInsensitive {
+		cases["other adapter's case-variant spelling"] = filepath.Join(repo.Dir, "claude.md")
+	}
+	for name, outPath := range cases {
+		t.Run(name, func(t *testing.T) {
+			before, err := os.ReadFile(filepath.Join(repo.Dir, "CLAUDE.md"))
+			if err != nil {
+				t.Fatalf("reading fixture CLAUDE.md: %v", err)
+			}
+
+			var stdout, stderr bytes.Buffer
+			got := cmdContextCompile([]string{"--request", reqPath, "--out", outPath}, strings.NewReader(""), &stdout, &stderr)
+			if got != 2 {
+				t.Fatalf("cmdContextCompile(--out %s, request adapter codex) = %d, want 2; stderr=%s", outPath, got, stderr.String())
+			}
+			if stdout.Len() != 0 {
+				t.Fatalf("stdout = %q, want empty", stdout.String())
+			}
+			after, err := os.ReadFile(filepath.Join(repo.Dir, "CLAUDE.md"))
+			if err != nil {
+				t.Fatalf("reading CLAUDE.md after refusal: %v", err)
+			}
+			if !bytes.Equal(before, after) {
+				t.Fatal("CLAUDE.md content changed despite the refusal — another adapter's managed projection file must never be overwritten")
+			}
+		})
+	}
+}
+
 // contextFailingWriter is a stdout stand-in whose every Write fails, the
 // in-process equivalent of a closed pipe or a full disk.
 type contextFailingWriter struct{}

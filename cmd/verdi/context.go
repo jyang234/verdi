@@ -131,7 +131,7 @@ func cmdContextCompile(args []string, stdin io.Reader, stdout, stderr io.Writer)
 		return 0
 	}
 
-	if err := validateContextOutputProjectionPaths(root, outArg, result.ProjectionFiles); err != nil {
+	if err := validateContextOutputProjectionPaths(root, outArg, result.ManagedProjectionPaths); err != nil {
 		fmt.Fprintln(stderr, "context compile:", err)
 		return 2
 	}
@@ -249,19 +249,24 @@ func validateContextOutputStoreZone(root, out, request string) error {
 }
 
 // validateContextOutputProjectionPaths rejects an --out destination that
-// collides with one of this compile's own managed instruction-projection
-// files (Wave-3 plan Task 8 Step 2: "one of the managed projection
-// paths") — checked only after a successful Compile, since the exact set
-// of managed paths for THIS request's adapter is only known then.
-func validateContextOutputProjectionPaths(root, out string, projectionFiles []contextcompile.ProjectionFile) error {
+// collides with ANY adapter's managed instruction-projection file in the
+// resolved constitution — not only the REQUESTED adapter's own (Wave-3
+// plan Task 8 Step 2: "one of the managed projection paths"; the plan's
+// "never writes ... managed projection files" constraint names the whole
+// managed surface, not a per-request subset of it). Checked only after a
+// successful Compile, since the managed path set is only known then.
+// managedProjectionPaths is Result.ManagedProjectionPaths — the full,
+// cross-adapter set stage 5 of Compile already resolves the constitution
+// to compute, so this guard never triggers a second authority load.
+func validateContextOutputProjectionPaths(root, out string, managedProjectionPaths []string) error {
 	outCanon, err := canonicalGuardPath(out)
 	if err != nil {
 		return fmt.Errorf("resolving --out: %w", err)
 	}
 
-	forbidden := make([]string, 0, len(projectionFiles))
-	for _, pf := range projectionFiles {
-		forbidden = append(forbidden, filepath.Join(root, filepath.FromSlash(pf.Path)))
+	forbidden := make([]string, 0, len(managedProjectionPaths))
+	for _, rel := range managedProjectionPaths {
+		forbidden = append(forbidden, filepath.Join(root, filepath.FromSlash(rel)))
 	}
 	return checkNotWithinAny(outCanon, forbidden)
 }
