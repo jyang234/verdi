@@ -11,6 +11,8 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -20,6 +22,7 @@ import (
 	"github.com/jyang234/verdi/internal/fixturegit"
 	"github.com/jyang234/verdi/internal/instructionprojection"
 	"github.com/jyang234/verdi/internal/policyartifact"
+	"github.com/jyang234/verdi/internal/specstate"
 )
 
 // --- fixture plumbing --------------------------------------------------
@@ -140,6 +143,83 @@ func writeContextRequestFile(t *testing.T, dir, name string, data []byte) string
 		t.Fatalf("write request file: %v", err)
 	}
 	return path
+}
+
+// --- exit-code mapping ---------------------------------------------------
+
+// TestContextExitCode proves the 0/1/2 contract's one mapping helper over
+// EVERY member of internal/contextcompile's closed typed-refusal family —
+// the Wave-3 plan's "exit 1 for each typed refusal family" bullet — plus
+// the wrapping, non-refusal, and defensive cases around it. Constructing
+// each refusal type by name here is the regression net for a future
+// refusal type that forgets contextcompile's unexported marker method: it
+// would compile, be handed to this helper by the command, and silently
+// map to exit 2 (an operational failure) instead of exit 1 (a verdict).
+func TestContextExitCode(t *testing.T) {
+	refusals := []struct {
+		name string
+		err  error
+	}{
+		{"PhaseScopeRefusal", &contextcompile.PhaseScopeRefusal{
+			Phase:       contextcompile.PhaseDesign,
+			ScopePhases: []string{"build"},
+		}},
+		{"NoConstitutionRefusal", &contextcompile.NoConstitutionRefusal{}},
+		{"AdapterMismatchRefusal", &contextcompile.AdapterMismatchRefusal{
+			Requested:  contextcompile.AdapterRef{ID: "codex", Version: "1"},
+			Registered: []contextcompile.AdapterRef{{ID: "claude", Version: "1"}},
+		}},
+		{"AcceptedSpecRefusal", &contextcompile.AcceptedSpecRefusal{
+			Ref:      "spec/feature-alpha",
+			State:    specstate.Proposed,
+			Relation: specstate.RelationNew,
+		}},
+		{"ExpectedRepositoryMismatchRefusal", &contextcompile.ExpectedRepositoryMismatchRefusal{
+			Expected:       contextcompile.Expected{Branch: "main", Head: strings.Repeat("a", 40)},
+			ComputedBranch: "topic",
+			BranchKnown:    true,
+		}},
+		{"DeclaredScopeRefusal", &contextcompile.DeclaredScopeRefusal{
+			Phase:  contextcompile.PhaseBuild,
+			Ref:    "spec/feature-alpha",
+			Reason: "not an authoritative build target",
+		}},
+		{"ProjectionDriftRefusal", &contextcompile.ProjectionDriftRefusal{
+			Paths:   []string{"AGENTS.md"},
+			Reasons: []string{"content-mismatch"},
+		}},
+	}
+	// The family is closed at seven members (internal/contextcompile/
+	// port.go's six plus validate.go's PhaseScopeRefusal); a new member
+	// must be added here, not silently left unproven.
+	if len(refusals) != 7 {
+		t.Fatalf("refusal table has %d rows, want the closed family's 7", len(refusals))
+	}
+
+	type exitCase struct {
+		name string
+		err  error
+		want int
+	}
+	cases := make([]exitCase, 0, len(refusals)+3)
+	for _, r := range refusals {
+		cases = append(cases, exitCase{r.name, r.err, 1})
+	}
+	cases = append(cases,
+		exitCase{"wrapped refusal", fmt.Errorf("wrapped: %w", &contextcompile.NoConstitutionRefusal{}), 1},
+		exitCase{"plain operational error", errors.New("port unavailable"), 2},
+		// Never reached from the command (contextExitCode is only called
+		// on a non-nil error); this pins the defensive branch's answer.
+		exitCase{"nil error", nil, 2},
+	)
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := contextExitCode(tc.err); got != tc.want {
+				t.Fatalf("contextExitCode(%v) = %d, want %d", tc.err, got, tc.want)
+			}
+		})
+	}
 }
 
 // --- parser-shape tests (no store root ever resolved) -------------------
