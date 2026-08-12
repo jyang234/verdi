@@ -959,6 +959,122 @@ func contextRunGit(t *testing.T, dir string, args ...string) {
 	}
 }
 
+// TestHasDotDotElement covers the belt-and-braces `--out` traversal ban
+// element-wise in both directions: every spelling that carries a real ".."
+// path element, and every honest name that merely CONTAINS two dots and
+// must stay allowed.
+func TestHasDotDotElement(t *testing.T) {
+	for _, tc := range []struct {
+		in   string
+		want bool
+	}{
+		{"..", true},
+		{"../x.json", true},
+		{"a/../x.json", true},
+		{"a/b/..", true},
+		{"./a/../b/x.json", true},
+		{filepath.Join("a", "b") + string(filepath.Separator) + ".." + string(filepath.Separator) + "x.json", true},
+
+		{"", false},
+		{"x.json", false},
+		{"./x.json", false},
+		{"a/b/x.json", false},
+		{"..notes.json", false},
+		{"notes...json", false},
+		{"a..b/x.json", false},
+		{"...", false},
+		{"/abs/path/x.json", false},
+	} {
+		t.Run(tc.in, func(t *testing.T) {
+			if got := hasDotDotElement(tc.in); got != tc.want {
+				t.Fatalf("hasDotDotElement(%q) = %v, want %v", tc.in, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestRedactCheckoutRoot covers the stderr sanitizer's happy path (every
+// absolute spelling of the root replaced by the fixed token), its
+// substring-overlap hazard (a resolved root that CONTAINS the unresolved
+// one), its determinism, and the negative cases where it must change
+// nothing — an empty root, a root that is "/", and a message that never
+// mentions the checkout at all.
+func TestRedactCheckoutRoot(t *testing.T) {
+	root := t.TempDir()
+	resolved, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		t.Fatalf("EvalSymlinks(root): %v", err)
+	}
+
+	t.Run("redacts the root as given", func(t *testing.T) {
+		got := redactCheckoutRoot(root, "policyauthority: reading constitution.md: open "+filepath.Join(root, ".verdi", "policy", "constitution.md")+": permission denied")
+		if strings.Contains(got, root) {
+			t.Fatalf("redactCheckoutRoot left the root in %q", got)
+		}
+		want := "policyauthority: reading constitution.md: open " + contextCheckoutToken + filepath.Join(string(filepath.Separator), ".verdi", "policy", "constitution.md") + ": permission denied"
+		if got != want {
+			t.Fatalf("redactCheckoutRoot = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("redacts the symlink-resolved spelling too", func(t *testing.T) {
+		got := redactCheckoutRoot(root, "gitx: git ls-tree -rz --full-tree HEAD (dir "+resolved+"): exit status 128")
+		for _, spelling := range []string{root, resolved} {
+			if strings.Contains(got, spelling) {
+				t.Fatalf("redactCheckoutRoot left the spelling %q in %q", spelling, got)
+			}
+		}
+	})
+
+	t.Run("overlapping spellings redact cleanly", func(t *testing.T) {
+		// The hazard is real only where one variant contains the other as
+		// a substring; on macOS /var/... vs /private/var/... is exactly
+		// that shape. Where the filesystem gives one spelling this is a
+		// no-op assertion, which is still correct.
+		got := redactCheckoutRoot(root, "dir "+resolved)
+		if got != "dir "+contextCheckoutToken {
+			t.Fatalf("redactCheckoutRoot = %q, want a single clean token", got)
+		}
+	})
+
+	t.Run("is deterministic", func(t *testing.T) {
+		msg := "open " + filepath.Join(resolved, "x") + " and " + filepath.Join(root, "y")
+		first := redactCheckoutRoot(root, msg)
+		for i := 0; i < 5; i++ {
+			if again := redactCheckoutRoot(root, msg); again != first {
+				t.Fatalf("redactCheckoutRoot is not deterministic: %q vs %q", first, again)
+			}
+		}
+	})
+
+	for _, tc := range []struct {
+		name, root, msg string
+	}{
+		{"empty root changes nothing", "", "open /etc/passwd: permission denied"},
+		{"filesystem root is never redacted", string(filepath.Separator), "open /etc/passwd: permission denied"},
+		{"unmentioned root changes nothing", root, "contextcompile: stage 1 validate request: phase outside scope"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := redactCheckoutRoot(tc.root, tc.msg); got != tc.msg {
+				t.Fatalf("redactCheckoutRoot = %q, want it unchanged (%q)", got, tc.msg)
+			}
+		})
+	}
+}
+
+// contextGitOutput runs one git command in dir and returns its stdout,
+// failing the test on a non-zero exit.
+func contextGitOutput(t *testing.T, dir string, args ...string) string {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("git %s: %v", strings.Join(args, " "), err)
+	}
+	return string(out)
+}
+
 // contextStderrSecrets are the sentinel strings the hygiene assertion
 // requires never to appear in a diagnostic: the drifted projection file's
 // own bytes, an uncommitted worktree file's bytes, and the spec fixture's
@@ -986,8 +1102,19 @@ func assertContextStderrHygienic(t *testing.T, stderr, root string) {
 	if stderr == "" {
 		t.Fatal("stderr is empty, want a diagnostic to inspect")
 	}
-	if strings.Contains(stderr, root) {
-		t.Fatalf("stderr leaks the absolute checkout path %q: %q", root, stderr)
+	// BOTH spellings of the checkout must be absent. On macOS a t.TempDir()
+	// root is reached as /var/... while os.Getwd — and therefore
+	// store.FindRoot, and therefore every `dir` gitx execs with — reports
+	// /private/var/..., so asserting only the spelling the test happens to
+	// hold would miss the leak entirely.
+	roots := []string{root}
+	if resolved, err := filepath.EvalSymlinks(root); err == nil && resolved != root {
+		roots = append(roots, resolved)
+	}
+	for _, r := range roots {
+		if strings.Contains(stderr, r) {
+			t.Fatalf("stderr leaks the absolute checkout path %q: %q", r, stderr)
+		}
 	}
 	if strings.Contains(stderr, contextStderrRemoteURL) || strings.Contains(stderr, "://") {
 		t.Fatalf("stderr leaks a raw remote URL: %q", stderr)
@@ -1016,67 +1143,117 @@ func buildContextHygieneRepo(t *testing.T) *fixturegit.Repo {
 }
 
 // TestCmdContextCompile_StderrHygiene proves the deterministic-diagnostic
-// constraint (Task 8 Step 1) across the command's whole diagnostic
-// surface, not just one fixed refusal string that could not carry a path
-// even in principle: the reserved-path guard, the request-read failure,
-// and two compile-stage failures — an unresolvable spec target and a
-// drifted managed projection whose worktree bytes are uncommitted.
+// constraint (Task 8 Step 1) across the command's whole diagnostic surface
+// as a TABLE, not as a handful of hand-picked failures that happen to
+// carry fixed, path-free strings. Every case below is driven through the
+// one assertion, so a newly reachable diagnostic is covered by adding a row
+// rather than by remembering to re-assert.
+//
+// Two rows exist specifically because the shared error seams underneath
+// DO carry absolute paths and must be sanitized at this boundary rather
+// than upstream (internal/gitx and internal/policyauthority have other
+// consumers whose diagnostics are theirs to define):
+//
+//   - internal/gitx formats every failure as "gitx: git %s (dir %s): %w: %s",
+//     whose `dir` is the absolute checkout;
+//   - internal/policyauthority/store.go wraps *os.PathError from os.ReadFile,
+//     whose Path is the absolute artifact path.
 func TestCmdContextCompile_StderrHygiene(t *testing.T) {
-	t.Run("reserved --out refusal", func(t *testing.T) {
-		repo := buildContextHygieneRepo(t)
-		t.Chdir(repo.Dir)
-		reqPath := writeContextRequestFile(t, repo.Dir, "request.json", contextRequestBytes(t, "spec/feature-alpha", contextcompile.PhaseDesign, nil))
+	cases := []struct {
+		name string
+		// setup prepares the hygiene repo (already the cwd) and returns
+		// the argv to run.
+		setup func(t *testing.T, repo *fixturegit.Repo) []string
+		// wantExitTwo pins exit 2 where the case is specifically an
+		// operational failure; zero means "any nonzero exit".
+		wantExitTwo bool
+	}{
+		{
+			name: "reserved --out refusal",
+			setup: func(t *testing.T, repo *fixturegit.Repo) []string {
+				reqPath := writeContextRequestFile(t, repo.Dir, "request.json", contextRequestBytes(t, "spec/feature-alpha", contextcompile.PhaseDesign, nil))
+				return []string{"--request", reqPath, "--out", filepath.Join(repo.Dir, ".verdi", "sneaky.json")}
+			},
+			wantExitTwo: true,
+		},
+		{
+			name: "request read failure",
+			setup: func(t *testing.T, repo *fixturegit.Repo) []string {
+				// The missing request lives OUTSIDE the checkout, so the
+				// permitted echo of the caller's own --request path can
+				// never account for a checkout path in the diagnostic.
+				return []string{"--request", filepath.Join(t.TempDir(), "does-not-exist.json")}
+			},
+			wantExitTwo: true,
+		},
+		{
+			name: "compile-stage failure: unresolvable spec target",
+			setup: func(t *testing.T, repo *fixturegit.Repo) []string {
+				reqPath := writeContextRequestFile(t, repo.Dir, "request.json", contextRequestBytes(t, "spec/feature-nonexistent", contextcompile.PhaseDesign, nil))
+				return []string{"--request", reqPath}
+			},
+		},
+		{
+			name: "compile-stage failure: drifted managed projection",
+			setup: func(t *testing.T, repo *fixturegit.Repo) []string {
+				if err := os.WriteFile(filepath.Join(repo.Dir, "AGENTS.md"), []byte("SENTINEL-DRIFTED-PROJECTION-BYTES\n"), 0o644); err != nil {
+					t.Fatalf("drifting AGENTS.md: %v", err)
+				}
+				reqPath := writeContextRequestFile(t, repo.Dir, "request.json", contextRequestBytes(t, "spec/feature-alpha", contextcompile.PhaseDesign, nil))
+				return []string{"--request", reqPath}
+			},
+		},
+		{
+			name: "operational failure: unreadable policy artifact",
+			setup: func(t *testing.T, repo *fixturegit.Repo) []string {
+				artifact := filepath.Join(repo.Dir, ".verdi", "policy", "constitution.md")
+				if err := os.Chmod(artifact, 0o000); err != nil {
+					t.Fatalf("chmod constitution: %v", err)
+				}
+				t.Cleanup(func() { _ = os.Chmod(artifact, 0o644) })
+				if _, err := os.ReadFile(artifact); err == nil {
+					t.Skip("chmod 0000 did not make the artifact unreadable (running as root?)")
+				}
+				reqPath := writeContextRequestFile(t, repo.Dir, "request.json", contextRequestBytes(t, "spec/feature-alpha", contextcompile.PhaseDesign, nil))
+				return []string{"--request", reqPath}
+			},
+			wantExitTwo: true,
+		},
+		{
+			name: "operational failure: unreadable git object store",
+			setup: func(t *testing.T, repo *fixturegit.Repo) []string {
+				// Point the checked-out branch at a well-formed but
+				// absent object id: `git rev-parse` still answers, and
+				// the first plumbing call that must actually READ the
+				// object fails — a genuine gitx failure whose message
+				// carries the absolute `dir`.
+				branch := strings.TrimSpace(contextGitOutput(t, repo.Dir, "rev-parse", "--abbrev-ref", "HEAD"))
+				const absent = "0123456789abcdef0123456789abcdef01234567"
+				if err := os.WriteFile(filepath.Join(repo.Dir, ".git", "refs", "heads", branch), []byte(absent+"\n"), 0o644); err != nil {
+					t.Fatalf("pointing %s at an absent object: %v", branch, err)
+				}
+				reqPath := writeContextRequestFile(t, repo.Dir, "request.json", contextRequestBytes(t, "spec/feature-alpha", contextcompile.PhaseDesign, nil))
+				return []string{"--request", reqPath}
+			},
+			wantExitTwo: true,
+		},
+	}
 
-		var stdout, stderr bytes.Buffer
-		got := cmdContextCompile([]string{"--request", reqPath, "--out", filepath.Join(repo.Dir, ".verdi", "sneaky.json")}, strings.NewReader(""), &stdout, &stderr)
-		if got != 2 {
-			t.Fatalf("cmdContextCompile = %d, want 2; stderr=%s", got, stderr.String())
-		}
-		assertContextStderrHygienic(t, stderr.String(), repo.Dir)
-	})
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := buildContextHygieneRepo(t)
+			t.Chdir(repo.Dir)
+			args := tc.setup(t, repo)
 
-	t.Run("request read failure", func(t *testing.T) {
-		repo := buildContextHygieneRepo(t)
-		t.Chdir(repo.Dir)
-		// The missing request lives OUTSIDE the checkout, so the
-		// permitted echo of the caller's own --request path can never
-		// account for a checkout path appearing in the diagnostic.
-		missing := filepath.Join(t.TempDir(), "does-not-exist.json")
-
-		var stdout, stderr bytes.Buffer
-		got := cmdContextCompile([]string{"--request", missing}, strings.NewReader(""), &stdout, &stderr)
-		if got != 2 {
-			t.Fatalf("cmdContextCompile(missing request) = %d, want 2; stderr=%s", got, stderr.String())
-		}
-		assertContextStderrHygienic(t, stderr.String(), repo.Dir)
-	})
-
-	t.Run("compile-stage failure: unresolvable spec target", func(t *testing.T) {
-		repo := buildContextHygieneRepo(t)
-		t.Chdir(repo.Dir)
-		reqPath := writeContextRequestFile(t, repo.Dir, "request.json", contextRequestBytes(t, "spec/feature-nonexistent", contextcompile.PhaseDesign, nil))
-
-		var stdout, stderr bytes.Buffer
-		got := cmdContextCompile([]string{"--request", reqPath}, strings.NewReader(""), &stdout, &stderr)
-		if got == 0 {
-			t.Fatalf("cmdContextCompile(unresolvable spec) = 0, want a failure; stdout=%s", stdout.String())
-		}
-		assertContextStderrHygienic(t, stderr.String(), repo.Dir)
-	})
-
-	t.Run("compile-stage failure: drifted managed projection", func(t *testing.T) {
-		repo := buildContextHygieneRepo(t)
-		t.Chdir(repo.Dir)
-		if err := os.WriteFile(filepath.Join(repo.Dir, "AGENTS.md"), []byte("SENTINEL-DRIFTED-PROJECTION-BYTES\n"), 0o644); err != nil {
-			t.Fatalf("drifting AGENTS.md: %v", err)
-		}
-		reqPath := writeContextRequestFile(t, repo.Dir, "request.json", contextRequestBytes(t, "spec/feature-alpha", contextcompile.PhaseDesign, nil))
-
-		var stdout, stderr bytes.Buffer
-		got := cmdContextCompile([]string{"--request", reqPath}, strings.NewReader(""), &stdout, &stderr)
-		if got == 0 {
-			t.Fatalf("cmdContextCompile(drifted projection) = 0, want a failure; stdout=%s", stdout.String())
-		}
-		assertContextStderrHygienic(t, stderr.String(), repo.Dir)
-	})
+			var stdout, stderr bytes.Buffer
+			got := cmdContextCompile(args, strings.NewReader(""), &stdout, &stderr)
+			if tc.wantExitTwo && got != 2 {
+				t.Fatalf("cmdContextCompile = %d, want 2; stderr=%s", got, stderr.String())
+			}
+			if got == 0 {
+				t.Fatalf("cmdContextCompile = 0, want a failure; stdout=%s stderr=%s", stdout.String(), stderr.String())
+			}
+			assertContextStderrHygienic(t, stderr.String(), repo.Dir)
+		})
+	}
 }

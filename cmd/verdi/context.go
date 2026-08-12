@@ -28,6 +28,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/jyang234/verdi/internal/atomicfile"
@@ -112,11 +113,11 @@ func cmdContextCompile(args []string, stdin io.Reader, stdout, stderr io.Writer)
 	if hasOut {
 		outCanon, err = canonicalOutPath(outArg)
 		if err != nil {
-			fmt.Fprintln(stderr, "context compile:", err)
+			printContextDiagnostic(stderr, root, err)
 			return 2
 		}
 		if err := validateContextOutputStoreZone(root, outCanon, requestArg); err != nil {
-			fmt.Fprintln(stderr, "context compile:", err)
+			printContextDiagnostic(stderr, root, err)
 			return 2
 		}
 	}
@@ -128,39 +129,100 @@ func cmdContextCompile(args []string, stdin io.Reader, stdout, stderr io.Writer)
 		data, err = os.ReadFile(requestArg)
 	}
 	if err != nil {
-		fmt.Fprintln(stderr, "context compile: reading request:", err)
+		printContextDiagnostic(stderr, root, fmt.Errorf("reading request: %w", err))
 		return 2
 	}
 
 	request, err := contextcompile.DecodeRequest(data)
 	if err != nil {
-		fmt.Fprintln(stderr, "context compile:", err)
+		printContextDiagnostic(stderr, root, err)
 		return contextExitCode(err)
 	}
 
 	result, err := contextcompile.NewCompiler().Compile(context.Background(), root, request)
 	if err != nil {
-		fmt.Fprintln(stderr, "context compile:", err)
+		printContextDiagnostic(stderr, root, err)
 		return contextExitCode(err)
 	}
 
 	if !hasOut {
 		if _, err := stdout.Write(result.ManifestBytes); err != nil {
-			fmt.Fprintln(stderr, "context compile: writing manifest to stdout:", err)
+			printContextDiagnostic(stderr, root, fmt.Errorf("writing manifest to stdout: %w", err))
 			return 2
 		}
 		return 0
 	}
 
 	if err := validateContextOutputProjectionPaths(root, outCanon, result.ManagedProjectionPaths); err != nil {
-		fmt.Fprintln(stderr, "context compile:", err)
+		printContextDiagnostic(stderr, root, err)
 		return 2
 	}
 	if err := atomicfile.Write(outCanon, result.ManifestBytes, 0o644); err != nil {
-		fmt.Fprintln(stderr, "context compile: writing manifest:", err)
+		printContextDiagnostic(stderr, root, fmt.Errorf("writing manifest: %w", err))
 		return 2
 	}
 	return 0
+}
+
+// contextCheckoutToken is the stable, relative stand-in every absolute
+// spelling of the resolved store root is replaced by before a diagnostic
+// reaches stderr. It is a fixed literal, so a redacted diagnostic is
+// byte-identical across machines, users and checkout locations — which is
+// the "deterministic diagnostics" half of the Wave-3 plan Task 8 Step 1
+// bullet, not merely the "without absolute checkout paths" half.
+const contextCheckoutToken = "<checkout>"
+
+// printContextDiagnostic writes one "context compile: <message>" line to
+// stderr with every absolute spelling of root redacted.
+//
+// The redaction lives HERE, at the CLI boundary, and deliberately not in
+// the seams that produce the paths. internal/gitx formats every failure as
+// "gitx: git %s (dir %s): %w: %s" and internal/policyauthority wraps
+// *os.PathError from os.ReadFile; both are shared packages whose other
+// consumers (journey, repositoryfacts, lint, the projection verifier) have
+// their own diagnostic contracts, and quieting them globally would trade a
+// leak in one verb for lost debuggability everywhere else. This verb's
+// stderr contract is this verb's to enforce.
+func printContextDiagnostic(stderr io.Writer, root string, err error) {
+	fmt.Fprintln(stderr, "context compile:", redactCheckoutRoot(root, err.Error()))
+}
+
+// redactCheckoutRoot replaces every absolute spelling of root in msg with
+// contextCheckoutToken. Both the root as resolved and its EvalSymlinks form
+// are redacted: a checkout reached through a symlinked ancestor (macOS's
+// /var -> /private/var being the everyday case) has two absolute spellings,
+// and different seams report different ones — os.ReadFile echoes the path
+// it was handed, while an exec'd child may report the kernel-resolved one.
+//
+// Longer spellings are replaced first because one variant can contain
+// another as a substring ("/private/var/x" contains "/var/x"); replacing
+// the shorter one first would leave a mangled "/private<checkout>" rather
+// than a clean token. Replacement is unconditional and order-fixed, so the
+// result is deterministic for a given message.
+func redactCheckoutRoot(root, msg string) string {
+	if root == "" {
+		return msg
+	}
+	variants := []string{filepath.Clean(root)}
+	if abs, err := filepath.Abs(root); err == nil {
+		variants = append(variants, abs)
+	}
+	if resolved, err := filepath.EvalSymlinks(root); err == nil {
+		variants = append(variants, resolved)
+	}
+	sort.Slice(variants, func(i, j int) bool { return len(variants[i]) > len(variants[j]) })
+
+	seen := map[string]bool{}
+	for _, v := range variants {
+		// Never redact "/" or a relative spelling: the first would shred
+		// every path in the message, the second is not a checkout leak.
+		if seen[v] || v == "" || v == string(filepath.Separator) || !filepath.IsAbs(v) {
+			continue
+		}
+		seen[v] = true
+		msg = strings.ReplaceAll(msg, v, contextCheckoutToken)
+	}
+	return msg
 }
 
 // contextExitCode maps a Compile/DecodeRequest error to CLAUDE.md's 0/1/2
