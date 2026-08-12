@@ -497,7 +497,12 @@ func withDeclaredContext(t *testing.T, data []byte, refs ...string) string {
 //	          spec/context-only@<commit 1>, and spec/feature-beta@<commit 2>
 //	          (an overlap with a store-authority path), plus the story
 //	commit 4: the generated managed instruction projection
-func declaredContextRepo(t *testing.T) *fixturegit.Repo {
+//
+// Returns the repo and commit 1's exact hex SHA (baseCommit) — the caller
+// needs it to assert the manifest's pinned declared-context refs by their
+// EXACT byte value (logical + "@" + baseCommit), not merely by prefix and
+// length.
+func declaredContextRepo(t *testing.T) (*fixturegit.Repo, string) {
 	t.Helper()
 	storyData, storyFM := decodeFragmentSpecFixture(t, "story-multi-parent.md")
 	alphaData, _ := decodeFragmentSpecFixture(t, "feature-alpha.md")
@@ -541,7 +546,7 @@ func declaredContextRepo(t *testing.T) *fixturegit.Repo {
 		t.Fatalf("instructionprojection.Generate: %v", err)
 	}
 	repo.Head = writeAndCommit("generate instruction projection", nil)
-	return repo
+	return repo, baseCommit
 }
 
 // TestCompile_Integration_DeclaredContextPinnedRefsSurviveIntoManifest is
@@ -550,7 +555,7 @@ func declaredContextRepo(t *testing.T) *fixturegit.Repo {
 // refs of a non-spec kind and a spec kind, plus one ref that overlaps a
 // store-authority path.
 func TestCompile_Integration_DeclaredContextPinnedRefsSurviveIntoManifest(t *testing.T) {
-	repo := declaredContextRepo(t)
+	repo, baseCommit := declaredContextRepo(t)
 	c := NewCompiler()
 	result, err := c.Compile(context.Background(), repo.Dir, integrationBuildRequest("spec/story-multi-parent"))
 	if err != nil {
@@ -568,8 +573,9 @@ func TestCompile_Integration_DeclaredContextPinnedRefsSurviveIntoManifest(t *tes
 		if row.Ref == nil {
 			t.Fatalf("%s row carries no ref", logical)
 		}
-		if !strings.HasPrefix(*row.Ref, logical+"@") || len(*row.Ref) <= len(logical)+1 {
-			t.Errorf("%s row ref = %q, want the exact pinned %s@<hex> form", logical, *row.Ref, logical)
+		wantRef := logical + "@" + baseCommit
+		if *row.Ref != wantRef {
+			t.Errorf("%s row ref = %q, want the exact pinned %q", logical, *row.Ref, wantRef)
 		}
 		// The data item keeps the logical identity; only the manifest row
 		// widens to the pinned ref.
