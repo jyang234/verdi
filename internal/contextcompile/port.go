@@ -143,12 +143,22 @@ func (*DeclaredScopeRefusal) contextRefusal() {}
 
 // ProjectionDriftRefusal reports managed instruction projection paths whose
 // checked-in bytes do not match the one canonical renderer.
+//
+// Reasons carries the sorted, de-duplicated closed
+// instructionprojection.Reason codes the verification report witnessed
+// (authority design §10: "Existing generated projection drift | Exit-1 typed
+// refusal with closed projection reason"). Paths may legally be empty — a
+// walk- or manifest-level finding names no managed file — but Reasons and
+// Paths are never BOTH empty: a refusal with no witness at all is not
+// constructed (compiler.go's driftWitness fails closed operationally
+// instead).
 type ProjectionDriftRefusal struct {
-	Paths []string
+	Paths   []string
+	Reasons []string
 }
 
 func (e *ProjectionDriftRefusal) Error() string {
-	return fmt.Sprintf("%s: %v", ErrProjectionDrift, e.Paths)
+	return fmt.Sprintf("%s: reasons %v at %v", ErrProjectionDrift, e.Reasons, e.Paths)
 }
 func (*ProjectionDriftRefusal) Unwrap() error   { return ErrProjectionDrift }
 func (*ProjectionDriftRefusal) contextRefusal() {}

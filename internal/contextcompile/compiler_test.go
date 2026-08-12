@@ -234,6 +234,50 @@ func compilerWrongClassFixture(t *testing.T) (GitReader, StateResolver, string) 
 	return git, states, fm.ID
 }
 
+// componentSpecFixture is a minimal, grammar-valid class:component
+// specification: components carry no object model at all (02: "No story, no
+// ACs"), so this is the whole legal artifact.
+const componentSpecFixture = `---
+id: spec/component-fixture
+kind: spec
+class: component
+title: "Component fixture"
+status: active
+owners: [platform-team]
+---
+# Component fixture
+
+Body prose.
+`
+
+// compilerComponentClassFixture wires a GitReader/StateResolver pair that
+// resolves componentSpecFixture (class component — neither feature nor
+// story) as accepted at compileHead: ResolveAcceptedSpec succeeds on it, and
+// stage 4's class dispatch must then refuse it as the wrong target class.
+func compilerComponentClassFixture(t *testing.T) (GitReader, StateResolver, string) {
+	t.Helper()
+	data := []byte(componentSpecFixture)
+	path := ".verdi/specs/active/component-fixture/spec.md"
+	object := strings.Repeat("e", 40)
+
+	git := authorityGit{
+		tree: func(context.Context, string, string) ([]gitx.TreeEntry, error) {
+			return []gitx.TreeEntry{{Mode: "100644", Type: "blob", Object: object, Path: path}}, nil
+		},
+		show: func(context.Context, string, string, string) ([]byte, error) {
+			return append([]byte(nil), data...), nil
+		},
+	}
+	states := authorityStateResolver{resolve: func(_ context.Context, _ string, candidate specstate.Candidate) (specstate.Result, error) {
+		return specstate.Result{
+			State:    specstate.AcceptedPendingBuild,
+			Relation: specstate.RelationExact,
+			Baseline: &specstate.Baseline{Path: candidate.Path, Blob: object, LandingCommit: strings.Repeat("c", 40)},
+		}, nil
+	}}
+	return git, states, "spec/component-fixture"
+}
+
 // gitWithWorktree wraps a GitReader, overriding only WorktreeChangedPaths —
 // used to give compilerAcceptedFixture's authorityGit (whose own
 // WorktreeChangedPaths always panics; see authority_test.go) a working
@@ -444,6 +488,88 @@ func TestCompilerStage5ProjectionDriftRefusal(t *testing.T) {
 	}
 	if len(refusal.Paths) != 1 || refusal.Paths[0] != "AGENTS.md" {
 		t.Fatalf("ProjectionDriftRefusal.Paths = %v, want [AGENTS.md]", refusal.Paths)
+	}
+	// Authority design §10: "Existing generated projection drift | Exit-1
+	// typed refusal with closed projection reason". The witness therefore
+	// names the closed instructionprojection.Reason code(s), not paths alone.
+	if len(refusal.Reasons) != 1 || refusal.Reasons[0] != string(instructionprojection.ReasonDrift) {
+		t.Fatalf("ProjectionDriftRefusal.Reasons = %v, want [%q]", refusal.Reasons, instructionprojection.ReasonDrift)
+	}
+}
+
+// TestCompilerStage5ProjectionDriftRefusalCarriesReasonsWithoutPaths proves a
+// drift report whose findings name no path at all (the real
+// ReasonIncompleteDiscovery/ReasonOrphanManifest shapes can carry a bare
+// directory-level or manifest-level finding) still refuses with a NONEMPTY
+// witness: the closed reason codes stand in for the absent paths, so §10's
+// "typed refusal with closed projection reason" is never satisfied by an
+// empty refusal.
+func TestCompilerStage5ProjectionDriftRefusalCarriesReasonsWithoutPaths(t *testing.T) {
+	root := installPolicyFixture(t)
+	git, states, ref := compilerAcceptedFixture(t)
+	repoFacts := stubRepoFactsGatherer{snapshot: validRepositorySnapshot(compileHead, "main")}
+	projection := stubProjectionVerifier{report: &instructionprojection.Report{
+		Findings: []instructionprojection.Finding{
+			{Adapter: "codex", Code: instructionprojection.ReasonIncompleteDiscovery, Detail: "walk failed"},
+			{Adapter: "codex", Code: instructionprojection.ReasonOrphanManifest},
+		},
+	}}
+	c := newCompilerWithPorts(git, states, defaultAuthorityLoader{}, nil, repoFacts, projection)
+	_, err := c.Compile(context.Background(), root, validCompileRequest(ref))
+	var refusal *ProjectionDriftRefusal
+	if !errors.As(err, &refusal) {
+		t.Fatalf("expected *ProjectionDriftRefusal, got %T %v", err, err)
+	}
+	if len(refusal.Paths) != 0 {
+		t.Fatalf("ProjectionDriftRefusal.Paths = %v, want empty (no finding named a path)", refusal.Paths)
+	}
+	want := []string{string(instructionprojection.ReasonIncompleteDiscovery), string(instructionprojection.ReasonOrphanManifest)}
+	if !reflect.DeepEqual(refusal.Reasons, want) {
+		t.Fatalf("ProjectionDriftRefusal.Reasons = %v, want sorted unique %v", refusal.Reasons, want)
+	}
+}
+
+// TestCompilerStage5ProjectionDriftWithoutWitnessIsOperational proves a
+// report that is not clean yet names neither a path nor a reason code cannot
+// become an empty exit-1 refusal: an unwitnessable drift claim is malformed
+// port output, so it fails closed as an operational error instead.
+func TestCompilerStage5ProjectionDriftWithoutWitnessIsOperational(t *testing.T) {
+	root := installPolicyFixture(t)
+	git, states, ref := compilerAcceptedFixture(t)
+	repoFacts := stubRepoFactsGatherer{snapshot: validRepositorySnapshot(compileHead, "main")}
+	projection := stubProjectionVerifier{report: &instructionprojection.Report{
+		Findings: []instructionprojection.Finding{{Adapter: "codex"}},
+	}}
+	c := newCompilerWithPorts(git, states, defaultAuthorityLoader{}, nil, repoFacts, projection)
+	_, err := c.Compile(context.Background(), root, validCompileRequest(ref))
+	if err == nil {
+		t.Fatal("expected a witnessless drift report to fail Compile")
+	}
+	if IsRefusal(err) {
+		t.Fatalf("witnessless drift report classified as a refusal: %T %v", err, err)
+	}
+}
+
+// TestCompilerStage4ComponentClassRefusalIsTyped proves a component-class
+// target — like a feature-class one — is a state-valid accepted target the
+// requested phase may not consume, so it returns the SAME typed
+// *DeclaredScopeRefusal family (plan Task 7 Step 2 lists "wrong target
+// class" among the typed refusals), never an untyped exit-2 error.
+func TestCompilerStage4ComponentClassRefusalIsTyped(t *testing.T) {
+	root := installPolicyFixture(t)
+	git, states, ref := compilerComponentClassFixture(t)
+	repoFacts := stubRepoFactsGatherer{snapshot: validRepositorySnapshot(compileHead, "main")}
+	c := newCompilerWithPorts(git, states, defaultAuthorityLoader{}, nil, repoFacts, panicProjectionVerifier{})
+	_, err := c.Compile(context.Background(), root, validCompileRequest(ref))
+	var refusal *DeclaredScopeRefusal
+	if !errors.As(err, &refusal) {
+		t.Fatalf("expected *DeclaredScopeRefusal, got %T %v", err, err)
+	}
+	if !IsRefusal(err) {
+		t.Fatal("component-class DeclaredScopeRefusal not classified as a refusal")
+	}
+	if refusal.Phase != PhaseBuild || refusal.Ref != ref {
+		t.Fatalf("DeclaredScopeRefusal = %+v, want phase=build ref=%q", refusal, ref)
 	}
 }
 

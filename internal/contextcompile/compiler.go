@@ -222,7 +222,18 @@ func (c Compiler) Compile(ctx context.Context, root string, request Request) (Re
 			return Result{}, fmt.Errorf("contextcompile: stage 4 resolve feature fragments: %w", err)
 		}
 	default:
-		return Result{}, fmt.Errorf("contextcompile: stage 4 resolve target: unsupported target class %q", target.Spec.Class)
+		// Every remaining closed spec class (v1: component) is a
+		// state-valid accepted target that NO phase's capsule may consume
+		// as its authoritative target — the same "wrong target class"
+		// condition the feature/build case above refuses (Wave-3 plan Task
+		// 7 Step 2 lists "wrong target class" among the typed refusals, and
+		// authority design §6 fixes each phase's admissible target class).
+		// It is therefore the same typed exit-1 family, never an untyped
+		// exit-2 operational error.
+		return Result{}, &DeclaredScopeRefusal{
+			Phase: request.Phase, Ref: target.Ref,
+			Reason: fmt.Sprintf("target class %q is not an authoritative context-compile target", target.Spec.Class),
+		}
 	}
 
 	obligations, err := ResolveBoundObligations(ctx, c.git, root, head, target)
@@ -245,7 +256,11 @@ func (c Compiler) Compile(ctx context.Context, root string, request Request) (Re
 		return Result{}, fmt.Errorf("contextcompile: stage 5 verify instruction projection: %w", err)
 	}
 	if !report.Clean() {
-		return Result{}, &ProjectionDriftRefusal{Paths: driftPaths(report)}
+		driftedPaths, driftReasons, err := driftWitness(report)
+		if err != nil {
+			return Result{}, fmt.Errorf("contextcompile: stage 5 verify instruction projection: %w", err)
+		}
+		return Result{}, &ProjectionDriftRefusal{Paths: driftedPaths, Reasons: driftReasons}
 	}
 
 	// Stage 7 (evaluated ahead of the stage-6 BuildUniverse call — see the
@@ -369,20 +384,48 @@ func (c Compiler) Compile(ctx context.Context, root string, request Request) (Re
 	}, nil
 }
 
-// driftPaths returns the sorted, de-duplicated set of paths report's
-// findings named, for ProjectionDriftRefusal.
-func driftPaths(report *instructionprojection.Report) []string {
-	seen := make(map[string]bool, len(report.Findings))
-	paths := make([]string, 0, len(report.Findings))
-	for _, f := range report.Findings {
-		if f.Path == "" || seen[f.Path] {
-			continue
+// driftWitness returns the sorted, de-duplicated paths AND closed
+// instructionprojection.Reason codes report's findings named, for
+// ProjectionDriftRefusal (authority design §10: the drift refusal carries a
+// closed projection reason, not a bare path list).
+//
+// A finding legally names no path — the discovery walk and the orphan-
+// manifest scan both produce directory- or manifest-level findings — so an
+// empty Paths result is not itself a defect. A report that is not clean yet
+// witnesses NEITHER a path nor a reason code is malformed port output: it
+// fails closed as an operational error rather than becoming an exit-1
+// refusal carrying no witness at all.
+func driftWitness(report *instructionprojection.Report) ([]string, []string, error) {
+	paths := uniqueSorted(len(report.Findings), func(yield func(string)) {
+		for _, f := range report.Findings {
+			yield(f.Path)
 		}
-		seen[f.Path] = true
-		paths = append(paths, f.Path)
+	})
+	reasons := uniqueSorted(len(report.Findings), func(yield func(string)) {
+		for _, f := range report.Findings {
+			yield(string(f.Code))
+		}
+	})
+	if len(paths) == 0 && len(reasons) == 0 {
+		return nil, nil, fmt.Errorf("instruction-projection report is not clean but names neither a path nor a closed reason code for any of its %d findings", len(report.Findings))
 	}
-	sort.Strings(paths)
-	return paths
+	return paths, reasons, nil
+}
+
+// uniqueSorted collects every non-empty value emit yields into one sorted,
+// de-duplicated slice.
+func uniqueSorted(capacity int, emit func(yield func(string))) []string {
+	seen := make(map[string]bool, capacity)
+	out := make([]string, 0, capacity)
+	emit(func(value string) {
+		if value == "" || seen[value] {
+			return
+		}
+		seen[value] = true
+		out = append(out, value)
+	})
+	sort.Strings(out)
+	return out
 }
 
 // indexDeclaredContextItems builds the explicit one-to-one
