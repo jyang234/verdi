@@ -65,8 +65,9 @@ Principles inherited from verdi-go and binding here:
   reaffirmations/<story-slug>/<object-id>.md   # rung-4 re-affirmation records; one per (story, amended object)
   conflicts/<name>.md              # challenges to closed decisions (evidence-model spec)
   bin/                             # committed shims: verdi-mcp, groundwork-mcp (surfaces spec)
-  policy/                          # CI constitution/policy/overlay/exemption artifacts;
+  policy/                          # CI constitution/policy/overlay/exemption/disposition artifacts;
                                    #   internal grammar owned by spec/policy-authority
+    dispositions/<name>.md         # authored-living semantic rulings, schema verdi.policy-disposition/v1
   data/                            # working area — gitignored, per-checkout
     writer.lock                    # single-writer enforcement (D3)
     serve.path                     # pointer file naming the real socket path (D3); the
@@ -87,6 +88,7 @@ Principles inherited from verdi-go and binding here:
                                     #   valid until their branch dies
     cache/
       index-<layout-version>-<tree-hash>
+      policy-conflict-<layout-version>-<tree-hash>-<input-digest>.json
     execution/<workspace-id>/      # execution-workspace runs (OD-6); naming owned by spec/execution-workspace
     execution/<workspace-id>.lock
     journey/event-receipts/<ref-slug>.jsonl   # GLG journey event receipts (GLG v3 dc-27; SI-5): append-only, D3 writer only
@@ -202,21 +204,27 @@ Notes:
   live only under configured non-product `spike_paths` — a restatement of
   the existing manifest key, not a redefinition.
 - `policy/`: the committed top-level home for Context Integrity's
-  constitution, policy, overlay, and exemption artifacts. Its internal
-  grammar (file naming, frontmatter, kind rows) is owned by CI's
-  `policy-authority` unit and is deferred (SI-6); this amendment is the D1
-  enumeration change admitting the entry. Until the `policy-authority` unit
-  lands the matching `knownTopLevelEntries` lint addition, creating
-  `.verdi/policy/` on disk fails VL-007 — fail-closed in the safe
-  direction, disclosed; the lint-enumeration change is assigned to the
-  `policy-authority` unit by name.
+  constitution, policy, overlay, exemption, and semantic-disposition
+  artifacts. Context Integrity's `policy-authority` unit owns the closed
+  internal path grammar,
+  strict decoding, path/ID parity, cross-reference validation, and effective
+  authority digest. Semantic dispositions live only at
+  `policy/dispositions/<name>.md`, with schema
+  `verdi.policy-disposition/v1`, kind `policy-disposition`, and ID
+  `policy-disposition/<name>`; `spec/context-integrity`'s conflict gate alone
+  interprets whether a loaded disposition matches the current semantic input
+  (SI-97). The top-level `policy/` admission and matching VL-007 enumeration
+  remain the single D1 entry established by SI-6; this amendment adds no
+  second authority root.
 - GLG human records: of GLG ac-4's five kinds, attestations, waivers,
-  deviation reports, and semantic dispositions already have homes in this
-  layout (attestations/, waivers/, archive deviation-report.md, spec
-  frontmatter dispositions). Exemption records have exactly one canonical
+  deviation reports, and semantic dispositions have homes in this layout
+  (`attestations/`, `waivers/`, archive `deviation-report.md`, and
+  `policy/dispositions/`). Exemption records have exactly one canonical
   artifact and one storage home — the CI constitution store's
   policy-exemption artifact under `policy/` (SI-4; GLG v2 dc-26; CI v2
-  dc-24); no second exemption artifact kind or directory exists.
+  dc-24); no second exemption artifact kind or directory exists. Legacy
+  spec-frontmatter dispositions remain valid historical content but never
+  satisfy `verdi.policy-disposition/v1` (SI-97).
 - GLG journey event receipts: `data/journey/` is a new individually-ratified
   data-zone root (joining `worktrees/`, `cache/`, `writer.lock`,
   `serve.path` among paths ratified individually rather than by the zones
@@ -334,7 +342,7 @@ the class honestly (see surfaces spec).
 | Class           | Claim to currency            | Kept honest by                       | Examples                                  |
 |-----------------|------------------------------|--------------------------------------|-------------------------------------------|
 | living-gated    | current, machine-maintained  | CI currency gate (regenerate + fail on drift) | boundary contracts, goldens (in service dirs) |
-| authored-living | maintained by humans         | MR review; dex shows last-modified from git | component specs, ADR index pages, authored diagrams |
+| authored-living | maintained by humans         | MR review; dex shows last-modified from git | component specs, ADR index pages, authored diagrams, policy dispositions |
 | frozen          | none — point-in-time record  | immutability lint (VL-010)           | feature and story specs at acceptance, board.json, rollup.json, final alignment reports, attestations, re-affirmation records |
 
 Class transitions are part of the doctrine: a feature spec is
@@ -354,6 +362,13 @@ records (concept §3b's rung-4 attestation) follow the incumbent attestation
 rule instead: **frozen at commit**, not at some later ritual — an
 attestation-shaped record is a point-in-time claim from the moment it
 exists, so there is no living interval to transition out of.
+
+A policy disposition is **authored-living** (SI-100): it is current committed
+human authority maintained, replaced, or removed through an MR, while the
+conflict gate independently requires its complete witness identity, applicable
+bound, and authenticated approvals to remain current. It is not frozen-stamped
+and cannot rewrite historical results; Git history retains prior bytes and
+every report binds the exact disposition digest it consumed.
 
 Frozen artifacts carry a stamp in frontmatter: `frozen: { at: 2026-05-14, commit: 3e91ab2 }`.
 The normative rule (enforced as VL-008 in the artifact contract): any artifact
@@ -408,8 +423,14 @@ a byte-deterministic pure function of the tree.
   edit changes the hash immediately: a new untracked file counts the moment
   it exists, and a tracked file deleted from the working tree is omitted
   from the pair set entirely (a deletion is a corpus change to detect, not
-  an error) rather than guessed at by mtime. `rm -rf .verdi/data/cache` is
-  always safe.
+  an error) rather than guessed at by mtime. The admitted conflict-judgment
+  filename is exactly
+  `policy-conflict-<layout-version>-<tree-hash>-<input-digest>.json`, where
+  `<layout-version>` is `internal/store.LayoutVersion` and both hash segments
+  are exactly 64 lowercase hexadecimal characters without a `sha256:` prefix
+  (SI-101). The strict record retains its full canonical `sha256:<hex>` digest
+  fields and verifies all three filename components; the file is disposable
+  machine state, never authority. `rm -rf .verdi/data/cache` is always safe.
 
 ## Garbage collection
 
@@ -422,7 +443,9 @@ a byte-deterministic pure function of the tree.
   tip is an ancestor of the default branch tip. Offline fallback: mtime-based
   pruning of ref directories older than the retention window. Both are safe
   precisely because derived is disposable;
-- prunes cache entries whose layout version or tree hash no longer matches;
+- prunes index and policy-conflict cache entries whose layout version or tree
+  hash no longer matches; a current-tree conflict entry is retained regardless
+  of input digest, and deleting any cache entry remains semantically inert;
 - optionally, on explicit opt-in, prunes a LOCAL branch and its worktree (if
   any) when the branch is fully merged into the default branch, its worktree
   carries no uncommitted changes, and the worktree is not the primary

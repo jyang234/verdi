@@ -438,7 +438,10 @@ under:
 
 The record schema is `verdi.policy-conflict-judgment/v1`. The existing D4
 `layout-version` and `tree-hash` are computed by `internal/store`;
-`input-digest` binds the role (`primary` or `challenger`), adapter-declared
+`tree-hash` and the filename form of `input-digest` are exactly 64 lowercase
+hexadecimal characters without a `sha256:` prefix, while record fields retain
+the full canonical digest form. The logical `input-digest` binds the role
+(`primary` or `challenger`), adapter-declared
 transport/model posture, argv digest, prompt digest, normalized input digest,
 profile/challenger posture, and effective authority digest. The content records
 the complete exchange from §6, all path-key components, and a self-digest.
@@ -474,15 +477,12 @@ Semantic rulings live at:
 .verdi/policy/dispositions/<name>.md
 ```
 
-This path requires a controller-authored amendment to
-`spec/verdi-store-layout` before runtime implementation may create it. The
-current store-layout sentence that places semantic dispositions in spec
-frontmatter does not describe AC-3's semantic-input witness, staleness,
-approval, or fallback record and cannot be silently repurposed. The amendment
-must name the new committed path and its policy-authority ownership, and extend
-the existing D4 cache filename grammar with §7's conflict-judgment record. It
-does not create a new data-zone root. Until that amendment reaches the default
-branch, implementation of disposition storage and judgment caching is blocked.
+The same authority tranche amends `spec/verdi-store-layout` to admit this path,
+name policy-authority ownership, replace its obsolete spec-frontmatter
+disposition statement, and extend the existing D4 cache filename grammar with
+§7's conflict-judgment record. It creates no new data-zone root or writer
+authority. Runtime implementation of disposition storage and judgment caching
+remains blocked until the reviewed tranche reaches the default branch.
 
 The human artifact schema is `verdi.policy-disposition/v1`, kind
 `policy-disposition`, ID `policy-disposition/<name>`. It uses the shared
@@ -819,9 +819,29 @@ Intentional omissions are:
   authority mutation;
 - no legacy report migration or reinterpretation;
 - no MCP or browser/workbench surface; and
-- no active store-layout edit inside this design commit; that canonical
-  amendment is a named controller prerequisite before runtime.
+- no layout-version bump, new data-zone root, new GC mode, or second writer
+  authority in the canonical store-layout amendment.
 
 No source clause, owner decision, proof effect, public interface, storage
 effect, lifecycle consumer, threat boundary, deferral, or residual disclosure
 is silently omitted.
+
+### Store-layout promotion witness
+
+Coverage is **2/2** accepted storage effects, with no omitted source element:
+
+1. §7 maps to the existing `data/cache/` directory row, D4's exact
+   `policy-conflict-<layout-version>-<tree-hash>-<input-digest>.json` grammar,
+   and the existing GC cache-pruning bullet. Both hash path segments are bare
+   64-lowercase-hex filename values while record fields retain canonical
+   `sha256:<hex>` digests; no new cache root or GC mode is created.
+2. §8 maps to the committed `policy/dispositions/<name>.md` row, the corrected
+   GLG human-record location, policy-authority loading/digest ownership, the
+   conflict gate's sole interpretation ownership, and authored-living temporal
+   classification. Legacy spec-frontmatter dispositions are intentionally
+   preserved as historical content but cannot satisfy the new schema.
+
+The transformation is additive except for correcting the obsolete
+spec-frontmatter-location statement. It changes no existing artifact bytes,
+index-cache semantics, writer authority, layout schema version, or historical
+record interpretation.
