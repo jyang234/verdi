@@ -5,6 +5,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/jyang234/verdi/internal/governanceprincipal"
 	"github.com/jyang234/verdi/internal/instructionprojection"
 	"github.com/jyang234/verdi/internal/policyartifact"
 )
@@ -281,6 +282,83 @@ func resolvedAuthorityArtifacts(authority PolicyAuthority) ([]storeAuthorityArti
 		}
 	}
 	return artifacts, nil
+}
+
+// requireAdoptedAuthorityDigest proves the exact HEAD bytes a compile is
+// about to wrap as an authority operand's payload are the same bytes the
+// ADOPTED digest was computed from.
+//
+// Every adopted digest in this service comes from the working-tree store
+// load (policyauthority.Load / Resolve), while every payload's bytes come
+// from `git show <HEAD>`. Those two disagree whenever an adopted artifact
+// has been edited without being committed, so without this check the
+// manifest would publish the fresh adopted digest over older bytes —
+// exactly the stale-authority substitution the digest is supposed to
+// prevent.
+//
+// A divergence is inconsistent authority, so it fails closed OPERATIONALLY
+// (authority design §10: "Malformed/noncanonical request or authority |
+// Exit 2"), matching the TOCTOU discipline resolveOwners and
+// reverifyGoverningFeature already apply to specification bytes. It is not
+// a new refusal family: §10 fixes no exit-1 row for it.
+func requireAdoptedAuthorityDigest(ref string, content []byte, adopted string, catalog governanceprincipal.Catalog) error {
+	computed, err := adoptedAuthorityDigest(ref, content, catalog)
+	if err != nil {
+		return fmt.Errorf("contextcompile: authority operand %s: decode its exact HEAD bytes: %w", ref, err)
+	}
+	if computed != adopted {
+		return fmt.Errorf("contextcompile: authority operand %s: the adopted digest %s does not bind its exact HEAD bytes (those digest as %s); the adopted store and HEAD have diverged", ref, adopted, computed)
+	}
+	return nil
+}
+
+// adoptedAuthorityDigest re-derives one authority artifact's canonical
+// digest from content, dispatching on the artifact ref's own kind half
+// through the SAME strict policyartifact/governanceprincipal decoders the
+// store load used — never a second, compiler-private digest rule.
+func adoptedAuthorityDigest(ref string, content []byte, catalog governanceprincipal.Catalog) (string, error) {
+	kind, _, ok := strings.Cut(ref, "/")
+	if !ok {
+		return "", fmt.Errorf("%q is not a <kind>/<name> policy artifact ref", ref)
+	}
+	switch kind {
+	case policyartifact.KindPolicy:
+		decoded, err := policyartifact.DecodePolicy(content)
+		if err != nil {
+			return "", err
+		}
+		return decoded.Digest()
+	case policyartifact.KindOverlay:
+		decoded, err := policyartifact.DecodeOverlay(content)
+		if err != nil {
+			return "", err
+		}
+		return decoded.Digest()
+	case policyartifact.KindExemption:
+		decoded, err := policyartifact.DecodeExemption(content)
+		if err != nil {
+			return "", err
+		}
+		return decoded.Digest()
+	case policyartifact.KindConstitution:
+		decoded, err := policyartifact.DecodeConstitution(content)
+		if err != nil {
+			return "", err
+		}
+		return decoded.Digest()
+	case policyartifact.KindProfileStorage:
+		decoded, err := policyartifact.DecodeStoredProfile(content, catalog)
+		if err != nil {
+			return "", err
+		}
+		// The adopted profile digest EffectivePolicy records is the
+		// kernel's own sealed profile digest (policyauthority's Resolve
+		// takes profile.Profile.Digest()), so this re-derivation must take
+		// exactly the same one.
+		return decoded.Profile.Digest()
+	default:
+		return "", fmt.Errorf("unknown policy artifact kind %q", kind)
+	}
 }
 
 // renderSelectedProjection renders authority's loaded store, effective

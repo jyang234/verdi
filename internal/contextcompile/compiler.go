@@ -7,6 +7,7 @@ import (
 
 	"github.com/jyang234/verdi/internal/artifact"
 	"github.com/jyang234/verdi/internal/gitx"
+	"github.com/jyang234/verdi/internal/governanceprincipal"
 	"github.com/jyang234/verdi/internal/instructionprojection"
 	"github.com/jyang234/verdi/internal/repositoryfacts"
 	"github.com/jyang234/verdi/internal/specstate"
@@ -322,7 +323,14 @@ func (c Compiler) Compile(ctx context.Context, root string, request Request) (Re
 
 	// Stage 9: classify every candidate exactly once and build data
 	// payloads.
-	materials, err := buildClassificationMaterials(ctx, c.git, root, head, target, fragments, obligations, declared, selection, authorityArtifacts, projectionFiles)
+	// The one governance catalog every stored profile is decoded against
+	// (policyauthority.Load's own rule), needed to re-derive the selected
+	// profile's adopted digest from its exact HEAD bytes.
+	catalog, err := authority.Store.Constitution.GovernanceCatalog()
+	if err != nil {
+		return Result{}, fmt.Errorf("contextcompile: stage 9 resolve governance catalog: %w", err)
+	}
+	materials, err := buildClassificationMaterials(ctx, c.git, root, head, target, fragments, obligations, declared, selection, authorityArtifacts, catalog, projectionFiles)
 	if err != nil {
 		return Result{}, fmt.Errorf("contextcompile: stage 9 build classification materials: %w", err)
 	}
@@ -526,6 +534,7 @@ func buildClassificationMaterials(
 	declared DeclaredContextResult,
 	selection authoritySelection,
 	authorityArtifacts []storeAuthorityArtifact,
+	catalog governanceprincipal.Catalog,
 	projectionFiles []ProjectionFile,
 ) ([]CandidateMaterial, error) {
 	universal := universalApplicabilityScope()
@@ -553,6 +562,9 @@ func buildClassificationMaterials(
 		if err != nil {
 			return nil, fmt.Errorf("read HEAD policy operand %s: %w", op.Path, err)
 		}
+		if err := requireAdoptedAuthorityDigest(op.ID, content, op.Digest, catalog); err != nil {
+			return nil, err
+		}
 		materials = append(materials, CandidateMaterial{
 			Source: SourceStoreAuthority, ID: refID(op.ID), Kind: IncludedPolicyArtifact,
 			PolicyScope: cloneScope(op.Scope), Content: content,
@@ -567,6 +579,9 @@ func buildClassificationMaterials(
 		content, err := git.Show(ctx, root, head, a.Path)
 		if err != nil {
 			return nil, fmt.Errorf("read HEAD authority artifact %s: %w", a.Path, err)
+		}
+		if err := requireAdoptedAuthorityDigest(a.Ref, content, a.Digest, catalog); err != nil {
+			return nil, err
 		}
 		materials = append(materials, CandidateMaterial{
 			Source: SourceStoreAuthority, ID: refID(a.Ref), Kind: IncludedPolicyArtifact,

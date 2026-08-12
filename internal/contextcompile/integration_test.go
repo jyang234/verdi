@@ -937,6 +937,87 @@ func TestCompile_Integration_NarrowedPathScopeKeepsAuthority(t *testing.T) {
 	}
 }
 
+// editStoreArtifactInWorkingTreeOnly rewrites one .verdi/policy/ artifact in
+// the WORKING TREE (never committing it), applying old->new exactly once,
+// then regenerates the managed instruction projection so the compile's stage
+// 5 still verifies clean against the edited store. The result is a
+// reachable, otherwise-legal checkout in which the adopted authority
+// policyauthority.Load reads differs from the exact HEAD bytes the compiler
+// wraps as that operand's payload.
+func editStoreArtifactInWorkingTreeOnly(t *testing.T, repo *fixturegit.Repo, rel, old, new string) {
+	t.Helper()
+	path := filepath.Join(repo.Dir, ".verdi", "policy", filepath.FromSlash(rel))
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %v", rel, err)
+	}
+	edited := strings.Replace(string(data), old, new, 1)
+	if edited == string(data) {
+		t.Fatalf("fixture edit did not apply: %q is absent from %s", old, rel)
+	}
+	if err := os.WriteFile(path, []byte(edited), 0o644); err != nil {
+		t.Fatalf("write %s: %v", rel, err)
+	}
+	if _, err := instructionprojection.Generate(repo.Dir); err != nil {
+		t.Fatalf("regenerate instruction projection: %v", err)
+	}
+}
+
+// TestCompile_Integration_AdoptedAuthorityDivergingFromHeadIsOperational
+// proves the compiler never ships stale HEAD bytes under a fresh adopted
+// digest. The adopted digest of every policy operand (and of the resolved
+// constitution and selected profile) comes from the WORKING-TREE store load,
+// while the payload bytes come from `git show HEAD`. When an adopted
+// artifact has been edited but not committed those two disagree, and the
+// manifest would otherwise claim the adopted digest over the older bytes.
+// This is inconsistent authority — an operational (exit-2) failure per
+// authority design §10's "Malformed/noncanonical request or authority",
+// matching resolveOwners's and reverifyGoverningFeature's existing TOCTOU
+// discipline — never a typed refusal.
+func TestCompile_Integration_AdoptedAuthorityDivergingFromHeadIsOperational(t *testing.T) {
+	cases := map[string]struct {
+		rel, old, new string
+		wantNamed     string
+	}{
+		"selected policy operand": {
+			rel:       "policies/go-toolchain.md",
+			old:       `title: "Go toolchain policy"`,
+			new:       `title: "Go toolchain policy (uncommitted edit)"`,
+			wantNamed: "policy/go-toolchain",
+		},
+		"resolved constitution": {
+			rel:       "constitution.md",
+			old:       `title: "Fixture project constitution"`,
+			new:       `title: "Fixture project constitution (uncommitted edit)"`,
+			wantNamed: "policy-constitution/constitution",
+		},
+		"selected governance profile": {
+			rel:       "profiles/solo-default.md",
+			old:       `{role: author, trust_source: github-org, subjects: [alice]}`,
+			new:       `{role: author, trust_source: github-org, subjects: [alice, bob]}`,
+			wantNamed: "governance-profile/solo-default",
+		},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			repo := multiParentStoryRepo(t)
+			editStoreArtifactInWorkingTreeOnly(t, repo, tc.rel, tc.old, tc.new)
+
+			c := NewCompiler()
+			_, err := c.Compile(context.Background(), repo.Dir, integrationBuildRequest("spec/story-multi-parent"))
+			if err == nil {
+				t.Fatal("Compile completed over authority whose adopted digest does not bind the HEAD bytes it wrapped")
+			}
+			if IsRefusal(err) {
+				t.Fatalf("adopted/HEAD authority divergence classified as a refusal (want operational): %T %v", err, err)
+			}
+			if !strings.Contains(err.Error(), tc.wantNamed) {
+				t.Errorf("error %q does not name the diverging operand %q", err, tc.wantNamed)
+			}
+		})
+	}
+}
+
 // TestCompile_Integration_RepositoryFactsGatheredExactlyOnce proves Compile
 // gathers repository facts exactly once and publishes THOSE facts in the
 // manifest: the fixture's second (and any later) Gather deliberately reports
