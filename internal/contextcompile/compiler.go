@@ -245,10 +245,6 @@ func (c Compiler) Compile(ctx context.Context, root string, request Request) (Re
 	if err != nil {
 		return Result{}, fmt.Errorf("contextcompile: stage 4 resolve declared context: %w", err)
 	}
-	declaredByLogicalRef, err := indexDeclaredContextItems(declared)
-	if err != nil {
-		return Result{}, fmt.Errorf("contextcompile: stage 4 resolve declared context: %w", err)
-	}
 
 	// Stage 5: verify the full existing managed instruction projection
 	// against disk.
@@ -300,13 +296,22 @@ func (c Compiler) Compile(ctx context.Context, root string, request Request) (Re
 	if err != nil {
 		return Result{}, fmt.Errorf("contextcompile: stage 6 build store-authority lifts: %w", err)
 	}
+	// The EFFECTIVE declared-context set, computed exactly once here and
+	// used for the universe lifts, the classification materials and the
+	// manifest's pinned-ref index alike, so no stage can disagree with
+	// another about which declared refs this compile actually carries.
+	effectiveDeclared := suppressStoreOwnedDeclaredContext(declared, storeLifts)
+	declaredByLogicalRef, err := indexDeclaredContextItems(effectiveDeclared)
+	if err != nil {
+		return Result{}, fmt.Errorf("contextcompile: stage 6 index declared context: %w", err)
+	}
 
 	candidates, err := BuildUniverse(UniverseInput{
 		Head:               head,
 		Tree:               entries,
 		WorktreePaths:      worktreePaths,
 		LiftedStorePaths:   storeLifts,
-		LiftedContextPaths: declared.Lift,
+		LiftedContextPaths: effectiveDeclared.Lift,
 		ProjectionPaths:    append([]string(nil), authority.Adapter.Managed...),
 		Adapter:            authority.Adapter,
 	})
@@ -330,7 +335,7 @@ func (c Compiler) Compile(ctx context.Context, root string, request Request) (Re
 	if err != nil {
 		return Result{}, fmt.Errorf("contextcompile: stage 9 resolve governance catalog: %w", err)
 	}
-	materials, err := buildClassificationMaterials(ctx, c.git, root, head, target, fragments, obligations, declared, selection, authorityArtifacts, catalog, projectionFiles)
+	materials, err := buildClassificationMaterials(ctx, c.git, root, head, target, fragments, obligations, effectiveDeclared, selection, authorityArtifacts, catalog, projectionFiles)
 	if err != nil {
 		return Result{}, fmt.Errorf("contextcompile: stage 9 build classification materials: %w", err)
 	}
@@ -490,6 +495,44 @@ func buildStoreLifts(
 	return lifts, nil
 }
 
+// suppressStoreOwnedDeclaredContext returns the EFFECTIVE declared-context
+// result after authority design §5's source precedence — SI-92: "source
+// precedence remains store-authority > declared-context > head-tree, so an
+// overlapping store-authority path suppresses the declared lift".
+//
+// Suppression is classification, not failure: a governing feature may
+// legally pin an artifact whose store path this same compile already owns
+// as authority (the commonest case being one parent feature pinning
+// another, which is also a parent of the target story). That path's bytes
+// are still in the capsule — once, under store-authority — so the declared
+// lift AND its classification material are dropped together here, before
+// either the universe or the materials are built. Dropping only the lift
+// (universe.go's own resolveLifts already did that) would leave a material
+// naming a candidate the universe deliberately never created, which
+// Classify rejects as absent from the universe.
+//
+// Suppression is per path, exactly as universe.go's precedence rule is: an
+// uncontested declared pin of a different path survives untouched.
+func suppressStoreOwnedDeclaredContext(declared DeclaredContextResult, storeLifts map[string]string) DeclaredContextResult {
+	effective := DeclaredContextResult{
+		Items: make([]DeclaredContextItem, 0, len(declared.Items)),
+		Lift:  make(map[string]string, len(declared.Lift)),
+	}
+	for _, item := range declared.Items {
+		if _, storeOwned := storeLifts[item.Path]; storeOwned {
+			continue
+		}
+		effective.Items = append(effective.Items, item)
+	}
+	for path, logicalRef := range declared.Lift {
+		if _, storeOwned := storeLifts[path]; storeOwned {
+			continue
+		}
+		effective.Lift[path] = logicalRef
+	}
+	return effective
+}
+
 // indexDeclaredContextItems builds the explicit one-to-one
 // logicalRef->DeclaredContextItem index this service uses to preserve each
 // declared-context-ref's complete pinned identity (authority design §5,
@@ -497,9 +540,17 @@ func buildStoreLifts(
 // already carries at most one item per LogicalRef (it fails closed on a
 // collapse itself), but this service never trusts that upstream guarantee
 // blindly: it re-derives and re-checks the same invariant from the
-// concrete Items/Lift values it was actually handed, failing closed on
-// either a duplicate logical ref among Items or a Lift value naming a
-// logical ref with no resolved Item.
+// concrete Items/Lift values it was actually handed.
+//
+// The Items<->Lift correspondence is checked in BOTH directions, because
+// the universe is built from Lift while the classification materials are
+// built from Items: every Lift value must name a resolved Item (else the
+// universe would carry a candidate no material can classify), and every
+// Item's own Path must be lifted to that Item's own LogicalRef (else a
+// material would name a candidate the universe never created, or two
+// sources would claim one path). Either direction failing is a
+// disagreement between this compile's own already-computed values, so it
+// fails closed rather than being reconciled.
 func indexDeclaredContextItems(result DeclaredContextResult) (map[string]DeclaredContextItem, error) {
 	byLogicalRef := make(map[string]DeclaredContextItem, len(result.Items))
 	for _, item := range result.Items {
@@ -511,6 +562,15 @@ func indexDeclaredContextItems(result DeclaredContextResult) (map[string]Declare
 	for path, logicalRef := range result.Lift {
 		if _, ok := byLogicalRef[logicalRef]; !ok {
 			return nil, fmt.Errorf("declared context: lift for path %q names logical ref %q with no resolved item", path, logicalRef)
+		}
+	}
+	for _, item := range result.Items {
+		lifted, ok := result.Lift[item.Path]
+		if !ok {
+			return nil, fmt.Errorf("declared context: item %q resolved at path %q, which no lift claims", item.LogicalRef, item.Path)
+		}
+		if lifted != item.LogicalRef {
+			return nil, fmt.Errorf("declared context: path %q is lifted to logical ref %q but its resolved item names %q", item.Path, lifted, item.LogicalRef)
 		}
 	}
 	return byLogicalRef, nil

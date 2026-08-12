@@ -9,6 +9,7 @@ package contextcompile
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"os/exec"
@@ -421,6 +422,210 @@ func multiParentStoryRepo(t *testing.T) *fixturegit.Repo {
 	})
 }
 
+// ============================================================================
+// Declared-context (SI-91/SI-92) end-to-end fixture
+// ============================================================================
+
+// declaredContextADR is a minimal valid non-spec artifact for a parent
+// feature to pin as declared context: SI-92 accepts every kind in the closed
+// artifact registry, and store.NonSpecArtifactPath resolves an ADR's single
+// fixed path (.verdi/adr/<name>.md).
+const declaredContextADR = `---
+id: adr/ctx-note
+kind: adr
+title: "Declared context note"
+status: accepted
+owners: [platform-team]
+decided: 2026-01-01
+frozen: { at: 2026-01-01, commit: 1111111111111111111111111111111111111111 }
+---
+# Declared context note
+
+## Context
+
+Prose the declared-context payload carries verbatim.
+
+## Decision
+
+Pin this ADR from a governing feature's context list.
+
+## Consequences
+
+The compile includes the whole artifact's exact pinned bytes.
+`
+
+// declaredContextSpec is a spec-kind declared-context target that is NOT one
+// of the story's governing parents, so its declared lift survives (unlike
+// the overlapping parent-feature pin below, which store authority outranks).
+const declaredContextSpec = `---
+id: spec/context-only
+kind: spec
+class: component
+title: "Context-only component"
+status: active
+owners: [platform-team]
+---
+# Context-only component
+
+Referenced only through a feature's declared context list.
+`
+
+// withDeclaredContext returns data (one fixture feature spec's exact bytes)
+// with a `context:` frontmatter key carrying refs inserted directly after
+// the class line. Building the refs at test time is unavoidable: an exact
+// pinned ref names a commit that only exists once the artifact it pins has
+// been committed, so no statically committed fixture file can carry one.
+func withDeclaredContext(t *testing.T, data []byte, refs ...string) string {
+	t.Helper()
+	const anchor = "class: feature\n"
+	text := string(data)
+	if !strings.Contains(text, anchor) {
+		t.Fatalf("fixture does not carry %q", anchor)
+	}
+	return strings.Replace(text, anchor, anchor+"context: ["+strings.Join(refs, ", ")+"]\n", 1)
+}
+
+// declaredContextRepo builds the hermetic multi-parent story fixture in
+// which BOTH governing parent features declare exact pinned context refs.
+// The layers are strictly additive and each pins only already-committed
+// commits:
+//
+//	commit 1: policy store, adr/ctx-note, spec/context-only
+//	commit 2: spec/feature-beta, declaring adr/ctx-note@<commit 1>
+//	commit 3: spec/feature-alpha, declaring adr/ctx-note@<commit 1> (the
+//	          SAME exact ref beta declared — SI-91 union de-duplication),
+//	          spec/context-only@<commit 1>, and spec/feature-beta@<commit 2>
+//	          (an overlap with a store-authority path), plus the story
+//	commit 4: the generated managed instruction projection
+func declaredContextRepo(t *testing.T) *fixturegit.Repo {
+	t.Helper()
+	storyData, storyFM := decodeFragmentSpecFixture(t, "story-multi-parent.md")
+	alphaData, _ := decodeFragmentSpecFixture(t, "feature-alpha.md")
+	betaData, _ := decodeFragmentSpecFixture(t, "feature-beta.md")
+
+	base := policyStoreFiles(t)
+	base[".verdi/adr/ctx-note.md"] = declaredContextADR
+	base[".verdi/specs/active/context-only/spec.md"] = declaredContextSpec
+	repo := fixturegit.Build(t, []fixturegit.Layer{{Files: base, Message: "scaffold"}})
+	t.Setenv("CI_DEFAULT_BRANCH", "main")
+	baseCommit := repo.Head
+
+	writeAndCommit := func(message string, files map[string]string) string {
+		for rel, content := range files {
+			dst := filepath.Join(repo.Dir, filepath.FromSlash(rel))
+			if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+				t.Fatalf("mkdir %s: %v", rel, err)
+			}
+			if err := os.WriteFile(dst, []byte(content), 0o644); err != nil {
+				t.Fatalf("write %s: %v", rel, err)
+			}
+		}
+		runIntegrationGit(t, repo.Dir, "add", "-A")
+		runIntegrationGit(t, repo.Dir, "commit", "--quiet", "--no-verify", "-m", message)
+		return strings.TrimSpace(runIntegrationGit(t, repo.Dir, "rev-parse", "HEAD"))
+	}
+
+	betaCommit := writeAndCommit("land feature-beta", map[string]string{
+		".verdi/specs/active/feature-beta/spec.md": withDeclaredContext(t, betaData, "adr/ctx-note@"+baseCommit),
+	})
+	writeAndCommit("land feature-alpha and the story", map[string]string{
+		".verdi/specs/active/feature-alpha/spec.md": withDeclaredContext(t, alphaData,
+			"adr/ctx-note@"+baseCommit,
+			"spec/context-only@"+baseCommit,
+			"spec/feature-beta@"+betaCommit,
+		),
+		".verdi/specs/active/" + strings.TrimPrefix(storyFM.ID, "spec/") + "/spec.md": string(storyData),
+	})
+
+	if _, err := instructionprojection.Generate(repo.Dir); err != nil {
+		t.Fatalf("instructionprojection.Generate: %v", err)
+	}
+	repo.Head = writeAndCommit("generate instruction projection", nil)
+	return repo
+}
+
+// TestCompile_Integration_DeclaredContextPinnedRefsSurviveIntoManifest is
+// the end-to-end proof for SI-91/SI-92's declared-context path: a real
+// multi-parent build story whose governing features declare exact pinned
+// refs of a non-spec kind and a spec kind, plus one ref that overlaps a
+// store-authority path.
+func TestCompile_Integration_DeclaredContextPinnedRefsSurviveIntoManifest(t *testing.T) {
+	repo := declaredContextRepo(t)
+	c := NewCompiler()
+	result, err := c.Compile(context.Background(), repo.Dir, integrationBuildRequest("spec/story-multi-parent"))
+	if err != nil {
+		t.Fatalf("Compile: unexpected error: %v", err)
+	}
+	m := result.Manifest
+
+	// (1) Candidate identity stays the UNPINNED logical ref, while the
+	// manifest's included row carries the COMPLETE pinned ref (SI-92).
+	for _, logical := range []string{"adr/ctx-note", "spec/context-only"} {
+		row := requireIncludedEntry(t, m.Included, "ref:"+logical)
+		if row.Source != SourceDeclaredContext || row.Kind != IncludedDeclaredContextRef {
+			t.Errorf("%s row = %+v, want source=declared-context kind=declared-context-ref", logical, row)
+		}
+		if row.Ref == nil {
+			t.Fatalf("%s row carries no ref", logical)
+		}
+		if !strings.HasPrefix(*row.Ref, logical+"@") || len(*row.Ref) <= len(logical)+1 {
+			t.Errorf("%s row ref = %q, want the exact pinned %s@<hex> form", logical, *row.Ref, logical)
+		}
+		// The data item keeps the logical identity; only the manifest row
+		// widens to the pinned ref.
+		found := false
+		for _, item := range result.DataItems {
+			if item.ID != "ref:"+logical {
+				continue
+			}
+			if found {
+				t.Fatalf("data item %q appears more than once; SI-91 de-duplicates identical exact refs declared by two parents", logical)
+			}
+			found = true
+			if item.Ref == nil || *item.Ref != logical {
+				t.Errorf("data item %q ref = %v, want the unpinned logical ref %q", logical, item.Ref, logical)
+			}
+		}
+		if !found {
+			t.Errorf("no data item for declared-context ref %q", logical)
+		}
+	}
+
+	// (2) Both parents declared adr/ctx-note@<same commit>: SI-91's union
+	// de-duplicates identical exact refs into ONE candidate and payload.
+	adrRows := 0
+	for _, e := range m.Included {
+		if e.ID == "ref:adr/ctx-note" {
+			adrRows++
+		}
+	}
+	if adrRows != 1 {
+		t.Errorf("adr/ctx-note has %d included rows, want exactly 1 (two parents declared the identical exact ref)", adrRows)
+	}
+
+	// (3) The overlapping pin resolves the path store authority already
+	// owns, so SI-92's source precedence classifies it store-authority and
+	// suppresses the declared lift — it is not a duplicate candidate and
+	// certainly not a compile failure.
+	betaRow := requireIncludedEntry(t, m.Included, "ref:spec/feature-beta")
+	if betaRow.Source != SourceStoreAuthority || betaRow.Kind != IncludedParentFeatureFragment {
+		t.Errorf("spec/feature-beta row = %+v, want source=store-authority kind=parent-feature-fragment", betaRow)
+	}
+	for _, e := range m.Included {
+		if e.Source == SourceDeclaredContext && e.Ref != nil && strings.HasPrefix(*e.Ref, "spec/feature-beta@") {
+			t.Errorf("spec/feature-beta also appears as a declared-context row %+v; store authority outranks the declared lift for that path", e)
+		}
+	}
+	// The lifted paths never reappear as repository files.
+	for _, path := range []string{".verdi/adr/ctx-note.md", ".verdi/specs/active/context-only/spec.md", ".verdi/specs/active/feature-beta/spec.md"} {
+		for _, e := range m.Included {
+			if e.Path != nil && *e.Path == path {
+				t.Errorf("%s is still an included %s/%s candidate; a lifted path is not duplicated as a repository file", path, e.Source, e.Kind)
+			}
+		}
+	}
+}
+
 // requireManifestEntry returns the sole IncludedEntry in entries whose ID
 // matches id, failing the test if it is absent or duplicated.
 func requireIncludedEntry(t *testing.T, entries []IncludedEntry, id string) IncludedEntry {
@@ -803,14 +1008,46 @@ func TestCompile_Integration_SpikeMultiParent_Succeeds(t *testing.T) {
 	if len(m.ParentFeatures) != 2 {
 		t.Fatalf("ParentFeatures = %+v, want exactly 2 rows", m.ParentFeatures)
 	}
+	// A spike's fragments target the OPEN QUESTIONS its `resolves` edges
+	// name, never acceptance criteria (authority design §6 Build: "a spike
+	// uses each `resolves` target open-question fragment"). Each parent
+	// fragment's payload is the canonical fragment JSON of §8.1, so the
+	// target shape is assertable straight off the returned data item.
+	payloadByID := make(map[string]string, len(result.DataItems))
+	for _, item := range result.DataItems {
+		payloadByID[item.ID] = item.Content
+	}
+	fragmentRows := 0
 	for _, e := range m.Included {
-		if e.Source == SourceStoreAuthority && e.Kind == IncludedParentFeatureFragment && e.Ref != nil {
-			// (nothing further asserted here at the manifest level: the
-			// fragment's own oq-* target shape is fragments_test.go's
-			// concern; this proves only that the spike wiring reaches a
-			// completed compile.)
-			_ = e
+		if e.Source != SourceStoreAuthority || e.Kind != IncludedParentFeatureFragment || e.Ref == nil {
+			continue
 		}
+		fragmentRows++
+		payload, ok := payloadByID[e.ID]
+		if !ok {
+			t.Errorf("parent fragment %s has no returned data item", e.ID)
+			continue
+		}
+		var decoded struct {
+			Targets []struct {
+				ID string `json:"id"`
+			} `json:"targets"`
+		}
+		if err := json.Unmarshal([]byte(payload), &decoded); err != nil {
+			t.Errorf("parent fragment %s payload is not the canonical fragment object: %v", e.ID, err)
+			continue
+		}
+		if len(decoded.Targets) == 0 {
+			t.Errorf("parent fragment %s carries no targets", e.ID)
+		}
+		for _, target := range decoded.Targets {
+			if !strings.HasPrefix(target.ID, "oq-") {
+				t.Errorf("parent fragment %s targets %q; a spike's fragment targets only oq-* open questions", e.ID, target.ID)
+			}
+		}
+	}
+	if fragmentRows != 2 {
+		t.Errorf("found %d parent-feature-fragment included rows, want 2", fragmentRows)
 	}
 }
 

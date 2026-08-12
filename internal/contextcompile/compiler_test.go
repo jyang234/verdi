@@ -141,7 +141,7 @@ func validRepositorySnapshot(head, branch string) repositoryfacts.Snapshot {
 
 // compileHead is the fixed 40-hex HEAD every stage 3-5 fixture in this
 // section agrees on.
-const compileHead = "ffffffffffffffffffffffffffffffffffffff"
+const compileHead = "ffffffffffffffffffffffffffffffffffffffff"
 
 // validCompileRequest builds a minimal, grammar-valid Request naming spec
 // as the target: schema, adapter, an unrestricted (empty) scope, phase
@@ -789,6 +789,162 @@ func TestCompilerStage9GitFailureNeededForClassificationIsOperational(t *testing
 	}
 	if IsRefusal(err) {
 		t.Fatalf("stage 9 Git failure classified as refusal (want operational): %T %v", err, err)
+	}
+}
+
+// --- declared-context indexing, suppression and pinned-ref widening -------
+
+func declaredItemFixture(logicalRef, pinned, path string) DeclaredContextItem {
+	return DeclaredContextItem{
+		Ref: pinned, LogicalRef: logicalRef, Path: path,
+		ContentDigest: digestSeed('7'), Content: []byte("body\n"),
+	}
+}
+
+func declaredResultFixture() DeclaredContextResult {
+	adr := declaredItemFixture("adr/ctx-note", "adr/ctx-note@"+gitHashSeed('1'), ".verdi/adr/ctx-note.md")
+	spec := declaredItemFixture("spec/context-only", "spec/context-only@"+gitHashSeed('1'), ".verdi/specs/active/context-only/spec.md")
+	return DeclaredContextResult{
+		Items: []DeclaredContextItem{adr, spec},
+		Lift:  map[string]string{adr.Path: adr.LogicalRef, spec.Path: spec.LogicalRef},
+	}
+}
+
+func TestIndexDeclaredContextItems(t *testing.T) {
+	got, err := indexDeclaredContextItems(declaredResultFixture())
+	if err != nil {
+		t.Fatalf("indexDeclaredContextItems: unexpected error: %v", err)
+	}
+	if len(got) != 2 || got["adr/ctx-note"].Ref != "adr/ctx-note@"+gitHashSeed('1') {
+		t.Fatalf("index = %+v, want both logical refs indexed to their pinned items", got)
+	}
+}
+
+// TestIndexDeclaredContextItemsBijectionFailsClosed proves the Items<->Lift
+// correspondence is checked in BOTH directions: the universe is built from
+// Lift while the classification materials are built from Items, so a
+// disagreement in either direction would produce a candidate no material can
+// classify, or a material naming a candidate the universe never created.
+func TestIndexDeclaredContextItemsBijectionFailsClosed(t *testing.T) {
+	cases := map[string]func(*DeclaredContextResult){
+		"duplicate logical ref among items": func(r *DeclaredContextResult) {
+			r.Items[1].LogicalRef = r.Items[0].LogicalRef
+		},
+		"lift names a logical ref with no item": func(r *DeclaredContextResult) {
+			r.Lift[".verdi/adr/other.md"] = "adr/other"
+		},
+		"item path is claimed by no lift": func(r *DeclaredContextResult) {
+			delete(r.Lift, r.Items[0].Path)
+		},
+		"lift disagrees with its item's logical ref": func(r *DeclaredContextResult) {
+			r.Lift[r.Items[0].Path] = r.Items[1].LogicalRef
+		},
+	}
+	for name, mutate := range cases {
+		t.Run(name, func(t *testing.T) {
+			result := declaredResultFixture()
+			mutate(&result)
+			if _, err := indexDeclaredContextItems(result); err == nil {
+				t.Fatal("expected indexDeclaredContextItems to fail closed")
+			}
+		})
+	}
+}
+
+// TestSuppressStoreOwnedDeclaredContext proves authority design §5's source
+// precedence (SI-92: "an overlapping store-authority path suppresses the
+// declared lift") drops the overlapping item AND its lift together, leaving
+// every uncontested declared pin untouched. Dropping only one of the two is
+// what made a legal overlapping pin abort the compile.
+func TestSuppressStoreOwnedDeclaredContext(t *testing.T) {
+	declared := declaredResultFixture()
+	storeLifts := map[string]string{
+		".verdi/specs/active/context-only/spec.md": "spec/context-only",
+		".verdi/specs/active/story-x/spec.md":      "spec/story-x",
+	}
+	effective := suppressStoreOwnedDeclaredContext(declared, storeLifts)
+	if len(effective.Items) != 1 || effective.Items[0].LogicalRef != "adr/ctx-note" {
+		t.Fatalf("effective items = %+v, want only the uncontested adr/ctx-note", effective.Items)
+	}
+	if len(effective.Lift) != 1 || effective.Lift[".verdi/adr/ctx-note.md"] != "adr/ctx-note" {
+		t.Fatalf("effective lift = %v, want only the uncontested adr/ctx-note path", effective.Lift)
+	}
+	// The suppressed set is still a consistent bijection.
+	if _, err := indexDeclaredContextItems(effective); err != nil {
+		t.Fatalf("suppressed set is not self-consistent: %v", err)
+	}
+	// The input is not mutated.
+	if len(declared.Items) != 2 || len(declared.Lift) != 2 {
+		t.Fatalf("suppression mutated its input: %+v", declared)
+	}
+}
+
+func TestSuppressStoreOwnedDeclaredContextKeepsEverythingUncontested(t *testing.T) {
+	declared := declaredResultFixture()
+	effective := suppressStoreOwnedDeclaredContext(declared, map[string]string{})
+	if !reflect.DeepEqual(effective.Items, declared.Items) || !reflect.DeepEqual(effective.Lift, declared.Lift) {
+		t.Fatalf("suppression dropped an uncontested declared pin: %+v", effective)
+	}
+}
+
+func declaredIncludedRow(id, ref string) IncludedEntry {
+	value := ref
+	return IncludedEntry{
+		ID: id, Source: SourceDeclaredContext, Kind: IncludedDeclaredContextRef, Ref: &value,
+		Applicability: ApplicabilityApplicable, PayloadChannel: ChannelData,
+		ContentDigest: digestSeed('7'), PayloadDigest: digestSeed('8'), Disclosures: []DisclosureCode{},
+	}
+}
+
+func TestApplyDeclaredContextPinnedRefs(t *testing.T) {
+	index, err := indexDeclaredContextItems(declaredResultFixture())
+	if err != nil {
+		t.Fatalf("indexDeclaredContextItems: %v", err)
+	}
+	other := IncludedEntry{
+		ID: "ref:spec/story-x", Source: SourceStoreAuthority, Kind: IncludedAcceptedSpec,
+		Applicability: ApplicabilityApplicable, PayloadChannel: ChannelData,
+		ContentDigest: digestSeed('7'), PayloadDigest: digestSeed('8'), Disclosures: []DisclosureCode{},
+	}
+	rows, err := applyDeclaredContextPinnedRefs([]IncludedEntry{
+		declaredIncludedRow("ref:adr/ctx-note", "adr/ctx-note"), other,
+	}, index)
+	if err != nil {
+		t.Fatalf("applyDeclaredContextPinnedRefs: unexpected error: %v", err)
+	}
+	if rows[0].ID != "ref:adr/ctx-note" {
+		t.Fatalf("candidate identity changed: %+v", rows[0])
+	}
+	if rows[0].Ref == nil || *rows[0].Ref != "adr/ctx-note@"+gitHashSeed('1') {
+		t.Fatalf("declared-context row ref = %v, want the complete pinned ref", rows[0].Ref)
+	}
+	if rows[1].Ref != nil {
+		t.Fatalf("a non-declared-context row was rewritten: %+v", rows[1])
+	}
+}
+
+// TestApplyDeclaredContextPinnedRefsFailsClosed proves the widening never
+// invents or silently keeps a logical ref: a declared-context row whose
+// logical ref has no resolved item, and one carrying no ref at all, both
+// fail closed rather than shipping an unpinned manifest identity.
+func TestApplyDeclaredContextPinnedRefsFailsClosed(t *testing.T) {
+	index, err := indexDeclaredContextItems(declaredResultFixture())
+	if err != nil {
+		t.Fatalf("indexDeclaredContextItems: %v", err)
+	}
+	noRefRow := declaredIncludedRow("ref:adr/ctx-note", "adr/ctx-note")
+	noRefRow.Ref = nil
+
+	cases := map[string][]IncludedEntry{
+		"no resolved item for the row's logical ref": {declaredIncludedRow("ref:adr/missing", "adr/missing")},
+		"declared-context row carries no ref":        {noRefRow},
+	}
+	for name, rows := range cases {
+		t.Run(name, func(t *testing.T) {
+			if _, err := applyDeclaredContextPinnedRefs(rows, index); err == nil {
+				t.Fatal("expected applyDeclaredContextPinnedRefs to fail closed")
+			}
+		})
 	}
 }
 
