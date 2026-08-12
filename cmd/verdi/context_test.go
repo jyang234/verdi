@@ -491,6 +491,90 @@ func TestCmdContextCompile_OutIsManagedProjectionFile_Refused(t *testing.T) {
 	}
 }
 
+// contextFilesystemIsCaseInsensitive probes dir once for case-insensitive
+// name resolution (APFS/HFS+ default, NTFS) by writing a lowercase file and
+// stat'ing its uppercase spelling. Case-variant alias subtests are only
+// meaningful — and only reachable as an actual bypass — on a filesystem
+// that answers yes; symlink alias subtests always run.
+func contextFilesystemIsCaseInsensitive(t *testing.T, dir string) bool {
+	t.Helper()
+	probe := filepath.Join(dir, "verdi-case-probe")
+	if err := os.WriteFile(probe, []byte("probe"), 0o644); err != nil {
+		t.Fatalf("writing case-sensitivity probe: %v", err)
+	}
+	defer func() { _ = os.Remove(probe) }()
+	_, err := os.Stat(filepath.Join(dir, "VERDI-CASE-PROBE"))
+	return err == nil
+}
+
+// TestCmdContextCompile_OutAliasesReservedPath_Refused proves the store-zone
+// guard is alias-safe, not merely string-clean: a case-variant spelling of
+// .verdi/ or .git/, a symlinked parent whose target IS .verdi/, and a
+// case-variant spelling of the input request file all name the same
+// filesystem objects the guard reserves, so each must be refused (exit 2)
+// with nothing written — the Wave-3 plan's "never writes .verdi/, managed
+// projection files, payload files, Git state, or a worktree" constraint is
+// about the destination the write actually lands on, not about how the
+// caller spelled it.
+func TestCmdContextCompile_OutAliasesReservedPath_Refused(t *testing.T) {
+	repo := buildContextCompileRepo(t, map[string]string{
+		".verdi/specs/active/feature-alpha/spec.md": contextFeatureAlphaSpec(t),
+	})
+	t.Chdir(repo.Dir)
+	reqPath := writeContextRequestFile(t, repo.Dir, "request.json", contextRequestBytes(t, "spec/feature-alpha", contextcompile.PhaseDesign, nil))
+	requestBefore, err := os.ReadFile(reqPath)
+	if err != nil {
+		t.Fatalf("reading request file: %v", err)
+	}
+	if err := os.Symlink(filepath.Join(repo.Dir, ".verdi"), filepath.Join(repo.Dir, "notes")); err != nil {
+		t.Fatalf("creating notes -> .verdi symlink: %v", err)
+	}
+	caseInsensitive := contextFilesystemIsCaseInsensitive(t, repo.Dir)
+
+	cases := []struct {
+		name          string
+		out           string
+		needsCaseFold bool
+	}{
+		{"case-variant .verdi spelling", filepath.Join(repo.Dir, ".VERDI", "sneaky.json"), true},
+		{"case-variant .git spelling", filepath.Join(repo.Dir, ".GIT", "sneaky.json"), true},
+		{"symlinked parent resolving into .verdi", filepath.Join(repo.Dir, "notes", "sneaky.json"), false},
+		{"relative symlinked parent", filepath.Join("notes", "sneaky.json"), false},
+		{"case-variant request-file spelling", filepath.Join(repo.Dir, "REQUEST.json"), true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if tc.needsCaseFold && !caseInsensitive {
+				t.Skip("filesystem is case-sensitive: a case-variant spelling names a genuinely different path here")
+			}
+			var stdout, stderr bytes.Buffer
+			got := cmdContextCompile([]string{"--request", reqPath, "--out", tc.out}, strings.NewReader(""), &stdout, &stderr)
+			if got != 2 {
+				t.Fatalf("cmdContextCompile(--out %s) = %d, want 2; stderr=%s", tc.out, got, stderr.String())
+			}
+			if stdout.Len() != 0 {
+				t.Fatalf("stdout = %q, want empty", stdout.String())
+			}
+			if stderr.Len() == 0 {
+				t.Fatal("stderr is empty, want a reserved-path diagnostic")
+			}
+			if _, err := os.Stat(filepath.Join(repo.Dir, ".verdi", "sneaky.json")); err == nil {
+				t.Fatal(".verdi/sneaky.json was written despite the refusal")
+			}
+			if _, err := os.Stat(filepath.Join(repo.Dir, ".git", "sneaky.json")); err == nil {
+				t.Fatal(".git/sneaky.json was written despite the refusal")
+			}
+			after, err := os.ReadFile(reqPath)
+			if err != nil {
+				t.Fatalf("reading request file after refusal: %v", err)
+			}
+			if !bytes.Equal(requestBefore, after) {
+				t.Fatal("the input request file was clobbered despite the refusal")
+			}
+		})
+	}
+}
+
 // TestCmdContextCompile_StderrHasNoAbsoluteCheckoutPath proves the
 // deterministic-diagnostic constraint (Task 8 Step 1): stderr never
 // carries the store root's own absolute filesystem path.

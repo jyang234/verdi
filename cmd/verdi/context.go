@@ -23,6 +23,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -195,41 +196,48 @@ func extractContextCompileFlags(args []string) (request string, hasRequest bool,
 	return request, hasRequest, out, hasOut, rest, nil
 }
 
-// sameFileArg reports whether a and b name the same filesystem path,
-// resolved to their absolute cleaned forms when that resolution succeeds
-// (falling back to a literal comparison otherwise, e.g. under an
-// unreadable cwd) — catching both a literal duplicate and two different
-// spellings of the same file (`foo.json` vs `./foo.json`).
+// sameFileArg reports whether a and b name the same filesystem object,
+// compared through canonicalGuardPath (absolute, symlink-resolved) rather
+// than by cleaned spelling alone — catching a literal duplicate, two
+// spellings of one path (`foo.json` vs `./foo.json`), a case-variant
+// spelling on a case-insensitive filesystem, and a symlink whose target is
+// the other argument. It falls back to a literal comparison when the cwd
+// itself cannot be resolved.
 func sameFileArg(a, b string) bool {
-	aAbs, aErr := filepath.Abs(a)
-	bAbs, bErr := filepath.Abs(b)
+	aCanon, aErr := canonicalGuardPath(a)
+	bCanon, bErr := canonicalGuardPath(b)
 	if aErr != nil || bErr != nil {
 		return a == b
 	}
-	return aAbs == bAbs
+	if pathsEqualAliasSafe(aCanon, bCanon) {
+		return true
+	}
+	aInfo, aStatErr := os.Stat(aCanon)
+	bInfo, bStatErr := os.Stat(bCanon)
+	return aStatErr == nil && bStatErr == nil && os.SameFile(aInfo, bInfo)
 }
 
 // validateContextOutputStoreZone rejects an --out destination that falls
 // inside root's .git/ or .verdi/ trees, or that names the exact input
 // request file (Wave-3 plan Task 8 Step 2) — checked before any request
-// is even read, so an unsafe --out never triggers a compile at all.
+// is even read, so an unsafe --out never triggers a compile at all. The
+// comparison is over canonical (symlink-resolved) spellings, so a
+// symlinked parent or a case-variant spelling of a reserved path cannot
+// smuggle a write into it.
 func validateContextOutputStoreZone(root, out, request string) error {
-	outAbs, err := filepath.Abs(out)
+	outCanon, err := canonicalGuardPath(out)
 	if err != nil {
 		return fmt.Errorf("resolving --out: %w", err)
 	}
-	outAbs = filepath.Clean(outAbs)
 
 	forbidden := []string{
 		filepath.Join(root, ".git"),
 		filepath.Join(root, ".verdi"),
 	}
 	if request != "-" {
-		if reqAbs, err := filepath.Abs(request); err == nil {
-			forbidden = append(forbidden, filepath.Clean(reqAbs))
-		}
+		forbidden = append(forbidden, request)
 	}
-	return checkNotWithinAny(outAbs, forbidden)
+	return checkNotWithinAny(outCanon, forbidden)
 }
 
 // validateContextOutputProjectionPaths rejects an --out destination that
@@ -238,31 +246,118 @@ func validateContextOutputStoreZone(root, out, request string) error {
 // paths") — checked only after a successful Compile, since the exact set
 // of managed paths for THIS request's adapter is only known then.
 func validateContextOutputProjectionPaths(root, out string, projectionFiles []contextcompile.ProjectionFile) error {
-	outAbs, err := filepath.Abs(out)
+	outCanon, err := canonicalGuardPath(out)
 	if err != nil {
 		return fmt.Errorf("resolving --out: %w", err)
 	}
-	outAbs = filepath.Clean(outAbs)
 
 	forbidden := make([]string, 0, len(projectionFiles))
 	for _, pf := range projectionFiles {
 		forbidden = append(forbidden, filepath.Join(root, filepath.FromSlash(pf.Path)))
 	}
-	return checkNotWithinAny(outAbs, forbidden)
+	return checkNotWithinAny(outCanon, forbidden)
 }
 
-// checkNotWithinAny returns a deterministic, path-free refusal (CLAUDE.md/
-// the authority design: stderr diagnostics must never carry an absolute
-// checkout path) when outAbs equals, or falls inside, any directory or
-// file in forbidden.
-func checkNotWithinAny(outAbs string, forbidden []string) error {
+// errContextOutReserved is the guard's one deterministic, path-free
+// refusal (CLAUDE.md/the authority design: stderr diagnostics must never
+// carry an absolute checkout path). Every reserved-destination match — by
+// canonical spelling, by case-folded spelling, or by filesystem identity —
+// reports exactly this message.
+var errContextOutReserved = errors.New("--out must not target a reserved store path, a managed projection file, or the input request file")
+
+// checkNotWithinAny returns errContextOutReserved when the canonical
+// outCanon equals, or falls inside, any directory or file in forbidden.
+// Each forbidden entry is canonicalized the same way, and the comparison
+// fails closed on ANY of three signals: exact canonical equality/
+// containment, case-folded equality/containment (a case-insensitive
+// filesystem resolves `.VERDI` and `.verdi` to one directory), or
+// filesystem identity via os.SameFile against outCanon or any of its
+// existing ancestors (which catches aliases no textual comparison can see,
+// including hardlinked or otherwise duplicated directory entries).
+func checkNotWithinAny(outCanon string, forbidden []string) error {
 	for _, f := range forbidden {
-		f = filepath.Clean(f)
-		if outAbs == f || isWithinDir(outAbs, f) {
-			return fmt.Errorf("--out must not target a reserved store path, a managed projection file, or the input request file")
+		fCanon, err := canonicalGuardPath(f)
+		if err != nil {
+			// A reserved path that cannot be resolved cannot be
+			// excluded either; refuse rather than let --out through.
+			return errContextOutReserved
+		}
+		if pathEqualOrWithin(outCanon, fCanon) || sameFileAsSelfOrAncestor(outCanon, fCanon) {
+			return errContextOutReserved
 		}
 	}
 	return nil
+}
+
+// canonicalGuardPath returns p's alias-resolved absolute spelling: the
+// absolute cleaned path with filepath.EvalSymlinks applied to its DEEPEST
+// EXISTING ancestor and the not-yet-existing remainder re-appended (an
+// --out destination usually does not exist yet, so EvalSymlinks cannot be
+// applied to the whole path). The only error returned is a failure to make
+// p absolute — an unreadable cwd; a failing EvalSymlinks (for example an
+// unreadable ancestor) degrades to the unresolved absolute spelling, which
+// the caller still compares textually and by filesystem identity.
+func canonicalGuardPath(p string) (string, error) {
+	abs, err := filepath.Abs(p)
+	if err != nil {
+		return "", err
+	}
+	abs = filepath.Clean(abs)
+
+	remainder := ""
+	for cur := abs; ; {
+		if _, statErr := os.Stat(cur); statErr == nil {
+			resolved, evalErr := filepath.EvalSymlinks(cur)
+			if evalErr != nil {
+				return abs, nil
+			}
+			return filepath.Clean(filepath.Join(resolved, remainder)), nil
+		}
+		parent := filepath.Dir(cur)
+		if parent == cur {
+			return abs, nil
+		}
+		remainder = filepath.Join(filepath.Base(cur), remainder)
+		cur = parent
+	}
+}
+
+// pathsEqualAliasSafe reports whether two canonical paths name the same
+// destination, treating a pure case difference as a match: the guard must
+// fail closed on a filesystem that resolves both spellings to one file,
+// and refusing an oddly-cased --out elsewhere is a safe, deterministic
+// over-refusal the caller resolves by renaming.
+func pathsEqualAliasSafe(a, b string) bool {
+	return a == b || strings.EqualFold(a, b)
+}
+
+// pathEqualOrWithin reports whether path equals dir or falls inside it,
+// under both exact and case-folded comparison.
+func pathEqualOrWithin(path, dir string) bool {
+	if pathsEqualAliasSafe(path, dir) {
+		return true
+	}
+	return isWithinDir(path, dir) || isWithinDir(strings.ToLower(path), strings.ToLower(dir))
+}
+
+// sameFileAsSelfOrAncestor reports whether path, or any existing ancestor
+// of it, is the very filesystem object target names. An ancestor match
+// means path lies inside target, however it was spelled.
+func sameFileAsSelfOrAncestor(path, target string) bool {
+	targetInfo, err := os.Stat(target)
+	if err != nil {
+		return false
+	}
+	for cur := path; ; {
+		if info, statErr := os.Stat(cur); statErr == nil && os.SameFile(info, targetInfo) {
+			return true
+		}
+		parent := filepath.Dir(cur)
+		if parent == cur {
+			return false
+		}
+		cur = parent
+	}
 }
 
 // isWithinDir reports whether path is strictly inside dir (dir treated as

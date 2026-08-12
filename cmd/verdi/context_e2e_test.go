@@ -225,6 +225,66 @@ func TestContextCompileE2E_OutInVerdiZone_RefusedNoWrite(t *testing.T) {
 	}
 }
 
+// TestContextCompileE2E_OutAliasesReservedPath_RefusedNoWrite proves the
+// real binary refuses the alias spellings of a reserved destination that a
+// clean-string guard cannot see — a case-variant `.VERDI/` spelling, a
+// symlinked parent whose target IS `.verdi/`, and a case-variant spelling
+// of the input request file — each with exit 2, nothing written into
+// .verdi/, an unclobbered request file, and an unchanged worktree.
+func TestContextCompileE2E_OutAliasesReservedPath_RefusedNoWrite(t *testing.T) {
+	bin := buildVerdiBinary(t)
+	repo := buildContextCompileRepo(t, map[string]string{
+		".verdi/specs/active/feature-alpha/spec.md": contextFeatureAlphaSpec(t),
+	})
+	reqPath := writeContextRequestFile(t, repo.Dir, "request.json", contextRequestBytes(t, "spec/feature-alpha", contextcompile.PhaseDesign, nil))
+	requestBefore, err := os.ReadFile(reqPath)
+	if err != nil {
+		t.Fatalf("reading request file: %v", err)
+	}
+	if err := os.Symlink(filepath.Join(repo.Dir, ".verdi"), filepath.Join(repo.Dir, "notes")); err != nil {
+		t.Fatalf("creating notes -> .verdi symlink: %v", err)
+	}
+	caseInsensitive := contextFilesystemIsCaseInsensitive(t, repo.Dir)
+	statusBefore := contextE2EPorcelainStatus(t, repo.Dir)
+
+	cases := []struct {
+		name          string
+		out           string
+		needsCaseFold bool
+	}{
+		{"case-variant .verdi spelling", ".VERDI/sneaky.json", true},
+		{"symlinked parent resolving into .verdi", "notes/sneaky.json", false},
+		{"case-variant request-file spelling", "REQUEST.json", true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if tc.needsCaseFold && !caseInsensitive {
+				t.Skip("filesystem is case-sensitive: a case-variant spelling names a genuinely different path here")
+			}
+			stdout, stderr, code := runVerdiBinary(t, bin, repo.Dir, nil, "context", "compile", "--request", "request.json", "--out", tc.out)
+			if code != 2 {
+				t.Fatalf("verdi context compile (--out %s) exit = %d, want 2\nstdout: %s\nstderr: %s", tc.out, code, stdout, stderr)
+			}
+			if stdout != "" {
+				t.Fatalf("stdout = %q, want empty", stdout)
+			}
+			if _, err := os.Stat(filepath.Join(repo.Dir, ".verdi", "sneaky.json")); err == nil {
+				t.Fatal(".verdi/sneaky.json was written despite the refusal")
+			}
+			after, err := os.ReadFile(reqPath)
+			if err != nil {
+				t.Fatalf("reading request file after refusal: %v", err)
+			}
+			if !bytes.Equal(requestBefore, after) {
+				t.Fatal("the input request file was clobbered despite the refusal")
+			}
+			if got := contextE2EPorcelainStatus(t, repo.Dir); got != statusBefore {
+				t.Fatalf("git status --porcelain changed despite the refusal: before=%q after=%q", statusBefore, got)
+			}
+		})
+	}
+}
+
 // TestContextCompileE2E_UnknownSubcommand_ExitTwo proves a bare invocation
 // against a real live tree still fails deterministically on usage alone
 // (no store root resolved, nothing touched), matching the hermetic
