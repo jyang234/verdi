@@ -289,6 +289,29 @@ A widened policy swapped into a loaded store's exported map.
 	}
 }
 
+// TestResolve_RejectsDispositionKeyMismatch is
+// TestResolve_RejectsSmuggledOverlay's own case for a disposition inserted
+// under a key that does not equal its own id: checkMapKeyIdentity must
+// catch a smuggled or duplicated disposition exactly like every other
+// artifact family, proving the mutation-after-load / duplicate-id refusal
+// this task's custody path is required to prove.
+func TestResolve_RejectsDispositionKeyMismatch(t *testing.T) {
+	s := loadMinimal(t)
+	d, err := policyartifact.DecodeDisposition([]byte(dispositionFile(t, "review-no-conflict")))
+	if err != nil {
+		t.Fatalf("DecodeDisposition() error: %v", err)
+	}
+	s.Dispositions = map[string]*policyartifact.Disposition{"policy-disposition/different-key": d}
+
+	_, err = Resolve(s)
+	if err == nil {
+		t.Fatal("Resolve() succeeded on a store carrying a disposition filed under a mismatched key, want error")
+	}
+	if !strings.Contains(err.Error(), "must equal the identity") {
+		t.Fatalf("error = %v, want the key-identity mismatch text", err)
+	}
+}
+
 // TestRefineClaim_RejectsNonOverridableClaim proves the narrowing
 // routine itself refuses a non-overridable claim, independent of the
 // Load-time and Resolve-time cross-validation that also reject it: DC-3's

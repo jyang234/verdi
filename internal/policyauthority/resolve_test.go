@@ -347,6 +347,192 @@ func TestResolve_BoundRefinementsGroupByScope(t *testing.T) {
 	}
 }
 
+// TestResolve_DispositionsAlwaysPresentEmpty proves a store with no
+// dispositions at all still encodes an explicit [] (authority-design §8:
+// "An authority store with no dispositions encodes it as [], not by
+// omission"), never a Go nil slice and never a missing JSON key.
+func TestResolve_DispositionsAlwaysPresentEmpty(t *testing.T) {
+	root := t.TempDir()
+	writeTree(t, root, minimalStoreFiles())
+	s, err := Load(root)
+	if err != nil {
+		t.Fatalf("Load() error: %v", err)
+	}
+	ep, err := Resolve(s)
+	if err != nil {
+		t.Fatalf("Resolve() error: %v", err)
+	}
+	if ep.Dispositions == nil {
+		t.Fatal("ep.Dispositions is nil, want an explicit empty slice")
+	}
+	if len(ep.Dispositions) != 0 {
+		t.Fatalf("ep.Dispositions = %+v, want empty", ep.Dispositions)
+	}
+	data, err := canonjson.Marshal(ep)
+	if err != nil {
+		t.Fatalf("Marshal() error: %v", err)
+	}
+	if !strings.Contains(string(data), `"dispositions":[]`) {
+		t.Fatalf("canonical output does not carry an explicit dispositions:[] field:\n%s", data)
+	}
+}
+
+// TestResolve_DispositionIncludedAndDigestChanges proves a loaded
+// disposition is carried into EffectivePolicy.Dispositions with its own
+// id/digest, and that its presence moves the effective-policy digest
+// relative to the same store with no dispositions at all (authority-design
+// §8: "Adding that field intentionally changes existing effective-policy
+// digests").
+func TestResolve_DispositionIncludedAndDigestChanges(t *testing.T) {
+	root := t.TempDir()
+	writeTree(t, root, minimalStoreFiles())
+	sEmpty, err := Load(root)
+	if err != nil {
+		t.Fatalf("Load(empty) error: %v", err)
+	}
+	epEmpty, err := Resolve(sEmpty)
+	if err != nil {
+		t.Fatalf("Resolve(empty) error: %v", err)
+	}
+	digestEmpty, err := epEmpty.Digest()
+	if err != nil {
+		t.Fatalf("Digest(empty) error: %v", err)
+	}
+
+	files := minimalStoreFiles()
+	files[".verdi/policy/dispositions/review-no-conflict.md"] = dispositionFile(t, "review-no-conflict")
+	rootWith := t.TempDir()
+	writeTree(t, rootWith, files)
+	sWith, err := Load(rootWith)
+	if err != nil {
+		t.Fatalf("Load(with) error: %v", err)
+	}
+	epWith, err := Resolve(sWith)
+	if err != nil {
+		t.Fatalf("Resolve(with) error: %v", err)
+	}
+	if len(epWith.Dispositions) != 1 {
+		t.Fatalf("epWith.Dispositions = %+v, want exactly one", epWith.Dispositions)
+	}
+	entry := epWith.Dispositions[0]
+	if entry.ID != "policy-disposition/review-no-conflict" {
+		t.Fatalf("entry.ID = %q, want policy-disposition/review-no-conflict", entry.ID)
+	}
+	wantDigest, err := sWith.Dispositions["policy-disposition/review-no-conflict"].Digest()
+	if err != nil {
+		t.Fatalf("stored disposition Digest() error: %v", err)
+	}
+	if entry.Digest != wantDigest {
+		t.Fatalf("entry.Digest = %q, want %q", entry.Digest, wantDigest)
+	}
+	if entry.Disposition.ID != "policy-disposition/review-no-conflict" {
+		t.Fatalf("entry.Disposition.ID = %q, want policy-disposition/review-no-conflict", entry.Disposition.ID)
+	}
+
+	digestWith, err := epWith.Digest()
+	if err != nil {
+		t.Fatalf("Digest(with) error: %v", err)
+	}
+	if digestWith == digestEmpty {
+		t.Fatalf("effective-policy digest unchanged after adding a disposition: both %s", digestWith)
+	}
+}
+
+// TestResolve_DispositionByteChangeMovesDigest proves a single content byte
+// difference between two otherwise-identical dispositions moves the
+// resulting effective-policy digest.
+func TestResolve_DispositionByteChangeMovesDigest(t *testing.T) {
+	digestFor := func(content string) string {
+		files := minimalStoreFiles()
+		files[".verdi/policy/dispositions/review-no-conflict.md"] = content
+		root := t.TempDir()
+		writeTree(t, root, files)
+		s, err := Load(root)
+		if err != nil {
+			t.Fatalf("Load() error: %v", err)
+		}
+		ep, err := Resolve(s)
+		if err != nil {
+			t.Fatalf("Resolve() error: %v", err)
+		}
+		digest, err := ep.Digest()
+		if err != nil {
+			t.Fatalf("Digest() error: %v", err)
+		}
+		return digest
+	}
+	base := dispositionFile(t, "review-no-conflict")
+	mutated := strings.Replace(base, "Test disposition review-no-conflict", "Mutated disposition review-no-conflict", 1)
+	if base == mutated {
+		t.Fatal("test setup: mutation left the fixture unchanged")
+	}
+	if digestFor(base) == digestFor(mutated) {
+		t.Fatal("effective-policy digest unchanged after a single disposition byte changed")
+	}
+}
+
+// TestResolve_DispositionsSortedByID proves the resolved slice is sorted by
+// canonical disposition id, independent of the on-disk/map insertion order
+// (authority-design §8: "sorted by canonical disposition ID").
+func TestResolve_DispositionsSortedByID(t *testing.T) {
+	files := minimalStoreFiles()
+	files[".verdi/policy/dispositions/zzz-last.md"] = dispositionFile(t, "zzz-last")
+	files[".verdi/policy/dispositions/aaa-first.md"] = dispositionFile(t, "aaa-first")
+	root := t.TempDir()
+	writeTree(t, root, files)
+	s, err := Load(root)
+	if err != nil {
+		t.Fatalf("Load() error: %v", err)
+	}
+	ep, err := Resolve(s)
+	if err != nil {
+		t.Fatalf("Resolve() error: %v", err)
+	}
+	if len(ep.Dispositions) != 2 {
+		t.Fatalf("len(Dispositions) = %d, want 2", len(ep.Dispositions))
+	}
+	if ep.Dispositions[0].ID != "policy-disposition/aaa-first" || ep.Dispositions[1].ID != "policy-disposition/zzz-last" {
+		t.Fatalf("Dispositions = %+v, want sorted by id", ep.Dispositions)
+	}
+}
+
+// TestResolve_DispositionOutputDoesNotAliasStore is
+// TestResolve_OutputDoesNotAliasStore's own case for a disposition: mutating
+// every nested slice/scope the resolved output carries must not disturb the
+// stored disposition's own seal.
+func TestResolve_DispositionOutputDoesNotAliasStore(t *testing.T) {
+	files := minimalStoreFiles()
+	files[".verdi/policy/dispositions/review-no-conflict.md"] = dispositionFile(t, "review-no-conflict")
+	root := t.TempDir()
+	writeTree(t, root, files)
+	s, err := Load(root)
+	if err != nil {
+		t.Fatalf("Load() error: %v", err)
+	}
+	ep, err := Resolve(s)
+	if err != nil {
+		t.Fatalf("Resolve() error: %v", err)
+	}
+	digestBefore, err := s.Dispositions["policy-disposition/review-no-conflict"].Digest()
+	if err != nil {
+		t.Fatalf("stored disposition Digest() before: %v", err)
+	}
+
+	entry := &ep.Dispositions[0]
+	entry.Disposition.Owners[0] = "tampered-team"
+	tamperScope(&entry.Disposition.Scope)
+	entry.Disposition.Witness.Claims[0].Values = append(entry.Disposition.Witness.Claims[0].Values, "tampered")
+	entry.Disposition.Approvals[0].Principal = "tampered"
+
+	digestAfter, err := s.Dispositions["policy-disposition/review-no-conflict"].Digest()
+	if err != nil {
+		t.Fatalf("stored disposition Digest() after output mutation: %v", err)
+	}
+	if digestAfter != digestBefore {
+		t.Fatalf("stored disposition digest changed through the resolved output: %s -> %s", digestBefore, digestAfter)
+	}
+}
+
 func TestEffectivePolicy_DigestRejectsHandBuilt(t *testing.T) {
 	var nilEP *EffectivePolicy
 	if _, err := nilEP.Digest(); err == nil {

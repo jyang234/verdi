@@ -1,5 +1,73 @@
 package policyauthority
 
+import (
+	"fmt"
+	"strings"
+	"testing"
+
+	"github.com/jyang234/verdi/internal/canonjson"
+	"github.com/jyang234/verdi/internal/policyartifact"
+)
+
+// dispositionFile returns valid verdi.policy-disposition/v1 file content
+// for name: one judge-result disposition witnessing a single placeholder
+// claim, with a real witness input_id computed the same way
+// policyartifact's own (unexported) witnessInputID does — clear input_id,
+// then canonjson.Digest the witness — so callers never hand-type a digest
+// that could silently drift from the real grammar (mirroring
+// fixtures_test.go's goVersionClaimDigest discipline, computed rather than
+// invented).
+func dispositionFile(t *testing.T, name string) string {
+	t.Helper()
+	universal := policyartifact.Scope{Phases: []string{}, Environments: []string{}, Paths: []string{}, Refs: []string{}}
+	targetDigest := "sha256:" + strings.Repeat("1", 64)
+	claimDigest := "sha256:" + strings.Repeat("2", 64)
+	authorityDigest := "sha256:" + strings.Repeat("3", 64)
+	witness := policyartifact.SemanticWitness{
+		TargetDigest: targetDigest,
+		Claims: []policyartifact.SemanticClaimWitness{{
+			ID:              "ac-example",
+			Digest:          claimDigest,
+			Category:        "acceptance-criterion",
+			AuthorityDigest: authorityDigest,
+			Scope:           universal,
+			Values:          []string{},
+		}},
+		Exemptions: []policyartifact.SemanticExemptionWitness{},
+	}
+	inputID, err := canonjson.Digest(witness)
+	if err != nil {
+		t.Fatalf("dispositionFile(%s): computing test witness input_id: %v", name, err)
+	}
+	return fmt.Sprintf(`---
+schema: verdi.policy-disposition/v1
+id: policy-disposition/%s
+kind: policy-disposition
+title: "Test disposition %s"
+owners: [platform-team]
+scope: {phases: [], environments: [], paths: [], refs: []}
+witness:
+  input_id: %q
+  target_digest: %q
+  claims:
+    - id: ac-example
+      digest: %q
+      category: acceptance-criterion
+      authority_digest: %q
+      scope: {phases: [], environments: [], paths: [], refs: []}
+      values: []
+  exemptions: []
+conclusion: no-conflict
+origin: judge-result
+approvals:
+  - role: policy-owner
+    principal: principal/github-org/YWxpY2U
+template: {identity: "embedded:policy-disposition.md", digest: "sha256:%s"}
+---
+Test rationale for %s.
+`, name, name, inputID, targetDigest, claimDigest, authorityDigest, strings.Repeat("4", 64), name)
+}
+
 // minimalStoreFiles returns a small but complete constitution-store file
 // set: one policy (an overridable allowed-values claim and a
 // non-overridable required-values claim), one overlay narrowing the

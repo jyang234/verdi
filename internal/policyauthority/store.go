@@ -16,11 +16,12 @@ import (
 // directory even when it carries no files at all — the classifier alone
 // only rejects unrecognized FILES).
 var knownPolicyDirs = map[string]bool{
-	policyartifact.DirPolicies:    true,
-	policyartifact.DirOverlays:    true,
-	policyartifact.DirExemptions:  true,
-	policyartifact.DirProfiles:    true,
-	policyartifact.DirProjections: true,
+	policyartifact.DirPolicies:     true,
+	policyartifact.DirOverlays:     true,
+	policyartifact.DirExemptions:   true,
+	policyartifact.DirDispositions: true,
+	policyartifact.DirProfiles:     true,
+	policyartifact.DirProjections:  true,
 }
 
 // Store is a fully loaded, fully cross-validated constitution store: the
@@ -40,12 +41,13 @@ var knownPolicyDirs = map[string]bool{
 type Store struct {
 	Root         string
 	Constitution *policyartifact.Constitution
-	// Policies, Overlays, and Exemptions are keyed by their full kinded
-	// artifact id ("policy/<name>", "policy-overlay/<name>",
-	// "policy-exemption/<name>").
-	Policies   map[string]*policyartifact.Policy
-	Overlays   map[string]*policyartifact.Overlay
-	Exemptions map[string]*policyartifact.Exemption
+	// Policies, Overlays, Exemptions, and Dispositions are keyed by their
+	// full kinded artifact id ("policy/<name>", "policy-overlay/<name>",
+	// "policy-exemption/<name>", "policy-disposition/<name>").
+	Policies     map[string]*policyartifact.Policy
+	Overlays     map[string]*policyartifact.Overlay
+	Exemptions   map[string]*policyartifact.Exemption
+	Dispositions map[string]*policyartifact.Disposition
 	// Profiles is keyed by the profile's own kernel id (no kind prefix —
 	// governanceprincipal's id grammar, matching Constitution.SelectedProfile).
 	Profiles map[string]*policyartifact.StoredProfile
@@ -81,11 +83,12 @@ func Load(root string) (*Store, error) {
 	}
 
 	s := &Store{
-		Root:       root,
-		Policies:   map[string]*policyartifact.Policy{},
-		Overlays:   map[string]*policyartifact.Overlay{},
-		Exemptions: map[string]*policyartifact.Exemption{},
-		Profiles:   map[string]*policyartifact.StoredProfile{},
+		Root:         root,
+		Policies:     map[string]*policyartifact.Policy{},
+		Overlays:     map[string]*policyartifact.Overlay{},
+		Exemptions:   map[string]*policyartifact.Exemption{},
+		Dispositions: map[string]*policyartifact.Disposition{},
+		Profiles:     map[string]*policyartifact.StoredProfile{},
 	}
 	var profileRels []string
 
@@ -136,6 +139,16 @@ func Load(root string) (*Store, error) {
 				return nil, fmt.Errorf("policyauthority: %s: filename stem %q does not match exemption name %q", rel, name, e.Name())
 			}
 			s.Exemptions[e.ID] = e
+
+		case policyartifact.KindDisposition:
+			d, err := policyartifact.DecodeDisposition(data)
+			if err != nil {
+				return nil, fmt.Errorf("policyauthority: decoding %s: %w", rel, err)
+			}
+			if d.Name() != name {
+				return nil, fmt.Errorf("policyauthority: %s: filename stem %q does not match disposition name %q", rel, name, d.Name())
+			}
+			s.Dispositions[d.ID] = d
 
 		case policyartifact.KindProfileStorage:
 			// Profiles decode against the constitution's governance
@@ -222,8 +235,8 @@ func walkPolicyDir(policyDir string) ([]string, error) {
 		}
 		if d.IsDir() {
 			if !knownPolicyDirs[rel] {
-				return fmt.Errorf("policyauthority: unexpected directory %q under .verdi/policy/ (known: %s, %s, %s, %s, %s)",
-					rel, policyartifact.DirPolicies, policyartifact.DirOverlays, policyartifact.DirExemptions, policyartifact.DirProfiles, policyartifact.DirProjections)
+				return fmt.Errorf("policyauthority: unexpected directory %q under .verdi/policy/ (known: %s, %s, %s, %s, %s, %s)",
+					rel, policyartifact.DirPolicies, policyartifact.DirOverlays, policyartifact.DirExemptions, policyartifact.DirDispositions, policyartifact.DirProfiles, policyartifact.DirProjections)
 			}
 			return nil
 		}
@@ -358,6 +371,9 @@ func checkMapKeyIdentity(s *Store) error {
 		return err
 	}
 	if err := checkKeyedIdentities("Exemptions", s.Exemptions, func(e *policyartifact.Exemption) string { return e.ID }); err != nil {
+		return err
+	}
+	if err := checkKeyedIdentities("Dispositions", s.Dispositions, func(d *policyartifact.Disposition) string { return d.ID }); err != nil {
 		return err
 	}
 	return checkKeyedIdentities("Profiles", s.Profiles, func(p *policyartifact.StoredProfile) string { return p.ID })

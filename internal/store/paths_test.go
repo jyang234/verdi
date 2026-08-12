@@ -4,6 +4,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/jyang234/verdi/internal/policyartifact"
 )
 
 // TestAbsolutePaths locks the host-native, root-joined forms against an
@@ -190,5 +192,73 @@ func TestWaiverPathEmptyRootDisplayForm(t *testing.T) {
 	}
 	if got, want := WaiverDir("", "story-7"), filepath.FromSlash(".verdi/waivers/story-7"); got != want {
 		t.Errorf("WaiverDir(\"\", …) = %q, want %q", got, want)
+	}
+}
+
+// TestPolicyDispositionPath locks the host-native, root-joined form
+// authority-design §8 fixes: "Semantic rulings live at
+// .verdi/policy/dispositions/<name>.md".
+func TestPolicyDispositionPath(t *testing.T) {
+	got := PolicyDispositionPath("/store", "review-no-conflict")
+	want := filepath.FromSlash("/store/.verdi/policy/dispositions/review-no-conflict.md")
+	if got != want {
+		t.Errorf("PolicyDispositionPath = %q, want %q", got, want)
+	}
+}
+
+// TestPolicyDispositionRelPath locks the store-relative, slash-canonical
+// twin, mirroring every other *RelPath accessor's own convention.
+func TestPolicyDispositionRelPath(t *testing.T) {
+	got := PolicyDispositionRelPath("review-no-conflict")
+	want := ".verdi/policy/dispositions/review-no-conflict.md"
+	if got != want {
+		t.Errorf("PolicyDispositionRelPath = %q, want %q", got, want)
+	}
+	if strings.ContainsRune(got, '\\') {
+		t.Errorf("PolicyDispositionRelPath %q must be slash-canonical, contains a backslash", got)
+	}
+}
+
+// TestPolicyDispositionPath_RelIsSlashOfAbsBelowRoot is
+// TestRelIsSlashOfAbsBelowRoot's own case for the new accessor pair — the
+// same anti-drift invariant every other family in this file already proves.
+func TestPolicyDispositionPath_RelIsSlashOfAbsBelowRoot(t *testing.T) {
+	const root = "/store"
+	abs := PolicyDispositionPath(root, "review-no-conflict")
+	rel, ok := strings.CutPrefix(filepath.ToSlash(abs), "/store/")
+	if !ok {
+		t.Fatalf("absolute %q not rooted under /store/", abs)
+	}
+	if rel != PolicyDispositionRelPath("review-no-conflict") {
+		t.Errorf("relative form %q != slash(abs) below root %q", PolicyDispositionRelPath("review-no-conflict"), rel)
+	}
+}
+
+// TestPolicyDispositionPath_AgreesWithPolicyArtifactGrammar proves
+// PolicyDispositionPath/RelPath never drift from
+// policyartifact.DirDispositions or the policy-disposition/<name> id
+// grammar policyartifact.ClassifyPolicyPath enforces: this store-level
+// accessor and the constitution store's own closed directory grammar must
+// always agree on which file backs which disposition id.
+func TestPolicyDispositionPath_AgreesWithPolicyArtifactGrammar(t *testing.T) {
+	const name = "review-no-conflict"
+	rel := PolicyDispositionRelPath(name)
+	const policyPrefix = ".verdi/policy/"
+	if !strings.HasPrefix(rel, policyPrefix) {
+		t.Fatalf("PolicyDispositionRelPath(%q) = %q, want a %q-prefixed path", name, rel, policyPrefix)
+	}
+	policyRel := strings.TrimPrefix(rel, policyPrefix)
+	if !strings.HasPrefix(policyRel, policyartifact.DirDispositions+"/") {
+		t.Fatalf("PolicyDispositionRelPath(%q) = %q, want it under policyartifact.DirDispositions (%q)", name, rel, policyartifact.DirDispositions)
+	}
+	kind, gotName, err := policyartifact.ClassifyPolicyPath(policyRel)
+	if err != nil {
+		t.Fatalf("policyartifact.ClassifyPolicyPath(%q): %v", policyRel, err)
+	}
+	if kind != policyartifact.KindDisposition {
+		t.Fatalf("ClassifyPolicyPath(%q) kind = %q, want %q", policyRel, kind, policyartifact.KindDisposition)
+	}
+	if gotName != name {
+		t.Fatalf("ClassifyPolicyPath(%q) name = %q, want %q", policyRel, gotName, name)
 	}
 }
