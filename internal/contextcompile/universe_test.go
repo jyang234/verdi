@@ -78,17 +78,76 @@ func TestBuildUniverse_SourcePrecedence(t *testing.T) {
 	}
 }
 
-// TestBuildUniverse_SamePathLiftedIntoBothFailsClosed proves the same path
-// cannot enter two of the three (store-authority, declared-context,
-// head-tree) sources.
-func TestBuildUniverse_SamePathLiftedIntoBothFailsClosed(t *testing.T) {
+// TestBuildUniverse_SamePathLiftedIntoBothPrefersStoreAuthority proves the
+// authority design §5 source precedence store-authority > declared-context >
+// head-tree resolves — rather than rejects — a path a pinned declared-context
+// ref resolves to that is already lifted as store authority. The path yields
+// exactly one store-authority candidate, the declared-context lift for that
+// path is suppressed before candidate construction, and no head-tree
+// duplicate survives.
+func TestBuildUniverse_SamePathLiftedIntoBothPrefersStoreAuthority(t *testing.T) {
 	in := UniverseInput{
+		Tree: []gitx.TreeEntry{
+			{Mode: "100644", Type: "blob", Object: "aaa", Path: "spec/foo/spec.md"},
+			{Mode: "100644", Type: "blob", Object: "bbb", Path: "ordinary.txt"},
+		},
 		LiftedStorePaths:   map[string]string{"spec/foo/spec.md": "spec/foo"},
 		LiftedContextPaths: map[string]string{"spec/foo/spec.md": "context/other"},
 		Adapter:            testAdapter(),
 	}
-	if _, err := BuildUniverse(in); err == nil {
-		t.Fatal("BuildUniverse(same path lifted into both store-authority and declared-context): want error, got nil")
+
+	got, err := BuildUniverse(in)
+	if err != nil {
+		t.Fatalf("BuildUniverse(same path lifted into both): unexpected error: %v", err)
+	}
+
+	if ids := idsBySource(got, SourceStoreAuthority); !reflect.DeepEqual(ids, []string{"ref:spec/foo"}) {
+		t.Fatalf("store-authority ids = %v, want %v", ids, []string{"ref:spec/foo"})
+	}
+	if ids := idsBySource(got, SourceDeclaredContext); len(ids) != 0 {
+		t.Fatalf("declared-context ids = %v, want none: the only path lifting ref:context/other is owned by store authority", ids)
+	}
+	if ids := idsBySource(got, SourceHeadTree); !reflect.DeepEqual(ids, []string{"path:ordinary.txt"}) {
+		t.Fatalf("head-tree ids = %v, want only the non-lifted path", ids)
+	}
+	for _, c := range got {
+		if c.ID == "path:spec/foo/spec.md" {
+			t.Fatalf("store-lifted path leaked into the universe as %#v", c)
+		}
+	}
+}
+
+// TestBuildUniverse_SuppressedContextRefSurvivesViaAnotherPath proves the
+// store-authority precedence suppresses only the contested path's lift, not
+// the declared-context ref itself: an uncontested second path lifting to the
+// same ref still produces the declared-context candidate.
+func TestBuildUniverse_SuppressedContextRefSurvivesViaAnotherPath(t *testing.T) {
+	in := UniverseInput{
+		Tree: []gitx.TreeEntry{
+			{Mode: "100644", Type: "blob", Object: "aaa", Path: "spec/foo/spec.md"},
+			{Mode: "100644", Type: "blob", Object: "bbb", Path: "docs/context.md"},
+		},
+		LiftedStorePaths: map[string]string{"spec/foo/spec.md": "spec/foo"},
+		LiftedContextPaths: map[string]string{
+			"spec/foo/spec.md": "context/other",
+			"docs/context.md":  "context/other",
+		},
+		Adapter: testAdapter(),
+	}
+
+	got, err := BuildUniverse(in)
+	if err != nil {
+		t.Fatalf("BuildUniverse: unexpected error: %v", err)
+	}
+
+	if ids := idsBySource(got, SourceStoreAuthority); !reflect.DeepEqual(ids, []string{"ref:spec/foo"}) {
+		t.Fatalf("store-authority ids = %v, want %v", ids, []string{"ref:spec/foo"})
+	}
+	if ids := idsBySource(got, SourceDeclaredContext); !reflect.DeepEqual(ids, []string{"ref:context/other"}) {
+		t.Fatalf("declared-context ids = %v, want %v", ids, []string{"ref:context/other"})
+	}
+	if ids := idsBySource(got, SourceHeadTree); len(ids) != 0 {
+		t.Fatalf("head-tree ids = %v, want none: both tracked paths are lifted", ids)
 	}
 }
 

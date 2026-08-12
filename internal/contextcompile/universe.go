@@ -73,7 +73,7 @@ func BuildUniverse(in UniverseInput) ([]Candidate, error) {
 		return nil, fmt.Errorf("contextcompile: BuildUniverse: adapter id and version are both required for the opaque harness-vendor-base candidate")
 	}
 
-	lift, err := resolveLifts(in.LiftedStorePaths, in.LiftedContextPaths)
+	lift, contextLifts, err := resolveLifts(in.LiftedStorePaths, in.LiftedContextPaths)
 	if err != nil {
 		return nil, err
 	}
@@ -86,7 +86,7 @@ func BuildUniverse(in UniverseInput) ([]Candidate, error) {
 	}
 	candidates = append(candidates, storeCandidates...)
 
-	contextCandidates, err := liftedCandidates(SourceDeclaredContext, in.LiftedContextPaths)
+	contextCandidates, err := liftedCandidates(SourceDeclaredContext, contextLifts)
 	if err != nil {
 		return nil, err
 	}
@@ -181,34 +181,45 @@ func BuildUniverse(in UniverseInput) ([]Candidate, error) {
 }
 
 // resolveLifts merges the store and declared-context lift maps into one
-// path->lifted set, failing closed when the same path is claimed by both —
-// "the same path cannot enter two of those three sources" (authority
-// design §5) applies across store-authority and declared-context exactly
-// as it applies against head-tree.
-func resolveLifts(store, ctx map[string]string) (map[string]bool, error) {
+// path->lifted set and returns the effective declared-context lift map that
+// candidate construction must use. Authority design §5 fixes the source
+// precedence store-authority > declared-context > head-tree, so a path
+// claimed by both lift maps is not a conflict: store authority wins it and
+// the declared-context lift for that path is suppressed here, before any
+// candidate is built. Suppression is per path, not per ref — an uncontested
+// second path lifting to the same ref still yields that declared-context
+// candidate. Every other lift validation (canonical path, non-empty ref)
+// still fails closed for both maps, and the merged lifted set continues to
+// suppress the head-tree duplicate for the path.
+func resolveLifts(store, ctx map[string]string) (map[string]bool, map[string]string, error) {
 	lifted := make(map[string]bool, len(store)+len(ctx))
 	for path, ref := range store {
 		if err := validateCandidatePath(path); err != nil {
-			return nil, fmt.Errorf("contextcompile: BuildUniverse: store-authority lift: %w", err)
+			return nil, nil, fmt.Errorf("contextcompile: BuildUniverse: store-authority lift: %w", err)
 		}
 		if ref == "" {
-			return nil, fmt.Errorf("contextcompile: BuildUniverse: store-authority lift: path %q has an empty ref", path)
+			return nil, nil, fmt.Errorf("contextcompile: BuildUniverse: store-authority lift: path %q has an empty ref", path)
 		}
 		lifted[path] = true
 	}
+	effectiveCtx := make(map[string]string, len(ctx))
 	for path, ref := range ctx {
 		if err := validateCandidatePath(path); err != nil {
-			return nil, fmt.Errorf("contextcompile: BuildUniverse: declared-context lift: %w", err)
+			return nil, nil, fmt.Errorf("contextcompile: BuildUniverse: declared-context lift: %w", err)
 		}
 		if ref == "" {
-			return nil, fmt.Errorf("contextcompile: BuildUniverse: declared-context lift: path %q has an empty ref", path)
+			return nil, nil, fmt.Errorf("contextcompile: BuildUniverse: declared-context lift: path %q has an empty ref", path)
 		}
-		if lifted[path] {
-			return nil, fmt.Errorf("contextcompile: BuildUniverse: path %q is lifted into both store-authority and declared-context", path)
+		if _, storeOwned := store[path]; storeOwned {
+			// Store authority outranks declared context for this path
+			// (authority design §5): drop the declared-context lift rather
+			// than emitting a second candidate for the same path.
+			continue
 		}
+		effectiveCtx[path] = ref
 		lifted[path] = true
 	}
-	return lifted, nil
+	return lifted, effectiveCtx, nil
 }
 
 // liftedCandidates turns one lift map's distinct ref values into sorted,
