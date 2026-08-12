@@ -75,6 +75,13 @@
 //     locate and replace to keep body and frontmatter in agreement (dc-2).
 //     The verb's fail-closed refusal, naming the finding it could not
 //     safely reconcile, IS the correct behavior here — not a workaround.
+//   - `verdi context compile` (TestCLIShowcaseContextCompile, Context
+//     Integrity Wave-3): exits 1 because examples/showcase carries no
+//     .verdi/policy/ constitution tree at all — a genuine, disclosed fact
+//     about this store, exactly like the align/close gaps above — so
+//     internal/contextcompile.ResolvePolicyAuthority's stage-2 store read
+//     refuses before any spec target is even resolved. There is no
+//     showcase-content shape that reaches a successful compile.
 //
 // cli:feature is DELIBERATELY EXCLUDED from the enumerated capability set
 // below (cliVerbs, coverage_test.go) — see that function's own comment and
@@ -103,9 +110,11 @@ import (
 
 	"github.com/jyang234/verdi/internal/artifact"
 	"github.com/jyang234/verdi/internal/boardio"
+	"github.com/jyang234/verdi/internal/contextcompile"
 	"github.com/jyang234/verdi/internal/gitx"
 	"github.com/jyang234/verdi/internal/journey"
 	"github.com/jyang234/verdi/internal/model"
+	"github.com/jyang234/verdi/internal/policyartifact"
 	"github.com/jyang234/verdi/internal/store"
 	"github.com/jyang234/verdi/internal/wtmanager"
 )
@@ -989,4 +998,68 @@ func TestCLIShowcaseJourney(t *testing.T) {
 			t.Fatalf("stderr = %q, want a \"journey: \"-prefixed line", stderr)
 		}
 	})
+}
+
+// TestCLIShowcaseContextCompile (cli:context, Context Integrity Wave-3,
+// docs/superpowers/specs/2026-08-11-context-compiler-authority-design.md
+// §2) drives `verdi context compile` against the REAL provisioned
+// examples/showcase store. Unlike every other verb this file covers, a
+// successful compile is not reachable against this corpus at all:
+// internal/contextcompile.ResolvePolicyAuthority's very first store read
+// (stage 2 of Compile, before the requested spec target is ever resolved)
+// requires an adopted .verdi/policy/ constitution tree
+// (internal/policyauthority.ErrNotAdopted otherwise), and examples/showcase
+// carries no .verdi/policy/ directory anywhere — grep-verified against its
+// own layers.txt and its committed .verdi/ tree — exactly the same kind of
+// genuine, disclosed fact about the showcase store as this file's own
+// package doc comment already uses for `verdi align` (no toolchain: block)
+// and `verdi close` (no derived/ zone): a real, deterministic refusal this
+// store's own committed shape produces, not a synthetic setup built to
+// force it.
+//
+// This proves the real binary's stage-2 refusal path end to end: exit 1
+// (contextcompile.IsRefusal's own *NoConstitutionRefusal mapping,
+// cmd/verdi/context.go's contextExitCode), completely empty stdout (no
+// partial manifest on a refusal), and a stderr diagnostic naming the exact
+// contextcompile.ErrNoConstitution text — over a grammatically valid
+// request built through contextcompile.EncodeRequest itself (never a
+// hand-typed JSON literal, mirroring cmd/verdi/context_test.go's own
+// contextRequestBytes convention) naming spec/stale-decline, the same real,
+// already-landed showcase feature TestCLIShowcaseSpecState and
+// TestCLIShowcaseJourney above already exercise — proving the refusal fires
+// for a request that is otherwise completely well-formed, not merely for a
+// malformed one.
+func TestCLIShowcaseContextCompile(t *testing.T) {
+	root := provisionShowcaseStore(t)
+
+	if _, err := os.Stat(filepath.Join(root, ".verdi", "policy")); !os.IsNotExist(err) {
+		t.Fatalf("test setup: provisioned showcase store unexpectedly carries a .verdi/policy/ tree (stat err=%v) — this test's whole premise is the no-constitution-adopted path", err)
+	}
+
+	request := contextcompile.Request{
+		Schema:  contextcompile.RequestSchema,
+		Adapter: contextcompile.AdapterRef{ID: "codex", Version: "1"},
+		Phase:   contextcompile.PhaseDesign,
+		Scope:   policyartifact.Scope{Phases: []string{}, Environments: []string{}, Paths: []string{}, Refs: []string{}},
+		Spec:    "spec/stale-decline",
+	}
+	data, err := contextcompile.EncodeRequest(request)
+	if err != nil {
+		t.Fatalf("EncodeRequest: %v", err)
+	}
+	reqPath := filepath.Join(t.TempDir(), "request.json")
+	if err := os.WriteFile(reqPath, data, 0o644); err != nil {
+		t.Fatalf("writing request file: %v", err)
+	}
+
+	stdout, stderr, code := runBinary(t, root, "context", "compile", "--request", reqPath)
+	if code != 1 {
+		t.Fatalf("verdi context compile against the real showcase store: exit %d, want 1 (no adopted .verdi/policy/ constitution)\nstdout:\n%s\nstderr:\n%s", code, stdout, stderr)
+	}
+	if stdout != "" {
+		t.Fatalf("stdout = %q, want empty on a refusal", stdout)
+	}
+	if !strings.Contains(stderr, contextcompile.ErrNoConstitution.Error()) {
+		t.Fatalf("stderr = %q, want it to contain %q", stderr, contextcompile.ErrNoConstitution.Error())
+	}
 }
