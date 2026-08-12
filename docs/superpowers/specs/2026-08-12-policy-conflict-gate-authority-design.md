@@ -1,7 +1,7 @@
 # Policy Conflict Gate Authority Design
 
 **Status:** Owner-approved design; repository authority becomes effective when
-the reviewed commit carrying this document and SI-93 through SI-102 reaches the
+the reviewed commit carrying this document and SI-93 through SI-103 reaches the
 configured default branch.
 
 **Planning base:** `bfaa8e2715678cbe8cd71137f23d743666caf1c4`
@@ -614,6 +614,41 @@ reason codes. Each embedded authority resolution carries artifact ID/digest
 plus match, freshness, scope, bound, and authorization states. Disclosures use
 closed codes and sorted witness strings.
 
+The closed reason-code vocabulary is exactly:
+
+```text
+mechanical-satisfiable
+scope-disjoint
+mechanical-conflict
+scope-unproven
+higher-order-scope-unproven
+principal-relation-violated
+principal-relation-unproven
+exemption-effective
+exemption-ineffective
+judge-unavailable
+judge-inconclusive
+challenger-unavailable
+judgment-disagreement
+disposition-required
+disposition-effective-no-conflict
+disposition-effective-conflict
+disposition-ineffective
+profile-experimental
+```
+
+Each code names the row's immediate proof outcome; exact stale, mismatch,
+scope, bound, and authorization detail remains in the row's typed authority
+resolution rather than multiplying codes for every Cartesian combination.
+
+The disclosure vocabulary reuses all fourteen closed
+`contextcompile.DisclosureCode` values unchanged and adds exactly
+`solo-principal-collapse`, emitted only when kernel authorization proves and
+discloses the solo profile's permitted author/approver collapse. Judge,
+challenger, disposition, scope, and experimental-profile outcomes stay row
+reasons rather than duplicated top-level disclosures. Unknown reason or
+disclosure codes fail closed.
+
 The report self-digest is computed over the digestless canonical form. Arrays
 sort by stable witness ID except author-ordered prose arrays explicitly named
 in their source schemas. No map with semantic iteration order enters a digest.
@@ -807,7 +842,7 @@ no browser behavior and adds no Playwright case.
 
 ## 14. Source coverage and losslessness
 
-Coverage is **9/9** implicated authority source groups. The mapping is
+Coverage is **10/10** implicated authority source groups. The mapping is
 lossless; each row names the complete clause range used rather than assigning
 inconsistent per-clause counts across differently structured sources:
 
@@ -822,6 +857,7 @@ inconsistent per-clause counts across differently structured sources:
 | Store-layout policy/data custody and human-artifact renderer/kernel | 1 | §§7–9, 13 |
 | Wave-3 orchestration unit, exit gate, review cadence, and delivery exclusions | 1 | §§1, 11, 13 |
 | Owner-approved lifecycle operand acquisition and current `gate`/`build start`/`close` grammars, including the effectful `close --prepare` path | 1 | §11, SI-102 |
+| Closed report reason/disclosure labels required by §10 but previously unnamed | 1 | §10, SI-103 |
 
 The transformations are explicit:
 
