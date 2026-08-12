@@ -74,6 +74,14 @@ func cmdContextCompile(args []string, stdin io.Reader, stdout, stderr io.Writer)
 		fmt.Fprintln(stderr, "context compile: --request is required")
 		return 2
 	}
+	// Symmetric with --request's own emptiness check: `--out=` (or an
+	// explicitly empty value) names no destination at all, so it is a flag
+	// shape the parser rejects — never an invocation that compiles first
+	// and only discovers it has nowhere to write at write time.
+	if hasOut && outArg == "" {
+		fmt.Fprintln(stderr, "context compile: --out requires a value")
+		return 2
+	}
 	if hasOut && requestArg != "-" && sameFileArg(requestArg, outArg) {
 		fmt.Fprintln(stderr, "context compile: --request and --out must not name the same path")
 		return 2

@@ -258,27 +258,36 @@ func TestCmdContext_Usage(t *testing.T) {
 }
 
 // TestCmdContextCompile_FlagShapeFailures proves every flag-shape failure
-// Task 8 Step 1 names — missing --request, duplicate --request/--out,
-// unknown flag, extra positional arguments, and --request equal to
-// --out — all exit 2, all from a rootless tempdir (never touching a store
-// root), and all leave stdout empty.
+// Task 8 Step 1 names — missing --request, an empty --request/--out value,
+// duplicate --request/--out, unknown flag, extra positional arguments, and
+// --request equal to --out — all exit 2, all from a rootless tempdir
+// (never touching a store root), and all leave stdout empty.
+//
+// wantStderr, where given, pins the exact flag-shape diagnostic: from a
+// rootless tempdir every later failure ALSO exits 2 (store-root
+// resolution fails there), so exit code alone cannot witness that a shape
+// was rejected during parsing rather than deep in the run.
 func TestCmdContextCompile_FlagShapeFailures(t *testing.T) {
 	t.Chdir(t.TempDir())
 
 	cases := []struct {
-		name string
-		args []string
+		name       string
+		args       []string
+		wantStderr string
 	}{
-		{"missing --request", nil},
-		{"missing --request value", []string{"--request"}},
-		{"duplicate --request", []string{"--request", "a.json", "--request", "b.json"}},
-		{"duplicate --request via =", []string{"--request=a.json", "--request=b.json"}},
-		{"duplicate --out", []string{"--request", "a.json", "--out", "x.json", "--out", "y.json"}},
-		{"missing --out value", []string{"--request", "a.json", "--out"}},
-		{"unknown flag", []string{"--request", "a.json", "--bogus"}},
-		{"extra positional argument", []string{"--request", "a.json", "extra"}},
-		{"request equals out", []string{"--request", "a.json", "--out", "a.json"}},
-		{"request equals out, different spelling", []string{"--request", "./a.json", "--out", "a.json"}},
+		{name: "missing --request"},
+		{name: "missing --request value", args: []string{"--request"}},
+		{name: "duplicate --request", args: []string{"--request", "a.json", "--request", "b.json"}},
+		{name: "duplicate --request via =", args: []string{"--request=a.json", "--request=b.json"}},
+		{name: "duplicate --out", args: []string{"--request", "a.json", "--out", "x.json", "--out", "y.json"}},
+		{name: "missing --out value", args: []string{"--request", "a.json", "--out"}},
+		{name: "unknown flag", args: []string{"--request", "a.json", "--bogus"}},
+		{name: "extra positional argument", args: []string{"--request", "a.json", "extra"}},
+		{name: "empty --request value via =", args: []string{"--request="}, wantStderr: "--request is required"},
+		{name: "empty --out value", args: []string{"--request", "a.json", "--out", ""}, wantStderr: "--out requires a value"},
+		{name: "empty --out value via =", args: []string{"--request", "a.json", "--out="}, wantStderr: "--out requires a value"},
+		{name: "request equals out", args: []string{"--request", "a.json", "--out", "a.json"}},
+		{name: "request equals out, different spelling", args: []string{"--request", "./a.json", "--out", "a.json"}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -292,6 +301,9 @@ func TestCmdContextCompile_FlagShapeFailures(t *testing.T) {
 			}
 			if stderr.Len() == 0 {
 				t.Fatal("stderr is empty, want a diagnostic")
+			}
+			if tc.wantStderr != "" && !strings.Contains(stderr.String(), tc.wantStderr) {
+				t.Fatalf("stderr = %q, want it to contain the flag-shape diagnostic %q", stderr.String(), tc.wantStderr)
 			}
 		})
 	}
