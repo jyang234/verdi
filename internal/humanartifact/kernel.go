@@ -37,9 +37,10 @@ func withFields(base []string, extra ...string) []string {
 // kernelFieldTable is the closed, per-kind kernel field-name table this
 // package's Kernel documentation type materializes.
 //
-// Constitution kinds (policy, policy-overlay, policy-exemption) list
-// their FULL L1 frontmatter key set (internal/policyartifact's
-// kernelDoc/policyDoc/overlayDoc/exemptionDoc) — AC-1/DC-4: nothing in a
+// Constitution kinds (policy, policy-overlay, policy-exemption,
+// policy-disposition) list their FULL L1 frontmatter key set (internal/
+// policyartifact's kernelDoc/policyDoc/overlayDoc/exemptionDoc/
+// dispositionDoc) — AC-1/DC-4: nothing in a
 // policy artifact's own structured claims/refinements/witnesses grammar
 // is generic free-form template content the way a spec's problem/
 // outcome prose is, so the whole decoded shape is authority, not merely
@@ -78,9 +79,10 @@ var kernelFieldTable = map[string][]string{
 	string(artifact.KindReaffirmation): withFields(specBaseFields, "object", "hash"),
 	string(artifact.KindObligation):    withFields(specBaseFields, "for_kind", "quality"),
 
-	policyartifact.KindPolicy:    {"schema", "id", "kind", "title", "owners", "template", "scope", "claims", "instructions", "payloads"},
-	policyartifact.KindOverlay:   {"schema", "id", "kind", "title", "owners", "template", "refines", "scope", "refinements"},
-	policyartifact.KindExemption: {"schema", "id", "kind", "title", "owners", "template", "scope", "witnesses", "compensating_controls", "approvals", "expiry", "review_condition"},
+	policyartifact.KindPolicy:      {"schema", "id", "kind", "title", "owners", "template", "scope", "claims", "instructions", "payloads"},
+	policyartifact.KindOverlay:     {"schema", "id", "kind", "title", "owners", "template", "refines", "scope", "refinements"},
+	policyartifact.KindExemption:   {"schema", "id", "kind", "title", "owners", "template", "scope", "witnesses", "compensating_controls", "approvals", "expiry", "review_condition"},
+	policyartifact.KindDisposition: {"schema", "id", "kind", "title", "owners", "template", "scope", "witness", "conclusion", "origin", "judgment", "compensating_controls", "approvals", "expiry", "review_condition"},
 }
 
 // KernelFields returns the immutable kernel frontmatter field NAMES for

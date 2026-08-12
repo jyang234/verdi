@@ -964,7 +964,7 @@ func TestCompile_Integration_Golden_BuildStoryMultiParent(t *testing.T) {
 // excluded repository-state row is therefore required to move the self
 // digest and required NOT to move this value; a regeneration that moved
 // both would mean the preimage had silently absorbed classification.
-const goldenAuthorityRevision = "sha256:45ab861faa1f9a4c01b5dd16d3da4604c9b990faec29883779cc033a0cef5fb1"
+const goldenAuthorityRevision = "sha256:f3484ea9689fb278239775c460437440a696c5923f73bd2fe40248f09e7ef563"
 
 // TestCompile_Integration_DeterministicAcrossTwoRoots proves identical
 // trusted inputs (HEAD, request, authority) built independently under two
