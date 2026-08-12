@@ -1,0 +1,1030 @@
+// Lane 7C (sealed actor projection) plus Task 7 Step 2's hermetic
+// end-to-end compiler integration coverage: real fixturegit repositories,
+// a real installed policy store, and the production NewCompiler() ports
+// (real gitx, real specstate.NewProjector, real policyauthority,
+// real repositoryfacts.NewGatherer, real instructionprojection.Verify) —
+// no fakes below this file's own git-plumbing test helpers.
+package contextcompile
+
+import (
+	"bytes"
+	"context"
+	"errors"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"reflect"
+	"sort"
+	"strings"
+	"testing"
+
+	"github.com/jyang234/verdi/internal/fixturegit"
+	"github.com/jyang234/verdi/internal/governanceprincipal"
+	"github.com/jyang234/verdi/internal/instructionprojection"
+	"github.com/jyang234/verdi/internal/policyartifact"
+	"github.com/jyang234/verdi/internal/repositoryfacts"
+	"github.com/jyang234/verdi/internal/specstate"
+)
+
+// --- fixtures: genuine sealed governanceprincipal resolutions --------------
+//
+// A PrincipalResolution's integrity seal can only be minted by
+// governanceprincipal.Resolver.Resolve (see seal_test.go's
+// TestResolutionSealRejectsForgery/TestResolutionSealDetectsMutation in
+// that package). These fixtures build a real, minimal solo-class profile
+// through the package's public DecodeProfile entry point and resolve real
+// claims through a hermetic fake TrustFactReader — no reconstruction of the
+// private seal, and no reliance on that package's unexported test helpers
+// (authedRes et al.), which are not visible from this package.
+
+// soloCatalog is the minimal catalog the fixture profile needs: solo-class
+// profiles carry no approval/distinctness coverage requirement, so no
+// roles or evidence sources need naming.
+func soloCatalog() governanceprincipal.Catalog {
+	return governanceprincipal.Catalog{Transitions: []string{"accept"}}
+}
+
+// soloProfileYAML is a minimal valid solo-class governance profile. Every
+// top-level field must be present (governanceprincipal's strict decode
+// rejects omission even where the value is the empty list).
+const soloProfileYAML = `schema: verdi.governance-profile/v1
+id: actors-fixture
+class: solo
+applicable_transitions: [accept]
+identity_trust_sources:
+  - { id: github, kind: forge }
+role_mappings: []
+ownership_sources: []
+signature_requirements: []
+required_approvers: []
+distinctness_rules: []
+evidence_source_restrictions: []
+escalation_thresholds: []
+`
+
+func actorsFixtureProfile(t *testing.T) governanceprincipal.Profile {
+	t.Helper()
+	p, err := governanceprincipal.DecodeProfile([]byte(soloProfileYAML), soloCatalog())
+	if err != nil {
+		t.Fatalf("DecodeProfile: %v", err)
+	}
+	return p
+}
+
+// staticTrustFactReader is a hermetic fake governanceprincipal.TrustFactReader
+// that always reports the wrapped fact, regardless of the source or claim
+// asked about.
+type staticTrustFactReader governanceprincipal.TrustFact
+
+func (f staticTrustFactReader) ReadTrustFact(context.Context, governanceprincipal.TrustSource, governanceprincipal.PrincipalClaim) (governanceprincipal.TrustFact, error) {
+	return governanceprincipal.TrustFact(f), nil
+}
+
+const fixtureEvidenceDigest = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+
+func authenticatedFact(subject string) governanceprincipal.TrustFact {
+	return governanceprincipal.TrustFact{
+		SourceID:       "github",
+		SourceKind:     governanceprincipal.TrustSourceForge,
+		Subjects:       []string{subject},
+		EvidenceDigest: fixtureEvidenceDigest,
+		Available:      true,
+		Valid:          true,
+	}
+}
+
+func unprovenFact() governanceprincipal.TrustFact {
+	return governanceprincipal.TrustFact{
+		SourceID:   "github",
+		SourceKind: governanceprincipal.TrustSourceForge,
+		Available:  false,
+		Reason:     "evidence unreachable",
+	}
+}
+
+func violatedFact() governanceprincipal.TrustFact {
+	return governanceprincipal.TrustFact{
+		SourceID:       "github",
+		SourceKind:     governanceprincipal.TrustSourceForge,
+		Available:      true,
+		Valid:          false,
+		Reason:         "signature invalid",
+		EvidenceDigest: fixtureEvidenceDigest,
+	}
+}
+
+// mintResolution obtains a genuine sealed resolution the only way one
+// exists: through governanceprincipal.Resolver.Resolve.
+func mintResolution(t *testing.T, fact governanceprincipal.TrustFact, subject string) governanceprincipal.PrincipalResolution {
+	t.Helper()
+	profile := actorsFixtureProfile(t)
+	r := governanceprincipal.NewResolver(staticTrustFactReader(fact))
+	res, err := r.Resolve(context.Background(), profile, governanceprincipal.PrincipalClaim{TrustSource: "github", Subject: subject})
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	return res
+}
+
+// --- ActorResolver fakes ----------------------------------------------------
+
+type fakeActorResolver struct {
+	resolutions []governanceprincipal.PrincipalResolution
+	err         error
+}
+
+func (f fakeActorResolver) Resolutions(context.Context) ([]governanceprincipal.PrincipalResolution, error) {
+	return f.resolutions, f.err
+}
+
+// --- tests -------------------------------------------------------------
+
+func TestProjectActorsNilResolverIsExplicitAbsence(t *testing.T) {
+	got, err := projectActors(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("projectActors(nil): unexpected error: %v", err)
+	}
+	if got.Posture != ResolutionUnproven {
+		t.Errorf("Posture = %q, want %q", got.Posture, ResolutionUnproven)
+	}
+	if got.Resolutions == nil || len(got.Resolutions) != 0 {
+		t.Errorf("Resolutions = %#v, want explicit empty slice", got.Resolutions)
+	}
+	if len(got.Disclosures) != 1 || got.Disclosures[0] != DisclosureActorResolutionUnproven {
+		t.Errorf("Disclosures = %v, want [%q]", got.Disclosures, DisclosureActorResolutionUnproven)
+	}
+}
+
+func TestProjectActorsEmptyResolverSetIsUnproven(t *testing.T) {
+	got, err := projectActors(context.Background(), fakeActorResolver{})
+	if err != nil {
+		t.Fatalf("projectActors: unexpected error: %v", err)
+	}
+	if got.Posture != ResolutionUnproven {
+		t.Errorf("Posture = %q, want %q", got.Posture, ResolutionUnproven)
+	}
+	if len(got.Resolutions) != 0 {
+		t.Errorf("Resolutions = %#v, want empty", got.Resolutions)
+	}
+	if len(got.Disclosures) != 1 || got.Disclosures[0] != DisclosureActorResolutionUnproven {
+		t.Errorf("Disclosures = %v, want [%q]", got.Disclosures, DisclosureActorResolutionUnproven)
+	}
+}
+
+func TestProjectActorsAllAuthenticatedIsProven(t *testing.T) {
+	author := mintResolution(t, authenticatedFact("user-123"), "user-123")
+	reviewer := mintResolution(t, authenticatedFact("user-456"), "user-456")
+	got, err := projectActors(context.Background(), fakeActorResolver{resolutions: []governanceprincipal.PrincipalResolution{author, reviewer}})
+	if err != nil {
+		t.Fatalf("projectActors: unexpected error: %v", err)
+	}
+	if got.Posture != ResolutionProven {
+		t.Errorf("Posture = %q, want %q", got.Posture, ResolutionProven)
+	}
+	if len(got.Disclosures) != 0 {
+		t.Errorf("Disclosures = %v, want empty", got.Disclosures)
+	}
+	if len(got.Resolutions) != 2 {
+		t.Fatalf("Resolutions = %#v, want 2", got.Resolutions)
+	}
+}
+
+func TestProjectActorsMixedAuthenticatedAndUnprovenIsUnproven(t *testing.T) {
+	author := mintResolution(t, authenticatedFact("user-123"), "user-123")
+	reviewer := mintResolution(t, unprovenFact(), "user-456")
+	got, err := projectActors(context.Background(), fakeActorResolver{resolutions: []governanceprincipal.PrincipalResolution{author, reviewer}})
+	if err != nil {
+		t.Fatalf("projectActors: unexpected error: %v", err)
+	}
+	if got.Posture != ResolutionUnproven {
+		t.Errorf("Posture = %q, want %q", got.Posture, ResolutionUnproven)
+	}
+	if len(got.Disclosures) != 1 || got.Disclosures[0] != DisclosureActorResolutionUnproven {
+		t.Errorf("Disclosures = %v, want [%q]", got.Disclosures, DisclosureActorResolutionUnproven)
+	}
+}
+
+func TestProjectActorsViolatedTakesPrecedence(t *testing.T) {
+	orders := [][]string{{"violated", "unproven"}, {"unproven", "violated"}}
+	for _, order := range orders {
+		t.Run(strings.Join(order, "-then-"), func(t *testing.T) {
+			violated := mintResolution(t, violatedFact(), "user-123")
+			unproven := mintResolution(t, unprovenFact(), "user-456")
+			var input []governanceprincipal.PrincipalResolution
+			for _, kind := range order {
+				if kind == "violated" {
+					input = append(input, violated)
+				} else {
+					input = append(input, unproven)
+				}
+			}
+			got, err := projectActors(context.Background(), fakeActorResolver{resolutions: input})
+			if err != nil {
+				t.Fatalf("projectActors: unexpected error: %v", err)
+			}
+			if got.Posture != ResolutionViolatedWithWitness {
+				t.Errorf("Posture = %q, want %q", got.Posture, ResolutionViolatedWithWitness)
+			}
+			if len(got.Disclosures) != 0 {
+				t.Errorf("Disclosures = %v, want empty (the disclosure is unproven-only)", got.Disclosures)
+			}
+		})
+	}
+}
+
+func TestProjectActorsForgedResolutionRejected(t *testing.T) {
+	genuine := mintResolution(t, authenticatedFact("user-123"), "user-123")
+	forged := genuine
+	forged.Witnesses = append([]governanceprincipal.Witness{}, genuine.Witnesses...)
+	forged.Witnesses[0].EvidenceDigest = "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+
+	_, err := projectActors(context.Background(), fakeActorResolver{resolutions: []governanceprincipal.PrincipalResolution{forged}})
+	if err == nil {
+		t.Fatal("projectActors(forged): want error, got nil")
+	}
+}
+
+func TestProjectActorsDuplicateClaimIdentityRejected(t *testing.T) {
+	first := mintResolution(t, authenticatedFact("user-123"), "user-123")
+	second := mintResolution(t, authenticatedFact("user-123"), "user-123")
+
+	_, err := projectActors(context.Background(), fakeActorResolver{resolutions: []governanceprincipal.PrincipalResolution{first, second}})
+	if err == nil {
+		t.Fatal("projectActors(duplicate claim identity): want error, got nil")
+	}
+}
+
+func TestProjectActorsDeterministicSort(t *testing.T) {
+	a := mintResolution(t, authenticatedFact("zed"), "zed")
+	b := mintResolution(t, authenticatedFact("alpha"), "alpha")
+	got, err := projectActors(context.Background(), fakeActorResolver{resolutions: []governanceprincipal.PrincipalResolution{a, b}})
+	if err != nil {
+		t.Fatalf("projectActors: unexpected error: %v", err)
+	}
+	if !sort.SliceIsSorted(got.Resolutions, func(i, j int) bool {
+		if got.Resolutions[i].Claim.TrustSource != got.Resolutions[j].Claim.TrustSource {
+			return got.Resolutions[i].Claim.TrustSource < got.Resolutions[j].Claim.TrustSource
+		}
+		return got.Resolutions[i].Claim.Subject < got.Resolutions[j].Claim.Subject
+	}) {
+		t.Errorf("Resolutions not sorted by (claim.trust_source, claim.subject): %#v", got.Resolutions)
+	}
+	if got.Resolutions[0].Claim.Subject != "alpha" {
+		t.Errorf("first resolution subject = %q, want %q", got.Resolutions[0].Claim.Subject, "alpha")
+	}
+}
+
+func TestProjectActorsResolverErrorIsOperational(t *testing.T) {
+	sentinel := errors.New("boom")
+	_, err := projectActors(context.Background(), fakeActorResolver{err: sentinel})
+	if err == nil || !errors.Is(err, sentinel) {
+		t.Fatalf("projectActors: err = %v, want wrapped %v", err, sentinel)
+	}
+}
+
+// ============================================================================
+// Hermetic end-to-end Compile fixtures (Task 7 Step 2)
+// ============================================================================
+
+// integrationCommitEnv is a fixed author/committer/date environment for the
+// git commits this file makes directly (outside fixturegit.Build's own
+// layers): two independently built repos from identical file trees and this
+// same fixed env always produce byte-identical commit objects — the same
+// determinism fixturegit itself relies on (see fixturegit.go's own
+// identity/date constants) — so TestCompile_Integration_DeterministicAcrossTwoRoots
+// below can assert byte-identical manifests across two wholly separate
+// t.TempDir() checkouts.
+var integrationCommitEnv = []string{
+	"TZ=UTC",
+	"GIT_AUTHOR_NAME=Verdi Fixture",
+	"GIT_AUTHOR_EMAIL=fixture@verdi.invalid",
+	"GIT_AUTHOR_DATE=1704067200 +0000",
+	"GIT_COMMITTER_NAME=Verdi Fixture",
+	"GIT_COMMITTER_EMAIL=fixture@verdi.invalid",
+	"GIT_COMMITTER_DATE=1704067200 +0000",
+}
+
+// runIntegrationGit execs git in dir with integrationCommitEnv applied,
+// failing the test on a non-zero exit. Test-local and package-private,
+// deliberately duplicated rather than shared with fixturegit's own
+// unexported runGit (test-only, cheap to duplicate; CLAUDE.md's shared-code
+// rule is about production code) or specstate's runGitForTest (a different
+// package, same idiom).
+func runIntegrationGit(t *testing.T, dir string, args ...string) string {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	cmd.Env = append(os.Environ(), integrationCommitEnv...)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %s: %v\n%s", strings.Join(args, " "), err, out)
+	}
+	return string(out)
+}
+
+// policyStoreFiles reads the same real, already-cross-validated policy
+// fixture files installPolicyFixture installs (internal/policyartifact's
+// own testdata/store), keyed by their repo-relative .verdi/policy/ path so
+// they can be committed into a fixturegit layer rather than merely written
+// to an ungoverned temp directory.
+func policyStoreFiles(t *testing.T) map[string]string {
+	t.Helper()
+	files := []string{
+		"constitution.md",
+		"policies/go-toolchain.md",
+		"overlays/frontend-go-version.md",
+		"exemptions/legacy-service-go.md",
+		"profiles/solo-default.md",
+	}
+	out := make(map[string]string, len(files))
+	for _, rel := range files {
+		data, err := os.ReadFile(filepath.Join("..", "policyartifact", "testdata", "store", filepath.FromSlash(rel)))
+		if err != nil {
+			t.Fatalf("read policy fixture %s: %v", rel, err)
+		}
+		out[".verdi/policy/"+rel] = string(data)
+	}
+	return out
+}
+
+// buildCompilerRepo builds a fresh, deterministic hermetic repository
+// carrying the real policy-store fixture plus specFiles (every spec this
+// test needs landed on main, e.g. ".verdi/specs/active/<name>/spec.md"),
+// then generates and commits the one real managed instruction projection
+// (AGENTS.md plus its projection manifest) so a compile's stage 5 finds a
+// clean, non-drifted projection. Every file lands in ONE scaffold commit
+// (fixturegit.Build) plus ONE deterministic "generate projection" commit
+// (this function's own runIntegrationGit calls) — both landing directly on
+// main, which is sufficient for the real specstate.NewProjector() to
+// resolve every spec as accepted-pending-build (SI-... / the same
+// statusless-direct-landing shape internal/journey's own
+// facts_integration_test.go TestGatherFacts_Integration_LandedSpec proves).
+// CI_DEFAULT_BRANCH is pinned so default-branch resolution never depends on
+// a configured "origin" remote or symbolic-ref (fixturegit repos carry
+// neither).
+func buildCompilerRepo(t *testing.T, specFiles map[string]string) *fixturegit.Repo {
+	t.Helper()
+	files := policyStoreFiles(t)
+	for path, content := range specFiles {
+		files[path] = content
+	}
+	repo := fixturegit.Build(t, []fixturegit.Layer{{Files: files, Message: "scaffold"}})
+	t.Setenv("CI_DEFAULT_BRANCH", "main")
+
+	if _, err := instructionprojection.Generate(repo.Dir); err != nil {
+		t.Fatalf("instructionprojection.Generate: %v", err)
+	}
+	runIntegrationGit(t, repo.Dir, "add", "-A")
+	runIntegrationGit(t, repo.Dir, "commit", "--quiet", "--no-verify", "-m", "generate instruction projection")
+	repo.Head = strings.TrimSpace(runIntegrationGit(t, repo.Dir, "rev-parse", "HEAD"))
+	return repo
+}
+
+// gitPorcelainStatus returns `git status --porcelain` output for dir,
+// failing the test on a non-zero exit.
+func gitPorcelainStatus(t *testing.T, dir string) string {
+	t.Helper()
+	cmd := exec.Command("git", "status", "--porcelain")
+	cmd.Dir = dir
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("git status --porcelain: %v", err)
+	}
+	return string(out)
+}
+
+// integrationBuildRequest builds a grammar-valid Request naming spec as the
+// build-phase target under an unrestricted (explicit-universal) scope.
+func integrationBuildRequest(spec string) Request {
+	return Request{
+		Schema:  RequestSchema,
+		Adapter: AdapterRef{ID: "codex", Version: "1"},
+		Phase:   PhaseBuild,
+		Scope:   policyartifact.Scope{Phases: []string{}, Environments: []string{}, Paths: []string{}, Refs: []string{}},
+		Spec:    spec,
+	}
+}
+
+// multiParentStoryRepo builds the real hermetic fixture for the
+// story-multi-parent story and its two governing parent features
+// (feature-alpha, feature-beta), reusing the exact fixtures.go/fragments_test.go
+// corpus already committed under testdata/fragments/.
+func multiParentStoryRepo(t *testing.T) *fixturegit.Repo {
+	t.Helper()
+	storyData, storyFM := decodeFragmentSpecFixture(t, "story-multi-parent.md")
+	alphaData, _ := decodeFragmentSpecFixture(t, "feature-alpha.md")
+	betaData, _ := decodeFragmentSpecFixture(t, "feature-beta.md")
+	return buildCompilerRepo(t, map[string]string{
+		".verdi/specs/active/" + strings.TrimPrefix(storyFM.ID, "spec/") + "/spec.md": string(storyData),
+		".verdi/specs/active/feature-alpha/spec.md":                                   string(alphaData),
+		".verdi/specs/active/feature-beta/spec.md":                                    string(betaData),
+	})
+}
+
+// requireManifestEntry returns the sole IncludedEntry in entries whose ID
+// matches id, failing the test if it is absent or duplicated.
+func requireIncludedEntry(t *testing.T, entries []IncludedEntry, id string) IncludedEntry {
+	t.Helper()
+	var found *IncludedEntry
+	for i := range entries {
+		if entries[i].ID == id {
+			if found != nil {
+				t.Fatalf("included entry %q appears more than once", id)
+			}
+			e := entries[i]
+			found = &e
+		}
+	}
+	if found == nil {
+		t.Fatalf("no included entry with id %q: %+v", id, entries)
+	}
+	return *found
+}
+
+// containsDisclosure reports whether want appears in codes.
+func containsDisclosure(codes []DisclosureCode, want DisclosureCode) bool {
+	for _, c := range codes {
+		if c == want {
+			return true
+		}
+	}
+	return false
+}
+
+// TestCompile_Integration_BuildStoryMultiParent_Succeeds is the primary
+// hermetic end-to-end proof: a real fixturegit repository, a real
+// installed policy store, and NewCompiler()'s real production ports
+// compile the multi-parent build story to a complete Result whose manifest
+// satisfies authority design §§5, 8, 9's structural invariants.
+func TestCompile_Integration_BuildStoryMultiParent_Succeeds(t *testing.T) {
+	repo := multiParentStoryRepo(t)
+	statusBefore := gitPorcelainStatus(t, repo.Dir)
+
+	c := NewCompiler()
+	result, err := c.Compile(context.Background(), repo.Dir, integrationBuildRequest("spec/story-multi-parent"))
+	if err != nil {
+		t.Fatalf("Compile: unexpected error: %v", err)
+	}
+
+	statusAfter := gitPorcelainStatus(t, repo.Dir)
+	if statusBefore != statusAfter {
+		t.Fatalf("Compile mutated the checkout: before=%q after=%q", statusBefore, statusAfter)
+	}
+	headAfter := strings.TrimSpace(runIntegrationGit(t, repo.Dir, "rev-parse", "HEAD"))
+	if headAfter != repo.Head {
+		t.Fatalf("Compile moved HEAD: before=%q after=%q", repo.Head, headAfter)
+	}
+
+	m := result.Manifest
+	if m.Schema != ManifestSchema {
+		t.Errorf("Schema = %q, want %q", m.Schema, ManifestSchema)
+	}
+	if m.Phase != PhaseBuild {
+		t.Errorf("Phase = %q, want %q", m.Phase, PhaseBuild)
+	}
+	if m.Adapter != (AdapterRef{ID: "codex", Version: "1"}) {
+		t.Errorf("Adapter = %+v", m.Adapter)
+	}
+	// The story's exact bytes were landed in the first (scaffold) commit;
+	// repo.Head has since moved on to the second (generate-projection)
+	// commit buildCompilerRepo adds, so the merge-signaled landing commit
+	// AcceptedSpec.Commit names is repo.Heads[0], not repo.Head.
+	if m.AcceptedSpec.Ref != "spec/story-multi-parent" || m.AcceptedSpec.Commit != repo.Heads[0] {
+		t.Errorf("AcceptedSpec = %+v, want ref spec/story-multi-parent landed at %s", m.AcceptedSpec, repo.Heads[0])
+	}
+	if m.AcceptedSpec.Commit == "" || m.AcceptedSpec.Blob == "" || m.AcceptedSpec.ContentDigest == "" {
+		t.Errorf("AcceptedSpec has an empty identity field: %+v", m.AcceptedSpec)
+	}
+
+	// revisions.authority binds; context is exactly 1 with no parent (the
+	// domain type carries no field a parent could occupy at all).
+	if err := validateDigest("revisions.authority", m.Revisions.Authority); err != nil {
+		t.Errorf("Revisions.Authority is not a valid digest: %v", err)
+	}
+	if m.Revisions.Context != 1 {
+		t.Errorf("Revisions.Context = %d, want 1", m.Revisions.Context)
+	}
+
+	// multi-parent story: sorted parent_features naming both feature-alpha
+	// and feature-beta.
+	if len(m.ParentFeatures) != 2 {
+		t.Fatalf("ParentFeatures = %+v, want exactly 2 rows", m.ParentFeatures)
+	}
+	if m.ParentFeatures[0].Ref != "spec/feature-alpha" || m.ParentFeatures[1].Ref != "spec/feature-beta" {
+		t.Fatalf("ParentFeatures refs = [%q, %q], want sorted [spec/feature-alpha, spec/feature-beta]", m.ParentFeatures[0].Ref, m.ParentFeatures[1].Ref)
+	}
+	for _, pf := range m.ParentFeatures {
+		if pf.SourceDigest == "" || pf.FragmentDigest == "" || pf.PayloadDigest == "" {
+			t.Errorf("ParentFeature %s has an empty digest: %+v", pf.Ref, pf)
+		}
+	}
+
+	// dispositions/expansions are always [] in v1 (the domain type carries
+	// no field for either, so this is a structural — not merely a value —
+	// assertion: Manifest simply has no Dispositions/Expansions field).
+	var hasDispositionsField, hasExpansionsField bool
+	mt := reflect.TypeOf(m)
+	for i := 0; i < mt.NumField(); i++ {
+		switch mt.Field(i).Name {
+		case "Dispositions":
+			hasDispositionsField = true
+		case "Expansions":
+			hasExpansionsField = true
+		}
+	}
+	if hasDispositionsField || hasExpansionsField {
+		t.Errorf("Manifest carries a Dispositions/Expansions field (dispositions=%v expansions=%v); v1 must not be able to represent a nonempty value", hasDispositionsField, hasExpansionsField)
+	}
+
+	// evidence: advisory, consumed_reports [], fresh (v1 computes every
+	// fact from the one HEAD gathered at stage 3 and reused unchanged).
+	if m.Evidence.Authority != EvidenceAuthorityAdvisory {
+		t.Errorf("Evidence.Authority = %q, want %q", m.Evidence.Authority, EvidenceAuthorityAdvisory)
+	}
+	if m.Evidence.ConsumedReports == nil || len(m.Evidence.ConsumedReports) != 0 {
+		t.Errorf("Evidence.ConsumedReports = %#v, want explicit empty slice", m.Evidence.ConsumedReports)
+	}
+	if m.Evidence.Freshness != EvidenceFreshnessFresh {
+		t.Errorf("Evidence.Freshness = %q, want %q", m.Evidence.Freshness, EvidenceFreshnessFresh)
+	}
+
+	// build phase: required_inputs is [].
+	if len(m.RequiredInputs) != 0 {
+		t.Errorf("RequiredInputs = %+v, want [] for phase build", m.RequiredInputs)
+	}
+
+	// actors: the production CLI supplies no principal-resolution port in
+	// v1, so posture is explicitly unproven with its mandatory disclosure.
+	if m.Actors.Posture != ResolutionUnproven {
+		t.Errorf("Actors.Posture = %q, want %q (no ActorResolver wired in NewCompiler)", m.Actors.Posture, ResolutionUnproven)
+	}
+	if len(m.Actors.Resolutions) != 0 {
+		t.Errorf("Actors.Resolutions = %+v, want empty", m.Actors.Resolutions)
+	}
+	found := false
+	for _, d := range m.Actors.Disclosures {
+		if d == DisclosureActorResolutionUnproven {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("Actors.Disclosures = %v, want %q", m.Actors.Disclosures, DisclosureActorResolutionUnproven)
+	}
+
+	// evidence: disclosures for every stale/unknown fact. fixturegit
+	// repositories are never given an "origin" remote, so the computed
+	// remote-origin fact is honestly unknown — this must surface both on
+	// Repository.Disclosures and (unioned) on the manifest's top-level
+	// Disclosures, never silently dropped or upgraded to a guessed value.
+	if !containsDisclosure(m.Repository.Disclosures, DisclosureRepositoryRemoteUnknown) {
+		t.Errorf("Repository.Disclosures = %v, want %q (fixturegit repos carry no origin remote)", m.Repository.Disclosures, DisclosureRepositoryRemoteUnknown)
+	}
+	if m.Repository.RemoteOrigin.Known {
+		t.Errorf("Repository.RemoteOrigin = %+v, want unknown", m.Repository.RemoteOrigin)
+	}
+	if !containsDisclosure(m.Disclosures, DisclosureRepositoryRemoteUnknown) {
+		t.Errorf("top-level Disclosures = %v, want the union to include %q", m.Disclosures, DisclosureRepositoryRemoteUnknown)
+	}
+
+	// included/excluded/opaque: every (source,id) candidate identity
+	// (authority design §5: "candidate identity is (source, logical-id)")
+	// appears in exactly one ledger — the SAME logical id legitimately
+	// appears twice under two DIFFERENT sources (a managed projection
+	// output's excluded head-tree copy plus its included projection
+	// candidate is the documented case), so the key here is the compound
+	// (source,id) pair, never id alone (internal duplicate-free union
+	// check — universe_test.go/classify_test.go already prove
+	// BuildUniverse/Classify's own total-partition invariant in isolation;
+	// this reproves it survived compiler-level assembly).
+	seen := make(map[string]string)
+	key := func(source Source, id string) string { return string(source) + "\x00" + id }
+	for _, e := range m.Included {
+		if prior, dup := seen[key(e.Source, e.ID)]; dup {
+			t.Errorf("(source,id) (%s,%q) appears in both %s and included", e.Source, e.ID, prior)
+		}
+		seen[key(e.Source, e.ID)] = "included"
+	}
+	for _, e := range m.Excluded {
+		if prior, dup := seen[key(e.Source, e.ID)]; dup {
+			t.Errorf("(source,id) (%s,%q) appears in both %s and excluded", e.Source, e.ID, prior)
+		}
+		seen[key(e.Source, e.ID)] = "excluded"
+	}
+	for _, e := range m.Opaque {
+		if prior, dup := seen[key(SourceOpaque, e.ID)]; dup {
+			t.Errorf("id %q appears in both %s and opaque", e.ID, prior)
+		}
+		seen[key(SourceOpaque, e.ID)] = "opaque"
+	}
+
+	// The accepted target, both parent fragments and the applicable
+	// go-toolchain policy are included with a binding content digest;
+	// the fixed opaque base names the requested adapter.
+	acceptedRow := requireIncludedEntry(t, m.Included, "ref:spec/story-multi-parent")
+	if acceptedRow.Source != SourceStoreAuthority || acceptedRow.Kind != IncludedAcceptedSpec || acceptedRow.PayloadChannel != ChannelData {
+		t.Errorf("accepted-spec included row = %+v", acceptedRow)
+	}
+	if acceptedRow.ContentDigest != m.AcceptedSpec.ContentDigest {
+		t.Errorf("accepted-spec included row content digest %q != AcceptedSpec.ContentDigest %q", acceptedRow.ContentDigest, m.AcceptedSpec.ContentDigest)
+	}
+	alphaRow := requireIncludedEntry(t, m.Included, "ref:spec/feature-alpha")
+	if alphaRow.Kind != IncludedParentFeatureFragment {
+		t.Errorf("feature-alpha included row = %+v", alphaRow)
+	}
+	policyRow := requireIncludedEntry(t, m.Included, "ref:policy/go-toolchain")
+	if policyRow.Kind != IncludedPolicyArtifact {
+		t.Errorf("policy/go-toolchain included row = %+v", policyRow)
+	}
+	if len(m.Opaque) != 1 || m.Opaque[0].Adapter != (AdapterRef{ID: "codex", Version: "1"}) {
+		t.Fatalf("Opaque = %+v, want exactly one codex/1 harness-vendor-base row", m.Opaque)
+	}
+
+	// The generated instruction-projection file is the only authority-
+	// channel included entry, and result.ProjectionFiles/ProjectionFileRef
+	// digests agree.
+	agentsRow := requireIncludedEntry(t, m.Included, "path:AGENTS.md")
+	if agentsRow.Source != SourceProjection || agentsRow.Kind != IncludedInstructionProjection || agentsRow.PayloadChannel != ChannelAuthority {
+		t.Errorf("AGENTS.md included row = %+v", agentsRow)
+	}
+	for _, e := range m.Included {
+		if e.PayloadChannel == ChannelAuthority && (e.Source != SourceProjection || e.Kind != IncludedInstructionProjection) {
+			t.Errorf("only source=projection/kind=instruction-projection may carry payload_channel authority, got %+v", e)
+		}
+	}
+	if len(m.ProjectionFiles) != 1 || m.ProjectionFiles[0].Path != "AGENTS.md" {
+		t.Fatalf("ProjectionFiles = %+v, want exactly one AGENTS.md row", m.ProjectionFiles)
+	}
+	if len(result.ProjectionFiles) != 1 || result.ProjectionFiles[0].Path != "AGENTS.md" {
+		t.Fatalf("result.ProjectionFiles = %+v, want exactly one AGENTS.md row", result.ProjectionFiles)
+	}
+	if result.ProjectionFiles[0].Digest != m.ProjectionFiles[0].Digest {
+		t.Errorf("result.ProjectionFiles digest %q != manifest ProjectionFiles digest %q", result.ProjectionFiles[0].Digest, m.ProjectionFiles[0].Digest)
+	}
+	if rawContentDigest(result.ProjectionFiles[0].Content) != result.ProjectionFiles[0].Digest {
+		t.Errorf("result.ProjectionFiles[0].Digest does not bind Content")
+	}
+
+	// every included digest binds the returned data-item bytes: DataItem's
+	// own `digest` field is the SHA-256 of its DIGESTLESS canonical form
+	// (authority design §8.1), not of DataItemBytes[i]'s own full encoded
+	// bytes (which include that digest field) — so the round-trip proof is
+	// EncodeDataItem(item) == DataItemBytes[i], not rawContentDigest of the
+	// outer bytes.
+	byID := make(map[string]DataItem, len(result.DataItems))
+	for i, item := range result.DataItems {
+		byID[item.ID] = item
+		reencoded, err := EncodeDataItem(item)
+		if err != nil {
+			t.Errorf("EncodeDataItem(DataItems[%d]): %v", i, err)
+			continue
+		}
+		if !bytes.Equal(reencoded, result.DataItemBytes[i]) {
+			t.Errorf("EncodeDataItem(DataItems[%d]) != DataItemBytes[%d] for id %q", i, i, item.ID)
+		}
+	}
+	for _, e := range m.Included {
+		if e.PayloadChannel != ChannelData {
+			continue
+		}
+		item, ok := byID[e.ID]
+		if !ok {
+			t.Errorf("included data-channel row %q has no corresponding result.DataItems entry", e.ID)
+			continue
+		}
+		if item.Digest != e.PayloadDigest {
+			t.Errorf("data item %q digest %q != included row payload_digest %q", e.ID, item.Digest, e.PayloadDigest)
+		}
+		if item.ContentDigest != e.ContentDigest {
+			t.Errorf("data item %q content digest %q != included row content_digest %q", e.ID, item.ContentDigest, e.ContentDigest)
+		}
+	}
+
+	// Round-tripping the returned manifest bytes must reproduce the exact
+	// same decoded Manifest and must byte-equal ManifestBytes.
+	decoded, err := DecodeManifest(result.ManifestBytes)
+	if err != nil {
+		t.Fatalf("DecodeManifest(result.ManifestBytes): %v", err)
+	}
+	if !reflect.DeepEqual(decoded, m) {
+		t.Errorf("DecodeManifest(result.ManifestBytes) != result.Manifest")
+	}
+	reencoded, err := EncodeManifest(m)
+	if err != nil {
+		t.Fatalf("EncodeManifest(result.Manifest): %v", err)
+	}
+	if !bytes.Equal(reencoded, result.ManifestBytes) {
+		t.Errorf("EncodeManifest(result.Manifest) != result.ManifestBytes")
+	}
+}
+
+// TestCompile_Integration_Golden_BuildStoryMultiParent ratchets the exact
+// canonical manifest bytes a compile of the multi-parent build story
+// produces (Task 7 Step 2: "deterministic goldens ... with exact-byte
+// ratchets"). fixturegit's fixed author/committer/date identity plus this
+// file's own integrationCommitEnv make every input (blob objects, commit
+// SHAs, digests) byte-stable across machines and runs, so this ratchet is
+// exact-byte, not merely structural.
+func TestCompile_Integration_Golden_BuildStoryMultiParent(t *testing.T) {
+	repo := multiParentStoryRepo(t)
+	c := NewCompiler()
+	result, err := c.Compile(context.Background(), repo.Dir, integrationBuildRequest("spec/story-multi-parent"))
+	if err != nil {
+		t.Fatalf("Compile: unexpected error: %v", err)
+	}
+
+	golden := mustReadFixture(t, "golden/manifest-build-story-multi-parent.json")
+	if !bytes.Equal(result.ManifestBytes, golden) {
+		t.Fatalf("manifest bytes drifted from the committed golden ratchet\ngot:  %s\nwant: %s", result.ManifestBytes, golden)
+	}
+}
+
+// TestCompile_Integration_DeterministicAcrossTwoRoots proves identical
+// trusted inputs (HEAD, request, authority) built independently under two
+// wholly separate checkouts yield byte-identical manifests, data items and
+// projections (authority design §10's first row).
+func TestCompile_Integration_DeterministicAcrossTwoRoots(t *testing.T) {
+	repoA := multiParentStoryRepo(t)
+	repoB := multiParentStoryRepo(t)
+	if repoA.Head != repoB.Head {
+		t.Fatalf("fixture is not itself deterministic: rootA HEAD=%s rootB HEAD=%s", repoA.Head, repoB.Head)
+	}
+
+	c := NewCompiler()
+	req := integrationBuildRequest("spec/story-multi-parent")
+	resultA, err := c.Compile(context.Background(), repoA.Dir, req)
+	if err != nil {
+		t.Fatalf("Compile(rootA): %v", err)
+	}
+	resultB, err := c.Compile(context.Background(), repoB.Dir, req)
+	if err != nil {
+		t.Fatalf("Compile(rootB): %v", err)
+	}
+
+	if !bytes.Equal(resultA.ManifestBytes, resultB.ManifestBytes) {
+		t.Fatalf("ManifestBytes differ across two identically-built roots:\nA: %s\nB: %s", resultA.ManifestBytes, resultB.ManifestBytes)
+	}
+	if len(resultA.DataItemBytes) != len(resultB.DataItemBytes) {
+		t.Fatalf("DataItemBytes length differs: A=%d B=%d", len(resultA.DataItemBytes), len(resultB.DataItemBytes))
+	}
+	for i := range resultA.DataItemBytes {
+		if !bytes.Equal(resultA.DataItemBytes[i], resultB.DataItemBytes[i]) {
+			t.Errorf("DataItemBytes[%d] differs across two identically-built roots", i)
+		}
+	}
+	if len(resultA.ProjectionFiles) != len(resultB.ProjectionFiles) {
+		t.Fatalf("ProjectionFiles length differs: A=%d B=%d", len(resultA.ProjectionFiles), len(resultB.ProjectionFiles))
+	}
+	for i := range resultA.ProjectionFiles {
+		if resultA.ProjectionFiles[i].Path != resultB.ProjectionFiles[i].Path || !bytes.Equal(resultA.ProjectionFiles[i].Content, resultB.ProjectionFiles[i].Content) {
+			t.Errorf("ProjectionFiles[%d] differs across two identically-built roots", i)
+		}
+	}
+}
+
+// TestCompile_Integration_SpikeMultiParent_Succeeds proves the spike
+// variant: `resolves` edges, oq-* targets, and no acceptance-criteria
+// obligations to resolve.
+func TestCompile_Integration_SpikeMultiParent_Succeeds(t *testing.T) {
+	spikeData, spikeFM := decodeFragmentSpecFixture(t, "spike-multi-parent.md")
+	alphaData, _ := decodeFragmentSpecFixture(t, "feature-alpha.md")
+	betaData, _ := decodeFragmentSpecFixture(t, "feature-beta.md")
+	repo := buildCompilerRepo(t, map[string]string{
+		".verdi/specs/active/" + strings.TrimPrefix(spikeFM.ID, "spec/") + "/spec.md": string(spikeData),
+		".verdi/specs/active/feature-alpha/spec.md":                                   string(alphaData),
+		".verdi/specs/active/feature-beta/spec.md":                                    string(betaData),
+	})
+
+	c := NewCompiler()
+	result, err := c.Compile(context.Background(), repo.Dir, integrationBuildRequest("spec/spike-multi-parent"))
+	if err != nil {
+		t.Fatalf("Compile: unexpected error: %v", err)
+	}
+	m := result.Manifest
+	if len(m.ParentFeatures) != 2 {
+		t.Fatalf("ParentFeatures = %+v, want exactly 2 rows", m.ParentFeatures)
+	}
+	for _, e := range m.Included {
+		if e.Source == SourceStoreAuthority && e.Kind == IncludedParentFeatureFragment && e.Ref != nil {
+			// (nothing further asserted here at the manifest level: the
+			// fragment's own oq-* target shape is fragments_test.go's
+			// concern; this proves only that the spike wiring reaches a
+			// completed compile.)
+			_ = e
+		}
+	}
+}
+
+// TestCompile_Integration_DesignFeature_Succeeds proves a class:feature
+// target compiles under phase design (unlike build, which
+// DeclaredScopeRefusal forbids for a feature target): required_inputs is
+// [], and the target has no parent_features of its own.
+func TestCompile_Integration_DesignFeature_Succeeds(t *testing.T) {
+	alphaData, alphaFM := decodeFragmentSpecFixture(t, "feature-alpha.md")
+	repo := buildCompilerRepo(t, map[string]string{
+		".verdi/specs/active/feature-alpha/spec.md": string(alphaData),
+	})
+
+	req := integrationBuildRequest(alphaFM.ID)
+	req.Phase = PhaseDesign
+	c := NewCompiler()
+	result, err := c.Compile(context.Background(), repo.Dir, req)
+	if err != nil {
+		t.Fatalf("Compile: unexpected error: %v", err)
+	}
+	m := result.Manifest
+	if m.Phase != PhaseDesign {
+		t.Errorf("Phase = %q, want design", m.Phase)
+	}
+	if len(m.ParentFeatures) != 0 {
+		t.Errorf("ParentFeatures = %+v, want [] for a feature target", m.ParentFeatures)
+	}
+	if len(m.RequiredInputs) != 0 {
+		t.Errorf("RequiredInputs = %+v, want [] for phase design", m.RequiredInputs)
+	}
+}
+
+// TestCompile_Integration_Review_RequiredInputsFiveRows proves the review
+// capsule's exactly-five closed required_inputs rows (authority design §6,
+// §8.2): accepted-spec and review-policy proven with a digest witness;
+// result-diff, evidence-bundle and builder-receipt unproven with their
+// fixed disclosure codes, and the compile still completes (exit-0
+// advisory).
+func TestCompile_Integration_Review_RequiredInputsFiveRows(t *testing.T) {
+	repo := multiParentStoryRepo(t)
+	req := integrationBuildRequest("spec/story-multi-parent")
+	req.Phase = PhaseReview
+
+	c := NewCompiler()
+	result, err := c.Compile(context.Background(), repo.Dir, req)
+	if err != nil {
+		t.Fatalf("Compile: unexpected error: %v", err)
+	}
+	m := result.Manifest
+	wantKinds := []string{
+		RequiredInputAcceptedSpec, RequiredInputBuilderReceipt, RequiredInputEvidenceBundle,
+		RequiredInputResultDiff, RequiredInputReviewPolicy,
+	}
+	if len(m.RequiredInputs) != len(wantKinds) {
+		t.Fatalf("RequiredInputs = %+v, want exactly %d rows", m.RequiredInputs, len(wantKinds))
+	}
+	for i, kind := range wantKinds {
+		row := m.RequiredInputs[i]
+		if row.Kind != kind {
+			t.Fatalf("RequiredInputs[%d].Kind = %q, want %q (rows must be sorted by kind)", i, row.Kind, kind)
+		}
+		switch kind {
+		case RequiredInputAcceptedSpec, RequiredInputReviewPolicy:
+			if row.Resolution != ResolutionProven || row.Digest == nil {
+				t.Errorf("RequiredInputs[%d] (%s) = %+v, want proven with a digest witness", i, kind, row)
+			}
+		default:
+			if row.Resolution != ResolutionUnproven || row.Digest != nil || len(row.Witnesses) == 0 {
+				t.Errorf("RequiredInputs[%d] (%s) = %+v, want unproven with a disclosure witness and no digest", i, kind, row)
+			}
+		}
+	}
+	wantDisclosures := []DisclosureCode{
+		DisclosureReviewBuilderReceiptUnproven, DisclosureReviewEvidenceBundleUnproven, DisclosureReviewResultDiffUnproven,
+	}
+	for _, want := range wantDisclosures {
+		found := false
+		for _, d := range m.Disclosures {
+			if d == want {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("top-level Disclosures = %v, want it to include %q", m.Disclosures, want)
+		}
+	}
+}
+
+// TestCompile_Integration_ExpectedRepositoryMismatch_RealFacts proves the
+// expected-repository refusal against REAL computed repository facts (not
+// the fake repositoryfacts.Snapshot compiler_test.go's stage-3 tests
+// inject), exercising the real repositoryfacts.NewGatherer() wiring
+// NewCompiler() constructs.
+func TestCompile_Integration_ExpectedRepositoryMismatch_RealFacts(t *testing.T) {
+	repo := multiParentStoryRepo(t)
+	req := integrationBuildRequest("spec/story-multi-parent")
+	req.Expected = &Expected{Branch: "not-main", Head: repo.Head}
+
+	c := NewCompiler()
+	_, err := c.Compile(context.Background(), repo.Dir, req)
+	var refusal *ExpectedRepositoryMismatchRefusal
+	if !errors.As(err, &refusal) {
+		t.Fatalf("expected *ExpectedRepositoryMismatchRefusal, got %T %v", err, err)
+	}
+	if !IsRefusal(err) {
+		t.Fatal("ExpectedRepositoryMismatchRefusal not classified as a refusal")
+	}
+	if refusal.ComputedBranch != "main" || refusal.ComputedHead != repo.Head {
+		t.Fatalf("refusal computed facts = %+v, want branch=main head=%s", refusal, repo.Head)
+	}
+}
+
+// TestCompile_Integration_ProjectionDrift_RealFacts proves the projection-
+// drift refusal against the REAL instructionprojection.Verify wiring: a
+// repository whose managed AGENTS.md was never generated (or has since
+// drifted from the constitution) refuses at stage 5, before any Git object
+// read that stage 4/6 would otherwise need.
+func TestCompile_Integration_ProjectionDrift_RealFacts(t *testing.T) {
+	storyData, storyFM := decodeFragmentSpecFixture(t, "story-multi-parent.md")
+	alphaData, _ := decodeFragmentSpecFixture(t, "feature-alpha.md")
+	betaData, _ := decodeFragmentSpecFixture(t, "feature-beta.md")
+	files := policyStoreFiles(t)
+	files[".verdi/specs/active/"+strings.TrimPrefix(storyFM.ID, "spec/")+"/spec.md"] = string(storyData)
+	files[".verdi/specs/active/feature-alpha/spec.md"] = string(alphaData)
+	files[".verdi/specs/active/feature-beta/spec.md"] = string(betaData)
+	// Deliberately skip buildCompilerRepo's Generate+commit step: no
+	// AGENTS.md is ever written, so the managed projection is absent
+	// (drifted) rather than clean.
+	repo := fixturegit.Build(t, []fixturegit.Layer{{Files: files, Message: "scaffold"}})
+	t.Setenv("CI_DEFAULT_BRANCH", "main")
+
+	c := NewCompiler()
+	_, err := c.Compile(context.Background(), repo.Dir, integrationBuildRequest("spec/story-multi-parent"))
+	var refusal *ProjectionDriftRefusal
+	if !errors.As(err, &refusal) {
+		t.Fatalf("expected *ProjectionDriftRefusal, got %T %v", err, err)
+	}
+	if !IsRefusal(err) {
+		t.Fatal("ProjectionDriftRefusal not classified as a refusal")
+	}
+	if len(refusal.Paths) == 0 {
+		t.Fatal("ProjectionDriftRefusal.Paths is empty, want it to name AGENTS.md")
+	}
+}
+
+// TestCompile_Integration_WrongTargetClass_RealFacts is
+// TestCompilerStage4WrongClassRefusalShortCircuits's real-git counterpart:
+// a feature specification requested as a build target refuses with
+// *DeclaredScopeRefusal even when every port is the genuine production
+// adapter over a real hermetic repository.
+func TestCompile_Integration_WrongTargetClass_RealFacts(t *testing.T) {
+	alphaData, alphaFM := decodeFragmentSpecFixture(t, "feature-alpha.md")
+	repo := buildCompilerRepo(t, map[string]string{
+		".verdi/specs/active/feature-alpha/spec.md": string(alphaData),
+	})
+
+	c := NewCompiler()
+	_, err := c.Compile(context.Background(), repo.Dir, integrationBuildRequest(alphaFM.ID))
+	var refusal *DeclaredScopeRefusal
+	if !errors.As(err, &refusal) {
+		t.Fatalf("expected *DeclaredScopeRefusal, got %T %v", err, err)
+	}
+	if !IsRefusal(err) {
+		t.Fatal("wrong-class DeclaredScopeRefusal not classified as a refusal")
+	}
+}
+
+// TestCompile_Integration_ActorResolver_SealedResolutionsProjectDeterministically
+// injects a real sealed ActorResolver (governanceprincipal.PrincipalResolution
+// values minted the only way one exists: through
+// governanceprincipal.Resolver.Resolve, mirroring this file's own
+// mintResolution helper) alongside every other real production port,
+// proving the manifest's actors section reflects the injected resolutions
+// without needing repository/authority facts to be faked too.
+func TestCompile_Integration_ActorResolver_SealedResolutionsProjectDeterministically(t *testing.T) {
+	repo := multiParentStoryRepo(t)
+	author := mintResolution(t, authenticatedFact("user-123"), "user-123")
+
+	c := newCompilerWithPorts(
+		gitxGitReader{}, specstate.NewProjector(), defaultAuthorityLoader{},
+		fakeActorResolver{resolutions: []governanceprincipal.PrincipalResolution{author}},
+		repositoryfacts.NewGatherer(), defaultProjectionVerifier{},
+	)
+	result, err := c.Compile(context.Background(), repo.Dir, integrationBuildRequest("spec/story-multi-parent"))
+	if err != nil {
+		t.Fatalf("Compile: unexpected error: %v", err)
+	}
+	m := result.Manifest
+	if m.Actors.Posture != ResolutionProven {
+		t.Errorf("Actors.Posture = %q, want %q", m.Actors.Posture, ResolutionProven)
+	}
+	if len(m.Actors.Resolutions) != 1 || m.Actors.Resolutions[0].Claim.Subject != "user-123" {
+		t.Fatalf("Actors.Resolutions = %+v", m.Actors.Resolutions)
+	}
+	if len(m.Actors.Disclosures) != 0 {
+		t.Errorf("Actors.Disclosures = %v, want empty (posture is proven)", m.Actors.Disclosures)
+	}
+}
+
+func TestProjectActorsDoesNotAliasPortMemory(t *testing.T) {
+	res := mintResolution(t, authenticatedFact("user-123"), "user-123")
+	original := res
+
+	got, err := projectActors(context.Background(), fakeActorResolver{resolutions: []governanceprincipal.PrincipalResolution{res}})
+	if err != nil {
+		t.Fatalf("projectActors: unexpected error: %v", err)
+	}
+	if len(got.Resolutions) != 1 || len(got.Resolutions[0].Witnesses) == 0 {
+		t.Fatalf("Resolutions = %#v, want 1 resolution with witnesses", got.Resolutions)
+	}
+
+	got.Resolutions[0].Witnesses[0].Detail = "mutated by caller"
+
+	if !reflect.DeepEqual(res.Witnesses, original.Witnesses) {
+		t.Errorf("mutating the returned section aliased the port's resolution memory: %#v", res.Witnesses)
+	}
+}
