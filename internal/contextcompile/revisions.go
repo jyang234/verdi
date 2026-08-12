@@ -133,7 +133,7 @@ func authorityRevision(in authorityRevisionInput) (string, error) {
 		if err := validateDigest(fmt.Sprintf("authority revision.decisions[%d].digest", i), d.Digest); err != nil {
 			return "", err
 		}
-		decisionOperands[i] = authorityRevisionDecisionOperand{Ref: d.Ref, Digest: d.Digest}
+		decisionOperands[i] = authorityRevisionDecisionOperand(d)
 	}
 	sortedDecisions, err := sortedUniqueByRef(decisionOperands, func(o authorityRevisionDecisionOperand) string { return o.Ref },
 		"authority revision.decisions")
@@ -149,7 +149,7 @@ func authorityRevision(in authorityRevisionInput) (string, error) {
 		if err := validateDigest(fmt.Sprintf("authority revision.obligations[%d].digest", i), o.Digest); err != nil {
 			return "", err
 		}
-		obligationOperands[i] = authorityRevisionObligationOperand{Ref: o.Ref, Digest: o.Digest}
+		obligationOperands[i] = authorityRevisionObligationOperand(o)
 	}
 	sortedObligations, err := sortedUniqueByRef(obligationOperands, func(o authorityRevisionObligationOperand) string { return o.Ref },
 		"authority revision.obligations")
