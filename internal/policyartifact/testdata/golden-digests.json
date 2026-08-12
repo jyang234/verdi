@@ -1,6 +1,6 @@
 {
   "constitution.md": "sha256:7790fdd8424dd833c164169afb592aaefb4175e2a97f3373e5a75acc10f04d04",
-  "dispositions/review-no-conflict.md": "sha256:446b201f9468a8bdafec03312dd741c15163104c7d8fe91790061a846834294d",
+  "dispositions/review-no-conflict.md": "sha256:6dfe14c5b061fa388c8f77ba6e658b6c4121bbd3da96ca9788662eb1c6c35099",
   "exemptions/legacy-service-go.md": "sha256:68a080df33ad573370689fb08931861d4761e2fec34661a82f249d0ad0cd511d",
   "overlays/frontend-go-version.md": "sha256:2f7ec5b5c29b4fdb637cc729a103746ceb7beae5c7a493bbe7672c6d9edf4caf",
   "policies/go-toolchain.md": "sha256:8f4fea5f3016a0ef67a082225b996fbe3470335214f116d8379239ada34c60bd",

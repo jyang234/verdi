@@ -164,3 +164,45 @@ func TestFixtureExemptionWitnessDigest(t *testing.T) {
 		t.Fatalf("fixture witness claim_digest = %s, real claim digest = %s (update the fixture)", got, claimDigest)
 	}
 }
+
+// TestFixtureDispositionWitnessDigests proves the committed disposition
+// fixture's exemption witness cites the REAL canonical digest of the
+// exemption artifact that lives in this same fixture store — the exact
+// semantic-input witness discipline (§8), pinned rather than synthetic, so
+// a later change to that exemption visibly stales the disposition instead
+// of silently widening it. The fixture's CLAIM witness digests stay
+// synthetic on purpose: those claims (an acceptance criterion and a policy
+// instruction) have no corresponding artifact in this store, so there is
+// no real digest to bind them to.
+func TestFixtureDispositionWitnessDigests(t *testing.T) {
+	exData, err := os.ReadFile(filepath.Join("testdata", "store", DirExemptions, "legacy-service-go.md"))
+	if err != nil {
+		t.Fatalf("reading exemption: %v", err)
+	}
+	ex, err := DecodeExemption(exData)
+	if err != nil {
+		t.Fatalf("decoding exemption: %v", err)
+	}
+	exDigest, err := ex.Digest()
+	if err != nil {
+		t.Fatalf("exemption digest: %v", err)
+	}
+
+	dispoData, err := os.ReadFile(filepath.Join("testdata", "store", DirDispositions, "review-no-conflict.md"))
+	if err != nil {
+		t.Fatalf("reading disposition: %v", err)
+	}
+	d, err := DecodeDisposition(dispoData)
+	if err != nil {
+		t.Fatalf("decoding disposition: %v", err)
+	}
+	if len(d.Witness.Exemptions) != 1 {
+		t.Fatalf("fixture witness exemptions = %+v, want exactly 1", d.Witness.Exemptions)
+	}
+	if got := d.Witness.Exemptions[0].ID; got != ex.ID {
+		t.Fatalf("fixture witness exemption id = %s, want %s", got, ex.ID)
+	}
+	if got := d.Witness.Exemptions[0].Digest; got != exDigest {
+		t.Fatalf("fixture witness exemption digest = %s, real exemption digest = %s (update the fixture, then recompute input_id)", got, exDigest)
+	}
+}

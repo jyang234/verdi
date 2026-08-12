@@ -36,6 +36,7 @@ var (
 	dispoClaimPolAuthority = hexDigest("test-dispo-claim-policy-authority")
 	dispoExemptionDigest   = hexDigest("test-dispo-exemption")
 	dispoJudgmentPrimary   = hexDigest("test-dispo-judgment-primary")
+	dispoJudgmentChallenge = hexDigest("test-dispo-judgment-challenger")
 	dispoTemplateDigest    = hexDigest("test-dispo-template")
 
 	// dispoWitness is the canonical two-claim, one-exemption semantic
@@ -100,6 +101,25 @@ var dispoTemplateLine = fmt.Sprintf(`template: {identity: "embedded:policy-dispo
 // dispoJudgmentBlock is validJudgeResultDispositionDoc's judgment
 // provenance block, named so negative cases can replace or remove it.
 var dispoJudgmentBlock = fmt.Sprintf("judgment:\n  primary_digest: %q\n", dispoJudgmentPrimary)
+
+// dispoApprovalsBlock is validJudgeResultDispositionDoc's single approval
+// entry, named so cases can replace exactly the approvals block.
+var dispoApprovalsBlock = "approvals:\n  - role: policy-owner\n    principal: principal/github-org/YWxpY2U\n"
+
+// dispoExemptionEntry is validJudgeResultDispositionDoc's single exemption
+// witness entry, named so cases can replace exactly that entry.
+var dispoExemptionEntry = fmt.Sprintf("    - id: policy-exemption/legacy-service-go\n      digest: %q\n", dispoExemptionDigest)
+
+// dispoScopeAnchor is validJudgeResultDispositionDoc's TOP-LEVEL scope
+// line plus the line that follows it: the claim witness for
+// ac-review-approval carries a byte-identical (but indented) scope, so a
+// case targeting the disposition's own scope must anchor on the
+// unindented occurrence.
+var dispoScopeAnchor = "scope: {phases: [review], environments: [], paths: [], refs: []}\nwitness:"
+
+// dispoClaimScopeAnchor is the ac-review-approval claim witness's scope
+// line, distinguished from the disposition's own by its indentation.
+var dispoClaimScopeAnchor = "      scope: {phases: [review], environments: [], paths: [], refs: []}"
 
 // validJudgeResultDispositionDoc returns a complete, valid judge-result,
 // no-conflict disposition document: two sorted claim witnesses in
@@ -250,6 +270,76 @@ func TestDecodeDisposition_StrictUnion(t *testing.T) {
 		}
 	})
 
+	t.Run("happy: judge-result citing a challenger judgment", func(t *testing.T) {
+		doc := strings.Replace(validJudgeResultDispositionDoc(), dispoJudgmentBlock,
+			fmt.Sprintf("judgment:\n  primary_digest: %q\n  challenger_digest: %q\n", dispoJudgmentPrimary, dispoJudgmentChallenge), 1)
+		d, err := DecodeDisposition([]byte(doc))
+		if err != nil {
+			t.Fatalf("DecodeDisposition: %v", err)
+		}
+		if d.Judgment == nil {
+			t.Fatal("Judgment = nil, want the cited provenance")
+		}
+		if d.Judgment.PrimaryDigest != dispoJudgmentPrimary {
+			t.Fatalf("PrimaryDigest = %q, want %q", d.Judgment.PrimaryDigest, dispoJudgmentPrimary)
+		}
+		if d.Judgment.ChallengerDigest != dispoJudgmentChallenge {
+			t.Fatalf("ChallengerDigest = %q, want %q", d.Judgment.ChallengerDigest, dispoJudgmentChallenge)
+		}
+	})
+
+	// Approvals are a normalized SET, not authored order: a document may
+	// list them any way and still decode to one canonical role-then-principal
+	// sequence, so two stores recording the same approval facts share a
+	// digest.
+	t.Run("happy: approvals normalize to role-then-principal order", func(t *testing.T) {
+		doc := strings.Replace(validJudgeResultDispositionDoc(), dispoApprovalsBlock,
+			"approvals:\n"+
+				"  - role: security-owner\n    principal: principal/github-org/YWxpY2U\n"+
+				"  - role: policy-owner\n    principal: principal/github-org/Ym9i\n"+
+				"  - role: policy-owner\n    principal: principal/github-org/YWxpY2U\n", 1)
+		d, err := DecodeDisposition([]byte(doc))
+		if err != nil {
+			t.Fatalf("DecodeDisposition: %v", err)
+		}
+		want := []Approval{
+			{Role: "policy-owner", Principal: "principal/github-org/YWxpY2U"},
+			{Role: "policy-owner", Principal: "principal/github-org/Ym9i"},
+			{Role: "security-owner", Principal: "principal/github-org/YWxpY2U"},
+		}
+		if len(d.Approvals) != len(want) {
+			t.Fatalf("Approvals = %+v, want %d entries", d.Approvals, len(want))
+		}
+		for i := range want {
+			if d.Approvals[i] != want[i] {
+				t.Fatalf("Approvals[%d] = %+v, want %+v (full: %+v)", i, d.Approvals[i], want[i], d.Approvals)
+			}
+		}
+	})
+
+	// judgmentDoc/approvalsDoc/exemptionsDoc/witnessDoc each swap exactly one
+	// block of the valid judge-result document, so a negative case names a
+	// single defect and the rest of the artifact stays conforming.
+	judgmentDoc := func(block string) string {
+		return strings.Replace(validJudgeResultDispositionDoc(), dispoJudgmentBlock, block, 1)
+	}
+	approvalsDoc := func(block string) string {
+		return strings.Replace(validJudgeResultDispositionDoc(), dispoApprovalsBlock, block, 1)
+	}
+	exemptionsDoc := func(entry string) string {
+		return strings.Replace(validJudgeResultDispositionDoc(), dispoExemptionEntry, entry, 1)
+	}
+	witnessDoc := func(block string) string {
+		return strings.Replace(validJudgeResultDispositionDoc(), dispoWitnessBlock(), block, 1)
+	}
+	// blankBody replaces everything after the closing frontmatter fence with
+	// whitespace, leaving a syntactically valid artifact with no rationale.
+	blankBody := func(doc string) string {
+		fence := "\n---\n"
+		i := strings.LastIndex(doc, fence)
+		return doc[:i+len(fence)] + "   \n\n"
+	}
+
 	negatives := []struct {
 		name    string
 		doc     string
@@ -292,6 +382,54 @@ func TestDecodeDisposition_StrictUnion(t *testing.T) {
 		{"judgment on human-fallback", strings.Replace(validHumanFallbackDispositionDoc(false), "origin: human-fallback\n", "origin: human-fallback\n"+dispoJudgmentBlock, 1), "judgment"},
 		{"human-fallback missing controls", strings.Replace(validHumanFallbackDispositionDoc(false), "compensating_controls:\n  - \"Weekly manual review of the overlapping claims.\"\n", "", 1), "compensating control"},
 		{"human-fallback missing both bounds", strings.Replace(validHumanFallbackDispositionDoc(false), `expiry: "2026-12-31"`+"\n", "", 1), "expiry or a review condition"},
+
+		{"no frontmatter delimiter", strings.TrimPrefix(validJudgeResultDispositionDoc(), "---\n"), "frontmatter delimiter"},
+
+		// Disposition-level scope: both the presence grammar (toScope) and
+		// the member grammar (Scope.Validate) apply to a disposition exactly
+		// as they do to every other kernel artifact.
+		{"missing witness", strings.Replace(validJudgeResultDispositionDoc(), dispoWitnessBlock(), "", 1), "field witness is missing"},
+		{"scope dimension missing", strings.Replace(validJudgeResultDispositionDoc(), dispoScopeAnchor, "scope: {phases: [review], environments: [], paths: []}\nwitness:", 1), "disposition.scope.refs is missing"},
+		{"scope with an unknown phase", strings.Replace(validJudgeResultDispositionDoc(), dispoScopeAnchor, "scope: {phases: [deploy], environments: [], paths: [], refs: []}\nwitness:", 1), "unknown phase"},
+
+		// Judgment provenance: a present citation must name real judgment
+		// records. challenger_digest is optional by ABSENCE only — an empty
+		// or malformed value is a citation wearing the shape of provenance.
+		{"judgment missing primary_digest", judgmentDoc(fmt.Sprintf("judgment:\n  challenger_digest: %q\n", dispoJudgmentChallenge)), "primary_digest is missing"},
+		{"malformed primary_digest", judgmentDoc("judgment:\n  primary_digest: \"sha256:nothex\"\n"), `primary_digest "sha256:nothex" is not sha256`},
+		{"malformed challenger_digest", judgmentDoc(fmt.Sprintf("judgment:\n  primary_digest: %q\n  challenger_digest: \"sha256:nothex\"\n", dispoJudgmentPrimary)), `challenger_digest "sha256:nothex" is not sha256`},
+		{"empty challenger_digest", judgmentDoc(fmt.Sprintf("judgment:\n  primary_digest: %q\n  challenger_digest: \"\"\n", dispoJudgmentPrimary)), `challenger_digest "" is not sha256`},
+
+		// Compensating controls are optional by ABSENCE only (§8: "when
+		// present, remain nonempty").
+		{"compensating_controls present but empty", strings.Replace(validJudgeResultDispositionDoc(), "approvals:\n", "compensating_controls: []\napprovals:\n", 1), "present but empty"},
+		{"blank review_condition", strings.Replace(validHumanFallbackDispositionDoc(true), `review_condition: "Re-evaluate once the judge transport is configured."`, `review_condition: "  "`, 1), "not blank text"},
+
+		// Approval facts: at least one, each complete, well-formed, and
+		// distinct.
+		{"approvals explicitly empty", approvalsDoc("approvals: []\n"), "at least one approval"},
+		{"approval missing role", approvalsDoc("approvals:\n  - principal: principal/github-org/YWxpY2U\n"), "role and principal are both required"},
+		{"approval missing principal", approvalsDoc("approvals:\n  - role: policy-owner\n"), "role and principal are both required"},
+		{"non-kebab approval role", approvalsDoc("approvals:\n  - role: Policy_Owner\n    principal: principal/github-org/YWxpY2U\n"), "must be kebab-case"},
+		{"invalid approval principal", approvalsDoc("approvals:\n  - role: policy-owner\n    principal: alice\n"), "want principal/<trust-source-id>/<base64url-subject>"},
+		{"duplicate approval pair", approvalsDoc("approvals:\n  - role: policy-owner\n    principal: principal/github-org/YWxpY2U\n  - role: policy-owner\n    principal: principal/github-org/YWxpY2U\n"), "duplicate approval"},
+
+		{"blank rationale body", blankBody(validJudgeResultDispositionDoc()), "rationale"},
+
+		// Semantic witness: a witness always names claims, and every claim's
+		// identity field carries its own grammar.
+		{"witness claims explicitly empty", witnessDoc(fmt.Sprintf("witness:\n  input_id: %q\n  target_digest: %q\n  claims: []\n  exemptions: []\n", hexDigest("placeholder-input-id"), dispoTargetDigest)), "at least one claim"},
+		{"blank claim id", strings.Replace(validJudgeResultDispositionDoc(), "- id: ac-review-approval", `- id: "   "`, 1), "must not be blank"},
+		{"claim id with a control character", strings.Replace(validJudgeResultDispositionDoc(), "- id: ac-review-approval", `- id: "ac\tone"`, 1), "control character"},
+		{"malformed claim authority_digest", strings.Replace(validJudgeResultDispositionDoc(), fmt.Sprintf("authority_digest: %q", dispoClaimACAuthority), `authority_digest: "nothex"`, 1), `authority_digest "nothex" is not sha256`},
+		{"claim scope dimension missing", strings.Replace(validJudgeResultDispositionDoc(), dispoClaimScopeAnchor, "      scope: {phases: [review], environments: [], paths: []}", 1), "witness.claims[0].scope.refs is missing"},
+		{"claim scope with an unknown phase", strings.Replace(validJudgeResultDispositionDoc(), dispoClaimScopeAnchor, "      scope: {phases: [deploy], environments: [], paths: [], refs: []}", 1), "unknown phase"},
+		{"empty claim value member", strings.Replace(validJudgeResultDispositionDoc(), `values: ["approved"]`, `values: [""]`, 1), "empty value"},
+
+		// Exemption witnesses carry an id/digest pair or nothing at all.
+		{"exemption witness missing id", exemptionsDoc(fmt.Sprintf("    - digest: %q\n", dispoExemptionDigest)), "id and digest are both required"},
+		{"exemption witness missing digest", exemptionsDoc("    - id: policy-exemption/legacy-service-go\n"), "id and digest are both required"},
+		{"malformed exemption witness digest", exemptionsDoc("    - id: policy-exemption/legacy-service-go\n      digest: \"nothex\"\n"), `digest "nothex" is not sha256`},
 	}
 	for _, tt := range negatives {
 		t.Run(tt.name, func(t *testing.T) {

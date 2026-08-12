@@ -6,7 +6,7 @@ title: "Review-phase claims coexist without conflict"
 owners: [platform-team]
 scope: {phases: [review], environments: [], paths: [], refs: []}
 witness:
-  input_id: "sha256:ee41b6446f3eb0b01c96f43bdc5da0f29412469e5753ae812f20fe92df4a1ef5"
+  input_id: "sha256:9925b345aabe29452335b8d168d58b89d7a746796ee4657334ec80ab9c3d3a3f"
   target_digest: "sha256:690557732c5799f64393edbdb9341bfc68641940ff7855da9d208db583bea7dc"
   claims:
     - id: ac-review-approval
@@ -23,7 +23,7 @@ witness:
       values: []
   exemptions:
     - id: policy-exemption/legacy-service-go
-      digest: "sha256:9d0655fb85addc86e8ceff9ec0035ebef7310f7e574e08eae806ce6fb395bef4"
+      digest: "sha256:68a080df33ad573370689fb08931861d4761e2fec34661a82f249d0ad0cd511d"
 conclusion: no-conflict
 origin: judge-result
 judgment:

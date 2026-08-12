@@ -273,18 +273,31 @@ func DecodeDisposition(data []byte) (*Disposition, error) {
 		if !sha256Re.MatchString(*jd.PrimaryDigest) {
 			return nil, fmt.Errorf("policyartifact: disposition judgment.primary_digest %q is not sha256:<64 hex> form", *jd.PrimaryDigest)
 		}
+		// challenger_digest is optional by ABSENCE only (§8: the challenger
+		// citation is made "when present"). A key that is present must name
+		// a real judgment record: an empty or malformed value would be a
+		// citation wearing the shape of provenance, so it fails closed
+		// rather than normalizing to "no challenger".
 		challenger := ""
 		if jd.ChallengerDigest != nil {
 			challenger = *jd.ChallengerDigest
-			if challenger != "" && !sha256Re.MatchString(challenger) {
-				return nil, fmt.Errorf("policyartifact: disposition judgment.challenger_digest %q is not sha256:<64 hex> form", challenger)
+			if !sha256Re.MatchString(challenger) {
+				return nil, fmt.Errorf("policyartifact: disposition judgment.challenger_digest %q is not sha256:<64 hex> form (omit the key entirely when no challenger judgment informed the ruling)", challenger)
 			}
 		}
 		judgment = &JudgmentProvenance{PrimaryDigest: *jd.PrimaryDigest, ChallengerDigest: challenger}
 	}
 
+	// Compensating controls are optional by ABSENCE only (§8: "Compensating
+	// controls, when present, remain nonempty author-ordered single-line
+	// prose") — a judge-result ruling that names none omits the key rather
+	// than declaring an empty list, so the artifact never states a control
+	// set it does not have.
 	var controls []string
 	if doc.CompensatingControls != nil {
+		if len(*doc.CompensatingControls) == 0 {
+			return nil, fmt.Errorf("policyartifact: disposition compensating_controls is present but empty: controls, when present, are nonempty (omit the key entirely when the ruling names none)")
+		}
 		controls = *doc.CompensatingControls
 	}
 	controls = emptyIfNil(controls)
