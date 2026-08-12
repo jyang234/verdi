@@ -99,21 +99,19 @@ func Verify(root string) (*Report, error) {
 	if err != nil {
 		return nil, fmt.Errorf("instructionprojection: %w", err)
 	}
-	return verify(root, store.Constitution, store.Policies, ep)
+	return verify(root, store, ep)
 }
 
 // verify is Verify's store-agnostic core: it never performs a Load of
 // its own, so a caller that already holds a resolved Store and
 // EffectivePolicy gets the same verdict from that same authority without
 // re-reading the store. Verify's public entry point delegates here once
-// its own Load+Resolve succeeds.
-func verify(root string, c *policyartifact.Constitution, policies map[string]*policyartifact.Policy, ep *policyauthority.EffectivePolicy) (*Report, error) {
-	in, err := buildProjectionInput(policies, ep)
-	if err != nil {
-		return nil, err
-	}
-
-	adapters := sortedAdapters(c.Adapters)
+// its own Load+Resolve succeeds. Every adapter's expected content and
+// manifest bytes come from the one shared Render seam (design §7,
+// SI-87(c)), using every one of ep's own policy ids as the full
+// selection, before the read-only comparisons below run unchanged.
+func verify(root string, store *policyauthority.Store, ep *policyauthority.EffectivePolicy) (*Report, error) {
+	adapters := sortedAdapters(store.Constitution.Adapters)
 
 	// An overlapping managed path is an unsatisfiable constitution, not
 	// a drift: reporting findings against the FILES would point a reader
@@ -137,30 +135,27 @@ func verify(root string, c *policyartifact.Constitution, policies map[string]*po
 		managed[rel] = true
 	}
 
+	sel := fullSelection(ep)
+
 	var findings []Finding
 
 	for _, adapter := range adapters {
-		content := renderProjection(adapter, in)
-		wantDigest := contentDigest(content)
+		rendered, err := Render(store, ep, adapter, sel)
+		if err != nil {
+			return nil, fmt.Errorf("instructionprojection: adapter %s: %w", adapter.ID, err)
+		}
 
-		files := make([]FileDigest, 0, len(adapter.Managed))
-		for _, rel := range adapter.Managed {
-			full := filepath.Join(root, filepath.FromSlash(rel))
-			if f := verifyManagedFile(full, rel, content, wantDigest); f != nil {
+		for _, rf := range rendered.Files {
+			full := filepath.Join(root, filepath.FromSlash(rf.Path))
+			if f := verifyManagedFile(full, rf.Path, rf.Content, rf.Digest); f != nil {
 				f.Adapter = adapter.ID
 				findings = append(findings, *f)
 			}
-			files = append(files, FileDigest{Path: rel, Digest: wantDigest})
 		}
 
-		m := buildManifest(adapter, in, files)
-		wantManifest, merr := manifestBytes(m)
-		if merr != nil {
-			return nil, fmt.Errorf("instructionprojection: adapter %s: canonicalizing manifest: %w", adapter.ID, merr)
-		}
 		manifestRel := adapterManifestRelPath(adapter.ID)
 		manifestFull := filepath.Join(root, filepath.FromSlash(manifestRel))
-		if f := verifyManifestFile(manifestFull, manifestRel, wantManifest); f != nil {
+		if f := verifyManifestFile(manifestFull, manifestRel, rendered.Manifest); f != nil {
 			f.Adapter = adapter.ID
 			findings = append(findings, *f)
 		}

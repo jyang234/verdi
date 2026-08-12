@@ -78,20 +78,18 @@ func Generate(root string) (*Result, error) {
 	if err != nil {
 		return nil, fmt.Errorf("instructionprojection: %w", err)
 	}
-	return generate(root, store.Constitution, store.Policies, ep)
+	return generate(root, store, ep)
 }
 
 // generate is Generate's store-agnostic core: it never calls Load
 // itself, so a caller that already holds a resolved store (or a test
 // that needs authority captured at a specific moment) can drive it
-// directly without a second Load.
-func generate(root string, c *policyartifact.Constitution, policies map[string]*policyartifact.Policy, ep *policyauthority.EffectivePolicy) (*Result, error) {
-	in, err := buildProjectionInput(policies, ep)
-	if err != nil {
-		return nil, err
-	}
-
-	adapters := sortedAdapters(c.Adapters)
+// directly without a second Load. It renders every adapter's content and
+// manifest through the one shared Render seam (design §7, SI-87(c)),
+// using every one of ep's own policy ids as the full selection, then
+// performs its own preflight and atomic writes exactly as before.
+func generate(root string, store *policyauthority.Store, ep *policyauthority.EffectivePolicy) (*Result, error) {
+	adapters := sortedAdapters(store.Constitution.Adapters)
 
 	// Prove the whole projection surface is satisfiable BEFORE writing
 	// anything: a partial write followed by a failure would leave files
@@ -107,28 +105,27 @@ func generate(root string, c *policyartifact.Constitution, policies map[string]*
 		return nil, err
 	}
 
+	sel := fullSelection(ep)
+
 	res := &Result{}
 	for _, adapter := range adapters {
-		content := renderProjection(adapter, in)
-		contentDig := contentDigest(content)
-
-		files := make([]FileDigest, 0, len(adapter.Managed))
-		for _, rel := range adapter.Managed {
-			full := filepath.Join(root, filepath.FromSlash(rel))
-			if err := atomicfile.Write(full, content, 0o644); err != nil {
-				return nil, fmt.Errorf("instructionprojection: adapter %s: writing %s: %w", adapter.ID, rel, err)
-			}
-			files = append(files, FileDigest{Path: rel, Digest: contentDig})
-		}
-
-		m := buildManifest(adapter, in, files)
-		mBytes, err := manifestBytes(m)
+		rendered, err := Render(store, ep, adapter, sel)
 		if err != nil {
-			return nil, fmt.Errorf("instructionprojection: adapter %s: canonicalizing manifest: %w", adapter.ID, err)
+			return nil, fmt.Errorf("instructionprojection: adapter %s: %w", adapter.ID, err)
 		}
+
+		files := make([]FileDigest, 0, len(rendered.Files))
+		for _, rf := range rendered.Files {
+			full := filepath.Join(root, filepath.FromSlash(rf.Path))
+			if err := atomicfile.Write(full, rf.Content, 0o644); err != nil {
+				return nil, fmt.Errorf("instructionprojection: adapter %s: writing %s: %w", adapter.ID, rf.Path, err)
+			}
+			files = append(files, FileDigest{Path: rf.Path, Digest: rf.Digest})
+		}
+
 		manifestRel := adapterManifestRelPath(adapter.ID)
 		manifestFull := filepath.Join(root, filepath.FromSlash(manifestRel))
-		if err := atomicfile.Write(manifestFull, mBytes, 0o644); err != nil {
+		if err := atomicfile.Write(manifestFull, rendered.Manifest, 0o644); err != nil {
 			return nil, fmt.Errorf("instructionprojection: adapter %s: writing manifest: %w", adapter.ID, err)
 		}
 
@@ -137,10 +134,22 @@ func generate(root string, c *policyartifact.Constitution, policies map[string]*
 			AdapterVersion: adapter.Version,
 			Files:          files,
 			ManifestPath:   manifestRel,
-			ManifestDigest: contentDigest(mBytes),
+			ManifestDigest: rendered.ManifestDigest,
 		})
 	}
 	return res, nil
+}
+
+// fullSelection returns a Selection naming every one of ep's own
+// effective policy ids — Generate and Verify's own "all effective policy
+// IDs" rule (design §7). The context compiler will later pass only its
+// phase-applicable subset through the same Render seam.
+func fullSelection(ep *policyauthority.EffectivePolicy) Selection {
+	ids := make([]string, 0, len(ep.Policies))
+	for _, e := range ep.Policies {
+		ids = append(ids, e.PolicyID)
+	}
+	return Selection{PolicyIDs: ids}
 }
 
 // adapterManifestRelPath returns the repo-relative slash path of
