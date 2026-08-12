@@ -948,6 +948,50 @@ func TestApplyDeclaredContextPinnedRefsFailsClosed(t *testing.T) {
 	}
 }
 
+// --- manifest obligation rows ---------------------------------------------
+
+// TestBuildObligationRows_MapsFieldsAndSorts proves buildObligationRows —
+// the mapping assembleManifest's stage 11 uses to build every
+// manifest.obligations row from Compile's own resolved BoundObligations —
+// carries each obligation's ref/path/ac/kind/content_digest through
+// unchanged and sorts the result by ref, regardless of call-site order.
+// Ported from the deleted dead ComposeCapsule seam's own
+// TestComposeCapsule_Build (contextcompile Wave-3 Task 9 C3): that seam had
+// zero production callers, but the underlying contract — an obligation
+// binds through into its manifest row unchanged — is real and is enforced
+// here, on the pure function Compile's own assembleManifest calls.
+func TestBuildObligationRows_MapsFieldsAndSorts(t *testing.T) {
+	second := BoundObligation{
+		Ref: "obligation/story-x--ac-2--behavioral", Path: ".verdi/obligations/story-x/ac-2/behavioral.md",
+		TargetRef: "spec/story-x", AC: "ac-2", Kind: artifact.EvidenceBehavioral, ContentDigest: digestSeed('2'),
+	}
+	first := BoundObligation{
+		Ref: "obligation/story-x--ac-1--static", Path: ".verdi/obligations/story-x/ac-1/static.md",
+		TargetRef: "spec/story-x", AC: "ac-1", Kind: artifact.EvidenceStatic, ContentDigest: digestSeed('1'),
+	}
+
+	got := buildObligationRows([]BoundObligation{second, first})
+
+	want := []Obligation{
+		{Ref: first.Ref, Path: first.Path, AC: first.AC, Kind: first.Kind, ContentDigest: first.ContentDigest},
+		{Ref: second.Ref, Path: second.Path, AC: second.AC, Kind: second.Kind, ContentDigest: second.ContentDigest},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("buildObligationRows = %+v, want %+v (sorted by ref, every field mapped through)", got, want)
+	}
+}
+
+// TestBuildObligationRows_EmptyIsExplicit proves a target with no bound
+// obligations gets an explicit empty (never nil) manifest.obligations,
+// mirroring the same explicit-[] contract design/build required_inputs
+// carry.
+func TestBuildObligationRows_EmptyIsExplicit(t *testing.T) {
+	got := buildObligationRows(nil)
+	if got == nil || len(got) != 0 {
+		t.Fatalf("buildObligationRows(nil) = %#v, want an explicit empty slice", got)
+	}
+}
+
 // --- store-authority lift map (authority design §5) -----------------------
 
 func storeLiftTarget() ResolvedSpec {

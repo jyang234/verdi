@@ -327,6 +327,63 @@ func TestClassifyRejectsDuplicatesAndDataDescendants(t *testing.T) {
 	}
 }
 
+// TestClassifyRejectsCandidateSourceShapeMismatch proves Classify's real,
+// production candidate-shape check (validateClassificationCandidate)
+// refuses a candidate whose Source tag disagrees with its own ID/path/ref
+// shape — a declared-context-shaped candidate mismarked SourceHeadTree, a
+// head-tree-shaped one mismarked SourceProjection, a projection-shaped one
+// mismarked SourceHeadTree, and the opaque base candidate mismarked
+// SourceHeadTree. Ported from the deleted dead ComposeCapsule seam's own
+// TestComposeCapsule_RejectsWrongSemanticSource (contextcompile Wave-3
+// Task 9 C3): that seam had zero production callers, but the underlying
+// contract — Compile refuses a source/shape mismatch — is real and is
+// enforced here, on the code path Classify (and therefore Compile) always
+// calls.
+func TestClassifyRejectsCandidateSourceShapeMismatch(t *testing.T) {
+	t.Parallel()
+	const head = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	opaque := Candidate{Source: SourceOpaque, ID: "opaque:harness-vendor-base/codex/1"}
+
+	tests := []struct {
+		name      string
+		candidate Candidate
+	}{
+		{
+			name:      "declared-context-shaped candidate mismarked head-tree",
+			candidate: Candidate{Source: SourceHeadTree, ID: "ref:spec/reference@" + strings.Repeat("a", 40), Ref: "spec/reference@" + strings.Repeat("a", 40)},
+		},
+		{
+			name:      "head-tree-shaped candidate mismarked projection",
+			candidate: Candidate{Source: SourceProjection, ID: "path:README.md", Path: "README.md", Object: strings.Repeat("b", 40), Mode: "100644", Type: "blob"},
+		},
+		{
+			name:      "projection-shaped candidate mismarked head-tree",
+			candidate: Candidate{Source: SourceHeadTree, ID: "path:AGENTS.md", Path: "AGENTS.md"},
+		},
+		{
+			name:      "opaque candidate mismarked head-tree",
+			candidate: Candidate{Source: SourceHeadTree, ID: "opaque:harness-vendor-base/codex/1"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			candidates := []Candidate{tt.candidate}
+			if tt.candidate.Source != SourceOpaque {
+				candidates = append(candidates, opaque)
+			}
+			_, err := Classify(context.Background(), &classifyGit{}, "/repo", head, ClassificationInput{
+				Candidates: candidates, Phase: PhaseBuild,
+				RequestScope: explicitUniversalScope(), TargetRef: "spec/story",
+				Adapter: AdapterRef{ID: "codex", Version: "1"},
+			})
+			if err == nil || !strings.Contains(err.Error(), "noncanonical") {
+				t.Fatalf("Classify() error = %v, want containing %q", err, "noncanonical")
+			}
+		})
+	}
+}
+
 func TestClassifyEvaluatesPolicyScopeAgainstTargetRef(t *testing.T) {
 	t.Parallel()
 
