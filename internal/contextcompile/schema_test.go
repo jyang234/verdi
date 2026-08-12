@@ -9,6 +9,7 @@ import (
 	"sort"
 	"testing"
 
+	"github.com/jyang234/verdi/internal/canonjson"
 	"github.com/jyang234/verdi/internal/execworkspace"
 )
 
@@ -282,6 +283,52 @@ func TestManifest_DecodeGoldenRoundTrip(t *testing.T) {
 	}
 }
 
+// manifestBytesWithMutatedExcludedReason returns a canonical manifest
+// document, otherwise identical to the golden fixture, whose sole defect is
+// excluded[0].reason carrying an unregistered ExclusionReason value
+// ("not-a-reason"). Unlike this table's other cases (which mutate golden's
+// raw bytes in place and leave its stale top-level digest untouched — safe
+// there only because domain validation runs, and so fails closed, strictly
+// before EncodeManifest ever recomputes and compares that digest), an enum
+// mutation buried inside excluded[] needs its own digest recomputed to
+// match: leaving the golden digest in place would make DecodeManifest's
+// final byte-equality check reject the document for a digest mismatch
+// regardless of whether ExclusionReason.Validate() itself ever ran,
+// silently proving nothing about the reason-enum check specifically. This
+// helper instead calls manifestDocFor/canonjson.Digest directly — the same
+// digestless-then-digest sequence EncodeManifest uses internally, but
+// skipping its Validate() call — to compute the digest the mutated document
+// WOULD carry if it were otherwise valid, isolating the unregistered reason
+// as the one remaining defect DecodeManifest's own domain validation must
+// catch.
+func manifestBytesWithMutatedExcludedReason(t *testing.T) []byte {
+	t.Helper()
+	m := decodeGoldenManifest(t)
+	if len(m.Excluded) == 0 {
+		t.Fatalf("test setup: golden manifest has no excluded rows to mutate")
+	}
+	m.Excluded[0].Reason = ExclusionReason("not-a-reason")
+	m.Digest = ""
+
+	digestlessDoc, err := manifestDocFor(m, "")
+	if err != nil {
+		t.Fatalf("test setup: manifestDocFor(digestless): %v", err)
+	}
+	digest, err := canonjson.Digest(digestlessDoc)
+	if err != nil {
+		t.Fatalf("test setup: canonjson.Digest: %v", err)
+	}
+	finalDoc, err := manifestDocFor(m, digest)
+	if err != nil {
+		t.Fatalf("test setup: manifestDocFor(final): %v", err)
+	}
+	out, err := canonjson.Marshal(finalDoc)
+	if err != nil {
+		t.Fatalf("test setup: canonjson.Marshal: %v", err)
+	}
+	return out
+}
+
 func TestManifest_DecodeRejectsMalformed(t *testing.T) {
 	golden := mustReadFixture(t, "manifest-build.json")
 	const schemaKV = `"schema":"` + ManifestSchema + `"`
@@ -304,6 +351,7 @@ func TestManifest_DecodeRejectsMalformed(t *testing.T) {
 		"nonempty expansions":      withTopLevelField(t, golden, "expansions", `[{}]`),
 		"unknown grant kind in capabilities": withTopLevelField(t, golden, "capabilities",
 			`{"grants":[{"kind":"filesystem"}],"schema":"verdi.execution-grants/v1"}`),
+		"unknown exclusion reason enum": manifestBytesWithMutatedExcludedReason(t),
 	}
 
 	for name, data := range cases {
