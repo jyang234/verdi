@@ -213,6 +213,23 @@ var showcaseCoverage = map[string][]coverageEvidence{
 	// ref negative case.
 	"cli:journey": {goE2E("internal/showcasealign/cli_showcase_test.go")},
 
+	// cli:context (Context Integrity Wave-3, docs/superpowers/specs/
+	// 2026-08-11-context-compiler-authority-design.md §2): added alongside
+	// the new verb itself — TestCLIShowcaseContextCompile
+	// (cli_showcase_test.go) drives `verdi context compile` against the
+	// real provisioned examples/showcase store. examples/showcase carries
+	// no .verdi/policy/ constitution tree at all (grep-verified against its
+	// own layers.txt and committed .verdi/ tree), so this proves the real
+	// binary's genuine, disclosed stage-2 no-constitution-adopted refusal
+	// (exit 1, empty stdout, the exact contextcompile.ErrNoConstitution
+	// diagnostic on stderr) over an otherwise well-formed request naming
+	// the real spec/stale-decline feature — the same "real, disclosed fact
+	// about the showcase store" pattern cli_showcase_test.go's own package
+	// doc comment already uses for cli:align/cli:close. No showcase-content
+	// shape reaches a successful compile, so this is the most meaningful
+	// real behavior the corpus can demonstrate for this verb.
+	"cli:context": {goE2E("internal/showcasealign/cli_showcase_test.go")},
+
 	// cli:serve: `cmd/e2eharness/main.go` launches the real `verdi serve
 	// --http <addr>` subprocess every Playwright spec in the suite runs
 	// against (never a fake/stub server) — so any SHOWCASE.-marked spec

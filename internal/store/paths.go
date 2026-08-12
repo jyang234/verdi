@@ -49,14 +49,18 @@ const (
 // Layout segments — the literals every accessor below is built from, named
 // once so the strings appear in exactly one place.
 const (
-	verdiDir         = ".verdi"
-	specsDir         = "specs"
-	attestationsDir  = "attestations"
-	obligationsDir   = "obligations"
-	waiversDir       = "waivers"
-	dataDir          = "data"
-	derivedDir       = "derived"
-	draftMutationDir = "draft-mutation"
+	verdiDir          = ".verdi"
+	specsDir          = "specs"
+	attestationsDir   = "attestations"
+	obligationsDir    = "obligations"
+	waiversDir        = "waivers"
+	adrDir            = "adr"
+	diagramsDir       = "diagrams"
+	conflictsDir      = "conflicts"
+	reaffirmationsDir = "reaffirmations"
+	dataDir           = "data"
+	derivedDir        = "derived"
+	draftMutationDir  = "draft-mutation"
 
 	specFile                 = "spec.md"
 	designProvenanceFile     = "design-provenance.jsonl"
@@ -209,6 +213,54 @@ func ObligationDir(root, specName string) string {
 // the same empty-root convention AttestationPath documents.
 func ObligationPath(root, specName, acID, kind string) string {
 	return filepath.Join(ObligationDir(root, specName), acID+"--"+kind+".md")
+}
+
+// ADRPath is an ADR file under root: <root>/.verdi/adr/<name>.md
+// (01 §Directory layout; internal/artifact/classify.go's own
+// "adr/"+".md" classification table this accessor is the forward twin
+// of — SI-92's shared non-spec artifact-ref-to-path seam, refpath.go,
+// resolves through this rather than re-deriving the "adr/" segment).
+func ADRPath(root, name string) string {
+	return filepath.Join(root, verdiDir, adrDir, name+".md")
+}
+
+// DiagramPath is an authored diagram file under root:
+// <root>/.verdi/diagrams/<name>.mermaid (01 §Directory layout: "authored
+// diagrams only; generated views are never committed"). Note the
+// ".mermaid" extension, distinct from every other kind's ".md".
+func DiagramPath(root, name string) string {
+	return filepath.Join(root, verdiDir, diagramsDir, name+".mermaid")
+}
+
+// ConflictPath is a filed conflict record under root:
+// <root>/.verdi/conflicts/<name>.md (01 §Directory layout; 03 §Challenging
+// closed decisions). This is the small, hand-authored "conflict" kind
+// (internal/artifact/conflict.go, KindConflict) — a distinct, top-level,
+// per-file artifact, NOT the same file as a spec directory's own
+// decision-conflict-report.md (DecisionConflictReportPath above), which is
+// a per-spec computed companion file addressed structurally, never by a
+// `kind:` frontmatter enum entry.
+func ConflictPath(root, name string) string {
+	return filepath.Join(root, verdiDir, conflictsDir, name+".md")
+}
+
+// ReaffirmationDir is a story's re-affirmation directory under root:
+// <root>/.verdi/reaffirmations/<storySlug>/ (01 §Directory layout: "rung-4
+// re-affirmation records; one per (story, amended object)"). storySlug is
+// the reaffirmation ref's compound-name story half (artifact.Ref's
+// "<story>--<object-id>" shape, R4-I-4), the same story-slug convention
+// AttestationDir/WaiverDir already use.
+func ReaffirmationDir(root, storySlug string) string {
+	return filepath.Join(root, verdiDir, reaffirmationsDir, storySlug)
+}
+
+// ReaffirmationPath is the reaffirmation file for (storySlug, objectID):
+// <ReaffirmationDir>/<objectID>.md (01 §Directory layout), mirroring
+// AttestationPath's own single-assembler role. Passing an empty root
+// yields the store-relative display form
+// (".verdi/reaffirmations/<storySlug>/<objectID>.md").
+func ReaffirmationPath(root, storySlug, objectID string) string {
+	return filepath.Join(ReaffirmationDir(root, storySlug), objectID+".md")
 }
 
 // DerivedRoot is the derived-artifact tree root under root:

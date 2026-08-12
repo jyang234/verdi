@@ -10,7 +10,7 @@ import (
 	"testing"
 
 	"github.com/jyang234/verdi/internal/artifact"
-	"github.com/jyang234/verdi/internal/gitx"
+	"github.com/jyang234/verdi/internal/repositoryfacts"
 	"github.com/jyang234/verdi/internal/specstate"
 	"github.com/jyang234/verdi/internal/store"
 )
@@ -83,7 +83,7 @@ func TestResolveTargetBytes_DirectRef_Active(t *testing.T) {
 	root := t.TempDir()
 	writeSpec(t, root, store.ZoneActive, "payments", testFeatureSpecMD)
 
-	p := newProjector(noOpGitReader(), &fakeStateResolver{}, alwaysUnresolvedDefaultBranch)
+	p := newProjector(noOpGitReader(), &fakeStateResolver{}, alwaysUnresolvedDefaultBranch, noOpRepositoryFactsGatherer())
 	name, relPath, content, foundOnDisk, err := p.resolveTargetBytes(context.Background(), root, "spec/payments")
 	if err != nil {
 		t.Fatalf("resolveTargetBytes: %v", err)
@@ -100,7 +100,7 @@ func TestResolveTargetBytes_DirectRef_Archive(t *testing.T) {
 	root := t.TempDir()
 	writeSpec(t, root, store.ZoneArchive, "payments", testFeatureSpecMD)
 
-	p := newProjector(noOpGitReader(), &fakeStateResolver{}, alwaysUnresolvedDefaultBranch)
+	p := newProjector(noOpGitReader(), &fakeStateResolver{}, alwaysUnresolvedDefaultBranch, noOpRepositoryFactsGatherer())
 	_, relPath, _, foundOnDisk, err := p.resolveTargetBytes(context.Background(), root, "spec/payments")
 	if err != nil {
 		t.Fatalf("resolveTargetBytes: %v", err)
@@ -123,7 +123,7 @@ func TestResolveTargetBytes_DirectRef_RemoteRefFallback(t *testing.T) {
 	resolveDB := func(context.Context, string) (specstate.Branch, bool) {
 		return specstate.Branch{Name: "main", Ref: "origin/main"}, true
 	}
-	p := newProjector(git, &fakeStateResolver{}, resolveDB)
+	p := newProjector(git, &fakeStateResolver{}, resolveDB, noOpRepositoryFactsGatherer())
 
 	name, relPath, content, foundOnDisk, err := p.resolveTargetBytes(context.Background(), root, "spec/payments")
 	if err != nil {
@@ -139,7 +139,7 @@ func TestResolveTargetBytes_DirectRef_RemoteRefFallback(t *testing.T) {
 
 func TestResolveTargetBytes_DirectRef_NotFound_NoDefaultBranch(t *testing.T) {
 	root := t.TempDir()
-	p := newProjector(noOpGitReader(), &fakeStateResolver{}, alwaysUnresolvedDefaultBranch)
+	p := newProjector(noOpGitReader(), &fakeStateResolver{}, alwaysUnresolvedDefaultBranch, noOpRepositoryFactsGatherer())
 
 	_, _, _, _, err := p.resolveTargetBytes(context.Background(), root, "spec/nope")
 	var nf *NotFoundError
@@ -157,7 +157,7 @@ func TestResolveTargetBytes_DirectRef_NotFound_DefaultBranchAlsoMissing(t *testi
 	resolveDB := func(context.Context, string) (specstate.Branch, bool) {
 		return specstate.Branch{Name: "main", Ref: "origin/main"}, true
 	}
-	p := newProjector(git, &fakeStateResolver{}, resolveDB)
+	p := newProjector(git, &fakeStateResolver{}, resolveDB, noOpRepositoryFactsGatherer())
 
 	_, _, _, _, err := p.resolveTargetBytes(context.Background(), root, "spec/nope")
 	var nf *NotFoundError
@@ -170,7 +170,7 @@ func TestResolveTargetBytes_StoryRef_Resolves(t *testing.T) {
 	root := t.TempDir()
 	writeSpec(t, root, store.ZoneActive, "loans", testFeatureSpecWithStoryMD)
 
-	p := newProjector(noOpGitReader(), &fakeStateResolver{}, alwaysUnresolvedDefaultBranch)
+	p := newProjector(noOpGitReader(), &fakeStateResolver{}, alwaysUnresolvedDefaultBranch, noOpRepositoryFactsGatherer())
 	name, relPath, content, foundOnDisk, err := p.resolveTargetBytes(context.Background(), root, "jira:LOAN-1482")
 	if err != nil {
 		t.Fatalf("resolveTargetBytes: %v", err)
@@ -188,7 +188,7 @@ func TestResolveTargetBytes_StoryRef_Unmatched(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(root, ".verdi", "specs", "active"), 0o755); err != nil {
 		t.Fatalf("MkdirAll: %v", err)
 	}
-	p := newProjector(noOpGitReader(), &fakeStateResolver{}, alwaysUnresolvedDefaultBranch)
+	p := newProjector(noOpGitReader(), &fakeStateResolver{}, alwaysUnresolvedDefaultBranch, noOpRepositoryFactsGatherer())
 
 	_, _, _, _, err := p.resolveTargetBytes(context.Background(), root, "jira:NOPE-1")
 	var nf *NotFoundError
@@ -199,7 +199,7 @@ func TestResolveTargetBytes_StoryRef_Unmatched(t *testing.T) {
 
 func TestResolveTargetBytes_NeitherForm(t *testing.T) {
 	root := t.TempDir()
-	p := newProjector(noOpGitReader(), &fakeStateResolver{}, alwaysUnresolvedDefaultBranch)
+	p := newProjector(noOpGitReader(), &fakeStateResolver{}, alwaysUnresolvedDefaultBranch, noOpRepositoryFactsGatherer())
 
 	_, _, _, _, err := p.resolveTargetBytes(context.Background(), root, "not-a-valid-arg")
 	if err == nil {
@@ -240,422 +240,120 @@ func TestDecodeTargetSpec(t *testing.T) {
 	}
 }
 
-// --- repository facts ---------------------------------------------------
+// --- repository facts -----------------------------------------------------
+//
+// Fine-grained repository-fact-gathering behavior (remote-origin
+// canonicalization, branch/HEAD/default-branch/relationship resolution,
+// dirty/staged detection, source classification, worktree identity) is
+// SI-85's shared internal/repositoryfacts leaf's own responsibility now,
+// proven by internal/repositoryfacts/gather_test.go against that
+// package's own fakes. This package's remaining, NEW responsibility is
+// exactly two things: correctly delegate to the injected
+// RepositoryFactsGatherer port, and map its closed DisclosureCode
+// vocabulary to this projection's byte-identical prose.
 
-func TestGatherRepositoryFacts_RemoteOrigin(t *testing.T) {
+// TestRepositoryDisclosureProse_AllCodesMapped proves every disclosure
+// code internal/repositoryfacts.Gather can emit maps to this projection's
+// own fixed, previously-hardcoded prose — the exact strings a caller of
+// GatherFacts observed before the SI-85 extraction.
+func TestRepositoryDisclosureProse_AllCodesMapped(t *testing.T) {
 	tests := []struct {
-		name      string
-		remoteURL func(context.Context, string, string) (string, error)
-		wantKnown bool
-		wantValue string
-		wantDiscl string
+		code repositoryfacts.DisclosureCode
+		want string
 	}{
-		{
-			// The record stores the CANONICAL repository identity, never
-			// the raw origin URL: scheme, userinfo, and the ".git" suffix
-			// are gone (gitx.CanonicalRemoteIdentity).
-			name:      "known, scp-like spelling",
-			remoteURL: func(context.Context, string, string) (string, error) { return "git@example.com:x/y.git", nil },
-			wantKnown: true,
-			wantValue: "example.com/x/y",
-		},
-		{
-			// Same repository, https spelling: the SAME identity, so two
-			// checkouts of one repository never disagree (nor do their
-			// record digests).
-			name:      "known, https spelling of the same repository",
-			remoteURL: func(context.Context, string, string) (string, error) { return "https://Example.com/x/y.git", nil },
-			wantKnown: true,
-			wantValue: "example.com/x/y",
-		},
-		{
-			// GLG v3's security decision: a journey projection carries no
-			// credentials. A credential-bearing origin URL reaches the
-			// record only as its credential-free identity.
-			name: "credential-bearing url is reduced to an identity",
-			remoteURL: func(context.Context, string, string) (string, error) {
-				return "https://user:s3cr3t-TOKEN@example.com/x/y.git", nil
-			},
-			wantKnown: true,
-			wantValue: "example.com/x/y",
-		},
-		{
-			// A URL that cannot be canonicalized is unproven and disclosed
-			// — and the raw URL itself is never routed into the record or
-			// into the disclosure (the same F1(a) posture as a read error).
-			name:      "uncanonicalizable url is unknown and disclosed",
-			remoteURL: func(context.Context, string, string) (string, error) { return "file:///srv/git/y.git", nil },
-			wantKnown: false,
-			wantDiscl: "the origin remote URL could not be canonicalized to a repository identity",
-		},
-		{
-			name: "no such remote",
-			remoteURL: func(context.Context, string, string) (string, error) {
-				return "", gitx.ErrNoSuchRemote
-			},
-			wantKnown: false,
-			wantDiscl: "no origin remote is configured",
-		},
-		{
-			name: "other error",
-			remoteURL: func(context.Context, string, string) (string, error) {
-				return "", errors.New("boom")
-			},
-			wantKnown: false,
-			// F1(a): the underlying error text ("boom") is never routed
-			// into the record — only a fixed, cause-classified disclosure.
-			wantDiscl: "remote origin could not be read from this checkout",
-		},
+		{repositoryfacts.DisclosureRemoteOriginUncanonicalizable, "the origin remote URL could not be canonicalized to a repository identity"},
+		{repositoryfacts.DisclosureRemoteOriginNotConfigured, "no origin remote is configured"},
+		{repositoryfacts.DisclosureRemoteOriginReadFailed, "remote origin could not be read from this checkout"},
+		{repositoryfacts.DisclosureBranchUnresolved, "the current branch could not be determined from this checkout"},
+		{repositoryfacts.DisclosureBranchDetached, "the repository is in a detached HEAD state; the current branch is unknown"},
+		{repositoryfacts.DisclosureHeadUnresolved, "HEAD could not be resolved from this checkout"},
+		{repositoryfacts.DisclosureDefaultBranchRefUnresolved, "the resolved default branch ref could not be resolved to a commit"},
+		{repositoryfacts.DisclosureDirtyUnknown, "working-tree dirty state could not be determined from this checkout"},
+		{repositoryfacts.DisclosureStagedUnknown, "staged paths could not be determined from this checkout"},
 	}
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			git := baseGitReaderForRepoFacts()
-			git.remoteURLFn = tt.remoteURL
-			p := newProjector(git, &fakeStateResolver{}, alwaysUnresolvedDefaultBranch)
-
-			rf, discl, err := p.gatherRepositoryFacts(context.Background(), t.TempDir(), "rel/spec.md", []byte("x"), true)
-			if err != nil {
-				t.Fatalf("gatherRepositoryFacts: %v", err)
+		t.Run(string(tt.code), func(t *testing.T) {
+			got, ok := repositoryDisclosureProse(tt.code)
+			if !ok {
+				t.Fatalf("repositoryDisclosureProse(%q): ok = false, want true", tt.code)
 			}
-			if rf.RemoteOrigin.Known != tt.wantKnown || rf.RemoteOrigin.Value != tt.wantValue {
-				t.Fatalf("RemoteOrigin = %+v", rf.RemoteOrigin)
-			}
-			if tt.wantDiscl != "" && !containsString(discl, tt.wantDiscl) {
-				t.Fatalf("disclosures = %v, want to contain %q", discl, tt.wantDiscl)
+			if got != tt.want {
+				t.Fatalf("repositoryDisclosureProse(%q) = %q, want %q", tt.code, got, tt.want)
 			}
 		})
 	}
 }
 
-// TestGatherRepositoryFacts_RemoteOriginNeverCarriesCredentials is the
-// negative twin of the table above, stated as the security property
-// itself (GLG v3: journey projections contain no credentials): for a
-// credential-bearing origin URL — canonicalizable or not — neither the
-// fact value nor any disclosure may contain the secret, the userinfo, or
-// the raw URL.
-func TestGatherRepositoryFacts_RemoteOriginNeverCarriesCredentials(t *testing.T) {
-	const secret = "s3cr3t-TOKEN"
-	urls := []string{
-		"https://user:" + secret + "@example.com/x/y.git",
-		"ssh://user:" + secret + "@example.com:2222/x/y.git",
-		// Not canonicalizable (unsupported scheme) AND credential-bearing:
-		// the unknown path must not leak it into the disclosure either.
-		"file://user:" + secret + "@example.com/x/y.git",
-	}
-	for _, raw := range urls {
-		t.Run(raw, func(t *testing.T) {
-			git := baseGitReaderForRepoFacts()
-			git.remoteURLFn = func(context.Context, string, string) (string, error) { return raw, nil }
-			p := newProjector(git, &fakeStateResolver{}, alwaysUnresolvedDefaultBranch)
-
-			rf, discl, err := p.gatherRepositoryFacts(context.Background(), t.TempDir(), "rel/spec.md", []byte("x"), true)
-			if err != nil {
-				t.Fatalf("gatherRepositoryFacts: %v", err)
-			}
-			for _, s := range append([]string{rf.RemoteOrigin.Value}, discl...) {
-				if strings.Contains(s, secret) || strings.Contains(s, "user@") || strings.Contains(s, raw) {
-					t.Fatalf("credential material leaked into the record: %q (origin %q)", s, raw)
-				}
-			}
-		})
+// TestRepositoryDisclosureProse_UnknownCodeFailsClosed proves an
+// unrecognized disclosure code — a contract-drift bug between
+// internal/repositoryfacts and this package's own mapping table — is
+// reported rather than silently dropped (CO-1).
+func TestRepositoryDisclosureProse_UnknownCodeFailsClosed(t *testing.T) {
+	_, ok := repositoryDisclosureProse(repositoryfacts.DisclosureCode("bogus-code"))
+	if ok {
+		t.Fatal("repositoryDisclosureProse(bogus-code): ok = true, want false")
 	}
 }
 
-func TestGatherRepositoryFacts_Branch(t *testing.T) {
-	tests := []struct {
-		name          string
-		currentBranch func(context.Context, string) (string, error)
-		wantKnown     bool
-		wantValue     string
-	}{
-		{"known", func(context.Context, string) (string, error) { return "main", nil }, true, "main"},
-		{"detached HEAD", func(context.Context, string) (string, error) { return "", nil }, false, ""},
-		{"error", func(context.Context, string) (string, error) { return "", errors.New("boom") }, false, ""},
+// TestGatherRepositoryFacts_DelegatesToSharedGatherer proves
+// gatherRepositoryFacts passes its exact parameters through as a
+// GatherInput, returns the shared leaf's Facts unchanged (RepositoryFacts
+// is a type alias for repositoryfacts.Facts), and maps every disclosure
+// code to this projection's own prose.
+func TestGatherRepositoryFacts_DelegatesToSharedGatherer(t *testing.T) {
+	wantSnap := repositoryfacts.Snapshot{
+		Facts: repositoryfacts.Facts{
+			RemoteOrigin:  repositoryfacts.StringFact{Known: true, Value: "example.invalid/repo"},
+			Branch:        repositoryfacts.StringFact{Known: true, Value: "main"},
+			Head:          repositoryfacts.StringFact{Known: true, Value: "abc123"},
+			DefaultBranch: repositoryfacts.DefaultBranchFact{Known: true, Name: "main", Ref: "origin/main", Head: "abc123"},
+			Relationship:  repositoryfacts.RelationshipEqual,
+			Dirty:         repositoryfacts.BoolFact{Known: true, Value: false},
+			Staged:        repositoryfacts.BoolFact{Known: true, Value: false},
+			Worktree:      repositoryfacts.WorktreeFact{Managed: false},
+			Source:        repositoryfacts.SourceHead,
+		},
+		Disclosures: []repositoryfacts.DisclosureCode{repositoryfacts.DisclosureRemoteOriginNotConfigured},
 	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			git := baseGitReaderForRepoFacts()
-			git.currentBranchFn = tt.currentBranch
-			p := newProjector(git, &fakeStateResolver{}, alwaysUnresolvedDefaultBranch)
+	var gotInput repositoryfacts.GatherInput
+	fake := &fakeRepositoryFactsGatherer{
+		gatherFn: func(_ context.Context, in repositoryfacts.GatherInput) (repositoryfacts.Snapshot, error) {
+			gotInput = in
+			return wantSnap, nil
+		},
+	}
+	p := newProjector(noOpGitReader(), &fakeStateResolver{}, alwaysUnresolvedDefaultBranch, fake)
 
-			rf, _, err := p.gatherRepositoryFacts(context.Background(), t.TempDir(), "rel/spec.md", []byte("x"), true)
-			if err != nil {
-				t.Fatalf("gatherRepositoryFacts: %v", err)
-			}
-			if rf.Branch.Known != tt.wantKnown || rf.Branch.Value != tt.wantValue {
-				t.Fatalf("Branch = %+v", rf.Branch)
-			}
-		})
-	}
-}
-
-func TestGatherRepositoryFacts_DefaultBranchAndRelationship(t *testing.T) {
-	tests := []struct {
-		name         string
-		resolveDB    DefaultBranchResolver
-		revParse     func(context.Context, string, string) (string, error)
-		isAncestor   func(context.Context, string, string, string) (bool, error)
-		wantDBKnown  bool
-		wantRelation string
-	}{
-		{
-			name:         "unresolved default branch",
-			resolveDB:    alwaysUnresolvedDefaultBranch,
-			revParse:     func(_ context.Context, _, rev string) (string, error) { return "headsha", nil },
-			wantDBKnown:  false,
-			wantRelation: "unknown",
-		},
-		{
-			name: "equal",
-			resolveDB: func(context.Context, string) (specstate.Branch, bool) {
-				return specstate.Branch{Name: "main", Ref: "origin/main"}, true
-			},
-			revParse: func(_ context.Context, _, rev string) (string, error) {
-				return "samesha", nil
-			},
-			wantDBKnown:  true,
-			wantRelation: "equal",
-		},
-		{
-			name: "ahead",
-			resolveDB: func(context.Context, string) (specstate.Branch, bool) {
-				return specstate.Branch{Name: "main", Ref: "origin/main"}, true
-			},
-			revParse: func(_ context.Context, _, rev string) (string, error) {
-				if rev == "HEAD" {
-					return "headsha", nil
-				}
-				return "defaultsha", nil
-			},
-			isAncestor: func(_ context.Context, _, ancestor, ref string) (bool, error) {
-				return ancestor == "defaultsha" && ref == "headsha", nil
-			},
-			wantDBKnown:  true,
-			wantRelation: "ahead",
-		},
-		{
-			name: "behind",
-			resolveDB: func(context.Context, string) (specstate.Branch, bool) {
-				return specstate.Branch{Name: "main", Ref: "origin/main"}, true
-			},
-			revParse: func(_ context.Context, _, rev string) (string, error) {
-				if rev == "HEAD" {
-					return "headsha", nil
-				}
-				return "defaultsha", nil
-			},
-			isAncestor: func(_ context.Context, _, ancestor, ref string) (bool, error) {
-				return ancestor == "headsha" && ref == "defaultsha", nil
-			},
-			wantDBKnown:  true,
-			wantRelation: "behind",
-		},
-		{
-			name: "diverged",
-			resolveDB: func(context.Context, string) (specstate.Branch, bool) {
-				return specstate.Branch{Name: "main", Ref: "origin/main"}, true
-			},
-			revParse: func(_ context.Context, _, rev string) (string, error) {
-				if rev == "HEAD" {
-					return "headsha", nil
-				}
-				return "defaultsha", nil
-			},
-			isAncestor:   func(context.Context, string, string, string) (bool, error) { return false, nil },
-			wantDBKnown:  true,
-			wantRelation: "diverged",
-		},
-		{
-			name: "ancestry error yields unknown relationship",
-			resolveDB: func(context.Context, string) (specstate.Branch, bool) {
-				return specstate.Branch{Name: "main", Ref: "origin/main"}, true
-			},
-			revParse: func(_ context.Context, _, rev string) (string, error) {
-				if rev == "HEAD" {
-					return "headsha", nil
-				}
-				return "defaultsha", nil
-			},
-			isAncestor:   func(context.Context, string, string, string) (bool, error) { return false, errors.New("boom") },
-			wantDBKnown:  true,
-			wantRelation: "unknown",
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			git := baseGitReaderForRepoFacts()
-			git.revParseFn = tt.revParse
-			if tt.isAncestor != nil {
-				git.isAncestorFn = tt.isAncestor
-			}
-			p := newProjector(git, &fakeStateResolver{}, tt.resolveDB)
-
-			rf, _, err := p.gatherRepositoryFacts(context.Background(), t.TempDir(), "rel/spec.md", []byte("x"), true)
-			if err != nil {
-				t.Fatalf("gatherRepositoryFacts: %v", err)
-			}
-			if rf.DefaultBranch.Known != tt.wantDBKnown {
-				t.Fatalf("DefaultBranch.Known = %v, want %v (%+v)", rf.DefaultBranch.Known, tt.wantDBKnown, rf.DefaultBranch)
-			}
-			if rf.Relationship != tt.wantRelation {
-				t.Fatalf("Relationship = %q, want %q", rf.Relationship, tt.wantRelation)
-			}
-		})
-	}
-}
-
-// TestGatherRepositoryFacts_DefaultBranchRevParseFails is F2's test: the
-// default branch NAME resolves, but RevParse of its own ref fails — a
-// distinct, disclosed failure (never silently the same "unknown" as no
-// default branch resolving at all).
-func TestGatherRepositoryFacts_DefaultBranchRevParseFails(t *testing.T) {
-	git := baseGitReaderForRepoFacts()
-	git.revParseFn = func(_ context.Context, _, rev string) (string, error) {
-		if rev == "HEAD" {
-			return "headsha", nil
-		}
-		return "", errors.New("boom")
-	}
-	resolveDB := func(context.Context, string) (specstate.Branch, bool) {
-		return specstate.Branch{Name: "main", Ref: "origin/main"}, true
-	}
-	p := newProjector(git, &fakeStateResolver{}, resolveDB)
-
-	rf, discl, err := p.gatherRepositoryFacts(context.Background(), t.TempDir(), "rel/spec.md", []byte("x"), true)
+	rf, discl, err := p.gatherRepositoryFacts(context.Background(), "the-root", "rel/spec.md", []byte("x"), true)
 	if err != nil {
 		t.Fatalf("gatherRepositoryFacts: %v", err)
 	}
-	if rf.DefaultBranch.Known {
-		t.Fatalf("DefaultBranch = %+v, want unknown", rf.DefaultBranch)
+	if gotInput.Root != "the-root" || gotInput.TargetPath != "rel/spec.md" || string(gotInput.TargetContent) != "x" || !gotInput.TargetFoundOnDisk {
+		t.Fatalf("GatherInput = %+v, want the exact caller parameters", gotInput)
 	}
-	want := "the resolved default branch ref could not be resolved to a commit"
-	if !containsString(discl, want) {
-		t.Fatalf("disclosures = %v, want to contain %q", discl, want)
+	if !reflect.DeepEqual(rf, wantSnap.Facts) {
+		t.Fatalf("gatherRepositoryFacts Facts = %+v, want %+v (unchanged pass-through)", rf, wantSnap.Facts)
 	}
-}
-
-func TestGatherRepositoryFacts_DirtyStaged(t *testing.T) {
-	git := baseGitReaderForRepoFacts()
-	git.statusDirtyFn = func(context.Context, string) (bool, error) { return true, nil }
-	git.stagedPathsFn = func(context.Context, string) ([]string, error) { return []string{"a", "b"}, nil }
-	p := newProjector(git, &fakeStateResolver{}, alwaysUnresolvedDefaultBranch)
-
-	rf, _, err := p.gatherRepositoryFacts(context.Background(), t.TempDir(), "rel/spec.md", []byte("x"), true)
-	if err != nil {
-		t.Fatalf("gatherRepositoryFacts: %v", err)
-	}
-	if !rf.Dirty.Known || !rf.Dirty.Value {
-		t.Fatalf("Dirty = %+v", rf.Dirty)
-	}
-	if !rf.Staged.Known || !rf.Staged.Value {
-		t.Fatalf("Staged = %+v", rf.Staged)
-	}
-
-	git.statusDirtyFn = func(context.Context, string) (bool, error) { return false, errors.New("boom") }
-	git.stagedPathsFn = func(context.Context, string) ([]string, error) { return nil, errors.New("boom") }
-	rf2, discl2, err := p.gatherRepositoryFacts(context.Background(), t.TempDir(), "rel/spec.md", []byte("x"), true)
-	if err != nil {
-		t.Fatalf("gatherRepositoryFacts: %v", err)
-	}
-	if rf2.Dirty.Known || rf2.Staged.Known {
-		t.Fatalf("Dirty/Staged should be unknown on error: %+v %+v", rf2.Dirty, rf2.Staged)
-	}
-	// F1(a): fixed, cause-classified disclosures — the underlying "boom"
-	// error text never reaches the record.
-	if !containsString(discl2, "working-tree dirty state could not be determined from this checkout") ||
-		!containsString(discl2, "staged paths could not be determined from this checkout") {
-		t.Fatalf("disclosures = %v, want the dirty and staged failure messages", discl2)
+	if len(discl) != 1 || discl[0] != "no origin remote is configured" {
+		t.Fatalf("disclosures = %v, want the mapped prose for DisclosureRemoteOriginNotConfigured", discl)
 	}
 }
 
-func TestGatherRepositoryFacts_Source(t *testing.T) {
-	tests := []struct {
-		name        string
-		foundOnDisk bool
-		showFn      func(context.Context, string, string, string) ([]byte, error)
-		content     []byte
-		want        string
-	}{
-		{
-			name:        "matches HEAD",
-			foundOnDisk: true,
-			showFn:      func(context.Context, string, string, string) ([]byte, error) { return []byte("same"), nil },
-			content:     []byte("same"),
-			want:        "head",
-		},
-		{
-			name:        "differs from HEAD",
-			foundOnDisk: true,
-			showFn:      func(context.Context, string, string, string) ([]byte, error) { return []byte("old"), nil },
-			content:     []byte("new"),
-			want:        "working-tree",
-		},
-		{
-			name:        "absent at HEAD",
-			foundOnDisk: true,
-			showFn:      func(context.Context, string, string, string) ([]byte, error) { return nil, errors.New("not found") },
-			content:     []byte("new"),
-			want:        "working-tree",
-		},
-		{
-			name:        "remote-ref fallback",
-			foundOnDisk: false,
-			showFn:      func(context.Context, string, string, string) ([]byte, error) { panic("should not be called") },
-			content:     []byte("remote"),
-			want:        "remote-ref",
+// TestGatherRepositoryFacts_PropagatesGatherError proves an error from
+// the injected gatherer (the shared leaf's zero-value fail-closed
+// contract) is wrapped and returned, never swallowed.
+func TestGatherRepositoryFacts_PropagatesGatherError(t *testing.T) {
+	fake := &fakeRepositoryFactsGatherer{
+		gatherFn: func(context.Context, repositoryfacts.GatherInput) (repositoryfacts.Snapshot, error) {
+			return repositoryfacts.Snapshot{}, errors.New("boom")
 		},
 	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			git := baseGitReaderForRepoFacts()
-			git.showFn = tt.showFn
-			p := newProjector(git, &fakeStateResolver{}, alwaysUnresolvedDefaultBranch)
+	p := newProjector(noOpGitReader(), &fakeStateResolver{}, alwaysUnresolvedDefaultBranch, fake)
 
-			rf, _, err := p.gatherRepositoryFacts(context.Background(), t.TempDir(), "rel/spec.md", tt.content, tt.foundOnDisk)
-			if err != nil {
-				t.Fatalf("gatherRepositoryFacts: %v", err)
-			}
-			if rf.Source != tt.want {
-				t.Fatalf("Source = %q, want %q", rf.Source, tt.want)
-			}
-		})
+	_, _, err := p.gatherRepositoryFacts(context.Background(), "root", "rel/spec.md", []byte("x"), true)
+	if err == nil {
+		t.Fatal("gatherRepositoryFacts: want error when the shared gatherer fails")
 	}
-}
-
-func TestWorktreeFact(t *testing.T) {
-	tests := []struct {
-		name        string
-		root        string
-		wantManaged bool
-		wantName    string
-	}{
-		{"unmanaged plain checkout", "/home/user/code/verdi", false, ""},
-		{"managed worktree", "/home/user/code/verdi/.verdi/data/worktrees/my-design", true, "my-design"},
-		{"managed worktree nested path", "/home/user/code/verdi/.verdi/data/worktrees/my-design/sub", true, "my-design"},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := worktreeFact(tt.root)
-			if got.Managed != tt.wantManaged || got.Name != tt.wantName {
-				t.Fatalf("worktreeFact(%q) = %+v, want managed=%v name=%q", tt.root, got, tt.wantManaged, tt.wantName)
-			}
-		})
-	}
-}
-
-// baseGitReaderForRepoFacts returns a fake wired with harmless defaults for
-// every method gatherRepositoryFacts calls, so a table-driven test only
-// needs to override the one or two methods it actually exercises.
-func baseGitReaderForRepoFacts() *fakeGitReader {
-	g := noOpGitReader()
-	g.remoteURLFn = func(context.Context, string, string) (string, error) { return "", gitx.ErrNoSuchRemote }
-	g.currentBranchFn = func(context.Context, string) (string, error) { return "main", nil }
-	g.revParseFn = func(context.Context, string, string) (string, error) { return "sha", nil }
-	g.statusDirtyFn = func(context.Context, string) (bool, error) { return false, nil }
-	g.stagedPathsFn = func(context.Context, string) ([]string, error) { return nil, nil }
-	g.showFn = func(context.Context, string, string, string) ([]byte, error) { return nil, errors.New("not found") }
-	g.isAncestorFn = func(context.Context, string, string, string) (bool, error) { return false, nil }
-	return g
 }
 
 // --- lifecycle facts -----------------------------------------------------
@@ -731,7 +429,7 @@ func TestResolveActiveBranch(t *testing.T) {
 			git := noOpGitReader()
 			git.hasLocalBranchFn = tt.hasLocal
 			git.hasRemoteTrackingBranchFn = tt.hasRemote
-			p := newProjector(git, &fakeStateResolver{}, alwaysUnresolvedDefaultBranch)
+			p := newProjector(git, &fakeStateResolver{}, alwaysUnresolvedDefaultBranch, noOpRepositoryFactsGatherer())
 
 			fact, discl, err := p.resolveActiveBranch(context.Background(), t.TempDir(), "foo")
 			if err != nil {
@@ -753,7 +451,7 @@ func TestResolveActiveBranch(t *testing.T) {
 func TestResolveActiveBranch_Error(t *testing.T) {
 	git := noOpGitReader()
 	git.hasLocalBranchFn = func(context.Context, string, string) (bool, error) { return false, errors.New("boom") }
-	p := newProjector(git, &fakeStateResolver{}, alwaysUnresolvedDefaultBranch)
+	p := newProjector(git, &fakeStateResolver{}, alwaysUnresolvedDefaultBranch, noOpRepositoryFactsGatherer())
 
 	_, _, err := p.resolveActiveBranch(context.Background(), t.TempDir(), "foo")
 	if err == nil {
@@ -831,7 +529,7 @@ func TestGatherLifecycleFacts_SanitizesRootFromDisclosures(t *testing.T) {
 			}, nil
 		},
 	}
-	p := newProjector(git, state, alwaysUnresolvedDefaultBranch)
+	p := newProjector(git, state, alwaysUnresolvedDefaultBranch, noOpRepositoryFactsGatherer())
 
 	lf, result, err := p.gatherLifecycleFacts(context.Background(), root, "rel/spec.md", "payments", []byte(testFeatureSpecMD), spec)
 	if err != nil {
@@ -897,7 +595,7 @@ func TestGatherLifecycleFacts_HappyPath(t *testing.T) {
 			}, nil
 		},
 	}
-	p := newProjector(git, state, alwaysUnresolvedDefaultBranch)
+	p := newProjector(git, state, alwaysUnresolvedDefaultBranch, noOpRepositoryFactsGatherer())
 
 	lf, result, err := p.gatherLifecycleFacts(context.Background(), t.TempDir(), "rel/spec.md", "payments", []byte(testFeatureSpecMD), spec)
 	if err != nil {
@@ -940,7 +638,7 @@ func TestGatherLifecycleFacts_PartialBaselineNeverMapped(t *testing.T) {
 			}, nil
 		},
 	}
-	p := newProjector(git, state, alwaysUnresolvedDefaultBranch)
+	p := newProjector(git, state, alwaysUnresolvedDefaultBranch, noOpRepositoryFactsGatherer())
 
 	lf, _, err := p.gatherLifecycleFacts(context.Background(), t.TempDir(), "rel/spec.md", "payments", []byte(testFeatureSpecMD), spec)
 	if err != nil {
@@ -961,7 +659,7 @@ func TestGatherLifecycleFacts_ResolveError(t *testing.T) {
 			return specstate.Result{}, errors.New("boom")
 		},
 	}
-	p := newProjector(noOpGitReader(), state, alwaysUnresolvedDefaultBranch)
+	p := newProjector(noOpGitReader(), state, alwaysUnresolvedDefaultBranch, noOpRepositoryFactsGatherer())
 
 	_, _, err = p.gatherLifecycleFacts(context.Background(), t.TempDir(), "rel/spec.md", "payments", []byte(testFeatureSpecMD), spec)
 	if err == nil {
@@ -978,7 +676,7 @@ func TestGatherFacts_HappyPath(t *testing.T) {
 		t.Fatalf("MkdirAll: %v", err)
 	}
 
-	git := baseGitReaderForRepoFacts()
+	git := noOpGitReader()
 	git.hasLocalBranchFn = func(context.Context, string, string) (bool, error) { return false, nil }
 	git.hasRemoteTrackingBranchFn = func(context.Context, string, string, string) (bool, error) { return false, nil }
 	state := &fakeStateResolver{
@@ -986,7 +684,15 @@ func TestGatherFacts_HappyPath(t *testing.T) {
 			return specstate.Result{State: specstate.Proposed, Relation: specstate.RelationNew}, nil
 		},
 	}
-	p := newProjector(git, state, alwaysUnresolvedDefaultBranch)
+	repoFacts := &fakeRepositoryFactsGatherer{
+		gatherFn: func(context.Context, repositoryfacts.GatherInput) (repositoryfacts.Snapshot, error) {
+			return repositoryfacts.Snapshot{
+				Facts:       repositoryfacts.Facts{Relationship: repositoryfacts.RelationshipUnknown, Source: repositoryfacts.SourceHead},
+				Disclosures: []repositoryfacts.DisclosureCode{},
+			}, nil
+		},
+	}
+	p := newProjector(git, state, alwaysUnresolvedDefaultBranch, repoFacts)
 
 	facts, err := p.GatherFacts(context.Background(), &store.Config{Root: root}, "spec/payments")
 	if err != nil {
@@ -1008,7 +714,7 @@ func TestGatherFacts_NotFound(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(root, ".verdi"), 0o755); err != nil {
 		t.Fatalf("MkdirAll: %v", err)
 	}
-	p := newProjector(noOpGitReader(), &fakeStateResolver{}, alwaysUnresolvedDefaultBranch)
+	p := newProjector(noOpGitReader(), &fakeStateResolver{}, alwaysUnresolvedDefaultBranch, noOpRepositoryFactsGatherer())
 
 	_, err := p.GatherFacts(context.Background(), &store.Config{Root: root}, "spec/nope")
 	var nf *NotFoundError
@@ -1020,7 +726,7 @@ func TestGatherFacts_NotFound(t *testing.T) {
 func TestGatherFacts_ComponentClassRefused(t *testing.T) {
 	root := t.TempDir()
 	writeSpec(t, root, store.ZoneActive, "shared-lib", testComponentSpecMD)
-	p := newProjector(noOpGitReader(), &fakeStateResolver{}, alwaysUnresolvedDefaultBranch)
+	p := newProjector(noOpGitReader(), &fakeStateResolver{}, alwaysUnresolvedDefaultBranch, noOpRepositoryFactsGatherer())
 
 	_, err := p.GatherFacts(context.Background(), &store.Config{Root: root}, "spec/shared-lib")
 	if err == nil {
@@ -1207,7 +913,7 @@ func TestResolveTargetBytes_StoryRef_StoryClassReachable(t *testing.T) {
 	root := t.TempDir()
 	writeSpec(t, root, store.ZoneActive, "loan-api", testStorySpecMD)
 
-	p := newProjector(noOpGitReader(), &fakeStateResolver{}, alwaysUnresolvedDefaultBranch)
+	p := newProjector(noOpGitReader(), &fakeStateResolver{}, alwaysUnresolvedDefaultBranch, noOpRepositoryFactsGatherer())
 	name, relPath, content, foundOnDisk, err := p.resolveTargetBytes(context.Background(), root, "jira:LOAN-1482")
 	if err != nil {
 		t.Fatalf("resolveTargetBytes: %v", err)
@@ -1250,7 +956,7 @@ func TestResolveTargetBytes_StoryRef_AmbiguousFailsClosed(t *testing.T) {
 				writeSpec(t, root, store.ZoneActive, name, content)
 			}
 
-			p := newProjector(noOpGitReader(), &fakeStateResolver{}, alwaysUnresolvedDefaultBranch)
+			p := newProjector(noOpGitReader(), &fakeStateResolver{}, alwaysUnresolvedDefaultBranch, noOpRepositoryFactsGatherer())
 			_, _, _, _, err := p.resolveTargetBytes(context.Background(), root, "jira:LOAN-1482")
 			if err == nil {
 				t.Fatal("resolveTargetBytes: want an ambiguity refusal, got nil")
@@ -1294,7 +1000,7 @@ func TestNotFoundError_SearchedIsHonestPerForm(t *testing.T) {
 		resolveDB := func(context.Context, string) (specstate.Branch, bool) {
 			return specstate.Branch{Name: "main", Ref: "origin/main"}, true
 		}
-		p := newProjector(noOpGitReader(), &fakeStateResolver{}, resolveDB)
+		p := newProjector(noOpGitReader(), &fakeStateResolver{}, resolveDB, noOpRepositoryFactsGatherer())
 
 		_, _, _, _, err := p.resolveTargetBytes(context.Background(), root, "jira:NOPE-1")
 		var nf *NotFoundError
@@ -1322,7 +1028,7 @@ func TestNotFoundError_SearchedIsHonestPerForm(t *testing.T) {
 		resolveDB := func(context.Context, string) (specstate.Branch, bool) {
 			return specstate.Branch{Name: "main", Ref: "origin/main"}, true
 		}
-		p := newProjector(git, &fakeStateResolver{}, resolveDB)
+		p := newProjector(git, &fakeStateResolver{}, resolveDB, noOpRepositoryFactsGatherer())
 
 		_, _, _, _, err := p.resolveTargetBytes(context.Background(), root, "spec/nope")
 		var nf *NotFoundError

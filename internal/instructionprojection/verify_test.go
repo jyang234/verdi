@@ -125,7 +125,7 @@ func TestGenerateThenVerifyCore_RoundTripClean(t *testing.T) {
 		t.Fatalf("Generate() unexpected error: %v", err)
 	}
 
-	report, err := verify(root, store.Constitution, store.Policies, ep)
+	report, err := verify(root, store, ep)
 	if err != nil {
 		t.Fatalf("verify() unexpected error: %v", err)
 	}

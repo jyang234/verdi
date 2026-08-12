@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/jyang234/verdi/internal/policyauthority"
 )
 
 // TestMultiAdapter_GenerateThenVerify_Clean is the realistic two-adapter
@@ -194,6 +196,65 @@ func TestVerify_OverlappingManagedPaths_FailsClosed(t *testing.T) {
 	}
 	if report != nil {
 		t.Fatalf("Verify() report = %+v, want nil alongside the overlap error", report)
+	}
+}
+
+// TestManagedPaths_MultiAdapter_ReturnsSortedUnion proves ManagedPaths
+// returns every managed path across ALL adapters — not one requested
+// adapter's own subset — sorted and de-duplicated, so a caller (the `verdi
+// context compile` --out guard) can refuse a destination that aliases any
+// OTHER adapter's managed file, not only the one it requested.
+func TestManagedPaths_MultiAdapter_ReturnsSortedUnion(t *testing.T) {
+	root := newMultiFixtureRoot(t)
+	store, err := policyauthority.Load(root)
+	if err != nil {
+		t.Fatalf("policyauthority.Load: %v", err)
+	}
+
+	got, err := ManagedPaths(store.Constitution.Adapters)
+	if err != nil {
+		t.Fatalf("ManagedPaths: %v", err)
+	}
+	want := []string{"AGENTS.md", "CLAUDE.md"}
+	if len(got) != len(want) {
+		t.Fatalf("ManagedPaths() = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("ManagedPaths() = %v, want %v", got, want)
+		}
+	}
+}
+
+// TestManagedPaths_ZeroAdapters_ReturnsEmpty proves the negative/edge
+// path: no adapters declared means no managed path, never nil-vs-empty
+// ambiguity that would trip up a caller ranging over the result.
+func TestManagedPaths_ZeroAdapters_ReturnsEmpty(t *testing.T) {
+	got, err := ManagedPaths(nil)
+	if err != nil {
+		t.Fatalf("ManagedPaths(nil): %v", err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("ManagedPaths(nil) = %v, want empty", got)
+	}
+}
+
+// TestManagedPaths_Overlapping_FailsClosed pins ManagedPaths to the same
+// fail-closed posture as Generate/Verify: an unsatisfiable constitution
+// (two adapters declaring the same path) is a named error, never a
+// silently deduplicated union that would hide the conflict from the --out
+// guard.
+func TestManagedPaths_Overlapping_FailsClosed(t *testing.T) {
+	root := t.TempDir()
+	writeTree(t, root, overlappingAdapterStoreFiles())
+	store, err := policyauthority.Load(root)
+	if err != nil {
+		t.Fatalf("policyauthority.Load: %v", err)
+	}
+
+	_, err = ManagedPaths(store.Constitution.Adapters)
+	if !errors.Is(err, ErrOverlappingManagedPath) {
+		t.Fatalf("ManagedPaths() error = %v, want errors.Is(err, ErrOverlappingManagedPath)", err)
 	}
 }
 

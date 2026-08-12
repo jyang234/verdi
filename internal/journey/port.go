@@ -11,6 +11,7 @@ import (
 	"github.com/jyang234/verdi/internal/evidence"
 	"github.com/jyang234/verdi/internal/gitx"
 	"github.com/jyang234/verdi/internal/policyauthority"
+	"github.com/jyang234/verdi/internal/repositoryfacts"
 	"github.com/jyang234/verdi/internal/specstate"
 	"github.com/jyang234/verdi/internal/store"
 )
@@ -183,6 +184,19 @@ func (policyAuthorityProfileLoader) Load(_ context.Context, root string) (Profil
 // function.
 type DefaultBranchResolver func(ctx context.Context, root string) (specstate.Branch, bool)
 
+// RepositoryFactsGatherer is journey's consumer-owned port (04 §port
+// pattern) onto the shared internal/repositoryfacts leaf (SI-85): exactly
+// the method repositoryfacts.Gatherer exposes, narrowed to what journey
+// needs, so journey's own tests can substitute an in-process fake with no
+// real git process at all — mirroring this file's other consumer-owned
+// ports (StateResolver, ProfileLoader, ObligationQualityReader).
+// repositoryfacts.Gatherer (a value type with a value-receiver Gather
+// method) satisfies this interface structurally; no adapter wrapper is
+// needed.
+type RepositoryFactsGatherer interface {
+	Gather(ctx context.Context, in repositoryfacts.GatherInput) (repositoryfacts.Snapshot, error)
+}
+
 // ObligationQualityFact is journey's consumer-owned projection of the shared
 // evidence assessment for one declared (AC, kind) pair.
 type ObligationQualityFact struct {
@@ -321,12 +335,13 @@ type Projector struct {
 	profiles             ProfileLoader
 	obligations          ObligationQualityReader
 	resolveDefaultBranch DefaultBranchResolver
+	repoFacts            RepositoryFactsGatherer
 }
 
 // NewProjector returns a Projector backed by real git plumbing, the real
 // internal/specstate resolver, the policyauthority-backed profile loader,
-// and specstate.ResolveDefaultBranch — the only constructor production
-// callers may use.
+// specstate.ResolveDefaultBranch, and the real internal/repositoryfacts
+// leaf — the only constructor production callers may use.
 func NewProjector() Projector {
 	return Projector{
 		git:                  NewGitReader(),
@@ -334,11 +349,12 @@ func NewProjector() Projector {
 		profiles:             NewProfileLoader(),
 		obligations:          NewObligationQualityReader(),
 		resolveDefaultBranch: specstate.ResolveDefaultBranch,
+		repoFacts:            repositoryfacts.NewGatherer(),
 	}
 }
 
 // newProjector is the test-only seam: package tests construct a Projector
 // over in-process fakes.
-func newProjector(git GitReader, state StateResolver, resolveDefaultBranch DefaultBranchResolver) Projector {
-	return Projector{git: git, state: state, profiles: NewProfileLoader(), obligations: evidenceObligationQualityReader{git: git}, resolveDefaultBranch: resolveDefaultBranch}
+func newProjector(git GitReader, state StateResolver, resolveDefaultBranch DefaultBranchResolver, repoFacts RepositoryFactsGatherer) Projector {
+	return Projector{git: git, state: state, profiles: NewProfileLoader(), obligations: evidenceObligationQualityReader{git: git}, resolveDefaultBranch: resolveDefaultBranch, repoFacts: repoFacts}
 }
