@@ -573,17 +573,17 @@ func TestCompilerStage4ComponentClassRefusalIsTyped(t *testing.T) {
 	}
 }
 
-// sentinelWorktreeErr is the fixed operational failure
+// errSentinelWorktree is the fixed operational failure
 // stubWorktreeChangedPathsErr injects at stage 6, so a test can prove
 // Compile actually reached stage 6 (rather than stopping at, or being
 // vacuously satisfied by, stage 5) without needing this compiler_test.go
 // fixture to carry a full classification/manifest-assembly setup — that
 // full-success proof belongs to integration_test.go's hermetic
 // end-to-end tests instead.
-var sentinelWorktreeErr = errors.New("contextcompile: fixture stage 6 worktree failure")
+var errSentinelWorktree = errors.New("contextcompile: fixture stage 6 worktree failure")
 
 func stubWorktreeChangedPathsErr(context.Context, string) ([]string, error) {
-	return nil, sentinelWorktreeErr
+	return nil, errSentinelWorktree
 }
 
 // TestCompilerStage5CleanProjectionProceedsPastStage5 proves a clean
@@ -602,7 +602,7 @@ func TestCompilerStage5CleanProjectionProceedsPastStage5(t *testing.T) {
 	c := newCompilerWithPorts(gitWithWorktree{GitReader: git, worktree: stubWorktreeChangedPathsErr}, states, defaultAuthorityLoader{}, nil, repoFacts, projection)
 	req := validCompileRequest(ref)
 	_, err := c.Compile(context.Background(), root, req)
-	if !errors.Is(err, sentinelWorktreeErr) {
+	if !errors.Is(err, errSentinelWorktree) {
 		t.Fatalf("expected Compile to reach stage 6 and surface the injected worktree failure, got %T %v", err, err)
 	}
 	if IsRefusal(err) {
@@ -693,7 +693,7 @@ func (p orderRecordingProjection) Verify(root string) (*instructionprojection.Re
 // that one method's call sites are not stage-exclusive, and compiler.go's
 // own Compile doc comment already discloses that stages 6/7/8 are not
 // claimed to run in strict Go-statement stage order either. Stage 6 is
-// deliberately made to fail (the same injected sentinelWorktreeErr
+// deliberately made to fail (the same injected errSentinelWorktree
 // TestCompilerStage5CleanProjectionProceedsPastStage5 uses) so this test
 // stays a lightweight port-boundary/order proof; the full stage 6-12
 // pipeline reaching a successful Result is integration_test.go's concern.
@@ -714,7 +714,7 @@ func TestCompilerStageOrderRecordsSequence(t *testing.T) {
 	)
 	req := validCompileRequest(ref)
 	_, err := c.Compile(context.Background(), root, req)
-	if !errors.Is(err, sentinelWorktreeErr) {
+	if !errors.Is(err, errSentinelWorktree) {
 		t.Fatalf("expected the injected stage 6 worktree failure, got %T %v", err, err)
 	}
 	if IsRefusal(err) {
@@ -734,7 +734,7 @@ func TestCompilerStageOrderRecordsSequence(t *testing.T) {
 	gather := indexOf("stage3:repoFacts.Gather")
 	verify := indexOf("stage5:projection.Verify")
 	worktree := indexOf("stage6:git.WorktreeChangedPaths")
-	if !(load < gather && gather < verify && verify < worktree) {
+	if load >= gather || gather >= verify || verify >= worktree {
 		t.Fatalf("stage order regressed: authority.Load=%d repoFacts.Gather=%d projection.Verify=%d git.WorktreeChangedPaths=%d; full log %v",
 			load, gather, verify, worktree, log)
 	}
