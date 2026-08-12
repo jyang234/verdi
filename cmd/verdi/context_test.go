@@ -288,6 +288,9 @@ func TestCmdContextCompile_FlagShapeFailures(t *testing.T) {
 		{name: "empty --out value via =", args: []string{"--request", "a.json", "--out="}, wantStderr: "--out requires a value"},
 		{name: "request equals out", args: []string{"--request", "a.json", "--out", "a.json"}},
 		{name: "request equals out, different spelling", args: []string{"--request", "./a.json", "--out", "a.json"}},
+		{name: "--out with an interior .. element", args: []string{"--request", "a.json", "--out", "sub/../x.json"}, wantStderr: contextOutDotDotDiagnostic},
+		{name: "--out with a leading .. element", args: []string{"--request", "a.json", "--out", "../x.json"}, wantStderr: contextOutDotDotDiagnostic},
+		{name: "--out that is exactly ..", args: []string{"--request", "a.json", "--out", ".."}, wantStderr: contextOutDotDotDiagnostic},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -856,6 +859,89 @@ func TestCmdContextCompile_OutAliasesReservedPath_Refused(t *testing.T) {
 			}
 			if !bytes.Equal(requestBefore, after) {
 				t.Fatal("the input request file was clobbered despite the refusal")
+			}
+		})
+	}
+}
+
+// contextOutDotDotDiagnostic is the exact deterministic diagnostic the
+// belt-and-braces `..` rejection emits. It is asserted from both the
+// flag-shape table and the symlink-traversal test below, so the two can
+// never drift apart.
+const contextOutDotDotDiagnostic = `--out must not contain a ".." path element`
+
+// TestCmdContextCompile_OutTraversesSymlinkedParentWithDotDot_Refused is the
+// single-string-discipline witness: `filepath.Clean` collapses a `..`
+// element LEXICALLY, before any symlink is resolved, but the kernel
+// resolves the symlink FIRST and only then applies `..`. So a spelling like
+// `a/../sneaky.json`, where `a` is a symlink into `.verdi/`, canonicalizes
+// (for the guard) to a harmless destination while the write it authorizes
+// actually lands inside the store — exactly the write authority design §11
+// and the Wave-3 plan's "never writes .verdi/, managed projection files,
+// payload files, Git state, or a worktree" constraint forbid.
+//
+// Both spellings below must be refused (exit 2) with nothing written
+// anywhere: the first would land in `.verdi/`, the second would clobber the
+// committed managed projection `AGENTS.md`.
+func TestCmdContextCompile_OutTraversesSymlinkedParentWithDotDot_Refused(t *testing.T) {
+	repo := buildContextCompileRepo(t, map[string]string{
+		".verdi/specs/active/feature-alpha/spec.md": contextFeatureAlphaSpec(t),
+	})
+	t.Chdir(repo.Dir)
+	reqPath := writeContextRequestFile(t, repo.Dir, "request.json", contextRequestBytes(t, "spec/feature-alpha", contextcompile.PhaseDesign, nil))
+
+	if err := os.MkdirAll(filepath.Join(repo.Dir, ".verdi", "sub"), 0o755); err != nil {
+		t.Fatalf("creating .verdi/sub: %v", err)
+	}
+	if err := os.Symlink(filepath.Join(repo.Dir, ".verdi", "sub"), filepath.Join(repo.Dir, "a")); err != nil {
+		t.Fatalf("creating a -> .verdi/sub symlink: %v", err)
+	}
+
+	projectionBefore, err := os.ReadFile(filepath.Join(repo.Dir, "AGENTS.md"))
+	if err != nil {
+		t.Fatalf("reading the managed projection: %v", err)
+	}
+
+	// Spelled with FromSlash rather than filepath.Join: Join CLEANS its
+	// result, which would destroy the very `..` element under test.
+	cases := []struct {
+		name string
+		out  string
+		// lands names the file the unguarded write would actually create
+		// or overwrite, resolved through the kernel's symlink-first rules.
+		lands string
+	}{
+		{"dot-dot after a symlink into the store zone", filepath.FromSlash("a/../sneaky.json"), filepath.Join(repo.Dir, ".verdi", "sneaky.json")},
+		{"dot-dot after a symlink onto a managed projection", filepath.FromSlash("a/../../AGENTS.md"), filepath.Join(repo.Dir, "AGENTS.md")},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var stdout, stderr bytes.Buffer
+			got := cmdContextCompile([]string{"--request", reqPath, "--out", tc.out}, strings.NewReader(""), &stdout, &stderr)
+			if got != 2 {
+				t.Fatalf("cmdContextCompile(--out %s) = %d, want 2; stderr=%s", tc.out, got, stderr.String())
+			}
+			if stdout.Len() != 0 {
+				t.Fatalf("stdout = %q, want empty", stdout.String())
+			}
+			if !strings.Contains(stderr.String(), contextOutDotDotDiagnostic) {
+				t.Fatalf("stderr = %q, want it to contain %q", stderr.String(), contextOutDotDotDiagnostic)
+			}
+			if _, err := os.Stat(filepath.Join(repo.Dir, ".verdi", "sneaky.json")); err == nil {
+				t.Fatal(".verdi/sneaky.json was written despite the refusal")
+			}
+			if _, err := os.Stat(filepath.Join(repo.Dir, ".verdi", "sub", "sneaky.json")); err == nil {
+				t.Fatal(".verdi/sub/sneaky.json was written despite the refusal")
+			}
+			if _, err := os.Stat(filepath.Join(repo.Dir, "sneaky.json")); err == nil {
+				t.Fatal("sneaky.json was written despite the refusal")
+			}
+			after, err := os.ReadFile(filepath.Join(repo.Dir, "AGENTS.md"))
+			if err != nil {
+				t.Fatalf("reading the managed projection after the refusal: %v", err)
+			}
+			if !bytes.Equal(projectionBefore, after) {
+				t.Fatalf("the managed projection %s was rewritten despite the refusal", tc.lands)
 			}
 		})
 	}

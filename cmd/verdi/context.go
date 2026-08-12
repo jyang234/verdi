@@ -82,6 +82,16 @@ func cmdContextCompile(args []string, stdin io.Reader, stdout, stderr io.Writer)
 		fmt.Fprintln(stderr, "context compile: --out requires a value")
 		return 2
 	}
+	// Belt-and-braces against the lexical/kernel `..` split (see
+	// canonicalOutPath): a destination spelled with a `..` element is
+	// rejected outright at flag-shape time, hermetically, before any store
+	// root is resolved. The caller can always respell the same destination
+	// without `..`, so this over-refusal costs nothing and removes a whole
+	// class of guard-versus-write divergence.
+	if hasOut && hasDotDotElement(outArg) {
+		fmt.Fprintln(stderr, "context compile:", errContextOutDotDot)
+		return 2
+	}
 	if hasOut && requestArg != "-" && sameFileArg(requestArg, outArg) {
 		fmt.Fprintln(stderr, "context compile: --request and --out must not name the same path")
 		return 2
@@ -93,8 +103,19 @@ func cmdContextCompile(args []string, stdin io.Reader, stdout, stderr io.Writer)
 		return 2
 	}
 
+	// outCanon is the ONE destination string this command ever uses once a
+	// root exists: every guard below approves it, and the write at the end
+	// receives exactly it. Canonicalizing once and reusing the result is
+	// what makes "the guard approved this write" a true statement rather
+	// than a statement about a different, merely similar, path.
+	var outCanon string
 	if hasOut {
-		if err := validateContextOutputStoreZone(root, outArg, requestArg); err != nil {
+		outCanon, err = canonicalOutPath(outArg)
+		if err != nil {
+			fmt.Fprintln(stderr, "context compile:", err)
+			return 2
+		}
+		if err := validateContextOutputStoreZone(root, outCanon, requestArg); err != nil {
 			fmt.Fprintln(stderr, "context compile:", err)
 			return 2
 		}
@@ -131,11 +152,11 @@ func cmdContextCompile(args []string, stdin io.Reader, stdout, stderr io.Writer)
 		return 0
 	}
 
-	if err := validateContextOutputProjectionPaths(root, outArg, result.ManagedProjectionPaths); err != nil {
+	if err := validateContextOutputProjectionPaths(root, outCanon, result.ManagedProjectionPaths); err != nil {
 		fmt.Fprintln(stderr, "context compile:", err)
 		return 2
 	}
-	if err := atomicfile.Write(outArg, result.ManifestBytes, 0o644); err != nil {
+	if err := atomicfile.Write(outCanon, result.ManifestBytes, 0o644); err != nil {
 		fmt.Fprintln(stderr, "context compile: writing manifest:", err)
 		return 2
 	}
@@ -231,13 +252,9 @@ func sameFileArg(a, b string) bool {
 // is even read, so an unsafe --out never triggers a compile at all. The
 // comparison is over canonical (symlink-resolved) spellings, so a
 // symlinked parent or a case-variant spelling of a reserved path cannot
-// smuggle a write into it.
-func validateContextOutputStoreZone(root, out, request string) error {
-	outCanon, err := canonicalGuardPath(out)
-	if err != nil {
-		return fmt.Errorf("resolving --out: %w", err)
-	}
-
+// smuggle a write into it. outCanon is canonicalOutPath's result — the
+// very string the eventual write receives, never the caller's raw spelling.
+func validateContextOutputStoreZone(root, outCanon, request string) error {
 	forbidden := []string{
 		filepath.Join(root, ".git"),
 		filepath.Join(root, ".verdi"),
@@ -258,12 +275,9 @@ func validateContextOutputStoreZone(root, out, request string) error {
 // managedProjectionPaths is Result.ManagedProjectionPaths — the full,
 // cross-adapter set stage 5 of Compile already resolves the constitution
 // to compute, so this guard never triggers a second authority load.
-func validateContextOutputProjectionPaths(root, out string, managedProjectionPaths []string) error {
-	outCanon, err := canonicalGuardPath(out)
-	if err != nil {
-		return fmt.Errorf("resolving --out: %w", err)
-	}
-
+// outCanon is the same canonicalOutPath result the store-zone guard
+// already approved and the write is about to receive.
+func validateContextOutputProjectionPaths(root, outCanon string, managedProjectionPaths []string) error {
 	forbidden := make([]string, 0, len(managedProjectionPaths))
 	for _, rel := range managedProjectionPaths {
 		forbidden = append(forbidden, filepath.Join(root, filepath.FromSlash(rel)))
@@ -277,6 +291,49 @@ func validateContextOutputProjectionPaths(root, out string, managedProjectionPat
 // canonical spelling, by case-folded spelling, or by filesystem identity —
 // reports exactly this message.
 var errContextOutReserved = errors.New("--out must not target a reserved store path, a managed projection file, or the input request file")
+
+// errContextOutDotDot is the deterministic, path-free diagnostic for an
+// --out spelling that carries a ".." element. See canonicalOutPath for why
+// such a spelling is refused outright rather than resolved.
+var errContextOutDotDot = errors.New(`--out must not contain a ".." path element`)
+
+// hasDotDotElement reports whether p contains a ".." PATH ELEMENT under
+// either separator convention. It is element-wise, never a substring test:
+// a file honestly named "..notes.json" or "a..b" carries no traversal and
+// stays allowed.
+func hasDotDotElement(p string) bool {
+	for _, seg := range strings.FieldsFunc(p, func(r rune) bool {
+		return r == '/' || r == filepath.Separator
+	}) {
+		if seg == ".." {
+			return true
+		}
+	}
+	return false
+}
+
+// canonicalOutPath returns the single absolute, alias-resolved destination
+// string the command uses for BOTH the reserved-path guards and the write
+// itself.
+//
+// The single-string discipline exists because filepath.Clean collapses a
+// ".." element LEXICALLY, before any symlink is resolved, while the kernel
+// resolves each symlink component FIRST and only then applies "..". With
+// `a` a symlink to `.verdi/sub`, the spelling `a/../out.json` cleans to
+// `./out.json` (which the guard happily approves) but names `.verdi/
+// out.json` to the kernel (which authority design §11 forbids writing).
+// Handing the write the guard's own canonical string closes that gap by
+// construction: there is no second path to disagree with the approved one.
+// hasDotDotElement rejects such spellings earlier still, so this function's
+// input is already ".."-free; the discipline is kept structurally anyway so
+// no future spelling can reintroduce the divergence.
+func canonicalOutPath(p string) (string, error) {
+	canon, err := canonicalGuardPath(p)
+	if err != nil {
+		return "", fmt.Errorf("resolving --out: %w", err)
+	}
+	return canon, nil
+}
 
 // checkNotWithinAny returns errContextOutReserved when the canonical
 // outCanon equals, or falls inside, any directory or file in forbidden.
