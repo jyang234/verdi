@@ -234,6 +234,75 @@ func TestPolicyDispositionPath_RelIsSlashOfAbsBelowRoot(t *testing.T) {
 	}
 }
 
+// TestPolicyDispositionPathEmptyRootDisplayForm is
+// TestAttestationPathEmptyRootDisplayForm's own twin for the disposition
+// accessor: an empty root drops the leading element, yielding the
+// ".verdi/…"-rooted display form a refusal or disclosure names instead of a
+// temp-dir- or checkout-rooted absolute path.
+func TestPolicyDispositionPathEmptyRootDisplayForm(t *testing.T) {
+	if got, want := PolicyDispositionPath("", "review-no-conflict"), filepath.FromSlash(".verdi/policy/dispositions/review-no-conflict.md"); got != want {
+		t.Errorf("PolicyDispositionPath(\"\", …) = %q, want %q", got, want)
+	}
+}
+
+// TestPolicyDispositionPath_EdgeCaseNamesAreJoinedNotValidated documents
+// what this accessor pair does with a degenerate name. Like every sibling
+// in paths.go — AttestationPath, ObligationPath, WaiverPath, ConflictPath —
+// it is a PURE JOIN helper: it never validates its name, so a caller's
+// empty, separator-bearing, traversal, or non-kebab name is joined and
+// path-cleaned rather than refused here.
+//
+// That is deliberate, not a gap: the closed name grammar lives in
+// policyartifact.ClassifyPolicyPath, the seam
+// TestPolicyDispositionPath_AgreesWithPolicyArtifactGrammar pins and
+// internal/policyauthority's loader actually consults. This test therefore
+// records the join behavior AND shows that each degenerate name's resulting
+// store path is refused by that grammar, so no such path can enter the
+// constitution store through the accessor.
+func TestPolicyDispositionPath_EdgeCaseNamesAreJoinedNotValidated(t *testing.T) {
+	const policyPrefix = ".verdi/policy/"
+	cases := []struct {
+		name    string
+		input   string
+		wantRel string
+		why     string
+	}{
+		{"empty", "", ".verdi/policy/dispositions/.md", "an empty name yields a bare extension, not an error"},
+		{"nested separator", "sub/ruling", ".verdi/policy/dispositions/sub/ruling.md", "a separator nests rather than being rejected or escaped"},
+		{"parent traversal", "../escape", ".verdi/policy/escape.md", "path.Join CLEANS the traversal, so the result leaves the dispositions directory"},
+		{"non-kebab", "Review Ruling", ".verdi/policy/dispositions/Review Ruling.md", "case and spaces survive the join untouched"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			rel := PolicyDispositionRelPath(tc.input)
+			if rel != tc.wantRel {
+				t.Errorf("PolicyDispositionRelPath(%q) = %q, want %q (%s)", tc.input, rel, tc.wantRel, tc.why)
+			}
+			if got, want := PolicyDispositionPath("/store", tc.input), filepath.FromSlash("/store/"+tc.wantRel); got != want {
+				t.Errorf("PolicyDispositionPath(\"/store\", %q) = %q, want %q", tc.input, got, want)
+			}
+			if !strings.HasPrefix(rel, policyPrefix) {
+				t.Fatalf("PolicyDispositionRelPath(%q) = %q, want a %q-prefixed path", tc.input, rel, policyPrefix)
+			}
+			if _, _, err := policyartifact.ClassifyPolicyPath(strings.TrimPrefix(rel, policyPrefix)); err == nil {
+				t.Errorf("policyartifact.ClassifyPolicyPath accepted %q built from name %q; the closed grammar must refuse it", rel, tc.input)
+			}
+		})
+	}
+}
+
+// TestPolicyDispositionPath_DotSegmentIsCleaned is the edge case above's
+// one non-refusing member, separated because it proves the opposite half of
+// the same "join, then clean" behavior: a leading "./" is cleaned away, so
+// the result is the ordinary path for the bare name and the grammar accepts
+// it. A caller must not read that as validation — only as path.Join's
+// documented cleaning.
+func TestPolicyDispositionPath_DotSegmentIsCleaned(t *testing.T) {
+	if got, want := PolicyDispositionRelPath("./ruling"), PolicyDispositionRelPath("ruling"); got != want {
+		t.Errorf("PolicyDispositionRelPath(%q) = %q, want it cleaned to %q", "./ruling", got, want)
+	}
+}
+
 // TestPolicyDispositionPath_AgreesWithPolicyArtifactGrammar proves
 // PolicyDispositionPath/RelPath never drift from
 // policyartifact.DirDispositions or the policy-disposition/<name> id
