@@ -14,6 +14,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -655,23 +656,136 @@ func TestCmdContextCompile_OutAliasesReservedPath_Refused(t *testing.T) {
 	}
 }
 
-// TestCmdContextCompile_StderrHasNoAbsoluteCheckoutPath proves the
-// deterministic-diagnostic constraint (Task 8 Step 1): stderr never
-// carries the store root's own absolute filesystem path.
-func TestCmdContextCompile_StderrHasNoAbsoluteCheckoutPath(t *testing.T) {
+// contextRunGit runs one git command in dir, failing the test on a
+// non-zero exit (this package has no shared runner; gate_test.go/
+// feature_test.go each carry their own single-purpose one).
+func contextRunGit(t *testing.T, dir string, args ...string) {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git %s: %v\n%s", strings.Join(args, " "), err, out)
+	}
+}
+
+// contextStderrSecrets are the sentinel strings the hygiene assertion
+// requires never to appear in a diagnostic: the drifted projection file's
+// own bytes, an uncommitted worktree file's bytes, and the spec fixture's
+// body prose (payload content that only a leaking diagnostic could echo).
+var contextStderrSecrets = []string{
+	"SENTINEL-DRIFTED-PROJECTION-BYTES",
+	"SENTINEL-UNCOMMITTED-WORKTREE-BYTES",
+	"Body prose must not enter the fragment.",
+}
+
+// contextStderrRemoteURL is the sentinel remote the hygiene fixtures
+// configure, so "no raw remote URL" is an assertion with something real to
+// find rather than a vacuous one.
+const contextStderrRemoteURL = "https://verdi-hygiene.invalid/secret-origin.git"
+
+// assertContextStderrHygienic enforces Task 8 Step 1's deterministic-
+// diagnostic constraint on one stderr text: no absolute checkout path, no
+// raw remote URL (nor any URL at all), and no payload or uncommitted
+// content. A caller-supplied absolute --request path echoed back is
+// permitted and is deliberately NOT asserted away — the constraint is
+// about what the command discloses from the checkout, not about repeating
+// what the caller typed.
+func assertContextStderrHygienic(t *testing.T, stderr, root string) {
+	t.Helper()
+	if stderr == "" {
+		t.Fatal("stderr is empty, want a diagnostic to inspect")
+	}
+	if strings.Contains(stderr, root) {
+		t.Fatalf("stderr leaks the absolute checkout path %q: %q", root, stderr)
+	}
+	if strings.Contains(stderr, contextStderrRemoteURL) || strings.Contains(stderr, "://") {
+		t.Fatalf("stderr leaks a raw remote URL: %q", stderr)
+	}
+	for _, secret := range contextStderrSecrets {
+		if strings.Contains(stderr, secret) {
+			t.Fatalf("stderr leaks payload or uncommitted content %q: %q", secret, stderr)
+		}
+	}
+}
+
+// buildContextHygieneRepo builds the shared hygiene fixture: the standard
+// compile repo plus a sentinel origin remote and a sentinel uncommitted
+// worktree file, so a leaking diagnostic has something recognizable to
+// leak.
+func buildContextHygieneRepo(t *testing.T) *fixturegit.Repo {
+	t.Helper()
 	repo := buildContextCompileRepo(t, map[string]string{
 		".verdi/specs/active/feature-alpha/spec.md": contextFeatureAlphaSpec(t),
 	})
-	t.Chdir(repo.Dir)
-	reqPath := writeContextRequestFile(t, repo.Dir, "request.json", contextRequestBytes(t, "spec/feature-alpha", contextcompile.PhaseDesign, nil))
-	outPath := filepath.Join(repo.Dir, ".verdi", "sneaky.json")
+	contextRunGit(t, repo.Dir, "remote", "add", "origin", contextStderrRemoteURL)
+	if err := os.WriteFile(filepath.Join(repo.Dir, "uncommitted-notes.txt"), []byte("SENTINEL-UNCOMMITTED-WORKTREE-BYTES\n"), 0o644); err != nil {
+		t.Fatalf("writing uncommitted sentinel: %v", err)
+	}
+	return repo
+}
 
-	var stdout, stderr bytes.Buffer
-	got := cmdContextCompile([]string{"--request", reqPath, "--out", outPath}, strings.NewReader(""), &stdout, &stderr)
-	if got != 2 {
-		t.Fatalf("cmdContextCompile = %d, want 2; stderr=%s", got, stderr.String())
-	}
-	if strings.Contains(stderr.String(), repo.Dir) {
-		t.Fatalf("stderr leaks the absolute checkout path: %q", stderr.String())
-	}
+// TestCmdContextCompile_StderrHygiene proves the deterministic-diagnostic
+// constraint (Task 8 Step 1) across the command's whole diagnostic
+// surface, not just one fixed refusal string that could not carry a path
+// even in principle: the reserved-path guard, the request-read failure,
+// and two compile-stage failures — an unresolvable spec target and a
+// drifted managed projection whose worktree bytes are uncommitted.
+func TestCmdContextCompile_StderrHygiene(t *testing.T) {
+	t.Run("reserved --out refusal", func(t *testing.T) {
+		repo := buildContextHygieneRepo(t)
+		t.Chdir(repo.Dir)
+		reqPath := writeContextRequestFile(t, repo.Dir, "request.json", contextRequestBytes(t, "spec/feature-alpha", contextcompile.PhaseDesign, nil))
+
+		var stdout, stderr bytes.Buffer
+		got := cmdContextCompile([]string{"--request", reqPath, "--out", filepath.Join(repo.Dir, ".verdi", "sneaky.json")}, strings.NewReader(""), &stdout, &stderr)
+		if got != 2 {
+			t.Fatalf("cmdContextCompile = %d, want 2; stderr=%s", got, stderr.String())
+		}
+		assertContextStderrHygienic(t, stderr.String(), repo.Dir)
+	})
+
+	t.Run("request read failure", func(t *testing.T) {
+		repo := buildContextHygieneRepo(t)
+		t.Chdir(repo.Dir)
+		// The missing request lives OUTSIDE the checkout, so the
+		// permitted echo of the caller's own --request path can never
+		// account for a checkout path appearing in the diagnostic.
+		missing := filepath.Join(t.TempDir(), "does-not-exist.json")
+
+		var stdout, stderr bytes.Buffer
+		got := cmdContextCompile([]string{"--request", missing}, strings.NewReader(""), &stdout, &stderr)
+		if got != 2 {
+			t.Fatalf("cmdContextCompile(missing request) = %d, want 2; stderr=%s", got, stderr.String())
+		}
+		assertContextStderrHygienic(t, stderr.String(), repo.Dir)
+	})
+
+	t.Run("compile-stage failure: unresolvable spec target", func(t *testing.T) {
+		repo := buildContextHygieneRepo(t)
+		t.Chdir(repo.Dir)
+		reqPath := writeContextRequestFile(t, repo.Dir, "request.json", contextRequestBytes(t, "spec/feature-nonexistent", contextcompile.PhaseDesign, nil))
+
+		var stdout, stderr bytes.Buffer
+		got := cmdContextCompile([]string{"--request", reqPath}, strings.NewReader(""), &stdout, &stderr)
+		if got == 0 {
+			t.Fatalf("cmdContextCompile(unresolvable spec) = 0, want a failure; stdout=%s", stdout.String())
+		}
+		assertContextStderrHygienic(t, stderr.String(), repo.Dir)
+	})
+
+	t.Run("compile-stage failure: drifted managed projection", func(t *testing.T) {
+		repo := buildContextHygieneRepo(t)
+		t.Chdir(repo.Dir)
+		if err := os.WriteFile(filepath.Join(repo.Dir, "AGENTS.md"), []byte("SENTINEL-DRIFTED-PROJECTION-BYTES\n"), 0o644); err != nil {
+			t.Fatalf("drifting AGENTS.md: %v", err)
+		}
+		reqPath := writeContextRequestFile(t, repo.Dir, "request.json", contextRequestBytes(t, "spec/feature-alpha", contextcompile.PhaseDesign, nil))
+
+		var stdout, stderr bytes.Buffer
+		got := cmdContextCompile([]string{"--request", reqPath}, strings.NewReader(""), &stdout, &stderr)
+		if got == 0 {
+			t.Fatalf("cmdContextCompile(drifted projection) = 0, want a failure; stdout=%s", stdout.String())
+		}
+		assertContextStderrHygienic(t, stderr.String(), repo.Dir)
+	})
 }
