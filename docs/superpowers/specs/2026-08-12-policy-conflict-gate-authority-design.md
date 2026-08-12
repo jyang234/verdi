@@ -225,23 +225,41 @@ never guessed disjoint.
 
 ### 4.4 Product rule and witness
 
-If any dimension is proven disjoint, the scopes are disjoint. If all four are
-proven overlapping, they overlap. Otherwise the result is unknown. Every
-comparison records a per-dimension state and the exact set, path, or graph-edge
-witness. Sorting is phase, environment, path, then ref; values inside each
-dimension are canonical lexical order.
+For a pair, if any dimension is proven disjoint, the scopes are disjoint. If
+all four are proven overlapping, they overlap. Otherwise the result is unknown.
+The same product rule extends directly to an N-way claim witness: each
+dimension intersects all participating sets or selectors once, and the product
+is overlap only when every dimension has a nonempty proven intersection. Scope
+overlap is not assumed transitive and is never used as an equivalence relation.
+Every comparison records a per-dimension state and the exact set, path, or
+graph-edge witness. Sorting is phase, environment, path, then ref; values inside
+each dimension are canonical lexical order.
 
 ## 5. Mechanical satisfiability
 
-Claims interact only inside one `(family, subject)` group. Every group uses
-exactly one of four Verdi-owned operand domains. A group containing operators
-from more than one domain is invalid authority and fails operationally; Verdi
-does not choose a meaning per pair.
+Claims interact only inside one `(family, subject)` group, except that an
+identity group additionally keys on its ordered `(left-role, right-role)` pair.
+Every group uses exactly one of four Verdi-owned operand domains. A group
+containing operators from more than one domain is invalid authority and fails
+operationally; Verdi does not choose a meaning per pair.
 
-The evaluator first partitions the claims into maximal proven-overlap groups.
-Proven-disjoint pairs cannot conflict. An unknown-scope relation produces a
-semantic candidate and a blocking-unproven result rather than entering a
-mechanical solver.
+Each domain solver first evaluates the complete conjunction without using
+scope. A satisfiable complete conjunction proves every scoped subset
+satisfiable. For an unsatisfiable conjunction, the solver emits deterministic
+claim witnesses:
+
+1. every exact-scope subgroup is solved as an N-claim conjunction;
+2. every differently-scoped claim pair is solved once; and
+3. if the complete group is unsatisfiable but neither step produces a
+   proven-overlap contradiction, the remaining higher-order scope case is
+   `blocked-unproven` with its complete claim witness.
+
+An unsatisfiable witness becomes `blocked-violated` only when §4.4 proves its
+N-way scope intersection nonempty. Proven-disjoint witnesses do not conflict.
+Unknown intersections and unresolved higher-order combinations move to the
+semantic input and remain blocking. This conservative boundary may withhold a
+mechanical conclusion, but it can neither manufacture a conflict from
+non-transitive pair overlap nor let an unresolved conjunction pass.
 
 ### 5.1 Discrete-set domain
 
@@ -250,21 +268,20 @@ The operators are `equals`, `not-equals`, `allowed-values`,
 of strings `X`:
 
 - `equals(v)` means `X = {v}`;
-- `not-equals(v)` means `X != {v}`;
+- `not-equals(v)` means `v` is not a member of `X`;
 - `allowed-values(A)` means `X` is a subset of `A`;
 - `required-values(R)` means `R` is a subset of `X`; and
 - `forbidden-values(F)` means `X` has empty intersection with `F`.
 
 Multiple constraints are conjunctive. Allowed sets intersect; required and
-forbidden sets union. Multiple `equals` values must agree. With an equals
-constraint, its singleton must satisfy every bound. Without equals, the solver
-requires all required values to remain allowed and unforbidden and, when an
-allowed bound exists, at least one allowed unforbidden value. `not-equals`
-forbids only its exact singleton and does not create an invented finite
-universe. If no finite allowed bound exists, a symbolic other value proves
-satisfiability unless the other constraints already force a forbidden exact
-singleton. The report records the finite sets and whether the proof used the
-open-domain witness.
+forbidden sets union; each `not-equals(v)` contributes `v` to the forbidden
+set. Multiple `equals` values must agree. With an equals constraint, its
+singleton must satisfy every bound. Without equals, the solver requires all
+required values to remain allowed and unforbidden and, when an allowed bound
+exists, at least one allowed unforbidden value. If no finite allowed bound
+exists, a symbolic other value proves satisfiability unless the other
+constraints already force a forbidden exact value. The report records the
+finite sets and whether the proof used the open-domain witness.
 
 ### 5.2 Integer-interval domain
 
@@ -276,25 +293,32 @@ already rejects non-integers and overflow.
 
 ### 5.3 Principal-relation domain
 
-The operators are `same-principal` and `different-principal`. The evaluator
-does not compare principal strings. It constructs one kernel authorization
-request over the exact authenticated resolutions, requested roles, profile,
-and separation mode. Requiring both relations for the same subject is a
-mechanical conflict. Requiring one relation is proven only when the kernel
-returns that conclusion; violated and unproven kernel results remain
-violated-with-witness or unproven respectively.
+The operators are `same-principal` and `different-principal`. For these two
+operators, the existing claim `values` field contains exactly two ordered role
+IDs: `[left-role, right-role]`; `subject` is the governed transition ID. This is
+a narrow operand rule inside the existing claim schema, not a new identity
+type or resolver. It prospectively replaces the policy-artifact validator's
+placeholder empty-values rule for these two previously uninterpreted
+operators; no committed policy artifact currently uses either operator. Policy
+decode rejects a bound or fewer or more roles; conflict-operand construction
+validates the transition and both roles through the existing kernel catalog.
+
+The evaluator never compares principal strings. It constructs one kernel
+authorization request over the exact authenticated resolutions, transition,
+ordered roles, profile, and separation mode. Requiring both relations for the
+same transition and role pair is a mechanical conflict. Requiring one relation
+is proven only when the kernel returns that conclusion; violated and unproven
+kernel results remain violated-with-witness or unproven respectively.
 
 ### 5.4 Path-capability domain
 
 The operators are `path-read` and `path-write`. Each names required access,
 not executable policy code and not an implicit prohibition. Same-kind path
-requirements union; read and write may coexist. When an accepted-context
-request supplies execution grants, every required path must be covered by the
-matching grant using the same exact-file/directory-prefix relation as §4.2.
-A missing or insufficient requested grant is a proven conflict between policy
-and the declared execution request. Candidate acceptance has no executing
-grant consumer; its path requirements are mutually satisfiable unless another
-typed policy operand makes the group invalid.
+requirements union; read and write may coexist, so these claims are mutually
+satisfiable. The conflict gate records the canonical requirement set but does
+not reinterpret a missing execution grant as a policy conflict. Grant
+satisfaction and enforcement remain with the execution boundary; as DC-5
+requires, missing execution is an unmet requirement rather than a conflict.
 
 ### 5.5 Exemption application
 
@@ -334,45 +358,49 @@ case-folds, rewrites, summarizes, or reorders authored text. Policy
 instructions inherit their policy/claim scope. Spec and obligation prose
 inherit the request scope intersected with their exact spec/object ref.
 
-The semantic input contains the complete sorted claims, every
-mechanically-unknown scope pair, applicable exemption identities/digests, and
-the canonical prompt. The prompt asks about overlap, simultaneous
-satisfiability, refinement, explicit exception, authority, and the strongest
-reasonable non-conflict interpretation. Prompt bytes are fixed repository
-code, not project configuration.
+The semantic input contains the complete sorted claims, every mechanically
+unknown or conservatively unresolved scope witness, applicable exemption
+identities/digests, and the canonical prompt. The prompt asks about overlap,
+simultaneous satisfiability, refinement, explicit exception, authority, and the
+strongest reasonable non-conflict interpretation. Prompt bytes are fixed
+repository code, not project configuration.
 
 The primary judge's strict inner result is canonical JSON schema
 `verdi.policy-conflict-judge-result/v1`:
 
 ```go
 type JudgeResult struct {
-    Schema     string
-    Model      ModelIdentity
-    Candidates []JudgeCandidate
+    Schema         string
+    Recommendation Recommendation
+    Findings       []JudgeFinding
 }
 
-type JudgeCandidate struct {
-    Claims         []ClaimWitness
-    Recommendation Recommendation
-    Categories     []string
-    Explanation    string
+type JudgeFinding struct {
+    Claims      []ClaimWitness
+    Categories  []string
+    Explanation string
 }
 ```
 
 `Recommendation` is exactly `conflict`, `no-conflict`, or `inconclusive`.
-Every candidate names at least two distinct input claim witnesses. Claims and
-categories are unique and sorted. Explanation is nonblank single-line UTF-8
-and is evidence, never authority. Verdi mints the candidate identity from the
-complete validated witness; it never trusts a model-supplied ID. An unknown,
-missing, duplicate, or digest-mismatched witness invalidates the result.
-Omission of an input pair is not a proof of no conflict.
+The recommendation covers the complete semantic-input digest; there is no
+implicit pair ledger. `conflict` requires at least one finding, while
+`no-conflict` requires the explicit empty findings set. `inconclusive` may
+carry findings that explain the unresolved state. Every finding names at least
+two distinct input claim witnesses. Claims and categories are unique and
+sorted. Explanation is nonblank single-line UTF-8 and is evidence, never
+authority. Verdi mints finding IDs from the validated result and the one
+semantic-input ID from the complete normalized witness identity; it never
+trusts a model-supplied ID or model identity. An unknown, missing, duplicate,
+or digest-mismatched witness invalidates the result.
 
-The recorded exchange contains the port-declared transport/model posture,
+The recorded exchange contains the adapter-declared transport/model posture,
 command digest, prompt digest, semantic-input digest, raw result bytes and
-digest, parsed result, validation state/reasons, and process outcome. Raw bytes
-never enter command construction or a human artifact. The CLI uses the
-existing `align.judge_cmd` argv only as process transport; it does not reuse
-legacy align prompts, finding IDs, permissive wrappers, disposition types, or
+digest, parsed result, validation state/reasons, and process outcome. Judge
+output cannot override adapter-declared model identity. Raw bytes never enter
+command construction or a human artifact. The CLI uses the existing
+`align.judge_cmd` argv only as process transport; it does not reuse legacy
+align prompts, finding IDs, permissive wrappers, disposition types, or
 `judge_required`. Missing transport is a completed blocking-unproven semantic
 state whenever semantic evaluation is required.
 
@@ -387,11 +415,12 @@ converted into a favorable fallback.
 
 The service accepts separate primary and challenger ports. Solo and team v1
 require the primary port only. High-assurance requires both ports and treats a
-missing challenger as unproven. The challenger receives the same normalized
-authority claims plus the validated primary result. A candidate-level conflict
-versus no-conflict difference, an omitted primary candidate, or an
-inconclusive challenger is disagreement and requires human disposition. A
-challenger cannot turn a primary result into an automatic pass.
+missing challenger as unproven. Primary and challenger receive the identical
+canonical prompt and normalized semantic input independently; neither receives
+the other's output. A recommendation difference, an inconclusive result, or a
+difference between their sorted finding-witness sets is disagreement and
+requires human disposition. A challenger cannot turn a primary result into an
+automatic pass.
 
 ## 7. Semantic judgment reuse
 
@@ -399,14 +428,15 @@ The evaluator is pure; the CLI process adapter owns immutable machine records
 under:
 
 ```text
-.verdi/data/policy-conflict/judgments/<input-digest>.json
+.verdi/data/cache/policy-conflict-<layout-version>-<tree-hash>-<input-digest>.json
 ```
 
-The record schema is `verdi.policy-conflict-judgment/v1`. `input-digest` binds
-the role (`primary` or `challenger`), port-declared transport/model posture,
-argv digest, prompt digest, normalized input digest, profile/challenger
-posture, and effective authority digest. The content records the complete
-exchange from §6 and a self-digest.
+The record schema is `verdi.policy-conflict-judgment/v1`. The existing D4
+`layout-version` and `tree-hash` are computed by `internal/store`;
+`input-digest` binds the role (`primary` or `challenger`), adapter-declared
+transport/model posture, argv digest, prompt digest, normalized input digest,
+profile/challenger posture, and effective authority digest. The content records
+the complete exchange from §6, all path-key components, and a self-digest.
 
 On a cache hit the adapter strict-decodes, canonical-reencodes, verifies the
 path key and every digest, and returns the recorded result without launching a
@@ -425,9 +455,11 @@ defined in §6 and are not cached as successful judgments. Failure to persist a
 validated successful exchange is also operational; the adapter never silently
 returns an uncached result whose later reuse posture differs.
 
-The cache is gitignored, disposable, and never authority. Deleting it may
-spend another judgment but cannot change which disposition matches. No cache
-path is a `verdi gc` promise in this unit.
+The cache is gitignored, disposable, and never authority. It reuses the
+existing D4 cache zone rather than introducing a new data-zone root. Deleting
+it may spend another judgment but cannot change which disposition matches. No
+new `verdi gc` behavior is created; the existing cache-entry pruning contract
+applies.
 
 ## 8. Semantic disposition artifact
 
@@ -440,11 +472,12 @@ Semantic rulings live at:
 This path requires a controller-authored amendment to
 `spec/verdi-store-layout` before runtime implementation may create it. The
 current store-layout sentence that places semantic dispositions in spec
-frontmatter does not describe AC-3's candidate witness, staleness, approval,
-or fallback record and cannot be silently repurposed. The amendment must name
-the new committed path, its policy-authority ownership, and the cache data-zone
-root from §7. Until that amendment reaches the default branch, implementation
-of disposition storage and the cache is blocked.
+frontmatter does not describe AC-3's semantic-input witness, staleness,
+approval, or fallback record and cannot be silently repurposed. The amendment
+must name the new committed path and its policy-authority ownership, and extend
+the existing D4 cache filename grammar with §7's conflict-judgment record. It
+does not create a new data-zone root. Until that amendment reaches the default
+branch, implementation of disposition storage and judgment caching is blocked.
 
 The human artifact schema is `verdi.policy-disposition/v1`, kind
 `policy-disposition`, ID `policy-disposition/<name>`. It uses the shared
@@ -471,34 +504,42 @@ type Disposition struct {
 ```
 
 `Conclusion` is `conflict` or `no-conflict`. `Origin` is `judge-result` or
-`human-fallback`. `SemanticWitness` carries the candidate ID, every complete
-typed or prose claim witness, categories, scopes, typed values/bounds,
-governing authority digest, context/candidate identity digest, and every
-applicable exemption ID/digest. It also carries primary and challenger input
-digests when present. The candidate ID is the canonical digest of the
-candidate-ID-less witness.
+`human-fallback`. `SemanticWitness` carries the semantic-input ID, every
+claim's identity fields required by AC-3 — claim ID and digest, category,
+scope, typed values/bounds when present, governing authority digest — the
+context/candidate identity digest, and every applicable exemption ID/digest.
+It does not duplicate authored claim text or raw judge output. The
+semantic-input ID is the canonical digest of exactly that complete witness
+identity. A `judge-result` record additionally cites the immutable primary and
+challenger judgment-record digests that informed the human, when present, as
+provenance; those citations do not redefine freshness or make the human ruling
+depend on a repeatable model response. Cache presence is never required to
+load or validate a disposition.
 
 Claims, categories, and exemption witnesses normalize as unique sorted sets.
-Compensating controls remain nonempty author-ordered single-line prose. Owners
-and approvals normalize under their existing policy-artifact rules. The body
-is the nonblank rationale. At least one compensating control and approval are
-required. At least one real calendar-date expiry or nonblank review condition
-is required. Unknown fields, conclusions, origins, or witness categories fail
-closed.
+Compensating controls, when present, remain nonempty author-ordered single-line
+prose. Owners and approvals normalize under their existing policy-artifact
+rules. The body is the nonblank rationale, and at least one approval is always
+required. A `human-fallback` must carry a real calendar-date expiry or nonblank
+review condition; when that fallback concludes `no-conflict`, it also requires
+at least one compensating control. A judge-result disposition and a conflict
+confirmation need no invented control or time bound: under AC-3 they remain
+current only while the complete semantic-input witness remains unchanged.
+Unknown fields, conclusions, origins, or witness categories fail closed.
 
-A judge-result disposition must match the current validated judge candidate.
-A fallback disposition is legal only when the current semantic input exists
-but configured judgment is absent, a well-formed result is inconclusive, or
-primary and challenger disagree; it binds the same complete witness and cannot
-be a generic override. Malformed or failed judge execution remains operational
-under §6. `no-conflict` resolves only an exact, current, authorized candidate.
-`conflict` establishes `blocked-violated`. A stale or unauthorized disposition
-never partially applies.
+A judge-result disposition must match the current validated semantic input. A
+fallback disposition is legal only when the current semantic
+input exists but configured judgment is absent, a well-formed result is
+inconclusive, or primary and challenger disagree; it binds the same complete
+witness and cannot be a generic override. Malformed or failed judge execution
+remains operational under §6. `no-conflict` resolves only an exact, current,
+authorized semantic input. `conflict` establishes `blocked-violated`. A
+stale or unauthorized disposition never partially applies.
 
 `internal/policyauthority` owns loading, path/ID parity, strict decoding,
 cross-reference validation, and inclusion in the effective-authority digest.
 `internal/policyconflict` alone interprets whether a disposition matches and
-governs the current candidate. Existing legacy `.verdi/conflicts/`,
+governs the current semantic input. Existing legacy `.verdi/conflicts/`,
 `decision-conflict-report.md`, deviation findings, and spec-frontmatter
 dispositions remain unchanged and never satisfy this schema.
 
@@ -511,10 +552,11 @@ comparison. An expiry before `evaluated_on` is expired; equality remains
 effective through that date.
 
 Review conditions are opaque named governance conditions, not self-proving
-text. A record whose only live bound is a review condition requires an injected
-condition resolver returning proven-current, triggered, or unproven with a
-witness. The local CLI has no production resolver in v1, so such a record is
-blocking-unproven unless an unexpired calendar expiry also keeps it bounded.
+text. V1 has no evidence source capable of proving one. A record whose only
+live bound is a review condition is therefore `blocked-unproven`; an unexpired
+calendar expiry may still keep the record bounded. A later managed integration
+may add a condition-evidence port together with its trust authority, but this
+unit does not add a speculative resolver.
 
 Approval strings in committed artifacts are claims, not authentication. The
 service accepts sealed `governanceprincipal.PrincipalResolution` values and
@@ -539,38 +581,34 @@ The machine report is strict canonical JSON schema
 
 ```go
 type Report struct {
-    Schema              string
-    Target              TargetIdentity
-    Repository          repositoryfacts.Snapshot
-    ContextManifest     *DigestRef
-    Authority           AuthorityIdentity
-    Profile             ProfileIdentity
-    EvaluatedOn         string
-    Mechanical          []MechanicalEvaluation
-    Semantic            []SemanticEvaluation
-    Exemptions          []AuthorityResolution
-    Dispositions        []AuthorityResolution
-    Disclosures         []Disclosure
-    Verdict             Verdict
-    Digest              string
+    Schema       string
+    Input        InputIdentity
+    Mechanical   []MechanicalEvaluation
+    Semantic     []SemanticEvaluation
+    Disclosures  []Disclosure
+    Verdict      Verdict
+    Digest       string
 }
 ```
 
-`TargetIdentity` is a strict `accepted-context`/`acceptance-candidate` union.
-The accepted arm carries the manifest digest. The candidate arm carries ref,
-path, branch, HEAD, blob, content digest, scope, adapter, and grant digest.
-`AuthorityIdentity` carries constitution and effective-policy digests and the
-complete sorted policy-entry identities. `ProfileIdentity` carries ID, class,
-and digest.
+`InputIdentity` contains the strict `accepted-context`/`acceptance-candidate`
+target union, repository snapshot, constitution and effective-policy digests,
+complete sorted policy-entry identities, profile ID/class/digest, and
+`evaluated_on`. The accepted target carries the manifest digest. The candidate
+target carries ref, path, branch, HEAD, blob, content digest, scope, adapter,
+and grant digest. These facts occur once; the report has no second
+`context_manifest`, top-level exemption ledger, or top-level disposition
+ledger that can drift from the evaluation rows.
 
 Each mechanical row carries its deterministic witness ID, family, subject,
 complete typed claims, scope proof, domain, pre-exemption solver result,
-exemption resolutions, post-exemption solver result, state, and reason codes.
-Each semantic row carries its complete witness ID, normalized claims,
-mechanical-unknown source when applicable, primary/challenger exchanges,
-disposition resolution, state, and reason codes. Authority-resolution rows
-carry artifact ID/digest plus match, freshness, scope, bound, and authorization
-states. Disclosures use closed codes and sorted witness strings.
+applicable exemption resolutions, post-exemption solver result, state, and
+reason codes. Each semantic row carries its semantic-input ID, normalized
+claim identities, mechanical-unknown source when applicable,
+primary/challenger exchanges, applicable disposition resolution, state, and
+reason codes. Each embedded authority resolution carries artifact ID/digest
+plus match, freshness, scope, bound, and authorization states. Disclosures use
+closed codes and sorted witness strings.
 
 The report self-digest is computed over the digestless canonical form. Arrays
 sort by stable witness ID except author-ordered prose arrays explicitly named
@@ -650,7 +688,8 @@ waiver, or conflict artifact is rewritten or reinterpreted.
 | Constitution not adopted, existing lifecycle consumer | Exact legacy behavior |
 | Proven disjoint scopes or satisfiable mechanical group | Proven no-conflict row |
 | Unsatisfiable overlapping group without effective exemption | Blocked-violated |
-| Unknown ref/scope relation | Semantic candidate plus blocked-unproven until disposition |
+| Unsatisfiable higher-order group whose conflict scope is not proven | Blocking-unproven semantic evaluation |
+| Unknown ref/scope relation | Semantic evaluation plus blocked-unproven until disposition |
 | Judge transport not configured when semantic evaluation is required | Blocking-unproven |
 | Well-formed inconclusive judge result | Blocking-unproven |
 | Configured judge start failure, nonzero exit, timeout, cancellation, malformed result, or invalid witness | Exit 2 |
@@ -674,15 +713,16 @@ operand boundary and canonical path checks close those paths.
 
 The threat model does not claim deterministic model behavior, inspect vendor
 runtime instructions, authenticate a local username, prove external review
-conditions without a port, or make a report digest prove isolation or actor
-identity. Those limitations are recorded, never silently upgraded.
+conditions in v1, or make a report digest prove isolation or actor identity.
+Those limitations are recorded, never silently upgraded.
 
 ## 13. Implementation ownership and verification
 
 The runtime unit may create `internal/policyconflict`, extend
 `internal/contextcompile` with sealed operands/candidate normalization, add the
 disposition kind to `internal/policyartifact`, `internal/policyauthority`,
-`internal/humanartifact`, and `internal/store`, extend the `context` CLI
+`internal/humanartifact`, and `internal/store`, replace the placeholder
+identity-claim operand validation described in §5.3, extend the `context` CLI
 namespace, and add thin provider calls to the four named lifecycle boundaries.
 It must not add UI, MCP, receipt, sealed-execution, forge-network, or generic
 policy-language behavior.
@@ -693,15 +733,18 @@ Implementation is TDD and proves at least:
    including unknown, duplicate, null, trailing, UTF-8, enum, union, and
    re-encode negatives;
 2. mutation-after-seal and cross-snapshot operand rejection;
-3. exact phase/environment/path/ref scope truth tables, including segment
-   boundaries and unknown artifact relationships;
+3. exact phase/environment/path/ref pair and N-way scope truth tables,
+   including non-transitive overlap, segment boundaries, unknown artifact
+   relationships, and conservative higher-order refusal;
 4. complete operator-pair and multi-claim satisfiability tables for all four
-   operand domains, including mixed-domain rejection;
+   operand domains, including `not-equals` membership exclusion, ordered
+   identity-role operands, kernel delegation, and mixed-domain rejection;
 5. pre- and post-exemption proof with stale, partial-scope, expired,
    review-unproven, and unauthorized cases;
 6. normalized prose-source coverage and deterministic prompt/input ratchets;
-7. judge witness validation, primary/challenger agreement/disagreement, and
-   the rule that model output never passes by itself;
+7. whole-input judge recommendation and finding-witness validation,
+   independently-run primary/challenger agreement/disagreement, adapter-owned
+   model identity, and the rule that model output never passes by itself;
 8. cache hit, miss, changed-key, corruption, symlink, collision, cancellation,
    and concurrent-writer behavior;
 9. disposition exact match, stale identity, fallback eligibility, conflict and
@@ -716,8 +759,9 @@ Implementation is TDD and proves at least:
     `make verify` output.
 
 Tests use hermetic fake judge processes, fixture Git repositories, injected
-clocks, condition resolvers, and principal fact readers. No test uses a network
-endpoint. This unit has no browser behavior and adds no Playwright case.
+clocks, and principal fact readers. Review-condition-only records are covered
+as explicit v1 unproven cases. No test uses a network endpoint. This unit has
+no browser behavior and adds no Playwright case.
 
 ## 14. Source coverage and losslessness
 
@@ -741,13 +785,16 @@ The transformations are explicit:
 - the context compiler's accepted-only request becomes one arm of a conflict
   request because pre-merge acceptance cannot honestly claim accepted state;
 - the compiler's applicability comparison remains selection-only while this
-  unit adds proof-grade pairwise scope algebra;
+  unit adds proof-grade pair and N-way scope algebra without treating overlap
+  as transitive;
 - existing policy claims become sealed runtime operands, not reconstructed
   manifest summaries;
-- the legacy align process command is reused only as transport while prompt,
-  schema, identity, staleness, and disposition semantics are new and isolated;
-- a judge retry becomes an immutable disposable machine record, while human
-  authority remains a committed disposition;
+- the legacy align process command is reused only as transport while one
+  whole-input recommendation, independently-run challenge, identity,
+  staleness, and disposition semantics are new and isolated;
+- a judge retry becomes an immutable disposable machine record inside the
+  existing D4 cache zone, while human authority remains a committed
+  disposition;
 - existing claim-level exemptions are applied by exact scoped removal and
   solver recomputation rather than treated as generic conflict waivers; and
 - the spec's one verdict becomes four current thin consumers and one later
