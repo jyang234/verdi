@@ -73,6 +73,13 @@ func TestFixtureDigests_Ratchet(t *testing.T) {
 		}
 		return e.Digest()
 	})
+	walk(DirDispositions, func(data []byte) (string, error) {
+		d, err := DecodeDisposition(data)
+		if err != nil {
+			return "", err
+		}
+		return d.Digest()
+	})
 	govCat, err := con.GovernanceCatalog()
 	if err != nil {
 		t.Fatalf("GovernanceCatalog: %v", err)

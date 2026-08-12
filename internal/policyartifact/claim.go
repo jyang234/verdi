@@ -77,10 +77,15 @@ func (o Operator) Validate() error {
 }
 
 // setValued reports whether o's Values operand is a semantic set (sorted
-// at normalization) rather than positional content.
+// at normalization) rather than positional content. same-principal and
+// different-principal are set-valued too (5.3: "The two roles are a
+// semantic set and normalize lexically, because both kernel relations are
+// symmetric") — their Values operand is the exact two-role pair, not
+// positional content either.
 func (o Operator) setValued() bool {
 	switch o {
-	case OpAllowedValues, OpRequiredValues, OpForbiddenValues, OpPathRead, OpPathWrite:
+	case OpAllowedValues, OpRequiredValues, OpForbiddenValues, OpPathRead, OpPathWrite,
+		OpSamePrincipal, OpDifferentPrincipal:
 		return true
 	}
 	return false
@@ -217,8 +222,21 @@ func (c Claim) Validate() error {
 			return fmt.Errorf("policyartifact: claim %s: operator %q takes a bound, not values", c.ID, c.Operator)
 		}
 	case OpSamePrincipal, OpDifferentPrincipal:
-		if len(c.Values) != 0 {
-			return fmt.Errorf("policyartifact: claim %s: operator %q takes no values", c.ID, c.Operator)
+		// Authority-design 5.3: values holds exactly two distinct role
+		// IDs — the two roles a symmetric relation names — never a bound;
+		// the kernel resolves the roles to authenticated principals at
+		// evaluation time (DC-22), this package fixes only the operand
+		// shape.
+		if len(c.Values) != 2 {
+			return fmt.Errorf("policyartifact: claim %s: operator %q requires exactly two role values, got %d", c.ID, c.Operator, len(c.Values))
+		}
+		if c.Values[0] == c.Values[1] {
+			return fmt.Errorf("policyartifact: claim %s: operator %q requires two distinct roles, got duplicate %q", c.ID, c.Operator, c.Values[0])
+		}
+		for _, v := range c.Values {
+			if !kebabRe.MatchString(v) {
+				return fmt.Errorf("policyartifact: claim %s: operator %q role %q must be kebab-case", c.ID, c.Operator, v)
+			}
 		}
 		if c.Bound != nil {
 			return fmt.Errorf("policyartifact: claim %s: operator %q takes no bound", c.ID, c.Operator)

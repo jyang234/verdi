@@ -18,11 +18,13 @@ const (
 	KindOverlay      = "policy-overlay"
 	KindExemption    = "policy-exemption"
 	KindConstitution = "policy-constitution"
+	KindDisposition  = "policy-disposition"
 
 	SchemaPolicy       = "verdi.policy/v1"
 	SchemaOverlay      = "verdi.policy-overlay/v1"
 	SchemaExemption    = "verdi.policy-exemption/v1"
 	SchemaConstitution = "verdi.policy-constitution/v1"
+	SchemaDisposition  = "verdi.policy-disposition/v1"
 )
 
 var sha256Re = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
@@ -176,10 +178,17 @@ func (d kernelDoc) toKernel(wantSchema, wantKind string) (kernel, error) {
 // policy-constitution and the stored governance-profile kind are
 // deliberately absent: no scaffold creates them, so requiring a record of
 // a template that does not exist would be a rule with no referent.
+// policy-disposition is scaffold-backed too: §8 fixes it as a human
+// artifact the same shared scaffold resolver creates. Task 2 adds the
+// scaffold itself (internal/designscaffold/templates/policy-disposition.md);
+// this task's fixture already carries a shape-valid template record ahead
+// of that scaffold landing, since a scaffold-backed kind's provenance
+// record is unconditional (AC-1), not deferred to the scaffold's arrival.
 var scaffoldBackedKinds = map[string]bool{
-	KindPolicy:    true,
-	KindOverlay:   true,
-	KindExemption: true,
+	KindPolicy:      true,
+	KindOverlay:     true,
+	KindExemption:   true,
+	KindDisposition: true,
 }
 
 // parseKindedID validates an "<kind>/<name>" constitution artifact id
