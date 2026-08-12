@@ -265,15 +265,13 @@ func declaredContextRawRefs(ctx context.Context, git GitReader, root, head strin
 	switch target.Spec.Class {
 	case artifact.ClassFeature:
 		if len(parents) != 0 {
-			// vocab:identity — SI-91/SI-92 diagnostic naming the fixed
-			// feature/story class-dispatch identity
+			// vocab:identity — "feature" names the fixed target-class identity this class-dispatch branch handles (SI-91/SI-92)
 			return nil, fmt.Errorf("contextcompile: resolve declared context: a feature target resolves its own context: list and must not receive parent fragments")
 		}
 		all = target.Spec.Context
 	case artifact.ClassStory:
 		if len(parents) == 0 {
-			// vocab:identity — SI-91/SI-92 diagnostic naming the fixed
-			// feature/story class-dispatch identity
+			// vocab:identity — "feature" names the fixed governing-parent artifact class this class-dispatch branch requires (SI-91/SI-92)
 			return nil, fmt.Errorf("contextcompile: resolve declared context: a story/spike target requires at least one governing parent feature")
 		}
 		for _, p := range parents {
@@ -284,8 +282,7 @@ func declaredContextRawRefs(ctx context.Context, git GitReader, root, head strin
 			all = append(all, spec.Context...)
 		}
 	default:
-		// vocab:identity — SI-91/SI-92 diagnostic naming the fixed
-		// feature/story class-dispatch identity
+		// vocab:identity — "feature" names the fixed target-class identity this class-dispatch default enumerates (SI-91/SI-92)
 		return nil, fmt.Errorf("contextcompile: resolve declared context: target class %q does not declare context (only feature and story/spike do)", target.Spec.Class)
 	}
 
@@ -310,28 +307,30 @@ func declaredContextRawRefs(ctx context.Context, git GitReader, root, head strin
 // fixed on-disk location regardless of what Ref claims.
 func reverifyGoverningFeature(ctx context.Context, git GitReader, root, head string, ff FragmentFeature) (*artifact.SpecFrontmatter, error) {
 	if ff.Path == "" {
+		// vocab:identity — "feature" names the fixed governing-parent artifact class this path-presence check guards (SI-92)
 		return nil, fmt.Errorf("contextcompile: resolve declared context: governing parent feature has no path")
 	}
 	content, err := git.Show(ctx, root, head, ff.Path)
 	if err != nil {
+		// vocab:identity — "feature" names the fixed governing-parent artifact class this HEAD re-read targets (SI-92)
 		return nil, fmt.Errorf("contextcompile: resolve declared context: read HEAD parent feature %s: %w", ff.Path, err)
 	}
 	fmBytes, _, err := artifact.SplitFrontmatter(content)
 	if err != nil {
+		// vocab:identity — "feature" names the fixed governing-parent artifact class this frontmatter split targets (SI-92)
 		return nil, fmt.Errorf("contextcompile: resolve declared context: decode parent feature %s: %w", ff.Path, err)
 	}
 	spec, err := artifact.DecodeSpec(fmBytes)
 	if err != nil {
+		// vocab:identity — "feature" names the fixed governing-parent artifact class this spec decode targets (SI-92)
 		return nil, fmt.Errorf("contextcompile: resolve declared context: decode parent feature %s: %w", ff.Path, err)
 	}
 	if spec.ID != ff.Ref || spec.Class != artifact.ClassFeature {
-		// vocab:identity — SI-92 TOCTOU diagnostic naming fixed governing
-		// parent feature and class identities
+		// vocab:identity — "feature" names the fixed governing-parent and re-decoded class identities this TOCTOU diagnostic reports (SI-92)
 		return nil, fmt.Errorf("contextcompile: resolve declared context: parent feature %s at %s re-decoded as %s/%s (TOCTOU mismatch)", ff.Ref, ff.Path, spec.ID, spec.Class)
 	}
 	if rawContentDigest(content) != ff.SourceDigest {
-		// vocab:identity — SI-92 TOCTOU diagnostic naming the fixed feature
-		// source-digest identity
+		// vocab:identity — "feature" names the fixed governing-parent artifact class this source-digest TOCTOU diagnostic reports (SI-92)
 		return nil, fmt.Errorf("contextcompile: resolve declared context: parent feature %s content at exact HEAD no longer matches its resolved source digest (TOCTOU mismatch)", ff.Ref)
 	}
 	return spec, nil

@@ -213,6 +213,7 @@ func (c Compiler) Compile(ctx context.Context, root string, request Request) (Re
 		if request.Phase == PhaseBuild {
 			return Result{}, &DeclaredScopeRefusal{
 				Phase: request.Phase, Ref: target.Ref,
+				// vocab:identity — "feature" names the fixed artifact spec class this refusal targets, not display prose
 				Reason: "feature specifications are not authoritative build targets",
 			}
 		}
@@ -220,6 +221,7 @@ func (c Compiler) Compile(ctx context.Context, root string, request Request) (Re
 	case artifact.ClassStory:
 		fragments, err = ResolveFeatureFragments(ctx, c.git, c.states, root, head, target)
 		if err != nil {
+			// vocab:identity — "feature" names the ResolveFeatureFragments stage this error wraps, the fixed artifact class
 			return Result{}, fmt.Errorf("contextcompile: stage 4 resolve feature fragments: %w", err)
 		}
 	default:
@@ -418,6 +420,7 @@ func driftWitness(report *instructionprojection.Report) ([]string, []string, err
 		}
 	})
 	if len(paths) == 0 && len(reasons) == 0 {
+		// vocab:identity — "closed" names the closed-enum instructionprojection.Reason code property, not display prose
 		return nil, nil, fmt.Errorf("instruction-projection report is not clean but names neither a path nor a closed reason code for any of its %d findings", len(report.Findings))
 	}
 	return paths, reasons, nil
@@ -473,6 +476,7 @@ func buildStoreLifts(
 		return nil, err
 	}
 	for _, f := range fragments {
+		// vocab:identity — "feature" names the parent FeatureFragment's artifact class in this store-lift owner label
 		if err := add("parent feature fragment", f.Feature.Path, f.Feature.Ref); err != nil {
 			return nil, err
 		}
@@ -888,17 +892,21 @@ func (c Compiler) resolveOwners(ctx context.Context, root, head string, target R
 	for _, f := range fragments {
 		content, err := c.git.Show(ctx, root, head, f.Feature.Path)
 		if err != nil {
+			// vocab:identity — "feature" names the governing parent FeatureFragment's artifact class this owners re-read targets
 			return nil, fmt.Errorf("owners: read HEAD parent feature %s: %w", f.Feature.Path, err)
 		}
 		if rawContentDigest(content) != f.Feature.SourceDigest {
+			// vocab:identity — "feature" names the governing parent FeatureFragment's artifact class in this TOCTOU diagnostic
 			return nil, fmt.Errorf("owners: parent feature %s content at exact HEAD no longer matches its resolved source digest (TOCTOU mismatch)", f.Feature.Ref)
 		}
 		fmBytes, _, err := artifact.SplitFrontmatter(content)
 		if err != nil {
+			// vocab:identity — "feature" names the governing parent FeatureFragment's artifact class this frontmatter split targets
 			return nil, fmt.Errorf("owners: decode parent feature %s: %w", f.Feature.Ref, err)
 		}
 		spec, err := artifact.DecodeSpec(fmBytes)
 		if err != nil {
+			// vocab:identity — "feature" names the governing parent FeatureFragment's artifact class this spec decode targets
 			return nil, fmt.Errorf("owners: decode parent feature %s: %w", f.Feature.Ref, err)
 		}
 		add(spec.Owners)
