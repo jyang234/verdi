@@ -498,38 +498,116 @@ func TestResolve_DispositionsSortedByID(t *testing.T) {
 
 // TestResolve_DispositionOutputDoesNotAliasStore is
 // TestResolve_OutputDoesNotAliasStore's own case for a disposition: mutating
-// every nested slice/scope the resolved output carries must not disturb the
-// stored disposition's own seal.
+// every nested slice, scope, and POINTER the resolved output carries must
+// not disturb the stored disposition's own seal.
+//
+// It runs over MAXIMAL fixtures of both origins, because copyDisposition's
+// optional branches — CompensatingControls, Witness.Exemptions, a witness
+// claim's Bound pointer, Judgment, and Template — are exactly the ones a
+// minimal fixture leaves nil or empty, where an alias is unobservable. The
+// human-fallback case additionally proves that origin loads and resolves at
+// all. Digest() re-derives the canonical digest and compares it to the
+// decode-time seal, so an alias shows up here either as a digest change or
+// as a seal-mismatch error.
 func TestResolve_DispositionOutputDoesNotAliasStore(t *testing.T) {
-	files := minimalStoreFiles()
-	files[".verdi/policy/dispositions/review-no-conflict.md"] = dispositionFile(t, "review-no-conflict")
-	root := t.TempDir()
-	writeTree(t, root, files)
-	s, err := Load(root)
-	if err != nil {
-		t.Fatalf("Load() error: %v", err)
+	cases := []struct {
+		name         string
+		file         func(*testing.T, string) string
+		wantJudgment bool
+	}{
+		{"judge-result", judgeResultDispositionFile, true},
+		{"human-fallback", humanFallbackDispositionFile, false},
 	}
-	ep, err := Resolve(s)
-	if err != nil {
-		t.Fatalf("Resolve() error: %v", err)
-	}
-	digestBefore, err := s.Dispositions["policy-disposition/review-no-conflict"].Digest()
-	if err != nil {
-		t.Fatalf("stored disposition Digest() before: %v", err)
-	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			const id = "policy-disposition/review-no-conflict"
+			files := minimalStoreFiles()
+			files[".verdi/policy/dispositions/review-no-conflict.md"] = tc.file(t, "review-no-conflict")
+			root := t.TempDir()
+			writeTree(t, root, files)
+			s, err := Load(root)
+			if err != nil {
+				t.Fatalf("Load() error: %v", err)
+			}
+			ep, err := Resolve(s)
+			if err != nil {
+				t.Fatalf("Resolve() error: %v", err)
+			}
+			digestBefore, err := s.Dispositions[id].Digest()
+			if err != nil {
+				t.Fatalf("stored disposition Digest() before: %v", err)
+			}
 
-	entry := &ep.Dispositions[0]
-	entry.Disposition.Owners[0] = "tampered-team"
-	tamperScope(&entry.Disposition.Scope)
-	entry.Disposition.Witness.Claims[0].Values = append(entry.Disposition.Witness.Claims[0].Values, "tampered")
-	entry.Disposition.Approvals[0].Principal = "tampered"
+			if len(ep.Dispositions) != 1 {
+				t.Fatalf("ep.Dispositions = %+v, want exactly one", ep.Dispositions)
+			}
+			entry := &ep.Dispositions[0]
+			d := &entry.Disposition
 
-	digestAfter, err := s.Dispositions["policy-disposition/review-no-conflict"].Digest()
-	if err != nil {
-		t.Fatalf("stored disposition Digest() after output mutation: %v", err)
-	}
-	if digestAfter != digestBefore {
-		t.Fatalf("stored disposition digest changed through the resolved output: %s -> %s", digestBefore, digestAfter)
+			// Guard: a vacuous pass is the real risk here. Every field
+			// mutated below must actually be populated in the resolved
+			// view, or the mutation proves nothing.
+			if len(d.Owners) == 0 || len(d.Approvals) == 0 || len(d.CompensatingControls) == 0 {
+				t.Fatalf("fixture leaves owners/approvals/controls empty: %+v", d)
+			}
+			if len(d.Witness.Claims) == 0 || len(d.Witness.Claims[0].Values) == 0 || d.Witness.Claims[0].Bound == nil {
+				t.Fatalf("fixture leaves the witness claim values/bound empty: %+v", d.Witness)
+			}
+			if len(d.Witness.Exemptions) == 0 {
+				t.Fatalf("fixture leaves the witness exemption set empty: %+v", d.Witness)
+			}
+			if d.Template == nil {
+				t.Fatalf("fixture leaves template nil: %+v", d)
+			}
+			if (d.Judgment != nil) != tc.wantJudgment {
+				t.Fatalf("Judgment presence = %v, want %v (origin %s)", d.Judgment != nil, tc.wantJudgment, d.Origin)
+			}
+			if tc.wantJudgment && (d.Judgment.PrimaryDigest == "" || d.Judgment.ChallengerDigest == "") {
+				t.Fatalf("fixture leaves judgment provenance partly empty: %+v", d.Judgment)
+			}
+			if d.Expiry == "" || d.ReviewCondition == "" {
+				t.Fatalf("fixture leaves expiry/review_condition empty: %+v", d)
+			}
+
+			d.Owners[0] = "tampered-team"
+			tamperScope(&d.Scope)
+			d.CompensatingControls[0] = "tampered control"
+			d.Approvals[0].Principal = "tampered"
+			d.Witness.Claims[0].ID = "tampered-claim"
+			d.Witness.Claims[0].Values[0] = "tampered"
+			tamperScope(&d.Witness.Claims[0].Scope)
+			*d.Witness.Claims[0].Bound = 9999
+			d.Witness.Exemptions[0].ID = "policy-exemption/tampered"
+			d.Template.Identity = "embedded:tampered.md"
+			if d.Judgment != nil {
+				d.Judgment.PrimaryDigest = "tampered"
+				d.Judgment.ChallengerDigest = "tampered"
+			}
+
+			digestAfter, err := s.Dispositions[id].Digest()
+			if err != nil {
+				t.Fatalf("stored disposition Digest() after output mutation: %v", err)
+			}
+			if digestAfter != digestBefore {
+				t.Fatalf("stored disposition digest changed through the resolved output: %s -> %s", digestBefore, digestAfter)
+			}
+
+			// The stored artifact's own content must also read back
+			// untouched, not merely re-digest to the same value.
+			stored := s.Dispositions[id]
+			if stored.Owners[0] == "tampered-team" || stored.Approvals[0].Principal == "tampered" ||
+				stored.CompensatingControls[0] == "tampered control" ||
+				stored.Witness.Claims[0].ID == "tampered-claim" ||
+				stored.Witness.Claims[0].Values[0] == "tampered" ||
+				*stored.Witness.Claims[0].Bound == 9999 ||
+				stored.Witness.Exemptions[0].ID == "policy-exemption/tampered" ||
+				stored.Template.Identity == "embedded:tampered.md" {
+				t.Fatalf("stored disposition content mutated through the resolved output: %+v", stored)
+			}
+			if stored.Judgment != nil && stored.Judgment.PrimaryDigest == "tampered" {
+				t.Fatalf("stored disposition judgment mutated through the resolved output: %+v", stored.Judgment)
+			}
+		})
 	}
 }
 
