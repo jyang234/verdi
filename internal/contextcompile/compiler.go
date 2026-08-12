@@ -291,15 +291,13 @@ func (c Compiler) Compile(ctx context.Context, root string, request Request) (Re
 		return Result{}, fmt.Errorf("contextcompile: stage 6 list worktree changed paths: %w", err)
 	}
 
-	storeLifts := map[string]string{target.Path: target.Ref}
-	for _, f := range fragments {
-		storeLifts[f.Feature.Path] = f.Feature.Ref
+	authorityArtifacts, err := resolvedAuthorityArtifacts(authority)
+	if err != nil {
+		return Result{}, fmt.Errorf("contextcompile: stage 6 resolve authority artifacts: %w", err)
 	}
-	for _, o := range obligations {
-		storeLifts[o.Path] = o.Ref
-	}
-	for _, op := range selection.Operands {
-		storeLifts[op.Path] = op.ID
+	storeLifts, err := buildStoreLifts(target, fragments, obligations, selection.Operands, authorityArtifacts)
+	if err != nil {
+		return Result{}, fmt.Errorf("contextcompile: stage 6 build store-authority lifts: %w", err)
 	}
 
 	candidates, err := BuildUniverse(UniverseInput{
@@ -324,7 +322,7 @@ func (c Compiler) Compile(ctx context.Context, root string, request Request) (Re
 
 	// Stage 9: classify every candidate exactly once and build data
 	// payloads.
-	materials, err := buildClassificationMaterials(ctx, c.git, root, head, target, fragments, obligations, declared, selection, projectionFiles)
+	materials, err := buildClassificationMaterials(ctx, c.git, root, head, target, fragments, obligations, declared, selection, authorityArtifacts, projectionFiles)
 	if err != nil {
 		return Result{}, fmt.Errorf("contextcompile: stage 9 build classification materials: %w", err)
 	}
@@ -428,6 +426,62 @@ func uniqueSorted(capacity int, emit func(yield func(string))) []string {
 	return out
 }
 
+// buildStoreLifts builds the exact store-authority lift map authority
+// design §5's store-authority row enumerates: "Resolved constitution,
+// profile, applicable policies/overlays/exemptions, accepted spec, parent
+// feature fragments, and obligations".
+//
+// One path may legitimately lift to only ONE ref, so a second entry
+// claiming an already-claimed path is not a silent overwrite here: it is an
+// inconsistent authority resolution (two distinct refs both claiming to own
+// one tracked file's bytes) and fails closed. Re-declaring the identical
+// (path, ref) pair is harmless and accepted, since the resulting lift map is
+// unchanged.
+func buildStoreLifts(
+	target ResolvedSpec,
+	fragments []FeatureFragment,
+	obligations []BoundObligation,
+	operands []PolicyOperand,
+	authorityArtifacts []storeAuthorityArtifact,
+) (map[string]string, error) {
+	lifts := make(map[string]string, 1+len(fragments)+len(obligations)+len(operands)+len(authorityArtifacts))
+	add := func(what, path, ref string) error {
+		if path == "" || ref == "" {
+			return fmt.Errorf("%s lifts empty path %q or empty ref %q", what, path, ref)
+		}
+		if prior, claimed := lifts[path]; claimed && prior != ref {
+			return fmt.Errorf("%s and %s both lift path %q; a tracked path has exactly one store-authority owner", prior, ref, path)
+		}
+		lifts[path] = ref
+		return nil
+	}
+
+	if err := add("accepted spec", target.Path, target.Ref); err != nil {
+		return nil, err
+	}
+	for _, f := range fragments {
+		if err := add("parent feature fragment", f.Feature.Path, f.Feature.Ref); err != nil {
+			return nil, err
+		}
+	}
+	for _, o := range obligations {
+		if err := add("obligation", o.Path, o.Ref); err != nil {
+			return nil, err
+		}
+	}
+	for _, op := range operands {
+		if err := add("policy operand", op.Path, op.ID); err != nil {
+			return nil, err
+		}
+	}
+	for _, a := range authorityArtifacts {
+		if err := add("resolved authority artifact", a.Path, a.Ref); err != nil {
+			return nil, err
+		}
+	}
+	return lifts, nil
+}
+
 // indexDeclaredContextItems builds the explicit one-to-one
 // logicalRef->DeclaredContextItem index this service uses to preserve each
 // declared-context-ref's complete pinned identity (authority design §5,
@@ -471,10 +525,11 @@ func buildClassificationMaterials(
 	obligations []BoundObligation,
 	declared DeclaredContextResult,
 	selection authoritySelection,
+	authorityArtifacts []storeAuthorityArtifact,
 	projectionFiles []ProjectionFile,
 ) ([]CandidateMaterial, error) {
 	universal := universalApplicabilityScope()
-	materials := make([]CandidateMaterial, 0, 1+len(fragments)+len(obligations)+len(selection.Operands)+len(declared.Items)+len(projectionFiles))
+	materials := make([]CandidateMaterial, 0, 1+len(fragments)+len(obligations)+len(selection.Operands)+len(authorityArtifacts)+len(declared.Items)+len(projectionFiles))
 
 	materials = append(materials, CandidateMaterial{
 		Source: SourceStoreAuthority, ID: refID(target.Ref), Kind: IncludedAcceptedSpec,
@@ -501,6 +556,21 @@ func buildClassificationMaterials(
 		materials = append(materials, CandidateMaterial{
 			Source: SourceStoreAuthority, ID: refID(op.ID), Kind: IncludedPolicyArtifact,
 			PolicyScope: cloneScope(op.Scope), Content: content,
+		})
+	}
+	// The resolved constitution and selected profile carry no declared
+	// Scope of their own — they are not scoped authority operands — so their
+	// applicability scope is universal, exactly like the accepted spec and
+	// the parent fragments above (authority design §6: only a policy/
+	// overlay/exemption's own declared Scope narrows applicability).
+	for _, a := range authorityArtifacts {
+		content, err := git.Show(ctx, root, head, a.Path)
+		if err != nil {
+			return nil, fmt.Errorf("read HEAD authority artifact %s: %w", a.Path, err)
+		}
+		materials = append(materials, CandidateMaterial{
+			Source: SourceStoreAuthority, ID: refID(a.Ref), Kind: IncludedPolicyArtifact,
+			PolicyScope: universal, Content: content,
 		})
 	}
 	for _, item := range declared.Items {

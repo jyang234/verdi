@@ -792,6 +792,112 @@ func TestCompilerStage9GitFailureNeededForClassificationIsOperational(t *testing
 	}
 }
 
+// --- store-authority lift map (authority design §5) -----------------------
+
+func storeLiftTarget() ResolvedSpec {
+	return ResolvedSpec{Ref: "spec/story-x", Path: ".verdi/specs/active/story-x/spec.md"}
+}
+
+func storeLiftAuthorityArtifacts() []storeAuthorityArtifact {
+	return []storeAuthorityArtifact{
+		{Ref: "policy-constitution/constitution", Path: ".verdi/policy/constitution.md", Digest: digestSeed('a')},
+		{Ref: "governance-profile/solo-default", Path: ".verdi/policy/profiles/solo-default.md", Digest: digestSeed('b')},
+	}
+}
+
+func TestBuildStoreLiftsEnumeratesEverySource(t *testing.T) {
+	lifts, err := buildStoreLifts(
+		storeLiftTarget(),
+		[]FeatureFragment{validFragmentFixture("feature-a", "problem a")},
+		[]BoundObligation{{Ref: "obligation/story-x--ac-1--static", Path: ".verdi/obligations/story-x/ac-1/static.md"}},
+		[]PolicyOperand{{Kind: PolicyEntryPolicy, ID: "policy/go-toolchain", Path: ".verdi/policy/policies/go-toolchain.md"}},
+		storeLiftAuthorityArtifacts(),
+	)
+	if err != nil {
+		t.Fatalf("buildStoreLifts: unexpected error: %v", err)
+	}
+	want := map[string]string{
+		".verdi/specs/active/story-x/spec.md":       "spec/story-x",
+		".verdi/specs/active/feature-a/spec.md":     "spec/feature-a",
+		".verdi/obligations/story-x/ac-1/static.md": "obligation/story-x--ac-1--static",
+		".verdi/policy/policies/go-toolchain.md":    "policy/go-toolchain",
+		".verdi/policy/constitution.md":             "policy-constitution/constitution",
+		".verdi/policy/profiles/solo-default.md":    "governance-profile/solo-default",
+	}
+	if !reflect.DeepEqual(lifts, want) {
+		t.Fatalf("buildStoreLifts = %v, want %v", lifts, want)
+	}
+}
+
+// TestBuildStoreLiftsDuplicatePathFailsClosed proves two DISTINCT refs
+// claiming one tracked path fail closed rather than silently overwriting one
+// another: authority design §5 lifts a path into store-authority exactly
+// once, so a second claimant is an inconsistent authority resolution, not a
+// last-writer-wins merge.
+func TestBuildStoreLiftsDuplicatePathFailsClosed(t *testing.T) {
+	collidingArtifacts := storeLiftAuthorityArtifacts()
+	collidingArtifacts[1].Path = collidingArtifacts[0].Path
+
+	cases := map[string]func() error{
+		"operand collides with the accepted spec": func() error {
+			_, err := buildStoreLifts(
+				storeLiftTarget(), nil, nil,
+				[]PolicyOperand{{Kind: PolicyEntryPolicy, ID: "policy/go-toolchain", Path: ".verdi/specs/active/story-x/spec.md"}},
+				nil,
+			)
+			return err
+		},
+		"two authority artifacts collide": func() error {
+			_, err := buildStoreLifts(storeLiftTarget(), nil, nil, nil, collidingArtifacts)
+			return err
+		},
+		"two fragments collide": func() error {
+			second := validFragmentFixture("feature-b", "problem b")
+			second.Feature.Path = ".verdi/specs/active/feature-a/spec.md"
+			_, err := buildStoreLifts(
+				storeLiftTarget(),
+				[]FeatureFragment{validFragmentFixture("feature-a", "problem a"), second},
+				nil, nil, nil,
+			)
+			return err
+		},
+		"empty operand path": func() error {
+			_, err := buildStoreLifts(
+				storeLiftTarget(), nil, nil,
+				[]PolicyOperand{{Kind: PolicyEntryPolicy, ID: "policy/go-toolchain"}},
+				nil,
+			)
+			return err
+		},
+	}
+	for name, run := range cases {
+		t.Run(name, func(t *testing.T) {
+			if err := run(); err == nil {
+				t.Fatal("expected buildStoreLifts to fail closed")
+			}
+		})
+	}
+}
+
+// TestBuildStoreLiftsIdenticalPairIsAccepted proves the guard rejects
+// CONFLICTING claims, not a redundant identical one: re-declaring the same
+// (path, ref) pair leaves the lift map unchanged and is therefore not an
+// inconsistency.
+func TestBuildStoreLiftsIdenticalPairIsAccepted(t *testing.T) {
+	target := storeLiftTarget()
+	lifts, err := buildStoreLifts(
+		target, nil, nil,
+		nil,
+		[]storeAuthorityArtifact{{Ref: target.Ref, Path: target.Path, Digest: digestSeed('a')}},
+	)
+	if err != nil {
+		t.Fatalf("buildStoreLifts: unexpected error on an identical repeated pair: %v", err)
+	}
+	if len(lifts) != 1 || lifts[target.Path] != target.Ref {
+		t.Fatalf("buildStoreLifts = %v, want the single unchanged pair", lifts)
+	}
+}
+
 // --- authorityRevision / contextRevisions (Lane 7B, authority design §9) ---
 //
 // digestSeed returns a valid "sha256:"+64-lowercase-hex digest built by

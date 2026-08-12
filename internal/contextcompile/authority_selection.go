@@ -9,6 +9,13 @@ import (
 	"github.com/jyang234/verdi/internal/policyartifact"
 )
 
+// policyStoreDir is the one repo-relative directory the constitution store
+// occupies, with its trailing separator. policyartifact owns the grammar
+// INSIDE that directory (its Dir* constants below and ClassifyPolicyPath),
+// but exports no constant naming the directory itself, so this package
+// spells it exactly once here instead of at every store-path call site.
+const policyStoreDir = ".verdi/policy/"
+
 // operandArtifactKind maps each closed PolicyEntry* kind to the
 // policyartifact ref-prefix kind an authorityOperandCandidate.ID must carry.
 var operandArtifactKind = map[string]string{
@@ -43,7 +50,7 @@ func validateAuthorityOperandCandidate(field string, c authorityOperandCandidate
 	if wantKind := operandArtifactKind[c.Kind]; kind != wantKind {
 		return fmt.Errorf("contextcompile: %s.id: %q has kind prefix %q, want %q for candidate kind %q", field, c.ID, kind, wantKind, c.Kind)
 	}
-	if wantPath := ".verdi/policy/" + operandArtifactDir[c.Kind] + "/" + name + ".md"; c.Path != wantPath {
+	if wantPath := policyStoreDir + operandArtifactDir[c.Kind] + "/" + name + ".md"; c.Path != wantPath {
 		return fmt.Errorf("contextcompile: %s.path: %q does not match id %q (want %q)", field, c.Path, c.ID, wantPath)
 	}
 	return validateDigest(field+".digest", c.Digest)
@@ -166,7 +173,7 @@ func authorityOperandCandidates(authority PolicyAuthority) ([]authorityOperandCa
 		candidates = append(candidates, authorityOperandCandidate{
 			Kind:   PolicyEntryPolicy,
 			ID:     policy.ID,
-			Path:   ".verdi/policy/policies/" + policy.Name() + ".md",
+			Path:   policyStoreDir + policyartifact.DirPolicies + "/" + policy.Name() + ".md",
 			Digest: digest,
 			Scope:  cloneScope(policy.Scope),
 		})
@@ -182,7 +189,7 @@ func authorityOperandCandidates(authority PolicyAuthority) ([]authorityOperandCa
 		candidates = append(candidates, authorityOperandCandidate{
 			Kind:   PolicyEntryOverlay,
 			ID:     overlay.ID,
-			Path:   ".verdi/policy/overlays/" + overlay.Name() + ".md",
+			Path:   policyStoreDir + policyartifact.DirOverlays + "/" + overlay.Name() + ".md",
 			Digest: digest,
 			Scope:  cloneScope(overlay.Scope),
 		})
@@ -198,7 +205,7 @@ func authorityOperandCandidates(authority PolicyAuthority) ([]authorityOperandCa
 		candidates = append(candidates, authorityOperandCandidate{
 			Kind:   PolicyEntryExemption,
 			ID:     exemption.ID,
-			Path:   ".verdi/policy/exemptions/" + exemption.Name() + ".md",
+			Path:   policyStoreDir + policyartifact.DirExemptions + "/" + exemption.Name() + ".md",
 			Digest: digest,
 			Scope:  cloneScope(exemption.Scope),
 		})
@@ -209,6 +216,71 @@ func authorityOperandCandidates(authority PolicyAuthority) ([]authorityOperandCa
 	})
 
 	return candidates, nil
+}
+
+// storeAuthorityArtifact is one constitution-store artifact that authority
+// design §5's store-authority row enumerates UNCONDITIONALLY — "Resolved
+// constitution, profile, applicable policies/overlays/exemptions, ..." — as
+// opposed to the policy/overlay/exemption operands, which enter only when
+// stage 7's applicability selection retains them.
+//
+// Ref is the canonical policy-artifact ref (validatePolicyArtifactRef's
+// grammar); Path is the tracked store path the ref lifts out of the
+// head-tree source; Digest is the ADOPTED digest the resolved effective
+// policy already binds, so a compile can prove the HEAD bytes it wraps as a
+// payload are the same bytes that authority was resolved from.
+type storeAuthorityArtifact struct {
+	Ref    string
+	Path   string
+	Digest string
+}
+
+// resolvedAuthorityArtifacts returns the resolved constitution and the
+// SELECTED governance profile as store-authority lifts (authority design
+// §5). Neither is subject to the request's declared scope: §6 fixes that
+// "scope still bounds repository material", and the applicable constitution
+// is required capsule content for every phase — so leaving these two as
+// head-tree repository files would let a narrowed `scope.paths` exclude the
+// governing constitution from the capsule it governs.
+//
+// Both digests come from the already-resolved EffectivePolicy, never
+// recomputed here from a second reading of the store.
+func resolvedAuthorityArtifacts(authority PolicyAuthority) ([]storeAuthorityArtifact, error) {
+	if authority.Store == nil {
+		return nil, fmt.Errorf("contextcompile: resolved authority artifacts: policy authority store is nil")
+	}
+	if authority.Effective == nil {
+		return nil, fmt.Errorf("contextcompile: resolved authority artifacts: policy authority effective policy is nil")
+	}
+	profileID := authority.Effective.ProfileID
+	if _, ok := authority.Store.Profiles[profileID]; !ok {
+		return nil, fmt.Errorf("contextcompile: resolved authority artifacts: resolved effective policy names profile %q, absent from the loaded store", profileID)
+	}
+
+	artifacts := []storeAuthorityArtifact{
+		{
+			Ref:    policyartifact.KindConstitution + "/" + policyartifact.ConstitutionName,
+			Path:   policyStoreDir + policyartifact.ConstitutionName + ".md",
+			Digest: authority.Effective.ConstitutionDigest,
+		},
+		{
+			Ref:    policyartifact.KindProfileStorage + "/" + profileID,
+			Path:   policyStoreDir + policyartifact.DirProfiles + "/" + profileID + ".md",
+			Digest: authority.Effective.ProfileDigest,
+		},
+	}
+	for _, a := range artifacts {
+		if err := validatePolicyArtifactRef("resolved authority artifact ref", a.Ref); err != nil {
+			return nil, err
+		}
+		if err := validateCandidatePath(a.Path); err != nil {
+			return nil, fmt.Errorf("contextcompile: resolved authority artifact %s: %w", a.Ref, err)
+		}
+		if err := validateDigest("resolved authority artifact "+a.Ref+" digest", a.Digest); err != nil {
+			return nil, err
+		}
+	}
+	return artifacts, nil
 }
 
 // renderSelectedProjection renders authority's loaded store, effective

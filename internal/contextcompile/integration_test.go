@@ -836,6 +836,107 @@ func (g countingRepoFactsGatherer) Gather(ctx context.Context, in repositoryfact
 	return snapshot, nil
 }
 
+// requireExcludedEntry returns the sole ExcludedEntry in entries whose ID
+// matches id, failing the test if it is absent or duplicated.
+func requireExcludedEntry(t *testing.T, entries []ExcludedEntry, id string) ExcludedEntry {
+	t.Helper()
+	var found *ExcludedEntry
+	for i := range entries {
+		if entries[i].ID == id {
+			if found != nil {
+				t.Fatalf("excluded entry %q appears more than once", id)
+			}
+			e := entries[i]
+			found = &e
+		}
+	}
+	if found == nil {
+		t.Fatalf("no excluded entry with id %q: %+v", id, entries)
+	}
+	return *found
+}
+
+// TestCompile_Integration_ConstitutionAndProfileAreStoreAuthority proves the
+// resolved constitution and the SELECTED governance profile are lifted into
+// store-authority, not left as ordinary head-tree repository files.
+// Authority design §5's store-authority row is an exact enumeration —
+// "Resolved constitution, profile, applicable policies/overlays/exemptions,
+// accepted spec, parent feature fragments, and obligations" — and §5 also
+// fixes that "a tracked path lifted here is not duplicated as a
+// repository-file candidate".
+func TestCompile_Integration_ConstitutionAndProfileAreStoreAuthority(t *testing.T) {
+	repo := multiParentStoryRepo(t)
+	c := NewCompiler()
+	result, err := c.Compile(context.Background(), repo.Dir, integrationBuildRequest("spec/story-multi-parent"))
+	if err != nil {
+		t.Fatalf("Compile: unexpected error: %v", err)
+	}
+	m := result.Manifest
+
+	for _, ref := range []string{"policy-constitution/constitution", "governance-profile/solo-default"} {
+		row := requireIncludedEntry(t, m.Included, "ref:"+ref)
+		if row.Source != SourceStoreAuthority || row.Kind != IncludedPolicyArtifact {
+			t.Errorf("%s included row = %+v, want source=store-authority kind=policy-artifact", ref, row)
+		}
+		if row.PayloadChannel != ChannelData {
+			t.Errorf("%s payload channel = %q, want %q", ref, row.PayloadChannel, ChannelData)
+		}
+	}
+	// The two lifted paths must NOT reappear as repository-file candidates.
+	for _, path := range []string{".verdi/policy/constitution.md", ".verdi/policy/profiles/solo-default.md"} {
+		for _, e := range m.Included {
+			if e.Path != nil && *e.Path == path {
+				t.Errorf("%s is still an included %s/%s candidate; a lifted path must not be duplicated as a repository file", path, e.Source, e.Kind)
+			}
+		}
+		for _, e := range m.Excluded {
+			if e.Path != nil && *e.Path == path {
+				t.Errorf("%s is still an excluded %s candidate; a lifted path must not be duplicated as a repository file", path, e.Source)
+			}
+		}
+	}
+	// The two digests the manifest's own policy section already claims must
+	// be exactly the ones the lifted candidates carry.
+	constitutionRow := requireIncludedEntry(t, m.Included, "ref:policy-constitution/constitution")
+	if constitutionRow.ContentDigest == "" {
+		t.Error("lifted constitution carries no content digest")
+	}
+	if m.Policy.ProfileID != "solo-default" {
+		t.Fatalf("Policy.ProfileID = %q, want solo-default", m.Policy.ProfileID)
+	}
+}
+
+// TestCompile_Integration_NarrowedPathScopeKeepsAuthority proves declared
+// scope bounds REPOSITORY material only (authority design §6: "Scope still
+// bounds repository material"): a compile scoped to `cmd/` excludes ordinary
+// tracked files as out-of-declared-scope while the applicable constitution
+// and selected profile — §6 Build's required capsule content — remain
+// included store-authority rows.
+func TestCompile_Integration_NarrowedPathScopeKeepsAuthority(t *testing.T) {
+	repo := multiParentStoryRepo(t)
+	req := integrationBuildRequest("spec/story-multi-parent")
+	req.Scope.Paths = []string{"cmd/"}
+
+	c := NewCompiler()
+	result, err := c.Compile(context.Background(), repo.Dir, req)
+	if err != nil {
+		t.Fatalf("Compile: unexpected error: %v", err)
+	}
+	m := result.Manifest
+
+	for _, ref := range []string{"policy-constitution/constitution", "governance-profile/solo-default", "spec/story-multi-parent"} {
+		row := requireIncludedEntry(t, m.Included, "ref:"+ref)
+		if row.Source != SourceStoreAuthority {
+			t.Errorf("%s row source = %q, want store-authority under a narrowed path scope", ref, row.Source)
+		}
+	}
+	// An ordinary tracked repository file outside cmd/ is scoped out.
+	scopedOut := requireExcludedEntry(t, m.Excluded, "path:.verdi/policy/overlays/frontend-go-version.md")
+	if scopedOut.Source != SourceHeadTree || scopedOut.Reason != ExclusionOutOfDeclaredScope {
+		t.Errorf("scoped-out repository file = %+v, want head-tree/out-of-declared-scope", scopedOut)
+	}
+}
+
 // TestCompile_Integration_RepositoryFactsGatheredExactlyOnce proves Compile
 // gathers repository facts exactly once and publishes THOSE facts in the
 // manifest: the fixture's second (and any later) Gather deliberately reports
