@@ -335,7 +335,7 @@ func (c Compiler) Compile(ctx context.Context, root string, request Request) (Re
 
 	// Stage 11: compute revisions, every manifest row, the disclosure
 	// union, and canonical bytes.
-	manifest, err := c.assembleManifest(ctx, root, head, request, authority, selection, target, fragments, obligations, declaredByLogicalRef, classification, actorsSection)
+	manifest, err := c.assembleManifest(ctx, root, head, snapshot, request, authority, selection, target, fragments, obligations, declaredByLogicalRef, classification, actorsSection)
 	if err != nil {
 		return Result{}, fmt.Errorf("contextcompile: stage 11 assemble manifest: %w", err)
 	}
@@ -480,6 +480,7 @@ func buildClassificationMaterials(
 func (c Compiler) assembleManifest(
 	ctx context.Context,
 	root, head string,
+	snapshot repositoryfacts.Snapshot,
 	request Request,
 	authority PolicyAuthority,
 	selection authoritySelection,
@@ -509,10 +510,7 @@ func (c Compiler) assembleManifest(
 		return Manifest{}, err
 	}
 
-	repositorySection, err := buildRepositorySection(ctx, c, root)
-	if err != nil {
-		return Manifest{}, err
-	}
+	repositorySection := buildRepositorySection(snapshot)
 
 	policyEntries, err := buildPolicyEntries(selection, request, target)
 	if err != nil {
@@ -725,21 +723,19 @@ func (c Compiler) resolveOwners(ctx context.Context, root, head string, target R
 	return owners, nil
 }
 
-// buildRepositorySection re-gathers repository facts through the same
-// port stage 3 already used and maps them to the manifest's `repository`
-// section, translating repositoryfacts' finer per-cause disclosure codes
-// to the coarser closed §8.2 manifest vocabulary (SI-85).
+// buildRepositorySection maps the ONE stage-3 repository-fact snapshot to
+// the manifest's `repository` section, translating repositoryfacts' finer
+// per-cause disclosure codes to the coarser closed §8.2 manifest vocabulary
+// (SI-85).
 //
-// A fresh Gather call here (rather than reusing stage 3's snapshot value)
-// keeps this mapping self-contained and pure-looking from the caller's
-// side; it reads exactly the same trusted port stage 3 already calls, over
-// the same unchanging checkout, so it is deterministically the same
-// Snapshot — v1 never mutates the checkout between stage 3 and stage 11.
-func buildRepositorySection(ctx context.Context, c Compiler, root string) (RepositoryFacts, error) {
-	snapshot, err := c.repoFacts.Gather(ctx, repositoryfacts.GatherInput{Root: root})
-	if err != nil {
-		return RepositoryFacts{}, fmt.Errorf("repository: re-gather repository facts: %w", err)
-	}
+// It deliberately takes stage 3's already-gathered Snapshot rather than
+// re-gathering: authority design §4 computes these facts once, and §8.2's
+// `repository` row must disclose the facts THIS compile used — the same
+// values stage 3 compared the caller's optional expectation against and
+// stage 4 onward resolved every object at. Nothing freezes the checkout
+// between stage 3 and stage 11, so a second gather could publish facts no
+// other stage ever consumed.
+func buildRepositorySection(snapshot repositoryfacts.Snapshot) RepositoryFacts {
 	f := snapshot.Facts
 	return RepositoryFacts{
 		RemoteOrigin:  StringFact{Known: f.RemoteOrigin.Known, Value: f.RemoteOrigin.Value},
@@ -752,7 +748,7 @@ func buildRepositorySection(ctx context.Context, c Compiler, root string) (Repos
 		Worktree:      WorktreeFact{Managed: f.Worktree.Managed, Name: f.Worktree.Name},
 		Source:        string(f.Source),
 		Disclosures:   mapRepositoryDisclosures(snapshot),
-	}, nil
+	}
 }
 
 // mapRepositoryDisclosures translates repositoryfacts' finer per-cause

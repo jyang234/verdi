@@ -814,6 +814,54 @@ func TestCompile_Integration_SpikeMultiParent_Succeeds(t *testing.T) {
 	}
 }
 
+// countingRepoFactsGatherer wraps a RepositoryFactsGatherer, counting every
+// Gather call and — from the SECOND call onward — returning a deliberately
+// DIFFERENT snapshot than the first. A compile must disclose the repository
+// facts it actually used, so it may gather exactly once (authority design
+// §8.2's `repository` row plus §4's "computed once"); a second gather is
+// both a redundant read and a window in which the manifest could publish
+// facts no other stage ever consumed.
+type countingRepoFactsGatherer struct {
+	RepositoryFactsGatherer
+	calls *int
+}
+
+func (g countingRepoFactsGatherer) Gather(ctx context.Context, in repositoryfacts.GatherInput) (repositoryfacts.Snapshot, error) {
+	*g.calls++
+	snapshot, err := g.RepositoryFactsGatherer.Gather(ctx, in)
+	if err != nil || *g.calls == 1 {
+		return snapshot, err
+	}
+	snapshot.Facts.Branch = repositoryfacts.StringFact{Known: true, Value: "poisoned-second-gather"}
+	return snapshot, nil
+}
+
+// TestCompile_Integration_RepositoryFactsGatheredExactlyOnce proves Compile
+// gathers repository facts exactly once and publishes THOSE facts in the
+// manifest: the fixture's second (and any later) Gather deliberately reports
+// a different branch, so a manifest naming "poisoned-second-gather" — or a
+// call count above one — witnesses a manifest row inconsistent with the
+// facts stage 3 actually checked the caller expectation against.
+func TestCompile_Integration_RepositoryFactsGatheredExactlyOnce(t *testing.T) {
+	repo := multiParentStoryRepo(t)
+	calls := 0
+	c := newCompilerWithPorts(
+		gitxGitReader{}, specstate.NewProjector(), defaultAuthorityLoader{}, nil,
+		countingRepoFactsGatherer{RepositoryFactsGatherer: repositoryfacts.NewGatherer(), calls: &calls},
+		defaultProjectionVerifier{},
+	)
+	result, err := c.Compile(context.Background(), repo.Dir, integrationBuildRequest("spec/story-multi-parent"))
+	if err != nil {
+		t.Fatalf("Compile: unexpected error: %v", err)
+	}
+	if calls != 1 {
+		t.Errorf("repositoryfacts Gather called %d times, want exactly 1 per Compile", calls)
+	}
+	if got := result.Manifest.Repository.Branch.Value; got != "main" {
+		t.Errorf("Repository.Branch = %q, want the stage-3 fact %q (the manifest must disclose the facts this compile used)", got, "main")
+	}
+}
+
 // TestCompile_Integration_DesignFeature_Succeeds proves a class:feature
 // target compiles under phase design (unlike build, which
 // DeclaredScopeRefusal forbids for a feature target): required_inputs is
