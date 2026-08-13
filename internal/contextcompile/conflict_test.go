@@ -1010,6 +1010,174 @@ func (g conflictOverlayGit) LsTreeEntries(ctx context.Context, root, ref string)
 	return append(append([]gitx.TreeEntry(nil), entries...), g.extra...), nil
 }
 
+// candidateFeatureDeclaredContextFixture wires a feature-class candidate
+// whose own context: list names rawRef. When includeADR is true the exact
+// pinned tree also contains adrDoc at the ADR's fixed store path; otherwise
+// the ref is intentionally unresolvable. The real candidate resolver sees
+// only exact Git-object reads and the real strict authority decoder.
+func candidateFeatureDeclaredContextFixture(t *testing.T, rawRef, adrDoc string, includeADR bool) (Compiler, CandidateRequest, string) {
+	t.Helper()
+	root := installPolicyFixture(t)
+	candidatePath := ".verdi/specs/active/candidate-feature/spec.md"
+	candidateSpec := strings.Replace(candidateFeatureSpec, "class: feature\n",
+		"class: feature\ncontext: [\""+rawRef+"\"]\n", 1)
+	if candidateSpec == candidateFeatureSpec {
+		t.Fatal("fixture patch did not apply: candidateFeatureSpec no longer carries a `class: feature` line")
+	}
+
+	files := map[string][]byte{candidatePath: []byte(candidateSpec)}
+	entries := []gitx.TreeEntry{{Mode: "100644", Type: "blob", Object: strings.Repeat("a", 40), Path: candidatePath}}
+	if includeADR {
+		files[conflictADRPath] = []byte(adrDoc)
+		entries = append(entries, gitx.TreeEntry{Mode: "100644", Type: "blob", Object: strings.Repeat("e", 40), Path: conflictADRPath})
+	}
+
+	git := policyDiskFallbackGit{GitReader: authorityGit{
+		tree: func(context.Context, string, string) ([]gitx.TreeEntry, error) {
+			return append([]gitx.TreeEntry(nil), entries...), nil
+		},
+		show: func(_ context.Context, _ string, _ string, path string) ([]byte, error) {
+			data, ok := files[path]
+			if !ok {
+				return nil, errors.New("contextcompile: unexpected candidate declared-context path")
+			}
+			return append([]byte(nil), data...), nil
+		},
+	}}
+	repoFacts := stubRepoFactsGatherer{snapshot: validRepositorySnapshot(compileHead, "main")}
+	c := newCompilerWithPorts(git, panicStateResolver{}, defaultAuthorityLoader{}, nil, repoFacts, panicProjectionVerifier{})
+	return c, candidateRequestFor("spec/candidate-feature", "main", compileHead), root
+}
+
+// storyCandidateDeclaredContextFixture wires a story-class candidate whose
+// governing feature-alpha parent declares the exact pinned fixture ADR. The
+// story has no context: field of its own, so a successful claim proves the
+// SI-91 parent-union path rather than the feature-target path.
+func storyCandidateDeclaredContextFixture(t *testing.T) (Compiler, CandidateRequest, string) {
+	t.Helper()
+	root := installPolicyFixture(t)
+	git, states, ref := compilerAcceptedFixture(t)
+	alphaData, _ := decodeFragmentSpecFixture(t, "feature-alpha.md")
+	declaring := strings.Replace(string(alphaData), "class: feature\n",
+		"class: feature\ncontext: [\""+conflictADRPinnedRef+"\"]\n", 1)
+	if declaring == string(alphaData) {
+		t.Fatal("fixture patch did not apply: feature-alpha.md no longer carries a `class: feature` line")
+	}
+
+	overlay := conflictOverlayGit{
+		GitReader: policyDiskFallbackGit{GitReader: git},
+		files: map[string][]byte{
+			conflictAlphaPath: []byte(declaring),
+			conflictADRPath:   []byte(conflictADRDoc),
+		},
+		extra: []gitx.TreeEntry{{Mode: "100644", Type: "blob", Object: strings.Repeat("e", 40), Path: conflictADRPath}},
+	}
+	gitWT := gitWithWorktree{GitReader: overlay, worktree: func(context.Context, string) ([]string, error) {
+		panic("contextcompile: candidate resolution must never read worktree-changed paths")
+	}}
+	repoFacts := stubRepoFactsGatherer{snapshot: validRepositorySnapshot(compileHead, "main")}
+	c := newCompilerWithPorts(gitWT, states, defaultAuthorityLoader{}, nil, repoFacts, panicProjectionVerifier{})
+	return c, candidateRequestFor(ref, "main", compileHead), root
+}
+
+// assertCandidateADRDecisionProse proves the complete candidate-visible ADR
+// behavior: normalized prose and digest, exact raw source digest and pinned
+// ref/path, source-set membership, and preservation of candidate identity.
+func assertCandidateADRDecisionProse(t *testing.T, view ConflictView) {
+	t.Helper()
+	if view.Snapshot.TargetKind != snapshotTargetAcceptanceCandidate || view.Snapshot.ManifestDigest != "" || view.Snapshot.CandidateDigest == "" {
+		t.Errorf("snapshot identity is not exclusively a candidate identity: %+v", view.Snapshot)
+	}
+	claims := conflictProseClaimsByCategory(view, categoryADRDecision)
+	if len(claims) != 1 {
+		t.Fatalf("adr-decision ProseClaims = %d, want exactly 1: %+v", len(claims), claims)
+	}
+	claim := claims[0]
+	if claim.Text != conflictADRNormalized {
+		t.Errorf("adr-decision Text =\n%q\nwant\n%q", claim.Text, conflictADRNormalized)
+	}
+	if want := rawContentDigest([]byte(conflictADRNormalized)); claim.TextDigest != want {
+		t.Errorf("adr-decision TextDigest = %q, want normalized-text digest %q", claim.TextDigest, want)
+	}
+	rawDigest := rawContentDigest([]byte(conflictADRDoc))
+	if claim.SourceRef != conflictADRPinnedRef || claim.SourcePath != conflictADRPath || claim.SourceDigest != rawDigest {
+		t.Errorf("adr-decision source = ref %q path %q digest %q, want exact pinned source %q %q %q",
+			claim.SourceRef, claim.SourcePath, claim.SourceDigest, conflictADRPinnedRef, conflictADRPath, rawDigest)
+	}
+	wantSource := ConflictSourceIdentity{Ref: conflictADRPinnedRef, Path: conflictADRPath, ContentDigest: rawDigest}
+	for _, source := range view.Snapshot.Sources {
+		if source == wantSource {
+			return
+		}
+	}
+	t.Errorf("Snapshot.Sources is missing the declared ADR %+v: %+v", wantSource, view.Snapshot.Sources)
+}
+
+// TestResolveConflictCandidateFeatureDeclaredContextADRDecisionProse catches
+// candidate feature construction dropping its own exact pinned context: list.
+func TestResolveConflictCandidateFeatureDeclaredContextADRDecisionProse(t *testing.T) {
+	c, req, root := candidateFeatureDeclaredContextFixture(t, conflictADRPinnedRef, conflictADRDoc, true)
+	operands, err := c.resolveConflictCandidate(context.Background(), root, req, ConflictFacts{})
+	if err != nil {
+		t.Fatalf("resolveConflictCandidate(feature declared context): unexpected error: %v", err)
+	}
+	view, err := operands.View()
+	if err != nil {
+		t.Fatalf("View: unexpected error: %v", err)
+	}
+	assertCandidateADRDecisionProse(t, view)
+}
+
+// TestResolveConflictCandidateStoryDeclaredContextADRDecisionProse catches
+// candidate story construction dropping the declared-context union inherited
+// from its accepted governing feature parents.
+func TestResolveConflictCandidateStoryDeclaredContextADRDecisionProse(t *testing.T) {
+	c, req, root := storyCandidateDeclaredContextFixture(t)
+	operands, err := c.resolveConflictCandidate(context.Background(), root, req, ConflictFacts{})
+	if err != nil {
+		t.Fatalf("resolveConflictCandidate(story declared context): unexpected error: %v", err)
+	}
+	view, err := operands.View()
+	if err != nil {
+		t.Fatalf("View: unexpected error: %v", err)
+	}
+	assertCandidateADRDecisionProse(t, view)
+}
+
+// TestResolveConflictCandidateDeclaredContextFailsOperationally catches a
+// candidate arm silently omitting invalid authority. Malformed exact refs,
+// unresolved pinned artifacts, and strict-decode failures are operational,
+// never state refusals or favorable empty claim sets.
+func TestResolveConflictCandidateDeclaredContextFailsOperationally(t *testing.T) {
+	malformedADR := strings.Replace(conflictADRDoc, "status: accepted\n", "status: accepted\nunknown: true\n", 1)
+	tests := []struct {
+		name       string
+		ref        string
+		adrDoc     string
+		includeADR bool
+		wantStage  string
+	}{
+		{name: "malformed unpinned ref", ref: "adr/alpha-base", wantStage: "decode candidate spec"},
+		{name: "unresolvable pinned artifact", ref: "adr/missing@" + compileHead, wantStage: "resolve declared context"},
+		{name: "malformed pinned artifact", ref: conflictADRPinnedRef, adrDoc: malformedADR, includeADR: true, wantStage: "resolve declared context"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c, req, root := candidateFeatureDeclaredContextFixture(t, tt.ref, tt.adrDoc, tt.includeADR)
+			_, err := c.resolveConflictCandidate(context.Background(), root, req, ConflictFacts{})
+			if err == nil {
+				t.Fatal("resolveConflictCandidate accepted malformed or unresolvable declared context")
+			}
+			if IsRefusal(err) {
+				t.Fatalf("declared-context authority error was classified as a state refusal: %T %v", err, err)
+			}
+			if !strings.Contains(err.Error(), tt.wantStage) {
+				t.Fatalf("error did not come from the expected %q stage: %v", tt.wantStage, err)
+			}
+		})
+	}
+}
+
 // hermeticAcceptedProseFixture is hermeticAcceptedFixture plus authored
 // prose authority: the governing parent feature declares one exact pinned
 // ADR as declared context, that ADR exists at its fixed store path with

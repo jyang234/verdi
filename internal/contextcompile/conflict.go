@@ -51,16 +51,14 @@ const (
 // string values mirror policyartifact.knownWitnessCategories so a
 // ProseClaim.Category always matches a legal disposition-witness category.
 //
-// adr-decision is produced on the ACCEPTED arm only. compilePipeline
-// already resolves the target's effective declared context (SI-92),
-// pinning each declared ADR's exact bytes and content digest, and that
-// ADR's whole normalized authored body IS its decision authority —
-// artifact.ADRFrontmatter carries no structured decision field to project
-// instead. The acceptance-candidate arm deliberately binds no declared
-// context and therefore emits no adr-decision claim: which commit a
-// not-yet-accepted candidate's declared pins must resolve against is a
-// question this task does not answer, and is deferred to owner
-// adjudication rather than invented here.
+// adr-decision is produced on both arms from the target's effective
+// declared context (SI-92), pinning each declared ADR's exact bytes and
+// content digest. An ADR's whole normalized authored body IS its decision
+// authority — artifact.ADRFrontmatter carries no structured decision field
+// to project instead. Candidate construction resolves the target and its
+// parents from req.Expected.Head, then ResolveDeclaredContext follows each
+// declared ref's own exact pinned commit; no accepted-target resolution or
+// candidate manifest is involved.
 const (
 	categoryPolicyInstruction     = "policy-instruction"
 	categorySpecProblem           = "spec-problem"
@@ -429,6 +427,10 @@ func (c Compiler) resolveConflictCandidate(ctx context.Context, root string, req
 	if err != nil {
 		return nil, fmt.Errorf("contextcompile: resolve candidate bound obligations: %w", err)
 	}
+	declared, err := ResolveDeclaredContext(ctx, c.git, root, req.Expected.Head, target, fragments)
+	if err != nil {
+		return nil, fmt.Errorf("contextcompile: resolve declared context for candidate: %w", err)
+	}
 
 	candidateAsRequest := Request{Schema: RequestSchema, Adapter: req.Adapter, Phase: PhaseDesign, Scope: req.Scope, Spec: req.Spec}
 	operandCandidates, err := authorityOperandCandidates(authority)
@@ -452,16 +454,14 @@ func (c Compiler) resolveConflictCandidate(ctx context.Context, root string, req
 		target:          target,
 		fragments:       fragments,
 		obligations:     obligations,
-		// No declared context: the candidate arm binds none (see the
-		// category block's comment — deferred to owner adjudication).
-		declared:  nil,
-		selection: selection,
+		declared:        declared.Items,
+		selection:       selection,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("contextcompile: build candidate conflict snapshot: %w", err)
 	}
 
-	view, err := buildConflictView(authority, selection, target, fragments, obligations, nil, req.Scope, snapshotIdentity, facts)
+	view, err := buildConflictView(authority, selection, target, fragments, obligations, declared.Items, req.Scope, snapshotIdentity, facts)
 	if err != nil {
 		return nil, err
 	}
@@ -484,8 +484,7 @@ type snapshotBuildInput struct {
 	target                          ResolvedSpec
 	fragments                       []FeatureFragment
 	obligations                     []BoundObligation
-	// declared is the arm's effective declared-context resolution. Only
-	// the accepted arm supplies one (see the category block's comment).
+	// declared is the arm's effective declared-context resolution.
 	declared  []DeclaredContextItem
 	selection authoritySelection
 }
