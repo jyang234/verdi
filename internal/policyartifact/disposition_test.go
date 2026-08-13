@@ -580,3 +580,87 @@ func TestDispositionDigest_SealedAndMutationSafe(t *testing.T) {
 		}
 	})
 }
+
+func TestValidateWitnessCategory(t *testing.T) {
+	valid := []string{
+		"policy-instruction", "spec-problem", "spec-outcome",
+		"acceptance-criterion", "open-question", "constraint", "decision",
+		"adr-decision", "obligation-declaration",
+	}
+	for _, c := range valid {
+		t.Run("valid/"+c, func(t *testing.T) {
+			if err := ValidateWitnessCategory(c); err != nil {
+				t.Fatalf("ValidateWitnessCategory(%q): %v", c, err)
+			}
+		})
+	}
+
+	invalid := []string{"", "spec-instruction", "POLICY-INSTRUCTION", "policy_instruction", "unknown-category"}
+	for _, c := range invalid {
+		t.Run("invalid/"+c, func(t *testing.T) {
+			if err := ValidateWitnessCategory(c); err == nil {
+				t.Fatalf("ValidateWitnessCategory(%q) = nil, want error", c)
+			}
+		})
+	}
+}
+
+// validSemanticClaimWitness returns a fresh, independently valid
+// SemanticClaimWitness for TestSemanticClaimWitness_Validate's negative
+// table to mutate.
+func validSemanticClaimWitness() SemanticClaimWitness {
+	return SemanticClaimWitness{
+		ID:              "ac-review-approval",
+		Digest:          dispoClaimACDigest,
+		Category:        "acceptance-criterion",
+		AuthorityDigest: dispoClaimACAuthority,
+		Scope:           Scope{Phases: []string{"review"}, Environments: []string{}, Paths: []string{}, Refs: []string{}},
+		Values:          []string{"approved"},
+	}
+}
+
+func TestSemanticClaimWitness_Validate(t *testing.T) {
+	t.Run("valid witness", func(t *testing.T) {
+		if err := validSemanticClaimWitness().Validate(); err != nil {
+			t.Fatalf("Validate: %v", err)
+		}
+	})
+
+	t.Run("valid witness with bound and no values", func(t *testing.T) {
+		w := validSemanticClaimWitness()
+		w.Values = nil
+		bound := 3
+		w.Bound = &bound
+		if err := w.Validate(); err != nil {
+			t.Fatalf("Validate: %v", err)
+		}
+	})
+
+	tests := []struct {
+		name   string
+		mutate func(*SemanticClaimWitness)
+	}{
+		{"blank id", func(w *SemanticClaimWitness) { w.ID = "  " }},
+		{"multiline id", func(w *SemanticClaimWitness) { w.ID = "line-one\nline-two" }},
+		{"empty id", func(w *SemanticClaimWitness) { w.ID = "" }},
+		{"malformed digest", func(w *SemanticClaimWitness) { w.Digest = "not-a-digest" }},
+		{"uppercase digest", func(w *SemanticClaimWitness) { w.Digest = strings.ToUpper(dispoClaimACDigest) }},
+		{"unknown category", func(w *SemanticClaimWitness) { w.Category = "unknown-category" }},
+		{"empty category", func(w *SemanticClaimWitness) { w.Category = "" }},
+		{"malformed authority digest", func(w *SemanticClaimWitness) { w.AuthorityDigest = "not-a-digest" }},
+		{"invalid scope (missing dimension)", func(w *SemanticClaimWitness) { w.Scope = Scope{} }},
+		{"invalid scope (unknown phase)", func(w *SemanticClaimWitness) {
+			w.Scope = Scope{Phases: []string{"bogus"}, Environments: []string{}, Paths: []string{}, Refs: []string{}}
+		}},
+		{"empty values entry", func(w *SemanticClaimWitness) { w.Values = []string{""} }},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			w := validSemanticClaimWitness()
+			tt.mutate(&w)
+			if err := w.Validate(); err == nil {
+				t.Fatalf("Validate() = nil, want error")
+			}
+		})
+	}
+}
