@@ -261,6 +261,14 @@ semantic input and remain blocking. This conservative boundary may withhold a
 mechanical conclusion, but it can neither manufacture a conflict from
 non-transitive pair overlap nor let an unresolved conjunction pass.
 
+When steps 1–2 find no overlapping contradiction, the evaluator may prove the
+complete group harmless by scope only through SI-107's component rule. Claims
+are joined when their pair is not proven disjoint (unknown remains joined).
+`scope-disjoint` is proven only when at least two components exist and the
+same domain solver proves every component satisfiable; otherwise the complete
+higher-order witness remains blocking-unproven. A disjoint complete N-way
+intersection alone is never sufficient.
+
 ### 5.1 Discrete-set domain
 
 The operators are `equals`, `not-equals`, `allowed-values`,
@@ -310,6 +318,14 @@ canonical role pair, profile, and separation mode. Requiring both relations for 
 same transition and role pair is a mechanical conflict. Requiring one relation
 is proven only when the kernel returns that conclusion; violated and unproven
 kernel results remain violated-with-witness or unproven respectively.
+The kernel identifies each distinctness finding with its exact sorted role
+pair. The evaluator consumes only whole-request authority findings and
+findings whose role or role pair belongs to the requested relation; unrelated
+governance findings cannot change this solver result. Advisory/experimental
+kernel posture is unproven for the authoritative consumer, not evidence that
+the requested relation is violated. Kernel-authorized solo role-collapse
+disclosures are returned beside the runtime evaluations and are hoisted once
+to the report's top-level disclosure set.
 
 ### 5.4 Path-capability domain
 
@@ -331,7 +347,11 @@ authorized under §9. Effective exempted claims are removed only inside the
 covered scope and the same solver runs again. A mechanical conflict is covered
 only when the post-exemption conjunction is satisfiable or disjoint. The report
 retains the original proof, exact removed claims, exemption identity/digest,
-authorization result, and post-exemption proof.
+authorization result, and post-exemption proof. A removed mechanical claim is
+identified by `(policy_id, claim_id, claim_digest)`, not by the semantic
+prose-witness vocabulary. An effective all-five-proven resolution names at
+least one exact current row witness; an ineffective resolution names the
+explicit empty removal set because it removed nothing.
 
 A semantic disposition can never erase a mechanical proof. `no-conflict` is
 not a legal mechanical resolution.
@@ -625,7 +645,8 @@ and grant digest. These facts occur once; the report has no second
 ledger that can drift from the evaluation rows.
 
 Each mechanical row carries its deterministic witness ID, family, subject,
-complete typed claims, scope proof, domain, pre-exemption solver result,
+complete typed claims keyed by `(policy_id, claim_id)` with their canonical
+base-claim digests, scope proof, domain, pre-exemption solver result,
 applicable exemption resolutions, post-exemption solver result, state, and
 reason codes. Each semantic row carries its semantic-input ID, normalized
 claim identities, mechanical-unknown source when applicable,

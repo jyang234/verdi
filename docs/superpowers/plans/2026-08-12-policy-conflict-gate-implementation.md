@@ -408,6 +408,7 @@ type TypedClaimRecord struct {
     Claim policyartifact.Claim
 }
 type ClaimWitness struct { ID, Digest, Category string }
+type MechanicalClaimWitness struct { PolicyID, ClaimID, ClaimDigest string }
 type JudgeFinding struct {
     Claims []ClaimWitness
     Categories []string
@@ -441,7 +442,7 @@ type AuthorityResolution struct {
 type ExemptionResolution struct {
     ID, Digest string
     Resolution AuthorityResolution
-    RemovedClaims []ClaimWitness
+    RemovedClaims []MechanicalClaimWitness
 }
 type DispositionResolution struct {
     ID, Digest string
@@ -751,7 +752,11 @@ type MechanicalInput struct {
     Actors []governanceprincipal.PrincipalResolution
     Refs RefRelationResolver
 }
-func EvaluateMechanical(context.Context, MechanicalInput) ([]MechanicalEvaluation, error)
+type MechanicalResult struct {
+    Evaluations []MechanicalEvaluation
+    Disclosures []Disclosure
+}
+func EvaluateMechanical(context.Context, MechanicalInput) (MechanicalResult, error)
 func ApplyEffectiveExemptions(MechanicalEvaluation, []ExemptionResolution) (MechanicalEvaluation, error)
 ~~~
 
@@ -790,10 +795,15 @@ Expected: undefined mechanical evaluator/solvers.
 
 Group by `(family, subject)` and for identity additionally by sorted role pair.
 Solve the complete conjunction first, then exact-scope N-way groups and unique
-differently-scoped pairs. Feed unresolved higher-order scope to an unproven
-row. `ApplyEffectiveExemptions` accepts only an all-proven typed resolution,
-performs exact scoped claim removal, and calls the same solver again; it never
-interprets dates/principals or edits a proof result in place.
+differently-scoped pairs. Apply SI-107's satisfiable-component proof before
+feeding the genuine unresolved higher-order scope remainder to an unproven
+row. Preserve every typed claim under `(policy_id, claim_id)` and verify its
+carried digest against its base claim. `ApplyEffectiveExemptions` accepts only
+an all-proven typed resolution, performs exact scoped claim removal through
+`MechanicalClaimWitness`, and calls the same solver again; rejected resolutions
+carry an empty removal set. It never interprets dates/principals or edits a
+proof result in place. Principal-relation evaluation uses SI-106's exact
+kernel-finding attribution and returns kernel disclosures beside evaluations.
 
 - [ ] **Step 4: Run focused and package race GREEN**
 
