@@ -505,22 +505,18 @@ func TestCompareScopesNonTransitiveWitness(t *testing.T) {
 func TestIntersectScopesNWay(t *testing.T) {
 	ctx := context.Background()
 
-	t.Run("degenerate empty slice is the universal scope", func(t *testing.T) {
-		proof, err := IntersectScopes(ctx, nil, noCallResolver{t})
-		if err != nil {
-			t.Fatalf("IntersectScopes(nil): %v", err)
+	t.Run("degenerate empty family is an operational error, never a vacuous universal proof", func(t *testing.T) {
+		// A zero-scope call is always a caller defect, and §5's consumers
+		// treat a returned proof as authority: answering "universal
+		// overlap" from the absence of any operand would let an
+		// unsatisfiable witness be scored against a scope intersection
+		// nobody ever supplied. Fail closed instead.
+		if _, err := IntersectScopes(ctx, nil, noCallResolver{t}); !errors.Is(err, errNoScopes) {
+			t.Fatalf("IntersectScopes(nil) error = %v, want it to wrap %v", err, errNoScopes)
 		}
-		if proof.State != ScopeOverlap {
-			t.Fatalf("state = %q, want overlap (vacuous intersection convention)", proof.State)
+		if _, err := IntersectScopes(ctx, []policyartifact.Scope{}, noCallResolver{t}); !errors.Is(err, errNoScopes) {
+			t.Fatalf("IntersectScopes(empty) error = %v, want it to wrap %v", err, errNoScopes)
 		}
-		for _, name := range []string{"phase", "environment", "path", "ref"} {
-			d := dimOf(t, proof, name)
-			if d.State != ScopeOverlap {
-				t.Fatalf("%s state = %q, want overlap", name, d.State)
-			}
-			strEq(t, name+".intersection", d.Intersection, []string{})
-		}
-		mustValidScopeProof(t, proof)
 	})
 
 	t.Run("degenerate single scope always proves overlap", func(t *testing.T) {
@@ -676,6 +672,20 @@ func TestIntersectScopesNWay(t *testing.T) {
 		}
 	})
 
+	t.Run("nil resolver with a ref pair that needs resolution is operational, never a panic", func(t *testing.T) {
+		// §4.3 routes every non-identical ref pair exclusively through the
+		// resolver port. With no port supplied there is no evidence at all,
+		// which is a caller defect: report it operationally rather than
+		// crashing the process or inventing a relation.
+		if _, err := CompareScopes(ctx, scopeRefs("adr/alpha"), scopeRefs("adr/beta"), nil); !errors.Is(err, errNilRefResolver) {
+			t.Fatalf("CompareScopes with a nil resolver: error = %v, want it to wrap %v", err, errNilRefResolver)
+		}
+		s1, s2, s3 := scopeRefs("a"), scopeRefs("b"), scopeRefs("c")
+		if _, err := IntersectScopes(ctx, []policyartifact.Scope{s1, s2, s3}, nil); !errors.Is(err, errNilRefResolver) {
+			t.Fatalf("IntersectScopes with a nil resolver: error = %v, want it to wrap %v", err, errNilRefResolver)
+		}
+	})
+
 	t.Run("nil resolver is never dereferenced when every ref relation is exact-equal or universal", func(t *testing.T) {
 		s1 := scopeRefs("adr/alpha")
 		s2 := scopeRefs("adr/alpha")
@@ -687,6 +697,235 @@ func TestIntersectScopesNWay(t *testing.T) {
 		if dimOf(t, proof, "ref").State != ScopeOverlap {
 			t.Fatalf("ref state, want overlap")
 		}
+		mustValidScopeProof(t, proof)
+	})
+}
+
+// --- IntersectScopes: N-way path containment ---------------------------------
+
+// A dimension's N-way result is ONE total intersection across every
+// participating set (authority design §4.4), so for paths the per-set question
+// is CONTAINMENT — "is this candidate region inside something this set
+// selects?" — not mere pairwise overlap. A candidate that only overlaps some
+// member of every set can still name a region two of those sets do not share,
+// which would manufacture an intersection out of non-transitive pair overlap
+// (§5; ledger SI-94).
+func TestIntersectScopesPathContainment(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("a parent subtree with two sibling children has no common region", func(t *testing.T) {
+		s1 := scopeWith(nil, nil, []string{"internal/"}, nil)
+		s2 := scopeWith(nil, nil, []string{"internal/policy/"}, nil)
+		s3 := scopeWith(nil, nil, []string{"internal/context/"}, nil)
+
+		// Setup sanity: the parent pairwise-overlaps each child.
+		for _, pair := range [][2]policyartifact.Scope{{s1, s2}, {s1, s3}} {
+			p, err := CompareScopes(ctx, pair[0], pair[1], noCallResolver{t})
+			if err != nil {
+				t.Fatalf("pairwise CompareScopes: %v", err)
+			}
+			if dimOf(t, p, "path").State != ScopeOverlap {
+				t.Fatalf("expected this pair to overlap on path as test setup")
+			}
+		}
+
+		proof, err := IntersectScopes(ctx, []policyartifact.Scope{s1, s2, s3}, noCallResolver{t})
+		if err != nil {
+			t.Fatalf("IntersectScopes: %v", err)
+		}
+		path := dimOf(t, proof, "path")
+		if path.State != ScopeDisjoint {
+			t.Fatalf("path state = %q (intersection %v), want disjoint: internal/policy/ and internal/context/ share no region, so no path lies inside all three sets", path.State, path.Intersection)
+		}
+		strEq(t, "path.intersection", path.Intersection, []string{})
+		if proof.State != ScopeDisjoint {
+			t.Fatalf("overall state = %q, want disjoint", proof.State)
+		}
+		mustValidScopeProof(t, proof)
+	})
+
+	t.Run("a chain of containing selectors intersects to the innermost region", func(t *testing.T) {
+		s1 := scopeWith(nil, nil, []string{"internal/"}, nil)
+		s2 := scopeWith(nil, nil, []string{"internal/policy/"}, nil)
+		s3 := scopeWith(nil, nil, []string{"internal/policy/gate.go"}, nil)
+		proof, err := IntersectScopes(ctx, []policyartifact.Scope{s1, s2, s3}, noCallResolver{t})
+		if err != nil {
+			t.Fatalf("IntersectScopes: %v", err)
+		}
+		path := dimOf(t, proof, "path")
+		if path.State != ScopeOverlap {
+			t.Fatalf("path state = %q, want overlap", path.State)
+		}
+		strEq(t, "path.intersection", path.Intersection, []string{"internal/policy/gate.go"})
+		mustValidScopeProof(t, proof)
+	})
+
+	t.Run("a set's own redundant narrower selector reports the broadest shared region", func(t *testing.T) {
+		// a/ already contains a/b/, so BOTH sets denote exactly the a/
+		// subtree and the exact intersection region is a/. Reporting a/b/
+		// would understate the region the sets actually share (§4.2, §4.4).
+		s := scopeWith(nil, nil, []string{"a/", "a/b/"}, nil)
+		proof, err := IntersectScopes(ctx, []policyartifact.Scope{s, s}, noCallResolver{t})
+		if err != nil {
+			t.Fatalf("IntersectScopes: %v", err)
+		}
+		path := dimOf(t, proof, "path")
+		if path.State != ScopeOverlap {
+			t.Fatalf("path state = %q, want overlap", path.State)
+		}
+		strEq(t, "path.intersection", path.Intersection, []string{"a/"})
+		strEq(t, "path.witnesses", path.Witnesses, []string{"a/"})
+		mustValidScopeProof(t, proof)
+	})
+
+	t.Run("an exact entry inside the other side's subtree still reports the entry", func(t *testing.T) {
+		// cmd/ is not itself inside {cmd/verdi/main.go}, so the only region
+		// both sets contain is the exact entry — the pair semantics of §4.2
+		// are unchanged by the containment rule.
+		a := scopeWith(nil, nil, []string{"cmd/verdi/main.go"}, nil)
+		b := scopeWith(nil, nil, []string{"cmd/"}, nil)
+		proof, err := IntersectScopes(ctx, []policyartifact.Scope{a, b}, noCallResolver{t})
+		if err != nil {
+			t.Fatalf("IntersectScopes: %v", err)
+		}
+		path := dimOf(t, proof, "path")
+		if path.State != ScopeOverlap {
+			t.Fatalf("path state = %q, want overlap", path.State)
+		}
+		strEq(t, "path.intersection", path.Intersection, []string{"cmd/verdi/main.go"})
+		mustValidScopeProof(t, proof)
+	})
+}
+
+// --- IntersectScopes: N-way ref proof ----------------------------------------
+
+// Ref overlap is never transitive and is never an equivalence relation
+// (authority design §4.4). With more than two participating sets, a candidate
+// proven by DISTINCT pairwise resolver proofs against different sets proves
+// nothing about those sets' own relation to each other, so the only sound
+// N-way proof is a ref every set exactly contains; anything else that is not
+// soundly excluded is unknown (§5: neither manufacture a conflict from
+// non-transitive pair overlap nor let an unresolved conjunction pass).
+func TestIntersectScopesRefNWayProof(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("a pairwise chain whose end pair is proven disjoint is unknown, never overlap", func(t *testing.T) {
+		resolver := newFakeResolver(t).
+			set("a", "b", ScopeOverlap, "edge:a-b").
+			set("b", "c", ScopeOverlap, "edge:b-c").
+			set("a", "c", ScopeDisjoint)
+		proof, err := IntersectScopes(ctx, []policyartifact.Scope{scopeRefs("a"), scopeRefs("b"), scopeRefs("c")}, resolver)
+		if err != nil {
+			t.Fatalf("IntersectScopes: %v", err)
+		}
+		ref := dimOf(t, proof, "ref")
+		if ref.State != ScopeUnknown {
+			t.Fatalf("ref state = %q (intersection %v), want unknown: b overlaps a and c by two SEPARATE proofs, which says nothing about a vs c — and a vs c is proven disjoint", ref.State, ref.Intersection)
+		}
+		strEq(t, "ref.intersection", ref.Intersection, []string{})
+		if proof.State != ScopeUnknown {
+			t.Fatalf("overall state = %q, want unknown", proof.State)
+		}
+		mustValidScopeProof(t, proof)
+	})
+
+	t.Run("a pairwise chain whose end pair is unresolved is unknown, never overlap", func(t *testing.T) {
+		resolver := newFakeResolver(t).
+			set("a", "b", ScopeOverlap, "edge:a-b").
+			set("a", "c", ScopeOverlap, "edge:a-c").
+			set("b", "c", ScopeUnknown, "no-governing-edge-found:b-c")
+		proof, err := IntersectScopes(ctx, []policyartifact.Scope{scopeRefs("a"), scopeRefs("b"), scopeRefs("c")}, resolver)
+		if err != nil {
+			t.Fatalf("IntersectScopes: %v", err)
+		}
+		ref := dimOf(t, proof, "ref")
+		if ref.State != ScopeUnknown {
+			t.Fatalf("ref state = %q (intersection %v), want unknown: a's two overlap proofs do not prove b and c share a region with each other", ref.State, ref.Intersection)
+		}
+		strEq(t, "ref.intersection", ref.Intersection, []string{})
+		if proof.State != ScopeUnknown {
+			t.Fatalf("overall state = %q, want unknown", proof.State)
+		}
+		mustValidScopeProof(t, proof)
+	})
+
+	t.Run("a ref every set exactly contains is proven for any arity", func(t *testing.T) {
+		resolver := newFakeResolver(t).set("a", "b", ScopeOverlap, "edge:a-b")
+		s1, s2, s3 := scopeRefs("a"), scopeRefs("a", "b"), scopeRefs("a")
+		proof, err := IntersectScopes(ctx, []policyartifact.Scope{s1, s2, s3}, resolver)
+		if err != nil {
+			t.Fatalf("IntersectScopes: %v", err)
+		}
+		ref := dimOf(t, proof, "ref")
+		if ref.State != ScopeOverlap {
+			t.Fatalf("ref state = %q, want overlap (a is exactly present in every set)", ref.State)
+		}
+		strEq(t, "ref.intersection", ref.Intersection, []string{"a"})
+		if proof.State != ScopeOverlap {
+			t.Fatalf("overall state = %q, want overlap", proof.State)
+		}
+		mustValidScopeProof(t, proof)
+	})
+
+	t.Run("every set proven disjoint from one set stays disjoint", func(t *testing.T) {
+		resolver := newFakeResolver(t).
+			set("a", "b", ScopeDisjoint).
+			set("a", "c", ScopeDisjoint).
+			set("b", "c", ScopeDisjoint)
+		proof, err := IntersectScopes(ctx, []policyartifact.Scope{scopeRefs("a"), scopeRefs("b"), scopeRefs("c")}, resolver)
+		if err != nil {
+			t.Fatalf("IntersectScopes: %v", err)
+		}
+		ref := dimOf(t, proof, "ref")
+		if ref.State != ScopeDisjoint {
+			t.Fatalf("ref state = %q, want disjoint (every candidate is excluded by a set whose every member answers disjoint)", ref.State)
+		}
+		mustValidScopeProof(t, proof)
+	})
+}
+
+// --- IntersectScopes: witness hygiene ----------------------------------------
+
+// An overlap dimension's witnesses are "the exact ... graph-edge witness"
+// supporting THAT overlap (authority design §4.4). A resolver result of
+// unknown supports nothing, so its witnesses must never be reported as
+// evidence for a proven overlap.
+func TestIntersectScopesRefWitnessHygiene(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("unknown-derived witnesses never enter an overlap dimension", func(t *testing.T) {
+		resolver := newFakeResolver(t).set("a", "x", ScopeUnknown, "no-governing-edge-found:a-x")
+		s1, s2, s3 := scopeRefs("a", "x"), scopeRefs("a"), scopeRefs("a")
+		proof, err := IntersectScopes(ctx, []policyartifact.Scope{s1, s2, s3}, resolver)
+		if err != nil {
+			t.Fatalf("IntersectScopes: %v", err)
+		}
+		ref := dimOf(t, proof, "ref")
+		if ref.State != ScopeOverlap {
+			t.Fatalf("ref state = %q, want overlap (a is exactly present in every set)", ref.State)
+		}
+		strEq(t, "ref.intersection", ref.Intersection, []string{"a"})
+		for _, w := range ref.Witnesses {
+			if w == "no-governing-edge-found:a-x" {
+				t.Fatalf("ref.witnesses = %v: an unknown resolver result's witness is evidence of NOTHING and must never support a proven overlap", ref.Witnesses)
+			}
+		}
+		strEq(t, "ref.witnesses", ref.Witnesses, []string{})
+		mustValidScopeProof(t, proof)
+	})
+
+	t.Run("a proven candidate's own overlap witnesses are still recorded", func(t *testing.T) {
+		resolver := newFakeResolver(t).set("a", "b", ScopeOverlap, "edge:a-b")
+		s1, s2 := scopeRefs("a"), scopeRefs("b")
+		proof, err := IntersectScopes(ctx, []policyartifact.Scope{s1, s2}, resolver)
+		if err != nil {
+			t.Fatalf("IntersectScopes: %v", err)
+		}
+		ref := dimOf(t, proof, "ref")
+		if ref.State != ScopeOverlap {
+			t.Fatalf("ref state = %q, want overlap", ref.State)
+		}
+		strEq(t, "ref.witnesses", ref.Witnesses, []string{"edge:a-b"})
 		mustValidScopeProof(t, proof)
 	})
 }

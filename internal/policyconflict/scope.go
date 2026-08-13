@@ -11,14 +11,14 @@
 //
 // Degenerate IntersectScopes inputs (documented per the Task 5 brief, not
 // separately named by §4.4):
-//   - Zero scopes: every dimension has zero participants, which this
-//     package treats identically to "every participant is universal" — the
-//     standard vacuous-intersection convention (intersecting over an empty
-//     family is the whole universe, since "for every participant, x is a
-//     member" is vacuously true for any x). The result is the universal
-//     scope: State overlap, every dimension overlap with empty witnesses.
-//     This is the smallest reversible choice: it never invents a disjoint
-//     or unknown outcome from the absence of any operand.
+//   - Zero scopes: an operational error, never a proof. The vacuous
+//     convention (intersecting over an empty family is the whole universe)
+//     is mathematically defensible but wrong here: §5's consumers read a
+//     returned proof as authority over the claims that produced it, so
+//     answering "universal overlap" for a call that supplied no operand at
+//     all would score an unsatisfiable witness against a scope nobody ever
+//     stated. A zero-scope call is always a caller defect, so this package
+//     fails closed instead of proving something about the universe.
 //   - One scope: intersecting a single set with only itself is always that
 //     set (there is no second participant to conflict with), so every
 //     dimension is proven overlap and the result State is always overlap.
@@ -28,11 +28,20 @@ package policyconflict
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
 
 	"github.com/jyang234/verdi/internal/policyartifact"
+)
+
+// The two operational (never verdict) failures this file can report: each one
+// is a defect in how the caller invoked scope comparison, not a fact about
+// any scope, so neither may ever be answered with a ScopeState.
+var (
+	errNoScopes       = errors.New("policyconflict: intersect scopes: at least one scope is required")
+	errNilRefResolver = errors.New("policyconflict: a ref relation resolver is required to relate two different refs")
 )
 
 // RefRelationResolver is scope comparison's one seam onto the accepted/
@@ -41,6 +50,15 @@ import (
 // graph-edge witnesses supporting that state. Scope comparison never parses
 // ref structure or reasons about the graph itself — every non-identical ref
 // pair is resolved exclusively through this port.
+//
+// Two guarantees implementations may rely on and must be prepared for:
+//   - Arguments always arrive in canonical lexical order (a <= b), so an
+//     implementation sees each unordered pair under exactly one argument
+//     order and may key its own caches on that order.
+//   - The pair is not always drawn from two different scopes: proving one
+//     scope's own ref against another member of that SAME scope's ref set is
+//     a normal query, so an implementation must answer intra-set pairs
+//     rather than assuming the two refs come from opposing operands.
 type RefRelationResolver interface {
 	Relate(ctx context.Context, a, b string) (ScopeState, []string, error)
 }
@@ -57,6 +75,9 @@ func CompareScopes(ctx context.Context, a, b policyartifact.Scope, resolver RefR
 // participating scope's set ONCE — never by chaining pairwise proofs — and
 // the overall state follows the same product rule CompareScopes uses.
 func IntersectScopes(ctx context.Context, scopes []policyartifact.Scope, resolver RefRelationResolver) (ScopeProof, error) {
+	if len(scopes) == 0 {
+		return ScopeProof{}, errNoScopes
+	}
 	phaseSets := make([][]string, len(scopes))
 	envSets := make([][]string, len(scopes))
 	pathSets := make([][]string, len(scopes))
@@ -223,38 +244,39 @@ func intersectValueDimension(dim string, sets [][]string) DimensionProof {
 // trailing slash is one exact entry).
 func pathIsSubtree(p string) bool { return strings.HasSuffix(p, "/") }
 
-// pathsOverlap decides one path VALUE pair per authority design §4.2:
-// exact-equal, an exact entry inside a directory subtree, or one subtree
-// containing another, all segment-aware since every subtree selector
-// already carries its own trailing slash (so a plain string-prefix test
-// cannot cross a segment boundary: "cmd/" is not a prefix of "cmdline/x").
-func pathsOverlap(a, b string) bool {
-	if a == b {
+// pathContains reports whether every entry the selector p names is also named
+// by the selector container. Authority design §4.2's three overlap cases are
+// each a containment: exact-equal values contain each other, a directory
+// subtree contains an exact entry inside it, and a directory subtree contains
+// another subtree beneath it — so two path values overlap exactly when one of
+// them contains the other. The test is segment-aware for free, because a
+// subtree selector always carries its own trailing slash and a plain prefix
+// test therefore cannot cross a segment boundary: "cmd/" contains
+// "cmd/verdi/main.go" but not "cmdline/x", and the exact entry "a" neither
+// contains nor is contained by the directory "a/".
+func pathContains(container, p string) bool {
+	if container == p {
 		return true
 	}
-	aDir, bDir := pathIsSubtree(a), pathIsSubtree(b)
-	switch {
-	case aDir && bDir:
-		return strings.HasPrefix(a, b) || strings.HasPrefix(b, a)
-	case aDir && !bDir:
-		return strings.HasPrefix(b, a)
-	case !aDir && bDir:
-		return strings.HasPrefix(a, b)
-	default:
-		return false
-	}
+	return pathIsSubtree(container) && strings.HasPrefix(p, container)
 }
 
 // intersectPathDimension proves the path dimension's total N-way
-// intersection (authority design §4.2/§4.4). A candidate path value c —
-// drawn only from the union of every participating set's own values, since
-// the deepest/narrowest selector any group of nested or sibling subtree
-// selectors can agree on is always one of those given values — is a proven
-// total-intersection witness when it overlaps (pathsOverlap) at least one
-// value in EVERY non-universal participating set. This is a single direct
-// per-candidate computation, never a chain through a further unrelated
-// candidate, so it cannot manufacture agreement between two sets that do
-// not themselves share a region.
+// intersection (authority design §4.2/§4.4). Two path selectors either
+// contain one another or name disjoint regions, so the intersection of two
+// selectors is always the narrower one — which means every maximal region of
+// the total intersection is itself one of the given values, and the union of
+// every participating set's values is a complete candidate list.
+//
+// A candidate c belongs to the total intersection exactly when EVERY
+// non-universal participating set contains it: some member t of that set must
+// satisfy pathContains(t, c). Coverage is containment, not mere pair overlap
+// — a candidate that merely overlaps some member of every set can still name
+// a region two of those sets do not share (internal/ overlaps both
+// internal/policy/ and internal/context/, yet those two share nothing), and
+// admitting it would manufacture an intersection out of non-transitive pair
+// overlap (§5). Each test is between the fixed candidate and a member of the
+// set actually being tested, never a chain through a third value.
 func intersectPathDimension(sets [][]string) DimensionProof {
 	left, right := dimensionSides(sets)
 	nonUniversal := nonUniversalSets(sets)
@@ -272,7 +294,7 @@ func intersectPathDimension(sets [][]string) DimensionProof {
 			for _, s := range nonUniversal {
 				coveredByS := false
 				for _, t := range s {
-					if pathsOverlap(c, t) {
+					if pathContains(t, c) {
 						coveredByS = true
 						break
 					}
@@ -286,7 +308,7 @@ func intersectPathDimension(sets [][]string) DimensionProof {
 				covered = append(covered, c)
 			}
 		}
-		witnesses := minimalPathWitnesses(covered)
+		witnesses := broadestPathWitnesses(covered)
 		if len(witnesses) == 0 {
 			return DimensionProof{Dimension: "path", State: ScopeDisjoint, Left: left, Right: right, Intersection: []string{}, Witnesses: []string{}}
 		}
@@ -294,28 +316,27 @@ func intersectPathDimension(sets [][]string) DimensionProof {
 	}
 }
 
-// minimalPathWitnesses drops every covered candidate that is itself a
-// directory subtree properly containing another covered candidate: the
-// broader selector is real evidence that coverage held, but the true
-// overlap REGION is the narrower one it contains (authority design §4.2's
-// containment semantics), so reporting both would misrepresent a single
-// exact-entry overlap as if it also meant "the whole containing subtree is
-// shared." Candidates that do not contain one another (separate covered
-// regions) are all kept. covered must already be canonical-lexical-order;
-// the result preserves that order.
-func minimalPathWitnesses(covered []string) []string {
+// broadestPathWitnesses reduces the covered candidates to the exact
+// intersection region (authority design §4.4's "exact ... path ...
+// witness"). Every covered candidate is genuinely inside the intersection,
+// but one contained in another covered candidate adds no region the broader
+// one does not already carry, so only the maximal covered selectors are
+// reported: if {a/, a/b/} is intersected with itself, both sets denote
+// exactly the a/ subtree and the shared region is a/, so reporting a/b/
+// would understate what the sets share. Covered candidates that do not
+// contain one another are separate shared regions and are all kept. covered
+// must already be canonical-lexical-order; the result preserves that order.
+func broadestPathWitnesses(covered []string) []string {
 	out := make([]string, 0, len(covered))
 	for _, c := range covered {
-		tooBroad := false
-		if pathIsSubtree(c) {
-			for _, d := range covered {
-				if d != c && strings.HasPrefix(d, c) {
-					tooBroad = true
-					break
-				}
+		insideAnother := false
+		for _, d := range covered {
+			if d != c && pathContains(d, c) {
+				insideAnother = true
+				break
 			}
 		}
-		if !tooBroad {
+		if !insideAnother {
 			out = append(out, c)
 		}
 	}
@@ -349,7 +370,10 @@ type refPairResolution struct {
 // deterministic order. A resolver error is operational and aborts the
 // whole dimension computation (never guessed at); an out-of-vocabulary
 // ScopeState is treated the same way, since an unknown enum value fails
-// closed here just as it does at every decode boundary.
+// closed here just as it does at every decode boundary. A missing resolver is
+// the same class of failure one step earlier: with no port there is no
+// evidence at all, so it is reported operationally rather than crashing or
+// standing in for a relation nobody proved.
 func resolveRefPair(ctx context.Context, cache map[refPairKey]refPairResolution, resolver RefRelationResolver, a, b string) (ScopeState, []string, error) {
 	if a == b {
 		return ScopeOverlap, nil, nil
@@ -357,6 +381,9 @@ func resolveRefPair(ctx context.Context, cache map[refPairKey]refPairResolution,
 	key := canonicalRefPair(a, b)
 	if r, ok := cache[key]; ok {
 		return r.state, r.wit, nil
+	}
+	if resolver == nil {
+		return "", nil, fmt.Errorf("%w: %q vs %q", errNilRefResolver, key.lo, key.hi)
 	}
 	state, wit, err := resolver.Relate(ctx, key.lo, key.hi)
 	if err != nil {
@@ -369,17 +396,31 @@ func resolveRefPair(ctx context.Context, cache map[refPairKey]refPairResolution,
 	return state, wit, nil
 }
 
-// intersectRefDimension proves the ref dimension's total N-way
-// intersection (authority design §4.3/§4.4). It mirrors
-// intersectPathDimension's candidate/coverage shape, but "overlap" between
-// a candidate and a set member is proven exclusively by exact-equality or
-// resolveRefPair — never inferred from any other pair. A candidate that is
-// directly proven to overlap at least one member of EVERY non-universal
-// participating set is a proven total-intersection witness; this can never
-// manufacture agreement between two sets from an unrelated pair's overlap,
-// because every check is between the SAME fixed candidate and a member of
-// the set actually being tested — it never substitutes a third ref's
-// relation for the two sets' own relation to each other.
+// intersectRefDimension proves the ref dimension's total N-way intersection
+// (authority design §4.3/§4.4). It mirrors intersectPathDimension's
+// candidate/coverage shape, but a relation between a candidate and a set
+// member is proven exclusively by exact-equality or resolveRefPair — never
+// inferred from any other pair. Refs have no containment grammar to reduce
+// with, so what a candidate must satisfy depends on the arity:
+//
+//   - Exactly two participating sets. A resolver overlap between the
+//     candidate and a member of the other set IS direct evidence about the
+//     only relation the pair asserts, so a candidate that overlaps at least
+//     one member of both sets is proven.
+//   - More than two participating sets. Separate pairwise proofs against
+//     different sets never compose: overlap "is not assumed transitive and
+//     is never used as an equivalence relation" (§4.4), so "b overlaps a"
+//     plus "b overlaps c" says nothing about whether a's set and c's set
+//     share anything, and admitting b would manufacture a conflict from
+//     non-transitive pair overlap (§5). The only ref such a group is proven
+//     to share is one every participating set exactly contains, which is
+//     direct evidence from every set at once.
+//
+// Exclusion is arity-independent and unchanged: a candidate is soundly
+// excluded only when some set's every member answers disjoint. A candidate
+// that is neither proven nor excluded leaves the intersection unresolved, so
+// the dimension is unknown — withholding a mechanical conclusion rather than
+// inventing either verdict (§5).
 func intersectRefDimension(ctx context.Context, sets [][]string, resolver RefRelationResolver) (DimensionProof, error) {
 	left, right := dimensionSides(sets)
 	nonUniversal := nonUniversalSets(sets)
@@ -393,6 +434,7 @@ func intersectRefDimension(ctx context.Context, sets [][]string, resolver RefRel
 
 	cache := make(map[refPairKey]refPairResolution)
 	candidates := unionSortedUnique(nonUniversal)
+	pairwise := len(nonUniversal) == 2
 
 	proven := make([]string, 0)
 	ambiguous := make([]string, 0)
@@ -401,8 +443,12 @@ func intersectRefDimension(ctx context.Context, sets [][]string, resolver RefRel
 
 	for _, c := range candidates {
 		excluded := false
-		candidateAmbiguous := false
-		var candidateEvidence []string
+		overlapEverywhere := true
+		// Overlap and unknown witnesses stay separated: an unknown result
+		// proves nothing, so it may never be reported as the evidence
+		// supporting a proven overlap (§4.4's "exact ... graph-edge
+		// witness" is a witness FOR the recorded state).
+		var overlapWit, unknownWit []string
 		for _, s := range nonUniversal {
 			setOverlap := false
 			setAmbiguous := false
@@ -414,35 +460,47 @@ func intersectRefDimension(ctx context.Context, sets [][]string, resolver RefRel
 				switch state {
 				case ScopeOverlap:
 					setOverlap = true
-					candidateEvidence = append(candidateEvidence, wit...)
+					overlapWit = append(overlapWit, wit...)
 				case ScopeUnknown:
 					setAmbiguous = true
-					candidateEvidence = append(candidateEvidence, wit...)
+					unknownWit = append(unknownWit, wit...)
 				}
 			}
 			if setOverlap {
 				continue
 			}
 			if setAmbiguous {
-				candidateAmbiguous = true
+				overlapEverywhere = false
 				continue
 			}
+			// Every member of this set answered disjoint, so no part of
+			// this candidate can be in the total intersection.
 			excluded = true
 			break
 		}
 		if excluded {
 			continue
 		}
-		if candidateAmbiguous {
-			ambiguous = append(ambiguous, c)
-			for _, w := range candidateEvidence {
-				unknownEvidence[w] = true
+		candidateProven := overlapEverywhere
+		if !pairwise {
+			candidateProven = presentInEverySet(nonUniversal, c)
+		}
+		if candidateProven {
+			proven = append(proven, c)
+			for _, w := range overlapWit {
+				overlapEvidence[w] = true
 			}
 			continue
 		}
-		proven = append(proven, c)
-		for _, w := range candidateEvidence {
-			overlapEvidence[w] = true
+		// Not proven and not soundly excluded: this candidate's own
+		// membership in the total intersection is unresolved. Every witness
+		// consulted along the way is recorded as evidence for that unknown.
+		ambiguous = append(ambiguous, c)
+		for _, w := range overlapWit {
+			unknownEvidence[w] = true
+		}
+		for _, w := range unknownWit {
+			unknownEvidence[w] = true
 		}
 	}
 
@@ -467,6 +525,21 @@ func intersectRefDimension(ctx context.Context, sets [][]string, resolver RefRel
 		}, nil
 	}
 	return DimensionProof{Dimension: "ref", State: ScopeDisjoint, Left: left, Right: right, Intersection: []string{}, Witnesses: []string{}}, nil
+}
+
+// presentInEverySet reports whether v appears verbatim in every set in sets,
+// which must already be canonical-lexical-order and duplicate-free. This is
+// the only ref evidence that holds for three or more participants at once:
+// exact equality is proven directly against each set, with no pairwise proof
+// composed into another (§4.4).
+func presentInEverySet(sets [][]string, v string) bool {
+	for _, s := range sets {
+		i := sort.SearchStrings(s, v)
+		if i >= len(s) || s[i] != v {
+			return false
+		}
+	}
+	return true
 }
 
 // sortedUniqueSetKeys returns m's keys in canonical lexical order.
