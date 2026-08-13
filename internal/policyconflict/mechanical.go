@@ -791,28 +791,48 @@ func solvePrincipalRelation(transition, roleA, roleB string, claims []policyarti
 		return SolverProof{}, fmt.Errorf("policyconflict: principal-relation solver: kernel authorization: %w", err)
 	}
 
-	// Authority design §5.3 is literal about the whole decision, not about
-	// one finding code: "Requiring one relation is proven only when the
-	// kernel returns that conclusion; violated and unproven kernel results
-	// remain violated-with-witness or unproven respectively." The kernel's
-	// three-valued State is therefore mapped faithfully — a decision
-	// violated for ANY reason (an experimental profile's forbidden
-	// authoritative authorization, an unauthorized role, a violated
-	// principal resolution) is never a mechanical proof, and a decision
-	// carrying only unproven findings is never upgraded either. Reading a
-	// distinctness finding code alone would have discarded exactly those
-	// results and manufactured a proven row from a violated kernel answer.
-	distinctnessShortfall := false
+	// An unknown decision state is a kernel contract this package cannot
+	// interpret: fail closed rather than read it as any outcome.
+	switch decision.State {
+	case governanceprincipal.AuthorizationAuthorized, governanceprincipal.AuthorizationViolated, governanceprincipal.AuthorizationUnproven:
+	default:
+		return SolverProof{}, fmt.Errorf("policyconflict: principal-relation solver: kernel returned unknown authorization state %q", decision.State)
+	}
+
+	// Authority design §5.3 fixes this question's operand set exactly: the
+	// evaluator "constructs one kernel authorization request over the exact
+	// authenticated resolutions, transition, canonical role pair, profile,
+	// and separation mode", and "Requiring one relation is proven only when
+	// the kernel returns that conclusion; violated and unproven kernel
+	// results remain violated-with-witness or unproven respectively."
+	//
+	// The kernel's WHOLE-decision state answers a broader question than
+	// that operand set: governanceprincipal degrades a decision to unproven
+	// on any finding at all, including approver-count, signature,
+	// ownership, evidence-source and escalation shortfalls about roles this
+	// claim never names. Those are not part of §5.3's operand set, so they
+	// are not evidence about this relation — consuming them wholesale
+	// blocks a relation the kernel actually proved. The outcome is
+	// therefore derived from the findings that BEAR on this claim
+	// (relationBearingFinding), never from an unrelated rule's shortfall
+	// and never from silence about a rule the kernel did run.
 	witnessSet := map[string]bool{}
+	relationViolated, relationUnproven := false, false
 	for _, f := range decision.Findings {
-		if f.Code == governanceprincipal.ReasonDistinctnessViolated || f.Code == governanceprincipal.ReasonDistinctnessUnproven {
-			distinctnessShortfall = true
+		if !relationBearingFinding(f, roleA, roleB) {
+			continue
 		}
-		// Every finding the kernel returns is part of this relation's
-		// evidence; its stable code plus whichever role/principal it names
-		// is the witness the report carries. (Findings' own three-valued
-		// contribution stays typed inside the kernel decision — the row's
-		// closed reason vocabulary names the outcome, not each finding.)
+		switch f.State {
+		case governanceprincipal.AuthorizationViolated:
+			relationViolated = true
+		case governanceprincipal.AuthorizationUnproven:
+			relationUnproven = true
+		}
+		// A relation-bearing finding's stable code plus whichever role or
+		// principal it names is the witness this proof carries. (Findings'
+		// own three-valued contribution stays typed inside the kernel
+		// decision — the row's closed reason vocabulary names the outcome,
+		// not each finding.)
 		witnessSet[f.Code] = true
 		if f.Role != "" {
 			witnessSet["role:"+f.Role] = true
@@ -824,25 +844,54 @@ func solvePrincipalRelation(transition, roleA, roleB string, claims []policyarti
 	witnesses := sortedKeysOf(witnessSet)
 	values := sortedUniqueCopy([]string{roleA, roleB})
 
-	switch decision.State {
-	case governanceprincipal.AuthorizationViolated:
+	switch {
+	case relationViolated:
 		return SolverProof{State: SolverUnsatisfiable, Domain: domainPrincipalRelation, Values: values, Required: []string{}, Forbidden: []string{}, Witnesses: witnesses}, nil
-	case governanceprincipal.AuthorizationUnproven:
+	case relationUnproven:
 		return SolverProof{State: SolverUnproven, Domain: domainPrincipalRelation, Values: values, Required: []string{}, Forbidden: []string{}, Witnesses: witnesses}, nil
-	case governanceprincipal.AuthorizationAuthorized:
-		// An authorized decision carries no findings at all, so the
-		// distinctness conclusion this claim asked for is exactly what the
-		// kernel returned. The two guards below never fire against the
-		// landed kernel; they exist so a future kernel that authorized
-		// while still reporting a distinctness shortfall, or that answered
-		// under a downgraded (advisory) posture, would withhold the proof
-		// rather than have this package read authorization as distinctness.
-		if distinctnessShortfall || decision.Posture != governanceprincipal.PostureAuthoritative {
-			return SolverProof{State: SolverUnproven, Domain: domainPrincipalRelation, Values: values, Required: []string{}, Forbidden: []string{}, Witnesses: witnesses}, nil
-		}
-		return SolverProof{State: SolverSatisfiable, Domain: domainPrincipalRelation, Values: values, Required: []string{}, Forbidden: []string{}, Witnesses: values}, nil
+	case decision.Posture != governanceprincipal.PostureAuthoritative:
+		// A downgraded effective posture is not the authoritative answer
+		// this request asked for, so it never proves the relation. (The
+		// landed kernel only downgrades an experimental profile, which
+		// already returns a violated whole-request finding above; this
+		// guard keeps a posture-only downgrade from reading as proof.)
+		return SolverProof{State: SolverUnproven, Domain: domainPrincipalRelation, Values: values, Required: []string{}, Forbidden: []string{}, Witnesses: witnesses}, nil
 	default:
-		return SolverProof{}, fmt.Errorf("policyconflict: principal-relation solver: kernel returned unknown authorization state %q", decision.State)
+		// The kernel ran the matching DistinctnessRule (checked above) and
+		// reported no adverse relation-bearing evidence: that IS the
+		// kernel returning this claim's conclusion.
+		return SolverProof{State: SolverSatisfiable, Domain: domainPrincipalRelation, Values: values, Required: []string{}, Forbidden: []string{}, Witnesses: values}, nil
+	}
+}
+
+// relationBearingFinding classifies one kernel finding as evidence about
+// THIS claim's relation, under authority design §5.3's operand set (the
+// exact authenticated resolutions, transition, canonical role pair,
+// profile, and separation mode):
+//
+//   - whole-request authority findings — an experimental profile's
+//     forbidden authoritative authorization, or a transition the profile
+//     does not govern — invalidate the authorization the relation would be
+//     proven through, so they always bear on it;
+//   - distinctness-violated is the separation conclusion itself. The
+//     kernel's Finding carries no rule identity and no role for it, so it
+//     can never be attributed away from this claim's pair; it always
+//     bears (conservative, and unchanged from this solver's original
+//     behavior);
+//   - every other finding — distinctness-unproven, principal-*,
+//     role-not-authorized, signature-*, ownership-*, evidence-source-*,
+//     escalation-*, required-approver-missing — bears only when it names
+//     one of this claim's two roles. A shortfall about a role this claim
+//     never names (an approver count, another role's signature) is
+//     outside §5.3's operand set and is not relation evidence.
+func relationBearingFinding(f governanceprincipal.Finding, roleA, roleB string) bool {
+	switch f.Code {
+	case governanceprincipal.ReasonExperimentalAuthorityForbidden, governanceprincipal.ReasonTransitionNotApplicable:
+		return true
+	case governanceprincipal.ReasonDistinctnessViolated:
+		return true
+	default:
+		return f.Role == roleA || f.Role == roleB
 	}
 }
 

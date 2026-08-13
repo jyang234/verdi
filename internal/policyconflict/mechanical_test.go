@@ -586,6 +586,178 @@ func TestEvaluateMechanicalPrincipalRelationExperimentalRowViolated(t *testing.T
 	}
 }
 
+// approverCatalog extends testCatalog with the third role the
+// required-approver fixtures below name.
+func approverCatalog() governanceprincipal.Catalog {
+	return governanceprincipal.Catalog{
+		Roles:       []string{"approver", "author", "reviewer"},
+		Transitions: []string{"release", "publish"},
+	}
+}
+
+func mustDecodeProfileWith(t *testing.T, raw string, catalog governanceprincipal.Catalog) governanceprincipal.Profile {
+	t.Helper()
+	p, err := governanceprincipal.DecodeProfile([]byte(raw), catalog)
+	if err != nil {
+		t.Fatalf("DecodeProfile: %v", err)
+	}
+	return p
+}
+
+// approverProfileYAML is a team-class profile whose required-approvers rule
+// names approverRole. Every other rule is identical to rolePolicyYAML's.
+func approverProfileYAML(approverRole string) string {
+	return `schema: verdi.governance-profile/v1
+id: team-default
+class: team
+applicable_transitions: [release]
+identity_trust_sources:
+  - { id: github, kind: forge }
+role_mappings:
+  - role: author
+    trust_source: github
+    subjects: ["user-a"]
+  - role: reviewer
+    trust_source: github
+    subjects: ["user-b", "user-c"]
+  - role: approver
+    trust_source: github
+    subjects: ["user-d"]
+ownership_sources: []
+signature_requirements: []
+required_approvers:
+  - transitions: [release]
+    roles: [` + approverRole + `]
+    minimum: 1
+distinctness_rules:
+  - transitions: [release]
+    left_role: author
+    right_role: reviewer
+    relation: different-principal
+evidence_source_restrictions: []
+escalation_thresholds: []
+`
+}
+
+// TestSolvePrincipalRelationIgnoresUnrelatedKernelFindings pins authority
+// design §5.3's operand set: the relation question is asked over "the exact
+// authenticated resolutions, transition, canonical role pair, profile, and
+// separation mode". A required-approver count for a role this claim never
+// names is not part of that operand set, so a kernel decision degraded to
+// unproven by it alone leaves the relation itself proven — while the same
+// decision shape with the approval rule naming a role the claim DOES name
+// stays proven for the ordinary reason, and a whole-request authority
+// violation still blocks.
+func TestSolvePrincipalRelationIgnoresUnrelatedKernelFindings(t *testing.T) {
+	claims := []policyartifact.Claim{principalClaim("c1", "release", policyartifact.OpDifferentPrincipal, "author", "reviewer", universalScope())}
+
+	t.Run("unrelated required-approver shortfall does not unprove the relation", func(t *testing.T) {
+		profile := mustDecodeProfileWith(t, approverProfileYAML("approver"), approverCatalog())
+		actors := []governanceprincipal.PrincipalResolution{
+			authenticatedActor(t, profile, "user-a"),
+			authenticatedActor(t, profile, "user-b"),
+		}
+		got, err := solvePrincipalRelation("release", "author", "reviewer", claims, profile, actors)
+		if err != nil {
+			t.Fatalf("solvePrincipalRelation: %v", err)
+		}
+		if got.State != SolverSatisfiable {
+			t.Fatalf("State = %q, want satisfiable: the kernel ran the distinctness rule and reported no relation-bearing shortfall (proof: %+v)", got.State, got)
+		}
+	})
+
+	t.Run("approval rule naming a claim role stays proven", func(t *testing.T) {
+		profile := mustDecodeProfileWith(t, approverProfileYAML("reviewer"), approverCatalog())
+		actors := []governanceprincipal.PrincipalResolution{
+			authenticatedActor(t, profile, "user-a"),
+			authenticatedActor(t, profile, "user-b"),
+		}
+		got, err := solvePrincipalRelation("release", "author", "reviewer", claims, profile, actors)
+		if err != nil {
+			t.Fatalf("solvePrincipalRelation: %v", err)
+		}
+		if got.State != SolverSatisfiable {
+			t.Fatalf("State = %q, want satisfiable (kernel authorized)", got.State)
+		}
+	})
+}
+
+func TestEvaluateMechanicalPrincipalRelationUnrelatedApproverShortfallProven(t *testing.T) {
+	profile := mustDecodeProfileWith(t, approverProfileYAML("approver"), approverCatalog())
+	actors := []governanceprincipal.PrincipalResolution{
+		authenticatedActor(t, profile, "user-a"),
+		authenticatedActor(t, profile, "user-b"),
+	}
+	claims := []contextcompile.TypedClaim{
+		typedClaim(t, "policy-a", principalClaim("c1", "release", policyartifact.OpDifferentPrincipal, "author", "reviewer", universalScope())),
+	}
+	rows, err := EvaluateMechanical(context.Background(), MechanicalInput{Claims: claims, Profile: profile, Actors: actors})
+	if err != nil {
+		t.Fatalf("EvaluateMechanical: %v", err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("rows = %+v, want exactly one", rows)
+	}
+	if rows[0].State != ProofProven {
+		t.Fatalf("State = %q, want proven (an approver count is not relation evidence)", rows[0].State)
+	}
+	if len(rows[0].Reasons) != 1 || rows[0].Reasons[0] != ReasonMechanicalSatisfiable {
+		t.Fatalf("Reasons = %v, want [mechanical-satisfiable]", rows[0].Reasons)
+	}
+	if err := validateMechanicalEvaluation("row", rows[0]); err != nil {
+		t.Fatalf("row failed validation: %v", err)
+	}
+}
+
+// TestSolvePrincipalRelationRelationBearingFindingsStillBlock keeps the
+// other half of the classification honest: a finding that names one of the
+// claim's own roles is relation-bearing evidence and still blocks.
+func TestSolvePrincipalRelationRelationBearingFindingsStillBlock(t *testing.T) {
+	profile := mustDecodeProfileWith(t, `schema: verdi.governance-profile/v1
+id: team-default
+class: team
+applicable_transitions: [release]
+identity_trust_sources:
+  - { id: github, kind: forge }
+  - { id: git-signature, kind: signed-commit }
+role_mappings:
+  - role: author
+    trust_source: github
+    subjects: ["user-a"]
+  - role: reviewer
+    trust_source: github
+    subjects: ["user-b"]
+ownership_sources: []
+signature_requirements:
+  - transitions: [release]
+    roles: [reviewer]
+    trust_sources: [git-signature]
+required_approvers:
+  - transitions: [release]
+    roles: [author]
+    minimum: 1
+distinctness_rules:
+  - transitions: [release]
+    left_role: author
+    right_role: reviewer
+    relation: different-principal
+evidence_source_restrictions: []
+escalation_thresholds: []
+`, approverCatalog())
+	actors := []governanceprincipal.PrincipalResolution{
+		authenticatedActor(t, profile, "user-a"),
+		authenticatedActor(t, profile, "user-b"),
+	}
+	claims := []policyartifact.Claim{principalClaim("c1", "release", policyartifact.OpDifferentPrincipal, "author", "reviewer", universalScope())}
+	got, err := solvePrincipalRelation("release", "author", "reviewer", claims, profile, actors)
+	if err != nil {
+		t.Fatalf("solvePrincipalRelation: %v", err)
+	}
+	if got.State != SolverUnproven {
+		t.Fatalf("State = %q, want unproven: an unproven signature finding naming role %q is evidence about a principal filling this claim's own role", got.State, "reviewer")
+	}
+}
+
 func TestSolvePrincipalRelationNoMatchingDistinctnessRuleUnproven(t *testing.T) {
 	profile := mustDecodeProfile(t, `schema: verdi.governance-profile/v1
 id: team-default
