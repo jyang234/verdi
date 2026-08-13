@@ -3,12 +3,16 @@ package policyconflict
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"testing"
 
 	"github.com/jyang234/verdi/internal/canonjson"
+	"github.com/jyang234/verdi/internal/contextcompile"
+	"github.com/jyang234/verdi/internal/policyartifact"
 )
 
 // --- fixture / mutation helpers (mirrors internal/contextcompile's own
@@ -140,7 +144,19 @@ func setAtPath(t *testing.T, data []byte, path []any, value any) map[string]any 
 	if err := dec.Decode(&generic); err != nil {
 		t.Fatalf("test setup: decode generic: %v", err)
 	}
-	cur := generic
+	tree, ok := generic.(map[string]any)
+	if !ok {
+		t.Fatalf("test setup: document root is not an object")
+	}
+	setAtPathIn(t, tree, path, value)
+	return tree
+}
+
+// setAtPathIn is setAtPath's walker over an already-decoded tree, so a
+// single case can stack several mutations before one redigest.
+func setAtPathIn(t *testing.T, tree map[string]any, path []any, value any) {
+	t.Helper()
+	var cur any = tree
 	for i, seg := range path {
 		last := i == len(path)-1
 		switch s := seg.(type) {
@@ -151,7 +167,7 @@ func setAtPath(t *testing.T, data []byte, path []any, value any) map[string]any 
 			}
 			if last {
 				m[s] = value
-				return generic.(map[string]any)
+				return
 			}
 			cur = m[s]
 		case int:
@@ -161,7 +177,7 @@ func setAtPath(t *testing.T, data []byte, path []any, value any) map[string]any 
 			}
 			if last {
 				arr[s] = value
-				return generic.(map[string]any)
+				return
 			}
 			cur = arr[s]
 		default:
@@ -169,7 +185,6 @@ func setAtPath(t *testing.T, data []byte, path []any, value any) map[string]any 
 		}
 	}
 	t.Fatalf("test setup: empty path")
-	return nil
 }
 
 // redigestTopLevel takes a mutated generic tree carrying a top-level
@@ -757,11 +772,10 @@ func TestDecodeReport_DisclosureVocabulary(t *testing.T) {
 // the closed §6 source-category vocabulary, with the top-level self-digest
 // forged to be internally consistent with that mutation (so digest
 // verification ALONE cannot catch it — only independent domain validation
-// of the embedded witness can). This is the schema.go/validate.go contract
-// this package cannot satisfy without either (a) an exported validation
-// seam on policyartifact.SemanticClaimWitness, or (b) duplicating
-// policyartifact's private closed witness-category vocabulary, both
-// forbidden by the Task 3 mandate.
+// of the embedded witness can). It passes through the exported
+// SemanticClaimWitness.Validate seam that controller adjudication
+// authorized in commit fe0fc401; policyconflict never duplicates
+// policyartifact's private closed witness-category vocabulary.
 func TestDecodeReport_SemanticClaimWitnessCategoryClosure(t *testing.T) {
 	base := mustReadFixture(t, "report.json")
 	tree := setAtPath(t, base, []any{"semantic", 0, "claims", 0, "category"}, "not-a-real-category")
@@ -775,13 +789,505 @@ func TestDecodeReport_SemanticClaimWitnessCategoryClosure(t *testing.T) {
 // evidence test: a Report whose embedded DispositionResolution.Conclusion
 // (policyartifact.DispositionConclusion) carries a value outside the
 // closed {conflict, no-conflict} vocabulary, again with a digest-consistent
-// forgery. policyartifact.DispositionConclusion exports no Validate method
-// either, so this hits the identical boundary.
+// forgery. It reaches that vocabulary through the sibling
+// DispositionConclusion.Validate seam authorized in the same commit.
 func TestDecodeReport_DispositionConclusionClosure(t *testing.T) {
 	base := mustReadFixture(t, "report.json")
 	tree := setAtPath(t, base, []any{"semantic", 0, "dispositions", 0, "conclusion"}, "not-a-real-conclusion")
 	data := redigestTopLevel(t, tree)
 	if _, err := DecodeReport(data); err == nil {
 		t.Fatalf("got nil error, want failure (out-of-vocabulary disposition conclusion, digest-consistent forgery)")
+	}
+}
+
+// --- shared negative-case plumbing (F2/F3/F4/F7/F8) -------------------------
+
+// requireErrContains asserts err is non-nil AND fails for the labelled
+// reason: a negative case that passes only because some unrelated wall
+// (byte-canonicality, digest mismatch) fired proves nothing about the rule
+// under test.
+func requireErrContains(t *testing.T, err error, want string) {
+	t.Helper()
+	if err == nil {
+		t.Fatalf("got nil error, want failure containing %q", want)
+	}
+	if !strings.Contains(err.Error(), want) {
+		t.Fatalf("error %q does not contain %q", err.Error(), want)
+	}
+}
+
+// canonicalTree marshals a mutated tree with the real canonjson seam. The
+// judge-result and request documents carry no self-digest, so this is their
+// analogue of redigestTopLevel: bytes that are genuinely canonical, so a
+// rejection can only come from the grammar rule under test.
+func canonicalTree(t *testing.T, tree map[string]any) []byte {
+	t.Helper()
+	out, err := canonjson.Marshal(tree)
+	if err != nil {
+		t.Fatalf("test setup: marshal canonical: %v", err)
+	}
+	return out
+}
+
+// forgedReport applies one mutation to the report fixture and returns
+// canonical bytes carrying a freshly forged, self-consistent digest.
+func forgedReport(t *testing.T, base []byte, path []any, value any) []byte {
+	t.Helper()
+	return redigestTopLevel(t, setAtPath(t, base, path, value))
+}
+
+func sha(c byte) string { return "sha256:" + repeatHex(c) }
+
+// validExemptionResolution is a fully conforming embedded exemption row —
+// the report fixture carries `"exemptions": []`, so every exemption case
+// (positive and negative alike) splices this shape in.
+func validExemptionResolution() map[string]any {
+	return map[string]any{
+		"id":     "policy-exemption/legacy-service-go",
+		"digest": sha('3'),
+		"resolution": map[string]any{
+			"match": "proven", "freshness": "proven", "scope": "proven",
+			"bound": "proven", "authorization": "proven",
+		},
+		"removed_claims": []any{
+			map[string]any{
+				"id":       "policy-instruction:example-policy#example-claim",
+				"digest":   sha('1'),
+				"category": "policy-instruction",
+			},
+		},
+	}
+}
+
+// validJudgmentExchange is a fully conforming embedded exchange for the
+// named role, including a raw_digest that really is the digest of the exact
+// raw_result bytes it carries.
+func validJudgmentExchange(role string) map[string]any {
+	raw := `{"findings":[],"recommendation":"no-conflict","schema":"verdi.policy-conflict-judge-result/v1"}` + "\n"
+	return map[string]any{
+		"role":           role,
+		"adapter":        map[string]any{"id": "codex", "version": "1"},
+		"model":          "codex-align-judge",
+		"command_digest": sha('3'),
+		"prompt_digest":  sha('5'),
+		"input_digest":   sha('4'),
+		"raw_result":     raw,
+		"raw_digest":     rawContentDigest([]byte(raw)),
+		"result": map[string]any{
+			"schema":         JudgeResultSchema,
+			"recommendation": "no-conflict",
+			"findings":       []any{},
+		},
+	}
+}
+
+func dimensionRow(name string) map[string]any {
+	return map[string]any{
+		"dimension": name, "state": "disjoint",
+		"left": []any{}, "right": []any{}, "intersection": []any{}, "witnesses": []any{},
+	}
+}
+
+func policyEntry(kind, id string) map[string]any {
+	return map[string]any{"kind": kind, "id": id, "digest": sha('e')}
+}
+
+// --- F2: closed source-category vocabulary ----------------------------------
+
+// TestDecodeJudgeResult_CategoryVocabularyClosure proves both category-
+// bearing members of a judge result are checked against the closed §6
+// source-category list, not merely against the single-line-prose grammar.
+// The bytes are canonical, so nothing but the vocabulary rule can reject.
+func TestDecodeJudgeResult_CategoryVocabularyClosure(t *testing.T) {
+	base := mustReadFixture(t, "judge-result.json")
+
+	t.Run("valid categories accepted", func(t *testing.T) {
+		if _, err := DecodeJudgeResult(base); err != nil {
+			t.Fatalf("DecodeJudgeResult(fixture): %v", err)
+		}
+	})
+
+	t.Run("unknown claim witness category", func(t *testing.T) {
+		tree := setAtPath(t, base, []any{"findings", 0, "claims", 0, "category"}, "not-a-real-category")
+		_, err := DecodeJudgeResult(canonicalTree(t, tree))
+		requireErrContains(t, err, `unknown witness category "not-a-real-category"`)
+	})
+
+	// "not-a-real-category" < "policy-instruction" lexically, so the set is
+	// still sorted-unique: only the vocabulary rule can reject it.
+	t.Run("unknown finding category", func(t *testing.T) {
+		tree := setAtPath(t, base, []any{"findings", 0, "categories"}, []any{"not-a-real-category", "policy-instruction"})
+		_, err := DecodeJudgeResult(canonicalTree(t, tree))
+		requireErrContains(t, err, `unknown witness category "not-a-real-category"`)
+	})
+}
+
+// TestDecodeReport_RemovedClaimCategoryClosure carries the same rule down
+// the report path: an exemption's removed-claim witness is a ClaimWitness
+// too, and its category is closed vocabulary even when the top-level
+// self-digest is forged to agree with the mutation.
+func TestDecodeReport_RemovedClaimCategoryClosure(t *testing.T) {
+	base := mustReadFixture(t, "report.json")
+	exemption := validExemptionResolution()
+	exemption["removed_claims"].([]any)[0].(map[string]any)["category"] = "not-a-real-category"
+	data := forgedReport(t, base, []any{"mechanical", 0, "exemptions"}, []any{exemption})
+	_, err := DecodeReport(data)
+	requireErrContains(t, err, `unknown witness category "not-a-real-category"`)
+}
+
+// --- F4: embedded exemption resolutions -------------------------------------
+
+// TestDecodeReport_ExemptionResolutions exercises the embedded exemption
+// row end to end: the fixture's own `"exemptions": []` never reaches this
+// code, so the positive case is what proves the doc conversion round-trips
+// at all, and the negatives pin each of its own rules.
+func TestDecodeReport_ExemptionResolutions(t *testing.T) {
+	base := mustReadFixture(t, "report.json")
+
+	t.Run("valid exemption round-trips", func(t *testing.T) {
+		data := forgedReport(t, base, []any{"mechanical", 0, "exemptions"}, []any{validExemptionResolution()})
+		report, err := DecodeReport(data)
+		if err != nil {
+			t.Fatalf("DecodeReport(valid exemption): %v", err)
+		}
+		if got := len(report.Mechanical[0].Exemptions); got != 1 {
+			t.Fatalf("exemptions = %d, want 1", got)
+		}
+		if got := report.Mechanical[0].Exemptions[0].RemovedClaims[0].Category; got != "policy-instruction" {
+			t.Fatalf("removed claim category = %q, want policy-instruction", got)
+		}
+		out, err := EncodeReport(report)
+		if err != nil {
+			t.Fatalf("EncodeReport(valid exemption): %v", err)
+		}
+		if !bytes.Equal(out, data) {
+			t.Fatalf("exemption round-trip mismatch:\n got: %s\nwant: %s", out, data)
+		}
+	})
+
+	negatives := []struct {
+		name string
+		mut  func(e map[string]any)
+		want string
+	}{
+		{"blank id", func(e map[string]any) { e["id"] = "" }, "id: must be non-empty"},
+		{"malformed digest", func(e map[string]any) { e["digest"] = "not-a-digest" }, "digest: \"not-a-digest\" is not a valid sha256"},
+		{"unknown resolution state", func(e map[string]any) {
+			e["resolution"].(map[string]any)["freshness"] = "probably"
+		}, "resolution.freshness"},
+		{"empty removed claims", func(e map[string]any) { e["removed_claims"] = []any{} }, "must name at least one removed claim"},
+		{"malformed removed claim digest", func(e map[string]any) {
+			e["removed_claims"].([]any)[0].(map[string]any)["digest"] = repeatHex('1')
+		}, "is not a valid sha256"},
+		{"blank removed claim id", func(e map[string]any) {
+			e["removed_claims"].([]any)[0].(map[string]any)["id"] = "  "
+		}, "must not be blank"},
+	}
+	for _, tc := range negatives {
+		t.Run(tc.name, func(t *testing.T) {
+			e := validExemptionResolution()
+			tc.mut(e)
+			data := forgedReport(t, base, []any{"mechanical", 0, "exemptions"}, []any{e})
+			requireErrContains(t, mustDecodeReportErr(t, data), tc.want)
+		})
+	}
+
+	t.Run("duplicate removed claim id", func(t *testing.T) {
+		e := validExemptionResolution()
+		dup := e["removed_claims"].([]any)[0]
+		e["removed_claims"] = []any{dup, dup}
+		data := forgedReport(t, base, []any{"mechanical", 0, "exemptions"}, []any{e})
+		requireErrContains(t, mustDecodeReportErr(t, data), "removed_claims: duplicate identity")
+	})
+
+	t.Run("duplicate exemption id", func(t *testing.T) {
+		data := forgedReport(t, base, []any{"mechanical", 0, "exemptions"},
+			[]any{validExemptionResolution(), validExemptionResolution()})
+		requireErrContains(t, mustDecodeReportErr(t, data), "exemptions: duplicate identity")
+	})
+
+	t.Run("unsorted exemptions", func(t *testing.T) {
+		first := validExemptionResolution()
+		second := validExemptionResolution()
+		second["id"] = "policy-exemption/aardvark"
+		data := forgedReport(t, base, []any{"mechanical", 0, "exemptions"}, []any{first, second})
+		requireErrContains(t, mustDecodeReportErr(t, data), "exemptions: must be sorted ascending")
+	})
+}
+
+func mustDecodeReportErr(t *testing.T, data []byte) error {
+	t.Helper()
+	_, err := DecodeReport(data)
+	return err
+}
+
+// --- F4/F7: semantic primary and challenger exchanges -----------------------
+
+// TestDecodeReport_SemanticExchanges exercises the semantic row's optional
+// judgment exchanges. The malformed cases must surface the exchange's OWN
+// grammar error: a swallowed conversion error would leave only the generic
+// "not the canonical encoding" wall, which proves nothing about why the
+// exchange is illegal.
+func TestDecodeReport_SemanticExchanges(t *testing.T) {
+	base := mustReadFixture(t, "report.json")
+
+	t.Run("valid primary and challenger round-trip", func(t *testing.T) {
+		tree := setAtPath(t, base, []any{"semantic", 0, "primary"}, validJudgmentExchange("primary"))
+		setAtPathIn(t, tree, []any{"semantic", 0, "challenger"}, validJudgmentExchange("challenger"))
+		data := redigestTopLevel(t, tree)
+		report, err := DecodeReport(data)
+		if err != nil {
+			t.Fatalf("DecodeReport(valid exchanges): %v", err)
+		}
+		if report.Semantic[0].Primary == nil || report.Semantic[0].Challenger == nil {
+			t.Fatalf("primary/challenger = %v/%v, want both present", report.Semantic[0].Primary, report.Semantic[0].Challenger)
+		}
+		out, err := EncodeReport(report)
+		if err != nil {
+			t.Fatalf("EncodeReport(valid exchanges): %v", err)
+		}
+		if !bytes.Equal(out, data) {
+			t.Fatalf("exchange round-trip mismatch:\n got: %s\nwant: %s", out, data)
+		}
+	})
+
+	t.Run("primary carrying the challenger role", func(t *testing.T) {
+		data := forgedReport(t, base, []any{"semantic", 0, "primary"}, validJudgmentExchange("challenger"))
+		requireErrContains(t, mustDecodeReportErr(t, data), `primary.role: must be "primary"`)
+	})
+
+	t.Run("challenger carrying the primary role", func(t *testing.T) {
+		data := forgedReport(t, base, []any{"semantic", 0, "challenger"}, validJudgmentExchange("primary"))
+		requireErrContains(t, mustDecodeReportErr(t, data), `challenger.role: must be "challenger"`)
+	})
+
+	t.Run("exchange missing a mandatory member", func(t *testing.T) {
+		e := validJudgmentExchange("primary")
+		delete(e, "model")
+		data := forgedReport(t, base, []any{"semantic", 0, "primary"}, e)
+		requireErrContains(t, mustDecodeReportErr(t, data), "judgment.exchange.model is missing")
+	})
+
+	t.Run("exchange raw_digest not the digest of raw_result", func(t *testing.T) {
+		e := validJudgmentExchange("primary")
+		e["raw_digest"] = sha('7')
+		data := forgedReport(t, base, []any{"semantic", 0, "primary"}, e)
+		requireErrContains(t, mustDecodeReportErr(t, data), "does not match the exact bytes carried in raw_result")
+	})
+
+	t.Run("exchange carrying an invalid inner result", func(t *testing.T) {
+		e := validJudgmentExchange("primary")
+		e["result"].(map[string]any)["recommendation"] = "maybe"
+		data := forgedReport(t, base, []any{"semantic", 0, "primary"}, e)
+		requireErrContains(t, mustDecodeReportErr(t, data), `unknown recommendation "maybe"`)
+	})
+}
+
+// --- F4: candidate target identity ------------------------------------------
+
+// TestEncodeReport_CandidateTargetIdentity exercises the InputIdentity
+// union's candidate arm, which no committed fixture carries: the row is
+// built in code and proven by an EncodeReport/DecodeReport round-trip.
+func TestEncodeReport_CandidateTargetIdentity(t *testing.T) {
+	base := mustReadFixture(t, "report.json")
+	report, err := DecodeReport(base)
+	if err != nil {
+		t.Fatalf("DecodeReport(fixture): %v", err)
+	}
+
+	candidate := &CandidateIdentity{
+		Ref:           "spec/example-story",
+		Path:          ".verdi/specs/active/example-story.md",
+		Branch:        "feature/example",
+		Head:          "0123456789abcdef0123456789abcdef01234567",
+		Blob:          "89abcdef0123456789abcdef0123456789abcdef",
+		ContentDigest: sha('a'),
+		Scope:         policyartifact.Scope{Phases: []string{}, Environments: []string{}, Paths: []string{}, Refs: []string{}},
+		Adapter:       contextcompile.AdapterRef{ID: "codex", Version: "1"},
+		GrantDigest:   sha('b'),
+	}
+	report.Input.Target = TargetIdentity{Kind: TargetAcceptanceCandidate, Candidate: candidate}
+
+	data, err := EncodeReport(report)
+	if err != nil {
+		t.Fatalf("EncodeReport(candidate target): %v", err)
+	}
+	decoded, err := DecodeReport(data)
+	if err != nil {
+		t.Fatalf("DecodeReport(candidate target): %v", err)
+	}
+	if decoded.Input.Target.Candidate == nil || decoded.Input.Target.Accepted != nil {
+		t.Fatalf("decoded target = %+v, want exactly the candidate arm", decoded.Input.Target)
+	}
+	if decoded.Input.Target.Candidate.Blob != candidate.Blob {
+		t.Fatalf("candidate blob = %q, want %q", decoded.Input.Target.Candidate.Blob, candidate.Blob)
+	}
+
+	negatives := []struct {
+		name string
+		mut  func(r *Report)
+		want string
+	}{
+		{"candidate head not full 40-hex", func(r *Report) { r.Input.Target.Candidate.Head = "abc" }, "candidate.head"},
+		{"candidate blob not full 40-hex", func(r *Report) { r.Input.Target.Candidate.Blob = strings.ToUpper(candidate.Blob) }, "candidate.blob"},
+		{"candidate content digest malformed", func(r *Report) { r.Input.Target.Candidate.ContentDigest = "nope" }, "candidate.content_digest"},
+		{"candidate grant digest malformed", func(r *Report) { r.Input.Target.Candidate.GrantDigest = "nope" }, "candidate.grant_digest"},
+		{"candidate ref empty", func(r *Report) { r.Input.Target.Candidate.Ref = "" }, "candidate.ref"},
+		{"candidate adapter version empty", func(r *Report) { r.Input.Target.Candidate.Adapter.Version = "" }, "candidate.adapter.version"},
+		{"both arms present", func(r *Report) { r.Input.Target.Accepted = &AcceptedIdentity{ManifestDigest: sha('b')} }, "requires exactly candidate present"},
+		{"neither arm present", func(r *Report) { r.Input.Target.Candidate = nil }, "requires exactly candidate present"},
+	}
+	for _, tc := range negatives {
+		t.Run(tc.name, func(t *testing.T) {
+			mutated := report
+			c := *candidate
+			mutated.Input.Target = TargetIdentity{Kind: TargetAcceptanceCandidate, Candidate: &c}
+			tc.mut(&mutated)
+			_, err := EncodeReport(mutated)
+			requireErrContains(t, err, tc.want)
+		})
+	}
+}
+
+// --- F3/F4/F8: digest-consistent forged report mutations --------------------
+
+// TestDecodeReport_ForgedMutationMatrix mutates every nested report enum,
+// digest, set, and order, each with the top-level self-digest re-forged so
+// the document is internally consistent. Digest verification therefore
+// cannot catch any of these; only independent domain validation can, and
+// each case asserts the specific rule that must fire.
+func TestDecodeReport_ForgedMutationMatrix(t *testing.T) {
+	base := mustReadFixture(t, "report.json")
+
+	cases := []struct {
+		name  string
+		path  []any
+		value any
+		want  string
+	}{
+		// nested enums
+		{"unknown reason code", []any{"mechanical", 0, "reasons"}, []any{"bogus-reason"}, `unknown reason code "bogus-reason"`},
+		{"unsorted reason codes", []any{"mechanical", 0, "reasons"}, []any{"scope-disjoint", "mechanical-conflict"}, "reasons: must be sorted ascending"},
+		{"duplicate reason codes", []any{"mechanical", 0, "reasons"}, []any{"scope-disjoint", "scope-disjoint"}, "reasons: duplicate identity"},
+		{"unknown semantic reason code", []any{"semantic", 0, "reasons"}, []any{"bogus-reason"}, `unknown reason code "bogus-reason"`},
+		{"unknown family", []any{"mechanical", 0, "family"}, "posture", "unknown constraint family"},
+		{"unknown mechanical state", []any{"mechanical", 0, "state"}, "maybe", `unknown proof state "maybe"`},
+		{"unknown semantic state", []any{"semantic", 0, "state"}, "maybe", `unknown proof state "maybe"`},
+		{"unknown scope-proof state", []any{"mechanical", 0, "scope", "state"}, "maybe", `unknown scope state "maybe"`},
+		{"unknown dimension state", []any{"mechanical", 0, "scope", "dimensions", 0, "state"}, "maybe", `unknown scope state "maybe"`},
+		{"unknown solver state", []any{"mechanical", 0, "before", "state"}, "maybe", `unknown solver state "maybe"`},
+		{"unknown post-exemption solver state", []any{"mechanical", 0, "after", "state"}, "maybe", `unknown solver state "maybe"`},
+		{"unknown verdict", []any{"verdict"}, "maybe", `unknown verdict "maybe"`},
+		{"unknown target kind", []any{"input", "target", "kind"}, "bogus", `unknown target kind "bogus"`},
+		{"unknown policy entry kind", []any{"input", "policy_entries", 0, "kind"}, "bogus", `kind: unknown value "bogus"`},
+		{"unknown scope dimension name", []any{"mechanical", 0, "scope", "dimensions", 0, "dimension"}, "timezone", `dimension: unknown value "timezone"`},
+
+		// authority-resolution sub-states, one case per member
+		{"resolution.match unknown", []any{"semantic", 0, "dispositions", 0, "resolution", "match"}, "maybe", "resolution.match:"},
+		{"resolution.freshness unknown", []any{"semantic", 0, "dispositions", 0, "resolution", "freshness"}, "maybe", "resolution.freshness:"},
+		{"resolution.scope unknown", []any{"semantic", 0, "dispositions", 0, "resolution", "scope"}, "maybe", "resolution.scope:"},
+		{"resolution.bound unknown", []any{"semantic", 0, "dispositions", 0, "resolution", "bound"}, "maybe", "resolution.bound:"},
+		{"resolution.authorization unknown", []any{"semantic", 0, "dispositions", 0, "resolution", "authorization"}, "maybe", "resolution.authorization:"},
+
+		// digest formats: case, length, and missing "sha256:" prefix
+		{"constitution digest uppercase", []any{"input", "constitution_digest"}, "sha256:" + strings.ToUpper(repeatHex('c')), "constitution_digest"},
+		{"effective policy digest too short", []any{"input", "effective_policy_digest"}, "sha256:abcdef", "effective_policy_digest"},
+		{"policy entry digest unprefixed", []any{"input", "policy_entries", 0, "digest"}, repeatHex('e'), "policy_entries[0].digest"},
+		{"profile digest unprefixed", []any{"input", "profile", "digest"}, repeatHex('f'), "profile.digest"},
+		{"accepted manifest digest malformed", []any{"input", "target", "accepted", "manifest_digest"}, "sha256:" + repeatHex('b') + "bb", "accepted.manifest_digest"},
+		{"typed claim policy digest unprefixed", []any{"mechanical", 0, "claims", 0, "policy_digest"}, repeatHex('0'), "claims[0].policy_digest"},
+		{"typed claim digest uppercase", []any{"mechanical", 0, "claims", 0, "claim_digest"}, "sha256:" + strings.ToUpper(repeatHex('a')), "claims[0].claim_digest"},
+		{"semantic input id unprefixed", []any{"semantic", 0, "input_id"}, repeatHex('2'), "input_id"},
+		{"disposition digest too short", []any{"semantic", 0, "dispositions", 0, "digest"}, "sha256:aa", "dispositions[0].digest"},
+		{"semantic claim digest malformed", []any{"semantic", 0, "claims", 0, "digest"}, "sha256:nothex", "is not sha256:<64 hex> form"},
+		{"semantic claim authority digest malformed", []any{"semantic", 0, "claims", 0, "authority_digest"}, repeatHex('7'), "authority_digest"},
+
+		// evaluated_on
+		{"evaluated_on wrong shape", []any{"input", "evaluated_on"}, "2026-8-12", "is not YYYY-MM-DD form"},
+		{"evaluated_on not a calendar date", []any{"input", "evaluated_on"}, "2026-02-31", "is not a real calendar date"},
+
+		// solver-proof sets: sorted-unique in canonical lexical order
+		{"unsorted solver values", []any{"mechanical", 0, "before", "values"}, []any{"1.23", "1.22"}, "before.values: must be sorted ascending"},
+		{"duplicate solver values", []any{"mechanical", 0, "before", "values"}, []any{"1.22", "1.22"}, "before.values: duplicate identity"},
+		{"unsorted solver required", []any{"mechanical", 0, "after", "required"}, []any{"beta", "alpha"}, "after.required: must be sorted ascending"},
+		{"duplicate solver forbidden", []any{"mechanical", 0, "before", "forbidden"}, []any{"alpha", "alpha"}, "before.forbidden: duplicate identity"},
+		{"unsorted solver witnesses", []any{"mechanical", 0, "after", "witnesses"}, []any{"w-2", "w-1"}, "after.witnesses: must be sorted ascending"},
+
+		// dimension-proof sets
+		{"unsorted dimension left", []any{"mechanical", 0, "scope", "dimensions", 0, "left"}, []any{"review", "build"}, "left: must be sorted ascending"},
+		{"duplicate dimension right", []any{"mechanical", 0, "scope", "dimensions", 0, "right"}, []any{"review", "review"}, "right: duplicate identity"},
+		{"unsorted dimension intersection", []any{"mechanical", 0, "scope", "dimensions", 0, "intersection"}, []any{"review", "build"}, "intersection: must be sorted ascending"},
+		{"duplicate dimension witnesses", []any{"mechanical", 0, "scope", "dimensions", 0, "witnesses"}, []any{"w-1", "w-1"}, "witnesses: duplicate identity"},
+
+		// scope-proof dimension rows: unique, known, in the fixed §4.4 order
+		{"duplicate dimension row", []any{"mechanical", 0, "scope", "dimensions"}, []any{dimensionRow("phase"), dimensionRow("phase")}, "dimensions: duplicate dimension"},
+		{"dimension rows out of §4.4 order", []any{"mechanical", 0, "scope", "dimensions"}, []any{dimensionRow("ref"), dimensionRow("phase")}, "dimensions: must be in phase, environment, path, ref order"},
+		{"unknown-scope dimension rows out of order", []any{"semantic", 0, "unknown_scopes"}, []any{map[string]any{
+			"state":      "unknown",
+			"dimensions": []any{dimensionRow("path"), dimensionRow("environment")},
+		}}, "must be in phase, environment, path, ref order"},
+
+		// policy-entry order and duplication
+		{"unsorted policy entries", []any{"input", "policy_entries"}, []any{policyEntry("policy", "go-toolchain"), policyEntry("exemption", "legacy")}, "policy_entries: must be sorted ascending"},
+		{"duplicate policy entries", []any{"input", "policy_entries"}, []any{policyEntry("policy", "go-toolchain"), policyEntry("policy", "go-toolchain")}, "policy_entries: duplicate identity"},
+
+		// disclosure order and duplication
+		{"unsorted disclosure witnesses", []any{"disclosures"}, []any{map[string]any{"code": "actor-resolution-unproven", "witnesses": []any{"w-2", "w-1"}}}, "witnesses: must be sorted ascending"},
+		{"duplicate disclosure witnesses", []any{"disclosures"}, []any{map[string]any{"code": "actor-resolution-unproven", "witnesses": []any{"w-1", "w-1"}}}, "witnesses: duplicate identity"},
+		{"duplicate disclosure codes", []any{"disclosures"}, []any{
+			map[string]any{"code": "actor-resolution-unproven", "witnesses": []any{}},
+			map[string]any{"code": "actor-resolution-unproven", "witnesses": []any{}},
+		}, "disclosures: duplicate identity"},
+
+		// semantic claim ordering and embedded witness scope
+		{"duplicate semantic claim ids", []any{"semantic", 0, "claims", 1, "id"}, "ac-1", "claims: duplicate identity"},
+		{"unsorted semantic witness scope paths", []any{"semantic", 0, "claims", 0, "scope", "paths"}, []any{"src/", "docs/"}, "paths: must be sorted ascending"},
+		{"unsorted semantic witness scope refs", []any{"semantic", 0, "claims", 0, "scope", "refs"}, []any{"spec/zeta", "spec/alpha"}, "refs: must be sorted ascending"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			data := forgedReport(t, base, tc.path, tc.value)
+			requireErrContains(t, mustDecodeReportErr(t, data), tc.want)
+		})
+	}
+}
+
+// TestDecodeReport_ScopeDimensionSubsequence proves the §4.4 dimension
+// order is a SUBSEQUENCE rule, not an all-four-required rule: any ordered
+// subset of phase, environment, path, ref is legal.
+func TestDecodeReport_ScopeDimensionSubsequence(t *testing.T) {
+	base := mustReadFixture(t, "report.json")
+	valid := [][]any{
+		{dimensionRow("phase")},
+		{dimensionRow("environment"), dimensionRow("ref")},
+		{dimensionRow("phase"), dimensionRow("environment"), dimensionRow("path"), dimensionRow("ref")},
+	}
+	for i, rows := range valid {
+		t.Run(fmt.Sprintf("subsequence/%d", i), func(t *testing.T) {
+			data := forgedReport(t, base, []any{"mechanical", 0, "scope", "dimensions"}, rows)
+			if _, err := DecodeReport(data); err != nil {
+				t.Fatalf("DecodeReport(%d dimension rows): %v", len(rows), err)
+			}
+		})
+	}
+}
+
+// TestValidateAuthorityResolution_DeterministicFieldSelection pins F10: when
+// several members are simultaneously invalid, the reported member must be
+// the first in the fixed match/freshness/scope/bound/authorization order,
+// every time. A map range would pick one at random per call.
+func TestValidateAuthorityResolution_DeterministicFieldSelection(t *testing.T) {
+	all := AuthorityResolution{Match: "a", Freshness: "b", Scope: "c", Bound: "d", Authorization: "e"}
+	for i := 0; i < 100; i++ {
+		err := validateAuthorityResolution("row.resolution", all)
+		requireErrContains(t, err, "row.resolution.match:")
+	}
+
+	// With match valid, freshness is next in the fixed order.
+	partial := AuthorityResolution{Match: ProofProven, Freshness: "b", Scope: "c", Bound: "d", Authorization: "e"}
+	for i := 0; i < 100; i++ {
+		err := validateAuthorityResolution("row.resolution", partial)
+		requireErrContains(t, err, "row.resolution.freshness:")
 	}
 }

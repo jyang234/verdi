@@ -327,11 +327,7 @@ func judgeFindingDocFor(f JudgeFinding) judgeFindingDoc {
 		claims[i] = claimWitnessDocFor(c)
 	}
 	explanation := f.Explanation
-	categories := f.Categories
-	if categories == nil {
-		categories = []string{}
-	}
-	return judgeFindingDoc{Claims: claims, Categories: categories, Explanation: &explanation}
+	return judgeFindingDoc{Claims: claims, Categories: nonNilSlice(f.Categories), Explanation: &explanation}
 }
 
 type judgeResultDoc struct {
@@ -367,9 +363,6 @@ func judgeResultDocFor(r JudgeResult) judgeResultDoc {
 	findings := make([]judgeFindingDoc, len(r.Findings))
 	for i, f := range r.Findings {
 		findings[i] = judgeFindingDocFor(f)
-	}
-	if findings == nil {
-		findings = []judgeFindingDoc{}
 	}
 	return judgeResultDoc{Schema: &schema, Recommendation: &recommendation, Findings: findings}
 }
@@ -775,14 +768,7 @@ func scopeProofDocFor(p ScopeProof) scopeProofDoc {
 	for i, d := range p.Dimensions {
 		dims[i] = dimensionProofDocFor(d)
 	}
-	return scopeProofDoc{State: string(p.State), Dimensions: nonNilDimSlice(dims)}
-}
-
-func nonNilDimSlice(s []dimensionProofDoc) []dimensionProofDoc {
-	if s != nil {
-		return s
-	}
-	return []dimensionProofDoc{}
+	return scopeProofDoc{State: string(p.State), Dimensions: dims}
 }
 
 func solverProofFromDoc(d solverProofDoc) SolverProof {
@@ -801,12 +787,17 @@ func solverProofDocFor(p SolverProof) solverProofDoc {
 	}
 }
 
+// The doc/domain pairs below are structurally identical (the doc type adds
+// only json tags, which a Go struct conversion ignores), so a conversion
+// says exactly "same shape, different wire role" and cannot silently drop a
+// field the way a field-by-field literal can when one side gains a member.
+
 func typedClaimRecordFromDoc(d typedClaimRecordDoc) TypedClaimRecord {
-	return TypedClaimRecord{PolicyID: d.PolicyID, PolicyDigest: d.PolicyDigest, ClaimDigest: d.ClaimDigest, Claim: d.Claim}
+	return TypedClaimRecord(d)
 }
 
 func typedClaimRecordDocFor(r TypedClaimRecord) typedClaimRecordDoc {
-	return typedClaimRecordDoc{PolicyID: r.PolicyID, PolicyDigest: r.PolicyDigest, ClaimDigest: r.ClaimDigest, Claim: r.Claim}
+	return typedClaimRecordDoc(r)
 }
 
 func authorityResolutionFromDoc(d authorityResolutionDoc) AuthorityResolution {
@@ -824,11 +815,11 @@ func authorityResolutionDocFor(r AuthorityResolution) authorityResolutionDoc {
 }
 
 func claimWitnessFromPlainDoc(d claimWitnessPlainDoc) ClaimWitness {
-	return ClaimWitness{ID: d.ID, Digest: d.Digest, Category: d.Category}
+	return ClaimWitness(d)
 }
 
 func claimWitnessPlainDocFor(w ClaimWitness) claimWitnessPlainDoc {
-	return claimWitnessPlainDoc{ID: w.ID, Digest: w.Digest, Category: w.Category}
+	return claimWitnessPlainDoc(w)
 }
 
 func exemptionResolutionFromDoc(d exemptionResolutionDoc) ExemptionResolution {
@@ -844,14 +835,7 @@ func exemptionResolutionDocFor(e ExemptionResolution) exemptionResolutionDoc {
 	for i, rc := range e.RemovedClaims {
 		removed[i] = claimWitnessPlainDocFor(rc)
 	}
-	return exemptionResolutionDoc{ID: e.ID, Digest: e.Digest, Resolution: authorityResolutionDocFor(e.Resolution), RemovedClaims: nonNilRemovedSlice(removed)}
-}
-
-func nonNilRemovedSlice(s []claimWitnessPlainDoc) []claimWitnessPlainDoc {
-	if s != nil {
-		return s
-	}
-	return []claimWitnessPlainDoc{}
+	return exemptionResolutionDoc{ID: e.ID, Digest: e.Digest, Resolution: authorityResolutionDocFor(e.Resolution), RemovedClaims: removed}
 }
 
 func mechanicalEvaluationFromDoc(d mechanicalEvaluationDoc) MechanicalEvaluation {
@@ -890,24 +874,10 @@ func mechanicalEvaluationDocFor(m MechanicalEvaluation) mechanicalEvaluationDoc 
 	}
 	return mechanicalEvaluationDoc{
 		ID: m.ID, Family: string(m.Family), Subject: m.Subject,
-		Claims: nonNilClaimSlice(claims), Scope: scopeProofDocFor(m.Scope), Domain: m.Domain,
-		Before: solverProofDocFor(m.Before), Exemptions: nonNilExemptionSlice(exemptions), After: solverProofDocFor(m.After),
-		State: string(m.State), Reasons: nonNilSlice(reasons),
+		Claims: claims, Scope: scopeProofDocFor(m.Scope), Domain: m.Domain,
+		Before: solverProofDocFor(m.Before), Exemptions: exemptions, After: solverProofDocFor(m.After),
+		State: string(m.State), Reasons: reasons,
 	}
-}
-
-func nonNilClaimSlice(s []typedClaimRecordDoc) []typedClaimRecordDoc {
-	if s != nil {
-		return s
-	}
-	return []typedClaimRecordDoc{}
-}
-
-func nonNilExemptionSlice(s []exemptionResolutionDoc) []exemptionResolutionDoc {
-	if s != nil {
-		return s
-	}
-	return []exemptionResolutionDoc{}
 }
 
 func dispositionResolutionFromDoc(d dispositionResolutionDoc) DispositionResolution {
@@ -926,7 +896,13 @@ func dispositionResolutionDocFor(d DispositionResolution) dispositionResolutionD
 	}
 }
 
-func semanticEvaluationFromDoc(d semanticEvaluationDoc) SemanticEvaluation {
+// semanticEvaluationFromDoc converts one semantic row. It returns an error
+// because the optional primary/challenger exchanges are the one nested
+// report member whose conversion can fail on its own grammar (a missing or
+// null mandatory exchange field): discarding that error and nilling the
+// exchange would hide the real reason behind the generic "input bytes are
+// not the canonical encoding" wall.
+func semanticEvaluationFromDoc(d semanticEvaluationDoc) (SemanticEvaluation, error) {
 	unknownScopes := make([]ScopeProof, len(d.UnknownScopes))
 	for i, s := range d.UnknownScopes {
 		unknownScopes[i] = scopeProofFromDoc(s)
@@ -942,21 +918,23 @@ func semanticEvaluationFromDoc(d semanticEvaluationDoc) SemanticEvaluation {
 	var primary, challenger *JudgmentExchange
 	if d.Primary != nil {
 		p, err := d.Primary.toDomain()
-		if err == nil {
-			primary = &p
+		if err != nil {
+			return SemanticEvaluation{}, fmt.Errorf("primary: %w", err)
 		}
+		primary = &p
 	}
 	if d.Challenger != nil {
 		c, err := d.Challenger.toDomain()
-		if err == nil {
-			challenger = &c
+		if err != nil {
+			return SemanticEvaluation{}, fmt.Errorf("challenger: %w", err)
 		}
+		challenger = &c
 	}
 	return SemanticEvaluation{
 		ID: d.ID, InputID: d.InputID, Claims: d.Claims, UnknownScopes: unknownScopes,
 		Primary: primary, Challenger: challenger, Dispositions: dispositions,
 		State: ProofState(d.State), Reasons: reasons,
-	}
+	}, nil
 }
 
 func semanticEvaluationDocFor(s SemanticEvaluation) semanticEvaluationDoc {
@@ -981,29 +959,11 @@ func semanticEvaluationDocFor(s SemanticEvaluation) semanticEvaluationDoc {
 		cd := judgmentExchangeDocFor(*s.Challenger)
 		challenger = &cd
 	}
-	claims := s.Claims
-	if claims == nil {
-		claims = []policyartifact.SemanticClaimWitness{}
-	}
 	return semanticEvaluationDoc{
-		ID: s.ID, InputID: s.InputID, Claims: claims, UnknownScopes: nonNilUnknownScopeSlice(unknownScopes),
-		Primary: primary, Challenger: challenger, Dispositions: nonNilDispositionSlice(dispositions),
-		State: string(s.State), Reasons: nonNilSlice(reasons),
+		ID: s.ID, InputID: s.InputID, Claims: nonNilSlice(s.Claims), UnknownScopes: unknownScopes,
+		Primary: primary, Challenger: challenger, Dispositions: dispositions,
+		State: string(s.State), Reasons: reasons,
 	}
-}
-
-func nonNilUnknownScopeSlice(s []scopeProofDoc) []scopeProofDoc {
-	if s != nil {
-		return s
-	}
-	return []scopeProofDoc{}
-}
-
-func nonNilDispositionSlice(s []dispositionResolutionDoc) []dispositionResolutionDoc {
-	if s != nil {
-		return s
-	}
-	return []dispositionResolutionDoc{}
 }
 
 func targetIdentityFromDoc(d targetIdentityDoc) TargetIdentity {
@@ -1049,7 +1009,7 @@ func inputIdentityFromDoc(d inputIdentityDoc) (InputIdentity, error) {
 	}
 	entries := make([]PolicyEntryIdentity, len(d.PolicyEntries))
 	for i, e := range d.PolicyEntries {
-		entries[i] = PolicyEntryIdentity{Kind: e.Kind, ID: e.ID, Digest: e.Digest}
+		entries[i] = PolicyEntryIdentity(e)
 	}
 	return InputIdentity{
 		Target:                targetIdentityFromDoc(d.Target),
@@ -1057,7 +1017,7 @@ func inputIdentityFromDoc(d inputIdentityDoc) (InputIdentity, error) {
 		ConstitutionDigest:    d.ConstitutionDigest,
 		EffectivePolicyDigest: d.EffectivePolicyDigest,
 		PolicyEntries:         entries,
-		Profile:               ProfileIdentity{ID: d.Profile.ID, Class: d.Profile.Class, Digest: d.Profile.Digest},
+		Profile:               ProfileIdentity(d.Profile),
 		EvaluatedOn:           d.EvaluatedOn,
 	}, nil
 }
@@ -1069,24 +1029,17 @@ func inputIdentityDocFor(i InputIdentity) (inputIdentityDoc, error) {
 	}
 	entries := make([]policyEntryIdentityDoc, len(i.PolicyEntries))
 	for idx, e := range i.PolicyEntries {
-		entries[idx] = policyEntryIdentityDoc{Kind: e.Kind, ID: e.ID, Digest: e.Digest}
+		entries[idx] = policyEntryIdentityDoc(e)
 	}
 	return inputIdentityDoc{
 		Target:                targetIdentityDocFor(i.Target),
 		Repository:            repoRaw,
 		ConstitutionDigest:    i.ConstitutionDigest,
 		EffectivePolicyDigest: i.EffectivePolicyDigest,
-		PolicyEntries:         nonNilPolicyEntrySlice(entries),
-		Profile:               profileIdentityDoc{ID: i.Profile.ID, Class: i.Profile.Class, Digest: i.Profile.Digest},
+		PolicyEntries:         entries,
+		Profile:               profileIdentityDoc(i.Profile),
 		EvaluatedOn:           i.EvaluatedOn,
 	}, nil
-}
-
-func nonNilPolicyEntrySlice(s []policyEntryIdentityDoc) []policyEntryIdentityDoc {
-	if s != nil {
-		return s
-	}
-	return []policyEntryIdentityDoc{}
 }
 
 func nonNilSlice[T any](s []T) []T {
@@ -1147,7 +1100,11 @@ func reportFromDoc(d reportDoc) (Report, error) {
 	}
 	semantic := make([]SemanticEvaluation, len(d.Semantic))
 	for i, s := range d.Semantic {
-		semantic[i] = semanticEvaluationFromDoc(s)
+		row, err := semanticEvaluationFromDoc(s)
+		if err != nil {
+			return Report{}, fmt.Errorf("report.semantic[%d]: %w", i, err)
+		}
+		semantic[i] = row
 	}
 	disclosures := make([]Disclosure, len(d.Disclosures))
 	for i, disc := range d.Disclosures {
@@ -1179,30 +1136,9 @@ func reportDocFor(r Report, digest string) (reportDoc, error) {
 	schema, verdict, dig := r.Schema, string(r.Verdict), digest
 	return reportDoc{
 		Schema: &schema, Input: &inputDoc,
-		Mechanical: nonNilMechSlice(mechanical), Semantic: nonNilSemSlice(semantic),
-		Disclosures: nonNilDisclosureSlice(disclosures), Verdict: &verdict, Digest: &dig,
+		Mechanical: mechanical, Semantic: semantic,
+		Disclosures: disclosures, Verdict: &verdict, Digest: &dig,
 	}, nil
-}
-
-func nonNilMechSlice(s []mechanicalEvaluationDoc) []mechanicalEvaluationDoc {
-	if s != nil {
-		return s
-	}
-	return []mechanicalEvaluationDoc{}
-}
-
-func nonNilSemSlice(s []semanticEvaluationDoc) []semanticEvaluationDoc {
-	if s != nil {
-		return s
-	}
-	return []semanticEvaluationDoc{}
-}
-
-func nonNilDisclosureSlice(s []disclosureDoc) []disclosureDoc {
-	if s != nil {
-		return s
-	}
-	return []disclosureDoc{}
 }
 
 // EncodeReport validates report, recomputes its self digest from a

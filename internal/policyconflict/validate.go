@@ -287,14 +287,29 @@ func (w ClaimWitness) validate(field string) error {
 	if err := validateDigest(field+".digest", w.Digest); err != nil {
 		return err
 	}
-	// Category is deliberately NOT closed-vocabulary-checked here: at this
-	// standalone judge-result boundary there is no semantic input to
-	// cross-reference against, so a witness's category is the judge's own
-	// declared classification of a claim it was shown — cross-validated
-	// later, at report-assembly time, against the actual normalized
-	// semantic input's own claim identities (authority design §6: "An
-	// unknown ... witness invalidates the result").
-	return singleLineNonBlank(field+".category", w.Category)
+	// Category is closed vocabulary, not free prose: authority design §6
+	// fixes the source-category list ("The closed source categories are
+	// ...") and rules that "An unknown, missing, duplicate, or
+	// digest-mismatched witness invalidates the result". A judge naming a
+	// category outside that list has classified a claim the semantic
+	// universe cannot contain, so the witness fails closed here — at the
+	// judge-result boundary and on every report path that carries a
+	// ClaimWitness. The vocabulary itself is reached through
+	// policyartifact.ValidateWitnessCategory, the exported seam authorized
+	// for exactly this embedding; policyconflict never duplicates the
+	// private knownWitnessCategories map.
+	return validateWitnessCategory(field+".category", w.Category)
+}
+
+// validateWitnessCategory closed-vocabulary-checks category via
+// policyartifact.ValidateWitnessCategory (authority design §6, ledger
+// SI-103) — the single call site through which this package reaches that
+// vocabulary.
+func validateWitnessCategory(field, category string) error {
+	if err := policyartifact.ValidateWitnessCategory(category); err != nil {
+		return fmt.Errorf("policyconflict: %s: %w", field, err)
+	}
+	return nil
 }
 
 func (f JudgeFinding) validate(field string) error {
@@ -313,7 +328,7 @@ func (f JudgeFinding) validate(field string) error {
 		return fmt.Errorf("policyconflict: %s.categories: must be non-nil (an explicitly empty set is [])", field)
 	}
 	for i, c := range f.Categories {
-		if err := singleLineNonBlank(fmt.Sprintf("%s.categories[%d]", field, i), c); err != nil {
+		if err := validateWitnessCategory(fmt.Sprintf("%s.categories[%d]", field, i), c); err != nil {
 			return err
 		}
 	}
@@ -544,16 +559,46 @@ func (t TargetIdentity) validate() error {
 	return nil
 }
 
+// scopeDimensionOrder is the fixed sort order authority design §4.4 fixes
+// for a scope proof's per-dimension rows ("Sorting is phase, environment,
+// path, then ref"). A proof may omit dimensions it did not compare, so a
+// legal row set is any SUBSEQUENCE of this order — never a permutation of
+// it, and never with a dimension repeated.
+var scopeDimensionOrder = []string{"phase", "environment", "path", "ref"}
+
+func scopeDimensionRank(name string) (int, bool) {
+	for i, d := range scopeDimensionOrder {
+		if d == name {
+			return i, true
+		}
+	}
+	return 0, false
+}
+
 func validateDimensionProof(field string, d DimensionProof) error {
 	if err := singleLineNonBlank(field+".dimension", d.Dimension); err != nil {
 		return err
 	}
-	switch d.Dimension {
-	case "phase", "environment", "path", "ref":
-	default:
+	if _, ok := scopeDimensionRank(d.Dimension); !ok {
 		return fmt.Errorf("policyconflict: %s.dimension: unknown value %q", field, d.Dimension)
 	}
-	return d.State.Validate()
+	if err := d.State.Validate(); err != nil {
+		return err
+	}
+	// Each recorded set is "the exact set, path, or graph-edge witness"
+	// (§4.4), and "values inside each dimension are canonical lexical
+	// order" — so a repeated or out-of-order value is a malformed witness,
+	// never something to silently deduplicate or re-sort.
+	if err := requireSortedUniqueStrings(field+".left", d.Left); err != nil {
+		return err
+	}
+	if err := requireSortedUniqueStrings(field+".right", d.Right); err != nil {
+		return err
+	}
+	if err := requireSortedUniqueStrings(field+".intersection", d.Intersection); err != nil {
+		return err
+	}
+	return requireSortedUniqueStrings(field+".witnesses", d.Witnesses)
 }
 
 func validateScopeProof(field string, s ScopeProof) error {
@@ -568,6 +613,17 @@ func validateScopeProof(field string, s ScopeProof) error {
 			return err
 		}
 	}
+	prev := -1
+	for i, d := range s.Dimensions {
+		rank, _ := scopeDimensionRank(d.Dimension) // known: checked above
+		switch {
+		case rank == prev:
+			return fmt.Errorf("policyconflict: %s.dimensions: duplicate dimension %q", field, d.Dimension)
+		case rank < prev:
+			return fmt.Errorf("policyconflict: %s.dimensions: must be in phase, environment, path, ref order (found %q after %q)", field, d.Dimension, s.Dimensions[i-1].Dimension)
+		}
+		prev = rank
+	}
 	return nil
 }
 
@@ -578,16 +634,45 @@ func validateSolverProof(field string, s SolverProof) error {
 	if err := validateNonEmpty(field+".domain", s.Domain); err != nil {
 		return err
 	}
-	return nil
+	// Same canonical-lexical-order rule as a dimension proof's witness sets
+	// (§4.4): a solver proof's domain sets are evidence, so a duplicate or
+	// out-of-order entry fails closed rather than being normalized away.
+	if err := requireSortedUniqueStrings(field+".values", s.Values); err != nil {
+		return err
+	}
+	if err := requireSortedUniqueStrings(field+".required", s.Required); err != nil {
+		return err
+	}
+	if err := requireSortedUniqueStrings(field+".forbidden", s.Forbidden); err != nil {
+		return err
+	}
+	return requireSortedUniqueStrings(field+".witnesses", s.Witnesses)
+}
+
+// authorityResolutionMembers is the fixed report order of an authority
+// resolution's five states (authority design §10: "match, freshness, scope,
+// bound, and authorization states"). Iterating a map here would make the
+// reported member nondeterministic whenever two are simultaneously invalid.
+func authorityResolutionMembers(r AuthorityResolution) [5]struct {
+	name  string
+	state ProofState
+} {
+	return [5]struct {
+		name  string
+		state ProofState
+	}{
+		{"match", r.Match},
+		{"freshness", r.Freshness},
+		{"scope", r.Scope},
+		{"bound", r.Bound},
+		{"authorization", r.Authorization},
+	}
 }
 
 func validateAuthorityResolution(field string, r AuthorityResolution) error {
-	for name, v := range map[string]ProofState{
-		"match": r.Match, "freshness": r.Freshness, "scope": r.Scope,
-		"bound": r.Bound, "authorization": r.Authorization,
-	} {
-		if err := v.Validate(); err != nil {
-			return fmt.Errorf("policyconflict: %s.%s: %w", field, name, err)
+	for _, m := range authorityResolutionMembers(r) {
+		if err := m.state.Validate(); err != nil {
+			return fmt.Errorf("policyconflict: %s.%s: %w", field, m.name, err)
 		}
 	}
 	return nil
@@ -707,12 +792,16 @@ func validateDispositionConclusion(field string, c policyartifact.DispositionCon
 // validateSemanticClaims validates every embedded
 // policyartifact.SemanticClaimWitness via that type's own exported
 // Validate — including its closed §6 source-category vocabulary — plus
-// this package's own sorted-unique ordering rule for the claim set
-// (authority design §10: "sorted-unique witness-ID order"; ordering is
-// policyconflict's own report-row concern, not policyartifact's). The
-// exported SemanticClaimWitness.Validate seam is the same controller-
-// authorized addition as validateDispositionConclusion above; policyconflict
-// never duplicates policyartifact's private knownWitnessCategories map.
+// this package's own ordering rules: sorted-unique claim IDs (authority
+// design §10: "sorted-unique witness-ID order") and, for each witness's
+// inherited scope, the same sorted-unique member rule validateScope applies
+// to every other scope in a report. Ordering is policyconflict's own
+// report-row concern: policyartifact's Scope.Validate proves membership and
+// uniqueness but not canonical lexical order, so an unsorted witness scope
+// would otherwise slip into a canonical report. The exported
+// SemanticClaimWitness.Validate seam is the same controller-authorized
+// addition as validateDispositionConclusion above; policyconflict never
+// duplicates policyartifact's private knownWitnessCategories map.
 func validateSemanticClaims(field string, claims []policyartifact.SemanticClaimWitness) error {
 	if len(claims) < 1 {
 		return fmt.Errorf("policyconflict: %s: must name at least one claim", field)
@@ -720,6 +809,9 @@ func validateSemanticClaims(field string, claims []policyartifact.SemanticClaimW
 	for i, c := range claims {
 		if err := c.Validate(); err != nil {
 			return fmt.Errorf("policyconflict: %s[%d]: %w", field, i, err)
+		}
+		if err := validateScope(fmt.Sprintf("%s[%d].scope", field, i), c.Scope); err != nil {
+			return err
 		}
 	}
 	return requireSortedUnique(field, claims, func(c policyartifact.SemanticClaimWitness) string { return c.ID })
