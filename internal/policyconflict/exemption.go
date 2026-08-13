@@ -1,16 +1,18 @@
 // exemption.go applies structural exemption departure to one already-proven
 // mechanical row (authority design §5.5, ledger SI-95). Task 8 owns how an
 // ExemptionResolution's five authority-resolution states (match, freshness,
-// scope coverage, bound, authorization) are derived; this file only accepts
-// a resolution whose states are ALL already proven, removes exactly the
-// exact-current claim witnesses it names, and reruns the identical domain
-// solver over the remainder. It never interprets dates or principals, and
-// it never edits row in place — every path returns a fresh value built from
-// row's own fields.
+// scope coverage, bound, authorization) are derived; this file APPLIES only
+// a resolution whose states are ALL already proven — removing exactly the
+// exact-current claim witnesses it names and rerunning the identical domain
+// solver over the remainder — while RECORDING every applicable resolution,
+// applied or not, with its typed states intact (§10). It never interprets
+// dates or principals, and it never edits row in place — every path returns
+// a fresh value built from row's own fields.
 package policyconflict
 
 import (
 	"fmt"
+	"reflect"
 	"sort"
 
 	"github.com/jyang234/verdi/internal/policyartifact"
@@ -49,15 +51,20 @@ func addReason(reasons []ReasonCode, r ReasonCode) []ReasonCode {
 // row.Domain, and every other structural field carry over unchanged — only
 // Exemptions, After, State, and Reasons can differ from row's own.
 //
-// A resolution not all-proven (allProven) is rejected: it is silently
-// excluded from application (never applied, never treated as an operational
-// caller defect — an authority shortfall is routine three-valued-honesty
-// territory, not a malformed call), and its exclusion is disclosed via
-// ReasonExemptionIneffective on the returned row whenever no OTHER
-// resolution ends up covering the conflict either. This package's own
-// choice between "operational error" and "untouched row" for this case (the
-// brief leaves it open) is: untouched row, silently-excluded resolution,
-// disclosed reason code — see the task report for the full rationale.
+// A resolution not all-proven (allProven) is rejected: it is never applied,
+// and it is never treated as an operational caller defect either (an
+// authority shortfall is routine three-valued-honesty territory, not a
+// malformed call). It is still RETAINED on the returned row: authority
+// design §10 has each row carry its applicable exemption resolutions with
+// their typed match/freshness/scope/bound/authorization states, so a
+// rejected resolution stays visible with the exact substate that rejected
+// it instead of vanishing. Its ineffectiveness is additionally named by
+// ReasonExemptionIneffective — including in the mixed case where another
+// resolution does cover the conflict, so a row never silently loses the
+// fact that an applicable exemption had no effect. Both reason codes may
+// therefore appear on one row; each names a real outcome of that row's
+// exemption application, and the wire's reason rule (a sorted-unique set
+// from the closed vocabulary) admits them together.
 //
 // An accepted resolution's RemovedClaims must each name a claim digest
 // exactly present among row.Claims (its "match" state already being proven
@@ -65,24 +72,31 @@ func addReason(reasons []ReasonCode, r ReasonCode) []ReasonCode {
 // digest absent here means the resolution was constructed against a
 // different row's witnesses).
 func ApplyEffectiveExemptions(row MechanicalEvaluation, resolutions []ExemptionResolution) (MechanicalEvaluation, error) {
-	accepted := make([]ExemptionResolution, 0, len(resolutions))
+	if err := validateRowOperand(row); err != nil {
+		return MechanicalEvaluation{}, err
+	}
+	applicable, err := dedupeResolutions(resolutions)
+	if err != nil {
+		return MechanicalEvaluation{}, err
+	}
+
+	accepted := make([]ExemptionResolution, 0, len(applicable))
 	anyRejected := false
-	for _, r := range resolutions {
+	for _, r := range applicable {
 		if allProven(r.Resolution) {
 			accepted = append(accepted, r)
 		} else {
 			anyRejected = true
 		}
 	}
-	sort.Slice(accepted, func(i, j int) bool { return accepted[i].ID < accepted[j].ID })
 
 	out := row
+	out.Exemptions = applicable
 	out.Reasons = append([]ReasonCode{}, row.Reasons...)
 
 	if len(accepted) == 0 {
-		out.Exemptions = []ExemptionResolution{}
 		out.After = row.Before
-		if anyRejected {
+		if anyRejected && row.State != ProofProven {
 			out.Reasons = addReason(out.Reasons, ReasonExemptionIneffective)
 		}
 		return out, nil
@@ -114,7 +128,7 @@ func ApplyEffectiveExemptions(row MechanicalEvaluation, resolutions []ExemptionR
 
 	var afterProof SolverProof
 	if row.Domain == domainPrincipalRelation {
-		afterProof = rerunPrincipalRelationWithoutKernel(remainder, row.Before)
+		afterProof = rerunPrincipalRelationWithoutKernel(remainder)
 	} else {
 		var err error
 		afterProof, err = rerunSolver(row.Domain, remainder)
@@ -122,22 +136,82 @@ func ApplyEffectiveExemptions(row MechanicalEvaluation, resolutions []ExemptionR
 			return MechanicalEvaluation{}, err
 		}
 	}
-
-	// "A mechanical conflict is covered only when the post-exemption
-	// conjunction is satisfiable or disjoint" (§5.5): row.Scope is the
-	// group's own already-proven scope proof, unchanged by exemption
-	// application, so a proven-disjoint group never needed exemption
-	// coverage from the solver result at all.
-	covered := afterProof.State == SolverSatisfiable || row.Scope.State == ScopeDisjoint
-
-	out.Exemptions = accepted
 	out.After = afterProof
-	if covered {
+
+	// A row that is ALREADY proven — a satisfiable group, or one proven
+	// harmless by disjoint scope — never was a mechanical conflict, and
+	// §5.5's coverage rule is about covering a conflict. Applying an
+	// exemption to it therefore records the resolutions and the recomputed
+	// post-exemption proof without crediting (or blaming) any exemption for
+	// a state the row already held on its own evidence.
+	if row.State == ProofProven {
+		return out, nil
+	}
+
+	switch afterProof.State {
+	case SolverSatisfiable:
+		// §5.5: "A mechanical conflict is covered only when the
+		// post-exemption conjunction is satisfiable or disjoint."
 		out.State = ProofProven
 		out.Reasons = []ReasonCode{ReasonExemptionEffective}
-	} else {
+		if anyRejected {
+			out.Reasons = addReason(out.Reasons, ReasonExemptionIneffective)
+		}
+	case SolverUnproven:
+		// The departure dissolved the original proof without producing a
+		// new one (see rerunPrincipalRelationWithoutKernel). The row's
+		// pre-exemption reason described a proof that no longer holds, so
+		// it is replaced by the outcome that does.
+		out.State = ProofUnproven
+		out.Reasons = addReason([]ReasonCode{ReasonPrincipalRelationUnproven}, ReasonExemptionIneffective)
+	default:
 		out.Reasons = addReason(out.Reasons, ReasonExemptionIneffective)
 	}
+	return out, nil
+}
+
+// validateRowOperand mirrors EvaluateMechanical's own entry validation over
+// the row this call reruns a solver across: a hand-built or mutated row
+// whose claims never passed Claim.Validate is a caller defect reported as
+// an operational error, never a panic inside a solver that trusts its
+// operand grammar.
+func validateRowOperand(row MechanicalEvaluation) error {
+	if row.Domain == "" {
+		return fmt.Errorf("policyconflict: apply exemptions: row %q carries no operand domain", row.ID)
+	}
+	for i, c := range row.Claims {
+		if c.PolicyID == "" || c.PolicyDigest == "" || c.ClaimDigest == "" {
+			return fmt.Errorf("policyconflict: apply exemptions: row %q claim [%d]: policy id, policy digest, and claim digest are all required", row.ID, i)
+		}
+		if err := c.Claim.Validate(); err != nil {
+			return fmt.Errorf("policyconflict: apply exemptions: row %q claim [%d] %s: %w", row.ID, i, c.ClaimDigest, err)
+		}
+	}
+	return nil
+}
+
+// dedupeResolutions returns resolutions in ascending ID order with
+// identical duplicates collapsed, satisfying the wire's sorted-unique
+// exemption identity rule (validate.go's requireSortedUnique over
+// ExemptionResolution.ID). Two DIFFERENT resolutions sharing one id are
+// contradictory operands — exactly the kernel's own treatment of
+// conflicting duplicate records — so they are an operational error rather
+// than a silent pick between two authorities.
+func dedupeResolutions(resolutions []ExemptionResolution) ([]ExemptionResolution, error) {
+	byID := make(map[string]ExemptionResolution, len(resolutions))
+	out := make([]ExemptionResolution, 0, len(resolutions))
+	for _, r := range resolutions {
+		prev, ok := byID[r.ID]
+		if ok {
+			if !reflect.DeepEqual(prev, r) {
+				return nil, fmt.Errorf("policyconflict: apply exemptions: two different resolutions share exemption id %q", r.ID)
+			}
+			continue
+		}
+		byID[r.ID] = r
+		out = append(out, r)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
 	return out, nil
 }
 
@@ -164,21 +238,47 @@ func rerunSolver(domain string, remainder []TypedClaimRecord) (SolverProof, erro
 }
 
 // rerunPrincipalRelationWithoutKernel is the identity domain's post-
-// exemption rerun. ApplyEffectiveExemptions' fixed signature carries no
-// context, profile, or actors (the exact API contract this package
-// implements), so it cannot construct a fresh kernel authorization request
-// the way solvePrincipalRelation does. The only kernel-independent fact
-// still provable here is that removing every same-/different-principal
-// claim leaves nothing left to require a relation at all — trivially
-// satisfiable. Any remainder that still asserts a relation cannot be
-// soundly re-verified without the kernel, so this conservatively returns
-// before unchanged rather than inventing a new proof (never a false pass;
-// see the task report's disclosed judgment call).
-func rerunPrincipalRelationWithoutKernel(remainder []TypedClaimRecord, before SolverProof) SolverProof {
+// exemption rerun: §5.5 requires that "the same solver runs again", so the
+// remainder is re-solved rather than having the original proof repeated.
+// ApplyEffectiveExemptions' fixed signature carries no context, profile, or
+// actors (the exact API contract this package implements), so it cannot
+// construct a fresh kernel authorization request the way
+// solvePrincipalRelation does — but §5.3 splits that solver into a
+// kernel-free half and a kernel half, and only the kernel half is out of
+// reach here:
+//
+//   - both relation operators still present: requiring same-principal and
+//     different-principal for one transition and role pair is a textual
+//     contradiction §5.3 proves without any kernel call — unsatisfiable;
+//   - exactly one relation still required: provable only by the kernel,
+//     which is unavailable, so the departure leaves the requirement
+//     unproven — never the removed contradiction repeated (that proof no
+//     longer holds) and never a manufactured pass;
+//   - no relation left: nothing requires a relation at all — satisfiable.
+func rerunPrincipalRelationWithoutKernel(remainder []TypedClaimRecord) SolverProof {
+	hasSame, hasDiff := false, false
+	roles := map[string]bool{}
 	for _, c := range remainder {
-		if c.Claim.Operator == policyartifact.OpSamePrincipal || c.Claim.Operator == policyartifact.OpDifferentPrincipal {
-			return before
+		switch c.Claim.Operator {
+		case policyartifact.OpSamePrincipal:
+			hasSame = true
+		case policyartifact.OpDifferentPrincipal:
+			hasDiff = true
+		default:
+			continue
+		}
+		for _, v := range c.Claim.Values {
+			roles[v] = true
 		}
 	}
-	return SolverProof{State: SolverSatisfiable, Domain: domainPrincipalRelation, Values: []string{}, Required: []string{}, Forbidden: []string{}, Witnesses: []string{}}
+	values := sortedKeysOf(roles)
+
+	switch {
+	case hasSame && hasDiff:
+		return SolverProof{State: SolverUnsatisfiable, Domain: domainPrincipalRelation, Values: values, Required: []string{}, Forbidden: []string{}, Witnesses: values}
+	case hasSame || hasDiff:
+		return SolverProof{State: SolverUnproven, Domain: domainPrincipalRelation, Values: values, Required: []string{}, Forbidden: []string{}, Witnesses: []string{}}
+	default:
+		return SolverProof{State: SolverSatisfiable, Domain: domainPrincipalRelation, Values: []string{}, Required: []string{}, Forbidden: []string{}, Witnesses: []string{}}
+	}
 }

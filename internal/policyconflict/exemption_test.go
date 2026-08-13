@@ -3,6 +3,7 @@ package policyconflict
 import (
 	"context"
 	"reflect"
+	"sort"
 	"testing"
 
 	"github.com/jyang234/verdi/internal/contextcompile"
@@ -85,8 +86,14 @@ func TestApplyEffectiveExemptionsRejectsEachNotProvenState(t *testing.T) {
 			if err != nil {
 				t.Fatalf("ApplyEffectiveExemptions: %v", err)
 			}
-			if len(got.Exemptions) != 0 {
-				t.Fatalf("Exemptions = %+v, want none applied (not all-proven)", got.Exemptions)
+			// Authority design §10 / ledger SI-103: the row carries EVERY
+			// applicable resolution with its typed states, so a rejected
+			// resolution stays visible and unapplied rather than vanishing.
+			if !reflect.DeepEqual(got.Exemptions, []ExemptionResolution{resolution}) {
+				t.Fatalf("Exemptions = %+v, want the rejected resolution retained unapplied with its states intact", got.Exemptions)
+			}
+			if !reflect.DeepEqual(got.After, row.Before) {
+				t.Fatalf("After = %+v, want the original proof (nothing was removed)", got.After)
 			}
 			if got.State != row.State {
 				t.Fatalf("State = %q, want unchanged %q (rejected candidate never covers)", got.State, row.State)
@@ -195,6 +202,201 @@ func TestApplyEffectiveExemptionsPartialRemovalStillConflict(t *testing.T) {
 	}
 }
 
+// TestApplyEffectiveExemptionsRetainsRejectedBesideAccepted covers the
+// mixed case: one all-proven resolution covers the conflict while a second,
+// not-all-proven resolution is rejected. Both stay on the row (authority
+// design §10: the row carries every applicable resolution), and the
+// rejected one's ineffectiveness stays visible in the reason set.
+func TestApplyEffectiveExemptionsRetainsRejectedBesideAccepted(t *testing.T) {
+	row := violatedRow(t)
+	var gold, silver TypedClaimRecord
+	for _, c := range row.Claims {
+		switch c.PolicyID {
+		case "policy-a":
+			gold = c
+		case "policy-b":
+			silver = c
+		}
+	}
+	accepted := exemptionFor("ex-a-accepted", allProvenResolution(), silver)
+	rejected := exemptionFor("ex-b-rejected", AuthorityResolution{
+		Match: ProofProven, Freshness: ProofProven, Scope: ProofProven, Bound: ProofUnproven, Authorization: ProofProven,
+	}, gold)
+
+	got, err := ApplyEffectiveExemptions(row, []ExemptionResolution{rejected, accepted})
+	if err != nil {
+		t.Fatalf("ApplyEffectiveExemptions: %v", err)
+	}
+	if got.State != ProofProven {
+		t.Fatalf("State = %q, want proven (the accepted resolution covers the conflict)", got.State)
+	}
+	if len(got.Exemptions) != 2 || got.Exemptions[0].ID != "ex-a-accepted" || got.Exemptions[1].ID != "ex-b-rejected" {
+		t.Fatalf("Exemptions = %+v, want both resolutions retained in ascending ID order", got.Exemptions)
+	}
+	if got.Exemptions[1].Resolution.Bound != ProofUnproven {
+		t.Fatalf("retained rejected resolution's states = %+v, want them intact", got.Exemptions[1].Resolution)
+	}
+	// The rejected resolution removed nothing: only the accepted one's claim
+	// left the conjunction.
+	if len(got.After.Values) != 1 || got.After.Values[0] != "gold" {
+		t.Fatalf("After = %+v, want only the accepted resolution's removal applied", got.After)
+	}
+	wantReasons := []ReasonCode{ReasonExemptionEffective, ReasonExemptionIneffective}
+	if !reflect.DeepEqual(got.Reasons, wantReasons) {
+		t.Fatalf("Reasons = %v, want %v (coverage proven, one applicable resolution ineffective)", got.Reasons, wantReasons)
+	}
+	if err := validateMechanicalEvaluation("row", got); err != nil {
+		t.Fatalf("result failed the package's own validation: %v", err)
+	}
+}
+
+// TestApplyEffectiveExemptionsDedupesIdenticalResolutionIDs pins the wire's
+// exemption identity rule (validate.go's requireSortedUnique over
+// ExemptionResolution.ID): the same resolution presented twice is one
+// applicable resolution, while two DIFFERENT resolutions sharing one id are
+// a caller defect rather than a silent pick.
+func TestApplyEffectiveExemptionsDedupesIdenticalResolutionIDs(t *testing.T) {
+	row := violatedRow(t)
+	var silver, gold TypedClaimRecord
+	for _, c := range row.Claims {
+		switch c.PolicyID {
+		case "policy-a":
+			gold = c
+		case "policy-b":
+			silver = c
+		}
+	}
+	resolution := exemptionFor("ex-1", allProvenResolution(), silver)
+
+	got, err := ApplyEffectiveExemptions(row, []ExemptionResolution{resolution, resolution})
+	if err != nil {
+		t.Fatalf("ApplyEffectiveExemptions: %v", err)
+	}
+	if len(got.Exemptions) != 1 {
+		t.Fatalf("Exemptions = %+v, want the identical duplicate collapsed", got.Exemptions)
+	}
+	if err := validateMechanicalEvaluation("row", got); err != nil {
+		t.Fatalf("result failed the package's own validation: %v", err)
+	}
+
+	conflicting := exemptionFor("ex-1", allProvenResolution(), gold)
+	if _, err := ApplyEffectiveExemptions(row, []ExemptionResolution{resolution, conflicting}); err == nil {
+		t.Fatal("want operational error for two different resolutions sharing one id, got nil")
+	}
+}
+
+// TestApplyEffectiveExemptionsMalformedRowIsOperationalError mirrors
+// EvaluateMechanical's own entry validation: a hand-built row carrying a
+// claim that never passed Claim.Validate is a caller defect reported as an
+// operational error, never a panic inside a solver.
+func TestApplyEffectiveExemptionsMalformedRowIsOperationalError(t *testing.T) {
+	malformed := policyartifact.Claim{
+		ID: "c1", Family: policyartifact.FamilyConfiguration, Operator: policyartifact.OpEquals,
+		Subject: "level", Values: []string{}, Scope: universalScope(), Overridable: true,
+	}
+	malformedDigest, err := policyartifact.ClaimDigest(malformed)
+	if err != nil {
+		t.Fatalf("ClaimDigest: %v", err)
+	}
+	healthy := discreteClaim("c2", "level", policyartifact.OpAllowedValues, []string{"gold"}, universalScope())
+	healthyDigest, err := policyartifact.ClaimDigest(healthy)
+	if err != nil {
+		t.Fatalf("ClaimDigest: %v", err)
+	}
+	records := []TypedClaimRecord{
+		{PolicyID: "policy-a", PolicyDigest: testDigest64, ClaimDigest: malformedDigest, Claim: malformed},
+		{PolicyID: "policy-b", PolicyDigest: testDigest64, ClaimDigest: healthyDigest, Claim: healthy},
+	}
+	sort.Slice(records, func(i, j int) bool { return records[i].ClaimDigest < records[j].ClaimDigest })
+	proof := SolverProof{State: SolverUnsatisfiable, Domain: domainDiscreteSet, Values: []string{}, Required: []string{}, Forbidden: []string{}, Witnesses: []string{}}
+	row := MechanicalEvaluation{
+		ID: "configuration:level#complete", Family: policyartifact.FamilyConfiguration, Subject: "level",
+		Claims: records, Scope: ScopeProof{State: ScopeOverlap, Dimensions: []DimensionProof{}},
+		Domain: domainDiscreteSet, Before: proof, Exemptions: []ExemptionResolution{}, After: proof,
+		State: ProofViolatedWithWitness, Reasons: []ReasonCode{ReasonMechanicalConflict},
+	}
+
+	// Removing only the healthy claim leaves the malformed one in the
+	// remainder the solver reruns over.
+	var healthyRecord TypedClaimRecord
+	for _, c := range records {
+		if c.ClaimDigest == healthyDigest {
+			healthyRecord = c
+		}
+	}
+	resolution := exemptionFor("ex-1", allProvenResolution(), healthyRecord)
+	if _, err := ApplyEffectiveExemptions(row, []ExemptionResolution{resolution}); err == nil {
+		t.Fatal("want operational error for a malformed row claim, got nil")
+	}
+}
+
+// TestApplyEffectiveExemptionsProvenDisjointRowIsNotCredited covers a row
+// that is already proven by proven-disjoint scope: it was never a mechanical
+// conflict, so no exemption can be credited with covering it (§5.5's
+// coverage rule applies to a conflict).
+func TestApplyEffectiveExemptionsProvenDisjointRowIsNotCredited(t *testing.T) {
+	row := evaluateOneRow(t, MechanicalInput{Claims: []contextcompile.TypedClaim{
+		typedClaim(t, "policy-a", discreteClaim("c1", "level", policyartifact.OpEquals, []string{"gold"}, phaseScope("design"))),
+		typedClaim(t, "policy-b", discreteClaim("c2", "level", policyartifact.OpEquals, []string{"silver"}, phaseScope("build"))),
+	}})
+	if row.State != ProofProven || len(row.Reasons) != 1 || row.Reasons[0] != ReasonScopeDisjoint {
+		t.Fatalf("precondition: row = %+v, want a proven scope-disjoint row", row)
+	}
+	resolution := exemptionFor("ex-1", allProvenResolution(), row.Claims[0])
+
+	got, err := ApplyEffectiveExemptions(row, []ExemptionResolution{resolution})
+	if err != nil {
+		t.Fatalf("ApplyEffectiveExemptions: %v", err)
+	}
+	if got.State != ProofProven {
+		t.Fatalf("State = %q, want proven (unchanged)", got.State)
+	}
+	if !reflect.DeepEqual(got.Reasons, row.Reasons) {
+		t.Fatalf("Reasons = %v, want the row's own %v: a disjoint row needs no exemption credit", got.Reasons, row.Reasons)
+	}
+	if len(got.Exemptions) != 1 {
+		t.Fatalf("Exemptions = %+v, want the applicable resolution recorded", got.Exemptions)
+	}
+}
+
+// TestApplyEffectiveExemptionsSharedClaimDigestDepartsOneIdentity documents
+// the frozen wire's claim-identity consequence (see mechanical.go's
+// collapse comment and the task report's ledger candidate): two policies
+// declaring one byte-identical claim contribute ONE claim identity, so an
+// exemption naming that digest departs from that single identity.
+func TestApplyEffectiveExemptionsSharedClaimDigestDepartsOneIdentity(t *testing.T) {
+	shared := discreteClaim("shared-claim", "level", policyartifact.OpEquals, []string{"gold"}, phaseScope("build"))
+	row := evaluateOneRow(t, MechanicalInput{Claims: []contextcompile.TypedClaim{
+		typedClaim(t, "policy-a", shared),
+		typedClaim(t, "policy-b", shared),
+		typedClaim(t, "policy-c", discreteClaim("c3", "level", policyartifact.OpEquals, []string{"silver"}, phaseScope("build"))),
+	}})
+	if row.State != ProofViolatedWithWitness {
+		t.Fatalf("precondition: row.State = %q, want violated-with-witness", row.State)
+	}
+	if len(row.Claims) != 2 {
+		t.Fatalf("row Claims = %+v, want the shared claim collapsed to one identity", row.Claims)
+	}
+	var sharedRecord TypedClaimRecord
+	for _, c := range row.Claims {
+		if c.Claim.ID == "shared-claim" {
+			sharedRecord = c
+		}
+	}
+	resolution := exemptionFor("ex-1", allProvenResolution(), sharedRecord)
+
+	got, err := ApplyEffectiveExemptions(row, []ExemptionResolution{resolution})
+	if err != nil {
+		t.Fatalf("ApplyEffectiveExemptions: %v", err)
+	}
+	if got.State != ProofProven {
+		t.Fatalf("State = %q, want proven: the one named claim identity left the conjunction", got.State)
+	}
+	if err := validateMechanicalEvaluation("row", got); err != nil {
+		t.Fatalf("result failed the package's own validation: %v", err)
+	}
+}
+
 func TestApplyEffectiveExemptionsNeverMutatesInputRow(t *testing.T) {
 	row := violatedRow(t)
 	before := row.Before
@@ -290,10 +492,12 @@ func TestApplyEffectiveExemptionsPrincipalRelationPartialRemovalConservative(t *
 	}
 
 	// Remove only the same-principal claim: one different-principal claim
-	// remains. ApplyEffectiveExemptions carries no kernel context (its
-	// signature has no ctx/profile/actors), so it cannot re-ask the kernel
-	// and must conservatively retain the original proof rather than invent
-	// a fresh one.
+	// remains. Authority design §5.5 requires "the same solver runs again",
+	// and the surviving half is exactly the kernel-free part of §5.3 — the
+	// same+different textual contradiction is gone, so the original violated
+	// proof must NOT be repeated. What remains (a single relation claim)
+	// cannot be re-verified without the kernel, which this fixed signature
+	// carries no ctx/profile/actors for, so the rerun is unproven.
 	var samePrincipalClaim TypedClaimRecord
 	for _, c := range row.Claims {
 		if c.Claim.Operator == policyartifact.OpSamePrincipal {
@@ -305,10 +509,50 @@ func TestApplyEffectiveExemptionsPrincipalRelationPartialRemovalConservative(t *
 	if err != nil {
 		t.Fatalf("ApplyEffectiveExemptions: %v", err)
 	}
-	if got.State != ProofViolatedWithWitness {
-		t.Fatalf("State = %q, want unchanged violated-with-witness (kernel unavailable, conservative)", got.State)
+	if got.After.State != SolverUnproven {
+		t.Fatalf("After.State = %q, want unproven (one surviving relation claim, no kernel available)", got.After.State)
 	}
-	if !reflect.DeepEqual(got.After, row.Before) {
-		t.Fatalf("After = %+v, want equal to the original Before (conservative retention)", got.After)
+	if got.State != ProofUnproven {
+		t.Fatalf("State = %q, want unproven (the original contradiction no longer holds and nothing re-proves it)", got.State)
+	}
+	wantReasons := []ReasonCode{ReasonExemptionIneffective, ReasonPrincipalRelationUnproven}
+	if !reflect.DeepEqual(got.Reasons, wantReasons) {
+		t.Fatalf("Reasons = %v, want %v", got.Reasons, wantReasons)
+	}
+	if err := validateMechanicalEvaluation("row", got); err != nil {
+		t.Fatalf("result failed the package's own validation: %v", err)
+	}
+}
+
+// TestApplyEffectiveExemptionsPrincipalRelationBothOperatorsSurvive covers
+// the kernel-free half §5.3 fixes: when both relation operators remain in
+// the remainder, the rerun proves the textual contradiction again without
+// any kernel call.
+func TestApplyEffectiveExemptionsPrincipalRelationBothOperatorsSurvive(t *testing.T) {
+	profile := mustDecodeProfile(t, rolePolicyYAML)
+	row := evaluateOneRow(t, MechanicalInput{Claims: []contextcompile.TypedClaim{
+		typedClaim(t, "policy-a", principalClaim("c1", "release", policyartifact.OpSamePrincipal, "author", "reviewer", universalScope())),
+		typedClaim(t, "policy-b", principalClaim("c2", "release", policyartifact.OpDifferentPrincipal, "reviewer", "author", universalScope())),
+		typedClaim(t, "policy-c", principalClaim("c3", "release", policyartifact.OpSamePrincipal, "reviewer", "author", universalScope())),
+	}, Profile: profile})
+	if row.State != ProofViolatedWithWitness {
+		t.Fatalf("precondition: row.State = %q, want violated-with-witness", row.State)
+	}
+	var oneSame TypedClaimRecord
+	for _, c := range row.Claims {
+		if c.Claim.ID == "c3" {
+			oneSame = c
+		}
+	}
+	resolution := exemptionFor("ex-1", allProvenResolution(), oneSame)
+	got, err := ApplyEffectiveExemptions(row, []ExemptionResolution{resolution})
+	if err != nil {
+		t.Fatalf("ApplyEffectiveExemptions: %v", err)
+	}
+	if got.After.State != SolverUnsatisfiable {
+		t.Fatalf("After.State = %q, want unsatisfiable (same+different both survive)", got.After.State)
+	}
+	if got.State != ProofViolatedWithWitness {
+		t.Fatalf("State = %q, want unchanged violated-with-witness", got.State)
 	}
 }
