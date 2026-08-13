@@ -2,6 +2,7 @@ package policyconflict
 
 import (
 	"context"
+	"reflect"
 	"testing"
 
 	"github.com/jyang234/verdi/internal/contextcompile"
@@ -321,6 +322,27 @@ func TestSolveInterval(t *testing.T) {
 	}
 }
 
+// TestSolveIntervalUnsatWitnessesAreSortedUnique pins the wire's own
+// ordering rule (validate.go's requireSortedUniqueStrings over a solver
+// proof's witness set) for the one interval case whose numeric order
+// disagrees with its lexical order: minimum 8 with maximum 6.
+func TestSolveIntervalUnsatWitnessesAreSortedUnique(t *testing.T) {
+	s := universalScope()
+	got, err := solveInterval([]policyartifact.Claim{
+		intervalClaim("c1", "replicas", policyartifact.OpMinimum, 8, s),
+		intervalClaim("c2", "replicas", policyartifact.OpMaximum, 6, s),
+	})
+	if err != nil {
+		t.Fatalf("solveInterval: %v", err)
+	}
+	if got.State != SolverUnsatisfiable {
+		t.Fatalf("State = %q, want unsatisfiable", got.State)
+	}
+	if err := validateSolverProof("proof", got); err != nil {
+		t.Fatalf("unsatisfiable interval proof failed the package's own wire validation: %v (proof: %+v)", err, got)
+	}
+}
+
 func TestSolveIntervalMalformedBound(t *testing.T) {
 	claim := intervalClaim("c1", "replicas", policyartifact.OpMinimum, 1, universalScope())
 	claim.Bound = nil
@@ -346,6 +368,32 @@ func TestSolvePathCapability(t *testing.T) {
 	}
 	if len(got.Values) != 1 || got.Values[0] != "internal/" {
 		t.Fatalf("Values = %v, want canonical union [internal/]", got.Values)
+	}
+}
+
+// TestSolvePathCapabilityRecordsPerKindRequirements pins authority design
+// §5.4's "canonical requirement set" per capability KIND: read and write
+// requirements union within their own kind, never into one anonymous set
+// that loses which access each path value was required for.
+func TestSolvePathCapabilityRecordsPerKindRequirements(t *testing.T) {
+	s := universalScope()
+	got := solvePathCapability([]policyartifact.Claim{
+		pathClaim("c1", "workspace", policyartifact.OpPathRead, []string{"internal/"}, s),
+		pathClaim("c2", "workspace", policyartifact.OpPathWrite, []string{"cmd/"}, s),
+	})
+	if got.State != SolverSatisfiable {
+		t.Fatalf("State = %q, want satisfiable", got.State)
+	}
+	wantValues := []string{"cmd/", "internal/"}
+	if !reflect.DeepEqual(got.Values, wantValues) {
+		t.Fatalf("Values = %v, want the canonical union %v", got.Values, wantValues)
+	}
+	wantWitnesses := []string{"path-read:internal/", "path-write:cmd/"}
+	if !reflect.DeepEqual(got.Witnesses, wantWitnesses) {
+		t.Fatalf("Witnesses = %v, want per-kind canonical requirement sets %v", got.Witnesses, wantWitnesses)
+	}
+	if err := validateSolverProof("proof", got); err != nil {
+		t.Fatalf("path-capability proof failed the package's own wire validation: %v", err)
 	}
 }
 
@@ -453,6 +501,89 @@ escalation_thresholds: []
 			t.Fatalf("State = %q, want unproven", got.State)
 		}
 	})
+}
+
+// experimentalPolicyYAML is rolePolicyYAML's identical role/distinctness
+// content under the experimental class: the kernel forces the effective
+// posture to advisory and returns a violated experimental-authority-
+// forbidden finding for the authoritative request this package makes.
+const experimentalPolicyYAML = `schema: verdi.governance-profile/v1
+id: team-default
+class: experimental
+applicable_transitions: [release]
+identity_trust_sources:
+  - { id: github, kind: forge }
+role_mappings:
+  - role: author
+    trust_source: github
+    subjects: ["user-a"]
+  - role: reviewer
+    trust_source: github
+    subjects: ["user-b", "user-c"]
+ownership_sources: []
+signature_requirements: []
+required_approvers: []
+distinctness_rules:
+  - transitions: [release]
+    left_role: author
+    right_role: reviewer
+    relation: different-principal
+evidence_source_restrictions: []
+escalation_thresholds: []
+`
+
+// TestSolvePrincipalRelationExperimentalProfileIsNeverProven pins authority
+// design §5.3's literal kernel mapping: "violated and unproven kernel
+// results remain violated-with-witness or unproven respectively". Two
+// distinct authenticated actors satisfy the distinctness rule itself, but
+// the kernel decision as a whole is violated (an experimental profile can
+// never produce an authoritative authorization), so the relation is NOT
+// proven.
+func TestSolvePrincipalRelationExperimentalProfileIsNeverProven(t *testing.T) {
+	profile := mustDecodeProfile(t, experimentalPolicyYAML)
+	actors := []governanceprincipal.PrincipalResolution{
+		authenticatedActor(t, profile, "user-a"),
+		authenticatedActor(t, profile, "user-b"),
+	}
+	claims := []policyartifact.Claim{principalClaim("c1", "release", policyartifact.OpDifferentPrincipal, "author", "reviewer", universalScope())}
+
+	got, err := solvePrincipalRelation("release", "author", "reviewer", claims, profile, actors)
+	if err != nil {
+		t.Fatalf("solvePrincipalRelation: %v", err)
+	}
+	if got.State != SolverUnsatisfiable {
+		t.Fatalf("State = %q, want unsatisfiable: the kernel decision is violated-with-witness, never a proof (proof: %+v)", got.State, got)
+	}
+	if !stringsContain(got.Witnesses, governanceprincipal.ReasonExperimentalAuthorityForbidden) {
+		t.Fatalf("Witnesses = %v, want the kernel's own violated finding code carried as a witness", got.Witnesses)
+	}
+	if err := validateSolverProof("proof", got); err != nil {
+		t.Fatalf("proof failed the package's own wire validation: %v", err)
+	}
+}
+
+func TestEvaluateMechanicalPrincipalRelationExperimentalRowViolated(t *testing.T) {
+	profile := mustDecodeProfile(t, experimentalPolicyYAML)
+	actors := []governanceprincipal.PrincipalResolution{
+		authenticatedActor(t, profile, "user-a"),
+		authenticatedActor(t, profile, "user-b"),
+	}
+	claims := []contextcompile.TypedClaim{
+		typedClaim(t, "policy-a", principalClaim("c1", "release", policyartifact.OpDifferentPrincipal, "author", "reviewer", universalScope())),
+	}
+	rows, err := EvaluateMechanical(context.Background(), MechanicalInput{Claims: claims, Profile: profile, Actors: actors})
+	if err != nil {
+		t.Fatalf("EvaluateMechanical: %v", err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("rows = %+v, want exactly one", rows)
+	}
+	if rows[0].State != ProofViolatedWithWitness {
+		t.Fatalf("State = %q, want violated-with-witness (kernel result is violated)", rows[0].State)
+	}
+	if err := validateMechanicalEvaluation("row", rows[0]); err != nil {
+		t.Fatalf("row failed validation: %v", err)
+	}
 }
 
 func TestSolvePrincipalRelationNoMatchingDistinctnessRuleUnproven(t *testing.T) {
@@ -621,21 +752,91 @@ func TestEvaluateMechanicalDisjointScopedPairNoConflictRow(t *testing.T) {
 	if err != nil {
 		t.Fatalf("EvaluateMechanical: %v", err)
 	}
-	// Neither step proves an overlap witness (each singleton exact-scope
-	// subgroup is trivially satisfiable alone, and the one differently-
-	// scoped pair is proven-disjoint), so the fallback higher-order row
-	// carries the whole group as unproven.
+	// Steps 1-2 produce no overlap witness at all: each singleton exact-
+	// scope subgroup is trivially satisfiable and the one differently-scoped
+	// pair is PROVEN disjoint. Authority design §5: "Proven-disjoint
+	// witnesses do not conflict" — no co-applicable subset can exist, so
+	// nothing remains for the higher-order case and the row is proven with
+	// scope-disjoint.
+	if len(rows) != 1 {
+		t.Fatalf("rows = %+v, want exactly one row", rows)
+	}
+	if rows[0].State != ProofProven {
+		t.Fatalf("State = %q, want proven (proven-disjoint witnesses do not conflict)", rows[0].State)
+	}
+	if len(rows[0].Reasons) != 1 || rows[0].Reasons[0] != ReasonScopeDisjoint {
+		t.Fatalf("Reasons = %v, want [scope-disjoint]", rows[0].Reasons)
+	}
+	if len(rows[0].Claims) != 2 {
+		t.Fatalf("row Claims = %+v, want the complete group", rows[0].Claims)
+	}
+	if err := validateMechanicalEvaluation("row", rows[0]); err != nil {
+		t.Fatalf("row failed validation: %v", err)
+	}
+}
+
+// TestEvaluateMechanicalPairwiseOverlappingTripleStaysUnproven is the
+// counterweight to the disjoint case above: three claims whose scopes
+// overlap PAIRWISE in every pair, each pair mechanically satisfiable, but
+// whose three-way conjunction is unsatisfiable. Steps 1-2 therefore produce
+// no witness at all, and the complete group's N-way scope intersection is
+// empty — yet a co-applicable unsatisfiable subset cannot be ruled out from
+// pairwise-disjointness evidence, because there is none. This must stay the
+// blocked-unproven higher-order residual and must never become a
+// scope-disjoint pass.
+func TestEvaluateMechanicalPairwiseOverlappingTripleStaysUnproven(t *testing.T) {
+	twoPhases := func(a, b string) policyartifact.Scope {
+		return policyartifact.Scope{Phases: []string{a, b}, Environments: []string{}, Paths: []string{}, Refs: []string{}}
+	}
+	claims := []contextcompile.TypedClaim{
+		typedClaim(t, "policy-a", discreteClaim("c1", "level", policyartifact.OpAllowedValues, []string{"gold", "silver"}, twoPhases("build", "design"))),
+		typedClaim(t, "policy-b", discreteClaim("c2", "level", policyartifact.OpAllowedValues, []string{"bronze", "silver"}, twoPhases("build", "review"))),
+		typedClaim(t, "policy-c", discreteClaim("c3", "level", policyartifact.OpAllowedValues, []string{"bronze", "gold"}, twoPhases("design", "review"))),
+	}
+	rows, err := EvaluateMechanical(context.Background(), MechanicalInput{Claims: claims})
+	if err != nil {
+		t.Fatalf("EvaluateMechanical: %v", err)
+	}
 	if len(rows) != 1 {
 		t.Fatalf("rows = %+v, want exactly one fallback row", rows)
 	}
 	if rows[0].State != ProofUnproven {
-		t.Fatalf("State = %q, want unproven (disjoint witnesses do not conflict)", rows[0].State)
+		t.Fatalf("State = %q, want unproven (no pairwise disjointness evidence rules the triple out)", rows[0].State)
 	}
 	if len(rows[0].Reasons) != 1 || rows[0].Reasons[0] != ReasonHigherOrderScopeUnproven {
 		t.Fatalf("Reasons = %v, want [higher-order-scope-unproven]", rows[0].Reasons)
 	}
-	if len(rows[0].Claims) != 2 {
+	if len(rows[0].Claims) != 3 {
 		t.Fatalf("fallback row Claims = %+v, want the complete group", rows[0].Claims)
+	}
+}
+
+// TestEvaluateMechanicalIdenticalClaimsFromTwoPoliciesCollapse pins the
+// frozen wire's row-claim identity rule (validate.go's
+// requireSortedUnique over ClaimDigest): a claim two policies declare
+// byte-identically has ONE row identity, so the row carries one record for
+// it, deterministically attributed.
+func TestEvaluateMechanicalIdenticalClaimsFromTwoPoliciesCollapse(t *testing.T) {
+	shared := discreteClaim("shared-claim", "level", policyartifact.OpAllowedValues, []string{"gold"}, universalScope())
+	claims := []contextcompile.TypedClaim{
+		typedClaim(t, "policy-b", shared),
+		typedClaim(t, "policy-a", shared),
+	}
+	rows, err := EvaluateMechanical(context.Background(), MechanicalInput{Claims: claims})
+	if err != nil {
+		t.Fatalf("EvaluateMechanical: %v", err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("rows = %+v, want exactly one", rows)
+	}
+	if err := validateMechanicalEvaluation("row", rows[0]); err != nil {
+		t.Fatalf("row failed the package's own wire validation: %v", err)
+	}
+	if len(rows[0].Claims) != 1 {
+		t.Fatalf("Claims = %+v, want one record for the single shared claim identity", rows[0].Claims)
+	}
+	if rows[0].Claims[0].PolicyID != "policy-a" {
+		t.Fatalf("Claims[0].PolicyID = %q, want the deterministic lowest contributing policy id", rows[0].Claims[0].PolicyID)
 	}
 }
 
@@ -695,6 +896,29 @@ func TestEvaluateMechanicalIntervalConflict(t *testing.T) {
 	}
 }
 
+// TestEvaluateMechanicalIntervalConflictRowValidates covers the interval
+// witness pair whose lexical order disagrees with its numeric order
+// (minimum 8, maximum 6): the emitted row must satisfy the frozen wire.
+func TestEvaluateMechanicalIntervalConflictRowValidates(t *testing.T) {
+	claims := []contextcompile.TypedClaim{
+		typedClaim(t, "policy-a", intervalClaim("c1", "replicas", policyartifact.OpMinimum, 8, universalScope())),
+		typedClaim(t, "policy-b", intervalClaim("c2", "replicas", policyartifact.OpMaximum, 6, universalScope())),
+	}
+	rows, err := EvaluateMechanical(context.Background(), MechanicalInput{Claims: claims})
+	if err != nil {
+		t.Fatalf("EvaluateMechanical: %v", err)
+	}
+	if len(rows) != 1 || rows[0].State != ProofViolatedWithWitness {
+		t.Fatalf("rows = %+v, want one violated row", rows)
+	}
+	if err := validateMechanicalEvaluation("row", rows[0]); err != nil {
+		t.Fatalf("row failed the package's own wire validation: %v", err)
+	}
+	if len(rows[0].Reasons) != 1 || rows[0].Reasons[0] != ReasonMechanicalConflict {
+		t.Fatalf("Reasons = %v, want [mechanical-conflict]", rows[0].Reasons)
+	}
+}
+
 func TestEvaluateMechanicalPathCapabilityNeverConflicts(t *testing.T) {
 	claims := []contextcompile.TypedClaim{
 		typedClaim(t, "policy-a", pathClaim("c1", "workspace", policyartifact.OpPathRead, []string{"internal/"}, universalScope())),
@@ -742,6 +966,76 @@ func TestEvaluateMechanicalPrincipalRelationUnprovenRow(t *testing.T) {
 	if len(rows[0].Reasons) != 1 || rows[0].Reasons[0] != ReasonPrincipalRelationUnproven {
 		t.Fatalf("Reasons = %v, want [principal-relation-unproven]", rows[0].Reasons)
 	}
+}
+
+// TestEvaluateMechanicalPrincipalRelationReasonsAreDomainDerived pins
+// ledger SI-103's "one stable consumer label per outcome" across the
+// identity domain's two distinct violated outcomes: the kernel-derived
+// relation violation carries principal-relation-violated, while the
+// kernel-free same+different textual contradiction is exactly what
+// authority design §5.3 calls "a mechanical conflict".
+func TestEvaluateMechanicalPrincipalRelationReasonsAreDomainDerived(t *testing.T) {
+	t.Run("kernel-derived violation", func(t *testing.T) {
+		collapsed := mustDecodeProfile(t, `schema: verdi.governance-profile/v1
+id: team-default
+class: solo
+applicable_transitions: [release]
+identity_trust_sources:
+  - { id: github, kind: forge }
+role_mappings:
+  - role: author
+    trust_source: github
+    subjects: ["user-a"]
+  - role: reviewer
+    trust_source: github
+    subjects: ["user-a", "user-c"]
+ownership_sources: []
+signature_requirements: []
+required_approvers: []
+distinctness_rules:
+  - transitions: [release]
+    left_role: author
+    right_role: reviewer
+    relation: different-principal
+evidence_source_restrictions: []
+escalation_thresholds: []
+`)
+		actors := []governanceprincipal.PrincipalResolution{authenticatedActor(t, collapsed, "user-a")}
+		claims := []contextcompile.TypedClaim{
+			typedClaim(t, "policy-a", principalClaim("c1", "release", policyartifact.OpDifferentPrincipal, "author", "reviewer", universalScope())),
+		}
+		rows, err := EvaluateMechanical(context.Background(), MechanicalInput{Claims: claims, Profile: collapsed, Actors: actors})
+		if err != nil {
+			t.Fatalf("EvaluateMechanical: %v", err)
+		}
+		if len(rows) != 1 || rows[0].State != ProofViolatedWithWitness {
+			t.Fatalf("rows = %+v, want one violated row", rows)
+		}
+		if len(rows[0].Reasons) != 1 || rows[0].Reasons[0] != ReasonPrincipalRelationViolated {
+			t.Fatalf("Reasons = %v, want [principal-relation-violated]", rows[0].Reasons)
+		}
+		if err := validateMechanicalEvaluation("row", rows[0]); err != nil {
+			t.Fatalf("row failed validation: %v", err)
+		}
+	})
+
+	t.Run("same+different textual contradiction", func(t *testing.T) {
+		profile := mustDecodeProfile(t, rolePolicyYAML)
+		claims := []contextcompile.TypedClaim{
+			typedClaim(t, "policy-a", principalClaim("c1", "release", policyartifact.OpSamePrincipal, "author", "reviewer", universalScope())),
+			typedClaim(t, "policy-b", principalClaim("c2", "release", policyartifact.OpDifferentPrincipal, "reviewer", "author", universalScope())),
+		}
+		rows, err := EvaluateMechanical(context.Background(), MechanicalInput{Claims: claims, Profile: profile})
+		if err != nil {
+			t.Fatalf("EvaluateMechanical: %v", err)
+		}
+		if len(rows) != 1 || rows[0].State != ProofViolatedWithWitness {
+			t.Fatalf("rows = %+v, want one violated row", rows)
+		}
+		if len(rows[0].Reasons) != 1 || rows[0].Reasons[0] != ReasonMechanicalConflict {
+			t.Fatalf("Reasons = %v, want [mechanical-conflict]", rows[0].Reasons)
+		}
+	})
 }
 
 // mapRefResolver is the hermetic fake RefRelationResolver used across

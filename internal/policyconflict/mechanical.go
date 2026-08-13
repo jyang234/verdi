@@ -13,21 +13,29 @@
 // exact-scope subgroup is solved as its own N-claim conjunction; every
 // unique differently-scoped claim pair is solved once; each witness that is
 // itself unsatisfiable AND whose own scope proof (Task 5's CompareScopes/
-// IntersectScopes) proves overlap becomes its own blocked-violated row. If
-// neither step produces such a witness, the remaining higher-order case is
-// one blocked-unproven row carrying the complete group. Proven-disjoint and
-// scope-unknown witnesses never manufacture a row of their own — they are
-// exactly the evidence the higher-order fallback withholds a conclusion
-// over (never a false pass, never a false conflict).
+// IntersectScopes) proves overlap becomes its own blocked-violated row.
+// Proven-disjoint and scope-unknown witnesses never manufacture a
+// blocked-violated row of their own.
+//
+// When neither step produces an overlap witness, step 3 asks whether proven
+// disjointness alone settles the group (disjointnessSettlesGroup): when
+// every claim subset that can co-apply at all is satisfiable, §5's
+// "Proven-disjoint witnesses do not conflict" is the complete answer and
+// the group is one proven ReasonScopeDisjoint row. Otherwise — any unknown
+// scope, or a co-applicable subset left unresolved — the remaining
+// higher-order case is one blocked-unproven row carrying the complete group
+// (never a false pass, never a false conflict).
 //
 // solvePrincipalRelation additionally has ONE domain-direct outcome no other
 // solver produces: SolverUnproven, emitted immediately (bypassing the scope
 // witness procedure entirely — no amount of scope refinement can manufacture
 // kernel evidence that was never supplied) whenever the profile carries no
 // matching governanceprincipal.DistinctnessRule for the claim's exact
-// (transition, canonical role pair, relation), or whenever the kernel itself
-// returns an unfilled-role finding. This mirrors ReasonPrincipalRelationUnproven
-// in the closed reason vocabulary.
+// (transition, canonical role pair, relation), or whenever the kernel's own
+// authorization decision is unproven. A kernel decision that is violated
+// for ANY reason is likewise never a proof (§5.3). This mirrors
+// ReasonPrincipalRelationUnproven and ReasonPrincipalRelationViolated in
+// the closed reason vocabulary.
 package policyconflict
 
 import (
@@ -90,6 +98,16 @@ type mechanicalGroupKey struct {
 
 // id is the group's deterministic, content-derived string identity: the
 // prefix every row this group emits shares.
+//
+// The concatenation is collision-free by the operand grammar this package
+// already enforces at entry, not by luck: EvaluateMechanical runs
+// Claim.Validate on every claim, which requires family, subject, and
+// identity role values to be kebab-case
+// (policyartifact's `^[a-z0-9]+(?:-[a-z0-9]+)*$`), so none of them can
+// contain ":", "+", "#", or ",". A row suffix (#complete, #scope:<digest>,
+// #pair:<digest>,<digest>) starts at the one "#" the whole ID can contain,
+// and claim/scope digests are sha256:<64 lowercase hex> with no "," in
+// them, so every ID parses back to exactly one group and suffix.
 func (k mechanicalGroupKey) id() string {
 	if k.family == policyartifact.FamilyIdentity {
 		return fmt.Sprintf("%s:%s:%s+%s", k.family, k.subject, k.roleA, k.roleB)
@@ -285,7 +303,7 @@ func deriveWitnessRows(ctx context.Context, gk mechanicalGroupKey, members []con
 			continue
 		}
 		id := gk.id() + "#scope:" + d
-		violated = append(violated, buildRow(id, gk, subMembers, subScope, domain, subBefore, ProofViolatedWithWitness, []ReasonCode{ReasonMechanicalConflict}))
+		violated = append(violated, buildRow(id, gk, subMembers, subScope, domain, subBefore, ProofViolatedWithWitness, []ReasonCode{unsatReasonFor(domain, claimsOf(subMembers))}))
 	}
 
 	// Step 2: every unique differently-scoped claim pair, solved once.
@@ -310,7 +328,7 @@ func deriveWitnessRows(ctx context.Context, gk mechanicalGroupKey, members []con
 				continue
 			}
 			id := gk.id() + "#pair:" + members[i].ClaimDigest + "," + members[j].ClaimDigest
-			violated = append(violated, buildRow(id, gk, pairMembers, pairScope, domain, pairBefore, ProofViolatedWithWitness, []ReasonCode{ReasonMechanicalConflict}))
+			violated = append(violated, buildRow(id, gk, pairMembers, pairScope, domain, pairBefore, ProofViolatedWithWitness, []ReasonCode{unsatReasonFor(domain, claimsOf(pairMembers))}))
 		}
 	}
 
@@ -319,23 +337,138 @@ func deriveWitnessRows(ctx context.Context, gk mechanicalGroupKey, members []con
 		return violated, nil
 	}
 
-	// Step 3: neither step proved an overlap witness — the remaining
-	// higher-order case is one blocked-unproven row carrying the complete
-	// group (never a proven-disjoint or scope-unknown result upgraded into
-	// a conflict, and never silently dropped either).
+	// Step 3: neither step proved an overlap witness. Two cases remain, and
+	// they are not the same result (never a proven-disjoint or scope-unknown
+	// witness upgraded into a conflict, and never silently dropped either).
 	scope, err := scopeProofFor(ctx, members, refs)
 	if err != nil {
 		return nil, err
 	}
+	settled, err := disjointnessSettlesGroup(ctx, members, domain, gk, profile, actors, refs)
+	if err != nil {
+		return nil, err
+	}
+	if settled && scope.State == ScopeDisjoint {
+		// Authority design §5: "Proven-disjoint witnesses do not conflict."
+		// Nothing REMAINS for the higher-order case here, so this is a
+		// proven row, not a withheld conclusion.
+		return []MechanicalEvaluation{buildRow(gk.id()+"#complete", gk, members, scope, domain, before, ProofProven, []ReasonCode{ReasonScopeDisjoint})}, nil
+	}
+	// The genuine residual: some co-applicable subset could still be
+	// unsatisfiable (or its scope is unknown), so one blocked-unproven row
+	// carries the complete claim witness.
 	return []MechanicalEvaluation{buildRow(gk.id()+"#complete", gk, members, scope, domain, before, ProofUnproven, []ReasonCode{ReasonHigherOrderScopeUnproven})}, nil
 }
 
-func buildRow(id string, gk mechanicalGroupKey, members []contextcompile.TypedClaim, scope ScopeProof, domain string, proof SolverProof, state ProofState, reasons []ReasonCode) MechanicalEvaluation {
-	records := make([]TypedClaimRecord, len(members))
-	for i, m := range members {
-		records[i] = TypedClaimRecord{PolicyID: m.PolicyID, PolicyDigest: m.PolicyDigest, ClaimDigest: m.ClaimDigest, Claim: m.Claim}
+// disjointnessSettlesGroup reports whether proven scope disjointness alone
+// settles an unsatisfiable group that steps 1-2 produced no overlap witness
+// for — i.e. whether NO co-applicable claim subset can be unsatisfiable.
+//
+// Why exhaustive PAIR disjointness covers N>=3 co-application. A subset of
+// claims can be co-applicable only if its N-way scope intersection is
+// nonempty (§4.4's product rule), and an N-way intersection is contained in
+// every one of its member pairs' intersections. So one proven-disjoint pair
+// inside a subset empties every higher-order intersection that contains
+// both members: a co-applicable subset can never straddle a proven-disjoint
+// pair. Build the graph whose edges are exactly the claim pairs NOT proven
+// disjoint (overlap AND unknown are both edges — unknown is never assumed
+// disjoint) and every co-applicable subset is a clique in it, hence lies
+// wholly inside one connected component. Conjunction is monotone, so if a
+// component's own complete conjunction is satisfiable, every subset of it
+// is too. When that holds for every component, no co-applicable
+// unsatisfiable subset exists at any arity and the group's unsatisfiability
+// is entirely an artifact of combining claims that never co-apply.
+//
+// The converse is deliberately weak: one unsatisfiable component (or one
+// unknown-scope edge holding claims together) leaves the group unproven
+// rather than violated, because steps 1-2 already failed to exhibit the
+// proven-overlap witness §5 requires for blocked-violated.
+func disjointnessSettlesGroup(ctx context.Context, members []contextcompile.TypedClaim, domain string, gk mechanicalGroupKey, profile governanceprincipal.Profile, actors []governanceprincipal.PrincipalResolution, refs RefRelationResolver) (bool, error) {
+	n := len(members)
+	parent := make([]int, n)
+	for i := range parent {
+		parent[i] = i
 	}
-	sort.Slice(records, func(i, j int) bool { return records[i].ClaimDigest < records[j].ClaimDigest })
+	find := func(i int) int {
+		for parent[i] != i {
+			parent[i] = parent[parent[i]]
+			i = parent[i]
+		}
+		return i
+	}
+
+	for i := 0; i < n; i++ {
+		for j := i + 1; j < n; j++ {
+			pairScope, err := scopeProofFor(ctx, []contextcompile.TypedClaim{members[i], members[j]}, refs)
+			if err != nil {
+				return false, err
+			}
+			if pairScope.State == ScopeDisjoint {
+				continue
+			}
+			ri, rj := find(i), find(j)
+			if ri != rj {
+				parent[ri] = rj
+			}
+		}
+	}
+
+	componentOrder := make([]int, 0, n)
+	components := make(map[int][]contextcompile.TypedClaim, n)
+	for i := 0; i < n; i++ {
+		root := find(i)
+		if _, ok := components[root]; !ok {
+			componentOrder = append(componentOrder, root)
+		}
+		components[root] = append(components[root], members[i])
+	}
+	if len(componentOrder) < 2 {
+		// One component means no proven-disjoint pair separated anything:
+		// the group's own unsatisfiability stands unexplained by scope.
+		return false, nil
+	}
+	for _, root := range componentOrder {
+		proof, err := solveGroup(domain, gk, claimsOf(components[root]), profile, actors)
+		if err != nil {
+			return false, err
+		}
+		if proof.State != SolverSatisfiable {
+			return false, nil
+		}
+	}
+	return true, nil
+}
+
+// unsatReasonFor names an unsatisfiable witness row's outcome from the
+// domain that proved it (ledger SI-103: one stable consumer label per
+// outcome). The identity domain has two distinct unsatisfiable outcomes:
+// requiring both relations for one transition and role pair is what
+// authority design §5.3 itself calls "a mechanical conflict" — a textual
+// contradiction proved without the kernel — while a single required
+// relation is unsatisfiable only because the KERNEL returned a violated
+// authorization, which is principal-relation-violated. Every other domain
+// has exactly one unsatisfiable outcome.
+func unsatReasonFor(domain string, claims []policyartifact.Claim) ReasonCode {
+	if domain != domainPrincipalRelation {
+		return ReasonMechanicalConflict
+	}
+	hasSame, hasDiff := false, false
+	for _, c := range claims {
+		switch c.Operator {
+		case policyartifact.OpSamePrincipal:
+			hasSame = true
+		case policyartifact.OpDifferentPrincipal:
+			hasDiff = true
+		}
+	}
+	if hasSame && hasDiff {
+		return ReasonMechanicalConflict
+	}
+	return ReasonPrincipalRelationViolated
+}
+
+func buildRow(id string, gk mechanicalGroupKey, members []contextcompile.TypedClaim, scope ScopeProof, domain string, proof SolverProof, state ProofState, reasons []ReasonCode) MechanicalEvaluation {
+	records := collapseClaimRecords(members)
 
 	sortedReasons := append([]ReasonCode(nil), reasons...)
 	sort.Slice(sortedReasons, func(i, j int) bool { return sortedReasons[i] < sortedReasons[j] })
@@ -353,6 +486,42 @@ func buildRow(id string, gk mechanicalGroupKey, members []contextcompile.TypedCl
 		State:      state,
 		Reasons:    sortedReasons,
 	}
+}
+
+// collapseClaimRecords turns members into the row's sorted claim records
+// under the frozen wire's OWN row-claim identity rule: validate.go keys a
+// row's claims on the claim digest alone (requireSortedUnique over
+// TypedClaimRecord.ClaimDigest), so one claim digest is exactly one row
+// identity. Two policies that declare a byte-identical claim therefore
+// contribute one identity — and one solver constraint, which a conjunction
+// of identical claims already is — recorded once, attributed to the lowest
+// (policy id, policy digest) so the row is deterministic. Emitting one
+// record per contributing policy instead would make every such row fail the
+// wire's duplicate-identity check outright.
+//
+// Consequence, disclosed rather than hidden: TypedClaimRecord carries
+// exactly one policy identity, so the report cannot show that a second
+// policy declared the same claim. Which policies an exemption must be
+// authorized against for such a shared claim is therefore not decidable
+// from this row; it belongs to the exemption's own match/authorization
+// derivation (Task 8), which evaluates against the complete typed-claim set
+// where both policy identities are still present. Recorded for the
+// invention ledger as a wire tension, not resolved silently here.
+func collapseClaimRecords(members []contextcompile.TypedClaim) []TypedClaimRecord {
+	byDigest := make(map[string]TypedClaimRecord, len(members))
+	for _, m := range members {
+		rec := TypedClaimRecord{PolicyID: m.PolicyID, PolicyDigest: m.PolicyDigest, ClaimDigest: m.ClaimDigest, Claim: m.Claim}
+		prev, ok := byDigest[m.ClaimDigest]
+		if !ok || rec.PolicyID < prev.PolicyID || (rec.PolicyID == prev.PolicyID && rec.PolicyDigest < prev.PolicyDigest) {
+			byDigest[m.ClaimDigest] = rec
+		}
+	}
+	records := make([]TypedClaimRecord, 0, len(byDigest))
+	for _, rec := range byDigest {
+		records = append(records, rec)
+	}
+	sort.Slice(records, func(i, j int) bool { return records[i].ClaimDigest < records[j].ClaimDigest })
+	return records
 }
 
 // --- solveDiscrete (authority design §5.1) ----------------------------------
@@ -492,7 +661,15 @@ func solveInterval(claims []policyartifact.Claim) (SolverProof, error) {
 	proof := SolverProof{State: SolverSatisfiable, Domain: domainIntegerInterval, Values: []string{}, Required: []string{}, Forbidden: []string{}, Minimum: effMin, Maximum: effMax, Witnesses: []string{}}
 	if effMin != nil && effMax != nil && *effMin > *effMax {
 		proof.State = SolverUnsatisfiable
-		proof.Witnesses = []string{strconv.Itoa(*effMin), strconv.Itoa(*effMax)}
+		// The exact incompatible bound pair is the witness. Its NUMERIC
+		// order (minimum then maximum) is not its lexical order — minimum 8
+		// with maximum 6 renders as "8" then "6" — and the wire's own
+		// canonical-lexical-order rule (validate.go's
+		// requireSortedUniqueStrings over a solver proof's witness set)
+		// governs every recorded set, so the pair is emitted sorted-unique.
+		// The bounds themselves stay individually addressable and unordered
+		// in the already-typed Minimum/Maximum fields.
+		proof.Witnesses = sortedUniqueCopy([]string{strconv.Itoa(*effMin), strconv.Itoa(*effMax)})
 	}
 	return proof, nil
 }
@@ -500,18 +677,31 @@ func solveInterval(claims []policyartifact.Claim) (SolverProof, error) {
 // --- solvePathCapability (authority design §5.4) ----------------------------
 
 // solvePathCapability proves the path-capability domain's complete
-// conjunction. Same-kind requirements union; read and write coexist, so
-// this domain never manufactures a conflict (DC-5: a missing execution
-// grant is an unmet requirement, not a conflict this solver reports).
+// conjunction. Authority design §5.4 unions SAME-KIND requirements ("Same-
+// kind path requirements union") and lets read and write coexist, so this
+// domain never manufactures a conflict (DC-5: a missing execution grant is
+// an unmet requirement, not a conflict this solver reports).
+//
+// Values records the group's whole canonical requirement set. Because the
+// two kinds union independently, the per-kind canonical sets are recorded
+// too: each witness is its own operator-qualified path
+// ("path-read:internal/"), so which access a value was required for
+// survives the union instead of collapsing into one anonymous set. Both
+// recorded sets stay inside the frozen SolverProof's existing fields.
 func solvePathCapability(claims []policyartifact.Claim) SolverProof {
 	values := map[string]bool{}
+	perKind := map[string]bool{}
 	for _, c := range claims {
 		for _, v := range c.Values {
 			values[v] = true
+			perKind[string(c.Operator)+":"+v] = true
 		}
 	}
-	canon := sortedKeysOf(values)
-	return SolverProof{State: SolverSatisfiable, Domain: domainPathCapability, Values: canon, Required: []string{}, Forbidden: []string{}, Witnesses: canon}
+	return SolverProof{
+		State: SolverSatisfiable, Domain: domainPathCapability,
+		Values: sortedKeysOf(values), Required: []string{}, Forbidden: []string{},
+		Witnesses: sortedKeysOf(perKind),
+	}
 }
 
 // --- solvePrincipalRelation (authority design §5.3) -------------------------
@@ -544,10 +734,11 @@ func solvePrincipalRelation(transition, roleA, roleB string, claims []policyarti
 		return SolverProof{State: SolverSatisfiable, Domain: domainPrincipalRelation, Values: []string{}, Required: []string{}, Forbidden: []string{}, Witnesses: []string{}}, nil
 	}
 	if hasSame && hasDiff {
+		roles := sortedUniqueCopy([]string{roleA, roleB})
 		return SolverProof{
 			State: SolverUnsatisfiable, Domain: domainPrincipalRelation,
-			Values: []string{roleA, roleB}, Required: []string{}, Forbidden: []string{},
-			Witnesses: []string{roleA, roleB},
+			Values: roles, Required: []string{}, Forbidden: []string{},
+			Witnesses: roles,
 		}, nil
 	}
 
@@ -581,9 +772,14 @@ func solvePrincipalRelation(transition, roleA, roleB string, claims []policyarti
 		}
 	}
 	if !matched {
-		return SolverProof{State: SolverUnproven, Domain: domainPrincipalRelation, Values: []string{roleA, roleB}, Required: []string{}, Forbidden: []string{}, Witnesses: []string{}}, nil
+		return SolverProof{State: SolverUnproven, Domain: domainPrincipalRelation, Values: sortedUniqueCopy([]string{roleA, roleB}), Required: []string{}, Forbidden: []string{}, Witnesses: []string{}}, nil
 	}
 
+	// DEFERRED (owner-gated, frozen Task 3 wire): the kernel decision's
+	// Disclosures — notably a solo profile's proven author/approver
+	// collapse — have no carrier on a MechanicalEvaluation, whose only
+	// disclosure channel is the report's top-level list this function
+	// cannot reach. They are deliberately not consumed here.
 	approvals := buildRoleApprovals(profile, actors, roleA, roleB)
 	decision, err := governanceprincipal.Authorize(profile, governanceprincipal.AuthorizationRequest{
 		Transition:  transition,
@@ -595,30 +791,58 @@ func solvePrincipalRelation(transition, roleA, roleB string, claims []policyarti
 		return SolverProof{}, fmt.Errorf("policyconflict: principal-relation solver: kernel authorization: %w", err)
 	}
 
-	violated := false
-	unproven := false
+	// Authority design §5.3 is literal about the whole decision, not about
+	// one finding code: "Requiring one relation is proven only when the
+	// kernel returns that conclusion; violated and unproven kernel results
+	// remain violated-with-witness or unproven respectively." The kernel's
+	// three-valued State is therefore mapped faithfully — a decision
+	// violated for ANY reason (an experimental profile's forbidden
+	// authoritative authorization, an unauthorized role, a violated
+	// principal resolution) is never a mechanical proof, and a decision
+	// carrying only unproven findings is never upgraded either. Reading a
+	// distinctness finding code alone would have discarded exactly those
+	// results and manufactured a proven row from a violated kernel answer.
+	distinctnessShortfall := false
 	witnessSet := map[string]bool{}
 	for _, f := range decision.Findings {
-		switch {
-		case f.Code == governanceprincipal.ReasonDistinctnessViolated:
-			violated = true
-			if f.PrincipalID != "" {
-				witnessSet[string(f.PrincipalID)] = true
-			}
-		case f.Code == governanceprincipal.ReasonDistinctnessUnproven && (f.Role == roleA || f.Role == roleB):
-			unproven = true
-			witnessSet[f.Role] = true
+		if f.Code == governanceprincipal.ReasonDistinctnessViolated || f.Code == governanceprincipal.ReasonDistinctnessUnproven {
+			distinctnessShortfall = true
+		}
+		// Every finding the kernel returns is part of this relation's
+		// evidence; its stable code plus whichever role/principal it names
+		// is the witness the report carries. (Findings' own three-valued
+		// contribution stays typed inside the kernel decision — the row's
+		// closed reason vocabulary names the outcome, not each finding.)
+		witnessSet[f.Code] = true
+		if f.Role != "" {
+			witnessSet["role:"+f.Role] = true
+		}
+		if f.PrincipalID != "" {
+			witnessSet["principal:"+string(f.PrincipalID)] = true
 		}
 	}
 	witnesses := sortedKeysOf(witnessSet)
+	values := sortedUniqueCopy([]string{roleA, roleB})
 
-	switch {
-	case violated:
-		return SolverProof{State: SolverUnsatisfiable, Domain: domainPrincipalRelation, Values: []string{roleA, roleB}, Required: []string{}, Forbidden: []string{}, Witnesses: witnesses}, nil
-	case unproven:
-		return SolverProof{State: SolverUnproven, Domain: domainPrincipalRelation, Values: []string{roleA, roleB}, Required: []string{}, Forbidden: []string{}, Witnesses: witnesses}, nil
+	switch decision.State {
+	case governanceprincipal.AuthorizationViolated:
+		return SolverProof{State: SolverUnsatisfiable, Domain: domainPrincipalRelation, Values: values, Required: []string{}, Forbidden: []string{}, Witnesses: witnesses}, nil
+	case governanceprincipal.AuthorizationUnproven:
+		return SolverProof{State: SolverUnproven, Domain: domainPrincipalRelation, Values: values, Required: []string{}, Forbidden: []string{}, Witnesses: witnesses}, nil
+	case governanceprincipal.AuthorizationAuthorized:
+		// An authorized decision carries no findings at all, so the
+		// distinctness conclusion this claim asked for is exactly what the
+		// kernel returned. The two guards below never fire against the
+		// landed kernel; they exist so a future kernel that authorized
+		// while still reporting a distinctness shortfall, or that answered
+		// under a downgraded (advisory) posture, would withhold the proof
+		// rather than have this package read authorization as distinctness.
+		if distinctnessShortfall || decision.Posture != governanceprincipal.PostureAuthoritative {
+			return SolverProof{State: SolverUnproven, Domain: domainPrincipalRelation, Values: values, Required: []string{}, Forbidden: []string{}, Witnesses: witnesses}, nil
+		}
+		return SolverProof{State: SolverSatisfiable, Domain: domainPrincipalRelation, Values: values, Required: []string{}, Forbidden: []string{}, Witnesses: values}, nil
 	default:
-		return SolverProof{State: SolverSatisfiable, Domain: domainPrincipalRelation, Values: []string{roleA, roleB}, Required: []string{}, Forbidden: []string{}, Witnesses: []string{roleA, roleB}}, nil
+		return SolverProof{}, fmt.Errorf("policyconflict: principal-relation solver: kernel returned unknown authorization state %q", decision.State)
 	}
 }
 
@@ -644,6 +868,10 @@ func buildRoleApprovals(profile governanceprincipal.Profile, actors []governance
 	return out
 }
 
+// holdsRoleLocal mirrors the kernel's own unexported holdsRole. DEFERRED
+// (owner-gated): the proper seam is an exported governanceprincipal method,
+// which is outside this task's write set — the duplication stays until that
+// kernel change is authorized.
 func holdsRoleLocal(profile governanceprincipal.Profile, actor governanceprincipal.PrincipalResolution, role string) bool {
 	for _, m := range profile.RoleMappings {
 		if m.Role == role && m.TrustSource == actor.Claim.TrustSource && stringsContain(m.Subjects, actor.Claim.Subject) {
