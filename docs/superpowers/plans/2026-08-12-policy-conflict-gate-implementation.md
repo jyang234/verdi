@@ -31,7 +31,7 @@ Git, and built-binary Go tests.
 - Binding authority is
   `docs/superpowers/specs/2026-08-12-policy-conflict-gate-authority-design.md`,
   Context Integrity AC-3/DC-3–DC-8/DC-15/DC-17–DC-24/CO-1–CO-6, and
-  invention-ledger SI-93–SI-108 as consolidated by the independently reviewed
+  invention-ledger SI-93–SI-109 as consolidated by the independently reviewed
   exact head carrying this plan.
 - Do not edit frozen artifacts or `docs/design/specs/`; do not add a layout
   root, UI, MCP tool, receipt, sealed-execution behavior, forge network call, or
@@ -64,7 +64,12 @@ uses claim-digest-only mechanical identity, requires a nonempty removal set on
 every exemption resolution, drops kernel disclosure/role-pair evidence, and
 classifies experimental authority as violated. The amended Task 3/6 text below
 is the target contract, not a claim that those bytes already conform. Task 6A
-is the owned reconciliation tranche and is a hard predecessor of Task 7.
+is the owned reconciliation tranche and is a hard predecessor of Task 7. Its
+independent exact-range review exposed two closure residuals: pair-row IDs
+still keyed only by claim digest after SI-105 preserved equal bytes from
+different policies, and report-wire validation stopped short of the already
+specified digest and enclosing-row membership checks. SI-109 fixes the one
+new row-identity choice; the validation correction adds no new semantics.
 
 ## File Map
 
@@ -845,6 +850,7 @@ landed Task 3/6 runtime. It must complete before Task 7 begins.
 
 **Files:**
 - Modify: `internal/policyconflict/{schema.go,schema_test.go,codec.go,validate.go,mechanical.go,mechanical_test.go,exemption.go,exemption_test.go}`
+- Modify: `internal/policyconflict/testdata/report.json`
 - Modify: `internal/governanceprincipal/{authorize.go,authorize_test.go}`
 
 **Interfaces:**
@@ -873,6 +879,12 @@ landed Task 3/6 runtime. It must complete before Task 7 begins.
 - Map advisory posture caused by an experimental profile to an unproven row
   with reason `profile-experimental`. It is not a mechanical violation and can
   never authorize an authoritative pass.
+- Derive each step-2 pair-row component from the canonical digest of its
+  composite `(policy_id, claim_id)` identity (SI-109), never from claim digest
+  alone. Report validation recomputes every carried claim digest and requires
+  every effective `removed_claims` witness to equal one exact current claim in
+  its enclosing mechanical row; decoding a self-consistent but forged report
+  fails operationally.
 
 - [ ] **Step 1: Write the reconciliation RED matrix**
 
@@ -916,6 +928,16 @@ three-valued outcomes.
 git add internal/governanceprincipal internal/policyconflict
 git commit -m "Correct mechanical evidence transport"
 ~~~
+
+- [ ] **Step 6: Close the independent-review residuals**
+
+Add RED witnesses for two policies carrying byte-identical contradictory
+claims producing distinct, stably ordered pair-row IDs; report decoding with a
+re-signed but stale carried claim digest; and a re-signed effective removal
+witness that is absent from, or digest-mismatched against, its enclosing row.
+Implement only SI-109's composite-identity row component and the existing
+wire checks above, refresh the canonical report fixture, rerun both Step 4
+commands, and obtain the same independent reviewer's single closure check.
 
 ### Task 7: Validate semantic judgments and immutable cache reuse
 
