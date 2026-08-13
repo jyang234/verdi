@@ -580,3 +580,109 @@ func TestDispositionDigest_SealedAndMutationSafe(t *testing.T) {
 		}
 	})
 }
+
+// --- exported vocabulary validation (Wave-3 policy-conflict-gate
+// authority design §6/§8; a sibling package embeds SemanticClaimWitness
+// and DispositionConclusion directly and needs to validate them without
+// duplicating this package's closed vocabularies) -------------------------
+
+func TestValidateWitnessCategory(t *testing.T) {
+	valid := []string{
+		"policy-instruction", "spec-problem", "spec-outcome",
+		"acceptance-criterion", "open-question", "constraint", "decision",
+		"adr-decision", "obligation-declaration",
+	}
+	for _, c := range valid {
+		t.Run("valid/"+c, func(t *testing.T) {
+			if err := ValidateWitnessCategory(c); err != nil {
+				t.Fatalf("ValidateWitnessCategory(%q): %v", c, err)
+			}
+		})
+	}
+
+	invalid := []string{"", "spec-instruction", "POLICY-INSTRUCTION", "policy_instruction", "unknown-category", "Constraint"}
+	for _, c := range invalid {
+		t.Run("invalid/"+c, func(t *testing.T) {
+			if err := ValidateWitnessCategory(c); err == nil {
+				t.Fatalf("ValidateWitnessCategory(%q) = nil, want error", c)
+			}
+		})
+	}
+}
+
+// validSemanticClaimWitness returns a fully valid, self-contained witness
+// for TestSemanticClaimWitnessValidate's positive and mutation cases.
+func validSemanticClaimWitness() SemanticClaimWitness {
+	return SemanticClaimWitness{
+		ID:              "ac-review-approval",
+		Digest:          hexDigest("witness-validate-claim"),
+		Category:        "acceptance-criterion",
+		AuthorityDigest: hexDigest("witness-validate-authority"),
+		Scope:           Scope{Phases: []string{"review"}, Environments: []string{}, Paths: []string{}, Refs: []string{}},
+		Values:          []string{"approved"},
+	}
+}
+
+func TestSemanticClaimWitnessValidate(t *testing.T) {
+	t.Run("valid witness", func(t *testing.T) {
+		w := validSemanticClaimWitness()
+		if err := w.Validate(); err != nil {
+			t.Fatalf("Validate: %v", err)
+		}
+	})
+	t.Run("valid witness with bound and no values", func(t *testing.T) {
+		w := validSemanticClaimWitness()
+		bound := 3
+		w.Values = []string{}
+		w.Bound = &bound
+		if err := w.Validate(); err != nil {
+			t.Fatalf("Validate: %v", err)
+		}
+	})
+
+	cases := []struct {
+		name   string
+		mutate func(*SemanticClaimWitness)
+	}{
+		{"blank id", func(w *SemanticClaimWitness) { w.ID = "" }},
+		{"whitespace-only id", func(w *SemanticClaimWitness) { w.ID = "   " }},
+		{"multiline id", func(w *SemanticClaimWitness) { w.ID = "line-one\nline-two" }},
+		{"control character in id", func(w *SemanticClaimWitness) { w.ID = "ac-review\x00approval" }},
+		{"malformed digest", func(w *SemanticClaimWitness) { w.Digest = "not-a-digest" }},
+		{"digest missing sha256 prefix", func(w *SemanticClaimWitness) { w.Digest = strings.TrimPrefix(w.Digest, "sha256:") }},
+		{"unknown category", func(w *SemanticClaimWitness) { w.Category = "bogus-category" }},
+		{"malformed authority digest", func(w *SemanticClaimWitness) { w.AuthorityDigest = "not-a-digest" }},
+		{"invalid scope (missing dimension)", func(w *SemanticClaimWitness) { w.Scope = Scope{} }},
+		{"invalid scope (unknown phase)", func(w *SemanticClaimWitness) { w.Scope.Phases = []string{"bogus-phase"} }},
+		{"empty value entry", func(w *SemanticClaimWitness) { w.Values = []string{""} }},
+	}
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			w := validSemanticClaimWitness()
+			tt.mutate(&w)
+			if err := w.Validate(); err == nil {
+				t.Fatalf("Validate() = nil, want error (%s)", tt.name)
+			}
+		})
+	}
+}
+
+func TestDispositionConclusionValidate(t *testing.T) {
+	valid := []DispositionConclusion{DispositionConflict, DispositionNoConflict}
+	for _, c := range valid {
+		t.Run("valid/"+string(c), func(t *testing.T) {
+			if err := c.Validate(); err != nil {
+				t.Fatalf("Validate(%q): %v", c, err)
+			}
+		})
+	}
+
+	invalid := []DispositionConclusion{"", "CONFLICT", "Conflict", "conflict ", "no_conflict", "bogus"}
+	for _, c := range invalid {
+		t.Run("invalid/"+string(c), func(t *testing.T) {
+			if err := c.Validate(); err == nil {
+				t.Fatalf("Validate(%q) = nil, want error", c)
+			}
+		})
+	}
+}

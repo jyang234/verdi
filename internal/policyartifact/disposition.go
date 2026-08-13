@@ -26,6 +26,19 @@ var knownDispositionConclusions = map[DispositionConclusion]bool{
 	DispositionNoConflict: true,
 }
 
+// Validate reports whether c is one of the two closed conclusion values.
+// Unknown values, including empty, fail closed. Wave-3's policy-conflict-
+// gate authority design embeds DispositionConclusion directly into its own
+// report schema (authority design §8/§10, ledger SI-93/SI-96/SI-99/SI-103);
+// this is the one exported seam that lets that sibling package validate a
+// conclusion without duplicating knownDispositionConclusions.
+func (c DispositionConclusion) Validate() error {
+	if !knownDispositionConclusions[c] {
+		return fmt.Errorf("policyartifact: unknown disposition conclusion %q (known: conflict, no-conflict)", c)
+	}
+	return nil
+}
+
 // DispositionOrigin is the closed provenance of a semantic disposition:
 // a validated judge exchange, or a human fallback recorded when no
 // current judge result exists, a well-formed result is inconclusive, or
@@ -78,6 +91,52 @@ type SemanticClaimWitness struct {
 	Scope           Scope    `json:"scope"`
 	Values          []string `json:"values"`
 	Bound           *int     `json:"bound,omitempty"`
+}
+
+// ValidateWitnessCategory reports whether category is a member of the
+// closed §6 source-category vocabulary (knownWitnessCategories). Unknown
+// values fail closed. Wave-3's policy-conflict-gate authority design
+// embeds SemanticClaimWitness directly into its own report schema
+// (authority design §6/§8, ledger SI-93/SI-96/SI-99/SI-103); this is the
+// one exported seam that lets that sibling package validate a witness's
+// category without duplicating the private vocabulary above.
+func ValidateWitnessCategory(category string) error {
+	if !knownWitnessCategories[category] {
+		return fmt.Errorf("policyartifact: unknown witness category %q", category)
+	}
+	return nil
+}
+
+// Validate checks w's complete per-claim grammar: single-line non-blank
+// id, sha256 digest, closed §6 category vocabulary (ValidateWitnessCategory),
+// sha256 authority digest, a valid scope, and non-empty values entries.
+// Bound is unconstrained. This expresses exactly the rule set
+// decodeSemanticWitness already applies to each witness claim; it is
+// exported for the same reason ValidateWitnessCategory is (see its doc
+// comment) — decodeSemanticWitness delegates to it below so the two call
+// sites cannot drift.
+func (w SemanticClaimWitness) Validate() error {
+	if err := singleLineNonBlank(w.ID); err != nil {
+		return fmt.Errorf("id: %w", err)
+	}
+	if !sha256Re.MatchString(w.Digest) {
+		return fmt.Errorf("digest %q is not sha256:<64 hex> form", w.Digest)
+	}
+	if err := ValidateWitnessCategory(w.Category); err != nil {
+		return err
+	}
+	if !sha256Re.MatchString(w.AuthorityDigest) {
+		return fmt.Errorf("authority_digest %q is not sha256:<64 hex> form", w.AuthorityDigest)
+	}
+	if err := w.Scope.Validate(); err != nil {
+		return err
+	}
+	for i, v := range w.Values {
+		if v == "" {
+			return fmt.Errorf("values[%d]: empty value", i)
+		}
+	}
+	return nil
 }
 
 // SemanticExemptionWitness names one exemption id/digest a disposition's
@@ -252,8 +311,8 @@ func DecodeDisposition(data []byte) (*Disposition, error) {
 	}
 
 	conclusion := DispositionConclusion(*doc.Conclusion)
-	if !knownDispositionConclusions[conclusion] {
-		return nil, fmt.Errorf("policyartifact: unknown disposition conclusion %q (known: conflict, no-conflict)", conclusion)
+	if err := conclusion.Validate(); err != nil {
+		return nil, err
 	}
 
 	origin := DispositionOrigin(*doc.Origin)
@@ -440,41 +499,30 @@ func decodeSemanticWitness(wd semanticWitnessDoc) (SemanticWitness, error) {
 		if cd.ID == nil || cd.Digest == nil || cd.Category == nil || cd.AuthorityDigest == nil || cd.Scope == nil || cd.Values == nil {
 			return SemanticWitness{}, fmt.Errorf("policyartifact: disposition witness claims[%d]: id, digest, category, authority_digest, scope, and values are all required (bound is optional)", i)
 		}
-		if err := singleLineNonBlank(*cd.ID); err != nil {
-			return SemanticWitness{}, fmt.Errorf("policyartifact: disposition witness claims[%d]: id: %w", i, err)
-		}
-		if !sha256Re.MatchString(*cd.Digest) {
-			return SemanticWitness{}, fmt.Errorf("policyartifact: disposition witness claims[%d]: digest %q is not sha256:<64 hex> form", i, *cd.Digest)
-		}
-		if !knownWitnessCategories[*cd.Category] {
-			return SemanticWitness{}, fmt.Errorf("policyartifact: disposition witness claims[%d]: unknown category %q", i, *cd.Category)
-		}
-		if !sha256Re.MatchString(*cd.AuthorityDigest) {
-			return SemanticWitness{}, fmt.Errorf("policyartifact: disposition witness claims[%d]: authority_digest %q is not sha256:<64 hex> form", i, *cd.AuthorityDigest)
-		}
 		cScope, err := cd.Scope.toScope(fmt.Sprintf("disposition.witness.claims[%d].scope", i))
 		if err != nil {
 			return SemanticWitness{}, err
 		}
-		if err := cScope.Validate(); err != nil {
-			return SemanticWitness{}, err
-		}
-		normalizeScope(&cScope)
-		values := emptyIfNil(*cd.Values)
-		for j, v := range values {
-			if v == "" {
-				return SemanticWitness{}, fmt.Errorf("policyartifact: disposition witness claims[%d].values[%d]: empty value", i, j)
-			}
-		}
-		claims = append(claims, SemanticClaimWitness{
+		// witness's per-claim grammar (id shape, digest forms, closed
+		// category vocabulary, scope validity, value-entry shape) is
+		// delegated to SemanticClaimWitness.Validate — the exact rule set
+		// this loop applied inline before that method was exported for
+		// internal/policyconflict's sake, so the two call sites cannot
+		// drift (see Validate's doc comment).
+		witness := SemanticClaimWitness{
 			ID:              *cd.ID,
 			Digest:          *cd.Digest,
 			Category:        *cd.Category,
 			AuthorityDigest: *cd.AuthorityDigest,
 			Scope:           cScope,
-			Values:          values,
+			Values:          emptyIfNil(*cd.Values),
 			Bound:           cd.Bound,
-		})
+		}
+		if err := witness.Validate(); err != nil {
+			return SemanticWitness{}, fmt.Errorf("policyartifact: disposition witness claims[%d]: %w", i, err)
+		}
+		normalizeScope(&witness.Scope)
+		claims = append(claims, witness)
 	}
 	for i := 1; i < len(claims); i++ {
 		if claims[i-1].ID >= claims[i].ID {
