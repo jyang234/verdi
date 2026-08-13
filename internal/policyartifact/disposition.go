@@ -101,15 +101,28 @@ type SemanticClaimWitness struct {
 // one exported seam that lets that sibling package validate a witness's
 // category without duplicating the private vocabulary above.
 func ValidateWitnessCategory(category string) error {
+	if err := validateWitnessCategory(category); err != nil {
+		return fmt.Errorf("policyartifact: %w", err)
+	}
+	return nil
+}
+
+// validateWitnessCategory is the same check without the package prefix, for
+// in-package callers whose own error already carries one (doubling it would
+// read "policyartifact: ...: policyartifact: ..."). ValidateWitnessCategory
+// adds the prefix for cross-package callers, which have none of their own.
+func validateWitnessCategory(category string) error {
 	if !knownWitnessCategories[category] {
-		return fmt.Errorf("policyartifact: unknown witness category %q", category)
+		return fmt.Errorf("unknown witness category %q", category)
 	}
 	return nil
 }
 
 // Validate checks w's complete per-claim grammar: single-line non-blank
-// id, sha256 digest, closed §6 category vocabulary (ValidateWitnessCategory),
-// sha256 authority digest, a valid scope, and non-empty values entries.
+// id, sha256 digest, closed §6 category vocabulary (the same check
+// ValidateWitnessCategory exports), sha256 authority digest, a valid scope,
+// and non-empty values entries. Its errors are unprefixed field-scoped
+// fragments; every caller supplies its own package/field label.
 // Bound is unconstrained. This expresses exactly the rule set
 // decodeSemanticWitness already applies to each witness claim; it is
 // exported for the same reason ValidateWitnessCategory is (see its doc
@@ -122,7 +135,7 @@ func (w SemanticClaimWitness) Validate() error {
 	if !sha256Re.MatchString(w.Digest) {
 		return fmt.Errorf("digest %q is not sha256:<64 hex> form", w.Digest)
 	}
-	if err := ValidateWitnessCategory(w.Category); err != nil {
+	if err := validateWitnessCategory(w.Category); err != nil {
 		return err
 	}
 	if !sha256Re.MatchString(w.AuthorityDigest) {

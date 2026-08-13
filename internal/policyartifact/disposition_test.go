@@ -686,3 +686,23 @@ func TestDispositionConclusionValidate(t *testing.T) {
 		})
 	}
 }
+
+// TestDecodeDisposition_WitnessCategoryErrorPrefixOnce proves the delegated
+// per-claim witness validation reports its package prefix exactly once. The
+// decode path already labels its own error "policyartifact: disposition
+// witness claims[i]: ..."; the delegated category check must not re-announce
+// the package inside that label.
+func TestDecodeDisposition_WitnessCategoryErrorPrefixOnce(t *testing.T) {
+	doc := strings.Replace(validJudgeResultDispositionDoc(), "category: acceptance-criterion", "category: vibe-check", 1)
+	_, err := DecodeDisposition([]byte(doc))
+	if err == nil {
+		t.Fatalf("DecodeDisposition(unknown witness category) = nil error, want failure")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "unknown witness category") {
+		t.Fatalf("error %q does not name the unknown witness category", msg)
+	}
+	if got := strings.Count(msg, "policyartifact:"); got != 1 {
+		t.Fatalf("error %q carries the %q prefix %d times, want exactly 1", msg, "policyartifact:", got)
+	}
+}
