@@ -387,6 +387,10 @@ func (c Compiler) resolveConflictCandidate(ctx context.Context, root string, req
 	case artifact.ClassStory:
 		fragments, err = ResolveFeatureFragments(ctx, c.git, c.states, root, req.Expected.Head, target)
 		if err != nil {
+			// The marker must sit on the literal's own line or exactly the
+			// line above it (scanVocabProse's lineHasMarker rule), so this
+			// classification stays one line.
+			// vocab:identity — "feature" names the fixed ResolveFeatureFragments stage and its governing-parent artifact-class identity this candidate-arm operational diagnostic reports (SI-84/SI-93)
 			return nil, fmt.Errorf("contextcompile: resolve candidate feature fragments: %w", err)
 		}
 	default:
