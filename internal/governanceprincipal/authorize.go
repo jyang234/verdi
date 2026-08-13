@@ -112,10 +112,18 @@ type AuthorizationRequest struct {
 // Finding is one applicable authorization finding: a stable reason code,
 // the finding's three-valued contribution (violated or unproven — an
 // authorized decision has no findings), and its witnesses.
+//
+// Roles is the finding's exact rule identity where a rule is defined over a
+// role PAIR: every distinctness finding carries its rule's two roles,
+// normalized lexically, and findings from every other rule family carry no
+// pair at all. A consumer scoped to one relation therefore attributes a
+// finding by structured identity instead of parsing Detail prose (GLG
+// DC-17/DC-22; ledger SI-106).
 type Finding struct {
 	Code           string             `json:"code"`
 	State          AuthorizationState `json:"state"`
 	Role           string             `json:"role,omitempty"`
+	Roles          []string           `json:"roles,omitempty"`
 	SourceID       string             `json:"source_id,omitempty"`
 	PrincipalID    PrincipalID        `json:"principal_id,omitempty"`
 	EvidenceDigest string             `json:"evidence_digest,omitempty"`
@@ -426,8 +434,34 @@ func fillRoles(profile Profile, approvals []ApprovalRecord, resolutions map[Prin
 	return fillers, findings
 }
 
+// HoldsRole reports whether profile's role mappings grant role to claim's
+// already-authenticated trust source and subject. It is the ONE exported
+// role-membership query (ledger SI-106): a consumer that must know which
+// principals are even eligible to fill a role asks the kernel instead of
+// reimplementing role-mapping semantics against Profile.RoleMappings.
+//
+// It answers a membership question only — never an authorization one. A
+// true result is not approval, not distinctness, and not a verdict; only
+// Authorize interprets those. Malformed operands (an unsealed profile, a
+// malformed claim, or a role outside the local ID grammar) are operational
+// errors, never a false answer.
+func HoldsRole(profile Profile, claim PrincipalClaim, role string) (bool, error) {
+	if err := profile.checkSeal(); err != nil {
+		return false, err
+	}
+	if err := claim.Validate(); err != nil {
+		return false, err
+	}
+	if err := ValidateID(role); err != nil {
+		return false, fmt.Errorf("governanceprincipal: role: %w", err)
+	}
+	return holdsRole(profile, claim, role), nil
+}
+
 // holdsRole reports whether a role mapping grants role to the claim's
-// trust source and subject.
+// trust source and subject. It is the single inner predicate both the
+// kernel's own rule evaluation and the exported HoldsRole query run, so
+// role-mapping semantics exist exactly once.
 func holdsRole(profile Profile, claim PrincipalClaim, role string) bool {
 	for _, m := range profile.RoleMappings {
 		if m.Role == role && m.TrustSource == claim.TrustSource && contains(m.Subjects, claim.Subject) {
@@ -506,9 +540,22 @@ func evaluateEscalation(profile Profile, transition string, metrics map[string]i
 	return findings
 }
 
+// sortedRolePair is a distinctness rule's canonical identity: the two roles
+// are a semantic set, so they normalize lexically and a reversed rule
+// spelling identifies identically. A fresh slice is returned per call, so no
+// two findings ever share backing storage.
+func sortedRolePair(a, b string) []string {
+	if a > b {
+		a, b = b, a
+	}
+	return []string{a, b}
+}
+
 // evaluateDistinctness applies same-principal and different-principal
 // rules centrally over the role fillers. An applicable rule with an
-// unfilled side is unproven, never vacuously satisfied.
+// unfilled side is unproven, never vacuously satisfied. Every finding this
+// family emits carries its rule's exact canonical role pair (SI-106), so a
+// relation-scoped consumer can tell one rule's evidence from another's.
 func evaluateDistinctness(profile Profile, transition string, fillers map[string][]PrincipalID) []Finding {
 	var findings []Finding
 	for _, rule := range profile.DistinctnessRules {
@@ -523,6 +570,7 @@ func evaluateDistinctness(profile Profile, transition string, fillers map[string
 						Code:   ReasonDistinctnessUnproven,
 						State:  AuthorizationUnproven,
 						Role:   role,
+						Roles:  sortedRolePair(rule.LeftRole, rule.RightRole),
 						Detail: fmt.Sprintf("%s rule between %q and %q: role %q has no authenticated filler", rule.Relation, rule.LeftRole, rule.RightRole, role),
 					})
 				}
@@ -536,6 +584,7 @@ func evaluateDistinctness(profile Profile, transition string, fillers map[string
 					findings = append(findings, Finding{
 						Code:        ReasonDistinctnessViolated,
 						State:       AuthorizationViolated,
+						Roles:       sortedRolePair(rule.LeftRole, rule.RightRole),
 						PrincipalID: p,
 						Detail:      fmt.Sprintf("roles %q and %q require different principals", rule.LeftRole, rule.RightRole),
 					})
@@ -553,6 +602,7 @@ func evaluateDistinctness(profile Profile, transition string, fillers map[string
 				findings = append(findings, Finding{
 					Code:   ReasonDistinctnessViolated,
 					State:  AuthorizationViolated,
+					Roles:  sortedRolePair(rule.LeftRole, rule.RightRole),
 					Detail: fmt.Sprintf("roles %q and %q require the same principal", rule.LeftRole, rule.RightRole),
 				})
 			}
@@ -768,9 +818,13 @@ func soloCollapseDisclosures(fillers map[string][]PrincipalID) []Disclosure {
 // unproven outranks authorized.
 func finishDecision(d AuthorizationDecision, findings []Finding, disclosures []Disclosure) AuthorizationDecision {
 	sort.Slice(findings, func(i, j int) bool { return findingLess(findings[i], findings[j]) })
-	deduped := findings[:0]
+	// Finding carries a role pair, so it is no longer a comparable struct:
+	// adjacent-duplicate collapse compares complete field content instead of
+	// using ==. The order above is total over that same content, so equal
+	// findings are always adjacent.
+	deduped := make([]Finding, 0, len(findings))
 	for i, f := range findings {
-		if i == 0 || f != findings[i-1] {
+		if i == 0 || !reflect.DeepEqual(f, findings[i-1]) {
 			deduped = append(deduped, f)
 		}
 	}
@@ -806,6 +860,9 @@ func findingLess(a, b Finding) bool {
 	if a.Role != b.Role {
 		return a.Role < b.Role
 	}
+	if c := compareStrings(a.Roles, b.Roles); c != 0 {
+		return c < 0
+	}
 	if a.SourceID != b.SourceID {
 		return a.SourceID < b.SourceID
 	}
@@ -816,4 +873,25 @@ func findingLess(a, b Finding) bool {
 		return a.EvidenceDigest < b.EvidenceDigest
 	}
 	return a.Detail < b.Detail
+}
+
+// compareStrings is the lexicographic order over two string sequences:
+// negative, zero, or positive as a sorts before, equal to, or after b. A
+// shorter sequence that is a prefix of a longer one sorts first.
+func compareStrings(a, b []string) int {
+	for i := 0; i < len(a) && i < len(b); i++ {
+		if a[i] != b[i] {
+			if a[i] < b[i] {
+				return -1
+			}
+			return 1
+		}
+	}
+	switch {
+	case len(a) < len(b):
+		return -1
+	case len(a) > len(b):
+		return 1
+	}
+	return 0
 }
