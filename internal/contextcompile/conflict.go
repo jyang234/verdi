@@ -160,12 +160,20 @@ type ConflictView struct {
 }
 
 // ConflictOperands is a sealed, clone-on-read projection: view is the
-// package's own private deep copy (never aliasing caller memory), seal is
-// the canonical digest minted over view plus a per-construction nonce (see
-// sealConflictOperands), and every field is unexported so only this
-// package's constructors can produce a value whose View() succeeds. The
-// zero value, a nil pointer, and any hand-built literal (even one that
-// copies an authentic view) fail closed.
+// package's own private deep copy, seal is the canonical digest minted
+// over view plus a per-construction nonce (see sealConflictOperands), and
+// every field is unexported so only this package's constructors can
+// produce a value whose View() succeeds. The zero value, a nil pointer,
+// and any hand-built literal (even one that copies an authentic view) fail
+// closed.
+//
+// The guard is two-layered, and honest about which layer covers what.
+// cloneConflictView PREVENTS mutation for everything this package can
+// deep-copy; for the one value it cannot — a pointer-implemented
+// policyartifact.Payload interface value, which stays shared across clones
+// — the seal DETECTS it, because the next View() reseals the private view
+// and refuses on any digest change. Detection, not prevention, is the
+// contract for that field.
 type ConflictOperands struct {
 	view  ConflictView
 	seal  string
@@ -482,12 +490,37 @@ type snapshotBuildInput struct {
 	selection authoritySelection
 }
 
+// validateSnapshotIdentityDigests enforces the mutually exclusive target
+// identity: an accepted-context snapshot carries a manifest digest and no
+// candidate digest, an acceptance-candidate snapshot exactly the reverse,
+// and no other target kind is assembled at all. A snapshot carrying both
+// (or neither) would let an evaluation be derived against a target its
+// operands were never resolved from, so every violation is operational.
+func validateSnapshotIdentityDigests(targetKind, manifestDigest, candidateDigest string) error {
+	switch targetKind {
+	case snapshotTargetAcceptedContext:
+		if manifestDigest == "" || candidateDigest != "" {
+			return fmt.Errorf("contextcompile: conflict snapshot: target kind %q requires exactly the manifest identity digest (manifest=%q candidate=%q)", targetKind, manifestDigest, candidateDigest)
+		}
+	case snapshotTargetAcceptanceCandidate:
+		if candidateDigest == "" || manifestDigest != "" {
+			return fmt.Errorf("contextcompile: conflict snapshot: target kind %q requires exactly the candidate identity digest (manifest=%q candidate=%q)", targetKind, manifestDigest, candidateDigest)
+		}
+	default:
+		return fmt.Errorf("contextcompile: conflict snapshot: unknown target kind %q carries no legal identity digest", targetKind)
+	}
+	return nil
+}
+
 func buildSnapshotIdentity(in snapshotBuildInput) (SnapshotIdentity, error) {
 	if err := in.repository.Validate(); err != nil {
 		return SnapshotIdentity{}, fmt.Errorf("contextcompile: conflict snapshot: repository facts: %w", err)
 	}
 	if in.authority.Effective == nil {
 		return SnapshotIdentity{}, fmt.Errorf("contextcompile: conflict snapshot: policy authority is not resolved")
+	}
+	if err := validateSnapshotIdentityDigests(in.targetKind, in.manifestDigest, in.candidateDigest); err != nil {
+		return SnapshotIdentity{}, err
 	}
 	grantBytes, err := execworkspace.EncodeGrantSet(in.grants)
 	if err != nil {
@@ -943,14 +976,25 @@ func cloneIntPtr(p *int) *int {
 	return &v
 }
 
-// cloneConflictView returns a complete deep copy of in: every nested
-// slice, map, and pointer field is freshly allocated so neither the
-// caller's original value nor the value cloneConflictView returns can
-// observe or cause a mutation through the other. Unexported seal fields
-// nested inside EffectivePolicy/Profile/PrincipalResolution survive: a
-// plain top-level struct assignment (`out := in`) copies every field,
-// exported or not, before this function replaces only the mutable
+// cloneConflictView returns a deep copy of in: every nested slice, map,
+// and typed pointer field this package can allocate is freshly allocated,
+// so neither the caller's original value nor the value cloneConflictView
+// returns can observe or cause a mutation through the other. Unexported
+// seal fields nested inside EffectivePolicy/Profile/PrincipalResolution
+// survive: a plain top-level struct assignment (`out := in`) copies every
+// field, exported or not, before this function replaces only the mutable
 // exported slice/map fields with fresh copies.
+//
+// ONE deliberate exception, with its own guard: the interface values in
+// EffectivePolicyEntry.Payloads (policyartifact.Payload) are copied as
+// interface values, so a payload implemented by a pointer type stays
+// SHARED between every clone — this package cannot deep-copy an open
+// interface without owning its implementations, and adding a Clone method
+// to policyartifact is outside this seam. Mutation through a returned view
+// is therefore DETECTED rather than prevented: the shared payload is
+// inside the sealed canonical digest, so the next View() reseals, sees a
+// different digest, and fails integrity verification. No caller ever reads
+// a silently mutated payload; a mutating caller loses the operands.
 func cloneConflictView(in ConflictView) ConflictView {
 	return ConflictView{
 		Snapshot:        cloneSnapshotIdentity(in.Snapshot),
@@ -1047,6 +1091,12 @@ func cloneEffectivePolicyEntry(in policyauthority.EffectivePolicyEntry) policyau
 	}
 	out.Instructions = append([]string{}, in.Instructions...)
 	if in.Payloads != nil {
+		// A fresh MAP, but the same interface values: a pointer-implemented
+		// policyartifact.Payload is shared by every clone (see
+		// cloneConflictView's exception note). Adding or removing a key
+		// through one view cannot affect another; mutating a shared
+		// payload's own fields is caught by the next View()'s seal recheck,
+		// not prevented here.
 		payloads := make(map[string]policyartifact.Payload, len(in.Payloads))
 		for k, v := range in.Payloads {
 			payloads[k] = v

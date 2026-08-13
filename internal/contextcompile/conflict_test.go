@@ -24,6 +24,7 @@ import (
 	"github.com/jyang234/verdi/internal/policyartifact"
 	"github.com/jyang234/verdi/internal/policyauthority"
 	"github.com/jyang234/verdi/internal/repositoryfacts"
+	"github.com/jyang234/verdi/internal/specstate"
 )
 
 // --- shared hermetic accepted-arm fixture -----------------------------
@@ -455,7 +456,7 @@ func TestResolveConflictCandidateDiffersFromAcceptedBytes(t *testing.T) {
 		t.Fatalf("resolveConflictCandidate(base): unexpected error: %v", err)
 	}
 
-	revised := strings.Replace(candidateFeatureSpec, "The candidate feature outcome.", "The REVISED candidate feature outcome.", -1)
+	revised := strings.ReplaceAll(candidateFeatureSpec, "The candidate feature outcome.", "The REVISED candidate feature outcome.")
 	writeFileAndCommit(t, repo, ".verdi/specs/active/candidate-feature/spec.md", revised, "revise candidate")
 
 	revisedOperands, err := c.resolveConflictCandidate(context.Background(), repo.Dir, candidateRequestFor("spec/candidate-feature", "main", repo.Head), ConflictFacts{})
@@ -472,6 +473,86 @@ func TestResolveConflictCandidateDiffersFromAcceptedBytes(t *testing.T) {
 	}
 	if baseView.Snapshot.CandidateDigest == revisedView.Snapshot.CandidateDigest {
 		t.Fatalf("CandidateDigest did not change between base %s and revised %s HEADs", baseHead, repo.Head)
+	}
+}
+
+// TestResolveConflictCandidateRevisesAcceptedBaseline is the companion
+// TestResolveConflictCandidateDiffersFromAcceptedBytes cannot be: that test
+// compares two candidate resolutions over two HEAD blobs and never
+// establishes an ACCEPTED baseline at all, while plan Task 4 Step 1 names
+// "a proposed candidate differing from default-branch accepted bytes".
+// Here the baseline spec is genuinely accepted on the default branch (the
+// accepted-arm fixture's own state resolution, resolved through
+// CompileConflict, which mints a manifest identity), and the candidate then
+// resolves over REVISED bytes of that same spec: the candidate identity is
+// the revised bytes' digest, no manifest identity is ever minted, and the
+// two digests differ.
+func TestResolveConflictCandidateRevisesAcceptedBaseline(t *testing.T) {
+	acceptedCompiler, req := hermeticAcceptedFixture(t, nil, nil, nil)
+	root := hermeticAcceptedRoot(t)
+	accepted, err := acceptedCompiler.CompileConflict(context.Background(), root, req, ConflictFacts{})
+	if err != nil {
+		t.Fatalf("CompileConflict(accepted baseline): unexpected error: %v", err)
+	}
+	acceptedView, err := accepted.View()
+	if err != nil {
+		t.Fatalf("View(accepted baseline): %v", err)
+	}
+	if acceptedView.Snapshot.ManifestDigest == "" {
+		t.Fatal("the baseline is not an accepted context: it minted no manifest identity")
+	}
+	repo := acceptedView.Snapshot.Repository
+	if repo.Branch.Value != repo.DefaultBranch.Name {
+		t.Fatalf("the baseline was not resolved on the default branch: branch=%q default=%q", repo.Branch.Value, repo.DefaultBranch.Name)
+	}
+	var baselineDigest string
+	for _, s := range acceptedView.Snapshot.Sources {
+		if s.Ref == req.Spec {
+			baselineDigest = s.ContentDigest
+		}
+	}
+	if baselineDigest == "" {
+		t.Fatalf("accepted Sources carries no entry for the baseline target %s: %+v", req.Spec, acceptedView.Snapshot.Sources)
+	}
+
+	// The proposed candidate: the identical spec ref, revised bytes.
+	storyData, _ := decodeFragmentSpecFixture(t, "story-multi-parent.md")
+	storyPath := ".verdi/specs/active/" + strings.TrimPrefix(req.Spec, "spec/") + "/spec.md"
+	revised := strings.ReplaceAll(string(storyData), "The story joins both features.", "The story joins both features, revised.")
+	if revised == string(storyData) {
+		t.Fatal("fixture patch did not apply: story-multi-parent.md no longer carries its outcome text")
+	}
+	if rawContentDigest([]byte(revised)) == baselineDigest {
+		t.Fatal("the revised candidate bytes are identical to the accepted baseline's")
+	}
+
+	git, states, _ := compilerAcceptedFixture(t)
+	overlay := conflictOverlayGit{
+		GitReader: policyDiskFallbackGit{GitReader: git},
+		files:     map[string][]byte{storyPath: []byte(revised)},
+	}
+	gitWT := gitWithWorktree{GitReader: overlay, worktree: func(context.Context, string) ([]string, error) {
+		panic("contextcompile: candidate resolution must never read worktree-changed paths")
+	}}
+	repoFacts := stubRepoFactsGatherer{snapshot: validRepositorySnapshot(compileHead, "main")}
+	candidateCompiler := newCompilerWithPorts(gitWT, states, defaultAuthorityLoader{}, nil, repoFacts, panicProjectionVerifier{})
+
+	candidate, err := candidateCompiler.resolveConflictCandidate(context.Background(), root, candidateRequestFor(req.Spec, "main", compileHead), ConflictFacts{})
+	if err != nil {
+		t.Fatalf("resolveConflictCandidate(revised over accepted baseline): unexpected error: %v", err)
+	}
+	candidateView, err := candidate.View()
+	if err != nil {
+		t.Fatalf("View(candidate): %v", err)
+	}
+	if want := rawContentDigest([]byte(revised)); candidateView.Snapshot.CandidateDigest != want {
+		t.Errorf("CandidateDigest = %q, want the revised bytes' digest %q", candidateView.Snapshot.CandidateDigest, want)
+	}
+	if candidateView.Snapshot.ManifestDigest != "" {
+		t.Errorf("ManifestDigest = %q, want always-empty for a candidate", candidateView.Snapshot.ManifestDigest)
+	}
+	if candidateView.Snapshot.CandidateDigest == baselineDigest {
+		t.Errorf("CandidateDigest equals the accepted baseline's content digest %q", baselineDigest)
 	}
 }
 
@@ -661,6 +742,184 @@ func TestCompileConflictContextCancellationPropagates(t *testing.T) {
 	_, err := c.CompileConflict(ctx, root, req, ConflictFacts{})
 	if err == nil {
 		t.Fatal("expected context cancellation to fail CompileConflict")
+	}
+}
+
+// --- 11: story-class acceptance candidates --------------------------------
+
+// recordingStateResolver wraps a StateResolver, recording every candidate
+// path whose state was actually resolved (and optionally overriding the
+// result), so a test can prove WHICH artifacts a candidate resolution
+// independently proved accepted.
+type recordingStateResolver struct {
+	inner  StateResolver
+	paths  *[]string
+	result func(path string) (specstate.Result, bool)
+}
+
+func (r recordingStateResolver) Resolve(ctx context.Context, root string, candidate specstate.Candidate) (specstate.Result, error) {
+	if r.paths != nil {
+		*r.paths = append(*r.paths, candidate.Path)
+	}
+	if r.result != nil {
+		if res, ok := r.result(candidate.Path); ok {
+			return res, nil
+		}
+	}
+	return r.inner.Resolve(ctx, root, candidate)
+}
+
+// storyCandidateFixture wires a Compiler for a STORY-class acceptance
+// candidate over compilerAcceptedFixture's fake tree (the multi-parent
+// story plus both governing parent features), recording every state
+// resolution and applying override to it. It returns the compiler, the
+// candidate's own ref, the root, and the recorded-path slice pointer.
+func storyCandidateFixture(t *testing.T, override func(path string) (specstate.Result, bool)) (Compiler, string, string, *[]string) {
+	t.Helper()
+	root := installPolicyFixture(t)
+	git, states, ref := compilerAcceptedFixture(t)
+	resolved := &[]string{}
+	recorder := recordingStateResolver{inner: states, paths: resolved, result: override}
+	gitWT := gitWithWorktree{GitReader: policyDiskFallbackGit{GitReader: git}, worktree: func(context.Context, string) ([]string, error) {
+		panic("contextcompile: candidate resolution must never read worktree-changed paths")
+	}}
+	repoFacts := stubRepoFactsGatherer{snapshot: validRepositorySnapshot(compileHead, "main")}
+	c := newCompilerWithPorts(gitWT, recorder, defaultAuthorityLoader{}, nil, repoFacts, panicProjectionVerifier{})
+	return c, ref, root, resolved
+}
+
+// TestResolveConflictCandidateStoryClassResolvesFragments proves the
+// story-class candidate arm: fragments resolve from both governing
+// parents, each parent's acceptance is independently proven through the
+// state resolver, and the candidate's OWN acceptance never is — the
+// synthetic specstate.AcceptedPendingBuild the arm places on its target
+// only satisfies ResolveFeatureFragments' internal target gate.
+func TestResolveConflictCandidateStoryClassResolvesFragments(t *testing.T) {
+	c, ref, root, resolved := storyCandidateFixture(t, nil)
+	operands, err := c.resolveConflictCandidate(context.Background(), root, candidateRequestFor(ref, "main", compileHead), ConflictFacts{})
+	if err != nil {
+		t.Fatalf("resolveConflictCandidate(story class): unexpected error: %v", err)
+	}
+	view, err := operands.View()
+	if err != nil {
+		t.Fatalf("View: unexpected error: %v", err)
+	}
+	if view.Snapshot.TargetKind != snapshotTargetAcceptanceCandidate || view.Snapshot.ManifestDigest != "" || view.Snapshot.CandidateDigest == "" {
+		t.Errorf("snapshot identity is not a candidate identity: %+v", view.Snapshot)
+	}
+
+	storyPath := ".verdi/specs/active/" + strings.TrimPrefix(ref, "spec/") + "/spec.md"
+	parents := map[string]string{
+		"spec/feature-alpha": ".verdi/specs/active/feature-alpha/spec.md",
+		"spec/feature-beta":  ".verdi/specs/active/feature-beta/spec.md",
+	}
+	for parentRef, parentPath := range parents {
+		found := false
+		for _, s := range view.Snapshot.Sources {
+			if s.Ref == parentRef && s.Path == parentPath {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("Sources missing governing parent %s: %+v", parentRef, view.Snapshot.Sources)
+		}
+		fragmentProse := false
+		for _, pc := range view.ProseClaims {
+			if pc.SourceRef == parentRef && pc.Category == categorySpecProblem {
+				fragmentProse = true
+			}
+		}
+		if !fragmentProse {
+			t.Errorf("ProseClaims missing the governing parent %s's own fragment prose", parentRef)
+		}
+		if !slicesContains(*resolved, parentPath) {
+			t.Errorf("governing parent %s was never independently state-resolved; resolved paths = %v", parentRef, *resolved)
+		}
+	}
+	if slicesContains(*resolved, storyPath) {
+		t.Errorf("the candidate's OWN acceptance was state-resolved (%s); a proposed candidate is by definition not yet accepted", storyPath)
+	}
+}
+
+// TestResolveConflictCandidateStoryClassUnacceptedParentFails proves the
+// governing-parent gate is real: a story-class candidate whose parent
+// feature is not accepted fails, and the failure names that parent.
+func TestResolveConflictCandidateStoryClassUnacceptedParentFails(t *testing.T) {
+	const unacceptedParent = ".verdi/specs/active/feature-beta/spec.md"
+	c, ref, root, _ := storyCandidateFixture(t, func(path string) (specstate.Result, bool) {
+		if path != unacceptedParent {
+			return specstate.Result{}, false
+		}
+		return specstate.Result{State: specstate.Proposed, Relation: specstate.RelationUnproven}, true
+	})
+
+	_, err := c.resolveConflictCandidate(context.Background(), root, candidateRequestFor(ref, "main", compileHead), ConflictFacts{})
+	if err == nil {
+		t.Fatal("resolveConflictCandidate accepted a story-class candidate whose governing parent is not accepted")
+	}
+	var refusal *AcceptedSpecRefusal
+	if !errors.As(err, &refusal) {
+		t.Fatalf("err = %v, want a wrapped AcceptedSpecRefusal naming the unaccepted parent", err)
+	}
+	if refusal.Ref != "spec/feature-beta" {
+		t.Errorf("refusal names %q, want the unaccepted governing parent spec/feature-beta", refusal.Ref)
+	}
+}
+
+// slicesContains reports whether haystack contains needle.
+func slicesContains(haystack []string, needle string) bool {
+	for _, s := range haystack {
+		if s == needle {
+			return true
+		}
+	}
+	return false
+}
+
+// --- 10: the two identity digests are mutually exclusive by target kind ---
+
+// TestConflictOperandsSnapshotIdentityDigestXor pins the plan's identity
+// rule: accepted requires ManifestDigest and an empty CandidateDigest,
+// acceptance-candidate is exactly the reverse, and an unknown target kind
+// is never assembled at all. Each violation is operational — a snapshot
+// that claimed both identities (or neither) would let a report be derived
+// against a target the operands were not resolved from.
+func TestConflictOperandsSnapshotIdentityDigestXor(t *testing.T) {
+	base := func(kind, manifest, candidate string) snapshotBuildInput {
+		return snapshotBuildInput{
+			targetKind:      kind,
+			repository:      validRepositorySnapshot(compileHead, "main").Facts,
+			manifestDigest:  manifest,
+			candidateDigest: candidate,
+			authority:       PolicyAuthority{Effective: &policyauthority.EffectivePolicy{}},
+		}
+	}
+	digestA := "sha256:" + strings.Repeat("1", 64)
+	digestB := "sha256:" + strings.Repeat("2", 64)
+
+	cases := map[string]snapshotBuildInput{
+		"accepted without a manifest digest":   base(snapshotTargetAcceptedContext, "", ""),
+		"accepted carrying both digests":       base(snapshotTargetAcceptedContext, digestA, digestB),
+		"accepted carrying a candidate digest": base(snapshotTargetAcceptedContext, "", digestB),
+		"candidate without a candidate digest": base(snapshotTargetAcceptanceCandidate, "", ""),
+		"candidate carrying both digests":      base(snapshotTargetAcceptanceCandidate, digestA, digestB),
+		"candidate carrying a manifest digest": base(snapshotTargetAcceptanceCandidate, digestA, ""),
+		"unknown target kind":                  base("other-kind", digestA, ""),
+	}
+	for name, in := range cases {
+		t.Run(name, func(t *testing.T) {
+			_, err := buildSnapshotIdentity(in)
+			if err == nil {
+				t.Fatalf("buildSnapshotIdentity(%s) = nil error, want an operational failure", name)
+			}
+			// The diagnostic must name the identity rule itself. These
+			// inputs are otherwise incomplete (no resolved store, no
+			// target), so a bare non-nil error would pass vacuously on a
+			// later stage's complaint without the rule ever being checked.
+			if !strings.Contains(err.Error(), "identity digest") {
+				t.Fatalf("buildSnapshotIdentity(%s) failed for an unrelated reason, not the identity-digest rule: %v", name, err)
+			}
+		})
 	}
 }
 
