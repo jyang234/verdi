@@ -31,7 +31,7 @@ Git, and built-binary Go tests.
 - Binding authority is
   `docs/superpowers/specs/2026-08-12-policy-conflict-gate-authority-design.md`,
   Context Integrity AC-3/DC-3–DC-8/DC-15/DC-17–DC-24/CO-1–CO-6, and
-  invention-ledger SI-93–SI-107 as consolidated by the independently reviewed
+  invention-ledger SI-93–SI-108 as consolidated by the independently reviewed
   exact head carrying this plan.
 - Do not edit frozen artifacts or `docs/design/specs/`; do not add a layout
   root, UI, MCP tool, receipt, sealed-execution behavior, forge network call, or
@@ -844,7 +844,7 @@ This correction task records the deliberate divergence from the already
 landed Task 3/6 runtime. It must complete before Task 7 begins.
 
 **Files:**
-- Modify: `internal/policyconflict/{schema.go,schema_test.go,codec.go,codec_test.go,validate.go,mechanical.go,mechanical_test.go,exemption.go,exemption_test.go}`
+- Modify: `internal/policyconflict/{schema.go,schema_test.go,codec.go,validate.go,mechanical.go,mechanical_test.go,exemption.go,exemption_test.go}`
 - Modify: `internal/governanceprincipal/{authorize.go,authorize_test.go}`
 
 **Interfaces:**
@@ -865,9 +865,11 @@ landed Task 3/6 runtime. It must complete before Task 7 begins.
 - Make `EvaluateMechanical` return
   `MechanicalResult { Evaluations []MechanicalEvaluation; Disclosures []Disclosure }`.
   Only a kernel `solo-role-collapse` disclosure translates to report code
-  `solo-principal-collapse`; its sorted principal/role witnesses are retained,
-  duplicate translations collapse, and any unknown kernel disclosure is an
-  operational error. Task 9 remains the sole report-hoisting location.
+  `solo-principal-collapse`; each principal/role membership becomes the
+  lossless witness token `<principal_id>:<role_id>` fixed by SI-108, tokens sort
+  and deduplicate, duplicate translations collapse, and any unknown kernel
+  disclosure is an operational error. Task 9 remains the sole report-hoisting
+  location.
 - Map advisory posture caused by an experimental profile to an unproven row
   with reason `profile-experimental`. It is not a mechanical violation and can
   never authorize an authoritative pass.
@@ -879,7 +881,8 @@ composite ordering/duplicates, rejected `removed_claims: []`, proven empty
 removal refusal, exact-current-row membership, exact distinctness role-pair
 attribution in the presence of a second rule, exported role lookup parity,
 kernel disclosure translation/deduplication/unknown-code refusal, and
-experimental unproven classification.
+experimental unproven classification. Pin the exact SI-108 pair-token grammar,
+including malformed components and two principals holding overlapping roles.
 
 - [ ] **Step 2: Run focused RED**
 
@@ -911,7 +914,7 @@ three-valued outcomes.
 
 ~~~bash
 git add internal/governanceprincipal internal/policyconflict
-git commit -m "Reconcile mechanical conflict proof wires"
+git commit -m "Correct mechanical evidence transport"
 ~~~
 
 ### Task 7: Validate semantic judgments and immutable cache reuse

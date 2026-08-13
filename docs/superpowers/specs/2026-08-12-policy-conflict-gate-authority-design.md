@@ -328,7 +328,10 @@ the requested relation is violated, and its row reason is
 translated to the report code `solo-principal-collapse`, returned beside the
 runtime evaluations, and hoisted once to the report's top-level disclosure
 set. These are distinct closed vocabularies; an unknown kernel disclosure is
-an operational error rather than a new report label.
+an operational error rather than a new report label. Each kernel principal/role
+membership is retained as one report witness token
+`<principal_id>:<role_id>`, sorted and deduplicated. The existing component
+grammars both forbid `:`, so the association is lossless without a second wire.
 
 ### 5.4 Path-capability domain
 
@@ -891,7 +894,7 @@ no browser behavior and adds no Playwright case.
 
 ## 14. Source coverage and losslessness
 
-Coverage is **13/13** implicated authority source groups. The mapping is
+Coverage is **14/14** implicated authority source groups. The mapping is
 lossless; each row names the complete clause range used rather than assigning
 inconsistent per-clause counts across differently structured sources:
 
@@ -910,6 +913,7 @@ inconsistent per-clause counts across differently structured sources:
 | Composite mechanical claim identity and exact removal witness | 1 | §§3, 5.5, 10; SI-105; plan Task 6A |
 | Principal-relation kernel evidence, role-membership ownership, experimental posture, and disclosure translation | 1 | §§5.3, 9–10; SI-106; plan Task 6A |
 | Proven-disjoint satisfiable-component completion | 1 | §§4.4–5; SI-107; plan Tasks 6, 6A |
+| Lossless solo-collapse principal/role witness encoding | 1 | §§5.3, 10; SI-108; plan Task 6A |
 
 The transformations are explicit:
 
