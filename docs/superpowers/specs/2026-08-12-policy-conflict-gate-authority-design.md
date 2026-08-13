@@ -323,9 +323,12 @@ pair. The evaluator consumes only whole-request authority findings and
 findings whose role or role pair belongs to the requested relation; unrelated
 governance findings cannot change this solver result. Advisory/experimental
 kernel posture is unproven for the authoritative consumer, not evidence that
-the requested relation is violated. Kernel-authorized solo role-collapse
-disclosures are returned beside the runtime evaluations and are hoisted once
-to the report's top-level disclosure set.
+the requested relation is violated, and its row reason is
+`profile-experimental`. Kernel-authorized `solo-role-collapse` disclosures are
+translated to the report code `solo-principal-collapse`, returned beside the
+runtime evaluations, and hoisted once to the report's top-level disclosure
+set. These are distinct closed vocabularies; an unknown kernel disclosure is
+an operational error rather than a new report label.
 
 ### 5.4 Path-capability domain
 
@@ -351,7 +354,9 @@ authorization result, and post-exemption proof. A removed mechanical claim is
 identified by `(policy_id, claim_id, claim_digest)`, not by the semantic
 prose-witness vocabulary. An effective all-five-proven resolution names at
 least one exact current row witness; an ineffective resolution names the
-explicit empty removal set because it removed nothing.
+mandatory-present explicit empty removal set (`[]`) because it removed
+nothing. Removal witnesses sort and deduplicate by `(policy_id, claim_id)`;
+their digest must match that exact current row claim.
 
 A semantic disposition can never erase a mechanical proof. `no-conflict` is
 not a legal mechanical resolution.
@@ -886,7 +891,7 @@ no browser behavior and adds no Playwright case.
 
 ## 14. Source coverage and losslessness
 
-Coverage is **10/10** implicated authority source groups. The mapping is
+Coverage is **13/13** implicated authority source groups. The mapping is
 lossless; each row names the complete clause range used rather than assigning
 inconsistent per-clause counts across differently structured sources:
 
@@ -902,6 +907,9 @@ inconsistent per-clause counts across differently structured sources:
 | Wave-3 orchestration unit, exit gate, review cadence, and delivery exclusions | 1 | §§1, 11, 13 |
 | Owner-approved lifecycle operand acquisition and current `gate`/`build start`/`close` grammars, including the effectful `close --prepare` path | 1 | §11, SI-102 |
 | Closed report reason/disclosure labels required by §10 but previously unnamed | 1 | §10, SI-103 |
+| Composite mechanical claim identity and exact removal witness | 1 | §§3, 5.5, 10; SI-105; plan Task 6A |
+| Principal-relation kernel evidence, role-membership ownership, experimental posture, and disclosure translation | 1 | §§5.3, 9–10; SI-106; plan Task 6A |
+| Proven-disjoint satisfiable-component completion | 1 | §§4.4–5; SI-107; plan Tasks 6, 6A |
 
 The transformations are explicit:
 

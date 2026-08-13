@@ -31,7 +31,7 @@ Git, and built-binary Go tests.
 - Binding authority is
   `docs/superpowers/specs/2026-08-12-policy-conflict-gate-authority-design.md`,
   Context Integrity AC-3/DC-3–DC-8/DC-15/DC-17–DC-24/CO-1–CO-6, and
-  invention-ledger SI-93–SI-103 as consolidated by the independently reviewed
+  invention-ledger SI-93–SI-107 as consolidated by the independently reviewed
   exact head carrying this plan.
 - Do not edit frozen artifacts or `docs/design/specs/`; do not add a layout
   root, UI, MCP tool, receipt, sealed-execution behavior, forge network call, or
@@ -57,6 +57,14 @@ Git, and built-binary Go tests.
 - Do not run Tasks 3–9 in parallel: they build one shared conflict type/proof
   graph. Task 1 and Task 2 are sequential authority foundations; Task 10 starts
   only after Task 9.
+
+**Correction status:** Tasks 3 and 6 were implemented before SI-105–SI-107
+closed four residual wire/proof gaps. Their landed runtime therefore still
+uses claim-digest-only mechanical identity, requires a nonempty removal set on
+every exemption resolution, drops kernel disclosure/role-pair evidence, and
+classifies experimental authority as violated. The amended Task 3/6 text below
+is the target contract, not a claim that those bytes already conform. Task 6A
+is the owned reconciliation tranche and is a hard predecessor of Task 7.
 
 ## File Map
 
@@ -513,6 +521,15 @@ func DecodeReport([]byte) (Report, error)
 func EncodeReport(Report) ([]byte, error)
 ~~~
 
+`TypedClaimRecord` and `MechanicalClaimWitness` sort and deduplicate by the
+composite key `(policy_id, claim_id)`; their `claim_digest` is verified against
+the canonical digest of the carried base claim. `removed_claims` is a
+mandatory-present array. It is nonempty exactly when all five authority states
+are proven and empty (`[]`) otherwise. A proven removal set contains only exact
+current witnesses from its enclosing mechanical row. `ClaimWitness` remains
+the separate semantic-prose vocabulary and is never used for mechanical
+removal.
+
 - [ ] **Step 1: Write strict-codec RED matrices**
 
 For all four schemas cover canonical round-trip, unknown and duplicate fields,
@@ -819,6 +836,82 @@ Expected: both exit 0 with deterministic row/witness order.
 ~~~bash
 git add internal/policyconflict/mechanical.go internal/policyconflict/mechanical_test.go internal/policyconflict/exemption.go internal/policyconflict/exemption_test.go
 git commit -m "Prove typed policy conflicts"
+~~~
+
+### Task 6A: Reconcile SI-105–SI-107 runtime wires and kernel evidence
+
+This correction task records the deliberate divergence from the already
+landed Task 3/6 runtime. It must complete before Task 7 begins.
+
+**Files:**
+- Modify: `internal/policyconflict/{schema.go,schema_test.go,codec.go,codec_test.go,validate.go,mechanical.go,mechanical_test.go,exemption.go,exemption_test.go}`
+- Modify: `internal/governanceprincipal/{authorize.go,authorize_test.go}`
+
+**Interfaces:**
+- Replace mechanical use of semantic `ClaimWitness` with
+  `MechanicalClaimWitness { PolicyID, ClaimID, ClaimDigest string }`.
+- Preserve and validate every `TypedClaimRecord` under composite
+  `(policy_id, claim_id)` identity; equal claim bytes from two policies remain
+  two records. Both typed records and removal witnesses sort and deduplicate by
+  that composite key, and every digest is recomputed from the carried claim.
+- Encode `removed_claims` as mandatory-present: `[]` unless all five authority
+  states are proven, and at least one exact current row witness when they are.
+- Add `Roles []string` to kernel `Finding`. Every distinctness finding carries
+  the exact sorted two-role pair; findings from other rule families carry no
+  pair. Add the validated exported query
+  `HoldsRole(Profile, PrincipalClaim, string) (bool, error)` and retain one
+  private already-validated inner predicate, so consumers do not duplicate
+  role-mapping semantics.
+- Make `EvaluateMechanical` return
+  `MechanicalResult { Evaluations []MechanicalEvaluation; Disclosures []Disclosure }`.
+  Only a kernel `solo-role-collapse` disclosure translates to report code
+  `solo-principal-collapse`; its sorted principal/role witnesses are retained,
+  duplicate translations collapse, and any unknown kernel disclosure is an
+  operational error. Task 9 remains the sole report-hoisting location.
+- Map advisory posture caused by an experimental profile to an unproven row
+  with reason `profile-experimental`. It is not a mechanical violation and can
+  never authorize an authoritative pass.
+
+- [ ] **Step 1: Write the reconciliation RED matrix**
+
+Cover same-bytes/different-policy preservation, mutated claim digest refusal,
+composite ordering/duplicates, rejected `removed_claims: []`, proven empty
+removal refusal, exact-current-row membership, exact distinctness role-pair
+attribution in the presence of a second rule, exported role lookup parity,
+kernel disclosure translation/deduplication/unknown-code refusal, and
+experimental unproven classification.
+
+- [ ] **Step 2: Run focused RED**
+
+~~~bash
+go test ./internal/governanceprincipal ./internal/policyconflict -run 'Test.*(MechanicalClaim|ExemptionResolution|DistinctnessRoles|HoldsRole|MechanicalDisclosure|ProfileExperimental)' -count=1
+~~~
+
+Expected: the new wire and kernel assertions fail against the pre-reconciliation
+runtime.
+
+- [ ] **Step 3: Implement the minimum reconciliation**
+
+Change only the named wire, validation, kernel evidence, mechanical result,
+and translation seams. Keep the four bounded domain solvers and SI-107
+component proof unchanged. Do not add a generic SAT engine, operator-pair
+dispatch, second role interpreter, or second report disclosure location.
+
+- [ ] **Step 4: Run focused and package race GREEN**
+
+~~~bash
+go test -race ./internal/governanceprincipal ./internal/policyconflict -run 'Test.*(MechanicalClaim|ExemptionResolution|DistinctnessRoles|HoldsRole|MechanicalDisclosure|ProfileExperimental)' -count=1
+go test -race ./internal/governanceprincipal ./internal/policyconflict -count=1
+~~~
+
+Expected: both exit 0 with deterministic composite ordering and exact
+three-valued outcomes.
+
+- [ ] **Step 5: Commit**
+
+~~~bash
+git add internal/governanceprincipal internal/policyconflict
+git commit -m "Reconcile mechanical conflict proof wires"
 ~~~
 
 ### Task 7: Validate semantic judgments and immutable cache reuse
