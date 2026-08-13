@@ -20,12 +20,14 @@
 package contextcompile
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"sort"
 	"strconv"
 	"strings"
 	"sync/atomic"
+	"unicode/utf8"
 
 	"github.com/jyang234/verdi/internal/artifact"
 	"github.com/jyang234/verdi/internal/canonjson"
@@ -44,15 +46,21 @@ const (
 	snapshotTargetAcceptanceCandidate = "acceptance-candidate"
 )
 
-// The closed §6 source-category vocabulary this package can actually
-// derive from data compilePipeline/resolveConflictCandidate already
-// resolve. adr-decision is intentionally NOT produced here: it requires
-// resolving a whole ADR corpus, a capability this compiler does not have
-// and no Task 4 test exercises; a later task that adds ADR corpus
-// resolution extends buildProseClaims rather than reinventing this seam.
-// The exact string values mirror policyartifact.knownWitnessCategories so
-// a ProseClaim.Category always matches a legal disposition-witness
-// category.
+// The closed §6 source-category vocabulary this package derives from the
+// data compilePipeline/resolveConflictCandidate already resolve. The exact
+// string values mirror policyartifact.knownWitnessCategories so a
+// ProseClaim.Category always matches a legal disposition-witness category.
+//
+// adr-decision is produced on the ACCEPTED arm only. compilePipeline
+// already resolves the target's effective declared context (SI-92),
+// pinning each declared ADR's exact bytes and content digest, and that
+// ADR's whole normalized authored body IS its decision authority —
+// artifact.ADRFrontmatter carries no structured decision field to project
+// instead. The acceptance-candidate arm deliberately binds no declared
+// context and therefore emits no adr-decision claim: which commit a
+// not-yet-accepted candidate's declared pins must resolve against is a
+// question this task does not answer, and is deferred to owner
+// adjudication rather than invented here.
 const (
 	categoryPolicyInstruction     = "policy-instruction"
 	categorySpecProblem           = "spec-problem"
@@ -61,8 +69,16 @@ const (
 	categoryOpenQuestion          = "open-question"
 	categoryConstraint            = "constraint"
 	categoryDecision              = "decision"
+	categoryADRDecision           = "adr-decision"
 	categoryObligationDeclaration = "obligation-declaration"
 )
+
+// conflictADRDecisionObject is the canonical object id every adr-decision
+// ProseClaim carries. An ADR has exactly one decision authority — its
+// authored body — and no structured object list to name, so this one fixed
+// id keeps ADR claim identity (ref#object) shaped exactly like every
+// neighboring spec/fragment claim's.
+const conflictADRDecisionObject = "decision"
 
 // TypedClaim is one applicable policy's claim, exactly as sealed for
 // mechanical conflict evaluation: the base (unrefined) operand plus its
@@ -233,13 +249,14 @@ func (c Compiler) CompileConflict(ctx context.Context, root string, request Requ
 		target:         outcome.target,
 		fragments:      outcome.fragments,
 		obligations:    outcome.obligations,
+		declared:       outcome.declared.Items,
 		selection:      outcome.selection,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("contextcompile: build accepted conflict snapshot: %w", err)
 	}
 
-	view, err := buildConflictView(outcome.authority, outcome.selection, outcome.target, outcome.fragments, outcome.obligations, request.Scope, snapshot, facts)
+	view, err := buildConflictView(outcome.authority, outcome.selection, outcome.target, outcome.fragments, outcome.obligations, outcome.declared.Items, request.Scope, snapshot, facts)
 	if err != nil {
 		return nil, err
 	}
@@ -427,13 +444,16 @@ func (c Compiler) resolveConflictCandidate(ctx context.Context, root string, req
 		target:          target,
 		fragments:       fragments,
 		obligations:     obligations,
-		selection:       selection,
+		// No declared context: the candidate arm binds none (see the
+		// category block's comment — deferred to owner adjudication).
+		declared:  nil,
+		selection: selection,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("contextcompile: build candidate conflict snapshot: %w", err)
 	}
 
-	view, err := buildConflictView(authority, selection, target, fragments, obligations, req.Scope, snapshotIdentity, facts)
+	view, err := buildConflictView(authority, selection, target, fragments, obligations, nil, req.Scope, snapshotIdentity, facts)
 	if err != nil {
 		return nil, err
 	}
@@ -456,7 +476,10 @@ type snapshotBuildInput struct {
 	target                          ResolvedSpec
 	fragments                       []FeatureFragment
 	obligations                     []BoundObligation
-	selection                       authoritySelection
+	// declared is the arm's effective declared-context resolution. Only
+	// the accepted arm supplies one (see the category block's comment).
+	declared  []DeclaredContextItem
+	selection authoritySelection
 }
 
 func buildSnapshotIdentity(in snapshotBuildInput) (SnapshotIdentity, error) {
@@ -470,7 +493,7 @@ func buildSnapshotIdentity(in snapshotBuildInput) (SnapshotIdentity, error) {
 	if err != nil {
 		return SnapshotIdentity{}, fmt.Errorf("contextcompile: conflict snapshot: encode grants: %w", err)
 	}
-	sources, err := buildConflictSources(in.target, in.fragments, in.obligations, in.selection, in.authority)
+	sources, err := buildConflictSources(in.target, in.fragments, in.obligations, in.declared, in.selection, in.authority)
 	if err != nil {
 		return SnapshotIdentity{}, err
 	}
@@ -495,9 +518,10 @@ func buildSnapshotIdentity(in snapshotBuildInput) (SnapshotIdentity, error) {
 // buildConflictSources returns the unique, sorted-by-(ref,path,digest) set
 // of every exact artifact contributing to this snapshot: the accepted or
 // candidate target, every governing parent-feature fragment, every bound
-// obligation, every applicable policy/overlay/exemption operand, and the
+// obligation, every declared-context ADR whose decision this snapshot
+// binds, every applicable policy/overlay/exemption operand, and the
 // resolved constitution and selected profile.
-func buildConflictSources(target ResolvedSpec, fragments []FeatureFragment, obligations []BoundObligation, selection authoritySelection, authority PolicyAuthority) ([]ConflictSourceIdentity, error) {
+func buildConflictSources(target ResolvedSpec, fragments []FeatureFragment, obligations []BoundObligation, declared []DeclaredContextItem, selection authoritySelection, authority PolicyAuthority) ([]ConflictSourceIdentity, error) {
 	authorityArtifacts, err := resolvedAuthorityArtifacts(authority)
 	if err != nil {
 		return nil, fmt.Errorf("contextcompile: conflict snapshot: resolved authority artifacts: %w", err)
@@ -531,6 +555,11 @@ func buildConflictSources(target ResolvedSpec, fragments []FeatureFragment, obli
 			return nil, err
 		}
 	}
+	for _, item := range declaredADRItems(declared) {
+		if err := add(item.Ref, item.Path, item.ContentDigest); err != nil {
+			return nil, err
+		}
+	}
 	for _, op := range selection.Operands {
 		if err := add(op.ID, op.Path, op.Digest); err != nil {
 			return nil, err
@@ -560,7 +589,7 @@ func buildConflictSources(target ResolvedSpec, fragments []FeatureFragment, obli
 // applicable typed claims, the normalized authority-prose universe this
 // package can derive, applicable exemptions, the selected governance
 // profile, and the caller-supplied actor facts.
-func buildConflictView(authority PolicyAuthority, selection authoritySelection, target ResolvedSpec, fragments []FeatureFragment, obligations []BoundObligation, governingScope policyartifact.Scope, snapshot SnapshotIdentity, facts ConflictFacts) (ConflictView, error) {
+func buildConflictView(authority PolicyAuthority, selection authoritySelection, target ResolvedSpec, fragments []FeatureFragment, obligations []BoundObligation, declared []DeclaredContextItem, governingScope policyartifact.Scope, snapshot SnapshotIdentity, facts ConflictFacts) (ConflictView, error) {
 	if authority.Store == nil || authority.Effective == nil {
 		return ConflictView{}, fmt.Errorf("contextcompile: conflict view: policy authority is not resolved")
 	}
@@ -572,7 +601,7 @@ func buildConflictView(authority PolicyAuthority, selection authoritySelection, 
 		return ConflictView{}, fmt.Errorf("contextcompile: conflict view: target %s has no decoded specification", target.Ref)
 	}
 
-	proseClaims, err := buildProseClaims(authority, selection, target, fragments, obligations, governingScope)
+	proseClaims, err := buildProseClaims(authority, selection, target, fragments, obligations, declared, governingScope)
 	if err != nil {
 		return ConflictView{}, err
 	}
@@ -661,19 +690,58 @@ func buildConflictExemptions(authority PolicyAuthority, selection authoritySelec
 
 // --- normalized authority prose (authority design §6) -----------------------
 
+// normalizeAuthorityProse returns one authored artifact's normalized prose
+// body, exactly as authority design §6 fixes normalization: it validates
+// UTF-8, converts CRLF to LF BEFORE artifact parsing, trims only the
+// structural frontmatter block and the newlines that delimit it from the
+// body, and never case-folds, rewrites, summarizes, or reorders the
+// authored text (interior text, including indentation, survives byte for
+// byte). Trimming is deliberately restricted to "\n" rather than every
+// space character: a whole-artifact TrimSpace both leaks frontmatter into
+// the claim and rewrites authored leading indentation.
+//
+// Every failure is OPERATIONAL and wrapped — invalid UTF-8, an artifact
+// without a well-formed frontmatter block, and an artifact whose authored
+// body is blank. None of them may degrade into a silently skipped claim: a
+// semantic universe quietly missing an authority claim is exactly the
+// favorable-silence failure the three-valued honesty rule forbids.
+func normalizeAuthorityProse(what string, raw []byte) (string, error) {
+	if !utf8.Valid(raw) {
+		return "", fmt.Errorf("contextcompile: normalize authored prose for %s: content is not valid UTF-8", what)
+	}
+	_, body, err := artifact.SplitFrontmatter(bytes.ReplaceAll(raw, []byte("\r\n"), []byte("\n")))
+	if err != nil {
+		return "", fmt.Errorf("contextcompile: normalize authored prose for %s: %w", what, err)
+	}
+	text := strings.Trim(string(body), "\n")
+	if strings.TrimSpace(text) == "" {
+		return "", fmt.Errorf("contextcompile: normalize authored prose for %s: the artifact carries no authored body", what)
+	}
+	return text, nil
+}
+
 // buildProseClaims assembles the complete sorted, unique-by-id prose
 // universe this package can derive: applicable policy instructions, the
 // target's own problem/outcome/AC/open-question/constraint/decision
-// prose, the same categories from each governing parent feature, and
-// obligation declarations.
-func buildProseClaims(authority PolicyAuthority, selection authoritySelection, target ResolvedSpec, fragments []FeatureFragment, obligations []BoundObligation, governingScope policyartifact.Scope) ([]ProseClaim, error) {
+// prose, the same categories from each governing parent feature, each
+// declared-context ADR's decision, and obligation declarations.
+func buildProseClaims(authority PolicyAuthority, selection authoritySelection, target ResolvedSpec, fragments []FeatureFragment, obligations []BoundObligation, declared []DeclaredContextItem, governingScope policyartifact.Scope) ([]ProseClaim, error) {
 	var out []ProseClaim
 	out = append(out, buildPolicyInstructionProse(authority, selection)...)
 	out = append(out, buildSpecProse(target.Ref, target.Path, target.ContentDigest, target.Spec, governingScope, authority.EffectiveDigest)...)
 	for _, f := range fragments {
 		out = append(out, buildFragmentProse(f, governingScope, authority.EffectiveDigest)...)
 	}
-	out = append(out, buildObligationProse(obligations, governingScope, authority.EffectiveDigest)...)
+	adrClaims, err := buildADRDecisionProse(declared, governingScope, authority.EffectiveDigest)
+	if err != nil {
+		return nil, err
+	}
+	out = append(out, adrClaims...)
+	obligationClaims, err := buildObligationProse(obligations, governingScope, authority.EffectiveDigest)
+	if err != nil {
+		return nil, err
+	}
+	out = append(out, obligationClaims...)
 
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
 	for i := 1; i < len(out); i++ {
@@ -796,12 +864,52 @@ func buildFragmentProse(f FeatureFragment, governingScope policyartifact.Scope, 
 	return out
 }
 
+// declaredADRItems returns the declared-context items that are ADRs — the
+// one declared-context kind this package projects into the §6 semantic
+// universe. It is the single home of that filter rule, so the prose
+// builder and the snapshot's source set can never disagree about which
+// declared artifacts this snapshot actually binds.
+func declaredADRItems(declared []DeclaredContextItem) []DeclaredContextItem {
+	out := make([]DeclaredContextItem, 0, len(declared))
+	for _, item := range declared {
+		if item.Kind == artifact.KindADR {
+			out = append(out, item)
+		}
+	}
+	return out
+}
+
+// buildADRDecisionProse returns one adr-decision ProseClaim per declared-
+// context ADR: its text the ADR's normalized authored body (the ADR's
+// decision authority in full — artifact.ADRFrontmatter has no structured
+// decision field), its source identity the exact pinned declared ref, path,
+// and RAW content digest. Normalization never changes a source digest: the
+// claim's TextDigest covers the normalized text, SourceDigest the exact
+// pinned bytes.
+func buildADRDecisionProse(declared []DeclaredContextItem, governingScope policyartifact.Scope, authorityDigest string) ([]ProseClaim, error) {
+	items := declaredADRItems(declared)
+	out := make([]ProseClaim, 0, len(items))
+	for _, item := range items {
+		text, err := normalizeAuthorityProse(item.Ref, item.Content)
+		if err != nil {
+			return nil, fmt.Errorf("contextcompile: conflict prose claims: %w", err)
+		}
+		out = append(out, newProseClaim(item.Ref, item.Path, item.ContentDigest, conflictADRDecisionObject, categoryADRDecision, text, governingScope, authorityDigest))
+	}
+	return out, nil
+}
+
 // buildObligationProse returns one obligation-declaration ProseClaim per
-// bound obligation, its text the obligation file's trimmed raw content.
-func buildObligationProse(obligations []BoundObligation, governingScope policyartifact.Scope, authorityDigest string) []ProseClaim {
+// bound obligation, its text the obligation's normalized authored body —
+// never the whole artifact, whose frontmatter is machinery identity, not
+// authored authority prose.
+func buildObligationProse(obligations []BoundObligation, governingScope policyartifact.Scope, authorityDigest string) ([]ProseClaim, error) {
 	out := make([]ProseClaim, 0, len(obligations))
 	for _, o := range obligations {
-		text := strings.TrimSpace(string(o.Content))
+		text, err := normalizeAuthorityProse(o.Ref, o.Content)
+		if err != nil {
+			return nil, fmt.Errorf("contextcompile: conflict prose claims: %w", err)
+		}
 		out = append(out, ProseClaim{
 			ID:           o.Ref,
 			Category:     categoryObligationDeclaration,
@@ -821,7 +929,7 @@ func buildObligationProse(obligations []BoundObligation, governingScope policyar
 			LineIdentity:    o.Ref,
 		})
 	}
-	return out
+	return out, nil
 }
 
 // --- deep cloning (mutation-safety: authority design §3/§12) ---------------

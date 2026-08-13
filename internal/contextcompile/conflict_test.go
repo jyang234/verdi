@@ -664,6 +664,349 @@ func TestCompileConflictContextCancellationPropagates(t *testing.T) {
 	}
 }
 
+// --- 9: normalized authored prose (adr-decision, obligation-declaration) --
+
+// conflictADRFrontmatter is the exact frontmatter block the fixture ADR
+// carries. Every value here is FRONTMATTER, never authored decision prose:
+// an adr-decision ProseClaim's normalized text must contain none of it
+// (authority design §6: normalization "trims only structural frontmatter/
+// body delimiters").
+const conflictADRFrontmatter = `---
+id: adr/alpha-base
+kind: adr
+title: "Alpha base decision"
+status: accepted
+owners: [platform-team]
+decided: 2026-04-01
+frozen: { at: 2026-04-01, commit: ffffffffffffffffffffffffffffffffffffffff }
+---
+`
+
+// conflictADRNormalized is the exact normalized authored Markdown body the
+// fixture ADR must yield: the structural delimiter line and the blank line
+// that follows it are trimmed, and NOTHING else about the authored text
+// changes (no case folding, rewriting, summarizing, or reordering).
+const conflictADRNormalized = `# Alpha base decision
+
+The alpha transport is pinned to the toolchain the policy store adopts.
+
+## Consequences
+
+Downstream consumers pin the identical toolchain.`
+
+// conflictADRDoc is the whole authored ADR artifact: frontmatter, a blank
+// structural line, the authored body, and a trailing newline.
+const conflictADRDoc = conflictADRFrontmatter + "\n" + conflictADRNormalized + "\n"
+
+// conflictObligationNormalized is the exact normalized authored body of the
+// fixture obligation, and conflictObligationDoc the whole artifact.
+const conflictObligationNormalized = `# Behavioral obligation for ac-1
+
+An end-to-end run must exercise both parents' joined path.`
+
+const conflictObligationDoc = `---
+id: obligation/story-multi-parent--ac-1--behavioral
+kind: obligation
+title: "Behavioral obligation for ac-1"
+owners: [story-team]
+for_kind: behavioral
+links:
+  - { type: verifies, ref: "spec/story-multi-parent" }
+frozen: { at: 2026-04-01, commit: ffffffffffffffffffffffffffffffffffffffff }
+---
+` + "\n" + conflictObligationNormalized + "\n"
+
+const (
+	conflictADRPath        = ".verdi/adr/alpha-base.md"
+	conflictObligationPath = ".verdi/obligations/story-multi-parent/ac-1--behavioral.md"
+	conflictAlphaPath      = ".verdi/specs/active/feature-alpha/spec.md"
+)
+
+// conflictADRPinnedRef is the exact pinned declared-context ref the fixture
+// parent feature declares (SI-92 grammar: kind/name@commit).
+const conflictADRPinnedRef = "adr/alpha-base@" + compileHead
+
+// conflictOverlayGit overlays extra HEAD-tree entries and exact file bytes
+// onto a wrapped GitReader, so a test can add declared-context and
+// obligation artifacts to compilerAcceptedFixture's fake tree without
+// touching any committed fixture file.
+type conflictOverlayGit struct {
+	GitReader
+	files map[string][]byte
+	extra []gitx.TreeEntry
+}
+
+func (g conflictOverlayGit) Show(ctx context.Context, root, ref, path string) ([]byte, error) {
+	if data, ok := g.files[path]; ok {
+		return append([]byte(nil), data...), nil
+	}
+	return g.GitReader.Show(ctx, root, ref, path)
+}
+
+func (g conflictOverlayGit) LsTreeEntries(ctx context.Context, root, ref string) ([]gitx.TreeEntry, error) {
+	entries, err := g.GitReader.LsTreeEntries(ctx, root, ref)
+	if err != nil {
+		return nil, err
+	}
+	return append(append([]gitx.TreeEntry(nil), entries...), g.extra...), nil
+}
+
+// hermeticAcceptedProseFixture is hermeticAcceptedFixture plus authored
+// prose authority: the governing parent feature declares one exact pinned
+// ADR as declared context, that ADR exists at its fixed store path with
+// adrDoc's bytes, and the story's ac-1 behavioral obligation exists at its
+// fixed path. It returns the wired Compiler, its Request, and the root.
+func hermeticAcceptedProseFixture(t *testing.T, adrDoc string) (Compiler, Request, string) {
+	t.Helper()
+	root := installPolicyFixture(t)
+	git, states, ref := compilerAcceptedFixture(t)
+
+	alphaData, _ := decodeFragmentSpecFixture(t, "feature-alpha.md")
+	declaring := strings.Replace(string(alphaData), "class: feature\n",
+		"class: feature\ncontext: [\""+conflictADRPinnedRef+"\"]\n", 1)
+	if declaring == string(alphaData) {
+		t.Fatal("fixture patch did not apply: feature-alpha.md no longer carries a `class: feature` line")
+	}
+
+	overlay := conflictOverlayGit{
+		GitReader: policyDiskFallbackGit{GitReader: git},
+		files: map[string][]byte{
+			conflictAlphaPath:      []byte(declaring),
+			conflictADRPath:        []byte(adrDoc),
+			conflictObligationPath: []byte(conflictObligationDoc),
+		},
+		extra: []gitx.TreeEntry{
+			{Mode: "100644", Type: "blob", Object: strings.Repeat("e", 40), Path: conflictADRPath},
+			{Mode: "100644", Type: "blob", Object: strings.Repeat("f", 40), Path: conflictObligationPath},
+		},
+	}
+	gitWT := gitWithWorktree{GitReader: overlay, worktree: func(context.Context, string) ([]string, error) { return nil, nil }}
+	repoFacts := stubRepoFactsGatherer{snapshot: validRepositorySnapshot(compileHead, "main")}
+	projection := stubProjectionVerifier{report: &instructionprojection.Report{}}
+
+	c := newCompilerWithPorts(gitWT, states, defaultAuthorityLoader{}, nil, repoFacts, projection)
+	return c, validCompileRequest(ref), root
+}
+
+// conflictProseClaimsByCategory returns view's prose claims of one category.
+func conflictProseClaimsByCategory(view ConflictView, category string) []ProseClaim {
+	var out []ProseClaim
+	for _, pc := range view.ProseClaims {
+		if pc.Category == category {
+			out = append(out, pc)
+		}
+	}
+	return out
+}
+
+// TestCompileConflictOperandsAcceptedADRDecisionProse proves the accepted
+// arm emits exactly one adr-decision ProseClaim per declared-context ADR,
+// whose text is the normalized authored body with no frontmatter value in
+// it, whose source digest remains the digest of the EXACT RAW pinned bytes,
+// and whose artifact appears in Snapshot.Sources.
+func TestCompileConflictOperandsAcceptedADRDecisionProse(t *testing.T) {
+	c, req, root := hermeticAcceptedProseFixture(t, conflictADRDoc)
+	operands, err := c.CompileConflict(context.Background(), root, req, ConflictFacts{})
+	if err != nil {
+		t.Fatalf("CompileConflict: unexpected error: %v", err)
+	}
+	view, err := operands.View()
+	if err != nil {
+		t.Fatalf("View: unexpected error: %v", err)
+	}
+
+	claims := conflictProseClaimsByCategory(view, "adr-decision")
+	if len(claims) != 1 {
+		t.Fatalf("adr-decision ProseClaims = %d, want exactly 1: %+v", len(claims), claims)
+	}
+	claim := claims[0]
+
+	if claim.Text != conflictADRNormalized {
+		t.Errorf("adr-decision Text =\n%q\nwant\n%q", claim.Text, conflictADRNormalized)
+	}
+	if want := rawContentDigest([]byte(conflictADRNormalized)); claim.TextDigest != want {
+		t.Errorf("adr-decision TextDigest = %q, want %q (the digest of the normalized text)", claim.TextDigest, want)
+	}
+	for _, frontmatterOnly := range []string{"kind: adr", "platform-team", "2026-04-01", "status:", "frozen:"} {
+		if strings.Contains(claim.Text, frontmatterOnly) {
+			t.Errorf("adr-decision Text leaked the frontmatter value %q:\n%s", frontmatterOnly, claim.Text)
+		}
+	}
+
+	rawDigest := rawContentDigest([]byte(conflictADRDoc))
+	if claim.SourceDigest != rawDigest {
+		t.Errorf("adr-decision SourceDigest = %q, want %q (normalization never changes a source digest)", claim.SourceDigest, rawDigest)
+	}
+	if claim.SourcePath != conflictADRPath {
+		t.Errorf("adr-decision SourcePath = %q, want %q", claim.SourcePath, conflictADRPath)
+	}
+	if claim.SourceRef != conflictADRPinnedRef {
+		t.Errorf("adr-decision SourceRef = %q, want the exact pinned declared-context ref %q", claim.SourceRef, conflictADRPinnedRef)
+	}
+	if claim.AuthorityDigest == "" {
+		t.Error("adr-decision AuthorityDigest is empty, want the effective-policy digest")
+	}
+	if claim.ID != claim.LineIdentity || claim.ID != claim.SourceRef+"#"+claim.Object {
+		t.Errorf("adr-decision identity is inconsistent with its neighbors: id=%q object=%q line=%q", claim.ID, claim.Object, claim.LineIdentity)
+	}
+	if len(claim.Scope.Refs) != 1 || claim.Scope.Refs[0] != claim.LineIdentity {
+		t.Errorf("adr-decision Scope.Refs = %v, want inheritance narrowed to its own ref %q", claim.Scope.Refs, claim.LineIdentity)
+	}
+
+	want := ConflictSourceIdentity{Ref: conflictADRPinnedRef, Path: conflictADRPath, ContentDigest: rawDigest}
+	found := false
+	for _, s := range view.Snapshot.Sources {
+		if s == want {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("Snapshot.Sources is missing the declared ADR %+v: %+v", want, view.Snapshot.Sources)
+	}
+}
+
+// TestCompileConflictOperandsAcceptedObligationProseExcludesFrontmatter
+// proves the pre-existing obligation-declaration claims run through the
+// same normalization: a whole-artifact trim would leak the obligation's
+// frontmatter into Text/TextDigest.
+func TestCompileConflictOperandsAcceptedObligationProseExcludesFrontmatter(t *testing.T) {
+	c, req, root := hermeticAcceptedProseFixture(t, conflictADRDoc)
+	operands, err := c.CompileConflict(context.Background(), root, req, ConflictFacts{})
+	if err != nil {
+		t.Fatalf("CompileConflict: unexpected error: %v", err)
+	}
+	view, err := operands.View()
+	if err != nil {
+		t.Fatalf("View: unexpected error: %v", err)
+	}
+
+	claims := conflictProseClaimsByCategory(view, categoryObligationDeclaration)
+	if len(claims) != 1 {
+		t.Fatalf("obligation-declaration ProseClaims = %d, want exactly 1: %+v", len(claims), claims)
+	}
+	claim := claims[0]
+	if claim.Text != conflictObligationNormalized {
+		t.Errorf("obligation-declaration Text =\n%q\nwant\n%q", claim.Text, conflictObligationNormalized)
+	}
+	if want := rawContentDigest([]byte(conflictObligationNormalized)); claim.TextDigest != want {
+		t.Errorf("obligation-declaration TextDigest = %q, want %q", claim.TextDigest, want)
+	}
+	for _, frontmatterOnly := range []string{"for_kind", "kind: obligation", "verifies", "frozen:"} {
+		if strings.Contains(claim.Text, frontmatterOnly) {
+			t.Errorf("obligation-declaration Text leaked the frontmatter value %q:\n%s", frontmatterOnly, claim.Text)
+		}
+	}
+	if want := rawContentDigest([]byte(conflictObligationDoc)); claim.SourceDigest != want {
+		t.Errorf("obligation-declaration SourceDigest = %q, want the raw artifact digest %q", claim.SourceDigest, want)
+	}
+}
+
+// TestCompileConflictOperandsAcceptedADRProseNormalizesCRLF proves CRLF
+// authored bytes normalize to LF text (authority design §6) — the claim is
+// byte-identical to the LF fixture's, while the source digest is the CRLF
+// artifact's own raw digest.
+func TestCompileConflictOperandsAcceptedADRProseNormalizesCRLF(t *testing.T) {
+	crlf := strings.ReplaceAll(conflictADRDoc, "\n", "\r\n")
+	c, req, root := hermeticAcceptedProseFixture(t, crlf)
+	operands, err := c.CompileConflict(context.Background(), root, req, ConflictFacts{})
+	if err != nil {
+		t.Fatalf("CompileConflict: unexpected error: %v", err)
+	}
+	view, err := operands.View()
+	if err != nil {
+		t.Fatalf("View: unexpected error: %v", err)
+	}
+	claims := conflictProseClaimsByCategory(view, "adr-decision")
+	if len(claims) != 1 {
+		t.Fatalf("adr-decision ProseClaims = %d, want exactly 1: %+v", len(claims), claims)
+	}
+	if strings.Contains(claims[0].Text, "\r") {
+		t.Errorf("adr-decision Text retained a CR: %q", claims[0].Text)
+	}
+	if claims[0].Text != conflictADRNormalized {
+		t.Errorf("adr-decision Text =\n%q\nwant the identical LF normalization\n%q", claims[0].Text, conflictADRNormalized)
+	}
+	if want := rawContentDigest([]byte(crlf)); claims[0].SourceDigest != want {
+		t.Errorf("adr-decision SourceDigest = %q, want the CRLF artifact's own raw digest %q", claims[0].SourceDigest, want)
+	}
+}
+
+// TestCompileConflictOperandsAcceptedADRInvalidUTF8FailsClosed proves
+// invalid-UTF-8 authored bytes never produce a claim. The refusal happens
+// upstream, in ResolveDeclaredContext's own invalid-authority check, before
+// this file's normalization is reached; this test pins that the compile as
+// a whole still fails operationally rather than silently skipping the ADR.
+// normalizeAuthorityProse's own independent UTF-8 refusal is proven
+// directly by TestConflictOperandsNormalizeAuthorityProse.
+func TestCompileConflictOperandsAcceptedADRInvalidUTF8FailsClosed(t *testing.T) {
+	invalid := conflictADRFrontmatter + "\n# Alpha base decision\n\n\xff\xfe not utf-8\n"
+	c, req, root := hermeticAcceptedProseFixture(t, invalid)
+	if _, err := c.CompileConflict(context.Background(), root, req, ConflictFacts{}); err == nil {
+		t.Fatal("CompileConflict accepted an invalid-UTF-8 declared ADR, want an operational failure")
+	}
+}
+
+// TestConflictOperandsNormalizeAuthorityProse pins the shared §6
+// normalization contract directly, on both arms: what it preserves and
+// every input it refuses operationally.
+func TestConflictOperandsNormalizeAuthorityProse(t *testing.T) {
+	t.Run("preserves authored text exactly", func(t *testing.T) {
+		cases := map[string]struct {
+			raw  string
+			want string
+		}{
+			"trims the structural delimiters only": {
+				raw:  "---\nid: adr/x\n---\n\n# Title\n\nBody.\n",
+				want: "# Title\n\nBody.",
+			},
+			"converts CRLF to LF": {
+				raw:  "---\r\nid: adr/x\r\n---\r\n\r\n# Title\r\n\r\nBody.\r\n",
+				want: "# Title\n\nBody.",
+			},
+			"never case-folds or reorders": {
+				raw:  "---\nid: adr/x\n---\n\nZebra THEN Apple.\n",
+				want: "Zebra THEN Apple.",
+			},
+			"keeps authored indentation and interior blank lines": {
+				raw:  "---\nid: adr/x\n---\n\n    indented\n\n\nlater\n",
+				want: "    indented\n\n\nlater",
+			},
+		}
+		for name, tc := range cases {
+			t.Run(name, func(t *testing.T) {
+				got, err := normalizeAuthorityProse("adr/x", []byte(tc.raw))
+				if err != nil {
+					t.Fatalf("normalizeAuthorityProse: unexpected error: %v", err)
+				}
+				if got != tc.want {
+					t.Errorf("normalizeAuthorityProse = %q, want %q", got, tc.want)
+				}
+			})
+		}
+	})
+
+	t.Run("refuses operationally", func(t *testing.T) {
+		cases := map[string]string{
+			"invalid UTF-8":            "---\nid: adr/x\n---\n\n\xff\xfe\n",
+			"no frontmatter block":     "# Title\n\nBody.\n",
+			"unterminated frontmatter": "---\nid: adr/x\n\n# Title\n",
+			"blank authored body":      "---\nid: adr/x\n---\n\n   \n\n",
+			"empty artifact":           "",
+		}
+		for name, raw := range cases {
+			t.Run(name, func(t *testing.T) {
+				got, err := normalizeAuthorityProse("adr/x", []byte(raw))
+				if err == nil {
+					t.Fatalf("normalizeAuthorityProse = %q, want an operational failure", got)
+				}
+				if !strings.Contains(err.Error(), "adr/x") {
+					t.Errorf("error %q does not name the artifact it refused", err)
+				}
+			})
+		}
+	})
+}
+
 // --- helpers ---------------------------------------------------------------
 
 // conflictViewsEqual compares two ConflictView values by canonical digest,
