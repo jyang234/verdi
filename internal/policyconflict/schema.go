@@ -225,6 +225,14 @@ type SolverProof struct {
 // TypedClaimRecord is one mechanical row's typed claim, bound to the exact
 // policy/overlay artifact and claim digest it was read from (authority
 // design §5, DC-8's "exact witnesses").
+//
+// Its identity is the composite (PolicyID, Claim.ID) — never the claim
+// digest alone (ledger SI-105): policy identity is part of an exemption
+// witness and cannot be discarded merely because two policies declare
+// byte-identical claims, so equal bytes from two policies remain two
+// records. ClaimDigest must equal the canonical digest of the carried
+// Claim; the runtime seams recompute it rather than trusting a carried
+// value.
 type TypedClaimRecord struct {
 	PolicyID     string
 	PolicyDigest string
@@ -232,13 +240,29 @@ type TypedClaimRecord struct {
 	Claim        policyartifact.Claim
 }
 
-// ClaimWitness names one exact claim a judge finding or a removed-claims
-// ledger cites: its canonical source id, content digest, and closed §6
-// source category (authority design §6). This is policyconflict's own
-// witness-reference type — distinct from policyartifact.SemanticClaimWitness,
-// which additionally carries the claim's own authority binding and is
-// never re-derived here; a ClaimWitness only cites an identity already
+// MechanicalClaimWitness names one exact typed mechanical claim an
+// exemption departed from (authority design §5.5, ledger SI-105): "A
+// removed mechanical claim is identified by (policy_id, claim_id,
+// claim_digest), not by the semantic prose-witness vocabulary." Its
+// identity is the composite (PolicyID, ClaimID); ClaimDigest is the exact
+// current row claim's digest, so a later claim change visibly stales the
+// exemption instead of silently widening it.
+type MechanicalClaimWitness struct {
+	PolicyID    string
+	ClaimID     string
+	ClaimDigest string
+}
+
+// ClaimWitness names one exact SEMANTIC claim a judge finding cites: its
+// canonical source id, content digest, and closed §6 source category
+// (authority design §6). This is policyconflict's own witness-reference
+// type — distinct from policyartifact.SemanticClaimWitness, which
+// additionally carries the claim's own authority binding and is never
+// re-derived here; a ClaimWitness only cites an identity already
 // established elsewhere.
+//
+// A typed mechanical constraint is NOT one of §6's prose categories, so an
+// exemption's removed claims use MechanicalClaimWitness instead (SI-105).
 type ClaimWitness struct {
 	ID       string
 	Digest   string
@@ -312,11 +336,17 @@ type AuthorityResolution struct {
 // application: the exemption's identity/digest, its authority resolution,
 // and the exact claims it removed from the post-exemption solve (authority
 // design §5.5).
+//
+// RemovedClaims is mandatory-present, never absent: it is nonempty (at
+// least one exact current row witness) exactly when all five authority
+// states are proven, and the explicit empty set for every rejected
+// resolution, which removed nothing. Witnesses sort and deduplicate by
+// their composite (PolicyID, ClaimID) identity.
 type ExemptionResolution struct {
 	ID            string
 	Digest        string
 	Resolution    AuthorityResolution
-	RemovedClaims []ClaimWitness
+	RemovedClaims []MechanicalClaimWitness
 }
 
 // MechanicalEvaluation is one mechanical row: the deterministic claim

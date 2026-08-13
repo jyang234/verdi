@@ -3,6 +3,7 @@ package policyconflict
 import (
 	"context"
 	"reflect"
+	"sort"
 	"testing"
 
 	"github.com/jyang234/verdi/internal/contextcompile"
@@ -136,6 +137,17 @@ func authenticatedActor(t *testing.T, profile governanceprincipal.Profile, subje
 		t.Fatalf("resolution state = %q, want authenticated", res.State)
 	}
 	return res
+}
+
+// mustPrincipalID derives the canonical kernel principal id for a github
+// subject — the exact left component of an SI-108 witness token.
+func mustPrincipalID(t *testing.T, subject string) string {
+	t.Helper()
+	id, err := governanceprincipal.CanonicalPrincipalID("github", subject)
+	if err != nil {
+		t.Fatalf("CanonicalPrincipalID: %v", err)
+	}
+	return string(id)
 }
 
 func unprovenActor(t *testing.T, profile governanceprincipal.Profile, subject string) governanceprincipal.PrincipalResolution {
@@ -405,7 +417,7 @@ func TestSolvePrincipalRelationSameDifferentContradiction(t *testing.T) {
 		principalClaim("c1", "release", policyartifact.OpSamePrincipal, "author", "reviewer", universalScope()),
 		principalClaim("c2", "release", policyartifact.OpDifferentPrincipal, "reviewer", "author", universalScope()),
 	}
-	got, err := solvePrincipalRelation("release", "author", "reviewer", claims, profile, nil)
+	got, _, err := solvePrincipalRelation("release", "author", "reviewer", claims, profile, nil)
 	if err != nil {
 		t.Fatalf("solvePrincipalRelation: %v", err)
 	}
@@ -423,11 +435,11 @@ func TestSolvePrincipalRelationCanonicalReversedRolePair(t *testing.T) {
 	forward := []policyartifact.Claim{principalClaim("c1", "release", policyartifact.OpDifferentPrincipal, "author", "reviewer", universalScope())}
 	reversed := []policyartifact.Claim{principalClaim("c1", "release", policyartifact.OpDifferentPrincipal, "reviewer", "author", universalScope())}
 
-	got1, err := solvePrincipalRelation("release", "author", "reviewer", forward, profile, actors)
+	got1, _, err := solvePrincipalRelation("release", "author", "reviewer", forward, profile, actors)
 	if err != nil {
 		t.Fatalf("solvePrincipalRelation forward: %v", err)
 	}
-	got2, err := solvePrincipalRelation("release", "author", "reviewer", reversed, profile, actors)
+	got2, _, err := solvePrincipalRelation("release", "author", "reviewer", reversed, profile, actors)
 	if err != nil {
 		t.Fatalf("solvePrincipalRelation reversed: %v", err)
 	}
@@ -445,7 +457,7 @@ func TestSolvePrincipalRelationKernelProvenViolatedUnproven(t *testing.T) {
 
 	t.Run("proven: distinct principals", func(t *testing.T) {
 		actors := []governanceprincipal.PrincipalResolution{authenticatedActor(t, profile, "user-a"), authenticatedActor(t, profile, "user-b")}
-		got, err := solvePrincipalRelation("release", "author", "reviewer", claims, profile, actors)
+		got, _, err := solvePrincipalRelation("release", "author", "reviewer", claims, profile, actors)
 		if err != nil {
 			t.Fatalf("solvePrincipalRelation: %v", err)
 		}
@@ -482,7 +494,7 @@ evidence_source_restrictions: []
 escalation_thresholds: []
 `)
 		actors := []governanceprincipal.PrincipalResolution{authenticatedActor(t, collapsed, "user-a")}
-		got, err := solvePrincipalRelation("release", "author", "reviewer", claims, collapsed, actors)
+		got, _, err := solvePrincipalRelation("release", "author", "reviewer", claims, collapsed, actors)
 		if err != nil {
 			t.Fatalf("solvePrincipalRelation: %v", err)
 		}
@@ -493,7 +505,7 @@ escalation_thresholds: []
 
 	t.Run("unproven: no authenticated fillers", func(t *testing.T) {
 		actors := []governanceprincipal.PrincipalResolution{unprovenActor(t, profile, "user-a")}
-		got, err := solvePrincipalRelation("release", "author", "reviewer", claims, profile, actors)
+		got, _, err := solvePrincipalRelation("release", "author", "reviewer", claims, profile, actors)
 		if err != nil {
 			t.Fatalf("solvePrincipalRelation: %v", err)
 		}
@@ -532,14 +544,14 @@ evidence_source_restrictions: []
 escalation_thresholds: []
 `
 
-// TestSolvePrincipalRelationExperimentalProfileIsNeverProven pins authority
-// design §5.3's literal kernel mapping: "violated and unproven kernel
-// results remain violated-with-witness or unproven respectively". Two
-// distinct authenticated actors satisfy the distinctness rule itself, but
-// the kernel decision as a whole is violated (an experimental profile can
-// never produce an authoritative authorization), so the relation is NOT
-// proven.
-func TestSolvePrincipalRelationExperimentalProfileIsNeverProven(t *testing.T) {
+// TestSolvePrincipalRelationProfileExperimentalUnproven pins authority
+// design §5.3's advisory-posture rule (ledger SI-106): "Advisory/experimental
+// kernel posture is unproven for the authoritative consumer, not evidence
+// that the requested relation is violated". Two distinct authenticated
+// actors satisfy the distinctness rule itself, but an experimental profile
+// can never produce an authoritative authorization — so the relation is
+// neither proven nor violated, it is UNPROVEN.
+func TestSolvePrincipalRelationProfileExperimentalUnproven(t *testing.T) {
 	profile := mustDecodeProfile(t, experimentalPolicyYAML)
 	actors := []governanceprincipal.PrincipalResolution{
 		authenticatedActor(t, profile, "user-a"),
@@ -547,22 +559,41 @@ func TestSolvePrincipalRelationExperimentalProfileIsNeverProven(t *testing.T) {
 	}
 	claims := []policyartifact.Claim{principalClaim("c1", "release", policyartifact.OpDifferentPrincipal, "author", "reviewer", universalScope())}
 
-	got, err := solvePrincipalRelation("release", "author", "reviewer", claims, profile, actors)
+	got, _, err := solvePrincipalRelation("release", "author", "reviewer", claims, profile, actors)
 	if err != nil {
 		t.Fatalf("solvePrincipalRelation: %v", err)
 	}
-	if got.State != SolverUnsatisfiable {
-		t.Fatalf("State = %q, want unsatisfiable: the kernel decision is violated-with-witness, never a proof (proof: %+v)", got.State, got)
+	if got.State != SolverUnproven {
+		t.Fatalf("State = %q, want unproven: advisory posture is never relation-violation evidence (proof: %+v)", got.State, got)
 	}
 	if !stringsContain(got.Witnesses, governanceprincipal.ReasonExperimentalAuthorityForbidden) {
-		t.Fatalf("Witnesses = %v, want the kernel's own violated finding code carried as a witness", got.Witnesses)
+		t.Fatalf("Witnesses = %v, want the kernel's own experimental finding code carried as a witness", got.Witnesses)
 	}
 	if err := validateSolverProof("proof", got); err != nil {
 		t.Fatalf("proof failed the package's own wire validation: %v", err)
 	}
 }
 
-func TestEvaluateMechanicalPrincipalRelationExperimentalRowViolated(t *testing.T) {
+// TestSolvePrincipalRelationProfileExperimentalNeverPasses is the other half
+// of the same rule: advisory posture must not authorize an authoritative
+// pass either, even when the separation rule itself is satisfied.
+func TestSolvePrincipalRelationProfileExperimentalNeverPasses(t *testing.T) {
+	profile := mustDecodeProfile(t, experimentalPolicyYAML)
+	actors := []governanceprincipal.PrincipalResolution{
+		authenticatedActor(t, profile, "user-a"),
+		authenticatedActor(t, profile, "user-b"),
+	}
+	claims := []policyartifact.Claim{principalClaim("c1", "release", policyartifact.OpDifferentPrincipal, "author", "reviewer", universalScope())}
+	got, _, err := solvePrincipalRelation("release", "author", "reviewer", claims, profile, actors)
+	if err != nil {
+		t.Fatalf("solvePrincipalRelation: %v", err)
+	}
+	if got.State == SolverSatisfiable {
+		t.Fatalf("State = %q, want anything but satisfiable: an experimental profile can never authorize an authoritative pass", got.State)
+	}
+}
+
+func TestEvaluateMechanicalProfileExperimentalRowUnproven(t *testing.T) {
 	profile := mustDecodeProfile(t, experimentalPolicyYAML)
 	actors := []governanceprincipal.PrincipalResolution{
 		authenticatedActor(t, profile, "user-a"),
@@ -571,15 +602,19 @@ func TestEvaluateMechanicalPrincipalRelationExperimentalRowViolated(t *testing.T
 	claims := []contextcompile.TypedClaim{
 		typedClaim(t, "policy-a", principalClaim("c1", "release", policyartifact.OpDifferentPrincipal, "author", "reviewer", universalScope())),
 	}
-	rows, err := EvaluateMechanical(context.Background(), MechanicalInput{Claims: claims, Profile: profile, Actors: actors})
+	result, err := EvaluateMechanical(context.Background(), MechanicalInput{Claims: claims, Profile: profile, Actors: actors})
 	if err != nil {
 		t.Fatalf("EvaluateMechanical: %v", err)
 	}
+	rows := result.Evaluations
 	if len(rows) != 1 {
 		t.Fatalf("rows = %+v, want exactly one", rows)
 	}
-	if rows[0].State != ProofViolatedWithWitness {
-		t.Fatalf("State = %q, want violated-with-witness (kernel result is violated)", rows[0].State)
+	if rows[0].State != ProofUnproven {
+		t.Fatalf("State = %q, want unproven (advisory posture is never a mechanical violation)", rows[0].State)
+	}
+	if len(rows[0].Reasons) != 1 || rows[0].Reasons[0] != ReasonProfileExperimental {
+		t.Fatalf("Reasons = %v, want [profile-experimental]", rows[0].Reasons)
 	}
 	if err := validateMechanicalEvaluation("row", rows[0]); err != nil {
 		t.Fatalf("row failed validation: %v", err)
@@ -657,7 +692,7 @@ func TestSolvePrincipalRelationIgnoresUnrelatedKernelFindings(t *testing.T) {
 			authenticatedActor(t, profile, "user-a"),
 			authenticatedActor(t, profile, "user-b"),
 		}
-		got, err := solvePrincipalRelation("release", "author", "reviewer", claims, profile, actors)
+		got, _, err := solvePrincipalRelation("release", "author", "reviewer", claims, profile, actors)
 		if err != nil {
 			t.Fatalf("solvePrincipalRelation: %v", err)
 		}
@@ -672,7 +707,7 @@ func TestSolvePrincipalRelationIgnoresUnrelatedKernelFindings(t *testing.T) {
 			authenticatedActor(t, profile, "user-a"),
 			authenticatedActor(t, profile, "user-b"),
 		}
-		got, err := solvePrincipalRelation("release", "author", "reviewer", claims, profile, actors)
+		got, _, err := solvePrincipalRelation("release", "author", "reviewer", claims, profile, actors)
 		if err != nil {
 			t.Fatalf("solvePrincipalRelation: %v", err)
 		}
@@ -691,10 +726,11 @@ func TestEvaluateMechanicalPrincipalRelationUnrelatedApproverShortfallProven(t *
 	claims := []contextcompile.TypedClaim{
 		typedClaim(t, "policy-a", principalClaim("c1", "release", policyartifact.OpDifferentPrincipal, "author", "reviewer", universalScope())),
 	}
-	rows, err := EvaluateMechanical(context.Background(), MechanicalInput{Claims: claims, Profile: profile, Actors: actors})
+	result, err := EvaluateMechanical(context.Background(), MechanicalInput{Claims: claims, Profile: profile, Actors: actors})
 	if err != nil {
 		t.Fatalf("EvaluateMechanical: %v", err)
 	}
+	rows := result.Evaluations
 	if len(rows) != 1 {
 		t.Fatalf("rows = %+v, want exactly one", rows)
 	}
@@ -749,7 +785,7 @@ escalation_thresholds: []
 		authenticatedActor(t, profile, "user-b"),
 	}
 	claims := []policyartifact.Claim{principalClaim("c1", "release", policyartifact.OpDifferentPrincipal, "author", "reviewer", universalScope())}
-	got, err := solvePrincipalRelation("release", "author", "reviewer", claims, profile, actors)
+	got, _, err := solvePrincipalRelation("release", "author", "reviewer", claims, profile, actors)
 	if err != nil {
 		t.Fatalf("solvePrincipalRelation: %v", err)
 	}
@@ -781,7 +817,7 @@ escalation_thresholds: []
 `)
 	actors := []governanceprincipal.PrincipalResolution{authenticatedActor(t, profile, "user-a"), authenticatedActor(t, profile, "user-b")}
 	claims := []policyartifact.Claim{principalClaim("c1", "release", policyartifact.OpDifferentPrincipal, "author", "reviewer", universalScope())}
-	got, err := solvePrincipalRelation("release", "author", "reviewer", claims, profile, actors)
+	got, _, err := solvePrincipalRelation("release", "author", "reviewer", claims, profile, actors)
 	if err != nil {
 		t.Fatalf("solvePrincipalRelation: %v", err)
 	}
@@ -793,7 +829,7 @@ escalation_thresholds: []
 func TestSolvePrincipalRelationUnregisteredTransitionRejected(t *testing.T) {
 	profile := mustDecodeProfile(t, rolePolicyYAML)
 	claims := []policyartifact.Claim{principalClaim("c1", "unregistered-transition", policyartifact.OpDifferentPrincipal, "author", "reviewer", universalScope())}
-	if _, err := solvePrincipalRelation("unregistered-transition", "author", "reviewer", claims, profile, nil); err == nil {
+	if _, _, err := solvePrincipalRelation("unregistered-transition", "author", "reviewer", claims, profile, nil); err == nil {
 		t.Fatal("want operational error for unregistered transition, got nil")
 	}
 }
@@ -801,14 +837,14 @@ func TestSolvePrincipalRelationUnregisteredTransitionRejected(t *testing.T) {
 func TestSolvePrincipalRelationUnregisteredRoleRejected(t *testing.T) {
 	profile := mustDecodeProfile(t, rolePolicyYAML)
 	claims := []policyartifact.Claim{principalClaim("c1", "release", policyartifact.OpDifferentPrincipal, "author", "ghost-role", universalScope())}
-	if _, err := solvePrincipalRelation("release", "author", "ghost-role", claims, profile, nil); err == nil {
+	if _, _, err := solvePrincipalRelation("release", "author", "ghost-role", claims, profile, nil); err == nil {
 		t.Fatal("want operational error for unregistered role, got nil")
 	}
 }
 
 func TestSolvePrincipalRelationNoRelationTriviallySatisfiable(t *testing.T) {
 	profile := mustDecodeProfile(t, rolePolicyYAML)
-	got, err := solvePrincipalRelation("release", "author", "reviewer", nil, profile, nil)
+	got, _, err := solvePrincipalRelation("release", "author", "reviewer", nil, profile, nil)
 	if err != nil {
 		t.Fatalf("solvePrincipalRelation: %v", err)
 	}
@@ -837,10 +873,11 @@ func TestEvaluateMechanicalMixedDomainRejected(t *testing.T) {
 }
 
 func TestEvaluateMechanicalEmptyClaims(t *testing.T) {
-	rows, err := EvaluateMechanical(context.Background(), MechanicalInput{})
+	result, err := EvaluateMechanical(context.Background(), MechanicalInput{})
 	if err != nil {
 		t.Fatalf("EvaluateMechanical: %v", err)
 	}
+	rows := result.Evaluations
 	if len(rows) != 0 {
 		t.Fatalf("rows = %+v, want none", rows)
 	}
@@ -851,10 +888,11 @@ func TestEvaluateMechanicalSatisfiableRow(t *testing.T) {
 		typedClaim(t, "policy-a", discreteClaim("c1", "level", policyartifact.OpAllowedValues, []string{"gold", "silver"}, universalScope())),
 		typedClaim(t, "policy-b", discreteClaim("c2", "level", policyartifact.OpRequiredValues, []string{"gold"}, universalScope())),
 	}
-	rows, err := EvaluateMechanical(context.Background(), MechanicalInput{Claims: claims})
+	result, err := EvaluateMechanical(context.Background(), MechanicalInput{Claims: claims})
 	if err != nil {
 		t.Fatalf("EvaluateMechanical: %v", err)
 	}
+	rows := result.Evaluations
 	if len(rows) != 1 {
 		t.Fatalf("rows = %+v, want exactly one", rows)
 	}
@@ -876,10 +914,11 @@ func TestEvaluateMechanicalExactScopeConflict(t *testing.T) {
 		typedClaim(t, "policy-a", discreteClaim("c1", "level", policyartifact.OpEquals, []string{"gold"}, scope)),
 		typedClaim(t, "policy-b", discreteClaim("c2", "level", policyartifact.OpEquals, []string{"silver"}, scope)),
 	}
-	rows, err := EvaluateMechanical(context.Background(), MechanicalInput{Claims: claims})
+	result, err := EvaluateMechanical(context.Background(), MechanicalInput{Claims: claims})
 	if err != nil {
 		t.Fatalf("EvaluateMechanical: %v", err)
 	}
+	rows := result.Evaluations
 	if len(rows) != 1 {
 		t.Fatalf("rows = %+v, want exactly one exact-scope witness", rows)
 	}
@@ -903,10 +942,11 @@ func TestEvaluateMechanicalDifferentlyScopedPairConflict(t *testing.T) {
 		typedClaim(t, "policy-a", discreteClaim("c1", "level", policyartifact.OpEquals, []string{"gold"}, universalScope())),
 		typedClaim(t, "policy-b", discreteClaim("c2", "level", policyartifact.OpEquals, []string{"silver"}, phaseScope("build"))),
 	}
-	rows, err := EvaluateMechanical(context.Background(), MechanicalInput{Claims: claims})
+	result, err := EvaluateMechanical(context.Background(), MechanicalInput{Claims: claims})
 	if err != nil {
 		t.Fatalf("EvaluateMechanical: %v", err)
 	}
+	rows := result.Evaluations
 	if len(rows) != 1 {
 		t.Fatalf("rows = %+v, want exactly one pair witness", rows)
 	}
@@ -920,10 +960,11 @@ func TestEvaluateMechanicalDisjointScopedPairNoConflictRow(t *testing.T) {
 		typedClaim(t, "policy-a", discreteClaim("c1", "level", policyartifact.OpEquals, []string{"gold"}, phaseScope("design"))),
 		typedClaim(t, "policy-b", discreteClaim("c2", "level", policyartifact.OpEquals, []string{"silver"}, phaseScope("build"))),
 	}
-	rows, err := EvaluateMechanical(context.Background(), MechanicalInput{Claims: claims})
+	result, err := EvaluateMechanical(context.Background(), MechanicalInput{Claims: claims})
 	if err != nil {
 		t.Fatalf("EvaluateMechanical: %v", err)
 	}
+	rows := result.Evaluations
 	// Steps 1-2 produce no overlap witness at all: each singleton exact-
 	// scope subgroup is trivially satisfiable and the one differently-scoped
 	// pair is PROVEN disjoint. Authority design §5: "Proven-disjoint
@@ -965,10 +1006,11 @@ func TestEvaluateMechanicalPairwiseOverlappingTripleStaysUnproven(t *testing.T) 
 		typedClaim(t, "policy-b", discreteClaim("c2", "level", policyartifact.OpAllowedValues, []string{"bronze", "silver"}, twoPhases("build", "review"))),
 		typedClaim(t, "policy-c", discreteClaim("c3", "level", policyartifact.OpAllowedValues, []string{"bronze", "gold"}, twoPhases("design", "review"))),
 	}
-	rows, err := EvaluateMechanical(context.Background(), MechanicalInput{Claims: claims})
+	result, err := EvaluateMechanical(context.Background(), MechanicalInput{Claims: claims})
 	if err != nil {
 		t.Fatalf("EvaluateMechanical: %v", err)
 	}
+	rows := result.Evaluations
 	if len(rows) != 1 {
 		t.Fatalf("rows = %+v, want exactly one fallback row", rows)
 	}
@@ -983,32 +1025,335 @@ func TestEvaluateMechanicalPairwiseOverlappingTripleStaysUnproven(t *testing.T) 
 	}
 }
 
-// TestEvaluateMechanicalIdenticalClaimsFromTwoPoliciesCollapse pins the
-// frozen wire's row-claim identity rule (validate.go's
-// requireSortedUnique over ClaimDigest): a claim two policies declare
-// byte-identically has ONE row identity, so the row carries one record for
-// it, deterministically attributed.
-func TestEvaluateMechanicalIdenticalClaimsFromTwoPoliciesCollapse(t *testing.T) {
+// TestMechanicalClaimIdentityPreservesTwoPolicies pins ledger SI-105(c):
+// a row claim is keyed by the composite (policy_id, claim_id), so equal
+// claim BYTES declared by two different policies remain two records. Policy
+// identity is part of an exemption witness and can never be discarded
+// merely because two policies declare identical bytes.
+func TestMechanicalClaimIdentityPreservesTwoPolicies(t *testing.T) {
 	shared := discreteClaim("shared-claim", "level", policyartifact.OpAllowedValues, []string{"gold"}, universalScope())
 	claims := []contextcompile.TypedClaim{
 		typedClaim(t, "policy-b", shared),
 		typedClaim(t, "policy-a", shared),
 	}
-	rows, err := EvaluateMechanical(context.Background(), MechanicalInput{Claims: claims})
+	result, err := EvaluateMechanical(context.Background(), MechanicalInput{Claims: claims})
 	if err != nil {
 		t.Fatalf("EvaluateMechanical: %v", err)
 	}
+	rows := result.Evaluations
 	if len(rows) != 1 {
 		t.Fatalf("rows = %+v, want exactly one", rows)
 	}
 	if err := validateMechanicalEvaluation("row", rows[0]); err != nil {
 		t.Fatalf("row failed the package's own wire validation: %v", err)
 	}
-	if len(rows[0].Claims) != 1 {
-		t.Fatalf("Claims = %+v, want one record for the single shared claim identity", rows[0].Claims)
+	if len(rows[0].Claims) != 2 {
+		t.Fatalf("Claims = %+v, want one record per contributing policy identity", rows[0].Claims)
 	}
-	if rows[0].Claims[0].PolicyID != "policy-a" {
-		t.Fatalf("Claims[0].PolicyID = %q, want the deterministic lowest contributing policy id", rows[0].Claims[0].PolicyID)
+	if rows[0].Claims[0].PolicyID != "policy-a" || rows[0].Claims[1].PolicyID != "policy-b" {
+		t.Fatalf("Claims policy ids = %q,%q, want composite-key ascending order policy-a,policy-b",
+			rows[0].Claims[0].PolicyID, rows[0].Claims[1].PolicyID)
+	}
+	if rows[0].Claims[0].ClaimDigest != rows[0].Claims[1].ClaimDigest {
+		t.Fatalf("Claims digests = %q,%q, want the identical claim bytes retained on both records",
+			rows[0].Claims[0].ClaimDigest, rows[0].Claims[1].ClaimDigest)
+	}
+}
+
+// TestMechanicalClaimIdentityDuplicateCompositeCollapses covers the other
+// half of composite identity: the SAME (policy_id, claim_id) supplied twice
+// is one record, while two records disagreeing about that identity's
+// content is contradictory authority and fails operationally.
+func TestMechanicalClaimIdentityDuplicateCompositeCollapses(t *testing.T) {
+	claim := discreteClaim("c1", "level", policyartifact.OpAllowedValues, []string{"gold"}, universalScope())
+	dup := []contextcompile.TypedClaim{typedClaim(t, "policy-a", claim), typedClaim(t, "policy-a", claim)}
+	result, err := EvaluateMechanical(context.Background(), MechanicalInput{Claims: dup})
+	if err != nil {
+		t.Fatalf("EvaluateMechanical: %v", err)
+	}
+	if len(result.Evaluations) != 1 || len(result.Evaluations[0].Claims) != 1 {
+		t.Fatalf("Evaluations = %+v, want one row carrying one record for the repeated identity", result.Evaluations)
+	}
+
+	other := discreteClaim("c1", "level", policyartifact.OpAllowedValues, []string{"silver"}, universalScope())
+	conflicting := []contextcompile.TypedClaim{typedClaim(t, "policy-a", claim), typedClaim(t, "policy-a", other)}
+	if _, err := EvaluateMechanical(context.Background(), MechanicalInput{Claims: conflicting}); err == nil {
+		t.Fatal("want operational error for two different claims sharing one (policy_id, claim_id), got nil")
+	}
+}
+
+// TestMechanicalClaimDigestMutationRefused pins ledger SI-105(c)'s digest
+// recomputation: a carried claim_digest that is not the canonical digest of
+// the carried base claim is hand-built or mutated operand drift, refused
+// operationally rather than trusted.
+func TestMechanicalClaimDigestMutationRefused(t *testing.T) {
+	good := typedClaim(t, "policy-a", discreteClaim("c1", "level", policyartifact.OpAllowedValues, []string{"gold"}, universalScope()))
+
+	t.Run("recomputed digest accepted", func(t *testing.T) {
+		if _, err := EvaluateMechanical(context.Background(), MechanicalInput{Claims: []contextcompile.TypedClaim{good}}); err != nil {
+			t.Fatalf("EvaluateMechanical(honest digest): %v", err)
+		}
+	})
+
+	t.Run("mutated digest refused", func(t *testing.T) {
+		mutated := good
+		mutated.ClaimDigest = testDigest64
+		if _, err := EvaluateMechanical(context.Background(), MechanicalInput{Claims: []contextcompile.TypedClaim{mutated}}); err == nil {
+			t.Fatal("want operational error for a claim digest that does not recompute, got nil")
+		}
+	})
+
+	t.Run("mutated claim body refused", func(t *testing.T) {
+		swapped := good
+		swapped.Claim = discreteClaim("c1", "level", policyartifact.OpAllowedValues, []string{"silver"}, universalScope())
+		if _, err := EvaluateMechanical(context.Background(), MechanicalInput{Claims: []contextcompile.TypedClaim{swapped}}); err == nil {
+			t.Fatal("want operational error for a claim body that no longer digests to its carried digest, got nil")
+		}
+	})
+}
+
+// --- SI-106: exact distinctness role-pair attribution ------------------------
+
+// TestRelationBearingFindingDistinctnessRolesAttribution pins authority
+// design §5.3's operand set (ledger SI-106): the evaluator consumes only
+// whole-request authority findings plus findings whose exact role or sorted
+// role pair belongs to the requested relation. A SECOND distinctness rule's
+// finding, carrying its own role pair, is not evidence about this claim's
+// relation and must not flip it.
+func TestRelationBearingFindingDistinctnessRolesAttribution(t *testing.T) {
+	cases := []struct {
+		name    string
+		finding governanceprincipal.Finding
+		want    bool
+	}{
+		{
+			"this claim's own distinctness pair bears",
+			governanceprincipal.Finding{
+				Code:  governanceprincipal.ReasonDistinctnessViolated,
+				State: governanceprincipal.AuthorizationViolated,
+				Roles: []string{"author", "reviewer"},
+			},
+			true,
+		},
+		{
+			"a second distinctness rule's pair does not bear",
+			governanceprincipal.Finding{
+				Code:  governanceprincipal.ReasonDistinctnessViolated,
+				State: governanceprincipal.AuthorizationViolated,
+				Roles: []string{"author", "owner"},
+			},
+			false,
+		},
+		{
+			"a second rule's unproven pair does not bear even when it names one shared role",
+			governanceprincipal.Finding{
+				Code:  governanceprincipal.ReasonDistinctnessUnproven,
+				State: governanceprincipal.AuthorizationUnproven,
+				Role:  "author",
+				Roles: []string{"author", "owner"},
+			},
+			false,
+		},
+		{
+			"whole-request experimental authority always bears",
+			governanceprincipal.Finding{
+				Code:  governanceprincipal.ReasonExperimentalAuthorityForbidden,
+				State: governanceprincipal.AuthorizationViolated,
+			},
+			true,
+		},
+		{
+			"whole-request inapplicable transition always bears",
+			governanceprincipal.Finding{
+				Code:  governanceprincipal.ReasonTransitionNotApplicable,
+				State: governanceprincipal.AuthorizationViolated,
+			},
+			true,
+		},
+		{
+			"a signature shortfall naming one of this claim's roles bears",
+			governanceprincipal.Finding{
+				Code:  governanceprincipal.ReasonSignatureUnproven,
+				State: governanceprincipal.AuthorizationUnproven,
+				Role:  "reviewer",
+			},
+			true,
+		},
+		{
+			"an approver shortfall naming no role of this claim does not bear",
+			governanceprincipal.Finding{
+				Code:  governanceprincipal.ReasonRequiredApproverMissing,
+				State: governanceprincipal.AuthorizationUnproven,
+			},
+			false,
+		},
+		{
+			"an ownership shortfall about an unrelated role does not bear",
+			governanceprincipal.Finding{
+				Code:  governanceprincipal.ReasonOwnershipViolated,
+				State: governanceprincipal.AuthorizationViolated,
+				Role:  "owner",
+			},
+			false,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := relationBearingFinding(tc.finding, "author", "reviewer"); got != tc.want {
+				t.Fatalf("relationBearingFinding(%+v) = %v, want %v", tc.finding, got, tc.want)
+			}
+			// The canonical pair normalizes lexically, so a reversed
+			// spelling of the same requested relation classifies identically.
+			if got := relationBearingFinding(tc.finding, "reviewer", "author"); got != tc.want {
+				t.Fatalf("relationBearingFinding(%+v) with reversed roles = %v, want %v", tc.finding, got, tc.want)
+			}
+		})
+	}
+}
+
+// --- SI-106/SI-108: kernel disclosure translation ---------------------------
+
+// soloCollapsePolicyYAML is a solo profile in which BOTH mapped subjects
+// hold both roles, so the kernel discloses two distinct solo collapses.
+const soloCollapsePolicyYAML = `schema: verdi.governance-profile/v1
+id: team-default
+class: solo
+applicable_transitions: [release]
+identity_trust_sources:
+  - { id: github, kind: forge }
+role_mappings:
+  - role: author
+    trust_source: github
+    subjects: ["user-a", "user-b"]
+  - role: reviewer
+    trust_source: github
+    subjects: ["user-a", "user-b"]
+ownership_sources: []
+signature_requirements: []
+required_approvers: []
+distinctness_rules:
+  - transitions: [release]
+    left_role: author
+    right_role: reviewer
+    relation: different-principal
+evidence_source_restrictions: []
+escalation_thresholds: []
+`
+
+// TestMechanicalDisclosureSoloCollapseTranslation pins ledger SI-108: each
+// kernel solo-collapse principal/role membership becomes exactly one report
+// witness token `<principal_id>:<role_id>` under report code
+// solo-principal-collapse, sorted and deduplicated, with duplicate
+// translations from repeated kernel calls collapsing into one disclosure.
+func TestMechanicalDisclosureSoloCollapseTranslation(t *testing.T) {
+	profile := mustDecodeProfile(t, soloCollapsePolicyYAML)
+	actors := []governanceprincipal.PrincipalResolution{
+		authenticatedActor(t, profile, "user-a"),
+		authenticatedActor(t, profile, "user-b"),
+	}
+	// Two differently-scoped claims in one group force the complete solve
+	// AND the scope-witness solves to call the kernel, so the identical
+	// disclosure is translated several times.
+	claims := []contextcompile.TypedClaim{
+		typedClaim(t, "policy-a", principalClaim("c1", "release", policyartifact.OpDifferentPrincipal, "author", "reviewer", phaseScope("build"))),
+		typedClaim(t, "policy-b", principalClaim("c2", "release", policyartifact.OpDifferentPrincipal, "author", "reviewer", phaseScope("review"))),
+	}
+	result, err := EvaluateMechanical(context.Background(), MechanicalInput{Claims: claims, Profile: profile, Actors: actors})
+	if err != nil {
+		t.Fatalf("EvaluateMechanical: %v", err)
+	}
+	if len(result.Disclosures) != 1 {
+		t.Fatalf("Disclosures = %+v, want exactly one collapsed disclosure", result.Disclosures)
+	}
+	got := result.Disclosures[0]
+	if got.Code != DisclosureSoloPrincipalCollapse {
+		t.Fatalf("Code = %q, want %q", got.Code, DisclosureSoloPrincipalCollapse)
+	}
+	pa := mustPrincipalID(t, "user-a")
+	pb := mustPrincipalID(t, "user-b")
+	want := []string{pa + ":author", pa + ":reviewer", pb + ":author", pb + ":reviewer"}
+	sort.Strings(want)
+	if !reflect.DeepEqual(got.Witnesses, want) {
+		t.Fatalf("Witnesses = %v, want the sorted deduplicated membership tokens %v", got.Witnesses, want)
+	}
+	if err := validateDisclosure("disclosure", got); err != nil {
+		t.Fatalf("translated disclosure failed the package's own wire validation: %v", err)
+	}
+}
+
+// TestMechanicalDisclosureNoneWithoutKernelEvidence keeps the empty case
+// honest: a profile that discloses nothing yields an explicitly empty set,
+// never a nil or a manufactured disclosure.
+func TestMechanicalDisclosureNoneWithoutKernelEvidence(t *testing.T) {
+	profile := mustDecodeProfile(t, rolePolicyYAML)
+	actors := []governanceprincipal.PrincipalResolution{
+		authenticatedActor(t, profile, "user-a"),
+		authenticatedActor(t, profile, "user-b"),
+	}
+	claims := []contextcompile.TypedClaim{
+		typedClaim(t, "policy-a", principalClaim("c1", "release", policyartifact.OpDifferentPrincipal, "author", "reviewer", universalScope())),
+	}
+	result, err := EvaluateMechanical(context.Background(), MechanicalInput{Claims: claims, Profile: profile, Actors: actors})
+	if err != nil {
+		t.Fatalf("EvaluateMechanical: %v", err)
+	}
+	if result.Disclosures == nil || len(result.Disclosures) != 0 {
+		t.Fatalf("Disclosures = %+v, want an explicitly empty set", result.Disclosures)
+	}
+}
+
+// TestMechanicalDisclosureTranslationRefusals pins the closed-vocabulary and
+// SI-108 grammar rules the translation fails closed on. These operands
+// cannot be produced by the landed kernel, so they are supplied directly:
+// the point is that policyconflict never invents a report label or a lossy
+// token when a future kernel does produce them.
+func TestMechanicalDisclosureTranslationRefusals(t *testing.T) {
+	principal := mustPrincipalID(t, "user-a")
+
+	t.Run("known code translates", func(t *testing.T) {
+		got, err := translateKernelDisclosures([]governanceprincipal.Disclosure{{
+			Code:        governanceprincipal.ReasonSoloRoleCollapse,
+			PrincipalID: governanceprincipal.PrincipalID(principal),
+			Roles:       []string{"reviewer", "author"},
+		}})
+		if err != nil {
+			t.Fatalf("translateKernelDisclosures: %v", err)
+		}
+		want := []Disclosure{{Code: DisclosureSoloPrincipalCollapse, Witnesses: []string{principal + ":author", principal + ":reviewer"}}}
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("got %+v, want %+v", got, want)
+		}
+	})
+
+	negatives := []struct {
+		name string
+		in   governanceprincipal.Disclosure
+	}{
+		{"unknown kernel disclosure code", governanceprincipal.Disclosure{
+			Code: "some-future-disclosure", PrincipalID: governanceprincipal.PrincipalID(principal), Roles: []string{"author"},
+		}},
+		{"principal component outside its grammar", governanceprincipal.Disclosure{
+			Code: governanceprincipal.ReasonSoloRoleCollapse, PrincipalID: "principal/github", Roles: []string{"author"},
+		}},
+		{"principal component containing a colon", governanceprincipal.Disclosure{
+			Code: governanceprincipal.ReasonSoloRoleCollapse, PrincipalID: governanceprincipal.PrincipalID(principal + ":extra"), Roles: []string{"author"},
+		}},
+		{"role component containing a colon", governanceprincipal.Disclosure{
+			Code: governanceprincipal.ReasonSoloRoleCollapse, PrincipalID: governanceprincipal.PrincipalID(principal), Roles: []string{"author:reviewer"},
+		}},
+		{"role component outside its grammar", governanceprincipal.Disclosure{
+			Code: governanceprincipal.ReasonSoloRoleCollapse, PrincipalID: governanceprincipal.PrincipalID(principal), Roles: []string{"Author"},
+		}},
+		{"membership naming no role at all", governanceprincipal.Disclosure{
+			Code: governanceprincipal.ReasonSoloRoleCollapse, PrincipalID: governanceprincipal.PrincipalID(principal), Roles: nil,
+		}},
+	}
+	for _, tc := range negatives {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := translateKernelDisclosures([]governanceprincipal.Disclosure{tc.in}); err == nil {
+				t.Fatalf("want operational error for %s, got nil", tc.name)
+			}
+		})
 	}
 }
 
@@ -1018,10 +1363,11 @@ func TestEvaluateMechanicalUnknownRefHigherOrderUnproven(t *testing.T) {
 		typedClaim(t, "policy-a", discreteClaim("c1", "level", policyartifact.OpEquals, []string{"gold"}, refScope("spec/a"))),
 		typedClaim(t, "policy-b", discreteClaim("c2", "level", policyartifact.OpEquals, []string{"silver"}, refScope("spec/b"))),
 	}
-	rows, err := EvaluateMechanical(context.Background(), MechanicalInput{Claims: claims, Refs: resolver})
+	result, err := EvaluateMechanical(context.Background(), MechanicalInput{Claims: claims, Refs: resolver})
 	if err != nil {
 		t.Fatalf("EvaluateMechanical: %v", err)
 	}
+	rows := result.Evaluations
 	if len(rows) != 1 || rows[0].State != ProofUnproven {
 		t.Fatalf("rows = %+v, want exactly one unproven fallback row", rows)
 	}
@@ -1033,14 +1379,16 @@ func TestEvaluateMechanicalDeterministicOrdering(t *testing.T) {
 		typedClaim(t, "policy-a", discreteClaim("c1", "alpha", policyartifact.OpAllowedValues, []string{"x"}, universalScope())),
 	}
 	in := MechanicalInput{Claims: claims}
-	rows1, err := EvaluateMechanical(context.Background(), in)
+	result1, err := EvaluateMechanical(context.Background(), in)
 	if err != nil {
 		t.Fatalf("EvaluateMechanical: %v", err)
 	}
-	rows2, err := EvaluateMechanical(context.Background(), in)
+	rows1 := result1.Evaluations
+	result2, err := EvaluateMechanical(context.Background(), in)
 	if err != nil {
 		t.Fatalf("EvaluateMechanical: %v", err)
 	}
+	rows2 := result2.Evaluations
 	if len(rows1) != 2 {
 		t.Fatalf("rows1 = %+v, want two groups", rows1)
 	}
@@ -1059,10 +1407,11 @@ func TestEvaluateMechanicalIntervalConflict(t *testing.T) {
 		typedClaim(t, "policy-a", intervalClaim("c1", "replicas", policyartifact.OpMinimum, 10, universalScope())),
 		typedClaim(t, "policy-b", intervalClaim("c2", "replicas", policyartifact.OpMaximum, 2, universalScope())),
 	}
-	rows, err := EvaluateMechanical(context.Background(), MechanicalInput{Claims: claims})
+	result, err := EvaluateMechanical(context.Background(), MechanicalInput{Claims: claims})
 	if err != nil {
 		t.Fatalf("EvaluateMechanical: %v", err)
 	}
+	rows := result.Evaluations
 	if len(rows) != 1 || rows[0].State != ProofViolatedWithWitness {
 		t.Fatalf("rows = %+v, want one violated row", rows)
 	}
@@ -1076,10 +1425,11 @@ func TestEvaluateMechanicalIntervalConflictRowValidates(t *testing.T) {
 		typedClaim(t, "policy-a", intervalClaim("c1", "replicas", policyartifact.OpMinimum, 8, universalScope())),
 		typedClaim(t, "policy-b", intervalClaim("c2", "replicas", policyartifact.OpMaximum, 6, universalScope())),
 	}
-	rows, err := EvaluateMechanical(context.Background(), MechanicalInput{Claims: claims})
+	result, err := EvaluateMechanical(context.Background(), MechanicalInput{Claims: claims})
 	if err != nil {
 		t.Fatalf("EvaluateMechanical: %v", err)
 	}
+	rows := result.Evaluations
 	if len(rows) != 1 || rows[0].State != ProofViolatedWithWitness {
 		t.Fatalf("rows = %+v, want one violated row", rows)
 	}
@@ -1096,10 +1446,11 @@ func TestEvaluateMechanicalPathCapabilityNeverConflicts(t *testing.T) {
 		typedClaim(t, "policy-a", pathClaim("c1", "workspace", policyartifact.OpPathRead, []string{"internal/"}, universalScope())),
 		typedClaim(t, "policy-b", pathClaim("c2", "workspace", policyartifact.OpPathWrite, []string{"internal/"}, universalScope())),
 	}
-	rows, err := EvaluateMechanical(context.Background(), MechanicalInput{Claims: claims})
+	result, err := EvaluateMechanical(context.Background(), MechanicalInput{Claims: claims})
 	if err != nil {
 		t.Fatalf("EvaluateMechanical: %v", err)
 	}
+	rows := result.Evaluations
 	if len(rows) != 1 || rows[0].State != ProofProven {
 		t.Fatalf("rows = %+v, want one proven row (path domain never manufactures conflict)", rows)
 	}
@@ -1111,10 +1462,11 @@ func TestEvaluateMechanicalPrincipalRelationRow(t *testing.T) {
 	claims := []contextcompile.TypedClaim{
 		typedClaim(t, "policy-a", principalClaim("c1", "release", policyartifact.OpDifferentPrincipal, "author", "reviewer", universalScope())),
 	}
-	rows, err := EvaluateMechanical(context.Background(), MechanicalInput{Claims: claims, Profile: profile, Actors: actors})
+	result, err := EvaluateMechanical(context.Background(), MechanicalInput{Claims: claims, Profile: profile, Actors: actors})
 	if err != nil {
 		t.Fatalf("EvaluateMechanical: %v", err)
 	}
+	rows := result.Evaluations
 	if len(rows) != 1 || rows[0].State != ProofProven {
 		t.Fatalf("rows = %+v, want one proven row", rows)
 	}
@@ -1128,10 +1480,11 @@ func TestEvaluateMechanicalPrincipalRelationUnprovenRow(t *testing.T) {
 	claims := []contextcompile.TypedClaim{
 		typedClaim(t, "policy-a", principalClaim("c1", "release", policyartifact.OpDifferentPrincipal, "author", "reviewer", universalScope())),
 	}
-	rows, err := EvaluateMechanical(context.Background(), MechanicalInput{Claims: claims, Profile: profile})
+	result, err := EvaluateMechanical(context.Background(), MechanicalInput{Claims: claims, Profile: profile})
 	if err != nil {
 		t.Fatalf("EvaluateMechanical: %v", err)
 	}
+	rows := result.Evaluations
 	if len(rows) != 1 || rows[0].State != ProofUnproven {
 		t.Fatalf("rows = %+v, want one unproven row (no actors)", rows)
 	}
@@ -1176,10 +1529,11 @@ escalation_thresholds: []
 		claims := []contextcompile.TypedClaim{
 			typedClaim(t, "policy-a", principalClaim("c1", "release", policyartifact.OpDifferentPrincipal, "author", "reviewer", universalScope())),
 		}
-		rows, err := EvaluateMechanical(context.Background(), MechanicalInput{Claims: claims, Profile: collapsed, Actors: actors})
+		result, err := EvaluateMechanical(context.Background(), MechanicalInput{Claims: claims, Profile: collapsed, Actors: actors})
 		if err != nil {
 			t.Fatalf("EvaluateMechanical: %v", err)
 		}
+		rows := result.Evaluations
 		if len(rows) != 1 || rows[0].State != ProofViolatedWithWitness {
 			t.Fatalf("rows = %+v, want one violated row", rows)
 		}
@@ -1197,10 +1551,11 @@ escalation_thresholds: []
 			typedClaim(t, "policy-a", principalClaim("c1", "release", policyartifact.OpSamePrincipal, "author", "reviewer", universalScope())),
 			typedClaim(t, "policy-b", principalClaim("c2", "release", policyartifact.OpDifferentPrincipal, "reviewer", "author", universalScope())),
 		}
-		rows, err := EvaluateMechanical(context.Background(), MechanicalInput{Claims: claims, Profile: profile})
+		result, err := EvaluateMechanical(context.Background(), MechanicalInput{Claims: claims, Profile: profile})
 		if err != nil {
 			t.Fatalf("EvaluateMechanical: %v", err)
 		}
+		rows := result.Evaluations
 		if len(rows) != 1 || rows[0].State != ProofViolatedWithWitness {
 			t.Fatalf("rows = %+v, want one violated row", rows)
 		}

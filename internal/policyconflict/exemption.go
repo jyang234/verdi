@@ -66,11 +66,12 @@ func addReason(reasons []ReasonCode, r ReasonCode) []ReasonCode {
 // exemption application, and the wire's reason rule (a sorted-unique set
 // from the closed vocabulary) admits them together.
 //
-// An accepted resolution's RemovedClaims must each name a claim digest
-// exactly present among row.Claims (its "match" state already being proven
-// is what makes this an operational contract, not a routine shortfall: a
-// digest absent here means the resolution was constructed against a
-// different row's witnesses).
+// An accepted resolution's RemovedClaims must each name a claim EXACTLY
+// present among row.Claims — same composite (policy_id, claim_id) identity
+// AND same claim digest (its "match" state already being proven is what
+// makes this an operational contract, not a routine shortfall: an identity
+// absent here means the resolution was constructed against a different
+// row's witnesses, and a digest mismatch means the claim changed under it).
 func ApplyEffectiveExemptions(row MechanicalEvaluation, resolutions []ExemptionResolution) (MechanicalEvaluation, error) {
 	if err := validateRowOperand(row); err != nil {
 		return MechanicalEvaluation{}, err
@@ -102,26 +103,34 @@ func ApplyEffectiveExemptions(row MechanicalEvaluation, resolutions []ExemptionR
 		return out, nil
 	}
 
-	removed := map[string]bool{}
+	removed := map[claimIdentity]bool{}
 	for _, r := range accepted {
 		for _, w := range r.RemovedClaims {
+			id := claimIdentity{policyID: w.PolicyID, claimID: w.ClaimID}
 			found := false
 			for _, c := range row.Claims {
-				if c.ClaimDigest == w.Digest {
-					found = true
-					break
+				if identityOf(c) != id {
+					continue
 				}
+				// Authority design §5.5: "their digest must match that exact
+				// current row claim". A stale digest is a claim that changed
+				// under the exemption, never a silent widening.
+				if c.ClaimDigest != w.ClaimDigest {
+					return MechanicalEvaluation{}, fmt.Errorf("policyconflict: apply exemptions: exemption %q names claim (policy %q, claim %q) with digest %s, but row %q's current claim digests to %s", r.ID, w.PolicyID, w.ClaimID, w.ClaimDigest, row.ID, c.ClaimDigest)
+				}
+				found = true
+				break
 			}
 			if !found {
-				return MechanicalEvaluation{}, fmt.Errorf("policyconflict: apply exemptions: exemption %q names claim digest %q, absent from row %q's current claims", r.ID, w.Digest, row.ID)
+				return MechanicalEvaluation{}, fmt.Errorf("policyconflict: apply exemptions: exemption %q names claim (policy %q, claim %q), absent from row %q's current claims", r.ID, w.PolicyID, w.ClaimID, row.ID)
 			}
-			removed[w.Digest] = true
+			removed[id] = true
 		}
 	}
 
 	remainder := make([]TypedClaimRecord, 0, len(row.Claims))
 	for _, c := range row.Claims {
-		if !removed[c.ClaimDigest] {
+		if !removed[identityOf(c)] {
 			remainder = append(remainder, c)
 		}
 	}
@@ -170,15 +179,31 @@ func ApplyEffectiveExemptions(row MechanicalEvaluation, resolutions []ExemptionR
 	return out, nil
 }
 
+// claimIdentity is a row claim's composite identity (ledger SI-105): the
+// governing policy plus the claim id. Byte-identical claims from two
+// policies are two identities, so an exemption departs from one of them
+// without touching the other.
+type claimIdentity struct {
+	policyID string
+	claimID  string
+}
+
+func identityOf(c TypedClaimRecord) claimIdentity {
+	return claimIdentity{policyID: c.PolicyID, claimID: c.Claim.ID}
+}
+
 // validateRowOperand mirrors EvaluateMechanical's own entry validation over
 // the row this call reruns a solver across: a hand-built or mutated row
-// whose claims never passed Claim.Validate is a caller defect reported as
-// an operational error, never a panic inside a solver that trusts its
-// operand grammar.
+// whose claims never passed Claim.Validate — or whose carried claim digest
+// does not recompute from the claim it carries — is a caller defect
+// reported as an operational error, never a panic inside a solver that
+// trusts its operand grammar and never a departure addressed at content
+// that no longer exists.
 func validateRowOperand(row MechanicalEvaluation) error {
 	if row.Domain == "" {
 		return fmt.Errorf("policyconflict: apply exemptions: row %q carries no operand domain", row.ID)
 	}
+	seen := make(map[claimIdentity]bool, len(row.Claims))
 	for i, c := range row.Claims {
 		if c.PolicyID == "" || c.PolicyDigest == "" || c.ClaimDigest == "" {
 			return fmt.Errorf("policyconflict: apply exemptions: row %q claim [%d]: policy id, policy digest, and claim digest are all required", row.ID, i)
@@ -186,6 +211,18 @@ func validateRowOperand(row MechanicalEvaluation) error {
 		if err := c.Claim.Validate(); err != nil {
 			return fmt.Errorf("policyconflict: apply exemptions: row %q claim [%d] %s: %w", row.ID, i, c.ClaimDigest, err)
 		}
+		recomputed, err := policyartifact.ClaimDigest(c.Claim)
+		if err != nil {
+			return fmt.Errorf("policyconflict: apply exemptions: row %q claim [%d]: digest claim: %w", row.ID, i, err)
+		}
+		if recomputed != c.ClaimDigest {
+			return fmt.Errorf("policyconflict: apply exemptions: row %q claim [%d] (policy %q claim %q): carried claim digest %s is not the canonical digest of its claim (%s)", row.ID, i, c.PolicyID, c.Claim.ID, c.ClaimDigest, recomputed)
+		}
+		id := identityOf(c)
+		if seen[id] {
+			return fmt.Errorf("policyconflict: apply exemptions: row %q carries two claims for identity (policy %q, claim %q)", row.ID, c.PolicyID, c.Claim.ID)
+		}
+		seen[id] = true
 	}
 	return nil
 }
@@ -197,10 +234,19 @@ func validateRowOperand(row MechanicalEvaluation) error {
 // contradictory operands — exactly the kernel's own treatment of
 // conflicting duplicate records — so they are an operational error rather
 // than a silent pick between two authorities.
+//
+// Each resolution's removal set is normalized first (normalizeRemovals), so
+// the identity comparison below is over canonical content and every
+// resolution this function returns already satisfies the wire's own
+// composite ordering and cardinality rules.
 func dedupeResolutions(resolutions []ExemptionResolution) ([]ExemptionResolution, error) {
 	byID := make(map[string]ExemptionResolution, len(resolutions))
 	out := make([]ExemptionResolution, 0, len(resolutions))
-	for _, r := range resolutions {
+	for _, raw := range resolutions {
+		r, err := normalizeRemovals(raw)
+		if err != nil {
+			return nil, err
+		}
 		prev, ok := byID[r.ID]
 		if ok {
 			if !reflect.DeepEqual(prev, r) {
@@ -213,6 +259,52 @@ func dedupeResolutions(resolutions []ExemptionResolution) ([]ExemptionResolution
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
 	return out, nil
+}
+
+// normalizeRemovals returns r with its removal set canonicalized, and
+// enforces authority design §5.5's mandatory-present, conditional-
+// cardinality contract:
+//
+//   - the set is never absent — a nil set is a caller defect, because §5.5
+//     requires the explicit empty set rather than silence;
+//   - an all-five-proven resolution names at least one witness, and a
+//     resolution that is not all-proven names none, because it removed
+//     nothing and must not record a departure it never made;
+//   - witnesses sort and deduplicate by their composite (policy_id,
+//     claim_id) identity. One identity carrying two DIFFERENT digests is
+//     contradictory authority, not a duplicate to collapse.
+func normalizeRemovals(r ExemptionResolution) (ExemptionResolution, error) {
+	if r.RemovedClaims == nil {
+		return ExemptionResolution{}, fmt.Errorf("policyconflict: apply exemptions: exemption %q: removed claims must be present (an explicitly empty set is [])", r.ID)
+	}
+	switch {
+	case allProven(r.Resolution) && len(r.RemovedClaims) == 0:
+		return ExemptionResolution{}, fmt.Errorf("policyconflict: apply exemptions: exemption %q: an all-proven resolution must name at least one removed claim", r.ID)
+	case !allProven(r.Resolution) && len(r.RemovedClaims) > 0:
+		return ExemptionResolution{}, fmt.Errorf("policyconflict: apply exemptions: exemption %q: a resolution that is not all-proven removed nothing and must name the explicit empty removal set, got %d", r.ID, len(r.RemovedClaims))
+	}
+
+	byIdentity := make(map[claimIdentity]MechanicalClaimWitness, len(r.RemovedClaims))
+	witnesses := make([]MechanicalClaimWitness, 0, len(r.RemovedClaims))
+	for _, w := range r.RemovedClaims {
+		id := claimIdentity{policyID: w.PolicyID, claimID: w.ClaimID}
+		if prev, ok := byIdentity[id]; ok {
+			if prev != w {
+				return ExemptionResolution{}, fmt.Errorf("policyconflict: apply exemptions: exemption %q names claim (policy %q, claim %q) with two different digests", r.ID, w.PolicyID, w.ClaimID)
+			}
+			continue
+		}
+		byIdentity[id] = w
+		witnesses = append(witnesses, w)
+	}
+	sort.Slice(witnesses, func(i, j int) bool {
+		if witnesses[i].PolicyID != witnesses[j].PolicyID {
+			return witnesses[i].PolicyID < witnesses[j].PolicyID
+		}
+		return witnesses[i].ClaimID < witnesses[j].ClaimID
+	})
+	r.RemovedClaims = witnesses
+	return r, nil
 }
 
 // rerunSolver reruns the identical domain solver (mechanical.go's own

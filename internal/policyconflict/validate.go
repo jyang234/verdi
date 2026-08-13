@@ -84,6 +84,24 @@ func requireSortedUniqueStrings(field string, ss []string) error {
 	return requireSortedUnique(field, ss, func(s string) string { return s })
 }
 
+// requireSortedUniqueComposite is requireSortedUnique over a TWO-part
+// identity (ledger SI-105's (policy_id, claim_id)). The tuple is compared
+// component-wise rather than through a concatenated key, so no separator
+// character has to be forbidden inside either component for the order and
+// the uniqueness check to agree with the identity they express.
+func requireSortedUniqueComposite[T any](field string, items []T, key func(T) [2]string) error {
+	for i := 1; i < len(items); i++ {
+		prev, cur := key(items[i-1]), key(items[i])
+		switch {
+		case cur == prev:
+			return fmt.Errorf("policyconflict: %s: duplicate identity (%q, %q)", field, cur[0], cur[1])
+		case cur[0] < prev[0] || (cur[0] == prev[0] && cur[1] < prev[1]):
+			return fmt.Errorf("policyconflict: %s: must be sorted ascending (found (%q, %q) after (%q, %q))", field, cur[0], cur[1], prev[0], prev[1])
+		}
+	}
+	return nil
+}
+
 // --- enum closure checks (policyconflict's own closed vocabularies) --------
 
 func (k TargetKind) Validate() error {
@@ -678,6 +696,11 @@ func validateAuthorityResolution(field string, r AuthorityResolution) error {
 	return nil
 }
 
+// typedClaimRecordKey is a row claim's composite identity (SI-105).
+func typedClaimRecordKey(r TypedClaimRecord) [2]string {
+	return [2]string{r.PolicyID, r.Claim.ID}
+}
+
 func validateTypedClaimRecord(field string, r TypedClaimRecord) error {
 	if err := validateNonEmpty(field+".policy_id", r.PolicyID); err != nil {
 		return err
@@ -691,6 +714,30 @@ func validateTypedClaimRecord(field string, r TypedClaimRecord) error {
 	return r.Claim.Validate()
 }
 
+// validateMechanicalClaimWitness checks one removed-claim witness's
+// composite identity and digest form (authority design §5.5, SI-105).
+func validateMechanicalClaimWitness(field string, w MechanicalClaimWitness) error {
+	if err := validateNonEmpty(field+".policy_id", w.PolicyID); err != nil {
+		return err
+	}
+	if err := validateNonEmpty(field+".claim_id", w.ClaimID); err != nil {
+		return err
+	}
+	return validateDigest(field+".claim_digest", w.ClaimDigest)
+}
+
+// mechanicalClaimWitnessKey is a removed-claim witness's composite identity.
+func mechanicalClaimWitnessKey(w MechanicalClaimWitness) [2]string {
+	return [2]string{w.PolicyID, w.ClaimID}
+}
+
+// validateExemptionResolution checks one applied-or-rejected exemption
+// resolution. Its removal set is mandatory-present with a CONDITIONAL
+// cardinality (authority design §5.5): "An effective all-five-proven
+// resolution names at least one exact current row witness; an ineffective
+// resolution names the mandatory-present explicit empty removal set (`[]`)
+// because it removed nothing." Both directions are enforced, so a rejected
+// resolution can never record a departure it never made.
 func validateExemptionResolution(field string, e ExemptionResolution) error {
 	if err := validateNonEmpty(field+".id", e.ID); err != nil {
 		return err
@@ -701,15 +748,21 @@ func validateExemptionResolution(field string, e ExemptionResolution) error {
 	if err := validateAuthorityResolution(field+".resolution", e.Resolution); err != nil {
 		return err
 	}
-	if len(e.RemovedClaims) < 1 {
-		return fmt.Errorf("policyconflict: %s.removed_claims: must name at least one removed claim", field)
+	if e.RemovedClaims == nil {
+		return fmt.Errorf("policyconflict: %s.removed_claims: must be non-nil (an explicitly empty set is [])", field)
+	}
+	switch {
+	case allProven(e.Resolution) && len(e.RemovedClaims) < 1:
+		return fmt.Errorf("policyconflict: %s.removed_claims: an all-proven resolution must name at least one removed claim", field)
+	case !allProven(e.Resolution) && len(e.RemovedClaims) != 0:
+		return fmt.Errorf("policyconflict: %s.removed_claims: a resolution that is not all-proven removed nothing and must name the explicit empty removal set, got %d", field, len(e.RemovedClaims))
 	}
 	for i, c := range e.RemovedClaims {
-		if err := c.validate(fmt.Sprintf("%s.removed_claims[%d]", field, i)); err != nil {
+		if err := validateMechanicalClaimWitness(fmt.Sprintf("%s.removed_claims[%d]", field, i), c); err != nil {
 			return err
 		}
 	}
-	return requireSortedUnique(field+".removed_claims", e.RemovedClaims, func(c ClaimWitness) string { return c.ID })
+	return requireSortedUniqueComposite(field+".removed_claims", e.RemovedClaims, mechanicalClaimWitnessKey)
 }
 
 func validateMechanicalEvaluation(field string, m MechanicalEvaluation) error {
@@ -730,7 +783,11 @@ func validateMechanicalEvaluation(field string, m MechanicalEvaluation) error {
 			return err
 		}
 	}
-	if err := requireSortedUnique(field+".claims", m.Claims, func(c TypedClaimRecord) string { return c.ClaimDigest }); err != nil {
+	// A row claim's identity is the composite (policy_id, claim_id), never
+	// the claim digest alone (SI-105): two policies declaring byte-identical
+	// claims are two records the wire must carry, because an exemption
+	// departs from one policy's claim and not the other's.
+	if err := requireSortedUniqueComposite(field+".claims", m.Claims, typedClaimRecordKey); err != nil {
 		return err
 	}
 	if err := validateScopeProof(field+".scope", m.Scope); err != nil {

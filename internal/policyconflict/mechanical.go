@@ -32,10 +32,21 @@
 // kernel evidence that was never supplied) whenever the profile carries no
 // matching governanceprincipal.DistinctnessRule for the claim's exact
 // (transition, canonical role pair, relation), or whenever the kernel's own
-// authorization decision is unproven. A kernel decision that is violated
-// for ANY reason is likewise never a proof (§5.3). This mirrors
+// relation-bearing evidence is unproven. A relation-bearing kernel finding
+// that is violated is likewise never a proof (§5.3). This mirrors
 // ReasonPrincipalRelationUnproven and ReasonPrincipalRelationViolated in
 // the closed reason vocabulary.
+//
+// Which kernel findings BEAR on the requested relation is itself fixed by
+// §5.3's operand set (relationBearingFinding, ledger SI-106): whole-request
+// authority findings, plus findings whose exact role or canonical role pair
+// is this claim's. An unrelated approver, signature, ownership, or SECOND
+// distinctness rule's shortfall never changes this relation. One kernel
+// outcome is neither a pass nor a violation: an experimental profile forces
+// an advisory effective posture, which is unproven under the row reason
+// ReasonProfileExperimental (unprovenReasonFor). Kernel disclosures ride
+// beside the rows in MechanicalResult, translated once by
+// translateKernelDisclosures and hoisted to the report only by Task 9.
 package policyconflict
 
 import (
@@ -129,24 +140,41 @@ func groupKeyFor(c policyartifact.Claim) mechanicalGroupKey {
 	return mechanicalGroupKey{family: c.Family, subject: c.Subject}
 }
 
+// MechanicalResult is EvaluateMechanical's complete outcome (ledger
+// SI-106): the deterministic mechanical rows, plus the translated kernel
+// disclosures the identity domain's authorization produced. It is a
+// RUNTIME-only value, not a wire document — Task 9 remains the single place
+// that hoists Disclosures into the report's one top-level disclosure
+// location, so no mechanical row is coupled to global disclosure state.
+type MechanicalResult struct {
+	Evaluations []MechanicalEvaluation
+	Disclosures []Disclosure
+}
+
 // EvaluateMechanical proves every typed claim group's mechanical
 // satisfiability (authority design §5). It groups in.Claims, solves each
 // group's complete conjunction first, and — for an unsatisfiable complete
 // conjunction — derives the deterministic scope-witness rows the package
 // comment above describes. Rows are always returned in ascending ID order;
 // identical inputs deep-equal outputs.
-func EvaluateMechanical(ctx context.Context, in MechanicalInput) ([]MechanicalEvaluation, error) {
-	for i, c := range in.Claims {
-		if c.PolicyID == "" || c.PolicyDigest == "" || c.ClaimDigest == "" {
-			return nil, fmt.Errorf("policyconflict: mechanical claim [%d]: policy id, policy digest, and claim digest are all required", i)
-		}
-		if err := c.Claim.Validate(); err != nil {
-			return nil, fmt.Errorf("policyconflict: mechanical claim [%d] %s: %w", i, c.ClaimDigest, err)
-		}
+func EvaluateMechanical(ctx context.Context, in MechanicalInput) (MechanicalResult, error) {
+	if err := validateClaimOperands(in.Claims); err != nil {
+		return MechanicalResult{}, err
 	}
 
+	// Sort on the claim digest first (the row-ID component) and break ties
+	// on the composite identity, so two policies declaring byte-identical
+	// claims still order deterministically against each other.
 	ordered := append([]contextcompile.TypedClaim(nil), in.Claims...)
-	sort.SliceStable(ordered, func(i, j int) bool { return ordered[i].ClaimDigest < ordered[j].ClaimDigest })
+	sort.Slice(ordered, func(i, j int) bool {
+		if ordered[i].ClaimDigest != ordered[j].ClaimDigest {
+			return ordered[i].ClaimDigest < ordered[j].ClaimDigest
+		}
+		if ordered[i].PolicyID != ordered[j].PolicyID {
+			return ordered[i].PolicyID < ordered[j].PolicyID
+		}
+		return ordered[i].Claim.ID < ordered[j].Claim.ID
+	})
 
 	var order []mechanicalGroupKey
 	buckets := make(map[mechanicalGroupKey][]contextcompile.TypedClaim)
@@ -160,15 +188,100 @@ func EvaluateMechanical(ctx context.Context, in MechanicalInput) ([]MechanicalEv
 	sort.Slice(order, func(i, j int) bool { return order[i].id() < order[j].id() })
 
 	rows := []MechanicalEvaluation{}
+	var kernel []governanceprincipal.Disclosure
 	for _, gk := range order {
-		grows, err := evaluateGroup(ctx, gk, buckets[gk], in.Profile, in.Actors, in.Refs)
+		grows, gdisclosures, err := evaluateGroup(ctx, gk, buckets[gk], in.Profile, in.Actors, in.Refs)
 		if err != nil {
-			return nil, err
+			return MechanicalResult{}, err
 		}
 		rows = append(rows, grows...)
+		kernel = append(kernel, gdisclosures...)
 	}
 	sort.Slice(rows, func(i, j int) bool { return rows[i].ID < rows[j].ID })
-	return rows, nil
+
+	disclosures, err := translateKernelDisclosures(kernel)
+	if err != nil {
+		return MechanicalResult{}, err
+	}
+	return MechanicalResult{Evaluations: rows, Disclosures: disclosures}, nil
+}
+
+// validateClaimOperands is EvaluateMechanical's entry contract over the
+// typed claims it will solve (ledger SI-105):
+//
+//   - every operand carries its policy identity, policy digest and claim
+//     digest, and passes Claim.Validate;
+//   - every carried claim_digest is RECOMPUTED from the carried base claim,
+//     so a hand-built or mutated digest is refused instead of silently
+//     addressing content that no longer exists;
+//   - one composite (policy_id, claim_id) identity names exactly one claim.
+//     A repeated identity carrying different content is contradictory
+//     authority and fails operationally rather than choosing a meaning.
+func validateClaimOperands(claims []contextcompile.TypedClaim) error {
+	type identity struct{ policyID, claimID string }
+	seen := make(map[identity]contextcompile.TypedClaim, len(claims))
+	for i, c := range claims {
+		if c.PolicyID == "" || c.PolicyDigest == "" || c.ClaimDigest == "" {
+			return fmt.Errorf("policyconflict: mechanical claim [%d]: policy id, policy digest, and claim digest are all required", i)
+		}
+		if err := c.Claim.Validate(); err != nil {
+			return fmt.Errorf("policyconflict: mechanical claim [%d] %s: %w", i, c.ClaimDigest, err)
+		}
+		recomputed, err := policyartifact.ClaimDigest(c.Claim)
+		if err != nil {
+			return fmt.Errorf("policyconflict: mechanical claim [%d] (policy %q claim %q): digest claim: %w", i, c.PolicyID, c.Claim.ID, err)
+		}
+		if recomputed != c.ClaimDigest {
+			return fmt.Errorf("policyconflict: mechanical claim [%d] (policy %q claim %q): carried claim digest %s is not the canonical digest of its claim (%s)", i, c.PolicyID, c.Claim.ID, c.ClaimDigest, recomputed)
+		}
+		key := identity{c.PolicyID, c.Claim.ID}
+		if prev, ok := seen[key]; ok {
+			if prev.ClaimDigest != c.ClaimDigest || prev.PolicyDigest != c.PolicyDigest {
+				return fmt.Errorf("policyconflict: mechanical claim [%d]: two different claims share identity (policy %q, claim %q)", i, c.PolicyID, c.Claim.ID)
+			}
+			continue
+		}
+		seen[key] = c
+	}
+	return nil
+}
+
+// translateKernelDisclosures maps the kernel's own disclosure vocabulary
+// onto the report's (authority design §5.3, ledger SI-106/SI-108). Only
+// solo-role-collapse translates, to report code solo-principal-collapse;
+// each principal/role membership becomes ONE witness token
+// `<principal_id>:<role_id>`, and the tokens sort and deduplicate, so
+// repeated kernel calls for the same group collapse into one disclosure.
+//
+// These are distinct closed vocabularies: an unknown kernel disclosure is
+// an operational error rather than a new report label. Both component
+// grammars forbid ":" — the token is therefore lossless and reversible —
+// and each component is checked through the kernel's OWN exported grammar
+// rather than a duplicated pattern here, so a component outside its closed
+// grammar is refused instead of silently producing an ambiguous token.
+func translateKernelDisclosures(kernel []governanceprincipal.Disclosure) ([]Disclosure, error) {
+	tokens := map[string]bool{}
+	for _, d := range kernel {
+		if d.Code != governanceprincipal.ReasonSoloRoleCollapse {
+			return nil, fmt.Errorf("policyconflict: kernel disclosure %q has no report translation", d.Code)
+		}
+		if err := d.PrincipalID.Validate(); err != nil {
+			return nil, fmt.Errorf("policyconflict: kernel disclosure %q: %w", d.Code, err)
+		}
+		if len(d.Roles) == 0 {
+			return nil, fmt.Errorf("policyconflict: kernel disclosure %q for principal %q names no role: the membership cannot be recorded losslessly", d.Code, d.PrincipalID)
+		}
+		for _, role := range d.Roles {
+			if err := governanceprincipal.ValidateID(role); err != nil {
+				return nil, fmt.Errorf("policyconflict: kernel disclosure %q for principal %q: role: %w", d.Code, d.PrincipalID, err)
+			}
+			tokens[string(d.PrincipalID)+":"+role] = true
+		}
+	}
+	if len(tokens) == 0 {
+		return []Disclosure{}, nil
+	}
+	return []Disclosure{{Code: DisclosureSoloPrincipalCollapse, Witnesses: sortedKeysOf(tokens)}}, nil
 }
 
 // determineDomain returns members' single shared operand domain, or an
@@ -202,19 +315,21 @@ func claimsOf(members []contextcompile.TypedClaim) []policyartifact.Claim {
 
 // solveGroup dispatches to the one domain solver claims' shared domain
 // names. This is the package's single dispatch point — never a per-operator
-// or per-operator-pair table.
-func solveGroup(domain string, gk mechanicalGroupKey, claims []policyartifact.Claim, profile governanceprincipal.Profile, actors []governanceprincipal.PrincipalResolution) (SolverProof, error) {
+// or per-operator-pair table. Only the principal-relation domain calls the
+// kernel, so it is the only one that can return kernel disclosures.
+func solveGroup(domain string, gk mechanicalGroupKey, claims []policyartifact.Claim, profile governanceprincipal.Profile, actors []governanceprincipal.PrincipalResolution) (SolverProof, []governanceprincipal.Disclosure, error) {
 	switch domain {
 	case domainDiscreteSet:
-		return solveDiscrete(claims), nil
+		return solveDiscrete(claims), nil, nil
 	case domainIntegerInterval:
-		return solveInterval(claims)
+		proof, err := solveInterval(claims)
+		return proof, nil, err
 	case domainPrincipalRelation:
 		return solvePrincipalRelation(gk.subject, gk.roleA, gk.roleB, claims, profile, actors)
 	case domainPathCapability:
-		return solvePathCapability(claims), nil
+		return solvePathCapability(claims), nil, nil
 	default:
-		return SolverProof{}, fmt.Errorf("policyconflict: unknown mechanical domain %q", domain)
+		return SolverProof{}, nil, fmt.Errorf("policyconflict: unknown mechanical domain %q", domain)
 	}
 }
 
@@ -226,45 +341,50 @@ func scopeProofFor(ctx context.Context, members []contextcompile.TypedClaim, ref
 	return IntersectScopes(ctx, scopes, refs)
 }
 
-func evaluateGroup(ctx context.Context, gk mechanicalGroupKey, members []contextcompile.TypedClaim, profile governanceprincipal.Profile, actors []governanceprincipal.PrincipalResolution, refs RefRelationResolver) ([]MechanicalEvaluation, error) {
+func evaluateGroup(ctx context.Context, gk mechanicalGroupKey, members []contextcompile.TypedClaim, profile governanceprincipal.Profile, actors []governanceprincipal.PrincipalResolution, refs RefRelationResolver) ([]MechanicalEvaluation, []governanceprincipal.Disclosure, error) {
 	domain, err := determineDomain(members)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
-	before, err := solveGroup(domain, gk, claimsOf(members), profile, actors)
+	before, disclosures, err := solveGroup(domain, gk, claimsOf(members), profile, actors)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	switch before.State {
 	case SolverSatisfiable:
 		scope, err := scopeProofFor(ctx, members, refs)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
-		return []MechanicalEvaluation{buildRow(gk.id()+"#complete", gk, members, scope, domain, before, ProofProven, []ReasonCode{ReasonMechanicalSatisfiable})}, nil
+		return []MechanicalEvaluation{buildRow(gk.id()+"#complete", gk, members, scope, domain, before, ProofProven, []ReasonCode{ReasonMechanicalSatisfiable})}, disclosures, nil
 	case SolverUnproven:
 		scope, err := scopeProofFor(ctx, members, refs)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
-		return []MechanicalEvaluation{buildRow(gk.id()+"#complete", gk, members, scope, domain, before, ProofUnproven, []ReasonCode{ReasonPrincipalRelationUnproven})}, nil
+		return []MechanicalEvaluation{buildRow(gk.id()+"#complete", gk, members, scope, domain, before, ProofUnproven, []ReasonCode{unprovenReasonFor(before)})}, disclosures, nil
 	case SolverUnsatisfiable:
-		return deriveWitnessRows(ctx, gk, members, domain, before, profile, actors, refs)
+		rows, witnessDisclosures, err := deriveWitnessRows(ctx, gk, members, domain, before, profile, actors, refs)
+		if err != nil {
+			return nil, nil, err
+		}
+		return rows, append(disclosures, witnessDisclosures...), nil
 	default:
-		return nil, fmt.Errorf("policyconflict: group %s: solver returned unknown state %q", gk.id(), before.State)
+		return nil, nil, fmt.Errorf("policyconflict: group %s: solver returned unknown state %q", gk.id(), before.State)
 	}
 }
 
 // deriveWitnessRows implements authority design §5's three-step procedure
 // for an unsatisfiable complete conjunction.
-func deriveWitnessRows(ctx context.Context, gk mechanicalGroupKey, members []contextcompile.TypedClaim, domain string, before SolverProof, profile governanceprincipal.Profile, actors []governanceprincipal.PrincipalResolution, refs RefRelationResolver) ([]MechanicalEvaluation, error) {
+func deriveWitnessRows(ctx context.Context, gk mechanicalGroupKey, members []contextcompile.TypedClaim, domain string, before SolverProof, profile governanceprincipal.Profile, actors []governanceprincipal.PrincipalResolution, refs RefRelationResolver) ([]MechanicalEvaluation, []governanceprincipal.Disclosure, error) {
+	var disclosures []governanceprincipal.Disclosure
 	scopeDigests := make([]string, len(members))
 	for i, m := range members {
 		d, err := canonjson.Digest(m.Claim.Scope)
 		if err != nil {
-			return nil, fmt.Errorf("policyconflict: digest claim scope: %w", err)
+			return nil, nil, fmt.Errorf("policyconflict: digest claim scope: %w", err)
 		}
 		scopeDigests[i] = d
 	}
@@ -288,16 +408,17 @@ func deriveWitnessRows(ctx context.Context, gk mechanicalGroupKey, members []con
 		for i, idx := range idxs {
 			subMembers[i] = members[idx]
 		}
-		subBefore, err := solveGroup(domain, gk, claimsOf(subMembers), profile, actors)
+		subBefore, subDisclosures, err := solveGroup(domain, gk, claimsOf(subMembers), profile, actors)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
+		disclosures = append(disclosures, subDisclosures...)
 		if subBefore.State != SolverUnsatisfiable {
 			continue
 		}
 		subScope, err := scopeProofFor(ctx, subMembers, refs)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		if subScope.State != ScopeOverlap {
 			continue
@@ -313,16 +434,17 @@ func deriveWitnessRows(ctx context.Context, gk mechanicalGroupKey, members []con
 				continue
 			}
 			pairMembers := []contextcompile.TypedClaim{members[i], members[j]}
-			pairBefore, err := solveGroup(domain, gk, claimsOf(pairMembers), profile, actors)
+			pairBefore, pairDisclosures, err := solveGroup(domain, gk, claimsOf(pairMembers), profile, actors)
 			if err != nil {
-				return nil, err
+				return nil, nil, err
 			}
+			disclosures = append(disclosures, pairDisclosures...)
 			if pairBefore.State != SolverUnsatisfiable {
 				continue
 			}
 			pairScope, err := scopeProofFor(ctx, pairMembers, refs)
 			if err != nil {
-				return nil, err
+				return nil, nil, err
 			}
 			if pairScope.State != ScopeOverlap {
 				continue
@@ -334,7 +456,7 @@ func deriveWitnessRows(ctx context.Context, gk mechanicalGroupKey, members []con
 
 	if len(violated) > 0 {
 		sort.Slice(violated, func(a, b int) bool { return violated[a].ID < violated[b].ID })
-		return violated, nil
+		return violated, disclosures, nil
 	}
 
 	// Step 3: neither step proved an overlap witness. Two cases remain, and
@@ -342,22 +464,23 @@ func deriveWitnessRows(ctx context.Context, gk mechanicalGroupKey, members []con
 	// witness upgraded into a conflict, and never silently dropped either).
 	scope, err := scopeProofFor(ctx, members, refs)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	settled, err := disjointnessSettlesGroup(ctx, members, domain, gk, profile, actors, refs)
+	settled, settleDisclosures, err := disjointnessSettlesGroup(ctx, members, domain, gk, profile, actors, refs)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
+	disclosures = append(disclosures, settleDisclosures...)
 	if settled && scope.State == ScopeDisjoint {
 		// Authority design §5: "Proven-disjoint witnesses do not conflict."
 		// Nothing REMAINS for the higher-order case here, so this is a
 		// proven row, not a withheld conclusion.
-		return []MechanicalEvaluation{buildRow(gk.id()+"#complete", gk, members, scope, domain, before, ProofProven, []ReasonCode{ReasonScopeDisjoint})}, nil
+		return []MechanicalEvaluation{buildRow(gk.id()+"#complete", gk, members, scope, domain, before, ProofProven, []ReasonCode{ReasonScopeDisjoint})}, disclosures, nil
 	}
 	// The genuine residual: some co-applicable subset could still be
 	// unsatisfiable (or its scope is unknown), so one blocked-unproven row
 	// carries the complete claim witness.
-	return []MechanicalEvaluation{buildRow(gk.id()+"#complete", gk, members, scope, domain, before, ProofUnproven, []ReasonCode{ReasonHigherOrderScopeUnproven})}, nil
+	return []MechanicalEvaluation{buildRow(gk.id()+"#complete", gk, members, scope, domain, before, ProofUnproven, []ReasonCode{ReasonHigherOrderScopeUnproven})}, disclosures, nil
 }
 
 // disjointnessSettlesGroup reports whether proven scope disjointness alone
@@ -383,7 +506,8 @@ func deriveWitnessRows(ctx context.Context, gk mechanicalGroupKey, members []con
 // unknown-scope edge holding claims together) leaves the group unproven
 // rather than violated, because steps 1-2 already failed to exhibit the
 // proven-overlap witness §5 requires for blocked-violated.
-func disjointnessSettlesGroup(ctx context.Context, members []contextcompile.TypedClaim, domain string, gk mechanicalGroupKey, profile governanceprincipal.Profile, actors []governanceprincipal.PrincipalResolution, refs RefRelationResolver) (bool, error) {
+func disjointnessSettlesGroup(ctx context.Context, members []contextcompile.TypedClaim, domain string, gk mechanicalGroupKey, profile governanceprincipal.Profile, actors []governanceprincipal.PrincipalResolution, refs RefRelationResolver) (bool, []governanceprincipal.Disclosure, error) {
+	var disclosures []governanceprincipal.Disclosure
 	n := len(members)
 	parent := make([]int, n)
 	for i := range parent {
@@ -401,7 +525,7 @@ func disjointnessSettlesGroup(ctx context.Context, members []contextcompile.Type
 		for j := i + 1; j < n; j++ {
 			pairScope, err := scopeProofFor(ctx, []contextcompile.TypedClaim{members[i], members[j]}, refs)
 			if err != nil {
-				return false, err
+				return false, nil, err
 			}
 			if pairScope.State == ScopeDisjoint {
 				continue
@@ -425,18 +549,19 @@ func disjointnessSettlesGroup(ctx context.Context, members []contextcompile.Type
 	if len(componentOrder) < 2 {
 		// One component means no proven-disjoint pair separated anything:
 		// the group's own unsatisfiability stands unexplained by scope.
-		return false, nil
+		return false, disclosures, nil
 	}
 	for _, root := range componentOrder {
-		proof, err := solveGroup(domain, gk, claimsOf(components[root]), profile, actors)
+		proof, componentDisclosures, err := solveGroup(domain, gk, claimsOf(components[root]), profile, actors)
 		if err != nil {
-			return false, err
+			return false, nil, err
 		}
+		disclosures = append(disclosures, componentDisclosures...)
 		if proof.State != SolverSatisfiable {
-			return false, nil
+			return false, disclosures, nil
 		}
 	}
-	return true, nil
+	return true, disclosures, nil
 }
 
 // unsatReasonFor names an unsatisfiable witness row's outcome from the
@@ -467,8 +592,22 @@ func unsatReasonFor(domain string, claims []policyartifact.Claim) ReasonCode {
 	return ReasonPrincipalRelationViolated
 }
 
+// unprovenReasonFor names an unproven row's outcome from the proof that
+// withheld it, mirroring unsatReasonFor's witness-derived rule. An
+// experimental profile forces an advisory effective posture: authority
+// design §5.3 makes that UNPROVEN for the authoritative consumer — never a
+// relation violation and never an authoritative pass — under its own row
+// reason profile-experimental. Every other withheld relation keeps
+// principal-relation-unproven.
+func unprovenReasonFor(proof SolverProof) ReasonCode {
+	if stringsContain(proof.Witnesses, governanceprincipal.ReasonExperimentalAuthorityForbidden) {
+		return ReasonProfileExperimental
+	}
+	return ReasonPrincipalRelationUnproven
+}
+
 func buildRow(id string, gk mechanicalGroupKey, members []contextcompile.TypedClaim, scope ScopeProof, domain string, proof SolverProof, state ProofState, reasons []ReasonCode) MechanicalEvaluation {
-	records := collapseClaimRecords(members)
+	records := claimRecordsFor(members)
 
 	sortedReasons := append([]ReasonCode(nil), reasons...)
 	sort.Slice(sortedReasons, func(i, j int) bool { return sortedReasons[i] < sortedReasons[j] })
@@ -488,39 +627,36 @@ func buildRow(id string, gk mechanicalGroupKey, members []contextcompile.TypedCl
 	}
 }
 
-// collapseClaimRecords turns members into the row's sorted claim records
-// under the frozen wire's OWN row-claim identity rule: validate.go keys a
-// row's claims on the claim digest alone (requireSortedUnique over
-// TypedClaimRecord.ClaimDigest), so one claim digest is exactly one row
-// identity. Two policies that declare a byte-identical claim therefore
-// contribute one identity — and one solver constraint, which a conjunction
-// of identical claims already is — recorded once, attributed to the lowest
-// (policy id, policy digest) so the row is deterministic. Emitting one
-// record per contributing policy instead would make every such row fail the
-// wire's duplicate-identity check outright.
+// claimRecordsFor turns members into the row's claim records under ledger
+// SI-105's composite identity rule: a record is keyed by (policy_id,
+// claim_id), so equal claim BYTES declared by two different policies stay
+// TWO records. Policy identity is part of an exemption witness — an
+// exemption departs from one policy's claim and not the other's, and a row
+// that collapsed them could not express that — so it is never discarded
+// merely because the bytes agree.
 //
-// Consequence, disclosed rather than hidden: TypedClaimRecord carries
-// exactly one policy identity, so the report cannot show that a second
-// policy declared the same claim. Which policies an exemption must be
-// authorized against for such a shared claim is therefore not decidable
-// from this row; it belongs to the exemption's own match/authorization
-// derivation (Task 8), which evaluates against the complete typed-claim set
-// where both policy identities are still present. Recorded for the
-// invention ledger as a wire tension, not resolved silently here.
-func collapseClaimRecords(members []contextcompile.TypedClaim) []TypedClaimRecord {
-	byDigest := make(map[string]TypedClaimRecord, len(members))
+// Deduplication is therefore only over a genuinely repeated composite
+// identity, which validateClaimOperands has already proven carries
+// identical content; the records sort by that same composite key, which is
+// the order the wire requires.
+func claimRecordsFor(members []contextcompile.TypedClaim) []TypedClaimRecord {
+	type identity struct{ policyID, claimID string }
+	seen := make(map[identity]bool, len(members))
+	records := make([]TypedClaimRecord, 0, len(members))
 	for _, m := range members {
-		rec := TypedClaimRecord{PolicyID: m.PolicyID, PolicyDigest: m.PolicyDigest, ClaimDigest: m.ClaimDigest, Claim: m.Claim}
-		prev, ok := byDigest[m.ClaimDigest]
-		if !ok || rec.PolicyID < prev.PolicyID || (rec.PolicyID == prev.PolicyID && rec.PolicyDigest < prev.PolicyDigest) {
-			byDigest[m.ClaimDigest] = rec
+		key := identity{m.PolicyID, m.Claim.ID}
+		if seen[key] {
+			continue
 		}
+		seen[key] = true
+		records = append(records, TypedClaimRecord{PolicyID: m.PolicyID, PolicyDigest: m.PolicyDigest, ClaimDigest: m.ClaimDigest, Claim: m.Claim})
 	}
-	records := make([]TypedClaimRecord, 0, len(byDigest))
-	for _, rec := range byDigest {
-		records = append(records, rec)
-	}
-	sort.Slice(records, func(i, j int) bool { return records[i].ClaimDigest < records[j].ClaimDigest })
+	sort.Slice(records, func(i, j int) bool {
+		if records[i].PolicyID != records[j].PolicyID {
+			return records[i].PolicyID < records[j].PolicyID
+		}
+		return records[i].Claim.ID < records[j].Claim.ID
+	})
 	return records
 }
 
@@ -717,7 +853,7 @@ func solvePathCapability(claims []policyartifact.Claim) SolverProof {
 // alone (governanceprincipal.Authorize) decides distinctness. A relation
 // with no matching governanceprincipal.DistinctnessRule on the profile has
 // no kernel evidence at all and is unproven rather than a silent pass.
-func solvePrincipalRelation(transition, roleA, roleB string, claims []policyartifact.Claim, profile governanceprincipal.Profile, actors []governanceprincipal.PrincipalResolution) (SolverProof, error) {
+func solvePrincipalRelation(transition, roleA, roleB string, claims []policyartifact.Claim, profile governanceprincipal.Profile, actors []governanceprincipal.PrincipalResolution) (SolverProof, []governanceprincipal.Disclosure, error) {
 	hasSame, hasDiff := false, false
 	for _, c := range claims {
 		switch c.Operator {
@@ -726,12 +862,12 @@ func solvePrincipalRelation(transition, roleA, roleB string, claims []policyarti
 		case policyartifact.OpDifferentPrincipal:
 			hasDiff = true
 		default:
-			return SolverProof{}, fmt.Errorf("policyconflict: principal-relation solver: unexpected operator %q", c.Operator)
+			return SolverProof{}, nil, fmt.Errorf("policyconflict: principal-relation solver: unexpected operator %q", c.Operator)
 		}
 	}
 
 	if !hasSame && !hasDiff {
-		return SolverProof{State: SolverSatisfiable, Domain: domainPrincipalRelation, Values: []string{}, Required: []string{}, Forbidden: []string{}, Witnesses: []string{}}, nil
+		return SolverProof{State: SolverSatisfiable, Domain: domainPrincipalRelation, Values: []string{}, Required: []string{}, Forbidden: []string{}, Witnesses: []string{}}, nil, nil
 	}
 	if hasSame && hasDiff {
 		roles := sortedUniqueCopy([]string{roleA, roleB})
@@ -739,7 +875,7 @@ func solvePrincipalRelation(transition, roleA, roleB string, claims []policyarti
 			State: SolverUnsatisfiable, Domain: domainPrincipalRelation,
 			Values: roles, Required: []string{}, Forbidden: []string{},
 			Witnesses: roles,
-		}, nil
+		}, nil, nil
 	}
 
 	relation := governanceprincipal.RelationSamePrincipal
@@ -748,13 +884,13 @@ func solvePrincipalRelation(transition, roleA, roleB string, claims []policyarti
 	}
 
 	if !stringsContain(profile.ApplicableTransitions, transition) {
-		return SolverProof{}, fmt.Errorf("policyconflict: principal-relation solver: transition %q is not registered in profile %q's applicable transitions", transition, profile.ID)
+		return SolverProof{}, nil, fmt.Errorf("policyconflict: principal-relation solver: transition %q is not registered in profile %q's applicable transitions", transition, profile.ID)
 	}
 	if !roleRegistered(profile, roleA) {
-		return SolverProof{}, fmt.Errorf("policyconflict: principal-relation solver: role %q is not registered in profile %q's role mappings", roleA, profile.ID)
+		return SolverProof{}, nil, fmt.Errorf("policyconflict: principal-relation solver: role %q is not registered in profile %q's role mappings", roleA, profile.ID)
 	}
 	if !roleRegistered(profile, roleB) {
-		return SolverProof{}, fmt.Errorf("policyconflict: principal-relation solver: role %q is not registered in profile %q's role mappings", roleB, profile.ID)
+		return SolverProof{}, nil, fmt.Errorf("policyconflict: principal-relation solver: role %q is not registered in profile %q's role mappings", roleB, profile.ID)
 	}
 
 	matched := false
@@ -772,15 +908,13 @@ func solvePrincipalRelation(transition, roleA, roleB string, claims []policyarti
 		}
 	}
 	if !matched {
-		return SolverProof{State: SolverUnproven, Domain: domainPrincipalRelation, Values: sortedUniqueCopy([]string{roleA, roleB}), Required: []string{}, Forbidden: []string{}, Witnesses: []string{}}, nil
+		return SolverProof{State: SolverUnproven, Domain: domainPrincipalRelation, Values: sortedUniqueCopy([]string{roleA, roleB}), Required: []string{}, Forbidden: []string{}, Witnesses: []string{}}, nil, nil
 	}
 
-	// DEFERRED (owner-gated, frozen Task 3 wire): the kernel decision's
-	// Disclosures — notably a solo profile's proven author/approver
-	// collapse — have no carrier on a MechanicalEvaluation, whose only
-	// disclosure channel is the report's top-level list this function
-	// cannot reach. They are deliberately not consumed here.
-	approvals := buildRoleApprovals(profile, actors, roleA, roleB)
+	approvals, err := buildRoleApprovals(profile, actors, roleA, roleB)
+	if err != nil {
+		return SolverProof{}, nil, err
+	}
 	decision, err := governanceprincipal.Authorize(profile, governanceprincipal.AuthorizationRequest{
 		Transition:  transition,
 		Posture:     governanceprincipal.PostureAuthoritative,
@@ -788,7 +922,7 @@ func solvePrincipalRelation(transition, roleA, roleB string, claims []policyarti
 		Approvals:   approvals,
 	})
 	if err != nil {
-		return SolverProof{}, fmt.Errorf("policyconflict: principal-relation solver: kernel authorization: %w", err)
+		return SolverProof{}, nil, fmt.Errorf("policyconflict: principal-relation solver: kernel authorization: %w", err)
 	}
 
 	// An unknown decision state is a kernel contract this package cannot
@@ -796,7 +930,7 @@ func solvePrincipalRelation(transition, roleA, roleB string, claims []policyarti
 	switch decision.State {
 	case governanceprincipal.AuthorizationAuthorized, governanceprincipal.AuthorizationViolated, governanceprincipal.AuthorizationUnproven:
 	default:
-		return SolverProof{}, fmt.Errorf("policyconflict: principal-relation solver: kernel returned unknown authorization state %q", decision.State)
+		return SolverProof{}, nil, fmt.Errorf("policyconflict: principal-relation solver: kernel returned unknown authorization state %q", decision.State)
 	}
 
 	// Authority design §5.3 fixes this question's operand set exactly: the
@@ -817,15 +951,22 @@ func solvePrincipalRelation(transition, roleA, roleB string, claims []policyarti
 	// (relationBearingFinding), never from an unrelated rule's shortfall
 	// and never from silence about a rule the kernel did run.
 	witnessSet := map[string]bool{}
-	relationViolated, relationUnproven := false, false
+	relationViolated, relationUnproven, relationExperimental := false, false, false
 	for _, f := range decision.Findings {
 		if !relationBearingFinding(f, roleA, roleB) {
 			continue
 		}
-		switch f.State {
-		case governanceprincipal.AuthorizationViolated:
+		switch {
+		case f.Code == governanceprincipal.ReasonExperimentalAuthorityForbidden:
+			// §5.3: an experimental profile's advisory posture is UNPROVEN
+			// for this authoritative consumer, not evidence that the
+			// requested relation is violated. It is recorded separately from
+			// the violated/unproven tallies so it can never be read as a
+			// mechanical conflict.
+			relationExperimental = true
+		case f.State == governanceprincipal.AuthorizationViolated:
 			relationViolated = true
-		case governanceprincipal.AuthorizationUnproven:
+		case f.State == governanceprincipal.AuthorizationUnproven:
 			relationUnproven = true
 		}
 		// A relation-bearing finding's stable code plus whichever role or
@@ -845,89 +986,92 @@ func solvePrincipalRelation(transition, roleA, roleB string, claims []policyarti
 	values := sortedUniqueCopy([]string{roleA, roleB})
 
 	switch {
+	case relationExperimental:
+		// Outranks every other outcome deliberately: an experimental
+		// profile can produce NO authoritative conclusion at all, so it
+		// yields neither a pass nor a violation — only an unproven row,
+		// whose reason is profile-experimental (unprovenReasonFor).
+		return SolverProof{State: SolverUnproven, Domain: domainPrincipalRelation, Values: values, Required: []string{}, Forbidden: []string{}, Witnesses: witnesses}, decision.Disclosures, nil
 	case relationViolated:
-		return SolverProof{State: SolverUnsatisfiable, Domain: domainPrincipalRelation, Values: values, Required: []string{}, Forbidden: []string{}, Witnesses: witnesses}, nil
+		return SolverProof{State: SolverUnsatisfiable, Domain: domainPrincipalRelation, Values: values, Required: []string{}, Forbidden: []string{}, Witnesses: witnesses}, decision.Disclosures, nil
 	case relationUnproven:
-		return SolverProof{State: SolverUnproven, Domain: domainPrincipalRelation, Values: values, Required: []string{}, Forbidden: []string{}, Witnesses: witnesses}, nil
+		return SolverProof{State: SolverUnproven, Domain: domainPrincipalRelation, Values: values, Required: []string{}, Forbidden: []string{}, Witnesses: witnesses}, decision.Disclosures, nil
 	case decision.Posture != governanceprincipal.PostureAuthoritative:
 		// A downgraded effective posture is not the authoritative answer
 		// this request asked for, so it never proves the relation. (The
-		// landed kernel only downgrades an experimental profile, which
-		// already returns a violated whole-request finding above; this
-		// guard keeps a posture-only downgrade from reading as proof.)
-		return SolverProof{State: SolverUnproven, Domain: domainPrincipalRelation, Values: values, Required: []string{}, Forbidden: []string{}, Witnesses: witnesses}, nil
+		// landed kernel only downgrades an experimental profile, which the
+		// case above already names; this guard keeps a future posture-only
+		// downgrade from reading as proof.)
+		return SolverProof{State: SolverUnproven, Domain: domainPrincipalRelation, Values: values, Required: []string{}, Forbidden: []string{}, Witnesses: witnesses}, decision.Disclosures, nil
 	default:
 		// The kernel ran the matching DistinctnessRule (checked above) and
 		// reported no adverse relation-bearing evidence: that IS the
 		// kernel returning this claim's conclusion.
-		return SolverProof{State: SolverSatisfiable, Domain: domainPrincipalRelation, Values: values, Required: []string{}, Forbidden: []string{}, Witnesses: values}, nil
+		return SolverProof{State: SolverSatisfiable, Domain: domainPrincipalRelation, Values: values, Required: []string{}, Forbidden: []string{}, Witnesses: values}, decision.Disclosures, nil
 	}
 }
 
 // relationBearingFinding classifies one kernel finding as evidence about
 // THIS claim's relation, under authority design §5.3's operand set (the
 // exact authenticated resolutions, transition, canonical role pair,
-// profile, and separation mode):
+// profile, and separation mode) and ledger SI-106:
 //
 //   - whole-request authority findings — an experimental profile's
 //     forbidden authoritative authorization, or a transition the profile
 //     does not govern — invalidate the authorization the relation would be
 //     proven through, so they always bear on it;
-//   - distinctness-violated is the separation conclusion itself. The
-//     kernel's Finding carries no rule identity and no role for it, so it
-//     can never be attributed away from this claim's pair; it always
-//     bears (conservative, and unchanged from this solver's original
-//     behavior);
-//   - every other finding — distinctness-unproven, principal-*,
-//     role-not-authorized, signature-*, ownership-*, evidence-source-*,
-//     escalation-*, required-approver-missing — bears only when it names
-//     one of this claim's two roles. A shortfall about a role this claim
-//     never names (an approver count, another role's signature) is
-//     outside §5.3's operand set and is not relation evidence.
+//   - a finding carrying a role PAIR is a rule defined over that pair
+//     (every distinctness finding). It bears only when the pair IS this
+//     claim's canonical pair: a SECOND distinctness rule's violation or
+//     shortfall is about a different relation and can never flip this one;
+//   - every other finding — principal-*, role-not-authorized, signature-*,
+//     ownership-*, evidence-source-*, escalation-*,
+//     required-approver-missing — bears only when it names one of this
+//     claim's two roles. A shortfall about a role this claim never names
+//     (an approver count, another role's signature) is outside §5.3's
+//     operand set and is not relation evidence.
 func relationBearingFinding(f governanceprincipal.Finding, roleA, roleB string) bool {
 	switch f.Code {
 	case governanceprincipal.ReasonExperimentalAuthorityForbidden, governanceprincipal.ReasonTransitionNotApplicable:
 		return true
-	case governanceprincipal.ReasonDistinctnessViolated:
-		return true
-	default:
-		return f.Role == roleA || f.Role == roleB
 	}
+	if len(f.Roles) > 0 {
+		// Both sides normalize lexically (the two roles are a semantic set),
+		// so a reversed spelling of the same relation identifies identically.
+		lo, hi := roleA, roleB
+		if lo > hi {
+			lo, hi = hi, lo
+		}
+		return len(f.Roles) == 2 && f.Roles[0] == lo && f.Roles[1] == hi
+	}
+	return f.Role == roleA || f.Role == roleB
 }
 
 // buildRoleApprovals proposes one candidate ApprovalRecord per authenticated
-// actor that this package's own role-membership check (profile.RoleMappings'
-// exported trust-source/subject data) finds eligible for roleA or roleB.
-// This never compares principal strings to each other — it only asks
-// whether one actor's own already-authenticated claim matches one role's
-// declared mapping, mirroring the same check the kernel re-verifies inside
-// Authorize before it ever reasons about distinctness.
-func buildRoleApprovals(profile governanceprincipal.Profile, actors []governanceprincipal.PrincipalResolution, roleA, roleB string) []governanceprincipal.ApprovalRecord {
+// actor the KERNEL's own exported role-membership query
+// (governanceprincipal.HoldsRole, ledger SI-106) finds eligible for roleA or
+// roleB. This package therefore holds no second interpretation of role
+// mapping semantics. It never compares principal strings to each other —
+// it only asks whether one actor's own already-authenticated claim matches
+// one role's declared mapping, which is the same check the kernel
+// re-verifies inside Authorize before it ever reasons about distinctness.
+func buildRoleApprovals(profile governanceprincipal.Profile, actors []governanceprincipal.PrincipalResolution, roleA, roleB string) ([]governanceprincipal.ApprovalRecord, error) {
 	var out []governanceprincipal.ApprovalRecord
 	for _, role := range []string{roleA, roleB} {
 		for _, actor := range actors {
 			if actor.State != governanceprincipal.ResolutionAuthenticated {
 				continue
 			}
-			if holdsRoleLocal(profile, actor, role) {
+			holds, err := governanceprincipal.HoldsRole(profile, actor.Claim, role)
+			if err != nil {
+				return nil, fmt.Errorf("policyconflict: principal-relation solver: role membership: %w", err)
+			}
+			if holds {
 				out = append(out, governanceprincipal.ApprovalRecord{Role: role, PrincipalID: actor.PrincipalID})
 			}
 		}
 	}
-	return out
-}
-
-// holdsRoleLocal mirrors the kernel's own unexported holdsRole. DEFERRED
-// (owner-gated): the proper seam is an exported governanceprincipal method,
-// which is outside this task's write set — the duplication stays until that
-// kernel change is authorized.
-func holdsRoleLocal(profile governanceprincipal.Profile, actor governanceprincipal.PrincipalResolution, role string) bool {
-	for _, m := range profile.RoleMappings {
-		if m.Role == role && m.TrustSource == actor.Claim.TrustSource && stringsContain(m.Subjects, actor.Claim.Subject) {
-			return true
-		}
-	}
-	return false
+	return out, nil
 }
 
 func roleRegistered(profile governanceprincipal.Profile, role string) bool {

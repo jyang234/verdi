@@ -626,22 +626,26 @@ type authorityResolutionDoc struct {
 	Authorization string `json:"authorization"`
 }
 
+// exemptionResolutionDoc carries removed_claims WITHOUT omitempty: the set
+// is mandatory-present (authority design §5.5), so a rejected resolution
+// that removed nothing still encodes an explicit `[]` rather than
+// disappearing from the wire.
 type exemptionResolutionDoc struct {
-	ID            string                 `json:"id"`
-	Digest        string                 `json:"digest"`
-	Resolution    authorityResolutionDoc `json:"resolution"`
-	RemovedClaims []claimWitnessPlainDoc `json:"removed_claims"`
+	ID            string                      `json:"id"`
+	Digest        string                      `json:"digest"`
+	Resolution    authorityResolutionDoc      `json:"resolution"`
+	RemovedClaims []mechanicalClaimWitnessDoc `json:"removed_claims"`
 }
 
-// claimWitnessPlainDoc is ClaimWitness's plain (non-pointer) nested-report
-// wire shape — mandatory-non-null presence for these leaf fields is
-// already implied by the enclosing mandatory array, matching
+// mechanicalClaimWitnessDoc is MechanicalClaimWitness's plain (non-pointer)
+// nested-report wire shape — mandatory-non-null presence for these leaf
+// fields is already implied by the enclosing mandatory array, matching
 // internal/contextcompile's convention of using plain structs for nested
 // report-only rows.
-type claimWitnessPlainDoc struct {
-	ID       string `json:"id"`
-	Digest   string `json:"digest"`
-	Category string `json:"category"`
+type mechanicalClaimWitnessDoc struct {
+	PolicyID    string `json:"policy_id"`
+	ClaimID     string `json:"claim_id"`
+	ClaimDigest string `json:"claim_digest"`
 }
 
 type mechanicalEvaluationDoc struct {
@@ -814,26 +818,33 @@ func authorityResolutionDocFor(r AuthorityResolution) authorityResolutionDoc {
 	}
 }
 
-func claimWitnessFromPlainDoc(d claimWitnessPlainDoc) ClaimWitness {
-	return ClaimWitness(d)
+func mechanicalClaimWitnessFromDoc(d mechanicalClaimWitnessDoc) MechanicalClaimWitness {
+	return MechanicalClaimWitness(d)
 }
 
-func claimWitnessPlainDocFor(w ClaimWitness) claimWitnessPlainDoc {
-	return claimWitnessPlainDoc(w)
+func mechanicalClaimWitnessDocFor(w MechanicalClaimWitness) mechanicalClaimWitnessDoc {
+	return mechanicalClaimWitnessDoc(w)
 }
 
+// exemptionResolutionFromDoc preserves the absent/empty distinction the
+// mandatory-present rule needs: an omitted or null removed_claims stays nil
+// so validation can reject it, while an explicit `[]` decodes to a non-nil
+// empty set.
 func exemptionResolutionFromDoc(d exemptionResolutionDoc) ExemptionResolution {
-	removed := make([]ClaimWitness, len(d.RemovedClaims))
-	for i, rc := range d.RemovedClaims {
-		removed[i] = claimWitnessFromPlainDoc(rc)
+	var removed []MechanicalClaimWitness
+	if d.RemovedClaims != nil {
+		removed = make([]MechanicalClaimWitness, len(d.RemovedClaims))
+		for i, rc := range d.RemovedClaims {
+			removed[i] = mechanicalClaimWitnessFromDoc(rc)
+		}
 	}
 	return ExemptionResolution{ID: d.ID, Digest: d.Digest, Resolution: authorityResolutionFromDoc(d.Resolution), RemovedClaims: removed}
 }
 
 func exemptionResolutionDocFor(e ExemptionResolution) exemptionResolutionDoc {
-	removed := make([]claimWitnessPlainDoc, len(e.RemovedClaims))
+	removed := make([]mechanicalClaimWitnessDoc, len(e.RemovedClaims))
 	for i, rc := range e.RemovedClaims {
-		removed[i] = claimWitnessPlainDocFor(rc)
+		removed[i] = mechanicalClaimWitnessDocFor(rc)
 	}
 	return exemptionResolutionDoc{ID: e.ID, Digest: e.Digest, Resolution: authorityResolutionDocFor(e.Resolution), RemovedClaims: removed}
 }

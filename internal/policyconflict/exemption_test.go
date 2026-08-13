@@ -10,34 +10,46 @@ import (
 	"github.com/jyang234/verdi/internal/policyartifact"
 )
 
-// exemptionClaimCategory is the closed policyartifact witness category
-// this package uses when a ClaimWitness names a typed mechanical claim
-// (the nine-value vocabulary policyartifact.ValidateWitnessCategory
-// enforces is authored for §6 prose claims; "constraint" is the closest
-// semantic fit for a typed policy constraint claim — see the task report's
-// disclosed judgment call).
-const exemptionClaimCategory = "constraint"
-
 func allProvenResolution() AuthorityResolution {
 	return AuthorityResolution{Match: ProofProven, Freshness: ProofProven, Scope: ProofProven, Bound: ProofProven, Authorization: ProofProven}
 }
 
+// exemptionFor builds a resolution naming exactly the supplied row claims as
+// MechanicalClaimWitnesses (ledger SI-105(c): a removed mechanical claim is
+// identified by (policy_id, claim_id, claim_digest), never by the semantic
+// prose-witness vocabulary), sorted by the composite key.
 func exemptionFor(id string, resolution AuthorityResolution, removed ...TypedClaimRecord) ExemptionResolution {
-	witnesses := make([]ClaimWitness, len(removed))
-	for i, c := range removed {
-		witnesses[i] = ClaimWitness{ID: c.PolicyID + "/" + c.ClaimDigest, Digest: c.ClaimDigest, Category: exemptionClaimCategory}
+	witnesses := make([]MechanicalClaimWitness, 0, len(removed))
+	for _, c := range removed {
+		witnesses = append(witnesses, MechanicalClaimWitness{PolicyID: c.PolicyID, ClaimID: c.Claim.ID, ClaimDigest: c.ClaimDigest})
 	}
+	sort.Slice(witnesses, func(i, j int) bool {
+		if witnesses[i].PolicyID != witnesses[j].PolicyID {
+			return witnesses[i].PolicyID < witnesses[j].PolicyID
+		}
+		return witnesses[i].ClaimID < witnesses[j].ClaimID
+	})
 	return ExemptionResolution{
 		ID: id, Digest: testDigest64, Resolution: resolution, RemovedClaims: witnesses,
 	}
 }
 
+// rejectedExemption builds a not-all-proven resolution: authority design
+// §5.5 requires it name the mandatory-present explicit EMPTY removal set,
+// because it removed nothing.
+func rejectedExemption(id string, resolution AuthorityResolution) ExemptionResolution {
+	return ExemptionResolution{
+		ID: id, Digest: testDigest64, Resolution: resolution, RemovedClaims: []MechanicalClaimWitness{},
+	}
+}
+
 func evaluateOneRow(t *testing.T, in MechanicalInput) MechanicalEvaluation {
 	t.Helper()
-	rows, err := EvaluateMechanical(context.Background(), in)
+	result, err := EvaluateMechanical(context.Background(), in)
 	if err != nil {
 		t.Fatalf("EvaluateMechanical: %v", err)
 	}
+	rows := result.Evaluations
 	if len(rows) != 1 {
 		t.Fatalf("rows = %+v, want exactly one", rows)
 	}
@@ -67,7 +79,6 @@ func TestApplyEffectiveExemptionsNoResolutions(t *testing.T) {
 
 func TestApplyEffectiveExemptionsRejectsEachNotProvenState(t *testing.T) {
 	row := violatedRow(t)
-	removed := row.Claims[0]
 
 	fields := []struct {
 		name string
@@ -81,7 +92,7 @@ func TestApplyEffectiveExemptionsRejectsEachNotProvenState(t *testing.T) {
 	}
 	for _, f := range fields {
 		t.Run(f.name+" not proven is rejected", func(t *testing.T) {
-			resolution := exemptionFor("ex-"+f.name, f.mk(allProvenResolution()), removed)
+			resolution := rejectedExemption("ex-"+f.name, f.mk(allProvenResolution()))
 			got, err := ApplyEffectiveExemptions(row, []ExemptionResolution{resolution})
 			if err != nil {
 				t.Fatalf("ApplyEffectiveExemptions: %v", err)
@@ -156,8 +167,12 @@ func TestApplyEffectiveExemptionsCoversConflict(t *testing.T) {
 	if !reflect.DeepEqual(got.Before, row.Before) {
 		t.Fatalf("Before = %+v, want the original mechanical proof retained unchanged", got.Before)
 	}
-	if len(got.Exemptions) != 1 || len(got.Exemptions[0].RemovedClaims) != 1 || got.Exemptions[0].RemovedClaims[0].Digest != silver.ClaimDigest {
+	if len(got.Exemptions) != 1 || len(got.Exemptions[0].RemovedClaims) != 1 {
 		t.Fatalf("Exemptions = %+v, want exactly the named removed claim", got.Exemptions)
+	}
+	wantWitness := MechanicalClaimWitness{PolicyID: silver.PolicyID, ClaimID: silver.Claim.ID, ClaimDigest: silver.ClaimDigest}
+	if got.Exemptions[0].RemovedClaims[0] != wantWitness {
+		t.Fatalf("RemovedClaims[0] = %+v, want the composite witness %+v", got.Exemptions[0].RemovedClaims[0], wantWitness)
 	}
 	if err := validateMechanicalEvaluation("row", got); err != nil {
 		t.Fatalf("result failed the package's own validation: %v", err)
@@ -209,19 +224,16 @@ func TestApplyEffectiveExemptionsPartialRemovalStillConflict(t *testing.T) {
 // rejected one's ineffectiveness stays visible in the reason set.
 func TestApplyEffectiveExemptionsRetainsRejectedBesideAccepted(t *testing.T) {
 	row := violatedRow(t)
-	var gold, silver TypedClaimRecord
+	var silver TypedClaimRecord
 	for _, c := range row.Claims {
-		switch c.PolicyID {
-		case "policy-a":
-			gold = c
-		case "policy-b":
+		if c.PolicyID == "policy-b" {
 			silver = c
 		}
 	}
 	accepted := exemptionFor("ex-a-accepted", allProvenResolution(), silver)
-	rejected := exemptionFor("ex-b-rejected", AuthorityResolution{
+	rejected := rejectedExemption("ex-b-rejected", AuthorityResolution{
 		Match: ProofProven, Freshness: ProofProven, Scope: ProofProven, Bound: ProofUnproven, Authorization: ProofProven,
-	}, gold)
+	})
 
 	got, err := ApplyEffectiveExemptions(row, []ExemptionResolution{rejected, accepted})
 	if err != nil {
@@ -359,12 +371,12 @@ func TestApplyEffectiveExemptionsProvenDisjointRowIsNotCredited(t *testing.T) {
 	}
 }
 
-// TestApplyEffectiveExemptionsSharedClaimDigestDepartsOneIdentity documents
-// the frozen wire's claim-identity consequence (see mechanical.go's
-// collapse comment and the task report's ledger candidate): two policies
-// declaring one byte-identical claim contribute ONE claim identity, so an
-// exemption naming that digest departs from that single identity.
-func TestApplyEffectiveExemptionsSharedClaimDigestDepartsOneIdentity(t *testing.T) {
+// TestExemptionResolutionSharedClaimBytesDepartOnePolicyIdentity pins ledger
+// SI-105(c): two policies declaring one byte-identical claim contribute TWO
+// composite identities, so an exemption naming one policy's identity departs
+// from that policy's claim ONLY — the other policy's identical requirement
+// survives the departure.
+func TestExemptionResolutionSharedClaimBytesDepartOnePolicyIdentity(t *testing.T) {
 	shared := discreteClaim("shared-claim", "level", policyartifact.OpEquals, []string{"gold"}, phaseScope("build"))
 	row := evaluateOneRow(t, MechanicalInput{Claims: []contextcompile.TypedClaim{
 		typedClaim(t, "policy-a", shared),
@@ -374,27 +386,174 @@ func TestApplyEffectiveExemptionsSharedClaimDigestDepartsOneIdentity(t *testing.
 	if row.State != ProofViolatedWithWitness {
 		t.Fatalf("precondition: row.State = %q, want violated-with-witness", row.State)
 	}
-	if len(row.Claims) != 2 {
-		t.Fatalf("row Claims = %+v, want the shared claim collapsed to one identity", row.Claims)
+	if len(row.Claims) != 3 {
+		t.Fatalf("row Claims = %+v, want one record per (policy_id, claim_id) identity", row.Claims)
 	}
-	var sharedRecord TypedClaimRecord
+	var policyAShared TypedClaimRecord
 	for _, c := range row.Claims {
-		if c.Claim.ID == "shared-claim" {
-			sharedRecord = c
+		if c.Claim.ID == "shared-claim" && c.PolicyID == "policy-a" {
+			policyAShared = c
 		}
 	}
-	resolution := exemptionFor("ex-1", allProvenResolution(), sharedRecord)
+	resolution := exemptionFor("ex-1", allProvenResolution(), policyAShared)
 
 	got, err := ApplyEffectiveExemptions(row, []ExemptionResolution{resolution})
 	if err != nil {
 		t.Fatalf("ApplyEffectiveExemptions: %v", err)
 	}
-	if got.State != ProofProven {
-		t.Fatalf("State = %q, want proven: the one named claim identity left the conjunction", got.State)
+	if got.State != ProofViolatedWithWitness {
+		t.Fatalf("State = %q, want the conflict uncovered: policy-b still declares the identical gold requirement", got.State)
 	}
 	if err := validateMechanicalEvaluation("row", got); err != nil {
 		t.Fatalf("result failed the package's own validation: %v", err)
 	}
+
+	// Departing from BOTH policy identities does cover it.
+	var policyBShared TypedClaimRecord
+	for _, c := range row.Claims {
+		if c.Claim.ID == "shared-claim" && c.PolicyID == "policy-b" {
+			policyBShared = c
+		}
+	}
+	both := exemptionFor("ex-2", allProvenResolution(), policyAShared, policyBShared)
+	covered, err := ApplyEffectiveExemptions(row, []ExemptionResolution{both})
+	if err != nil {
+		t.Fatalf("ApplyEffectiveExemptions: %v", err)
+	}
+	if covered.State != ProofProven {
+		t.Fatalf("State = %q, want proven once every declaring policy identity is departed from", covered.State)
+	}
+}
+
+// TestExemptionResolutionRemovedClaimsCardinality pins authority design
+// §5.5's mandatory-present removal set: an all-five-proven resolution names
+// at least one witness, and every rejected resolution names the explicit
+// empty set because it removed nothing.
+func TestExemptionResolutionRemovedClaimsCardinality(t *testing.T) {
+	row := violatedRow(t)
+	notProven := AuthorityResolution{
+		Match: ProofProven, Freshness: ProofProven, Scope: ProofProven, Bound: ProofUnproven, Authorization: ProofProven,
+	}
+
+	t.Run("rejected resolution with an explicit empty set is accepted", func(t *testing.T) {
+		got, err := ApplyEffectiveExemptions(row, []ExemptionResolution{rejectedExemption("ex-1", notProven)})
+		if err != nil {
+			t.Fatalf("ApplyEffectiveExemptions: %v", err)
+		}
+		if len(got.Exemptions) != 1 || len(got.Exemptions[0].RemovedClaims) != 0 || got.Exemptions[0].RemovedClaims == nil {
+			t.Fatalf("Exemptions = %+v, want the rejected resolution retained with a mandatory-present empty removal set", got.Exemptions)
+		}
+		if err := validateMechanicalEvaluation("row", got); err != nil {
+			t.Fatalf("result failed the package's own validation: %v", err)
+		}
+	})
+
+	t.Run("proven resolution removing nothing is refused", func(t *testing.T) {
+		empty := ExemptionResolution{ID: "ex-1", Digest: testDigest64, Resolution: allProvenResolution(), RemovedClaims: []MechanicalClaimWitness{}}
+		if _, err := ApplyEffectiveExemptions(row, []ExemptionResolution{empty}); err == nil {
+			t.Fatal("want operational error for an all-proven resolution naming no removed claim, got nil")
+		}
+	})
+
+	t.Run("rejected resolution claiming a removal is refused", func(t *testing.T) {
+		lying := exemptionFor("ex-1", notProven, row.Claims[0])
+		if _, err := ApplyEffectiveExemptions(row, []ExemptionResolution{lying}); err == nil {
+			t.Fatal("want operational error for a rejected resolution claiming a removal it never made, got nil")
+		}
+	})
+
+	t.Run("absent removal set is refused", func(t *testing.T) {
+		absent := ExemptionResolution{ID: "ex-1", Digest: testDigest64, Resolution: notProven}
+		if _, err := ApplyEffectiveExemptions(row, []ExemptionResolution{absent}); err == nil {
+			t.Fatal("want operational error for an absent (nil) removal set, got nil")
+		}
+	})
+}
+
+// TestExemptionResolutionWitnessMustNameCurrentRowClaim pins §5.5's
+// exact-current-row membership rule: an applied witness must belong to the
+// row's own typed-claim set by BOTH composite key and digest.
+func TestExemptionResolutionWitnessMustNameCurrentRowClaim(t *testing.T) {
+	row := violatedRow(t)
+	present := row.Claims[0]
+
+	negatives := []struct {
+		name    string
+		witness MechanicalClaimWitness
+	}{
+		{"policy id absent from the row", MechanicalClaimWitness{PolicyID: "policy-ghost", ClaimID: present.Claim.ID, ClaimDigest: present.ClaimDigest}},
+		{"claim id absent from the row", MechanicalClaimWitness{PolicyID: present.PolicyID, ClaimID: "ghost-claim", ClaimDigest: present.ClaimDigest}},
+		{"stale digest for a present identity", MechanicalClaimWitness{PolicyID: present.PolicyID, ClaimID: present.Claim.ID, ClaimDigest: testDigest64}},
+	}
+	for _, tc := range negatives {
+		t.Run(tc.name, func(t *testing.T) {
+			resolution := ExemptionResolution{
+				ID: "ex-1", Digest: testDigest64, Resolution: allProvenResolution(),
+				RemovedClaims: []MechanicalClaimWitness{tc.witness},
+			}
+			if _, err := ApplyEffectiveExemptions(row, []ExemptionResolution{resolution}); err == nil {
+				t.Fatalf("want operational error for %s, got nil", tc.name)
+			}
+		})
+	}
+
+	t.Run("exact current witness is applied", func(t *testing.T) {
+		resolution := exemptionFor("ex-1", allProvenResolution(), present)
+		if _, err := ApplyEffectiveExemptions(row, []ExemptionResolution{resolution}); err != nil {
+			t.Fatalf("ApplyEffectiveExemptions(exact witness): %v", err)
+		}
+	})
+}
+
+// TestExemptionResolutionRemovedClaimsCompositeOrdering pins the composite
+// sort/dedupe rule the wire requires: identical witnesses collapse, and two
+// witnesses disagreeing about one identity's digest are contradictory.
+func TestExemptionResolutionRemovedClaimsCompositeOrdering(t *testing.T) {
+	row := violatedRow(t)
+	var gold, silver TypedClaimRecord
+	for _, c := range row.Claims {
+		switch c.PolicyID {
+		case "policy-a":
+			gold = c
+		case "policy-b":
+			silver = c
+		}
+	}
+
+	t.Run("unsorted duplicates normalize", func(t *testing.T) {
+		unsorted := ExemptionResolution{
+			ID: "ex-1", Digest: testDigest64, Resolution: allProvenResolution(),
+			RemovedClaims: []MechanicalClaimWitness{
+				{PolicyID: silver.PolicyID, ClaimID: silver.Claim.ID, ClaimDigest: silver.ClaimDigest},
+				{PolicyID: gold.PolicyID, ClaimID: gold.Claim.ID, ClaimDigest: gold.ClaimDigest},
+				{PolicyID: silver.PolicyID, ClaimID: silver.Claim.ID, ClaimDigest: silver.ClaimDigest},
+			},
+		}
+		got, err := ApplyEffectiveExemptions(row, []ExemptionResolution{unsorted})
+		if err != nil {
+			t.Fatalf("ApplyEffectiveExemptions: %v", err)
+		}
+		removed := got.Exemptions[0].RemovedClaims
+		if len(removed) != 2 || removed[0].PolicyID != "policy-a" || removed[1].PolicyID != "policy-b" {
+			t.Fatalf("RemovedClaims = %+v, want composite-sorted and deduplicated", removed)
+		}
+		if err := validateMechanicalEvaluation("row", got); err != nil {
+			t.Fatalf("result failed the package's own validation: %v", err)
+		}
+	})
+
+	t.Run("one identity with two digests is refused", func(t *testing.T) {
+		contradictory := ExemptionResolution{
+			ID: "ex-1", Digest: testDigest64, Resolution: allProvenResolution(),
+			RemovedClaims: []MechanicalClaimWitness{
+				{PolicyID: gold.PolicyID, ClaimID: gold.Claim.ID, ClaimDigest: gold.ClaimDigest},
+				{PolicyID: gold.PolicyID, ClaimID: gold.Claim.ID, ClaimDigest: testDigest64},
+			},
+		}
+		if _, err := ApplyEffectiveExemptions(row, []ExemptionResolution{contradictory}); err == nil {
+			t.Fatal("want operational error for one identity carrying two digests, got nil")
+		}
+	})
 }
 
 func TestApplyEffectiveExemptionsNeverMutatesInputRow(t *testing.T) {
@@ -424,9 +583,12 @@ func TestApplyEffectiveExemptionsNeverMutatesInputRow(t *testing.T) {
 	}
 }
 
-func TestApplyEffectiveExemptionsUnknownClaimDigestIsOperationalError(t *testing.T) {
+func TestApplyEffectiveExemptionsUnknownClaimIdentityIsOperationalError(t *testing.T) {
 	row := violatedRow(t)
-	ghost := TypedClaimRecord{PolicyID: "policy-ghost", PolicyDigest: testDigest64, ClaimDigest: testDigest64}
+	ghost := TypedClaimRecord{
+		PolicyID: "policy-ghost", PolicyDigest: testDigest64, ClaimDigest: testDigest64,
+		Claim: discreteClaim("ghost-claim", "level", policyartifact.OpEquals, []string{"bronze"}, phaseScope("build")),
+	}
 	resolution := exemptionFor("ex-1", allProvenResolution(), ghost)
 	if _, err := ApplyEffectiveExemptions(row, []ExemptionResolution{resolution}); err == nil {
 		t.Fatal("want operational error for a named claim absent from the row, got nil")
