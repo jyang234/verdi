@@ -1167,9 +1167,10 @@ func TestMechanicalClaimIdentityPairRowsStayDistinct(t *testing.T) {
 // other half of SI-105's composite identity rule against step 2's "every
 // UNIQUE differently-scoped claim pair". An input may legitimately carry the
 // same (policy_id, claim_id) twice with identical content —
-// validateClaimOperands tolerates the exact repeat deliberately — and each
-// copy pairs with the same differently-scoped contradicting claim, so an
-// un-normalized member list mints two byte-identical rows carrying one ID.
+// normalizeClaimOperands accepts the exact repeat deliberately and returns
+// it as one deduplicated operand — and each copy would otherwise pair with
+// the same differently-scoped contradicting claim, so an un-normalized
+// member list mints two byte-identical rows carrying one ID.
 // That duplicate fails the report's own row-ID uniqueness rule and would
 // fail a legitimate run operationally. Normalizing the member list once
 // makes the duplicated input prove exactly what the same input without the
