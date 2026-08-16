@@ -331,3 +331,65 @@ func TestPolicyDispositionPath_AgreesWithPolicyArtifactGrammar(t *testing.T) {
 		t.Fatalf("ClassifyPolicyPath(%q) name = %q, want %q", policyRel, gotName, name)
 	}
 }
+
+const (
+	testTreeHash    = "830515d6a6d3116cc84ff21c6874aa8110f72c7c134ca306fb7b8b610e8dcae2"
+	testInputDigest = "536a625825acd2ce01dbeb65078de98a32972b7e6a8c4e129651324280904bc1"
+)
+
+// TestPolicyConflictCachePath locks the D4 filename grammar exactly:
+// policy-conflict-<layout-version>-<tree-hash>-<input-digest>.json under
+// .verdi/data/cache/ (store-layout D4; ledger SI-96/SI-101).
+func TestPolicyConflictCachePath(t *testing.T) {
+	got, err := PolicyConflictCachePath("/store", testTreeHash, testInputDigest)
+	if err != nil {
+		t.Fatalf("PolicyConflictCachePath: %v", err)
+	}
+	want := filepath.FromSlash("/store/.verdi/data/cache/policy-conflict-" + LayoutVersion + "-" + testTreeHash + "-" + testInputDigest + ".json")
+	if got != want {
+		t.Errorf("PolicyConflictCachePath = %q, want %q", got, want)
+	}
+}
+
+// TestPolicyConflictCachePath_Negative proves every non-bare-64-lowercase-
+// hex shape is refused rather than silently joined into a path no
+// legitimate TreeHash/digest value could ever produce (D4: "both hash
+// segments are exactly 64 lowercase hexadecimal characters without a
+// sha256: prefix").
+func TestPolicyConflictCachePath_Negative(t *testing.T) {
+	tests := []struct {
+		name      string
+		treeHash  string
+		inputHash string
+	}{
+		{"tree hash carries sha256: prefix", "sha256:" + testTreeHash, testInputDigest},
+		{"tree hash too short", testTreeHash[:63], testInputDigest},
+		{"tree hash too long", testTreeHash + "a", testInputDigest},
+		{"tree hash uppercase", strings.ToUpper(testTreeHash), testInputDigest},
+		{"tree hash empty", "", testInputDigest},
+		{"input digest carries sha256: prefix", testTreeHash, "sha256:" + testInputDigest},
+		{"input digest too short", testTreeHash, testInputDigest[:63]},
+		{"input digest uppercase", testTreeHash, strings.ToUpper(testInputDigest)},
+		{"input digest empty", testTreeHash, ""},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := PolicyConflictCachePath("/store", tc.treeHash, tc.inputHash); err == nil {
+				t.Fatalf("PolicyConflictCachePath(%q, %q) = nil error, want a refusal", tc.treeHash, tc.inputHash)
+			}
+		})
+	}
+}
+
+// TestPolicyConflictCachePath_EmptyRootDisplayForm mirrors every other
+// accessor's own empty-root display-form convention.
+func TestPolicyConflictCachePath_EmptyRootDisplayForm(t *testing.T) {
+	got, err := PolicyConflictCachePath("", testTreeHash, testInputDigest)
+	if err != nil {
+		t.Fatalf("PolicyConflictCachePath: %v", err)
+	}
+	want := filepath.FromSlash(".verdi/data/cache/policy-conflict-" + LayoutVersion + "-" + testTreeHash + "-" + testInputDigest + ".json")
+	if got != want {
+		t.Errorf("PolicyConflictCachePath(\"\", …) = %q, want %q", got, want)
+	}
+}
