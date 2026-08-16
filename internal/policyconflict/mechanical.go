@@ -137,7 +137,8 @@ func (k mechanicalGroupKey) id() string {
 // identity keeps the suffix bounded and content-derived without adding a
 // delimiter or escaping grammar, and one composite identity still names
 // exactly one claim because drift under it already fails operationally in
-// validateClaimOperands.
+// normalizeClaimOperands, which also collapses an exact repeat of one
+// identity so no two members can mint the same pair suffix.
 func claimIdentityDigest(c contextcompile.TypedClaim) (string, error) {
 	d, err := canonjson.Digest(struct {
 		ClaimID  string `json:"claim_id"`
@@ -181,14 +182,15 @@ type MechanicalResult struct {
 // comment above describes. Rows are always returned in ascending ID order;
 // identical inputs deep-equal outputs.
 func EvaluateMechanical(ctx context.Context, in MechanicalInput) (MechanicalResult, error) {
-	if err := validateClaimOperands(in.Claims); err != nil {
+	claims, err := normalizeClaimOperands(in.Claims)
+	if err != nil {
 		return MechanicalResult{}, err
 	}
 
 	// Sort on the claim digest first (the row-ID component) and break ties
 	// on the composite identity, so two policies declaring byte-identical
 	// claims still order deterministically against each other.
-	ordered := append([]contextcompile.TypedClaim(nil), in.Claims...)
+	ordered := append([]contextcompile.TypedClaim(nil), claims...)
 	sort.Slice(ordered, func(i, j int) bool {
 		if ordered[i].ClaimDigest != ordered[j].ClaimDigest {
 			return ordered[i].ClaimDigest < ordered[j].ClaimDigest
@@ -229,7 +231,7 @@ func EvaluateMechanical(ctx context.Context, in MechanicalInput) (MechanicalResu
 	return MechanicalResult{Evaluations: rows, Disclosures: disclosures}, nil
 }
 
-// validateClaimOperands is EvaluateMechanical's entry contract over the
+// normalizeClaimOperands is EvaluateMechanical's entry contract over the
 // typed claims it will solve (ledger SI-105):
 //
 //   - every operand carries its policy identity, policy digest and claim
@@ -240,33 +242,47 @@ func EvaluateMechanical(ctx context.Context, in MechanicalInput) (MechanicalResu
 //   - one composite (policy_id, claim_id) identity names exactly one claim.
 //     A repeated identity carrying different content is contradictory
 //     authority and fails operationally rather than choosing a meaning.
-func validateClaimOperands(claims []contextcompile.TypedClaim) error {
+//
+// It is also the package's SINGLE member-normalization seam: an EXACT
+// repeat of one composite identity is one operand, so the canonical member
+// list it returns carries each composite identity once. Everything
+// downstream — grouping, the domain solvers, both witness steps and the row
+// records — reads that one list, which is what keeps step 2's "every UNIQUE
+// differently-scoped claim pair" unique. Without it a legitimately repeated
+// identity pairs twice with the same differently-scoped claim and mints two
+// byte-identical rows carrying one ID, which the report's own row-ID
+// uniqueness rule refuses. Deduplication is only over a repeat this function
+// has just proven identical; two different contents under one composite
+// identity are still refused above rather than collapsed.
+func normalizeClaimOperands(claims []contextcompile.TypedClaim) ([]contextcompile.TypedClaim, error) {
 	type identity struct{ policyID, claimID string }
 	seen := make(map[identity]contextcompile.TypedClaim, len(claims))
+	normalized := make([]contextcompile.TypedClaim, 0, len(claims))
 	for i, c := range claims {
 		if c.PolicyID == "" || c.PolicyDigest == "" || c.ClaimDigest == "" {
-			return fmt.Errorf("policyconflict: mechanical claim [%d]: policy id, policy digest, and claim digest are all required", i)
+			return nil, fmt.Errorf("policyconflict: mechanical claim [%d]: policy id, policy digest, and claim digest are all required", i)
 		}
 		if err := c.Claim.Validate(); err != nil {
-			return fmt.Errorf("policyconflict: mechanical claim [%d] %s: %w", i, c.ClaimDigest, err)
+			return nil, fmt.Errorf("policyconflict: mechanical claim [%d] %s: %w", i, c.ClaimDigest, err)
 		}
 		recomputed, err := policyartifact.ClaimDigest(c.Claim)
 		if err != nil {
-			return fmt.Errorf("policyconflict: mechanical claim [%d] (policy %q claim %q): digest claim: %w", i, c.PolicyID, c.Claim.ID, err)
+			return nil, fmt.Errorf("policyconflict: mechanical claim [%d] (policy %q claim %q): digest claim: %w", i, c.PolicyID, c.Claim.ID, err)
 		}
 		if recomputed != c.ClaimDigest {
-			return fmt.Errorf("policyconflict: mechanical claim [%d] (policy %q claim %q): carried claim digest %s is not the canonical digest of its claim (%s)", i, c.PolicyID, c.Claim.ID, c.ClaimDigest, recomputed)
+			return nil, fmt.Errorf("policyconflict: mechanical claim [%d] (policy %q claim %q): carried claim digest %s is not the canonical digest of its claim (%s)", i, c.PolicyID, c.Claim.ID, c.ClaimDigest, recomputed)
 		}
 		key := identity{c.PolicyID, c.Claim.ID}
 		if prev, ok := seen[key]; ok {
 			if prev.ClaimDigest != c.ClaimDigest || prev.PolicyDigest != c.PolicyDigest {
-				return fmt.Errorf("policyconflict: mechanical claim [%d]: two different claims share identity (policy %q, claim %q)", i, c.PolicyID, c.Claim.ID)
+				return nil, fmt.Errorf("policyconflict: mechanical claim [%d]: two different claims share identity (policy %q, claim %q)", i, c.PolicyID, c.Claim.ID)
 			}
 			continue
 		}
 		seen[key] = c
+		normalized = append(normalized, c)
 	}
-	return nil
+	return normalized, nil
 }
 
 // translateKernelDisclosures maps the kernel's own disclosure vocabulary
@@ -666,9 +682,9 @@ func buildRow(id string, gk mechanicalGroupKey, members []contextcompile.TypedCl
 // merely because the bytes agree.
 //
 // Deduplication is therefore only over a genuinely repeated composite
-// identity, which validateClaimOperands has already proven carries
-// identical content; the records sort by that same composite key, which is
-// the order the wire requires.
+// identity, which normalizeClaimOperands has already proven carries
+// identical content and already collapsed on the member list; the records
+// sort by that same composite key, which is the order the wire requires.
 func claimRecordsFor(members []contextcompile.TypedClaim) []TypedClaimRecord {
 	type identity struct{ policyID, claimID string }
 	seen := make(map[identity]bool, len(members))

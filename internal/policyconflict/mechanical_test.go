@@ -1163,6 +1163,57 @@ func TestMechanicalClaimIdentityPairRowsStayDistinct(t *testing.T) {
 	}
 }
 
+// TestMechanicalClaimIdentityDuplicateCompositeYieldsOneWitnessRow pins the
+// other half of SI-105's composite identity rule against step 2's "every
+// UNIQUE differently-scoped claim pair". An input may legitimately carry the
+// same (policy_id, claim_id) twice with identical content —
+// validateClaimOperands tolerates the exact repeat deliberately — and each
+// copy pairs with the same differently-scoped contradicting claim, so an
+// un-normalized member list mints two byte-identical rows carrying one ID.
+// That duplicate fails the report's own row-ID uniqueness rule and would
+// fail a legitimate run operationally. Normalizing the member list once
+// makes the duplicated input prove exactly what the same input without the
+// duplicate proves.
+func TestMechanicalClaimIdentityDuplicateCompositeYieldsOneWitnessRow(t *testing.T) {
+	repeated := typedClaim(t, "policy-a", discreteClaim("c1", "level", policyartifact.OpEquals, []string{"gold"}, universalScope()))
+	contradicting := typedClaim(t, "policy-c", discreteClaim("other-claim", "level", policyartifact.OpEquals, []string{"silver"}, phaseScope("build")))
+
+	withDup := MechanicalInput{Claims: []contextcompile.TypedClaim{repeated, repeated, contradicting}}
+	withoutDup := MechanicalInput{Claims: []contextcompile.TypedClaim{repeated, contradicting}}
+
+	dupResult, err := EvaluateMechanical(context.Background(), withDup)
+	if err != nil {
+		t.Fatalf("EvaluateMechanical(duplicated composite): %v", err)
+	}
+	plainResult, err := EvaluateMechanical(context.Background(), withoutDup)
+	if err != nil {
+		t.Fatalf("EvaluateMechanical(no duplicate): %v", err)
+	}
+
+	// (a) The duplicate changes nothing at all about what is proven.
+	if !reflect.DeepEqual(dupResult, plainResult) {
+		t.Fatalf("duplicated composite changed the proof:\n withDup:    %+v\n withoutDup: %+v", dupResult, plainResult)
+	}
+
+	// (b) The exact report-level rule a colliding row ID breaks.
+	if err := requireSortedUnique("report.mechanical", dupResult.Evaluations, func(m MechanicalEvaluation) string { return m.ID }); err != nil {
+		t.Fatalf("duplicated composite broke the report's row-ID uniqueness rule: %v", err)
+	}
+	if len(dupResult.Evaluations) != 1 {
+		t.Fatalf("rows = %+v, want exactly one differently-scoped pair witness", dupResult.Evaluations)
+	}
+	row := dupResult.Evaluations[0]
+	if row.State != ProofViolatedWithWitness {
+		t.Fatalf("row.State = %q, want violated-with-witness", row.State)
+	}
+	if err := validateMechanicalEvaluation("row", row); err != nil {
+		t.Fatalf("row failed the package's own wire validation: %v", err)
+	}
+	if len(row.Claims) != 2 {
+		t.Fatalf("row.Claims = %+v, want one record per contributing composite identity", row.Claims)
+	}
+}
+
 // --- SI-106: exact distinctness role-pair attribution ------------------------
 
 // TestRelationBearingFindingDistinctnessRolesAttribution pins authority
