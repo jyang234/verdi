@@ -2,6 +2,7 @@ package policyconflict
 
 import (
 	"context"
+	"fmt"
 	"reflect"
 	"sort"
 	"testing"
@@ -1110,6 +1111,56 @@ func TestMechanicalClaimDigestMutationRefused(t *testing.T) {
 			t.Fatal("want operational error for a claim body that no longer digests to its carried digest, got nil")
 		}
 	})
+}
+
+// TestMechanicalClaimIdentityPairRowsStayDistinct pins ledger SI-109: a
+// step-2 pair-row component is the canonical digest of that claim's
+// composite (policy_id, claim_id) identity, never the claim digest alone.
+// Two policies declaring BYTE-IDENTICAL contradictory claims each pair with
+// the same third claim, so claim-digest components would mint two rows
+// carrying one ID — a duplicate the report's own row-ID uniqueness rule
+// refuses (a legitimate gate run failing operationally) and an ordering
+// sort.Slice cannot make deterministic.
+func TestMechanicalClaimIdentityPairRowsStayDistinct(t *testing.T) {
+	shared := discreteClaim("shared-claim", "level", policyartifact.OpEquals, []string{"gold"}, universalScope())
+	claims := []contextcompile.TypedClaim{
+		typedClaim(t, "policy-a", shared),
+		typedClaim(t, "policy-b", shared),
+		typedClaim(t, "policy-c", discreteClaim("other-claim", "level", policyartifact.OpEquals, []string{"silver"}, phaseScope("build"))),
+	}
+	in := MechanicalInput{Claims: claims}
+
+	result, err := EvaluateMechanical(context.Background(), in)
+	if err != nil {
+		t.Fatalf("EvaluateMechanical: %v", err)
+	}
+	rows := result.Evaluations
+	if len(rows) != 2 {
+		t.Fatalf("rows = %+v, want exactly two differently-scoped pair witnesses (one per contradicting policy identity)", rows)
+	}
+	for i, row := range rows {
+		if row.State != ProofViolatedWithWitness {
+			t.Fatalf("rows[%d].State = %q, want violated-with-witness", i, row.State)
+		}
+		if err := validateMechanicalEvaluation(fmt.Sprintf("row[%d]", i), row); err != nil {
+			t.Fatalf("rows[%d] failed the package's own wire validation: %v", i, err)
+		}
+	}
+	if rows[0].ID == rows[1].ID {
+		t.Fatalf("pair rows share one ID %q: byte-identical claims from two policies collided", rows[0].ID)
+	}
+	// The exact report-level rule a colliding ID breaks.
+	if err := requireSortedUnique("report.mechanical", rows, func(m MechanicalEvaluation) string { return m.ID }); err != nil {
+		t.Fatalf("pair rows fail the report's own row-ID uniqueness rule: %v", err)
+	}
+
+	again, err := EvaluateMechanical(context.Background(), in)
+	if err != nil {
+		t.Fatalf("EvaluateMechanical(second run): %v", err)
+	}
+	if !reflect.DeepEqual(result, again) {
+		t.Fatalf("EvaluateMechanical is not deterministic:\n run1: %+v\n run2: %+v", result, again)
+	}
 }
 
 // --- SI-106: exact distinctness role-pair attribution ------------------------

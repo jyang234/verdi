@@ -711,7 +711,21 @@ func validateTypedClaimRecord(field string, r TypedClaimRecord) error {
 	if err := validateDigest(field+".claim_digest", r.ClaimDigest); err != nil {
 		return err
 	}
-	return r.Claim.Validate()
+	if err := r.Claim.Validate(); err != nil {
+		return err
+	}
+	// SI-105: claim_digest must EQUAL the canonical digest of the base claim
+	// this record carries. A hand-built or mutated digest addresses content
+	// that no longer exists, and a self-consistently re-signed report cannot
+	// make it true — only recomputation catches it.
+	recomputed, err := policyartifact.ClaimDigest(r.Claim)
+	if err != nil {
+		return fmt.Errorf("policyconflict: %s.claim_digest: digest claim: %w", field, err)
+	}
+	if recomputed != r.ClaimDigest {
+		return fmt.Errorf("policyconflict: %s.claim_digest: %s is not the canonical digest of the claim it carries (%s)", field, r.ClaimDigest, recomputed)
+	}
+	return nil
 }
 
 // validateMechanicalClaimWitness checks one removed-claim witness's
@@ -765,6 +779,39 @@ func validateExemptionResolution(field string, e ExemptionResolution) error {
 	return requireSortedUniqueComposite(field+".removed_claims", e.RemovedClaims, mechanicalClaimWitnessKey)
 }
 
+// validateRemovalWitnessMembership enforces authority design §5.5's
+// exact-current-row rule on the WIRE (SI-105): every removed-claim witness
+// of an EFFECTIVE (all-five-proven) resolution must name a claim the
+// ENCLOSING row currently carries, matching by policy_id, claim_id AND
+// digest. A witness naming an absent identity, or a stale digest for a
+// present one, records a departure that never happened; a self-consistently
+// re-signed report cannot make it true, so the check is operational and
+// independent of the envelope digest. A rejected resolution names the
+// explicit empty removal set (checked in validateExemptionResolution) and
+// therefore has nothing to match.
+func validateRemovalWitnessMembership(field string, m MechanicalEvaluation) error {
+	current := make(map[[2]string]string, len(m.Claims))
+	for _, c := range m.Claims {
+		current[typedClaimRecordKey(c)] = c.ClaimDigest
+	}
+	for i, e := range m.Exemptions {
+		if !allProven(e.Resolution) {
+			continue
+		}
+		for j, w := range e.RemovedClaims {
+			where := fmt.Sprintf("%s.exemptions[%d].removed_claims[%d]", field, i, j)
+			got, ok := current[mechanicalClaimWitnessKey(w)]
+			if !ok {
+				return fmt.Errorf("policyconflict: %s: names claim (policy %q, claim %q), absent from row %q's current claims", where, w.PolicyID, w.ClaimID, m.ID)
+			}
+			if got != w.ClaimDigest {
+				return fmt.Errorf("policyconflict: %s: names claim (policy %q, claim %q) with digest %s, but row %q's current claim digests to %s", where, w.PolicyID, w.ClaimID, w.ClaimDigest, m.ID, got)
+			}
+		}
+	}
+	return nil
+}
+
 func validateMechanicalEvaluation(field string, m MechanicalEvaluation) error {
 	if err := validateNonEmpty(field+".id", m.ID); err != nil {
 		return err
@@ -808,6 +855,9 @@ func validateMechanicalEvaluation(field string, m MechanicalEvaluation) error {
 		}
 	}
 	if err := requireSortedUnique(field+".exemptions", m.Exemptions, func(e ExemptionResolution) string { return e.ID }); err != nil {
+		return err
+	}
+	if err := validateRemovalWitnessMembership(field, m); err != nil {
 		return err
 	}
 	if err := validateSolverProof(field+".after", m.After); err != nil {

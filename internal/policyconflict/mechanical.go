@@ -117,13 +117,36 @@ type mechanicalGroupKey struct {
 // (policyartifact's `^[a-z0-9]+(?:-[a-z0-9]+)*$`), so none of them can
 // contain ":", "+", "#", or ",". A row suffix (#complete, #scope:<digest>,
 // #pair:<digest>,<digest>) starts at the one "#" the whole ID can contain,
-// and claim/scope digests are sha256:<64 lowercase hex> with no "," in
+// and scope/identity digests are sha256:<64 lowercase hex> with no "," in
 // them, so every ID parses back to exactly one group and suffix.
 func (k mechanicalGroupKey) id() string {
 	if k.family == policyartifact.FamilyIdentity {
 		return fmt.Sprintf("%s:%s:%s+%s", k.family, k.subject, k.roleA, k.roleB)
 	}
 	return fmt.Sprintf("%s:%s", k.family, k.subject)
+}
+
+// claimIdentityDigest is the canonical content address of one claim's
+// COMPOSITE (policy_id, claim_id) identity (ledger SI-109) — the component
+// every step-2 pair row is built from.
+//
+// A pair component can never be the claim digest alone: two policies
+// declaring BYTE-IDENTICAL contradictory claims would then mint two rows
+// carrying one ID, which the report's own row-ID uniqueness rule refuses
+// and which no sort can order deterministically. Digesting the composite
+// identity keeps the suffix bounded and content-derived without adding a
+// delimiter or escaping grammar, and one composite identity still names
+// exactly one claim because drift under it already fails operationally in
+// validateClaimOperands.
+func claimIdentityDigest(c contextcompile.TypedClaim) (string, error) {
+	d, err := canonjson.Digest(struct {
+		ClaimID  string `json:"claim_id"`
+		PolicyID string `json:"policy_id"`
+	}{ClaimID: c.Claim.ID, PolicyID: c.PolicyID})
+	if err != nil {
+		return "", fmt.Errorf("policyconflict: digest claim identity (policy %q, claim %q): %w", c.PolicyID, c.Claim.ID, err)
+	}
+	return d, nil
 }
 
 // groupKeyFor derives c's group key. For the identity family the two role
@@ -381,12 +404,17 @@ func evaluateGroup(ctx context.Context, gk mechanicalGroupKey, members []context
 func deriveWitnessRows(ctx context.Context, gk mechanicalGroupKey, members []contextcompile.TypedClaim, domain string, before SolverProof, profile governanceprincipal.Profile, actors []governanceprincipal.PrincipalResolution, refs RefRelationResolver) ([]MechanicalEvaluation, []governanceprincipal.Disclosure, error) {
 	var disclosures []governanceprincipal.Disclosure
 	scopeDigests := make([]string, len(members))
+	identityDigests := make([]string, len(members))
 	for i, m := range members {
 		d, err := canonjson.Digest(m.Claim.Scope)
 		if err != nil {
 			return nil, nil, fmt.Errorf("policyconflict: digest claim scope: %w", err)
 		}
 		scopeDigests[i] = d
+		identityDigests[i], err = claimIdentityDigest(m)
+		if err != nil {
+			return nil, nil, err
+		}
 	}
 
 	var subgroupOrder []string
@@ -449,7 +477,9 @@ func deriveWitnessRows(ctx context.Context, gk mechanicalGroupKey, members []con
 			if pairScope.State != ScopeOverlap {
 				continue
 			}
-			id := gk.id() + "#pair:" + members[i].ClaimDigest + "," + members[j].ClaimDigest
+			// SI-109: the ordered pair of COMPOSITE identity digests, in
+			// the members' own deterministic order.
+			id := gk.id() + "#pair:" + identityDigests[i] + "," + identityDigests[j]
 			violated = append(violated, buildRow(id, gk, pairMembers, pairScope, domain, pairBefore, ProofViolatedWithWitness, []ReasonCode{unsatReasonFor(domain, claimsOf(pairMembers))}))
 		}
 	}

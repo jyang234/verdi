@@ -843,8 +843,10 @@ func sha(c byte) string { return "sha256:" + repeatHex(c) }
 // (positive and negative alike) splices this shape in.
 // validExemptionResolution is an all-five-proven resolution: authority
 // design §5.5 requires it name at least one MechanicalClaimWitness, keyed by
-// the composite (policy_id, claim_id) with the claim's exact digest.
-func validExemptionResolution() map[string]any {
+// the composite (policy_id, claim_id) with the claim's exact digest — the
+// exact current claim of the fixture's own enclosing mechanical row.
+func validExemptionResolution(t *testing.T) map[string]any {
+	t.Helper()
 	return map[string]any{
 		"id":     "policy-exemption/legacy-service-go",
 		"digest": sha('3'),
@@ -856,7 +858,7 @@ func validExemptionResolution() map[string]any {
 			map[string]any{
 				"policy_id":    "go-toolchain",
 				"claim_id":     "go-version",
-				"claim_digest": sha('1'),
+				"claim_digest": fixtureClaimDigest(t),
 			},
 		},
 	}
@@ -865,8 +867,9 @@ func validExemptionResolution() map[string]any {
 // rejectedExemptionResolution is the mirror case: a resolution whose
 // authority is not all-proven names the mandatory-present EXPLICIT empty
 // removal set, because it removed nothing.
-func rejectedExemptionResolution() map[string]any {
-	e := validExemptionResolution()
+func rejectedExemptionResolution(t *testing.T) map[string]any {
+	t.Helper()
+	e := validExemptionResolution(t)
 	e["resolution"].(map[string]any)["bound"] = "unproven"
 	e["removed_claims"] = []any{}
 	return e
@@ -945,7 +948,7 @@ func TestDecodeReport_MechanicalClaimWitnessIsNotSemantic(t *testing.T) {
 	base := mustReadFixture(t, "report.json")
 
 	t.Run("semantic witness spelling rejected", func(t *testing.T) {
-		exemption := validExemptionResolution()
+		exemption := validExemptionResolution(t)
 		exemption["removed_claims"] = []any{map[string]any{
 			"id": "policy-instruction:example-policy#example-claim", "digest": sha('1'), "category": "policy-instruction",
 		}}
@@ -954,7 +957,7 @@ func TestDecodeReport_MechanicalClaimWitnessIsNotSemantic(t *testing.T) {
 	})
 
 	t.Run("category alongside the mechanical witness rejected", func(t *testing.T) {
-		exemption := validExemptionResolution()
+		exemption := validExemptionResolution(t)
 		exemption["removed_claims"].([]any)[0].(map[string]any)["category"] = "policy-instruction"
 		data := forgedReport(t, base, []any{"mechanical", 0, "exemptions"}, []any{exemption})
 		requireErrContains(t, mustDecodeReportErr(t, data), "unknown field")
@@ -969,7 +972,7 @@ func TestDecodeReport_ExemptionResolutionRemovedClaimsCardinality(t *testing.T) 
 	base := mustReadFixture(t, "report.json")
 
 	t.Run("rejected resolution with an explicit empty set round-trips", func(t *testing.T) {
-		data := forgedReport(t, base, []any{"mechanical", 0, "exemptions"}, []any{rejectedExemptionResolution()})
+		data := forgedReport(t, base, []any{"mechanical", 0, "exemptions"}, []any{rejectedExemptionResolution(t)})
 		report, err := DecodeReport(data)
 		if err != nil {
 			t.Fatalf("DecodeReport(rejected resolution): %v", err)
@@ -1011,7 +1014,7 @@ func TestDecodeReport_ExemptionResolutionRemovedClaimsCardinality(t *testing.T) 
 	}
 	for _, tc := range negatives {
 		t.Run(tc.name, func(t *testing.T) {
-			e := validExemptionResolution()
+			e := validExemptionResolution(t)
 			tc.mut(e)
 			data := forgedReport(t, base, []any{"mechanical", 0, "exemptions"}, []any{e})
 			requireErrContains(t, mustDecodeReportErr(t, data), tc.want)
@@ -1026,14 +1029,7 @@ func TestDecodeReport_ExemptionResolutionRemovedClaimsCardinality(t *testing.T) 
 func TestDecodeReport_MechanicalClaimCompositeIdentity(t *testing.T) {
 	base := mustReadFixture(t, "report.json")
 	claimOf := func(policyID, claimID string) map[string]any {
-		return map[string]any{
-			"policy_id": policyID, "policy_digest": sha('0'), "claim_digest": sha('1'),
-			"claim": map[string]any{
-				"family": "configuration", "id": claimID, "operator": "equals", "overridable": false,
-				"scope":   map[string]any{"environments": []any{}, "paths": []any{}, "phases": []any{}, "refs": []any{}},
-				"subject": "go-toolchain", "values": []any{"1.22"},
-			},
-		}
+		return reportClaimRecord(t, policyID, claimID)
 	}
 
 	t.Run("same claim bytes from two policies are two records", func(t *testing.T) {
@@ -1061,6 +1057,114 @@ func TestDecodeReport_MechanicalClaimCompositeIdentity(t *testing.T) {
 	})
 }
 
+// --- SI-105 wire closure: recomputed digests and exact removal witnesses -----
+
+// fixtureClaim is the exact policyartifact.Claim the report fixture's single
+// mechanical row carries. Keeping it in code (rather than reading the
+// fixture's own claim_digest back) is what makes fixtureClaimDigest an
+// INDEPENDENT recomputation: a fixture carrying an untruthful digest fails
+// these tests instead of defining truth for them.
+func fixtureClaim() policyartifact.Claim {
+	return policyartifact.Claim{
+		ID: "go-version", Family: policyartifact.FamilyConfiguration,
+		Operator: policyartifact.OpEquals, Subject: "go-toolchain",
+		Values: []string{"1.22"},
+		Scope: policyartifact.Scope{
+			Phases: []string{}, Environments: []string{}, Paths: []string{}, Refs: []string{},
+		},
+		Overridable: false,
+	}
+}
+
+func fixtureClaimDigest(t *testing.T) string {
+	t.Helper()
+	d, err := policyartifact.ClaimDigest(fixtureClaim())
+	if err != nil {
+		t.Fatalf("test setup: ClaimDigest(fixture claim): %v", err)
+	}
+	return d
+}
+
+// reportClaimRecord is the wire form of one TypedClaimRecord carrying the
+// fixture's claim shape under the named composite identity, with the
+// TRUTHFUL canonical digest of the claim it carries.
+func reportClaimRecord(t *testing.T, policyID, claimID string) map[string]any {
+	t.Helper()
+	c := fixtureClaim()
+	c.ID = claimID
+	d, err := policyartifact.ClaimDigest(c)
+	if err != nil {
+		t.Fatalf("test setup: ClaimDigest(%s/%s): %v", policyID, claimID, err)
+	}
+	return map[string]any{
+		"policy_id": policyID, "policy_digest": sha('0'), "claim_digest": d,
+		"claim": map[string]any{
+			"family": "configuration", "id": claimID, "operator": "equals", "overridable": false,
+			"scope":   map[string]any{"environments": []any{}, "paths": []any{}, "phases": []any{}, "refs": []any{}},
+			"subject": "go-toolchain", "values": []any{"1.22"},
+		},
+	}
+}
+
+// TestDecodeReport_MechanicalClaimDigestRecomputed pins ledger SI-105 on the
+// report wire: a TypedClaimRecord's claim_digest must EQUAL the canonical
+// digest of the base claim it carries. The forged report is re-signed, so
+// the document is internally consistent and only independent recomputation
+// can reject it.
+func TestDecodeReport_MechanicalClaimDigestRecomputed(t *testing.T) {
+	base := mustReadFixture(t, "report.json")
+
+	t.Run("truthful digest round-trips", func(t *testing.T) {
+		report, err := DecodeReport(base)
+		if err != nil {
+			t.Fatalf("DecodeReport(fixture): %v", err)
+		}
+		if got, want := report.Mechanical[0].Claims[0].ClaimDigest, fixtureClaimDigest(t); got != want {
+			t.Fatalf("fixture claim_digest = %q, want the canonical digest %q of the carried claim", got, want)
+		}
+	})
+
+	t.Run("stale carried digest refused", func(t *testing.T) {
+		data := forgedReport(t, base, []any{"mechanical", 0, "claims", 0, "claim_digest"}, sha('a'))
+		requireErrContains(t, mustDecodeReportErr(t, data), "claims[0].claim_digest")
+	})
+
+	t.Run("mutated claim body refused", func(t *testing.T) {
+		data := forgedReport(t, base, []any{"mechanical", 0, "claims", 0, "claim", "values"}, []any{"1.23"})
+		requireErrContains(t, mustDecodeReportErr(t, data), "claims[0].claim_digest")
+	})
+}
+
+// TestDecodeReport_ExemptionResolutionRemovalWitnessIsCurrentRowClaim pins
+// the other half of SI-105 on the wire: every removed_claims witness of an
+// all-five-proven resolution must equal an EXACT current claim of its
+// ENCLOSING mechanical row, by policy_id, claim_id and digest alike. Both
+// forgeries are re-signed, so nothing but the membership rule can reject.
+func TestDecodeReport_ExemptionResolutionRemovalWitnessIsCurrentRowClaim(t *testing.T) {
+	base := mustReadFixture(t, "report.json")
+
+	t.Run("exact current witness accepted", func(t *testing.T) {
+		data := forgedReport(t, base, []any{"mechanical", 0, "exemptions"}, []any{validExemptionResolution(t)})
+		if _, err := DecodeReport(data); err != nil {
+			t.Fatalf("DecodeReport(exact current witness): %v", err)
+		}
+	})
+
+	t.Run("witness absent from the enclosing row", func(t *testing.T) {
+		e := validExemptionResolution(t)
+		e["removed_claims"].([]any)[0].(map[string]any)["policy_id"] = "ghost-policy"
+		data := forgedReport(t, base, []any{"mechanical", 0, "exemptions"}, []any{e})
+		requireErrContains(t, mustDecodeReportErr(t, data), "absent from")
+	})
+
+	t.Run("witness digest mismatching the enclosing row claim", func(t *testing.T) {
+		e := validExemptionResolution(t)
+		e["removed_claims"].([]any)[0].(map[string]any)["claim_digest"] = sha('a')
+		data := forgedReport(t, base, []any{"mechanical", 0, "exemptions"}, []any{e})
+		requireErrContains(t, mustDecodeReportErr(t, data), "current claim digests to")
+	})
+}
+
 // --- F4: embedded exemption resolutions -------------------------------------
 
 // TestDecodeReport_ExemptionResolutions exercises the embedded exemption
@@ -1071,7 +1175,7 @@ func TestDecodeReport_ExemptionResolutions(t *testing.T) {
 	base := mustReadFixture(t, "report.json")
 
 	t.Run("valid exemption round-trips", func(t *testing.T) {
-		data := forgedReport(t, base, []any{"mechanical", 0, "exemptions"}, []any{validExemptionResolution()})
+		data := forgedReport(t, base, []any{"mechanical", 0, "exemptions"}, []any{validExemptionResolution(t)})
 		report, err := DecodeReport(data)
 		if err != nil {
 			t.Fatalf("DecodeReport(valid exemption): %v", err)
@@ -1079,7 +1183,7 @@ func TestDecodeReport_ExemptionResolutions(t *testing.T) {
 		if got := len(report.Mechanical[0].Exemptions); got != 1 {
 			t.Fatalf("exemptions = %d, want 1", got)
 		}
-		want := MechanicalClaimWitness{PolicyID: "go-toolchain", ClaimID: "go-version", ClaimDigest: sha('1')}
+		want := MechanicalClaimWitness{PolicyID: "go-toolchain", ClaimID: "go-version", ClaimDigest: fixtureClaimDigest(t)}
 		if got := report.Mechanical[0].Exemptions[0].RemovedClaims[0]; got != want {
 			t.Fatalf("removed claim = %+v, want the composite witness %+v", got, want)
 		}
@@ -1105,7 +1209,7 @@ func TestDecodeReport_ExemptionResolutions(t *testing.T) {
 	}
 	for _, tc := range negatives {
 		t.Run(tc.name, func(t *testing.T) {
-			e := validExemptionResolution()
+			e := validExemptionResolution(t)
 			tc.mut(e)
 			data := forgedReport(t, base, []any{"mechanical", 0, "exemptions"}, []any{e})
 			requireErrContains(t, mustDecodeReportErr(t, data), tc.want)
@@ -1113,7 +1217,7 @@ func TestDecodeReport_ExemptionResolutions(t *testing.T) {
 	}
 
 	t.Run("duplicate removed claim composite identity", func(t *testing.T) {
-		e := validExemptionResolution()
+		e := validExemptionResolution(t)
 		dup := e["removed_claims"].([]any)[0]
 		e["removed_claims"] = []any{dup, dup}
 		data := forgedReport(t, base, []any{"mechanical", 0, "exemptions"}, []any{e})
@@ -1121,21 +1225,29 @@ func TestDecodeReport_ExemptionResolutions(t *testing.T) {
 	})
 
 	t.Run("unsorted removed claim composite identities", func(t *testing.T) {
-		e := validExemptionResolution()
-		first := map[string]any{"policy_id": "go-toolchain", "claim_id": "go-version", "claim_digest": sha('1')}
-		second := map[string]any{"policy_id": "aardvark-policy", "claim_id": "go-version", "claim_digest": sha('1')}
+		e := validExemptionResolution(t)
+		first := map[string]any{"policy_id": "go-toolchain", "claim_id": "go-version", "claim_digest": fixtureClaimDigest(t)}
+		second := map[string]any{"policy_id": "aardvark-policy", "claim_id": "go-version", "claim_digest": fixtureClaimDigest(t)}
 		e["removed_claims"] = []any{first, second}
 		data := forgedReport(t, base, []any{"mechanical", 0, "exemptions"}, []any{e})
 		requireErrContains(t, mustDecodeReportErr(t, data), "removed_claims: must be sorted ascending")
 	})
 
+	// Both departures are real: the enclosing row carries BOTH policy
+	// identities' byte-identical claims, so each witness names an exact
+	// current row claim and only policy identity distinguishes them.
 	t.Run("two policies departed from for identical claim bytes", func(t *testing.T) {
-		e := validExemptionResolution()
+		e := validExemptionResolution(t)
 		e["removed_claims"] = []any{
-			map[string]any{"policy_id": "go-toolchain", "claim_id": "go-version", "claim_digest": sha('1')},
-			map[string]any{"policy_id": "go-toolchain-overlay", "claim_id": "go-version", "claim_digest": sha('1')},
+			map[string]any{"policy_id": "go-toolchain", "claim_id": "go-version", "claim_digest": fixtureClaimDigest(t)},
+			map[string]any{"policy_id": "go-toolchain-overlay", "claim_id": "go-version", "claim_digest": fixtureClaimDigest(t)},
 		}
-		data := forgedReport(t, base, []any{"mechanical", 0, "exemptions"}, []any{e})
+		tree := setAtPath(t, base, []any{"mechanical", 0, "claims"}, []any{
+			reportClaimRecord(t, "go-toolchain", "go-version"),
+			reportClaimRecord(t, "go-toolchain-overlay", "go-version"),
+		})
+		setAtPathIn(t, tree, []any{"mechanical", 0, "exemptions"}, []any{e})
+		data := redigestTopLevel(t, tree)
 		report, err := DecodeReport(data)
 		if err != nil {
 			t.Fatalf("DecodeReport(two policy identities, identical claim bytes): %v", err)
@@ -1147,13 +1259,13 @@ func TestDecodeReport_ExemptionResolutions(t *testing.T) {
 
 	t.Run("duplicate exemption id", func(t *testing.T) {
 		data := forgedReport(t, base, []any{"mechanical", 0, "exemptions"},
-			[]any{validExemptionResolution(), validExemptionResolution()})
+			[]any{validExemptionResolution(t), validExemptionResolution(t)})
 		requireErrContains(t, mustDecodeReportErr(t, data), "exemptions: duplicate identity")
 	})
 
 	t.Run("unsorted exemptions", func(t *testing.T) {
-		first := validExemptionResolution()
-		second := validExemptionResolution()
+		first := validExemptionResolution(t)
+		second := validExemptionResolution(t)
 		second["id"] = "policy-exemption/aardvark"
 		data := forgedReport(t, base, []any{"mechanical", 0, "exemptions"}, []any{first, second})
 		requireErrContains(t, mustDecodeReportErr(t, data), "exemptions: must be sorted ascending")
