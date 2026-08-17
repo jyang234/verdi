@@ -23,6 +23,19 @@ type serviceDateSource string
 
 func (d serviceDateSource) TodayUTC(context.Context) (string, error) { return string(d), nil }
 
+type serviceTreeHasher struct {
+	hash  string
+	err   error
+	calls int
+	roots []string
+}
+
+func (h *serviceTreeHasher) TreeHash(_ context.Context, root string) (string, error) {
+	h.calls++
+	h.roots = append(h.roots, root)
+	return h.hash, h.err
+}
+
 type serviceJudge struct {
 	role   JudgeRole
 	result JudgeResult
@@ -228,6 +241,110 @@ func TestServiceEvaluateJudgeFailureIsOperationalWithoutReport(t *testing.T) {
 	}
 	if result.Report.Schema != "" || len(result.ReportBytes) != 0 {
 		t.Fatalf("result = %+v, want no report on judge failure", result)
+	}
+}
+
+func TestServiceEvaluateConcreteJudgeUsesImmutableCache(t *testing.T) {
+	service, repo := newServiceFixture(t, nil)
+	if err := os.WriteFile(filepath.Join(repo.Dir, ".verdi", ".gitignore"), []byte("data/\n"), 0o644); err != nil {
+		t.Fatalf("write cache ignore: %v", err)
+	}
+	runOperandGit(t, repo.Dir, "add", ".verdi/.gitignore")
+	runOperandGit(t, repo.Dir, "commit", "--quiet", "--no-verify", "-m", "ignore data cache")
+	repo.Head = strings.TrimSpace(runOperandGit(t, repo.Dir, "rev-parse", "HEAD"))
+	runner := &fakeJudgeRunner{fn: func(context.Context, []string, []byte) ([]byte, int, error) {
+		return noConflictResultBytes(t), 0, nil
+	}}
+	adapter := baseAdapter(runner)
+	adapter.Root = repo.Dir
+	hasher := &serviceTreeHasher{hash: cacheTestTreeHash}
+	service.Deps.Primary = &adapter
+	service.Deps.TreeHasher = hasher
+
+	first, err := service.Evaluate(context.Background(), serviceAcceptedRequest())
+	if err != nil {
+		t.Fatalf("first Evaluate: %v", err)
+	}
+	second, err := service.Evaluate(context.Background(), serviceAcceptedRequest())
+	if err != nil {
+		t.Fatalf("second Evaluate: %v", err)
+	}
+	if runner.calls != 1 {
+		t.Fatalf("runner calls = %d, want one total after immutable cache hit", runner.calls)
+	}
+	if hasher.calls != 2 {
+		t.Fatalf("tree hash calls = %d, want one current D4 hash per evaluation", hasher.calls)
+	}
+	wantRoot, err := filepath.EvalSymlinks(repo.Dir)
+	if err != nil {
+		t.Fatalf("EvalSymlinks fixture root: %v", err)
+	}
+	for _, root := range hasher.roots {
+		if root != wantRoot || !filepath.IsAbs(root) {
+			t.Fatalf("TreeHash root = %q, want canonical absolute %q", root, wantRoot)
+		}
+	}
+	assertSameReportBytes(t, first.ReportBytes, second.ReportBytes)
+}
+
+func TestServiceEvaluateConcreteJudgeCachePreconditionsFailWithoutEffects(t *testing.T) {
+	tests := []struct {
+		name        string
+		adapterRoot func(*fixturegit.Repo) string
+		hasher      *serviceTreeHasher
+	}{
+		{
+			name: "checkout root mismatch",
+			adapterRoot: func(*fixturegit.Repo) string {
+				return t.TempDir()
+			},
+			hasher: &serviceTreeHasher{hash: cacheTestTreeHash},
+		},
+		{
+			name:        "tree hasher missing",
+			adapterRoot: func(repo *fixturegit.Repo) string { return repo.Dir },
+		},
+		{
+			name:        "tree hash failure",
+			adapterRoot: func(repo *fixturegit.Repo) string { return repo.Dir },
+			hasher:      &serviceTreeHasher{err: errors.New("D4 unavailable")},
+		},
+		{
+			name:        "tree hash malformed",
+			adapterRoot: func(repo *fixturegit.Repo) string { return repo.Dir },
+			hasher:      &serviceTreeHasher{hash: "not-a-tree-hash"},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			service, repo := newServiceFixture(t, nil)
+			runner := &fakeJudgeRunner{fn: func(context.Context, []string, []byte) ([]byte, int, error) {
+				return noConflictResultBytes(t), 0, nil
+			}}
+			adapter := baseAdapter(runner)
+			adapter.Root = test.adapterRoot(repo)
+			service.Deps.Primary = adapter
+			if test.hasher != nil {
+				service.Deps.TreeHasher = test.hasher
+			}
+
+			result, err := service.Evaluate(context.Background(), serviceAcceptedRequest())
+			if !IsOperational(err) {
+				t.Fatalf("Evaluate error = %T %v, want operational", err, err)
+			}
+			if result.Report.Schema != "" || len(result.ReportBytes) != 0 {
+				t.Fatalf("result = %+v, want zero result", result)
+			}
+			if runner.calls != 0 {
+				t.Fatalf("runner calls = %d, want zero", runner.calls)
+			}
+			if test.name == "checkout root mismatch" && test.hasher.calls != 0 {
+				t.Fatalf("tree hash calls = %d, want zero before root match", test.hasher.calls)
+			}
+			if _, statErr := os.Stat(filepath.Join(repo.Dir, ".verdi", "data", "cache")); !os.IsNotExist(statErr) {
+				t.Fatalf("cache path exists or stat failed unexpectedly: %v", statErr)
+			}
+		})
 	}
 }
 

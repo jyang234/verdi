@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"reflect"
 	"sort"
 
@@ -22,8 +23,16 @@ type ServiceDeps struct {
 	Refs       RefRelationResolver
 	Primary    Judge
 	Challenger Judge
+	TreeHasher TreeHasher
 	Dates      DateSource
 	Actors     []governanceprincipal.PrincipalResolution
+}
+
+// TreeHasher supplies the current D4 corpus identity after the conflict
+// snapshot has been resolved. It is required only for concrete local process
+// adapters; injected non-process Judge ports remain filesystem-free.
+type TreeHasher interface {
+	TreeHash(context.Context, string) (string, error)
 }
 
 // Service derives one completed verdict/report or one typed no-report error.
@@ -180,11 +189,15 @@ func (s *Service) evaluateSemantic(ctx context.Context, view contextcompile.Conf
 		return SemanticEvaluation{}, nil, operational("encode semantic input", err)
 	}
 
-	primary, err := runValidatedJudge(ctx, s.Deps.Primary, JudgePrimary, input, inputBytes)
+	cache, err := s.prepareJudgeCache(ctx)
+	if err != nil {
+		return SemanticEvaluation{}, nil, operational("prepare judgment cache", err)
+	}
+	primary, err := runValidatedJudge(ctx, s.Deps.Primary, JudgePrimary, input, inputBytes, cache, view)
 	if err != nil {
 		return SemanticEvaluation{}, nil, operational("run primary judge", err)
 	}
-	challenger, err := runValidatedJudge(ctx, s.Deps.Challenger, JudgeChallenger, input, inputBytes)
+	challenger, err := runValidatedJudge(ctx, s.Deps.Challenger, JudgeChallenger, input, inputBytes, cache, view)
 	if err != nil {
 		return SemanticEvaluation{}, nil, operational("run challenger judge", err)
 	}
@@ -235,11 +248,100 @@ func humanFallbackEligible(class governanceprincipal.Class, primary, challenger 
 	return missingConfigured || inconclusive || disagreement
 }
 
-func runValidatedJudge(ctx context.Context, judge Judge, role JudgeRole, input SemanticInput, inputBytes []byte) (*ValidatedExchange, error) {
+type judgeCacheContext struct {
+	enabled  bool
+	root     string
+	treeHash string
+}
+
+func (s *Service) prepareJudgeCache(ctx context.Context) (judgeCacheContext, error) {
+	adapters := make([]JudgeAdapter, 0, 2)
+	for _, judge := range []Judge{s.Deps.Primary, s.Deps.Challenger} {
+		switch adapter := judge.(type) {
+		case JudgeAdapter:
+			adapters = append(adapters, adapter)
+		case *JudgeAdapter:
+			if adapter == nil {
+				return judgeCacheContext{}, fmt.Errorf("concrete judge adapter is nil")
+			}
+			adapters = append(adapters, *adapter)
+		}
+	}
+	if len(adapters) == 0 {
+		return judgeCacheContext{}, nil
+	}
+	root, err := canonicalCheckoutRoot(s.Root)
+	if err != nil {
+		return judgeCacheContext{}, fmt.Errorf("service root: %w", err)
+	}
+	for _, adapter := range adapters {
+		adapterRoot, err := canonicalCheckoutRoot(adapter.Root)
+		if err != nil {
+			return judgeCacheContext{}, fmt.Errorf("adapter root: %w", err)
+		}
+		if adapterRoot != root {
+			return judgeCacheContext{}, fmt.Errorf("adapter root %q does not match service root %q", adapterRoot, root)
+		}
+	}
+	if s.Deps.TreeHasher == nil {
+		return judgeCacheContext{}, fmt.Errorf("tree hasher is nil for concrete judge adapter")
+	}
+	treeHash, err := s.Deps.TreeHasher.TreeHash(ctx, root)
+	if err != nil {
+		return judgeCacheContext{}, fmt.Errorf("compute D4 tree hash: %w", err)
+	}
+	if err := validateBareHex("D4 tree hash", treeHash); err != nil {
+		return judgeCacheContext{}, err
+	}
+	return judgeCacheContext{enabled: true, root: root, treeHash: treeHash}, nil
+}
+
+func canonicalCheckoutRoot(root string) (string, error) {
+	if root == "" {
+		return "", fmt.Errorf("root is empty")
+	}
+	abs, err := filepath.Abs(root)
+	if err != nil {
+		return "", fmt.Errorf("resolve absolute path: %w", err)
+	}
+	resolved, err := filepath.EvalSymlinks(abs)
+	if err != nil {
+		return "", fmt.Errorf("resolve symlinks: %w", err)
+	}
+	if !filepath.IsAbs(resolved) {
+		return "", fmt.Errorf("resolved root %q is not absolute", resolved)
+	}
+	return filepath.Clean(resolved), nil
+}
+
+func runValidatedJudge(ctx context.Context, judge Judge, role JudgeRole, input SemanticInput, inputBytes []byte, cache judgeCacheContext, view contextcompile.ConflictView) (*ValidatedExchange, error) {
 	if judge == nil {
 		return nil, nil
 	}
-	exchange, err := judge.Judge(ctx, input.Prompt, inputBytes)
+	var exchange JudgmentExchange
+	var err error
+	switch adapter := judge.(type) {
+	case JudgeAdapter:
+		if !cache.enabled {
+			return nil, fmt.Errorf("concrete judge adapter has no prepared cache context")
+		}
+		adapter.Root = cache.root
+		validated, cacheErr := CachedJudge(ctx, adapter, input, cache.treeHash, view.Profile.ID, view.Snapshot.ProfileDigest, view.Snapshot.EffectivePolicyDigest)
+		exchange, err = validated.Exchange, cacheErr
+	case *JudgeAdapter:
+		if adapter == nil {
+			return nil, fmt.Errorf("concrete judge adapter is nil")
+		}
+		if !cache.enabled {
+			return nil, fmt.Errorf("concrete judge adapter has no prepared cache context")
+		}
+		copy := *adapter
+		copy.Root = cache.root
+		validated, cacheErr := CachedJudge(ctx, copy, input, cache.treeHash, view.Profile.ID, view.Snapshot.ProfileDigest, view.Snapshot.EffectivePolicyDigest)
+		exchange, err = validated.Exchange, cacheErr
+	default:
+		exchange, err = judge.Judge(ctx, input.Prompt, inputBytes)
+	}
 	if err != nil {
 		return nil, err
 	}
