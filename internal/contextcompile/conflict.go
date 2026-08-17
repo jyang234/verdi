@@ -107,6 +107,14 @@ type ConflictSourceIdentity struct {
 	Ref, Path, ContentDigest string
 }
 
+// ConflictPolicyIdentity is the exact identity of one authority operand
+// selected into this snapshot. It intentionally carries no claims or prose:
+// claimless policies and the instructionless overlay/exemption kinds remain
+// first-class identities at the sealed boundary.
+type ConflictPolicyIdentity struct {
+	Kind, ID, Digest string
+}
+
 // SnapshotIdentity binds every fact a conflict evaluation's sealed
 // operands were resolved from (authority design §3). Exactly one of
 // ManifestDigest (accepted-context) or CandidateDigest plus CandidateBlob
@@ -122,6 +130,8 @@ type SnapshotIdentity struct {
 	Phase                                     Phase
 	Scope                                     policyartifact.Scope
 	GrantDigest                               string
+	PolicyEntries                             []ConflictPolicyIdentity
+	Disclosures                               []DisclosureCode
 	Sources                                   []ConflictSourceIdentity
 }
 
@@ -201,7 +211,7 @@ type conflictOperandsSealDoc struct {
 // deep-clones it into private storage so no caller-held reference can
 // reach it, and mints its one seal.
 func sealConflictOperands(view ConflictView) (*ConflictOperands, error) {
-	if err := validateSnapshotIdentityCandidateBlob(view.Snapshot.TargetKind, view.Snapshot.CandidateBlob); err != nil {
+	if err := validateSnapshotIdentityTransport(view.Snapshot); err != nil {
 		return nil, fmt.Errorf("contextcompile: seal conflict operands: %w", err)
 	}
 	clean := cloneConflictView(view)
@@ -224,6 +234,9 @@ func (o *ConflictOperands) View() (ConflictView, error) {
 	}
 	if o.seal == "" {
 		return ConflictView{}, fmt.Errorf("contextcompile: conflict operands are unsealed (not produced by CompileConflict/resolveConflictCandidate)")
+	}
+	if err := validateSnapshotIdentityTransport(o.view.Snapshot); err != nil {
+		return ConflictView{}, fmt.Errorf("contextcompile: conflict operands snapshot failed validation: %w", err)
 	}
 	got, err := canonjson.Digest(conflictOperandsSealDoc{View: o.view, Nonce: o.nonce})
 	if err != nil {
@@ -261,6 +274,7 @@ func (c Compiler) CompileConflict(ctx context.Context, root string, request Requ
 		obligations:    outcome.obligations,
 		declared:       outcome.declared.Items,
 		selection:      outcome.selection,
+		disclosures:    outcome.result.Manifest.Disclosures,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("contextcompile: build accepted conflict snapshot: %w", err)
@@ -460,6 +474,7 @@ func (c Compiler) resolveConflictCandidate(ctx context.Context, root string, req
 		obligations:     obligations,
 		declared:        declared.Items,
 		selection:       selection,
+		disclosures:     unionDisclosures(mapRepositoryDisclosures(snapshot), selection.Disclosures),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("contextcompile: build candidate conflict snapshot: %w", err)
@@ -489,8 +504,9 @@ type snapshotBuildInput struct {
 	fragments                       []FeatureFragment
 	obligations                     []BoundObligation
 	// declared is the arm's effective declared-context resolution.
-	declared  []DeclaredContextItem
-	selection authoritySelection
+	declared    []DeclaredContextItem
+	selection   authoritySelection
+	disclosures []DisclosureCode
 }
 
 // validateSnapshotIdentityDigests enforces the mutually exclusive target
@@ -537,6 +553,65 @@ func validateSnapshotIdentityCandidateBlob(targetKind, candidateBlob string) err
 	return nil
 }
 
+// validateConflictPolicyIdentity enforces the exact closed identity grammar
+// shared by selected authority operands and the sealed snapshot projection.
+func validateConflictPolicyIdentity(field string, entry ConflictPolicyIdentity) error {
+	if err := validatePolicyEntryKind(field+".kind", entry.Kind); err != nil {
+		return err
+	}
+	kind, name, ok := strings.Cut(entry.ID, "/")
+	if !ok || name == "" || strings.Contains(name, "/") {
+		return fmt.Errorf("contextcompile: %s.id: %q is not a valid <kind>/<name> policy artifact ref", field, entry.ID)
+	}
+	if wantKind := operandArtifactKind[entry.Kind]; kind != wantKind {
+		return fmt.Errorf("contextcompile: %s.id: %q has kind prefix %q, want %q for policy entry kind %q", field, entry.ID, kind, wantKind, entry.Kind)
+	}
+	return validateDigest(field+".digest", entry.Digest)
+}
+
+func validateConflictPolicyIdentities(entries []ConflictPolicyIdentity) error {
+	if entries == nil {
+		return fmt.Errorf("contextcompile: conflict snapshot policy entries: must be non-nil (an explicitly empty set is [])")
+	}
+	for i, entry := range entries {
+		if err := validateConflictPolicyIdentity(fmt.Sprintf("conflict snapshot policy entries[%d]", i), entry); err != nil {
+			return err
+		}
+	}
+	return requireSortedUnique("conflict snapshot policy entries", entries, func(entry ConflictPolicyIdentity) string {
+		return entry.Kind + "\x00" + entry.ID
+	})
+}
+
+// buildConflictPolicyIdentities projects every exact selected operand,
+// independent of whether it happens to contain claims or instructions.
+func buildConflictPolicyIdentities(selection authoritySelection) ([]ConflictPolicyIdentity, error) {
+	entries := make([]ConflictPolicyIdentity, len(selection.Operands))
+	for i, operand := range selection.Operands {
+		entries[i] = ConflictPolicyIdentity{Kind: operand.Kind, ID: operand.ID, Digest: operand.Digest}
+		if err := validateConflictPolicyIdentity(fmt.Sprintf("conflict snapshot policy entries[%d]", i), entries[i]); err != nil {
+			return nil, err
+		}
+	}
+	sort.Slice(entries, func(i, j int) bool {
+		return entries[i].Kind+"\x00"+entries[i].ID < entries[j].Kind+"\x00"+entries[j].ID
+	})
+	if err := validateConflictPolicyIdentities(entries); err != nil {
+		return nil, err
+	}
+	return entries, nil
+}
+
+func validateSnapshotIdentityTransport(snapshot SnapshotIdentity) error {
+	if err := validateSnapshotIdentityCandidateBlob(snapshot.TargetKind, snapshot.CandidateBlob); err != nil {
+		return err
+	}
+	if err := validateConflictPolicyIdentities(snapshot.PolicyEntries); err != nil {
+		return err
+	}
+	return validateDisclosures("conflict snapshot disclosures", snapshot.Disclosures)
+}
+
 func buildSnapshotIdentity(in snapshotBuildInput) (SnapshotIdentity, error) {
 	if err := in.repository.Validate(); err != nil {
 		return SnapshotIdentity{}, fmt.Errorf("contextcompile: conflict snapshot: repository facts: %w", err)
@@ -554,6 +629,14 @@ func buildSnapshotIdentity(in snapshotBuildInput) (SnapshotIdentity, error) {
 	if err := validateSnapshotIdentityCandidateBlob(in.targetKind, candidateBlob); err != nil {
 		return SnapshotIdentity{}, err
 	}
+	policyEntries, err := buildConflictPolicyIdentities(in.selection)
+	if err != nil {
+		return SnapshotIdentity{}, err
+	}
+	disclosures := append([]DisclosureCode{}, in.disclosures...)
+	if err := validateDisclosures("conflict snapshot disclosures", disclosures); err != nil {
+		return SnapshotIdentity{}, err
+	}
 	grantBytes, err := execworkspace.EncodeGrantSet(in.grants)
 	if err != nil {
 		return SnapshotIdentity{}, fmt.Errorf("contextcompile: conflict snapshot: encode grants: %w", err)
@@ -563,7 +646,7 @@ func buildSnapshotIdentity(in snapshotBuildInput) (SnapshotIdentity, error) {
 		return SnapshotIdentity{}, err
 	}
 
-	return SnapshotIdentity{
+	snapshot := SnapshotIdentity{
 		TargetKind:            in.targetKind,
 		Repository:            in.repository,
 		ManifestDigest:        in.manifestDigest,
@@ -577,8 +660,14 @@ func buildSnapshotIdentity(in snapshotBuildInput) (SnapshotIdentity, error) {
 		Phase:                 in.phase,
 		Scope:                 cloneScope(in.scope),
 		GrantDigest:           rawContentDigest(grantBytes),
+		PolicyEntries:         policyEntries,
+		Disclosures:           disclosures,
 		Sources:               sources,
-	}, nil
+	}
+	if err := validateSnapshotIdentityTransport(snapshot); err != nil {
+		return SnapshotIdentity{}, err
+	}
+	return snapshot, nil
 }
 
 // buildConflictSources returns the unique, sorted-by-(ref,path,digest) set
@@ -794,16 +883,16 @@ func normalizeAuthorityProse(what string, raw []byte) (string, error) {
 func buildProseClaims(authority PolicyAuthority, selection authoritySelection, target ResolvedSpec, fragments []FeatureFragment, obligations []BoundObligation, declared []DeclaredContextItem, governingScope policyartifact.Scope) ([]ProseClaim, error) {
 	var out []ProseClaim
 	out = append(out, buildPolicyInstructionProse(authority, selection)...)
-	out = append(out, buildSpecProse(target.Ref, target.Path, target.ContentDigest, target.Spec, governingScope, authority.EffectiveDigest)...)
+	out = append(out, buildSpecProse(target.Ref, target.Path, target.ContentDigest, target.Spec, governingScope)...)
 	for _, f := range fragments {
-		out = append(out, buildFragmentProse(f, governingScope, authority.EffectiveDigest)...)
+		out = append(out, buildFragmentProse(f, governingScope)...)
 	}
-	adrClaims, err := buildADRDecisionProse(declared, governingScope, authority.EffectiveDigest)
+	adrClaims, err := buildADRDecisionProse(declared, governingScope)
 	if err != nil {
 		return nil, err
 	}
 	out = append(out, adrClaims...)
-	obligationClaims, err := buildObligationProse(obligations, governingScope, authority.EffectiveDigest)
+	obligationClaims, err := buildObligationProse(obligations, governingScope)
 	if err != nil {
 		return nil, err
 	}
@@ -822,7 +911,7 @@ func buildProseClaims(authority PolicyAuthority, selection authoritySelection, t
 // governing (request/candidate) scope's phase/environment/path dimensions
 // narrowed to exactly this object's own ref — never a broader claim than
 // the object it names.
-func newProseClaim(ref, path, sourceDigest, object, category, text string, governingScope policyartifact.Scope, authorityDigest string) ProseClaim {
+func newProseClaim(ref, path, sourceDigest, object, category, text string, governingScope policyartifact.Scope) ProseClaim {
 	lineIdentity := ref + "#" + object
 	return ProseClaim{
 		ID:           lineIdentity,
@@ -838,7 +927,7 @@ func newProseClaim(ref, path, sourceDigest, object, category, text string, gover
 			Paths:        cloneStrings(governingScope.Paths),
 			Refs:         []string{lineIdentity},
 		},
-		AuthorityDigest: authorityDigest,
+		AuthorityDigest: sourceDigest,
 		Object:          object,
 		LineIdentity:    lineIdentity,
 	}
@@ -872,7 +961,7 @@ func buildPolicyInstructionProse(authority PolicyAuthority, selection authorityS
 				SourcePath:      op.Path,
 				SourceDigest:    op.Digest,
 				Scope:           cloneScope(op.Scope),
-				AuthorityDigest: authority.EffectiveDigest,
+				AuthorityDigest: op.Digest,
 				Object:          object,
 				LineIdentity:    op.ID + "#" + object,
 			})
@@ -883,49 +972,49 @@ func buildPolicyInstructionProse(authority PolicyAuthority, selection authorityS
 
 // buildSpecProse returns the target's own problem/outcome/AC/open-
 // question/constraint/decision prose.
-func buildSpecProse(ref, path, contentDigest string, spec *artifact.SpecFrontmatter, governingScope policyartifact.Scope, authorityDigest string) []ProseClaim {
+func buildSpecProse(ref, path, contentDigest string, spec *artifact.SpecFrontmatter, governingScope policyartifact.Scope) []ProseClaim {
 	var out []ProseClaim
 	if spec.Problem != nil {
-		out = append(out, newProseClaim(ref, path, contentDigest, "problem", categorySpecProblem, spec.Problem.Text, governingScope, authorityDigest))
+		out = append(out, newProseClaim(ref, path, contentDigest, "problem", categorySpecProblem, spec.Problem.Text, governingScope))
 	}
 	if spec.Outcome != nil {
-		out = append(out, newProseClaim(ref, path, contentDigest, "outcome", categorySpecOutcome, spec.Outcome.Text, governingScope, authorityDigest))
+		out = append(out, newProseClaim(ref, path, contentDigest, "outcome", categorySpecOutcome, spec.Outcome.Text, governingScope))
 	}
 	for _, ac := range spec.AcceptanceCriteria {
-		out = append(out, newProseClaim(ref, path, contentDigest, ac.ID, categoryAcceptanceCriterion, ac.Text, governingScope, authorityDigest))
+		out = append(out, newProseClaim(ref, path, contentDigest, ac.ID, categoryAcceptanceCriterion, ac.Text, governingScope))
 	}
 	for _, oq := range spec.OpenQuestions {
-		out = append(out, newProseClaim(ref, path, contentDigest, oq.ID, categoryOpenQuestion, oq.Text, governingScope, authorityDigest))
+		out = append(out, newProseClaim(ref, path, contentDigest, oq.ID, categoryOpenQuestion, oq.Text, governingScope))
 	}
 	for _, co := range spec.Constraints {
-		out = append(out, newProseClaim(ref, path, contentDigest, co.ID, categoryConstraint, co.Text, governingScope, authorityDigest))
+		out = append(out, newProseClaim(ref, path, contentDigest, co.ID, categoryConstraint, co.Text, governingScope))
 	}
 	for _, dc := range spec.Decisions {
-		out = append(out, newProseClaim(ref, path, contentDigest, dc.ID, categoryDecision, dc.Text, governingScope, authorityDigest))
+		out = append(out, newProseClaim(ref, path, contentDigest, dc.ID, categoryDecision, dc.Text, governingScope))
 	}
 	return out
 }
 
 // buildFragmentProse returns the same feature-object categories as
 // buildSpecProse, projected from one governing parent-feature fragment.
-func buildFragmentProse(f FeatureFragment, governingScope policyartifact.Scope, authorityDigest string) []ProseClaim {
+func buildFragmentProse(f FeatureFragment, governingScope policyartifact.Scope) []ProseClaim {
 	ref, path, digest := f.Feature.Ref, f.Feature.Path, f.Feature.SourceDigest
 	out := []ProseClaim{
-		newProseClaim(ref, path, digest, "problem", categorySpecProblem, f.Problem.Text, governingScope, authorityDigest),
-		newProseClaim(ref, path, digest, "outcome", categorySpecOutcome, f.Outcome.Text, governingScope, authorityDigest),
+		newProseClaim(ref, path, digest, "problem", categorySpecProblem, f.Problem.Text, governingScope),
+		newProseClaim(ref, path, digest, "outcome", categorySpecOutcome, f.Outcome.Text, governingScope),
 	}
 	for _, t := range f.Targets {
 		category := categoryAcceptanceCriterion
 		if strings.HasPrefix(t.ID, "oq-") {
 			category = categoryOpenQuestion
 		}
-		out = append(out, newProseClaim(ref, path, digest, t.ID, category, t.Text, governingScope, authorityDigest))
+		out = append(out, newProseClaim(ref, path, digest, t.ID, category, t.Text, governingScope))
 	}
 	for _, co := range f.Constraints {
-		out = append(out, newProseClaim(ref, path, digest, co.ID, categoryConstraint, co.Text, governingScope, authorityDigest))
+		out = append(out, newProseClaim(ref, path, digest, co.ID, categoryConstraint, co.Text, governingScope))
 	}
 	for _, dc := range f.Decisions {
-		out = append(out, newProseClaim(ref, path, digest, dc.ID, categoryDecision, dc.Text, governingScope, authorityDigest))
+		out = append(out, newProseClaim(ref, path, digest, dc.ID, categoryDecision, dc.Text, governingScope))
 	}
 	return out
 }
@@ -952,7 +1041,7 @@ func declaredADRItems(declared []DeclaredContextItem) []DeclaredContextItem {
 // and RAW content digest. Normalization never changes a source digest: the
 // claim's TextDigest covers the normalized text, SourceDigest the exact
 // pinned bytes.
-func buildADRDecisionProse(declared []DeclaredContextItem, governingScope policyartifact.Scope, authorityDigest string) ([]ProseClaim, error) {
+func buildADRDecisionProse(declared []DeclaredContextItem, governingScope policyartifact.Scope) ([]ProseClaim, error) {
 	items := declaredADRItems(declared)
 	out := make([]ProseClaim, 0, len(items))
 	for _, item := range items {
@@ -960,7 +1049,7 @@ func buildADRDecisionProse(declared []DeclaredContextItem, governingScope policy
 		if err != nil {
 			return nil, fmt.Errorf("contextcompile: conflict prose claims: %w", err)
 		}
-		out = append(out, newProseClaim(item.Ref, item.Path, item.ContentDigest, conflictADRDecisionObject, categoryADRDecision, text, governingScope, authorityDigest))
+		out = append(out, newProseClaim(item.Ref, item.Path, item.ContentDigest, conflictADRDecisionObject, categoryADRDecision, text, governingScope))
 	}
 	return out, nil
 }
@@ -969,7 +1058,7 @@ func buildADRDecisionProse(declared []DeclaredContextItem, governingScope policy
 // bound obligation, its text the obligation's normalized authored body —
 // never the whole artifact, whose frontmatter is machinery identity, not
 // authored authority prose.
-func buildObligationProse(obligations []BoundObligation, governingScope policyartifact.Scope, authorityDigest string) ([]ProseClaim, error) {
+func buildObligationProse(obligations []BoundObligation, governingScope policyartifact.Scope) ([]ProseClaim, error) {
 	out := make([]ProseClaim, 0, len(obligations))
 	for _, o := range obligations {
 		text, err := normalizeAuthorityProse(o.Ref, o.Content)
@@ -990,7 +1079,7 @@ func buildObligationProse(obligations []BoundObligation, governingScope policyar
 				Paths:        cloneStrings(governingScope.Paths),
 				Refs:         []string{o.Ref},
 			},
-			AuthorityDigest: authorityDigest,
+			AuthorityDigest: o.ContentDigest,
 			Object:          o.AC,
 			LineIdentity:    o.Ref,
 		})
@@ -1043,6 +1132,8 @@ func cloneConflictView(in ConflictView) ConflictView {
 func cloneSnapshotIdentity(in SnapshotIdentity) SnapshotIdentity {
 	out := in
 	out.Scope = cloneScope(in.Scope)
+	out.PolicyEntries = append([]ConflictPolicyIdentity{}, in.PolicyEntries...)
+	out.Disclosures = append([]DisclosureCode{}, in.Disclosures...)
 	out.Sources = append([]ConflictSourceIdentity{}, in.Sources...)
 	return out
 }

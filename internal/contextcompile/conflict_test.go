@@ -12,9 +12,12 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
+	"sort"
 	"strings"
 	"testing"
 
+	"github.com/jyang234/verdi/internal/artifact"
 	"github.com/jyang234/verdi/internal/canonjson"
 	"github.com/jyang234/verdi/internal/execworkspace"
 	"github.com/jyang234/verdi/internal/fixturegit"
@@ -184,6 +187,12 @@ func TestCompileConflictOperandsAcceptedSnapshotIdentity(t *testing.T) {
 	if snap.GrantDigest == "" {
 		t.Error("GrantDigest is empty")
 	}
+	if len(snap.PolicyEntries) != 1 || snap.PolicyEntries[0].Kind != PolicyEntryPolicy || snap.PolicyEntries[0].ID != "policy/go-toolchain" || snap.PolicyEntries[0].Digest == "" {
+		t.Errorf("PolicyEntries = %+v, want the exact applicable policy identity", snap.PolicyEntries)
+	}
+	if snap.Disclosures == nil {
+		t.Error("Disclosures is nil, want an explicitly empty sorted set")
+	}
 	if err := snap.Repository.Validate(); err != nil {
 		t.Errorf("Repository facts invalid: %v", err)
 	}
@@ -228,6 +237,56 @@ func TestCompileConflictOperandsAcceptedSnapshotIdentity(t *testing.T) {
 	}
 	if !foundInstruction {
 		t.Errorf("ProseClaims missing a policy-instruction claim: %+v", view.ProseClaims)
+	}
+}
+
+func TestCompileConflictOperandsAcceptedTransportsExactManifestDisclosures(t *testing.T) {
+	c, req := hermeticAcceptedFixture(t, nil, nil, nil)
+	req.Phase = PhaseReview
+	root := hermeticAcceptedRoot(t)
+	outcome, err := c.compilePipeline(context.Background(), root, req)
+	if err != nil {
+		t.Fatalf("compilePipeline: unexpected error: %v", err)
+	}
+	if len(outcome.result.Manifest.Disclosures) == 0 {
+		t.Fatal("fixture manifest disclosures are empty, want review-stage disclosures")
+	}
+
+	operands, err := c.CompileConflict(context.Background(), root, req, ConflictFacts{})
+	if err != nil {
+		t.Fatalf("CompileConflict: unexpected error: %v", err)
+	}
+	view, err := operands.View()
+	if err != nil {
+		t.Fatalf("View: unexpected error: %v", err)
+	}
+	if !reflect.DeepEqual(view.Snapshot.Disclosures, outcome.result.Manifest.Disclosures) {
+		t.Fatalf("snapshot disclosures = %v, want exact compile manifest union %v", view.Snapshot.Disclosures, outcome.result.Manifest.Disclosures)
+	}
+}
+
+// A policy identity row deliberately has no claims or instructions. This
+// test therefore proves the snapshot derives its complete set from the
+// selected authority operands themselves, preserving claimless policies
+// and the intrinsically instructionless overlay/exemption kinds.
+func TestConflictSnapshotPolicyEntriesPreserveEverySelectedOperand(t *testing.T) {
+	digest := func(hex string) string { return "sha256:" + strings.Repeat(hex, 64) }
+	selection := authoritySelection{Operands: []PolicyOperand{
+		{Kind: PolicyEntryPolicy, ID: "policy/claimless", Digest: digest("3")},
+		{Kind: PolicyEntryExemption, ID: "policy-exemption/no-claims", Digest: digest("1")},
+		{Kind: PolicyEntryOverlay, ID: "policy-overlay/no-instructions", Digest: digest("2")},
+	}}
+	want := []ConflictPolicyIdentity{
+		{Kind: PolicyEntryExemption, ID: "policy-exemption/no-claims", Digest: digest("1")},
+		{Kind: PolicyEntryOverlay, ID: "policy-overlay/no-instructions", Digest: digest("2")},
+		{Kind: PolicyEntryPolicy, ID: "policy/claimless", Digest: digest("3")},
+	}
+	got, err := buildConflictPolicyIdentities(selection)
+	if err != nil {
+		t.Fatalf("buildConflictPolicyIdentities: unexpected error: %v", err)
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("policy identities = %+v, want exact sorted selected operands %+v", got, want)
 	}
 }
 
@@ -419,6 +478,12 @@ func TestResolveConflictCandidateReadsExactHeadBlob(t *testing.T) {
 	if snap.CandidateBlob == strings.TrimPrefix(snap.CandidateDigest, "sha256:") {
 		t.Errorf("CandidateBlob was inferred from CandidateDigest instead of preserving the independent Git identity: %+v", snap)
 	}
+	if snap.PolicyEntries == nil {
+		t.Error("PolicyEntries is nil, want the exact explicitly represented selected authority set")
+	}
+	if !reflect.DeepEqual(snap.Disclosures, []DisclosureCode{DisclosureRepositoryRemoteUnknown}) {
+		t.Errorf("Disclosures = %v, want the exact candidate repository-stage disclosure", snap.Disclosures)
+	}
 	found := false
 	for _, pc := range view.ProseClaims {
 		if pc.Category == categorySpecProblem {
@@ -427,6 +492,33 @@ func TestResolveConflictCandidateReadsExactHeadBlob(t *testing.T) {
 	}
 	if !found {
 		t.Errorf("ProseClaims missing spec-problem for the candidate's own target: %+v", view.ProseClaims)
+	}
+}
+
+func TestResolveConflictCandidateTransportsApplicabilityAndRepositoryDisclosures(t *testing.T) {
+	files := policyStoreFiles(t)
+	policyPath := ".verdi/policy/policies/go-toolchain.md"
+	files[policyPath] = strings.Replace(
+		files[policyPath],
+		"scope: {phases: [], environments: [], paths: [], refs: []}",
+		"scope: {phases: [], environments: [production], paths: [], refs: []}",
+		1,
+	)
+	files[".verdi/specs/active/candidate-feature/spec.md"] = candidateFeatureSpec
+	repo := fixturegit.Build(t, []fixturegit.Layer{{Files: files, Message: "scaffold"}})
+	t.Setenv("CI_DEFAULT_BRANCH", "main")
+
+	operands, err := NewCompiler().resolveConflictCandidate(context.Background(), repo.Dir, candidateRequestFor("spec/candidate-feature", "main", repo.Head), ConflictFacts{})
+	if err != nil {
+		t.Fatalf("resolveConflictCandidate: unexpected error: %v", err)
+	}
+	view, err := operands.View()
+	if err != nil {
+		t.Fatalf("View: unexpected error: %v", err)
+	}
+	want := []DisclosureCode{DisclosureApplicabilityUnknown, DisclosureRepositoryRemoteUnknown}
+	if !reflect.DeepEqual(view.Snapshot.Disclosures, want) {
+		t.Fatalf("candidate disclosures = %v, want exact union of stages actually run %v", view.Snapshot.Disclosures, want)
 	}
 }
 
@@ -973,6 +1065,110 @@ func TestConflictOperandsSnapshotIdentityCandidateBlobValidation(t *testing.T) {
 	})
 }
 
+func TestConflictOperandsSnapshotTransportValidation(t *testing.T) {
+	c, req := hermeticAcceptedFixture(t, nil, nil, nil)
+	operands, err := c.CompileConflict(context.Background(), hermeticAcceptedRoot(t), req, ConflictFacts{})
+	if err != nil {
+		t.Fatalf("CompileConflict: unexpected error: %v", err)
+	}
+	valid, err := operands.View()
+	if err != nil {
+		t.Fatalf("View: unexpected error: %v", err)
+	}
+	digest := "sha256:" + strings.Repeat("a", 64)
+	validEntries := []ConflictPolicyIdentity{
+		{Kind: PolicyEntryExemption, ID: "policy-exemption/example", Digest: digest},
+		{Kind: PolicyEntryOverlay, ID: "policy-overlay/example", Digest: digest},
+		{Kind: PolicyEntryPolicy, ID: "policy/example", Digest: digest},
+	}
+	policyCases := map[string][]ConflictPolicyIdentity{
+		"missing":       nil,
+		"unknown kind":  {{Kind: "other", ID: "policy/example", Digest: digest}},
+		"wrong id kind": {{Kind: PolicyEntryPolicy, ID: "policy-overlay/example", Digest: digest}},
+		"malformed id":  {{Kind: PolicyEntryPolicy, ID: "policy/example/extra", Digest: digest}},
+		"bad digest":    {{Kind: PolicyEntryPolicy, ID: "policy/example", Digest: "sha256:bad"}},
+		"unsorted":      {validEntries[1], validEntries[0]},
+		"duplicate":     {validEntries[0], validEntries[0]},
+	}
+	for name, entries := range policyCases {
+		t.Run("policy entries "+name, func(t *testing.T) {
+			view := cloneConflictView(valid)
+			view.Snapshot.PolicyEntries = entries
+			if _, err := sealConflictOperands(view); err == nil || !strings.Contains(err.Error(), "policy entries") {
+				t.Fatalf("sealConflictOperands error = %v, want policy entries validation failure", err)
+			}
+		})
+	}
+
+	disclosureCases := map[string][]DisclosureCode{
+		"missing":   nil,
+		"unknown":   {DisclosureCode("other")},
+		"unsorted":  {DisclosureRepositoryRemoteUnknown, DisclosureApplicabilityUnknown},
+		"duplicate": {DisclosureApplicabilityUnknown, DisclosureApplicabilityUnknown},
+	}
+	for name, disclosures := range disclosureCases {
+		t.Run("disclosures "+name, func(t *testing.T) {
+			view := cloneConflictView(valid)
+			view.Snapshot.Disclosures = disclosures
+			if _, err := sealConflictOperands(view); err == nil || !strings.Contains(err.Error(), "disclosures") {
+				t.Fatalf("sealConflictOperands error = %v, want disclosures validation failure", err)
+			}
+		})
+	}
+}
+
+func TestConflictOperandsSnapshotTransportPreservesAllClosedCodesAndCloneSafety(t *testing.T) {
+	c, req := hermeticAcceptedFixture(t, nil, nil, nil)
+	operands, err := c.CompileConflict(context.Background(), hermeticAcceptedRoot(t), req, ConflictFacts{})
+	if err != nil {
+		t.Fatalf("CompileConflict: unexpected error: %v", err)
+	}
+	view, err := operands.View()
+	if err != nil {
+		t.Fatalf("View: unexpected error: %v", err)
+	}
+	all := []DisclosureCode{
+		DisclosureActorResolutionUnproven,
+		DisclosureRepositoryRemoteUnknown,
+		DisclosureRepositoryBranchUnknown,
+		DisclosureRepositoryHeadUnknown,
+		DisclosureDefaultBranchUnknown,
+		DisclosureDefaultRelationshipUnknown,
+		DisclosureDirtyStateUnknown,
+		DisclosureStagedStateUnknown,
+		DisclosureFreshnessUnknown,
+		DisclosureApplicabilityUnknown,
+		DisclosureReviewResultDiffUnproven,
+		DisclosureReviewEvidenceBundleUnproven,
+		DisclosureReviewBuilderReceiptUnproven,
+		DisclosureOpaqueHarnessVendorBase,
+	}
+	sort.Slice(all, func(i, j int) bool { return all[i] < all[j] })
+	view.Snapshot.Disclosures = all
+	sealed, err := sealConflictOperands(view)
+	if err != nil {
+		t.Fatalf("sealConflictOperands(all closed codes): unexpected error: %v", err)
+	}
+	first, err := sealed.View()
+	if err != nil {
+		t.Fatalf("View(first): unexpected error: %v", err)
+	}
+	if len(first.Snapshot.Disclosures) != 14 {
+		t.Fatalf("Disclosures length = %d, want all 14 closed codes: %v", len(first.Snapshot.Disclosures), first.Snapshot.Disclosures)
+	}
+	wantEntries := append([]ConflictPolicyIdentity{}, first.Snapshot.PolicyEntries...)
+	wantDisclosures := append([]DisclosureCode{}, first.Snapshot.Disclosures...)
+	first.Snapshot.PolicyEntries[0].Digest = "sha256:" + strings.Repeat("f", 64)
+	first.Snapshot.Disclosures[0] = DisclosureCode("mutated")
+	second, err := sealed.View()
+	if err != nil {
+		t.Fatalf("View(second): unexpected error after caller-owned clone mutation: %v", err)
+	}
+	if !reflect.DeepEqual(second.Snapshot.PolicyEntries, wantEntries) || !reflect.DeepEqual(second.Snapshot.Disclosures, wantDisclosures) {
+		t.Fatalf("sealed snapshot changed through returned clone: entries=%+v disclosures=%v", second.Snapshot.PolicyEntries, second.Snapshot.Disclosures)
+	}
+}
+
 // --- 9: normalized authored prose (adr-decision, obligation-declaration) --
 
 // conflictADRFrontmatter is the exact frontmatter block the fixture ADR
@@ -1276,6 +1472,67 @@ func conflictProseClaimsByCategory(view ConflictView, category string) []ProseCl
 	return out
 }
 
+// TestConflictOperandsProseAuthorityUsesExactSource catches a cyclic
+// disposition witness: every prose claim's authority identity is the exact
+// artifact that authored it, never the aggregate effective-policy digest
+// whose disposition set may contain the witness itself.
+func TestConflictOperandsProseAuthorityUsesExactSource(t *testing.T) {
+	c, req, root := hermeticAcceptedProseFixture(t, conflictADRDoc)
+	outcome, err := c.compilePipeline(context.Background(), root, req)
+	if err != nil {
+		t.Fatalf("compilePipeline: unexpected error: %v", err)
+	}
+
+	target := outcome.target
+	targetSpec := *target.Spec
+	targetSpec.OpenQuestions = append(targetSpec.OpenQuestions, artifact.OpenQuestion{ID: "oq-cycle", Text: "Does this witness remain cycle-free?", Anchor: "oq-cycle"})
+	target.Spec = &targetSpec
+
+	claims, err := buildProseClaims(outcome.authority, outcome.selection, target, outcome.fragments, outcome.obligations, outcome.declared.Items, req.Scope)
+	if err != nil {
+		t.Fatalf("buildProseClaims: unexpected error: %v", err)
+	}
+	wantCategories := map[string]bool{
+		categoryPolicyInstruction:     false,
+		categorySpecProblem:           false,
+		categorySpecOutcome:           false,
+		categoryAcceptanceCriterion:   false,
+		categoryOpenQuestion:          false,
+		categoryConstraint:            false,
+		categoryDecision:              false,
+		categoryADRDecision:           false,
+		categoryObligationDeclaration: false,
+	}
+	before := make(map[string]string, len(claims))
+	for _, claim := range claims {
+		if _, ok := wantCategories[claim.Category]; !ok {
+			t.Fatalf("claim %q carries unknown category %q", claim.ID, claim.Category)
+		}
+		wantCategories[claim.Category] = true
+		if claim.AuthorityDigest != claim.SourceDigest {
+			t.Errorf("claim %q authority digest = %q, want its exact source digest %q", claim.ID, claim.AuthorityDigest, claim.SourceDigest)
+		}
+		before[claim.ID] = claim.AuthorityDigest
+	}
+	for category, found := range wantCategories {
+		if !found {
+			t.Errorf("prose claims did not exercise closed category %q: %+v", category, claims)
+		}
+	}
+
+	changedAuthority := outcome.authority
+	changedAuthority.EffectiveDigest = rawContentDigest([]byte("unrelated disposition changed only the effective aggregate"))
+	changed, err := buildProseClaims(changedAuthority, outcome.selection, target, outcome.fragments, outcome.obligations, outcome.declared.Items, req.Scope)
+	if err != nil {
+		t.Fatalf("buildProseClaims(changed aggregate): unexpected error: %v", err)
+	}
+	for _, claim := range changed {
+		if claim.AuthorityDigest != before[claim.ID] {
+			t.Errorf("claim %q authority digest changed with an unrelated effective aggregate: %q -> %q", claim.ID, before[claim.ID], claim.AuthorityDigest)
+		}
+	}
+}
+
 // TestCompileConflictOperandsAcceptedADRDecisionProse proves the accepted
 // arm emits exactly one adr-decision ProseClaim per declared-context ADR,
 // whose text is the normalized authored body with no frontmatter value in
@@ -1320,8 +1577,8 @@ func TestCompileConflictOperandsAcceptedADRDecisionProse(t *testing.T) {
 	if claim.SourceRef != conflictADRPinnedRef {
 		t.Errorf("adr-decision SourceRef = %q, want the exact pinned declared-context ref %q", claim.SourceRef, conflictADRPinnedRef)
 	}
-	if claim.AuthorityDigest == "" {
-		t.Error("adr-decision AuthorityDigest is empty, want the effective-policy digest")
+	if claim.AuthorityDigest != claim.SourceDigest {
+		t.Errorf("adr-decision AuthorityDigest = %q, want exact source digest %q", claim.AuthorityDigest, claim.SourceDigest)
 	}
 	if claim.ID != claim.LineIdentity || claim.ID != claim.SourceRef+"#"+claim.Object {
 		t.Errorf("adr-decision identity is inconsistent with its neighbors: id=%q object=%q line=%q", claim.ID, claim.Object, claim.LineIdentity)
