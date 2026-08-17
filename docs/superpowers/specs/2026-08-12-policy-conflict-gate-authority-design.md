@@ -393,9 +393,8 @@ whose scope state is unknown, plus every row whose reason is
 `higher-order-scope-unproven` even when its aggregate scope state is disjoint.
 Each such witness retains the row's complete composite typed-claim records and
 exact scope proof; it does not copy solver output or later authority-resolution
-state. This includes a conservatively unresolved higher-order row even when
-its aggregate scope state is `disjoint`. The input also carries applicable
-exemption identities/digests and the canonical prompt. The prompt asks about overlap,
+state. The input also carries applicable exemption identities/digests and the
+canonical prompt. The prompt asks about overlap,
 simultaneous satisfiability, refinement, explicit exception, authority, and the
 strongest reasonable non-conflict interpretation. Prompt bytes are fixed
 repository code, not project configuration.
@@ -923,7 +922,7 @@ no browser behavior and adds no Playwright case.
 
 ## 14. Source coverage and losslessness
 
-Coverage is **14/14** implicated authority source groups. The mapping is
+Coverage is **18/18** implicated authority source groups. The mapping is
 lossless; each row names the complete clause range used rather than assigning
 inconsistent per-clause counts across differently structured sources:
 
@@ -943,6 +942,10 @@ inconsistent per-clause counts across differently structured sources:
 | Principal-relation kernel evidence, role-membership ownership, experimental posture, and disclosure translation | 1 | §§5.3, 9–10; SI-106; plan Task 6A |
 | Proven-disjoint satisfiable-component completion | 1 | §§4.4–5; SI-107; plan Tasks 6, 6A |
 | Lossless solo-collapse principal/role witness encoding | 1 | §§5.3, 10; SI-108; plan Task 6A |
+| Composite mechanical pair-row identity | 1 | §§3, 5.3, 10; SI-109; plan Tasks 6A, 7A |
+| Lossless unknown-mechanical semantic witness | 1 | §§5–6, 10; SI-110; plan Task 7A |
+| Verifiable judgment cache-key and raw-result binding | 1 | §§6–7, 12; SI-111; plan Task 7A |
+| Closed category-specific semantic prose identity | 1 | §6; SI-112; plan Task 7A |
 
 The transformations are explicit:
 
