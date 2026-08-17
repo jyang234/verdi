@@ -312,11 +312,14 @@ type JudgmentExchange struct {
 // no "sha256:" prefix — distinct from JudgmentExchange.InputDigest, which
 // retains the full "sha256:<hex>" record form (SI-101).
 type Judgment struct {
-	Schema      string
-	TreeHash    string
-	InputDigest string
-	Exchange    JudgmentExchange
-	Digest      string
+	Schema          string
+	TreeHash        string
+	InputDigest     string
+	ProfileID       string
+	ProfileDigest   string
+	AuthorityDigest string
+	Exchange        JudgmentExchange
+	Digest          string
 }
 
 // --- Report (authority design §10) ------------------------------------------

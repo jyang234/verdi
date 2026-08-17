@@ -385,9 +385,9 @@ func TestBuildSemanticInput_EvaluationsMustBeSortedAndUnique(t *testing.T) {
 }
 
 func TestBuildSemanticInput_UnknownExemptionDigestMismatch(t *testing.T) {
-	rowA := semanticEvaluation("group-a", unknownScopeProof("w1"), nil,
+	rowA := semanticEvaluation("group-a", disjointScopeProof(), nil,
 		[]ExemptionResolution{{ID: "exemption/x", Digest: semanticDigest("v1")}})
-	rowB := semanticEvaluation("group-b", unknownScopeProof("w2"), nil,
+	rowB := semanticEvaluation("group-b", disjointScopeProof(), nil,
 		[]ExemptionResolution{{ID: "exemption/x", Digest: semanticDigest("v2")}})
 	_, err := BuildSemanticInput(contextcompile.ConflictView{}, []MechanicalEvaluation{rowA, rowB})
 	if err == nil {
@@ -397,8 +397,8 @@ func TestBuildSemanticInput_UnknownExemptionDigestMismatch(t *testing.T) {
 
 func TestBuildSemanticInput_DuplicateExemptionSameDigestCollapses(t *testing.T) {
 	w := ExemptionResolution{ID: "exemption/x", Digest: semanticDigest("v1")}
-	rowA := semanticEvaluation("group-a", unknownScopeProof("w1"), nil, []ExemptionResolution{w})
-	rowB := semanticEvaluation("group-b", unknownScopeProof("w2"), nil, []ExemptionResolution{w})
+	rowA := semanticEvaluation("group-a", disjointScopeProof(), nil, []ExemptionResolution{w})
+	rowB := semanticEvaluation("group-b", disjointScopeProof(), nil, []ExemptionResolution{w})
 	got, err := BuildSemanticInput(contextcompile.ConflictView{}, []MechanicalEvaluation{rowA, rowB})
 	if err != nil {
 		t.Fatalf("BuildSemanticInput: %v", err)

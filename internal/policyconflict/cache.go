@@ -85,6 +85,18 @@ func CachedJudge(ctx context.Context, adapter JudgeAdapter, input SemanticInput,
 	if len(adapter.Argv) == 0 {
 		return ValidatedExchange{}, fmt.Errorf("%w: adapter argv is empty", ErrCacheOperational)
 	}
+	if err := validateSemanticInput(input); err != nil {
+		return ValidatedExchange{}, fmt.Errorf("%w: %v", ErrCacheOperational, err)
+	}
+	if err := validateNonEmpty("profile_id", profileID); err != nil {
+		return ValidatedExchange{}, fmt.Errorf("%w: %v", ErrCacheOperational, err)
+	}
+	if err := validateDigest("profile_digest", profileDigest); err != nil {
+		return ValidatedExchange{}, fmt.Errorf("%w: %v", ErrCacheOperational, err)
+	}
+	if err := validateDigest("authority_digest", authorityDigest); err != nil {
+		return ValidatedExchange{}, fmt.Errorf("%w: %v", ErrCacheOperational, err)
+	}
 
 	promptBytes := input.Prompt
 	inputBytes, err := canonjson.Marshal(semanticInputWitnessDoc{
@@ -96,6 +108,7 @@ func CachedJudge(ctx context.Context, adapter JudgeAdapter, input SemanticInput,
 		return ValidatedExchange{}, fmt.Errorf("%w: encoding normalized semantic input: %v", ErrCacheOperational, err)
 	}
 
+	configuredCommandDigest := rawContentDigest([]byte(joinArgv(adapter.Argv)))
 	bareKeyDigest, err := judgeCacheKeyDigest(adapter, promptBytes, inputBytes, profileID, profileDigest, authorityDigest)
 	if err != nil {
 		return ValidatedExchange{}, fmt.Errorf("%w: %v", ErrCacheOperational, err)
@@ -137,6 +150,9 @@ func CachedJudge(ctx context.Context, adapter JudgeAdapter, input SemanticInput,
 	if exchange.Model != adapter.Model {
 		return ValidatedExchange{}, fmt.Errorf("%w: judge returned model %q, want %q", ErrCacheOperational, exchange.Model, adapter.Model)
 	}
+	if exchange.CommandDigest != configuredCommandDigest {
+		return ValidatedExchange{}, fmt.Errorf("%w: judge returned command_digest %q, want configured command digest %q", ErrCacheOperational, exchange.CommandDigest, configuredCommandDigest)
+	}
 	wantPromptDigest := rawContentDigest(promptBytes)
 	if exchange.PromptDigest != wantPromptDigest {
 		return ValidatedExchange{}, fmt.Errorf("%w: judge returned prompt_digest %q, want %q", ErrCacheOperational, exchange.PromptDigest, wantPromptDigest)
@@ -150,7 +166,11 @@ func CachedJudge(ctx context.Context, adapter JudgeAdapter, input SemanticInput,
 		return ValidatedExchange{}, fmt.Errorf("%w: %v", ErrCacheOperational, err)
 	}
 
-	judgment := Judgment{Schema: JudgmentSchema, TreeHash: treeHash, InputDigest: bareKeyDigest, Exchange: exchange}
+	judgment := Judgment{
+		Schema: JudgmentSchema, TreeHash: treeHash, InputDigest: bareKeyDigest,
+		ProfileID: profileID, ProfileDigest: profileDigest, AuthorityDigest: authorityDigest,
+		Exchange: exchange,
+	}
 	encoded, err := EncodeJudgment(judgment)
 	if err != nil {
 		return ValidatedExchange{}, fmt.Errorf("%w: encoding judgment: %v", ErrCacheOperational, err)
@@ -191,8 +211,8 @@ func CachedJudge(ctx context.Context, adapter JudgeAdapter, input SemanticInput,
 	if err != nil {
 		return ValidatedExchange{}, fmt.Errorf("%w: existing cache record at %s is malformed: %v", ErrCacheOperational, path, err)
 	}
-	if winner.TreeHash != treeHash || winner.InputDigest != bareKeyDigest {
-		return ValidatedExchange{}, fmt.Errorf("%w: existing cache record at %s does not carry the expected path key", ErrCacheOperational, path)
+	if err := validateJudgmentPathKey(winner, treeHash, bareKeyDigest); err != nil {
+		return ValidatedExchange{}, fmt.Errorf("%w: existing cache record at %s does not carry the expected path key: %v", ErrCacheOperational, path, err)
 	}
 	if !bytes.Equal(existing, encoded) {
 		return ValidatedExchange{}, fmt.Errorf("%w: existing cache record at %s is a different winner (content mismatch)", ErrCacheOperational, path)
@@ -203,19 +223,37 @@ func CachedJudge(ctx context.Context, adapter JudgeAdapter, input SemanticInput,
 // judgeCacheKeyDigest computes the D4 filename's bare-hex input-digest
 // segment from every axis authority design §7 names.
 func judgeCacheKeyDigest(adapter JudgeAdapter, promptBytes, inputBytes []byte, profileID, profileDigest, authorityDigest string) (string, error) {
-	argvDigest := rawContentDigest([]byte(joinArgv(adapter.Argv)))
-	full, err := canonjson.Digest(judgeCacheKeyDoc{
+	return digestJudgeCacheKey(judgeCacheKeyDoc{
 		Role:            JudgeRole(adapter.Role),
 		AdapterID:       adapter.Adapter.ID,
 		AdapterVersion:  adapter.Adapter.Version,
 		Model:           adapter.Model,
-		ArgvDigest:      argvDigest,
+		ArgvDigest:      rawContentDigest([]byte(joinArgv(adapter.Argv))),
 		PromptDigest:    rawContentDigest(promptBytes),
 		InputDigest:     rawContentDigest(inputBytes),
 		ProfileID:       profileID,
 		ProfileDigest:   profileDigest,
 		AuthorityDigest: authorityDigest,
 	})
+}
+
+func judgmentCacheKeyDigest(judgment Judgment) (string, error) {
+	return digestJudgeCacheKey(judgeCacheKeyDoc{
+		Role:            judgment.Exchange.Role,
+		AdapterID:       judgment.Exchange.Adapter.ID,
+		AdapterVersion:  judgment.Exchange.Adapter.Version,
+		Model:           judgment.Exchange.Model,
+		ArgvDigest:      judgment.Exchange.CommandDigest,
+		PromptDigest:    judgment.Exchange.PromptDigest,
+		InputDigest:     judgment.Exchange.InputDigest,
+		ProfileID:       judgment.ProfileID,
+		ProfileDigest:   judgment.ProfileDigest,
+		AuthorityDigest: judgment.AuthorityDigest,
+	})
+}
+
+func digestJudgeCacheKey(doc judgeCacheKeyDoc) (string, error) {
+	full, err := canonjson.Digest(doc)
 	if err != nil {
 		return "", fmt.Errorf("digesting cache key: %w", err)
 	}
@@ -224,6 +262,20 @@ func judgeCacheKeyDigest(adapter JudgeAdapter, promptBytes, inputBytes []byte, p
 		return "", fmt.Errorf("computed cache key digest %q is not sha256:<64 hex> form", full)
 	}
 	return bare, nil
+}
+
+func validateJudgmentPathKey(judgment Judgment, treeHash, inputDigest string) error {
+	if judgment.TreeHash != treeHash || judgment.InputDigest != inputDigest {
+		return fmt.Errorf("record fields are tree_hash=%q input_digest=%q, want %q/%q", judgment.TreeHash, judgment.InputDigest, treeHash, inputDigest)
+	}
+	recomputed, err := judgmentCacheKeyDigest(judgment)
+	if err != nil {
+		return err
+	}
+	if recomputed != inputDigest {
+		return fmt.Errorf("carried components recompute to %q, want %q", recomputed, inputDigest)
+	}
+	return nil
 }
 
 func joinArgv(argv []string) string {
@@ -275,8 +327,8 @@ func loadCachedJudgment(path, treeHash, inputDigest string) (Judgment, bool, err
 	if err != nil {
 		return Judgment{}, false, fmt.Errorf("%w: cache record at %s is malformed: %v", ErrCacheOperational, path, err)
 	}
-	if judgment.TreeHash != treeHash || judgment.InputDigest != inputDigest {
-		return Judgment{}, false, fmt.Errorf("%w: cache record at %s does not carry the expected path key", ErrCacheOperational, path)
+	if err := validateJudgmentPathKey(judgment, treeHash, inputDigest); err != nil {
+		return Judgment{}, false, fmt.Errorf("%w: cache record at %s does not carry the expected path key: %v", ErrCacheOperational, path, err)
 	}
 	return judgment, true, nil
 }

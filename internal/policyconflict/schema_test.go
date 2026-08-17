@@ -601,6 +601,35 @@ func TestDecodeJudgment_StrictDecodeMatrix(t *testing.T) {
 	}
 }
 
+func TestDecodeJudgment_RequiresGovernanceIdentity(t *testing.T) {
+	base := mustReadFixture(t, "judgment.json")
+	for _, field := range []string{"profile_id", "profile_digest", "authority_digest"} {
+		t.Run(field+" absent", func(t *testing.T) {
+			if _, err := DecodeJudgment(withoutTopLevelField(t, base, field)); err == nil {
+				t.Fatalf("DecodeJudgment accepted missing %s", field)
+			}
+		})
+	}
+	for _, field := range []string{"profile_digest", "authority_digest"} {
+		t.Run(field+" is a full digest", func(t *testing.T) {
+			data := withTopLevelField(t, base, field, `"`+repeatHex('a')+`"`)
+			if _, err := DecodeJudgment(data); err == nil {
+				t.Fatalf("DecodeJudgment accepted bare %s", field)
+			}
+		})
+	}
+}
+
+func TestDecodeJudgment_RawResultMustEqualParsedResult(t *testing.T) {
+	base := mustReadFixture(t, "judgment.json")
+	tree := setAtPath(t, base, []any{"exchange", "result", "recommendation"}, "inconclusive")
+	setAtPathIn(t, tree, []any{"exchange", "result", "findings"}, []any{})
+	data := redigestTopLevel(t, tree)
+	if _, err := DecodeJudgment(data); err == nil {
+		t.Fatal("DecodeJudgment accepted raw_result bytes that decode to a different result")
+	}
+}
+
 func TestDecodeJudgment_PathKeyVsRecordDigestForm(t *testing.T) {
 	base := mustReadFixture(t, "judgment.json")
 
@@ -1336,7 +1365,7 @@ func TestDecodeReport_SemanticExchanges(t *testing.T) {
 		e := validJudgmentExchange("primary")
 		e["result"].(map[string]any)["recommendation"] = "maybe"
 		data := forgedReport(t, base, []any{"semantic", 0, "primary"}, e)
-		requireErrContains(t, mustDecodeReportErr(t, data), `unknown recommendation "maybe"`)
+		requireErrContains(t, mustDecodeReportErr(t, data), "does not equal the strict-decoded raw_result")
 	})
 }
 

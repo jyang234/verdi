@@ -17,7 +17,9 @@ import (
 	"testing"
 
 	"github.com/jyang234/verdi/internal/canonjson"
+	"github.com/jyang234/verdi/internal/contextcompile"
 	"github.com/jyang234/verdi/internal/filelock"
+	"github.com/jyang234/verdi/internal/policyartifact"
 	"github.com/jyang234/verdi/internal/store"
 )
 
@@ -26,10 +28,14 @@ func hex64(s string) string {
 	return hex.EncodeToString(sum[:])
 }
 
-var cacheTestTreeHash = hex64("tree")
+var (
+	cacheTestTreeHash        = hex64("tree")
+	cacheTestProfileDigest   = semanticDigest("cache profile")
+	cacheTestAuthorityDigest = semanticDigest("cache authority")
+)
 
 func cacheTestInput() SemanticInput {
-	return SemanticInput{Prompt: []byte("prompt bytes"), Claims: nil, UnknownMechanicals: nil, Exemptions: nil}
+	return SemanticInput{Prompt: []byte(semanticPrompt), Claims: []contextcompile.ProseClaim{}, UnknownMechanicals: []UnknownMechanicalWitness{}, Exemptions: []policyartifact.SemanticExemptionWitness{}}
 }
 
 // --- hit / miss ------------------------------------------------------------
@@ -41,7 +47,7 @@ func TestPolicyConflictCache_Miss_RunsJudgeAndPublishes(t *testing.T) {
 	a := baseAdapter(runner)
 	a.Root = root
 
-	got, err := CachedJudge(context.Background(), a, cacheTestInput(), cacheTestTreeHash, "solo", "profile-digest-1", "authority-digest-1")
+	got, err := CachedJudge(context.Background(), a, cacheTestInput(), cacheTestTreeHash, "solo", cacheTestProfileDigest, cacheTestAuthorityDigest)
 	if err != nil {
 		t.Fatalf("CachedJudge: %v", err)
 	}
@@ -76,11 +82,11 @@ func TestPolicyConflictCache_Hit_DoesNotRunJudge(t *testing.T) {
 	a.Root = root
 	input := cacheTestInput()
 
-	first, err := CachedJudge(context.Background(), a, input, cacheTestTreeHash, "solo", "profile-digest-1", "authority-digest-1")
+	first, err := CachedJudge(context.Background(), a, input, cacheTestTreeHash, "solo", cacheTestProfileDigest, cacheTestAuthorityDigest)
 	if err != nil {
 		t.Fatalf("first CachedJudge: %v", err)
 	}
-	second, err := CachedJudge(context.Background(), a, input, cacheTestTreeHash, "solo", "profile-digest-1", "authority-digest-1")
+	second, err := CachedJudge(context.Background(), a, input, cacheTestTreeHash, "solo", cacheTestProfileDigest, cacheTestAuthorityDigest)
 	if err != nil {
 		t.Fatalf("second CachedJudge: %v", err)
 	}
@@ -101,7 +107,7 @@ func baseKeyArgs() (JudgeAdapter, []byte, []byte, string, string, string) {
 	a := baseAdapter(nil)
 	prompt := []byte("prompt")
 	input := []byte(`{"claims":[]}`)
-	return a, prompt, input, "solo", "profile-digest", "authority-digest"
+	return a, prompt, input, "solo", cacheTestProfileDigest, cacheTestAuthorityDigest
 }
 
 func TestPolicyConflictCache_KeyChanges_Role(t *testing.T) {
@@ -238,7 +244,7 @@ func TestPolicyConflictCache_PersistedRecordCarriesFullDigests(t *testing.T) {
 	runner := &fakeJudgeRunner{fn: func(ctx context.Context, argv []string, stdin []byte) ([]byte, int, error) { return want, 0, nil }}
 	a := baseAdapter(runner)
 	a.Root = root
-	if _, err := CachedJudge(context.Background(), a, cacheTestInput(), cacheTestTreeHash, "solo", "d1", "d2"); err != nil {
+	if _, err := CachedJudge(context.Background(), a, cacheTestInput(), cacheTestTreeHash, "solo", cacheTestProfileDigest, cacheTestAuthorityDigest); err != nil {
 		t.Fatalf("CachedJudge: %v", err)
 	}
 	entries, err := os.ReadDir(filepath.Join(root, ".verdi", "data", "cache"))
@@ -254,11 +260,13 @@ func TestPolicyConflictCache_PersistedRecordCarriesFullDigests(t *testing.T) {
 		t.Fatalf("DecodeJudgment: %v", err)
 	}
 	for name, got := range map[string]string{
-		"command_digest": judgment.Exchange.CommandDigest,
-		"prompt_digest":  judgment.Exchange.PromptDigest,
-		"input_digest":   judgment.Exchange.InputDigest,
-		"raw_digest":     judgment.Exchange.RawDigest,
-		"digest":         judgment.Digest,
+		"profile_digest":   judgment.ProfileDigest,
+		"authority_digest": judgment.AuthorityDigest,
+		"command_digest":   judgment.Exchange.CommandDigest,
+		"prompt_digest":    judgment.Exchange.PromptDigest,
+		"input_digest":     judgment.Exchange.InputDigest,
+		"raw_digest":       judgment.Exchange.RawDigest,
+		"digest":           judgment.Digest,
 	} {
 		if !strings.HasPrefix(got, "sha256:") || len(got) != len("sha256:")+64 {
 			t.Errorf("%s = %q, want full sha256:<64 hex> form", name, got)
@@ -269,6 +277,60 @@ func TestPolicyConflictCache_PersistedRecordCarriesFullDigests(t *testing.T) {
 	}
 	if len(judgment.InputDigest) != 64 || strings.Contains(judgment.InputDigest, ":") {
 		t.Errorf("judgment.InputDigest = %q, want bare 64 hex", judgment.InputDigest)
+	}
+	if judgment.ProfileID != "solo" {
+		t.Errorf("judgment.ProfileID = %q, want solo", judgment.ProfileID)
+	}
+}
+
+func TestPolicyConflictCache_RejectsIncompleteSemanticInputBeforeRun(t *testing.T) {
+	tests := []struct {
+		name string
+		mut  func(*SemanticInput)
+	}{
+		{"different prompt", func(in *SemanticInput) { in.Prompt = []byte("project-configured prompt") }},
+		{"nil claims", func(in *SemanticInput) { in.Claims = nil }},
+		{"nil unknown mechanicals", func(in *SemanticInput) { in.UnknownMechanicals = nil }},
+		{"nil exemptions", func(in *SemanticInput) { in.Exemptions = nil }},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			runner := &fakeJudgeRunner{fn: func(context.Context, []string, []byte) ([]byte, int, error) {
+				t.Fatal("runner must not be invoked for an incomplete semantic input")
+				return nil, 0, nil
+			}}
+			a := baseAdapter(runner)
+			a.Root = t.TempDir()
+			input := cacheTestInput()
+			tc.mut(&input)
+			if _, err := CachedJudge(context.Background(), a, input, cacheTestTreeHash, "solo", cacheTestProfileDigest, cacheTestAuthorityDigest); err == nil {
+				t.Fatal("CachedJudge accepted an incomplete semantic input")
+			}
+			if runner.calls != 0 {
+				t.Fatalf("runner.calls = %d, want 0", runner.calls)
+			}
+		})
+	}
+}
+
+func TestPolicyConflictCache_RejectsDivergentCommandDigestBeforePublication(t *testing.T) {
+	root := t.TempDir()
+	runner := &fakeJudgeRunner{fn: func(_ context.Context, argv []string, _ []byte) ([]byte, int, error) {
+		// A hostile/misbehaving runner mutates the shared argv after the
+		// cache key captured the configured command. JudgeAdapter computes
+		// its returned command_digest after Run, exposing the divergence.
+		argv[0] = "substituted-judge"
+		return noConflictResultBytes(t), 0, nil
+	}}
+	a := baseAdapter(runner)
+	a.Root = root
+
+	if _, err := CachedJudge(context.Background(), a, cacheTestInput(), cacheTestTreeHash, "solo", cacheTestProfileDigest, cacheTestAuthorityDigest); err == nil {
+		t.Fatal("CachedJudge accepted a returned command_digest different from the configured command")
+	}
+	entries, readErr := os.ReadDir(filepath.Join(root, ".verdi", "data", "cache"))
+	if readErr == nil && len(entries) != 0 {
+		t.Fatalf("cache dir entries = %d, want 0 — a divergent transport identity must not be published", len(entries))
 	}
 }
 
@@ -307,7 +369,7 @@ func TestPolicyConflictCache_Symlink(t *testing.T) {
 	}})
 	a.Root = root
 	input := cacheTestInput()
-	path := precomputedCachePath(t, root, a, input, cacheTestTreeHash, "solo", "d1", "d2")
+	path := precomputedCachePath(t, root, a, input, cacheTestTreeHash, "solo", cacheTestProfileDigest, cacheTestAuthorityDigest)
 
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		t.Fatal(err)
@@ -320,7 +382,7 @@ func TestPolicyConflictCache_Symlink(t *testing.T) {
 		t.Skipf("symlinks unsupported: %v", err)
 	}
 
-	_, err := CachedJudge(context.Background(), a, input, cacheTestTreeHash, "solo", "d1", "d2")
+	_, err := CachedJudge(context.Background(), a, input, cacheTestTreeHash, "solo", cacheTestProfileDigest, cacheTestAuthorityDigest)
 	if err == nil {
 		t.Fatal("expected an error for a symlinked cache path")
 	}
@@ -334,7 +396,7 @@ func TestPolicyConflictCache_Corruption(t *testing.T) {
 	}})
 	a.Root = root
 	input := cacheTestInput()
-	path := precomputedCachePath(t, root, a, input, cacheTestTreeHash, "solo", "d1", "d2")
+	path := precomputedCachePath(t, root, a, input, cacheTestTreeHash, "solo", cacheTestProfileDigest, cacheTestAuthorityDigest)
 
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		t.Fatal(err)
@@ -343,7 +405,7 @@ func TestPolicyConflictCache_Corruption(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, err := CachedJudge(context.Background(), a, input, cacheTestTreeHash, "solo", "d1", "d2")
+	_, err := CachedJudge(context.Background(), a, input, cacheTestTreeHash, "solo", cacheTestProfileDigest, cacheTestAuthorityDigest)
 	if err == nil {
 		t.Fatal("expected an error for a corrupt cache record")
 	}
@@ -356,8 +418,9 @@ func TestPolicyConflictCache_MismatchedKey(t *testing.T) {
 	runnerA := &fakeJudgeRunner{fn: func(ctx context.Context, argv []string, stdin []byte) ([]byte, int, error) { return want, 0, nil }}
 	a := baseAdapter(runnerA)
 	a.Root = root
-	inputA := SemanticInput{Prompt: []byte("prompt A")}
-	if _, err := CachedJudge(context.Background(), a, inputA, cacheTestTreeHash, "solo", "d1", "d2"); err != nil {
+	inputA := cacheTestInput()
+	inputA.Exemptions = []policyartifact.SemanticExemptionWitness{{ID: "exemption/a", Digest: semanticDigest("exemption a")}}
+	if _, err := CachedJudge(context.Background(), a, inputA, cacheTestTreeHash, "solo", cacheTestProfileDigest, cacheTestAuthorityDigest); err != nil {
 		t.Fatalf("CachedJudge: %v", err)
 	}
 	entries, err := os.ReadDir(filepath.Join(root, ".verdi", "data", "cache"))
@@ -373,8 +436,9 @@ func TestPolicyConflictCache_MismatchedKey(t *testing.T) {
 	// Copy that legitimate (self-consistent) record's bytes to the path a
 	// DIFFERENT key would compute — the record decodes fine on its own but
 	// disagrees with the path it was found at.
-	inputB := SemanticInput{Prompt: []byte("prompt B")}
-	mismatchedPath := precomputedCachePath(t, root, a, inputB, cacheTestTreeHash, "solo", "d1", "d2")
+	inputB := cacheTestInput()
+	inputB.Exemptions = []policyartifact.SemanticExemptionWitness{{ID: "exemption/b", Digest: semanticDigest("exemption b")}}
+	mismatchedPath := precomputedCachePath(t, root, a, inputB, cacheTestTreeHash, "solo", cacheTestProfileDigest, cacheTestAuthorityDigest)
 	if err := os.WriteFile(mismatchedPath, winnerBytes, 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -385,7 +449,7 @@ func TestPolicyConflictCache_MismatchedKey(t *testing.T) {
 	}}
 	b := baseAdapter(runnerB)
 	b.Root = root
-	_, err = CachedJudge(context.Background(), b, inputB, cacheTestTreeHash, "solo", "d1", "d2")
+	_, err = CachedJudge(context.Background(), b, inputB, cacheTestTreeHash, "solo", cacheTestProfileDigest, cacheTestAuthorityDigest)
 	if err == nil {
 		t.Fatal("expected an error for a cache record whose path key does not match its own content")
 	}
@@ -410,7 +474,7 @@ func TestPolicyConflictCache_LockHeldIsOperational(t *testing.T) {
 	a := baseAdapter(runner)
 	a.Root = root
 
-	_, err = CachedJudge(context.Background(), a, cacheTestInput(), cacheTestTreeHash, "solo", "d1", "d2")
+	_, err = CachedJudge(context.Background(), a, cacheTestInput(), cacheTestTreeHash, "solo", cacheTestProfileDigest, cacheTestAuthorityDigest)
 	if err == nil {
 		t.Fatal("expected an error when the writer lock is already held")
 	}
@@ -432,7 +496,7 @@ func TestPolicyConflictCache_PersistenceFailure(t *testing.T) {
 	a := baseAdapter(runner)
 	a.Root = root
 
-	_, err := CachedJudge(context.Background(), a, cacheTestInput(), cacheTestTreeHash, "solo", "d1", "d2")
+	_, err := CachedJudge(context.Background(), a, cacheTestInput(), cacheTestTreeHash, "solo", cacheTestProfileDigest, cacheTestAuthorityDigest)
 	if err == nil {
 		t.Fatal("expected an error when the cache directory cannot be created")
 	}
@@ -447,7 +511,7 @@ func TestPolicyConflictCache_FailedAttemptNeverCached(t *testing.T) {
 	a.Root = root
 	input := cacheTestInput()
 
-	_, err := CachedJudge(context.Background(), a, input, cacheTestTreeHash, "solo", "d1", "d2")
+	_, err := CachedJudge(context.Background(), a, input, cacheTestTreeHash, "solo", cacheTestProfileDigest, cacheTestAuthorityDigest)
 	if err == nil {
 		t.Fatal("expected an error for malformed judge output")
 	}
@@ -479,7 +543,7 @@ func TestPolicyConflictCache_InvalidWitnessAttemptNeverCached(t *testing.T) {
 	a.Root = root
 	input := cacheTestInput() // no claims at all
 
-	_, err = CachedJudge(context.Background(), a, input, cacheTestTreeHash, "solo", "d1", "d2")
+	_, err = CachedJudge(context.Background(), a, input, cacheTestTreeHash, "solo", cacheTestProfileDigest, cacheTestAuthorityDigest)
 	if err == nil {
 		t.Fatal("expected an error for a result citing an unknown claim witness")
 	}
@@ -510,7 +574,7 @@ func TestPolicyConflictCache_ConcurrentIdenticalWriters(t *testing.T) {
 			innerRan = true
 			inner := baseAdapter(&fakeJudgeRunner{fn: func(ctx context.Context, argv []string, stdin []byte) ([]byte, int, error) { return want, 0, nil }})
 			inner.Root = root
-			if _, err := CachedJudge(context.Background(), inner, input, cacheTestTreeHash, "solo", "d1", "d2"); err != nil {
+			if _, err := CachedJudge(context.Background(), inner, input, cacheTestTreeHash, "solo", cacheTestProfileDigest, cacheTestAuthorityDigest); err != nil {
 				t.Fatalf("inner CachedJudge (simulated concurrent publisher): %v", err)
 			}
 		}
@@ -519,7 +583,7 @@ func TestPolicyConflictCache_ConcurrentIdenticalWriters(t *testing.T) {
 	a := baseAdapter(outer)
 	a.Root = root
 
-	got, err := CachedJudge(context.Background(), a, input, cacheTestTreeHash, "solo", "d1", "d2")
+	got, err := CachedJudge(context.Background(), a, input, cacheTestTreeHash, "solo", cacheTestProfileDigest, cacheTestAuthorityDigest)
 	if err != nil {
 		t.Fatalf("outer CachedJudge: %v", err)
 	}
@@ -532,27 +596,24 @@ func TestPolicyConflictCache_ConcurrentIdenticalWriters(t *testing.T) {
 	}
 }
 
-// TestPolicyConflictCache_DifferentWinnerCollision mirrors the identical-
-// writer test above, except the "concurrent" publisher used a DIFFERENT
-// adapter Model — genuinely different content under the SAME cache key
-// only if the differing field were NOT part of the key; since Model IS
-// part of the key, this instead directly forges a mismatched pre-existing
-// record via a raw write (the same technique TestPolicyConflictCache_
-// MismatchedKey uses) to exercise the post-lock byte-identity check with
-// a record that DOES match the path key but carries different content.
+// TestPolicyConflictCache_DifferentWinnerCollision plants a fully
+// self-digested record whose asserted top-level path key matches the
+// expected filename but whose carried exchange components recompute to a
+// different key. A hit must validate the derivation, not trust the
+// attacker's duplicated top-level key assertion.
 func TestPolicyConflictCache_DifferentWinnerCollision(t *testing.T) {
 	root := t.TempDir()
 	want := noConflictResultBytes(t)
 	input := cacheTestInput()
 	a := baseAdapter(nil)
 	a.Root = root
-	path := precomputedCachePath(t, root, a, input, cacheTestTreeHash, "solo", "d1", "d2")
+	path := precomputedCachePath(t, root, a, input, cacheTestTreeHash, "solo", cacheTestProfileDigest, cacheTestAuthorityDigest)
 
 	inputBytes, err := testSemanticInputBytes(input)
 	if err != nil {
 		t.Fatal(err)
 	}
-	key, err := judgeCacheKeyDigest(a, input.Prompt, inputBytes, "solo", "d1", "d2")
+	key, err := judgeCacheKeyDigest(a, input.Prompt, inputBytes, "solo", cacheTestProfileDigest, cacheTestAuthorityDigest)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -566,6 +627,7 @@ func TestPolicyConflictCache_DifferentWinnerCollision(t *testing.T) {
 	}
 	foreign := Judgment{
 		Schema: JudgmentSchema, TreeHash: cacheTestTreeHash, InputDigest: key,
+		ProfileID: "solo", ProfileDigest: cacheTestProfileDigest, AuthorityDigest: cacheTestAuthorityDigest,
 		Exchange: JudgmentExchange{
 			Role: JudgePrimary, Adapter: a.Adapter, Model: a.Model,
 			CommandDigest: rawContentDigest([]byte("argv")), PromptDigest: rawContentDigest(input.Prompt), InputDigest: rawContentDigest(inputBytes),
@@ -585,23 +647,13 @@ func TestPolicyConflictCache_DifferentWinnerCollision(t *testing.T) {
 
 	runner := &fakeJudgeRunner{fn: func(ctx context.Context, argv []string, stdin []byte) ([]byte, int, error) { return want, 0, nil }}
 	a.Runner = runner
-	// The initial hit-check will find the foreign record and, since it
-	// decodes and key-matches, treat it as a legitimate HIT — proving the
-	// pre-check honors whatever is already validly there. To reach the
-	// post-lock collision path specifically, remove the pre-existing
-	// record's discoverability by the pre-check is not meaningful (a
-	// pre-check hit is a hit); the collision path is instead exercised via
-	// TestPolicyConflictCache_ConcurrentIdenticalWriters's inner-call
-	// technique with differing content, below.
-	got, err := CachedJudge(context.Background(), a, input, cacheTestTreeHash, "solo", "d1", "d2")
-	if err != nil {
-		t.Fatalf("CachedJudge: %v", err)
-	}
-	if got.Exchange.Result.Recommendation != RecommendationConflict {
-		t.Fatalf("Recommendation = %q, want the pre-existing foreign record's %q (a valid hit)", got.Exchange.Result.Recommendation, RecommendationConflict)
+	// The initial hit-check must reject before any judge process can run.
+	_, err = CachedJudge(context.Background(), a, input, cacheTestTreeHash, "solo", cacheTestProfileDigest, cacheTestAuthorityDigest)
+	if err == nil {
+		t.Fatal("CachedJudge accepted a self-consistent foreign exchange under the expected path")
 	}
 	if runner.calls != 0 {
-		t.Fatalf("runner.calls = %d, want 0 (cache hit)", runner.calls)
+		t.Fatalf("runner.calls = %d, want 0 (invalid hit must fail before invoking the judge)", runner.calls)
 	}
 }
 
@@ -638,7 +690,7 @@ func TestPolicyConflictCache_ConcurrentDifferentWinnerCollision(t *testing.T) {
 			innerRan = true
 			inner := baseAdapter(&fakeJudgeRunner{fn: func(ctx context.Context, argv []string, stdin []byte) ([]byte, int, error) { return resultA, 0, nil }})
 			inner.Root = root
-			if _, err := CachedJudge(context.Background(), inner, input, cacheTestTreeHash, "solo", "d1", "d2"); err != nil {
+			if _, err := CachedJudge(context.Background(), inner, input, cacheTestTreeHash, "solo", cacheTestProfileDigest, cacheTestAuthorityDigest); err != nil {
 				t.Fatalf("inner CachedJudge: %v", err)
 			}
 		}
@@ -652,7 +704,7 @@ func TestPolicyConflictCache_ConcurrentDifferentWinnerCollision(t *testing.T) {
 	a := baseAdapter(outer)
 	a.Root = root
 
-	_, err = CachedJudge(context.Background(), a, input, cacheTestTreeHash, "solo", "d1", "d2")
+	_, err = CachedJudge(context.Background(), a, input, cacheTestTreeHash, "solo", cacheTestProfileDigest, cacheTestAuthorityDigest)
 	if err == nil {
 		t.Fatal("expected a collision error when the outer call's own content disagrees with the already-published winner")
 	}

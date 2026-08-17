@@ -14,6 +14,7 @@
 package policyconflict
 
 import (
+	"bytes"
 	"fmt"
 	"regexp"
 	"sort"
@@ -34,6 +35,7 @@ import (
 // topics §6 names. Its bytes are a ratcheted constant: semantic_test.go
 // pins them so an accidental edit here is caught as a diff, not silently
 // shipped as a changed judge behavior.
+// vocab:identity — "closed" names the judge protocol's fixed complete-input mechanism, not a lifecycle/display-state label.
 const semanticPrompt = `You are evaluating a closed set of normalized, human-authored authority claims for policy conflict.
 
 Each claim below carries its own id, category, scope, governing authority digest, and normalized text. Some claims are typed constraints whose exact scope relationship to the group could not be proven mechanically and are included as unknown mechanical witnesses with complete policy-bound typed claim records and exact scope proof; they carry no authored prose. Every other claim is prose and its full authored text is included.
@@ -109,6 +111,44 @@ func BuildSemanticInput(view contextcompile.ConflictView, evaluations []Mechanic
 	prompt := make([]byte, len(semanticPrompt))
 	copy(prompt, semanticPrompt)
 	return SemanticInput{Claims: claims, UnknownMechanicals: unknown, Exemptions: exemptions, Prompt: prompt}, nil
+}
+
+// validateSemanticInput defends the cache/launch boundary against a
+// hand-built or mutated input. A launch is valid only for the fixed prompt
+// and complete, explicitly-present witness sets BuildSemanticInput emits.
+func validateSemanticInput(in SemanticInput) error {
+	if !bytes.Equal(in.Prompt, []byte(semanticPrompt)) {
+		return fmt.Errorf("policyconflict: semantic input prompt does not match the fixed repository prompt")
+	}
+	if in.Claims == nil {
+		return fmt.Errorf("policyconflict: semantic input claims must be non-nil (an explicitly empty set is [])")
+	}
+	if _, err := normalizedProseClaims(in.Claims); err != nil {
+		return fmt.Errorf("policyconflict: semantic input: %w", err)
+	}
+	if in.UnknownMechanicals == nil {
+		return fmt.Errorf("policyconflict: semantic input unknown mechanicals must be non-nil (an explicitly empty set is [])")
+	}
+	for i, witness := range in.UnknownMechanicals {
+		if err := validateUnknownMechanicalWitness(fmt.Sprintf("semantic input unknown_mechanicals[%d]", i), witness); err != nil {
+			return err
+		}
+	}
+	if err := requireSortedUnique("semantic input unknown_mechanicals", in.UnknownMechanicals, func(w UnknownMechanicalWitness) string { return w.ID }); err != nil {
+		return err
+	}
+	if in.Exemptions == nil {
+		return fmt.Errorf("policyconflict: semantic input exemptions must be non-nil (an explicitly empty set is [])")
+	}
+	for i, witness := range in.Exemptions {
+		if err := validateNonEmpty(fmt.Sprintf("semantic input exemptions[%d].id", i), witness.ID); err != nil {
+			return err
+		}
+		if err := validateDigest(fmt.Sprintf("semantic input exemptions[%d].digest", i), witness.Digest); err != nil {
+			return err
+		}
+	}
+	return requireSortedUnique("semantic input exemptions", in.Exemptions, func(w policyartifact.SemanticExemptionWitness) string { return w.ID })
 }
 
 // normalizedProseClaims clones and defensively re-validates view's prose

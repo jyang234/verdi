@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"reflect"
 	"regexp"
 	"strings"
 	"time"
@@ -423,6 +424,13 @@ func (e JudgmentExchange) validate() error {
 	if want := rawContentDigest([]byte(e.RawResult)); want != e.RawDigest {
 		return fmt.Errorf("policyconflict: judgment.exchange.raw_digest: %q does not match the exact bytes carried in raw_result (want %q)", e.RawDigest, want)
 	}
+	decoded, err := DecodeJudgeResult([]byte(e.RawResult))
+	if err != nil {
+		return fmt.Errorf("policyconflict: judgment.exchange.raw_result: %w", err)
+	}
+	if !reflect.DeepEqual(decoded, e.Result) {
+		return fmt.Errorf("policyconflict: judgment.exchange.result: does not equal the strict-decoded raw_result")
+	}
 	return e.Result.Validate()
 }
 
@@ -440,6 +448,15 @@ func (j Judgment) Validate() error {
 		return err
 	}
 	if err := validateBareHex("judgment.input_digest", j.InputDigest); err != nil {
+		return err
+	}
+	if err := validateNonEmpty("judgment.profile_id", j.ProfileID); err != nil {
+		return err
+	}
+	if err := validateDigest("judgment.profile_digest", j.ProfileDigest); err != nil {
+		return err
+	}
+	if err := validateDigest("judgment.authority_digest", j.AuthorityDigest); err != nil {
 		return err
 	}
 	if err := j.Exchange.validate(); err != nil {

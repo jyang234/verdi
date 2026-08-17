@@ -477,11 +477,14 @@ func judgmentExchangeDocFor(e JudgmentExchange) judgmentExchangeDoc {
 // recomputation by DecodeJudgment, mirroring
 // internal/contextcompile.manifestDoc's own self-digest pattern.
 type judgmentDoc struct {
-	Schema      *string              `json:"schema"`
-	TreeHash    *string              `json:"tree_hash"`
-	InputDigest *string              `json:"input_digest"`
-	Exchange    *judgmentExchangeDoc `json:"exchange"`
-	Digest      *string              `json:"digest"`
+	Schema          *string              `json:"schema"`
+	TreeHash        *string              `json:"tree_hash"`
+	InputDigest     *string              `json:"input_digest"`
+	ProfileID       *string              `json:"profile_id"`
+	ProfileDigest   *string              `json:"profile_digest"`
+	AuthorityDigest *string              `json:"authority_digest"`
+	Exchange        *judgmentExchangeDoc `json:"exchange"`
+	Digest          *string              `json:"digest"`
 }
 
 func (d judgmentDoc) toDomain() (Judgment, error) {
@@ -495,6 +498,12 @@ func (d judgmentDoc) toDomain() (Judgment, error) {
 		return Judgment{}, missing("tree_hash")
 	case d.InputDigest == nil:
 		return Judgment{}, missing("input_digest")
+	case d.ProfileID == nil:
+		return Judgment{}, missing("profile_id")
+	case d.ProfileDigest == nil:
+		return Judgment{}, missing("profile_digest")
+	case d.AuthorityDigest == nil:
+		return Judgment{}, missing("authority_digest")
 	case d.Exchange == nil:
 		return Judgment{}, missing("exchange")
 	case d.Digest == nil:
@@ -505,11 +514,14 @@ func (d judgmentDoc) toDomain() (Judgment, error) {
 		return Judgment{}, err
 	}
 	return Judgment{
-		Schema:      *d.Schema,
-		TreeHash:    *d.TreeHash,
-		InputDigest: *d.InputDigest,
-		Exchange:    exchange,
-		Digest:      *d.Digest,
+		Schema:          *d.Schema,
+		TreeHash:        *d.TreeHash,
+		InputDigest:     *d.InputDigest,
+		ProfileID:       *d.ProfileID,
+		ProfileDigest:   *d.ProfileDigest,
+		AuthorityDigest: *d.AuthorityDigest,
+		Exchange:        exchange,
+		Digest:          *d.Digest,
 	}, nil
 }
 
@@ -519,14 +531,17 @@ func (d judgmentDoc) toDomain() (Judgment, error) {
 // the freshly computed digest for the final encoding — mirrors
 // internal/contextcompile.manifestDocFor exactly.
 func judgmentDocFor(j Judgment, digest string) judgmentDoc {
-	schema, treeHash, inputDigest, dig := j.Schema, j.TreeHash, j.InputDigest, digest
+	schema, treeHash, inputDigest, profileID, profileDigest, authorityDigest, dig := j.Schema, j.TreeHash, j.InputDigest, j.ProfileID, j.ProfileDigest, j.AuthorityDigest, digest
 	exchange := judgmentExchangeDocFor(j.Exchange)
 	return judgmentDoc{
-		Schema:      &schema,
-		TreeHash:    &treeHash,
-		InputDigest: &inputDigest,
-		Exchange:    &exchange,
-		Digest:      &dig,
+		Schema:          &schema,
+		TreeHash:        &treeHash,
+		InputDigest:     &inputDigest,
+		ProfileID:       &profileID,
+		ProfileDigest:   &profileDigest,
+		AuthorityDigest: &authorityDigest,
+		Exchange:        &exchange,
+		Digest:          &dig,
 	}
 }
 
