@@ -387,12 +387,28 @@ case-folds, rewrites, summarizes, or reorders authored text. Policy
 instructions inherit their policy/claim scope. Spec and obligation prose
 inherit the request scope intersected with their exact spec/object ref.
 
-The semantic input contains the complete sorted claims, every mechanically
-unknown or conservatively unresolved scope witness, applicable exemption
-identities/digests, and the canonical prompt. The prompt asks about overlap,
+The semantic input contains the complete sorted prose claims and one sorted
+`UnknownMechanicalWitness { id, claims, scope }` for every mechanical row
+whose reason is `scope-unproven` or `higher-order-scope-unproven`. Each such
+witness retains the row's complete composite typed-claim records and exact
+scope proof; it does not copy solver output or later authority-resolution
+state. This includes a conservatively unresolved higher-order row even when
+its aggregate scope state is `disjoint`. The input also carries applicable
+exemption identities/digests and the canonical prompt. The prompt asks about overlap,
 simultaneous satisfiability, refinement, explicit exception, authority, and the
 strongest reasonable non-conflict interpretation. Prompt bytes are fixed
 repository code, not project configuration.
+
+Semantic prose line identities are not general artifact fragment refs. They
+are validated by closed source category: policy instructions use
+`<policy-id>#instruction-<positive-n>` and retain the policy claim's declared
+scope; spec and feature prose use the whole spec ref plus `problem`, `outcome`,
+or the category's declared `ac-*`, `oq-*`, `co-*`, or `dc-*` object and carry
+that line identity as their sole scope ref; an ADR body uses its exact pinned
+ref plus `decision` as its sole scope ref; and an obligation declaration uses
+its whole obligation ref as both line identity and sole scope ref. In every arm
+the carried source ref, object, line identity, and claim ID agree exactly. This
+does not widen the artifact contract's declared-object fragment grammar.
 
 The primary judge's strict inner result is canonical JSON schema
 `verdi.policy-conflict-judge-result/v1`:
@@ -477,7 +493,13 @@ the full canonical digest form. The logical `input-digest` binds the role
 (`primary` or `challenger`), adapter-declared
 transport/model posture, argv digest, prompt digest, normalized input digest,
 profile/challenger posture, and effective authority digest. The content records
-the complete exchange from §6, all path-key components, and a self-digest.
+the complete exchange from §6, required `profile_id`, full `profile_digest`,
+full `authority_digest`, and a self-digest. Together with the exchange's role,
+adapter, model, command, prompt, and normalized-input digests, those fields are
+all path-key components. A cache hit recomputes the bare outer `input-digest`
+from the carried components and also requires the canonical `raw_result` to
+decode to the carried parsed result; neither the outer key nor a
+self-consistently rewritten record is trusted by assertion.
 
 On a cache hit the adapter strict-decodes, canonical-reencodes, verifies the
 path key and every digest, and returns the recorded result without launching a
@@ -657,7 +679,7 @@ complete typed claims keyed by `(policy_id, claim_id)` with their canonical
 base-claim digests, scope proof, domain, pre-exemption solver result,
 applicable exemption resolutions, post-exemption solver result, state, and
 reason codes. Each semantic row carries its semantic-input ID, normalized
-claim identities, mechanical-unknown source when applicable,
+claim identities, the sorted `UnknownMechanicalWitness` rows when applicable,
 primary/challenger exchanges, applicable disposition resolution, state, and
 reason codes. Each embedded authority resolution carries artifact ID/digest
 plus match, freshness, scope, bound, and authorization states. Disclosures use

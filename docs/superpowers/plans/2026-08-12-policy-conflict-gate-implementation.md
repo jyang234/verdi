@@ -71,6 +71,15 @@ different policies, and report-wire validation stopped short of the already
 specified digest and enclosing-row membership checks. SI-109 fixes the one
 new row-identity choice; the validation correction adds no new semantics.
 
+Task 7's first implementation was independently reviewed before Task 8. That
+review found three proof-interface gaps fixed by SI-110–SI-112: unresolved
+mechanical rows carried scope without their typed claims and omitted the
+higher-order/disjoint residual; cache records asserted rather than recomputed
+their complete path-key binding and did not bind raw bytes to the parsed
+result; and semantic line identities used a necessary but under-specified
+structural bypass around the artifact fragment grammar. The amended Task 3/7
+interfaces below are the correction target and a hard predecessor of Task 8.
+
 ## File Map
 
 | Responsibility | Files |
@@ -446,6 +455,7 @@ type JudgmentExchange struct {
 }
 type Judgment struct {
     Schema, TreeHash, InputDigest string
+    ProfileID, ProfileDigest, AuthorityDigest string
     Exchange JudgmentExchange
     Digest string
 }
@@ -478,7 +488,7 @@ type MechanicalEvaluation struct {
 type SemanticEvaluation struct {
     ID, InputID string
     Claims []policyartifact.SemanticClaimWitness
-    UnknownScopes []ScopeProof
+    UnknownMechanicals []UnknownMechanicalWitness
     Primary, Challenger *JudgmentExchange
     Dispositions []DispositionResolution
     State ProofState
@@ -955,9 +965,14 @@ commands, and obtain the same independent reviewer's single closure check.
 ~~~go
 type SemanticInput struct {
     Claims []contextcompile.ProseClaim
-    UnknownScopes []ScopeProof
+    UnknownMechanicals []UnknownMechanicalWitness
     Exemptions []policyartifact.SemanticExemptionWitness
     Prompt []byte
+}
+type UnknownMechanicalWitness struct {
+    ID string
+    Claims []TypedClaimRecord
+    Scope ScopeProof
 }
 type Judge interface {
     Judge(context.Context, []byte, []byte) (JudgmentExchange, error)
@@ -995,8 +1010,11 @@ writer ownership.
 - [ ] **Step 1: Write prose/prompt/judge/cache RED tests**
 
 Ratchet the complete normalized semantic input and fixed prompt bytes. Cover
-all source categories, CRLF normalization, exact object/line identity, inherited
-scope, exclusion of repository data/raw model text, and deterministic order.
+all source categories, CRLF normalization, SI-112 exact object/line identity,
+inherited scope, exclusion of repository data/raw model text, and deterministic
+order. Prove that both scope-unknown and higher-order-unproven rows carry their
+complete composite typed claims, that a typed-claim change moves the semantic
+input digest, and that other mechanical rows are excluded.
 Validate conflict/no-conflict/inconclusive cardinality, two distinct known claim
 witnesses, unknown/missing/duplicate claims, category mismatch, invalid UTF-8,
 noncanonical JSON, and model-identity substitution.
@@ -1024,6 +1042,11 @@ strict inner result rather than legacy align wrappers. Cache only a completed,
 validated successful exchange; its persisted presence is the successful
 process/validation state, so do not add single-value success enums or an
 always-empty reasons field. Run the judge without the checkout writer lock.
+The cache-aware entry validates the fixed prompt and complete semantic input.
+Persist SI-111's profile/authority fields, recompute the complete key from the
+record on every hit, and require the strict raw result to decode byte-identically
+to the carried parsed result. Refuse a symlink at any managed cache-path
+component rather than following a symlinked parent.
 For cache directory creation and publication only, acquire the existing
 nonblocking D3 `data/writer.lock`, call `CreateImmutable`, and release before
 returning. A lock-holder refusal is operational. If another process published
