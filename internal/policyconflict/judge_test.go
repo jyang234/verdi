@@ -107,6 +107,33 @@ func TestJudgeAdapter_RejectsNULArgvBeforeRun(t *testing.T) {
 	}
 }
 
+func TestJudgeAdapter_RejectsEmptyExecutableBeforeRun(t *testing.T) {
+	runner := &fakeJudgeRunner{fn: func(context.Context, []string, []byte) ([]byte, int, error) {
+		t.Fatal("runner must not receive an empty executable name")
+		return nil, 0, nil
+	}}
+	a := baseAdapter(runner)
+	a.Argv = []string{"", "later-argument"}
+
+	if _, err := a.Judge(context.Background(), []byte("prompt"), []byte(`{}`)); err == nil {
+		t.Fatal("Judge accepted an empty argv[0]")
+	}
+	if runner.calls != 0 {
+		t.Fatalf("runner.calls = %d, want 0", runner.calls)
+	}
+}
+
+func TestJudgeAdapter_AllowsEmptyLaterArgument(t *testing.T) {
+	want := noConflictResultBytes(t)
+	runner := &fakeJudgeRunner{fn: func(context.Context, []string, []byte) ([]byte, int, error) { return want, 0, nil }}
+	a := baseAdapter(runner)
+	a.Argv = []string{"judge-bin", ""}
+
+	if _, err := a.Judge(context.Background(), []byte("prompt"), []byte(`{}`)); err != nil {
+		t.Fatalf("Judge rejected a legal empty later argument: %v", err)
+	}
+}
+
 func TestJudgeAdapter_StartFailure(t *testing.T) {
 	runner := &fakeJudgeRunner{fn: func(ctx context.Context, argv []string, stdin []byte) ([]byte, int, error) {
 		return nil, 0, errors.New("exec: \"judge-bin\": executable file not found in $PATH")

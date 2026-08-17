@@ -158,11 +158,14 @@ func (a JudgeAdapter) Judge(ctx context.Context, prompt, input []byte) (Judgment
 }
 
 // validateJudgeArgv rejects only transport-impossible argv shapes. Empty
-// argument values remain legal; an empty vector has no executable and a NUL
-// byte cannot cross the operating-system exec boundary.
+// later argument values remain legal; an empty vector or argv[0] has no
+// executable, and a NUL byte cannot cross the operating-system exec boundary.
 func validateJudgeArgv(argv []string) error {
 	if len(argv) == 0 {
 		return fmt.Errorf("adapter argv is empty")
+	}
+	if argv[0] == "" {
+		return fmt.Errorf("adapter argv[0] executable is empty")
 	}
 	for i, arg := range argv {
 		if strings.ContainsRune(arg, '\x00') {
