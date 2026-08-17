@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"sort"
+	"strings"
 
 	"github.com/jyang234/verdi/internal/canonjson"
 	"github.com/jyang234/verdi/internal/contextcompile"
@@ -201,6 +202,9 @@ func (s *Service) evaluateSemantic(ctx context.Context, view contextcompile.Conf
 	if err != nil {
 		return SemanticEvaluation{}, nil, operational("run challenger judge", err)
 	}
+	if err := rejectCheckoutRootExplanations(s.Root, primary, challenger); err != nil {
+		return SemanticEvaluation{}, nil, operational("validate judge report prose", err)
+	}
 
 	dispositions, disclosures, err := ResolveDispositionAuthority(authorityInput, input, primary, challenger)
 	if err != nil {
@@ -312,6 +316,34 @@ func canonicalCheckoutRoot(root string) (string, error) {
 		return "", fmt.Errorf("resolved root %q is not absolute", resolved)
 	}
 	return filepath.Clean(resolved), nil
+}
+
+func rejectCheckoutRootExplanations(root string, exchanges ...*ValidatedExchange) error {
+	hasExchange := false
+	for _, exchange := range exchanges {
+		if exchange != nil {
+			hasExchange = true
+			break
+		}
+	}
+	if !hasExchange {
+		return nil
+	}
+	canonicalRoot, err := canonicalCheckoutRoot(root)
+	if err != nil {
+		return fmt.Errorf("checkout root: %w", err)
+	}
+	for _, exchange := range exchanges {
+		if exchange == nil {
+			continue
+		}
+		for i, finding := range exchange.Exchange.Result.Findings {
+			if strings.Contains(finding.Explanation, canonicalRoot) {
+				return fmt.Errorf("finding %d explanation contains the exact canonical checkout root", i)
+			}
+		}
+	}
+	return nil
 }
 
 func runValidatedJudge(ctx context.Context, judge Judge, role JudgeRole, input SemanticInput, inputBytes []byte, cache judgeCacheContext, view contextcompile.ConflictView) (*ValidatedExchange, error) {

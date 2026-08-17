@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 
@@ -41,6 +42,39 @@ type serviceJudge struct {
 	result JudgeResult
 	inputs [][]byte
 	err    error
+}
+
+type serviceRootLeakingJudge struct {
+	root string
+}
+
+func (j serviceRootLeakingJudge) Judge(_ context.Context, prompt, input []byte) (JudgmentExchange, error) {
+	var shown semanticInputWitnessDoc
+	if err := json.Unmarshal(input, &shown); err != nil {
+		return JudgmentExchange{}, err
+	}
+	if len(shown.Claims) < 2 {
+		return JudgmentExchange{}, fmt.Errorf("need two semantic claims, got %d", len(shown.Claims))
+	}
+	claims := []ClaimWitness{witnessOf(shown.Claims[0]), witnessOf(shown.Claims[1])}
+	categories := []string{claims[0].Category, claims[1].Category}
+	sort.Strings(categories)
+	result := JudgeResult{
+		Schema: JudgeResultSchema, Recommendation: RecommendationConflict,
+		Findings: []JudgeFinding{{
+			Claims: claims, Categories: categories,
+			Explanation: "conflict found under checkout " + j.root,
+		}},
+	}
+	raw, err := EncodeJudgeResult(result)
+	if err != nil {
+		return JudgmentExchange{}, err
+	}
+	return JudgmentExchange{
+		Role: JudgePrimary, Adapter: contextcompile.AdapterRef{ID: "fixture-judge", Version: "1"}, Model: "fixture-model",
+		CommandDigest: rawContentDigest([]byte("fixture-judge")), PromptDigest: rawContentDigest(prompt), InputDigest: rawContentDigest(input),
+		RawResult: string(raw), RawDigest: rawContentDigest(raw), Result: result,
+	}, nil
 }
 
 func (j *serviceJudge) Judge(_ context.Context, prompt, input []byte) (JudgmentExchange, error) {
@@ -241,6 +275,23 @@ func TestServiceEvaluateJudgeFailureIsOperationalWithoutReport(t *testing.T) {
 	}
 	if result.Report.Schema != "" || len(result.ReportBytes) != 0 {
 		t.Fatalf("result = %+v, want no report on judge failure", result)
+	}
+}
+
+func TestServiceEvaluateRejectsCheckoutRootInJudgeExplanation(t *testing.T) {
+	service, repo := newServiceFixture(t, nil)
+	root, err := filepath.EvalSymlinks(repo.Dir)
+	if err != nil {
+		t.Fatalf("EvalSymlinks fixture root: %v", err)
+	}
+	service.Deps.Primary = serviceRootLeakingJudge{root: root}
+
+	result, err := service.Evaluate(context.Background(), serviceAcceptedRequest())
+	if !IsOperational(err) || !strings.Contains(err.Error(), "checkout root") {
+		t.Fatalf("Evaluate error = %T %v, want operational checkout-root refusal", err, err)
+	}
+	if result.Report.Schema != "" || len(result.ReportBytes) != 0 {
+		t.Fatalf("result = %+v, want zero report", result)
 	}
 }
 
