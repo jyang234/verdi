@@ -543,6 +543,24 @@ func TestResolve_DispositionOutputDoesNotAliasStore(t *testing.T) {
 			}
 			entry := &ep.Dispositions[0]
 			d := &entry.Disposition
+			copiedDigest, err := d.Digest()
+			if err != nil {
+				t.Fatalf("resolved disposition Digest() before mutation: %v", err)
+			}
+			if copiedDigest != digestBefore || copiedDigest != entry.Digest {
+				t.Fatalf("resolved disposition digest = %q, stored = %q, entry = %q", copiedDigest, digestBefore, entry.Digest)
+			}
+			storedJSON, err := canonjson.Marshal(s.Dispositions[id])
+			if err != nil {
+				t.Fatalf("marshal stored disposition: %v", err)
+			}
+			copiedJSON, err := canonjson.Marshal(d)
+			if err != nil {
+				t.Fatalf("marshal resolved disposition: %v", err)
+			}
+			if string(copiedJSON) != string(storedJSON) {
+				t.Fatalf("resolved disposition differs from stored disposition:\n got: %s\nwant: %s", copiedJSON, storedJSON)
+			}
 
 			// Guard: a vacuous pass is the real risk here. Every field
 			// mutated below must actually be populated in the resolved

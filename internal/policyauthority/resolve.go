@@ -457,29 +457,18 @@ func copyPayloads(payloads map[string]policyartifact.Payload) map[string]policya
 	return out
 }
 
-// copyDisposition returns a deep, non-aliasing copy of d's decoded content
-// (never d.seal, which is unexported and therefore already zero on any
-// value built outside policyartifact) — every slice and pointer field is
-// copied fresh, mirroring copyScope/copyPayloads' own "never alias from the
-// Store" discipline the rest of this file already applies to policies and
-// exemptions.
+// copyDisposition returns a deep, non-aliasing copy of d's decoded content.
+// The value copy preserves policyartifact's unexported decode seal; every
+// exported slice and pointer field is then copied fresh, mirroring
+// copyScope/copyPayloads' own "never alias from the Store" discipline the
+// rest of this file already applies to policies and exemptions.
 func copyDisposition(d *policyartifact.Disposition) policyartifact.Disposition {
-	out := policyartifact.Disposition{
-		Schema:               d.Schema,
-		ID:                   d.ID,
-		Kind:                 d.Kind,
-		Title:                d.Title,
-		Owners:               append([]string{}, d.Owners...),
-		Scope:                copyScope(d.Scope),
-		Witness:              copySemanticWitness(d.Witness),
-		Conclusion:           d.Conclusion,
-		Origin:               d.Origin,
-		CompensatingControls: append([]string{}, d.CompensatingControls...),
-		Approvals:            append([]policyartifact.Approval{}, d.Approvals...),
-		Expiry:               d.Expiry,
-		ReviewCondition:      d.ReviewCondition,
-		Rationale:            d.Rationale,
-	}
+	out := *d // preserves the unexported seal field
+	out.Owners = append([]string{}, d.Owners...)
+	out.Scope = copyScope(d.Scope)
+	out.Witness = copySemanticWitness(d.Witness)
+	out.CompensatingControls = append([]string{}, d.CompensatingControls...)
+	out.Approvals = append([]policyartifact.Approval{}, d.Approvals...)
 	if d.Judgment != nil {
 		j := *d.Judgment
 		out.Judgment = &j

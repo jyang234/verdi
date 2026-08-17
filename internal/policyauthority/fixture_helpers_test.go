@@ -19,18 +19,18 @@ import (
 // invented).
 func dispositionFile(t *testing.T, name string) string {
 	t.Helper()
-	universal := policyartifact.Scope{Phases: []string{}, Environments: []string{}, Paths: []string{}, Refs: []string{}}
+	const claimID = "spec/example#ac-example"
 	targetDigest := "sha256:" + strings.Repeat("1", 64)
 	claimDigest := "sha256:" + strings.Repeat("2", 64)
 	authorityDigest := "sha256:" + strings.Repeat("3", 64)
 	witness := policyartifact.SemanticWitness{
 		TargetDigest: targetDigest,
 		Claims: []policyartifact.SemanticClaimWitness{{
-			ID:              "ac-example",
+			ID:              claimID,
 			Digest:          claimDigest,
 			Category:        "acceptance-criterion",
 			AuthorityDigest: authorityDigest,
-			Scope:           universal,
+			Scope:           semanticClaimScope(claimID),
 			Values:          []string{},
 		}},
 		Exemptions: []policyartifact.SemanticExemptionWitness{},
@@ -50,11 +50,11 @@ witness:
   input_id: %q
   target_digest: %q
   claims:
-    - id: ac-example
+    - id: %q
       digest: %q
       category: acceptance-criterion
       authority_digest: %q
-      scope: {phases: [], environments: [], paths: [], refs: []}
+      scope: {phases: [], environments: [], paths: [], refs: [%q]}
       values: []
   exemptions: []
 conclusion: no-conflict
@@ -65,14 +65,11 @@ approvals:
 template: {identity: "embedded:policy-disposition.md", digest: "sha256:%s"}
 ---
 Test rationale for %s.
-`, name, name, inputID, targetDigest, claimDigest, authorityDigest, strings.Repeat("4", 64), name)
+`, name, name, inputID, targetDigest, claimID, claimDigest, authorityDigest, claimID, strings.Repeat("4", 64), name)
 }
 
-// universalScope is the fixture scope every dimension of which is the
-// explicit empty (universal) set, already in the normalized form
-// policyartifact's own decoder produces.
-func universalScope() policyartifact.Scope {
-	return policyartifact.Scope{Phases: []string{}, Environments: []string{}, Paths: []string{}, Refs: []string{}}
+func semanticClaimScope(id string) policyartifact.Scope {
+	return policyartifact.Scope{Phases: []string{}, Environments: []string{}, Paths: []string{}, Refs: []string{id}}
 }
 
 // renderWitnessYAML renders w as the exact column-zero `witness:` block a
@@ -137,24 +134,26 @@ func listYAML(vs []string) string {
 // witness set, so no deep-copy branch is left empty by construction.
 func richWitness() policyartifact.SemanticWitness {
 	bound := 3
+	const acceptanceID = "spec/example#ac-bounded"
+	const constraintID = "spec/example#co-second"
 	return policyartifact.SemanticWitness{
 		TargetDigest: "sha256:" + strings.Repeat("a", 64),
 		Claims: []policyartifact.SemanticClaimWitness{
 			{
-				ID:              "ac-bounded",
+				ID:              acceptanceID,
 				Digest:          "sha256:" + strings.Repeat("b", 64),
 				Category:        "acceptance-criterion",
 				AuthorityDigest: "sha256:" + strings.Repeat("c", 64),
-				Scope:           universalScope(),
+				Scope:           semanticClaimScope(acceptanceID),
 				Values:          []string{"weekly"},
 				Bound:           &bound,
 			},
 			{
-				ID:              "con-second",
+				ID:              constraintID,
 				Digest:          "sha256:" + strings.Repeat("d", 64),
 				Category:        "constraint",
 				AuthorityDigest: "sha256:" + strings.Repeat("c", 64),
-				Scope:           universalScope(),
+				Scope:           semanticClaimScope(constraintID),
 				Values:          []string{},
 			},
 		},
