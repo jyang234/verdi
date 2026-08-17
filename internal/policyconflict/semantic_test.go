@@ -48,8 +48,14 @@ func semanticClaim(ref, object, category, text string) contextcompile.ProseClaim
 	}
 }
 
-func semanticEvaluation(id string, scope ScopeProof, exemptions []ExemptionResolution) MechanicalEvaluation {
-	return MechanicalEvaluation{ID: id, Scope: scope, Exemptions: exemptions}
+func semanticEvaluation(id string, scope ScopeProof, claims []TypedClaimRecord, exemptions []ExemptionResolution, reasons ...ReasonCode) MechanicalEvaluation {
+	return MechanicalEvaluation{ID: id, Claims: claims, Scope: scope, Exemptions: exemptions, Reasons: reasons}
+}
+
+func semanticTypedClaim(t *testing.T, policyID, claimID, value string) TypedClaimRecord {
+	t.Helper()
+	claim := discreteClaim(claimID, "go-toolchain", policyartifact.OpEquals, []string{value}, phaseScope("build"))
+	return claimRecordsFor([]contextcompile.TypedClaim{typedClaim(t, policyID, claim)})[0]
 }
 
 func disjointScopeProof() ScopeProof {
@@ -71,10 +77,13 @@ func TestBuildSemanticInput_Happy(t *testing.T) {
 	c2 := semanticClaim("policy/go-toolchain", "instruction-1", "policy-instruction", "Use Go 1.22.")
 	view := contextcompile.ConflictView{ProseClaims: []contextcompile.ProseClaim{c2, c1}} // c2.ID < c1.ID
 
-	knownRow := semanticEvaluation("group-known", disjointScopeProof(), nil)
-	unknownRow := semanticEvaluation("group-unknown", unknownScopeProof("spec/widget#problem"),
-		[]ExemptionResolution{{ID: "exemption/legacy-go", Digest: semanticDigest("exemption body")}})
-	evaluations := []MechanicalEvaluation{knownRow, unknownRow}
+	unknownClaim := semanticTypedClaim(t, "policy/go-toolchain", "go-version", "1.22")
+	higherOrderClaim := semanticTypedClaim(t, "policy/release", "release-channel", "stable")
+	knownRow := semanticEvaluation("group-known", unknownScopeProof("ignored-unknown-scope"), nil, nil, ReasonMechanicalSatisfiable)
+	higherOrderRow := semanticEvaluation("group-higher-order", disjointScopeProof(), []TypedClaimRecord{higherOrderClaim}, nil, ReasonHigherOrderScopeUnproven)
+	unknownRow := semanticEvaluation("group-unknown", unknownScopeProof("spec/widget#problem"), []TypedClaimRecord{unknownClaim},
+		[]ExemptionResolution{{ID: "exemption/legacy-go", Digest: semanticDigest("exemption body")}}, ReasonScopeUnproven)
+	evaluations := []MechanicalEvaluation{higherOrderRow, knownRow, unknownRow}
 
 	got, err := BuildSemanticInput(view, evaluations)
 	if err != nil {
@@ -83,8 +92,12 @@ func TestBuildSemanticInput_Happy(t *testing.T) {
 	if !reflect.DeepEqual(got.Claims, []contextcompile.ProseClaim{c2, c1}) {
 		t.Fatalf("Claims = %+v, want the exact two input claims unchanged", got.Claims)
 	}
-	if len(got.UnknownScopes) != 1 || !reflect.DeepEqual(got.UnknownScopes[0], unknownRow.Scope) {
-		t.Fatalf("UnknownScopes = %+v, want exactly [%+v] (the disjoint row must be excluded)", got.UnknownScopes, unknownRow.Scope)
+	wantUnknown := []UnknownMechanicalWitness{
+		{ID: higherOrderRow.ID, Claims: []TypedClaimRecord{higherOrderClaim}, Scope: higherOrderRow.Scope},
+		{ID: unknownRow.ID, Claims: []TypedClaimRecord{unknownClaim}, Scope: unknownRow.Scope},
+	}
+	if !reflect.DeepEqual(got.UnknownMechanicals, wantUnknown) {
+		t.Fatalf("UnknownMechanicals = %+v, want %+v (reason selects rows even when aggregate scope is disjoint)", got.UnknownMechanicals, wantUnknown)
 	}
 	wantExemptions := []policyartifact.SemanticExemptionWitness{{ID: "exemption/legacy-go", Digest: semanticDigest("exemption body")}}
 	if !reflect.DeepEqual(got.Exemptions, wantExemptions) {
@@ -111,6 +124,9 @@ func TestBuildSemanticInput_PromptRatchet(t *testing.T) {
 		if !strings.Contains(semanticPrompt, want) {
 			t.Errorf("semanticPrompt does not name recommendation value %q", want)
 		}
+	}
+	if !strings.Contains(semanticPrompt, "complete policy-bound typed claim records and exact scope proof") {
+		t.Fatal("semanticPrompt does not describe the lossless unknown-mechanical witness it sends")
 	}
 	// Ratchet: two calls over the same fixed constant always digest
 	// identically — this is the ratchet property Step 1 asks for; the
@@ -266,8 +282,8 @@ func TestBuildSemanticInput_ClaimsMustBeUnique(t *testing.T) {
 }
 
 func TestBuildSemanticInput_EvaluationsMustBeSortedAndUnique(t *testing.T) {
-	rowA := semanticEvaluation("group-a", disjointScopeProof(), nil)
-	rowB := semanticEvaluation("group-b", disjointScopeProof(), nil)
+	rowA := semanticEvaluation("group-a", disjointScopeProof(), nil, nil)
+	rowB := semanticEvaluation("group-b", disjointScopeProof(), nil, nil)
 	if _, err := BuildSemanticInput(contextcompile.ConflictView{}, []MechanicalEvaluation{rowB, rowA}); err == nil {
 		t.Fatal("expected an error for out-of-order evaluations")
 	}
@@ -277,9 +293,9 @@ func TestBuildSemanticInput_EvaluationsMustBeSortedAndUnique(t *testing.T) {
 }
 
 func TestBuildSemanticInput_UnknownExemptionDigestMismatch(t *testing.T) {
-	rowA := semanticEvaluation("group-a", unknownScopeProof("w1"),
+	rowA := semanticEvaluation("group-a", unknownScopeProof("w1"), nil,
 		[]ExemptionResolution{{ID: "exemption/x", Digest: semanticDigest("v1")}})
-	rowB := semanticEvaluation("group-b", unknownScopeProof("w2"),
+	rowB := semanticEvaluation("group-b", unknownScopeProof("w2"), nil,
 		[]ExemptionResolution{{ID: "exemption/x", Digest: semanticDigest("v2")}})
 	_, err := BuildSemanticInput(contextcompile.ConflictView{}, []MechanicalEvaluation{rowA, rowB})
 	if err == nil {
@@ -289,8 +305,8 @@ func TestBuildSemanticInput_UnknownExemptionDigestMismatch(t *testing.T) {
 
 func TestBuildSemanticInput_DuplicateExemptionSameDigestCollapses(t *testing.T) {
 	w := ExemptionResolution{ID: "exemption/x", Digest: semanticDigest("v1")}
-	rowA := semanticEvaluation("group-a", unknownScopeProof("w1"), []ExemptionResolution{w})
-	rowB := semanticEvaluation("group-b", unknownScopeProof("w2"), []ExemptionResolution{w})
+	rowA := semanticEvaluation("group-a", unknownScopeProof("w1"), nil, []ExemptionResolution{w})
+	rowB := semanticEvaluation("group-b", unknownScopeProof("w2"), nil, []ExemptionResolution{w})
 	got, err := BuildSemanticInput(contextcompile.ConflictView{}, []MechanicalEvaluation{rowA, rowB})
 	if err != nil {
 		t.Fatalf("BuildSemanticInput: %v", err)
@@ -301,20 +317,80 @@ func TestBuildSemanticInput_DuplicateExemptionSameDigestCollapses(t *testing.T) 
 	}
 }
 
-func TestBuildSemanticInput_NoUnknownScopesIsEmptyNotNil(t *testing.T) {
-	rowA := semanticEvaluation("group-a", disjointScopeProof(), nil)
+func TestBuildSemanticInput_NoUnknownMechanicalsIsEmptyNotNil(t *testing.T) {
+	rowA := semanticEvaluation("group-a", disjointScopeProof(), nil, nil, ReasonScopeDisjoint)
 	got, err := BuildSemanticInput(contextcompile.ConflictView{}, []MechanicalEvaluation{rowA})
 	if err != nil {
 		t.Fatalf("BuildSemanticInput: %v", err)
 	}
-	if got.UnknownScopes == nil {
-		t.Fatal("UnknownScopes = nil, want the explicit empty set")
+	if got.UnknownMechanicals == nil {
+		t.Fatal("UnknownMechanicals = nil, want the explicit empty set")
 	}
-	if len(got.UnknownScopes) != 0 {
-		t.Fatalf("UnknownScopes = %+v, want empty", got.UnknownScopes)
+	if len(got.UnknownMechanicals) != 0 {
+		t.Fatalf("UnknownMechanicals = %+v, want empty", got.UnknownMechanicals)
 	}
 	if got.Exemptions == nil {
 		t.Fatal("Exemptions = nil, want the explicit empty set")
+	}
+}
+
+func TestBuildSemanticInput_UnknownMechanicalIdentityIsLosslessAndNarrow(t *testing.T) {
+	baseClaim := semanticTypedClaim(t, "policy/go-toolchain", "go-version", "1.22")
+	row := semanticEvaluation("group-unknown", disjointScopeProof(), []TypedClaimRecord{baseClaim},
+		[]ExemptionResolution{{ID: "exemption/x", Digest: semanticDigest("x"), Resolution: AuthorityResolution{Match: ProofUnproven}}},
+		ReasonHigherOrderScopeUnproven)
+
+	base, err := BuildSemanticInput(contextcompile.ConflictView{}, []MechanicalEvaluation{row})
+	if err != nil {
+		t.Fatalf("BuildSemanticInput(base): %v", err)
+	}
+	baseDigest, err := semanticInputDigest(base)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	t.Run("typed claim bytes move identity", func(t *testing.T) {
+		changed := row
+		changed.Claims = []TypedClaimRecord{semanticTypedClaim(t, "policy/go-toolchain", "go-version", "1.23")}
+		got, err := BuildSemanticInput(contextcompile.ConflictView{}, []MechanicalEvaluation{changed})
+		if err != nil {
+			t.Fatalf("BuildSemanticInput(changed claim): %v", err)
+		}
+		digest, err := semanticInputDigest(got)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if digest == baseDigest {
+			t.Fatal("changing a complete typed claim must change the semantic input digest")
+		}
+	})
+
+	t.Run("solver and authority resolution do not move identity", func(t *testing.T) {
+		changed := row
+		changed.Before = SolverProof{State: SolverUnsatisfiable, Domain: "discrete-set", Values: []string{"different"}}
+		changed.After = SolverProof{State: SolverSatisfiable, Domain: "discrete-set", Values: []string{"other"}}
+		changed.State = ProofViolatedWithWitness
+		changed.Exemptions = []ExemptionResolution{{ID: "exemption/x", Digest: semanticDigest("x"), Resolution: AuthorityResolution{
+			Match: ProofProven, Freshness: ProofProven, Scope: ProofProven, Bound: ProofProven, Authorization: ProofProven,
+		}}}
+		got, err := BuildSemanticInput(contextcompile.ConflictView{}, []MechanicalEvaluation{changed})
+		if err != nil {
+			t.Fatalf("BuildSemanticInput(changed solver/authority): %v", err)
+		}
+		digest, err := semanticInputDigest(got)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if digest != baseDigest {
+			t.Fatalf("solver/authority-only changes moved semantic identity: got %q, want %q", digest, baseDigest)
+		}
+	})
+
+	// The built input must own its complete typed-claim record, not alias
+	// the mechanical evaluator's mutable slice.
+	row.Claims[0].Claim.Values[0] = "mutated-after-build"
+	if got := base.UnknownMechanicals[0].Claims[0].Claim.Values[0]; got != "1.22" {
+		t.Fatalf("built witness aliased caller claim values: got %q, want 1.22", got)
 	}
 }
 

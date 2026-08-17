@@ -88,9 +88,9 @@ func CachedJudge(ctx context.Context, adapter JudgeAdapter, input SemanticInput,
 
 	promptBytes := input.Prompt
 	inputBytes, err := canonjson.Marshal(semanticInputWitnessDoc{
-		Claims:        input.Claims,
-		UnknownScopes: input.UnknownScopes,
-		Exemptions:    input.Exemptions,
+		Claims:             input.Claims,
+		UnknownMechanicals: input.UnknownMechanicals,
+		Exemptions:         input.Exemptions,
 	})
 	if err != nil {
 		return ValidatedExchange{}, fmt.Errorf("%w: encoding normalized semantic input: %v", ErrCacheOperational, err)

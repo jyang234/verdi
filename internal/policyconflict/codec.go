@@ -648,6 +648,12 @@ type mechanicalClaimWitnessDoc struct {
 	ClaimDigest string `json:"claim_digest"`
 }
 
+type unknownMechanicalWitnessDoc struct {
+	ID     string                `json:"id"`
+	Claims []typedClaimRecordDoc `json:"claims"`
+	Scope  scopeProofDoc         `json:"scope"`
+}
+
 type mechanicalEvaluationDoc struct {
 	ID         string                   `json:"id"`
 	Family     string                   `json:"family"`
@@ -670,15 +676,15 @@ type dispositionResolutionDoc struct {
 }
 
 type semanticEvaluationDoc struct {
-	ID            string                                `json:"id"`
-	InputID       string                                `json:"input_id"`
-	Claims        []policyartifact.SemanticClaimWitness `json:"claims"`
-	UnknownScopes []scopeProofDoc                       `json:"unknown_scopes"`
-	Primary       *judgmentExchangeDoc                  `json:"primary,omitempty"`
-	Challenger    *judgmentExchangeDoc                  `json:"challenger,omitempty"`
-	Dispositions  []dispositionResolutionDoc            `json:"dispositions"`
-	State         string                                `json:"state"`
-	Reasons       []string                              `json:"reasons"`
+	ID                 string                                `json:"id"`
+	InputID            string                                `json:"input_id"`
+	Claims             []policyartifact.SemanticClaimWitness `json:"claims"`
+	UnknownMechanicals []unknownMechanicalWitnessDoc         `json:"unknown_mechanicals"`
+	Primary            *judgmentExchangeDoc                  `json:"primary,omitempty"`
+	Challenger         *judgmentExchangeDoc                  `json:"challenger,omitempty"`
+	Dispositions       []dispositionResolutionDoc            `json:"dispositions"`
+	State              string                                `json:"state"`
+	Reasons            []string                              `json:"reasons"`
 }
 
 type acceptedIdentityDoc struct {
@@ -826,6 +832,22 @@ func mechanicalClaimWitnessDocFor(w MechanicalClaimWitness) mechanicalClaimWitne
 	return mechanicalClaimWitnessDoc(w)
 }
 
+func unknownMechanicalWitnessFromDoc(d unknownMechanicalWitnessDoc) UnknownMechanicalWitness {
+	claims := make([]TypedClaimRecord, len(d.Claims))
+	for i, claim := range d.Claims {
+		claims[i] = typedClaimRecordFromDoc(claim)
+	}
+	return UnknownMechanicalWitness{ID: d.ID, Claims: claims, Scope: scopeProofFromDoc(d.Scope)}
+}
+
+func unknownMechanicalWitnessDocFor(w UnknownMechanicalWitness) unknownMechanicalWitnessDoc {
+	claims := make([]typedClaimRecordDoc, len(w.Claims))
+	for i, claim := range w.Claims {
+		claims[i] = typedClaimRecordDocFor(claim)
+	}
+	return unknownMechanicalWitnessDoc{ID: w.ID, Claims: claims, Scope: scopeProofDocFor(w.Scope)}
+}
+
 // exemptionResolutionFromDoc preserves the absent/empty distinction the
 // mandatory-present rule needs: an omitted or null removed_claims stays nil
 // so validation can reject it, while an explicit `[]` decodes to a non-nil
@@ -914,9 +936,9 @@ func dispositionResolutionDocFor(d DispositionResolution) dispositionResolutionD
 // exchange would hide the real reason behind the generic "input bytes are
 // not the canonical encoding" wall.
 func semanticEvaluationFromDoc(d semanticEvaluationDoc) (SemanticEvaluation, error) {
-	unknownScopes := make([]ScopeProof, len(d.UnknownScopes))
-	for i, s := range d.UnknownScopes {
-		unknownScopes[i] = scopeProofFromDoc(s)
+	unknownMechanicals := make([]UnknownMechanicalWitness, len(d.UnknownMechanicals))
+	for i, witness := range d.UnknownMechanicals {
+		unknownMechanicals[i] = unknownMechanicalWitnessFromDoc(witness)
 	}
 	dispositions := make([]DispositionResolution, len(d.Dispositions))
 	for i, disp := range d.Dispositions {
@@ -942,16 +964,16 @@ func semanticEvaluationFromDoc(d semanticEvaluationDoc) (SemanticEvaluation, err
 		challenger = &c
 	}
 	return SemanticEvaluation{
-		ID: d.ID, InputID: d.InputID, Claims: d.Claims, UnknownScopes: unknownScopes,
+		ID: d.ID, InputID: d.InputID, Claims: d.Claims, UnknownMechanicals: unknownMechanicals,
 		Primary: primary, Challenger: challenger, Dispositions: dispositions,
 		State: ProofState(d.State), Reasons: reasons,
 	}, nil
 }
 
 func semanticEvaluationDocFor(s SemanticEvaluation) semanticEvaluationDoc {
-	unknownScopes := make([]scopeProofDoc, len(s.UnknownScopes))
-	for i, u := range s.UnknownScopes {
-		unknownScopes[i] = scopeProofDocFor(u)
+	unknownMechanicals := make([]unknownMechanicalWitnessDoc, len(s.UnknownMechanicals))
+	for i, witness := range s.UnknownMechanicals {
+		unknownMechanicals[i] = unknownMechanicalWitnessDocFor(witness)
 	}
 	dispositions := make([]dispositionResolutionDoc, len(s.Dispositions))
 	for i, d := range s.Dispositions {
@@ -971,7 +993,7 @@ func semanticEvaluationDocFor(s SemanticEvaluation) semanticEvaluationDoc {
 		challenger = &cd
 	}
 	return semanticEvaluationDoc{
-		ID: s.ID, InputID: s.InputID, Claims: nonNilSlice(s.Claims), UnknownScopes: unknownScopes,
+		ID: s.ID, InputID: s.InputID, Claims: nonNilSlice(s.Claims), UnknownMechanicals: unknownMechanicals,
 		Primary: primary, Challenger: challenger, Dispositions: dispositions,
 		State: string(s.State), Reasons: reasons,
 	}

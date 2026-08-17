@@ -1479,9 +1479,13 @@ func TestDecodeReport_ForgedMutationMatrix(t *testing.T) {
 		// scope-proof dimension rows: unique, known, in the fixed §4.4 order
 		{"duplicate dimension row", []any{"mechanical", 0, "scope", "dimensions"}, []any{dimensionRow("phase"), dimensionRow("phase")}, "dimensions: duplicate dimension"},
 		{"dimension rows out of §4.4 order", []any{"mechanical", 0, "scope", "dimensions"}, []any{dimensionRow("ref"), dimensionRow("phase")}, "dimensions: must be in phase, environment, path, ref order"},
-		{"unknown-scope dimension rows out of order", []any{"semantic", 0, "unknown_scopes"}, []any{map[string]any{
-			"state":      "unknown",
-			"dimensions": []any{dimensionRow("path"), dimensionRow("environment")},
+		{"unknown-mechanical dimension rows out of order", []any{"semantic", 0, "unknown_mechanicals"}, []any{map[string]any{
+			"id":     "mechanical/unresolved",
+			"claims": []any{reportClaimRecord(t, "go-toolchain", "go-version")},
+			"scope": map[string]any{
+				"state":      "unknown",
+				"dimensions": []any{dimensionRow("path"), dimensionRow("environment")},
+			},
 		}}, "must be in phase, environment, path, ref order"},
 
 		// policy-entry order and duplication

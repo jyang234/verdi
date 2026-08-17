@@ -367,6 +367,18 @@ type MechanicalEvaluation struct {
 	Reasons    []ReasonCode
 }
 
+// UnknownMechanicalWitness is the lossless semantic identity of one
+// mechanically unresolved row (authority design §§6/10, SI-110). It keeps
+// exactly the row ID, its complete composite typed-claim records, and its
+// exact scope proof. Solver output and later authority-resolution state are
+// deliberately absent so unrelated mechanical recomputation cannot stale a
+// semantic disposition.
+type UnknownMechanicalWitness struct {
+	ID     string
+	Claims []TypedClaimRecord
+	Scope  ScopeProof
+}
+
 // DispositionResolution is one semantic row's applicable disposition:
 // identity/digest, its closed conclusion, and its authority resolution
 // (authority design §8/§9/§10).
@@ -382,15 +394,15 @@ type DispositionResolution struct {
 // and (when run) challenger exchanges, applicable disposition resolutions,
 // proof state, and reason codes (authority design §10).
 type SemanticEvaluation struct {
-	ID            string
-	InputID       string
-	Claims        []policyartifact.SemanticClaimWitness
-	UnknownScopes []ScopeProof
-	Primary       *JudgmentExchange
-	Challenger    *JudgmentExchange
-	Dispositions  []DispositionResolution
-	State         ProofState
-	Reasons       []ReasonCode
+	ID                 string
+	InputID            string
+	Claims             []policyartifact.SemanticClaimWitness
+	UnknownMechanicals []UnknownMechanicalWitness
+	Primary            *JudgmentExchange
+	Challenger         *JudgmentExchange
+	Dispositions       []DispositionResolution
+	State              ProofState
+	Reasons            []ReasonCode
 }
 
 // AcceptedIdentity is the report's target-identity union's accepted arm:

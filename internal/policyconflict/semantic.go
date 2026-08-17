@@ -34,7 +34,7 @@ import (
 // shipped as a changed judge behavior.
 const semanticPrompt = `You are evaluating a closed set of normalized, human-authored authority claims for policy conflict.
 
-Each claim below carries its own id, category, scope, governing authority digest, and normalized text. Some claims are typed constraints whose exact scope relationship to the group could not be proven mechanically and are included here only as unknown-scope witnesses (id/digest/category, no free text); every other claim is prose and its full authored text is included.
+Each claim below carries its own id, category, scope, governing authority digest, and normalized text. Some claims are typed constraints whose exact scope relationship to the group could not be proven mechanically and are included as unknown mechanical witnesses with complete policy-bound typed claim records and exact scope proof; they carry no authored prose. Every other claim is prose and its full authored text is included.
 
 Considering ALL claims and unknown-scope witnesses together as one group, and any exemption identities listed as already-authorized departures from named claims, determine:
 
@@ -54,10 +54,10 @@ Report your recommendation as exactly one of "conflict", "no-conflict", or "inco
 // scope witness, the applicable exemption identities/digests, and the
 // fixed prompt.
 type SemanticInput struct {
-	Claims        []contextcompile.ProseClaim
-	UnknownScopes []ScopeProof
-	Exemptions    []policyartifact.SemanticExemptionWitness
-	Prompt        []byte
+	Claims             []contextcompile.ProseClaim
+	UnknownMechanicals []UnknownMechanicalWitness
+	Exemptions         []policyartifact.SemanticExemptionWitness
+	Prompt             []byte
 }
 
 // ValidatedExchange is one judge result that has passed ValidateJudgeResult
@@ -106,7 +106,7 @@ func BuildSemanticInput(view contextcompile.ConflictView, evaluations []Mechanic
 	}
 	prompt := make([]byte, len(semanticPrompt))
 	copy(prompt, semanticPrompt)
-	return SemanticInput{Claims: claims, UnknownScopes: unknown, Exemptions: exemptions, Prompt: prompt}, nil
+	return SemanticInput{Claims: claims, UnknownMechanicals: unknown, Exemptions: exemptions, Prompt: prompt}, nil
 }
 
 // normalizedProseClaims clones and defensively re-validates view's prose
@@ -223,25 +223,59 @@ func cloneStringSlice(s []string) []string {
 	return out
 }
 
-// unknownScopeWitnesses collects the ScopeProof of every evaluation row
-// whose top-level scope state is unknown — the "mechanically unknown or
-// conservatively unresolved scope witness" §6 names — in the evaluations'
-// own (already row-ID-sorted) order, and requires evaluations to already
-// arrive sorted-unique by id.
-func unknownScopeWitnesses(evaluations []MechanicalEvaluation) ([]ScopeProof, error) {
+// unknownScopeWitnesses collects the lossless witness of every row whose
+// reason is scope-unproven or higher-order-scope-unproven (SI-110). Reason,
+// not aggregate Scope.State, selects the row: a conservatively unresolved
+// higher-order row remains semantic input even when its aggregate scope is
+// disjoint. Only ID, complete cloned typed claims, and exact scope enter the
+// witness; solver and authority-resolution state stay outside its identity.
+func unknownScopeWitnesses(evaluations []MechanicalEvaluation) ([]UnknownMechanicalWitness, error) {
 	if err := requireSortedUnique("evaluations", evaluations, func(e MechanicalEvaluation) string { return e.ID }); err != nil {
 		return nil, err
 	}
-	out := make([]ScopeProof, 0)
-	for _, e := range evaluations {
-		if err := validateScopeProof(fmt.Sprintf("evaluations[%s].scope", e.ID), e.Scope); err != nil {
+	out := make([]UnknownMechanicalWitness, 0)
+	for i, e := range evaluations {
+		unresolved := false
+		for _, reason := range e.Reasons {
+			if reason == ReasonScopeUnproven || reason == ReasonHigherOrderScopeUnproven {
+				unresolved = true
+				break
+			}
+		}
+		if !unresolved {
+			continue
+		}
+		w := UnknownMechanicalWitness{ID: e.ID, Claims: cloneTypedClaimRecords(e.Claims), Scope: cloneScopeProof(e.Scope)}
+		if err := validateUnknownMechanicalWitness(fmt.Sprintf("evaluations[%d].unknown_mechanical", i), w); err != nil {
 			return nil, err
 		}
-		if e.Scope.State == ScopeUnknown {
-			out = append(out, cloneScopeProof(e.Scope))
-		}
+		out = append(out, w)
 	}
 	return out, nil
+}
+
+func cloneTypedClaimRecords(in []TypedClaimRecord) []TypedClaimRecord {
+	if in == nil {
+		return nil
+	}
+	out := make([]TypedClaimRecord, len(in))
+	for i, record := range in {
+		claim := record.Claim
+		claim.Values = cloneStringSlice(claim.Values)
+		if claim.Bound != nil {
+			bound := *claim.Bound
+			claim.Bound = &bound
+		}
+		claim.Scope = policyartifact.Scope{
+			Phases:       cloneStringSlice(claim.Scope.Phases),
+			Environments: cloneStringSlice(claim.Scope.Environments),
+			Paths:        cloneStringSlice(claim.Scope.Paths),
+			Refs:         cloneStringSlice(claim.Scope.Refs),
+		}
+		record.Claim = claim
+		out[i] = record
+	}
+	return out
 }
 
 func cloneScopeProof(p ScopeProof) ScopeProof {
@@ -299,16 +333,16 @@ func applicableExemptionWitnesses(evaluations []MechanicalEvaluation) ([]policya
 
 // semanticInputWitnessDoc is the exact deterministic shape
 // semanticInputDigest hashes: the input's identity-bearing content
-// (Claims, UnknownScopes, Exemptions) — never Prompt, which is fixed
+// (Claims, UnknownMechanicals, Exemptions) — never Prompt, which is fixed
 // repository code shared by every input and carries no per-evaluation
 // identity. This value is never decoded by anything (it is hashed, not
 // persisted as its own wire artifact), so it needs no json tags beyond
 // determinism: canonjson.Marshal sorts object keys and fixes encoding
 // regardless of struct field naming.
 type semanticInputWitnessDoc struct {
-	Claims        []contextcompile.ProseClaim
-	UnknownScopes []ScopeProof
-	Exemptions    []policyartifact.SemanticExemptionWitness
+	Claims             []contextcompile.ProseClaim
+	UnknownMechanicals []UnknownMechanicalWitness
+	Exemptions         []policyartifact.SemanticExemptionWitness
 }
 
 // semanticInputDigest returns in's canonical "sha256:<hex>" content
@@ -316,9 +350,9 @@ type semanticInputWitnessDoc struct {
 // semantic-input ID from the complete normalized witness identity").
 func semanticInputDigest(in SemanticInput) (string, error) {
 	digest, err := canonjson.Digest(semanticInputWitnessDoc{
-		Claims:        in.Claims,
-		UnknownScopes: in.UnknownScopes,
-		Exemptions:    in.Exemptions,
+		Claims:             in.Claims,
+		UnknownMechanicals: in.UnknownMechanicals,
+		Exemptions:         in.Exemptions,
 	})
 	if err != nil {
 		return "", fmt.Errorf("policyconflict: digesting semantic input: %w", err)

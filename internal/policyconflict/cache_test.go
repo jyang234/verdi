@@ -29,7 +29,7 @@ func hex64(s string) string {
 var cacheTestTreeHash = hex64("tree")
 
 func cacheTestInput() SemanticInput {
-	return SemanticInput{Prompt: []byte("prompt bytes"), Claims: nil, UnknownScopes: nil, Exemptions: nil}
+	return SemanticInput{Prompt: []byte("prompt bytes"), Claims: nil, UnknownMechanicals: nil, Exemptions: nil}
 }
 
 // --- hit / miss ------------------------------------------------------------
@@ -296,7 +296,7 @@ func precomputedCachePath(t *testing.T, root string, a JudgeAdapter, input Seman
 // same as production) so tests can precompute the exact cache path/key a
 // live CachedJudge call would use.
 func testSemanticInputBytes(in SemanticInput) ([]byte, error) {
-	return canonjson.Marshal(semanticInputWitnessDoc{Claims: in.Claims, UnknownScopes: in.UnknownScopes, Exemptions: in.Exemptions})
+	return canonjson.Marshal(semanticInputWitnessDoc{Claims: in.Claims, UnknownMechanicals: in.UnknownMechanicals, Exemptions: in.Exemptions})
 }
 
 func TestPolicyConflictCache_Symlink(t *testing.T) {

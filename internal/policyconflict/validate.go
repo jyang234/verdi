@@ -728,6 +728,24 @@ func validateTypedClaimRecord(field string, r TypedClaimRecord) error {
 	return nil
 }
 
+func validateUnknownMechanicalWitness(field string, w UnknownMechanicalWitness) error {
+	if err := validateNonEmpty(field+".id", w.ID); err != nil {
+		return err
+	}
+	if len(w.Claims) < 1 {
+		return fmt.Errorf("policyconflict: %s.claims: must name at least one complete typed claim", field)
+	}
+	for i, claim := range w.Claims {
+		if err := validateTypedClaimRecord(fmt.Sprintf("%s.claims[%d]", field, i), claim); err != nil {
+			return err
+		}
+	}
+	if err := requireSortedUniqueComposite(field+".claims", w.Claims, typedClaimRecordKey); err != nil {
+		return err
+	}
+	return validateScopeProof(field+".scope", w.Scope)
+}
+
 // validateMechanicalClaimWitness checks one removed-claim witness's
 // composite identity and digest form (authority design §5.5, SI-105).
 func validateMechanicalClaimWitness(field string, w MechanicalClaimWitness) error {
@@ -934,13 +952,16 @@ func validateSemanticEvaluation(field string, s SemanticEvaluation) error {
 	if err := validateSemanticClaims(field+".claims", s.Claims); err != nil {
 		return err
 	}
-	if s.UnknownScopes == nil {
-		return fmt.Errorf("policyconflict: %s.unknown_scopes: must be non-nil (an explicitly empty set is [])", field)
+	if s.UnknownMechanicals == nil {
+		return fmt.Errorf("policyconflict: %s.unknown_mechanicals: must be non-nil (an explicitly empty set is [])", field)
 	}
-	for i, u := range s.UnknownScopes {
-		if err := validateScopeProof(fmt.Sprintf("%s.unknown_scopes[%d]", field, i), u); err != nil {
+	for i, u := range s.UnknownMechanicals {
+		if err := validateUnknownMechanicalWitness(fmt.Sprintf("%s.unknown_mechanicals[%d]", field, i), u); err != nil {
 			return err
 		}
+	}
+	if err := requireSortedUnique(field+".unknown_mechanicals", s.UnknownMechanicals, func(w UnknownMechanicalWitness) string { return w.ID }); err != nil {
+		return err
 	}
 	if s.Primary != nil {
 		if s.Primary.Role != JudgePrimary {
