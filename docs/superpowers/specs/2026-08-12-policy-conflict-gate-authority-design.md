@@ -1,7 +1,7 @@
 # Policy Conflict Gate Authority Design
 
 **Status:** Owner-approved design; repository authority becomes effective when
-the reviewed commit carrying this document and SI-93 through SI-112 reaches the
+the reviewed commit carrying this document and SI-93 through SI-113 reaches the
 configured default branch.
 
 **Planning base:** `bfaa8e2715678cbe8cd71137f23d743666caf1c4`
@@ -645,6 +645,15 @@ roles, ownership, and separation mode. An authenticated authorized result may
 satisfy the approval. Violated and unproven resolution states remain distinct
 in the report and cannot authorize.
 
+The exemption resolver passes the fixed transition
+`policy-exemption-approval` to `governanceprincipal.Authorize`; the disposition
+resolver passes `policy-disposition-approval`. The applied profile must list
+the applicable transition and key any approval, ownership, signature,
+evidence-source, escalation, or distinctness rule to that transition. Neither
+resolver substitutes the conflict subject, artifact name, or a committed
+principal string. A missing or mismatched transition remains the kernel's
+explicit non-authorizing finding and never becomes a favorable default.
+
 The local CLI has no trusted forge, signature, or identity-provider fact reader
 in this unit. It therefore records approval authentication as unproven and
 cannot make an exemption or disposition effective. Managed callers may inject
@@ -922,7 +931,7 @@ no browser behavior and adds no Playwright case.
 
 ## 14. Source coverage and losslessness
 
-Coverage is **18/18** implicated authority source groups. The mapping is
+Coverage is **19/19** implicated authority source groups. The mapping is
 lossless; each row names the complete clause range used rather than assigning
 inconsistent per-clause counts across differently structured sources:
 
@@ -946,6 +955,7 @@ inconsistent per-clause counts across differently structured sources:
 | Lossless unknown-mechanical semantic witness | 1 | §§5–6, 10; SI-110; plan Task 7A |
 | Verifiable judgment cache-key and raw-result binding | 1 | §§6–7, 12; SI-111; plan Task 7A |
 | Closed category-specific semantic prose identity | 1 | §6; SI-112; plan Task 7A |
+| Fixed governance transitions for exemption and disposition approval | 1 | §9; SI-113; plan Task 8 |
 
 The transformations are explicit:
 

@@ -31,7 +31,7 @@ Git, and built-binary Go tests.
 - Binding authority is
   `docs/superpowers/specs/2026-08-12-policy-conflict-gate-authority-design.md`,
   Context Integrity AC-3/DC-3–DC-8/DC-15/DC-17–DC-24/CO-1–CO-6, and
-  invention-ledger SI-93–SI-112 as consolidated by the independently reviewed
+  invention-ledger SI-93–SI-113 as consolidated by the independently reviewed
   exact head carrying this plan.
 - Do not edit frozen artifacts or `docs/design/specs/`; do not add a layout
   root, UI, MCP tool, receipt, sealed-execution behavior, forge network call, or
@@ -1181,6 +1181,9 @@ the injected date only. Delegate approval/separation meaning to
 `governanceprincipal.Authorize`; never compare usernames or principal strings
 inside `policyconflict`. Preserve stale/unauthorized/unproven records in the
 resolution row while preventing them from changing the underlying conflict.
+Pass exactly `policy-exemption-approval` for exemption authorization and
+`policy-disposition-approval` for disposition authorization as fixed by
+SI-113; do not derive either transition from a row subject or artifact name.
 
 - [ ] **Step 4: Run focused and package race GREEN**
 
