@@ -1,7 +1,7 @@
 # Policy Conflict Gate Authority Design
 
 **Status:** Owner-approved design; repository authority becomes effective when
-the reviewed commit carrying this document and SI-93 through SI-114 reaches the
+the reviewed commit carrying this document and SI-93 through SI-115 reaches the
 configured default branch.
 
 **Planning base:** `bfaa8e2715678cbe8cd71137f23d743666caf1c4`
@@ -361,6 +361,40 @@ mandatory-present explicit empty removal set (`[]`) because it removed
 nothing. Removal witnesses sort and deduplicate by `(policy_id, claim_id)`;
 their digest must match that exact current row claim.
 
+Task 8 derives the five states without treating symmetric overlap as
+directional coverage:
+
+- An exemption is applicable to a row only when at least one exemption
+  witness has the same `(policy_id, claim_id)` as a current row claim.
+  Unrelated exemptions are omitted. `Match` is proven for that structural
+  applicability; `Freshness` is proven only when every exemption witness for
+  an identity present in that row carries the current claim digest. Any such
+  mismatch is violated-with-witness. Witnesses for other rows do not make this
+  row stale.
+- The evaluated conflict scope is the exact four-dimensional intersection
+  already carried by the row's `ScopeProof`. A dimension whose proof is
+  unknown makes coverage unproven. A proven-disjoint dimension is an empty
+  conflict set and is covered. For a proven-overlap dimension, an empty
+  intersection is universal: only an empty exemption dimension covers it.
+  Otherwise an empty exemption dimension is universal and covers every
+  member. Phase and environment require every intersection value to occur in
+  the exemption set. Path requires every intersection selector to be
+  contained by at least one exemption selector under §4.2's existing
+  segment-aware containment rule. Ref requires exact equality or a
+  directionally proven container-to-member relation from a dedicated
+  `RefCoverageResolver`; a symmetric overlap result is insufficient.
+- Coverage is violated-with-witness if any dimension is not contained,
+  otherwise unproven if any required ref relation or row dimension is
+  unknown, and otherwise proven. Resolver failure is operational. Exact,
+  universal, phase, environment, and path cases do not invoke the ref port.
+- `Bound` is proven for an expiry equal to or later than `evaluated_on`,
+  violated-with-witness for an earlier expiry, and unproven when a live
+  review condition is the only bound. `Authorization` is exactly the §9
+  kernel result for `policy-exemption-approval`.
+
+Only an all-five-proven resolution carries the exact current matching row
+witnesses in `removed_claims`. No partial state produces a favorable removal.
+
 A semantic disposition can never erase a mechanical proof. `no-conflict` is
 not a legal mechanical resolution.
 
@@ -618,7 +652,15 @@ governs the current semantic input. Its authority input therefore carries the
 current target digest in addition to the semantic input. `Match` is proven only
 when the disposition's input ID, target digest, normalized claim identities and
 applicable exemption identities all equal those current operands; no partial
-component match is favorable. Existing legacy `.verdi/conflicts/`,
+component match is favorable. `Freshness` has the same state as that exact
+current-input match. Because a disposition governs the complete semantic input
+and has no narrower scope field, `Scope` likewise has the same state: it is
+proven only by an exact complete-input match, violated-with-witness on a
+definite mismatch, and otherwise unproven. A judge-result disposition's
+`Bound` follows that same exact-current match and needs no fallback-only time
+bound. A human-fallback disposition uses §9's expiry/review-condition rules.
+`Authorization` is exactly the §9 kernel result for
+`policy-disposition-approval`. Existing legacy `.verdi/conflicts/`,
 `decision-conflict-report.md`, deviation findings, and spec-frontmatter
 dispositions remain unchanged and never satisfy this schema.
 
@@ -647,6 +689,12 @@ live bound is a review condition is therefore `blocked-unproven`; an unexpired
 calendar expiry may still keep the record bounded. A later managed integration
 may add a condition-evidence port together with its trust authority, but this
 unit does not add a speculative resolver.
+
+The production date port must supply one real `YYYY-MM-DD` UTC calendar date;
+missing or malformed injected dates are operational failures. Exemption and
+human-fallback disposition bounds use only that value. Judge-result
+dispositions instead remain bounded by their exact current complete-input
+match: a mismatch cannot be reclassified as a live time-bounded ruling.
 
 Approval strings in committed artifacts are claims, not authentication. The
 service accepts sealed `governanceprincipal.PrincipalResolution` values and
@@ -941,7 +989,7 @@ no browser behavior and adds no Playwright case.
 
 ## 14. Source coverage and losslessness
 
-Coverage is **20/20** implicated authority source groups. The mapping is
+Coverage is **21/21** implicated authority source groups. The mapping is
 lossless; each row names the complete clause range used rather than assigning
 inconsistent per-clause counts across differently structured sources:
 
@@ -967,6 +1015,7 @@ inconsistent per-clause counts across differently structured sources:
 | Closed category-specific semantic prose identity | 1 | §6; SI-112; plan Task 7A |
 | Fixed governance transitions for exemption and disposition approval | 1 | §9; SI-113; plan Task 8 |
 | Disposition runtime-input and target freshness boundary | 1 | §§6, 8–10; SI-114; plan Tasks 7B–9 |
+| Complete five-state authority derivation and directional exemption coverage | 1 | §§4, 5.5, 8–10; SI-115; plan Task 8 |
 
 The transformations are explicit:
 
@@ -988,6 +1037,9 @@ The transformations are explicit:
   human artifact does not invent a second digest over its smaller projection;
 - existing claim-level exemptions are applied by exact scoped removal and
   solver recomputation rather than treated as generic conflict waivers; and
+- exemption scope coverage is a directional containment proof over the
+  already-carried conflict intersection, with a dedicated ref-coverage port
+  rather than a favorable reinterpretation of symmetric overlap; and
 - the spec's one verdict becomes four current thin consumers and one later
   sealed consumer, never five implementations; and
 - lifecycle request operands reuse the existing strict context request document

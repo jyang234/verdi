@@ -31,7 +31,7 @@ Git, and built-binary Go tests.
 - Binding authority is
   `docs/superpowers/specs/2026-08-12-policy-conflict-gate-authority-design.md`,
   Context Integrity AC-3/DC-3–DC-8/DC-15/DC-17–DC-24/CO-1–CO-6, and
-  invention-ledger SI-93–SI-114 as consolidated by the independently reviewed
+  invention-ledger SI-93–SI-115 as consolidated by the independently reviewed
   exact head carrying this plan.
 - Do not edit frozen artifacts or `docs/design/specs/`; do not add a layout
   root, UI, MCP tool, receipt, sealed-execution behavior, forge network call, or
@@ -90,6 +90,12 @@ judgment/cache identity, removes the disposition decoder's incorrect second
 self-derived semantic-input identity, and supplies target identity separately
 at the authority boundary. Task 7B is the narrow pre-release correction and a
 hard predecessor of Task 8.
+
+Task 8's second dispatch stopped with zero edits because symmetric ref overlap
+could not prove directional exemption containment and the five report states
+had no complete derivation table. SI-115 adds the one directional ref-coverage
+port and fixes every state source without adding a new artifact, report field,
+or evaluator.
 
 ## File Map
 
@@ -1183,6 +1189,9 @@ Expected: all commands exit 0. Task 8 starts only after this tranche lands.
 
 ~~~go
 type DateSource interface { TodayUTC(context.Context) (string, error) }
+type RefCoverageResolver interface {
+    Covers(context.Context, string, string) (ProofState, []string, error)
+}
 type AuthorityInput struct {
     EvaluatedOn string
     TargetDigest string
@@ -1191,7 +1200,7 @@ type AuthorityInput struct {
     Exemptions []policyartifact.Exemption
     Dispositions []policyartifact.Disposition
 }
-func ResolveExemptionAuthority(AuthorityInput, MechanicalEvaluation) ([]ExemptionResolution, error)
+func ResolveExemptionAuthority(context.Context, AuthorityInput, MechanicalEvaluation, RefCoverageResolver) ([]ExemptionResolution, error)
 func ResolveDispositionAuthority(AuthorityInput, SemanticInput, Primary, Challenger *ValidatedExchange) ([]DispositionResolution, error)
 ~~~
 
@@ -1207,6 +1216,14 @@ digest. Run kernel authorization tables for solo permitted collapse with
 disclosure, team/high-assurance distinctness, proven/violated/unproven actors,
 unknown roles/principals, and experimental profile refusal. A committed
 principal string without a matching sealed resolution must remain unproven.
+For exemptions, cover unrelated-artifact omission, exact composite-identity
+applicability, current and stale row-local witness digests, universal and
+narrow phase/environment/path dimensions, segment-aware path containment,
+exact ref equality, directionally covered and uncovered different refs,
+unknown ref coverage, unknown carried scope, resolver failure, and an
+exemption spanning witnesses in more than one row. Prove that symmetric ref
+overlap is never accepted as directional coverage and that every rejected
+resolution carries `removed_claims: []`.
 
 - [ ] **Step 2: Run the focused RED**
 
@@ -1228,6 +1245,24 @@ resolution row while preventing them from changing the underlying conflict.
 Pass exactly `policy-exemption-approval` for exemption authorization and
 `policy-disposition-approval` for disposition authorization as fixed by
 SI-113; do not derive either transition from a row subject or artifact name.
+
+Derive exemption coverage from the row's carried `ScopeProof` intersection,
+not by rerunning symmetric scope comparison. Empty exemption dimensions are
+universal; an empty proven-overlap intersection is universal and only a
+universal exemption covers it. Phase/environment use exact set containment and
+paths use the existing segment-aware containment rule. Equal refs are local;
+different refs go only through `RefCoverageResolver.Covers(container, member)`.
+Map any uncovered dimension to violated-with-witness, otherwise any unknown
+dimension or relation to unproven, otherwise proven; resolver errors are
+operational. Applicability and freshness are row-local by composite witness
+identity, so an exemption spanning multiple rows can resolve each row without
+requiring unrelated witnesses to occur there.
+
+For dispositions, derive `Match` from SI-114's exact four-component equality
+and assign `Freshness` and complete-input `Scope` the same state. A
+judge-result `Bound` follows exact-current Match; a human-fallback `Bound` uses
+the injected expiry/review rule. Authorization is solely the SI-113 kernel
+transition. No partial equality or unknown state is favorable.
 
 - [ ] **Step 4: Run focused and package race GREEN**
 
