@@ -16,7 +16,7 @@ func reportInput(view contextcompile.ConflictView, req Request, evaluatedOn stri
 		return InputIdentity{}, "", err
 	}
 
-	target := TargetIdentity{}
+	var target TargetIdentity
 	switch req.Target.Kind {
 	case TargetAcceptedContext:
 		target = TargetIdentity{
