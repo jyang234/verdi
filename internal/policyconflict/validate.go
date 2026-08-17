@@ -543,11 +543,11 @@ func (i InputIdentity) validate() error {
 	if err := requireSortedUnique("input.policy_entries", i.PolicyEntries, func(e PolicyEntryIdentity) string { return e.Kind + "\x00" + e.ID }); err != nil {
 		return err
 	}
-	if err := validateNonEmpty("input.profile.id", i.Profile.ID); err != nil {
+	if err := validateGovernanceProfileID("input.profile.id", i.Profile.ID); err != nil {
 		return err
 	}
-	if err := validateNonEmpty("input.profile.class", i.Profile.Class); err != nil {
-		return err
+	if err := governanceprincipal.Class(i.Profile.Class).Validate(); err != nil {
+		return fmt.Errorf("policyconflict: input.profile.class: %w", err)
 	}
 	if err := validateDigest("input.profile.digest", i.Profile.Digest); err != nil {
 		return err

@@ -1483,6 +1483,8 @@ func TestDecodeReport_ForgedMutationMatrix(t *testing.T) {
 		{"unknown verdict", []any{"verdict"}, "maybe", `unknown verdict "maybe"`},
 		{"unknown target kind", []any{"input", "target", "kind"}, "bogus", `unknown target kind "bogus"`},
 		{"unknown policy entry kind", []any{"input", "policy_entries", 0, "kind"}, "bogus", `kind: unknown value "bogus"`},
+		{"invalid profile id", []any{"input", "profile", "id"}, "UPPER", `invalid id "UPPER"`},
+		{"unknown profile class", []any{"input", "profile", "class"}, "bogus", `unknown profile class "bogus"`},
 		{"unknown scope dimension name", []any{"mechanical", 0, "scope", "dimensions", 0, "dimension"}, "timezone", `dimension: unknown value "timezone"`},
 
 		// authority-resolution sub-states, one case per member
