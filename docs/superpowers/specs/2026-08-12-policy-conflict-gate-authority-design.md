@@ -568,7 +568,11 @@ cache-aware entry; the service never calls its raw process method directly.
 Injected non-process `Judge` ports remain valid for managed callers and
 hermetic tests and do not acquire an implicit filesystem cache. The service
 does not rediscover policy, recompile context, or create a second cache
-abstraction to perform this handoff.
+abstraction to perform this handoff. Before hashing or cache access, the
+service resolves both its checkout root and the concrete adapter's cache root
+to canonical absolute paths and requires exact equality. A mismatch is an
+operational failure with no cache read, write, process launch, or report; the
+service neither trusts the adapter's different root nor silently rewrites it.
 
 On a miss the adapter executes and validates without holding the checkout-wide
 writer lock. Cache directory creation and immutable publication then acquire

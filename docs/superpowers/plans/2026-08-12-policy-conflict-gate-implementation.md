@@ -1393,6 +1393,9 @@ entry: the second identical evaluation must return the validated cached
 exchange without launching the runner, and a missing, malformed, or failed D4
 tree-hash fact must fail operationally with no report. Custom non-process
 `Judge` fakes remain direct ports and require no cache/tree-hash dependency.
+Prove a concrete adapter whose cache root does not resolve to the same
+canonical absolute checkout root as `Service.Root` fails before tree hashing,
+cache access, process launch, or report construction.
 Prove strict report decode rejects a self-consistent digest whose verdict does
 not equal the carried rows and blocking disclosures. Prove a schema-valid
 judge explanation containing the exact absolute checkout root is rejected
@@ -1425,6 +1428,9 @@ tree hash obtained from `TreeHasher` after snapshot resolution, and the sealed
 profile/effective-policy identities. It must never call the adapter's raw
 `Judge` method. Other injected `Judge` implementations retain the direct port
 for managed callers and hermetic tests; do not add another cache interface.
+Resolve `Service.Root` and a concrete adapter's `Root` to canonical absolute
+paths and require exact equality before calling `TreeHasher` or `CachedJudge`;
+a mismatch is operational, never silently overridden.
 Reject any validated exchange whose report-bearing prose contains the exact
 absolute checkout root before disposition resolution or report construction.
 `Report.Validate` must also derive the verdict from its carried rows and
