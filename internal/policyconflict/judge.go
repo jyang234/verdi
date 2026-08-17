@@ -94,8 +94,8 @@ func (a JudgeAdapter) Judge(ctx context.Context, prompt, input []byte) (Judgment
 	if a.Runner == nil {
 		return JudgmentExchange{}, fmt.Errorf("%w: adapter runner is nil", ErrJudgeOperational)
 	}
-	if len(a.Argv) == 0 {
-		return JudgmentExchange{}, fmt.Errorf("%w: adapter argv is empty", ErrJudgeOperational)
+	if err := validateJudgeArgv(a.Argv); err != nil {
+		return JudgmentExchange{}, fmt.Errorf("%w: %v", ErrJudgeOperational, err)
 	}
 	role := JudgeRole(a.Role)
 	if err := role.Validate(); err != nil {
@@ -155,4 +155,19 @@ func (a JudgeAdapter) Judge(ctx context.Context, prompt, input []byte) (Judgment
 		RawDigest:     rawContentDigest(stdout),
 		Result:        result,
 	}, nil
+}
+
+// validateJudgeArgv rejects only transport-impossible argv shapes. Empty
+// argument values remain legal; an empty vector has no executable and a NUL
+// byte cannot cross the operating-system exec boundary.
+func validateJudgeArgv(argv []string) error {
+	if len(argv) == 0 {
+		return fmt.Errorf("adapter argv is empty")
+	}
+	for i, arg := range argv {
+		if strings.ContainsRune(arg, '\x00') {
+			return fmt.Errorf("adapter argv[%d] contains NUL", i)
+		}
+	}
+	return nil
 }

@@ -101,6 +101,111 @@ func TestPolicyConflictCache_Hit_DoesNotRunJudge(t *testing.T) {
 	}
 }
 
+func TestPolicyConflictCache_HitRejectsUnknownClaimResult(t *testing.T) {
+	root := t.TempDir()
+	input := cacheTestInput()
+	a := baseAdapter(nil)
+	a.Root = root
+	inputBytes, err := testSemanticInputBytes(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	key, err := judgeCacheKeyDigest(a, input.Prompt, inputBytes, "solo", cacheTestProfileDigest, cacheTestAuthorityDigest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path, err := store.PolicyConflictCachePath(root, cacheTestTreeHash, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resultBytes, err := EncodeJudgeResult(JudgeResult{
+		Schema: JudgeResultSchema, Recommendation: RecommendationConflict,
+		Findings: []JudgeFinding{{
+			Claims: []ClaimWitness{
+				{ID: "spec/ghost#outcome", Digest: semanticDigest("ghost outcome"), Category: "spec-outcome"},
+				{ID: "spec/ghost#problem", Digest: semanticDigest("ghost problem"), Category: "spec-problem"},
+			},
+			Categories: []string{"spec-outcome", "spec-problem"}, Explanation: "self-consistent result cites claims absent from the exact input",
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result := mustDecodeJudgeResult(t, resultBytes)
+	judgment := Judgment{
+		Schema: JudgmentSchema, TreeHash: cacheTestTreeHash, InputDigest: key,
+		ProfileID: "solo", ProfileDigest: cacheTestProfileDigest, AuthorityDigest: cacheTestAuthorityDigest,
+		Exchange: JudgmentExchange{
+			Role: JudgePrimary, Adapter: a.Adapter, Model: a.Model,
+			CommandDigest: rawContentDigest([]byte(joinArgv(a.Argv))), PromptDigest: rawContentDigest(input.Prompt), InputDigest: rawContentDigest(inputBytes),
+			RawResult: string(resultBytes), RawDigest: rawContentDigest(resultBytes), Result: result,
+		},
+	}
+	encoded, err := EncodeJudgment(judgment)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, encoded, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	runner := &fakeJudgeRunner{fn: func(context.Context, []string, []byte) ([]byte, int, error) {
+		t.Fatal("runner must not be invoked past an invalid cache hit")
+		return nil, 0, nil
+	}}
+	a.Runner = runner
+	if _, err := CachedJudge(context.Background(), a, input, cacheTestTreeHash, "solo", cacheTestProfileDigest, cacheTestAuthorityDigest); err == nil {
+		t.Fatal("CachedJudge accepted a cached result whose claims are absent from the exact input")
+	}
+	if runner.calls != 0 {
+		t.Fatalf("runner.calls = %d, want 0", runner.calls)
+	}
+}
+
+func TestPolicyConflictCache_RejectsNULArgvBeforeHitOrRun(t *testing.T) {
+	root := t.TempDir()
+	input := cacheTestInput()
+	result := noConflictResultBytes(t)
+	good := baseAdapter(&fakeJudgeRunner{fn: func(context.Context, []string, []byte) ([]byte, int, error) { return result, 0, nil }})
+	good.Root = root
+	good.Argv = []string{"judge-bin", "a", "b"}
+	if _, err := CachedJudge(context.Background(), good, input, cacheTestTreeHash, "solo", cacheTestProfileDigest, cacheTestAuthorityDigest); err != nil {
+		t.Fatalf("publishing collision witness: %v", err)
+	}
+
+	runner := &fakeJudgeRunner{fn: func(context.Context, []string, []byte) ([]byte, int, error) {
+		t.Fatal("runner must not receive an argv value that cannot reach exec")
+		return nil, 0, nil
+	}}
+	bad := baseAdapter(runner)
+	bad.Root = root
+	bad.Argv = []string{"judge-bin", "a\x00b"} // same NUL-delimited digest as good.Argv without validation
+	if _, err := CachedJudge(context.Background(), bad, input, cacheTestTreeHash, "solo", cacheTestProfileDigest, cacheTestAuthorityDigest); err == nil {
+		t.Fatal("CachedJudge accepted an argv element containing NUL")
+	}
+	if runner.calls != 0 {
+		t.Fatalf("runner.calls = %d, want 0", runner.calls)
+	}
+}
+
+func TestPolicyConflictCache_RejectsInvalidProfileIDBeforeRun(t *testing.T) {
+	runner := &fakeJudgeRunner{fn: func(context.Context, []string, []byte) ([]byte, int, error) {
+		t.Fatal("runner must not be invoked for an invalid governance profile identity")
+		return nil, 0, nil
+	}}
+	a := baseAdapter(runner)
+	a.Root = t.TempDir()
+	if _, err := CachedJudge(context.Background(), a, cacheTestInput(), cacheTestTreeHash, "UPPER", cacheTestProfileDigest, cacheTestAuthorityDigest); err == nil {
+		t.Fatal("CachedJudge accepted a profile ID outside governanceprincipal's grammar")
+	}
+	if runner.calls != 0 {
+		t.Fatalf("runner.calls = %d, want 0", runner.calls)
+	}
+}
+
 // --- cache-key axes (unit-level, via judgeCacheKeyDigest directly) --------
 
 func baseKeyArgs() (JudgeAdapter, []byte, []byte, string, string, string) {

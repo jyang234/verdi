@@ -620,6 +620,23 @@ func TestDecodeJudgment_RequiresGovernanceIdentity(t *testing.T) {
 	}
 }
 
+func TestDecodeJudgment_ProfileIDGrammar(t *testing.T) {
+	base := mustReadFixture(t, "judgment.json")
+	tree := setAtPath(t, base, []any{"profile_id"}, "UPPER")
+	if _, err := DecodeJudgment(redigestTopLevel(t, tree)); err == nil {
+		t.Fatal("DecodeJudgment accepted a profile ID outside governanceprincipal's grammar")
+	}
+
+	judgment, err := DecodeJudgment(base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	judgment.ProfileID = "UPPER"
+	if _, err := EncodeJudgment(judgment); err == nil {
+		t.Fatal("EncodeJudgment accepted a profile ID outside governanceprincipal's grammar")
+	}
+}
+
 func TestDecodeJudgment_RawResultMustEqualParsedResult(t *testing.T) {
 	base := mustReadFixture(t, "judgment.json")
 	tree := setAtPath(t, base, []any{"exchange", "result", "recommendation"}, "inconclusive")

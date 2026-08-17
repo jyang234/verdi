@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/jyang234/verdi/internal/artifact"
+	"github.com/jyang234/verdi/internal/governanceprincipal"
 	"github.com/jyang234/verdi/internal/policyartifact"
 )
 
@@ -38,6 +39,13 @@ func validateDigest(field, value string) error {
 func validateBareHex(field, value string) error {
 	if !bareHexRe.MatchString(value) {
 		return fmt.Errorf("policyconflict: %s: %q is not a valid bare 64 lowercase hex digest (no sha256: prefix)", field, value)
+	}
+	return nil
+}
+
+func validateGovernanceProfileID(field, value string) error {
+	if err := governanceprincipal.ValidateID(value); err != nil {
+		return fmt.Errorf("policyconflict: %s: %w", field, err)
 	}
 	return nil
 }
@@ -450,7 +458,7 @@ func (j Judgment) Validate() error {
 	if err := validateBareHex("judgment.input_digest", j.InputDigest); err != nil {
 		return err
 	}
-	if err := validateNonEmpty("judgment.profile_id", j.ProfileID); err != nil {
+	if err := validateGovernanceProfileID("judgment.profile_id", j.ProfileID); err != nil {
 		return err
 	}
 	if err := validateDigest("judgment.profile_digest", j.ProfileDigest); err != nil {

@@ -83,13 +83,13 @@ func CachedJudge(ctx context.Context, adapter JudgeAdapter, input SemanticInput,
 	if err := validateNonEmpty("adapter.model", adapter.Model); err != nil {
 		return ValidatedExchange{}, fmt.Errorf("%w: %v", ErrCacheOperational, err)
 	}
-	if len(adapter.Argv) == 0 {
-		return ValidatedExchange{}, fmt.Errorf("%w: adapter argv is empty", ErrCacheOperational)
+	if err := validateJudgeArgv(adapter.Argv); err != nil {
+		return ValidatedExchange{}, fmt.Errorf("%w: %v", ErrCacheOperational, err)
 	}
 	if err := validateSemanticInput(input); err != nil {
 		return ValidatedExchange{}, fmt.Errorf("%w: %v", ErrCacheOperational, err)
 	}
-	if err := validateNonEmpty("profile_id", profileID); err != nil {
+	if err := validateGovernanceProfileID("profile_id", profileID); err != nil {
 		return ValidatedExchange{}, fmt.Errorf("%w: %v", ErrCacheOperational, err)
 	}
 	if err := validateDigest("profile_digest", profileDigest); err != nil {
@@ -132,6 +132,9 @@ func CachedJudge(ctx context.Context, adapter JudgeAdapter, input SemanticInput,
 	if judgment, found, err := loadCachedJudgment(path, treeHash, bareKeyDigest); err != nil {
 		return ValidatedExchange{}, err
 	} else if found {
+		if _, err := ValidateJudgeResult(input, judgment.Exchange.Result); err != nil {
+			return ValidatedExchange{}, fmt.Errorf("%w: cached judgment result is invalid for the exact semantic input: %v", ErrCacheOperational, err)
+		}
 		return ValidatedExchange{Exchange: judgment.Exchange, RecordDigest: recordDigest}, nil
 	}
 
