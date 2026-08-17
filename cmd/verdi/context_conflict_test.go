@@ -313,6 +313,45 @@ func TestCmdContextConflictOutputSymlinksRejectedBeforeProvider(t *testing.T) {
 	}
 }
 
+// TestCmdContextConflictOutputAncestorAliasRejected proves an arbitrary
+// external alias cannot become a trusted output anchor merely because the
+// directory reached through it is the same filesystem object as the checkout.
+func TestCmdContextConflictOutputAncestorAliasRejected(t *testing.T) {
+	root, requestPath := contextConflictFixture(t)
+	t.Chdir(root)
+
+	aliasDir := t.TempDir()
+	alias := filepath.Join(aliasDir, "checkout-parent-alias")
+	if err := os.Symlink(filepath.Dir(root), alias); err != nil {
+		t.Fatalf("create external checkout-parent alias: %v", err)
+	}
+	out := filepath.Join(alias, filepath.Base(root), "ancestor-alias-report.json")
+
+	factoryCalls := 0
+	providerCalls := 0
+	factory := func(string, policyconflict.Request) (policyconflict.VerdictProvider, error) {
+		factoryCalls++
+		return contextConflictProviderFunc(func(context.Context, policyconflict.Request) (policyconflict.Result, error) {
+			providerCalls++
+			return contextConflictResult(policyconflict.VerdictPass), nil
+		}), nil
+	}
+
+	var stdout, stderr bytes.Buffer
+	if code := cmdContextConflictWithFactory([]string{"--request", requestPath, "--out", out}, strings.NewReader(""), &stdout, &stderr, factory); code != 2 {
+		t.Fatalf("exit = %d, want 2; stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+	}
+	if stdout.Len() != 0 || stderr.Len() == 0 {
+		t.Fatalf("stdout=%q stderr=%q, want empty stdout and a refusal", stdout.String(), stderr.String())
+	}
+	if factoryCalls != 0 || providerCalls != 0 {
+		t.Fatalf("provider factory calls = %d, evaluations = %d; want both zero before output refusal", factoryCalls, providerCalls)
+	}
+	if _, err := os.Stat(filepath.Join(root, "ancestor-alias-report.json")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("checkout report stat error = %v, want not-exist", err)
+	}
+}
+
 func TestCmdContextConflictNoPartialReportOnFailure(t *testing.T) {
 	root, requestPath := contextConflictFixture(t)
 	t.Chdir(root)

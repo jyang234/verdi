@@ -457,48 +457,37 @@ func canonicalOutPath(root, p string) (string, error) {
 }
 
 // rejectContextOutputSymlinks Lstats every existing caller-selected component
-// of p. The deepest non-symlink filesystem-identical ancestor shared with the
-// resolved checkout is the trusted anchor. This preserves ambient aliases such
-// as macOS /var -> /private/var while still rejecting every caller-selected
-// symlink below that anchor. Inspection stops at the first nonexistent
-// component so a new leaf or parent remains valid for atomicfile.Write to
-// create. Lstat is deliberate: Stat/EvalSymlinks would follow the entry and
-// erase the fact that the caller selected a symlinked output path.
+// of p. Only lexical containment under the established checkout root or its
+// explicitly resolved spelling creates a trusted anchor. Every other path is
+// inspected from the filesystem root, so a caller-created alias to the checkout
+// or one of its ancestors cannot become authority merely through filesystem
+// identity. Inspection stops at the first nonexistent component so a new leaf
+// or parent remains valid for atomicfile.Write to create. Lstat is deliberate:
+// Stat/EvalSymlinks would follow the entry and erase the fact that the caller
+// selected a symlinked output path.
 func rejectContextOutputSymlinks(root, p string) error {
 	abs, err := filepath.Abs(p)
 	if err != nil {
 		return fmt.Errorf("resolving --out: %w", err)
 	}
-	abs = filepath.Clean(abs)
+	abs = normalizeContextSystemAlias(filepath.Clean(abs))
 
-	var rootAncestors []os.FileInfo
-	if rootAbs, absErr := filepath.Abs(root); absErr == nil {
-		for cur := filepath.Clean(rootAbs); ; {
-			if info, statErr := os.Stat(cur); statErr == nil {
-				rootAncestors = append(rootAncestors, info)
-			}
-			parent := filepath.Dir(cur)
-			if parent == cur {
-				break
-			}
-			cur = parent
-		}
+	rootAbs, err := filepath.Abs(root)
+	if err != nil {
+		return fmt.Errorf("resolving checkout root: %w", err)
 	}
+	rootAbs = normalizeContextSystemAlias(filepath.Clean(rootAbs))
+	rootCanonical, err := filepath.EvalSymlinks(rootAbs)
+	if err != nil {
+		return fmt.Errorf("resolving checkout root: %w", err)
+	}
+	rootCanonical = normalizeContextSystemAlias(filepath.Clean(rootCanonical))
+
 	anchor := ""
-	for cur := filepath.Dir(abs); anchor == ""; {
-		if info, statErr := os.Lstat(cur); statErr == nil && info.Mode()&os.ModeSymlink == 0 {
-			for _, rootInfo := range rootAncestors {
-				if os.SameFile(info, rootInfo) {
-					anchor = cur
-					break
-				}
-			}
+	for _, trusted := range []string{rootAbs, rootCanonical} {
+		if (abs == trusted || isWithinDir(abs, trusted)) && len(trusted) > len(anchor) {
+			anchor = trusted
 		}
-		parent := filepath.Dir(cur)
-		if parent == cur {
-			break
-		}
-		cur = parent
 	}
 
 	components := make([]string, 0, 8)
@@ -529,6 +518,30 @@ func rejectContextOutputSymlinks(root, p string) error {
 		}
 	}
 	return nil
+}
+
+// normalizeContextSystemAlias canonicalizes macOS's system-owned
+// /var -> /private/var alias before output-component inspection. This narrow,
+// verified alias preserves checkout and temp-path spellings supplied by the OS
+// without admitting caller-created aliases as trusted roots.
+func normalizeContextSystemAlias(p string) string {
+	if filepath.Separator != '/' {
+		return p
+	}
+	varRoot := filepath.Clean("/var")
+	privateVarRoot := filepath.Clean("/private/var")
+	resolved, err := filepath.EvalSymlinks(varRoot)
+	if err != nil || filepath.Clean(resolved) != privateVarRoot {
+		return p
+	}
+	if p != varRoot && !isWithinDir(p, varRoot) {
+		return p
+	}
+	rel, err := filepath.Rel(varRoot, p)
+	if err != nil {
+		return p
+	}
+	return filepath.Clean(filepath.Join(privateVarRoot, rel))
 }
 
 // checkNotWithinAny returns errContextOutReserved when the canonical
