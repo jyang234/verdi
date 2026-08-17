@@ -42,18 +42,27 @@ import (
 // vocab:identity — CLI usage/flag grammar (identity)
 const contextCompileUsage = "usage: verdi context compile --request <path|-> [--out <path>]"
 
-// cmdContext dispatches `verdi context <subcommand>`. v0 has exactly one
-// subcommand, "compile"; any other subcommand — or none — is a usage
-// error (CLAUDE.md's operational exit code 2). This argument-shape check
+// cmdContext dispatches `verdi context <subcommand>`. The namespace exposes
+// the read-only "compile" and "conflict" inspection surfaces; any other
+// subcommand — or none — is a usage error (CLAUDE.md's operational exit code
+// 2). This argument-shape check
 // runs before any store root is resolved, so a bare `verdi context` is
 // hermetic and safe against a live checkout (mirrors journey.go/model.go's
 // own usage-first posture).
 func cmdContext(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
-	if len(args) == 0 || args[0] != "compile" {
+	if len(args) == 0 {
 		fmt.Fprintln(stderr, contextCompileUsage)
 		return 2
 	}
-	return cmdContextCompile(args[1:], stdin, stdout, stderr)
+	switch args[0] {
+	case "compile":
+		return cmdContextCompile(args[1:], stdin, stdout, stderr)
+	case "conflict":
+		return cmdContextConflict(args[1:], stdin, stdout, stderr)
+	default:
+		fmt.Fprintln(stderr, contextCompileUsage)
+		return 2
+	}
 }
 
 // cmdContextCompile implements `verdi context compile`. Every flag-shape
@@ -184,7 +193,14 @@ const contextCheckoutToken = "<checkout>"
 // leak in one verb for lost debuggability everywhere else. This verb's
 // stderr contract is this verb's to enforce.
 func printContextDiagnostic(stderr io.Writer, root string, err error) {
-	fmt.Fprintln(stderr, "context compile:", redactCheckoutRoot(root, err.Error()))
+	printContextCommandDiagnostic(stderr, "compile", root, err)
+}
+
+// printContextCommandDiagnostic is the context namespace's one redaction and
+// diagnostic framing seam. Both inspection subcommands reach it so neither
+// can leak a checkout path while formatting a package or process error.
+func printContextCommandDiagnostic(stderr io.Writer, subcommand, root string, err error) {
+	fmt.Fprintf(stderr, "context %s: %s\n", subcommand, redactCheckoutRoot(root, err.Error()))
 }
 
 // redactCheckoutRoot replaces every absolute spelling of root in msg with
@@ -209,6 +225,40 @@ func redactCheckoutRoot(root, msg string) string {
 	}
 	if resolved, err := filepath.EvalSymlinks(root); err == nil {
 		variants = append(variants, resolved)
+	}
+	// The process environment can retain the caller's symlink spelling of
+	// the current checkout even when filepath.Abs/Getwd return the kernel-
+	// resolved spelling (notably macOS /var versus /private/var). Include it
+	// only after proving it names the same directory, so an unrelated PWD
+	// value can never redact arbitrary diagnostic text.
+	if pwd := os.Getenv("PWD"); filepath.IsAbs(pwd) {
+		rootInfo, rootErr := os.Stat(root)
+		pwdInfo, pwdErr := os.Stat(pwd)
+		if rootErr == nil && pwdErr == nil && os.SameFile(rootInfo, pwdInfo) {
+			variants = append(variants, filepath.Clean(pwd))
+		}
+	}
+	// Also recover top-level symlink aliases for the resolved root. exec
+	// diagnostics on macOS commonly re-spell /private/var/... as /var/...
+	// even when both root and PWD are already resolved. This small bounded
+	// scan proves the alias through EvalSymlinks before admitting it.
+	if entries, err := os.ReadDir(string(filepath.Separator)); err == nil {
+		cleanRoot := filepath.Clean(root)
+		for _, entry := range entries {
+			if entry.Type()&os.ModeSymlink == 0 {
+				continue
+			}
+			aliasBase := filepath.Join(string(filepath.Separator), entry.Name())
+			resolved, err := filepath.EvalSymlinks(aliasBase)
+			if err != nil {
+				continue
+			}
+			rel, err := filepath.Rel(resolved, cleanRoot)
+			if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+				continue
+			}
+			variants = append(variants, filepath.Clean(filepath.Join(aliasBase, rel)))
+		}
 	}
 	sort.Slice(variants, func(i, j int) bool { return len(variants[i]) > len(variants[j]) })
 
