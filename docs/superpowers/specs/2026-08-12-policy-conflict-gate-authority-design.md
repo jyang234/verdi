@@ -1,7 +1,7 @@
 # Policy Conflict Gate Authority Design
 
 **Status:** Owner-approved design; repository authority becomes effective when
-the reviewed commit carrying this document and SI-93 through SI-103 reaches the
+the reviewed commit carrying this document and SI-93 through SI-112 reaches the
 configured default branch.
 
 **Planning base:** `bfaa8e2715678cbe8cd71137f23d743666caf1c4`
@@ -389,9 +389,10 @@ inherit the request scope intersected with their exact spec/object ref.
 
 The semantic input contains the complete sorted prose claims and one sorted
 `UnknownMechanicalWitness { id, claims, scope }` for every mechanical row
-whose reason is `scope-unproven` or `higher-order-scope-unproven`. Each such
-witness retains the row's complete composite typed-claim records and exact
-scope proof; it does not copy solver output or later authority-resolution
+whose scope state is unknown, plus every row whose reason is
+`higher-order-scope-unproven` even when its aggregate scope state is disjoint.
+Each such witness retains the row's complete composite typed-claim records and
+exact scope proof; it does not copy solver output or later authority-resolution
 state. This includes a conservatively unresolved higher-order row even when
 its aggregate scope state is `disjoint`. The input also carries applicable
 exemption identities/digests and the canonical prompt. The prompt asks about overlap,
@@ -406,8 +407,11 @@ scope; spec and feature prose use the whole spec ref plus `problem`, `outcome`,
 or the category's declared `ac-*`, `oq-*`, `co-*`, or `dc-*` object and carry
 that line identity as their sole scope ref; an ADR body uses its exact pinned
 ref plus `decision` as its sole scope ref; and an obligation declaration uses
-its whole obligation ref as both line identity and sole scope ref. In every arm
-the carried source ref, object, line identity, and claim ID agree exactly. This
+its whole obligation ref as source ref, claim ID, line identity, and sole scope
+ref while its object names the bound acceptance criterion. In the first three
+arms the claim ID and line identity equal `<source-ref>#<object>`; the
+obligation arm instead requires claim ID, line identity, and source ref to be
+the same whole obligation ref and validates the separate bound-AC object. This
 does not widen the artifact contract's declared-object fragment grammar.
 
 The primary judge's strict inner result is canonical JSON schema
@@ -493,11 +497,14 @@ the full canonical digest form. The logical `input-digest` binds the role
 (`primary` or `challenger`), adapter-declared
 transport/model posture, argv digest, prompt digest, normalized input digest,
 profile/challenger posture, and effective authority digest. The content records
-the complete exchange from §6, required `profile_id`, full `profile_digest`,
-full `authority_digest`, and a self-digest. Together with the exchange's role,
-adapter, model, command, prompt, and normalized-input digests, those fields are
-all path-key components. A cache hit recomputes the bare outer `input-digest`
-from the carried components and also requires the canonical `raw_result` to
+the complete exchange from §6, required `tree_hash`, bare outer
+`input_digest`, `profile_id`, full `profile_digest`, full `authority_digest`,
+and a self-digest. Together with the exchange's role, adapter, model, command,
+prompt, and normalized-input digests, those fields make every filename and
+logical-key component independently verifiable. A cache hit verifies the
+carried tree hash against the path, recomputes the bare outer `input-digest`
+from the remaining carried components, compares it to both the record and
+path, and also requires the canonical `raw_result` to
 decode to the carried parsed result; neither the outer key nor a
 self-consistently rewritten record is trusted by assertion.
 

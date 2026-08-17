@@ -31,7 +31,7 @@ Git, and built-binary Go tests.
 - Binding authority is
   `docs/superpowers/specs/2026-08-12-policy-conflict-gate-authority-design.md`,
   Context Integrity AC-3/DC-3–DC-8/DC-15/DC-17–DC-24/CO-1–CO-6, and
-  invention-ledger SI-93–SI-109 as consolidated by the independently reviewed
+  invention-ledger SI-93–SI-112 as consolidated by the independently reviewed
   exact head carrying this plan.
 - Do not edit frozen artifacts or `docs/design/specs/`; do not add a layout
   root, UI, MCP tool, receipt, sealed-execution behavior, forge network call, or
@@ -78,7 +78,11 @@ higher-order/disjoint residual; cache records asserted rather than recomputed
 their complete path-key binding and did not bind raw bytes to the parsed
 result; and semantic line identities used a necessary but under-specified
 structural bypass around the artifact fragment grammar. The amended Task 3/7
-interfaces below are the correction target and a hard predecessor of Task 8.
+interfaces below are the correction target, not a claim that their first
+landed bytes already conform. Task 7A owns the post-landing reconciliation and
+is a hard predecessor of Task 8. Both affected `/v1` schemas remain unreleased,
+so this pre-release required-field correction does not consume a schema-version
+bump.
 
 ## File Map
 
@@ -1012,9 +1016,11 @@ writer ownership.
 Ratchet the complete normalized semantic input and fixed prompt bytes. Cover
 all source categories, CRLF normalization, SI-112 exact object/line identity,
 inherited scope, exclusion of repository data/raw model text, and deterministic
-order. Prove that both scope-unknown and higher-order-unproven rows carry their
-complete composite typed claims, that a typed-claim change moves the semantic
-input digest, and that other mechanical rows are excluded.
+order. Prove that every unknown-scope row, including one whose reason is
+`principal-relation-unproven`, and every higher-order-unproven row carry their
+complete composite typed claims; the latter remains included when aggregate
+scope is disjoint. Prove that a typed-claim change moves the semantic input
+digest and that other mechanical rows are excluded.
 Validate conflict/no-conflict/inconclusive cardinality, two distinct known claim
 witnesses, unknown/missing/duplicate claims, category mismatch, invalid UTF-8,
 noncanonical JSON, and model-identity substitution.
@@ -1069,6 +1075,61 @@ Expected: both exit 0, including concurrent-writer tests.
 git add internal/policyconflict internal/atomicfile internal/store
 git commit -m "Record semantic conflict judgments"
 ~~~
+
+### Task 7A: Reconcile semantic proof and cache interfaces
+
+**Files:**
+- Modify: `internal/policyconflict/{schema.go,schema_test.go,codec.go,validate.go,semantic.go,semantic_test.go,judge.go,judge_test.go,cache.go,cache_test.go,testdata/**}`
+
+This tranche owns the post-landing correction required by SI-110–SI-112. It
+does not reopen the Task 7 transport or add a second cache abstraction.
+
+- [ ] **Step 1: Capture focused RED witnesses against the first Task 7 head**
+
+Prove that semantic input and report rows retain complete typed claims for
+every unknown-scope row, including a `principal-relation-unproven` row, and for
+every higher-order-unproven row even when aggregate scope is disjoint. Prove
+the closed, category-specific prose identity relations, including the
+obligation arm's separate bound-AC object.
+
+Prove that a hit refuses a foreign or rewritten tree, outer input digest,
+profile, authority, adapter/model/command/prompt/input component, or parsed/raw
+result pair; that the miss path refuses a returned command digest inconsistent
+with the configured adapter before publication; and that any symlinked managed
+cache-path component fails operationally. The cache-aware entry must reject an
+alternate prompt or incomplete hand-built semantic input before process work.
+
+- [ ] **Step 2: Implement the minimum shared validation**
+
+Replace bare scope rows with `UnknownMechanicalWitness`, select them by unknown
+scope state plus the higher-order-unproven reason, and use the same wire in the
+semantic report. Centralize the closed prose-identity validation without
+widening `artifact.ParseRef`. Extend the unreleased judgment record with the
+SI-111 fields, verify tree and outer digest against the path, recompute the
+logical key from the remaining carried components, and require canonical raw
+result equality. Validate the fixed prompt, the complete input, configured
+adapter command identity, and every managed parent before immutable
+publication.
+
+- [ ] **Step 3: Run focused and package race GREEN**
+
+~~~bash
+go test -race ./internal/policyconflict ./internal/atomicfile ./internal/store -run 'Test(BuildSemanticInput|ValidateJudgeResult|JudgeAdapter|PolicyConflictCache|CreateImmutable|DecodeJudgment|DecodeReport)' -count=1
+go test -race ./internal/policyconflict ./internal/atomicfile ./internal/store -count=1
+go vet ./internal/policyconflict ./internal/atomicfile ./internal/store
+~~~
+
+Expected: all exit 0, including the exact negative witnesses above.
+
+- [ ] **Step 4: Commit and obtain the one closure check**
+
+~~~bash
+git add internal/policyconflict
+git commit -m "Bind semantic judgment evidence"
+~~~
+
+Review the consolidated Task 7/7A range once, correct accepted findings once,
+and obtain the same reviewer's single closure check before Task 8.
 
 ### Task 8: Resolve bounds, principals, and semantic dispositions
 
