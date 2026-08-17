@@ -169,6 +169,9 @@ func TestCompileConflictOperandsAcceptedSnapshotIdentity(t *testing.T) {
 	if snap.CandidateDigest != "" {
 		t.Errorf("CandidateDigest = %q, want empty for an accepted-context snapshot", snap.CandidateDigest)
 	}
+	if snap.CandidateBlob != "" {
+		t.Errorf("CandidateBlob = %q, want empty for an accepted-context snapshot", snap.CandidateBlob)
+	}
 	if snap.EffectivePolicyDigest == "" || snap.ConstitutionDigest == "" || snap.ProfileID == "" || snap.ProfileDigest == "" {
 		t.Errorf("snapshot authority identity incomplete: %+v", snap)
 	}
@@ -377,7 +380,8 @@ func candidateRequestFor(spec, branch, head string) CandidateRequest {
 }
 
 func TestResolveConflictCandidateReadsExactHeadBlob(t *testing.T) {
-	repo := candidateFixtureRepo(t, ".verdi/specs/active/candidate-feature/spec.md", candidateFeatureSpec)
+	const candidatePath = ".verdi/specs/active/candidate-feature/spec.md"
+	repo := candidateFixtureRepo(t, candidatePath, candidateFeatureSpec)
 	c := NewCompiler()
 	operands, err := c.resolveConflictCandidate(context.Background(), repo.Dir, candidateRequestFor("spec/candidate-feature", "main", repo.Head), ConflictFacts{})
 	if err != nil {
@@ -397,12 +401,23 @@ func TestResolveConflictCandidateReadsExactHeadBlob(t *testing.T) {
 	if snap.CandidateDigest == "" {
 		t.Error("CandidateDigest is empty, want set for an acceptance-candidate snapshot")
 	}
+	blobOutput, err := exec.Command("git", "-C", repo.Dir, "rev-parse", repo.Head+":"+candidatePath).Output()
+	if err != nil {
+		t.Fatalf("rev-parse candidate blob: %v", err)
+	}
+	wantBlob := strings.TrimSpace(string(blobOutput))
+	if snap.CandidateBlob != wantBlob {
+		t.Errorf("CandidateBlob = %q, want exact HEAD-tree blob OID %q", snap.CandidateBlob, wantBlob)
+	}
 	if snap.Phase != PhaseDesign {
 		t.Errorf("Phase = %q, want %q (candidate phase is fixed to design)", snap.Phase, PhaseDesign)
 	}
 	wantDigest := rawContentDigest([]byte(candidateFeatureSpec))
 	if snap.CandidateDigest != wantDigest {
 		t.Errorf("CandidateDigest = %q, want %q (the exact HEAD-tree blob's digest)", snap.CandidateDigest, wantDigest)
+	}
+	if snap.CandidateBlob == strings.TrimPrefix(snap.CandidateDigest, "sha256:") {
+		t.Errorf("CandidateBlob was inferred from CandidateDigest instead of preserving the independent Git identity: %+v", snap)
 	}
 	found := false
 	for _, pc := range view.ProseClaims {
@@ -921,6 +936,41 @@ func TestConflictOperandsSnapshotIdentityDigestXor(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestConflictOperandsSnapshotIdentityCandidateBlobValidation(t *testing.T) {
+	cases := map[string]string{
+		"candidate without a blob":      "",
+		"candidate with a short blob":   strings.Repeat("b", 39),
+		"candidate with uppercase blob": strings.Repeat("A", 40),
+	}
+	for name, candidateBlob := range cases {
+		t.Run(name, func(t *testing.T) {
+			_, err := buildSnapshotIdentity(snapshotBuildInput{
+				targetKind:      snapshotTargetAcceptanceCandidate,
+				repository:      validRepositorySnapshot(compileHead, "main").Facts,
+				candidateDigest: "sha256:" + strings.Repeat("1", 64),
+				authority:       PolicyAuthority{Effective: &policyauthority.EffectivePolicy{}},
+				target:          ResolvedSpec{Blob: candidateBlob},
+			})
+			if err == nil {
+				t.Fatalf("buildSnapshotIdentity accepted candidate blob %q", candidateBlob)
+			}
+			if !strings.Contains(err.Error(), "candidate blob") {
+				t.Fatalf("buildSnapshotIdentity failed for an unrelated reason: %v", err)
+			}
+		})
+	}
+
+	t.Run("accepted carrying a candidate blob", func(t *testing.T) {
+		_, err := sealConflictOperands(ConflictView{Snapshot: SnapshotIdentity{
+			TargetKind:    snapshotTargetAcceptedContext,
+			CandidateBlob: strings.Repeat("a", 40),
+		}})
+		if err == nil {
+			t.Fatal("sealConflictOperands accepted an accepted-context snapshot carrying a candidate blob")
+		}
+	})
 }
 
 // --- 9: normalized authored prose (adr-decision, obligation-declaration) --

@@ -109,12 +109,13 @@ type ConflictSourceIdentity struct {
 
 // SnapshotIdentity binds every fact a conflict evaluation's sealed
 // operands were resolved from (authority design §3). Exactly one of
-// ManifestDigest (accepted-context) or CandidateDigest (acceptance-
-// candidate) is set, matching TargetKind.
+// ManifestDigest (accepted-context) or CandidateDigest plus CandidateBlob
+// (acceptance-candidate) is set, matching TargetKind.
 type SnapshotIdentity struct {
 	TargetKind                                string
 	Repository                                repositoryfacts.Facts
 	ManifestDigest, CandidateDigest           string
+	CandidateBlob                             string
 	EffectivePolicyDigest, ConstitutionDigest string
 	ProfileID, ProfileDigest                  string
 	Adapter                                   AdapterRef
@@ -200,6 +201,9 @@ type conflictOperandsSealDoc struct {
 // deep-clones it into private storage so no caller-held reference can
 // reach it, and mints its one seal.
 func sealConflictOperands(view ConflictView) (*ConflictOperands, error) {
+	if err := validateSnapshotIdentityCandidateBlob(view.Snapshot.TargetKind, view.Snapshot.CandidateBlob); err != nil {
+		return nil, fmt.Errorf("contextcompile: seal conflict operands: %w", err)
+	}
 	clean := cloneConflictView(view)
 	nonce := strconv.FormatUint(atomic.AddUint64(&conflictOperandsSeq, 1), 10)
 	seal, err := canonjson.Digest(conflictOperandsSealDoc{View: clean, Nonce: nonce})
@@ -511,6 +515,28 @@ func validateSnapshotIdentityDigests(targetKind, manifestDigest, candidateDigest
 	return nil
 }
 
+// validateSnapshotIdentityCandidateBlob enforces the candidate-only exact
+// Git identity: accepted contexts never carry it, while candidates carry the
+// full lowercase 40-hex HEAD-tree blob OID already proven by resolution.
+func validateSnapshotIdentityCandidateBlob(targetKind, candidateBlob string) error {
+	switch targetKind {
+	case snapshotTargetAcceptedContext:
+		if candidateBlob != "" {
+			return fmt.Errorf("contextcompile: conflict snapshot: target kind %q cannot carry candidate blob %q", targetKind, candidateBlob)
+		}
+	case snapshotTargetAcceptanceCandidate:
+		if err := validateGitHash("conflict snapshot candidate blob", candidateBlob); err != nil {
+			return err
+		}
+		if len(candidateBlob) != 40 {
+			return fmt.Errorf("contextcompile: conflict snapshot candidate blob: %q must be a full 40-lowercase-hex Git object ID", candidateBlob)
+		}
+	default:
+		return fmt.Errorf("contextcompile: conflict snapshot: unknown target kind %q carries no legal candidate blob", targetKind)
+	}
+	return nil
+}
+
 func buildSnapshotIdentity(in snapshotBuildInput) (SnapshotIdentity, error) {
 	if err := in.repository.Validate(); err != nil {
 		return SnapshotIdentity{}, fmt.Errorf("contextcompile: conflict snapshot: repository facts: %w", err)
@@ -519,6 +545,13 @@ func buildSnapshotIdentity(in snapshotBuildInput) (SnapshotIdentity, error) {
 		return SnapshotIdentity{}, fmt.Errorf("contextcompile: conflict snapshot: policy authority is not resolved")
 	}
 	if err := validateSnapshotIdentityDigests(in.targetKind, in.manifestDigest, in.candidateDigest); err != nil {
+		return SnapshotIdentity{}, err
+	}
+	candidateBlob := ""
+	if in.targetKind == snapshotTargetAcceptanceCandidate {
+		candidateBlob = in.target.Blob
+	}
+	if err := validateSnapshotIdentityCandidateBlob(in.targetKind, candidateBlob); err != nil {
 		return SnapshotIdentity{}, err
 	}
 	grantBytes, err := execworkspace.EncodeGrantSet(in.grants)
@@ -535,6 +568,7 @@ func buildSnapshotIdentity(in snapshotBuildInput) (SnapshotIdentity, error) {
 		Repository:            in.repository,
 		ManifestDigest:        in.manifestDigest,
 		CandidateDigest:       in.candidateDigest,
+		CandidateBlob:         candidateBlob,
 		EffectivePolicyDigest: in.authority.EffectiveDigest,
 		ConstitutionDigest:    in.authority.Effective.ConstitutionDigest,
 		ProfileID:             in.authority.Effective.ProfileID,
