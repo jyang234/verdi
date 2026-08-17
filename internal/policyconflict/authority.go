@@ -522,6 +522,14 @@ func ResolveDispositionAuthority(in AuthorityInput, semanticInput SemanticInput,
 	if err := validateEvaluatedOn("authority_input.evaluated_on", in.EvaluatedOn); err != nil {
 		return nil, err
 	}
+	// SI-114's separate exact target comparison presumes a well-formed
+	// operand to compare: a missing or malformed injected TargetDigest is
+	// a caller/operand defect, never a string that simply fails to match
+	// (which would report a favorable-adjacent "definite mismatch" instead
+	// of the true precondition failure it actually is).
+	if err := validateDigest("authority_input.target_digest", in.TargetDigest); err != nil {
+		return nil, err
+	}
 	if err := validateSemanticInput(semanticInput); err != nil {
 		return nil, fmt.Errorf("policyconflict: resolve disposition authority: %w", err)
 	}
