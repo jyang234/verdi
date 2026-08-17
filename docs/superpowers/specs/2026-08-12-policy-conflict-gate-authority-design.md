@@ -994,7 +994,7 @@ no browser behavior and adds no Playwright case.
 
 ## 14. Source coverage and losslessness
 
-Coverage is **21/21** implicated authority source groups. The mapping is
+Coverage is **22/22** implicated authority source groups. The mapping is
 lossless; each row names the complete clause range used rather than assigning
 inconsistent per-clause counts across differently structured sources:
 
