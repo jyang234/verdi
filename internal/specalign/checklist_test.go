@@ -135,8 +135,21 @@ func TestV0ThinSliceChecklist(t *testing.T) {
 	// Checklist: "`sync --or-regen`, `matrix` (with `--preview`),
 	// `align` (computed + judged, digest/integrity split)"
 	t.Run("05_sync_matrix_preview_align_are_real", func(t *testing.T) {
-		_, syncStderr, _ := runBinary(t, root, "sync", "--or-regen")
+		// Probe sync's mutually-exclusive-mode preflight rather than entering
+		// effectful sync against this live repository. Reaching this exact
+		// diagnostic proves the verb and both named modes are registered,
+		// while TestRunSync_OrRegen_MatchesGolden owns regeneration behavior
+		// hermetically in cmd/verdi's suite.
+		_, syncStderr, syncCode := runBinary(t, root, "sync", "--or-regen", "--produce")
 		assertNotOutOfV0(t, "sync", syncStderr)
+		if syncCode != 2 {
+			t.Errorf("verdi sync --or-regen --produce: exit = %d, want 2 (mutually exclusive modes)", syncCode)
+		}
+		for _, want := range []string{"mutually exclusive", "--or-regen", "--produce"} {
+			if !strings.Contains(syncStderr, want) {
+				t.Errorf("verdi sync --or-regen --produce: stderr = %q, want %q", syncStderr, want)
+			}
+		}
 
 		_, matrixStderr, _ := runBinary(t, root, "matrix", "--preview", "spec/verdi-index")
 		assertNotOutOfV0(t, "matrix", matrixStderr)
