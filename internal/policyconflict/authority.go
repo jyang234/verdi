@@ -123,7 +123,7 @@ func resolveBound(expiry, review, evaluatedOn string) (ProofState, error) {
 // distinctness violation, unknown transition) maps directly: an explicit
 // violated finding outranks unproven, exactly as Authorize itself already
 // orders them, and an absent finding set is authorized.
-func resolveAuthorization(profile governanceprincipal.Profile, transition string, actors []governanceprincipal.PrincipalResolution, approvals []policyartifact.Approval) (ProofState, error) {
+func resolveAuthorization(profile governanceprincipal.Profile, transition string, actors []governanceprincipal.PrincipalResolution, approvals []policyartifact.Approval) (ProofState, []Disclosure, error) {
 	records := make([]governanceprincipal.ApprovalRecord, 0, len(approvals))
 	for _, a := range approvals {
 		records = append(records, governanceprincipal.ApprovalRecord{
@@ -138,21 +138,59 @@ func resolveAuthorization(profile governanceprincipal.Profile, transition string
 		Approvals:   records,
 	})
 	if err != nil {
-		return "", fmt.Errorf("policyconflict: resolve authorization: %w", err)
+		return "", nil, fmt.Errorf("policyconflict: resolve authorization: %w", err)
+	}
+	disclosures, err := translateKernelDisclosures(decision.Disclosures)
+	if err != nil {
+		return "", nil, fmt.Errorf("policyconflict: resolve authorization disclosures: %w", err)
 	}
 	if decision.Posture == governanceprincipal.PostureAdvisory {
-		return ProofUnproven, nil
+		return ProofUnproven, disclosures, nil
 	}
 	switch decision.State {
 	case governanceprincipal.AuthorizationAuthorized:
-		return ProofProven, nil
+		return ProofProven, disclosures, nil
 	case governanceprincipal.AuthorizationViolated:
-		return ProofViolatedWithWitness, nil
+		return ProofViolatedWithWitness, disclosures, nil
 	case governanceprincipal.AuthorizationUnproven:
-		return ProofUnproven, nil
+		return ProofUnproven, disclosures, nil
 	default:
-		return "", fmt.Errorf("policyconflict: resolve authorization: unknown kernel decision state %q", decision.State)
+		return "", nil, fmt.Errorf("policyconflict: resolve authorization: unknown kernel decision state %q", decision.State)
 	}
+}
+
+// mergeAuthorityDisclosures returns the sorted union of already-translated
+// authorization disclosures, merging witness sets for a repeated code. It
+// keeps the public resolver result set-like even when several applicable
+// artifacts independently invoke the kernel with the same solo collapse.
+func mergeAuthorityDisclosures(sets ...[]Disclosure) ([]Disclosure, error) {
+	byCode := make(map[DisclosureCode]map[string]bool)
+	for _, set := range sets {
+		for _, disclosure := range set {
+			if err := validateDisclosure("authority disclosure", disclosure); err != nil {
+				return nil, err
+			}
+			witnesses := byCode[disclosure.Code]
+			if witnesses == nil {
+				witnesses = make(map[string]bool)
+				byCode[disclosure.Code] = witnesses
+			}
+			for _, witness := range disclosure.Witnesses {
+				witnesses[witness] = true
+			}
+		}
+	}
+
+	codes := make([]DisclosureCode, 0, len(byCode))
+	for code := range byCode {
+		codes = append(codes, code)
+	}
+	sort.Slice(codes, func(i, j int) bool { return codes[i] < codes[j] })
+	out := make([]Disclosure, 0, len(codes))
+	for _, code := range codes {
+		out = append(out, Disclosure{Code: code, Witnesses: sortedKeysOf(byCode[code])})
+	}
+	return out, nil
 }
 
 // --- exemption arm (authority design §5.5) ----------------------------------
@@ -161,50 +199,58 @@ func resolveAuthorization(profile governanceprincipal.Profile, transition string
 // exemption in in.Exemptions APPLICABLE to row — an exemption naming no
 // witness sharing a current row claim's composite (policy_id, claim_id) is
 // OMITTED entirely, never returned as a rejected resolution (SI-115). The
-// returned slice is sorted ascending by exemption ID; it is the exact input
-// exemption.go's ApplyEffectiveExemptions consumes to apply the accepted
-// (all-five-proven) resolutions and record the rejected ones. row is never
-// mutated. A hand-built or mutated row, a hand-built (never-decoded)
-// exemption, a missing/malformed evaluated_on, or a kernel operand defect
-// is an operational error — never a favorable or unfavorable verdict.
-func ResolveExemptionAuthority(ctx context.Context, in AuthorityInput, row MechanicalEvaluation, resolver RefCoverageResolver) ([]ExemptionResolution, error) {
+// returned resolution slice is sorted ascending by exemption ID; it is the
+// exact input exemption.go's ApplyEffectiveExemptions consumes to apply the
+// accepted (all-five-proven) resolutions and record the rejected ones. The
+// second slice is the sorted, deduplicated union of authorization disclosures
+// produced for applicable artifacts. row is never mutated. A hand-built or
+// mutated row, a hand-built (never-decoded) exemption, a missing/malformed
+// evaluated_on, or a kernel operand defect is an operational error — never a
+// favorable or unfavorable verdict.
+func ResolveExemptionAuthority(ctx context.Context, in AuthorityInput, row MechanicalEvaluation, resolver RefCoverageResolver) ([]ExemptionResolution, []Disclosure, error) {
 	if err := validateRowOperand(row); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if err := validateScopeProof("row.scope", row.Scope); err != nil {
-		return nil, fmt.Errorf("policyconflict: resolve exemption authority: %w", err)
+		return nil, nil, fmt.Errorf("policyconflict: resolve exemption authority: %w", err)
 	}
 	if err := validateEvaluatedOn("authority_input.evaluated_on", in.EvaluatedOn); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	out := make([]ExemptionResolution, 0, len(in.Exemptions))
+	disclosureSets := make([][]Disclosure, 0, len(in.Exemptions))
 	seen := make(map[string]policyartifact.Exemption, len(in.Exemptions))
 	for _, e := range in.Exemptions {
 		if prev, ok := seen[e.ID]; ok {
 			if !reflect.DeepEqual(prev, e) {
-				return nil, fmt.Errorf("policyconflict: resolve exemption authority: two different exemption artifacts share id %q", e.ID)
+				return nil, nil, fmt.Errorf("policyconflict: resolve exemption authority: two different exemption artifacts share id %q", e.ID)
 			}
 			continue
 		}
 		seen[e.ID] = e
 
-		resolution, applicable, err := resolveExemption(ctx, in, row, e, resolver)
+		resolution, applicable, disclosures, err := resolveExemption(ctx, in, row, e, resolver)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		if applicable {
 			out = append(out, resolution)
+			disclosureSets = append(disclosureSets, disclosures)
 		}
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
-	return out, nil
+	disclosures, err := mergeAuthorityDisclosures(disclosureSets...)
+	if err != nil {
+		return nil, nil, fmt.Errorf("policyconflict: resolve exemption authority disclosures: %w", err)
+	}
+	return out, disclosures, nil
 }
 
 // resolveExemption reports e's ExemptionResolution against row and whether
 // e is applicable at all (SI-115: an inapplicable exemption is omitted, not
 // rejected).
-func resolveExemption(ctx context.Context, in AuthorityInput, row MechanicalEvaluation, e policyartifact.Exemption, resolver RefCoverageResolver) (ExemptionResolution, bool, error) {
+func resolveExemption(ctx context.Context, in AuthorityInput, row MechanicalEvaluation, e policyartifact.Exemption, resolver RefCoverageResolver) (ExemptionResolution, bool, []Disclosure, error) {
 	matched := make([]TypedClaimRecord, 0, len(row.Claims))
 	fresh := true
 	for _, c := range row.Claims {
@@ -220,7 +266,7 @@ func resolveExemption(ctx context.Context, in AuthorityInput, row MechanicalEval
 		}
 	}
 	if len(matched) == 0 {
-		return ExemptionResolution{}, false, nil
+		return ExemptionResolution{}, false, []Disclosure{}, nil
 	}
 
 	resolution := AuthorityResolution{Match: ProofProven}
@@ -232,25 +278,25 @@ func resolveExemption(ctx context.Context, in AuthorityInput, row MechanicalEval
 
 	scopeState, err := resolveExemptionScope(ctx, row.Scope, e.Scope, resolver)
 	if err != nil {
-		return ExemptionResolution{}, false, err
+		return ExemptionResolution{}, false, nil, err
 	}
 	resolution.Scope = scopeState
 
 	boundState, err := resolveBound(e.Expiry, e.ReviewCondition, in.EvaluatedOn)
 	if err != nil {
-		return ExemptionResolution{}, false, err
+		return ExemptionResolution{}, false, nil, err
 	}
 	resolution.Bound = boundState
 
-	authState, err := resolveAuthorization(in.Profile, transitionExemptionApproval, in.Actors, e.Approvals)
+	authState, disclosures, err := resolveAuthorization(in.Profile, transitionExemptionApproval, in.Actors, e.Approvals)
 	if err != nil {
-		return ExemptionResolution{}, false, err
+		return ExemptionResolution{}, false, nil, err
 	}
 	resolution.Authorization = authState
 
 	digest, err := e.Digest()
 	if err != nil {
-		return ExemptionResolution{}, false, fmt.Errorf("policyconflict: resolve exemption authority: exemption %q: %w", e.ID, err)
+		return ExemptionResolution{}, false, nil, fmt.Errorf("policyconflict: resolve exemption authority: exemption %q: %w", e.ID, err)
 	}
 
 	removed := make([]MechanicalClaimWitness, 0)
@@ -266,7 +312,7 @@ func resolveExemption(ctx context.Context, in AuthorityInput, row MechanicalEval
 		})
 	}
 
-	return ExemptionResolution{ID: e.ID, Digest: digest, Resolution: resolution, RemovedClaims: removed}, true, nil
+	return ExemptionResolution{ID: e.ID, Digest: digest, Resolution: resolution, RemovedClaims: removed}, true, disclosures, nil
 }
 
 // resolveExemptionScope proves directional coverage over row's own carried
@@ -517,10 +563,12 @@ func witnessClaimIdentities(claims []policyartifact.SemanticClaimWitness) []sema
 // reported operationally, never silently accepted. Cache presence is never
 // required or consulted here (§8: "Cache presence is never required to load
 // or validate a disposition") — a disposition's own JudgmentProvenance
-// citation is informational only and is never read by this function.
-func ResolveDispositionAuthority(in AuthorityInput, semanticInput SemanticInput, primary, challenger *ValidatedExchange) ([]DispositionResolution, error) {
+// citation is informational only and is never read by this function. The
+// second returned slice is the sorted, deduplicated union of every artifact's
+// authorization disclosures.
+func ResolveDispositionAuthority(in AuthorityInput, semanticInput SemanticInput, primary, challenger *ValidatedExchange) ([]DispositionResolution, []Disclosure, error) {
 	if err := validateEvaluatedOn("authority_input.evaluated_on", in.EvaluatedOn); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	// SI-114's separate exact target comparison presumes a well-formed
 	// operand to compare: a missing or malformed injected TargetDigest is
@@ -528,43 +576,49 @@ func ResolveDispositionAuthority(in AuthorityInput, semanticInput SemanticInput,
 	// (which would report a favorable-adjacent "definite mismatch" instead
 	// of the true precondition failure it actually is).
 	if err := validateDigest("authority_input.target_digest", in.TargetDigest); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if err := validateSemanticInput(semanticInput); err != nil {
-		return nil, fmt.Errorf("policyconflict: resolve disposition authority: %w", err)
+		return nil, nil, fmt.Errorf("policyconflict: resolve disposition authority: %w", err)
 	}
 	currentDigest, err := semanticInputDigest(semanticInput)
 	if err != nil {
-		return nil, fmt.Errorf("policyconflict: resolve disposition authority: %w", err)
+		return nil, nil, fmt.Errorf("policyconflict: resolve disposition authority: %w", err)
 	}
 	if primary != nil && primary.RecordDigest != currentDigest {
-		return nil, fmt.Errorf("policyconflict: resolve disposition authority: primary exchange record digest %s does not match the current semantic input digest %s (cross-snapshot operand)", primary.RecordDigest, currentDigest)
+		return nil, nil, fmt.Errorf("policyconflict: resolve disposition authority: primary exchange record digest %s does not match the current semantic input digest %s (cross-snapshot operand)", primary.RecordDigest, currentDigest)
 	}
 	if challenger != nil && challenger.RecordDigest != currentDigest {
-		return nil, fmt.Errorf("policyconflict: resolve disposition authority: challenger exchange record digest %s does not match the current semantic input digest %s (cross-snapshot operand)", challenger.RecordDigest, currentDigest)
+		return nil, nil, fmt.Errorf("policyconflict: resolve disposition authority: challenger exchange record digest %s does not match the current semantic input digest %s (cross-snapshot operand)", challenger.RecordDigest, currentDigest)
 	}
 
 	currentClaims := proseClaimIdentities(semanticInput.Claims)
 
 	out := make([]DispositionResolution, 0, len(in.Dispositions))
+	disclosureSets := make([][]Disclosure, 0, len(in.Dispositions))
 	seen := make(map[string]policyartifact.Disposition, len(in.Dispositions))
 	for _, d := range in.Dispositions {
 		if prev, ok := seen[d.ID]; ok {
 			if !reflect.DeepEqual(prev, d) {
-				return nil, fmt.Errorf("policyconflict: resolve disposition authority: two different disposition artifacts share id %q", d.ID)
+				return nil, nil, fmt.Errorf("policyconflict: resolve disposition authority: two different disposition artifacts share id %q", d.ID)
 			}
 			continue
 		}
 		seen[d.ID] = d
 
-		res, err := resolveDisposition(in, currentDigest, currentClaims, semanticInput.Exemptions, d)
+		res, disclosures, err := resolveDisposition(in, currentDigest, currentClaims, semanticInput.Exemptions, d)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		out = append(out, res)
+		disclosureSets = append(disclosureSets, disclosures)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
-	return out, nil
+	disclosures, err := mergeAuthorityDisclosures(disclosureSets...)
+	if err != nil {
+		return nil, nil, fmt.Errorf("policyconflict: resolve disposition authority disclosures: %w", err)
+	}
+	return out, disclosures, nil
 }
 
 // resolveDisposition derives d's DispositionResolution against the current
@@ -576,7 +630,7 @@ func ResolveDispositionAuthority(in AuthorityInput, semanticInput SemanticInput,
 // one of the four is violated-with-witness. A judge-result disposition's
 // Bound follows that same state; a human-fallback disposition's Bound uses
 // the injected expiry/review-condition rule instead.
-func resolveDisposition(in AuthorityInput, currentDigest string, currentClaims []semanticClaimIdentity, currentExemptions []policyartifact.SemanticExemptionWitness, d policyartifact.Disposition) (DispositionResolution, error) {
+func resolveDisposition(in AuthorityInput, currentDigest string, currentClaims []semanticClaimIdentity, currentExemptions []policyartifact.SemanticExemptionWitness, d policyartifact.Disposition) (DispositionResolution, []Disclosure, error) {
 	matchState := ProofProven
 	switch {
 	case d.Witness.InputID != currentDigest:
@@ -597,23 +651,23 @@ func resolveDisposition(in AuthorityInput, currentDigest string, currentClaims [
 	case policyartifact.DispositionHumanFallback:
 		bound, err := resolveBound(d.Expiry, d.ReviewCondition, in.EvaluatedOn)
 		if err != nil {
-			return DispositionResolution{}, fmt.Errorf("policyconflict: resolve disposition authority: disposition %q: %w", d.ID, err)
+			return DispositionResolution{}, nil, fmt.Errorf("policyconflict: resolve disposition authority: disposition %q: %w", d.ID, err)
 		}
 		resolution.Bound = bound
 	default:
-		return DispositionResolution{}, fmt.Errorf("policyconflict: resolve disposition authority: disposition %q: unknown origin %q", d.ID, d.Origin)
+		return DispositionResolution{}, nil, fmt.Errorf("policyconflict: resolve disposition authority: disposition %q: unknown origin %q", d.ID, d.Origin)
 	}
 
-	authState, err := resolveAuthorization(in.Profile, transitionDispositionApproval, in.Actors, d.Approvals)
+	authState, disclosures, err := resolveAuthorization(in.Profile, transitionDispositionApproval, in.Actors, d.Approvals)
 	if err != nil {
-		return DispositionResolution{}, err
+		return DispositionResolution{}, nil, err
 	}
 	resolution.Authorization = authState
 
 	digest, err := d.Digest()
 	if err != nil {
-		return DispositionResolution{}, fmt.Errorf("policyconflict: resolve disposition authority: disposition %q: %w", d.ID, err)
+		return DispositionResolution{}, nil, fmt.Errorf("policyconflict: resolve disposition authority: disposition %q: %w", d.ID, err)
 	}
 
-	return DispositionResolution{ID: d.ID, Digest: digest, Conclusion: d.Conclusion, Resolution: resolution}, nil
+	return DispositionResolution{ID: d.ID, Digest: digest, Conclusion: d.Conclusion, Resolution: resolution}, disclosures, nil
 }

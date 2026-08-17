@@ -593,7 +593,7 @@ func TestResolveExemptionAuthorityOmitsUnrelatedExemption(t *testing.T) {
 		Profile:     referenceProfile(t),
 		Exemptions:  []policyartifact.Exemption{unrelated},
 	}
-	got, err := ResolveExemptionAuthority(context.Background(), in, row, noCallCoverageResolver{t: t})
+	got, _, err := ResolveExemptionAuthority(context.Background(), in, row, noCallCoverageResolver{t: t})
 	if err != nil {
 		t.Fatalf("ResolveExemptionAuthority: %v", err)
 	}
@@ -636,7 +636,7 @@ func TestResolveExemptionAuthorityApplicabilityAndFreshness(t *testing.T) {
 				Actors:      []governanceprincipal.PrincipalResolution{authorityResolve(t, "alice", authenticatedFact("alice"))},
 				Exemptions:  []policyartifact.Exemption{ex},
 			}
-			got, err := ResolveExemptionAuthority(context.Background(), in, row, noCallCoverageResolver{t: t})
+			got, _, err := ResolveExemptionAuthority(context.Background(), in, row, noCallCoverageResolver{t: t})
 			if err != nil {
 				t.Fatalf("ResolveExemptionAuthority: %v", err)
 			}
@@ -702,7 +702,7 @@ func TestResolveExemptionAuthorityRowLocalFreshness(t *testing.T) {
 		Exemptions:  []policyartifact.Exemption{ex},
 	}
 
-	gotX, err := ResolveExemptionAuthority(context.Background(), in, rowX, noCallCoverageResolver{t: t})
+	gotX, _, err := ResolveExemptionAuthority(context.Background(), in, rowX, noCallCoverageResolver{t: t})
 	if err != nil {
 		t.Fatalf("ResolveExemptionAuthority(rowX): %v", err)
 	}
@@ -710,7 +710,7 @@ func TestResolveExemptionAuthorityRowLocalFreshness(t *testing.T) {
 		t.Fatalf("rowX resolutions = %+v, want one proven-fresh resolution (its own witness is current)", gotX)
 	}
 
-	gotY, err := ResolveExemptionAuthority(context.Background(), in, rowY, noCallCoverageResolver{t: t})
+	gotY, _, err := ResolveExemptionAuthority(context.Background(), in, rowY, noCallCoverageResolver{t: t})
 	if err != nil {
 		t.Fatalf("ResolveExemptionAuthority(rowY): %v", err)
 	}
@@ -849,7 +849,7 @@ func TestResolveExemptionAuthorityScopeCoverage(t *testing.T) {
 				Actors:      []governanceprincipal.PrincipalResolution{authorityResolve(t, "alice", authenticatedFact("alice"))},
 				Exemptions:  []policyartifact.Exemption{ex},
 			}
-			got, err := ResolveExemptionAuthority(context.Background(), in, row, tc.resolver)
+			got, _, err := ResolveExemptionAuthority(context.Background(), in, row, tc.resolver)
 			if err != nil {
 				t.Fatalf("ResolveExemptionAuthority: %v", err)
 			}
@@ -880,7 +880,7 @@ func TestResolveExemptionAuthorityScopeResolverFailure(t *testing.T) {
 		Profile:     referenceProfile(t),
 		Exemptions:  []policyartifact.Exemption{ex},
 	}
-	_, err := ResolveExemptionAuthority(context.Background(), in, row, resolver)
+	_, _, err := ResolveExemptionAuthority(context.Background(), in, row, resolver)
 	if err == nil {
 		t.Fatal("ResolveExemptionAuthority: want operational error on resolver failure, got nil")
 	}
@@ -900,7 +900,7 @@ func TestResolveExemptionAuthorityMissingResolverIsOperational(t *testing.T) {
 		Profile:     referenceProfile(t),
 		Exemptions:  []policyartifact.Exemption{ex},
 	}
-	_, err := ResolveExemptionAuthority(context.Background(), in, row, nil)
+	_, _, err := ResolveExemptionAuthority(context.Background(), in, row, nil)
 	if err == nil {
 		t.Fatal("ResolveExemptionAuthority: want operational error with a nil resolver and a nonuniversal different-ref pair, got nil")
 	}
@@ -938,7 +938,7 @@ func TestResolveExemptionAuthorityBound(t *testing.T) {
 				Profile:     referenceProfile(t),
 				Exemptions:  []policyartifact.Exemption{ex},
 			}
-			got, err := ResolveExemptionAuthority(context.Background(), in, row, noCallCoverageResolver{t: t})
+			got, _, err := ResolveExemptionAuthority(context.Background(), in, row, noCallCoverageResolver{t: t})
 			if err != nil {
 				t.Fatalf("ResolveExemptionAuthority: %v", err)
 			}
@@ -959,7 +959,7 @@ func TestResolveExemptionAuthorityMalformedEvaluatedOn(t *testing.T) {
 	for _, evaluatedOn := range []string{"", "not-a-date", "2026-13-40"} {
 		t.Run(fmt.Sprintf("evaluated_on=%q", evaluatedOn), func(t *testing.T) {
 			in := AuthorityInput{EvaluatedOn: evaluatedOn, Profile: referenceProfile(t)}
-			_, err := ResolveExemptionAuthority(context.Background(), in, row, nil)
+			_, _, err := ResolveExemptionAuthority(context.Background(), in, row, nil)
 			if err == nil {
 				t.Fatalf("ResolveExemptionAuthority: want operational error for evaluated_on %q, got nil", evaluatedOn)
 			}
@@ -975,7 +975,7 @@ func TestResolveExemptionAuthorityMalformedRow(t *testing.T) {
 	t.Run("stale carried claim digest", func(t *testing.T) {
 		row := authorityRow("row-1", []TypedClaimRecord{bad}, dims)
 		in := AuthorityInput{EvaluatedOn: "2026-01-01", Profile: referenceProfile(t)}
-		_, err := ResolveExemptionAuthority(context.Background(), in, row, nil)
+		_, _, err := ResolveExemptionAuthority(context.Background(), in, row, nil)
 		if err == nil {
 			t.Fatal("ResolveExemptionAuthority: want operational error for a hand-built row with a non-recomputing claim digest, got nil")
 		}
@@ -987,7 +987,7 @@ func TestResolveExemptionAuthorityMalformedRow(t *testing.T) {
 			Dimensions: []DimensionProof{universalDim("phase"), universalDim("environment"), universalDim("path")}, // no ref
 		})
 		in := AuthorityInput{EvaluatedOn: "2026-01-01", Profile: referenceProfile(t)}
-		_, err := ResolveExemptionAuthority(context.Background(), in, row, nil)
+		_, _, err := ResolveExemptionAuthority(context.Background(), in, row, nil)
 		if err != nil {
 			t.Fatalf("ResolveExemptionAuthority: unexpected error for a wire-legal subsequence scope proof with no applicable exemption: %v", err)
 		}
@@ -1007,7 +1007,7 @@ func TestResolveExemptionAuthorityDuplicateExemptionID(t *testing.T) {
 		Profile:     referenceProfile(t),
 		Exemptions:  []policyartifact.Exemption{e1, e2},
 	}
-	_, err := ResolveExemptionAuthority(context.Background(), in, row, noCallCoverageResolver{t: t})
+	_, _, err := ResolveExemptionAuthority(context.Background(), in, row, noCallCoverageResolver{t: t})
 	if err == nil {
 		t.Fatal("ResolveExemptionAuthority: want operational error for two different exemption artifacts sharing one id, got nil")
 	}
@@ -1027,7 +1027,7 @@ func TestResolveExemptionAuthoritySortedByID(t *testing.T) {
 		Profile:     referenceProfile(t),
 		Exemptions:  []policyartifact.Exemption{exZ, exA},
 	}
-	got, err := ResolveExemptionAuthority(context.Background(), in, row, noCallCoverageResolver{t: t})
+	got, _, err := ResolveExemptionAuthority(context.Background(), in, row, noCallCoverageResolver{t: t})
 	if err != nil {
 		t.Fatalf("ResolveExemptionAuthority: %v", err)
 	}
@@ -1074,7 +1074,7 @@ func TestResolveDispositionAuthorityExactMatchJudgeResult(t *testing.T) {
 		Actors:       []governanceprincipal.PrincipalResolution{authorityResolve(t, "alice", authenticatedFact("alice"))},
 		Dispositions: []policyartifact.Disposition{d},
 	}
-	got, err := ResolveDispositionAuthority(in, si, nil, nil)
+	got, _, err := ResolveDispositionAuthority(in, si, nil, nil)
 	if err != nil {
 		t.Fatalf("ResolveDispositionAuthority: %v", err)
 	}
@@ -1195,7 +1195,7 @@ func TestResolveDispositionAuthorityMismatch(t *testing.T) {
 				Actors:       []governanceprincipal.PrincipalResolution{authorityResolve(t, "alice", authenticatedFact("alice"))},
 				Dispositions: []policyartifact.Disposition{d},
 			}
-			got, err := ResolveDispositionAuthority(in, si, nil, nil)
+			got, _, err := ResolveDispositionAuthority(in, si, nil, nil)
 			if err != nil {
 				t.Fatalf("ResolveDispositionAuthority: %v", err)
 			}
@@ -1254,7 +1254,7 @@ func TestResolveDispositionAuthorityHumanFallbackBound(t *testing.T) {
 				Profile:      referenceProfile(t),
 				Dispositions: []policyartifact.Disposition{d},
 			}
-			got, err := ResolveDispositionAuthority(in, si, nil, nil)
+			got, _, err := ResolveDispositionAuthority(in, si, nil, nil)
 			if err != nil {
 				t.Fatalf("ResolveDispositionAuthority: %v", err)
 			}
@@ -1290,7 +1290,7 @@ func TestResolveDispositionAuthorityJudgeResultBoundIgnoresJudgeAvailability(t *
 	// primary and challenger are both absent (nil) — §8: currency depends
 	// only on the complete semantic-input witness, never on a live judge
 	// being available this run.
-	got, err := ResolveDispositionAuthority(in, si, nil, nil)
+	got, _, err := ResolveDispositionAuthority(in, si, nil, nil)
 	if err != nil {
 		t.Fatalf("ResolveDispositionAuthority: %v", err)
 	}
@@ -1317,7 +1317,7 @@ func TestResolveDispositionAuthorityJudgmentProvenanceNeverConsulted(t *testing.
 		Profile:      referenceProfile(t),
 		Dispositions: []policyartifact.Disposition{d},
 	}
-	got, err := ResolveDispositionAuthority(in, si, nil, nil)
+	got, _, err := ResolveDispositionAuthority(in, si, nil, nil)
 	if err != nil {
 		t.Fatalf("ResolveDispositionAuthority: %v", err)
 	}
@@ -1343,13 +1343,13 @@ func TestResolveDispositionAuthorityCrossSnapshotExchangeMismatch(t *testing.T) 
 	mismatched := &ValidatedExchange{RecordDigest: testDigest64B}
 
 	t.Run("primary", func(t *testing.T) {
-		_, err := ResolveDispositionAuthority(in, si, mismatched, nil)
+		_, _, err := ResolveDispositionAuthority(in, si, mismatched, nil)
 		if err == nil {
 			t.Fatal("ResolveDispositionAuthority: want operational error when primary was validated against a different semantic input, got nil")
 		}
 	})
 	t.Run("challenger", func(t *testing.T) {
-		_, err := ResolveDispositionAuthority(in, si, nil, mismatched)
+		_, _, err := ResolveDispositionAuthority(in, si, nil, mismatched)
 		if err == nil {
 			t.Fatal("ResolveDispositionAuthority: want operational error when challenger was validated against a different semantic input, got nil")
 		}
@@ -1361,7 +1361,7 @@ func TestResolveDispositionAuthorityMalformedEvaluatedOn(t *testing.T) {
 	for _, evaluatedOn := range []string{"", "not-a-date"} {
 		t.Run(fmt.Sprintf("evaluated_on=%q", evaluatedOn), func(t *testing.T) {
 			in := AuthorityInput{EvaluatedOn: evaluatedOn, Profile: referenceProfile(t)}
-			_, err := ResolveDispositionAuthority(in, si, nil, nil)
+			_, _, err := ResolveDispositionAuthority(in, si, nil, nil)
 			if err == nil {
 				t.Fatalf("ResolveDispositionAuthority: want operational error for evaluated_on %q, got nil", evaluatedOn)
 			}
@@ -1381,7 +1381,7 @@ func TestResolveDispositionAuthorityTargetDigestShape(t *testing.T) {
 	for _, tc := range []string{"", "not-a-digest", "sha256:abcd", "sha256:" + strings.Repeat("g", 64)} {
 		t.Run(fmt.Sprintf("target_digest=%q", tc), func(t *testing.T) {
 			in := AuthorityInput{EvaluatedOn: "2026-01-01", TargetDigest: tc, Profile: referenceProfile(t)}
-			_, err := ResolveDispositionAuthority(in, si, nil, nil)
+			_, _, err := ResolveDispositionAuthority(in, si, nil, nil)
 			if err == nil {
 				t.Fatalf("ResolveDispositionAuthority: want operational error for target_digest %q, got nil", tc)
 			}
@@ -1399,7 +1399,7 @@ func TestResolveDispositionAuthorityTargetDigestShape(t *testing.T) {
 		Profile:      referenceProfile(t),
 		Dispositions: []policyartifact.Disposition{d},
 	}
-	got, err := ResolveDispositionAuthority(in, si, nil, nil)
+	got, _, err := ResolveDispositionAuthority(in, si, nil, nil)
 	if err != nil {
 		t.Fatalf("ResolveDispositionAuthority: %v", err)
 	}
@@ -1410,7 +1410,7 @@ func TestResolveDispositionAuthorityTargetDigestShape(t *testing.T) {
 
 func TestResolveDispositionAuthorityMalformedSemanticInput(t *testing.T) {
 	in := AuthorityInput{EvaluatedOn: "2026-01-01", Profile: referenceProfile(t)}
-	_, err := ResolveDispositionAuthority(in, SemanticInput{}, nil, nil)
+	_, _, err := ResolveDispositionAuthority(in, SemanticInput{}, nil, nil)
 	if err == nil {
 		t.Fatal("ResolveDispositionAuthority: want operational error for a hand-built zero-value semantic input, got nil")
 	}
@@ -1437,7 +1437,7 @@ func TestResolveDispositionAuthorityDuplicateDispositionID(t *testing.T) {
 		Profile:      referenceProfile(t),
 		Dispositions: []policyartifact.Disposition{d1, d2},
 	}
-	_, err = ResolveDispositionAuthority(in, si, nil, nil)
+	_, _, err = ResolveDispositionAuthority(in, si, nil, nil)
 	if err == nil {
 		t.Fatal("ResolveDispositionAuthority: want operational error for two different disposition artifacts sharing one id, got nil")
 	}
@@ -1458,7 +1458,7 @@ func TestResolveDispositionAuthoritySortedByID(t *testing.T) {
 		Profile:      referenceProfile(t),
 		Dispositions: []policyartifact.Disposition{dZ, dA},
 	}
-	got, err := ResolveDispositionAuthority(in, si, nil, nil)
+	got, _, err := ResolveDispositionAuthority(in, si, nil, nil)
 	if err != nil {
 		t.Fatalf("ResolveDispositionAuthority: %v", err)
 	}
@@ -1474,11 +1474,12 @@ func TestResolveDispositionAuthoritySortedByID(t *testing.T) {
 // =============================================================================
 
 type authorizationCase struct {
-	name      string
-	profile   []byte
-	approvals []policyartifact.Approval
-	actors    []governanceprincipal.PrincipalResolution
-	want      ProofState
+	name            string
+	profile         []byte
+	approvals       []policyartifact.Approval
+	actors          []governanceprincipal.PrincipalResolution
+	want            ProofState
+	wantDisclosures []Disclosure
 }
 
 func authorizationCases(t *testing.T) []authorizationCase {
@@ -1511,6 +1512,10 @@ func authorizationCases(t *testing.T) []authorizationCase {
 				authorityResolve(t, "alice", authenticatedFact("alice")),
 			},
 			want: ProofProven,
+			wantDisclosures: []Disclosure{{
+				Code:      DisclosureSoloPrincipalCollapse,
+				Witnesses: []string{alice + ":author", alice + ":policy-owner"},
+			}},
 		},
 		{
 			name:    "team distinctness violated by collapse",
@@ -1610,7 +1615,7 @@ func TestResolveExemptionAuthorityAuthorization(t *testing.T) {
 				Actors:      tc.actors,
 				Exemptions:  []policyartifact.Exemption{ex},
 			}
-			got, err := ResolveExemptionAuthority(context.Background(), in, row, noCallCoverageResolver{t: t})
+			got, disclosures, err := ResolveExemptionAuthority(context.Background(), in, row, noCallCoverageResolver{t: t})
 			if err != nil {
 				t.Fatalf("ResolveExemptionAuthority: %v", err)
 			}
@@ -1619,6 +1624,13 @@ func TestResolveExemptionAuthorityAuthorization(t *testing.T) {
 			}
 			if got[0].Resolution.Authorization != tc.want {
 				t.Fatalf("Authorization = %q, want %q", got[0].Resolution.Authorization, tc.want)
+			}
+			wantDisclosures := tc.wantDisclosures
+			if wantDisclosures == nil {
+				wantDisclosures = []Disclosure{}
+			}
+			if !reflect.DeepEqual(disclosures, wantDisclosures) {
+				t.Fatalf("Disclosures = %+v, want exact authorization disclosures %+v", disclosures, wantDisclosures)
 			}
 		})
 	}
@@ -1641,7 +1653,7 @@ func TestResolveDispositionAuthorityAuthorization(t *testing.T) {
 				Actors:       tc.actors,
 				Dispositions: []policyartifact.Disposition{d},
 			}
-			got, err := ResolveDispositionAuthority(in, si, nil, nil)
+			got, disclosures, err := ResolveDispositionAuthority(in, si, nil, nil)
 			if err != nil {
 				t.Fatalf("ResolveDispositionAuthority: %v", err)
 			}
@@ -1651,8 +1663,83 @@ func TestResolveDispositionAuthorityAuthorization(t *testing.T) {
 			if got[0].Resolution.Authorization != tc.want {
 				t.Fatalf("Authorization = %q, want %q", got[0].Resolution.Authorization, tc.want)
 			}
+			wantDisclosures := tc.wantDisclosures
+			if wantDisclosures == nil {
+				wantDisclosures = []Disclosure{}
+			}
+			if !reflect.DeepEqual(disclosures, wantDisclosures) {
+				t.Fatalf("Disclosures = %+v, want exact authorization disclosures %+v", disclosures, wantDisclosures)
+			}
 		})
 	}
+}
+
+func TestResolveAuthorityDeduplicatesDisclosuresAcrossArtifacts(t *testing.T) {
+	alice := authorityPrincipalID(t, "alice")
+	approvals := []policyartifact.Approval{
+		{Role: "author", Principal: alice},
+		{Role: "policy-owner", Principal: alice},
+	}
+	actors := []governanceprincipal.PrincipalResolution{authorityResolve(t, "alice", authenticatedFact("alice"))}
+	want := []Disclosure{{
+		Code:      DisclosureSoloPrincipalCollapse,
+		Witnesses: []string{alice + ":author", alice + ":policy-owner"},
+	}}
+
+	t.Run("exemptions", func(t *testing.T) {
+		claim := authorityTypedClaim(t, "policy/policy-a", discreteClaim("c1", "level", policyartifact.OpAllowedValues, []string{"gold"}, universalScope()))
+		row := authorityRow("row-1", []TypedClaimRecord{claim}, fourDims(universalDim("phase"), universalDim("environment"), universalDim("path"), universalDim("ref")))
+		build := func(name string) policyartifact.Exemption {
+			return buildExemption(t, exemptionFixture{
+				Name: name, Scope: universalScope(), Approvals: approvals,
+				Witnesses: []policyartifact.Witness{{Policy: "policy/policy-a", Claim: "c1", ClaimDigest: claim.ClaimDigest}},
+			})
+		}
+		in := AuthorityInput{
+			EvaluatedOn: "2026-01-01",
+			Profile:     decodeAuthorityProfile(t, authorityProfileYAML("solo")),
+			Actors:      actors,
+			Exemptions:  []policyartifact.Exemption{build("collapse-b"), build("collapse-a")},
+		}
+		resolutions, disclosures, err := ResolveExemptionAuthority(context.Background(), in, row, noCallCoverageResolver{t: t})
+		if err != nil {
+			t.Fatalf("ResolveExemptionAuthority: %v", err)
+		}
+		if len(resolutions) != 2 {
+			t.Fatalf("resolutions = %+v, want both applicable artifacts", resolutions)
+		}
+		if !reflect.DeepEqual(disclosures, want) {
+			t.Fatalf("Disclosures = %+v, want one sorted deduplicated disclosure %+v", disclosures, want)
+		}
+	})
+
+	t.Run("dispositions", func(t *testing.T) {
+		si := authoritySemanticInput(t)
+		inputDigest, err := semanticInputDigest(si)
+		if err != nil {
+			t.Fatalf("semanticInputDigest: %v", err)
+		}
+		build := func(name string) policyartifact.Disposition {
+			return matchingDispositionFixture(t, name, policyartifact.DispositionJudgeResult, si, inputDigest, testDigest64B, approvals)
+		}
+		in := AuthorityInput{
+			EvaluatedOn:  "2026-01-01",
+			TargetDigest: testDigest64B,
+			Profile:      decodeAuthorityProfile(t, authorityProfileYAML("solo")),
+			Actors:       actors,
+			Dispositions: []policyartifact.Disposition{build("collapse-b"), build("collapse-a")},
+		}
+		resolutions, disclosures, err := ResolveDispositionAuthority(in, si, nil, nil)
+		if err != nil {
+			t.Fatalf("ResolveDispositionAuthority: %v", err)
+		}
+		if len(resolutions) != 2 {
+			t.Fatalf("resolutions = %+v, want both applicable artifacts", resolutions)
+		}
+		if !reflect.DeepEqual(disclosures, want) {
+			t.Fatalf("Disclosures = %+v, want one sorted deduplicated disclosure %+v", disclosures, want)
+		}
+	})
 }
 
 // TestResolveExemptionAuthorityUnlistedTransition proves SI-113/§9's
@@ -1676,7 +1763,7 @@ func TestResolveExemptionAuthorityUnlistedTransition(t *testing.T) {
 		Actors:      []governanceprincipal.PrincipalResolution{authorityResolve(t, "alice", authenticatedFact("alice"))},
 		Exemptions:  []policyartifact.Exemption{ex},
 	}
-	got, err := ResolveExemptionAuthority(context.Background(), in, row, noCallCoverageResolver{t: t})
+	got, _, err := ResolveExemptionAuthority(context.Background(), in, row, noCallCoverageResolver{t: t})
 	if err != nil {
 		t.Fatalf("ResolveExemptionAuthority: %v", err)
 	}
@@ -1705,7 +1792,7 @@ func TestResolveDispositionAuthorityUnlistedTransition(t *testing.T) {
 		Actors:       []governanceprincipal.PrincipalResolution{authorityResolve(t, "alice", authenticatedFact("alice"))},
 		Dispositions: []policyartifact.Disposition{d},
 	}
-	got, err := ResolveDispositionAuthority(in, si, nil, nil)
+	got, _, err := ResolveDispositionAuthority(in, si, nil, nil)
 	if err != nil {
 		t.Fatalf("ResolveDispositionAuthority: %v", err)
 	}
@@ -1732,9 +1819,12 @@ func TestResolveExemptionAuthorityZeroValuePrincipalResolutionRejected(t *testin
 		Actors:      []governanceprincipal.PrincipalResolution{{}}, // zero value: never produced by Resolver.Resolve
 		Exemptions:  []policyartifact.Exemption{ex},
 	}
-	_, err := ResolveExemptionAuthority(context.Background(), in, row, noCallCoverageResolver{t: t})
+	_, disclosures, err := ResolveExemptionAuthority(context.Background(), in, row, noCallCoverageResolver{t: t})
 	if err == nil {
 		t.Fatal("ResolveExemptionAuthority: want operational error for a zero-value (unsealed) PrincipalResolution, got nil")
+	}
+	if disclosures != nil {
+		t.Fatalf("Disclosures = %+v, want nil on operational failure", disclosures)
 	}
 }
 
@@ -1752,8 +1842,11 @@ func TestResolveDispositionAuthorityZeroValuePrincipalResolutionRejected(t *test
 		Actors:       []governanceprincipal.PrincipalResolution{{}},
 		Dispositions: []policyartifact.Disposition{d},
 	}
-	_, err = ResolveDispositionAuthority(in, si, nil, nil)
+	_, disclosures, err := ResolveDispositionAuthority(in, si, nil, nil)
 	if err == nil {
 		t.Fatal("ResolveDispositionAuthority: want operational error for a zero-value (unsealed) PrincipalResolution, got nil")
+	}
+	if disclosures != nil {
+		t.Fatalf("Disclosures = %+v, want nil on operational failure", disclosures)
 	}
 }
