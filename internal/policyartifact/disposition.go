@@ -161,12 +161,15 @@ type SemanticExemptionWitness struct {
 
 // SemanticWitness is the complete semantic-input identity a disposition
 // binds to: the target/candidate identity digest, and the exact sorted
-// claim and exemption witness sets. InputID is the canonical digest of
-// exactly this complete witness identity with InputID itself cleared
-// (§8: "The semantic-input ID is the canonical digest of exactly that
-// complete witness identity") — DecodeDisposition proves the two agree,
-// so a disposition can never be pointed at a witness it does not
-// actually describe.
+// claim and exemption witness sets. InputID is the Task 7 canonical
+// runtime digest over the complete normalized prose claims,
+// unknown-mechanical witnesses, and applicable exemption identities (§8)
+// — a digest over strictly more than this witness's own smaller
+// claim/exemption/target projection can express. DecodeDisposition
+// validates only InputID's digest form; it can no longer prove, and must
+// not fabricate, agreement with the witness content it accompanies
+// (SI-114). internal/policyconflict is the sole seam that compares
+// InputID to the current runtime semantic input.
 type SemanticWitness struct {
 	InputID      string                     `json:"input_id"`
 	TargetDigest string                     `json:"target_digest"`
@@ -264,20 +267,12 @@ type dispositionDoc struct {
 	ReviewCondition      *string                `yaml:"review_condition"`
 }
 
-// witnessInputID computes the semantic-input ID: the canonical digest of
-// w's complete witness identity with InputID itself cleared (§8). Both
-// DecodeDisposition's agreement check and fixture authors computing a
-// witness's real input_id call this one function, so the two can never
-// drift.
-func witnessInputID(w SemanticWitness) (string, error) {
-	w.InputID = ""
-	return canonjson.Digest(w)
-}
-
 // DecodeDisposition strictly decodes data as a verdi.policy-disposition/v1
 // artifact, validates its semantic-witness and origin-specific grammar,
-// normalizes it, proves its input_id agrees with its own witness content,
-// and seals the result.
+// normalizes it, and seals the result. It validates witness.input_id's
+// digest form but does not self-derive or compare it against the
+// artifact's own (smaller) claim/exemption/target projection — see
+// SemanticWitness's doc comment (SI-114, §8).
 func DecodeDisposition(data []byte) (*Disposition, error) {
 	fm, body, err := artifact.SplitFrontmatter(data)
 	if err != nil {
@@ -477,13 +472,16 @@ func DecodeDisposition(data []byte) (*Disposition, error) {
 	return d, nil
 }
 
-// decodeSemanticWitness validates and normalizes wd into a SemanticWitness,
-// then proves its declared input_id agrees with the canonical digest of
-// its own (normalized) content. Claims and exemptions must both arrive
-// strictly sorted by id with no duplicates — an unsorted or duplicate
-// witness set fails closed rather than being silently reordered, so a
-// witness's on-disk byte order is never load-bearing evidence of anything
-// this package re-derives.
+// decodeSemanticWitness validates and normalizes wd into a SemanticWitness.
+// input_id is validated for mandatory presence and sha256:<64 hex> digest
+// shape only; this package no longer self-derives a second semantic-input
+// identity from the witness's own smaller claim/exemption/target
+// projection to compare against it (SI-114, §8) — internal/policyconflict
+// alone proves agreement with the current runtime semantic input. Claims
+// and exemptions must both arrive strictly sorted by id with no
+// duplicates — an unsorted or duplicate witness set fails closed rather
+// than being silently reordered, so a witness's on-disk byte order is
+// never load-bearing evidence of anything this package re-derives.
 func decodeSemanticWitness(wd semanticWitnessDoc) (SemanticWitness, error) {
 	missing := func(field string) error {
 		return fmt.Errorf("policyartifact: disposition witness field %s is missing: every witness field is mandatory (exemptions' explicit empty set is [])", field)
@@ -499,6 +497,9 @@ func decodeSemanticWitness(wd semanticWitnessDoc) (SemanticWitness, error) {
 	}
 	if wd.Exemptions == nil {
 		return SemanticWitness{}, missing("exemptions")
+	}
+	if !sha256Re.MatchString(*wd.InputID) {
+		return SemanticWitness{}, fmt.Errorf("policyartifact: disposition witness input_id %q is not sha256:<64 hex> form", *wd.InputID)
 	}
 	if !sha256Re.MatchString(*wd.TargetDigest) {
 		return SemanticWitness{}, fmt.Errorf("policyartifact: disposition witness target_digest %q is not sha256:<64 hex> form", *wd.TargetDigest)
@@ -567,13 +568,6 @@ func decodeSemanticWitness(wd semanticWitnessDoc) (SemanticWitness, error) {
 		TargetDigest: *wd.TargetDigest,
 		Claims:       claims,
 		Exemptions:   exemptions,
-	}
-	want, err := witnessInputID(w)
-	if err != nil {
-		return SemanticWitness{}, err
-	}
-	if w.InputID != want {
-		return SemanticWitness{}, fmt.Errorf("policyartifact: disposition witness input_id mismatch: got %q want %q (input_id is the canonical digest of the witness identity with input_id cleared)", w.InputID, want)
 	}
 	return w, nil
 }
