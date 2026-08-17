@@ -140,6 +140,9 @@ func TestBuildSemanticInput_PromptRatchet(t *testing.T) {
 	if !strings.Contains(semanticPrompt, "complete policy-bound typed claim records and exact scope proof") {
 		t.Fatal("semanticPrompt does not describe the lossless unknown-mechanical witness it sends")
 	}
+	if strings.Contains(semanticPrompt, "unknown-scope witnesses") || !strings.Contains(semanticPrompt, "Considering ALL claims and unknown mechanical witnesses") {
+		t.Fatal("semanticPrompt describes the carried witnesses as scope-only rather than the complete SI-110 unknown-mechanical set")
+	}
 	// Ratchet: two calls over the same fixed constant always digest
 	// identically — this is the ratchet property Step 1 asks for; the
 	// content assertions above are what actually catches a topic being

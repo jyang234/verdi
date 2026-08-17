@@ -40,7 +40,7 @@ const semanticPrompt = `You are evaluating a closed set of normalized, human-aut
 
 Each claim below carries its own id, category, scope, governing authority digest, and normalized text. Some claims are typed constraints whose exact scope relationship to the group could not be proven mechanically and are included as unknown mechanical witnesses with complete policy-bound typed claim records and exact scope proof; they carry no authored prose. Every other claim is prose and its full authored text is included.
 
-Considering ALL claims and unknown-scope witnesses together as one group, and any exemption identities listed as already-authorized departures from named claims, determine:
+Considering ALL claims and unknown mechanical witnesses together as one group, and any exemption identities listed as already-authorized departures from named claims, determine:
 
 1. Overlap: do any two or more claims apply to the same subject at the same time?
 2. Simultaneous satisfiability: can every overlapping claim be honored at once, or does honoring one require violating another?
