@@ -432,6 +432,88 @@ func TestServiceEvaluateActorPermutationIsDeterministic(t *testing.T) {
 	assertSameReportBytes(t, first.ReportBytes, second.ReportBytes)
 }
 
+func TestServiceEvaluateSealedCollectionPermutationsAreDeterministic(t *testing.T) {
+	repo, request, actors, _, _ := serviceDispositionRepo(t)
+	duplicateAuthorityArtifact(t, repo,
+		".verdi/policy/exemptions/legacy-service-go.md",
+		".verdi/policy/exemptions/zzz-legacy-service-go.md",
+		"id: policy-exemption/legacy-service-go", "id: policy-exemption/zzz-legacy-service-go")
+	duplicateAuthorityArtifact(t, repo,
+		".verdi/policy/dispositions/current-no-conflict.md",
+		".verdi/policy/dispositions/zzz-current-no-conflict.md",
+		"id: policy-disposition/current-no-conflict", "id: policy-disposition/zzz-current-no-conflict")
+	if _, err := instructionprojection.Generate(repo.Dir); err != nil {
+		t.Fatalf("instructionprojection.Generate: %v", err)
+	}
+	runOperandGit(t, repo.Dir, "add", "-A")
+	runOperandGit(t, repo.Dir, "commit", "--quiet", "--no-verify", "-m", "add determinism operands")
+	repo.Head = strings.TrimSpace(runOperandGit(t, repo.Dir, "rev-parse", "HEAD"))
+
+	bob := authorityResolve(t, "bob", authenticatedFact("bob"))
+	actorOrders := [][]governanceprincipal.PrincipalResolution{
+		{actors[0], bob},
+		{bob, actors[0]},
+	}
+	judge := serviceNoConflictJudge()
+	var first []byte
+	for i := 0; i < 8; i++ {
+		service := NewService(repo.Dir, ServiceDeps{
+			Compiler: contextcompile.NewCompiler(), Refs: noCallResolver{t: t}, Primary: judge,
+			Dates: serviceDateSource("2026-08-12"), Actors: actorOrders[i%len(actorOrders)],
+		})
+		result, err := service.Evaluate(context.Background(), request)
+		if err != nil {
+			t.Fatalf("Evaluate permutation %d: %v", i, err)
+		}
+		if i == 0 {
+			first = append([]byte(nil), result.ReportBytes...)
+		} else {
+			assertSameReportBytes(t, first, result.ReportBytes)
+		}
+		if len(result.Report.Input.PolicyEntries) < 3 || !sort.SliceIsSorted(result.Report.Input.PolicyEntries, func(i, j int) bool {
+			left, right := result.Report.Input.PolicyEntries[i], result.Report.Input.PolicyEntries[j]
+			return left.Kind+"\x00"+left.ID < right.Kind+"\x00"+right.ID
+		}) {
+			t.Fatalf("policy entries are not the complete canonical order: %+v", result.Report.Input.PolicyEntries)
+		}
+		row := result.Report.Semantic[0]
+		if !sort.SliceIsSorted(row.Claims, func(i, j int) bool { return row.Claims[i].ID < row.Claims[j].ID }) {
+			t.Fatalf("semantic claims are not canonical: %+v", row.Claims)
+		}
+		if len(row.Dispositions) != 2 || !sort.SliceIsSorted(row.Dispositions, func(i, j int) bool { return row.Dispositions[i].ID < row.Dispositions[j].ID }) {
+			t.Fatalf("dispositions are not complete/canonical: %+v", row.Dispositions)
+		}
+	}
+	if len(judge.inputs) != 8 {
+		t.Fatalf("judge inputs = %d, want one per sealed evaluation", len(judge.inputs))
+	}
+	for i, input := range judge.inputs {
+		var shown semanticInputWitnessDoc
+		if err := json.Unmarshal(input, &shown); err != nil {
+			t.Fatalf("decode judge input %d: %v", i, err)
+		}
+		if len(shown.Exemptions) != 2 || !sort.SliceIsSorted(shown.Exemptions, func(i, j int) bool { return shown.Exemptions[i].ID < shown.Exemptions[j].ID }) {
+			t.Fatalf("judge input %d exemptions are not complete/canonical: %+v", i, shown.Exemptions)
+		}
+	}
+}
+
+func duplicateAuthorityArtifact(t *testing.T, repo *fixturegit.Repo, source, target, oldID, newID string) {
+	t.Helper()
+	raw, err := os.ReadFile(filepath.Join(repo.Dir, filepath.FromSlash(source)))
+	if err != nil {
+		t.Fatalf("read %s: %v", source, err)
+	}
+	changed := strings.Replace(string(raw), oldID, newID, 1)
+	if changed == string(raw) {
+		t.Fatalf("%s does not contain %q", source, oldID)
+	}
+	path := filepath.Join(repo.Dir, filepath.FromSlash(target))
+	if err := os.WriteFile(path, []byte(changed), 0o644); err != nil {
+		t.Fatalf("write %s: %v", target, err)
+	}
+}
+
 func TestServiceEvaluateDispositionAndExemptionUseOneSemanticIdentity(t *testing.T) {
 	repo, request, actors, baselineInputID, baselineAuthorityDigest := serviceDispositionRepo(t)
 	judge := serviceNoConflictJudge()
@@ -473,6 +555,193 @@ func TestServiceEvaluateDispositionAndExemptionUseOneSemanticIdentity(t *testing
 	if len(result.Report.Input.PolicyEntries) == 0 {
 		t.Fatal("applicable sealed policy-entry ledger is empty")
 	}
+}
+
+func TestServiceEvaluateSealedDispositionOutcomes(t *testing.T) {
+	t.Run("effective conflict", func(t *testing.T) {
+		repo, request, actors, _, _ := serviceDispositionRepo(t)
+		rewriteDisposition(t, repo, func(body string) string {
+			return strings.Replace(body, "conclusion: no-conflict", "conclusion: conflict", 1)
+		})
+		service := NewService(repo.Dir, ServiceDeps{
+			Compiler: contextcompile.NewCompiler(), Refs: noCallResolver{t: t}, Primary: serviceNoConflictJudge(),
+			Dates: serviceDateSource("2026-08-12"), Actors: actors,
+		})
+		result, err := service.Evaluate(context.Background(), request)
+		if err != nil {
+			t.Fatalf("Evaluate: %v", err)
+		}
+		row := result.Report.Semantic[0]
+		if result.Report.Verdict != VerdictBlockedViolated || row.State != ProofViolatedWithWitness || !containsReason(row.Reasons, ReasonDispositionEffectiveConflict) {
+			t.Fatalf("report = %+v, want sealed effective-conflict violation", result.Report)
+		}
+		if len(row.Dispositions) != 1 || !allProven(row.Dispositions[0].Resolution) {
+			t.Fatalf("dispositions = %+v, want one all-proven conflict disposition", row.Dispositions)
+		}
+	})
+
+	t.Run("stale exact target", func(t *testing.T) {
+		repo, request, actors, _, _ := serviceDispositionRepo(t)
+		rewriteDisposition(t, repo, func(body string) string {
+			lines := strings.Split(body, "\n")
+			for i, line := range lines {
+				if strings.HasPrefix(line, "  target_digest:") {
+					lines[i] = "  target_digest: \"" + testDigest64 + "\""
+				}
+			}
+			return strings.Join(lines, "\n")
+		})
+		service := NewService(repo.Dir, ServiceDeps{
+			Compiler: contextcompile.NewCompiler(), Refs: noCallResolver{t: t}, Primary: serviceNoConflictJudge(),
+			Dates: serviceDateSource("2026-08-12"), Actors: actors,
+		})
+		result, err := service.Evaluate(context.Background(), request)
+		if err != nil {
+			t.Fatalf("Evaluate: %v", err)
+		}
+		row := result.Report.Semantic[0]
+		resolution := row.Dispositions[0].Resolution
+		if result.Report.Verdict != VerdictBlockedUnproven || row.State != ProofUnproven || resolution.Match != ProofViolatedWithWitness || resolution.Freshness != ProofViolatedWithWitness || !containsReason(row.Reasons, ReasonDispositionIneffective) {
+			t.Fatalf("report = %+v, want stale disposition retained and ineffective", result.Report)
+		}
+	})
+
+	t.Run("unauthorized approval", func(t *testing.T) {
+		repo, request, _, _, _ := serviceDispositionRepo(t)
+		service := NewService(repo.Dir, ServiceDeps{
+			Compiler: contextcompile.NewCompiler(), Refs: noCallResolver{t: t}, Primary: serviceNoConflictJudge(),
+			Dates: serviceDateSource("2026-08-12"), Actors: []governanceprincipal.PrincipalResolution{},
+		})
+		result, err := service.Evaluate(context.Background(), request)
+		if err != nil {
+			t.Fatalf("Evaluate: %v", err)
+		}
+		row := result.Report.Semantic[0]
+		resolution := row.Dispositions[0].Resolution
+		if result.Report.Verdict != VerdictBlockedUnproven || row.State != ProofUnproven || resolution.Authorization != ProofUnproven || resolution.Match != ProofProven || !containsReason(row.Reasons, ReasonDispositionIneffective) {
+			t.Fatalf("report = %+v, want current but unauthorized disposition retained and ineffective", result.Report)
+		}
+	})
+}
+
+func TestServiceEvaluateSealedHighAssuranceJudgmentPosture(t *testing.T) {
+	tests := []struct {
+		name       string
+		challenger Judge
+		wantReason []ReasonCode
+	}{
+		{name: "missing challenger", wantReason: []ReasonCode{ReasonChallengerUnavailable}},
+		{name: "disagreeing challenger", challenger: serviceInconclusiveJudge(JudgeChallenger), wantReason: []ReasonCode{ReasonJudgeInconclusive, ReasonJudgmentDisagreement}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			repo := highAssuranceServiceRepo(t)
+			service := NewService(repo.Dir, ServiceDeps{
+				Compiler: contextcompile.NewCompiler(), Refs: noCallResolver{t: t}, Primary: serviceNoConflictJudge(), Challenger: test.challenger,
+				Dates: serviceDateSource("2026-08-12"),
+			})
+			result, err := service.Evaluate(context.Background(), serviceAcceptedRequest())
+			if err != nil {
+				t.Fatalf("Evaluate: %v", err)
+			}
+			if result.Report.Verdict != VerdictBlockedUnproven || len(result.Report.Semantic) != 1 || result.Report.Semantic[0].State != ProofUnproven {
+				t.Fatalf("report = %+v, want one sealed high-assurance unproven row", result.Report)
+			}
+			for _, reason := range test.wantReason {
+				if !containsReason(result.Report.Semantic[0].Reasons, reason) {
+					t.Fatalf("reasons = %v, want %q", result.Report.Semantic[0].Reasons, reason)
+				}
+			}
+		})
+	}
+}
+
+func TestServiceEvaluateSealedExperimentalPosture(t *testing.T) {
+	files := operandPolicyStoreFiles(t)
+	profilePath := ".verdi/policy/profiles/solo-default.md"
+	files[profilePath] = strings.Replace(files[profilePath], "class: solo", "class: experimental", 1)
+	files[".verdi/specs/active/operand-feature/spec.md"] = operandFeatureSpec
+	repo := buildServiceRepo(t, files, "experimental posture")
+	service := NewService(repo.Dir, ServiceDeps{
+		Compiler: contextcompile.NewCompiler(), Refs: noCallResolver{t: t}, Primary: serviceNoConflictJudge(), Dates: serviceDateSource("2026-08-12"),
+	})
+	result, err := service.Evaluate(context.Background(), serviceAcceptedRequest())
+	if err != nil {
+		t.Fatalf("Evaluate: %v", err)
+	}
+	if result.Report.Verdict != VerdictBlockedUnproven || len(result.Report.Mechanical) != 0 || len(result.Report.Semantic) != 1 || !containsReason(result.Report.Semantic[0].Reasons, ReasonProfileExperimental) {
+		t.Fatalf("report = %+v, want clean mechanical posture blocked only at semantic experimental proof", result.Report)
+	}
+}
+
+func rewriteDisposition(t *testing.T, repo *fixturegit.Repo, mutate func(string) string) {
+	t.Helper()
+	path := filepath.Join(repo.Dir, ".verdi", "policy", "dispositions", "current-no-conflict.md")
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read disposition: %v", err)
+	}
+	changed := mutate(string(raw))
+	if changed == string(raw) {
+		t.Fatal("disposition mutation did not change the fixture")
+	}
+	if err := os.WriteFile(path, []byte(changed), 0o644); err != nil {
+		t.Fatalf("write disposition: %v", err)
+	}
+	if _, err := instructionprojection.Generate(repo.Dir); err != nil {
+		t.Fatalf("instructionprojection.Generate: %v", err)
+	}
+	runOperandGit(t, repo.Dir, "add", "-A")
+	runOperandGit(t, repo.Dir, "commit", "--quiet", "--no-verify", "-m", "change disposition")
+	repo.Head = strings.TrimSpace(runOperandGit(t, repo.Dir, "rev-parse", "HEAD"))
+}
+
+func highAssuranceServiceRepo(t *testing.T) *fixturegit.Repo {
+	t.Helper()
+	files := operandPolicyStoreFiles(t)
+	delete(files, ".verdi/policy/profiles/solo-default.md")
+	files[".verdi/policy/profiles/high-default.md"] = `---
+schema: verdi.governance-profile/v1
+id: high-default
+class: high-assurance
+applicable_transitions: [accept]
+identity_trust_sources:
+  - {id: github-org, kind: forge}
+  - {id: git-signature, kind: signed-commit}
+  - {id: codeowners, kind: ownership}
+role_mappings:
+  - {role: author, trust_source: github-org, subjects: [alice]}
+  - {role: policy-owner, trust_source: github-org, subjects: [bob]}
+ownership_sources:
+  - {id: owner-check, trust_source: codeowners, transitions: [accept], roles: [policy-owner]}
+signature_requirements:
+  - {transitions: [accept], roles: [policy-owner], trust_sources: [git-signature]}
+required_approvers:
+  - {transitions: [accept], roles: [policy-owner], minimum: 1}
+distinctness_rules:
+  - {transitions: [accept], left_role: author, right_role: policy-owner, relation: different-principal}
+evidence_source_restrictions:
+  - {transitions: [accept], allowed_sources: [ci]}
+escalation_thresholds: []
+---
+High-assurance fixture profile.
+`
+	files[".verdi/policy/constitution.md"] = strings.Replace(files[".verdi/policy/constitution.md"], "selected_profile: solo-default", "selected_profile: high-default", 1)
+	files[".verdi/specs/active/operand-feature/spec.md"] = operandFeatureSpec
+	return buildServiceRepo(t, files, "high assurance posture")
+}
+
+func buildServiceRepo(t *testing.T, files map[string]string, message string) *fixturegit.Repo {
+	t.Helper()
+	repo := fixturegit.Build(t, []fixturegit.Layer{{Files: files, Message: message}})
+	t.Setenv("CI_DEFAULT_BRANCH", "main")
+	if _, err := instructionprojection.Generate(repo.Dir); err != nil {
+		t.Fatalf("instructionprojection.Generate: %v", err)
+	}
+	runOperandGit(t, repo.Dir, "add", "-A")
+	runOperandGit(t, repo.Dir, "commit", "--quiet", "--no-verify", "-m", "generate instruction projection")
+	repo.Head = strings.TrimSpace(runOperandGit(t, repo.Dir, "rev-parse", "HEAD"))
+	return repo
 }
 
 func serviceDispositionRepo(t *testing.T) (*fixturegit.Repo, Request, []governanceprincipal.PrincipalResolution, string, string) {
