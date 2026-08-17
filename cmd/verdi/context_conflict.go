@@ -17,9 +17,6 @@ import (
 	"github.com/jyang234/verdi/internal/store"
 )
 
-// vocab:identity — CLI usage/flag grammar (identity)
-const contextConflictUsage = "usage: verdi context conflict --request <path|-> [--out <path>]"
-
 type contextConflictProviderFactory func(string, policyconflict.Request) (policyconflict.VerdictProvider, error)
 
 // cmdContextConflict exposes the one Task-9 evaluator as a read-only CLI
