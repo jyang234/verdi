@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+
+	"github.com/jyang234/verdi/internal/canonjson"
 )
 
 // hexDigest returns a deterministic, shape-valid sha256:<64 hex> digest for
@@ -17,13 +19,18 @@ func hexDigest(seed string) string {
 	return "sha256:" + hex.EncodeToString(sum[:])
 }
 
-// mustWitnessInputID computes w's real input_id via the same function
-// DecodeDisposition itself verifies against, so a test document's
-// input_id can never silently drift from what decode actually recomputes.
-func mustWitnessInputID(w SemanticWitness) string {
-	id, err := witnessInputID(w)
+// testDerivedWitnessDigest computes the canonical digest of w's witness
+// identity with InputID cleared — the same shape the real Task 7 runtime
+// semantic-input digest takes (§8). It exists only so dispoWitness's
+// shared fixture value can be computed rather than hand-typed; SI-114
+// removed the decoder's own equivalent self-derivation, so nothing in
+// this package still ties input_id to this computation — see the
+// dedicated non-derivable-input_id case in TestDecodeDisposition_StrictUnion.
+func testDerivedWitnessDigest(w SemanticWitness) string {
+	w.InputID = ""
+	id, err := canonjson.Digest(w)
 	if err != nil {
-		panic(fmt.Sprintf("witnessInputID: %v", err))
+		panic(fmt.Sprintf("testDerivedWitnessDigest: %v", err))
 	}
 	return id
 }
@@ -40,8 +47,7 @@ var (
 	dispoTemplateDigest    = hexDigest("test-dispo-template")
 
 	// dispoWitness is the canonical two-claim, one-exemption semantic
-	// witness every valid test document shares. Its content, not its
-	// digest, is authoritative; dispoInputID is derived FROM it.
+	// witness every valid test document shares.
 	dispoWitness = SemanticWitness{
 		TargetDigest: dispoTargetDigest,
 		Claims: []SemanticClaimWitness{
@@ -66,7 +72,14 @@ var (
 			{ID: "policy-exemption/legacy-service-go", Digest: dispoExemptionDigest},
 		},
 	}
-	dispoInputID = mustWitnessInputID(dispoWitness)
+	// dispoInputID happens to be the digest testDerivedWitnessDigest
+	// computes from dispoWitness, purely as a stable, non-hand-typed
+	// fixture value — SI-114 (§8) means the decoder no longer requires or
+	// checks this agreement; see the dedicated
+	// "witness input_id need not derive from..." case below for a
+	// well-formed input_id that is deliberately NOT derivable and still
+	// decodes.
+	dispoInputID = testDerivedWitnessDigest(dispoWitness)
 )
 
 // dispoWitnessBlock is the shared "witness:" frontmatter block every valid
@@ -288,6 +301,27 @@ func TestDecodeDisposition_StrictUnion(t *testing.T) {
 		}
 	})
 
+	// SI-114 (§8): the decoder validates witness.input_id's digest form
+	// only. It no longer self-derives a second semantic-input identity
+	// from the artifact's own smaller claim/exemption/target projection
+	// and compares the two — that agreement (against the current runtime
+	// semantic input) is Task 8's (internal/policyconflict) concern alone.
+	// A well-formed input_id that this witness's own content could never
+	// have produced must still decode successfully.
+	t.Run("happy: witness input_id need not derive from the artifact's own projection", func(t *testing.T) {
+		runtimeInputID := hexDigest("runtime-semantic-input-not-derivable-from-witness")
+		doc := strings.Replace(validJudgeResultDispositionDoc(),
+			fmt.Sprintf("input_id: %q", dispoInputID),
+			fmt.Sprintf("input_id: %q", runtimeInputID), 1)
+		d, err := DecodeDisposition([]byte(doc))
+		if err != nil {
+			t.Fatalf("DecodeDisposition: %v", err)
+		}
+		if d.Witness.InputID != runtimeInputID {
+			t.Fatalf("Witness.InputID = %q, want %q", d.Witness.InputID, runtimeInputID)
+		}
+	})
+
 	// Approvals are a normalized SET, not authored order: a document may
 	// list them any way and still decode to one canonical role-then-principal
 	// sequence, so two stores recording the same approval facts share a
@@ -375,7 +409,7 @@ func TestDecodeDisposition_StrictUnion(t *testing.T) {
 		{"bad claim digest form", strings.Replace(validJudgeResultDispositionDoc(), fmt.Sprintf("digest: %q\n      category: acceptance-criterion", dispoClaimACDigest), `digest: "nothex"
       category: acceptance-criterion`, 1), "digest"},
 		{"bad exemption id form", strings.Replace(validJudgeResultDispositionDoc(), "id: policy-exemption/legacy-service-go", "id: legacy-service-go", 1), "form"},
-		{"input_id mismatch", strings.Replace(validJudgeResultDispositionDoc(), fmt.Sprintf("input_id: %q", dispoInputID), fmt.Sprintf("input_id: %q", hexDigest("wrong-input-id")), 1), "input_id mismatch"},
+		{"malformed witness.input_id", strings.Replace(validJudgeResultDispositionDoc(), fmt.Sprintf("input_id: %q", dispoInputID), `input_id: "nothex"`, 1), "input_id"},
 		{"invalid expiry date", strings.Replace(validHumanFallbackDispositionDoc(false), `expiry: "2026-12-31"`, `expiry: "2026-02-31"`, 1), "calendar date"},
 		{"blank compensating control", strings.Replace(validHumanFallbackDispositionDoc(false), `"Weekly manual review of the overlapping claims."`, `""`, 1), "empty control"},
 		{"multiline compensating control", strings.Replace(validHumanFallbackDispositionDoc(false), `"Weekly manual review of the overlapping claims."`, "\"line one\\nline two\"", 1), "single line"},
