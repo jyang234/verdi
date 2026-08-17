@@ -1337,11 +1337,15 @@ git commit -m "Authorize policy conflict departures"
 - Produces:
 
 ~~~go
+type TreeHasher interface {
+    TreeHash(context.Context, string) (string, error)
+}
 type ServiceDeps struct {
     Compiler contextcompile.Compiler
     Refs RefRelationResolver
     Primary Judge
     Challenger Judge
+    TreeHasher TreeHasher
     Dates DateSource
     // managed callers may inject sealed actor facts; local construction does not
     Actors []governanceprincipal.PrincipalResolution
@@ -1384,6 +1388,16 @@ constructible without a digest fixed point; the aggregate effective-policy and
 accepted-manifest digests remain separately bound in the report input and the
 effective-policy digest remains in the judgment cache key.
 
+Prove a concrete `JudgeAdapter` reaches the existing immutable cache-aware
+entry: the second identical evaluation must return the validated cached
+exchange without launching the runner, and a missing, malformed, or failed D4
+tree-hash fact must fail operationally with no report. Custom non-process
+`Judge` fakes remain direct ports and require no cache/tree-hash dependency.
+Prove strict report decode rejects a self-consistent digest whose verdict does
+not equal the carried rows and blocking disclosures. Prove a schema-valid
+judge explanation containing the exact absolute checkout root is rejected
+before any report bytes are returned.
+
 - [ ] **Step 2: Run the focused RED**
 
 ~~~bash
@@ -1404,6 +1418,18 @@ failures return typed operational errors and no report. Return a typed
 not-adopted refusal before semantic work. `ProbeAdoption` delegates to
 `policyauthority.Load`: only `ErrNotAdopted` returns `(false,nil)`; incomplete,
 malformed, or symlinked policy stores remain operational errors.
+
+After the one semantic input exists, a concrete value or pointer
+`JudgeAdapter` must call the existing `CachedJudge` entry with that input, the
+tree hash obtained from `TreeHasher` after snapshot resolution, and the sealed
+profile/effective-policy identities. It must never call the adapter's raw
+`Judge` method. Other injected `Judge` implementations retain the direct port
+for managed callers and hermetic tests; do not add another cache interface.
+Reject any validated exchange whose report-bearing prose contains the exact
+absolute checkout root before disposition resolution or report construction.
+`Report.Validate` must also derive the verdict from its carried rows and
+blocking disclosures and require exact equality, so strict decode cannot
+authenticate a freshly re-digested favorable lie.
 
 Build report target and policy-entry identity only from the sealed snapshot:
 use its validated candidate blob, exact target source, and complete applicable
@@ -1478,7 +1504,9 @@ Expected: `context` rejects the unknown `conflict` subcommand.
 Add a subcommand dispatch and a dedicated flag extractor. Reuse canonical
 output path/fence and diagnostic redaction; do not duplicate their logic.
 Construct local service with primary judge transport only, no actor facts, and
-no challenger. Write report bytes only after evaluation completes.
+no challenger. Supply its consumer-owned `TreeHasher` by composing the existing
+`store.DiscoverServices` and `store.TreeHash` seams; do not add another corpus
+hash algorithm. Write report bytes only after evaluation completes.
 
 - [ ] **Step 4: Run focused race and built-binary GREEN**
 

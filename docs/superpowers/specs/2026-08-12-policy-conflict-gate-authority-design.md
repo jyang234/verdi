@@ -560,6 +560,16 @@ process. A changed bound component selects another key. A malformed,
 noncanonical, mismatched, symlinked, or post-write-mutated record is an
 operational failure, not a cache miss.
 
+The conflict service supplies the cache adapter with the exact sealed profile
+and effective-authority identities it already resolved and obtains the current
+D4 corpus tree hash through a consumer-owned read-only port after snapshot
+resolution. A concrete local `JudgeAdapter` always uses the one existing
+cache-aware entry; the service never calls its raw process method directly.
+Injected non-process `Judge` ports remain valid for managed callers and
+hermetic tests and do not acquire an implicit filesystem cache. The service
+does not rediscover policy, recompile context, or create a second cache
+abstraction to perform this handoff.
+
 On a miss the adapter executes and validates without holding the checkout-wide
 writer lock. Cache directory creation and immutable publication then acquire
 the existing nonblocking D3 `data/writer.lock`, use a temporary file followed
