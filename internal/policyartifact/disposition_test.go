@@ -52,20 +52,20 @@ var (
 		TargetDigest: dispoTargetDigest,
 		Claims: []SemanticClaimWitness{
 			{
-				ID:              "ac-review-approval",
-				Digest:          dispoClaimACDigest,
-				Category:        "acceptance-criterion",
-				AuthorityDigest: dispoClaimACAuthority,
-				Scope:           Scope{Phases: []string{"review"}, Environments: []string{}, Paths: []string{}, Refs: []string{}},
-				Values:          []string{"approved"},
-			},
-			{
-				ID:              "policy-review-instruction",
+				ID:              "policy/review#instruction-1",
 				Digest:          dispoClaimPolDigest,
 				Category:        "policy-instruction",
 				AuthorityDigest: dispoClaimPolAuthority,
 				Scope:           Scope{Phases: []string{}, Environments: []string{}, Paths: []string{}, Refs: []string{}},
 				Values:          []string{},
+			},
+			{
+				ID:              "spec/review-flow#ac-review-approval",
+				Digest:          dispoClaimACDigest,
+				Category:        "acceptance-criterion",
+				AuthorityDigest: dispoClaimACAuthority,
+				Scope:           Scope{Phases: []string{"review"}, Environments: []string{}, Paths: []string{}, Refs: []string{"spec/review-flow#ac-review-approval"}},
+				Values:          []string{"approved"},
 			},
 		},
 		Exemptions: []SemanticExemptionWitness{
@@ -89,22 +89,22 @@ func dispoWitnessBlock() string {
   input_id: %q
   target_digest: %q
   claims:
-    - id: ac-review-approval
-      digest: %q
-      category: acceptance-criterion
-      authority_digest: %q
-      scope: {phases: [review], environments: [], paths: [], refs: []}
-      values: ["approved"]
-    - id: policy-review-instruction
+    - id: policy/review#instruction-1
       digest: %q
       category: policy-instruction
       authority_digest: %q
       scope: {phases: [], environments: [], paths: [], refs: []}
       values: []
+    - id: spec/review-flow#ac-review-approval
+      digest: %q
+      category: acceptance-criterion
+      authority_digest: %q
+      scope: {phases: [review], environments: [], paths: [], refs: [spec/review-flow#ac-review-approval]}
+      values: ["approved"]
   exemptions:
     - id: policy-exemption/legacy-service-go
       digest: %q
-`, dispoInputID, dispoTargetDigest, dispoClaimACDigest, dispoClaimACAuthority, dispoClaimPolDigest, dispoClaimPolAuthority, dispoExemptionDigest)
+`, dispoInputID, dispoTargetDigest, dispoClaimPolDigest, dispoClaimPolAuthority, dispoClaimACDigest, dispoClaimACAuthority, dispoExemptionDigest)
 }
 
 // dispoTemplateLine is validJudgeResultDispositionDoc's scaffold-provenance
@@ -130,9 +130,9 @@ var dispoExemptionEntry = fmt.Sprintf("    - id: policy-exemption/legacy-service
 // unindented occurrence.
 var dispoScopeAnchor = "scope: {phases: [review], environments: [], paths: [], refs: []}\nwitness:"
 
-// dispoClaimScopeAnchor is the ac-review-approval claim witness's scope
+// dispoClaimScopeAnchor is the spec acceptance-criterion claim witness's scope
 // line, distinguished from the disposition's own by its indentation.
-var dispoClaimScopeAnchor = "      scope: {phases: [review], environments: [], paths: [], refs: []}"
+var dispoClaimScopeAnchor = "      scope: {phases: [review], environments: [], paths: [], refs: [spec/review-flow#ac-review-approval]}"
 
 // validJudgeResultDispositionDoc returns a complete, valid judge-result,
 // no-conflict disposition document: two sorted claim witnesses in
@@ -215,7 +215,7 @@ func TestDecodeDisposition_StrictUnion(t *testing.T) {
 		if len(d.Witness.Claims) != 2 {
 			t.Fatalf("witness claims = %d, want 2", len(d.Witness.Claims))
 		}
-		if d.Witness.Claims[0].ID != "ac-review-approval" || d.Witness.Claims[1].ID != "policy-review-instruction" {
+		if d.Witness.Claims[0].ID != "policy/review#instruction-1" || d.Witness.Claims[1].ID != "spec/review-flow#ac-review-approval" {
 			t.Fatalf("claim order = %+v", d.Witness.Claims)
 		}
 		if len(d.Witness.Exemptions) != 1 {
@@ -398,7 +398,7 @@ func TestDecodeDisposition_StrictUnion(t *testing.T) {
 		{"missing witness.input_id", strings.Replace(validJudgeResultDispositionDoc(), fmt.Sprintf("  input_id: %q\n", dispoInputID), "", 1), "input_id"},
 		{"missing witness.target_digest", strings.Replace(validJudgeResultDispositionDoc(), fmt.Sprintf("  target_digest: %q\n", dispoTargetDigest), "", 1), "target_digest"},
 		{"missing witness.claims key", strings.Replace(validJudgeResultDispositionDoc(), dispoWitnessBlock(), "witness:\n  input_id: \"x\"\n  target_digest: \"x\"\n  exemptions: []\n", 1), "claims"},
-		{"missing witness.exemptions key", strings.Replace(validJudgeResultDispositionDoc(), dispoWitnessBlock(), fmt.Sprintf("witness:\n  input_id: %q\n  target_digest: %q\n  claims:\n    - id: ac-review-approval\n      digest: %q\n      category: acceptance-criterion\n      authority_digest: %q\n      scope: {phases: [review], environments: [], paths: [], refs: []}\n      values: [\"approved\"]\n", dispoInputID, dispoTargetDigest, dispoClaimACDigest, dispoClaimACAuthority), 1), "exemptions"},
+		{"missing witness.exemptions key", strings.Replace(validJudgeResultDispositionDoc(), dispoWitnessBlock(), fmt.Sprintf("witness:\n  input_id: %q\n  target_digest: %q\n  claims:\n    - id: spec/review-flow#ac-review-approval\n      digest: %q\n      category: acceptance-criterion\n      authority_digest: %q\n      scope: {phases: [review], environments: [], paths: [], refs: [spec/review-flow#ac-review-approval]}\n      values: [\"approved\"]\n", dispoInputID, dispoTargetDigest, dispoClaimACDigest, dispoClaimACAuthority), 1), "exemptions"},
 		{"claim witness missing digest", strings.Replace(validJudgeResultDispositionDoc(), fmt.Sprintf("digest: %q\n      category: acceptance-criterion", dispoClaimACDigest), "category: acceptance-criterion", 1), "required"},
 		{"unknown schema", strings.Replace(validJudgeResultDispositionDoc(), "verdi.policy-disposition/v1", "verdi.policy-disposition/v2", 1), "schema"},
 		{"kind mismatch", strings.Replace(validJudgeResultDispositionDoc(), "kind: policy-disposition", "kind: policy-exemption", 1), "kind"},
@@ -453,10 +453,10 @@ func TestDecodeDisposition_StrictUnion(t *testing.T) {
 		// Semantic witness: a witness always names claims, and every claim's
 		// identity field carries its own grammar.
 		{"witness claims explicitly empty", witnessDoc(fmt.Sprintf("witness:\n  input_id: %q\n  target_digest: %q\n  claims: []\n  exemptions: []\n", hexDigest("placeholder-input-id"), dispoTargetDigest)), "at least one claim"},
-		{"blank claim id", strings.Replace(validJudgeResultDispositionDoc(), "- id: ac-review-approval", `- id: "   "`, 1), "must not be blank"},
-		{"claim id with a control character", strings.Replace(validJudgeResultDispositionDoc(), "- id: ac-review-approval", `- id: "ac\tone"`, 1), "control character"},
+		{"blank claim id", strings.Replace(validJudgeResultDispositionDoc(), "- id: spec/review-flow#ac-review-approval", `- id: "   "`, 1), "must not be blank"},
+		{"claim id with a control character", strings.Replace(validJudgeResultDispositionDoc(), "- id: spec/review-flow#ac-review-approval", `- id: "spec/review-flow#ac\tone"`, 1), "control character"},
 		{"malformed claim authority_digest", strings.Replace(validJudgeResultDispositionDoc(), fmt.Sprintf("authority_digest: %q", dispoClaimACAuthority), `authority_digest: "nothex"`, 1), `authority_digest "nothex" is not sha256`},
-		{"claim scope dimension missing", strings.Replace(validJudgeResultDispositionDoc(), dispoClaimScopeAnchor, "      scope: {phases: [review], environments: [], paths: []}", 1), "witness.claims[0].scope.refs is missing"},
+		{"claim scope dimension missing", strings.Replace(validJudgeResultDispositionDoc(), dispoClaimScopeAnchor, "      scope: {phases: [review], environments: [], paths: []}", 1), "witness.claims[1].scope.refs is missing"},
 		{"claim scope with an unknown phase", strings.Replace(validJudgeResultDispositionDoc(), dispoClaimScopeAnchor, "      scope: {phases: [deploy], environments: [], paths: [], refs: []}", 1), "unknown phase"},
 		{"empty claim value member", strings.Replace(validJudgeResultDispositionDoc(), `values: ["approved"]`, `values: [""]`, 1), "empty value"},
 
@@ -491,8 +491,12 @@ func TestDecodeDisposition_WitnessOrdering(t *testing.T) {
 			"  exemptions:\n" + exemptions
 	}
 	claimEntry := func(id, digest, category, authority string) string {
-		return fmt.Sprintf("    - id: %s\n      digest: %q\n      category: %s\n      authority_digest: %q\n      scope: {phases: [], environments: [], paths: [], refs: []}\n      values: []\n",
-			id, digest, category, authority)
+		refs := "[]"
+		if category != "policy-instruction" {
+			refs = fmt.Sprintf("[%s]", id)
+		}
+		return fmt.Sprintf("    - id: %s\n      digest: %q\n      category: %s\n      authority_digest: %q\n      scope: {phases: [], environments: [], paths: [], refs: %s}\n      values: []\n",
+			id, digest, category, authority, refs)
 	}
 	exemptionEntry := func(id, digest string) string {
 		return fmt.Sprintf("    - id: %s\n      digest: %q\n", id, digest)
@@ -510,27 +514,27 @@ func TestDecodeDisposition_WitnessOrdering(t *testing.T) {
 	}{
 		{
 			"unsorted claims",
-			doc(claimEntry("policy-review-instruction", dispoClaimPolDigest, "policy-instruction", dispoClaimPolAuthority)+
-				claimEntry("ac-review-approval", dispoClaimACDigest, "acceptance-criterion", dispoClaimACAuthority), baseExemptions),
+			doc(claimEntry("spec/review-flow#ac-review-approval", dispoClaimACDigest, "acceptance-criterion", dispoClaimACAuthority)+
+				claimEntry("policy/review#instruction-1", dispoClaimPolDigest, "policy-instruction", dispoClaimPolAuthority), baseExemptions),
 			"sorted",
 		},
 		{
 			"duplicate claim ids",
-			doc(claimEntry("ac-review-approval", dispoClaimACDigest, "acceptance-criterion", dispoClaimACAuthority)+
-				claimEntry("ac-review-approval", dispoClaimPolDigest, "policy-instruction", dispoClaimPolAuthority), baseExemptions),
+			doc(claimEntry("policy/review#instruction-1", dispoClaimACDigest, "policy-instruction", dispoClaimACAuthority)+
+				claimEntry("policy/review#instruction-1", dispoClaimPolDigest, "policy-instruction", dispoClaimPolAuthority), baseExemptions),
 			"duplicates",
 		},
 		{
 			"unsorted exemptions",
-			doc(claimEntry("ac-review-approval", dispoClaimACDigest, "acceptance-criterion", dispoClaimACAuthority)+
-				claimEntry("policy-review-instruction", dispoClaimPolDigest, "policy-instruction", dispoClaimPolAuthority),
+			doc(claimEntry("policy/review#instruction-1", dispoClaimPolDigest, "policy-instruction", dispoClaimPolAuthority)+
+				claimEntry("spec/review-flow#ac-review-approval", dispoClaimACDigest, "acceptance-criterion", dispoClaimACAuthority),
 				exemptionEntry("policy-exemption/zzz-late", hexDigest("zzz"))+exemptionEntry("policy-exemption/aaa-early", hexDigest("aaa"))),
 			"sorted",
 		},
 		{
 			"duplicate exemption witnesses",
-			doc(claimEntry("ac-review-approval", dispoClaimACDigest, "acceptance-criterion", dispoClaimACAuthority)+
-				claimEntry("policy-review-instruction", dispoClaimPolDigest, "policy-instruction", dispoClaimPolAuthority),
+			doc(claimEntry("policy/review#instruction-1", dispoClaimPolDigest, "policy-instruction", dispoClaimPolAuthority)+
+				claimEntry("spec/review-flow#ac-review-approval", dispoClaimACDigest, "acceptance-criterion", dispoClaimACAuthority),
 				exemptionEntry("policy-exemption/legacy-service-go", dispoExemptionDigest)+exemptionEntry("policy-exemption/legacy-service-go", dispoExemptionDigest)),
 			"duplicates",
 		},
@@ -648,12 +652,115 @@ func TestValidateWitnessCategory(t *testing.T) {
 // for TestSemanticClaimWitnessValidate's positive and mutation cases.
 func validSemanticClaimWitness() SemanticClaimWitness {
 	return SemanticClaimWitness{
-		ID:              "ac-review-approval",
+		ID:              "spec/review-flow#ac-review-approval",
 		Digest:          hexDigest("witness-validate-claim"),
 		Category:        "acceptance-criterion",
 		AuthorityDigest: hexDigest("witness-validate-authority"),
-		Scope:           Scope{Phases: []string{"review"}, Environments: []string{}, Paths: []string{}, Refs: []string{}},
+		Scope:           Scope{Phases: []string{"review"}, Environments: []string{}, Paths: []string{}, Refs: []string{"spec/review-flow#ac-review-approval"}},
 		Values:          []string{"approved"},
+	}
+}
+
+func TestSemanticClaimWitnessValidate_CategorySpecificSemanticRefs(t *testing.T) {
+	tests := []struct {
+		name     string
+		id       string
+		category string
+		refs     []string
+	}{
+		{"policy instruction retains inherited scope", "policy/go-toolchain#instruction-12", "policy-instruction", []string{"spec/widget#ac-1"}},
+		{"spec problem", "spec/widget#problem", "spec-problem", []string{"spec/widget#problem"}},
+		{"spec outcome", "spec/widget#outcome", "spec-outcome", []string{"spec/widget#outcome"}},
+		{"acceptance criterion", "spec/widget#ac-1", "acceptance-criterion", []string{"spec/widget#ac-1"}},
+		{"open question", "spec/widget#oq-1", "open-question", []string{"spec/widget#oq-1"}},
+		{"constraint", "spec/widget#co-1", "constraint", []string{"spec/widget#co-1"}},
+		{"decision", "spec/widget#dc-1", "decision", []string{"spec/widget#dc-1"}},
+		{"ADR decision", "adr/0001-widget@abcdef1#decision", "adr-decision", []string{"adr/0001-widget@abcdef1#decision"}},
+		{"obligation declaration", "obligation/widget--ac-1--static", "obligation-declaration", []string{"obligation/widget--ac-1--static"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			w := SemanticClaimWitness{
+				ID:              tt.id,
+				Digest:          hexDigest("semantic-ref-" + tt.name),
+				Category:        tt.category,
+				AuthorityDigest: hexDigest("semantic-authority-" + tt.name),
+				Scope: Scope{
+					Phases:       []string{"review"},
+					Environments: []string{"production"},
+					Paths:        []string{"cmd/verdi/"},
+					Refs:         tt.refs,
+				},
+				Values: []string{},
+			}
+			if err := w.Validate(); err != nil {
+				t.Fatalf("Validate: %v", err)
+			}
+		})
+	}
+}
+
+func TestSemanticClaimWitnessValidate_RejectsInvalidCategorySpecificIdentity(t *testing.T) {
+	valid := func(id, category string, refs ...string) SemanticClaimWitness {
+		return SemanticClaimWitness{
+			ID:              id,
+			Digest:          hexDigest("invalid-semantic-ref-" + id),
+			Category:        category,
+			AuthorityDigest: hexDigest("invalid-semantic-authority-" + id),
+			Scope:           Scope{Phases: []string{"review"}, Environments: []string{"production"}, Paths: []string{"cmd/verdi/"}, Refs: refs},
+			Values:          []string{},
+		}
+	}
+
+	tests := []struct {
+		name    string
+		witness SemanticClaimWitness
+	}{
+		{"policy instruction number is positive", valid("policy/go-toolchain#instruction-0", "policy-instruction")},
+		{"policy instruction number has no leading zero", valid("policy/go-toolchain#instruction-01", "policy-instruction")},
+		{"policy instruction number is decimal", valid("policy/go-toolchain#instruction-one", "policy-instruction")},
+		{"policy instruction uses policy identity", valid("policy-overlay/go-toolchain#instruction-1", "policy-instruction")},
+		{"policy instruction retains ordinary ref grammar", valid("policy/go-toolchain#instruction-1", "policy-instruction", "policy/go-toolchain#instruction-1")},
+		{"semantic ID requires object suffix", valid("spec/widget", "acceptance-criterion", "spec/widget")},
+		{"semantic ID has one suffix", valid("spec/widget#ac-1#foreign", "acceptance-criterion", "spec/widget#ac-1#foreign")},
+		{"problem rejects ordinary artifact fragment", valid("spec/widget#ac-1", "spec-problem", "spec/widget#ac-1")},
+		{"declared object suffix is canonical", valid("spec/widget#ac--1", "acceptance-criterion", "spec/widget#ac--1")},
+		{"acceptance criterion rejects open-question suffix", valid("spec/widget#oq-1", "acceptance-criterion", "spec/widget#oq-1")},
+		{"open question rejects acceptance-criterion suffix", valid("spec/widget#ac-1", "open-question", "spec/widget#ac-1")},
+		{"constraint rejects decision suffix", valid("spec/widget#dc-1", "constraint", "spec/widget#dc-1")},
+		{"decision rejects constraint suffix", valid("spec/widget#co-1", "decision", "spec/widget#co-1")},
+		{"spec identity must be unpinned", valid("spec/widget@abcdef1#ac-1", "acceptance-criterion", "spec/widget@abcdef1#ac-1")},
+		{"semantic ref must be present", valid("spec/widget#ac-1", "acceptance-criterion")},
+		{"semantic ref must match ID", valid("spec/widget#ac-1", "acceptance-criterion", "spec/other#ac-1")},
+		{"semantic ref must be sole", valid("spec/widget#ac-1", "acceptance-criterion", "spec/widget#ac-1", "spec/other#ac-1")},
+		{"ADR identity must be pinned", valid("adr/0001-widget#decision", "adr-decision", "adr/0001-widget#decision")},
+		{"ADR identity requires decision suffix", valid("adr/0001-widget@abcdef1#dc-1", "adr-decision", "adr/0001-widget@abcdef1#dc-1")},
+		{"obligation identity must be whole", valid("obligation/widget--ac-1--static#ac-1", "obligation-declaration", "obligation/widget--ac-1--static#ac-1")},
+		{"obligation identity must be unpinned", valid("obligation/widget--ac-1--static@abcdef1", "obligation-declaration", "obligation/widget--ac-1--static@abcdef1")},
+		{"control-bearing semantic ID", valid("spec/widget#ac-1\nforeign", "acceptance-criterion", "spec/widget#ac-1\nforeign")},
+		{"unknown category", valid("spec/widget#ac-1", "unknown-category", "spec/widget#ac-1")},
+		{"semantic scope retains strict phase grammar", func() SemanticClaimWitness {
+			w := valid("spec/widget#ac-1", "acceptance-criterion", "spec/widget#ac-1")
+			w.Scope.Phases = []string{"deploy"}
+			return w
+		}()},
+		{"semantic scope retains strict environment grammar", func() SemanticClaimWitness {
+			w := valid("spec/widget#ac-1", "acceptance-criterion", "spec/widget#ac-1")
+			w.Scope.Environments = []string{"Production"}
+			return w
+		}()},
+		{"semantic scope retains strict path grammar", func() SemanticClaimWitness {
+			w := valid("spec/widget#ac-1", "acceptance-criterion", "spec/widget#ac-1")
+			w.Scope.Paths = []string{"../escape"}
+			return w
+		}()},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if err := tt.witness.Validate(); err == nil {
+				t.Fatal("Validate() = nil, want category-specific identity failure")
+			}
+		})
 	}
 }
 

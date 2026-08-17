@@ -118,11 +118,14 @@ func validateWitnessCategory(category string) error {
 	return nil
 }
 
-// Validate checks w's complete per-claim grammar: single-line non-blank
-// id, sha256 digest, closed §6 category vocabulary (the same check
-// ValidateWitnessCategory exports), sha256 authority digest, a valid scope,
-// and non-empty values entries. Its errors are unprefixed field-scoped
-// fragments; every caller supplies its own package/field label.
+// Validate checks w's complete per-claim grammar: category-specific semantic
+// id and scope-ref identity, sha256 digest, closed §6 category vocabulary (the
+// same check ValidateWitnessCategory exports), sha256 authority digest, strict
+// phase/environment/path scope dimensions, and non-empty values entries.
+// Policy instructions alone retain ordinary Scope validation because their
+// scope is inherited rather than narrowed to the instruction line. Its errors
+// are unprefixed field-scoped fragments; every caller supplies its own
+// package/field label.
 // Bound is unconstrained. This expresses exactly the rule set
 // decodeSemanticWitness already applies to each witness claim; it is
 // exported for the same reason ValidateWitnessCategory is (see its doc
@@ -141,13 +144,137 @@ func (w SemanticClaimWitness) Validate() error {
 	if !sha256Re.MatchString(w.AuthorityDigest) {
 		return fmt.Errorf("authority_digest %q is not sha256:<64 hex> form", w.AuthorityDigest)
 	}
-	if err := w.Scope.Validate(); err != nil {
+	if err := validateSemanticClaimScope(w.ID, w.Category, w.Scope); err != nil {
 		return err
 	}
 	for i, v := range w.Values {
 		if v == "" {
 			return fmt.Errorf("values[%d]: empty value", i)
 		}
+	}
+	return nil
+}
+
+// validateSemanticClaimScope enforces SI-112's closed line-identity grammar
+// without widening artifact.ParseRef. Problem, outcome, and ADR-body decision
+// anchors are semantic line identities, not general declared-object fragments.
+func validateSemanticClaimScope(id, category string, scope Scope) error {
+	switch category {
+	case "policy-instruction":
+		source, object, err := semanticLineIdentityParts(id)
+		if err != nil {
+			return err
+		}
+		if _, err := parseKindedID(source, KindPolicy); err != nil {
+			return fmt.Errorf("id: policy-instruction source: %w", err)
+		}
+		if !positiveInstructionObject(object) {
+			return fmt.Errorf("id: policy-instruction requires instruction-<positive-n>, got %q", object)
+		}
+		return scope.Validate()
+
+	case "spec-problem", "spec-outcome", "acceptance-criterion", "open-question", "constraint", "decision":
+		source, object, err := semanticLineIdentityParts(id)
+		if err != nil {
+			return err
+		}
+		ref, err := artifact.ParseRef(source)
+		if err != nil || ref.Kind != artifact.KindSpec || ref.Pinned() || ref.Fragment() {
+			return fmt.Errorf("id: %q must use an unpinned whole spec ref", id)
+		}
+		if err := validateSpecSemanticObject(category, source, object); err != nil {
+			return err
+		}
+		return validateSoleSemanticRef(id, scope)
+
+	case "adr-decision":
+		source, object, err := semanticLineIdentityParts(id)
+		if err != nil {
+			return err
+		}
+		ref, err := artifact.ParsePinnedRef(source)
+		if err != nil || ref.Kind != artifact.KindADR || ref.Fragment() {
+			return fmt.Errorf("id: %q must use an exact pinned whole ADR ref", id)
+		}
+		if object != "decision" {
+			return fmt.Errorf("id: adr-decision requires suffix %q, got %q", "decision", object)
+		}
+		return validateSoleSemanticRef(id, scope)
+
+	case "obligation-declaration":
+		ref, err := artifact.ParseRef(id)
+		if err != nil || ref.Kind != artifact.KindObligation || ref.Pinned() || ref.Fragment() {
+			return fmt.Errorf("id: %q must be an unpinned whole obligation ref", id)
+		}
+		return validateSoleSemanticRef(id, scope)
+	}
+	return fmt.Errorf("unknown witness category %q", category)
+}
+
+func semanticLineIdentityParts(id string) (string, string, error) {
+	source, object, ok := strings.Cut(id, "#")
+	if !ok || source == "" || object == "" || strings.Contains(object, "#") {
+		return "", "", fmt.Errorf("id: %q must have exact <source-ref>#<object> form", id)
+	}
+	return source, object, nil
+}
+
+func positiveInstructionObject(object string) bool {
+	n := strings.TrimPrefix(object, "instruction-")
+	if n == object || n == "" || n[0] == '0' {
+		return false
+	}
+	for _, r := range n {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
+}
+
+func validateSpecSemanticObject(category, source, object string) error {
+	switch category {
+	case "spec-problem":
+		if object != "problem" {
+			return fmt.Errorf("id: spec-problem requires suffix %q, got %q", "problem", object)
+		}
+		return nil
+	case "spec-outcome":
+		if object != "outcome" {
+			return fmt.Errorf("id: spec-outcome requires suffix %q, got %q", "outcome", object)
+		}
+		return nil
+	}
+	var prefix string
+	switch category {
+	case "acceptance-criterion":
+		prefix = "ac-"
+	case "open-question":
+		prefix = "oq-"
+	case "constraint":
+		prefix = "co-"
+	case "decision":
+		prefix = "dc-"
+	default:
+		return fmt.Errorf("unknown witness category %q", category)
+	}
+	if !strings.HasPrefix(object, prefix) {
+		return fmt.Errorf("id: category %q requires an %s* suffix, got %q", category, prefix, object)
+	}
+	if _, err := artifact.ParseRef(source + "#" + object); err != nil {
+		return fmt.Errorf("id: %q is not a canonical declared-object identity: %w", object, err)
+	}
+	return nil
+}
+
+func validateSoleSemanticRef(id string, scope Scope) error {
+	grammar := scope
+	grammar.Refs = []string{}
+	if err := grammar.Validate(); err != nil {
+		return err
+	}
+	if len(scope.Refs) != 1 || scope.Refs[0] != id {
+		return fmt.Errorf("scope.refs: must be exactly [%q], got %v", id, scope.Refs)
 	}
 	return nil
 }

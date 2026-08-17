@@ -1549,7 +1549,14 @@ func TestDecodeReport_ForgedMutationMatrix(t *testing.T) {
 		}, "disclosures: duplicate identity"},
 
 		// semantic claim ordering and embedded witness scope
-		{"duplicate semantic claim ids", []any{"semantic", 0, "claims", 1, "id"}, "ac-1", "claims: duplicate identity"},
+		{"duplicate semantic claim ids", []any{"semantic", 0, "claims", 1}, map[string]any{
+			"authority_digest": sha('7'),
+			"category":         "policy-instruction",
+			"digest":           sha('8'),
+			"id":               "policy/example-policy#instruction-1",
+			"scope":            map[string]any{"environments": []any{}, "paths": []any{}, "phases": []any{}, "refs": []any{}},
+			"values":           []any{},
+		}, "claims: duplicate identity"},
 		{"unsorted semantic witness scope paths", []any{"semantic", 0, "claims", 0, "scope", "paths"}, []any{"src/", "docs/"}, "paths: must be sorted ascending"},
 		{"unsorted semantic witness scope refs", []any{"semantic", 0, "claims", 0, "scope", "refs"}, []any{"spec/zeta", "spec/alpha"}, "refs: must be sorted ascending"},
 	}
