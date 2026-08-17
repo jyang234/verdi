@@ -91,7 +91,7 @@ func TestBuildSemanticInput_Happy(t *testing.T) {
 
 	unknownClaim := semanticTypedClaim(t, "policy/go-toolchain", "go-version", "1.22")
 	higherOrderClaim := semanticTypedClaim(t, "policy/release", "release-channel", "stable")
-	knownRow := semanticEvaluation("group-known", unknownScopeProof("ignored-unknown-scope"), nil, nil, ReasonMechanicalSatisfiable)
+	knownRow := semanticEvaluation("group-known", disjointScopeProof(), nil, nil, ReasonMechanicalSatisfiable)
 	higherOrderRow := semanticEvaluation("group-higher-order", disjointScopeProof(), []TypedClaimRecord{higherOrderClaim}, nil, ReasonHigherOrderScopeUnproven)
 	unknownRow := semanticEvaluation("group-unknown", unknownScopeProof("spec/widget#problem"), []TypedClaimRecord{unknownClaim},
 		[]ExemptionResolution{{ID: "exemption/legacy-go", Digest: semanticDigest("exemption body")}}, ReasonScopeUnproven)
@@ -423,6 +423,21 @@ func TestBuildSemanticInput_NoUnknownMechanicalsIsEmptyNotNil(t *testing.T) {
 	}
 	if got.Exemptions == nil {
 		t.Fatal("Exemptions = nil, want the explicit empty set")
+	}
+}
+
+func TestBuildSemanticInput_UnknownScopeSurvivesNonScopeReason(t *testing.T) {
+	claim := semanticTypedClaim(t, "policy/go-toolchain", "go-version", "1.22")
+	row := semanticEvaluation("group-principal-unproven", unknownScopeProof("principal relation unavailable"), []TypedClaimRecord{claim}, nil,
+		ReasonPrincipalRelationUnproven)
+
+	got, err := BuildSemanticInput(contextcompile.ConflictView{}, []MechanicalEvaluation{row})
+	if err != nil {
+		t.Fatalf("BuildSemanticInput: %v", err)
+	}
+	want := []UnknownMechanicalWitness{{ID: row.ID, Claims: []TypedClaimRecord{claim}, Scope: row.Scope}}
+	if !reflect.DeepEqual(got.UnknownMechanicals, want) {
+		t.Fatalf("UnknownMechanicals = %+v, want %+v (unknown scope is semantic input regardless of the row's governing reason)", got.UnknownMechanicals, want)
 	}
 }
 

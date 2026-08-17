@@ -301,20 +301,20 @@ func cloneStringSlice(s []string) []string {
 }
 
 // unknownScopeWitnesses collects the lossless witness of every row whose
-// reason is scope-unproven or higher-order-scope-unproven (SI-110). Reason,
-// not aggregate Scope.State, selects the row: a conservatively unresolved
-// higher-order row remains semantic input even when its aggregate scope is
-// disjoint. Only ID, complete cloned typed claims, and exact scope enter the
-// witness; solver and authority-resolution state stay outside its identity.
+// aggregate Scope.State is unknown, plus every conservatively unresolved
+// higher-order-scope-unproven row even when its aggregate scope is disjoint
+// (SI-110/SI-112). Only ID, complete cloned typed claims, and exact scope
+// enter the witness; solver and authority-resolution state stay outside its
+// identity.
 func unknownScopeWitnesses(evaluations []MechanicalEvaluation) ([]UnknownMechanicalWitness, error) {
 	if err := requireSortedUnique("evaluations", evaluations, func(e MechanicalEvaluation) string { return e.ID }); err != nil {
 		return nil, err
 	}
 	out := make([]UnknownMechanicalWitness, 0)
 	for i, e := range evaluations {
-		unresolved := false
+		unresolved := e.Scope.State == ScopeUnknown
 		for _, reason := range e.Reasons {
-			if reason == ReasonScopeUnproven || reason == ReasonHigherOrderScopeUnproven {
+			if reason == ReasonHigherOrderScopeUnproven {
 				unresolved = true
 				break
 			}
