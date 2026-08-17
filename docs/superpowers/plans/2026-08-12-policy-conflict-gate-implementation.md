@@ -31,7 +31,7 @@ Git, and built-binary Go tests.
 - Binding authority is
   `docs/superpowers/specs/2026-08-12-policy-conflict-gate-authority-design.md`,
   Context Integrity AC-3/DC-3–DC-8/DC-15/DC-17–DC-24/CO-1–CO-6, and
-  invention-ledger SI-93–SI-115 as consolidated by the independently reviewed
+  invention-ledger SI-93–SI-116 as consolidated by the independently reviewed
   exact head carrying this plan.
 - Do not edit frozen artifacts or `docs/design/specs/`; do not add a layout
   root, UI, MCP tool, receipt, sealed-execution behavior, forge network call, or
@@ -96,6 +96,13 @@ could not prove directional exemption containment and the five report states
 had no complete derivation table. SI-115 adds the one directional ref-coverage
 port and fixes every state source without adding a new artifact, report field,
 or evaluator.
+
+Task 8's combined authority/runtime review found that its Step 1 still assigned
+human-fallback eligibility to the five-state resolver even though §8 defines
+eligibility from the live judge exchanges and SI-115 assigns no state to that
+predicate. SI-116 keeps each Task 8 state single-purpose and assigns fallback
+legality to Task 9, the first seam that combines exchanges, disposition
+resolutions, rows, and the final verdict.
 
 ## File Map
 
@@ -1209,13 +1216,13 @@ func ResolveDispositionAuthority(AuthorityInput, SemanticInput, Primary, Challen
 Cover expiry before/on/after evaluation date, malformed or missing injected
 date, review-condition-only unproven, exact/mismatched runtime input ID,
 normalized claim witness, target,
-exemption, and judgment provenance, judge-result versus fallback eligibility,
-fallback controls/bounds, absent/inconclusive/disagreeing judge results, conflict
-and no-conflict conclusions, and cache absence after a recorded provenance
-digest. Run kernel authorization tables for solo permitted collapse with
-disclosure, team/high-assurance distinctness, proven/violated/unproven actors,
-unknown roles/principals, and experimental profile refusal. A committed
-principal string without a matching sealed resolution must remain unproven.
+exemption, and judgment provenance, judge-result and fallback controls/bounds,
+conflict and no-conflict conclusions, and cache absence after a recorded
+provenance digest. Run kernel authorization tables for solo permitted collapse
+with disclosure, team/high-assurance distinctness, proven/violated/unproven
+actors, unknown roles/principals, and experimental profile refusal. A
+committed principal string without a matching sealed resolution must remain
+unproven.
 For exemptions, cover unrelated-artifact omission, exact composite-identity
 applicability, current and stale row-local witness digests, universal and
 narrow phase/environment/path dimensions, segment-aware path containment,
@@ -1262,7 +1269,10 @@ For dispositions, derive `Match` from SI-114's exact four-component equality
 and assign `Freshness` and complete-input `Scope` the same state. A
 judge-result `Bound` follows exact-current Match; a human-fallback `Bound` uses
 the injected expiry/review rule. Authorization is solely the SI-113 kernel
-transition. No partial equality or unknown state is favorable.
+transition. No partial equality or unknown state is favorable. Do not decide
+whether a human fallback is legal from the judge results here: SI-116 assigns
+that verdict prerequisite to Task 9 without adding or overloading a Task 8
+state.
 
 - [ ] **Step 4: Run focused and package race GREEN**
 
@@ -1316,6 +1326,11 @@ no-conflict disposition; effective conflict disposition; inconclusive/missing
 judge; high-assurance missing/disagreeing challenger; mixed violated and
 unproven rows; stale/unauthorized authority; experimental profile; and
 constitution absence. Assert violated outranks unproven while both rows remain.
+For every human-fallback disposition, prove legality only when configured
+judgment is absent, a well-formed result is inconclusive, or primary and
+challenger disagree. Prove that a conclusive, non-disagreeing judge result
+cannot be overridden by a human fallback even when all five Task 8 authority
+states are proven.
 
 Ratchet byte-identical reports over repeated runs and permutations of claims,
 policies, exemptions, dispositions, and actor facts. Assert one input identity,
@@ -1341,6 +1356,14 @@ failures return typed operational errors and no report. Return a typed
 not-adopted refusal before semantic work. `ProbeAdoption` delegates to
 `policyauthority.Load`: only `ErrNotAdopted` returns `(false,nil)`; incomplete,
 malformed, or symlinked policy stores remain operational errors.
+
+When applying disposition resolutions, enforce SI-116 before deriving the
+semantic row and verdict. A `human-fallback` is eligible only if configured
+judgment is absent, a well-formed result is inconclusive, or primary and
+challenger disagree. A conclusive, non-disagreeing configured result makes the
+fallback ineligible even when its five authority states are proven; it cannot
+act as a generic override. Malformed or failed judge execution remains an
+operational error under authority §6, not fallback eligibility.
 
 - [ ] **Step 4: Run package and dependency race GREEN**
 

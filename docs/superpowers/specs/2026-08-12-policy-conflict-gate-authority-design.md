@@ -1,7 +1,7 @@
 # Policy Conflict Gate Authority Design
 
 **Status:** Owner-approved design; repository authority becomes effective when
-the reviewed commit carrying this document and SI-93 through SI-115 reaches the
+the reviewed commit carrying this document and SI-93 through SI-116 reaches the
 configured default branch.
 
 **Planning base:** `bfaa8e2715678cbe8cd71137f23d743666caf1c4`
@@ -645,6 +645,11 @@ remains operational under §6. `no-conflict` resolves only an exact, current,
 authorized semantic input. `conflict` establishes `blocked-violated`. A
 stale or unauthorized disposition never partially applies.
 
+Task 9's orchestration owns that fallback-legality predicate because it alone
+combines the current judge exchanges with Task 8's disposition-resolution
+states. Fallback legality is not a sixth Task 8 authority state and cannot be
+folded into `Match`, `Freshness`, `Scope`, `Bound`, or `Authorization`.
+
 `internal/policyauthority` owns loading, path/ID parity, strict decoding,
 cross-reference validation, and inclusion in the effective-authority digest.
 `internal/policyconflict` alone interprets whether a disposition matches and
@@ -1016,6 +1021,7 @@ inconsistent per-clause counts across differently structured sources:
 | Fixed governance transitions for exemption and disposition approval | 1 | §9; SI-113; plan Task 8 |
 | Disposition runtime-input and target freshness boundary | 1 | §§6, 8–10; SI-114; plan Tasks 7B–9 |
 | Complete five-state authority derivation and directional exemption coverage | 1 | §§4, 5.5, 8–10; SI-115; plan Task 8 |
+| Human-fallback legality at the verdict boundary | 1 | §§3, 6, 8, 10; SI-116; plan Task 9 |
 
 The transformations are explicit:
 
