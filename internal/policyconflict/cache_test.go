@@ -388,6 +388,34 @@ func TestPolicyConflictCache_Symlink(t *testing.T) {
 	}
 }
 
+func TestPolicyConflictCache_SymlinkedManagedParent(t *testing.T) {
+	for _, rel := range []string{".verdi", filepath.Join(".verdi", "data"), filepath.Join(".verdi", "data", "cache")} {
+		t.Run(rel, func(t *testing.T) {
+			root := t.TempDir()
+			external := t.TempDir()
+			link := filepath.Join(root, rel)
+			if err := os.MkdirAll(filepath.Dir(link), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Symlink(external, link); err != nil {
+				t.Skipf("symlinks unsupported: %v", err)
+			}
+
+			runner := &fakeJudgeRunner{fn: func(context.Context, []string, []byte) ([]byte, int, error) {
+				return noConflictResultBytes(t), 0, nil
+			}}
+			a := baseAdapter(runner)
+			a.Root = root
+			if _, err := CachedJudge(context.Background(), a, cacheTestInput(), cacheTestTreeHash, "solo", cacheTestProfileDigest, cacheTestAuthorityDigest); err == nil {
+				t.Fatal("CachedJudge accepted a symlinked managed cache-path component")
+			}
+			if runner.calls != 0 {
+				t.Fatalf("runner.calls = %d, want 0 (stable parent refusal precedes process work)", runner.calls)
+			}
+		})
+	}
+}
+
 func TestPolicyConflictCache_Corruption(t *testing.T) {
 	root := t.TempDir()
 	a := baseAdapter(&fakeJudgeRunner{fn: func(ctx context.Context, argv []string, stdin []byte) ([]byte, int, error) {

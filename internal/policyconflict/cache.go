@@ -16,6 +16,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/jyang234/verdi/internal/atomicfile"
 	"github.com/jyang234/verdi/internal/canonjson"
@@ -115,6 +116,9 @@ func CachedJudge(ctx context.Context, adapter JudgeAdapter, input SemanticInput,
 	}
 	path, err := store.PolicyConflictCachePath(adapter.Root, treeHash, bareKeyDigest)
 	if err != nil {
+		return ValidatedExchange{}, fmt.Errorf("%w: %v", ErrCacheOperational, err)
+	}
+	if err := refuseManagedCacheSymlinks(adapter.Root, path); err != nil {
 		return ValidatedExchange{}, fmt.Errorf("%w: %v", ErrCacheOperational, err)
 	}
 
@@ -297,6 +301,49 @@ func strippedDigest(full string) (string, bool) {
 		return "", false
 	}
 	return full[len(prefix):], true
+}
+
+// refuseManagedCacheSymlinks performs the declared stable-path check over
+// every existing component below the checkout root. It intentionally does
+// not claim to close concurrent substitution after this check; the cache
+// threat model requires refusal of stable symlinked .verdi/data/cache
+// ancestry before any read, process launch, lock, or write.
+func refuseManagedCacheSymlinks(root, target string) error {
+	absRoot, err := filepath.Abs(root)
+	if err != nil {
+		return fmt.Errorf("resolving cache root %s: %w", root, err)
+	}
+	absTarget, err := filepath.Abs(target)
+	if err != nil {
+		return fmt.Errorf("resolving cache path %s: %w", target, err)
+	}
+	rel, err := filepath.Rel(absRoot, absTarget)
+	if err != nil {
+		return fmt.Errorf("relativizing cache path %s under %s: %w", absTarget, absRoot, err)
+	}
+	if rel == "." || rel == ".." || filepath.IsAbs(rel) || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return fmt.Errorf("cache path %s is not a managed descendant of root %s", absTarget, absRoot)
+	}
+
+	current := absRoot
+	parts := strings.Split(rel, string(filepath.Separator))
+	for i, part := range parts {
+		current = filepath.Join(current, part)
+		info, err := os.Lstat(current)
+		if err != nil {
+			if os.IsNotExist(err) {
+				return nil
+			}
+			return fmt.Errorf("inspecting managed cache component %s: %w", current, err)
+		}
+		if info.Mode()&os.ModeSymlink != 0 {
+			return fmt.Errorf("refusing symlinked managed cache component %s", current)
+		}
+		if i < len(parts)-1 && !info.IsDir() {
+			return fmt.Errorf("refusing non-directory managed cache parent %s (mode %s)", current, info.Mode())
+		}
+	}
+	return nil
 }
 
 // loadCachedJudgment reports the cached Judgment at path if one exists and
