@@ -145,11 +145,12 @@ The production service performs one ordered evaluation:
 4. Verify that every operand identity agrees with the context/candidate,
    effective-policy, profile, repository, and source digests in that snapshot.
 5. Compute scope relations and mechanical satisfiability.
-6. Build semantic inputs for prose relations and mechanically unknown scope.
-7. Reuse or run primary and, when supplied and required, challenger judgment.
-8. Load and resolve current exemptions and dispositions.
-9. Interpret authenticated principal resolutions through
-   `internal/governanceprincipal`.
+6. Resolve current exemptions and authenticated principals, then apply every
+   effective exemption through the same mechanical solver.
+7. Build the semantic input from prose relations, mechanically unknown scope,
+   and the exact resolved exemption witness set.
+8. Reuse or run primary and, when supplied and required, challenger judgment.
+9. Resolve current semantic dispositions and their authenticated principals.
 10. Derive and canonicalize the one report and overall verdict.
 
 The context compiler gains a sealed runtime-only `ConflictOperands` projection.
@@ -172,8 +173,10 @@ The actual Go representation may use sealed pointers and unexported fields to
 preserve the landed mutation guard, but it carries exactly those semantic
 groups. `SnapshotIdentity` binds request kind, repository facts, context
 manifest or candidate identity, effective-policy digest, constitution digest,
-profile identity/digest, adapter, phase, scope, capabilities, and exact source
-digests. `TypedClaim` adds its governing policy ID to the complete normalized
+profile identity/digest, adapter, phase, scope, capabilities, the target
+specification content digest, the candidate blob OID when applicable, the
+complete sorted applicable policy/overlay/exemption entry ledger, and exact
+source digests. `TypedClaim` adds its governing policy ID to the complete normalized
 `policyartifact.Claim`. `ProseClaim` is defined in §6.
 
 Accepted-context construction reuses the existing compiler result and the
@@ -628,8 +631,11 @@ normalized prose claims, unknown-mechanical witnesses and applicable exemption
 identities. The strict artifact decoder validates that ID's digest form but
 does not self-derive it from the smaller human-artifact projection; the
 conflict interpreter compares it to the current runtime input. The target
-digest remains a separate exact component: accepted context supplies its
-manifest digest and an acceptance candidate supplies its exact content digest.
+digest remains a separate exact component: both accepted context and an
+acceptance candidate supply the target specification artifact's exact content
+digest. The accepted manifest digest remains separately bound in the report's
+accepted target identity; using it inside the disposition would recurse through
+the effective-policy digest and the disposition artifact itself.
 A `judge-result` record additionally cites the immutable primary and
 challenger judgment-record digests that informed the human, when present, as
 provenance; those citations do not redefine freshness or make the human ruling
@@ -664,7 +670,8 @@ folded into `Match`, `Freshness`, `Scope`, `Bound`, or `Authorization`.
 cross-reference validation, and inclusion in the effective-authority digest.
 `internal/policyconflict` alone interprets whether a disposition matches and
 governs the current semantic input. Its authority input therefore carries the
-current target digest in addition to the semantic input. `Match` is proven only
+current target specification content digest in addition to the semantic input.
+`Match` is proven only
 when the disposition's input ID, target digest, normalized claim identities and
 applicable exemption identities all equal those current operands; no partial
 component match is favorable. `Freshness` has the same state as that exact
@@ -735,6 +742,13 @@ profile and kernel authorize that collapse and the report carries the kernel's
 disclosure. Team and high-assurance retain their distinctness requirements.
 Experimental profile results are always `blocked-unproven` for authoritative
 consumers even when the conflict set is otherwise clean.
+
+The exemption and disposition authority resolvers return the kernel's closed
+disclosures beside their typed resolution rows. Task 9 merges, sorts, and
+deduplicates those disclosures with mechanical disclosures at the report's one
+top-level location. It does not rerun authorization to recover evidence that a
+predecessor discarded, and the resolution wire does not gain a duplicate
+disclosure field.
 
 ## 10. Canonical report and verdict
 
@@ -807,6 +821,19 @@ discloses the solo profile's permitted author/approver collapse. Judge,
 challenger, disposition, scope, and experimental-profile outcomes stay row
 reasons rather than duplicated top-level disclosures. Unknown reason or
 disclosure codes fail closed.
+
+The sealed conflict snapshot carries every disclosure emitted by the compiler
+stages that produced that snapshot. Exactly four inherited codes independently
+block this verdict as unproven: `applicability-unknown`,
+`review-result-diff-unproven`, `review-evidence-bundle-unproven`, and
+`review-builder-receipt-unproven`. The remaining compiler codes stay visible
+but do not independently block policy-conflict proof: required repository
+identity failures are operational before a report, actor uncertainty is
+represented by the relevant typed authorization state, freshness belongs to
+its evidence consumer, and `opaque-harness-vendor-base` names deliberately
+non-authoritative context. This classification does not turn an unknown fact
+favorable; it prevents an unrelated disclosure from overriding the proof
+state owned by its actual consumer.
 
 The report self-digest is computed over the digestless canonical form. Arrays
 sort by stable witness ID except author-ordered prose arrays explicitly named
@@ -1004,7 +1031,7 @@ no browser behavior and adds no Playwright case.
 
 ## 14. Source coverage and losslessness
 
-Coverage is **23/23** implicated authority source groups. The mapping is
+Coverage is **27/27** implicated authority source groups. The mapping is
 lossless; each row names the complete clause range used rather than assigning
 inconsistent per-clause counts across differently structured sources:
 
@@ -1029,10 +1056,14 @@ inconsistent per-clause counts across differently structured sources:
 | Verifiable judgment cache-key and raw-result binding | 1 | §§6–7, 12; SI-111; plan Task 7A |
 | Closed category-specific semantic prose identity | 1 | §6; SI-112; plan Task 7A |
 | Fixed governance transitions for exemption and disposition approval | 1 | §9; SI-113; plan Task 8 |
-| Disposition runtime-input and target freshness boundary | 1 | §§6, 8–10; SI-114; plan Tasks 7B–9 |
+| Disposition runtime-input and cycle-free target freshness boundary | 1 | §§6, 8–10; SI-114, SI-117; plan Tasks 7B–9 |
 | Complete five-state authority derivation and directional exemption coverage | 1 | §§4, 5.5, 8–10; SI-115; plan Task 8 |
 | Human-fallback legality at the verdict boundary | 1 | §§3, 6, 8, 10; SI-116; plan Task 9 |
-| Cycle-free semantic claim authority identity | 1 | §§3, 6–8, 10; SI-117; plan Tasks 4, 7–9 |
+| Cycle-free disposition witness identities | 1 | §§3, 6–8, 10; SI-117; plan Tasks 4, 7–9 |
+| Lossless approval-disclosure transport | 1 | §§5.3, 8–10; SI-118; plan Tasks 8–9 |
+| Lossless sealed report-input transport | 1 | §§3, 10, 12; SI-119; plan Tasks 4 and 9 |
+| Inherited disclosure transport and verdict relevance | 1 | §§3, 10, 12; SI-120; plan Tasks 4 and 9 |
+| Exemption-before-semantic orchestration order | 1 | §§3, 5.5–8, 10; SI-121; plan Tasks 7–9 |
 
 The transformations are explicit:
 
@@ -1050,11 +1081,18 @@ The transformations are explicit:
   existing D4 cache zone, while human authority remains a committed
   disposition;
 - the disposition's input ID reuses the complete runtime semantic-input digest
-  while target identity remains a separately compared authority operand; the
-  human artifact does not invent a second digest over its smaller projection;
+  while the target specification's exact content digest remains a separately
+  compared authority operand; the human artifact does not invent a second
+  digest over its smaller projection or recurse through the accepted manifest;
 - each semantic claim binds the exact artifact digest that authored it while
   the aggregate effective-policy digest remains a separate report/cache input,
   so disposition bytes never become a recursive input to their own witness;
+- sealed snapshot transport retains the exact candidate blob and applicable
+  policy-entry ledger, and Task 8 returns kernel disclosures beside its rows,
+  so Task 9 neither reruns a resolver nor drops already-proven evidence;
+- inherited compiler disclosures remain visible with an explicit proof-owning
+  blocking subset, and exemptions resolve before the one semantic-input digest
+  is judged, cached, matched, and reported;
 - existing claim-level exemptions are applied by exact scoped removal and
   solver recomputation rather than treated as generic conflict waivers; and
 - exemption scope coverage is a directional containment proof over the

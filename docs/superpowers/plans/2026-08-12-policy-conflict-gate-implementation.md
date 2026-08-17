@@ -104,13 +104,27 @@ predicate. SI-116 keeps each Task 8 state single-purpose and assigns fallback
 legality to Task 9, the first seam that combines exchanges, disposition
 resolutions, rows, and the final verdict.
 
-Task 9's first implementation audit found that Task 4 assigned every semantic
-claim the aggregate effective-policy digest even though that digest includes
-the disposition artifacts whose witnesses must carry the semantic claims.
-This creates an unreachable cryptographic fixed point for every effective
-disposition. SI-117 fixes the already-present `AuthorityDigest` field to the
-exact source artifact digest and requires a narrow Task 4 runtime correction
-before Task 9 service orchestration resumes; it adds no field or digest layer.
+Task 9's first implementation audit found two unreachable cryptographic fixed
+points: Task 4 assigned every semantic claim the aggregate effective-policy
+digest even though that digest includes dispositions, and SI-114 assigned an
+accepted disposition the manifest digest even though the manifest binds that
+same aggregate. SI-117 fixes the already-present `AuthorityDigest` field to the
+exact source artifact digest and fixes both target arms to the target
+specification's exact content digest. A narrow Task 4/runtime-input correction
+must land before Task 9 resumes; it adds no field or digest layer.
+
+The same audit found two lossless-transport omissions: Task 4 dropped the
+candidate blob and applicable policy-entry ledger before sealing, and Task 8
+dropped kernel approval disclosures after authorization. SI-118–SI-119 require
+the existing seams to return those already-proven facts; Task 9 still performs
+no second Git/policy/kernel resolution and adds no duplicate report location.
+
+Finally, Task 9 found that Task 4 dropped compiler disclosures and that the
+original ten-stage wording placed semantic-input construction before exemption
+resolution even though exemption identities are part of that input. SI-120
+fixes the exact blocking-disclosure subset; SI-121 orders exemption resolution
+and recomputation before semantic digesting/judgment. Neither change adds a
+stage, verdict, or second proof path.
 
 ## File Map
 
@@ -647,10 +661,13 @@ type ProseClaim struct {
 type ConflictSourceIdentity struct {
     Ref, Path, ContentDigest string
 }
+type ConflictPolicyEntryIdentity struct {
+    Kind, ID, Digest string
+}
 type SnapshotIdentity struct {
     TargetKind string // accepted-context | acceptance-candidate
     Repository repositoryfacts.Facts
-    ManifestDigest, CandidateDigest string
+    ManifestDigest, CandidateDigest, CandidateBlob string
     EffectivePolicyDigest, ConstitutionDigest string
     ProfileID, ProfileDigest string
     Adapter AdapterRef
@@ -658,6 +675,8 @@ type SnapshotIdentity struct {
     Scope policyartifact.Scope
     GrantDigest string
     Sources []ConflictSourceIdentity
+    PolicyEntries []ConflictPolicyEntryIdentity
+    Disclosures []DisclosureCode
 }
 type CandidateRequest struct {
     Adapter AdapterRef
@@ -691,9 +710,14 @@ func ResolveOperands(context.Context, contextcompile.Compiler, string, Request, 
 ~~~
 
 The two mutually exclusive identity digest fields are validated by target kind:
-accepted requires `ManifestDigest` and empty `CandidateDigest`; candidate is the
-reverse. `Sources` is unique and sorted by `(ref,path,content_digest)`. Do not
-encode snapshot identity as an untyped map.
+accepted requires `ManifestDigest` and empty `CandidateDigest`/`CandidateBlob`;
+candidate requires `CandidateDigest`, the exact validated 40-hex HEAD-tree
+`CandidateBlob`, and empty `ManifestDigest`. `Sources` is unique and sorted by
+`(ref,path,content_digest)`. `PolicyEntries` is the complete applicable
+policy/overlay/exemption selection, unique and sorted by `(kind,id)`; it cannot
+be reconstructed from the broader source set. `Disclosures` is the sorted
+unique union emitted by the compiler stages that produced this snapshot. Do
+not encode snapshot identity as an untyped map.
 
 - [ ] **Step 1: Write operand sealing and fixture-Git RED tests**
 
@@ -1215,8 +1239,8 @@ type AuthorityInput struct {
     Exemptions []policyartifact.Exemption
     Dispositions []policyartifact.Disposition
 }
-func ResolveExemptionAuthority(context.Context, AuthorityInput, MechanicalEvaluation, RefCoverageResolver) ([]ExemptionResolution, error)
-func ResolveDispositionAuthority(AuthorityInput, SemanticInput, Primary, Challenger *ValidatedExchange) ([]DispositionResolution, error)
+func ResolveExemptionAuthority(context.Context, AuthorityInput, MechanicalEvaluation, RefCoverageResolver) ([]ExemptionResolution, []Disclosure, error)
+func ResolveDispositionAuthority(AuthorityInput, SemanticInput, Primary, Challenger *ValidatedExchange) ([]DispositionResolution, []Disclosure, error)
 ~~~
 
 - [ ] **Step 1: Write complete authority-state RED tables**
@@ -1282,6 +1306,11 @@ whether a human fallback is legal from the judge results here: SI-116 assigns
 that verdict prerequisite to Task 9 without adding or overloading a Task 8
 state.
 
+Return the kernel's translated closed disclosures beside the resolution rows;
+do not discard them, rerun authorization downstream, or add them to each
+resolution wire. Task 9 owns their one top-level merge with mechanical
+disclosures.
+
 - [ ] **Step 4: Run focused and package race GREEN**
 
 ~~~bash
@@ -1344,10 +1373,16 @@ Ratchet byte-identical reports over repeated runs and permutations of claims,
 policies, exemptions, dispositions, and actor facts. Assert one input identity,
 no duplicate authority ledgers, no absolute/credential/secret/process-env data,
 closed reason/disclosure codes, and report digest equality after decode.
+Prove all compiler disclosures survive the sealed boundary, each of SI-120's
+four blocking codes independently produces `blocked-unproven`, and every other
+known compiler code remains visible without independently overriding a clean
+proof. Prove an effective exemption is present in the one semantic-input digest
+shown to both judges and matched by a disposition.
 Include a real sealed-store disposition fixture and prove its source-artifact
-authority digests and semantic-input ID are constructible without a digest
-fixed point; the aggregate effective-policy digest remains separately bound in
-the report input and judgment cache key.
+authority digests, exact target-content digest, and semantic-input ID are
+constructible without a digest fixed point; the aggregate effective-policy and
+accepted-manifest digests remain separately bound in the report input and the
+effective-policy digest remains in the judgment cache key.
 
 - [ ] **Step 2: Run the focused RED**
 
@@ -1360,14 +1395,23 @@ Expected: undefined service/report derivation APIs.
 - [ ] **Step 3: Implement the ordered ten-stage service**
 
 Follow authority §3 order exactly: validate request; resolve one snapshot;
-obtain/reverify sealed operands; run mechanical proof; build semantic input;
-reuse/run judges; resolve exemptions/dispositions/principals; derive rows;
-derive verdict; canonicalize/self-digest report. Return a completed `Result`
+obtain/reverify sealed operands; run mechanical proof; resolve/apply exemptions
+and their principals; build semantic input from those rows; reuse/run judges;
+resolve dispositions and their principals; derive rows/verdict; then
+canonicalize/self-digest the report. Return a completed `Result`
 only for the three verdicts. Decode/authority/cache/I/O/process/cancellation
 failures return typed operational errors and no report. Return a typed
 not-adopted refusal before semantic work. `ProbeAdoption` delegates to
 `policyauthority.Load`: only `ErrNotAdopted` returns `(false,nil)`; incomplete,
 malformed, or symlinked policy stores remain operational errors.
+
+Build report target and policy-entry identity only from the sealed snapshot:
+use its validated candidate blob, exact target source, and complete applicable
+policy-entry ledger. Merge, sort, and deduplicate mechanical plus exemption and
+disposition authorization disclosures once at the report boundary.
+Preserve every sealed compiler disclosure; independently block as unproven only
+for the four SI-120 codes, leaving every other code visible at its owning typed
+fact rather than treating disclosure presence itself as failure.
 
 When applying disposition resolutions, enforce SI-116 before deriving the
 semantic row and verdict. A `human-fallback` is eligible only if configured
