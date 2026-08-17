@@ -1125,7 +1125,15 @@ func TestResolveDispositionAuthorityMismatch(t *testing.T) {
 		{
 			name: "mismatched claim category",
 			mutate: func(f dispositionFixture) dispositionFixture {
-				f.Claims[0].Category = "spec-problem"
+				// Category-specific semantic identities must be structurally
+				// valid before the resolver can compare them. Replace one
+				// policy instruction with a valid, independently different
+				// spec-problem witness, then preserve canonical ID order.
+				mismatch := f.Claims[0]
+				mismatch.ID = "spec/example-story#problem"
+				mismatch.Category = "spec-problem"
+				mismatch.Scope.Refs = []string{mismatch.ID}
+				f.Claims = []policyartifact.SemanticClaimWitness{f.Claims[1], mismatch}
 				return f
 			},
 		},

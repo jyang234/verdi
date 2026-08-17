@@ -831,6 +831,30 @@ func TestDecodeReport_SemanticClaimWitnessCategoryClosure(t *testing.T) {
 	}
 }
 
+// TestDecodeReport_SemanticClaimWitnessSemanticOnlyScopeRef proves report
+// validation preserves the category-specific semantic line identities already
+// validated by policyartifact.SemanticClaimWitness. In particular, #outcome is
+// a legal semantic anchor but deliberately not a general artifact fragment.
+func TestDecodeReport_SemanticClaimWitnessSemanticOnlyScopeRef(t *testing.T) {
+	base := mustReadFixture(t, "report.json")
+	tree := setAtPath(t, base, []any{"semantic", 0, "claims", 1, "category"}, "spec-outcome")
+	setAtPathIn(t, tree, []any{"semantic", 0, "claims", 1, "id"}, "spec/example-story#outcome")
+	setAtPathIn(t, tree, []any{"semantic", 0, "claims", 1, "scope", "refs"}, []any{"spec/example-story#outcome"})
+	data := redigestTopLevel(t, tree)
+
+	report, err := DecodeReport(data)
+	if err != nil {
+		t.Fatalf("DecodeReport(valid semantic-only scope ref): %v", err)
+	}
+	encoded, err := EncodeReport(report)
+	if err != nil {
+		t.Fatalf("EncodeReport(valid semantic-only scope ref): %v", err)
+	}
+	if !bytes.Equal(encoded, data) {
+		t.Fatalf("semantic-only scope ref round-trip mismatch:\n got: %s\nwant: %s", encoded, data)
+	}
+}
+
 // TestDecodeReport_DispositionConclusionClosure is the second pinpoint
 // evidence test: a Report whose embedded DispositionResolution.Conclusion
 // (policyartifact.DispositionConclusion) carries a value outside the
@@ -1557,8 +1581,15 @@ func TestDecodeReport_ForgedMutationMatrix(t *testing.T) {
 			"scope":            map[string]any{"environments": []any{}, "paths": []any{}, "phases": []any{}, "refs": []any{}},
 			"values":           []any{},
 		}, "claims: duplicate identity"},
+		{"unsorted semantic witness scope phases", []any{"semantic", 0, "claims", 0, "scope", "phases"}, []any{"review", "build"}, "phases: must be sorted ascending"},
+		{"unsorted semantic witness scope environments", []any{"semantic", 0, "claims", 0, "scope", "environments"}, []any{"production", "development"}, "environments: must be sorted ascending"},
 		{"unsorted semantic witness scope paths", []any{"semantic", 0, "claims", 0, "scope", "paths"}, []any{"src/", "docs/"}, "paths: must be sorted ascending"},
 		{"unsorted semantic witness scope refs", []any{"semantic", 0, "claims", 0, "scope", "refs"}, []any{"spec/zeta", "spec/alpha"}, "refs: must be sorted ascending"},
+		{"duplicate semantic witness scope phases", []any{"semantic", 0, "claims", 0, "scope", "phases"}, []any{"build", "build"}, "duplicate entry"},
+		{"duplicate semantic witness scope environments", []any{"semantic", 0, "claims", 0, "scope", "environments"}, []any{"development", "development"}, "duplicate entry"},
+		{"duplicate semantic witness scope paths", []any{"semantic", 0, "claims", 0, "scope", "paths"}, []any{"docs/", "docs/"}, "duplicate entry"},
+		{"duplicate semantic witness scope refs", []any{"semantic", 0, "claims", 0, "scope", "refs"}, []any{"spec/alpha", "spec/alpha"}, "duplicate entry"},
+		{"semantic witness scope phase is closed", []any{"semantic", 0, "claims", 0, "scope", "phases"}, []any{"deploy"}, "unknown phase"},
 	}
 
 	for _, tc := range cases {

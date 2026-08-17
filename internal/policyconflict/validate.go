@@ -944,11 +944,14 @@ func validateDispositionConclusion(field string, c policyartifact.DispositionCon
 // Validate — including its closed §6 source-category vocabulary — plus
 // this package's own ordering rules: sorted-unique claim IDs (authority
 // design §10: "sorted-unique witness-ID order") and, for each witness's
-// inherited scope, the same sorted-unique member rule validateScope applies
-// to every other scope in a report. Ordering is policyconflict's own
-// report-row concern: policyartifact's Scope.Validate proves membership and
-// uniqueness but not canonical lexical order, so an unsorted witness scope
-// would otherwise slip into a canonical report. The exported
+// inherited scope, the same sorted-unique member ordering rule validateScope
+// applies to every other scope in a report. SemanticClaimWitness.Validate
+// owns category-aware scope membership: reapplying validateScope here would
+// incorrectly feed semantic-only #problem/#outcome/#decision anchors through
+// the general artifact-fragment grammar. Ordering is policyconflict's own
+// report-row concern: policyartifact proves membership and uniqueness but not
+// canonical lexical order, so an unsorted witness scope would otherwise slip
+// into a canonical report. The exported
 // SemanticClaimWitness.Validate seam is the same controller-authorized
 // addition as validateDispositionConclusion above; policyconflict never
 // duplicates policyartifact's private knownWitnessCategories map.
@@ -960,7 +963,17 @@ func validateSemanticClaims(field string, claims []policyartifact.SemanticClaimW
 		if err := c.Validate(); err != nil {
 			return fmt.Errorf("policyconflict: %s[%d]: %w", field, i, err)
 		}
-		if err := validateScope(fmt.Sprintf("%s[%d].scope", field, i), c.Scope); err != nil {
+		scopeField := fmt.Sprintf("%s[%d].scope", field, i)
+		if err := requireSortedUniqueStrings(scopeField+".phases", c.Scope.Phases); err != nil {
+			return err
+		}
+		if err := requireSortedUniqueStrings(scopeField+".environments", c.Scope.Environments); err != nil {
+			return err
+		}
+		if err := requireSortedUniqueStrings(scopeField+".paths", c.Scope.Paths); err != nil {
+			return err
+		}
+		if err := requireSortedUniqueStrings(scopeField+".refs", c.Scope.Refs); err != nil {
 			return err
 		}
 	}
