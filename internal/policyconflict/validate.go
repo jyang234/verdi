@@ -1090,6 +1090,9 @@ func (r Report) Validate() error {
 	if err := r.Verdict.Validate(); err != nil {
 		return fmt.Errorf("policyconflict: report.verdict: %w", err)
 	}
+	if want := reportVerdict(r.Mechanical, r.Semantic, r.Disclosures); r.Verdict != want {
+		return fmt.Errorf("policyconflict: report.verdict: %q does not equal derived verdict %q", r.Verdict, want)
+	}
 	if r.Digest != "" {
 		if err := validateDigest("report.digest", r.Digest); err != nil {
 			return err

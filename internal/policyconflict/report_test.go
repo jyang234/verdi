@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/jyang234/verdi/internal/contextcompile"
@@ -88,6 +89,23 @@ func TestReportDeterminismViolatedOutranksUnproven(t *testing.T) {
 	semantic := []SemanticEvaluation{{State: ProofUnproven}}
 	if got := reportVerdict(mechanical, semantic, nil); got != VerdictBlockedViolated {
 		t.Fatalf("reportVerdict = %q, want %q", got, VerdictBlockedViolated)
+	}
+}
+
+func TestReportDeterminismRejectsFavorableVerdictForgery(t *testing.T) {
+	base := mustReadFixture(t, "report.json")
+	forged := forgedReport(t, base, []any{"verdict"}, string(VerdictPass))
+	if _, err := DecodeReport(forged); err == nil || !strings.Contains(err.Error(), "derived verdict") {
+		t.Fatalf("DecodeReport(freshly re-digested favorable lie) error = %v, want derived-verdict refusal", err)
+	}
+
+	report, err := DecodeReport(base)
+	if err != nil {
+		t.Fatalf("DecodeReport(fixture): %v", err)
+	}
+	report.Verdict = VerdictPass
+	if _, err := EncodeReport(report); err == nil || !strings.Contains(err.Error(), "derived verdict") {
+		t.Fatalf("EncodeReport(favorable lie) error = %v, want derived-verdict refusal", err)
 	}
 }
 
