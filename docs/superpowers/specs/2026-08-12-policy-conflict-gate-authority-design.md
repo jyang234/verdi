@@ -421,6 +421,16 @@ case-folds, rewrites, summarizes, or reorders authored text. Policy
 instructions inherit their policy/claim scope. Spec and obligation prose
 inherit the request scope intersected with their exact spec/object ref.
 
+The governing authority digest is the digest of the exact artifact bytes that
+authored that prose claim. For a policy instruction it is the selected policy
+artifact's sealed digest; for target, feature, ADR, and obligation prose it is
+the source artifact's exact content digest. It is never the aggregate
+effective-policy digest: that aggregate includes dispositions, so requiring a
+disposition to embed it would make both the disposition digest and semantic
+input identity depend recursively on their own future values. The aggregate
+effective-policy digest remains bound once, separately, in `InputIdentity` and
+the judgment cache key.
+
 The semantic input contains the complete sorted prose claims and one sorted
 `UnknownMechanicalWitness { id, claims, scope }` for every mechanical row
 whose scope state is unknown, plus every row whose reason is
@@ -994,7 +1004,7 @@ no browser behavior and adds no Playwright case.
 
 ## 14. Source coverage and losslessness
 
-Coverage is **22/22** implicated authority source groups. The mapping is
+Coverage is **23/23** implicated authority source groups. The mapping is
 lossless; each row names the complete clause range used rather than assigning
 inconsistent per-clause counts across differently structured sources:
 
@@ -1022,6 +1032,7 @@ inconsistent per-clause counts across differently structured sources:
 | Disposition runtime-input and target freshness boundary | 1 | §§6, 8–10; SI-114; plan Tasks 7B–9 |
 | Complete five-state authority derivation and directional exemption coverage | 1 | §§4, 5.5, 8–10; SI-115; plan Task 8 |
 | Human-fallback legality at the verdict boundary | 1 | §§3, 6, 8, 10; SI-116; plan Task 9 |
+| Cycle-free semantic claim authority identity | 1 | §§3, 6–8, 10; SI-117; plan Tasks 4, 7–9 |
 
 The transformations are explicit:
 
@@ -1041,6 +1052,9 @@ The transformations are explicit:
 - the disposition's input ID reuses the complete runtime semantic-input digest
   while target identity remains a separately compared authority operand; the
   human artifact does not invent a second digest over its smaller projection;
+- each semantic claim binds the exact artifact digest that authored it while
+  the aggregate effective-policy digest remains a separate report/cache input,
+  so disposition bytes never become a recursive input to their own witness;
 - existing claim-level exemptions are applied by exact scoped removal and
   solver recomputation rather than treated as generic conflict waivers; and
 - exemption scope coverage is a directional containment proof over the

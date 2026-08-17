@@ -104,6 +104,14 @@ predicate. SI-116 keeps each Task 8 state single-purpose and assigns fallback
 legality to Task 9, the first seam that combines exchanges, disposition
 resolutions, rows, and the final verdict.
 
+Task 9's first implementation audit found that Task 4 assigned every semantic
+claim the aggregate effective-policy digest even though that digest includes
+the disposition artifacts whose witnesses must carry the semantic claims.
+This creates an unreachable cryptographic fixed point for every effective
+disposition. SI-117 fixes the already-present `AuthorityDigest` field to the
+exact source artifact digest and requires a narrow Task 4 runtime correction
+before Task 9 service orchestration resumes; it adds no field or digest layer.
+
 ## File Map
 
 | Responsibility | Files |
@@ -1336,6 +1344,10 @@ Ratchet byte-identical reports over repeated runs and permutations of claims,
 policies, exemptions, dispositions, and actor facts. Assert one input identity,
 no duplicate authority ledgers, no absolute/credential/secret/process-env data,
 closed reason/disclosure codes, and report digest equality after decode.
+Include a real sealed-store disposition fixture and prove its source-artifact
+authority digests and semantic-input ID are constructible without a digest
+fixed point; the aggregate effective-policy digest remains separately bound in
+the report input and judgment cache key.
 
 - [ ] **Step 2: Run the focused RED**
 
