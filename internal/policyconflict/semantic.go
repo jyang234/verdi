@@ -15,10 +15,12 @@ package policyconflict
 
 import (
 	"fmt"
+	"regexp"
 	"sort"
 	"strings"
 	"unicode/utf8"
 
+	"github.com/jyang234/verdi/internal/artifact"
 	"github.com/jyang234/verdi/internal/canonjson"
 	"github.com/jyang234/verdi/internal/contextcompile"
 	"github.com/jyang234/verdi/internal/policyartifact"
@@ -153,18 +155,7 @@ func normalizedProseClaims(in []contextcompile.ProseClaim) ([]contextcompile.Pro
 		if err := validateNonEmpty(field+".object", c.Object); err != nil {
 			return nil, err
 		}
-		// Every contextcompile prose-claim builder sets ID == LineIdentity
-		// (policy-instruction/spec/fragment/adr-decision claims further
-		// compose it as SourceRef+"#"+Object; obligation-declaration claims
-		// use the bare obligation ref instead, with Object naming the bound
-		// AC separately) — ID==LineIdentity is the one invariant every
-		// category shares, so that is what this defends, rather than a
-		// single ref#object formula that would wrongly reject a legitimate
-		// obligation-declaration claim.
-		if c.ID != c.LineIdentity {
-			return nil, fmt.Errorf("policyconflict: %s.id: %q does not match its own line identity %q", field, c.ID, c.LineIdentity)
-		}
-		if err := validateProseClaimScope(field+".scope", c.Scope); err != nil {
+		if err := validateProseClaimIdentity(field, c); err != nil {
 			return nil, err
 		}
 		out = append(out, cloneProseClaim(c))
@@ -172,36 +163,122 @@ func normalizedProseClaims(in []contextcompile.ProseClaim) ([]contextcompile.Pro
 	return out, nil
 }
 
-// validateProseClaimScope checks a ProseClaim's own inherited scope. It
-// reuses policyartifact.Scope's real phase/environment/path grammar (by
-// validating a copy with Refs cleared, since that grammar's own dimensions
-// are unaffected by what Refs carries) but does NOT run the shared
-// validateScope/Scope.Validate ref-grammar check on Refs itself:
-// ProseClaim.Scope.Refs carries the claim's own "ref#object" LINE IDENTITY
-// (newProseClaim/buildPolicyInstructionProse/buildObligationProse all set
-// it that way), a different vocabulary from a governing policy's own
-// declared scope refs — artifact.ParseRef's fragment-object grammar
-// requires a hyphenated object id (e.g. "ac-2", "instruction-1") and
-// genuinely rejects the spec kernel's own fixed single-word anchors
-// "problem"/"outcome"/"decision", which real Task 4 output legitimately
-// carries. Refs here is instead required non-nil, sorted-unique, and
-// non-blank per entry — structural well-formedness without imposing an
-// object-id grammar this field was never that vocabulary.
-func validateProseClaimScope(field string, s policyartifact.Scope) error {
-	forGrammar := s
-	forGrammar.Refs = []string{}
-	if err := validateScope(field, forGrammar); err != nil {
-		return err
-	}
-	if s.Refs == nil {
-		return fmt.Errorf("policyconflict: %s.refs: must be non-nil (an explicitly empty set is [])", field)
-	}
-	for i, r := range s.Refs {
-		if err := validateNonEmpty(fmt.Sprintf("%s.refs[%d]", field, i), r); err != nil {
+var (
+	policyProseSourceRe = regexp.MustCompile(`^policy/[a-z0-9]+(?:-[a-z0-9]+)*$`)
+	instructionObjectRe = regexp.MustCompile(`^instruction-[1-9][0-9]*$`)
+)
+
+// validateProseClaimIdentity enforces SI-112's closed, category-specific
+// line-identity grammar against the exact contextcompile producers. These
+// line identities are deliberately not fed to artifact.ParseRef where the
+// kernel/body anchors problem, outcome, and decision are not general
+// declared-object fragments.
+func validateProseClaimIdentity(field string, c contextcompile.ProseClaim) error {
+	switch c.Category {
+	case "policy-instruction":
+		if !policyProseSourceRe.MatchString(c.SourceRef) {
+			return fmt.Errorf("policyconflict: %s.source_ref: %q is not a canonical policy/<name> identity", field, c.SourceRef)
+		}
+		if !instructionObjectRe.MatchString(c.Object) {
+			return fmt.Errorf("policyconflict: %s.object: %q is not instruction-<positive-n> form", field, c.Object)
+		}
+		if err := requireProseLineIdentity(field, c, c.SourceRef+"#"+c.Object); err != nil {
 			return err
 		}
+		// Policy instructions retain the policy claim's declared scope; it
+		// is not replaced by a one-line ref scope.
+		return validateScope(field+".scope", c.Scope)
+
+	case "spec-problem", "spec-outcome", "acceptance-criterion", "open-question", "constraint", "decision":
+		ref, err := artifact.ParseRef(c.SourceRef)
+		if err != nil || ref.Kind != artifact.KindSpec || ref.Pinned() || ref.Fragment() {
+			return fmt.Errorf("policyconflict: %s.source_ref: %q must be an unpinned whole spec ref", field, c.SourceRef)
+		}
+		if err := validateSpecProseObject(field+".object", c.Category, c.SourceRef, c.Object); err != nil {
+			return err
+		}
+		line := c.SourceRef + "#" + c.Object
+		if err := requireProseLineIdentity(field, c, line); err != nil {
+			return err
+		}
+		return validateSoleLineScope(field+".scope", c.Scope, line)
+
+	case "adr-decision":
+		ref, err := artifact.ParsePinnedRef(c.SourceRef)
+		if err != nil || ref.Kind != artifact.KindADR || ref.Fragment() {
+			return fmt.Errorf("policyconflict: %s.source_ref: %q must be an exact pinned whole ADR ref", field, c.SourceRef)
+		}
+		if c.Object != "decision" {
+			return fmt.Errorf("policyconflict: %s.object: adr-decision requires %q, got %q", field, "decision", c.Object)
+		}
+		line := c.SourceRef + "#decision"
+		if err := requireProseLineIdentity(field, c, line); err != nil {
+			return err
+		}
+		return validateSoleLineScope(field+".scope", c.Scope, line)
+
+	case "obligation-declaration":
+		ref, err := artifact.ParseRef(c.SourceRef)
+		if err != nil || ref.Kind != artifact.KindObligation || ref.Pinned() || ref.Fragment() {
+			return fmt.Errorf("policyconflict: %s.source_ref: %q must be an unpinned whole obligation ref", field, c.SourceRef)
+		}
+		_, acID, _, ok := artifact.SplitObligationName(ref.Name)
+		if !ok || c.Object != acID {
+			return fmt.Errorf("policyconflict: %s.object: %q does not match obligation ref %q's acceptance criterion %q", field, c.Object, c.SourceRef, acID)
+		}
+		if err := requireProseLineIdentity(field, c, c.SourceRef); err != nil {
+			return err
+		}
+		return validateSoleLineScope(field+".scope", c.Scope, c.SourceRef)
 	}
-	return requireSortedUniqueStrings(field+".refs", s.Refs)
+	return fmt.Errorf("policyconflict: %s.category: unknown semantic prose category %q", field, c.Category)
+}
+
+func validateSpecProseObject(field, category, sourceRef, object string) error {
+	switch category {
+	case "spec-problem":
+		if object != "problem" {
+			return fmt.Errorf("policyconflict: %s: spec-problem requires %q, got %q", field, "problem", object)
+		}
+		return nil
+	case "spec-outcome":
+		if object != "outcome" {
+			return fmt.Errorf("policyconflict: %s: spec-outcome requires %q, got %q", field, "outcome", object)
+		}
+		return nil
+	}
+	prefix := map[string]string{
+		"acceptance-criterion": "ac-",
+		"open-question":        "oq-",
+		"constraint":           "co-",
+		"decision":             "dc-",
+	}[category]
+	if !strings.HasPrefix(object, prefix) {
+		return fmt.Errorf("policyconflict: %s: category %q requires an %s* object, got %q", field, category, prefix, object)
+	}
+	if _, err := artifact.ParseRef(sourceRef + "#" + object); err != nil {
+		return fmt.Errorf("policyconflict: %s: %q is not a canonical declared-object identity: %w", field, object, err)
+	}
+	return nil
+}
+
+func requireProseLineIdentity(field string, c contextcompile.ProseClaim, want string) error {
+	if c.ID != want || c.LineIdentity != want {
+		return fmt.Errorf("policyconflict: %s: source_ref/object require id and line_identity %q, got id=%q line_identity=%q", field, want, c.ID, c.LineIdentity)
+	}
+	return nil
+}
+
+func validateSoleLineScope(field string, scope policyartifact.Scope, line string) error {
+	grammar := scope
+	grammar.Refs = []string{}
+	if err := validateScope(field, grammar); err != nil {
+		return err
+	}
+	if len(scope.Refs) != 1 || scope.Refs[0] != line {
+		return fmt.Errorf("policyconflict: %s.refs: must be exactly [%q], got %v", field, line, scope.Refs)
+	}
+	return nil
 }
 
 func cloneProseClaim(c contextcompile.ProseClaim) contextcompile.ProseClaim {

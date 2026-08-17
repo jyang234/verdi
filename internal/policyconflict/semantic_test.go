@@ -33,6 +33,18 @@ func semanticScope(ref string) policyartifact.Scope {
 // identity, correct TextDigest, and a valid inherited scope.
 func semanticClaim(ref, object, category, text string) contextcompile.ProseClaim {
 	id := ref + "#" + object
+	scope := semanticScope(id)
+	if category == "policy-instruction" {
+		// Policy instructions retain their policy artifact's declared scope;
+		// unlike object prose, they are not narrowed to their line identity.
+		scope = policyartifact.Scope{Phases: []string{"build"}, Environments: []string{}, Paths: []string{}, Refs: []string{}}
+	}
+	if category == "obligation-declaration" {
+		// The obligation's whole artifact ref is its line identity; Object
+		// separately records the bound AC encoded in that ref's name.
+		id = ref
+		scope = semanticScope(ref)
+	}
 	return contextcompile.ProseClaim{
 		ID:              id,
 		Category:        category,
@@ -41,7 +53,7 @@ func semanticClaim(ref, object, category, text string) contextcompile.ProseClaim
 		SourceRef:       ref,
 		SourcePath:      "specs/active/" + ref + "/spec.md",
 		SourceDigest:    semanticDigest(ref + " source"),
-		Scope:           semanticScope(id),
+		Scope:           scope,
 		AuthorityDigest: semanticDigest(ref + " authority"),
 		Object:          object,
 		LineIdentity:    id,
@@ -138,13 +150,22 @@ func TestBuildSemanticInput_PromptRatchet(t *testing.T) {
 }
 
 func TestBuildSemanticInput_AllSourceCategories(t *testing.T) {
-	categories := []string{
-		"policy-instruction", "spec-problem", "spec-outcome", "acceptance-criterion",
-		"open-question", "constraint", "decision", "adr-decision", "obligation-declaration",
+	tests := []struct {
+		ref, object, category string
+	}{
+		{"policy/go-toolchain", "instruction-1", "policy-instruction"},
+		{"spec/widget", "problem", "spec-problem"},
+		{"spec/widget", "outcome", "spec-outcome"},
+		{"spec/widget", "ac-1", "acceptance-criterion"},
+		{"spec/widget", "oq-1", "open-question"},
+		{"spec/widget", "co-1", "constraint"},
+		{"spec/widget", "dc-1", "decision"},
+		{"adr/0001-widget@abcdef1", "decision", "adr-decision"},
+		{"obligation/widget--ac-1--static", "ac-1", "obligation-declaration"},
 	}
-	claims := make([]contextcompile.ProseClaim, 0, len(categories))
-	for i, cat := range categories {
-		claims = append(claims, semanticClaim("spec/widget", cat+"-obj", cat, "text for "+cat+string(rune('a'+i))))
+	claims := make([]contextcompile.ProseClaim, 0, len(tests))
+	for i, tc := range tests {
+		claims = append(claims, semanticClaim(tc.ref, tc.object, tc.category, "text for "+tc.category+string(rune('a'+i))))
 	}
 	sort.Slice(claims, func(i, j int) bool { return claims[i].ID < claims[j].ID })
 	view := contextcompile.ConflictView{ProseClaims: claims}
@@ -152,8 +173,8 @@ func TestBuildSemanticInput_AllSourceCategories(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BuildSemanticInput: %v", err)
 	}
-	if len(got.Claims) != len(categories) {
-		t.Fatalf("Claims count = %d, want %d", len(got.Claims), len(categories))
+	if len(got.Claims) != len(tests) {
+		t.Fatalf("Claims count = %d, want %d", len(got.Claims), len(tests))
 	}
 }
 
@@ -173,16 +194,87 @@ func TestBuildSemanticInput_AllSourceCategories(t *testing.T) {
 // passing even if a future change carelessly swaps
 // validateProseClaimScope back to the shared strict helper.
 func TestBuildSemanticInput_KernelAnchorObjects(t *testing.T) {
-	for _, object := range []string{"problem", "outcome", "decision"} {
-		t.Run(object, func(t *testing.T) {
-			c := semanticClaim("spec/widget", object, "spec-problem", "kernel-anchor text for "+object)
+	tests := []struct {
+		ref, object, category string
+	}{
+		{"spec/widget", "problem", "spec-problem"},
+		{"spec/widget", "outcome", "spec-outcome"},
+		{"adr/0001-widget@abcdef1", "decision", "adr-decision"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.category, func(t *testing.T) {
+			c := semanticClaim(tc.ref, tc.object, tc.category, "kernel-anchor text for "+tc.object)
 			view := contextcompile.ConflictView{ProseClaims: []contextcompile.ProseClaim{c}}
 			got, err := BuildSemanticInput(view, nil)
 			if err != nil {
-				t.Fatalf("BuildSemanticInput rejected the real kernel anchor object %q: %v", object, err)
+				t.Fatalf("BuildSemanticInput rejected the real kernel anchor object %q: %v", tc.object, err)
 			}
-			if len(got.Claims) != 1 || got.Claims[0].Object != object {
-				t.Fatalf("Claims = %+v, want exactly one claim with object %q", got.Claims, object)
+			if len(got.Claims) != 1 || got.Claims[0].Object != tc.object {
+				t.Fatalf("Claims = %+v, want exactly one claim with object %q", got.Claims, tc.object)
+			}
+		})
+	}
+}
+
+func TestBuildSemanticInput_CategorySpecificLineIdentity(t *testing.T) {
+	valid := []contextcompile.ProseClaim{
+		semanticClaim("policy/go-toolchain", "instruction-12", "policy-instruction", "Use the governed toolchain."),
+		semanticClaim("spec/widget", "problem", "spec-problem", "The problem."),
+		semanticClaim("spec/widget", "outcome", "spec-outcome", "The outcome."),
+		semanticClaim("spec/widget", "ac-1", "acceptance-criterion", "The acceptance criterion."),
+		semanticClaim("spec/widget", "oq-1", "open-question", "The open question."),
+		semanticClaim("spec/widget", "co-1", "constraint", "The constraint."),
+		semanticClaim("spec/widget", "dc-1", "decision", "The decision."),
+		semanticClaim("adr/0001-widget@abcdef1", "decision", "adr-decision", "The ADR decision."),
+		semanticClaim("obligation/widget--ac-1--static", "ac-1", "obligation-declaration", "The obligation declaration."),
+	}
+	sort.Slice(valid, func(i, j int) bool { return valid[i].ID < valid[j].ID })
+	if _, err := BuildSemanticInput(contextcompile.ConflictView{ProseClaims: valid}, nil); err != nil {
+		t.Fatalf("BuildSemanticInput(real producer identities): %v", err)
+	}
+
+	baseSpec := semanticClaim("spec/widget", "ac-1", "acceptance-criterion", "The acceptance criterion.")
+	basePolicy := semanticClaim("policy/go-toolchain", "instruction-1", "policy-instruction", "Use the governed toolchain.")
+	baseADR := semanticClaim("adr/0001-widget@abcdef1", "decision", "adr-decision", "The ADR decision.")
+	baseObligation := semanticClaim("obligation/widget--ac-1--static", "ac-1", "obligation-declaration", "The obligation declaration.")
+
+	tests := []struct {
+		name string
+		base contextcompile.ProseClaim
+		mut  func(*contextcompile.ProseClaim)
+	}{
+		{"spec category/object mismatch", baseSpec, func(c *contextcompile.ProseClaim) { c.Category = "open-question" }},
+		{"spec foreign source kind", baseSpec, func(c *contextcompile.ProseClaim) { c.SourceRef = "adr/0001-widget" }},
+		{"spec pinned source", baseSpec, func(c *contextcompile.ProseClaim) { c.SourceRef = "spec/widget@abcdef1" }},
+		{"spec wrong scope ref", baseSpec, func(c *contextcompile.ProseClaim) { c.Scope.Refs = []string{"spec/other#ac-1"} }},
+		{"policy foreign source kind", basePolicy, func(c *contextcompile.ProseClaim) { c.SourceRef = "policy-overlay/go-toolchain" }},
+		{"policy nonpositive instruction", basePolicy, func(c *contextcompile.ProseClaim) {
+			c.Object, c.ID, c.LineIdentity = "instruction-0", "policy/go-toolchain#instruction-0", "policy/go-toolchain#instruction-0"
+		}},
+		{"adr must be pinned", baseADR, func(c *contextcompile.ProseClaim) {
+			c.SourceRef, c.ID, c.LineIdentity = "adr/0001-widget", "adr/0001-widget#decision", "adr/0001-widget#decision"
+			c.Scope.Refs = []string{c.LineIdentity}
+		}},
+		{"adr wrong object", baseADR, func(c *contextcompile.ProseClaim) {
+			c.Object, c.ID, c.LineIdentity = "dc-1", c.SourceRef+"#dc-1", c.SourceRef+"#dc-1"
+			c.Scope.Refs = []string{c.LineIdentity}
+		}},
+		{"obligation object disagrees with ref", baseObligation, func(c *contextcompile.ProseClaim) { c.Object = "ac-2" }},
+		{"obligation fragment identity", baseObligation, func(c *contextcompile.ProseClaim) {
+			c.ID, c.LineIdentity = c.SourceRef+"#ac-1", c.SourceRef+"#ac-1"
+			c.Scope.Refs = []string{c.LineIdentity}
+		}},
+		{"control-bearing object", baseSpec, func(c *contextcompile.ProseClaim) {
+			c.Object, c.ID, c.LineIdentity = "ac-1\nforeign", c.SourceRef+"#ac-1\nforeign", c.SourceRef+"#ac-1\nforeign"
+			c.Scope.Refs = []string{c.LineIdentity}
+		}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			claim := cloneProseClaim(tc.base)
+			tc.mut(&claim)
+			if _, err := BuildSemanticInput(contextcompile.ConflictView{ProseClaims: []contextcompile.ProseClaim{claim}}, nil); err == nil {
+				t.Fatal("BuildSemanticInput accepted a category/identity mismatch")
 			}
 		})
 	}
