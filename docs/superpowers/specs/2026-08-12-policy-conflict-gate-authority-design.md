@@ -1,7 +1,7 @@
 # Policy Conflict Gate Authority Design
 
 **Status:** Owner-approved design; repository authority becomes effective when
-the reviewed commit carrying this document and SI-93 through SI-113 reaches the
+the reviewed commit carrying this document and SI-93 through SI-114 reaches the
 configured default branch.
 
 **Planning base:** `bfaa8e2715678cbe8cd71137f23d743666caf1c4`
@@ -579,8 +579,14 @@ claim's identity fields required by AC-3 — claim ID and digest, category,
 scope, typed values/bounds when present, governing authority digest — the
 context/candidate identity digest, and every applicable exemption ID/digest.
 It does not duplicate authored claim text or raw judge output. The
-semantic-input ID is the canonical digest of exactly that complete witness
-identity. A `judge-result` record additionally cites the immutable primary and
+semantic-input ID is the Task 7 canonical runtime digest over the complete
+normalized prose claims, unknown-mechanical witnesses and applicable exemption
+identities. The strict artifact decoder validates that ID's digest form but
+does not self-derive it from the smaller human-artifact projection; the
+conflict interpreter compares it to the current runtime input. The target
+digest remains a separate exact component: accepted context supplies its
+manifest digest and an acceptance candidate supplies its exact content digest.
+A `judge-result` record additionally cites the immutable primary and
 challenger judgment-record digests that informed the human, when present, as
 provenance; those citations do not redefine freshness or make the human ruling
 depend on a repeatable model response. Cache presence is never required to
@@ -608,7 +614,11 @@ stale or unauthorized disposition never partially applies.
 `internal/policyauthority` owns loading, path/ID parity, strict decoding,
 cross-reference validation, and inclusion in the effective-authority digest.
 `internal/policyconflict` alone interprets whether a disposition matches and
-governs the current semantic input. Existing legacy `.verdi/conflicts/`,
+governs the current semantic input. Its authority input therefore carries the
+current target digest in addition to the semantic input. `Match` is proven only
+when the disposition's input ID, target digest, normalized claim identities and
+applicable exemption identities all equal those current operands; no partial
+component match is favorable. Existing legacy `.verdi/conflicts/`,
 `decision-conflict-report.md`, deviation findings, and spec-frontmatter
 dispositions remain unchanged and never satisfy this schema.
 
@@ -931,7 +941,7 @@ no browser behavior and adds no Playwright case.
 
 ## 14. Source coverage and losslessness
 
-Coverage is **19/19** implicated authority source groups. The mapping is
+Coverage is **20/20** implicated authority source groups. The mapping is
 lossless; each row names the complete clause range used rather than assigning
 inconsistent per-clause counts across differently structured sources:
 
@@ -956,6 +966,7 @@ inconsistent per-clause counts across differently structured sources:
 | Verifiable judgment cache-key and raw-result binding | 1 | §§6–7, 12; SI-111; plan Task 7A |
 | Closed category-specific semantic prose identity | 1 | §6; SI-112; plan Task 7A |
 | Fixed governance transitions for exemption and disposition approval | 1 | §9; SI-113; plan Task 8 |
+| Disposition runtime-input and target freshness boundary | 1 | §§6, 8–10; SI-114; plan Tasks 7B–9 |
 
 The transformations are explicit:
 
@@ -972,6 +983,9 @@ The transformations are explicit:
 - a judge retry becomes an immutable disposable machine record inside the
   existing D4 cache zone, while human authority remains a committed
   disposition;
+- the disposition's input ID reuses the complete runtime semantic-input digest
+  while target identity remains a separately compared authority operand; the
+  human artifact does not invent a second digest over its smaller projection;
 - existing claim-level exemptions are applied by exact scoped removal and
   solver recomputation rather than treated as generic conflict waivers; and
 - the spec's one verdict becomes four current thin consumers and one later

@@ -31,7 +31,7 @@ Git, and built-binary Go tests.
 - Binding authority is
   `docs/superpowers/specs/2026-08-12-policy-conflict-gate-authority-design.md`,
   Context Integrity AC-3/DC-3–DC-8/DC-15/DC-17–DC-24/CO-1–CO-6, and
-  invention-ledger SI-93–SI-113 as consolidated by the independently reviewed
+  invention-ledger SI-93–SI-114 as consolidated by the independently reviewed
   exact head carrying this plan.
 - Do not edit frozen artifacts or `docs/design/specs/`; do not add a layout
   root, UI, MCP tool, receipt, sealed-execution behavior, forge network call, or
@@ -83,6 +83,13 @@ landed bytes already conform. Task 7A owns the post-landing reconciliation and
 is a hard predecessor of Task 8. Both affected `/v1` schemas remain unreleased,
 so this pre-release required-field correction does not consume a schema-version
 bump.
+
+Task 8's first dispatch stopped with zero edits because its fixed input could
+not prove a disposition's target component. SI-114 preserves the landed Task 7
+judgment/cache identity, removes the disposition decoder's incorrect second
+self-derived semantic-input identity, and supplies target identity separately
+at the authority boundary. Task 7B is the narrow pre-release correction and a
+hard predecessor of Task 8.
 
 ## File Map
 
@@ -1131,6 +1138,39 @@ git commit -m "Bind semantic judgment evidence"
 Review the consolidated Task 7/7A range once, correct accepted findings once,
 and obtain the same reviewer's single closure check before Task 8.
 
+### Task 7B: Reconcile disposition input identity
+
+**Files:**
+- Modify: `internal/policyartifact/{disposition.go,disposition_test.go}`
+
+This pre-release correction implements SI-114 without changing Task 7's
+semantic-input digest, judgment records or immutable cache keys.
+
+- [ ] **Step 1: Capture the focused RED**
+
+Prove that a disposition whose `witness.input_id` is a well-formed current
+runtime semantic-input digest decodes even though that digest is not derivable
+from the human artifact's smaller claim/exemption/target projection. Preserve
+strict rejection of a missing or malformed digest.
+
+- [ ] **Step 2: Remove the false self-derivation**
+
+Keep `input_id` mandatory and digest-shaped, but do not recompute it in the
+artifact decoder. Task 8 is the sole seam that compares it to the current
+runtime semantic input and every separately carried match component.
+
+- [ ] **Step 3: Run GREEN and commit**
+
+~~~bash
+go test -race ./internal/policyartifact -run 'TestDecodeDisposition' -count=1
+go test -race ./internal/policyartifact -count=1
+go vet ./internal/policyartifact
+git add internal/policyartifact/disposition.go internal/policyartifact/disposition_test.go
+git commit -m "Bind dispositions to runtime inputs"
+~~~
+
+Expected: all commands exit 0. Task 8 starts only after this tranche lands.
+
 ### Task 8: Resolve bounds, principals, and semantic dispositions
 
 **Files:**
@@ -1145,6 +1185,7 @@ and obtain the same reviewer's single closure check before Task 8.
 type DateSource interface { TodayUTC(context.Context) (string, error) }
 type AuthorityInput struct {
     EvaluatedOn string
+    TargetDigest string
     Profile governanceprincipal.Profile
     Actors []governanceprincipal.PrincipalResolution
     Exemptions []policyartifact.Exemption
@@ -1157,7 +1198,8 @@ func ResolveDispositionAuthority(AuthorityInput, SemanticInput, Primary, Challen
 - [ ] **Step 1: Write complete authority-state RED tables**
 
 Cover expiry before/on/after evaluation date, malformed or missing injected
-date, review-condition-only unproven, exact/mismatched witness, target,
+date, review-condition-only unproven, exact/mismatched runtime input ID,
+normalized claim witness, target,
 exemption, and judgment provenance, judge-result versus fallback eligibility,
 fallback controls/bounds, absent/inconclusive/disagreeing judge results, conflict
 and no-conflict conclusions, and cache absence after a recorded provenance
@@ -1176,8 +1218,10 @@ Expected: undefined authority resolution APIs.
 
 - [ ] **Step 3: Implement exact freshness and kernel delegation**
 
-Compare complete canonical witness identities, not prose or partial IDs. Use
-the injected date only. Delegate approval/separation meaning to
+Compare the artifact input ID to `semanticInputDigest`, compare
+`AuthorityInput.TargetDigest` to the artifact target digest, and compare the
+normalized claim and exemption identity sets exactly; no subset or partial
+match is proven. Use the injected date only. Delegate approval/separation meaning to
 `governanceprincipal.Authorize`; never compare usernames or principal strings
 inside `policyconflict`. Preserve stale/unauthorized/unproven records in the
 resolution row while preventing them from changing the underlying conflict.
