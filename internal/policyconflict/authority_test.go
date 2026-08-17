@@ -466,6 +466,47 @@ identity_trust_sources:
 `, class, class, trustSources, ownership, signature, distinctness, evidence))
 }
 
+// authorityProfileMissingTransitionYAML builds a solo profile whose
+// applicable_transitions omits missing (SI-113/§9: "A missing or mismatched
+// transition remains the kernel's explicit non-authorizing finding and
+// never becomes a favorable default"). Solo keeps the fixture minimal:
+// governanceprincipal's class-coverage validation only applies to
+// team/high-assurance, and Authorize short-circuits on transition
+// applicability before any approver/distinctness rule is even consulted,
+// so no other rule content is load-bearing here.
+func authorityProfileMissingTransitionYAML(missing string) []byte {
+	all := []string{"policy-exemption-approval", "policy-disposition-approval"}
+	kept := make([]string, 0, 1)
+	for _, t := range all {
+		if t != missing {
+			kept = append(kept, t)
+		}
+	}
+	return []byte(fmt.Sprintf(`schema: verdi.governance-profile/v1
+id: authority-test-missing-transition
+class: solo
+applicable_transitions: %s
+identity_trust_sources:
+  - { id: github, kind: forge }
+role_mappings:
+  - role: author
+    trust_source: github
+    subjects: ["alice", "bob"]
+  - role: policy-owner
+    trust_source: github
+    subjects: ["alice", "bob"]
+ownership_sources: []
+signature_requirements: []
+required_approvers:
+  - transitions: [policy-exemption-approval, policy-disposition-approval]
+    roles: [policy-owner]
+    minimum: 1
+distinctness_rules: []
+evidence_source_restrictions: []
+escalation_thresholds: []
+`, yamlList(kept)))
+}
+
 func decodeAuthorityProfile(t *testing.T, raw []byte) governanceprincipal.Profile {
 	t.Helper()
 	p, err := governanceprincipal.DecodeProfile(raw, authorityCatalog())
@@ -1102,6 +1143,34 @@ func TestResolveDispositionAuthorityMismatch(t *testing.T) {
 				return f
 			},
 		},
+		{
+			// SI-114/SI-115: no partial equality is favorable — a witness
+			// claim set with one MORE identity than the current input's
+			// normalized set is a definite mismatch, not a superset pass.
+			name: "witness claim set has one extra claim",
+			mutate: func(f dispositionFixture) dispositionFixture {
+				extra := policyartifact.SemanticClaimWitness{
+					ID:              "policy/test-policy#instruction-3",
+					Digest:          testDigest64,
+					Category:        "policy-instruction",
+					AuthorityDigest: testDigest64,
+					Scope:           universalScope(),
+					Values:          []string{},
+				}
+				f.Claims = append(append([]policyartifact.SemanticClaimWitness{}, f.Claims...), extra)
+				return f
+			},
+		},
+		{
+			// The reverse cardinality mismatch: one FEWER witness claim
+			// than the current input's normalized set is equally a
+			// definite mismatch, never a favorable subset pass.
+			name: "witness claim set is missing a claim",
+			mutate: func(f dispositionFixture) dispositionFixture {
+				f.Claims = append([]policyartifact.SemanticClaimWitness{}, f.Claims[:1]...)
+				return f
+			},
+		},
 	}
 
 	for _, tc := range tests {
@@ -1297,6 +1366,45 @@ func TestResolveDispositionAuthorityMalformedEvaluatedOn(t *testing.T) {
 				t.Fatalf("ResolveDispositionAuthority: want operational error for evaluated_on %q, got nil", evaluatedOn)
 			}
 		})
+	}
+}
+
+// TestResolveDispositionAuthorityTargetDigestShape proves
+// AuthorityInput.TargetDigest is validated fail-closed, matching this
+// package's malformed-injected-input convention (validateEvaluatedOn): a
+// missing or non-"sha256:<64 hex>" TargetDigest is an operational error —
+// caught before any resolution work, never silently compared as a bare
+// string and never treated as a favorable or unfavorable Match outcome.
+func TestResolveDispositionAuthorityTargetDigestShape(t *testing.T) {
+	si := authoritySemanticInput(t)
+
+	for _, tc := range []string{"", "not-a-digest", "sha256:abcd", "sha256:" + strings.Repeat("g", 64)} {
+		t.Run(fmt.Sprintf("target_digest=%q", tc), func(t *testing.T) {
+			in := AuthorityInput{EvaluatedOn: "2026-01-01", TargetDigest: tc, Profile: referenceProfile(t)}
+			_, err := ResolveDispositionAuthority(in, si, nil, nil)
+			if err == nil {
+				t.Fatalf("ResolveDispositionAuthority: want operational error for target_digest %q, got nil", tc)
+			}
+		})
+	}
+
+	digest, err := semanticInputDigest(si)
+	if err != nil {
+		t.Fatalf("semanticInputDigest: %v", err)
+	}
+	d := matchingDispositionFixture(t, "target-digest-well-formed", policyartifact.DispositionJudgeResult, si, digest, testDigest64B, defaultApprovals(t))
+	in := AuthorityInput{
+		EvaluatedOn:  "2026-01-01",
+		TargetDigest: testDigest64B,
+		Profile:      referenceProfile(t),
+		Dispositions: []policyartifact.Disposition{d},
+	}
+	got, err := ResolveDispositionAuthority(in, si, nil, nil)
+	if err != nil {
+		t.Fatalf("ResolveDispositionAuthority: %v", err)
+	}
+	if len(got) != 1 || got[0].Resolution.Match != ProofProven {
+		t.Fatalf("resolutions = %+v, want one proven-match resolution for a well-formed target digest", got)
 	}
 }
 
@@ -1544,6 +1652,68 @@ func TestResolveDispositionAuthorityAuthorization(t *testing.T) {
 				t.Fatalf("Authorization = %q, want %q", got[0].Resolution.Authorization, tc.want)
 			}
 		})
+	}
+}
+
+// TestResolveExemptionAuthorityUnlistedTransition proves SI-113/§9's
+// "explicit non-authorizing finding, never a favorable default": a profile
+// that does not list "policy-exemption-approval" among its applicable
+// transitions must map to Authorization = violated-with-witness, not
+// unproven and never proven.
+func TestResolveExemptionAuthorityUnlistedTransition(t *testing.T) {
+	claim := authorityTypedClaim(t, "policy/policy-a", discreteClaim("c1", "level", policyartifact.OpAllowedValues, []string{"gold"}, universalScope()))
+	dims := fourDims(universalDim("phase"), universalDim("environment"), universalDim("path"), universalDim("ref"))
+	row := authorityRow("row-1", []TypedClaimRecord{claim}, dims)
+	ex := buildExemption(t, exemptionFixture{
+		Name:      "unlisted-transition",
+		Scope:     universalScope(),
+		Witnesses: []policyartifact.Witness{{Policy: "policy/policy-a", Claim: "c1", ClaimDigest: claim.ClaimDigest}},
+		Approvals: defaultApprovals(t),
+	})
+	in := AuthorityInput{
+		EvaluatedOn: "2026-01-01",
+		Profile:     decodeAuthorityProfile(t, authorityProfileMissingTransitionYAML(transitionExemptionApproval)),
+		Actors:      []governanceprincipal.PrincipalResolution{authorityResolve(t, "alice", authenticatedFact("alice"))},
+		Exemptions:  []policyartifact.Exemption{ex},
+	}
+	got, err := ResolveExemptionAuthority(context.Background(), in, row, noCallCoverageResolver{t: t})
+	if err != nil {
+		t.Fatalf("ResolveExemptionAuthority: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("resolutions = %+v, want exactly one", got)
+	}
+	if got[0].Resolution.Authorization != ProofViolatedWithWitness {
+		t.Fatalf("Authorization = %q, want violated-with-witness (unlisted transition is the kernel's explicit non-authorizing finding)", got[0].Resolution.Authorization)
+	}
+}
+
+// TestResolveDispositionAuthorityUnlistedTransition is the disposition
+// arm's mirror: a profile that does not list "policy-disposition-approval"
+// must map to Authorization = violated-with-witness.
+func TestResolveDispositionAuthorityUnlistedTransition(t *testing.T) {
+	si := authoritySemanticInput(t)
+	digest, err := semanticInputDigest(si)
+	if err != nil {
+		t.Fatalf("semanticInputDigest: %v", err)
+	}
+	d := matchingDispositionFixture(t, "unlisted-transition", policyartifact.DispositionJudgeResult, si, digest, testDigest64B, defaultApprovals(t))
+	in := AuthorityInput{
+		EvaluatedOn:  "2026-01-01",
+		TargetDigest: testDigest64B,
+		Profile:      decodeAuthorityProfile(t, authorityProfileMissingTransitionYAML(transitionDispositionApproval)),
+		Actors:       []governanceprincipal.PrincipalResolution{authorityResolve(t, "alice", authenticatedFact("alice"))},
+		Dispositions: []policyartifact.Disposition{d},
+	}
+	got, err := ResolveDispositionAuthority(in, si, nil, nil)
+	if err != nil {
+		t.Fatalf("ResolveDispositionAuthority: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("resolutions = %+v, want exactly one", got)
+	}
+	if got[0].Resolution.Authorization != ProofViolatedWithWitness {
+		t.Fatalf("Authorization = %q, want violated-with-witness (unlisted transition is the kernel's explicit non-authorizing finding)", got[0].Resolution.Authorization)
 	}
 }
 
