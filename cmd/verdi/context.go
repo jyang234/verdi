@@ -120,7 +120,7 @@ func cmdContextCompile(args []string, stdin io.Reader, stdout, stderr io.Writer)
 	// than a statement about a different, merely similar, path.
 	var outCanon string
 	if hasOut {
-		outCanon, err = canonicalOutPath(outArg)
+		outCanon, err = canonicalOutPath(root, outArg)
 		if err != nil {
 			printContextDiagnostic(stderr, root, err)
 			return 2
@@ -409,6 +409,12 @@ var errContextOutReserved = errors.New("--out must not target a reserved store p
 // such a spelling is refused outright rather than resolved.
 var errContextOutDotDot = errors.New(`--out must not contain a ".." path element`)
 
+// errContextOutSymlink is the deterministic, path-free diagnostic for an
+// existing symlink anywhere in the output path. Output paths are authority
+// boundaries, so resolving a symlink to an otherwise-safe target is not an
+// acceptable substitute for proving that the caller's path is symlink-free.
+var errContextOutSymlink = errors.New("--out must not contain a symlink path component")
+
 // hasDotDotElement reports whether p contains a ".." PATH ELEMENT under
 // either separator convention. It is element-wise, never a substring test:
 // a file honestly named "..notes.json" or "a..b" carries no traversal and
@@ -439,12 +445,90 @@ func hasDotDotElement(p string) bool {
 // hasDotDotElement rejects such spellings earlier still, so this function's
 // input is already ".."-free; the discipline is kept structurally anyway so
 // no future spelling can reintroduce the divergence.
-func canonicalOutPath(p string) (string, error) {
+func canonicalOutPath(root, p string) (string, error) {
+	if err := rejectContextOutputSymlinks(root, p); err != nil {
+		return "", err
+	}
 	canon, err := canonicalGuardPath(p)
 	if err != nil {
 		return "", fmt.Errorf("resolving --out: %w", err)
 	}
 	return canon, nil
+}
+
+// rejectContextOutputSymlinks Lstats every existing caller-selected component
+// of p. The deepest non-symlink filesystem-identical ancestor shared with the
+// resolved checkout is the trusted anchor. This preserves ambient aliases such
+// as macOS /var -> /private/var while still rejecting every caller-selected
+// symlink below that anchor. Inspection stops at the first nonexistent
+// component so a new leaf or parent remains valid for atomicfile.Write to
+// create. Lstat is deliberate: Stat/EvalSymlinks would follow the entry and
+// erase the fact that the caller selected a symlinked output path.
+func rejectContextOutputSymlinks(root, p string) error {
+	abs, err := filepath.Abs(p)
+	if err != nil {
+		return fmt.Errorf("resolving --out: %w", err)
+	}
+	abs = filepath.Clean(abs)
+
+	var rootAncestors []os.FileInfo
+	if rootAbs, absErr := filepath.Abs(root); absErr == nil {
+		for cur := filepath.Clean(rootAbs); ; {
+			if info, statErr := os.Stat(cur); statErr == nil {
+				rootAncestors = append(rootAncestors, info)
+			}
+			parent := filepath.Dir(cur)
+			if parent == cur {
+				break
+			}
+			cur = parent
+		}
+	}
+	anchor := ""
+	for cur := filepath.Dir(abs); anchor == ""; {
+		if info, statErr := os.Lstat(cur); statErr == nil && info.Mode()&os.ModeSymlink == 0 {
+			for _, rootInfo := range rootAncestors {
+				if os.SameFile(info, rootInfo) {
+					anchor = cur
+					break
+				}
+			}
+		}
+		parent := filepath.Dir(cur)
+		if parent == cur {
+			break
+		}
+		cur = parent
+	}
+
+	components := make([]string, 0, 8)
+	if anchor != "" {
+		for cur := abs; cur != anchor; cur = filepath.Dir(cur) {
+			components = append(components, cur)
+		}
+	} else {
+		for cur := abs; ; {
+			components = append(components, cur)
+			parent := filepath.Dir(cur)
+			if parent == cur {
+				break
+			}
+			cur = parent
+		}
+	}
+	for i := len(components) - 1; i >= 0; i-- {
+		info, statErr := os.Lstat(components[i])
+		if statErr != nil {
+			if errors.Is(statErr, os.ErrNotExist) {
+				return nil
+			}
+			return fmt.Errorf("checking --out path components: %w", statErr)
+		}
+		if info.Mode()&os.ModeSymlink != 0 {
+			return errContextOutSymlink
+		}
+	}
+	return nil
 }
 
 // checkNotWithinAny returns errContextOutReserved when the canonical

@@ -62,7 +62,7 @@ func cmdContextConflictWithFactory(args []string, stdin io.Reader, stdout, stder
 
 	var outCanon string
 	if hasOut {
-		outCanon, err = canonicalOutPath(outArg)
+		outCanon, err = canonicalOutPath(root, outArg)
 		if err != nil {
 			printContextCommandDiagnostic(stderr, "conflict", root, err)
 			return 2

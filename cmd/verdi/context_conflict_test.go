@@ -246,6 +246,73 @@ func TestCmdContextConflictStrictRequestAndOutputFence(t *testing.T) {
 	}
 }
 
+// TestCmdContextConflictOutputSymlinksRejectedBeforeProvider proves that the
+// shared context output fence rejects symlinks as such, even when they resolve
+// to an otherwise-safe destination. A guard that only canonicalizes the path
+// would approve both cases and hand the resolved target to the atomic writer.
+func TestCmdContextConflictOutputSymlinksRejectedBeforeProvider(t *testing.T) {
+	root, requestPath := contextConflictFixture(t)
+	t.Chdir(root)
+
+	directTarget := filepath.Join(root, "safe-report-target.json")
+	wantTarget := []byte("leave this file unchanged\n")
+	if err := os.WriteFile(directTarget, wantTarget, 0o644); err != nil {
+		t.Fatalf("write direct symlink target: %v", err)
+	}
+	directLink := filepath.Join(root, "safe-report-link.json")
+	if err := os.Symlink(directTarget, directLink); err != nil {
+		t.Fatalf("create direct output symlink: %v", err)
+	}
+
+	parentTarget := root
+	parentLink := filepath.Join(root, "safe-output-link")
+	if err := os.Symlink(parentTarget, parentLink); err != nil {
+		t.Fatalf("create output parent symlink: %v", err)
+	}
+
+	factoryCalls := 0
+	providerCalls := 0
+	factory := func(string, policyconflict.Request) (policyconflict.VerdictProvider, error) {
+		factoryCalls++
+		return contextConflictProviderFunc(func(context.Context, policyconflict.Request) (policyconflict.Result, error) {
+			providerCalls++
+			return contextConflictResult(policyconflict.VerdictPass), nil
+		}), nil
+	}
+
+	for _, tc := range []struct {
+		name string
+		out  string
+	}{
+		{"direct symlink to safe file", directLink},
+		{"symlinked parent to safe directory", filepath.Join(parentLink, "symlinked-parent-report.json")},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var stdout, stderr bytes.Buffer
+			if code := cmdContextConflictWithFactory([]string{"--request", requestPath, "--out", tc.out}, strings.NewReader(""), &stdout, &stderr, factory); code != 2 {
+				t.Fatalf("exit = %d, want 2; stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+			}
+			if stdout.Len() != 0 || stderr.Len() == 0 {
+				t.Fatalf("stdout=%q stderr=%q, want empty stdout and a refusal", stdout.String(), stderr.String())
+			}
+		})
+	}
+
+	if factoryCalls != 0 || providerCalls != 0 {
+		t.Fatalf("provider factory calls = %d, evaluations = %d; want both zero before output refusal", factoryCalls, providerCalls)
+	}
+	gotTarget, err := os.ReadFile(directTarget)
+	if err != nil {
+		t.Fatalf("read direct symlink target after refusal: %v", err)
+	}
+	if !bytes.Equal(gotTarget, wantTarget) {
+		t.Fatalf("direct symlink target = %q, want unchanged %q", gotTarget, wantTarget)
+	}
+	if _, err := os.Stat(filepath.Join(parentTarget, "symlinked-parent-report.json")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("symlinked parent report stat error = %v, want not-exist", err)
+	}
+}
+
 func TestCmdContextConflictNoPartialReportOnFailure(t *testing.T) {
 	root, requestPath := contextConflictFixture(t)
 	t.Chdir(root)
