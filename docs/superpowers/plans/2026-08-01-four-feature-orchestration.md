@@ -119,7 +119,28 @@ For each delivery unit:
    produces the final handoff.
 8. Let the human owner merge only after required CI and governance checks pass.
 
-At most two implementation units may be active concurrently. Parallel units must have merged prerequisites, disjoint semantic ownership, and no planned edits to the same shared package, schema registry, `Makefile`, workbench assets, or Playwright path. When any of those conditions is false, serialize the units.
+Concurrency is phase-specific rather than one global number. The table below is
+the ceiling, never a target; a lane may start only when its prerequisites are
+merged, its semantic and changed-file ownership is disjoint, and it does not
+share a schema registry, `Makefile`, workbench asset, or Playwright path with
+another active lane.
+
+| Phase | Maximum active implementation lanes | Additional constraint |
+|---|---:|---|
+| Wave 0 | 2 | Spec-only promotion lanes only; shared registries and owner decisions remain serialized. |
+| Wave 1 | 1 | The shared authority kernel and its first consumers define types used downstream. |
+| Wave 2 | 2 | Use the existing disjoint Track A/Track B ownership. |
+| Wave 3A | 1 | Context compilation precedes the policy-conflict gate in one CI-owned sequence. |
+| Wave 3.5 | 2 | After one serialized readiness contract lands, one backend snapshot lane and one FABLE cockpit lane may proceed over disjoint files; integration is serialized. |
+| Wave 3B | 2 | Only a focused CSE plan proving disjoint evaluator/observer and scheduling/resume ownership may use both; otherwise use one. |
+| Wave 4 | 1 | Shared identity, authority, receipt, and human-record schemas remain serialized. |
+| Wave 5 | 3 | Each lane must pass a package/file ownership check; any shared adapter or registry reduces the ceiling. |
+| Wave 6 | 1 | All workbench presentation is FABLE-owned and fully serialized. |
+| Wave 7 | 3 | Up to three independent dogfood journeys may run concurrently; whole-program verification, review, and approval remain serialized. |
+
+Read-only reconnaissance does not consume an implementation lane and cannot
+grant Gate P or Gate I. When a ceiling or ownership condition is uncertain,
+serialize rather than infer permission.
 
 ## Scope boundaries
 
@@ -285,7 +306,11 @@ If time remains after Wave 0:
 - do not begin `policy-authority`, ASD runtime, GLG runtime, CSE runtime, shared isolation, context compilation, or workbench code ahead of their merged prerequisites; and
 - end every active session with a pushed branch or committed planning packet, exact base/head SHAs, a clean-worktree statement, and explicit next gate. Unpushed chat conclusions are not progress.
 
-The implementation concurrency ceiling remains two. During the shared-kernel phase it is one because the kernel controls types and semantics consumed by both CI and GLG. Read-only analysis may use spare sessions, but it cannot grant Gate P or Gate I.
+The phase-specific concurrency table in [How to use this index](#how-to-use-this-index)
+supersedes the former global ceiling of two. During the shared-kernel phase the
+ceiling remains one because the kernel controls types and semantics consumed by
+both CI and GLG. Read-only analysis may use spare sessions, but it cannot grant
+Gate P or Gate I.
 
 ## Delivery waves
 
@@ -332,18 +357,50 @@ After either track merges, the next eligible unit may start:
 
 **Exit gate:** ASD mutations are atomic and provenance-bound; journey records and obligation blockers are deterministic; CSE can evaluate complete canned observations into byte-identical results; no adapter owns independent semantics.
 
-### Wave 3 — Compilation, conflict, and isolated execution boundaries
+### Wave 3A — Compilation and conflict boundaries
 
 Track A, sequential:
 
 - [ ] Deliver CI `context-compiler`, including explicit ASD provenance exclusion and complete included/excluded/opaque ledgers.
 - [ ] Deliver CI `policy-conflict-gate`, including mechanical proof, semantic candidates, dispositions, exemptions, staleness, and one shared verdict.
 
-Track B, eligible after the shared isolation boundary is approved:
+
+**Exit gate:** Context compilation is byte-deterministic; conflict unknowns
+block; every lifecycle consumer uses the one shared conflict verdict.
+
+### Wave 3.5 — Bounded UX readiness pilot
+
+- [ ] Ratify the sequencing overlay and lossless carve-out matrix in the
+  [Wave 3.5 UX readiness pilot plan](2026-08-18-wave-3-5-ux-readiness-pilot.md).
+- [ ] Deliver a pure read-only readiness projection and an explicit startup
+  snapshot through `verdi serve --context-request <path>`.
+- [ ] Deliver the FABLE-owned hybrid cockpit: a four-area linear process rail,
+  prioritized attention queue, complete concern list, board deep links, and
+  exact CLI fallbacks.
+- [ ] Run the solo-author pilot and record comprehension, navigation,
+  terminology, unnecessary-process, stale-state, and missing-corrective-seam
+  findings without treating telemetry as lifecycle truth.
+- [ ] Adjudicate every accepted finding to Wave 3.5, its original downstream
+  wave, or an explicit non-goal.
+
+The pilot adds no workflow engine, persisted readiness artifact, cockpit
+mutation, controlled execution, or favorable interpretation of unknown facts.
+It is not a substitute for GLG `continuous-readiness`, GLG `journey-metrics`,
+the complete Wave 6 workbench, or any Wave 7 dogfood journey.
+
+**Exit gate:** The immutable snapshot is exact and stale-by-design; the cockpit
+never hides an unresolved fact; the solo-author evaluation is recorded and its
+findings are mapped; the owner has accepted the Wave 3B re-entry decision.
+
+### Wave 3B — CSE evaluator and isolated execution boundaries
+
+Eligible only after the Wave 3.5 exit gate:
 
 - [ ] Deliver CSE evaluator capability discovery, generic command evaluator, process observer, candidate materialization, deterministic scheduling, interruption resume, and retention behavior.
 
-**Exit gate:** Context compilation is byte-deterministic; conflict unknowns block; experiments distinguish candidate verdicts from operational failures; changed inputs refuse resume.
+**Exit gate:** Experiments distinguish candidate verdicts from operational
+failures; changed inputs refuse resume; unsupported isolation remains an
+operational refusal rather than ambient execution.
 
 ### Wave 4 — Authoritative execution and accountable lifecycle governance
 
@@ -359,7 +416,9 @@ Serialize changes that touch shared identity, authority, receipts, or human-reco
 
 ### Wave 5 — Adapters and remaining non-UI lifecycle behavior
 
-Units may run in parallel only after a file/package ownership check:
+Up to three units may run in parallel only after a file/package ownership
+check. Wave 3.5's provisional readiness and pilot-observation slices do not
+remove the full `continuous-readiness` or `journey-metrics` obligations here:
 
 - [ ] Deliver ASD capability/context reads, MCP adapter, proposal-only dogfood, draft-write, semantic review, and provenance read paths.
 - [ ] Deliver CSE CLI and agent adapters, ratification record, spike-closure integration, cleanup, and selected-capsule retention.
@@ -380,9 +439,20 @@ benefits from one:
 - [ ] GLG journey, readiness, attestation, and recovery projections.
 - [ ] CSE registration lock, execution state, result explanation, and ratification surfaces.
 
+The Wave 3.5 cockpit shell and solo-author navigation language are promoted
+inputs to this wave, not a claim that the GLG workbench unit is complete. Live
+refresh, broader roles, authoritative actions, recovery UX, accessibility,
+responsive behavior, performance, and complete lifecycle presentation remain
+here.
+
 **Exit gate:** All browser paths consume the same records as CLI and MCP, expose repository and authority posture, have keyboard-accessible Playwright coverage, and create no UI-only authority or shadow database.
 
 ### Wave 7 — Dogfood and whole-program approval
+
+The ASD, CSE, and CI dogfood journeys may run concurrently when their fixtures,
+ports, and output paths are disjoint. The GLG end-to-end journey begins after
+their facts are available; final gates, whole-program review, and human
+authorization are serialized.
 
 - [ ] Run one ASD journey through both Claude Code and Codex using the same typed mutation contract.
 - [ ] Run one genuine CSE comparison and preserve a scoped recommendation or honest inconclusive result.
@@ -551,9 +621,10 @@ one shared file.
 | 2 | GLG `journey-projection` |
 | 2 | GLG `obligation-quality` |
 | 2 | CSE schemas and decision engine |
-| 3 | CI `context-compiler` |
-| 3 | CI `policy-conflict-gate` |
-| 3 | CSE evaluator and isolated execution |
+| 3A | CI `context-compiler` |
+| 3A | CI `policy-conflict-gate` |
+| 3.5 | UX readiness projection, cockpit, and solo-author pilot |
+| 3B | CSE evaluator and isolated execution |
 | 4 | CI `sealed-codex-execution` |
 | 4 | CI `context-receipts-review` |
 | 4 | GLG `lifecycle-governance` |
