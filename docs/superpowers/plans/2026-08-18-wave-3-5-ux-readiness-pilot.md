@@ -55,7 +55,10 @@ cross-model review and owner adjudication.
   the flag.
 - The projection is read-only and in-memory. Do not add a readiness file,
   readiness cache, database row, status field, transition, stamp, receipt,
-  event log, or artifact kind.
+  event log, or artifact kind. The reused policy-conflict evaluator retains its
+  already-ratified D4 immutable judgment cache: a semantic cache miss may
+  publish that predecessor-owned record under its existing transient writer
+  lock, but no readiness-owned path or record is created.
 - The four areas are presentation concepts, not lifecycle states:
   `shape-proposal`, `show-success`, `check-context`, and `request-review`.
 - Three-valued honesty is exact: `proven`, `violated-with-witness`, or
@@ -69,18 +72,26 @@ cross-model review and owner adjudication.
   endpoint, wrap a CLI mutation, create a new browser action, or reinterpret a
   board response. Existing board behavior is unchanged.
 - A board destination is emitted only when the target and branch produce an
-  existing `/b/{branch}/board/spec/{name}` address. Every other concern carries
-  an exact CLI token vector; neither backend nor frontend emits shell text.
-- The startup snapshot is computed before the writer lock, listener, MCP
-  socket, or HTTP server is created. Any inability to build a complete honest
-  snapshot is operational exit 2 with no server process left running.
+  existing `/b/{branch}/board/spec/{name}` address. The cockpit is the one
+  narrow additional caller authorized to mint that address, and it calls the
+  existing workbench constructor rather than copying its grammar. Every other
+  concern carries an exact CLI token vector; neither backend nor frontend emits
+  shell text.
+- The startup snapshot is computed before `verdi serve` acquires its long-held
+  writer lock or creates a listener, MCP socket, or HTTP server. The reused
+  policy-conflict evaluator may acquire and release its existing transient D4
+  cache-publication lock during this computation. Any inability to build a
+  complete honest snapshot is operational exit 2 with no server process left
+  running.
 - Every cockpit page says that it is a startup snapshot, names its exact HEAD,
   and directs the author to restart `verdi serve` after an edit. No refresh,
   polling, invalidation, websocket, or recomputation endpoint enters V1.
 - Browser instrumentation records only a bounded sequence of closed event IDs
-  and concern/area IDs in page memory. It records no clock time, source text,
-  prompt, hidden reasoning, path outside the canonical target, secret, user
-  identity, or network request; it never drives readiness.
+  and concern/area IDs in page memory. Board navigation opens a separate tab so
+  the cockpit source tab and its sequence remain available for pilot capture.
+  Instrumentation records no clock time, source text, prompt, hidden reasoning,
+  path outside the canonical target, secret, user identity, or network request;
+  it never drives readiness.
 - Frontend production, CSS, client JavaScript, rendered cockpit markup, and
   Playwright work are owned by a FABLE agent. Non-frontend implementation is
   owned by Sonnet. Repairs are owned by Opus.
@@ -120,7 +131,6 @@ type Timing string
 
 const (
     TimingCurrent  Timing = "current"
-    TimingOther    Timing = "other"
     TimingEventual Timing = "eventual"
 )
 
@@ -135,6 +145,7 @@ type Concern struct {
     State       State
     Blocking    bool
     Timing      Timing
+    WorkClass   journey.BlockerClass
     Summary     string
     Witnesses   []string
     Destination Destination
@@ -161,10 +172,13 @@ type Snapshot struct {
 ```
 
 Every slice is non-nil. IDs and enums are closed and validated. Witnesses are
-sorted and deduplicated. An unresolved concern's `Destination` requires exactly
-one of a nonempty root-relative `BoardPath` or a nonempty CLI token vector; a
-proven concern carries neither because it needs no corrective action. Tokens
-reject control characters and empty strings.
+sorted and deduplicated. `WorkClass` copies the exact class only for a
+journey-blocker-derived concern and is empty for every other source; the
+projection never classifies a spec, board, evidence contributor, conflict row,
+principal, or action on its own. An unresolved concern's `Destination` requires
+exactly one of a nonempty root-relative `BoardPath` or a nonempty CLI token
+vector; a proven concern carries neither because it needs no corrective action.
+Tokens reject control characters and empty strings.
 
 Concern identity is source-prefixed rather than invented display text:
 `shape/problem`, `shape/outcome`, `shape/question/<id>`, `shape/provenance`,
@@ -249,7 +263,8 @@ so an empty area cannot become a vacuous pass.
 - `show-success`: journey evidence contributors plus every current/eventual
   blocker whose ID begins `obligation-quality/`. Contributor resolution maps
   exactly to the three readiness states but is nonblocking detail; current
-  obligation-quality blockers are blocking and eventual ones are not.
+  obligation-quality blockers are blocking and eventual ones are not. Each
+  blocker concern retains its exact `journey.Blocker.Class`.
 - `check-context`: the policy-conflict verdict and every report reason or
   disclosure. `pass` is proven, `blocked-violated` is violated, and
   `blocked-unproven` is unproven. That top-level verdict is the sole blocking
@@ -258,7 +273,9 @@ so an empty area cannot become a vacuous pass.
 - `request-review`: all remaining journey blockers, principal requirements,
   lifecycle posture, and the existence of a proven safe action that advances
   toward review. Current blockers and the action anchor are blocking; eventual
-  blockers are not. An absent or unproven safe action is unproven, never ready.
+  blockers are not. Each blocker concern retains its exact
+  `journey.Blocker.Class`. An absent or unproven safe action is unproven, never
+  ready.
 
 An area's state is violated if any blocking row is violated, otherwise
 unproven if any blocking row is unproven, otherwise proven. The adapter must
@@ -269,11 +286,13 @@ non-proven area in the fixed area order; it is empty only when all four areas
 are proven.
 
 `AllConcerns` sorts by area order, then concern ID. `Attention` contains the
-same unresolved concern values, without copies that differ semantically. It
+same unresolved concern values, without copies that differ semantically. A
+concern is `eventual` only when it comes from
+`Journey.Blockers.Eventual.Items`; every other concern is `current`. Attention
 sorts lexicographically by four fixed keys: blocking before nonblocking;
-`current` before `other` before `eventual`; violated before unproven; then area
-order and concern ID. This is the complete prioritization logic; do not add
-scores, weights, heuristics, personalization, or AI ranking.
+`current` before `eventual`; violated before unproven; then area order and
+concern ID. This is the complete prioritization logic; do not add scores,
+weights, heuristics, personalization, or AI ranking.
 
 ## Sequencing and Parallel Ownership
 
@@ -315,10 +334,14 @@ Task 4 begins only after both lane heads are integrated.
 - Create: `internal/readinesspilot/derive.go`
 - Create: `internal/readinesspilot/schema_test.go`
 - Create: `internal/readinesspilot/derive_test.go`
+- Modify: `internal/workbench/directory.go` (export the existing
+  `branchBoardHref` constructor without changing its grammar)
+- Modify: `internal/workbench/directory_test.go` (constructor parity only)
 
 - [ ] Write table-driven validation REDs for every enum, nil slice, invalid
   ID, unsorted/duplicate witness, invalid destination union, control-bearing
-  CLI token, invalid board item kind, violated mutation/board posture,
+  CLI token, missing/invalid work class on a journey blocker, work class on a
+  non-journey concern, invalid board item kind, violated mutation/board posture,
   inconsistent area state, missing focus, queue omission, queue duplication,
   and queue-order case.
 - [ ] Write derivation REDs covering all three states in every area; an
@@ -334,21 +357,25 @@ Task 4 begins only after both lane heads are integrated.
   go test ./internal/readinesspilot -run 'Test(Validate|Derive)' -count=1
   ```
 
-- [ ] Implement only the fixed contract and six-rung comparator above. Reuse
+- [ ] Implement only the fixed contract and comparator above. Reuse
   `journey.Record.Validate` and `policyconflict.Report.Validate`; do not copy
-  either validator or recompute their proof semantics.
+  either validator or recompute their proof semantics. Export the existing
+  workbench branch-board constructor by capitalization and route every existing
+  workbench caller through that same function; do not add a wrapper with a
+  second grammar.
 - [ ] Run the focused GREEN and race package gate:
 
   ```bash
   go test -race ./internal/readinesspilot -count=1
-  go vet ./internal/readinesspilot
+  go test -race ./internal/workbench -run 'Test.*BranchBoardHref' -count=1
+  go vet ./internal/readinesspilot ./internal/workbench
   ```
 
 - [ ] Review for favorable empty defaults, missing later concerns, copied proof
   logic, or an accidental persistence/codec surface; then commit:
 
   ```bash
-  git add internal/readinesspilot
+  git add internal/readinesspilot internal/workbench/directory.go internal/workbench/directory_test.go
   git commit -m "Define the readiness pilot projection"
   ```
 
@@ -378,7 +405,9 @@ Task 4 begins only after both lane heads are integrated.
   `artifact.DecodeSpec`, `designprovenance.DecodeLog`, `boardio`'s existing
   annotation reader, and `store`'s existing draft-mutation paths. It does not
   add a second request decoder, policy resolver, journey derivation, Git fact
-  model, board parser, or recovery interpreter.
+  model, board parser, recovery interpreter, or branch-board URL grammar. The
+  real policy-conflict provider retains its existing D4 judgment-cache behavior;
+  that predecessor-owned cache is not a readiness artifact.
 - [ ] Write REDs proving: exactly one strict request read; symlink and `..`
   refusal; design-phase-only refusal; feature and story targets; absent expected
   identity bound to current design branch/HEAD; supplied identity mismatch;
@@ -386,8 +415,9 @@ Task 4 begins only after both lane heads are integrated.
   explicit unproven when absence is legal and operational when bytes are
   malformed; direct-Markdown gap; present mutation staging/journal disclosed
   without recovery; open and unavailable scratch-board state; conflict
-  pass/violated/unproven; and no file write under `.verdi/data` attributable to
-  readiness.
+  pass/violated/unproven; no readiness-named file, cache, or record under
+  `.verdi/data`; and the exact existing D4 cache effect on a semantic miss, with
+  its transient lock released before `Build` returns.
 - [ ] Run the RED:
 
   ```bash
@@ -402,9 +432,10 @@ Task 4 begins only after both lane heads are integrated.
   request's adapter, grants, scope, and spec plus the computed expected value—the
   same construction already used by `runConflictGate`, not a new target rule.
 - [ ] Build destinations in the adapter, not the renderer. For the selected
-  design branch use `/b/<path-escaped-branch>/board/spec/<name>` only for
-  board-correctable shape/evidence concerns. Otherwise provide an exact CLI
-  vector beginning with `verdi`; no shell quoting or executable lookup occurs.
+  design branch call `workbench.BranchBoardHref(branch, name)` only for
+  board-correctable shape/evidence concerns; never reproduce the route grammar
+  locally. Otherwise provide an exact CLI vector beginning with `verdi`; no
+  shell quoting or executable lookup occurs.
 - [ ] Run focused and package gates:
 
   ```bash
@@ -440,10 +471,11 @@ Task 4 begins only after both lane heads are integrated.
 
 - [ ] Use `/fable-orchestration` before frontend production. Write renderer
   REDs for the four ordered areas, state labels, current-focus marker, queue
-  ordering, complete concern list, witnesses, exact board/CLI destination
-  exclusivity, stale notice with HEAD, no mutation form/button/fetch, keyboard
-  landmarks, reduced-motion behavior, narrow viewport, dark mode, and all
-  three honest states.
+  ordering, complete concern list, source-provided work-class labels,
+  witnesses, exact board/CLI destination exclusivity, stale notice with HEAD,
+  no mutation form/button/fetch, keyboard landmarks, reduced-motion behavior,
+  narrow viewport, dark mode, and all three honest states. Empty work class is
+  omitted rather than guessed.
 - [ ] Register only `GET /readiness` and `GET /assets/readiness.js`. Missing
   injected snapshot returns a disclosed 503 page; wrong methods return 405.
 - [ ] Implement a legible hybrid layout: the linear rail stays continuously
@@ -466,7 +498,9 @@ Task 4 begins only after both lane heads are integrated.
   page-local integer, the last 200 events are kept in
   `window.__verdiReadinessPilotEvents`, and a same-page
   `verdi:readiness-pilot` `CustomEvent` is dispatched. No event leaves the
-  browser and no event influences rendering.
+  browser and no event influences rendering. Board links use `target="_blank"`
+  and `rel="noopener"`; the `board-link-followed` event is appended before the
+  new tab opens, and the source cockpit tab retains the sequence.
 - [ ] Run the lane gates:
 
   ```bash
@@ -516,7 +550,8 @@ serialized after Tasks 2 and 3 are integrated.
 - [ ] Have FABLE add Playwright coverage for: linear orientation; priority
   without omission; violated and unproven states; board deep link; CLI copy;
   keyboard traversal; in-memory event shape/cap; editing through the existing
-  board; unchanged cockpit after edit; and restart guidance.
+  board; preservation of the cockpit source tab and event array across board
+  navigation; unchanged cockpit after edit; and restart guidance.
 - [ ] Run the integration gates:
 
   ```bash
@@ -549,8 +584,9 @@ their own experience and retains every human-only judgment.
   edit; and explain why restart is required.
 - [ ] Record task completion, wrong turns, terminology questions, navigation
   friction, unnecessary steps, stale-state understanding, missing corrective
-  seams, and the closed in-memory event sequence. Do not record source text,
-  prompts, hidden reasoning, secrets, or individual productivity judgments.
+  seams, and the closed in-memory event sequence from the preserved cockpit
+  source tab. Do not record source text, prompts, hidden reasoning, secrets, or
+  individual productivity judgments.
 - [ ] Give every finding one state: `accepted-wave-3.5`,
   `deferred-original-wave`, `rejected-out-of-scope`, or `unproven`. A deferred
   finding names its original delivery unit and wave.

@@ -131,7 +131,7 @@ another active lane.
 | Wave 1 | 1 | The shared authority kernel and its first consumers define types used downstream. |
 | Wave 2 | 2 | Use the existing disjoint Track A/Track B ownership. |
 | Wave 3A | 1 | Context compilation precedes the policy-conflict gate in one CI-owned sequence. |
-| Wave 3.5 | 2 | After one serialized readiness contract lands, one backend snapshot lane and one FABLE cockpit lane may proceed over disjoint files; integration is serialized. |
+| Wave 3.5 | 2 | After one serialized readiness contract and shared board-link constructor export land, one backend snapshot lane and one FABLE cockpit lane may proceed over disjoint files; integration is serialized. |
 | Wave 3B | 2 | Only a focused CSE plan proving disjoint evaluator/observer and scheduling/resume ownership may use both; otherwise use one. |
 | Wave 4 | 1 | Shared identity, authority, receipt, and human-record schemas remain serialized. |
 | Wave 5 | 3 | Each lane must pass a package/file ownership check; any shared adapter or registry reduces the ceiling. |
