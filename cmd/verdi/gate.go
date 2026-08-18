@@ -51,11 +51,13 @@ import (
 	"strings"
 
 	"github.com/jyang234/verdi/internal/artifact"
+	"github.com/jyang234/verdi/internal/contextcompile"
 	"github.com/jyang234/verdi/internal/disclosure"
 	"github.com/jyang234/verdi/internal/evidence"
 	"github.com/jyang234/verdi/internal/gitx"
 	"github.com/jyang234/verdi/internal/lint"
 	"github.com/jyang234/verdi/internal/model"
+	"github.com/jyang234/verdi/internal/policyconflict"
 	"github.com/jyang234/verdi/internal/specstate"
 	"github.com/jyang234/verdi/internal/store"
 	"github.com/jyang234/verdi/internal/storyresolve"
@@ -63,8 +65,14 @@ import (
 
 // cmdGate is `verdi gate`'s entry point, invoked by dispatch.go.
 func cmdGate(args []string, stdout, stderr io.Writer) int {
+	requestPath, rest, err := extractConflictRequestFlag(args)
+	if err != nil {
+		fmt.Fprintln(stderr, "gate:", err)
+		return 2
+	}
+	args = rest
 	if len(args) != 0 {
-		fmt.Fprintln(stderr, "gate: usage: verdi gate (no arguments; operates on the current build branch)")
+		fmt.Fprintln(stderr, "gate: usage: verdi gate [--context-request <path>] (operates on the current lifecycle branch)")
 		return 2
 	}
 
@@ -90,7 +98,7 @@ func cmdGate(args []string, stdout, stderr io.Writer) int {
 	// exactly (CLAUDE.md: don't invent a second design-branch detector).
 	if strings.HasPrefix(branch, "design/") {
 		f := buildForgeBestEffort(ctx, root)
-		return runSpecMRGate(ctx, root, branch, f, resolveDefaultBranch(ctx, root), stdout, stderr)
+		return runSpecMRGateWithConflict(ctx, root, branch, f, resolveDefaultBranch(ctx, root), requestPath, localLifecycleConflictProvider{root: root}, stdout, stderr)
 	}
 
 	spec, err := storyresolve.ResolveBuildSpec(root, branch)
@@ -113,7 +121,7 @@ func cmdGate(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 
-	return runGate(ctx, root, spec, head, specstate.NewProjector(), cfg.Model, stdout, stderr)
+	return runGateWithConflict(ctx, root, spec, head, specstate.NewProjector(), cfg.Model, requestPath, localLifecycleConflictProvider{root: root}, stdout, stderr)
 }
 
 // resolveDefaultBranch delegates to internal/lint.ResolveDefaultBranch
@@ -168,9 +176,29 @@ type gateCondition struct {
 // working tree's status field), evaluates all four conditions independently,
 // prints each with its reason, and returns the exit code.
 func runGate(ctx context.Context, root string, spec *artifact.SpecFrontmatter, head string, resolver specStateResolver, mdl *model.Model, stdout, stderr io.Writer) int {
+	return runGateWithConflict(ctx, root, spec, head, resolver, mdl, "", localLifecycleConflictProvider{root: root}, stdout, stderr)
+}
+
+func runGateWithConflict(ctx context.Context, root string, spec *artifact.SpecFrontmatter, head string, resolver specStateResolver, mdl *model.Model, requestPath string, provider policyconflict.VerdictProvider, stdout, stderr io.Writer) int {
 	specRef, err := artifact.ParseRef(spec.ID)
 	if err != nil {
 		fmt.Fprintln(stderr, "gate: internal error: resolved spec has an invalid id:", err)
+		return 2
+	}
+	branch, err := gitx.CurrentBranch(ctx, root)
+	if err != nil {
+		fmt.Fprintln(stderr, "gate:", err)
+		return 2
+	}
+	conflict, err := runConflictGate(ctx, root, conflictGateInput{
+		RequestPath: requestPath,
+		Phase:       contextcompile.PhaseBuild,
+		Spec:        spec.ID,
+		Branch:      branch,
+		Head:        head,
+	}, provider)
+	if err != nil {
+		fmt.Fprintln(stderr, "gate:", err)
 		return 2
 	}
 
@@ -198,7 +226,13 @@ func runGate(ctx context.Context, root string, spec *artifact.SpecFrontmatter, h
 		return 2
 	}
 
-	return reportGateConditions(stdout, []gateCondition{cond1, cond2, cond3, cond4})
+	conditions := []gateCondition{cond1, cond2, cond3, cond4}
+	if conflict.Adopted {
+		condition := conflictCondition(conflict.Result)
+		condition.Name = "5. " + condition.Name
+		conditions = append(conditions, condition)
+	}
+	return reportGateConditions(stdout, conditions)
 }
 
 // reportGateConditions prints each condition's PASS/FAIL line (and its reason

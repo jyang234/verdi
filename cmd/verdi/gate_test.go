@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -11,7 +12,9 @@ import (
 	"testing"
 
 	"github.com/jyang234/verdi/internal/artifact"
+	"github.com/jyang234/verdi/internal/contextcompile"
 	"github.com/jyang234/verdi/internal/fixturegit"
+	"github.com/jyang234/verdi/internal/policyconflict"
 	"github.com/jyang234/verdi/internal/specstate"
 	"github.com/jyang234/verdi/internal/store"
 	"github.com/jyang234/verdi/internal/storyresolve"
@@ -234,6 +237,79 @@ acceptance_criteria:
 ---
 # body
 `
+}
+
+// TestBuildGateConflictPreEffect catches the build gate folding the conflict
+// verdict into evidence semantics, omitting either block state, or changing
+// Git/report/evidence state before any conflict refusal returns.
+func TestBuildGateConflictPreEffect(t *testing.T) {
+	tests := []struct {
+		name     string
+		verdict  policyconflict.Verdict
+		provider error
+		wantCode int
+	}{
+		{name: "pass", verdict: policyconflict.VerdictPass, wantCode: 0},
+		{name: "blocked violated", verdict: policyconflict.VerdictBlockedViolated, wantCode: 1},
+		{name: "blocked unproven", verdict: policyconflict.VerdictBlockedUnproven, wantCode: 1},
+		{name: "operational", provider: errors.New("provider unavailable"), wantCode: 2},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := buildGateRepo(t, "accepted-pending-build")
+			spec := mustResolveBuildSpec(t, repo.Dir)
+			writeGateReport(t, repo.Dir, repo.Head, dispositionedFindingYAML)
+			installConflictPolicyStore(t, repo.Dir)
+			requestPath := contextLifecycleRequestFile(t, repo.Dir, "build-context.json", "spec/stale-decline", contextcompile.PhaseBuild, nil)
+			before := takeConflictLifecycleSnapshot(t, repo.Dir,
+				".verdi/specs/active/stale-decline/spec.md",
+				".verdi/specs/active/stale-decline/deviation-report.md",
+				".verdi/specs/active/stale-decline/decision-conflict-report.md",
+				filepath.ToSlash(filepath.Join(".verdi", "data", "derived", store.RefSlug("spec/stale-decline"), repo.Head, "verdicts.json")),
+			)
+
+			calls := 0
+			provider := contextConflictProviderFunc(func(_ context.Context, request policyconflict.Request) (policyconflict.Result, error) {
+				calls++
+				if request.Target.Kind != policyconflict.TargetAcceptedContext || request.Target.AcceptedContext == nil || request.Target.AcceptedContext.Phase != contextcompile.PhaseBuild {
+					t.Fatalf("build target = %+v, want accepted build context", request.Target)
+				}
+				if tt.provider != nil {
+					return policyconflict.Result{}, tt.provider
+				}
+				return lifecycleConflictResult(tt.verdict), nil
+			})
+
+			var stdout, stderr bytes.Buffer
+			got := runGateWithConflict(context.Background(), repo.Dir, spec, repo.Head, specstate.NewProjector(), nil, requestPath, provider, &stdout, &stderr)
+			if got != tt.wantCode {
+				t.Fatalf("runGateWithConflict = %d, want %d; stdout=%s stderr=%s", got, tt.wantCode, stdout.String(), stderr.String())
+			}
+			if calls != 1 {
+				t.Fatalf("provider calls = %d, want 1", calls)
+			}
+			assertConflictLifecycleSnapshot(t, repo.Dir, before)
+			if tt.provider != nil {
+				if stdout.Len() != 0 || !strings.Contains(stderr.String(), "provider unavailable") {
+					t.Fatalf("operational stdout=%q stderr=%q", stdout.String(), stderr.String())
+				}
+				return
+			}
+			if !strings.Contains(stdout.String(), "2. no AC violated") || !strings.Contains(stdout.String(), "5. constitutional conflict verdict") {
+				t.Fatalf("stdout = %q, want separate evidence and conflict conditions", stdout.String())
+			}
+			if strings.Index(stdout.String(), "2. no AC violated") >= strings.Index(stdout.String(), "5. constitutional conflict verdict") {
+				t.Fatalf("stdout = %q, want conflict beside and after evidence condition", stdout.String())
+			}
+			wantMarker := "[PASS] 5. constitutional conflict verdict"
+			if tt.wantCode == 1 {
+				wantMarker = "[FAIL] 5. constitutional conflict verdict"
+			}
+			if !strings.Contains(stdout.String(), wantMarker) {
+				t.Fatalf("stdout = %q, want %q", stdout.String(), wantMarker)
+			}
+		})
+	}
 }
 
 // TestGate_Condition1_FailsAlone proves condition 1 (the build-head spec's

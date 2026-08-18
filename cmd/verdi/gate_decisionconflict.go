@@ -25,8 +25,10 @@ import (
 
 	"github.com/jyang234/verdi/internal/align"
 	"github.com/jyang234/verdi/internal/artifact"
+	"github.com/jyang234/verdi/internal/contextcompile"
 	"github.com/jyang234/verdi/internal/forge"
 	"github.com/jyang234/verdi/internal/gitx"
+	"github.com/jyang234/verdi/internal/policyconflict"
 	"github.com/jyang234/verdi/internal/store"
 	"github.com/jyang234/verdi/internal/storyresolve"
 )
@@ -54,6 +56,10 @@ import (
 // directly instead of depending on a fixturegit repo's actual git
 // default-branch detection.
 func runSpecMRGate(ctx context.Context, root, branch string, f forge.Forge, defaultBranchRef string, stdout, stderr io.Writer) int {
+	return runSpecMRGateWithConflict(ctx, root, branch, f, defaultBranchRef, "", localLifecycleConflictProvider{root: root}, stdout, stderr)
+}
+
+func runSpecMRGateWithConflict(ctx context.Context, root, branch string, f forge.Forge, defaultBranchRef, requestPath string, provider policyconflict.VerdictProvider, stdout, stderr io.Writer) int {
 	spec, err := storyresolve.ResolveDesignSpec(root, branch)
 	if err != nil {
 		fmt.Fprintln(stderr, "gate:", err)
@@ -65,6 +71,18 @@ func runSpecMRGate(ctx context.Context, root, branch string, f forge.Forge, defa
 		return 2
 	}
 	head, err := gitx.RevParse(ctx, root, "HEAD")
+	if err != nil {
+		fmt.Fprintln(stderr, "gate:", err)
+		return 2
+	}
+	conflict, err := runConflictGate(ctx, root, conflictGateInput{
+		RequestPath: requestPath,
+		Phase:       contextcompile.PhaseDesign,
+		Spec:        spec.ID,
+		Candidate:   true,
+		Branch:      branch,
+		Head:        head,
+	}, provider)
 	if err != nil {
 		fmt.Fprintln(stderr, "gate:", err)
 		return 2
@@ -82,6 +100,9 @@ func runSpecMRGate(ctx context.Context, root, branch string, f forge.Forge, defa
 	}
 
 	conds := []gateCondition{cond1, cond2}
+	if conflict.Adopted {
+		conds = append(conds, conflictCondition(conflict.Result))
+	}
 	numberSpecMRConditions(conds)
 	return reportGateConditions(stdout, conds)
 }

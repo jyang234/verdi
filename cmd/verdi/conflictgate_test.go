@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"runtime"
@@ -35,6 +36,88 @@ func adoptedConflictGateRepo(t *testing.T) (string, string) {
 		".verdi/specs/active/feature-alpha/spec.md": contextFeatureAlphaSpec(t),
 	})
 	return repo.Dir, repo.Head
+}
+
+func installConflictPolicyStore(t *testing.T, root string) {
+	t.Helper()
+	for rel, content := range contextPolicyStoreFiles(t) {
+		path := filepath.Join(root, filepath.FromSlash(rel))
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatalf("mkdir policy parent: %v", err)
+		}
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatalf("write policy fixture %s: %v", rel, err)
+		}
+	}
+}
+
+func lifecycleConflictResult(verdict policyconflict.Verdict) policyconflict.Result {
+	result := contextConflictResult(verdict)
+	result.Report.Digest = "sha256:" + strings.Repeat("c", 64)
+	if verdict != policyconflict.VerdictPass {
+		result.Report.Mechanical = []policyconflict.MechanicalEvaluation{{
+			ID: "mechanical-policy-conflict",
+			Reasons: []policyconflict.ReasonCode{
+				policyconflict.ReasonMechanicalConflict,
+			},
+		}}
+	}
+	return result
+}
+
+type conflictLifecycleSnapshot struct {
+	Branches []byte
+	Head     []byte
+	Index    []byte
+	Worktree []byte
+	Status   []byte
+	Files    map[string][]byte
+}
+
+func takeConflictLifecycleSnapshot(t *testing.T, root string, paths ...string) conflictLifecycleSnapshot {
+	t.Helper()
+	git := func(args ...string) []byte {
+		t.Helper()
+		cmd := exec.Command("git", args...)
+		cmd.Dir = root
+		out, err := cmd.Output()
+		if err != nil {
+			t.Fatalf("git %s: %v", strings.Join(args, " "), err)
+		}
+		return out
+	}
+	snapshot := conflictLifecycleSnapshot{
+		Branches: git("for-each-ref", "--format=%(refname):%(objectname)", "refs/heads"),
+		Head:     git("rev-parse", "HEAD"),
+		Index:    git("diff", "--cached", "--binary"),
+		Worktree: git("diff", "--binary"),
+		Status:   git("status", "--porcelain=v1", "-z", "--untracked-files=all"),
+		Files:    make(map[string][]byte, len(paths)),
+	}
+	for _, path := range paths {
+		data, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(path)))
+		if errors.Is(err, os.ErrNotExist) {
+			snapshot.Files[path] = nil
+			continue
+		}
+		if err != nil {
+			t.Fatalf("read snapshot path %s: %v", path, err)
+		}
+		snapshot.Files[path] = data
+	}
+	return snapshot
+}
+
+func assertConflictLifecycleSnapshot(t *testing.T, root string, before conflictLifecycleSnapshot) {
+	t.Helper()
+	paths := make([]string, 0, len(before.Files))
+	for path := range before.Files {
+		paths = append(paths, path)
+	}
+	after := takeConflictLifecycleSnapshot(t, root, paths...)
+	if !reflect.DeepEqual(after, before) {
+		t.Fatalf("repository changed across conflict refusal\nbefore=%+v\nafter=%+v", before, after)
+	}
 }
 
 // TestConflictGateRequestGrammar catches a lifecycle command consuming the
