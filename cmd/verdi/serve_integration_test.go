@@ -125,6 +125,10 @@ func TestServeContextRequestFlagGrammar(t *testing.T) {
 			{name: "unknown flag", args: []string{"--unknown"}},
 			{name: "positional", args: []string{"extra"}},
 			{name: "missing HTTP value", args: []string{"--http"}},
+			{name: "empty HTTP value", args: []string{"--http", ""}},
+			{name: "HTTP followed by context flag", args: []string{"--http", "--context-request"}},
+			{name: "HTTP followed by unknown flag", args: []string{"--http", "--unknown"}},
+			{name: "HTTP followed by repeated HTTP flag", args: []string{"--http", "--http"}},
 		} {
 			t.Run(tc.name, func(t *testing.T) {
 				called := false

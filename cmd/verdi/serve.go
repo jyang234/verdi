@@ -45,7 +45,7 @@ func parseServeOptions(args []string) (serveOptions, error) {
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
 		case "--http":
-			if i+1 >= len(args) {
+			if i+1 >= len(args) || args[i+1] == "" || strings.HasPrefix(args[i+1], "--") {
 				return serveOptions{}, errors.New("--http requires a value")
 			}
 			options.httpAddr = args[i+1]
