@@ -243,7 +243,9 @@ func writeReadinessDestination(b *strings.Builder, dest readinesspilot.Destinati
 	if len(dest.CLI) == 0 {
 		return
 	}
-	b.WriteString(`<p class="readiness-dest readiness-cli" data-readiness-cli="1">`)
+	// tabindex 0: a keyboard-only author must be able to reach the vector
+	// to select and copy it (Task 4 browser-exposed defect).
+	b.WriteString(`<p class="readiness-dest readiness-cli" data-readiness-cli="1" tabindex="0" aria-label="CLI fallback">`)
 	for i, token := range dest.CLI {
 		if i > 0 {
 			b.WriteString(` `)

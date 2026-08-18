@@ -489,6 +489,9 @@ func TestReadinessRender_KeyboardLandmarksAndScript(t *testing.T) {
 		`href="#area-shape-proposal"`,
 		`id="area-shape-proposal"`,
 		`id="concern-shape/question/q-alpha"`,
+		// The CLI fallback is keyboard-reachable (a Task 4 browser test
+		// exposed that a keyboard-only author could not reach it to copy).
+		`<p class="readiness-dest readiness-cli" data-readiness-cli="1" tabindex="0" aria-label="CLI fallback">`,
 		`<script src="/assets/readiness.js" defer></script>`,
 	} {
 		if !strings.Contains(html, want) {
