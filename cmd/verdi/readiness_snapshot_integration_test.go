@@ -107,7 +107,7 @@ func TestReadinessSnapshotProvenanceMutationAndBoard(t *testing.T) {
 		}
 	})
 
-	t.Run("open and unavailable scratch board are explicit", func(t *testing.T) {
+	t.Run("scratch board read outcomes are explicit", func(t *testing.T) {
 		t.Run("open", func(t *testing.T) {
 			repo, requestPath, _, _, _ := readinessSnapshotRepo(t, "feature")
 			annotation := &artifact.Annotation{
@@ -128,14 +128,30 @@ func TestReadinessSnapshotProvenanceMutationAndBoard(t *testing.T) {
 		t.Run("unavailable", func(t *testing.T) {
 			repo, requestPath, _, _, _ := readinessSnapshotRepo(t, "feature")
 			builder := localReadinessSnapshotBuilder{readAnnotations: func(string) ([]*artifact.Annotation, error) {
-				return nil, errors.New("scratch store unavailable")
+				return nil, &os.PathError{Op: "open", Path: boardio.AnnotationsDir(repo.Dir), Err: os.ErrPermission}
 			}}
 			snapshot := buildReadinessSnapshot(t, repo, requestPath, policyconflict.VerdictPass, builder)
 			concern := readinessSnapshotConcern(t, snapshot, "shape/board")
 			if concern.State != readinesspilot.StateUnproven {
 				t.Fatalf("board state = %q, want unproven", concern.State)
 			}
-			assertReadinessStringsContain(t, concern.Witnesses, "scratch store unavailable")
+			assertReadinessStringsContain(t, concern.Witnesses, "permission denied")
+		})
+
+		t.Run("malformed record is operational", func(t *testing.T) {
+			repo, requestPath, _, _, _ := readinessSnapshotRepo(t, "feature")
+			dir := boardio.AnnotationsDir(repo.Dir)
+			if err := os.MkdirAll(dir, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(dir, "board--feature-alpha.jsonl"), []byte("not-json\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			builder := localReadinessSnapshotBuilder{providerFactory: readinessSnapshotProviderFactory(t, repo.Dir, policyconflict.VerdictPass, nil)}
+			_, err := builder.Build(context.Background(), repo.Dir, requestPath)
+			if err == nil || !strings.Contains(err.Error(), "reading scratch board annotations") || !strings.Contains(err.Error(), "strict json decode") {
+				t.Fatalf("Build error = %v, want malformed board record operational error", err)
+			}
 		})
 	})
 }

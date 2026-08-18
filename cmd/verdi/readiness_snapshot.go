@@ -184,7 +184,10 @@ func (b localReadinessSnapshotBuilder) Build(ctx context.Context, root, requestP
 	if readAnnotations == nil {
 		readAnnotations = boardio.ReadAllAnnotations
 	}
-	board := readinessBoardFacts(readAnnotations, root, name)
+	board, err := readinessBoardFacts(readAnnotations, root, name)
+	if err != nil {
+		return readinesspilot.Snapshot{}, err
+	}
 
 	declared := artifact.DeclaredObjectIDs(spec)
 	declaredIDs := make([]string, 0, len(declared))
@@ -325,14 +328,18 @@ func readinessMutationFacts(root, name string) (readinesspilot.ProvenanceFacts, 
 	return readinesspilot.ProvenanceFacts{MutationState: readinesspilot.StateUnproven, MutationWitnesses: witnesses}, nil
 }
 
-func readinessBoardFacts(readAnnotations func(string) ([]*artifact.Annotation, error), root, name string) readinesspilot.BoardFacts {
+func readinessBoardFacts(readAnnotations func(string) ([]*artifact.Annotation, error), root, name string) (readinesspilot.BoardFacts, error) {
 	annotations, err := readAnnotations(boardio.AnnotationsDir(root))
 	if err != nil {
+		var pathErr *os.PathError
+		if !errors.As(err, &pathErr) {
+			return readinesspilot.BoardFacts{}, fmt.Errorf("building readiness snapshot: reading scratch board annotations: %w", err)
+		}
 		witness := strings.ReplaceAll(err.Error(), root, "<store-root>")
 		return readinesspilot.BoardFacts{
 			State: readinesspilot.StateUnproven, OpenItems: []readinesspilot.BoardItem{},
 			Witnesses: []string{"scratch board enumeration unavailable: " + witness},
-		}
+		}, nil
 	}
 	items := make([]readinesspilot.BoardItem, 0)
 	for _, annotation := range annotations {
@@ -348,7 +355,7 @@ func readinessBoardFacts(readAnnotations func(string) ([]*artifact.Annotation, e
 	}
 	return readinesspilot.BoardFacts{
 		State: readinesspilot.StateProven, OpenItems: items, Witnesses: []string{"scratch board enumerated"},
-	}
+	}, nil
 }
 
 func readinessDigest(data []byte) string {
