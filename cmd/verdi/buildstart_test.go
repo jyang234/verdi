@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -10,8 +11,10 @@ import (
 	"testing"
 
 	"github.com/jyang234/verdi/internal/artifact"
+	"github.com/jyang234/verdi/internal/contextcompile"
 	"github.com/jyang234/verdi/internal/fixturegit"
 	"github.com/jyang234/verdi/internal/gitx"
+	"github.com/jyang234/verdi/internal/policyconflict"
 	"github.com/jyang234/verdi/internal/specstate"
 )
 
@@ -349,6 +352,81 @@ func TestRunBuildStart_StatuslessExactDefaultBranch_Starts(t *testing.T) {
 	}
 	if branch != "feature/widget-story" {
 		t.Fatalf("branch = %q, want feature/widget-story; stdout=%s", branch, stdout.String())
+	}
+}
+
+// TestBuildStartConflictPreEffect catches evaluation before the accepted,
+// cascade, and obligation-quality preconditions, or after branch/baseline
+// mutation. Every refusal snapshots branches, HEAD, index, and projection
+// bytes exactly.
+func TestBuildStartConflictPreEffect(t *testing.T) {
+	tests := []struct {
+		name     string
+		verdict  policyconflict.Verdict
+		provider error
+		wantCode int
+	}{
+		{name: "pass", verdict: policyconflict.VerdictPass, wantCode: 0},
+		{name: "blocked violated", verdict: policyconflict.VerdictBlockedViolated, wantCode: 1},
+		{name: "blocked unproven", verdict: policyconflict.VerdictBlockedUnproven, wantCode: 1},
+		{name: "operational", provider: errors.New("provider unavailable"), wantCode: 2},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := fixturegit.Build(t, []fixturegit.Layer{{Files: map[string]string{
+				".verdi/verdi.yaml":                               phase7ManifestYAML,
+				".verdi/specs/active/widget-story/spec.md":        statuslessBuildStorySpecMD,
+				".verdi/obligations/widget-story/ac-1--static.md": buildQualityObligationDocument("widget-story", "ac-1", artifact.EvidenceStatic, buildQualityBlock()),
+			}, Message: "accepted story"}})
+			t.Setenv("CI_DEFAULT_BRANCH", "main")
+			installConflictPolicyStore(t, repo.Dir)
+			requestPath := contextLifecycleRequestFile(t, repo.Dir, "build-start-context.json", "spec/widget-story", contextcompile.PhaseBuild, nil)
+			before := takeConflictLifecycleSnapshot(t, repo.Dir,
+				".verdi/specs/active/widget-story/spec.md",
+				".verdi/obligations/widget-story/ac-1--static.md",
+				".verdi/specs/active/widget-story/deviation-report.md",
+				"AGENTS.md",
+			)
+
+			calls := 0
+			provider := contextConflictProviderFunc(func(_ context.Context, request policyconflict.Request) (policyconflict.Result, error) {
+				calls++
+				accepted := request.Target.AcceptedContext
+				if request.Target.Kind != policyconflict.TargetAcceptedContext || accepted == nil || accepted.Phase != contextcompile.PhaseBuild {
+					t.Fatalf("build-start target = %+v, want accepted build context", request.Target)
+				}
+				want := contextcompile.Expected{Branch: "main", Head: repo.Head}
+				if accepted.Expected == nil || *accepted.Expected != want {
+					t.Fatalf("build-start expected = %+v, want %+v", accepted.Expected, want)
+				}
+				if tt.provider != nil {
+					return policyconflict.Result{}, tt.provider
+				}
+				return lifecycleConflictResult(tt.verdict), nil
+			})
+
+			var stdout, stderr bytes.Buffer
+			got := runBuildStartWithConflict(context.Background(), repo.Dir, "spec/widget-story", specstate.NewProjector(),
+				syncDeps{Runner: nil, GoTest: fakeGoTest{}}, requestPath, provider, &stdout, &stderr)
+			if got != tt.wantCode {
+				t.Fatalf("runBuildStartWithConflict = %d, want %d; stdout=%s stderr=%s", got, tt.wantCode, stdout.String(), stderr.String())
+			}
+			if calls != 1 {
+				t.Fatalf("provider calls = %d, want 1", calls)
+			}
+			if tt.wantCode != 0 {
+				assertConflictLifecycleSnapshot(t, repo.Dir, before)
+			}
+			if tt.provider != nil {
+				if stdout.Len() != 0 || !strings.Contains(stderr.String(), "provider unavailable") {
+					t.Fatalf("operational stdout=%q stderr=%q", stdout.String(), stderr.String())
+				}
+				return
+			}
+			if !strings.Contains(stdout.String(), "constitutional conflict: state: "+string(tt.verdict)) {
+				t.Fatalf("stdout = %q, want conflict summary", stdout.String())
+			}
+		})
 	}
 }
 
