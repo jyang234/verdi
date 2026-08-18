@@ -24,9 +24,11 @@ import (
 	"strings"
 
 	"github.com/jyang234/verdi/internal/artifact"
+	"github.com/jyang234/verdi/internal/contextcompile"
 	"github.com/jyang234/verdi/internal/evidence"
 	"github.com/jyang234/verdi/internal/gitx"
 	"github.com/jyang234/verdi/internal/model"
+	"github.com/jyang234/verdi/internal/policyconflict"
 	"github.com/jyang234/verdi/internal/specstate"
 	"github.com/jyang234/verdi/internal/store"
 	"github.com/jyang234/verdi/internal/storyresolve"
@@ -92,6 +94,12 @@ func runBuildVerb(args []string, stdout, stderr io.Writer) int {
 // single positional argument, resolves the store root and manifest, and
 // wires the real runner before delegating to runBuildStart.
 func cmdBuildStart(args []string, stdout, stderr io.Writer) int {
+	requestPath, rest, err := extractConflictRequestFlag(args)
+	if err != nil {
+		fmt.Fprintln(stderr, "build start:", err)
+		return 2
+	}
+	args = rest
 	if len(args) != 1 {
 		// vocab:identity — CLI usage grammar (identity arg placeholders)
 		fmt.Fprintln(stderr, "build start: usage: verdi build start <story-spec | story-ref>")
@@ -122,7 +130,7 @@ func cmdBuildStart(args []string, stdout, stderr io.Writer) int {
 	}
 	deps := syncDeps{Runner: runner, GoTest: realGoTestRunner{}, Stdout: stdout, Stderr: stderr, Model: cfg.Model}
 
-	return runBuildStart(ctx, root, storyArg, specstate.NewProjector(), deps, stdout, stderr)
+	return runBuildStartWithConflict(ctx, root, storyArg, specstate.NewProjector(), deps, requestPath, localLifecycleConflictProvider{root: root}, stdout, stderr)
 }
 
 // runBuildStart is the testable core: given an already-resolved root, a
@@ -143,6 +151,10 @@ func cmdBuildStart(args []string, stdout, stderr io.Writer) int {
 // operational error (exit 2): a feature spec has no code of its own to
 // build against — only its implementing stories do.
 func runBuildStart(ctx context.Context, root, storyArg string, resolver specStateResolver, deps syncDeps, stdout, stderr io.Writer) int {
+	return runBuildStartWithConflict(ctx, root, storyArg, resolver, deps, "", localLifecycleConflictProvider{root: root}, stdout, stderr)
+}
+
+func runBuildStartWithConflict(ctx context.Context, root, storyArg string, resolver specStateResolver, deps syncDeps, requestPath string, provider policyconflict.VerdictProvider, stdout, stderr io.Writer) int {
 	spec, err := resolveBuildTarget(root, storyArg, deps.Model)
 	if err != nil {
 		fmt.Fprintln(stderr, "build start:", err)
@@ -257,13 +269,36 @@ func runBuildStart(ctx context.Context, root, storyArg string, resolver specStat
 		}
 	}
 
-	branch := "feature/" + specRef.Name
-
+	currentBranch, err := gitx.CurrentBranch(ctx, root)
+	if err != nil {
+		fmt.Fprintln(stderr, "build start:", err)
+		return 2
+	}
 	commit, err := gitx.RevParse(ctx, root, "HEAD")
 	if err != nil {
 		fmt.Fprintln(stderr, "build start:", err)
 		return 2
 	}
+	conflict, err := runConflictGate(ctx, root, conflictGateInput{
+		RequestPath: requestPath,
+		Phase:       contextcompile.PhaseBuild,
+		Spec:        spec.ID,
+		Branch:      currentBranch,
+		Head:        commit,
+	}, provider)
+	if err != nil {
+		fmt.Fprintln(stderr, "build start:", err)
+		return 2
+	}
+	if conflict.Adopted {
+		renderConflictSummary(stdout, conflict.Result)
+		if conflict.Result.Report.Verdict != policyconflict.VerdictPass {
+			return 1
+		}
+	}
+
+	branch := "feature/" + specRef.Name
+
 	if err := gitx.CheckoutNewBranch(ctx, root, branch); err != nil {
 		fmt.Fprintln(stderr, "build start:", err)
 		return 2

@@ -4,6 +4,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/jyang234/verdi/internal/policyartifact"
 )
 
 // TestAbsolutePaths locks the host-native, root-joined forms against an
@@ -190,5 +192,204 @@ func TestWaiverPathEmptyRootDisplayForm(t *testing.T) {
 	}
 	if got, want := WaiverDir("", "story-7"), filepath.FromSlash(".verdi/waivers/story-7"); got != want {
 		t.Errorf("WaiverDir(\"\", …) = %q, want %q", got, want)
+	}
+}
+
+// TestPolicyDispositionPath locks the host-native, root-joined form
+// authority-design §8 fixes: "Semantic rulings live at
+// .verdi/policy/dispositions/<name>.md".
+func TestPolicyDispositionPath(t *testing.T) {
+	got := PolicyDispositionPath("/store", "review-no-conflict")
+	want := filepath.FromSlash("/store/.verdi/policy/dispositions/review-no-conflict.md")
+	if got != want {
+		t.Errorf("PolicyDispositionPath = %q, want %q", got, want)
+	}
+}
+
+// TestPolicyDispositionRelPath locks the store-relative, slash-canonical
+// twin, mirroring every other *RelPath accessor's own convention.
+func TestPolicyDispositionRelPath(t *testing.T) {
+	got := PolicyDispositionRelPath("review-no-conflict")
+	want := ".verdi/policy/dispositions/review-no-conflict.md"
+	if got != want {
+		t.Errorf("PolicyDispositionRelPath = %q, want %q", got, want)
+	}
+	if strings.ContainsRune(got, '\\') {
+		t.Errorf("PolicyDispositionRelPath %q must be slash-canonical, contains a backslash", got)
+	}
+}
+
+// TestPolicyDispositionPath_RelIsSlashOfAbsBelowRoot is
+// TestRelIsSlashOfAbsBelowRoot's own case for the new accessor pair — the
+// same anti-drift invariant every other family in this file already proves.
+func TestPolicyDispositionPath_RelIsSlashOfAbsBelowRoot(t *testing.T) {
+	const root = "/store"
+	abs := PolicyDispositionPath(root, "review-no-conflict")
+	rel, ok := strings.CutPrefix(filepath.ToSlash(abs), "/store/")
+	if !ok {
+		t.Fatalf("absolute %q not rooted under /store/", abs)
+	}
+	if rel != PolicyDispositionRelPath("review-no-conflict") {
+		t.Errorf("relative form %q != slash(abs) below root %q", PolicyDispositionRelPath("review-no-conflict"), rel)
+	}
+}
+
+// TestPolicyDispositionPathEmptyRootDisplayForm is
+// TestAttestationPathEmptyRootDisplayForm's own twin for the disposition
+// accessor: an empty root drops the leading element, yielding the
+// ".verdi/…"-rooted display form a refusal or disclosure names instead of a
+// temp-dir- or checkout-rooted absolute path.
+func TestPolicyDispositionPathEmptyRootDisplayForm(t *testing.T) {
+	if got, want := PolicyDispositionPath("", "review-no-conflict"), filepath.FromSlash(".verdi/policy/dispositions/review-no-conflict.md"); got != want {
+		t.Errorf("PolicyDispositionPath(\"\", …) = %q, want %q", got, want)
+	}
+}
+
+// TestPolicyDispositionPath_EdgeCaseNamesAreJoinedNotValidated documents
+// what this accessor pair does with a degenerate name. Like every sibling
+// in paths.go — AttestationPath, ObligationPath, WaiverPath, ConflictPath —
+// it is a PURE JOIN helper: it never validates its name, so a caller's
+// empty, separator-bearing, traversal, or non-kebab name is joined and
+// path-cleaned rather than refused here.
+//
+// That is deliberate, not a gap: the closed name grammar lives in
+// policyartifact.ClassifyPolicyPath, the seam
+// TestPolicyDispositionPath_AgreesWithPolicyArtifactGrammar pins and
+// internal/policyauthority's loader actually consults. This test therefore
+// records the join behavior AND shows that each degenerate name's resulting
+// store path is refused by that grammar, so no such path can enter the
+// constitution store through the accessor.
+func TestPolicyDispositionPath_EdgeCaseNamesAreJoinedNotValidated(t *testing.T) {
+	const policyPrefix = ".verdi/policy/"
+	cases := []struct {
+		name    string
+		input   string
+		wantRel string
+		why     string
+	}{
+		{"empty", "", ".verdi/policy/dispositions/.md", "an empty name yields a bare extension, not an error"},
+		{"nested separator", "sub/ruling", ".verdi/policy/dispositions/sub/ruling.md", "a separator nests rather than being rejected or escaped"},
+		{"parent traversal", "../escape", ".verdi/policy/escape.md", "path.Join CLEANS the traversal, so the result leaves the dispositions directory"},
+		{"non-kebab", "Review Ruling", ".verdi/policy/dispositions/Review Ruling.md", "case and spaces survive the join untouched"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			rel := PolicyDispositionRelPath(tc.input)
+			if rel != tc.wantRel {
+				t.Errorf("PolicyDispositionRelPath(%q) = %q, want %q (%s)", tc.input, rel, tc.wantRel, tc.why)
+			}
+			if got, want := PolicyDispositionPath("/store", tc.input), filepath.FromSlash("/store/"+tc.wantRel); got != want {
+				t.Errorf("PolicyDispositionPath(\"/store\", %q) = %q, want %q", tc.input, got, want)
+			}
+			if !strings.HasPrefix(rel, policyPrefix) {
+				t.Fatalf("PolicyDispositionRelPath(%q) = %q, want a %q-prefixed path", tc.input, rel, policyPrefix)
+			}
+			if _, _, err := policyartifact.ClassifyPolicyPath(strings.TrimPrefix(rel, policyPrefix)); err == nil {
+				t.Errorf("policyartifact.ClassifyPolicyPath accepted %q built from name %q; the closed grammar must refuse it", rel, tc.input)
+			}
+		})
+	}
+}
+
+// TestPolicyDispositionPath_DotSegmentIsCleaned is the edge case above's
+// one non-refusing member, separated because it proves the opposite half of
+// the same "join, then clean" behavior: a leading "./" is cleaned away, so
+// the result is the ordinary path for the bare name and the grammar accepts
+// it. A caller must not read that as validation — only as path.Join's
+// documented cleaning.
+func TestPolicyDispositionPath_DotSegmentIsCleaned(t *testing.T) {
+	if got, want := PolicyDispositionRelPath("./ruling"), PolicyDispositionRelPath("ruling"); got != want {
+		t.Errorf("PolicyDispositionRelPath(%q) = %q, want it cleaned to %q", "./ruling", got, want)
+	}
+}
+
+// TestPolicyDispositionPath_AgreesWithPolicyArtifactGrammar proves
+// PolicyDispositionPath/RelPath never drift from
+// policyartifact.DirDispositions or the policy-disposition/<name> id
+// grammar policyartifact.ClassifyPolicyPath enforces: this store-level
+// accessor and the constitution store's own closed directory grammar must
+// always agree on which file backs which disposition id.
+func TestPolicyDispositionPath_AgreesWithPolicyArtifactGrammar(t *testing.T) {
+	const name = "review-no-conflict"
+	rel := PolicyDispositionRelPath(name)
+	const policyPrefix = ".verdi/policy/"
+	if !strings.HasPrefix(rel, policyPrefix) {
+		t.Fatalf("PolicyDispositionRelPath(%q) = %q, want a %q-prefixed path", name, rel, policyPrefix)
+	}
+	policyRel := strings.TrimPrefix(rel, policyPrefix)
+	if !strings.HasPrefix(policyRel, policyartifact.DirDispositions+"/") {
+		t.Fatalf("PolicyDispositionRelPath(%q) = %q, want it under policyartifact.DirDispositions (%q)", name, rel, policyartifact.DirDispositions)
+	}
+	kind, gotName, err := policyartifact.ClassifyPolicyPath(policyRel)
+	if err != nil {
+		t.Fatalf("policyartifact.ClassifyPolicyPath(%q): %v", policyRel, err)
+	}
+	if kind != policyartifact.KindDisposition {
+		t.Fatalf("ClassifyPolicyPath(%q) kind = %q, want %q", policyRel, kind, policyartifact.KindDisposition)
+	}
+	if gotName != name {
+		t.Fatalf("ClassifyPolicyPath(%q) name = %q, want %q", policyRel, gotName, name)
+	}
+}
+
+const (
+	testTreeHash    = "830515d6a6d3116cc84ff21c6874aa8110f72c7c134ca306fb7b8b610e8dcae2"
+	testInputDigest = "536a625825acd2ce01dbeb65078de98a32972b7e6a8c4e129651324280904bc1"
+)
+
+// TestPolicyConflictCachePath locks the D4 filename grammar exactly:
+// policy-conflict-<layout-version>-<tree-hash>-<input-digest>.json under
+// .verdi/data/cache/ (store-layout D4; ledger SI-96/SI-101).
+func TestPolicyConflictCachePath(t *testing.T) {
+	got, err := PolicyConflictCachePath("/store", testTreeHash, testInputDigest)
+	if err != nil {
+		t.Fatalf("PolicyConflictCachePath: %v", err)
+	}
+	want := filepath.FromSlash("/store/.verdi/data/cache/policy-conflict-" + LayoutVersion + "-" + testTreeHash + "-" + testInputDigest + ".json")
+	if got != want {
+		t.Errorf("PolicyConflictCachePath = %q, want %q", got, want)
+	}
+}
+
+// TestPolicyConflictCachePath_Negative proves every non-bare-64-lowercase-
+// hex shape is refused rather than silently joined into a path no
+// legitimate TreeHash/digest value could ever produce (D4: "both hash
+// segments are exactly 64 lowercase hexadecimal characters without a
+// sha256: prefix").
+func TestPolicyConflictCachePath_Negative(t *testing.T) {
+	tests := []struct {
+		name      string
+		treeHash  string
+		inputHash string
+	}{
+		{"tree hash carries sha256: prefix", "sha256:" + testTreeHash, testInputDigest},
+		{"tree hash too short", testTreeHash[:63], testInputDigest},
+		{"tree hash too long", testTreeHash + "a", testInputDigest},
+		{"tree hash uppercase", strings.ToUpper(testTreeHash), testInputDigest},
+		{"tree hash empty", "", testInputDigest},
+		{"input digest carries sha256: prefix", testTreeHash, "sha256:" + testInputDigest},
+		{"input digest too short", testTreeHash, testInputDigest[:63]},
+		{"input digest uppercase", testTreeHash, strings.ToUpper(testInputDigest)},
+		{"input digest empty", testTreeHash, ""},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := PolicyConflictCachePath("/store", tc.treeHash, tc.inputHash); err == nil {
+				t.Fatalf("PolicyConflictCachePath(%q, %q) = nil error, want a refusal", tc.treeHash, tc.inputHash)
+			}
+		})
+	}
+}
+
+// TestPolicyConflictCachePath_EmptyRootDisplayForm mirrors every other
+// accessor's own empty-root display-form convention.
+func TestPolicyConflictCachePath_EmptyRootDisplayForm(t *testing.T) {
+	got, err := PolicyConflictCachePath("", testTreeHash, testInputDigest)
+	if err != nil {
+		t.Fatalf("PolicyConflictCachePath: %v", err)
+	}
+	want := filepath.FromSlash(".verdi/data/cache/policy-conflict-" + LayoutVersion + "-" + testTreeHash + "-" + testInputDigest + ".json")
+	if got != want {
+		t.Errorf("PolicyConflictCachePath(\"\", …) = %q, want %q", got, want)
 	}
 }

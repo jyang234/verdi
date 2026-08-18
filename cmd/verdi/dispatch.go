@@ -42,7 +42,7 @@ var verbPhase = map[string]int{
 	"waive":           20, // extensibility phase 2, spec/verb-surfaces ac-1/ac-2 (spec/creation-surfaces#ac-5, ledger L-N9, guide 8.4) — new verb, ratified into 05 §CLI in the same change; `verdi waive` creates or (--reaffirm) extends a waiver record over the waivers/ kind
 	"spec":            21, // merge-signaled spec acceptance, Task 5 — new verb; `verdi spec state SPEC_REF` is the read-only surface over internal/specstate's Git-derived effective-state projection, never a lifecycle mutation
 	"journey":         22, // GLG v3 AC-1 (guided-lifecycle-governance-v3, journey-projection delivery unit) — first GLG runtime verb; `verdi journey <feature-or-story-ref>` is a read-only projection over internal/journey, never a lifecycle mutation
-	"context":         23, // Context Integrity Wave-3 (docs/superpowers/specs/2026-08-11-context-compiler-authority-design.md §2, ledger SI-78..SI-87) — new verb; `verdi context compile --request <path|-> [--out <path>]` is a read-only inspection surface over internal/contextcompile.Compiler, mutating nothing but its own explicit --out destination
+	"context":         23, // Context Integrity Wave-3 (context-compiler and policy-conflict authority designs, ledger SI-78..SI-122) — `context compile` and `context conflict` are read-only inspection surfaces, mutating nothing but their own explicit --out destination and conflict's existing immutable cache
 }
 
 // vocab:identity — CLI verb names (identity)

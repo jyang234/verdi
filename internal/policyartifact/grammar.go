@@ -24,11 +24,12 @@ const KindProjectionManifest = "instruction-projection"
 // Dir names within .verdi/policy/ (SI-6: this unit owns the directory's
 // internal grammar).
 const (
-	DirPolicies    = "policies"
-	DirOverlays    = "overlays"
-	DirExemptions  = "exemptions"
-	DirProfiles    = "profiles"
-	DirProjections = "projections"
+	DirPolicies     = "policies"
+	DirOverlays     = "overlays"
+	DirExemptions   = "exemptions"
+	DirDispositions = "dispositions"
+	DirProfiles     = "profiles"
+	DirProjections  = "projections"
 )
 
 // ClassifyPolicyPath maps a .verdi/policy/-relative slash path to the
@@ -41,7 +42,7 @@ func ClassifyPolicyPath(rel string) (kind, name string, err error) {
 		return KindConstitution, ConstitutionName, nil
 	}
 	unrecognized := func() error {
-		return fmt.Errorf("policyartifact: unrecognized entry %q under .verdi/policy/ (known: constitution.md, %s/<name>.md, %s/<name>.md, %s/<name>.md, %s/<name>.md, %s/<adapter-id>.json)", rel, DirPolicies, DirOverlays, DirExemptions, DirProfiles, DirProjections)
+		return fmt.Errorf("policyartifact: unrecognized entry %q under .verdi/policy/ (known: constitution.md, %s/<name>.md, %s/<name>.md, %s/<name>.md, %s/<name>.md, %s/<name>.md, %s/<adapter-id>.json)", rel, DirPolicies, DirOverlays, DirExemptions, DirDispositions, DirProfiles, DirProjections)
 	}
 	dir, file, ok := strings.Cut(rel, "/")
 	if !ok || strings.Contains(file, "/") {
@@ -62,7 +63,7 @@ func ClassifyPolicyPath(rel string) (kind, name string, err error) {
 	}
 	stem := strings.TrimSuffix(file, ".md")
 	switch dir {
-	case DirPolicies, DirOverlays, DirExemptions:
+	case DirPolicies, DirOverlays, DirExemptions, DirDispositions:
 		if !kebabRe.MatchString(stem) {
 			return "", "", fmt.Errorf("policyartifact: entry %q under .verdi/policy/%s: name %q must be kebab-case", rel, dir, stem)
 		}
@@ -71,8 +72,10 @@ func ClassifyPolicyPath(rel string) (kind, name string, err error) {
 			return KindPolicy, stem, nil
 		case DirOverlays:
 			return KindOverlay, stem, nil
-		default:
+		case DirExemptions:
 			return KindExemption, stem, nil
+		default:
+			return KindDisposition, stem, nil
 		}
 	case DirProfiles:
 		// The file stem must equal the profile's kernel id, so it uses

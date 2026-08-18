@@ -42,18 +42,27 @@ import (
 // vocab:identity — CLI usage/flag grammar (identity)
 const contextCompileUsage = "usage: verdi context compile --request <path|-> [--out <path>]"
 
-// cmdContext dispatches `verdi context <subcommand>`. v0 has exactly one
-// subcommand, "compile"; any other subcommand — or none — is a usage
-// error (CLAUDE.md's operational exit code 2). This argument-shape check
+// cmdContext dispatches `verdi context <subcommand>`. The namespace exposes
+// the read-only "compile" and "conflict" inspection surfaces; any other
+// subcommand — or none — is a usage error (CLAUDE.md's operational exit code
+// 2). This argument-shape check
 // runs before any store root is resolved, so a bare `verdi context` is
 // hermetic and safe against a live checkout (mirrors journey.go/model.go's
 // own usage-first posture).
 func cmdContext(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
-	if len(args) == 0 || args[0] != "compile" {
+	if len(args) == 0 {
 		fmt.Fprintln(stderr, contextCompileUsage)
 		return 2
 	}
-	return cmdContextCompile(args[1:], stdin, stdout, stderr)
+	switch args[0] {
+	case "compile":
+		return cmdContextCompile(args[1:], stdin, stdout, stderr)
+	case "conflict":
+		return cmdContextConflict(args[1:], stdin, stdout, stderr)
+	default:
+		fmt.Fprintln(stderr, contextCompileUsage)
+		return 2
+	}
 }
 
 // cmdContextCompile implements `verdi context compile`. Every flag-shape
@@ -111,7 +120,7 @@ func cmdContextCompile(args []string, stdin io.Reader, stdout, stderr io.Writer)
 	// than a statement about a different, merely similar, path.
 	var outCanon string
 	if hasOut {
-		outCanon, err = canonicalOutPath(outArg)
+		outCanon, err = canonicalOutPath(root, outArg)
 		if err != nil {
 			printContextDiagnostic(stderr, root, err)
 			return 2
@@ -184,7 +193,14 @@ const contextCheckoutToken = "<checkout>"
 // leak in one verb for lost debuggability everywhere else. This verb's
 // stderr contract is this verb's to enforce.
 func printContextDiagnostic(stderr io.Writer, root string, err error) {
-	fmt.Fprintln(stderr, "context compile:", redactCheckoutRoot(root, err.Error()))
+	printContextCommandDiagnostic(stderr, "compile", root, err)
+}
+
+// printContextCommandDiagnostic is the context namespace's one redaction and
+// diagnostic framing seam. Both inspection subcommands reach it so neither
+// can leak a checkout path while formatting a package or process error.
+func printContextCommandDiagnostic(stderr io.Writer, subcommand, root string, err error) {
+	fmt.Fprintf(stderr, "context %s: %s\n", subcommand, redactCheckoutRoot(root, err.Error()))
 }
 
 // redactCheckoutRoot replaces every absolute spelling of root in msg with
@@ -209,6 +225,40 @@ func redactCheckoutRoot(root, msg string) string {
 	}
 	if resolved, err := filepath.EvalSymlinks(root); err == nil {
 		variants = append(variants, resolved)
+	}
+	// The process environment can retain the caller's symlink spelling of
+	// the current checkout even when filepath.Abs/Getwd return the kernel-
+	// resolved spelling (notably macOS /var versus /private/var). Include it
+	// only after proving it names the same directory, so an unrelated PWD
+	// value can never redact arbitrary diagnostic text.
+	if pwd := os.Getenv("PWD"); filepath.IsAbs(pwd) {
+		rootInfo, rootErr := os.Stat(root)
+		pwdInfo, pwdErr := os.Stat(pwd)
+		if rootErr == nil && pwdErr == nil && os.SameFile(rootInfo, pwdInfo) {
+			variants = append(variants, filepath.Clean(pwd))
+		}
+	}
+	// Also recover top-level symlink aliases for the resolved root. exec
+	// diagnostics on macOS commonly re-spell /private/var/... as /var/...
+	// even when both root and PWD are already resolved. This small bounded
+	// scan proves the alias through EvalSymlinks before admitting it.
+	if entries, err := os.ReadDir(string(filepath.Separator)); err == nil {
+		cleanRoot := filepath.Clean(root)
+		for _, entry := range entries {
+			if entry.Type()&os.ModeSymlink == 0 {
+				continue
+			}
+			aliasBase := filepath.Join(string(filepath.Separator), entry.Name())
+			resolved, err := filepath.EvalSymlinks(aliasBase)
+			if err != nil {
+				continue
+			}
+			rel, err := filepath.Rel(resolved, cleanRoot)
+			if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+				continue
+			}
+			variants = append(variants, filepath.Clean(filepath.Join(aliasBase, rel)))
+		}
 	}
 	sort.Slice(variants, func(i, j int) bool { return len(variants[i]) > len(variants[j]) })
 
@@ -359,6 +409,12 @@ var errContextOutReserved = errors.New("--out must not target a reserved store p
 // such a spelling is refused outright rather than resolved.
 var errContextOutDotDot = errors.New(`--out must not contain a ".." path element`)
 
+// errContextOutSymlink is the deterministic, path-free diagnostic for an
+// existing symlink anywhere in the output path. Output paths are authority
+// boundaries, so resolving a symlink to an otherwise-safe target is not an
+// acceptable substitute for proving that the caller's path is symlink-free.
+var errContextOutSymlink = errors.New("--out must not contain a symlink path component")
+
 // hasDotDotElement reports whether p contains a ".." PATH ELEMENT under
 // either separator convention. It is element-wise, never a substring test:
 // a file honestly named "..notes.json" or "a..b" carries no traversal and
@@ -389,12 +445,103 @@ func hasDotDotElement(p string) bool {
 // hasDotDotElement rejects such spellings earlier still, so this function's
 // input is already ".."-free; the discipline is kept structurally anyway so
 // no future spelling can reintroduce the divergence.
-func canonicalOutPath(p string) (string, error) {
+func canonicalOutPath(root, p string) (string, error) {
+	if err := rejectContextOutputSymlinks(root, p); err != nil {
+		return "", err
+	}
 	canon, err := canonicalGuardPath(p)
 	if err != nil {
 		return "", fmt.Errorf("resolving --out: %w", err)
 	}
 	return canon, nil
+}
+
+// rejectContextOutputSymlinks Lstats every existing caller-selected component
+// of p. Only lexical containment under the established checkout root or its
+// explicitly resolved spelling creates a trusted anchor. Every other path is
+// inspected from the filesystem root, so a caller-created alias to the checkout
+// or one of its ancestors cannot become authority merely through filesystem
+// identity. Inspection stops at the first nonexistent component so a new leaf
+// or parent remains valid for atomicfile.Write to create. Lstat is deliberate:
+// Stat/EvalSymlinks would follow the entry and erase the fact that the caller
+// selected a symlinked output path.
+func rejectContextOutputSymlinks(root, p string) error {
+	abs, err := filepath.Abs(p)
+	if err != nil {
+		return fmt.Errorf("resolving --out: %w", err)
+	}
+	abs = normalizeContextSystemAlias(filepath.Clean(abs))
+
+	rootAbs, err := filepath.Abs(root)
+	if err != nil {
+		return fmt.Errorf("resolving checkout root: %w", err)
+	}
+	rootAbs = normalizeContextSystemAlias(filepath.Clean(rootAbs))
+	rootCanonical, err := filepath.EvalSymlinks(rootAbs)
+	if err != nil {
+		return fmt.Errorf("resolving checkout root: %w", err)
+	}
+	rootCanonical = normalizeContextSystemAlias(filepath.Clean(rootCanonical))
+
+	anchor := ""
+	for _, trusted := range []string{rootAbs, rootCanonical} {
+		if (abs == trusted || isWithinDir(abs, trusted)) && len(trusted) > len(anchor) {
+			anchor = trusted
+		}
+	}
+
+	components := make([]string, 0, 8)
+	if anchor != "" {
+		for cur := abs; cur != anchor; cur = filepath.Dir(cur) {
+			components = append(components, cur)
+		}
+	} else {
+		for cur := abs; ; {
+			components = append(components, cur)
+			parent := filepath.Dir(cur)
+			if parent == cur {
+				break
+			}
+			cur = parent
+		}
+	}
+	for i := len(components) - 1; i >= 0; i-- {
+		info, statErr := os.Lstat(components[i])
+		if statErr != nil {
+			if errors.Is(statErr, os.ErrNotExist) {
+				return nil
+			}
+			return fmt.Errorf("checking --out path components: %w", statErr)
+		}
+		if info.Mode()&os.ModeSymlink != 0 {
+			return errContextOutSymlink
+		}
+	}
+	return nil
+}
+
+// normalizeContextSystemAlias canonicalizes macOS's system-owned
+// /var -> /private/var alias before output-component inspection. This narrow,
+// verified alias preserves checkout and temp-path spellings supplied by the OS
+// without admitting caller-created aliases as trusted roots.
+func normalizeContextSystemAlias(p string) string {
+	if filepath.Separator != '/' {
+		return p
+	}
+	varRoot := filepath.Clean("/var")
+	privateVarRoot := filepath.Clean("/private/var")
+	resolved, err := filepath.EvalSymlinks(varRoot)
+	if err != nil || filepath.Clean(resolved) != privateVarRoot {
+		return p
+	}
+	if p != varRoot && !isWithinDir(p, varRoot) {
+		return p
+	}
+	rel, err := filepath.Rel(varRoot, p)
+	if err != nil {
+		return p
+	}
+	return filepath.Clean(filepath.Join(privateVarRoot, rel))
 }
 
 // checkNotWithinAny returns errContextOutReserved when the canonical

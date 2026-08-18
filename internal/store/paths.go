@@ -1,8 +1,10 @@
 package store
 
 import (
+	"fmt"
 	"path"
 	"path/filepath"
+	"regexp"
 )
 
 // This file is the single assembler for the .verdi store layout
@@ -61,6 +63,9 @@ const (
 	dataDir           = "data"
 	derivedDir        = "derived"
 	draftMutationDir  = "draft-mutation"
+	policyDir         = "policy"
+	dispositionsDir   = "dispositions"
+	cacheDir          = "cache"
 
 	specFile                 = "spec.md"
 	designProvenanceFile     = "design-provenance.jsonl"
@@ -268,6 +273,53 @@ func ReaffirmationPath(root, storySlug, objectID string) string {
 // keyed one level down by ref-slug and then by commit.
 func DerivedRoot(root string) string {
 	return filepath.Join(root, verdiDir, dataDir, derivedDir)
+}
+
+// PolicyDispositionPath is a semantic-disposition file under root:
+// <root>/.verdi/policy/dispositions/<name>.md (authority-design §8:
+// "Semantic rulings live at .verdi/policy/dispositions/<name>.md"). name is
+// the disposition's own bare filename stem — the policy-disposition/<name>
+// id's name half — matching policyartifact.DirDispositions and the
+// policy-disposition/<name> id grammar policyartifact.ClassifyPolicyPath
+// enforces (paths_test.go's own cross-package check proves the two never
+// drift; internal/policyauthority owns loading through this accessor).
+func PolicyDispositionPath(root, name string) string {
+	return filepath.Join(root, verdiDir, policyDir, dispositionsDir, name+".md")
+}
+
+// PolicyDispositionRelPath is PolicyDispositionPath's store-relative,
+// slash-canonical form.
+func PolicyDispositionRelPath(name string) string {
+	return path.Join(verdiDir, policyDir, dispositionsDir, name+".md")
+}
+
+// cacheDigestSegmentRe matches the D4 cache filename's bare digest-segment
+// form: exactly 64 lowercase hexadecimal characters, no "sha256:" prefix
+// (store-layout D4: "both hash segments are exactly 64 lowercase
+// hexadecimal characters without a sha256: prefix"; SI-101).
+var cacheDigestSegmentRe = regexp.MustCompile(`^[0-9a-f]{64}$`)
+
+// PolicyConflictCachePath is the D4 immutable policy-conflict judgment
+// cache entry under root:
+// <root>/.verdi/data/cache/policy-conflict-<layout-version>-<treeHash>-<inputDigest>.json
+// (store-layout D4: "The admitted conflict-judgment filename is exactly
+// policy-conflict-<layout-version>-<tree-hash>-<input-digest>.json"; ledger
+// SI-96/SI-101). LayoutVersion is this package's own constant, never a
+// caller-supplied value. treeHash and inputDigest must each already be the
+// bare 64-lowercase-hex filename-segment form (TreeHash's own return shape,
+// and the caller's own bare-hex projection of its full "sha256:<hex>"
+// input-digest record field) — any other shape is a caller defect this
+// function refuses rather than silently naming a path no legitimate
+// digest could ever produce.
+func PolicyConflictCachePath(root, treeHash, inputDigest string) (string, error) {
+	if !cacheDigestSegmentRe.MatchString(treeHash) {
+		return "", fmt.Errorf("store: policy conflict cache path: tree hash %q is not 64 lowercase hex characters", treeHash)
+	}
+	if !cacheDigestSegmentRe.MatchString(inputDigest) {
+		return "", fmt.Errorf("store: policy conflict cache path: input digest %q is not 64 lowercase hex characters", inputDigest)
+	}
+	name := fmt.Sprintf("policy-conflict-%s-%s-%s.json", LayoutVersion, treeHash, inputDigest)
+	return filepath.Join(root, verdiDir, dataDir, cacheDir, name), nil
 }
 
 // DerivedSpecDir is a single spec's derived subtree: <DerivedRoot>/<refSlug>/

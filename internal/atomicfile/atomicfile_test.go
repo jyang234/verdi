@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -153,5 +154,232 @@ func TestWrite_Negative_DestinationIsDirectory(t *testing.T) {
 		if e.Name() != "iamadir" {
 			t.Fatalf("leftover temp file after failed rename: %s", e.Name())
 		}
+	}
+}
+
+// TestCreateImmutable_Happy proves the first publisher wins (created=true,
+// existing=nil), the content lands with the requested permission bits, and
+// no temp litter remains — catches CreateImmutable regressing into a plain
+// overwrite (Write's own contract) rather than a no-clobber publish.
+func TestCreateImmutable_Happy(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "sub", "record.json")
+
+	created, existing, err := CreateImmutable(path, []byte(`{"x":1}`), 0o644)
+	if err != nil {
+		t.Fatalf("CreateImmutable: %v", err)
+	}
+	if !created {
+		t.Fatalf("created = false, want true for the first publisher")
+	}
+	if existing != nil {
+		t.Fatalf("existing = %q, want nil on a fresh publish", existing)
+	}
+
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	if string(got) != `{"x":1}` {
+		t.Fatalf("content = %q, want the published bytes", got)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm() != 0o644 {
+		t.Fatalf("perm = %v, want 0644", info.Mode().Perm())
+	}
+
+	entries, err := os.ReadDir(filepath.Dir(path))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 || entries[0].Name() != "record.json" {
+		t.Fatalf("dir entries = %v, want exactly [record.json] (no temp litter)", entries)
+	}
+}
+
+// TestCreateImmutable_NoClobber_IdenticalBytes proves the D4/§7 case
+// directly: a second publisher whose bytes are byte-identical to the first
+// is told it lost (created=false) and handed back exactly the winner's
+// bytes, never silently overwriting the first record — a regression that
+// started clobbering existing records would flip this to created=true or
+// change the file's content.
+func TestCreateImmutable_NoClobber_IdenticalBytes(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "record.json")
+	data := []byte(`{"x":1}`)
+
+	created1, _, err := CreateImmutable(path, data, 0o644)
+	if err != nil || !created1 {
+		t.Fatalf("first CreateImmutable: created=%v err=%v, want true/nil", created1, err)
+	}
+
+	created2, existing2, err := CreateImmutable(path, data, 0o644)
+	if err != nil {
+		t.Fatalf("second CreateImmutable: %v", err)
+	}
+	if created2 {
+		t.Fatalf("created = true on the second identical publish, want false")
+	}
+	if string(existing2) != string(data) {
+		t.Fatalf("existing = %q, want the first publisher's exact bytes %q", existing2, data)
+	}
+
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != string(data) {
+		t.Fatalf("on-disk content = %q, want unchanged %q", got, data)
+	}
+}
+
+// TestCreateImmutable_DifferentWinner proves a second publisher whose
+// bytes DIFFER from the already-published winner is told it lost and
+// handed back the winner's DIFFERENT bytes — the caller (policyconflict's
+// cache adapter) turns this into a collision error; CreateImmutable itself
+// only reports what is actually on disk.
+func TestCreateImmutable_DifferentWinner(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "record.json")
+
+	created1, _, err := CreateImmutable(path, []byte(`{"x":1}`), 0o644)
+	if err != nil || !created1 {
+		t.Fatalf("first CreateImmutable: created=%v err=%v, want true/nil", created1, err)
+	}
+
+	created2, existing2, err := CreateImmutable(path, []byte(`{"x":2}`), 0o644)
+	if err != nil {
+		t.Fatalf("second CreateImmutable: %v", err)
+	}
+	if created2 {
+		t.Fatalf("created = true on a colliding publish, want false")
+	}
+	if string(existing2) != `{"x":1}` {
+		t.Fatalf("existing = %q, want the first (different) winner's bytes", existing2)
+	}
+}
+
+// TestCreateImmutable_Symlink proves CreateImmutable refuses to read
+// through a symlink planted at path — the threat model's path-substitution
+// case (authority design §12: "Symlink at managed disposition/cache/output
+// path" is an operational failure, never a silent read-through).
+func TestCreateImmutable_Symlink(t *testing.T) {
+	dir := t.TempDir()
+	real := filepath.Join(dir, "elsewhere.json")
+	if err := os.WriteFile(real, []byte(`{"planted":true}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, "record.json")
+	if err := os.Symlink(real, path); err != nil {
+		t.Skipf("symlinks unsupported in this environment: %v", err)
+	}
+
+	_, _, err := CreateImmutable(path, []byte(`{"x":1}`), 0o644)
+	if err == nil {
+		t.Fatal("expected an error refusing an existing symlink at path")
+	}
+	if !strings.Contains(err.Error(), "symlink") {
+		t.Fatalf("error = %q, want it to name the symlink refusal", err)
+	}
+}
+
+// TestCreateImmutable_Concurrent races many goroutines publishing
+// byte-identical content at the same path with no external lock — proving
+// CreateImmutable is race-safe purely from os.Link's own atomicity (D4/§7:
+// "no-clobber atomic publication"), which is exactly why the cache
+// adapter's writer.lock exists only around directory creation, never as
+// the source of this guarantee. Exactly one goroutine must observe
+// created=true; every other goroutine must observe created=false with
+// existing bytes identical to what was published.
+func TestCreateImmutable_Concurrent(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "record.json")
+	data := []byte(`{"x":1}`)
+
+	const n = 16
+	var wg sync.WaitGroup
+	results := make([]struct {
+		created  bool
+		existing []byte
+		err      error
+	}, n)
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			c, e, err := CreateImmutable(path, data, 0o644)
+			results[i].created, results[i].existing, results[i].err = c, e, err
+		}(i)
+	}
+	wg.Wait()
+
+	winners := 0
+	for i, r := range results {
+		if r.err != nil {
+			t.Fatalf("goroutine %d: unexpected error: %v", i, r.err)
+		}
+		if r.created {
+			winners++
+			continue
+		}
+		if string(r.existing) != string(data) {
+			t.Fatalf("goroutine %d: existing = %q, want the identical published bytes %q", i, r.existing, data)
+		}
+	}
+	if winners != 1 {
+		t.Fatalf("winners = %d, want exactly 1 across %d racing identical publishers", winners, n)
+	}
+}
+
+// TestCreateImmutable_Negative_UnwritableParent mirrors Write's own
+// unwritable-parent case: a persistence failure must be a wrapped error,
+// and it must not fabricate a false "created" or "existing" result.
+func TestCreateImmutable_Negative_UnwritableParent(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("DISCLOSURE: running as root — os.Chmod(0o555) does not restrict root's own writes, so this permission-based negative test cannot exercise the unwritable-parent path under this user")
+	}
+
+	base := t.TempDir()
+	blocked := filepath.Join(base, "blocked")
+	if err := os.Mkdir(blocked, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(blocked, 0o555); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(blocked, 0o755) })
+
+	path := filepath.Join(blocked, "record.json")
+	created, existing, err := CreateImmutable(path, []byte("nope"), 0o644)
+	if err == nil {
+		t.Fatal("expected an error creating under an unwritable directory")
+	}
+	if created || existing != nil {
+		t.Fatalf("created=%v existing=%q on a failed publish, want false/nil", created, existing)
+	}
+	if !strings.Contains(err.Error(), "atomicfile:") {
+		t.Fatalf("error = %q, want it wrapped with an atomicfile: prefix", err)
+	}
+}
+
+// TestCreateImmutable_Negative_NonRegularExisting proves an existing
+// non-regular, non-symlink entry at path (a directory) is refused rather
+// than silently treated as a winner to read through.
+func TestCreateImmutable_Negative_NonRegularExisting(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "record.json")
+	if err := os.Mkdir(path, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	_, _, err := CreateImmutable(path, []byte(`{"x":1}`), 0o644)
+	if err == nil {
+		t.Fatal("expected an error when path already names a directory")
+	}
+	if !strings.Contains(err.Error(), "atomicfile:") {
+		t.Fatalf("error = %q, want it wrapped with an atomicfile: prefix", err)
 	}
 }

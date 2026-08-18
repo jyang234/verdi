@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/jyang234/verdi/internal/canonjson"
 	"github.com/jyang234/verdi/internal/policyartifact"
 )
 
@@ -54,6 +55,339 @@ func testExemptionData(scaffold Scaffold) ExemptionScaffoldData {
 		Expiry:             "2099-12-31",
 		TemplateIdentity:   scaffold.Identity,
 		TemplateDigest:     scaffold.Digest,
+	}
+}
+
+// testDispositionWitnessInputID computes the exact witness input_id
+// testDispositionData's witness fields imply — the canonical digest of a
+// policyartifact.SemanticWitness with InputID cleared, exactly what
+// policyartifact's own (unexported) witnessInputID computes internally —
+// so DecodeDisposition's own input_id-agreement check passes. Computed,
+// never hand-typed, mirroring policy_test.go's own testWitnessClaimDigest
+// discipline.
+func testDispositionWitnessInputID(t *testing.T, targetDigest, claimID, claimDigest, category, authorityDigest string) string {
+	t.Helper()
+	universal := policyartifact.Scope{Phases: []string{}, Environments: []string{}, Paths: []string{}, Refs: []string{}}
+	w := policyartifact.SemanticWitness{
+		TargetDigest: targetDigest,
+		Claims: []policyartifact.SemanticClaimWitness{{
+			ID:              claimID,
+			Digest:          claimDigest,
+			Category:        category,
+			AuthorityDigest: authorityDigest,
+			Scope:           universal,
+			Values:          []string{},
+		}},
+		Exemptions: []policyartifact.SemanticExemptionWitness{},
+	}
+	id, err := canonjson.Digest(w)
+	if err != nil {
+		t.Fatalf("computing test witness input_id: %v", err)
+	}
+	return id
+}
+
+func testDispositionData(scaffold Scaffold) DispositionScaffoldData {
+	targetDigest := testDigestFor("test-disposition-target")
+	claimDigest := testDigestFor("test-disposition-claim")
+	authorityDigest := testDigestFor("test-disposition-authority")
+	// InputID is filled in by the caller below once the other fields are
+	// fixed (it depends on them); tests that need a real DispositionScaffoldData
+	// call testDispositionDataWithInputID(t, scaffold) instead.
+	return DispositionScaffoldData{
+		Name:              "test-disposition",
+		Title:             "Test Disposition",
+		Owners:            []string{"platform-team"},
+		TargetDigest:      targetDigest,
+		ClaimID:           "policy/test-policy#instruction-1",
+		ClaimDigest:       claimDigest,
+		Category:          "policy-instruction",
+		AuthorityDigest:   authorityDigest,
+		ApprovalRole:      "policy-owner",
+		ApprovalPrincipal: "principal/github-org/YWxpY2U",
+		Expiry:            "2099-12-31",
+		TemplateIdentity:  scaffold.Identity,
+		TemplateDigest:    scaffold.Digest,
+	}
+}
+
+// testDispositionDataWithInputID returns testDispositionData(scaffold) with
+// a real, computed InputID matching its own witness fields.
+func testDispositionDataWithInputID(t *testing.T, scaffold Scaffold) DispositionScaffoldData {
+	t.Helper()
+	data := testDispositionData(scaffold)
+	data.InputID = testDispositionWitnessInputID(t, data.TargetDigest, data.ClaimID, data.ClaimDigest, data.Category, data.AuthorityDigest)
+	return data
+}
+
+// testDigestFor is a well-formed sha256:<64 hex> placeholder computed from
+// seed, mirroring testWitnessClaimDigest's own discipline.
+func testDigestFor(seed string) string {
+	sum := sha256.Sum256([]byte(seed))
+	return "sha256:" + hex.EncodeToString(sum[:])
+}
+
+// TestRenderDisposition_Happy proves the canonical embedded
+// policy-disposition.md scaffold renders complete, valid
+// verdi.policy-disposition/v1 content whose kernel round-trips exactly.
+func TestRenderDisposition_Happy(t *testing.T) {
+	scaffold, err := ResolveScaffold(t.TempDir(), "policy-disposition.md")
+	if err != nil {
+		t.Fatalf("ResolveScaffold: %v", err)
+	}
+	data := testDispositionDataWithInputID(t, scaffold)
+	content, err := RenderDisposition(scaffold, data)
+	if err != nil {
+		t.Fatalf("RenderDisposition: %v", err)
+	}
+	d, err := policyartifact.DecodeDisposition([]byte(content))
+	if err != nil {
+		t.Fatalf("test setup: DecodeDisposition on RenderDisposition's own output: %v", err)
+	}
+	if d.ID != "policy-disposition/test-disposition" {
+		t.Fatalf("ID = %q", d.ID)
+	}
+	if d.Title != data.Title {
+		t.Fatalf("Title = %q, want %q", d.Title, data.Title)
+	}
+	if d.Conclusion != policyartifact.DispositionNoConflict {
+		t.Fatalf("Conclusion = %q, want no-conflict", d.Conclusion)
+	}
+	if d.Origin != policyartifact.DispositionJudgeResult {
+		t.Fatalf("Origin = %q, want judge-result", d.Origin)
+	}
+	if d.Witness.InputID != data.InputID {
+		t.Fatalf("Witness.InputID = %q, want %q", d.Witness.InputID, data.InputID)
+	}
+	if d.Template == nil || d.Template.Identity != scaffold.Identity || d.Template.Digest != scaffold.Digest {
+		t.Fatalf("Template = %+v, want identity %q digest %q", d.Template, scaffold.Identity, scaffold.Digest)
+	}
+}
+
+// TestRenderDisposition_Determinism mirrors TestRenderPolicy_Determinism.
+func TestRenderDisposition_Determinism(t *testing.T) {
+	scaffold, err := ResolveScaffold(t.TempDir(), "policy-disposition.md")
+	if err != nil {
+		t.Fatalf("ResolveScaffold: %v", err)
+	}
+	data := testDispositionDataWithInputID(t, scaffold)
+	a, err := RenderDisposition(scaffold, data)
+	if err != nil {
+		t.Fatalf("RenderDisposition(a): %v", err)
+	}
+	b, err := RenderDisposition(scaffold, data)
+	if err != nil {
+		t.Fatalf("RenderDisposition(b): %v", err)
+	}
+	if a != b {
+		t.Fatalf("RenderDisposition is not deterministic:\na=%q\nb=%q", a, b)
+	}
+	da, err := policyartifact.DecodeDisposition([]byte(a))
+	if err != nil {
+		t.Fatalf("DecodeDisposition(a): %v", err)
+	}
+	db, err := policyartifact.DecodeDisposition([]byte(b))
+	if err != nil {
+		t.Fatalf("DecodeDisposition(b): %v", err)
+	}
+	digestA, err := da.Digest()
+	if err != nil {
+		t.Fatalf("Digest(a): %v", err)
+	}
+	digestB, err := db.Digest()
+	if err != nil {
+		t.Fatalf("Digest(b): %v", err)
+	}
+	if digestA != digestB {
+		t.Fatalf("decoded digests differ: %s vs %s", digestA, digestB)
+	}
+}
+
+// TestRenderDisposition_RoundTripKernelFields proves every disposition
+// kernel field the scaffold's minimal judge-result skeleton fixes (scope,
+// witness content, conclusion, origin, judgment absence, compensating
+// controls absence, review_condition absence) round-trips to exactly the
+// fixed canonical default, and every field the caller supplies
+// (id/title/owners/template, witness identity fields, approval, expiry)
+// round-trips to exactly what data supplied.
+func TestRenderDisposition_RoundTripKernelFields(t *testing.T) {
+	scaffold, err := ResolveScaffold(t.TempDir(), "policy-disposition.md")
+	if err != nil {
+		t.Fatalf("ResolveScaffold: %v", err)
+	}
+	data := testDispositionDataWithInputID(t, scaffold)
+	content, err := RenderDisposition(scaffold, data)
+	if err != nil {
+		t.Fatalf("RenderDisposition: %v", err)
+	}
+	d, err := policyartifact.DecodeDisposition([]byte(content))
+	if err != nil {
+		t.Fatalf("DecodeDisposition: %v", err)
+	}
+	if !scopesEqual(d.Scope, universalScope) {
+		t.Fatalf("Scope = %+v, want universal", d.Scope)
+	}
+	if d.Witness.TargetDigest != data.TargetDigest {
+		t.Fatalf("Witness.TargetDigest = %q, want %q", d.Witness.TargetDigest, data.TargetDigest)
+	}
+	if len(d.Witness.Claims) != 1 {
+		t.Fatalf("Witness.Claims = %+v, want exactly one", d.Witness.Claims)
+	}
+	claim := d.Witness.Claims[0]
+	if claim.ID != data.ClaimID || claim.Digest != data.ClaimDigest || claim.Category != data.Category || claim.AuthorityDigest != data.AuthorityDigest {
+		t.Fatalf("Witness.Claims[0] = %+v, want id/digest/category/authority_digest matching data", claim)
+	}
+	if !scopesEqual(claim.Scope, universalScope) {
+		t.Fatalf("Witness.Claims[0].Scope = %+v, want universal", claim.Scope)
+	}
+	if len(claim.Values) != 0 {
+		t.Fatalf("Witness.Claims[0].Values = %v, want empty", claim.Values)
+	}
+	if len(d.Witness.Exemptions) != 0 {
+		t.Fatalf("Witness.Exemptions = %+v, want empty", d.Witness.Exemptions)
+	}
+	if d.Judgment != nil {
+		t.Fatalf("Judgment = %+v, want none", d.Judgment)
+	}
+	if len(d.CompensatingControls) != 0 {
+		t.Fatalf("CompensatingControls = %v, want empty", d.CompensatingControls)
+	}
+	wantApproval := policyartifact.Approval{Role: data.ApprovalRole, Principal: data.ApprovalPrincipal}
+	if len(d.Approvals) != 1 || d.Approvals[0] != wantApproval {
+		t.Fatalf("Approvals = %+v, want exactly [%+v]", d.Approvals, wantApproval)
+	}
+	if d.Expiry != data.Expiry {
+		t.Fatalf("Expiry = %q, want %q", d.Expiry, data.Expiry)
+	}
+	if d.ReviewCondition != "" {
+		t.Fatalf("ReviewCondition = %q, want empty", d.ReviewCondition)
+	}
+}
+
+// TestRenderDisposition_StoreOverrideResolution proves a store override at
+// .verdi/templates/policy-disposition.md wins over the embedded canonical
+// default (mirroring TestRenderPolicy_StoreOverrideSabotage's own
+// resolution proof for the exemption scaffold family).
+func TestRenderDisposition_StoreOverrideResolution(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, ".verdi", "templates"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	canonical, err := ResolveScaffold(t.TempDir(), "policy-disposition.md")
+	if err != nil {
+		t.Fatalf("ResolveScaffold(canonical): %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(root, ".verdi", "templates", "policy-disposition.md"), canonical.Template, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	scaffold, err := ResolveScaffold(root, "policy-disposition.md")
+	if err != nil {
+		t.Fatalf("ResolveScaffold(override): %v", err)
+	}
+	if scaffold.Identity != "store:.verdi/templates/policy-disposition.md" {
+		t.Fatalf("Identity = %q, want the store override identity", scaffold.Identity)
+	}
+	data := testDispositionDataWithInputID(t, scaffold)
+	content, err := RenderDisposition(scaffold, data)
+	if err != nil {
+		t.Fatalf("RenderDisposition(store override): %v", err)
+	}
+	if _, err := policyartifact.DecodeDisposition([]byte(content)); err != nil {
+		t.Fatalf("DecodeDisposition(store override output): %v", err)
+	}
+}
+
+// testDispositionTemplate is a minimal, valid, self-contained
+// policy-disposition.md-shaped template — the sabotage table's own base,
+// mirroring testPolicyTemplate's role.
+const testDispositionTemplate = `---
+schema: verdi.policy-disposition/v1
+id: policy-disposition/{{.Name}}
+kind: policy-disposition
+title: {{printf "%q" .Title}}
+owners: [{{range $i, $o := .Owners}}{{if $i}}, {{end}}{{safe $o}}{{end}}]
+scope: {phases: [], environments: [], paths: [], refs: []}
+witness:
+  input_id: {{printf "%q" .InputID}}
+  target_digest: {{printf "%q" .TargetDigest}}
+  claims:
+    - id: {{safe .ClaimID}}
+      digest: {{printf "%q" .ClaimDigest}}
+      category: {{safe .Category}}
+      authority_digest: {{printf "%q" .AuthorityDigest}}
+      scope: {phases: [], environments: [], paths: [], refs: []}
+      values: []
+  exemptions: []
+conclusion: no-conflict
+origin: judge-result
+approvals:
+  - role: {{safe .ApprovalRole}}
+    principal: {{safe .ApprovalPrincipal}}
+expiry: {{printf "%q" .Expiry}}
+template: {identity: {{printf "%q" .TemplateIdentity}}, digest: {{printf "%q" .TemplateDigest}}}
+---
+Placeholder rationale.
+`
+
+// TestRenderDisposition_Sabotage is RenderPolicy/RenderExemption's own
+// anti-synthesis proof for the disposition scaffold: a template that
+// renames, drops, hardcodes, or otherwise mutates a kernel field fails
+// RenderDisposition closed, each with an error naming the specific fault.
+func TestRenderDisposition_Sabotage(t *testing.T) {
+	tests := []struct {
+		name    string
+		mutate  func(string) string
+		wantSub string
+	}{
+		{
+			"hardcode id ignoring data.Name",
+			func(s string) string {
+				return strings.Replace(s, "id: policy-disposition/{{.Name}}", "id: policy-disposition/hardcoded-name", 1)
+			},
+			"id",
+		},
+		{
+			"hardcode conclusion to conflict",
+			func(s string) string { return strings.Replace(s, "conclusion: no-conflict", "conclusion: conflict", 1) },
+			"conclusion",
+		},
+		{
+			"hardcode origin to human-fallback",
+			func(s string) string {
+				return strings.Replace(s,
+					"origin: judge-result\napprovals:",
+					"origin: human-fallback\ncompensating_controls:\n  - \"A control.\"\napprovals:", 1)
+			},
+			"origin",
+		},
+		{
+			"hardcode expiry ignoring data.Expiry",
+			func(s string) string {
+				return strings.Replace(s, `expiry: {{printf "%q" .Expiry}}`, `expiry: "2030-06-15"`, 1)
+			},
+			"expiry",
+		},
+		{
+			"synthesize a review_condition",
+			func(s string) string {
+				return strings.Replace(s, `expiry: {{printf "%q" .Expiry}}`, `expiry: {{printf "%q" .Expiry}}
+review_condition: "synthesized review condition"`, 1)
+			},
+			"review_condition",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			scaffold := scaffoldFromTemplate(tt.mutate(testDispositionTemplate))
+			data := testDispositionDataWithInputID(t, scaffold)
+			_, err := RenderDisposition(scaffold, data)
+			if err == nil {
+				t.Fatalf("RenderDisposition(sabotaged: %s) = nil error, want error containing %q", tt.name, tt.wantSub)
+			}
+			if !strings.Contains(err.Error(), tt.wantSub) {
+				t.Fatalf("RenderDisposition(sabotaged: %s) error = %v, want containing %q", tt.name, err, tt.wantSub)
+			}
+		})
 	}
 }
 

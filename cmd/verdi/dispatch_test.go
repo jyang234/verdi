@@ -262,3 +262,16 @@ func TestRun_NegativePaths(t *testing.T) {
 		})
 	}
 }
+
+// TestRunContextConflictDispatch proves the registered context namespace
+// routes conflict to its own grammar rather than the compile-only usage path.
+func TestRunContextConflictDispatch(t *testing.T) {
+	var stderr bytes.Buffer
+	got := run([]string{"context", "conflict"}, &stderr)
+	if got != 2 {
+		t.Fatalf("run([context conflict]) = %d, want 2", got)
+	}
+	if !strings.Contains(stderr.String(), "context conflict: --request is required") {
+		t.Fatalf("stderr = %q, want conflict request diagnostic", stderr.String())
+	}
+}

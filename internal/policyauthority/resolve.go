@@ -41,6 +41,14 @@ type EffectivePolicy struct {
 	ProfileDigest      string                 `json:"profile_digest"`
 	Policies           []EffectivePolicyEntry `json:"policies"`
 	Exemptions         []EffectiveExemption   `json:"exemptions"`
+	// Dispositions is ALWAYS present, sorted by canonical disposition id, and
+	// [] (never omitted) when the store carries none (authority-design §8:
+	// "verdi.effective-policy/v1 gains one always-present dispositions array
+	// ... An authority store with no dispositions encodes it as [], not by
+	// omission"). Like Exemptions, a disposition is carried here as a
+	// recorded fact only — internal/policyconflict alone interprets whether
+	// it matches or governs the current semantic input (§8).
+	Dispositions []EffectiveDisposition `json:"dispositions"`
 
 	seal string
 }
@@ -115,6 +123,21 @@ type EffectiveExemption struct {
 	ReviewCondition string                    `json:"review_condition,omitempty"`
 	Owners          []string                  `json:"owners"`
 	Approvals       []policyartifact.Approval `json:"approvals"`
+}
+
+// EffectiveDisposition is one loaded semantic disposition carried into the
+// effective policy as a recorded fact (authority-design §8): its identity
+// and digest, plus a deep, non-aliasing copy of the complete decoded
+// artifact — mirroring EffectiveExemption's own "recorded fact only, no
+// interpretation" posture. No match/freshness/verdict semantics are
+// computed here; that is internal/policyconflict's job (§8: "internal/
+// policyauthority owns loading, path/ID parity, strict decoding, and
+// inclusion in the effective-authority digest. internal/policyconflict
+// alone interprets whether a disposition matches").
+type EffectiveDisposition struct {
+	ID          string                     `json:"id"`
+	Digest      string                     `json:"digest"`
+	Disposition policyartifact.Disposition `json:"disposition"`
 }
 
 // Resolve computes the one canonical effective policy from a Store that
@@ -208,6 +231,21 @@ func Resolve(s *Store) (*EffectivePolicy, error) {
 		})
 	}
 
+	dispositionIDs := sortedKeys(s.Dispositions)
+	dispositions := make([]EffectiveDisposition, 0, len(dispositionIDs))
+	for _, did := range dispositionIDs {
+		d := s.Dispositions[did]
+		dDigest, err := d.Digest()
+		if err != nil {
+			return nil, fmt.Errorf("policyauthority: disposition %s: %w", did, err)
+		}
+		dispositions = append(dispositions, EffectiveDisposition{
+			ID:          did,
+			Digest:      dDigest,
+			Disposition: copyDisposition(d),
+		})
+	}
+
 	ep := &EffectivePolicy{
 		Schema:             EffectivePolicySchema,
 		ConstitutionDigest: conDigest,
@@ -215,6 +253,7 @@ func Resolve(s *Store) (*EffectivePolicy, error) {
 		ProfileDigest:      profDigest,
 		Policies:           entries,
 		Exemptions:         exemptions,
+		Dispositions:       dispositions,
 	}
 	seal, err := canonjson.Digest(ep)
 	if err != nil {
@@ -416,6 +455,56 @@ func copyPayloads(payloads map[string]policyartifact.Payload) map[string]policya
 		out[kind] = p
 	}
 	return out
+}
+
+// copyDisposition returns a deep, non-aliasing copy of d's decoded content.
+// The value copy preserves policyartifact's unexported decode seal; every
+// exported slice and pointer field is then copied fresh, mirroring
+// copyScope/copyPayloads' own "never alias from the Store" discipline the
+// rest of this file already applies to policies and exemptions.
+func copyDisposition(d *policyartifact.Disposition) policyartifact.Disposition {
+	out := *d // preserves the unexported seal field
+	out.Owners = append([]string{}, d.Owners...)
+	out.Scope = copyScope(d.Scope)
+	out.Witness = copySemanticWitness(d.Witness)
+	out.CompensatingControls = append([]string{}, d.CompensatingControls...)
+	out.Approvals = append([]policyartifact.Approval{}, d.Approvals...)
+	if d.Judgment != nil {
+		j := *d.Judgment
+		out.Judgment = &j
+	}
+	if d.Template != nil {
+		tmpl := *d.Template
+		out.Template = &tmpl
+	}
+	return out
+}
+
+// copySemanticWitness returns a deep copy of w: every claim's own scope and
+// values slice, and its bound pointer when present, copied fresh.
+func copySemanticWitness(w policyartifact.SemanticWitness) policyartifact.SemanticWitness {
+	claims := make([]policyartifact.SemanticClaimWitness, len(w.Claims))
+	for i, c := range w.Claims {
+		cc := policyartifact.SemanticClaimWitness{
+			ID:              c.ID,
+			Digest:          c.Digest,
+			Category:        c.Category,
+			AuthorityDigest: c.AuthorityDigest,
+			Scope:           copyScope(c.Scope),
+			Values:          append([]string{}, c.Values...),
+		}
+		if c.Bound != nil {
+			b := *c.Bound
+			cc.Bound = &b
+		}
+		claims[i] = cc
+	}
+	return policyartifact.SemanticWitness{
+		InputID:      w.InputID,
+		TargetDigest: w.TargetDigest,
+		Claims:       claims,
+		Exemptions:   append([]policyartifact.SemanticExemptionWitness{}, w.Exemptions...),
+	}
 }
 
 // copyScope returns a deep copy of s whose dimensions share no backing

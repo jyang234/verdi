@@ -476,7 +476,7 @@ func TestWaiveE2E_FullLifecycle(t *testing.T) {
 	reaffirmOut, reaffirmErr, reaffirmCode := runVerdiBinary(t, bin, repo.Dir, nil,
 		"waive", "jira:WAIVE-1", "ac-1", "--reaffirm",
 		"--rationale", "still flaking on the CI runner; PAY-1519 not yet fixed",
-		"--expires", "2026-08-15")
+		"--expires", "2099-12-31")
 	if reaffirmCode != 0 {
 		t.Fatalf("verdi waive --reaffirm exit = %d, want 0\nstdout: %s\nstderr: %s", reaffirmCode, reaffirmOut, reaffirmErr)
 	}

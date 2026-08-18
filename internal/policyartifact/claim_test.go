@@ -47,7 +47,7 @@ func TestClaimValidate_Happy(t *testing.T) {
 			c := validClaim()
 			c.Family = FamilyIdentity
 			c.Operator = OpSamePrincipal
-			c.Values = nil
+			c.Values = []string{"reviewer", "author"}
 			return c
 		}()},
 		{"resource family path-read", func() Claim {
@@ -109,11 +109,15 @@ func TestClaimValidate_Negative(t *testing.T) {
 			c.Operator = OpPathRead
 			c.Values = []string{"docs/**"}
 		}, "resource"},
+		// Flipped from the placeholder "takes no values" rule (5.3):
+		// same-principal now REQUIRES values, exactly two distinct
+		// roles, so a single value is rejected for having too few
+		// roles rather than for carrying any values at all.
 		{"same-principal with values", func(c *Claim) {
 			c.Family = FamilyIdentity
 			c.Operator = OpSamePrincipal
 			c.Values = []string{"x"}
-		}, "values"},
+		}, "two"},
 		{"path-write absolute path", func(c *Claim) {
 			c.Family = FamilyResource
 			c.Operator = OpPathWrite
@@ -224,5 +228,85 @@ func TestClaimDigest_DeterministicAndOrderInsensitive(t *testing.T) {
 	}
 	if dc == da {
 		t.Fatalf("different claims share digest %s", dc)
+	}
+}
+
+// TestClaimPrincipalRelation_ExactlyTwoCanonicalRoles proves 5.3's
+// principal-relation operand rule: same-principal and different-principal
+// require exactly two distinct kebab-case role values, normalize them as
+// a lexically-sorted set (both kernel relations are symmetric), and never
+// take a bound.
+func TestClaimPrincipalRelation_ExactlyTwoCanonicalRoles(t *testing.T) {
+	principalClaim := func() Claim {
+		c := validClaim()
+		c.Family = FamilyIdentity
+		c.Operator = OpSamePrincipal
+		c.Values = []string{"reviewer", "author"}
+		return c
+	}
+
+	t.Run("valid two-role claim", func(t *testing.T) {
+		c := principalClaim()
+		if err := c.Validate(); err != nil {
+			t.Fatalf("Validate() = %v, want nil", err)
+		}
+	})
+
+	t.Run("different-principal valid two-role claim", func(t *testing.T) {
+		c := principalClaim()
+		c.Operator = OpDifferentPrincipal
+		if err := c.Validate(); err != nil {
+			t.Fatalf("Validate() = %v, want nil", err)
+		}
+	})
+
+	t.Run("reversed spelling normalizes to the same ClaimDigest", func(t *testing.T) {
+		a := principalClaim()
+		a.Values = []string{"author", "reviewer"}
+		b := principalClaim()
+		b.Values = []string{"reviewer", "author"}
+		normalizeClaim(&a)
+		normalizeClaim(&b)
+
+		da, err := ClaimDigest(a)
+		if err != nil {
+			t.Fatalf("ClaimDigest(a): %v", err)
+		}
+		db, err := ClaimDigest(b)
+		if err != nil {
+			t.Fatalf("ClaimDigest(b): %v", err)
+		}
+		if da != db {
+			t.Fatalf("reversed-spelling digests differ: %s vs %s", da, db)
+		}
+	})
+
+	one := 1
+	negatives := []struct {
+		name    string
+		values  []string
+		bound   *int
+		wantSub string
+	}{
+		{"zero roles", nil, nil, "two"},
+		{"one role", []string{"author"}, nil, "two"},
+		{"three roles", []string{"author", "reviewer", "approver"}, nil, "two"},
+		{"duplicate roles", []string{"author", "author"}, nil, "distinct"},
+		{"bound rejected", []string{"author", "reviewer"}, &one, "bound"},
+		{"non-kebab role", []string{"Author", "reviewer"}, nil, "kebab"},
+	}
+	for _, tt := range negatives {
+		t.Run(tt.name, func(t *testing.T) {
+			c := principalClaim()
+			c.Values = tt.values
+			c.Bound = tt.bound
+			err := c.Validate()
+			if err == nil {
+				t.Fatalf("Validate() = nil, want error containing %q", tt.wantSub)
+			}
+			if !strings.Contains(err.Error(), tt.wantSub) {
+				t.Fatalf("Validate() = %v, want error containing %q", err, tt.wantSub)
+			}
+		})
 	}
 }

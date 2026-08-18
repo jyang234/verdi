@@ -333,6 +333,183 @@ func TestAuthorizeDistinctness(t *testing.T) {
 	})
 }
 
+// TestAuthorizeDistinctnessRolesCarryExactPair pins ledger SI-106: the
+// kernel exposes each distinctness finding's EXACT sorted role pair, so a
+// consumer never has to infer rule identity from human detail text and can
+// tell a second rule's finding apart from its own. Findings from every other
+// rule family carry no pair at all.
+func TestAuthorizeDistinctnessRolesCarryExactPair(t *testing.T) {
+	twoRules := `distinctness_rules:
+  - transitions: [close, accept, merge-authorize]
+    left_role: author
+    right_role: reviewer
+    relation: different-principal
+  - transitions: [accept]
+    left_role: owner
+    right_role: author
+    relation: different-principal
+`
+	findingFor := func(t *testing.T, d AuthorizationDecision, code string, roles ...string) Finding {
+		t.Helper()
+		for _, f := range d.Findings {
+			if f.Code == code && reflect.DeepEqual(f.Roles, roles) {
+				return f
+			}
+		}
+		t.Fatalf("no %q finding carrying role pair %v in %+v", code, roles, d.Findings)
+		return Finding{}
+	}
+
+	t.Run("violated finding carries its own sorted pair", func(t *testing.T) {
+		profile := authzProfile(t, map[string]string{"distinctness_rules": twoRules})
+		// user-123 fills author AND owner, so only the (author, owner) rule
+		// is violated; (author, reviewer) is satisfied by user-456.
+		d, err := Authorize(profile, AuthorizationRequest{
+			Transition:  "accept",
+			Posture:     PostureAuthoritative,
+			Resolutions: []PrincipalResolution{authedRes(t, "user-123"), authedRes(t, "user-456")},
+			Approvals: []ApprovalRecord{
+				{Role: "author", PrincipalID: mustPID(t, "user-123")},
+				{Role: "reviewer", PrincipalID: mustPID(t, "user-456")},
+				{Role: "owner", PrincipalID: mustPID(t, "user-123")},
+			},
+		})
+		if err != nil {
+			t.Fatalf("Authorize: %v", err)
+		}
+		got := findingFor(t, d, ReasonDistinctnessViolated, "author", "owner")
+		if got.State != AuthorizationViolated {
+			t.Fatalf("finding state = %q, want violated-with-witness", got.State)
+		}
+		for _, f := range d.Findings {
+			if f.Code == ReasonDistinctnessViolated && reflect.DeepEqual(f.Roles, []string{"author", "reviewer"}) {
+				t.Fatalf("the satisfied (author, reviewer) rule must produce no finding: %+v", f)
+			}
+		}
+	})
+
+	t.Run("unproven finding carries its own sorted pair", func(t *testing.T) {
+		profile := authzProfile(t, map[string]string{"distinctness_rules": twoRules})
+		d, err := Authorize(profile, AuthorizationRequest{
+			Transition:  "accept",
+			Posture:     PostureAuthoritative,
+			Resolutions: []PrincipalResolution{authedRes(t, "user-456")},
+			Approvals:   []ApprovalRecord{{Role: "reviewer", PrincipalID: mustPID(t, "user-456")}},
+		})
+		if err != nil {
+			t.Fatalf("Authorize: %v", err)
+		}
+		byPair := findingFor(t, d, ReasonDistinctnessUnproven, "author", "reviewer")
+		if byPair.Role != "author" {
+			t.Fatalf("finding role = %q, want the unfilled role author", byPair.Role)
+		}
+		// The second rule's own unproven findings carry ITS pair, reversed
+		// spelling normalized lexically.
+		findingFor(t, d, ReasonDistinctnessUnproven, "author", "owner")
+	})
+
+	t.Run("other rule families carry no pair", func(t *testing.T) {
+		profile := authzProfile(t, map[string]string{"distinctness_rules": twoRules})
+		// The unresolved owner approval adds a principal-unproven finding:
+		// a different rule family, which must carry no pair.
+		d, err := Authorize(profile, AuthorizationRequest{
+			Transition:  "accept",
+			Posture:     PostureAuthoritative,
+			Resolutions: []PrincipalResolution{authedRes(t, "user-456")},
+			Approvals: []ApprovalRecord{
+				{Role: "reviewer", PrincipalID: mustPID(t, "user-456")},
+				{Role: "owner", PrincipalID: mustPID(t, "user-999")},
+			},
+		})
+		if err != nil {
+			t.Fatalf("Authorize: %v", err)
+		}
+		saw := false
+		for _, f := range d.Findings {
+			switch f.Code {
+			case ReasonDistinctnessViolated, ReasonDistinctnessUnproven:
+				if len(f.Roles) != 2 {
+					t.Fatalf("distinctness finding %+v must carry exactly two roles", f)
+				}
+			default:
+				saw = true
+				if len(f.Roles) != 0 {
+					t.Fatalf("finding %+v is not a distinctness finding and must carry no role pair", f)
+				}
+			}
+		}
+		if !saw {
+			t.Fatalf("expected at least one non-distinctness finding in %+v", d.Findings)
+		}
+	})
+}
+
+// TestHoldsRoleIsTheOneValidatedRoleQuery pins ledger SI-106's single
+// exported role-membership seam: consumers must not duplicate role-mapping
+// semantics, so the exported query is exactly the kernel's own private
+// predicate behind validated operands.
+func TestHoldsRoleIsTheOneValidatedRoleQuery(t *testing.T) {
+	profile := authzProfile(t, nil)
+
+	t.Run("parity with the kernel's own predicate", func(t *testing.T) {
+		claims := []PrincipalClaim{
+			{TrustSource: "github", Subject: "user-123"},
+			{TrustSource: "github", Subject: "user-456"},
+			{TrustSource: "github", Subject: "user-999"},
+			{TrustSource: "github", Subject: "nobody"},
+		}
+		for _, claim := range claims {
+			for _, role := range []string{"author", "reviewer", "owner"} {
+				got, err := HoldsRole(profile, claim, role)
+				if err != nil {
+					t.Fatalf("HoldsRole(%q, %q): %v", claim.Subject, role, err)
+				}
+				if want := holdsRole(profile, claim, role); got != want {
+					t.Fatalf("HoldsRole(%q, %q) = %v, want kernel parity %v", claim.Subject, role, got, want)
+				}
+			}
+		}
+	})
+
+	t.Run("known membership", func(t *testing.T) {
+		got, err := HoldsRole(profile, PrincipalClaim{TrustSource: "github", Subject: "user-123"}, "author")
+		if err != nil || !got {
+			t.Fatalf("HoldsRole = %v, %v; want true, nil", got, err)
+		}
+	})
+
+	t.Run("unmapped role for this principal", func(t *testing.T) {
+		got, err := HoldsRole(profile, PrincipalClaim{TrustSource: "github", Subject: "user-123"}, "reviewer")
+		if err != nil || got {
+			t.Fatalf("HoldsRole = %v, %v; want false, nil", got, err)
+		}
+	})
+
+	negatives := []struct {
+		name  string
+		claim PrincipalClaim
+		role  string
+	}{
+		{"malformed role id", PrincipalClaim{TrustSource: "github", Subject: "user-123"}, "Author"},
+		{"blank role id", PrincipalClaim{TrustSource: "github", Subject: "user-123"}, ""},
+		{"malformed trust source", PrincipalClaim{TrustSource: "GitHub", Subject: "user-123"}, "author"},
+		{"blank subject", PrincipalClaim{TrustSource: "github", Subject: ""}, "author"},
+	}
+	for _, tc := range negatives {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := HoldsRole(profile, tc.claim, tc.role); err == nil {
+				t.Fatalf("want operational error for %s, got nil", tc.name)
+			}
+		})
+	}
+
+	t.Run("unsealed profile is refused", func(t *testing.T) {
+		if _, err := HoldsRole(Profile{}, PrincipalClaim{TrustSource: "github", Subject: "user-123"}, "author"); err == nil {
+			t.Fatal("want operational error for a profile that did not come from DecodeProfile, got nil")
+		}
+	})
+}
+
 func TestAuthorizeSoloCollapse(t *testing.T) {
 	solo := mustDecode(t, []byte(soloYAML))
 	req := AuthorizationRequest{

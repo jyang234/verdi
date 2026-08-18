@@ -30,6 +30,7 @@ func TestKernelFields_KnownKinds(t *testing.T) {
 		{"policy", []string{"schema", "id", "kind", "title", "owners", "template", "scope", "claims", "instructions", "payloads"}},
 		{"policy-overlay", []string{"schema", "id", "kind", "title", "owners", "template", "refines", "scope", "refinements"}},
 		{"policy-exemption", []string{"schema", "id", "kind", "title", "owners", "template", "scope", "witnesses", "compensating_controls", "approvals", "expiry", "review_condition"}},
+		{"policy-disposition", []string{"schema", "id", "kind", "title", "owners", "template", "scope", "witness", "conclusion", "origin", "judgment", "compensating_controls", "approvals", "expiry", "review_condition"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.kind, func(t *testing.T) {

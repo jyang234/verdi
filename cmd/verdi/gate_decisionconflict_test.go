@@ -3,12 +3,15 @@ package main
 import (
 	"bytes"
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/jyang234/verdi/internal/contextcompile"
 	"github.com/jyang234/verdi/internal/fixturegit"
+	"github.com/jyang234/verdi/internal/policyconflict"
 )
 
 // writeDecisionConflictReport writes decision-conflict-report.md directly
@@ -165,5 +168,73 @@ func TestCheckDeclaredDecisionConflicts_AllResolvedPasses(t *testing.T) {
 	}
 	if !cond.OK {
 		t.Fatalf("OK = false (%s), want true (every declared edge resolved, every judged finding dispositioned)", cond.Reason)
+	}
+}
+
+// TestSpecMRGateConflictPreEffect catches the design gate omitting the
+// constitutional condition, constructing an accepted arm, or mutating any
+// repository/report bytes before returning a block or operational failure.
+func TestSpecMRGateConflictPreEffect(t *testing.T) {
+	tests := []struct {
+		name     string
+		verdict  policyconflict.Verdict
+		provider error
+		wantCode int
+	}{
+		{name: "pass", verdict: policyconflict.VerdictPass, wantCode: 0},
+		{name: "blocked violated", verdict: policyconflict.VerdictBlockedViolated, wantCode: 1},
+		{name: "blocked unproven", verdict: policyconflict.VerdictBlockedUnproven, wantCode: 1},
+		{name: "operational", provider: errors.New("provider unavailable"), wantCode: 2},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := buildDesignGateRepo(t)
+			writeDecisionConflictReport(t, repo.Dir, repo.Head,
+				"  - { id: f-1, kind: computed, text: t, disposition: exempt, note: n }\n")
+			installConflictPolicyStore(t, repo.Dir)
+			requestPath := contextLifecycleRequestFile(t, repo.Dir, "design-context.json", "spec/stale-decline", contextcompile.PhaseDesign, nil)
+			before := takeConflictLifecycleSnapshot(t, repo.Dir,
+				".verdi/specs/active/stale-decline/decision-conflict-report.md",
+				".verdi/specs/active/stale-decline/deviation-report.md",
+			)
+
+			calls := 0
+			provider := contextConflictProviderFunc(func(_ context.Context, request policyconflict.Request) (policyconflict.Result, error) {
+				calls++
+				if request.Target.Kind != policyconflict.TargetAcceptanceCandidate || request.Target.AcceptanceCandidate == nil {
+					t.Fatalf("design target = %+v, want acceptance-candidate", request.Target)
+				}
+				if tt.provider != nil {
+					return policyconflict.Result{}, tt.provider
+				}
+				return lifecycleConflictResult(tt.verdict), nil
+			})
+
+			var stdout, stderr bytes.Buffer
+			got := runSpecMRGateWithConflict(context.Background(), repo.Dir, "design/stale-decline", nil, "main", requestPath, provider, &stdout, &stderr)
+			if got != tt.wantCode {
+				t.Fatalf("runSpecMRGateWithConflict = %d, want %d; stdout=%s stderr=%s", got, tt.wantCode, stdout.String(), stderr.String())
+			}
+			if calls != 1 {
+				t.Fatalf("provider calls = %d, want 1", calls)
+			}
+			assertConflictLifecycleSnapshot(t, repo.Dir, before)
+			if tt.provider != nil {
+				if stdout.Len() != 0 || !strings.Contains(stderr.String(), "provider unavailable") {
+					t.Fatalf("operational stdout=%q stderr=%q", stdout.String(), stderr.String())
+				}
+				return
+			}
+			if !strings.Contains(stdout.String(), "3. constitutional conflict verdict") {
+				t.Fatalf("stdout = %q, want numbered constitutional condition", stdout.String())
+			}
+			wantMarker := "[PASS] 3. constitutional conflict verdict"
+			if tt.wantCode == 1 {
+				wantMarker = "[FAIL] 3. constitutional conflict verdict"
+			}
+			if !strings.Contains(stdout.String(), wantMarker) {
+				t.Fatalf("stdout = %q, want %q", stdout.String(), wantMarker)
+			}
+		})
 	}
 }

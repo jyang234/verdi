@@ -55,6 +55,35 @@ type ExemptionScaffoldData struct {
 	TemplateDigest     string
 }
 
+// DispositionScaffoldData is the policy-disposition.md scaffold's own
+// render input: PolicyScaffoldData's identity fields plus the minimal
+// judge-result witness (target/claim identity), one approval, and an
+// expiry (authority-design §8: judge-result needs no fallback-only control
+// or time bound, but an expiry remains legal — this scaffold's minimal
+// skeleton always renders one so a real disposition has a concrete
+// re-review date to edit rather than a silently absent bound). InputID
+// must already be the exact canonical digest of the witness it describes
+// (Witness.InputID cleared then canonjson-digested, exactly what
+// policyartifact.DecodeDisposition itself re-derives and checks) — the
+// caller computes it, since only the caller knows the complete witness
+// content this minimal single-claim skeleton commits to.
+type DispositionScaffoldData struct {
+	Name              string
+	Title             string
+	Owners            []string
+	InputID           string
+	TargetDigest      string
+	ClaimID           string
+	ClaimDigest       string
+	Category          string
+	AuthorityDigest   string
+	ApprovalRole      string
+	ApprovalPrincipal string
+	Expiry            string
+	TemplateIdentity  string
+	TemplateDigest    string
+}
+
 // universalScope is the canonical scaffold's own fixed scope value:
 // every one of the three policy-family templates renders the universal
 // (unconstrained on every dimension) scope verbatim — none of
@@ -198,6 +227,92 @@ func RenderExemption(scaffold Scaffold, data ExemptionScaffoldData) (string, err
 		return "", fmt.Errorf("humanartifact: rendered policy-exemption kernel mismatch: review_condition = %q, want empty (this scaffold renders an expiry only)", e.ReviewCondition)
 	}
 	return content, nil
+}
+
+// RenderDisposition is RenderPolicy's twin for the policy-disposition
+// scaffold: the shared id/title/owners/template kernel round trip,
+// universal scope, AND the disposition-specific kernel fields
+// (kernelFieldTable's disposition row: witness, conclusion, origin,
+// judgment, compensating_controls, approvals, expiry, review_condition)
+// round-trip either what data supplied (witness identity fields, the one
+// approval, expiry) or this scaffold's own fixed canonical defaults
+// (conclusion no-conflict, origin judge-result, no judgment provenance, no
+// compensating controls, no review condition) — a minimal judge-result
+// skeleton, not a creation-verb-exposed artifact (authority-design §8).
+func RenderDisposition(scaffold Scaffold, data DispositionScaffoldData) (string, error) {
+	content, err := designscaffold.RenderValue(scaffold.Template, data)
+	if err != nil {
+		return "", fmt.Errorf("humanartifact: rendering disposition scaffold: %w", err)
+	}
+	d, err := policyartifact.DecodeDisposition([]byte(content))
+	if err != nil {
+		return "", fmt.Errorf("humanartifact: rendered disposition scaffold failed strict decode: %w", err)
+	}
+	wantID := policyartifact.KindDisposition + "/" + data.Name
+	if err := verifyKernelRoundTrip(policyartifact.KindDisposition, wantID, data.Title, data.Owners, d.ID, d.Title, d.Owners, d.Template, scaffold); err != nil {
+		return "", err
+	}
+	if !scopesEqual(d.Scope, universalScope) {
+		return "", fmt.Errorf("humanartifact: rendered policy-disposition kernel mismatch: scope = %+v, want the canonical universal scope %+v", d.Scope, universalScope)
+	}
+	if d.Witness.InputID != data.InputID {
+		return "", fmt.Errorf("humanartifact: rendered policy-disposition kernel mismatch: witness.input_id = %q, want %q", d.Witness.InputID, data.InputID)
+	}
+	if d.Witness.TargetDigest != data.TargetDigest {
+		return "", fmt.Errorf("humanartifact: rendered policy-disposition kernel mismatch: witness.target_digest = %q, want %q", d.Witness.TargetDigest, data.TargetDigest)
+	}
+	wantClaim := policyartifact.SemanticClaimWitness{
+		ID:              data.ClaimID,
+		Digest:          data.ClaimDigest,
+		Category:        data.Category,
+		AuthorityDigest: data.AuthorityDigest,
+		Scope:           universalScope,
+		Values:          []string{},
+	}
+	if len(d.Witness.Claims) != 1 || !semanticClaimWitnessEqual(d.Witness.Claims[0], wantClaim) {
+		return "", fmt.Errorf("humanartifact: rendered policy-disposition kernel mismatch: witness.claims = %+v, want exactly [%+v] (a template must not hardcode, drop, or synthesize a claim witness)", d.Witness.Claims, wantClaim)
+	}
+	if len(d.Witness.Exemptions) != 0 {
+		return "", fmt.Errorf("humanartifact: rendered policy-disposition kernel mismatch: witness.exemptions = %+v, want empty (this scaffold names no exemption)", d.Witness.Exemptions)
+	}
+	if d.Conclusion != policyartifact.DispositionNoConflict {
+		return "", fmt.Errorf("humanartifact: rendered policy-disposition kernel mismatch: conclusion = %q, want %q (this scaffold's fixed canonical default)", d.Conclusion, policyartifact.DispositionNoConflict)
+	}
+	if d.Origin != policyartifact.DispositionJudgeResult {
+		return "", fmt.Errorf("humanartifact: rendered policy-disposition kernel mismatch: origin = %q, want %q (this scaffold's fixed canonical default)", d.Origin, policyartifact.DispositionJudgeResult)
+	}
+	if d.Judgment != nil {
+		return "", fmt.Errorf("humanartifact: rendered policy-disposition kernel mismatch: judgment = %+v, want none (this scaffold never fabricates judgment provenance)", d.Judgment)
+	}
+	if len(d.CompensatingControls) != 0 {
+		return "", fmt.Errorf("humanartifact: rendered policy-disposition kernel mismatch: compensating_controls = %v, want empty (a judge-result ruling needs none)", d.CompensatingControls)
+	}
+	wantApproval := policyartifact.Approval{Role: data.ApprovalRole, Principal: data.ApprovalPrincipal}
+	if len(d.Approvals) != 1 || d.Approvals[0] != wantApproval {
+		return "", fmt.Errorf("humanartifact: rendered policy-disposition kernel mismatch: approvals = %+v, want exactly [%+v] (a template must not hardcode, drop, or synthesize an approval)", d.Approvals, wantApproval)
+	}
+	if d.Expiry != data.Expiry {
+		return "", fmt.Errorf("humanartifact: rendered policy-disposition kernel mismatch: expiry = %q, want %q", d.Expiry, data.Expiry)
+	}
+	if d.ReviewCondition != "" {
+		return "", fmt.Errorf("humanartifact: rendered policy-disposition kernel mismatch: review_condition = %q, want empty (this scaffold renders an expiry only)", d.ReviewCondition)
+	}
+	return content, nil
+}
+
+// semanticClaimWitnessEqual compares two SemanticClaimWitness values field
+// by field — like scopesEqual, an explicit comparison since the type's
+// slice/pointer fields make it non-comparable via ==. want.Bound is always
+// nil (this scaffold's fixed canonical default never fabricates a bound),
+// so got.Bound must also be nil.
+func semanticClaimWitnessEqual(got, want policyartifact.SemanticClaimWitness) bool {
+	return got.ID == want.ID &&
+		got.Digest == want.Digest &&
+		got.Category == want.Category &&
+		got.AuthorityDigest == want.AuthorityDigest &&
+		scopesEqual(got.Scope, want.Scope) &&
+		stringSlicesEqualExact(got.Values, want.Values) &&
+		got.Bound == nil && want.Bound == nil
 }
 
 // scopesEqual compares two Scope values dimension by dimension.

@@ -172,23 +172,61 @@ func (defaultProjectionVerifier) Verify(root string) (*instructionprojection.Rep
 // name each step's authority-design role and refusal precedence, not a
 // claim that Go statement order is 6-then-7-then-8.
 func (c Compiler) Compile(ctx context.Context, root string, request Request) (Result, error) {
+	outcome, err := c.compilePipeline(ctx, root, request)
+	if err != nil {
+		return Result{}, err
+	}
+	return outcome.result, nil
+}
+
+// compileOutcome bundles Compile's full Result together with the exact
+// intermediate values CompileConflict needs to build a ConflictOperands
+// from the SAME single authority resolution and target/fragment/
+// obligation/declared-context resolution compilePipeline already ran
+// (authority design §3: accepted-context construction "reuses the existing
+// compiler result and the already-resolved sealed policy store; the
+// conflict service never reloads policy"). Compile discards every field but
+// result; CompileConflict uses every field.
+type compileOutcome struct {
+	result      Result
+	snapshot    repositoryfacts.Snapshot
+	authority   PolicyAuthority
+	target      ResolvedSpec
+	fragments   []FeatureFragment
+	obligations []BoundObligation
+	declared    DeclaredContextResult
+	// selection is stage 7's exact retained authority-operand selection
+	// (applicable policies/overlays/exemptions) — the same selection the
+	// manifest's policy.entries section was built from. CompileConflict
+	// needs it to build TypedClaims/Exemptions/policy-instruction
+	// ProseClaims from the identical applicable operand set, rather than
+	// re-evaluating applicability a second time.
+	selection authoritySelection
+}
+
+// compilePipeline is Compile's complete pipeline (see Compile's own doc
+// comment for the numbered stage list), extracted so CompileConflict can
+// run the identical single pass and additionally consume the intermediate
+// authority/target/fragments/obligations/declared-context values Compile
+// itself already computed, rather than re-resolving any of them.
+func (c Compiler) compilePipeline(ctx context.Context, root string, request Request) (compileOutcome, error) {
 	if !c.constructed {
-		return Result{}, fmt.Errorf("contextcompile: zero-value Compiler cannot compile; use NewCompiler")
+		return compileOutcome{}, fmt.Errorf("contextcompile: zero-value Compiler cannot compile; use NewCompiler")
 	}
 	if root == "" {
-		return Result{}, fmt.Errorf("contextcompile: root must not be empty")
+		return compileOutcome{}, fmt.Errorf("contextcompile: root must not be empty")
 	}
 
 	// Stage 1: validate the request. A phase outside a nonempty
 	// scope.phases surfaces as *PhaseScopeRefusal, unchanged.
 	if err := request.Validate(); err != nil {
-		return Result{}, fmt.Errorf("contextcompile: stage 1 validate request: %w", err)
+		return compileOutcome{}, fmt.Errorf("contextcompile: stage 1 validate request: %w", err)
 	}
 
 	// Stage 2: resolve policy authority and the exact requested adapter.
 	authority, err := ResolvePolicyAuthority(c.authority, root, request.Adapter)
 	if err != nil {
-		return Result{}, fmt.Errorf("contextcompile: stage 2 resolve policy authority: %w", err)
+		return compileOutcome{}, fmt.Errorf("contextcompile: stage 2 resolve policy authority: %w", err)
 	}
 
 	// Stage 3: gather repository facts and compare the optional caller
@@ -196,20 +234,20 @@ func (c Compiler) Compile(ctx context.Context, root string, request Request) (Re
 	// Gather runs with no evaluated target.
 	snapshot, err := c.repoFacts.Gather(ctx, repositoryfacts.GatherInput{Root: root})
 	if err != nil {
-		return Result{}, fmt.Errorf("contextcompile: stage 3 gather repository facts: %w", err)
+		return compileOutcome{}, fmt.Errorf("contextcompile: stage 3 gather repository facts: %w", err)
 	}
 	if err := ResolveExpectedRepository(request.Expected, snapshot.Facts); err != nil {
-		return Result{}, fmt.Errorf("contextcompile: stage 3 compare expected repository: %w", err)
+		return compileOutcome{}, fmt.Errorf("contextcompile: stage 3 compare expected repository: %w", err)
 	}
 	if !snapshot.Facts.Head.Known {
-		return Result{}, fmt.Errorf("contextcompile: stage 3 repository HEAD is unknown; cannot resolve stage 4's spec target")
+		return compileOutcome{}, fmt.Errorf("contextcompile: stage 3 repository HEAD is unknown; cannot resolve stage 4's spec target")
 	}
 	head := snapshot.Facts.Head.Value
 
 	// Stage 4: resolve the accepted target and its semantic dependencies.
 	target, err := ResolveAcceptedSpec(ctx, c.git, c.states, root, head, request.Spec)
 	if err != nil {
-		return Result{}, fmt.Errorf("contextcompile: stage 4 resolve accepted spec: %w", err)
+		return compileOutcome{}, fmt.Errorf("contextcompile: stage 4 resolve accepted spec: %w", err)
 	}
 
 	var fragments []FeatureFragment
@@ -221,7 +259,7 @@ func (c Compiler) Compile(ctx context.Context, root string, request Request) (Re
 		// validateCapsuleTarget rule, ported here since Compile assembles
 		// the manifest directly rather than through ComposeCapsule).
 		if request.Phase == PhaseBuild {
-			return Result{}, &DeclaredScopeRefusal{
+			return compileOutcome{}, &DeclaredScopeRefusal{
 				Phase: request.Phase, Ref: target.Ref,
 				// vocab:identity — "feature" names the fixed artifact spec class this refusal targets, not display prose
 				Reason: "feature specifications are not authoritative build targets",
@@ -232,7 +270,7 @@ func (c Compiler) Compile(ctx context.Context, root string, request Request) (Re
 		fragments, err = ResolveFeatureFragments(ctx, c.git, c.states, root, head, target)
 		if err != nil {
 			// vocab:identity — "feature" names the ResolveFeatureFragments stage this error wraps, the fixed artifact class
-			return Result{}, fmt.Errorf("contextcompile: stage 4 resolve feature fragments: %w", err)
+			return compileOutcome{}, fmt.Errorf("contextcompile: stage 4 resolve feature fragments: %w", err)
 		}
 	default:
 		// Every remaining closed spec class (v1: component) is a
@@ -243,7 +281,7 @@ func (c Compiler) Compile(ctx context.Context, root string, request Request) (Re
 		// authority design §6 fixes each phase's admissible target class).
 		// It is therefore the same typed exit-1 family, never an untyped
 		// exit-2 operational error.
-		return Result{}, &DeclaredScopeRefusal{
+		return compileOutcome{}, &DeclaredScopeRefusal{
 			Phase: request.Phase, Ref: target.Ref,
 			Reason: fmt.Sprintf("target class %q is not an authoritative context-compile target", target.Spec.Class),
 		}
@@ -251,25 +289,25 @@ func (c Compiler) Compile(ctx context.Context, root string, request Request) (Re
 
 	obligations, err := ResolveBoundObligations(ctx, c.git, root, head, target)
 	if err != nil {
-		return Result{}, fmt.Errorf("contextcompile: stage 4 resolve bound obligations: %w", err)
+		return compileOutcome{}, fmt.Errorf("contextcompile: stage 4 resolve bound obligations: %w", err)
 	}
 	declared, err := ResolveDeclaredContext(ctx, c.git, root, head, target, fragments)
 	if err != nil {
-		return Result{}, fmt.Errorf("contextcompile: stage 4 resolve declared context: %w", err)
+		return compileOutcome{}, fmt.Errorf("contextcompile: stage 4 resolve declared context: %w", err)
 	}
 
 	// Stage 5: verify the full existing managed instruction projection
 	// against disk.
 	report, err := c.projection.Verify(root)
 	if err != nil {
-		return Result{}, fmt.Errorf("contextcompile: stage 5 verify instruction projection: %w", err)
+		return compileOutcome{}, fmt.Errorf("contextcompile: stage 5 verify instruction projection: %w", err)
 	}
 	if !report.Clean() {
 		driftedPaths, driftReasons, err := driftWitness(report)
 		if err != nil {
-			return Result{}, fmt.Errorf("contextcompile: stage 5 verify instruction projection: %w", err)
+			return compileOutcome{}, fmt.Errorf("contextcompile: stage 5 verify instruction projection: %w", err)
 		}
-		return Result{}, &ProjectionDriftRefusal{Paths: driftedPaths, Reasons: driftReasons}
+		return compileOutcome{}, &ProjectionDriftRefusal{Paths: driftedPaths, Reasons: driftReasons}
 	}
 
 	// Stage 5b: compute the full managed-projection path set across EVERY
@@ -279,7 +317,7 @@ func (c Compiler) Compile(ctx context.Context, root string, request Request) (Re
 	// already loaded, so this never re-loads authority a second time.
 	managedProjectionPaths, err := instructionprojection.ManagedPaths(authority.Store.Constitution.Adapters)
 	if err != nil {
-		return Result{}, fmt.Errorf("contextcompile: stage 5b compute managed projection paths: %w", err)
+		return compileOutcome{}, fmt.Errorf("contextcompile: stage 5b compute managed projection paths: %w", err)
 	}
 
 	// Stage 7 (evaluated ahead of the stage-6 BuildUniverse call — see the
@@ -287,11 +325,11 @@ func (c Compiler) Compile(ctx context.Context, root string, request Request) (Re
 	// applicable authority operands and policy ids.
 	operandCandidates, err := authorityOperandCandidates(authority)
 	if err != nil {
-		return Result{}, fmt.Errorf("contextcompile: stage 7 list authority operand candidates: %w", err)
+		return compileOutcome{}, fmt.Errorf("contextcompile: stage 7 list authority operand candidates: %w", err)
 	}
 	selection, err := selectAuthorityOperands(operandCandidates, request, target)
 	if err != nil {
-		return Result{}, fmt.Errorf("contextcompile: stage 7 select authority operands: %w", err)
+		return compileOutcome{}, fmt.Errorf("contextcompile: stage 7 select authority operands: %w", err)
 	}
 
 	environment := ""
@@ -303,20 +341,20 @@ func (c Compiler) Compile(ctx context.Context, root string, request Request) (Re
 	// store/declared-context lifts.
 	entries, err := c.git.LsTreeEntries(ctx, root, head)
 	if err != nil {
-		return Result{}, fmt.Errorf("contextcompile: stage 6 list HEAD tree: %w", err)
+		return compileOutcome{}, fmt.Errorf("contextcompile: stage 6 list HEAD tree: %w", err)
 	}
 	worktreePaths, err := c.git.WorktreeChangedPaths(ctx, root)
 	if err != nil {
-		return Result{}, fmt.Errorf("contextcompile: stage 6 list worktree changed paths: %w", err)
+		return compileOutcome{}, fmt.Errorf("contextcompile: stage 6 list worktree changed paths: %w", err)
 	}
 
 	authorityArtifacts, err := resolvedAuthorityArtifacts(authority)
 	if err != nil {
-		return Result{}, fmt.Errorf("contextcompile: stage 6 resolve authority artifacts: %w", err)
+		return compileOutcome{}, fmt.Errorf("contextcompile: stage 6 resolve authority artifacts: %w", err)
 	}
 	storeLifts, err := buildStoreLifts(target, fragments, obligations, selection.Operands, authorityArtifacts)
 	if err != nil {
-		return Result{}, fmt.Errorf("contextcompile: stage 6 build store-authority lifts: %w", err)
+		return compileOutcome{}, fmt.Errorf("contextcompile: stage 6 build store-authority lifts: %w", err)
 	}
 	// The EFFECTIVE declared-context set, computed exactly once here and
 	// used for the universe lifts, the classification materials and the
@@ -325,7 +363,7 @@ func (c Compiler) Compile(ctx context.Context, root string, request Request) (Re
 	effectiveDeclared := suppressStoreOwnedDeclaredContext(declared, storeLifts)
 	declaredByLogicalRef, err := indexDeclaredContextItems(effectiveDeclared)
 	if err != nil {
-		return Result{}, fmt.Errorf("contextcompile: stage 6 index declared context: %w", err)
+		return compileOutcome{}, fmt.Errorf("contextcompile: stage 6 index declared context: %w", err)
 	}
 
 	candidates, err := BuildUniverse(UniverseInput{
@@ -338,14 +376,14 @@ func (c Compiler) Compile(ctx context.Context, root string, request Request) (Re
 		Adapter:            authority.Adapter,
 	})
 	if err != nil {
-		return Result{}, fmt.Errorf("contextcompile: stage 6 build candidate universe: %w", err)
+		return compileOutcome{}, fmt.Errorf("contextcompile: stage 6 build candidate universe: %w", err)
 	}
 
 	// Stage 8: render the pure, phase-filtered projection for exactly the
 	// stage-7 selected policy ids.
 	projectionFiles, err := renderSelectedProjection(authority, selection.Selection)
 	if err != nil {
-		return Result{}, fmt.Errorf("contextcompile: stage 8 render selected projection: %w", err)
+		return compileOutcome{}, fmt.Errorf("contextcompile: stage 8 render selected projection: %w", err)
 	}
 
 	// Stage 9: classify every candidate exactly once and build data
@@ -355,11 +393,11 @@ func (c Compiler) Compile(ctx context.Context, root string, request Request) (Re
 	// profile's adopted digest from its exact HEAD bytes.
 	catalog, err := authority.Store.Constitution.GovernanceCatalog()
 	if err != nil {
-		return Result{}, fmt.Errorf("contextcompile: stage 9 resolve governance catalog: %w", err)
+		return compileOutcome{}, fmt.Errorf("contextcompile: stage 9 resolve governance catalog: %w", err)
 	}
 	materials, err := buildClassificationMaterials(ctx, c.git, root, head, target, fragments, obligations, effectiveDeclared, selection, authorityArtifacts, catalog, projectionFiles)
 	if err != nil {
-		return Result{}, fmt.Errorf("contextcompile: stage 9 build classification materials: %w", err)
+		return compileOutcome{}, fmt.Errorf("contextcompile: stage 9 build classification materials: %w", err)
 	}
 	classification, err := Classify(ctx, c.git, root, head, ClassificationInput{
 		Candidates:   candidates,
@@ -371,29 +409,29 @@ func (c Compiler) Compile(ctx context.Context, root string, request Request) (Re
 		Adapter:      AdapterRef{ID: authority.Adapter.ID, Version: authority.Adapter.Version},
 	})
 	if err != nil {
-		return Result{}, fmt.Errorf("contextcompile: stage 9 classify candidates: %w", err)
+		return compileOutcome{}, fmt.Errorf("contextcompile: stage 9 classify candidates: %w", err)
 	}
 
 	// Stage 10: project sealed actors, or the explicit unproven-absence
 	// posture.
 	actorsSection, err := projectActors(ctx, c.actors)
 	if err != nil {
-		return Result{}, fmt.Errorf("contextcompile: stage 10 project actors: %w", err)
+		return compileOutcome{}, fmt.Errorf("contextcompile: stage 10 project actors: %w", err)
 	}
 
 	// Stage 11: compute revisions, every manifest row, the disclosure
 	// union, and canonical bytes.
 	manifest, err := c.assembleManifest(ctx, root, head, snapshot, request, authority, selection, target, fragments, obligations, declaredByLogicalRef, classification, actorsSection)
 	if err != nil {
-		return Result{}, fmt.Errorf("contextcompile: stage 11 assemble manifest: %w", err)
+		return compileOutcome{}, fmt.Errorf("contextcompile: stage 11 assemble manifest: %w", err)
 	}
 	manifestBytes, err := EncodeManifest(manifest)
 	if err != nil {
-		return Result{}, fmt.Errorf("contextcompile: stage 11 encode manifest: %w", err)
+		return compileOutcome{}, fmt.Errorf("contextcompile: stage 11 encode manifest: %w", err)
 	}
 	finalManifest, err := DecodeManifest(manifestBytes)
 	if err != nil {
-		return Result{}, fmt.Errorf("contextcompile: stage 11 decode canonical manifest: %w", err)
+		return compileOutcome{}, fmt.Errorf("contextcompile: stage 11 decode canonical manifest: %w", err)
 	}
 
 	// Stage 12: return the fresh, in-memory Result.
@@ -408,13 +446,23 @@ func (c Compiler) Compile(ctx context.Context, root string, request Request) (Re
 		dataItemBytes[i] = append([]byte(nil), b...)
 	}
 
-	return Result{
+	result := Result{
 		Manifest:               finalManifest,
 		ManifestBytes:          append([]byte(nil), manifestBytes...),
 		DataItems:              append([]DataItem(nil), classification.DataItems...),
 		DataItemBytes:          dataItemBytes,
 		ProjectionFiles:        resultProjectionFiles,
 		ManagedProjectionPaths: append([]string(nil), managedProjectionPaths...),
+	}
+	return compileOutcome{
+		result:      result,
+		snapshot:    snapshot,
+		authority:   authority,
+		target:      target,
+		fragments:   fragments,
+		obligations: obligations,
+		declared:    effectiveDeclared,
+		selection:   selection,
 	}, nil
 }
 

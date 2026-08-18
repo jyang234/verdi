@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -14,12 +15,15 @@ import (
 	"time"
 
 	"github.com/jyang234/verdi/internal/artifact"
+	"github.com/jyang234/verdi/internal/contextcompile"
 	"github.com/jyang234/verdi/internal/evidence"
 	"github.com/jyang234/verdi/internal/fixturegit"
 	forgefake "github.com/jyang234/verdi/internal/forge/fake"
 	"github.com/jyang234/verdi/internal/gitx"
 	"github.com/jyang234/verdi/internal/lint"
+	"github.com/jyang234/verdi/internal/policyconflict"
 	"github.com/jyang234/verdi/internal/provider/fake"
+	"github.com/jyang234/verdi/internal/specstate"
 	"github.com/jyang234/verdi/internal/store"
 	"github.com/jyang234/verdi/internal/storyresolve"
 	"github.com/jyang234/verdi/internal/upstream"
@@ -117,6 +121,88 @@ digest: sha256:%s
 `, covers, findingsYAML, strings.Repeat("0", 64))
 	if err := os.WriteFile(filepath.Join(dir, "deviation-report.md"), []byte(content), 0o644); err != nil {
 		t.Fatalf("writing deviation-report.md: %v", err)
+	}
+}
+
+// TestCloseConflictPreEffect catches real-close evaluation after any branch,
+// archive, freeze, stage, commit, or publish effect. Both block states and an
+// operational failure preserve every observable repository and provider fact.
+func TestCloseConflictPreEffect(t *testing.T) {
+	tests := []struct {
+		name     string
+		verdict  policyconflict.Verdict
+		provider error
+		wantCode int
+	}{
+		{name: "pass reaches legacy precondition", verdict: policyconflict.VerdictPass, wantCode: 1},
+		{name: "blocked violated", verdict: policyconflict.VerdictBlockedViolated, wantCode: 1},
+		{name: "blocked unproven", verdict: policyconflict.VerdictBlockedUnproven, wantCode: 1},
+		{name: "operational", provider: errors.New("provider unavailable"), wantCode: 2},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := buildCloseFixtureRepo(t)
+			installConflictPolicyStore(t, repo.Dir)
+			requestPath := contextLifecycleRequestFile(t, repo.Dir, "close-context.json", "spec/close-fixture", contextcompile.PhaseReview, nil)
+			before := takeConflictLifecycleSnapshot(t, repo.Dir,
+				".verdi/specs/active/close-fixture/spec.md",
+				".verdi/specs/active/close-fixture/deviation-report.md",
+				".verdi/specs/active/close-fixture/rollup.json",
+				".verdi/specs/archive/close-fixture/spec.md",
+				".verdi/specs/archive/close-fixture/deviation-report.md",
+				".verdi/specs/archive/close-fixture/rollup.json",
+			)
+			fp := fake.New()
+			calls := 0
+			provider := contextConflictProviderFunc(func(_ context.Context, request policyconflict.Request) (policyconflict.Result, error) {
+				calls++
+				accepted := request.Target.AcceptedContext
+				if request.Target.Kind != policyconflict.TargetAcceptedContext || accepted == nil || accepted.Phase != contextcompile.PhaseReview {
+					t.Fatalf("close target = %+v, want accepted review context", request.Target)
+				}
+				want := contextcompile.Expected{Branch: "main", Head: repo.Head}
+				if accepted.Expected == nil || *accepted.Expected != want {
+					t.Fatalf("close expected = %+v, want %+v", accepted.Expected, want)
+				}
+				if tt.provider != nil {
+					return policyconflict.Result{}, tt.provider
+				}
+				return lifecycleConflictResult(tt.verdict), nil
+			})
+
+			deps := closeDeps{
+				Registry:            fp,
+				State:               fakeScaffoldResolver{result: specstate.Result{State: specstate.Proposed}},
+				ConflictRequestPath: requestPath,
+				ConflictProvider:    provider,
+			}
+			var stdout, stderr bytes.Buffer
+			got := runClose(context.Background(), repo.Dir, "spec/close-fixture", &store.Manifest{}, deps, &stdout, &stderr)
+			if got != tt.wantCode {
+				t.Fatalf("runClose = %d, want %d; stdout=%s stderr=%s", got, tt.wantCode, stdout.String(), stderr.String())
+			}
+			if calls != 1 {
+				t.Fatalf("provider calls = %d, want 1", calls)
+			}
+			if tt.verdict != policyconflict.VerdictPass {
+				assertConflictLifecycleSnapshot(t, repo.Dir, before)
+			}
+			if _, published := fp.PublishedField("jira:CLOSE-1"); published {
+				t.Fatal("rollup published across conflict refusal")
+			}
+			if tt.provider != nil {
+				if stdout.Len() != 0 || !strings.Contains(stderr.String(), "provider unavailable") {
+					t.Fatalf("operational stdout=%q stderr=%q", stdout.String(), stderr.String())
+				}
+				return
+			}
+			if !strings.Contains(stdout.String(), "constitutional conflict: state: "+string(tt.verdict)) {
+				t.Fatalf("stdout = %q, want conflict summary", stdout.String())
+			}
+			if tt.verdict == policyconflict.VerdictPass && !strings.Contains(stderr.String(), "proposal has not landed") {
+				t.Fatalf("pass did not reach existing close precondition: %q", stderr.String())
+			}
+		})
 	}
 }
 

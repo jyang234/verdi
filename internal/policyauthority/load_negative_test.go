@@ -202,6 +202,85 @@ func TestLoad_UnregisteredApprovalRole(t *testing.T) {
 	}
 }
 
+// dispositionScopeLine is dispositionFile's OWN top-level scope line: the
+// nested witness-claim scope is indented, so replacing this exact
+// column-zero line rewrites only the disposition's own Scope.
+const dispositionScopeLine = "\nscope: {phases: [], environments: [], paths: [], refs: []}\n"
+
+// TestLoad_DispositionUnregisteredScopeEnvironment is
+// TestLoad_UnregisteredScopeEnvironment's case for a disposition: §8 gives
+// policyauthority cross-reference validation over dispositions exactly as
+// over exemptions, so a disposition scoped to an environment the
+// constitution never registered must be refused rather than sealed into the
+// effective-authority digest.
+func TestLoad_DispositionUnregisteredScopeEnvironment(t *testing.T) {
+	files := minimalStoreFiles()
+	files[".verdi/policy/dispositions/review-no-conflict.md"] = strings.Replace(
+		dispositionFile(t, "review-no-conflict"),
+		dispositionScopeLine,
+		"\nscope: {phases: [], environments: [nonexistent-env], paths: [], refs: []}\n", 1)
+	root := t.TempDir()
+	writeTree(t, root, files)
+	_, err := Load(root)
+	if err == nil {
+		t.Fatal("Load() succeeded, want an unregistered-environment error")
+	}
+	if !strings.Contains(err.Error(), "registered environments") {
+		t.Fatalf("error = %v, want environment-registration text", err)
+	}
+	if !strings.Contains(err.Error(), "disposition policy-disposition/review-no-conflict scope") {
+		t.Fatalf("error = %v, want the offending disposition and field named", err)
+	}
+}
+
+// TestLoad_DispositionUnregisteredApprovalRole is
+// TestLoad_UnregisteredApprovalRole's case for a disposition: §8 requires at
+// least one approval on every disposition, and an approval naming a role
+// outside the constitution catalog is the same unauthorized-authority defect
+// the exemption loop already refuses.
+func TestLoad_DispositionUnregisteredApprovalRole(t *testing.T) {
+	files := minimalStoreFiles()
+	files[".verdi/policy/dispositions/review-no-conflict.md"] = strings.Replace(
+		dispositionFile(t, "review-no-conflict"), "role: policy-owner", "role: not-a-role", 1)
+	root := t.TempDir()
+	writeTree(t, root, files)
+	_, err := Load(root)
+	if err == nil {
+		t.Fatal("Load() succeeded, want an unregistered-role error")
+	}
+	if !strings.Contains(err.Error(), "is not a member of the constitution catalog's roles") {
+		t.Fatalf("error = %v, want role-registration text", err)
+	}
+	if !strings.Contains(err.Error(), "disposition policy-disposition/review-no-conflict approval") {
+		t.Fatalf("error = %v, want the offending disposition and field named", err)
+	}
+}
+
+// TestLoad_DispositionRegisteredScopeAndRoleLoads is the positive control
+// for the two refusals above: a disposition naming a REGISTERED environment
+// and a catalog role still loads, so the new cross-validation refuses only
+// unregistered references and never any nonempty scope environment.
+func TestLoad_DispositionRegisteredScopeAndRoleLoads(t *testing.T) {
+	files := minimalStoreFiles()
+	files[".verdi/policy/dispositions/review-no-conflict.md"] = strings.Replace(
+		dispositionFile(t, "review-no-conflict"),
+		dispositionScopeLine,
+		"\nscope: {phases: [], environments: [production], paths: [], refs: []}\n", 1)
+	root := t.TempDir()
+	writeTree(t, root, files)
+	s, err := Load(root)
+	if err != nil {
+		t.Fatalf("Load() error on a disposition naming a registered environment: %v", err)
+	}
+	d, ok := s.Dispositions["policy-disposition/review-no-conflict"]
+	if !ok {
+		t.Fatalf("Dispositions = %v, want policy-disposition/review-no-conflict loaded", s.Dispositions)
+	}
+	if len(d.Scope.Environments) != 1 || d.Scope.Environments[0] != "production" {
+		t.Fatalf("loaded disposition scope environments = %v, want [production]", d.Scope.Environments)
+	}
+}
+
 func TestLoad_SelectedProfileMissing(t *testing.T) {
 	files := minimalStoreFiles()
 	files[".verdi/policy/constitution.md"] = strings.Replace(
