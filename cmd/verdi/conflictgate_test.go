@@ -364,6 +364,51 @@ func TestConflictGateTarget(t *testing.T) {
 	}
 }
 
+// TestLifecycleConflictBuiltBinary proves that the real close dispatcher
+// threads the one request adapter through each review-mode entry point. The
+// real provider's conservative verdict must arrive before any close effect.
+func TestLifecycleConflictBuiltBinary(t *testing.T) {
+	bin := buildVerdiBinary(t)
+	tests := []struct {
+		name string
+		args func(string) []string
+	}{
+		{name: "close", args: func(path string) []string {
+			return []string{"close", "--force-local", "spec/feature-alpha", "--context-request", path}
+		}},
+		{name: "preflight", args: func(path string) []string {
+			return []string{"close", "--preflight", "--context-request", path, "spec/feature-alpha"}
+		}},
+		{name: "prepare", args: func(path string) []string {
+			return []string{"close", "--context-request", path, "--prepare", "spec/feature-alpha"}
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := buildContextCompileRepo(t, map[string]string{
+				".verdi/specs/active/feature-alpha/spec.md": contextFeatureAlphaSpec(t),
+			})
+			requestPath := contextLifecycleRequestFile(t, repo.Dir, "review-context.json", "spec/feature-alpha", contextcompile.PhaseReview, nil)
+			before := takeConflictLifecycleSnapshot(t, repo.Dir,
+				".verdi/specs/active/feature-alpha/spec.md",
+				".verdi/specs/active/feature-alpha/deviation-report.md",
+				".verdi/specs/active/feature-alpha/rollup.json",
+				".verdi/specs/archive/feature-alpha/spec.md",
+				"AGENTS.md",
+			)
+
+			stdout, stderr, code := runVerdiBinary(t, bin, repo.Dir, []string{"CI_DEFAULT_BRANCH=main"}, tt.args(requestPath)...)
+			if code != 1 {
+				t.Fatalf("exit=%d, want conflict verdict exit 1; stdout=%s stderr=%s", code, stdout, stderr)
+			}
+			if !strings.Contains(stdout, "constitutional conflict: state: blocked-unproven") {
+				t.Fatalf("stdout=%q, want closed conflict summary", stdout)
+			}
+			assertConflictLifecycleSnapshot(t, repo.Dir, before)
+		})
+	}
+}
+
 func TestConflictGateTargetProviderError(t *testing.T) {
 	root, head := adoptedConflictGateRepo(t)
 	path := contextLifecycleRequestFile(t, root, "provider-error.json", "spec/feature-alpha", contextcompile.PhaseBuild, nil)

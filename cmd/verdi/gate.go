@@ -72,7 +72,7 @@ func cmdGate(args []string, stdout, stderr io.Writer) int {
 	}
 	args = rest
 	if len(args) != 0 {
-		fmt.Fprintln(stderr, "gate: usage: verdi gate [--context-request <path>] (operates on the current lifecycle branch)")
+		fmt.Fprintln(stderr, "gate: usage: verdi gate (no arguments; operates on the current build branch)")
 		return 2
 	}
 

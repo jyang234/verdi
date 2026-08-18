@@ -88,12 +88,14 @@ import (
 
 	"github.com/jyang234/verdi/internal/artifact"
 	"github.com/jyang234/verdi/internal/canonjson"
+	"github.com/jyang234/verdi/internal/contextcompile"
 	"github.com/jyang234/verdi/internal/disclosure"
 	"github.com/jyang234/verdi/internal/evidence"
 	"github.com/jyang234/verdi/internal/forge"
 	"github.com/jyang234/verdi/internal/gitx"
 	"github.com/jyang234/verdi/internal/lint"
 	"github.com/jyang234/verdi/internal/model"
+	"github.com/jyang234/verdi/internal/policyconflict"
 	"github.com/jyang234/verdi/internal/provider"
 	"github.com/jyang234/verdi/internal/specstate"
 	"github.com/jyang234/verdi/internal/store"
@@ -128,6 +130,10 @@ type closeDeps struct {
 	// nil-is-production posture buildstart.go's wiring takes; tests may
 	// inject a fake for shapes real git cannot practically reconstruct.
 	State specStateResolver
+	// ConflictRequestPath and ConflictProvider feed the one shared lifecycle
+	// adapter. Their zero values preserve pre-adoption direct-call behavior.
+	ConflictRequestPath string
+	ConflictProvider    policyconflict.VerdictProvider
 }
 
 // closeAddPaths and closeCreateCommit are the closure ritual's two post-
@@ -251,6 +257,12 @@ func unwindClosureBranchCut(ctx context.Context, root, originalBranch, closureBr
 
 // cmdClose is `verdi close`'s entry point, invoked by dispatch.go.
 func cmdClose(args []string, stdout, stderr io.Writer) int {
+	requestPath, rest, err := extractConflictRequestFlag(args)
+	if err != nil {
+		fmt.Fprintln(stderr, "close:", err)
+		return 2
+	}
+	args = rest
 	forceLocal := false
 	preflight := false
 	prepare := false
@@ -307,7 +319,7 @@ func cmdClose(args []string, stdout, stderr io.Writer) int {
 			fmt.Fprintln(stderr, "close:", err)
 			return 2
 		}
-		return runPreflight(ctx, root, storyArg, cfg.Manifest, cfg.Model, buildForgeBestEffort(ctx, root), forceLocal, stdout, stderr)
+		return runPreflightWithConflict(ctx, root, storyArg, cfg.Manifest, cfg.Model, buildForgeBestEffort(ctx, root), forceLocal, requestPath, localLifecycleConflictProvider{root: root}, stdout, stderr)
 	}
 	// 04 §Semantics: "PublishRollup runs in CI only" — close calls it
 	// directly (ac-2), so the same CI-only discipline `rollup --publish`
@@ -355,18 +367,91 @@ func cmdClose(args []string, stdout, stderr io.Writer) int {
 	}
 
 	deps := closeDeps{
-		Runner:        runner,
-		JudgeCmd:      judgeCmd,
-		JudgeRequired: judgeRequired,
-		JudgeTimeout:  judgeTimeout,
-		Forge:         buildForgeBestEffort(ctx, root),
-		Registry:      buildProviderRegistry(manifest),
-		Model:         cfg.Model,
+		Runner:              runner,
+		JudgeCmd:            judgeCmd,
+		JudgeRequired:       judgeRequired,
+		JudgeTimeout:        judgeTimeout,
+		Forge:               buildForgeBestEffort(ctx, root),
+		Registry:            buildProviderRegistry(manifest),
+		Model:               cfg.Model,
+		ConflictRequestPath: requestPath,
+		ConflictProvider:    localLifecycleConflictProvider{root: root},
 	}
 	if prepare {
-		return runPrepare(ctx, root, storyArg, manifest, deps, forceLocal, stdout, stderr)
+		return runPrepareWithConflict(ctx, root, storyArg, manifest, deps, forceLocal, requestPath, deps.ConflictProvider, stdout, stderr)
 	}
 	return runClose(ctx, root, storyArg, manifest, deps, stdout, stderr)
+}
+
+func runPreflightWithConflict(ctx context.Context, root, storyArg string, manifest *store.Manifest, mdl *model.Model, f forge.Forge, forceLocal bool, requestPath string, provider policyconflict.VerdictProvider, stdout, stderr io.Writer) int {
+	adopted, err := probeConflictGate(root, requestPath)
+	if err != nil {
+		fmt.Fprintln(stderr, "close:", err)
+		return 2
+	}
+	if !adopted {
+		return runPreflight(ctx, root, storyArg, manifest, mdl, f, forceLocal, stdout, stderr)
+	}
+	if rc := runCloseConflictGate(ctx, root, storyArg, requestPath, provider, stdout, stderr); rc != 0 {
+		return rc
+	}
+	return runPreflight(ctx, root, storyArg, manifest, mdl, f, forceLocal, stdout, stderr)
+}
+
+func runPrepareWithConflict(ctx context.Context, root, storyArg string, manifest *store.Manifest, deps closeDeps, forceLocal bool, requestPath string, provider policyconflict.VerdictProvider, stdout, stderr io.Writer) int {
+	adopted, err := probeConflictGate(root, requestPath)
+	if err != nil {
+		fmt.Fprintln(stderr, "close:", err)
+		return 2
+	}
+	if !adopted {
+		return runPrepare(ctx, root, storyArg, manifest, deps, forceLocal, stdout, stderr)
+	}
+	if rc := runCloseConflictGate(ctx, root, storyArg, requestPath, provider, stdout, stderr); rc != 0 {
+		return rc
+	}
+	return runPrepare(ctx, root, storyArg, manifest, deps, forceLocal, stdout, stderr)
+}
+
+func runCloseConflictGate(ctx context.Context, root, storyArg, requestPath string, provider policyconflict.VerdictProvider, stdout, stderr io.Writer) int {
+	spec, err := storyresolve.Resolve(root, storyArg)
+	if err != nil {
+		fmt.Fprintln(stderr, "close:", err)
+		return 2
+	}
+	return runCloseConflictGateForSpec(ctx, root, spec, requestPath, provider, stdout, stderr)
+}
+
+func runCloseConflictGateForSpec(ctx context.Context, root string, spec *artifact.SpecFrontmatter, requestPath string, provider policyconflict.VerdictProvider, stdout, stderr io.Writer) int {
+	branch, err := gitx.CurrentBranch(ctx, root)
+	if err != nil {
+		fmt.Fprintln(stderr, "close:", err)
+		return 2
+	}
+	head, err := gitx.RevParse(ctx, root, "HEAD")
+	if err != nil {
+		fmt.Fprintln(stderr, "close:", err)
+		return 2
+	}
+	conflict, err := runConflictGate(ctx, root, conflictGateInput{
+		RequestPath: requestPath,
+		Phase:       contextcompile.PhaseReview,
+		Spec:        spec.ID,
+		Branch:      branch,
+		Head:        head,
+	}, provider)
+	if err != nil {
+		fmt.Fprintln(stderr, "close:", err)
+		return 2
+	}
+	if !conflict.Adopted {
+		return 0
+	}
+	renderConflictSummary(stdout, conflict.Result)
+	if conflict.Result.Report.Verdict != policyconflict.VerdictPass {
+		return 1
+	}
+	return 0
 }
 
 // closureStatusMode names how the archive step must treat the target
@@ -504,6 +589,16 @@ func runClose(ctx context.Context, root, storyArg string, manifest *store.Manife
 	if err != nil {
 		fmt.Fprintln(stderr, "close:", err)
 		return 2
+	}
+	adopted, err := probeConflictGate(root, deps.ConflictRequestPath)
+	if err != nil {
+		fmt.Fprintln(stderr, "close:", err)
+		return 2
+	}
+	if adopted {
+		if rc := runCloseConflictGateForSpec(ctx, root, spec, deps.ConflictRequestPath, deps.ConflictProvider, stdout, stderr); rc != 0 {
+			return rc
+		}
 	}
 	if spec.Class == artifact.ClassFeature {
 		return runCloseFeature(ctx, root, spec, manifest, deps, stdout, stderr)

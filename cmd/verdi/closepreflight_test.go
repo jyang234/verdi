@@ -30,9 +30,11 @@ import (
 	"testing"
 
 	"github.com/jyang234/verdi/internal/artifact"
+	"github.com/jyang234/verdi/internal/contextcompile"
 	"github.com/jyang234/verdi/internal/fixturegit"
 	"github.com/jyang234/verdi/internal/forge"
 	forgefake "github.com/jyang234/verdi/internal/forge/fake"
+	"github.com/jyang234/verdi/internal/policyconflict"
 	"github.com/jyang234/verdi/internal/provider/fake"
 	"github.com/jyang234/verdi/internal/store"
 	"github.com/jyang234/verdi/internal/upstream"
@@ -101,6 +103,73 @@ func buildPreflightFixtureRepoWithSpec(t *testing.T, spec string) *fixturegit.Re
 		},
 		Message: "preflight fixture: feature + story declaring static+behavioral+attestation",
 	}})
+}
+
+// TestClosePreflightConflictPreEffect catches preflight using a phase other
+// than review, evaluating more than once, or changing any closure tree/Git
+// fact while returning a constitutional block or operational failure.
+func TestClosePreflightConflictPreEffect(t *testing.T) {
+	tests := []struct {
+		name     string
+		verdict  policyconflict.Verdict
+		provider error
+		wantCode int
+	}{
+		{name: "pass reaches existing preflight", verdict: policyconflict.VerdictPass, wantCode: 1},
+		{name: "blocked violated", verdict: policyconflict.VerdictBlockedViolated, wantCode: 1},
+		{name: "blocked unproven", verdict: policyconflict.VerdictBlockedUnproven, wantCode: 1},
+		{name: "operational", provider: errors.New("provider unavailable"), wantCode: 2},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := buildPreflightFixtureRepo(t)
+			installConflictPolicyStore(t, repo.Dir)
+			requestPath := contextLifecycleRequestFile(t, repo.Dir, "preflight-context.json", preflightStoryRef, contextcompile.PhaseReview, nil)
+			before := takeConflictLifecycleSnapshot(t, repo.Dir,
+				".verdi/specs/active/preflight-fixture/spec.md",
+				".verdi/specs/active/preflight-fixture/deviation-report.md",
+				".verdi/specs/active/preflight-fixture/rollup.json",
+				".verdi/specs/archive/preflight-fixture/spec.md",
+			)
+
+			calls := 0
+			provider := contextConflictProviderFunc(func(_ context.Context, request policyconflict.Request) (policyconflict.Result, error) {
+				calls++
+				accepted := request.Target.AcceptedContext
+				if request.Target.Kind != policyconflict.TargetAcceptedContext || accepted == nil || accepted.Phase != contextcompile.PhaseReview {
+					t.Fatalf("preflight target = %+v, want accepted review context", request.Target)
+				}
+				if tt.provider != nil {
+					return policyconflict.Result{}, tt.provider
+				}
+				return lifecycleConflictResult(tt.verdict), nil
+			})
+
+			var stdout, stderr bytes.Buffer
+			got := runPreflightWithConflict(context.Background(), repo.Dir, preflightStoryRef, &store.Manifest{}, nil, forgefake.New(), true, requestPath, provider, &stdout, &stderr)
+			if got != tt.wantCode {
+				t.Fatalf("runPreflightWithConflict = %d, want %d; stdout=%s stderr=%s", got, tt.wantCode, stdout.String(), stderr.String())
+			}
+			if calls != 1 {
+				t.Fatalf("provider calls = %d, want 1", calls)
+			}
+			if tt.verdict != policyconflict.VerdictPass {
+				assertConflictLifecycleSnapshot(t, repo.Dir, before)
+			}
+			if tt.provider != nil {
+				if stdout.Len() != 0 || !strings.Contains(stderr.String(), "provider unavailable") {
+					t.Fatalf("operational stdout=%q stderr=%q", stdout.String(), stderr.String())
+				}
+				return
+			}
+			if !strings.Contains(stdout.String(), "constitutional conflict: state: "+string(tt.verdict)) {
+				t.Fatalf("stdout = %q, want conflict summary", stdout.String())
+			}
+			if tt.verdict == policyconflict.VerdictPass && !strings.Contains(stdout.String(), "dry run: rehearses the closure gate") {
+				t.Fatalf("pass did not reach existing preflight: %q", stdout.String())
+			}
+		})
+	}
 }
 
 const preflightStoryRef = "spec/preflight-fixture"

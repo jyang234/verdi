@@ -61,18 +61,12 @@ func extractConflictRequestFlag(args []string) (string, []string, error) {
 // context compiler seam, replaces the optional expected claim with computed
 // lifecycle facts, and invokes the one policy-conflict provider port.
 func runConflictGate(ctx context.Context, root string, input conflictGateInput, provider policyconflict.VerdictProvider) (conflictGateResult, error) {
-	adopted, err := policyconflict.ProbeAdoption(root)
+	adopted, err := probeConflictGate(root, input.RequestPath)
 	if err != nil {
-		return conflictGateResult{}, fmt.Errorf("probing policy-conflict adoption: %w", err)
+		return conflictGateResult{}, err
 	}
 	if !adopted {
-		if input.RequestPath != "" {
-			return conflictGateResult{}, errors.New("--context-request is invalid before constitution adoption")
-		}
 		return conflictGateResult{Adopted: false}, nil
-	}
-	if input.RequestPath == "" {
-		return conflictGateResult{}, errors.New("--context-request is required after constitution adoption")
 	}
 	if input.RequestPath == "-" {
 		return conflictGateResult{}, errors.New("--context-request does not accept stdin ('-')")
@@ -122,6 +116,9 @@ func runConflictGate(ctx context.Context, root string, input conflictGateInput, 
 			AcceptedContext: &request,
 		}
 	}
+	if err := conflictRequest.Validate(); err != nil {
+		return conflictGateResult{}, fmt.Errorf("constructing lifecycle conflict request: %w", err)
+	}
 	if provider == nil {
 		return conflictGateResult{}, errors.New("policy-conflict provider is nil")
 	}
@@ -133,6 +130,26 @@ func runConflictGate(ctx context.Context, root string, input conflictGateInput, 
 		return conflictGateResult{}, err
 	}
 	return conflictGateResult{Adopted: true, Result: result}, nil
+}
+
+// probeConflictGate owns the adoption/flag compatibility decision used by the
+// adapter and by wrappers that must preserve an older parser's exact legacy
+// output before resolving target operands.
+func probeConflictGate(root, requestPath string) (bool, error) {
+	adopted, err := policyconflict.ProbeAdoption(root)
+	if err != nil {
+		return false, fmt.Errorf("probing policy-conflict adoption: %w", err)
+	}
+	if !adopted {
+		if requestPath != "" {
+			return false, errors.New("--context-request is invalid before constitution adoption")
+		}
+		return false, nil
+	}
+	if requestPath == "" {
+		return false, errors.New("--context-request is required after constitution adoption")
+	}
+	return true, nil
 }
 
 // rejectConflictRequestSymlinks refuses both a linked request file and any
@@ -148,6 +165,35 @@ func rejectConflictRequestSymlinks(root, requestPath string) error {
 	if err != nil {
 		return fmt.Errorf("resolving store root: %w", err)
 	}
+	rootInfo, err := os.Stat(rootAbs)
+	if err != nil {
+		return fmt.Errorf("inspecting store root: %w", err)
+	}
+
+	// Walk upward from the caller-selected file until the physical store root
+	// inode is reached. This checks every selectable component below the root,
+	// but deliberately stops before platform aliases above it (macOS commonly
+	// exposes /var through /private/var). A lexical Rel check cannot distinguish
+	// that harmless host alias from a symlink selected inside the checkout.
+	current := requestAbs
+	for {
+		info, statErr := os.Lstat(current)
+		if statErr == nil {
+			if os.SameFile(rootInfo, info) {
+				return nil
+			}
+			if info.Mode()&os.ModeSymlink != 0 {
+				return errors.New("--context-request must not contain a symlink path component")
+			}
+		} else if !errors.Is(statErr, os.ErrNotExist) {
+			return fmt.Errorf("inspecting --context-request path: %w", statErr)
+		}
+		parent := filepath.Dir(current)
+		if parent == current {
+			break
+		}
+		current = parent
+	}
 
 	start := filepath.Clean(string(filepath.Separator))
 	remainder := requestAbs
@@ -161,7 +207,7 @@ func rejectConflictRequestSymlinks(root, requestPath string) error {
 		remainder = strings.TrimPrefix(requestAbs, string(filepath.Separator))
 	}
 
-	current := start
+	current = start
 	for _, component := range strings.Split(remainder, string(filepath.Separator)) {
 		if component == "" || component == "." {
 			continue

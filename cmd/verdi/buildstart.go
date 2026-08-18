@@ -102,7 +102,7 @@ func cmdBuildStart(args []string, stdout, stderr io.Writer) int {
 	args = rest
 	if len(args) != 1 {
 		// vocab:identity — CLI usage grammar (identity arg placeholders)
-		fmt.Fprintln(stderr, "build start: usage: verdi build start <story-spec | story-ref> [--context-request <path>]")
+		fmt.Fprintln(stderr, "build start: usage: verdi build start <story-spec | story-ref>")
 		return 2
 	}
 	storyArg := args[0]
