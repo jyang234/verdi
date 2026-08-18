@@ -30,6 +30,62 @@ const EVENT_VOCABULARY = new Set([
   "stale-notice-inspected",
 ]);
 
+// Pinned INDEPENDENTLY of the rendered DOM, from the committed hermetic
+// harness fixtures (provision_board.go's refi-decline-flow design branch
+// + provision_readiness.go's policy/constitution fixtures) and the fixed
+// readiness comparators: the complete concern inventory in area-then-id
+// order with each row's exact three-valued state, and the exact
+// deterministic attention order (blocking first, violated first, then
+// area/id order). A reordered, omitted, or extra concern — in either
+// view — fails these exact-array oracles. The sha256 semantic id is the
+// digest of committed fixture bytes and is therefore deterministic.
+const SEMANTIC_ID =
+  "context/semantic/sha256:a42722bcbc7bf152d376083fab35c04b462cf3f6735880306e78e8bee1815d6a";
+
+const COMPLETE_CONCERNS: Array<[id: string, state: string]> = [
+  ["shape/board", "proven"],
+  ["shape/mutation", "proven"],
+  ["shape/outcome", "proven"],
+  ["shape/problem", "proven"],
+  ["shape/provenance", "unproven"],
+  ["shape/question/oq-1", "unproven"],
+  ["success/contributor/attestation", "unproven"],
+  ["success/contributor/behavioral", "unproven"],
+  ["success/contributor/static", "unproven"],
+  ["context/disclosure/repository-remote-unknown", "unproven"],
+  ["context/mechanical/action:make-verify#complete", "proven"],
+  ["context/mechanical/configuration:go-version#complete", "proven"],
+  [SEMANTIC_ID, "unproven"],
+  ["context/verdict", "unproven"],
+  ["review/action", "unproven"],
+  ["review/blocker/forge-facts-unavailable/merge", "violated-with-witness"],
+  [
+    "review/blocker/obligation-author-vouch-unproven/merge/attestation/author-vouch",
+    "violated-with-witness",
+  ],
+  ["review/role/merge/attestation/author-vouch", "unproven"],
+];
+
+const ATTENTION_QUEUE = [
+  "review/blocker/forge-facts-unavailable/merge",
+  "review/blocker/obligation-author-vouch-unproven/merge/attestation/author-vouch",
+  "shape/question/oq-1",
+  "context/verdict",
+  "review/action",
+  "shape/provenance",
+  "success/contributor/attestation",
+  "success/contributor/behavioral",
+  "success/contributor/static",
+  "context/disclosure/repository-remote-unknown",
+  SEMANTIC_ID,
+  "review/role/merge/attestation/author-vouch",
+];
+
+// The first board-destination concern in queue order — the cockpit's
+// first board link — pinned for exact event assertions below.
+const BOARD_LINK_CONCERN = "shape/question/oq-1";
+const BOARD_LINK_AREA = "shape-proposal";
+
 type PilotEvent = {
   sequence: number;
   event: string;
@@ -99,39 +155,33 @@ test("attention queue is prioritized without omitting any concern", async ({
 }) => {
   await page.goto("/readiness");
 
+  // EXACT ordered attention queue — pinned from the committed fixture,
+  // never derived from the page. A reversed queue, a dropped concern, or
+  // an extra row fails this array equality.
   const queueIds = await page
     .locator(".readiness-queue [data-concern-id]")
     .evaluateAll((els) => els.map((el) => el.getAttribute("data-concern-id")));
-  expect(queueIds.length).toBeGreaterThan(0);
+  expect(queueIds).toEqual(ATTENTION_QUEUE);
 
+  // EXACT complete inventory with each row's exact state, in area-then-id
+  // order. A concern omitted from BOTH views still fails here, because
+  // the expected array is independent of the DOM.
   const allRows = await page
     .locator(".readiness-all [data-concern-id]")
     .evaluateAll((els) =>
-      els.map((el) => ({
-        id: el.getAttribute("data-concern-id"),
-        state: el
+      els.map((el) => [
+        el.getAttribute("data-concern-id"),
+        el
           .querySelector(".readiness-state")
           ?.className.replace(/.*readiness-state--/, ""),
-      })),
+      ]),
     );
+  expect(allRows).toEqual(COMPLETE_CONCERNS);
 
-  // Every queue entry appears in the complete grouped view…
-  const allIds = new Set(allRows.map((r) => r.id));
-  for (const id of queueIds) {
-    expect(allIds.has(id), `queue concern ${id} missing from All concerns`).toBe(true);
-  }
-  // …and the queue omits NO unresolved concern (priority ≠ omission).
-  const unresolved = allRows.filter((r) => r.state !== "proven").map((r) => r.id);
-  expect(new Set(queueIds)).toEqual(new Set(unresolved));
-  // Proven facts stay visible in the complete view.
-  expect(allRows.some((r) => r.state === "proven")).toBe(true);
-
-  // Priority is positional: the queue renders above the complete section,
-  // as a numbered ordered list.
+  // Priority is positional: the queue renders above the complete section.
   const queueBox = await page.locator(".readiness-queue").boundingBox();
   const allBox = await page.locator(".readiness-all").boundingBox();
   expect(queueBox!.y).toBeLessThan(allBox!.y);
-  await expect(page.locator(".readiness-queue ol.readiness-queue-list")).toHaveCount(1);
 });
 
 test("violated-with-witness and unproven are visibly and textually distinct", async ({
@@ -185,38 +235,49 @@ test("board destination opens the editable board in a new tab and both tabs keep
   // The existing board, in authoring (editable) mode — not a copy.
   await expect(popup.getByRole("button", { name: "Add sticky" })).toBeVisible();
 
-  // The cockpit source tab is preserved with its event array intact: the
-  // prior events are still there, board-link-followed was appended with a
-  // monotonic sequence, exactly once for the primary click.
+  // The cockpit source tab is preserved and the primary click appended
+  // EXACTLY ONE event to the complete array — the expected
+  // board-link-followed and nothing else (no filtering: any unintended
+  // extra event fails the prefix/length equality).
   await expect(page.locator(".readiness-page")).toBeVisible();
   const after = await pilotEvents(page);
+  expect(after.length).toBe(before.length + 1);
   expect(after.slice(0, before.length)).toEqual(before);
-  const boardEvents = after.filter((e) => e.event === "board-link-followed");
-  expect(boardEvents).toHaveLength(1);
-  expect(boardEvents[0].concern_id).not.toBe("");
-  for (let i = 1; i < after.length; i++) {
-    expect(after[i].sequence).toBeGreaterThan(after[i - 1].sequence);
-  }
+  expect(after[after.length - 1]).toEqual({
+    sequence: before[before.length - 1].sequence + 1,
+    event: "board-link-followed",
+    area_id: BOARD_LINK_AREA,
+    concern_id: BOARD_LINK_CONCERN,
+  });
   await popup.close();
 });
 
-test("middle-button navigation records exactly one event; right-click records none", async ({
+test("middle-button appends exactly one event; right-click appends none", async ({
   page,
 }) => {
   await page.goto("/readiness");
   const boardLink = page.locator(".readiness-board-link").first();
 
+  // Middle-button auxclick: the COMPLETE array grows by exactly the one
+  // expected board-link-followed event.
+  const beforeMiddle = await pilotEvents(page);
   await boardLink.click({ button: "middle" });
-  let events = (await pilotEvents(page)).filter(
-    (e) => e.event === "board-link-followed",
-  );
-  expect(events).toHaveLength(1);
+  const afterMiddle = await pilotEvents(page);
+  expect(afterMiddle).toEqual([
+    ...beforeMiddle,
+    {
+      sequence: beforeMiddle[beforeMiddle.length - 1].sequence + 1,
+      event: "board-link-followed",
+      area_id: BOARD_LINK_AREA,
+      concern_id: BOARD_LINK_CONCERN,
+    },
+  ]);
 
+  // Right-click: the complete array is identical — not one event of any
+  // kind may be appended.
   await boardLink.click({ button: "right" });
-  events = (await pilotEvents(page)).filter(
-    (e) => e.event === "board-link-followed",
-  );
-  expect(events).toHaveLength(1);
+  const afterRight = await pilotEvents(page);
+  expect(afterRight).toEqual(afterMiddle);
 });
 
 test("CLI fallback tokens copy as the exact vector, never an invented shell command", async ({
@@ -382,6 +443,12 @@ test("an edit through the existing board leaves the preserved cockpit and its sn
 
   const bodyBefore = await (await page.request.get("/readiness")).text();
   const eventsBefore = await pilotEvents(page);
+  // The COMPLETE snapshot-bearing cockpit DOM of the source tab (metadata
+  // card, stale notice, rail, queue, complete section, script include),
+  // captured before the board is opened or edited.
+  const domBefore = await page.evaluate(
+    () => document.querySelector("main.content")!.outerHTML,
+  );
 
   // One supported edit through the EXISTING editable board, in its own tab.
   const [popup] = await Promise.all([
@@ -392,7 +459,13 @@ test("an edit through the existing board leaves the preserved cockpit and its sn
   await addSticky(popup, "readiness pilot probe: cockpit must not notice this");
   await popup.close();
 
-  // The preserved cockpit tab still shows the original immutable snapshot.
+  // The preserved source tab's cockpit DOM is byte-for-byte unchanged
+  // after the real edit — instrumentation appended an event, but neither
+  // it nor the edit may touch the rendered snapshot.
+  const domAfter = await page.evaluate(
+    () => document.querySelector("main.content")!.outerHTML,
+  );
+  expect(domAfter).toBe(domBefore);
   await expect(page.locator(".readiness-stale")).toContainText(
     `Startup snapshot at ${head}`,
   );
