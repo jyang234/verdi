@@ -161,6 +161,15 @@ func run() error {
 		return fmt.Errorf("provisioning showcase draft fixtures: %w", err)
 	}
 
+	// The readiness pilot consumes one strict design-phase context request
+	// against the serving branch. Provision the existing policy fixture and
+	// managed projection, then pass the caller-owned request to serve; the
+	// snapshot itself remains startup-only and in memory.
+	readinessRequestPath, err := provisionReadiness(ctx, moduleRoot, storeRoot)
+	if err != nil {
+		return fmt.Errorf("provisioning readiness fixtures: %w", err)
+	}
+
 	dexSrv := &http.Server{Addr: dexAddr, Handler: http.FileServer(http.Dir(dexOut))}
 	dexLn, err := net.Listen("tcp", dexAddr)
 	if err != nil {
@@ -205,7 +214,7 @@ func run() error {
 	defer func() { _ = inspectSrv.Close() }()
 	log.Printf("e2eharness: inspection server at http://%s (store: %s)", inspectAddr, storeRoot)
 
-	serveCmd := exec.CommandContext(ctx, binPath, "serve", "--http", workbenchAddr)
+	serveCmd := exec.CommandContext(ctx, binPath, "serve", "--http", workbenchAddr, "--context-request", readinessRequestPath)
 	// A graceful stop on interrupt — SIGTERM, then up to 5s before the
 	// stdlib force-kills — rather than exec.CommandContext's default of
 	// killing the subprocess the instant ctx is done.

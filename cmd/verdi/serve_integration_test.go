@@ -8,12 +8,18 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
+	"strings"
 	"sync"
 	"syscall"
 	"testing"
@@ -22,7 +28,243 @@ import (
 	"github.com/jyang234/verdi/internal/filelock"
 	"github.com/jyang234/verdi/internal/fixturegit"
 	"github.com/jyang234/verdi/internal/mcpserve"
+	"github.com/jyang234/verdi/internal/policyconflict"
+	"github.com/jyang234/verdi/internal/readinesspilot"
+	"github.com/jyang234/verdi/internal/store"
+	"github.com/jyang234/verdi/internal/workbench"
 )
+
+type readinessSnapshotBuilderFunc func(context.Context, string, string) (readinesspilot.Snapshot, error)
+
+func (f readinessSnapshotBuilderFunc) Build(ctx context.Context, root, requestPath string) (readinesspilot.Snapshot, error) {
+	return f(ctx, root, requestPath)
+}
+
+func TestServeContextRequestFlagGrammar(t *testing.T) {
+	t.Run("one request in either flag position preserves HTTP behavior", func(t *testing.T) {
+		for _, tc := range []struct {
+			name string
+			args []string
+		}{
+			{name: "context first", args: []string{"--context-request", "request.json", "--http", "127.0.0.1:4101"}},
+			{name: "context last", args: []string{"--http", "127.0.0.1:4101", "--context-request", "request.json"}},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				var calls []string
+				deps := serveCommandDeps{
+					findRoot: func(string) (string, error) {
+						calls = append(calls, "find-root")
+						return "/store", nil
+					},
+					readiness: readinessSnapshotBuilderFunc(func(_ context.Context, root, requestPath string) (readinesspilot.Snapshot, error) {
+						calls = append(calls, "build:"+root+":"+requestPath)
+						return readinesspilot.Snapshot{Head: "startup-head"}, nil
+					}),
+					run: func(root, httpAddr string, readiness *readinesspilot.Snapshot, _, _ io.Writer) int {
+						calls = append(calls, "run:"+root+":"+httpAddr)
+						if readiness == nil || readiness.Head != "startup-head" {
+							t.Fatalf("run readiness = %+v, want injected startup snapshot", readiness)
+						}
+						return 0
+					},
+				}
+				var stdout, stderr bytes.Buffer
+				if code := cmdServeWithDeps(tc.args, &stdout, &stderr, deps); code != 0 {
+					t.Fatalf("exit = %d, stderr=%q", code, stderr.String())
+				}
+				want := []string{"find-root", "build:/store:request.json", "run:/store:127.0.0.1:4101"}
+				if !reflect.DeepEqual(calls, want) {
+					t.Fatalf("calls = %q, want %q", calls, want)
+				}
+			})
+		}
+	})
+
+	t.Run("legacy no-flag and repeated HTTP retain exact selection", func(t *testing.T) {
+		for _, tc := range []struct {
+			name     string
+			args     []string
+			wantHTTP string
+		}{
+			{name: "default", wantHTTP: defaultWorkbenchAddr},
+			{name: "explicit", args: []string{"--http", "127.0.0.1:0"}, wantHTTP: "127.0.0.1:0"},
+			{name: "last repeated value wins", args: []string{"--http", "127.0.0.1:4100", "--http", "127.0.0.1:4102"}, wantHTTP: "127.0.0.1:4102"},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				deps := serveCommandDeps{
+					findRoot: func(string) (string, error) { return "/store", nil },
+					readiness: readinessSnapshotBuilderFunc(func(context.Context, string, string) (readinesspilot.Snapshot, error) {
+						t.Fatal("readiness builder called without --context-request")
+						return readinesspilot.Snapshot{}, nil
+					}),
+					run: func(_ string, gotHTTP string, readiness *readinesspilot.Snapshot, _, _ io.Writer) int {
+						if gotHTTP != tc.wantHTTP || readiness != nil {
+							t.Fatalf("run(http=%q, readiness=%+v), want http=%q and nil readiness", gotHTTP, readiness, tc.wantHTTP)
+						}
+						return 0
+					},
+				}
+				var stdout, stderr bytes.Buffer
+				if code := cmdServeWithDeps(tc.args, &stdout, &stderr, deps); code != 0 {
+					t.Fatalf("exit = %d, stderr=%q", code, stderr.String())
+				}
+			})
+		}
+	})
+
+	t.Run("closed invalid grammar has no root or server effect", func(t *testing.T) {
+		for _, tc := range []struct {
+			name string
+			args []string
+		}{
+			{name: "missing context value", args: []string{"--context-request"}},
+			{name: "empty context value", args: []string{"--context-request", ""}},
+			{name: "context followed by flag", args: []string{"--context-request", "--http", "127.0.0.1:0"}},
+			{name: "stdin context", args: []string{"--context-request", "-"}},
+			{name: "duplicate context", args: []string{"--context-request", "a", "--context-request", "b"}},
+			{name: "unknown flag", args: []string{"--unknown"}},
+			{name: "positional", args: []string{"extra"}},
+			{name: "missing HTTP value", args: []string{"--http"}},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				called := false
+				deps := serveCommandDeps{
+					findRoot: func(string) (string, error) { called = true; return "", errors.New("must not run") },
+					readiness: readinessSnapshotBuilderFunc(func(context.Context, string, string) (readinesspilot.Snapshot, error) {
+						called = true
+						return readinesspilot.Snapshot{}, errors.New("must not run")
+					}),
+					run: func(string, string, *readinesspilot.Snapshot, io.Writer, io.Writer) int { called = true; return 0 },
+				}
+				var stdout, stderr bytes.Buffer
+				if code := cmdServeWithDeps(tc.args, &stdout, &stderr, deps); code != 2 {
+					t.Fatalf("exit = %d, want 2", code)
+				}
+				if called || stdout.Len() != 0 || stderr.Len() == 0 {
+					t.Fatalf("called=%v stdout=%q stderr=%q, want parser-only diagnostic", called, stdout.String(), stderr.String())
+				}
+			})
+		}
+	})
+}
+
+func TestServeContextRequestBuildsBeforeEveryServerEffect(t *testing.T) {
+	root := t.TempDir()
+	lockPath := store.WriterLockPath(root)
+	var calls []string
+	builds := 0
+	builder := readinessSnapshotBuilderFunc(func(context.Context, string, string) (readinesspilot.Snapshot, error) {
+		builds++
+		calls = append(calls, "builder-start")
+		if err := os.MkdirAll(filepath.Dir(lockPath), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		lock, err := filelock.Acquire(lockPath)
+		if err != nil {
+			t.Fatalf("builder transient lock: %v", err)
+		}
+		if err := filelock.Release(lock, lockPath); err != nil {
+			t.Fatalf("builder transient lock release: %v", err)
+		}
+		calls = append(calls, "builder-lock-released", "builder-complete")
+		return readinesspilot.Snapshot{Head: "startup-head"}, nil
+	})
+	deps := serveCommandDeps{
+		findRoot:  func(string) (string, error) { return root, nil },
+		readiness: builder,
+		run: func(string, string, *readinesspilot.Snapshot, io.Writer, io.Writer) int {
+			lock, err := filelock.Acquire(lockPath)
+			if err != nil {
+				t.Fatalf("server could not acquire writer lock after builder returned: %v", err)
+			}
+			if err := filelock.Release(lock, lockPath); err != nil {
+				t.Fatalf("server lock release: %v", err)
+			}
+			calls = append(calls,
+				"data-directory", "writer-lock", "unix-listen", "pointer-file",
+				"forge-wiring", "tcp-listen", "handler-construction", "mcp-service",
+			)
+			return 0
+		},
+	}
+	var stdout, stderr bytes.Buffer
+	if code := cmdServeWithDeps([]string{"--context-request", "request.json"}, &stdout, &stderr, deps); code != 0 {
+		t.Fatalf("exit = %d, stderr=%q", code, stderr.String())
+	}
+	want := []string{
+		"builder-start", "builder-lock-released", "builder-complete",
+		"data-directory", "writer-lock", "unix-listen", "pointer-file",
+		"forge-wiring", "tcp-listen", "handler-construction", "mcp-service",
+	}
+	if builds != 1 || !reflect.DeepEqual(calls, want) {
+		t.Fatalf("builds=%d calls=%q, want one build then %q", builds, calls, want)
+	}
+}
+
+func TestServeContextRequestBuilderFailureStopsBeforeServerEffects(t *testing.T) {
+	var serverEffects int
+	deps := serveCommandDeps{
+		findRoot: func(string) (string, error) { return t.TempDir(), nil },
+		readiness: readinessSnapshotBuilderFunc(func(context.Context, string, string) (readinesspilot.Snapshot, error) {
+			return readinesspilot.Snapshot{}, errors.New("snapshot unavailable")
+		}),
+		run: func(string, string, *readinesspilot.Snapshot, io.Writer, io.Writer) int {
+			serverEffects++
+			return 0
+		},
+	}
+	var stdout, stderr bytes.Buffer
+	if code := cmdServeWithDeps([]string{"--context-request", "request.json"}, &stdout, &stderr, deps); code != 2 {
+		t.Fatalf("exit = %d, want operational 2", code)
+	}
+	if serverEffects != 0 || stdout.Len() != 0 || !strings.Contains(stderr.String(), "snapshot unavailable") {
+		t.Fatalf("serverEffects=%d stdout=%q stderr=%q", serverEffects, stdout.String(), stderr.String())
+	}
+}
+
+func TestServeContextRequestSnapshotRemainsImmutableAcrossRequests(t *testing.T) {
+	repo, requestPath, _, _, specPath := readinessSnapshotRepo(t, "feature")
+	providerFactory := readinessSnapshotProviderFactory(t, repo.Dir, policyconflict.VerdictPass, nil)
+	builds := 0
+	builder := readinessSnapshotBuilderFunc(func(ctx context.Context, root, gotRequestPath string) (readinesspilot.Snapshot, error) {
+		builds++
+		return (localReadinessSnapshotBuilder{providerFactory: providerFactory}).Build(ctx, root, gotRequestPath)
+	})
+	deps := serveCommandDeps{
+		findRoot:  func(string) (string, error) { return repo.Dir, nil },
+		readiness: builder,
+		run: func(root, _ string, readiness *readinesspilot.Snapshot, _, _ io.Writer) int {
+			if readiness == nil {
+				t.Fatal("run received nil readiness snapshot")
+			}
+			handler := workbench.NewHandlerWith(root, workbench.Deps{Readiness: readiness})
+			first := httptest.NewRecorder()
+			handler.ServeHTTP(first, httptest.NewRequest(http.MethodGet, "/readiness", nil))
+			if first.Code != http.StatusOK {
+				t.Fatalf("first readiness status = %d, body=%q", first.Code, first.Body.String())
+			}
+			if !strings.Contains(first.Body.String(), repo.Head) || !strings.Contains(first.Body.String(), "restart verdi serve after an edit") {
+				t.Fatalf("first body misses startup HEAD or stale notice: %q", first.Body.String())
+			}
+			if err := os.WriteFile(specPath, []byte("changed after startup; no longer a valid spec\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			second := httptest.NewRecorder()
+			handler.ServeHTTP(second, httptest.NewRequest(http.MethodGet, "/readiness", nil))
+			if second.Code != http.StatusOK || second.Body.String() != first.Body.String() {
+				t.Fatalf("second readiness response changed after source mutation: status=%d\nfirst=%q\nsecond=%q", second.Code, first.Body.String(), second.Body.String())
+			}
+			return 0
+		},
+	}
+	var stdout, stderr bytes.Buffer
+	if code := cmdServeWithDeps([]string{"--http", "127.0.0.1:0", "--context-request", requestPath}, &stdout, &stderr, deps); code != 0 {
+		t.Fatalf("exit = %d, stderr=%q", code, stderr.String())
+	}
+	if builds != 1 {
+		t.Fatalf("readiness builds = %d after two HTTP requests, want exactly 1", builds)
+	}
+}
 
 var (
 	buildOnce sync.Once

@@ -18,10 +18,12 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 
 	"github.com/jyang234/verdi/internal/filelock"
 	"github.com/jyang234/verdi/internal/mcpserve"
+	"github.com/jyang234/verdi/internal/readinesspilot"
 	"github.com/jyang234/verdi/internal/store"
 	"github.com/jyang234/verdi/internal/workbench"
 )
@@ -30,25 +32,106 @@ import (
 // address — loopback only (05 §Workbench: "binds localhost only").
 const defaultWorkbenchAddr = "127.0.0.1:4173"
 
+type serveOptions struct {
+	httpAddr           string
+	contextRequestPath string
+}
+
+// parseServeOptions owns serve's closed flag grammar. The readiness flag is
+// additive; the legacy --http flag keeps its last-value-wins behavior.
+func parseServeOptions(args []string) (serveOptions, error) {
+	options := serveOptions{httpAddr: defaultWorkbenchAddr}
+	contextRequestSeen := false
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--http":
+			if i+1 >= len(args) {
+				return serveOptions{}, errors.New("--http requires a value")
+			}
+			options.httpAddr = args[i+1]
+			i++
+		case "--context-request":
+			if contextRequestSeen {
+				return serveOptions{}, errors.New("--context-request may be supplied only once")
+			}
+			contextRequestSeen = true
+			if i+1 >= len(args) || args[i+1] == "" || strings.HasPrefix(args[i+1], "--") {
+				return serveOptions{}, errors.New("--context-request requires a filesystem path")
+			}
+			i++
+			options.contextRequestPath = args[i]
+			if options.contextRequestPath == "-" {
+				return serveOptions{}, errors.New("--context-request does not accept stdin ('-')")
+			}
+		default:
+			return serveOptions{}, fmt.Errorf("unknown argument %q", args[i])
+		}
+	}
+	return options, nil
+}
+
+type serveRunner func(root, httpAddr string, readiness *readinesspilot.Snapshot, stdout, stderr io.Writer) int
+
+// serveCommandDeps is the narrow startup-order seam. Building readiness is
+// completed before run is entered; run owns every server effect from data-dir
+// creation onward.
+type serveCommandDeps struct {
+	findRoot  func(string) (string, error)
+	readiness readinessSnapshotBuilder
+	run       serveRunner
+}
+
 // cmdServe is `verdi serve`'s real entry point, invoked by dispatch.go.
 func cmdServe(args []string, stdout, stderr io.Writer) int {
-	httpAddr := defaultWorkbenchAddr
-	for i := 0; i < len(args); i++ {
-		if args[i] == "--http" && i+1 < len(args) {
-			httpAddr = args[i+1]
-			i++
-			continue
-		}
-		fmt.Fprintf(stderr, "serve: unknown argument %q\n", args[i])
+	return cmdServeWithDeps(args, stdout, stderr, serveCommandDeps{
+		findRoot:  store.FindRoot,
+		readiness: localReadinessSnapshotBuilder{},
+		run:       runServe,
+	})
+}
+
+// cmdServeWithDeps parses the additive readiness input, captures its one
+// immutable startup snapshot, and only then enters the effectful server run.
+func cmdServeWithDeps(args []string, stdout, stderr io.Writer, deps serveCommandDeps) int {
+	options, err := parseServeOptions(args)
+	if err != nil {
+		fmt.Fprintln(stderr, "serve:", err)
+		return 2
+	}
+	if deps.findRoot == nil {
+		fmt.Fprintln(stderr, "serve: store root resolver is nil")
 		return 2
 	}
 
-	root, err := store.FindRoot(".")
+	root, err := deps.findRoot(".")
 	if err != nil {
 		fmt.Fprintln(stderr, "serve:", err)
 		return 2
 	}
 
+	var readiness *readinesspilot.Snapshot
+	if options.contextRequestPath != "" {
+		if deps.readiness == nil {
+			fmt.Fprintln(stderr, "serve: readiness snapshot builder is nil")
+			return 2
+		}
+		snapshot, buildErr := deps.readiness.Build(context.Background(), root, options.contextRequestPath)
+		if buildErr != nil {
+			fmt.Fprintln(stderr, "serve:", buildErr)
+			return 2
+		}
+		readiness = &snapshot
+	}
+	if deps.run == nil {
+		fmt.Fprintln(stderr, "serve: server runner is nil")
+		return 2
+	}
+	return deps.run(root, options.httpAddr, readiness, stdout, stderr)
+}
+
+// runServe contains the existing single-writer runtime. It is entered only
+// after any requested readiness snapshot has been fully built.
+func runServe(root, httpAddr string, readiness *readinesspilot.Snapshot, stdout, stderr io.Writer) int {
 	dataDir := filepath.Join(root, ".verdi", "data")
 	if err := os.MkdirAll(dataDir, 0o755); err != nil {
 		fmt.Fprintln(stderr, "serve:", err)
@@ -104,7 +187,7 @@ func cmdServe(args []string, stdout, stderr io.Writer) int {
 	// neither, no spec is ever under review and the board keys purely off
 	// branch state.
 	forgePort, configuredKind := forgeBestEffort(context.Background(), root)
-	deps := workbench.Deps{}
+	deps := workbench.Deps{Readiness: readiness}
 	switch {
 	case forgePort != nil:
 		deps.CommentFeed = newForgeCommentFeed(forgePort, root)
