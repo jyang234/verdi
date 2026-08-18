@@ -909,7 +909,145 @@ func validateMechanicalEvaluation(field string, m MechanicalEvaluation) error {
 	if err := m.State.Validate(); err != nil {
 		return fmt.Errorf("policyconflict: %s.state: %w", field, err)
 	}
-	return validateReasons(field+".reasons", m.Reasons)
+	if err := validateReasons(field+".reasons", m.Reasons); err != nil {
+		return err
+	}
+	return validateMechanicalOutcome(field, m)
+}
+
+// validateMechanicalOutcome binds the independently valid fields of a row
+// into the one proof result produced by EvaluateMechanical followed by
+// ApplyEffectiveExemptions. The report digest authenticates only its own
+// bytes; it cannot make a favorable State/Reasons claim true when the
+// carried solver, scope, and exemption results prove otherwise.
+func validateMechanicalOutcome(field string, m MechanicalEvaluation) error {
+	if m.Before.Domain != m.Domain {
+		return fmt.Errorf("policyconflict: %s: mechanical outcome before domain %q does not match row domain %q", field, m.Before.Domain, m.Domain)
+	}
+	if m.After.Domain != m.Domain {
+		return fmt.Errorf("policyconflict: %s: mechanical outcome after domain %q does not match row domain %q", field, m.After.Domain, m.Domain)
+	}
+
+	hasAccepted, hasRejected := false, false
+	for _, exemption := range m.Exemptions {
+		if allProven(exemption.Resolution) {
+			hasAccepted = true
+		} else {
+			hasRejected = true
+		}
+	}
+
+	if !hasAccepted {
+		if !reflect.DeepEqual(m.After, m.Before) {
+			return fmt.Errorf("policyconflict: %s: mechanical outcome without an accepted exemption must preserve the before proof as after", field)
+		}
+		return validateUnexemptedMechanicalOutcome(field, m, hasRejected)
+	}
+
+	// A satisfiable row was already proven before any exemption. Removing
+	// requirements cannot turn that conjunction unfavorable, and §5.5 does
+	// not credit an exemption for a conflict that never existed.
+	if m.Before.State == SolverSatisfiable {
+		if m.After.State != SolverSatisfiable {
+			return fmt.Errorf("policyconflict: %s: mechanical outcome removed claims from a satisfiable proof but after is %q", field, m.After.State)
+		}
+		return requireMechanicalOutcome(field, m, ProofProven, []ReasonCode{ReasonMechanicalSatisfiable})
+	}
+
+	// A proven-disjoint row likewise had no conflict to cover. Its original
+	// proof state and reason remain authoritative even though §5.5 records
+	// the recomputed post-exemption solver result.
+	if m.Before.State == SolverUnsatisfiable && m.Scope.State == ScopeDisjoint &&
+		m.State == ProofProven && reflect.DeepEqual(m.Reasons, []ReasonCode{ReasonScopeDisjoint}) {
+		return nil
+	}
+
+	switch m.After.State {
+	case SolverSatisfiable:
+		reasons := []ReasonCode{ReasonExemptionEffective}
+		if hasRejected {
+			reasons = addReason(reasons, ReasonExemptionIneffective)
+		}
+		return requireMechanicalOutcome(field, m, ProofProven, reasons)
+	case SolverUnproven:
+		if m.Domain != domainPrincipalRelation {
+			return fmt.Errorf("policyconflict: %s: mechanical outcome has unproven after proof outside the principal-relation domain", field)
+		}
+		reasons := addReason([]ReasonCode{unprovenReasonFor(m.After)}, ReasonExemptionIneffective)
+		return requireMechanicalOutcome(field, m, ProofUnproven, reasons)
+	case SolverUnsatisfiable:
+		reason := unsatReasonFor(m.Domain, remainingMechanicalClaims(m))
+		reasons := addReason([]ReasonCode{reason}, ReasonExemptionIneffective)
+		return requireMechanicalOutcome(field, m, ProofViolatedWithWitness, reasons)
+	default:
+		return fmt.Errorf("policyconflict: %s: mechanical outcome has unknown after solver state %q", field, m.After.State)
+	}
+}
+
+func validateUnexemptedMechanicalOutcome(field string, m MechanicalEvaluation, hasRejected bool) error {
+	switch m.Before.State {
+	case SolverSatisfiable:
+		return requireMechanicalOutcome(field, m, ProofProven, []ReasonCode{ReasonMechanicalSatisfiable})
+	case SolverUnproven:
+		if m.Domain != domainPrincipalRelation {
+			return fmt.Errorf("policyconflict: %s: mechanical outcome has unproven before proof outside the principal-relation domain", field)
+		}
+		reasons := []ReasonCode{unprovenReasonFor(m.Before)}
+		if hasRejected {
+			reasons = addReason(reasons, ReasonExemptionIneffective)
+		}
+		return requireMechanicalOutcome(field, m, ProofUnproven, reasons)
+	case SolverUnsatisfiable:
+		switch m.State {
+		case ProofProven:
+			if m.Scope.State != ScopeDisjoint {
+				return fmt.Errorf("policyconflict: %s: mechanical outcome claims an unsatisfiable proof is proven without disjoint scope", field)
+			}
+			return requireMechanicalOutcome(field, m, ProofProven, []ReasonCode{ReasonScopeDisjoint})
+		case ProofViolatedWithWitness:
+			if m.Scope.State != ScopeOverlap {
+				return fmt.Errorf("policyconflict: %s: mechanical outcome claims an unsatisfiable violation without overlapping scope", field)
+			}
+			reasons := []ReasonCode{unsatReasonFor(m.Domain, claimsFromRecords(m.Claims))}
+			if hasRejected {
+				reasons = addReason(reasons, ReasonExemptionIneffective)
+			}
+			return requireMechanicalOutcome(field, m, ProofViolatedWithWitness, reasons)
+		case ProofUnproven:
+			reasons := []ReasonCode{ReasonHigherOrderScopeUnproven}
+			if hasRejected {
+				reasons = addReason(reasons, ReasonExemptionIneffective)
+			}
+			return requireMechanicalOutcome(field, m, ProofUnproven, reasons)
+		}
+	}
+	return fmt.Errorf("policyconflict: %s: mechanical outcome is not derivable from its before proof", field)
+}
+
+func requireMechanicalOutcome(field string, m MechanicalEvaluation, wantState ProofState, wantReasons []ReasonCode) error {
+	if m.State != wantState || !reflect.DeepEqual(m.Reasons, wantReasons) {
+		return fmt.Errorf("policyconflict: %s: mechanical outcome state/reasons are (%q, %v), want (%q, %v)", field, m.State, m.Reasons, wantState, wantReasons)
+	}
+	return nil
+}
+
+func remainingMechanicalClaims(m MechanicalEvaluation) []policyartifact.Claim {
+	removed := make(map[[2]string]bool)
+	for _, exemption := range m.Exemptions {
+		if !allProven(exemption.Resolution) {
+			continue
+		}
+		for _, witness := range exemption.RemovedClaims {
+			removed[mechanicalClaimWitnessKey(witness)] = true
+		}
+	}
+	remaining := make([]policyartifact.Claim, 0, len(m.Claims))
+	for _, record := range m.Claims {
+		if !removed[typedClaimRecordKey(record)] {
+			remaining = append(remaining, record.Claim)
+		}
+	}
+	return remaining
 }
 
 func validateDispositionResolution(field string, d DispositionResolution) error {

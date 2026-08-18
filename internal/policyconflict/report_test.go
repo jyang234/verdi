@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/jyang234/verdi/internal/contextcompile"
+	"github.com/jyang234/verdi/internal/policyartifact"
 )
 
 func TestReportDeterminismRepeatedServiceEvaluation(t *testing.T) {
@@ -106,6 +107,164 @@ func TestReportDeterminismRejectsFavorableVerdictForgery(t *testing.T) {
 	report.Verdict = VerdictPass
 	if _, err := EncodeReport(report); err == nil || !strings.Contains(err.Error(), "derived verdict") {
 		t.Fatalf("EncodeReport(favorable lie) error = %v, want derived-verdict refusal", err)
+	}
+}
+
+func TestDecodeReportRejectsSelfRedigestedMechanicalOutcomeForgery(t *testing.T) {
+	base, err := DecodeReport(mustReadFixture(t, "report.json"))
+	if err != nil {
+		t.Fatalf("DecodeReport(fixture): %v", err)
+	}
+	row := violatedRow(t)
+	if row.After.State != SolverUnsatisfiable {
+		t.Fatalf("test setup: After.State = %q, want unsatisfiable", row.After.State)
+	}
+	base.Mechanical = []MechanicalEvaluation{row}
+	base.Semantic = []SemanticEvaluation{}
+	base.Disclosures = []Disclosure{}
+	base.Verdict = VerdictBlockedViolated
+	blocked, err := EncodeReport(base)
+	if err != nil {
+		t.Fatalf("EncodeReport(conforming blocked report): %v", err)
+	}
+
+	// Keep the exact unsatisfiable post-exemption proof, but lie that the row
+	// is mechanically satisfiable and therefore that the report passes. The
+	// public self-digest is recomputed over those canonical forged bytes, so
+	// only independent cross-field proof validation can reject the lie.
+	tree := setAtPath(t, blocked, []any{"mechanical", 0, "state"}, string(ProofProven))
+	setAtPathIn(t, tree, []any{"mechanical", 0, "reasons"}, []any{string(ReasonMechanicalSatisfiable)})
+	setAtPathIn(t, tree, []any{"verdict"}, string(VerdictPass))
+	forged := redigestTopLevel(t, tree)
+	if _, err := DecodeReport(forged); err == nil {
+		t.Fatal("DecodeReport(self-redigested favorable mechanical outcome forgery): got nil error, want cross-field rejection")
+	}
+}
+
+func TestMechanicalOutcomeValidationCoversConformingProofResults(t *testing.T) {
+	satisfiable := evaluateOneRow(t, MechanicalInput{Claims: []contextcompile.TypedClaim{
+		typedClaim(t, "policy-a", discreteClaim("c1", "level", policyartifact.OpEquals, []string{"gold"}, universalScope())),
+	}})
+	disjoint := evaluateOneRow(t, MechanicalInput{Claims: []contextcompile.TypedClaim{
+		typedClaim(t, "policy-a", discreteClaim("c1", "level", policyartifact.OpEquals, []string{"gold"}, phaseScope("build"))),
+		typedClaim(t, "policy-b", discreteClaim("c2", "level", policyartifact.OpEquals, []string{"silver"}, phaseScope("review"))),
+	}})
+	unsatisfiable := violatedRow(t)
+	profile := mustDecodeProfile(t, rolePolicyYAML)
+	unproven := evaluateOneRow(t, MechanicalInput{Claims: []contextcompile.TypedClaim{
+		typedClaim(t, "policy-a", principalClaim("c1", "release", policyartifact.OpDifferentPrincipal, "author", "reviewer", universalScope())),
+	}, Profile: profile})
+
+	var silver TypedClaimRecord
+	for _, claim := range unsatisfiable.Claims {
+		if claim.PolicyID == "policy-b" {
+			silver = claim
+		}
+	}
+	effective, err := applyEffectiveExemptions(unsatisfiable, []ExemptionResolution{
+		exemptionFor("ex-effective", allProvenResolution(), silver),
+	})
+	if err != nil {
+		t.Fatalf("ApplyEffectiveExemptions(effective): %v", err)
+	}
+	rejected, err := applyEffectiveExemptions(unsatisfiable, []ExemptionResolution{
+		rejectedExemption("ex-rejected", AuthorityResolution{
+			Match: ProofProven, Freshness: ProofProven, Scope: ProofProven,
+			Bound: ProofUnproven, Authorization: ProofProven,
+		}),
+	})
+	if err != nil {
+		t.Fatalf("ApplyEffectiveExemptions(rejected): %v", err)
+	}
+
+	partiallyRemoved := evaluateOneRow(t, MechanicalInput{Claims: []contextcompile.TypedClaim{
+		typedClaim(t, "policy-a", discreteClaim("c1", "level", policyartifact.OpEquals, []string{"gold"}, universalScope())),
+		typedClaim(t, "policy-b", discreteClaim("c2", "level", policyartifact.OpEquals, []string{"silver"}, universalScope())),
+		typedClaim(t, "policy-c", discreteClaim("c3", "level", policyartifact.OpAllowedValues, []string{"gold", "silver"}, universalScope())),
+	}})
+	var harmless TypedClaimRecord
+	for _, claim := range partiallyRemoved.Claims {
+		if claim.PolicyID == "policy-c" {
+			harmless = claim
+		}
+	}
+	acceptedIneffective, err := applyEffectiveExemptions(partiallyRemoved, []ExemptionResolution{
+		exemptionFor("ex-insufficient", allProvenResolution(), harmless),
+	})
+	if err != nil {
+		t.Fatalf("ApplyEffectiveExemptions(insufficient): %v", err)
+	}
+
+	tests := []struct {
+		name   string
+		row    MechanicalEvaluation
+		mutate func(*MechanicalEvaluation)
+	}{
+		{
+			name: "satisfiable",
+			row:  satisfiable,
+			mutate: func(row *MechanicalEvaluation) {
+				row.State = ProofUnproven
+				row.Reasons = []ReasonCode{ReasonPrincipalRelationUnproven}
+			},
+		},
+		{
+			name: "disjoint",
+			row:  disjoint,
+			mutate: func(row *MechanicalEvaluation) {
+				row.Scope.State = ScopeOverlap
+			},
+		},
+		{
+			name: "unsatisfiable",
+			row:  unsatisfiable,
+			mutate: func(row *MechanicalEvaluation) {
+				row.State = ProofProven
+				row.Reasons = []ReasonCode{ReasonMechanicalSatisfiable}
+			},
+		},
+		{
+			name: "unproven",
+			row:  unproven,
+			mutate: func(row *MechanicalEvaluation) {
+				row.State = ProofProven
+				row.Reasons = []ReasonCode{ReasonMechanicalSatisfiable}
+			},
+		},
+		{
+			name: "effective exemption",
+			row:  effective,
+			mutate: func(row *MechanicalEvaluation) {
+				row.After.State = SolverUnsatisfiable
+			},
+		},
+		{
+			name: "rejected ineffective exemption",
+			row:  rejected,
+			mutate: func(row *MechanicalEvaluation) {
+				row.Reasons = []ReasonCode{ReasonMechanicalConflict}
+			},
+		},
+		{
+			name: "accepted ineffective exemption",
+			row:  acceptedIneffective,
+			mutate: func(row *MechanicalEvaluation) {
+				row.State = ProofProven
+				row.Reasons = []ReasonCode{ReasonExemptionEffective}
+			},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if err := validateMechanicalEvaluation("row", test.row); err != nil {
+				t.Fatalf("conforming row rejected: %v\nrow: %+v", err, test.row)
+			}
+			forged := test.row
+			test.mutate(&forged)
+			if err := validateMechanicalEvaluation("row", forged); err == nil {
+				t.Fatalf("incoherent row accepted: %+v", forged)
+			}
+		})
 	}
 }
 
