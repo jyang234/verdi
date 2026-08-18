@@ -604,6 +604,52 @@ func TestReadinessAsset_JSNoNetworkNoPersistence(t *testing.T) {
 	}
 }
 
+// TestReadinessAsset_JSMiddleClickInstrumented pins fix-round finding 1:
+// middle-button activation of a board link (auxclick, button 1) must
+// share the primary click's synchronous board-link recorder, so the
+// _blank navigation is never un-instrumented.
+func TestReadinessAsset_JSMiddleClickInstrumented(t *testing.T) {
+	h := NewHandler(t.TempDir())
+	req := httptest.NewRequest(http.MethodGet, "/assets/readiness.js", nil)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	js := rec.Body.String()
+
+	for _, want := range []string{`"auxclick"`, "button !== 1", "recordBoardLink"} {
+		if !strings.Contains(js, want) {
+			t.Fatalf("readiness.js is missing middle-button instrumentation %q", want)
+		}
+	}
+	if got := strings.Count(js, `record("board-link-followed"`); got != 1 {
+		t.Fatalf("board-link-followed is recorded from %d sites, want exactly 1 shared recorder", got)
+	}
+}
+
+// TestReadinessStyle_NarrowAnchorsAndWrapping pins fix-round findings 2
+// and 3: fragment targets carry a narrow-mode scroll offset so the
+// pinned rail never obscures them, and long valid snapshot values wrap
+// instead of overflowing or truncating.
+func TestReadinessStyle_NarrowAnchorsAndWrapping(t *testing.T) {
+	css, err := dex.StyleCSS()
+	if err != nil {
+		t.Fatalf("dex.StyleCSS: %v", err)
+	}
+	// Scope to the cockpit's own block: other components of the shared
+	// stylesheet legitimately use truncation.
+	s := sectionOf(t, string(css), "the readiness pilot cockpit", "Syntax-highlighting palettes")
+	if !strings.Contains(s, "scroll-margin-top") {
+		t.Fatal("cockpit block has no scroll offset for its fragment targets")
+	}
+	if !strings.Contains(s, "overflow-wrap") {
+		t.Fatal("cockpit block has no wrapping rule for long values")
+	}
+	for _, forbidden := range []string{"text-overflow", "overflow: hidden", "overflow-x: hidden"} {
+		if strings.Contains(s, forbidden) {
+			t.Fatalf("cockpit block truncates content (%q) instead of wrapping it", forbidden)
+		}
+	}
+}
+
 func TestReadinessStyle_CockpitRules(t *testing.T) {
 	css, err := dex.StyleCSS()
 	if err != nil {

@@ -49,17 +49,37 @@
     return closestAttr(el, "[data-concern-id]", "data-concern-id");
   }
 
+  function boardLinkOf(el) {
+    return el && el.closest ? el.closest("a.readiness-board-link") : null;
+  }
+
+  // The ONE board-link recorder, shared by primary click and
+  // middle-button auxclick: appended synchronously in the activating
+  // event's own phase, BEFORE the browser's default _blank navigation
+  // opens the separate tab; this source tab keeps the sequence. Never
+  // preventDefault around it.
+  function recordBoardLink(link) {
+    record("board-link-followed", areaOf(link), concernOf(link));
+  }
+
+  document.addEventListener("auxclick", function (e) {
+    if (e.button !== 1) {
+      return;
+    }
+    var link = boardLinkOf(e.target instanceof Element ? e.target : null);
+    if (link) {
+      recordBoardLink(link);
+    }
+  });
+
   document.addEventListener("click", function (e) {
     var target = e.target instanceof Element ? e.target : null;
     if (!target) {
       return;
     }
-    var boardLink = target.closest("a.readiness-board-link");
+    var boardLink = boardLinkOf(target);
     if (boardLink) {
-      // Appended synchronously in the click phase, BEFORE the browser's
-      // default _blank navigation opens the separate tab; this source
-      // tab keeps the sequence. Never preventDefault here.
-      record("board-link-followed", areaOf(boardLink), concernOf(boardLink));
+      recordBoardLink(boardLink);
       return;
     }
     if (target.closest("[data-readiness-stale]")) {

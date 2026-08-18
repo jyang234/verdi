@@ -3471,6 +3471,18 @@ button.yarn-chip-type {
   color: var(--muted-solid);
 }
 .readiness-summary { margin: 0 0 0.3rem; font-size: 0.92rem; }
+/* long valid snapshot values (ids, summaries, witnesses, CLI tokens)
+   wrap — never truncated, clipped, or allowed to overflow sideways */
+.readiness-summary,
+.readiness-station-label,
+.readiness-area-head,
+.readiness-concern-link code,
+.readiness-concern-id,
+.readiness-witnesses code,
+.readiness-cli-token { overflow-wrap: anywhere; }
+.readiness-concern-head > *,
+.readiness-cli > .readiness-cli-token { min-width: 0; max-width: 100%; }
+.readiness-row { min-width: 0; }
 .readiness-concern-link { text-decoration: none; }
 .readiness-concern-link:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .readiness-concern-link code,
@@ -3530,6 +3542,10 @@ button.yarn-chip-type {
   }
   .readiness-station--focus .readiness-station-link { border-top-color: var(--accent); }
   .readiness-station-label { font-size: 0.82rem; }
+  /* fragment targets land BELOW the pinned rail, not behind it — the
+     offset clears the strip's tallest (focused, wrapped-label) form */
+  .readiness-area,
+  .readiness-row { scroll-margin-top: 11rem; }
 }
 
 /* motion is opt-in; a reduced-motion preference gets a static page */
