@@ -150,6 +150,31 @@ func violatedRow(t *testing.T) MechanicalEvaluation {
 	}})
 }
 
+func unprovenScopeExemptionOperands(t *testing.T) (MechanicalEvaluation, TypedClaimRecord) {
+	t.Helper()
+	resolver := &mapRefResolver{states: map[[2]string]ScopeState{
+		{"spec/a", "spec/b"}: ScopeUnknown,
+	}}
+	row := evaluateOneRow(t, MechanicalInput{
+		Claims: []contextcompile.TypedClaim{
+			typedClaim(t, "policy-a", discreteClaim("c1", "level", policyartifact.OpEquals, []string{"gold"}, refScope("spec/a"))),
+			typedClaim(t, "policy-b", discreteClaim("c2", "level", policyartifact.OpEquals, []string{"silver"}, refScope("spec/b"))),
+			typedClaim(t, "policy-c", discreteClaim("c3", "level", policyartifact.OpAllowedValues, []string{"gold", "silver"}, universalScope())),
+		},
+		Refs: resolver,
+	})
+	if row.State != ProofUnproven || !reflect.DeepEqual(row.Reasons, []ReasonCode{ReasonHigherOrderScopeUnproven}) || row.Scope.State != ScopeUnknown {
+		t.Fatalf("test setup: row = %+v, want unknown-scope higher-order unproven", row)
+	}
+	for _, claim := range row.Claims {
+		if claim.PolicyID == "policy-c" {
+			return row, claim
+		}
+	}
+	t.Fatal("test setup: harmless policy-c claim absent")
+	return MechanicalEvaluation{}, TypedClaimRecord{}
+}
+
 func TestApplyEffectiveExemptionsCoversConflict(t *testing.T) {
 	row := violatedRow(t)
 	if row.State != ProofViolatedWithWitness {
@@ -228,6 +253,26 @@ func TestApplyEffectiveExemptionsPartialRemovalStillConflict(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("Reasons = %v, want exemption-ineffective disclosed", got.Reasons)
+	}
+}
+
+func TestApplyEffectiveExemptionsUnsatisfiableAfterPreservesUnprovenScopeOutcome(t *testing.T) {
+	row, harmless := unprovenScopeExemptionOperands(t)
+	got, err := applyEffectiveExemptions(row, []ExemptionResolution{
+		exemptionFor("ex-harmless", allProvenResolution(), harmless),
+	})
+	if err != nil {
+		t.Fatalf("ApplyEffectiveExemptions: %v", err)
+	}
+	if got.After.State != SolverUnsatisfiable {
+		t.Fatalf("After.State = %q, want unsatisfiable", got.After.State)
+	}
+	if got.State != ProofUnproven {
+		t.Fatalf("State = %q, want unproven because no post-exemption scope proof exists", got.State)
+	}
+	wantReasons := []ReasonCode{ReasonExemptionIneffective, ReasonHigherOrderScopeUnproven}
+	if !reflect.DeepEqual(got.Reasons, wantReasons) {
+		t.Fatalf("Reasons = %v, want %v", got.Reasons, wantReasons)
 	}
 }
 
@@ -724,7 +769,7 @@ func TestApplyEffectiveExemptionsPrincipalRelationPreservesKernelOutcomes(t *tes
 			wantState:  ProofViolatedWithWitness,
 			wantReasons: []ReasonCode{
 				ReasonExemptionIneffective,
-				ReasonPrincipalRelationViolated,
+				ReasonMechanicalConflict,
 			},
 		},
 		{

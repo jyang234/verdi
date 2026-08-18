@@ -976,12 +976,38 @@ func validateMechanicalOutcome(field string, m MechanicalEvaluation) error {
 		reasons := addReason([]ReasonCode{unprovenReasonFor(m.After)}, ReasonExemptionIneffective)
 		return requireMechanicalOutcome(field, m, ProofUnproven, reasons)
 	case SolverUnsatisfiable:
-		reason := unsatReasonFor(m.Domain, remainingMechanicalClaims(m))
-		reasons := addReason([]ReasonCode{reason}, ReasonExemptionIneffective)
-		return requireMechanicalOutcome(field, m, ProofViolatedWithWitness, reasons)
+		return validatePreservedUnsatisfiableOutcome(field, m)
 	default:
 		return fmt.Errorf("policyconflict: %s: mechanical outcome has unknown after solver state %q", field, m.After.State)
 	}
+}
+
+func validatePreservedUnsatisfiableOutcome(field string, m MechanicalEvaluation) error {
+	if m.State == ProofProven {
+		return fmt.Errorf("policyconflict: %s: mechanical outcome promotes an unsatisfiable after proof without a post-exemption scope proof", field)
+	}
+	originalReasons := make([]ReasonCode, 0, len(m.Reasons))
+	foundIneffective := false
+	for _, reason := range m.Reasons {
+		if reason == ReasonExemptionIneffective {
+			foundIneffective = true
+			continue
+		}
+		originalReasons = append(originalReasons, reason)
+	}
+	if !foundIneffective {
+		return fmt.Errorf("policyconflict: %s: mechanical outcome with an unsatisfiable after proof must record exemption-ineffective", field)
+	}
+
+	// ApplyEffectiveExemptions preserves the original proof outcome because
+	// the wire has no post-exemption scope proof. Reuse the unexempted row
+	// validator against that reconstructed original instead of duplicating
+	// its satisfiable/disjoint/violated/unproven derivation here.
+	original := m
+	original.After = m.Before
+	original.Exemptions = []ExemptionResolution{}
+	original.Reasons = originalReasons
+	return validateUnexemptedMechanicalOutcome(field, original, false)
 }
 
 func validateUnexemptedMechanicalOutcome(field string, m MechanicalEvaluation, hasRejected bool) error {
@@ -1029,25 +1055,6 @@ func requireMechanicalOutcome(field string, m MechanicalEvaluation, wantState Pr
 		return fmt.Errorf("policyconflict: %s: mechanical outcome state/reasons are (%q, %v), want (%q, %v)", field, m.State, m.Reasons, wantState, wantReasons)
 	}
 	return nil
-}
-
-func remainingMechanicalClaims(m MechanicalEvaluation) []policyartifact.Claim {
-	removed := make(map[[2]string]bool)
-	for _, exemption := range m.Exemptions {
-		if !allProven(exemption.Resolution) {
-			continue
-		}
-		for _, witness := range exemption.RemovedClaims {
-			removed[mechanicalClaimWitnessKey(witness)] = true
-		}
-	}
-	remaining := make([]policyartifact.Claim, 0, len(m.Claims))
-	for _, record := range m.Claims {
-		if !removed[typedClaimRecordKey(record)] {
-			remaining = append(remaining, record.Claim)
-		}
-	}
-	return remaining
 }
 
 func validateDispositionResolution(field string, d DispositionResolution) error {

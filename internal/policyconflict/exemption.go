@@ -190,8 +190,13 @@ func ApplyEffectiveExemptions(ctx context.Context, in ExemptionApplication) (Exe
 		out.State = ProofUnproven
 		out.Reasons = addReason([]ReasonCode{unprovenReasonFor(afterProof)}, ReasonExemptionIneffective)
 	case SolverUnsatisfiable:
-		out.State = ProofViolatedWithWitness
-		out.Reasons = addReason([]ReasonCode{unsatReasonFor(row.Domain, claimsFromRecords(remainder))}, ReasonExemptionIneffective)
+		// The report carries only the original scope proof. An
+		// unsatisfiable remainder therefore cannot promote an originally
+		// unproven scope conclusion to a witnessed violation; retain the
+		// row's proved state/reasons and record only that the exemption did
+		// not cover it.
+		out.State = row.State
+		out.Reasons = addReason(row.Reasons, ReasonExemptionIneffective)
 	}
 	return ExemptionApplicationResult{Evaluation: out, Disclosures: disclosures}, nil
 }

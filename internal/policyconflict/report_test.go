@@ -268,6 +268,46 @@ func TestMechanicalOutcomeValidationCoversConformingProofResults(t *testing.T) {
 	}
 }
 
+func TestDecodeReportRejectsUnsatisfiableAfterViolatedPromotionWithoutNewScopeProof(t *testing.T) {
+	row, harmless := unprovenScopeExemptionOperands(t)
+	application, err := applyEffectiveExemptions(row, []ExemptionResolution{
+		exemptionFor("ex-harmless", allProvenResolution(), harmless),
+	})
+	if err != nil {
+		t.Fatalf("ApplyEffectiveExemptions: %v", err)
+	}
+	honest := application
+	honest.State = ProofUnproven
+	honest.Reasons = []ReasonCode{ReasonExemptionIneffective, ReasonHigherOrderScopeUnproven}
+
+	report, err := DecodeReport(mustReadFixture(t, "report.json"))
+	if err != nil {
+		t.Fatalf("DecodeReport(fixture): %v", err)
+	}
+	report.Mechanical = []MechanicalEvaluation{honest}
+	report.Semantic = []SemanticEvaluation{}
+	report.Disclosures = []Disclosure{}
+	report.Verdict = VerdictBlockedUnproven
+	encoded, err := EncodeReport(report)
+	if err != nil {
+		t.Fatalf("EncodeReport(honest unproven result): %v", err)
+	}
+	if _, err := DecodeReport(encoded); err != nil {
+		t.Fatalf("DecodeReport(honest unproven result): %v", err)
+	}
+
+	tree := setAtPath(t, encoded, []any{"mechanical", 0, "state"}, string(ProofViolatedWithWitness))
+	setAtPathIn(t, tree, []any{"mechanical", 0, "reasons"}, []any{
+		string(ReasonExemptionIneffective),
+		string(ReasonMechanicalConflict),
+	})
+	setAtPathIn(t, tree, []any{"verdict"}, string(VerdictBlockedViolated))
+	forged := redigestTopLevel(t, tree)
+	if _, err := DecodeReport(forged); err == nil {
+		t.Fatal("DecodeReport(self-redigested violated promotion): got nil error, want rejection without a post-exemption scope proof")
+	}
+}
+
 func TestReportDeterminismSemanticRequirement(t *testing.T) {
 	if semanticEvaluationRequired(SemanticInput{Claims: nil, UnknownMechanicals: nil}) {
 		t.Fatal("empty semantic input unexpectedly requires evaluation")
