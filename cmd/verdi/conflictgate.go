@@ -71,10 +71,11 @@ func runConflictGate(ctx context.Context, root string, input conflictGateInput, 
 	if input.RequestPath == "-" {
 		return conflictGateResult{}, errors.New("--context-request does not accept stdin ('-')")
 	}
-	if err := rejectConflictRequestSymlinks(root, input.RequestPath); err != nil {
+	requestPath, err := validatedConflictRequestPath(root, input.RequestPath)
+	if err != nil {
 		return conflictGateResult{}, err
 	}
-	data, err := os.ReadFile(input.RequestPath)
+	data, err := os.ReadFile(requestPath)
 	if err != nil {
 		return conflictGateResult{}, fmt.Errorf("reading --context-request: %w", err)
 	}
@@ -152,22 +153,28 @@ func probeConflictGate(root, requestPath string) (bool, error) {
 	return true, nil
 }
 
-// rejectConflictRequestSymlinks refuses both a linked request file and any
-// linked caller-selected ancestor. Paths inside the checkout start at the
-// already-resolved store root, avoiding false positives from platform-level
-// aliases above the checkout while still proving every request component.
-func rejectConflictRequestSymlinks(root, requestPath string) error {
+// validatedConflictRequestPath returns the one absolute request path used by
+// both validation and reading. It refuses traversal elements before Abs can
+// collapse them lexically: the kernel follows a symlink before applying "..",
+// so validating the cleaned spelling but reading the original could select a
+// different file. It also refuses a linked request file or caller-selected
+// ancestor. Paths inside the checkout start at the already-resolved store root,
+// avoiding false positives from platform-level aliases above the checkout.
+func validatedConflictRequestPath(root, requestPath string) (string, error) {
+	if hasDotDotElement(requestPath) {
+		return "", errors.New(`--context-request must not contain a ".." path element`)
+	}
 	requestAbs, err := filepath.Abs(requestPath)
 	if err != nil {
-		return fmt.Errorf("resolving --context-request path: %w", err)
+		return "", fmt.Errorf("resolving --context-request path: %w", err)
 	}
 	rootAbs, err := filepath.Abs(root)
 	if err != nil {
-		return fmt.Errorf("resolving store root: %w", err)
+		return "", fmt.Errorf("resolving store root: %w", err)
 	}
 	rootInfo, err := os.Stat(rootAbs)
 	if err != nil {
-		return fmt.Errorf("inspecting store root: %w", err)
+		return "", fmt.Errorf("inspecting store root: %w", err)
 	}
 
 	// Walk upward from the caller-selected file until the physical store root
@@ -180,13 +187,13 @@ func rejectConflictRequestSymlinks(root, requestPath string) error {
 		info, statErr := os.Lstat(current)
 		if statErr == nil {
 			if os.SameFile(rootInfo, info) {
-				return nil
+				return requestAbs, nil
 			}
 			if info.Mode()&os.ModeSymlink != 0 {
-				return errors.New("--context-request must not contain a symlink path component")
+				return "", errors.New("--context-request must not contain a symlink path component")
 			}
 		} else if !errors.Is(statErr, os.ErrNotExist) {
-			return fmt.Errorf("inspecting --context-request path: %w", statErr)
+			return "", fmt.Errorf("inspecting --context-request path: %w", statErr)
 		}
 		parent := filepath.Dir(current)
 		if parent == current {
@@ -216,15 +223,15 @@ func rejectConflictRequestSymlinks(root, requestPath string) error {
 		info, statErr := os.Lstat(current)
 		if statErr != nil {
 			if errors.Is(statErr, os.ErrNotExist) {
-				return nil
+				return requestAbs, nil
 			}
-			return fmt.Errorf("inspecting --context-request path: %w", statErr)
+			return "", fmt.Errorf("inspecting --context-request path: %w", statErr)
 		}
 		if info.Mode()&os.ModeSymlink != 0 {
-			return errors.New("--context-request must not contain a symlink path component")
+			return "", errors.New("--context-request must not contain a symlink path component")
 		}
 	}
-	return nil
+	return requestAbs, nil
 }
 
 // localLifecycleConflictProvider preserves the VerdictProvider boundary while

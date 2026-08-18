@@ -274,11 +274,70 @@ func TestConflictGateRequestValidation(t *testing.T) {
 		if err := os.Symlink(valid, link); err != nil {
 			t.Skipf("symlink unavailable: %v", err)
 		}
+		calls := 0
 		_, err := runConflictGate(context.Background(), root, conflictGateInput{
 			RequestPath: link, Phase: contextcompile.PhaseDesign, Spec: "spec/feature-alpha", Candidate: true, Branch: "design/feature-alpha", Head: head,
-		}, nil)
+		}, contextConflictProviderFunc(func(context.Context, policyconflict.Request) (policyconflict.Result, error) {
+			calls++
+			return contextConflictResult(policyconflict.VerdictPass), nil
+		}))
 		if err == nil || !strings.Contains(err.Error(), "symlink") {
 			t.Fatalf("runConflictGate symlink error = %v, want symlink refusal", err)
+		}
+		if calls != 0 {
+			t.Fatalf("provider calls = %d after symlink refusal, want 0", calls)
+		}
+	})
+
+	t.Run("symlink ancestor", func(t *testing.T) {
+		dir := filepath.Join(root, "request-dir")
+		if err := os.Mkdir(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		request := contextLifecycleRequestFile(t, dir, "request.json", "spec/feature-alpha", contextcompile.PhaseDesign, nil)
+		link := filepath.Join(root, "request-dir-link")
+		if err := os.Symlink(dir, link); err != nil {
+			t.Skipf("symlink unavailable: %v", err)
+		}
+		calls := 0
+		_, err := runConflictGate(context.Background(), root, conflictGateInput{
+			RequestPath: filepath.Join(link, filepath.Base(request)), Phase: contextcompile.PhaseDesign, Spec: "spec/feature-alpha", Candidate: true, Branch: "design/feature-alpha", Head: head,
+		}, contextConflictProviderFunc(func(context.Context, policyconflict.Request) (policyconflict.Result, error) {
+			calls++
+			return contextConflictResult(policyconflict.VerdictPass), nil
+		}))
+		if err == nil || !strings.Contains(err.Error(), "symlink") {
+			t.Fatalf("runConflictGate symlink-ancestor error = %v, want symlink refusal", err)
+		}
+		if calls != 0 {
+			t.Fatalf("provider calls = %d after symlink-ancestor refusal, want 0", calls)
+		}
+	})
+
+	t.Run("system var alias", func(t *testing.T) {
+		resolvedRoot, err := filepath.EvalSymlinks(root)
+		if err != nil {
+			t.Fatalf("EvalSymlinks(%q): %v", root, err)
+		}
+		if resolvedRoot == root {
+			t.Skip("checkout root has no system path alias")
+		}
+		rel, err := filepath.Rel(root, valid)
+		if err != nil {
+			t.Fatalf("Rel(%q, %q): %v", root, valid, err)
+		}
+		calls := 0
+		_, err = runConflictGate(context.Background(), resolvedRoot, conflictGateInput{
+			RequestPath: valid, Phase: contextcompile.PhaseDesign, Spec: "spec/feature-alpha", Candidate: true, Branch: "design/feature-alpha", Head: head,
+		}, contextConflictProviderFunc(func(context.Context, policyconflict.Request) (policyconflict.Result, error) {
+			calls++
+			return contextConflictResult(policyconflict.VerdictPass), nil
+		}))
+		if err != nil {
+			t.Fatalf("runConflictGate root alias %q request alias %q: %v", resolvedRoot, filepath.Join(root, rel), err)
+		}
+		if calls != 1 {
+			t.Fatalf("provider calls = %d through system path alias, want 1", calls)
 		}
 	})
 
@@ -298,6 +357,46 @@ func TestConflictGateRequestValidation(t *testing.T) {
 			t.Fatalf("runConflictGate unreadable error = %v, want read refusal", err)
 		}
 	})
+}
+
+// TestConflictGateRequestPathIdentity catches validation and reading using
+// different pathname identities. filepath.Abs cleans "symlink-dir/.."
+// lexically, while the kernel follows symlink-dir before applying "..". A
+// request path containing that sequence must fail operationally before the
+// provider is constructed or called, never decode an external request file.
+func TestConflictGateRequestPathIdentity(t *testing.T) {
+	root, _ := adoptedConflictGateRepo(t)
+	writeContextRequestFile(t, root, "request.json", []byte("{not-the-request\n"))
+
+	externalParent := t.TempDir()
+	externalChild := filepath.Join(externalParent, "child")
+	if err := os.Mkdir(externalChild, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	contextLifecycleRequestFile(t, externalParent, "request.json", "spec/feature-alpha", contextcompile.PhaseReview, nil)
+	link := filepath.Join(root, "symlink-dir")
+	if err := os.Symlink(externalChild, link); err != nil {
+		t.Skipf("symlink unavailable: %v", err)
+	}
+
+	// filepath.Join would erase the traversal element this regression needs.
+	requestPath := root + string(filepath.Separator) + filepath.FromSlash("symlink-dir/../request.json")
+	calls := 0
+	provider := contextConflictProviderFunc(func(context.Context, policyconflict.Request) (policyconflict.Result, error) {
+		calls++
+		return contextConflictResult(policyconflict.VerdictPass), nil
+	})
+	var stdout, stderr bytes.Buffer
+	got := runCloseConflictGate(context.Background(), root, "spec/feature-alpha", requestPath, provider, &stdout, &stderr)
+	if got != 2 {
+		t.Fatalf("runCloseConflictGate = %d, want operational exit 2; stdout=%q stderr=%q", got, stdout.String(), stderr.String())
+	}
+	if calls != 0 {
+		t.Fatalf("provider calls = %d after path-identity refusal, want 0", calls)
+	}
+	if stdout.Len() != 0 || !strings.Contains(stderr.String(), `".." path element`) {
+		t.Fatalf("stdout=%q stderr=%q, want path-safe operational refusal", stdout.String(), stderr.String())
+	}
 }
 
 // TestConflictGateTarget catches drift among lifecycle consumers: design must
