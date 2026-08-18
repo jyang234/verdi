@@ -149,7 +149,7 @@ func (s *Service) Evaluate(ctx context.Context, request Request) (Result, error)
 	}
 	disclosures, err := mergeReportDisclosures(inherited, mechanicalResult.Disclosures, exemptionDisclosures, dispositionDisclosures)
 	if err != nil {
-		return Result{}, operational("merge report disclosures", err)
+		return Result{}, operational("combine report disclosures", err)
 	}
 	inputIdentity, _, err := reportInput(view, request, evaluatedOn)
 	if err != nil {
