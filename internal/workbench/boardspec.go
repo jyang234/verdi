@@ -24,6 +24,7 @@ import (
 	"github.com/jyang234/verdi/internal/evidence"
 	"github.com/jyang234/verdi/internal/gitx"
 	"github.com/jyang234/verdi/internal/model"
+	"github.com/jyang234/verdi/internal/readinesspilot"
 	"github.com/jyang234/verdi/internal/specstate"
 	"github.com/jyang234/verdi/internal/store"
 	"github.com/jyang234/verdi/internal/wallbadge"
@@ -96,6 +97,14 @@ type Deps struct {
 	// its disclosed verification-unavailable state, and nothing on the
 	// editor blocks (verification informs, never gates).
 	DiagramVerifier DiagramVerifier
+
+	// Readiness is the Wave 3.5 pilot's startup snapshot: derived once by
+	// the caller (cmd/verdi's serve path via readinesspilot.Derive) and
+	// injected immutable — the cockpit page renders it verbatim and never
+	// recomputes readiness. nil means the pilot is not wired: GET
+	// /readiness discloses that honestly with a 503 page rather than
+	// rendering anything vacuous.
+	Readiness *readinesspilot.Snapshot
 }
 
 // boardSpecServer holds the board's dependencies for one store root.

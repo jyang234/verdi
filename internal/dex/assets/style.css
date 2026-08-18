@@ -3255,6 +3255,289 @@ button.yarn-chip-type {
   margin: 0 0 0.7rem;
 }
 
+/* ---------- the readiness pilot cockpit (GET /readiness) ----------
+   A hybrid preflight surface: the four-area rail stays continuously
+   visible (sticky spine, left on desktop, a pinned strip on narrow
+   viewports), the attention queue is the page's visual primary (numbered
+   cards — the number IS the deterministic fix-next order), and the
+   complete enumeration below it hides nothing. State is always spoken as
+   its exact contract word beside a shape-coded glyph (✓ / ✕ / dashed
+   ring) — color is never the only signal. Everything derives from the
+   shared tokens above, so dark mode needs no extra rules here. */
+
+.readiness-page { max-width: 74rem; }
+/* the cockpit needs a wider measure than the prose pages' 70ch shell
+   column — widened only when the shell hosts this page */
+.content:has(> .readiness-page) { max-width: 74rem; }
+
+.readiness-stale {
+  display: flex;
+  gap: 0.6rem;
+  align-items: baseline;
+  background: var(--st-pending-tint);
+  border: 1px solid var(--st-pending);
+  border-left-width: 4px;
+  border-radius: 6px;
+  padding: 0.6rem 0.85rem;
+  margin: 0 0 1.2rem;
+  font-size: 0.85rem;
+}
+.readiness-stale:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.readiness-stale-badge { font-size: 1rem; }
+
+.readiness-layout {
+  display: grid;
+  grid-template-columns: 15rem minmax(0, 1fr);
+  gap: 1.8rem;
+  align-items: start;
+}
+
+/* the rail: four stations on one spine, continuously visible */
+.readiness-rail { position: sticky; top: 1rem; }
+.readiness-rail-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border-left: 2px solid var(--rule);
+}
+.readiness-station { margin: 0; }
+.readiness-station-link {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  padding: 0.6rem 0.7rem 0.6rem 0.9rem;
+  margin-left: -2px;
+  border-left: 3px solid transparent;
+  text-decoration: none;
+  color: var(--ink);
+}
+.readiness-station-link:hover { background: var(--panel); }
+.readiness-station-link:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.readiness-station--focus .readiness-station-link {
+  border-left-color: var(--accent);
+  background: var(--panel);
+}
+.readiness-station-glyph { font-weight: 700; }
+.readiness-station-glyph--proven { color: var(--st-evidenced); }
+.readiness-station-glyph--violated-with-witness { color: var(--st-violated); }
+.readiness-station-glyph--unproven { color: var(--st-pending); }
+.readiness-station-label {
+  font-family: var(--serif);
+  font-size: 0.98rem;
+}
+.readiness-focus {
+  font-size: 0.66rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.09em;
+  color: var(--accent-strong);
+}
+.readiness-focus::before { content: "▸ "; }
+
+/* the state chip: exact contract word + glyph; unproven adds a dashed
+   border as a second non-color channel */
+.readiness-state {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.3rem;
+  width: fit-content;
+  font-family: var(--mono);
+  font-size: 0.68rem;
+  letter-spacing: 0.02em;
+  padding: 0.1rem 0.5rem;
+  border: 1px solid;
+  border-radius: 999px;
+}
+.readiness-state--proven {
+  color: var(--st-evidenced);
+  background: var(--st-evidenced-tint);
+  border-color: var(--st-evidenced);
+}
+.readiness-state--violated-with-witness {
+  color: var(--st-violated);
+  background: var(--st-violated-tint);
+  border-color: var(--st-violated);
+}
+.readiness-state--unproven {
+  color: var(--st-pending);
+  background: var(--st-pending-tint);
+  border-color: var(--st-pending);
+  border-style: dashed;
+}
+
+.readiness-heading {
+  font-family: var(--serif);
+  font-size: 1.3rem;
+  margin: 0 0 0.25rem;
+}
+
+/* the attention queue: the page's visual primary */
+.readiness-queue { margin: 0 0 2.2rem; }
+.readiness-queue-note {
+  color: var(--muted-solid);
+  font-size: 0.8rem;
+  margin: 0 0 0.9rem;
+}
+.readiness-queue-empty {
+  display: flex;
+  gap: 0.5rem;
+  align-items: baseline;
+  border: 1px solid var(--st-evidenced);
+  background: var(--st-evidenced-tint);
+  color: var(--st-evidenced);
+  border-radius: 8px;
+  padding: 0.7rem 0.9rem;
+  font-size: 0.9rem;
+}
+.readiness-queue-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  counter-reset: readiness-queue;
+}
+.readiness-queue-list > li {
+  counter-increment: readiness-queue;
+  display: flex;
+  gap: 0.85rem;
+  margin: 0 0 0.95rem;
+}
+.readiness-queue-list > li::before {
+  content: counter(readiness-queue);
+  font-family: var(--serif);
+  font-size: 1.5rem;
+  line-height: 1.15;
+  min-width: 1.5rem;
+  text-align: right;
+  color: var(--muted-solid);
+}
+.readiness-card {
+  flex: 1;
+  min-width: 0;
+  background: var(--card);
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+  box-shadow: var(--shadow-card);
+  padding: 0.85rem 1rem;
+}
+.readiness-card .readiness-summary {
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+/* the complete enumeration: quieter rows, nothing hidden */
+.readiness-all {
+  border-top: 2px solid var(--rule);
+  padding-top: 1.1rem;
+}
+.readiness-area-head {
+  display: flex;
+  gap: 0.6rem;
+  align-items: center;
+  font-family: var(--serif);
+  font-size: 1.05rem;
+  margin: 1.2rem 0 0.3rem;
+}
+.readiness-row {
+  border-top: 1px solid var(--rule);
+  padding: 0.65rem 0.2rem;
+  font-size: 0.85rem;
+}
+
+/* shared concern internals */
+.readiness-concern-head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  align-items: center;
+  margin: 0 0 0.35rem;
+}
+.readiness-flag {
+  font-size: 0.66rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+}
+.readiness-flag--blocking { color: var(--st-violated); }
+/* a proven blocking-class fact is settled — say "blocking" without alarm */
+.readiness-concern--proven .readiness-flag--blocking { color: var(--muted-solid); }
+.readiness-flag--eventual { color: var(--frozen); }
+.readiness-workclass {
+  font-family: var(--mono);
+  font-size: 0.68rem;
+  padding: 0.1rem 0.4rem;
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  background: var(--panel);
+  color: var(--muted-solid);
+}
+.readiness-summary { margin: 0 0 0.3rem; font-size: 0.92rem; }
+.readiness-concern-link { text-decoration: none; }
+.readiness-concern-link:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.readiness-concern-link code,
+.readiness-concern-id {
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  color: var(--muted-solid);
+}
+.readiness-witnesses {
+  list-style: none;
+  margin: 0.45rem 0 0;
+  padding: 0.45rem 0.65rem;
+  border-left: 3px solid var(--rule);
+  background: var(--panel);
+}
+.readiness-witnesses li { margin: 0.12rem 0; }
+.readiness-witnesses code { font-size: 0.74rem; }
+.readiness-dest { margin: 0.55rem 0 0; }
+.readiness-board-link { font-weight: 600; color: var(--accent-strong); }
+.readiness-board-link:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.readiness-cli {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+}
+.readiness-cli-token {
+  border: 1px solid var(--rule);
+  background: var(--panel);
+  border-radius: 4px;
+  padding: 0.12rem 0.45rem;
+  font-size: 0.76rem;
+}
+
+/* narrow viewport: the rail becomes a pinned strip — still continuously
+   visible, still ahead of the queue in reading order */
+@media (max-width: 720px) {
+  .readiness-layout { display: block; }
+  .readiness-rail {
+    top: 0;
+    z-index: 5;
+    background: var(--paper);
+    border-bottom: 1px solid var(--rule);
+    margin: 0 0 1rem;
+  }
+  .readiness-rail-list {
+    display: flex;
+    border-left: 0;
+    border-top: 2px solid var(--rule);
+  }
+  .readiness-station { flex: 1; min-width: 0; }
+  .readiness-station-link {
+    margin-left: 0;
+    margin-top: -2px;
+    border-left: 0;
+    border-top: 3px solid transparent;
+    padding: 0.45rem 0.4rem;
+  }
+  .readiness-station--focus .readiness-station-link { border-top-color: var(--accent); }
+  .readiness-station-label { font-size: 0.82rem; }
+}
+
+/* motion is opt-in; a reduced-motion preference gets a static page */
+@media (prefers-reduced-motion: no-preference) {
+  .readiness-station-link,
+  .readiness-board-link { transition: background-color 140ms ease, color 140ms ease; }
+}
+
 /* Syntax-highlighting palettes. Chroma emits no inline colour, so these two
    class-based palettes are the ONLY place code colour is defined — which is
    what lets a dark-mode browser restyle highlighted code instead of showing

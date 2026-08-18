@@ -7,7 +7,7 @@ import (
 	"github.com/jyang234/verdi/internal/dex"
 )
 
-//go:embed assets/board.js assets/boardspec.js assets/boarddiagram.js
+//go:embed assets/board.js assets/boardspec.js assets/boarddiagram.js assets/readiness.js
 var embeddedAssets embed.FS
 
 // mermaidHandler serves dex's vendored mermaid.min.js (05 §Workbench:
@@ -66,6 +66,13 @@ func boardSpecJSHandler() http.HandlerFunc {
 // (spec/board-editor) — same minimal, dependency-free posture.
 func boardDiagramJSHandler() http.HandlerFunc {
 	return embeddedJSHandler("assets/boarddiagram.js")
+}
+
+// readinessJSHandler serves the readiness pilot cockpit's one JS file —
+// page-memory instrumentation only, same minimal, dependency-free
+// posture as the board scripts.
+func readinessJSHandler() http.HandlerFunc {
+	return embeddedJSHandler("assets/readiness.js")
 }
 
 func embeddedJSHandler(name string) http.HandlerFunc {
