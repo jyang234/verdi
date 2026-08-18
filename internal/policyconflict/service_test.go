@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"sort"
 	"strings"
 	"testing"
@@ -432,6 +433,164 @@ func TestServiceEvaluateActorPermutationIsDeterministic(t *testing.T) {
 	assertSameReportBytes(t, first.ReportBytes, second.ReportBytes)
 }
 
+func TestServiceEvaluatePrincipalExemptionRerunsSealedKernel(t *testing.T) {
+	files := operandPolicyStoreFiles(t)
+	files[".verdi/policy/constitution.md"] = strings.NewReplacer(
+		"transitions: [accept, close]", "transitions: [accept, close, policy-exemption-approval, release]",
+		"identity: [exemption-approval]", "identity: [exemption-approval, release]",
+	).Replace(files[".verdi/policy/constitution.md"])
+	files[".verdi/policy/profiles/solo-default.md"] = `---
+schema: verdi.governance-profile/v1
+id: solo-default
+class: solo
+applicable_transitions: [accept, policy-exemption-approval, release]
+identity_trust_sources:
+  - {id: github-org, kind: forge}
+role_mappings:
+  - {role: author, trust_source: github-org, subjects: [alice]}
+  - {role: reviewer, trust_source: github-org, subjects: [alice]}
+  - {role: policy-owner, trust_source: github-org, subjects: [alice]}
+ownership_sources: []
+signature_requirements: []
+required_approvers: []
+distinctness_rules:
+  - {transitions: [release], left_role: author, right_role: reviewer, relation: same-principal}
+evidence_source_restrictions: []
+escalation_thresholds: []
+---
+The sealed service fixture profile.
+`
+	different := principalClaim("different-author-reviewer", "release", policyartifact.OpDifferentPrincipal, "author", "reviewer", universalScope())
+	differentDigest, err := policyartifact.ClaimDigest(different)
+	if err != nil {
+		t.Fatalf("ClaimDigest(different): %v", err)
+	}
+	files[".verdi/policy/policies/principal-separation.md"] = fmt.Sprintf(`---
+schema: verdi.policy/v1
+id: policy/principal-separation
+kind: policy
+title: "Principal separation policy"
+owners: [platform-team]
+scope: {phases: [], environments: [], paths: [], refs: []}
+claims:
+  - id: same-author-reviewer
+    family: identity
+    operator: same-principal
+    subject: release
+    values: [author, reviewer]
+    scope: {phases: [], environments: [], paths: [], refs: []}
+    overridable: true
+  - id: different-author-reviewer
+    family: identity
+    operator: different-principal
+    subject: release
+    values: [author, reviewer]
+    scope: {phases: [], environments: [], paths: [], refs: []}
+    overridable: true
+instructions:
+  - "Keep author and reviewer identity requirements explicit."
+payloads: {}
+template: {identity: "test", digest: %q}
+---
+The fixture starts contradictory until its exact current exemption applies.
+`, testDigest64)
+	principal, err := governanceprincipal.CanonicalPrincipalID("github-org", "alice")
+	if err != nil {
+		t.Fatalf("CanonicalPrincipalID: %v", err)
+	}
+	files[".verdi/policy/exemptions/principal-different.md"] = fmt.Sprintf(`---
+schema: verdi.policy-exemption/v1
+id: policy-exemption/principal-different
+kind: policy-exemption
+title: "Depart from different-principal requirement"
+owners: [platform-team]
+scope: {phases: [], environments: [], paths: [], refs: []}
+witnesses:
+  - policy: policy/principal-separation
+    claim: different-author-reviewer
+    claim_digest: %q
+compensating_controls:
+  - "Retain the same-principal requirement."
+approvals:
+  - role: policy-owner
+    principal: %s
+expiry: "2026-12-31"
+template: {identity: "test", digest: %q}
+---
+The exact current different-principal claim is departed from.
+`, differentDigest, principal, testDigest64)
+	files[".verdi/specs/active/operand-feature/spec.md"] = operandFeatureSpec
+	repo := buildServiceRepo(t, files, "principal exemption")
+
+	profileBytes, err := os.ReadFile(filepath.Join(repo.Dir, ".verdi", "policy", "profiles", "solo-default.md"))
+	if err != nil {
+		t.Fatalf("read profile: %v", err)
+	}
+	profile, err := governanceprincipal.DecodeProfile(profileBytes, governanceprincipal.Catalog{
+		Roles:           []string{"author", "policy-owner", "reviewer"},
+		Transitions:     []string{"accept", "close", "policy-exemption-approval", "release"},
+		EvidenceSources: []string{"ci"}, EscalationMetrics: []string{"age-days"},
+	})
+	if err != nil {
+		t.Fatalf("DecodeProfile: %v", err)
+	}
+	resolve := func(subject string) governanceprincipal.PrincipalResolution {
+		t.Helper()
+		resolver := governanceprincipal.NewResolver(staticFact(governanceprincipal.TrustFact{
+			SourceID: "github-org", SourceKind: governanceprincipal.TrustSourceForge,
+			Available: true, Valid: true, Subjects: []string{subject}, EvidenceDigest: testDigest64,
+		}))
+		actor, resolveErr := resolver.Resolve(context.Background(), profile, governanceprincipal.PrincipalClaim{TrustSource: "github-org", Subject: subject})
+		if resolveErr != nil {
+			t.Fatalf("Resolve(%s): %v", subject, resolveErr)
+		}
+		return actor
+	}
+	service := NewService(repo.Dir, ServiceDeps{
+		Compiler: contextcompile.NewCompiler(), Refs: noCallResolver{t: t},
+		Primary: serviceNoConflictJudge(), Dates: serviceDateSource("2026-08-12"),
+		Actors: []governanceprincipal.PrincipalResolution{resolve("alice"), resolve("bob")},
+	})
+	compileRequest := acceptedOperandRequest("spec/operand-feature")
+	request := Request{Schema: RequestSchema, Target: Target{Kind: TargetAcceptedContext, AcceptedContext: &compileRequest}}
+	result, err := service.Evaluate(context.Background(), request)
+	if err != nil {
+		t.Fatalf("Evaluate: %v", err)
+	}
+	var row *MechanicalEvaluation
+	for i := range result.Report.Mechanical {
+		if result.Report.Mechanical[i].Domain == domainPrincipalRelation {
+			row = &result.Report.Mechanical[i]
+			break
+		}
+	}
+	if row == nil {
+		t.Fatalf("mechanical rows = %+v, policy entries = %+v, want principal-relation row", result.Report.Mechanical, result.Report.Input.PolicyEntries)
+	}
+	if row.Before.State != SolverUnsatisfiable || row.After.State != SolverSatisfiable || row.State != ProofProven || !reflect.DeepEqual(row.Reasons, []ReasonCode{ReasonExemptionEffective}) {
+		t.Fatalf("principal row = %+v, want unsatisfiable before and kernel-authorized exemption-effective survivor", *row)
+	}
+	if len(row.Exemptions) != 1 || !allProven(row.Exemptions[0].Resolution) {
+		t.Fatalf("exemptions = %+v, want one all-five-proven sealed resolution", row.Exemptions)
+	}
+	wantDisclosure := Disclosure{
+		Code: DisclosureSoloPrincipalCollapse,
+		Witnesses: []string{
+			string(principal) + ":author",
+			string(principal) + ":reviewer",
+		},
+	}
+	var matching []Disclosure
+	for _, disclosure := range result.Report.Disclosures {
+		if disclosure.Code == DisclosureSoloPrincipalCollapse {
+			matching = append(matching, disclosure)
+		}
+	}
+	if !reflect.DeepEqual(matching, []Disclosure{wantDisclosure}) {
+		t.Fatalf("disclosures = %+v, want the post-exemption kernel disclosure %+v hoisted once", result.Report.Disclosures, wantDisclosure)
+	}
+}
+
 func TestServiceEvaluateSealedCollectionPermutationsAreDeterministic(t *testing.T) {
 	repo, request, actors, _, _ := serviceDispositionRepo(t)
 	duplicateAuthorityArtifact(t, repo,
@@ -815,11 +974,13 @@ func serviceDispositionRepo(t *testing.T) (*fixturegit.Repo, Request, []governan
 		if err != nil {
 			t.Fatalf("ResolveExemptionAuthority: %v", err)
 		}
-		applied, err := ApplyEffectiveExemptions(row, resolutions)
+		application, err := ApplyEffectiveExemptions(context.Background(), ExemptionApplication{
+			Row: row, Resolutions: resolutions, Profile: view.Profile, Actors: actors,
+		})
 		if err != nil {
 			t.Fatalf("ApplyEffectiveExemptions: %v", err)
 		}
-		rows = append(rows, applied)
+		rows = append(rows, application.Evaluation)
 	}
 	semanticInput, err := BuildSemanticInput(view, rows)
 	if err != nil {

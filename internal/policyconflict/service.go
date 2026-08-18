@@ -115,17 +115,21 @@ func (s *Service) Evaluate(ctx context.Context, request Request) (Result, error)
 	coverage, _ := s.Deps.Refs.(RefCoverageResolver)
 	mechanical := make([]MechanicalEvaluation, 0, len(mechanicalResult.Evaluations))
 	exemptionDisclosures := []Disclosure{}
+	exemptionApplicationDisclosures := []Disclosure{}
 	for _, row := range mechanicalResult.Evaluations {
 		resolutions, disclosures, err := ResolveExemptionAuthority(ctx, authorityInput, row, coverage)
 		if err != nil {
 			return Result{}, operational("resolve exemption authority", err)
 		}
-		resolved, err := ApplyEffectiveExemptions(row, resolutions)
+		application, err := ApplyEffectiveExemptions(ctx, ExemptionApplication{
+			Row: row, Resolutions: resolutions, Profile: view.Profile, Actors: view.Actors,
+		})
 		if err != nil {
 			return Result{}, operational("apply exemptions", err)
 		}
-		mechanical = append(mechanical, resolved)
+		mechanical = append(mechanical, application.Evaluation)
 		exemptionDisclosures = append(exemptionDisclosures, disclosures...)
+		exemptionApplicationDisclosures = append(exemptionApplicationDisclosures, application.Disclosures...)
 	}
 
 	semanticInput, err := BuildSemanticInput(view, mechanical)
@@ -147,7 +151,7 @@ func (s *Service) Evaluate(ctx context.Context, request Request) (Result, error)
 	if err != nil {
 		return Result{}, operational("derive compiler disclosures", err)
 	}
-	disclosures, err := mergeReportDisclosures(inherited, mechanicalResult.Disclosures, exemptionDisclosures, dispositionDisclosures)
+	disclosures, err := mergeReportDisclosures(inherited, mechanicalResult.Disclosures, exemptionDisclosures, exemptionApplicationDisclosures, dispositionDisclosures)
 	if err != nil {
 		return Result{}, operational("combine report disclosures", err)
 	}

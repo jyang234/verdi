@@ -11,12 +11,30 @@
 package policyconflict
 
 import (
+	"context"
 	"fmt"
 	"reflect"
 	"sort"
 
+	"github.com/jyang234/verdi/internal/governanceprincipal"
 	"github.com/jyang234/verdi/internal/policyartifact"
 )
+
+// ExemptionApplication carries the one mechanical row being recomputed and
+// the exact sealed kernel operands Service already used for its initial solve.
+type ExemptionApplication struct {
+	Row         MechanicalEvaluation
+	Resolutions []ExemptionResolution
+	Profile     governanceprincipal.Profile
+	Actors      []governanceprincipal.PrincipalResolution
+}
+
+// ExemptionApplicationResult is one recomputed row plus any translated kernel
+// disclosures produced only by its post-exemption principal-relation solve.
+type ExemptionApplicationResult struct {
+	Evaluation  MechanicalEvaluation
+	Disclosures []Disclosure
+}
 
 // allProven reports whether every one of r's five authority-resolution
 // states is proven (authority design §5.5: "Accept ONLY a resolution whose
@@ -72,13 +90,17 @@ func addReason(reasons []ReasonCode, r ReasonCode) []ReasonCode {
 // makes this an operational contract, not a routine shortfall: an identity
 // absent here means the resolution was constructed against a different
 // row's witnesses, and a digest mismatch means the claim changed under it).
-func ApplyEffectiveExemptions(row MechanicalEvaluation, resolutions []ExemptionResolution) (MechanicalEvaluation, error) {
+func ApplyEffectiveExemptions(ctx context.Context, in ExemptionApplication) (ExemptionApplicationResult, error) {
+	if err := ctx.Err(); err != nil {
+		return ExemptionApplicationResult{}, fmt.Errorf("policyconflict: apply exemptions: %w", err)
+	}
+	row, resolutions := in.Row, in.Resolutions
 	if err := validateRowOperand(row); err != nil {
-		return MechanicalEvaluation{}, err
+		return ExemptionApplicationResult{}, err
 	}
 	applicable, err := dedupeResolutions(resolutions)
 	if err != nil {
-		return MechanicalEvaluation{}, err
+		return ExemptionApplicationResult{}, err
 	}
 
 	accepted := make([]ExemptionResolution, 0, len(applicable))
@@ -100,7 +122,7 @@ func ApplyEffectiveExemptions(row MechanicalEvaluation, resolutions []ExemptionR
 		if anyRejected && row.State != ProofProven {
 			out.Reasons = addReason(out.Reasons, ReasonExemptionIneffective)
 		}
-		return out, nil
+		return ExemptionApplicationResult{Evaluation: out, Disclosures: []Disclosure{}}, nil
 	}
 
 	removed := map[claimIdentity]bool{}
@@ -116,13 +138,13 @@ func ApplyEffectiveExemptions(row MechanicalEvaluation, resolutions []ExemptionR
 				// current row claim". A stale digest is a claim that changed
 				// under the exemption, never a silent widening.
 				if c.ClaimDigest != w.ClaimDigest {
-					return MechanicalEvaluation{}, fmt.Errorf("policyconflict: apply exemptions: exemption %q names claim (policy %q, claim %q) with digest %s, but row %q's current claim digests to %s", r.ID, w.PolicyID, w.ClaimID, w.ClaimDigest, row.ID, c.ClaimDigest)
+					return ExemptionApplicationResult{}, fmt.Errorf("policyconflict: apply exemptions: exemption %q names claim (policy %q, claim %q) with digest %s, but row %q's current claim digests to %s", r.ID, w.PolicyID, w.ClaimID, w.ClaimDigest, row.ID, c.ClaimDigest)
 				}
 				found = true
 				break
 			}
 			if !found {
-				return MechanicalEvaluation{}, fmt.Errorf("policyconflict: apply exemptions: exemption %q names claim (policy %q, claim %q), absent from row %q's current claims", r.ID, w.PolicyID, w.ClaimID, row.ID)
+				return ExemptionApplicationResult{}, fmt.Errorf("policyconflict: apply exemptions: exemption %q names claim (policy %q, claim %q), absent from row %q's current claims", r.ID, w.PolicyID, w.ClaimID, row.ID)
 			}
 			removed[id] = true
 		}
@@ -135,15 +157,9 @@ func ApplyEffectiveExemptions(row MechanicalEvaluation, resolutions []ExemptionR
 		}
 	}
 
-	var afterProof SolverProof
-	if row.Domain == domainPrincipalRelation {
-		afterProof = rerunPrincipalRelationWithoutKernel(remainder)
-	} else {
-		var err error
-		afterProof, err = rerunSolver(row.Domain, remainder)
-		if err != nil {
-			return MechanicalEvaluation{}, err
-		}
+	afterProof, disclosures, err := rerunSolver(row, remainder, in.Profile, in.Actors)
+	if err != nil {
+		return ExemptionApplicationResult{}, err
 	}
 	out.After = afterProof
 
@@ -154,7 +170,7 @@ func ApplyEffectiveExemptions(row MechanicalEvaluation, resolutions []ExemptionR
 	// post-exemption proof without crediting (or blaming) any exemption for
 	// a state the row already held on its own evidence.
 	if row.State == ProofProven {
-		return out, nil
+		return ExemptionApplicationResult{Evaluation: out, Disclosures: disclosures}, nil
 	}
 
 	switch afterProof.State {
@@ -168,15 +184,16 @@ func ApplyEffectiveExemptions(row MechanicalEvaluation, resolutions []ExemptionR
 		}
 	case SolverUnproven:
 		// The departure dissolved the original proof without producing a
-		// new one (see rerunPrincipalRelationWithoutKernel). The row's
+		// new one. The row's
 		// pre-exemption reason described a proof that no longer holds, so
 		// it is replaced by the outcome that does.
 		out.State = ProofUnproven
-		out.Reasons = addReason([]ReasonCode{ReasonPrincipalRelationUnproven}, ReasonExemptionIneffective)
-	default:
-		out.Reasons = addReason(out.Reasons, ReasonExemptionIneffective)
+		out.Reasons = addReason([]ReasonCode{unprovenReasonFor(afterProof)}, ReasonExemptionIneffective)
+	case SolverUnsatisfiable:
+		out.State = ProofViolatedWithWitness
+		out.Reasons = addReason([]ReasonCode{unsatReasonFor(row.Domain, claimsFromRecords(remainder))}, ReasonExemptionIneffective)
 	}
-	return out, nil
+	return ExemptionApplicationResult{Evaluation: out, Disclosures: disclosures}, nil
 }
 
 // claimIdentity is a row claim's composite identity (ledger SI-105): the
@@ -307,70 +324,27 @@ func normalizeRemovals(r ExemptionResolution) (ExemptionResolution, error) {
 	return r, nil
 }
 
-// rerunSolver reruns the identical domain solver (mechanical.go's own
-// solveDiscrete/solveInterval/solvePathCapability — every one a pure
-// function with no kernel or scope-resolver dependency) over remainder.
-// domainPrincipalRelation is handled by rerunPrincipalRelationWithoutKernel
-// instead; it never reaches this function.
-func rerunSolver(domain string, remainder []TypedClaimRecord) (SolverProof, error) {
-	claims := make([]policyartifact.Claim, len(remainder))
-	for i, c := range remainder {
-		claims[i] = c.Claim
+// rerunSolver dispatches through mechanical.go's single domain-solver seam,
+// including the principal-relation kernel path with the same sealed profile
+// and authenticated actors used by the initial solve.
+func rerunSolver(row MechanicalEvaluation, remainder []TypedClaimRecord, profile governanceprincipal.Profile, actors []governanceprincipal.PrincipalResolution) (SolverProof, []Disclosure, error) {
+	group := groupKeyFor(row.Claims[0].Claim)
+	claims := claimsFromRecords(remainder)
+	proof, kernelDisclosures, err := solveGroup(row.Domain, group, claims, profile, actors)
+	if err != nil {
+		return SolverProof{}, nil, err
 	}
-	switch domain {
-	case domainDiscreteSet:
-		return solveDiscrete(claims), nil
-	case domainIntegerInterval:
-		return solveInterval(claims)
-	case domainPathCapability:
-		return solvePathCapability(claims), nil
-	default:
-		return SolverProof{}, fmt.Errorf("policyconflict: apply exemptions: unsupported mechanical domain %q", domain)
+	disclosures, err := translateKernelDisclosures(kernelDisclosures)
+	if err != nil {
+		return SolverProof{}, nil, err
 	}
+	return proof, disclosures, nil
 }
 
-// rerunPrincipalRelationWithoutKernel is the identity domain's post-
-// exemption rerun: §5.5 requires that "the same solver runs again", so the
-// remainder is re-solved rather than having the original proof repeated.
-// ApplyEffectiveExemptions' fixed signature carries no context, profile, or
-// actors (the exact API contract this package implements), so it cannot
-// construct a fresh kernel authorization request the way
-// solvePrincipalRelation does — but §5.3 splits that solver into a
-// kernel-free half and a kernel half, and only the kernel half is out of
-// reach here:
-//
-//   - both relation operators still present: requiring same-principal and
-//     different-principal for one transition and role pair is a textual
-//     contradiction §5.3 proves without any kernel call — unsatisfiable;
-//   - exactly one relation still required: provable only by the kernel,
-//     which is unavailable, so the departure leaves the requirement
-//     unproven — never the removed contradiction repeated (that proof no
-//     longer holds) and never a manufactured pass;
-//   - no relation left: nothing requires a relation at all — satisfiable.
-func rerunPrincipalRelationWithoutKernel(remainder []TypedClaimRecord) SolverProof {
-	hasSame, hasDiff := false, false
-	roles := map[string]bool{}
-	for _, c := range remainder {
-		switch c.Claim.Operator {
-		case policyartifact.OpSamePrincipal:
-			hasSame = true
-		case policyartifact.OpDifferentPrincipal:
-			hasDiff = true
-		default:
-			continue
-		}
-		for _, v := range c.Claim.Values {
-			roles[v] = true
-		}
+func claimsFromRecords(records []TypedClaimRecord) []policyartifact.Claim {
+	claims := make([]policyartifact.Claim, len(records))
+	for i, c := range records {
+		claims[i] = c.Claim
 	}
-	values := sortedKeysOf(roles)
-
-	switch {
-	case hasSame && hasDiff:
-		return SolverProof{State: SolverUnsatisfiable, Domain: domainPrincipalRelation, Values: values, Required: []string{}, Forbidden: []string{}, Witnesses: values}
-	case hasSame || hasDiff:
-		return SolverProof{State: SolverUnproven, Domain: domainPrincipalRelation, Values: values, Required: []string{}, Forbidden: []string{}, Witnesses: []string{}}
-	default:
-		return SolverProof{State: SolverSatisfiable, Domain: domainPrincipalRelation, Values: []string{}, Required: []string{}, Forbidden: []string{}, Witnesses: []string{}}
-	}
+	return claims
 }

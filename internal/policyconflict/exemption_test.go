@@ -2,11 +2,14 @@ package policyconflict
 
 import (
 	"context"
+	"errors"
 	"reflect"
 	"sort"
+	"strings"
 	"testing"
 
 	"github.com/jyang234/verdi/internal/contextcompile"
+	"github.com/jyang234/verdi/internal/governanceprincipal"
 	"github.com/jyang234/verdi/internal/policyartifact"
 )
 
@@ -56,13 +59,24 @@ func evaluateOneRow(t *testing.T, in MechanicalInput) MechanicalEvaluation {
 	return rows[0]
 }
 
+func applyEffectiveExemptions(row MechanicalEvaluation, resolutions []ExemptionResolution) (MechanicalEvaluation, error) {
+	return applyEffectiveExemptionsWithAuthority(row, resolutions, governanceprincipal.Profile{}, nil)
+}
+
+func applyEffectiveExemptionsWithAuthority(row MechanicalEvaluation, resolutions []ExemptionResolution, profile governanceprincipal.Profile, actors []governanceprincipal.PrincipalResolution) (MechanicalEvaluation, error) {
+	result, err := ApplyEffectiveExemptions(context.Background(), ExemptionApplication{
+		Row: row, Resolutions: resolutions, Profile: profile, Actors: actors,
+	})
+	return result.Evaluation, err
+}
+
 // --- accept only all-proven resolutions -------------------------------------
 
 func TestApplyEffectiveExemptionsNoResolutions(t *testing.T) {
 	row := evaluateOneRow(t, MechanicalInput{Claims: []contextcompile.TypedClaim{
 		typedClaim(t, "policy-a", discreteClaim("c1", "level", policyartifact.OpAllowedValues, []string{"gold"}, universalScope())),
 	}})
-	got, err := ApplyEffectiveExemptions(row, nil)
+	got, err := applyEffectiveExemptions(row, nil)
 	if err != nil {
 		t.Fatalf("ApplyEffectiveExemptions: %v", err)
 	}
@@ -93,7 +107,7 @@ func TestApplyEffectiveExemptionsRejectsEachNotProvenState(t *testing.T) {
 	for _, f := range fields {
 		t.Run(f.name+" not proven is rejected", func(t *testing.T) {
 			resolution := rejectedExemption("ex-"+f.name, f.mk(allProvenResolution()))
-			got, err := ApplyEffectiveExemptions(row, []ExemptionResolution{resolution})
+			got, err := applyEffectiveExemptions(row, []ExemptionResolution{resolution})
 			if err != nil {
 				t.Fatalf("ApplyEffectiveExemptions: %v", err)
 			}
@@ -151,7 +165,7 @@ func TestApplyEffectiveExemptionsCoversConflict(t *testing.T) {
 	}
 	resolution := exemptionFor("ex-1", allProvenResolution(), silver)
 
-	got, err := ApplyEffectiveExemptions(row, []ExemptionResolution{resolution})
+	got, err := applyEffectiveExemptions(row, []ExemptionResolution{resolution})
 	if err != nil {
 		t.Fatalf("ApplyEffectiveExemptions: %v", err)
 	}
@@ -199,7 +213,7 @@ func TestApplyEffectiveExemptionsPartialRemovalStillConflict(t *testing.T) {
 	}
 	resolution := exemptionFor("ex-1", allProvenResolution(), harmless)
 
-	got, err := ApplyEffectiveExemptions(row, []ExemptionResolution{resolution})
+	got, err := applyEffectiveExemptions(row, []ExemptionResolution{resolution})
 	if err != nil {
 		t.Fatalf("ApplyEffectiveExemptions: %v", err)
 	}
@@ -235,7 +249,7 @@ func TestApplyEffectiveExemptionsRetainsRejectedBesideAccepted(t *testing.T) {
 		Match: ProofProven, Freshness: ProofProven, Scope: ProofProven, Bound: ProofUnproven, Authorization: ProofProven,
 	})
 
-	got, err := ApplyEffectiveExemptions(row, []ExemptionResolution{rejected, accepted})
+	got, err := applyEffectiveExemptions(row, []ExemptionResolution{rejected, accepted})
 	if err != nil {
 		t.Fatalf("ApplyEffectiveExemptions: %v", err)
 	}
@@ -280,7 +294,7 @@ func TestApplyEffectiveExemptionsDedupesIdenticalResolutionIDs(t *testing.T) {
 	}
 	resolution := exemptionFor("ex-1", allProvenResolution(), silver)
 
-	got, err := ApplyEffectiveExemptions(row, []ExemptionResolution{resolution, resolution})
+	got, err := applyEffectiveExemptions(row, []ExemptionResolution{resolution, resolution})
 	if err != nil {
 		t.Fatalf("ApplyEffectiveExemptions: %v", err)
 	}
@@ -292,7 +306,7 @@ func TestApplyEffectiveExemptionsDedupesIdenticalResolutionIDs(t *testing.T) {
 	}
 
 	conflicting := exemptionFor("ex-1", allProvenResolution(), gold)
-	if _, err := ApplyEffectiveExemptions(row, []ExemptionResolution{resolution, conflicting}); err == nil {
+	if _, err := applyEffectiveExemptions(row, []ExemptionResolution{resolution, conflicting}); err == nil {
 		t.Fatal("want operational error for two different resolutions sharing one id, got nil")
 	}
 }
@@ -337,7 +351,7 @@ func TestApplyEffectiveExemptionsMalformedRowIsOperationalError(t *testing.T) {
 		}
 	}
 	resolution := exemptionFor("ex-1", allProvenResolution(), healthyRecord)
-	if _, err := ApplyEffectiveExemptions(row, []ExemptionResolution{resolution}); err == nil {
+	if _, err := applyEffectiveExemptions(row, []ExemptionResolution{resolution}); err == nil {
 		t.Fatal("want operational error for a malformed row claim, got nil")
 	}
 }
@@ -356,7 +370,7 @@ func TestApplyEffectiveExemptionsProvenDisjointRowIsNotCredited(t *testing.T) {
 	}
 	resolution := exemptionFor("ex-1", allProvenResolution(), row.Claims[0])
 
-	got, err := ApplyEffectiveExemptions(row, []ExemptionResolution{resolution})
+	got, err := applyEffectiveExemptions(row, []ExemptionResolution{resolution})
 	if err != nil {
 		t.Fatalf("ApplyEffectiveExemptions: %v", err)
 	}
@@ -397,7 +411,7 @@ func TestExemptionResolutionSharedClaimBytesDepartOnePolicyIdentity(t *testing.T
 	}
 	resolution := exemptionFor("ex-1", allProvenResolution(), policyAShared)
 
-	got, err := ApplyEffectiveExemptions(row, []ExemptionResolution{resolution})
+	got, err := applyEffectiveExemptions(row, []ExemptionResolution{resolution})
 	if err != nil {
 		t.Fatalf("ApplyEffectiveExemptions: %v", err)
 	}
@@ -416,7 +430,7 @@ func TestExemptionResolutionSharedClaimBytesDepartOnePolicyIdentity(t *testing.T
 		}
 	}
 	both := exemptionFor("ex-2", allProvenResolution(), policyAShared, policyBShared)
-	covered, err := ApplyEffectiveExemptions(row, []ExemptionResolution{both})
+	covered, err := applyEffectiveExemptions(row, []ExemptionResolution{both})
 	if err != nil {
 		t.Fatalf("ApplyEffectiveExemptions: %v", err)
 	}
@@ -436,7 +450,7 @@ func TestExemptionResolutionRemovedClaimsCardinality(t *testing.T) {
 	}
 
 	t.Run("rejected resolution with an explicit empty set is accepted", func(t *testing.T) {
-		got, err := ApplyEffectiveExemptions(row, []ExemptionResolution{rejectedExemption("ex-1", notProven)})
+		got, err := applyEffectiveExemptions(row, []ExemptionResolution{rejectedExemption("ex-1", notProven)})
 		if err != nil {
 			t.Fatalf("ApplyEffectiveExemptions: %v", err)
 		}
@@ -450,21 +464,21 @@ func TestExemptionResolutionRemovedClaimsCardinality(t *testing.T) {
 
 	t.Run("proven resolution removing nothing is refused", func(t *testing.T) {
 		empty := ExemptionResolution{ID: "ex-1", Digest: testDigest64, Resolution: allProvenResolution(), RemovedClaims: []MechanicalClaimWitness{}}
-		if _, err := ApplyEffectiveExemptions(row, []ExemptionResolution{empty}); err == nil {
+		if _, err := applyEffectiveExemptions(row, []ExemptionResolution{empty}); err == nil {
 			t.Fatal("want operational error for an all-proven resolution naming no removed claim, got nil")
 		}
 	})
 
 	t.Run("rejected resolution claiming a removal is refused", func(t *testing.T) {
 		lying := exemptionFor("ex-1", notProven, row.Claims[0])
-		if _, err := ApplyEffectiveExemptions(row, []ExemptionResolution{lying}); err == nil {
+		if _, err := applyEffectiveExemptions(row, []ExemptionResolution{lying}); err == nil {
 			t.Fatal("want operational error for a rejected resolution claiming a removal it never made, got nil")
 		}
 	})
 
 	t.Run("absent removal set is refused", func(t *testing.T) {
 		absent := ExemptionResolution{ID: "ex-1", Digest: testDigest64, Resolution: notProven}
-		if _, err := ApplyEffectiveExemptions(row, []ExemptionResolution{absent}); err == nil {
+		if _, err := applyEffectiveExemptions(row, []ExemptionResolution{absent}); err == nil {
 			t.Fatal("want operational error for an absent (nil) removal set, got nil")
 		}
 	})
@@ -491,7 +505,7 @@ func TestExemptionResolutionWitnessMustNameCurrentRowClaim(t *testing.T) {
 				ID: "ex-1", Digest: testDigest64, Resolution: allProvenResolution(),
 				RemovedClaims: []MechanicalClaimWitness{tc.witness},
 			}
-			if _, err := ApplyEffectiveExemptions(row, []ExemptionResolution{resolution}); err == nil {
+			if _, err := applyEffectiveExemptions(row, []ExemptionResolution{resolution}); err == nil {
 				t.Fatalf("want operational error for %s, got nil", tc.name)
 			}
 		})
@@ -499,7 +513,7 @@ func TestExemptionResolutionWitnessMustNameCurrentRowClaim(t *testing.T) {
 
 	t.Run("exact current witness is applied", func(t *testing.T) {
 		resolution := exemptionFor("ex-1", allProvenResolution(), present)
-		if _, err := ApplyEffectiveExemptions(row, []ExemptionResolution{resolution}); err != nil {
+		if _, err := applyEffectiveExemptions(row, []ExemptionResolution{resolution}); err != nil {
 			t.Fatalf("ApplyEffectiveExemptions(exact witness): %v", err)
 		}
 	})
@@ -529,7 +543,7 @@ func TestExemptionResolutionRemovedClaimsCompositeOrdering(t *testing.T) {
 				{PolicyID: silver.PolicyID, ClaimID: silver.Claim.ID, ClaimDigest: silver.ClaimDigest},
 			},
 		}
-		got, err := ApplyEffectiveExemptions(row, []ExemptionResolution{unsorted})
+		got, err := applyEffectiveExemptions(row, []ExemptionResolution{unsorted})
 		if err != nil {
 			t.Fatalf("ApplyEffectiveExemptions: %v", err)
 		}
@@ -550,7 +564,7 @@ func TestExemptionResolutionRemovedClaimsCompositeOrdering(t *testing.T) {
 				{PolicyID: gold.PolicyID, ClaimID: gold.Claim.ID, ClaimDigest: testDigest64},
 			},
 		}
-		if _, err := ApplyEffectiveExemptions(row, []ExemptionResolution{contradictory}); err == nil {
+		if _, err := applyEffectiveExemptions(row, []ExemptionResolution{contradictory}); err == nil {
 			t.Fatal("want operational error for one identity carrying two digests, got nil")
 		}
 	})
@@ -568,7 +582,7 @@ func TestApplyEffectiveExemptionsNeverMutatesInputRow(t *testing.T) {
 		}
 	}
 	resolution := exemptionFor("ex-1", allProvenResolution(), silver)
-	if _, err := ApplyEffectiveExemptions(row, []ExemptionResolution{resolution}); err != nil {
+	if _, err := applyEffectiveExemptions(row, []ExemptionResolution{resolution}); err != nil {
 		t.Fatalf("ApplyEffectiveExemptions: %v", err)
 	}
 
@@ -590,7 +604,7 @@ func TestApplyEffectiveExemptionsUnknownClaimIdentityIsOperationalError(t *testi
 		Claim: discreteClaim("ghost-claim", "level", policyartifact.OpEquals, []string{"bronze"}, phaseScope("build")),
 	}
 	resolution := exemptionFor("ex-1", allProvenResolution(), ghost)
-	if _, err := ApplyEffectiveExemptions(row, []ExemptionResolution{resolution}); err == nil {
+	if _, err := applyEffectiveExemptions(row, []ExemptionResolution{resolution}); err == nil {
 		t.Fatal("want operational error for a named claim absent from the row, got nil")
 	}
 }
@@ -605,11 +619,11 @@ func TestApplyEffectiveExemptionsDeterministic(t *testing.T) {
 	}
 	resolution := exemptionFor("ex-1", allProvenResolution(), silver)
 
-	got1, err := ApplyEffectiveExemptions(row, []ExemptionResolution{resolution})
+	got1, err := applyEffectiveExemptions(row, []ExemptionResolution{resolution})
 	if err != nil {
 		t.Fatalf("ApplyEffectiveExemptions: %v", err)
 	}
-	got2, err := ApplyEffectiveExemptions(row, []ExemptionResolution{resolution})
+	got2, err := applyEffectiveExemptions(row, []ExemptionResolution{resolution})
 	if err != nil {
 		t.Fatalf("ApplyEffectiveExemptions: %v", err)
 	}
@@ -618,7 +632,7 @@ func TestApplyEffectiveExemptionsDeterministic(t *testing.T) {
 	}
 }
 
-// --- principal-relation domain: no kernel context available -----------------
+// --- principal-relation domain: identical kernel rerun ----------------------
 
 func TestApplyEffectiveExemptionsPrincipalRelationEmptiedRemainderSatisfiable(t *testing.T) {
 	profile := mustDecodeProfile(t, rolePolicyYAML)
@@ -631,7 +645,7 @@ func TestApplyEffectiveExemptionsPrincipalRelationEmptiedRemainderSatisfiable(t 
 	}
 
 	resolution := exemptionFor("ex-1", allProvenResolution(), row.Claims...)
-	got, err := ApplyEffectiveExemptions(row, []ExemptionResolution{resolution})
+	got, err := applyEffectiveExemptions(row, []ExemptionResolution{resolution})
 	if err != nil {
 		t.Fatalf("ApplyEffectiveExemptions: %v", err)
 	}
@@ -643,23 +657,24 @@ func TestApplyEffectiveExemptionsPrincipalRelationEmptiedRemainderSatisfiable(t 
 	}
 }
 
-func TestApplyEffectiveExemptionsPrincipalRelationPartialRemovalConservative(t *testing.T) {
+func TestApplyEffectiveExemptionsPrincipalRelationPartialRemovalRerunsKernel(t *testing.T) {
 	profile := mustDecodeProfile(t, rolePolicyYAML)
+	actors := []governanceprincipal.PrincipalResolution{
+		authenticatedActor(t, profile, "user-a"),
+		authenticatedActor(t, profile, "user-b"),
+	}
 	row := evaluateOneRow(t, MechanicalInput{Claims: []contextcompile.TypedClaim{
 		typedClaim(t, "policy-a", principalClaim("c1", "release", policyartifact.OpSamePrincipal, "author", "reviewer", universalScope())),
 		typedClaim(t, "policy-b", principalClaim("c2", "release", policyartifact.OpDifferentPrincipal, "reviewer", "author", universalScope())),
-	}, Profile: profile})
+	}, Profile: profile, Actors: actors})
 	if row.State != ProofViolatedWithWitness {
 		t.Fatalf("precondition: row.State = %q, want violated-with-witness", row.State)
 	}
 
 	// Remove only the same-principal claim: one different-principal claim
-	// remains. Authority design §5.5 requires "the same solver runs again",
-	// and the surviving half is exactly the kernel-free part of §5.3 — the
-	// same+different textual contradiction is gone, so the original violated
-	// proof must NOT be repeated. What remains (a single relation claim)
-	// cannot be re-verified without the kernel, which this fixed signature
-	// carries no ctx/profile/actors for, so the rerun is unproven.
+	// remains. The same sealed profile and authenticated actors already proved
+	// by the service make that surviving relation kernel-authorized, so §5.5's
+	// identical solver rerun must cover the original contradiction.
 	var samePrincipalClaim TypedClaimRecord
 	for _, c := range row.Claims {
 		if c.Claim.Operator == policyartifact.OpSamePrincipal {
@@ -667,22 +682,105 @@ func TestApplyEffectiveExemptionsPrincipalRelationPartialRemovalConservative(t *
 		}
 	}
 	resolution := exemptionFor("ex-1", allProvenResolution(), samePrincipalClaim)
-	got, err := ApplyEffectiveExemptions(row, []ExemptionResolution{resolution})
+	got, err := applyEffectiveExemptionsWithAuthority(row, []ExemptionResolution{resolution}, profile, actors)
 	if err != nil {
 		t.Fatalf("ApplyEffectiveExemptions: %v", err)
 	}
-	if got.After.State != SolverUnproven {
-		t.Fatalf("After.State = %q, want unproven (one surviving relation claim, no kernel available)", got.After.State)
+	if got.After.State != SolverSatisfiable {
+		t.Fatalf("After.State = %q, want satisfiable (surviving relation is kernel-authorized)", got.After.State)
 	}
-	if got.State != ProofUnproven {
-		t.Fatalf("State = %q, want unproven (the original contradiction no longer holds and nothing re-proves it)", got.State)
+	if got.State != ProofProven {
+		t.Fatalf("State = %q, want proven (the exemption covers the original contradiction)", got.State)
 	}
-	wantReasons := []ReasonCode{ReasonExemptionIneffective, ReasonPrincipalRelationUnproven}
+	wantReasons := []ReasonCode{ReasonExemptionEffective}
 	if !reflect.DeepEqual(got.Reasons, wantReasons) {
 		t.Fatalf("Reasons = %v, want %v", got.Reasons, wantReasons)
 	}
 	if err := validateMechanicalEvaluation("row", got); err != nil {
 		t.Fatalf("result failed the package's own validation: %v", err)
+	}
+}
+
+func TestApplyEffectiveExemptionsPrincipalRelationPreservesKernelOutcomes(t *testing.T) {
+	collapsed := mustDecodeProfile(t, strings.Replace(rolePolicyYAML,
+		`subjects: ["user-b", "user-c"]`, `subjects: ["user-a", "user-c"]`, 1))
+	team := mustDecodeProfile(t, rolePolicyYAML)
+	experimental := mustDecodeProfile(t, experimentalPolicyYAML)
+	tests := []struct {
+		name        string
+		profile     governanceprincipal.Profile
+		actors      []governanceprincipal.PrincipalResolution
+		wantSolver  SolverState
+		wantState   ProofState
+		wantReasons []ReasonCode
+	}{
+		{
+			name:    "violated relation remains violated",
+			profile: collapsed,
+			actors: []governanceprincipal.PrincipalResolution{
+				authenticatedActor(t, collapsed, "user-a"),
+			},
+			wantSolver: SolverUnsatisfiable,
+			wantState:  ProofViolatedWithWitness,
+			wantReasons: []ReasonCode{
+				ReasonExemptionIneffective,
+				ReasonPrincipalRelationViolated,
+			},
+		},
+		{
+			name:        "missing relation evidence remains unproven",
+			profile:     team,
+			actors:      []governanceprincipal.PrincipalResolution{},
+			wantSolver:  SolverUnproven,
+			wantState:   ProofUnproven,
+			wantReasons: []ReasonCode{ReasonExemptionIneffective, ReasonPrincipalRelationUnproven},
+		},
+		{
+			name:    "experimental relation remains unproven",
+			profile: experimental,
+			actors: []governanceprincipal.PrincipalResolution{
+				authenticatedActor(t, experimental, "user-a"),
+				authenticatedActor(t, experimental, "user-b"),
+			},
+			wantSolver:  SolverUnproven,
+			wantState:   ProofUnproven,
+			wantReasons: []ReasonCode{ReasonExemptionIneffective, ReasonProfileExperimental},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			row := evaluateOneRow(t, MechanicalInput{Claims: []contextcompile.TypedClaim{
+				typedClaim(t, "policy-a", principalClaim("c1", "release", policyartifact.OpSamePrincipal, "author", "reviewer", universalScope())),
+				typedClaim(t, "policy-b", principalClaim("c2", "release", policyartifact.OpDifferentPrincipal, "reviewer", "author", universalScope())),
+			}, Profile: test.profile})
+			var same TypedClaimRecord
+			for _, claim := range row.Claims {
+				if claim.Claim.Operator == policyartifact.OpSamePrincipal {
+					same = claim
+				}
+			}
+			got, err := applyEffectiveExemptionsWithAuthority(row, []ExemptionResolution{
+				exemptionFor("ex-1", allProvenResolution(), same),
+			}, test.profile, test.actors)
+			if err != nil {
+				t.Fatalf("ApplyEffectiveExemptions: %v", err)
+			}
+			if got.After.State != test.wantSolver || got.State != test.wantState || !reflect.DeepEqual(got.Reasons, test.wantReasons) {
+				t.Fatalf("result = %+v, want after=%q state=%q reasons=%v", got, test.wantSolver, test.wantState, test.wantReasons)
+			}
+		})
+	}
+}
+
+func TestApplyEffectiveExemptionsHonorsCanceledContext(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	result, err := ApplyEffectiveExemptions(ctx, ExemptionApplication{Row: violatedRow(t)})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("ApplyEffectiveExemptions error = %v, want context.Canceled", err)
+	}
+	if !reflect.DeepEqual(result, ExemptionApplicationResult{}) {
+		t.Fatalf("result = %+v, want zero result", result)
 	}
 }
 
@@ -707,7 +805,7 @@ func TestApplyEffectiveExemptionsPrincipalRelationBothOperatorsSurvive(t *testin
 		}
 	}
 	resolution := exemptionFor("ex-1", allProvenResolution(), oneSame)
-	got, err := ApplyEffectiveExemptions(row, []ExemptionResolution{resolution})
+	got, err := applyEffectiveExemptions(row, []ExemptionResolution{resolution})
 	if err != nil {
 		t.Fatalf("ApplyEffectiveExemptions: %v", err)
 	}
