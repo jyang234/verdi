@@ -196,7 +196,7 @@ func rejectConflictRequestSymlinks(root, requestPath string) error {
 	}
 
 	start := filepath.Clean(string(filepath.Separator))
-	remainder := requestAbs
+	var remainder string
 	if rel, relErr := filepath.Rel(rootAbs, requestAbs); relErr == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 		start = rootAbs
 		remainder = rel
