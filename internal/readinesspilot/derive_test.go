@@ -535,11 +535,98 @@ func TestValidateInputRejectsInvalidPosturesAndSources(t *testing.T) {
 			wantErr: "board item id",
 		},
 		{
-			name: "nil open items",
+			name: "accepts nil declared object ids",
+			mutate: func(in *Input) {
+				in.Shape.DeclaredObjectIDs = nil
+			},
+			wantErr: "declared object ids must be non-nil",
+		},
+		{
+			name: "accepts nil open question ids",
+			mutate: func(in *Input) {
+				in.Shape.OpenQuestionIDs = nil
+			},
+			wantErr: "open question ids must be non-nil",
+		},
+		{
+			name: "accepts nil chain witnesses",
+			mutate: func(in *Input) {
+				in.Provenance.ChainWitnesses = nil
+			},
+			wantErr: "chain witnesses must be non-nil",
+		},
+		{
+			name: "accepts empty chain witness element",
+			mutate: func(in *Input) {
+				in.Provenance.ChainState = StateUnproven
+				in.Provenance.ChainWitnesses = []string{""}
+			},
+			wantErr: "chain witnesses contains an empty witness",
+		},
+		{
+			name: "accepts nil mutation witnesses",
+			mutate: func(in *Input) {
+				in.Provenance.MutationWitnesses = nil
+			},
+			wantErr: "mutation witnesses must be non-nil",
+		},
+		{
+			name: "accepts empty mutation witness element",
+			mutate: func(in *Input) {
+				in.Provenance.MutationState = StateUnproven
+				in.Provenance.MutationWitnesses = []string{""}
+			},
+			wantErr: "mutation witnesses contains an empty witness",
+		},
+		{
+			name: "accepts nil board open items",
 			mutate: func(in *Input) {
 				in.Board.OpenItems = nil
 			},
 			wantErr: "open items must be non-nil",
+		},
+		{
+			name: "accepts nil board witnesses",
+			mutate: func(in *Input) {
+				in.Board.Witnesses = nil
+			},
+			wantErr: "board witnesses must be non-nil",
+		},
+		{
+			name: "accepts empty board witness element",
+			mutate: func(in *Input) {
+				in.Board.State = StateUnproven
+				in.Board.Witnesses = []string{""}
+			},
+			wantErr: "board witnesses contains an empty witness",
+		},
+		{
+			name: "accepts nil shape fallback",
+			mutate: func(in *Input) {
+				in.Fallbacks.Shape = nil
+			},
+			wantErr: "shape fallback must be non-nil",
+		},
+		{
+			name: "accepts nil success fallback",
+			mutate: func(in *Input) {
+				in.Fallbacks.Success = nil
+			},
+			wantErr: "success fallback must be non-nil",
+		},
+		{
+			name: "accepts nil context fallback",
+			mutate: func(in *Input) {
+				in.Fallbacks.Context = nil
+			},
+			wantErr: "context fallback must be non-nil",
+		},
+		{
+			name: "accepts nil review fallback",
+			mutate: func(in *Input) {
+				in.Fallbacks.Review = nil
+			},
+			wantErr: "review fallback must be non-nil",
 		},
 		{
 			name: "journey validator reused",

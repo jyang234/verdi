@@ -147,8 +147,8 @@ func (in Input) validate() error {
 	if err := in.Provenance.ChainState.validate("chain state"); err != nil {
 		return err
 	}
-	if in.Provenance.ChainWitnesses == nil {
-		return fmt.Errorf("readinesspilot: chain witnesses must be non-nil")
+	if err := validateWitnesses("chain witnesses", in.Provenance.ChainWitnesses); err != nil {
+		return err
 	}
 	if in.Provenance.ChainState != StateProven && len(in.Provenance.ChainWitnesses) == 0 {
 		return fmt.Errorf("readinesspilot: unresolved chain state requires a witness")
@@ -156,8 +156,8 @@ func (in Input) validate() error {
 	if in.Provenance.MutationState != StateProven && in.Provenance.MutationState != StateUnproven {
 		return fmt.Errorf("readinesspilot: mutation state %q must be proven or unproven", in.Provenance.MutationState)
 	}
-	if in.Provenance.MutationWitnesses == nil {
-		return fmt.Errorf("readinesspilot: mutation witnesses must be non-nil")
+	if err := validateWitnesses("mutation witnesses", in.Provenance.MutationWitnesses); err != nil {
+		return err
 	}
 	if in.Provenance.MutationState == StateUnproven && len(in.Provenance.MutationWitnesses) == 0 {
 		return fmt.Errorf("readinesspilot: unproven mutation state requires a witness")
@@ -168,8 +168,8 @@ func (in Input) validate() error {
 	if in.Board.OpenItems == nil {
 		return fmt.Errorf("readinesspilot: board open items must be non-nil")
 	}
-	if in.Board.Witnesses == nil {
-		return fmt.Errorf("readinesspilot: board witnesses must be non-nil")
+	if err := validateWitnesses("board witnesses", in.Board.Witnesses); err != nil {
+		return err
 	}
 	if in.Board.State == StateUnproven && len(in.Board.Witnesses) == 0 {
 		return fmt.Errorf("readinesspilot: unproven board state requires a witness")

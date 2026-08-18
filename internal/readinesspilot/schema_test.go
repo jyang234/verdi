@@ -101,6 +101,20 @@ func TestValidateSnapshotRejectsClosedContractViolations(t *testing.T) {
 			wantErr: "invalid id",
 		},
 		{
+			name: "accepts unknown concern identity vocabulary",
+			mutate: func(s *Snapshot) {
+				s.AllConcerns[0].ID = "shape/invented"
+			},
+			wantErr: "not in the closed concern identity vocabulary",
+		},
+		{
+			name: "accepts empty witness element",
+			mutate: func(s *Snapshot) {
+				s.AllConcerns[0].Witnesses = []string{""}
+			},
+			wantErr: "empty witness",
+		},
+		{
 			name: "unsorted witnesses",
 			mutate: func(s *Snapshot) {
 				s.AllConcerns[0].Witnesses = []string{"b", "a"}

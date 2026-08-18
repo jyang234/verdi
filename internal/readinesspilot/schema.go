@@ -251,8 +251,8 @@ func (c Concern) validate() error {
 	if c.Summary == "" {
 		return fmt.Errorf("concern %q summary must be non-empty", c.ID)
 	}
-	if c.Witnesses == nil {
-		return fmt.Errorf("concern %q witnesses must be non-nil", c.ID)
+	if err := validateWitnesses(fmt.Sprintf("concern %q witnesses", c.ID), c.Witnesses); err != nil {
+		return err
 	}
 	if !strictlySorted(c.Witnesses) {
 		return fmt.Errorf("concern %q witnesses must be sorted and deduplicated", c.ID)
@@ -385,6 +385,18 @@ func validateIdentity(field, value string) error {
 	for _, component := range strings.Split(value, "/") {
 		if component == "" {
 			return fmt.Errorf("readinesspilot: %s has an empty component", field)
+		}
+	}
+	return nil
+}
+
+func validateWitnesses(field string, witnesses []string) error {
+	if witnesses == nil {
+		return fmt.Errorf("readinesspilot: %s must be non-nil", field)
+	}
+	for _, witness := range witnesses {
+		if witness == "" {
+			return fmt.Errorf("readinesspilot: %s contains an empty witness", field)
 		}
 	}
 	return nil
