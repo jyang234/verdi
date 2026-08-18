@@ -328,7 +328,7 @@ func writeDefaultEntry(buf *bytes.Buffer, root string, e refindex.Entry, name st
 }
 
 // defaultCorpusHref, defaultBoardHref, matrixHref, verdictHref (here),
-// branchBoardHref (the shared per-branch constructor below) and
+// BranchBoardHref (the shared per-branch constructor below) and
 // designBoardHref (below writeDesignEntry) are the directory's address
 // grammar, each computed in exactly one place and shared verbatim with the
 // home-status-glance leading section (glance.go) — the "mirrors exactly,
@@ -355,14 +355,14 @@ const (
 	boardSpecPrefix   = "/board/spec/"
 )
 
-// branchBoardHref is THE single constructor of the per-branch board address
+// BranchBoardHref is THE single constructor of the per-branch board address
 // (draft-boards dc-1): the branch rides one path segment with its slashes
 // percent-encoded, the spec name beneath it emitted verbatim (always a
 // valid slug). The directory's design entries (designBoardHref) and the
 // diagram editor's origin path (boardOriginPath, boarddiagram.go) both build
 // the address through here; diagramExitStore parses the same two prefixes
 // back out.
-func branchBoardHref(branch, name string) string {
+func BranchBoardHref(branch, name string) string {
 	return branchBoardPrefix + url.PathEscape(branch) + boardSpecPrefix + name
 }
 
@@ -394,11 +394,11 @@ func writeDesignEntry(buf *bytes.Buffer, e refindex.Entry, name string, inReview
 
 // designBoardHref is the directory's per-branch board address for a design
 // branch: the branch is always designPrefix+name (feature dc-1), and the
-// address is built through the shared branchBoardHref constructor — the
+// address is built through the shared BranchBoardHref constructor — the
 // name segment is a valid slug emitted verbatim, never containing a
 // character url.PathEscape would touch.
 func designBoardHref(name string) string {
-	return branchBoardHref(designPrefix+name, name)
+	return BranchBoardHref(designPrefix+name, name)
 }
 
 // writeStatusChip renders the entry's spec status in the same
