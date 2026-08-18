@@ -325,6 +325,7 @@ func concernIdentity(id string, timing Timing) (AreaID, bool, bool, error) {
 	case id == "review/action":
 		return AreaReview, false, true, nil
 	default:
+		// vocab:identity — "closed" describes enum closure in a schema diagnostic, not the renameable lifecycle state.
 		return "", false, false, fmt.Errorf("invalid id %q: not in the closed concern identity vocabulary", id)
 	}
 }

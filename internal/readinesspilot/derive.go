@@ -228,6 +228,7 @@ func deriveShape(input Input) []Concern {
 	))
 	concerns = append(concerns, newConcern(
 		"shape/mutation", AreaShape, input.Provenance.MutationState, false, TimingCurrent, "",
+		// vocab:identity — "Draft mutation" names the ASD draftmutation source-fact domain, not a lifecycle-state display label.
 		"Draft mutation residue posture", input.Provenance.MutationWitnesses,
 		cliDestination(input.Provenance.MutationState, input.Fallbacks.Shape),
 	))
