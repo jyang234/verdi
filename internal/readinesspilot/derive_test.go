@@ -25,12 +25,16 @@ func TestDeriveHappyPath(t *testing.T) {
 	if snapshot.CurrentFocus != "" || len(snapshot.Attention) != 0 {
 		t.Fatalf("all-proven snapshot focus/attention = %q/%+v, want empty", snapshot.CurrentFocus, snapshot.Attention)
 	}
-	if snapshot.TargetRef != "spec/example" || snapshot.Branch != "design/example" || snapshot.Head != "0123456789abcdef0123456789abcdef01234567" {
+	if snapshot.TargetRef != "spec/example" || snapshot.TargetTitle != "Exact source title" || snapshot.Branch != "design/example" || snapshot.Head != "0123456789abcdef0123456789abcdef01234567" {
 		t.Fatalf("snapshot identity = %+v, want exact input identity", snapshot)
 	}
-	for _, area := range snapshot.Areas {
+	wantLabels := []string{"Define the work", "Define success", "Check constraints", "Get approval"}
+	for i, area := range snapshot.Areas {
 		if area.State != StateProven {
 			t.Fatalf("area %q state = %q, want %q", area.ID, area.State, StateProven)
+		}
+		if area.Label != wantLabels[i] {
+			t.Fatalf("area[%d] label = %q, want %q", i, area.Label, wantLabels[i])
 		}
 	}
 }
@@ -465,6 +469,69 @@ func TestDeriveRetainsLaterViolationWhenEarlierAreaIsCurrent(t *testing.T) {
 	}
 }
 
+func TestDeriveGroupsAttentionByCurrentFocusThenExistingComparator(t *testing.T) {
+	t.Parallel()
+
+	in := baseInput(t)
+	in.Shape.ProblemPresent = false
+	in.Shape.OpenQuestionIDs = []string{"oq-1"}
+	in.Provenance.ChainState = StateUnproven
+	in.Provenance.ChainWitnesses = []string{"design provenance is unavailable"}
+	in.Journey.Blockers.Current = mustJourney(t).Blockers.Current
+	in.Conflict = conflictReport(t, policyconflict.VerdictBlockedViolated)
+
+	snapshot := mustDerive(t, in)
+	if snapshot.CurrentFocus != AreaShape {
+		t.Fatalf("CurrentFocus = %q, want %q", snapshot.CurrentFocus, AreaShape)
+	}
+	wantIDs := []string{
+		"shape/problem",
+		"shape/question/oq-1",
+		"shape/provenance",
+		"success/blocker/obligation-quality/ac-2/runtime",
+		"context/verdict",
+		"review/blocker/forge-facts-unavailable/close",
+		"context/semantic/semantic/example-conflict",
+	}
+	gotIDs := make([]string, len(snapshot.Attention))
+	for i, concern := range snapshot.Attention {
+		gotIDs[i] = concern.ID
+	}
+	if !reflect.DeepEqual(gotIDs, wantIDs) {
+		t.Fatalf("attention ids = %q, want current-focus group then unchanged comparator order %q", gotIDs, wantIDs)
+	}
+
+	currentCount := 0
+	remainderCount := 0
+	seenRemainder := false
+	positions := make(map[string]int, len(snapshot.Attention))
+	for i, concern := range snapshot.Attention {
+		positions[concern.ID] = i
+		isCurrent := concern.Area == snapshot.CurrentFocus
+		if isCurrent {
+			currentCount++
+			if seenRemainder {
+				t.Fatalf("current-focus concern %q follows remainder: %+v", concern.ID, snapshot.Attention)
+			}
+		} else {
+			remainderCount++
+			seenRemainder = true
+		}
+		if i > 0 {
+			previous := snapshot.Attention[i-1]
+			if (previous.Area == snapshot.CurrentFocus) == isCurrent && !attentionLess(previous, concern) {
+				t.Fatalf("existing comparator changed within attention group at %q then %q", previous.ID, concern.ID)
+			}
+		}
+	}
+	if currentCount < 2 || remainderCount < 2 {
+		t.Fatalf("test requires at least two concerns per group, got current=%d remainder=%d", currentCount, remainderCount)
+	}
+	if positions["shape/question/oq-1"] >= positions["context/verdict"] {
+		t.Fatalf("current-area unproven concern did not precede downstream blocking violation: %+v", snapshot.Attention)
+	}
+}
+
 func TestDeriveInputOrderDeterminism(t *testing.T) {
 	t.Parallel()
 
@@ -499,6 +566,20 @@ func TestValidateInputRejectsInvalidPosturesAndSources(t *testing.T) {
 		mutate  func(*Input)
 		wantErr string
 	}{
+		{
+			name: "missing target title",
+			mutate: func(in *Input) {
+				in.Target.Title = ""
+			},
+			wantErr: "target title",
+		},
+		{
+			name: "control-bearing target title",
+			mutate: func(in *Input) {
+				in.Target.Title = "Unsafe\ntitle"
+			},
+			wantErr: "target title",
+		},
 		{
 			name: "invalid chain enum",
 			mutate: func(in *Input) {
@@ -677,6 +758,7 @@ func baseInput(t *testing.T) Input {
 	return Input{
 		Target: TargetFacts{
 			Ref:       "spec/example",
+			Title:     "Exact source title",
 			Class:     "feature",
 			Branch:    "design/example",
 			Head:      "0123456789abcdef0123456789abcdef01234567",

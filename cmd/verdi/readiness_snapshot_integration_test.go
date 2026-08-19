@@ -20,16 +20,22 @@ import (
 )
 
 func TestReadinessSnapshotFeatureAndStoryTargets(t *testing.T) {
-	for _, class := range []string{"feature", "story"} {
-		t.Run(class, func(t *testing.T) {
-			repo, requestPath, _, targetRef, _ := readinessSnapshotRepo(t, class)
+	for _, tc := range []struct {
+		class string
+		title string
+	}{
+		{class: "feature", title: "Feature Alpha"},
+		{class: "story", title: "Borrower appeal: exact source title"},
+	} {
+		t.Run(tc.class, func(t *testing.T) {
+			repo, requestPath, _, targetRef, _ := readinessSnapshotRepo(t, tc.class)
 			builder := localReadinessSnapshotBuilder{providerFactory: readinessSnapshotProviderFactory(t, repo.Dir, policyconflict.VerdictPass, nil)}
 			snapshot, err := builder.Build(context.Background(), repo.Dir, requestPath)
 			if err != nil {
 				t.Fatalf("Build: %v", err)
 			}
-			if snapshot.TargetRef != targetRef || snapshot.TargetClass != class || snapshot.Branch != "design/"+strings.TrimPrefix(targetRef, "spec/") || snapshot.Head != repo.Head {
-				t.Fatalf("snapshot identity = %+v, want %s %s at current design branch/%s", snapshot, targetRef, class, repo.Head)
+			if snapshot.TargetRef != targetRef || snapshot.TargetTitle != tc.title || snapshot.TargetClass != tc.class || snapshot.Branch != "design/"+strings.TrimPrefix(targetRef, "spec/") || snapshot.Head != repo.Head {
+				t.Fatalf("snapshot identity = %+v, want %s %q %s at current design branch/%s", snapshot, targetRef, tc.title, tc.class, repo.Head)
 			}
 			if err := snapshot.Validate(); err != nil {
 				t.Fatalf("snapshot Validate: %v", err)
@@ -293,7 +299,7 @@ func assertNoReadinessPersistence(t *testing.T, root string) {
 const readinessStorySpec = `---
 id: spec/story-alpha
 kind: spec
-title: "Story Alpha"
+title: "Borrower appeal: exact source title"
 owners: [alpha-team]
 class: story
 story: jira:ALPHA-1

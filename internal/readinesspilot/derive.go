@@ -13,6 +13,7 @@ import (
 // surface, when one is servable.
 type TargetFacts struct {
 	Ref       string
+	Title     string
 	Class     string
 	Branch    string
 	Head      string
@@ -99,10 +100,13 @@ func Derive(input Input) (Snapshot, error) {
 			attention = append(attention, concern)
 		}
 	}
-	sort.Slice(attention, func(i, j int) bool { return attentionLess(attention[i], attention[j]) })
+	sort.Slice(attention, func(i, j int) bool {
+		return attentionLessForFocus(currentFocus, attention[i], attention[j])
+	})
 
 	snapshot := Snapshot{
 		TargetRef:     input.Target.Ref,
+		TargetTitle:   input.Target.Title,
 		TargetClass:   input.Target.Class,
 		Branch:        input.Target.Branch,
 		Head:          input.Target.Head,
@@ -122,6 +126,9 @@ func Derive(input Input) (Snapshot, error) {
 func (in Input) validate() error {
 	if err := validateIdentity("target ref", in.Target.Ref); err != nil {
 		return err
+	}
+	if in.Target.Title == "" || containsControl(in.Target.Title) {
+		return fmt.Errorf("readinesspilot: target title must be non-empty and control-free")
 	}
 	if in.Target.Class != "feature" && in.Target.Class != "story" {
 		return fmt.Errorf("readinesspilot: unknown target class %q", in.Target.Class)

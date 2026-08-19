@@ -203,7 +203,7 @@ func (b localReadinessSnapshotBuilder) Build(ctx context.Context, root, requestP
 
 	input := readinesspilot.Input{
 		Target: readinesspilot.TargetFacts{
-			Ref: request.Spec, Class: string(spec.Class), Branch: branch, Head: head,
+			Ref: request.Spec, Title: spec.Title, Class: string(spec.Class), Branch: branch, Head: head,
 			BoardPath: workbench.BranchBoardHref(branch, name),
 		},
 		Shape: readinesspilot.ShapeFacts{

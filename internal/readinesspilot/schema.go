@@ -70,6 +70,7 @@ type Area struct {
 // workbench.
 type Snapshot struct {
 	TargetRef     string
+	TargetTitle   string
 	TargetClass   string
 	Branch        string
 	Head          string
@@ -84,10 +85,10 @@ type Snapshot struct {
 var digestPattern = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
 
 var orderedAreas = []Area{
-	{ID: AreaShape, Label: "Shape proposal"},
-	{ID: AreaSuccess, Label: "Show success"},
-	{ID: AreaContext, Label: "Check context"},
-	{ID: AreaReview, Label: "Request review"},
+	{ID: AreaShape, Label: "Define the work"},
+	{ID: AreaSuccess, Label: "Define success"},
+	{ID: AreaContext, Label: "Check constraints"},
+	{ID: AreaReview, Label: "Get approval"},
 }
 
 var areaOrder = map[AreaID]int{
@@ -102,6 +103,9 @@ var areaOrder = map[AreaID]int{
 func (s Snapshot) Validate() error {
 	if err := validateIdentity("target ref", s.TargetRef); err != nil {
 		return err
+	}
+	if s.TargetTitle == "" || containsControl(s.TargetTitle) {
+		return fmt.Errorf("readinesspilot: target title must be non-empty and control-free")
 	}
 	if s.TargetClass != "feature" && s.TargetClass != "story" {
 		return fmt.Errorf("readinesspilot: unknown target class %q", s.TargetClass)
@@ -199,8 +203,8 @@ func (s Snapshot) Validate() error {
 		}
 	}
 	for i := 1; i < len(s.Attention); i++ {
-		if !attentionLess(s.Attention[i-1], s.Attention[i]) {
-			return fmt.Errorf("readinesspilot: attention order is not the fixed comparator at %q", s.Attention[i].ID)
+		if !attentionLessForFocus(wantFocus, s.Attention[i-1], s.Attention[i]) {
+			return fmt.Errorf("readinesspilot: attention order is not the fixed current-focus grouping at %q", s.Attention[i].ID)
 		}
 	}
 	return nil
@@ -376,6 +380,15 @@ func attentionLess(a, b Concern) bool {
 		return a.State == StateViolated
 	}
 	return concernLess(a, b)
+}
+
+func attentionLessForFocus(currentFocus AreaID, a, b Concern) bool {
+	aCurrent := a.Area == currentFocus
+	bCurrent := b.Area == currentFocus
+	if aCurrent != bCurrent {
+		return aCurrent
+	}
+	return attentionLess(a, b)
 }
 
 func validateIdentity(field, value string) error {

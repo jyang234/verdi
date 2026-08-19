@@ -24,6 +24,20 @@ func TestValidateSnapshotRejectsClosedContractViolations(t *testing.T) {
 		wantErr string
 	}{
 		{
+			name: "missing target title",
+			mutate: func(s *Snapshot) {
+				s.TargetTitle = ""
+			},
+			wantErr: "target title",
+		},
+		{
+			name: "control-bearing target title",
+			mutate: func(s *Snapshot) {
+				s.TargetTitle = "Unsafe\ntitle"
+			},
+			wantErr: "target title",
+		},
+		{
 			name: "unknown state",
 			mutate: func(s *Snapshot) {
 				s.AllConcerns[0].State = State("ready")
@@ -308,7 +322,7 @@ func TestValidateFocusAndAttentionLosslessness(t *testing.T) {
 			wantErr: "duplicate concern",
 		},
 		{
-			name: "queue order",
+			name: "former global queue order",
 			mutate: func(s *Snapshot) {
 				s.Attention[0], s.Attention[1] = s.Attention[1], s.Attention[0]
 			},
@@ -352,15 +366,16 @@ func validSnapshot() Snapshot {
 	}
 	return Snapshot{
 		TargetRef:     "spec/example",
+		TargetTitle:   "Exact source title",
 		TargetClass:   "feature",
 		Branch:        "design/example",
 		Head:          "0123456789abcdef0123456789abcdef01234567",
 		RequestDigest: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 		Areas: []Area{
-			{ID: AreaShape, Label: "Shape proposal", State: StateProven},
-			{ID: AreaSuccess, Label: "Show success", State: StateProven},
-			{ID: AreaContext, Label: "Check context", State: StateProven},
-			{ID: AreaReview, Label: "Request review", State: StateProven},
+			{ID: AreaShape, Label: "Define the work", State: StateProven},
+			{ID: AreaSuccess, Label: "Define success", State: StateProven},
+			{ID: AreaContext, Label: "Check constraints", State: StateProven},
+			{ID: AreaReview, Label: "Get approval", State: StateProven},
 		},
 		CurrentFocus: "",
 		Attention:    []Concern{},
@@ -402,7 +417,7 @@ func validOrderedQueueSnapshot() Snapshot {
 	snapshot.Areas[2].State = StateViolated
 	snapshot.Areas[3].State = StateProven
 	snapshot.CurrentFocus = AreaShape
-	snapshot.Attention = []Concern{contextVerdict, shape, success, review}
+	snapshot.Attention = []Concern{shape, contextVerdict, success, review}
 	return snapshot
 }
 
