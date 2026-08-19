@@ -105,9 +105,6 @@ the corrective route remains a barrier to entry. Exact technical facts and a
 destination are present, but presence alone did not communicate the next
 action.
 
-The remaining navigation, work-class, board-edit, restart, and event-sequence
-steps are still in progress. No favorable interpretation is applied to them.
-
 After expanding the complete queue, the participant described every additional
 item as actionable later and asked whether the four stages are intended to be
 completed out of order. The cockpit does not answer that sequencing question.
@@ -352,7 +349,7 @@ queue` from this point forward.
 | Find another concern | proven | Participant identified the third `Define success` card as work to do soon afterward. |
 | Distinguish mechanical work from human judgment | proven | Participant identified the policy-conflict verdict as mechanical and principal-role review as human judgment, while recommending a visible human-review flag. |
 | Follow a board link or CLI fallback | proven | Participant returned to the existing editable board from the cockpit flow. |
-| Make one supported board edit | proven | Participant created or revisited the prompted sticky and confirmed that in-place editing remains unavailable. |
+| Make one supported board edit | unproven | Participant returned to the board and confirmed that the sticky remained non-editable, but did not supply an exact successful story-scenario mutation witness. Revisiting is not treated as an edit. |
 | Explain why restart is required | violated-with-witness | Participant chose graduation rather than draft editing as the desired confirmation boundary but did not identify the current manual serve restart required to recompute the startup snapshot. |
 | Preserve and record the closed event sequence | unproven | Pending. |
 
@@ -392,8 +389,18 @@ return to their original delivery units.
 
 - Consolidated Task 4 implementation review: approved at `3580cb62`.
 - Corrected-runtime closure review: approved at `8fbef095`.
-- Focused readiness Playwright: 15/15 passed before the corrected human rerun.
-- Full browser suite: 239/239 passed before the corrected human rerun.
+- `go test -race ./internal/workbench -run 'TestReadiness' -count=1`:
+  passed before the corrected human rerun.
+- `go test -race ./cmd/e2eharness -run 'TestReadiness' -count=1`:
+  passed before the corrected human rerun.
+- From `e2e/`,
+  `npx playwright test tests/49-readiness-pilot.spec.ts`: 15/15 passed before
+  the corrected human rerun.
+- `make e2e`: 239/239 passed before the corrected human rerun.
+- `go test ./internal/specalign -run 'TestVocabProseWitness' -count=1`:
+  passed before the corrected human rerun.
+- `go vet ./internal/workbench ./cmd/e2eharness`: passed with no output.
+- `git diff --check`: passed with no output.
 - Human usability is not inferred from automated browser success.
 
 ## Wave 3B re-entry
