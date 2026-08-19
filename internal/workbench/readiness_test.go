@@ -209,7 +209,7 @@ func TestReadinessRender_OrientationLeadsWithTitle(t *testing.T) {
 	if title < 0 || step < 0 || purpose < 0 || target < 0 {
 		t.Fatalf("page is missing orientation pieces (title=%d step=%d purpose=%d target=%d)", title, step, purpose, target)
 	}
-	if !(title < step && step < purpose && purpose < target) {
+	if title >= step || step >= purpose || purpose >= target {
 		t.Fatalf("orientation order is wrong: title=%d step=%d purpose=%d target-tech=%d", title, step, purpose, target)
 	}
 
