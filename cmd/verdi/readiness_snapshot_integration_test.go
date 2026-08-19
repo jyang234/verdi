@@ -53,6 +53,7 @@ func TestReadinessSnapshotProvenanceMutationAndBoard(t *testing.T) {
 			t.Fatalf("provenance state = %q, want unproven", concern.State)
 		}
 		assertReadinessStringsContain(t, concern.Witnesses, "sidecar is absent")
+		assertReadinessBoardDestination(t, concern, "/b/design%2Ffeature-alpha/board/spec/feature-alpha")
 	})
 
 	t.Run("malformed provenance is operational", func(t *testing.T) {
@@ -84,6 +85,7 @@ func TestReadinessSnapshotProvenanceMutationAndBoard(t *testing.T) {
 			t.Fatalf("provenance state = %q, want unproven", concern.State)
 		}
 		assertReadinessStringsContain(t, concern.Witnesses, "direct Markdown")
+		assertReadinessBoardDestination(t, concern, "/b/design%2Ffeature-alpha/board/spec/feature-alpha")
 	})
 
 	t.Run("mutation residue is disclosed without recovery", func(t *testing.T) {
@@ -106,6 +108,7 @@ func TestReadinessSnapshotProvenanceMutationAndBoard(t *testing.T) {
 		}
 		assertReadinessStringsContain(t, concern.Witnesses, "journal")
 		assertReadinessStringsContain(t, concern.Witnesses, "spec stage")
+		assertReadinessBoardDestination(t, concern, "/b/design%2Ffeature-alpha/board/spec/feature-alpha")
 		journalBytes, _ := os.ReadFile(journal)
 		stageBytes, _ := os.ReadFile(stage)
 		if string(journalBytes) != "leave-unread" || string(stageBytes) != "leave-unread" {
@@ -142,6 +145,7 @@ func TestReadinessSnapshotProvenanceMutationAndBoard(t *testing.T) {
 				t.Fatalf("board state = %q, want unproven", concern.State)
 			}
 			assertReadinessStringsContain(t, concern.Witnesses, "permission denied")
+			assertReadinessBoardDestination(t, concern, "/b/design%2Ffeature-alpha/board/spec/feature-alpha")
 		})
 
 		t.Run("malformed record is operational", func(t *testing.T) {
@@ -183,8 +187,59 @@ func TestReadinessSnapshotConflictVerdictsAndDestinations(t *testing.T) {
 				assertReadinessCLI(t, concern.Destination.CLI, []string{"verdi", "context", "conflict", "--request", requestPath})
 			}
 			provenance := readinessSnapshotConcern(t, snapshot, "shape/provenance")
-			assertReadinessCLI(t, provenance.Destination.CLI, []string{"verdi", "design", "provenance", targetRef})
+			if provenance.Destination.BoardPath != "/b/design%2Ffeature-alpha/board/spec/feature-alpha" || len(provenance.Destination.CLI) != 0 {
+				t.Fatalf("shape provenance destination = %+v, want the existing branch board and no CLI", provenance.Destination)
+			}
+			review := readinessSnapshotConcern(t, snapshot, "review/action")
+			assertReadinessCLI(t, review.Destination.CLI, []string{"verdi", "journey", targetRef})
 		})
+	}
+}
+
+func TestReadinessSnapshotEmittedCLIVectorsReachRegisteredCommands(t *testing.T) {
+	bin := buildVerdiBinary(t)
+	repo, requestPath, _, _, _ := readinessSnapshotRepo(t, "story")
+
+	snapshot, err := (localReadinessSnapshotBuilder{}).Build(context.Background(), repo.Dir, requestPath)
+	if err != nil {
+		t.Fatalf("Build with production dependencies: %v", err)
+	}
+	executedAreas := map[readinesspilot.AreaID]bool{}
+	for _, concern := range snapshot.AllConcerns {
+		cli := concern.Destination.CLI
+		if len(cli) == 0 {
+			continue
+		}
+		executedAreas[concern.Area] = true
+		t.Run(concern.ID, func(t *testing.T) {
+			stdout, stderr, code := runVerdiBinary(t, bin, repo.Dir, []string{"CI_DEFAULT_BRANCH=main"}, cli[1:]...)
+			if strings.Contains(stderr, "usage:") || strings.Contains(stderr, "not implemented") {
+				t.Fatalf("emitted CLI %q was rejected by registered dispatch grammar: exit=%d stdout=%q stderr=%q", cli, code, stdout, stderr)
+			}
+			if code < 0 || code > 2 {
+				t.Fatalf("emitted CLI %q returned exit=%d, want honest clean/verdict/operational exit 0/1/2; stdout=%q stderr=%q", cli, code, stdout, stderr)
+			}
+		})
+	}
+
+	for _, area := range []readinesspilot.AreaID{readinesspilot.AreaSuccess, readinesspilot.AreaContext, readinesspilot.AreaReview} {
+		if !executedAreas[area] {
+			t.Errorf("no emitted CLI vector exercised for area %q", area)
+		}
+	}
+	if executedAreas[readinesspilot.AreaShape] {
+		t.Error("shape area emitted a CLI vector instead of the existing branch board destination")
+	}
+	provenance := readinessSnapshotConcern(t, snapshot, "shape/provenance")
+	if provenance.Destination.BoardPath != "/b/design%2Fstory-alpha/board/spec/story-alpha" || len(provenance.Destination.CLI) != 0 {
+		t.Errorf("shape provenance destination = %+v, want the existing branch board and no invented CLI", provenance.Destination)
+	}
+}
+
+func assertReadinessBoardDestination(t *testing.T, concern readinesspilot.Concern, want string) {
+	t.Helper()
+	if concern.Destination.BoardPath != want || len(concern.Destination.CLI) != 0 {
+		t.Fatalf("concern %q destination = %+v, want board path %q and no CLI", concern.ID, concern.Destination, want)
 	}
 }
 

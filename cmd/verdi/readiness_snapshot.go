@@ -215,16 +215,29 @@ func (b localReadinessSnapshotBuilder) Build(ctx context.Context, root, requestP
 		Journey:    record,
 		Conflict:   conflictResult.Report,
 		Fallbacks: readinesspilot.Fallbacks{
-			Shape:   []string{"verdi", "design", "provenance", request.Spec},
-			Success: []string{"verdi", "journey", request.Spec, "--success"},
+			Shape:   []string{"verdi", "journey", request.Spec},
+			Success: []string{"verdi", "journey", request.Spec},
 			Context: []string{"verdi", "context", "conflict", "--request", requestPath},
-			Review:  []string{"verdi", "journey", request.Spec, "--review"},
+			Review:  []string{"verdi", "journey", request.Spec},
 		},
 		RequestDigest: readinessDigest(requestBytes),
 	}
 	snapshot, err := readinesspilot.Derive(input)
 	if err != nil {
 		return readinesspilot.Snapshot{}, fmt.Errorf("building readiness snapshot: deriving projection: %w", err)
+	}
+	// Shape has no registered corrective inspection command. Route every
+	// unresolved shape concern to the existing selected-branch board instead of
+	// exposing Derive's required CLI fallback outside this adapter.
+	for _, concerns := range [][]readinesspilot.Concern{snapshot.AllConcerns, snapshot.Attention} {
+		for i := range concerns {
+			if concerns[i].Area == readinesspilot.AreaShape && concerns[i].State != readinesspilot.StateProven {
+				concerns[i].Destination = readinesspilot.Destination{BoardPath: input.Target.BoardPath, CLI: []string{}}
+			}
+		}
+	}
+	if err := snapshot.Validate(); err != nil {
+		return readinesspilot.Snapshot{}, fmt.Errorf("building readiness snapshot: routing shape destinations: %w", err)
 	}
 	return snapshot, nil
 }
