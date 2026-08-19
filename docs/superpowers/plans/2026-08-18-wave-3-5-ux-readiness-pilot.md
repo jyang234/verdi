@@ -598,6 +598,36 @@ their own experience and retains every human-only judgment.
 - [ ] Obtain the owner's explicit Wave 3B re-entry decision in the durable pull
   request conversation. Do not encode that approval as a runtime field.
 
+### Owner-approved correction from pilot finding F-01
+
+The feature scenario failed first-use comprehension before the participant
+could complete the task script. The participant approved SI-125's bounded
+correction as the one permitted Wave 3.5 correction pass:
+
+- answer `Where am I in the process?` first with `Step N of 4` and the plain
+  labels `Define the work`, `Define success`, `Check constraints`, and
+  `Get approval`;
+- answer `What should I focus on next?` with current-area unresolved concerns
+  first, then the existing deterministic comparator for the remaining areas;
+- show exactly three priorities on every viewport, disclose the exact remaining
+  count, and expand all remaining priorities inline without reordering;
+- keep known downstream violations visible through their exact count;
+- lead with `Ready`, `Needs attention`, and `Not enough evidence yet`, retaining
+  each exact formal state in technical details;
+- prefer an exact source display name only when already carried; otherwise use
+  the existing basic summary and never synthesize a friendly identity;
+- move ids, digests, witnesses, work class, timing, and formal state into
+  directly accessible technical details, and retain every proven concern under
+  completed checks; and
+- treat expansion as ephemeral view state only: no persisted preference,
+  readiness mutation, refresh, new score, or favorable interpretation of an
+  unknown fact.
+
+The original Task 3 visibility rules are superseded only where the bullets
+above explicitly introduce progressive disclosure. All source facts remain
+lossless and reachable, and the feature and story scenarios must both be rerun
+after the correction.
+
 ## Task 6: Close the delivery unit
 
 - [ ] Run exact final gates from the consolidated head:
