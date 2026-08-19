@@ -197,25 +197,50 @@ func sectionOf(t *testing.T, html, from, until string) string {
 }
 
 func TestReadinessRender_OrientationLeadsWithTitle(t *testing.T) {
-	html := renderReadinessFixture(t, readinessFixture())
-	orient := sectionOf(t, html, `<section class="readiness-orient"`, `</section>`)
+	snap := readinessFixture()
+	html := renderReadinessFixture(t, snap)
 
-	if !strings.Contains(orient, `<h2 class="readiness-title">Pilot decline flow</h2>`) {
-		t.Fatalf("orientation does not lead with the exact target title:\n%s", orient)
+	// REAL DOM order, not presence alone: title → step → purpose must all
+	// precede the target technical metadata.
+	title := strings.Index(html, `<h2 class="readiness-title">Pilot decline flow</h2>`)
+	step := strings.Index(html, `Step 1 of 4 — Define the work`)
+	purpose := strings.Index(html, `This is a startup snapshot of readiness for the current design work.`)
+	target := strings.Index(html, `readiness-target-tech`)
+	if title < 0 || step < 0 || purpose < 0 || target < 0 {
+		t.Fatalf("page is missing orientation pieces (title=%d step=%d purpose=%d target=%d)", title, step, purpose, target)
 	}
-	if !strings.Contains(orient, `Step 1 of 4 — Define the work`) {
-		t.Fatalf("orientation does not state the current step:\n%s", orient)
+	if !(title < step && step < purpose && purpose < target) {
+		t.Fatalf("orientation order is wrong: title=%d step=%d purpose=%d target-tech=%d", title, step, purpose, target)
 	}
-	if !strings.Contains(orient, `This is a startup snapshot of readiness for the current design work.`) {
-		t.Fatalf("orientation is missing the exact purpose copy:\n%s", orient)
+
+	// The old leading metadata card is gone from this page entirely.
+	if strings.Contains(html, `metadata-card`) {
+		t.Fatal("page still renders the shell's leading metadata card")
 	}
-	// The exact target ref stays in technical metadata, never as the title.
-	meta := sectionOf(t, html, `<aside class="metadata-card">`, `</aside>`)
-	if !strings.Contains(meta, "spec/pilot") {
-		t.Fatalf("metadata card lost the exact target ref:\n%s", meta)
+
+	// The target technical details retain every exact fact, unnormalized.
+	tech := sectionOf(t, html, `readiness-target-tech`, `</details>`)
+	for _, want := range []string{
+		`<summary>Target technical details</summary>`,
+		`<dt>Target</dt><dd><code>spec/pilot</code></dd>`,
+		`<dt>Class</dt><dd><code>` + snap.TargetClass + `</code></dd>`,
+		`<dt>Branch</dt><dd><code>design/pilot</code></dd>`,
+		`<dt>Head</dt><dd><code>` + readinessFixtureHead + `</code></dd>`,
+		`<dt>Request digest</dt><dd><code>` + snap.RequestDigest + `</code></dd>`,
+	} {
+		if !strings.Contains(tech, want) {
+			t.Fatalf("target technical details are missing %q:\n%s", want, tech)
+		}
 	}
-	if strings.Contains(orient, "spec/pilot") {
-		t.Fatalf("orientation uses the technical ref instead of the title:\n%s", orient)
+
+	// The title itself never falls back to the technical ref, and the
+	// stale notice stays inside the orientation block.
+	orient := sectionOf(t, html, `<section class="readiness-orient"`, `</section>`)
+	if strings.Contains(sectionOf(t, orient, `<h2 class="readiness-title">`, `</h2>`), "spec/pilot") {
+		t.Fatalf("orientation title uses the technical ref:\n%s", orient)
+	}
+	if !strings.Contains(orient, `class="readiness-stale"`) {
+		t.Fatalf("stale notice left the orientation block:\n%s", orient)
 	}
 }
 
@@ -341,8 +366,23 @@ func TestReadinessRender_FocusListTopThreeAndDisclosure(t *testing.T) {
 }
 
 func TestReadinessRender_FocusListFewerThanFour(t *testing.T) {
+	// A CONFORMING three-priority snapshot, not a render-only slice: the
+	// governance signoff is proven here (no destination), so exactly the
+	// three remaining unresolved concerns form the attention list and the
+	// area states, destinations, and validation all agree.
 	snap := readinessFixture()
-	snap.Attention = snap.Attention[:3]
+	signoff := readinessConcernSignoff()
+	signoff.State = readinesspilot.StateProven
+	signoff.Destination = readinesspilot.Destination{CLI: []string{}}
+	snap.AllConcerns[5] = signoff
+	snap.Attention = []readinesspilot.Concern{
+		readinessConcernQuestion(),
+		readinessConcernCoverage(),
+		readinessConcernAction(),
+	}
+	if err := snap.Validate(); err != nil {
+		t.Fatalf("fewer-than-four fixture violates the readiness contract: %v", err)
+	}
 	html := renderReadinessFixture(t, snap)
 	queue := sectionOf(t, html, `<section class="readiness-queue"`, `</section>`)
 	if strings.Contains(queue, "readiness-more") || strings.Contains(queue, "more item") {
@@ -609,6 +649,7 @@ func TestReadinessRender_KeyboardLandmarksAndScript(t *testing.T) {
 		`<details class="readiness-more">`,
 		`<summary class="readiness-more-summary">`,
 		`<details class="readiness-tech">`,
+		`<details class="readiness-tech readiness-target-tech">`,
 		`<p class="readiness-dest readiness-cli" data-readiness-cli="1" tabindex="0" aria-label="CLI fallback">`,
 		`<script src="/assets/readiness.js" defer></script>`,
 	} {

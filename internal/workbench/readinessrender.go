@@ -99,16 +99,13 @@ func renderReadiness(snap readinesspilot.Snapshot) ([]byte, error) {
 	writeReadinessFocus(&b, snap, em)
 	writeReadinessCompleted(&b, snap, em)
 	b.WriteString(`</div>`)
+	// No MetaRows: the shared shell would render them BEFORE the body, so
+	// the target's technical facts would precede the orientation. They
+	// live in the orientation's own trailing disclosure instead
+	// (writeReadinessTargetTech).
 	return renderPage(pageData{
-		Title: "Readiness",
-		Nav:   template.HTML(`<a href="/">index</a> <span class="current">readiness</span>`),
-		MetaRows: []metaRow{
-			{Label: "Target", Value: snap.TargetRef},
-			{Label: "Class", Value: snap.TargetClass},
-			{Label: "Branch", Value: snap.Branch},
-			{Label: "Head", Value: snap.Head},
-			{Label: "Request digest", Value: snap.RequestDigest},
-		},
+		Title:     "Readiness",
+		Nav:       template.HTML(`<a href="/">index</a> <span class="current">readiness</span>`),
 		BodyHTML:  template.HTML(b.String()), //nolint:gosec // built above from escaped snapshot text only
 		ExtraHTML: template.HTML(`<script src="/assets/readiness.js" defer></script>`),
 	})
@@ -141,9 +138,24 @@ func writeReadinessOrientation(b *strings.Builder, snap readinesspilot.Snapshot)
 	}
 	b.WriteString(`</p>`)
 	b.WriteString(`<p class="readiness-purpose">This is a startup snapshot of readiness for the current design work.</p>`)
+	writeReadinessTargetTech(b, snap)
 	b.WriteString(`</div>`)
 	writeReadinessStale(b, snap)
 	b.WriteString(`</section>`)
+}
+
+// writeReadinessTargetTech writes the target's exact technical facts —
+// ref, class, branch, HEAD, request digest, verbatim — as a directly
+// accessible disclosure AFTER the title, step, and purpose, so plain
+// orientation always precedes technical metadata in reading order.
+func writeReadinessTargetTech(b *strings.Builder, snap readinesspilot.Snapshot) {
+	b.WriteString(`<details class="readiness-tech readiness-target-tech"><summary>Target technical details</summary><dl class="readiness-tech-facts">`)
+	writeReadinessFact(b, "Target", snap.TargetRef)
+	writeReadinessFact(b, "Class", snap.TargetClass)
+	writeReadinessFact(b, "Branch", snap.Branch)
+	writeReadinessFact(b, "Head", snap.Head)
+	writeReadinessFact(b, "Request digest", snap.RequestDigest)
+	b.WriteString(`</dl></details>`)
 }
 
 // writeReadinessStale writes the startup-snapshot notice: the snapshot's

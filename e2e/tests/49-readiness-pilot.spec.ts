@@ -1,5 +1,5 @@
 import { test, expect, type Page } from "@playwright/test";
-import { SHOWCASE, branchBoardPath } from "./fixtures";
+import { CONTROL_URL, SHOWCASE, branchBoardPath } from "./fixtures";
 import { addSticky } from "./helpers";
 
 // The Wave 3.5 readiness pilot cockpit (GET /readiness), F-01 corrected
@@ -60,6 +60,27 @@ const RAIL: Array<[id: string, label: string, formal: string]> = [
 
 const TARGET_TITLE = "Refinancing decline flow";
 
+// The isolated all-proven cockpit (cmd/e2eharness/readinessallproven.go):
+// pinned to that fixture's own literals, independent of any render.
+const ALL_PROVEN = {
+  title: "Fully proven pilot flow",
+  head: "e2eallproven0001",
+  concerns: [
+    "shape/problem",
+    "success/contributor/static",
+    "context/verdict",
+    "review/action",
+  ],
+};
+
+async function allProvenReadinessURL(page: Page): Promise<string> {
+  const res = await page.request.get(
+    `${CONTROL_URL}/readiness-all-proven-fixture`,
+  );
+  expect(res.ok()).toBe(true);
+  return (await res.text()).trim() + "readiness";
+}
+
 // The first board-destination concern in focus order — the cockpit's
 // first board link — pinned for exact event assertions below.
 const BOARD_LINK_CONCERN = "shape/question/oq-1";
@@ -103,10 +124,10 @@ function focusIds(page: Page): Promise<Array<string | null>> {
 
 async function startupHead(page: Page): Promise<string> {
   const head = await page
-    .locator('.metadata-card dt:text-is("Head") + dd')
-    .innerText();
-  expect(head.trim()).not.toBe("");
-  return head.trim();
+    .locator('.readiness-target-tech dt:text-is("Head") + dd')
+    .textContent();
+  expect((head ?? "").trim()).not.toBe("");
+  return (head ?? "").trim();
 }
 
 test("orientation and rail answer where-am-I with plain labels", async ({
@@ -122,11 +143,27 @@ test("orientation and rail answer where-am-I with plain labels", async ({
   await expect(page.locator(".readiness-purpose")).toHaveText(
     "This is a startup snapshot of readiness for the current design work.",
   );
-  // The technical ref stays in metadata, not in the orientation block.
-  await expect(page.locator(".metadata-card")).toContainText(
+  // REAL DOM order: title → step → purpose all precede the target
+  // technical metadata, and the shell's old leading metadata card is
+  // gone from this page.
+  const ordered = await page.evaluate(() => {
+    const before = (a: Element | null, b: Element | null) =>
+      !!a && !!b &&
+      !!(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING);
+    const title = document.querySelector(".readiness-title");
+    const step = document.querySelector(".readiness-step");
+    const purpose = document.querySelector(".readiness-purpose");
+    const target = document.querySelector(".readiness-target-tech");
+    return before(title, step) && before(step, purpose) && before(purpose, target);
+  });
+  expect(ordered).toBe(true);
+  await expect(page.locator(".metadata-card")).toHaveCount(0);
+  // The target facts stay exact inside the trailing disclosure.
+  const targetTech = page.locator(".readiness-target-tech");
+  expect(await targetTech.textContent()).toContain(
     `spec/${SHOWCASE.DESIGN_SPEC}`,
   );
-  await expect(page.locator(".readiness-orient")).not.toContainText(
+  await expect(page.locator("h2.readiness-title")).not.toContainText(
     `spec/${SHOWCASE.DESIGN_SPEC}`,
   );
 
@@ -515,6 +552,132 @@ test("an edit through the existing board leaves the preserved cockpit and its sn
 
   const bodyAfter = await (await page.request.get("/readiness")).text();
   expect(bodyAfter).toBe(bodyBefore);
+});
+
+test("420px shows exactly the first three priorities before expansion", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 420, height: 800 });
+  await page.goto("/readiness");
+
+  const visible = page.locator(".readiness-queue [data-concern-id]:visible");
+  await expect(visible).toHaveCount(3);
+  for (let i = 0; i < 3; i++) {
+    await expect(visible.nth(i)).toHaveAttribute(
+      "data-concern-id",
+      ATTENTION_QUEUE[i],
+    );
+  }
+});
+
+test("the all-proven snapshot renders the honest complete posture", async ({
+  page,
+}) => {
+  await page.goto(await allProvenReadinessURL(page));
+
+  await expect(page.locator("h2.readiness-title")).toHaveText(
+    ALL_PROVEN.title,
+  );
+  await expect(page.locator(".readiness-step")).toHaveText(
+    "All four steps are complete.",
+  );
+  await expect(page.locator('[aria-current]')).toHaveCount(0);
+  await expect(page.locator(".readiness-queue-empty")).toHaveText(
+    "Nothing needs attention: every check in this snapshot is proven.",
+  );
+  await expect(page.locator(".readiness-queue [data-concern-id]")).toHaveCount(
+    0,
+  );
+  await expect(page.locator(".readiness-downstream")).toHaveCount(0);
+  await expect(page.locator(".readiness-stale")).toContainText(
+    `Startup snapshot at ${ALL_PROVEN.head}`,
+  );
+
+  // Every concern is present under completed checks with its exact
+  // formal facts.
+  const completedIds = await page
+    .locator(".readiness-completed [data-concern-id]")
+    .evaluateAll((els) => els.map((el) => el.getAttribute("data-concern-id")));
+  expect(completedIds).toEqual(ALL_PROVEN.concerns);
+  for (const id of ALL_PROVEN.concerns) {
+    const row = page.locator(`[data-concern-id="${id}"]`);
+    await expect(row.locator(".readiness-state")).toHaveText("Ready");
+    await row.locator(".readiness-tech summary").click();
+    const facts = row.locator(".readiness-tech-facts");
+    await expect(facts).toContainText("proven");
+    await expect(facts).toContainText(id);
+  }
+});
+
+test("light and dark schemes keep the cockpit legible with identical facts", async ({
+  page,
+}) => {
+  const palette = async () =>
+    page.evaluate(() => {
+      const luminance = (color: string) => {
+        const m = color.match(/\d+(\.\d+)?/g)!.map(Number);
+        return (0.2126 * m[0] + 0.7152 * m[1] + 0.0722 * m[2]) / 255;
+      };
+      const bodyBg = getComputedStyle(document.body).backgroundColor;
+      const ink = getComputedStyle(
+        document.querySelector(".readiness-summary")!,
+      ).color;
+      return { bg: luminance(bodyBg), ink: luminance(ink) };
+    });
+
+  await page.emulateMedia({ colorScheme: "light" });
+  await page.goto("/readiness");
+  const light = await palette();
+  const lightIds = await focusIds(page);
+
+  await page.emulateMedia({ colorScheme: "dark" });
+  await page.reload();
+  const dark = await palette();
+  const darkIds = await focusIds(page);
+
+  // The selected palette is actually used: a light ground in light mode,
+  // a dark ground in dark mode, and legible ink contrast in both.
+  expect(light.bg).toBeGreaterThan(0.5);
+  expect(dark.bg).toBeLessThan(0.5);
+  expect(Math.abs(light.ink - light.bg)).toBeGreaterThan(0.3);
+  expect(Math.abs(dark.ink - dark.bg)).toBeGreaterThan(0.3);
+  // Same facts, same order, in both schemes.
+  expect(lightIds).toEqual(ATTENTION_QUEUE);
+  expect(darkIds).toEqual(ATTENTION_QUEUE);
+});
+
+test("keyboard traversal reaches technical details for every priority and completed check", async ({
+  page,
+}) => {
+  await page.goto("/readiness");
+
+  // Expand the remainder with the keyboard so every priority's control
+  // is in the tab order.
+  await page.locator(".readiness-more-summary").focus();
+  await page.keyboard.press("Enter");
+  await expect(page.locator("details.readiness-more")).toHaveAttribute(
+    "open",
+    "",
+  );
+
+  const reachable = new Set<string>();
+  await page.locator("body").press("Tab");
+  for (let i = 0; i < 300; i++) {
+    const id = await page.evaluate(() => {
+      const el = document.activeElement;
+      if (!el || !el.matches("details.readiness-tech > summary")) return "";
+      const row = el.closest("[data-concern-id]");
+      return row ? row.getAttribute("data-concern-id") || "" : "";
+    });
+    if (id) reachable.add(id);
+    if (reachable.size === ATTENTION_QUEUE.length + COMPLETED_CHECKS.length) {
+      break;
+    }
+    await page.keyboard.press("Tab");
+  }
+  expect([...reachable].sort()).toEqual(
+    [...ATTENTION_QUEUE, ...COMPLETED_CHECKS].sort(),
+  );
 });
 
 test("420px: pinned rail hides nothing, anchors reveal disclosed rows, long values fit", async ({
