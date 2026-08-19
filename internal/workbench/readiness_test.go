@@ -13,26 +13,27 @@ import (
 
 const readinessFixtureHead = "4f1c9d2ab7e0"
 
-// readinessFixture is the canonical mixed-state cockpit fixture: one
-// proven, one violated-with-witness, and unproven concerns spread over
-// the four areas, exercising both destination kinds and both timings.
+// readinessFixture is the canonical mixed-state cockpit fixture on the
+// F-01 corrected contract: a target title, the four plain area labels,
+// and the current-focus-first attention order.
 func readinessFixture() readinesspilot.Snapshot {
 	return readinesspilot.Snapshot{
 		TargetRef:     "spec/pilot",
+		TargetTitle:   "Pilot decline flow",
 		TargetClass:   "story",
 		Branch:        "design/pilot",
 		Head:          readinessFixtureHead,
 		RequestDigest: "sha256:" + strings.Repeat("ab", 32),
 		Areas: []readinesspilot.Area{
-			{ID: readinesspilot.AreaShape, Label: "Shape proposal", State: readinesspilot.StateUnproven},
-			{ID: readinesspilot.AreaSuccess, Label: "Show success", State: readinesspilot.StateViolated},
-			{ID: readinesspilot.AreaContext, Label: "Check context", State: readinesspilot.StateProven},
-			{ID: readinesspilot.AreaReview, Label: "Request review", State: readinesspilot.StateUnproven},
+			{ID: readinesspilot.AreaShape, Label: "Define the work", State: readinesspilot.StateUnproven},
+			{ID: readinesspilot.AreaSuccess, Label: "Define success", State: readinesspilot.StateViolated},
+			{ID: readinesspilot.AreaContext, Label: "Check constraints", State: readinesspilot.StateProven},
+			{ID: readinesspilot.AreaReview, Label: "Get approval", State: readinesspilot.StateUnproven},
 		},
 		CurrentFocus: readinesspilot.AreaShape,
 		Attention: []readinesspilot.Concern{
-			readinessConcernCoverage(),
 			readinessConcernQuestion(),
+			readinessConcernCoverage(),
 			readinessConcernAction(),
 			readinessConcernSignoff(),
 		},
@@ -116,8 +117,8 @@ func readinessConcernSignoff() readinesspilot.Concern {
 	}
 }
 
-// readinessAllProvenFixture is the fully proven variant: an empty
-// attention queue and no current-focus area.
+// readinessAllProvenFixture is the fully proven variant: empty attention,
+// no current focus, all four steps complete.
 func readinessAllProvenFixture() readinesspilot.Snapshot {
 	problem := readinessConcernProblem()
 	contributor := readinesspilot.Concern{
@@ -135,15 +136,16 @@ func readinessAllProvenFixture() readinesspilot.Snapshot {
 	}
 	return readinesspilot.Snapshot{
 		TargetRef:     "spec/pilot",
+		TargetTitle:   "Pilot decline flow",
 		TargetClass:   "story",
 		Branch:        "design/pilot",
 		Head:          readinessFixtureHead,
 		RequestDigest: "sha256:" + strings.Repeat("ab", 32),
 		Areas: []readinesspilot.Area{
-			{ID: readinesspilot.AreaShape, Label: "Shape proposal", State: readinesspilot.StateProven},
-			{ID: readinesspilot.AreaSuccess, Label: "Show success", State: readinesspilot.StateProven},
-			{ID: readinesspilot.AreaContext, Label: "Check context", State: readinesspilot.StateProven},
-			{ID: readinesspilot.AreaReview, Label: "Request review", State: readinesspilot.StateProven},
+			{ID: readinesspilot.AreaShape, Label: "Define the work", State: readinesspilot.StateProven},
+			{ID: readinesspilot.AreaSuccess, Label: "Define success", State: readinesspilot.StateProven},
+			{ID: readinesspilot.AreaContext, Label: "Check constraints", State: readinesspilot.StateProven},
+			{ID: readinesspilot.AreaReview, Label: "Get approval", State: readinesspilot.StateProven},
 		},
 		CurrentFocus: "",
 		Attention:    []readinesspilot.Concern{},
@@ -152,9 +154,10 @@ func readinessAllProvenFixture() readinesspilot.Snapshot {
 	}
 }
 
-// TestReadinessFixture_ContractValid pins both fixtures to the committed
-// Task 1 contract: a fixture Validate() rejects would make every
-// assertion below untrustworthy.
+// TestReadinessFixture_ContractValid pins both fixtures to the approved
+// corrected contract (TargetTitle, plain labels, current-focus-first
+// attention): a fixture Validate() rejects would make every assertion
+// below untrustworthy.
 func TestReadinessFixture_ContractValid(t *testing.T) {
 	if err := readinessFixture().Validate(); err != nil {
 		t.Fatalf("mixed fixture violates the readiness contract: %v", err)
@@ -174,8 +177,8 @@ func renderReadinessFixture(t *testing.T, snap readinesspilot.Snapshot) string {
 }
 
 // sectionOf extracts the substring of html between the opening marker and
-// the next top-level section marker, so assertions can scope themselves
-// to one region of the page.
+// the next occurrence of until, so assertions can scope themselves to one
+// region of the page.
 func sectionOf(t *testing.T, html, from, until string) string {
 	t.Helper()
 	start := strings.Index(html, from)
@@ -193,228 +196,358 @@ func sectionOf(t *testing.T, html, from, until string) string {
 	return rest[:len(from)+end]
 }
 
-func TestReadinessRender_RailOrderAndStates(t *testing.T) {
+func TestReadinessRender_OrientationLeadsWithTitle(t *testing.T) {
+	html := renderReadinessFixture(t, readinessFixture())
+	orient := sectionOf(t, html, `<section class="readiness-orient"`, `</section>`)
+
+	if !strings.Contains(orient, `<h2 class="readiness-title">Pilot decline flow</h2>`) {
+		t.Fatalf("orientation does not lead with the exact target title:\n%s", orient)
+	}
+	if !strings.Contains(orient, `Step 1 of 4 — Define the work`) {
+		t.Fatalf("orientation does not state the current step:\n%s", orient)
+	}
+	if !strings.Contains(orient, `This is a startup snapshot of readiness for the current design work.`) {
+		t.Fatalf("orientation is missing the exact purpose copy:\n%s", orient)
+	}
+	// The exact target ref stays in technical metadata, never as the title.
+	meta := sectionOf(t, html, `<aside class="metadata-card">`, `</aside>`)
+	if !strings.Contains(meta, "spec/pilot") {
+		t.Fatalf("metadata card lost the exact target ref:\n%s", meta)
+	}
+	if strings.Contains(orient, "spec/pilot") {
+		t.Fatalf("orientation uses the technical ref instead of the title:\n%s", orient)
+	}
+}
+
+func TestReadinessRender_RailOrderPlainStatesAndFocus(t *testing.T) {
 	html := renderReadinessFixture(t, readinessFixture())
 	rail := sectionOf(t, html, `<nav class="readiness-rail"`, `</nav>`)
 
+	type station struct{ area, label, plain, formal string }
+	want := []station{
+		{"shape-proposal", "Define the work", "Not enough evidence yet", "unproven"},
+		{"show-success", "Define success", "Needs attention", "violated-with-witness"},
+		{"check-context", "Check constraints", "Ready", "proven"},
+		{"request-review", "Get approval", "Not enough evidence yet", "unproven"},
+	}
 	prev := -1
-	for _, area := range []string{"shape-proposal", "show-success", "check-context", "request-review"} {
-		idx := strings.Index(rail, `data-area-id="`+area+`"`)
+	for i, st := range want {
+		idx := strings.Index(rail, `data-area-id="`+st.area+`"`)
 		if idx < 0 {
-			t.Fatalf("rail is missing station %q:\n%s", area, rail)
+			t.Fatalf("rail is missing station %q", st.area)
 		}
 		if idx < prev {
-			t.Fatalf("rail station %q is out of the fixed four-area order", area)
+			t.Fatalf("rail station %q is out of the fixed order", st.area)
 		}
 		prev = idx
-	}
-	for _, label := range []string{"Shape proposal", "Show success", "Check context", "Request review"} {
-		if !strings.Contains(rail, label) {
-			t.Fatalf("rail is missing area label %q", label)
+		block := sectionOf(t, rail, `data-area-id="`+st.area+`"`, `</li>`)
+		if !strings.Contains(block, `data-state="`+st.formal+`"`) {
+			t.Fatalf("station %q lost its exact formal state:\n%s", st.area, block)
+		}
+		if !strings.Contains(block, st.label) {
+			t.Fatalf("station %q is missing plain label %q", st.area, st.label)
+		}
+		if !strings.Contains(block, `>`+st.plain+`<`) {
+			t.Fatalf("station %q is missing plain state %q:\n%s", st.area, st.plain, block)
+		}
+		if !strings.Contains(block, `href="#area-`+st.area+`"`) {
+			t.Fatalf("station %q lost its fragment anchor", st.area)
+		}
+		wantNum := []string{"1", "2", "3", "4"}[i]
+		if !strings.Contains(block, `<span class="readiness-station-num">`+wantNum+`</span>`) {
+			t.Fatalf("station %q is missing step number %s:\n%s", st.area, wantNum, block)
 		}
 	}
-	// Exact per-area state words, matched inside each station's slice.
-	stations := map[string]string{
-		"shape-proposal": "unproven", "show-success": "violated-with-witness",
-		"check-context": "proven", "request-review": "unproven",
+	if got := strings.Count(rail, `aria-current="step"`); got != 1 {
+		t.Fatalf("rail carries %d aria-current markers, want exactly 1", got)
 	}
-	for area, state := range stations {
-		station := sectionOf(t, rail, `data-area-id="`+area+`"`, `</li>`)
-		if !strings.Contains(station, `>`+state+`<`) {
-			t.Fatalf("station %q does not carry exact state label %q:\n%s", area, state, station)
-		}
+	focus := sectionOf(t, rail, `data-area-id="shape-proposal"`, `</li>`)
+	if !strings.Contains(focus, `aria-current="step"`) {
+		t.Fatal("current-focus marker is not on the snapshot's focus area")
 	}
 }
 
-func TestReadinessRender_CurrentFocusMarker(t *testing.T) {
-	html := renderReadinessFixture(t, readinessFixture())
-	rail := sectionOf(t, html, `<nav class="readiness-rail"`, `</nav>`)
-
-	if got := strings.Count(rail, "current focus"); got != 1 {
-		t.Fatalf("rail carries %d current-focus markers, want exactly 1", got)
+func TestReadinessRender_AllCompletePostureIsHonest(t *testing.T) {
+	html := renderReadinessFixture(t, readinessAllProvenFixture())
+	if !strings.Contains(html, "All four steps are complete.") {
+		t.Fatal("all-proven snapshot does not state plainly that the steps are complete")
 	}
-	focusStation := sectionOf(t, rail, `data-area-id="shape-proposal"`, `</li>`)
-	if !strings.Contains(focusStation, "current focus") {
-		t.Fatalf("current-focus marker is not on the snapshot's focus area:\n%s", focusStation)
+	if strings.Contains(html, "Step 1 of 4") || strings.Contains(html, `aria-current`) {
+		t.Fatal("all-proven snapshot invents a current focus")
 	}
-	if !strings.Contains(focusStation, `aria-current`) {
-		t.Fatalf("focus station is missing aria-current:\n%s", focusStation)
+	if strings.Contains(html, "Known problems in later steps") {
+		t.Fatal("all-proven snapshot renders a downstream count with no focus")
+	}
+	queue := sectionOf(t, html, `<section class="readiness-queue"`, `</section>`)
+	if strings.Contains(queue, "data-concern-id") {
+		t.Fatalf("all-proven focus list still lists concerns:\n%s", queue)
+	}
+	if !strings.Contains(queue, "Nothing needs attention: every check in this snapshot is proven.") {
+		t.Fatalf("empty focus list does not state its honest reason:\n%s", queue)
+	}
+	// Every proven fact stays reachable in completed checks.
+	completed := sectionOf(t, html, `<section class="readiness-completed"`, "</main>")
+	if got := strings.Count(completed, `data-concern-id="`); got != 4 {
+		t.Fatalf("completed checks list %d proven concerns, want 4", got)
 	}
 }
 
-func TestReadinessRender_AttentionQueueOrderAndPrimacy(t *testing.T) {
+func TestReadinessRender_FocusListTopThreeAndDisclosure(t *testing.T) {
 	html := renderReadinessFixture(t, readinessFixture())
 	queue := sectionOf(t, html, `<section class="readiness-queue"`, `</section>`)
 
-	want := []string{
-		"success/blocker/obligation-quality/coverage",
+	// Exactly the first three priorities are outside the disclosure, in
+	// the snapshot's exact order, ranked 1..3.
+	top := sectionOf(t, queue, `<ol class="readiness-queue-list">`, `</ol>`)
+	wantTop := []string{
 		"shape/question/q-alpha",
+		"success/blocker/obligation-quality/coverage",
 		"review/action",
-		"review/blocker/gov-signoff",
 	}
 	prev := -1
-	for _, id := range want {
-		idx := strings.Index(queue, `data-concern-id="`+id+`"`)
+	for i, id := range wantTop {
+		idx := strings.Index(top, `data-concern-id="`+id+`"`)
 		if idx < 0 {
-			t.Fatalf("attention queue is missing concern %q:\n%s", id, queue)
+			t.Fatalf("top-three list is missing %q:\n%s", id, top)
 		}
 		if idx < prev {
-			t.Fatalf("attention queue concern %q is out of snapshot order", id)
+			t.Fatalf("top-three concern %q is out of snapshot order", id)
+		}
+		prev = idx
+		rank := []string{"1", "2", "3"}[i]
+		if !strings.Contains(top, `<span class="readiness-rank">`+rank+`</span>`) {
+			t.Fatalf("top-three list is missing rank %s", rank)
+		}
+	}
+	if got := strings.Count(top, `data-concern-id="`); got != 3 {
+		t.Fatalf("top list shows %d priorities, want exactly 3", got)
+	}
+
+	// The remainder sits in an inline disclosure with the exact
+	// remaining-count label and the exact open label.
+	more := sectionOf(t, queue, `<details class="readiness-more">`, `</details>`)
+	if !strings.Contains(more, `<span class="readiness-more-closed">1 more item</span>`) {
+		t.Fatalf("disclosure control is missing the exact remaining count:\n%s", more)
+	}
+	if !strings.Contains(more, `<span class="readiness-more-open">Show fewer</span>`) {
+		t.Fatalf("disclosure control is missing the exact open label:\n%s", more)
+	}
+	if !strings.Contains(more, `data-concern-id="review/blocker/gov-signoff"`) {
+		t.Fatalf("disclosure does not carry the remaining concern:\n%s", more)
+	}
+	if !strings.Contains(more, `<span class="readiness-rank">4</span>`) {
+		t.Fatalf("remainder does not continue the original ranking:\n%s", more)
+	}
+}
+
+func TestReadinessRender_FocusListFewerThanFour(t *testing.T) {
+	snap := readinessFixture()
+	snap.Attention = snap.Attention[:3]
+	html := renderReadinessFixture(t, snap)
+	queue := sectionOf(t, html, `<section class="readiness-queue"`, `</section>`)
+	if strings.Contains(queue, "readiness-more") || strings.Contains(queue, "more item") {
+		t.Fatalf("three priorities still render a misleading remaining-count control:\n%s", queue)
+	}
+	if got := strings.Count(queue, `data-concern-id="`); got != 3 {
+		t.Fatalf("focus list shows %d priorities, want all 3", got)
+	}
+}
+
+func TestReadinessRender_DownstreamViolatedCount(t *testing.T) {
+	// Fixture: focus is the first area; both violated concerns (success,
+	// review) sit in later areas → exactly 2.
+	html := renderReadinessFixture(t, readinessFixture())
+	if !strings.Contains(html, `Known problems in later steps: 2`) {
+		t.Fatal("page does not disclose the exact downstream violated count")
+	}
+
+	// The counting rule itself, on synthetic snapshots distinguishing
+	// current, earlier, downstream, violated, and unproven rows.
+	areas := []readinesspilot.Area{
+		{ID: readinesspilot.AreaShape}, {ID: readinesspilot.AreaSuccess},
+		{ID: readinesspilot.AreaContext}, {ID: readinesspilot.AreaReview},
+	}
+	concern := func(area readinesspilot.AreaID, state readinesspilot.State) readinesspilot.Concern {
+		return readinesspilot.Concern{Area: area, State: state}
+	}
+	tests := []struct {
+		name  string
+		focus readinesspilot.AreaID
+		rows  []readinesspilot.Concern
+		want  int
+	}{
+		{"current-area violation is not downstream", readinesspilot.AreaContext,
+			[]readinesspilot.Concern{concern(readinesspilot.AreaContext, readinesspilot.StateViolated)}, 0},
+		{"earlier-area violation is not downstream", readinesspilot.AreaContext,
+			[]readinesspilot.Concern{concern(readinesspilot.AreaSuccess, readinesspilot.StateViolated)}, 0},
+		{"later violation counts", readinesspilot.AreaContext,
+			[]readinesspilot.Concern{concern(readinesspilot.AreaReview, readinesspilot.StateViolated)}, 1},
+		{"later unproven does not count", readinesspilot.AreaContext,
+			[]readinesspilot.Concern{concern(readinesspilot.AreaReview, readinesspilot.StateUnproven)}, 0},
+		{"later proven does not count", readinesspilot.AreaContext,
+			[]readinesspilot.Concern{concern(readinesspilot.AreaReview, readinesspilot.StateProven)}, 0},
+		{"no focus means zero", "",
+			[]readinesspilot.Concern{concern(readinesspilot.AreaReview, readinesspilot.StateViolated)}, 0},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			snap := readinesspilot.Snapshot{Areas: areas, CurrentFocus: tt.focus, AllConcerns: tt.rows}
+			if got := readinessDownstreamViolated(snap); got != tt.want {
+				t.Fatalf("readinessDownstreamViolated = %d, want %d", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestReadinessRender_PlainStateLabelsWithFormalDetails(t *testing.T) {
+	html := renderReadinessFixture(t, readinessFixture())
+	// Every state chip pairs the formal modifier class with the plain
+	// label text — the mapping is exact and total.
+	for formal, plain := range map[string]string{
+		"proven":                "Ready",
+		"violated-with-witness": "Needs attention",
+		"unproven":              "Not enough evidence yet",
+	} {
+		chip := `<span class="readiness-state readiness-state--` + formal + `">` + plain + `</span>`
+		if !strings.Contains(html, chip) {
+			t.Fatalf("page is missing exact chip %q", chip)
+		}
+		if strings.Count(html, `readiness-state--`+formal+`"`) != strings.Count(html, chip) {
+			t.Fatalf("some %q chip does not carry plain label %q", formal, plain)
+		}
+	}
+	// The formal words stay reachable in technical details.
+	for _, formal := range []string{"proven", "violated-with-witness", "unproven"} {
+		if !strings.Contains(html, `<dd><code>`+formal+`</code></dd>`) {
+			t.Fatalf("technical details never state formal state %q", formal)
+		}
+	}
+}
+
+func TestReadinessRender_TechnicalDetailsComplete(t *testing.T) {
+	html := renderReadinessFixture(t, readinessFixture())
+	card := sectionOf(t, html, `data-concern-id="success/blocker/obligation-quality/coverage"`, `</article>`)
+	tech := sectionOf(t, card, `<details class="readiness-tech">`, `</details>`)
+
+	for _, want := range []string{
+		`<summary>Technical details</summary>`,
+		`<dt>State</dt><dd><code>violated-with-witness</code></dd>`,
+		`<dt>Concern</dt><dd><code>success/blocker/obligation-quality/coverage</code></dd>`,
+		`<dt>Area</dt><dd><code>show-success</code></dd>`,
+		`<dt>Blocking</dt><dd><code>true</code></dd>`,
+		`<dt>Timing</dt><dd><code>current</code></dd>`,
+		`<dt>Work class</dt><dd><code>mechanical</code></dd>`,
+		`coverage gate output names the red step`,
+		`gate run 41 is red`,
+		`<dt>Destination</dt>`,
+	} {
+		if !strings.Contains(tech, want) {
+			t.Fatalf("technical details are missing %q:\n%s", want, tech)
+		}
+	}
+	// The destination is exact token data, never a joined shell string.
+	if !strings.Contains(tech, `<code>verdi</code>`) || strings.Contains(html, "verdi gate run --target spec/pilot") {
+		t.Fatalf("technical destination is not the exact token vector:\n%s", tech)
+	}
+
+	// A concern without a source work class renders no work-class row —
+	// omitted, never guessed.
+	question := sectionOf(t, html, `data-concern-id="shape/question/q-alpha"`, `</article>`)
+	if strings.Contains(question, "Work class") {
+		t.Fatalf("concern without a source work class renders one:\n%s", question)
+	}
+	// A proven concern's details carry its facts but no destination.
+	completed := sectionOf(t, html, `<section class="readiness-completed"`, "</main>")
+	proven := sectionOf(t, completed, `data-concern-id="shape/problem"`, `</article>`)
+	if !strings.Contains(proven, `<dd><code>proven</code></dd>`) {
+		t.Fatalf("proven concern's details lost its formal state:\n%s", proven)
+	}
+	if strings.Contains(proven, "Destination") || strings.Contains(proven, "readiness-board-link") || strings.Contains(proven, "readiness-cli-token") {
+		t.Fatalf("proven concern renders a destination:\n%s", proven)
+	}
+}
+
+func TestReadinessRender_SummariesArePrimaryCopy(t *testing.T) {
+	snap := readinessFixture()
+	html := renderReadinessFixture(t, snap)
+	for _, concern := range snap.AllConcerns {
+		if !strings.Contains(html, `<p class="readiness-summary">`+concern.Summary+`</p>`) {
+			t.Fatalf("concern %q does not use its source summary as primary copy", concern.ID)
+		}
+	}
+}
+
+func TestReadinessRender_LosslessDisjointInventoryAndAnchors(t *testing.T) {
+	snap := readinessFixture()
+	html := renderReadinessFixture(t, snap)
+
+	// Each concern appears exactly once across the two inventories.
+	if got := strings.Count(html, `data-concern-id="`); got != len(snap.AllConcerns) {
+		t.Fatalf("page lists %d concern rows, want exactly %d (no omission, no duplication)", got, len(snap.AllConcerns))
+	}
+	queue := sectionOf(t, html, `<section class="readiness-queue"`, `</section>`)
+	for _, concern := range snap.Attention {
+		if !strings.Contains(queue, `data-concern-id="`+concern.ID+`"`) {
+			t.Fatalf("unresolved concern %q is not reachable in the focus list", concern.ID)
+		}
+	}
+	completed := sectionOf(t, html, `<section class="readiness-completed"`, "</main>")
+	prev := -1
+	for _, concern := range snap.AllConcerns {
+		if concern.State != readinesspilot.StateProven {
+			continue
+		}
+		idx := strings.Index(completed, `data-concern-id="`+concern.ID+`"`)
+		if idx < 0 {
+			t.Fatalf("proven concern %q is not reachable in completed checks", concern.ID)
+		}
+		if idx < prev {
+			t.Fatalf("completed check %q is out of the snapshot's order", concern.ID)
 		}
 		prev = idx
 	}
-	if got := strings.Count(queue, `data-concern-id="`); got != len(want) {
-		t.Fatalf("attention queue lists %d concerns, want exactly %d", got, len(want))
-	}
-	// The queue renders BEFORE the complete section and as an ordered
-	// list — its position is the deterministic comparator's order.
-	if !strings.Contains(queue, "<ol") {
-		t.Fatalf("attention queue is not an ordered list:\n%s", queue)
-	}
-	if strings.Index(html, `<section class="readiness-queue"`) > strings.Index(html, `<section class="readiness-all"`) {
-		t.Fatal("attention queue does not precede the complete concerns section")
+
+	// Every area keeps exactly one fragment anchor, on its first row.
+	for _, area := range []string{"shape-proposal", "show-success", "check-context", "request-review"} {
+		if got := strings.Count(html, `id="area-`+area+`"`); got != 1 {
+			t.Fatalf("area %q has %d fragment anchors, want exactly 1", area, got)
+		}
 	}
 }
 
-func TestReadinessRender_WorkClassLabels(t *testing.T) {
+func TestReadinessRender_DestinationActionsUsable(t *testing.T) {
 	html := renderReadinessFixture(t, readinessFixture())
-	queue := sectionOf(t, html, `<section class="readiness-queue"`, `</section>`)
-
-	coverage := sectionOf(t, queue, `data-concern-id="success/blocker/obligation-quality/coverage"`, `</article>`)
-	if !strings.Contains(coverage, `>mechanical<`) {
-		t.Fatalf("journey-derived concern is missing its source-provided work-class label:\n%s", coverage)
-	}
-	signoff := sectionOf(t, queue, `data-concern-id="review/blocker/gov-signoff"`, `</article>`)
-	if !strings.Contains(signoff, `>governance<`) {
-		t.Fatalf("eventual concern is missing its source-provided work-class label:\n%s", signoff)
-	}
-	// A concern whose source supplies no work class renders NO work-class
-	// chip at all — omitted, never guessed.
-	question := sectionOf(t, queue, `data-concern-id="shape/question/q-alpha"`, `</article>`)
-	if strings.Contains(question, "readiness-workclass") {
-		t.Fatalf("concern without a source work class renders a work-class chip:\n%s", question)
-	}
-}
-
-func TestReadinessRender_AllConcernsComplete(t *testing.T) {
-	snap := readinessFixture()
-	html := renderReadinessFixture(t, snap)
-	all := sectionOf(t, html, `<section class="readiness-all"`, "</main>")
-
-	for _, concern := range snap.AllConcerns {
-		if !strings.Contains(all, `data-concern-id="`+concern.ID+`"`) {
-			t.Fatalf("complete section is missing concern %q", concern.ID)
+	question := sectionOf(t, html, `data-concern-id="shape/question/q-alpha"`, `</article>`)
+	link := sectionOf(t, question, `class="readiness-board-link"`, `</a>`)
+	for _, want := range []string{`href="/board/spec/pilot"`, `target="_blank"`, `rel="noopener"`} {
+		if !strings.Contains(link, want) {
+			t.Fatalf("board link is missing %q:\n%s", want, link)
 		}
-	}
-	if got := strings.Count(all, `data-concern-id="`); got != len(snap.AllConcerns) {
-		t.Fatalf("complete section lists %d concerns, want all %d", got, len(snap.AllConcerns))
-	}
-	// Proven facts stay visible: the proven concerns render with their
-	// exact state word, never hidden or collapsed away.
-	for _, id := range []string{"shape/problem", "context/verdict"} {
-		row := sectionOf(t, all, `data-concern-id="`+id+`"`, `</article>`)
-		if !strings.Contains(row, `>proven<`) {
-			t.Fatalf("proven concern %q does not carry its exact state label:\n%s", id, row)
-		}
-	}
-	// No collapsed remainder: no disclosure widget and no bare hidden
-	// attribute (aria-hidden on a decorative glyph is fine — it hides
-	// nothing from sighted readers).
-	if strings.Contains(all, "<details") || strings.Contains(all, " hidden>") || strings.Contains(all, ` hidden `) {
-		t.Fatalf("complete section hides content behind a disclosure widget:\n%s", all)
-	}
-}
-
-func TestReadinessRender_StateLabelsNeverColorAlone(t *testing.T) {
-	html := renderReadinessFixture(t, readinessFixture())
-	// Every state chip carries the exact state word as TEXT — the three
-	// exact labels all appear, and each chip class is accompanied by its
-	// word so color is never the only signal.
-	for _, state := range []string{"proven", "violated-with-witness", "unproven"} {
-		if !strings.Contains(html, `>`+state+`<`) {
-			t.Fatalf("page never renders exact state label %q as text", state)
-		}
-		if strings.Count(html, `readiness-state--`+state) != strings.Count(html, `readiness-state readiness-state--`+state) {
-			t.Fatalf("state chip class %q appears outside a labelled chip", state)
-		}
-	}
-}
-
-func TestReadinessRender_WitnessesExact(t *testing.T) {
-	snap := readinessFixture()
-	html := renderReadinessFixture(t, snap)
-	for _, concern := range snap.AllConcerns {
-		for _, witness := range concern.Witnesses {
-			if !strings.Contains(html, witness) {
-				t.Fatalf("witness %q of %q is not rendered verbatim", witness, concern.ID)
-			}
-		}
-	}
-}
-
-func TestReadinessRender_DestinationExclusivity(t *testing.T) {
-	html := renderReadinessFixture(t, readinessFixture())
-	queue := sectionOf(t, html, `<section class="readiness-queue"`, `</section>`)
-
-	question := sectionOf(t, queue, `data-concern-id="shape/question/q-alpha"`, `</article>`)
-	if !strings.Contains(question, `class="readiness-board-link"`) {
-		t.Fatalf("board-destination concern has no board link:\n%s", question)
 	}
 	if strings.Contains(question, "readiness-cli-token") {
 		t.Fatalf("board-destination concern also renders CLI tokens:\n%s", question)
 	}
 
-	coverage := sectionOf(t, queue, `data-concern-id="success/blocker/obligation-quality/coverage"`, `</article>`)
+	coverage := sectionOf(t, html, `data-concern-id="success/blocker/obligation-quality/coverage"`, `</article>`)
 	if strings.Contains(coverage, "readiness-board-link") {
 		t.Fatalf("CLI-destination concern also renders a board link:\n%s", coverage)
 	}
-
-	all := sectionOf(t, html, `<section class="readiness-all"`, "</main>")
-	proven := sectionOf(t, all, `data-concern-id="shape/problem"`, `</article>`)
-	if strings.Contains(proven, "readiness-board-link") || strings.Contains(proven, "readiness-cli-token") {
-		t.Fatalf("proven concern renders a destination:\n%s", proven)
-	}
-}
-
-func TestReadinessRender_BoardLinkTargetRelAttrs(t *testing.T) {
-	html := renderReadinessFixture(t, readinessFixture())
-	link := sectionOf(t, html, `class="readiness-board-link"`, `</a>`)
-	if !strings.Contains(link, `href="/board/spec/pilot"`) {
-		t.Fatalf("board link href is not the snapshot's exact board path:\n%s", link)
-	}
-	if !strings.Contains(link, `target="_blank"`) {
-		t.Fatalf("board link is missing target=_blank:\n%s", link)
-	}
-	if !strings.Contains(link, `rel="noopener"`) {
-		t.Fatalf("board link is missing rel=noopener:\n%s", link)
-	}
-}
-
-func TestReadinessRender_CLITokenVector(t *testing.T) {
-	html := renderReadinessFixture(t, readinessFixture())
-	queue := sectionOf(t, html, `<section class="readiness-queue"`, `</section>`)
-	coverage := sectionOf(t, queue, `data-concern-id="success/blocker/obligation-quality/coverage"`, `</article>`)
-
 	tokens := []string{"verdi", "gate", "run", "--target", "spec/pilot"}
+	action := sectionOf(t, coverage, `class="readiness-dest readiness-cli"`, `</p>`)
 	prev := -1
 	for _, token := range tokens {
 		marker := `<code class="readiness-cli-token">` + token + `</code>`
-		idx := strings.Index(coverage, marker)
+		idx := strings.Index(action, marker)
 		if idx < 0 {
-			t.Fatalf("CLI destination is missing token element %q:\n%s", token, coverage)
+			t.Fatalf("CLI action is missing token element %q:\n%s", token, action)
 		}
 		if idx < prev {
 			t.Fatalf("CLI token %q is out of vector order", token)
 		}
 		prev = idx
 	}
-	if got := strings.Count(coverage, "readiness-cli-token"); got != len(tokens) {
-		t.Fatalf("CLI destination renders %d token elements, want exactly %d", got, len(tokens))
-	}
-	// Never a shell string: the joined command must not appear as one run
-	// of text anywhere on the page.
-	if strings.Contains(html, "verdi gate run --target spec/pilot") {
-		t.Fatal("CLI destination is rendered as a joined shell string")
+	if !strings.Contains(action, `tabindex="0"`) {
+		t.Fatalf("CLI fallback is not keyboard-reachable:\n%s", action)
 	}
 }
 
@@ -448,11 +581,15 @@ func TestReadinessRender_NoMutationSurface(t *testing.T) {
 
 func TestReadinessRender_EscapesUntrustedText(t *testing.T) {
 	snap := readinessFixture()
+	snap.TargetTitle = `<script>alert(0)</script>`
 	snap.AllConcerns[2].Summary = `<script>alert(1)</script>`
-	snap.Attention[0].Summary = `<script>alert(1)</script>`
+	snap.Attention[1].Summary = `<script>alert(1)</script>`
 	snap.AllConcerns[2].Witnesses = []string{`"><img src=x onerror=alert(2)>`}
-	snap.Attention[0].Witnesses = []string{`"><img src=x onerror=alert(2)>`}
+	snap.Attention[1].Witnesses = []string{`"><img src=x onerror=alert(2)>`}
 	html := renderReadinessFixture(t, snap)
+	if strings.Contains(html, "<script>alert(0)") {
+		t.Fatal("target title is not HTML-escaped")
+	}
 	if strings.Contains(html, "<script>alert(1)") {
 		t.Fatal("summary text is not HTML-escaped")
 	}
@@ -461,36 +598,17 @@ func TestReadinessRender_EscapesUntrustedText(t *testing.T) {
 	}
 }
 
-func TestReadinessRender_AllProvenEmptyQueue(t *testing.T) {
-	html := renderReadinessFixture(t, readinessAllProvenFixture())
-	queue := sectionOf(t, html, `<section class="readiness-queue"`, `</section>`)
-	if strings.Contains(queue, `data-concern-id=`) {
-		t.Fatalf("all-proven snapshot still lists queue concerns:\n%s", queue)
-	}
-	if !strings.Contains(queue, "every concern is proven") {
-		t.Fatalf("empty queue does not state its honest reason:\n%s", queue)
-	}
-	if strings.Contains(html, "current focus") {
-		t.Fatal("all-proven snapshot renders a current-focus marker")
-	}
-	// The complete section still shows all proven facts.
-	all := sectionOf(t, html, `<section class="readiness-all"`, "</main>")
-	if got := strings.Count(all, `data-concern-id="`); got != 4 {
-		t.Fatalf("complete section lists %d proven concerns, want 4", got)
-	}
-}
-
 func TestReadinessRender_KeyboardLandmarksAndScript(t *testing.T) {
 	html := renderReadinessFixture(t, readinessFixture())
 	for _, want := range []string{
 		`<nav class="readiness-rail" aria-label="Readiness rail">`,
-		`aria-label="Attention queue"`,
-		`aria-label="All concerns"`,
+		`aria-label="Focus next"`,
+		`aria-label="Completed checks"`,
 		`href="#area-shape-proposal"`,
 		`id="area-shape-proposal"`,
-		`id="concern-shape/question/q-alpha"`,
-		// The CLI fallback is keyboard-reachable (a Task 4 browser test
-		// exposed that a keyboard-only author could not reach it to copy).
+		`<details class="readiness-more">`,
+		`<summary class="readiness-more-summary">`,
+		`<details class="readiness-tech">`,
 		`<p class="readiness-dest readiness-cli" data-readiness-cli="1" tabindex="0" aria-label="CLI fallback">`,
 		`<script src="/assets/readiness.js" defer></script>`,
 	} {
@@ -607,10 +725,6 @@ func TestReadinessAsset_JSNoNetworkNoPersistence(t *testing.T) {
 	}
 }
 
-// TestReadinessAsset_JSMiddleClickInstrumented pins fix-round finding 1:
-// middle-button activation of a board link (auxclick, button 1) must
-// share the primary click's synchronous board-link recorder, so the
-// _blank navigation is never un-instrumented.
 func TestReadinessAsset_JSMiddleClickInstrumented(t *testing.T) {
 	h := NewHandler(t.TempDir())
 	req := httptest.NewRequest(http.MethodGet, "/assets/readiness.js", nil)
@@ -628,10 +742,6 @@ func TestReadinessAsset_JSMiddleClickInstrumented(t *testing.T) {
 	}
 }
 
-// TestReadinessStyle_NarrowAnchorsAndWrapping pins fix-round findings 2
-// and 3: fragment targets carry a narrow-mode scroll offset so the
-// pinned rail never obscures them, and long valid snapshot values wrap
-// instead of overflowing or truncating.
 func TestReadinessStyle_NarrowAnchorsAndWrapping(t *testing.T) {
 	css, err := dex.StyleCSS()
 	if err != nil {
@@ -660,7 +770,8 @@ func TestReadinessStyle_CockpitRules(t *testing.T) {
 	}
 	s := string(css)
 	for _, want := range []string{
-		".readiness-rail", ".readiness-queue", ".readiness-all",
+		".readiness-rail", ".readiness-queue", ".readiness-completed",
+		".readiness-orient", ".readiness-more", ".readiness-tech",
 		".readiness-stale", ".readiness-cli-token",
 		"prefers-reduced-motion",
 	} {

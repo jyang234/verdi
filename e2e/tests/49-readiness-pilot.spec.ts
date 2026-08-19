@@ -2,24 +2,74 @@ import { test, expect, type Page } from "@playwright/test";
 import { SHOWCASE, branchBoardPath } from "./fixtures";
 import { addSticky } from "./helpers";
 
-// The Wave 3.5 readiness pilot cockpit (GET /readiness): browser proof of
-// the FABLE-owned hybrid surface over the ONE immutable startup snapshot
-// the harness provisions via --context-request (target
-// SHOWCASE.DESIGN_SPEC on SHOWCASE.DESIGN_BRANCH). The cockpit is
-// GET-only and never recomputes readiness — every assertion here reads;
-// the one supported mutation below happens through the EXISTING board
-// surface in its own tab, and the cockpit must not notice.
+// The Wave 3.5 readiness pilot cockpit (GET /readiness), F-01 corrected
+// form (SI-125): orientation first ("where am I?"), the four-step
+// process rail with plain labels, a ranked focus list showing the top
+// three priorities with the exact remainder behind one inline
+// disclosure, and completed checks holding every proven fact. The page
+// is a GET-only view of ONE immutable startup snapshot; the only
+// interactive state is the ephemeral open state of native disclosures.
 //
-// The closed instrumentation vocabulary (plan, Task 3/4): readiness-opened,
+// Closed instrumentation vocabulary (unchanged): readiness-opened,
 // area-inspected, concern-inspected, board-link-followed,
 // cli-fallback-copied, stale-notice-inspected — page memory only.
 
-const RAIL_ORDER = [
-  "shape-proposal",
-  "show-success",
-  "check-context",
-  "request-review",
+// Pinned INDEPENDENTLY of the rendered DOM, from the committed hermetic
+// harness fixtures (provision_board.go's refi-decline-flow design branch
+// + provision_readiness.go's policy fixtures) and the corrected
+// comparators (current-focus area first, then blocking, violated, and
+// area/id order). A reordered, omitted, or extra concern — in either
+// inventory — fails these exact-array oracles. The sha256 semantic id is
+// the digest of committed fixture bytes and is therefore deterministic.
+const SEMANTIC_ID =
+  "context/semantic/sha256:a42722bcbc7bf152d376083fab35c04b462cf3f6735880306e78e8bee1815d6a";
+
+// The exact focus order: the current-focus area (shape-proposal) leads.
+const ATTENTION_QUEUE = [
+  "shape/question/oq-1",
+  "shape/provenance",
+  "review/blocker/forge-facts-unavailable/merge",
+  "review/blocker/obligation-author-vouch-unproven/merge/attestation/author-vouch",
+  "context/verdict",
+  "review/action",
+  "success/contributor/attestation",
+  "success/contributor/behavioral",
+  "success/contributor/static",
+  "context/disclosure/repository-remote-unknown",
+  SEMANTIC_ID,
+  "review/role/merge/attestation/author-vouch",
 ];
+
+// Every and only the proven concerns, in existing AllConcerns order.
+const COMPLETED_CHECKS = [
+  "shape/board",
+  "shape/mutation",
+  "shape/outcome",
+  "shape/problem",
+  "context/mechanical/action:make-verify#complete",
+  "context/mechanical/configuration:go-version#complete",
+];
+
+// The four stations in snapshot order: id, plain label, formal state.
+const RAIL: Array<[id: string, label: string, formal: string]> = [
+  ["shape-proposal", "Define the work", "unproven"],
+  ["show-success", "Define success", "proven"],
+  ["check-context", "Check constraints", "unproven"],
+  ["request-review", "Get approval", "violated-with-witness"],
+];
+
+const TARGET_TITLE = "Refinancing decline flow";
+
+// The first board-destination concern in focus order — the cockpit's
+// first board link — pinned for exact event assertions below.
+const BOARD_LINK_CONCERN = "shape/question/oq-1";
+const BOARD_LINK_AREA = "shape-proposal";
+
+const PLAIN_LABELS: Record<string, string> = {
+  proven: "Ready",
+  "violated-with-witness": "Needs attention",
+  unproven: "Not enough evidence yet",
+};
 
 const EVENT_VOCABULARY = new Set([
   "readiness-opened",
@@ -29,62 +79,6 @@ const EVENT_VOCABULARY = new Set([
   "cli-fallback-copied",
   "stale-notice-inspected",
 ]);
-
-// Pinned INDEPENDENTLY of the rendered DOM, from the committed hermetic
-// harness fixtures (provision_board.go's refi-decline-flow design branch
-// + provision_readiness.go's policy/constitution fixtures) and the fixed
-// readiness comparators: the complete concern inventory in area-then-id
-// order with each row's exact three-valued state, and the exact
-// deterministic attention order (blocking first, violated first, then
-// area/id order). A reordered, omitted, or extra concern — in either
-// view — fails these exact-array oracles. The sha256 semantic id is the
-// digest of committed fixture bytes and is therefore deterministic.
-const SEMANTIC_ID =
-  "context/semantic/sha256:a42722bcbc7bf152d376083fab35c04b462cf3f6735880306e78e8bee1815d6a";
-
-const COMPLETE_CONCERNS: Array<[id: string, state: string]> = [
-  ["shape/board", "proven"],
-  ["shape/mutation", "proven"],
-  ["shape/outcome", "proven"],
-  ["shape/problem", "proven"],
-  ["shape/provenance", "unproven"],
-  ["shape/question/oq-1", "unproven"],
-  ["success/contributor/attestation", "unproven"],
-  ["success/contributor/behavioral", "unproven"],
-  ["success/contributor/static", "unproven"],
-  ["context/disclosure/repository-remote-unknown", "unproven"],
-  ["context/mechanical/action:make-verify#complete", "proven"],
-  ["context/mechanical/configuration:go-version#complete", "proven"],
-  [SEMANTIC_ID, "unproven"],
-  ["context/verdict", "unproven"],
-  ["review/action", "unproven"],
-  ["review/blocker/forge-facts-unavailable/merge", "violated-with-witness"],
-  [
-    "review/blocker/obligation-author-vouch-unproven/merge/attestation/author-vouch",
-    "violated-with-witness",
-  ],
-  ["review/role/merge/attestation/author-vouch", "unproven"],
-];
-
-const ATTENTION_QUEUE = [
-  "review/blocker/forge-facts-unavailable/merge",
-  "review/blocker/obligation-author-vouch-unproven/merge/attestation/author-vouch",
-  "shape/question/oq-1",
-  "context/verdict",
-  "review/action",
-  "shape/provenance",
-  "success/contributor/attestation",
-  "success/contributor/behavioral",
-  "success/contributor/static",
-  "context/disclosure/repository-remote-unknown",
-  SEMANTIC_ID,
-  "review/role/merge/attestation/author-vouch",
-];
-
-// The first board-destination concern in queue order — the cockpit's
-// first board link — pinned for exact event assertions below.
-const BOARD_LINK_CONCERN = "shape/question/oq-1";
-const BOARD_LINK_AREA = "shape-proposal";
 
 type PilotEvent = {
   sequence: number;
@@ -101,6 +95,12 @@ function pilotEvents(page: Page): Promise<PilotEvent[]> {
   );
 }
 
+function focusIds(page: Page): Promise<Array<string | null>> {
+  return page
+    .locator(".readiness-queue [data-concern-id]")
+    .evaluateAll((els) => els.map((el) => el.getAttribute("data-concern-id")));
+}
+
 async function startupHead(page: Page): Promise<string> {
   const head = await page
     .locator('.metadata-card dt:text-is("Head") + dd')
@@ -109,104 +109,172 @@ async function startupHead(page: Page): Promise<string> {
   return head.trim();
 }
 
-test("rail gives linear orientation in the fixed four-area order", async ({
+test("orientation and rail answer where-am-I with plain labels", async ({
   page,
 }) => {
   await page.goto("/readiness");
 
+  // Orientation: exact title first, current step, exact purpose copy.
+  await expect(page.locator("h2.readiness-title")).toHaveText(TARGET_TITLE);
+  await expect(page.locator(".readiness-step")).toHaveText(
+    "Step 1 of 4 — Define the work",
+  );
+  await expect(page.locator(".readiness-purpose")).toHaveText(
+    "This is a startup snapshot of readiness for the current design work.",
+  );
+  // The technical ref stays in metadata, not in the orientation block.
+  await expect(page.locator(".metadata-card")).toContainText(
+    `spec/${SHOWCASE.DESIGN_SPEC}`,
+  );
+  await expect(page.locator(".readiness-orient")).not.toContainText(
+    `spec/${SHOWCASE.DESIGN_SPEC}`,
+  );
+
+  // Rail: snapshot order, plain labels, exact formal states in
+  // data-state, one aria-current station on the current focus.
   const stations = page.locator(".readiness-rail .readiness-station");
   await expect(stations).toHaveCount(4);
-  for (let i = 0; i < RAIL_ORDER.length; i++) {
-    await expect(stations.nth(i)).toHaveAttribute("data-area-id", RAIL_ORDER[i]);
-    // Every station speaks its exact three-valued state word (the chip
-    // text is the word plus an aria-hidden shape glyph).
+  for (let i = 0; i < RAIL.length; i++) {
+    const [id, label, formal] = RAIL[i];
+    await expect(stations.nth(i)).toHaveAttribute("data-area-id", id);
+    await expect(stations.nth(i)).toHaveAttribute("data-state", formal);
+    await expect(stations.nth(i)).toContainText(label);
+    await expect(stations.nth(i)).toContainText(PLAIN_LABELS[formal]);
     await expect(
-      stations.nth(i).locator(".readiness-state"),
-    ).toHaveText(/(^|[✓✕◌])(proven|violated-with-witness|unproven)$/);
+      stations.nth(i).locator(".readiness-station-num"),
+    ).toHaveText(String(i + 1));
+  }
+  await expect(page.locator('[aria-current="step"]')).toHaveCount(1);
+  await expect(
+    stations.first().locator('a[aria-current="step"]'),
+  ).toHaveCount(1);
+});
+
+test("focus list shows exactly three priorities and the exact disclosed remainder", async ({
+  page,
+}) => {
+  await page.goto("/readiness");
+
+  // Exactly the first three, in the pinned order, ranked 1..3.
+  expect(await focusIds(page)).toEqual(ATTENTION_QUEUE); // complete list is in the DOM…
+  const visible = page.locator(
+    ".readiness-queue [data-concern-id]:visible",
+  );
+  await expect(visible).toHaveCount(3);
+  for (let i = 0; i < 3; i++) {
+    await expect(visible.nth(i)).toHaveAttribute(
+      "data-concern-id",
+      ATTENTION_QUEUE[i],
+    );
+    await expect(visible.nth(i).locator(".readiness-rank")).toHaveText(
+      String(i + 1),
+    );
   }
 
-  // The current-focus marker sits on exactly the FIRST non-proven area
-  // (state read from the chip's modifier class, glyph-independent).
-  const states = await stations
-    .locator(".readiness-state")
-    .evaluateAll((els) =>
-      els.map((el) => el.className.replace(/.*readiness-state--/, "")),
-    );
-  const firstNonProven = states.findIndex((s) => s !== "proven");
-  expect(firstNonProven, "harness snapshot must carry a non-proven area").toBeGreaterThanOrEqual(0);
-  await expect(page.locator(".readiness-focus")).toHaveCount(1);
-  await expect(
-    stations.nth(firstNonProven).locator(".readiness-focus"),
-  ).toHaveText("current focus");
-  await expect(
-    stations.nth(firstNonProven).locator("a[aria-current]"),
-  ).toHaveCount(1);
+  // Downstream disclosure: exactly the violated concerns in areas after
+  // the current focus (the two review blockers) — nothing else counted.
+  await expect(page.locator(".readiness-downstream")).toHaveText(
+    "Known problems in later steps: 2",
+  );
 
-  // Continuously visible: the rail stays on screen at the page bottom.
-  await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
-  const railBox = await page.locator(".readiness-rail").boundingBox();
-  expect(railBox).not.toBeNull();
-  expect(railBox!.y).toBeGreaterThanOrEqual(0);
-  expect(railBox!.y).toBeLessThan(page.viewportSize()!.height);
+  // The inline control carries the exact remaining count; expanding
+  // reveals the complete ordered remainder; the open control reads
+  // "Show fewer"; collapsing hides it again. No event is recorded.
+  const more = page.locator("details.readiness-more");
+  const summary = more.locator(".readiness-more-summary");
+  await expect(summary).toHaveText(/9 more items\s*Show fewer/); // both spans in DOM…
+  await expect(more.locator(".readiness-more-closed")).toBeVisible();
+  await expect(more.locator(".readiness-more-open")).toBeHidden();
+
+  const eventsBefore = await pilotEvents(page);
+  await summary.click();
+  await expect(more).toHaveAttribute("open", "");
+  await expect(more.locator(".readiness-more-open")).toBeVisible();
+  await expect(more.locator(".readiness-more-closed")).toBeHidden();
+  const revealed = more.locator("[data-concern-id]");
+  await expect(revealed).toHaveCount(9);
+  for (let i = 0; i < 9; i++) {
+    await expect(revealed.nth(i)).toHaveAttribute(
+      "data-concern-id",
+      ATTENTION_QUEUE[i + 3],
+    );
+    await expect(revealed.nth(i).locator(".readiness-rank")).toHaveText(
+      String(i + 4),
+    );
+  }
+  await summary.click();
+  await expect(more.locator("[data-concern-id]").first()).toBeHidden();
+  expect(await pilotEvents(page)).toEqual(eventsBefore); // expansion records nothing
 });
 
-test("attention queue is prioritized without omitting any concern", async ({
+test("focus and completed checks are lossless, disjoint, and complete", async ({
   page,
 }) => {
   await page.goto("/readiness");
 
-  // EXACT ordered attention queue — pinned from the committed fixture,
-  // never derived from the page. A reversed queue, a dropped concern, or
-  // an extra row fails this array equality.
-  const queueIds = await page
-    .locator(".readiness-queue [data-concern-id]")
-    .evaluateAll((els) => els.map((el) => el.getAttribute("data-concern-id")));
+  const queueIds = await focusIds(page);
   expect(queueIds).toEqual(ATTENTION_QUEUE);
 
-  // EXACT complete inventory with each row's exact state, in area-then-id
-  // order. A concern omitted from BOTH views still fails here, because
-  // the expected array is independent of the DOM.
-  const allRows = await page
-    .locator(".readiness-all [data-concern-id]")
-    .evaluateAll((els) =>
-      els.map((el) => [
-        el.getAttribute("data-concern-id"),
-        el
-          .querySelector(".readiness-state")
-          ?.className.replace(/.*readiness-state--/, ""),
-      ]),
-    );
-  expect(allRows).toEqual(COMPLETE_CONCERNS);
+  const completedIds = await page
+    .locator(".readiness-completed [data-concern-id]")
+    .evaluateAll((els) => els.map((el) => el.getAttribute("data-concern-id")));
+  expect(completedIds).toEqual(COMPLETED_CHECKS);
 
-  // Priority is positional: the queue renders above the complete section.
-  const queueBox = await page.locator(".readiness-queue").boundingBox();
-  const allBox = await page.locator(".readiness-all").boundingBox();
-  expect(queueBox!.y).toBeLessThan(allBox!.y);
+  // Disjoint union covering every concern exactly once.
+  const union = new Set([...queueIds, ...completedIds]);
+  expect(union.size).toBe(queueIds.length + completedIds.length);
+  const totalRows = await page.locator("[data-concern-id]").count();
+  expect(totalRows).toBe(queueIds.length + completedIds.length);
+
+  // Completed rows carry the plain Ready label; their technical details
+  // retain the exact formal state.
+  const firstDone = page
+    .locator(".readiness-completed [data-concern-id]")
+    .first();
+  await expect(firstDone.locator(".readiness-state")).toHaveText("Ready");
+  await firstDone.locator(".readiness-tech summary").click();
+  await expect(firstDone.locator(".readiness-tech-facts")).toContainText(
+    "proven",
+  );
 });
 
-test("violated-with-witness and unproven are visibly and textually distinct", async ({
+test("plain state labels pair with exact formal technical details", async ({
   page,
 }) => {
   await page.goto("/readiness");
 
-  const violated = page.locator(".readiness-state--violated-with-witness").first();
-  const unproven = page.locator(".readiness-state--unproven").first();
-  await expect(violated).toContainText("violated-with-witness");
-  await expect(unproven).toContainText("unproven");
+  // Every chip pairs its formal modifier class with the plain label.
+  const chips = await page
+    .locator(".readiness-state")
+    .evaluateAll((els) =>
+      els.map((el) => [
+        el.className.replace(/.*readiness-state--/, ""),
+        el.textContent?.trim(),
+      ]),
+    );
+  expect(chips.length).toBeGreaterThan(0);
+  for (const [formal, text] of chips) {
+    expect(text).toBe(PLAIN_LABELS[formal as string]);
+  }
 
-  // Beyond color: the glyphs differ and unproven carries a dashed border.
-  const vGlyph = await violated.locator(".readiness-glyph").innerText();
-  const uGlyph = await unproven.locator(".readiness-glyph").innerText();
-  expect(vGlyph).not.toBe(uGlyph);
-  await expect(unproven).toHaveCSS("border-top-style", "dashed");
-  await expect(violated).toHaveCSS("border-top-style", "solid");
-
-  // An unresolved concern carries its exact witnesses.
-  const witnessed = page
-    .locator(".readiness-queue .readiness-card .readiness-witnesses code")
+  // Violated and unproven stay visibly distinct beyond color.
+  const violated = page
+    .locator(".readiness-state--violated-with-witness")
     .first();
-  await expect(witnessed).toBeVisible();
-  await expect(witnessed).not.toHaveText("");
+  const unproven = page.locator(".readiness-state--unproven").first();
+  await expect(violated).toHaveCSS("border-top-style", "solid");
+  await expect(unproven).toHaveCSS("border-top-style", "dashed");
+
+  // A violated concern's technical details carry the exact formal facts.
+  await page.locator("details.readiness-more > summary").click();
+  const blocker = page.locator(
+    `[data-concern-id="${ATTENTION_QUEUE[2]}"]`,
+  );
+  await blocker.locator(".readiness-tech summary").click();
+  const facts = blocker.locator(".readiness-tech-facts");
+  await expect(facts).toContainText("violated-with-witness");
+  await expect(facts).toContainText(ATTENTION_QUEUE[2]);
+  await expect(facts).toContainText("request-review");
 });
 
 test("board destination opens the editable board in a new tab and both tabs keep their state", async ({
@@ -232,13 +300,10 @@ test("board destination opens the editable board in a new tab and both tabs keep
   expect(popup.url()).toContain(
     branchBoardPath(SHOWCASE.DESIGN_BRANCH, SHOWCASE.DESIGN_SPEC),
   );
-  // The existing board, in authoring (editable) mode — not a copy.
   await expect(popup.getByRole("button", { name: "Add sticky" })).toBeVisible();
 
-  // The cockpit source tab is preserved and the primary click appended
-  // EXACTLY ONE event to the complete array — the expected
-  // board-link-followed and nothing else (no filtering: any unintended
-  // extra event fails the prefix/length equality).
+  // The source tab is preserved and the primary click appended EXACTLY
+  // ONE event — the expected board-link-followed and nothing else.
   await expect(page.locator(".readiness-page")).toBeVisible();
   const after = await pilotEvents(page);
   expect(after.length).toBe(before.length + 1);
@@ -258,8 +323,6 @@ test("middle-button appends exactly one event; right-click appends none", async 
   await page.goto("/readiness");
   const boardLink = page.locator(".readiness-board-link").first();
 
-  // Middle-button auxclick: the COMPLETE array grows by exactly the one
-  // expected board-link-followed event.
   const beforeMiddle = await pilotEvents(page);
   await boardLink.click({ button: "middle" });
   const afterMiddle = await pilotEvents(page);
@@ -273,8 +336,6 @@ test("middle-button appends exactly one event; right-click appends none", async 
     },
   ]);
 
-  // Right-click: the complete array is identical — not one event of any
-  // kind may be appended.
   await boardLink.click({ button: "right" });
   const afterRight = await pilotEvents(page);
   expect(afterRight).toEqual(afterMiddle);
@@ -290,13 +351,10 @@ test("CLI fallback tokens copy as the exact vector, never an invented shell comm
   });
 
   const cli = page.locator(".readiness-cli").first();
-  const tokens = await cli
-    .locator(".readiness-cli-token")
-    .allInnerTexts();
+  const tokens = await cli.locator(".readiness-cli-token").allInnerTexts();
   expect(tokens.length).toBeGreaterThan(0);
   expect(tokens[0]).toBe("verdi");
 
-  // Select the vector and copy with the keyboard.
   await cli.evaluate((el) => {
     const selection = window.getSelection()!;
     selection.removeAllRanges();
@@ -305,8 +363,6 @@ test("CLI fallback tokens copy as the exact vector, never an invented shell comm
   await page.keyboard.press("ControlOrMeta+c");
 
   const copied = await page.evaluate(() => navigator.clipboard.readText());
-  // The copy is exactly the tokens in order, whitespace-separated — no
-  // quoting, escaping, or joined shell syntax invented by the page.
   expect(copied.split(/\s+/).filter((t) => t !== "")).toEqual(tokens);
 
   const copyEvents = (await pilotEvents(page)).filter(
@@ -316,37 +372,36 @@ test("CLI fallback tokens copy as the exact vector, never an invented shell comm
   expect(copyEvents[0].concern_id).not.toBe("");
 });
 
-test("keyboard traversal reaches notice, rail, queue, board link, and CLI fallback", async ({
-  page,
-}) => {
+test("keyboard traversal reaches every cockpit landmark", async ({ page }) => {
   await page.goto("/readiness");
   await page.emulateMedia({ reducedMotion: "reduce" });
 
-  // Walk the tab order and record which cockpit landmarks receive focus.
   const reached = new Set<string>();
-  await page.locator("body").press("Tab"); // enter the page's tab order
-  for (let i = 0; i < 120; i++) {
-    const cls = await page.evaluate(
-      () => (document.activeElement && document.activeElement.className) || "",
-    );
-    for (const landmark of [
-      "readiness-stale",
-      "readiness-station-link",
-      "readiness-concern-link",
-      "readiness-board-link",
-      "readiness-cli",
-    ]) {
-      if (String(cls).split(" ").includes(landmark)) reached.add(landmark);
-    }
-    if (reached.size === 5) break;
+  await page.locator("body").press("Tab");
+  for (let i = 0; i < 160; i++) {
+    const kind = await page.evaluate(() => {
+      const el = document.activeElement;
+      if (!el) return "";
+      const cls = String(el.className || "");
+      if (cls.includes("readiness-stale")) return "stale";
+      if (cls.includes("readiness-station-link")) return "station";
+      if (cls.includes("readiness-more-summary")) return "expansion";
+      if (cls.includes("readiness-board-link")) return "board";
+      if (cls.includes("readiness-cli")) return "cli";
+      if (el.matches("details.readiness-tech > summary")) return "tech";
+      return "";
+    });
+    if (kind) reached.add(kind);
+    if (reached.size === 6) break;
     await page.keyboard.press("Tab");
   }
   expect([...reached].sort()).toEqual([
-    "readiness-board-link",
-    "readiness-cli",
-    "readiness-concern-link",
-    "readiness-stale",
-    "readiness-station-link",
+    "board",
+    "cli",
+    "expansion",
+    "stale",
+    "station",
+    "tech",
   ]);
 
   // Focusing the stale notice records its inspection.
@@ -369,11 +424,9 @@ test("instrumentation keeps the closed vocabulary, exact shape, 200-cap, and pag
   await page.goto("/readiness");
   await page.waitForLoadState("networkidle");
 
-  // From here on, the cockpit itself must issue NO network request.
   const requests: string[] = [];
   page.on("request", (r) => requests.push(r.url()));
 
-  // Mirror the same-page CustomEvent stream.
   await page.evaluate(() => {
     const w = window as unknown as { __seen: unknown[] };
     w.__seen = [];
@@ -384,7 +437,6 @@ test("instrumentation keeps the closed vocabulary, exact shape, 200-cap, and pag
 
   const htmlBefore = await page.evaluate(() => document.body.innerHTML);
 
-  // Real interactions plus a burst that overflows the cap.
   await page.locator(".readiness-stale").click();
   await page.locator(".readiness-queue [data-concern-id]").first().click();
   await page.evaluate(() => {
@@ -395,7 +447,7 @@ test("instrumentation keeps the closed vocabulary, exact shape, 200-cap, and pag
   });
 
   const events = await pilotEvents(page);
-  expect(events).toHaveLength(200); // capped at the final 200
+  expect(events).toHaveLength(200);
   for (const event of events) {
     expect(Object.keys(event).sort()).toEqual([
       "area_id",
@@ -408,18 +460,15 @@ test("instrumentation keeps the closed vocabulary, exact shape, 200-cap, and pag
   for (let i = 1; i < events.length; i++) {
     expect(events[i].sequence).toBe(events[i - 1].sequence + 1);
   }
-  // The cap keeps the FINAL 200: the tail is the last synthetic click.
   expect(events[events.length - 1].event).toBe("area-inspected");
   expect(events[events.length - 1].area_id).toBe("shape-proposal");
 
-  // The same-page CustomEvent stream carried the same objects.
   const seen = await page.evaluate(
     () => (window as unknown as { __seen: PilotEvent[] }).__seen,
   );
   expect(seen.length).toBeGreaterThanOrEqual(212);
   expect(seen[seen.length - 1]).toEqual(events[events.length - 1]);
 
-  // No network, no persistence, no rendering effect.
   expect(requests).toEqual([]);
   const persistence = await page.evaluate(() => ({
     local: window.localStorage.length,
@@ -436,21 +485,16 @@ test("an edit through the existing board leaves the preserved cockpit and its sn
   await page.goto("/readiness");
   const head = await startupHead(page);
 
-  // The stale notice names the exact startup HEAD and directs a restart.
   const notice = page.locator(".readiness-stale");
   await expect(notice).toContainText(`Startup snapshot at ${head}`);
   await expect(notice).toContainText("restart verdi serve");
 
   const bodyBefore = await (await page.request.get("/readiness")).text();
   const eventsBefore = await pilotEvents(page);
-  // The COMPLETE snapshot-bearing cockpit DOM of the source tab (metadata
-  // card, stale notice, rail, queue, complete section, script include),
-  // captured before the board is opened or edited.
   const domBefore = await page.evaluate(
     () => document.querySelector("main.content")!.outerHTML,
   );
 
-  // One supported edit through the EXISTING editable board, in its own tab.
   const [popup] = await Promise.all([
     page.waitForEvent("popup"),
     page.locator(".readiness-board-link").first().click(),
@@ -459,9 +503,6 @@ test("an edit through the existing board leaves the preserved cockpit and its sn
   await addSticky(popup, "readiness pilot probe: cockpit must not notice this");
   await popup.close();
 
-  // The preserved source tab's cockpit DOM is byte-for-byte unchanged
-  // after the real edit — instrumentation appended an event, but neither
-  // it nor the edit may touch the rendered snapshot.
   const domAfter = await page.evaluate(
     () => document.querySelector("main.content")!.outerHTML,
   );
@@ -472,25 +513,22 @@ test("an edit through the existing board leaves the preserved cockpit and its sn
   const events = await pilotEvents(page);
   expect(events.slice(0, eventsBefore.length)).toEqual(eventsBefore);
 
-  // A fresh render after the edit is byte-identical: startup snapshot,
-  // never recomputed.
   const bodyAfter = await (await page.request.get("/readiness")).text();
   expect(bodyAfter).toBe(bodyBefore);
 });
 
-test("420px: pinned rail hides nothing and long values do not overflow", async ({
+test("420px: pinned rail hides nothing, anchors reveal disclosed rows, long values fit", async ({
   page,
 }) => {
   await page.setViewportSize({ width: 420, height: 800 });
   await page.emulateMedia({ reducedMotion: "reduce" });
   await page.goto("/readiness");
 
-  // No horizontal overflow and no cockpit element clipping its content.
   const widths = await page.evaluate(() => ({
     doc: document.documentElement.scrollWidth,
     clipped: Array.from(
       document.querySelectorAll(
-        ".readiness-card, .readiness-row, .readiness-cli, .readiness-witnesses",
+        ".readiness-card, .readiness-row, .readiness-cli, .readiness-tech-facts",
       ),
     )
       .filter((el) => el.scrollWidth > el.clientWidth + 1)
@@ -499,26 +537,35 @@ test("420px: pinned rail hides nothing and long values do not overflow", async (
   expect(widths.doc).toBeLessThanOrEqual(420);
   expect(widths.clipped).toEqual([]);
 
-  // Rail-link fragment target lands below the pinned rail.
   const railBottom = () =>
     page.evaluate(
-      () => document.querySelector(".readiness-rail")!.getBoundingClientRect().bottom,
+      () =>
+        document.querySelector(".readiness-rail")!.getBoundingClientRect()
+          .bottom,
     );
+
+  // A rail anchor whose target sits INSIDE the collapsed remainder must
+  // reveal it (native details auto-expansion) and land below the rail.
   await page.locator('a[href="#area-check-context"]').click();
+  await expect(page.locator("details.readiness-more")).toHaveAttribute(
+    "open",
+    "",
+  );
   let top = await page.evaluate(
-    () => document.getElementById("area-check-context")!.getBoundingClientRect().top,
+    () =>
+      document.getElementById("area-check-context")!.getBoundingClientRect()
+        .top,
   );
   expect(top).toBeGreaterThanOrEqual((await railBottom()) - 1);
 
-  // Keyboard-activated concern fragment target likewise.
+  // Keyboard-activated anchor to a visible target likewise.
   await page.evaluate(() => window.scrollTo(0, 0));
-  const concernLink = page.locator("a.readiness-concern-link").first();
-  const targetId = (await concernLink.getAttribute("href"))!.slice(1);
-  await concernLink.focus();
+  await page.locator('a[href="#area-request-review"]').focus();
   await page.keyboard.press("Enter");
   top = await page.evaluate(
-    (id) => document.getElementById(id)!.getBoundingClientRect().top,
-    targetId,
+    () =>
+      document.getElementById("area-request-review")!.getBoundingClientRect()
+        .top,
   );
   expect(top).toBeGreaterThanOrEqual((await railBottom()) - 1);
 });
