@@ -33,7 +33,7 @@ DC-10, DC-12–DC-15, CO-1–CO-7; `spec/execution-workspace`; the canonical
 CSE design's evaluator, execution, failure, and retention sections; the
 four-feature orchestration plan's Wave 3B contract; invention-ledger
 SI-12–SI-13, SI-17, SI-30, SI-37, SI-40–SI-46, SI-58–SI-63, SI-75–SI-76,
-and SI-126–SI-133.
+and SI-126–SI-134.
 
 **Execution status:** Runtime implementation is BLOCKED until this consolidated
 spec-only head passes its one independent cross-model review, the owner accepts
@@ -129,12 +129,13 @@ The amendment makes these exact changes:
    evaluator-supplied witness, reason, and disclosure text before canonical
    publication.
 
-4. Revise results to `verdi.experiment-result/v2`, binding
-   `execution_digest`, preserving each measured candidate execution outcome,
-   carrying diagnostic warmup failures in canonical schedule order, and
-   copying the receipt's exact
-   network projection plus the closed `weaker-isolation` disclosure whenever
-   network is allowed. Add the closed decision reason
+4. Revise results to `verdi.experiment-result/v2` as one strict envelope with
+   an engine-owned `decision` document and a harness-owned `execution` annex.
+   The decision preserves each measured candidate execution outcome. The annex
+   binds `execution_digest`, carries final-invocation warmup diagnostics in
+   canonical schedule order, and copies the receipt's exact network projection
+   plus the closed `weaker-isolation` disclosure whenever network is allowed.
+   Add the closed decision reason
    `baseline-candidate-failure`. V1 remains decodeable for predecessor
    compatibility but cannot prove the environment-policy conjunct and cannot
    be emitted by Wave 3B. The result itself, not only an external receipt
@@ -165,7 +166,7 @@ The amendment makes these exact changes:
    the only operation allowed to prefer one result.
 
 7. Record the amendment and the 43/43 source-coverage matrix in the accepted
-   revision history. Update SI-126–SI-133 from conditional to the exact
+   revision history. Update SI-126–SI-134 from conditional to the exact
    ratified amendment head only after merge.
 
 ## Fixed evaluator protocol
@@ -244,8 +245,8 @@ Rules:
   explicit protocol/ledger amendment rather than an adapter override.
 - A non-completed warmup neither publishes an observation nor fails the run.
   The runner retains `{candidate, warmup, kind, witness}` in the V2 result's
-  diagnostic `warmup_failures` list in exact warmup-schedule order and continues
-  the declared schedule.
+  non-decision `execution.warmup_diagnostics.failures` list in exact
+  warmup-schedule order and continues the declared schedule.
   Warmup failures never affect eligibility or recommendation. A crash/timeout
   in a measured cycle remains candidate evidence under the rules below.
 
@@ -270,29 +271,68 @@ Observation V2 decision semantics are exact:
   candidate from winning; if no non-baseline candidate remains eligible, the
   existing `no-eligible-candidate` disclosed-unproven reason applies.
 
-Result V2 candidate rows carry a sorted `execution_failures` list of
-`{round, kind, witness}`. They never translate an execution failure into a
-guard violation.
+Result V2 `decision.candidates` rows carry a sorted `execution_failures` list
+of `{round, kind, witness}`. They never translate an execution failure into a
+guard violation. Those rows are engine-recomputable because measured outcomes
+are observations.
 
-The V2 additions are required and presence-sensitive:
+The V2 envelope is required and presence-sensitive:
 
 ```text
-execution_digest                     canonical receipt digest
-warmup_failures                      [] or schedule-ordered rows
-  row                                {candidate, warmup, kind, witness}
-isolation.network                    exact {mode, configured, reason} receipt value
-isolation.disclosures                [] or [weaker-isolation]
-candidates[].execution_failures      [] or round-ordered rows
-  row                                {round, kind, witness}
+schema                                      verdi.experiment-result/v2
+decision                                    engine-owned decision document
+  experiment/definition_digest/run          exact locked/run identity
+  algorithm/verdict/winner/reasons           closed decision fields
+  candidates[].execution_failures            [] or round-ordered rows
+    row                                      {round, kind, witness}
+  observations_digest                        complete measured-set digest
+execution                                   harness-owned execution annex
+  execution_digest                           canonical receipt digest
+  isolation.network                          exact receipt value
+  isolation.disclosures                      [] or [weaker-isolation]
+  warmup_diagnostics.authority               non-decision-diagnostic
+  warmup_diagnostics.scope                   final-invocation
+  warmup_diagnostics.failures                [] or schedule-ordered rows
+    row                                      {candidate, warmup, kind, witness}
 ```
 
 Warmup/candidate failure kinds are exactly `candidate-crash` or
-`candidate-timeout`; their witness is nonempty. `isolation` is copied
+`candidate-timeout`; their witness is nonempty. The isolation value is copied
 byte-for-byte as a typed value from the validated receipt's network projection.
 Its disclosures list is empty for configured default deny and contains exactly
-`weaker-isolation` for allowed ambient network. This is direct result evidence;
-`execution_digest` remains the independent at-rest binding to the complete
-receipt.
+`weaker-isolation` for allowed ambient network.
+
+SI-43 recompute-equality applies exactly to canonical `decision` bytes. The V2
+verifier recomputes that document from the locked definition and complete
+measured observations and requires byte identity. It independently validates
+the exact receipt and requires `execution.execution_digest` and
+`execution.isolation` to equal it. Warmup diagnostics have no durable source
+input because warmups are deliberately outside the observation set; the fixed
+`authority` and `scope` fields therefore make them visible but explicitly
+non-decision and unverified at rest. They are strict/canonical and
+schedule-ordered but are excluded from recompute authority. The digest of the
+whole result still binds the exact annex bytes for ratification without
+elevating them into recommendation evidence.
+
+Task 1 widens the existing consumer-owned verification port without reversing
+the package dependency:
+
+```go
+type ResultVerifier func(
+    Definition,
+    []Observation,
+    *ExecutionReceipt,
+    Result,
+) error
+```
+
+`DeriveState` loads and passes the exact run receipt for V2; a missing receipt
+is operational. V1 passes nil and retains its existing full-result recompute
+and environment-receipt disclosure. `internal/experimentdecision.VerifyResult`
+dispatches by the already strict-decoded result schema: V1 compares the whole
+canonical result as today, while V2 compares only the canonical decision
+document and verifies the annex as defined above. No caller may choose which
+fields participate.
 
 ### Process observer
 
@@ -362,10 +402,12 @@ versions. CPU/memory allocation is disclosed unproven when no enforced
 resource-ceiling fact exists. Network mode is always present.
 
 `ExecutionReceiptDigest` is `canonjson.Digest` of the validated value. Every
-V2 result carries that digest. At-rest verification receives the exact receipt,
-requires its experiment/run to match the observation set and result, requires
-its schedule/capability/input identities to match the locked definition, then
-runs existing recompute-equality. A matching V2 receipt removes
+V2 execution annex carries that digest. At-rest verification receives the
+exact receipt, requires its experiment/run to match the observation set and
+result, requires its schedule/capability/input identities to match the locked
+definition, verifies the annex's receipt-derived fields, then applies SI-43
+recompute-equality to the engine-owned decision document only. A matching V2
+receipt removes
 `result-environment-policy-receipt`; a V1 result retains that disclosure.
 
 The service never invents authorization. It requires a consumer-owned port:
@@ -508,12 +550,12 @@ authority source. A crash leaves either the old complete file or the old file
 plus one complete line.
 
 A complete run invokes `experimentdecision.Evaluate` with the receipt's exact
-environment policy, constructs a V2 result with `execution_digest`, the exact
-receipt-derived isolation projection, measured execution failures, and the
-final invocation's warmup diagnostics, verifies it, and immutably publishes
-`result.json`. An existing byte-equal result is an idempotent success; any
-different existing result is operational. The runner never publishes a result
-for an incomplete run.
+environment policy, places its recomputable output and measured execution
+failures in `decision`, constructs `execution` from the exact receipt-derived
+isolation plus the final invocation's non-decision warmup diagnostics, verifies
+both ownership surfaces, and immutably publishes `result.json`. An existing
+byte-equal result is an idempotent success; any different existing result is
+operational. The runner never publishes a result for an incomplete run.
 
 ## Implementation sequence
 
@@ -550,10 +592,11 @@ run_paths}.go` and tests/fixtures.
 
 - [ ] RED: exact strict codecs, union presence, unknown/duplicate/trailing data,
       canonical-byte equality, command-operation invariant, candidate outcomes,
-      warmup diagnostics, result isolation, receipt/result binding, capability
-      membership, multi-run enumeration, V1 disclosure retention, and V2
-      receipt proof. Ratchet the former test that rejected evaluator V1 as an
-      unknown protocol to the amended closed set.
+      warmup diagnostic authority/scope, result isolation, decision-versus-annex
+      projection, decision-only recompute forgery rejection, annex receipt
+      binding, capability membership, multi-run enumeration, V1 disclosure
+      retention, and V2 receipt proof. Ratchet the former test that rejected
+      evaluator V1 as an unknown protocol to the amended closed set.
 - [ ] GREEN: implement only the fixed schemas and validators.
 - [ ] Preserve old V1 decode/recompute tests; V1 is read compatibility, not a
       Wave 3B emission path.
@@ -631,8 +674,8 @@ require it.
       changed definition/capabilities/authorization/grants/env/fingerprint/
       schedule; duplicate/out-of-order/altered records; rerun ID separation;
       complete-run idempotency; candidate crash/timeout eligibility; receipt
-      digest result binding; V2 at-rest verification; and no favorable run
-      selection.
+      digest/result-annex binding; V2 decision recompute-equality; strict but
+      non-authoritative warmup diagnostics; and no favorable run selection.
 - [ ] GREEN: reuse `ErrObservationIncomplete`, existing decision computation,
       and canonical digest seams; add no second recommendation algorithm.
 - [ ] Prove all complete reruns enumerate in canonical run-ID order and an
@@ -707,6 +750,11 @@ precondition remains unprovable at rest. Without per-run directories, reruns
 must overwrite evidence or be silently selected. Each added structure closes a
 binding correctness gap and has one owner.
 
+The V2 decision/annex split is two ownership projections inside one result, not
+a second result or recommendation mechanism. It exists because SI-43 can
+recompute decision facts from definition/observations while receipt facts and
+deliberately unmeasured warmup diagnostics have different proof sources.
+
 ## Source coverage and losslessness witness
 
 The Wave 3B slice maps 43/43 implicated authority units:
@@ -752,7 +800,7 @@ The Wave 3B slice maps 43/43 implicated authority units:
 | 37 | Locked workload/fixture/contract digest proof | SI-132 read-only resolver; Tasks 3–6 |
 | 38 | Resume-stable profile environment and cleanup handoff | SI-133; Tasks 3–6, final release deferred to Wave 5 |
 | 39 | AC-1 registration, human lock, and terminal tree | registration/lock remain Wave 5; multi-run terminal tree is Gate A item 1 |
-| 40 | AC-2 deterministic recommendation and exit contract | existing Wave 2 `experimentdecision` remains the sole engine; V2 outcome integration in Tasks 1/5 and future exit adapter in Wave 5 |
+| 40 | AC-2 deterministic recommendation and exit contract | existing Wave 2 `experimentdecision` remains the sole engine; SI-134 V2 decision-only recompute surface and outcome integration in Tasks 1/5; future exit adapter in Wave 5 |
 | 41 | DC-2 derived state including exploratory and multi-run aggregate posture | Gate A item 6; Task 1 |
 | 42 | CO-4 process exit mapping | unchanged typed-outcome boundary here; explicit future mapping in Failure and exit semantics and Wave 5 |
 | 43 | CO-5 registered-boundary scope | unchanged result claim; Task 5 recompute and at-rest verification preserve exact definition/run/environment identity |
