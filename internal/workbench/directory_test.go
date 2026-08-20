@@ -108,6 +108,39 @@ func getHome(t *testing.T, root string, home HomeDeps) (int, string) {
 	return rec.Code, rec.Body.String()
 }
 
+func TestBranchBoardHref(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name   string
+		branch string
+		spec   string
+		want   string
+	}{
+		{
+			name:   "design branch",
+			branch: "design/example",
+			spec:   "example",
+			want:   "/b/design%2Fexample/board/spec/example",
+		},
+		{
+			name:   "nested branch",
+			branch: "user/alice/idea",
+			spec:   "idea",
+			want:   "/b/user%2Falice%2Fidea/board/spec/idea",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := BranchBoardHref(tt.branch, tt.spec); got != tt.want {
+				t.Fatalf("BranchBoardHref(%q, %q) = %q, want %q", tt.branch, tt.spec, got, tt.want)
+			}
+		})
+	}
+}
+
 // TestRenderHome_DirectoryGroupsChipsAndLinks is ac-1's render witness: the
 // four status groups organize the page in order, every entry appears
 // exactly once under its group, status- and source-chipped, linked per

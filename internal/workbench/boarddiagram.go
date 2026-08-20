@@ -525,7 +525,7 @@ func boardOriginPath(fixedBranch, boardName string) string {
 	if fixedBranch == "" {
 		return boardSpecPrefix + boardName
 	}
-	return branchBoardHref(fixedBranch, boardName)
+	return BranchBoardHref(fixedBranch, boardName)
 }
 
 // diagramExitTarget is the diagram designer's resolved return-target
@@ -623,7 +623,7 @@ func diagramExitStore(root, origin string) (store, name string, ok bool) {
 	// mount), exactly as the operator's URL carried it — so splitting on the
 	// first boardSpecPrefix segment is unambiguous (an encoded branch can
 	// contain no such literal, and a spec name can contain no slash). These
-	// are the same two prefixes branchBoardHref (directory.go) builds with.
+	// are the same two prefixes BranchBoardHref (directory.go) builds with.
 	if rest, found := strings.CutPrefix(origin, branchBoardPrefix); found {
 		seg, tail, cut := strings.Cut(rest, boardSpecPrefix)
 		if !cut || seg == "" || !specNameRe.MatchString(tail) {

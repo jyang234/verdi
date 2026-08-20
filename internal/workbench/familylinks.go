@@ -146,7 +146,7 @@ func attachParentFeatureLink(proj *BoardProjection, ix *index.Index, fixedBranch
 // addressing sweep judged-fbl-r4-5 was filed for): an ACTIVE match is
 // servable BY CONSTRUCTION at its branch's own board — the index this
 // resolver's callers built walks the branch worktree, and /b/{branch}
-// serves that same worktree — so the href is the shared branchBoardHref
+// serves that same worktree — so the href is the shared BranchBoardHref
 // address, never the root-relative one that ejected the operator to the
 // serving checkout and 404ed on a branch-only target. An ARCHIVED match
 // has NO surface that provably serves it (the /a/ corpus is root-only,
@@ -163,7 +163,7 @@ func servableSurface(ref string, entry *index.Entry, fixedBranch string) (href s
 		return "/a/" + ref, true
 	}
 	if fixedBranch != "" {
-		return branchBoardHref(fixedBranch, strings.TrimPrefix(ref, "spec/")), false
+		return BranchBoardHref(fixedBranch, strings.TrimPrefix(ref, "spec/")), false
 	}
 	return "/board/" + ref, false
 }

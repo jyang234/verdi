@@ -47,12 +47,18 @@ type controlServer struct {
 	mu     sync.Mutex
 	outage bool
 
-	emptyGlance *emptyGlanceFixture
-	vocab       *vocabFixture
+	emptyGlance        *emptyGlanceFixture
+	vocab              *vocabFixture
+	readinessAllProven *readinessAllProvenFixture
 }
 
 func newControlServer(storeRoot, moduleRoot string) *controlServer {
-	return &controlServer{storeRoot: storeRoot, emptyGlance: newEmptyGlanceFixture(), vocab: newVocabFixture(moduleRoot)}
+	return &controlServer{
+		storeRoot:          storeRoot,
+		emptyGlance:        newEmptyGlanceFixture(),
+		vocab:              newVocabFixture(moduleRoot),
+		readinessAllProven: newReadinessAllProvenFixture(),
+	}
 }
 
 // handler wires the four endpoints onto a fresh mux.
@@ -64,6 +70,11 @@ func (c *controlServer) handler() http.Handler {
 	mux.HandleFunc("/empty-glance-fixture", c.emptyGlance.handler)
 	mux.HandleFunc("/vocab-fixture", c.vocab.handler)
 	mux.HandleFunc("/vocab-fixture/show", c.vocab.showHandler)
+	// The isolated all-proven readiness cockpit (readinessallproven.go):
+	// the real workbench handler over a strictly valid fully proven
+	// snapshot — the browser posture the shared mixed snapshot can never
+	// show.
+	mux.HandleFunc("/readiness-all-proven-fixture", c.readinessAllProven.handler)
 	return mux
 }
 

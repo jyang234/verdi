@@ -3255,6 +3255,290 @@ button.yarn-chip-type {
   margin: 0 0 0.7rem;
 }
 
+/* ---------- the readiness pilot cockpit (GET /readiness) ----------
+   F-01 corrected form (SI-125, owner-approved mockup): orientation first
+   ("where am I?"), a horizontal four-step process rail, then the ranked
+   focus list ("what should I focus on next?") with the top three
+   priorities as cards and the exact remainder behind one native
+   disclosure; completed checks close the page. States are summarized in
+   plain words (Ready / Needs attention / Not enough evidence yet) with
+   the formal state kept in each row's technical details; unproven chips
+   add a dashed border so color is never the only signal. Tokens only —
+   dark mode needs no extra rules here. */
+
+.readiness-page { max-width: 64rem; }
+/* the cockpit needs a wider measure than the prose pages' 70ch shell
+   column — widened only when the shell hosts this page */
+.content:has(> .readiness-page) { max-width: 64rem; }
+
+/* orientation: title, step line, purpose, and the snapshot notice */
+.readiness-orient {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(16rem, 0.8fr);
+  gap: 1.6rem;
+  align-items: start;
+  margin: 0 0 1.4rem;
+}
+.readiness-eyebrow {
+  margin: 0 0 0.35rem;
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--accent-strong);
+}
+.readiness-title {
+  margin: 0 0 0.4rem;
+  font-family: var(--serif);
+  font-size: 1.9rem;
+  line-height: 1.1;
+  overflow-wrap: anywhere;
+}
+.readiness-step { margin: 0 0 0.4rem; font-size: 1.02rem; font-weight: 600; }
+.readiness-purpose { margin: 0; color: var(--muted-solid); font-size: 0.88rem; max-width: 46ch; }
+
+.readiness-stale {
+  display: flex;
+  gap: 0.6rem;
+  align-items: baseline;
+  background: var(--st-pending-tint);
+  border: 1px solid var(--st-pending);
+  border-left-width: 4px;
+  border-radius: 6px;
+  padding: 0.65rem 0.85rem;
+  font-size: 0.85rem;
+}
+.readiness-stale:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* the process rail: four steps, snapshot order */
+.readiness-rail { margin: 0 0 1.6rem; }
+.readiness-rail-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  border-top: 1px solid var(--rule);
+  border-bottom: 1px solid var(--rule);
+}
+.readiness-station { min-width: 0; }
+.readiness-station + .readiness-station { border-left: 1px solid var(--rule); }
+.readiness-station-link {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  height: 100%;
+  padding: 0.7rem 0.75rem 0.8rem;
+  border-top: 3px solid transparent;
+  text-decoration: none;
+  color: var(--ink);
+}
+.readiness-station-link:hover { background: var(--panel); }
+.readiness-station-link:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.readiness-station--focus .readiness-station-link {
+  border-top-color: var(--accent);
+  background: var(--panel);
+}
+.readiness-station-num { font-family: var(--mono); font-size: 0.7rem; color: var(--muted-solid); }
+.readiness-station-label { font-family: var(--serif); font-size: 0.98rem; overflow-wrap: anywhere; }
+
+/* the plain state chip; the formal state rides the modifier class */
+.readiness-state {
+  display: inline-block;
+  width: fit-content;
+  font-size: 0.72rem;
+  font-weight: 600;
+  padding: 0.14rem 0.5rem;
+  border: 1px solid;
+  border-radius: 999px;
+}
+.readiness-state--proven {
+  color: var(--st-evidenced);
+  background: var(--st-evidenced-tint);
+  border-color: var(--st-evidenced);
+}
+.readiness-state--violated-with-witness {
+  color: var(--st-violated);
+  background: var(--st-violated-tint);
+  border-color: var(--st-violated);
+}
+.readiness-state--unproven {
+  color: var(--st-pending);
+  background: var(--st-pending-tint);
+  border-color: var(--st-pending);
+  border-style: dashed;
+}
+
+.readiness-heading { font-family: var(--serif); font-size: 1.3rem; margin: 0 0 0.25rem; }
+
+/* focus next: the ranked cards */
+.readiness-queue { margin: 0 0 2rem; }
+.readiness-queue-note { color: var(--muted-solid); font-size: 0.8rem; margin: 0 0 0.2rem; }
+.readiness-downstream {
+  margin: 0 0 0.9rem;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--st-violated);
+}
+.readiness-queue-empty {
+  border: 1px solid var(--st-evidenced);
+  background: var(--st-evidenced-tint);
+  color: var(--st-evidenced);
+  border-radius: 8px;
+  padding: 0.7rem 0.9rem;
+  font-size: 0.9rem;
+}
+.readiness-queue-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.7rem;
+}
+.readiness-card,
+.readiness-row { scroll-margin-top: 1rem; }
+.readiness-card {
+  display: flex;
+  gap: 0.85rem;
+  align-items: flex-start;
+  min-width: 0;
+  background: var(--card);
+  border: 1px solid var(--rule);
+  border-radius: 10px;
+  box-shadow: var(--shadow-card);
+  padding: 0.85rem 1rem;
+}
+.readiness-rank {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 1.9rem;
+  height: 1.9rem;
+  border: 1px solid var(--rule);
+  border-radius: 50%;
+  font-family: var(--mono);
+  font-size: 0.78rem;
+  color: var(--muted-solid);
+}
+.readiness-copy { min-width: 0; flex: 1; }
+.readiness-stage {
+  margin: 0 0 0.15rem;
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--accent-strong);
+}
+.readiness-summary {
+  margin: 0 0 0.4rem;
+  font-size: 0.98rem;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.readiness-row .readiness-summary { font-weight: 500; font-size: 0.9rem; }
+
+/* technical details: the formal facts, one native disclosure per row */
+.readiness-tech { margin: 0.5rem 0 0; }
+.readiness-tech summary,
+.readiness-more-summary {
+  cursor: pointer;
+  width: fit-content;
+  color: var(--muted-solid);
+  font-size: 0.78rem;
+}
+.readiness-tech summary:focus-visible,
+.readiness-more-summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.readiness-tech-facts {
+  margin: 0.45rem 0 0;
+  padding: 0.55rem 0.7rem;
+  background: var(--panel);
+  border-left: 3px solid var(--rule);
+  font-size: 0.76rem;
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 0.15rem 0.7rem;
+}
+.readiness-tech-facts dt { color: var(--muted-solid); }
+.readiness-tech-facts dd { margin: 0; min-width: 0; }
+.readiness-tech-facts code,
+.readiness-witnesses code { overflow-wrap: anywhere; }
+.readiness-witnesses { list-style: none; margin: 0; padding: 0; }
+.readiness-witnesses li { margin: 0.1rem 0; }
+
+/* the one inline remainder disclosure: exact-count closed label,
+   "Show fewer" open label — swapped purely by CSS, no script */
+.readiness-more { margin: 0.8rem 0 0; }
+.readiness-more-summary {
+  color: var(--accent-strong);
+  font-weight: 600;
+  font-size: 0.85rem;
+  padding: 0.4rem 0;
+}
+.readiness-more:not([open]) .readiness-more-open { display: none; }
+.readiness-more[open] .readiness-more-closed { display: none; }
+.readiness-queue-rest { margin-top: 0.7rem; }
+
+/* destinations */
+.readiness-dest { margin: 0.55rem 0 0; }
+.readiness-board-link { font-weight: 600; color: var(--accent-strong); }
+.readiness-board-link:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.readiness-cli {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+}
+.readiness-cli:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.readiness-cli-token {
+  border: 1px solid var(--rule);
+  background: var(--panel);
+  border-radius: 4px;
+  padding: 0.12rem 0.45rem;
+  font-size: 0.76rem;
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+
+/* completed checks: quieter rows, everything proven, nothing dropped */
+.readiness-completed { border-top: 2px solid var(--rule); padding-top: 1.1rem; }
+.readiness-completed-note { color: var(--muted-solid); font-size: 0.8rem; margin: 0 0 0.6rem; }
+.readiness-row {
+  display: flex;
+  gap: 0.85rem;
+  align-items: flex-start;
+  min-width: 0;
+  border-top: 1px solid var(--rule);
+  padding: 0.6rem 0.2rem;
+  font-size: 0.88rem;
+}
+
+/* narrow viewport: the rail becomes the pinned strip — continuously
+   visible, fragment targets offset below it */
+@media (max-width: 720px) {
+  .readiness-orient { grid-template-columns: 1fr; gap: 0.9rem; }
+  .readiness-rail {
+    position: sticky;
+    top: 0;
+    z-index: 5;
+    background: var(--paper);
+    border-bottom: 1px solid var(--rule);
+    margin: 0 0 1rem;
+  }
+  .readiness-rail-list { display: flex; }
+  .readiness-station { flex: 1; min-width: 0; }
+  .readiness-station-link { padding: 0.45rem 0.4rem; }
+  .readiness-station-label { font-size: 0.8rem; }
+  .readiness-card { flex-wrap: wrap; }
+  .readiness-card,
+  .readiness-row { scroll-margin-top: 11rem; }
+}
+
+/* motion is opt-in; a reduced-motion preference gets a static page */
+@media (prefers-reduced-motion: no-preference) {
+  .readiness-station-link,
+  .readiness-board-link { transition: background-color 140ms ease, color 140ms ease; }
+}
+
 /* Syntax-highlighting palettes. Chroma emits no inline colour, so these two
    class-based palettes are the ONLY place code colour is defined — which is
    what lets a dark-mode browser restyle highlighted code instead of showing

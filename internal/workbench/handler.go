@@ -117,6 +117,12 @@ func RegisterRoutesWithHome(mux *http.ServeMux, root string, deps Deps, home Hom
 	// renders as preview").
 	mux.HandleFunc("/matrix/{story...}", matrixHandler(root))
 
+	// The Wave 3.5 readiness pilot cockpit: a GET-only render of the
+	// startup snapshot injected via Deps.Readiness (nil discloses an
+	// honest 503). Method checks live in the handler, matching the
+	// method-prefix note above.
+	mux.HandleFunc("/readiness", readinessHandler(deps.Readiness))
+
 	// The v1 board: the spec-as-source projection (05 §Workbench, R4).
 	// "/board/spec/{name}" is strictly more specific than the v0
 	// "/board/{key}/{action}" patterns below, so ServeMux routes every
@@ -179,4 +185,5 @@ func RegisterRoutesWithHome(mux *http.ServeMux, root string, deps Deps, home Hom
 	mux.HandleFunc("/assets/board.js", boardJSHandler())
 	mux.HandleFunc("/assets/boardspec.js", boardSpecJSHandler())
 	mux.HandleFunc("/assets/boarddiagram.js", boardDiagramJSHandler())
+	mux.HandleFunc("/assets/readiness.js", readinessJSHandler())
 }
