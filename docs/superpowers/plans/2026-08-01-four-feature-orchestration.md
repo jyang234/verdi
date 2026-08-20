@@ -370,17 +370,17 @@ block; every lifecycle consumer uses the one shared conflict verdict.
 
 ### Wave 3.5 — Bounded UX readiness pilot
 
-- [ ] Ratify the sequencing overlay and lossless carve-out matrix in the
+- [x] Ratify the sequencing overlay and lossless carve-out matrix in the
   [Wave 3.5 UX readiness pilot plan](2026-08-18-wave-3-5-ux-readiness-pilot.md).
-- [ ] Deliver a pure read-only readiness projection and an explicit startup
+- [x] Deliver a pure read-only readiness projection and an explicit startup
   snapshot through `verdi serve --context-request <path>`.
-- [ ] Deliver the FABLE-owned hybrid cockpit: a four-area linear process rail,
+- [x] Deliver the FABLE-owned hybrid cockpit: a four-area linear process rail,
   prioritized attention queue, complete concern list, board deep links, and
   exact CLI fallbacks.
-- [ ] Run the solo-author pilot and record comprehension, navigation,
+- [x] Run the solo-author pilot and record comprehension, navigation,
   terminology, unnecessary-process, stale-state, and missing-corrective-seam
   findings without treating telemetry as lifecycle truth.
-- [ ] Adjudicate every accepted finding to Wave 3.5, its original downstream
+- [x] Adjudicate every accepted finding to Wave 3.5, its original downstream
   wave, or an explicit non-goal.
 
 The pilot adds no workflow engine, persisted readiness artifact, cockpit
@@ -396,7 +396,12 @@ findings are mapped; the owner has accepted the Wave 3B re-entry decision.
 
 Eligible only after the Wave 3.5 exit gate:
 
-- [ ] Deliver CSE evaluator capability discovery, generic command evaluator, process observer, candidate materialization, deterministic scheduling, interruption resume, and retention behavior.
+- [ ] Ratify the prerequisite evaluator, observation/result V2, multi-run, and
+  durable-receipt authority fixed by the focused
+  [Wave 3B CSE implementation plan](2026-08-20-cse-wave-3b-evaluator-isolated-execution.md).
+- [ ] Deliver CSE evaluator capability discovery, generic command evaluator,
+  process observer, candidate materialization, deterministic scheduling,
+  interruption resume, and retention behavior according to that plan.
 
 **Exit gate:** Experiments distinguish candidate verdicts from operational
 failures; changed inputs refuse resume; unsupported isolation remains an
