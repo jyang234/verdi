@@ -28,8 +28,8 @@ workbench, cleanup, or capsule selection enters Wave 3B.
 `internal/filelock`, `internal/store`, hermetic process fixtures, and
 `fixturegit`.
 
-**Authority:** `spec/comparative-spike-experiments` AC-1–AC-4, DC-10,
-DC-12–DC-15, CO-1–CO-3, CO-6–CO-7; `spec/execution-workspace`; the canonical
+**Authority:** `spec/comparative-spike-experiments` AC-1–AC-4, AC-6, DC-2,
+DC-10, DC-12–DC-15, CO-1–CO-7; `spec/execution-workspace`; the canonical
 CSE design's evaluator, execution, failure, and retention sections; the
 four-feature orchestration plan's Wave 3B contract; invention-ledger
 SI-12–SI-13, SI-17, SI-30, SI-37, SI-40–SI-46, SI-58–SI-63, SI-75–SI-76,
@@ -105,11 +105,16 @@ The amendment makes these exact changes:
    ```
 
    There are no persisted real experiment instances to migrate at the
-   amendment head. Tests and canned fixtures are updated in the runtime tasks.
+   amendment head. The migration witness separately names the committed
+   `internal/experimentdecision/testdata/caching-{proven,inconclusive}` golden
+   fixture trees whose root-level V1 observation/result files are updated in
+   the runtime tasks.
    The tree has no `latest`, `current`, or preferred-run pointer.
 
 2. Register `verdi.experiment-evaluator/v1` as the run request/response
-   protocol and close OQ-1 as specified below. Register
+   protocol and close OQ-1 as specified below. Require evaluator argv to
+   contain at least an executable and the final literal `run` operation.
+   Register
    `verdi.experiment-evaluator-capabilities/v2`, adding required nonempty
    `evaluator_version` and requiring protocol support for evaluator V1 and
    observation V2. Capabilities V1 remains read-compatible but is not
@@ -119,12 +124,21 @@ The amendment makes these exact changes:
 3. Revise observations to `verdi.experiment-observation/v2`, adding one
    required closed execution outcome. V1 remains decodeable only for canned
    predecessor compatibility and is never emitted by Wave 3B. A later adapter
-   must not silently mix V1 and V2 within one run.
+   must not silently mix V1 and V2 within one run. Reserve the two fixed
+   `verdi-evaluator-*` harness measurement IDs and require valid UTF-8 for all
+   evaluator-supplied witness, reason, and disclosure text before canonical
+   publication.
 
 4. Revise results to `verdi.experiment-result/v2`, binding
-   `execution_digest` and preserving each candidate's execution outcome. V1
-   remains decodeable for predecessor compatibility but cannot prove the
-   environment-policy conjunct and cannot be emitted by Wave 3B.
+   `execution_digest`, preserving each measured candidate execution outcome,
+   carrying diagnostic warmup failures in canonical schedule order, and
+   copying the receipt's exact
+   network projection plus the closed `weaker-isolation` disclosure whenever
+   network is allowed. Add the closed decision reason
+   `baseline-candidate-failure`. V1 remains decodeable for predecessor
+   compatibility but cannot prove the environment-policy conjunct and cannot
+   be emitted by Wave 3B. The result itself, not only an external receipt
+   reference, therefore discloses weaker isolation as CO-6 requires.
 
 5. Register `verdi.experiment-execution/v1` as the canonical durable run
    receipt and name `runs/<run-id>/execution.json` as SI-42/SI-44's proof
@@ -132,6 +146,7 @@ The amendment makes these exact changes:
 
 6. Define aggregate state without choosing a favorable run:
 
+   - `exploratory`: the definition is not locked;
    - `registered`: no complete run;
    - `measured`: no result exists and at least one run has a complete valid
      observation set;
@@ -149,7 +164,7 @@ The amendment makes these exact changes:
    The aggregate state label is not a run selector. An exact ratification is
    the only operation allowed to prefer one result.
 
-7. Record the amendment and the 38/38 source-coverage matrix in the accepted
+7. Record the amendment and the 43/43 source-coverage matrix in the accepted
    revision history. Update SI-126–SI-133 from conditional to the exact
    ratified amendment head only after merge.
 
@@ -158,7 +173,8 @@ The amendment makes these exact changes:
 ### Operation transport
 
 `experiment.yaml` retains `evaluator.argv` exactly as an argument vector. V1
-adds one cross-field invariant: its final element is the literal `run`.
+adds one cross-field invariant: the vector contains at least two elements and
+its final element is the literal `run`.
 Discovery copies the vector and replaces only that final element with
 `describe`. The executable and every preceding configuration argument remain
 byte-identical. Neither operation uses a shell.
@@ -223,10 +239,15 @@ Rules:
 - A nonzero evaluator exit, harness deadline, missing response, malformed or
   noncanonical response, more than 1 MiB stdout, or more than 1 MiB retained
   stderr is operational. Only a zero-exit strict response can name a candidate
-  crash/timeout.
-- A non-completed warmup is operational because warmups never enter the
-  measured evidence set; the runner does not convert an unmeasured event into
-  a candidate verdict or silently discard it and continue.
+  crash/timeout. These are Wave 3B's initial transport safety ceilings; Wave 5
+  policy may impose an equal or lower limit, but raising either requires an
+  explicit protocol/ledger amendment rather than an adapter override.
+- A non-completed warmup neither publishes an observation nor fails the run.
+  The runner retains `{candidate, warmup, kind, witness}` in the V2 result's
+  diagnostic `warmup_failures` list in exact warmup-schedule order and continues
+  the declared schedule.
+  Warmup failures never affect eligibility or recommendation. A crash/timeout
+  in a measured cycle remains candidate evidence under the rules below.
 
 The harness creates every authoritative observation envelope. The evaluator
 never supplies schema version, experiment digest, run, candidate, measured
@@ -253,6 +274,26 @@ Result V2 candidate rows carry a sorted `execution_failures` list of
 `{round, kind, witness}`. They never translate an execution failure into a
 guard violation.
 
+The V2 additions are required and presence-sensitive:
+
+```text
+execution_digest                     canonical receipt digest
+warmup_failures                      [] or schedule-ordered rows
+  row                                {candidate, warmup, kind, witness}
+isolation.network                    exact {mode, configured, reason} receipt value
+isolation.disclosures                [] or [weaker-isolation]
+candidates[].execution_failures      [] or round-ordered rows
+  row                                {round, kind, witness}
+```
+
+Warmup/candidate failure kinds are exactly `candidate-crash` or
+`candidate-timeout`; their witness is nonempty. `isolation` is copied
+byte-for-byte as a typed value from the validated receipt's network projection.
+Its disclosures list is empty for configured default deny and contains exactly
+`weaker-isolation` for allowed ambient network. This is direct result evidence;
+`execution_digest` remains the independent at-rest binding to the complete
+receipt.
+
 ### Process observer
 
 For every zero-exit `run` response the harness appends:
@@ -268,6 +309,23 @@ by the attempt's observation disclosure `peak-rss-unavailable`; it is never
 zero-filled or written retroactively into the immutable run receipt.
 Exit status and harness timeout are control facts, not measurements: nonzero or
 deadline expiry invalidates the evaluator attempt operationally.
+
+## Platform and completion-evidence posture
+
+Wave 3B authoritative default-deny execution is Linux-only under SI-76. Linux
+uses the landed user/network-namespace backend. Darwin and every other
+unsupported platform return CO-6 operational refusal before `Profile.Command`
+can produce an evaluator command; there is no ambient fallback and no skipped
+success claim.
+
+Platform-specific tests have complementary, mandatory contracts rather than a
+runtime skip: the Linux file executes the hermetic default-deny journey, while
+the unsupported-platform file asserts the exact operational refusal and that
+no command or evidence is created. Task 6 completion requires both a local
+platform-appropriate refusal/success suite and the exact-head Linux CI
+`make verify` result containing the real isolated journey and literal
+`verify OK`. A Darwin-only green run is useful refusal evidence but cannot by
+itself complete Wave 3B.
 
 ## Fixed durable run contract
 
@@ -290,9 +348,15 @@ versions                  Verdi and recommendation-engine versions
 disclosures               sorted unique closed disclosures
 ```
 
-The candidate receipt row carries candidate ID, base commit, patch digest, and
-the full `execworkspace.Identity`; path and truncated workspace ID are not
-authority. The fingerprint includes evaluator/workload/fixture inputs,
+The candidate receipt row carries candidate ID, base commit, patch digest,
+`workspace_run_id`, and the full `execworkspace.Identity`; path and truncated
+workspace ID are not authority. `workspace_run_id` is the lowercase full
+SHA-256 of canonical JSON containing the locked `experiment_digest`, the
+caller-supplied CSE `run`, and the candidate ID. It is the RunID supplied to
+`execworkspace.NewPatchIdentity`, so two experiments cannot address the same
+candidate workspace and two byte-identical candidates cannot share one profile
+root even when their base, patch, and human run labels match.
+The fingerprint includes evaluator/workload/fixture/contract inputs,
 declared environment names and values, OS/architecture, and the named tool
 versions. CPU/memory allocation is disclosed unproven when no enforced
 resource-ceiling fact exists. Network mode is always present.
@@ -355,14 +419,21 @@ requires the process allowlist to contain the exact evaluator argv0, requires
 the granted timeout to equal the definition's timeout, requires every
 capability-declared environment name to be present and no undeclared name,
 refuses `requires_elevated`, and requires a network grant iff
-`requires_network` is true. Until Wave 5 provides the concrete resolver there
-is no default/local constructor and no user-facing launch path.
+`requires_network` is true. Before materialization it also cross-checks the
+locked decision vocabulary against the digest-verified capabilities: every
+required correctness/safety guard is in `capabilities.guards`; the primary
+metric's ID/type/unit/direction and every bounded-guard metric ID are present in
+`capabilities.metrics`, except that either fixed harness observer ID is checked
+against its built-in type/unit/direction rather than attributed to the project
+evaluator. A fixed peak-RSS metric on a platform without that observer fails
+operationally before materialization. Until Wave 5 provides the concrete
+resolver there is no default/local constructor and no user-facing launch path.
 
 Every `DeclaredEnv` value is explicitly approved by that resolver for both
 process exposure and durable recording in the run fingerprint. Wave 3B never
 copies ambient environment variables. A later policy adapter must refuse
 secret-bearing values rather than pass a secret and expect the receipt writer
-to guess that it needs redaction.
+to guess that it needs redaction; SI-130 carries that obligation into Wave 5.
 
 Every describe/run launch also verifies the actual executable before start:
 after `Profile.Command` fixes the launch path and the caller fixes `Dir`, the
@@ -388,15 +459,18 @@ arbitrary set.
 Each candidate workspace uses its reserved root-level
 `.verdi-cse-environment` directory as `BuildProfile`'s caller-owned `envRoot`
 for the whole run. The base tree and every candidate patch must leave that path
-absent. The directory persists across interruption so a resume does not reset
+absent, and CSE itself rejects a pre-existing or nonempty path before calling
+`BuildProfile`. The directory persists across interruption so a resume does not reset
 candidate-local HOME/XDG/TMP state after measured evidence already exists. If
 any observation exists and a required candidate environment root is missing,
 resume refuses the changed environment. When no observation exists, a missing
 root is recreated and all warmups restart. After the complete measured set is
 validated, the runner removes only these reserved roots and proves their
 absence before emitting a result; failure to clean is operational. This makes
-an interrupted workspace dirty and conservatively unreclaimable, while a
-successful run leaves no profile-state obstacle for Wave 5's later release.
+an interrupted workspace dirty and conservatively unreclaimable. Removing the
+profile root does not make the base-plus-patch worktree Git-clean or reclaim it;
+Wave 5 still owns release-by-marker and cleanup and must not infer reclaimability
+from profile-root absence alone.
 
 The first start:
 
@@ -405,8 +479,9 @@ The first start:
 3. resolves every workload/fixture/contract identity and verifies its protected
    base-tree bytes;
 4. resolves and cross-checks authorization;
-5. derives the receipt and full schedule;
-6. creates `runs/<run-id>/execution.json` immutably under `writer.lock`; then
+5. derives the experiment-scoped workspace run ID, receipt, and full schedule;
+6. creates `runs/<run-id>/execution.json` with
+   `atomicfile.CreateImmutable` under `writer.lock`; then
 7. materializes and evaluates in schedule order.
 
 Resume:
@@ -421,7 +496,10 @@ Resume:
    records; and
 5. executes only the missing measured tail in schedule order. Completed warmups
    are not resumable evidence, so a resume begins the warmup schedule again
-   before executing missing measured keys.
+   before executing missing measured keys. `schedule_digest` binds the logical
+   declared schedule, not the number of physical warmup attempts across
+   interruptions; only the final uninterrupted invocation's diagnostic warmup
+   failures enter the completed V2 result.
 
 Publishing one measured observation holds `writer.lock`, re-reads and verifies
 the current file, and uses `atomicfile.Write` with exactly the existing bytes
@@ -430,10 +508,12 @@ authority source. A crash leaves either the old complete file or the old file
 plus one complete line.
 
 A complete run invokes `experimentdecision.Evaluate` with the receipt's exact
-environment policy, constructs a V2 result with `execution_digest`, verifies
-it, and immutably publishes `result.json`. An existing byte-equal result is an
-idempotent success; any different existing result is operational. The runner
-never publishes a result for an incomplete run.
+environment policy, constructs a V2 result with `execution_digest`, the exact
+receipt-derived isolation projection, measured execution failures, and the
+final invocation's warmup diagnostics, verifies it, and immutably publishes
+`result.json`. An existing byte-equal result is an idempotent success; any
+different existing result is operational. The runner never publishes a result
+for an incomplete run.
 
 ## Implementation sequence
 
@@ -449,8 +529,9 @@ flow, the accepted revision history, this plan, and the invention ledger.
 
 - [ ] Produce the exact amendment described by Gate A without direct-edit
       bypass.
-- [ ] Add a 38/38 source-coverage witness and zero-existing-artifact migration
-      witness.
+- [ ] Add a 43/43 source-coverage witness and zero-existing-artifact migration
+      witness that separately enumerates the two committed caching fixture
+      trees requiring V2 ratchet updates.
 - [ ] Run `make spec-align`.
 - [ ] Obtain one independent cross-model review; adjudicate and author at most
       one correction pass; obtain the same reviewer's closure check.
@@ -458,17 +539,21 @@ flow, the accepted revision history, this plan, and the invention ledger.
 
 ### Task 1: Land the V2 artifact and protocol kernel
 
-**Modify:** `internal/experiment/{definition,capabilities,observation,
-observations_validation,result,ratification,state,state_disclosure,enums}.go`
-and their tests.
+**Modify:** `internal/experiment/{definition,capabilities,candidate,grammar,
+normalize,strictdecode,observation,observations_validation,result,ratification,
+state,state_disclosure,enums}.go` and their tests as required by the fixed
+contract. Inspect and ratchet the unchanged capsule protocol rather than
+inventing a replacement.
 
 **Create:** `internal/experiment/{evaluator_protocol,execution_receipt,
 run_paths}.go` and tests/fixtures.
 
 - [ ] RED: exact strict codecs, union presence, unknown/duplicate/trailing data,
       canonical-byte equality, command-operation invariant, candidate outcomes,
-      receipt/result binding, multi-run enumeration, V1 disclosure retention,
-      and V2 receipt proof.
+      warmup diagnostics, result isolation, receipt/result binding, capability
+      membership, multi-run enumeration, V1 disclosure retention, and V2
+      receipt proof. Ratchet the former test that rejected evaluator V1 as an
+      unknown protocol to the amended closed set.
 - [ ] GREEN: implement only the fixed schemas and validators.
 - [ ] Preserve old V1 decode/recompute tests; V1 is read compatibility, not a
       Wave 3B emission path.
@@ -487,9 +572,10 @@ responses.
       parity, closed outcome rules, trust-boundary rejection, stdout/stderr
       bounds, exit/timeout classification, context cancellation, duration,
       Linux RSS, and unavailable RSS disclosure.
-- [ ] GREEN: construct every launch through `Profile.Command`; set only `Dir`,
-      `Stdin`, `Stdout`, and `Stderr`; never mutate `Path`, `Args`, `Env`,
-      `SysProcAttr`, or `ExtraFiles` afterwards.
+- [ ] GREEN: construct every launch through `Profile.Command`; retain and close
+      its derived context/cancel pair; set only `Dir`, `Stdin`, `Stdout`, and
+      `Stderr`; never mutate `Path`, `Args`, `Env`, `SysProcAttr`, or
+      `ExtraFiles` afterwards.
 - [ ] Use injected command/process seams for unit tests and hermetic built
       helper processes for integration; no network.
 - [ ] Run `go test -race ./internal/experimentevaluator ./internal/execworkspace`.
@@ -503,8 +589,10 @@ receipt}.go` and tests.
 - [ ] RED: complete rotation tables (2/3/4 candidates, zero/multiple warmups),
       digest determinism, clone safety, mismatched policy/digest/timeout/env,
       network/elevated requirements, unsupported grant mechanisms, exact
-      input ID/path/digest/protected-path resolution, candidate materialization
-      identities, reserved environment-root collisions, and receipt round trip.
+      input ID/path/digest/protected-path resolution, capability membership,
+      experiment-scoped candidate materialization identities, reserved absent
+      and pre-existing/nonempty environment-root collisions, and receipt round
+      trip.
 - [ ] GREEN: one pure schedule derivation and one authorization validation path;
       do not copy grant or fingerprint semantics.
 - [ ] Run `go test -race ./internal/experimentrun ./internal/experiment
@@ -515,9 +603,11 @@ receipt}.go` and tests.
 
 **Create:** `internal/experimentrun/{service,storage}.go` and tests.
 
-- [ ] RED: start ordering, immutable receipt before execution, base-plus-patch
+- [ ] RED: start ordering, immutable receipt before execution through the
+      existing `atomicfile.CreateImmutable` seam, base-plus-patch
       materialization, candidate-root command directory, warmup exclusion,
-      candidate outcome preservation, process/evaluator operational failures,
+      warmup-failure disclosure, candidate outcome preservation,
+      process/evaluator operational failures,
       cancellation, run-scoped environment persistence/cleanup, and no
       observation/result on failure.
 - [ ] RED: symlink/nonregular run parents and files, writer-lock contention,
@@ -559,6 +649,10 @@ require it.
 - [ ] Add negative journeys for changed environment, malformed evaluator
       response, unsupported isolation, candidate crash, candidate timeout, and
       evaluator timeout. Assert candidate versus operational classification.
+- [ ] Use complementary platform test files: Linux executes the real
+      default-deny journey; Darwin/other execute and assert CO-6 refusal with no
+      command or evidence. Neither path skips. Require the exact-head Linux CI
+      gate before claiming this unit complete.
 - [ ] Audit that no `cmd/verdi`, MCP, workbench, browser, lifecycle, release,
       cleanup, capsule, or real policy adapter entered the diff.
 - [ ] Run `go test -race ./...`.
@@ -579,10 +673,11 @@ The future Wave 5 adapter maps:
   evaluator/harness failure, materialization failure, lock/write failure, or
   changed resume input: exit 2.
 
-Candidate guard failure, candidate crash, and candidate timeout are data inside
-a successfully completed comparison, not application errors. An evaluator
-crash or harness timeout is operational and publishes no observation for that
-attempt.
+Candidate guard failure and measured candidate crash/timeout are data inside a
+successfully completed comparison, not application errors. A warmup candidate
+crash/timeout is non-decision diagnostic data in the completed V2 result. An
+evaluator crash or harness timeout is operational and publishes no observation
+for that attempt.
 
 ## Overengineering review
 
@@ -614,7 +709,7 @@ binding correctness gap and has one owner.
 
 ## Source coverage and losslessness witness
 
-The Wave 3B slice maps 38/38 implicated authority units:
+The Wave 3B slice maps 43/43 implicated authority units:
 
 | # | Source unit | Destination |
 |---:|---|---|
@@ -635,14 +730,14 @@ The Wave 3B slice maps 38/38 implicated authority units:
 | 15 | AC-4 resume only missing | SI-129; Task 5 |
 | 16 | AC-4 unchanged resume inputs | receipt re-verification; Task 5 |
 | 17 | AC-4 distinct visible reruns | SI-128; Gate A, Tasks 1/5 |
-| 18 | AC-4 reproduction rule | intentionally deferred; no reproduced claim in Wave 3B |
+| 18 | AC-4 reproduction rule | deferred to Wave 5 registration/policy adapters; Wave 7 may claim reproduction only after an exact registered rule exists |
 | 19 | AC-4 minimal durable retention | per-run receipt/observations/result |
 | 20 | AC-4 cleanup after ratification | deferred unchanged to Wave 5 |
 | 21 | DC-10 closed kernel + protocol revision | Gate A, Task 1 |
 | 22 | DC-12 trust custody | SI-127; Tasks 1–2 |
 | 23 | DC-13 schedule/fingerprint | SI-128/SI-129; Tasks 1/3 |
 | 24 | DC-14 failure families | SI-131; Tasks 2/4/6 |
-| 25 | DC-15 resume/rerun/reproduction | Tasks 1/5; reproduction deferred visibly |
+| 25 | DC-15 resume/rerun/reproduction | Tasks 1/5; reproduction rule deferred to Wave 5 and its proof journey to Wave 7 |
 | 26 | AC-6 project policy | mandatory authorization port; concrete resolver deferred to Wave 5 |
 | 27 | CO-1 three-valued honesty | all validation/failure boundaries |
 | 28 | CO-2 strict versioned schemas | Gate A, Task 1 |
@@ -656,19 +751,30 @@ The Wave 3B slice maps 38/38 implicated authority units:
 | 36 | OQ-2 candidate-report corroboration | explicitly remains unresolved and non-decision-eligible |
 | 37 | Locked workload/fixture/contract digest proof | SI-132 read-only resolver; Tasks 3–6 |
 | 38 | Resume-stable profile environment and cleanup handoff | SI-133; Tasks 3–6, final release deferred to Wave 5 |
+| 39 | AC-1 registration, human lock, and terminal tree | registration/lock remain Wave 5; multi-run terminal tree is Gate A item 1 |
+| 40 | AC-2 deterministic recommendation and exit contract | existing Wave 2 `experimentdecision` remains the sole engine; V2 outcome integration in Tasks 1/5 and future exit adapter in Wave 5 |
+| 41 | DC-2 derived state including exploratory and multi-run aggregate posture | Gate A item 6; Task 1 |
+| 42 | CO-4 process exit mapping | unchanged typed-outcome boundary here; explicit future mapping in Failure and exit semantics and Wave 5 |
+| 43 | CO-5 registered-boundary scope | unchanged result claim; Task 5 recompute and at-rest verification preserve exact definition/run/environment identity |
 
 Transformations: the undefined OQ-1 protocol becomes SI-126's fixed v1; the
 single-run terminal tree becomes SI-128's lossless multi-run tree before any
 real persisted instance exists; candidate failure prose becomes an explicit
 closed outcome rather than a fabricated guard; and the in-memory SI-42
 attestation gains a durable receipt. Intentional omissions are reproduction
-claims, policy adapters, ratification, cleanup, capsule selection, CLI/MCP/UI,
-and OQ-2 corroboration, each retained under its named original wave or open
-question. No source unit is silently dropped.
+claims (Wave 5 registration, exercised only later), policy adapters,
+ratification, cleanup, capsule selection, CLI/MCP/UI, and OQ-2 corroboration,
+each retained under its named original wave or open question. The existing
+`verdi.experiment-capsule/v1` artifact remains in the closed CSE schema
+inventory but is unchanged until Wave 5 creates it. No source unit is silently
+dropped.
 
 ## Handoff after Wave 3B
 
 After Task 6 and owner merge, resume the original program at Wave 5. Wave 5
 must provide the concrete experiment-policy resolver and user-facing adapters,
 then registration/ratification and post-ratification release/capsule behavior.
+It must also make the reproduction rule registrable before any later result can
+be labelled reproduced and must require an exact result digest even when the
+aggregate posture is inconclusive while one run has a proven winner.
 Wave 6 owns the workbench. Wave 7 dogfood remains unchanged.

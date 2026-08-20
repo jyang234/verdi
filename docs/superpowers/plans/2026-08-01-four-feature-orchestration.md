@@ -405,7 +405,9 @@ Eligible only after the Wave 3.5 exit gate:
 
 **Exit gate:** Experiments distinguish candidate verdicts from operational
 failures; changed inputs refuse resume; unsupported isolation remains an
-operational refusal rather than ambient execution.
+operational refusal rather than ambient execution; exact-head Linux CI proves
+the real default-deny journey while Darwin/other platform tests prove refusal
+without skipping.
 
 ### Wave 4 — Authoritative execution and accountable lifecycle governance
 
@@ -426,7 +428,9 @@ check. Wave 3.5's provisional readiness and pilot-observation slices do not
 remove the full `continuous-readiness` or `journey-metrics` obligations here:
 
 - [ ] Deliver ASD capability/context reads, MCP adapter, proposal-only dogfood, draft-write, semantic review, and provenance read paths.
-- [ ] Deliver CSE CLI and agent adapters, ratification record, spike-closure integration, cleanup, and selected-capsule retention.
+- [ ] Deliver CSE CLI and agent adapters, registration including any explicit
+  reproduction rule, ratification record, spike-closure integration, cleanup,
+  and selected-capsule retention.
 - [ ] Deliver GLG `continuous-readiness` and feature-attestation scaffolding without agent-authored human claims.
 - [ ] Deliver GLG `lifecycle-recovery` as diagnosis-first, read-only-by-default projection over observable state.
 - [ ] Deliver GLG `journey-metrics` only after stable action, blocker, and outcome-event identifiers exist.
@@ -460,7 +464,9 @@ their facts are available; final gates, whole-program review, and human
 authorization are serialized.
 
 - [ ] Run one ASD journey through both Claude Code and Codex using the same typed mutation contract.
-- [ ] Run one genuine CSE comparison and preserve a scoped recommendation or honest inconclusive result.
+- [ ] Run one genuine CSE comparison and preserve a scoped recommendation or
+  honest inconclusive result; call it reproduced only when Wave 5 registered
+  and the journey satisfied an exact reproduction rule.
 - [ ] Run one CI sealed build and fresh Codex review, disclosing the opaque vendor boundary.
 - [ ] Run the GLG journey across design, acceptance, build, evidence, review, recovery, and closure states.
 - [ ] Run `make verify` and `go test -race ./...` from the final integrated tree.
