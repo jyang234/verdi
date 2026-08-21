@@ -214,16 +214,17 @@ Notes:
   excerpts).
 - CSE experiment tree: each locked comparison is an immutable child
   experiment at `specs/{active,archive}/<spike>/experiments/<experiment-id>/`,
-  containing — transcribed verbatim from the CSE design's §Architecture and
-  artifact lifecycle — `experiment.yaml`, `candidates/` (e.g.
-  `baseline.patch`, `candidate-a.patch`, `candidate-b.patch`),
-  `observations.jsonl`, `result.json`, `recommendation.md`,
-  `ratification.yaml`, and `selected/capsule-manifest.json`. Observation,
-  result, ratification, and selected-capsule artifacts appear only as the
-  lifecycle reaches those states; the experiment directory follows its
-  parent spike from active to archive. Additional durable support files may
-  live only under configured non-product `spike_paths` — a restatement of
-  the existing manifest key, not a redefinition.
+  containing — transcribed from
+  `spec/comparative-spike-experiments-v2` AC-1 — `experiment.yaml`,
+  `candidates/<candidate-id>.patch`, `evaluator-capabilities.json`,
+  `runs/<run-id>/{execution.json,observations.jsonl,result.json}`,
+  `recommendation.md`, `ratification.yaml`, and
+  `selected/capsule-manifest.json`. Per-run observation and result artifacts,
+  ratification, and selected-capsule artifacts appear only as the lifecycle
+  reaches those states; the experiment directory follows its parent spike
+  from active to archive. Additional durable support files may live only
+  under configured non-product `spike_paths` — a restatement of the existing
+  manifest key, not a redefinition.
 - `policy/`: the committed top-level home for Context Integrity's
   constitution, policy, overlay, exemption, and semantic-disposition
   artifacts. Context Integrity's `policy-authority` unit owns the closed

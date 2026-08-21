@@ -337,11 +337,11 @@ State is derived from the presence and validity of artifacts:
 | Derived state | Required facts |
 |---|---|
 | exploratory | the experiment definition is not locked |
-| registered | no run has a complete valid measured observation set |
-| measured | no result exists and at least one run has a complete valid measured observation set |
-| recommended | every result-bearing run is valid, every result is a proven winner, and every result names the same winner |
-| inconclusive | at least one valid result exists and the result-bearing runs are not unanimous on one proven winner |
-| ratified | `ratification.yaml` binds one exact result digest and that result's run and execution receipt validate |
+| registered | the definition is locked, `ratification.yaml` is absent, and no run has a complete valid measured observation set |
+| measured | the definition is locked, `ratification.yaml` and all result artifacts are absent, and at least one run has a complete valid measured observation set |
+| recommended | the definition is locked, `ratification.yaml` is absent, at least one result exists, every result-bearing run is valid, every result is a proven winner, and every result names the same winner |
+| inconclusive | the definition is locked, `ratification.yaml` is absent, at least one valid result exists, and the result-bearing runs are not unanimous on one proven winner |
+| ratified | the definition is locked and `ratification.yaml` binds one exact result digest whose run and execution receipt validate |
 
 The aggregate label is never a run selector. Every run remains enumerable with
 its own `registered`, `measured`, `recommended`, or `inconclusive` posture.
@@ -768,8 +768,10 @@ digest, copies the receipt's network projection and closed
 `weaker-isolation` disclosure, and carries schedule-ordered warmup failures
 with fixed `authority: non-decision-diagnostic` and
 `scope: final-invocation`. The verifier independently checks receipt and
-isolation parity. The whole-result digest binds both projections for later
-ratification, but warmup diagnostics never affect decision or state. Result v1
+isolation parity, including that the receipt's experiment digest equals the
+decision's definition digest and the receipt's run equals the decision's run.
+The whole-result digest binds both projections for later ratification, but
+warmup diagnostics never affect decision or state. Result v1
 remains decodeable for predecessor compatibility, retains its unproven
 environment-receipt disclosure, and is never emitted by this revision.
 
@@ -1373,11 +1375,11 @@ evidence; supporting another platform requires a ratified enforceable backend.
 
 ## DC-28
 
-Aggregate state never chooses a favorable rerun. Recommended means every valid
-result-bearing run proves the same winner. Any other valid result-bearing set
-is inconclusive; incomplete runs remain visible but cannot erase or improve
-completed evidence. Only human ratification of one exact result digest may
-prefer a run.
+Aggregate state never chooses a favorable rerun. Recommended requires at least
+one result and means every valid result-bearing run proves the same winner. Any
+other nonempty valid result-bearing set is inconclusive; incomplete runs remain
+visible but cannot erase or improve completed evidence. Only human ratification
+of one exact result digest may prefer a run.
 
 ## CO-1
 
@@ -1498,7 +1500,9 @@ fact would be recorded, remains unresolved.
 ## Source coverage and migration witness
 
 This revision maps all 43 authority units implicated by the Wave 3B evaluator
-and isolated-execution slice:
+and isolated-execution slice. The frontmatter supersession manifest separately
+classifies every predecessor object, including the 20 predecessor objects not
+enumerated again in this slice matrix:
 
 | # | Source unit | Destination |
 |---:|---|---|
@@ -1546,7 +1550,8 @@ and isolated-execution slice:
 | 42 | CO-4 process exit mapping | carried CO-4; no Wave 3B user-facing adapter |
 | 43 | CO-5 registered-boundary scope | carried CO-5; receipt/result identities preserve the exact boundary |
 
-Coverage is 43/43. Transformations are explicit: the undefined evaluator
+Slice coverage is 43/43. Whole-predecessor object coverage is recorded by the
+supersession manifest above. Transformations are explicit: the undefined evaluator
 operation becomes DC-20's evaluator v1 transport; the single-run terminal tree
 becomes the multi-run tree before any real persisted instance exists;
 candidate crash and timeout become closed observation outcomes rather than
