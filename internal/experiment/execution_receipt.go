@@ -293,3 +293,51 @@ func ExecutionReceiptDigest(r ExecutionReceipt) (string, error) {
 	}
 	return canonjson.Digest(r)
 }
+
+// ValidateExecutionReceiptBinding proves the exact receipt belongs to the
+// locked definition and measured run whose V2 decision it supports.
+func ValidateExecutionReceiptBinding(def Definition, observations []Observation, receipt ExecutionReceipt) error {
+	if err := receipt.Validate(); err != nil {
+		return err
+	}
+	locked, err := Locked(def)
+	if err != nil {
+		return err
+	}
+	if !locked {
+		return fmt.Errorf("experiment: execution receipt binding requires a locked definition")
+	}
+	if err := ValidateComplete(def, observations); err != nil {
+		return err
+	}
+	digest, err := DefinitionDigest(def)
+	if err != nil {
+		return err
+	}
+	if receipt.ExperimentDigest != digest || receipt.Run != observations[0].Run {
+		return fmt.Errorf("experiment: execution receipt does not match definition/observation identity")
+	}
+	if receipt.EnvironmentPolicy != def.Execution.EnvironmentPolicy {
+		return fmt.Errorf("experiment: execution receipt environment policy %q does not match definition %q", receipt.EnvironmentPolicy, def.Execution.EnvironmentPolicy)
+	}
+	if receipt.CapabilitiesDigest != def.Evaluator.CapabilitiesDigest {
+		return fmt.Errorf("experiment: execution receipt capabilities digest does not match definition")
+	}
+	if receipt.Versions.RecommendationEngine != string(def.Algorithm) {
+		return fmt.Errorf("experiment: execution receipt recommendation engine does not match definition")
+	}
+	registered := make(map[string]Candidate, len(def.Candidates))
+	for _, candidate := range def.Candidates {
+		registered[candidate.ID] = candidate
+	}
+	if len(receipt.Candidates) != len(registered) {
+		return fmt.Errorf("experiment: execution receipt candidate set has %d rows, want %d", len(receipt.Candidates), len(registered))
+	}
+	for _, row := range receipt.Candidates {
+		candidate, ok := registered[row.ID]
+		if !ok || row.BaseCommit != candidate.Base || row.PatchDigest != candidate.Digest {
+			return fmt.Errorf("experiment: execution receipt candidate %q does not match the locked definition", row.ID)
+		}
+	}
+	return nil
+}

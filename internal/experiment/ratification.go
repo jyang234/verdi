@@ -108,11 +108,12 @@ func ValidateRatificationBinding(def Definition, res Result, r Ratification) err
 		return err
 	}
 
+	decision := res.decisionDocument()
 	switch r.Disposition {
 	case DispositionSelectRecommended:
-		if res.Verdict != VerdictProvenWinner {
+		if decision.Verdict != VerdictProvenWinner {
 			return fmt.Errorf("experiment: ratification disposition %q requires a %q result, but the bound result's verdict is %q",
-				DispositionSelectRecommended, VerdictProvenWinner, res.Verdict)
+				DispositionSelectRecommended, VerdictProvenWinner, decision.Verdict)
 		}
 	case DispositionSelectOther:
 		registered := false
@@ -126,7 +127,7 @@ func ValidateRatificationBinding(def Definition, res Result, r Ratification) err
 			return fmt.Errorf("experiment: ratification candidate %q does not name a registered candidate of definition %q",
 				r.Candidate, def.ID)
 		}
-		if res.Winner != "" && r.Candidate == res.Winner {
+		if decision.Winner != "" && r.Candidate == decision.Winner {
 			return fmt.Errorf("experiment: ratification disposition %q names candidate %q, which IS the result's recommended winner",
 				DispositionSelectOther, r.Candidate)
 		}

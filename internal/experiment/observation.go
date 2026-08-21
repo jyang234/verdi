@@ -3,6 +3,7 @@ package experiment
 import (
 	"bytes"
 	"fmt"
+	"unicode/utf8"
 
 	"github.com/jyang234/verdi/internal/canonjson"
 )
@@ -32,7 +33,7 @@ func (g GuardResult) Validate() error {
 	}
 	switch g.Verdict {
 	case GuardVerdictFail:
-		if g.Witness == nil || *g.Witness == "" {
+		if g.Witness == nil || *g.Witness == "" || !utf8.ValidString(*g.Witness) {
 			return fmt.Errorf("experiment: guard %q: witness must be a nonempty string when verdict is %q", g.ID, GuardVerdictFail)
 		}
 	case GuardVerdictPass:
@@ -167,15 +168,34 @@ func DecodeObservations(data []byte) ([]Observation, error) {
 	lines := bytes.Split(data, []byte("\n"))
 	out := make([]Observation, 0, len(lines))
 	for i, line := range lines {
-		trimmed := bytes.TrimRight(line, "\r")
-		if len(bytes.TrimSpace(trimmed)) == 0 {
+		if len(bytes.TrimSpace(line)) == 0 {
 			continue
 		}
-		o, err := DecodeObservation(trimmed)
+		record := append([]byte(nil), line...)
+		if i < len(lines)-1 {
+			record = append(record, '\n')
+		}
+		o, err := DecodeObservation(record)
 		if err != nil {
 			return nil, fmt.Errorf("experiment: observations.jsonl line %d: %w", i+1, err)
 		}
 		out = append(out, o)
+	}
+	if len(out) > 0 && out[0].Schema == ObservationSchemaV2 {
+		var canonical bytes.Buffer
+		for i, observation := range out {
+			if observation.Schema != ObservationSchemaV2 {
+				return nil, fmt.Errorf("experiment: observations.jsonl line %d mixes observation schemas", i+1)
+			}
+			encoded, err := EncodeObservation(observation)
+			if err != nil {
+				return nil, fmt.Errorf("experiment: observations.jsonl line %d: %w", i+1, err)
+			}
+			canonical.Write(encoded)
+		}
+		if !bytes.Equal(data, canonical.Bytes()) {
+			return nil, fmt.Errorf("experiment: observations v2 file is not the exact canonical JSONL encoding")
+		}
 	}
 	return out, nil
 }
@@ -238,7 +258,7 @@ func (o Observation) Validate() error {
 	}
 
 	for i, d := range o.Disclosures {
-		if d == "" {
+		if d == "" || !utf8.ValidString(d) {
 			return fmt.Errorf("experiment: observation.disclosures[%d] must be nonempty", i)
 		}
 	}

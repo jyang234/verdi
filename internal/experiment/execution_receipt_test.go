@@ -122,4 +122,13 @@ func TestResultV2DecisionAnnexPresenceAndReceiptBinding(t *testing.T) {
 	if err := ValidateResultReceipt(receipt, bad); err == nil {
 		t.Fatalf("ValidateResultReceipt(forged isolation) = nil error")
 	}
+	invalidUTF8 := string([]byte{0xff})
+	if err := (Reason{Code: ReasonPracticalTie, Detail: invalidUTF8}).Validate(); err == nil {
+		t.Fatalf("Reason.Validate(invalid UTF-8) = nil error")
+	}
+	bad = freshResult(t)
+	bad.Execution.WarmupDiagnostics.Failures = []WarmupFailure{{Candidate: "facts-cache", Warmup: 1, Kind: OutcomeCandidateCrash, Witness: invalidUTF8}}
+	if err := bad.Validate(); err == nil {
+		t.Fatalf("Result.Validate(invalid UTF-8 warmup witness) = nil error")
+	}
 }

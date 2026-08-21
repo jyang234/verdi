@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"reflect"
 	"sort"
+	"unicode/utf8"
 
 	"github.com/jyang234/verdi/internal/canonjson"
 )
@@ -48,7 +49,10 @@ func (r Reason) Validate() error {
 			return fmt.Errorf("experiment: reason %q: candidate: %w", r.Code, err)
 		}
 	}
-	if r.Witness != nil && *r.Witness == "" {
+	if !utf8.ValidString(r.Detail) {
+		return fmt.Errorf("experiment: reason %q: detail must be valid UTF-8", r.Code)
+	}
+	if r.Witness != nil && (*r.Witness == "" || !utf8.ValidString(*r.Witness)) {
 		return fmt.Errorf("experiment: reason %q: witness must be nonempty when present", r.Code)
 	}
 	if r.Code == ReasonBaselineCandidateFailure {
@@ -73,6 +77,9 @@ func (f CandidateExecutionFailure) Validate() error {
 	}
 	if f.Kind != OutcomeCandidateCrash && f.Kind != OutcomeCandidateTimeout {
 		return fmt.Errorf("experiment: candidate execution failure kind %q", f.Kind)
+	}
+	if !utf8.ValidString(f.Witness) {
+		return fmt.Errorf("experiment: candidate execution failure witness must be valid UTF-8")
 	}
 	return nonemptyString("candidate execution failure witness", f.Witness)
 }
@@ -471,7 +478,7 @@ func (e ResultExecution) Validate() error {
 		if f.Kind != OutcomeCandidateCrash && f.Kind != OutcomeCandidateTimeout {
 			return fmt.Errorf("experiment: warmup failure kind %q", f.Kind)
 		}
-		if f.Witness == "" {
+		if f.Witness == "" || !utf8.ValidString(f.Witness) {
 			return fmt.Errorf("experiment: warmup failure witness must be nonempty")
 		}
 		key := fmt.Sprintf("%d/%s", f.Warmup, f.Candidate)
@@ -479,6 +486,36 @@ func (e ResultExecution) Validate() error {
 			return fmt.Errorf("experiment: duplicate warmup failure %s", key)
 		}
 		seen[key] = true
+	}
+	return nil
+}
+
+// ValidateWarmupDiagnosticsOrder proves failures are a subsequence of the
+// definition's deterministic warmup schedule.
+func ValidateWarmupDiagnosticsOrder(def Definition, diagnostics WarmupDiagnostics) error {
+	if err := def.Validate(); err != nil {
+		return err
+	}
+	ranks := make(map[string]int, def.Execution.Warmups*len(def.Candidates))
+	rank := 0
+	for warmup := 1; warmup <= def.Execution.Warmups; warmup++ {
+		offset := (warmup - 1) % len(def.Candidates)
+		for position := range def.Candidates {
+			candidate := def.Candidates[(offset+position)%len(def.Candidates)]
+			ranks[fmt.Sprintf("%d/%s", warmup, candidate.ID)] = rank
+			rank++
+		}
+	}
+	last := -1
+	for _, failure := range diagnostics.Failures {
+		current, ok := ranks[fmt.Sprintf("%d/%s", failure.Warmup, failure.Candidate)]
+		if !ok {
+			return fmt.Errorf("experiment: warmup failure %s@%d is outside the registered schedule", failure.Candidate, failure.Warmup)
+		}
+		if current <= last {
+			return fmt.Errorf("experiment: warmup failures are not in exact schedule order")
+		}
+		last = current
 	}
 	return nil
 }
@@ -495,6 +532,25 @@ func (res Result) validateV2() error {
 		return err
 	}
 	return res.Execution.Validate()
+}
+
+func (res Result) decisionDocument() ResultDecision {
+	if res.Schema == ResultSchemaV2 && res.Decision != nil {
+		return *res.Decision
+	}
+	candidates := make([]DecisionCandidate, len(res.Candidates))
+	for i, candidate := range res.Candidates {
+		candidates[i] = DecisionCandidate{
+			ID: candidate.ID, Baseline: candidate.Baseline, Eligible: candidate.Eligible,
+			Violations: candidate.Violations, Primary: candidate.Primary, Bounds: candidate.Bounds,
+			ExecutionFailures: []CandidateExecutionFailure{},
+		}
+	}
+	return ResultDecision{
+		Experiment: res.Experiment, DefinitionDigest: res.DefinitionDigest, Run: res.Run,
+		Algorithm: res.Algorithm, Verdict: res.Verdict, Winner: res.Winner,
+		Reasons: res.Reasons, Candidates: candidates, ObservationsDigest: res.ObservationsDigest,
+	}
 }
 
 func NewResultV2(decision ResultDecision, execution ResultExecution) (Result, error) {

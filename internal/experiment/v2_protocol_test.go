@@ -107,6 +107,12 @@ func TestEvaluatorResponseOutcomePresenceAndCustody(t *testing.T) {
 			r.Measurements = []Measurement{{ID: EvaluatorWallDurationMetricID, Value: NumberValue("1"), Unit: "ns", Source: SourceEvaluatorMeasured}}
 			return r
 		}()},
+		{"invalid UTF-8 guard witness", func() EvaluatorResponse {
+			r := completed
+			witness := string([]byte{0xff})
+			r.Guards = []GuardResult{{ID: "behavioral-equivalence", Verdict: GuardVerdictFail, Witness: &witness}}
+			return r
+		}()},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -142,6 +148,9 @@ func TestObservationV2OutcomeUnionAndCanonicalBytes(t *testing.T) {
 	}
 	if _, err := DecodeObservation([]byte(strings.Replace(string(b), `{"candidate"`, `{ "candidate"`, 1))); err == nil {
 		t.Fatalf("DecodeObservation(noncanonical v2) = nil error")
+	}
+	if _, err := DecodeObservations(append(append([]byte(nil), b...), '\n')); err == nil {
+		t.Fatalf("DecodeObservations(v2 with an extra blank line) = nil error")
 	}
 }
 
