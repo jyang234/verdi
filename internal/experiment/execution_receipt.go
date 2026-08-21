@@ -408,6 +408,10 @@ func validateLockedInputDigests(def Definition, got map[string]string) error {
 		return fmt.Errorf("experiment: receipt fingerprint input set has %d entries, want one evaluator plus %d locked workload/fixture/contract inputs", len(got), wantCount)
 	}
 
+	protected := make(map[string]bool, len(def.ProtectedPaths))
+	for _, path := range def.ProtectedPaths {
+		protected[path] = true
+	}
 	resolved := make(map[string]int, len(want))
 	for path, digest := range got {
 		if path == evaluatorKey {
@@ -415,6 +419,9 @@ func validateLockedInputDigests(def Definition, got map[string]string) error {
 		}
 		if err := ValidateRepoRelativePath(path); err != nil {
 			return fmt.Errorf("experiment: receipt fingerprint resolved input %q: %w", path, err)
+		}
+		if !protected[path] {
+			return fmt.Errorf("experiment: receipt fingerprint resolved input %q is absent from definition.protected_paths", path)
 		}
 		resolved[digest]++
 	}

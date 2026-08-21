@@ -60,5 +60,9 @@ execution:
 algorithm: verdi.experiment-recommendation/v1
 retention_policy: standard-retention
 
+protected_paths:
+  - contracts/equivalence.json
+  - inputs/workload.json
+
 lock:
-  definition_digest: sha256:113d6d809d0fd9a8c8abd9665fdd95e23bca7fea4f9655457f1230f8bf2db5bf
+  definition_digest: sha256:e24c6781bee8d3c2f12f98453e93f0a849e0aacb7546b007d4b08aa421c9dfeb

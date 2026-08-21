@@ -5,6 +5,24 @@ import (
 	"testing"
 )
 
+var resolvedInputPaths = []string{
+	"contracts/equivalence.json",
+	"fixtures/request-log.json",
+	"inputs/workload.json",
+}
+
+func withResolvedInputPaths(t *testing.T, def Definition) (Definition, string) {
+	t.Helper()
+	def.ProtectedPaths = append([]string(nil), resolvedInputPaths...)
+	def.Lock = nil
+	digest, err := DefinitionDigest(def)
+	if err != nil {
+		t.Fatal(err)
+	}
+	def.Lock = &Lock{DefinitionDigest: digest}
+	return def, digest
+}
+
 func validExecutionReceipt(t *testing.T) ExecutionReceipt {
 	t.Helper()
 	workspaceRunID, err := WorkspaceRunID(digestOf("a"), "run-1", "facts-cache")
@@ -76,8 +94,9 @@ func TestExecutionReceiptExactCodecDigestAndUnionRules(t *testing.T) {
 
 func TestValidateExecutionReceiptBindingRejectsForgedControlsAndLockedInputs(t *testing.T) {
 	_, capabilitiesDigest := capabilitiesAuthorityForState(t, []string{"behavioral-equivalence", "tenant-isolation"}, "fixture-evaluator/2.1.0")
-	doc, digest := lockedV2DefinitionDoc(t, capabilitiesDigest)
+	doc, _ := lockedV2DefinitionDoc(t, capabilitiesDigest)
 	def := mustDecodeDefinition(t, doc)
+	def, digest := withResolvedInputPaths(t, def)
 	observations, _ := completeObservationsV2JSONL(t, digest, "run-1")
 	receipt := executionReceiptForState(t, def, "run-1")
 	receipt.Fingerprint.InputDigests = map[string]string{
@@ -136,8 +155,9 @@ func TestValidateExecutionReceiptBindingRejectsForgedControlsAndLockedInputs(t *
 
 func TestValidateExecutionReceiptBindingAcceptsResolvedPathInputs(t *testing.T) {
 	_, capabilitiesDigest := capabilitiesAuthorityForState(t, []string{"behavioral-equivalence", "tenant-isolation"}, "fixture-evaluator/2.1.0")
-	doc, digest := lockedV2DefinitionDoc(t, capabilitiesDigest)
+	doc, _ := lockedV2DefinitionDoc(t, capabilitiesDigest)
 	def := mustDecodeDefinition(t, doc)
+	def, digest := withResolvedInputPaths(t, def)
 	observations, _ := completeObservationsV2JSONL(t, digest, "run-1")
 	receipt := executionReceiptForState(t, def, "run-1")
 	receipt.Fingerprint.InputDigests = map[string]string{
@@ -164,6 +184,10 @@ func TestValidateExecutionReceiptBindingAcceptsResolvedPathInputs(t *testing.T) 
 		}},
 		{name: "traversal path", mutate: func(inputs map[string]string) {
 			inputs["inputs/../workload.json"] = inputs["inputs/workload.json"]
+			delete(inputs, "inputs/workload.json")
+		}},
+		{name: "canonical but undeclared path", mutate: func(inputs map[string]string) {
+			inputs["inputs/unprotected.json"] = inputs["inputs/workload.json"]
 			delete(inputs, "inputs/workload.json")
 		}},
 		{name: "missing input", mutate: func(inputs map[string]string) {
@@ -202,6 +226,7 @@ func TestValidateExecutionReceiptBindingPreservesResolvedInputDigestMultiplicity
 	_, capabilitiesDigest := capabilitiesAuthorityForState(t, []string{"behavioral-equivalence", "tenant-isolation"}, "fixture-evaluator/2.1.0")
 	doc, _ := lockedV2DefinitionDoc(t, capabilitiesDigest)
 	def := mustDecodeDefinition(t, doc)
+	def, _ = withResolvedInputPaths(t, def)
 	def.Contract.Digest = def.Fixtures[0].Digest
 	def.Lock = nil
 	digest, err := DefinitionDigest(def)

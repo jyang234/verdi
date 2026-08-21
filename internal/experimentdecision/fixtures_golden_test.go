@@ -93,6 +93,7 @@ func verifyGoldenV2(t *testing.T, name string, def experiment.Definition, obs []
 func predecessorDefinition(t *testing.T, def experiment.Definition) experiment.Definition {
 	t.Helper()
 	predecessor := def
+	predecessor.ProtectedPaths = nil
 	predecessor.Evaluator.CapabilitiesDigest = fixtureDigest("d")
 	predecessor.Decision.Guards = append([]experiment.Guard(nil), def.Decision.Guards...)
 	for i := range predecessor.Decision.Guards {
@@ -135,15 +136,15 @@ func TestV2GoldenFixtureByteDigests(t *testing.T) {
 	wants := map[string]map[string]string{
 		"caching-proven": {
 			"evaluator-capabilities.json": "1300bce65fc6717bba6623464f054675229ec531909b01385e73ce5e4ca4a6bf",
-			"execution.json":              "32eb23232bc377e8682fc959a4ecd99382c5fa7c7d4a17b60b3ba4025a730c2f",
-			"observations.jsonl":          "fe87e9d8d12e7b88b740d848e24b22f3a342987c84d3d8de72326e8f72481e3e",
-			"result.json":                 "168c00e9017767ac8a7d12e1abd987f33aeb3d727a2e9ffa22a4f326b6d2d8e0",
+			"execution.json":              "e2e64ad59263cb0a184dcc0d7d36ff8b0e08c92e7c8ff95bf9f6faef00010d1c",
+			"observations.jsonl":          "5638a788b245d40611237da388599c6fd24d7bb7407ba44d64a086b50ede7f7f",
+			"result.json":                 "bbcff620f69c154b2343c540a4954fd0baf14d931999038384c9b2669b5296fb",
 		},
 		"caching-inconclusive": {
 			"evaluator-capabilities.json": "1300bce65fc6717bba6623464f054675229ec531909b01385e73ce5e4ca4a6bf",
-			"execution.json":              "f56a3e97991a2879265c98923ef2c98a4526391b9db09fea224ccfa2a741291f",
-			"observations.jsonl":          "52fff75ac6fc250505e6089280cfb6cbf81001489a0c132d575abff573920d79",
-			"result.json":                 "fd98ab2ef4418d765c8117efb65f2b6fc92fe5a4045467e23f65603d63b31b2f",
+			"execution.json":              "af3d71f835363f3841aaf72147d3ae671dbae438c9609759fb7b2ceb24f18948",
+			"observations.jsonl":          "6f7c3a4692a369203a1c5718644393a3ec927b630a79167c970598217372bf0d",
+			"result.json":                 "56185875ab6c9454a6c8c7802225861c458e786c5945218fdbea8fbc08812bfb",
 		},
 	}
 	for name, files := range wants {

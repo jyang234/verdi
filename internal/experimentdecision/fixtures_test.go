@@ -99,6 +99,7 @@ func lockDefinition(t *testing.T, mutators ...func(*experiment.Definition)) expe
 func lockV2Definition(t *testing.T, mutators ...func(*experiment.Definition)) experiment.Definition {
 	t.Helper()
 	v2 := func(def *experiment.Definition) {
+		def.ProtectedPaths = append(def.ProtectedPaths, "contracts/equivalence.json", "inputs/workload.json")
 		for i := range def.Decision.Guards {
 			if def.Decision.Guards[i].Bounded() {
 				def.Decision.Guards[i].ID = experiment.EvaluatorPeakRSSMetricID
