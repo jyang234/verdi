@@ -9,7 +9,12 @@ import (
 	"github.com/jyang234/verdi/internal/canonjson"
 )
 
-type RunPaths struct{ Directory, Execution, Observations, Result string }
+type RunPaths struct {
+	Directory    string
+	Execution    string
+	Observations string
+	Result       string
+}
 
 func PathsForRun(experimentDir, run string) (RunPaths, error) {
 	if err := ValidateRepoRelativePath(experimentDir); err != nil {

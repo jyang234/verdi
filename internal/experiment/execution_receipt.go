@@ -54,8 +54,8 @@ func (f ExecutionFingerprint) Validate() error {
 		}
 	}
 	for k, v := range f.Env {
-		if k == "" {
-			return fmt.Errorf("experiment: receipt fingerprint environment name is empty")
+		if k == "" || strings.ContainsAny(k, "=\x00") {
+			return fmt.Errorf("experiment: receipt fingerprint environment name %q is invalid", k)
 		}
 		if v != nil && strings.IndexByte(*v, 0) >= 0 {
 			return fmt.Errorf("experiment: receipt fingerprint environment %q contains NUL", k)
@@ -116,7 +116,7 @@ func (i WorkspaceIdentity) Validate() error {
 
 func lowerHex(s string) bool {
 	for _, c := range []byte(s) {
-		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f')) {
+		if (c < '0' || c > '9') && (c < 'a' || c > 'f') {
 			return false
 		}
 	}

@@ -233,6 +233,16 @@ func readRuns(dir, defDigest string, def Definition, verify ResultVerifier) ([]r
 }
 
 func readRun(dir, runID, defDigest string, def Definition, verify ResultVerifier) (runEvidence, error) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return runEvidence{}, fmt.Errorf("experiment: reading run directory %s: %w", dir, err)
+	}
+	allowed := map[string]bool{executionFile: true, observationsFile: true, resultFile: true}
+	for _, entry := range entries {
+		if !allowed[entry.Name()] || entry.IsDir() || entry.Type()&os.ModeSymlink != 0 {
+			return runEvidence{}, fmt.Errorf("experiment: malformed run directory %s contains unexpected entry %q", dir, entry.Name())
+		}
+	}
 	receipt, hasReceipt, err := readExecutionReceipt(dir)
 	if err != nil {
 		return runEvidence{}, err

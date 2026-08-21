@@ -9,9 +9,8 @@ const (
 
 // registeredProtocolVersions is the closed set of protocol version
 // strings a capabilities response may declare support for (AC-3, DC-10).
-// "verdi.experiment-evaluator/v1" is deliberately absent: OQ-1 leaves that
-// protocol's scope unresolved, so it is not yet a name this package
-// accepts anywhere.
+// V1 predecessor artifacts and the amended evaluator/observation protocols
+// are the complete accepted set; unknown revisions fail closed.
 var registeredProtocolVersions = map[string]bool{
 	CapabilitiesSchema:      true,
 	CapabilitiesSchemaV2:    true,

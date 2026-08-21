@@ -703,6 +703,17 @@ func TestDeriveStateDetailsEnumeratesRunsWithoutSelectingTheFavorableOne(t *test
 	}
 }
 
+func TestDeriveStateRejectsMalformedRunDirectoryEntry(t *testing.T) {
+	dir := t.TempDir()
+	doc, _ := lockedDefinitionDoc(t)
+	writeExperimentFile(t, dir, definitionFile, doc)
+	writeCandidatePatches(t, dir)
+	writeRunFile(t, dir, "run-1", "latest", "not an authority artifact")
+	if _, err := DeriveStateDetails(dir, testExperimentDir, acceptResult); err == nil {
+		t.Fatalf("DeriveStateDetails(run with unknown artifact) = nil error")
+	}
+}
+
 func completeObservationsV2JSONL(t *testing.T, defDigest, run string) ([]Observation, string) {
 	t.Helper()
 	v1, err := DecodeObservations([]byte(observationsJSONLForRun(defDigest, run, true)))

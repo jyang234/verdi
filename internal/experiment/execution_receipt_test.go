@@ -67,6 +67,11 @@ func TestExecutionReceiptExactCodecDigestAndUnionRules(t *testing.T) {
 	if _, err := EncodeExecutionReceipt(bad); err == nil {
 		t.Fatalf("EncodeExecutionReceipt(forged workspace id) = nil error")
 	}
+	bad = validExecutionReceipt(t)
+	bad.Fingerprint.Env = map[string]*string{"BAD=KEY": nil}
+	if _, err := EncodeExecutionReceipt(bad); err == nil {
+		t.Fatalf("EncodeExecutionReceipt(invalid fingerprint environment key) = nil error")
+	}
 }
 
 func validDecisionV2() ResultDecision {
@@ -94,6 +99,16 @@ func TestResultV2DecisionAnnexPresenceAndReceiptBinding(t *testing.T) {
 	if _, err := DecodeResult(b); err != nil {
 		t.Fatalf("DecodeResult(v2): %v", err)
 	}
+	for _, mutated := range [][]byte{
+		append(append([]byte(nil), b...), []byte(`{}`)...),
+		[]byte(strings.Replace(string(b), `{"decision"`, `{ "decision"`, 1)),
+		[]byte(strings.Replace(string(b), `"schema":"verdi.experiment-result/v2"`, `"schema":"verdi.experiment-result/v2","schema":"verdi.experiment-result/v2"`, 1)),
+		[]byte(strings.Replace(string(b), `"schema":"verdi.experiment-result/v2"`, `"schema":"verdi.experiment-result/v2","unknown":true`, 1)),
+	} {
+		if _, err := DecodeResult(mutated); err == nil {
+			t.Fatalf("DecodeResult(mutated v2 bytes) = nil error")
+		}
+	}
 	if err := ValidateResultReceipt(receipt, res); err != nil {
 		t.Fatalf("ValidateResultReceipt(): %v", err)
 	}
@@ -111,6 +126,11 @@ func TestResultV2DecisionAnnexPresenceAndReceiptBinding(t *testing.T) {
 	bad.Execution.ExecutionDigest = digestOf("0")
 	if err := ValidateResultReceipt(receipt, bad); err == nil {
 		t.Fatalf("ValidateResultReceipt(forged digest) = nil error")
+	}
+	bad = freshResult(t)
+	bad.Decision = nil
+	if _, err := EncodeResult(bad); err == nil {
+		t.Fatalf("EncodeResult(v2 without decision) = nil error")
 	}
 	bad = freshResult(t)
 	bad.Execution.WarmupDiagnostics.Authority = "decision"

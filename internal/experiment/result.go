@@ -10,7 +10,7 @@ import (
 	"github.com/jyang234/verdi/internal/canonjson"
 )
 
-// ResultSchema is the only accepted result.json schema identifier.
+// ResultSchema is the predecessor read-compatible result schema identifier.
 const ResultSchema = "verdi.experiment-result/v1"
 
 const ResultSchemaV2 = "verdi.experiment-result/v2"
@@ -591,14 +591,6 @@ func DecisionFromResult(res Result, obs []Observation) (ResultDecision, error) {
 		return ResultDecision{}, err
 	}
 	return d, nil
-}
-
-func (d ResultDecision) legacyResult() Result {
-	candidates := make([]CandidateResult, len(d.Candidates))
-	for i, c := range d.Candidates {
-		candidates[i] = CandidateResult{ID: c.ID, Baseline: c.Baseline, Eligible: c.Eligible, Violations: c.Violations, Primary: c.Primary, Bounds: c.Bounds}
-	}
-	return Result{Schema: ResultSchema, Experiment: d.Experiment, DefinitionDigest: d.DefinitionDigest, Run: d.Run, Algorithm: d.Algorithm, Verdict: d.Verdict, Winner: d.Winner, Reasons: d.Reasons, Candidates: candidates, ObservationsDigest: d.ObservationsDigest}
 }
 
 func ValidateResultReceipt(receipt ExecutionReceipt, res Result) error {

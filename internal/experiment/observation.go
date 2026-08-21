@@ -8,8 +8,7 @@ import (
 	"github.com/jyang234/verdi/internal/canonjson"
 )
 
-// ObservationSchema is the only accepted observation-record schema
-// identifier.
+// ObservationSchema is the predecessor read-compatible schema identifier.
 const ObservationSchema = "verdi.experiment-observation/v1"
 
 // ObservationSchemaV2 is the harness-owned measured-attempt envelope.
@@ -87,9 +86,8 @@ func (m Measurement) Validate() error {
 	return nil
 }
 
-// Observation is one verdi.experiment-observation/v1 record: one
-// evaluator response for one candidate and round, keyed to the locked
-// definition and its run identity (AC-3).
+// Observation is one V1 predecessor record or V2 harness-owned measured
+// attempt, keyed to the locked definition and its run identity.
 type Observation struct {
 	Schema           string            `json:"schema"`
 	ExperimentDigest string            `json:"experiment_digest"`

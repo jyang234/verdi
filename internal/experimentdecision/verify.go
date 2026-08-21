@@ -22,20 +22,17 @@ import (
 // mutation surface AC-5/AC-6 leave open). Recomputation is what makes the
 // forgery detectable.
 //
-// The comparison is over canonical JSON bytes (RenderResult), which is
-// exactly the identity experiment.ResultDigest binds: two results agreeing
-// on every value but spelling one number differently are NOT equal here,
-// deliberately, because CO-3's byte identity is the property at stake.
+// V1 compares the complete canonical result. V2 compares only the canonical
+// engine-owned decision, then independently verifies the receipt-bound annex;
+// strict non-decision warmup diagnostics remain visible but unrecomputed.
 //
 // Every failure is an operational error (CO-1) — an unlocked or tampered
 // definition, incomplete or integrity-violating observations, an invalid
 // res, or a genuine mismatch. None of them is a verdict: a result that
 // does not recompute makes no statement about candidates at all.
 //
-// It takes NO environment attestation, unlike Evaluate: an attestation is
-// the execution layer's assertion about the run that produced obs (SI-42),
-// which no at-rest reader can make. That conjunct stays disclosed-unproven
-// at rest until spec/execution-workspace's durable receipt lands (SI-44).
+// It takes no in-memory environment attestation: V2 re-establishes that
+// conjunct from execution.json, while V1 remains disclosed-unproven.
 func VerifyResult(def experiment.Definition, obs []experiment.Observation, receipt *experiment.ExecutionReceipt, res experiment.Result) error {
 	locked, err := experiment.Locked(def)
 	if err != nil {

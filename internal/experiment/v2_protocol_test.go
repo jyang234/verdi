@@ -76,8 +76,19 @@ func TestEvaluatorRequestExactCodecAndCycleUnion(t *testing.T) {
 
 func TestEvaluatorResponseOutcomePresenceAndCustody(t *testing.T) {
 	completed := EvaluatorResponse{Schema: EvaluatorProtocolSchema, Outcome: CandidateOutcome{Kind: OutcomeCompleted}, Guards: []GuardResult{}, Measurements: []Measurement{}, Disclosures: []string{}}
-	if _, err := EncodeEvaluatorResponse(completed); err != nil {
+	completedBytes, err := EncodeEvaluatorResponse(completed)
+	if err != nil {
 		t.Fatalf("EncodeEvaluatorResponse(completed): %v", err)
+	}
+	for _, mutated := range [][]byte{
+		append(append([]byte(nil), completedBytes...), []byte(`{}`)...),
+		[]byte(strings.Replace(string(completedBytes), `{"disclosures"`, `{ "disclosures"`, 1)),
+		[]byte(strings.Replace(string(completedBytes), `"schema":"verdi.experiment-evaluator/v1"`, `"schema":"verdi.experiment-evaluator/v1","schema":"verdi.experiment-evaluator/v1"`, 1)),
+		[]byte(strings.Replace(string(completedBytes), `"schema":"verdi.experiment-evaluator/v1"`, `"schema":"verdi.experiment-evaluator/v1","unknown":true`, 1)),
+	} {
+		if _, err := DecodeEvaluatorResponse(mutated); err == nil {
+			t.Fatalf("DecodeEvaluatorResponse(mutated bytes) = nil error")
+		}
 	}
 	witness := "segmentation fault"
 	failed := completed
@@ -186,5 +197,9 @@ func TestRunPathsAndWorkspaceRunID(t *testing.T) {
 	id2, _ := WorkspaceRunID(digestOf("a"), "run-2", "facts-cache")
 	if len(id1) != 64 || id1 == id2 {
 		t.Fatalf("workspace ids = %q, %q", id1, id2)
+	}
+	const wantRun1 = "2035c74f49c3cf4c5e2b2ccac887e6097bce4fc725709b7810fc2b7518fcc523"
+	if id1 != wantRun1 {
+		t.Fatalf("workspace run-1 id = %q, want %q", id1, wantRun1)
 	}
 }
