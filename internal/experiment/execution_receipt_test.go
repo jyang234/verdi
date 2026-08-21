@@ -81,10 +81,10 @@ func TestValidateExecutionReceiptBindingRejectsForgedControlsAndLockedInputs(t *
 	observations, _ := completeObservationsV2JSONL(t, digest, "run-1")
 	receipt := executionReceiptForState(t, def, "run-1")
 	receipt.Fingerprint.InputDigests = map[string]string{
-		"contract:behavioral-equivalence-contract": strings.TrimPrefix(digestOf("7"), "sha256:"),
-		"evaluator:./tools/cache-evaluator":        strings.TrimPrefix(digestOf("3"), "sha256:"),
-		"fixture:request-log":                      strings.TrimPrefix(digestOf("6"), "sha256:"),
-		"workload:representative-request-mix":      strings.TrimPrefix(digestOf("5"), "sha256:"),
+		"contracts/equivalence.json":        strings.TrimPrefix(digestOf("7"), "sha256:"),
+		"evaluator:./tools/cache-evaluator": strings.TrimPrefix(digestOf("3"), "sha256:"),
+		"fixtures/request-log.json":         strings.TrimPrefix(digestOf("6"), "sha256:"),
+		"inputs/workload.json":              strings.TrimPrefix(digestOf("5"), "sha256:"),
 	}
 	if err := ValidateExecutionReceiptBinding(def, observations, receipt); err != nil {
 		t.Fatalf("ValidateExecutionReceiptBinding(valid authoritative receipt): %v", err)
@@ -108,14 +108,13 @@ func TestValidateExecutionReceiptBindingRejectsForgedControlsAndLockedInputs(t *
 		{name: "unapplied required control", mutate: func(r *ExecutionReceipt) { r.Enforcement[0].Applied = false }},
 		{name: "missing allocation disclosures", mutate: func(r *ExecutionReceipt) { r.Disclosures = []ReceiptDisclosure{} }},
 		{name: "changed workload digest", mutate: func(r *ExecutionReceipt) {
-			r.Fingerprint.InputDigests["workload:representative-request-mix"] = strings.Repeat("0", 64)
+			r.Fingerprint.InputDigests["inputs/workload.json"] = strings.Repeat("0", 64)
 		}},
-		{name: "changed fixture identity", mutate: func(r *ExecutionReceipt) {
-			delete(r.Fingerprint.InputDigests, "fixture:request-log")
-			r.Fingerprint.InputDigests["fixture:other-log"] = strings.TrimPrefix(digestOf("6"), "sha256:")
+		{name: "missing fixture input", mutate: func(r *ExecutionReceipt) {
+			delete(r.Fingerprint.InputDigests, "fixtures/request-log.json")
 		}},
 		{name: "changed contract digest", mutate: func(r *ExecutionReceipt) {
-			r.Fingerprint.InputDigests["contract:behavioral-equivalence-contract"] = strings.Repeat("1", 64)
+			r.Fingerprint.InputDigests["contracts/equivalence.json"] = strings.Repeat("1", 64)
 		}},
 	}
 	for _, tt := range tests {
@@ -132,6 +131,103 @@ func TestValidateExecutionReceiptBindingRejectsForgedControlsAndLockedInputs(t *
 				t.Fatalf("ValidateExecutionReceiptBinding(forged receipt) = nil error")
 			}
 		})
+	}
+}
+
+func TestValidateExecutionReceiptBindingAcceptsResolvedPathInputs(t *testing.T) {
+	_, capabilitiesDigest := capabilitiesAuthorityForState(t, []string{"behavioral-equivalence", "tenant-isolation"}, "fixture-evaluator/2.1.0")
+	doc, digest := lockedV2DefinitionDoc(t, capabilitiesDigest)
+	def := mustDecodeDefinition(t, doc)
+	observations, _ := completeObservationsV2JSONL(t, digest, "run-1")
+	receipt := executionReceiptForState(t, def, "run-1")
+	receipt.Fingerprint.InputDigests = map[string]string{
+		"contracts/equivalence.json":        strings.TrimPrefix(def.Contract.Digest, "sha256:"),
+		"evaluator:./tools/cache-evaluator": strings.TrimPrefix(def.Evaluator.Digest, "sha256:"),
+		"fixtures/request-log.json":         strings.TrimPrefix(def.Fixtures[0].Digest, "sha256:"),
+		"inputs/workload.json":              strings.TrimPrefix(def.Workload.Digest, "sha256:"),
+	}
+	if err := ValidateExecutionReceiptBinding(def, observations, receipt); err != nil {
+		t.Fatalf("ValidateExecutionReceiptBinding(canonical resolved input paths): %v", err)
+	}
+
+	tests := []struct {
+		name   string
+		mutate func(map[string]string)
+	}{
+		{name: "noncanonical path", mutate: func(inputs map[string]string) {
+			inputs["./inputs/workload.json"] = inputs["inputs/workload.json"]
+			delete(inputs, "inputs/workload.json")
+		}},
+		{name: "absolute path", mutate: func(inputs map[string]string) {
+			inputs["/inputs/workload.json"] = inputs["inputs/workload.json"]
+			delete(inputs, "inputs/workload.json")
+		}},
+		{name: "traversal path", mutate: func(inputs map[string]string) {
+			inputs["inputs/../workload.json"] = inputs["inputs/workload.json"]
+			delete(inputs, "inputs/workload.json")
+		}},
+		{name: "missing input", mutate: func(inputs map[string]string) {
+			delete(inputs, "contracts/equivalence.json")
+		}},
+		{name: "extra input", mutate: func(inputs map[string]string) {
+			inputs["inputs/extra.json"] = strings.Repeat("8", 64)
+		}},
+		{name: "digest substitution", mutate: func(inputs map[string]string) {
+			inputs["inputs/workload.json"] = strings.Repeat("0", 64)
+		}},
+		{name: "renamed evaluator entry", mutate: func(inputs map[string]string) {
+			inputs["tools/cache-evaluator"] = inputs["evaluator:./tools/cache-evaluator"]
+			delete(inputs, "evaluator:./tools/cache-evaluator")
+		}},
+		{name: "evaluator digest substitution", mutate: func(inputs map[string]string) {
+			inputs["evaluator:./tools/cache-evaluator"] = strings.Repeat("0", 64)
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			forged := receipt
+			forged.Fingerprint.InputDigests = make(map[string]string, len(receipt.Fingerprint.InputDigests))
+			for name, value := range receipt.Fingerprint.InputDigests {
+				forged.Fingerprint.InputDigests[name] = value
+			}
+			tt.mutate(forged.Fingerprint.InputDigests)
+			if err := ValidateExecutionReceiptBinding(def, observations, forged); err == nil {
+				t.Fatalf("ValidateExecutionReceiptBinding(forged resolved inputs) = nil error")
+			}
+		})
+	}
+}
+
+func TestValidateExecutionReceiptBindingPreservesResolvedInputDigestMultiplicity(t *testing.T) {
+	_, capabilitiesDigest := capabilitiesAuthorityForState(t, []string{"behavioral-equivalence", "tenant-isolation"}, "fixture-evaluator/2.1.0")
+	doc, _ := lockedV2DefinitionDoc(t, capabilitiesDigest)
+	def := mustDecodeDefinition(t, doc)
+	def.Contract.Digest = def.Fixtures[0].Digest
+	def.Lock = nil
+	digest, err := DefinitionDigest(def)
+	if err != nil {
+		t.Fatal(err)
+	}
+	def.Lock = &Lock{DefinitionDigest: digest}
+	observations, _ := completeObservationsV2JSONL(t, digest, "run-1")
+	receipt := executionReceiptForState(t, def, "run-1")
+	receipt.Fingerprint.InputDigests = map[string]string{
+		"contracts/equivalence.json":        strings.TrimPrefix(def.Contract.Digest, "sha256:"),
+		"evaluator:./tools/cache-evaluator": strings.TrimPrefix(def.Evaluator.Digest, "sha256:"),
+		"fixtures/request-log.json":         strings.TrimPrefix(def.Fixtures[0].Digest, "sha256:"),
+		"inputs/workload.json":              strings.TrimPrefix(def.Workload.Digest, "sha256:"),
+	}
+	if err := ValidateExecutionReceiptBinding(def, observations, receipt); err != nil {
+		t.Fatalf("ValidateExecutionReceiptBinding(two refs sharing one digest): %v", err)
+	}
+	receipt.Fingerprint.InputDigests["contracts/equivalence.json"] = strings.TrimPrefix(def.Workload.Digest, "sha256:")
+	if err := ValidateExecutionReceiptBinding(def, observations, receipt); err == nil {
+		t.Fatalf("ValidateExecutionReceiptBinding(equal digest multiplicity substituted while digest set remains complete) = nil error")
+	}
+	receipt.Fingerprint.InputDigests["contracts/equivalence.json"] = strings.TrimPrefix(def.Contract.Digest, "sha256:")
+	delete(receipt.Fingerprint.InputDigests, "contracts/equivalence.json")
+	if err := ValidateExecutionReceiptBinding(def, observations, receipt); err == nil {
+		t.Fatalf("ValidateExecutionReceiptBinding(missing one of two equal-digest refs) = nil error")
 	}
 }
 

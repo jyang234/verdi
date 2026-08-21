@@ -28,9 +28,9 @@ func receiptFor(t *testing.T, def experiment.Definition, run string) experiment.
 		Schema: experiment.ExecutionReceiptSchema, ExperimentDigest: digest, Run: run,
 		EnvironmentPolicy: def.Execution.EnvironmentPolicy, AuthorityDigest: fixtureDigest("1"), CapabilitiesDigest: def.Evaluator.CapabilitiesDigest, ScheduleDigest: fixtureDigest("2"), GrantsDigest: fixtureDigest("3"),
 		Fingerprint: experiment.ExecutionFingerprint{OS: "linux", Arch: "amd64", ToolVersions: map[string]string{"evaluator": "2.1.0", "verdi": "0.1.0"}, Env: map[string]*string{}, InputDigests: map[string]string{
-			"contract:" + def.Contract.ID:        strings.TrimPrefix(def.Contract.Digest, "sha256:"),
+			"contracts/equivalence.json":         strings.TrimPrefix(def.Contract.Digest, "sha256:"),
 			"evaluator:" + def.Evaluator.Argv[0]: strings.TrimPrefix(def.Evaluator.Digest, "sha256:"),
-			"workload:" + def.Workload.ID:        strings.TrimPrefix(def.Workload.Digest, "sha256:"),
+			"inputs/workload.json":               strings.TrimPrefix(def.Workload.Digest, "sha256:"),
 		}},
 		Enforcement: []experiment.ReceiptEnforcement{{Kind: "process-execution", Applied: true, Reason: "allowlist applied"}, {Kind: "timeouts", Applied: true, Reason: "deadline applied"}},
 		Network:     experiment.ReceiptNetwork{Mode: experiment.NetworkDeny, Configured: true, Reason: "network namespace configured"}, Candidates: candidates,

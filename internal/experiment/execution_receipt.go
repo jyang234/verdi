@@ -389,20 +389,38 @@ func validateAuthoritativeExecutionControls(receipt ExecutionReceipt) error {
 }
 
 func validateLockedInputDigests(def Definition, got map[string]string) error {
-	want := map[string]string{
-		"evaluator:" + def.Evaluator.Argv[0]: strings.TrimPrefix(def.Evaluator.Digest, "sha256:"),
-		"workload:" + def.Workload.ID:        strings.TrimPrefix(def.Workload.Digest, "sha256:"),
-		"contract:" + def.Contract.ID:        strings.TrimPrefix(def.Contract.Digest, "sha256:"),
+	// The evaluator is not an ArtifactRef resolved by InputResolver. Keep its
+	// reserved key bound separately to the exact locked argv[0] and digest.
+	evaluatorKey := "evaluator:" + def.Evaluator.Argv[0]
+	evaluatorDigest := strings.TrimPrefix(def.Evaluator.Digest, "sha256:")
+	if got[evaluatorKey] != evaluatorDigest {
+		return fmt.Errorf("experiment: receipt fingerprint evaluator input %q digest %q does not match locked digest %q", evaluatorKey, got[evaluatorKey], evaluatorDigest)
 	}
+
+	want := make(map[string]int, 2+len(def.Fixtures))
+	want[strings.TrimPrefix(def.Workload.Digest, "sha256:")]++
+	want[strings.TrimPrefix(def.Contract.Digest, "sha256:")]++
 	for _, fixture := range def.Fixtures {
-		want["fixture:"+fixture.ID] = strings.TrimPrefix(fixture.Digest, "sha256:")
+		want[strings.TrimPrefix(fixture.Digest, "sha256:")]++
 	}
-	if len(got) != len(want) {
-		return fmt.Errorf("experiment: receipt fingerprint input set has %d entries, want %d locked evaluator/workload/fixture/contract inputs", len(got), len(want))
+	wantCount := 2 + len(def.Fixtures)
+	if len(got) != wantCount+1 {
+		return fmt.Errorf("experiment: receipt fingerprint input set has %d entries, want one evaluator plus %d locked workload/fixture/contract inputs", len(got), wantCount)
 	}
-	for name, digest := range want {
-		if got[name] != digest {
-			return fmt.Errorf("experiment: receipt fingerprint input %q digest %q does not match locked digest %q", name, got[name], digest)
+
+	resolved := make(map[string]int, len(want))
+	for path, digest := range got {
+		if path == evaluatorKey {
+			continue
+		}
+		if err := ValidateRepoRelativePath(path); err != nil {
+			return fmt.Errorf("experiment: receipt fingerprint resolved input %q: %w", path, err)
+		}
+		resolved[digest]++
+	}
+	for digest, count := range want {
+		if resolved[digest] != count {
+			return fmt.Errorf("experiment: receipt fingerprint has %d resolved inputs with locked digest %q, want %d", resolved[digest], digest, count)
 		}
 	}
 	return nil

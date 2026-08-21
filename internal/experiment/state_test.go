@@ -795,12 +795,12 @@ func executionReceiptForState(t *testing.T, def Definition, run string) Executio
 		})
 	}
 	inputDigests := map[string]string{
-		"contract:" + def.Contract.ID:        strings.TrimPrefix(def.Contract.Digest, "sha256:"),
+		"contracts/equivalence.json":         strings.TrimPrefix(def.Contract.Digest, "sha256:"),
 		"evaluator:" + def.Evaluator.Argv[0]: strings.TrimPrefix(def.Evaluator.Digest, "sha256:"),
-		"workload:" + def.Workload.ID:        strings.TrimPrefix(def.Workload.Digest, "sha256:"),
+		"inputs/workload.json":               strings.TrimPrefix(def.Workload.Digest, "sha256:"),
 	}
 	for _, fixture := range def.Fixtures {
-		inputDigests["fixture:"+fixture.ID] = strings.TrimPrefix(fixture.Digest, "sha256:")
+		inputDigests["fixtures/"+fixture.ID+".json"] = strings.TrimPrefix(fixture.Digest, "sha256:")
 	}
 	return ExecutionReceipt{
 		Schema: ExecutionReceiptSchema, ExperimentDigest: digest, Run: run, EnvironmentPolicy: def.Execution.EnvironmentPolicy,
