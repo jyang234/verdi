@@ -89,9 +89,18 @@ func ValidateObservations(def Definition, obs []Observation) error {
 	boundGuardUnits := make(map[string]string, len(boundGuardIDs))
 
 	var runID string
+	var schema string
 	seenCR := make(map[candidateRound]bool, len(obs))
 
 	for i, o := range obs {
+		if err := o.Validate(); err != nil {
+			return fmt.Errorf("%w: observation %d: %v", ErrObservationIntegrity, i, err)
+		}
+		if schema == "" {
+			schema = o.Schema
+		} else if o.Schema != schema {
+			return fmt.Errorf("%w: observation %d: schema %q does not match the shared run schema %q", ErrObservationIntegrity, i, o.Schema, schema)
+		}
 		if o.ExperimentDigest != defDigest {
 			return fmt.Errorf("%w: observation %d: experiment_digest %q does not match the locked definition digest %q", ErrObservationIntegrity, i, o.ExperimentDigest, defDigest)
 		}
@@ -111,6 +120,9 @@ func ValidateObservations(def Definition, obs []Observation) error {
 			return fmt.Errorf("%w: duplicate observation for candidate %q round %d", ErrObservationIntegrity, o.Candidate, o.Round)
 		}
 		seenCR[key] = true
+		if o.Schema == ObservationSchemaV2 && o.Outcome.Kind != OutcomeCompleted {
+			continue
+		}
 
 		seenGuards := make(map[string]bool, len(o.Guards))
 		for _, g := range o.Guards {

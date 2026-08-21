@@ -3,11 +3,16 @@ package experiment
 import (
 	"bytes"
 	"fmt"
+
+	"github.com/jyang234/verdi/internal/canonjson"
 )
 
 // ObservationSchema is the only accepted observation-record schema
 // identifier.
 const ObservationSchema = "verdi.experiment-observation/v1"
+
+// ObservationSchemaV2 is the harness-owned measured-attempt envelope.
+const ObservationSchemaV2 = "verdi.experiment-observation/v2"
 
 // GuardResult is one guard verdict inside an observation record.
 type GuardResult struct {
@@ -85,14 +90,15 @@ func (m Measurement) Validate() error {
 // evaluator response for one candidate and round, keyed to the locked
 // definition and its run identity (AC-3).
 type Observation struct {
-	Schema           string        `json:"schema"`
-	ExperimentDigest string        `json:"experiment_digest"`
-	Run              string        `json:"run"`
-	Candidate        string        `json:"candidate"`
-	Round            int           `json:"round"`
-	Guards           []GuardResult `json:"guards"`
-	Measurements     []Measurement `json:"measurements"`
-	Disclosures      []string      `json:"disclosures"`
+	Schema           string            `json:"schema"`
+	ExperimentDigest string            `json:"experiment_digest"`
+	Run              string            `json:"run"`
+	Candidate        string            `json:"candidate"`
+	Round            int               `json:"round"`
+	Outcome          *CandidateOutcome `json:"outcome,omitempty"`
+	Guards           []GuardResult     `json:"guards"`
+	Measurements     []Measurement     `json:"measurements"`
+	Disclosures      []string          `json:"disclosures"`
 }
 
 // observationDoc is the strict decode target: disclosures is a pointer so
@@ -100,14 +106,15 @@ type Observation struct {
 // explicitly present empty list, matching the artifact's "required key;
 // may be empty" grammar.
 type observationDoc struct {
-	Schema           string        `json:"schema"`
-	ExperimentDigest string        `json:"experiment_digest"`
-	Run              string        `json:"run"`
-	Candidate        string        `json:"candidate"`
-	Round            int           `json:"round"`
-	Guards           []GuardResult `json:"guards"`
-	Measurements     []Measurement `json:"measurements"`
-	Disclosures      *[]string     `json:"disclosures"`
+	Schema           string            `json:"schema"`
+	ExperimentDigest string            `json:"experiment_digest"`
+	Run              string            `json:"run"`
+	Candidate        string            `json:"candidate"`
+	Round            int               `json:"round"`
+	Outcome          *CandidateOutcome `json:"outcome,omitempty"`
+	Guards           []GuardResult     `json:"guards"`
+	Measurements     []Measurement     `json:"measurements"`
+	Disclosures      *[]string         `json:"disclosures"`
 }
 
 // DecodeObservation strict-decodes data as one observation record and
@@ -127,6 +134,7 @@ func DecodeObservation(data []byte) (Observation, error) {
 		Run:              doc.Run,
 		Candidate:        doc.Candidate,
 		Round:            doc.Round,
+		Outcome:          doc.Outcome,
 		Guards:           doc.Guards,
 		Measurements:     doc.Measurements,
 		Disclosures:      *doc.Disclosures,
@@ -134,7 +142,20 @@ func DecodeObservation(data []byte) (Observation, error) {
 	if err := o.Validate(); err != nil {
 		return Observation{}, err
 	}
+	if o.Schema == ObservationSchemaV2 {
+		if err := requireCanonicalJSON(data, o); err != nil {
+			return Observation{}, fmt.Errorf("experiment: observation v2: %w", err)
+		}
+	}
 	return o, nil
+}
+
+// EncodeObservation validates and canonically encodes one observation.
+func EncodeObservation(o Observation) ([]byte, error) {
+	if err := o.Validate(); err != nil {
+		return nil, err
+	}
+	return canonjson.Marshal(o)
 }
 
 // DecodeObservations strict-decodes data as an observations.jsonl file:
@@ -164,8 +185,22 @@ func DecodeObservations(data []byte) ([]Observation, error) {
 // integrity (run consistency, candidate/round registration, completeness)
 // — that is ValidateObservations' job (observations_validation.go).
 func (o Observation) Validate() error {
-	if o.Schema != ObservationSchema {
-		return fmt.Errorf("experiment: unknown observation schema %q, want %q", o.Schema, ObservationSchema)
+	if o.Schema != ObservationSchema && o.Schema != ObservationSchemaV2 {
+		return fmt.Errorf("experiment: unknown observation schema %q", o.Schema)
+	}
+	if o.Schema == ObservationSchema && o.Outcome != nil {
+		return fmt.Errorf("experiment: observation v1 forbids outcome")
+	}
+	if o.Schema == ObservationSchemaV2 {
+		if o.Outcome == nil {
+			return fmt.Errorf("experiment: observation v2 requires outcome")
+		}
+		if err := o.Outcome.Validate(); err != nil {
+			return err
+		}
+		if o.Outcome.Kind != OutcomeCompleted && (len(o.Guards) != 0 || len(o.Measurements) != 0) {
+			return fmt.Errorf("experiment: candidate failure observation requires empty guards and measurements")
+		}
 	}
 	if err := ValidateDigest(o.ExperimentDigest); err != nil {
 		return fmt.Errorf("experiment: observation.experiment_digest: %w", err)

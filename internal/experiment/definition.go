@@ -81,18 +81,27 @@ func EvaluatorRepoPath(argv0 string) (string, error) {
 	return path, nil
 }
 
-// Validate checks argv is a nonempty vector whose executable is a
+// Validate checks argv contains an executable plus the final literal run
+// operation, whose executable is a
 // well-formed absolute, bare-command, or canonical repo-relative path
 // (EvaluatorRepoPath), and that both digests are well-formed.
 func (e Evaluator) Validate() error {
-	if len(e.Argv) == 0 {
-		return fmt.Errorf("experiment: evaluator.argv must be nonempty")
+	if len(e.Argv) < 2 {
+		return fmt.Errorf("experiment: evaluator.argv must contain at least an executable and final %q operation", "run")
 	}
 	if e.Argv[0] == "" {
 		return fmt.Errorf("experiment: evaluator.argv[0] must be nonempty")
 	}
 	if _, err := EvaluatorRepoPath(e.Argv[0]); err != nil {
 		return err
+	}
+	for i, arg := range e.Argv {
+		if arg == "" {
+			return fmt.Errorf("experiment: evaluator.argv[%d] must be nonempty", i)
+		}
+	}
+	if e.Argv[len(e.Argv)-1] != "run" {
+		return fmt.Errorf("experiment: evaluator.argv final operation is %q, want %q", e.Argv[len(e.Argv)-1], "run")
 	}
 	if err := ValidateDigest(e.Digest); err != nil {
 		return fmt.Errorf("experiment: evaluator.digest: %w", err)

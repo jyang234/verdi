@@ -287,3 +287,20 @@ func TestDefinitionEvaluatorArgvNoShellString(t *testing.T) {
 		t.Errorf("DecodeDefinition() with empty argv = nil error, want error")
 	}
 }
+
+func TestDefinitionEvaluatorArgvEndsInRunOperation(t *testing.T) {
+	tests := []struct {
+		name string
+		argv string
+	}{
+		{"executable only", `["./tools/cache-evaluator"]`},
+		{"wrong operation", `["./tools/cache-evaluator", "describe"]`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if _, err := DecodeDefinition([]byte(evaluatorArgvYAML(t, tt.argv))); err == nil {
+				t.Fatalf("DecodeDefinition() = nil error, want final run-operation error")
+			}
+		})
+	}
+}

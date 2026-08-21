@@ -66,11 +66,11 @@ func TestDecodeCapabilitiesRejects(t *testing.T) {
 		name string
 		doc  string
 	}{
-		{"unknown schema", mutateCapabilities(t, `"schema": "verdi.experiment-evaluator-capabilities/v1"`, `"schema": "verdi.experiment-evaluator-capabilities/v2"`)},
+		{"unknown schema", mutateCapabilities(t, `"schema": "verdi.experiment-evaluator-capabilities/v1"`, `"schema": "verdi.experiment-evaluator-capabilities/v3"`)},
 		{"unknown field", strings.TrimSuffix(validCapabilitiesJSON(), "}") + `,"unknown_field": true}`},
 		{"trailing data", validCapabilitiesJSON() + "\n{}"},
 		{"empty protocol_versions", mutateCapabilities(t, `"protocol_versions": ["verdi.experiment-evaluator-capabilities/v1", "verdi.experiment-observation/v1"]`, `"protocol_versions": []`)},
-		{"unrecognized protocol version (evaluator/v1)", mutateCapabilities(t, `"verdi.experiment-observation/v1"`, `"verdi.experiment-evaluator/v1"`)},
+		{"duplicate protocol version", mutateCapabilities(t, `"verdi.experiment-observation/v1"`, `"verdi.experiment-evaluator-capabilities/v1"`)},
 		{"arbitrary unrecognized protocol version", mutateCapabilities(t, `"verdi.experiment-observation/v1"`, `"verdi.something-else/v1"`)},
 		{"unknown metric type", mutateCapabilities(t, `"type": "duration"`, `"type": "percentage"`)},
 		{"unknown metric direction", mutateCapabilities(t, `"direction": "lower"`, `"direction": "sideways"`)},

@@ -7,8 +7,10 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/jyang234/verdi/internal/artifact"
+	"github.com/jyang234/verdi/internal/canonjson"
 )
 
 // This file layers two package-local decode guards OVER the shared
@@ -34,10 +36,27 @@ import (
 // seam, with the duplicate-key guard running FIRST so a two-faced document
 // is rejected before any field of it is believed.
 func decodeStrictJSON(data []byte, out interface{}) error {
+	if !utf8.Valid(data) {
+		return fmt.Errorf("experiment: json is not valid UTF-8")
+	}
 	if err := checkNoDuplicateJSONKeys(data); err != nil {
 		return err
 	}
 	return artifact.DecodeStrictJSON(data, out)
+}
+
+// requireCanonicalJSON rejects any bytes other than the canonical encoding
+// this package writes for value. It is applied to every V2/new protocol
+// artifact while predecessor V1 artifacts retain read compatibility.
+func requireCanonicalJSON(data []byte, value interface{}) error {
+	canonical, err := canonjson.Marshal(value)
+	if err != nil {
+		return fmt.Errorf("experiment: encoding canonical json: %w", err)
+	}
+	if !bytes.Equal(data, canonical) {
+		return fmt.Errorf("experiment: bytes are not the canonical encoding (want %q, got %q)", canonical, data)
+	}
+	return nil
 }
 
 // decodeStrictYAML decodes data into out through the shared strict YAML

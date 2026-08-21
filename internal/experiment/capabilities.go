@@ -2,9 +2,10 @@ package experiment
 
 import "fmt"
 
-// CapabilitiesSchema is the only accepted evaluator-capabilities schema
-// identifier.
-const CapabilitiesSchema = "verdi.experiment-evaluator-capabilities/v1"
+const (
+	CapabilitiesSchema   = "verdi.experiment-evaluator-capabilities/v1"
+	CapabilitiesSchemaV2 = "verdi.experiment-evaluator-capabilities/v2"
+)
 
 // registeredProtocolVersions is the closed set of protocol version
 // strings a capabilities response may declare support for (AC-3, DC-10).
@@ -12,8 +13,11 @@ const CapabilitiesSchema = "verdi.experiment-evaluator-capabilities/v1"
 // protocol's scope unresolved, so it is not yet a name this package
 // accepts anywhere.
 var registeredProtocolVersions = map[string]bool{
-	CapabilitiesSchema: true,
-	ObservationSchema:  true,
+	CapabilitiesSchema:      true,
+	CapabilitiesSchemaV2:    true,
+	EvaluatorProtocolSchema: true,
+	ObservationSchema:       true,
+	ObservationSchemaV2:     true,
 }
 
 // CapabilityMetric is one metric a capabilities response declares
@@ -48,6 +52,7 @@ func (m CapabilityMetric) Validate() error {
 // access requirements.
 type Capabilities struct {
 	Schema           string             `json:"schema"`
+	EvaluatorVersion string             `json:"evaluator_version,omitempty"`
 	ProtocolVersions []string           `json:"protocol_versions"`
 	Metrics          []CapabilityMetric `json:"metrics"`
 	Guards           []string           `json:"guards,omitempty"`
@@ -66,6 +71,7 @@ type Capabilities struct {
 // the question; one that answers [] has.
 type capabilitiesDoc struct {
 	Schema           string              `json:"schema"`
+	EvaluatorVersion string              `json:"evaluator_version,omitempty"`
 	ProtocolVersions []string            `json:"protocol_versions"`
 	Metrics          *[]CapabilityMetric `json:"metrics"`
 	Guards           []string            `json:"guards,omitempty"`
@@ -89,6 +95,7 @@ func DecodeCapabilities(raw []byte) (Capabilities, error) {
 	}
 	c := Capabilities{
 		Schema:           doc.Schema,
+		EvaluatorVersion: doc.EvaluatorVersion,
 		ProtocolVersions: doc.ProtocolVersions,
 		Metrics:          *doc.Metrics,
 		Guards:           doc.Guards,
@@ -101,6 +108,11 @@ func DecodeCapabilities(raw []byte) (Capabilities, error) {
 	if err := c.Validate(); err != nil {
 		return Capabilities{}, err
 	}
+	if c.Schema == CapabilitiesSchemaV2 {
+		if err := requireCanonicalJSON(raw, c); err != nil {
+			return Capabilities{}, fmt.Errorf("experiment: capabilities v2: %w", err)
+		}
+	}
 	return c, nil
 }
 
@@ -108,15 +120,33 @@ func DecodeCapabilities(raw []byte) (Capabilities, error) {
 // metric ids, and the optional unique-id sets for guards, observers, and
 // workload inputs.
 func (c Capabilities) Validate() error {
-	if c.Schema != CapabilitiesSchema {
-		return fmt.Errorf("experiment: unknown capabilities schema %q, want %q", c.Schema, CapabilitiesSchema)
+	if c.Schema != CapabilitiesSchema && c.Schema != CapabilitiesSchemaV2 {
+		return fmt.Errorf("experiment: unknown capabilities schema %q", c.Schema)
+	}
+	if c.Schema == CapabilitiesSchemaV2 && c.EvaluatorVersion == "" {
+		return fmt.Errorf("experiment: capabilities.evaluator_version must be nonempty for v2")
+	}
+	if c.Schema == CapabilitiesSchema && c.EvaluatorVersion != "" {
+		return fmt.Errorf("experiment: capabilities.evaluator_version is not part of v1")
 	}
 	if len(c.ProtocolVersions) == 0 {
 		return fmt.Errorf("experiment: capabilities.protocol_versions must be nonempty")
 	}
+	seenProtocols := make(map[string]bool, len(c.ProtocolVersions))
 	for _, v := range c.ProtocolVersions {
 		if !registeredProtocolVersions[v] {
 			return fmt.Errorf("experiment: capabilities.protocol_versions: unknown protocol version %q", v)
+		}
+		if seenProtocols[v] {
+			return fmt.Errorf("experiment: capabilities.protocol_versions: duplicate protocol version %q", v)
+		}
+		seenProtocols[v] = true
+	}
+	if c.Schema == CapabilitiesSchemaV2 {
+		for _, required := range []string{EvaluatorProtocolSchema, ObservationSchemaV2} {
+			if !seenProtocols[required] {
+				return fmt.Errorf("experiment: capabilities.protocol_versions: v2 requires %q", required)
+			}
 		}
 	}
 
@@ -144,6 +174,56 @@ func (c Capabilities) Validate() error {
 		if e == "" {
 			return fmt.Errorf("experiment: capabilities.environment[%d] must be nonempty", i)
 		}
+	}
+	return nil
+}
+
+// ValidateDefinitionCapabilities proves a locked definition's decision
+// vocabulary is a member of the digest-pinned evaluator capabilities.
+func ValidateDefinitionCapabilities(def Definition, c Capabilities) error {
+	if err := def.Validate(); err != nil {
+		return err
+	}
+	if c.Schema != CapabilitiesSchemaV2 {
+		return fmt.Errorf("experiment: a V2 run requires capabilities schema %q", CapabilitiesSchemaV2)
+	}
+	if err := c.Validate(); err != nil {
+		return err
+	}
+	guards := make(map[string]bool, len(c.Guards))
+	for _, id := range c.Guards {
+		guards[id] = true
+	}
+	metrics := make(map[string]CapabilityMetric, len(c.Metrics))
+	for _, metric := range c.Metrics {
+		metrics[metric.ID] = metric
+	}
+	for _, g := range def.Decision.Guards {
+		if g.Bounded() {
+			if !isHarnessMetric(g.ID) {
+				if _, ok := metrics[g.ID]; !ok {
+					return fmt.Errorf("experiment: bounded metric %q is absent from capabilities", g.ID)
+				}
+			}
+			continue
+		}
+		if !guards[g.ID] {
+			return fmt.Errorf("experiment: required guard %q is absent from capabilities", g.ID)
+		}
+	}
+	pm := def.Decision.PrimaryMetric
+	if builtin, ok := harnessMetric(pm.ID); ok {
+		if pm.Type != builtin.Type || pm.Unit != builtin.Unit || pm.Direction != builtin.Direction {
+			return fmt.Errorf("experiment: primary metric %q does not match its fixed harness definition", pm.ID)
+		}
+		return nil
+	}
+	metric, ok := metrics[pm.ID]
+	if !ok {
+		return fmt.Errorf("experiment: primary metric %q is absent from capabilities", pm.ID)
+	}
+	if metric.Type != pm.Type || metric.Unit != pm.Unit || metric.Direction != pm.Direction {
+		return fmt.Errorf("experiment: primary metric %q does not match capabilities", pm.ID)
 	}
 	return nil
 }

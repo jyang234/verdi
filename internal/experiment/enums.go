@@ -94,6 +94,23 @@ func (s Source) DecisionEligible() bool {
 	return s == SourceHarnessMeasured || s == SourceEvaluatorMeasured
 }
 
+// OutcomeKind is the closed measured-attempt outcome vocabulary.
+type OutcomeKind string
+
+const (
+	OutcomeCompleted        OutcomeKind = "completed"
+	OutcomeCandidateCrash   OutcomeKind = "candidate-crash"
+	OutcomeCandidateTimeout OutcomeKind = "candidate-timeout"
+)
+
+func (k OutcomeKind) Validate() error {
+	switch k {
+	case OutcomeCompleted, OutcomeCandidateCrash, OutcomeCandidateTimeout:
+		return nil
+	}
+	return fmt.Errorf("experiment: unknown candidate outcome %q", k)
+}
+
 // GuardVerdictValue is the closed guard-verdict vocabulary an observation
 // record's guard entries carry.
 type GuardVerdictValue string
@@ -157,6 +174,7 @@ type ReasonCode string
 // The seven registered reason codes.
 const (
 	ReasonBaselineGuardViolation          ReasonCode = "baseline-guard-violation"
+	ReasonBaselineCandidateFailure        ReasonCode = "baseline-candidate-failure"
 	ReasonNoEligibleCandidate             ReasonCode = "no-eligible-candidate"
 	ReasonInsufficientBaselineImprovement ReasonCode = "insufficient-baseline-improvement"
 	ReasonInsufficientSeparation          ReasonCode = "insufficient-separation"
@@ -168,7 +186,7 @@ const (
 // Validate fails closed on any reason code outside the vocabulary.
 func (r ReasonCode) Validate() error {
 	switch r {
-	case ReasonBaselineGuardViolation, ReasonNoEligibleCandidate, ReasonInsufficientBaselineImprovement,
+	case ReasonBaselineGuardViolation, ReasonBaselineCandidateFailure, ReasonNoEligibleCandidate, ReasonInsufficientBaselineImprovement,
 		ReasonInsufficientSeparation, ReasonPracticalTie, ReasonExcessiveVariance, ReasonConflictingBounds:
 		return nil
 	}

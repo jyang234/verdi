@@ -15,11 +15,12 @@ import (
 // digest's whole job is to bind a Result to the EXACT evidence set that
 // produced it, not to re-assert facts the Result states directly.
 type ObservationRecordProjection struct {
-	Candidate    string                   `json:"candidate"`
-	Round        int                      `json:"round"`
-	Guards       []experiment.GuardResult `json:"guards"`
-	Measurements []experiment.Measurement `json:"measurements"`
-	Disclosures  []string                 `json:"disclosures"`
+	Candidate    string                       `json:"candidate"`
+	Round        int                          `json:"round"`
+	Outcome      *experiment.CandidateOutcome `json:"outcome,omitempty"`
+	Guards       []experiment.GuardResult     `json:"guards"`
+	Measurements []experiment.Measurement     `json:"measurements"`
+	Disclosures  []string                     `json:"disclosures"`
 }
 
 // ObservationsDigest returns the internal/canonjson.Digest of obs's
@@ -49,6 +50,7 @@ func ObservationsDigest(def experiment.Definition, obs []experiment.Observation)
 		projected[i] = ObservationRecordProjection{
 			Candidate:    o.Candidate,
 			Round:        o.Round,
+			Outcome:      o.Outcome,
 			Guards:       o.Guards,
 			Measurements: o.Measurements,
 			Disclosures:  o.Disclosures,
