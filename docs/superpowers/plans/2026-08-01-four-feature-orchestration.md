@@ -370,17 +370,17 @@ block; every lifecycle consumer uses the one shared conflict verdict.
 
 ### Wave 3.5 — Bounded UX readiness pilot
 
-- [ ] Ratify the sequencing overlay and lossless carve-out matrix in the
+- [x] Ratify the sequencing overlay and lossless carve-out matrix in the
   [Wave 3.5 UX readiness pilot plan](2026-08-18-wave-3-5-ux-readiness-pilot.md).
-- [ ] Deliver a pure read-only readiness projection and an explicit startup
+- [x] Deliver a pure read-only readiness projection and an explicit startup
   snapshot through `verdi serve --context-request <path>`.
-- [ ] Deliver the FABLE-owned hybrid cockpit: a four-area linear process rail,
+- [x] Deliver the FABLE-owned hybrid cockpit: a four-area linear process rail,
   prioritized attention queue, complete concern list, board deep links, and
   exact CLI fallbacks.
-- [ ] Run the solo-author pilot and record comprehension, navigation,
+- [x] Run the solo-author pilot and record comprehension, navigation,
   terminology, unnecessary-process, stale-state, and missing-corrective-seam
   findings without treating telemetry as lifecycle truth.
-- [ ] Adjudicate every accepted finding to Wave 3.5, its original downstream
+- [x] Adjudicate every accepted finding to Wave 3.5, its original downstream
   wave, or an explicit non-goal.
 
 The pilot adds no workflow engine, persisted readiness artifact, cockpit
@@ -396,11 +396,18 @@ findings are mapped; the owner has accepted the Wave 3B re-entry decision.
 
 Eligible only after the Wave 3.5 exit gate:
 
-- [ ] Deliver CSE evaluator capability discovery, generic command evaluator, process observer, candidate materialization, deterministic scheduling, interruption resume, and retention behavior.
+- [ ] Ratify the prerequisite evaluator, observation/result V2, multi-run, and
+  durable-receipt authority fixed by the focused
+  [Wave 3B CSE implementation plan](2026-08-20-cse-wave-3b-evaluator-isolated-execution.md).
+- [ ] Deliver CSE evaluator capability discovery, generic command evaluator,
+  process observer, candidate materialization, deterministic scheduling,
+  interruption resume, and retention behavior according to that plan.
 
 **Exit gate:** Experiments distinguish candidate verdicts from operational
 failures; changed inputs refuse resume; unsupported isolation remains an
-operational refusal rather than ambient execution.
+operational refusal rather than ambient execution; exact-head Linux CI proves
+the real default-deny journey while Darwin/other platform tests prove refusal
+without skipping.
 
 ### Wave 4 — Authoritative execution and accountable lifecycle governance
 
@@ -421,7 +428,9 @@ check. Wave 3.5's provisional readiness and pilot-observation slices do not
 remove the full `continuous-readiness` or `journey-metrics` obligations here:
 
 - [ ] Deliver ASD capability/context reads, MCP adapter, proposal-only dogfood, draft-write, semantic review, and provenance read paths.
-- [ ] Deliver CSE CLI and agent adapters, ratification record, spike-closure integration, cleanup, and selected-capsule retention.
+- [ ] Deliver CSE CLI and agent adapters, registration including any explicit
+  reproduction rule, ratification record, spike-closure integration, cleanup,
+  and selected-capsule retention.
 - [ ] Deliver GLG `continuous-readiness` and feature-attestation scaffolding without agent-authored human claims.
 - [ ] Deliver GLG `lifecycle-recovery` as diagnosis-first, read-only-by-default projection over observable state.
 - [ ] Deliver GLG `journey-metrics` only after stable action, blocker, and outcome-event identifiers exist.
@@ -455,7 +464,9 @@ their facts are available; final gates, whole-program review, and human
 authorization are serialized.
 
 - [ ] Run one ASD journey through both Claude Code and Codex using the same typed mutation contract.
-- [ ] Run one genuine CSE comparison and preserve a scoped recommendation or honest inconclusive result.
+- [ ] Run one genuine CSE comparison and preserve a scoped recommendation or
+  honest inconclusive result; call it reproduced only when Wave 5 registered
+  and the journey satisfied an exact reproduction rule.
 - [ ] Run one CI sealed build and fresh Codex review, disclosing the opaque vendor boundary.
 - [ ] Run the GLG journey across design, acceptance, build, evidence, review, recovery, and closure states.
 - [ ] Run `make verify` and `go test -race ./...` from the final integrated tree.
