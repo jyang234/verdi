@@ -148,15 +148,19 @@ The amendment makes these exact changes:
 6. Define aggregate state without choosing a favorable run:
 
    - `exploratory`: the definition is not locked;
-   - `registered`: no complete run;
-   - `measured`: no result exists and at least one run has a complete valid
+   - `registered`: the definition is locked, `ratification.yaml` is absent,
+     and no run has a complete valid measured observation set;
+   - `measured`: the definition is locked, `ratification.yaml` and all result
+     artifacts are absent, and at least one run has a complete valid
      observation set;
-   - `recommended`: every result-bearing run is valid, every such result is
-     `proven-winner`, and all name the same winner;
-   - `inconclusive`: at least one valid result exists and the result-bearing
-     runs are not unanimous on one proven winner; and
-   - `ratified`: `ratification.yaml` binds one exact result digest and that
-     result's run/receipt validate.
+   - `recommended`: the definition is locked, `ratification.yaml` is absent,
+     at least one result exists, every result-bearing run is valid, every such
+     result is `proven-winner`, and all name the same winner;
+   - `inconclusive`: the definition is locked, `ratification.yaml` is absent,
+     at least one valid result exists, and the result-bearing runs are not
+     unanimous on one proven winner; and
+   - `ratified`: the definition is locked and `ratification.yaml` binds one
+     exact result digest whose run/receipt validate.
 
    Any malformed run directory, cross-run identity mismatch, invalid result,
    or ambiguous duplicate result digest is operational. Every run remains
@@ -553,7 +557,9 @@ A complete run invokes `experimentdecision.Evaluate` with the receipt's exact
 environment policy, places its recomputable output and measured execution
 failures in `decision`, constructs `execution` from the exact receipt-derived
 isolation plus the final invocation's non-decision warmup diagnostics, verifies
-both ownership surfaces, and immutably publishes `result.json`. An existing
+both ownership surfaces, including receipt experiment-digest/decision
+definition-digest and receipt-run/decision-run parity, and immutably publishes
+`result.json`. An existing
 byte-equal result is an idempotent success; any different existing result is
 operational. The runner never publishes a result for an incomplete run.
 
@@ -757,7 +763,9 @@ deliberately unmeasured warmup diagnostics have different proof sources.
 
 ## Source coverage and losslessness witness
 
-The Wave 3B slice maps 43/43 implicated authority units:
+The Wave 3B slice maps 43/43 implicated authority units. The canonical
+successor's supersession manifest separately classifies every predecessor
+object, including the 20 predecessor objects not repeated in this slice:
 
 | # | Source unit | Destination |
 |---:|---|---|

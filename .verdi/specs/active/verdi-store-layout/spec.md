@@ -50,6 +50,16 @@ Principles inherited from verdi-go and binding here:
       board.json                   # frozen at commit-to-design (feature class only)
     active/<name>/design-provenance.jsonl   # ASD sidecar: append-only, non-authoritative (OD-8)
     active/<spike>/experiments/<experiment-id>/   # CSE experiment tree; follows spike to archive
+      experiment.yaml
+      candidates/<candidate-id>.patch
+      evaluator-capabilities.json
+      runs/<run-id>/
+        execution.json
+        observations.jsonl
+        result.json
+      recommendation.md
+      ratification.yaml
+      selected/capsule-manifest.json
     archive/<name>/                # closed feature specs move here whole
       spec.md
       layout.json
@@ -57,7 +67,7 @@ Principles inherited from verdi-go and binding here:
       rollup.json                  # frozen at closure
       deviation-report.md          # frozen at closure
     archive/<name>/design-provenance.jsonl
-    archive/<spike>/experiments/<experiment-id>/
+    archive/<spike>/experiments/<experiment-id>/  # same complete CSE tree after spike closure
   adr/<name>.md
   diagrams/<name>.mermaid          # authored diagrams only; generated views are never committed
   attestations/<story-slug>/<ac-id>.md   # <story-slug> = RefSlug(scheme-prefixed story ref)
@@ -100,6 +110,17 @@ Principles inherited from verdi-go and binding here:
 
 Notes:
 
+- The CSE terminal tree is run-scoped before the first persisted real
+  experiment. Every run retains its own execution receipt, observations, and
+  result under `runs/<run-id>/`; no root-level observation/result pair and no
+  `latest`, `current`, or preferred-run pointer exists. Aggregate experiment
+  posture is derived across all visible runs by
+  `spec/comparative-spike-experiments-v2`; the store layout never selects a
+  favorable run. Repository inspection at this amendment head finds zero real
+  persisted experiment trees to migrate. The two committed
+  `internal/experimentdecision/testdata/caching-{proven,inconclusive}/`
+  golden trees are runtime fixtures, not store instances, and are explicitly
+  scheduled for v2 ratcheting by the CSE runtime schema task.
 - `data/` lives **inside** `.verdi/` and is excluded by a **committed**
   `.verdi/.gitignore`. Rationale: each git worktree gets its own isolated
   working area for free, which matters for parallel local agents; and the
@@ -193,16 +214,17 @@ Notes:
   excerpts).
 - CSE experiment tree: each locked comparison is an immutable child
   experiment at `specs/{active,archive}/<spike>/experiments/<experiment-id>/`,
-  containing — transcribed verbatim from the CSE design's §Architecture and
-  artifact lifecycle — `experiment.yaml`, `candidates/` (e.g.
-  `baseline.patch`, `candidate-a.patch`, `candidate-b.patch`),
-  `observations.jsonl`, `result.json`, `recommendation.md`,
-  `ratification.yaml`, and `selected/capsule-manifest.json`. Observation,
-  result, ratification, and selected-capsule artifacts appear only as the
-  lifecycle reaches those states; the experiment directory follows its
-  parent spike from active to archive. Additional durable support files may
-  live only under configured non-product `spike_paths` — a restatement of
-  the existing manifest key, not a redefinition.
+  containing — transcribed from
+  `spec/comparative-spike-experiments-v2` AC-1 — `experiment.yaml`,
+  `candidates/<candidate-id>.patch`, `evaluator-capabilities.json`,
+  `runs/<run-id>/{execution.json,observations.jsonl,result.json}`,
+  `recommendation.md`, `ratification.yaml`, and
+  `selected/capsule-manifest.json`. Per-run observation and result artifacts,
+  ratification, and selected-capsule artifacts appear only as the lifecycle
+  reaches those states; the experiment directory follows its parent spike
+  from active to archive. Additional durable support files may live only
+  under configured non-product `spike_paths` — a restatement of the existing
+  manifest key, not a redefinition.
 - `policy/`: the committed top-level home for Context Integrity's
   constitution, policy, overlay, exemption, and semantic-disposition
   artifacts. Context Integrity's `policy-authority` unit owns the closed
