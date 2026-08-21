@@ -74,6 +74,67 @@ func TestExecutionReceiptExactCodecDigestAndUnionRules(t *testing.T) {
 	}
 }
 
+func TestValidateExecutionReceiptBindingRejectsForgedControlsAndLockedInputs(t *testing.T) {
+	_, capabilitiesDigest := capabilitiesAuthorityForState(t, []string{"behavioral-equivalence", "tenant-isolation"}, "fixture-evaluator/2.1.0")
+	doc, digest := lockedV2DefinitionDoc(t, capabilitiesDigest)
+	def := mustDecodeDefinition(t, doc)
+	observations, _ := completeObservationsV2JSONL(t, digest, "run-1")
+	receipt := executionReceiptForState(t, def, "run-1")
+	receipt.Fingerprint.InputDigests = map[string]string{
+		"contract:behavioral-equivalence-contract": strings.TrimPrefix(digestOf("7"), "sha256:"),
+		"evaluator:./tools/cache-evaluator":        strings.TrimPrefix(digestOf("3"), "sha256:"),
+		"fixture:request-log":                      strings.TrimPrefix(digestOf("6"), "sha256:"),
+		"workload:representative-request-mix":      strings.TrimPrefix(digestOf("5"), "sha256:"),
+	}
+	if err := ValidateExecutionReceiptBinding(def, observations, receipt); err != nil {
+		t.Fatalf("ValidateExecutionReceiptBinding(valid authoritative receipt): %v", err)
+	}
+	allowed := receipt
+	allowed.Network = ReceiptNetwork{Mode: NetworkAllow, Configured: true, Reason: "policy-authorized ambient network"}
+	allowed.Enforcement = append([]ReceiptEnforcement{{Kind: "network", Applied: true, Reason: "explicit network grant applied"}}, receipt.Enforcement...)
+	if err := ValidateExecutionReceiptBinding(def, observations, allowed); err != nil {
+		t.Fatalf("ValidateExecutionReceiptBinding(valid policy-authorized network receipt): %v", err)
+	}
+
+	tests := []struct {
+		name   string
+		mutate func(*ExecutionReceipt)
+	}{
+		{name: "non-Linux platform", mutate: func(r *ExecutionReceipt) { r.Fingerprint.OS = "darwin" }},
+		{name: "ambient network allow without grant row", mutate: func(r *ExecutionReceipt) {
+			r.Network = ReceiptNetwork{Mode: NetworkAllow, Configured: true, Reason: "ambient network allowed"}
+		}},
+		{name: "empty enforcement", mutate: func(r *ExecutionReceipt) { r.Enforcement = []ReceiptEnforcement{} }},
+		{name: "unapplied required control", mutate: func(r *ExecutionReceipt) { r.Enforcement[0].Applied = false }},
+		{name: "missing allocation disclosures", mutate: func(r *ExecutionReceipt) { r.Disclosures = []ReceiptDisclosure{} }},
+		{name: "changed workload digest", mutate: func(r *ExecutionReceipt) {
+			r.Fingerprint.InputDigests["workload:representative-request-mix"] = strings.Repeat("0", 64)
+		}},
+		{name: "changed fixture identity", mutate: func(r *ExecutionReceipt) {
+			delete(r.Fingerprint.InputDigests, "fixture:request-log")
+			r.Fingerprint.InputDigests["fixture:other-log"] = strings.TrimPrefix(digestOf("6"), "sha256:")
+		}},
+		{name: "changed contract digest", mutate: func(r *ExecutionReceipt) {
+			r.Fingerprint.InputDigests["contract:behavioral-equivalence-contract"] = strings.Repeat("1", 64)
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			forged := receipt
+			forged.Enforcement = append([]ReceiptEnforcement(nil), receipt.Enforcement...)
+			forged.Disclosures = append([]ReceiptDisclosure(nil), receipt.Disclosures...)
+			forged.Fingerprint.InputDigests = make(map[string]string, len(receipt.Fingerprint.InputDigests))
+			for name, digest := range receipt.Fingerprint.InputDigests {
+				forged.Fingerprint.InputDigests[name] = digest
+			}
+			tt.mutate(&forged)
+			if err := ValidateExecutionReceiptBinding(def, observations, forged); err == nil {
+				t.Fatalf("ValidateExecutionReceiptBinding(forged receipt) = nil error")
+			}
+		})
+	}
+}
+
 func validDecisionV2() ResultDecision {
 	return ResultDecision{Experiment: "cache-placement-v1", DefinitionDigest: digestOf("a"), Run: "run-1", Algorithm: AlgorithmV1, Verdict: VerdictProvenWinner, Winner: "facts-cache", Candidates: []DecisionCandidate{
 		{ID: "baseline", Baseline: true, Eligible: true, ExecutionFailures: []CandidateExecutionFailure{}},

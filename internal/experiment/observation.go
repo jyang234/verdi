@@ -216,8 +216,13 @@ func (o Observation) Validate() error {
 		if err := o.Outcome.Validate(); err != nil {
 			return err
 		}
-		if o.Outcome.Kind != OutcomeCompleted && (len(o.Guards) != 0 || len(o.Measurements) != 0) {
-			return fmt.Errorf("experiment: candidate failure observation requires empty guards and measurements")
+		if o.Outcome.Kind != OutcomeCompleted {
+			if o.Guards == nil || o.Measurements == nil {
+				return fmt.Errorf("experiment: candidate failure observation requires present empty guards and measurements arrays")
+			}
+			if len(o.Guards) != 0 || len(o.Measurements) != 0 {
+				return fmt.Errorf("experiment: candidate failure observation requires empty guards and measurements")
+			}
 		}
 	}
 	if err := ValidateDigest(o.ExperimentDigest); err != nil {

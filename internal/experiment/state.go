@@ -9,6 +9,7 @@ import (
 
 const (
 	definitionFile   = "experiment.yaml"
+	capabilitiesFile = "evaluator-capabilities.json"
 	runsDirectory    = "runs"
 	executionFile    = "execution.json"
 	observationsFile = "observations.jsonl"
@@ -223,7 +224,7 @@ func readRuns(dir, defDigest string, def Definition, verify ResultVerifier) ([]r
 		if err := ValidateID(entry.Name()); err != nil {
 			return nil, fmt.Errorf("experiment: malformed run directory %q: %w", entry.Name(), err)
 		}
-		run, err := readRun(filepath.Join(runsPath, entry.Name()), entry.Name(), defDigest, def, verify)
+		run, err := readRun(dir, filepath.Join(runsPath, entry.Name()), entry.Name(), defDigest, def, verify)
 		if err != nil {
 			return nil, err
 		}
@@ -232,7 +233,7 @@ func readRuns(dir, defDigest string, def Definition, verify ResultVerifier) ([]r
 	return runs, nil
 }
 
-func readRun(dir, runID, defDigest string, def Definition, verify ResultVerifier) (runEvidence, error) {
+func readRun(experimentDir, dir, runID, defDigest string, def Definition, verify ResultVerifier) (runEvidence, error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return runEvidence{}, fmt.Errorf("experiment: reading run directory %s: %w", dir, err)
@@ -278,6 +279,11 @@ func readRun(dir, runID, defDigest string, def Definition, verify ResultVerifier
 	}
 	if err := ValidateObservations(def, observations); err != nil {
 		return runEvidence{}, fmt.Errorf("experiment: %s: %w", obsPath, err)
+	}
+	if observations[0].Schema == ObservationSchemaV2 {
+		if err := validateCapabilitiesAuthority(experimentDir, def); err != nil {
+			return runEvidence{}, err
+		}
 	}
 	if observations[0].Run != runID {
 		return runEvidence{}, fmt.Errorf("experiment: %s: observation run %q does not match directory %q", obsPath, observations[0].Run, runID)
@@ -329,6 +335,25 @@ func readRun(dir, runID, defDigest string, def Definition, verify ResultVerifier
 		state = StateRecommended
 	}
 	return runEvidence{state: RunState{Run: runID, State: state, ResultDigest: digest}, result: &result}, nil
+}
+
+func validateCapabilitiesAuthority(dir string, def Definition) error {
+	path := filepath.Join(dir, capabilitiesFile)
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return fmt.Errorf("experiment: reading V2 capability authority %s: %w", path, err)
+	}
+	capabilities, err := DecodeCapabilities(raw)
+	if err != nil {
+		return fmt.Errorf("experiment: %s: %w", path, err)
+	}
+	if got := sha256Digest(raw); got != def.Evaluator.CapabilitiesDigest {
+		return fmt.Errorf("experiment: %s digest %q does not match evaluator.capabilities_digest %q", path, got, def.Evaluator.CapabilitiesDigest)
+	}
+	if err := ValidateDefinitionCapabilities(def, capabilities); err != nil {
+		return fmt.Errorf("experiment: %s does not authorize the locked decision vocabulary: %w", path, err)
+	}
+	return nil
 }
 
 func readExecutionReceipt(dir string) (ExecutionReceipt, bool, error) {

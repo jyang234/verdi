@@ -154,8 +154,20 @@ func TestObservationV2OutcomeUnionAndCanonicalBytes(t *testing.T) {
 	failed.Outcome = &CandidateOutcome{Kind: OutcomeCandidateTimeout, Witness: &w}
 	failed.Guards = nil
 	failed.Measurements = nil
-	if _, err := EncodeObservation(failed); err != nil {
-		t.Fatalf("EncodeObservation(timeout): %v", err)
+	if _, err := EncodeObservation(failed); err == nil {
+		t.Fatalf("EncodeObservation(timeout with null arrays) = nil error")
+	}
+	failed.Guards = []GuardResult{}
+	failed.Measurements = []Measurement{}
+	failedBytes, err := EncodeObservation(failed)
+	if err != nil {
+		t.Fatalf("EncodeObservation(timeout with present empty arrays): %v", err)
+	}
+	for _, field := range []string{"guards", "measurements"} {
+		mutated := strings.Replace(string(failedBytes), `"`+field+`":[]`, `"`+field+`":null`, 1)
+		if _, err := DecodeObservation([]byte(mutated)); err == nil {
+			t.Fatalf("DecodeObservation(timeout with null %s) = nil error", field)
+		}
 	}
 	if _, err := DecodeObservation([]byte(strings.Replace(string(b), `{"candidate"`, `{ "candidate"`, 1))); err == nil {
 		t.Fatalf("DecodeObservation(noncanonical v2) = nil error")

@@ -326,6 +326,12 @@ func ValidateExecutionReceiptBinding(def Definition, observations []Observation,
 	if receipt.Versions.RecommendationEngine != string(def.Algorithm) {
 		return fmt.Errorf("experiment: execution receipt recommendation engine does not match definition")
 	}
+	if err := validateAuthoritativeExecutionControls(receipt); err != nil {
+		return err
+	}
+	if err := validateLockedInputDigests(def, receipt.Fingerprint.InputDigests); err != nil {
+		return err
+	}
 	registered := make(map[string]Candidate, len(def.Candidates))
 	for _, candidate := range def.Candidates {
 		registered[candidate.ID] = candidate
@@ -337,6 +343,66 @@ func ValidateExecutionReceiptBinding(def Definition, observations []Observation,
 		candidate, ok := registered[row.ID]
 		if !ok || row.BaseCommit != candidate.Base || row.PatchDigest != candidate.Digest {
 			return fmt.Errorf("experiment: execution receipt candidate %q does not match the locked definition", row.ID)
+		}
+	}
+	return nil
+}
+
+func validateAuthoritativeExecutionControls(receipt ExecutionReceipt) error {
+	if receipt.Fingerprint.OS != "linux" {
+		return fmt.Errorf("experiment: authoritative CSE execution requires linux, receipt names %q", receipt.Fingerprint.OS)
+	}
+	if !receipt.Network.Configured {
+		return fmt.Errorf("experiment: authoritative CSE execution requires configured network posture")
+	}
+	applied := make(map[string]bool, len(receipt.Enforcement))
+	for _, row := range receipt.Enforcement {
+		if !row.Applied {
+			return fmt.Errorf("experiment: receipt enforcement %q was not applied", row.Kind)
+		}
+		applied[row.Kind] = true
+	}
+	if receipt.Network.Mode == NetworkDeny && applied["network"] {
+		return fmt.Errorf("experiment: configured default deny forbids a network grant enforcement row")
+	}
+	if receipt.Network.Mode == NetworkAllow && !applied["network"] {
+		return fmt.Errorf("experiment: allowed ambient network requires its applied network grant enforcement row")
+	}
+	for _, required := range []string{"process-execution", "timeouts"} {
+		if !applied[required] {
+			return fmt.Errorf("experiment: authoritative CSE execution requires applied %q enforcement", required)
+		}
+	}
+	wantDisclosures := []ReceiptDisclosure{}
+	if !applied["resource-ceilings"] {
+		wantDisclosures = []ReceiptDisclosure{DisclosureCPUAllocationUnproven, DisclosureMemoryAllocationUnproven}
+	}
+	if len(receipt.Disclosures) != len(wantDisclosures) {
+		return fmt.Errorf("experiment: receipt allocation disclosures do not match resource-ceiling enforcement")
+	}
+	for i := range wantDisclosures {
+		if receipt.Disclosures[i] != wantDisclosures[i] {
+			return fmt.Errorf("experiment: receipt allocation disclosures do not match resource-ceiling enforcement")
+		}
+	}
+	return nil
+}
+
+func validateLockedInputDigests(def Definition, got map[string]string) error {
+	want := map[string]string{
+		"evaluator:" + def.Evaluator.Argv[0]: strings.TrimPrefix(def.Evaluator.Digest, "sha256:"),
+		"workload:" + def.Workload.ID:        strings.TrimPrefix(def.Workload.Digest, "sha256:"),
+		"contract:" + def.Contract.ID:        strings.TrimPrefix(def.Contract.Digest, "sha256:"),
+	}
+	for _, fixture := range def.Fixtures {
+		want["fixture:"+fixture.ID] = strings.TrimPrefix(fixture.Digest, "sha256:")
+	}
+	if len(got) != len(want) {
+		return fmt.Errorf("experiment: receipt fingerprint input set has %d entries, want %d locked evaluator/workload/fixture/contract inputs", len(got), len(want))
+	}
+	for name, digest := range want {
+		if got[name] != digest {
+			return fmt.Errorf("experiment: receipt fingerprint input %q digest %q does not match locked digest %q", name, got[name], digest)
 		}
 	}
 	return nil

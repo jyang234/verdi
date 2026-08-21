@@ -27,7 +27,11 @@ func receiptFor(t *testing.T, def experiment.Definition, run string) experiment.
 	return experiment.ExecutionReceipt{
 		Schema: experiment.ExecutionReceiptSchema, ExperimentDigest: digest, Run: run,
 		EnvironmentPolicy: def.Execution.EnvironmentPolicy, AuthorityDigest: fixtureDigest("1"), CapabilitiesDigest: def.Evaluator.CapabilitiesDigest, ScheduleDigest: fixtureDigest("2"), GrantsDigest: fixtureDigest("3"),
-		Fingerprint: experiment.ExecutionFingerprint{OS: "linux", Arch: "amd64", ToolVersions: map[string]string{"evaluator": "2.1.0", "verdi": "0.1.0"}, Env: map[string]*string{}, InputDigests: map[string]string{"workload": strings.TrimPrefix(def.Workload.Digest, "sha256:")}},
+		Fingerprint: experiment.ExecutionFingerprint{OS: "linux", Arch: "amd64", ToolVersions: map[string]string{"evaluator": "2.1.0", "verdi": "0.1.0"}, Env: map[string]*string{}, InputDigests: map[string]string{
+			"contract:" + def.Contract.ID:        strings.TrimPrefix(def.Contract.Digest, "sha256:"),
+			"evaluator:" + def.Evaluator.Argv[0]: strings.TrimPrefix(def.Evaluator.Digest, "sha256:"),
+			"workload:" + def.Workload.ID:        strings.TrimPrefix(def.Workload.Digest, "sha256:"),
+		}},
 		Enforcement: []experiment.ReceiptEnforcement{{Kind: "process-execution", Applied: true, Reason: "allowlist applied"}, {Kind: "timeouts", Applied: true, Reason: "deadline applied"}},
 		Network:     experiment.ReceiptNetwork{Mode: experiment.NetworkDeny, Configured: true, Reason: "network namespace configured"}, Candidates: candidates,
 		Versions:    experiment.ReceiptVersions{Verdi: "0.1.0", RecommendationEngine: string(experiment.AlgorithmV1)},
@@ -37,7 +41,7 @@ func receiptFor(t *testing.T, def experiment.Definition, run string) experiment.
 
 func verifiableV2Run(t *testing.T) (experiment.Definition, []experiment.Observation, experiment.ExecutionReceipt, experiment.Result) {
 	t.Helper()
-	def := lockDefinition(t)
+	def := lockV2Definition(t)
 	obs := measuredV2(happyObservations(t, def, "run-1",
 		map[string][]float64{"baseline": {40, 42, 41}, "candidate-a": {18, 19, 17}},
 		map[string][]float64{"baseline": {100, 101, 99}, "candidate-a": {108, 109, 107}},
@@ -125,6 +129,35 @@ func TestVerifyResultV2RejectsWarmupFailuresOutsideScheduleOrder(t *testing.T) {
 	}
 	if err := VerifyResult(def, obs, &receipt, outOfOrder); err == nil {
 		t.Fatalf("VerifyResult(out-of-order warmup failures) = nil error")
+	}
+}
+
+func TestVerifyResultRejectsV2ResultOverV1ObservationsAtDirectPort(t *testing.T) {
+	def := lockDefinition(t)
+	observations := happyObservations(t, def, "run-1",
+		map[string][]float64{"baseline": {40, 42, 41}, "candidate-a": {18, 19, 17}},
+		map[string][]float64{"baseline": {100, 101, 99}, "candidate-a": {108, 109, 107}},
+	)
+	core := mustEvaluate(t, def, observations)
+	decision, err := experiment.DecisionFromResult(core, observations)
+	if err != nil {
+		t.Fatal(err)
+	}
+	receipt := receiptFor(t, def, "run-1")
+	receiptDigest, err := experiment.ExecutionReceiptDigest(receipt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := experiment.NewResultV2(decision, experiment.ResultExecution{
+		ExecutionDigest:   receiptDigest,
+		Isolation:         experiment.ResultIsolation{Network: receipt.Network, Disclosures: []experiment.IsolationDisclosure{}},
+		WarmupDiagnostics: experiment.WarmupDiagnostics{Authority: experiment.WarmupAuthorityNonDecisionDiagnostic, Scope: experiment.WarmupScopeFinalInvocation, Failures: []experiment.WarmupFailure{}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := VerifyResult(def, observations, &receipt, result); err == nil {
+		t.Fatalf("VerifyResult(v2 result over v1 observations) = nil error")
 	}
 }
 

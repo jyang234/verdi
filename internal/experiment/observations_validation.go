@@ -138,6 +138,11 @@ func ValidateObservations(def Definition, obs []Observation) error {
 		}
 
 		for _, m := range o.Measurements {
+			if o.Schema == ObservationSchemaV2 && m.Source == SourceHarnessMeasured {
+				if err := validateHarnessMeasurement(m); err != nil {
+					return fmt.Errorf("%w: observation %d (candidate %q round %d): %v", ErrObservationIntegrity, i, o.Candidate, o.Round, err)
+				}
+			}
 			if err := validateMeasurementValueKind(def, m); err != nil {
 				return fmt.Errorf("%w: observation %d (candidate %q round %d): %v", ErrObservationIntegrity, i, o.Candidate, o.Round, err)
 			}
@@ -178,6 +183,20 @@ func ValidateObservations(def Definition, obs []Observation) error {
 		}
 	}
 
+	return nil
+}
+
+func validateHarnessMeasurement(m Measurement) error {
+	builtin, ok := harnessMetric(m.ID)
+	if !ok {
+		return fmt.Errorf("harness-measured value %q is not one of the fixed harness observer ids", m.ID)
+	}
+	if m.Unit != builtin.Unit {
+		return fmt.Errorf("harness-measured value %q unit %q does not match fixed unit %q", m.ID, m.Unit, builtin.Unit)
+	}
+	if builtin.Type != MetricBoolean && m.Value.IsBool() {
+		return fmt.Errorf("harness-measured value %q must carry a JSON number for fixed type %q", m.ID, builtin.Type)
+	}
 	return nil
 }
 

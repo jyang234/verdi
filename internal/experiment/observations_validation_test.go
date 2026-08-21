@@ -61,6 +61,49 @@ func TestValidateObservationsHappyPath(t *testing.T) {
 	}
 }
 
+func TestValidateObservationsV2RestrictsHarnessMeasuredCustody(t *testing.T) {
+	def, digest := smallRoundsDefinition(t)
+	base := decodeObs(t, validObservationLines(digest)...)
+	for i := range base {
+		base[i].Schema = ObservationSchemaV2
+		base[i].Outcome = &CandidateOutcome{Kind: OutcomeCompleted}
+		base[i].Measurements[1].Source = SourceEvaluatorMeasured
+	}
+
+	t.Run("unreserved observer id", func(t *testing.T) {
+		observations := append([]Observation(nil), base...)
+		observations[0].Measurements = append([]Measurement(nil), base[0].Measurements...)
+		observations[0].Measurements[1].Source = SourceHarnessMeasured
+		if err := ValidateObservations(def, observations); err == nil {
+			t.Fatalf("ValidateObservations(v2 unreserved harness measurement) = nil error")
+		}
+	})
+
+	t.Run("reserved observer with wrong built-in unit", func(t *testing.T) {
+		observations := append([]Observation(nil), base...)
+		for i := range observations {
+			observations[i].Measurements = append(append([]Measurement(nil), base[i].Measurements...), Measurement{
+				ID: EvaluatorWallDurationMetricID, Value: NumberValue("1"), Unit: "ms", Source: SourceHarnessMeasured,
+			})
+		}
+		if err := ValidateObservations(def, observations); err == nil {
+			t.Fatalf("ValidateObservations(v2 harness measurement with wrong built-in unit) = nil error")
+		}
+	})
+
+	t.Run("reserved observer with exact built-in definition", func(t *testing.T) {
+		observations := append([]Observation(nil), base...)
+		for i := range observations {
+			observations[i].Measurements = append(append([]Measurement(nil), base[i].Measurements...), Measurement{
+				ID: EvaluatorWallDurationMetricID, Value: NumberValue("1"), Unit: "ns", Source: SourceHarnessMeasured,
+			})
+		}
+		if err := ValidateObservations(def, observations); err != nil {
+			t.Fatalf("ValidateObservations(v2 fixed harness observer): %v", err)
+		}
+	})
+}
+
 func TestValidateObservationsNotLocked(t *testing.T) {
 	unlocked := mustDecodeDefinition(t, mutate(t, "rounds: 10", "rounds: 2"))
 	digest, err := DefinitionDigest(unlocked)

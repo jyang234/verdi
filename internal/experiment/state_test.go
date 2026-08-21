@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/jyang234/verdi/internal/canonjson"
 )
 
 // acceptResult and rejectResult are the stub ResultVerifier ports this
@@ -57,6 +59,42 @@ func writeRunFile(t *testing.T, root, run, relPath, content string) {
 func lockedDefinitionDoc(t *testing.T) (doc, digest string) {
 	t.Helper()
 	unlocked := mutate(t, "rounds: 10", "rounds: 2")
+	def := mustDecodeDefinition(t, unlocked)
+	digest, err := DefinitionDigest(def)
+	if err != nil {
+		t.Fatalf("DefinitionDigest() unexpected error: %v", err)
+	}
+	return unlocked + "lock:\n  definition_digest: " + digest + "\n", digest
+}
+
+func capabilitiesAuthorityForState(t *testing.T, guards []string, evaluatorVersion string) ([]byte, string) {
+	t.Helper()
+	capabilities := Capabilities{
+		Schema:           CapabilitiesSchemaV2,
+		EvaluatorVersion: evaluatorVersion,
+		ProtocolVersions: []string{EvaluatorProtocolSchema, ObservationSchemaV2},
+		Metrics: []CapabilityMetric{
+			{ID: "request-latency", Type: MetricDuration, Unit: "ms", Direction: DirectionLower},
+		},
+		Guards:           guards,
+		RequiresNetwork:  false,
+		RequiresElevated: false,
+	}
+	if err := capabilities.Validate(); err != nil {
+		t.Fatalf("Capabilities.Validate(): %v", err)
+	}
+	raw, err := canonjson.Marshal(capabilities)
+	if err != nil {
+		t.Fatalf("canonjson.Marshal(capabilities): %v", err)
+	}
+	return raw, sha256Digest(raw)
+}
+
+func lockedV2DefinitionDoc(t *testing.T, capabilitiesDigest string) (doc, digest string) {
+	t.Helper()
+	unlocked := mutate(t, "rounds: 10", "rounds: 2")
+	unlocked = strings.Replace(unlocked, "capabilities_digest: "+digestOf("4"), "capabilities_digest: "+capabilitiesDigest, 1)
+	unlocked = strings.Replace(unlocked, "- id: peak-rss", "- id: "+EvaluatorPeakRSSMetricID, 1)
 	def := mustDecodeDefinition(t, unlocked)
 	digest, err := DefinitionDigest(def)
 	if err != nil {
@@ -724,6 +762,12 @@ func completeObservationsV2JSONL(t *testing.T, defDigest, run string) ([]Observa
 	for i := range v1 {
 		v1[i].Schema = ObservationSchemaV2
 		v1[i].Outcome = &CandidateOutcome{Kind: OutcomeCompleted}
+		for j := range v1[i].Measurements {
+			if v1[i].Measurements[j].Source == SourceHarnessMeasured {
+				v1[i].Measurements[j].ID = EvaluatorPeakRSSMetricID
+				v1[i].Measurements[j].Unit = "bytes"
+			}
+		}
 		line, err := EncodeObservation(v1[i])
 		if err != nil {
 			t.Fatal(err)
@@ -750,10 +794,18 @@ func executionReceiptForState(t *testing.T, def Definition, run string) Executio
 			Materialization: WorkspaceIdentity{Shape: WorkspaceBasePlusPatch, RunID: workspaceID, CommitSHA: candidate.Base, PatchSHA256: strings.TrimPrefix(candidate.Digest, "sha256:")},
 		})
 	}
+	inputDigests := map[string]string{
+		"contract:" + def.Contract.ID:        strings.TrimPrefix(def.Contract.Digest, "sha256:"),
+		"evaluator:" + def.Evaluator.Argv[0]: strings.TrimPrefix(def.Evaluator.Digest, "sha256:"),
+		"workload:" + def.Workload.ID:        strings.TrimPrefix(def.Workload.Digest, "sha256:"),
+	}
+	for _, fixture := range def.Fixtures {
+		inputDigests["fixture:"+fixture.ID] = strings.TrimPrefix(fixture.Digest, "sha256:")
+	}
 	return ExecutionReceipt{
 		Schema: ExecutionReceiptSchema, ExperimentDigest: digest, Run: run, EnvironmentPolicy: def.Execution.EnvironmentPolicy,
 		AuthorityDigest: digestOf("1"), CapabilitiesDigest: def.Evaluator.CapabilitiesDigest, ScheduleDigest: digestOf("2"), GrantsDigest: digestOf("3"),
-		Fingerprint: ExecutionFingerprint{OS: "linux", Arch: "amd64", ToolVersions: map[string]string{"evaluator": "2.1.0", "verdi": "0.1.0"}, Env: map[string]*string{}, InputDigests: map[string]string{"workload": strings.TrimPrefix(def.Workload.Digest, "sha256:")}},
+		Fingerprint: ExecutionFingerprint{OS: "linux", Arch: "amd64", ToolVersions: map[string]string{"evaluator": "2.1.0", "verdi": "0.1.0"}, Env: map[string]*string{}, InputDigests: inputDigests},
 		Enforcement: []ReceiptEnforcement{{Kind: "process-execution", Applied: true, Reason: "allowlist applied"}, {Kind: "timeouts", Applied: true, Reason: "deadline applied"}},
 		Network:     ReceiptNetwork{Mode: NetworkDeny, Configured: true, Reason: "network namespace configured"}, Candidates: candidates,
 		Versions:    ReceiptVersions{Verdi: "0.1.0", RecommendationEngine: string(AlgorithmV1)},
@@ -761,11 +813,48 @@ func executionReceiptForState(t *testing.T, def Definition, run string) Executio
 	}
 }
 
+func TestDeriveStateV2RequiresDigestPinnedCapabilitiesAuthority(t *testing.T) {
+	allGuards := []string{"behavioral-equivalence", "tenant-isolation"}
+	_, validDigest := capabilitiesAuthorityForState(t, allGuards, "fixture-evaluator/2.1.0")
+	mismatchedCapabilities, _ := capabilitiesAuthorityForState(t, allGuards, "fixture-evaluator/2.2.0")
+	undeclaredCapabilities, undeclaredDigest := capabilitiesAuthorityForState(t, []string{"behavioral-equivalence"}, "fixture-evaluator/2.1.0")
+
+	tests := []struct {
+		name              string
+		definitionDigest  string
+		capabilities      []byte
+		writeCapabilities bool
+	}{
+		{name: "missing", definitionDigest: validDigest},
+		{name: "digest mismatch", definitionDigest: validDigest, capabilities: mismatchedCapabilities, writeCapabilities: true},
+		{name: "undeclared required guard", definitionDigest: undeclaredDigest, capabilities: undeclaredCapabilities, writeCapabilities: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			doc, digest := lockedV2DefinitionDoc(t, tt.definitionDigest)
+			writeExperimentFile(t, dir, definitionFile, doc)
+			writeCandidatePatches(t, dir)
+			if tt.writeCapabilities {
+				writeExperimentFile(t, dir, "evaluator-capabilities.json", string(tt.capabilities))
+			}
+			_, encoded := completeObservationsV2JSONL(t, digest, "run-1")
+			writeRunFile(t, dir, "run-1", observationsFile, encoded)
+
+			if derived, err := DeriveStateDetails(dir, testExperimentDir, acceptResult); err == nil {
+				t.Fatalf("DeriveStateDetails() = %+v, nil error; V2 evidence without exact declared capability authority must not become state-bearing", derived)
+			}
+		})
+	}
+}
+
 func TestDeriveStateV2RequiresAndPassesReceiptWithoutV1Disclosure(t *testing.T) {
 	dir := t.TempDir()
-	doc, digest := lockedDefinitionDoc(t)
+	capabilities, capabilitiesDigest := capabilitiesAuthorityForState(t, []string{"behavioral-equivalence", "tenant-isolation"}, "fixture-evaluator/2.1.0")
+	doc, digest := lockedV2DefinitionDoc(t, capabilitiesDigest)
 	def := mustDecodeDefinition(t, doc)
 	writeExperimentFile(t, dir, definitionFile, doc)
+	writeExperimentFile(t, dir, capabilitiesFile, string(capabilities))
 	writeCandidatePatches(t, dir)
 	obs, encodedObs := completeObservationsV2JSONL(t, digest, "run-1")
 	writeRunFile(t, dir, "run-1", observationsFile, encodedObs)
@@ -804,6 +893,14 @@ func TestDeriveStateV2RequiresAndPassesReceiptWithoutV1Disclosure(t *testing.T) 
 		t.Fatal(err)
 	}
 	writeRunFile(t, dir, "run-1", executionFile, string(receiptBytes))
+	capabilitiesPath := filepath.Join(dir, testExperimentDir, capabilitiesFile)
+	if err := os.Remove(capabilitiesPath); err != nil {
+		t.Fatal(err)
+	}
+	if state, _, err := DeriveState(dir, testExperimentDir, acceptResult); err == nil {
+		t.Fatalf("DeriveState(v2 result without capability authority) = %q, nil error", state)
+	}
+	writeExperimentFile(t, dir, capabilitiesFile, string(capabilities))
 	receivedReceipt := false
 	verify := func(_ Definition, _ []Observation, got *ExecutionReceipt, _ Result) error {
 		receivedReceipt = got != nil

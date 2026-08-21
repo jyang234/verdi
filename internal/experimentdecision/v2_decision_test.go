@@ -11,6 +11,12 @@ func measuredV2(obs []experiment.Observation) []experiment.Observation {
 	for i := range out {
 		out[i].Schema = experiment.ObservationSchemaV2
 		out[i].Outcome = &experiment.CandidateOutcome{Kind: experiment.OutcomeCompleted}
+		for j := range out[i].Measurements {
+			if out[i].Measurements[j].Source == experiment.SourceHarnessMeasured {
+				out[i].Measurements[j].ID = experiment.EvaluatorPeakRSSMetricID
+				out[i].Measurements[j].Unit = "bytes"
+			}
+		}
 	}
 	return out
 }
@@ -38,8 +44,17 @@ func decisionCandidate(t *testing.T, d experiment.ResultDecision, id string) exp
 	return experiment.DecisionCandidate{}
 }
 
+func threeCandidateV2Def(t *testing.T) experiment.Definition {
+	t.Helper()
+	return lockV2Definition(t, func(def *experiment.Definition) {
+		def.Candidates = append(def.Candidates, experiment.Candidate{
+			ID: "candidate-b", Patch: "candidates/candidate-b.patch", Digest: fixtureDigest("0"), Base: base40,
+		})
+	})
+}
+
 func TestEvaluateV2BaselineFailurePreservesOutcomeAndCompletedRounds(t *testing.T) {
-	def := lockDefinition(t)
+	def := lockV2Definition(t)
 	obs := measuredV2(happyObservations(t, def, "run-1",
 		map[string][]float64{"baseline": {40, 42, 41}, "candidate-a": {18, 19, 17}},
 		map[string][]float64{"baseline": {100, 101, 99}, "candidate-a": {108, 109, 107}},
@@ -68,7 +83,7 @@ func TestEvaluateV2BaselineFailurePreservesOutcomeAndCompletedRounds(t *testing.
 }
 
 func TestEvaluateV2NonBaselineFailureDoesNotBlockOtherWinner(t *testing.T) {
-	def := threeCandidateDef(t)
+	def := threeCandidateV2Def(t)
 	obs := measuredV2(threeCandidateObs(t, def,
 		[]float64{40, 42, 41}, []float64{18, 19, 17}, []float64{10, 11, 9},
 	))
@@ -92,7 +107,7 @@ func TestEvaluateV2NonBaselineFailureDoesNotBlockOtherWinner(t *testing.T) {
 }
 
 func TestObservationsDigestBindsV2Outcome(t *testing.T) {
-	def := lockDefinition(t)
+	def := lockV2Definition(t)
 	obs := measuredV2(happyObservations(t, def, "run-1",
 		map[string][]float64{"baseline": {40, 42, 41}, "candidate-a": {18, 19, 17}},
 		map[string][]float64{"baseline": {100, 101, 99}, "candidate-a": {108, 109, 107}},

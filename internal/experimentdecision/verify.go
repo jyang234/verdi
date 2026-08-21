@@ -44,6 +44,13 @@ func VerifyResult(def experiment.Definition, obs []experiment.Observation, recei
 	if err := experiment.ValidateComplete(def, obs); err != nil {
 		return errfWrap("verifying result: validating observations", err)
 	}
+	wantObservationSchema := experiment.ObservationSchema
+	if res.Schema == experiment.ResultSchemaV2 {
+		wantObservationSchema = experiment.ObservationSchemaV2
+	}
+	if obs[0].Schema != wantObservationSchema {
+		return errf("verifying result: result schema %q requires observation schema %q, got %q", res.Schema, wantObservationSchema, obs[0].Schema)
+	}
 
 	recomputed, err := compute(def, obs)
 	if err != nil {

@@ -90,11 +90,43 @@ func verifyGoldenV2(t *testing.T, name string, def experiment.Definition, obs []
 	}
 }
 
-func predecessorObservations(obs []experiment.Observation) []experiment.Observation {
+func predecessorDefinition(t *testing.T, def experiment.Definition) experiment.Definition {
+	t.Helper()
+	predecessor := def
+	predecessor.Evaluator.CapabilitiesDigest = fixtureDigest("d")
+	predecessor.Decision.Guards = append([]experiment.Guard(nil), def.Decision.Guards...)
+	for i := range predecessor.Decision.Guards {
+		if predecessor.Decision.Guards[i].ID == experiment.EvaluatorPeakRSSMetricID {
+			predecessor.Decision.Guards[i].ID = "peak-rss"
+		}
+	}
+	predecessor.Lock = nil
+	digest, err := experiment.DefinitionDigest(predecessor)
+	if err != nil {
+		t.Fatalf("DefinitionDigest(predecessor): %v", err)
+	}
+	predecessor.Lock = &experiment.Lock{DefinitionDigest: digest}
+	return predecessor
+}
+
+func predecessorObservations(t *testing.T, def experiment.Definition, obs []experiment.Observation) []experiment.Observation {
+	t.Helper()
 	predecessor := append([]experiment.Observation(nil), obs...)
+	digest, err := experiment.DefinitionDigest(def)
+	if err != nil {
+		t.Fatalf("DefinitionDigest(predecessor): %v", err)
+	}
 	for i := range predecessor {
 		predecessor[i].Schema = experiment.ObservationSchema
+		predecessor[i].ExperimentDigest = digest
 		predecessor[i].Outcome = nil
+		predecessor[i].Measurements = append([]experiment.Measurement(nil), obs[i].Measurements...)
+		for j := range predecessor[i].Measurements {
+			if predecessor[i].Measurements[j].ID == experiment.EvaluatorPeakRSSMetricID {
+				predecessor[i].Measurements[j].ID = "peak-rss"
+				predecessor[i].Measurements[j].Unit = "MiB"
+			}
+		}
 	}
 	return predecessor
 }
@@ -102,14 +134,16 @@ func predecessorObservations(obs []experiment.Observation) []experiment.Observat
 func TestV2GoldenFixtureByteDigests(t *testing.T) {
 	wants := map[string]map[string]string{
 		"caching-proven": {
-			"execution.json":     "f8af7d33441972ed26d879c7340d218dbb0e4cfd435e3d090eb2dd3511cf224a",
-			"observations.jsonl": "2497322dd4ac036b154cb4d8957ff58f07b7625a8cfe03500cd3c8b07f4aac7f",
-			"result.json":        "7bd23c34a21603ee7c07fffe1fba34412fdb732c1844fbcf816efb13e6335888",
+			"evaluator-capabilities.json": "1300bce65fc6717bba6623464f054675229ec531909b01385e73ce5e4ca4a6bf",
+			"execution.json":              "8d16b16bb8a98892ab6abc554630a667ce5629a4130727fc5edcbb6b6f75b01f",
+			"observations.jsonl":          "fe87e9d8d12e7b88b740d848e24b22f3a342987c84d3d8de72326e8f72481e3e",
+			"result.json":                 "a8b7b724f120913ba24771d0d28cba0be1ef741806f067a5a136c1edd5a2fb94",
 		},
 		"caching-inconclusive": {
-			"execution.json":     "59a8a594eb3b10f65212ef34debdd6e8e764c75fbabba801362bd41c3919cfbb",
-			"observations.jsonl": "269d450ea8424ca77dd1f81ff8d430f0382d4b52d3fc9b219cf5266b0459d902",
-			"result.json":        "2d36292274061b2c61c2c7f413fc295767f9f52753f60f16c5eab81ec0d94969",
+			"evaluator-capabilities.json": "1300bce65fc6717bba6623464f054675229ec531909b01385e73ce5e4ca4a6bf",
+			"execution.json":              "82f6192af398f9f51afdb468d0bbeb3f7650748e56edec75361c7a782b5b8714",
+			"observations.jsonl":          "52fff75ac6fc250505e6089280cfb6cbf81001489a0c132d575abff573920d79",
+			"result.json":                 "17af2f45a5f092e19c95d4d5e172a28f66d1be962d25de7a55d212cd32e9b6c9",
 		},
 	}
 	for name, files := range wants {
@@ -199,11 +233,12 @@ func TestCachingProvenFixture(t *testing.T) {
 
 	verifyGoldenV2(t, "caching-proven", def, obs, res)
 
-	predecessor, err := Evaluate(def, predecessorObservations(obs), attestation(def))
+	predecessorDef := predecessorDefinition(t, def)
+	predecessor, err := Evaluate(predecessorDef, predecessorObservations(t, predecessorDef, obs), attestation(predecessorDef))
 	if err != nil {
 		t.Fatalf("Evaluate(caching-proven predecessor projection): %v", err)
 	}
-	recommendation, err := RenderRecommendation(def, predecessor)
+	recommendation, err := RenderRecommendation(predecessorDef, predecessor)
 	if err != nil {
 		t.Fatalf("RenderRecommendation(caching-proven): %v", err)
 	}
@@ -241,11 +276,12 @@ func TestCachingInconclusiveFixture(t *testing.T) {
 
 	verifyGoldenV2(t, "caching-inconclusive", def, obs, res)
 
-	predecessor, err := Evaluate(def, predecessorObservations(obs), attestation(def))
+	predecessorDef := predecessorDefinition(t, def)
+	predecessor, err := Evaluate(predecessorDef, predecessorObservations(t, predecessorDef, obs), attestation(predecessorDef))
 	if err != nil {
 		t.Fatalf("Evaluate(caching-inconclusive predecessor projection): %v", err)
 	}
-	recommendation, err := RenderRecommendation(def, predecessor)
+	recommendation, err := RenderRecommendation(predecessorDef, predecessor)
 	if err != nil {
 		t.Fatalf("RenderRecommendation(caching-inconclusive): %v", err)
 	}

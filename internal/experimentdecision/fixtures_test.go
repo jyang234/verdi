@@ -96,6 +96,18 @@ func lockDefinition(t *testing.T, mutators ...func(*experiment.Definition)) expe
 	return def
 }
 
+func lockV2Definition(t *testing.T, mutators ...func(*experiment.Definition)) experiment.Definition {
+	t.Helper()
+	v2 := func(def *experiment.Definition) {
+		for i := range def.Decision.Guards {
+			if def.Decision.Guards[i].Bounded() {
+				def.Decision.Guards[i].ID = experiment.EvaluatorPeakRSSMetricID
+			}
+		}
+	}
+	return lockDefinition(t, append([]func(*experiment.Definition){v2}, mutators...)...)
+}
+
 // attestation returns the canned execution-layer environment-policy
 // attestation for def: the policy def itself registers (SI-42). Wave 2
 // has no execution unit to produce a real one, so every test and fixture
