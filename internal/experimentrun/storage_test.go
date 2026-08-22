@@ -70,6 +70,187 @@ func TestRunStorageReceiptIsImmutable(t *testing.T) {
 	}
 }
 
+func TestRunStoragePreflightStartRejectsExistingMutableOrTerminalArtifacts(t *testing.T) {
+	for _, field := range []string{"observations", "result"} {
+		t.Run(field, func(t *testing.T) {
+			root := t.TempDir()
+			storage, err := newRunStorage(root, "experiments/comparison", "run-1")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.MkdirAll(filepath.Dir(storage.capabilitiesPath), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(storage.capabilitiesPath, []byte("capabilities"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			path := storage.observationsPath
+			if field == "result" {
+				path = storage.resultPath
+			}
+			if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(path, []byte("existing"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if err := storage.preflightStart(); err == nil || !strings.Contains(err.Error(), "start does not resume") {
+				t.Fatalf("preflightStart(existing %s) error = %v", field, err)
+			}
+		})
+	}
+}
+
+func TestRunStorageResultPublicationIsImmutableAndIdempotent(t *testing.T) {
+	root := t.TempDir()
+	storage, err := newRunStorage(root, "experiments/comparison", "run-1")
+	if err != nil {
+		t.Fatalf("newRunStorage: %v", err)
+	}
+	def, capabilities, capabilitiesBytes := decisionDefinition(t)
+	receipt := decisionReceipt(t, def, capabilities, capabilitiesBytes, "run-1")
+	observations := completeStorageObservations(t, def, "run-1")
+	firstResult, _, err := buildCompleteResult(def, observations, receipt, []experiment.WarmupFailure{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, err := experiment.EncodeResult(firstResult)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := storage.publishResult(first); err != nil {
+		t.Fatalf("first publishResult: %v", err)
+	}
+	if err := storage.publishResult(first); err != nil {
+		t.Fatalf("byte-equal publishResult: %v", err)
+	}
+	differentResult, _, err := buildCompleteResult(def, observations, receipt, []experiment.WarmupFailure{{
+		Candidate: "beta", Warmup: 1, Kind: experiment.OutcomeCandidateTimeout, Witness: "different final invocation",
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	different, err := experiment.EncodeResult(differentResult)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := storage.publishResult(different); err == nil || !strings.Contains(err.Error(), "differs") {
+		t.Fatalf("valid differing publishResult error = %v", err)
+	}
+	if got, readErr := os.ReadFile(storage.resultPath); readErr != nil || !bytes.Equal(got, first) {
+		t.Fatalf("differing result changed durable bytes: equal=%t err=%v", bytes.Equal(got, first), readErr)
+	}
+
+	invalidStorage, err := newRunStorage(t.TempDir(), "experiments/comparison", "run-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(invalidStorage.resultPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	invalid := []byte("not-json\n")
+	if err := os.WriteFile(invalidStorage.resultPath, invalid, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := invalidStorage.publishResult(first); err == nil || !strings.Contains(err.Error(), "is invalid") {
+		t.Fatalf("invalid existing publishResult error = %v", err)
+	}
+	if got, readErr := os.ReadFile(invalidStorage.resultPath); readErr != nil || !bytes.Equal(got, invalid) {
+		t.Fatalf("invalid existing result changed: equal=%t err=%v", bytes.Equal(got, invalid), readErr)
+	}
+}
+
+func TestRunStorageLoadResultRejectsExistingEmptyOrMalformedArtifact(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		data []byte
+	}{
+		{name: "empty", data: []byte{}},
+		{name: "malformed", data: []byte("not-json\n")},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			root := t.TempDir()
+			storage, err := newRunStorage(root, "experiments/comparison", "run-1")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.MkdirAll(filepath.Dir(storage.resultPath), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(storage.resultPath, test.data, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if result, present, err := storage.loadResult(); err == nil || present {
+				t.Fatalf("loadResult() = %#v, present=%t, error=%v; want invalid existing artifact error", result, present, err)
+			}
+		})
+	}
+}
+
+func TestRunStorageResumeRequiresReceiptAndValidatesMeasuredPrefix(t *testing.T) {
+	root := t.TempDir()
+	storage, err := newRunStorage(root, "experiments/comparison", "run-1")
+	if err != nil {
+		t.Fatalf("newRunStorage: %v", err)
+	}
+	if _, err := storage.loadReceipt(); err == nil || !strings.Contains(err.Error(), "execution receipt") {
+		t.Fatalf("loadReceipt absent error = %v", err)
+	}
+
+	receipt := storageReceipt(t, root, "run-1")
+	if err := storage.createReceipt(receipt); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := storage.loadReceipt()
+	if err != nil {
+		t.Fatalf("loadReceipt: %v", err)
+	}
+	encoded, _ := experiment.EncodeExecutionReceipt(receipt)
+	loadedBytes, _ := experiment.EncodeExecutionReceipt(loaded)
+	if !bytes.Equal(loadedBytes, encoded) {
+		t.Fatal("loaded receipt does not preserve canonical receipt bytes")
+	}
+
+	def, schedule := storageDefinition(t)
+	measured := measuredSchedule(schedule)
+	for _, test := range []struct {
+		name         string
+		observations []experiment.Observation
+		wantError    bool
+	}{
+		{name: "missing tail", observations: []experiment.Observation{storageObservation(t, def, "run-1", measured[0])}},
+		{name: "missing middle", observations: []experiment.Observation{storageObservation(t, def, "run-1", measured[0]), storageObservation(t, def, "run-1", measured[2])}, wantError: true},
+		{name: "duplicate", observations: []experiment.Observation{storageObservation(t, def, "run-1", measured[0]), storageObservation(t, def, "run-1", measured[0])}, wantError: true},
+		{name: "out of order", observations: []experiment.Observation{storageObservation(t, def, "run-1", measured[1])}, wantError: true},
+		{name: "altered run identity", observations: []experiment.Observation{storageObservation(t, def, "run-2", measured[0])}, wantError: true},
+		{name: "extra", observations: append(completeStorageObservations(t, def, "run-1"), storageObservation(t, def, "run-1", measured[0])), wantError: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			var data []byte
+			for _, observation := range test.observations {
+				line, encodeErr := experiment.EncodeObservation(observation)
+				if encodeErr != nil {
+					t.Fatal(encodeErr)
+				}
+				data = append(data, line...)
+			}
+			if err := os.WriteFile(storage.observationsPath, data, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			got, loadErr := storage.loadMeasuredPrefix(def, schedule)
+			if test.wantError {
+				if loadErr == nil {
+					t.Fatalf("loadMeasuredPrefix() = %#v, nil error", got)
+				}
+				return
+			}
+			if loadErr != nil || len(got) != len(test.observations) {
+				t.Fatalf("loadMeasuredPrefix() = %#v, %v", got, loadErr)
+			}
+		})
+	}
+}
+
 func TestRunStorageRejectsContendedWriterLock(t *testing.T) {
 	root := t.TempDir()
 	storage, err := newRunStorage(root, "experiments/comparison", "run-1")

@@ -34,7 +34,7 @@ func (strictAttemptEvaluator) Observe(ctx context.Context, profile execworkspace
 }
 
 // ServiceDependencies supplies every authority and side-effect port required
-// to start a CSE run. It intentionally has no authorization default.
+// to start or resume a CSE run. It intentionally has no authorization default.
 type ServiceDependencies struct {
 	Authorization AuthorizationResolver
 	Inputs        InputResolver
@@ -43,9 +43,9 @@ type ServiceDependencies struct {
 	Versions      experiment.ReceiptVersions
 }
 
-// Service starts one receipt-first CSE execution. It owns neither policy
-// resolution, workspace implementation, evaluator transport, decision, result
-// publication, resume, nor cleanup.
+// Service executes receipt-first CSE starts and unchanged-input resumes. It
+// owns neither policy resolution, workspace implementation, evaluator
+// transport, nor recommendation semantics.
 type Service struct {
 	authorization AuthorizationResolver
 	inputs        InputResolver
@@ -62,13 +62,15 @@ type StartRequest struct {
 	Definition    experiment.Definition
 }
 
-// StartResult carries transient Task 4 execution facts. Its observations are
-// the measured records already published atomically; warmup failures remain
-// diagnostics for Task 5 to place in a result annex.
+// StartResult carries the durable execution facts plus the complete V2 result
+// and its whole-result digest. Incomplete executions return an error and never
+// carry or publish a result.
 type StartResult struct {
 	Receipt        experiment.ExecutionReceipt
 	Observations   []experiment.Observation
 	WarmupFailures []experiment.WarmupFailure
+	Result         experiment.Result
+	ResultDigest   string
 }
 
 // NewService validates that every required authority and workspace-effect port
@@ -100,8 +102,8 @@ func NewService(dependencies ServiceDependencies) (*Service, error) {
 
 // Start validates every locked execution fact, publishes the immutable receipt
 // under the checkout writer lock, then materializes and executes the complete
-// deterministic schedule. It never publishes a result or removes a profile
-// root; both belong to Task 5.
+// deterministic schedule, removes only the reserved profile roots, and
+// publishes the verified complete V2 result.
 func (s *Service) Start(ctx context.Context, request StartRequest) (StartResult, error) {
 	if s == nil {
 		return StartResult{}, fmt.Errorf("experimentrun: start: service is nil")
@@ -223,7 +225,21 @@ func (s *Service) Start(ctx context.Context, request StartRequest) (StartResult,
 		}
 		result.Observations = append(result.Observations, *attempt.Observation)
 	}
+	result.Result, result.ResultDigest, err = completeRun(storage, request.Definition, result.Observations, receipt, result.WarmupFailures, candidateEnvironmentRoots(request.Definition, candidates))
+	if err != nil {
+		return StartResult{}, err
+	}
 	return result, nil
+}
+
+func candidateEnvironmentRoots(def experiment.Definition, candidates map[string]*candidatePlan) []string {
+	paths := make([]string, 0, len(def.Candidates))
+	for _, candidate := range def.Candidates {
+		if plan, ok := candidates[candidate.ID]; ok {
+			paths = append(paths, plan.environment)
+		}
+	}
+	return paths
 }
 
 func (s *Service) evaluateAttempt(ctx context.Context, profile execworkspace.Profile, input experimentevaluator.ObserveInput) (experimentevaluator.Attempt, error) {
@@ -248,6 +264,14 @@ type candidatePlan struct {
 }
 
 func (s *Service) planCandidates(request StartRequest, authorized AuthorizedExecution, capabilities experiment.Capabilities, inputs ResolvedInputs, patches map[string][]byte, experimentDigest string) (map[string]*candidatePlan, []byte, execworkspace.EnforcementReport, error) {
+	return s.deriveCandidatePlans(request, authorized, capabilities, inputs, patches, experimentDigest, true)
+}
+
+func (s *Service) planResumeCandidates(request StartRequest, authorized AuthorizedExecution, capabilities experiment.Capabilities, inputs ResolvedInputs, patches map[string][]byte, experimentDigest string) (map[string]*candidatePlan, []byte, execworkspace.EnforcementReport, error) {
+	return s.deriveCandidatePlans(request, authorized, capabilities, inputs, patches, experimentDigest, false)
+}
+
+func (s *Service) deriveCandidatePlans(request StartRequest, authorized AuthorizedExecution, capabilities experiment.Capabilities, inputs ResolvedInputs, patches map[string][]byte, experimentDigest string, preflightExisting bool) (map[string]*candidatePlan, []byte, execworkspace.EnforcementReport, error) {
 	plans := make(map[string]*candidatePlan, len(request.Definition.Candidates))
 	var fingerprint []byte
 	var enforcement execworkspace.EnforcementReport
@@ -266,8 +290,10 @@ func (s *Service) planCandidates(request StartRequest, authorized AuthorizedExec
 		}
 		workspacePath := execworkspace.UnitPath(request.Root, workspaceID)
 		environmentPath := filepath.Join(workspacePath, environmentRootName)
-		if err := preflightExistingEnvironmentRoot(workspacePath); err != nil {
-			return nil, nil, execworkspace.EnforcementReport{}, fmt.Errorf("experimentrun: plan candidate %q environment: %w", candidate.ID, err)
+		if preflightExisting {
+			if err := preflightExistingEnvironmentRoot(workspacePath); err != nil {
+				return nil, nil, execworkspace.EnforcementReport{}, fmt.Errorf("experimentrun: plan candidate %q environment: %w", candidate.ID, err)
+			}
 		}
 		planned, report, err := execworkspace.PlanProfile(workspacePath, environmentPath, authorized.Grants, authorized.Authorization.DeclaredEnv)
 		if err != nil {

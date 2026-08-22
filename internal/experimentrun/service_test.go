@@ -352,10 +352,13 @@ func TestStartPublishesReceiptBeforeMaterializationAndMeasuredPrefix(t *testing.
 	if len(result.Observations) != len(def.Candidates)*def.Execution.Rounds {
 		t.Fatalf("measured observations = %d, want %d with warmups excluded", len(result.Observations), len(def.Candidates)*def.Execution.Rounds)
 	}
+	if result.Result.Schema != experiment.ResultSchemaV2 || result.ResultDigest == "" {
+		t.Fatalf("complete Start result = %#v digest=%q, want V2 result and explicit whole-result digest", result.Result, result.ResultDigest)
+	}
 	if got := result.WarmupFailures; len(got) != 1 || got[0].Candidate != "beta" || got[0].Warmup != 1 || got[0].Kind != experiment.OutcomeCandidateTimeout {
 		t.Fatalf("warmup failures = %#v, want beta timeout diagnostic", got)
 	}
-	for i, want := range []string{"alpha@1", "beta@1", "beta@2", "alpha@2"} {
+	for i, want := range []string{"beta@1", "alpha@1", "alpha@2", "beta@2"} {
 		got := fmt.Sprintf("%s@%d", result.Observations[i].Candidate, result.Observations[i].Round)
 		if got != want {
 			t.Fatalf("observation %d = %q, want exact measured schedule prefix %q", i, got, want)
@@ -374,12 +377,20 @@ func TestStartPublishesReceiptBeforeMaterializationAndMeasuredPrefix(t *testing.
 	if len(persisted) != len(result.Observations) {
 		t.Fatalf("persisted observations = %d, want %d", len(persisted), len(result.Observations))
 	}
-	if _, statErr := os.Lstat(filepath.Join(root, filepath.FromSlash(paths.Result))); !errors.Is(statErr, os.ErrNotExist) {
-		t.Fatalf("Task 4 emitted result.json: lstat error = %v", statErr)
+	resultBytes, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(paths.Result)))
+	if err != nil {
+		t.Fatalf("read result.json: %v", err)
+	}
+	decodedResult, err := experiment.DecodeResult(resultBytes)
+	if err != nil {
+		t.Fatalf("decode result.json: %v", err)
+	}
+	if digest, digestErr := experiment.ResultDigest(decodedResult); digestErr != nil || digest != result.ResultDigest {
+		t.Fatalf("result digest = %q, %v; want returned %q", digest, digestErr, result.ResultDigest)
 	}
 	for _, materialized := range materializer.paths {
-		if _, statErr := os.Stat(filepath.Join(materialized, environmentRootName)); statErr != nil {
-			t.Fatalf("activated environment root below %q: %v", materialized, statErr)
+		if _, statErr := os.Lstat(filepath.Join(materialized, environmentRootName)); !errors.Is(statErr, os.ErrNotExist) {
+			t.Fatalf("completed Start left environment root below %q: %v", materialized, statErr)
 		}
 	}
 }
@@ -433,7 +444,8 @@ func (m *recordingMaterializer) Materialize(_ context.Context, request execworks
 }
 
 type recordingEvaluator struct {
-	requests []experimentevaluator.ObserveInput
+	requests      []experimentevaluator.ObserveInput
+	warmupWitness string
 }
 
 type fixedAttemptEvaluator struct {
@@ -467,7 +479,10 @@ func (e *recordingEvaluator) Observe(ctx context.Context, profile execworkspace.
 	processMeasurements := []experiment.Measurement{wall}
 	processDisclosures := []string{experiment.PeakRSSUnavailableDisclosure}
 	if input.Request.Cycle.Kind == experiment.CycleWarmup && input.Request.Candidate == "beta" {
-		witness := "warmup candidate timed out"
+		witness := e.warmupWitness
+		if witness == "" {
+			witness = "warmup candidate timed out"
+		}
 		return experimentevaluator.Attempt{
 			Outcome:             experiment.CandidateOutcome{Kind: experiment.OutcomeCandidateTimeout, Witness: &witness},
 			ProcessMeasurements: processMeasurements,

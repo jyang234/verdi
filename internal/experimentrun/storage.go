@@ -14,9 +14,9 @@ import (
 	"github.com/jyang234/verdi/internal/store"
 )
 
-// runStorage owns the receipt and observation publication operations for one
-// caller-supplied CSE run. It uses the checkout-wide writer lock; it neither
-// interprets decision state nor publishes a result.
+// runStorage owns immutable receipt/result publication and measured-prefix
+// publication for one caller-supplied CSE run. It uses the checkout-wide
+// writer lock and does not interpret decision state.
 type runStorage struct {
 	root             string
 	experimentDir    string
@@ -25,6 +25,7 @@ type runStorage struct {
 	candidateDir     string
 	executionPath    string
 	observationsPath string
+	resultPath       string
 	writerLockPath   string
 }
 
@@ -45,12 +46,83 @@ func newRunStorage(root, experimentDir, run string) (runStorage, error) {
 		candidateDir:     filepath.Join(experimentPath, "candidates"),
 		executionPath:    filepath.Join(root, filepath.FromSlash(paths.Execution)),
 		observationsPath: filepath.Join(root, filepath.FromSlash(paths.Observations)),
+		resultPath:       filepath.Join(root, filepath.FromSlash(paths.Result)),
 		writerLockPath:   store.WriterLockPath(root),
 	}, nil
 }
 
+func (s runStorage) loadReceipt() (experiment.ExecutionReceipt, error) {
+	data, err := readRegularFile(s.root, s.executionPath)
+	if err != nil {
+		return experiment.ExecutionReceipt{}, fmt.Errorf("read execution receipt: %w", err)
+	}
+	receipt, err := experiment.DecodeExecutionReceipt(data)
+	if err != nil {
+		return experiment.ExecutionReceipt{}, fmt.Errorf("decode execution receipt: %w", err)
+	}
+	return receipt, nil
+}
+
+func (s runStorage) loadMeasuredPrefix(def experiment.Definition, schedule []ScheduledAttempt) ([]experiment.Observation, error) {
+	existing, err := readOptionalRegularFile(s.root, s.observationsPath)
+	if err != nil {
+		return nil, fmt.Errorf("read observations: %w", err)
+	}
+	observations, err := experiment.DecodeObservations(existing)
+	if err != nil {
+		return nil, fmt.Errorf("decode observations: %w", err)
+	}
+	if len(existing) > 0 && len(observations) == 0 {
+		return nil, fmt.Errorf("decode observations: nonempty file contains zero records")
+	}
+	if err := validateMeasuredPrefix(def, schedule, s.run, observations); err != nil {
+		return nil, err
+	}
+	return observations, nil
+}
+
+func (s runStorage) loadResult() (experiment.Result, bool, error) {
+	data, err := readRegularFile(s.root, s.resultPath)
+	if errors.Is(err, os.ErrNotExist) {
+		return experiment.Result{}, false, nil
+	}
+	if err != nil {
+		return experiment.Result{}, false, fmt.Errorf("read result: %w", err)
+	}
+	if len(data) == 0 {
+		return experiment.Result{}, false, fmt.Errorf("decode result: existing result is empty")
+	}
+	result, err := experiment.DecodeResult(data)
+	if err != nil {
+		return experiment.Result{}, false, fmt.Errorf("decode result: %w", err)
+	}
+	return result, true, nil
+}
+
+func (s runStorage) publishResult(data []byte) error {
+	return s.withWriterLock(func() error {
+		if err := validateStoreFilePath(s.root, s.resultPath); err != nil {
+			return err
+		}
+		if err := ensureParentTree(s.root, filepath.Dir(s.resultPath)); err != nil {
+			return err
+		}
+		created, existing, err := atomicfile.CreateImmutable(s.resultPath, data, 0o600)
+		if err != nil {
+			return fmt.Errorf("publish result: %w", err)
+		}
+		if created || bytes.Equal(existing, data) {
+			return nil
+		}
+		if _, decodeErr := experiment.DecodeResult(existing); decodeErr != nil {
+			return fmt.Errorf("existing result %q is invalid: %w", s.resultPath, decodeErr)
+		}
+		return fmt.Errorf("existing result %q differs from the recomputed complete-run result", s.resultPath)
+	})
+}
+
 func (s runStorage) preflightStart() error {
-	for _, path := range []string{s.executionPath, s.observationsPath, s.writerLockPath} {
+	for _, path := range []string{s.executionPath, s.observationsPath, s.resultPath, s.writerLockPath} {
 		if err := validateStoreFilePath(s.root, path); err != nil {
 			return err
 		}
@@ -58,10 +130,12 @@ func (s runStorage) preflightStart() error {
 	if _, err := readRegularFile(s.root, s.capabilitiesPath); err != nil {
 		return fmt.Errorf("read evaluator capabilities: %w", err)
 	}
-	if _, err := os.Lstat(s.observationsPath); err == nil {
-		return fmt.Errorf("observations file %q already exists; start does not resume a run", s.observationsPath)
-	} else if !errors.Is(err, os.ErrNotExist) {
-		return fmt.Errorf("lstat observations file %q: %w", s.observationsPath, err)
+	for _, path := range []string{s.observationsPath, s.resultPath} {
+		if _, err := os.Lstat(path); err == nil {
+			return fmt.Errorf("run artifact %q already exists; start does not resume a run", path)
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("lstat run artifact %q: %w", path, err)
+		}
 	}
 	return nil
 }
