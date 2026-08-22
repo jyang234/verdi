@@ -14,6 +14,10 @@ const ObservationSchema = "verdi.experiment-observation/v1"
 // ObservationSchemaV2 is the harness-owned measured-attempt envelope.
 const ObservationSchemaV2 = "verdi.experiment-observation/v2"
 
+// PeakRSSUnavailableDisclosure records that the harness process observer
+// could not obtain the optional Linux peak-RSS fact for a measured attempt.
+const PeakRSSUnavailableDisclosure = "peak-rss-unavailable"
+
 // GuardResult is one guard verdict inside an observation record.
 type GuardResult struct {
 	ID      string            `json:"id"`
@@ -218,10 +222,10 @@ func (o Observation) Validate() error {
 		}
 		if o.Outcome.Kind != OutcomeCompleted {
 			if o.Guards == nil || o.Measurements == nil {
-				return fmt.Errorf("experiment: candidate failure observation requires present empty guards and measurements arrays")
+				return fmt.Errorf("experiment: candidate failure observation requires present guards and measurements arrays")
 			}
-			if len(o.Guards) != 0 || len(o.Measurements) != 0 {
-				return fmt.Errorf("experiment: candidate failure observation requires empty guards and measurements")
+			if err := validateCandidateFailureEvidence(o); err != nil {
+				return err
 			}
 		}
 	}
@@ -266,5 +270,52 @@ func (o Observation) Validate() error {
 		}
 	}
 
+	return nil
+}
+
+func validateCandidateFailureEvidence(o Observation) error {
+	if len(o.Guards) != 0 {
+		return fmt.Errorf("experiment: candidate failure observation requires empty guards")
+	}
+	if o.Disclosures == nil {
+		return fmt.Errorf("experiment: candidate failure observation requires a present disclosures array")
+	}
+
+	seenWallDuration := false
+	seenPeakRSS := false
+	for _, measurement := range o.Measurements {
+		if measurement.Source != SourceHarnessMeasured {
+			return fmt.Errorf("experiment: candidate failure measurement %q must be harness-measured", measurement.ID)
+		}
+		if err := validateHarnessMeasurement(measurement); err != nil {
+			return fmt.Errorf("experiment: candidate failure observation: %v", err)
+		}
+		switch measurement.ID {
+		case EvaluatorWallDurationMetricID:
+			if seenWallDuration {
+				return fmt.Errorf("experiment: candidate failure observation repeats fixed wall-duration measurement")
+			}
+			seenWallDuration = true
+		case EvaluatorPeakRSSMetricID:
+			if seenPeakRSS {
+				return fmt.Errorf("experiment: candidate failure observation repeats optional peak-RSS measurement")
+			}
+			seenPeakRSS = true
+		default:
+			return fmt.Errorf("experiment: candidate failure observation measurement %q is not a fixed harness process measurement", measurement.ID)
+		}
+	}
+	if !seenWallDuration {
+		return fmt.Errorf("experiment: candidate failure observation requires fixed wall-duration measurement %q", EvaluatorWallDurationMetricID)
+	}
+	if seenPeakRSS {
+		if len(o.Disclosures) != 0 {
+			return fmt.Errorf("experiment: candidate failure observation with peak RSS requires empty disclosures")
+		}
+		return nil
+	}
+	if len(o.Disclosures) != 1 || o.Disclosures[0] != PeakRSSUnavailableDisclosure {
+		return fmt.Errorf("experiment: candidate failure observation without peak RSS requires exactly disclosure %q", PeakRSSUnavailableDisclosure)
+	}
 	return nil
 }

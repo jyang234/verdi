@@ -158,15 +158,25 @@ func TestObservationV2OutcomeUnionAndCanonicalBytes(t *testing.T) {
 		t.Fatalf("EncodeObservation(timeout with null arrays) = nil error")
 	}
 	failed.Guards = []GuardResult{}
-	failed.Measurements = []Measurement{}
+	failed.Measurements = []Measurement{{ID: EvaluatorWallDurationMetricID, Value: NumberValue("2500000"), Unit: "ns", Source: SourceHarnessMeasured}}
+	failed.Disclosures = []string{PeakRSSUnavailableDisclosure}
 	failedBytes, err := EncodeObservation(failed)
 	if err != nil {
-		t.Fatalf("EncodeObservation(timeout with present empty arrays): %v", err)
+		t.Fatalf("EncodeObservation(timeout with fixed process facts): %v", err)
 	}
-	for _, field := range []string{"guards", "measurements"} {
-		mutated := strings.Replace(string(failedBytes), `"`+field+`":[]`, `"`+field+`":null`, 1)
+	for _, mutation := range []struct {
+		field string
+		old   string
+	}{
+		{field: "guards", old: `"guards":[]`},
+		{field: "measurements", old: `"measurements":[{"id":"verdi-evaluator-wall-duration","source":"harness-measured","unit":"ns","value":2500000}]`},
+	} {
+		mutated := strings.Replace(string(failedBytes), mutation.old, `"`+mutation.field+`":null`, 1)
+		if mutated == string(failedBytes) {
+			t.Fatalf("canonical failure fixture does not contain %s field encoding %q", mutation.field, mutation.old)
+		}
 		if _, err := DecodeObservation([]byte(mutated)); err == nil {
-			t.Fatalf("DecodeObservation(timeout with null %s) = nil error", field)
+			t.Fatalf("DecodeObservation(timeout with null %s) = nil error", mutation.field)
 		}
 	}
 	if _, err := DecodeObservation([]byte(strings.Replace(string(b), `{"candidate"`, `{ "candidate"`, 1))); err == nil {

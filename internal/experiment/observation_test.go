@@ -5,6 +5,100 @@ import (
 	"testing"
 )
 
+func candidateFailureObservation() Observation {
+	witness := "candidate process exited before producing a result"
+	return Observation{
+		Schema:           ObservationSchemaV2,
+		ExperimentDigest: digestOf("a"),
+		Run:              "run-1",
+		Candidate:        "facts-cache",
+		Round:            1,
+		Outcome:          &CandidateOutcome{Kind: OutcomeCandidateCrash, Witness: &witness},
+		Guards:           []GuardResult{},
+		Measurements: []Measurement{
+			{ID: EvaluatorWallDurationMetricID, Value: NumberValue("2500000"), Unit: "ns", Source: SourceHarnessMeasured},
+			{ID: EvaluatorPeakRSSMetricID, Value: NumberValue("4096"), Unit: "bytes", Source: SourceHarnessMeasured},
+		},
+		Disclosures: []string{},
+	}
+}
+
+func TestObservationV2CandidateFailureAcceptsFixedHarnessMeasurements(t *testing.T) {
+	tests := []struct {
+		name        string
+		observation Observation
+	}{
+		{name: "duration and peak RSS", observation: candidateFailureObservation()},
+		{name: "duration and unavailable RSS disclosure", observation: func() Observation {
+			o := candidateFailureObservation()
+			o.Outcome.Kind = OutcomeCandidateTimeout
+			o.Measurements = o.Measurements[:1]
+			o.Disclosures = []string{PeakRSSUnavailableDisclosure}
+			return o
+		}()},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			encoded, err := EncodeObservation(tt.observation)
+			if err != nil {
+				t.Fatalf("EncodeObservation(candidate failure with fixed harness measurements): %v", err)
+			}
+			if _, err := DecodeObservation(encoded); err != nil {
+				t.Fatalf("DecodeObservation(canonical candidate failure): %v", err)
+			}
+		})
+	}
+}
+
+func TestObservationV2CandidateFailureRejectsNonProcessEvidence(t *testing.T) {
+	tests := []struct {
+		name   string
+		mutate func(*Observation)
+	}{
+		{name: "nonempty guards", mutate: func(o *Observation) {
+			o.Guards = []GuardResult{{ID: "behavioral-equivalence", Verdict: GuardVerdictPass}}
+		}},
+		{name: "missing wall duration", mutate: func(o *Observation) { o.Measurements = o.Measurements[1:] }},
+		{name: "extra fixed measurement", mutate: func(o *Observation) {
+			o.Measurements = append(o.Measurements, o.Measurements[0])
+		}},
+		{name: "evaluator measurement", mutate: func(o *Observation) {
+			o.Measurements = append(o.Measurements, Measurement{ID: "request-latency", Value: NumberValue("1"), Unit: "ms", Source: SourceEvaluatorMeasured})
+		}},
+		{name: "candidate measurement", mutate: func(o *Observation) {
+			o.Measurements = append(o.Measurements, Measurement{ID: "cache-hits", Value: NumberValue("1"), Unit: "count", Source: SourceCandidateReported})
+		}},
+		{name: "wrong wall duration id", mutate: func(o *Observation) { o.Measurements[0].ID = "evaluator-wall-duration" }},
+		{name: "wall duration evaluator measured", mutate: func(o *Observation) { o.Measurements[0].Source = SourceEvaluatorMeasured }},
+		{name: "wall duration candidate reported", mutate: func(o *Observation) { o.Measurements[0].Source = SourceCandidateReported }},
+		{name: "wall duration wrong unit", mutate: func(o *Observation) { o.Measurements[0].Unit = "ms" }},
+		{name: "wall duration boolean", mutate: func(o *Observation) { o.Measurements[0].Value = BoolValue(true) }},
+		{name: "RSS missing without disclosure", mutate: func(o *Observation) { o.Measurements = o.Measurements[:1] }},
+		{name: "RSS evaluator measured", mutate: func(o *Observation) { o.Measurements[1].Source = SourceEvaluatorMeasured }},
+		{name: "RSS candidate reported", mutate: func(o *Observation) { o.Measurements[1].Source = SourceCandidateReported }},
+		{name: "RSS wrong unit", mutate: func(o *Observation) { o.Measurements[1].Unit = "KiB" }},
+		{name: "RSS boolean", mutate: func(o *Observation) { o.Measurements[1].Value = BoolValue(true) }},
+		{name: "RSS plus unavailable disclosure", mutate: func(o *Observation) { o.Disclosures = []string{PeakRSSUnavailableDisclosure} }},
+		{name: "evaluator injected disclosure", mutate: func(o *Observation) { o.Disclosures = []string{"candidate-used-fallback"} }},
+		{name: "extra disclosure with unavailable RSS", mutate: func(o *Observation) {
+			o.Measurements = o.Measurements[:1]
+			o.Disclosures = []string{"candidate-used-fallback", PeakRSSUnavailableDisclosure}
+		}},
+		{name: "null disclosures with RSS", mutate: func(o *Observation) { o.Disclosures = nil }},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			o := candidateFailureObservation()
+			tt.mutate(&o)
+			if err := o.Validate(); err == nil {
+				t.Fatalf("Observation.Validate() = nil error, want candidate-failure evidence rejection")
+			}
+		})
+	}
+}
+
 func validObservationJSON() string {
 	return `{
   "schema": "verdi.experiment-observation/v1",

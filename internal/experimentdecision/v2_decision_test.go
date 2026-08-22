@@ -26,7 +26,11 @@ func failMeasuredAttempt(obs []experiment.Observation, candidate string, round i
 		if obs[i].Candidate == candidate && obs[i].Round == round {
 			obs[i].Outcome = &experiment.CandidateOutcome{Kind: kind, Witness: &witness}
 			obs[i].Guards = []experiment.GuardResult{}
-			obs[i].Measurements = []experiment.Measurement{}
+			obs[i].Measurements = []experiment.Measurement{
+				measurement(experiment.EvaluatorWallDurationMetricID, 1, "ns", experiment.SourceHarnessMeasured),
+				measurement(experiment.EvaluatorPeakRSSMetricID, 1, "bytes", experiment.SourceHarnessMeasured),
+			}
+			obs[i].Disclosures = []string{}
 			return
 		}
 	}
@@ -103,6 +107,53 @@ func TestEvaluateV2NonBaselineFailureDoesNotBlockOtherWinner(t *testing.T) {
 	failed := decisionCandidate(t, decision, "candidate-a")
 	if failed.Eligible || failed.Primary == nil || failed.Primary.Rounds != 2 || len(failed.ExecutionFailures) != 1 || failed.ExecutionFailures[0].Kind != experiment.OutcomeCandidateTimeout {
 		t.Fatalf("candidate-a decision row = %+v", failed)
+	}
+}
+
+func TestEvaluateV2FailureProcessFactsDoNotEnterDecisionAggregates(t *testing.T) {
+	def := lockV2Definition(t, func(def *experiment.Definition) {
+		def.Decision.PrimaryMetric.ID = experiment.EvaluatorWallDurationMetricID
+		def.Decision.PrimaryMetric.Unit = "ns"
+		def.Decision.PrimaryMetric.Aggregation = experiment.AggregationMean
+	})
+	obs := measuredV2(happyObservations(t, def, "run-1",
+		map[string][]float64{"baseline": {40, 42, 41}, "candidate-a": {18, 19, 17}},
+		map[string][]float64{"baseline": {100, 101, 99}, "candidate-a": {108, 109, 107}},
+	))
+	for i := range obs {
+		for j := range obs[i].Measurements {
+			if obs[i].Measurements[j].ID == experiment.EvaluatorWallDurationMetricID {
+				obs[i].Measurements[j].Source = experiment.SourceHarnessMeasured
+			}
+		}
+	}
+	witness := "attempt timed out"
+	for i := range obs {
+		if obs[i].Candidate == "candidate-a" && obs[i].Round == 2 {
+			obs[i].Outcome = &experiment.CandidateOutcome{Kind: experiment.OutcomeCandidateTimeout, Witness: &witness}
+			obs[i].Guards = []experiment.GuardResult{}
+			obs[i].Measurements = []experiment.Measurement{
+				measurement(experiment.EvaluatorWallDurationMetricID, 1, "ns", experiment.SourceHarnessMeasured),
+				measurement(experiment.EvaluatorPeakRSSMetricID, 1000000, "bytes", experiment.SourceHarnessMeasured),
+			}
+			break
+		}
+	}
+
+	res, err := Evaluate(def, obs, attestation(def))
+	if err != nil {
+		t.Fatalf("Evaluate(): %v", err)
+	}
+	decision, err := experiment.DecisionFromResult(res, obs)
+	if err != nil {
+		t.Fatalf("DecisionFromResult(): %v", err)
+	}
+	failed := decisionCandidate(t, decision, "candidate-a")
+	if failed.Primary == nil || failed.Primary.Value != "17.5" || failed.Primary.Rounds != 2 {
+		t.Fatalf("candidate-a primary = %+v, want completed-round mean 17.5 over 2 rounds", failed.Primary)
+	}
+	if len(failed.Bounds) != 1 || failed.Bounds[0].Value != "108" {
+		t.Fatalf("candidate-a bounds = %+v, want completed-round peak RSS maximum 108", failed.Bounds)
 	}
 }
 

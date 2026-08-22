@@ -204,10 +204,10 @@ func (e *evaluation) stepBaselineExecutionFailure() (experiment.Result, bool, er
 // primaryRoundValues returns candID's decision-eligible primary-metric
 // values, one per registered round, in round order (1..Rounds).
 // experiment.ValidateComplete already guarantees exactly one record per
-// round and experiment.ValidateObservations already guarantees that
-// record carries exactly one decision-eligible primary-metric
-// measurement, so this never returns fewer than def.Execution.Rounds
-// values for a validated (def, obs) pair.
+// round, and experiment.ValidateObservations guarantees every completed
+// record carries one decision-eligible primary-metric measurement. Candidate
+// failure records retain only diagnostic process facts, so they are skipped
+// even when a fixed observer id is the registered primary metric (SI-135).
 //
 // A BOOLEAN-typed primary metric projects onto the same float64 scale
 // through MeasurementValue.Float64 — true to 1, false to 0 (SI-46) — which
@@ -219,6 +219,9 @@ func (e *evaluation) primaryRoundValues(candID string) []float64 {
 	values := make([]float64, 0, e.def.Execution.Rounds)
 	for round := 1; round <= e.def.Execution.Rounds; round++ {
 		o := e.byCandRound[candRound{candID, round}]
+		if o.Outcome != nil && o.Outcome.Kind != experiment.OutcomeCompleted {
+			continue
+		}
 		for _, m := range o.Measurements {
 			if m.ID != primaryID || !m.Source.DecisionEligible() {
 				continue
@@ -236,19 +239,18 @@ func (e *evaluation) primaryRoundValues(candID string) []float64 {
 // guardRoundValues returns candID's decision-eligible measurement values
 // for guard id guardID, one per registered round, in round order.
 //
-// The Source.DecisionEligible() filter here is defense in depth, not the
-// primary guarantee: experiment.Observation.Validate already forbids two
-// measurements sharing one id within the same record regardless of
-// source, and experiment.ValidateObservations already requires a
-// decision-eligible measurement under every registered bound guard's id
-// in every record. Together those two checks make a bound guard's value
-// ever being candidate-reported-only unreachable through validated
-// input — Evaluate's precondition check rejects that shape before this
-// function is ever called (see TestEvaluateBoundGuardCandidateReportedOnlyRejected).
+// Candidate failure records are skipped before source selection so their
+// fixed process facts remain diagnostic even when an observer id is also a
+// registered bound. For completed records, Source.DecisionEligible() is
+// defense in depth: validation already requires one eligible value for every
+// registered bound.
 func (e *evaluation) guardRoundValues(candID, guardID string) []float64 {
 	values := make([]float64, 0, e.def.Execution.Rounds)
 	for round := 1; round <= e.def.Execution.Rounds; round++ {
 		o := e.byCandRound[candRound{candID, round}]
+		if o.Outcome != nil && o.Outcome.Kind != experiment.OutcomeCompleted {
+			continue
+		}
 		for _, m := range o.Measurements {
 			if m.ID != guardID || !m.Source.DecisionEligible() {
 				continue

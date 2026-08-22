@@ -104,6 +104,30 @@ func TestValidateObservationsV2RestrictsHarnessMeasuredCustody(t *testing.T) {
 	})
 }
 
+func TestValidateObservationsV2CandidateFailureProcessFactsAreDiagnostic(t *testing.T) {
+	def, digest := smallRoundsDefinition(t)
+	observations := decodeObs(t, validObservationLines(digest)...)
+	for i := range observations {
+		observations[i].Schema = ObservationSchemaV2
+		observations[i].Outcome = &CandidateOutcome{Kind: OutcomeCompleted}
+		// This predecessor fixture's peak-rss id is not one of the V2 fixed
+		// harness observer ids, so it represents evaluator evidence here.
+		observations[i].Measurements[1].Source = SourceEvaluatorMeasured
+	}
+	witness := "candidate process timed out"
+	failed := &observations[len(observations)-1]
+	failed.Outcome = &CandidateOutcome{Kind: OutcomeCandidateTimeout, Witness: &witness}
+	failed.Guards = []GuardResult{}
+	failed.Measurements = []Measurement{
+		{ID: EvaluatorWallDurationMetricID, Value: NumberValue("2500000"), Unit: "ns", Source: SourceHarnessMeasured},
+		{ID: EvaluatorPeakRSSMetricID, Value: NumberValue("4096"), Unit: "bytes", Source: SourceHarnessMeasured},
+	}
+
+	if err := ValidateComplete(def, observations); err != nil {
+		t.Fatalf("ValidateComplete(candidate failure with diagnostic process facts): %v", err)
+	}
+}
+
 func TestValidateObservationsNotLocked(t *testing.T) {
 	unlocked := mustDecodeDefinition(t, mutate(t, "rounds: 10", "rounds: 2"))
 	digest, err := DefinitionDigest(unlocked)
