@@ -419,6 +419,15 @@ declared environment names and values, OS/architecture, and the named tool
 versions. CPU/memory allocation is disclosed unproven when no enforced
 resource-ceiling fact exists. Network mode is always present.
 
+For Wave 3B the named runtime-version row is exactly `runtime` with the value
+returned by Go's `runtime.Version()`; `evaluator`, `verdi`, and
+`recommendation-engine` retain their existing values. Receipt construction
+compares the fingerprint's OS, architecture, and `runtime` row with the
+current process's `runtime.GOOS`, `runtime.GOARCH`, and `runtime.Version()`.
+It then applies the Linux-only authoritative posture above. Caller-supplied
+fingerprint bytes therefore cannot claim Linux or a different runtime on an
+unsupported host, and no receipt is minted from such a claim (SI-136).
+
 `ExecutionReceiptDigest` is `canonjson.Digest` of the validated value. Every
 V2 execution annex carries that digest. At-rest verification receives the
 exact receipt, requires its experiment/run to match the observation set and
