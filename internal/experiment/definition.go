@@ -247,9 +247,9 @@ type Execution struct {
 }
 
 // Validate checks warmups/rounds bounds, the order enum, that
-// timeout_per_round parses as a positive duration (the registered string
-// itself is never reformatted), and that environment_policy is a
-// nonempty opaque identifier this package does not interpret.
+// timeout_per_round parses as a positive integral number of seconds (the
+// registered string itself is never reformatted), and that environment_policy
+// is a nonempty opaque identifier this package does not interpret.
 func (e Execution) Validate() error {
 	if e.Warmups < 0 {
 		return fmt.Errorf("experiment: execution.warmups must be >= 0, got %d", e.Warmups)
@@ -266,6 +266,9 @@ func (e Execution) Validate() error {
 	}
 	if d <= 0 {
 		return fmt.Errorf("experiment: execution.timeout_per_round %q must be > 0", e.TimeoutPerRound)
+	}
+	if d%time.Second != 0 {
+		return fmt.Errorf("experiment: execution.timeout_per_round %q must be an integral number of seconds", e.TimeoutPerRound)
 	}
 	if err := nonemptyString("execution.environment_policy", e.EnvironmentPolicy); err != nil {
 		return err
