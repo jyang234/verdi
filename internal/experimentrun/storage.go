@@ -143,10 +143,13 @@ func (s runStorage) appendObservation(def experiment.Definition, schedule []Sche
 		if err != nil {
 			return fmt.Errorf("decode observations: %w", err)
 		}
-		if err := validateMeasuredPrefix(def, schedule, observations); err != nil {
+		if len(existing) > 0 && len(observations) == 0 {
+			return fmt.Errorf("decode observations: nonempty file contains zero records")
+		}
+		if err := validateMeasuredPrefix(def, schedule, s.run, observations); err != nil {
 			return err
 		}
-		if err := validateNextObservation(def, schedule, observations, observation); err != nil {
+		if err := validateNextObservation(def, schedule, s.run, observations, observation); err != nil {
 			return err
 		}
 		data := append(append([]byte(nil), existing...), line...)
@@ -182,7 +185,7 @@ func (s runStorage) withWriterLock(operation func() error) (err error) {
 	return operation()
 }
 
-func validateMeasuredPrefix(def experiment.Definition, schedule []ScheduledAttempt, observations []experiment.Observation) error {
+func validateMeasuredPrefix(def experiment.Definition, schedule []ScheduledAttempt, run string, observations []experiment.Observation) error {
 	measured := measuredSchedule(schedule)
 	if len(observations) > len(measured) {
 		return fmt.Errorf("observations contain %d records, exceeding measured schedule length %d", len(observations), len(measured))
@@ -195,6 +198,9 @@ func validateMeasuredPrefix(def experiment.Definition, schedule []ScheduledAttem
 	}
 	for i, observation := range observations {
 		want := measured[i]
+		if observation.Run != run {
+			return fmt.Errorf("observations record %d run %q does not match durable run %q", i, observation.Run, run)
+		}
 		if observation.Schema != experiment.ObservationSchemaV2 || observation.Candidate != want.Candidate || observation.Round != want.Cycle.Number {
 			return fmt.Errorf("observations record %d is not measured schedule prefix entry %s@%d", i, want.Candidate, want.Cycle.Number)
 		}
@@ -202,13 +208,16 @@ func validateMeasuredPrefix(def experiment.Definition, schedule []ScheduledAttem
 	return nil
 }
 
-func validateNextObservation(def experiment.Definition, schedule []ScheduledAttempt, observations []experiment.Observation, observation experiment.Observation) error {
+func validateNextObservation(def experiment.Definition, schedule []ScheduledAttempt, run string, observations []experiment.Observation, observation experiment.Observation) error {
 	measured := measuredSchedule(schedule)
 	if len(observations) >= len(measured) {
 		return fmt.Errorf("measured schedule is already complete")
 	}
 	if err := experiment.ValidateObservations(def, append(append([]experiment.Observation(nil), observations...), observation)); err != nil {
 		return fmt.Errorf("validate next observation: %w", err)
+	}
+	if observation.Run != run {
+		return fmt.Errorf("next observation run %q does not match durable run %q", observation.Run, run)
 	}
 	want := measured[len(observations)]
 	if observation.Schema != experiment.ObservationSchemaV2 || observation.Candidate != want.Candidate || observation.Round != want.Cycle.Number {

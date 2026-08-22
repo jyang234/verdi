@@ -132,6 +132,90 @@ func TestRunStorageAppendObservationPublishesExactPrefix(t *testing.T) {
 	}
 }
 
+func TestRunStorageAppendObservationBindsEveryRecordToPathRun(t *testing.T) {
+	for _, test := range []struct {
+		name       string
+		prefixRuns []string
+		appendRun  string
+	}{
+		{
+			name:      "new record names another run",
+			appendRun: "run-2",
+		},
+		{
+			name:       "existing prefix and new record name another run",
+			prefixRuns: []string{"run-2"},
+			appendRun:  "run-2",
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			root := t.TempDir()
+			storage, err := newRunStorage(root, "experiments/comparison", "run-1")
+			if err != nil {
+				t.Fatalf("newRunStorage: %v", err)
+			}
+			def, schedule := storageDefinition(t)
+			measured := measuredSchedule(schedule)
+			var existing []byte
+			for i, run := range test.prefixRuns {
+				encoded, encodeErr := experiment.EncodeObservation(storageObservation(t, def, run, measured[i]))
+				if encodeErr != nil {
+					t.Fatalf("encode prefix observation: %v", encodeErr)
+				}
+				existing = append(existing, encoded...)
+			}
+			if len(existing) > 0 {
+				if err := os.MkdirAll(filepath.Dir(storage.observationsPath), 0o755); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(storage.observationsPath, existing, 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+
+			appendObservation := storageObservation(t, def, test.appendRun, measured[len(test.prefixRuns)])
+			if err := storage.appendObservation(def, schedule, appendObservation); err == nil || !strings.Contains(err.Error(), "run") {
+				t.Fatalf("appendObservation error = %v, want path-run identity refusal", err)
+			}
+			got, err := readOptionalRegularFile(root, storage.observationsPath)
+			if err != nil {
+				t.Fatalf("read observations after refusal: %v", err)
+			}
+			if !bytes.Equal(got, existing) {
+				t.Fatalf("run-mismatched append mutated prior bytes: got %q, want %q", got, existing)
+			}
+		})
+	}
+}
+
+func TestRunStorageRejectsBlankOnlyObservationPrefixWithoutMutation(t *testing.T) {
+	root := t.TempDir()
+	storage, err := newRunStorage(root, "experiments/comparison", "run-1")
+	if err != nil {
+		t.Fatalf("newRunStorage: %v", err)
+	}
+	def, schedule := storageDefinition(t)
+	if err := os.MkdirAll(filepath.Dir(storage.observationsPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	existing := []byte("\n")
+	if err := os.WriteFile(storage.observationsPath, existing, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	observation := storageObservation(t, def, "run-1", measuredSchedule(schedule)[0])
+	if err := storage.appendObservation(def, schedule, observation); err == nil || !strings.Contains(err.Error(), "zero records") {
+		t.Fatalf("appendObservation error = %v, want nonempty zero-record prefix refusal", err)
+	}
+	got, err := os.ReadFile(storage.observationsPath)
+	if err != nil {
+		t.Fatalf("read blank-only observations: %v", err)
+	}
+	if !bytes.Equal(got, existing) {
+		t.Fatalf("blank-only prefix changed: got %q, want %q", got, existing)
+	}
+}
+
 func TestRunStoragePreservesMeasuredCandidateFailure(t *testing.T) {
 	root := t.TempDir()
 	storage, err := newRunStorage(root, "experiments/comparison", "run-1")
@@ -267,11 +351,11 @@ func TestRunStoragePreflightRejectsUnsafeDurablePaths(t *testing.T) {
 			name: "symlinked run parent",
 			setup: func(t *testing.T, storage runStorage, outside string) {
 				t.Helper()
-				parent := filepath.Dir(filepath.Dir(storage.executionPath))
-				if err := os.MkdirAll(parent, 0o755); err != nil {
+				runParent := filepath.Dir(storage.executionPath)
+				if err := os.MkdirAll(filepath.Dir(runParent), 0o755); err != nil {
 					t.Fatal(err)
 				}
-				if err := os.Symlink(outside, filepath.Join(parent, "runs")); err != nil {
+				if err := os.Symlink(filepath.Dir(outside), runParent); err != nil {
 					t.Fatal(err)
 				}
 			},
@@ -323,6 +407,87 @@ func TestRunStoragePreflightRejectsUnsafeDurablePaths(t *testing.T) {
 			test.setup(t, storage, outside)
 			if err := storage.preflightStart(); err == nil {
 				t.Fatal("preflightStart() = nil error for unsafe durable path")
+			}
+		})
+	}
+}
+
+func TestRunStorageAppendRejectsUnsafePathsWithoutExternalMutation(t *testing.T) {
+	for _, test := range []struct {
+		name  string
+		setup func(t *testing.T, storage runStorage, outside string)
+	}{
+		{
+			name: "symlinked run parent",
+			setup: func(t *testing.T, storage runStorage, outside string) {
+				t.Helper()
+				runParent := filepath.Dir(storage.observationsPath)
+				if err := os.MkdirAll(filepath.Dir(runParent), 0o755); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Symlink(filepath.Dir(outside), runParent); err != nil {
+					t.Fatal(err)
+				}
+			},
+		},
+		{
+			name: "nonregular observations file",
+			setup: func(t *testing.T, storage runStorage, _ string) {
+				t.Helper()
+				if err := os.MkdirAll(storage.observationsPath, 0o755); err != nil {
+					t.Fatal(err)
+				}
+			},
+		},
+		{
+			name: "symlinked observations file",
+			setup: func(t *testing.T, storage runStorage, outside string) {
+				t.Helper()
+				if err := os.MkdirAll(filepath.Dir(storage.observationsPath), 0o755); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Symlink(outside, storage.observationsPath); err != nil {
+					t.Fatal(err)
+				}
+			},
+		},
+		{
+			name: "symlinked writer lock",
+			setup: func(t *testing.T, storage runStorage, outside string) {
+				t.Helper()
+				if err := os.MkdirAll(filepath.Dir(storage.writerLockPath), 0o755); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Symlink(outside, storage.writerLockPath); err != nil {
+					t.Fatal(err)
+				}
+			},
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			root := t.TempDir()
+			storage, err := newRunStorage(root, "experiments/comparison", "run-1")
+			if err != nil {
+				t.Fatalf("newRunStorage: %v", err)
+			}
+			outside := filepath.Join(t.TempDir(), "outside")
+			original := []byte("outside must remain unchanged")
+			if err := os.WriteFile(outside, original, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			test.setup(t, storage, outside)
+			def, schedule := storageDefinition(t)
+			observation := storageObservation(t, def, "run-1", measuredSchedule(schedule)[0])
+
+			if err := storage.appendObservation(def, schedule, observation); err == nil {
+				t.Fatal("appendObservation = nil error for unsafe durable path")
+			}
+			got, err := os.ReadFile(outside)
+			if err != nil {
+				t.Fatalf("read outside sentinel: %v", err)
+			}
+			if !bytes.Equal(got, original) {
+				t.Fatalf("unsafe append mutated outside bytes: got %q, want %q", got, original)
 			}
 		})
 	}
