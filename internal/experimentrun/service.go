@@ -174,6 +174,9 @@ func (s *Service) Start(ctx context.Context, request StartRequest) (StartResult,
 	if err := storage.createReceipt(receipt); err != nil {
 		return StartResult{}, err
 	}
+	if err := s.prepareCandidateProfiles(ctx, request.Root, request.Definition, candidates, candidateRootsMustBeAbsent); err != nil {
+		return StartResult{}, err
+	}
 	result := StartResult{
 		Receipt:        receipt,
 		Observations:   make([]experiment.Observation, 0, len(measuredSchedule(schedule))),
@@ -184,9 +187,8 @@ func (s *Service) Start(ctx context.Context, request StartRequest) (StartResult,
 		if !ok {
 			return StartResult{}, fmt.Errorf("experimentrun: schedule names unplanned candidate %q", scheduled.Candidate)
 		}
-		profile, err := s.activateCandidate(ctx, candidate)
-		if err != nil {
-			return StartResult{}, err
+		if !candidate.activated {
+			return StartResult{}, fmt.Errorf("experimentrun: schedule candidate %q has no activated profile", scheduled.Candidate)
 		}
 		observeInput := experimentevaluator.ObserveInput{
 			Launch: experimentevaluator.Launch{
@@ -205,7 +207,7 @@ func (s *Service) Start(ctx context.Context, request StartRequest) (StartResult,
 				Contract:         inputs.Contract,
 			},
 		}
-		attempt, err := s.evaluateAttempt(ctx, profile, observeInput)
+		attempt, err := s.evaluateAttempt(ctx, candidate.profile, observeInput)
 		if err != nil {
 			return StartResult{}, fmt.Errorf("experimentrun: evaluate %s %q: %w", scheduled.Cycle.Kind, scheduled.Candidate, err)
 		}
@@ -261,6 +263,45 @@ type candidatePlan struct {
 	planned       execworkspace.Profile
 	profile       execworkspace.Profile
 	activated     bool
+}
+
+type candidateRootState uint8
+
+const (
+	candidateRootsMustBeAbsent candidateRootState = iota
+	candidateRootsMayBeMissing
+	candidateRootsMustExist
+)
+
+// prepareCandidateProfiles establishes every receipt-bound materialization and
+// activated profile before a scheduled attempt may publish evidence. Resume
+// validates every current root before the first materialization effect.
+func (s *Service) prepareCandidateProfiles(ctx context.Context, root string, def experiment.Definition, candidates map[string]*candidatePlan, state candidateRootState) error {
+	for _, candidate := range def.Candidates {
+		plan := candidates[candidate.ID]
+		if plan == nil {
+			return fmt.Errorf("experimentrun: candidate %q has no derived plan", candidate.ID)
+		}
+		if state == candidateRootsMustBeAbsent {
+			continue
+		}
+		if err := validateResumeEnvironmentRoot(root, plan.environment, state == candidateRootsMustExist); err != nil {
+			return err
+		}
+	}
+	for _, candidate := range def.Candidates {
+		plan := candidates[candidate.ID]
+		if state == candidateRootsMustBeAbsent {
+			if _, err := s.activateCandidate(ctx, plan); err != nil {
+				return err
+			}
+			continue
+		}
+		if err := s.activateResumeCandidate(ctx, root, plan, state == candidateRootsMustExist); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (s *Service) planCandidates(request StartRequest, authorized AuthorizedExecution, capabilities experiment.Capabilities, inputs ResolvedInputs, patches map[string][]byte, experimentDigest string) (map[string]*candidatePlan, []byte, execworkspace.EnforcementReport, error) {

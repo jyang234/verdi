@@ -115,27 +115,17 @@ func (s *Service) Resume(ctx context.Context, request ResumeRequest) (StartResul
 			}
 			return StartResult{Receipt: receipt, Observations: observations, WarmupFailures: append([]experiment.WarmupFailure(nil), storedResult.Execution.WarmupDiagnostics.Failures...), Result: storedResult, ResultDigest: digest}, nil
 		}
-		result, digest, err := completeRun(storage, startRequest.Definition, observations, receipt, []experiment.WarmupFailure{}, environmentRoots)
-		if err != nil {
-			return StartResult{}, err
-		}
-		return StartResult{Receipt: receipt, Observations: observations, WarmupFailures: []experiment.WarmupFailure{}, Result: result, ResultDigest: digest}, nil
 	}
 
-	hasMeasured := len(observations) > 0
-	for _, candidate := range startRequest.Definition.Candidates {
-		plan := candidates[candidate.ID]
-		if plan == nil {
-			return StartResult{}, fmt.Errorf("experimentrun: resume candidate %q has no derived plan", candidate.ID)
-		}
-		if err := validateResumeEnvironmentRoot(startRequest.Root, plan.environment, hasMeasured); err != nil {
-			return StartResult{}, err
-		}
+	// Missing roots are retryable before measured evidence and at the unique
+	// complete-prefix/no-result cleanup boundary. An incomplete measured prefix
+	// still requires every receipt-bound root to persist unchanged.
+	rootState := candidateRootsMayBeMissing
+	if !complete && len(observations) > 0 {
+		rootState = candidateRootsMustExist
 	}
-	for _, candidate := range startRequest.Definition.Candidates {
-		if err := s.activateResumeCandidate(ctx, startRequest.Root, candidates[candidate.ID], hasMeasured); err != nil {
-			return StartResult{}, err
-		}
+	if err := s.prepareCandidateProfiles(ctx, startRequest.Root, startRequest.Definition, candidates, rootState); err != nil {
+		return StartResult{}, err
 	}
 
 	warmupFailures := []experiment.WarmupFailure{}
@@ -246,6 +236,15 @@ func validateResumeEnvironmentRoot(root, path string, hasMeasuredObservations bo
 	}
 	if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
 		return fmt.Errorf("experimentrun: reserved environment root %q is not a non-symlink directory", path)
+	}
+	entries, err := os.ReadDir(path)
+	if err != nil {
+		return fmt.Errorf("experimentrun: read reserved environment root %q: %w", path, err)
+	}
+	for _, entry := range entries {
+		if entry.Name() != ".home" && entry.Name() != ".tmp" {
+			return fmt.Errorf("experimentrun: reserved environment root %q has foreign top-level entry %q", path, entry.Name())
+		}
 	}
 	for _, relative := range []string{filepath.Join(".home"), filepath.Join(".home", ".config"), filepath.Join(".home", ".cache"), ".tmp"} {
 		required := filepath.Join(path, relative)

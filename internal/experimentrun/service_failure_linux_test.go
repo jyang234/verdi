@@ -36,7 +36,7 @@ func TestStartOperationalFailuresPublishNoObservationOrResult(t *testing.T) {
 				return materializer, &fixedAttemptEvaluator{err: failure}
 			},
 			want:                 failureSentinel,
-			wantMaterializations: 1,
+			wantMaterializations: 2,
 		},
 		{
 			name: "evaluator cancellation",
@@ -44,7 +44,7 @@ func TestStartOperationalFailuresPublishNoObservationOrResult(t *testing.T) {
 				return materializer, &fixedAttemptEvaluator{err: context.Canceled}
 			},
 			want:                 context.Canceled,
-			wantMaterializations: 1,
+			wantMaterializations: 2,
 		},
 		{
 			name: "invalid injected attempt identity",
@@ -54,7 +54,7 @@ func TestStartOperationalFailuresPublishNoObservationOrResult(t *testing.T) {
 				return materializer, &fixedAttemptEvaluator{attempt: attempt}
 			},
 			wantError:            "experiment digest",
-			wantMaterializations: 1,
+			wantMaterializations: 2,
 		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
