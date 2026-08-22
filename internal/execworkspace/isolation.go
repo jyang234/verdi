@@ -74,6 +74,12 @@ import (
 	"time"
 )
 
+// commandCleanupGrace bounds os/exec's post-cancellation or post-exit pipe
+// cleanup when a descendant retains inherited descriptors. It is an internal
+// return-path bound, not an execution-grant timeout or a descendant-lifetime
+// policy.
+const commandCleanupGrace = 100 * time.Millisecond
+
 // profileOwnedEnvKeys are the four environment keys BuildProfile itself
 // sets from envRoot. A declaredEnv pair naming one of these is
 // rejected outright — never a silent override — so a caller can never
@@ -162,6 +168,9 @@ func (p Profile) Env() []string {
 // somewhere else entirely), and this seam never guesses it. cmd.SysProcAttr
 // is set to networkSysProcAttr's result and NOTHING ELSE composes a second
 // value onto it (design §4: "no consumer composes a second value").
+// cmd.WaitDelay is the package-internal cleanup grace above so a retained
+// inherited descriptor cannot make command cleanup outlive its bounded return;
+// it neither extends the granted deadline nor promises descendant termination.
 // cmd.ExtraFiles is never set (design §2: "Profile.Command creates no
 // ExtraFiles"), so it is always nil on the returned Cmd.
 //
@@ -201,6 +210,7 @@ func (p Profile) Command(ctx context.Context, argv0 string, args ...string) (*ex
 	}
 
 	cmd := exec.CommandContext(runCtx, argv0, args...)
+	cmd.WaitDelay = commandCleanupGrace
 	cmd.Env = p.Env()
 	cmd.SysProcAttr = sysProcAttr
 	return cmd, runCtx, cancel, nil
