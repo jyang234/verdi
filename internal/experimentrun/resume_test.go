@@ -16,7 +16,8 @@ func TestResumeRejectsNilServiceOrContext(t *testing.T) {
 	if _, err := service.Resume(context.Background(), ResumeRequest{}); err == nil || !strings.Contains(err.Error(), "service is nil") {
 		t.Fatalf("nil service Resume error = %v", err)
 	}
-	if _, err := (&Service{}).Resume(nil, ResumeRequest{}); err == nil || !strings.Contains(err.Error(), "nil context") {
+	var nilContext context.Context
+	if _, err := (&Service{}).Resume(nilContext, ResumeRequest{}); err == nil || !strings.Contains(err.Error(), "nil context") {
 		t.Fatalf("nil context Resume error = %v", err)
 	}
 }
