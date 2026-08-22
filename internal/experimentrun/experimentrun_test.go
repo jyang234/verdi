@@ -4,8 +4,10 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"strconv"
 	"strings"
@@ -258,16 +260,35 @@ func TestResolveInputsProvesExactProtectedRegularFiles(t *testing.T) {
 		})
 	}
 
-	symlinkPath := filepath.Join(root, "contracts", "symlink.json")
-	if err := os.Symlink(filepath.Join(root, "contracts", "behavioral.json"), symlinkPath); err != nil {
+	if err := os.Symlink(filepath.Join(root, "contracts", "behavioral.json"), filepath.Join(root, "contracts", "symlink.json")); err != nil {
 		t.Fatal(err)
 	}
-	symlinkResolver := cloneInputs(base)
-	v := symlinkResolver.values[def.Contract.ID]
-	v.Path = "contracts/symlink.json"
-	symlinkResolver.values[def.Contract.ID] = v
-	if _, err := ResolveInputs(context.Background(), symlinkResolver, root, def); err == nil {
-		t.Fatal("ResolveInputs() accepted a symlink")
+	if err := os.Symlink(filepath.Join(root, "contracts"), filepath.Join(root, "linked-contracts")); err != nil {
+		t.Fatal(err)
+	}
+	for _, tt := range []struct {
+		name string
+		path string
+	}{
+		{name: "final component", path: "contracts/symlink.json"},
+		{name: "parent component", path: "linked-contracts/behavioral.json"},
+	} {
+		t.Run(tt.name+" symlink", func(t *testing.T) {
+			symlinkDefinition := def
+			symlinkDefinition.ProtectedPaths = append(append([]string(nil), def.ProtectedPaths...), tt.path)
+			symlinkDefinition = relockDefinition(t, symlinkDefinition)
+			symlinkResolver := cloneInputs(base)
+			v := symlinkResolver.values[def.Contract.ID]
+			v.Path = tt.path
+			symlinkResolver.values[def.Contract.ID] = v
+			_, err := ResolveInputs(context.Background(), symlinkResolver, root, symlinkDefinition)
+			if err == nil {
+				t.Fatal("ResolveInputs() accepted a symlink")
+			}
+			if !strings.Contains(err.Error(), "traverses a symlink") {
+				t.Fatalf("ResolveInputs() error = %q, want actual symlink traversal refusal", err)
+			}
+		})
 	}
 }
 
@@ -380,7 +401,8 @@ func TestBuildExecutionReceiptStrictRoundTripDigestAndCloneSafety(t *testing.T) 
 		},
 		Versions: experiment.ReceiptVersions{Verdi: "v-test", RecommendationEngine: string(def.Algorithm)},
 	}
-	receipt, err := BuildExecutionReceipt(input)
+	host := linuxHostRuntimeFacts()
+	receipt, err := buildExecutionReceipt(input, host)
 	if err != nil {
 		t.Fatalf("BuildExecutionReceipt(): %v", err)
 	}
@@ -406,7 +428,7 @@ func TestBuildExecutionReceiptStrictRoundTripDigestAndCloneSafety(t *testing.T) 
 	if digest != decodedDigest {
 		t.Fatalf("receipt digest = %q, decoded digest = %q", digest, decodedDigest)
 	}
-	if err := VerifyExecutionReceipt(input, decoded); err != nil {
+	if err := verifyExecutionReceipt(input, decoded, host); err != nil {
 		t.Fatalf("VerifyExecutionReceipt(): %v", err)
 	}
 
@@ -415,7 +437,7 @@ func TestBuildExecutionReceiptStrictRoundTripDigestAndCloneSafety(t *testing.T) 
 	if value := receipt.Fingerprint.Env["LANG"]; value == nil || *value != "C" {
 		t.Fatal("receipt aliases authorization environment")
 	}
-	if err := VerifyExecutionReceipt(input, receipt); err == nil {
+	if err := verifyExecutionReceipt(input, receipt, host); err == nil {
 		t.Fatal("VerifyExecutionReceipt() accepted changed candidate patch input")
 	}
 }
@@ -467,10 +489,105 @@ func TestBuildExecutionReceiptRejectsMismatchedAuthorityInputs(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			candidate := cloneReceiptInput(input)
 			tt.mutate(&candidate)
-			if _, err := BuildExecutionReceipt(candidate); err == nil {
+			if _, err := buildExecutionReceipt(candidate, linuxHostRuntimeFacts()); err == nil {
 				t.Fatal("BuildExecutionReceipt() = nil error")
 			}
 		})
+	}
+}
+
+func TestBuildExecutionReceiptRejectsFingerprintHostForgeryAndMissingRuntime(t *testing.T) {
+	def, caps, capsBytes := testDefinition(t, []string{"alpha", "beta"}, 0)
+	root := t.TempDir()
+	resolved := writeResolvedInputs(t, root, def)
+	auth := testAuthorization(t, def, false)
+	input := ReceiptInput{
+		Definition:        def,
+		Run:               "run-1",
+		Capabilities:      caps,
+		CapabilitiesBytes: capsBytes,
+		Authorization:     mustResolveAuthorization(t, def, caps, auth),
+		Inputs:            resolved,
+		CandidatePatches:  candidatePatches(t, def),
+		Fingerprint:       testFingerprint(t, def, caps, auth, resolved),
+		Enforcement: execworkspace.EnforcementReport{
+			Rows:    []execworkspace.EnforcementReportRow{{Kind: execworkspace.GrantProcessExecution, Applied: true, Reason: "allowlist applied"}, {Kind: execworkspace.GrantTimeouts, Applied: true, Reason: "timeout applied"}},
+			Network: execworkspace.NetworkEnforcement{Mode: execworkspace.NetworkDeny, Configured: true, Reason: "linux namespace configured"},
+		},
+		Versions: experiment.ReceiptVersions{Verdi: "v-test", RecommendationEngine: string(def.Algorithm)},
+	}
+	for _, tt := range []struct {
+		name      string
+		mutate    func(*experiment.ExecutionFingerprint)
+		build     func(ReceiptInput) (experiment.ExecutionReceipt, error)
+		wantError string
+	}{
+		{name: "forged operating system", mutate: func(f *experiment.ExecutionFingerprint) {
+			if runtime.GOOS == "linux" {
+				f.OS = "darwin"
+			} else {
+				f.OS = "linux"
+			}
+		}, build: BuildExecutionReceipt, wantError: "does not match host"},
+		{name: "missing runtime version", mutate: func(f *experiment.ExecutionFingerprint) {
+			delete(f.ToolVersions, "runtime")
+		}, build: func(input ReceiptInput) (experiment.ExecutionReceipt, error) {
+			return buildExecutionReceipt(input, linuxHostRuntimeFacts())
+		}, wantError: `tool version "runtime"`},
+		{name: "forged architecture", mutate: func(f *experiment.ExecutionFingerprint) {
+			f.Arch = "arm64"
+		}, build: func(input ReceiptInput) (experiment.ExecutionReceipt, error) {
+			return buildExecutionReceipt(input, linuxHostRuntimeFacts())
+		}, wantError: "architecture"},
+		{name: "forged runtime version", mutate: func(f *experiment.ExecutionFingerprint) {
+			f.ToolVersions["runtime"] = "go-forged"
+		}, build: func(input ReceiptInput) (experiment.ExecutionReceipt, error) {
+			return buildExecutionReceipt(input, linuxHostRuntimeFacts())
+		}, wantError: `tool version "runtime"`},
+		{name: "matching unsupported host", mutate: func(f *experiment.ExecutionFingerprint) {
+			f.OS = "darwin"
+			f.Arch = "arm64"
+		}, build: func(input ReceiptInput) (experiment.ExecutionReceipt, error) {
+			return buildExecutionReceipt(input, hostRuntimeFacts{os: "darwin", arch: "arm64", runtimeVersion: runtime.Version()})
+		}, wantError: "authoritative CSE execution requires linux"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			candidate := cloneReceiptInput(input)
+			candidate.Fingerprint = mutateFingerprint(t, candidate.Fingerprint, tt.mutate)
+			receipt, err := tt.build(candidate)
+			if err == nil {
+				t.Fatal("BuildExecutionReceipt() = nil error")
+			}
+			if !strings.Contains(err.Error(), tt.wantError) {
+				t.Fatalf("BuildExecutionReceipt() error = %q, want %q", err, tt.wantError)
+			}
+			if !reflect.DeepEqual(receipt, experiment.ExecutionReceipt{}) {
+				t.Fatalf("BuildExecutionReceipt() receipt = %+v, want zero receipt", receipt)
+			}
+		})
+	}
+
+	candidate := cloneReceiptInput(input)
+	candidate.Fingerprint = mutateFingerprint(t, candidate.Fingerprint, func(f *experiment.ExecutionFingerprint) {
+		f.OS = runtime.GOOS
+		f.Arch = runtime.GOARCH
+		f.ToolVersions["runtime"] = runtime.Version()
+	})
+	receipt, err := BuildExecutionReceipt(candidate)
+	if runtime.GOOS == "linux" {
+		if err != nil {
+			t.Fatalf("BuildExecutionReceipt() on linux: %v", err)
+		}
+		if reflect.DeepEqual(receipt, experiment.ExecutionReceipt{}) {
+			t.Fatal("BuildExecutionReceipt() on linux returned a zero receipt")
+		}
+		return
+	}
+	if err == nil || !strings.Contains(err.Error(), "authoritative CSE execution requires linux") {
+		t.Fatalf("BuildExecutionReceipt() error = %v, want unsupported-host refusal", err)
+	}
+	if !reflect.DeepEqual(receipt, experiment.ExecutionReceipt{}) {
+		t.Fatalf("BuildExecutionReceipt() receipt = %+v, want zero receipt", receipt)
 	}
 }
 
@@ -619,6 +736,7 @@ func testFingerprint(t *testing.T, def experiment.Definition, caps experiment.Ca
 		ToolVersions: map[string]string{
 			"evaluator":             caps.EvaluatorVersion,
 			"recommendation-engine": string(def.Algorithm),
+			"runtime":               runtime.Version(),
 			"verdi":                 "v-test",
 		},
 		Env: map[string]*string{"LANG": pointer(authorization.DeclaredEnv["LANG"])},
@@ -629,6 +747,24 @@ func testFingerprint(t *testing.T, def experiment.Definition, caps experiment.Ca
 			inputs.Contract.Path:                 strings.TrimPrefix(inputs.Contract.Digest, "sha256:"),
 		},
 	}
+	bytes, err := canonjson.Marshal(fingerprint)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return bytes
+}
+
+func linuxHostRuntimeFacts() hostRuntimeFacts {
+	return hostRuntimeFacts{os: "linux", arch: "amd64", runtimeVersion: runtime.Version()}
+}
+
+func mutateFingerprint(t *testing.T, raw []byte, mutate func(*experiment.ExecutionFingerprint)) []byte {
+	t.Helper()
+	var fingerprint experiment.ExecutionFingerprint
+	if err := json.Unmarshal(raw, &fingerprint); err != nil {
+		t.Fatal(err)
+	}
+	mutate(&fingerprint)
 	bytes, err := canonjson.Marshal(fingerprint)
 	if err != nil {
 		t.Fatal(err)

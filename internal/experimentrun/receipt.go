@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"reflect"
+	"runtime"
 	"sort"
 	"strings"
 
@@ -29,6 +30,12 @@ type ReceiptInput struct {
 	Fingerprint       []byte
 	Enforcement       execworkspace.EnforcementReport
 	Versions          experiment.ReceiptVersions
+}
+
+type hostRuntimeFacts struct {
+	os             string
+	arch           string
+	runtimeVersion string
 }
 
 // CandidateReceipts derives sorted receipt candidate rows from the registered
@@ -92,6 +99,14 @@ func CandidateReceipts(def experiment.Definition, experimentDigest, run string, 
 // BuildExecutionReceipt derives one strict durable receipt. It rechecks every
 // authority input instead of trusting an earlier validation pass.
 func BuildExecutionReceipt(input ReceiptInput) (experiment.ExecutionReceipt, error) {
+	return buildExecutionReceipt(input, hostRuntimeFacts{
+		os:             runtime.GOOS,
+		arch:           runtime.GOARCH,
+		runtimeVersion: runtime.Version(),
+	})
+}
+
+func buildExecutionReceipt(input ReceiptInput, host hostRuntimeFacts) (experiment.ExecutionReceipt, error) {
 	if err := input.Definition.Validate(); err != nil {
 		return experiment.ExecutionReceipt{}, fmt.Errorf("experimentrun: build receipt definition: %w", err)
 	}
@@ -145,7 +160,7 @@ func BuildExecutionReceipt(input ReceiptInput) (experiment.ExecutionReceipt, err
 	if err != nil {
 		return experiment.ExecutionReceipt{}, err
 	}
-	if err := validateFingerprint(input.Definition, capabilities, authorized.Authorization, input.Inputs, input.Versions, fingerprint); err != nil {
+	if err := validateFingerprint(input.Definition, capabilities, authorized.Authorization, input.Inputs, input.Versions, fingerprint, host); err != nil {
 		return experiment.ExecutionReceipt{}, err
 	}
 	enforcement, network, disclosures, err := receiptEnforcement(authorized.Grants, input.Enforcement)
@@ -178,10 +193,18 @@ func BuildExecutionReceipt(input ReceiptInput) (experiment.ExecutionReceipt, err
 // receipt derivable from input. A mismatch is operational rather than a
 // favorable interpretation of changed execution facts.
 func VerifyExecutionReceipt(input ReceiptInput, receipt experiment.ExecutionReceipt) error {
+	return verifyExecutionReceipt(input, receipt, hostRuntimeFacts{
+		os:             runtime.GOOS,
+		arch:           runtime.GOARCH,
+		runtimeVersion: runtime.Version(),
+	})
+}
+
+func verifyExecutionReceipt(input ReceiptInput, receipt experiment.ExecutionReceipt, host hostRuntimeFacts) error {
 	if err := receipt.Validate(); err != nil {
 		return fmt.Errorf("experimentrun: verify receipt: %w", err)
 	}
-	want, err := BuildExecutionReceipt(input)
+	want, err := buildExecutionReceipt(input, host)
 	if err != nil {
 		return fmt.Errorf("experimentrun: verify receipt inputs: %w", err)
 	}
@@ -217,9 +240,18 @@ func decodeFingerprint(raw []byte) (experiment.ExecutionFingerprint, error) {
 	return fingerprint, nil
 }
 
-func validateFingerprint(def experiment.Definition, capabilities experiment.Capabilities, authorization ExecutionAuthorization, inputs ResolvedInputs, versions experiment.ReceiptVersions, fingerprint experiment.ExecutionFingerprint) error {
-	if fingerprint.OS != "linux" {
-		return fmt.Errorf("experimentrun: authoritative CSE execution requires linux, fingerprint names %q", fingerprint.OS)
+func validateFingerprint(def experiment.Definition, capabilities experiment.Capabilities, authorization ExecutionAuthorization, inputs ResolvedInputs, versions experiment.ReceiptVersions, fingerprint experiment.ExecutionFingerprint, host hostRuntimeFacts) error {
+	if fingerprint.OS != host.os {
+		return fmt.Errorf("experimentrun: fingerprint OS %q does not match host %q", fingerprint.OS, host.os)
+	}
+	if fingerprint.Arch != host.arch {
+		return fmt.Errorf("experimentrun: fingerprint architecture %q does not match host %q", fingerprint.Arch, host.arch)
+	}
+	if fingerprint.ToolVersions["runtime"] != host.runtimeVersion {
+		return fmt.Errorf("experimentrun: fingerprint tool version %q does not match host runtime %q", "runtime", host.runtimeVersion)
+	}
+	if host.os != "linux" {
+		return fmt.Errorf("experimentrun: authoritative CSE execution requires linux, host is %q", host.os)
 	}
 	if err := versions.Validate(); err != nil {
 		return fmt.Errorf("experimentrun: receipt versions: %w", err)
