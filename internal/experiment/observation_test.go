@@ -99,6 +99,52 @@ func TestObservationV2CandidateFailureRejectsNonProcessEvidence(t *testing.T) {
 	}
 }
 
+func TestObservationValidateAndEncodeRequireDisclosuresArray(t *testing.T) {
+	completed := CandidateOutcome{Kind: OutcomeCompleted}
+	for _, test := range []struct {
+		name        string
+		observation Observation
+	}{
+		{
+			name: "v1",
+			observation: Observation{
+				Schema:           ObservationSchema,
+				ExperimentDigest: digestOf("a"),
+				Run:              "run-1",
+				Candidate:        "facts-cache",
+				Round:            1,
+				Guards:           []GuardResult{},
+				Measurements:     []Measurement{},
+			},
+		},
+		{
+			name: "v2 completed",
+			observation: Observation{
+				Schema:           ObservationSchemaV2,
+				ExperimentDigest: digestOf("a"),
+				Run:              "run-1",
+				Candidate:        "facts-cache",
+				Round:            1,
+				Outcome:          &completed,
+				Guards:           []GuardResult{},
+				Measurements:     []Measurement{},
+			},
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if err := test.observation.Validate(); err == nil || !strings.Contains(err.Error(), "disclosures") {
+				t.Fatalf("Observation.Validate error = %v, want required disclosures array refusal", err)
+			}
+			if encoded, err := EncodeObservation(test.observation); err == nil {
+				if _, decodeErr := DecodeObservation(encoded); decodeErr != nil {
+					t.Fatalf("EncodeObservation emitted bytes its decoder rejects: %q: %v", encoded, decodeErr)
+				}
+				t.Fatalf("EncodeObservation error = nil, want required disclosures array refusal; bytes=%q", encoded)
+			}
+		})
+	}
+}
+
 func validObservationJSON() string {
 	return `{
   "schema": "verdi.experiment-observation/v1",

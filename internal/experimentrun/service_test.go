@@ -59,6 +59,27 @@ func TestServiceValidatesInjectedAttemptAtEvaluatorBoundary(t *testing.T) {
 		}
 	})
 
+	t.Run("RSS-present observation requires disclosures array", func(t *testing.T) {
+		invalid := validServiceAttempt(input.Request)
+		rss := experiment.Measurement{
+			ID:     experiment.EvaluatorPeakRSSMetricID,
+			Value:  experiment.NumberValue("4096"),
+			Unit:   "bytes",
+			Source: experiment.SourceHarnessMeasured,
+		}
+		invalid.ProcessMeasurements = append(invalid.ProcessMeasurements, rss)
+		invalid.ProcessDisclosures = nil
+		observation := *invalid.Observation
+		observation.Measurements = append(observation.Measurements, rss)
+		observation.Disclosures = nil
+		invalid.Observation = &observation
+		evaluator := &fixedAttemptEvaluator{attempt: invalid}
+		service := &Service{evaluator: evaluator}
+		if _, err := service.evaluateAttempt(context.Background(), execworkspace.Profile{}, input); err == nil || !strings.Contains(err.Error(), "disclosures") {
+			t.Fatalf("evaluateAttempt error = %v, want nil disclosures refusal", err)
+		}
+	})
+
 	t.Run("operational evaluator failure", func(t *testing.T) {
 		failure := errors.New("evaluator transport failed")
 		evaluator := &fixedAttemptEvaluator{err: failure}

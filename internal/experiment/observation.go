@@ -210,6 +210,9 @@ func (o Observation) Validate() error {
 	if o.Schema != ObservationSchema && o.Schema != ObservationSchemaV2 {
 		return fmt.Errorf("experiment: unknown observation schema %q", o.Schema)
 	}
+	if o.Disclosures == nil {
+		return fmt.Errorf("experiment: observation.disclosures must be a present array")
+	}
 	if o.Schema == ObservationSchema && o.Outcome != nil {
 		return fmt.Errorf("experiment: observation v1 forbids outcome")
 	}
@@ -276,9 +279,6 @@ func (o Observation) Validate() error {
 func validateCandidateFailureEvidence(o Observation) error {
 	if len(o.Guards) != 0 {
 		return fmt.Errorf("experiment: candidate failure observation requires empty guards")
-	}
-	if o.Disclosures == nil {
-		return fmt.Errorf("experiment: candidate failure observation requires a present disclosures array")
 	}
 
 	seenWallDuration := false

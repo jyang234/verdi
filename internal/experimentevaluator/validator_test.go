@@ -156,6 +156,13 @@ func TestValidateAttemptRejectsMissingForgedOrExtraProcessFacts(t *testing.T) {
 		{name: "duplicate observation process disclosure", mutate: func(a *Attempt) {
 			a.Observation.Disclosures = append(a.Observation.Disclosures, experiment.PeakRSSUnavailableDisclosure)
 		}},
+		{name: "RSS-present observation has nil disclosures", mutate: func(a *Attempt) {
+			rss := numericMeasurement(experiment.EvaluatorPeakRSSMetricID, 4096, "bytes")
+			a.ProcessMeasurements = append(a.ProcessMeasurements, rss)
+			a.ProcessDisclosures = nil
+			a.Observation.Measurements = append(a.Observation.Measurements, rss)
+			a.Observation.Disclosures = nil
+		}},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			attempt := cloneAttempt(valid)

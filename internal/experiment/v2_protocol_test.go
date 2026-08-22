@@ -175,6 +175,7 @@ func TestObservationV2OutcomeUnionAndCanonicalBytes(t *testing.T) {
 	}{
 		{field: "guards", old: `"guards":[]`},
 		{field: "measurements", old: `"measurements":[{"id":"verdi-evaluator-wall-duration","source":"harness-measured","unit":"ns","value":2500000}]`},
+		{field: "disclosures", old: `"disclosures":["peak-rss-unavailable"]`},
 	} {
 		mutated := strings.Replace(string(failedBytes), mutation.old, `"`+mutation.field+`":null`, 1)
 		if mutated == string(failedBytes) {
