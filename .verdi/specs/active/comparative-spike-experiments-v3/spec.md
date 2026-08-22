@@ -1,7 +1,7 @@
 ---
-id: spec/comparative-spike-experiments-v2
+id: spec/comparative-spike-experiments-v3
 kind: spec
-title: "Comparative Spike Experiments v2"
+title: "Comparative Spike Experiments v3"
 owners: [platform-team]
 class: feature
 problem:
@@ -49,7 +49,7 @@ stubs:
   - { slug: experiment-policy, acceptance_criteria: [ac-6] }
   - { slug: dogfood-comparison, acceptance_criteria: [ac-7] }
 links:
-  - { type: supersedes, ref: spec/comparative-spike-experiments }
+  - { type: supersedes, ref: spec/comparative-spike-experiments-v2 }
   - { type: depends-on, ref: spec/verdi-artifact-contract }
   - { type: depends-on, ref: spec/verdi-evidence-model }
   - { type: depends-on, ref: spec/worktree-manager }
@@ -117,7 +117,7 @@ decisions:
     text: "the generic evaluator transport retains the registered no-shell argv with final operation token run, derives discovery by replacing only that token with describe, persists one digest-pinned capabilities v2 document, and exchanges one canonical evaluator v1 request and response per invocation"
     anchor: dc-20
   - id: dc-21
-    text: "observation v2 is a harness-owned measured-attempt envelope with exactly one completed, candidate-crash, or candidate-timeout outcome; evaluator output cannot claim harness identity or harness-measured values, and warmup failures remain visible non-decision diagnostics rather than observations"
+    text: "observation v2 is a harness-owned measured-attempt envelope with exactly one completed, candidate-crash, or candidate-timeout outcome; evaluator output cannot claim harness identity or harness-measured values; every zero-exit measured attempt carries only the fixed harness process measurements in addition to any completed evaluator evidence, while failure-outcome process measurements remain diagnostic and never restore eligibility; and warmup failures remain visible non-decision diagnostics rather than observations"
     anchor: dc-21
   - id: dc-22
     text: "result v2 is one strict artifact containing an engine-owned decision document and a harness-owned execution annex: decision bytes are recomputed exactly from the locked definition and measured observations, receipt and isolation facts are verified independently, and the whole-result digest binds both projections without making warmup diagnostics decision authority"
@@ -167,15 +167,14 @@ open_questions:
     text: "the observation protocol says candidate-reported values are diagnostic unless a registered independent observer corroborates them, while the trust model names no corroborated class and forbids adapters promoting measurements to a higher trust class; whether corroboration ever makes candidate-reported values decision-eligible, and under what recorded identity, is unresolved"
     anchor: oq-2
 supersession:
-  carried: [ac-1, ac-2, ac-3, ac-4, ac-5, ac-6, ac-7, dc-1, dc-2, dc-3, dc-4, dc-5, dc-6, dc-7, dc-8, dc-9, dc-11, dc-12, dc-13, dc-14, dc-15, dc-16, dc-17, dc-18, dc-19, co-1, co-2, co-3, co-4, co-5, co-6, co-7, oq-2]
+  carried: [ac-1, ac-2, ac-3, ac-4, ac-5, ac-6, ac-7, dc-1, dc-2, dc-3, dc-4, dc-5, dc-6, dc-7, dc-8, dc-9, dc-10, dc-11, dc-12, dc-13, dc-14, dc-15, dc-16, dc-17, dc-18, dc-19, dc-20, dc-22, dc-23, dc-24, dc-25, dc-26, dc-27, dc-28, co-1, co-2, co-3, co-4, co-5, co-6, co-7, oq-2]
   amended:
-    - { id: dc-10, note: "closes OQ-1 and registers the evaluator, capability, observation, execution-receipt, and result protocol ownership split" }
+    - { id: dc-21, note: "retains fixed harness process facts on every zero-exit measured attempt while keeping candidate-failure process facts diagnostic and evaluator custody closed" }
   amended_advisory: []
-  removed:
-    - { id: oq-1, note: "resolved by the exact generic evaluator v1 transport and protocol inventory in dc-20 and this specification's fixed evaluator protocol" }
-  added: [dc-20, dc-21, dc-22, dc-23, dc-24, dc-25, dc-26, dc-27, dc-28]
+  removed: []
+  added: []
 ---
-# Comparative Spike Experiments v2
+# Comparative Spike Experiments v3
 
 ## Problem
 
@@ -595,7 +594,8 @@ candidate root. The harness emits strict
 Every measurement carries one trust classification:
 
 - `harness-measured`: facts Verdi observes outside candidate control, such as
-  process duration, exit status, timeout, and peak memory;
+  process duration and peak memory; exit status and timeout remain control
+  facts rather than measurements;
 - `evaluator-measured`: facts produced by a locked project evaluator with a
   declared capability; or
 - `candidate-reported`: internal counters such as cache hits, misses,
@@ -613,7 +613,15 @@ original witness needed to explain failures.
 `completed` forbids an outcome witness and requires the existing
 definition-aware guard, primary-metric, and bounded-measurement set.
 `candidate-crash` and `candidate-timeout` require a nonempty witness and empty
-guards and measurements. They make that candidate ineligible without
+guards. Their evaluator response requires empty measurements. The harness-owned
+measured observation instead carries exactly
+`verdi-evaluator-wall-duration` plus `verdi-evaluator-peak-rss` when the Linux
+process API returns it, or the `peak-rss-unavailable` disclosure when it does
+not. The evaluator response may not supply that reserved disclosure, just as it
+may not supply either fixed process-measurement ID; only the harness may append
+them to the observation. Those fixed process facts are diagnostic for a failure
+outcome: they never restore eligibility, satisfy a registered decision metric,
+or enter an aggregate. The failure makes that candidate ineligible without
 fabricating a guard failure. A baseline execution failure yields the closed
 `baseline-candidate-failure` violated result with candidate, outcome, round,
 and witness preserved; a non-baseline execution failure does not prevent a
@@ -1322,9 +1330,12 @@ and per-evaluator flag grammars are outside the protocol.
 Observation v2 belongs to the harness. A measured attempt is exactly
 `completed`, `candidate-crash`, or `candidate-timeout`; the harness supplies
 the immutable experiment/run/candidate/round identity and fixed process
-measurements. A project evaluator cannot claim harness custody. Warmup failure
-is retained only as explicit non-decision diagnostic data and never becomes a
-measured observation or recommendation input.
+measurements. A failure outcome has no guards or evaluator/candidate
+measurements, but retains the fixed harness duration and optional RSS fact (or
+the RSS-unavailable disclosure) as diagnostics that cannot affect eligibility
+or aggregation. A project evaluator cannot claim harness custody. Warmup
+failure is retained only as explicit non-decision diagnostic data and never
+becomes a measured observation or recommendation input.
 
 ## DC-22
 
@@ -1499,10 +1510,10 @@ fact would be recorded, remains unresolved.
 
 ## Source coverage and migration witness
 
-This revision maps all 43 authority units implicated by the Wave 3B evaluator
-and isolated-execution slice. The frontmatter supersession manifest separately
-classifies every predecessor object, including the 20 predecessor objects not
-enumerated again in this slice matrix:
+The frontmatter supersession manifest maps all 43 v2 predecessor objects: 42
+are carried, DC-21 is amended, and none are added or removed (43/43). This
+revision independently retains and extends the complete 44-unit authority map
+for the Wave 3B evaluator and isolated-execution slice:
 
 | # | Source unit | Destination |
 |---:|---|---|
@@ -1549,13 +1560,16 @@ enumerated again in this slice matrix:
 | 41 | DC-2 derived state and multi-run aggregate posture | carried DC-2; AC-1 aggregate table; DC-28 |
 | 42 | CO-4 process exit mapping | carried CO-4; no Wave 3B user-facing adapter |
 | 43 | CO-5 registered-boundary scope | carried CO-5; receipt/result identities preserve the exact boundary |
+| 44 | Zero-exit process-observer facts versus failure-outcome evidence emptiness | AC-3 and DC-21 distinguish the empty evaluator response from the harness-owned observation: only fixed process measurements survive on failure, remain diagnostic, and cannot restore eligibility or enter aggregates |
 
-Slice coverage is 43/43. Whole-predecessor object coverage is recorded by the
+Slice coverage is 44/44. Whole-predecessor object coverage is recorded by the
 supersession manifest above. Transformations are explicit: the undefined evaluator
 operation becomes DC-20's evaluator v1 transport; the single-run terminal tree
 becomes the multi-run tree before any real persisted instance exists;
 candidate crash and timeout become closed observation outcomes rather than
-fabricated guard failures; and the former in-memory environment attestation
+fabricated guard failures; the fixed process observer remains lossless on every
+zero-exit measured attempt without admitting evaluator measurements or using a
+failure's diagnostics in the decision; and the former in-memory environment attestation
 gains an execution v1 receipt. The unchanged capsule protocol remains in the
 closed inventory but is not created until Wave 5.
 

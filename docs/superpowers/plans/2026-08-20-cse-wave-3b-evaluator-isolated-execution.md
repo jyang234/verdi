@@ -168,8 +168,9 @@ The amendment makes these exact changes:
    the only operation allowed to prefer one result.
 
 7. Record the amendment and the 44/44 source-coverage matrix in the accepted
-   revision history. Update SI-126–SI-135 from conditional to the exact
-   ratified amendment head only after merge.
+   revision history. Preserve SI-126–SI-134's settled PR #299 provenance, and
+   update only SI-135 from conditional to this correction's exact ratified
+   merge head after owner merge.
 
 ## Fixed evaluator protocol
 
@@ -242,6 +243,9 @@ Rules:
 - The two fixed `verdi-evaluator-*` observer IDs are reserved: the evaluator
   response may not supply them. If the definition registers one as its primary
   or bounded metric, the harness-supplied value satisfies that requirement.
+- `peak-rss-unavailable` is likewise reserved to the harness process observer;
+  the evaluator response may not supply it. The harness appends it only when
+  the Linux process API returns no RSS fact.
 - A nonzero evaluator exit, harness deadline, missing response, malformed or
   noncanonical response, more than 1 MiB stdout, or more than 1 MiB retained
   stderr is operational. Only a zero-exit strict response can name a candidate
