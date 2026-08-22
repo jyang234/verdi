@@ -37,9 +37,10 @@ and SI-126–SI-135.
 
 **Execution status:** Task 0's canonical CSE/store-layout amendment is ratified
 and merged, and the Task 1 evidence-schema tranche is complete on its runtime
-branch. Task 2 is BLOCKED until the SI-135 observer-authority correction passes
-its one independent cross-model review and is accepted and merged by the
-owner. No runtime producer may work around that authority gap.
+branch. The independently reviewed SI-135 observer-authority correction is
+ratified by the owner merge of PR #301 at
+`165adcafb03f5c722653dab6df9f78850e5b5be6`; Task 2 is unblocked and must
+implement the exact CSE v3 custody boundary.
 
 ## Scope and non-goals
 
