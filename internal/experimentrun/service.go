@@ -203,7 +203,7 @@ func (s *Service) Start(ctx context.Context, request StartRequest) (StartResult,
 				Candidate:        scheduled.Candidate,
 				Cycle:            scheduled.Cycle,
 				Workload:         inputs.Workload,
-				Fixtures:         append([]experiment.ResolvedArtifact(nil), inputs.Fixtures...),
+				Fixtures:         cloneResolvedArtifacts(inputs.Fixtures),
 				Contract:         inputs.Contract,
 			},
 		}
@@ -232,6 +232,12 @@ func (s *Service) Start(ctx context.Context, request StartRequest) (StartResult,
 		return StartResult{}, err
 	}
 	return result, nil
+}
+
+func cloneResolvedArtifacts(in []experiment.ResolvedArtifact) []experiment.ResolvedArtifact {
+	out := make([]experiment.ResolvedArtifact, len(in))
+	copy(out, in)
+	return out
 }
 
 func candidateEnvironmentRoots(def experiment.Definition, candidates map[string]*candidatePlan) []string {

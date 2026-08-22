@@ -169,7 +169,7 @@ func (s *Service) observeScheduled(ctx context.Context, request StartRequest, in
 		Request: experiment.EvaluatorRequest{
 			Schema: experiment.EvaluatorProtocolSchema, ExperimentDigest: experimentDigest, Run: request.Run,
 			Candidate: scheduled.Candidate, Cycle: scheduled.Cycle, Workload: inputs.Workload,
-			Fixtures: append([]experiment.ResolvedArtifact(nil), inputs.Fixtures...), Contract: inputs.Contract,
+			Fixtures: cloneResolvedArtifacts(inputs.Fixtures), Contract: inputs.Contract,
 		},
 	})
 	if err != nil {

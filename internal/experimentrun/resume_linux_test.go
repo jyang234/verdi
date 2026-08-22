@@ -16,6 +16,53 @@ import (
 	"github.com/jyang234/verdi/internal/experimentevaluator"
 )
 
+func TestStartPreservesFixturePresenceInEvaluatorRequests(t *testing.T) {
+	for _, fixtureCount := range []int{0, 1} {
+		t.Run(fmt.Sprintf("%d fixtures", fixtureCount), func(t *testing.T) {
+			fixture := newRunFixture(t, "run-1", 0)
+			if fixtureCount == 0 {
+				makeRunFixtureFixtureless(t, &fixture)
+			}
+			evaluator := &recordingEvaluator{}
+			service := newResumeTestService(t, fixture, evaluator)
+
+			if _, err := service.Start(context.Background(), fixture.request); err != nil {
+				t.Fatalf("Start: %v", err)
+			}
+			assertEvaluatorRequestFixtures(t, evaluator.requests, fixture.request.Definition.Fixtures)
+		})
+	}
+}
+
+func TestResumePreservesFixturePresenceInEvaluatorRequests(t *testing.T) {
+	for _, fixtureCount := range []int{0, 1} {
+		t.Run(fmt.Sprintf("%d fixtures", fixtureCount), func(t *testing.T) {
+			fixture := newRunFixture(t, "run-1", 0)
+			if fixtureCount == 0 {
+				makeRunFixtureFixtureless(t, &fixture)
+			}
+			interruption := errors.New("interrupt before first measured observation")
+			starter := newResumeTestService(t, fixture, &interruptingEvaluator{
+				delegate:  &recordingEvaluator{},
+				kind:      experiment.CycleMeasured,
+				candidate: "alpha",
+				round:     1,
+				err:       interruption,
+			})
+			if _, err := starter.Start(context.Background(), fixture.request); !errors.Is(err, interruption) {
+				t.Fatalf("Start interruption error = %v, want %v", err, interruption)
+			}
+
+			evaluator := &recordingEvaluator{}
+			service := newResumeTestService(t, fixture, evaluator)
+			if _, err := service.Resume(context.Background(), ResumeRequest(fixture.request)); err != nil {
+				t.Fatalf("Resume: %v", err)
+			}
+			assertEvaluatorRequestFixtures(t, evaluator.requests, fixture.request.Definition.Fixtures)
+		})
+	}
+}
+
 func TestStartZeroWarmupsActivatesEveryCandidateBeforeFirstObservation(t *testing.T) {
 	fixture := newRunFixture(t, "run-1", 0)
 	interruption := errors.New("interrupt after first measured append")
@@ -583,6 +630,45 @@ func newRunFixture(t *testing.T, run string, warmups int) interruptedRunFixture 
 		versions:      experiment.ReceiptVersions{Verdi: "v-test", RecommendationEngine: string(def.Algorithm)},
 	}
 	return fixture
+}
+
+func makeRunFixtureFixtureless(t *testing.T, fixture *interruptedRunFixture) {
+	t.Helper()
+	def := fixture.request.Definition
+	fixtureID := def.Fixtures[0].ID
+	def.Fixtures = []experiment.ArtifactRef{}
+	protected := make([]string, 0, len(def.ProtectedPaths)-1)
+	for _, path := range def.ProtectedPaths {
+		if path != "fixtures/request-log.json" {
+			protected = append(protected, path)
+		}
+	}
+	def.ProtectedPaths = protected
+	def = relockDefinition(t, def)
+	fixture.request.Definition = def
+	fixture.authorization = testAuthorization(t, def, true)
+	delete(fixture.inputs.values, fixtureID)
+}
+
+func assertEvaluatorRequestFixtures(t *testing.T, requests []experimentevaluator.ObserveInput, want []experiment.ArtifactRef) {
+	t.Helper()
+	if len(requests) == 0 {
+		t.Fatal("evaluator received no requests")
+	}
+	for i, request := range requests {
+		got := request.Request.Fixtures
+		if got == nil {
+			t.Fatalf("evaluator request %d fixtures = nil, want present array", i)
+		}
+		if len(got) != len(want) {
+			t.Fatalf("evaluator request %d fixture count = %d, want %d", i, len(got), len(want))
+		}
+		for fixtureIndex := range want {
+			if got[fixtureIndex].ID != want[fixtureIndex].ID || got[fixtureIndex].Digest != want[fixtureIndex].Digest {
+				t.Fatalf("evaluator request %d fixture %d = %#v, want id/digest %#v", i, fixtureIndex, got[fixtureIndex], want[fixtureIndex])
+			}
+		}
+	}
 }
 
 func completeMeasuredPrefix(t *testing.T, fixture interruptedRunFixture) {
