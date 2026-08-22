@@ -266,7 +266,7 @@ func verifyExecutable(cmd *exec.Cmd, expectedDigest string) error {
 		return fmt.Errorf("hash %q: %w", path, errors.Join(err, file.Close()))
 	}
 	if err := file.Close(); err != nil {
-		return fmt.Errorf("close %q: %w", path, err)
+		return fmt.Errorf("finalize %q: %w", path, err)
 	}
 	got := "sha256:" + hex.EncodeToString(hash.Sum(nil))
 	if got != expectedDigest {
