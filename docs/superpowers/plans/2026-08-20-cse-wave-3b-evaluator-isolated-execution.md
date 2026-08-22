@@ -504,6 +504,19 @@ copies ambient environment variables. A later policy adapter must refuse
 secret-bearing values rather than pass a secret and expect the receipt writer
 to guess that it needs redaction; SI-130 carries that obligation into Wave 5.
 
+Profile construction is two-stage at this receipt-first boundary (SI-137).
+`execworkspace.PlanProfile` validates grants, declared environment, roots, and
+platform controls and returns the exact enforcement projection plus a planned
+profile without creating a directory. A planned profile is not launchable;
+`Profile.Command` refuses it. Its deterministic environment projection is
+nevertheless the input to the existing shared fingerprint collector. After
+the immutable receipt is written and the candidate workspace is materialized,
+CSE proves the reserved environment root absent and activates that same plan;
+activation alone creates the profile-owned HOME/XDG/TMP directories and
+returns the launchable profile. Existing `BuildProfile` remains the
+compatibility composition of plan plus activation for other consumers. No
+second grant, platform, environment, or fingerprint implementation exists.
+
 Every describe/run launch also verifies the actual executable before start:
 after `Profile.Command` fixes the launch path and the caller fixes `Dir`, the
 adapter refuses a symlink or nonregular executable, hashes the exact file the
@@ -528,8 +541,12 @@ arbitrary set.
 Each candidate workspace uses its reserved root-level
 `.verdi-cse-environment` directory as `BuildProfile`'s caller-owned `envRoot`
 for the whole run. The base tree and every candidate patch must leave that path
-absent, and CSE itself rejects a pre-existing or nonempty path before calling
-`BuildProfile`. The directory persists across interruption so a resume does not reset
+absent. CSE plans the profile before the receipt without touching that path;
+after materialization it rejects a pre-existing or nonempty path before
+activating the plan. A collision therefore leaves at most the already-immutable
+receipt and materialized workspace, with no profile directory, observation, or
+result, and resume must re-verify and retry the same fail-closed boundary. The
+directory persists across interruption so a resume does not reset
 candidate-local HOME/XDG/TMP state after measured evidence already exists. If
 any observation exists and a required candidate environment root is missing,
 resume refuses the changed environment. When no observation exists, a missing
@@ -547,11 +564,13 @@ The first start:
 2. strict-decodes `evaluator-capabilities.json` and proves digest parity;
 3. resolves every workload/fixture/contract identity and verifies its protected
    base-tree bytes;
-4. resolves and cross-checks authorization;
+4. resolves and cross-checks authorization, and purely plans every candidate
+   profile plus its exact fingerprint/enforcement projection;
 5. derives the experiment-scoped workspace run ID, receipt, and full schedule;
 6. creates `runs/<run-id>/execution.json` with
    `atomicfile.CreateImmutable` under `writer.lock`; then
-7. materializes and evaluates in schedule order.
+7. materializes each candidate, proves its reserved environment root absent,
+   activates the already-bound profile plan, and evaluates in schedule order.
 
 Resume:
 
