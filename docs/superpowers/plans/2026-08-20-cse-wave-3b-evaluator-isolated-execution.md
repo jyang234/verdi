@@ -33,7 +33,7 @@ DC-10, DC-12–DC-15, CO-1–CO-7; `spec/execution-workspace`; the canonical
 CSE design's evaluator, execution, failure, and retention sections; the
 four-feature orchestration plan's Wave 3B contract; invention-ledger
 SI-12–SI-13, SI-17, SI-30, SI-37, SI-40–SI-46, SI-58–SI-63, SI-75–SI-76,
-and SI-126–SI-135.
+and SI-126–SI-138.
 
 **Execution status:** Task 0's canonical CSE/store-layout amendment is ratified
 and merged, and the Task 1 evidence-schema tranche is complete on its runtime
@@ -498,6 +498,14 @@ evaluator. A fixed peak-RSS metric on a platform without that observer fails
 operationally before materialization. Until Wave 5 provides the concrete
 resolver there is no default/local constructor and no user-facing launch path.
 
+The shared execution grant represents timeout authority as a positive integer
+number of seconds. A Wave 3B definition is therefore registrable only when
+`timeout_per_round` is a positive integral number of seconds. Definition
+validation rejects every positive fractional-second duration; authorization
+does not round, truncate, or approximate it. This keeps the definition and its
+grant exactly comparable without introducing a second duration field or a
+feature-local grant grammar (SI-138).
+
 Every `DeclaredEnv` value is explicitly approved by that resolver for both
 process exposure and durable recording in the run fingerprint. Wave 3B never
 copies ambient environment variables. A later policy adapter must refuse
@@ -680,7 +688,8 @@ responses.
 receipt}.go` and tests.
 
 - [ ] RED: complete rotation tables (2/3/4 candidates, zero/multiple warmups),
-      digest determinism, clone safety, mismatched policy/digest/timeout/env,
+      digest determinism, clone safety, rejected fractional-second definition
+      timeouts, mismatched policy/digest/timeout/env,
       network/elevated requirements, unsupported grant mechanisms, exact
       input ID/path/digest/protected-path resolution, capability membership,
       experiment-scoped candidate materialization identities, reserved absent
@@ -880,6 +889,13 @@ evaluator response plus a harness-owned observation containing no guards or
 evaluator/candidate measurements. Coverage is 2/2. The transformation admits
 only the two fixed harness measurement IDs, keeps them diagnostic for a failure
 outcome, and adds no artifact or persistence surface.
+
+The SI-138 correction is lossless across the two previously incompatible
+timeout clauses: (1) the definition's positive duration maps to a positive
+integral-second validation rule; (2) the authorization contract's exact
+equality maps to the existing integer `timeout_seconds` grant without rounding.
+Coverage is 2/2. This is a representability closure over source units already
+counted in the 44/44 matrix, not a new execution capability or authority unit.
 
 ## Handoff after Wave 3B
 
