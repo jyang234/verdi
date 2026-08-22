@@ -174,7 +174,7 @@ func verifyRegularInput(root, path, digest string) error {
 		return fmt.Errorf("hash input %q: %w", path, copyErr)
 	}
 	if closeErr != nil {
-		return fmt.Errorf("close input %q: %w", path, closeErr)
+		return fmt.Errorf("finalize input %q: %w", path, closeErr)
 	}
 	got := "sha256:" + hex.EncodeToString(hash.Sum(nil))
 	if got != digest {
