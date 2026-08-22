@@ -148,6 +148,9 @@ func (a adapter) observe(ctx context.Context, input ObserveInput) (Attempt, erro
 		ProcessDisclosures:  append([]string(nil), disclosures...),
 	}
 	if input.Request.Cycle.Kind == experiment.CycleWarmup {
+		if err := ValidateAttempt(input, attempt); err != nil {
+			return Attempt{}, operational("run attempt", ErrProtocol, nil, err)
+		}
 		return attempt, nil
 	}
 	guards := []experiment.GuardResult{}
@@ -169,10 +172,10 @@ func (a adapter) observe(ctx context.Context, input ObserveInput) (Attempt, erro
 		Measurements:     observationMeasurements,
 		Disclosures:      observationDisclosures,
 	}
-	if err := observation.Validate(); err != nil {
-		return Attempt{}, operational("run observation", ErrProtocol, nil, err)
-	}
 	attempt.Observation = &observation
+	if err := ValidateAttempt(input, attempt); err != nil {
+		return Attempt{}, operational("run attempt", ErrProtocol, nil, err)
+	}
 	return attempt, nil
 }
 

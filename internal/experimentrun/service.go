@@ -186,7 +186,7 @@ func (s *Service) Start(ctx context.Context, request StartRequest) (StartResult,
 		if err != nil {
 			return StartResult{}, err
 		}
-		attempt, err := s.evaluator.Observe(ctx, profile, experimentevaluator.ObserveInput{
+		observeInput := experimentevaluator.ObserveInput{
 			Launch: experimentevaluator.Launch{
 				Directory: candidate.workspacePath,
 				Argv:      append([]string(nil), request.Definition.Evaluator.Argv...),
@@ -202,12 +202,10 @@ func (s *Service) Start(ctx context.Context, request StartRequest) (StartResult,
 				Fixtures:         append([]experiment.ResolvedArtifact(nil), inputs.Fixtures...),
 				Contract:         inputs.Contract,
 			},
-		})
+		}
+		attempt, err := s.evaluateAttempt(ctx, profile, observeInput)
 		if err != nil {
 			return StartResult{}, fmt.Errorf("experimentrun: evaluate %s %q: %w", scheduled.Cycle.Kind, scheduled.Candidate, err)
-		}
-		if err := validateEvaluatorAttempt(scheduled, attempt); err != nil {
-			return StartResult{}, err
 		}
 		if scheduled.Cycle.Kind == experiment.CycleWarmup {
 			if attempt.Outcome.Kind != experiment.OutcomeCompleted {
@@ -228,37 +226,15 @@ func (s *Service) Start(ctx context.Context, request StartRequest) (StartResult,
 	return result, nil
 }
 
-// validateEvaluatorAttempt protects publication from a malformed injected
-// evaluator port. The production adapter already constructs these shapes, but
-// the service owns the durable boundary and must not persist an observation
-// that disagrees with the attempt outcome it claims to preserve.
-func validateEvaluatorAttempt(scheduled ScheduledAttempt, attempt experimentevaluator.Attempt) error {
-	if err := attempt.Outcome.Validate(); err != nil {
-		return fmt.Errorf("experimentrun: %s %d candidate %q outcome: %w", scheduled.Cycle.Kind, scheduled.Cycle.Number, scheduled.Candidate, err)
+func (s *Service) evaluateAttempt(ctx context.Context, profile execworkspace.Profile, input experimentevaluator.ObserveInput) (experimentevaluator.Attempt, error) {
+	attempt, err := s.evaluator.Observe(ctx, profile, input)
+	if err != nil {
+		return experimentevaluator.Attempt{}, err
 	}
-	switch scheduled.Cycle.Kind {
-	case experiment.CycleWarmup:
-		if attempt.Observation != nil {
-			return fmt.Errorf("experimentrun: warmup %d candidate %q returned an observation", scheduled.Cycle.Number, scheduled.Candidate)
-		}
-	case experiment.CycleMeasured:
-		if attempt.Observation == nil {
-			return fmt.Errorf("experimentrun: measured round %d candidate %q returned no observation", scheduled.Cycle.Number, scheduled.Candidate)
-		}
-		if attempt.Observation.Outcome == nil || !sameCandidateOutcome(attempt.Outcome, *attempt.Observation.Outcome) {
-			return fmt.Errorf("experimentrun: measured round %d candidate %q observation outcome does not match evaluator outcome", scheduled.Cycle.Number, scheduled.Candidate)
-		}
-	default:
-		return fmt.Errorf("experimentrun: unknown schedule cycle kind %q", scheduled.Cycle.Kind)
+	if err := experimentevaluator.ValidateAttempt(input, attempt); err != nil {
+		return experimentevaluator.Attempt{}, fmt.Errorf("experimentrun: validate evaluator attempt: %w", err)
 	}
-	return nil
-}
-
-func sameCandidateOutcome(left, right experiment.CandidateOutcome) bool {
-	if left.Kind != right.Kind || (left.Witness == nil) != (right.Witness == nil) {
-		return false
-	}
-	return left.Witness == nil || *left.Witness == *right.Witness
+	return attempt, nil
 }
 
 type candidatePlan struct {

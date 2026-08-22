@@ -34,54 +34,39 @@ func TestNewServiceDefaultsToStrictEvaluatorAdapter(t *testing.T) {
 	}
 }
 
-func TestValidateEvaluatorAttemptFailsClosed(t *testing.T) {
-	witness := "candidate timed out"
-	completedWithWitness := experiment.CandidateOutcome{Kind: experiment.OutcomeCompleted, Witness: &witness}
-	timeout := experiment.CandidateOutcome{Kind: experiment.OutcomeCandidateTimeout, Witness: &witness}
-	completed := experiment.CandidateOutcome{Kind: experiment.OutcomeCompleted}
+func TestServiceValidatesInjectedAttemptAtEvaluatorBoundary(t *testing.T) {
+	input := experimentevaluator.ObserveInput{Request: validServiceEvaluatorRequest()}
+	valid := validServiceAttempt(input.Request)
 
-	for _, test := range []struct {
-		name      string
-		scheduled ScheduledAttempt
-		attempt   experimentevaluator.Attempt
-		want      string
-	}{
-		{
-			name:      "invalid warmup outcome",
-			scheduled: ScheduledAttempt{Candidate: "alpha", Cycle: experiment.EvaluatorCycle{Kind: experiment.CycleWarmup, Number: 1}},
-			attempt:   experimentevaluator.Attempt{Outcome: completedWithWitness},
-			want:      "outcome",
-		},
-		{
-			name:      "warmup observation",
-			scheduled: ScheduledAttempt{Candidate: "alpha", Cycle: experiment.EvaluatorCycle{Kind: experiment.CycleWarmup, Number: 1}},
-			attempt:   experimentevaluator.Attempt{Outcome: completed, Observation: &experiment.Observation{}},
-			want:      "warmup",
-		},
-		{
-			name:      "missing measured observation",
-			scheduled: ScheduledAttempt{Candidate: "alpha", Cycle: experiment.EvaluatorCycle{Kind: experiment.CycleMeasured, Number: 1}},
-			attempt:   experimentevaluator.Attempt{Outcome: completed},
-			want:      "no observation",
-		},
-		{
-			name:      "mismatched measured outcome",
-			scheduled: ScheduledAttempt{Candidate: "alpha", Cycle: experiment.EvaluatorCycle{Kind: experiment.CycleMeasured, Number: 1}},
-			attempt: experimentevaluator.Attempt{
-				Outcome: timeout,
-				Observation: &experiment.Observation{
-					Outcome: &completed,
-				},
-			},
-			want: "does not match",
-		},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			if err := validateEvaluatorAttempt(test.scheduled, test.attempt); err == nil || !strings.Contains(err.Error(), test.want) {
-				t.Fatalf("validateEvaluatorAttempt error = %v, want %q", err, test.want)
-			}
-		})
-	}
+	t.Run("valid attempt", func(t *testing.T) {
+		evaluator := &fixedAttemptEvaluator{attempt: valid}
+		service := &Service{evaluator: evaluator}
+		if _, err := service.evaluateAttempt(context.Background(), execworkspace.Profile{}, input); err != nil {
+			t.Fatalf("evaluateAttempt: %v", err)
+		}
+		if evaluator.calls != 1 {
+			t.Fatalf("injected evaluator calls = %d, want 1", evaluator.calls)
+		}
+	})
+
+	t.Run("missing harness facts", func(t *testing.T) {
+		invalid := valid
+		invalid.ProcessMeasurements = nil
+		evaluator := &fixedAttemptEvaluator{attempt: invalid}
+		service := &Service{evaluator: evaluator}
+		if _, err := service.evaluateAttempt(context.Background(), execworkspace.Profile{}, input); err == nil || !strings.Contains(err.Error(), "process facts") {
+			t.Fatalf("evaluateAttempt error = %v, want missing harness process facts refusal", err)
+		}
+	})
+
+	t.Run("operational evaluator failure", func(t *testing.T) {
+		failure := errors.New("evaluator transport failed")
+		evaluator := &fixedAttemptEvaluator{err: failure}
+		service := &Service{evaluator: evaluator}
+		if _, err := service.evaluateAttempt(context.Background(), execworkspace.Profile{}, input); !errors.Is(err, failure) {
+			t.Fatalf("evaluateAttempt error = %v, want evaluator failure", err)
+		}
+	})
 }
 
 func TestActivateCandidateRejectsMaterializerIdentityMismatch(t *testing.T) {
@@ -114,6 +99,51 @@ func TestActivateCandidateRejectsMaterializerIdentityMismatch(t *testing.T) {
 	})
 	if err == nil || !strings.Contains(err.Error(), "workspace id") {
 		t.Fatalf("activateCandidate error = %v, want materializer identity mismatch", err)
+	}
+}
+
+func TestActivateCandidateMaterializerFailuresHaveNoProfileEffects(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		err  error
+	}{
+		{name: "operational failure", err: errors.New("materializer failed")},
+		{name: "cancellation", err: context.Canceled},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			root := t.TempDir()
+			identity, err := execworkspace.NewPatchIdentity("run-1", strings.Repeat("a", 40), []byte("diff --git a/a b/a\n"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			workspaceID, err := identity.WorkspaceID()
+			if err != nil {
+				t.Fatal(err)
+			}
+			workspace := execworkspace.UnitPath(root, workspaceID)
+			environment := filepath.Join(workspace, environmentRootName)
+			planned, _, err := execworkspace.PlanProfile(workspace, environment, testGrants(t, true, "./tools/evaluator", 30), map[string]string{"LANG": "C"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			candidate := &candidatePlan{
+				identity:      identity,
+				workspacePath: workspace,
+				environment:   environment,
+				planned:       planned,
+			}
+			service := &Service{materializer: fixedMaterializer{err: test.err}}
+
+			if _, err := service.activateCandidate(context.Background(), candidate); !errors.Is(err, test.err) {
+				t.Fatalf("activateCandidate error = %v, want errors.Is(_, %v)", err, test.err)
+			}
+			if candidate.activated {
+				t.Fatal("candidate marked activated after materializer failure")
+			}
+			if _, err := os.Lstat(environment); !errors.Is(err, os.ErrNotExist) {
+				t.Fatalf("materializer failure created profile environment: %v", err)
+			}
+		})
 	}
 }
 
@@ -385,6 +415,17 @@ type recordingEvaluator struct {
 	requests []experimentevaluator.ObserveInput
 }
 
+type fixedAttemptEvaluator struct {
+	attempt experimentevaluator.Attempt
+	err     error
+	calls   int
+}
+
+func (e *fixedAttemptEvaluator) Observe(context.Context, execworkspace.Profile, experimentevaluator.ObserveInput) (experimentevaluator.Attempt, error) {
+	e.calls++
+	return e.attempt, e.err
+}
+
 func (e *recordingEvaluator) Observe(ctx context.Context, profile execworkspace.Profile, input experimentevaluator.ObserveInput) (experimentevaluator.Attempt, error) {
 	cmd, _, cancel, err := profile.Command(ctx, input.Launch.Argv[0])
 	if err != nil {
@@ -396,13 +437,29 @@ func (e *recordingEvaluator) Observe(ctx context.Context, profile execworkspace.
 	}
 	cancel()
 	e.requests = append(e.requests, input)
+	wall := experiment.Measurement{
+		ID:     experiment.EvaluatorWallDurationMetricID,
+		Value:  experiment.NumberValue("1"),
+		Unit:   "ns",
+		Source: experiment.SourceHarnessMeasured,
+	}
+	processMeasurements := []experiment.Measurement{wall}
+	processDisclosures := []string{experiment.PeakRSSUnavailableDisclosure}
 	if input.Request.Cycle.Kind == experiment.CycleWarmup && input.Request.Candidate == "beta" {
 		witness := "warmup candidate timed out"
-		return experimentevaluator.Attempt{Outcome: experiment.CandidateOutcome{Kind: experiment.OutcomeCandidateTimeout, Witness: &witness}}, nil
+		return experimentevaluator.Attempt{
+			Outcome:             experiment.CandidateOutcome{Kind: experiment.OutcomeCandidateTimeout, Witness: &witness},
+			ProcessMeasurements: processMeasurements,
+			ProcessDisclosures:  processDisclosures,
+		}, nil
 	}
 	outcome := experiment.CandidateOutcome{Kind: experiment.OutcomeCompleted}
 	if input.Request.Cycle.Kind == experiment.CycleWarmup {
-		return experimentevaluator.Attempt{Outcome: outcome}, nil
+		return experimentevaluator.Attempt{
+			Outcome:             outcome,
+			ProcessMeasurements: processMeasurements,
+			ProcessDisclosures:  processDisclosures,
+		}, nil
 	}
 	observation := experiment.Observation{
 		Schema:           experiment.ObservationSchemaV2,
@@ -415,10 +472,56 @@ func (e *recordingEvaluator) Observe(ctx context.Context, profile execworkspace.
 		Measurements: []experiment.Measurement{
 			{ID: "latency", Value: experiment.NumberValue("10"), Unit: "ms", Source: experiment.SourceEvaluatorMeasured},
 			{ID: "memory", Value: experiment.NumberValue("1"), Unit: "bytes", Source: experiment.SourceEvaluatorMeasured},
+			wall,
 		},
-		Disclosures: []string{},
+		Disclosures: processDisclosures,
 	}
-	return experimentevaluator.Attempt{Outcome: outcome, Observation: &observation}, nil
+	return experimentevaluator.Attempt{
+		Outcome:             outcome,
+		Observation:         &observation,
+		ProcessMeasurements: processMeasurements,
+		ProcessDisclosures:  processDisclosures,
+	}, nil
+}
+
+func validServiceEvaluatorRequest() experiment.EvaluatorRequest {
+	return experiment.EvaluatorRequest{
+		Schema:           experiment.EvaluatorProtocolSchema,
+		ExperimentDigest: "sha256:" + strings.Repeat("a", 64),
+		Run:              "run-1",
+		Candidate:        "alpha",
+		Cycle:            experiment.EvaluatorCycle{Kind: experiment.CycleMeasured, Number: 1},
+		Workload:         experiment.ResolvedArtifact{ID: "workload", Path: "inputs/workload.json", Digest: "sha256:" + strings.Repeat("b", 64)},
+		Fixtures:         []experiment.ResolvedArtifact{},
+		Contract:         experiment.ResolvedArtifact{ID: "contract", Path: "contracts/behavioral.json", Digest: "sha256:" + strings.Repeat("c", 64)},
+	}
+}
+
+func validServiceAttempt(request experiment.EvaluatorRequest) experimentevaluator.Attempt {
+	outcome := experiment.CandidateOutcome{Kind: experiment.OutcomeCompleted}
+	wall := experiment.Measurement{
+		ID:     experiment.EvaluatorWallDurationMetricID,
+		Value:  experiment.NumberValue("1"),
+		Unit:   "ns",
+		Source: experiment.SourceHarnessMeasured,
+	}
+	observation := experiment.Observation{
+		Schema:           experiment.ObservationSchemaV2,
+		ExperimentDigest: request.ExperimentDigest,
+		Run:              request.Run,
+		Candidate:        request.Candidate,
+		Round:            request.Cycle.Number,
+		Outcome:          &outcome,
+		Guards:           []experiment.GuardResult{},
+		Measurements:     []experiment.Measurement{wall},
+		Disclosures:      []string{experiment.PeakRSSUnavailableDisclosure},
+	}
+	return experimentevaluator.Attempt{
+		Outcome:             outcome,
+		Observation:         &observation,
+		ProcessMeasurements: []experiment.Measurement{wall},
+		ProcessDisclosures:  []string{experiment.PeakRSSUnavailableDisclosure},
+	}
 }
 
 func writeStartAuthority(t *testing.T, root, experimentDir string, capabilities []byte, patches map[string][]byte) {
