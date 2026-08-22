@@ -118,6 +118,11 @@ func TestEvaluatorResponseOutcomePresenceAndCustody(t *testing.T) {
 			r.Measurements = []Measurement{{ID: EvaluatorWallDurationMetricID, Value: NumberValue("1"), Unit: "ns", Source: SourceEvaluatorMeasured}}
 			return r
 		}()},
+		{"reserved RSS unavailable disclosure forbidden", func() EvaluatorResponse {
+			r := failed
+			r.Disclosures = []string{PeakRSSUnavailableDisclosure}
+			return r
+		}()},
 		{"invalid UTF-8 guard witness", func() EvaluatorResponse {
 			r := completed
 			witness := string([]byte{0xff})

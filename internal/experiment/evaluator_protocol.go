@@ -179,6 +179,9 @@ func (r EvaluatorResponse) Validate() error {
 		if d == "" || !utf8.ValidString(d) {
 			return fmt.Errorf("experiment: evaluator disclosure %d must be nonempty valid UTF-8", i)
 		}
+		if d == PeakRSSUnavailableDisclosure {
+			return fmt.Errorf("experiment: evaluator response cannot supply reserved disclosure %q", d)
+		}
 	}
 	return nil
 }

@@ -288,7 +288,7 @@ func validateCandidateFailureEvidence(o Observation) error {
 			return fmt.Errorf("experiment: candidate failure measurement %q must be harness-measured", measurement.ID)
 		}
 		if err := validateHarnessMeasurement(measurement); err != nil {
-			return fmt.Errorf("experiment: candidate failure observation: %v", err)
+			return fmt.Errorf("experiment: candidate failure observation: %w", err)
 		}
 		switch measurement.ID {
 		case EvaluatorWallDurationMetricID:
