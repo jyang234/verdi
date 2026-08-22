@@ -33,15 +33,13 @@ DC-10, DC-12–DC-15, CO-1–CO-7; `spec/execution-workspace`; the canonical
 CSE design's evaluator, execution, failure, and retention sections; the
 four-feature orchestration plan's Wave 3B contract; invention-ledger
 SI-12–SI-13, SI-17, SI-30, SI-37, SI-40–SI-46, SI-58–SI-63, SI-75–SI-76,
-and SI-126–SI-134.
+and SI-126–SI-135.
 
-**Execution status:** Runtime implementation is BLOCKED until this consolidated
-spec-only head passes its one independent cross-model review, the owner accepts
-the decisions, and Task 0's canonical CSE/store-layout amendment is ratified
-and merged. The current explicit terminal tree has no multi-run or durable
-receipt path, and the current observation/result schemas cannot honestly
-represent candidate crash or timeout. No runtime producer may work around
-those authority gaps.
+**Execution status:** Task 0's canonical CSE/store-layout amendment is ratified
+and merged, and the Task 1 evidence-schema tranche is complete on its runtime
+branch. Task 2 is BLOCKED until the SI-135 observer-authority correction passes
+its one independent cross-model review and is accepted and merged by the
+owner. No runtime producer may work around that authority gap.
 
 ## Scope and non-goals
 
@@ -169,8 +167,8 @@ The amendment makes these exact changes:
    The aggregate state label is not a run selector. An exact ratification is
    the only operation allowed to prefer one result.
 
-7. Record the amendment and the 43/43 source-coverage matrix in the accepted
-   revision history. Update SI-126–SI-134 from conditional to the exact
+7. Record the amendment and the 44/44 source-coverage matrix in the accepted
+   revision history. Update SI-126–SI-135 from conditional to the exact
    ratified amendment head only after merge.
 
 ## Fixed evaluator protocol
@@ -234,8 +232,11 @@ Rules:
 - `completed` forbids `outcome.witness` and requires the definition-aware
   guard/primary/bound evidence already enforced by `ValidateObservations`.
 - `candidate-crash` and `candidate-timeout` require a nonempty witness and
-  require empty guards and measurements. They are candidate outcomes, not a
-  fabricated failure of every registered guard.
+  require the evaluator response to carry empty guards and measurements. The
+  harness-owned measured observation carries no guards or
+  evaluator/candidate measurements for that outcome, but still appends its
+  fixed process measurements. They are candidate outcomes, not a fabricated
+  failure of every registered guard.
 - Evaluator measurements may be `evaluator-measured` or
   `candidate-reported`; `harness-measured` is rejected at this boundary.
 - The two fixed `verdi-evaluator-*` observer IDs are reserved: the evaluator
@@ -263,8 +264,9 @@ Observation V2 decision semantics are exact:
 - each measured candidate/round still has exactly one observation;
 - a `completed` observation must satisfy all existing guard, primary, and
   bounded-measurement requirements;
-- a crash/timeout observation makes that candidate ineligible and contributes
-  no metric value or guard verdict;
+- a crash/timeout observation carries only the fixed harness process
+  measurements, makes that candidate ineligible, and contributes no metric
+  value or guard verdict to the decision or aggregates;
 - aggregates for an ineligible candidate may describe only its completed
   rounds and carry the exact completed-round count;
 - any baseline crash/timeout ends the decision as
@@ -340,17 +342,24 @@ fields participate.
 
 ### Process observer
 
-For every zero-exit `run` response the harness appends:
+For every zero-exit `run` response the harness appends to the attempt result,
+and to every measured observation:
 
 - `verdi-evaluator-wall-duration`, numeric nanoseconds,
   `source: harness-measured`; and
 - on Linux when returned by the process API, `verdi-evaluator-peak-rss`,
   numeric bytes, `source: harness-measured`.
 
-The IDs and units are fixed. The duration is diagnostic unless the locked
-definition explicitly registers the same ID. Peak RSS absence is represented
-by the attempt's observation disclosure `peak-rss-unavailable`; it is never
-zero-filled or written retroactively into the immutable run receipt.
+The IDs and units are fixed. For a completed outcome, the duration is
+diagnostic unless the locked definition explicitly registers the same ID. For
+a candidate-crash or candidate-timeout outcome, both process measurements are
+diagnostic regardless of the definition: the candidate is already ineligible,
+and they cannot satisfy a decision metric or enter an aggregate. Peak RSS
+absence is represented by the attempt's observation disclosure
+`peak-rss-unavailable`; it is never zero-filled or written retroactively into
+the immutable run receipt. A failed warmup still publishes no observation, so
+its attempt process facts remain transient and only the fixed outcome
+diagnostic enters the final-invocation warmup annex.
 Exit status and harness timeout are control facts, not measurements: nonzero or
 deadline expiry invalidates the evaluator attempt operationally.
 
@@ -577,7 +586,7 @@ flow, the accepted revision history, this plan, and the invention ledger.
 
 - [ ] Produce the exact amendment described by Gate A without direct-edit
       bypass.
-- [ ] Add a 43/43 source-coverage witness and zero-existing-artifact migration
+- [ ] Add a 44/44 source-coverage witness and zero-existing-artifact migration
       witness that separately enumerates the two committed caching fixture
       trees requiring V2 ratchet updates.
 - [ ] Run `make spec-align`.
@@ -620,7 +629,9 @@ responses.
 - [ ] RED: describe token replacement, exact stdin, canonical stdout, digest
       parity, closed outcome rules, trust-boundary rejection, stdout/stderr
       bounds, exit/timeout classification, context cancellation, duration,
-      Linux RSS, and unavailable RSS disclosure.
+      Linux RSS, unavailable RSS disclosure, and fixed harness facts on every
+      zero-exit outcome without admitting a failure's process facts into the
+      decision.
 - [ ] GREEN: construct every launch through `Profile.Command`; retain and close
       its derived context/cancel pair; set only `Dir`, `Stdin`, `Stdout`, and
       `Stderr`; never mutate `Path`, `Args`, `Env`, `SysProcAttr`, or
@@ -763,7 +774,7 @@ deliberately unmeasured warmup diagnostics have different proof sources.
 
 ## Source coverage and losslessness witness
 
-The Wave 3B slice maps 43/43 implicated authority units. The canonical
+The Wave 3B slice maps 44/44 implicated authority units. The canonical
 successor's supersession manifest separately classifies every predecessor
 object, including the 20 predecessor objects not repeated in this slice:
 
@@ -812,11 +823,14 @@ object, including the 20 predecessor objects not repeated in this slice:
 | 41 | DC-2 derived state including exploratory and multi-run aggregate posture | Gate A item 6; Task 1 |
 | 42 | CO-4 process exit mapping | unchanged typed-outcome boundary here; explicit future mapping in Failure and exit semantics and Wave 5 |
 | 43 | CO-5 registered-boundary scope | unchanged result claim; Task 5 recompute and at-rest verification preserve exact definition/run/environment identity |
+| 44 | Zero-exit process-observer facts versus failure-outcome evidence emptiness | SI-135; Task 2 keeps the evaluator response empty, while Tasks 2/4 project only fixed harness facts into a measured failure observation and Task 5 excludes them from decision values/aggregates |
 
 Transformations: the undefined OQ-1 protocol becomes SI-126's fixed v1; the
 single-run terminal tree becomes SI-128's lossless multi-run tree before any
 real persisted instance exists; candidate failure prose becomes an explicit
-closed outcome rather than a fabricated guard; and the in-memory SI-42
+closed outcome rather than a fabricated guard; fixed process-observer facts
+remain lossless on every zero-exit measured attempt without becoming favorable
+failure evidence; and the in-memory SI-42
 attestation gains a durable receipt. Intentional omissions are reproduction
 claims (Wave 5 registration, exercised only later), policy adapters,
 ratification, cleanup, capsule selection, CLI/MCP/UI, and OQ-2 corroboration,
@@ -824,6 +838,15 @@ each retained under its named original wave or open question. The existing
 `verdi.experiment-capsule/v1` artifact remains in the closed CSE schema
 inventory but is unchanged until Wave 5 creates it. No source unit is silently
 dropped.
+
+The SI-135 correction is separately lossless across its two contradictory
+source clauses: (1) the process-observer requirement to retain fixed facts for
+every zero-exit `run` response maps to the attempt result and every measured
+observation; (2) the candidate-failure empty-evidence rule maps to an empty
+evaluator response plus a harness-owned observation containing no guards or
+evaluator/candidate measurements. Coverage is 2/2. The transformation admits
+only the two fixed harness measurement IDs, keeps them diagnostic for a failure
+outcome, and adds no artifact or persistence surface.
 
 ## Handoff after Wave 3B
 
