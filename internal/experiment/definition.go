@@ -81,18 +81,27 @@ func EvaluatorRepoPath(argv0 string) (string, error) {
 	return path, nil
 }
 
-// Validate checks argv is a nonempty vector whose executable is a
+// Validate checks argv contains an executable plus the final literal run
+// operation, whose executable is a
 // well-formed absolute, bare-command, or canonical repo-relative path
 // (EvaluatorRepoPath), and that both digests are well-formed.
 func (e Evaluator) Validate() error {
-	if len(e.Argv) == 0 {
-		return fmt.Errorf("experiment: evaluator.argv must be nonempty")
+	if len(e.Argv) < 2 {
+		return fmt.Errorf("experiment: evaluator.argv must contain at least an executable and final %q operation", "run")
 	}
 	if e.Argv[0] == "" {
 		return fmt.Errorf("experiment: evaluator.argv[0] must be nonempty")
 	}
 	if _, err := EvaluatorRepoPath(e.Argv[0]); err != nil {
 		return err
+	}
+	for i, arg := range e.Argv {
+		if arg == "" {
+			return fmt.Errorf("experiment: evaluator.argv[%d] must be nonempty", i)
+		}
+	}
+	if e.Argv[len(e.Argv)-1] != "run" {
+		return fmt.Errorf("experiment: evaluator.argv final operation is %q, want %q", e.Argv[len(e.Argv)-1], "run")
 	}
 	if err := ValidateDigest(e.Digest); err != nil {
 		return fmt.Errorf("experiment: evaluator.digest: %w", err)
@@ -238,9 +247,9 @@ type Execution struct {
 }
 
 // Validate checks warmups/rounds bounds, the order enum, that
-// timeout_per_round parses as a positive duration (the registered string
-// itself is never reformatted), and that environment_policy is a
-// nonempty opaque identifier this package does not interpret.
+// timeout_per_round parses as a positive integral number of seconds (the
+// registered string itself is never reformatted), and that environment_policy
+// is a nonempty opaque identifier this package does not interpret.
 func (e Execution) Validate() error {
 	if e.Warmups < 0 {
 		return fmt.Errorf("experiment: execution.warmups must be >= 0, got %d", e.Warmups)
@@ -257,6 +266,9 @@ func (e Execution) Validate() error {
 	}
 	if d <= 0 {
 		return fmt.Errorf("experiment: execution.timeout_per_round %q must be > 0", e.TimeoutPerRound)
+	}
+	if d%time.Second != 0 {
+		return fmt.Errorf("experiment: execution.timeout_per_round %q must be an integral number of seconds", e.TimeoutPerRound)
 	}
 	if err := nonemptyString("execution.environment_policy", e.EnvironmentPolicy); err != nil {
 		return err

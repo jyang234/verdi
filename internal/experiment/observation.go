@@ -3,11 +3,20 @@ package experiment
 import (
 	"bytes"
 	"fmt"
+	"unicode/utf8"
+
+	"github.com/jyang234/verdi/internal/canonjson"
 )
 
-// ObservationSchema is the only accepted observation-record schema
-// identifier.
+// ObservationSchema is the predecessor read-compatible schema identifier.
 const ObservationSchema = "verdi.experiment-observation/v1"
+
+// ObservationSchemaV2 is the harness-owned measured-attempt envelope.
+const ObservationSchemaV2 = "verdi.experiment-observation/v2"
+
+// PeakRSSUnavailableDisclosure records that the harness process observer
+// could not obtain the optional Linux peak-RSS fact for a measured attempt.
+const PeakRSSUnavailableDisclosure = "peak-rss-unavailable"
 
 // GuardResult is one guard verdict inside an observation record.
 type GuardResult struct {
@@ -27,7 +36,7 @@ func (g GuardResult) Validate() error {
 	}
 	switch g.Verdict {
 	case GuardVerdictFail:
-		if g.Witness == nil || *g.Witness == "" {
+		if g.Witness == nil || *g.Witness == "" || !utf8.ValidString(*g.Witness) {
 			return fmt.Errorf("experiment: guard %q: witness must be a nonempty string when verdict is %q", g.ID, GuardVerdictFail)
 		}
 	case GuardVerdictPass:
@@ -81,18 +90,18 @@ func (m Measurement) Validate() error {
 	return nil
 }
 
-// Observation is one verdi.experiment-observation/v1 record: one
-// evaluator response for one candidate and round, keyed to the locked
-// definition and its run identity (AC-3).
+// Observation is one V1 predecessor record or V2 harness-owned measured
+// attempt, keyed to the locked definition and its run identity.
 type Observation struct {
-	Schema           string        `json:"schema"`
-	ExperimentDigest string        `json:"experiment_digest"`
-	Run              string        `json:"run"`
-	Candidate        string        `json:"candidate"`
-	Round            int           `json:"round"`
-	Guards           []GuardResult `json:"guards"`
-	Measurements     []Measurement `json:"measurements"`
-	Disclosures      []string      `json:"disclosures"`
+	Schema           string            `json:"schema"`
+	ExperimentDigest string            `json:"experiment_digest"`
+	Run              string            `json:"run"`
+	Candidate        string            `json:"candidate"`
+	Round            int               `json:"round"`
+	Outcome          *CandidateOutcome `json:"outcome,omitempty"`
+	Guards           []GuardResult     `json:"guards"`
+	Measurements     []Measurement     `json:"measurements"`
+	Disclosures      []string          `json:"disclosures"`
 }
 
 // observationDoc is the strict decode target: disclosures is a pointer so
@@ -100,14 +109,15 @@ type Observation struct {
 // explicitly present empty list, matching the artifact's "required key;
 // may be empty" grammar.
 type observationDoc struct {
-	Schema           string        `json:"schema"`
-	ExperimentDigest string        `json:"experiment_digest"`
-	Run              string        `json:"run"`
-	Candidate        string        `json:"candidate"`
-	Round            int           `json:"round"`
-	Guards           []GuardResult `json:"guards"`
-	Measurements     []Measurement `json:"measurements"`
-	Disclosures      *[]string     `json:"disclosures"`
+	Schema           string            `json:"schema"`
+	ExperimentDigest string            `json:"experiment_digest"`
+	Run              string            `json:"run"`
+	Candidate        string            `json:"candidate"`
+	Round            int               `json:"round"`
+	Outcome          *CandidateOutcome `json:"outcome,omitempty"`
+	Guards           []GuardResult     `json:"guards"`
+	Measurements     []Measurement     `json:"measurements"`
+	Disclosures      *[]string         `json:"disclosures"`
 }
 
 // DecodeObservation strict-decodes data as one observation record and
@@ -127,6 +137,7 @@ func DecodeObservation(data []byte) (Observation, error) {
 		Run:              doc.Run,
 		Candidate:        doc.Candidate,
 		Round:            doc.Round,
+		Outcome:          doc.Outcome,
 		Guards:           doc.Guards,
 		Measurements:     doc.Measurements,
 		Disclosures:      *doc.Disclosures,
@@ -134,7 +145,20 @@ func DecodeObservation(data []byte) (Observation, error) {
 	if err := o.Validate(); err != nil {
 		return Observation{}, err
 	}
+	if o.Schema == ObservationSchemaV2 {
+		if err := requireCanonicalJSON(data, o); err != nil {
+			return Observation{}, fmt.Errorf("experiment: observation v2: %w", err)
+		}
+	}
 	return o, nil
+}
+
+// EncodeObservation validates and canonically encodes one observation.
+func EncodeObservation(o Observation) ([]byte, error) {
+	if err := o.Validate(); err != nil {
+		return nil, err
+	}
+	return canonjson.Marshal(o)
 }
 
 // DecodeObservations strict-decodes data as an observations.jsonl file:
@@ -146,15 +170,34 @@ func DecodeObservations(data []byte) ([]Observation, error) {
 	lines := bytes.Split(data, []byte("\n"))
 	out := make([]Observation, 0, len(lines))
 	for i, line := range lines {
-		trimmed := bytes.TrimRight(line, "\r")
-		if len(bytes.TrimSpace(trimmed)) == 0 {
+		if len(bytes.TrimSpace(line)) == 0 {
 			continue
 		}
-		o, err := DecodeObservation(trimmed)
+		record := append([]byte(nil), line...)
+		if i < len(lines)-1 {
+			record = append(record, '\n')
+		}
+		o, err := DecodeObservation(record)
 		if err != nil {
 			return nil, fmt.Errorf("experiment: observations.jsonl line %d: %w", i+1, err)
 		}
 		out = append(out, o)
+	}
+	if len(out) > 0 && out[0].Schema == ObservationSchemaV2 {
+		var canonical bytes.Buffer
+		for i, observation := range out {
+			if observation.Schema != ObservationSchemaV2 {
+				return nil, fmt.Errorf("experiment: observations.jsonl line %d mixes observation schemas", i+1)
+			}
+			encoded, err := EncodeObservation(observation)
+			if err != nil {
+				return nil, fmt.Errorf("experiment: observations.jsonl line %d: %w", i+1, err)
+			}
+			canonical.Write(encoded)
+		}
+		if !bytes.Equal(data, canonical.Bytes()) {
+			return nil, fmt.Errorf("experiment: observations v2 file is not the exact canonical JSONL encoding")
+		}
 	}
 	return out, nil
 }
@@ -164,8 +207,30 @@ func DecodeObservations(data []byte) ([]Observation, error) {
 // integrity (run consistency, candidate/round registration, completeness)
 // — that is ValidateObservations' job (observations_validation.go).
 func (o Observation) Validate() error {
-	if o.Schema != ObservationSchema {
-		return fmt.Errorf("experiment: unknown observation schema %q, want %q", o.Schema, ObservationSchema)
+	if o.Schema != ObservationSchema && o.Schema != ObservationSchemaV2 {
+		return fmt.Errorf("experiment: unknown observation schema %q", o.Schema)
+	}
+	if o.Disclosures == nil {
+		return fmt.Errorf("experiment: observation.disclosures must be a present array")
+	}
+	if o.Schema == ObservationSchema && o.Outcome != nil {
+		return fmt.Errorf("experiment: observation v1 forbids outcome")
+	}
+	if o.Schema == ObservationSchemaV2 {
+		if o.Outcome == nil {
+			return fmt.Errorf("experiment: observation v2 requires outcome")
+		}
+		if err := o.Outcome.Validate(); err != nil {
+			return err
+		}
+		if o.Outcome.Kind != OutcomeCompleted {
+			if o.Guards == nil || o.Measurements == nil {
+				return fmt.Errorf("experiment: candidate failure observation requires present guards and measurements arrays")
+			}
+			if err := validateCandidateFailureEvidence(o); err != nil {
+				return err
+			}
+		}
 	}
 	if err := ValidateDigest(o.ExperimentDigest); err != nil {
 		return fmt.Errorf("experiment: observation.experiment_digest: %w", err)
@@ -203,10 +268,54 @@ func (o Observation) Validate() error {
 	}
 
 	for i, d := range o.Disclosures {
-		if d == "" {
+		if d == "" || !utf8.ValidString(d) {
 			return fmt.Errorf("experiment: observation.disclosures[%d] must be nonempty", i)
 		}
 	}
 
+	return nil
+}
+
+func validateCandidateFailureEvidence(o Observation) error {
+	if len(o.Guards) != 0 {
+		return fmt.Errorf("experiment: candidate failure observation requires empty guards")
+	}
+
+	seenWallDuration := false
+	seenPeakRSS := false
+	for _, measurement := range o.Measurements {
+		if measurement.Source != SourceHarnessMeasured {
+			return fmt.Errorf("experiment: candidate failure measurement %q must be harness-measured", measurement.ID)
+		}
+		if err := validateHarnessMeasurement(measurement); err != nil {
+			return fmt.Errorf("experiment: candidate failure observation: %w", err)
+		}
+		switch measurement.ID {
+		case EvaluatorWallDurationMetricID:
+			if seenWallDuration {
+				return fmt.Errorf("experiment: candidate failure observation repeats fixed wall-duration measurement")
+			}
+			seenWallDuration = true
+		case EvaluatorPeakRSSMetricID:
+			if seenPeakRSS {
+				return fmt.Errorf("experiment: candidate failure observation repeats optional peak-RSS measurement")
+			}
+			seenPeakRSS = true
+		default:
+			return fmt.Errorf("experiment: candidate failure observation measurement %q is not a fixed harness process measurement", measurement.ID)
+		}
+	}
+	if !seenWallDuration {
+		return fmt.Errorf("experiment: candidate failure observation requires fixed wall-duration measurement %q", EvaluatorWallDurationMetricID)
+	}
+	if seenPeakRSS {
+		if len(o.Disclosures) != 0 {
+			return fmt.Errorf("experiment: candidate failure observation with peak RSS requires empty disclosures")
+		}
+		return nil
+	}
+	if len(o.Disclosures) != 1 || o.Disclosures[0] != PeakRSSUnavailableDisclosure {
+		return fmt.Errorf("experiment: candidate failure observation without peak RSS requires exactly disclosure %q", PeakRSSUnavailableDisclosure)
+	}
 	return nil
 }

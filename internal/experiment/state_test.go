@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/jyang234/verdi/internal/canonjson"
 )
 
 // acceptResult and rejectResult are the stub ResultVerifier ports this
@@ -15,9 +17,9 @@ import (
 // exactly what keeps that import direction one-way. The integration test
 // wiring the REAL verifier over committed fixtures lives on the
 // experimentdecision side.
-func acceptResult(Definition, []Observation, Result) error { return nil }
+func acceptResult(Definition, []Observation, *ExecutionReceipt, Result) error { return nil }
 
-func rejectResult(Definition, []Observation, Result) error {
+func rejectResult(Definition, []Observation, *ExecutionReceipt, Result) error {
 	return errors.New("stub verifier: recomputed result differs")
 }
 
@@ -39,7 +41,15 @@ func writeFile(t *testing.T, dir, relPath, content string) {
 // repo root root — the layout DeriveState's two arguments describe.
 func writeExperimentFile(t *testing.T, root, relPath, content string) {
 	t.Helper()
+	if relPath == observationsFile || relPath == resultFile || relPath == executionFile {
+		relPath = filepath.Join(runsDirectory, "run-1", relPath)
+	}
 	writeFile(t, root, filepath.Join(testExperimentDir, relPath), content)
+}
+
+func writeRunFile(t *testing.T, root, run, relPath, content string) {
+	t.Helper()
+	writeFile(t, root, filepath.Join(testExperimentDir, runsDirectory, run, relPath), content)
 }
 
 // lockedDefinitionDoc returns validDefinitionYAML — with rounds reduced to
@@ -49,6 +59,42 @@ func writeExperimentFile(t *testing.T, root, relPath, content string) {
 func lockedDefinitionDoc(t *testing.T) (doc, digest string) {
 	t.Helper()
 	unlocked := mutate(t, "rounds: 10", "rounds: 2")
+	def := mustDecodeDefinition(t, unlocked)
+	digest, err := DefinitionDigest(def)
+	if err != nil {
+		t.Fatalf("DefinitionDigest() unexpected error: %v", err)
+	}
+	return unlocked + "lock:\n  definition_digest: " + digest + "\n", digest
+}
+
+func capabilitiesAuthorityForState(t *testing.T, guards []string, evaluatorVersion string) ([]byte, string) {
+	t.Helper()
+	capabilities := Capabilities{
+		Schema:           CapabilitiesSchemaV2,
+		EvaluatorVersion: evaluatorVersion,
+		ProtocolVersions: []string{EvaluatorProtocolSchema, ObservationSchemaV2},
+		Metrics: []CapabilityMetric{
+			{ID: "request-latency", Type: MetricDuration, Unit: "ms", Direction: DirectionLower},
+		},
+		Guards:           guards,
+		RequiresNetwork:  false,
+		RequiresElevated: false,
+	}
+	if err := capabilities.Validate(); err != nil {
+		t.Fatalf("Capabilities.Validate(): %v", err)
+	}
+	raw, err := canonjson.Marshal(capabilities)
+	if err != nil {
+		t.Fatalf("canonjson.Marshal(capabilities): %v", err)
+	}
+	return raw, sha256Digest(raw)
+}
+
+func lockedV2DefinitionDoc(t *testing.T, capabilitiesDigest string) (doc, digest string) {
+	t.Helper()
+	unlocked := mutate(t, "rounds: 10", "rounds: 2")
+	unlocked = strings.Replace(unlocked, "capabilities_digest: "+digestOf("4"), "capabilities_digest: "+capabilitiesDigest, 1)
+	unlocked = strings.Replace(unlocked, "- id: peak-rss", "- id: "+EvaluatorPeakRSSMetricID, 1)
 	def := mustDecodeDefinition(t, unlocked)
 	digest, err := DefinitionDigest(def)
 	if err != nil {
@@ -468,7 +514,7 @@ func TestDeriveStateVerifierReceivesDecodedArtifacts(t *testing.T) {
 	var gotDef Definition
 	var gotObs []Observation
 	var gotRes Result
-	verify := func(def Definition, obs []Observation, res Result) error {
+	verify := func(def Definition, obs []Observation, _ *ExecutionReceipt, res Result) error {
 		calls++
 		gotDef, gotObs, gotRes = def, obs, res
 		return nil
@@ -631,11 +677,11 @@ func TestDeriveStateTamperedPatchProtectedPathIsError(t *testing.T) {
 	}
 }
 
-// TestDeriveStateIncompleteObservationsIsError proves that an
+// TestDeriveStateIncompleteRunRemainsRegistered proves that an
 // observations.jsonl file which is present, decodes, and digest-links
 // correctly but does not cover every registered (candidate, round) pair
-// is an error, not a silent report of "registered".
-func TestDeriveStateIncompleteObservationsIsError(t *testing.T) {
+// is an enumerable registered run and does not invent completed evidence.
+func TestDeriveStateIncompleteRunRemainsRegistered(t *testing.T) {
 	dir := t.TempDir()
 	doc, digest := lockedDefinitionDoc(t)
 	writeExperimentFile(t, dir, "experiment.yaml", doc)
@@ -643,7 +689,231 @@ func TestDeriveStateIncompleteObservationsIsError(t *testing.T) {
 	lines := validObservationLines(digest)
 	writeExperimentFile(t, dir, "observations.jsonl", strings.Join(lines[:3], "\n")+"\n") // drop facts-cache round 2
 
+	derived, err := DeriveStateDetails(dir, testExperimentDir, acceptResult)
+	if err != nil {
+		t.Fatalf("DeriveStateDetails(): %v", err)
+	}
+	if derived.State != StateRegistered || len(derived.Runs) != 1 || derived.Runs[0].State != StateRegistered {
+		t.Fatalf("derived state = %+v", derived)
+	}
+}
+
+func observationsJSONLForRun(defDigest, run string, complete bool) string {
+	lines := validObservationLines(defDigest)
+	if !complete {
+		lines = lines[:1]
+	}
+	return strings.ReplaceAll(strings.Join(lines, "\n")+"\n", `"run": "run-1"`, `"run": "`+run+`"`)
+}
+
+func resultJSONForRun(defDigest, run string, verdict Verdict) string {
+	return strings.Replace(validResultJSONForDigest(defDigest, verdict), `"run": "run-1"`, `"run": "`+run+`"`, 1)
+}
+
+func TestDeriveStateDetailsEnumeratesRunsWithoutSelectingTheFavorableOne(t *testing.T) {
+	dir := t.TempDir()
+	doc, digest := lockedDefinitionDoc(t)
+	writeExperimentFile(t, dir, definitionFile, doc)
+	writeCandidatePatches(t, dir)
+	writeRunFile(t, dir, "run-2", observationsFile, observationsJSONLForRun(digest, "run-2", false))
+	writeRunFile(t, dir, "run-1", observationsFile, observationsJSONLForRun(digest, "run-1", true))
+	writeRunFile(t, dir, "run-1", resultFile, resultJSONForRun(digest, "run-1", VerdictProvenWinner))
+
+	derived, err := DeriveStateDetails(dir, testExperimentDir, acceptResult)
+	if err != nil {
+		t.Fatalf("DeriveStateDetails(): %v", err)
+	}
+	if derived.State != StateRecommended || len(derived.Runs) != 2 {
+		t.Fatalf("derived = %+v", derived)
+	}
+	if derived.Runs[0].Run != "run-1" || derived.Runs[0].State != StateRecommended || derived.Runs[1].Run != "run-2" || derived.Runs[1].State != StateRegistered {
+		t.Fatalf("run enumeration = %+v", derived.Runs)
+	}
+
+	writeRunFile(t, dir, "run-2", observationsFile, observationsJSONLForRun(digest, "run-2", true))
+	writeRunFile(t, dir, "run-2", resultFile, resultJSONForRun(digest, "run-2", VerdictDisclosedUnproven))
+	derived, err = DeriveStateDetails(dir, testExperimentDir, acceptResult)
+	if err != nil {
+		t.Fatalf("DeriveStateDetails(second result): %v", err)
+	}
+	if derived.State != StateInconclusive || derived.Runs[1].State != StateInconclusive {
+		t.Fatalf("mixed result aggregate = %+v", derived)
+	}
+}
+
+func TestDeriveStateRejectsMalformedRunDirectoryEntry(t *testing.T) {
+	dir := t.TempDir()
+	doc, _ := lockedDefinitionDoc(t)
+	writeExperimentFile(t, dir, definitionFile, doc)
+	writeCandidatePatches(t, dir)
+	writeRunFile(t, dir, "run-1", "latest", "not an authority artifact")
+	if _, err := DeriveStateDetails(dir, testExperimentDir, acceptResult); err == nil {
+		t.Fatalf("DeriveStateDetails(run with unknown artifact) = nil error")
+	}
+}
+
+func completeObservationsV2JSONL(t *testing.T, defDigest, run string) ([]Observation, string) {
+	t.Helper()
+	v1, err := DecodeObservations([]byte(observationsJSONLForRun(defDigest, run, true)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var encoded strings.Builder
+	for i := range v1 {
+		v1[i].Schema = ObservationSchemaV2
+		v1[i].Outcome = &CandidateOutcome{Kind: OutcomeCompleted}
+		for j := range v1[i].Measurements {
+			if v1[i].Measurements[j].Source == SourceHarnessMeasured {
+				v1[i].Measurements[j].ID = EvaluatorPeakRSSMetricID
+				v1[i].Measurements[j].Unit = "bytes"
+			}
+		}
+		line, err := EncodeObservation(v1[i])
+		if err != nil {
+			t.Fatal(err)
+		}
+		encoded.Write(line)
+	}
+	return v1, encoded.String()
+}
+
+func executionReceiptForState(t *testing.T, def Definition, run string) ExecutionReceipt {
+	t.Helper()
+	digest, err := DefinitionDigest(def)
+	if err != nil {
+		t.Fatal(err)
+	}
+	candidates := make([]ReceiptCandidate, 0, len(def.Candidates))
+	for _, candidate := range def.Candidates {
+		workspaceID, err := WorkspaceRunID(digest, run, candidate.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		candidates = append(candidates, ReceiptCandidate{
+			ID: candidate.ID, BaseCommit: candidate.Base, PatchDigest: candidate.Digest, WorkspaceRunID: workspaceID,
+			Materialization: WorkspaceIdentity{Shape: WorkspaceBasePlusPatch, RunID: workspaceID, CommitSHA: candidate.Base, PatchSHA256: strings.TrimPrefix(candidate.Digest, "sha256:")},
+		})
+	}
+	inputDigests := map[string]string{
+		"contracts/equivalence.json":         strings.TrimPrefix(def.Contract.Digest, "sha256:"),
+		"evaluator:" + def.Evaluator.Argv[0]: strings.TrimPrefix(def.Evaluator.Digest, "sha256:"),
+		"inputs/workload.json":               strings.TrimPrefix(def.Workload.Digest, "sha256:"),
+	}
+	for _, fixture := range def.Fixtures {
+		inputDigests["fixtures/"+fixture.ID+".json"] = strings.TrimPrefix(fixture.Digest, "sha256:")
+	}
+	return ExecutionReceipt{
+		Schema: ExecutionReceiptSchema, ExperimentDigest: digest, Run: run, EnvironmentPolicy: def.Execution.EnvironmentPolicy,
+		AuthorityDigest: digestOf("1"), CapabilitiesDigest: def.Evaluator.CapabilitiesDigest, ScheduleDigest: digestOf("2"), GrantsDigest: digestOf("3"),
+		Fingerprint: ExecutionFingerprint{OS: "linux", Arch: "amd64", ToolVersions: map[string]string{"evaluator": "2.1.0", "verdi": "0.1.0"}, Env: map[string]*string{}, InputDigests: inputDigests},
+		Enforcement: []ReceiptEnforcement{{Kind: "process-execution", Applied: true, Reason: "allowlist applied"}, {Kind: "timeouts", Applied: true, Reason: "deadline applied"}},
+		Network:     ReceiptNetwork{Mode: NetworkDeny, Configured: true, Reason: "network namespace configured"}, Candidates: candidates,
+		Versions:    ReceiptVersions{Verdi: "0.1.0", RecommendationEngine: string(AlgorithmV1)},
+		Disclosures: []ReceiptDisclosure{DisclosureCPUAllocationUnproven, DisclosureMemoryAllocationUnproven},
+	}
+}
+
+func TestDeriveStateV2RequiresDigestPinnedCapabilitiesAuthority(t *testing.T) {
+	allGuards := []string{"behavioral-equivalence", "tenant-isolation"}
+	_, validDigest := capabilitiesAuthorityForState(t, allGuards, "fixture-evaluator/2.1.0")
+	mismatchedCapabilities, _ := capabilitiesAuthorityForState(t, allGuards, "fixture-evaluator/2.2.0")
+	undeclaredCapabilities, undeclaredDigest := capabilitiesAuthorityForState(t, []string{"behavioral-equivalence"}, "fixture-evaluator/2.1.0")
+
+	tests := []struct {
+		name              string
+		definitionDigest  string
+		capabilities      []byte
+		writeCapabilities bool
+	}{
+		{name: "missing", definitionDigest: validDigest},
+		{name: "digest mismatch", definitionDigest: validDigest, capabilities: mismatchedCapabilities, writeCapabilities: true},
+		{name: "undeclared required guard", definitionDigest: undeclaredDigest, capabilities: undeclaredCapabilities, writeCapabilities: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			doc, digest := lockedV2DefinitionDoc(t, tt.definitionDigest)
+			writeExperimentFile(t, dir, definitionFile, doc)
+			writeCandidatePatches(t, dir)
+			if tt.writeCapabilities {
+				writeExperimentFile(t, dir, "evaluator-capabilities.json", string(tt.capabilities))
+			}
+			_, encoded := completeObservationsV2JSONL(t, digest, "run-1")
+			writeRunFile(t, dir, "run-1", observationsFile, encoded)
+
+			if derived, err := DeriveStateDetails(dir, testExperimentDir, acceptResult); err == nil {
+				t.Fatalf("DeriveStateDetails() = %+v, nil error; V2 evidence without exact declared capability authority must not become state-bearing", derived)
+			}
+		})
+	}
+}
+
+func TestDeriveStateV2RequiresAndPassesReceiptWithoutV1Disclosure(t *testing.T) {
+	dir := t.TempDir()
+	capabilities, capabilitiesDigest := capabilitiesAuthorityForState(t, []string{"behavioral-equivalence", "tenant-isolation"}, "fixture-evaluator/2.1.0")
+	doc, digest := lockedV2DefinitionDoc(t, capabilitiesDigest)
+	def := mustDecodeDefinition(t, doc)
+	writeExperimentFile(t, dir, definitionFile, doc)
+	writeExperimentFile(t, dir, capabilitiesFile, string(capabilities))
+	writeCandidatePatches(t, dir)
+	obs, encodedObs := completeObservationsV2JSONL(t, digest, "run-1")
+	writeRunFile(t, dir, "run-1", observationsFile, encodedObs)
+
+	legacy, err := DecodeResult([]byte(validResultJSONForDigest(digest, VerdictProvenWinner)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	decision, err := DecisionFromResult(legacy, obs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	receipt := executionReceiptForState(t, def, "run-1")
+	receiptDigest, err := ExecutionReceiptDigest(receipt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := NewResultV2(decision, ResultExecution{
+		ExecutionDigest:   receiptDigest,
+		Isolation:         ResultIsolation{Network: receipt.Network, Disclosures: []IsolationDisclosure{}},
+		WarmupDiagnostics: WarmupDiagnostics{Authority: WarmupAuthorityNonDecisionDiagnostic, Scope: WarmupScopeFinalInvocation, Failures: []WarmupFailure{}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	resultBytes, err := EncodeResult(result)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeRunFile(t, dir, "run-1", resultFile, string(resultBytes))
 	if _, _, err := DeriveState(dir, testExperimentDir, acceptResult); err == nil {
-		t.Errorf("DeriveState() with an incomplete observation set = nil error, want error")
+		t.Fatalf("DeriveState(v2 without receipt) = nil error")
+	}
+	receiptBytes, err := EncodeExecutionReceipt(receipt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeRunFile(t, dir, "run-1", executionFile, string(receiptBytes))
+	capabilitiesPath := filepath.Join(dir, testExperimentDir, capabilitiesFile)
+	if err := os.Remove(capabilitiesPath); err != nil {
+		t.Fatal(err)
+	}
+	if state, _, err := DeriveState(dir, testExperimentDir, acceptResult); err == nil {
+		t.Fatalf("DeriveState(v2 result without capability authority) = %q, nil error", state)
+	}
+	writeExperimentFile(t, dir, capabilitiesFile, string(capabilities))
+	receivedReceipt := false
+	verify := func(_ Definition, _ []Observation, got *ExecutionReceipt, _ Result) error {
+		receivedReceipt = got != nil
+		return nil
+	}
+	state, disclosures, err := DeriveState(dir, testExperimentDir, verify)
+	if err != nil {
+		t.Fatalf("DeriveState(v2): %v", err)
+	}
+	if state != StateRecommended || !receivedReceipt {
+		t.Fatalf("state/receipt = %q/%v", state, receivedReceipt)
+	}
+	if len(disclosures) != 1 || disclosures[0].Code != DisclosureRegistrationLockWitness {
+		t.Fatalf("V2 disclosures = %+v", disclosures)
 	}
 }

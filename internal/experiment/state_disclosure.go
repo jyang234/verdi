@@ -27,17 +27,10 @@ const (
 	// refusal.
 	DisclosureRegistrationLockWitness StateDisclosureCode = "registration-lock-human-witness"
 
-	// DisclosureResultEnvironmentReceipt is emitted at every RESULT-BEARING
-	// rung — recommended, inconclusive, and ratified alike — because each
-	// one rests on a verdict, and AC-2 step 1 makes every verdict rest on
-	// the run matching the registered environment policy as well as the
-	// locked digests. SI-42 resolved that conjunct at the Wave-2 layer as a
-	// caller-supplied in-memory attestation; no artifact inside the
-	// experiment directory records the environment the run actually
-	// executed in, so a reader of these bytes cannot re-establish it. The
-	// Wave-3 execution unit's durable receipt/fingerprint artifact owns
-	// converting this into proof or refusal; until it lands the conjunct is
-	// disclosed-unproven here rather than silently assumed (SI-44, CO-1).
+	// DisclosureResultEnvironmentReceipt remains on V1 predecessor results:
+	// they carry no durable receipt capable of proving the registered
+	// environment-policy conjunct. A verified V2 result binds execution.json
+	// and therefore does not emit this disclosure.
 	DisclosureResultEnvironmentReceipt StateDisclosureCode = "result-environment-policy-receipt"
 
 	// DisclosureRatificationActorResolution is emitted only at the ratified
@@ -96,11 +89,8 @@ func lockWitnessDisclosure() StateDisclosure {
 	}
 }
 
-// environmentReceiptDisclosure makes SI-42's at-rest deferral visible:
-// the engine was handed an environment-policy attestation in memory, but
-// the artifacts left behind hold no fingerprint of the environment the
-// run executed in, so at rest AC-2 step 1's second conjunct is unproven
-// until the Wave-3 execution unit's durable receipt exists (SI-44).
+// environmentReceiptDisclosure makes the V1 predecessor's missing durable
+// execution proof visible at rest.
 func environmentReceiptDisclosure() StateDisclosure {
 	return StateDisclosure{
 		Code: DisclosureResultEnvironmentReceipt,

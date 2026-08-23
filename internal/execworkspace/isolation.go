@@ -74,6 +74,12 @@ import (
 	"time"
 )
 
+// commandCleanupGrace bounds os/exec's post-cancellation or post-exit pipe
+// cleanup when a descendant retains inherited descriptors. It is an internal
+// return-path bound, not an execution-grant timeout or a descendant-lifetime
+// policy.
+const commandCleanupGrace = 100 * time.Millisecond
+
 // profileOwnedEnvKeys are the four environment keys BuildProfile itself
 // sets from envRoot. A declaredEnv pair naming one of these is
 // rejected outright — never a silent override — so a caller can never
@@ -86,17 +92,32 @@ var profileOwnedEnvKeys = map[string]bool{
 	"TMPDIR":          true,
 }
 
-// Profile is a constructed, ready-to-use isolation profile. A consumer
-// constructs its launch through Command, which is the seam that ENFORCES
-// AllowedArgv0s and Timeout; this package never starts a process itself.
-// The zero Profile has an empty (but non-panicking) Env(), a zero Timeout
-// and a nil AllowedArgv0s, so Command refuses it outright — only
-// BuildProfile constructs a Profile actually backed by a workspace.
+// Profile is an isolation-profile projection. PlanProfile returns a planned
+// Profile whose environment is available to CollectFingerprint but whose
+// Command refuses every launch until Activate prepares its profile-owned
+// directories. BuildProfile returns the same projection already activated.
+// This package never starts a process itself.
+//
+// The zero Profile has an empty (but non-panicking) Env(), a zero Timeout and a
+// nil AllowedArgv0s, so Command refuses it outright.
 type Profile struct {
 	env           map[string]string
 	network       NetworkEnforcement
 	Timeout       time.Duration
 	AllowedArgv0s []string
+	plan          *profilePlan
+	activated     bool
+}
+
+// profilePlan is PlanProfile's immutable internal snapshot. Profile retains
+// public compatibility projections of Timeout and AllowedArgv0s, but Activate
+// always rebuilds from this private clone so caller mutation cannot change the
+// receipt-bound plan between fingerprinting and activation.
+type profilePlan struct {
+	env           map[string]string
+	network       NetworkEnforcement
+	timeout       time.Duration
+	allowedArgv0s []string
 }
 
 // Env renders the profile's environment as deterministic, sorted
@@ -124,6 +145,9 @@ func (p Profile) Env() []string {
 //   - A nil ctx is an operational error, never a silently substituted
 //     Background: the caller's cancellation scope is the caller's own
 //     choice, and context.WithTimeout would panic on it.
+//   - A Profile returned by PlanProfile refuses until Activate has created the
+//     exact plan's profile-owned directories. Its environment remains readable
+//     before then solely for shared fingerprint collection (SI-137).
 //   - Constructing a launch REQUIRES a recorded process-execution
 //     allowance. A nil AllowedArgv0s means no GrantProcessExecution grant
 //     was requested at all, and that is an operational error — never an
@@ -135,7 +159,7 @@ func (p Profile) Env() []string {
 //     looser rule would silently widen a ratified allowlist. A miss is an
 //     operational error naming argv0 and the whole allowlist.
 //   - The profile's network enforcement fact (p.network, set by
-//     BuildProfile — design §3, ledger SI-75/SI-76) must have a launchable
+//     PlanProfile — design §3, ledger SI-75/SI-76) must have a launchable
 //     mechanism: networkSysProcAttr (network_linux.go/network_
 //     unsupported.go, the platform seam) maps an explicit ambient allow to
 //     a nil SysProcAttr and a configured deny to the platform's exact
@@ -162,6 +186,9 @@ func (p Profile) Env() []string {
 // somewhere else entirely), and this seam never guesses it. cmd.SysProcAttr
 // is set to networkSysProcAttr's result and NOTHING ELSE composes a second
 // value onto it (design §4: "no consumer composes a second value").
+// cmd.WaitDelay is the package-internal cleanup grace above so a retained
+// inherited descriptor cannot make command cleanup outlive its bounded return;
+// it neither extends the granted deadline nor promises descendant termination.
 // cmd.ExtraFiles is never set (design §2: "Profile.Command creates no
 // ExtraFiles"), so it is always nil on the returned Cmd.
 //
@@ -176,6 +203,11 @@ func (p Profile) Command(ctx context.Context, argv0 string, args ...string) (*ex
 	if ctx == nil {
 		return nil, nil, nil, operationalError("isolation-profile: launch", fmt.Errorf(
 			"nil context: the launch's cancellation scope is the caller's own choice and is never silently substituted (SI-40)"))
+	}
+	if p.plan != nil && !p.activated {
+		return nil, nil, nil, operationalError("isolation-profile: launch", fmt.Errorf(
+			"planned profile is not activated, so no launch may be constructed for %q before its profile-owned HOME/XDG/TMPDIR directories exist (SI-137)",
+			argv0))
 	}
 	if p.AllowedArgv0s == nil {
 		return nil, nil, nil, operationalError("isolation-profile: launch", fmt.Errorf(
@@ -201,6 +233,7 @@ func (p Profile) Command(ctx context.Context, argv0 string, args ...string) (*ex
 	}
 
 	cmd := exec.CommandContext(runCtx, argv0, args...)
+	cmd.WaitDelay = commandCleanupGrace
 	cmd.Env = p.Env()
 	cmd.SysProcAttr = sysProcAttr
 	return cmd, runCtx, cancel, nil
@@ -337,6 +370,31 @@ var couldNotApplyReasons = map[GrantKind]string{
 // No wall clock, no randomness: BuildProfile's output depends only on its
 // four inputs.
 func BuildProfile(workspacePath, envRoot string, grants GrantSet, declaredEnv map[string]string) (Profile, *EnforcementReport, error) {
+	planned, report, planErr := PlanProfile(workspacePath, envRoot, grants, declaredEnv)
+	if report == nil {
+		return planned, nil, planErr
+	}
+
+	activated, err := activateProfile(planned, "build profile")
+	if err != nil {
+		// Preserve BuildProfile's historical creation-error output: directory
+		// failure preceded report construction and returned a zero Profile and
+		// nil report even when grant derivation itself was valid.
+		return Profile{}, nil, err
+	}
+	return activated, report, planErr
+}
+
+// PlanProfile validates and derives the same Profile and EnforcementReport as
+// BuildProfile without reading or modifying the filesystem. The returned
+// planned Profile exposes its deterministic Env projection to
+// CollectFingerprint, but Command fails closed until Activate is called.
+//
+// Validation and required-control failures retain BuildProfile's established
+// profile/report/error outputs. In particular, an unapplied required control
+// returns the planned Profile and report alongside the operational error; a
+// validation failure returns a zero Profile and nil report.
+func PlanProfile(workspacePath, envRoot string, grants GrantSet, declaredEnv map[string]string) (Profile, *EnforcementReport, error) {
 	if workspacePath == "" {
 		return Profile{}, nil, fmt.Errorf("execworkspace: build profile: workspace path is empty")
 	}
@@ -383,27 +441,21 @@ func BuildProfile(workspacePath, envRoot string, grants GrantSet, declaredEnv ma
 		env[key] = value
 	}
 
-	for _, dir := range []string{env["HOME"], env["XDG_CONFIG_HOME"], env["XDG_CACHE_HOME"], env["TMPDIR"]} {
-		if err := os.MkdirAll(dir, 0o700); err != nil {
-			return Profile{}, nil, fmt.Errorf("execworkspace: build profile: creating %q: %w", dir, err)
-		}
-	}
-
-	profile := Profile{env: env}
-
+	plan := &profilePlan{env: cloneStringMap(env)}
 	if g, ok := grants.Get(GrantTimeouts); ok {
-		profile.Timeout = time.Duration(g.Seconds) * time.Second
+		plan.timeout = time.Duration(g.Seconds) * time.Second
 	}
 	if g, ok := grants.Get(GrantProcessExecution); ok {
 		argv0s := append([]string(nil), g.Argv0s...)
 		sort.Strings(argv0s)
-		profile.AllowedArgv0s = argv0s
+		plan.allowedArgv0s = argv0s
 	}
 	_, networkGranted := grants.Get(GrantNetwork)
-	profile.network = computeNetworkEnforcement(networkGranted)
+	plan.network = computeNetworkEnforcement(networkGranted)
+	profile := profileFromPlan(plan, false)
 
 	report, unapplied := buildEnforcementReport(grants)
-	report.Network = profile.network
+	report.Network = plan.network
 
 	// AD-5's could-not-apply failure and design §3's deny-unconfigured
 	// failure are the SAME failure class (a required control this call
@@ -413,7 +465,7 @@ func BuildProfile(workspacePath, envRoot string, grants GrantSet, declaredEnv ma
 	// kinds in their fixed declaration order — never map iteration, never
 	// randomness.
 	var problems []string
-	if profile.network.Mode == NetworkDeny && !profile.network.Configured {
+	if plan.network.Mode == NetworkDeny && !plan.network.Configured {
 		problems = append(problems, "network (deny unconfigurable on this platform)")
 	}
 	problems = append(problems, unapplied...)
@@ -427,6 +479,50 @@ func BuildProfile(workspacePath, envRoot string, grants GrantSet, declaredEnv ma
 		)
 	}
 	return profile, report, nil
+}
+
+// Activate creates the exact planned Profile's HOME/XDG/TMPDIR directories
+// and returns a launchable clone. It accepts no replacement inputs: activation
+// can only materialize the private plan already bound into p. A zero or
+// manually constructed Profile has no such plan and fails closed.
+func (p Profile) Activate() (Profile, error) {
+	return activateProfile(p, "activate profile")
+}
+
+func activateProfile(p Profile, errorOp string) (Profile, error) {
+	if p.plan == nil {
+		return Profile{}, operationalError("isolation-profile: activate", fmt.Errorf(
+			"profile has no PlanProfile snapshot to activate (SI-137)"))
+	}
+	for _, dir := range profileDirectories(p.plan.env) {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			return Profile{}, fmt.Errorf("execworkspace: %s: creating %q: %w", errorOp, dir, err)
+		}
+	}
+	return profileFromPlan(p.plan, true), nil
+}
+
+func profileFromPlan(plan *profilePlan, activated bool) Profile {
+	return Profile{
+		env:           cloneStringMap(plan.env),
+		network:       plan.network,
+		Timeout:       plan.timeout,
+		AllowedArgv0s: append([]string(nil), plan.allowedArgv0s...),
+		plan:          plan,
+		activated:     activated,
+	}
+}
+
+func profileDirectories(env map[string]string) []string {
+	return []string{env["HOME"], env["XDG_CONFIG_HOME"], env["XDG_CACHE_HOME"], env["TMPDIR"]}
+}
+
+func cloneStringMap(in map[string]string) map[string]string {
+	out := make(map[string]string, len(in))
+	for key, value := range in {
+		out[key] = value
+	}
+	return out
 }
 
 // buildEnforcementReport builds the deterministic, kind-ordered

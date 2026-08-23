@@ -3,6 +3,8 @@ package experiment
 import (
 	"strings"
 	"testing"
+
+	"github.com/jyang234/verdi/internal/canonjson"
 )
 
 func validCapsuleManifestJSON() string {
@@ -17,6 +19,21 @@ func validCapsuleManifestJSON() string {
     {"id": "observations", "digest": "` + digestOf("d") + `"}
   ]
 }`
+}
+
+func TestCapsuleProtocolCanonicalDigestRatchet(t *testing.T) {
+	manifest, err := DecodeCapsuleManifest([]byte(validCapsuleManifestJSON()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	digest, err := canonjson.Digest(manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const want = "sha256:8588e115ebfe5756223d59c3188daf00f10d43f1654e9751bf66a6b9f72806fd"
+	if digest != want {
+		t.Fatalf("capsule manifest canonical digest = %q, want %q", digest, want)
+	}
 }
 
 func mutateCapsule(t *testing.T, old, replacement string) string {

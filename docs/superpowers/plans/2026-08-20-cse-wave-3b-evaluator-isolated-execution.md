@@ -33,13 +33,14 @@ DC-10, DC-12–DC-15, CO-1–CO-7; `spec/execution-workspace`; the canonical
 CSE design's evaluator, execution, failure, and retention sections; the
 four-feature orchestration plan's Wave 3B contract; invention-ledger
 SI-12–SI-13, SI-17, SI-30, SI-37, SI-40–SI-46, SI-58–SI-63, SI-75–SI-76,
-and SI-126–SI-135.
+and SI-126–SI-138.
 
 **Execution status:** Task 0's canonical CSE/store-layout amendment is ratified
 and merged, and the Task 1 evidence-schema tranche is complete on its runtime
-branch. Task 2 is BLOCKED until the SI-135 observer-authority correction passes
-its one independent cross-model review and is accepted and merged by the
-owner. No runtime producer may work around that authority gap.
+branch. The independently reviewed SI-135 observer-authority correction is
+ratified by the owner merge of PR #301 at
+`165adcafb03f5c722653dab6df9f78850e5b5be6`; Task 2 is unblocked and must
+implement the exact CSE v3 custody boundary.
 
 ## Scope and non-goals
 
@@ -418,6 +419,15 @@ declared environment names and values, OS/architecture, and the named tool
 versions. CPU/memory allocation is disclosed unproven when no enforced
 resource-ceiling fact exists. Network mode is always present.
 
+For Wave 3B the named runtime-version row is exactly `runtime` with the value
+returned by Go's `runtime.Version()`; `evaluator`, `verdi`, and
+`recommendation-engine` retain their existing values. Receipt construction
+compares the fingerprint's OS, architecture, and `runtime` row with the
+current process's `runtime.GOOS`, `runtime.GOARCH`, and `runtime.Version()`.
+It then applies the Linux-only authoritative posture above. Caller-supplied
+fingerprint bytes therefore cannot claim Linux or a different runtime on an
+unsupported host, and no receipt is minted from such a claim (SI-136).
+
 `ExecutionReceiptDigest` is `canonjson.Digest` of the validated value. Every
 V2 execution annex carries that digest. At-rest verification receives the
 exact receipt, requires its experiment/run to match the observation set and
@@ -488,11 +498,32 @@ evaluator. A fixed peak-RSS metric on a platform without that observer fails
 operationally before materialization. Until Wave 5 provides the concrete
 resolver there is no default/local constructor and no user-facing launch path.
 
+The shared execution grant represents timeout authority as a positive integer
+number of seconds. A Wave 3B definition is therefore registrable only when
+`timeout_per_round` is a positive integral number of seconds. Definition
+validation rejects every positive fractional-second duration; authorization
+does not round, truncate, or approximate it. This keeps the definition and its
+grant exactly comparable without introducing a second duration field or a
+feature-local grant grammar (SI-138).
+
 Every `DeclaredEnv` value is explicitly approved by that resolver for both
 process exposure and durable recording in the run fingerprint. Wave 3B never
 copies ambient environment variables. A later policy adapter must refuse
 secret-bearing values rather than pass a secret and expect the receipt writer
 to guess that it needs redaction; SI-130 carries that obligation into Wave 5.
+
+Profile construction is two-stage at this receipt-first boundary (SI-137).
+`execworkspace.PlanProfile` validates grants, declared environment, roots, and
+platform controls and returns the exact enforcement projection plus a planned
+profile without creating a directory. A planned profile is not launchable;
+`Profile.Command` refuses it. Its deterministic environment projection is
+nevertheless the input to the existing shared fingerprint collector. After
+the immutable receipt is written and the candidate workspace is materialized,
+CSE proves the reserved environment root absent and activates that same plan;
+activation alone creates the profile-owned HOME/XDG/TMP directories and
+returns the launchable profile. Existing `BuildProfile` remains the
+compatibility composition of plan plus activation for other consumers. No
+second grant, platform, environment, or fingerprint implementation exists.
 
 Every describe/run launch also verifies the actual executable before start:
 after `Profile.Command` fixes the launch path and the caller fixes `Dir`, the
@@ -518,8 +549,12 @@ arbitrary set.
 Each candidate workspace uses its reserved root-level
 `.verdi-cse-environment` directory as `BuildProfile`'s caller-owned `envRoot`
 for the whole run. The base tree and every candidate patch must leave that path
-absent, and CSE itself rejects a pre-existing or nonempty path before calling
-`BuildProfile`. The directory persists across interruption so a resume does not reset
+absent. CSE plans the profile before the receipt without touching that path;
+after materialization it rejects a pre-existing or nonempty path before
+activating the plan. A collision therefore leaves at most the already-immutable
+receipt and materialized workspace, with no profile directory, observation, or
+result, and resume must re-verify and retry the same fail-closed boundary. The
+directory persists across interruption so a resume does not reset
 candidate-local HOME/XDG/TMP state after measured evidence already exists. If
 any observation exists and a required candidate environment root is missing,
 resume refuses the changed environment. When no observation exists, a missing
@@ -537,11 +572,13 @@ The first start:
 2. strict-decodes `evaluator-capabilities.json` and proves digest parity;
 3. resolves every workload/fixture/contract identity and verifies its protected
    base-tree bytes;
-4. resolves and cross-checks authorization;
+4. resolves and cross-checks authorization, and purely plans every candidate
+   profile plus its exact fingerprint/enforcement projection;
 5. derives the experiment-scoped workspace run ID, receipt, and full schedule;
 6. creates `runs/<run-id>/execution.json` with
    `atomicfile.CreateImmutable` under `writer.lock`; then
-7. materializes and evaluates in schedule order.
+7. materializes each candidate, proves its reserved environment root absent,
+   activates the already-bound profile plan, and evaluates in schedule order.
 
 Resume:
 
@@ -651,7 +688,8 @@ responses.
 receipt}.go` and tests.
 
 - [ ] RED: complete rotation tables (2/3/4 candidates, zero/multiple warmups),
-      digest determinism, clone safety, mismatched policy/digest/timeout/env,
+      digest determinism, clone safety, rejected fractional-second definition
+      timeouts, mismatched policy/digest/timeout/env,
       network/elevated requirements, unsupported grant mechanisms, exact
       input ID/path/digest/protected-path resolution, capability membership,
       experiment-scoped candidate materialization identities, reserved absent
@@ -851,6 +889,13 @@ evaluator response plus a harness-owned observation containing no guards or
 evaluator/candidate measurements. Coverage is 2/2. The transformation admits
 only the two fixed harness measurement IDs, keeps them diagnostic for a failure
 outcome, and adds no artifact or persistence surface.
+
+The SI-138 correction is lossless across the two previously incompatible
+timeout clauses: (1) the definition's positive duration maps to a positive
+integral-second validation rule; (2) the authorization contract's exact
+equality maps to the existing integer `timeout_seconds` grant without rounding.
+Coverage is 2/2. This is a representability closure over source units already
+counted in the 44/44 matrix, not a new execution capability or authority unit.
 
 ## Handoff after Wave 3B
 

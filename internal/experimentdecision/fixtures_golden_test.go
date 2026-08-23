@@ -1,8 +1,11 @@
 package experimentdecision
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 
 	"github.com/jyang234/verdi/internal/experiment"
@@ -33,7 +36,7 @@ func goldenExperiment(t *testing.T, name string) (def experiment.Definition, obs
 		t.Fatalf("%s: fixture definition is not locked", name)
 	}
 
-	rawObs, err := os.ReadFile(filepath.Join(dir, "observations.jsonl"))
+	rawObs, err := os.ReadFile(filepath.Join(dir, "runs", "run-1", "observations.jsonl"))
 	if err != nil {
 		t.Fatalf("reading %s/observations.jsonl: %v", name, err)
 	}
@@ -49,11 +52,131 @@ func goldenExperiment(t *testing.T, name string) (def experiment.Definition, obs
 func goldenBytes(t *testing.T, name, file string) []byte {
 	t.Helper()
 	path := filepath.Join("testdata", name, file)
+	if file == "execution.json" || file == "observations.jsonl" || file == "result.json" {
+		path = filepath.Join("testdata", name, "runs", "run-1", file)
+	}
 	data, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("reading golden %s: %v", path, err)
 	}
 	return data
+}
+
+func goldenReceipt(t *testing.T, name string) experiment.ExecutionReceipt {
+	t.Helper()
+	receipt, err := experiment.DecodeExecutionReceipt(goldenBytes(t, name, "execution.json"))
+	if err != nil {
+		t.Fatalf("DecodeExecutionReceipt(%s): %v", name, err)
+	}
+	return receipt
+}
+
+func verifyGoldenV2(t *testing.T, name string, def experiment.Definition, obs []experiment.Observation, core experiment.Result) {
+	t.Helper()
+	stored, err := experiment.DecodeResult(goldenBytes(t, name, "result.json"))
+	if err != nil {
+		t.Fatalf("DecodeResult(%s): %v", name, err)
+	}
+	receipt := goldenReceipt(t, name)
+	if err := VerifyResult(def, obs, &receipt, stored); err != nil {
+		t.Fatalf("VerifyResult(%s): %v", name, err)
+	}
+	decision, err := experiment.DecisionFromResult(core, obs)
+	if err != nil {
+		t.Fatalf("DecisionFromResult(%s): %v", name, err)
+	}
+	if !reflect.DeepEqual(stored.Decision, &decision) {
+		t.Fatalf("stored V2 decision differs from recomputed decision\nstored: %+v\nrecomputed: %+v", stored.Decision, decision)
+	}
+}
+
+func predecessorDefinition(t *testing.T, def experiment.Definition) experiment.Definition {
+	t.Helper()
+	predecessor := def
+	predecessor.ProtectedPaths = nil
+	predecessor.Evaluator.CapabilitiesDigest = fixtureDigest("d")
+	predecessor.Decision.Guards = append([]experiment.Guard(nil), def.Decision.Guards...)
+	for i := range predecessor.Decision.Guards {
+		if predecessor.Decision.Guards[i].ID == experiment.EvaluatorPeakRSSMetricID {
+			predecessor.Decision.Guards[i].ID = "peak-rss"
+		}
+	}
+	predecessor.Lock = nil
+	digest, err := experiment.DefinitionDigest(predecessor)
+	if err != nil {
+		t.Fatalf("DefinitionDigest(predecessor): %v", err)
+	}
+	predecessor.Lock = &experiment.Lock{DefinitionDigest: digest}
+	return predecessor
+}
+
+func predecessorObservations(t *testing.T, def experiment.Definition, obs []experiment.Observation) []experiment.Observation {
+	t.Helper()
+	predecessor := append([]experiment.Observation(nil), obs...)
+	digest, err := experiment.DefinitionDigest(def)
+	if err != nil {
+		t.Fatalf("DefinitionDigest(predecessor): %v", err)
+	}
+	for i := range predecessor {
+		predecessor[i].Schema = experiment.ObservationSchema
+		predecessor[i].ExperimentDigest = digest
+		predecessor[i].Outcome = nil
+		predecessor[i].Measurements = append([]experiment.Measurement(nil), obs[i].Measurements...)
+		for j := range predecessor[i].Measurements {
+			if predecessor[i].Measurements[j].ID == experiment.EvaluatorPeakRSSMetricID {
+				predecessor[i].Measurements[j].ID = "peak-rss"
+				predecessor[i].Measurements[j].Unit = "MiB"
+			}
+		}
+	}
+	return predecessor
+}
+
+func TestV2GoldenFixtureByteDigests(t *testing.T) {
+	wants := map[string]map[string]string{
+		"caching-proven": {
+			"evaluator-capabilities.json": "1300bce65fc6717bba6623464f054675229ec531909b01385e73ce5e4ca4a6bf",
+			"execution.json":              "e2e64ad59263cb0a184dcc0d7d36ff8b0e08c92e7c8ff95bf9f6faef00010d1c",
+			"observations.jsonl":          "5638a788b245d40611237da388599c6fd24d7bb7407ba44d64a086b50ede7f7f",
+			"result.json":                 "bbcff620f69c154b2343c540a4954fd0baf14d931999038384c9b2669b5296fb",
+		},
+		"caching-inconclusive": {
+			"evaluator-capabilities.json": "1300bce65fc6717bba6623464f054675229ec531909b01385e73ce5e4ca4a6bf",
+			"execution.json":              "af3d71f835363f3841aaf72147d3ae671dbae438c9609759fb7b2ceb24f18948",
+			"observations.jsonl":          "6f7c3a4692a369203a1c5718644393a3ec927b630a79167c970598217372bf0d",
+			"result.json":                 "56185875ab6c9454a6c8c7802225861c458e786c5945218fdbea8fbc08812bfb",
+		},
+	}
+	for name, files := range wants {
+		for file, want := range files {
+			sum := sha256.Sum256(goldenBytes(t, name, file))
+			got := hex.EncodeToString(sum[:])
+			if got != want {
+				t.Errorf("%s/%s sha256 = %s, want %s", name, file, got, want)
+			}
+		}
+	}
+}
+
+func TestNoPersistedRealExperimentNeedsRunLayoutMigration(t *testing.T) {
+	var found []string
+	for _, root := range []string{filepath.Join("..", "..", ".verdi", "specs", "active"), filepath.Join("..", "..", ".verdi", "specs", "archive")} {
+		err := filepath.WalkDir(root, func(path string, entry os.DirEntry, err error) error {
+			if err != nil {
+				return err
+			}
+			if entry.IsDir() && filepath.Base(filepath.Dir(path)) == "experiments" {
+				found = append(found, path)
+			}
+			return nil
+		})
+		if err != nil {
+			t.Fatalf("walking %s: %v", root, err)
+		}
+	}
+	if len(found) != 0 {
+		t.Fatalf("persisted real experiments require migration: %v", found)
+	}
 }
 
 // TestCachingProvenFixture is CO-7's required committed deterministic
@@ -109,16 +232,14 @@ func TestCachingProvenFixture(t *testing.T) {
 		t.Fatalf("final-cache primary %v is not faster than the winner's %v; the fixture no longer demonstrates faster-incorrect-loses", loserVal, winnerVal)
 	}
 
-	rendered, err := RenderResult(res)
-	if err != nil {
-		t.Fatalf("RenderResult(caching-proven): %v", err)
-	}
-	wantResult := goldenBytes(t, "caching-proven", "result.json")
-	if string(rendered) != string(wantResult) {
-		t.Fatalf("RenderResult(caching-proven) does not match the committed golden.\ngot:\n%s\nwant:\n%s", rendered, wantResult)
-	}
+	verifyGoldenV2(t, "caching-proven", def, obs, res)
 
-	recommendation, err := RenderRecommendation(def, res)
+	predecessorDef := predecessorDefinition(t, def)
+	predecessor, err := Evaluate(predecessorDef, predecessorObservations(t, predecessorDef, obs), attestation(predecessorDef))
+	if err != nil {
+		t.Fatalf("Evaluate(caching-proven predecessor projection): %v", err)
+	}
+	recommendation, err := RenderRecommendation(predecessorDef, predecessor)
 	if err != nil {
 		t.Fatalf("RenderRecommendation(caching-proven): %v", err)
 	}
@@ -154,16 +275,14 @@ func TestCachingInconclusiveFixture(t *testing.T) {
 		t.Fatalf("Reasons = %+v, want exactly one insufficient-separation", res.Reasons)
 	}
 
-	rendered, err := RenderResult(res)
-	if err != nil {
-		t.Fatalf("RenderResult(caching-inconclusive): %v", err)
-	}
-	wantResult := goldenBytes(t, "caching-inconclusive", "result.json")
-	if string(rendered) != string(wantResult) {
-		t.Fatalf("RenderResult(caching-inconclusive) does not match the committed golden.\ngot:\n%s\nwant:\n%s", rendered, wantResult)
-	}
+	verifyGoldenV2(t, "caching-inconclusive", def, obs, res)
 
-	recommendation, err := RenderRecommendation(def, res)
+	predecessorDef := predecessorDefinition(t, def)
+	predecessor, err := Evaluate(predecessorDef, predecessorObservations(t, predecessorDef, obs), attestation(predecessorDef))
+	if err != nil {
+		t.Fatalf("Evaluate(caching-inconclusive predecessor projection): %v", err)
+	}
+	recommendation, err := RenderRecommendation(predecessorDef, predecessor)
 	if err != nil {
 		t.Fatalf("RenderRecommendation(caching-inconclusive): %v", err)
 	}

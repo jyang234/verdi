@@ -30,7 +30,7 @@ func verifiableRun(t *testing.T) (experiment.Definition, []experiment.Observatio
 // an AT-REST check over artifacts, not an emission.
 func TestVerifyResultAcceptsEngineOutput(t *testing.T) {
 	def, obs, res := verifiableRun(t)
-	if err := VerifyResult(def, obs, res); err != nil {
+	if err := VerifyResult(def, obs, nil, res); err != nil {
 		t.Fatalf("VerifyResult() on the engine's own output: %v", err)
 	}
 }
@@ -46,7 +46,8 @@ func TestVerifyResultAcceptsCommittedFixtures(t *testing.T) {
 			if err != nil {
 				t.Fatalf("DecodeResult(%s): %v", name, err)
 			}
-			if err := VerifyResult(def, obs, res); err != nil {
+			receipt := goldenReceipt(t, name)
+			if err := VerifyResult(def, obs, &receipt, res); err != nil {
 				t.Fatalf("VerifyResult(%s) on the committed result.json: %v", name, err)
 			}
 		})
@@ -127,7 +128,7 @@ func TestVerifyResultRejects(t *testing.T) {
 			obs = append([]experiment.Observation(nil), obs...)
 			tt.mutate(t, &def, &obs, &res)
 
-			err := VerifyResult(def, obs, res)
+			err := VerifyResult(def, obs, nil, res)
 			if err == nil {
 				t.Fatalf("VerifyResult(%s) = nil error, want an operational error", tt.name)
 			}
@@ -175,7 +176,7 @@ func copyFixture(t *testing.T, name string) (root string) {
 // so a fixture edit can never turn this into a silently no-op forgery.
 func forgeResult(t *testing.T, root, name, old, replacement string) {
 	t.Helper()
-	path := filepath.Join(root, name, "result.json")
+	path := filepath.Join(root, name, "runs", "run-1", "result.json")
 	data, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("reading %s: %v", path, err)
@@ -219,14 +220,14 @@ func TestDeriveStateWithRealVerifierOverFixtures(t *testing.T) {
 		{
 			name:     "forged winner aggregate",
 			fixture:  "caching-proven",
-			forgeOld: `"eligible":true,"id":"facts-cache","primary":{"aggregation":"p95","rounds":3,"unit":"ms","value":19}`,
-			forgeNew: `"eligible":true,"id":"facts-cache","primary":{"aggregation":"p95","rounds":3,"unit":"ms","value":9}`,
+			forgeOld: `"eligible":true,"execution_failures":[],"id":"facts-cache","primary":{"aggregation":"p95","rounds":3,"unit":"ms","value":19}`,
+			forgeNew: `"eligible":true,"execution_failures":[],"id":"facts-cache","primary":{"aggregation":"p95","rounds":3,"unit":"ms","value":9}`,
 		},
 		{
 			name:     "forged verdict and winner",
 			fixture:  "caching-inconclusive",
-			forgeOld: `"reasons":[{"candidate":"facts-cache","code":"insufficient-separation","detail":"insufficient separation from candidate edge-cache"}],"run":"run-1","schema":"verdi.experiment-result/v1","verdict":"disclosed-unproven"`,
-			forgeNew: `"run":"run-1","schema":"verdi.experiment-result/v1","verdict":"proven-winner","winner":"facts-cache"`,
+			forgeOld: `"reasons":[{"candidate":"facts-cache","code":"insufficient-separation","detail":"insufficient separation from candidate edge-cache"}],"run":"run-1","verdict":"disclosed-unproven"`,
+			forgeNew: `"run":"run-1","verdict":"proven-winner","winner":"facts-cache"`,
 		},
 	}
 
@@ -238,7 +239,7 @@ func TestDeriveStateWithRealVerifierOverFixtures(t *testing.T) {
 				forgeResult(t, root, tt.fixture, tt.forgeOld, tt.forgeNew)
 				// The forgery must be a shape-valid document, or this test
 				// would be proving DecodeResult's checks rather than SI-43's.
-				raw, err := os.ReadFile(filepath.Join(root, tt.fixture, "result.json"))
+				raw, err := os.ReadFile(filepath.Join(root, tt.fixture, "runs", "run-1", "result.json"))
 				if err != nil {
 					t.Fatalf("reading forged result: %v", err)
 				}
@@ -273,7 +274,7 @@ func TestDeriveStateWithRealVerifierOverFixtures(t *testing.T) {
 func TestVerifyResultIsTheDeriveStateVerifier(t *testing.T) {
 	var verify experiment.ResultVerifier = VerifyResult
 	def, obs, res := verifiableRun(t)
-	if err := verify(def, obs, res); err != nil {
+	if err := verify(def, obs, nil, res); err != nil {
 		t.Fatalf("wired verifier: %v", err)
 	}
 }

@@ -121,11 +121,12 @@ type evaluation struct {
 	runID       string
 	byCandRound map[candRound]experiment.Observation
 
-	violations map[string][]experiment.Violation
-	primary    map[string]experiment.PrimaryResult
-	primaryVal map[string]float64
-	bounds     map[string][]experiment.Bound
-	eligible   map[string]bool
+	executionFailures map[string][]experiment.CandidateExecutionFailure
+	violations        map[string][]experiment.Violation
+	primary           map[string]*experiment.PrimaryResult
+	primaryVal        map[string]float64
+	bounds            map[string][]experiment.Bound
+	eligible          map[string]bool
 
 	// boundReasons carries step 4's unevaluable-bound findings forward to
 	// step 5, which reports them only after confirming the baseline premise
@@ -136,8 +137,12 @@ type evaluation struct {
 // run executes AC-2 steps 2 through 8 in order and returns the assembled,
 // self-validating Result.
 func (e *evaluation) run() (experiment.Result, error) {
+	e.stepExecutionOutcomes()
 	e.stepGuardEligibility()
 	e.stepAggregatePrimary()
+	if res, done, err := e.stepBaselineExecutionFailure(); done {
+		return res, err
+	}
 	e.stepSecondaryBounds()
 
 	if res, done, err := e.stepBaselinePremiseAndImprovement(); done {
@@ -156,13 +161,53 @@ func (e *evaluation) run() (experiment.Result, error) {
 	return e.assemble(experiment.VerdictProvenWinner, best, nil)
 }
 
+func (e *evaluation) stepExecutionOutcomes() {
+	e.executionFailures = make(map[string][]experiment.CandidateExecutionFailure, len(e.def.Candidates))
+	for _, candidate := range e.def.Candidates {
+		for round := 1; round <= e.def.Execution.Rounds; round++ {
+			observation := e.byCandRound[candRound{candidate.ID, round}]
+			if observation.Outcome == nil || observation.Outcome.Kind == experiment.OutcomeCompleted {
+				continue
+			}
+			e.executionFailures[candidate.ID] = append(e.executionFailures[candidate.ID], experiment.CandidateExecutionFailure{
+				Round: round, Kind: observation.Outcome.Kind, Witness: *observation.Outcome.Witness,
+			})
+		}
+	}
+}
+
+func (e *evaluation) stepBaselineExecutionFailure() (experiment.Result, bool, error) {
+	failed := e.executionFailures[e.def.Decision.Baseline]
+	if len(failed) == 0 {
+		return experiment.Result{}, false, nil
+	}
+	failure := failed[0]
+	witness := failure.Witness
+	e.bounds = make(map[string][]experiment.Bound, len(e.def.Candidates))
+	e.finalizeEligibility(make(map[string]bool))
+	for _, candidate := range e.def.Candidates {
+		if len(e.executionFailures[candidate.ID]) == 0 && len(e.violations[candidate.ID]) == 0 {
+			e.eligible[candidate.ID] = true
+		}
+	}
+	reason := experiment.Reason{
+		Code:      experiment.ReasonBaselineCandidateFailure,
+		Candidate: e.def.Decision.Baseline,
+		Outcome:   failure.Kind,
+		Round:     failure.Round,
+		Witness:   &witness,
+	}
+	result, err := e.assemble(experiment.VerdictViolatedWithWitness, "", []experiment.Reason{reason})
+	return result, true, err
+}
+
 // primaryRoundValues returns candID's decision-eligible primary-metric
 // values, one per registered round, in round order (1..Rounds).
 // experiment.ValidateComplete already guarantees exactly one record per
-// round and experiment.ValidateObservations already guarantees that
-// record carries exactly one decision-eligible primary-metric
-// measurement, so this never returns fewer than def.Execution.Rounds
-// values for a validated (def, obs) pair.
+// round, and experiment.ValidateObservations guarantees every completed
+// record carries one decision-eligible primary-metric measurement. Candidate
+// failure records retain only diagnostic process facts, so they are skipped
+// even when a fixed observer id is the registered primary metric (SI-135).
 //
 // A BOOLEAN-typed primary metric projects onto the same float64 scale
 // through MeasurementValue.Float64 — true to 1, false to 0 (SI-46) — which
@@ -174,6 +219,9 @@ func (e *evaluation) primaryRoundValues(candID string) []float64 {
 	values := make([]float64, 0, e.def.Execution.Rounds)
 	for round := 1; round <= e.def.Execution.Rounds; round++ {
 		o := e.byCandRound[candRound{candID, round}]
+		if o.Outcome != nil && o.Outcome.Kind != experiment.OutcomeCompleted {
+			continue
+		}
 		for _, m := range o.Measurements {
 			if m.ID != primaryID || !m.Source.DecisionEligible() {
 				continue
@@ -191,19 +239,18 @@ func (e *evaluation) primaryRoundValues(candID string) []float64 {
 // guardRoundValues returns candID's decision-eligible measurement values
 // for guard id guardID, one per registered round, in round order.
 //
-// The Source.DecisionEligible() filter here is defense in depth, not the
-// primary guarantee: experiment.Observation.Validate already forbids two
-// measurements sharing one id within the same record regardless of
-// source, and experiment.ValidateObservations already requires a
-// decision-eligible measurement under every registered bound guard's id
-// in every record. Together those two checks make a bound guard's value
-// ever being candidate-reported-only unreachable through validated
-// input — Evaluate's precondition check rejects that shape before this
-// function is ever called (see TestEvaluateBoundGuardCandidateReportedOnlyRejected).
+// Candidate failure records are skipped before source selection so their
+// fixed process facts remain diagnostic even when an observer id is also a
+// registered bound. For completed records, Source.DecisionEligible() is
+// defense in depth: validation already requires one eligible value for every
+// registered bound.
 func (e *evaluation) guardRoundValues(candID, guardID string) []float64 {
 	values := make([]float64, 0, e.def.Execution.Rounds)
 	for round := 1; round <= e.def.Execution.Rounds; round++ {
 		o := e.byCandRound[candRound{candID, round}]
+		if o.Outcome != nil && o.Outcome.Kind != experiment.OutcomeCompleted {
+			continue
+		}
 		for _, m := range o.Measurements {
 			if m.ID != guardID || !m.Source.DecisionEligible() {
 				continue
@@ -249,19 +296,23 @@ func (e *evaluation) stepGuardEligibility() {
 // disqualified candidate's actual performance — using only decision
 // -eligible measurements.
 func (e *evaluation) stepAggregatePrimary() {
-	e.primary = make(map[string]experiment.PrimaryResult, len(e.def.Candidates))
+	e.primary = make(map[string]*experiment.PrimaryResult, len(e.def.Candidates))
 	e.primaryVal = make(map[string]float64, len(e.def.Candidates))
 	pm := e.def.Decision.PrimaryMetric
 	for _, c := range e.def.Candidates {
 		values := e.primaryRoundValues(c.ID)
+		if len(values) == 0 {
+			continue
+		}
 		agg := aggregate(pm.Aggregation, values)
 		e.primaryVal[c.ID] = agg
-		e.primary[c.ID] = experiment.PrimaryResult{
+		primary := experiment.PrimaryResult{
 			Aggregation: pm.Aggregation,
 			Unit:        pm.Unit,
 			Value:       formatFloat(agg),
 			Rounds:      len(values),
 		}
+		e.primary[c.ID] = &primary
 	}
 }
 
@@ -293,7 +344,10 @@ func (e *evaluation) stepSecondaryBounds() {
 		}
 		maxByCand := make(map[string]float64, len(e.def.Candidates))
 		for _, c := range e.def.Candidates {
-			maxByCand[c.ID] = maximum(e.guardRoundValues(c.ID, g.ID))
+			values := e.guardRoundValues(c.ID, g.ID)
+			if len(values) > 0 {
+				maxByCand[c.ID] = maximum(values)
+			}
 		}
 		baselineAgg := maxByCand[e.def.Decision.Baseline]
 		if baselineAgg <= 0 {
@@ -306,6 +360,9 @@ func (e *evaluation) stepSecondaryBounds() {
 		}
 		limit := baselineAgg * (1 + *g.MaximumRelativeToBaseline)
 		for _, c := range e.def.Candidates {
+			if _, ok := maxByCand[c.ID]; !ok {
+				continue
+			}
 			v := maxByCand[c.ID]
 			pass := v <= limit
 			e.bounds[c.ID] = append(e.bounds[c.ID], experiment.Bound{
@@ -333,7 +390,7 @@ func (e *evaluation) stepSecondaryBounds() {
 func (e *evaluation) finalizeEligibility(boundOK map[string]bool) {
 	e.eligible = make(map[string]bool, len(e.def.Candidates))
 	for _, c := range e.def.Candidates {
-		e.eligible[c.ID] = len(e.violations[c.ID]) == 0 && boundOK[c.ID]
+		e.eligible[c.ID] = len(e.executionFailures[c.ID]) == 0 && len(e.violations[c.ID]) == 0 && boundOK[c.ID]
 	}
 }
 
@@ -600,13 +657,12 @@ func (e *evaluation) stepVariability() (res experiment.Result, done bool, err er
 func (e *evaluation) assemble(verdict experiment.Verdict, winner string, reasons []experiment.Reason) (experiment.Result, error) {
 	candidates := make([]experiment.CandidateResult, 0, len(e.def.Candidates))
 	for _, c := range e.def.Candidates {
-		primary := e.primary[c.ID]
 		candidates = append(candidates, experiment.CandidateResult{
 			ID:         c.ID,
 			Baseline:   c.ID == e.def.Decision.Baseline,
 			Eligible:   e.eligible[c.ID],
 			Violations: e.violations[c.ID],
-			Primary:    &primary,
+			Primary:    e.primary[c.ID],
 			Bounds:     e.bounds[c.ID],
 		})
 	}

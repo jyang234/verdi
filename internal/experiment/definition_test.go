@@ -229,6 +229,34 @@ func TestDecodeDefinitionRejects(t *testing.T) {
 	}
 }
 
+func TestExecutionValidateRequiresPositiveIntegralSecondTimeout(t *testing.T) {
+	tests := []struct {
+		name    string
+		timeout string
+		wantErr bool
+	}{
+		{name: "one second", timeout: "1s"},
+		{name: "integral seconds expressed as milliseconds", timeout: "2000ms"},
+		{name: "fractional seconds", timeout: "1500ms", wantErr: true},
+		{name: "subsecond", timeout: "1ns", wantErr: true},
+		{name: "fraction above an integral second", timeout: "1000000001ns", wantErr: true},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			execution := Execution{
+				Rounds:            1,
+				Order:             OrderDeterministicRotation,
+				TimeoutPerRound:   test.timeout,
+				EnvironmentPolicy: "isolated-v1",
+			}
+			err := execution.Validate()
+			if (err != nil) != test.wantErr {
+				t.Fatalf("Execution.Validate() error = %v, wantErr %t", err, test.wantErr)
+			}
+		})
+	}
+}
+
 func TestDefinitionWithLockDecodes(t *testing.T) {
 	doc := validDefinitionYAML() + "lock:\n  definition_digest: " + digestOf("9") + "\n"
 	def, err := DecodeDefinition([]byte(doc))
@@ -285,5 +313,22 @@ func TestDefinitionEvaluatorArgvNoShellString(t *testing.T) {
 	doc := mutate(t, "  argv: [\"./tools/cache-evaluator\", \"run\"]\n", "  argv: []\n")
 	if _, err := DecodeDefinition([]byte(doc)); err == nil {
 		t.Errorf("DecodeDefinition() with empty argv = nil error, want error")
+	}
+}
+
+func TestDefinitionEvaluatorArgvEndsInRunOperation(t *testing.T) {
+	tests := []struct {
+		name string
+		argv string
+	}{
+		{"executable only", `["./tools/cache-evaluator"]`},
+		{"wrong operation", `["./tools/cache-evaluator", "describe"]`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if _, err := DecodeDefinition([]byte(evaluatorArgvYAML(t, tt.argv))); err == nil {
+				t.Fatalf("DecodeDefinition() = nil error, want final run-operation error")
+			}
+		})
 	}
 }

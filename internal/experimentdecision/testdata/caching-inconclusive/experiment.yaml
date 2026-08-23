@@ -21,7 +21,7 @@ candidates:
 evaluator:
   argv: ["./tools/cache-evaluator", "run"]
   digest: sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
-  capabilities_digest: sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+  capabilities_digest: sha256:1300bce65fc6717bba6623464f054675229ec531909b01385e73ce5e4ca4a6bf
 
 workload:
   id: representative-request-mix
@@ -47,7 +47,7 @@ decision:
     - id: behavioral-equivalence
     - id: tenant-isolation
     - id: invalidation-deadline
-    - id: peak-rss
+    - id: verdi-evaluator-peak-rss
       maximum_relative_to_baseline: 0.15
 
 execution:
@@ -60,5 +60,9 @@ execution:
 algorithm: verdi.experiment-recommendation/v1
 retention_policy: standard-retention
 
+protected_paths:
+  - contracts/equivalence.json
+  - inputs/workload.json
+
 lock:
-  definition_digest: sha256:fa5ce7dc638a306e23a6792449c06f1dec066956bf1321fbedf4254994bfe127
+  definition_digest: sha256:a09984fe77f337510ed82d610271172dbcc7de687c71581e46c3752ef905da38
