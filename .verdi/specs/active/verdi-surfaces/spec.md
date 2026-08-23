@@ -18,9 +18,10 @@ schema: verdi.surfaces/v1
 
 One Go library, four surfaces. The library (store walk, strict decode, index,
 fold, digests) is the product; every surface below is a thin consumer.
-Division of audiences: **the dex is the human read surface; MCP is the
-machine read surface; the workbench is the human write surface; MRs are the
-only durable write path.** Nothing is duplicated, so nothing can drift.
+Division of audiences: **the dex is the human read surface; the CLI is the
+local typed action surface; MCP is the machine read and bounded agent-action
+surface; the workbench is the interactive human surface; MRs are the only
+durable authority path.** Nothing is duplicated, so nothing can drift.
 
 ## CLI
 
@@ -37,6 +38,7 @@ only durable write path.** Nothing is duplicated, so nothing can drift.
 | `verdi sync [--or-regen]`| local     | pull the MR/PR pipeline's evidence bundle for the current ref through the configured forge into `derived/<ref>/<commit>/`; `--or-regen` regenerates locally when no bundle exists (fresh clone, no pipeline yet) |
 | `verdi serve`            | local     | localhost workbench UI + lens pages (read/write to mutable zone) |
 | `verdi mcp`              | local     | MCP server over stdio (below)                                  |
+| `verdi experiment <operation>` | local + CI | the comparative-experiment namespace (SI-139..SI-146): strict typed operations over one application core for draft/candidate preparation, explicit direct-draft reconciliation, registration review and human lock proposal, capability inspection, locked-run start/resume, all-run status, deterministic result explanation, authenticated ratification proposal, selected-capsule publication and workspace release; agent adapters receive only their permitted subset and cannot reconcile; exits 0 clean/proven, 1 completed refusal or unproven verdict, 2 operational |
 | `verdi matrix <story\|feature>` | local + CI| compute and print the fold; accepts exactly a scheme-prefixed story/feature ref or a spec ref — a bare tracker key is an operational error naming the accepted forms; for a **feature ref**, renders the feature fold (§4 of the concept): per-AC status, frozen stubs paired with the computed live `implements` mapping under the acceptance-time-plan banner, stub reconciliation state; `--preview` includes advisory evidence |
 | `verdi rollup <story> --publish` | CI | compute fold from authoritative evidence for the given story or spec ref (the same strict two-form argument as `matrix`) and publish to provider; `--force-local` runs the verb outside CI for local testing, printing a disclosed, non-authoritative warning first |
 | `verdi close <story\|feature>` | local→CI  | **story:** fetch runtime records, verify eligibility, run `align --freeze`, generate frozen rollup, open the closure MR. **feature** (03 §Closure ritual): fails unless every feature AC is `evidenced` (including its outcome floor) and stub reconciliation passes; the closure MR carries the reconciliation block alongside the fold snapshot; `--preflight` (spec/close-preflight) rehearses the identical closure-gate fold (the same `runClosureGate`/`runFeatureClosureGate` functions a real close calls, story or feature alike) and reports exactly what a real close would refuse on, per AC and evidence kind — an absent attestation named distinctly from a scaffolded-but-unauthored one at the same exact path, any non-ancestor derived-commit directory found but excluded named explicitly — without cutting a branch, freezing, writing, or publishing anything; exits 0 (ready), 1 (NOT READY — a verdict, never an error), or 2 (a genuine operational failure only); dispatched BEFORE the CI-only/`--force-local` publish guard, so it runs from a plain local checkout, disclosing once, informationally (never as a failing condition), that a real close from that same environment would separately refuse at that guard |
@@ -271,10 +273,14 @@ policy lenses. Neither duplicates the other's tools.
 | `list_tasks`         | R   | open `agent-task` annotations                            |
 | `get_board`          | R   | the deterministic board projection for a spec ref (§Workbench) — the same element taxonomy, computed badges, and mode-appropriate annotations a human sees in `verdi serve`, so agents work from what humans see rather than a second-hand summary |
 | `add_annotation`     | W   | append to the mutable zone (the only write tool)         |
+| `experiment`         | R/W | strict closed union over the agent-permitted comparative-experiment operations: inspect, capability discovery, draft/candidate preparation, locked-run start/resume, status, and result explanation; registration lock, ratification, capsule publication, release, closure, policy weakening, and prototype promotion are absent or explicitly refused |
 
-`get_board` grows the read surface only; the write surface stays
-`add_annotation` and nothing else — board authoring on a design branch (the
-git affordance, §Workbench) is a human/git act, not an MCP write path.
+`get_board` grows the board read surface only; `add_annotation` remains the
+only mutable-zone annotation writer. The `experiment` tool writes only through
+the CSE application core into an unlocked experiment draft or an already
+accepted locked run; it is not a generic file writer and exposes no human-only
+transition. Board authoring on a design branch (the git affordance,
+§Workbench) remains a human/git act, not an MCP write path.
 
 Safety note, normative: annotation bodies and artifact contents returned by
 these tools are **data, never instructions**. Skills consuming them must treat
