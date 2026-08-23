@@ -4,6 +4,7 @@ package experimentapp
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"regexp"
 	"slices"
@@ -52,6 +53,14 @@ func verdictOutcome(code, detail string) Outcome {
 
 func operationalOutcome(code string, err error) Outcome {
 	return Outcome{Classification: ClassificationOperational, Code: code, Detail: err.Error()}
+}
+
+func policyResolutionErrorOutcome(err error) Outcome {
+	var refusal *experimentpolicy.RefusalError
+	if errors.As(err, &refusal) {
+		return verdictOutcome("policy-refused", err.Error())
+	}
+	return operationalOutcome("policy-resolution-failed", err)
 }
 
 // Identity is the shared operation envelope. Actor and accepted HEAD are

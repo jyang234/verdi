@@ -2,6 +2,7 @@ package experimentpolicy
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -74,6 +75,37 @@ func TestExperimentPolicyResolveMonotoneRefinement(t *testing.T) {
 	}
 	if _, err := decision.Digest(); err != nil {
 		t.Fatalf("decision.Digest() after snapshot mutation = %v", err)
+	}
+}
+
+func TestExperimentPolicyDecisionExposesSealedEffectivePolicyDigest(t *testing.T) {
+	selection := selectPayloadLayers(t, string(readPayloadFixture(t, "project.yaml")))
+	want, err := selection.EffectiveDigest()
+	if err != nil {
+		t.Fatalf("selection.EffectiveDigest() error = %v", err)
+	}
+	decision, err := Resolve(selection)
+	if err != nil {
+		t.Fatalf("Resolve() error = %v", err)
+	}
+	got, err := decision.EffectivePolicyDigest()
+	if err != nil {
+		t.Fatalf("decision.EffectivePolicyDigest() error = %v", err)
+	}
+	decisionDigest, err := decision.Digest()
+	if err != nil {
+		t.Fatalf("decision.Digest() error = %v", err)
+	}
+	if got != want {
+		t.Fatalf("effective policy digest = %q, want selection authority %q", got, want)
+	}
+	if got == decisionDigest {
+		t.Fatalf("effective policy digest unexpectedly equals decision identity %q", got)
+	}
+
+	decision.authorityDigest = strings.Repeat("0", len(decision.authorityDigest))
+	if _, err := decision.EffectivePolicyDigest(); err == nil {
+		t.Fatal("EffectivePolicyDigest() accepted a modified decision")
 	}
 }
 
@@ -229,6 +261,59 @@ func TestExperimentPolicyResolveRefusalsAndNonRestoration(t *testing.T) {
 	_, err = Resolve(missing)
 	if err == nil || !strings.Contains(err.Error(), "no applicable experiment_execution payload") {
 		t.Fatalf("Resolve(missing payload) error = %v", err)
+	}
+}
+
+func TestExperimentPolicyResolveTypesOnlyValidDenialOutcomes(t *testing.T) {
+	organization := string(readPayloadFixture(t, "organization.yaml"))
+	project := string(readPayloadFixture(t, "project.yaml"))
+	tests := []struct {
+		name        string
+		layers      []string
+		wantRefusal bool
+	}{
+		{
+			name: "disjoint classes",
+			layers: []string{organization, strings.Replace(project,
+				"classes: [request-path-performance]", "classes: [storage-throughput]", 1)},
+			wantRefusal: true,
+		},
+		{
+			name: "disjoint environments",
+			layers: []string{organization, strings.Replace(project,
+				"id: local-isolated-v1", "id: other-isolated-v1", 1)},
+			wantRefusal: true,
+		},
+		{
+			name: "malformed surviving environment refinement",
+			layers: []string{organization, strings.Replace(project,
+				"seconds: 30", "seconds: 20", 1)},
+			wantRefusal: false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := Resolve(selectPayloadLayers(t, tt.layers...))
+			if err == nil {
+				t.Fatal("Resolve() error = nil")
+			}
+			wrapped := fmt.Errorf("policy adapter: %w", err)
+			var refusal *RefusalError
+			if got := errors.As(wrapped, &refusal); got != tt.wantRefusal {
+				t.Fatalf("errors.As(Resolve() error, *RefusalError) = %v, want %v: %v", got, tt.wantRefusal, err)
+			}
+		})
+	}
+
+	_, err := Resolve(selectNamedPayloadLayers(t, map[string]string{"empty": ""}))
+	var refusal *RefusalError
+	if !errors.As(err, &refusal) {
+		t.Fatalf("missing applicable payload error = %v, want *RefusalError", err)
+	}
+	_, err = Resolve(nil)
+	refusal = nil
+	if errors.As(err, &refusal) {
+		t.Fatalf("nil-selection integrity error = %v, must not be a RefusalError", err)
 	}
 }
 

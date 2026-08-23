@@ -26,6 +26,24 @@ type decisionContent struct {
 	Payload         Payload `json:"payload"`
 }
 
+// RefusalError is a well-formed policy resolution whose valid authority
+// operands deny the operation. Structural, decoder, integrity, and malformed
+// refinement failures do not use this type.
+type RefusalError struct {
+	detail string
+}
+
+func (e *RefusalError) Error() string {
+	if e == nil {
+		return "experimentpolicy: policy refused"
+	}
+	return e.detail
+}
+
+func newRefusalError(format string, args ...any) error {
+	return &RefusalError{detail: fmt.Sprintf(format, args...)}
+}
+
 // Resolve intersects every allowlist and environment ID set, takes minimum
 // limits, unions mandatory guards, and applies denial dominance over the
 // already-selected Context Integrity ledger. It has no loader, scope logic,
@@ -54,7 +72,7 @@ func Resolve(selection *contextcompile.ApplicablePayloadSelection) (*Decision, e
 		return nil, fmt.Errorf("experimentpolicy: resolve layers: %w", err)
 	}
 	if len(layers) == 0 {
-		return nil, fmt.Errorf("experimentpolicy: no applicable %s payload", PayloadKind)
+		return nil, newRefusalError("experimentpolicy: no applicable %s payload", PayloadKind)
 	}
 
 	payloads := make([]*Payload, len(layers))
@@ -128,6 +146,15 @@ func (d *Decision) Payload() (Payload, error) {
 	return *cloned, nil
 }
 
+// EffectivePolicyDigest returns the exact sealed effective-policy identity
+// from which this decision was resolved.
+func (d *Decision) EffectivePolicyDigest() (string, error) {
+	if err := d.checkSeal(); err != nil {
+		return "", err
+	}
+	return d.authorityDigest, nil
+}
+
 // Digest returns the sealed decision identity.
 func (d *Decision) Digest() (string, error) {
 	if err := d.checkSeal(); err != nil {
@@ -194,7 +221,7 @@ func refuseEmptyAllowances(payload *Payload) error {
 	}
 	for _, test := range tests {
 		if test.empty {
-			return fmt.Errorf("experimentpolicy: %s intersection is empty; denial dominates and no lower layer may restore it", test.name)
+			return newRefusalError("experimentpolicy: %s intersection is empty; denial dominates and no lower layer may restore it", test.name)
 		}
 	}
 	return nil

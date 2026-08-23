@@ -52,13 +52,16 @@ func (s *Service) Inspect(ctx context.Context, identity Identity) InspectResult 
 	capabilities := experiment.Capabilities{}
 	if definition.Schema == experiment.DefinitionSchemaV2 {
 		capabilitiesBytes, readErr := fs.ReadFile(snapshot.source, path.Join(snapshot.experimentPath, "evaluator-capabilities.json"))
-		if readErr == nil {
-			capabilities, err = experiment.DecodeCapabilities(capabilitiesBytes)
-			if err != nil {
-				return InspectResult{Outcome: operationalOutcome("capabilities-invalid", err)}
-			}
-		} else if !errors.Is(readErr, fs.ErrNotExist) {
+		if readErr != nil {
 			return InspectResult{Outcome: operationalOutcome("capabilities-unreadable", readErr)}
+		}
+		capabilities, err = experiment.DecodeCapabilities(capabilitiesBytes)
+		if err != nil {
+			return InspectResult{Outcome: operationalOutcome("capabilities-invalid", err)}
+		}
+		capabilitiesDigest := rawDigest(capabilitiesBytes)
+		if capabilitiesDigest != definition.Evaluator.CapabilitiesDigest {
+			return InspectResult{Outcome: operationalOutcome("capabilities-digest-mismatch", fmt.Errorf("accepted capabilities digest %q does not match definition %q", capabilitiesDigest, definition.Evaluator.CapabilitiesDigest))}
 		}
 	}
 	decision, err := s.policy.ResolvePolicy(ctx, clonePolicyRequest(PolicyRequest{
@@ -67,12 +70,12 @@ func (s *Service) Inspect(ctx context.Context, identity Identity) InspectResult 
 		CandidatePaths: candidatePaths,
 	}))
 	if err != nil {
-		return InspectResult{Outcome: operationalOutcome("policy-resolution-failed", err)}
+		return InspectResult{Outcome: policyResolutionErrorOutcome(err)}
 	}
 	if decision == nil {
 		return InspectResult{Outcome: operationalOutcome("policy-resolution-invalid", fmt.Errorf("experimentapp: policy resolver returned nil decision"))}
 	}
-	policyDigest, err := decision.Digest()
+	policyDigest, err := decision.EffectivePolicyDigest()
 	if err != nil {
 		return InspectResult{Outcome: operationalOutcome("policy-resolution-invalid", err)}
 	}
@@ -80,7 +83,7 @@ func (s *Service) Inspect(ctx context.Context, identity Identity) InspectResult 
 	if err != nil {
 		return InspectResult{Outcome: operationalOutcome("policy-resolution-invalid", err)}
 	}
-	if definition.Schema == experiment.DefinitionSchemaV2 && capabilities.Schema != "" {
+	if definition.Schema == experiment.DefinitionSchemaV2 {
 		if _, err := experimentpolicy.Authorize(decision, experimentpolicy.AuthorizationInput{
 			Definition: definition, Capabilities: capabilities, ExperimentPath: snapshot.experimentPath,
 			CandidatePaths: candidatePaths,

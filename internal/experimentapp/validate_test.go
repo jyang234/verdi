@@ -2,6 +2,7 @@ package experimentapp
 
 import (
 	"context"
+	"errors"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -71,6 +72,38 @@ func TestValidateDraftClassifiesV1AndMalformedCapabilityBytes(t *testing.T) {
 			}
 			if policy.calls != 1 {
 				t.Fatalf("policy calls = %d, want exactly 1", policy.calls)
+			}
+		})
+	}
+}
+
+func TestValidateDraftClassifiesOnlyTypedPolicyRefusalAsVerdict(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want Classification
+		code string
+		exit int
+	}{
+		{name: "disjoint class policy", err: resolveTestPolicyRefusal(t, "class"), want: ClassificationVerdict, code: "policy-refused", exit: 1},
+		{name: "generic resolver failure", err: errors.New("policy backend unavailable"), want: ClassificationOperational, code: "policy-resolution-failed", exit: 2},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			root := t.TempDir()
+			copyExperimentFixture(t, root, "experiment-v2", "request-path-v2")
+			service, err := NewService(
+				&fakePolicyResolver{err: tt.err},
+				&fakeGit{revision: DefaultBranch{Name: "main", Ref: "refs/remotes/origin/main", Head: testHead}},
+				&fakeCapabilities{},
+				&acceptingVerifier{},
+			)
+			if err != nil {
+				t.Fatal(err)
+			}
+			result := service.ValidateDraft(context.Background(), testIdentity(t, root, "request-path-v2"))
+			if result.Outcome.Classification != tt.want || result.Outcome.Code != tt.code || result.Outcome.ExitCode() != tt.exit {
+				t.Fatalf("ValidateDraft() outcome = %+v exit %d, want %s/%s exit %d", result.Outcome, result.Outcome.ExitCode(), tt.want, tt.code, tt.exit)
 			}
 		})
 	}

@@ -75,12 +75,12 @@ func (s *Service) validateDraftAtRevision(ctx context.Context, identity Identity
 		Spike: identity.Spike, Definition: definition, CandidatePaths: candidatePaths,
 	}))
 	if err != nil {
-		return ValidateDraftResult{Outcome: operationalOutcome("policy-resolution-failed", err)}
+		return ValidateDraftResult{Outcome: policyResolutionErrorOutcome(err)}
 	}
 	if decision == nil {
 		return ValidateDraftResult{Outcome: operationalOutcome("policy-resolution-invalid", fmt.Errorf("experimentapp: policy resolver returned nil decision"))}
 	}
-	policyDigest, err := decision.Digest()
+	policyDigest, err := decision.EffectivePolicyDigest()
 	if err != nil {
 		return ValidateDraftResult{Outcome: operationalOutcome("policy-resolution-invalid", err)}
 	}

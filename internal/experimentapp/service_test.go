@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"testing"
 
 	"github.com/jyang234/verdi/internal/contextcompile"
@@ -107,6 +108,25 @@ func testActor(t *testing.T) Actor {
 
 func resolveTestPolicy(t *testing.T) *experimentpolicy.Decision {
 	t.Helper()
+	selection := selectTestPolicy(t, "")
+	decision, err := experimentpolicy.Resolve(selection)
+	if err != nil {
+		t.Fatalf("experimentpolicy.Resolve() error = %v", err)
+	}
+	return decision
+}
+
+func resolveTestPolicyRefusal(t *testing.T, denial string) error {
+	t.Helper()
+	_, err := experimentpolicy.Resolve(selectTestPolicy(t, denial))
+	if err == nil {
+		t.Fatalf("experimentpolicy.Resolve(%s denial) error = nil", denial)
+	}
+	return fmt.Errorf("test policy resolver: %w", err)
+}
+
+func selectTestPolicy(t *testing.T, denial string) *contextcompile.ApplicablePayloadSelection {
+	t.Helper()
 	root := t.TempDir()
 	source := filepath.Join("testdata", "policy")
 	err := filepath.WalkDir(source, func(path string, entry fs.DirEntry, walkErr error) error {
@@ -133,6 +153,26 @@ func resolveTestPolicy(t *testing.T) *experimentpolicy.Decision {
 	if err != nil {
 		t.Fatalf("copy policy fixture: %v", err)
 	}
+	if denial != "" {
+		policyPath := filepath.Join(root, ".verdi", "policy", "policies", "experiment.md")
+		data, err := os.ReadFile(policyPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		data = []byte(strings.Replace(string(data), "id: policy/experiment", "id: policy/denial", 1))
+		switch denial {
+		case "class":
+			data = []byte(strings.Replace(string(data), "classes: [request-path-performance]", "classes: [storage-throughput]", 1))
+		case "environment":
+			data = []byte(strings.Replace(string(data), "id: local-isolated-v1", "id: other-isolated-v1", 1))
+		default:
+			t.Fatalf("unknown test policy denial %q", denial)
+		}
+		denialPath := filepath.Join(root, ".verdi", "policy", "policies", "denial.md")
+		if err := os.WriteFile(denialPath, data, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
 	store, err := policyauthority.Load(root)
 	if err != nil {
 		t.Fatalf("policyauthority.Load() error = %v", err)
@@ -151,11 +191,7 @@ func resolveTestPolicy(t *testing.T) *experimentpolicy.Decision {
 	if err != nil {
 		t.Fatalf("SelectApplicablePayloads() error = %v", err)
 	}
-	decision, err := experimentpolicy.Resolve(selection)
-	if err != nil {
-		t.Fatalf("experimentpolicy.Resolve() error = %v", err)
-	}
-	return decision
+	return selection
 }
 
 func gitFixture(t *testing.T, fixture, experimentID string) *fakeGit {
@@ -194,6 +230,19 @@ func gitFixture(t *testing.T, fixture, experimentID string) *fakeGit {
 		entries:  entries,
 		blobs:    blobs,
 	}
+}
+
+func acceptedExperimentFilePath(experimentID, rel string) string {
+	return filepath.ToSlash(filepath.Join(".verdi", "specs", "active", "request-path-spike", "experiments", experimentID, rel))
+}
+
+func setAcceptedExperimentFile(t *testing.T, git *fakeGit, experimentID, rel string, data []byte) {
+	t.Helper()
+	filePath := acceptedExperimentFilePath(experimentID, rel)
+	object := fmt.Sprintf("object-%03d", len(git.entries)+1)
+	git.entries = append(git.entries, GitTreeEntry{Mode: "100644", Type: "blob", Object: object, Path: filePath})
+	sort.Slice(git.entries, func(i, j int) bool { return git.entries[i].Path < git.entries[j].Path })
+	git.blobs[filePath] = append([]byte(nil), data...)
 }
 
 func testIdentity(t *testing.T, root, experimentID string) Identity {

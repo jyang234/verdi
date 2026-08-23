@@ -59,6 +59,17 @@ func TestReviewRegistrationIsDeterministicReadOnlyAndDisclosesDirectEdits(t *tes
 	if direct.AcceptedArtifactDigest == direct.ProposedArtifactDigest || directPolicy.calls != 1 {
 		t.Fatalf("direct review digests/policy = %q %q / %d", direct.AcceptedArtifactDigest, direct.ProposedArtifactDigest, directPolicy.calls)
 	}
+	effectivePolicyDigest, err := directPolicy.decision.EffectivePolicyDigest()
+	if err != nil {
+		t.Fatal(err)
+	}
+	decisionDigest, err := directPolicy.decision.Digest()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if direct.Packet.PolicyDigest != effectivePolicyDigest || direct.Packet.PolicyDigest == decisionDigest {
+		t.Fatalf("review policy digest = %q, want effective %q and not decision %q", direct.Packet.PolicyDigest, effectivePolicyDigest, decisionDigest)
+	}
 
 	actor := testActor(t)
 	record := experiment.ProvenanceRecord{
@@ -66,7 +77,7 @@ func TestReviewRegistrationIsDeterministicReadOnlyAndDisclosesDirectEdits(t *tes
 		Experiment:     experiment.ProvenanceExperiment{Spike: "spec/request-path-spike", ID: "request-path-v2"},
 		Operation:      experiment.MutationReconcileDirect,
 		PreviousDigest: direct.AcceptedArtifactDigest, ResultDigest: direct.ProposedArtifactDigest,
-		PolicyDigest:   direct.Packet.PolicyDigest,
+		PolicyDigest:   decisionDigest,
 		PolicyDecision: experiment.ProvenancePolicyDecision{State: experiment.PolicyAllowed, Reasons: []experiment.ProvenancePolicyReason{}},
 		Attribution:    actor.Attribution(), Harness: actor.Harness(), Session: actor.Session(),
 		Paths: []string{".verdi/specs/active/request-path-spike/experiments/request-path-v2/unregistered.txt"},
@@ -79,6 +90,22 @@ func TestReviewRegistrationIsDeterministicReadOnlyAndDisclosesDirectEdits(t *tes
 		t.Fatal(err)
 	}
 	provenancePath := filepath.Join(filepath.Dir(marker), experiment.ProvenanceFile)
+	if err := os.WriteFile(provenancePath, provenanceBytes, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	wrongIdentity, _, _ := run()
+	if wrongIdentity.Outcome.Classification != ClassificationVerdict || wrongIdentity.Outcome.Code != "direct-draft-unreconciled" {
+		t.Fatalf("decision-seal provenance outcome = %+v, want unreconciled verdict", wrongIdentity.Outcome)
+	}
+
+	record.PolicyDigest = effectivePolicyDigest
+	if err := record.Seal(); err != nil {
+		t.Fatal(err)
+	}
+	provenanceBytes, err = experiment.EncodeProvenanceRecord(record)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := os.WriteFile(provenancePath, provenanceBytes, 0o644); err != nil {
 		t.Fatal(err)
 	}
