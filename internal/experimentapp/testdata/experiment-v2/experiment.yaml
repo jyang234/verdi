@@ -1,0 +1,48 @@
+schema: verdi.experiment/v2
+class: request-path-performance
+reproduction:
+  minimum_valid_runs: 2
+id: request-path-v2
+spike: spec/request-path-spike
+question: spec/request-path-spike#oq-cache
+base_commit: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+candidates:
+  - id: baseline
+    patch: candidates/baseline.patch
+    digest: sha256:53a2ed4f07d80ccce9b2d21199fc99fc70c22a35c1ea24654ab0324d2b753f26
+    base: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+  - id: cache
+    patch: candidates/cache.patch
+    digest: sha256:948705e2b8a093896358025d2b75282fbd1c36557c278881add34f4c75cbecc7
+    base: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+evaluator:
+  argv: ["./tools/evaluator", "run"]
+  digest: sha256:3333333333333333333333333333333333333333333333333333333333333333
+  capabilities_digest: sha256:812cd93a95c48eef49c81b2c8712e0d6b100baa585bb398aad7ad89b720afa15
+workload:
+  id: request-mix
+  digest: sha256:5555555555555555555555555555555555555555555555555555555555555555
+contract:
+  id: request-contract
+  digest: sha256:6666666666666666666666666666666666666666666666666666666666666666
+decision:
+  primary_metric:
+    id: request-latency
+    type: duration
+    unit: ms
+    aggregation: p95
+    direction: lower
+  baseline: baseline
+  baseline_improvement:
+    relative: 0.25
+  candidate_separation:
+    relative: 0.05
+  guards: []
+execution:
+  warmups: 1
+  rounds: 3
+  order: deterministic-rotation
+  timeout_per_round: 30s
+  environment_policy: local-isolated-v1
+algorithm: verdi.experiment-recommendation/v1
+retention_policy: standard-retention-v1

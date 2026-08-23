@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -185,6 +186,25 @@ func TestDeriveStateAbsoluteRepoRootReadsThroughExperimentDir(t *testing.T) {
 	}
 	if state != StateRegistered {
 		t.Errorf("DeriveState() = %q, want %q", state, StateRegistered)
+	}
+}
+
+func TestDeriveStateDetailsFromSourceMatchesFilesystem(t *testing.T) {
+	root := t.TempDir()
+	doc, _ := lockedDefinitionDoc(t)
+	writeExperimentFile(t, root, definitionFile, doc)
+	writeCandidatePatches(t, root)
+
+	filesystem, err := DeriveStateDetails(root, testExperimentDir, acceptResult)
+	if err != nil {
+		t.Fatalf("DeriveStateDetails() error = %v", err)
+	}
+	fromSource, err := DeriveStateDetailsFromSource(os.DirFS(root), testExperimentDir, acceptResult)
+	if err != nil {
+		t.Fatalf("DeriveStateDetailsFromSource() error = %v", err)
+	}
+	if !reflect.DeepEqual(fromSource, filesystem) {
+		t.Fatalf("source derivation = %#v, filesystem derivation = %#v", fromSource, filesystem)
 	}
 }
 
