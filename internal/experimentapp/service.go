@@ -80,6 +80,7 @@ func (i Identity) validate() error {
 		return fmt.Errorf("experimentapp: checkout root must be nonblank")
 	}
 	if !spikePattern.MatchString(i.Spike) {
+		// vocab:identity — "spike" names the operation envelope's fixed spec/<id> artifact-ref field grammar, not renameable display vocabulary.
 		return fmt.Errorf("experimentapp: spike %q does not match ^spec/<id>$", i.Spike)
 	}
 	if err := experiment.ValidateID(i.ExperimentID); err != nil {

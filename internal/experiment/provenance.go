@@ -79,6 +79,7 @@ var provenanceSpikePattern = regexp.MustCompile(`^spec/[a-z0-9]+(-[a-z0-9]+)*$`)
 
 func (e ProvenanceExperiment) validate() error {
 	if !provenanceSpikePattern.MatchString(e.Spike) {
+		// vocab:identity — "spike" names the provenance record's fixed spec/<id> artifact-ref field grammar, not renameable display vocabulary.
 		return fmt.Errorf("experiment: provenance spike %q does not match ^spec/<id>$", e.Spike)
 	}
 	if err := ValidateID(e.ID); err != nil {
