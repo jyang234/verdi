@@ -1,5 +1,5 @@
 <!-- verdi:generated-projection adapter=codex adapter-version=1 -->
-<!-- verdi:authority-digest sha256:3196a15124b0d39bb1db0b2adfb20f7deea530309ffa7b48bc1e1cf3b3446c0b -->
+<!-- verdi:authority-digest sha256:445b1aa5050804114d0824e84599c7e6a11fc27362c023d898ef7c80610c5a56 -->
 <!-- verdi:governance-profile id=solo-default digest=sha256:e57f7183f68956ba34e4208655e34656a26b7090f9bc8ba275a141e215af46a3 -->
 <!-- verdi: this is a generated projection; edits here never change authority, and any difference is reported as drift until this file is regenerated. -->
 
