@@ -60,6 +60,49 @@ func TestDefinitionDigestDeterministic(t *testing.T) {
 	}
 }
 
+func TestDefinitionV2NormalizationBindsOperandsAndClones(t *testing.T) {
+	def := mustDecodeDefinition(t, validDefinitionV2YAML("reproduction:\n  minimum_valid_runs: 2\n"))
+	normalized, err := NormalizeDefinition(def)
+	if err != nil {
+		t.Fatalf("NormalizeDefinition(): %v", err)
+	}
+	baseDigest, err := DefinitionDigest(def)
+	if err != nil {
+		t.Fatalf("DefinitionDigest(): %v", err)
+	}
+
+	changedClass := def
+	changedClass.Class = "request-path-throughput"
+	classDigest, err := DefinitionDigest(changedClass)
+	if err != nil {
+		t.Fatalf("DefinitionDigest(changed class): %v", err)
+	}
+	changedRule := def
+	changedRule.Reproduction = &ReproductionRule{MinimumValidRuns: 3}
+	ruleDigest, err := DefinitionDigest(changedRule)
+	if err != nil {
+		t.Fatalf("DefinitionDigest(changed rule): %v", err)
+	}
+	if baseDigest == classDigest || baseDigest == ruleDigest {
+		t.Fatalf("v2 operand change did not change digest: base=%q class=%q rule=%q", baseDigest, classDigest, ruleDigest)
+	}
+
+	// Mutate every slice owned by the source definition. A normalized value is
+	// a custody boundary and must retain the exact pre-mutation projection.
+	def.Candidates[0].ID = "mutated-candidate"
+	def.Evaluator.Argv[0] = "mutated-evaluator"
+	def.Fixtures[0].ID = "mutated-fixture"
+	def.Decision.Guards[0].ID = "mutated-guard"
+	def.ProtectedPaths[0] = "mutated/path"
+	if normalized.Candidates[0].ID != "baseline" ||
+		normalized.Evaluator.Argv[0] != "./tools/cache-evaluator" ||
+		normalized.Fixtures[0].ID != "request-log" ||
+		normalized.Decision.Guards[0].ID != "behavioral-equivalence" ||
+		normalized.ProtectedPaths[0] != "internal/cache" {
+		t.Fatalf("NormalizeDefinition() retained mutable source aliases: %+v", normalized)
+	}
+}
+
 func TestDefinitionDigestChangesWithRegisteredInput(t *testing.T) {
 	base := mustDecodeDefinition(t, validDefinitionYAML())
 	baseDigest, err := DefinitionDigest(base)

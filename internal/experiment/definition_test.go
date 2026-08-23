@@ -110,6 +110,100 @@ func validDefinitionYAML() string {
 		"  - internal/cache\n"
 }
 
+// validDefinitionV2YAML upgrades the shared predecessor fixture without
+// changing any v1 field. reproductionBlock is either empty or a complete
+// top-level reproduction mapping.
+func validDefinitionV2YAML(reproductionBlock string) string {
+	doc := strings.Replace(validDefinitionYAML(),
+		"schema: verdi.experiment/v1\n",
+		"schema: verdi.experiment/v2\nclass: request-path-performance\n", 1)
+	if reproductionBlock == "" {
+		return doc
+	}
+	return doc + reproductionBlock
+}
+
+func TestDefinitionV2DecodeAndVersionCompatibility(t *testing.T) {
+	tests := []struct {
+		name        string
+		doc         string
+		wantSchema  string
+		wantClass   string
+		wantMinimum int
+	}{
+		{
+			name:       "v1 remains decode compatible",
+			doc:        validDefinitionYAML(),
+			wantSchema: DefinitionSchemaV1,
+		},
+		{
+			name:       "v2 accepts an absent reproduction rule",
+			doc:        validDefinitionV2YAML(""),
+			wantSchema: DefinitionSchemaV2,
+			wantClass:  "request-path-performance",
+		},
+		{
+			name:        "v2 accepts a registered reproduction rule",
+			doc:         validDefinitionV2YAML("reproduction:\n  minimum_valid_runs: 2\n"),
+			wantSchema:  DefinitionSchemaV2,
+			wantClass:   "request-path-performance",
+			wantMinimum: 2,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			def, err := DecodeDefinition([]byte(tt.doc))
+			if err != nil {
+				t.Fatalf("DecodeDefinition() unexpected error: %v", err)
+			}
+			if def.Schema != tt.wantSchema || def.Class != tt.wantClass {
+				t.Fatalf("decoded schema/class = %q/%q, want %q/%q", def.Schema, def.Class, tt.wantSchema, tt.wantClass)
+			}
+			if tt.wantMinimum == 0 {
+				if def.Reproduction != nil {
+					t.Fatalf("decoded reproduction = %+v, want absent", def.Reproduction)
+				}
+				return
+			}
+			if def.Reproduction == nil || def.Reproduction.MinimumValidRuns != tt.wantMinimum {
+				t.Fatalf("decoded reproduction = %+v, want minimum_valid_runs=%d", def.Reproduction, tt.wantMinimum)
+			}
+		})
+	}
+}
+
+func TestDefinitionV2RejectsInvalidVersionedFields(t *testing.T) {
+	validV2 := validDefinitionV2YAML("reproduction:\n  minimum_valid_runs: 2\n")
+	tests := []struct {
+		name string
+		doc  string
+	}{
+		{"v2 missing class", strings.Replace(validV2, "class: request-path-performance\n", "", 1)},
+		{"v2 noncanonical class", strings.Replace(validV2, "class: request-path-performance", "class: Request_Path_Performance", 1)},
+		{"v2 minimum one", strings.Replace(validV2, "minimum_valid_runs: 2", "minimum_valid_runs: 1", 1)},
+		{"v2 minimum zero", strings.Replace(validV2, "minimum_valid_runs: 2", "minimum_valid_runs: 0", 1)},
+		{"v2 minimum negative", strings.Replace(validV2, "minimum_valid_runs: 2", "minimum_valid_runs: -1", 1)},
+		{"v2 unknown top-level field", validV2 + "confidence: 0.95\n"},
+		{"v2 unknown reproduction field", strings.Replace(validV2, "  minimum_valid_runs: 2\n", "  minimum_valid_runs: 2\n  environment_diversity: 2\n", 1)},
+		{"v2 duplicate class", strings.Replace(validV2, "class: request-path-performance\n", "class: request-path-performance\nclass: request-path-performance\n", 1)},
+		{"v2 duplicate minimum", strings.Replace(validV2, "  minimum_valid_runs: 2\n", "  minimum_valid_runs: 2\n  minimum_valid_runs: 3\n", 1)},
+		{"v2 null class", strings.Replace(validV2, "class: request-path-performance", "class: null", 1)},
+		{"v2 null reproduction", strings.Replace(validV2, "reproduction:\n  minimum_valid_runs: 2", "reproduction: null", 1)},
+		{"v2 null minimum", strings.Replace(validV2, "minimum_valid_runs: 2", "minimum_valid_runs: null", 1)},
+		{"v1 forbids class", strings.Replace(validDefinitionYAML(), "schema: verdi.experiment/v1\n", "schema: verdi.experiment/v1\nclass: request-path-performance\n", 1)},
+		{"v1 forbids reproduction", validDefinitionYAML() + "reproduction:\n  minimum_valid_runs: 2\n"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if def, err := DecodeDefinition([]byte(tt.doc)); err == nil {
+				t.Fatalf("DecodeDefinition() = %+v, nil error", def)
+			}
+		})
+	}
+}
+
 func TestDecodeDefinitionHappyPath(t *testing.T) {
 	def, err := DecodeDefinition([]byte(validDefinitionYAML()))
 	if err != nil {
