@@ -28,14 +28,14 @@ func TestStartOperationalFailuresPublishNoObservationOrResult(t *testing.T) {
 			configure: func(failure error, _ *recordingMaterializer) (WorkspaceMaterializer, AttemptEvaluator) {
 				return failingMaterializer{err: failure}, &recordingEvaluator{}
 			},
-			want: failureSentinel,
+			want: errFailureSentinel,
 		},
 		{
 			name: "evaluator operational failure",
 			configure: func(failure error, materializer *recordingMaterializer) (WorkspaceMaterializer, AttemptEvaluator) {
 				return materializer, &fixedAttemptEvaluator{err: failure}
 			},
-			want:                 failureSentinel,
+			want:                 errFailureSentinel,
 			wantMaterializations: 2,
 		},
 		{
@@ -79,7 +79,7 @@ func TestStartOperationalFailuresPublishNoObservationOrResult(t *testing.T) {
 				root:        root,
 				receiptPath: filepath.Join(root, filepath.FromSlash(paths.Execution)),
 			}
-			materializer, evaluator := test.configure(failureSentinel, recording)
+			materializer, evaluator := test.configure(errFailureSentinel, recording)
 			service, err := NewService(ServiceDependencies{
 				Authorization: staticAuthorization{authorization: testAuthorization(t, def, true)},
 				Inputs: staticInputs{values: map[string]ResolvedInput{
@@ -120,7 +120,7 @@ func TestStartOperationalFailuresPublishNoObservationOrResult(t *testing.T) {
 	}
 }
 
-var failureSentinel = errors.New("injected operational failure")
+var errFailureSentinel = errors.New("injected operational failure")
 
 type failingMaterializer struct {
 	err error

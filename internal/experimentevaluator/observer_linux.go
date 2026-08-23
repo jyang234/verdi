@@ -21,7 +21,7 @@ func peakRSSBytes(state processState) (int64, bool, error) {
 		return 0, false, fmt.Errorf("negative Linux ru_maxrss %d", peakKiB)
 	}
 	if peakKiB > math.MaxInt64/1024 {
-		return 0, false, fmt.Errorf("Linux ru_maxrss %d KiB overflows bytes", peakKiB)
+		return 0, false, fmt.Errorf("linux ru_maxrss %d KiB overflows bytes", peakKiB)
 	}
 	return peakKiB * 1024, true, nil
 }
