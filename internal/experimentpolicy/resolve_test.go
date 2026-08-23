@@ -2,6 +2,7 @@ package experimentpolicy
 
 import (
 	"bytes"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -91,6 +92,93 @@ func TestExperimentPolicyResolveIsCommutative(t *testing.T) {
 	}
 	if !reflect.DeepEqual(leftPayload, rightPayload) {
 		t.Fatalf("commutative reduction differs:\nleft=%#v\nright=%#v", leftPayload, rightPayload)
+	}
+}
+
+func TestExperimentPolicyResolveEnvironmentEqualityUsesCompleteIntersection(t *testing.T) {
+	base := string(readPayloadFixture(t, "project.yaml"))
+	environment := func(id string, timeout int, value string) string {
+		return fmt.Sprintf(`  - id: %s
+    grants:
+      schema: verdi.execution-grants/v1
+      grants:
+        - kind: timeouts
+          seconds: %d
+    declared_environment: {GOMAXPROCS: %q}
+`, id, timeout, value)
+	}
+	withEnvironments := func(environments ...string) string {
+		return replaceYAMLSection(base, "environments:", "limits:", "environments:\n"+strings.Join(environments, ""))
+	}
+	layers := map[string]string{
+		"A": withEnvironments(environment("drop", 10, "1"), environment("keep", 30, "1")),
+		"B": withEnvironments(environment("drop", 20, "2"), environment("keep", 30, "1")),
+		"C": withEnvironments(environment("keep", 30, "1")),
+	}
+	permutations := [][]string{
+		{"A", "B", "C"},
+		{"A", "C", "B"},
+		{"B", "A", "C"},
+		{"B", "C", "A"},
+		{"C", "A", "B"},
+		{"C", "B", "A"},
+	}
+	for _, order := range permutations {
+		t.Run(strings.Join(order, "-"), func(t *testing.T) {
+			decision := resolveNamedPayloadLayers(t, map[string]string{
+				"alpha":   layers[order[0]],
+				"bravo":   layers[order[1]],
+				"charlie": layers[order[2]],
+			})
+			payload, err := decision.Payload()
+			if err != nil {
+				t.Fatalf("decision.Payload() error = %v", err)
+			}
+			if len(payload.Environments) != 1 || payload.Environments[0].ID != "keep" {
+				t.Fatalf("environments = %#v, want only keep", payload.Environments)
+			}
+			if got := payload.Environments[0].DeclaredEnvironment; !reflect.DeepEqual(got, map[string]string{"GOMAXPROCS": "1"}) {
+				t.Fatalf("keep declared environment = %#v", got)
+			}
+		})
+	}
+}
+
+func TestExperimentPolicyResolveRefusesSurvivingEnvironmentMismatch(t *testing.T) {
+	base := string(readPayloadFixture(t, "project.yaml"))
+	environment := func(id string, timeout int, value string) string {
+		return fmt.Sprintf(`  - id: %s
+    grants:
+      schema: verdi.execution-grants/v1
+      grants:
+        - kind: timeouts
+          seconds: %d
+    declared_environment: {GOMAXPROCS: %q}
+`, id, timeout, value)
+	}
+	withEnvironments := func(environments ...string) string {
+		return replaceYAMLSection(base, "environments:", "limits:", "environments:\n"+strings.Join(environments, ""))
+	}
+	tests := []struct {
+		name       string
+		mismatched string
+		want       string
+	}{
+		{name: "grant bytes", mismatched: environment("keep", 31, "1"), want: "grant bytes differ"},
+		{name: "declared values", mismatched: environment("keep", 30, "2"), want: "declared environment differs"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			selection := selectPayloadLayers(t,
+				withEnvironments(environment("drop", 10, "1"), environment("keep", 30, "1")),
+				withEnvironments(environment("drop", 10, "1"), tt.mismatched),
+				withEnvironments(environment("keep", 30, "1")),
+			)
+			_, err := Resolve(selection)
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("Resolve() error = %v, want containing %q", err, tt.want)
+			}
+		})
 	}
 }
 

@@ -57,20 +57,46 @@ func Resolve(selection *contextcompile.ApplicablePayloadSelection) (*Decision, e
 		return nil, fmt.Errorf("experimentpolicy: no applicable %s payload", PayloadKind)
 	}
 
-	first, ok := layers[0].Payload.(*Payload)
-	if !ok {
-		return nil, fmt.Errorf("experimentpolicy: policy %s payload is %T, want *experimentpolicy.Payload", layers[0].PolicyID, layers[0].Payload)
-	}
-	effective, err := clonePayload(first)
-	if err != nil {
-		return nil, fmt.Errorf("experimentpolicy: policy %s: %w", layers[0].PolicyID, err)
-	}
-	for _, layer := range layers[1:] {
+	payloads := make([]*Payload, len(layers))
+	for i, layer := range layers {
 		payload, ok := layer.Payload.(*Payload)
 		if !ok {
 			return nil, fmt.Errorf("experimentpolicy: policy %s payload is %T, want *experimentpolicy.Payload", layer.PolicyID, layer.Payload)
 		}
-		if err := reduceInto(effective, payload); err != nil {
+		payloads[i] = payload
+	}
+
+	// Exact grants and declared values constrain only IDs surviving the
+	// complete commutative intersection, never an intermediate pair.
+	survivingEnvironmentIDs := make(map[string]bool, len(payloads[0].Environments))
+	for _, environment := range payloads[0].Environments {
+		survivingEnvironmentIDs[environment.ID] = true
+	}
+	for _, payload := range payloads[1:] {
+		present := make(map[string]bool, len(payload.Environments))
+		for _, environment := range payload.Environments {
+			present[environment.ID] = true
+		}
+		for id := range survivingEnvironmentIDs {
+			if !present[id] {
+				delete(survivingEnvironmentIDs, id)
+			}
+		}
+	}
+
+	effective, err := clonePayload(payloads[0])
+	if err != nil {
+		return nil, fmt.Errorf("experimentpolicy: policy %s: %w", layers[0].PolicyID, err)
+	}
+	environments := make([]Environment, 0, len(survivingEnvironmentIDs))
+	for _, environment := range effective.Environments {
+		if survivingEnvironmentIDs[environment.ID] {
+			environments = append(environments, environment)
+		}
+	}
+	effective.Environments = environments
+	for i, layer := range layers[1:] {
+		if err := reduceInto(effective, payloads[i+1]); err != nil {
 			return nil, fmt.Errorf("experimentpolicy: policy %s refinement: %w", layer.PolicyID, err)
 		}
 	}
