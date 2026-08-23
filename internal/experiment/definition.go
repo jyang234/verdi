@@ -368,7 +368,7 @@ func DecodeDefinition(raw []byte) (Definition, error) {
 	if err := decodeStrictYAML(raw, &def); err != nil {
 		return Definition{}, fmt.Errorf("experiment: decoding definition: %w", err)
 	}
-	if err := rejectNullDefinitionFields(raw); err != nil {
+	if err := validateDefinitionFieldPresence(raw, def.Schema); err != nil {
 		return Definition{}, err
 	}
 	if err := def.Validate(); err != nil {
@@ -519,14 +519,21 @@ func (def Definition) Validate() error {
 	return nil
 }
 
-// rejectNullDefinitionFields distinguishes an omitted optional reproduction
-// rule from an explicit YAML null, which a pointer field alone cannot do.
-// The generic presence view still enters through the package's one strict YAML
-// seam; the typed decode above remains the authority for known fields.
-func rejectNullDefinitionFields(raw []byte) error {
+// validateDefinitionFieldPresence distinguishes omitted fields from present
+// zero values. The generic presence view still enters through the package's
+// one strict YAML seam; the typed decode above remains the authority for known
+// fields and values.
+func validateDefinitionFieldPresence(raw []byte, schema string) error {
 	var document map[string]interface{}
 	if err := decodeStrictYAML(raw, &document); err != nil {
 		return fmt.Errorf("experiment: decoding definition presence: %w", err)
+	}
+	if schema == DefinitionSchemaV1 {
+		for _, field := range []string{"class", "reproduction"} {
+			if _, present := document[field]; present {
+				return fmt.Errorf("experiment: definition v1 forbids %s", field)
+			}
+		}
 	}
 	for _, field := range []string{"schema", "class", "reproduction"} {
 		if value, present := document[field]; present && value == nil {

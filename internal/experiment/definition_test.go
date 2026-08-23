@@ -173,6 +173,44 @@ func TestDefinitionV2DecodeAndVersionCompatibility(t *testing.T) {
 	}
 }
 
+func TestDefinitionV1VersionSpecificFieldPresence(t *testing.T) {
+	tests := []struct {
+		name    string
+		doc     string
+		wantErr string
+	}{
+		{
+			name: "ordinary historical v1",
+			doc:  validDefinitionYAML(),
+		},
+		{
+			name:    "explicit empty class",
+			doc:     strings.Replace(validDefinitionYAML(), "schema: verdi.experiment/v1\n", "schema: verdi.experiment/v1\nclass: \"\"\n", 1),
+			wantErr: "definition v1 forbids class",
+		},
+		{
+			name:    "explicit empty reproduction",
+			doc:     validDefinitionYAML() + "reproduction: {}\n",
+			wantErr: "definition v1 forbids reproduction",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := DecodeDefinition([]byte(tt.doc))
+			if tt.wantErr == "" {
+				if err != nil {
+					t.Fatalf("DecodeDefinition() unexpected error: %v", err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("DecodeDefinition() error = %v, want error containing %q", err, tt.wantErr)
+			}
+		})
+	}
+}
+
 func TestDefinitionV2RejectsInvalidVersionedFields(t *testing.T) {
 	validV2 := validDefinitionV2YAML("reproduction:\n  minimum_valid_runs: 2\n")
 	tests := []struct {
