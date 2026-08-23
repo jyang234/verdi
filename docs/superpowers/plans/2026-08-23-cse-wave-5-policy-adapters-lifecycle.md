@@ -135,6 +135,12 @@ go vet ./internal/experiment
 - Add the smallest generic applicable-payload selection in
   `internal/contextcompile` over the existing `EvaluateApplicability` seam,
   with tests; do not add a CSE-specific scope evaluator there
+- Modify `internal/experimentrun/authorization.go`, service/resume request
+  plumbing, and focused tests to carry and enforce the effective observation
+  byte ceiling
+- Modify `internal/experimentevaluator/adapter.go` and focused tests to accept
+  one explicit positive response limit while retaining the existing hard
+  ceiling as defense in depth
 
 **Authority:** design §5; CSE AC-6, DC-10/DC-11, CO-1–CO-3;
 Context Integrity DC-23; execution-workspace grant authority; SI-141.
@@ -144,12 +150,14 @@ duplicate acceptance and mutation-safe sealed transport; exact target-scope
 selection; unknown applicability; all CSE monotone reduction operators;
 missing payload; empty intersection; lower-layer environment restoration;
 same-id grant/value mismatch refusal; unknown class/evaluator/protocol;
-trusted sources; mandatory
-guards; exact policy-supplied environment values; and exact
+trusted sources; mandatory guards; positive observation/retained-artifact
+limits; minimum limit refinement; exact policy-supplied environment values;
+raw response and canonical observation below/at/above-limit refusal without
+append; hard-ceiling non-weakening; and exact
 `experimentrun.ExecutionAuthorization` projection.
 
 ```bash
-go test ./internal/experimentpolicy ./internal/policyartifact ./internal/policyauthority ./internal/contextcompile -run 'Test.*(Experiment|LayeredPayload)' -count=1
+go test ./internal/experimentpolicy ./internal/policyartifact ./internal/policyauthority ./internal/contextcompile ./internal/experimentrun ./internal/experimentevaluator -run 'Test.*(Experiment|LayeredPayload|ObservationLimit)' -count=1
 ```
 
 Expected RED: missing payload/resolver symbols and unregistered payload kind.
@@ -157,20 +165,25 @@ Expected RED: missing payload/resolver symbols and unregistered payload kind.
 **GREEN:** Register `experiment_execution` as layered at package
 initialization. Context Integrity selects applicable layers with its existing
 three-valued scope algebra and seals the complete selection. CSE performs only
-commutative intersection/union/denial reduction over that sealed ledger and
-returns an immutable decision plus the existing exact authorization. Its
+commutative intersection/minimum/union/denial reduction over that sealed
+ledger and returns an immutable decision plus the existing exact
+authorization. Its
 environment field is a policy-owned `map[string]string`; it never copies
 ambient values. Named environment ids intersect, while every layer naming a
 surviving id must carry byte-identical grant bytes and environment values;
 Wave 5 does not invent a grant-refinement algorithm. Grants remain the sole
-timeout/resource authority; do not add unenforced observation or retention
-limit fields. Never load policy inside the reducer and never create a
-fallback.
+timeout/CPU/memory/network/filesystem/process authority. Minimum observation
+and retained-artifact byte ceilings remain in the sealed policy decision.
+Project the observation cap into `ExecutionAuthorization`; pass the smaller
+of that cap and the existing hard ceiling to each evaluator run; reject raw
+responses and encoded measured observations above it before durable append.
+Task 9 consumes the retained-artifact cap at capsule construction. Never load
+policy inside the reducer and never create a fallback.
 
 ```bash
 go test -race ./internal/experimentpolicy -count=1
-go test -race ./internal/policyartifact ./internal/policyauthority ./internal/contextcompile -run 'Test.*(Payload|Experiment)' -count=1
-go vet ./internal/experimentpolicy ./internal/policyartifact ./internal/policyauthority ./internal/contextcompile
+go test -race ./internal/policyartifact ./internal/policyauthority ./internal/contextcompile ./internal/experimentrun ./internal/experimentevaluator -run 'Test.*(Payload|Experiment|ObservationLimit)' -count=1
+go vet ./internal/experimentpolicy ./internal/policyartifact ./internal/policyauthority ./internal/contextcompile ./internal/experimentrun ./internal/experimentevaluator
 ```
 
 **Commit:** `Resolve effective experiment execution policy`
@@ -482,23 +495,28 @@ go test -race ./internal/governanceprincipal ./internal/experiment -run 'Test.*(
 - Modify `internal/execworkspace` only if an exact reviewed release seam is
   missing; stop before any predecessor edit
 
-**Authority:** design §§3–4, 9–10; CSE AC-4/AC-5,
+**Authority:** design §§3–5, 9–10; CSE AC-4–AC-6,
 DC-8/DC-9/DC-15/DC-16, CO-1–CO-5; execution-workspace release authority;
-SI-140/SI-146.
+SI-140/SI-141/SI-146.
 
 **RED:** Pin selecting candidate derivation, non-selecting no-capsule behavior,
 exact artifact inventory and digests, fixture ids, missing/extra/symlinked/
 nonregular inputs, immutable same/conflict publication, capsule-before-release
-ordering, all-workspace release, partial failure, retry, and minimal-record
+ordering, effective retained-artifact ceiling below/at/above every closed
+inventory member, exact oversized-artifact witness with no publication or
+deletion, all-workspace release, partial failure, retry, and minimal-record
 non-targeting.
 
 ```bash
 go test ./internal/experiment ./internal/experimentapp -run 'Test(Capsule|Release|Reproduction)' -count=1
 ```
 
-**GREEN:** Build one deterministic manifest from accepted bytes, publish and
-re-decode it, then invoke the existing release operation. No filesystem walk
-may infer selection or broaden cleanup scope.
+**GREEN:** Build one deterministic manifest from accepted bytes and the one
+sealed policy decision, reject any inventory artifact whose raw bytes exceed
+the effective `retained_artifact_bytes`, publish and re-decode the manifest,
+then invoke the existing release operation. The manifest itself is not a
+retained-input member. No filesystem walk may infer selection or broaden
+cleanup scope.
 
 ```bash
 go test -race ./internal/experiment ./internal/experimentapp -run 'Test(Capsule|Release|Reproduction)' -count=1

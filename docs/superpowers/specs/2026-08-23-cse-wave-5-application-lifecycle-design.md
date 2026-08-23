@@ -241,7 +241,7 @@ The generic predecessor amendment is deliberately narrow:
 
 This is a shared Context Integrity transport, not a CSE hierarchy or second
 resolver. The CSE reducer has no organization/project precedence algorithm;
-its intersection/union/denial operations are commutative across every
+its intersection/minimum/union/denial operations are commutative across every
 already-applicable selected layer.
 
 The v1 payload contains:
@@ -259,6 +259,9 @@ experiment_execution:
       grants: <exact spec/execution-workspace grant-set shape>
       declared_environment:
         GOMAXPROCS: "1"
+  limits:
+    observation_bytes: 524288
+    retained_artifact_bytes: 16777216
   trusted_measurement_sources: [harness-measured, evaluator-measured]
   mandatory_guards:
     - class: request-path-performance
@@ -267,16 +270,17 @@ experiment_execution:
 
 Every list is present, sorted, and duplicate-free. Every environment name and
 exact value is present in a sorted map; values are policy bytes, never copied
-from the ambient process. The grant field strict-decodes through the one
-shared execution-workspace grammar and remains the only timeout/resource
-limit authority. The fixed evaluator transport ceiling remains an
-implementation safety ceiling, not a policy promise. CSE does not restate
-network, filesystem, process, CPU, memory, transport, or retention semantics.
+from the ambient process. Both byte ceilings are positive. The grant field
+strict-decodes through the one shared execution-workspace grammar and remains
+the only timeout/CPU/memory/network/filesystem/process authority. The two CSE
+byte ceilings govern CSE-owned evidence boundaries only; they do not restate a
+shared grant.
 
 The CSE reducer receives every applicable entry already selected and sealed by
 Context Integrity, then combines the payloads monotonically:
 
 - allowlists intersect;
+- maximum byte ceilings take the minimum;
 - named environment ids intersect; a surviving id must carry byte-identical
   canonical grant bytes and an identical declared-environment map in every
   layer that names it, otherwise refinement is malformed and refuses;
@@ -289,6 +293,24 @@ Wave 5 does not invent grant-set intersection. A project can narrow execution
 by removing a named environment, while changing the grants or values of a
 surviving id is an explicit conflict. Finer grant refinement remains deferred
 until the shared execution-grant owner defines it.
+
+`observation_bytes` limits both the raw evaluator run-response bytes and the
+canonical measured-observation bytes published for one attempt. Wave 5A adds
+one explicit limit operand to `experimentevaluator.ObserveInput`, extends
+`experimentrun.ExecutionAuthorization` with the effective observation cap,
+and has the run service enforce the smaller of policy and the existing hard
+transport ceiling before append. The fixed hard ceiling remains defense in
+depth; a larger policy value never weakens it, and a smaller organization or
+project value is mechanically enforced.
+
+`retained_artifact_bytes` is the maximum raw-byte length of each artifact
+eligible for the selected capsule inventory. It is carried by the sealed CSE
+policy decision and enforced by the Wave 5C capsule builder before immutable
+publication. It does not apply to the capsule manifest itself and does not
+delete an oversized artifact; the operation refuses with the exact artifact
+identity and observed size. Applying it earlier to disposable candidate
+workspaces would conflate retention policy with execution inputs, so Wave 5
+does not do that.
 
 The selected definition environment-policy id must resolve to one exact
 effective environment entry. Its canonical grant bytes, exact declared
@@ -529,6 +551,9 @@ unit crosses its authority boundary. Required evidence includes:
   layer transport;
 - policy refinement tables proving intersection/union/deny semantics and
   lower-layer non-weakening;
+- observation raw/canonical boundary tests below, at, and above the effective
+  policy cap and hard transport cap, plus per-artifact capsule retention
+  boundary tests with lower-layer minimum selection;
 - application tests proving one effective-policy resolution per operation;
 - hermetic Git histories distinguishing proposed from accepted bytes and
   filesystem-versus-exact-tree state parity under divergent worktrees;
@@ -580,7 +605,7 @@ orchestration and the Wave 3B handoff:
 | AC-4 cleanup deferred by Wave 3B | §§3, 9 | Release only after durable ratification; minimal evidence excluded |
 | AC-4 selected capsule deferred by Wave 3B | §9 | Exact closed inventory over existing capsule v1 manifest |
 | AC-6 concrete policy resolver deferred by Wave 3B | §5 | Generic Context Integrity layered-payload selection plus typed commutative CSE reduction; no feature-local hierarchy |
-| AC-6 policy constraints | §5 | Paths, classes, evaluators, exact environment values, shared grants, sources, mandatory guards; no unenforceable duplicate limit vocabulary |
+| AC-6 policy constraints | §§5, 9 | Paths, classes, evaluators, exact environment values, shared grants, observation/retained-artifact byte ceilings, sources, and mandatory guards; each limit has one owned enforcement boundary |
 | AC-6 mutation provenance | §6 | CSE-specific strict append-only record; read-only detection plus explicit direct-edit reconciliation mutation |
 | DC-2 derived state | §§3–4, 7 | One experiment state algorithm over filesystem or exact-tree byte sources; no new state artifact or preferred-run pointer |
 | DC-7 human-only decisions | §§3, 7–9 | Agent surface structurally omits authority operations |
