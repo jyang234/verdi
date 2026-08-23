@@ -345,6 +345,7 @@ func newJourneyFixture(t *testing.T, evaluator, evaluatorDigest, mode, timeout s
 		AuthorityDigest:   journeyDigest([]byte("journey authority")),
 		GrantBytes:        grantBytes,
 		DeclaredEnv:       map[string]string{"LANG": "C"},
+		ObservationBytes:  experimentevaluator.HardResponseBytes,
 	}
 	paths, err := experiment.PathsForRun(experimentDir, run)
 	if err != nil {

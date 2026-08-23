@@ -70,7 +70,7 @@ func TestEvaluatorIntegrationUsesProfileCommandAndHermeticHelper(t *testing.T) {
 		t.Fatalf("Discover bytes = %q, want canned canonical capabilities", discovery.Bytes)
 	}
 
-	attempt, err := Observe(context.Background(), profile, ObserveInput{Launch: launch, Request: validProtocolRequest(experiment.CycleMeasured)})
+	attempt, err := Observe(context.Background(), profile, ObserveInput{Launch: launch, Request: validProtocolRequest(experiment.CycleMeasured), ResponseLimit: HardResponseBytes})
 	if err != nil {
 		t.Fatalf("Observe: %v", err)
 	}
@@ -114,8 +114,9 @@ func TestEvaluatorDeadlineReturnsWhileDescendantRetainsOutput(t *testing.T) {
 	start := time.Now()
 	go func() {
 		_, err := Observe(context.Background(), profile, ObserveInput{
-			Launch:  launch,
-			Request: validProtocolRequest(experiment.CycleMeasured),
+			Launch:        launch,
+			Request:       validProtocolRequest(experiment.CycleMeasured),
+			ResponseLimit: HardResponseBytes,
 		})
 		resultCh <- result{err: err, elapsed: time.Since(start)}
 	}()

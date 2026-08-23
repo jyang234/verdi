@@ -27,6 +27,7 @@ type ExecutionAuthorization struct {
 	AuthorityDigest   string
 	GrantBytes        []byte
 	DeclaredEnv       map[string]string
+	ObservationBytes  int64
 }
 
 // AuthorizedExecution is a validated authorization plus the decoded shared
@@ -64,6 +65,9 @@ func validateAuthorization(def experiment.Definition, capabilities experiment.Ca
 	}
 	if err := experiment.ValidateDigest(authorization.AuthorityDigest); err != nil {
 		return AuthorizedExecution{}, fmt.Errorf("experimentrun: authorization authority digest: %w", err)
+	}
+	if authorization.ObservationBytes <= 0 {
+		return AuthorizedExecution{}, fmt.Errorf("experimentrun: authorization observation bytes must be > 0, got %d", authorization.ObservationBytes)
 	}
 	grants, err := execworkspace.DecodeGrantSet(authorization.GrantBytes)
 	if err != nil {

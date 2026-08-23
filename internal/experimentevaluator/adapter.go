@@ -19,7 +19,10 @@ import (
 	"github.com/jyang234/verdi/internal/experiment"
 )
 
-const transportLimit = 1 << 20
+// HardResponseBytes is the fixed evaluator transport ceiling retained as
+// defense in depth. Observe enforces the smaller of this ceiling and the
+// explicit positive policy limit on ObserveInput.
+const HardResponseBytes int64 = 1 << 20
 
 // Launch is the immutable command identity and candidate-local working
 // directory used for one describe or run operation.
@@ -45,8 +48,9 @@ type Discovery struct {
 
 // ObserveInput binds one evaluator run request to its authorized launch.
 type ObserveInput struct {
-	Launch  Launch
-	Request experiment.EvaluatorRequest
+	Launch        Launch
+	Request       experiment.EvaluatorRequest
+	ResponseLimit int64
 }
 
 // Attempt is the validated result of one zero-exit evaluator invocation.
@@ -105,7 +109,7 @@ func (a adapter) discover(ctx context.Context, input DiscoverInput) (Discovery, 
 	}
 	argv := append([]string(nil), input.Launch.Argv...)
 	argv[len(argv)-1] = "describe"
-	stdout, _, _, err := a.execute(ctx, input.Launch, argv, nil, false)
+	stdout, _, _, err := a.execute(ctx, input.Launch, argv, nil, false, HardResponseBytes)
 	if err != nil {
 		return Discovery{}, err
 	}
@@ -126,11 +130,15 @@ func (a adapter) observe(ctx context.Context, input ObserveInput) (Attempt, erro
 	if err := validateLaunch(input.Launch); err != nil {
 		return Attempt{}, operational("run input", ErrProtocol, nil, err)
 	}
+	responseLimit, err := effectiveResponseLimit(input.ResponseLimit)
+	if err != nil {
+		return Attempt{}, operational("run input", ErrProtocol, nil, err)
+	}
 	requestBytes, err := experiment.EncodeEvaluatorRequest(input.Request)
 	if err != nil {
 		return Attempt{}, operational("run input", ErrProtocol, nil, err)
 	}
-	stdout, state, duration, err := a.execute(ctx, input.Launch, input.Launch.Argv, requestBytes, true)
+	stdout, state, duration, err := a.execute(ctx, input.Launch, input.Launch.Argv, requestBytes, true, responseLimit)
 	if err != nil {
 		return Attempt{}, err
 	}
@@ -192,15 +200,15 @@ func validateLaunch(launch Launch) error {
 	return nil
 }
 
-func (a adapter) execute(ctx context.Context, launch Launch, argv []string, stdin []byte, timed bool) ([]byte, processState, time.Duration, error) {
+func (a adapter) execute(ctx context.Context, launch Launch, argv []string, stdin []byte, timed bool, stdoutLimit int64) ([]byte, processState, time.Duration, error) {
 	cmd, runCtx, cancel, err := a.commands.Command(ctx, argv[0], argv[1:]...)
 	if err != nil {
 		return nil, nil, 0, operational("construct command", ErrLaunch, nil, err)
 	}
 	defer cancel()
 
-	stdout := &boundedBuffer{limit: transportLimit}
-	stderr := &boundedBuffer{limit: transportLimit}
+	stdout := &boundedBuffer{limit: stdoutLimit}
+	stderr := &boundedBuffer{limit: HardResponseBytes}
 	cmd.Dir = launch.Directory
 	cmd.Stdin = bytes.NewReader(stdin)
 	cmd.Stdout = stdout
@@ -285,22 +293,22 @@ func rawDigest(data []byte) string {
 
 type boundedBuffer struct {
 	buffer bytes.Buffer
-	limit  int
+	limit  int64
 	total  int64
 }
 
 func (b *boundedBuffer) Write(p []byte) (int, error) {
 	b.total += int64(len(p))
-	remaining := b.limit - b.buffer.Len()
-	if remaining > len(p) {
-		remaining = len(p)
+	remaining := b.limit - int64(b.buffer.Len())
+	if remaining > int64(len(p)) {
+		remaining = int64(len(p))
 	}
 	if remaining > 0 {
-		written, err := b.buffer.Write(p[:remaining])
+		written, err := b.buffer.Write(p[:int(remaining)])
 		if err != nil {
 			return 0, err
 		}
-		if written != remaining {
+		if written != int(remaining) {
 			return 0, io.ErrShortWrite
 		}
 	}
@@ -312,5 +320,15 @@ func (b *boundedBuffer) Bytes() []byte {
 }
 
 func (b *boundedBuffer) Exceeded() bool {
-	return b.total > int64(b.limit)
+	return b.total > b.limit
+}
+
+func effectiveResponseLimit(policyLimit int64) (int64, error) {
+	if policyLimit <= 0 {
+		return 0, fmt.Errorf("response limit must be > 0, got %d", policyLimit)
+	}
+	if policyLimit < HardResponseBytes {
+		return policyLimit, nil
+	}
+	return HardResponseBytes, nil
 }

@@ -5,6 +5,7 @@ import (
 	"sync"
 
 	"github.com/jyang234/verdi/internal/artifact"
+	"github.com/jyang234/verdi/internal/canonjson"
 )
 
 // Payload is one typed feature-specific policy payload (DC-23/OD-5:
@@ -25,9 +26,34 @@ type Payload interface {
 // payloadDecoder strictly decodes one payload kind's YAML bytes.
 type payloadDecoder func([]byte) (Payload, error)
 
+// PayloadCardinality is the closed ownership mode for one registered typed
+// payload kind. Existing registrations remain singleton by default; layered
+// is opt-in for payloads whose feature owner defines a commutative reducer.
+type PayloadCardinality string
+
+const (
+	PayloadSingleton PayloadCardinality = "singleton"
+	PayloadLayered   PayloadCardinality = "layered"
+)
+
+// Validate fails closed on a cardinality outside the registered vocabulary.
+func (c PayloadCardinality) Validate() error {
+	switch c {
+	case PayloadSingleton, PayloadLayered:
+		return nil
+	default:
+		return fmt.Errorf("policyartifact: unknown payload cardinality %q", c)
+	}
+}
+
+type payloadRegistration struct {
+	decode      payloadDecoder
+	cardinality PayloadCardinality
+}
+
 var (
 	payloadMu       sync.RWMutex
-	payloadRegistry = map[string]payloadDecoder{}
+	payloadRegistry = map[string]payloadRegistration{}
 )
 
 // RegisterPayloadKind registers a typed decoder for a feature-specific
@@ -43,15 +69,38 @@ var (
 // unaffected. Registering an empty kind, a nil decoder, or a kind twice
 // is a programming error and panics.
 func RegisterPayloadKind(kind string, decode func([]byte) (Payload, error)) {
+	registerPayloadKind(kind, PayloadSingleton, decode)
+}
+
+// RegisterLayeredPayloadKind registers an opt-in layered typed payload. The
+// policy-authority owner may retain several policy owners for this kind, but
+// it still performs no feature reduction or precedence interpretation.
+func RegisterLayeredPayloadKind(kind string, decode func([]byte) (Payload, error)) {
+	registerPayloadKind(kind, PayloadLayered, decode)
+}
+
+func registerPayloadKind(kind string, cardinality PayloadCardinality, decode payloadDecoder) {
 	if kind == "" || decode == nil {
-		panic("policyartifact: RegisterPayloadKind requires a kind and a decoder")
+		panic("policyartifact: payload registration requires a kind and a decoder")
+	}
+	if err := cardinality.Validate(); err != nil {
+		panic(err)
 	}
 	payloadMu.Lock()
 	defer payloadMu.Unlock()
 	if _, dup := payloadRegistry[kind]; dup {
 		panic(fmt.Sprintf("policyartifact: payload kind %q registered twice", kind))
 	}
-	payloadRegistry[kind] = decode
+	payloadRegistry[kind] = payloadRegistration{decode: decode, cardinality: cardinality}
+}
+
+// RegisteredPayloadCardinality reports the closed cardinality registered for
+// kind. Unknown kinds return false and are never assigned a fallback.
+func RegisteredPayloadCardinality(kind string) (PayloadCardinality, bool) {
+	payloadMu.RLock()
+	defer payloadMu.RUnlock()
+	registration, ok := payloadRegistry[kind]
+	return registration.cardinality, ok
 }
 
 // decodePayloads dispatches each payload node to its registered typed
@@ -60,7 +109,7 @@ func decodePayloads(nodes map[string]artifact.RawNode) (map[string]Payload, erro
 	out := make(map[string]Payload, len(nodes))
 	for kind, node := range nodes {
 		payloadMu.RLock()
-		dec, ok := payloadRegistry[kind]
+		registration, ok := payloadRegistry[kind]
 		payloadMu.RUnlock()
 		if !ok {
 			// vocab:identity — "feature" names the DC-23/OD-5 term of art (feature-specific payload), not the display class a store renames.
@@ -71,7 +120,7 @@ func decodePayloads(nodes map[string]artifact.RawNode) (map[string]Payload, erro
 		if err != nil {
 			return nil, fmt.Errorf("policyartifact: payload %s: %w", kind, err)
 		}
-		p, err := dec(raw)
+		p, err := registration.decode(raw)
 		if err != nil {
 			return nil, fmt.Errorf("policyartifact: payload %s: %w", kind, err)
 		}
@@ -84,6 +133,43 @@ func decodePayloads(nodes map[string]artifact.RawNode) (map[string]Payload, erro
 		out[kind] = p
 	}
 	return out, nil
+}
+
+// ClonePayload returns a strict, non-aliasing copy through the registered
+// decoder for kind. Canonical JSON is valid input to the strict YAML seam;
+// decoding it again gives generic Context Integrity transport a deep copy
+// without learning any feature payload fields.
+func ClonePayload(kind string, payload Payload) (Payload, error) {
+	if payload == nil {
+		return nil, fmt.Errorf("policyartifact: clone payload %q: payload is nil", kind)
+	}
+	payloadMu.RLock()
+	registration, ok := payloadRegistry[kind]
+	payloadMu.RUnlock()
+	if !ok {
+		return nil, fmt.Errorf("policyartifact: clone payload %q: kind is not registered", kind)
+	}
+	if payload.PayloadKind() != kind {
+		return nil, fmt.Errorf("policyartifact: clone payload %q: value reports kind %q", kind, payload.PayloadKind())
+	}
+	if err := payload.Validate(); err != nil {
+		return nil, fmt.Errorf("policyartifact: clone payload %q: %w", kind, err)
+	}
+	raw, err := canonjson.Marshal(payload)
+	if err != nil {
+		return nil, fmt.Errorf("policyartifact: clone payload %q: encode: %w", kind, err)
+	}
+	cloned, err := registration.decode(raw)
+	if err != nil {
+		return nil, fmt.Errorf("policyartifact: clone payload %q: decode: %w", kind, err)
+	}
+	if cloned.PayloadKind() != kind {
+		return nil, fmt.Errorf("policyartifact: clone payload %q: decoder returned kind %q", kind, cloned.PayloadKind())
+	}
+	if err := cloned.Validate(); err != nil {
+		return nil, fmt.Errorf("policyartifact: clone payload %q: decoded value: %w", kind, err)
+	}
+	return cloned, nil
 }
 
 // DesignAssistancePayloadKind is the ASD design-assistance payload's

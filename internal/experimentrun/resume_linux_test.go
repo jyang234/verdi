@@ -280,7 +280,7 @@ func TestResumeCompleteSetRefusesCleanupCollisionAndEmitsNoResult(t *testing.T) 
 		t.Fatal(err)
 	}
 	for _, scheduled := range measuredSchedule(schedule)[len(prefix):] {
-		if err := storage.appendObservation(fixture.request.Definition, schedule, storageObservation(t, fixture.request.Definition, fixture.request.Run, scheduled)); err != nil {
+		if err := storage.appendObservation(fixture.request.Definition, schedule, storageObservation(t, fixture.request.Definition, fixture.request.Run, scheduled), experimentevaluator.HardResponseBytes); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -683,7 +683,7 @@ func completeMeasuredPrefix(t *testing.T, fixture interruptedRunFixture) {
 		t.Fatal(err)
 	}
 	for _, scheduled := range measuredSchedule(schedule)[len(prefix):] {
-		if err := storage.appendObservation(fixture.request.Definition, schedule, storageObservation(t, fixture.request.Definition, fixture.request.Run, scheduled)); err != nil {
+		if err := storage.appendObservation(fixture.request.Definition, schedule, storageObservation(t, fixture.request.Definition, fixture.request.Run, scheduled), experimentevaluator.HardResponseBytes); err != nil {
 			t.Fatal(err)
 		}
 	}

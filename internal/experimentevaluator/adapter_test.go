@@ -258,7 +258,7 @@ func TestLaunchGrammarIsRejectedBeforeCommandConstruction(t *testing.T) {
 func TestProfileCommandRefusalIsOperational(t *testing.T) {
 	a, commands, processes, launch := testAdapter(t, []byte(canonicalCompletedResponse))
 	commands.err = errors.New("required isolation control unavailable")
-	_, err := a.observe(context.Background(), ObserveInput{Launch: launch, Request: validProtocolRequest(experiment.CycleMeasured)})
+	_, err := a.observe(context.Background(), ObserveInput{Launch: launch, Request: validProtocolRequest(experiment.CycleMeasured), ResponseLimit: HardResponseBytes})
 	if !errors.Is(err, ErrLaunch) || !IsOperational(err) {
 		t.Fatalf("observe error = %v, want operational ErrLaunch", err)
 	}
@@ -272,7 +272,7 @@ func TestObserveSendsExactCanonicalRequestAndBuildsMeasuredObservation(t *testin
 	request := validProtocolRequest(experiment.CycleMeasured)
 	wantStdin := "{\"candidate\":\"candidate-a\",\"contract\":{\"digest\":\"sha256:" + strings.Repeat("c", 64) + "\",\"id\":\"contract-a\",\"path\":\"contracts/a.json\"},\"cycle\":{\"kind\":\"measured\",\"number\":1},\"experiment_digest\":\"sha256:" + strings.Repeat("a", 64) + "\",\"fixtures\":[{\"digest\":\"sha256:" + strings.Repeat("d", 64) + "\",\"id\":\"fixture-a\",\"path\":\"fixtures/a.json\"}],\"run\":\"run-1\",\"schema\":\"verdi.experiment-evaluator/v1\",\"workload\":{\"digest\":\"sha256:" + strings.Repeat("b", 64) + "\",\"id\":\"workload-a\",\"path\":\"workloads/a.json\"}}\n"
 
-	attempt, err := a.observe(context.Background(), ObserveInput{Launch: launch, Request: request})
+	attempt, err := a.observe(context.Background(), ObserveInput{Launch: launch, Request: request, ResponseLimit: HardResponseBytes})
 	if err != nil {
 		t.Fatalf("observe: %v", err)
 	}
@@ -300,6 +300,60 @@ func TestObserveSendsExactCanonicalRequestAndBuildsMeasuredObservation(t *testin
 	}
 }
 
+func TestObservationLimitRejectsRawResponseAboveEffectiveCeiling(t *testing.T) {
+	response := []byte(canonicalCompletedResponse)
+	tests := []struct {
+		name    string
+		limit   int64
+		wantErr bool
+	}{
+		{name: "below limit", limit: int64(len(response) + 1)},
+		{name: "at limit", limit: int64(len(response))},
+		{name: "above limit", limit: int64(len(response) - 1), wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			a, _, _, launch := testAdapter(t, response)
+			_, err := a.observe(context.Background(), ObserveInput{
+				Launch: launch, Request: validProtocolRequest(experiment.CycleMeasured), ResponseLimit: tt.limit,
+			})
+			if tt.wantErr {
+				if !errors.Is(err, ErrStdoutLimit) {
+					t.Fatalf("observe() error = %v, want ErrStdoutLimit", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("observe() error = %v", err)
+			}
+		})
+	}
+
+	t.Run("nonpositive limit refuses before launch", func(t *testing.T) {
+		a, _, processes, launch := testAdapter(t, response)
+		_, err := a.observe(context.Background(), ObserveInput{
+			Launch: launch, Request: validProtocolRequest(experiment.CycleMeasured), ResponseLimit: 0,
+		})
+		if err == nil || !errors.Is(err, ErrProtocol) {
+			t.Fatalf("observe() error = %v, want protocol refusal", err)
+		}
+		if processes.runs != 0 {
+			t.Fatalf("invalid limit launched evaluator %d times", processes.runs)
+		}
+	})
+
+	t.Run("larger policy limit cannot weaken hard ceiling", func(t *testing.T) {
+		oversized := bytes.Repeat([]byte{'x'}, int(HardResponseBytes)+1)
+		a, _, _, launch := testAdapter(t, oversized)
+		_, err := a.observe(context.Background(), ObserveInput{
+			Launch: launch, Request: validProtocolRequest(experiment.CycleMeasured), ResponseLimit: HardResponseBytes * 2,
+		})
+		if !errors.Is(err, ErrStdoutLimit) {
+			t.Fatalf("observe() error = %v, want hard-ceiling ErrStdoutLimit", err)
+		}
+	})
+}
+
 func TestObservePreservesClosedCandidateOutcomesAndHarnessFacts(t *testing.T) {
 	witness := "candidate process exited unexpectedly"
 	responses := []struct {
@@ -313,7 +367,7 @@ func TestObservePreservesClosedCandidateOutcomesAndHarnessFacts(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			response := "{\"disclosures\":[\"evaluator saw candidate exit\"],\"guards\":[],\"measurements\":[],\"outcome\":{\"kind\":\"" + string(tt.kind) + "\",\"witness\":\"" + witness + "\"},\"schema\":\"verdi.experiment-evaluator/v1\"}\n"
 			a, _, _, launch := testAdapter(t, []byte(response))
-			attempt, err := a.observe(context.Background(), ObserveInput{Launch: launch, Request: validProtocolRequest(experiment.CycleMeasured)})
+			attempt, err := a.observe(context.Background(), ObserveInput{Launch: launch, Request: validProtocolRequest(experiment.CycleMeasured), ResponseLimit: HardResponseBytes})
 			if err != nil {
 				t.Fatalf("observe: %v", err)
 			}
@@ -339,7 +393,7 @@ func TestObservePreservesClosedCandidateOutcomesAndHarnessFacts(t *testing.T) {
 func TestObserveWarmupFailureKeepsOnlyTransientProcessFacts(t *testing.T) {
 	response := []byte("{\"disclosures\":[],\"guards\":[],\"measurements\":[],\"outcome\":{\"kind\":\"candidate-timeout\",\"witness\":\"workload timed out\"},\"schema\":\"verdi.experiment-evaluator/v1\"}\n")
 	a, _, _, launch := testAdapter(t, response)
-	attempt, err := a.observe(context.Background(), ObserveInput{Launch: launch, Request: validProtocolRequest(experiment.CycleWarmup)})
+	attempt, err := a.observe(context.Background(), ObserveInput{Launch: launch, Request: validProtocolRequest(experiment.CycleWarmup), ResponseLimit: HardResponseBytes})
 	if err != nil {
 		t.Fatalf("observe: %v", err)
 	}
@@ -380,7 +434,7 @@ func TestObserveRejectsEvaluatorTrustBoundaryClaims(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			a, _, _, launch := testAdapter(t, []byte(tt.raw))
-			_, err := a.observe(context.Background(), ObserveInput{Launch: launch, Request: validProtocolRequest(experiment.CycleMeasured)})
+			_, err := a.observe(context.Background(), ObserveInput{Launch: launch, Request: validProtocolRequest(experiment.CycleMeasured), ResponseLimit: HardResponseBytes})
 			if !errors.Is(err, ErrProtocol) {
 				t.Fatalf("observe error = %v, want ErrProtocol", err)
 			}
@@ -404,7 +458,7 @@ func TestTransportBoundsAreExactAndOperational(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			a, _, processes, launch := testAdapter(t, tt.stdout)
 			processes.stderr = tt.stderr
-			_, err := a.observe(context.Background(), ObserveInput{Launch: launch, Request: validProtocolRequest(experiment.CycleMeasured)})
+			_, err := a.observe(context.Background(), ObserveInput{Launch: launch, Request: validProtocolRequest(experiment.CycleMeasured), ResponseLimit: HardResponseBytes})
 			if tt.want == nil {
 				if err != nil {
 					t.Fatalf("observe: %v", err)
@@ -481,7 +535,7 @@ func TestProcessFailuresRemainOperational(t *testing.T) {
 			}
 			processes.state = tt.state
 			processes.err = tt.runErr
-			_, err := a.observe(tt.parentCtx(), ObserveInput{Launch: launch, Request: validProtocolRequest(experiment.CycleMeasured)})
+			_, err := a.observe(tt.parentCtx(), ObserveInput{Launch: launch, Request: validProtocolRequest(experiment.CycleMeasured), ResponseLimit: HardResponseBytes})
 			if !errors.Is(err, tt.want) {
 				t.Fatalf("observe error = %v, want errors.Is(_, %v)", err, tt.want)
 			}
@@ -499,7 +553,7 @@ func TestEvaluatorExecutableTrustBoundary(t *testing.T) {
 	t.Run("digest mismatch", func(t *testing.T) {
 		a, commands, processes, launch := testAdapter(t, []byte(canonicalCompletedResponse))
 		launch.Digest = "sha256:" + strings.Repeat("0", 64)
-		_, err := a.observe(context.Background(), ObserveInput{Launch: launch, Request: validProtocolRequest(experiment.CycleMeasured)})
+		_, err := a.observe(context.Background(), ObserveInput{Launch: launch, Request: validProtocolRequest(experiment.CycleMeasured), ResponseLimit: HardResponseBytes})
 		if !errors.Is(err, ErrEvaluatorDigest) {
 			t.Fatalf("observe error = %v, want ErrEvaluatorDigest", err)
 		}
@@ -523,7 +577,7 @@ func TestEvaluatorExecutableTrustBoundary(t *testing.T) {
 		clock := &sequenceClock{times: []time.Time{start, start.Add(time.Millisecond)}}
 		a := adapter{commands: commands, processes: processes, now: clock.Now}
 		launch := Launch{Directory: t.TempDir(), Argv: []string{link, "run"}, Digest: digest}
-		_, err := a.observe(context.Background(), ObserveInput{Launch: launch, Request: validProtocolRequest(experiment.CycleMeasured)})
+		_, err := a.observe(context.Background(), ObserveInput{Launch: launch, Request: validProtocolRequest(experiment.CycleMeasured), ResponseLimit: HardResponseBytes})
 		if !errors.Is(err, ErrEvaluatorDigest) {
 			t.Fatalf("observe error = %v, want ErrEvaluatorDigest", err)
 		}

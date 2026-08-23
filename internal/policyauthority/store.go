@@ -472,6 +472,13 @@ func checkDuplicatePayloadKinds(policies map[string]*policyartifact.Policy) erro
 	for _, pid := range sortedKeys(policies) {
 		p := policies[pid]
 		for _, kind := range sortedKeys(p.Payloads) {
+			cardinality, ok := policyartifact.RegisteredPayloadCardinality(kind)
+			if !ok {
+				return fmt.Errorf("policyauthority: payload kind %q is not registered", kind)
+			}
+			if cardinality == policyartifact.PayloadLayered {
+				continue
+			}
 			if owner, dup := seenBy[kind]; dup {
 				return fmt.Errorf("policyauthority: payload kind %q is registered by both policy %s and policy %s", kind, owner, pid)
 			}

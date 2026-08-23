@@ -1209,6 +1209,7 @@ func cloneEffectivePolicy(in policyauthority.EffectivePolicy) policyauthority.Ef
 
 func cloneEffectivePolicyEntry(in policyauthority.EffectivePolicyEntry) policyauthority.EffectivePolicyEntry {
 	out := in
+	out.Scope = cloneScope(in.Scope)
 	out.Claims = make([]policyauthority.EffectiveClaim, len(in.Claims))
 	for i, c := range in.Claims {
 		out.Claims[i] = cloneEffectiveClaim(c)

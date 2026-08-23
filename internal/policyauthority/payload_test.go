@@ -56,15 +56,30 @@ func TestResolve_PayloadFlowsThroughTyped(t *testing.T) {
 // to fake one with.
 const testPayloadKind = "zz_test_payload"
 
+const testLayeredPayloadKind = "zz_layered_payload"
+
 type testPayload struct {
 	Note string `yaml:"note" json:"note"`
 }
 
+type testLayeredPayload struct {
+	Values []string `yaml:"values" json:"values"`
+}
+
 func (p *testPayload) PayloadKind() string { return testPayloadKind }
+
+func (p *testLayeredPayload) PayloadKind() string { return testLayeredPayloadKind }
 
 func (p *testPayload) Validate() error {
 	if p.Note == "" {
 		return fmt.Errorf("note is required")
+	}
+	return nil
+}
+
+func (p *testLayeredPayload) Validate() error {
+	if len(p.Values) == 0 {
+		return fmt.Errorf("values are required")
 	}
 	return nil
 }
@@ -82,6 +97,72 @@ func init() {
 		}
 		return &testPayload{Note: *doc.Note}, nil
 	})
+	policyartifact.RegisterLayeredPayloadKind(testLayeredPayloadKind, func(raw []byte) (policyartifact.Payload, error) {
+		var doc struct {
+			Values *[]string `yaml:"values"`
+		}
+		if err := artifact.DecodeStrict(raw, &doc); err != nil {
+			return nil, err
+		}
+		if doc.Values == nil {
+			return nil, fmt.Errorf("values are missing")
+		}
+		return &testLayeredPayload{Values: append([]string(nil), (*doc.Values)...)}, nil
+	})
+}
+
+func TestLoadLayeredPayloadOwnersAreSealedWithoutAliasing(t *testing.T) {
+	files := minimalStoreFiles()
+	files[".verdi/policy/policies/go-toolchain.md"] = strings.Replace(
+		files[".verdi/policy/policies/go-toolchain.md"],
+		"payloads: {}",
+		"payloads: {zz_layered_payload: {values: [alpha, beta]}}",
+		1,
+	)
+	files[".verdi/policy/policies/second.md"] = `---
+schema: verdi.policy/v1
+id: policy/second
+kind: policy
+title: "Second layered policy"
+owners: [platform-team]
+scope: {phases: [], environments: [], paths: [], refs: []}
+claims: []
+instructions: []
+payloads: {zz_layered_payload: {values: [beta]}}
+template: {identity: "embedded:policy.md", digest: "sha256:0e1b83a8e41d5ecfe9f14cb4973b7a584bfcb471247fa064b5fe273e4d322561"}
+---
+A second independently scoped layer.
+`
+	root := t.TempDir()
+	writeTree(t, root, files)
+
+	store, err := Load(root)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	effective, err := Resolve(store)
+	if err != nil {
+		t.Fatalf("Resolve() error = %v", err)
+	}
+
+	if got := len(effective.Policies); got != 2 {
+		t.Fatalf("effective policies = %d, want 2 layered owners", got)
+	}
+	storePayload := store.Policies["policy/go-toolchain"].Payloads[testLayeredPayloadKind].(*testLayeredPayload)
+	storePayload.Values[0] = "mutated-after-resolve"
+
+	var resolved *testLayeredPayload
+	for _, entry := range effective.Policies {
+		if entry.PolicyID == "policy/go-toolchain" {
+			resolved = entry.Payloads[testLayeredPayloadKind].(*testLayeredPayload)
+		}
+	}
+	if resolved == nil || resolved.Values[0] != "alpha" {
+		t.Fatalf("resolved payload after store mutation = %#v, want independent alpha layer", resolved)
+	}
+	if _, err := effective.Digest(); err != nil {
+		t.Fatalf("effective.Digest() after source mutation = %v, want sealed independent transport", err)
+	}
 }
 
 // TestLoad_DuplicatePayloadKindIsDeterministic proves the duplicate-kind

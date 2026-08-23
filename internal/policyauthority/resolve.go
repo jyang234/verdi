@@ -54,11 +54,12 @@ type EffectivePolicy struct {
 }
 
 // EffectivePolicyEntry is one policy's post-refinement content: its
-// identity and digest, effective claims, author-ordered instructions, and
-// typed payloads.
+// identity and digest, applicability scope, effective claims, author-ordered
+// instructions, and typed payloads.
 type EffectivePolicyEntry struct {
 	PolicyID     string                            `json:"policy_id"`
 	PolicyDigest string                            `json:"policy_digest"`
+	Scope        policyartifact.Scope              `json:"scope"`
 	Claims       []EffectiveClaim                  `json:"claims"`
 	Instructions []string                          `json:"instructions"`
 	Payloads     map[string]policyartifact.Payload `json:"payloads"`
@@ -202,12 +203,17 @@ func Resolve(s *Store) (*EffectivePolicy, error) {
 			claims = append(claims, ec)
 		}
 
+		payloads, err := copyPayloads(p.Payloads)
+		if err != nil {
+			return nil, fmt.Errorf("policyauthority: policy %s payloads: %w", pid, err)
+		}
 		entries = append(entries, EffectivePolicyEntry{
 			PolicyID:     pid,
 			PolicyDigest: pDigest,
+			Scope:        copyScope(p.Scope),
 			Claims:       claims,
 			Instructions: append([]string{}, p.Instructions...),
-			Payloads:     copyPayloads(p.Payloads),
+			Payloads:     payloads,
 		})
 	}
 
@@ -443,18 +449,19 @@ func sortRefinementsByContent(rs []ScopedRefinement) error {
 	return nil
 }
 
-// copyPayloads returns a fresh map holding the same payload values. The
-// VALUES are shared deliberately: a decoded payload is an immutable typed
-// struct this package never rewrites, and copying it would require every
-// feature's payload type to implement a clone the Payload interface does
-// not declare. The MAP is copied so a caller cannot add, delete, or
-// replace a stored policy's payload registration through the output.
-func copyPayloads(payloads map[string]policyartifact.Payload) map[string]policyartifact.Payload {
+// copyPayloads returns a strict deep copy of every typed payload through its
+// registered decoder. Neither the map nor pointer-implemented payload values
+// can alias the Store after the effective policy is sealed.
+func copyPayloads(payloads map[string]policyartifact.Payload) (map[string]policyartifact.Payload, error) {
 	out := make(map[string]policyartifact.Payload, len(payloads))
-	for kind, p := range payloads {
-		out[kind] = p
+	for _, kind := range sortedKeys(payloads) {
+		cloned, err := policyartifact.ClonePayload(kind, payloads[kind])
+		if err != nil {
+			return nil, err
+		}
+		out[kind] = cloned
 	}
-	return out
+	return out, nil
 }
 
 // copyDisposition returns a deep, non-aliasing copy of d's decoded content.
