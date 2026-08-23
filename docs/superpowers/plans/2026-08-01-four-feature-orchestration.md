@@ -429,16 +429,18 @@ remove the full `continuous-readiness` or `journey-metrics` obligations here:
 
 - [ ] Deliver ASD capability/context reads, MCP adapter, proposal-only dogfood, draft-write, semantic review, and provenance read paths.
 - [ ] Deliver CSE Wave 5A policy/application foundation: the concrete
-  Context Integrity experiment-policy resolver, registered reproduction rule,
+  Context Integrity layered-payload selection, concrete experiment-policy
+  reducer, exact-tree experiment-state source, registered reproduction rule,
   mutation provenance, and read/validate/review application operations.
 - [ ] After 5A merges, deliver CSE Wave 5B registration and adapters: draft and
   candidate mutations, merge-signaled human lock, execution/status/explanation,
   one CLI namespace, and one agent-safe MCP tool over the same core. This unit
   exclusively owns the serialized CLI/MCP inventories while it runs.
 - [ ] After 5B merges, deliver CSE Wave 5C ratification and release:
-  authenticated merge-signaled ratification, reproduction derivation,
-  selected-capsule retention, execution-workspace release, and additive
-  evidence for the existing spike-close path.
+  authenticated merge-signaled ratification, reproduction-status integration,
+  selected-capsule retention, execution-workspace release, the serialized
+  remaining human CLI operations, and additive evidence for the existing
+  spike-close path.
 
 The three CSE rows above are one lossless decomposition of the former single
 CSE Wave 5 row, not three new capabilities. They are serialized because each

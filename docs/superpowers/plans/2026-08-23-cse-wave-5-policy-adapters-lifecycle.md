@@ -28,6 +28,14 @@ DC-1–DC-28, CO-1–CO-7; `spec/context-integrity-v2`;
 four-feature orchestration Wave 5; SI-12–SI-13, SI-17, SI-30, SI-37,
 SI-40–SI-46, SI-58–SI-63, SI-75–SI-76, SI-126–SI-146.
 
+## Contents
+
+1. Global execution contract
+2. Wave 5A — policy and application foundation (Tasks 1–3)
+3. Wave 5B — registration and adapters (Tasks 4–7)
+4. Wave 5C — ratification, release, and closure (Tasks 8–12)
+5. Wave 5C final review and program handoff
+
 ## Global execution contract
 
 - Deliver exactly three pull requests: Wave 5A, 5B, and 5C. Rebase each new
@@ -44,8 +52,8 @@ SI-40–SI-46, SI-58–SI-63, SI-75–SI-76, SI-126–SI-146.
 - Preserve strict canonical codecs, three-valued honesty, sealed operand
   custody, one writer lock, no-network tests, and exact 0/1/2 behavior.
 - The CLI verb and MCP tool registries are shared serialized resources. Tasks
-  6 and 7 must run with an explicit ownership check and no concurrent registry
-  change from another feature lane.
+  6, 7, and 11 must run with an explicit ownership check and no concurrent
+  registry change from another feature lane.
 - No UI, HTTP workbench action, JavaScript, CSS, Playwright CSE feature, new
   lifecycle engine, prototype promotion, or candidate-reported corroboration.
 - Each task report lives under
@@ -62,9 +70,11 @@ SI-40–SI-46, SI-58–SI-63, SI-75–SI-76, SI-126–SI-146.
 
 # Wave 5A — policy and application foundation
 
-**PR scope:** definition v2/reproduction, typed CSE policy, provenance, and
-read-only/validation application operations. No CLI, MCP, registration write,
-execution launch, ratification, cleanup, or closure change.
+**PR scope:** definition v2/reproduction, the generic Context Integrity
+layered-payload selection and experiment exact-tree state seams, typed CSE
+policy, provenance, and read-only/validation application operations. No CLI,
+MCP, registration write, execution launch, ratification, cleanup, or closure
+change.
 
 ## Task 1: Add experiment definition v2 and reproduction derivation
 
@@ -117,35 +127,50 @@ go vet ./internal/experiment
 - Add `internal/experimentpolicy/*_test.go`
 - Add deterministic policy fixtures under
   `internal/experimentpolicy/testdata/`
-- Modify `internal/policyartifact/payload_test.go` only for registration
-  integration evidence
-- Modify `internal/policyauthority/payload_test.go` only for resolved-payload
-  transport evidence
+- Modify `internal/policyartifact/payload.go` and tests to register closed
+  singleton/layered cardinality while preserving singleton as the default
+- Modify `internal/policyauthority/{store,resolve}.go` and tests so duplicate
+  singleton payloads still fail, while every typed layer of a registered
+  layered kind is sealed into the one effective policy
+- Add the smallest generic applicable-payload selection in
+  `internal/contextcompile` over the existing `EvaluateApplicability` seam,
+  with tests; do not add a CSE-specific scope evaluator there
 
 **Authority:** design §5; CSE AC-6, DC-10/DC-11, CO-1–CO-3;
 Context Integrity DC-23; execution-workspace grant authority; SI-141.
 
-**RED:** Pin strict payload grammar, sealed provenance, all monotone refinement
-operators, duplicate ownership, missing payload, empty intersection, lower
-layer grant restoration, unknown class/evaluator/protocol, limits, trusted
-sources, mandatory guards, and exact `experimentrun.ExecutionAuthorization`
-projection.
+**RED:** Pin strict payload grammar; singleton duplicate refusal; layered
+duplicate acceptance and mutation-safe sealed transport; exact target-scope
+selection; unknown applicability; all CSE monotone reduction operators;
+missing payload; empty intersection; lower-layer environment restoration;
+same-id grant/value mismatch refusal; unknown class/evaluator/protocol;
+trusted sources; mandatory
+guards; exact policy-supplied environment values; and exact
+`experimentrun.ExecutionAuthorization` projection.
 
 ```bash
-go test ./internal/experimentpolicy ./internal/policyartifact ./internal/policyauthority -run 'Test.*Experiment' -count=1
+go test ./internal/experimentpolicy ./internal/policyartifact ./internal/policyauthority ./internal/contextcompile -run 'Test.*(Experiment|LayeredPayload)' -count=1
 ```
 
 Expected RED: missing payload/resolver symbols and unregistered payload kind.
 
-**GREEN:** Register `experiment_execution` at package initialization. Consume
-one sealed `EffectivePolicy`, refine in canonical authority order, and return
-an immutable CSE decision plus exact authorization. Never load policy inside
-the resolver and never create a fallback.
+**GREEN:** Register `experiment_execution` as layered at package
+initialization. Context Integrity selects applicable layers with its existing
+three-valued scope algebra and seals the complete selection. CSE performs only
+commutative intersection/union/denial reduction over that sealed ledger and
+returns an immutable decision plus the existing exact authorization. Its
+environment field is a policy-owned `map[string]string`; it never copies
+ambient values. Named environment ids intersect, while every layer naming a
+surviving id must carry byte-identical grant bytes and environment values;
+Wave 5 does not invent a grant-refinement algorithm. Grants remain the sole
+timeout/resource authority; do not add unenforced observation or retention
+limit fields. Never load policy inside the reducer and never create a
+fallback.
 
 ```bash
 go test -race ./internal/experimentpolicy -count=1
-go test -race ./internal/policyartifact ./internal/policyauthority -run 'Test.*(Payload|Experiment)' -count=1
-go vet ./internal/experimentpolicy ./internal/policyartifact ./internal/policyauthority
+go test -race ./internal/policyartifact ./internal/policyauthority ./internal/contextcompile -run 'Test.*(Payload|Experiment)' -count=1
+go vet ./internal/experimentpolicy ./internal/policyartifact ./internal/policyauthority ./internal/contextcompile
 ```
 
 **Commit:** `Resolve effective experiment execution policy`
@@ -155,11 +180,16 @@ go vet ./internal/experimentpolicy ./internal/policyartifact ./internal/policyau
 **Own:**
 
 - Add `internal/experiment/provenance.go` and tests
+- Modify `internal/experiment/state.go` and tests to extract one byte-source
+  entry point while retaining the filesystem API as an adapter over the same
+  state algorithm
 - Add `internal/experimentapp/service.go`
 - Add `internal/experimentapp/actor.go`
 - Add `internal/experimentapp/inspect.go`
 - Add `internal/experimentapp/validate.go`
 - Add `internal/experimentapp/review.go`
+- Add `internal/experimentapp/accepted.go` for exact default-branch tree
+  enumeration and byte supply through consumer-owned Git ports
 - Add `internal/experimentapp/*_test.go`
 - Add hermetic fixtures under `internal/experimentapp/testdata/`
 
@@ -168,9 +198,11 @@ DC-2/DC-7/DC-10/DC-11/DC-16, CO-1–CO-5; SI-142/SI-143.
 
 **RED:** Pin strict/canonical provenance, actor seal/mutation rejection,
 single policy-resolution call per operation, v1 inspection compatibility,
-v2 registration readiness, proposed-versus-accepted state, deterministic
-review packet, no writes from read operations, and exact classification of
-verdict versus operational errors.
+v2 registration readiness, filesystem/source state parity, exact
+default-branch tree enumeration, divergent worktree bytes, stale/mixed HEAD,
+deterministic review packet, unreconciled-direct-edit disclosure, no writes
+from read operations, and exact classification of verdict versus operational
+errors.
 
 ```bash
 go test ./internal/experiment ./internal/experimentapp -run 'Test(Provenance|Inspect|ValidateDraft|ReviewRegistration|Actor)' -count=1
@@ -179,8 +211,12 @@ go test ./internal/experiment ./internal/experimentapp -run 'Test(Provenance|Ins
 Expected RED: missing application/provenance symbols.
 
 **GREEN:** Define consumer-owned ports for policy, accepted Git facts,
-capability discovery, and result verification. Return structs, keep blocking
-I/O context-first, and deep-copy sealed inputs. Do not add mutations yet.
+capability discovery, and result verification. Resolve all accepted experiment
+bytes from one commit, then call the source-backed `internal/experiment` state
+algorithm; never call the spec-only projector and never duplicate the state
+table in the application package. Return structs, keep blocking I/O
+context-first, and deep-copy sealed inputs. `review-registration` reports an
+unreconciled direct edit but writes nothing. Do not add mutations yet.
 
 ```bash
 go test -race ./internal/experiment ./internal/experimentapp -count=1
@@ -233,20 +269,27 @@ closure, or UI behavior.
 DC-1–DC-3/DC-7/DC-11; SI-142–SI-144.
 
 **RED:** Prove unlocked canonical mutations, candidate patch capture, protected
-path refusal, provenance atomicity, direct-edit reconciliation, actor custody,
-locked immutability, expected-HEAD mismatch, proposed lock non-authority,
-accepted exact lock, and agent refusal of registration lock.
+path refusal, provenance atomicity, read-only review refusal for an unmatched
+direct edit, explicit `reconcile-draft` append using the closed
+`reconcile-direct-draft` id, zero content mutation during reconciliation,
+actor custody, locked immutability, expected-HEAD mismatch, proposed lock
+non-authority, accepted exact-tree lock, and agent refusal of reconciliation
+and registration lock.
 
 ```bash
 go test ./internal/experimentapp -run 'Test(Draft|Candidate|Registration|DirectEdit)' -count=1
 ```
 
-**GREEN:** Serialize proposal artifact plus provenance under the existing
-writer lock, then require accepted HEAD to carry their complete pair before
-either becomes authority; a locally interrupted pair remains a refused dirty
-proposal rather than creating a second journal. Human registration accepts
-only a sealed authenticated actor and exact review packet digest. Accepted
-resolution reads one default-branch tree and never the worktree proposal.
+**GREEN:** Add `reconcile-draft` as an explicit local-human application
+mutation and the fifth provenance operation id; it appends one
+unauthenticated exact-digest reconciliation record and does not alter draft
+content. Keep review read-only and keep reconciliation absent from MCP.
+Serialize proposal artifact plus provenance under the existing writer lock,
+then require accepted HEAD to carry their complete pair before either becomes
+authority; a locally interrupted pair remains a refused dirty proposal rather
+than creating a second journal. Human registration accepts only a sealed
+authenticated actor and exact review packet digest. Accepted resolution reads
+one default-branch tree and never the worktree proposal.
 
 ```bash
 go test -race ./internal/experimentapp -run 'Test(Draft|Candidate|Registration|DirectEdit)' -count=1
@@ -271,8 +314,8 @@ DC-10–DC-15/DC-20–DC-28; SI-126–SI-143.
 
 **RED:** Prove accepted-lock requirement, one policy decision, exact
 authorization reuse, run-id identity, start/resume parity, all-run status,
-deterministic explanations, provenance atomicity, completed unproven exit 1,
-and operational preservation.
+deterministic explanations, no duplicate provenance append for machine
+evidence, completed unproven exit 1, and operational preservation.
 
 ```bash
 go test ./internal/experimentapp -run 'Test(Start|Resume|Status|Explain)' -count=1
@@ -303,17 +346,18 @@ exclusively for this task.
 
 **Authority:** design §§3, 8, 10–11; CSE AC-5, CO-4/CO-7; SI-145.
 
-**RED:** Built-binary tests pin grammar, canonical `--json`, human rendering,
-stdin/file boundaries where applicable, every operation exit, human actor
-resolution, agent-inapplicable paths, no output mutation on failure, and
-legacy usage byte stability.
+**RED:** Built-binary tests pin the exact through-5B operation inventory,
+grammar, canonical `--json`, human rendering, stdin/file boundaries where
+applicable, explicit `reconcile-draft`, every operation exit, human actor
+resolution, no output mutation on failure, and legacy usage byte stability.
 
 ```bash
 go test ./cmd/verdi -run 'Test.*Experiment.*BuiltBinary' -count=1
 ```
 
 **GREEN:** Add only `verdi experiment`; subcommands translate to typed core
-requests. Do not implement lifecycle logic in `cmd/verdi`.
+requests implemented through 5B. Do not predeclare or stub Wave 5C operations,
+and do not implement lifecycle logic in `cmd/verdi`.
 
 ```bash
 go test -race ./cmd/verdi -run 'Test.*Experiment' -count=1
@@ -341,8 +385,9 @@ showcase MCP mappings are owned exclusively for this task.
 CO-4/CO-7; 05 MCP safety rule; SI-145.
 
 **RED:** Prove strict operation union, data-never-instructions description,
-allowed agent operations, explicit refusal of every human/release/closure
-operation, no free-form argv or path escape, and byte-identical semantic
+allowed agent operations, explicit refusal of reconciliation and every
+human/release/closure operation, no free-form argv or path escape, and
+byte-identical semantic
 results between CLI JSON and MCP for equivalent reads, mutations, execution,
 and failures.
 
@@ -383,7 +428,8 @@ Open and merge Wave 5B only after owner approval.
 # Wave 5C — ratification, release, and closure
 
 **PR scope:** human ratification, reproduction status, selected capsule,
-workspace release, and existing spike-close evidence. No UI or Wave 7 dogfood.
+workspace release, the serialized CLI extension for those operations, and
+existing spike-close evidence. No MCP expansion, UI, or Wave 7 dogfood.
 
 ## Task 8: Add authenticated ratification and accepted-state resolution
 
@@ -391,25 +437,34 @@ workspace release, and existing spike-close evidence. No UI or Wave 7 dogfood.
 
 - Add `internal/experimentapp/ratification.go`
 - Add `internal/experimentapp/ratification_test.go`
+- Modify `internal/experiment/ratification.go` and tests to add strict emitted
+  v2 actor claim/id bytes while retaining v1 decode/state-history compatibility
 - Add accepted Git fixtures under `internal/experimentapp/testdata/`
-- Modify `internal/experiment/state.go` only for an exact accepted-authority
-  transport seam proven missing; stop for adjudication first
+- Reuse the reviewed exact-tree state seam delivered in Task 3; do not add a
+  second accepted resolver
 
 **Authority:** design §§3, 7, 9–10; CSE AC-5, DC-7/DC-16, CO-1–CO-4;
 governance-principal authority; SI-143/SI-146.
 
-**RED:** Pin all dispositions, exact result digest, candidate binding,
-authenticated actor seal, forged/mutated/unproven actor, proposed bytes,
-accepted exact bytes, stale HEAD, cross-run duplicate digest, and no authority
-from payload actor text.
+**RED:** Pin v1 decode-only compatibility; v2 strict/canonical actor claim and
+principal-id grammar; all dispositions; exact result digest; candidate binding;
+proposal construction only from an authenticated sealed resolution;
+forged/mutated/unproven actor; accepted claim re-resolution through the
+configured profile/trust-fact reader; derived-id mismatch; missing trust
+source; proposed bytes; accepted exact-tree bytes; stale HEAD; cross-run
+duplicate digest; and no authority from payload actor text.
 
 ```bash
 go test ./internal/experimentapp -run 'Test.*Ratification' -count=1
 ```
 
-**GREEN:** Build the record only from a sealed principal resolution and
-existing validators. Re-resolve accepted authority before any release or
-closure effect.
+**GREEN:** Emit v2 only. Build its actor block only from the claim and
+principal id of a sealed authenticated resolution. At accepted use, pass the
+persisted claim to the existing governance resolver, require a new sealed
+authenticated resolution, and compare the kernel-derived id byte-exactly
+before any release or closure effect. Never serialize or reconstruct the
+in-memory seal, accept a prebuilt id from an adapter, or treat v1 as new
+release authority.
 
 ```bash
 go test -race ./internal/experimentapp -run 'Test.*Ratification' -count=1
@@ -483,7 +538,48 @@ go test -race ./cmd/verdi -run 'TestClose' -count=1
 
 **Commit:** `Gate spike closure on ratified experiments`
 
-## Task 11: Prove the complete non-UI Wave 5 journey
+## Task 11: Extend the CLI with Wave 5C human operations
+
+**Serialized registry ownership:** `cmd/verdi` and the CLI inventory are owned
+exclusively for this task; do not overlap another registry change.
+
+**Own:**
+
+- Modify `cmd/verdi/experiment.go` and its tests
+- Modify the CLI dispatcher/usage only if the existing namespace registration
+  cannot dispatch the new closed subcommands
+- Modify CLI inventory/spec-alignment/showcase mappings in the same commit
+- Add built-binary fixtures under `cmd/verdi/testdata/` if needed
+
+**Authority:** design §§3, 8–10; CSE AC-5/AC-7, DC-7/DC-11/DC-16,
+CO-1–CO-4/CO-7; binding 05 CLI surface; SI-145/SI-146.
+
+**RED:** Prove the exact Wave 5C `verdi experiment` subcommands for
+ratification proposal, capsule publication, and workspace release/retry;
+sealed human actor acquisition; canonical JSON/human parity; proposed versus
+accepted refusal; capsule-before-release ordering; all 0/1/2 exits; no MCP
+inventory change; existing `verdi close` integration from Task 10; and legacy
+through-5B behavior/usage compatibility.
+
+```bash
+go test ./cmd/verdi -run 'Test.*Experiment.*(Ratification|Capsule|Release|Close).*BuiltBinary' -count=1
+```
+
+**GREEN:** Extend the existing `verdi experiment` dispatcher only after Tasks
+8–10 core methods exist. Translate arguments to typed application requests;
+do not duplicate lifecycle, actor, capsule, release, or closure logic in the
+CLI. The MCP union remains byte-for-byte agent-safe and unchanged.
+
+```bash
+go test -race ./cmd/verdi -run 'Test.*Experiment' -count=1
+go test -race ./internal/mcpserve -run 'Test.*Experiment' -count=1
+go test ./internal/specalign -run 'Test(CLI|Verb|Vocab)' -count=1
+go vet ./cmd/verdi ./internal/mcpserve
+```
+
+**Commit:** `Expose experiment ratification and release operations`
+
+## Task 12: Prove the complete non-UI Wave 5 journey
 
 **Own:**
 
@@ -498,12 +594,16 @@ go test -race ./cmd/verdi -run 'TestClose' -count=1
 **Authority:** design §§1–13; CSE AC-1–AC-6, CO-7; Wave 5 exit gate.
 
 **RED:** Start from an unlocked comparison and pin the full sequence: draft,
-candidate capture, review, authenticated lock proposal, accepted lock, run,
+candidate capture, read-only unreconciled review, explicit reconciliation,
+authenticated lock proposal, accepted lock, run,
 result, explanation, authenticated ratification proposal, accepted
 ratification, reproduction posture, capsule, release, and closure evidence.
 Add adversarial journeys for a faster incorrect candidate, agent human-action
-attempts, lower-policy weakening, changed accepted HEAD, inconclusive reruns,
-cleanup failure/retry, and direct Git draft reconciliation.
+attempts, organization/project layered-policy weakening, changed accepted
+HEAD with a divergent worktree, ratification claim/id substitution,
+inconclusive reruns, cleanup failure/retry, and direct Git draft
+reconciliation. Exercise every 5B and 5C CLI subcommand; prove the MCP union
+remains unchanged after 5C.
 
 ```bash
 go test ./internal/experimentapp ./cmd/verdi ./internal/mcpserve -run 'Test.*Experiment.*Journey' -count=1

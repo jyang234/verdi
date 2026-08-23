@@ -14,6 +14,22 @@ registration and adapters, and Wave 5C ratification/release integration
 **Frontend boundary:** none. The CSE workbench remains the FABLE-owned Wave 6
 consumer of the application core defined here.
 
+## Contents
+
+1. Decision and scope
+2. Architecture and ownership
+3. Closed operation set
+4. Experiment definition v2 and reproduction
+5. Typed CSE policy
+6. Mutation provenance
+7. Proposed versus accepted authority
+8. CLI and MCP adapters
+9. Ratification, capsule, release, and closure
+10. Failure and exit semantics
+11. Verification and adversarial coverage
+12. Delivery gates
+13. Lossless source-coverage witness
+
 ## 1. Decision and scope
 
 Wave 5 delivers the non-UI CSE lifecycle through one typed application core.
@@ -26,14 +42,16 @@ core; neither owns policy, authority, state, or experiment semantics.
 The work is split into three serialized units:
 
 1. **Wave 5A — policy and application foundation:** experiment-definition v2,
-   registered reproduction rules, typed CSE policy, mutation provenance, and
+   registered reproduction rules, the generic layered-payload and accepted-tree
+   predecessor seams, typed CSE policy, mutation provenance, and
    read/validate/review application operations.
 2. **Wave 5B — registration and adapters:** draft/candidate mutation,
    registration lock, run start/resume/status/explanation, and parity across
    the CLI and agent-safe MCP surface.
 3. **Wave 5C — ratification and release:** authenticated ratification,
-   reproduction derivation, selected capsule construction, workspace release,
-   and existing spike-close integration.
+   reproduction-status integration, selected capsule construction, workspace
+   release, the remaining human CLI operations, and existing spike-close
+   integration.
 
 The split does not create three cores. Every unit extends one
 `internal/experimentapp` consumer. Package boundaries keep schemas, policy,
@@ -65,9 +83,18 @@ MCP agent adapter ---+--> experimentapp
                            `-- existing spike closure consumer
 ```
 
-`internal/experiment` remains the sole schema and cross-record-validation
-owner. `internal/experimentpolicy` owns the CSE typed payload and its monotone
-interpretation of one sealed `policyauthority.EffectivePolicy`.
+`internal/experiment` remains the sole schema, state-table, and
+cross-record-validation owner. Wave 5A extracts its reads behind a byte-source
+seam so the same algorithm can consume either the working filesystem or one
+exact Git tree; `internal/experimentapp` may resolve that tree and supply its
+bytes, but may not reproduce the state table.
+
+`policyartifact`, `policyauthority`, and `contextcompile` continue to own typed
+payload registration, effective-policy resolution, and scope applicability.
+Wave 5A adds one generic registered layered-payload mode and one sealed
+applicable-payload selection to those owners. `internal/experimentpolicy`
+owns only the CSE grammar and the commutative monotone reduction of that
+already-selected sealed ledger; it never chooses applicability or precedence.
 `internal/experimentrun` remains the sole runner and receipt/result publisher.
 `internal/experimentapp` owns lifecycle preconditions, actor custody,
 provenance, immutable experiment-directory writes, and composition of those
@@ -123,6 +150,11 @@ Every agent operation carries an explicit unauthenticated attribution with
 harness identity and optional session identity. Attribution is not authority.
 
 ### 3.3 Human-only mutations
+
+`reconcile-draft` is a local-human bookkeeping mutation: it records an
+otherwise-unattributable direct draft change with explicit unauthenticated
+attribution, changes no draft content, and grants no authority. It is omitted
+from MCP and must complete before a read-only registration review can pass.
 
 Registration lock and ratification require a sealed authenticated principal
 resolution produced by the adapter's existing trust boundary. A payload actor
@@ -190,10 +222,27 @@ selection reproduced.
 
 ## 5. Typed CSE policy
 
-`internal/experimentpolicy` registers the `experiment_execution` payload kind
-with `policyartifact`. Context Integrity continues to own storage,
-inheritance, applicability, effective resolution, identity, and digest. The
-CSE package receives one sealed effective policy and has no fallback store.
+`internal/experimentpolicy` registers `experiment_execution` as a **layered**
+payload kind with `policyartifact`. Singleton remains the default for every
+existing payload kind. Context Integrity continues to own storage,
+inheritance, applicability, effective resolution, identity, and digest.
+
+The generic predecessor amendment is deliberately narrow:
+
+- payload-kind registration records `singleton` or `layered` cardinality;
+- `policyauthority` continues rejecting duplicate singleton payload owners,
+  but permits a layered kind in several policies and seals every typed layer
+  into the one effective-policy identity;
+- `contextcompile` applies its existing three-valued scope algorithm to those
+  layers for the exact operation target and returns one sealed, sorted,
+  lossless selection; unknown applicability stays blocking; and
+- feature code receives that selection and cannot add, remove, reorder, or
+  independently reselect policy entries.
+
+This is a shared Context Integrity transport, not a CSE hierarchy or second
+resolver. The CSE reducer has no organization/project precedence algorithm;
+its intersection/union/denial operations are commutative across every
+already-applicable selected layer.
 
 The v1 payload contains:
 
@@ -208,35 +257,42 @@ experiment_execution:
   environments:
     - id: default-deny
       grants: <exact spec/execution-workspace grant-set shape>
-      declared_environment: [GOMAXPROCS]
-  limits:
-    timeout_seconds: 120
-    observation_bytes: 1048576
-    retained_artifact_bytes: 16777216
+      declared_environment:
+        GOMAXPROCS: "1"
   trusted_measurement_sources: [harness-measured, evaluator-measured]
   mandatory_guards:
     - class: request-path-performance
       guards: [contract-correct]
 ```
 
-Every list is present, sorted, and duplicate-free. Numeric limits are positive.
-The grant field strict-decodes through the one shared execution-workspace
-grammar; CSE does not restate network, filesystem, process, CPU, or memory
-semantics.
+Every list is present, sorted, and duplicate-free. Every environment name and
+exact value is present in a sorted map; values are policy bytes, never copied
+from the ambient process. The grant field strict-decodes through the one
+shared execution-workspace grammar and remains the only timeout/resource
+limit authority. The fixed evaluator transport ceiling remains an
+implementation safety ceiling, not a policy promise. CSE does not restate
+network, filesystem, process, CPU, memory, transport, or retention semantics.
 
-The CSE resolver selects all applicable effective-policy entries that carry
-this payload and refines them monotonically:
+The CSE reducer receives every applicable entry already selected and sealed by
+Context Integrity, then combines the payloads monotonically:
 
 - allowlists intersect;
-- maximum limits take the minimum;
+- named environment ids intersect; a surviving id must carry byte-identical
+  canonical grant bytes and an identical declared-environment map in every
+  layer that names it, otherwise refinement is malformed and refuses;
 - required guards union;
 - any denial dominates;
 - a lower layer cannot restore an excluded path, class, evaluator, protocol,
-  measurement source, environment value, or grant.
+  measurement source, or named environment.
+
+Wave 5 does not invent grant-set intersection. A project can narrow execution
+by removing a named environment, while changing the grants or values of a
+surviving id is an explicit conflict. Finer grant refinement remains deferred
+until the shared execution-grant owner defines it.
 
 The selected definition environment-policy id must resolve to one exact
-effective environment entry. Its canonical grant bytes, declared environment,
-and effective-policy digest become the existing
+effective environment entry. Its canonical grant bytes, exact declared
+environment map, and effective-policy digest become the existing
 `experimentrun.ExecutionAuthorization`. Missing applicable CSE policy,
 duplicate environment ownership, empty intersections, malformed refinement,
 or an input outside the final allowance refuses fail-closed.
@@ -266,19 +322,23 @@ digest            record self-digest
 ```
 
 The closed successful mutation ids are `draft-definition`,
-`capture-candidate`, `propose-registration`, and `propose-ratification`.
+`capture-candidate`, `reconcile-direct-draft`, `propose-registration`, and
+`propose-ratification`.
 Machine evidence production already carries its own receipt, observation,
 result, capsule, and release identities and is not duplicated into a second
 provenance algorithm. Refused attempts are returned to the caller and are not
 written into committed authority merely to create an audit side effect.
 
 Direct Markdown/Git edits cannot truthfully identify every editing event.
-During registration review the application core compares the accepted base
-with proposed bytes. If changes lack an exact matching typed-operation chain,
-it appends one `reconcile-direct-draft` record with explicit unauthenticated
-attribution and the exact prior/result digests. It never invents a person,
-agent, session, or intermediate operation. The human registration review then
-judges those resulting bytes normally.
+`review-registration` remains strictly read-only: it compares the accepted
+base with proposed bytes and reports a blocking `direct-draft-unreconciled`
+posture when changes lack an exact typed-operation chain. Wave 5B adds the
+explicitly mutating, local-human CLI operation `reconcile-draft`. That
+operation appends exactly one `reconcile-direct-draft` record with explicit
+unauthenticated attribution and the exact prior/result digests. It never
+invents a person, agent, session, or intermediate operation. A later read-only
+registration review may then judge the reconciled bytes normally. The MCP
+agent union omits reconciliation.
 
 Typed proposal writes serialize the artifact and provenance append under the
 checkout writer lock. They remain non-authoritative working-tree bytes until
@@ -295,9 +355,19 @@ Working-tree or review-branch lock and ratification bytes are proposals. The
 application core has separate proposed and accepted resolvers:
 
 - proposed operations validate exact caller-selected bytes and expected HEAD;
-- authority-bearing inspection and lifecycle operations resolve the exact
-  default-branch HEAD tree and reuse the existing merge-signaled state
-  projector.
+- authority-bearing inspection and lifecycle operations resolve one exact
+  default-branch HEAD tree, enumerate the experiment directory through Git
+  plumbing, and feed those bytes through the new source-backed entry point of
+  the existing `internal/experiment` state algorithm.
+
+The accepted resolver does not call `specstate.Projector`: that projector's
+closed path grammar owns only spec artifacts. It also does not call the
+filesystem-only `DeriveStateDetails`. Wave 5A adds one reader-backed
+`experiment.DeriveStateDetailsFromSource` (name illustrative, signature fixed
+by its TDD task) and retains `DeriveStateDetails` as the filesystem adapter.
+Git enumeration, blob reads, default-branch HEAD identity, and state
+derivation are each executed once; a mixed worktree/default-tree snapshot is
+operationally impossible through the sealed result.
 
 Registration is proven only when the locked definition's exact bytes and
 digest are present in the accepted tree. Ratification is proven only when the
@@ -305,10 +375,33 @@ exact ratification bytes, bound result, definition, receipt, observations, and
 candidate patches resolve from one accepted tree. An unmerged proposal never
 enables execution, cleanup, or closure.
 
-The actor resolution embedded in `ratification.yaml` is independently
-re-verified through the governance-principal kernel at the accepted revision.
-Unproven authentication is a blocking verdict. Malformed or internally
-inconsistent identity evidence is operational.
+Wave 5 emits `verdi.experiment-ratification/v2`. Its actor block persists the
+adapter-resolved `governanceprincipal.PrincipalClaim` (`trust_source` plus
+stable `subject`) and the kernel-derived `principal_id`; it does not persist a
+forgeable `PrincipalResolution` seal. V1 remains strict decode/state-history
+compatibility but cannot be newly proposed or authorize release/closure.
+
+```yaml
+schema: verdi.experiment-ratification/v2
+result_digest: sha256:...
+actor:
+  trust_source: github
+  subject: stable-adapter-subject
+  principal_id: principal/github/...
+disposition: select-recommended
+```
+
+The actor keys are explicit ratification-v2 schema fields; the record does not
+serialize the Go structure or inherit its incidental JSON/YAML field names.
+
+At the accepted revision the human adapter resolves the persisted claim
+through the configured governance profile and trust-fact reader, requires an
+authenticated sealed result, and requires exact principal-id equality with
+the record. Unproven authentication is a blocking verdict. A malformed claim,
+principal mismatch, missing configured trust source, or internally
+inconsistent identity evidence is operational. This uses the existing kernel
+API; no adapter supplies a prebuilt principal ID and no feature-local identity
+parser exists.
 
 ## 8. CLI and MCP adapters
 
@@ -318,7 +411,14 @@ Wave 5B adds one top-level CLI namespace:
 verdi experiment <operation> ...
 ```
 
-Subcommands map one-to-one to the application operations. Machine output is
+Wave 5B registers the operations implemented through 5B, including the
+explicit local-human `reconcile-draft` and registration proposal. Wave 5C
+serially extends the same dispatcher with ratification proposal, capsule
+publication, and workspace release/retry after their core methods exist;
+comparison-backed closure remains an additive check in the existing
+`verdi close` path.
+Subcommands map one-to-one to the application operations available at that
+unit. Machine output is
 canonical JSON when `--json` is selected; human output is a rendering of the
 same typed result. Standard streams and the repository exit contract remain
 unchanged: `0` clean/proven, `1` completed refusal or unproven verdict, `2`
@@ -331,9 +431,10 @@ not a free-form command tunnel. It never accepts `propose-registration`,
 Unknown operations and human-only operation names fail explicitly.
 
 The CLI verb and MCP tool inventories are serialized shared registries. Wave
-5B cannot overlap any ASD, CI, or GLG task that changes either registry.
-Spec-alignment and showcase inventories change in the same commit as their
-live registrations.
+5B cannot overlap any ASD, CI, or GLG task that changes either registry, and
+Wave 5C cannot overlap another CLI-registry owner while it extends the
+namespace. Spec-alignment and showcase inventories change in the same commit
+as their live registrations.
 
 CLI and MCP conformance tests feed semantically identical requests through
 both adapters and require byte-identical core result projections. The MCP
@@ -344,9 +445,12 @@ data.
 ## 9. Ratification, capsule, release, and closure
 
 The human adapter obtains one sealed authenticated principal resolution before
-building a ratification proposal. It sets `ratification.actor` from that
-resolution and runs the existing record and binding validators. The core
-cannot accept an actor field supplied by the request.
+building a ratification proposal. It copies the resolution's exact claim and
+kernel-derived principal id into the v2 actor block and runs the record and
+binding validators. The core cannot accept any actor field supplied by the
+request. Accepted use repeats the kernel resolution from that persisted claim
+and compares the derived id; the original in-memory seal is neither serialized
+nor treated as reconstructable proof.
 
 For a selecting ratification, the selected candidate is:
 
@@ -420,14 +524,21 @@ unit crosses its authority boundary. Required evidence includes:
 
 - strict decode, canonical encode, digest, clone-safety, and version migration
   tests for every new record;
-- policy refinement tables proving intersection/minimum/union/deny precedence
-  and lower-layer non-weakening;
+- singleton-versus-layered payload registration, duplicate layered owners,
+  canonical scope selection, unknown applicability, and mutation-safe sealed
+  layer transport;
+- policy refinement tables proving intersection/union/deny semantics and
+  lower-layer non-weakening;
 - application tests proving one effective-policy resolution per operation;
-- hermetic Git histories distinguishing proposed from accepted bytes;
-- authenticated-principal and unauthenticated-agent custody tests;
-- CLI built-binary and live in-process MCP conformance tests;
+- hermetic Git histories distinguishing proposed from accepted bytes and
+  filesystem-versus-exact-tree state parity under divergent worktrees;
+- authenticated-principal, persisted-claim re-resolution, and
+  unauthenticated-agent custody tests;
+- CLI built-binary and live in-process MCP conformance tests, including the
+  serialized Wave 5C CLI extension and unchanged agent exclusion;
 - explicit MCP refusal of every human-only operation;
-- registration immutability and direct-edit reconciliation tests;
+- registration immutability, read-only unreconciled review, and explicit
+  direct-edit reconciliation tests;
 - reproduction tables over zero, incomplete, agreeing, disagreeing,
   malformed, and extra visible runs;
 - capsule exact-inventory/digest tests;
@@ -460,18 +571,18 @@ orchestration and the Wave 3B handoff:
 
 | Source obligation | Destination | Transformation or omission |
 |---|---|---|
-| Wave 5 CSE CLI and agent adapters | §§2, 3, 8, 11 | One CLI namespace and one agent-safe MCP union over one core |
+| Wave 5 CSE CLI and agent adapters | §§2, 3, 8, 11 | One CLI namespace extended in 5B then 5C, plus one unchanged agent-safe MCP union over one core |
 | AC-5 same typed operations | §§2–3, 8 | Adapter parsing/rendering separated from core semantics |
 | AC-5 human registration lock | §§3, 7 | Proposal bytes separated from merge-signaled accepted authority |
-| AC-5 authenticated ratification | §§3, 7, 9 | Existing ratification schema plus sealed principal resolution |
+| AC-5 authenticated ratification | §§3, 7, 9 | Ratification v2 persists the kernel claim/id operands; accepted use re-resolves the claim and compares the id |
 | AC-5 spike closure | §9 | Additive evidence provider into the existing closure path; no new edge |
 | AC-4 reproduction rule deferred by Wave 3B | §4 | Minimal registered run-count rule over existing unanimous aggregate |
 | AC-4 cleanup deferred by Wave 3B | §§3, 9 | Release only after durable ratification; minimal evidence excluded |
 | AC-4 selected capsule deferred by Wave 3B | §9 | Exact closed inventory over existing capsule v1 manifest |
-| AC-6 concrete policy resolver deferred by Wave 3B | §5 | Typed Context Integrity payload; no feature-local hierarchy |
-| AC-6 policy constraints | §5 | Paths, classes, evaluators, grants, limits, sources, mandatory guards |
-| AC-6 mutation provenance | §6 | CSE-specific strict append-only record; honest direct-edit reconciliation |
-| DC-2 derived state | §§3–4, 7 | No new state artifact or preferred-run pointer |
+| AC-6 concrete policy resolver deferred by Wave 3B | §5 | Generic Context Integrity layered-payload selection plus typed commutative CSE reduction; no feature-local hierarchy |
+| AC-6 policy constraints | §5 | Paths, classes, evaluators, exact environment values, shared grants, sources, mandatory guards; no unenforceable duplicate limit vocabulary |
+| AC-6 mutation provenance | §6 | CSE-specific strict append-only record; read-only detection plus explicit direct-edit reconciliation mutation |
+| DC-2 derived state | §§3–4, 7 | One experiment state algorithm over filesystem or exact-tree byte sources; no new state artifact or preferred-run pointer |
 | DC-7 human-only decisions | §§3, 7–9 | Agent surface structurally omits authority operations |
 | DC-8 durable reasoning/disposable prototypes | §9 | Capsule first, then workspace release |
 | DC-9 no patch promotion | §§1, 9 | Capsule is evidence only; product source untouched |
