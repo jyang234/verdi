@@ -67,6 +67,7 @@ func (f ChallengeFacts) validate() error {
 		return err
 	}
 	if !spikeRe.MatchString(f.Spike) {
+		// vocab:identity — "spike" names the challenge's fixed spec/<id> artifact-ref field grammar, not renameable display vocabulary.
 		return fmt.Errorf("experimenthuman: spike %q does not match ^spec/<id>$", f.Spike)
 	}
 	if err := experiment.ValidateID(f.ExperimentID); err != nil {
