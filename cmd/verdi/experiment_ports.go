@@ -150,11 +150,23 @@ func experimentAcceptedTreeFS(ctx context.Context, root, commit string) (fs.FS, 
 		if entry.Type != "blob" {
 			continue
 		}
+		// Preserve the accepted entry's file kind: a mode-120000 entry is a
+		// symlink and must stay one so consumers apply their own refusal
+		// (its blob data is the link target and is never followed here).
+		var mode fs.FileMode
+		switch entry.Mode {
+		case "100644", "100755":
+			mode = 0o444
+		case "120000":
+			mode = fs.ModeSymlink | 0o444
+		default:
+			return nil, fmt.Errorf("experiment CLI: accepted tree entry %s has unsupported blob mode %s", entry.Path, entry.Mode)
+		}
 		data, readErr := gitx.Show(ctx, root, commit, entry.Path)
 		if readErr != nil {
 			return nil, readErr
 		}
-		source[entry.Path] = &fstest.MapFile{Data: data, Mode: 0o444}
+		source[entry.Path] = &fstest.MapFile{Data: data, Mode: mode}
 	}
 	return source, nil
 }

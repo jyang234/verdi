@@ -370,6 +370,111 @@ func TestExperimentHumanProofBuiltBinary(t *testing.T) {
 	}
 }
 
+func experimentGitOutput(t *testing.T, dir string, args ...string) string {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("git %v: %v", args, err)
+	}
+	return strings.TrimSpace(string(out))
+}
+
+func TestExperimentAcceptedPolicySymlinkModeBuiltBinary(t *testing.T) {
+	t.Setenv("CI_DEFAULT_BRANCH", "main")
+	publicKey, privateKey, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	repo := buildExperimentHumanRepo(t, publicKey)
+	bin := buildVerdiBinary(t)
+
+	// Real-Git probe: retype the still-valid policy blob to a committed
+	// symlink entry (mode 120000) without changing its bytes, and commit an
+	// unrelated symlink elsewhere in the same accepted tree.
+	if err := os.Symlink("layers.txt", filepath.Join(repo.Dir, "docs-link")); err != nil {
+		t.Fatal(err)
+	}
+	runGitForExperimentTest(t, repo.Dir, "add", "docs-link")
+	policyBlob := experimentGitOutput(t, repo.Dir, "rev-parse", "HEAD:.verdi/policy/policies/experiment.md")
+	runGitForExperimentTest(t, repo.Dir, "update-index", "--cacheinfo", "120000,"+policyBlob+",.verdi/policy/policies/experiment.md")
+	runGitForExperimentTest(t, repo.Dir, "commit", "-q", "-m", "retype accepted policy entry")
+	acceptedHead := contextE2ECurrentHead(t, repo.Dir)
+
+	base := []string{"experiment", "reconcile-draft", "--spike", "spec/request-path-spike", "--experiment", "request-path-v2", "--accepted-head", acceptedHead, "--json"}
+	stdout, stderr, code := runExperimentBuiltBinary(t, bin, repo.Dir, nil, base...)
+	if code != 1 || stderr != "" || !strings.Contains(stdout, `"code":"human-authorization-required"`) {
+		t.Fatalf("challenge exit/stdout/stderr = %d/%q/%q", code, stdout, stderr)
+	}
+	challengeBytes, err := decodeExperimentChallengeOutput(t, stdout).Challenge.Canonical()
+	if err != nil {
+		t.Fatal(err)
+	}
+	proof := filepath.Join(t.TempDir(), "valid.sig")
+	if err := os.WriteFile(proof, ed25519.Sign(privateKey, challengeBytes), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	before := contextE2EPorcelainStatus(t, repo.Dir)
+	proofArgs := append(append([]string{}, base...), "--human-proof", proof)
+	stdout, stderr, code = runExperimentBuiltBinary(t, bin, repo.Dir, nil, proofArgs...)
+	if code != 2 || stdout != "" || !strings.Contains(stderr, "under .verdi/policy/") || !strings.Contains(stderr, "symlink") {
+		t.Fatalf("retyped policy entry exit/stdout/stderr = %d/%q/%q, want operational symlink refusal naming the policy entry", code, stdout, stderr)
+	}
+	if after := contextE2EPorcelainStatus(t, repo.Dir); after != before {
+		t.Fatalf("retyped policy entry mutated worktree: before=%q after=%q", before, after)
+	}
+}
+
+func TestExperimentUnrelatedAcceptedSymlinkBuiltBinary(t *testing.T) {
+	t.Setenv("CI_DEFAULT_BRANCH", "main")
+	publicKey, privateKey, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	repo := buildExperimentHumanRepo(t, publicKey)
+	bin := buildVerdiBinary(t)
+
+	// A committed symlink OUTSIDE .verdi/policy must not be rejected by the
+	// accepted-tree helper: the full human reconcile flow stays clean.
+	if err := os.Symlink("layers.txt", filepath.Join(repo.Dir, "docs-link")); err != nil {
+		t.Fatal(err)
+	}
+	runGitForExperimentTest(t, repo.Dir, "add", "docs-link")
+	runGitForExperimentTest(t, repo.Dir, "commit", "-q", "-m", "unrelated accepted symlink")
+	acceptedHead := contextE2ECurrentHead(t, repo.Dir)
+
+	runGitForExperimentTest(t, repo.Dir, "checkout", "-q", "-b", "proposal")
+	experimentDir := filepath.Join(repo.Dir, ".verdi", "specs", "active", "request-path-spike", "experiments", "request-path-v2")
+	if err := os.WriteFile(filepath.Join(experimentDir, "human-note.txt"), []byte("direct edit beside a symlink\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGitForExperimentTest(t, repo.Dir, "add", ".")
+	runGitForExperimentTest(t, repo.Dir, "commit", "-q", "-m", "direct edit")
+
+	base := []string{"experiment", "reconcile-draft", "--spike", "spec/request-path-spike", "--experiment", "request-path-v2", "--accepted-head", acceptedHead, "--json"}
+	stdout, stderr, code := runExperimentBuiltBinary(t, bin, repo.Dir, nil, base...)
+	if code != 1 || stderr != "" || !strings.Contains(stdout, `"code":"human-authorization-required"`) {
+		t.Fatalf("challenge exit/stdout/stderr = %d/%q/%q", code, stdout, stderr)
+	}
+	challengeBytes, err := decodeExperimentChallengeOutput(t, stdout).Challenge.Canonical()
+	if err != nil {
+		t.Fatal(err)
+	}
+	proof := filepath.Join(t.TempDir(), "valid.sig")
+	if err := os.WriteFile(proof, ed25519.Sign(privateKey, challengeBytes), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	proofArgs := append(append([]string{}, base...), "--human-proof", proof)
+	stdout, stderr, code = runExperimentBuiltBinary(t, bin, repo.Dir, nil, proofArgs...)
+	if code != 0 || stderr != "" || !strings.Contains(stdout, `"classification":"clean"`) {
+		t.Fatalf("reconcile beside unrelated symlink exit/stdout/stderr = %d/%q/%q, want clean completion", code, stdout, stderr)
+	}
+	if _, err := os.Stat(filepath.Join(experimentDir, "mutation-provenance.jsonl")); err != nil {
+		t.Fatalf("reconcile beside unrelated symlink omitted provenance: %v", err)
+	}
+}
+
 func TestExperimentHumanKeyUnmappedBuiltBinary(t *testing.T) {
 	t.Setenv("CI_DEFAULT_BRANCH", "main")
 	_, privateKey, err := ed25519.GenerateKey(rand.Reader)
