@@ -1,6 +1,7 @@
 package experimentapp
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -124,22 +125,21 @@ func (s *Service) ReviewRegistration(ctx context.Context, identity Identity) Rev
 		PacketDigest: packetDigest, AcceptedArtifactDigest: acceptedDigest,
 		ProposedArtifactDigest: proposedDigest,
 	}
-	if acceptedDigest == proposedDigest {
-		return result
-	}
-	provenancePath := path.Join(validation.ExperimentPath, experiment.ProvenanceFile)
-	provenanceBytes, ok := proposedFiles[provenancePath]
-	if !ok {
-		result.Outcome = verdictOutcome("direct-draft-unreconciled", "proposed experiment bytes differ from accepted bytes without mutation provenance")
-		return result
-	}
-	records, err := experiment.DecodeProvenanceLog(provenanceBytes)
+	history, err := compareProvenanceHistories(
+		accepted.source.files, acceptedPath,
+		proposedFiles, validation.ExperimentPath,
+		packet.Experiment, acceptedDigest,
+	)
 	if err != nil {
 		result.Outcome = operationalOutcome("mutation-provenance-invalid", err)
 		return result
 	}
-	if !reconcilesArtifactDigests(records, packet.Experiment, validation.PolicyDigest, acceptedDigest, proposedDigest) {
-		result.Outcome = verdictOutcome("direct-draft-unreconciled", "mutation provenance does not reconcile accepted and proposed artifact digests under the effective policy")
+	if history.mismatch != "" {
+		result.Outcome = verdictOutcome("direct-draft-unreconciled", history.mismatch)
+		return result
+	}
+	if !history.reaches(proposedDigest) {
+		result.Outcome = verdictOutcome("direct-draft-unreconciled", "mutation provenance does not reach the proposed human-authored artifact digest")
 	}
 	return result
 }
@@ -186,29 +186,73 @@ func artifactSetDigest(files map[string][]byte, experimentPath string) (string, 
 	prefix := strings.TrimSuffix(experimentPath, "/") + "/"
 	entries := make([]artifactEntry, 0, len(files))
 	for name, data := range files {
-		if !strings.HasPrefix(name, prefix) || name == path.Join(experimentPath, experiment.ProvenanceFile) {
+		if !strings.HasPrefix(name, prefix) {
 			continue
 		}
-		entries = append(entries, artifactEntry{Path: strings.TrimPrefix(name, prefix), Digest: rawDigest(data)})
+		relative := strings.TrimPrefix(name, prefix)
+		if !isMutationArtifact(relative) {
+			continue
+		}
+		entries = append(entries, artifactEntry{Path: relative, Digest: rawDigest(data)})
 	}
 	sort.Slice(entries, func(i, j int) bool { return entries[i].Path < entries[j].Path })
 	return canonjson.Digest(entries)
 }
 
-func reconcilesArtifactDigests(records []experiment.ProvenanceRecord, identity experiment.ProvenanceExperiment, policyDigest, acceptedDigest, proposedDigest string) bool {
-	for start := range records {
-		if records[start].PreviousDigest != acceptedDigest {
-			continue
-		}
-		for index := start; index < len(records); index++ {
-			record := records[index]
-			if record.Experiment != identity || record.PolicyDigest != policyDigest {
-				break
-			}
-			if record.ResultDigest == proposedDigest {
-				return index == len(records)-1
+// isMutationArtifact is the one human/agent mutation projection. Machine
+// evidence has independent receipts and identities, so only the three
+// design-owned evidence locations are omitted from mutation provenance.
+func isMutationArtifact(relative string) bool {
+	if relative == experiment.ProvenanceFile || relative == "recommendation.md" {
+		return false
+	}
+	return !strings.HasPrefix(relative, "runs/") && !strings.HasPrefix(relative, "selected/")
+}
+
+type provenanceHistories struct {
+	accepted       []experiment.ProvenanceRecord
+	proposed       []experiment.ProvenanceRecord
+	acceptedDigest string
+	mismatch       string
+}
+
+func (h provenanceHistories) reaches(digest string) bool {
+	if len(h.proposed) == 0 {
+		return digest == h.acceptedDigest
+	}
+	return h.proposed[len(h.proposed)-1].ResultDigest == digest
+}
+
+func compareProvenanceHistories(acceptedFiles map[string][]byte, acceptedPath string, proposedFiles map[string][]byte, proposedPath string, identity experiment.ProvenanceExperiment, acceptedDigest string) (provenanceHistories, error) {
+	acceptedBytes := acceptedFiles[path.Join(acceptedPath, experiment.ProvenanceFile)]
+	proposedBytes := proposedFiles[path.Join(proposedPath, experiment.ProvenanceFile)]
+	acceptedRecords, err := experiment.DecodeProvenanceLog(acceptedBytes)
+	if err != nil {
+		return provenanceHistories{}, fmt.Errorf("accepted mutation provenance: %w", err)
+	}
+	proposedRecords, err := experiment.DecodeProvenanceLog(proposedBytes)
+	if err != nil {
+		return provenanceHistories{}, fmt.Errorf("proposed mutation provenance: %w", err)
+	}
+	history := provenanceHistories{accepted: acceptedRecords, proposed: proposedRecords, acceptedDigest: acceptedDigest}
+	for _, records := range [][]experiment.ProvenanceRecord{acceptedRecords, proposedRecords} {
+		for _, record := range records {
+			if record.Experiment != identity {
+				history.mismatch = "mutation provenance belongs to a different experiment"
+				return history, nil
 			}
 		}
 	}
-	return false
+	if len(acceptedRecords) > 0 && acceptedRecords[len(acceptedRecords)-1].ResultDigest != acceptedDigest {
+		history.mismatch = "accepted mutation provenance does not reach the accepted human-authored artifact digest"
+		return history, nil
+	}
+	if !bytes.HasPrefix(proposedBytes, acceptedBytes) || len(proposedRecords) < len(acceptedRecords) {
+		history.mismatch = "proposed mutation provenance does not retain the exact accepted append-only prefix"
+		return history, nil
+	}
+	if len(acceptedRecords) == 0 && len(proposedRecords) > 0 && proposedRecords[0].PreviousDigest != acceptedDigest {
+		history.mismatch = "proposed mutation provenance is not anchored to the accepted human-authored artifact digest"
+	}
+	return history, nil
 }

@@ -310,7 +310,7 @@ func (s *Service) commitDraftMutation(ctx context.Context, identity Identity, pr
 	if err != nil {
 		return DraftMutationResult{Outcome: verdictOutcome("direct-draft-unreconciled", err.Error())}
 	}
-	if err := writeProposal(ctx, identity.CheckoutRoot, coordinator, files, provenanceFile); err != nil {
+	if err := writeProposal(ctx, identity.CheckoutRoot, coordinator, files, provenanceFile, nil); err != nil {
 		return DraftMutationResult{Outcome: operationalOutcome("proposal-write-failed", err)}
 	}
 	return DraftMutationResult{

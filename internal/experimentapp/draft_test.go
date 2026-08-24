@@ -140,6 +140,50 @@ func TestDraftInterruptionLeavesDirtyProposalRefused(t *testing.T) {
 	}
 }
 
+func TestDraftMutationProjectionIgnoresMachineEvidenceButNotDirectArtifacts(t *testing.T) {
+	root, service := mutationTestService(t)
+	definitionPath := mutationDefinitionPath(root)
+	original := mustReadFile(t, definitionPath)
+	firstBytes := bytes.Replace(original, []byte("#oq-cache\n"), []byte("#oq-first\n"), 1)
+	first := service.DraftDefinition(context.Background(), testIdentity(t, root, "request-path-v2"), DraftDefinitionInput{DefinitionBytes: firstBytes})
+	if first.Outcome.Classification != ClassificationClean {
+		t.Fatalf("DraftDefinition(first) outcome = %+v", first.Outcome)
+	}
+	experimentDir := filepath.Dir(definitionPath)
+	for name, data := range map[string][]byte{
+		filepath.Join("runs", "run-1", "execution.json"): []byte("{}\n"),
+		"recommendation.md": []byte("# Recommendation\n\nMachine generated.\n"),
+		filepath.Join("selected", "capsule-manifest.json"): []byte("{}\n"),
+	} {
+		full := filepath.Join(experimentDir, name)
+		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(full, data, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	secondBytes := bytes.Replace(firstBytes, []byte("#oq-first\n"), []byte("#oq-second\n"), 1)
+	second := service.DraftDefinition(context.Background(), testIdentity(t, root, "request-path-v2"), DraftDefinitionInput{DefinitionBytes: secondBytes})
+	if second.Outcome.Classification != ClassificationClean {
+		t.Fatalf("DraftDefinition(after machine evidence) outcome = %+v", second.Outcome)
+	}
+	if err := os.WriteFile(filepath.Join(experimentDir, "unknown-direct.txt"), []byte("direct edit\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	thirdBytes := bytes.Replace(secondBytes, []byte("#oq-second\n"), []byte("#oq-third\n"), 1)
+	third := service.DraftDefinition(context.Background(), testIdentity(t, root, "request-path-v2"), DraftDefinitionInput{DefinitionBytes: thirdBytes})
+	if third.Outcome.Classification != ClassificationVerdict || third.Outcome.Code != "direct-draft-unreconciled" {
+		t.Fatalf("DraftDefinition(after unknown artifact) outcome = %+v", third.Outcome)
+	}
+	identity := testIdentity(t, root, "request-path-v2")
+	identity.Actor = authenticatedHuman(t)
+	reconciled := service.ReconcileDraft(context.Background(), identity)
+	if reconciled.Outcome.Classification != ClassificationClean {
+		t.Fatalf("ReconcileDraft(unknown artifact) outcome = %+v", reconciled.Outcome)
+	}
+}
+
 func mutationTestService(t *testing.T) (string, *Service) {
 	t.Helper()
 	root := t.TempDir()

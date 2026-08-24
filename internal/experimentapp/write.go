@@ -15,7 +15,10 @@ import (
 	"github.com/jyang234/verdi/internal/experiment"
 )
 
+var errProposalArtifactSetChanged = errors.New("experimentapp: proposal artifact set changed after review")
+
 const (
+	stepProposalWriterLocked       = "experiment-proposal-writer-locked"
 	stepProposalArtifactsInstalled = "experiment-proposal-artifacts-installed"
 )
 
@@ -26,14 +29,39 @@ type proposalFile struct {
 	new       []byte
 }
 
+type proposalArtifactSetGuard struct {
+	experimentPath string
+	digest         string
+}
+
 // writeProposal serializes exact proposal artifacts and their complete
 // provenance append under the checkout-wide writer lock. Artifacts are
 // installed before provenance so an interruption is a visibly dirty proposal,
 // never an authoritative pair. There is deliberately no second journal.
-func writeProposal(ctx context.Context, root string, coordinator draftmutation.Coordinator, artifacts []proposalFile, provenance proposalFile) error {
+func writeProposal(ctx context.Context, root string, coordinator draftmutation.Coordinator, artifacts []proposalFile, provenance proposalFile, guard *proposalArtifactSetGuard) error {
 	files := append([]proposalFile(nil), artifacts...)
 	sort.Slice(files, func(i, j int) bool { return files[i].path < files[j].path })
 	return draftmutation.WithWriterLock(ctx, root, coordinator, func(_ *draftmutation.LockedWriter) error {
+		if coordinator.After != nil {
+			if err := coordinator.After(stepProposalWriterLocked); err != nil {
+				return fmt.Errorf("experimentapp: after %s: %w", stepProposalWriterLocked, err)
+			}
+		}
+		// Registration supplies a guard so the packet's complete mutation
+		// artifact set is rebound after lock acquisition and before any write.
+		if guard != nil {
+			current, err := readProposedArtifactFiles(root, guard.experimentPath)
+			if err != nil {
+				return err
+			}
+			digest, err := artifactSetDigest(current, guard.experimentPath)
+			if err != nil {
+				return err
+			}
+			if digest != guard.digest {
+				return errProposalArtifactSetChanged
+			}
+		}
 		for _, file := range append(append([]proposalFile(nil), files...), provenance) {
 			if err := validateProposalFile(root, file); err != nil {
 				return err

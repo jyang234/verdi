@@ -7,12 +7,12 @@ import (
 	"fmt"
 	"io/fs"
 	"path"
+	"slices"
 	"sort"
 
 	"github.com/jyang234/verdi/internal/canonjson"
 	"github.com/jyang234/verdi/internal/draftmutation"
 	"github.com/jyang234/verdi/internal/experiment"
-	"github.com/jyang234/verdi/internal/experimentpolicy"
 	"github.com/jyang234/verdi/internal/governanceprincipal"
 )
 
@@ -73,24 +73,24 @@ func (s *Service) ReconcileDraft(ctx context.Context, identity Identity) DraftMu
 	if acceptedDigest == proposedDigest {
 		return DraftMutationResult{Outcome: verdictOutcome("direct-draft-absent", "proposed artifact set does not differ from accepted bytes")}
 	}
-	provenancePath := path.Join(validation.ExperimentPath, experiment.ProvenanceFile)
-	oldProvenance := proposed[provenancePath]
-	records, err := experiment.DecodeProvenanceLog(oldProvenance)
+	wantIdentity := experiment.ProvenanceExperiment{Spike: identity.Spike, ID: identity.ExperimentID}
+	history, err := compareProvenanceHistories(
+		accepted.source.files, acceptedPath,
+		proposed, validation.ExperimentPath,
+		wantIdentity, acceptedDigest,
+	)
 	if err != nil {
 		return DraftMutationResult{Outcome: operationalOutcome("mutation-provenance-invalid", err)}
 	}
+	if history.mismatch != "" {
+		return DraftMutationResult{Outcome: verdictOutcome("direct-draft-unreconciled", history.mismatch)}
+	}
+	if history.reaches(proposedDigest) {
+		return DraftMutationResult{Outcome: verdictOutcome("direct-draft-absent", "proposed human-authored artifact bytes are already reconciled")}
+	}
 	previousDigest := acceptedDigest
-	if len(records) > 0 {
-		wantIdentity := experiment.ProvenanceExperiment{Spike: identity.Spike, ID: identity.ExperimentID}
-		if records[0].PreviousDigest != acceptedDigest {
-			return DraftMutationResult{Outcome: verdictOutcome("direct-draft-unreconciled", "existing provenance is not anchored to the accepted artifact digest")}
-		}
-		for _, record := range records {
-			if record.Experiment != wantIdentity || record.PolicyDigest != validation.PolicyDigest {
-				return DraftMutationResult{Outcome: verdictOutcome("direct-draft-unreconciled", "existing provenance belongs to different experiment or policy authority")}
-			}
-		}
-		previousDigest = records[len(records)-1].ResultDigest
+	if len(history.proposed) > 0 {
+		previousDigest = history.proposed[len(history.proposed)-1].ResultDigest
 	}
 	paths := changedArtifactPaths(accepted.source.files, acceptedPath, proposed, validation.ExperimentPath)
 	if len(paths) == 0 {
@@ -108,7 +108,7 @@ func (s *Service) ReconcileDraft(ctx context.Context, identity Identity) DraftMu
 	if err != nil {
 		return DraftMutationResult{Outcome: operationalOutcome("mutation-provenance-invalid", err)}
 	}
-	if err := writeProposal(ctx, identity.CheckoutRoot, draftmutation.Coordinator{}, nil, provenanceFile); err != nil {
+	if err := writeProposal(ctx, identity.CheckoutRoot, draftmutation.Coordinator{}, nil, provenanceFile, nil); err != nil {
 		return DraftMutationResult{Outcome: operationalOutcome("proposal-write-failed", err)}
 	}
 	return DraftMutationResult{Outcome: cleanOutcome(), AcceptedHead: accepted.revision.Head, ExperimentPath: validation.ExperimentPath, ArtifactDigest: proposedDigest, ProvenanceDigest: sealed.Digest}
@@ -117,6 +117,10 @@ func (s *Service) ReconcileDraft(ctx context.Context, identity Identity) DraftMu
 // ProposeRegistration writes a digest-matching lock only after a sealed human
 // actor presents the exact deterministic packet digest.
 func (s *Service) ProposeRegistration(ctx context.Context, identity Identity, input RegistrationInput) RegistrationResult {
+	return s.proposeRegistration(ctx, identity, input, draftmutation.Coordinator{})
+}
+
+func (s *Service) proposeRegistration(ctx context.Context, identity Identity, input RegistrationInput, coordinator draftmutation.Coordinator) RegistrationResult {
 	if err := identity.validate(); err != nil {
 		return RegistrationResult{Outcome: operationalOutcome("invalid-request", err)}
 	}
@@ -187,10 +191,14 @@ func (s *Service) ProposeRegistration(ctx context.Context, identity Identity, in
 		return RegistrationResult{Outcome: verdictOutcome("direct-draft-unreconciled", err.Error())}
 	}
 	oldCapabilities, capabilitiesExist := proposed[capabilitiesPath]
-	if err := writeProposal(ctx, identity.CheckoutRoot, draftmutation.Coordinator{}, []proposalFile{
+	guard := &proposalArtifactSetGuard{experimentPath: review.Packet.ExperimentPath, digest: review.ProposedArtifactDigest}
+	if err := writeProposal(ctx, identity.CheckoutRoot, coordinator, []proposalFile{
 		{path: capabilitiesPath, old: oldCapabilities, oldExists: capabilitiesExist, new: capabilitiesBytes},
 		{path: definitionPath, old: definitionBytes, oldExists: true, new: lockedBytes},
-	}, provenanceFile); err != nil {
+	}, provenanceFile, guard); err != nil {
+		if errors.Is(err, errProposalArtifactSetChanged) {
+			return RegistrationResult{Outcome: verdictOutcome("review-packet-mismatch", "proposal artifact set changed after registration review")}
+		}
 		return RegistrationResult{Outcome: operationalOutcome("proposal-write-failed", err)}
 	}
 	return RegistrationResult{
@@ -231,7 +239,7 @@ func (s *Service) AcceptedRegistration(ctx context.Context, identity Identity) R
 	if definition.Schema != experiment.DefinitionSchemaV2 {
 		return RegistrationResult{Outcome: verdictOutcome("registration-not-accepted", "only definition v2 can carry a Wave 5 registration")}
 	}
-	candidatePaths, err := experiment.ValidateCandidatePatchesFromSource(snapshot.source, snapshot.experimentPath, definition)
+	_, err = experiment.ValidateCandidatePatchesFromSource(snapshot.source, snapshot.experimentPath, definition)
 	if err != nil {
 		return RegistrationResult{Outcome: operationalOutcome("candidate-invalid", err)}
 	}
@@ -249,24 +257,8 @@ func (s *Service) AcceptedRegistration(ctx context.Context, identity Identity) R
 	if rawDigest(capabilitiesBytes) != definition.Evaluator.CapabilitiesDigest {
 		return RegistrationResult{Outcome: operationalOutcome("capabilities-digest-mismatch", fmt.Errorf("accepted capabilities do not match definition"))}
 	}
-	decision, err := s.policy.ResolvePolicy(ctx, clonePolicyRequest(PolicyRequest{
-		CheckoutRoot: identity.CheckoutRoot, ExperimentPath: snapshot.experimentPath, Spike: identity.Spike,
-		Definition: definition, Capabilities: capabilities, CandidatePaths: candidatePaths,
-	}))
-	if err != nil {
-		return RegistrationResult{Outcome: policyResolutionErrorOutcome(err)}
-	}
-	if decision == nil {
-		return RegistrationResult{Outcome: operationalOutcome("policy-resolution-invalid", fmt.Errorf("experimentapp: policy resolver returned nil decision"))}
-	}
-	if _, err := experimentpolicy.Authorize(decision, experimentpolicy.AuthorizationInput{
-		Definition: definition, Capabilities: capabilities, ExperimentPath: snapshot.experimentPath, CandidatePaths: candidatePaths,
-	}); err != nil {
-		return RegistrationResult{Outcome: verdictOutcome("policy-refused", err.Error())}
-	}
-	policyDigest, err := decision.EffectivePolicyDigest()
-	if err != nil {
-		return RegistrationResult{Outcome: operationalOutcome("policy-resolution-invalid", err)}
+	if err := experiment.ValidateDefinitionCapabilities(definition, capabilities); err != nil {
+		return RegistrationResult{Outcome: operationalOutcome("capabilities-invalid", err)}
 	}
 	provenanceBytes, err := fs.ReadFile(snapshot.source, path.Join(snapshot.experimentPath, experiment.ProvenanceFile))
 	if errors.Is(err, fs.ErrNotExist) {
@@ -288,7 +280,8 @@ func (s *Service) AcceptedRegistration(ctx context.Context, identity Identity) R
 	}
 	last := records[len(records)-1]
 	wantIdentity := experiment.ProvenanceExperiment{Spike: identity.Spike, ID: identity.ExperimentID}
-	if last.Operation != experiment.MutationProposeRegistration || last.Experiment != wantIdentity || last.ResultDigest != artifactDigest || last.PolicyDigest != policyDigest || last.Attribution.Unauthenticated {
+	wantPaths := []string{path.Join(snapshot.experimentPath, "evaluator-capabilities.json"), path.Join(snapshot.experimentPath, "experiment.yaml")}
+	if last.Operation != experiment.MutationProposeRegistration || last.Experiment != wantIdentity || last.ResultDigest != artifactDigest || last.Attribution.Unauthenticated || !slices.Equal(last.Paths, wantPaths) {
 		return RegistrationResult{Outcome: verdictOutcome("registration-not-accepted", "accepted lock and provenance do not form one complete registration pair")}
 	}
 	definitionDigest, err := experiment.DefinitionDigest(definition)
@@ -338,10 +331,14 @@ func relativeArtifactFiles(files map[string][]byte, experimentPath string) map[s
 	prefix := experimentPath + "/"
 	relative := map[string][]byte{}
 	for name, data := range files {
-		if name == path.Join(experimentPath, experiment.ProvenanceFile) || len(name) <= len(prefix) || name[:len(prefix)] != prefix {
+		if len(name) <= len(prefix) || name[:len(prefix)] != prefix {
 			continue
 		}
-		relative[name[len(prefix):]] = data
+		relativePath := name[len(prefix):]
+		if !isMutationArtifact(relativePath) {
+			continue
+		}
+		relative[relativePath] = data
 	}
 	return relative
 }

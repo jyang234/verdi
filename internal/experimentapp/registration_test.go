@@ -1,7 +1,9 @@
 package experimentapp
 
 import (
+	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
@@ -9,6 +11,7 @@ import (
 	"sort"
 	"testing"
 
+	"github.com/jyang234/verdi/internal/draftmutation"
 	"github.com/jyang234/verdi/internal/experiment"
 	"github.com/jyang234/verdi/internal/governanceprincipal"
 )
@@ -116,6 +119,163 @@ func TestRegistrationRequiresSealedHumanExactPacketAndAcceptedPair(t *testing.T)
 	accepted = service.AcceptedRegistration(context.Background(), humanIdentity)
 	if accepted.Outcome.Classification != ClassificationClean || !accepted.Accepted || accepted.DefinitionDigest != proposal.DefinitionDigest {
 		t.Fatalf("AcceptedRegistration(accepted pair) = %+v", accepted)
+	}
+}
+
+func TestRegistrationRefusesArtifactSetChangeInsideWriterLock(t *testing.T) {
+	root, service := mutationTestService(t)
+	identity := testIdentity(t, root, "request-path-v2")
+	identity.Actor = authenticatedHuman(t)
+	review := service.ReviewRegistration(context.Background(), identity)
+	if review.Outcome.Classification != ClassificationClean {
+		t.Fatalf("ReviewRegistration() outcome = %+v", review.Outcome)
+	}
+	experimentDir := filepath.Dir(mutationDefinitionPath(root))
+	definitionBefore := mustReadFile(t, mutationDefinitionPath(root))
+	injectedPath := filepath.Join(experimentDir, "registration-note.md")
+	coordinator := draftmutation.Coordinator{After: func(step string) error {
+		if step != stepProposalWriterLocked {
+			return nil
+		}
+		return os.WriteFile(injectedPath, []byte("changed after review\n"), 0o644)
+	}}
+
+	result := service.proposeRegistration(context.Background(), identity, RegistrationInput{ReviewPacketDigest: review.PacketDigest}, coordinator)
+	if result.Outcome.Classification != ClassificationVerdict || result.Outcome.Code != "review-packet-mismatch" {
+		t.Fatalf("ProposeRegistration(concurrent artifact) outcome = %+v", result.Outcome)
+	}
+	if got := mustReadFile(t, mutationDefinitionPath(root)); !bytes.Equal(got, definitionBefore) {
+		t.Fatalf("registration changed definition after packet race")
+	}
+	for _, name := range []string{"evaluator-capabilities.json", experiment.ProvenanceFile} {
+		if _, err := os.Stat(filepath.Join(experimentDir, name)); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("registration wrote %s after packet race: %v", name, err)
+		}
+	}
+}
+
+func TestRegistrationAcceptedTreeDoesNotResolveWorktreePolicy(t *testing.T) {
+	root, service := mutationTestService(t)
+	identity := testIdentity(t, root, "request-path-v2")
+	identity.Actor = authenticatedHuman(t)
+	review := service.ReviewRegistration(context.Background(), identity)
+	proposal := service.ProposeRegistration(context.Background(), identity, RegistrationInput{ReviewPacketDigest: review.PacketDigest})
+	if proposal.Outcome.Classification != ClassificationClean {
+		t.Fatalf("ProposeRegistration() outcome = %+v", proposal.Outcome)
+	}
+	service.git = gitFromExperimentDir(t, root, "request-path-v2")
+	divergentPolicy := &fakePolicyResolver{err: errors.New("divergent worktree policy must not be consulted")}
+	service.policy = divergentPolicy
+
+	accepted := service.AcceptedRegistration(context.Background(), identity)
+	if accepted.Outcome.Classification != ClassificationClean || !accepted.Accepted {
+		t.Fatalf("AcceptedRegistration() = %+v", accepted)
+	}
+	if divergentPolicy.calls != 0 {
+		t.Fatalf("AcceptedRegistration() policy calls = %d, want 0", divergentPolicy.calls)
+	}
+}
+
+func TestDirectEditReconciliationPreservesMergedTypedHistory(t *testing.T) {
+	root, service := mutationTestService(t)
+	definitionPath := mutationDefinitionPath(root)
+	original := mustReadFile(t, definitionPath)
+	updated := bytes.Replace(original, []byte("#oq-cache\n"), []byte("#oq-merged\n"), 1)
+	mutation := service.DraftDefinition(context.Background(), testIdentity(t, root, "request-path-v2"), DraftDefinitionInput{DefinitionBytes: updated})
+	if mutation.Outcome.Classification != ClassificationClean {
+		t.Fatalf("DraftDefinition() outcome = %+v", mutation.Outcome)
+	}
+	acceptedProvenance := mustReadFile(t, filepath.Join(filepath.Dir(definitionPath), experiment.ProvenanceFile))
+	service.git = gitFromExperimentDir(t, root, "request-path-v2")
+	if err := os.WriteFile(filepath.Join(filepath.Dir(definitionPath), "direct-note.txt"), []byte("direct edit\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	identity := testIdentity(t, root, "request-path-v2")
+	identity.Actor = authenticatedHuman(t)
+
+	reconciled := service.ReconcileDraft(context.Background(), identity)
+	if reconciled.Outcome.Classification != ClassificationClean {
+		t.Fatalf("ReconcileDraft(merged history) outcome = %+v", reconciled.Outcome)
+	}
+	provenance := mustReadFile(t, filepath.Join(filepath.Dir(definitionPath), experiment.ProvenanceFile))
+	if !bytes.HasPrefix(provenance, acceptedProvenance) {
+		t.Fatalf("reconciliation did not preserve accepted provenance prefix")
+	}
+	records := mutationProvenance(t, root)
+	if len(records) != 2 || records[1].PreviousDigest != records[0].ResultDigest || records[1].ResultDigest != reconciled.ArtifactDigest {
+		t.Fatalf("reconciled provenance = %+v", records)
+	}
+}
+
+func TestDirectEditReconciliationAllowsHistoricalPolicyEvolution(t *testing.T) {
+	root, service := mutationTestService(t)
+	definitionPath := mutationDefinitionPath(root)
+	original := mustReadFile(t, definitionPath)
+	updated := bytes.Replace(original, []byte("#oq-cache\n"), []byte("#oq-old-policy\n"), 1)
+	mutation := service.DraftDefinition(context.Background(), testIdentity(t, root, "request-path-v2"), DraftDefinitionInput{DefinitionBytes: updated})
+	if mutation.Outcome.Classification != ClassificationClean {
+		t.Fatalf("DraftDefinition() outcome = %+v", mutation.Outcome)
+	}
+	records := mutationProvenance(t, root)
+	records[0].PolicyDigest = rawDigest([]byte("historical policy"))
+	if err := records[0].Seal(); err != nil {
+		t.Fatal(err)
+	}
+	historical, err := experiment.EncodeProvenanceRecord(records[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	provenancePath := filepath.Join(filepath.Dir(definitionPath), experiment.ProvenanceFile)
+	if err := os.WriteFile(provenancePath, historical, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	service.git = gitFromExperimentDir(t, root, "request-path-v2")
+	if err := os.WriteFile(filepath.Join(filepath.Dir(definitionPath), "direct-note.txt"), []byte("direct edit\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	identity := testIdentity(t, root, "request-path-v2")
+	identity.Actor = authenticatedHuman(t)
+
+	reconciled := service.ReconcileDraft(context.Background(), identity)
+	if reconciled.Outcome.Classification != ClassificationClean {
+		t.Fatalf("ReconcileDraft(policy evolution) outcome = %+v", reconciled.Outcome)
+	}
+	reconciledRecords := mutationProvenance(t, root)
+	currentPolicyDigest, err := resolveTestPolicy(t).EffectivePolicyDigest()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(reconciledRecords) != 2 || reconciledRecords[0].PolicyDigest == currentPolicyDigest || reconciledRecords[1].PolicyDigest != currentPolicyDigest {
+		t.Fatalf("policy-evolved provenance = %+v", reconciledRecords)
+	}
+}
+
+func TestRegistrationReviewRejectsAlteredAcceptedHistory(t *testing.T) {
+	root, service := mutationTestService(t)
+	definitionPath := mutationDefinitionPath(root)
+	original := mustReadFile(t, definitionPath)
+	updated := bytes.Replace(original, []byte("#oq-cache\n"), []byte("#oq-accepted-history\n"), 1)
+	mutation := service.DraftDefinition(context.Background(), testIdentity(t, root, "request-path-v2"), DraftDefinitionInput{DefinitionBytes: updated})
+	if mutation.Outcome.Classification != ClassificationClean {
+		t.Fatalf("DraftDefinition() outcome = %+v", mutation.Outcome)
+	}
+	service.git = gitFromExperimentDir(t, root, "request-path-v2")
+	records := mutationProvenance(t, root)
+	records[0].PolicyDigest = rawDigest([]byte("altered history"))
+	if err := records[0].Seal(); err != nil {
+		t.Fatal(err)
+	}
+	altered, err := experiment.EncodeProvenanceRecord(records[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(filepath.Dir(definitionPath), experiment.ProvenanceFile), altered, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	review := service.ReviewRegistration(context.Background(), testIdentity(t, root, "request-path-v2"))
+	if review.Outcome.Classification != ClassificationVerdict || review.Outcome.Code != "direct-draft-unreconciled" {
+		t.Fatalf("ReviewRegistration(altered accepted history) outcome = %+v", review.Outcome)
 	}
 }
 
