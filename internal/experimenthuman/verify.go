@@ -61,14 +61,14 @@ func verifyWith(ctx context.Context, current ChallengeFacts, challengeBytes, sig
 	if err != nil {
 		return Verification{}, err
 	}
-	if challenge != expected {
-		return verdict(governanceprincipal.ResolutionViolated, ReasonHumanChallengeStale), nil
-	}
 	if signature == nil || len(signature) == 0 {
 		return verdict(governanceprincipal.ResolutionUnproven, ReasonHumanProofMissing), nil
 	}
 	if len(signature) != ed25519.SignatureSize {
 		return Verification{}, fmt.Errorf("experimenthuman: detached Ed25519 signature is %d bytes, want %d", len(signature), ed25519.SignatureSize)
+	}
+	if challenge != expected {
+		return verdict(governanceprincipal.ResolutionViolated, ReasonHumanChallengeStale), nil
 	}
 	if accepted.Source == nil {
 		return Verification{}, fmt.Errorf("experimenthuman: accepted authority source is nil")

@@ -110,6 +110,7 @@ func TestHumanProofVerdictAndOperationalClassification(t *testing.T) {
 		authority AcceptedAuthority
 	}{
 		{"wrong proof length", facts, challengeBytes, signature[:63], authority},
+		{"wrong proof length with stale challenge", stale, challengeBytes, signature[:63], authority},
 		{"noncanonical challenge", facts, append([]byte(" "), challengeBytes...), signature, authority},
 		{"accepted tree mismatch", facts, challengeBytes, signature, AcceptedAuthority{Head: "dddddddddddddddddddddddddddddddddddddddd", Source: authority.Source}},
 		{"policy load failure", facts, challengeBytes, signature, AcceptedAuthority{Head: facts.AcceptedHEAD, Source: fstest.MapFS{}}},
