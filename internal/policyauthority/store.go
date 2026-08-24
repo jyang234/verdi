@@ -1,11 +1,13 @@
 package policyauthority
 
 import (
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
-	"path/filepath"
+	"path"
 	"sort"
+	"strings"
 
 	"github.com/jyang234/verdi/internal/policyartifact"
 )
@@ -62,28 +64,39 @@ type Store struct {
 // or cross-validation failure is returned naming the offending artifact
 // and field.
 func Load(root string) (*Store, error) {
-	policyDir := filepath.Join(root, ".verdi", "policy")
-	info, err := os.Lstat(policyDir)
+	s, err := LoadFromSource(os.DirFS(root))
 	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, fmt.Errorf("policyauthority: %w", ErrNotAdopted)
-		}
-		return nil, fmt.Errorf("policyauthority: statting .verdi/policy: %w", err)
+		return nil, err
 	}
-	if info.Mode()&fs.ModeSymlink != 0 {
+	s.Root = root
+	return s, nil
+}
+
+// LoadFromSource loads the constitution store from a repository-rooted,
+// read-only source. It is the single decoder and cross-validation path used
+// by both Load's filesystem adapter and exact accepted-tree consumers.
+func LoadFromSource(source fs.FS) (*Store, error) {
+	if source == nil {
+		return nil, fmt.Errorf("policyauthority: source is nil")
+	}
+	const policyDir = ".verdi/policy"
+	entry, err := policyRootEntry(source)
+	if err != nil {
+		return nil, err
+	}
+	if entry.Type()&fs.ModeSymlink != 0 {
 		return nil, fmt.Errorf("policyauthority: .verdi/policy is a symlink; the constitution store root must be a directory")
 	}
-	if !info.IsDir() {
+	if !entry.IsDir() {
 		return nil, fmt.Errorf("policyauthority: .verdi/policy exists but is not a directory")
 	}
 
-	fileRels, err := walkPolicyDir(policyDir)
+	fileRels, err := walkPolicyDir(source, policyDir)
 	if err != nil {
 		return nil, err
 	}
 
 	s := &Store{
-		Root:         root,
 		Policies:     map[string]*policyartifact.Policy{},
 		Overlays:     map[string]*policyartifact.Overlay{},
 		Exemptions:   map[string]*policyartifact.Exemption{},
@@ -97,7 +110,7 @@ func Load(root string) (*Store, error) {
 		if err != nil {
 			return nil, fmt.Errorf("policyauthority: %w", err)
 		}
-		data, err := os.ReadFile(filepath.Join(policyDir, filepath.FromSlash(rel)))
+		data, err := fs.ReadFile(source, path.Join(policyDir, rel))
 		if err != nil {
 			return nil, fmt.Errorf("policyauthority: reading %s: %w", rel, err)
 		}
@@ -182,7 +195,7 @@ func Load(root string) (*Store, error) {
 		if err != nil {
 			return nil, fmt.Errorf("policyauthority: %w", err)
 		}
-		data, err := os.ReadFile(filepath.Join(policyDir, filepath.FromSlash(rel)))
+		data, err := fs.ReadFile(source, path.Join(policyDir, rel))
 		if err != nil {
 			return nil, fmt.Errorf("policyauthority: reading %s: %w", rel, err)
 		}
@@ -204,27 +217,39 @@ func Load(root string) (*Store, error) {
 	return s, nil
 }
 
+func policyRootEntry(source fs.FS) (fs.DirEntry, error) {
+	entries, err := fs.ReadDir(source, ".verdi")
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil, fmt.Errorf("policyauthority: %w", ErrNotAdopted)
+		}
+		return nil, fmt.Errorf("policyauthority: reading .verdi: %w", err)
+	}
+	for _, entry := range entries {
+		if entry.Name() == "policy" {
+			return entry, nil
+		}
+	}
+	return nil, fmt.Errorf("policyauthority: %w", ErrNotAdopted)
+}
+
 // walkPolicyDir returns the sorted, root-relative slash paths of every
 // FILE under policyDir, failing closed on any directory directly or
-// transitively under policyDir whose own path is not one of the five
+// transitively under policyDir whose own path is not one of the six
 // known directory names (an empty unrecognized directory carries no file
 // for policyartifact.ClassifyPolicyPath to reject, so Load must check
 // directories itself).
-func walkPolicyDir(policyDir string) ([]string, error) {
+func walkPolicyDir(source fs.FS, policyDir string) ([]string, error) {
 	var files []string
-	err := filepath.WalkDir(policyDir, func(path string, d fs.DirEntry, err error) error {
+	err := fs.WalkDir(source, policyDir, func(name string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
-		if path == policyDir {
+		if name == policyDir {
 			return nil
 		}
-		rel, rerr := filepath.Rel(policyDir, path)
-		if rerr != nil {
-			return rerr
-		}
-		rel = filepath.ToSlash(rel)
-		// A symlink is never store content. filepath.WalkDir does not
+		rel := strings.TrimPrefix(name, policyDir+"/")
+		// A symlink is never store content. fs.WalkDir does not
 		// follow links, so a linked artifact would otherwise be read
 		// through its target: content outside the Git-governed store, or
 		// content that resolves differently on another checkout, would
