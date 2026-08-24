@@ -8,8 +8,10 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 
+	"github.com/jyang234/verdi/internal/execworkspace"
 	"github.com/jyang234/verdi/internal/experiment"
 	"github.com/jyang234/verdi/internal/experimentpolicy"
 	"github.com/jyang234/verdi/internal/experimentrun"
@@ -18,6 +20,7 @@ import (
 type recordedExecutionCall struct {
 	request       experimentrun.StartRequest
 	authorization experimentrun.ExecutionAuthorization
+	bindings      experimentrun.InputBindings
 }
 
 type recordingExecutionRunner struct {
@@ -28,14 +31,14 @@ type recordingExecutionRunner struct {
 	write   bool
 }
 
-func (r *recordingExecutionRunner) Start(_ context.Context, request experimentrun.StartRequest, authorization experimentrun.ExecutionAuthorization) (experimentrun.StartResult, error) {
-	r.starts = append(r.starts, recordedExecutionCall{request: request, authorization: cloneExecutionAuthorization(authorization)})
+func (r *recordingExecutionRunner) Start(_ context.Context, request experimentrun.StartRequest, authorization experimentrun.ExecutionAuthorization, bindings experimentrun.InputBindings) (experimentrun.StartResult, error) {
+	r.starts = append(r.starts, recordedExecutionCall{request: request, authorization: cloneExecutionAuthorization(authorization), bindings: bindings})
 	return r.result(request)
 }
 
-func (r *recordingExecutionRunner) Resume(_ context.Context, request experimentrun.ResumeRequest, authorization experimentrun.ExecutionAuthorization) (experimentrun.StartResult, error) {
+func (r *recordingExecutionRunner) Resume(_ context.Context, request experimentrun.ResumeRequest, authorization experimentrun.ExecutionAuthorization, bindings experimentrun.InputBindings) (experimentrun.StartResult, error) {
 	start := experimentrun.StartRequest(request)
-	r.resumes = append(r.resumes, recordedExecutionCall{request: start, authorization: cloneExecutionAuthorization(authorization)})
+	r.resumes = append(r.resumes, recordedExecutionCall{request: start, authorization: cloneExecutionAuthorization(authorization), bindings: bindings})
 	return r.result(start)
 }
 
@@ -138,8 +141,8 @@ func TestStartResumeUseAcceptedRegistrationCommitAuthorizationAndExactRun(t *tes
 	provenancePath := filepath.Join(filepath.Dir(mutationDefinitionPath(root)), experiment.ProvenanceFile)
 	provenanceBefore := mustReadFile(t, provenancePath)
 
-	started := service.Start(context.Background(), identity, ExecutionInput{Run: "run-caller-owned"})
-	resumed := service.Resume(context.Background(), identity, ExecutionInput{Run: "run-caller-owned"})
+	started := service.Start(context.Background(), identity, ExecutionInput{Run: "run-caller-owned", Bindings: applicationInputBindings()})
+	resumed := service.Resume(context.Background(), identity, ExecutionInput{Run: "run-caller-owned", Bindings: applicationInputBindings()})
 	if started.Outcome.Classification != ClassificationClean || resumed.Outcome.Classification != ClassificationClean {
 		t.Fatalf("Start/Resume outcomes = %+v / %+v", started.Outcome, resumed.Outcome)
 	}
@@ -188,11 +191,65 @@ func TestStartResumeUseAcceptedRegistrationCommitAuthorizationAndExactRun(t *tes
 	}
 }
 
+func TestExecutionInputBindingStartAndResumeTransportSameDeepCopy(t *testing.T) {
+	runner := &recordingExecutionRunner{}
+	_, service, _, identity := registeredExecutionService(t, runner)
+	bindings := applicationInputBindings()
+
+	started := service.Start(context.Background(), identity, ExecutionInput{Run: "run-start", Bindings: bindings})
+	resumed := service.Resume(context.Background(), identity, ExecutionInput{Run: "run-resume", Bindings: bindings})
+	if started.Outcome.Classification != ClassificationClean || resumed.Outcome.Classification != ClassificationClean {
+		t.Fatalf("Start/Resume outcomes = %+v / %+v", started.Outcome, resumed.Outcome)
+	}
+	if len(runner.starts) != 1 || len(runner.resumes) != 1 {
+		t.Fatalf("runner calls start=%d resume=%d, want one each", len(runner.starts), len(runner.resumes))
+	}
+	if !reflect.DeepEqual(runner.starts[0].bindings, bindings) || !reflect.DeepEqual(runner.resumes[0].bindings, bindings) {
+		t.Fatalf("transported bindings differ: start=%+v resume=%+v want=%+v", runner.starts[0].bindings, runner.resumes[0].bindings, bindings)
+	}
+	bindings.Inputs[0].Path = "mutated-after-call"
+	if runner.starts[0].bindings.Inputs[0].Path == "mutated-after-call" || runner.resumes[0].bindings.Inputs[0].Path == "mutated-after-call" {
+		t.Fatal("execution runner retained an alias to caller-owned bindings")
+	}
+}
+
+func TestRunDelegateInputBindingConstructsBoundResolverWithoutAmbientFallback(t *testing.T) {
+	definition, err := experiment.DecodeDefinition(mustReadFile(t, filepath.Join("testdata", "experiment-v2", "experiment.yaml")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	definition.Lock = nil
+	digest, err := experiment.DefinitionDigest(definition)
+	if err != nil {
+		t.Fatal(err)
+	}
+	definition.Lock = &experiment.Lock{DefinitionDigest: digest}
+	materializer := &countingExecutionMaterializer{}
+	delegate, err := NewRunDelegate(RunDependencies{
+		Materializer: materializer,
+		Versions: experiment.ReceiptVersions{
+			Verdi: "v-test", RecommendationEngine: string(experiment.AlgorithmV1),
+		},
+	})
+	if err != nil {
+		t.Fatalf("NewRunDelegate(): %v", err)
+	}
+	bindings := applicationInputBindings()
+	bindings.Inputs[1].ID = "wrong-workload"
+	_, err = delegate.Start(context.Background(), experimentrun.StartRequest{Definition: definition}, experimentrun.ExecutionAuthorization{}, bindings)
+	if err == nil || !strings.Contains(err.Error(), "workload") {
+		t.Fatalf("RunDelegate.Start() error = %v, want shared bound-resolver identity refusal", err)
+	}
+	if materializer.calls != 0 {
+		t.Fatalf("materializer calls = %d, want no execution before binding refusal", materializer.calls)
+	}
+}
+
 func TestStartRequiresAcceptedLockAndExactWorktreeParityBeforeRunner(t *testing.T) {
 	runner := &recordingExecutionRunner{}
 	root, service := mutationTestService(t)
 	identity := testIdentity(t, root, "request-path-v2")
-	result := service.Start(context.Background(), identity, ExecutionInput{Run: "run-1"})
+	result := service.Start(context.Background(), identity, ExecutionInput{Run: "run-1", Bindings: applicationInputBindings()})
 	if result.Outcome.Classification != ClassificationVerdict || result.Outcome.Code != "registration-not-accepted" || len(runner.starts) != 0 {
 		t.Fatalf("Start(unaccepted) = %+v runner calls=%d", result, len(runner.starts))
 	}
@@ -202,7 +259,7 @@ func TestStartRequiresAcceptedLockAndExactWorktreeParityBeforeRunner(t *testing.
 	if err := os.WriteFile(direct, []byte("changed locked inputs\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	result = service.Start(context.Background(), identity, ExecutionInput{Run: "run-1"})
+	result = service.Start(context.Background(), identity, ExecutionInput{Run: "run-1", Bindings: applicationInputBindings()})
 	if result.Outcome.Classification != ClassificationOperational || result.Outcome.Code != "locked-input-mismatch" || len(runner.starts) != 0 {
 		t.Fatalf("Start(mismatched worktree) = %+v runner calls=%d", result, len(runner.starts))
 	}
@@ -229,9 +286,9 @@ func TestStartResumePreserveVerdictAndOperationalClassification(t *testing.T) {
 			policy.err = tt.policy
 			var result ExecutionResult
 			if tt.resume {
-				result = service.Resume(context.Background(), identity, ExecutionInput{Run: "run-1"})
+				result = service.Resume(context.Background(), identity, ExecutionInput{Run: "run-1", Bindings: applicationInputBindings()})
 			} else {
-				result = service.Start(context.Background(), identity, ExecutionInput{Run: "run-1"})
+				result = service.Start(context.Background(), identity, ExecutionInput{Run: "run-1", Bindings: applicationInputBindings()})
 			}
 			if result.Outcome.Classification != tt.want || result.Outcome.Code != tt.code || result.Outcome.ExitCode() != tt.exit {
 				t.Fatalf("execution outcome = %+v, want %s/%s exit %d", result.Outcome, tt.want, tt.code, tt.exit)
@@ -244,8 +301,35 @@ func TestStartRejectsRunnerRunIdentityDrift(t *testing.T) {
 	runner := &recordingExecutionRunner{}
 	_, service, _, identity := registeredExecutionService(t, runner)
 	runner.err = fmt.Errorf("runner refused caller identity")
-	result := service.Start(context.Background(), identity, ExecutionInput{Run: "run-exact"})
+	result := service.Start(context.Background(), identity, ExecutionInput{Run: "run-exact", Bindings: applicationInputBindings()})
 	if result.Outcome.Classification != ClassificationOperational || result.Outcome.Code != "runner-failed" {
 		t.Fatalf("Start(identity refusal) = %+v", result.Outcome)
+	}
+}
+
+type countingExecutionMaterializer struct {
+	calls int
+}
+
+func (m *countingExecutionMaterializer) Materialize(context.Context, execworkspace.Request) (execworkspace.Result, error) {
+	m.calls++
+	return execworkspace.Result{}, errors.New("unexpected materialization")
+}
+
+func applicationInputBindings() experimentrun.InputBindings {
+	return experimentrun.InputBindings{
+		Schema: experimentrun.InputBindingSchema,
+		Inputs: []experimentrun.InputBinding{
+			{
+				Slot: experimentrun.InputSlotContract, ID: "request-contract",
+				Digest: "sha256:6666666666666666666666666666666666666666666666666666666666666666",
+				Path:   "contracts/request.json",
+			},
+			{
+				Slot: experimentrun.InputSlotWorkload, ID: "request-mix",
+				Digest: "sha256:5555555555555555555555555555555555555555555555555555555555555555",
+				Path:   "inputs/request.json",
+			},
+		},
 	}
 }

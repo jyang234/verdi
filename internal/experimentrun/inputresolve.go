@@ -18,7 +18,27 @@ const environmentRootName = ".verdi-cse-environment"
 // InputResolver resolves a locked artifact reference to the exact protected
 // base-tree file the evaluator receives. It is read-only by contract.
 type InputResolver interface {
-	ResolveExperimentInput(ctx context.Context, root string, ref experiment.ArtifactRef) (ResolvedInput, error)
+	ResolveExperimentInput(ctx context.Context, root string, request ResolveInputRequest) (ResolvedInput, error)
+}
+
+// ResolveInputRequest binds one resolver request to its exact closed slot.
+type ResolveInputRequest struct {
+	Slot InputSlot
+	Ref  experiment.ArtifactRef
+}
+
+// Validate checks both the closed slot and locked artifact identity.
+func (r ResolveInputRequest) Validate() error {
+	if err := r.Slot.Validate(); err != nil {
+		return err
+	}
+	if err := r.Ref.Validate("input resolver request"); err != nil {
+		return err
+	}
+	if strings.HasPrefix(string(r.Slot), fixtureSlotPrefix) && r.Slot != FixtureInputSlot(r.Ref.ID) {
+		return fmt.Errorf("experimentrun: fixture input slot %q does not match requested id %q", r.Slot, r.Ref.ID)
+	}
+	return nil
 }
 
 // ResolvedInput is an InputResolver's proposed locked artifact identity.
@@ -57,8 +77,12 @@ func ResolveInputs(ctx context.Context, resolver InputResolver, root string, def
 		protected[path] = true
 	}
 	seenPaths := map[string]bool{}
-	resolve := func(field string, ref experiment.ArtifactRef) (experiment.ResolvedArtifact, error) {
-		resolved, err := resolver.ResolveExperimentInput(ctx, root, ref)
+	resolve := func(slot InputSlot, field string, ref experiment.ArtifactRef) (experiment.ResolvedArtifact, error) {
+		request := ResolveInputRequest{Slot: slot, Ref: ref}
+		if err := request.Validate(); err != nil {
+			return experiment.ResolvedArtifact{}, fmt.Errorf("%s: %w", field, err)
+		}
+		resolved, err := resolver.ResolveExperimentInput(ctx, root, request)
 		if err != nil {
 			return experiment.ResolvedArtifact{}, fmt.Errorf("%s: %w", field, err)
 		}
@@ -81,18 +105,18 @@ func ResolveInputs(ctx context.Context, resolver InputResolver, root string, def
 		seenPaths[artifact.Path] = true
 		return artifact, nil
 	}
-	workload, err := resolve("workload", def.Workload)
+	workload, err := resolve(InputSlotWorkload, "workload", def.Workload)
 	if err != nil {
 		return ResolvedInputs{}, err
 	}
 	fixtures := make([]experiment.ResolvedArtifact, len(def.Fixtures))
 	for i, fixture := range def.Fixtures {
-		fixtures[i], err = resolve(fmt.Sprintf("fixtures[%d]", i), fixture)
+		fixtures[i], err = resolve(FixtureInputSlot(fixture.ID), fmt.Sprintf("fixtures[%d]", i), fixture)
 		if err != nil {
 			return ResolvedInputs{}, err
 		}
 	}
-	contract, err := resolve("contract", def.Contract)
+	contract, err := resolve(InputSlotContract, "contract", def.Contract)
 	if err != nil {
 		return ResolvedInputs{}, err
 	}

@@ -12,9 +12,11 @@ import (
 	"github.com/jyang234/verdi/internal/experimentrun"
 )
 
-// ExecutionInput identifies the caller-owned durable run identity.
+// ExecutionInput identifies the caller-owned durable run and carries the
+// operation-scoped typed bindings for its locked execution inputs.
 type ExecutionInput struct {
-	Run string
+	Run      string
+	Bindings experimentrun.InputBindings
 }
 
 // ExecutionResult is the application projection of the existing runner's
@@ -30,14 +32,13 @@ type ExecutionResult struct {
 // ExecutionRunner receives the exact already-projected authorization. Its
 // production implementation below creates and delegates to experimentrun.
 type ExecutionRunner interface {
-	Start(context.Context, experimentrun.StartRequest, experimentrun.ExecutionAuthorization) (experimentrun.StartResult, error)
-	Resume(context.Context, experimentrun.ResumeRequest, experimentrun.ExecutionAuthorization) (experimentrun.StartResult, error)
+	Start(context.Context, experimentrun.StartRequest, experimentrun.ExecutionAuthorization, experimentrun.InputBindings) (experimentrun.StartResult, error)
+	Resume(context.Context, experimentrun.ResumeRequest, experimentrun.ExecutionAuthorization, experimentrun.InputBindings) (experimentrun.StartResult, error)
 }
 
 // RunDependencies are the existing experimentrun dependencies other than
 // authorization, which is operation-scoped and injected by this package.
 type RunDependencies struct {
-	Inputs       experimentrun.InputResolver
 	Materializer experimentrun.WorkspaceMaterializer
 	Evaluator    experimentrun.AttemptEvaluator
 	Versions     experiment.ReceiptVersions
@@ -50,8 +51,8 @@ type RunDelegate struct {
 
 // NewRunDelegate validates the non-authority runner composition ports.
 func NewRunDelegate(dependencies RunDependencies) (*RunDelegate, error) {
-	if dependencies.Inputs == nil || dependencies.Materializer == nil {
-		return nil, fmt.Errorf("experimentapp: run input resolver and materializer are required")
+	if dependencies.Materializer == nil {
+		return nil, fmt.Errorf("experimentapp: run materializer is required")
 	}
 	if err := dependencies.Versions.Validate(); err != nil {
 		return nil, fmt.Errorf("experimentapp: run versions: %w", err)
@@ -59,20 +60,24 @@ func NewRunDelegate(dependencies RunDependencies) (*RunDelegate, error) {
 	return &RunDelegate{dependencies: dependencies}, nil
 }
 
-func (r *RunDelegate) service(authorization experimentrun.ExecutionAuthorization) (*experimentrun.Service, error) {
+func (r *RunDelegate) service(authorization experimentrun.ExecutionAuthorization, definition experiment.Definition, bindings experimentrun.InputBindings) (*experimentrun.Service, error) {
 	if r == nil {
 		return nil, fmt.Errorf("experimentapp: run delegate is nil")
 	}
+	inputs, err := experimentrun.NewBoundInputResolver(definition, bindings)
+	if err != nil {
+		return nil, fmt.Errorf("experimentapp: bind execution inputs: %w", err)
+	}
 	return experimentrun.NewService(experimentrun.ServiceDependencies{
 		Authorization: exactAuthorization{authorization: cloneExecutionAuthorization(authorization)},
-		Inputs:        r.dependencies.Inputs, Materializer: r.dependencies.Materializer,
+		Inputs:        inputs, Materializer: r.dependencies.Materializer,
 		Evaluator: r.dependencies.Evaluator, Versions: r.dependencies.Versions,
 	})
 }
 
 // Start injects the exact application authorization and delegates unchanged.
-func (r *RunDelegate) Start(ctx context.Context, request experimentrun.StartRequest, authorization experimentrun.ExecutionAuthorization) (experimentrun.StartResult, error) {
-	runner, err := r.service(authorization)
+func (r *RunDelegate) Start(ctx context.Context, request experimentrun.StartRequest, authorization experimentrun.ExecutionAuthorization, bindings experimentrun.InputBindings) (experimentrun.StartResult, error) {
+	runner, err := r.service(authorization, request.Definition, bindings)
 	if err != nil {
 		return experimentrun.StartResult{}, err
 	}
@@ -80,8 +85,8 @@ func (r *RunDelegate) Start(ctx context.Context, request experimentrun.StartRequ
 }
 
 // Resume injects the exact application authorization and delegates unchanged.
-func (r *RunDelegate) Resume(ctx context.Context, request experimentrun.ResumeRequest, authorization experimentrun.ExecutionAuthorization) (experimentrun.StartResult, error) {
-	runner, err := r.service(authorization)
+func (r *RunDelegate) Resume(ctx context.Context, request experimentrun.ResumeRequest, authorization experimentrun.ExecutionAuthorization, bindings experimentrun.InputBindings) (experimentrun.StartResult, error) {
+	runner, err := r.service(authorization, experimentrun.StartRequest(request).Definition, bindings)
 	if err != nil {
 		return experimentrun.StartResult{}, err
 	}
@@ -188,9 +193,9 @@ func (s *Service) execute(ctx context.Context, identity Identity, input Executio
 	}
 	var execution experimentrun.StartResult
 	if resume {
-		execution, err = s.runner.Resume(ctx, experimentrun.ResumeRequest(request), cloneExecutionAuthorization(authorization))
+		execution, err = s.runner.Resume(ctx, experimentrun.ResumeRequest(request), cloneExecutionAuthorization(authorization), input.Bindings.Clone())
 	} else {
-		execution, err = s.runner.Start(ctx, request, cloneExecutionAuthorization(authorization))
+		execution, err = s.runner.Start(ctx, request, cloneExecutionAuthorization(authorization), input.Bindings.Clone())
 	}
 	if err != nil {
 		return ExecutionResult{Outcome: operationalOutcome("runner-failed", err)}
