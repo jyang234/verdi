@@ -157,6 +157,9 @@ func (s *Service) execute(ctx context.Context, identity Identity, input Executio
 	if err != nil {
 		return ExecutionResult{Outcome: operationalOutcome("accepted-execution-invalid", err)}
 	}
+	if _, err := experimentrun.NewBoundInputResolver(definition, input.Bindings); err != nil {
+		return ExecutionResult{Outcome: operationalOutcome("input-binding-invalid", fmt.Errorf("experimentapp: execution input bindings: %w", err))}
+	}
 	decision, err := s.policy.ResolvePolicy(ctx, clonePolicyRequest(PolicyRequest{
 		CheckoutRoot: identity.CheckoutRoot, ExperimentPath: snapshot.experimentPath,
 		Spike: identity.Spike, AcceptedCommit: snapshot.revision.Head,

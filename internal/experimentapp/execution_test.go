@@ -213,6 +213,72 @@ func TestExecutionInputBindingStartAndResumeTransportSameDeepCopy(t *testing.T) 
 	}
 }
 
+func TestExecutionInputBindingStartAndResumeRejectInvalidBeforeEffects(t *testing.T) {
+	tests := []struct {
+		name       string
+		resume     bool
+		bindings   func() experimentrun.InputBindings
+		wantDetail string
+	}{
+		{
+			name:       "start absent bindings",
+			bindings:   func() experimentrun.InputBindings { return experimentrun.InputBindings{} },
+			wantDetail: "input binding schema",
+		},
+		{
+			name:       "resume absent bindings",
+			resume:     true,
+			bindings:   func() experimentrun.InputBindings { return experimentrun.InputBindings{} },
+			wantDetail: "input binding schema",
+		},
+		{
+			name: "start identity mismatch",
+			bindings: func() experimentrun.InputBindings {
+				bindings := applicationInputBindings()
+				bindings.Inputs[1].ID = "wrong-workload"
+				return bindings
+			},
+			wantDetail: `slot "workload" identity`,
+		},
+		{
+			name:   "resume identity mismatch",
+			resume: true,
+			bindings: func() experimentrun.InputBindings {
+				bindings := applicationInputBindings()
+				bindings.Inputs[1].ID = "wrong-workload"
+				return bindings
+			},
+			wantDetail: `slot "workload" identity`,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			runner := &recordingExecutionRunner{}
+			_, service, policy, identity := registeredExecutionService(t, runner)
+			input := ExecutionInput{Run: "run-binding-refusal", Bindings: tt.bindings()}
+
+			var result ExecutionResult
+			if tt.resume {
+				result = service.Resume(context.Background(), identity, input)
+			} else {
+				result = service.Start(context.Background(), identity, input)
+			}
+			if calls := len(runner.starts) + len(runner.resumes); calls != 0 {
+				t.Errorf("execution runner calls = %d, want zero before input-binding refusal", calls)
+			}
+			if policy.calls != 0 {
+				t.Errorf("policy resolver calls = %d, want zero before input-binding refusal", policy.calls)
+			}
+			if result.Outcome.Classification != ClassificationOperational || result.Outcome.Code != "input-binding-invalid" || result.Outcome.ExitCode() != 2 {
+				t.Errorf("execution outcome = %+v, want operational/input-binding-invalid exit 2", result.Outcome)
+			}
+			if !strings.Contains(result.Outcome.Detail, tt.wantDetail) {
+				t.Errorf("execution detail = %q, want %q", result.Outcome.Detail, tt.wantDetail)
+			}
+		})
+	}
+}
+
 func TestRunDelegateInputBindingConstructsBoundResolverWithoutAmbientFallback(t *testing.T) {
 	definition, err := experiment.DecodeDefinition(mustReadFile(t, filepath.Join("testdata", "experiment-v2", "experiment.yaml")))
 	if err != nil {
