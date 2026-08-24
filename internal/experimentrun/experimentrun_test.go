@@ -115,6 +115,7 @@ func TestResolveAuthorizationFailsClosed(t *testing.T) {
 		AuthorityDigest:   digestText("authority"),
 		GrantBytes:        grantBytes,
 		DeclaredEnv:       map[string]string{"LANG": "C"},
+		ObservationBytes:  4096,
 	}
 
 	if _, err := ResolveAuthorization(context.Background(), staticAuthorization{authorization: base}, def, caps); err != nil {
@@ -127,6 +128,7 @@ func TestResolveAuthorizationFailsClosed(t *testing.T) {
 	}{
 		{name: "mismatched environment policy", mutate: func(a *ExecutionAuthorization, _ *experiment.Capabilities) { a.EnvironmentPolicy = "other-policy" }},
 		{name: "malformed authority digest", mutate: func(a *ExecutionAuthorization, _ *experiment.Capabilities) { a.AuthorityDigest = "unknown" }},
+		{name: "nonpositive observation limit", mutate: func(a *ExecutionAuthorization, _ *experiment.Capabilities) { a.ObservationBytes = 0 }},
 		{name: "noncanonical grant bytes", mutate: func(a *ExecutionAuthorization, _ *experiment.Capabilities) { a.GrantBytes = append(a.GrantBytes, ' ') }},
 		{name: "timeout mismatch", mutate: func(a *ExecutionAuthorization, _ *experiment.Capabilities) {
 			g := testGrants(t, false, "./tools/evaluator", 29)
@@ -685,7 +687,7 @@ func testAuthorization(t *testing.T, def experiment.Definition, network bool) Ex
 	if err != nil {
 		t.Fatal(err)
 	}
-	return ExecutionAuthorization{EnvironmentPolicy: def.Execution.EnvironmentPolicy, AuthorityDigest: digestText("authority"), GrantBytes: bytes, DeclaredEnv: map[string]string{"LANG": "C"}}
+	return ExecutionAuthorization{EnvironmentPolicy: def.Execution.EnvironmentPolicy, AuthorityDigest: digestText("authority"), GrantBytes: bytes, DeclaredEnv: map[string]string{"LANG": "C"}, ObservationBytes: 4096}
 }
 
 func mustResolveAuthorization(t *testing.T, def experiment.Definition, caps experiment.Capabilities, authorization ExecutionAuthorization) AuthorizedExecution {

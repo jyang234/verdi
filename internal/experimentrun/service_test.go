@@ -349,6 +349,11 @@ func TestStartPublishesReceiptBeforeMaterializationAndMeasuredPrefix(t *testing.
 	if len(evaluator.requests) != len(schedule) {
 		t.Fatalf("evaluations = %d, want complete schedule %d", len(evaluator.requests), len(schedule))
 	}
+	for i, input := range evaluator.requests {
+		if input.ResponseLimit != 4096 {
+			t.Fatalf("evaluation %d response limit = %d, want exact authorization cap 4096", i, input.ResponseLimit)
+		}
+	}
 	if len(result.Observations) != len(def.Candidates)*def.Execution.Rounds {
 		t.Fatalf("measured observations = %d, want %d with warmups excluded", len(result.Observations), len(def.Candidates)*def.Execution.Rounds)
 	}
@@ -392,6 +397,25 @@ func TestStartPublishesReceiptBeforeMaterializationAndMeasuredPrefix(t *testing.
 		if _, statErr := os.Lstat(filepath.Join(materialized, environmentRootName)); !errors.Is(statErr, os.ErrNotExist) {
 			t.Fatalf("completed Start left environment root below %q: %v", materialized, statErr)
 		}
+	}
+}
+
+func TestObservationLimitProjectionNeverWeakensHardCeiling(t *testing.T) {
+	tests := []struct {
+		name   string
+		policy int64
+		want   int64
+	}{
+		{name: "below hard ceiling", policy: 4096, want: 4096},
+		{name: "at hard ceiling", policy: experimentevaluator.HardResponseBytes, want: experimentevaluator.HardResponseBytes},
+		{name: "above hard ceiling", policy: experimentevaluator.HardResponseBytes + 1, want: experimentevaluator.HardResponseBytes},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := effectiveObservationLimit(tt.policy); got != tt.want {
+				t.Fatalf("effectiveObservationLimit(%d) = %d, want %d", tt.policy, got, tt.want)
+			}
+		})
 	}
 }
 

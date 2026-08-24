@@ -20,8 +20,8 @@ var (
 	ErrHarnessDeadline = errors.New("experiment evaluator harness deadline exceeded")
 	// ErrContextCancellation identifies cancellation or expiry of the caller's context.
 	ErrContextCancellation = errors.New("experiment evaluator caller context canceled")
-	// ErrStdoutLimit identifies evaluator stdout above the fixed transport ceiling.
-	ErrStdoutLimit = errors.New("experiment evaluator stdout exceeds one MiB")
+	// ErrStdoutLimit identifies evaluator stdout above the effective policy/hard ceiling.
+	ErrStdoutLimit = errors.New("experiment evaluator stdout exceeds effective response limit")
 	// ErrStderrLimit identifies retained evaluator stderr above the fixed transport ceiling.
 	ErrStderrLimit = errors.New("experiment evaluator stderr exceeds one MiB")
 	// ErrObserver identifies an invalid fixed process observation.

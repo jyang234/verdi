@@ -7,8 +7,16 @@ import (
 	"time"
 )
 
-// DefinitionSchema is the only accepted experiment.yaml schema identifier.
-const DefinitionSchema = "verdi.experiment/v1"
+const (
+	// DefinitionSchemaV1 is retained for strict historical decode only.
+	DefinitionSchemaV1 = "verdi.experiment/v1"
+	// DefinitionSchemaV2 is the emitted and registrable Wave 5 schema.
+	DefinitionSchemaV2 = "verdi.experiment/v2"
+
+	// DefinitionSchema preserves the predecessor v1 source API. New writers
+	// must use DefinitionSchemaV2 explicitly.
+	DefinitionSchema = DefinitionSchemaV1
+)
 
 // spikeRe and questionRe are the grammars for a Definition's spike and
 // question references: a spike is a bare "spec/<id>" ref, a question adds
@@ -306,27 +314,46 @@ type Lock struct {
 	DefinitionDigest string `yaml:"definition_digest"`
 }
 
-// Definition is one verdi.experiment/v1 registration artifact (AC-1):
-// the immutable decision contract a human locks before execution counts
-// as evidence.
+// ReproductionRule is the optional immutable run-count rule registered by a
+// v2 definition. It implies no scoring, confidence, environment comparison,
+// retry suppression, or run selection.
+type ReproductionRule struct {
+	MinimumValidRuns int `yaml:"minimum_valid_runs" json:"minimum_valid_runs"`
+}
+
+// Validate requires at least two complete valid result-bearing runs before a
+// unanimous result set may be described as reproduced.
+func (r ReproductionRule) Validate() error {
+	if r.MinimumValidRuns < 2 {
+		return fmt.Errorf("experiment: reproduction.minimum_valid_runs must be >= 2, got %d", r.MinimumValidRuns)
+	}
+	return nil
+}
+
+// Definition is one strict v1 or v2 experiment registration artifact. V1 is
+// decode-only historical compatibility. V2 adds the exact policy class and
+// optional reproduction rule that a human locks before execution counts as
+// evidence.
 type Definition struct {
-	Schema          string           `yaml:"schema"`
-	ID              string           `yaml:"id"`
-	Spike           string           `yaml:"spike"`
-	Question        string           `yaml:"question"`
-	BaseCommit      string           `yaml:"base_commit"`
-	Candidates      []Candidate      `yaml:"candidates"`
-	Evaluator       Evaluator        `yaml:"evaluator"`
-	Workload        ArtifactRef      `yaml:"workload"`
-	Fixtures        []ArtifactRef    `yaml:"fixtures,omitempty"`
-	Contract        ArtifactRef      `yaml:"contract"`
-	Decision        DecisionSpec     `yaml:"decision"`
-	Execution       Execution        `yaml:"execution"`
-	Algorithm       AlgorithmVersion `yaml:"algorithm"`
-	RetentionPolicy string           `yaml:"retention_policy"`
-	Policy          *PolicyRef       `yaml:"policy,omitempty"`
-	ProtectedPaths  []string         `yaml:"protected_paths,omitempty"`
-	Lock            *Lock            `yaml:"lock,omitempty"`
+	Schema          string            `yaml:"schema"`
+	Class           string            `yaml:"class,omitempty"`
+	Reproduction    *ReproductionRule `yaml:"reproduction,omitempty"`
+	ID              string            `yaml:"id"`
+	Spike           string            `yaml:"spike"`
+	Question        string            `yaml:"question"`
+	BaseCommit      string            `yaml:"base_commit"`
+	Candidates      []Candidate       `yaml:"candidates"`
+	Evaluator       Evaluator         `yaml:"evaluator"`
+	Workload        ArtifactRef       `yaml:"workload"`
+	Fixtures        []ArtifactRef     `yaml:"fixtures,omitempty"`
+	Contract        ArtifactRef       `yaml:"contract"`
+	Decision        DecisionSpec      `yaml:"decision"`
+	Execution       Execution         `yaml:"execution"`
+	Algorithm       AlgorithmVersion  `yaml:"algorithm"`
+	RetentionPolicy string            `yaml:"retention_policy"`
+	Policy          *PolicyRef        `yaml:"policy,omitempty"`
+	ProtectedPaths  []string          `yaml:"protected_paths,omitempty"`
+	Lock            *Lock             `yaml:"lock,omitempty"`
 }
 
 // DecodeDefinition strict-decodes raw as an experiment.yaml document and
@@ -341,6 +368,9 @@ func DecodeDefinition(raw []byte) (Definition, error) {
 	if err := decodeStrictYAML(raw, &def); err != nil {
 		return Definition{}, fmt.Errorf("experiment: decoding definition: %w", err)
 	}
+	if err := validateDefinitionFieldPresence(raw, def.Schema); err != nil {
+		return Definition{}, err
+	}
 	if err := def.Validate(); err != nil {
 		return Definition{}, err
 	}
@@ -353,8 +383,25 @@ func DecodeDefinition(raw []byte) (Definition, error) {
 // unique guard ids disjoint from the primary metric id, and unique,
 // well-formed fixture and protected-path lists.
 func (def Definition) Validate() error {
-	if def.Schema != DefinitionSchema {
-		return fmt.Errorf("experiment: unknown definition schema %q, want %q", def.Schema, DefinitionSchema)
+	switch def.Schema {
+	case DefinitionSchemaV1:
+		if def.Class != "" {
+			return fmt.Errorf("experiment: definition v1 forbids class")
+		}
+		if def.Reproduction != nil {
+			return fmt.Errorf("experiment: definition v1 forbids reproduction")
+		}
+	case DefinitionSchemaV2:
+		if err := ValidateID(def.Class); err != nil {
+			return fmt.Errorf("experiment: definition class: %w", err)
+		}
+		if def.Reproduction != nil {
+			if err := def.Reproduction.Validate(); err != nil {
+				return err
+			}
+		}
+	default:
+		return fmt.Errorf("experiment: unknown definition schema %q, want %q or %q", def.Schema, DefinitionSchemaV1, DefinitionSchemaV2)
 	}
 	if err := ValidateID(def.ID); err != nil {
 		return fmt.Errorf("experiment: definition id: %w", err)
@@ -469,5 +516,41 @@ func (def Definition) Validate() error {
 		}
 	}
 
+	return nil
+}
+
+// validateDefinitionFieldPresence distinguishes omitted fields from present
+// zero values. The generic presence view still enters through the package's
+// one strict YAML seam; the typed decode above remains the authority for known
+// fields and values.
+func validateDefinitionFieldPresence(raw []byte, schema string) error {
+	var document map[string]interface{}
+	if err := decodeStrictYAML(raw, &document); err != nil {
+		return fmt.Errorf("experiment: decoding definition presence: %w", err)
+	}
+	if schema == DefinitionSchemaV1 {
+		for _, field := range []string{"class", "reproduction"} {
+			if _, present := document[field]; present {
+				return fmt.Errorf("experiment: definition v1 forbids %s", field)
+			}
+		}
+	}
+	for _, field := range []string{"schema", "class", "reproduction"} {
+		if value, present := document[field]; present && value == nil {
+			return fmt.Errorf("experiment: definition field %s must not be null", field)
+		}
+	}
+	reproduction, present := document["reproduction"]
+	if !present || reproduction == nil {
+		return nil
+	}
+	mapping, ok := reproduction.(map[string]interface{})
+	if !ok {
+		// The typed strict decode reports the concrete type mismatch.
+		return nil
+	}
+	if value, present := mapping["minimum_valid_runs"]; present && value == nil {
+		return fmt.Errorf("experiment: definition field reproduction.minimum_valid_runs must not be null")
+	}
 	return nil
 }

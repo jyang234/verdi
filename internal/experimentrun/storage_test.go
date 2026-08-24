@@ -2,6 +2,7 @@ package experimentrun
 
 import (
 	"bytes"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -11,6 +12,7 @@ import (
 	"github.com/jyang234/verdi/internal/canonjson"
 	"github.com/jyang234/verdi/internal/execworkspace"
 	"github.com/jyang234/verdi/internal/experiment"
+	"github.com/jyang234/verdi/internal/experimentevaluator"
 	"github.com/jyang234/verdi/internal/filelock"
 )
 
@@ -300,7 +302,7 @@ func TestRunStorageAppendObservationPublishesExactPrefix(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := storage.appendObservation(def, schedule, second); err != nil {
+	if err := storage.appendObservation(def, schedule, second, experimentevaluator.HardResponseBytes); err != nil {
 		t.Fatalf("append observation: %v", err)
 	}
 	got, err := os.ReadFile(storage.observationsPath)
@@ -310,6 +312,54 @@ func TestRunStorageAppendObservationPublishesExactPrefix(t *testing.T) {
 	want := append(append([]byte(nil), firstBytes...), secondBytes...)
 	if !bytes.Equal(got, want) {
 		t.Fatalf("observations bytes = %q, want exact prior prefix plus one canonical line %q", got, want)
+	}
+}
+
+func TestObservationLimitRejectsCanonicalObservationBeforeAppend(t *testing.T) {
+	def, schedule := storageDefinition(t)
+	observation := storageObservation(t, def, "run-1", measuredSchedule(schedule)[0])
+	encoded, err := experiment.EncodeObservation(observation)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tests := []struct {
+		name    string
+		limit   int64
+		wantErr bool
+	}{
+		{name: "below limit", limit: int64(len(encoded) + 1)},
+		{name: "at limit", limit: int64(len(encoded))},
+		{name: "above limit", limit: int64(len(encoded) - 1), wantErr: true},
+		{name: "zero limit", limit: 0, wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			root := t.TempDir()
+			storage, err := newRunStorage(root, "experiments/comparison", "run-1")
+			if err != nil {
+				t.Fatal(err)
+			}
+			err = storage.appendObservation(def, schedule, observation, tt.limit)
+			if tt.wantErr {
+				if err == nil || !strings.Contains(err.Error(), "observation byte limit") {
+					t.Fatalf("appendObservation() error = %v, want byte-limit refusal", err)
+				}
+				if _, statErr := os.Stat(storage.observationsPath); !errors.Is(statErr, os.ErrNotExist) {
+					t.Fatalf("refused observation append created or changed file: %v", statErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("appendObservation() error = %v", err)
+			}
+			got, err := os.ReadFile(storage.observationsPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !bytes.Equal(got, encoded) {
+				t.Fatalf("stored bytes = %q, want exact canonical observation %q", got, encoded)
+			}
+		})
 	}
 }
 
@@ -355,7 +405,7 @@ func TestRunStorageAppendObservationBindsEveryRecordToPathRun(t *testing.T) {
 			}
 
 			appendObservation := storageObservation(t, def, test.appendRun, measured[len(test.prefixRuns)])
-			if err := storage.appendObservation(def, schedule, appendObservation); err == nil || !strings.Contains(err.Error(), "run") {
+			if err := storage.appendObservation(def, schedule, appendObservation, experimentevaluator.HardResponseBytes); err == nil || !strings.Contains(err.Error(), "run") {
 				t.Fatalf("appendObservation error = %v, want path-run identity refusal", err)
 			}
 			got, err := readOptionalRegularFile(root, storage.observationsPath)
@@ -385,7 +435,7 @@ func TestRunStorageRejectsBlankOnlyObservationPrefixWithoutMutation(t *testing.T
 	}
 
 	observation := storageObservation(t, def, "run-1", measuredSchedule(schedule)[0])
-	if err := storage.appendObservation(def, schedule, observation); err == nil || !strings.Contains(err.Error(), "zero records") {
+	if err := storage.appendObservation(def, schedule, observation, experimentevaluator.HardResponseBytes); err == nil || !strings.Contains(err.Error(), "zero records") {
 		t.Fatalf("appendObservation error = %v, want nonempty zero-record prefix refusal", err)
 	}
 	got, err := os.ReadFile(storage.observationsPath)
@@ -418,7 +468,7 @@ func TestRunStoragePreservesMeasuredCandidateFailure(t *testing.T) {
 	}}
 	observation.Disclosures = []string{experiment.PeakRSSUnavailableDisclosure}
 
-	if err := storage.appendObservation(def, schedule, observation); err != nil {
+	if err := storage.appendObservation(def, schedule, observation, experimentevaluator.HardResponseBytes); err != nil {
 		t.Fatalf("append candidate failure: %v", err)
 	}
 	data, err := os.ReadFile(storage.observationsPath)
@@ -469,7 +519,7 @@ func TestRunStorageRejectsInvalidObservationPrefixWithoutMutation(t *testing.T) 
 			if err := os.WriteFile(storage.observationsPath, test.existing, 0o600); err != nil {
 				t.Fatal(err)
 			}
-			if err := storage.appendObservation(def, schedule, test.append); err == nil || !strings.Contains(err.Error(), test.want) {
+			if err := storage.appendObservation(def, schedule, test.append, experimentevaluator.HardResponseBytes); err == nil || !strings.Contains(err.Error(), test.want) {
 				t.Fatalf("appendObservation error = %v, want %q", err, test.want)
 			}
 			got, err := os.ReadFile(storage.observationsPath)
@@ -497,7 +547,7 @@ func TestRunStorageConcurrentMeasuredPublicationHasOneWinner(t *testing.T) {
 		go func() {
 			defer wait.Done()
 			<-start
-			errs <- storage.appendObservation(def, schedule, first)
+			errs <- storage.appendObservation(def, schedule, first, experimentevaluator.HardResponseBytes)
 		}()
 	}
 	close(start)
@@ -660,7 +710,7 @@ func TestRunStorageAppendRejectsUnsafePathsWithoutExternalMutation(t *testing.T)
 			def, schedule := storageDefinition(t)
 			observation := storageObservation(t, def, "run-1", measuredSchedule(schedule)[0])
 
-			if err := storage.appendObservation(def, schedule, observation); err == nil {
+			if err := storage.appendObservation(def, schedule, observation, experimentevaluator.HardResponseBytes); err == nil {
 				t.Fatal("appendObservation = nil error for unsafe durable path")
 			}
 			got, err := os.ReadFile(outside)

@@ -62,6 +62,7 @@ func (s *Service) Resume(ctx context.Context, request ResumeRequest) (StartResul
 	if err != nil {
 		return StartResult{}, err
 	}
+	observationLimit := effectiveObservationLimit(authorized.Authorization.ObservationBytes)
 	schedule, err := DeriveSchedule(startRequest.Definition)
 	if err != nil {
 		return StartResult{}, err
@@ -133,7 +134,7 @@ func (s *Service) Resume(ctx context.Context, request ResumeRequest) (StartResul
 		if scheduled.Cycle.Kind != experiment.CycleWarmup {
 			continue
 		}
-		attempt, err := s.observeScheduled(ctx, startRequest, inputs, experimentDigest, candidates[scheduled.Candidate], scheduled)
+		attempt, err := s.observeScheduled(ctx, startRequest, inputs, experimentDigest, candidates[scheduled.Candidate], scheduled, observationLimit)
 		if err != nil {
 			return StartResult{}, err
 		}
@@ -143,11 +144,11 @@ func (s *Service) Resume(ctx context.Context, request ResumeRequest) (StartResul
 	}
 	measured := measuredSchedule(schedule)
 	for _, scheduled := range measured[len(observations):] {
-		attempt, err := s.observeScheduled(ctx, startRequest, inputs, experimentDigest, candidates[scheduled.Candidate], scheduled)
+		attempt, err := s.observeScheduled(ctx, startRequest, inputs, experimentDigest, candidates[scheduled.Candidate], scheduled, observationLimit)
 		if err != nil {
 			return StartResult{}, err
 		}
-		if err := storage.appendObservation(startRequest.Definition, schedule, *attempt.Observation); err != nil {
+		if err := storage.appendObservation(startRequest.Definition, schedule, *attempt.Observation, observationLimit); err != nil {
 			return StartResult{}, err
 		}
 		observations = append(observations, *attempt.Observation)
@@ -159,7 +160,7 @@ func (s *Service) Resume(ctx context.Context, request ResumeRequest) (StartResul
 	return StartResult{Receipt: receipt, Observations: observations, WarmupFailures: warmupFailures, Result: result, ResultDigest: digest}, nil
 }
 
-func (s *Service) observeScheduled(ctx context.Context, request StartRequest, inputs ResolvedInputs, experimentDigest string, candidate *candidatePlan, scheduled ScheduledAttempt) (experimentevaluator.Attempt, error) {
+func (s *Service) observeScheduled(ctx context.Context, request StartRequest, inputs ResolvedInputs, experimentDigest string, candidate *candidatePlan, scheduled ScheduledAttempt, observationLimit int64) (experimentevaluator.Attempt, error) {
 	attempt, err := s.evaluateAttempt(ctx, candidate.profile, experimentevaluator.ObserveInput{
 		Launch: experimentevaluator.Launch{
 			Directory: candidate.workspacePath,
@@ -171,6 +172,7 @@ func (s *Service) observeScheduled(ctx context.Context, request StartRequest, in
 			Candidate: scheduled.Candidate, Cycle: scheduled.Cycle, Workload: inputs.Workload,
 			Fixtures: cloneResolvedArtifacts(inputs.Fixtures), Contract: inputs.Contract,
 		},
+		ResponseLimit: observationLimit,
 	})
 	if err != nil {
 		return experimentevaluator.Attempt{}, fmt.Errorf("experimentrun: evaluate %s %q: %w", scheduled.Cycle.Kind, scheduled.Candidate, err)

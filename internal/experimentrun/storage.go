@@ -197,10 +197,16 @@ func (s runStorage) createReceipt(receipt experiment.ExecutionReceipt) error {
 	})
 }
 
-func (s runStorage) appendObservation(def experiment.Definition, schedule []ScheduledAttempt, observation experiment.Observation) error {
+func (s runStorage) appendObservation(def experiment.Definition, schedule []ScheduledAttempt, observation experiment.Observation, observationLimit int64) error {
 	line, err := experiment.EncodeObservation(observation)
 	if err != nil {
 		return fmt.Errorf("encode observation: %w", err)
+	}
+	if observationLimit <= 0 {
+		return fmt.Errorf("observation byte limit must be > 0, got %d", observationLimit)
+	}
+	if int64(len(line)) > observationLimit {
+		return fmt.Errorf("observation byte limit %d exceeded by canonical observation of %d bytes", observationLimit, len(line))
 	}
 	return s.withWriterLock(func() error {
 		if err := validateStoreFilePath(s.root, s.observationsPath); err != nil {

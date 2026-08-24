@@ -1,0 +1,1 @@
+{"environment":["GOMAXPROCS"],"evaluator_version":"fixture/1.0.0","metrics":[{"direction":"lower","id":"request-latency","type":"duration","unit":"ms"}],"protocol_versions":["verdi.experiment-evaluator/v1","verdi.experiment-observation/v2"],"requires_elevated":false,"requires_network":false,"schema":"verdi.experiment-evaluator-capabilities/v2"}

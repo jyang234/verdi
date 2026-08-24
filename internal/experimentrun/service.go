@@ -144,6 +144,7 @@ func (s *Service) Start(ctx context.Context, request StartRequest) (StartResult,
 	if err != nil {
 		return StartResult{}, err
 	}
+	observationLimit := effectiveObservationLimit(authorized.Authorization.ObservationBytes)
 	schedule, err := DeriveSchedule(request.Definition)
 	if err != nil {
 		return StartResult{}, err
@@ -206,6 +207,7 @@ func (s *Service) Start(ctx context.Context, request StartRequest) (StartResult,
 				Fixtures:         cloneResolvedArtifacts(inputs.Fixtures),
 				Contract:         inputs.Contract,
 			},
+			ResponseLimit: observationLimit,
 		}
 		attempt, err := s.evaluateAttempt(ctx, candidate.profile, observeInput)
 		if err != nil {
@@ -222,7 +224,7 @@ func (s *Service) Start(ctx context.Context, request StartRequest) (StartResult,
 			}
 			continue
 		}
-		if err := storage.appendObservation(request.Definition, schedule, *attempt.Observation); err != nil {
+		if err := storage.appendObservation(request.Definition, schedule, *attempt.Observation, observationLimit); err != nil {
 			return StartResult{}, err
 		}
 		result.Observations = append(result.Observations, *attempt.Observation)
@@ -232,6 +234,13 @@ func (s *Service) Start(ctx context.Context, request StartRequest) (StartResult,
 		return StartResult{}, err
 	}
 	return result, nil
+}
+
+func effectiveObservationLimit(policyLimit int64) int64 {
+	if policyLimit < experimentevaluator.HardResponseBytes {
+		return policyLimit
+	}
+	return experimentevaluator.HardResponseBytes
 }
 
 func cloneResolvedArtifacts(in []experiment.ResolvedArtifact) []experiment.ResolvedArtifact {

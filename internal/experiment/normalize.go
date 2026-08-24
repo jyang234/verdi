@@ -2,6 +2,7 @@ package experiment
 
 import (
 	"fmt"
+	"slices"
 
 	"github.com/jyang234/verdi/internal/canonjson"
 )
@@ -14,22 +15,24 @@ import (
 // including the lock would be circular and would let a lock's mere
 // presence perturb the identity it is supposed to attest to.
 type NormalizedDefinition struct {
-	Schema          string           `json:"schema"`
-	ID              string           `json:"id"`
-	Spike           string           `json:"spike"`
-	Question        string           `json:"question"`
-	BaseCommit      string           `json:"base_commit"`
-	Candidates      []Candidate      `json:"candidates"`
-	Evaluator       Evaluator        `json:"evaluator"`
-	Workload        ArtifactRef      `json:"workload"`
-	Fixtures        []ArtifactRef    `json:"fixtures,omitempty"`
-	Contract        ArtifactRef      `json:"contract"`
-	Decision        DecisionSpec     `json:"decision"`
-	Execution       Execution        `json:"execution"`
-	Algorithm       AlgorithmVersion `json:"algorithm"`
-	RetentionPolicy string           `json:"retention_policy"`
-	Policy          *PolicyRef       `json:"policy,omitempty"`
-	ProtectedPaths  []string         `json:"protected_paths,omitempty"`
+	Schema          string            `json:"schema"`
+	Class           string            `json:"class,omitempty"`
+	Reproduction    *ReproductionRule `json:"reproduction,omitempty"`
+	ID              string            `json:"id"`
+	Spike           string            `json:"spike"`
+	Question        string            `json:"question"`
+	BaseCommit      string            `json:"base_commit"`
+	Candidates      []Candidate       `json:"candidates"`
+	Evaluator       Evaluator         `json:"evaluator"`
+	Workload        ArtifactRef       `json:"workload"`
+	Fixtures        []ArtifactRef     `json:"fixtures,omitempty"`
+	Contract        ArtifactRef       `json:"contract"`
+	Decision        DecisionSpec      `json:"decision"`
+	Execution       Execution         `json:"execution"`
+	Algorithm       AlgorithmVersion  `json:"algorithm"`
+	RetentionPolicy string            `json:"retention_policy"`
+	Policy          *PolicyRef        `json:"policy,omitempty"`
+	ProtectedPaths  []string          `json:"protected_paths,omitempty"`
 }
 
 // NormalizeDefinition validates def and returns its canonical,
@@ -41,24 +44,80 @@ func NormalizeDefinition(def Definition) (NormalizedDefinition, error) {
 	if err := def.Validate(); err != nil {
 		return NormalizedDefinition{}, err
 	}
+	evaluator := def.Evaluator
+	evaluator.Argv = slices.Clone(def.Evaluator.Argv)
+	decision := cloneDecisionSpec(def.Decision)
 	return NormalizedDefinition{
 		Schema:          def.Schema,
+		Class:           def.Class,
+		Reproduction:    cloneReproductionRule(def.Reproduction),
 		ID:              def.ID,
 		Spike:           def.Spike,
 		Question:        def.Question,
 		BaseCommit:      def.BaseCommit,
-		Candidates:      def.Candidates,
-		Evaluator:       def.Evaluator,
+		Candidates:      slices.Clone(def.Candidates),
+		Evaluator:       evaluator,
 		Workload:        def.Workload,
-		Fixtures:        def.Fixtures,
+		Fixtures:        slices.Clone(def.Fixtures),
 		Contract:        def.Contract,
-		Decision:        def.Decision,
+		Decision:        decision,
 		Execution:       def.Execution,
 		Algorithm:       def.Algorithm,
 		RetentionPolicy: def.RetentionPolicy,
-		Policy:          def.Policy,
-		ProtectedPaths:  def.ProtectedPaths,
+		Policy:          clonePolicyRef(def.Policy),
+		ProtectedPaths:  slices.Clone(def.ProtectedPaths),
 	}, nil
+}
+
+func cloneDecisionSpec(decision DecisionSpec) DecisionSpec {
+	cloned := decision
+	cloned.BaselineImprovement = cloneThreshold(decision.BaselineImprovement)
+	cloned.CandidateSeparation = cloneThreshold(decision.CandidateSeparation)
+	cloned.Guards = slices.Clone(decision.Guards)
+	for i := range cloned.Guards {
+		if bound := decision.Guards[i].MaximumRelativeToBaseline; bound != nil {
+			value := *bound
+			cloned.Guards[i].MaximumRelativeToBaseline = &value
+		}
+	}
+	if decision.Variability != nil {
+		value := *decision.Variability
+		cloned.Variability = &value
+	}
+	return cloned
+}
+
+func cloneThreshold(threshold Threshold) Threshold {
+	cloned := threshold
+	if threshold.Relative != nil {
+		value := *threshold.Relative
+		cloned.Relative = &value
+	}
+	if threshold.Absolute != nil {
+		value := *threshold.Absolute
+		cloned.Absolute = &value
+	}
+	return cloned
+}
+
+func clonePolicyRef(policy *PolicyRef) *PolicyRef {
+	if policy == nil {
+		return nil
+	}
+	cloned := *policy
+	if policy.Digest != nil {
+		value := *policy.Digest
+		cloned.Digest = &value
+	}
+	return &cloned
+}
+
+func cloneReproductionRule(rule *ReproductionRule) *ReproductionRule {
+	if rule == nil {
+		return nil
+	}
+	cloned := *rule
+	return &cloned
 }
 
 // DefinitionDigest returns def's immutable experiment identity: the

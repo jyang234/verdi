@@ -1,0 +1,21 @@
+experiment_paths: [.verdi/specs/active/**/experiments/**]
+candidate_paths: [spikes/**]
+classes: [request-path-performance]
+evaluators:
+  - argv0: ./tools/evaluator
+    protocols: [verdi.experiment-evaluator/v1]
+environments:
+  - id: local-isolated-v1
+    grants:
+      schema: verdi.execution-grants/v1
+      grants:
+        - kind: process-execution
+          argv0s: [./tools/evaluator]
+        - kind: timeouts
+          seconds: 30
+    declared_environment: {GOMAXPROCS: "1"}
+limits: {observation_bytes: 262144, retained_artifact_bytes: 8388608}
+trusted_measurement_sources: [evaluator-measured, harness-measured]
+mandatory_guards:
+  - class: request-path-performance
+    guards: [integrity-guard]
