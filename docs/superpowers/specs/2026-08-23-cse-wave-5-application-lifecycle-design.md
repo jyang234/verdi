@@ -448,10 +448,11 @@ operational.
 
 ### Offline human authorization challenge
 
-`reconcile-draft` and `propose-registration` do not borrow an ambient forge
-session, Git author string, operating-system user, request field, or
-credential store. They use one offline, action-bound signed-commit adapter.
-Verdi never reads a private key, invokes a signing command, opens a network
+`reconcile-draft`, `propose-registration`, and Wave 5C
+`propose-ratification` do not borrow an ambient forge session, Git author
+string, operating-system user, request field, Git signature configuration, or
+credential store. They use one offline, action-bound Ed25519 adapter. Verdi
+never reads a private key, invokes a signing command, opens a network
 connection, or asks an agent process to approve a human operation.
 
 The first invocation without `--human-proof` is read-only and returns verdict
@@ -464,55 +465,66 @@ The first invocation without `--human-proof` is read-only and returns verdict
   "spike": "spec/example",
   "experiment_id": "comparison",
   "accepted_head": "0123456789abcdef0123456789abcdef01234567",
-  "proposal_parent": "89abcdef0123456789abcdef0123456789abcdef",
-  "trust_source": "git-signature",
+  "proposal_head": "89abcdef0123456789abcdef0123456789abcdef",
+  "trust_source": "offline-human",
   "input_digest": "sha256:...",
   "proposal_digest": "sha256:..."
 }
 ```
 
-The closed operation vocabulary is `reconcile-draft` and
-`propose-registration`. `input_digest` binds the canonical operation input:
-an empty object for reconciliation and the exact registration-review packet
-digest for registration. `proposal_digest` binds the complete current
-human-authored experiment artifact set; machine evidence remains excluded by
-the same projection that owns mutation provenance. `proposal_parent` is the
-current proposal-branch HEAD before signing, while `accepted_head` remains the
-separately resolved default-branch authority coordinate.
+The closed operation vocabulary is `reconcile-draft`,
+`propose-registration`, and `propose-ratification`. `input_digest` binds the
+canonical operation input: an empty object for reconciliation, the exact
+registration-review packet digest for registration, and the complete typed
+ratification input for ratification. `proposal_digest` binds the complete
+current human-authored experiment artifact set; machine evidence remains
+excluded by the same projection that owns mutation provenance.
+`proposal_head` is the current proposal-branch HEAD at challenge creation and
+proof use, while `accepted_head` remains the separately resolved
+default-branch authority coordinate.
 
-The human saves those exact bytes and manually creates one signed empty commit
-whose message is byte-identical to the challenge. The documented prompt is:
+The selected accepted governance profile must contain an
+`identity-provider` trust source and at least one role-mapping subject for it
+with exact grammar `ed25519:<base64.RawURLEncoding of 32 public-key bytes>`.
+The subject is both the stable kernel subject and the self-contained public
+verification key; no keyring, Git configuration, certificate service, or
+second signer registry is consulted. The human saves the exact canonical
+challenge bytes and manually signs that file with the matching private key.
+The documented OpenSSL example is a prompt, not a Verdi subprocess:
 
 ```bash
-git commit --allow-empty --cleanup=verbatim -S -F <challenge-file>
+openssl pkeyutl -sign -rawin -inkey <private-key.pem> \
+  -in <challenge-file> -out <signature-file>
 ```
 
 Verdi does not run that command. The second identical invocation supplies
-`--human-proof <commit>`. The adapter requires the proof commit to be current
-proposal-branch HEAD, have exactly one parent equal to `proposal_parent`, have
-the same tree as that parent, and carry the exact canonical challenge as its
-message. It verifies the Git signature locally, derives the stable subject
-only from Git's cryptographically verified primary-key fingerprint, and
-requires that exact fingerprint to be named by a role mapping for the chosen
-`signed-commit` trust source in the sealed accepted governance profile. It
-then supplies only the normalized trust fact to the existing
+`--human-proof <signature-file>`. The file must be exactly one raw 64-byte
+Ed25519 signature over the canonical challenge bytes. The adapter loads the
+constitution store from the same exact accepted Git tree as `accepted_head`
+through a shared source-backed `policyauthority` loader, reuses that store's
+cross-validation, obtains a deep-cloned sealed selected profile through one
+owned accessor, and tries only the mapped Ed25519 subjects of the challenge's
+identity-provider source. Exactly one key must verify. It then supplies only
+the normalized trust fact to the existing
 `governanceprincipal.Resolver`; only the kernel may mint the sealed
 `PrincipalResolution` consumed by `experimentapp.NewAuthenticatedHuman`.
 
-The evidence digest is SHA-256 over the proof commit's exact raw object bytes.
-Signer display names, email addresses, commit authors, and caller-provided
-subjects never become identity. Unknown or unmapped fingerprints, invalid
-signatures, a missing proof, or a challenge that no longer matches current
-inputs are verdicts with stable witnesses. Malformed/noncanonical challenge
-bytes, ambiguous commit shape, Git verification failure, unsafe repository
-state, or a broken fact-port contract are operational. A successful proof is
-single-state: either human operation changes the bound proposal digest, so
-replay no longer matches; a no-op/refused operation confers no durable actor
-token or serialized resolver seal.
+The canonical evidence-digest preimage is the exact byte concatenation
+`"verdi.experiment-human-proof/v1\x00" || challenge-bytes || signature-bytes`;
+the trust fact carries lowercase `sha256:` over that preimage. Display names,
+email addresses, commit authors, ambient usernames, and caller-provided
+subjects never become identity. An unknown source, unmapped key, invalid
+signature, missing proof, or challenge that no longer matches current inputs
+is a verdict with stable witnesses. A malformed/noncanonical challenge,
+wrong-length proof, unsafe or ambiguous accepted-tree state, failed exact-tree
+policy loading, or broken fact-port contract is operational. A successful
+proof is single-state: either the human operation changes the bound proposal
+digest, so replay no longer matches, or a no-op/refused operation confers no
+durable actor token or serialized resolver seal.
 
 The JSON and human renderings include the challenge and manual signing prompt
-as data. MCP structurally omits both human operations and never accepts a
-proof commit. This is an authentication adapter only: the application core
+as data. MCP structurally omits all three human operations and never accepts a
+proof. This is an authentication adapter only: the application core
 still owns review, policy, writer locking, provenance, and mutation semantics.
 
 Wave 5B also adds one MCP tool named `experiment`. Its request is a strict
@@ -631,9 +643,10 @@ unit crosses its authority boundary. Required evidence includes:
 - CLI built-binary and live in-process MCP conformance tests, including the
   serialized Wave 5C CLI extension and unchanged agent exclusion;
 - explicit MCP refusal of every human-only operation;
-- offline signed-challenge tests covering exact message/tree/parent/current-
-  HEAD binding, accepted-profile fingerprint mapping, invalid/unavailable
-  signatures, stale inputs, replay, and proof-free agent refusal;
+- offline signed-challenge tests covering exact accepted/proposal HEAD and
+  operation/input/proposal binding, source-backed accepted-profile loading,
+  mapped Ed25519 keys, malformed/invalid signatures, stale inputs, replay, and
+  proof-free agent refusal;
 - registration immutability, read-only unreconciled review, and explicit
   direct-edit reconciliation tests;
 - reproduction tables over zero, incomplete, agreeing, disagreeing,
@@ -681,7 +694,7 @@ orchestration and the Wave 3B handoff:
 | AC-6 mutation provenance | §6 | CSE-specific strict append-only record; read-only detection plus explicit direct-edit reconciliation mutation |
 | DC-2 derived state | §§3–4, 7 | One experiment state algorithm over filesystem or exact-tree byte sources; no new state artifact or preferred-run pointer |
 | DC-7 human-only decisions | §§3, 7–9 | Agent surface structurally omits authority operations |
-| DC-7 human authentication evidence | §8 | Manual signed empty commit binds the exact operation and proposal bytes; accepted-profile fingerprint mapping and the existing kernel mint the actor, while Verdi never handles private credentials |
+| DC-7 human authentication evidence | §8 | Manual detached Ed25519 signature binds the exact operation and proposal bytes; the public key comes from the exact accepted profile and the existing kernel mints the actor, while Verdi never handles private credentials |
 | DC-8 durable reasoning/disposable prototypes | §9 | Capsule first, then workspace release |
 | DC-9 no patch promotion | §§1, 9 | Capsule is evidence only; product source untouched |
 | DC-11 no privileged adapter | §§2, 8, 11 | CLI/MCP parity against one core |

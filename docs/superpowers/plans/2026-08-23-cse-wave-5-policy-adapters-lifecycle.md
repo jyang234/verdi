@@ -344,6 +344,47 @@ go test -race ./internal/experimentapp ./internal/experimentrun -count=1
 
 **Commit:** `Expose experiment execution operations`
 
+## Task 5A: Add the offline human-authorization adapter
+
+**Own:**
+
+- Add `internal/experimenthuman/challenge.go` and focused tests
+- Add `internal/experimenthuman/verify.go` and focused tests
+- Add a source-backed `policyauthority` store loader and a sealed selected-
+  profile accessor by extracting, not duplicating, the existing filesystem
+  loader and cross-validation
+- Add directly covering `internal/policyauthority` tests
+
+**Authority:** design §8; CSE AC-5, DC-7, CO-1–CO-4/CO-7;
+governance-principal fact-port authority; SI-19/SI-143–SI-147.
+
+**RED:** Prove the strict/canonical challenge schema and closed three-operation
+union; exact accepted/proposal HEAD, input, and human-artifact binding;
+source-backed policy-store equivalence; deep-cloned sealed selected profile;
+the exact `ed25519:<base64.RawURLEncoding public key>` mapped-subject grammar;
+64-byte detached-signature verification; exact evidence-digest preimage;
+zero/multiple matching keys; stale/replayed facts; and verdict versus
+operational classification. Tests use generated in-memory Ed25519 keys and
+hermetic accepted-tree fakes, never a keychain, Git config, network, or signing
+subprocess.
+
+```bash
+go test ./internal/experimenthuman ./internal/policyauthority -run 'Test(HumanChallenge|HumanProof|LoadFromSource|SelectedProfile)' -count=1
+```
+
+**GREEN:** Keep challenge/proof validation and trust-fact production in the
+shared adapter package. The adapter receives already-derived proposal facts,
+loads accepted authority only through the shared source-backed store, and
+calls the existing governance resolver. It never constructs an actor,
+interprets roles, signs data, or reads ambient credentials.
+
+```bash
+go test -race ./internal/experimenthuman ./internal/policyauthority -count=1
+go vet ./internal/experimenthuman ./internal/policyauthority
+```
+
+**Commit:** `Verify offline experiment human proofs`
+
 ## Task 6: Add the built-binary CLI adapter
 
 **Serialized registry ownership:** `cmd/verdi` and the CLI inventory are owned
@@ -374,10 +415,10 @@ go test ./cmd/verdi -run 'Test.*Experiment.*BuiltBinary' -count=1
 requests implemented through 5B. Do not predeclare or stub Wave 5C operations,
 and do not implement lifecycle logic in `cmd/verdi`. Human-only operations
 first emit the canonical `verdi.experiment-human-challenge/v1` verdict and
-manual signing prompt; only an exact locally verified proof commit whose
-primary fingerprint is mapped by the sealed accepted profile may produce a
-kernel-sealed human actor. Verdi never signs, reads private-key material, uses
-a keychain/forge session, or accesses the network.
+manual signing prompt; only an exact detached Ed25519 proof verified by Task
+5A against the exact accepted profile may produce a kernel-sealed human actor.
+Verdi never signs, reads private-key material, uses a keychain/forge session,
+or accesses the network.
 
 ```bash
 go test -race ./cmd/verdi -run 'Test.*Experiment' -count=1
@@ -577,7 +618,7 @@ exclusively for this task; do not overlap another registry change.
 - Add built-binary fixtures under `cmd/verdi/testdata/` if needed
 
 **Authority:** design §§3, 8–10; CSE AC-5/AC-7, DC-7/DC-11/DC-16,
-CO-1–CO-4/CO-7; binding 05 CLI surface; SI-145/SI-146.
+CO-1–CO-4/CO-7; binding 05 CLI surface; SI-145–SI-147.
 
 **RED:** Prove the exact Wave 5C `verdi experiment` subcommands for
 ratification proposal, capsule publication, and workspace release/retry;
@@ -593,7 +634,10 @@ go test ./cmd/verdi -run 'Test.*Experiment.*(Ratification|Capsule|Release|Close)
 **GREEN:** Extend the existing `verdi experiment` dispatcher only after Tasks
 8–10 core methods exist. Translate arguments to typed application requests;
 do not duplicate lifecycle, actor, capsule, release, or closure logic in the
-CLI. The MCP union remains byte-for-byte agent-safe and unchanged.
+CLI. `propose-ratification` reuses Task 5A's same challenge/proof flow with its
+complete typed ratification-input digest; no second identity adapter or
+credential path is permitted. The MCP union remains byte-for-byte agent-safe
+and unchanged.
 
 ```bash
 go test -race ./cmd/verdi -run 'Test.*Experiment' -count=1
