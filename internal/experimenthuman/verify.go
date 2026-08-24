@@ -61,7 +61,7 @@ func verifyWith(ctx context.Context, current ChallengeFacts, challengeBytes, sig
 	if err != nil {
 		return Verification{}, err
 	}
-	if signature == nil || len(signature) == 0 {
+	if len(signature) == 0 {
 		return verdict(governanceprincipal.ResolutionUnproven, ReasonHumanProofMissing), nil
 	}
 	if len(signature) != ed25519.SignatureSize {
