@@ -26,7 +26,7 @@ experimentrun, execworkspace, and close seams remain authoritative.
 DC-1–DC-28, CO-1–CO-7; `spec/context-integrity-v2`;
 `spec/execution-workspace`; CSE Wave 5 application/lifecycle design;
 four-feature orchestration Wave 5; SI-12–SI-13, SI-17, SI-30, SI-37,
-SI-40–SI-46, SI-58–SI-63, SI-75–SI-76, SI-126–SI-146.
+SI-40–SI-46, SI-58–SI-63, SI-75–SI-76, SI-126–SI-147.
 
 ## Contents
 
@@ -41,7 +41,7 @@ SI-40–SI-46, SI-58–SI-63, SI-75–SI-76, SI-126–SI-146.
 - Deliver exactly three pull requests: Wave 5A, 5B, and 5C. Rebase each new
   worktree from merged main after its predecessor lands.
 - Do not begin runtime until the independently reviewed planning/authority PR
-  carrying this plan, its design, and SI-139–SI-146 is owner-merged.
+  carrying this plan, its design, and SI-139–SI-147 is owner-merged.
 - Before each task, reread its cited authority and inspect the named predecessor
   APIs. Stop on any authority or public-interface contradiction; do not guess.
 - Use TDD: capture the exact RED, implement the smallest conforming change,
@@ -357,12 +357,14 @@ exclusively for this task.
 - Modify CLI inventory/spec-alignment tests and showcase mappings
 - Add built-binary fixtures under `cmd/verdi/testdata/` if needed
 
-**Authority:** design §§3, 8, 10–11; CSE AC-5, CO-4/CO-7; SI-145.
+**Authority:** design §§3, 8, 10–11; CSE AC-5, CO-4/CO-7;
+SI-145/SI-147.
 
 **RED:** Built-binary tests pin the exact through-5B operation inventory,
 grammar, canonical `--json`, human rendering, stdin/file boundaries where
-applicable, explicit `reconcile-draft`, every operation exit, human actor
-resolution, no output mutation on failure, and legacy usage byte stability.
+applicable, explicit `reconcile-draft`, every operation exit, offline
+signed-challenge actor resolution, exact challenge/proof/current-HEAD binding,
+no output mutation on failure, and legacy usage byte stability.
 
 ```bash
 go test ./cmd/verdi -run 'Test.*Experiment.*BuiltBinary' -count=1
@@ -370,7 +372,12 @@ go test ./cmd/verdi -run 'Test.*Experiment.*BuiltBinary' -count=1
 
 **GREEN:** Add only `verdi experiment`; subcommands translate to typed core
 requests implemented through 5B. Do not predeclare or stub Wave 5C operations,
-and do not implement lifecycle logic in `cmd/verdi`.
+and do not implement lifecycle logic in `cmd/verdi`. Human-only operations
+first emit the canonical `verdi.experiment-human-challenge/v1` verdict and
+manual signing prompt; only an exact locally verified proof commit whose
+primary fingerprint is mapped by the sealed accepted profile may produce a
+kernel-sealed human actor. Verdi never signs, reads private-key material, uses
+a keychain/forge session, or accesses the network.
 
 ```bash
 go test -race ./cmd/verdi -run 'Test.*Experiment' -count=1

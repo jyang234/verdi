@@ -1,7 +1,7 @@
 # CSE Wave 5 Application and Lifecycle Authority Design
 
 **Status:** Owner-approved design; repository authority becomes effective when
-the reviewed commit carrying this document and SI-139 through SI-146 reaches
+the reviewed commit carrying this document and SI-139 through SI-147 reaches
 the configured default branch.
 
 **Planning base:** `8cbb97aa738e34e4703f6d8d57892357b8cf2bd8`
@@ -446,6 +446,75 @@ same typed result. Standard streams and the repository exit contract remain
 unchanged: `0` clean/proven, `1` completed refusal or unproven verdict, `2`
 operational.
 
+### Offline human authorization challenge
+
+`reconcile-draft` and `propose-registration` do not borrow an ambient forge
+session, Git author string, operating-system user, request field, or
+credential store. They use one offline, action-bound signed-commit adapter.
+Verdi never reads a private key, invokes a signing command, opens a network
+connection, or asks an agent process to approve a human operation.
+
+The first invocation without `--human-proof` is read-only and returns verdict
+`human-authorization-required` plus canonical JSON for exactly one challenge:
+
+```json
+{
+  "schema": "verdi.experiment-human-challenge/v1",
+  "operation": "propose-registration",
+  "spike": "spec/example",
+  "experiment_id": "comparison",
+  "accepted_head": "0123456789abcdef0123456789abcdef01234567",
+  "proposal_parent": "89abcdef0123456789abcdef0123456789abcdef",
+  "trust_source": "git-signature",
+  "input_digest": "sha256:...",
+  "proposal_digest": "sha256:..."
+}
+```
+
+The closed operation vocabulary is `reconcile-draft` and
+`propose-registration`. `input_digest` binds the canonical operation input:
+an empty object for reconciliation and the exact registration-review packet
+digest for registration. `proposal_digest` binds the complete current
+human-authored experiment artifact set; machine evidence remains excluded by
+the same projection that owns mutation provenance. `proposal_parent` is the
+current proposal-branch HEAD before signing, while `accepted_head` remains the
+separately resolved default-branch authority coordinate.
+
+The human saves those exact bytes and manually creates one signed empty commit
+whose message is byte-identical to the challenge. The documented prompt is:
+
+```bash
+git commit --allow-empty --cleanup=verbatim -S -F <challenge-file>
+```
+
+Verdi does not run that command. The second identical invocation supplies
+`--human-proof <commit>`. The adapter requires the proof commit to be current
+proposal-branch HEAD, have exactly one parent equal to `proposal_parent`, have
+the same tree as that parent, and carry the exact canonical challenge as its
+message. It verifies the Git signature locally, derives the stable subject
+only from Git's cryptographically verified primary-key fingerprint, and
+requires that exact fingerprint to be named by a role mapping for the chosen
+`signed-commit` trust source in the sealed accepted governance profile. It
+then supplies only the normalized trust fact to the existing
+`governanceprincipal.Resolver`; only the kernel may mint the sealed
+`PrincipalResolution` consumed by `experimentapp.NewAuthenticatedHuman`.
+
+The evidence digest is SHA-256 over the proof commit's exact raw object bytes.
+Signer display names, email addresses, commit authors, and caller-provided
+subjects never become identity. Unknown or unmapped fingerprints, invalid
+signatures, a missing proof, or a challenge that no longer matches current
+inputs are verdicts with stable witnesses. Malformed/noncanonical challenge
+bytes, ambiguous commit shape, Git verification failure, unsafe repository
+state, or a broken fact-port contract are operational. A successful proof is
+single-state: either human operation changes the bound proposal digest, so
+replay no longer matches; a no-op/refused operation confers no durable actor
+token or serialized resolver seal.
+
+The JSON and human renderings include the challenge and manual signing prompt
+as data. MCP structurally omits both human operations and never accepts a
+proof commit. This is an authentication adapter only: the application core
+still owns review, policy, writer locking, provenance, and mutation semantics.
+
 Wave 5B also adds one MCP tool named `experiment`. Its request is a strict
 closed union over the agent-permitted operation subset. This is one typed tool,
 not a free-form command tunnel. It never accepts `propose-registration`,
@@ -562,6 +631,9 @@ unit crosses its authority boundary. Required evidence includes:
 - CLI built-binary and live in-process MCP conformance tests, including the
   serialized Wave 5C CLI extension and unchanged agent exclusion;
 - explicit MCP refusal of every human-only operation;
+- offline signed-challenge tests covering exact message/tree/parent/current-
+  HEAD binding, accepted-profile fingerprint mapping, invalid/unavailable
+  signatures, stale inputs, replay, and proof-free agent refusal;
 - registration immutability, read-only unreconciled review, and explicit
   direct-edit reconciliation tests;
 - reproduction tables over zero, incomplete, agreeing, disagreeing,
@@ -609,6 +681,7 @@ orchestration and the Wave 3B handoff:
 | AC-6 mutation provenance | §6 | CSE-specific strict append-only record; read-only detection plus explicit direct-edit reconciliation mutation |
 | DC-2 derived state | §§3–4, 7 | One experiment state algorithm over filesystem or exact-tree byte sources; no new state artifact or preferred-run pointer |
 | DC-7 human-only decisions | §§3, 7–9 | Agent surface structurally omits authority operations |
+| DC-7 human authentication evidence | §8 | Manual signed empty commit binds the exact operation and proposal bytes; accepted-profile fingerprint mapping and the existing kernel mint the actor, while Verdi never handles private credentials |
 | DC-8 durable reasoning/disposable prototypes | §9 | Capsule first, then workspace release |
 | DC-9 no patch promotion | §§1, 9 | Capsule is evidence only; product source untouched |
 | DC-11 no privileged adapter | §§2, 8, 11 | CLI/MCP parity against one core |
@@ -623,6 +696,6 @@ orchestration and the Wave 3B handoff:
 | Wave 6 CSE workbench | Explicitly omitted in §§1, 8, 11–12 | Deferred unchanged to FABLE-owned Wave 6 |
 | Wave 7 genuine comparison | Explicitly omitted in §12 | Deferred unchanged until Wave 5C lands |
 
-Coverage: **25 of 25 source obligations mapped**. No source capability is
+Coverage: **26 of 26 source obligations mapped**. No source capability is
 silently removed. Candidate-reported corroboration remains the canonical
 unresolved OQ-2 and is intentionally omitted from decision eligibility.
