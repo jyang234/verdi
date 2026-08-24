@@ -413,4 +413,32 @@ func TestMCPShowcaseCoverage(t *testing.T) {
 			t.Fatalf("list_tasks did not return the open agent-task just added (id %s): %+v", addOut.ID, listOut.Tasks)
 		}
 	})
+
+	// mcp:experiment (CSE Wave 5B, design §8; SI-145): the showcase corpus
+	// contains no comparative experiments — a real, disclosed fact about
+	// examples/showcase, the same pattern cli:context's mapping uses — so
+	// the most meaningful real behavior the corpus can demonstrate is the
+	// tool's genuine typed operational refusal for an experiment the
+	// accepted tree does not carry. The same request through the real CLI
+	// binary must produce the byte-identical typed projection (design §8's
+	// adapter-conformance rule), proven here against real showcase content.
+	t.Run("experiment", func(t *testing.T) {
+		t.Setenv("CI_DEFAULT_BRANCH", "main")
+		text, isError := callMCPTool(t, srv, "experiment", map[string]any{
+			"operation": "status", "spike": "spec/stale-decline",
+			"experiment": "showcase-probe", "accepted_head": head,
+		})
+		if !isError || !strings.Contains(text, `"code":"accepted-tree-invalid"`) {
+			t.Fatalf("experiment status against the real showcase store: isError=%v text=%s, want the typed operational no-such-experiment refusal", isError, text)
+		}
+		cliOut, cliErr, cliCode := runBinary(t, root, "experiment", "status",
+			"--spike", "spec/stale-decline", "--experiment", "showcase-probe",
+			"--accepted-head", head, "--json")
+		if cliCode != 2 || cliErr != "" {
+			t.Fatalf("verdi experiment status against the real showcase store: exit %d stderr %q, want the same typed operational refusal", cliCode, cliErr)
+		}
+		if cliOut != text {
+			t.Fatalf("CLI and MCP typed result projections differ over real showcase content:\nCLI: %s\nMCP: %s", cliOut, text)
+		}
+	})
 }

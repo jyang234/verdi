@@ -303,7 +303,7 @@ rows:
 
   - id: 12-mcp-tools
     section: "12"
-    capability: "MCP: nine tools, annotation-only writes, data-never-instructions"
+    capability: "MCP: ten tools — eight knowledge reads, one annotation write, one typed agent experiment gateway — data-never-instructions"
     status: EXISTS
     witnesses:
       - name: TestMCPToolInventory

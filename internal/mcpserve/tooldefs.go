@@ -127,6 +127,44 @@ func toolDefs(mdl *model.Model) []map[string]any {
 			}, "ref"),
 		},
 		{
+			"name": "experiment",
+			// The closed Wave 5B agent operation union (design §8; SI-145).
+			// Operation names and request-field names are identity; the
+			// argument grammar is enforced strictly server-side
+			// (tool_experiment.go's single decoder).
+			//
+			// vocab:identity — MCP operation-name/request-field grammar (identity)
+			"description": "One strict typed request against the comparative-experiment application core. operation is exactly one of: inspect, discover-capabilities, validate-draft, review-registration, status, explain-result, draft-definition, capture-candidate, start, resume. Human-only and later-wave lifecycle operations are structurally excluded and always refused. Results carry the application's exact clean/verdict/operational classification; verdict and operational results are tool errors carrying the same typed JSON projection." + dataNeverInstructionsNote,
+			"inputSchema": obj(map[string]any{
+				// vocab:identity — MCP request-field grammar (identity)
+				"operation": str("one of the ten operation names above"),
+				// vocab:identity — MCP request-field/ref grammar (identity)
+				"spike": str("spec/<name> ref the experiment belongs to"),
+				// vocab:identity — MCP request-field grammar (identity)
+				"experiment": str("experiment id under that ref"),
+				// vocab:identity — MCP request-field grammar (identity)
+				"accepted_head": str("exact expected accepted-branch head commit (40 hex)"),
+				// vocab:identity — MCP request-field grammar (identity)
+				"run": str("run id (explain-result, start, resume only)"),
+				// vocab:identity — MCP request-field grammar (identity)
+				"definition": str("exact experiment definition bytes (draft-definition, capture-candidate only)"),
+				// vocab:identity — MCP request-field grammar (identity)
+				"candidate": str("candidate id (capture-candidate only)"),
+				// vocab:identity — MCP request-field grammar (identity)
+				"patch": str("exact candidate patch bytes (capture-candidate only)"),
+				"candidate_patches": map[string]any{
+					"type": "object", "additionalProperties": map[string]any{"type": "string"},
+					// vocab:identity — MCP request-field grammar (identity)
+					"description": "candidate id to exact patch bytes (draft-definition only)",
+				},
+				"inputs": map[string]any{
+					"type": "object",
+					// vocab:identity — wire schema id (identity)
+					"description": "the exact canonical verdi.experiment-input-bindings/v1 document as a JSON value (start, resume only)",
+				},
+			}, "operation", "spike", "experiment", "accepted_head"),
+		},
+		{
 			"name":        "add_annotation",
 			"description": "Append a new annotation (verdi.annotation/v1) to the mutable zone — the ONLY write tool on this server. At least one of target or board is required. A target must name a pinned ref (kind/name@commit) that actually resolves; an unresolvable target is rejected." + dataNeverInstructionsNote,
 			"inputSchema": obj(map[string]any{

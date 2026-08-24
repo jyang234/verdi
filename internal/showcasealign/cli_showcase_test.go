@@ -1063,3 +1063,55 @@ func TestCLIShowcaseContextCompile(t *testing.T) {
 		t.Fatalf("stderr = %q, want it to contain %q", stderr, contextcompile.ErrNoConstitution.Error())
 	}
 }
+
+// TestCLIShowcaseExperiment (cli:experiment, CSE Wave 5B — design §8,
+// ledger SI-145) drives `verdi experiment status` against the real
+// provisioned examples/showcase store. The showcase corpus contains no
+// comparative experiments at all — a real, disclosed fact about the store,
+// the same pattern cli:context's mapping uses for its own
+// no-constitution refusal — so this proves the real binary's genuine typed
+// operational refusal (exit 2, `accepted-tree-invalid` in the canonical
+// JSON projection on stdout) for an experiment the accepted tree does not
+// carry, over an otherwise well-formed request naming the real
+// spec/stale-decline spike, and mutates nothing. mcp_showcase_test.go's
+// own experiment subtest proves the MCP adapter answers the byte-identical
+// typed projection for this same request.
+func TestCLIShowcaseExperiment(t *testing.T) {
+	t.Setenv("CI_DEFAULT_BRANCH", "main")
+	root := provisionShowcaseStore(t)
+	ctx := context.Background()
+
+	head, err := gitx.RevParse(ctx, root, "HEAD")
+	if err != nil {
+		t.Fatalf("test setup: gitx.RevParse(HEAD): %v", err)
+	}
+	dirtyBefore, err := gitx.StatusDirty(ctx, root)
+	if err != nil {
+		t.Fatalf("test setup: gitx.StatusDirty: %v", err)
+	}
+
+	stdout, stderr, code := runBinary(t, root, "experiment", "status",
+		"--spike", "spec/stale-decline", "--experiment", "showcase-probe",
+		"--accepted-head", head, "--json")
+	if code != 2 || stderr != "" {
+		t.Fatalf("verdi experiment status against the real showcase store: exit %d, want 2\nstdout:\n%s\nstderr:\n%s", code, stdout, stderr)
+	}
+	if !strings.Contains(stdout, `"classification":"operational"`) || !strings.Contains(stdout, `"code":"accepted-tree-invalid"`) {
+		t.Fatalf("stdout = %q, want the typed operational no-such-experiment refusal projection", stdout)
+	}
+
+	headAfter, err := gitx.RevParse(ctx, root, "HEAD")
+	if err != nil {
+		t.Fatalf("gitx.RevParse(HEAD) after: %v", err)
+	}
+	if head != headAfter {
+		t.Fatalf("HEAD changed: before=%s after=%s — a refused experiment read must never mutate the repository", head, headAfter)
+	}
+	dirtyAfter, err := gitx.StatusDirty(ctx, root)
+	if err != nil {
+		t.Fatalf("gitx.StatusDirty after: %v", err)
+	}
+	if dirtyAfter != dirtyBefore {
+		t.Fatalf("working-tree dirty state changed (before=%v after=%v) — a refused experiment read must never mutate the working tree", dirtyBefore, dirtyAfter)
+	}
+}

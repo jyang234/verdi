@@ -373,6 +373,64 @@ func TestStartRejectsRunnerRunIdentityDrift(t *testing.T) {
 	}
 }
 
+// identityDriftExecutionRunner returns a SUCCESSFUL runner result whose
+// receipt or result decision names a different run than the caller asked
+// for — the parked Task 5 Minor: the post-result guard must classify that
+// drift operationally, never surface it as a comparison outcome.
+type identityDriftExecutionRunner struct {
+	driftReceipt  bool
+	driftDecision bool
+}
+
+func (r *identityDriftExecutionRunner) Start(_ context.Context, request experimentrun.StartRequest, _ experimentrun.ExecutionAuthorization, _ experimentrun.InputBindings) (experimentrun.StartResult, error) {
+	return r.result(request)
+}
+
+func (r *identityDriftExecutionRunner) Resume(_ context.Context, request experimentrun.ResumeRequest, _ experimentrun.ExecutionAuthorization, _ experimentrun.InputBindings) (experimentrun.StartResult, error) {
+	return r.result(experimentrun.StartRequest(request))
+}
+
+func (r *identityDriftExecutionRunner) result(request experimentrun.StartRequest) (experimentrun.StartResult, error) {
+	digest, err := experiment.DefinitionDigest(request.Definition)
+	if err != nil {
+		return experimentrun.StartResult{}, err
+	}
+	decisionRun := request.Run
+	if r.driftDecision {
+		decisionRun = request.Run + "-drift"
+	}
+	result := testExecutionResult(experiment.VerdictProvenWinner, decisionRun, digest)
+	resultDigest, err := experiment.ResultDigest(result)
+	if err != nil {
+		return experimentrun.StartResult{}, err
+	}
+	receiptRun := request.Run
+	if r.driftReceipt {
+		receiptRun = request.Run + "-drift"
+	}
+	return experimentrun.StartResult{
+		Receipt: experiment.ExecutionReceipt{Run: receiptRun}, Result: result, ResultDigest: resultDigest,
+	}, nil
+}
+
+func TestExperimentRunnerIdentityDriftIsOperational(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		runner *identityDriftExecutionRunner
+	}{
+		{name: "receipt-run-drift", runner: &identityDriftExecutionRunner{driftReceipt: true}},
+		{name: "decision-run-drift", runner: &identityDriftExecutionRunner{driftDecision: true}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			_, service, _, identity := registeredExecutionService(t, test.runner)
+			result := service.Start(context.Background(), identity, ExecutionInput{Run: "run-exact", Bindings: applicationInputBindings()})
+			if result.Outcome.Classification != ClassificationOperational || result.Outcome.Code != "runner-result-invalid" {
+				t.Fatalf("Start(%s) outcome = %+v, want operational runner-result-invalid", test.name, result.Outcome)
+			}
+		})
+	}
+}
+
 type countingExecutionMaterializer struct {
 	calls int
 }

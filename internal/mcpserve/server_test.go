@@ -128,12 +128,15 @@ func TestServer_ToolsListAndCall(t *testing.T) {
 	listResp := c.call(t, "tools/list", nil)
 	result := listResp["result"].(map[string]any)
 	tools, _ := result["tools"].([]any)
-	if len(tools) != 9 {
-		t.Fatalf("tools/list returned %d tools, want 9: %#v", len(tools), tools)
+	// 05 §MCP server's nine tools plus `experiment` (CSE Wave 5B, design §8,
+	// ledger SI-145 — registered in the same commit as its tooldefs.go row).
+	if len(tools) != 10 {
+		t.Fatalf("tools/list returned %d tools, want 10: %#v", len(tools), tools)
 	}
 	wantNames := map[string]bool{
 		"search_artifacts": true, "get_artifact": true, "get_links": true, "get_matrix": true,
 		"get_context_bundle": true, "list_annotations": true, "list_tasks": true, "get_board": true, "add_annotation": true,
+		"experiment": true,
 	}
 	for _, raw := range tools {
 		def := raw.(map[string]any)
