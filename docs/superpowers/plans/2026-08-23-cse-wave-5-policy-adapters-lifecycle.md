@@ -408,8 +408,11 @@ bindings fail before execution or durable publication.
 go test ./internal/experimentrun ./internal/experimentapp -run 'Test.*InputBinding' -count=1
 ```
 
-**GREEN:** Add one strict/canonical `verdi.experiment-input-bindings/v1` codec
-and operation-scoped resolver in `experimentrun`. Bind `workload`, `contract`,
+**GREEN:** Add one strict canonical-JSON
+`verdi.experiment-input-bindings/v1` codec with the required exact
+`{schema,inputs}` top-level object and operation-scoped resolver in
+`experimentrun`. Reject missing/null/unknown/duplicate fields, trailing data,
+and noncanonical bytes. Bind `workload`, `contract`,
 and `fixture:<fixture-id>` to exact definition references and paths while
 retaining the landed protected-path/raw-byte proof and receipt authority.
 Transport the typed document through `experimentapp`; do not infer paths,

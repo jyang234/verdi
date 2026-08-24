@@ -530,9 +530,14 @@ still owns review, policy, writer locking, provenance, and mutation semantics.
 ### Explicit execution input bindings
 
 `start` and `resume` require one canonical
-`verdi.experiment-input-bindings/v1` document. It contains an explicitly
-present `inputs` array whose entries have exactly `slot`, `id`, `digest`, and
-`path`. The closed slot grammar is `workload`, `contract`, or
+`verdi.experiment-input-bindings/v1` document. Its wire is UTF-8 canonical JSON
+with exactly the required top-level fields `schema` and `inputs`; `schema` is
+the literal `verdi.experiment-input-bindings/v1`, and `inputs` is an explicitly
+present, non-null array whose entries have exactly `slot`, `id`, `digest`, and
+`path`. The strict decoder rejects invalid JSON or UTF-8, missing, null,
+unknown, or duplicate fields at either level, trailing data, and bytes unequal
+to the shared canonical JSON re-encoding. The closed slot grammar is
+`workload`, `contract`, or
 `fixture:<fixture-id>`; the suffix of a fixture slot must equal that fixture's
 locked definition id. Entries are sorted lexically by slot in canonical bytes.
 
@@ -737,6 +742,6 @@ orchestration and the Wave 3B handoff:
 | Wave 6 CSE workbench | Explicitly omitted in §§1, 8, 11–12 | Deferred unchanged to FABLE-owned Wave 6 |
 | Wave 7 genuine comparison | Explicitly omitted in §12 | Deferred unchanged until Wave 5C lands |
 
-Coverage: **27 of 27 source obligations mapped**. No source capability is
+Coverage: **28 of 28 source obligations mapped**. No source capability is
 silently removed. Candidate-reported corroboration remains the canonical
 unresolved OQ-2 and is intentionally omitted from decision eligibility.
