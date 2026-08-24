@@ -1,7 +1,7 @@
 # CSE Wave 5 Application and Lifecycle Authority Design
 
 **Status:** Owner-approved design; repository authority becomes effective when
-the reviewed commit carrying this document and SI-139 through SI-147 reaches
+the reviewed commit carrying this document and SI-139 through SI-148 reaches
 the configured default branch.
 
 **Planning base:** `8cbb97aa738e34e4703f6d8d57892357b8cf2bd8`
@@ -527,6 +527,33 @@ as data. MCP structurally omits all three human operations and never accepts a
 proof. This is an authentication adapter only: the application core
 still owns review, policy, writer locking, provenance, and mutation semantics.
 
+### Explicit execution input bindings
+
+`start` and `resume` require one canonical
+`verdi.experiment-input-bindings/v1` document. It contains an explicitly
+present `inputs` array whose entries have exactly `slot`, `id`, `digest`, and
+`path`. The closed slot grammar is `workload`, `contract`, or
+`fixture:<fixture-id>`; the suffix of a fixture slot must equal that fixture's
+locked definition id. Entries are sorted lexically by slot in canonical bytes.
+
+The document must contain exactly one entry for the workload, exactly one for
+the contract, and exactly one for every fixture, with no other or duplicate
+slot or path. Each id and digest must equal the locked definition
+reference for that slot. Each path uses the existing canonical repository-path
+grammar, must be named by `protected_paths`, and is resolved below the explicit
+execution root. The existing `experimentrun` input proof remains authoritative
+for non-symlink regular-file custody and exact raw-byte SHA-256 parity.
+
+One shared strict codec and bound resolver in `internal/experimentrun` own this
+grammar and validation. The application operation transports the typed binding
+document for that invocation. CLI `start` and `resume` require
+`--inputs <path|->`; the MCP adapter accepts the same typed document. No adapter
+may infer a path from an artifact id, scan protected paths by digest, use an
+ambient mapping, or implement a second binding grammar. This explicit document
+is operation input, not accepted experiment authority, durable run evidence, or
+a new mapping store; the immutable execution receipt continues to bind the
+resolved protected paths and their exact digests.
+
 Wave 5B also adds one MCP tool named `experiment`. Its request is a strict
 closed union over the agent-permitted operation subset. This is one typed tool,
 not a free-form command tunnel. It never accepts `propose-registration`,
@@ -695,6 +722,7 @@ orchestration and the Wave 3B handoff:
 | DC-2 derived state | §§3–4, 7 | One experiment state algorithm over filesystem or exact-tree byte sources; no new state artifact or preferred-run pointer |
 | DC-7 human-only decisions | §§3, 7–9 | Agent surface structurally omits authority operations |
 | DC-7 human authentication evidence | §8 | Manual detached Ed25519 signature binds the exact operation and proposal bytes; the public key comes from the exact accepted profile and the existing kernel mints the actor, while Verdi never handles private credentials |
+| AC-3/AC-4 execution input path custody | §8 | One strict per-operation slot/id/digest/path document feeds the shared runner resolver; raw bytes, protected-path membership, and receipt binding remain with the landed execution proof |
 | DC-8 durable reasoning/disposable prototypes | §9 | Capsule first, then workspace release |
 | DC-9 no patch promotion | §§1, 9 | Capsule is evidence only; product source untouched |
 | DC-11 no privileged adapter | §§2, 8, 11 | CLI/MCP parity against one core |
@@ -709,6 +737,6 @@ orchestration and the Wave 3B handoff:
 | Wave 6 CSE workbench | Explicitly omitted in §§1, 8, 11–12 | Deferred unchanged to FABLE-owned Wave 6 |
 | Wave 7 genuine comparison | Explicitly omitted in §12 | Deferred unchanged until Wave 5C lands |
 
-Coverage: **26 of 26 source obligations mapped**. No source capability is
+Coverage: **27 of 27 source obligations mapped**. No source capability is
 silently removed. Candidate-reported corroboration remains the canonical
 unresolved OQ-2 and is intentionally omitted from decision eligibility.

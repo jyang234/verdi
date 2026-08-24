@@ -26,7 +26,7 @@ experimentrun, execworkspace, and close seams remain authoritative.
 DC-1–DC-28, CO-1–CO-7; `spec/context-integrity-v2`;
 `spec/execution-workspace`; CSE Wave 5 application/lifecycle design;
 four-feature orchestration Wave 5; SI-12–SI-13, SI-17, SI-30, SI-37,
-SI-40–SI-46, SI-58–SI-63, SI-75–SI-76, SI-126–SI-147.
+SI-40–SI-46, SI-58–SI-63, SI-75–SI-76, SI-126–SI-148.
 
 ## Contents
 
@@ -41,7 +41,7 @@ SI-40–SI-46, SI-58–SI-63, SI-75–SI-76, SI-126–SI-147.
 - Deliver exactly three pull requests: Wave 5A, 5B, and 5C. Rebase each new
   worktree from merged main after its predecessor lands.
 - Do not begin runtime until the independently reviewed planning/authority PR
-  carrying this plan, its design, and SI-139–SI-147 is owner-merged.
+  carrying this plan, its design, and SI-139–SI-148 is owner-merged.
 - Before each task, reread its cited authority and inspect the named predecessor
   APIs. Stop on any authority or public-interface contradiction; do not guess.
 - Use TDD: capture the exact RED, implement the smallest conforming change,
@@ -385,6 +385,44 @@ go vet ./internal/experimenthuman ./internal/policyauthority
 
 **Commit:** `Verify offline experiment human proofs`
 
+## Task 5B: Bind execution inputs to explicit repository paths
+
+**Own:**
+
+- Add `internal/experimentrun/inputbinding.go` and focused tests
+- Change the existing `InputResolver` request to include the closed input slot
+  and update its direct callers/tests
+- Modify `internal/experimentapp/execution.go` and focused tests to transport
+  one operation-scoped typed binding document
+
+**Authority:** design §8 explicit execution input bindings; CSE AC-3–AC-5,
+DC-3/DC-13–DC-15, CO-1–CO-4; SI-132/SI-148.
+
+**RED:** Prove no production resolver exists for the accepted definition's
+pathless `{id,digest}` references; identical ids in different roles cannot be
+resolved without a slot; and missing, extra, duplicate, noncanonical,
+identity-mismatched, unprotected, symlink, nonregular, or raw-digest-mismatched
+bindings fail before execution or durable publication.
+
+```bash
+go test ./internal/experimentrun ./internal/experimentapp -run 'Test.*InputBinding' -count=1
+```
+
+**GREEN:** Add one strict/canonical `verdi.experiment-input-bindings/v1` codec
+and operation-scoped resolver in `experimentrun`. Bind `workload`, `contract`,
+and `fixture:<fixture-id>` to exact definition references and paths while
+retaining the landed protected-path/raw-byte proof and receipt authority.
+Transport the typed document through `experimentapp`; do not infer paths,
+search by digest, add a store, or duplicate resolver validation.
+
+```bash
+go test -race ./internal/experimentrun ./internal/experimentapp -run 'Test.*InputBinding' -count=1
+go test -race ./internal/experimentrun ./internal/experimentapp -count=1
+go vet ./internal/experimentrun ./internal/experimentapp
+```
+
+**Commit:** `Bind experiment inputs to explicit paths`
+
 ## Task 6: Add the built-binary CLI adapter
 
 **Serialized registry ownership:** `cmd/verdi` and the CLI inventory are owned
@@ -398,13 +436,14 @@ exclusively for this task.
 - Modify CLI inventory/spec-alignment tests and showcase mappings
 - Add built-binary fixtures under `cmd/verdi/testdata/` if needed
 
-**Authority:** design §§3, 8, 10–11; CSE AC-5, CO-4/CO-7;
-SI-145/SI-147.
+**Authority:** design §§3, 8, 10–11; CSE AC-3–AC-5, CO-1–CO-4/CO-7;
+SI-145/SI-147/SI-148.
 
 **RED:** Built-binary tests pin the exact through-5B operation inventory,
 grammar, canonical `--json`, human rendering, stdin/file boundaries where
 applicable, explicit `reconcile-draft`, every operation exit, offline
 signed-challenge actor resolution, exact challenge/proof/current-HEAD binding,
+required `--inputs <path|->` for start/resume through the shared binding codec,
 no output mutation on failure, and legacy usage byte stability.
 
 ```bash
@@ -418,7 +457,8 @@ first emit the canonical `verdi.experiment-human-challenge/v1` verdict and
 manual signing prompt; only an exact detached Ed25519 proof verified by Task
 5A against the exact accepted profile may produce a kernel-sealed human actor.
 Verdi never signs, reads private-key material, uses a keychain/forge session,
-or accesses the network.
+or accesses the network. It does not infer input paths or implement a binding
+grammar.
 
 ```bash
 go test -race ./cmd/verdi -run 'Test.*Experiment' -count=1
@@ -443,11 +483,12 @@ showcase MCP mappings are owned exclusively for this task.
 - Add `internal/experimentapp/conformance_test.go`
 
 **Authority:** design §§2–3, 8, 10–11; CSE AC-5/AC-6, DC-7/DC-10/DC-11,
-CO-4/CO-7; 05 MCP safety rule; SI-145.
+CO-1–CO-4/CO-7; 05 MCP safety rule; SI-145/SI-148.
 
 **RED:** Prove strict operation union, data-never-instructions description,
 allowed agent operations, explicit refusal of reconciliation and every
 human/release/closure operation, no free-form argv or path escape, and
+strict reuse of the typed input-binding document for start/resume, and
 byte-identical semantic
 results between CLI JSON and MCP for equivalent reads, mutations, execution,
 and failures.
