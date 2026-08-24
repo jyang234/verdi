@@ -43,6 +43,7 @@ var verbPhase = map[string]int{
 	"spec":            21, // merge-signaled spec acceptance, Task 5 — new verb; `verdi spec state SPEC_REF` is the read-only surface over internal/specstate's Git-derived effective-state projection, never a lifecycle mutation
 	"journey":         22, // GLG v3 AC-1 (guided-lifecycle-governance-v3, journey-projection delivery unit) — first GLG runtime verb; `verdi journey <feature-or-story-ref>` is a read-only projection over internal/journey, never a lifecycle mutation
 	"context":         23, // Context Integrity Wave-3 (context-compiler and policy-conflict authority designs, ledger SI-78..SI-122) — `context compile` and `context conflict` are read-only inspection surfaces, mutating nothing but their own explicit --out destination and conflict's existing immutable cache
+	"experiment":      24, // Comparative Spike Experiments Wave 5B — bounded CLI adapter over internal/experimentapp
 }
 
 // vocab:identity — CLI verb names (identity)
@@ -51,7 +52,7 @@ const usage = `usage: verdi <verb> [args...]
 verbs: lint, design, accept, feature, build, align, sync, serve, mcp, matrix,
        rollup, close, disposition, waivers, verify-artifact, dex, gc, gate,
        board, audit, attest, model, init, obligation, waive, spec, journey,
-       context`
+       context, experiment`
 
 // run parses args and returns the exit code per the CLAUDE.md contract:
 // 0 clean / 1 verdict failure / 2 operational error. Phase 1 has no verdicts
@@ -148,6 +149,9 @@ func run(args []string, stderr io.Writer) int {
 	}
 	if verb == "context" {
 		return cmdContext(args[1:], os.Stdin, os.Stdout, stderr)
+	}
+	if verb == "experiment" {
+		return cmdExperiment(args[1:], os.Stdin, os.Stdout, stderr)
 	}
 
 	if phase == 0 {

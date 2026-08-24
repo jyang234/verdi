@@ -100,6 +100,20 @@
 // cmdContext) BEFORE resolving a store root or reading any file, falling
 // straight into the plain default case below — the same safety property
 // model/spec/journey already rely on there.
+//
+// CSE Wave 5B (docs/superpowers/specs/2026-08-23-cse-wave-5-application-
+// lifecycle-design.md §8, ledger SI-145): `experiment` is the bounded CLI
+// adapter over internal/experimentapp — dispatch.go's verbPhase gains an
+// `experiment` key (phase 24) in the same change this inV0 addition
+// rides (the CLI verb inventory is a serialized shared registry; its
+// spec-align row changes in the same commit as the live registration).
+// Some `experiment` operations DO mutate (draft mutation, reconciliation,
+// registration proposal, run execution), but a bare `verdi experiment`
+// (no operation) fails on the closed-grammar usage check alone
+// (cmd/verdi/experiment.go's cmdExperiment) BEFORE resolving a store root
+// or reading any file, falling straight into the plain default case
+// below — the same safety property model/spec/journey/context already
+// rely on there.
 package specalign
 
 import "testing"
@@ -115,7 +129,7 @@ func TestV0CLIVerbInventory(t *testing.T) {
 		"lint", "design", "accept", "feature", "build", "align", "sync",
 		"serve", "mcp", "matrix", "rollup", "dex", "gate", "board", "audit",
 		"close", "gc", "attest", "disposition", "model", "spec", "obligation",
-		"journey", "context",
+		"journey", "context", "experiment",
 	}
 	// PLAN.md §5 scope discipline, verbatim (as amended: `close`/`gc`
 	// graduated to real, round 6): "Explicitly out of v0 (not stubbed —
