@@ -401,7 +401,7 @@ func (experimentToolCapabilityDiscoverer) DiscoverCapabilities(ctx context.Conte
 	if err != nil {
 		return experimentapp.CapabilityDiscovery{}, err
 	}
-	defer os.RemoveAll(envRoot)
+	defer func() { _ = os.RemoveAll(envRoot) }()
 	grants := execworkspace.GrantSet{Grants: []execworkspace.Grant{
 		{Kind: execworkspace.GrantNetwork},
 		{Kind: execworkspace.GrantProcessExecution, Argv0s: []string{request.Definition.Evaluator.Argv[0]}},
