@@ -136,20 +136,33 @@ func conformanceReadTestdata(t *testing.T, name string) string {
 }
 
 // conformanceRepo replicates cmd/verdi's own experiment human-repo fixture
-// (accepted v2 experiment, offline-human Ed25519 profile, /bin/sh evaluator)
+// (accepted v2 experiment, offline-human Ed25519 profile, host-shell-copy
+// evaluator)
 // — test helpers in another package's _test.go files cannot be imported.
 func conformanceRepo(t *testing.T, publicKey ed25519.PublicKey) *fixturegit.Repo {
 	t.Helper()
 	capabilities := conformanceReadTestdata(t, "capabilities.json")
 	definition := conformanceReadTestdata(t, "experiment-v2/experiment.yaml")
-	shellBytes, err := os.ReadFile("/bin/sh")
+	// Bind the fully resolved host shell as the evaluator executable:
+	// /bin/sh is itself a symlink on Linux runners, and the evaluator trust
+	// boundary correctly refuses symlinked executables, so resolve the
+	// chain to the real non-symlink regular executable and bind the digest
+	// of its exact bytes. (A byte-copy at a test-owned path is NOT viable:
+	// macOS kills relocated platform binaries with SIGKILL, witnessed
+	// during the Wave 5B CI correction.) Mirrors cmd/verdi's experiment
+	// fixture builder exactly.
+	shellPath, err := filepath.EvalSymlinks("/bin/sh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	shellBytes, err := os.ReadFile(shellPath)
 	if err != nil {
 		t.Fatal(err)
 	}
 	shellSum := sha256.Sum256(shellBytes)
 	definition = strings.Replace(definition,
 		`  argv: ["./tools/evaluator", "run"]`+"\n"+`  digest: sha256:3333333333333333333333333333333333333333333333333333333333333333`,
-		`  argv: ["/bin/sh", "tools/evaluator.sh", "run"]`+"\n"+`  digest: sha256:`+hex.EncodeToString(shellSum[:]), 1)
+		fmt.Sprintf(`  argv: [%q, "tools/evaluator.sh", "run"]`, shellPath)+"\n"+`  digest: sha256:`+hex.EncodeToString(shellSum[:]), 1)
 	profile := fmt.Sprintf(`---
 schema: verdi.governance-profile/v1
 id: solo-default
@@ -168,7 +181,7 @@ escalation_thresholds: []
 ---
 Hermetic offline-human profile.
 `, base64.RawURLEncoding.EncodeToString(publicKey))
-	policy := strings.ReplaceAll(conformanceReadTestdata(t, "policy/policies/experiment.md"), "./tools/evaluator", "/bin/sh")
+	policy := strings.ReplaceAll(conformanceReadTestdata(t, "policy/policies/experiment.md"), "./tools/evaluator", shellPath)
 	script := "#!/bin/sh\nif [ \"$1\" = describe ]; then\n  printf '%s\\n' '" + strings.TrimSuffix(capabilities, "\n") + "'\n  exit 0\nfi\nexit 2\n"
 	prefix := ".verdi/specs/active/request-path-spike/experiments/request-path-v2/"
 	files := map[string]string{

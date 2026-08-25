@@ -608,13 +608,25 @@ func buildExperimentHumanRepoWithSubjects(t *testing.T, subjects []string) *fixt
 	}
 	capabilities := read("capabilities.json")
 	definition := read("experiment-v2/experiment.yaml")
-	shellBytes, err := os.ReadFile("/bin/sh")
+	// Bind the fully resolved host shell as the evaluator executable:
+	// /bin/sh is itself a symlink on Linux runners, and the evaluator trust
+	// boundary correctly refuses symlinked executables, so resolve the
+	// chain to the real non-symlink regular executable and bind the digest
+	// of its exact bytes. (A byte-copy at a test-owned path is NOT viable:
+	// macOS kills relocated platform binaries with SIGKILL, witnessed
+	// during the Wave 5B CI correction.) Mirrors the conformance fixture
+	// builder exactly.
+	shellPath, err := filepath.EvalSymlinks("/bin/sh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	shellBytes, err := os.ReadFile(shellPath)
 	if err != nil {
 		t.Fatal(err)
 	}
 	definition = strings.Replace(definition,
 		`  argv: ["./tools/evaluator", "run"]`+"\n"+`  digest: sha256:3333333333333333333333333333333333333333333333333333333333333333`,
-		`  argv: ["/bin/sh", "tools/evaluator.sh", "run"]`+"\n"+`  digest: `+experimentRawDigest(shellBytes), 1)
+		fmt.Sprintf(`  argv: [%q, "tools/evaluator.sh", "run"]`, shellPath)+"\n"+`  digest: `+experimentRawDigest(shellBytes), 1)
 	quoted := make([]string, len(subjects))
 	for index, subject := range subjects {
 		quoted[index] = fmt.Sprintf("%q", subject)
@@ -637,7 +649,7 @@ escalation_thresholds: []
 ---
 Hermetic offline-human profile.
 `, strings.Join(quoted, ", "))
-	policy := strings.ReplaceAll(read("policy/policies/experiment.md"), "./tools/evaluator", "/bin/sh")
+	policy := strings.ReplaceAll(read("policy/policies/experiment.md"), "./tools/evaluator", shellPath)
 	script := "#!/bin/sh\nif [ \"$1\" = describe ]; then\n  printf '%s\\n' '" + strings.TrimSuffix(capabilities, "\n") + "'\n  exit 0\nfi\nexit 2\n"
 	prefix := ".verdi/specs/active/request-path-spike/experiments/request-path-v2/"
 	files := map[string]string{
