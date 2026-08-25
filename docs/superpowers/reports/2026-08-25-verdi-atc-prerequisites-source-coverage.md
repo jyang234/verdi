@@ -29,9 +29,9 @@ The source set is closed to:
    §§3–10;
 4. Verdi `spec/context-integrity-v2` AC-4, AC-5, DC-1, DC-2, DC-9 through
    DC-13, DC-16, and CO-1 through CO-6;
-5. the approved 2026-08-25 canonical-home ruling recorded as SI-147.
+5. the approved 2026-08-25 canonical-home ruling recorded as SI-149.
 6. the owner-accepted 2026-08-25 acyclic execution/receipt boundary ruling
-   recorded as SI-157.
+   recorded as SI-159.
 
 Historical ATC revisions are provenance, not active authority, and therefore
 are not promotion sources. The source plan's predicted implementation paths,
@@ -60,7 +60,7 @@ copied into the accepted specifications and are itemized below.
 | 15 | v0.5 §§6–7: R0, correction, R2, countersign sequence and fresh candidate binding | 2 | receipts-review AC-3/AC-4/DC-5 | Only review-context authority promoted; scheduler states stay ATC-owned |
 | 16 | Amendment §3: deterministic Verdi context and runtime dispatch are two separately digest-bound layers | 2 | feature DC-1; sealed-codex DC-3; receipts-review AC-1 | Preserved as separate manifest/projection and dispatch operands |
 | 17 | Amendment §3: minimum authority/data inventory, classified exclusions/opaque rows, no excluded-content reads | 4 | sealed-codex AC-1/co-1/co-2 and DC-3 | Content-minimization and non-reading rule retained verbatim in semantics |
-| 18 | Amendment §4: flight plan read, scoped expansion, child manifest/event, invalidating changes | 4 | sealed-codex AC-2 and DC-2; SI-149 | Conceptual operations fixed as `get_flight_plan` and `request_context` |
+| 18 | Amendment §4: flight plan read, scoped expansion, child manifest/event, invalidating changes | 4 | sealed-codex AC-2 and DC-2; SI-151 | Conceptual operations fixed as `get_flight_plan` and `request_context` |
 | 19 | Amendment §5: project-controlled proof boundary, opaque vendor input, no secrets or hidden-reasoning claim | 3 | feature DC-5; sealed-codex DC-4/co-1; sealed-claude DC-5/co-1 | Provider summaries restricted to non-gating telemetry |
 | 20 | Amendment §6: complete provider-observable activity, normalized events, digest-bound large segments | 3 | feature AC-6; sealed-claude AC-2–AC-4/DC-2/DC-4 and payload union | Closed event vocabulary, strict per-kind bodies, and detail substitution made exact |
 | 21 | Amendment §6: strict decode, identity/sequence, redact, durable append/project/ack, idempotency/gap refusal | 4 | feature DC-6; sealed-codex AC-3/event continuity; sealed-claude AC-2/AC-4/DC-3 | Revision-local source order, cross-revision bridge, and VATC global order explicitly separated |
@@ -72,8 +72,8 @@ copied into the accepted specifications and are itemized below.
 | 27 | Context Integrity v2 AC-5 | 1 | receipts-review implements link plus AC-1–AC-4 | Existing stub fulfilled directly, not copied into a competing feature only |
 | 28 | Context Integrity v2 DC-1, DC-2, DC-9–DC-13, DC-16 | 8 | feature DC-1/DC-5/DC-6; sealed-codex decisions; receipts-review decisions | Harness neutrality, proof boundary, immutability, continuity, trust, review, and channel separation preserved |
 | 29 | Context Integrity v2 CO-1–CO-6 | 6 | feature CO-1–CO-6 and child constraints | Honesty, strictness, determinism, secret safety, prospective changes, and evidence gates retained |
-| 30 | Owner-approved canonical home, dual implements edges, and deterministic tracker refs | 1 | feature DC-2/stubs; story links/story fields; SI-147 | Recorded as conditional authority pending merge |
-| 31 | Owner-accepted acyclic execution/receipt finalization and persistence boundary | 1 | sealed-codex event continuity; receipts-review AC-1/DC-4; sealed-claude DC-3/payload union; SI-157 | Expansion revisions close with child-manifest, final execution closes through execution-result, and the later receipt event carries recoverable canonical receipt bytes that VATC verifies and atomically persists before separately acknowledging outside the receipt's own digest boundary |
+| 30 | Owner-approved canonical home, dual implements edges, and deterministic tracker refs | 1 | feature DC-2/stubs; story links/story fields; SI-149 | Recorded as conditional authority pending merge |
+| 31 | Owner-accepted acyclic execution/receipt finalization and persistence boundary | 1 | sealed-codex event continuity; receipts-review AC-1/DC-4; sealed-claude DC-3/payload union; SI-159 | Expansion revisions close with child-manifest, final execution closes through execution-result, and the later receipt event carries recoverable canonical receipt bytes that VATC verifies and atomically persists before separately acknowledging outside the receipt's own digest boundary |
 
 ## Intentional non-promotions
 
