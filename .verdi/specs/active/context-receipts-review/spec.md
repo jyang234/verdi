@@ -84,12 +84,15 @@ every predecessor bridge before considering the receipt internally complete.
 
 Receipt finalization is deliberately acyclic. The receipt self-digest covers
 the execution array but not the later event that announces that digest. The
-sealed producer emits that `receipt` event only after finalization, and VATC
-returns a strict `receipt_event_ack` that binds the receipt digest and exact
-source/global recorder position. Automated ATC authority requires both a
-proven receipt and this durable acknowledgment. Failure to emit or acknowledge
-the event cannot alter the receipt bytes and leaves the run non-authoritative
-for automation.
+sealed producer emits that `receipt` event only after finalization, carrying
+the canonical receipt bytes through the strict inline-or-segment detail union.
+VATC resolves, strict-decodes, canonicalizes, digest-checks, and atomically
+persists those bytes with the event before returning a strict
+`receipt_event_ack` that binds the receipt digest and exact source/global
+recorder position. Automated ATC authority requires both a proven receipt and
+this durable acknowledgment. Missing, inaccessible, non-canonical, or
+mismatched event detail cannot be acknowledged; failure cannot alter the
+receipt bytes and leaves the run non-authoritative for automation.
 
 ## AC-2
 

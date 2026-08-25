@@ -73,7 +73,7 @@ copied into the accepted specifications and are itemized below.
 | 28 | Context Integrity v2 DC-1, DC-2, DC-9–DC-13, DC-16 | 8 | feature DC-1/DC-5/DC-6; sealed-codex decisions; receipts-review decisions | Harness neutrality, proof boundary, immutability, continuity, trust, review, and channel separation preserved |
 | 29 | Context Integrity v2 CO-1–CO-6 | 6 | feature CO-1–CO-6 and child constraints | Honesty, strictness, determinism, secret safety, prospective changes, and evidence gates retained |
 | 30 | Owner-approved canonical home, dual implements edges, and deterministic tracker refs | 1 | feature DC-2/stubs; story links/story fields; SI-147 | Recorded as conditional authority pending merge |
-| 31 | Owner-accepted acyclic execution/receipt finalization boundary | 1 | sealed-codex event continuity; receipts-review AC-1/DC-4; sealed-claude DC-3/payload union; SI-157 | Expansion revisions close with child-manifest, final execution closes through execution-result, and the later receipt event is separately acknowledged outside its own digest boundary |
+| 31 | Owner-accepted acyclic execution/receipt finalization and persistence boundary | 1 | sealed-codex event continuity; receipts-review AC-1/DC-4; sealed-claude DC-3/payload union; SI-157 | Expansion revisions close with child-manifest, final execution closes through execution-result, and the later receipt event carries recoverable canonical receipt bytes that VATC verifies and atomically persists before separately acknowledging outside the receipt's own digest boundary |
 
 ## Intentional non-promotions
 

@@ -251,15 +251,21 @@ The `execution-result` payload binds the result facts but never
 `event_chain_root` or a digest of the finalized result object. After VATC
 acknowledges that event, Verdi may construct the canonical execution result
 and receipt that bind the now-final execution array and root. Only then does
-the producer emit `receipt` with the receipt digest as the next source event.
+the producer emit `receipt` with the receipt digest and canonical receipt
+bytes, carried by U6's strict inline-or-segment `detail` union, as the next
+source event.
 That post-finalization event is deliberately outside the root carried by the
 receipt, so no object includes its own digest transitively. Its closed
 `verdi.receipt-event-ack/v1` binds schema, flight/lane/epoch/session, manifest
 revision, event kind `receipt`, source sequence, event digest, VATC global
 sequence, and receipt digest.
-VATC persists the receipt and acknowledgment before returning it; an
-unacknowledged receipt event leaves the receipt inspectable but cannot satisfy
-an automated ATC gate. Later orchestration or closure records bind that
+VATC resolves the detail bytes, strict-decodes and canonically re-encodes the
+receipt, proves its computed digest and fixed role/authority/execution-root
+fields equal the event fields, then atomically persists the receipt bytes and
+event before returning the acknowledgment. It does not acknowledge a missing,
+unretrievable, non-canonical, or mismatched detail. An unacknowledged receipt
+event leaves the producer's receipt inspectable but cannot satisfy an
+automated ATC gate. Later orchestration or closure records bind that
 post-receipt acknowledgment rather than rewriting the immutable receipt.
 
 Continuity records used before finalization bind the complete acknowledged

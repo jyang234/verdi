@@ -182,7 +182,7 @@ types.
 | `flight-plan-deviation` | `deviation_id, plan_digest, rule_id, operation, observed_digest, verdict, witnesses, detail` |
 | `adjudication` | `finding_or_deviation_id, principal_resolution, decision, reason_digest, detail` |
 | `execution-result` | `authority, input_commit, output_commit, output_tree, clean, manifest_digest, result_facts_digest` |
-| `receipt` | `role, receipt_digest, authority, execution_event_chain_root` |
+| `receipt` | `role, receipt_digest, authority, execution_event_chain_root, detail` |
 | `retry` | `reason_code, prior_session, next_session, continuity_digest` |
 | `resume` | `continuity_digest, prior_session, current_session, manifest_digest, event_chain_root` |
 | `suspension` | `reason_code, continuity_digest, event_chain_root` |
@@ -199,7 +199,15 @@ receipt acknowledgment. The event envelope and its acknowledgment establish
 the execution cutoff; the later canonical execution result binds that cutoff.
 The `receipt` row may therefore bind both the finalized receipt digest and the
 already-fixed execution root without either value depending on the receipt
-event's own digest.
+event's own digest. Its required `detail` contains exactly the canonical
+receipt JSON represented by the union below. For inline detail,
+`redacted_json` strict-decodes and canonical re-encoding must reproduce the
+same digest carried by both `detail.digest` and `receipt_digest`; for segment
+detail, `reference` must resolve to those exact canonical bytes before
+acknowledgment and both digest fields must match them. VATC verifies that the decoded receipt's role,
+authority, execution root, and self-digest equal the fixed payload fields and
+atomically persists the receipt bytes with the event. Retrieval or equality
+failure refuses acknowledgment.
 
 `detail` is required only in the rows that list it and is exactly one of:
 
