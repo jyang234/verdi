@@ -30,6 +30,8 @@ The source set is closed to:
 4. Verdi `spec/context-integrity-v2` AC-4, AC-5, DC-1, DC-2, DC-9 through
    DC-13, DC-16, and CO-1 through CO-6;
 5. the approved 2026-08-25 canonical-home ruling recorded as SI-147.
+6. the owner-accepted 2026-08-25 acyclic execution/receipt boundary ruling
+   recorded as SI-157.
 
 Historical ATC revisions are provenance, not active authority, and therefore
 are not promotion sources. The source plan's predicted implementation paths,
@@ -71,6 +73,7 @@ copied into the accepted specifications and are itemized below.
 | 28 | Context Integrity v2 DC-1, DC-2, DC-9–DC-13, DC-16 | 8 | feature DC-1/DC-5/DC-6; sealed-codex decisions; receipts-review decisions | Harness neutrality, proof boundary, immutability, continuity, trust, review, and channel separation preserved |
 | 29 | Context Integrity v2 CO-1–CO-6 | 6 | feature CO-1–CO-6 and child constraints | Honesty, strictness, determinism, secret safety, prospective changes, and evidence gates retained |
 | 30 | Owner-approved canonical home, dual implements edges, and deterministic tracker refs | 1 | feature DC-2/stubs; story links/story fields; SI-147 | Recorded as conditional authority pending merge |
+| 31 | Owner-accepted acyclic execution/receipt finalization boundary | 1 | sealed-codex event continuity; receipts-review AC-1/DC-4; sealed-claude DC-3/payload union; SI-157 | Expansion revisions close with child-manifest, final execution closes through execution-result, and the later receipt event is separately acknowledged outside its own digest boundary |
 
 ## Intentional non-promotions
 
@@ -91,14 +94,14 @@ stage/repository.
 
 ## Coverage result
 
-- Binding semantic units in the closed promotion source set: **96**
-- Units mapped to a canonical feature/story destination: **96**
+- Binding semantic units in the closed promotion source set: **97**
+- Units mapped to a canonical feature/story destination: **97**
 - Binding units intentionally omitted: **0**
-- Coverage: **96 / 96 (100%)**
+- Coverage: **97 / 97 (100%)**
 - Non-semantic or out-of-scope planning groups intentionally not promoted:
   **20** (18 enumerated mechanics and 2 grouped scope exclusions)
 
-Mechanical mapping: **proven 96/96**. Semantic losslessness is
-**disclosed-as-unproven pending the same independent reviewer's closure check
-after the one correction pass**. No implementation may launch on this state;
+Mechanical mapping: **proven 97/97**. Semantic losslessness is
+**disclosed-as-unproven pending an independent exact-head closure check after
+the owner-adjudicated correction**. No implementation may launch on this state;
 authority still requires owner merge.

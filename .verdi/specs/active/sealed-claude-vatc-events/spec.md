@@ -36,7 +36,7 @@ decisions:
     text: "the exact event kinds are flight-plan, instruction-projection, child-manifest, prompt, provider-message, provider-summary, tool-call, tool-result, read, write, edit-denied, context-request, context-decision, claim-request, claim-decision, claim-wait, claim-release, command, test, resource, timeout, git-status, git-diff, git-commit, forge-change, gate-input, gate-verdict, witness, flight-plan-deviation, adjudication, execution-result, receipt, retry, resume, suspension, telemetry-gap, adapter-start, adapter-stop, and adapter-error"
     anchor: dc-2
   - id: dc-3
-    text: "the U4 source-sequence and prior-revision bridge contract remains unchanged for Claude: source_sequence starts at one and is monotonic within one flight/lane/epoch/session/adapter/manifest-revision identity; the child-manifest event closes revision N; VATC allocates its separate never-resetting global committed sequence only after durable ingestion; and receipts digest the ordered revision segments without confusing the two orders"
+    text: "the U4 source-sequence, expansion-revision bridge, final execution-result boundary, and post-finalization receipt-event contract remain unchanged for Claude: source_sequence starts at one and is monotonic within one flight/lane/epoch/session/adapter/manifest-revision identity; child-manifest closes only a revision followed by an approved expansion; VATC allocates its separate never-resetting global committed sequence only after durable ingestion; receipts digest the execution revision segments through execution-result; and the separately required receipt_event_ack cannot enter the receipt it acknowledges"
     anchor: dc-3
   - id: dc-4
     text: "each payload contains fixed routing and verdict fields plus only where declared an optional detail union; detail is exactly inline redacted canonical JSON or a segment reference, and detail larger than the configured inline ceiling is redacted then stored as a segment whose media type, byte count, digest, redaction profile, and storage reference are event-bound; fixed fields always remain inline and the event carries no unredacted duplicate"
@@ -181,8 +181,8 @@ types.
 | `witness` | `witness_kind, witness_digest, authority, detail` |
 | `flight-plan-deviation` | `deviation_id, plan_digest, rule_id, operation, observed_digest, verdict, witnesses, detail` |
 | `adjudication` | `finding_or_deviation_id, principal_resolution, decision, reason_digest, detail` |
-| `execution-result` | `authority, input_commit, output_commit, output_tree, clean, manifest_digest, event_chain_root, result_digest` |
-| `receipt` | `role, receipt_digest, authority` |
+| `execution-result` | `authority, input_commit, output_commit, output_tree, clean, manifest_digest, result_facts_digest` |
+| `receipt` | `role, receipt_digest, authority, execution_event_chain_root` |
 | `retry` | `reason_code, prior_session, next_session, continuity_digest` |
 | `resume` | `continuity_digest, prior_session, current_session, manifest_digest, event_chain_root` |
 | `suspension` | `reason_code, continuity_digest, event_chain_root` |
@@ -190,6 +190,16 @@ types.
 | `adapter-start` | `adapter, adapter_version, session, profile_digest, workspace_request_digest` |
 | `adapter-stop` | `adapter, adapter_version, session, exit_code, reason_code` |
 | `adapter-error` | `adapter, adapter_version, session, operation, reason_code, error_digest, detail` |
+
+`result_facts_digest` is the digest of a strict
+`verdi.context-execution-result-facts/v1` object containing the
+`execution-result` row's authority, repository, cleanliness, and manifest
+facts, with no event-chain root, finalized result digest, receipt digest, or
+receipt acknowledgment. The event envelope and its acknowledgment establish
+the execution cutoff; the later canonical execution result binds that cutoff.
+The `receipt` row may therefore bind both the finalized receipt digest and the
+already-fixed execution root without either value depending on the receipt
+event's own digest.
 
 `detail` is required only in the rows that list it and is exactly one of:
 

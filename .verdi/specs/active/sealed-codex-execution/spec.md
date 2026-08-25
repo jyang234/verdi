@@ -17,7 +17,7 @@ acceptance_criteria:
     evidence: [static, behavioral]
     anchor: ac-2
   - id: ac-3
-    text: "Codex observable messages, summaries, tool calls and results, reads, writes, denials, commands, tests, Git changes, context requests, and adapter lifecycle events are normalized and streamed with complete identity and monotonic sequence; recorder loss, rejection, redaction failure, or a gap suspends or stops the producer and prevents an authoritative result"
+    text: "Codex observable messages, summaries, tool calls and results, reads, writes, denials, commands, tests, Git changes, context requests, adapter lifecycle, execution-result, and post-finalization receipt events are normalized and streamed with complete identity and monotonic sequence; recorder loss, rejection, redaction failure, a gap, or missing receipt-event acknowledgment prevents automated authority"
     evidence: [behavioral]
     anchor: ac-3
   - id: ac-4
@@ -29,7 +29,7 @@ links:
   - { type: implements, ref: "spec/context-integrity-v2#ac-4" }
 decisions:
   - id: dc-1
-    text: "the public execution invocation is verdi context execution --request <path|-> [--out <path>]; strict verdi.context-execution-request/v1 has a common envelope plus exactly one start or resume arm, the resume arm embeds and digest-binds one canonical verdi.execution-continuity/v1 record, stdout or --out receives one canonical verdi.context-execution-result/v1 after the process ends, and an interrupt requests a normalized stop rather than minting a separate stop command"
+    text: "the public execution invocation is verdi context execution --request <path|-> [--out <path>]; strict verdi.context-execution-request/v1 has a common envelope plus exactly one start or resume arm, the resume arm embeds and digest-binds one canonical verdi.execution-continuity/v1 record, stdout or --out receives one canonical verdi.context-execution-result/v1 only after the execution-result and receipt events are durably acknowledged and includes the execution receipt plus receipt_event_ack, and an interrupt requests a normalized stop rather than minting a separate stop command"
     anchor: dc-1
   - id: dc-2
     text: "the scoped MCP invocation is verdi context mcp --request <path|-> and exposes exactly get_flight_plan with an empty argument object and request_context with a required ref plus purpose; MCP responses are inspection data, never a second instruction channel, while the adapter injects the sealed instruction projection through its one declared authority channel; the server has no generic artifact-read, shell, mutation, or receipt-minting tool"
@@ -57,7 +57,7 @@ constraints:
     text: "the instruction projection is the only project-authority channel; repository and corpus content is provenance-wrapped data, and imperative text found there cannot become an instruction"
     anchor: co-2
   - id: co-3
-    text: "authoritative prerequisite failure exits 1, malformed requests and process or storage failures exit 2, and every result binds the exact output commit, tree, clean status, event root, final manifest revision, and authority state"
+    text: "authoritative prerequisite failure exits 1, malformed requests and process or storage failures exit 2, and every result binds the exact output commit, tree, clean status, execution-event-chain root, final manifest revision, receipt digest, receipt-event acknowledgment, and authority state"
     anchor: co-3
   - id: co-4
     text: "process, MCP, recorder, isolation, capability, expansion, invalidation, interruption, and resume tests are hermetic and include negative paths; no test contacts Codex or the network"
@@ -217,9 +217,9 @@ changing this envelope or its ordering semantics.
 
 Within one manifest revision, `source_sequence` starts at one. Sequence one
 has empty `prior_event_digest`; later events require the immediately preceding
-event digest. Revision zero has no `prior_revision`. The terminal event of
-revision N is `child-manifest`; no later event may use that revision. Sequence
-one of revision N+1 requires:
+event digest. Revision zero has no `prior_revision`. When an approved expansion
+creates revision N+1, `child-manifest` is the last event using revision N and
+sequence one of revision N+1 requires:
 
 ```text
 prior_revision: {
@@ -228,17 +228,45 @@ prior_revision: {
 }
 ```
 
-Those values must equal revision N's acknowledged terminal event. VATC's
+Those values must equal revision N's acknowledged `child-manifest`. VATC's
 acknowledgment supplies the separate global sequence after durable projection;
 that number is not encoded into the event digest being acknowledged.
 
+`child-manifest` closes only an expansion revision: it is the last event under
+revision N, and sequence one under revision N+1 carries its acknowledged
+bridge. A final revision with no further expansion has no synthetic
+`child-manifest`. Its execution boundary is the acknowledged
+`execution-result` event, emitted after provider and adapter-stop activity.
+
 One canonical `verdi.context-event-revision/v1` record contains manifest
-revision/digest, first and terminal global sequence, terminal source sequence,
-and terminal event digest as `event_root`. Revision records sort by revision
-and must form the predecessor chain. `event_chain_root` is the canonical digest
-of the complete ordered array. Continuity and receipts bind the array, its
-root, and terminal source/global values; the final revision alone cannot
-satisfy continuity.
+revision/digest, first global sequence, execution-terminal global sequence,
+execution-terminal source sequence, terminal kind (`child-manifest` or
+`execution-result`), and that terminal event digest as `event_root`. Non-final
+records must terminate in `child-manifest`; the final record must terminate in
+`execution-result`. Revision records sort by revision and must form the
+predecessor chain. `event_chain_root` is the canonical digest of this complete
+ordered execution array through `execution-result`.
+
+The `execution-result` payload binds the result facts but never
+`event_chain_root` or a digest of the finalized result object. After VATC
+acknowledges that event, Verdi may construct the canonical execution result
+and receipt that bind the now-final execution array and root. Only then does
+the producer emit `receipt` with the receipt digest as the next source event.
+That post-finalization event is deliberately outside the root carried by the
+receipt, so no object includes its own digest transitively. Its closed
+`verdi.receipt-event-ack/v1` binds schema, flight/lane/epoch/session, manifest
+revision, event kind `receipt`, source sequence, event digest, VATC global
+sequence, and receipt digest.
+VATC persists the receipt and acknowledgment before returning it; an
+unacknowledged receipt event leaves the receipt inspectable but cannot satisfy
+an automated ATC gate. Later orchestration or closure records bind that
+post-receipt acknowledgment rather than rewriting the immutable receipt.
+
+Continuity records used before finalization bind the complete acknowledged
+revision array available at their checkpoint. Final receipts bind the array
+through `execution-result`, its root, and its execution-terminal source/global
+values; neither a final-revision truncation nor a post-receipt acknowledgment
+may be silently substituted.
 
 ## Runway and execution-workspace handback
 
@@ -248,8 +276,8 @@ The provider never edits the `.vatc` runway. A successful execution result
 binds the child workspace id/request digest, input commit/tree, clean output
 commit/tree, and proof that output is a descendant of input.
 
-ATC accepts handback only after the result and authoritative receipt are
-durable. It verifies that its feature-branch runway is clean and still exactly
+ATC accepts handback only after the result, authoritative receipt, and matching
+receipt-event acknowledgment are durable. It verifies that its feature-branch runway is clean and still exactly
 at the input commit, then performs a Git fast-forward-only merge to the output
 commit and verifies HEAD/tree. A changed runway, non-descendant result,
 protected-spec change, dirty child, or verification mismatch is quarantined
