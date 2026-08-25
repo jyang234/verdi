@@ -1,24 +1,29 @@
 ---
 id: obligation/vatc-forge-countersign--ac-3--behavioral
 kind: obligation
-title: "unauthored obligation scaffold: spec/vatc-forge-countersign ac-3 behavioral"
+title: "Gate and closure share one read-only countersign resolver"
 owners: ["platform-team"]
 for_kind: behavioral
 quality:
-  state: unresolved-design-debt
+  state: elaborated
+  claim: "Build gate and story or feature close preflight consume the same countersign resolver, preserve approval and principal witnesses in canonical journey or closure evidence, and never write a countersign artifact or request approval."
+  falsifier: "A lifecycle consumer implements separate approval logic, accepts an unavailable or adverse forge fact, drops the approval or principal witness, mutates the candidate tree, or contacts an unconfigured forge as if approval were proven."
+  scope: "Built-binary gate, close --preflight, close --prepare, journey, and closure publication paths over hermetic forge fakes and candidate trees."
+  producer: { kind: test, ref: "go-test:cmd/verdi:TestCountersignLifecycleContract_Behavioral" }
+  authoritative_source: { kind: ci-job, ref: "verify" }
+  freshness:
+    invalidated_by: [spec, code]
+    rule: "Rerun go-test:cmd/verdi:TestCountersignLifecycleContract_Behavioral in CI job verify at the exact candidate commit after any governing specification or code change."
 links:
   - { type: verifies, ref: "spec/vatc-forge-countersign" }
 frozen: { at: 2026-08-25, commit: 0e8006b8b20270c9792ef6bf1a81ce165cbdcde9 }
 ---
-# unauthored obligation scaffold: spec/vatc-forge-countersign ac-3 behavioral
+# Gate and closure share one read-only countersign resolver
 
-<!-- verdi:obligation-unauthored -->
-This obligation was scaffolded by `verdi obligation author` for spec/vatc-forge-countersign's
-behavioral evidence on ac-3 and has not been authored. Replace this entire
-paragraph, and delete the marker comment above, with your own
-statement of what that evidence must specifically show before this
-acceptance criterion can rely on it. Re-running
-`verdi obligation author spec/vatc-forge-countersign ac-3 behavioral` before this file is frozen by a
-merge to main regenerates this scaffold from scratch, discarding any
-authoring done in the meantime — the design branch is the safety net
-(git diff/checkout), not this verb.
+CI job `verify` must record producer `go-test:cmd/verdi:TestCountersignLifecycleContract_Behavioral` at the exact candidate commit.
+
+The evidence must prove: Build gate and story or feature close preflight consume the same countersign resolver, preserve approval and principal witnesses in canonical journey or closure evidence, and never write a countersign artifact or request approval.
+
+It is falsified when: A lifecycle consumer implements separate approval logic, accepts an unavailable or adverse forge fact, drops the approval or principal witness, mutates the candidate tree, or contacts an unconfigured forge as if approval were proven.
+
+Scope: Built-binary gate, close --preflight, close --prepare, journey, and closure publication paths over hermetic forge fakes and candidate trees.

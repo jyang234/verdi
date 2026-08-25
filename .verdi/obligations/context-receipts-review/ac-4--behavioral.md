@@ -1,24 +1,29 @@
 ---
 id: obligation/context-receipts-review--ac-4--behavioral
 kind: obligation
-title: "unauthored obligation scaffold: spec/context-receipts-review ac-4 behavioral"
+title: "R0 and R2 are distinct receipt-bound review executions"
 owners: ["platform-team"]
 for_kind: behavioral
 quality:
-  state: unresolved-design-debt
+  state: elaborated
+  claim: "R0 and R2 bind the configured reviewer lane, adapter, model, version, and isolated profile while using distinct sessions, manifests, dispatches, event roots, packets, and receipts, and neither inherits unrecorded builder or R0 context."
+  falsifier: "A session, packet, dispatch, event root, or receipt is reused; configured reviewer identity drifts; R2 lacks adjudication or current evidence; or freshness depends on an orchestrator assertion rather than bound bytes."
+  scope: "Two sequential hermetic sealed review executions using the same configured reviewer identity with distinct runtime identities, receipt chain, packet inventories, and negative context-inheritance fixtures."
+  producer: { kind: test, ref: "go-test:internal/sealedreview:TestSealedReviewFreshnessContract_Behavioral" }
+  authoritative_source: { kind: ci-job, ref: "verify" }
+  freshness:
+    invalidated_by: [spec, code]
+    rule: "Rerun go-test:internal/sealedreview:TestSealedReviewFreshnessContract_Behavioral in CI job verify at the exact candidate commit after any governing specification or code change."
 links:
   - { type: verifies, ref: "spec/context-receipts-review" }
 frozen: { at: 2026-08-25, commit: 0e8006b8b20270c9792ef6bf1a81ce165cbdcde9 }
 ---
-# unauthored obligation scaffold: spec/context-receipts-review ac-4 behavioral
+# R0 and R2 are distinct receipt-bound review executions
 
-<!-- verdi:obligation-unauthored -->
-This obligation was scaffolded by `verdi obligation author` for spec/context-receipts-review's
-behavioral evidence on ac-4 and has not been authored. Replace this entire
-paragraph, and delete the marker comment above, with your own
-statement of what that evidence must specifically show before this
-acceptance criterion can rely on it. Re-running
-`verdi obligation author spec/context-receipts-review ac-4 behavioral` before this file is frozen by a
-merge to main regenerates this scaffold from scratch, discarding any
-authoring done in the meantime — the design branch is the safety net
-(git diff/checkout), not this verb.
+CI job `verify` must record producer `go-test:internal/sealedreview:TestSealedReviewFreshnessContract_Behavioral` at the exact candidate commit.
+
+The evidence must prove: R0 and R2 bind the configured reviewer lane, adapter, model, version, and isolated profile while using distinct sessions, manifests, dispatches, event roots, packets, and receipts, and neither inherits unrecorded builder or R0 context.
+
+It is falsified when: A session, packet, dispatch, event root, or receipt is reused; configured reviewer identity drifts; R2 lacks adjudication or current evidence; or freshness depends on an orchestrator assertion rather than bound bytes.
+
+Scope: Two sequential hermetic sealed review executions using the same configured reviewer identity with distinct runtime identities, receipt chain, packet inventories, and negative context-inheritance fixtures.

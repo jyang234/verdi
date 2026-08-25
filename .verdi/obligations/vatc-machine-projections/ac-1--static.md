@@ -1,24 +1,29 @@
 ---
 id: obligation/vatc-machine-projections--ac-1--static
 kind: obligation
-title: "unauthored obligation scaffold: spec/vatc-machine-projections ac-1 static"
+title: "One strict tagged matrix union feeds every adapter"
 owners: ["platform-team"]
 for_kind: static
 quality:
-  state: unresolved-design-debt
+  state: elaborated
+  claim: "The matrix contract is one strict verdi.matrix/v1 class-tagged union assembled by internal/matrixprojection and consumed by CLI text, CLI JSON, and MCP without alternate field assembly."
+  falsifier: "A decoder accepts an unknown or cross-arm field, either tagged body is missing or duplicated, a native story or feature fold field or order is lost, or any adapter assembles a second matrix record."
+  scope: "The matrix record and codec, story and feature fold mapping, CLI matrix formatters, and the MCP get_matrix binding."
+  producer: { kind: test, ref: "go-test:internal/matrixprojection:TestMatrixProjectionContract_Static" }
+  authoritative_source: { kind: ci-job, ref: "verify" }
+  freshness:
+    invalidated_by: [spec, code]
+    rule: "Rerun go-test:internal/matrixprojection:TestMatrixProjectionContract_Static in CI job verify at the exact candidate commit after any governing specification or code change."
 links:
   - { type: verifies, ref: "spec/vatc-machine-projections" }
 frozen: { at: 2026-08-25, commit: 0e8006b8b20270c9792ef6bf1a81ce165cbdcde9 }
 ---
-# unauthored obligation scaffold: spec/vatc-machine-projections ac-1 static
+# One strict tagged matrix union feeds every adapter
 
-<!-- verdi:obligation-unauthored -->
-This obligation was scaffolded by `verdi obligation author` for spec/vatc-machine-projections's
-static evidence on ac-1 and has not been authored. Replace this entire
-paragraph, and delete the marker comment above, with your own
-statement of what that evidence must specifically show before this
-acceptance criterion can rely on it. Re-running
-`verdi obligation author spec/vatc-machine-projections ac-1 static` before this file is frozen by a
-merge to main regenerates this scaffold from scratch, discarding any
-authoring done in the meantime — the design branch is the safety net
-(git diff/checkout), not this verb.
+CI job `verify` must record producer `go-test:internal/matrixprojection:TestMatrixProjectionContract_Static` at the exact candidate commit.
+
+The evidence must prove: The matrix contract is one strict verdi.matrix/v1 class-tagged union assembled by internal/matrixprojection and consumed by CLI text, CLI JSON, and MCP without alternate field assembly.
+
+It is falsified when: A decoder accepts an unknown or cross-arm field, either tagged body is missing or duplicated, a native story or feature fold field or order is lost, or any adapter assembles a second matrix record.
+
+Scope: The matrix record and codec, story and feature fold mapping, CLI matrix formatters, and the MCP get_matrix binding.

@@ -1,24 +1,29 @@
 ---
 id: obligation/context-receipts-review--ac-3--behavioral
 kind: obligation
-title: "unauthored obligation scaffold: spec/context-receipts-review ac-3 behavioral"
+title: "Each review receives a newly compiled minimum packet"
 owners: ["platform-team"]
 for_kind: behavioral
 quality:
-  state: unresolved-design-debt
+  state: elaborated
+  claim: "R0 and R2 each run through sealed execution with a new packet containing only the accepted spec, exact current diff, evidence bundle, builder receipt, and review policy, with R2 additionally containing accepted adjudication and current candidate evidence."
+  falsifier: "Either packet includes builder conversation, personal or global memory, unrelated context, prior reviewer conversation, stale diff or evidence, omits a required item, or starts outside sealed execution."
+  scope: "Fresh R0 and R2 manifest compilation, packet inventory and digests, excluded and opaque rows, builder receipt binding, adjudication inclusion, and sealed review launch fixtures."
+  producer: { kind: test, ref: "go-test:internal/sealedreview:TestSealedReviewPacketContract_Behavioral" }
+  authoritative_source: { kind: ci-job, ref: "verify" }
+  freshness:
+    invalidated_by: [spec, code]
+    rule: "Rerun go-test:internal/sealedreview:TestSealedReviewPacketContract_Behavioral in CI job verify at the exact candidate commit after any governing specification or code change."
 links:
   - { type: verifies, ref: "spec/context-receipts-review" }
 frozen: { at: 2026-08-25, commit: 0e8006b8b20270c9792ef6bf1a81ce165cbdcde9 }
 ---
-# unauthored obligation scaffold: spec/context-receipts-review ac-3 behavioral
+# Each review receives a newly compiled minimum packet
 
-<!-- verdi:obligation-unauthored -->
-This obligation was scaffolded by `verdi obligation author` for spec/context-receipts-review's
-behavioral evidence on ac-3 and has not been authored. Replace this entire
-paragraph, and delete the marker comment above, with your own
-statement of what that evidence must specifically show before this
-acceptance criterion can rely on it. Re-running
-`verdi obligation author spec/context-receipts-review ac-3 behavioral` before this file is frozen by a
-merge to main regenerates this scaffold from scratch, discarding any
-authoring done in the meantime — the design branch is the safety net
-(git diff/checkout), not this verb.
+CI job `verify` must record producer `go-test:internal/sealedreview:TestSealedReviewPacketContract_Behavioral` at the exact candidate commit.
+
+The evidence must prove: R0 and R2 each run through sealed execution with a new packet containing only the accepted spec, exact current diff, evidence bundle, builder receipt, and review policy, with R2 additionally containing accepted adjudication and current candidate evidence.
+
+It is falsified when: Either packet includes builder conversation, personal or global memory, unrelated context, prior reviewer conversation, stale diff or evidence, omits a required item, or starts outside sealed execution.
+
+Scope: Fresh R0 and R2 manifest compilation, packet inventory and digests, excluded and opaque rows, builder receipt binding, adjudication inclusion, and sealed review launch fixtures.

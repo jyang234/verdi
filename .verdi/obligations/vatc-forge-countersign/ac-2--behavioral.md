@@ -1,24 +1,29 @@
 ---
 id: obligation/vatc-forge-countersign--ac-2--behavioral
 kind: obligation
-title: "unauthored obligation scaffold: spec/vatc-forge-countersign ac-2 behavioral"
+title: "Countersign reduction proves roles, freshness, count, and separation"
 owners: ["platform-team"]
 for_kind: behavioral
 quality:
-  state: unresolved-design-debt
+  state: elaborated
+  claim: "The resolver proves a countersign only from active exact-candidate fresh role-authorized approvals by authenticated distinct principals that meet required count and separation policy, preserving every rejected or unproven operand as a witness."
+  falsifier: "A stale, wrong-head, revoked, duplicate-principal, unauthorized-role, self-approved, insufficient-count, future-stamped, or unproven approval contributes to a proven verdict, or eligible ordering varies."
+  scope: "Hermetic resolver tables for story-review and feature-UAT obligations, multi-approval counts, policy freshness, principal normalization, and separation of duties."
+  producer: { kind: test, ref: "go-test:internal/countersign:TestCountersignWitnessContract_Behavioral" }
+  authoritative_source: { kind: ci-job, ref: "verify" }
+  freshness:
+    invalidated_by: [spec, code]
+    rule: "Rerun go-test:internal/countersign:TestCountersignWitnessContract_Behavioral in CI job verify at the exact candidate commit after any governing specification or code change."
 links:
   - { type: verifies, ref: "spec/vatc-forge-countersign" }
 frozen: { at: 2026-08-25, commit: 0e8006b8b20270c9792ef6bf1a81ce165cbdcde9 }
 ---
-# unauthored obligation scaffold: spec/vatc-forge-countersign ac-2 behavioral
+# Countersign reduction proves roles, freshness, count, and separation
 
-<!-- verdi:obligation-unauthored -->
-This obligation was scaffolded by `verdi obligation author` for spec/vatc-forge-countersign's
-behavioral evidence on ac-2 and has not been authored. Replace this entire
-paragraph, and delete the marker comment above, with your own
-statement of what that evidence must specifically show before this
-acceptance criterion can rely on it. Re-running
-`verdi obligation author spec/vatc-forge-countersign ac-2 behavioral` before this file is frozen by a
-merge to main regenerates this scaffold from scratch, discarding any
-authoring done in the meantime — the design branch is the safety net
-(git diff/checkout), not this verb.
+CI job `verify` must record producer `go-test:internal/countersign:TestCountersignWitnessContract_Behavioral` at the exact candidate commit.
+
+The evidence must prove: The resolver proves a countersign only from active exact-candidate fresh role-authorized approvals by authenticated distinct principals that meet required count and separation policy, preserving every rejected or unproven operand as a witness.
+
+It is falsified when: A stale, wrong-head, revoked, duplicate-principal, unauthorized-role, self-approved, insufficient-count, future-stamped, or unproven approval contributes to a proven verdict, or eligible ordering varies.
+
+Scope: Hermetic resolver tables for story-review and feature-UAT obligations, multi-approval counts, policy freshness, principal normalization, and separation of duties.

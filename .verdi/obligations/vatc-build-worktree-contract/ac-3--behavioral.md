@@ -1,24 +1,29 @@
 ---
 id: obligation/vatc-build-worktree-contract--ac-3--behavioral
 kind: obligation
-title: "unauthored obligation scaffold: spec/vatc-build-worktree-contract ac-3 behavioral"
+title: "Runway base mismatches and Git failures refuse without fallback"
 owners: ["platform-team"]
 for_kind: behavioral
 quality:
-  state: unresolved-design-debt
+  state: elaborated
+  claim: "An existing feature branch at the wrong base and an operational Git failure produce deterministic refusals without selecting another checkout or partially mutating the runway or primary checkout."
+  falsifier: "Either adverse fixture falls back to another branch or checkout, partially mutates Git state, weakens an existing lifecycle gate, or produces a nondeterministic witness or exit class."
+  scope: "Fixture Git wrong-base and injected operational-failure cases with complete before-and-after snapshots of both primary and runway repositories."
+  producer: { kind: test, ref: "go-test:cmd/verdi:TestBuildCommandsFromATCRunway_Refusals" }
+  authoritative_source: { kind: ci-job, ref: "verify" }
+  freshness:
+    invalidated_by: [spec, code]
+    rule: "Rerun go-test:cmd/verdi:TestBuildCommandsFromATCRunway_Refusals in CI job verify at the exact candidate commit after any governing specification or code change."
 links:
   - { type: verifies, ref: "spec/vatc-build-worktree-contract" }
 frozen: { at: 2026-08-25, commit: 0e8006b8b20270c9792ef6bf1a81ce165cbdcde9 }
 ---
-# unauthored obligation scaffold: spec/vatc-build-worktree-contract ac-3 behavioral
+# Runway base mismatches and Git failures refuse without fallback
 
-<!-- verdi:obligation-unauthored -->
-This obligation was scaffolded by `verdi obligation author` for spec/vatc-build-worktree-contract's
-behavioral evidence on ac-3 and has not been authored. Replace this entire
-paragraph, and delete the marker comment above, with your own
-statement of what that evidence must specifically show before this
-acceptance criterion can rely on it. Re-running
-`verdi obligation author spec/vatc-build-worktree-contract ac-3 behavioral` before this file is frozen by a
-merge to main regenerates this scaffold from scratch, discarding any
-authoring done in the meantime — the design branch is the safety net
-(git diff/checkout), not this verb.
+CI job `verify` must record producer `go-test:cmd/verdi:TestBuildCommandsFromATCRunway_Refusals` at the exact candidate commit.
+
+The evidence must prove: An existing feature branch at the wrong base and an operational Git failure produce deterministic refusals without selecting another checkout or partially mutating the runway or primary checkout.
+
+It is falsified when: Either adverse fixture falls back to another branch or checkout, partially mutates Git state, weakens an existing lifecycle gate, or produces a nondeterministic witness or exit class.
+
+Scope: Fixture Git wrong-base and injected operational-failure cases with complete before-and-after snapshots of both primary and runway repositories.

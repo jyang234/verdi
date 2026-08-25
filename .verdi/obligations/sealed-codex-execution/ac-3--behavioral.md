@@ -1,24 +1,29 @@
 ---
 id: obligation/sealed-codex-execution--ac-3--behavioral
 kind: obligation
-title: "unauthored obligation scaffold: spec/sealed-codex-execution ac-3 behavioral"
+title: "Observable execution activity forms one acknowledged event chain"
 owners: ["platform-team"]
 for_kind: behavioral
 quality:
-  state: unresolved-design-debt
+  state: elaborated
+  claim: "All provider-observable messages, summaries, tool activity, reads, writes, denials, commands, tests, Git changes, context activity, adapter lifecycle, execution-result, and receipt emission are normalized with complete identity and monotonic revision-local ordering before authoritative completion."
+  falsifier: "An observable activity class is omitted, secret-bearing detail survives redaction, source order or a revision bridge has a gap, VATC rejects or cannot durably append an event, receipt-event acknowledgment is absent, or authority still resolves proven."
+  scope: "Canned Codex process streams, normalized U4 event envelope, recorder acknowledgments, redaction outcomes, expansion revisions, execution-result cutoff, and post-finalization receipt event."
+  producer: { kind: test, ref: "go-test:internal/sealedexec:TestContextEventContinuityContract_Behavioral" }
+  authoritative_source: { kind: ci-job, ref: "verify" }
+  freshness:
+    invalidated_by: [spec, code]
+    rule: "Rerun go-test:internal/sealedexec:TestContextEventContinuityContract_Behavioral in CI job verify at the exact candidate commit after any governing specification or code change."
 links:
   - { type: verifies, ref: "spec/sealed-codex-execution" }
 frozen: { at: 2026-08-25, commit: 0e8006b8b20270c9792ef6bf1a81ce165cbdcde9 }
 ---
-# unauthored obligation scaffold: spec/sealed-codex-execution ac-3 behavioral
+# Observable execution activity forms one acknowledged event chain
 
-<!-- verdi:obligation-unauthored -->
-This obligation was scaffolded by `verdi obligation author` for spec/sealed-codex-execution's
-behavioral evidence on ac-3 and has not been authored. Replace this entire
-paragraph, and delete the marker comment above, with your own
-statement of what that evidence must specifically show before this
-acceptance criterion can rely on it. Re-running
-`verdi obligation author spec/sealed-codex-execution ac-3 behavioral` before this file is frozen by a
-merge to main regenerates this scaffold from scratch, discarding any
-authoring done in the meantime — the design branch is the safety net
-(git diff/checkout), not this verb.
+CI job `verify` must record producer `go-test:internal/sealedexec:TestContextEventContinuityContract_Behavioral` at the exact candidate commit.
+
+The evidence must prove: All provider-observable messages, summaries, tool activity, reads, writes, denials, commands, tests, Git changes, context activity, adapter lifecycle, execution-result, and receipt emission are normalized with complete identity and monotonic revision-local ordering before authoritative completion.
+
+It is falsified when: An observable activity class is omitted, secret-bearing detail survives redaction, source order or a revision bridge has a gap, VATC rejects or cannot durably append an event, receipt-event acknowledgment is absent, or authority still resolves proven.
+
+Scope: Canned Codex process streams, normalized U4 event envelope, recorder acknowledgments, redaction outcomes, expansion revisions, execution-result cutoff, and post-finalization receipt event.

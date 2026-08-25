@@ -1,24 +1,29 @@
 ---
 id: obligation/vatc-build-worktree-contract--ac-1--behavioral
 kind: obligation
-title: "unauthored obligation scaffold: spec/vatc-build-worktree-contract ac-1 behavioral"
+title: "Build start stays inside the ATC runway"
 owners: ["platform-team"]
 for_kind: behavioral
 quality:
-  state: unresolved-design-debt
+  state: elaborated
+  claim: "From .vatc/worktrees/<story-slug>/a<epoch>, built-binary build start checks out the expected feature branch in that runway while the primary checkout branch, HEAD, index, worktree, and untracked set remain byte-identical."
+  falsifier: "Build start changes the primary checkout, creates or checks out the feature branch in the wrong worktree, selects a different base, or leaves an unrecorded mutation."
+  scope: "A fixture Git primary checkout, one detached ATC runway, stable input commits, and before-and-after branch, HEAD, index, status, tree, and untracked snapshots."
+  producer: { kind: test, ref: "go-test:cmd/verdi:TestBuildCommandsFromATCRunway_BuildStart" }
+  authoritative_source: { kind: ci-job, ref: "verify" }
+  freshness:
+    invalidated_by: [spec, code]
+    rule: "Rerun go-test:cmd/verdi:TestBuildCommandsFromATCRunway_BuildStart in CI job verify at the exact candidate commit after any governing specification or code change."
 links:
   - { type: verifies, ref: "spec/vatc-build-worktree-contract" }
 frozen: { at: 2026-08-25, commit: 0e8006b8b20270c9792ef6bf1a81ce165cbdcde9 }
 ---
-# unauthored obligation scaffold: spec/vatc-build-worktree-contract ac-1 behavioral
+# Build start stays inside the ATC runway
 
-<!-- verdi:obligation-unauthored -->
-This obligation was scaffolded by `verdi obligation author` for spec/vatc-build-worktree-contract's
-behavioral evidence on ac-1 and has not been authored. Replace this entire
-paragraph, and delete the marker comment above, with your own
-statement of what that evidence must specifically show before this
-acceptance criterion can rely on it. Re-running
-`verdi obligation author spec/vatc-build-worktree-contract ac-1 behavioral` before this file is frozen by a
-merge to main regenerates this scaffold from scratch, discarding any
-authoring done in the meantime — the design branch is the safety net
-(git diff/checkout), not this verb.
+CI job `verify` must record producer `go-test:cmd/verdi:TestBuildCommandsFromATCRunway_BuildStart` at the exact candidate commit.
+
+The evidence must prove: From .vatc/worktrees/<story-slug>/a<epoch>, built-binary build start checks out the expected feature branch in that runway while the primary checkout branch, HEAD, index, worktree, and untracked set remain byte-identical.
+
+It is falsified when: Build start changes the primary checkout, creates or checks out the feature branch in the wrong worktree, selects a different base, or leaves an unrecorded mutation.
+
+Scope: A fixture Git primary checkout, one detached ATC runway, stable input commits, and before-and-after branch, HEAD, index, status, tree, and untracked snapshots.
