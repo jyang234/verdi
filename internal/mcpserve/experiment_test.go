@@ -256,6 +256,40 @@ func TestExperimentToolStrictRequestDecode(t *testing.T) {
 	}
 }
 
+// TestExperimentToolInvalidUTF8Rejection is the wire-level regression for
+// the Codex Task 7 finding: encoding/json silently replaces invalid UTF-8
+// with U+FFFD, so without an explicit raw-byte check a live request
+// containing `spec/\xffbad` reached the application core as `spec/�bad`
+// — a rewritten identity instead of a structural refusal. The strict
+// decoder must reject the raw bytes before any store, Git, or application
+// access, naming UTF-8, with no typed application classification and no
+// worktree effect.
+func TestExperimentToolInvalidUTF8Rejection(t *testing.T) {
+	t.Setenv("CI_DEFAULT_BRANCH", "main")
+	invalidArgs := "{\"operation\":\"status\",\"spike\":\"spec/\xffbad\",\"experiment\":\"comparison\",\"accepted_head\":\"" + strings.Repeat("a", 40) + "\"}"
+
+	// Against a nonexistent root: the refusal must be structural — it
+	// answers identically with no store to touch.
+	text, isError := callExperimentTool(t, filepath.Join(t.TempDir(), "missing"), invalidArgs)
+	if !isError || !strings.Contains(text, "UTF-8") {
+		t.Fatalf("invalid UTF-8 arguments must be structurally refused naming UTF-8: isError=%v text=%q", isError, text)
+	}
+	if strings.Contains(text, `"classification"`) || strings.Contains(text, "�") {
+		t.Fatalf("invalid UTF-8 arguments reached the application core or were replacement-decoded: %q", text)
+	}
+
+	// Against a real repository: same refusal, zero mutation.
+	repo := experimentToolRepo(t)
+	before := experimentPorcelain(t, repo.Dir)
+	text, isError = callExperimentTool(t, repo.Dir, invalidArgs)
+	if !isError || !strings.Contains(text, "UTF-8") || strings.Contains(text, `"classification"`) {
+		t.Fatalf("invalid UTF-8 arguments against a real store: isError=%v text=%q, want the same structural UTF-8 refusal", isError, text)
+	}
+	if after := experimentPorcelain(t, repo.Dir); after != before {
+		t.Fatalf("invalid UTF-8 refusal mutated worktree: before=%q after=%q", before, after)
+	}
+}
+
 func TestExperimentToolInputBindingTransport(t *testing.T) {
 	t.Setenv("CI_DEFAULT_BRANCH", "main")
 	repo := experimentToolRepo(t)

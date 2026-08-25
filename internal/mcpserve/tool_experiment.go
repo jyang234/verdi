@@ -19,6 +19,7 @@ import (
 	"os"
 	"sort"
 	"testing/fstest"
+	"unicode/utf8"
 
 	"github.com/jyang234/verdi/internal/contextcompile"
 	"github.com/jyang234/verdi/internal/execworkspace"
@@ -100,6 +101,12 @@ var experimentToolBaseFields = []string{"operation", "spike", "experiment", "acc
 // missing or extra fields — all before any filesystem or Git access.
 func decodeExperimentToolRequest(raw json.RawMessage) (experimentToolRequest, error) {
 	var request experimentToolRequest
+	// encoding/json silently replaces invalid UTF-8 with U+FFFD, which
+	// would rewrite exact identity, definition, or patch bytes instead of
+	// refusing them — validate the raw wire bytes first.
+	if !utf8.Valid(raw) {
+		return request, fmt.Errorf("request arguments are not valid UTF-8")
+	}
 	keys, err := experimentToolRequestKeys(raw)
 	if err != nil {
 		return request, err
