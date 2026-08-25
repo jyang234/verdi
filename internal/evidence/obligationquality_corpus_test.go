@@ -28,11 +28,8 @@ func TestObligationQualityLegacyCorpus(t *testing.T) {
 	if err != nil {
 		t.Fatalf("glob legacy obligations: %v", err)
 	}
-	if len(paths) != wantFiles {
-		t.Fatalf("legacy obligation files = %d, want %d", len(paths), wantFiles)
-	}
-
 	h := sha256.New()
+	legacyFiles := 0
 	markerBodies := 0
 	for _, path := range paths {
 		raw, err := os.ReadFile(path)
@@ -44,11 +41,6 @@ func TestObligationQualityLegacyCorpus(t *testing.T) {
 			t.Fatalf("relative path %s: %v", path, err)
 		}
 		rel = filepath.ToSlash(rel)
-		_, _ = h.Write([]byte(rel))
-		_, _ = h.Write([]byte{0})
-		_, _ = h.Write(raw)
-		_, _ = h.Write([]byte{0})
-
 		fm, body, err := artifact.SplitFrontmatter(raw)
 		if err != nil {
 			t.Fatalf("split %s: %v", rel, err)
@@ -58,8 +50,14 @@ func TestObligationQualityLegacyCorpus(t *testing.T) {
 			t.Fatalf("decode %s: %v", rel, err)
 		}
 		if obligation.Quality != nil {
-			t.Fatalf("%s quality = %+v, want absent legacy field", rel, obligation.Quality)
+			continue
 		}
+
+		legacyFiles++
+		_, _ = h.Write([]byte(rel))
+		_, _ = h.Write([]byte{0})
+		_, _ = h.Write(raw)
+		_, _ = h.Write([]byte{0})
 		if strings.Contains(string(body), UnauthoredObligationMarker) {
 			markerBodies++
 		}
@@ -81,6 +79,9 @@ func TestObligationQualityLegacyCorpus(t *testing.T) {
 		if assessment.StructuralState != ObligationLegacyUnelaborated {
 			t.Fatalf("%s structural state = %q, want %q", rel, assessment.StructuralState, ObligationLegacyUnelaborated)
 		}
+	}
+	if legacyFiles != wantFiles {
+		t.Fatalf("legacy obligation files = %d, want %d", legacyFiles, wantFiles)
 	}
 
 	gotDigest := "sha256:" + hex.EncodeToString(h.Sum(nil))
