@@ -66,7 +66,8 @@ func (s *Service) Inspect(ctx context.Context, identity Identity) InspectResult 
 	}
 	decision, err := s.policy.ResolvePolicy(ctx, clonePolicyRequest(PolicyRequest{
 		CheckoutRoot: identity.CheckoutRoot, ExperimentPath: snapshot.experimentPath,
-		Spike: identity.Spike, Definition: definition, Capabilities: capabilities,
+		Spike: identity.Spike, AcceptedCommit: snapshot.revision.Head,
+		Definition: definition, Capabilities: capabilities,
 		CandidatePaths: candidatePaths,
 	}))
 	if err != nil {

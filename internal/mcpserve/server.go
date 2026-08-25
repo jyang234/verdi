@@ -114,6 +114,8 @@ func (s *Server) callTool(ctx context.Context, params json.RawMessage) map[strin
 		return s.Backend.GetBoard(ctx, call.Arguments)
 	case "add_annotation":
 		return s.Backend.AddAnnotation(ctx, call.Arguments)
+	case "experiment":
+		return s.Backend.Experiment(ctx, call.Arguments)
 	default:
 		return toolError(fmt.Sprintf("unknown tool: %q", call.Name))
 	}

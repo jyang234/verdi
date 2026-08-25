@@ -101,6 +101,7 @@ type PolicyRequest struct {
 	CheckoutRoot   string
 	ExperimentPath string
 	Spike          string
+	AcceptedCommit string
 	Definition     experiment.Definition
 	Capabilities   experiment.Capabilities
 	CandidatePaths []string
@@ -147,19 +148,32 @@ type Service struct {
 	git          AcceptedGit
 	capabilities CapabilityDiscoverer
 	results      ResultVerifier
+	runner       ExecutionRunner
 }
 
-// NewService requires all four consumer-owned ports.
-func NewService(policy PolicyResolver, git AcceptedGit, capabilities CapabilityDiscoverer, results ResultVerifier) (*Service, error) {
+// NewService requires the four read/authority ports and accepts at most one
+// execution delegate. A service without a delegate remains useful for
+// proposal and read operations; Start and Resume then fail operationally.
+func NewService(policy PolicyResolver, git AcceptedGit, capabilities CapabilityDiscoverer, results ResultVerifier, runners ...ExecutionRunner) (*Service, error) {
 	if policy == nil || git == nil || capabilities == nil || results == nil {
 		return nil, fmt.Errorf("experimentapp: policy, accepted Git, capability discovery, and result verification ports are required")
 	}
-	return &Service{policy: policy, git: git, capabilities: capabilities, results: results}, nil
+	if len(runners) > 1 {
+		return nil, fmt.Errorf("experimentapp: at most one execution runner is permitted")
+	}
+	var runner ExecutionRunner
+	if len(runners) == 1 {
+		if runners[0] == nil {
+			return nil, fmt.Errorf("experimentapp: execution runner is nil")
+		}
+		runner = runners[0]
+	}
+	return &Service{policy: policy, git: git, capabilities: capabilities, results: results, runner: runner}, nil
 }
 
 func clonePolicyRequest(in PolicyRequest) PolicyRequest {
 	return PolicyRequest{
-		CheckoutRoot: in.CheckoutRoot, ExperimentPath: in.ExperimentPath, Spike: in.Spike,
+		CheckoutRoot: in.CheckoutRoot, ExperimentPath: in.ExperimentPath, Spike: in.Spike, AcceptedCommit: in.AcceptedCommit,
 		Definition: cloneDefinition(in.Definition), Capabilities: cloneCapabilities(in.Capabilities),
 		CandidatePaths: slices.Clone(in.CandidatePaths),
 	}

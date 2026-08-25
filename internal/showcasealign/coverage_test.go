@@ -230,6 +230,17 @@ var showcaseCoverage = map[string][]coverageEvidence{
 	// real behavior the corpus can demonstrate for this verb.
 	"cli:context": {goE2E("internal/showcasealign/cli_showcase_test.go")},
 
+	// cli:experiment (CSE Wave 5B, docs/superpowers/specs/2026-08-23-cse-
+	// wave-5-application-lifecycle-design.md §8, ledger SI-145): added for
+	// the Wave 5B registry — TestCLIShowcaseExperiment
+	// (cli_showcase_test.go) drives `verdi experiment status` against the
+	// real provisioned examples/showcase store, which carries no
+	// comparative experiments at all (a genuine, disclosed fact, not a
+	// workaround — cli:context's own no-constitution pattern above),
+	// proving the real binary's typed operational refusal for an
+	// experiment the accepted tree does not carry, with nothing mutated.
+	"cli:experiment": {goE2E("internal/showcasealign/cli_showcase_test.go")},
+
 	// cli:serve: `cmd/e2eharness/main.go` launches the real `verdi serve
 	// --http <addr>` subprocess every Playwright spec in the suite runs
 	// against (never a fake/stub server) — so any SHOWCASE.-marked spec
@@ -258,6 +269,13 @@ var showcaseCoverage = map[string][]coverageEvidence{
 	"mcp:list_tasks":         {goE2E("internal/showcasealign/mcp_showcase_test.go")},
 	"mcp:get_board":          {goE2E("internal/showcasealign/mcp_showcase_test.go")},
 	"mcp:add_annotation":     {goE2E("internal/showcasealign/mcp_showcase_test.go")},
+	// mcp:experiment (CSE Wave 5B, design §8, ledger SI-145): the
+	// experiment subtest in mcp_showcase_test.go drives the live tool
+	// against the same provisioned showcase store and additionally proves
+	// its typed projection is byte-identical to the real CLI binary's for
+	// the same request (the design §8 adapter-conformance rule, exercised
+	// over real showcase content).
+	"mcp:experiment": {goE2E("internal/showcasealign/mcp_showcase_test.go")},
 
 	// --- Workbench surfaces ---
 	"wb:board":                {playwright("10-board-projection.spec.ts")},

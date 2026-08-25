@@ -601,8 +601,8 @@ func (r staticAuthorization) ResolveExecutionAuthorization(context.Context, expe
 
 type staticInputs struct{ values map[string]ResolvedInput }
 
-func (r staticInputs) ResolveExperimentInput(_ context.Context, _ string, ref experiment.ArtifactRef) (ResolvedInput, error) {
-	value, ok := r.values[ref.ID]
+func (r staticInputs) ResolveExperimentInput(_ context.Context, _ string, request ResolveInputRequest) (ResolvedInput, error) {
+	value, ok := r.values[request.Ref.ID]
 	if !ok {
 		return ResolvedInput{}, os.ErrNotExist
 	}

@@ -61,7 +61,12 @@ func listMCPTools(t *testing.T) []mcpToolDef {
 
 // guide-claim: 12-mcp-tools
 func TestMCPToolInventory(t *testing.T) {
-	// 05-surfaces.md §MCP server's table, verbatim.
+	// 05-surfaces.md §MCP server's table, verbatim, plus `experiment` (CSE
+	// Wave 5B, docs/superpowers/specs/2026-08-23-cse-wave-5-application-
+	// lifecycle-design.md §8, ledger SI-145): the one agent-facing typed
+	// gateway over internal/experimentapp, registered in the same commit as
+	// its live tooldefs.go row (the MCP tool inventory is a serialized
+	// shared registry).
 	want := []string{
 		"search_artifacts",
 		"get_artifact",
@@ -72,6 +77,7 @@ func TestMCPToolInventory(t *testing.T) {
 		"list_tasks",
 		"get_board",
 		"add_annotation",
+		"experiment",
 	}
 
 	tools := listMCPTools(t)

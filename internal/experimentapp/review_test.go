@@ -93,9 +93,9 @@ func TestReviewRegistrationIsDeterministicReadOnlyAndDisclosesDirectEdits(t *tes
 	if err := os.WriteFile(provenancePath, provenanceBytes, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	wrongIdentity, _, _ := run()
-	if wrongIdentity.Outcome.Classification != ClassificationVerdict || wrongIdentity.Outcome.Code != "direct-draft-unreconciled" {
-		t.Fatalf("decision-seal provenance outcome = %+v, want unreconciled verdict", wrongIdentity.Outcome)
+	historicalPolicy, _, _ := run()
+	if historicalPolicy.Outcome.Classification != ClassificationClean {
+		t.Fatalf("historical-policy provenance outcome = %+v", historicalPolicy.Outcome)
 	}
 
 	record.PolicyDigest = effectivePolicyDigest

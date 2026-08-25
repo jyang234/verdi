@@ -26,7 +26,7 @@ experimentrun, execworkspace, and close seams remain authoritative.
 DC-1–DC-28, CO-1–CO-7; `spec/context-integrity-v2`;
 `spec/execution-workspace`; CSE Wave 5 application/lifecycle design;
 four-feature orchestration Wave 5; SI-12–SI-13, SI-17, SI-30, SI-37,
-SI-40–SI-46, SI-58–SI-63, SI-75–SI-76, SI-126–SI-146.
+SI-40–SI-46, SI-58–SI-63, SI-75–SI-76, SI-126–SI-148.
 
 ## Contents
 
@@ -41,7 +41,7 @@ SI-40–SI-46, SI-58–SI-63, SI-75–SI-76, SI-126–SI-146.
 - Deliver exactly three pull requests: Wave 5A, 5B, and 5C. Rebase each new
   worktree from merged main after its predecessor lands.
 - Do not begin runtime until the independently reviewed planning/authority PR
-  carrying this plan, its design, and SI-139–SI-146 is owner-merged.
+  carrying this plan, its design, and SI-139–SI-148 is owner-merged.
 - Before each task, reread its cited authority and inspect the named predecessor
   APIs. Stop on any authority or public-interface contradiction; do not guess.
 - Use TDD: capture the exact RED, implement the smallest conforming change,
@@ -344,6 +344,88 @@ go test -race ./internal/experimentapp ./internal/experimentrun -count=1
 
 **Commit:** `Expose experiment execution operations`
 
+## Task 5A: Add the offline human-authorization adapter
+
+**Own:**
+
+- Add `internal/experimenthuman/challenge.go` and focused tests
+- Add `internal/experimenthuman/verify.go` and focused tests
+- Add a source-backed `policyauthority` store loader and a sealed selected-
+  profile accessor by extracting, not duplicating, the existing filesystem
+  loader and cross-validation
+- Add directly covering `internal/policyauthority` tests
+
+**Authority:** design §8; CSE AC-5, DC-7, CO-1–CO-4/CO-7;
+governance-principal fact-port authority; SI-19/SI-143–SI-147.
+
+**RED:** Prove the strict/canonical challenge schema and closed three-operation
+union; exact accepted/proposal HEAD, input, and human-artifact binding;
+source-backed policy-store equivalence; deep-cloned sealed selected profile;
+the exact `ed25519:<base64.RawURLEncoding public key>` mapped-subject grammar;
+64-byte detached-signature verification; exact evidence-digest preimage;
+zero/multiple matching keys; stale/replayed facts; and verdict versus
+operational classification. Tests use generated in-memory Ed25519 keys and
+hermetic accepted-tree fakes, never a keychain, Git config, network, or signing
+subprocess.
+
+```bash
+go test ./internal/experimenthuman ./internal/policyauthority -run 'Test(HumanChallenge|HumanProof|LoadFromSource|SelectedProfile)' -count=1
+```
+
+**GREEN:** Keep challenge/proof validation and trust-fact production in the
+shared adapter package. The adapter receives already-derived proposal facts,
+loads accepted authority only through the shared source-backed store, and
+calls the existing governance resolver. It never constructs an actor,
+interprets roles, signs data, or reads ambient credentials.
+
+```bash
+go test -race ./internal/experimenthuman ./internal/policyauthority -count=1
+go vet ./internal/experimenthuman ./internal/policyauthority
+```
+
+**Commit:** `Verify offline experiment human proofs`
+
+## Task 5B: Bind execution inputs to explicit repository paths
+
+**Own:**
+
+- Add `internal/experimentrun/inputbinding.go` and focused tests
+- Change the existing `InputResolver` request to include the closed input slot
+  and update its direct callers/tests
+- Modify `internal/experimentapp/execution.go` and focused tests to transport
+  one operation-scoped typed binding document
+
+**Authority:** design §8 explicit execution input bindings; CSE AC-3–AC-5,
+DC-3/DC-13–DC-15, CO-1–CO-4; SI-132/SI-148.
+
+**RED:** Prove no production resolver exists for the accepted definition's
+pathless `{id,digest}` references; identical ids in different roles cannot be
+resolved without a slot; and missing, extra, duplicate, noncanonical,
+identity-mismatched, unprotected, symlink, nonregular, or raw-digest-mismatched
+bindings fail before execution or durable publication.
+
+```bash
+go test ./internal/experimentrun ./internal/experimentapp -run 'Test.*InputBinding' -count=1
+```
+
+**GREEN:** Add one strict canonical-JSON
+`verdi.experiment-input-bindings/v1` codec with the required exact
+`{schema,inputs}` top-level object and operation-scoped resolver in
+`experimentrun`. Reject missing/null/unknown/duplicate fields, trailing data,
+and noncanonical bytes. Bind `workload`, `contract`,
+and `fixture:<fixture-id>` to exact definition references and paths while
+retaining the landed protected-path/raw-byte proof and receipt authority.
+Transport the typed document through `experimentapp`; do not infer paths,
+search by digest, add a store, or duplicate resolver validation.
+
+```bash
+go test -race ./internal/experimentrun ./internal/experimentapp -run 'Test.*InputBinding' -count=1
+go test -race ./internal/experimentrun ./internal/experimentapp -count=1
+go vet ./internal/experimentrun ./internal/experimentapp
+```
+
+**Commit:** `Bind experiment inputs to explicit paths`
+
 ## Task 6: Add the built-binary CLI adapter
 
 **Serialized registry ownership:** `cmd/verdi` and the CLI inventory are owned
@@ -357,12 +439,15 @@ exclusively for this task.
 - Modify CLI inventory/spec-alignment tests and showcase mappings
 - Add built-binary fixtures under `cmd/verdi/testdata/` if needed
 
-**Authority:** design §§3, 8, 10–11; CSE AC-5, CO-4/CO-7; SI-145.
+**Authority:** design §§3, 8, 10–11; CSE AC-3–AC-5, CO-1–CO-4/CO-7;
+SI-145/SI-147/SI-148.
 
 **RED:** Built-binary tests pin the exact through-5B operation inventory,
 grammar, canonical `--json`, human rendering, stdin/file boundaries where
-applicable, explicit `reconcile-draft`, every operation exit, human actor
-resolution, no output mutation on failure, and legacy usage byte stability.
+applicable, explicit `reconcile-draft`, every operation exit, offline
+signed-challenge actor resolution, exact challenge/proof/current-HEAD binding,
+required `--inputs <path|->` for start/resume through the shared binding codec,
+no output mutation on failure, and legacy usage byte stability.
 
 ```bash
 go test ./cmd/verdi -run 'Test.*Experiment.*BuiltBinary' -count=1
@@ -370,7 +455,13 @@ go test ./cmd/verdi -run 'Test.*Experiment.*BuiltBinary' -count=1
 
 **GREEN:** Add only `verdi experiment`; subcommands translate to typed core
 requests implemented through 5B. Do not predeclare or stub Wave 5C operations,
-and do not implement lifecycle logic in `cmd/verdi`.
+and do not implement lifecycle logic in `cmd/verdi`. Human-only operations
+first emit the canonical `verdi.experiment-human-challenge/v1` verdict and
+manual signing prompt; only an exact detached Ed25519 proof verified by Task
+5A against the exact accepted profile may produce a kernel-sealed human actor.
+Verdi never signs, reads private-key material, uses a keychain/forge session,
+or accesses the network. It does not infer input paths or implement a binding
+grammar.
 
 ```bash
 go test -race ./cmd/verdi -run 'Test.*Experiment' -count=1
@@ -395,11 +486,12 @@ showcase MCP mappings are owned exclusively for this task.
 - Add `internal/experimentapp/conformance_test.go`
 
 **Authority:** design §§2–3, 8, 10–11; CSE AC-5/AC-6, DC-7/DC-10/DC-11,
-CO-4/CO-7; 05 MCP safety rule; SI-145.
+CO-1–CO-4/CO-7; 05 MCP safety rule; SI-145/SI-148.
 
 **RED:** Prove strict operation union, data-never-instructions description,
 allowed agent operations, explicit refusal of reconciliation and every
 human/release/closure operation, no free-form argv or path escape, and
+strict reuse of the typed input-binding document for start/resume, and
 byte-identical semantic
 results between CLI JSON and MCP for equivalent reads, mutations, execution,
 and failures.
@@ -570,7 +662,7 @@ exclusively for this task; do not overlap another registry change.
 - Add built-binary fixtures under `cmd/verdi/testdata/` if needed
 
 **Authority:** design §§3, 8–10; CSE AC-5/AC-7, DC-7/DC-11/DC-16,
-CO-1–CO-4/CO-7; binding 05 CLI surface; SI-145/SI-146.
+CO-1–CO-4/CO-7; binding 05 CLI surface; SI-145–SI-147.
 
 **RED:** Prove the exact Wave 5C `verdi experiment` subcommands for
 ratification proposal, capsule publication, and workspace release/retry;
@@ -586,7 +678,10 @@ go test ./cmd/verdi -run 'Test.*Experiment.*(Ratification|Capsule|Release|Close)
 **GREEN:** Extend the existing `verdi experiment` dispatcher only after Tasks
 8–10 core methods exist. Translate arguments to typed application requests;
 do not duplicate lifecycle, actor, capsule, release, or closure logic in the
-CLI. The MCP union remains byte-for-byte agent-safe and unchanged.
+CLI. `propose-ratification` reuses Task 5A's same challenge/proof flow with its
+complete typed ratification-input digest; no second identity adapter or
+credential path is permitted. The MCP union remains byte-for-byte agent-safe
+and unchanged.
 
 ```bash
 go test -race ./cmd/verdi -run 'Test.*Experiment' -count=1
