@@ -1,0 +1,21 @@
+---
+id: obligation/vatc-forge-countersign--ac-2--static
+kind: obligation
+title: "scaffolded obligation: ac-2 static evidence"
+owners: ["johnyang"]
+for_kind: static
+links:
+  - { type: verifies, ref: "spec/vatc-forge-countersign" }
+frozen: { at: 2026-08-25, commit: 87e2827eadf4ae6e038858522d9d05b5a335d878 }
+---
+# scaffolded obligation: ac-2 static evidence
+
+This obligation was scaffolded by `verdi obligation scaffold`; not elaborated. It is a placeholder for ac-2's static evidence, written by `verdi
+obligation scaffold` because no obligation existed for this pair yet
+(spec/creation-surfaces#ac-4). Replace this body with a first-person
+statement of what that evidence must specifically show before relying
+on it — by hand, or via `verdi obligation author spec/vatc-forge-countersign ac-2 static` on this
+same design branch, before this pull request merges.
+The acceptance criterion's own declared text, for reference:
+
+the countersign resolver emits canonical verdi.countersign-witness/v1 carrying a deterministically ordered approval set and satisfies an attestation/countersign obligation only when the required story-review or feature-UAT role, authenticated principals, active approval states, candidate SHA, bound freshness policy, distinct-principal count, and configured separation of duties are proven
