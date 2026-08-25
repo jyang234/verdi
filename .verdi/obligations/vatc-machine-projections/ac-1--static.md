@@ -1,21 +1,24 @@
 ---
 id: obligation/vatc-machine-projections--ac-1--static
 kind: obligation
-title: "scaffolded obligation: ac-1 static evidence"
-owners: ["johnyang"]
+title: "unauthored obligation scaffold: spec/vatc-machine-projections ac-1 static"
+owners: ["platform-team"]
 for_kind: static
+quality:
+  state: unresolved-design-debt
 links:
   - { type: verifies, ref: "spec/vatc-machine-projections" }
-frozen: { at: 2026-08-25, commit: 87e2827eadf4ae6e038858522d9d05b5a335d878 }
+frozen: { at: 2026-08-25, commit: 0e8006b8b20270c9792ef6bf1a81ce165cbdcde9 }
 ---
-# scaffolded obligation: ac-1 static evidence
+# unauthored obligation scaffold: spec/vatc-machine-projections ac-1 static
 
-This obligation was scaffolded by `verdi obligation scaffold`; not elaborated. It is a placeholder for ac-1's static evidence, written by `verdi
-obligation scaffold` because no obligation existed for this pair yet
-(spec/creation-surfaces#ac-4). Replace this body with a first-person
-statement of what that evidence must specifically show before relying
-on it — by hand, or via `verdi obligation author spec/vatc-machine-projections ac-1 static` on this
-same design branch, before this pull request merges.
-The acceptance criterion's own declared text, for reference:
-
-verdi matrix accepts --json for story and feature targets and emits one canonical tagged verdi.matrix/v1 union: a common target, preview, and violated envelope plus exactly one story or feature body preserving that fold's complete native acceptance-criterion facts; the legacy text formatter and MCP get_matrix consume that same typed projection
+<!-- verdi:obligation-unauthored -->
+This obligation was scaffolded by `verdi obligation author` for spec/vatc-machine-projections's
+static evidence on ac-1 and has not been authored. Replace this entire
+paragraph, and delete the marker comment above, with your own
+statement of what that evidence must specifically show before this
+acceptance criterion can rely on it. Re-running
+`verdi obligation author spec/vatc-machine-projections ac-1 static` before this file is frozen by a
+merge to main regenerates this scaffold from scratch, discarding any
+authoring done in the meantime — the design branch is the safety net
+(git diff/checkout), not this verb.

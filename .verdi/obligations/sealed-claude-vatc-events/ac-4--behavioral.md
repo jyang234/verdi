@@ -1,21 +1,24 @@
 ---
 id: obligation/sealed-claude-vatc-events--ac-4--behavioral
 kind: obligation
-title: "scaffolded obligation: ac-4 behavioral evidence"
-owners: ["johnyang"]
+title: "unauthored obligation scaffold: spec/sealed-claude-vatc-events ac-4 behavioral"
+owners: ["platform-team"]
 for_kind: behavioral
+quality:
+  state: unresolved-design-debt
 links:
   - { type: verifies, ref: "spec/sealed-claude-vatc-events" }
-frozen: { at: 2026-08-25, commit: 87e2827eadf4ae6e038858522d9d05b5a335d878 }
+frozen: { at: 2026-08-25, commit: 0e8006b8b20270c9792ef6bf1a81ce165cbdcde9 }
 ---
-# scaffolded obligation: ac-4 behavioral evidence
+# unauthored obligation scaffold: spec/sealed-claude-vatc-events ac-4 behavioral
 
-This obligation was scaffolded by `verdi obligation scaffold`; not elaborated. It is a placeholder for ac-4's behavioral evidence, written by `verdi
-obligation scaffold` because no obligation existed for this pair yet
-(spec/creation-surfaces#ac-4). Replace this body with a first-person
-statement of what that evidence must specifically show before relying
-on it — by hand, or via `verdi obligation author spec/sealed-claude-vatc-events ac-4 behavioral` on this
-same design branch, before this pull request merges.
-The acceptance criterion's own declared text, for reference:
-
-secret-bearing values are rejected or redacted before emission, each event kind strict-decodes through its fixed verdi.context-event-payload/<kind>/v1 body, large variable detail uses the closed redacted inline-or-segment union, replay is idempotent, and duplicate conflict, sequence or revision-bridge gap, stale identity, invalid kind or payload, failed redaction, sink discontinuity, or unavailable durable append prevents an authoritative result and receipt
+<!-- verdi:obligation-unauthored -->
+This obligation was scaffolded by `verdi obligation author` for spec/sealed-claude-vatc-events's
+behavioral evidence on ac-4 and has not been authored. Replace this entire
+paragraph, and delete the marker comment above, with your own
+statement of what that evidence must specifically show before this
+acceptance criterion can rely on it. Re-running
+`verdi obligation author spec/sealed-claude-vatc-events ac-4 behavioral` before this file is frozen by a
+merge to main regenerates this scaffold from scratch, discarding any
+authoring done in the meantime — the design branch is the safety net
+(git diff/checkout), not this verb.
