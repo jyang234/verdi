@@ -9,7 +9,7 @@ problem: { text: "a sealed run still cannot support authoritative closure unless
 outcome: { text: "Verdi emits and verifies canonical builder and reviewer receipts from trusted managed-runner evidence and launches fresh sealed reviews whose packets are exact, minimal, builder-chat-free, and independently receipt-bound", anchor: outcome }
 acceptance_criteria:
   - id: ac-1
-    text: "verdi.context-receipt/v1 strict-decodes and canonically binds receipt role and authority, manifest and dispatch digests, input and output commits and trees, worktree cleanliness, event root and terminal sequence, expansion ledger, obligations, evidence commands and results, runner principal resolution, adapter identity, review inputs, review-of link, and its own digest"
+    text: "verdi.context-receipt/v1 strict-decodes and canonically binds receipt role and authority, manifest and dispatch digests, ATC runway and execution-workspace identities, input and output commits and trees, worktree cleanliness, the ordered revision-segment event-chain root plus terminal manifest/source/VATC-global sequences, expansion ledger, obligations, evidence commands and results, runner principal resolution, adapter identity, review inputs, review-of link, and its own digest"
     evidence: [static, behavioral]
     anchor: ac-1
   - id: ac-2
@@ -38,7 +38,7 @@ decisions:
     text: "hashes prove byte integrity but not runner identity or isolation; only the configured governance-principal resolver over trusted managed-runner or CI evidence can make a receipt authoritative"
     anchor: dc-3
   - id: dc-4
-    text: "a review receipt names exactly one builder receipt digest in review_of and binds the complete review packet inventory; builder and reviewer receipts form a chain, not a shared session transcript"
+    text: "a review receipt names exactly one builder receipt digest in review_of and binds the complete review packet inventory; every receipt binds the canonical ordered revision_segments array and its event_chain_root as defined by the event profile, including terminal_manifest_revision, terminal_source_sequence, and terminal_global_sequence; builder and reviewer receipts form a chain, not a shared session transcript"
     anchor: dc-4
   - id: dc-5
     text: "R0 and R2 may retain the same configured reviewer identity but are separate executions with separate manifests, dispatches, sessions, event roots, and receipts; freshness is proven from those bytes rather than asserted by the orchestrator"
@@ -73,6 +73,14 @@ and trusted-runner identity, not a claim made in review prose.
 The receipt inventory is closed and digest-bound. Missing expansions, evidence,
 events, or repository identities are visible failures rather than optional
 fields that a favorable run may omit.
+
+The `event_chain_root` is the canonical digest of the complete ordered
+`revision_segments` array defined by `spec/sealed-codex-execution`; it is not
+the final revision's event root. `terminal_manifest_revision` selects the last
+array entry, while `terminal_source_sequence` and `terminal_global_sequence`
+must equal that entry's terminal acknowledgments. Verification recomputes the
+array root and proves every predecessor bridge before considering the receipt
+complete.
 
 ## AC-2
 
@@ -109,7 +117,9 @@ Hashes prove bytes, while the governance kernel proves trusted runner identity.
 
 ### DC-4
 
-A review receipt binds exactly one builder receipt and its complete packet.
+A review receipt binds exactly one builder receipt, its complete packet, and
+the full ordered revision-event chain rather than only the final manifest
+subchain.
 
 ### DC-5
 

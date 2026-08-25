@@ -24,7 +24,7 @@ acceptance_criteria:
     evidence: [behavioral, attestation]
     anchor: ac-3
   - id: ac-4
-    text: "an authoritative Codex execution uses a sealed minimum-context manifest and immutable instruction projection, proves project-profile and worktree isolation plus approved capabilities, records classified context expansions and complete event continuity, and refuses authority on invalidation, discontinuity, or unverifiable resume"
+    text: "an authoritative Codex execution uses a sealed minimum-context manifest and immutable instruction projection, proves project-profile isolation plus a detached execution-workspace child of the clean ATC runway, records classified context expansions and a canonical cross-revision continuity record, and refuses authority on invalidation, discontinuity, unverifiable resume, or unsafe handback"
     evidence: [static, behavioral, attestation]
     anchor: ac-4
   - id: ac-5
@@ -32,7 +32,7 @@ acceptance_criteria:
     evidence: [static, behavioral, attestation]
     anchor: ac-5
   - id: ac-6
-    text: "Claude Code has the same sealed-execution invariants as Codex and both adapters emit the complete provider-observable activity stream through one strict redacted VATC event profile whose gaps, unavailable telemetry, and segment boundaries are explicit and receipt-bound"
+    text: "Claude Code has the same sealed-execution invariants as Codex and both adapters emit the complete provider-observable activity stream through one strict redacted VATC event profile with a closed per-kind payload union whose gaps, unavailable telemetry, and segment boundaries are explicit and receipt-bound"
     evidence: [static, behavioral, attestation]
     anchor: ac-6
 stubs:

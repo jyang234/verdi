@@ -13,7 +13,7 @@ acceptance_criteria:
     evidence: [static, behavioral]
     anchor: ac-1
   - id: ac-2
-    text: "the countersign resolver emits canonical verdi.countersign-witness/v1 and satisfies an attestation/countersign obligation only when the required story-review or feature-UAT role, authenticated principal, active approval state, candidate SHA, freshness policy, count, and configured separation of duties are proven"
+    text: "the countersign resolver emits canonical verdi.countersign-witness/v1 carrying a deterministically ordered approval set and satisfies an attestation/countersign obligation only when the required story-review or feature-UAT role, authenticated principals, active approval states, candidate SHA, bound freshness policy, distinct-principal count, and configured separation of duties are proven"
     evidence: [static, behavioral]
     anchor: ac-2
   - id: ac-3
@@ -27,13 +27,13 @@ decisions:
     text: "U2 adds no standalone CLI or MCP operation: existing verdi gate, verdi close --preflight, verdi close --prepare, and close publication consume the forge-backed resolver; machine consumers read its witness through the canonical journey or closure evidence they already consume"
     anchor: dc-1
   - id: dc-2
-    text: "verdi.countersign-witness/v1 contains schema, repository, forge, change_id, approval_id, approval_ref, candidate_sha, approval_state, approved_at, observed_at, principal_resolution, obligation, freshness, verdict, and witnesses; digests cover normalized values and never credential material"
+    text: "verdi.countersign-witness/v1 contains schema, repository, forge, change_id, candidate_sha, obligation, freshness, approvals, reduction, verdict, witnesses, and digest; approvals is ordered by canonical principal id then approval id and each row binds approval id/ref/state/times/candidate SHA/principal resolution/provider witnesses; reduction binds eligible approval ids, sorted distinct principals, satisfied and required counts, separation verdict, and freshness verdict"
     anchor: dc-2
   - id: dc-3
     text: "the current candidate is the forge-reported change head and must equal the locally evaluated full commit SHA; branch names, tree equality alone, display names, author claims, comments, reactions, and historical approvals cannot substitute"
     anchor: dc-3
   - id: dc-4
-    text: "a configured but unreachable forge, an approval whose identity or freshness cannot be proven, and absent forge configuration are disclosed or blocking according to the consuming transition; none are interpreted as approval"
+    text: "freshness binds the governance policy id and digest, evaluation and observation stamps, maximum observation age, optional maximum approval age, and provider snapshot identity; observation is fresh only when its nonnegative age is within the maximum, approval age is additionally checked when configured, and a configured but unreachable forge or any unproven operand is disclosed or blocking according to the consuming transition, never interpreted as approval"
     anchor: dc-4
 constraints:
   - id: co-1
@@ -86,8 +86,8 @@ standalone command exists.
 
 ### DC-2
 
-The witness schema contains the closed identity, approval, obligation,
-freshness, verdict, and witness fields declared above.
+The witness schema contains the closed multi-approval, obligation, freshness,
+reduction, verdict, and witness fields declared above.
 
 ### DC-3
 
@@ -95,8 +95,8 @@ Only the full forge change-head SHA matched to local HEAD binds a candidate.
 
 ### DC-4
 
-Unavailable or unauthenticated forge facts are blocking or disclosed-unproven,
-never approval.
+Freshness is computed from the bound policy and forge snapshot. Unavailable or
+unauthenticated facts are blocking or disclosed-unproven, never approval.
 
 ## Constraints
 
@@ -111,3 +111,47 @@ Forge contract tests use hermetic HTTP and in-memory fakes without network.
 ### CO-3
 
 Countersign resolution is read-only and cannot request approval or mutate Git.
+
+## Countersign witness contract
+
+The canonical witness has this closed shape:
+
+```text
+schema: "verdi.countersign-witness/v1"
+repository, forge, change_id, candidate_sha
+obligation: {
+  transition, scheme, kind, role, required_count,
+  governance_profile_id, governance_profile_digest, separation_rule
+}
+freshness: {
+  policy_id, policy_digest, evaluated_at, observed_at,
+  maximum_observation_age_seconds, maximum_approval_age_seconds,
+  provider_snapshot_id
+}
+approvals[]: {
+  approval_id, approval_ref, state, approved_at, updated_at, candidate_sha,
+  principal_resolution, provider_witnesses[]
+}
+reduction: {
+  eligible_approval_ids[], distinct_principal_ids[],
+  eligible_count, required_count, freshness_verdict, separation_verdict
+}
+verdict, witnesses[], digest
+```
+
+Times are normalized UTC RFC3339Nano stamps. `maximum_approval_age_seconds`
+is zero only when the bound policy imposes no approval-age ceiling; the live
+observation-age check always applies. A negative age, missing snapshot id,
+future provider stamp, or age above its configured maximum is not fresh.
+
+The adapter rejects duplicate approval ids. The resolver retains every
+normalized approval row, then selects rows that are active, exact-candidate,
+fresh, role-authorized, and authenticated. Eligible rows sort by canonical
+principal id and approval id. Multiple rows for one canonical principal count
+once; `eligible_approval_ids` retains all contributing ids while
+`distinct_principal_ids` is the kernel-normalized set used for
+`eligible_count`. The governance kernel evaluates the declared separation
+rule against those principals and the candidate author. `proven` requires
+`eligible_count >= required_count` and a proven separation verdict. Missing,
+violated, or unproven operands preserve their own witnesses and cannot be
+reduced to a pass.

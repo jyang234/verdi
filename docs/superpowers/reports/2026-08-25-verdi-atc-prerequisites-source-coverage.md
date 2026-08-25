@@ -20,7 +20,9 @@ their originating group and are cited as corroboration.
 
 The source set is closed to:
 
-1. Verdi-ATC `PLAN.md` §§2–4 and the global Stage 0.5 constraints;
+1. Verdi-ATC `PLAN.md` §§2–4 and its binding subordinate
+   `docs/superpowers/plans/2026-08-24-verdi-atc-stage-0.5.md`, including the
+   global Stage 0.5 constraints;
 2. `docs/design/specs/00-verdi-atc-v0.5-ste.md` §§4.7, 5.4, 6, 7, 8, 14,
    and the applicable binding decisions in §15;
 3. `docs/design/amendments/001-sealed-flight-plans-and-central-recorder.md`
@@ -40,13 +42,13 @@ copied into the accepted specifications and are itemized below.
 | # | Source authority | Units | Canonical destination | Transformation / omission |
 |---|---|---:|---|---|
 | 1 | PLAN §§2–4: Verdi retains authority; ATC consumes pinned strict CLI/MCP and never invents upstream semantics | 1 | feature DC-1/DC-3 | Restated as the ownership and wire-change boundary |
-| 2 | PLAN U0: exact feature delivery and six accepted story refs | 1 | feature stubs; six story ids | Canonicalized under the approved narrow feature; no story omitted |
-| 3 | PLAN U1: canonical matrix plus explicit journey JSON, shared projection/MCP parity | 2 | feature AC-1; machine-projections AC-1/AC-2 and DC-1–DC-3 | Exact schema and invocation names made normative |
-| 4 | PLAN U2: authenticated candidate-bound approval, principal/freshness/revocation, story/feature consumption | 3 | feature AC-2/DC-4; forge-countersign AC-1–AC-3 | Provider-neutral witness fixed; no file countersign |
+| 2 | Stage 0.5 subordinate plan Task U0: exact feature delivery and six accepted story refs | 1 | feature stubs; six story ids | Canonicalized under the approved narrow feature; no story omitted |
+| 3 | PLAN U1: canonical matrix plus explicit journey JSON, shared projection/MCP parity | 2 | feature AC-1; machine-projections AC-1/AC-2 and DC-1–DC-3 | Exact tagged story/feature result union and invocation names made normative |
+| 4 | PLAN U2: authenticated candidate-bound approval, principal/freshness/revocation, story/feature consumption | 3 | feature AC-2/DC-4; forge-countersign AC-1–AC-3 | Provider-neutral multi-approval witness, deterministic reduction, and freshness fixed; no file countersign |
 | 5 | PLAN U3: non-primary runway transcript and repair only a proven gap | 2 | feature AC-3; worktree-contract AC-1–AC-3/DC-2 | Planning test intent promoted without presupposing a runtime defect |
-| 6 | PLAN U4: isolation, immutable authority, capabilities/expansion, invalidation/resume/events | 4 | feature AC-4/DC-5/DC-6; sealed-codex AC-1–AC-4 | Harness-neutral core plus exact Codex public wire fixed |
-| 7 | PLAN U5: authenticated builder/reviewer chain, trusted runner, fresh isolated review | 3 | feature AC-5; receipts-review AC-1–AC-4 | Receipt production and verification separated explicitly |
-| 8 | PLAN U6: Claude parity, normalized/redacted events, discontinuity honesty | 3 | feature AC-6; sealed-claude AC-1–AC-4 | Shared adapter/event contract fixed rather than provider-log forwarding |
+| 6 | PLAN U4: isolation, immutable authority, capabilities/expansion, invalidation/resume/events | 4 | feature AC-4/DC-5/DC-6; sealed-codex AC-1–AC-4/DC-6/DC-7 | Harness-neutral core, controller/child workspaces, continuity record, and exact Codex public wire fixed |
+| 7 | PLAN U5: authenticated builder/reviewer chain, trusted runner, fresh isolated review | 3 | feature AC-5; receipts-review AC-1–AC-4 | Receipt production and verification separated; complete ordered revision chain bound explicitly |
+| 8 | PLAN U6: Claude parity, normalized/redacted events, discontinuity honesty | 3 | feature AC-6; sealed-claude AC-1–AC-4 and payload union | Shared adapter/event contract and exhaustive per-kind bodies fixed rather than provider-log forwarding |
 | 9 | PLAN global gates: strict decode, exit 0/1/2, hermetic tests, full verify/race | 4 | feature CO-1–CO-6 and child constraints | Consolidated once at feature level and specialized per story |
 | 10 | v0.5 §4.7/D2: matrix and journey `--json`; canonical JSON; MCP fallback; no text scraping | 2 | machine-projections AC-1–AC-3/DC-1–DC-3 | Existing `get_matrix` retained; operational fallback remains ATC-side |
 | 11 | v0.5 §§4.7, 6, 7, 15 F-23/D1: authenticated story-review and G3 feature approvals, exact candidate, reference, no tree write | 4 | forge-countersign AC-1–AC-3/DC-1–DC-4 | Role names normalized to story-review and feature-UAT obligations |
@@ -58,12 +60,12 @@ copied into the accepted specifications and are itemized below.
 | 17 | Amendment §3: minimum authority/data inventory, classified exclusions/opaque rows, no excluded-content reads | 4 | sealed-codex AC-1/co-1/co-2 and DC-3 | Content-minimization and non-reading rule retained verbatim in semantics |
 | 18 | Amendment §4: flight plan read, scoped expansion, child manifest/event, invalidating changes | 4 | sealed-codex AC-2 and DC-2; SI-149 | Conceptual operations fixed as `get_flight_plan` and `request_context` |
 | 19 | Amendment §5: project-controlled proof boundary, opaque vendor input, no secrets or hidden-reasoning claim | 3 | feature DC-5; sealed-codex DC-4/co-1; sealed-claude DC-5/co-1 | Provider summaries restricted to non-gating telemetry |
-| 20 | Amendment §6: complete provider-observable activity, normalized events, digest-bound large segments | 3 | feature AC-6; sealed-claude AC-2–AC-4/DC-2/DC-4 | Closed event vocabulary and segment metadata made exact |
-| 21 | Amendment §6: strict decode, identity/sequence, redact, durable append/project/ack, idempotency/gap refusal | 4 | feature DC-6; sealed-codex AC-3; sealed-claude AC-2/AC-4/DC-3 | Source and VATC global sequence explicitly separated |
-| 22 | Amendment §7: author continuity, candidate delta, fresh R0/R2, replacement from records not memory | 4 | sealed-codex AC-4; receipts-review AC-3/AC-4/DC-4/DC-5 | Builder chat and prior reviewer conversation explicitly excluded |
+| 20 | Amendment §6: complete provider-observable activity, normalized events, digest-bound large segments | 3 | feature AC-6; sealed-claude AC-2–AC-4/DC-2/DC-4 and payload union | Closed event vocabulary, strict per-kind bodies, and detail substitution made exact |
+| 21 | Amendment §6: strict decode, identity/sequence, redact, durable append/project/ack, idempotency/gap refusal | 4 | feature DC-6; sealed-codex AC-3/event continuity; sealed-claude AC-2/AC-4/DC-3 | Revision-local source order, cross-revision bridge, and VATC global order explicitly separated |
+| 22 | Amendment §7: author continuity, candidate delta, fresh R0/R2, replacement from records not memory | 4 | sealed-codex AC-4/DC-7; receipts-review AC-3/AC-4/DC-4/DC-5 | Canonical continuity record replaces memory; builder chat and prior reviewer conversation explicitly excluded |
 | 23 | Amendment §8: stale identity quarantine, denied context/write, recorder discontinuity, G2 expansion, no invented Failed state | 5 | sealed-codex AC-2–AC-4/DC-5/co-3; sealed-claude AC-4 | ATC's G2/state ownership referenced but not duplicated in Verdi |
-| 24 | Amendment §9: two adapters, manifest/projection/child schemas, scoped expansion, strict events, receipts, advisory mode | 6 | feature AC-4–AC-6; U4–U6 stories | All six additions land across the three accepted story boundaries |
-| 25 | Amendment §10: deterministic parity, ambient exclusion, fail-closed access/gaps, restart, fresh R0/R2, honest VATC projection | 6 | feature AC-4–AC-6/DC-5/DC-6; U4–U6 ACs | Acceptance split only where an independently testable story owns it |
+| 24 | Amendment §9: two adapters, manifest/projection/child schemas, scoped expansion, strict events, receipts, advisory mode | 6 | feature AC-4–AC-6; U4–U6 stories | Serial ownership is U4 envelope/continuity, U5 receipts, U6 exhaustive payload registry and Claude parity |
+| 25 | Amendment §10: deterministic parity, ambient exclusion, fail-closed access/gaps, restart, fresh R0/R2, honest VATC projection | 6 | feature AC-4–AC-6/DC-5/DC-6; U4–U6 ACs | Acceptance fixes controller/child isolation, exact resume continuity, and strict payload parity at their owning stories |
 | 26 | Context Integrity v2 AC-4 | 1 | sealed-codex implements link plus AC-1–AC-4 | Existing stub fulfilled directly, not copied into a competing feature only |
 | 27 | Context Integrity v2 AC-5 | 1 | receipts-review implements link plus AC-1–AC-4 | Existing stub fulfilled directly, not copied into a competing feature only |
 | 28 | Context Integrity v2 DC-1, DC-2, DC-9–DC-13, DC-16 | 8 | feature DC-1/DC-5/DC-6; sealed-codex decisions; receipts-review decisions | Harness neutrality, proof boundary, immutability, continuity, trust, review, and channel separation preserved |
@@ -96,5 +98,7 @@ stage/repository.
 - Non-semantic or out-of-scope planning groups intentionally not promoted:
   **20** (18 enumerated mechanics and 2 grouped scope exclusions)
 
-Result: **proven for source coverage, pending independent semantic review and
-owner merge for authority**.
+Mechanical mapping: **proven 96/96**. Semantic losslessness is
+**disclosed-as-unproven pending the same independent reviewer's closure check
+after the one correction pass**. No implementation may launch on this state;
+authority still requires owner merge.
