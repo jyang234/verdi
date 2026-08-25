@@ -18,6 +18,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"slices"
 
 	"github.com/jyang234/verdi/internal/draftmutation"
 	"github.com/jyang234/verdi/internal/experiment"
@@ -106,12 +107,11 @@ func (s *Service) ProposeRatification(ctx context.Context, identity Identity, in
 	} else if !errors.Is(err, fs.ErrNotExist) {
 		return RatificationProposalResult{Outcome: operationalOutcome("accepted-tree-invalid", err)}
 	}
-	registration := s.AcceptedRegistration(ctx, identity)
+	// The registration pair is judged against the SAME resolved snapshot:
+	// the accepted HEAD and tree are resolved exactly once (design §7).
+	registration := s.acceptedRegistrationAt(identity, snapshot)
 	if registration.Outcome.Classification != ClassificationClean {
 		return RatificationProposalResult{Outcome: registration.Outcome}
-	}
-	if snapshot.revision.Head != registration.AcceptedHead || snapshot.experimentPath != registration.ExperimentPath {
-		return RatificationProposalResult{Outcome: operationalOutcome("accepted-tree-invalid", fmt.Errorf("experimentapp: accepted registration and ratification snapshot differ"))}
 	}
 	definitionBytes, err := fs.ReadFile(snapshot.source, path.Join(snapshot.experimentPath, "experiment.yaml"))
 	if err != nil {
@@ -164,6 +164,9 @@ func (s *Service) ProposeRatification(ctx context.Context, identity Identity, in
 	}
 	if resultDigest != input.ResultDigest {
 		return RatificationProposalResult{Outcome: operationalOutcome("result-invalid", fmt.Errorf("experimentapp: accepted run %q result digest %q does not match requested %q", matchedRun, resultDigest, input.ResultDigest))}
+	}
+	if result.Schema != experiment.ResultSchemaV2 {
+		return RatificationProposalResult{Outcome: verdictOutcome("ratification-evidence-v1", "the selected result is decode-only v1 evidence without an execution receipt and cannot become fresh ratification authority")}
 	}
 
 	record := experiment.Ratification{
@@ -306,6 +309,65 @@ func (s *Service) AcceptedRatification(ctx context.Context, identity Identity, a
 	}
 	if derived.State != experiment.StateRatified {
 		return AcceptedRatificationResult{Outcome: operationalOutcome("state-invalid", fmt.Errorf("experimentapp: accepted tree carries ratification bytes but derives state %q", derived.State))}
+	}
+
+	// The bound result must be authoritative v2 evidence with its validated
+	// execution receipt: v1 runs remain decode-only state history and can
+	// never anchor fresh release or closure authority (design §7, AC-1).
+	matchedRun := ""
+	for _, run := range derived.Runs {
+		if run.ResultDigest == record.ResultDigest {
+			matchedRun = run.Run
+		}
+	}
+	if matchedRun == "" {
+		return AcceptedRatificationResult{Outcome: operationalOutcome("state-invalid", fmt.Errorf("experimentapp: ratified state names no run for result digest %q", record.ResultDigest))}
+	}
+	resultRaw, err := fs.ReadFile(snapshot.source, path.Join(snapshot.experimentPath, "runs", matchedRun, "result.json"))
+	if err != nil {
+		return AcceptedRatificationResult{Outcome: operationalOutcome("result-unreadable", err)}
+	}
+	boundResult, err := experiment.DecodeResult(resultRaw)
+	if err != nil {
+		return AcceptedRatificationResult{Outcome: operationalOutcome("result-invalid", err)}
+	}
+	if boundResult.Schema != experiment.ResultSchemaV2 {
+		return AcceptedRatificationResult{Outcome: verdictOutcome("ratification-evidence-v1", "the bound result is decode-only v1 evidence without an execution receipt and cannot carry ratification authority")}
+	}
+
+	// The accepted resolver proves the complete artifact/provenance pair
+	// (design §6): the final provenance record must be the exact
+	// authenticated propose-ratification mutation for these bytes.
+	provenanceRaw, err := fs.ReadFile(snapshot.source, path.Join(snapshot.experimentPath, experiment.ProvenanceFile))
+	if errors.Is(err, fs.ErrNotExist) {
+		return AcceptedRatificationResult{Outcome: verdictOutcome("ratification-provenance-incomplete", "accepted ratification bytes carry no mutation-provenance record")}
+	}
+	if err != nil {
+		return AcceptedRatificationResult{Outcome: operationalOutcome("mutation-provenance-invalid", err)}
+	}
+	records, err := experiment.DecodeProvenanceLog(provenanceRaw)
+	if err != nil {
+		return AcceptedRatificationResult{Outcome: operationalOutcome("mutation-provenance-invalid", err)}
+	}
+	if len(records) == 0 {
+		return AcceptedRatificationResult{Outcome: verdictOutcome("ratification-provenance-incomplete", "accepted mutation provenance is empty")}
+	}
+	acceptedDigest, err := artifactSetDigest(snapshot.source.files, snapshot.experimentPath)
+	if err != nil {
+		return AcceptedRatificationResult{Outcome: operationalOutcome("artifact-digest-invalid", err)}
+	}
+	last := records[len(records)-1]
+	wantIdentity := experiment.ProvenanceExperiment{Spike: identity.Spike, ID: identity.ExperimentID}
+	wantPaths := []string{path.Join(snapshot.experimentPath, ratificationFileName)}
+	if last.Operation != experiment.MutationProposeRatification || last.Experiment != wantIdentity ||
+		last.ResultDigest != acceptedDigest || !slices.Equal(last.Paths, wantPaths) {
+		return AcceptedRatificationResult{Outcome: verdictOutcome("ratification-provenance-incomplete", "accepted ratification and provenance do not form one complete propose-ratification pair")}
+	}
+	if last.Attribution.Unauthenticated || last.Attribution.PrincipalID == "" {
+		return AcceptedRatificationResult{Outcome: operationalOutcome("ratification-provenance-identity", fmt.Errorf("experimentapp: the accepted propose-ratification record is not attributed to an authenticated principal"))}
+	}
+	if string(last.Attribution.PrincipalID) != record.ActorV2.PrincipalID {
+		return AcceptedRatificationResult{Outcome: operationalOutcome("ratification-provenance-identity", fmt.Errorf("experimentapp: provenance attribution principal %q does not correspond to the ratification actor %q", last.Attribution.PrincipalID, record.ActorV2.PrincipalID))}
 	}
 
 	claim := governanceprincipal.PrincipalClaim{TrustSource: record.ActorV2.TrustSource, Subject: record.ActorV2.Subject}

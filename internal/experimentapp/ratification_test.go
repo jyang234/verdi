@@ -76,11 +76,9 @@ func ratificationResolve(t *testing.T, facts trustFactReaderFunc) governanceprin
 	return resolution
 }
 
-// writeRatifiableRun materializes one complete accepted run (v1
-// observations plus v1 result — decode-only run evidence needs no
-// receipt) under the worktree experiment directory and returns the exact
-// result digest.
-func writeRatifiableRun(t *testing.T, root string, def experiment.Definition, run string, cacheValue int) string {
+// ratifiableObservations builds one complete observation set for the
+// locked definition, with the cache candidate at cacheValue.
+func ratifiableObservations(t *testing.T, def experiment.Definition, run string, cacheValue int, schema string) []experiment.Observation {
 	t.Helper()
 	definitionDigest, err := experiment.DefinitionDigest(def)
 	if err != nil {
@@ -103,6 +101,17 @@ func writeRatifiableRun(t *testing.T, root string, def experiment.Definition, ru
 			})
 		}
 	}
+	if schema == experiment.ObservationSchemaV2 {
+		for i := range observations {
+			observations[i].Schema = experiment.ObservationSchemaV2
+			observations[i].Outcome = &experiment.CandidateOutcome{Kind: experiment.OutcomeCompleted}
+		}
+	}
+	return observations
+}
+
+func encodeRatifiableObservations(t *testing.T, observations []experiment.Observation) []byte {
+	t.Helper()
 	var observationBytes bytes.Buffer
 	for _, observation := range observations {
 		line, err := experiment.EncodeObservation(observation)
@@ -111,6 +120,112 @@ func writeRatifiableRun(t *testing.T, root string, def experiment.Definition, ru
 		}
 		observationBytes.Write(line)
 	}
+	return observationBytes.Bytes()
+}
+
+// ratifiableReceipt builds a schema-valid execution receipt for the locked
+// definition and run (the acceptingVerifier fixture judges deeper parity).
+func ratifiableReceipt(t *testing.T, def experiment.Definition, run string) experiment.ExecutionReceipt {
+	t.Helper()
+	definitionDigest, err := experiment.DefinitionDigest(def)
+	if err != nil {
+		t.Fatal(err)
+	}
+	candidates := make([]experiment.ReceiptCandidate, 0, len(def.Candidates))
+	for _, candidate := range def.Candidates {
+		workspaceID, err := experiment.WorkspaceRunID(definitionDigest, run, candidate.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		candidates = append(candidates, experiment.ReceiptCandidate{
+			ID: candidate.ID, BaseCommit: candidate.Base, PatchDigest: candidate.Digest, WorkspaceRunID: workspaceID,
+			Materialization: experiment.WorkspaceIdentity{Shape: experiment.WorkspaceBasePlusPatch, RunID: workspaceID, CommitSHA: candidate.Base, PatchSHA256: strings.TrimPrefix(candidate.Digest, "sha256:")},
+		})
+	}
+	return experiment.ExecutionReceipt{
+		Schema: experiment.ExecutionReceiptSchema, ExperimentDigest: definitionDigest, Run: run,
+		EnvironmentPolicy: def.Execution.EnvironmentPolicy,
+		AuthorityDigest:   "sha256:" + strings.Repeat("1", 64), CapabilitiesDigest: def.Evaluator.CapabilitiesDigest,
+		ScheduleDigest: "sha256:" + strings.Repeat("2", 64), GrantsDigest: "sha256:" + strings.Repeat("3", 64),
+		Fingerprint: experiment.ExecutionFingerprint{OS: "linux", Arch: "amd64", ToolVersions: map[string]string{"evaluator": "2.1.0", "verdi": "0.1.0"}, Env: map[string]*string{}, InputDigests: map[string]string{
+			"inputs/workload.txt": strings.TrimPrefix(def.Workload.Digest, "sha256:"),
+		}},
+		Enforcement: []experiment.ReceiptEnforcement{{Kind: "process-execution", Applied: true, Reason: "allowlist applied"}, {Kind: "timeouts", Applied: true, Reason: "deadline applied"}},
+		Network:     experiment.ReceiptNetwork{Mode: experiment.NetworkDeny, Configured: true, Reason: "network namespace configured"},
+		Candidates:  candidates,
+		Versions:    experiment.ReceiptVersions{Verdi: "0.1.0", RecommendationEngine: string(experiment.AlgorithmV1)},
+		Disclosures: []experiment.ReceiptDisclosure{experiment.DisclosureCPUAllocationUnproven, experiment.DisclosureMemoryAllocationUnproven},
+	}
+}
+
+// writeRatifiableRun materializes one complete accepted run with
+// AUTHORITATIVE v2 evidence — v2 observations, a validated execution
+// receipt, and the v2 result binding that receipt — and returns the exact
+// result digest (design §7: ratification is proven only with the receipt).
+func writeRatifiableRun(t *testing.T, root string, def experiment.Definition, run string, cacheValue int) string {
+	t.Helper()
+	observations := ratifiableObservations(t, def, run, cacheValue, experiment.ObservationSchemaV2)
+	core, err := experimentdecision.Evaluate(def, observations, experimentdecision.EnvironmentAttestation{PolicyID: def.Execution.EnvironmentPolicy})
+	if err != nil {
+		t.Fatal(err)
+	}
+	decision, err := experiment.DecisionFromResult(core, observations)
+	if err != nil {
+		t.Fatal(err)
+	}
+	receipt := ratifiableReceipt(t, def, run)
+	receiptDigest, err := experiment.ExecutionReceiptDigest(receipt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := experiment.NewResultV2(decision, experiment.ResultExecution{
+		ExecutionDigest: receiptDigest,
+		Isolation: experiment.ResultIsolation{
+			Network:     receipt.Network,
+			Disclosures: []experiment.IsolationDisclosure{},
+		},
+		WarmupDiagnostics: experiment.WarmupDiagnostics{
+			Authority: experiment.WarmupAuthorityNonDecisionDiagnostic,
+			Scope:     experiment.WarmupScopeFinalInvocation, Failures: []experiment.WarmupFailure{},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	receiptBytes, err := experiment.EncodeExecutionReceipt(receipt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resultBytes, err := experiment.EncodeResult(result)
+	if err != nil {
+		t.Fatal(err)
+	}
+	runDir := filepath.Join(filepath.Dir(mutationDefinitionPath(root)), "runs", run)
+	if err := os.MkdirAll(runDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(runDir, "execution.json"), receiptBytes, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(runDir, "observations.jsonl"), encodeRatifiableObservations(t, observations), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(runDir, "result.json"), resultBytes, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	digest, err := experiment.ResultDigest(result)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return digest
+}
+
+// writeRatifiableRunV1 materializes decode-only v1 run evidence — v1
+// observations and a receiptless v1 result — which remains valid state
+// history but must never become fresh ratification authority.
+func writeRatifiableRunV1(t *testing.T, root string, def experiment.Definition, run string, cacheValue int) string {
+	t.Helper()
+	observations := ratifiableObservations(t, def, run, cacheValue, experiment.ObservationSchema)
 	result, err := experimentdecision.Evaluate(def, observations, experimentdecision.EnvironmentAttestation{PolicyID: def.Execution.EnvironmentPolicy})
 	if err != nil {
 		t.Fatal(err)
@@ -123,7 +238,7 @@ func writeRatifiableRun(t *testing.T, root string, def experiment.Definition, ru
 	if err := os.MkdirAll(runDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(runDir, "observations.jsonl"), observationBytes.Bytes(), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(runDir, "observations.jsonl"), encodeRatifiableObservations(t, observations), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(runDir, "result.json"), resultBytes, 0o600); err != nil {
@@ -545,4 +660,253 @@ func TestAcceptedRatificationRefusesHistoryAndCorruption(t *testing.T) {
 			t.Fatalf("outcome = %+v, want operational derived-id mismatch", result.Outcome)
 		}
 	})
+}
+
+// plantAcceptedRatification writes ratification bytes (and, when record is
+// non-nil, a chain-valid propose-ratification provenance record) directly
+// into the worktree and regenerates the accepted tree — the direct-Git-edit
+// shapes the accepted resolver must judge.
+func plantAcceptedRatification(t *testing.T, root string, service *Service, encoded []byte, provenance *experiment.ProvenanceRecord) {
+	t.Helper()
+	experimentDir := filepath.Dir(mutationDefinitionPath(root))
+	experimentPath := filepath.ToSlash(filepath.Join(".verdi", "specs", "active", "request-path-spike", "experiments", "request-path-v2"))
+	if err := os.WriteFile(filepath.Join(experimentDir, "ratification.yaml"), encoded, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if provenance != nil {
+		proposed, err := readProposedArtifactFiles(root, experimentPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, provenanceFile, err := appendProvenance(proposed, experimentPath, *provenance)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(root, filepath.FromSlash(provenanceFile.path)), provenanceFile.new, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	service.git = gitFromExperimentDir(t, root, "request-path-v2")
+}
+
+// ratificationPairRecord builds the exact final provenance record a genuine
+// propose-ratification mutation appends, with the given attribution.
+func ratificationPairRecord(t *testing.T, root string, encoded []byte, attribution governanceprincipal.Attribution) experiment.ProvenanceRecord {
+	t.Helper()
+	experimentPath := filepath.ToSlash(filepath.Join(".verdi", "specs", "active", "request-path-spike", "experiments", "request-path-v2"))
+	proposed, err := readProposedArtifactFiles(root, experimentPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ratificationPath := experimentPath + "/ratification.yaml"
+	previous := cloneFileMap(proposed)
+	delete(previous, ratificationPath)
+	previousDigest, err := artifactSetDigest(previous, experimentPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	withRatification := cloneFileMap(previous)
+	withRatification[ratificationPath] = encoded
+	resultDigest, err := artifactSetDigest(withRatification, experimentPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return experiment.ProvenanceRecord{
+		Schema: experiment.ProvenanceSchema, Experiment: experiment.ProvenanceExperiment{Spike: "spec/request-path-spike", ID: "request-path-v2"},
+		Operation: experiment.MutationProposeRatification, PreviousDigest: previousDigest, ResultDigest: resultDigest,
+		PolicyDigest:   "sha256:" + strings.Repeat("4", 64),
+		PolicyDecision: experiment.ProvenancePolicyDecision{State: experiment.PolicyAllowed, Reasons: []experiment.ProvenancePolicyReason{}},
+		Attribution:    attribution, Paths: []string{ratificationPath},
+	}
+}
+
+func ratificationV2Bytes(t *testing.T, resolution governanceprincipal.PrincipalResolution, resultDigest string) []byte {
+	t.Helper()
+	encoded, err := experiment.EncodeRatification(experiment.Ratification{
+		Schema: experiment.RatificationSchemaV2, ResultDigest: resultDigest,
+		ActorV2: &experiment.RatificationActor{
+			TrustSource: resolution.Claim.TrustSource, Subject: resolution.Claim.Subject,
+			PrincipalID: string(resolution.PrincipalID),
+		},
+		Disposition: experiment.DispositionSelectRecommended,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return encoded
+}
+
+func TestProposeRatificationRefusesReceiptlessV1Evidence(t *testing.T) {
+	root, service, identity, _, _ := ratifiableService(t)
+	resolution := ratificationResolve(t, ratificationFacts("user-123"))
+	human := humanRatificationIdentity(t, identity, resolution)
+	definitionBytes, err := os.ReadFile(mutationDefinitionPath(root))
+	if err != nil {
+		t.Fatal(err)
+	}
+	locked, err := experiment.DecodeDefinition(definitionBytes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	v1Digest := writeRatifiableRunV1(t, root, locked, "run-legacy", 40)
+	service.git = gitFromExperimentDir(t, root, "request-path-v2")
+	result := service.ProposeRatification(context.Background(), human, RatificationProposalInput{
+		ResultDigest: v1Digest, Disposition: experiment.DispositionSelectRecommended, Resolution: resolution,
+	})
+	if result.Outcome.Classification != ClassificationVerdict || result.Outcome.Code != "ratification-evidence-v1" {
+		t.Fatalf("ProposeRatification(v1 evidence) outcome = %+v, want ratification-evidence-v1 verdict", result.Outcome)
+	}
+}
+
+func TestAcceptedRatificationRequiresProvenancePair(t *testing.T) {
+	authorityFor := func(t *testing.T) AcceptedRatificationAuthority {
+		return AcceptedRatificationAuthority{Profile: ratificationProfile(t, "github"), Facts: ratificationFacts("user-123")}
+	}
+
+	t.Run("valid record without its final provenance record is not clean", func(t *testing.T) {
+		root, service, identity, winnerDigest, _ := ratifiableService(t)
+		resolution := ratificationResolve(t, ratificationFacts("user-123"))
+		human := humanRatificationIdentity(t, identity, resolution)
+		plantAcceptedRatification(t, root, service, ratificationV2Bytes(t, resolution, winnerDigest), nil)
+		result := service.AcceptedRatification(context.Background(), human, authorityFor(t))
+		if result.Outcome.Classification != ClassificationVerdict || result.Outcome.Code != "ratification-provenance-incomplete" {
+			t.Fatalf("outcome = %+v, want ratification-provenance-incomplete verdict", result.Outcome)
+		}
+	})
+
+	t.Run("complete planted pair with authenticated attribution is clean", func(t *testing.T) {
+		root, service, identity, winnerDigest, _ := ratifiableService(t)
+		resolution := ratificationResolve(t, ratificationFacts("user-123"))
+		human := humanRatificationIdentity(t, identity, resolution)
+		encoded := ratificationV2Bytes(t, resolution, winnerDigest)
+		attribution, err := governanceprincipal.NewPrincipalAttribution(resolution.PrincipalID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		record := ratificationPairRecord(t, root, encoded, attribution)
+		plantAcceptedRatification(t, root, service, encoded, &record)
+		result := service.AcceptedRatification(context.Background(), human, authorityFor(t))
+		if result.Outcome.Classification != ClassificationClean {
+			t.Fatalf("outcome = %+v, want clean", result.Outcome)
+		}
+	})
+
+	t.Run("unauthenticated final attribution is operational", func(t *testing.T) {
+		root, service, identity, winnerDigest, _ := ratifiableService(t)
+		resolution := ratificationResolve(t, ratificationFacts("user-123"))
+		human := humanRatificationIdentity(t, identity, resolution)
+		encoded := ratificationV2Bytes(t, resolution, winnerDigest)
+		record := ratificationPairRecord(t, root, encoded, governanceprincipal.NewUnauthenticatedAttribution())
+		plantAcceptedRatification(t, root, service, encoded, &record)
+		result := service.AcceptedRatification(context.Background(), human, authorityFor(t))
+		if result.Outcome.Classification != ClassificationOperational {
+			t.Fatalf("outcome = %+v, want operational", result.Outcome)
+		}
+	})
+
+	t.Run("final attribution principal must match the record actor", func(t *testing.T) {
+		root, service, identity, winnerDigest, _ := ratifiableService(t)
+		resolution := ratificationResolve(t, ratificationFacts("user-123"))
+		human := humanRatificationIdentity(t, identity, resolution)
+		encoded := ratificationV2Bytes(t, resolution, winnerDigest)
+		otherID, err := governanceprincipal.CanonicalPrincipalID("github", "user-456")
+		if err != nil {
+			t.Fatal(err)
+		}
+		otherAttribution, err := governanceprincipal.NewPrincipalAttribution(otherID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		record := ratificationPairRecord(t, root, encoded, otherAttribution)
+		plantAcceptedRatification(t, root, service, encoded, &record)
+		result := service.AcceptedRatification(context.Background(), human, authorityFor(t))
+		if result.Outcome.Classification != ClassificationOperational {
+			t.Fatalf("outcome = %+v, want operational", result.Outcome)
+		}
+	})
+
+	t.Run("final record must name the exact ratification path", func(t *testing.T) {
+		root, service, identity, winnerDigest, _ := ratifiableService(t)
+		resolution := ratificationResolve(t, ratificationFacts("user-123"))
+		human := humanRatificationIdentity(t, identity, resolution)
+		encoded := ratificationV2Bytes(t, resolution, winnerDigest)
+		attribution, err := governanceprincipal.NewPrincipalAttribution(resolution.PrincipalID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		record := ratificationPairRecord(t, root, encoded, attribution)
+		record.Paths = []string{record.Paths[0] + ".renamed"}
+		plantAcceptedRatification(t, root, service, encoded, &record)
+		result := service.AcceptedRatification(context.Background(), human, authorityFor(t))
+		if result.Outcome.Classification != ClassificationVerdict || result.Outcome.Code != "ratification-provenance-incomplete" {
+			t.Fatalf("outcome = %+v, want ratification-provenance-incomplete verdict", result.Outcome)
+		}
+	})
+
+	t.Run("final record must bind the exact accepted artifact-set digest", func(t *testing.T) {
+		root, service, identity, winnerDigest, _ := ratifiableService(t)
+		resolution := ratificationResolve(t, ratificationFacts("user-123"))
+		human := humanRatificationIdentity(t, identity, resolution)
+		encoded := ratificationV2Bytes(t, resolution, winnerDigest)
+		attribution, err := governanceprincipal.NewPrincipalAttribution(resolution.PrincipalID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		record := ratificationPairRecord(t, root, encoded, attribution)
+		record.ResultDigest = "sha256:" + strings.Repeat("8", 64)
+		plantAcceptedRatification(t, root, service, encoded, &record)
+		result := service.AcceptedRatification(context.Background(), human, authorityFor(t))
+		if result.Outcome.Classification != ClassificationVerdict || result.Outcome.Code != "ratification-provenance-incomplete" {
+			t.Fatalf("outcome = %+v, want ratification-provenance-incomplete verdict", result.Outcome)
+		}
+	})
+}
+
+func TestAcceptedRatificationRefusesReceiptlessV1Evidence(t *testing.T) {
+	root, service, identity, _, _ := ratifiableService(t)
+	resolution := ratificationResolve(t, ratificationFacts("user-123"))
+	human := humanRatificationIdentity(t, identity, resolution)
+	definitionBytes, err := os.ReadFile(mutationDefinitionPath(root))
+	if err != nil {
+		t.Fatal(err)
+	}
+	locked, err := experiment.DecodeDefinition(definitionBytes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	v1Digest := writeRatifiableRunV1(t, root, locked, "run-legacy", 40)
+	encoded := ratificationV2Bytes(t, resolution, v1Digest)
+	attribution, err := governanceprincipal.NewPrincipalAttribution(resolution.PrincipalID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	record := ratificationPairRecord(t, root, encoded, attribution)
+	plantAcceptedRatification(t, root, service, encoded, &record)
+	result := service.AcceptedRatification(context.Background(), human, AcceptedRatificationAuthority{
+		Profile: ratificationProfile(t, "github"), Facts: ratificationFacts("user-123"),
+	})
+	if result.Outcome.Classification != ClassificationVerdict || result.Outcome.Code != "ratification-evidence-v1" {
+		t.Fatalf("outcome = %+v, want ratification-evidence-v1 verdict", result.Outcome)
+	}
+}
+
+func TestProposeRatificationResolvesAcceptedTreeOnce(t *testing.T) {
+	_, service, identity, winnerDigest, _ := ratifiableService(t)
+	resolution := ratificationResolve(t, ratificationFacts("user-123"))
+	human := humanRatificationIdentity(t, identity, resolution)
+	git, ok := service.git.(*fakeGit)
+	if !ok {
+		t.Fatalf("service.git is %T, want *fakeGit", service.git)
+	}
+	git.headCalls = 0
+	git.treeCalls = nil
+	result := service.ProposeRatification(context.Background(), human, RatificationProposalInput{
+		ResultDigest: winnerDigest, Disposition: experiment.DispositionSelectRecommended, Resolution: resolution,
+	})
+	if result.Outcome.Classification != ClassificationClean {
+		t.Fatalf("ProposeRatification() outcome = %+v", result.Outcome)
+	}
+	if git.headCalls != 1 || len(git.treeCalls) != 1 {
+		t.Fatalf("accepted resolution ran %d HEAD resolutions and %d tree enumerations, want exactly one of each (design §7)", git.headCalls, len(git.treeCalls))
+	}
 }
