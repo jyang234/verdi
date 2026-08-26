@@ -20,6 +20,12 @@ import (
 // (05 §CLI: "regenerates locally when no bundle exists").
 var ErrNoBundle = errors.New("forge: no evidence bundle available for this ref/commit")
 
+// ErrUnavailable identifies a configured forge read that could not be
+// completed because the provider transport or HTTP service was unavailable.
+// Callers preserve this as an unavailable operand; JSON/schema violations do
+// not wrap this sentinel and remain operational contract errors.
+var ErrUnavailable = errors.New("forge: provider unavailable")
+
 // DerivedTree is the verdi-evidence CI artifact's full contents: every
 // derived bundle file one (ref, commit) CI run wrote under
 // .verdi/data/derived/, keyed by path RELATIVE to that directory (e.g.

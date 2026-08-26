@@ -24,6 +24,30 @@ const (
 
 // TestForgeApprovalContract_Static is the exact static AC-1 evidence producer.
 func TestForgeApprovalContract_Static(t *testing.T) {
+	t.Run("candidate author is required and snapshot-bound", func(t *testing.T) {
+		first, err := forge.NewApprovalSnapshot(
+			"github", "acme/widgets", "17", candidateA,
+			forge.ProviderActor{Scheme: "github-user-id", Subject: "700"}, fixedClock(), nil,
+		)
+		if err != nil {
+			t.Fatalf("NewApprovalSnapshot: %v", err)
+		}
+		second, err := forge.NewApprovalSnapshot(
+			"github", "acme/widgets", "17", candidateA,
+			forge.ProviderActor{Scheme: "github-user-id", Subject: "701"}, fixedClock(), nil,
+		)
+		if err != nil {
+			t.Fatalf("NewApprovalSnapshot second: %v", err)
+		}
+		if first.ProviderSnapshotID == second.ProviderSnapshotID {
+			t.Fatalf("author change did not change provider snapshot id: %q", first.ProviderSnapshotID)
+		}
+		first.CandidateAuthor = forge.ProviderActor{}
+		if err := first.Validate(); err == nil || !strings.Contains(err.Error(), "candidate_author") {
+			t.Fatalf("Validate missing candidate author = %v, want candidate_author error", err)
+		}
+	})
+
 	t.Run("provider-neutral snapshot validates and sorts facts", func(t *testing.T) {
 		approvals := []forge.Approval{
 			approvalFixture("review-2", candidateB),
@@ -35,6 +59,7 @@ func TestForgeApprovalContract_Static(t *testing.T) {
 			"acme/widgets",
 			"17",
 			candidateA,
+			forge.ProviderActor{Scheme: "github-user-id", Subject: "700"},
 			time.Date(2026, 8, 26, 12, 30, 0, 123, time.FixedZone("EDT", -4*60*60)),
 			approvals,
 		)
@@ -65,7 +90,7 @@ func TestForgeApprovalContract_Static(t *testing.T) {
 	})
 
 	t.Run("zero approvals still proves observation identity", func(t *testing.T) {
-		got, err := forge.NewApprovalSnapshot("gitlab", "42", "9", candidateA, time.Date(2026, 8, 26, 16, 0, 0, 0, time.UTC), nil)
+		got, err := forge.NewApprovalSnapshot("gitlab", "42", "9", candidateA, forge.ProviderActor{Scheme: "gitlab-user-id", Subject: "70"}, time.Date(2026, 8, 26, 16, 0, 0, 0, time.UTC), nil)
 		if err != nil {
 			t.Fatalf("NewApprovalSnapshot: %v", err)
 		}
@@ -80,6 +105,7 @@ func TestForgeApprovalContract_Static(t *testing.T) {
 	t.Run("validation fails closed", func(t *testing.T) {
 		base, err := forge.NewApprovalSnapshot(
 			"github", "acme/widgets", "17", candidateA,
+			forge.ProviderActor{Scheme: "github-user-id", Subject: "700"},
 			time.Date(2026, 8, 26, 16, 30, 0, 0, time.UTC),
 			[]forge.Approval{approvalFixture("review-1", candidateA)},
 		)
@@ -134,7 +160,7 @@ func TestForgeApprovalContract_Static(t *testing.T) {
 			t.Run("valid "+tt.name, func(t *testing.T) {
 				approval := approvalFixture("review-1", candidateA)
 				approval.Actor = forge.ProviderActor{Scheme: tt.scheme, Subject: tt.subject}
-				if _, err := forge.NewApprovalSnapshot(tt.forgeName, "acme/widgets", "17", candidateA, fixedClock(), []forge.Approval{approval}); err != nil {
+				if _, err := forge.NewApprovalSnapshot(tt.forgeName, "acme/widgets", "17", candidateA, forge.ProviderActor{Scheme: tt.scheme, Subject: "700"}, fixedClock(), []forge.Approval{approval}); err != nil {
 					t.Fatalf("NewApprovalSnapshot: %v", err)
 				}
 			})
@@ -154,7 +180,7 @@ func TestForgeApprovalContract_Static(t *testing.T) {
 			t.Run(tt.name, func(t *testing.T) {
 				approval := approvalFixture("review-1", candidateA)
 				approval.Actor.Scheme = tt.scheme
-				_, err := forge.NewApprovalSnapshot(tt.forgeName, "acme/widgets", "17", candidateA, fixedClock(), []forge.Approval{approval})
+				_, err := forge.NewApprovalSnapshot(tt.forgeName, "acme/widgets", "17", candidateA, forge.ProviderActor{Scheme: tt.scheme, Subject: "700"}, fixedClock(), []forge.Approval{approval})
 				if err == nil || !strings.Contains(err.Error(), "actor.scheme") {
 					t.Fatalf("NewApprovalSnapshot error = %v, want actor.scheme error", err)
 				}
@@ -165,7 +191,7 @@ func TestForgeApprovalContract_Static(t *testing.T) {
 			t.Run("invalid subject "+fmt.Sprintf("%q", subject), func(t *testing.T) {
 				approval := approvalFixture("review-1", candidateA)
 				approval.Actor.Subject = subject
-				_, err := forge.NewApprovalSnapshot("github", "acme/widgets", "17", candidateA, fixedClock(), []forge.Approval{approval})
+				_, err := forge.NewApprovalSnapshot("github", "acme/widgets", "17", candidateA, forge.ProviderActor{Scheme: "github-user-id", Subject: "700"}, fixedClock(), []forge.Approval{approval})
 				if err == nil || !strings.Contains(err.Error(), "actor.subject") {
 					t.Fatalf("NewApprovalSnapshot error = %v, want actor.subject error", err)
 				}
@@ -175,7 +201,8 @@ func TestForgeApprovalContract_Static(t *testing.T) {
 
 	t.Run("direct validation cannot bypass provider actor contract", func(t *testing.T) {
 		snapshot, err := forge.NewApprovalSnapshot(
-			"github", "acme/widgets", "17", candidateA, fixedClock(),
+			"github", "acme/widgets", "17", candidateA,
+			forge.ProviderActor{Scheme: "github-user-id", Subject: "700"}, fixedClock(),
 			[]forge.Approval{approvalFixture("review-1", candidateA)},
 		)
 		if err != nil {
@@ -197,6 +224,7 @@ func TestForgeApprovalContract_Static(t *testing.T) {
 	t.Run("fake returns independent provider facts", func(t *testing.T) {
 		seed, err := forge.NewApprovalSnapshot(
 			"github", "acme/widgets", "17", candidateA,
+			forge.ProviderActor{Scheme: "github-user-id", Subject: "700"},
 			time.Date(2026, 8, 26, 16, 30, 0, 0, time.UTC),
 			[]forge.Approval{approvalFixture("review-1", candidateA)},
 		)
@@ -227,7 +255,7 @@ func TestForgeApprovalContract_Behavioral(t *testing.T) {
 		server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			switch r.URL.Path {
 			case "/repos/acme/widgets/pulls/17":
-				writeJSON(t, w, `{"head":{"sha":"`+candidateA+`"}}`)
+				writeJSON(t, w, githubPullJSON(candidateA, 700))
 			case "/repos/acme/widgets/pulls/17/reviews":
 				if r.URL.Query().Get("per_page") != "100" && r.URL.Query().Get("page") == "" {
 					t.Errorf("first reviews query = %q", r.URL.RawQuery)
@@ -266,6 +294,9 @@ func TestForgeApprovalContract_Behavioral(t *testing.T) {
 		if first.CandidateSHA != candidateA || first.ObservedAt != "2026-08-26T16:30:00.000000005Z" {
 			t.Fatalf("snapshot binding = %+v", first)
 		}
+		if first.CandidateAuthor != (forge.ProviderActor{Scheme: "github-user-id", Subject: "700"}) {
+			t.Fatalf("candidate author = %+v", first.CandidateAuthor)
+		}
 		if first.ProviderSnapshotID != second.ProviderSnapshotID || first.ObservedAt == second.ObservedAt {
 			t.Fatalf("snapshot identity depends on observation time: first=%+v second=%+v", first, second)
 		}
@@ -293,7 +324,7 @@ func TestForgeApprovalContract_Behavioral(t *testing.T) {
 				if headCalls.Add(1) == 2 {
 					candidate = candidateB
 				}
-				writeJSON(t, w, `{"head":{"sha":"`+candidate+`"}}`)
+				writeJSON(t, w, githubPullJSON(candidate, 700))
 			case "/repos/acme/widgets/pulls/17/reviews":
 				approvalsCalls.Add(1)
 				writeJSON(t, w, `[]`)
@@ -305,11 +336,36 @@ func TestForgeApprovalContract_Behavioral(t *testing.T) {
 
 		a := github.New(github.Config{BaseURL: server.URL, Owner: "acme", Repo: "widgets", HTTPClient: server.Client(), Clock: fixedClock})
 		_, err := a.ListApprovals(context.Background(), "17")
-		if err == nil || !strings.Contains(err.Error(), "head changed during approval collection") {
+		if err == nil || !strings.Contains(err.Error(), "head or author changed during approval collection") {
 			t.Fatalf("ListApprovals error = %v, want head-change operational error (head calls %d, approval calls %d)", err, headCalls.Load(), approvalsCalls.Load())
 		}
 		if headCalls.Load() != 2 || approvalsCalls.Load() != 1 {
 			t.Fatalf("request counts: head=%d approvals=%d, want 2 and 1", headCalls.Load(), approvalsCalls.Load())
+		}
+	})
+
+	t.Run("github rejects author change during approval collection", func(t *testing.T) {
+		var headCalls atomic.Int32
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			switch r.URL.Path {
+			case "/repos/acme/widgets/pulls/17":
+				author := 700
+				if headCalls.Add(1) == 2 {
+					author = 701
+				}
+				writeJSON(t, w, githubPullJSON(candidateA, author))
+			case "/repos/acme/widgets/pulls/17/reviews":
+				writeJSON(t, w, `[]`)
+			default:
+				http.NotFound(w, r)
+			}
+		}))
+		defer server.Close()
+
+		a := github.New(github.Config{BaseURL: server.URL, Owner: "acme", Repo: "widgets", HTTPClient: server.Client(), Clock: fixedClock})
+		_, err := a.ListApprovals(context.Background(), "17")
+		if err == nil || !strings.Contains(err.Error(), "head or author changed during approval collection") {
+			t.Fatalf("ListApprovals error = %v, want author-change operational error", err)
 		}
 	})
 
@@ -352,7 +408,7 @@ func TestForgeApprovalContract_Behavioral(t *testing.T) {
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			switch r.URL.Path {
 			case "/repos/acme/widgets/pulls/17":
-				writeJSON(t, w, `{"head":{"sha":"`+candidateA+`"}}`)
+				writeJSON(t, w, githubPullJSON(candidateA, 700))
 			case "/repos/acme/widgets/pulls/17/reviews":
 				w.Header().Set("Link", `not-a-link; rel="next"`)
 				writeJSON(t, w, `[]`)
@@ -373,7 +429,7 @@ func TestForgeApprovalContract_Behavioral(t *testing.T) {
 		server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			switch r.URL.Path {
 			case "/repos/acme/widgets/pulls/17":
-				writeJSON(t, w, `{"head":{"sha":"`+candidateA+`"}}`)
+				writeJSON(t, w, githubPullJSON(candidateA, 700))
 			case "/repos/acme/widgets/pulls/17/reviews":
 				reviewsCalls.Add(1)
 				if r.URL.Query().Get("page") == "" {
@@ -402,7 +458,7 @@ func TestForgeApprovalContract_Behavioral(t *testing.T) {
 		server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			switch r.URL.Path {
 			case "/repos/acme/widgets/pulls/17":
-				writeJSON(t, w, `{"head":{"sha":"`+candidateA+`"}}`)
+				writeJSON(t, w, githubPullJSON(candidateA, 700))
 			case "/repos/acme/widgets/pulls/17/reviews":
 				call := reviewsCalls.Add(1)
 				if call > 2 {
@@ -436,7 +492,7 @@ func TestForgeApprovalContract_Behavioral(t *testing.T) {
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			switch r.URL.Path {
 			case "/projects/42/merge_requests/9":
-				writeJSON(t, w, `{"sha":"`+candidateA+`"}`)
+				writeJSON(t, w, gitlabMRJSON(candidateA, 70))
 			case "/projects/42/merge_requests/9/approvals":
 				if approvalsCall.Add(1) == 1 {
 					writeJSON(t, w, `{"approved_by":[{"user":{"id":8,"username":"display-eight"},"approved_at":"2026-08-26T15:02:00Z"},{"user":{"id":7,"username":"renamed-seven"},"approved_at":"2026-08-26T11:01:00-04:00"}]}`)
@@ -464,6 +520,9 @@ func TestForgeApprovalContract_Behavioral(t *testing.T) {
 		}
 		if len(first.Approvals) != 2 || len(second.Approvals) != 1 {
 			t.Fatalf("current sets: first=%+v second=%+v", first.Approvals, second.Approvals)
+		}
+		if first.CandidateAuthor != (forge.ProviderActor{Scheme: "gitlab-user-id", Subject: "70"}) {
+			t.Fatalf("candidate author = %+v", first.CandidateAuthor)
 		}
 		if first.Approvals[0].ApprovalID > first.Approvals[1].ApprovalID {
 			t.Fatalf("approvals are not deterministically ID-ordered: %+v", first.Approvals)
@@ -500,7 +559,7 @@ func TestForgeApprovalContract_Behavioral(t *testing.T) {
 				if headCalls.Add(1) == 2 {
 					candidate = candidateB
 				}
-				writeJSON(t, w, `{"sha":"`+candidate+`"}`)
+				writeJSON(t, w, gitlabMRJSON(candidate, 70))
 			case "/projects/42/merge_requests/9/approvals":
 				approvalsCalls.Add(1)
 				writeJSON(t, w, `{"approved_by":[]}`)
@@ -512,7 +571,7 @@ func TestForgeApprovalContract_Behavioral(t *testing.T) {
 
 		a := gitlab.New(gitlab.Config{BaseURL: server.URL, ProjectID: "42", HTTPClient: server.Client(), Clock: fixedClock})
 		_, err := a.ListApprovals(context.Background(), "9")
-		if err == nil || !strings.Contains(err.Error(), "head changed during approval collection") {
+		if err == nil || !strings.Contains(err.Error(), "head or author changed during approval collection") {
 			t.Fatalf("ListApprovals error = %v, want head-change operational error (head calls %d, approval calls %d)", err, headCalls.Load(), approvalsCalls.Load())
 		}
 		if headCalls.Load() != 2 || approvalsCalls.Load() != 1 {
@@ -520,11 +579,36 @@ func TestForgeApprovalContract_Behavioral(t *testing.T) {
 		}
 	})
 
+	t.Run("gitlab rejects author change during approval collection", func(t *testing.T) {
+		var headCalls atomic.Int32
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			switch r.URL.Path {
+			case "/projects/42/merge_requests/9":
+				author := 70
+				if headCalls.Add(1) == 2 {
+					author = 71
+				}
+				writeJSON(t, w, gitlabMRJSON(candidateA, author))
+			case "/projects/42/merge_requests/9/approvals":
+				writeJSON(t, w, `{"approved_by":[]}`)
+			default:
+				http.NotFound(w, r)
+			}
+		}))
+		defer server.Close()
+
+		a := gitlab.New(gitlab.Config{BaseURL: server.URL, ProjectID: "42", HTTPClient: server.Client(), Clock: fixedClock})
+		_, err := a.ListApprovals(context.Background(), "9")
+		if err == nil || !strings.Contains(err.Error(), "head or author changed during approval collection") {
+			t.Fatalf("ListApprovals error = %v, want author-change operational error", err)
+		}
+	})
+
 	t.Run("gitlab rejects continuation claim", func(t *testing.T) {
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			switch r.URL.Path {
 			case "/projects/42/merge_requests/9":
-				writeJSON(t, w, `{"sha":"`+candidateA+`"}`)
+				writeJSON(t, w, gitlabMRJSON(candidateA, 70))
 			case "/projects/42/merge_requests/9/approvals":
 				w.Header().Set("X-Next-Page", "2")
 				writeJSON(t, w, `{"approved_by":[]}`)
@@ -578,12 +662,20 @@ func githubReviewJSON(id int, ref, state, commit string, userID int, login, subm
 	return fmt.Sprintf(`{"id":%d,"node_id":%q,"state":%q,"submitted_at":%q,"commit_id":%q,"user":{"id":%d,"login":%q}}`, id, ref, state, submittedAt, commit, userID, login)
 }
 
+func githubPullJSON(candidate string, authorID int) string {
+	return fmt.Sprintf(`{"head":{"sha":%q},"user":{"id":%d}}`, candidate, authorID)
+}
+
+func gitlabMRJSON(candidate string, authorID int) string {
+	return fmt.Sprintf(`{"sha":%q,"author":{"id":%d}}`, candidate, authorID)
+}
+
 func githubFixture(t *testing.T, reviewsBody string) (*github.Adapter, func()) {
 	t.Helper()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/repos/acme/widgets/pulls/17":
-			writeJSON(t, w, `{"head":{"sha":"`+candidateA+`"}}`)
+			writeJSON(t, w, githubPullJSON(candidateA, 700))
 		case "/repos/acme/widgets/pulls/17/reviews":
 			writeJSON(t, w, reviewsBody)
 		default:
@@ -599,7 +691,7 @@ func gitlabFixture(t *testing.T, approvalsBody, continuation string) (*gitlab.Ad
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/projects/42/merge_requests/9":
-			writeJSON(t, w, `{"sha":"`+candidateA+`"}`)
+			writeJSON(t, w, gitlabMRJSON(candidateA, 70))
 		case "/projects/42/merge_requests/9/approvals":
 			if continuation != "" {
 				w.Header().Set("X-Next-Page", continuation)

@@ -13,7 +13,10 @@ import (
 )
 
 type approvalMergeRequestJSON struct {
-	SHA string `json:"sha"`
+	SHA    string `json:"sha"`
+	Author struct {
+		ID int64 `json:"id"`
+	} `json:"author"`
 }
 
 type approvalsJSON struct {
@@ -61,9 +64,13 @@ func (a *Adapter) ListApprovals(ctx context.Context, changeID string) (forge.App
 		// vocab:identity — GitLab provider resource name, not a Verdi lifecycle class.
 		return forge.ApprovalSnapshot{}, fmt.Errorf("gitlab: rereading merge request %s head after approval collection: %w", changeID, err)
 	}
-	if currentMergeRequest.SHA != mergeRequest.SHA {
+	if currentMergeRequest.SHA != mergeRequest.SHA || currentMergeRequest.Author.ID != mergeRequest.Author.ID {
 		// vocab:identity — GitLab provider resource name, not a Verdi lifecycle class.
-		return forge.ApprovalSnapshot{}, fmt.Errorf("gitlab: merge request %s head changed during approval collection from %s to %s", changeID, mergeRequest.SHA, currentMergeRequest.SHA)
+		return forge.ApprovalSnapshot{}, fmt.Errorf("gitlab: merge request %s head or author changed during approval collection from head=%s author=%d to head=%s author=%d", changeID, mergeRequest.SHA, mergeRequest.Author.ID, currentMergeRequest.SHA, currentMergeRequest.Author.ID)
+	}
+	if mergeRequest.Author.ID <= 0 {
+		// vocab:identity — GitLab provider resource name, not a Verdi lifecycle class.
+		return forge.ApprovalSnapshot{}, fmt.Errorf("gitlab: merge request %s carries no stable author user id", changeID)
 	}
 
 	seenUsers := make(map[int64]struct{}, len(response.ApprovedBy))
@@ -97,7 +104,7 @@ func (a *Adapter) ListApprovals(ctx context.Context, changeID string) (forge.App
 		})
 	}
 
-	snapshot, err := forge.NewApprovalSnapshot("gitlab", a.cfg.ProjectID, changeID, mergeRequest.SHA, a.cfg.Clock(), approvals)
+	snapshot, err := forge.NewApprovalSnapshot("gitlab", a.cfg.ProjectID, changeID, mergeRequest.SHA, forge.ProviderActor{Scheme: "gitlab-user-id", Subject: strconv.FormatInt(mergeRequest.Author.ID, 10)}, a.cfg.Clock(), approvals)
 	if err != nil {
 		// vocab:identity — GitLab provider resource name, not a Verdi lifecycle class.
 		return forge.ApprovalSnapshot{}, fmt.Errorf("gitlab: normalize merge request %s approvals: %w", changeID, err)
@@ -108,7 +115,7 @@ func (a *Adapter) ListApprovals(ctx context.Context, changeID string) (forge.App
 func (a *Adapter) getApprovalJSON(ctx context.Context, requestURL string, out any) (headers http.Header, err error) {
 	response, err := a.transport.RawDo(ctx, http.MethodGet, requestURL, nil, a.setAuth)
 	if err != nil {
-		return nil, fmt.Errorf("gitlab: GET %s: %w", requestURL, err)
+		return nil, fmt.Errorf("%w: gitlab: GET %s: %w", forge.ErrUnavailable, requestURL, err)
 	}
 	defer func() {
 		if closeErr := response.Body.Close(); closeErr != nil {

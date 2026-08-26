@@ -55,6 +55,7 @@ import (
 	"github.com/jyang234/verdi/internal/disclosure"
 	"github.com/jyang234/verdi/internal/evidence"
 	"github.com/jyang234/verdi/internal/gitx"
+	"github.com/jyang234/verdi/internal/lifecyclecountersign"
 	"github.com/jyang234/verdi/internal/lint"
 	"github.com/jyang234/verdi/internal/model"
 	"github.com/jyang234/verdi/internal/policyconflict"
@@ -121,7 +122,7 @@ func cmdGate(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 
-	return runGateWithConflict(ctx, root, spec, head, specstate.NewProjector(), cfg.Model, requestPath, localLifecycleConflictProvider{root: root}, stdout, stderr)
+	return runGateWithConflictAndCountersign(ctx, root, spec, head, specstate.NewProjector(), cfg.Model, requestPath, localLifecycleConflictProvider{root: root}, lifecyclecountersign.Resolver{Forge: buildForgeBestEffort(ctx, root)}, stdout, stderr)
 }
 
 // resolveDefaultBranch delegates to internal/lint.ResolveDefaultBranch
@@ -180,6 +181,10 @@ func runGate(ctx context.Context, root string, spec *artifact.SpecFrontmatter, h
 }
 
 func runGateWithConflict(ctx context.Context, root string, spec *artifact.SpecFrontmatter, head string, resolver specStateResolver, mdl *model.Model, requestPath string, provider policyconflict.VerdictProvider, stdout, stderr io.Writer) int {
+	return runGateWithConflictAndCountersign(ctx, root, spec, head, resolver, mdl, requestPath, provider, nil, stdout, stderr)
+}
+
+func runGateWithConflictAndCountersign(ctx context.Context, root string, spec *artifact.SpecFrontmatter, head string, resolver specStateResolver, mdl *model.Model, requestPath string, provider policyconflict.VerdictProvider, countersignResolver lifecycleCountersignResolver, stdout, stderr io.Writer) int {
 	specRef, err := artifact.ParseRef(spec.ID)
 	if err != nil {
 		fmt.Fprintln(stderr, "gate: internal error: resolved spec has an invalid id:", err)
@@ -231,6 +236,19 @@ func runGateWithConflict(ctx context.Context, root string, spec *artifact.SpecFr
 		condition := conflictCondition(conflict.Result)
 		condition.Name = "5. " + condition.Name
 		conditions = append(conditions, condition)
+	}
+	if countersignResolver != nil {
+		manifest, err := loadManifest(root)
+		if err != nil {
+			fmt.Fprintln(stderr, "gate:", err)
+			return 2
+		}
+		result, err := resolveLifecycleCountersign(ctx, countersignResolver, root, manifest, mdl, string(spec.Class), resolveDefaultBranch(ctx, root), head)
+		if err != nil {
+			fmt.Fprintln(stderr, "gate:", err)
+			return 2
+		}
+		conditions = append(conditions, lifecycleCountersignCondition(len(conditions)+1, result))
 	}
 	return reportGateConditions(stdout, conditions)
 }

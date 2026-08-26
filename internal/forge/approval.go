@@ -74,18 +74,19 @@ type Approval struct {
 
 // ApprovalSnapshot is one forge observation, including an empty approval set.
 type ApprovalSnapshot struct {
-	Forge              string     `json:"forge"`
-	Repository         string     `json:"repository"`
-	ChangeID           string     `json:"change_id"`
-	CandidateSHA       string     `json:"candidate_sha"`
-	ObservedAt         string     `json:"observed_at"`
-	ProviderSnapshotID string     `json:"provider_snapshot_id"`
-	Approvals          []Approval `json:"approvals"`
+	Forge              string        `json:"forge"`
+	Repository         string        `json:"repository"`
+	ChangeID           string        `json:"change_id"`
+	CandidateSHA       string        `json:"candidate_sha"`
+	CandidateAuthor    ProviderActor `json:"candidate_author"`
+	ObservedAt         string        `json:"observed_at"`
+	ProviderSnapshotID string        `json:"provider_snapshot_id"`
+	Approvals          []Approval    `json:"approvals"`
 }
 
 // NewApprovalSnapshot normalizes ordering and observation time, validates all
 // facts, and derives an identity that deliberately excludes observation time.
-func NewApprovalSnapshot(forgeName, repository, changeID, candidateSHA string, observedAt time.Time, approvals []Approval) (ApprovalSnapshot, error) {
+func NewApprovalSnapshot(forgeName, repository, changeID, candidateSHA string, candidateAuthor ProviderActor, observedAt time.Time, approvals []Approval) (ApprovalSnapshot, error) {
 	stamp, err := NormalizeTimestamp(observedAt.Format(time.RFC3339Nano))
 	if err != nil {
 		return ApprovalSnapshot{}, fmt.Errorf("forge: observed_at: %w", err)
@@ -108,7 +109,8 @@ func NewApprovalSnapshot(forgeName, repository, changeID, candidateSHA string, o
 
 	snapshot := ApprovalSnapshot{
 		Forge: forgeName, Repository: repository, ChangeID: changeID,
-		CandidateSHA: candidateSHA, ObservedAt: stamp, Approvals: rows,
+		CandidateSHA: candidateSHA, CandidateAuthor: candidateAuthor,
+		ObservedAt: stamp, Approvals: rows,
 	}
 	snapshot.ProviderSnapshotID, err = snapshot.providerFactsDigest()
 	if err != nil {
@@ -132,6 +134,12 @@ func (s ApprovalSnapshot) Validate() error {
 		return err
 	}
 	if err := validateCandidateSHA("candidate_sha", s.CandidateSHA); err != nil {
+		return err
+	}
+	if s.CandidateAuthor == (ProviderActor{}) {
+		return fmt.Errorf("forge: candidate_author is required")
+	}
+	if err := validateProviderActor("forge: candidate_author", s.Forge, s.CandidateAuthor); err != nil {
 		return err
 	}
 	if _, err := normalizedTime("forge: observed_at", s.ObservedAt); err != nil {
@@ -171,12 +179,13 @@ func (s ApprovalSnapshot) Validate() error {
 
 func (s ApprovalSnapshot) providerFactsDigest() (string, error) {
 	identity := struct {
-		Forge        string     `json:"forge"`
-		Repository   string     `json:"repository"`
-		ChangeID     string     `json:"change_id"`
-		CandidateSHA string     `json:"candidate_sha"`
-		Approvals    []Approval `json:"approvals"`
-	}{s.Forge, s.Repository, s.ChangeID, s.CandidateSHA, s.Approvals}
+		Forge           string        `json:"forge"`
+		Repository      string        `json:"repository"`
+		ChangeID        string        `json:"change_id"`
+		CandidateSHA    string        `json:"candidate_sha"`
+		CandidateAuthor ProviderActor `json:"candidate_author"`
+		Approvals       []Approval    `json:"approvals"`
+	}{s.Forge, s.Repository, s.ChangeID, s.CandidateSHA, s.CandidateAuthor, s.Approvals}
 	return canonjson.Digest(identity)
 }
 

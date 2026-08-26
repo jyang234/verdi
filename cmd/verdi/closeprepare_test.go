@@ -151,11 +151,11 @@ func TestCmdClose_PrepareAcceptsExplicitStoryAndFeatureRefs(t *testing.T) {
 
 		var stdout, stderr bytes.Buffer
 		rc := cmdClose([]string{"--prepare", "spec/close-fixture", "--force-local"}, &stdout, &stderr)
-		if rc != 0 {
-			t.Fatalf("cmdClose(--prepare story) = %d, want 0; stdout=%s stderr=%s", rc, stdout.String(), stderr.String())
+		if rc != 1 {
+			t.Fatalf("cmdClose(--prepare story, missing countersign config) = %d, want 1; stdout=%s stderr=%s", rc, stdout.String(), stderr.String())
 		}
-		if !strings.Contains(stdout.String(), "close: --prepare: next command: verdi close spec/close-fixture --force-local") {
-			t.Fatalf("stdout does not prove --prepare dispatch: %s", stdout.String())
+		if !strings.Contains(stdout.String(), "forge countersign") || !strings.Contains(stdout.String(), "MECHANICAL WORK REQUIRED") {
+			t.Fatalf("stdout does not prove delegated countersign preflight: %s", stdout.String())
 		}
 		if _, err := os.Stat(filepath.Join(repo.Dir, ".verdi", "specs", "active", "close-fixture", "spec.md")); err != nil {
 			t.Fatalf("--prepare archived or removed the active story: %v", err)
@@ -172,11 +172,11 @@ func TestCmdClose_PrepareAcceptsExplicitStoryAndFeatureRefs(t *testing.T) {
 
 		var stdout, stderr bytes.Buffer
 		rc := cmdClose([]string{"jira:FIXTURE-EPIC-1", "--prepare", "--force-local"}, &stdout, &stderr)
-		if rc != 0 {
-			t.Fatalf("cmdClose(--prepare feature) = %d, want 0; stdout=%s stderr=%s", rc, stdout.String(), stderr.String())
+		if rc != 1 {
+			t.Fatalf("cmdClose(--prepare feature, missing countersign config) = %d, want 1; stdout=%s stderr=%s", rc, stdout.String(), stderr.String())
 		}
-		if !strings.Contains(stdout.String(), "close: --prepare: next command: verdi close jira:FIXTURE-EPIC-1 --force-local") {
-			t.Fatalf("stdout does not prove feature --prepare dispatch: %s", stdout.String())
+		if !strings.Contains(stdout.String(), "forge countersign") || !strings.Contains(stdout.String(), "MECHANICAL WORK REQUIRED") {
+			t.Fatalf("stdout does not prove delegated feature countersign preflight: %s", stdout.String())
 		}
 		if _, err := os.Stat(filepath.Join(repo.Dir, ".verdi", "specs", "active", "close-feature-fixture", "spec.md")); err != nil {
 			t.Fatalf("--prepare archived or removed the active feature: %v", err)
@@ -192,11 +192,11 @@ func TestCmdClose_PrepareRunsOutsideCIWithoutForceLocal(t *testing.T) {
 
 	var stdout, stderr bytes.Buffer
 	rc := cmdClose([]string{"--prepare", "spec/close-fixture"}, &stdout, &stderr)
-	if rc != 0 {
-		t.Fatalf("cmdClose(--prepare outside CI) = %d, want 0; stdout=%s stderr=%s", rc, stdout.String(), stderr.String())
+	if rc != 1 {
+		t.Fatalf("cmdClose(--prepare outside CI, missing countersign config) = %d, want 1; stdout=%s stderr=%s", rc, stdout.String(), stderr.String())
 	}
-	if !strings.Contains(stdout.String(), "close: --prepare: next command: verdi close spec/close-fixture\n") {
-		t.Fatalf("stdout does not contain the unguarded local preparation result: %s", stdout.String())
+	if !strings.Contains(stdout.String(), "forge countersign") || !strings.Contains(stdout.String(), "MECHANICAL WORK REQUIRED") {
+		t.Fatalf("stdout does not contain the delegated countersign preflight result: %s", stdout.String())
 	}
 	if strings.Contains(stderr.String(), "refusing to publish outside CI") {
 		t.Fatalf("--prepare was incorrectly restored behind the publish guard: %s", stderr.String())

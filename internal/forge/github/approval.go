@@ -16,6 +16,9 @@ type approvalPullJSON struct {
 	Head struct {
 		SHA string `json:"sha"`
 	} `json:"head"`
+	User struct {
+		ID int64 `json:"id"`
+	} `json:"user"`
 }
 
 type approvalReviewJSON struct {
@@ -52,8 +55,11 @@ func (a *Adapter) ListApprovals(ctx context.Context, changeID string) (forge.App
 	if _, err := a.getApprovalJSON(ctx, pullURL, &currentPull); err != nil {
 		return forge.ApprovalSnapshot{}, fmt.Errorf("github: rereading pull request %s head after approval collection: %w", changeID, err)
 	}
-	if currentPull.Head.SHA != pull.Head.SHA {
-		return forge.ApprovalSnapshot{}, fmt.Errorf("github: pull request %s head changed during approval collection from %s to %s", changeID, pull.Head.SHA, currentPull.Head.SHA)
+	if currentPull.Head.SHA != pull.Head.SHA || currentPull.User.ID != pull.User.ID {
+		return forge.ApprovalSnapshot{}, fmt.Errorf("github: pull request %s head or author changed during approval collection from head=%s author=%d to head=%s author=%d", changeID, pull.Head.SHA, pull.User.ID, currentPull.Head.SHA, currentPull.User.ID)
+	}
+	if pull.User.ID <= 0 {
+		return forge.ApprovalSnapshot{}, fmt.Errorf("github: pull request %s carries no stable author user id", changeID)
 	}
 
 	seenReviewIDs := make(map[int64]struct{}, len(reviews))
@@ -102,7 +108,7 @@ func (a *Adapter) ListApprovals(ctx context.Context, changeID string) (forge.App
 	}
 
 	repository := a.cfg.Owner + "/" + a.cfg.Repo
-	snapshot, err := forge.NewApprovalSnapshot("github", repository, changeID, pull.Head.SHA, a.cfg.Clock(), approvals)
+	snapshot, err := forge.NewApprovalSnapshot("github", repository, changeID, pull.Head.SHA, forge.ProviderActor{Scheme: "github-user-id", Subject: strconv.FormatInt(pull.User.ID, 10)}, a.cfg.Clock(), approvals)
 	if err != nil {
 		return forge.ApprovalSnapshot{}, fmt.Errorf("github: normalize pull request %s approvals: %w", changeID, err)
 	}
@@ -160,7 +166,7 @@ func approvalNextLink(header string) (string, error) {
 func (a *Adapter) getApprovalJSON(ctx context.Context, requestURL string, out any) (headers http.Header, err error) {
 	response, err := a.transport.RawDo(ctx, http.MethodGet, requestURL, nil, a.setAuth)
 	if err != nil {
-		return nil, fmt.Errorf("github: GET %s: %w", requestURL, err)
+		return nil, fmt.Errorf("%w: github: GET %s: %w", forge.ErrUnavailable, requestURL, err)
 	}
 	defer func() {
 		if closeErr := response.Body.Close(); closeErr != nil {

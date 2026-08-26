@@ -187,7 +187,11 @@ type preflightPrelude struct {
 // whose preflight IS the whole run, so nothing has been rehearsed or disclosed
 // before it reaches here — the empty prelude.
 func runPreflight(ctx context.Context, root, storyArg string, manifest *store.Manifest, mdl *model.Model, f forge.Forge, forceLocal bool, stdout, stderr io.Writer) int {
-	return runPreflightWithPrelude(ctx, root, storyArg, manifest, mdl, f, forceLocal, preflightPrelude{}, stdout, stderr)
+	return runPreflightWithPreludeAndCountersign(ctx, root, storyArg, manifest, mdl, f, forceLocal, preflightPrelude{}, nil, stdout, stderr)
+}
+
+func runPreflightWithCountersign(ctx context.Context, root, storyArg string, manifest *store.Manifest, mdl *model.Model, f forge.Forge, forceLocal bool, countersignResolver lifecycleCountersignResolver, stdout, stderr io.Writer) int {
+	return runPreflightWithPreludeAndCountersign(ctx, root, storyArg, manifest, mdl, f, forceLocal, preflightPrelude{}, countersignResolver, stdout, stderr)
 }
 
 // runPreflightWithPrelude is `--preflight`'s testable dispatch core: resolves
@@ -203,7 +207,7 @@ func runPreflight(ctx context.Context, root, storyArg string, manifest *store.Ma
 // disclosed (--prepare's regeneration disclosure); its count joins this
 // function's own so the readiness summary describes the whole run rather than
 // its last phase.
-func runPreflightWithPrelude(ctx context.Context, root, storyArg string, manifest *store.Manifest, mdl *model.Model, f forge.Forge, forceLocal bool, prelude preflightPrelude, stdout, stderr io.Writer) int {
+func runPreflightWithPreludeAndCountersign(ctx context.Context, root, storyArg string, manifest *store.Manifest, mdl *model.Model, f forge.Forge, forceLocal bool, prelude preflightPrelude, countersignResolver lifecycleCountersignResolver, stdout, stderr io.Writer) int {
 	fmt.Fprintf(stdout, "close: --preflight %s (dry run: rehearses the closure gate only; nothing on disk changes and nothing is published)\n", storyArg)
 
 	// Rehearsed FIRST, in the real ritual's own order: requireCleanIndex is
@@ -241,6 +245,20 @@ func runPreflightWithPrelude(ctx context.Context, root, storyArg string, manifes
 		return 2
 	}
 	defaultBranchRef := lint.ResolveDefaultBranch(ctx, root)
+	var countersignCondition *gateCondition
+	if countersignResolver != nil {
+		result, err := resolveLifecycleCountersign(ctx, countersignResolver, root, manifest, mdl, string(spec.Class), defaultBranchRef, head)
+		if err != nil {
+			fmt.Fprintln(stderr, "close: --preflight:", err)
+			return 2
+		}
+		number := 5
+		if spec.Class == artifact.ClassFeature {
+			number = 7
+		}
+		condition := lifecycleCountersignCondition(number, result)
+		countersignCondition = &condition
+	}
 
 	var outcome closureGateOutcome
 	if spec.Class == artifact.ClassFeature {
@@ -251,6 +269,15 @@ func runPreflightWithPrelude(ctx context.Context, root, storyArg string, manifes
 	if err != nil {
 		fmt.Fprintln(stderr, "close: --preflight:", err)
 		return 2
+	}
+	if countersignCondition != nil {
+		label := "closure: "
+		if spec.Class == artifact.ClassFeature {
+			label = "closure(" + mdl.DisplayClass("feature") + "): "
+		}
+		countersignOutcome := reportClosureGateConditions(stdout, label, []gateCondition{*countersignCondition})
+		outcome.Ready = outcome.Ready && countersignOutcome.Ready
+		outcome.Disclosures += countersignOutcome.Disclosures
 	}
 	outcome.Disclosures += disclosures
 

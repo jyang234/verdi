@@ -616,7 +616,8 @@ func TestGate_UnresolvableDefaultBranch_FailsOperationally(t *testing.T) {
 
 // TestCmdGate_EntryPoint drives the real verdi gate entry point
 // (dispatch.go's route, current-branch/CI-env inference included), proving
-// the full wiring — not just runGate's testable core — works end to end.
+// the full wiring — not just runGate's testable core — blocks when the
+// repository has not configured the required lifecycle countersign operand.
 func TestCmdGate_EntryPoint(t *testing.T) {
 	repo := buildGateRepo(t, "accepted-pending-build")
 	writeGateReport(t, repo.Dir, repo.Head, dispositionedFindingYAML)
@@ -625,8 +626,8 @@ func TestCmdGate_EntryPoint(t *testing.T) {
 
 	var stderr bytes.Buffer
 	got := run([]string{"gate"}, &stderr)
-	if got != 0 {
-		t.Fatalf("run([gate]) = %d, want 0; stderr=%s", got, stderr.String())
+	if got != 1 {
+		t.Fatalf("run([gate]) = %d, want 1 (missing countersign operand); stderr=%s", got, stderr.String())
 	}
 }
 

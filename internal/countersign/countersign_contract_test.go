@@ -90,7 +90,7 @@ func approval(id, subject string) forge.Approval {
 
 func testRequest(t *testing.T, rows []forge.Approval, states map[string]gp.ResolutionState) Request {
 	t.Helper()
-	snapshot, err := forge.NewApprovalSnapshot("github", "acme/widgets", "42", testSHA, mustTime(t, observedAt), rows)
+	snapshot, err := forge.NewApprovalSnapshot("github", "acme/widgets", "42", testSHA, forge.ProviderActor{Scheme: "github-user-id", Subject: "900"}, mustTime(t, observedAt), rows)
 	if err != nil {
 		t.Fatalf("NewApprovalSnapshot: %v", err)
 	}
