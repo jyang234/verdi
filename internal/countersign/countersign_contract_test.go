@@ -296,6 +296,49 @@ func TestCountersignWitnessContract_Static(t *testing.T) {
 		}
 	})
 
+	t.Run("retained adverse eligibility witnesses cannot be redigested into proof", func(t *testing.T) {
+		tests := map[string]func(*testing.T) Record{
+			"role refused": func(t *testing.T) Record {
+				return resolveRecord(t, testRequest(t, []forge.Approval{approval("r1", "999")}, nil))
+			},
+			"self approved": func(t *testing.T) Record {
+				req := testRequest(t, []forge.Approval{approval("r1", "101")}, nil)
+				req.Obligation.SeparationRule = SeparationDifferentFromAuthor
+				author := authorResolution(t, req, "101", gp.ResolutionAuthenticated)
+				req.CandidateAuthor = &author
+				return resolveRecord(t, req)
+			},
+		}
+		for name, build := range tests {
+			t.Run(name, func(t *testing.T) {
+				falseGreen := build(t)
+				row := falseGreen.Approvals[0]
+				falseGreen.Reduction.EligibleApprovalIDs = []string{row.ApprovalID}
+				falseGreen.Reduction.DistinctPrincipalIDs = []gp.PrincipalID{row.PrincipalResolution.PrincipalID}
+				falseGreen.Reduction.EligibleCount = 1
+				falseGreen.Reduction.FreshnessVerdict = VerdictProven
+				falseGreen.Reduction.SeparationVerdict = VerdictProven
+				falseGreen.Verdict = VerdictProven
+				digest, err := recordDigest(falseGreen)
+				if err != nil {
+					t.Fatal(err)
+				}
+				falseGreen.Digest = digest
+
+				if _, err := EncodeRecord(falseGreen); err == nil {
+					t.Fatal("EncodeRecord accepted a redigested false-green witness")
+				}
+				raw, err := canonjson.Marshal(falseGreen)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if _, err := DecodeRecord(bytes.NewReader(raw)); err == nil {
+					t.Fatal("DecodeRecord accepted a canonical redigested false-green witness")
+				}
+			})
+		}
+	})
+
 	t.Run("decoded noncanonical order is rejected", func(t *testing.T) {
 		var doc map[string]any
 		if err := json.Unmarshal(encoded, &doc); err != nil {
@@ -480,6 +523,37 @@ func TestCountersignWitnessContract_Behavioral(t *testing.T) {
 			}
 			if !found {
 				t.Fatalf("top-level witnesses lack %q fact: %v", prefix, record.Witnesses)
+			}
+		}
+	})
+
+	t.Run("missing author remains an unproven operand", func(t *testing.T) {
+		req := testRequest(t, []forge.Approval{approval("r1", "101")}, nil)
+		req.Obligation.SeparationRule = SeparationDifferentFromAuthor
+
+		record, err := Resolve(context.Background(), req)
+		if err != nil {
+			t.Fatalf("Resolve returned an operational error for a missing author: %v", err)
+		}
+		if record.Verdict != VerdictUnproven || record.Reduction.SeparationVerdict != VerdictUnproven {
+			t.Fatalf("verdict/separation = %q/%q, want unproven/unproven", record.Verdict, record.Reduction.SeparationVerdict)
+		}
+		if record.Reduction.EligibleCount != 0 || len(record.Reduction.EligibleApprovalIDs) != 0 || len(record.Reduction.DistinctPrincipalIDs) != 0 {
+			t.Fatalf("missing author contributed eligible approvals: %+v", record.Reduction)
+		}
+		for _, want := range []string{
+			`candidate-author-resolution:operand="missing":state="unproven"`,
+			`approval-separation:approval_id="r1":state="unproven"`,
+		} {
+			found := false
+			for _, witness := range record.Witnesses {
+				if witness == want {
+					found = true
+					break
+				}
+			}
+			if !found {
+				t.Fatalf("witnesses lack %q: %v", want, record.Witnesses)
 			}
 		}
 	})

@@ -477,6 +477,9 @@ func validateReduction(record Record) error {
 		if !observationFresh || !approvalFresh(evaluated, row.ApprovedAt, row.UpdatedAt, record.Freshness.MaximumApprovalAgeSeconds) {
 			return fmt.Errorf("countersign: eligible approval %q contradicts recorded freshness", id)
 		}
+		if err := validateEligibleApprovalWitnesses(record, row); err != nil {
+			return err
+		}
 		principalSet[row.PrincipalResolution.PrincipalID] = true
 	}
 	wantPrincipals := make([]gp.PrincipalID, 0, len(principalSet))
@@ -493,6 +496,47 @@ func validateReduction(record Record) error {
 		}
 	}
 	return nil
+}
+
+func validateEligibleApprovalWitnesses(record Record, row ApprovalRecord) error {
+	role := roleMembershipWitness(row.ApprovalID, record.Obligation.Role, VerdictProven)
+	rolePrefix := fmt.Sprintf("role-membership:approval_id=%q:", row.ApprovalID)
+	if err := requireExactApprovalWitness(record.Witnesses, rolePrefix, role); err != nil {
+		return fmt.Errorf("countersign: eligible approval %q role membership: %w", row.ApprovalID, err)
+	}
+	if record.Obligation.SeparationRule == SeparationDifferentFromAuthor {
+		separation := approvalSeparationWitness(row.ApprovalID, string(gp.AuthorizationAuthorized))
+		separationPrefix := fmt.Sprintf("approval-separation:approval_id=%q:", row.ApprovalID)
+		if err := requireExactApprovalWitness(record.Witnesses, separationPrefix, separation); err != nil {
+			return fmt.Errorf("countersign: eligible approval %q separation: %w", row.ApprovalID, err)
+		}
+	}
+	return nil
+}
+
+func requireExactApprovalWitness(witnesses []string, prefix, want string) error {
+	found := false
+	for _, witness := range witnesses {
+		if !strings.HasPrefix(witness, prefix) {
+			continue
+		}
+		if witness != want {
+			return fmt.Errorf("retained witness %q contradicts required witness %q", witness, want)
+		}
+		found = true
+	}
+	if !found {
+		return fmt.Errorf("required retained witness %q is absent", want)
+	}
+	return nil
+}
+
+func roleMembershipWitness(approvalID, role string, verdict Verdict) string {
+	return fmt.Sprintf("role-membership:approval_id=%q:role=%q:verdict=%q", approvalID, role, verdict)
+}
+
+func approvalSeparationWitness(approvalID, state string) string {
+	return fmt.Sprintf("approval-separation:approval_id=%q:state=%q", approvalID, state)
 }
 
 func validateUniqueStrings(field string, values []string) error {

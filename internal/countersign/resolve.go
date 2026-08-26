@@ -59,6 +59,8 @@ func Resolve(ctx context.Context, request Request) (Record, error) {
 		for _, witness := range author.Witnesses {
 			authorFacts = append(authorFacts, fmt.Sprintf("candidate-author-witness:code=%q:source_id=%q:evidence_digest=%q:detail=%q", witness.Code, witness.SourceID, witness.EvidenceDigest, witness.Detail))
 		}
+	} else if request.Obligation.SeparationRule == SeparationDifferentFromAuthor {
+		authorFacts = append(authorFacts, `candidate-author-resolution:operand="missing":state="unproven"`)
 	}
 
 	evaluations := make([]evaluatedApproval, 0, len(request.Snapshot.Approvals))
@@ -119,7 +121,7 @@ func Resolve(ctx context.Context, request Request) (Record, error) {
 			fmt.Sprintf("approval-candidate:approval_id=%q:match=%t", row.ApprovalID, headOK),
 			fmt.Sprintf("approval-freshness:approval_id=%q:approved_at=%q:updated_at=%q:evaluated_at=%q:maximum_age_seconds=%d:verdict=%q", row.ApprovalID, row.ApprovedAt, row.UpdatedAt, request.EvaluatedAt, request.FreshnessPolicy.MaximumApprovalAgeSeconds, boolVerdict(fresh)),
 			fmt.Sprintf("principal-resolution:approval_id=%q:state=%q", row.ApprovalID, row.PrincipalResolution.State),
-			fmt.Sprintf("role-membership:approval_id=%q:role=%q:verdict=%q", row.ApprovalID, request.Obligation.Role, boolVerdict(role)),
+			roleMembershipWitness(row.ApprovalID, request.Obligation.Role, boolVerdict(role)),
 		)
 
 		providerCandidate := candidateMatch && observationFresh && stateOK && headOK && role
@@ -128,11 +130,15 @@ func Resolve(ctx context.Context, request Request) (Record, error) {
 		}
 		separation := gp.AuthorizationAuthorized
 		if request.Obligation.SeparationRule == SeparationDifferentFromAuthor {
-			separation, err = gp.EvaluateRelation(e.resolution, *author, gp.RelationDifferentPrincipal)
-			if err != nil {
-				return Record{}, fmt.Errorf("countersign: approval %q separation: %w", row.ApprovalID, err)
+			if author == nil {
+				separation = gp.AuthorizationUnproven
+			} else {
+				separation, err = gp.EvaluateRelation(e.resolution, *author, gp.RelationDifferentPrincipal)
+				if err != nil {
+					return Record{}, fmt.Errorf("countersign: approval %q separation: %w", row.ApprovalID, err)
+				}
 			}
-			witnesses = append(witnesses, fmt.Sprintf("approval-separation:approval_id=%q:state=%q", row.ApprovalID, separation))
+			witnesses = append(witnesses, approvalSeparationWitness(row.ApprovalID, string(separation)))
 		}
 		if !fresh {
 			e.staleRelevant = e.resolution.State != gp.ResolutionViolated && separation != gp.AuthorizationViolated
@@ -273,9 +279,8 @@ func validateRequest(request Request) (string, time.Time, bool, bool, error) {
 			return "", time.Time{}, false, false, fmt.Errorf("countersign: candidate author must be absent when separation is none")
 		}
 	case SeparationDifferentFromAuthor:
-		if request.CandidateAuthor == nil {
-			return "", time.Time{}, false, false, fmt.Errorf("countersign: candidate author is required for different-from-author separation")
-		}
+		// A nil author is the closed request shape's unavailable operand. The
+		// reducer preserves it as unproven rather than treating it as malformed.
 	}
 	observationFresh := withinAge(evaluated, request.Snapshot.ObservedAt, request.FreshnessPolicy.MaximumObservationAgeSeconds)
 	return profileDigest, evaluated, observationFresh, request.Snapshot.CandidateSHA == request.LocalCandidateSHA, nil
