@@ -49,7 +49,6 @@ import (
 	"github.com/jyang234/verdi/internal/disclosure"
 	"github.com/jyang234/verdi/internal/evidence"
 	"github.com/jyang234/verdi/internal/matrixprojection"
-	"github.com/jyang234/verdi/internal/model"
 	"github.com/jyang234/verdi/internal/store"
 )
 
@@ -101,7 +100,7 @@ func cmdMatrix(args []string, stdout, stderr io.Writer) int {
 			fmt.Fprintln(stderr, "matrix:", err)
 			return 2
 		}
-		printMatrix(stdout, projection.Record, projection.EffectiveStatus, projection.Model, obligationCells)
+		printMatrix(stdout, projection.Record, projection.ArtifactClass, projection.EffectiveStatus, projection.Model, obligationCells)
 		return 0
 	}
 	if projection.Feature == nil {
@@ -214,7 +213,11 @@ func obligationCellsFor(root, specName string, acs []artifact.AcceptanceCriterio
 // id — kept as a caller-supplied map, rather than looked up here, so this
 // function stays a pure formatter over already-computed data (no disk I/O),
 // exactly as it was before this story.
-func printMatrix(w io.Writer, record matrixprojection.Record, status artifact.Status, mdl *model.Model, obligationCells map[string]string) {
+type matrixStateDisplayer interface {
+	DisplayState(class, status string) string
+}
+
+func printMatrix(w io.Writer, record matrixprojection.Record, artifactClass artifact.SpecClass, status artifact.Status, mdl matrixStateDisplayer, obligationCells map[string]string) {
 	result := record.Story
 	// L-M13(1) classification: the "story:"/"spec:"/"status:" line KEYS
 	// mirror frontmatter field names, and the trailing
@@ -223,7 +226,7 @@ func printMatrix(w io.Writer, record matrixprojection.Record, status artifact.St
 	// (spec/vocabulary-surfaces ac-1; nil-safe bare-id fallback).
 	fmt.Fprintf(w, "story: %s\n", result.StoryRef)
 	fmt.Fprintf(w, "spec:  %s\n", record.Target.SpecRef)
-	fmt.Fprintf(w, "status: %s\n", mdl.DisplayState("story", string(status)))
+	fmt.Fprintf(w, "status: %s\n", displayMatrixState(mdl, artifactClass, status))
 	if record.Preview {
 		// Bare Render output, unindented and unprefixed, so
 		// disclosure.IsRendered recognizes the line and a disclosure consumer
@@ -242,4 +245,11 @@ func printMatrix(w io.Writer, record matrixprojection.Record, status artifact.St
 	fmt.Fprintln(w)
 	fmt.Fprintf(w, "story.violated: %t\n", record.Violated)
 	fmt.Fprintf(w, "story.eligible: %t\n", result.Eligible)
+}
+
+func displayMatrixState(displayer matrixStateDisplayer, artifactClass artifact.SpecClass, status artifact.Status) string {
+	if displayer == nil {
+		return string(status)
+	}
+	return displayer.DisplayState(string(artifactClass), string(status))
 }

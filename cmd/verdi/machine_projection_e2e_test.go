@@ -7,9 +7,9 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"reflect"
 	"testing"
 
+	"github.com/jyang234/verdi/internal/journey"
 	"github.com/jyang234/verdi/internal/matrixprojection"
 	"github.com/jyang234/verdi/internal/mcpserve"
 )
@@ -61,7 +61,7 @@ func runMachineProjectionBinary(t *testing.T, bin, dir string, args ...string) (
 	return exitErr.ExitCode(), stdout.Bytes(), stderr.Bytes()
 }
 
-func decodeToolMatrix(t *testing.T, result map[string]any) matrixprojection.Record {
+func decodeToolMatrix(t *testing.T, result map[string]any) ([]byte, matrixprojection.Record) {
 	t.Helper()
 	raw, err := json.Marshal(result)
 	if err != nil {
@@ -80,11 +80,12 @@ func decodeToolMatrix(t *testing.T, result map[string]any) matrixprojection.Reco
 	if envelope.IsError || len(envelope.Content) != 1 || envelope.Content[0].Type != "text" {
 		t.Fatalf("MCP get_matrix result = %s, want one successful text content item", raw)
 	}
-	record, err := matrixprojection.Decode([]byte(envelope.Content[0].Text))
+	text := []byte(envelope.Content[0].Text)
+	record, err := matrixprojection.Decode(text)
 	if err != nil {
 		t.Fatalf("decoding MCP matrix record: %v\n%s", err, envelope.Content[0].Text)
 	}
-	return record
+	return text, record
 }
 
 func TestMatrixProjectionContract_Behavioral(t *testing.T) {
@@ -95,16 +96,18 @@ func TestMatrixProjectionContract_Behavioral(t *testing.T) {
 		"specs/active/borrower-update-mobile",
 		"specs/active/borrower-update-mobile-spike",
 	)
+	writeViolatedMatrixFixture(t, repo.Dir, repo.Head)
 	backend := &mcpserve.Backend{Root: repo.Dir}
 
 	tests := []struct {
-		name    string
-		ref     string
-		preview bool
+		name         string
+		ref          string
+		preview      bool
+		wantViolated bool
 	}{
 		{name: "story", ref: "spec/borrower-update-api"},
-		{name: "feature", ref: "spec/stale-decline"},
-		{name: "preview feature", ref: "spec/stale-decline", preview: true},
+		{name: "adverse feature", ref: "spec/stale-decline", wantViolated: true},
+		{name: "adverse preview feature", ref: "spec/stale-decline", preview: true, wantViolated: true},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -124,13 +127,24 @@ func TestMatrixProjectionContract_Behavioral(t *testing.T) {
 			if err != nil {
 				t.Fatalf("decoding CLI matrix: %v\n%s", err, first)
 			}
+			if cliRecord.Violated != tc.wantViolated {
+				t.Fatalf("verdi %v violated = %t, want %t", args, cliRecord.Violated, tc.wantViolated)
+			}
 			exit, second, stderr := runMachineProjectionBinary(t, bin, repo.Dir, args...)
 			if exit != 0 || !bytes.Equal(first, second) {
 				t.Fatalf("verdi %v is nondeterministic: exit=%d stderr=%s\nfirst=%s\nsecond=%s", args, exit, stderr, first, second)
 			}
-			mcpRecord := decodeToolMatrix(t, backend.GetMatrix(context.Background(), json.RawMessage(`{"story":"`+tc.ref+`","preview":`+map[bool]string{false: "false", true: "true"}[tc.preview]+`}`)))
-			if !reflect.DeepEqual(cliRecord, mcpRecord) {
-				t.Fatalf("CLI and MCP matrix records differ:\nCLI: %#v\nMCP: %#v", cliRecord, mcpRecord)
+			toolArgs := json.RawMessage(`{"story":"` + tc.ref + `","preview":` + map[bool]string{false: "false", true: "true"}[tc.preview] + `}`)
+			mcpFirst, mcpRecord := decodeToolMatrix(t, backend.GetMatrix(context.Background(), toolArgs))
+			mcpSecond, _ := decodeToolMatrix(t, backend.GetMatrix(context.Background(), toolArgs))
+			if !bytes.Equal(first, mcpFirst) {
+				t.Fatalf("CLI and raw MCP matrix bytes differ:\nCLI: %q\nMCP: %q", first, mcpFirst)
+			}
+			if !bytes.Equal(mcpFirst, mcpSecond) {
+				t.Fatalf("MCP get_matrix is nondeterministic:\nfirst: %q\nsecond: %q", mcpFirst, mcpSecond)
+			}
+			if mcpRecord.Violated != tc.wantViolated {
+				t.Fatalf("MCP get_matrix violated = %t, want %t", mcpRecord.Violated, tc.wantViolated)
 			}
 		})
 	}
@@ -164,14 +178,7 @@ func TestJourneyJSONContract_Behavioral(t *testing.T) {
 func TestMachineProjectionFailureContract_Behavioral(t *testing.T) {
 	bin := buildMachineProjectionBinary(t)
 	repo := buildCorpusRepo(t)
-	derivedDir := filepath.Join(repo.Dir, ".verdi", "data", "derived", "spec--stale-decline", repo.Head)
-	if err := os.MkdirAll(derivedDir, 0o755); err != nil {
-		t.Fatalf("creating violated matrix fixture: %v", err)
-	}
-	violatedEvidence := `[{"schema":"verdi.evidence/v1","evidence_for":["ac-1"],"kind":"static","verdict":"fail","witness":"ci://verify/static/ac-1","provenance":{"source":"ci","pipeline":"u1","commit":"` + repo.Head + `"},"digest":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}]`
-	if err := os.WriteFile(filepath.Join(derivedDir, "verdicts.json"), []byte(violatedEvidence), 0o644); err != nil {
-		t.Fatalf("writing violated matrix fixture: %v", err)
-	}
+	writeViolatedMatrixFixture(t, repo.Dir, repo.Head)
 	exit, violatedJSON, stderr := runMachineProjectionBinary(t, bin, repo.Dir, "matrix", "--json", "spec/stale-decline")
 	if exit != 0 {
 		t.Fatalf("violated matrix report exit = %d, want 0; stderr=%s", exit, stderr)
@@ -184,6 +191,17 @@ func TestMachineProjectionFailureContract_Behavioral(t *testing.T) {
 	if exit != 0 || !bytes.Contains(blockedText, []byte("stub_reconciliation.blocked: true")) {
 		t.Fatalf("blocked matrix report exit=%d stderr=%s output=%s, want exit 0 and blocked=true", exit, stderr, blockedText)
 	}
+	exit, blockedJourney, stderr := runMachineProjectionBinary(t, bin, repo.Dir, "journey", "--json", "spec/stale-decline")
+	if exit != 0 {
+		t.Fatalf("journey blocker report exit = %d, want 0; stderr=%s", exit, stderr)
+	}
+	journeyRecord, err := journey.Decode(blockedJourney)
+	if err != nil {
+		t.Fatalf("decoding journey blocker report: %v\n%s", err, blockedJourney)
+	}
+	if len(journeyRecord.Blockers.Current)+len(journeyRecord.Blockers.Eventual.Items) == 0 {
+		t.Fatalf("journey blocker report has no real blockers: %s", blockedJourney)
+	}
 
 	tests := []struct {
 		name string
@@ -195,7 +213,6 @@ func TestMachineProjectionFailureContract_Behavioral(t *testing.T) {
 		{name: "matrix duplicate preview", args: []string{"matrix", "--preview", "--preview", "spec/stale-decline"}, want: 2},
 		{name: "matrix malformed flag order", args: []string{"matrix", "--json", "--preview", "spec/stale-decline"}, want: 2},
 		{name: "matrix missing ref", args: []string{"matrix", "--json", "spec/missing"}, want: 2},
-		{name: "journey blocker report succeeds", args: []string{"journey", "--json", "spec/stale-decline"}, want: 0},
 		{name: "journey unknown flag", args: []string{"journey", "--wat", "spec/stale-decline"}, want: 2},
 		{name: "journey duplicate json", args: []string{"journey", "--json", "--json", "spec/stale-decline"}, want: 2},
 		{name: "journey malformed flag order", args: []string{"journey", "spec/stale-decline", "--json"}, want: 2},
@@ -216,6 +233,18 @@ func TestMachineProjectionFailureContract_Behavioral(t *testing.T) {
 		if exit != 2 {
 			t.Fatalf("rootless verdi %v exit = %d, want 2; stderr=%s", args, exit, stderr)
 		}
+	}
+}
+
+func writeViolatedMatrixFixture(t *testing.T, root, commit string) {
+	t.Helper()
+	derivedDir := filepath.Join(root, ".verdi", "data", "derived", "spec--stale-decline", commit)
+	if err := os.MkdirAll(derivedDir, 0o755); err != nil {
+		t.Fatalf("creating violated matrix fixture: %v", err)
+	}
+	violatedEvidence := `[{"schema":"verdi.evidence/v1","evidence_for":["ac-1"],"kind":"static","verdict":"fail","witness":"ci://verify/static/ac-1","provenance":{"source":"ci","pipeline":"u1","commit":"` + commit + `"},"digest":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}]`
+	if err := os.WriteFile(filepath.Join(derivedDir, "verdicts.json"), []byte(violatedEvidence), 0o644); err != nil {
+		t.Fatalf("writing violated matrix fixture: %v", err)
 	}
 }
 

@@ -1,6 +1,7 @@
 package matrixprojection
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -115,6 +116,57 @@ func TestMatrixProjectionContract_Static(t *testing.T) {
 		t.Fatalf("decoded feature arms = story:%#v feature:%#v, want exactly feature", decodedFeature.Story, decodedFeature.Feature)
 	}
 
+	requiredFields := []struct {
+		name   string
+		data   []byte
+		object []any
+		key    string
+	}{
+		{name: "envelope schema", data: storyJSON, key: "schema"},
+		{name: "envelope target", data: storyJSON, key: "target"},
+		{name: "envelope preview false", data: featureJSON, key: "preview"},
+		{name: "envelope violated false", data: featureJSON, key: "violated"},
+		{name: "target class", data: storyJSON, object: []any{"target"}, key: "class"},
+		{name: "target spec ref", data: storyJSON, object: []any{"target"}, key: "spec_ref"},
+		{name: "target effective state", data: storyJSON, object: []any{"target"}, key: "effective_state"},
+		{name: "story body story ref", data: storyJSON, object: []any{"story"}, key: "story_ref"},
+		{name: "story body eligible false", data: storyJSON, object: []any{"story"}, key: "eligible"},
+		{name: "story body acs", data: storyJSON, object: []any{"story"}, key: "acs"},
+		{name: "story AC id", data: storyJSON, object: []any{"story", "acs", 0}, key: "id"},
+		{name: "story AC text", data: storyJSON, object: []any{"story", "acs", 0}, key: "text"},
+		{name: "story AC status", data: storyJSON, object: []any{"story", "acs", 0}, key: "status"},
+		{name: "story AC summary", data: storyJSON, object: []any{"story", "acs", 0}, key: "summary"},
+		{name: "story AC kinds", data: storyJSON, object: []any{"story", "acs", 0}, key: "kinds"},
+		{name: "kind kind", data: storyJSON, object: []any{"story", "acs", 0, "kinds", 0}, key: "kind"},
+		{name: "kind satisfied false", data: storyJSON, object: []any{"story", "acs", 0, "kinds", 0}, key: "satisfied"},
+		{name: "kind attestation state", data: storyJSON, object: []any{"story", "acs", 0, "kinds", 0}, key: "attestation_state"},
+		{name: "kind violating witness empty", data: storyJSON, object: []any{"story", "acs", 0, "kinds", 1}, key: "violating_witness"},
+		{name: "kind obligation quality", data: storyJSON, object: []any{"story", "acs", 0, "kinds", 0}, key: "obligation_quality"},
+		{name: "obligation quality structural state", data: storyJSON, object: []any{"story", "acs", 0, "kinds", 0, "obligation_quality"}, key: "structural_state"},
+		{name: "obligation quality match state", data: storyJSON, object: []any{"story", "acs", 0, "kinds", 0, "obligation_quality"}, key: "match_state"},
+		{name: "obligation quality reason empty", data: storyJSON, object: []any{"story", "acs", 0, "kinds", 0, "obligation_quality"}, key: "reason"},
+		{name: "obligation quality witness path", data: storyJSON, object: []any{"story", "acs", 0, "kinds", 0, "obligation_quality"}, key: "witness_path"},
+		{name: "feature body acs", data: featureJSON, object: []any{"feature"}, key: "acs"},
+		{name: "feature AC id", data: featureJSON, object: []any{"feature", "acs", 0}, key: "id"},
+		{name: "feature AC text", data: featureJSON, object: []any{"feature", "acs", 0}, key: "text"},
+		{name: "feature AC status", data: featureJSON, object: []any{"feature", "acs", 0}, key: "status"},
+		{name: "feature AC summary", data: featureJSON, object: []any{"feature", "acs", 0}, key: "summary"},
+		{name: "feature AC implementing stories", data: featureJSON, object: []any{"feature", "acs", 0}, key: "implementing_stories"},
+		{name: "feature AC outcome floor", data: featureJSON, object: []any{"feature", "acs", 0}, key: "outcome_floor"},
+		{name: "outcome floor satisfied false", data: featureJSON, object: []any{"feature", "acs", 0, "outcome_floor"}, key: "satisfied"},
+		{name: "outcome floor declares attestation false", data: featureJSON, object: []any{"feature", "acs", 1, "outcome_floor"}, key: "declares_attestation"},
+		{name: "outcome floor attestation state", data: featureJSON, object: []any{"feature", "acs", 0, "outcome_floor"}, key: "attestation_state"},
+		{name: "outcome floor violating witness empty", data: featureJSON, object: []any{"feature", "acs", 0, "outcome_floor"}, key: "violating_witness"},
+	}
+	for _, tc := range requiredFields {
+		t.Run("missing "+tc.name, func(t *testing.T) {
+			withoutKey := removeJSONKey(t, tc.data, tc.object, tc.key)
+			if _, err := Decode(withoutKey); err == nil {
+				t.Fatalf("Decode accepted JSON missing required %s key %q: %s", tc.name, tc.key, withoutKey)
+			}
+		})
+	}
+
 	invalid := []struct {
 		name string
 		json string
@@ -142,6 +194,49 @@ func TestMatrixProjectionContract_Static(t *testing.T) {
 			}
 		})
 	}
+}
+
+func removeJSONKey(t *testing.T, data []byte, objectPath []any, key string) []byte {
+	t.Helper()
+	var root any
+	if err := json.Unmarshal(data, &root); err != nil {
+		t.Fatalf("decoding required-field fixture: %v", err)
+	}
+	current := root
+	for _, segment := range objectPath {
+		switch value := segment.(type) {
+		case string:
+			object, ok := current.(map[string]any)
+			if !ok {
+				t.Fatalf("required-field fixture path %v segment %q is not an object", objectPath, value)
+			}
+			current, ok = object[value]
+			if !ok {
+				t.Fatalf("required-field fixture path %v is missing segment %q", objectPath, value)
+			}
+		case int:
+			array, ok := current.([]any)
+			if !ok || value < 0 || value >= len(array) {
+				t.Fatalf("required-field fixture path %v index %d is invalid", objectPath, value)
+			}
+			current = array[value]
+		default:
+			t.Fatalf("required-field fixture path %v has unsupported segment %#v", objectPath, segment)
+		}
+	}
+	object, ok := current.(map[string]any)
+	if !ok {
+		t.Fatalf("required-field fixture path %v is not an object", objectPath)
+	}
+	if _, ok := object[key]; !ok {
+		t.Fatalf("required-field fixture path %v has no key %q", objectPath, key)
+	}
+	delete(object, key)
+	out, err := json.Marshal(root)
+	if err != nil {
+		t.Fatalf("encoding required-field fixture: %v", err)
+	}
+	return out
 }
 
 func TestConstructorsRejectMismatchedTargets(t *testing.T) {

@@ -22,6 +22,7 @@ import (
 type Projection struct {
 	Record          Record
 	Spec            *artifact.SpecFrontmatter
+	ArtifactClass   artifact.SpecClass
 	EffectiveStatus artifact.Status
 	Model           *model.Model
 	Feature         *FeatureDetail
@@ -70,7 +71,7 @@ func Project(ctx context.Context, root, ref string, preview bool, mdl *model.Mod
 	if !validEffectiveStates[targetState] {
 		return Projection{}, fmt.Errorf("matrix projection: effective state %q is unknown", state.State)
 	}
-	base := Projection{Spec: spec, EffectiveStatus: state.ArtifactStatus(), Model: mdl}
+	base := Projection{Spec: spec, ArtifactClass: spec.Class, EffectiveStatus: state.ArtifactStatus(), Model: mdl}
 
 	if spec.Class == artifact.ClassFeature && spec.Problem != nil {
 		return projectFeature(ctx, root, commit, preview, mdl, spec, targetState, base)

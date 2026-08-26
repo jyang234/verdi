@@ -260,11 +260,149 @@ func Decode(data []byte) (Record, error) {
 			return Record{}, fmt.Errorf("matrix projection: decode: %s must be absent rather than null", arm)
 		}
 	}
+	if err := validateRequiredFieldPresence(raw); err != nil {
+		return Record{}, fmt.Errorf("matrix projection: decode: %w", err)
+	}
 
 	if err := record.Validate(); err != nil {
 		return Record{}, fmt.Errorf("matrix projection: decode: %w", err)
 	}
 	return record, nil
+}
+
+func validateRequiredFieldPresence(root map[string]json.RawMessage) error {
+	if err := requireJSONFields(root, "record", "schema", "target", "preview", "violated"); err != nil {
+		return err
+	}
+	target, err := decodeJSONObject(root["target"], "target")
+	if err != nil {
+		return err
+	}
+	if err := requireJSONFields(target, "target", "class", "spec_ref", "effective_state"); err != nil {
+		return err
+	}
+	if story, ok := root["story"]; ok {
+		if err := validateStoryFieldPresence(story); err != nil {
+			return err
+		}
+	}
+	if feature, ok := root["feature"]; ok {
+		if err := validateFeatureFieldPresence(feature); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateStoryFieldPresence(raw json.RawMessage) error {
+	story, err := decodeJSONObject(raw, "story")
+	if err != nil {
+		return err
+	}
+	if err := requireJSONFields(story, "story", "story_ref", "eligible", "acs"); err != nil {
+		return err
+	}
+	acs, err := decodeJSONArray(story["acs"], "story.acs")
+	if err != nil {
+		return err
+	}
+	for i, rawAC := range acs {
+		path := fmt.Sprintf("story.acs[%d]", i)
+		ac, err := decodeJSONObject(rawAC, path)
+		if err != nil {
+			return err
+		}
+		if err := requireJSONFields(ac, path, "id", "text", "status", "summary", "kinds"); err != nil {
+			return err
+		}
+		kinds, err := decodeJSONArray(ac["kinds"], path+".kinds")
+		if err != nil {
+			return err
+		}
+		for j, rawKind := range kinds {
+			kindPath := fmt.Sprintf("%s.kinds[%d]", path, j)
+			kind, err := decodeJSONObject(rawKind, kindPath)
+			if err != nil {
+				return err
+			}
+			if err := requireJSONFields(kind, kindPath, "kind", "satisfied", "attestation_state", "violating_witness", "obligation_quality"); err != nil {
+				return err
+			}
+			qualityPath := kindPath + ".obligation_quality"
+			quality, err := decodeJSONObject(kind["obligation_quality"], qualityPath)
+			if err != nil {
+				return err
+			}
+			if err := requireJSONFields(quality, qualityPath, "structural_state", "match_state", "reason", "witness_path"); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func validateFeatureFieldPresence(raw json.RawMessage) error {
+	feature, err := decodeJSONObject(raw, "feature")
+	if err != nil {
+		return err
+	}
+	if err := requireJSONFields(feature, "feature", "acs"); err != nil {
+		return err
+	}
+	acs, err := decodeJSONArray(feature["acs"], "feature.acs")
+	if err != nil {
+		return err
+	}
+	for i, rawAC := range acs {
+		path := fmt.Sprintf("feature.acs[%d]", i)
+		ac, err := decodeJSONObject(rawAC, path)
+		if err != nil {
+			return err
+		}
+		if err := requireJSONFields(ac, path, "id", "text", "status", "summary", "implementing_stories", "outcome_floor"); err != nil {
+			return err
+		}
+		floorPath := path + ".outcome_floor"
+		floor, err := decodeJSONObject(ac["outcome_floor"], floorPath)
+		if err != nil {
+			return err
+		}
+		if err := requireJSONFields(floor, floorPath, "satisfied", "declares_attestation", "attestation_state", "violating_witness"); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func requireJSONFields(object map[string]json.RawMessage, path string, fields ...string) error {
+	for _, field := range fields {
+		if _, ok := object[field]; !ok {
+			return fmt.Errorf("%s.%s is required", path, field)
+		}
+	}
+	return nil
+}
+
+func decodeJSONObject(raw json.RawMessage, path string) (map[string]json.RawMessage, error) {
+	var object map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &object); err != nil {
+		return nil, fmt.Errorf("%s must be an object: %w", path, err)
+	}
+	if object == nil {
+		return nil, fmt.Errorf("%s must be an object", path)
+	}
+	return object, nil
+}
+
+func decodeJSONArray(raw json.RawMessage, path string) ([]json.RawMessage, error) {
+	var array []json.RawMessage
+	if err := json.Unmarshal(raw, &array); err != nil {
+		return nil, fmt.Errorf("%s must be an array: %w", path, err)
+	}
+	if array == nil {
+		return nil, fmt.Errorf("%s must be an array", path)
+	}
+	return array, nil
 }
 
 // Validate enforces the closed union, enum, and explicit-array contract.

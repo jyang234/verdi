@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"fmt"
 	"io"
 	"os"
@@ -464,6 +465,35 @@ func TestCmdMatrix_StatusLine_Superseded(t *testing.T) {
 	}
 }
 
+type distinctMatrixVocabulary struct{}
+
+func (distinctMatrixVocabulary) DisplayState(class, status string) string {
+	return class + "-display-" + status
+}
+
+func TestPrintMatrix_GrandfatheredFeatureUsesFeatureVocabulary(t *testing.T) {
+	repo := fixturegit.Build(t, []fixturegit.Layer{{
+		Files: map[string]string{
+			".verdi/verdi.yaml": phase7ManifestYAML,
+			".verdi/specs/active/superseded-story-fixture/spec.md": matrixSupersededStorySpecMD,
+		},
+		Message: "init store with a grandfathered feature",
+	}})
+	t.Setenv("CI_DEFAULT_BRANCH", "main")
+	projection, err := matrixprojection.Project(context.Background(), repo.Dir, "spec/superseded-story-fixture", false, nil)
+	if err != nil {
+		t.Fatalf("Project(grandfathered feature): %v", err)
+	}
+	if projection.Record.Target.Class != matrixprojection.ClassStory || projection.ArtifactClass != artifact.ClassFeature {
+		t.Fatalf("grandfathered projection classes = wire:%q artifact:%q, want story/feature", projection.Record.Target.Class, projection.ArtifactClass)
+	}
+	var out bytes.Buffer
+	printMatrix(&out, projection.Record, projection.ArtifactClass, projection.EffectiveStatus, distinctMatrixVocabulary{}, nil)
+	if !strings.Contains(out.String(), "status: feature-display-superseded\n") {
+		t.Fatalf("grandfathered feature status = %q, want feature display vocabulary", out.String())
+	}
+}
+
 // matrixObligationFixtureSpecMD is a minimal grandfathered class: feature
 // story fixture (no problem/outcome needed, the same shape
 // matrixSupersededStorySpecMD uses) declaring two ACs across three (ac,
@@ -796,8 +826,8 @@ func TestMatrixPreviewBanner_RendersThroughTheSeam(t *testing.T) {
 		}
 		onRecord := record
 		onRecord.Preview = true
-		printMatrix(&on, onRecord, artifact.Status("accepted-pending-build"), nil, nil)
-		printMatrix(&off, record, artifact.Status("accepted-pending-build"), nil, nil)
+		printMatrix(&on, onRecord, artifact.ClassStory, artifact.Status("accepted-pending-build"), nil, nil)
+		printMatrix(&off, record, artifact.ClassStory, artifact.Status("accepted-pending-build"), nil, nil)
 		if !hasLine(on.String()) {
 			t.Errorf("printMatrix(--preview) = %q, want the seam-rendered banner %q", on.String(), want)
 		}
