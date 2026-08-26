@@ -50,7 +50,6 @@ import (
 	"github.com/jyang234/verdi/internal/evidence"
 	"github.com/jyang234/verdi/internal/matrixprojection"
 	"github.com/jyang234/verdi/internal/model"
-	"github.com/jyang234/verdi/internal/specstate"
 	"github.com/jyang234/verdi/internal/store"
 )
 
@@ -138,33 +137,6 @@ func parseMatrixArgs(args []string) (preview, jsonMode bool, target string, ok b
 	default:
 		return false, false, "", false
 	}
-}
-
-// effectiveMatrixStatus resolves the matrix target's Git-derived effective
-// lifecycle state ONCE (final fix wave I2), in the legacy artifact.Status
-// display vocabulary (specstate.Result.ArtifactStatus — Unproven prints as
-// the literal "unproven", never dressed as a proven value). The spec's own
-// bytes are re-read via loadSpecBytesWithZone (featurematrix.go) because a
-// matrix target may legitimately live in EITHER zone — an archived, closed
-// story is directly addressable here.
-func effectiveMatrixStatus(ctx context.Context, root string, spec *artifact.SpecFrontmatter) (artifact.Status, error) {
-	name, err := specDirName(spec.ID)
-	if err != nil {
-		return "", err
-	}
-	_, relPath, content, err := loadSpecBytesWithZone(root, name)
-	if err != nil {
-		return "", err
-	}
-	if content == nil {
-		// vocab:identity — operational diagnostic naming ids (exit-2 machinery, not verdict prose)
-		return "", fmt.Errorf("resolved spec %s not found in specs/active/ or specs/archive/", spec.ID)
-	}
-	result, err := specstate.NewProjector().Resolve(ctx, root, specstate.Candidate{Path: relPath, Content: content})
-	if err != nil {
-		return "", err
-	}
-	return result.ArtifactStatus(), nil
 }
 
 // specDirName returns the <name> segment of a spec ref "spec/<name>" — the

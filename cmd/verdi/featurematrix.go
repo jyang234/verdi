@@ -150,30 +150,6 @@ func supersededStoryRefs(supersededByAC map[string][]string) []string {
 	return refs
 }
 
-// foldImplementingStory runs the ordinary story-level fold (evidence.Fold)
-// for one implementing story, loading its own derived evidence and
-// consulting waivers/attestations keyed by its own story-slug — the exact
-// same mechanism cmdMatrix already uses for a directly-resolved story spec.
-func foldImplementingStory(ctx context.Context, root, commit string, storySpec *artifact.SpecFrontmatter) (evidence.StoryResult, error) {
-	derivedRoot := store.DerivedSpecDir(root, store.RefSlug(storySpec.ID))
-	records, err := evidence.LoadRecords(ctx, root, derivedRoot, commit)
-	if err != nil {
-		// vocab:identity — operational diagnostic naming ids (exit-2 machinery, not verdict prose)
-		return evidence.StoryResult{}, fmt.Errorf("matrix: loading evidence for implementing story %s: %w", storySpec.ID, err)
-	}
-	in, err := storyFoldInput(ctx, root, storySpec, commit, records, false)
-	if err != nil {
-		// vocab:identity — machinery diagnostic names the fixed implementing-story role and spec id
-		return evidence.StoryResult{}, fmt.Errorf("matrix: preparing obligation quality for implementing story %s: %w", storySpec.ID, err)
-	}
-	result, err := evidence.Fold(in)
-	if err != nil {
-		// vocab:identity — operational diagnostic naming ids (exit-2 machinery, not verdict prose)
-		return evidence.StoryResult{}, fmt.Errorf("matrix: folding implementing story %s: %w", storySpec.ID, err)
-	}
-	return result, nil
-}
-
 // printFeatureMatrix renders the feature fold, mirroring printMatrix's
 // shape (matrix.go) at the feature level, plus the stub × computed-live-
 // mapping section 05 §Lenses requires: "story stubs always rendered
