@@ -5,8 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"github.com/jyang234/verdi/internal/artifact"
 	"github.com/jyang234/verdi/internal/governanceprincipal"
-	"gopkg.in/yaml.v3"
 )
 
 // RatificationSchema is the v1 ratification.yaml schema identifier. V1 is
@@ -73,53 +73,40 @@ type Ratification struct {
 // ratificationActorField is the version-divergent wire form of the
 // `actor` key: a v1 scalar principal id or a v2 three-field block. The
 // document-level dialect guard (anchors/aliases/tags) has already run by
-// the time this unmarshals, so this only owns the shape, closed key set,
-// duplicate keys, and string-ness of the block.
+// the time this unmarshals, and the node shape is judged only through the
+// shared internal/artifact seam (RawNode projections) — this file owns
+// the closed key set and required keys, never yaml handling itself.
 type ratificationActorField struct {
 	scalar    string
 	hasScalar bool
 	block     *RatificationActor
 }
 
-func (f *ratificationActorField) UnmarshalYAML(node *yaml.Node) error {
-	switch node.Kind {
-	case yaml.ScalarNode:
-		if node.Tag != "!!str" {
-			return fmt.Errorf("ratification actor must be a string, got %s", node.Tag)
-		}
-		f.scalar, f.hasScalar = node.Value, true
-		return nil
-	case yaml.MappingNode:
-		if len(node.Content)%2 != 0 {
-			return fmt.Errorf("malformed ratification actor mapping")
-		}
-		allowed := map[string]bool{"trust_source": true, "subject": true, "principal_id": true}
-		seen := map[string]string{}
-		for i := 0; i < len(node.Content); i += 2 {
-			key, value := node.Content[i], node.Content[i+1]
-			if key.Kind != yaml.ScalarNode || key.Tag != "!!str" {
-				return fmt.Errorf("ratification actor field name must be a plain string")
-			}
-			if !allowed[key.Value] {
-				return fmt.Errorf("ratification actor field %q is not known", key.Value)
-			}
-			if _, duplicate := seen[key.Value]; duplicate {
-				return fmt.Errorf("ratification actor field %q is duplicated", key.Value)
-			}
-			if value.Kind != yaml.ScalarNode || value.Tag != "!!str" {
-				return fmt.Errorf("ratification actor field %q must be a string, got %s", key.Value, value.Tag)
-			}
-			seen[key.Value] = value.Value
-		}
-		for _, required := range []string{"trust_source", "subject", "principal_id"} {
-			if _, ok := seen[required]; !ok {
-				return fmt.Errorf("ratification actor field %q is required", required)
-			}
-		}
-		f.block = &RatificationActor{TrustSource: seen["trust_source"], Subject: seen["subject"], PrincipalID: seen["principal_id"]}
+func (f *ratificationActorField) UnmarshalYAML(node *artifact.RawNode) error {
+	if value, ok := artifact.RawNodeStringScalar(node); ok {
+		f.scalar, f.hasScalar = value, true
 		return nil
 	}
-	return fmt.Errorf("ratification actor must be a v1 principal-id string or a v2 actor block")
+	fields, isMapping, err := artifact.RawNodeStringMapping(node)
+	if err != nil {
+		return fmt.Errorf("ratification actor: %w", err)
+	}
+	if !isMapping {
+		return fmt.Errorf("ratification actor must be a v1 principal-id string or a v2 actor block")
+	}
+	allowed := map[string]bool{"trust_source": true, "subject": true, "principal_id": true}
+	for key := range fields {
+		if !allowed[key] {
+			return fmt.Errorf("ratification actor field %q is not known", key)
+		}
+	}
+	for _, required := range []string{"trust_source", "subject", "principal_id"} {
+		if _, ok := fields[required]; !ok {
+			return fmt.Errorf("ratification actor field %q is required", required)
+		}
+	}
+	f.block = &RatificationActor{TrustSource: fields["trust_source"], Subject: fields["subject"], PrincipalID: fields["principal_id"]}
+	return nil
 }
 
 // ratificationWire is the strict on-disk shape shared by both schema
