@@ -253,7 +253,6 @@ func (s *Service) AcceptedRatification(ctx context.Context, identity Identity, a
 	if authority.Facts == nil {
 		return AcceptedRatificationResult{Outcome: operationalOutcome("ratification-authority-invalid", fmt.Errorf("experimentapp: accepted ratification requires a configured trust-fact reader"))}
 	}
-
 	snapshot, err := resolveAccepted(ctx, s.git, identity)
 	if err != nil {
 		var stale *staleAcceptedHeadError
@@ -262,6 +261,34 @@ func (s *Service) AcceptedRatification(ctx context.Context, identity Identity, a
 		}
 		return AcceptedRatificationResult{Outcome: operationalOutcome("accepted-tree-invalid", err)}
 	}
+	facts, outcome := s.acceptedRatificationAt(ctx, identity, authority, snapshot)
+	if outcome.Classification != ClassificationClean {
+		return AcceptedRatificationResult{Outcome: outcome}
+	}
+	return AcceptedRatificationResult{
+		Outcome: cleanOutcome(), AcceptedHead: snapshot.revision.Head,
+		ExperimentPath: snapshot.experimentPath, Ratification: facts.record.Clone(),
+		PrincipalID: facts.principal,
+	}
+}
+
+// acceptedRatificationFacts is the complete accepted-ratification proof a
+// snapshot-holding lifecycle operation consumes without resolving the
+// accepted HEAD or tree a second time.
+type acceptedRatificationFacts struct {
+	record     experiment.Ratification
+	definition experiment.Definition
+	derived    experiment.StateDerivation
+	run        string
+	result     experiment.Result
+	principal  governanceprincipal.PrincipalID
+}
+
+// acceptedRatificationAt judges the full accepted-ratification proof
+// against one already-resolved accepted snapshot (behavior-identical
+// extraction of AcceptedRatification's body; the public result shape and
+// classification are pinned by the existing tests).
+func (s *Service) acceptedRatificationAt(ctx context.Context, identity Identity, authority AcceptedRatificationAuthority, snapshot acceptedSnapshot) (acceptedRatificationFacts, Outcome) {
 	// Ratification presupposes the registration lock: the accepted
 	// definition must be the locked v2 record. The registration
 	// provenance-pair check is deliberately NOT reused here — it pins the
@@ -270,33 +297,33 @@ func (s *Service) AcceptedRatification(ctx context.Context, identity Identity, a
 	// exact-tree artifact resolution below plus claim re-resolution.
 	definitionBytes, err := fs.ReadFile(snapshot.source, path.Join(snapshot.experimentPath, "experiment.yaml"))
 	if err != nil {
-		return AcceptedRatificationResult{Outcome: operationalOutcome("definition-unreadable", err)}
+		return acceptedRatificationFacts{}, operationalOutcome("definition-unreadable", err)
 	}
 	definition, err := experiment.DecodeDefinition(definitionBytes)
 	if err != nil {
-		return AcceptedRatificationResult{Outcome: operationalOutcome("definition-invalid", err)}
+		return acceptedRatificationFacts{}, operationalOutcome("definition-invalid", err)
 	}
 	locked, err := experiment.Locked(definition)
 	if err != nil {
-		return AcceptedRatificationResult{Outcome: operationalOutcome("definition-invalid", err)}
+		return acceptedRatificationFacts{}, operationalOutcome("definition-invalid", err)
 	}
 	if !locked || definition.Schema != experiment.DefinitionSchemaV2 {
-		return AcceptedRatificationResult{Outcome: verdictOutcome("registration-not-accepted", "accepted definition is not a locked v2 registration")}
+		return acceptedRatificationFacts{}, verdictOutcome("registration-not-accepted", "accepted definition is not a locked v2 registration")
 	}
 
 	raw, err := fs.ReadFile(snapshot.source, path.Join(snapshot.experimentPath, ratificationFileName))
 	if errors.Is(err, fs.ErrNotExist) {
-		return AcceptedRatificationResult{Outcome: verdictOutcome("ratification-not-accepted", "no ratification is present at the accepted HEAD; proposal bytes carry no authority")}
+		return acceptedRatificationFacts{}, verdictOutcome("ratification-not-accepted", "no ratification is present at the accepted HEAD; proposal bytes carry no authority")
 	}
 	if err != nil {
-		return AcceptedRatificationResult{Outcome: operationalOutcome("ratification-unreadable", err)}
+		return acceptedRatificationFacts{}, operationalOutcome("ratification-unreadable", err)
 	}
 	record, err := experiment.DecodeRatification(raw)
 	if err != nil {
-		return AcceptedRatificationResult{Outcome: operationalOutcome("ratification-invalid", err)}
+		return acceptedRatificationFacts{}, operationalOutcome("ratification-invalid", err)
 	}
 	if record.Schema == experiment.RatificationSchema {
-		return AcceptedRatificationResult{Outcome: verdictOutcome("ratification-v1-history", "ratification v1 is decode-only predecessor history and cannot authorize release or closure")}
+		return acceptedRatificationFacts{}, verdictOutcome("ratification-v1-history", "ratification v1 is decode-only predecessor history and cannot authorize release or closure")
 	}
 
 	// One exact-tree pass of the one state algorithm proves the record
@@ -305,10 +332,10 @@ func (s *Service) AcceptedRatification(ctx context.Context, identity Identity, a
 	// operational corruption of accepted evidence.
 	derived, err := experiment.DeriveStateDetailsFromSource(snapshot.source, snapshot.experimentPath, s.results.VerifyResult)
 	if err != nil {
-		return AcceptedRatificationResult{Outcome: operationalOutcome("state-invalid", err)}
+		return acceptedRatificationFacts{}, operationalOutcome("state-invalid", err)
 	}
 	if derived.State != experiment.StateRatified {
-		return AcceptedRatificationResult{Outcome: operationalOutcome("state-invalid", fmt.Errorf("experimentapp: accepted tree carries ratification bytes but derives state %q", derived.State))}
+		return acceptedRatificationFacts{}, operationalOutcome("state-invalid", fmt.Errorf("experimentapp: accepted tree carries ratification bytes but derives state %q", derived.State))
 	}
 
 	// The bound result must be authoritative v2 evidence with its validated
@@ -321,18 +348,18 @@ func (s *Service) AcceptedRatification(ctx context.Context, identity Identity, a
 		}
 	}
 	if matchedRun == "" {
-		return AcceptedRatificationResult{Outcome: operationalOutcome("state-invalid", fmt.Errorf("experimentapp: ratified state names no run for result digest %q", record.ResultDigest))}
+		return acceptedRatificationFacts{}, operationalOutcome("state-invalid", fmt.Errorf("experimentapp: ratified state names no run for result digest %q", record.ResultDigest))
 	}
 	resultRaw, err := fs.ReadFile(snapshot.source, path.Join(snapshot.experimentPath, "runs", matchedRun, "result.json"))
 	if err != nil {
-		return AcceptedRatificationResult{Outcome: operationalOutcome("result-unreadable", err)}
+		return acceptedRatificationFacts{}, operationalOutcome("result-unreadable", err)
 	}
 	boundResult, err := experiment.DecodeResult(resultRaw)
 	if err != nil {
-		return AcceptedRatificationResult{Outcome: operationalOutcome("result-invalid", err)}
+		return acceptedRatificationFacts{}, operationalOutcome("result-invalid", err)
 	}
 	if boundResult.Schema != experiment.ResultSchemaV2 {
-		return AcceptedRatificationResult{Outcome: verdictOutcome("ratification-evidence-v1", "the bound result is decode-only v1 evidence without an execution receipt and cannot carry ratification authority")}
+		return acceptedRatificationFacts{}, verdictOutcome("ratification-evidence-v1", "the bound result is decode-only v1 evidence without an execution receipt and cannot carry ratification authority")
 	}
 
 	// The accepted resolver proves the complete artifact/provenance pair
@@ -340,28 +367,28 @@ func (s *Service) AcceptedRatification(ctx context.Context, identity Identity, a
 	// authenticated propose-ratification mutation for these bytes.
 	provenanceRaw, err := fs.ReadFile(snapshot.source, path.Join(snapshot.experimentPath, experiment.ProvenanceFile))
 	if errors.Is(err, fs.ErrNotExist) {
-		return AcceptedRatificationResult{Outcome: verdictOutcome("ratification-provenance-incomplete", "accepted ratification bytes carry no mutation-provenance record")}
+		return acceptedRatificationFacts{}, verdictOutcome("ratification-provenance-incomplete", "accepted ratification bytes carry no mutation-provenance record")
 	}
 	if err != nil {
-		return AcceptedRatificationResult{Outcome: operationalOutcome("mutation-provenance-invalid", err)}
+		return acceptedRatificationFacts{}, operationalOutcome("mutation-provenance-invalid", err)
 	}
 	records, err := experiment.DecodeProvenanceLog(provenanceRaw)
 	if err != nil {
-		return AcceptedRatificationResult{Outcome: operationalOutcome("mutation-provenance-invalid", err)}
+		return acceptedRatificationFacts{}, operationalOutcome("mutation-provenance-invalid", err)
 	}
 	if len(records) == 0 {
-		return AcceptedRatificationResult{Outcome: verdictOutcome("ratification-provenance-incomplete", "accepted mutation provenance is empty")}
+		return acceptedRatificationFacts{}, verdictOutcome("ratification-provenance-incomplete", "accepted mutation provenance is empty")
 	}
 	acceptedDigest, err := artifactSetDigest(snapshot.source.files, snapshot.experimentPath)
 	if err != nil {
-		return AcceptedRatificationResult{Outcome: operationalOutcome("artifact-digest-invalid", err)}
+		return acceptedRatificationFacts{}, operationalOutcome("artifact-digest-invalid", err)
 	}
 	last := records[len(records)-1]
 	wantIdentity := experiment.ProvenanceExperiment{Spike: identity.Spike, ID: identity.ExperimentID}
 	wantPaths := []string{path.Join(snapshot.experimentPath, ratificationFileName)}
 	if last.Operation != experiment.MutationProposeRatification || last.Experiment != wantIdentity ||
 		last.ResultDigest != acceptedDigest || !slices.Equal(last.Paths, wantPaths) {
-		return AcceptedRatificationResult{Outcome: verdictOutcome("ratification-provenance-incomplete", "accepted ratification and provenance do not form one complete propose-ratification pair")}
+		return acceptedRatificationFacts{}, verdictOutcome("ratification-provenance-incomplete", "accepted ratification and provenance do not form one complete propose-ratification pair")
 	}
 	// AC-5's two temporally distinct human moments (design §3.3): the
 	// ratification tail must extend the exact pre-ratification artifact
@@ -373,50 +400,49 @@ func (s *Service) AcceptedRatification(ctx context.Context, identity Identity, a
 	delete(preimageFiles, path.Join(snapshot.experimentPath, ratificationFileName))
 	preimageDigest, err := artifactSetDigest(preimageFiles, snapshot.experimentPath)
 	if err != nil {
-		return AcceptedRatificationResult{Outcome: operationalOutcome("artifact-digest-invalid", err)}
+		return acceptedRatificationFacts{}, operationalOutcome("artifact-digest-invalid", err)
 	}
 	if last.PreviousDigest != preimageDigest {
-		return AcceptedRatificationResult{Outcome: verdictOutcome("ratification-provenance-incomplete", "the accepted propose-ratification record does not extend the exact pre-ratification artifact set")}
+		return acceptedRatificationFacts{}, verdictOutcome("ratification-provenance-incomplete", "the accepted propose-ratification record does not extend the exact pre-ratification artifact set")
 	}
 	if len(records) < 2 {
-		return AcceptedRatificationResult{Outcome: verdictOutcome("ratification-provenance-incomplete", "no accepted propose-registration record precedes the ratification")}
+		return acceptedRatificationFacts{}, verdictOutcome("ratification-provenance-incomplete", "no accepted propose-registration record precedes the ratification")
 	}
 	predecessor := records[len(records)-2]
 	wantRegistrationPaths := []string{path.Join(snapshot.experimentPath, "evaluator-capabilities.json"), path.Join(snapshot.experimentPath, "experiment.yaml")}
 	if predecessor.Operation != experiment.MutationProposeRegistration || predecessor.Experiment != wantIdentity ||
 		predecessor.ResultDigest != preimageDigest || !slices.Equal(predecessor.Paths, wantRegistrationPaths) {
-		return AcceptedRatificationResult{Outcome: verdictOutcome("ratification-provenance-incomplete", "the record preceding the ratification is not the complete accepted propose-registration pair")}
+		return acceptedRatificationFacts{}, verdictOutcome("ratification-provenance-incomplete", "the record preceding the ratification is not the complete accepted propose-registration pair")
 	}
 	if predecessor.Attribution.Unauthenticated || predecessor.Attribution.PrincipalID == "" {
-		return AcceptedRatificationResult{Outcome: operationalOutcome("ratification-provenance-identity", fmt.Errorf("experimentapp: the accepted propose-registration record is not attributed to an authenticated principal"))}
+		return acceptedRatificationFacts{}, operationalOutcome("ratification-provenance-identity", fmt.Errorf("experimentapp: the accepted propose-registration record is not attributed to an authenticated principal"))
 	}
 	if last.Attribution.Unauthenticated || last.Attribution.PrincipalID == "" {
-		return AcceptedRatificationResult{Outcome: operationalOutcome("ratification-provenance-identity", fmt.Errorf("experimentapp: the accepted propose-ratification record is not attributed to an authenticated principal"))}
+		return acceptedRatificationFacts{}, operationalOutcome("ratification-provenance-identity", fmt.Errorf("experimentapp: the accepted propose-ratification record is not attributed to an authenticated principal"))
 	}
 	if string(last.Attribution.PrincipalID) != record.ActorV2.PrincipalID {
-		return AcceptedRatificationResult{Outcome: operationalOutcome("ratification-provenance-identity", fmt.Errorf("experimentapp: provenance attribution principal %q does not correspond to the ratification actor %q", last.Attribution.PrincipalID, record.ActorV2.PrincipalID))}
+		return acceptedRatificationFacts{}, operationalOutcome("ratification-provenance-identity", fmt.Errorf("experimentapp: provenance attribution principal %q does not correspond to the ratification actor %q", last.Attribution.PrincipalID, record.ActorV2.PrincipalID))
 	}
 
 	claim := governanceprincipal.PrincipalClaim{TrustSource: record.ActorV2.TrustSource, Subject: record.ActorV2.Subject}
 	resolution, err := governanceprincipal.NewResolver(authority.Facts).Resolve(ctx, authority.Profile, claim)
 	if err != nil {
-		return AcceptedRatificationResult{Outcome: operationalOutcome("ratification-principal-invalid", err)}
+		return acceptedRatificationFacts{}, operationalOutcome("ratification-principal-invalid", err)
 	}
 	if resolution.State != governanceprincipal.ResolutionAuthenticated {
 		for _, witness := range resolution.Witnesses {
 			if witness.Code == governanceprincipal.ReasonTrustSourceForbidden {
-				return AcceptedRatificationResult{Outcome: operationalOutcome("ratification-trust-source-missing", fmt.Errorf("experimentapp: persisted trust source %q is not configured by the accepted governance profile", claim.TrustSource))}
+				return acceptedRatificationFacts{}, operationalOutcome("ratification-trust-source-missing", fmt.Errorf("experimentapp: persisted trust source %q is not configured by the accepted governance profile", claim.TrustSource))
 			}
 		}
-		return AcceptedRatificationResult{Outcome: verdictOutcome("ratification-actor-unauthenticated", fmt.Sprintf("persisted claim re-resolved to state %q", resolution.State))}
+		return acceptedRatificationFacts{}, verdictOutcome("ratification-actor-unauthenticated", fmt.Sprintf("persisted claim re-resolved to state %q", resolution.State))
 	}
 	if string(resolution.PrincipalID) != record.ActorV2.PrincipalID {
-		return AcceptedRatificationResult{Outcome: operationalOutcome("ratification-principal-mismatch", fmt.Errorf("experimentapp: kernel-derived principal %q does not equal the persisted principal %q", resolution.PrincipalID, record.ActorV2.PrincipalID))}
+		return acceptedRatificationFacts{}, operationalOutcome("ratification-principal-mismatch", fmt.Errorf("experimentapp: kernel-derived principal %q does not equal the persisted principal %q", resolution.PrincipalID, record.ActorV2.PrincipalID))
 	}
 
-	return AcceptedRatificationResult{
-		Outcome: cleanOutcome(), AcceptedHead: snapshot.revision.Head,
-		ExperimentPath: snapshot.experimentPath, Ratification: record.Clone(),
-		PrincipalID: resolution.PrincipalID,
-	}
+	return acceptedRatificationFacts{
+		record: record, definition: definition, derived: derived,
+		run: matchedRun, result: boundResult, principal: resolution.PrincipalID,
+	}, cleanOutcome()
 }
