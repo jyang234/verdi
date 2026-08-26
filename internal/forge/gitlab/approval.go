@@ -39,6 +39,7 @@ func (a *Adapter) ListApprovals(ctx context.Context, changeID string) (forge.App
 	mergeRequestURL := fmt.Sprintf("%s/projects/%s/merge_requests/%s", a.cfg.BaseURL, project, change)
 	var mergeRequest approvalMergeRequestJSON
 	if _, err := a.getApprovalJSON(ctx, mergeRequestURL, &mergeRequest); err != nil {
+		// vocab:identity — GitLab provider resource name, not a Verdi lifecycle class.
 		return forge.ApprovalSnapshot{}, fmt.Errorf("gitlab: reading merge request %s head: %w", changeID, err)
 	}
 
@@ -46,6 +47,7 @@ func (a *Adapter) ListApprovals(ctx context.Context, changeID string) (forge.App
 	var response approvalsJSON
 	headers, err := a.getApprovalJSON(ctx, approvalsURL, &response)
 	if err != nil {
+		// vocab:identity — GitLab provider resource name, not a Verdi lifecycle class.
 		return forge.ApprovalSnapshot{}, fmt.Errorf("gitlab: reading merge request %s approvals: %w", changeID, err)
 	}
 	if headers.Get(nextPageHeader) != "" || headers.Get("Link") != "" {
@@ -53,6 +55,15 @@ func (a *Adapter) ListApprovals(ctx context.Context, changeID string) (forge.App
 	}
 	if response.ApprovedBy == nil {
 		return forge.ApprovalSnapshot{}, fmt.Errorf("gitlab: approvals response carries null or missing approved_by")
+	}
+	var currentMergeRequest approvalMergeRequestJSON
+	if _, err := a.getApprovalJSON(ctx, mergeRequestURL, &currentMergeRequest); err != nil {
+		// vocab:identity — GitLab provider resource name, not a Verdi lifecycle class.
+		return forge.ApprovalSnapshot{}, fmt.Errorf("gitlab: rereading merge request %s head after approval collection: %w", changeID, err)
+	}
+	if currentMergeRequest.SHA != mergeRequest.SHA {
+		// vocab:identity — GitLab provider resource name, not a Verdi lifecycle class.
+		return forge.ApprovalSnapshot{}, fmt.Errorf("gitlab: merge request %s head changed during approval collection from %s to %s", changeID, mergeRequest.SHA, currentMergeRequest.SHA)
 	}
 
 	seenUsers := make(map[int64]struct{}, len(response.ApprovedBy))
@@ -88,6 +99,7 @@ func (a *Adapter) ListApprovals(ctx context.Context, changeID string) (forge.App
 
 	snapshot, err := forge.NewApprovalSnapshot("gitlab", a.cfg.ProjectID, changeID, mergeRequest.SHA, a.cfg.Clock(), approvals)
 	if err != nil {
+		// vocab:identity — GitLab provider resource name, not a Verdi lifecycle class.
 		return forge.ApprovalSnapshot{}, fmt.Errorf("gitlab: normalize merge request %s approvals: %w", changeID, err)
 	}
 	return snapshot, nil
@@ -100,6 +112,7 @@ func (a *Adapter) getApprovalJSON(ctx context.Context, requestURL string, out an
 	}
 	defer func() {
 		if closeErr := response.Body.Close(); closeErr != nil {
+			// vocab:identity — HTTP response-body operation, not a Verdi lifecycle class.
 			err = errors.Join(err, fmt.Errorf("gitlab: close GET %s response: %w", requestURL, closeErr))
 		}
 	}()

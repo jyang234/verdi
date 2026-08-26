@@ -48,6 +48,13 @@ func (a *Adapter) ListApprovals(ctx context.Context, changeID string) (forge.App
 	if err != nil {
 		return forge.ApprovalSnapshot{}, fmt.Errorf("github: reading pull request %s reviews: %w", changeID, err)
 	}
+	var currentPull approvalPullJSON
+	if _, err := a.getApprovalJSON(ctx, pullURL, &currentPull); err != nil {
+		return forge.ApprovalSnapshot{}, fmt.Errorf("github: rereading pull request %s head after approval collection: %w", changeID, err)
+	}
+	if currentPull.Head.SHA != pull.Head.SHA {
+		return forge.ApprovalSnapshot{}, fmt.Errorf("github: pull request %s head changed during approval collection from %s to %s", changeID, pull.Head.SHA, currentPull.Head.SHA)
+	}
 
 	seenReviewIDs := make(map[int64]struct{}, len(reviews))
 	approvals := make([]forge.Approval, 0, len(reviews))
@@ -105,8 +112,13 @@ func (a *Adapter) ListApprovals(ctx context.Context, changeID string) (forge.App
 func (a *Adapter) drainApprovalReviews(ctx context.Context, firstURL string) ([]approvalReviewJSON, error) {
 	var all []approvalReviewJSON
 	next := withPerPage(firstURL)
+	visited := make(map[string]struct{})
 	for next != "" {
 		current := next
+		if _, exists := visited[current]; exists {
+			return nil, fmt.Errorf("github: approval pagination cycle detected: %s was already visited", current)
+		}
+		visited[current] = struct{}{}
 		var page []approvalReviewJSON
 		headers, err := a.getApprovalJSON(ctx, current, &page)
 		if err != nil {
@@ -120,17 +132,27 @@ func (a *Adapter) drainApprovalReviews(ctx context.Context, firstURL string) ([]
 		if err != nil {
 			return nil, err
 		}
-		if next == current {
-			return nil, fmt.Errorf("github: approval pagination loop detected: Link rel=\"next\" repeats %s", current)
-		}
 	}
 	return all, nil
 }
 
 func approvalNextLink(header string) (string, error) {
-	next := parseLinkNext(header)
-	if next == "" && strings.Contains(header, `rel="next"`) {
-		return "", fmt.Errorf("github: malformed approval pagination Link claims rel=\"next\"")
+	next := ""
+	for _, member := range strings.Split(header, ",") {
+		if !strings.Contains(member, `rel="next"`) {
+			continue
+		}
+		candidate := parseLinkNext(member)
+		if candidate == "" {
+			return "", fmt.Errorf("github: malformed approval pagination Link claims rel=\"next\"")
+		}
+		if _, err := url.ParseRequestURI(candidate); err != nil {
+			return "", fmt.Errorf("github: malformed approval pagination next URL %q: %w", candidate, err)
+		}
+		if next != "" && candidate != next {
+			return "", fmt.Errorf("github: approval pagination Link carries multiple distinct next continuations %q and %q", next, candidate)
+		}
+		next = candidate
 	}
 	return next, nil
 }
@@ -142,6 +164,7 @@ func (a *Adapter) getApprovalJSON(ctx context.Context, requestURL string, out an
 	}
 	defer func() {
 		if closeErr := response.Body.Close(); closeErr != nil {
+			// vocab:identity — HTTP response-body operation, not a Verdi lifecycle class.
 			err = errors.Join(err, fmt.Errorf("github: close GET %s response: %w", requestURL, closeErr))
 		}
 	}()

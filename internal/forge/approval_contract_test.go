@@ -120,6 +120,73 @@ func TestForgeApprovalContract_Static(t *testing.T) {
 		}
 	})
 
+	t.Run("provider actor contract accepts only built-in canonical identities", func(t *testing.T) {
+		valid := []struct {
+			name      string
+			forgeName string
+			scheme    string
+			subject   string
+		}{
+			{"github", "github", "github-user-id", "101"},
+			{"gitlab", "gitlab", "gitlab-user-id", "9223372036854775807"},
+		}
+		for _, tt := range valid {
+			t.Run("valid "+tt.name, func(t *testing.T) {
+				approval := approvalFixture("review-1", candidateA)
+				approval.Actor = forge.ProviderActor{Scheme: tt.scheme, Subject: tt.subject}
+				if _, err := forge.NewApprovalSnapshot(tt.forgeName, "acme/widgets", "17", candidateA, fixedClock(), []forge.Approval{approval}); err != nil {
+					t.Fatalf("NewApprovalSnapshot: %v", err)
+				}
+			})
+		}
+
+		schemes := []struct {
+			name      string
+			forgeName string
+			scheme    string
+		}{
+			{"unknown forge", "bitbucket", "github-user-id"},
+			{"unknown scheme", "github", "provider-user"},
+			{"github with gitlab scheme", "github", "gitlab-user-id"},
+			{"gitlab with github scheme", "gitlab", "github-user-id"},
+		}
+		for _, tt := range schemes {
+			t.Run(tt.name, func(t *testing.T) {
+				approval := approvalFixture("review-1", candidateA)
+				approval.Actor.Scheme = tt.scheme
+				_, err := forge.NewApprovalSnapshot(tt.forgeName, "acme/widgets", "17", candidateA, fixedClock(), []forge.Approval{approval})
+				if err == nil || !strings.Contains(err.Error(), "actor.scheme") {
+					t.Fatalf("NewApprovalSnapshot error = %v, want actor.scheme error", err)
+				}
+			})
+		}
+
+		for _, subject := range []string{"", "+1", "-1", "0", "01", " 1", "1 ", "9223372036854775808", "octocat", "Jane Doe"} {
+			t.Run("invalid subject "+fmt.Sprintf("%q", subject), func(t *testing.T) {
+				approval := approvalFixture("review-1", candidateA)
+				approval.Actor.Subject = subject
+				_, err := forge.NewApprovalSnapshot("github", "acme/widgets", "17", candidateA, fixedClock(), []forge.Approval{approval})
+				if err == nil || !strings.Contains(err.Error(), "actor.subject") {
+					t.Fatalf("NewApprovalSnapshot error = %v, want actor.subject error", err)
+				}
+			})
+		}
+	})
+
+	t.Run("direct validation cannot bypass provider actor contract", func(t *testing.T) {
+		snapshot, err := forge.NewApprovalSnapshot(
+			"github", "acme/widgets", "17", candidateA, fixedClock(),
+			[]forge.Approval{approvalFixture("review-1", candidateA)},
+		)
+		if err != nil {
+			t.Fatalf("fixture: %v", err)
+		}
+		snapshot.Approvals[0].Actor.Subject = "renamed-login"
+		if err := snapshot.Validate(); err == nil || !strings.Contains(err.Error(), "actor.subject") {
+			t.Fatalf("Validate error = %v, want actor.subject error", err)
+		}
+	})
+
 	t.Run("unknown approval state cannot decode", func(t *testing.T) {
 		var state forge.ApprovalState
 		if err := json.Unmarshal([]byte(`"pending"`), &state); err == nil {
@@ -129,7 +196,7 @@ func TestForgeApprovalContract_Static(t *testing.T) {
 
 	t.Run("fake returns independent provider facts", func(t *testing.T) {
 		seed, err := forge.NewApprovalSnapshot(
-			"fake", "acme/widgets", "17", candidateA,
+			"github", "acme/widgets", "17", candidateA,
 			time.Date(2026, 8, 26, 16, 30, 0, 0, time.UTC),
 			[]forge.Approval{approvalFixture("review-1", candidateA)},
 		)
@@ -216,6 +283,36 @@ func TestForgeApprovalContract_Behavioral(t *testing.T) {
 		}
 	})
 
+	t.Run("github rejects head change during approval collection", func(t *testing.T) {
+		var headCalls atomic.Int32
+		var approvalsCalls atomic.Int32
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			switch r.URL.Path {
+			case "/repos/acme/widgets/pulls/17":
+				candidate := candidateA
+				if headCalls.Add(1) == 2 {
+					candidate = candidateB
+				}
+				writeJSON(t, w, `{"head":{"sha":"`+candidate+`"}}`)
+			case "/repos/acme/widgets/pulls/17/reviews":
+				approvalsCalls.Add(1)
+				writeJSON(t, w, `[]`)
+			default:
+				http.NotFound(w, r)
+			}
+		}))
+		defer server.Close()
+
+		a := github.New(github.Config{BaseURL: server.URL, Owner: "acme", Repo: "widgets", HTTPClient: server.Client(), Clock: fixedClock})
+		_, err := a.ListApprovals(context.Background(), "17")
+		if err == nil || !strings.Contains(err.Error(), "head changed during approval collection") {
+			t.Fatalf("ListApprovals error = %v, want head-change operational error (head calls %d, approval calls %d)", err, headCalls.Load(), approvalsCalls.Load())
+		}
+		if headCalls.Load() != 2 || approvalsCalls.Load() != 1 {
+			t.Fatalf("request counts: head=%d approvals=%d, want 2 and 1", headCalls.Load(), approvalsCalls.Load())
+		}
+	})
+
 	t.Run("github rejects duplicate incomplete unknown and trailing facts", func(t *testing.T) {
 		tests := []struct {
 			name string
@@ -267,6 +364,70 @@ func TestForgeApprovalContract_Behavioral(t *testing.T) {
 		a := github.New(github.Config{BaseURL: server.URL, Owner: "acme", Repo: "widgets", HTTPClient: server.Client(), Clock: fixedClock})
 		if _, err := a.ListApprovals(context.Background(), "17"); err == nil {
 			t.Fatal("ListApprovals with malformed claimed continuation: want error, got nil")
+		}
+	})
+
+	t.Run("github rejects multiple distinct next continuations", func(t *testing.T) {
+		var reviewsCalls atomic.Int32
+		var server *httptest.Server
+		server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			switch r.URL.Path {
+			case "/repos/acme/widgets/pulls/17":
+				writeJSON(t, w, `{"head":{"sha":"`+candidateA+`"}}`)
+			case "/repos/acme/widgets/pulls/17/reviews":
+				reviewsCalls.Add(1)
+				if r.URL.Query().Get("page") == "" {
+					w.Header().Set("Link", "<"+server.URL+r.URL.Path+"?page=2>; rel=\"next\", <"+server.URL+r.URL.Path+"?page=3>; rel=\"next\"")
+				}
+				writeJSON(t, w, `[]`)
+			default:
+				http.NotFound(w, r)
+			}
+		}))
+		defer server.Close()
+
+		a := github.New(github.Config{BaseURL: server.URL, Owner: "acme", Repo: "widgets", HTTPClient: server.Client(), Clock: fixedClock})
+		_, err := a.ListApprovals(context.Background(), "17")
+		if err == nil || !strings.Contains(err.Error(), "multiple distinct") {
+			t.Fatalf("ListApprovals error = %v, want multiple-distinct-next error (review calls %d)", err, reviewsCalls.Load())
+		}
+		if reviewsCalls.Load() != 1 {
+			t.Fatalf("review calls = %d, want 1", reviewsCalls.Load())
+		}
+	})
+
+	t.Run("github rejects multi-page approval cycle", func(t *testing.T) {
+		var reviewsCalls atomic.Int32
+		var server *httptest.Server
+		server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			switch r.URL.Path {
+			case "/repos/acme/widgets/pulls/17":
+				writeJSON(t, w, `{"head":{"sha":"`+candidateA+`"}}`)
+			case "/repos/acme/widgets/pulls/17/reviews":
+				call := reviewsCalls.Add(1)
+				if call > 2 {
+					http.Error(w, "unexpected pagination revisit", http.StatusInternalServerError)
+					return
+				}
+				if r.URL.Query().Get("page") == "2" {
+					w.Header().Set("Link", "<"+server.URL+r.URL.Path+"?per_page=100>; rel=\"next\"")
+				} else {
+					w.Header().Set("Link", "<"+server.URL+r.URL.Path+"?page=2>; rel=\"next\"")
+				}
+				writeJSON(t, w, `[]`)
+			default:
+				http.NotFound(w, r)
+			}
+		}))
+		defer server.Close()
+
+		a := github.New(github.Config{BaseURL: server.URL, Owner: "acme", Repo: "widgets", HTTPClient: server.Client(), Clock: fixedClock})
+		_, err := a.ListApprovals(context.Background(), "17")
+		if err == nil || !strings.Contains(err.Error(), "approval pagination cycle detected") {
+			t.Fatalf("ListApprovals error = %v, want multi-page cycle error (review calls %d)", err, reviewsCalls.Load())
+		}
+		if reviewsCalls.Load() != 2 {
+			t.Fatalf("review calls = %d, want 2", reviewsCalls.Load())
 		}
 	})
 
@@ -326,6 +487,36 @@ func TestForgeApprovalContract_Behavioral(t *testing.T) {
 			if approval.State == forge.ApprovalRevoked || approval.Actor.Subject == "8" {
 				t.Fatalf("removed approval was fabricated as history: %+v", second.Approvals)
 			}
+		}
+	})
+
+	t.Run("gitlab rejects head change during approval collection", func(t *testing.T) {
+		var headCalls atomic.Int32
+		var approvalsCalls atomic.Int32
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			switch r.URL.Path {
+			case "/projects/42/merge_requests/9":
+				candidate := candidateA
+				if headCalls.Add(1) == 2 {
+					candidate = candidateB
+				}
+				writeJSON(t, w, `{"sha":"`+candidate+`"}`)
+			case "/projects/42/merge_requests/9/approvals":
+				approvalsCalls.Add(1)
+				writeJSON(t, w, `{"approved_by":[]}`)
+			default:
+				http.NotFound(w, r)
+			}
+		}))
+		defer server.Close()
+
+		a := gitlab.New(gitlab.Config{BaseURL: server.URL, ProjectID: "42", HTTPClient: server.Client(), Clock: fixedClock})
+		_, err := a.ListApprovals(context.Background(), "9")
+		if err == nil || !strings.Contains(err.Error(), "head changed during approval collection") {
+			t.Fatalf("ListApprovals error = %v, want head-change operational error (head calls %d, approval calls %d)", err, headCalls.Load(), approvalsCalls.Load())
+		}
+		if headCalls.Load() != 2 || approvalsCalls.Load() != 1 {
+			t.Fatalf("request counts: head=%d approvals=%d, want 2 and 1", headCalls.Load(), approvalsCalls.Load())
 		}
 	})
 

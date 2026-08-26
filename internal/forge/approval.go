@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -146,7 +147,7 @@ func (s ApprovalSnapshot) Validate() error {
 	seen := make(map[string]struct{}, len(s.Approvals))
 	previous := ""
 	for i, approval := range s.Approvals {
-		if err := approval.validate(i); err != nil {
+		if err := approval.validate(s.Forge, i); err != nil {
 			return err
 		}
 		if _, exists := seen[approval.ApprovalID]; exists {
@@ -196,7 +197,7 @@ func DecodeApprovalJSON(reader io.Reader, out any) error {
 	return nil
 }
 
-func (a Approval) validate(index int) error {
+func (a Approval) validate(forgeName string, index int) error {
 	prefix := fmt.Sprintf("forge: approvals[%d]", index)
 	if err := requireValue(prefix+".approval_id", a.ApprovalID); err != nil {
 		return err
@@ -221,10 +222,7 @@ func (a Approval) validate(index int) error {
 	if err := validateCandidateSHA(prefix+".candidate_sha", a.CandidateSHA); err != nil {
 		return err
 	}
-	if err := requireValue(prefix+".actor.scheme", a.Actor.Scheme); err != nil {
-		return err
-	}
-	if err := requireValue(prefix+".actor.subject", a.Actor.Subject); err != nil {
+	if err := validateProviderActor(prefix, forgeName, a.Actor); err != nil {
 		return err
 	}
 	if a.ProviderWitnesses == nil {
@@ -237,6 +235,29 @@ func (a Approval) validate(index int) error {
 		if err := requireValue(fmt.Sprintf("%s.provider_witnesses[%d].value", prefix, witnessIndex), witness.Value); err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+func validateProviderActor(prefix, forgeName string, actor ProviderActor) error {
+	wantScheme := ""
+	switch forgeName {
+	case "github":
+		wantScheme = "github-user-id"
+	case "gitlab":
+		wantScheme = "gitlab-user-id"
+	default:
+		return fmt.Errorf("%s.actor.scheme: forge %q has no legal provider actor scheme", prefix, forgeName)
+	}
+	if actor.Scheme != wantScheme {
+		return fmt.Errorf("%s.actor.scheme must be %q for forge %q, got %q", prefix, wantScheme, forgeName, actor.Scheme)
+	}
+	if err := requireValue(prefix+".actor.subject", actor.Subject); err != nil {
+		return err
+	}
+	numericID, err := strconv.ParseInt(actor.Subject, 10, 64)
+	if err != nil || numericID <= 0 || strconv.FormatInt(numericID, 10) != actor.Subject {
+		return fmt.Errorf("%s.actor.subject must be a canonical positive base-10 provider numeric ID", prefix)
 	}
 	return nil
 }
