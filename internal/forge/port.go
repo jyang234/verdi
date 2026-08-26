@@ -71,6 +71,9 @@ type CIInfo struct {
 
 // Forge is the I-22 port.
 type Forge interface {
+	// ListApprovals returns the forge's current provider facts for changeID,
+	// including the forge-reported candidate head and an explicit empty set.
+	ListApprovals(ctx context.Context, changeID string) (ApprovalSnapshot, error)
 	// FetchEvidenceBundle retrieves the latest successful verdi-evidence
 	// CI run's artifact for (ref, commit) through the forge's own API and
 	// returns its full derived tree (every bundle file keyed by path
