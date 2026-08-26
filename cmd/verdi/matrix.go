@@ -1,8 +1,7 @@
-// verdi matrix <story> (05 §CLI, PLAN.md Phase 6): folds a story's
-// acceptance-criteria evidence (internal/evidence) and prints the per-AC
-// status table plus story eligibility. Kept in its own file per PLAN.md's
-// instruction so dispatch.go's diff for wiring this verb in stays a
-// one-line handler change.
+// verdi matrix [--preview] --json <story-or-feature-ref> emits the canonical
+// matrix record; the legacy no-JSON forms render that same typed projection as
+// the established text tables. internal/matrixprojection owns target
+// resolution, folding, and record assembly for both adapters and MCP.
 //
 // matrix REPORTS; it never GATES (PLAN.md Phase 8 owns `verdi gate`) — so
 // it exits 0 whenever the fold computed successfully, even when the story
@@ -41,7 +40,6 @@ package main
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -50,32 +48,17 @@ import (
 	"github.com/jyang234/verdi/internal/artifact"
 	"github.com/jyang234/verdi/internal/disclosure"
 	"github.com/jyang234/verdi/internal/evidence"
-	"github.com/jyang234/verdi/internal/gitx"
+	"github.com/jyang234/verdi/internal/matrixprojection"
 	"github.com/jyang234/verdi/internal/model"
 	"github.com/jyang234/verdi/internal/specstate"
 	"github.com/jyang234/verdi/internal/store"
-	"github.com/jyang234/verdi/internal/storyresolve"
 )
 
 // cmdMatrix is `verdi matrix`'s real entry point, invoked by dispatch.go.
 func cmdMatrix(args []string, stdout, stderr io.Writer) int {
-	ctx := context.Background()
-
-	preview := false
-	var storyArg string
-	for _, a := range args {
-		if a == "--preview" {
-			preview = true
-			continue
-		}
-		if storyArg != "" {
-			fmt.Fprintf(stderr, "matrix: unexpected extra argument %q\n", a)
-			return 2
-		}
-		storyArg = a
-	}
-	if storyArg == "" {
-		fmt.Fprintln(stderr, "matrix: usage: verdi matrix <jira:STORY-KEY | spec/name> [--preview]")
+	preview, jsonMode, target, ok := parseMatrixArgs(args)
+	if !ok {
+		fmt.Fprintln(stderr, "matrix: usage: verdi matrix [--preview] --json <story-or-feature-ref> | verdi matrix <story-or-feature-ref> [--preview]")
 		return 2
 	}
 
@@ -84,95 +67,77 @@ func cmdMatrix(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, "matrix:", err)
 		return 2
 	}
-	// The resolved operating model (store.Open's config bottleneck, L-M3):
-	// the matrix's status VALUE and table prose resolve display vocabulary
-	// through Config.Model (spec/vocabulary-surfaces ac-1, L-M13(1)). An
-	// unresolvable store is operational (exit 2), matching every other
-	// manifest-loading verb.
 	cfg, err := store.Open(root)
 	if err != nil {
 		fmt.Fprintln(stderr, "matrix:", err)
 		return 2
 	}
-	mdl := cfg.Model
-	commit, err := gitx.RevParse(ctx, root, "HEAD")
+	projection, err := matrixprojection.Project(context.Background(), root, target, preview, cfg.Model)
 	if err != nil {
 		fmt.Fprintln(stderr, "matrix:", err)
 		return 2
 	}
-
-	spec, err := storyresolve.Resolve(root, storyArg)
-	if err != nil {
-		fmt.Fprintln(stderr, "matrix:", err)
-		return 2
-	}
-
-	// Final fix wave I2: the `status:` line speaks the spec's EFFECTIVE
-	// lifecycle state — resolved ONCE here through the projector and
-	// passed through to both rungs' printers (neither re-resolves). The
-	// raw persisted field printed a BLANK line for a statusless,
-	// merge-accepted spec; the effective state is what every other surface
-	// already speaks. matrix still reports, never gates: an Unproven state
-	// prints as its honest "unproven" word rather than refusing.
-	effectiveStatus, err := effectiveMatrixStatus(ctx, root, spec)
-	if err != nil {
-		fmt.Fprintln(stderr, "matrix:", err)
-		return 2
-	}
-
-	// Only a round-four REAL feature spec renders through the feature fold;
-	// everything else folds at the story level below. A round-four real
-	// feature is exactly `class: feature` AND carrying problem/outcome
-	// (VL-006 requires them on new-class specs). Both conjuncts are load-
-	// bearing:
-	//   - Class alone is not enough: a grandfathered v0 `class: feature`
-	//     spec is story-grade (Problem == nil), and must fold at the story
-	//     level, not through FoldFeature.
-	//   - Problem alone is not enough: a round-four `class: story` spec
-	//     ALSO carries problem/outcome, so a Problem-only discriminator
-	//     misroutes it into FoldFeature, which fails closed ("not a feature
-	//     spec") — the I-1 defect. Its Class is story, so the Class conjunct
-	//     keeps it on the story path.
-	// See featurematrix.go's doc comment for the grandfathering preserved.
-	if spec.Class == artifact.ClassFeature && spec.Problem != nil {
-		if err := cmdMatrixFeature(ctx, root, commit, spec, effectiveStatus, preview, mdl, stdout); err != nil {
+	if jsonMode {
+		data, err := matrixprojection.Marshal(projection.Record)
+		if err != nil {
+			fmt.Fprintln(stderr, "matrix:", err)
+			return 2
+		}
+		if _, err := stdout.Write(data); err != nil {
 			fmt.Fprintln(stderr, "matrix:", err)
 			return 2
 		}
 		return 0
 	}
 
-	// foldStoryEvidence (foldload.go) wraps LoadRecords/Fold failures with
-	// its own "loading evidence records: "/"folding evidence: " prefix;
-	// unwrap one level here so matrix's stderr output stays exactly what
-	// it printed before this prologue was shared (bit-for-bit, dc-4) —
-	// the fold's waiver/attestation directories are keyed by the story's
-	// own ref slug (I-30), threaded through unchanged.
-	result, err := foldStoryEvidence(ctx, root, spec, commit, preview)
-	if err != nil {
-		fmt.Fprintln(stderr, "matrix:", errors.Unwrap(err))
+	if projection.Record.Story != nil {
+		specName, err := specDirName(projection.Spec.ID)
+		if err != nil {
+			fmt.Fprintln(stderr, "matrix:", err)
+			return 2
+		}
+		obligationCells, err := obligationCellsFor(root, specName, projection.Spec.AcceptanceCriteria)
+		if err != nil {
+			fmt.Fprintln(stderr, "matrix:", err)
+			return 2
+		}
+		printMatrix(stdout, projection.Record, projection.EffectiveStatus, projection.Model, obligationCells)
+		return 0
+	}
+	if projection.Feature == nil {
+		fmt.Fprintln(stderr, "matrix: feature projection detail is missing")
 		return 2
 	}
-
-	// spec/obligation-wall ac-1: obligations are loaded by (spec-name,
-	// ac-id) — the spec's OWN directory name, distinct from the story
-	// tracker slug the fold's waiver/attestation lookups above use. specName
-	// is not carried by evidence.Fold's own output (obligations do not
-	// change the fold, feature evidence-obligations oq-1); it is derived
-	// here, independently, from the resolved spec's canonical ref.
-	specName, err := specDirName(spec.ID)
-	if err != nil {
-		fmt.Fprintln(stderr, "matrix:", err)
-		return 2
-	}
-	obligationCells, err := obligationCellsFor(root, specName, spec.AcceptanceCriteria)
-	if err != nil {
-		fmt.Fprintln(stderr, "matrix:", err)
-		return 2
-	}
-
-	printMatrix(stdout, result, effectiveStatus, string(spec.Class), mdl, preview, obligationCells)
+	printFeatureMatrix(stdout, projection.Spec, projection.EffectiveStatus, projection.Record, projection.Feature.Reconciliation, projection.Feature.Stories, projection.Feature.SupersededByAC, projection.Model)
 	return 0
+}
+
+func parseMatrixArgs(args []string) (preview, jsonMode bool, target string, ok bool) {
+	switch len(args) {
+	case 1:
+		if strings.HasPrefix(args[0], "-") {
+			return false, false, "", false
+		}
+		return false, false, args[0], true
+	case 2:
+		switch {
+		case args[0] == "--json" && !strings.HasPrefix(args[1], "-"):
+			return false, true, args[1], true
+		case args[0] == "--preview" && !strings.HasPrefix(args[1], "-"):
+			return true, false, args[1], true
+		case args[1] == "--preview" && !strings.HasPrefix(args[0], "-"):
+			return true, false, args[0], true
+		default:
+			return false, false, "", false
+		}
+	case 3:
+		if args[0] == "--preview" && args[1] == "--json" && !strings.HasPrefix(args[2], "-") {
+			return true, true, args[2], true
+		}
+		return false, false, "", false
+	default:
+		return false, false, "", false
+	}
 }
 
 // effectiveMatrixStatus resolves the matrix target's Git-derived effective
@@ -276,16 +241,17 @@ func obligationCellsFor(root, specName string, acs []artifact.AcceptanceCriterio
 // id — kept as a caller-supplied map, rather than looked up here, so this
 // function stays a pure formatter over already-computed data (no disk I/O),
 // exactly as it was before this story.
-func printMatrix(w io.Writer, result evidence.StoryResult, status artifact.Status, class string, mdl *model.Model, preview bool, obligationCells map[string]string) {
+func printMatrix(w io.Writer, record matrixprojection.Record, status artifact.Status, mdl *model.Model, obligationCells map[string]string) {
+	result := record.Story
 	// L-M13(1) classification: the "story:"/"spec:"/"status:" line KEYS
 	// mirror frontmatter field names, and the trailing
 	// story.violated/story.eligible lines are the fold's verdict KEYS —
 	// identity, bare. The status VALUE is a state word — display, resolved
 	// (spec/vocabulary-surfaces ac-1; nil-safe bare-id fallback).
-	fmt.Fprintf(w, "story: %s\n", result.Story)
-	fmt.Fprintf(w, "spec:  %s\n", result.SpecRef)
-	fmt.Fprintf(w, "status: %s\n", mdl.DisplayState(class, string(status)))
-	if preview {
+	fmt.Fprintf(w, "story: %s\n", result.StoryRef)
+	fmt.Fprintf(w, "spec:  %s\n", record.Target.SpecRef)
+	fmt.Fprintf(w, "status: %s\n", mdl.DisplayState("story", string(status)))
+	if record.Preview {
 		// Bare Render output, unindented and unprefixed, so
 		// disclosure.IsRendered recognizes the line and a disclosure consumer
 		// can count it (ac-1's recognizer half).
@@ -301,6 +267,6 @@ func printMatrix(w io.Writer, result evidence.StoryResult, status artifact.Statu
 	_ = tw.Flush() // tabwriter over stdout; flush error is unactionable CLI output
 
 	fmt.Fprintln(w)
-	fmt.Fprintf(w, "story.violated: %t\n", result.Violated)
+	fmt.Fprintf(w, "story.violated: %t\n", record.Violated)
 	fmt.Fprintf(w, "story.eligible: %t\n", result.Eligible)
 }

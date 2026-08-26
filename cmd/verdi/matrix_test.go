@@ -15,6 +15,7 @@ import (
 	"github.com/jyang234/verdi/internal/disclosure"
 	"github.com/jyang234/verdi/internal/evidence"
 	"github.com/jyang234/verdi/internal/fixturegit"
+	"github.com/jyang234/verdi/internal/matrixprojection"
 )
 
 // corpusTestdataDir is examples/showcase relative to this package, the same
@@ -642,6 +643,37 @@ func runMatrixForTest(t *testing.T, args []string, stdout, stderr io.Writer) int
 	return cmdMatrix(args, stdout, stderr)
 }
 
+func TestParseMatrixArgs(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name                          string
+		args                          []string
+		wantPreview, wantJSON, wantOK bool
+		wantTarget                    string
+	}{
+		{name: "legacy", args: []string{"spec/x"}, wantTarget: "spec/x", wantOK: true},
+		{name: "legacy preview after", args: []string{"spec/x", "--preview"}, wantPreview: true, wantTarget: "spec/x", wantOK: true},
+		{name: "legacy preview before", args: []string{"--preview", "spec/x"}, wantPreview: true, wantTarget: "spec/x", wantOK: true},
+		{name: "json", args: []string{"--json", "spec/x"}, wantJSON: true, wantTarget: "spec/x", wantOK: true},
+		{name: "preview json", args: []string{"--preview", "--json", "spec/x"}, wantPreview: true, wantJSON: true, wantTarget: "spec/x", wantOK: true},
+		{name: "missing", args: nil},
+		{name: "unknown", args: []string{"--wat", "spec/x"}},
+		{name: "duplicate", args: []string{"--json", "--json", "spec/x"}},
+		{name: "duplicate preview", args: []string{"--preview", "--preview", "spec/x"}},
+		{name: "wrong json order", args: []string{"--json", "--preview", "spec/x"}},
+		{name: "flag after json target", args: []string{"--json", "spec/x", "--preview"}},
+		{name: "extra positional", args: []string{"spec/x", "spec/y"}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			preview, jsonMode, target, ok := parseMatrixArgs(tc.args)
+			if preview != tc.wantPreview || jsonMode != tc.wantJSON || target != tc.wantTarget || ok != tc.wantOK {
+				t.Fatalf("parseMatrixArgs(%v) = (%t, %t, %q, %t), want (%t, %t, %q, %t)", tc.args, preview, jsonMode, target, ok, tc.wantPreview, tc.wantJSON, tc.wantTarget, tc.wantOK)
+			}
+		})
+	}
+}
+
 // TestCmdMatrix_Negative covers cmdMatrix's own operational-error paths
 // that don't need a real store: missing story argument, an unexpected
 // extra positional argument, and no findable store root.
@@ -758,9 +790,14 @@ func TestMatrixPreviewBanner_RendersThroughTheSeam(t *testing.T) {
 
 	t.Run("story rung", func(t *testing.T) {
 		var on, off bytes.Buffer
-		result := evidence.StoryResult{Story: "jira:LOAN-1", SpecRef: "spec/x"}
-		printMatrix(&on, result, artifact.Status("accepted-pending-build"), "story", nil, true, nil)
-		printMatrix(&off, result, artifact.Status("accepted-pending-build"), "story", nil, false, nil)
+		record := matrixprojection.Record{
+			Target: matrixprojection.Target{Class: matrixprojection.ClassStory, SpecRef: "spec/x"},
+			Story:  &matrixprojection.StoryBody{StoryRef: "jira:LOAN-1", ACs: []matrixprojection.StoryAC{}},
+		}
+		onRecord := record
+		onRecord.Preview = true
+		printMatrix(&on, onRecord, artifact.Status("accepted-pending-build"), nil, nil)
+		printMatrix(&off, record, artifact.Status("accepted-pending-build"), nil, nil)
 		if !hasLine(on.String()) {
 			t.Errorf("printMatrix(--preview) = %q, want the seam-rendered banner %q", on.String(), want)
 		}
@@ -772,9 +809,14 @@ func TestMatrixPreviewBanner_RendersThroughTheSeam(t *testing.T) {
 	t.Run("feature rung", func(t *testing.T) {
 		var on, off bytes.Buffer
 		spec := &artifact.SpecFrontmatter{Class: artifact.ClassFeature}
-		result := evidence.FeatureResult{SpecRef: "spec/f"}
-		printFeatureMatrix(&on, spec, artifact.Status("accepted-pending-build"), result, evidence.StubReconciliation{}, nil, nil, true, nil)
-		printFeatureMatrix(&off, spec, artifact.Status("accepted-pending-build"), result, evidence.StubReconciliation{}, nil, nil, false, nil)
+		record := matrixprojection.Record{
+			Target:  matrixprojection.Target{Class: matrixprojection.ClassFeature, SpecRef: "spec/f"},
+			Feature: &matrixprojection.FeatureBody{ACs: []matrixprojection.FeatureAC{}},
+		}
+		onRecord := record
+		onRecord.Preview = true
+		printFeatureMatrix(&on, spec, artifact.Status("accepted-pending-build"), onRecord, evidence.StubReconciliation{}, nil, nil, nil)
+		printFeatureMatrix(&off, spec, artifact.Status("accepted-pending-build"), record, evidence.StubReconciliation{}, nil, nil, nil)
 		if !hasLine(on.String()) {
 			t.Errorf("printFeatureMatrix(--preview) = %q, want the seam-rendered banner %q", on.String(), want)
 		}
