@@ -363,6 +363,33 @@ func (s *Service) AcceptedRatification(ctx context.Context, identity Identity, a
 		last.ResultDigest != acceptedDigest || !slices.Equal(last.Paths, wantPaths) {
 		return AcceptedRatificationResult{Outcome: verdictOutcome("ratification-provenance-incomplete", "accepted ratification and provenance do not form one complete propose-ratification pair")}
 	}
+	// AC-5's two temporally distinct human moments (design §3.3): the
+	// ratification tail must extend the exact pre-ratification artifact
+	// set, and the immediately preceding record must be the complete
+	// accepted propose-registration pair. Registration and ratification
+	// principals may legitimately differ, so no cross-record principal
+	// equality is imposed.
+	preimageFiles := cloneFileMap(snapshot.source.files)
+	delete(preimageFiles, path.Join(snapshot.experimentPath, ratificationFileName))
+	preimageDigest, err := artifactSetDigest(preimageFiles, snapshot.experimentPath)
+	if err != nil {
+		return AcceptedRatificationResult{Outcome: operationalOutcome("artifact-digest-invalid", err)}
+	}
+	if last.PreviousDigest != preimageDigest {
+		return AcceptedRatificationResult{Outcome: verdictOutcome("ratification-provenance-incomplete", "the accepted propose-ratification record does not extend the exact pre-ratification artifact set")}
+	}
+	if len(records) < 2 {
+		return AcceptedRatificationResult{Outcome: verdictOutcome("ratification-provenance-incomplete", "no accepted propose-registration record precedes the ratification")}
+	}
+	predecessor := records[len(records)-2]
+	wantRegistrationPaths := []string{path.Join(snapshot.experimentPath, "evaluator-capabilities.json"), path.Join(snapshot.experimentPath, "experiment.yaml")}
+	if predecessor.Operation != experiment.MutationProposeRegistration || predecessor.Experiment != wantIdentity ||
+		predecessor.ResultDigest != preimageDigest || !slices.Equal(predecessor.Paths, wantRegistrationPaths) {
+		return AcceptedRatificationResult{Outcome: verdictOutcome("ratification-provenance-incomplete", "the record preceding the ratification is not the complete accepted propose-registration pair")}
+	}
+	if predecessor.Attribution.Unauthenticated || predecessor.Attribution.PrincipalID == "" {
+		return AcceptedRatificationResult{Outcome: operationalOutcome("ratification-provenance-identity", fmt.Errorf("experimentapp: the accepted propose-registration record is not attributed to an authenticated principal"))}
+	}
 	if last.Attribution.Unauthenticated || last.Attribution.PrincipalID == "" {
 		return AcceptedRatificationResult{Outcome: operationalOutcome("ratification-provenance-identity", fmt.Errorf("experimentapp: the accepted propose-ratification record is not attributed to an authenticated principal"))}
 	}

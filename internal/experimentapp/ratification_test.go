@@ -910,3 +910,164 @@ func TestProposeRatificationResolvesAcceptedTreeOnce(t *testing.T) {
 		t.Fatalf("accepted resolution ran %d HEAD resolutions and %d tree enumerations, want exactly one of each (design §7)", git.headCalls, len(git.treeCalls))
 	}
 }
+
+// writeRatificationProvenanceLog replaces the worktree provenance log with
+// exactly the given sealed records and regenerates the accepted tree.
+func writeRatificationProvenanceLog(t *testing.T, root string, service *Service, records []experiment.ProvenanceRecord) {
+	t.Helper()
+	var combined []byte
+	for i := range records {
+		if err := records[i].Seal(); err != nil {
+			t.Fatal(err)
+		}
+		encoded, err := experiment.EncodeProvenanceRecord(records[i])
+		if err != nil {
+			t.Fatal(err)
+		}
+		combined = append(combined, encoded...)
+	}
+	experimentDir := filepath.Dir(mutationDefinitionPath(root))
+	if err := os.WriteFile(filepath.Join(experimentDir, "mutation-provenance.jsonl"), combined, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	service.git = gitFromExperimentDir(t, root, "request-path-v2")
+}
+
+// ratificationChainDigests returns the pre-ratification (preimage) and
+// complete accepted mutation-artifact digests for the current worktree with
+// encoded ratification bytes installed.
+func ratificationChainDigests(t *testing.T, root string, encoded []byte) (preimage, full string) {
+	t.Helper()
+	experimentPath := filepath.ToSlash(filepath.Join(".verdi", "specs", "active", "request-path-spike", "experiments", "request-path-v2"))
+	proposed, err := readProposedArtifactFiles(root, experimentPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ratificationPath := experimentPath + "/ratification.yaml"
+	withoutRatification := cloneFileMap(proposed)
+	delete(withoutRatification, ratificationPath)
+	preimage, err = artifactSetDigest(withoutRatification, experimentPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	withRatification := cloneFileMap(withoutRatification)
+	withRatification[ratificationPath] = encoded
+	full, err = artifactSetDigest(withRatification, experimentPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return preimage, full
+}
+
+func ratificationHistoryRecord(operation experiment.MutationOperation, previous, result string, paths []string, attribution governanceprincipal.Attribution) experiment.ProvenanceRecord {
+	return experiment.ProvenanceRecord{
+		Schema: experiment.ProvenanceSchema, Experiment: experiment.ProvenanceExperiment{Spike: "spec/request-path-spike", ID: "request-path-v2"},
+		Operation: operation, PreviousDigest: previous, ResultDigest: result,
+		PolicyDigest:   "sha256:" + strings.Repeat("4", 64),
+		PolicyDecision: experiment.ProvenancePolicyDecision{State: experiment.PolicyAllowed, Reasons: []experiment.ProvenancePolicyReason{}},
+		Attribution:    attribution, Paths: paths,
+	}
+}
+
+// TestAcceptedRatificationRequiresRegistrationHistory is the adjudicated
+// closure regression: a canonical accepted tree whose provenance carries
+// ONE authenticated propose-ratification record but NO earlier accepted
+// propose-registration record must never return clean — AC-5's two
+// temporally distinct human moments (design §3.3).
+func TestAcceptedRatificationRequiresRegistrationHistory(t *testing.T) {
+	experimentPath := filepath.ToSlash(filepath.Join(".verdi", "specs", "active", "request-path-spike", "experiments", "request-path-v2"))
+	registrationPaths := []string{experimentPath + "/evaluator-capabilities.json", experimentPath + "/experiment.yaml"}
+	ratificationPaths := []string{experimentPath + "/ratification.yaml"}
+	seed := "sha256:" + strings.Repeat("5", 64)
+	authority := func(t *testing.T) AcceptedRatificationAuthority {
+		return AcceptedRatificationAuthority{Profile: ratificationProfile(t, "github"), Facts: ratificationFacts("user-123", "user-456")}
+	}
+	build := func(t *testing.T) (root string, service *Service, human Identity, encoded []byte, preimage, full string, principal governanceprincipal.PrincipalID) {
+		t.Helper()
+		root, service, identity, winnerDigest, _ := ratifiableService(t)
+		resolution := ratificationResolve(t, ratificationFacts("user-123", "user-456"))
+		human = humanRatificationIdentity(t, identity, resolution)
+		encoded = ratificationV2Bytes(t, resolution, winnerDigest)
+		experimentDir := filepath.Dir(mutationDefinitionPath(root))
+		if err := os.WriteFile(filepath.Join(experimentDir, "ratification.yaml"), encoded, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		preimage, full = ratificationChainDigests(t, root, encoded)
+		return root, service, human, encoded, preimage, full, resolution.PrincipalID
+	}
+
+	t.Run("single propose-ratification record is not clean", func(t *testing.T) {
+		root, service, human, _, preimage, full, principal := build(t)
+		attribution, err := governanceprincipal.NewPrincipalAttribution(principal)
+		if err != nil {
+			t.Fatal(err)
+		}
+		writeRatificationProvenanceLog(t, root, service, []experiment.ProvenanceRecord{
+			ratificationHistoryRecord(experiment.MutationProposeRatification, preimage, full, ratificationPaths, attribution),
+		})
+		result := service.AcceptedRatification(context.Background(), human, authority(t))
+		if result.Outcome.Classification == ClassificationClean {
+			t.Fatalf("outcome = %+v, want not clean: no accepted propose-registration record precedes the ratification", result.Outcome)
+		}
+		if result.Outcome.Classification != ClassificationVerdict || result.Outcome.Code != "ratification-provenance-incomplete" {
+			t.Fatalf("outcome = %+v, want ratification-provenance-incomplete verdict", result.Outcome)
+		}
+	})
+
+	t.Run("non-registration predecessor is refused", func(t *testing.T) {
+		root, service, human, _, preimage, full, principal := build(t)
+		attribution, err := governanceprincipal.NewPrincipalAttribution(principal)
+		if err != nil {
+			t.Fatal(err)
+		}
+		writeRatificationProvenanceLog(t, root, service, []experiment.ProvenanceRecord{
+			ratificationHistoryRecord(experiment.MutationReconcileDirect, seed, preimage, []string{experimentPath + "/human-note.txt"}, governanceprincipal.NewUnauthenticatedAttribution()),
+			ratificationHistoryRecord(experiment.MutationProposeRatification, preimage, full, ratificationPaths, attribution),
+		})
+		result := service.AcceptedRatification(context.Background(), human, authority(t))
+		if result.Outcome.Classification != ClassificationVerdict || result.Outcome.Code != "ratification-provenance-incomplete" {
+			t.Fatalf("outcome = %+v, want ratification-provenance-incomplete verdict", result.Outcome)
+		}
+	})
+
+	t.Run("chain digests must match the ratification preimage", func(t *testing.T) {
+		root, service, human, _, _, full, principal := build(t)
+		attribution, err := governanceprincipal.NewPrincipalAttribution(principal)
+		if err != nil {
+			t.Fatal(err)
+		}
+		wrong := "sha256:" + strings.Repeat("6", 64)
+		writeRatificationProvenanceLog(t, root, service, []experiment.ProvenanceRecord{
+			ratificationHistoryRecord(experiment.MutationProposeRegistration, seed, wrong, registrationPaths, attribution),
+			ratificationHistoryRecord(experiment.MutationProposeRatification, wrong, full, ratificationPaths, attribution),
+		})
+		result := service.AcceptedRatification(context.Background(), human, authority(t))
+		if result.Outcome.Classification != ClassificationVerdict || result.Outcome.Code != "ratification-provenance-incomplete" {
+			t.Fatalf("outcome = %+v, want ratification-provenance-incomplete verdict", result.Outcome)
+		}
+	})
+
+	t.Run("distinct authenticated principals may register and ratify", func(t *testing.T) {
+		root, service, human, _, preimage, full, principal := build(t)
+		ratifierAttribution, err := governanceprincipal.NewPrincipalAttribution(principal)
+		if err != nil {
+			t.Fatal(err)
+		}
+		registrarID, err := governanceprincipal.CanonicalPrincipalID("github", "user-456")
+		if err != nil {
+			t.Fatal(err)
+		}
+		registrarAttribution, err := governanceprincipal.NewPrincipalAttribution(registrarID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		writeRatificationProvenanceLog(t, root, service, []experiment.ProvenanceRecord{
+			ratificationHistoryRecord(experiment.MutationProposeRegistration, seed, preimage, registrationPaths, registrarAttribution),
+			ratificationHistoryRecord(experiment.MutationProposeRatification, preimage, full, ratificationPaths, ratifierAttribution),
+		})
+		result := service.AcceptedRatification(context.Background(), human, authority(t))
+		if result.Outcome.Classification != ClassificationClean {
+			t.Fatalf("outcome = %+v, want clean: registration and ratification principals may legitimately differ", result.Outcome)
+		}
+	})
+}
