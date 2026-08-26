@@ -124,10 +124,10 @@ type OutcomeFloorProjection struct {
 // re-deriving any fold fact.
 func NewStory(target Target, preview bool, result evidence.StoryResult) (Record, error) {
 	if target.Class != ClassStory {
-		return Record{}, fmt.Errorf("matrix projection: story body requires target class %q, got %q", ClassStory, target.Class)
+		return Record{}, fmt.Errorf("matrix projection: tagged body requires target class %q, got %q", ClassStory, target.Class)
 	}
 	if result.SpecRef != target.SpecRef {
-		return Record{}, fmt.Errorf("matrix projection: story fold spec_ref %q does not match target %q", result.SpecRef, target.SpecRef)
+		return Record{}, fmt.Errorf("matrix projection: source fold spec_ref %q does not match target %q", result.SpecRef, target.SpecRef)
 	}
 
 	acs := make([]StoryAC, 0, len(result.ACs))
@@ -139,7 +139,7 @@ func NewStory(target Target, preview bool, result evidence.StoryResult) (Record,
 				var err error
 				attestation, err = projectAttestationState(kind.Attestation)
 				if err != nil {
-					return Record{}, fmt.Errorf("matrix projection: story AC %s kind %s: %w", ac.ID, kind.Kind, err)
+					return Record{}, fmt.Errorf("matrix projection: AC %s kind %s: %w", ac.ID, kind.Kind, err)
 				}
 			}
 			kinds = append(kinds, KindProjection{
@@ -166,7 +166,7 @@ func NewStory(target Target, preview bool, result evidence.StoryResult) (Record,
 		Story:    &StoryBody{StoryRef: result.Story, Eligible: result.Eligible, ACs: acs},
 	}
 	if err := record.Validate(); err != nil {
-		return Record{}, fmt.Errorf("matrix projection: assembling story record: %w", err)
+		return Record{}, fmt.Errorf("matrix projection: assembling target record: %w", err)
 	}
 	return record, nil
 }
@@ -175,10 +175,10 @@ func NewStory(target Target, preview bool, result evidence.StoryResult) (Record,
 // or re-deriving any fold fact.
 func NewFeature(target Target, preview bool, result evidence.FeatureResult) (Record, error) {
 	if target.Class != ClassFeature {
-		return Record{}, fmt.Errorf("matrix projection: feature body requires target class %q, got %q", ClassFeature, target.Class)
+		return Record{}, fmt.Errorf("matrix projection: tagged body requires target class %q, got %q", ClassFeature, target.Class)
 	}
 	if result.SpecRef != target.SpecRef {
-		return Record{}, fmt.Errorf("matrix projection: feature fold spec_ref %q does not match target %q", result.SpecRef, target.SpecRef)
+		return Record{}, fmt.Errorf("matrix projection: source fold spec_ref %q does not match target %q", result.SpecRef, target.SpecRef)
 	}
 
 	acs := make([]FeatureAC, 0, len(result.ACs))
@@ -192,7 +192,7 @@ func NewFeature(target Target, preview bool, result evidence.FeatureResult) (Rec
 			var err error
 			attestation, err = projectAttestationState(ac.Floor.Attestation)
 			if err != nil {
-				return Record{}, fmt.Errorf("matrix projection: feature AC %s outcome floor: %w", ac.ID, err)
+				return Record{}, fmt.Errorf("matrix projection: AC %s outcome floor: %w", ac.ID, err)
 			}
 		}
 		acs = append(acs, FeatureAC{
@@ -218,7 +218,7 @@ func NewFeature(target Target, preview bool, result evidence.FeatureResult) (Rec
 		Feature:  &FeatureBody{ACs: acs},
 	}
 	if err := record.Validate(); err != nil {
-		return Record{}, fmt.Errorf("matrix projection: assembling feature record: %w", err)
+		return Record{}, fmt.Errorf("matrix projection: assembling target record: %w", err)
 	}
 	return record, nil
 }
@@ -276,16 +276,16 @@ func (r Record) Validate() error {
 		return err
 	}
 	if (r.Story == nil) == (r.Feature == nil) {
-		return fmt.Errorf("exactly one of story or feature must be present")
+		return fmt.Errorf("exactly one tagged body must be present")
 	}
 	if r.Target.Class == ClassStory {
 		if r.Story == nil || r.Feature != nil {
-			return fmt.Errorf("target class %q requires exactly the story body", r.Target.Class)
+			return fmt.Errorf("target class %q requires exactly its matching body", r.Target.Class)
 		}
 		return r.validateStory()
 	}
 	if r.Feature == nil || r.Story != nil {
-		return fmt.Errorf("target class %q requires exactly the feature body", r.Target.Class)
+		return fmt.Errorf("target class %q requires exactly its matching body", r.Target.Class)
 	}
 	return r.validateFeature()
 }
@@ -305,10 +305,10 @@ func (t Target) validate() error {
 
 func (r Record) validateStory() error {
 	if r.Story.StoryRef == "" {
-		return fmt.Errorf("story story_ref is required")
+		return fmt.Errorf("story_ref is required")
 	}
 	if r.Story.ACs == nil {
-		return fmt.Errorf("story acs must be an array")
+		return fmt.Errorf("tagged body acs must be an array")
 	}
 	violated := false
 	eligible := true
@@ -317,7 +317,7 @@ func (r Record) validateStory() error {
 			return err
 		}
 		if ac.Kinds == nil {
-			return fmt.Errorf("story acs[%d].kinds must be an array", i)
+			return fmt.Errorf("tagged body acs[%d].kinds must be an array", i)
 		}
 		for j, kind := range ac.Kinds {
 			if err := kind.validate(i, j); err != nil {
@@ -332,17 +332,17 @@ func (r Record) validateStory() error {
 		}
 	}
 	if r.Violated != violated {
-		return fmt.Errorf("violated %t does not match story AC statuses", r.Violated)
+		return fmt.Errorf("violated %t does not match target AC statuses", r.Violated)
 	}
 	if r.Story.Eligible != eligible {
-		return fmt.Errorf("story eligible %t does not match AC statuses", r.Story.Eligible)
+		return fmt.Errorf("eligible %t does not match AC statuses", r.Story.Eligible)
 	}
 	return nil
 }
 
 func (r Record) validateFeature() error {
 	if r.Feature.ACs == nil {
-		return fmt.Errorf("feature acs must be an array")
+		return fmt.Errorf("tagged body acs must be an array")
 	}
 	violated := false
 	for i, ac := range r.Feature.ACs {
@@ -350,10 +350,10 @@ func (r Record) validateFeature() error {
 			return err
 		}
 		if ac.Status == string(evidence.StatusWaived) {
-			return fmt.Errorf("feature acs[%d].status %q is story-only", i, ac.Status)
+			return fmt.Errorf("tagged body acs[%d].status %q is not permitted for target class %q", i, ac.Status, r.Target.Class)
 		}
 		if ac.ImplementingStories == nil {
-			return fmt.Errorf("feature acs[%d].implementing_stories must be an array", i)
+			return fmt.Errorf("tagged body acs[%d].implementing_stories must be an array", i)
 		}
 		if err := ac.OutcomeFloor.validate(i); err != nil {
 			return err
@@ -363,7 +363,7 @@ func (r Record) validateFeature() error {
 		}
 	}
 	if r.Violated != violated {
-		return fmt.Errorf("violated %t does not match feature AC statuses", r.Violated)
+		return fmt.Errorf("violated %t does not match target AC statuses", r.Violated)
 	}
 	return nil
 }
@@ -380,14 +380,14 @@ func validateCommonAC(arm string, index int, id, status string) error {
 
 func (k KindProjection) validate(acIndex, kindIndex int) error {
 	if !validKinds[k.Kind] {
-		return fmt.Errorf("story acs[%d].kinds[%d].kind %q is unknown", acIndex, kindIndex, k.Kind)
+		return fmt.Errorf("tagged body acs[%d].kinds[%d].kind %q is unknown", acIndex, kindIndex, k.Kind)
 	}
 	if k.Kind == string(artifact.EvidenceAttestation) {
 		if !validApplicableAttestationStates[k.AttestationState] {
-			return fmt.Errorf("story acs[%d].kinds[%d].attestation_state %q is unknown", acIndex, kindIndex, k.AttestationState)
+			return fmt.Errorf("tagged body acs[%d].kinds[%d].attestation_state %q is unknown", acIndex, kindIndex, k.AttestationState)
 		}
 	} else if k.AttestationState != AttestationNotApplicable {
-		return fmt.Errorf("story acs[%d].kinds[%d].attestation_state must be %q for kind %q", acIndex, kindIndex, AttestationNotApplicable, k.Kind)
+		return fmt.Errorf("tagged body acs[%d].kinds[%d].attestation_state must be %q for kind %q", acIndex, kindIndex, AttestationNotApplicable, k.Kind)
 	}
 	if err := k.ObligationQuality.validate(acIndex, kindIndex); err != nil {
 		return err
@@ -397,16 +397,16 @@ func (k KindProjection) validate(acIndex, kindIndex int) error {
 
 func (q ObligationQualityProjection) validate(acIndex, kindIndex int) error {
 	if !validStructuralStates[q.StructuralState] {
-		return fmt.Errorf("story acs[%d].kinds[%d].obligation_quality.structural_state %q is unknown", acIndex, kindIndex, q.StructuralState)
+		return fmt.Errorf("tagged body acs[%d].kinds[%d].obligation_quality.structural_state %q is unknown", acIndex, kindIndex, q.StructuralState)
 	}
 	if !validMatchStates[q.MatchState] {
-		return fmt.Errorf("story acs[%d].kinds[%d].obligation_quality.match_state %q is unknown", acIndex, kindIndex, q.MatchState)
+		return fmt.Errorf("tagged body acs[%d].kinds[%d].obligation_quality.match_state %q is unknown", acIndex, kindIndex, q.MatchState)
 	}
 	if !validReasons[q.Reason] {
-		return fmt.Errorf("story acs[%d].kinds[%d].obligation_quality.reason %q is unknown", acIndex, kindIndex, q.Reason)
+		return fmt.Errorf("tagged body acs[%d].kinds[%d].obligation_quality.reason %q is unknown", acIndex, kindIndex, q.Reason)
 	}
 	if q.WitnessPath == "" {
-		return fmt.Errorf("story acs[%d].kinds[%d].obligation_quality.witness_path is required", acIndex, kindIndex)
+		return fmt.Errorf("tagged body acs[%d].kinds[%d].obligation_quality.witness_path is required", acIndex, kindIndex)
 	}
 	return nil
 }
@@ -414,10 +414,10 @@ func (q ObligationQualityProjection) validate(acIndex, kindIndex int) error {
 func (f OutcomeFloorProjection) validate(acIndex int) error {
 	if f.DeclaresAttestation {
 		if !validApplicableAttestationStates[f.AttestationState] {
-			return fmt.Errorf("feature acs[%d].outcome_floor.attestation_state %q is unknown", acIndex, f.AttestationState)
+			return fmt.Errorf("tagged body acs[%d].outcome_floor.attestation_state %q is unknown", acIndex, f.AttestationState)
 		}
 	} else if f.AttestationState != AttestationNotApplicable {
-		return fmt.Errorf("feature acs[%d].outcome_floor.attestation_state must be %q when attestation is not declared", acIndex, AttestationNotApplicable)
+		return fmt.Errorf("tagged body acs[%d].outcome_floor.attestation_state must be %q when attestation is not declared", acIndex, AttestationNotApplicable)
 	}
 	return nil
 }

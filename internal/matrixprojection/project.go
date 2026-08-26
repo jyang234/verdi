@@ -82,7 +82,7 @@ func projectStory(ctx context.Context, root, commit string, preview bool, spec *
 	derivedRoot := store.DerivedSpecDir(root, store.RefSlug(spec.ID))
 	records, err := evidence.LoadRecords(ctx, root, derivedRoot, commit)
 	if err != nil {
-		return Projection{}, fmt.Errorf("matrix projection: loading story evidence: %w", err)
+		return Projection{}, fmt.Errorf("matrix projection: loading target evidence: %w", err)
 	}
 	parsed, err := artifact.ParseRef(spec.ID)
 	if err != nil {
@@ -104,7 +104,7 @@ func projectStory(ctx context.Context, root, commit string, preview bool, spec *
 		Git:               ancestryReader{},
 	})
 	if err != nil {
-		return Projection{}, fmt.Errorf("matrix projection: folding story %s: %w", parsed.Name, err)
+		return Projection{}, fmt.Errorf("matrix projection: folding target %s: %w", parsed.Name, err)
 	}
 	record, err := NewStory(Target{Class: ClassStory, SpecRef: spec.ID, EffectiveState: targetState}, preview, result)
 	if err != nil {
@@ -117,7 +117,7 @@ func projectStory(ctx context.Context, root, commit string, preview bool, spec *
 func projectFeature(ctx context.Context, root, commit string, preview bool, mdl *model.Model, spec *artifact.SpecFrontmatter, targetState EffectiveState, base Projection) (Projection, error) {
 	ref, err := artifact.ParseRef(spec.ID)
 	if err != nil {
-		return Projection{}, fmt.Errorf("matrix projection: parsing feature ref %q: %w", spec.ID, err)
+		return Projection{}, fmt.Errorf("matrix projection: parsing target ref %q: %w", spec.ID, err)
 	}
 	ix, err := index.Build(root)
 	if err != nil {
@@ -130,14 +130,14 @@ func projectFeature(ctx context.Context, root, commit string, preview bool, mdl 
 	derivedRoot := store.DerivedSpecDir(root, store.RefSlug(spec.ID))
 	records, err := evidence.LoadRecords(ctx, root, derivedRoot, commit)
 	if err != nil {
-		return Projection{}, fmt.Errorf("matrix projection: loading feature evidence: %w", err)
+		return Projection{}, fmt.Errorf("matrix projection: loading target evidence: %w", err)
 	}
 	result, err := evidence.FoldFeature(evidence.FeatureInput{
 		Spec: spec, Stories: storiesByAC, Records: records, Preview: preview,
 		StoreRoot: root, FeatureSlug: ref.Name, Model: mdl,
 	})
 	if err != nil {
-		return Projection{}, fmt.Errorf("matrix projection: folding feature: %w", err)
+		return Projection{}, fmt.Errorf("matrix projection: folding target: %w", err)
 	}
 	stubStories := make([]evidence.StubStory, 0, len(stories))
 	for _, story := range stories {
@@ -145,7 +145,7 @@ func projectFeature(ctx context.Context, root, commit string, preview bool, mdl 
 	}
 	reconciliation, err := evidence.ReconcileStubs(evidence.StubReconcileInput{Spec: spec, Stories: stubStories, Model: mdl})
 	if err != nil {
-		return Projection{}, fmt.Errorf("matrix projection: reconciling feature stubs: %w", err)
+		return Projection{}, fmt.Errorf("matrix projection: reconciling target stubs: %w", err)
 	}
 	record, err := NewFeature(Target{Class: ClassFeature, SpecRef: spec.ID, EffectiveState: targetState}, preview, result)
 	if err != nil {
@@ -179,7 +179,7 @@ func resolveEffectiveState(ctx context.Context, root string, spec *artifact.Spec
 // shared by matrix projection and lifecycle consumers.
 func DiscoverImplementingStories(ctx context.Context, root, commit, featureName string, spec *artifact.SpecFrontmatter, ix *index.Index, resolver StateResolver) ([]ImplementingStory, map[string][]evidence.ImplementingStory, map[string][]string, error) {
 	if resolver == nil {
-		return nil, nil, nil, fmt.Errorf("matrix projection: implementing story state resolver is required")
+		return nil, nil, nil, fmt.Errorf("matrix projection: implementer state resolver is required")
 	}
 	order := make([]string, 0)
 	acsByStory := make(map[string][]string)
@@ -210,24 +210,24 @@ func DiscoverImplementingStories(ctx context.Context, root, commit, featureName 
 	for _, storyRef := range order {
 		parsed, err := artifact.ParseRef(storyRef)
 		if err != nil {
-			return nil, nil, nil, fmt.Errorf("matrix projection: implementing story ref %q: %w", storyRef, err)
+			return nil, nil, nil, fmt.Errorf("matrix projection: implementer ref %q: %w", storyRef, err)
 		}
 		storySpec, relPath, content, err := loadSpecBytesWithZone(root, parsed.Name)
 		if err != nil {
-			return nil, nil, nil, fmt.Errorf("matrix projection: loading implementing story %s: %w", storyRef, err)
+			return nil, nil, nil, fmt.Errorf("matrix projection: loading implementer %s: %w", storyRef, err)
 		}
 		if storySpec == nil {
-			return nil, nil, nil, fmt.Errorf("matrix projection: implementing story %s not found in specs/active/ or specs/archive/", storyRef)
+			return nil, nil, nil, fmt.Errorf("matrix projection: implementer %s not found in specs/active/ or specs/archive/", storyRef)
 		}
 		loaded[storyRef] = loadedStory{spec: storySpec}
 		candidates = append(candidates, specstate.Candidate{Path: relPath, Content: content})
 	}
 	states, err := resolver.ResolveMany(ctx, root, candidates)
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("matrix projection: resolving implementing story states for spec/%s: %w", featureName, err)
+		return nil, nil, nil, fmt.Errorf("matrix projection: resolving implementer states for spec/%s: %w", featureName, err)
 	}
 	if len(states) != len(order) {
-		return nil, nil, nil, fmt.Errorf("matrix projection: resolving implementing story states returned %d results for %d candidates", len(states), len(order))
+		return nil, nil, nil, fmt.Errorf("matrix projection: resolving implementer states returned %d results for %d candidates", len(states), len(order))
 	}
 
 	stories := make([]ImplementingStory, 0, len(order))
@@ -238,7 +238,7 @@ func DiscoverImplementingStories(ctx context.Context, root, commit, featureName 
 		acIDs := append([]string(nil), acsByStory[storyRef]...)
 		sort.Strings(acIDs)
 		if state.State == specstate.Unproven {
-			return nil, nil, nil, fmt.Errorf("matrix projection: implementing story %s effective state cannot be proven: %s", storyRef, strings.Join(state.Disclosures, "; "))
+			return nil, nil, nil, fmt.Errorf("matrix projection: implementer %s effective state cannot be proven: %s", storyRef, strings.Join(state.Disclosures, "; "))
 		}
 		if state.State == specstate.Superseded {
 			for _, acID := range acIDs {
@@ -266,7 +266,7 @@ func foldImplementingStory(ctx context.Context, root, commit string, spec *artif
 	derivedRoot := store.DerivedSpecDir(root, store.RefSlug(spec.ID))
 	records, err := evidence.LoadRecords(ctx, root, derivedRoot, commit)
 	if err != nil {
-		return evidence.StoryResult{}, fmt.Errorf("matrix projection: loading evidence for implementing story %s: %w", spec.ID, err)
+		return evidence.StoryResult{}, fmt.Errorf("matrix projection: loading evidence for implementer %s: %w", spec.ID, err)
 	}
 	landing := ""
 	if state.Baseline != nil {
@@ -278,7 +278,7 @@ func foldImplementingStory(ctx context.Context, root, commit string, spec *artif
 		SpecLandingCommit: landing, Git: ancestryReader{},
 	})
 	if err != nil {
-		return evidence.StoryResult{}, fmt.Errorf("matrix projection: folding implementing story %s: %w", spec.ID, err)
+		return evidence.StoryResult{}, fmt.Errorf("matrix projection: folding implementer %s: %w", spec.ID, err)
 	}
 	return result, nil
 }

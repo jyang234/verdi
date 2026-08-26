@@ -57,6 +57,7 @@ import (
 func cmdMatrix(args []string, stdout, stderr io.Writer) int {
 	preview, jsonMode, target, ok := parseMatrixArgs(args)
 	if !ok {
+		// vocab:identity — CLI grammar placeholder uses canonical wire class ids.
 		fmt.Fprintln(stderr, "matrix: usage: verdi matrix [--preview] --json <story-or-feature-ref> | verdi matrix <story-or-feature-ref> [--preview]")
 		return 2
 	}
@@ -104,7 +105,7 @@ func cmdMatrix(args []string, stdout, stderr io.Writer) int {
 		return 0
 	}
 	if projection.Feature == nil {
-		fmt.Fprintln(stderr, "matrix: feature projection detail is missing")
+		fmt.Fprintln(stderr, "matrix: tagged projection detail is missing")
 		return 2
 	}
 	printFeatureMatrix(stdout, projection.Spec, projection.EffectiveStatus, projection.Record, projection.Feature.Reconciliation, projection.Feature.Stories, projection.Feature.SupersededByAC, projection.Model)
