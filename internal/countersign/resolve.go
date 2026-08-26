@@ -147,9 +147,11 @@ func Resolve(ctx context.Context, request Request) (Record, error) {
 		switch {
 		case row.PrincipalResolution.State == gp.ResolutionAuthenticated && separation == gp.AuthorizationAuthorized:
 			e.eligible = true
-		case separation == gp.AuthorizationUnproven || row.PrincipalResolution.State == gp.ResolutionUnproven:
+		case row.PrincipalResolution.State != gp.ResolutionViolated && separation == gp.AuthorizationUnproven:
 			e.potential = true
-			e.separationUnproven = separation == gp.AuthorizationUnproven
+			e.separationUnproven = true
+		case row.PrincipalResolution.State == gp.ResolutionUnproven && separation == gp.AuthorizationAuthorized:
+			e.potential = true
 		case separation == gp.AuthorizationViolated:
 			e.separationViolated = true
 		}
@@ -175,7 +177,8 @@ func Resolve(ctx context.Context, request Request) (Record, error) {
 	}
 	eligiblePrincipals := make(map[gp.PrincipalID]bool)
 	possiblePrincipals := make(map[gp.PrincipalID]bool)
-	staleRelevant, separationViolated, separationUnproven := false, false, false
+	staleRelevant, separationViolated := false, false
+	separationUnproven := request.Obligation.SeparationRule == SeparationDifferentFromAuthor && author == nil
 	for _, e := range evaluations {
 		record.Approvals = append(record.Approvals, e.record)
 		if e.eligible {

@@ -390,6 +390,18 @@ func TestCountersignWitnessContract_Behavioral(t *testing.T) {
 		{"unproven resolution", func(t *testing.T) Request {
 			return testRequest(t, []forge.Approval{approval("r1", "101")}, map[string]gp.ResolutionState{"101": gp.ResolutionUnproven})
 		}, VerdictUnproven, 0, VerdictProven, VerdictProven},
+		{"violated resolution with missing author", func(t *testing.T) Request {
+			r := testRequest(t, []forge.Approval{approval("r1", "101")}, map[string]gp.ResolutionState{"101": gp.ResolutionViolated})
+			r.Obligation.SeparationRule = SeparationDifferentFromAuthor
+			return r
+		}, VerdictViolated, 0, VerdictProven, VerdictUnproven},
+		{"violated separation takes priority over unproven resolution", func(t *testing.T) Request {
+			r := testRequest(t, []forge.Approval{approval("r1", "101")}, map[string]gp.ResolutionState{"101": gp.ResolutionUnproven})
+			r.Obligation.SeparationRule = SeparationDifferentFromAuthor
+			a := authorResolution(t, r, "999", gp.ResolutionViolated)
+			r.CandidateAuthor = &a
+			return r
+		}, VerdictViolated, 0, VerdictProven, VerdictViolated},
 		{"role refusal", func(t *testing.T) Request { return testRequest(t, []forge.Approval{approval("r1", "999")}, nil) }, VerdictViolated, 0, VerdictProven, VerdictProven},
 		{"revoked", func(t *testing.T) Request {
 			a := approval("r1", "101")
