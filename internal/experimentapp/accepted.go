@@ -52,6 +52,12 @@ type acceptedSnapshot struct {
 	revision       DefaultBranch
 	experimentPath string
 	source         *snapshotFS
+	// entries is the ORIGINAL complete accepted-tree enumeration the one
+	// ListTree call returned, retained so lifecycle operations resolve
+	// protected-input entries from the same snapshot without a second
+	// enumeration (design §7: HEAD identity, Git enumeration, blob reads,
+	// and state derivation each execute once).
+	entries []GitTreeEntry
 }
 
 func resolveAcceptedHead(ctx context.Context, git AcceptedGit, identity Identity) (DefaultBranch, error) {
@@ -105,7 +111,7 @@ func resolveAcceptedExperiment(ctx context.Context, git AcceptedGit, identity Id
 		}
 	}
 	if len(present) == 0 && !requireExperiment {
-		return acceptedSnapshot{revision: revision, source: newSnapshotFS(map[string][]byte{})}, nil
+		return acceptedSnapshot{revision: revision, source: newSnapshotFS(map[string][]byte{}), entries: entries}, nil
 	}
 	if len(present) != 1 {
 		return acceptedSnapshot{}, fmt.Errorf("experimentapp: accepted experiment resolves in %d active/archive locations, want exactly one", len(present))
@@ -135,7 +141,7 @@ func resolveAcceptedExperiment(ctx context.Context, git AcceptedGit, identity Id
 	if !definitionPresent {
 		return acceptedSnapshot{}, fmt.Errorf("experimentapp: accepted experiment has no experiment.yaml")
 	}
-	return acceptedSnapshot{revision: revision, experimentPath: experimentPath, source: newSnapshotFS(files)}, nil
+	return acceptedSnapshot{revision: revision, experimentPath: experimentPath, source: newSnapshotFS(files), entries: entries}, nil
 }
 
 type snapshotFS struct {

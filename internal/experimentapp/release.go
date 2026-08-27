@@ -196,6 +196,12 @@ func (s *Service) releaseTargets(snapshot acceptedSnapshot, definition experimen
 		if receipt.ExperimentDigest != definitionDigest || receipt.Run != run.Run {
 			return nil, operationalOutcome("receipt-invalid", fmt.Errorf("experimentapp: receipt identity for run %q does not match the locked definition", run.Run))
 		}
+		// The receipt's COMPLETE candidate authority must match the locked
+		// definition — exact membership, cardinality, base commits, and
+		// patch digests — before any workspace target derives from it.
+		if err := experiment.ValidateReceiptCandidateAuthority(definition, receipt); err != nil {
+			return nil, operationalOutcome("receipt-invalid", err)
+		}
 		for _, candidate := range receipt.Candidates {
 			registered, ok := candidatesByID[candidate.ID]
 			if !ok {
@@ -265,8 +271,26 @@ func (s *Service) publishSelectedCapsule(ctx context.Context, identity Identity,
 	if err := experiment.ValidateRepoRelativePath(manifestPath); err != nil {
 		return "", "", operationalOutcome("capsule-publish-failed", err)
 	}
-	absolute := filepath.Join(identity.CheckoutRoot, filepath.FromSlash(manifestPath))
+	absolute, err := proposalAbsolutePath(identity.CheckoutRoot, manifestPath)
+	if err != nil {
+		return "", "", operationalOutcome("capsule-publish-failed", err)
+	}
 	publishErr := draftmutation.WithWriterLock(ctx, identity.CheckoutRoot, draftmutation.Coordinator{}, func(_ *draftmutation.LockedWriter) error {
+		// The existing proposal path-safety seam refuses symlinked,
+		// missing-as-non-directory, and escaping parents component by
+		// component before any byte lands, and the final component must be
+		// absent or an existing regular file — never a symlink or
+		// directory the immutable write could follow or collide with.
+		if err := ensureProposalDirectory(identity.CheckoutRoot, filepath.Dir(absolute)); err != nil {
+			return err
+		}
+		if info, statErr := os.Lstat(absolute); statErr == nil {
+			if !info.Mode().IsRegular() {
+				return fmt.Errorf("capsule manifest path %q is not a regular non-symlink file", manifestPath)
+			}
+		} else if !errors.Is(statErr, fs.ErrNotExist) {
+			return statErr
+		}
 		created, existing, err := atomicfile.CreateImmutable(absolute, encoded, 0o600)
 		if err != nil {
 			return fmt.Errorf("publish capsule manifest: %w", err)
@@ -359,12 +383,10 @@ func (s *Service) retainedProtectedInputs(ctx context.Context, identity Identity
 		return nil, operationalOutcome("receipt-invalid", err)
 	}
 
-	entries, err := s.git.ListTree(ctx, identity.CheckoutRoot, snapshot.revision.Head)
-	if err != nil {
-		return nil, operationalOutcome("accepted-tree-invalid", err)
-	}
-	entriesByPath := make(map[string]GitTreeEntry, len(entries))
-	for _, entry := range entries {
+	// The snapshot retains the ORIGINAL complete tree enumeration, so no
+	// second ListTree runs for the same accepted commit (design §7).
+	entriesByPath := make(map[string]GitTreeEntry, len(snapshot.entries))
+	for _, entry := range snapshot.entries {
 		entriesByPath[entry.Path] = entry
 	}
 

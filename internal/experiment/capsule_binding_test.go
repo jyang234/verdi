@@ -2,6 +2,7 @@ package experiment
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -38,6 +39,8 @@ func buildCapsuleBindingFixture(t *testing.T, disposition Disposition, candidate
 	t.Helper()
 	bytesByID := capsuleBindingBytes()
 	doc := validDefinitionYAML()
+	doc = strings.Replace(doc, "schema: verdi.experiment/v1\n",
+		"schema: verdi.experiment/v2\nclass: cache-placement-performance\n", 1)
 	doc = strings.Replace(doc, "workload:\n  id: representative-request-mix\n  digest: "+digestOf("5"),
 		"workload:\n  id: representative-request-mix\n  digest: "+sha256Digest(bytesByID[CapsuleArtifactWorkload]), 1)
 	doc = strings.Replace(doc, "fixtures:\n  - id: request-log\n    digest: "+digestOf("6"),
@@ -46,11 +49,18 @@ func buildCapsuleBindingFixture(t *testing.T, disposition Disposition, candidate
 		"contract:\n  id: behavioral-equivalence-contract\n  digest: "+sha256Digest(bytesByID[CapsuleArtifactContract]), 1)
 	doc = strings.Replace(doc, "capabilities_digest: "+digestOf("4"),
 		"capabilities_digest: "+sha256Digest(bytesByID[CapsuleArtifactEvaluatorCapabilities]), 1)
-	def := mustDecodeDefinition(t, doc)
-	defDigest, err := DefinitionDigest(def)
+	unlocked := mustDecodeDefinition(t, doc)
+	defDigest, err := DefinitionDigest(unlocked)
 	if err != nil {
 		t.Fatal(err)
 	}
+	doc = doc + "lock:\n  definition_digest: " + defDigest + "\n"
+	def := mustDecodeDefinition(t, doc)
+	if locked, err := Locked(def); err != nil || !locked {
+		t.Fatalf("binding fixture definition is not locked: %v/%v", locked, err)
+	}
+	// The retained definition artifact is the exact locked accepted bytes.
+	bytesByID[CapsuleArtifactDefinition] = []byte(doc)
 
 	decision := ResultDecision{
 		Experiment: def.ID, DefinitionDigest: defDigest, Run: "run-1",
@@ -93,6 +103,13 @@ func buildCapsuleBindingFixture(t *testing.T, disposition Disposition, candidate
 	if candidate != "" {
 		ratification.Candidate = candidate
 		ratification.Reason = "explicit selection for the binding fixture"
+	}
+	if ratification.Disposition == DispositionSelectRecommended || ratification.Disposition == DispositionSelectOther {
+		ratificationBytes, err := EncodeRatification(ratification)
+		if err != nil {
+			t.Fatal(err)
+		}
+		bytesByID[CapsuleArtifactRatification] = ratificationBytes
 	}
 
 	ids := make([]string, 0, len(bytesByID))
@@ -315,11 +332,89 @@ func TestBindCapsuleManifestRetainedArtifactCeiling(t *testing.T) {
 		t.Fatalf("fixture over cap accepted or untyped: %v", err)
 	}
 
-	// Encoded manifest bytes are excluded from the ceiling: the manifest
-	// may be larger than the cap that every retained member satisfies.
-	manifest, err := BindCapsuleManifest(fixture.input(largest))
+}
+
+// TestBindCapsuleManifestExcludesManifestFromCeiling constructs a
+// many-fixture inventory whose encoded manifest is strictly larger than
+// every retained member, then binds with the cap set to the largest
+// member: success proves the manifest bytes are never measured against
+// the retained-artifact ceiling.
+func TestBindCapsuleManifestExcludesManifestFromCeiling(t *testing.T) {
+	fixture := buildCapsuleBindingFixture(t, DispositionSelectRecommended, "")
+	lockedDoc := ""
+	for _, artifact := range fixture.artifacts {
+		if artifact.ID == CapsuleArtifactDefinition {
+			lockedDoc = string(artifact.Bytes)
+		}
+	}
+	unlockedDoc := strings.Split(lockedDoc, "lock:\n")[0]
+	extraFixtures := ""
+	extraArtifacts := []CapsuleRetainedArtifact{}
+	for i := 0; i < 150; i++ {
+		id := fmt.Sprintf("fx-%03d", i)
+		content := []byte("fixture-" + id + "\n")
+		extraFixtures += "  - id: " + id + "\n    digest: " + sha256Digest(content) + "\n"
+		extraArtifacts = append(extraArtifacts, CapsuleRetainedArtifact{ID: "fixture-" + id, Bytes: content})
+	}
+	unlockedDoc = strings.Replace(unlockedDoc, "fixtures:\n", "fixtures:\n"+extraFixtures, 1)
+	unlocked := mustDecodeDefinition(t, unlockedDoc)
+	digest, err := DefinitionDigest(unlocked)
 	if err != nil {
 		t.Fatal(err)
+	}
+	relocked := unlockedDoc + "lock:\n  definition_digest: " + digest + "\n"
+
+	// Rebuild the dependent evidence chain over the widened definition.
+	def := mustDecodeDefinition(t, relocked)
+	decision := *fixture.result.Decision
+	decision.DefinitionDigest = digest
+	result, err := NewResultV2(decision, *fixture.result.Execution)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resultBytes, err := EncodeResult(result)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resultDigest, err := ResultDigest(result)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ratification := fixture.ratification
+	ratification.ResultDigest = resultDigest
+	ratificationBytes, err := EncodeRatification(ratification)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	artifacts := []CapsuleRetainedArtifact{}
+	for _, artifact := range fixture.artifacts {
+		switch artifact.ID {
+		case CapsuleArtifactDefinition:
+			artifact.Bytes = []byte(relocked)
+		case CapsuleArtifactResult:
+			artifact.Bytes = resultBytes
+		case CapsuleArtifactRatification:
+			artifact.Bytes = ratificationBytes
+		}
+		artifacts = append(artifacts, artifact)
+	}
+	artifacts = append(artifacts, extraArtifacts...)
+
+	largest := int64(0)
+	for _, artifact := range artifacts {
+		if int64(len(artifact.Bytes)) > largest {
+			largest = int64(len(artifact.Bytes))
+		}
+	}
+	input := CapsuleBindingInput{
+		Definition: def, DefinitionDigest: digest,
+		Ratification: ratification, Result: result,
+		Artifacts: artifacts, RetainedArtifactBytes: largest,
+	}
+	manifest, err := BindCapsuleManifest(input)
+	if err != nil {
+		t.Fatalf("BindCapsuleManifest(cap = largest member) error: %v", err)
 	}
 	encoded, err := EncodeCapsuleManifest(manifest)
 	if err != nil {
@@ -370,4 +465,130 @@ func TestEncodeCapsuleManifestCanonicalBytes(t *testing.T) {
 	if _, ok := decoded["artifacts"]; !ok {
 		t.Fatalf("encoded manifest omits artifacts: %s", encoded)
 	}
+}
+
+// TestBindCapsuleManifestDerivesAuthorityFromRetainedBytes is the
+// correction matrix for the trusted-caller finding: every authority-
+// bearing definition/result/ratification fact must be derived or verified
+// from the exact retained bytes, never accepted from the caller's typed
+// projections alone.
+func TestCapsuleBindingDerivesAuthorityFromRetainedBytes(t *testing.T) {
+	setArtifact := func(f capsuleBindingFixture, id string, data []byte) capsuleBindingFixture {
+		artifacts := make([]CapsuleRetainedArtifact, len(f.artifacts))
+		copy(artifacts, f.artifacts)
+		for i := range artifacts {
+			if artifacts[i].ID == id {
+				artifacts[i].Bytes = data
+			}
+		}
+		f.artifacts = artifacts
+		return f
+	}
+
+	t.Run("arbitrary valid but incorrect DefinitionDigest is refused", func(t *testing.T) {
+		fixture := buildCapsuleBindingFixture(t, DispositionSelectRecommended, "")
+		input := fixture.input(1 << 20)
+		input.DefinitionDigest = digestOf("9")
+		if _, err := BindCapsuleManifest(input); err == nil {
+			t.Fatalf("caller-supplied wrong definition digest accepted")
+		}
+	})
+
+	t.Run("unlocked definition bytes are refused", func(t *testing.T) {
+		fixture := buildCapsuleBindingFixture(t, DispositionSelectRecommended, "")
+		lockedDoc := ""
+		for _, artifact := range fixture.artifacts {
+			if artifact.ID == CapsuleArtifactDefinition {
+				lockedDoc = string(artifact.Bytes)
+			}
+		}
+		unlockedDoc := strings.Split(lockedDoc, "lock:\n")[0]
+		unlocked := setArtifact(fixture, CapsuleArtifactDefinition, []byte(unlockedDoc))
+		unlockedDef := mustDecodeDefinition(t, unlockedDoc)
+		input := unlocked.input(1 << 20)
+		input.Definition = unlockedDef
+		if _, err := BindCapsuleManifest(input); err == nil {
+			t.Fatalf("unlocked definition bytes accepted as capsule authority")
+		}
+	})
+
+	t.Run("non-v2 definition bytes are refused", func(t *testing.T) {
+		fixture := buildCapsuleBindingFixture(t, DispositionSelectRecommended, "")
+		v1 := mustDecodeDefinition(t, validDefinitionYAML())
+		v1Digest, err := DefinitionDigest(v1)
+		if err != nil {
+			t.Fatal(err)
+		}
+		v1Doc := validDefinitionYAML() + "lock:\n  definition_digest: " + v1Digest + "\n"
+		v1Locked := mustDecodeDefinition(t, v1Doc)
+		swapped := setArtifact(fixture, CapsuleArtifactDefinition, []byte(v1Doc))
+		input := swapped.input(1 << 20)
+		input.Definition = v1Locked
+		input.DefinitionDigest = v1Digest
+		if _, err := BindCapsuleManifest(input); err == nil {
+			t.Fatalf("locked v1 definition accepted as fresh capsule authority")
+		}
+	})
+
+	t.Run("typed definition diverging from retained bytes is refused", func(t *testing.T) {
+		fixture := buildCapsuleBindingFixture(t, DispositionSelectRecommended, "")
+		input := fixture.input(1 << 20)
+		input.Definition.ID = "some-other-experiment"
+		if _, err := BindCapsuleManifest(input); err == nil {
+			t.Fatalf("typed definition projection diverging from retained bytes accepted")
+		}
+	})
+
+	t.Run("typed result winner diverging from retained result bytes is refused", func(t *testing.T) {
+		fixture := buildCapsuleBindingFixture(t, DispositionSelectRecommended, "")
+		input := fixture.input(1 << 20)
+		tamperedDecision := *input.Result.Decision
+		tamperedDecision.Winner = "baseline"
+		tamperedDecision.Candidates = append([]DecisionCandidate(nil), input.Result.Decision.Candidates...)
+		input.Result.Decision = &tamperedDecision
+		manifest, err := BindCapsuleManifest(input)
+		if err == nil && manifest.Selected != "facts-cache" {
+			t.Fatalf("caller-modified result selected %q instead of the retained result's winner", manifest.Selected)
+		}
+		if err == nil {
+			t.Fatalf("typed result diverging from retained bytes accepted")
+		}
+	})
+
+	t.Run("typed ratification diverging from retained bytes is refused", func(t *testing.T) {
+		fixture := buildCapsuleBindingFixture(t, DispositionSelectOther, "baseline")
+		input := fixture.input(1 << 20)
+		input.Ratification.Candidate = "facts-cache"
+		input.Ratification.Reason = "tampered selection"
+		if _, err := BindCapsuleManifest(input); err == nil {
+			t.Fatalf("typed ratification diverging from retained bytes accepted")
+		}
+	})
+
+	t.Run("retained ratification bound to a different result is refused", func(t *testing.T) {
+		fixture := buildCapsuleBindingFixture(t, DispositionSelectRecommended, "")
+		foreign := Ratification{
+			Schema: RatificationSchemaV2, ResultDigest: digestOf("8"),
+			ActorV2:     &RatificationActor{TrustSource: "github", Subject: "user-123", PrincipalID: validActor},
+			Disposition: DispositionSelectRecommended,
+		}
+		foreignBytes, err := EncodeRatification(foreign)
+		if err != nil {
+			t.Fatal(err)
+		}
+		swapped := setArtifact(fixture, CapsuleArtifactRatification, foreignBytes)
+		input := swapped.input(1 << 20)
+		input.Ratification = foreign
+		if _, err := BindCapsuleManifest(input); err == nil {
+			t.Fatalf("retained ratification bound to a foreign result accepted")
+		}
+	})
+
+	t.Run("malformed retained definition bytes are refused", func(t *testing.T) {
+		fixture := buildCapsuleBindingFixture(t, DispositionSelectRecommended, "")
+		broken := setArtifact(fixture, CapsuleArtifactDefinition, []byte("not: [valid\n"))
+		if _, err := BindCapsuleManifest(broken.input(1 << 20)); err == nil {
+			t.Fatalf("malformed retained definition bytes accepted")
+		}
+	})
 }

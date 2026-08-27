@@ -112,21 +112,108 @@ func IsCapsuleArtifactOversized(err error) bool {
 // observed size). The manifest itself is not an inventory member and is
 // never measured against the ceiling.
 func BindCapsuleManifest(in CapsuleBindingInput) (CapsuleManifest, error) {
-	selected, err := SelectedCapsuleCandidate(in.Definition, in.Result, in.Ratification)
-	if err != nil {
-		return CapsuleManifest{}, err
-	}
-	if err := ValidateDigest(in.DefinitionDigest); err != nil {
-		return CapsuleManifest{}, fmt.Errorf("experiment: capsule definition digest: %w", err)
-	}
 	if in.RetainedArtifactBytes <= 0 {
 		return CapsuleManifest{}, fmt.Errorf("experiment: capsule retained_artifact_bytes ceiling must be positive, got %d", in.RetainedArtifactBytes)
 	}
+	presented := make(map[string][]byte, len(in.Artifacts))
+	for _, artifact := range in.Artifacts {
+		if _, duplicate := presented[artifact.ID]; duplicate {
+			return CapsuleManifest{}, fmt.Errorf("experiment: capsule inventory presents duplicate artifact %q", artifact.ID)
+		}
+		presented[artifact.ID] = artifact.Bytes
+	}
 
+	// Every authority-bearing fact is derived from the exact RETAINED
+	// bytes; caller-supplied typed projections are compatibility inputs
+	// that must match those bytes and can never select differently.
+	definitionBytes, ok := presented[CapsuleArtifactDefinition]
+	if !ok {
+		return CapsuleManifest{}, fmt.Errorf("experiment: capsule inventory is missing required artifact %q", CapsuleArtifactDefinition)
+	}
+	definition, err := DecodeDefinition(definitionBytes)
+	if err != nil {
+		return CapsuleManifest{}, fmt.Errorf("experiment: retained definition bytes: %w", err)
+	}
+	locked, err := Locked(definition)
+	if err != nil {
+		return CapsuleManifest{}, fmt.Errorf("experiment: retained definition lock: %w", err)
+	}
+	if !locked || definition.Schema != DefinitionSchemaV2 {
+		return CapsuleManifest{}, fmt.Errorf("experiment: capsule authority requires the locked v2 definition; retained bytes carry schema %q locked=%v", definition.Schema, locked)
+	}
+	definitionDigest, err := DefinitionDigest(definition)
+	if err != nil {
+		return CapsuleManifest{}, err
+	}
+	if in.DefinitionDigest != definitionDigest {
+		return CapsuleManifest{}, fmt.Errorf("experiment: caller definition digest %q does not match the retained definition's canonical digest %q", in.DefinitionDigest, definitionDigest)
+	}
+	projectedDigest, err := DefinitionDigest(in.Definition)
+	if err != nil || projectedDigest != definitionDigest {
+		return CapsuleManifest{}, fmt.Errorf("experiment: caller definition projection does not match the retained definition bytes")
+	}
+
+	resultBytes, ok := presented[CapsuleArtifactResult]
+	if !ok {
+		return CapsuleManifest{}, fmt.Errorf("experiment: capsule inventory is missing required artifact %q", CapsuleArtifactResult)
+	}
+	result, err := DecodeResult(resultBytes)
+	if err != nil {
+		return CapsuleManifest{}, fmt.Errorf("experiment: retained result bytes: %w", err)
+	}
+	resultDigest, err := ResultDigest(result)
+	if err != nil {
+		return CapsuleManifest{}, err
+	}
+	projectedResultDigest, err := ResultDigest(in.Result)
+	if err != nil || projectedResultDigest != resultDigest {
+		return CapsuleManifest{}, fmt.Errorf("experiment: caller result projection does not match the retained result bytes")
+	}
+
+	ratificationBytes, ok := presented[CapsuleArtifactRatification]
+	if !ok {
+		return CapsuleManifest{}, fmt.Errorf("experiment: capsule inventory is missing required artifact %q", CapsuleArtifactRatification)
+	}
+	ratification, err := DecodeRatification(ratificationBytes)
+	if err != nil {
+		return CapsuleManifest{}, fmt.Errorf("experiment: retained ratification bytes: %w", err)
+	}
+	if ratification.Schema != RatificationSchemaV2 {
+		return CapsuleManifest{}, fmt.Errorf("experiment: capsule authority requires a v2 ratification; retained bytes carry %q", ratification.Schema)
+	}
+	canonicalRatification, err := EncodeRatification(ratification)
+	if err != nil {
+		return CapsuleManifest{}, err
+	}
+	if string(canonicalRatification) != string(ratificationBytes) {
+		return CapsuleManifest{}, fmt.Errorf("experiment: retained ratification bytes are not the deterministic v2 encoding")
+	}
+	projectedRatification, err := EncodeRatification(in.Ratification)
+	if err != nil || string(projectedRatification) != string(canonicalRatification) {
+		return CapsuleManifest{}, fmt.Errorf("experiment: caller ratification projection does not match the retained ratification bytes")
+	}
+
+	// The exact selected evidence chain: the retained ratification binds
+	// the retained result, and the retained result binds the retained
+	// definition.
+	if ratification.ResultDigest != resultDigest {
+		return CapsuleManifest{}, fmt.Errorf("experiment: retained ratification result_digest %q does not bind the retained result %q", ratification.ResultDigest, resultDigest)
+	}
+	if result.Schema != ResultSchemaV2 || result.Decision == nil {
+		return CapsuleManifest{}, fmt.Errorf("experiment: capsule authority requires a v2 result with its decision document")
+	}
+	if result.Decision.DefinitionDigest != definitionDigest || result.Decision.Experiment != definition.ID {
+		return CapsuleManifest{}, fmt.Errorf("experiment: retained result identity does not bind the retained definition")
+	}
+
+	selected, err := SelectedCapsuleCandidate(definition, result, ratification)
+	if err != nil {
+		return CapsuleManifest{}, err
+	}
 	var selectedCandidate *Candidate
-	for i := range in.Definition.Candidates {
-		if in.Definition.Candidates[i].ID == selected {
-			selectedCandidate = &in.Definition.Candidates[i]
+	for i := range definition.Candidates {
+		if definition.Candidates[i].ID == selected {
+			selectedCandidate = &definition.Candidates[i]
 			break
 		}
 	}
@@ -140,15 +227,15 @@ func BindCapsuleManifest(in CapsuleBindingInput) (CapsuleManifest, error) {
 	required := map[string]string{
 		CapsuleArtifactDefinition:            "",
 		CapsuleArtifactCandidatePatch:        selectedCandidate.Digest,
-		CapsuleArtifactEvaluatorCapabilities: in.Definition.Evaluator.CapabilitiesDigest,
-		CapsuleArtifactContract:              in.Definition.Contract.Digest,
-		CapsuleArtifactWorkload:              in.Definition.Workload.Digest,
+		CapsuleArtifactEvaluatorCapabilities: definition.Evaluator.CapabilitiesDigest,
+		CapsuleArtifactContract:              definition.Contract.Digest,
+		CapsuleArtifactWorkload:              definition.Workload.Digest,
 		CapsuleArtifactExecutionReceipt:      "",
 		CapsuleArtifactObservations:          "",
-		CapsuleArtifactResult:                in.Ratification.ResultDigest,
+		CapsuleArtifactResult:                ratification.ResultDigest,
 		CapsuleArtifactRatification:          "",
 	}
-	for _, fixture := range in.Definition.Fixtures {
+	for _, fixture := range definition.Fixtures {
 		id, err := CapsuleFixtureArtifactID(fixture.ID)
 		if err != nil {
 			return CapsuleManifest{}, err
@@ -157,15 +244,10 @@ func BindCapsuleManifest(in CapsuleBindingInput) (CapsuleManifest, error) {
 	}
 	optional := map[string]bool{CapsuleArtifactRecommendation: true}
 
-	presented := make(map[string][]byte, len(in.Artifacts))
-	for _, artifact := range in.Artifacts {
-		if _, duplicate := presented[artifact.ID]; duplicate {
-			return CapsuleManifest{}, fmt.Errorf("experiment: capsule inventory presents duplicate artifact %q", artifact.ID)
+	for id := range presented {
+		if _, known := required[id]; !known && !optional[id] {
+			return CapsuleManifest{}, fmt.Errorf("experiment: capsule inventory presents %q, which is outside the closed retained set", id)
 		}
-		if _, known := required[artifact.ID]; !known && !optional[artifact.ID] {
-			return CapsuleManifest{}, fmt.Errorf("experiment: capsule inventory presents %q, which is outside the closed retained set", artifact.ID)
-		}
-		presented[artifact.ID] = artifact.Bytes
 	}
 	for id := range required {
 		if _, ok := presented[id]; !ok {
@@ -189,8 +271,8 @@ func BindCapsuleManifest(in CapsuleBindingInput) (CapsuleManifest, error) {
 	sort.Slice(artifacts, func(i, j int) bool { return artifacts[i].ID < artifacts[j].ID })
 
 	manifest := CapsuleManifest{
-		Schema: CapsuleManifestSchema, Experiment: in.Definition.ID,
-		DefinitionDigest: in.DefinitionDigest, ResultDigest: in.Ratification.ResultDigest,
+		Schema: CapsuleManifestSchema, Experiment: definition.ID,
+		DefinitionDigest: definitionDigest, ResultDigest: ratification.ResultDigest,
 		Selected: selected, Artifacts: artifacts,
 	}
 	if err := manifest.Validate(); err != nil {

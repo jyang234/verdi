@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/jyang234/verdi/internal/canonjson"
 	"github.com/jyang234/verdi/internal/execworkspace"
 	"github.com/jyang234/verdi/internal/experiment"
 	"github.com/jyang234/verdi/internal/governanceprincipal"
@@ -451,5 +452,255 @@ func TestReleaseRatifiedRequiresReleaser(t *testing.T) {
 	result := fixture.service.ReleaseRatified(context.Background(), fixture.identity, authority)
 	if result.Outcome.Classification != ClassificationOperational {
 		t.Fatalf("nil releaser outcome = %+v, want operational", result.Outcome)
+	}
+}
+
+// plantReceiptOnlyRun writes an incomplete run carrying ONLY the given
+// encoded execution receipt, regenerates the accepted tree, and restores
+// the protected-input blobs.
+func plantReceiptOnlyRun(t *testing.T, fixture releaseFixture, run string, encoded []byte, workloadBytes []byte) {
+	t.Helper()
+	runDir := filepath.Join(filepath.Dir(mutationDefinitionPath(fixture.root)), "runs", run)
+	if err := os.MkdirAll(runDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(runDir, "execution.json"), encoded, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	fixture.service.git = gitFromExperimentDir(t, fixture.root, "request-path-v2")
+	git := fixture.service.git.(*fakeGit)
+	addReleaseBlob(t, git, releaseWorkloadPath, workloadBytes, "100644")
+	addReleaseBlob(t, git, releaseContractPath, releaseContractBytes(), "100644")
+	addReleaseBlob(t, git, releaseFixturePath, releaseFixtureBytes(), "100644")
+}
+
+// TestReleaseRatifiedRefusesUnsafeCapsulePath is the symlinked-parent
+// correction matrix: publication must refuse before any external write or
+// workspace release, on a real filesystem.
+func TestReleaseRatifiedRefusesUnsafeCapsulePath(t *testing.T) {
+	t.Run("symlinked selected parent", func(t *testing.T) {
+		fixture := buildReleaseFixture(t, []byte("workload-bytes\n"), experiment.DispositionSelectRecommended, "")
+		outside := t.TempDir()
+		experimentDir := filepath.Dir(mutationDefinitionPath(fixture.root))
+		if err := os.Symlink(outside, filepath.Join(experimentDir, "selected")); err != nil {
+			t.Fatal(err)
+		}
+		releaser := &fakeWorkspaceReleaser{}
+		result := fixture.service.ReleaseRatified(context.Background(), fixture.identity, releaseAuthority(t, releaser))
+		if result.Outcome.Classification != ClassificationOperational {
+			t.Fatalf("symlinked selected parent outcome = %+v, want operational", result.Outcome)
+		}
+		entries, err := os.ReadDir(outside)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(entries) != 0 {
+			t.Fatalf("capsule publication escaped through the symlinked parent: %v", entries)
+		}
+		if len(releaser.calls) != 0 {
+			t.Fatalf("workspaces released despite unsafe capsule path: %v", releaser.calls)
+		}
+	})
+
+	t.Run("directory collision at the manifest path", func(t *testing.T) {
+		fixture := buildReleaseFixture(t, []byte("workload-bytes\n"), experiment.DispositionSelectRecommended, "")
+		if err := os.MkdirAll(releaseManifestPath(fixture.root), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		releaser := &fakeWorkspaceReleaser{}
+		result := fixture.service.ReleaseRatified(context.Background(), fixture.identity, releaseAuthority(t, releaser))
+		if result.Outcome.Classification != ClassificationOperational {
+			t.Fatalf("directory collision outcome = %+v, want operational", result.Outcome)
+		}
+		if len(releaser.calls) != 0 {
+			t.Fatalf("workspaces released despite manifest collision: %v", releaser.calls)
+		}
+	})
+
+	t.Run("symlinked final component", func(t *testing.T) {
+		fixture := buildReleaseFixture(t, []byte("workload-bytes\n"), experiment.DispositionSelectRecommended, "")
+		experimentDir := filepath.Dir(mutationDefinitionPath(fixture.root))
+		if err := os.MkdirAll(filepath.Join(experimentDir, "selected"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		outsideFile := filepath.Join(t.TempDir(), "target.json")
+		if err := os.WriteFile(outsideFile, []byte("outside\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(outsideFile, releaseManifestPath(fixture.root)); err != nil {
+			t.Fatal(err)
+		}
+		releaser := &fakeWorkspaceReleaser{}
+		result := fixture.service.ReleaseRatified(context.Background(), fixture.identity, releaseAuthority(t, releaser))
+		if result.Outcome.Classification != ClassificationOperational {
+			t.Fatalf("symlinked final component outcome = %+v, want operational", result.Outcome)
+		}
+		after, err := os.ReadFile(outsideFile)
+		if err != nil || string(after) != "outside\n" {
+			t.Fatalf("capsule publication followed the final-component symlink: %q/%v", after, err)
+		}
+		if len(releaser.calls) != 0 {
+			t.Fatalf("workspaces released despite unsafe manifest path: %v", releaser.calls)
+		}
+	})
+}
+
+// TestReleaseRatifiedValidatesReceiptCandidateAuthority is the
+// candidate-parity correction matrix: every receipt's complete candidate
+// authority must match the locked definition before any target derives.
+func TestReleaseRatifiedValidatesReceiptCandidateAuthority(t *testing.T) {
+	baseReceipt := func(t *testing.T, fixture releaseFixture) experiment.ExecutionReceipt {
+		t.Helper()
+		return ratifiableReceipt(t, fixture.locked, "run-omega")
+	}
+	fullInputs := func(def experiment.Definition) map[string]string {
+		return map[string]string{
+			"evaluator:" + def.Evaluator.Argv[0]: strings.TrimPrefix(def.Evaluator.Digest, "sha256:"),
+			releaseWorkloadPath:                  strings.TrimPrefix(def.Workload.Digest, "sha256:"),
+			releaseContractPath:                  strings.TrimPrefix(def.Contract.Digest, "sha256:"),
+			releaseFixturePath:                   strings.TrimPrefix(def.Fixtures[0].Digest, "sha256:"),
+		}
+	}
+	run := func(t *testing.T, fixture releaseFixture) (ReleaseResult, *fakeWorkspaceReleaser) {
+		t.Helper()
+		releaser := &fakeWorkspaceReleaser{}
+		return fixture.service.ReleaseRatified(context.Background(), fixture.identity, releaseAuthority(t, releaser)), releaser
+	}
+
+	t.Run("forged candidate base commit is refused", func(t *testing.T) {
+		fixture := buildReleaseFixture(t, []byte("workload-bytes\n"), experiment.DispositionRejectAll, "")
+		receipt := baseReceipt(t, fixture)
+		receipt.Fingerprint.InputDigests = fullInputs(fixture.locked)
+		forgedBase := strings.Repeat("b", 40)
+		for i := range receipt.Candidates {
+			receipt.Candidates[i].BaseCommit = forgedBase
+			receipt.Candidates[i].Materialization.CommitSHA = forgedBase
+		}
+		encoded, err := experiment.EncodeExecutionReceipt(receipt)
+		if err != nil {
+			t.Fatalf("forged-base receipt must remain internally consistent: %v", err)
+		}
+		plantReceiptOnlyRun(t, fixture, "run-omega", encoded, []byte("workload-bytes\n"))
+		result, releaser := run(t, fixture)
+		if result.Outcome.Classification != ClassificationOperational {
+			t.Fatalf("forged base commit outcome = %+v, want operational refusal", result.Outcome)
+		}
+		if len(releaser.calls) != 0 {
+			t.Fatalf("forged base commit still released workspaces: %v", releaser.calls)
+		}
+	})
+
+	t.Run("missing candidate row is refused", func(t *testing.T) {
+		fixture := buildReleaseFixture(t, []byte("workload-bytes\n"), experiment.DispositionRejectAll, "")
+		receipt := baseReceipt(t, fixture)
+		receipt.Fingerprint.InputDigests = fullInputs(fixture.locked)
+		receipt.Candidates = receipt.Candidates[:1]
+		encoded, err := experiment.EncodeExecutionReceipt(receipt)
+		if err != nil {
+			t.Fatalf("single-row receipt must remain internally consistent: %v", err)
+		}
+		plantReceiptOnlyRun(t, fixture, "run-omega", encoded, []byte("workload-bytes\n"))
+		result, releaser := run(t, fixture)
+		if result.Outcome.Classification != ClassificationOperational {
+			t.Fatalf("missing candidate row outcome = %+v, want operational refusal", result.Outcome)
+		}
+		if len(releaser.calls) != 0 {
+			t.Fatalf("missing candidate row still released workspaces: %v", releaser.calls)
+		}
+	})
+
+	t.Run("extra candidate row is refused", func(t *testing.T) {
+		fixture := buildReleaseFixture(t, []byte("workload-bytes\n"), experiment.DispositionRejectAll, "")
+		receipt := baseReceipt(t, fixture)
+		receipt.Fingerprint.InputDigests = fullInputs(fixture.locked)
+		defDigest, err := experiment.DefinitionDigest(fixture.locked)
+		if err != nil {
+			t.Fatal(err)
+		}
+		extraRunID, err := experiment.WorkspaceRunID(defDigest, "run-omega", "zzz-extra")
+		if err != nil {
+			t.Fatal(err)
+		}
+		patchDigest := "sha256:" + strings.Repeat("e", 64)
+		receipt.Candidates = append(receipt.Candidates, experiment.ReceiptCandidate{
+			ID: "zzz-extra", BaseCommit: strings.Repeat("a", 40), PatchDigest: patchDigest, WorkspaceRunID: extraRunID,
+			Materialization: experiment.WorkspaceIdentity{
+				Shape: experiment.WorkspaceBasePlusPatch, RunID: extraRunID,
+				CommitSHA: strings.Repeat("a", 40), PatchSHA256: strings.TrimPrefix(patchDigest, "sha256:"),
+			},
+		})
+		encoded, err := experiment.EncodeExecutionReceipt(receipt)
+		if err != nil {
+			t.Fatalf("extra-row receipt must remain internally consistent: %v", err)
+		}
+		plantReceiptOnlyRun(t, fixture, "run-omega", encoded, []byte("workload-bytes\n"))
+		result, releaser := run(t, fixture)
+		if result.Outcome.Classification != ClassificationOperational {
+			t.Fatalf("extra candidate row outcome = %+v, want operational refusal", result.Outcome)
+		}
+		if len(releaser.calls) != 0 {
+			t.Fatalf("extra candidate row still released workspaces: %v", releaser.calls)
+		}
+	})
+
+	t.Run("duplicate and reordered candidate rows are refused at decode", func(t *testing.T) {
+		for name, mutate := range map[string]func([]experiment.ReceiptCandidate) []experiment.ReceiptCandidate{
+			"duplicate": func(rows []experiment.ReceiptCandidate) []experiment.ReceiptCandidate {
+				return append([]experiment.ReceiptCandidate{rows[0]}, rows...)
+			},
+			"reordered": func(rows []experiment.ReceiptCandidate) []experiment.ReceiptCandidate {
+				reversed := append([]experiment.ReceiptCandidate(nil), rows...)
+				for i, j := 0, len(reversed)-1; i < j; i, j = i+1, j-1 {
+					reversed[i], reversed[j] = reversed[j], reversed[i]
+				}
+				return reversed
+			},
+		} {
+			t.Run(name, func(t *testing.T) {
+				fixture := buildReleaseFixture(t, []byte("workload-bytes\n"), experiment.DispositionRejectAll, "")
+				receipt := baseReceipt(t, fixture)
+				receipt.Fingerprint.InputDigests = fullInputs(fixture.locked)
+				receipt.Candidates = mutate(receipt.Candidates)
+				encoded, err := canonjson.Marshal(receipt)
+				if err != nil {
+					t.Fatal(err)
+				}
+				plantReceiptOnlyRun(t, fixture, "run-omega", encoded, []byte("workload-bytes\n"))
+				result, releaser := run(t, fixture)
+				if result.Outcome.Classification != ClassificationOperational {
+					t.Fatalf("%s rows outcome = %+v, want operational refusal", name, result.Outcome)
+				}
+				if len(releaser.calls) != 0 {
+					t.Fatalf("%s rows still released workspaces: %v", name, releaser.calls)
+				}
+			})
+		}
+	})
+}
+
+// TestReleaseRatifiedSingleAcceptedEnumeration proves a complete
+// successful release performs exactly one HEAD resolution, one recursive
+// tree enumeration, and no duplicate accepted-blob reads (design §7).
+func TestReleaseRatifiedSingleAcceptedEnumeration(t *testing.T) {
+	fixture := buildReleaseFixture(t, []byte("workload-bytes\n"), experiment.DispositionSelectRecommended, "")
+	fixture.git.headCalls = 0
+	fixture.git.treeCalls = nil
+	fixture.git.blobCalls = nil
+	result := fixture.service.ReleaseRatified(context.Background(), fixture.identity, releaseAuthority(t, &fakeWorkspaceReleaser{}))
+	if result.Outcome.Classification != ClassificationClean {
+		t.Fatalf("ReleaseRatified() outcome = %+v", result.Outcome)
+	}
+	if fixture.git.headCalls != 1 {
+		t.Fatalf("accepted HEAD resolved %d times, want exactly once", fixture.git.headCalls)
+	}
+	if len(fixture.git.treeCalls) != 1 {
+		t.Fatalf("accepted tree enumerated %d times, want exactly once: %v", len(fixture.git.treeCalls), fixture.git.treeCalls)
+	}
+	seenBlob := map[string]bool{}
+	for _, call := range fixture.git.blobCalls {
+		if seenBlob[call] {
+			t.Fatalf("duplicate accepted blob read %q", call)
+		}
+		seenBlob[call] = true
 	}
 }
