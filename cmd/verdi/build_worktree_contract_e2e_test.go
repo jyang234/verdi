@@ -68,10 +68,23 @@ type atcFixtureOptions struct {
 }
 
 type atcRunwayFixture struct {
-	primary      string
-	runway       string
-	expectedBase string
-	wrongBase    string
+	primary          string
+	runway           string
+	runwayRel        string
+	expectedBase     string
+	wrongBase        string
+	childEnvironment atcChildEnvironment
+}
+
+type atcChildEnvironment struct {
+	base      []string
+	toolPath  string
+	gitBinary string
+}
+
+type atcVerdiEnvironmentOptions struct {
+	gitExecutableDir string
+	gitSentinel      string
 }
 
 type atcCandidateFile struct {
@@ -117,14 +130,14 @@ func TestBuildCommandsFromATCRunway_BuildStart(t *testing.T) {
 	bin := buildVerdiBinary(t)
 	fixture := newATCRunwayFixture(t, atcFixtureOptions{storySlug: atcStorySlug, epoch: 1})
 
-	primaryBefore := mustATCSnapshot(t, fixture.primary)
-	runwayBefore := mustATCSnapshot(t, fixture.runway)
+	primaryBefore := mustATCPrimarySnapshot(t, fixture)
+	runwayBefore := mustATCRunwaySnapshot(t, fixture)
 	if !runwayBefore.Detached {
 		t.Fatalf("runway starts on branch %q, want detached at accepted-story base %s", runwayBefore.Branch, fixture.expectedBase)
 	}
 
 	argv := []string{"build", "start", "spec/" + atcFeatureName}
-	observed, err := runATCVerdi(bin, fixture.runway, argv, []string{"CI_DEFAULT_BRANCH=main"})
+	observed, err := runATCVerdi(bin, fixture.runway, argv, fixture.childEnvironment, atcVerdiEnvironmentOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -132,10 +145,10 @@ func TestBuildCommandsFromATCRunway_BuildStart(t *testing.T) {
 		t.Fatalf("verdi %v exit=%d class=%s, want 0/clean; stdout=%s stderr=%s", argv, observed.ExitCode, observed.ExitClass, observed.Stdout, observed.Stderr)
 	}
 
-	primaryAfter := mustATCSnapshot(t, fixture.primary)
+	primaryAfter := mustATCPrimarySnapshot(t, fixture)
 	assertATCRepositoryUnchanged(t, "primary across build start", primaryBefore, primaryAfter)
 
-	runwayAfter := mustATCSnapshot(t, fixture.runway)
+	runwayAfter := mustATCRunwaySnapshot(t, fixture)
 	wantRunway := runwayBefore
 	wantRunway.Branch = "feature/" + atcFeatureName
 	wantRunway.Detached = false
@@ -156,13 +169,13 @@ func TestBuildCommandsFromATCRunway_BuildStart(t *testing.T) {
 func TestBuildCommandsFromATCRunway_Lifecycle(t *testing.T) {
 	bin := buildVerdiBinary(t)
 	fixture := newATCRunwayFixture(t, atcFixtureOptions{storySlug: atcStorySlug, epoch: 2})
-	primaryBefore := mustATCSnapshot(t, fixture.primary)
-	runwayBefore := mustATCSnapshot(t, fixture.runway)
+	primaryBefore := mustATCPrimarySnapshot(t, fixture)
+	runwayBefore := mustATCRunwaySnapshot(t, fixture)
 
 	var transcript []atcTranscriptRow
 	runBoundary := func(command string, argv []string, wantExit int, wantClass, wantWitness string) atcRepositorySnapshot {
 		t.Helper()
-		observed, err := runATCVerdi(bin, fixture.runway, argv, []string{"CI_DEFAULT_BRANCH=main"})
+		observed, err := runATCVerdi(bin, fixture.runway, argv, fixture.childEnvironment, atcVerdiEnvironmentOptions{})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -173,9 +186,9 @@ func TestBuildCommandsFromATCRunway_Lifecycle(t *testing.T) {
 			t.Fatalf("verdi %v output lacks deterministic witness %q; stdout=%s stderr=%s", argv, wantWitness, observed.Stdout, observed.Stderr)
 		}
 
-		primaryAfter := mustATCSnapshot(t, fixture.primary)
+		primaryAfter := mustATCPrimarySnapshot(t, fixture)
 		assertATCRepositoryUnchanged(t, "primary after "+command, primaryBefore, primaryAfter)
-		runwayAfter := mustATCSnapshot(t, fixture.runway)
+		runwayAfter := mustATCRunwaySnapshot(t, fixture)
 		transcript = append(transcript, atcTranscriptRow{
 			Command:      command,
 			Argv:         append([]string(nil), argv...),
@@ -248,11 +261,11 @@ func TestBuildCommandsFromATCRunway_Refusals(t *testing.T) {
 		if fixture.wrongBase == "" || fixture.wrongBase == fixture.expectedBase {
 			t.Fatalf("wrong-base fixture has branch base %q and expected base %q", fixture.wrongBase, fixture.expectedBase)
 		}
-		primaryBefore := mustATCSnapshot(t, fixture.primary)
-		runwayBefore := mustATCSnapshot(t, fixture.runway)
+		primaryBefore := mustATCPrimarySnapshot(t, fixture)
+		runwayBefore := mustATCRunwaySnapshot(t, fixture)
 
 		argv := []string{"build", "start", "spec/" + atcFeatureName}
-		observed, err := runATCVerdi(bin, fixture.runway, argv, []string{"CI_DEFAULT_BRANCH=main"})
+		observed, err := runATCVerdi(bin, fixture.runway, argv, fixture.childEnvironment, atcVerdiEnvironmentOptions{})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -264,16 +277,16 @@ func TestBuildCommandsFromATCRunway_Refusals(t *testing.T) {
 				t.Fatalf("wrong-base stderr = %q, want deterministic witness %q", observed.Stderr, want)
 			}
 		}
-		assertATCRepositoryUnchanged(t, "wrong-base primary refusal", primaryBefore, mustATCSnapshot(t, fixture.primary))
-		assertATCRepositoryUnchanged(t, "wrong-base runway refusal", runwayBefore, mustATCSnapshot(t, fixture.runway))
+		assertATCRepositoryUnchanged(t, "wrong-base primary refusal", primaryBefore, mustATCPrimarySnapshot(t, fixture))
+		assertATCRepositoryUnchanged(t, "wrong-base runway refusal", runwayBefore, mustATCRunwaySnapshot(t, fixture))
 		t.Logf("Refusal transcript: case=wrong-base expected=%s existing=%s argv=%q exit=%s branch=DETACHED head=%s witness=%q",
 			fixture.expectedBase, fixture.wrongBase, argv, observed.ExitClass, runwayBefore.Head, "feature/enum-spike already exists")
 	})
 
 	t.Run("injected Git process failure", func(t *testing.T) {
 		fixture := newATCRunwayFixture(t, atcFixtureOptions{storySlug: atcStorySlug, epoch: 4})
-		primaryBefore := mustATCSnapshot(t, fixture.primary)
-		runwayBefore := mustATCSnapshot(t, fixture.runway)
+		primaryBefore := mustATCPrimarySnapshot(t, fixture)
+		runwayBefore := mustATCRunwaySnapshot(t, fixture)
 		fakeDir := writeATCGitFailureFake(t)
 		sentinel := filepath.Join(t.TempDir(), "git-invoked")
 		entries, err := os.ReadDir(fakeDir)
@@ -285,8 +298,10 @@ func TestBuildCommandsFromATCRunway_Refusals(t *testing.T) {
 		}
 
 		argv := []string{"build", "start", "spec/" + atcFeatureName}
-		pathOverride := "PATH=" + fakeDir + string(os.PathListSeparator) + os.Getenv("PATH")
-		observed, err := runATCVerdi(bin, fixture.runway, argv, []string{"CI_DEFAULT_BRANCH=main", pathOverride, "VATC_GIT_SENTINEL=" + sentinel})
+		observed, err := runATCVerdi(bin, fixture.runway, argv, fixture.childEnvironment, atcVerdiEnvironmentOptions{
+			gitExecutableDir: fakeDir,
+			gitSentinel:      sentinel,
+		})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -301,10 +316,123 @@ func TestBuildCommandsFromATCRunway_Refusals(t *testing.T) {
 				t.Fatalf("stderr = %q, want deterministic operational witness %q", observed.Stderr, want)
 			}
 		}
-		assertATCRepositoryUnchanged(t, "Git-failure primary refusal", primaryBefore, mustATCSnapshot(t, fixture.primary))
-		assertATCRepositoryUnchanged(t, "Git-failure runway refusal", runwayBefore, mustATCSnapshot(t, fixture.runway))
+		assertATCRepositoryUnchanged(t, "Git-failure primary refusal", primaryBefore, mustATCPrimarySnapshot(t, fixture))
+		assertATCRepositoryUnchanged(t, "Git-failure runway refusal", runwayBefore, mustATCRunwaySnapshot(t, fixture))
 		t.Logf("Refusal transcript: case=git-process-failure argv=%q exit=%s branch=DETACHED head=%s stderr=%q",
 			argv, observed.ExitClass, runwayBefore.Head, strings.TrimSpace(observed.Stderr))
+	})
+
+	t.Run("hermetic child environment drops ambient Git steering", func(t *testing.T) {
+		ambient := []string{
+			"GIT_DIR=/developer/repository/.git",
+			"GIT_WORK_TREE=/developer/repository",
+			"GIT_INDEX_FILE=/developer/repository/.git/index",
+			"GIT_CONFIG_COUNT=1",
+			"GIT_CONFIG_KEY_0=core.excludesfile",
+			"GIT_CONFIG_VALUE_0=/developer/global-ignore",
+			"GIT_ASKPASS=/developer/credential-helper",
+			"HTTPS_PROXY=http://developer-proxy.invalid",
+			"HOME=/developer/home",
+			"LC_ALL=developer-locale",
+			"PWD=/developer/stale-working-directory",
+		}
+		for _, entry := range ambient {
+			key, value, _ := strings.Cut(entry, "=")
+			t.Setenv(key, value)
+		}
+
+		environment := newATCChildEnvironment(t)
+		childValues, err := environment.verdi(atcVerdiEnvironmentOptions{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		values := make(map[string]string, len(childValues))
+		for _, entry := range childValues {
+			key, value, _ := strings.Cut(entry, "=")
+			values[key] = value
+		}
+		var keys []string
+		for key := range values {
+			keys = append(keys, key)
+		}
+		sort.Strings(keys)
+		wantKeys := []string{
+			"CI_DEFAULT_BRANCH",
+			"GIT_CONFIG_GLOBAL",
+			"GIT_CONFIG_NOSYSTEM",
+			"GIT_TERMINAL_PROMPT",
+			"HOME",
+			"LANG",
+			"LC_ALL",
+			"PATH",
+			"TMPDIR",
+			"XDG_CONFIG_HOME",
+		}
+		if !reflect.DeepEqual(keys, wantKeys) {
+			t.Fatalf("Verdi child environment keys = %v, want exact allowlist %v", keys, wantKeys)
+		}
+		for _, entry := range ambient {
+			key, value, _ := strings.Cut(entry, "=")
+			if values[key] == value {
+				t.Fatalf("child environment retained ambient %s=%q", key, value)
+			}
+		}
+		if values["PATH"] != environment.toolPath || values["CI_DEFAULT_BRANCH"] != "main" {
+			t.Fatalf("declared child inputs = PATH=%q CI_DEFAULT_BRANCH=%q, want explicit values", values["PATH"], values["CI_DEFAULT_BRANCH"])
+		}
+		if values["HOME"] == "" || values["HOME"] == "/developer/home" || values["XDG_CONFIG_HOME"] == "" {
+			t.Fatalf("isolated config boundary = HOME=%q XDG_CONFIG_HOME=%q", values["HOME"], values["XDG_CONFIG_HOME"])
+		}
+		if values["LC_ALL"] != "C" || values["LANG"] != "C" || values["GIT_CONFIG_NOSYSTEM"] != "1" || values["GIT_CONFIG_GLOBAL"] != os.DevNull {
+			t.Fatalf("fixed locale/Git config boundary = LC_ALL=%q LANG=%q GIT_CONFIG_NOSYSTEM=%q GIT_CONFIG_GLOBAL=%q",
+				values["LC_ALL"], values["LANG"], values["GIT_CONFIG_NOSYSTEM"], values["GIT_CONFIG_GLOBAL"])
+		}
+		if _, err := environment.verdi(atcVerdiEnvironmentOptions{gitExecutableDir: t.TempDir()}); err == nil {
+			t.Fatal("Git fake directory without invocation sentinel succeeded, want rejected incomplete override")
+		}
+		if _, err := environment.verdi(atcVerdiEnvironmentOptions{gitSentinel: filepath.Join(t.TempDir(), "sentinel")}); err == nil {
+			t.Fatal("Git fake sentinel without executable directory succeeded, want rejected incomplete override")
+		}
+	})
+
+	t.Run("primary snapshot observes ignored candidates outside exact runway", func(t *testing.T) {
+		fixture := newATCRunwayFixture(t, atcFixtureOptions{storySlug: atcStorySlug, epoch: 6})
+		primaryBefore := mustATCPrimarySnapshot(t, fixture)
+
+		fallbackMarker := filepath.Join(fixture.primary, ".vatc", "fallback-marker")
+		if err := os.WriteFile(fallbackMarker, []byte("redirected mutation\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		primaryAfterFallback := mustATCPrimarySnapshot(t, fixture)
+		if diff := atcSnapshotDifference(primaryBefore, primaryAfterFallback); diff == "" || !strings.Contains(diff, ".vatc/fallback-marker") {
+			t.Fatalf("ignored fallback mutation difference = %q, want exact candidate witness", diff)
+		}
+
+		if err := os.Remove(fallbackMarker); err != nil {
+			t.Fatal(err)
+		}
+		siblingPath := filepath.Join(fixture.primary, ".vatc", "worktrees", "sibling-story", "a9", "mutation.txt")
+		if err := os.MkdirAll(filepath.Dir(siblingPath), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(siblingPath, []byte("sibling mutation\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		primaryAfterSibling := mustATCPrimarySnapshot(t, fixture)
+		if diff := atcSnapshotDifference(primaryBefore, primaryAfterSibling); diff == "" || !strings.Contains(diff, ".vatc/worktrees/sibling-story/a9/mutation.txt") {
+			t.Fatalf("ignored sibling mutation difference = %q, want exact candidate witness", diff)
+		}
+
+		runwayBefore := mustATCRunwaySnapshot(t, fixture)
+		runwayOnly := filepath.Join(fixture.runway, "separately-owned.txt")
+		if err := os.WriteFile(runwayOnly, []byte("runway mutation\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		primaryAfterRunway := mustATCPrimarySnapshot(t, fixture)
+		assertATCRepositoryUnchanged(t, "primary across exact separately-owned runway mutation", primaryAfterSibling, primaryAfterRunway)
+		if diff := atcSnapshotDifference(runwayBefore, mustATCRunwaySnapshot(t, fixture)); diff == "" || !strings.Contains(diff, "separately-owned.txt") {
+			t.Fatalf("separately-owned runway mutation difference = %q, want runway candidate witness", diff)
+		}
 	})
 
 	t.Run("helper negative paths fail closed", func(t *testing.T) {
@@ -317,10 +445,11 @@ func TestBuildCommandsFromATCRunway_Refusals(t *testing.T) {
 				t.Fatalf("validateATCFixtureOptions(%+v) succeeded, want error", opts)
 			}
 		}
-		if _, err := snapshotATCRepository(t.TempDir()); err == nil {
+		environment := newATCChildEnvironment(t)
+		if _, err := snapshotATCRepository(t.TempDir(), environment, ""); err == nil {
 			t.Fatal("snapshotATCRepository(non-repository) succeeded, want operational error")
 		}
-		if _, err := runATCVerdi(filepath.Join(t.TempDir(), "missing-verdi"), t.TempDir(), []string{"gate"}, nil); err == nil {
+		if _, err := runATCVerdi(filepath.Join(t.TempDir(), "missing-verdi"), t.TempDir(), []string{"gate"}, environment, atcVerdiEnvironmentOptions{}); err == nil {
 			t.Fatal("runATCVerdi(missing executable) succeeded, want process-start error")
 		}
 		for _, code := range []int{0, 1, 2} {
@@ -333,11 +462,11 @@ func TestBuildCommandsFromATCRunway_Refusals(t *testing.T) {
 		}
 
 		fixture := newATCRunwayFixture(t, atcFixtureOptions{storySlug: atcStorySlug, epoch: 5})
-		before := mustATCSnapshot(t, fixture.runway)
+		before := mustATCRunwaySnapshot(t, fixture)
 		if err := os.WriteFile(filepath.Join(fixture.runway, "unexpected.txt"), []byte("mutation\n"), 0o644); err != nil {
 			t.Fatal(err)
 		}
-		after := mustATCSnapshot(t, fixture.runway)
+		after := mustATCRunwaySnapshot(t, fixture)
 		if diff := atcSnapshotDifference(before, after); diff == "" || !strings.Contains(diff, "candidate files") {
 			t.Fatalf("snapshot difference = %q, want candidate-file mutation witness", diff)
 		}
@@ -362,6 +491,7 @@ func newATCRunwayFixture(t *testing.T, opts atcFixtureOptions) atcRunwayFixture 
 	if err := validateATCFixtureOptions(opts); err != nil {
 		t.Fatal(err)
 	}
+	childEnvironment := newATCChildEnvironment(t)
 
 	layers := []fixturegit.Layer{{
 		Files: map[string]string{
@@ -377,26 +507,126 @@ func newATCRunwayFixture(t *testing.T, opts atcFixtureOptions) atcRunwayFixture 
 			Message: "advance accepted story base",
 		})
 	}
-	repo := fixturegit.Build(t, layers)
+	var repoDir, repoHead string
+	var repoHeads []string
+	withATCProcessEnvironment(t, childEnvironment.git(), func() {
+		repo := fixturegit.Build(t, layers)
+		repoDir = repo.Dir
+		repoHead = repo.Head
+		repoHeads = append([]string(nil), repo.Heads...)
+	})
 
 	var wrongBase string
 	if opts.wrongFeatureBase {
-		wrongBase = repo.Heads[0]
-		mustATCGit(t, repo.Dir, "branch", "feature/"+atcFeatureName, wrongBase)
+		wrongBase = repoHeads[0]
+		mustATCGit(t, repoDir, childEnvironment, "branch", "feature/"+atcFeatureName, wrongBase)
 	}
 
-	runway := filepath.Join(repo.Dir, ".vatc", "worktrees", opts.storySlug, fmt.Sprintf("a%d", opts.epoch))
+	runwayRel := filepath.Join(".vatc", "worktrees", opts.storySlug, fmt.Sprintf("a%d", opts.epoch))
+	runway := filepath.Join(repoDir, runwayRel)
 	if err := os.MkdirAll(filepath.Dir(runway), 0o755); err != nil {
 		t.Fatalf("creating ATC runway parent: %v", err)
 	}
-	mustATCGit(t, repo.Dir, "worktree", "add", "--detach", runway, repo.Head)
+	mustATCGit(t, repoDir, childEnvironment, "worktree", "add", "--detach", runway, repoHead)
 
-	return atcRunwayFixture{primary: repo.Dir, runway: runway, expectedBase: repo.Head, wrongBase: wrongBase}
+	return atcRunwayFixture{
+		primary:          repoDir,
+		runway:           runway,
+		runwayRel:        filepath.ToSlash(runwayRel),
+		expectedBase:     repoHead,
+		wrongBase:        wrongBase,
+		childEnvironment: childEnvironment,
+	}
 }
 
-func mustATCGit(t *testing.T, dir string, args ...string) string {
+func newATCChildEnvironment(t *testing.T) atcChildEnvironment {
 	t.Helper()
-	out, code, err := runATCGit(dir, args...)
+	toolPath := os.Getenv("PATH")
+	if toolPath == "" {
+		t.Fatal("constructing hermetic child environment: PATH is required for the real Git/toolchain binaries")
+	}
+	gitBinary, err := exec.LookPath("git")
+	if err != nil {
+		t.Fatalf("constructing hermetic child environment: resolve git: %v", err)
+	}
+	boundary := t.TempDir()
+	home := filepath.Join(boundary, "home")
+	xdgConfig := filepath.Join(boundary, "xdg-config")
+	tmp := filepath.Join(boundary, "tmp")
+	for _, dir := range []string{home, xdgConfig, tmp} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatalf("constructing hermetic child environment directory %s: %v", dir, err)
+		}
+	}
+	return atcChildEnvironment{
+		base: []string{
+			"GIT_CONFIG_GLOBAL=" + os.DevNull,
+			"GIT_CONFIG_NOSYSTEM=1",
+			"GIT_TERMINAL_PROMPT=0",
+			"HOME=" + home,
+			"LANG=C",
+			"LC_ALL=C",
+			"TMPDIR=" + tmp,
+			"XDG_CONFIG_HOME=" + xdgConfig,
+		},
+		toolPath:  toolPath,
+		gitBinary: gitBinary,
+	}
+}
+
+func (environment atcChildEnvironment) git() []string {
+	values := append([]string(nil), environment.base...)
+	return append(values, "PATH="+environment.toolPath)
+}
+
+func (environment atcChildEnvironment) verdi(options atcVerdiEnvironmentOptions) ([]string, error) {
+	if (options.gitExecutableDir == "") != (options.gitSentinel == "") {
+		return nil, errors.New("Git failure fake requires both executable directory and invocation sentinel")
+	}
+	toolPath := environment.toolPath
+	values := append([]string(nil), environment.base...)
+	if options.gitExecutableDir != "" {
+		if !filepath.IsAbs(options.gitExecutableDir) || !filepath.IsAbs(options.gitSentinel) {
+			return nil, errors.New("Git failure fake directory and invocation sentinel must be absolute")
+		}
+		toolPath = options.gitExecutableDir + string(os.PathListSeparator) + toolPath
+		values = append(values, "VATC_GIT_SENTINEL="+options.gitSentinel)
+	}
+	values = append(values, "CI_DEFAULT_BRANCH=main", "PATH="+toolPath)
+	return values, nil
+}
+
+func withATCProcessEnvironment(t *testing.T, environment []string, run func()) {
+	t.Helper()
+	original := os.Environ()
+	defer func() {
+		if err := replaceATCProcessEnvironment(original); err != nil {
+			t.Errorf("restoring process environment: %v", err)
+		}
+	}()
+	if err := replaceATCProcessEnvironment(environment); err != nil {
+		t.Fatalf("installing hermetic fixture environment: %v", err)
+	}
+	run()
+}
+
+func replaceATCProcessEnvironment(environment []string) error {
+	os.Clearenv()
+	for _, entry := range environment {
+		key, value, found := strings.Cut(entry, "=")
+		if !found || key == "" {
+			return fmt.Errorf("invalid child environment entry %q", entry)
+		}
+		if err := os.Setenv(key, value); err != nil {
+			return fmt.Errorf("set child environment %s: %w", key, err)
+		}
+	}
+	return nil
+}
+
+func mustATCGit(t *testing.T, dir string, environment atcChildEnvironment, args ...string) string {
+	t.Helper()
+	out, code, err := runATCGit(dir, environment, args...)
 	if err != nil {
 		t.Fatalf("starting git %v: %v", args, err)
 	}
@@ -406,9 +636,10 @@ func mustATCGit(t *testing.T, dir string, args ...string) string {
 	return string(out)
 }
 
-func runATCGit(dir string, args ...string) ([]byte, int, error) {
-	cmd := exec.Command("git", args...)
+func runATCGit(dir string, environment atcChildEnvironment, args ...string) ([]byte, int, error) {
+	cmd := exec.Command(environment.gitBinary, args...)
 	cmd.Dir = dir
+	cmd.Env = environment.git()
 	out, err := cmd.CombinedOutput()
 	if err == nil {
 		return out, 0, nil
@@ -420,14 +651,18 @@ func runATCGit(dir string, args ...string) ([]byte, int, error) {
 	return out, -1, err
 }
 
-func runATCVerdi(bin, dir string, argv, overrides []string) (atcProcessObservation, error) {
+func runATCVerdi(bin, dir string, argv []string, environment atcChildEnvironment, options atcVerdiEnvironmentOptions) (atcProcessObservation, error) {
+	childEnvironment, err := environment.verdi(options)
+	if err != nil {
+		return atcProcessObservation{}, fmt.Errorf("constructing Verdi child environment: %w", err)
+	}
 	cmd := exec.Command(bin, argv...)
 	cmd.Dir = dir
-	cmd.Env = atcEnvironment(overrides)
+	cmd.Env = childEnvironment
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
-	err := cmd.Run()
+	err = cmd.Run()
 	exitCode := 0
 	if err != nil {
 		var exitErr *exec.ExitError
@@ -456,34 +691,32 @@ func classifyATCExit(code int) (string, error) {
 	}
 }
 
-func atcEnvironment(overrides []string) []string {
-	keys := make(map[string]struct{}, len(overrides))
-	for _, override := range overrides {
-		key, _, _ := strings.Cut(override, "=")
-		keys[key] = struct{}{}
-	}
-	env := make([]string, 0, len(os.Environ())+len(overrides))
-	for _, value := range os.Environ() {
-		key, _, _ := strings.Cut(value, "=")
-		if _, overridden := keys[key]; !overridden {
-			env = append(env, value)
-		}
-	}
-	return append(env, overrides...)
+func mustATCPrimarySnapshot(t *testing.T, fixture atcRunwayFixture) atcRepositorySnapshot {
+	t.Helper()
+	return mustATCSnapshot(t, fixture.primary, fixture.childEnvironment, fixture.runwayRel)
 }
 
-func mustATCSnapshot(t *testing.T, dir string) atcRepositorySnapshot {
+func mustATCRunwaySnapshot(t *testing.T, fixture atcRunwayFixture) atcRepositorySnapshot {
 	t.Helper()
-	snapshot, err := snapshotATCRepository(dir)
+	return mustATCSnapshot(t, fixture.runway, fixture.childEnvironment, "")
+}
+
+func mustATCSnapshot(t *testing.T, dir string, environment atcChildEnvironment, excludedSubtree string) atcRepositorySnapshot {
+	t.Helper()
+	snapshot, err := snapshotATCRepository(dir, environment, excludedSubtree)
 	if err != nil {
 		t.Fatalf("snapshotting %s: %v", dir, err)
 	}
 	return snapshot
 }
 
-func snapshotATCRepository(dir string) (atcRepositorySnapshot, error) {
+func snapshotATCRepository(dir string, environment atcChildEnvironment, excludedSubtree string) (atcRepositorySnapshot, error) {
 	var snapshot atcRepositorySnapshot
-	branch, code, err := runATCGit(dir, "symbolic-ref", "--short", "-q", "HEAD")
+	excludedSubtree, err := normalizeATCExcludedSubtree(excludedSubtree)
+	if err != nil {
+		return snapshot, err
+	}
+	branch, code, err := runATCGit(dir, environment, "symbolic-ref", "--short", "-q", "HEAD")
 	if err != nil {
 		return snapshot, fmt.Errorf("starting git symbolic-ref: %w", err)
 	}
@@ -497,13 +730,13 @@ func snapshotATCRepository(dir string) (atcRepositorySnapshot, error) {
 	}
 
 	var commandErr error
-	if snapshot.Head, commandErr = atcGitText(dir, "rev-parse", "HEAD"); commandErr != nil {
+	if snapshot.Head, commandErr = atcGitText(dir, environment, "rev-parse", "HEAD"); commandErr != nil {
 		return snapshot, commandErr
 	}
-	if snapshot.Tree, commandErr = atcGitText(dir, "rev-parse", "HEAD^{tree}"); commandErr != nil {
+	if snapshot.Tree, commandErr = atcGitText(dir, environment, "rev-parse", "HEAD^{tree}"); commandErr != nil {
 		return snapshot, commandErr
 	}
-	indexPath, commandErr := atcGitText(dir, "rev-parse", "--git-path", "index")
+	indexPath, commandErr := atcGitText(dir, environment, "rev-parse", "--git-path", "index")
 	if commandErr != nil {
 		return snapshot, commandErr
 	}
@@ -516,33 +749,68 @@ func snapshotATCRepository(dir string) (atcRepositorySnapshot, error) {
 	}
 	snapshot.IndexDigest = atcDigest(snapshot.Index)
 
-	status, code, err := runATCGit(dir, "status", "--porcelain=v1", "--untracked-files=all")
+	status, code, err := runATCGit(dir, environment, "status", "--porcelain=v1", "--untracked-files=all")
 	if err != nil {
 		return snapshot, fmt.Errorf("starting git status: %w", err)
 	}
 	if code != 0 {
 		return snapshot, fmt.Errorf("git status exit %d: %s", code, status)
 	}
-	snapshot.Status = strings.TrimSuffix(string(status), "\n")
-	snapshot.ChangedPaths = atcChangedPaths(snapshot.Status)
 
-	untracked, code, err := runATCGit(dir, "ls-files", "--others", "--exclude-standard", "-z")
+	tracked, code, err := runATCGit(dir, environment, "ls-files", "--cached", "-z")
+	if err != nil {
+		return snapshot, fmt.Errorf("starting git ls-files --cached: %w", err)
+	}
+	if code != 0 {
+		return snapshot, fmt.Errorf("git ls-files --cached exit %d: %s", code, tracked)
+	}
+	trackedPaths := atcCandidatePaths(tracked, excludedSubtree)
+	trackedSet := make(map[string]struct{}, len(trackedPaths))
+	for _, path := range trackedPaths {
+		trackedSet[path] = struct{}{}
+	}
+
+	ordinaryUntracked, code, err := runATCGit(dir, environment, "ls-files", "--others", "--exclude-standard", "-z")
 	if err != nil {
 		return snapshot, fmt.Errorf("starting git ls-files --others: %w", err)
 	}
 	if code != 0 {
-		return snapshot, fmt.Errorf("git ls-files --others exit %d: %s", code, untracked)
+		return snapshot, fmt.Errorf("git ls-files --others exit %d: %s", code, ordinaryUntracked)
 	}
-	snapshot.UntrackedPaths = atcCandidatePaths(untracked)
+	ordinaryUntrackedSet := make(map[string]struct{})
+	for _, path := range atcCandidatePaths(ordinaryUntracked, excludedSubtree) {
+		ordinaryUntrackedSet[path] = struct{}{}
+	}
 
-	candidates, code, err := runATCGit(dir, "ls-files", "--cached", "--others", "--exclude-standard", "-z")
+	filesystemPaths, err := atcFilesystemCandidatePaths(dir, excludedSubtree)
 	if err != nil {
-		return snapshot, fmt.Errorf("starting git ls-files candidates: %w", err)
+		return snapshot, err
 	}
-	if code != 0 {
-		return snapshot, fmt.Errorf("git ls-files candidates exit %d: %s", code, candidates)
+	candidateSet := make(map[string]struct{}, len(trackedPaths)+len(filesystemPaths))
+	for _, path := range trackedPaths {
+		candidateSet[path] = struct{}{}
 	}
-	for _, path := range atcCandidatePaths(candidates) {
+	var ignoredPaths []string
+	for _, path := range filesystemPaths {
+		candidateSet[path] = struct{}{}
+		if _, tracked := trackedSet[path]; tracked {
+			continue
+		}
+		snapshot.UntrackedPaths = append(snapshot.UntrackedPaths, path)
+		if _, ordinary := ordinaryUntrackedSet[path]; !ordinary {
+			ignoredPaths = append(ignoredPaths, path)
+		}
+	}
+	sort.Strings(snapshot.UntrackedPaths)
+	snapshot.Status = atcStatusWithIgnored(strings.TrimSuffix(string(status), "\n"), ignoredPaths)
+	snapshot.ChangedPaths = atcChangedPaths(snapshot.Status)
+
+	candidatePaths := make([]string, 0, len(candidateSet))
+	for path := range candidateSet {
+		candidatePaths = append(candidatePaths, path)
+	}
+	sort.Strings(candidatePaths)
+	for _, path := range candidatePaths {
 		candidate, err := snapshotATCCandidate(dir, path)
 		if err != nil {
 			return snapshot, err
@@ -552,8 +820,8 @@ func snapshotATCRepository(dir string) (atcRepositorySnapshot, error) {
 	return snapshot, nil
 }
 
-func atcGitText(dir string, args ...string) (string, error) {
-	out, code, err := runATCGit(dir, args...)
+func atcGitText(dir string, environment atcChildEnvironment, args ...string) (string, error) {
+	out, code, err := runATCGit(dir, environment, args...)
 	if err != nil {
 		return "", fmt.Errorf("starting git %v: %w", args, err)
 	}
@@ -563,18 +831,85 @@ func atcGitText(dir string, args ...string) (string, error) {
 	return strings.TrimSpace(string(out)), nil
 }
 
-func atcCandidatePaths(raw []byte) []string {
+func normalizeATCExcludedSubtree(excludedSubtree string) (string, error) {
+	if excludedSubtree == "" {
+		return "", nil
+	}
+	if filepath.IsAbs(excludedSubtree) {
+		return "", fmt.Errorf("snapshot exclusion must be repository-relative: %q", excludedSubtree)
+	}
+	clean := filepath.ToSlash(filepath.Clean(filepath.FromSlash(excludedSubtree)))
+	if clean == "." || clean == ".." || strings.HasPrefix(clean, "../") {
+		return "", fmt.Errorf("snapshot exclusion escapes repository: %q", excludedSubtree)
+	}
+	return clean, nil
+}
+
+func atcCandidatePaths(raw []byte, excludedSubtree string) []string {
 	parts := bytes.Split(raw, []byte{0})
 	paths := make([]string, 0, len(parts))
 	for _, part := range parts {
 		path := filepath.ToSlash(string(part))
-		if path == "" || path == ".verdi/data" || strings.HasPrefix(path, ".verdi/data/") {
+		if path == "" || atcCandidatePathExcluded(path, excludedSubtree) {
 			continue
 		}
 		paths = append(paths, path)
 	}
 	sort.Strings(paths)
 	return paths
+}
+
+func atcFilesystemCandidatePaths(root, excludedSubtree string) ([]string, error) {
+	var paths []string
+	err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return fmt.Errorf("walk candidate %s: %w", path, walkErr)
+		}
+		rel, err := filepath.Rel(root, path)
+		if err != nil {
+			return fmt.Errorf("candidate path relative to %s: %w", root, err)
+		}
+		rel = filepath.ToSlash(rel)
+		if rel == "." {
+			return nil
+		}
+		if atcCandidatePathExcluded(rel, excludedSubtree) {
+			if entry.IsDir() {
+				return fs.SkipDir
+			}
+			return nil
+		}
+		if !entry.IsDir() {
+			paths = append(paths, rel)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	sort.Strings(paths)
+	return paths, nil
+}
+
+func atcCandidatePathExcluded(path, excludedSubtree string) bool {
+	for _, excluded := range []string{".git", ".verdi/data", excludedSubtree} {
+		if excluded != "" && (path == excluded || strings.HasPrefix(path, excluded+"/")) {
+			return true
+		}
+	}
+	return false
+}
+
+func atcStatusWithIgnored(status string, ignoredPaths []string) string {
+	var lines []string
+	if status != "" {
+		lines = append(lines, strings.Split(status, "\n")...)
+	}
+	for _, path := range ignoredPaths {
+		lines = append(lines, "!! "+path)
+	}
+	sort.Strings(lines)
+	return strings.Join(lines, "\n")
 }
 
 func snapshotATCCandidate(root, path string) (atcCandidateFile, error) {
