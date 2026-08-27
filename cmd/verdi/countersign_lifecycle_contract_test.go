@@ -186,11 +186,7 @@ func TestCountersignLifecycleContract_Behavioral(t *testing.T) {
 			if result.code != 1 {
 				t.Fatalf("built-binary %s close = %+v, want conflict verdict exit 1", tc.class, result)
 			}
-			counterAt := strings.Index(result.stdout, "forge countersign proven")
-			conflictAt := strings.Index(result.stdout, "constitutional conflict: state: blocked-unproven")
-			if counterAt < 0 || conflictAt < 0 || counterAt >= conflictAt {
-				t.Fatalf("built-binary %s close output does not prove countersign before conflict block: %s", tc.class, result.stdout)
-			}
+			assertCountersignBeforeConflictBlock(t, result, "built-binary "+tc.class+" close")
 			if got := strings.TrimSpace(gitOutput(t, root, "rev-parse", "HEAD")); got != beforeHead {
 				t.Fatalf("blocked %s close HEAD = %s, want %s", tc.class, got, beforeHead)
 			}
