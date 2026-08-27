@@ -404,6 +404,15 @@ func runPreflightWithConflictAndCountersign(ctx context.Context, root, storyArg 
 	if !adopted {
 		return runPreflightWithCountersign(ctx, root, storyArg, manifest, mdl, f, forceLocal, countersignResolver, stdout, stderr)
 	}
+	if countersignResolver != nil && manifest != nil && manifest.Countersign != nil {
+		if rc := reportConfiguredCountersignBeforeConflict(ctx, root, storyArg, manifest, mdl, countersignResolver, stdout, stderr); rc != 0 {
+			return rc
+		}
+		if rc := runCloseConflictGate(ctx, root, storyArg, requestPath, provider, stdout, stderr); rc != 0 {
+			return rc
+		}
+		return runPreflightWithCountersign(ctx, root, storyArg, manifest, mdl, f, forceLocal, nil, stdout, stderr)
+	}
 	if rc := runCloseConflictGate(ctx, root, storyArg, requestPath, provider, stdout, stderr); rc != 0 {
 		return rc
 	}
@@ -419,10 +428,55 @@ func runPrepareWithConflict(ctx context.Context, root, storyArg string, manifest
 	if !adopted {
 		return runPrepare(ctx, root, storyArg, manifest, deps, forceLocal, stdout, stderr)
 	}
+	if deps.Countersign != nil && manifest != nil && manifest.Countersign != nil {
+		if rc := reportConfiguredCountersignBeforeConflict(ctx, root, storyArg, manifest, deps.Model, deps.Countersign, stdout, stderr); rc != 0 {
+			return rc
+		}
+		if rc := runCloseConflictGate(ctx, root, storyArg, requestPath, provider, stdout, stderr); rc != 0 {
+			return rc
+		}
+		deps.Countersign = nil
+		return runPrepare(ctx, root, storyArg, manifest, deps, forceLocal, stdout, stderr)
+	}
 	if rc := runCloseConflictGate(ctx, root, storyArg, requestPath, provider, stdout, stderr); rc != 0 {
 		return rc
 	}
 	return runPrepare(ctx, root, storyArg, manifest, deps, forceLocal, stdout, stderr)
+}
+
+// reportConfiguredCountersignBeforeConflict resolves and renders the configured
+// production countersign operand before an independently adopted constitutional
+// conflict can block the lifecycle entry point. Callers remove the resolver
+// from the later delegated core only after this precheck passes, avoiding a
+// duplicate forge observation while preserving legacy conflict-first behavior
+// for repositories without configured countersigning.
+func reportConfiguredCountersignBeforeConflict(ctx context.Context, root, storyArg string, manifest *store.Manifest, mdl *model.Model, resolver lifecycleCountersignResolver, stdout, stderr io.Writer) int {
+	spec, err := storyresolve.Resolve(root, storyArg)
+	if err != nil {
+		fmt.Fprintln(stderr, "close:", err)
+		return 2
+	}
+	head, err := gitx.RevParse(ctx, root, "HEAD")
+	if err != nil {
+		fmt.Fprintln(stderr, "close:", err)
+		return 2
+	}
+	result, err := resolveLifecycleCountersign(ctx, resolver, root, manifest, mdl, string(spec.Class), lint.ResolveDefaultBranch(ctx, root), head)
+	if err != nil {
+		fmt.Fprintln(stderr, "close:", err)
+		return 2
+	}
+	number := 5
+	label := "closure: "
+	if spec.Class == artifact.ClassFeature {
+		number = 7
+		label = "closure(" + mdl.DisplayClass("feature") + "): "
+	}
+	outcome := reportClosureGateConditions(stdout, label, []gateCondition{lifecycleCountersignCondition(number, result)})
+	if !outcome.Ready {
+		return 1
+	}
+	return 0
 }
 
 func runCloseConflictGate(ctx context.Context, root, storyArg, requestPath string, provider policyconflict.VerdictProvider, stdout, stderr io.Writer) int {

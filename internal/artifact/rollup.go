@@ -165,6 +165,18 @@ func (c RollupCountersign) validate() error {
 	if c.Approvals == nil || c.EligibleApprovalIDs == nil || c.DistinctPrincipalIDs == nil || c.Witnesses == nil {
 		return fmt.Errorf("artifact: rollup countersign arrays must be non-null")
 	}
+	if len(c.Approvals) == 0 {
+		return fmt.Errorf("artifact: proven rollup countersign approvals must be nonempty")
+	}
+	if len(c.EligibleApprovalIDs) == 0 {
+		return fmt.Errorf("artifact: proven rollup countersign eligible_approval_ids must be nonempty")
+	}
+	if len(c.DistinctPrincipalIDs) == 0 {
+		return fmt.Errorf("artifact: proven rollup countersign distinct_principal_ids must be nonempty")
+	}
+	if len(c.Witnesses) == 0 {
+		return fmt.Errorf("artifact: proven rollup countersign witnesses must be nonempty")
+	}
 	rows := make(map[string]RollupCountersignApproval, len(c.Approvals))
 	for i, approval := range c.Approvals {
 		if approval.ApprovalID == "" || approval.ApprovalRef == "" {

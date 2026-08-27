@@ -1,6 +1,9 @@
 package artifact
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestDecodeRollup_Happy(t *testing.T) {
 	y := `{"schema":"verdi.rollup/v1","story":"jira:LOAN-1482","ref":"spec/stale-decline","commit":"7f3c2a1",
@@ -33,6 +36,27 @@ func TestDecodeRollup_CountersignProjection(t *testing.T) {
 	}
 	if r.Countersign == nil || r.Countersign.RecordDigest != "sha256:"+hex64 || len(r.Countersign.Approvals) != 1 || r.Countersign.Approvals[0].ApprovalRef != "gid://review/17" {
 		t.Fatalf("Countersign = %+v", r.Countersign)
+	}
+
+	for _, tc := range []struct {
+		name string
+		old  string
+		new  string
+	}{
+		{name: "empty approvals", old: `"approvals":[{"approval_id":"17","approval_ref":"gid://review/17","principal_id":"forge-live:101","principal_state":"authenticated"}]`, new: `"approvals":[]`},
+		{name: "empty eligible approval ids", old: `"eligible_approval_ids":["17"]`, new: `"eligible_approval_ids":[]`},
+		{name: "empty distinct principal ids", old: `"distinct_principal_ids":["forge-live:101"]`, new: `"distinct_principal_ids":[]`},
+		{name: "empty witnesses", old: `"witnesses":["countersign-verdict:value=proven"]`, new: `"witnesses":[]`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			projection := strings.Replace(y, tc.old, tc.new, 1)
+			if projection == y {
+				t.Fatalf("test setup did not replace %s", tc.name)
+			}
+			if _, err := DecodeRollup([]byte(projection)); err == nil {
+				t.Fatalf("DecodeRollup with %s: want error", tc.name)
+			}
+		})
 	}
 
 	for _, tc := range []struct {

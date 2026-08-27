@@ -83,6 +83,9 @@ func TestResolve(t *testing.T) {
 			{"profile", func(r *Resolver, _ *Request) {
 				r.LoadProfile = func(string) (gp.Profile, error) { return gp.Profile{}, missingProfile }
 			}, "profile"},
+			{"configured trust source", func(_ *Resolver, r *Request) {
+				r.Manifest.Countersign.TrustSource = "forge-unselected"
+			}, "principal-authentication"},
 		}
 		for _, tc := range tests {
 			t.Run(tc.name, func(t *testing.T) {

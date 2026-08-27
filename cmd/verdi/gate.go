@@ -232,10 +232,10 @@ func runGateWithConflictAndCountersign(ctx context.Context, root string, spec *a
 	}
 
 	conditions := []gateCondition{cond1, cond2, cond3, cond4}
+	var constitutionalConflict *gateCondition
 	if conflict.Adopted {
 		condition := conflictCondition(conflict.Result)
-		condition.Name = "5. " + condition.Name
-		conditions = append(conditions, condition)
+		constitutionalConflict = &condition
 	}
 	if countersignResolver != nil {
 		manifest, err := loadManifest(root)
@@ -248,7 +248,16 @@ func runGateWithConflictAndCountersign(ctx context.Context, root string, spec *a
 			fmt.Fprintln(stderr, "gate:", err)
 			return 2
 		}
+		if constitutionalConflict != nil && (manifest == nil || manifest.Countersign == nil) {
+			constitutionalConflict.Name = fmt.Sprintf("%d. %s", len(conditions)+1, constitutionalConflict.Name)
+			conditions = append(conditions, *constitutionalConflict)
+			constitutionalConflict = nil
+		}
 		conditions = append(conditions, lifecycleCountersignCondition(len(conditions)+1, result))
+	}
+	if constitutionalConflict != nil {
+		constitutionalConflict.Name = fmt.Sprintf("%d. %s", len(conditions)+1, constitutionalConflict.Name)
+		conditions = append(conditions, *constitutionalConflict)
 	}
 	return reportGateConditions(stdout, conditions)
 }

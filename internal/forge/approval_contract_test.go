@@ -549,6 +549,85 @@ func TestForgeApprovalContract_Behavioral(t *testing.T) {
 		}
 	})
 
+	t.Run("gitlab normalizes route aliases to provider-stable project identity", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			switch r.URL.EscapedPath() {
+			case "/projects/42/merge_requests/9", "/projects/acme%2Fwidgets/merge_requests/9":
+				writeJSON(t, w, gitlabMRJSON(candidateA, 70))
+			case "/projects/42/merge_requests/9/approvals", "/projects/acme%2Fwidgets/merge_requests/9/approvals":
+				writeJSON(t, w, `{"approved_by":[{"user":{"id":7,"username":"display-only"},"approved_at":"2026-08-26T15:01:00Z"}]}`)
+			default:
+				t.Errorf("unexpected request: %s %s", r.Method, r.URL.String())
+				http.NotFound(w, r)
+			}
+		}))
+		defer server.Close()
+
+		read := func(route string) forge.ApprovalSnapshot {
+			t.Helper()
+			a := gitlab.New(gitlab.Config{BaseURL: server.URL, ProjectID: route, HTTPClient: server.Client(), Clock: fixedClock})
+			snapshot, err := a.ListApprovals(context.Background(), "9")
+			if err != nil {
+				t.Fatalf("ListApprovals route %q: %v", route, err)
+			}
+			return snapshot
+		}
+
+		numeric := read("42")
+		pathRouted := read("acme/widgets")
+		if numeric.Repository != "42" || pathRouted.Repository != "42" {
+			t.Fatalf("repositories = %q and %q, want provider project id 42", numeric.Repository, pathRouted.Repository)
+		}
+		if numeric.ProviderSnapshotID != pathRouted.ProviderSnapshotID {
+			t.Fatalf("snapshot ids differ by request route: numeric=%q path=%q", numeric.ProviderSnapshotID, pathRouted.ProviderSnapshotID)
+		}
+		if len(numeric.Approvals) != 1 || len(pathRouted.Approvals) != 1 || numeric.Approvals[0].ApprovalID != pathRouted.Approvals[0].ApprovalID {
+			t.Fatalf("approval ids differ by request route: numeric=%+v path=%+v", numeric.Approvals, pathRouted.Approvals)
+		}
+	})
+
+	t.Run("gitlab rejects missing invalid or changed provider project identity", func(t *testing.T) {
+		tests := []struct {
+			name     string
+			firstMR  string
+			secondMR string
+			want     string
+		}{
+			{name: "missing", firstMR: fmt.Sprintf(`{"sha":%q,"author":{"id":70}}`, candidateA), want: "stable project id"},
+			{name: "invalid", firstMR: fmt.Sprintf(`{"sha":%q,"project_id":0,"author":{"id":70}}`, candidateA), want: "stable project id"},
+			{name: "negative", firstMR: fmt.Sprintf(`{"sha":%q,"project_id":-1,"author":{"id":70}}`, candidateA), want: "stable project id"},
+			{name: "missing after collection", firstMR: gitlabMRJSON(candidateA, 70), secondMR: fmt.Sprintf(`{"sha":%q,"author":{"id":70}}`, candidateA), want: "stable project id after approval collection"},
+			{name: "invalid after collection", firstMR: gitlabMRJSON(candidateA, 70), secondMR: fmt.Sprintf(`{"sha":%q,"project_id":0,"author":{"id":70}}`, candidateA), want: "stable project id after approval collection"},
+			{name: "changed", firstMR: gitlabMRJSON(candidateA, 70), secondMR: fmt.Sprintf(`{"sha":%q,"project_id":43,"author":{"id":70}}`, candidateA), want: "project changed during approval collection"},
+		}
+		for _, tc := range tests {
+			t.Run(tc.name, func(t *testing.T) {
+				var mrCalls atomic.Int32
+				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					switch r.URL.Path {
+					case "/projects/42/merge_requests/9":
+						body := tc.firstMR
+						if mrCalls.Add(1) == 2 && tc.secondMR != "" {
+							body = tc.secondMR
+						}
+						writeJSON(t, w, body)
+					case "/projects/42/merge_requests/9/approvals":
+						writeJSON(t, w, `{"approved_by":[]}`)
+					default:
+						http.NotFound(w, r)
+					}
+				}))
+				defer server.Close()
+
+				a := gitlab.New(gitlab.Config{BaseURL: server.URL, ProjectID: "42", HTTPClient: server.Client(), Clock: fixedClock})
+				_, err := a.ListApprovals(context.Background(), "9")
+				if err == nil || !strings.Contains(err.Error(), tc.want) {
+					t.Fatalf("ListApprovals error = %v, want %q", err, tc.want)
+				}
+			})
+		}
+	})
+
 	t.Run("gitlab rejects head change during approval collection", func(t *testing.T) {
 		var headCalls atomic.Int32
 		var approvalsCalls atomic.Int32
@@ -667,7 +746,7 @@ func githubPullJSON(candidate string, authorID int) string {
 }
 
 func gitlabMRJSON(candidate string, authorID int) string {
-	return fmt.Sprintf(`{"sha":%q,"author":{"id":%d}}`, candidate, authorID)
+	return fmt.Sprintf(`{"sha":%q,"project_id":42,"author":{"id":%d}}`, candidate, authorID)
 }
 
 func githubFixture(t *testing.T, reviewsBody string) (*github.Adapter, func()) {

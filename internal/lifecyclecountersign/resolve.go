@@ -120,6 +120,9 @@ func (r Resolver) Resolve(ctx context.Context, request Request) (Result, error) 
 	if err != nil {
 		return Result{}, fmt.Errorf("lifecycle countersign: freshness policy: %w", err)
 	}
+	if !profileHasTrustSource(profile, config.TrustSource) {
+		return unproven("principal-authentication", fmt.Sprintf("configured trust source %q is absent from the selected governance profile", config.TrustSource)), nil
+	}
 	facts := providerFacts{snapshot: snapshot}
 	principalResolver := gp.NewResolver(facts)
 	author, err := principalResolver.Resolve(ctx, profile, gp.PrincipalClaim{TrustSource: config.TrustSource, Subject: snapshot.CandidateAuthor.Subject})
@@ -148,6 +151,15 @@ func (r Resolver) Resolve(ctx context.Context, request Request) (Result, error) 
 	}
 	copy := record
 	return Result{Verdict: record.Verdict, Record: &copy, Witnesses: append([]string{}, record.Witnesses...)}, nil
+}
+
+func profileHasTrustSource(profile gp.Profile, trustSource string) bool {
+	for _, source := range profile.IdentityTrustSources {
+		if source.ID == trustSource {
+			return true
+		}
+	}
+	return false
 }
 
 func lifecycleObligation(mdl *model.Model, class string) (string, int, error) {

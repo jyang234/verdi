@@ -22,8 +22,10 @@ import (
 
 	"github.com/jyang234/verdi/internal/artifact"
 	"github.com/jyang234/verdi/internal/contextcompile"
+	"github.com/jyang234/verdi/internal/countersign"
 	"github.com/jyang234/verdi/internal/fixturegit"
 	"github.com/jyang234/verdi/internal/forge"
+	forgefake "github.com/jyang234/verdi/internal/forge/fake"
 	"github.com/jyang234/verdi/internal/instructionprojection"
 	"github.com/jyang234/verdi/internal/lifecyclecountersign"
 	"github.com/jyang234/verdi/internal/model"
@@ -78,7 +80,6 @@ func TestCountersignLifecycleContract_Behavioral(t *testing.T) {
 				t.Fatalf("verdi gate output = %q, want %q", result.stdout+result.stderr, want)
 			}
 		}
-
 		after := countersignCandidateSnapshot(t, repo.Dir)
 		if before != after {
 			t.Fatalf("verdi gate mutated candidate repository:\nbefore=%s\nafter=%s", before, after)
@@ -86,7 +87,29 @@ func TestCountersignLifecycleContract_Behavioral(t *testing.T) {
 		assertNoCountersignArtifact(t, repo.Dir)
 	})
 
-	t.Run("proven exact-head story approval passes build gate without mutation", func(t *testing.T) {
+	t.Run("built-binary unconfigured gate preserves legacy conflict-first order", func(t *testing.T) {
+		repo := buildCountersignGateRepo(t)
+		head := installCountersignContractAuthority(t, repo.Dir, true, true)
+		removeCountersignConfig(t, repo.Dir)
+		writeCountersignGateReport(t, repo.Dir, head)
+		requestPath := contextLifecycleRequestFile(t, repo.Dir, "lifecycle-unconfigured-context.json", "spec/enum-spike", contextcompile.PhaseBuild, nil)
+		before := countersignCandidateSnapshot(t, repo.Dir)
+
+		result := runCountersignContractBinary(t, binary, repo.Dir, nil, "gate", "--context-request", requestPath)
+		if result.code != 1 {
+			t.Fatalf("unconfigured built-binary gate = %+v, want blocking exit 1", result)
+		}
+		conflictAt := strings.Index(result.stdout, "constitutional conflict")
+		countersignAt := strings.Index(result.stdout, "forge countersign")
+		if conflictAt < 0 || countersignAt < conflictAt {
+			t.Fatalf("unconfigured gate changed legacy conflict-first order: stdout=%s stderr=%s", result.stdout, result.stderr)
+		}
+		if before != countersignCandidateSnapshot(t, repo.Dir) {
+			t.Fatalf("unconfigured gate mutated candidate: stdout=%s stderr=%s", result.stdout, result.stderr)
+		}
+	})
+
+	t.Run("built-binary configured gate proves countersign before unchanged conflict block without mutation", func(t *testing.T) {
 		repo := buildCountersignGateRepo(t)
 		head := installCountersignContractAuthority(t, repo.Dir, true, true)
 		writeCountersignGateReport(t, repo.Dir, head)
@@ -96,13 +119,13 @@ func TestCountersignLifecycleContract_Behavioral(t *testing.T) {
 		})
 		defer server.Close()
 		requestPath := contextLifecycleRequestFile(t, repo.Dir, "lifecycle-gate-context.json", "spec/enum-spike", contextcompile.PhaseBuild, nil)
-		setCountersignGitLabEnv(t, server.URL)
 
 		before := countersignCandidateSnapshot(t, repo.Dir)
-		result := runInjectedCountersignLifecycle(t, repo.Dir, requestPath, "gate", "")
-		if result.code != 0 || !strings.Contains(result.stdout, "countersign record: sha256:") {
-			t.Fatalf("injected-conflict gate result = %+v, want proven countersign pass", result)
+		result := runCountersignContractBinary(t, binary, repo.Dir, countersignGitLabEnv(server.URL), "gate", "--context-request", requestPath)
+		if result.code != 1 {
+			t.Fatalf("built-binary gate result = %+v, want unchanged conflict verdict exit 1", result)
 		}
+		assertCountersignBeforeConflictBlock(t, result, "built-binary gate")
 		assertCountersignReadOnly(t, repo.Dir, before, requests)
 	})
 
@@ -116,7 +139,7 @@ func TestCountersignLifecycleContract_Behavioral(t *testing.T) {
 		{name: "story close prepare delegated preflight", class: "story", mode: "prepare", storyArg: "spec/close-fixture"},
 		{name: "feature close preflight", class: "feature", mode: "preflight", storyArg: "spec/close-feature-fixture"},
 	} {
-		t.Run("proven "+tc.name+" uses the shared resolver through injected conflict verdict without mutation", func(t *testing.T) {
+		t.Run("built-binary configured "+tc.name+" proves countersign before unchanged conflict block without mutation", func(t *testing.T) {
 			root, head := readyCountersignCloseRepo(t, tc.class)
 			approvers := []int64{101}
 			if tc.class == "feature" {
@@ -128,13 +151,14 @@ func TestCountersignLifecycleContract_Behavioral(t *testing.T) {
 			})
 			defer server.Close()
 			requestPath := contextLifecycleRequestFile(t, root, "lifecycle-close-context.json", tc.storyArg, contextcompile.PhaseReview, nil)
-			setCountersignGitLabEnv(t, server.URL)
 
 			before := countersignCandidateSnapshot(t, root)
-			result := runInjectedCountersignLifecycle(t, root, requestPath, tc.mode, tc.storyArg)
-			if result.code != 0 || !strings.Contains(result.stdout, "countersign record: sha256:") {
-				t.Fatalf("verdi %s result = %+v, want proven countersign pass", tc.name, result)
+			args := []string{"close", tc.storyArg, "--" + tc.mode, "--force-local", "--context-request", requestPath}
+			result := runCountersignContractBinary(t, binary, root, countersignGitLabEnv(server.URL), args...)
+			if result.code != 1 {
+				t.Fatalf("built-binary %s result = %+v, want unchanged conflict verdict exit 1", tc.name, result)
 			}
+			assertCountersignBeforeConflictBlock(t, result, "built-binary "+tc.name)
 			assertCountersignReadOnly(t, root, before, requests)
 		})
 	}
@@ -278,24 +302,102 @@ func TestCountersignLifecycleContract_Behavioral(t *testing.T) {
 		assertNoCountersignArtifact(t, repo.Dir)
 	})
 
+	t.Run("removed GitLab approval is absent from the newer active snapshot", func(t *testing.T) {
+		repo := buildCountersignGateRepo(t)
+		head := installCountersignContractAuthority(t, repo.Dir, true, true)
+		writeCountersignGateReport(t, repo.Dir, head)
+		server, requests := newCountersignGitLabServer(t, countersignGitLabScenario{
+			CandidateSHA: head, SourceBranch: currentCountersignBranch(t, repo.Dir), AuthorID: 900,
+			ApproverSets: [][]int64{{101}, {}}, ApprovedAt: time.Now().Add(-time.Minute), OpenMR: true,
+		})
+		defer server.Close()
+		requestPath := contextLifecycleRequestFile(t, repo.Dir, "lifecycle-removed-context.json", "spec/enum-spike", contextcompile.PhaseBuild, nil)
+		before := countersignCandidateSnapshot(t, repo.Dir)
+
+		first := runCountersignContractBinary(t, binary, repo.Dir, countersignGitLabEnv(server.URL), "gate", "--context-request", requestPath)
+		if first.code != 1 {
+			t.Fatalf("first built-binary gate = %+v, want conflict verdict exit 1", first)
+		}
+		assertCountersignBeforeConflictBlock(t, first, "first active GitLab snapshot")
+
+		second := runCountersignContractBinary(t, binary, repo.Dir, countersignGitLabEnv(server.URL), "gate", "--context-request", requestPath)
+		output := second.stdout + second.stderr
+		if second.code != 1 || !strings.Contains(output, "[FAIL] 5. forge countersign") || !strings.Contains(output, "countersign verdict is violated-with-witness") {
+			t.Fatalf("newer snapshot without approver = %+v, want non-proven countersign verdict", second)
+		}
+		if strings.Contains(output, "dismissed") || strings.Contains(output, "revoked") {
+			t.Fatalf("newer GitLab snapshot fabricated historical state: %s", output)
+		}
+		if requests.approvalReadCount() != 2 {
+			t.Fatalf("approval snapshot reads = %d, want older and newer observations", requests.approvalReadCount())
+		}
+		assertCountersignReadOnly(t, repo.Dir, before, requests)
+	})
+
+	t.Run("explicit dismissed approval row is retained through the lifecycle reducer", func(t *testing.T) {
+		repo := buildCountersignGateRepo(t)
+		head := installCountersignContractAuthority(t, repo.Dir, true, true)
+		cfg, err := store.Open(repo.Dir)
+		if err != nil {
+			t.Fatalf("open countersign store: %v", err)
+		}
+		branch := currentCountersignBranch(t, repo.Dir)
+		f := forgefake.New()
+		f.SeedOpenMR("main", forge.OpenMR{ID: "17", SourceBranch: branch})
+		stamp := time.Now().Add(-time.Minute).UTC().Format(time.RFC3339Nano)
+		snapshot, err := forge.NewApprovalSnapshot(
+			"github", "acme/widgets", "17", head,
+			forge.ProviderActor{Scheme: "github-user-id", Subject: "900"}, time.Now().Add(-30*time.Second),
+			[]forge.Approval{{
+				ApprovalID: "dismissed-101", ApprovalRef: "review/dismissed-101", State: forge.ApprovalDismissed,
+				ApprovedAt: stamp, UpdatedAt: stamp, CandidateSHA: head,
+				Actor:             forge.ProviderActor{Scheme: "github-user-id", Subject: "101"},
+				ProviderWitnesses: []forge.ProviderWitness{{Name: "review_id", Value: "dismissed-101"}},
+			}},
+		)
+		if err != nil {
+			t.Fatalf("build dismissed snapshot: %v", err)
+		}
+		f.SeedApprovalSnapshot("17", snapshot)
+
+		result, err := (lifecyclecountersign.Resolver{Forge: f}).Resolve(context.Background(), lifecyclecountersign.Request{
+			Root: repo.Dir, Manifest: cfg.Manifest, Model: cfg.Model, TargetClass: "story",
+			DefaultBranch: "main", SourceBranch: branch, LocalCandidateSHA: head,
+		})
+		if err != nil {
+			t.Fatalf("resolve dismissed approval: %v", err)
+		}
+		if result.Verdict == countersign.VerdictProven || result.Record == nil {
+			t.Fatalf("dismissed result = %+v, want retained adverse record", result)
+		}
+		if len(result.Record.Approvals) != 1 || result.Record.Approvals[0].State != forge.ApprovalDismissed {
+			t.Fatalf("dismissed approval was not retained: %+v", result.Record.Approvals)
+		}
+	})
+
 	t.Run("adverse forge and authority facts never pass", func(t *testing.T) {
 		tests := []struct {
-			name         string
-			scenario     countersignGitLabScenario
-			withProfile  bool
-			withForge    bool
-			unreachable  bool
-			wantCode     int
-			wantUnproven bool
+			name                  string
+			scenario              countersignGitLabScenario
+			withProfile           bool
+			withForge             bool
+			unreachable           bool
+			absentTrustSource     bool
+			wantCode              int
+			wantUnproven          bool
+			wantUnprovenPrincipal bool
+			wantRoleRefused       bool
+			wantMalformedActor    bool
 		}{
-			{name: "revoked or dismissed approval absent from active GitLab set", scenario: countersignGitLabScenario{AuthorID: 900, OpenMR: true}, withProfile: true, withForge: true, wantCode: 1},
+			{name: "zero current GitLab approvals", scenario: countersignGitLabScenario{AuthorID: 900, OpenMR: true}, withProfile: true, withForge: true, wantCode: 1},
 			{name: "stale approval", scenario: countersignGitLabScenario{AuthorID: 900, Approvers: []int64{101}, ApprovedAt: time.Now().Add(-2 * time.Hour), OpenMR: true}, withProfile: true, withForge: true, wantCode: 1},
 			{name: "future approval", scenario: countersignGitLabScenario{AuthorID: 900, Approvers: []int64{101}, ApprovedAt: time.Now().Add(5 * time.Minute), OpenMR: true}, withProfile: true, withForge: true, wantCode: 1},
 			{name: "wrong head", scenario: countersignGitLabScenario{CandidateSHA: strings.Repeat("b", 40), AuthorID: 900, Approvers: []int64{101}, ApprovedAt: time.Now().Add(-time.Minute), OpenMR: true}, withProfile: true, withForge: true, wantCode: 1},
 			{name: "duplicate stable approver", scenario: countersignGitLabScenario{AuthorID: 900, Approvers: []int64{101, 101}, ApprovedAt: time.Now().Add(-time.Minute), OpenMR: true}, withProfile: true, withForge: true, wantCode: 2},
 			{name: "self approved", scenario: countersignGitLabScenario{AuthorID: 101, Approvers: []int64{101}, ApprovedAt: time.Now().Add(-time.Minute), OpenMR: true}, withProfile: true, withForge: true, wantCode: 1},
-			{name: "role refused", scenario: countersignGitLabScenario{AuthorID: 900, Approvers: []int64{301}, ApprovedAt: time.Now().Add(-time.Minute), OpenMR: true}, withProfile: true, withForge: true, wantCode: 1},
-			{name: "unauthenticated provider actor without stable identity", scenario: countersignGitLabScenario{AuthorID: 0, Approvers: []int64{101}, ApprovedAt: time.Now().Add(-time.Minute), OpenMR: true}, withProfile: true, withForge: true, wantCode: 2},
+			{name: "role refused under present trust source", scenario: countersignGitLabScenario{AuthorID: 900, Approvers: []int64{301}, ApprovedAt: time.Now().Add(-time.Minute), OpenMR: true}, withProfile: true, withForge: true, wantCode: 1, wantRoleRefused: true},
+			{name: "stable provider actor with absent configured trust source", scenario: countersignGitLabScenario{AuthorID: 900, Approvers: []int64{302}, ApprovedAt: time.Now().Add(-time.Minute), OpenMR: true}, withProfile: true, withForge: true, absentTrustSource: true, wantCode: 1, wantUnproven: true, wantUnprovenPrincipal: true},
+			{name: "malformed zero provider actor", scenario: countersignGitLabScenario{AuthorID: 900, Approvers: []int64{0}, ApprovedAt: time.Now().Add(-time.Minute), OpenMR: true}, withProfile: true, withForge: true, wantCode: 2, wantMalformedActor: true},
 			{name: "absent selected profile", scenario: countersignGitLabScenario{AuthorID: 900, Approvers: []int64{101}, ApprovedAt: time.Now().Add(-time.Minute), OpenMR: true}, withForge: true, wantCode: 1, wantUnproven: true},
 			{name: "absent forge", withProfile: true, wantCode: 1, wantUnproven: true},
 			{name: "absent merge request", scenario: countersignGitLabScenario{AuthorID: 900, Approvers: []int64{101}, ApprovedAt: time.Now().Add(-time.Minute)}, withProfile: true, withForge: true, wantCode: 1, wantUnproven: true},
@@ -306,6 +408,9 @@ func TestCountersignLifecycleContract_Behavioral(t *testing.T) {
 			t.Run(tc.name, func(t *testing.T) {
 				repo := buildCountersignGateRepo(t)
 				head := installCountersignContractAuthority(t, repo.Dir, tc.withForge, tc.withProfile)
+				if tc.absentTrustSource {
+					configureCountersignTrustSource(t, repo.Dir, "forge-unselected")
+				}
 				writeCountersignGateReport(t, repo.Dir, head)
 				tc.scenario.SourceBranch = currentCountersignBranch(t, repo.Dir)
 				if tc.scenario.CandidateSHA == "" {
@@ -333,6 +438,24 @@ func TestCountersignLifecycleContract_Behavioral(t *testing.T) {
 				if tc.wantUnproven && !strings.Contains(result.stdout+result.stderr, "unproven") {
 					t.Fatalf("verdi gate output = %q, want unproven disclosure", result.stdout+result.stderr)
 				}
+				if tc.wantUnprovenPrincipal {
+					output := result.stdout + result.stderr
+					if !strings.Contains(output, "lifecycle-countersign:principal-authentication:unproven:") {
+						t.Fatalf("verdi gate output = %q, want canonical unproven principal-authentication evidence", output)
+					}
+					if strings.Contains(output, "role-membership:") {
+						t.Fatalf("verdi gate output = %q, absent trust source must not be relabeled as role refusal", output)
+					}
+				}
+				if tc.wantRoleRefused {
+					output := result.stdout + result.stderr
+					if !strings.Contains(output, "role-membership:") || !strings.Contains(output, `verdict="violated-with-witness"`) {
+						t.Fatalf("verdi gate output = %q, want role-membership refusal under present trust source", output)
+					}
+				}
+				if tc.wantMalformedActor && !strings.Contains(result.stderr, "approval carries no stable actor user id") {
+					t.Fatalf("verdi gate stderr = %q, want malformed stable-actor error", result.stderr)
+				}
 				assertCountersignReadOnly(t, repo.Dir, before, requests)
 			})
 		}
@@ -344,6 +467,7 @@ type countersignGitLabScenario struct {
 	SourceBranch       string
 	AuthorID           int64
 	Approvers          []int64
+	ApproverSets       [][]int64
 	ApprovedAt         time.Time
 	OpenMR             bool
 	MalformedApprovals bool
@@ -352,6 +476,7 @@ type countersignGitLabScenario struct {
 type countersignForgeRequests struct {
 	mu               sync.Mutex
 	mutatingRequests int
+	approvalReads    int
 }
 
 type countersignJiraCounts struct {
@@ -405,6 +530,12 @@ func (r *countersignForgeRequests) mutating() int {
 	return r.mutatingRequests
 }
 
+func (r *countersignForgeRequests) approvalReadCount() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.approvalReads
+}
+
 func newCountersignGitLabServer(t *testing.T, scenario countersignGitLabScenario) (*httptest.Server, *countersignForgeRequests) {
 	t.Helper()
 	requests := &countersignForgeRequests{}
@@ -425,15 +556,26 @@ func newCountersignGitLabServer(t *testing.T, scenario countersignGitLabScenario
 			}
 			_, _ = fmt.Fprintf(w, `[{"iid":17,"source_branch":%q,"title":"candidate"}]`, scenario.SourceBranch)
 		case "/projects/42/merge_requests/17":
-			_, _ = fmt.Fprintf(w, `{"sha":%q,"author":{"id":%d}}`, scenario.CandidateSHA, scenario.AuthorID)
+			_, _ = fmt.Fprintf(w, `{"sha":%q,"project_id":42,"author":{"id":%d}}`, scenario.CandidateSHA, scenario.AuthorID)
 		case "/projects/42/merge_requests/17/approvals":
 			if scenario.MalformedApprovals {
 				_, _ = w.Write([]byte(`{"approved_by":`))
 				return
 			}
+			approvers := scenario.Approvers
+			requests.mu.Lock()
+			readIndex := requests.approvalReads
+			requests.approvalReads++
+			requests.mu.Unlock()
+			if len(scenario.ApproverSets) > 0 {
+				if readIndex >= len(scenario.ApproverSets) {
+					readIndex = len(scenario.ApproverSets) - 1
+				}
+				approvers = scenario.ApproverSets[readIndex]
+			}
 			stamp := scenario.ApprovedAt.UTC().Format(time.RFC3339Nano)
 			var rows []string
-			for _, id := range scenario.Approvers {
+			for _, id := range approvers {
 				rows = append(rows, fmt.Sprintf(`{"user":{"id":%d,"username":%q},"approved_at":%q}`, id, fmt.Sprintf("u%d", id), stamp))
 			}
 			_, _ = fmt.Fprintf(w, `{"approved_by":[%s]}`, strings.Join(rows, ","))
@@ -542,6 +684,44 @@ func installCountersignContractAuthority(t *testing.T, root string, withForge, w
 	return strings.TrimSpace(gitOutput(t, root, "rev-parse", "HEAD"))
 }
 
+func configureCountersignTrustSource(t *testing.T, root, trustSource string) {
+	t.Helper()
+	manifestPath := filepath.Join(root, ".verdi", "verdi.yaml")
+	raw, err := os.ReadFile(manifestPath)
+	if err != nil {
+		t.Fatalf("read fixture manifest: %v", err)
+	}
+	updated := strings.Replace(string(raw), "trust_source: forge-live", "trust_source: "+trustSource, 1)
+	if updated == string(raw) {
+		t.Fatal("fixture manifest does not contain forge-live countersign trust source")
+	}
+	if err := os.WriteFile(manifestPath, []byte(updated), 0o644); err != nil {
+		t.Fatalf("write fixture manifest trust source: %v", err)
+	}
+}
+
+func removeCountersignConfig(t *testing.T, root string) {
+	t.Helper()
+	manifestPath := filepath.Join(root, ".verdi", "verdi.yaml")
+	raw, err := os.ReadFile(manifestPath)
+	if err != nil {
+		t.Fatalf("read fixture manifest: %v", err)
+	}
+	const block = `countersign:
+  trust_source: forge-live
+  freshness_policy_id: forge-current
+  maximum_observation_age_seconds: 300
+  maximum_approval_age_seconds: 3600
+`
+	updated := strings.Replace(string(raw), block, "", 1)
+	if updated == string(raw) {
+		t.Fatal("fixture manifest does not contain countersign config")
+	}
+	if err := os.WriteFile(manifestPath, []byte(updated), 0o644); err != nil {
+		t.Fatalf("write fixture manifest without countersign config: %v", err)
+	}
+}
+
 func readyCountersignCloseRepo(t *testing.T, class string) (string, string) {
 	t.Helper()
 	if class == "story" {
@@ -595,7 +775,7 @@ func assertCountersignReadOnly(t *testing.T, root, before string, requests *coun
 	t.Helper()
 	after := countersignCandidateSnapshot(t, root)
 	if before != after {
-		t.Fatalf("read-only lifecycle command mutated candidate:\nbefore=%s\nafter=%s", before, after)
+		t.Fatalf("read-only lifecycle command mutated candidate:\nbefore=%s\nafter=%s\nstatus including ignored files:\n%s", before, after, gitOutput(t, root, "status", "--short", "--ignored"))
 	}
 	if requests.mutating() != 0 {
 		t.Fatalf("forge approval-request count = %d, want 0 (port is read-only)", requests.mutating())
@@ -610,6 +790,21 @@ func countersignRecordDigestFromOutput(t *testing.T, output string) string {
 		t.Fatalf("output has no countersign record digest: %s", output)
 	}
 	return match[1]
+}
+
+func assertCountersignBeforeConflictBlock(t *testing.T, result countersignCommandResult, label string) {
+	t.Helper()
+	countersignAt := strings.Index(result.stdout, "forge countersign proven")
+	conflictAt := strings.Index(result.stdout, "constitutional conflict")
+	stateAt := strings.Index(result.stdout, "state: blocked-unproven")
+	passOnCountersignLine := false
+	if countersignAt >= 0 {
+		lineStart := strings.LastIndex(result.stdout[:countersignAt], "\n") + 1
+		passOnCountersignLine = strings.Contains(result.stdout[lineStart:countersignAt], "[PASS]")
+	}
+	if !passOnCountersignLine || conflictAt < 0 || stateAt < conflictAt || countersignAt >= conflictAt {
+		t.Fatalf("%s output does not prove countersign before conflict block: stdout=%s stderr=%s", label, result.stdout, result.stderr)
+	}
 }
 
 const countersignContractConstitution = `---
@@ -802,7 +997,7 @@ func countersignCandidateSnapshot(t *testing.T, root string) string {
 		if err != nil {
 			return err
 		}
-		if entry.IsDir() && rel == ".git" {
+		if entry.IsDir() && (rel == ".git" || filepath.ToSlash(rel) == ".verdi/data") {
 			return filepath.SkipDir
 		}
 		if entry.IsDir() {
@@ -822,7 +1017,7 @@ func countersignCandidateSnapshot(t *testing.T, root string) string {
 	}); err != nil {
 		t.Fatalf("snapshot candidate bytes: %v", err)
 	}
-	for _, args := range [][]string{{"rev-parse", "HEAD"}, {"diff", "--cached", "--binary"}, {"status", "--short"}} {
+	for _, args := range [][]string{{"rev-parse", "HEAD"}, {"diff", "--cached", "--binary"}, {"status", "--short", "--", ".", ":(exclude).verdi/data"}} {
 		cmd := exec.Command("git", args...)
 		cmd.Dir = root
 		output, err := cmd.CombinedOutput()
