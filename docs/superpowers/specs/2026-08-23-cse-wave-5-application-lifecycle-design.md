@@ -1,7 +1,7 @@
 # CSE Wave 5 Application and Lifecycle Authority Design
 
 **Status:** Owner-approved design; repository authority becomes effective when
-the reviewed commit carrying this document and SI-139 through SI-148 reaches
+the reviewed commit carrying this document and SI-139 through SI-149 reaches
 the configured default branch.
 
 **Planning base:** `8cbb97aa738e34e4703f6d8d57892357b8cf2bd8`
@@ -607,8 +607,28 @@ The capsule builder deterministically produces the existing
 - ratification; and
 - recommendation explanation when present.
 
-Artifact ids are closed and deterministically derived; fixture ids are
-namespaced by registered fixture id. Digests are recomputed from exact bytes.
+Artifact ids are the following exact closed vocabulary and mapping:
+
+| Retained member | Capsule artifact id |
+|---|---|
+| locked definition | `definition` |
+| selected candidate patch | `candidate-patch` |
+| evaluator capabilities | `evaluator-capabilities` |
+| behavioral contract | `contract` |
+| workload | `workload` |
+| each registered fixture | `fixture-<registered-fixture-id>` |
+| selected run execution receipt | `execution-receipt` |
+| selected run observations | `observations` |
+| selected result | `result` |
+| ratification | `ratification` |
+| recommendation explanation, when present | `recommendation` |
+
+`<registered-fixture-id>` is the definition's exact registered fixture id and
+must already satisfy the capsule artifact-id grammar when prefixed by
+`fixture-`. The capsule manifest describes this inventory and is not itself a
+retained member. No builder or adapter may derive an artifact id from a path,
+display label, media type, or local naming convention. Digests are recomputed
+from exact bytes.
 The builder rejects missing, extra, duplicate, mutable, symlinked,
 non-regular, or digest-mismatched inputs. The manifest is published immutably
 under the writer lock and re-decoded before release begins.
@@ -721,6 +741,7 @@ orchestration and the Wave 3B handoff:
 | AC-4 reproduction rule deferred by Wave 3B | §4 | Minimal registered run-count rule over existing unanimous aggregate |
 | AC-4 cleanup deferred by Wave 3B | §§3, 9 | Release only after durable ratification; minimal evidence excluded |
 | AC-4 selected capsule deferred by Wave 3B | §9 | Exact closed inventory over existing capsule v1 manifest |
+| Exact capsule artifact-id vocabulary left unnamed by the inventory | §9, SI-149 | Owner-approved one-to-one member mapping, including `fixture-<registered-fixture-id>`; manifest intentionally excluded as a member |
 | AC-6 concrete policy resolver deferred by Wave 3B | §5 | Generic Context Integrity layered-payload selection plus typed commutative CSE reduction; no feature-local hierarchy |
 | AC-6 policy constraints | §§5, 9 | Paths, classes, evaluators, exact environment values, shared grants, observation/retained-artifact byte ceilings, sources, and mandatory guards; each limit has one owned enforcement boundary |
 | AC-6 mutation provenance | §6 | CSE-specific strict append-only record; read-only detection plus explicit direct-edit reconciliation mutation |
@@ -742,6 +763,6 @@ orchestration and the Wave 3B handoff:
 | Wave 6 CSE workbench | Explicitly omitted in §§1, 8, 11–12 | Deferred unchanged to FABLE-owned Wave 6 |
 | Wave 7 genuine comparison | Explicitly omitted in §12 | Deferred unchanged until Wave 5C lands |
 
-Coverage: **28 of 28 source obligations mapped**. No source capability is
+Coverage: **29 of 29 source obligations mapped**. No source capability is
 silently removed. Candidate-reported corroboration remains the canonical
 unresolved OQ-2 and is intentionally omitted from decision eligibility.
