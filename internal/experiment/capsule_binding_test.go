@@ -49,6 +49,14 @@ func buildCapsuleBindingFixture(t *testing.T, disposition Disposition, candidate
 		"contract:\n  id: behavioral-equivalence-contract\n  digest: "+sha256Digest(bytesByID[CapsuleArtifactContract]), 1)
 	doc = strings.Replace(doc, "capabilities_digest: "+digestOf("4"),
 		"capabilities_digest: "+sha256Digest(bytesByID[CapsuleArtifactEvaluatorCapabilities]), 1)
+	// The retained run proof is validated with the full binding
+	// validators: the rounds match the shared complete observation set,
+	// the harness-measured metric carries its reserved identifier, and
+	// the receipt's resolved input paths are registered protected paths.
+	doc = strings.Replace(doc, "rounds: 10", "rounds: 2", 1)
+	doc = strings.Replace(doc, "- id: peak-rss", "- id: "+EvaluatorPeakRSSMetricID, 1)
+	doc = strings.Replace(doc, "protected_paths:\n  - internal/cache\n",
+		"protected_paths:\n  - contracts/equivalence.json\n  - fixtures/request-log.json\n  - inputs/workload.json\n  - internal/cache\n", 1)
 	unlocked := mustDecodeDefinition(t, doc)
 	defDigest, err := DefinitionDigest(unlocked)
 	if err != nil {
@@ -62,7 +70,7 @@ func buildCapsuleBindingFixture(t *testing.T, disposition Disposition, candidate
 	// The retained definition artifact is the exact locked accepted bytes.
 	bytesByID[CapsuleArtifactDefinition] = []byte(doc)
 
-	observations := capsuleBindingObservations(t, defDigest, "run-1", 40)
+	observations, encodedObservations := completeObservationsV2JSONL(t, defDigest, "run-1")
 	observationsDigest, err := ObservationsDigest(def, observations)
 	if err != nil {
 		t.Fatal(err)
@@ -77,7 +85,7 @@ func buildCapsuleBindingFixture(t *testing.T, disposition Disposition, candidate
 		t.Fatal(err)
 	}
 	bytesByID[CapsuleArtifactExecutionReceipt] = receiptBytes
-	bytesByID[CapsuleArtifactObservations] = encodeCapsuleBindingObservations(t, observations)
+	bytesByID[CapsuleArtifactObservations] = []byte(encodedObservations)
 
 	decision := ResultDecision{
 		Experiment: def.ID, DefinitionDigest: defDigest, Run: "run-1",
@@ -91,7 +99,7 @@ func buildCapsuleBindingFixture(t *testing.T, disposition Disposition, candidate
 	result, err := NewResultV2(decision, ResultExecution{
 		ExecutionDigest: receiptDigest,
 		Isolation: ResultIsolation{
-			Network:     ReceiptNetwork{Mode: NetworkDeny, Configured: true, Reason: "test default deny"},
+			Network:     receipt.Network,
 			Disclosures: []IsolationDisclosure{},
 		},
 		WarmupDiagnostics: WarmupDiagnostics{
@@ -365,15 +373,27 @@ func TestBindCapsuleManifestExcludesManifestFromCeiling(t *testing.T) {
 		}
 	}
 	unlockedDoc := strings.Split(lockedDoc, "lock:\n")[0]
+	// A manifest row costs slightly more than a definition fixture entry
+	// only when the receipt's resolved-input path (which must be a
+	// registered protected path) stays two characters, so the widened
+	// inventory uses short protected paths distinct from the fixture IDs.
+	const extraFixtureCount = 1000
+	pathAlphabet := "abcdefghijklmnopqrstuvwxyz0123456789"
 	extraFixtures := ""
+	extraProtected := ""
 	extraArtifacts := []CapsuleRetainedArtifact{}
-	for i := 0; i < 150; i++ {
-		id := fmt.Sprintf("fx-%03d", i)
+	extraInputDigests := map[string]string{}
+	for i := 0; i < extraFixtureCount; i++ {
+		id := fmt.Sprintf("fx-%04d", i)
 		content := []byte("fixture-" + id + "\n")
+		path := string([]byte{pathAlphabet[i/len(pathAlphabet)], pathAlphabet[i%len(pathAlphabet)]})
 		extraFixtures += "  - id: " + id + "\n    digest: " + sha256Digest(content) + "\n"
+		extraProtected += "  - " + path + "\n"
+		extraInputDigests[path] = strings.TrimPrefix(sha256Digest(content), "sha256:")
 		extraArtifacts = append(extraArtifacts, CapsuleRetainedArtifact{ID: "fixture-" + id, Bytes: content})
 	}
 	unlockedDoc = strings.Replace(unlockedDoc, "fixtures:\n", "fixtures:\n"+extraFixtures, 1)
+	unlockedDoc = strings.Replace(unlockedDoc, "protected_paths:\n", "protected_paths:\n"+extraProtected, 1)
 	unlocked := mustDecodeDefinition(t, unlockedDoc)
 	digest, err := DefinitionDigest(unlocked)
 	if err != nil {
@@ -384,12 +404,18 @@ func TestBindCapsuleManifestExcludesManifestFromCeiling(t *testing.T) {
 	// Rebuild the dependent evidence chain over the widened definition:
 	// observations, receipt, and the result binding both.
 	def := mustDecodeDefinition(t, relocked)
-	observations := capsuleBindingObservations(t, digest, "run-1", 40)
+	observations, encodedObservations := completeObservationsV2JSONL(t, digest, "run-1")
 	observationsDigest, err := ObservationsDigest(def, observations)
 	if err != nil {
 		t.Fatal(err)
 	}
 	receipt := executionReceiptForState(t, def, "run-1")
+	for i := 0; i < extraFixtureCount; i++ {
+		delete(receipt.Fingerprint.InputDigests, fmt.Sprintf("fixtures/fx-%04d.json", i))
+	}
+	for path, digest := range extraInputDigests {
+		receipt.Fingerprint.InputDigests[path] = digest
+	}
 	receiptDigest, err := ExecutionReceiptDigest(receipt)
 	if err != nil {
 		t.Fatal(err)
@@ -434,7 +460,7 @@ func TestBindCapsuleManifestExcludesManifestFromCeiling(t *testing.T) {
 		case CapsuleArtifactExecutionReceipt:
 			artifact.Bytes = receiptBytes
 		case CapsuleArtifactObservations:
-			artifact.Bytes = encodeCapsuleBindingObservations(t, observations)
+			artifact.Bytes = []byte(encodedObservations)
 		}
 		artifacts = append(artifacts, artifact)
 	}
@@ -704,4 +730,149 @@ func encodeCapsuleBindingObservations(t *testing.T, observations []Observation) 
 		encoded = append(encoded, line...)
 	}
 	return encoded
+}
+
+// rebindCapsuleEvidence rebuilds the fixture's result/ratification chain
+// around replacement observations so their digest genuinely binds — the
+// adversarial shape where digest equality alone would authorize an
+// impossible evidence chain.
+func rebindCapsuleEvidence(t *testing.T, fixture capsuleBindingFixture, observations []Observation) capsuleBindingFixture {
+	t.Helper()
+	observationsDigest, err := ObservationsDigest(fixture.def, observations)
+	if err != nil {
+		t.Fatal(err)
+	}
+	decision := *fixture.result.Decision
+	decision.ObservationsDigest = observationsDigest
+	result, err := NewResultV2(decision, *fixture.result.Execution)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resultBytes, err := EncodeResult(result)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resultDigest, err := ResultDigest(result)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ratification := fixture.ratification
+	ratification.ResultDigest = resultDigest
+	ratificationBytes, err := EncodeRatification(ratification)
+	if err != nil {
+		t.Fatal(err)
+	}
+	artifacts := make([]CapsuleRetainedArtifact, len(fixture.artifacts))
+	copy(artifacts, fixture.artifacts)
+	for i := range artifacts {
+		switch artifacts[i].ID {
+		case CapsuleArtifactObservations:
+			artifacts[i].Bytes = encodeCapsuleBindingObservations(t, observations)
+		case CapsuleArtifactResult:
+			artifacts[i].Bytes = resultBytes
+		case CapsuleArtifactRatification:
+			artifacts[i].Bytes = ratificationBytes
+		}
+	}
+	fixture.result = result
+	fixture.resultDigest = resultDigest
+	fixture.ratification = ratification
+	fixture.artifacts = artifacts
+	return fixture
+}
+
+// TestCapsuleBindingRequiresAuthoritativeRunProof is the closure matrix:
+// digest equality alone is insufficient — the retained run evidence must
+// be v2, complete, and receipt/result-bound through the existing full
+// validators.
+func TestCapsuleBindingRequiresAuthoritativeRunProof(t *testing.T) {
+	t.Run("v1 observations under a v2 result are refused even when digest-bound", func(t *testing.T) {
+		fixture := buildCapsuleBindingFixture(t, DispositionSelectRecommended, "")
+		defDigest := fixture.defDigest
+		v1, err := DecodeObservations([]byte(observationsJSONLForRun(defDigest, "run-1", true)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		rebound := rebindCapsuleEvidence(t, fixture, v1)
+		if _, err := BindCapsuleManifest(rebound.input(1 << 20)); err == nil {
+			t.Fatalf("v1 observations accepted as fresh capsule authority under a v2 result")
+		}
+	})
+
+	t.Run("incomplete observations are refused even when digest-bound", func(t *testing.T) {
+		fixture := buildCapsuleBindingFixture(t, DispositionSelectRecommended, "")
+		full, err := DecodeObservations([]byte(observationsJSONLForRun(fixture.defDigest, "run-1", true)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		for i := range full {
+			full[i].Schema = ObservationSchemaV2
+			full[i].Outcome = &CandidateOutcome{Kind: OutcomeCompleted}
+		}
+		incomplete := full[:1]
+		if err := ValidateComplete(fixture.def, incomplete); err == nil {
+			t.Fatalf("fixture error: the truncated set still validates complete")
+		}
+		rebound := rebindCapsuleEvidence(t, fixture, incomplete)
+		if _, err := BindCapsuleManifest(rebound.input(1 << 20)); err == nil {
+			t.Fatalf("incomplete observations accepted as fresh capsule authority")
+		}
+	})
+
+	t.Run("receipt outside the definition binding is refused", func(t *testing.T) {
+		fixture := buildCapsuleBindingFixture(t, DispositionSelectRecommended, "")
+		// A receipt whose environment policy diverges from the definition
+		// passes byte/digest identity only if the result rebinds it; the
+		// full receipt-binding validator must still refuse it.
+		receipt := executionReceiptForState(t, fixture.def, "run-1")
+		receipt.EnvironmentPolicy = "some-other-policy"
+		receiptDigest, err := ExecutionReceiptDigest(receipt)
+		if err != nil {
+			t.Fatal(err)
+		}
+		receiptBytes, err := EncodeExecutionReceipt(receipt)
+		if err != nil {
+			t.Fatal(err)
+		}
+		execution := *fixture.result.Execution
+		execution.ExecutionDigest = receiptDigest
+		execution.Isolation.Network = receipt.Network
+		decision := *fixture.result.Decision
+		result, err := NewResultV2(decision, execution)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resultBytes, err := EncodeResult(result)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resultDigest, err := ResultDigest(result)
+		if err != nil {
+			t.Fatal(err)
+		}
+		ratification := fixture.ratification
+		ratification.ResultDigest = resultDigest
+		ratificationBytes, err := EncodeRatification(ratification)
+		if err != nil {
+			t.Fatal(err)
+		}
+		artifacts := make([]CapsuleRetainedArtifact, len(fixture.artifacts))
+		copy(artifacts, fixture.artifacts)
+		for i := range artifacts {
+			switch artifacts[i].ID {
+			case CapsuleArtifactExecutionReceipt:
+				artifacts[i].Bytes = receiptBytes
+			case CapsuleArtifactResult:
+				artifacts[i].Bytes = resultBytes
+			case CapsuleArtifactRatification:
+				artifacts[i].Bytes = ratificationBytes
+			}
+		}
+		fixture.result = result
+		fixture.ratification = ratification
+		fixture.artifacts = artifacts
+		if _, err := BindCapsuleManifest(fixture.input(1 << 20)); err == nil {
+			t.Fatalf("receipt outside the definition's execution policy accepted")
+		}
+	})
 }

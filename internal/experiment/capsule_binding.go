@@ -251,6 +251,25 @@ func BindCapsuleManifest(in CapsuleBindingInput) (CapsuleManifest, error) {
 		return CapsuleManifest{}, fmt.Errorf("experiment: retained observations are not the evidence set the retained result binds")
 	}
 
+	// Digest parity alone does not make the run evidence authoritative:
+	// the retained observations must be the v2 complete evidence set and
+	// the retained receipt/result pair must survive the full binding
+	// validators before their digests are accepted.
+	for _, observation := range observations {
+		if observation.Schema != ObservationSchemaV2 {
+			return CapsuleManifest{}, fmt.Errorf("experiment: capsule authority requires v2 observations, got %q", observation.Schema)
+		}
+	}
+	if err := ValidateComplete(definition, observations); err != nil {
+		return CapsuleManifest{}, fmt.Errorf("experiment: retained observations: %w", err)
+	}
+	if err := ValidateExecutionReceiptBinding(definition, observations, receipt); err != nil {
+		return CapsuleManifest{}, fmt.Errorf("experiment: retained execution receipt: %w", err)
+	}
+	if err := ValidateResultReceipt(receipt, result); err != nil {
+		return CapsuleManifest{}, fmt.Errorf("experiment: retained result: %w", err)
+	}
+
 	selected, err := SelectedCapsuleCandidate(definition, result, ratification)
 	if err != nil {
 		return CapsuleManifest{}, err

@@ -144,6 +144,13 @@ func buildReleaseFixture(t *testing.T, workloadBytes []byte, disposition experim
 	replace("digest: sha256:"+strings.Repeat("5", 64), "digest: "+rawDigest(workloadBytes))
 	replace("digest: sha256:"+strings.Repeat("6", 64), "digest: "+rawDigest(releaseContractBytes()))
 	replace("contract:\n", "fixtures:\n  - id: request-log\n    digest: "+rawDigest(releaseFixtureBytes())+"\ncontract:\n")
+	// The capsule kernel proves the retained receipt with the full
+	// binding validators, so the receipt's resolved-input paths must be
+	// registered protected paths.
+	doc += "protected_paths:\n" +
+		"  - fixtures/request-log.bin\n" +
+		"  - inputs/contract.txt\n" +
+		"  - inputs/workload.txt\n"
 	if err := os.WriteFile(definitionPath, []byte(doc), 0o600); err != nil {
 		t.Fatal(err)
 	}
