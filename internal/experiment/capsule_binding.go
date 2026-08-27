@@ -310,6 +310,7 @@ func BindCapsuleManifest(in CapsuleBindingInput) (CapsuleManifest, error) {
 
 	for id := range presented {
 		if _, known := required[id]; !known && !optional[id] {
+			// vocab:identity — "closed retained set" names the fixed capsule protocol inventory (the SI-149 owner-approved artifact-ID set), not a model-state display.
 			return CapsuleManifest{}, fmt.Errorf("experiment: capsule inventory presents %q, which is outside the closed retained set", id)
 		}
 	}
