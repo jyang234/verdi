@@ -206,6 +206,51 @@ func BindCapsuleManifest(in CapsuleBindingInput) (CapsuleManifest, error) {
 		return CapsuleManifest{}, fmt.Errorf("experiment: retained result identity does not bind the retained definition")
 	}
 
+	// The selected result binds the EXACT retained run evidence: the
+	// execution receipt through the result's execution digest, and the
+	// complete observations through the decision's observations digest —
+	// both proven with the existing receipt/observation authority, never
+	// accepted as unconstrained bytes.
+	receiptBytes, ok := presented[CapsuleArtifactExecutionReceipt]
+	if !ok {
+		return CapsuleManifest{}, fmt.Errorf("experiment: capsule inventory is missing required artifact %q", CapsuleArtifactExecutionReceipt)
+	}
+	receipt, err := DecodeExecutionReceipt(receiptBytes)
+	if err != nil {
+		return CapsuleManifest{}, fmt.Errorf("experiment: retained execution-receipt bytes: %w", err)
+	}
+	if receipt.ExperimentDigest != definitionDigest || receipt.Run != result.Decision.Run {
+		return CapsuleManifest{}, fmt.Errorf("experiment: retained execution receipt identity does not bind the retained definition and selected run")
+	}
+	receiptDigest, err := ExecutionReceiptDigest(receipt)
+	if err != nil {
+		return CapsuleManifest{}, err
+	}
+	if result.Execution == nil || result.Execution.ExecutionDigest != receiptDigest {
+		return CapsuleManifest{}, fmt.Errorf("experiment: retained execution receipt is not the receipt the retained result binds")
+	}
+
+	observationsBytes, ok := presented[CapsuleArtifactObservations]
+	if !ok {
+		return CapsuleManifest{}, fmt.Errorf("experiment: capsule inventory is missing required artifact %q", CapsuleArtifactObservations)
+	}
+	observations, err := DecodeObservations(observationsBytes)
+	if err != nil {
+		return CapsuleManifest{}, fmt.Errorf("experiment: retained observations bytes: %w", err)
+	}
+	for _, observation := range observations {
+		if observation.ExperimentDigest != definitionDigest || observation.Run != result.Decision.Run {
+			return CapsuleManifest{}, fmt.Errorf("experiment: retained observation identity does not bind the retained definition and selected run")
+		}
+	}
+	observationsDigest, err := ObservationsDigest(definition, observations)
+	if err != nil {
+		return CapsuleManifest{}, fmt.Errorf("experiment: retained observations: %w", err)
+	}
+	if result.Decision.ObservationsDigest != observationsDigest {
+		return CapsuleManifest{}, fmt.Errorf("experiment: retained observations are not the evidence set the retained result binds")
+	}
+
 	selected, err := SelectedCapsuleCandidate(definition, result, ratification)
 	if err != nil {
 		return CapsuleManifest{}, err

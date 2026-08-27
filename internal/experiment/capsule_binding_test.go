@@ -62,6 +62,23 @@ func buildCapsuleBindingFixture(t *testing.T, disposition Disposition, candidate
 	// The retained definition artifact is the exact locked accepted bytes.
 	bytesByID[CapsuleArtifactDefinition] = []byte(doc)
 
+	observations := capsuleBindingObservations(t, defDigest, "run-1", 40)
+	observationsDigest, err := ObservationsDigest(def, observations)
+	if err != nil {
+		t.Fatal(err)
+	}
+	receipt := executionReceiptForState(t, def, "run-1")
+	receiptDigest, err := ExecutionReceiptDigest(receipt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	receiptBytes, err := EncodeExecutionReceipt(receipt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bytesByID[CapsuleArtifactExecutionReceipt] = receiptBytes
+	bytesByID[CapsuleArtifactObservations] = encodeCapsuleBindingObservations(t, observations)
+
 	decision := ResultDecision{
 		Experiment: def.ID, DefinitionDigest: defDigest, Run: "run-1",
 		Algorithm: def.Algorithm, Verdict: VerdictProvenWinner, Winner: "facts-cache",
@@ -69,10 +86,10 @@ func buildCapsuleBindingFixture(t *testing.T, disposition Disposition, candidate
 			{ID: "baseline", Baseline: true, Eligible: true, ExecutionFailures: []CandidateExecutionFailure{}},
 			{ID: "facts-cache", Eligible: true, ExecutionFailures: []CandidateExecutionFailure{}},
 		},
-		ObservationsDigest: sha256Digest([]byte("observations")),
+		ObservationsDigest: observationsDigest,
 	}
 	result, err := NewResultV2(decision, ResultExecution{
-		ExecutionDigest: sha256Digest([]byte("receipt")),
+		ExecutionDigest: receiptDigest,
 		Isolation: ResultIsolation{
 			Network:     ReceiptNetwork{Mode: NetworkDeny, Configured: true, Reason: "test default deny"},
 			Disclosures: []IsolationDisclosure{},
@@ -364,11 +381,29 @@ func TestBindCapsuleManifestExcludesManifestFromCeiling(t *testing.T) {
 	}
 	relocked := unlockedDoc + "lock:\n  definition_digest: " + digest + "\n"
 
-	// Rebuild the dependent evidence chain over the widened definition.
+	// Rebuild the dependent evidence chain over the widened definition:
+	// observations, receipt, and the result binding both.
 	def := mustDecodeDefinition(t, relocked)
+	observations := capsuleBindingObservations(t, digest, "run-1", 40)
+	observationsDigest, err := ObservationsDigest(def, observations)
+	if err != nil {
+		t.Fatal(err)
+	}
+	receipt := executionReceiptForState(t, def, "run-1")
+	receiptDigest, err := ExecutionReceiptDigest(receipt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	receiptBytes, err := EncodeExecutionReceipt(receipt)
+	if err != nil {
+		t.Fatal(err)
+	}
 	decision := *fixture.result.Decision
 	decision.DefinitionDigest = digest
-	result, err := NewResultV2(decision, *fixture.result.Execution)
+	decision.ObservationsDigest = observationsDigest
+	execution := *fixture.result.Execution
+	execution.ExecutionDigest = receiptDigest
+	result, err := NewResultV2(decision, execution)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -396,6 +431,10 @@ func TestBindCapsuleManifestExcludesManifestFromCeiling(t *testing.T) {
 			artifact.Bytes = resultBytes
 		case CapsuleArtifactRatification:
 			artifact.Bytes = ratificationBytes
+		case CapsuleArtifactExecutionReceipt:
+			artifact.Bytes = receiptBytes
+		case CapsuleArtifactObservations:
+			artifact.Bytes = encodeCapsuleBindingObservations(t, observations)
 		}
 		artifacts = append(artifacts, artifact)
 	}
@@ -584,6 +623,45 @@ func TestCapsuleBindingDerivesAuthorityFromRetainedBytes(t *testing.T) {
 		}
 	})
 
+	t.Run("forged execution-receipt bytes are refused", func(t *testing.T) {
+		fixture := buildCapsuleBindingFixture(t, DispositionSelectRecommended, "")
+		forged := setArtifact(fixture, CapsuleArtifactExecutionReceipt, []byte("forged receipt text\n"))
+		if _, err := BindCapsuleManifest(forged.input(1 << 20)); err == nil {
+			t.Fatalf("forged execution-receipt bytes accepted into an authoritative capsule")
+		}
+	})
+
+	t.Run("forged observations bytes are refused", func(t *testing.T) {
+		fixture := buildCapsuleBindingFixture(t, DispositionSelectRecommended, "")
+		forged := setArtifact(fixture, CapsuleArtifactObservations, []byte("forged observations text\n"))
+		if _, err := BindCapsuleManifest(forged.input(1 << 20)); err == nil {
+			t.Fatalf("forged observations bytes accepted into an authoritative capsule")
+		}
+	})
+
+	t.Run("decodable receipt not bound by the result is refused", func(t *testing.T) {
+		fixture := buildCapsuleBindingFixture(t, DispositionSelectRecommended, "")
+		other := executionReceiptForState(t, fixture.def, "run-other")
+		otherBytes, err := EncodeExecutionReceipt(other)
+		if err != nil {
+			t.Fatal(err)
+		}
+		swapped := setArtifact(fixture, CapsuleArtifactExecutionReceipt, otherBytes)
+		if _, err := BindCapsuleManifest(swapped.input(1 << 20)); err == nil {
+			t.Fatalf("receipt outside the result's execution binding accepted")
+		}
+	})
+
+	t.Run("decodable observations not bound by the result are refused", func(t *testing.T) {
+		fixture := buildCapsuleBindingFixture(t, DispositionSelectRecommended, "")
+		defDigest := fixture.defDigest
+		other := capsuleBindingObservations(t, defDigest, "run-1", 999)
+		swapped := setArtifact(fixture, CapsuleArtifactObservations, encodeCapsuleBindingObservations(t, other))
+		if _, err := BindCapsuleManifest(swapped.input(1 << 20)); err == nil {
+			t.Fatalf("observations outside the result's evidence binding accepted")
+		}
+	})
+
 	t.Run("malformed retained definition bytes are refused", func(t *testing.T) {
 		fixture := buildCapsuleBindingFixture(t, DispositionSelectRecommended, "")
 		broken := setArtifact(fixture, CapsuleArtifactDefinition, []byte("not: [valid\n"))
@@ -591,4 +669,39 @@ func TestCapsuleBindingDerivesAuthorityFromRetainedBytes(t *testing.T) {
 			t.Fatalf("malformed retained definition bytes accepted")
 		}
 	})
+}
+
+// capsuleBindingObservations builds one minimal valid observation per
+// registered candidate for the shared binding definition.
+func capsuleBindingObservations(t *testing.T, defDigest, run string, cacheValue int) []Observation {
+	t.Helper()
+	observations := []Observation{}
+	for i, candidate := range []string{"baseline", "facts-cache"} {
+		value := 100
+		if i == 1 {
+			value = cacheValue
+		}
+		observations = append(observations, Observation{
+			Schema: ObservationSchema, ExperimentDigest: defDigest,
+			Run: run, Candidate: candidate, Round: 1,
+			Guards: []GuardResult{}, Measurements: []Measurement{{
+				ID: "request-latency", Value: NumberValue(json.Number(fmt.Sprintf("%d", value))),
+				Unit: "ms", Source: SourceEvaluatorMeasured,
+			}}, Disclosures: []string{},
+		})
+	}
+	return observations
+}
+
+func encodeCapsuleBindingObservations(t *testing.T, observations []Observation) []byte {
+	t.Helper()
+	encoded := []byte{}
+	for _, observation := range observations {
+		line, err := EncodeObservation(observation)
+		if err != nil {
+			t.Fatal(err)
+		}
+		encoded = append(encoded, line...)
+	}
+	return encoded
 }

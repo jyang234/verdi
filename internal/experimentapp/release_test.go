@@ -14,6 +14,7 @@ import (
 	"github.com/jyang234/verdi/internal/canonjson"
 	"github.com/jyang234/verdi/internal/execworkspace"
 	"github.com/jyang234/verdi/internal/experiment"
+	"github.com/jyang234/verdi/internal/experimentdecision"
 	"github.com/jyang234/verdi/internal/governanceprincipal"
 )
 
@@ -58,7 +59,15 @@ func releaseFixtureBytes() []byte  { return []byte("fixture-bytes\n") }
 // derives retained bytes from.
 func writeReleasableRun(t *testing.T, root string, def experiment.Definition, run string, cacheValue int, workloadBytes []byte) string {
 	t.Helper()
-	digest := writeRatifiableRun(t, root, def, run, cacheValue)
+	observations := ratifiableObservations(t, def, run, cacheValue, experiment.ObservationSchemaV2)
+	core, err := experimentdecision.Evaluate(def, observations, experimentdecision.EnvironmentAttestation{PolicyID: def.Execution.EnvironmentPolicy})
+	if err != nil {
+		t.Fatal(err)
+	}
+	decision, err := experiment.DecisionFromResult(core, observations)
+	if err != nil {
+		t.Fatal(err)
+	}
 	receipt := ratifiableReceipt(t, def, run)
 	receipt.Fingerprint.InputDigests = map[string]string{
 		"evaluator:" + def.Evaluator.Argv[0]: strings.TrimPrefix(def.Evaluator.Digest, "sha256:"),
@@ -66,12 +75,47 @@ func writeReleasableRun(t *testing.T, root string, def experiment.Definition, ru
 		releaseContractPath:                  strings.TrimPrefix(def.Contract.Digest, "sha256:"),
 		releaseFixturePath:                   strings.TrimPrefix(def.Fixtures[0].Digest, "sha256:"),
 	}
-	encoded, err := experiment.EncodeExecutionReceipt(receipt)
+	receiptDigest, err := experiment.ExecutionReceiptDigest(receipt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := experiment.NewResultV2(decision, experiment.ResultExecution{
+		ExecutionDigest: receiptDigest,
+		Isolation: experiment.ResultIsolation{
+			Network:     receipt.Network,
+			Disclosures: []experiment.IsolationDisclosure{},
+		},
+		WarmupDiagnostics: experiment.WarmupDiagnostics{
+			Authority: experiment.WarmupAuthorityNonDecisionDiagnostic,
+			Scope:     experiment.WarmupScopeFinalInvocation, Failures: []experiment.WarmupFailure{},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	receiptBytes, err := experiment.EncodeExecutionReceipt(receipt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resultBytes, err := experiment.EncodeResult(result)
 	if err != nil {
 		t.Fatal(err)
 	}
 	runDir := filepath.Join(filepath.Dir(mutationDefinitionPath(root)), "runs", run)
-	if err := os.WriteFile(filepath.Join(runDir, "execution.json"), encoded, 0o600); err != nil {
+	if err := os.MkdirAll(runDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(runDir, "execution.json"), receiptBytes, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(runDir, "observations.jsonl"), encodeRatifiableObservations(t, observations), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(runDir, "result.json"), resultBytes, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	digest, err := experiment.ResultDigest(result)
+	if err != nil {
 		t.Fatal(err)
 	}
 	_ = workloadBytes
