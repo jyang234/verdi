@@ -82,6 +82,11 @@ type atcChildEnvironment struct {
 	gitBinary string
 }
 
+type atcExecutableSelection struct {
+	name string
+	path string
+}
+
 type atcVerdiEnvironmentOptions struct {
 	gitExecutableDir string
 	gitSentinel      string
@@ -323,6 +328,9 @@ func TestBuildCommandsFromATCRunway_Refusals(t *testing.T) {
 	})
 
 	t.Run("hermetic child environment drops ambient Git steering", func(t *testing.T) {
+		selections := mustATCResolveHostExecutables(t)
+		hostileUnselected := t.TempDir()
+		t.Setenv("PATH", strings.Join([]string{".", hostileUnselected, os.Getenv("PATH")}, string(os.PathListSeparator)))
 		ambient := []string{
 			"GIT_DIR=/developer/repository/.git",
 			"GIT_WORK_TREE=/developer/repository",
@@ -341,7 +349,7 @@ func TestBuildCommandsFromATCRunway_Refusals(t *testing.T) {
 			t.Setenv(key, value)
 		}
 
-		environment := newATCChildEnvironment(t)
+		environment := mustATCChildEnvironment(t, selections)
 		childValues, err := environment.verdi(atcVerdiEnvironmentOptions{})
 		if err != nil {
 			t.Fatal(err)
@@ -379,6 +387,37 @@ func TestBuildCommandsFromATCRunway_Refusals(t *testing.T) {
 		}
 		if values["PATH"] != environment.toolPath || values["CI_DEFAULT_BRANCH"] != "main" {
 			t.Fatalf("declared child inputs = PATH=%q CI_DEFAULT_BRANCH=%q, want explicit values", values["PATH"], values["CI_DEFAULT_BRANCH"])
+		}
+		for _, hostile := range []string{".", hostileUnselected} {
+			for _, childPath := range filepath.SplitList(values["PATH"]) {
+				if childPath == hostile {
+					t.Fatalf("child PATH retained hostile unselected directory %q", hostile)
+				}
+			}
+		}
+		if pathEntries := filepath.SplitList(values["PATH"]); !reflect.DeepEqual(pathEntries, []string{environment.toolPath}) {
+			t.Fatalf("child PATH entries = %q, want only private executable directory %q", pathEntries, environment.toolPath)
+		}
+		toolEntries, err := os.ReadDir(environment.toolPath)
+		if err != nil {
+			t.Fatalf("reading private executable directory: %v", err)
+		}
+		var toolNames []string
+		for _, entry := range toolEntries {
+			toolNames = append(toolNames, entry.Name())
+		}
+		if want := []string{"git"}; !reflect.DeepEqual(toolNames, want) {
+			t.Fatalf("private executable names = %q, want exact selections %q", toolNames, want)
+		}
+		for _, selection := range selections {
+			installed := filepath.Join(environment.toolPath, selection.name)
+			resolved, err := filepath.EvalSymlinks(installed)
+			if err != nil {
+				t.Fatalf("resolving private executable %s: %v", selection.name, err)
+			}
+			if resolved != selection.path {
+				t.Fatalf("private executable %s resolves to %q, want selected %q", selection.name, resolved, selection.path)
+			}
 		}
 		if values["HOME"] == "" || values["HOME"] == "/developer/home" || values["XDG_CONFIG_HOME"] == "" {
 			t.Fatalf("isolated config boundary = HOME=%q XDG_CONFIG_HOME=%q", values["HOME"], values["XDG_CONFIG_HOME"])
@@ -445,7 +484,8 @@ func TestBuildCommandsFromATCRunway_Refusals(t *testing.T) {
 				t.Fatalf("validateATCFixtureOptions(%+v) succeeded, want error", opts)
 			}
 		}
-		environment := newATCChildEnvironment(t)
+		selections := mustATCResolveHostExecutables(t)
+		environment := mustATCChildEnvironment(t, selections)
 		if _, err := snapshotATCRepository(t.TempDir(), environment, ""); err == nil {
 			t.Fatal("snapshotATCRepository(non-repository) succeeded, want operational error")
 		}
@@ -459,6 +499,37 @@ func TestBuildCommandsFromATCRunway_Refusals(t *testing.T) {
 		}
 		if _, err := classifyATCExit(3); err == nil {
 			t.Fatal("classifyATCExit(3) succeeded, want fail-closed unknown-class error")
+		}
+
+		nonExecutable := filepath.Join(t.TempDir(), "git")
+		if err := os.WriteFile(nonExecutable, []byte("not executable\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		missing := filepath.Join(t.TempDir(), "missing")
+		selectionWith := func(index int, replacement atcExecutableSelection) []atcExecutableSelection {
+			candidate := append([]atcExecutableSelection(nil), selections...)
+			candidate[index] = replacement
+			return candidate
+		}
+		for _, test := range []struct {
+			name       string
+			selections []atcExecutableSelection
+		}{
+			{name: "missing required executable", selections: nil},
+			{name: "duplicate name", selections: append(append([]atcExecutableSelection(nil), selections...), selections[0])},
+			{name: "malformed name", selections: selectionWith(0, atcExecutableSelection{name: "bad/git", path: selections[0].path})},
+			{name: "unexpected name", selections: selectionWith(0, atcExecutableSelection{name: "go", path: selections[0].path})},
+			{name: "empty path", selections: selectionWith(0, atcExecutableSelection{name: "git"})},
+			{name: "relative path", selections: selectionWith(0, atcExecutableSelection{name: "git", path: "relative/git"})},
+			{name: "missing path", selections: selectionWith(0, atcExecutableSelection{name: "git", path: missing})},
+			{name: "directory path", selections: selectionWith(0, atcExecutableSelection{name: "git", path: t.TempDir()})},
+			{name: "non-executable path", selections: selectionWith(0, atcExecutableSelection{name: "git", path: nonExecutable})},
+		} {
+			t.Run("reject executable selection "+test.name, func(t *testing.T) {
+				if _, err := newATCChildEnvironment(t, test.selections); err == nil {
+					t.Fatalf("newATCChildEnvironment(%s) succeeded, want error", test.name)
+				}
+			})
 		}
 
 		fixture := newATCRunwayFixture(t, atcFixtureOptions{storySlug: atcStorySlug, epoch: 5})
@@ -491,7 +562,7 @@ func newATCRunwayFixture(t *testing.T, opts atcFixtureOptions) atcRunwayFixture 
 	if err := validateATCFixtureOptions(opts); err != nil {
 		t.Fatal(err)
 	}
-	childEnvironment := newATCChildEnvironment(t)
+	childEnvironment := mustATCChildEnvironment(t, mustATCResolveHostExecutables(t))
 
 	layers := []fixturegit.Layer{{
 		Files: map[string]string{
@@ -539,23 +610,75 @@ func newATCRunwayFixture(t *testing.T, opts atcFixtureOptions) atcRunwayFixture 
 	}
 }
 
-func newATCChildEnvironment(t *testing.T) atcChildEnvironment {
+func mustATCResolveHostExecutables(t *testing.T) []atcExecutableSelection {
 	t.Helper()
-	toolPath := os.Getenv("PATH")
-	if toolPath == "" {
-		t.Fatal("constructing hermetic child environment: PATH is required for the real Git/toolchain binaries")
+	selections := make([]atcExecutableSelection, 0, 1)
+	for _, name := range []string{"git"} {
+		path, err := exec.LookPath(name)
+		if err != nil {
+			t.Fatalf("resolving host executable %s: %v", name, err)
+		}
+		absolute, err := filepath.Abs(path)
+		if err != nil {
+			t.Fatalf("canonicalizing host executable %s: %v", name, err)
+		}
+		canonical, err := validateATCExecutablePath(absolute)
+		if err != nil {
+			t.Fatalf("validating host executable %s: %v", name, err)
+		}
+		selections = append(selections, atcExecutableSelection{name: name, path: canonical})
 	}
-	gitBinary, err := exec.LookPath("git")
+	return selections
+}
+
+func mustATCChildEnvironment(t *testing.T, selections []atcExecutableSelection) atcChildEnvironment {
+	t.Helper()
+	environment, err := newATCChildEnvironment(t, selections)
 	if err != nil {
-		t.Fatalf("constructing hermetic child environment: resolve git: %v", err)
+		t.Fatalf("constructing hermetic child environment: %v", err)
 	}
+	return environment
+}
+
+func newATCChildEnvironment(t *testing.T, selections []atcExecutableSelection) (atcChildEnvironment, error) {
+	t.Helper()
+	required := []string{"git"}
+	selected := make(map[string]string, len(selections))
+	for _, selection := range selections {
+		if selection.name == "" || filepath.Base(selection.name) != selection.name || strings.ContainsAny(selection.name, `/\\`) {
+			return atcChildEnvironment{}, fmt.Errorf("executable selection name must be one path component: %q", selection.name)
+		}
+		if selection.name != "git" {
+			return atcChildEnvironment{}, fmt.Errorf("unexpected executable selection name %q", selection.name)
+		}
+		if _, duplicate := selected[selection.name]; duplicate {
+			return atcChildEnvironment{}, fmt.Errorf("duplicate executable selection name %q", selection.name)
+		}
+		canonical, err := validateATCExecutablePath(selection.path)
+		if err != nil {
+			return atcChildEnvironment{}, fmt.Errorf("validate executable selection %s: %w", selection.name, err)
+		}
+		selected[selection.name] = canonical
+	}
+	for _, name := range required {
+		if selected[name] == "" {
+			return atcChildEnvironment{}, fmt.Errorf("required executable selection %q is missing", name)
+		}
+	}
+
 	boundary := t.TempDir()
 	home := filepath.Join(boundary, "home")
 	xdgConfig := filepath.Join(boundary, "xdg-config")
 	tmp := filepath.Join(boundary, "tmp")
-	for _, dir := range []string{home, xdgConfig, tmp} {
+	toolPath := filepath.Join(boundary, "executables")
+	for _, dir := range []string{home, xdgConfig, tmp, toolPath} {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
-			t.Fatalf("constructing hermetic child environment directory %s: %v", dir, err)
+			return atcChildEnvironment{}, fmt.Errorf("create hermetic child environment directory %s: %w", dir, err)
+		}
+	}
+	for _, name := range required {
+		if err := os.Symlink(selected[name], filepath.Join(toolPath, name)); err != nil {
+			return atcChildEnvironment{}, fmt.Errorf("install selected executable %s: %w", name, err)
 		}
 	}
 	return atcChildEnvironment{
@@ -570,8 +693,35 @@ func newATCChildEnvironment(t *testing.T) atcChildEnvironment {
 			"XDG_CONFIG_HOME=" + xdgConfig,
 		},
 		toolPath:  toolPath,
-		gitBinary: gitBinary,
+		gitBinary: filepath.Join(toolPath, "git"),
+	}, nil
+}
+
+func validateATCExecutablePath(path string) (string, error) {
+	if path == "" {
+		return "", errors.New("executable path is empty")
 	}
+	if !filepath.IsAbs(path) {
+		return "", fmt.Errorf("executable path must be absolute: %q", path)
+	}
+	canonical, err := filepath.EvalSymlinks(filepath.Clean(path))
+	if err != nil {
+		return "", fmt.Errorf("resolve executable path %q: %w", path, err)
+	}
+	info, err := os.Stat(canonical)
+	if err != nil {
+		return "", fmt.Errorf("stat executable path %q: %w", canonical, err)
+	}
+	if info.IsDir() {
+		return "", fmt.Errorf("executable path is a directory: %q", canonical)
+	}
+	if !info.Mode().IsRegular() {
+		return "", fmt.Errorf("executable path is not a regular file: %q", canonical)
+	}
+	if info.Mode().Perm()&0o111 == 0 {
+		return "", fmt.Errorf("executable path is not executable: %q", canonical)
+	}
+	return canonical, nil
 }
 
 func (environment atcChildEnvironment) git() []string {
