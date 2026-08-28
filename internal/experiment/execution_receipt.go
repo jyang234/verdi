@@ -332,6 +332,17 @@ func ValidateExecutionReceiptBinding(def Definition, observations []Observation,
 	if err := validateLockedInputDigests(def, receipt.Fingerprint.InputDigests); err != nil {
 		return err
 	}
+	return ValidateReceiptCandidateAuthority(def, receipt)
+}
+
+// ValidateReceiptCandidateAuthority proves one receipt's COMPLETE
+// candidate authority against the locked definition: exact registered
+// membership and cardinality, with each row's exact base commit and patch
+// digest. Receipt.Validate has already proven the rows sorted and unique;
+// the presence check below still fails closed if that invariant ever
+// weakens. It deliberately requires no observations, so receipt-only
+// incomplete runs can be judged before any workspace target derives.
+func ValidateReceiptCandidateAuthority(def Definition, receipt ExecutionReceipt) error {
 	registered := make(map[string]Candidate, len(def.Candidates))
 	for _, candidate := range def.Candidates {
 		registered[candidate.ID] = candidate
@@ -339,10 +350,20 @@ func ValidateExecutionReceiptBinding(def Definition, observations []Observation,
 	if len(receipt.Candidates) != len(registered) {
 		return fmt.Errorf("experiment: execution receipt candidate set has %d rows, want %d", len(receipt.Candidates), len(registered))
 	}
+	seen := make(map[string]bool, len(receipt.Candidates))
 	for _, row := range receipt.Candidates {
 		candidate, ok := registered[row.ID]
 		if !ok || row.BaseCommit != candidate.Base || row.PatchDigest != candidate.Digest {
 			return fmt.Errorf("experiment: execution receipt candidate %q does not match the locked definition", row.ID)
+		}
+		if seen[row.ID] {
+			return fmt.Errorf("experiment: execution receipt candidate %q is duplicated", row.ID)
+		}
+		seen[row.ID] = true
+	}
+	for id := range registered {
+		if !seen[id] {
+			return fmt.Errorf("experiment: execution receipt omits registered candidate %q", id)
 		}
 	}
 	return nil

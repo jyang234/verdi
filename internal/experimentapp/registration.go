@@ -221,6 +221,14 @@ func (s *Service) AcceptedRegistration(ctx context.Context, identity Identity) R
 		}
 		return RegistrationResult{Outcome: operationalOutcome("accepted-tree-invalid", err)}
 	}
+	return s.acceptedRegistrationAt(identity, snapshot)
+}
+
+// acceptedRegistrationAt judges the registration pair against one
+// already-resolved accepted snapshot, so callers holding a snapshot never
+// resolve the accepted HEAD or enumerate the tree a second time (design
+// §7: HEAD identity, Git enumeration, and blob reads each execute once).
+func (s *Service) acceptedRegistrationAt(identity Identity, snapshot acceptedSnapshot) RegistrationResult {
 	definitionBytes, err := fs.ReadFile(snapshot.source, path.Join(snapshot.experimentPath, "experiment.yaml"))
 	if err != nil {
 		return RegistrationResult{Outcome: operationalOutcome("definition-unreadable", err)}
