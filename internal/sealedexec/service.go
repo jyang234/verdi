@@ -1039,7 +1039,8 @@ func validateProfile(request ExecutionRequest, workspace WorkspaceFacts, profile
 		!filepath.IsAbs(profile.Executable) || profile.CodexHome == "" {
 		return verdict("resolved profile identity/version/workspace is mismatched")
 	}
-	if envValueFromProfile(profile.Profile.Env(), "CODEX_HOME") != profile.CodexHome {
+	if !filepath.IsAbs(profile.CodexHome) || filepath.Clean(profile.CodexHome) != profile.CodexHome ||
+		envValueFromProfile(profile.Profile.Env(), "CODEX_HOME") != profile.CodexHome {
 		return verdict("resolved profile CODEX_HOME identity is not isolated and exact")
 	}
 	requested, err := execworkspace.EncodeGrantSet(request.Grants)

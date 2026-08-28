@@ -102,6 +102,60 @@ func TestContextExecutionContract_Static(t *testing.T) {
 		})
 	}
 
+	t.Run("relative CODEX_HOME is refused before adapter launch", func(t *testing.T) {
+		svc, ports := newServiceHarness(t, req)
+		profile, enforcement, err := execworkspace.BuildProfile(ports.workspace.Path, t.TempDir(), req.Grants, map[string]string{
+			"CODEX_HOME": ".codex",
+		})
+		if err != nil {
+			t.Fatalf("BuildProfile relative CODEX_HOME: %v", err)
+		}
+		ports.profile.Profile = profile
+		ports.profile.Enforcement = *enforcement
+		ports.profile.CodexHome = envValue(profile.Env(), "CODEX_HOME")
+
+		if _, err := svc.Execute(context.Background(), req, []contextcompile.DataItem{}); !errors.Is(err, ErrVerdict) {
+			t.Fatalf("Execute relative CODEX_HOME error = %v, want verdict", err)
+		}
+		if ports.startCalls != 0 {
+			t.Fatalf("adapter launches = %d, want 0", ports.startCalls)
+		}
+	})
+
+	t.Run("non-clean absolute CODEX_HOME is refused before adapter launch", func(t *testing.T) {
+		svc, ports := newServiceHarness(t, req)
+		codexHome := filepath.Join(t.TempDir(), "codex-home") + string(filepath.Separator) + ".." + string(filepath.Separator) + "codex-home"
+		profile, enforcement, err := execworkspace.BuildProfile(ports.workspace.Path, t.TempDir(), req.Grants, map[string]string{
+			"CODEX_HOME": codexHome,
+		})
+		if err != nil {
+			t.Fatalf("BuildProfile non-clean CODEX_HOME: %v", err)
+		}
+		ports.profile.Profile = profile
+		ports.profile.Enforcement = *enforcement
+		ports.profile.CodexHome = envValue(profile.Env(), "CODEX_HOME")
+
+		if _, err := svc.Execute(context.Background(), req, []contextcompile.DataItem{}); !errors.Is(err, ErrVerdict) {
+			t.Fatalf("Execute non-clean CODEX_HOME error = %v, want verdict", err)
+		}
+		if ports.startCalls != 0 {
+			t.Fatalf("adapter launches = %d, want 0", ports.startCalls)
+		}
+	})
+
+	t.Run("clean absolute CODEX_HOME remains accepted", func(t *testing.T) {
+		svc, ports := newServiceHarness(t, req)
+		if !filepath.IsAbs(ports.profile.CodexHome) || filepath.Clean(ports.profile.CodexHome) != ports.profile.CodexHome {
+			t.Fatalf("absolute CODEX_HOME fixture = %q, want clean absolute path", ports.profile.CodexHome)
+		}
+		if _, err := svc.Execute(context.Background(), req, []contextcompile.DataItem{}); err != nil {
+			t.Fatalf("Execute clean absolute CODEX_HOME: %v", err)
+		}
+		if ports.startCalls != 1 {
+			t.Fatalf("adapter launches = %d, want 1", ports.startCalls)
+		}
+	})
+
 	t.Run("advisory conflict remains advisory", func(t *testing.T) {
 		svc, ports := newServiceHarness(t, req)
 		ports.conflict.Verification = unproven(FailureUnproven, "semantic conflict proof unavailable")
