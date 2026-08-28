@@ -1652,11 +1652,18 @@ func TestAcceptedRatificationRebindsRetainedProof(t *testing.T) {
 // snapshot. It is the only way to exercise the accepted-use path where the
 // retained proof's signed accepted_head names a policy tree that is not the
 // current one.
+//
+// historicalErr additionally makes that ONE commit unresolvable while the
+// current accepted HEAD keeps resolving normally — the shape design §11's
+// "historical accepted-HEAD unreachability" family and SI-150 option (c)
+// require: an unresolvable historical HEAD is refused OPERATIONALLY, never
+// by silently substituting the current worktree or current profile.
 type headScopedGit struct {
-	base       *fakeGit
-	historical string
-	entries    []GitTreeEntry
-	blobs      map[string][]byte
+	base          *fakeGit
+	historical    string
+	historicalErr error
+	entries       []GitTreeEntry
+	blobs         map[string][]byte
 }
 
 func (g *headScopedGit) ResolveDefaultBranch(ctx context.Context, root string) (DefaultBranch, error) {
@@ -1664,21 +1671,46 @@ func (g *headScopedGit) ResolveDefaultBranch(ctx context.Context, root string) (
 }
 
 func (g *headScopedGit) ListTree(ctx context.Context, root, commit string) ([]GitTreeEntry, error) {
-	if commit == g.historical {
-		return append([]GitTreeEntry(nil), g.entries...), nil
+	if commit != g.historical {
+		return g.base.ListTree(ctx, root, commit)
 	}
-	return g.base.ListTree(ctx, root, commit)
+	if g.historicalErr != nil {
+		return nil, g.historicalErr
+	}
+	return append([]GitTreeEntry(nil), g.entries...), nil
 }
 
 func (g *headScopedGit) ReadBlob(ctx context.Context, root, commit, object, path string) ([]byte, error) {
 	if commit != g.historical {
 		return g.base.ReadBlob(ctx, root, commit, object, path)
 	}
+	if g.historicalErr != nil {
+		return nil, g.historicalErr
+	}
 	data, ok := g.blobs[path]
 	if !ok {
 		return nil, fmt.Errorf("missing historical fake blob %s", path)
 	}
 	return append([]byte(nil), data...), nil
+}
+
+// stripHistoricalPolicyTree makes the designated historical commit RESOLVE
+// normally while carrying no .verdi/policy/ tree at all — the companion
+// negative to an outright unresolvable historical HEAD.
+func stripHistoricalPolicyTree(scoped *headScopedGit) {
+	const policyPrefix = ".verdi/policy/"
+	kept := make([]GitTreeEntry, 0, len(scoped.entries))
+	for _, entry := range scoped.entries {
+		if !strings.HasPrefix(entry.Path, policyPrefix) {
+			kept = append(kept, entry)
+		}
+	}
+	scoped.entries = kept
+	for name := range scoped.blobs {
+		if strings.HasPrefix(name, policyPrefix) {
+			delete(scoped.blobs, name)
+		}
+	}
 }
 
 // newHeadScopedGit snapshots base and overwrites the snapshot's .verdi/policy/
@@ -1733,7 +1765,10 @@ func TestAcceptedRatificationRequiresCurrentProfileMapping(t *testing.T) {
 	// plantAcceptedRatification regenerates the fake accepted tree from the
 	// worktree alone, so the current policy tree is always (re)planted here
 	// explicitly — never inherited from the historical fixture.
-	build := func(t *testing.T, currentProfile func(git *fakeGit, signer ratificationSigner)) (*Service, Identity) {
+	// tuneHistorical (nil for a healthy historical tree) reshapes the wrapper
+	// serving the HISTORICAL commit only, so the current accepted HEAD keeps
+	// resolving while its predecessor does not.
+	build := func(t *testing.T, currentProfile func(git *fakeGit, signer ratificationSigner), tuneHistorical func(*headScopedGit)) (*Service, Identity) {
 		t.Helper()
 		root, service, identity, winnerDigest, _ := ratifiableService(t)
 		signerA := newRatificationSigner(t)
@@ -1755,7 +1790,11 @@ func TestAcceptedRatificationRequiresCurrentProfileMapping(t *testing.T) {
 		plantAcceptedRatification(t, root, service, encoded, &pair)
 		base := service.git.(*fakeGit)
 		currentProfile(base, signerA)
-		service.git = newHeadScopedGit(base, oldHead, signerA.subject)
+		scoped := newHeadScopedGit(base, oldHead, signerA.subject)
+		if tuneHistorical != nil {
+			tuneHistorical(scoped)
+		}
+		service.git = scoped
 		return service, human
 	}
 
@@ -1765,7 +1804,7 @@ func TestAcceptedRatificationRequiresCurrentProfileMapping(t *testing.T) {
 		// subject remains mapped, so the accepted use resolves cleanly.
 		service, human := build(t, func(git *fakeGit, signer ratificationSigner) {
 			plantRatificationGovernanceProfile(git, signer.subject)
-		})
+		}, nil)
 		result := service.AcceptedRatification(context.Background(), human)
 		if result.Outcome.Classification != ClassificationClean {
 			t.Fatalf("outcome = %+v, want clean", result.Outcome)
@@ -1776,7 +1815,7 @@ func TestAcceptedRatificationRequiresCurrentProfileMapping(t *testing.T) {
 		other := newRatificationSigner(t)
 		service, human := build(t, func(git *fakeGit, _ ratificationSigner) {
 			plantRatificationGovernanceProfile(git, other.subject)
-		})
+		}, nil)
 		result := service.AcceptedRatification(context.Background(), human)
 		if result.Outcome.Classification != ClassificationVerdict || result.Outcome.Code != "ratification-proof-unsatisfied" {
 			t.Fatalf("outcome = %+v, want ratification-proof-unsatisfied verdict", result.Outcome)
@@ -1794,10 +1833,64 @@ func TestAcceptedRatificationRequiresCurrentProfileMapping(t *testing.T) {
 		// authority evidence rather than an internal inconsistency.
 		service, human := build(t, func(git *fakeGit, _ ratificationSigner) {
 			plantSourcelessGovernanceProfile(git)
-		})
+		}, nil)
 		result := service.AcceptedRatification(context.Background(), human)
 		if result.Outcome.Classification != ClassificationVerdict || result.Outcome.Code != "ratification-proof-unsatisfied" {
 			t.Fatalf("outcome = %+v, want ratification-proof-unsatisfied verdict", result.Outcome)
+		}
+	})
+
+	// design §11's historical accepted-HEAD unreachability family, SI-150
+	// option (c): the retained proof names a historical commit the accepted
+	// Git port cannot serve. The current accepted HEAD still resolves
+	// perfectly — the whole point is that the operation must refuse
+	// OPERATIONALLY rather than fall back to the current tree it can read.
+	t.Run("unresolvable historical head is operational", func(t *testing.T) {
+		service, human := build(t, func(git *fakeGit, signer ratificationSigner) {
+			plantRatificationGovernanceProfile(git, signer.subject)
+		}, func(scoped *headScopedGit) {
+			scoped.historicalErr = fmt.Errorf("fatal: bad object %s", oldHead)
+		})
+		result := service.AcceptedRatification(context.Background(), human)
+		if result.Outcome.Classification != ClassificationOperational || result.Outcome.Code != "ratification-proof-head-unreachable" {
+			t.Fatalf("outcome = %+v, want operational ratification-proof-head-unreachable", result.Outcome)
+		}
+		// The refusal must carry the port's own failure, not a silent
+		// substitution of the readable current tree.
+		if !strings.Contains(result.Outcome.Detail, oldHead) {
+			t.Fatalf("Detail = %q, want the unreadable historical commit named", result.Outcome.Detail)
+		}
+	})
+
+	t.Run("historical head without a policy tree is operational", func(t *testing.T) {
+		// The companion negative: the historical commit RESOLVES, so the
+		// head-unreachable arm cannot fire, but it carries no .verdi/policy/
+		// tree for the retained proof to re-verify against. The current tree's
+		// perfectly good profile must never stand in for it — the refusal
+		// arrives from experimenthuman.VerifyRetained's own policy load, still
+		// operational (controller pin P1: an unreadable historical policy tree
+		// is never a verdict about the human).
+		service, human := build(t, func(git *fakeGit, signer ratificationSigner) {
+			plantRatificationGovernanceProfile(git, signer.subject)
+		}, stripHistoricalPolicyTree)
+		result := service.AcceptedRatification(context.Background(), human)
+		if result.Outcome.Classification != ClassificationOperational || result.Outcome.Code != "ratification-proof-invalid" {
+			t.Fatalf("outcome = %+v, want operational ratification-proof-invalid", result.Outcome)
+		}
+	})
+
+	t.Run("undecodable current policy tree is operational", func(t *testing.T) {
+		// F-3: the HISTORICAL re-verification succeeds (its tree is intact),
+		// and only the CURRENT accepted policy authority fails to load. That is
+		// corrupted local authority, not a statement about the ratifier, so it
+		// is operational and distinct from the mapping verdicts above.
+		service, human := build(t, func(git *fakeGit, signer ratificationSigner) {
+			plantRatificationGovernanceProfile(git, signer.subject)
+			plantGitBlob(git, ".verdi/policy/profiles/solo-default.md", []byte("---\nnot: [a profile\n"))
+		}, nil)
+		result := service.AcceptedRatification(context.Background(), human)
+		if result.Outcome.Classification != ClassificationOperational || result.Outcome.Code != "ratification-authority-invalid" {
+			t.Fatalf("outcome = %+v, want operational ratification-authority-invalid", result.Outcome)
 		}
 	})
 }
