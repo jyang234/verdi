@@ -3,7 +3,6 @@ package main
 import (
 	"bytes"
 	"crypto/ed25519"
-	"crypto/rand"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -23,6 +22,13 @@ const (
 	wave5CWorkloadPath = "inputs/workload.txt"
 	wave5CContractPath = "inputs/contract.txt"
 )
+
+var wave5CFixtureEd25519Seed = [ed25519.SeedSize]byte{
+	0x4f, 0x6e, 0xe7, 0x11, 0x98, 0x34, 0xa2, 0x6b,
+	0x1c, 0x53, 0xdd, 0x80, 0x29, 0xf5, 0x47, 0xbe,
+	0x66, 0x09, 0xca, 0x31, 0xd4, 0x7b, 0x8e, 0x15,
+	0xfa, 0x22, 0x5c, 0x93, 0x08, 0xb6, 0x41, 0xed,
+}
 
 type wave5CExperimentFixture struct {
 	repo         *fixturegit.Repo
@@ -178,11 +184,29 @@ func TestExperimentRatificationCapsuleReleaseBuiltBinary(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	publishJSON, publishErr, publishCode := runExperimentBuiltBinary(t, bin, repo.Dir, nil, wave5CReleaseArgs("publish-capsule", repo.Head, true)...)
+	if publishCode != 0 || publishErr != "" || !strings.Contains(publishJSON, `"CapsulePublished":true`) || !strings.Contains(publishJSON, `"classification":"clean"`) ||
+		strings.Contains(publishJSON, `"Released":`) || strings.Contains(publishJSON, `"Failed":`) {
+		t.Fatalf("capsule publication exit/stdout/stderr = %d/%q/%q, want clean publication", publishCode, publishJSON, publishErr)
+	}
+	if _, err := experiment.DecodeCapsuleManifest(mustReadWave5CFile(t, manifestPath)); err != nil {
+		t.Fatalf("published capsule does not strict-decode: %v", err)
+	}
+	for _, target := range fixture.targets {
+		if _, err := os.Lstat(execworkspace.ReleasedPath(repo.Dir, target)); !os.IsNotExist(err) {
+			t.Fatalf("publish-capsule released workspace %s: %v", target, err)
+		}
+	}
+	secondPublishJSON, secondPublishErr, secondPublishCode := runExperimentBuiltBinary(t, bin, repo.Dir, nil, wave5CReleaseArgs("publish-capsule", repo.Head, true)...)
+	if secondPublishCode != publishCode || secondPublishErr != "" || secondPublishJSON != publishJSON {
+		t.Fatalf("capsule publication retry differs: first=%d/%q/%q second=%d/%q/%q", publishCode, publishJSON, publishErr, secondPublishCode, secondPublishJSON, secondPublishErr)
+	}
+
 	failingMarker := execworkspace.ReleasedPath(repo.Dir, fixture.targets[0])
 	if err := os.MkdirAll(failingMarker, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	stdout, stderr, code = runExperimentBuiltBinary(t, bin, repo.Dir, nil, wave5CReleaseArgs("publish-capsule", repo.Head, true)...)
+	stdout, stderr, code = runExperimentBuiltBinary(t, bin, repo.Dir, nil, wave5CReleaseArgs("release-workspaces", repo.Head, true)...)
 	if code != 2 || stderr != "" || !strings.Contains(stdout, `"code":"workspace-release-failed"`) || !strings.Contains(stdout, `"CapsulePublished":true`) {
 		t.Fatalf("partial release exit/stdout/stderr = %d/%q/%q, want published capsule plus operational failure", code, stdout, stderr)
 	}
@@ -208,13 +232,13 @@ func TestExperimentRatificationCapsuleReleaseBuiltBinary(t *testing.T) {
 	if !strings.Contains(firstJSON, `"CapsulePublished":true`) || !strings.Contains(firstJSON, `"classification":"clean"`) {
 		t.Fatalf("release retry JSON = %q, want clean typed capsule result", firstJSON)
 	}
-	publishJSON, publishErr, publishCode := runExperimentBuiltBinary(t, bin, repo.Dir, nil, wave5CReleaseArgs("publish-capsule", repo.Head, true)...)
-	if publishCode != firstCode || publishErr != "" || publishJSON != firstJSON {
-		t.Fatalf("publish/release typed projections differ: publish=%d/%q/%q release=%d/%q", publishCode, publishJSON, publishErr, firstCode, firstJSON)
-	}
 	humanOut, humanErr, humanCode = runExperimentBuiltBinary(t, bin, repo.Dir, nil, wave5CReleaseArgs("release-workspaces", repo.Head, false)...)
 	if humanCode != firstCode || humanErr != "" || !strings.HasPrefix(humanOut, "experiment release-workspaces: clean (clean)\n") {
 		t.Fatalf("release human parity = %d/%q/%q, want the JSON result's clean exit/classification", humanCode, humanOut, humanErr)
+	}
+	humanOut, humanErr, humanCode = runExperimentBuiltBinary(t, bin, repo.Dir, nil, wave5CReleaseArgs("publish-capsule", repo.Head, false)...)
+	if humanCode != publishCode || humanErr != "" || !strings.HasPrefix(humanOut, "experiment publish-capsule: clean (clean)\n") {
+		t.Fatalf("publication human parity = %d/%q/%q, want the JSON result's clean exit/classification", humanCode, humanOut, humanErr)
 	}
 }
 
@@ -255,23 +279,74 @@ func TestExperimentCapsuleReleaseNonSelectingBuiltBinary(t *testing.T) {
 		t.Fatalf("non-selecting ratification published a capsule: %v", err)
 	}
 	for _, target := range fixture.targets {
+		if _, err := os.Lstat(execworkspace.ReleasedPath(repo.Dir, target)); !os.IsNotExist(err) {
+			t.Fatalf("non-selecting publish released workspace %s: %v", target, err)
+		}
+	}
+	releaseJSON, releaseErr, releaseCode := runExperimentBuiltBinary(t, bin, repo.Dir, nil, wave5CReleaseArgs("release-workspaces", repo.Head, true)...)
+	if releaseCode != 0 || releaseErr != "" || !strings.Contains(releaseJSON, `"CapsulePublished":false`) {
+		t.Fatalf("non-selecting release = %d/%q/%q, want clean release without capsule", releaseCode, releaseJSON, releaseErr)
+	}
+	for _, target := range fixture.targets {
 		info, err := os.Lstat(execworkspace.ReleasedPath(repo.Dir, target))
 		if err != nil || !info.Mode().IsRegular() {
 			t.Fatalf("non-selecting release marker for %s = %v/%v", target, info, err)
 		}
 	}
-	releaseJSON, releaseErr, releaseCode := runExperimentBuiltBinary(t, bin, repo.Dir, nil, wave5CReleaseArgs("release-workspaces", repo.Head, true)...)
-	if releaseCode != publishCode || releaseErr != "" || releaseJSON != publishJSON {
-		t.Fatalf("non-selecting retry differs: publish=%d/%q release=%d/%q/%q", publishCode, publishJSON, releaseCode, releaseJSON, releaseErr)
+	retryJSON, retryErr, retryCode := runExperimentBuiltBinary(t, bin, repo.Dir, nil, wave5CReleaseArgs("release-workspaces", repo.Head, true)...)
+	if retryCode != releaseCode || retryErr != "" || retryJSON != releaseJSON {
+		t.Fatalf("non-selecting release retry differs: first=%d/%q second=%d/%q/%q", releaseCode, releaseJSON, retryCode, retryJSON, retryErr)
 	}
+}
+
+func TestWave5CFixtureConstructionIsDeterministic(t *testing.T) {
+	t.Setenv("CI_DEFAULT_BRANCH", "main")
+	bin := buildVerdiBinary(t)
+
+	setWave5CGitAmbient(t, "Ambient One", "one@example.invalid", "1735689600 +0000")
+	first := buildWave5CAcceptedResult(t, bin)
+	firstChallenge := wave5CChallengeBytes(t, bin, first)
+
+	setWave5CGitAmbient(t, "Ambient Two", "two@example.invalid", "1767225600 +0000")
+	second := buildWave5CAcceptedResult(t, bin)
+	secondChallenge := wave5CChallengeBytes(t, bin, second)
+
+	if first.repo.Head != second.repo.Head {
+		t.Errorf("equivalent fixture HEADs differ: %s vs %s", first.repo.Head, second.repo.Head)
+	}
+	if !bytes.Equal(firstChallenge, secondChallenge) {
+		t.Errorf("equivalent fixture challenges differ:\nfirst:  %s\nsecond: %s", firstChallenge, secondChallenge)
+	}
+}
+
+func setWave5CGitAmbient(t *testing.T, name, email, date string) {
+	t.Helper()
+	for key, value := range map[string]string{
+		"GIT_AUTHOR_NAME": name, "GIT_AUTHOR_EMAIL": email, "GIT_AUTHOR_DATE": date,
+		"GIT_COMMITTER_NAME": name, "GIT_COMMITTER_EMAIL": email, "GIT_COMMITTER_DATE": date,
+	} {
+		t.Setenv(key, value)
+	}
+}
+
+func wave5CChallengeBytes(t *testing.T, bin string, fixture wave5CExperimentFixture) []byte {
+	t.Helper()
+	args := wave5CRatificationArgs(fixture.repo.Head, fixture.resultDigest, experiment.DispositionSelectRecommended, "", "")
+	stdout, stderr, code := runExperimentBuiltBinary(t, bin, fixture.repo.Dir, nil, append(args, "--json")...)
+	if code != 1 || stderr != "" {
+		t.Fatalf("ratification challenge exit/stdout/stderr = %d/%q/%q", code, stdout, stderr)
+	}
+	encoded, err := decodeExperimentChallengeOutput(t, stdout).Challenge.Canonical()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return encoded
 }
 
 func buildWave5CAcceptedResult(t *testing.T, bin string) wave5CExperimentFixture {
 	t.Helper()
-	publicKey, privateKey, err := ed25519.GenerateKey(rand.Reader)
-	if err != nil {
-		t.Fatal(err)
-	}
+	privateKey := ed25519.NewKeyFromSeed(wave5CFixtureEd25519Seed[:])
+	publicKey := privateKey.Public().(ed25519.PublicKey)
 	repo := buildExperimentHumanRepo(t, publicKey)
 	wave5CBindProtectedInputs(t, repo)
 

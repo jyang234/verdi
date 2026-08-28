@@ -60,6 +60,62 @@ type ReleaseResult struct {
 	Failed           []string
 }
 
+// CapsulePublicationResult is the typed publication-only outcome. It carries
+// no workspace-release projection because publication never invokes the
+// release port or writes release markers.
+type CapsulePublicationResult struct {
+	Outcome          Outcome
+	AcceptedHead     string
+	ExperimentPath   string
+	Disposition      experiment.Disposition
+	Selected         string
+	CapsulePublished bool
+	ManifestDigest   string
+}
+
+// PublishRatifiedCapsule publishes and verifies the selected capsule for an
+// accepted selecting ratification. A non-selecting ratification is a clean
+// no-op. This operation never releases a workspace.
+func (s *Service) PublishRatifiedCapsule(ctx context.Context, identity Identity) CapsulePublicationResult {
+	if ctx == nil {
+		return CapsulePublicationResult{Outcome: operationalOutcome("invalid-request", fmt.Errorf("experimentapp: capsule publication context is nil"))}
+	}
+	if err := identity.validate(); err != nil {
+		return CapsulePublicationResult{Outcome: operationalOutcome("invalid-request", err)}
+	}
+
+	lifecycle, outcome := s.resolveAcceptedRatifiedLifecycle(ctx, identity)
+	if outcome.Classification != ClassificationClean {
+		return CapsulePublicationResult{Outcome: outcome}
+	}
+	result := CapsulePublicationResult{
+		AcceptedHead: lifecycle.snapshot.revision.Head, ExperimentPath: lifecycle.snapshot.experimentPath,
+		Disposition: lifecycle.facts.record.Disposition,
+	}
+	selecting := lifecycle.facts.record.Disposition == experiment.DispositionSelectRecommended ||
+		lifecycle.facts.record.Disposition == experiment.DispositionSelectOther
+	if !selecting {
+		result.Outcome = cleanOutcome()
+		return result
+	}
+
+	definitionDigest, payload, payloadOutcome := s.resolveEffectivePolicyPayload(ctx, identity, lifecycle.snapshot, lifecycle.facts)
+	if payloadOutcome.Classification != ClassificationClean {
+		result.Outcome = payloadOutcome
+		return result
+	}
+	manifestDigest, selected, capsuleOutcome := s.publishSelectedCapsule(ctx, identity, lifecycle.snapshot, lifecycle.facts, definitionDigest, payload.Limits.RetainedArtifactBytes)
+	if capsuleOutcome.Classification != ClassificationClean {
+		result.Outcome = capsuleOutcome
+		return result
+	}
+	result.CapsulePublished = true
+	result.ManifestDigest = manifestDigest
+	result.Selected = selected
+	result.Outcome = cleanOutcome()
+	return result
+}
+
 // ReleaseRatified performs the post-ratification lifecycle consequence.
 func (s *Service) ReleaseRatified(ctx context.Context, identity Identity, authority ReleaseAuthority) ReleaseResult {
 	if ctx == nil {
@@ -72,38 +128,30 @@ func (s *Service) ReleaseRatified(ctx context.Context, identity Identity, author
 		return ReleaseResult{Outcome: operationalOutcome("release-authority-invalid", fmt.Errorf("experimentapp: release requires a configured workspace releaser"))}
 	}
 
-	snapshot, err := resolveAccepted(ctx, s.git, identity)
-	if err != nil {
-		var stale *staleAcceptedHeadError
-		if errors.As(err, &stale) {
-			return ReleaseResult{Outcome: verdictOutcome("accepted-head-stale", stale.Error())}
-		}
-		return ReleaseResult{Outcome: operationalOutcome("accepted-tree-invalid", err)}
-	}
-	facts, outcome := s.acceptedRatificationAt(ctx, identity, snapshot)
+	lifecycle, outcome := s.resolveAcceptedRatifiedLifecycle(ctx, identity)
 	if outcome.Classification != ClassificationClean {
 		return ReleaseResult{Outcome: outcome}
 	}
 	result := ReleaseResult{
-		AcceptedHead: snapshot.revision.Head, ExperimentPath: snapshot.experimentPath,
-		Disposition: facts.record.Disposition,
+		AcceptedHead: lifecycle.snapshot.revision.Head, ExperimentPath: lifecycle.snapshot.experimentPath,
+		Disposition: lifecycle.facts.record.Disposition,
 	}
-	definitionDigest, payload, payloadOutcome := s.resolveEffectivePolicyPayload(ctx, identity, snapshot, facts)
+	definitionDigest, payload, payloadOutcome := s.resolveEffectivePolicyPayload(ctx, identity, lifecycle.snapshot, lifecycle.facts)
 	if payloadOutcome.Classification != ClassificationClean {
 		result.Outcome = payloadOutcome
 		return result
 	}
 
-	targets, targetOutcome := s.releaseTargets(snapshot, facts.definition, definitionDigest, facts.derived)
+	targets, targetOutcome := s.releaseTargets(lifecycle.snapshot, lifecycle.facts.definition, definitionDigest, lifecycle.facts.derived)
 	if targetOutcome.Classification != ClassificationClean {
 		result.Outcome = targetOutcome
 		return result
 	}
 
-	selecting := facts.record.Disposition == experiment.DispositionSelectRecommended ||
-		facts.record.Disposition == experiment.DispositionSelectOther
+	selecting := lifecycle.facts.record.Disposition == experiment.DispositionSelectRecommended ||
+		lifecycle.facts.record.Disposition == experiment.DispositionSelectOther
 	if selecting {
-		manifestDigest, selected, capsuleOutcome := s.publishSelectedCapsule(ctx, identity, snapshot, facts, definitionDigest, payload.Limits.RetainedArtifactBytes)
+		manifestDigest, selected, capsuleOutcome := s.publishSelectedCapsule(ctx, identity, lifecycle.snapshot, lifecycle.facts, definitionDigest, payload.Limits.RetainedArtifactBytes)
 		if capsuleOutcome.Classification != ClassificationClean {
 			result.Outcome = capsuleOutcome
 			return result
@@ -128,6 +176,29 @@ func (s *Service) ReleaseRatified(ctx context.Context, identity Identity, author
 	}
 	result.Outcome = cleanOutcome()
 	return result
+}
+
+type acceptedRatifiedLifecycle struct {
+	snapshot acceptedSnapshot
+	facts    acceptedRatificationFacts
+}
+
+// resolveAcceptedRatifiedLifecycle resolves the one exact accepted snapshot and its
+// authenticated ratification facts shared by publication and release.
+func (s *Service) resolveAcceptedRatifiedLifecycle(ctx context.Context, identity Identity) (acceptedRatifiedLifecycle, Outcome) {
+	snapshot, err := resolveAccepted(ctx, s.git, identity)
+	if err != nil {
+		var stale *staleAcceptedHeadError
+		if errors.As(err, &stale) {
+			return acceptedRatifiedLifecycle{}, verdictOutcome("accepted-head-stale", stale.Error())
+		}
+		return acceptedRatifiedLifecycle{}, operationalOutcome("accepted-tree-invalid", err)
+	}
+	facts, outcome := s.acceptedRatificationAt(ctx, identity, snapshot)
+	if outcome.Classification != ClassificationClean {
+		return acceptedRatifiedLifecycle{}, outcome
+	}
+	return acceptedRatifiedLifecycle{snapshot: snapshot, facts: facts}, cleanOutcome()
 }
 
 // releaseTargets derives the complete disposable-workspace set only from

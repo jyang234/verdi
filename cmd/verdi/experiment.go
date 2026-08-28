@@ -123,7 +123,10 @@ func cmdExperiment(args []string, stdin io.Reader, stdout, stderr io.Writer) int
 		return runExperimentCapture(ctx, service, identity, flags, stdin, stdout, stderr)
 	case "reconcile-draft", "propose-registration", "propose-ratification":
 		return runExperimentHuman(ctx, operation, service, identity, flags, stdout, stderr)
-	case "publish-capsule", "release-workspaces":
+	case "publish-capsule":
+		result := service.PublishRatifiedCapsule(ctx, identity)
+		return renderExperimentResult(operation, result.Outcome, result, flags.json, stdout, stderr)
+	case "release-workspaces":
 		result := service.ReleaseRatified(ctx, identity, experimentapp.ReleaseAuthority{Releaser: execworkspace.NewReleaser(root)})
 		return renderExperimentResult(operation, result.Outcome, result, flags.json, stdout, stderr)
 	case "start", "resume":

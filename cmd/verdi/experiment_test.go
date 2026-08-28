@@ -677,9 +677,37 @@ func runGitForExperimentTest(t *testing.T, dir string, args ...string) {
 	t.Helper()
 	cmd := exec.Command("git", args...)
 	cmd.Dir = dir
+	if len(args) > 0 && args[0] == "commit" {
+		cmd.Env = experimentFixtureCommitEnvironment(os.Environ())
+	}
 	if output, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("git %v: %v\n%s", args, err, output)
 	}
+}
+
+func experimentFixtureCommitEnvironment(base []string) []string {
+	overrides := []string{
+		"TZ=UTC",
+		"GIT_AUTHOR_NAME=Verdi Fixture",
+		"GIT_AUTHOR_EMAIL=fixture@verdi.invalid",
+		"GIT_AUTHOR_DATE=1704067200 +0000",
+		"GIT_COMMITTER_NAME=Verdi Fixture",
+		"GIT_COMMITTER_EMAIL=fixture@verdi.invalid",
+		"GIT_COMMITTER_DATE=1704067200 +0000",
+	}
+	keys := make(map[string]bool, len(overrides))
+	for _, value := range overrides {
+		key, _, _ := strings.Cut(value, "=")
+		keys[key] = true
+	}
+	environment := make([]string, 0, len(base)+len(overrides))
+	for _, value := range base {
+		key, _, _ := strings.Cut(value, "=")
+		if !keys[key] {
+			environment = append(environment, value)
+		}
+	}
+	return append(environment, overrides...)
 }
 
 func TestExperimentInventoryBuiltBinary(t *testing.T) {
