@@ -1,6 +1,8 @@
 package experiment
 
 import (
+	"crypto/ed25519"
+	"encoding/base64"
 	"strings"
 	"testing"
 )
@@ -220,6 +222,14 @@ func TestDecodeRatificationRejects(t *testing.T) {
 		// other disposition an absent reason is legitimate.
 		{"select-other empty reason", selectOtherDoc + "candidate: baseline\nreason: \"\"\n"},
 		{"candidate present on non-select-other", validRatificationYAML() + "candidate: baseline\n"},
+		// F1 (Task 10 correction, lane review): yaml.v3 never calls a
+		// field's UnmarshalYAML for a !!null-tagged node, so a
+		// null-valued authentication_proof key would otherwise decode as
+		// though the key were absent. v1 must refuse the key's PRESENCE
+		// — null or populated — not just a populated block.
+		{"v1 authentication_proof bare key", validRatificationYAML() + "authentication_proof:\n"},
+		{"v1 authentication_proof null", validRatificationYAML() + "authentication_proof: null\n"},
+		{"v1 authentication_proof tilde-null", validRatificationYAML() + "authentication_proof: ~\n"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -292,6 +302,10 @@ func TestDecodeRatificationV2Rejects(t *testing.T) {
 		{"v1 schema with v2 actor block", mutate(t, "schema: verdi.experiment-ratification/v2", "schema: verdi.experiment-ratification/v1")},
 		{"actor anchor", mutate(t, "  trust_source: github\n", "  trust_source: &a github\n")},
 		{"unknown top-level field", validRatificationV2YAML() + "unknown_field: true\n"},
+		// F1: same null-key gap, pinned on v2.
+		{"v2 authentication_proof bare key", validRatificationV2YAML() + "authentication_proof:\n"},
+		{"v2 authentication_proof null", validRatificationV2YAML() + "authentication_proof: null\n"},
+		{"v2 authentication_proof tilde-null", validRatificationV2YAML() + "authentication_proof: ~\n"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -302,21 +316,153 @@ func TestDecodeRatificationV2Rejects(t *testing.T) {
 	}
 }
 
-func TestEncodeRatificationEmitsV2Only(t *testing.T) {
+// validProofChallengeBytes and validProofSignatureBytes are grammar-only
+// v3 authentication-proof fixture bytes: at the wire-grammar layer (P4)
+// only canonical encoding and length matter, never cryptographic
+// validity — signature verification lives in experimenthuman.
+var (
+	validProofChallengeBytes = []byte("ratification-v3-grammar-fixture-challenge-bytes")
+	validProofSignatureBytes = func() []byte {
+		b := make([]byte, ed25519.SignatureSize)
+		for i := range b {
+			b[i] = byte(i + 1)
+		}
+		return b
+	}()
+)
+
+func validProofBase64(b []byte) string { return base64.RawURLEncoding.EncodeToString(b) }
+
+// validAuthenticationProofBlock is the exact wire authentication_proof
+// block a v3 record carries.
+func validAuthenticationProofBlock() string {
+	return "authentication_proof:\n" +
+		"  schema: " + HumanProofSchema + "\n" +
+		"  challenge_base64url: " + validProofBase64(validProofChallengeBytes) + "\n" +
+		"  signature_base64url: " + validProofBase64(validProofSignatureBytes) + "\n"
+}
+
+func validAuthenticationProof() *AuthenticationProof {
+	return &AuthenticationProof{
+		Schema:             HumanProofSchema,
+		ChallengeBase64URL: validProofBase64(validProofChallengeBytes),
+		SignatureBase64URL: validProofBase64(validProofSignatureBytes),
+	}
+}
+
+func validRatificationV3YAML() string {
+	return "schema: verdi.experiment-ratification/v3\n" +
+		"result_digest: " + digestOf("a") + "\n" +
+		validRatificationActorBlock() +
+		validAuthenticationProofBlock() +
+		"disposition: select-recommended\n"
+}
+
+func TestDecodeRatificationV3HappyPath(t *testing.T) {
+	r, err := DecodeRatification([]byte(validRatificationV3YAML()))
+	if err != nil {
+		t.Fatalf("DecodeRatification(v3) unexpected error: %v", err)
+	}
+	if r.Schema != RatificationSchemaV3 || r.ActorV2 == nil || r.Proof == nil {
+		t.Fatalf("r = %+v, want v3 record with actor and proof blocks", r)
+	}
+	if r.ActorV2.TrustSource != "github" || r.ActorV2.Subject != "user-123" || r.ActorV2.PrincipalID != validActor {
+		t.Fatalf("r.ActorV2 = %+v", r.ActorV2)
+	}
+	if r.Proof.Schema != HumanProofSchema ||
+		r.Proof.ChallengeBase64URL != validProofBase64(validProofChallengeBytes) ||
+		r.Proof.SignatureBase64URL != validProofBase64(validProofSignatureBytes) {
+		t.Fatalf("r.Proof = %+v", r.Proof)
+	}
+	challenge, err := r.Proof.ChallengeBytes()
+	if err != nil || string(challenge) != string(validProofChallengeBytes) {
+		t.Fatalf("r.Proof.ChallengeBytes() = %q/%v, want %q", challenge, err, validProofChallengeBytes)
+	}
+	signature, err := r.Proof.SignatureBytes()
+	if err != nil || string(signature) != string(validProofSignatureBytes) {
+		t.Fatalf("r.Proof.SignatureBytes() = %q/%v, want %q", signature, err, validProofSignatureBytes)
+	}
+}
+
+// TestDecodeRatificationV3Rejects is the v3 grammar table: every negative
+// this package owns at the wire layer (P4) — wrong proof schema literal,
+// non-canonical/alternate base64, wrong signature length, empty
+// challenge, missing blocks/fields, and the proof block riding on v1/v2
+// records (and vice versa, a v3 record missing its actor block).
+func TestDecodeRatificationV3Rejects(t *testing.T) {
+	mutate := func(t *testing.T, old, replacement string) string {
+		t.Helper()
+		doc := validRatificationV3YAML()
+		if !strings.Contains(doc, old) {
+			t.Fatalf("v3 fixture does not contain %q", old)
+		}
+		return strings.Replace(doc, old, replacement, 1)
+	}
+	paddedChallenge := base64.URLEncoding.EncodeToString(validProofChallengeBytes) // standard padded alphabet: decode-only failure under RawURLEncoding
+	paddedSig := base64.URLEncoding.EncodeToString(validProofSignatureBytes)
+	short63 := validProofBase64(validProofSignatureBytes[:63])
+	long65 := validProofBase64(append(append([]byte{}, validProofSignatureBytes...), 0x00))
+	actorBlock := "actor:\n  trust_source: github\n  subject: \"user-123\"\n  principal_id: " + validActor + "\n"
+
+	tests := []struct {
+		name string
+		doc  string
+	}{
+		{"wrong proof schema literal", mutate(t, "  schema: "+HumanProofSchema, "  schema: verdi.experiment-human-proof/v2")},
+		{"padded challenge base64", mutate(t, "  challenge_base64url: "+validProofBase64(validProofChallengeBytes), "  challenge_base64url: "+paddedChallenge)},
+		{"padded signature base64", mutate(t, "  signature_base64url: "+validProofBase64(validProofSignatureBytes), "  signature_base64url: "+paddedSig)},
+		{"63-byte signature", mutate(t, "  signature_base64url: "+validProofBase64(validProofSignatureBytes), "  signature_base64url: "+short63)},
+		{"65-byte signature", mutate(t, "  signature_base64url: "+validProofBase64(validProofSignatureBytes), "  signature_base64url: "+long65)},
+		{"empty challenge", mutate(t, "  challenge_base64url: "+validProofBase64(validProofChallengeBytes), "  challenge_base64url: \"\"")},
+		{"missing proof block entirely", strings.Replace(validRatificationV3YAML(), validAuthenticationProofBlock(), "", 1)},
+		// F1: pin the null-key case explicitly on v3 too, distinct from
+		// "missing entirely" — a null-valued key must refuse the same as
+		// an absent one, never silently read as "no proof block".
+		{"proof block null", strings.Replace(validRatificationV3YAML(), validAuthenticationProofBlock(), "authentication_proof: null\n", 1)},
+		{"unknown proof field", mutate(t, "  signature_base64url: "+validProofBase64(validProofSignatureBytes)+"\n", "  signature_base64url: "+validProofBase64(validProofSignatureBytes)+"\n  extra_field: true\n")},
+		{"missing proof schema field", mutate(t, "  schema: "+HumanProofSchema+"\n", "")},
+		{"missing challenge field", mutate(t, "  challenge_base64url: "+validProofBase64(validProofChallengeBytes)+"\n", "")},
+		{"missing signature field", mutate(t, "  signature_base64url: "+validProofBase64(validProofSignatureBytes)+"\n", "")},
+		{"proof block anchor", mutate(t, "  schema: "+HumanProofSchema, "  schema: &p "+HumanProofSchema)},
+		{"v3 missing actor block", strings.Replace(validRatificationV3YAML(), actorBlock, "", 1)},
+		{"v3 with v1 scalar actor", strings.Replace(validRatificationV3YAML(), actorBlock, "actor: "+validActor+"\n", 1)},
+		{"proof block on v1 schema", strings.Replace(validRatificationYAML(), "disposition: select-recommended\n", validAuthenticationProofBlock()+"disposition: select-recommended\n", 1)},
+		{"proof block on v2 schema", strings.Replace(validRatificationV2YAML(), "disposition: select-recommended\n", validAuthenticationProofBlock()+"disposition: select-recommended\n", 1)},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if _, err := DecodeRatification([]byte(tt.doc)); err == nil {
+				t.Errorf("DecodeRatification(%s) = nil error, want error", tt.name)
+			}
+		})
+	}
+}
+
+func TestEncodeRatificationEmitsV3Only(t *testing.T) {
 	v1 := bindingRatification(DispositionSelectRecommended, "")
 	if _, err := EncodeRatification(v1); err == nil {
 		t.Fatalf("EncodeRatification(v1) = nil error, want v1 decode-only refusal")
 	}
 
-	record := Ratification{
+	v2 := Ratification{
 		Schema: RatificationSchemaV2, ResultDigest: digestOf("a"),
 		ActorV2:     &RatificationActor{TrustSource: "github", Subject: "user-123", PrincipalID: validActor},
+		Disposition: DispositionSelectRecommended,
+	}
+	if _, err := EncodeRatification(v2); err == nil {
+		t.Fatalf("EncodeRatification(v2) = nil error, want v2 decode-only refusal now that v3 is the emitted schema")
+	}
+
+	record := Ratification{
+		Schema: RatificationSchemaV3, ResultDigest: digestOf("a"),
+		ActorV2:     &RatificationActor{TrustSource: "github", Subject: "user-123", PrincipalID: validActor},
+		Proof:       validAuthenticationProof(),
 		Disposition: DispositionSelectOther, Candidate: "baseline",
 		Reason: "operational risk: \"quoted\" text\nand a newline",
 	}
 	first, err := EncodeRatification(record)
 	if err != nil {
-		t.Fatalf("EncodeRatification(v2) error: %v", err)
+		t.Fatalf("EncodeRatification(v3) error: %v", err)
 	}
 	second, err := EncodeRatification(record)
 	if err != nil {
@@ -327,23 +473,28 @@ func TestEncodeRatificationEmitsV2Only(t *testing.T) {
 	}
 	decoded, err := DecodeRatification(first)
 	if err != nil {
-		t.Fatalf("emitted v2 bytes do not strict-decode: %v\n%s", err, first)
+		t.Fatalf("emitted v3 bytes do not strict-decode: %v\n%s", err, first)
 	}
-	if decoded.Schema != RatificationSchemaV2 || decoded.ActorV2 == nil ||
+	if decoded.Schema != RatificationSchemaV3 || decoded.ActorV2 == nil ||
 		*decoded.ActorV2 != *record.ActorV2 ||
+		decoded.Proof == nil || *decoded.Proof != *record.Proof ||
 		decoded.ResultDigest != record.ResultDigest ||
 		decoded.Disposition != record.Disposition ||
 		decoded.Candidate != record.Candidate || decoded.Reason != record.Reason {
 		t.Fatalf("round trip changed the record:\nin:  %+v\nout: %+v", record, decoded)
 	}
 	// Defensive copy: the emitted bytes and decoded record share no actor
-	// storage with the input.
+	// or proof storage with the input.
 	record.ActorV2.PrincipalID = "principal/github/mutated"
+	record.Proof.SignatureBase64URL = "mutated"
 	redecoded, err := DecodeRatification(first)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if redecoded.ActorV2.PrincipalID != validActor {
 		t.Fatalf("emitted bytes aliased the caller's actor block")
+	}
+	if redecoded.Proof.SignatureBase64URL != validProofBase64(validProofSignatureBytes) {
+		t.Fatalf("emitted bytes aliased the caller's proof block")
 	}
 }

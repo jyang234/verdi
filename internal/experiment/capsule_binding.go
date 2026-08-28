@@ -178,15 +178,19 @@ func BindCapsuleManifest(in CapsuleBindingInput) (CapsuleManifest, error) {
 	if err != nil {
 		return CapsuleManifest{}, fmt.Errorf("experiment: retained ratification bytes: %w", err)
 	}
-	if ratification.Schema != RatificationSchemaV2 {
-		return CapsuleManifest{}, fmt.Errorf("experiment: capsule authority requires a v2 ratification; retained bytes carry %q", ratification.Schema)
+	if ratification.Schema != RatificationSchemaV3 {
+		// Task 10 correction (SI-150, design §9): the V2-to-V3 authorization
+		// flip applies at every existing authority site, capsule binding
+		// included — a persisted claim/id pair without the retained,
+		// re-verifiable authentication proof can never authorize a capsule.
+		return CapsuleManifest{}, fmt.Errorf("experiment: capsule authority requires a v3 ratification; retained bytes carry %q", ratification.Schema)
 	}
 	canonicalRatification, err := EncodeRatification(ratification)
 	if err != nil {
 		return CapsuleManifest{}, err
 	}
 	if string(canonicalRatification) != string(ratificationBytes) {
-		return CapsuleManifest{}, fmt.Errorf("experiment: retained ratification bytes are not the deterministic v2 encoding")
+		return CapsuleManifest{}, fmt.Errorf("experiment: retained ratification bytes are not the deterministic v3 encoding")
 	}
 	projectedRatification, err := EncodeRatification(in.Ratification)
 	if err != nil || string(projectedRatification) != string(canonicalRatification) {

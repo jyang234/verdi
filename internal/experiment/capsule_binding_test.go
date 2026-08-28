@@ -10,7 +10,11 @@ import (
 // capsuleBindingFixture is one complete, internally consistent binding
 // context: a definition whose workload/contract/fixture/capabilities
 // digests are the REAL digests of the returned artifact bytes, a proven
-// v2 result, and a v2 ratification bound to that result.
+// v2 result, and a v3 ratification (Task 10 correction, SI-150) bound to
+// that result. The retained authentication_proof block carries only
+// grammar-valid bytes: the kernel checks schema and deterministic
+// encoding parity, never signature validity — cryptographic
+// verification is internal/experimenthuman's job.
 type capsuleBindingFixture struct {
 	def          Definition
 	defDigest    string
@@ -121,8 +125,9 @@ func buildCapsuleBindingFixture(t *testing.T, disposition Disposition, candidate
 	bytesByID[CapsuleArtifactResult] = resultBytes
 
 	ratification := Ratification{
-		Schema: RatificationSchemaV2, ResultDigest: resultDigest,
+		Schema: RatificationSchemaV3, ResultDigest: resultDigest,
 		ActorV2:     &RatificationActor{TrustSource: "github", Subject: "user-123", PrincipalID: validActor},
+		Proof:       validAuthenticationProof(),
 		Disposition: disposition,
 	}
 	if candidate != "" {
@@ -320,6 +325,43 @@ func TestBindCapsuleManifestRejectsBrokenInventories(t *testing.T) {
 			t.Fatalf("result bytes diverging from the ratified digest accepted")
 		}
 	})
+}
+
+// TestBindCapsuleManifestRequiresV3Ratification is the kernel v3 flip
+// (Task 10 correction, SI-150, design §9): a retained ratification
+// carrying valid, strict-decodable v2 bytes — never emitted by
+// EncodeRatification anymore, but still exactly what historical decode
+// compatibility allows on disk — must still be refused as capsule
+// authority. Hand-writing the v2 document directly (rather than through
+// EncodeRatification, which now refuses to emit it) exercises
+// BindCapsuleManifest's own schema gate, not merely the encoder's.
+func TestBindCapsuleManifestRequiresV3Ratification(t *testing.T) {
+	fixture := buildCapsuleBindingFixture(t, DispositionSelectRecommended, "")
+	v2Doc := "schema: " + RatificationSchemaV2 + "\n" +
+		"result_digest: " + fixture.resultDigest + "\n" +
+		"actor:\n" +
+		"  trust_source: github\n" +
+		"  subject: \"user-123\"\n" +
+		"  principal_id: " + validActor + "\n" +
+		"disposition: select-recommended\n"
+	if _, err := DecodeRatification([]byte(v2Doc)); err != nil {
+		t.Fatalf("fixture error: hand-written v2 document does not strict-decode: %v", err)
+	}
+	artifacts := make([]CapsuleRetainedArtifact, len(fixture.artifacts))
+	copy(artifacts, fixture.artifacts)
+	for i := range artifacts {
+		if artifacts[i].ID == CapsuleArtifactRatification {
+			artifacts[i].Bytes = []byte(v2Doc)
+		}
+	}
+	fixture.artifacts = artifacts
+	input := fixture.input(1 << 20)
+	input.Ratification, _ = DecodeRatification([]byte(v2Doc))
+	if _, err := BindCapsuleManifest(input); err == nil {
+		t.Fatalf("retained v2 ratification bytes accepted as capsule authority")
+	} else if !strings.Contains(err.Error(), "requires a v3 ratification") {
+		t.Fatalf("BindCapsuleManifest(v2 ratification) error = %v, want the v3-requirement refusal", err)
+	}
 }
 
 func TestBindCapsuleManifestRetainedArtifactCeiling(t *testing.T) {
@@ -633,8 +675,9 @@ func TestCapsuleBindingDerivesAuthorityFromRetainedBytes(t *testing.T) {
 	t.Run("retained ratification bound to a different result is refused", func(t *testing.T) {
 		fixture := buildCapsuleBindingFixture(t, DispositionSelectRecommended, "")
 		foreign := Ratification{
-			Schema: RatificationSchemaV2, ResultDigest: digestOf("8"),
+			Schema: RatificationSchemaV3, ResultDigest: digestOf("8"),
 			ActorV2:     &RatificationActor{TrustSource: "github", Subject: "user-123", PrincipalID: validActor},
+			Proof:       validAuthenticationProof(),
 			Disposition: DispositionSelectRecommended,
 		}
 		foreignBytes, err := EncodeRatification(foreign)
