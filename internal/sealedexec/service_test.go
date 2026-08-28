@@ -6,6 +6,7 @@ import (
 	"errors"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -139,7 +140,7 @@ func TestContextExecutionContract_Static(t *testing.T) {
 		if !errors.Is(err, ErrOperational) {
 			t.Fatalf("Execute error = %v, want operational", err)
 		}
-		if len(ports.appended) != 1 || ports.appended[0].Kind != contextevent.KindTelemetryGap || ports.sessionStored != "" {
+		if len(ports.appended) != 2 || ports.appended[0].Kind != contextevent.KindTelemetryGap || ports.appended[1].Kind != contextevent.KindAdapterStop || ports.sessionStored != "" {
 			t.Fatalf("recorded observations/session = %#v/%q", ports.appended, ports.sessionStored)
 		}
 	})
@@ -360,8 +361,8 @@ func TestContextExecutionAcknowledgedStream_Behavioral(t *testing.T) {
 		if !errors.Is(err, ErrOperational) {
 			t.Fatalf("Execute error = %v, want operational", err)
 		}
-		if ports.stopCount() != 1 || ports.consumedDeliveries() != 1 || len(ports.appendedEvents()) != 1 {
-			t.Fatalf("stop/deliveries/acknowledged events = %d/%d/%d, want 1/1/1", ports.stopCount(), ports.consumedDeliveries(), len(ports.appendedEvents()))
+		if ports.stopCount() != 1 || ports.consumedDeliveries() != 1 || len(ports.appendedEvents()) != 2 {
+			t.Fatalf("stop/deliveries/acknowledged events = %d/%d/%d, want 1/1/2", ports.stopCount(), ports.consumedDeliveries(), len(ports.appendedEvents()))
 		}
 	})
 
@@ -373,8 +374,8 @@ func TestContextExecutionAcknowledgedStream_Behavioral(t *testing.T) {
 		if !errors.Is(err, ErrOperational) {
 			t.Fatalf("Execute error = %v, want operational", err)
 		}
-		if ports.stopCount() != 1 || ports.sessionStored != "" || len(ports.appendedEvents()) != 1 {
-			t.Fatalf("stop/stored/acknowledged events = %d/%q/%d, want 1/empty/1", ports.stopCount(), ports.sessionStored, len(ports.appendedEvents()))
+		if ports.stopCount() != 1 || ports.sessionStored != "" || len(ports.appendedEvents()) != 2 {
+			t.Fatalf("stop/stored/acknowledged events = %d/%q/%d, want 1/empty/2", ports.stopCount(), ports.sessionStored, len(ports.appendedEvents()))
 		}
 	})
 
@@ -415,13 +416,309 @@ func TestContextExecutionAcknowledgedStream_Behavioral(t *testing.T) {
 		if !reached {
 			t.Fatal("interrupt could not reach the blocked active run")
 		}
-		if executeErr != nil || interruptErr != nil {
-			t.Fatalf("execute/interrupt errors = %v/%v", executeErr, interruptErr)
+		if !errors.Is(executeErr, ErrVerdict) || !strings.Contains(executeErr.Error(), "interrupted") || interruptErr != nil {
+			t.Fatalf("execute/interrupt errors = %v/%v, want interruption verdict/nil", executeErr, interruptErr)
 		}
 		got := ports.appendedEvents()
 		if len(got) != 2 || got[0].Kind != contextevent.KindProviderSummary || got[1].Kind != contextevent.KindAdapterStop {
 			t.Fatalf("acknowledged event order = %v, want provider-summary then adapter-stop", observationEventKinds(got))
 		}
+	})
+
+	t.Run("racing complete frame is acknowledged before the consumer stop terminal", func(t *testing.T) {
+		resume := serviceRequest(t, ActionResume)
+		svc, ports := newServiceHarness(t, resume)
+		ports.resumeEntered = make(chan struct{})
+		ports.resumeRelease = make(chan struct{})
+		ports.blockedDelivery = &AdapterResult{Observations: []NormalizedObservation{summaryObservation}}
+		type executeResult struct {
+			run ExecutionRun
+			err error
+		}
+		executeDone := make(chan executeResult, 1)
+		go func() {
+			run, err := svc.Execute(context.Background(), resume, []contextcompile.DataItem{})
+			executeDone <- executeResult{run: run, err: err}
+		}()
+		select {
+		case <-ports.resumeEntered:
+		case <-time.After(time.Second):
+			t.Fatal("resume stream did not reach the raced pull")
+		}
+		interruptDone := make(chan struct {
+			ack contextevent.EventAck
+			err error
+		}, 1)
+		go func() {
+			ack, err := svc.Interrupt(context.Background(), InterruptRequest{
+				Request: resume, Workspace: ports.workspace,
+				AdapterSessionRef: resume.Resume.Continuity.AdapterSessionRef,
+			})
+			interruptDone <- struct {
+				ack contextevent.EventAck
+				err error
+			}{ack: ack, err: err}
+		}()
+
+		interrupt := <-interruptDone
+		executed := <-executeDone
+		if interrupt.err != nil {
+			t.Fatalf("Interrupt: %v", interrupt.err)
+		}
+		if !errors.Is(executed.err, ErrVerdict) || !errors.Is(executed.err, ErrInterrupted) || !strings.Contains(executed.err.Error(), "interrupted") {
+			t.Fatalf("Execute error = %v, want explicit interruption verdict", executed.err)
+		}
+		got := ports.appendedEvents()
+		if len(got) != 2 || got[0].Kind != contextevent.KindProviderSummary || got[1].Kind != contextevent.KindAdapterStop {
+			t.Fatalf("acknowledged event order = %v, want provider-summary then adapter-stop", observationEventKinds(got))
+		}
+		if len(executed.run.Acks) != 2 || executed.run.Acks[1] != interrupt.ack || executed.run.Authority == contextevent.AuthorityAuthoritative {
+			t.Fatalf("partial run/interrupt ack = %#v/%#v, want identical terminal ack and non-authoritative run", executed.run, interrupt.ack)
+		}
+		if ports.consumedDeliveries() != 1 {
+			t.Fatalf("provider frames consumed = %d, want exactly raced frame", ports.consumedDeliveries())
+		}
+	})
+
+	t.Run("start before thread started accepts only empty session interrupt identity", func(t *testing.T) {
+		svc, ports := newServiceHarness(t, start)
+		ports.startBlockedBeforeSession = true
+		ports.resumeEntered = make(chan struct{})
+		ports.resumeRelease = make(chan struct{})
+		type executeResult struct {
+			run ExecutionRun
+			err error
+		}
+		executeDone := make(chan executeResult, 1)
+		go func() {
+			run, err := svc.Execute(context.Background(), start, []contextcompile.DataItem{})
+			executeDone <- executeResult{run: run, err: err}
+		}()
+		select {
+		case <-ports.resumeEntered:
+		case <-time.After(time.Second):
+			t.Fatal("start stream did not block before thread.started")
+		}
+		ack, interruptErr := svc.Interrupt(context.Background(), InterruptRequest{Request: start, Workspace: ports.workspace})
+		if interruptErr != nil {
+			ports.releaseResume()
+		}
+		executed := <-executeDone
+		if interruptErr != nil {
+			t.Fatalf("pre-session Interrupt: %v", interruptErr)
+		}
+		if !errors.Is(executed.err, ErrVerdict) || !errors.Is(executed.err, ErrInterrupted) || !strings.Contains(executed.err.Error(), "interrupted") {
+			t.Fatalf("Execute error = %v, want interruption verdict", executed.err)
+		}
+		if len(executed.run.Acks) != 1 || executed.run.Acks[0] != ack || executed.run.AdapterSessionRef != "" {
+			t.Fatalf("pre-session partial run/ack = %#v/%#v", executed.run, ack)
+		}
+		got := ports.appendedEvents()
+		if len(got) != 1 || got[0].Kind != contextevent.KindAdapterStop {
+			t.Fatalf("pre-session events = %v, want adapter-stop", observationEventKinds(got))
+		}
+	})
+
+	t.Run("established start refuses empty and mismatched session operands", func(t *testing.T) {
+		svc, ports := newServiceHarness(t, start)
+		ports.startBlockAfterDeliveries = true
+		ports.resumeEntered = make(chan struct{})
+		ports.resumeRelease = make(chan struct{})
+		executeDone := make(chan error, 1)
+		go func() {
+			_, err := svc.Execute(context.Background(), start, []contextcompile.DataItem{})
+			executeDone <- err
+		}()
+		select {
+		case <-ports.resumeEntered:
+		case <-time.After(time.Second):
+			t.Fatal("start stream did not block after thread.started")
+		}
+		for _, session := range []string{"", "different-session"} {
+			if _, err := svc.Interrupt(context.Background(), InterruptRequest{Request: start, Workspace: ports.workspace, AdapterSessionRef: session}); !errors.Is(err, ErrVerdict) {
+				t.Errorf("Interrupt session %q error = %v, want verdict", session, err)
+			}
+		}
+		if _, err := svc.Interrupt(context.Background(), InterruptRequest{Request: start, Workspace: ports.workspace, AdapterSessionRef: "codex-session-1"}); err != nil {
+			t.Fatalf("matching established-session Interrupt: %v", err)
+		}
+		if err := <-executeDone; !errors.Is(err, ErrVerdict) || !strings.Contains(err.Error(), "interrupted") {
+			t.Fatalf("Execute error = %v, want interruption verdict", err)
+		}
+	})
+
+	t.Run("interrupt returns only after the consumer acknowledges the exact stop", func(t *testing.T) {
+		resume := serviceRequest(t, ActionResume)
+		svc, ports := newServiceHarness(t, resume)
+		ports.resumeEntered = make(chan struct{})
+		ports.resumeRelease = make(chan struct{})
+		ports.appendEntered = make(chan struct{})
+		ports.appendRelease = make(chan struct{})
+		ports.appendBlockAt = 1
+		executeDone := make(chan error, 1)
+		go func() {
+			_, err := svc.Execute(context.Background(), resume, []contextcompile.DataItem{})
+			executeDone <- err
+		}()
+		<-ports.resumeEntered
+		interruptDone := make(chan struct {
+			ack contextevent.EventAck
+			err error
+		}, 1)
+		go func() {
+			ack, err := svc.Interrupt(context.Background(), InterruptRequest{Request: resume, Workspace: ports.workspace, AdapterSessionRef: resume.Resume.Continuity.AdapterSessionRef})
+			interruptDone <- struct {
+				ack contextevent.EventAck
+				err error
+			}{ack: ack, err: err}
+		}()
+		<-ports.appendEntered
+		select {
+		case result := <-interruptDone:
+			t.Fatalf("Interrupt returned before stop acknowledgment: %#v", result)
+		case <-time.After(50 * time.Millisecond):
+		}
+		close(ports.appendRelease)
+		interrupt := <-interruptDone
+		if interrupt.err != nil {
+			t.Fatalf("Interrupt: %v", interrupt.err)
+		}
+		if err := <-executeDone; !errors.Is(err, ErrVerdict) {
+			t.Fatalf("Execute error = %v, want interruption verdict", err)
+		}
+		events := ports.appendedEvents()
+		if len(events) != 1 || interrupt.ack.Kind != contextevent.KindAdapterStop || interrupt.ack.EventDigest != events[0].EventDigest {
+			t.Fatalf("Interrupt ack/events = %#v/%#v, want exact adapter-stop ack", interrupt.ack, events)
+		}
+	})
+
+	t.Run("failure stop is ordered when recorder works and disclosed when it rejects", func(t *testing.T) {
+		t.Run("ordered stop", func(t *testing.T) {
+			svc, ports := newServiceHarness(t, start)
+			ports.streamErrAt = 2
+			run, err := svc.Execute(context.Background(), start, []contextcompile.DataItem{})
+			if !errors.Is(err, ErrOperational) {
+				t.Fatalf("Execute error = %v, want operational", err)
+			}
+			got := ports.appendedEvents()
+			if len(got) != 2 || got[0].Kind != contextevent.KindAdapterStart || got[1].Kind != contextevent.KindAdapterStop || len(run.Acks) != 2 {
+				t.Fatalf("failure events/run = %v/%#v, want adapter-start then adapter-stop", observationEventKinds(got), run)
+			}
+		})
+		t.Run("recorder rejection has no stop ack", func(t *testing.T) {
+			svc, ports := newServiceHarness(t, start)
+			ports.appendErr = errors.New("durable recorder rejected sequence")
+			run, err := svc.Execute(context.Background(), start, []contextcompile.DataItem{})
+			if !errors.Is(err, ErrOperational) || !strings.Contains(err.Error(), "adapter-stop was not acknowledged") {
+				t.Fatalf("Execute error = %v, want explicit unacknowledged-stop operational witness", err)
+			}
+			if len(ports.appendedEvents()) != 0 || len(run.Acks) != 0 || ports.stopCount() != 1 {
+				t.Fatalf("rejected recorder events/acks/stops = %d/%d/%d, want 0/0/1", len(ports.appendedEvents()), len(run.Acks), ports.stopCount())
+			}
+		})
+	})
+
+	t.Run("caller cancellation releases the active registration after stop cleanup", func(t *testing.T) {
+		resume := serviceRequest(t, ActionResume)
+		svc, ports := newServiceHarness(t, resume)
+		ports.resumeEntered = make(chan struct{})
+		ports.resumeRelease = make(chan struct{})
+		ctx, cancel := context.WithCancel(context.Background())
+		done := make(chan error, 1)
+		go func() {
+			_, err := svc.Execute(ctx, resume, []contextcompile.DataItem{})
+			done <- err
+		}()
+		<-ports.resumeEntered
+		cancel()
+		if err := <-done; !errors.Is(err, ErrOperational) {
+			t.Fatalf("Execute cancellation error = %v, want operational", err)
+		}
+		release, err := svc.BeginReplacement(executionKey(resume))
+		if err != nil || release == nil {
+			t.Fatalf("replacement after cancellation release/error = %t/%v", release != nil, err)
+		}
+		release()
+	})
+
+	t.Run("accepted interrupt records stop when execute cancellation unblocks the raced pull", func(t *testing.T) {
+		resume := serviceRequest(t, ActionResume)
+		svc, ports := newServiceHarness(t, resume)
+		ports.resumeEntered = make(chan struct{})
+		ports.resumeRelease = make(chan struct{})
+		ports.stopEntered = make(chan struct{})
+		ports.stopRelease = make(chan struct{})
+		executeCtx, cancelExecute := context.WithCancel(context.Background())
+		defer cancelExecute()
+		type executeResult struct {
+			run ExecutionRun
+			err error
+		}
+		executeDone := make(chan executeResult, 1)
+		go func() {
+			run, err := svc.Execute(executeCtx, resume, []contextcompile.DataItem{})
+			executeDone <- executeResult{run: run, err: err}
+		}()
+		<-ports.resumeEntered
+		interruptDone := make(chan struct {
+			ack contextevent.EventAck
+			err error
+		}, 1)
+		go func() {
+			ack, err := svc.Interrupt(context.Background(), InterruptRequest{Request: resume, Workspace: ports.workspace, AdapterSessionRef: resume.Resume.Continuity.AdapterSessionRef})
+			interruptDone <- struct {
+				ack contextevent.EventAck
+				err error
+			}{ack: ack, err: err}
+		}()
+		<-ports.stopEntered
+		cancelExecute()
+		close(ports.stopRelease)
+		interrupt := <-interruptDone
+		executed := <-executeDone
+		if interrupt.err != nil {
+			t.Fatalf("Interrupt: %v", interrupt.err)
+		}
+		if !errors.Is(executed.err, ErrVerdict) || !errors.Is(executed.err, ErrInterrupted) || !errors.Is(executed.err, ErrOperational) {
+			t.Fatalf("Execute error = %v, want joined interruption verdict and caller-cancellation operational error", executed.err)
+		}
+		got := ports.appendedEvents()
+		if len(got) != 1 || got[0].Kind != contextevent.KindAdapterStop || len(executed.run.Acks) != 1 || executed.run.Acks[0] != interrupt.ack {
+			t.Fatalf("cancellation/interrupt events/run/ack = %v/%#v/%#v", observationEventKinds(got), executed.run, interrupt.ack)
+		}
+	})
+
+	t.Run("normal terminal closes run wait channels and releases registration", func(t *testing.T) {
+		resume := serviceRequest(t, ActionResume)
+		svc, ports := newServiceHarness(t, resume)
+		ports.resumeEntered = make(chan struct{})
+		ports.resumeRelease = make(chan struct{})
+		done := make(chan error, 1)
+		go func() {
+			_, err := svc.Execute(context.Background(), resume, []contextcompile.DataItem{})
+			done <- err
+		}()
+		<-ports.resumeEntered
+		active := svc.activeRun(executionKey(resume))
+		if active == nil {
+			t.Fatal("active run disappeared before normal terminal")
+		}
+		ports.releaseResume()
+		if err := <-done; err != nil {
+			t.Fatalf("Execute: %v", err)
+		}
+		for name, channel := range map[string]<-chan struct{}{"done": active.done, "stop-issued": active.stopIssued} {
+			select {
+			case <-channel:
+			default:
+				t.Errorf("%s channel remained open after normal terminal", name)
+			}
+		}
+		release, err := svc.BeginReplacement(executionKey(resume))
+		if err != nil || release == nil {
+			t.Fatalf("replacement after normal terminal release/error = %t/%v", release != nil, err)
+		}
+		release()
 	})
 
 	t.Run("concurrent replacement remains refused while stream is active", func(t *testing.T) {
@@ -534,8 +831,8 @@ func TestContextExecutionAcknowledgedStream_Behavioral(t *testing.T) {
 				t.Fatal("concurrent interrupts did not terminate")
 			}
 		}
-		if err := <-executeDone; err != nil {
-			t.Fatalf("Execute: %v", err)
+		if err := <-executeDone; !errors.Is(err, ErrVerdict) || !strings.Contains(err.Error(), "interrupted") {
+			t.Fatalf("Execute error = %v, want interruption verdict", err)
 		}
 		if succeeded != 1 || refused != 1 {
 			t.Fatalf("successful/refused interrupts = %d/%d, want 1/1", succeeded, refused)
@@ -569,8 +866,8 @@ func TestContextExecutionAcknowledgedStream_Behavioral(t *testing.T) {
 					t.Fatalf("Execute error = %v, want operational", err)
 				}
 				got := ports.appendedEvents()
-				if ports.stopCount() != 1 || ports.consumedDeliveries() != 1 || len(got) != 2 || got[0].Kind != contextevent.KindTelemetryGap || got[1].Kind != contextevent.KindAdapterError {
-					t.Fatalf("stop/deliveries/events = %d/%d/%v, want 1/1/[telemetry-gap adapter-error]", ports.stopCount(), ports.consumedDeliveries(), observationEventKinds(got))
+				if ports.stopCount() != 1 || ports.consumedDeliveries() != 1 || len(got) != 3 || got[0].Kind != contextevent.KindTelemetryGap || got[1].Kind != contextevent.KindAdapterError || got[2].Kind != contextevent.KindAdapterStop {
+					t.Fatalf("stop/deliveries/events = %d/%d/%v, want 1/1/[telemetry-gap adapter-error adapter-stop]", ports.stopCount(), ports.consumedDeliveries(), observationEventKinds(got))
 				}
 			})
 		}
@@ -578,48 +875,54 @@ func TestContextExecutionAcknowledgedStream_Behavioral(t *testing.T) {
 }
 
 type serviceFake struct {
-	t                     *testing.T
-	mu                    sync.Mutex
-	log                   []string
-	authority             AuthorityFacts
-	runway                RunwayFacts
-	materialized          execworkspace.Result
-	workspace             WorkspaceFacts
-	profile               ResolvedProfile
-	conflict              ConflictFacts
-	recorder              RecorderFacts
-	checkpoint            RecorderCheckpoint
-	opaque                OpaqueBoundaryFacts
-	adapterFacts          AdapterFacts
-	session               ProviderSessionFacts
-	expansion             ExpansionFacts
-	input                 ProviderInput
-	appended              []contextevent.Event
-	appendErr             error
-	appendErrAt           int
-	appendCalls           int
-	appendEntered         chan struct{}
-	appendRelease         chan struct{}
-	sessionErr            error
-	sessionStoreErr       error
-	sessionStored         string
-	startCalls            int
-	resumeCalls           int
-	sessionVerifyCalls    int
-	stopCalls             int
-	stopEntered           chan struct{}
-	resumedSession        string
-	resumeObservedSession string
-	resumeObservations    []NormalizedObservation
-	startResult           *AdapterResult
-	startDeliveries       []AdapterResult
-	resumeDeliveries      []AdapterResult
-	deliveriesConsumed    int
-	streamNextCalls       int
-	streamErrAt           int
-	resumeEntered         chan struct{}
-	resumeRelease         chan struct{}
-	resumeReleaseOnce     sync.Once
+	t                         *testing.T
+	mu                        sync.Mutex
+	log                       []string
+	authority                 AuthorityFacts
+	runway                    RunwayFacts
+	materialized              execworkspace.Result
+	workspace                 WorkspaceFacts
+	profile                   ResolvedProfile
+	conflict                  ConflictFacts
+	recorder                  RecorderFacts
+	checkpoint                RecorderCheckpoint
+	opaque                    OpaqueBoundaryFacts
+	adapterFacts              AdapterFacts
+	session                   ProviderSessionFacts
+	expansion                 ExpansionFacts
+	input                     ProviderInput
+	appended                  []contextevent.Event
+	appendErr                 error
+	appendErrAt               int
+	appendCalls               int
+	appendEntered             chan struct{}
+	appendRelease             chan struct{}
+	appendBlockAt             int
+	sessionErr                error
+	sessionStoreErr           error
+	sessionStored             string
+	startCalls                int
+	resumeCalls               int
+	sessionVerifyCalls        int
+	stopCalls                 int
+	stopEntered               chan struct{}
+	stopRelease               chan struct{}
+	resumedSession            string
+	resumeObservedSession     string
+	resumeObservations        []NormalizedObservation
+	startResult               *AdapterResult
+	startDeliveries           []AdapterResult
+	resumeDeliveries          []AdapterResult
+	deliveriesConsumed        int
+	streamNextCalls           int
+	streamErrAt               int
+	resumeEntered             chan struct{}
+	resumeRelease             chan struct{}
+	resumeReleaseOnce         sync.Once
+	blockedDelivery           *AdapterResult
+	startBlockedBeforeSession bool
+	startBlockAfterDeliveries bool
+	stopRequested             bool
 }
 
 func newServiceHarness(t *testing.T, req ExecutionRequest) (*Service, *serviceFake) {
@@ -830,7 +1133,10 @@ func (p *serviceFake) Start(_ context.Context, launch AdapterLaunch) (ActiveAdap
 			Payload: &contextevent.AdapterStartPayload{Schema: "verdi.context-event-payload/adapter-start/v1", Adapter: contextevent.AdapterCodex, AdapterVersion: launch.Request.AdapterVersion, Session: launch.Request.Session, ProfileDigest: launch.Profile.Digest, WorkspaceRequestDigest: launch.Workspace.RequestDigest},
 		}}}}
 	}
-	return &serviceAdapterRun{ports: p, deliveries: deliveries}, nil
+	if p.startBlockedBeforeSession {
+		deliveries = nil
+	}
+	return &serviceAdapterRun{ports: p, deliveries: deliveries, block: p.startBlockedBeforeSession || p.startBlockAfterDeliveries}, nil
 }
 func (p *serviceFake) Resume(_ context.Context, launch AdapterLaunch, session string) (ActiveAdapterRun, error) {
 	p.record("adapter-resume")
@@ -845,13 +1151,15 @@ func (p *serviceFake) Resume(_ context.Context, launch AdapterLaunch, session st
 	} else if p.resumeObservedSession != "" || len(p.resumeObservations) != 0 {
 		deliveries = []AdapterResult{{ObservedSessionRef: p.resumeObservedSession, Observations: append([]NormalizedObservation(nil), p.resumeObservations...)}}
 	}
-	return &serviceAdapterRun{ports: p, deliveries: deliveries, resume: true}, nil
+	return &serviceAdapterRun{ports: p, deliveries: deliveries, block: true}, nil
 }
 func (p *serviceFake) stopActive() (AdapterStopResult, error) {
 	p.record("adapter-stop")
 	p.mu.Lock()
 	p.stopCalls++
+	p.stopRequested = true
 	entered := p.stopEntered
+	releaseStop := p.stopRelease
 	p.mu.Unlock()
 	if entered != nil {
 		select {
@@ -859,6 +1167,9 @@ func (p *serviceFake) stopActive() (AdapterStopResult, error) {
 		default:
 			close(entered)
 		}
+	}
+	if releaseStop != nil {
+		<-releaseStop
 	}
 	p.releaseResume()
 	return AdapterStopResult{ExitCode: 130, ReasonCode: "interrupt-requested"}, nil
@@ -869,9 +1180,12 @@ func (p *serviceFake) Append(_ context.Context, event contextevent.Event) (conte
 	p.appendCalls++
 	call := p.appendCalls
 	entered, release := p.appendEntered, p.appendRelease
-	appendErr, appendErrAt := p.appendErr, p.appendErrAt
+	appendErr, appendErrAt, blockAt := p.appendErr, p.appendErrAt, p.appendBlockAt
 	p.mu.Unlock()
-	if entered != nil && call == 1 {
+	if blockAt == 0 {
+		blockAt = 1
+	}
+	if appendErr == nil && entered != nil && call == blockAt {
 		close(entered)
 		<-release
 	}
@@ -887,19 +1201,27 @@ func (p *serviceFake) Append(_ context.Context, event contextevent.Event) (conte
 type serviceAdapterRun struct {
 	ports      *serviceFake
 	deliveries []AdapterResult
-	resume     bool
+	block      bool
 	index      int
 	blocked    bool
 	terminal   bool
 }
 
-func (r *serviceAdapterRun) Next(context.Context) (AdapterResult, error) {
+func (r *serviceAdapterRun) Next(ctx context.Context) (AdapterResult, error) {
 	r.ports.mu.Lock()
 	r.ports.streamNextCalls++
 	nextCall, streamErrAt := r.ports.streamNextCalls, r.ports.streamErrAt
 	r.ports.mu.Unlock()
 	if streamErrAt != 0 && nextCall == streamErrAt {
 		return AdapterResult{}, errors.New("fake adapter: stream failed")
+	}
+	r.ports.mu.Lock()
+	stopRequested := r.ports.stopRequested
+	r.ports.mu.Unlock()
+	if stopRequested {
+		r.terminal = true
+		stop := AdapterStopResult{ExitCode: 130, ReasonCode: "interrupt-requested"}
+		return AdapterResult{Stopped: &stop}, nil
 	}
 	if r.index < len(r.deliveries) {
 		result := r.deliveries[r.index]
@@ -909,15 +1231,37 @@ func (r *serviceAdapterRun) Next(context.Context) (AdapterResult, error) {
 		r.ports.mu.Unlock()
 		return result, nil
 	}
-	if r.resume && !r.blocked {
+	if r.block && !r.blocked {
 		r.blocked = true
 		r.ports.mu.Lock()
 		entered, release := r.ports.resumeEntered, r.ports.resumeRelease
 		r.ports.mu.Unlock()
 		if entered != nil {
 			close(entered)
-			<-release
+			select {
+			case <-release:
+			case <-ctx.Done():
+				return AdapterResult{}, ctx.Err()
+			}
 		}
+		r.ports.mu.Lock()
+		raced := r.ports.blockedDelivery
+		if raced != nil {
+			r.ports.blockedDelivery = nil
+			r.ports.deliveriesConsumed++
+		}
+		r.ports.mu.Unlock()
+		if raced != nil {
+			return *raced, nil
+		}
+	}
+	r.ports.mu.Lock()
+	stopRequested = r.ports.stopRequested
+	r.ports.mu.Unlock()
+	if stopRequested {
+		r.terminal = true
+		stop := AdapterStopResult{ExitCode: 130, ReasonCode: "interrupt-requested"}
+		return AdapterResult{Stopped: &stop}, nil
 	}
 	if r.terminal {
 		return AdapterResult{}, errors.New("fake adapter: next after terminal")

@@ -26,6 +26,9 @@ var (
 	ErrOperational = errors.New("sealedexec: operational failure")
 	// ErrConcurrentDispatch refuses resume/replacement overlap for one epoch.
 	ErrConcurrentDispatch = errors.New("sealedexec: concurrent dispatch")
+	// ErrInterrupted marks a run whose ordered adapter-stop was acknowledged.
+	// It is always returned together with ErrVerdict.
+	ErrInterrupted = errors.New("sealedexec: execution interrupted")
 )
 
 // FailureCode is the closed reason category accompanying a non-proven fact.
@@ -212,6 +215,7 @@ type AdapterResult struct {
 	Observations       []NormalizedObservation
 	OperationalFailure string
 	Terminal           *AdapterTerminalResult
+	Stopped            *AdapterStopResult
 }
 
 // ActiveAdapterRun is consumer-driven: the service does not request the next
@@ -347,11 +351,25 @@ type activeExecution struct {
 	priorGlobal      uint64
 	sessionRef       string
 	acks             []contextevent.EventAck
-	stopRequested    bool
-	stopped          bool
-	finished         bool
+	state            activeExecutionState
+	stopIssued       chan struct{}
+	stopIssueOnce    sync.Once
+	stopRequestErr   error
+	terminalCause    error
+	done             chan struct{}
+	stopAck          contextevent.EventAck
+	terminalErr      error
 	resumeRechecked  bool
 }
+
+type activeExecutionState uint8
+
+const (
+	activePreparing activeExecutionState = iota
+	activeRunning
+	activeStopRequested
+	activeTerminal
+)
 
 // NewService refuses a missing proof or execution dependency.
 func NewService(ports ServicePorts) (*Service, error) {
@@ -554,8 +572,9 @@ func (s *Service) Execute(ctx context.Context, request ExecutionRequest, data []
 	return s.consumeActive(ctx, active, authorityMode, witnesses)
 }
 
-// Interrupt requests the adapter's normalized stop path and records its
-// acknowledged outcome.
+// Interrupt requests the adapter's normalized stop path. The sole stream
+// consumer records the stop after acknowledging any already-observed frame;
+// Interrupt waits for and returns that exact acknowledgment.
 func (s *Service) Interrupt(ctx context.Context, request InterruptRequest) (contextevent.EventAck, error) {
 	if ctx == nil {
 		return contextevent.EventAck{}, operational("interrupt", errors.New("nil context"))
@@ -569,46 +588,47 @@ func (s *Service) Interrupt(ctx context.Context, request InterruptRequest) (cont
 		return contextevent.EventAck{}, verdict("interrupt has no matching active run")
 	}
 	active.mu.Lock()
-	defer active.mu.Unlock()
-	if active.finished || active.stopped || active.stopRequested {
+	if active.state != activeRunning {
+		active.mu.Unlock()
 		return contextevent.EventAck{}, verdict("interrupt has no stoppable active run")
 	}
-	if !bytes.Equal(canonicalRequest, active.canonicalRequest) || !reflect.DeepEqual(request.Workspace, active.workspace) ||
-		request.AdapterSessionRef == "" || request.AdapterSessionRef != active.sessionRef {
+	if !bytes.Equal(canonicalRequest, active.canonicalRequest) || !reflect.DeepEqual(request.Workspace, active.workspace) || !interruptSessionMatches(active, request.AdapterSessionRef) {
+		active.mu.Unlock()
 		return contextevent.EventAck{}, verdict("interrupt identity does not match the verified active run")
 	}
-	active.stopRequested = true
-	stop, err := active.stream.Stop(ctx)
-	if err != nil {
-		active.stopped = true
-		return contextevent.EventAck{}, operational("adapter stop", err)
+	active.state = activeStopRequested
+	active.terminalCause = interruptedVerdict()
+	done := active.done
+	active.mu.Unlock()
+
+	s.issueStop(context.WithoutCancel(ctx), active)
+	select {
+	case <-done:
+	case <-ctx.Done():
+		// A simultaneously published terminal result wins over caller
+		// cancellation; otherwise the accepted run-bound stop continues.
+		select {
+		case <-done:
+		default:
+			return contextevent.EventAck{}, operational("interrupt wait", ctx.Err())
+		}
 	}
-	schema, _ := contextevent.PayloadSchema(contextevent.KindAdapterStop)
-	payload := &contextevent.AdapterStopPayload{Schema: schema, Adapter: active.request.Adapter, AdapterVersion: active.request.AdapterVersion, Session: active.request.Session, ExitCode: stop.ExitCode, ReasonCode: stop.ReasonCode}
-	stamp, err := s.ports.Stamps.NextStamp(ctx)
-	if err != nil {
-		active.stopped = true
-		return contextevent.EventAck{}, operational("interrupt stamp", err)
+	active.mu.Lock()
+	defer active.mu.Unlock()
+	if active.stopAck != (contextevent.EventAck{}) {
+		return active.stopAck, nil
 	}
-	event, err := buildEvent(active.request, active.workspace, active.sequence, active.priorDigest, nil, stamp, contextevent.KindAdapterStop, payload)
-	if err != nil {
-		active.stopped = true
-		return contextevent.EventAck{}, operational("encode stop event", err)
+	if active.terminalErr != nil {
+		return contextevent.EventAck{}, active.terminalErr
 	}
-	ack, err := active.recorder.Append(ctx, event)
-	if err != nil {
-		active.stopped = true
-		return contextevent.EventAck{}, operational("append stop event", err)
+	return contextevent.EventAck{}, operational("interrupt", errors.New("adapter-stop was not acknowledged"))
+}
+
+func interruptSessionMatches(active *activeExecution, operand string) bool {
+	if active.request.Action == ActionStart && active.sessionRef == "" {
+		return operand == ""
 	}
-	if err := validateAck(event, ack, active.priorGlobal); err != nil {
-		active.stopped = true
-		return contextevent.EventAck{}, operational("acknowledge stop event", err)
-	}
-	active.acks = append(active.acks, ack)
-	active.sequence++
-	active.priorDigest, active.priorGlobal = event.EventDigest, ack.GlobalSequence
-	active.stopped = true
-	return ack, nil
+	return operand != "" && operand == active.sessionRef
 }
 
 // BeginReplacement reserves the same exclusion key used by start/resume.
@@ -654,6 +674,9 @@ func (s *Service) activate(active *activeExecution, stream ActiveAdapterRun, req
 	active.priorGlobal = priorGlobal
 	active.sessionRef = sessionRef
 	active.acks = []contextevent.EventAck{}
+	active.state = activeRunning
+	active.stopIssued = make(chan struct{})
+	active.done = make(chan struct{})
 }
 
 func (s *Service) activeRun(key ExecutionKey) *activeExecution {
@@ -683,129 +706,165 @@ func (s *Service) verifySession(ctx context.Context, request ExecutionRequest, p
 
 func (s *Service) consumeActive(ctx context.Context, active *activeExecution, authority contextevent.Authority, witnesses []string) (ExecutionRun, error) {
 	for {
-		result, nextErr := active.stream.Next(ctx)
 		active.mu.Lock()
-		if active.stopped {
-			run := activeRunResult(active, authority, witnesses)
-			active.finished = true
+		state, stopIssued := active.state, active.stopIssued
+		active.mu.Unlock()
+		if state == activeStopRequested {
+			<-stopIssued
+			active.mu.Lock()
+			stopRequestErr := active.stopRequestErr
 			active.mu.Unlock()
-			return run, nil
+			if stopRequestErr != nil {
+				return s.finishWithoutStopAck(active, authority, witnesses, operational("request adapter stop", stopRequestErr))
+			}
 		}
+
+		result, nextErr := active.stream.Next(ctx)
 		if nextErr != nil {
 			failure := operational("provider stream", nextErr)
-			failure = s.stopFailureLocked(ctx, active, failure)
-			run := activeRunResult(active, authority, witnesses)
-			active.finished = true
+			active.mu.Lock()
+			alreadyStopping := active.state == activeStopRequested
+			if alreadyStopping {
+				active.terminalCause = errors.Join(active.terminalCause, failure)
+			}
 			active.mu.Unlock()
-			return run, failure
+			if alreadyStopping {
+				continue
+			}
+			s.requestFailureStop(context.WithoutCancel(ctx), active, failure)
+			continue
+		}
+		if result.Stopped != nil {
+			if result.Terminal != nil || result.ObservedSessionRef != "" || len(result.Observations) != 0 || result.OperationalFailure != "" {
+				failure := operational("provider stream", errors.New("stop terminal/result union is invalid"))
+				s.requestFailureStop(context.WithoutCancel(ctx), active, failure)
+				return s.finishWithoutStopAck(active, authority, witnesses, failure)
+			}
+			active.mu.Lock()
+			stopping := active.state == activeStopRequested
+			active.mu.Unlock()
+			if !stopping {
+				failure := operational("provider stream", errors.New("unsolicited stop terminal"))
+				s.requestFailureStop(context.WithoutCancel(ctx), active, failure)
+				return s.finishWithoutStopAck(active, authority, witnesses, failure)
+			}
+			ack, err := s.recordStop(context.WithoutCancel(ctx), active, *result.Stopped)
+			if err != nil {
+				return s.finishWithoutStopAck(active, authority, witnesses, err)
+			}
+			active.mu.Lock()
+			cause := active.terminalCause
+			active.mu.Unlock()
+			return s.finishActive(active, authority, witnesses, ack, cause)
 		}
 		if result.Terminal == nil && len(result.Observations) == 0 {
 			failure := operational("provider stream", errors.New("non-terminal result has no normalized observations"))
-			failure = s.stopFailureLocked(ctx, active, failure)
-			run := activeRunResult(active, authority, witnesses)
-			active.finished = true
-			active.mu.Unlock()
-			return run, failure
+			s.requestFailureStop(context.WithoutCancel(ctx), active, failure)
+			continue
 		}
-		blocked, recordErr := s.recordResultLocked(ctx, active, result)
+		blocked, recorderUsable, recordErr := s.recordResult(ctx, active, result)
 		if recordErr != nil {
-			recordErr = s.stopFailureLocked(ctx, active, recordErr)
-			run := activeRunResult(active, authority, witnesses)
-			active.finished = true
-			active.mu.Unlock()
-			return run, recordErr
+			s.requestFailureStop(context.WithoutCancel(ctx), active, recordErr)
+			if !recorderUsable {
+				return s.finishWithoutStopAck(active, authority, witnesses, errors.New("recorder rejected activity; adapter-stop was not acknowledged"))
+			}
+			continue
 		}
+		var failure error
 		if active.request.Action == ActionResume && !active.resumeRechecked {
 			if _, err := s.verifySession(ctx, active.request, active.profile, active.workspace); err != nil {
-				err = s.stopFailureLocked(ctx, active, err)
-				run := activeRunResult(active, authority, witnesses)
-				active.finished = true
-				active.mu.Unlock()
-				return run, err
+				failure = err
 			}
 			active.resumeRechecked = true
 		}
-		if result.OperationalFailure != "" {
-			failure := operational("provider observation", errors.New(result.OperationalFailure))
-			failure = s.stopFailureLocked(ctx, active, failure)
-			run := activeRunResult(active, authority, witnesses)
-			active.finished = true
-			active.mu.Unlock()
-			return run, failure
+		if result.OperationalFailure != "" && failure == nil {
+			failure = operational("provider observation", errors.New(result.OperationalFailure))
 		}
-		if active.request.Action == ActionResume && result.ObservedSessionRef != "" && result.ObservedSessionRef != active.sessionRef {
-			failure := verdict("resumed stream session identity mismatch")
-			failure = s.stopFailureLocked(ctx, active, failure)
-			run := activeRunResult(active, authority, witnesses)
-			active.finished = true
-			active.mu.Unlock()
-			return run, failure
+		active.mu.Lock()
+		sessionRef := active.sessionRef
+		active.mu.Unlock()
+		if active.request.Action == ActionResume && result.ObservedSessionRef != "" && result.ObservedSessionRef != sessionRef && failure == nil {
+			failure = verdict("resumed stream session identity mismatch")
 		}
-		if blocked != "" {
-			failure := verdict(blocked)
-			failure = s.stopFailureLocked(ctx, active, failure)
-			run := activeRunResult(active, authority, witnesses)
-			active.finished = true
-			active.mu.Unlock()
-			return run, failure
+		if blocked != "" && failure == nil {
+			failure = verdict(blocked)
 		}
-		if result.Terminal == nil {
-			active.mu.Unlock()
+		if result.Terminal != nil && result.Terminal.ExitCode != 0 && failure == nil {
+			failure = operational("provider process", fmt.Errorf("unreported nonzero exit %d", result.Terminal.ExitCode))
+		}
+		if result.Terminal != nil && active.request.Action == ActionStart && sessionRef == "" && failure == nil {
+			failure = verdict("start stream did not establish an acknowledged adapter session identity")
+		}
+		if failure != nil {
+			s.requestFailureStop(context.WithoutCancel(ctx), active, failure)
 			continue
 		}
-		if result.Terminal.ExitCode != 0 {
-			failure := operational("provider process", fmt.Errorf("unreported nonzero exit %d", result.Terminal.ExitCode))
-			failure = s.stopFailureLocked(ctx, active, failure)
-			run := activeRunResult(active, authority, witnesses)
-			active.finished = true
-			active.mu.Unlock()
-			return run, failure
-		}
-		if active.request.Action == ActionStart && strings.TrimSpace(active.sessionRef) == "" {
-			failure := verdict("start stream did not establish an acknowledged adapter session identity")
-			failure = s.stopFailureLocked(ctx, active, failure)
-			run := activeRunResult(active, authority, witnesses)
-			active.finished = true
-			active.mu.Unlock()
-			return run, failure
-		}
-		active.finished = true
-		run := activeRunResult(active, authority, witnesses)
+		active.mu.Lock()
+		stopping := active.state == activeStopRequested
 		active.mu.Unlock()
-		return run, nil
+		if stopping {
+			if result.Terminal != nil {
+				return s.finishWithoutStopAck(active, authority, witnesses, operational("provider stream", errors.New("natural terminal replaced requested stop terminal")))
+			}
+			continue
+		}
+		if result.Terminal != nil {
+			if run, err, finished := s.tryFinishNormally(active, authority, witnesses); finished {
+				return run, err
+			}
+		}
 	}
 }
 
-func (s *Service) recordResultLocked(ctx context.Context, active *activeExecution, result AdapterResult) (string, error) {
+func (s *Service) recordResult(ctx context.Context, active *activeExecution, result AdapterResult) (string, bool, error) {
 	blocked := ""
 	for _, observation := range result.Observations {
+		lockSessionBoundary := active.request.Action == ActionStart && observation.Kind == contextevent.KindAdapterStart
+		if lockSessionBoundary {
+			active.mu.Lock()
+		}
 		stamp, err := s.ports.Stamps.NextStamp(ctx)
 		if err != nil {
-			return "", operational("observation stamp", err)
+			if lockSessionBoundary {
+				active.mu.Unlock()
+			}
+			return "", true, operational("observation stamp", err)
 		}
 		event, err := buildEvent(active.request, active.workspace, active.sequence, active.priorDigest, nil, stamp, observation.Kind, observation.Payload)
 		if err != nil {
-			return "", operational("normalize adapter observation", err)
+			if lockSessionBoundary {
+				active.mu.Unlock()
+			}
+			return "", true, operational("normalize adapter observation", err)
 		}
 		ack, err := active.recorder.Append(ctx, event)
 		if err != nil {
-			return "", operational("append adapter observation", err)
+			if lockSessionBoundary {
+				active.mu.Unlock()
+			}
+			return "", false, operational("append adapter observation", err)
 		}
 		if err := validateAck(event, ack, active.priorGlobal); err != nil {
-			return "", operational("acknowledge adapter observation", err)
+			if lockSessionBoundary {
+				active.mu.Unlock()
+			}
+			return "", false, operational("acknowledge adapter observation", err)
 		}
 		active.acks = append(active.acks, ack)
 		active.sequence++
 		active.priorDigest, active.priorGlobal = event.EventDigest, ack.GlobalSequence
 		if active.request.Action == ActionStart && observation.Kind == contextevent.KindAdapterStart {
 			if result.ObservedSessionRef == "" || (active.sessionRef != "" && active.sessionRef != result.ObservedSessionRef) {
-				return "", verdict("adapter-start lacks one stable session identity")
+				active.mu.Unlock()
+				return "", true, verdict("adapter-start lacks one stable session identity")
 			}
 			record := SessionRecord{Key: executionKey(active.request), SessionRef: result.ObservedSessionRef, AdapterVersion: active.request.AdapterVersion, ProfileDigest: active.profile.Digest, WorkspaceID: active.workspace.WorkspaceID, LifecycleAck: ack}
 			if err := s.ports.SessionStore.StoreAdapterSession(ctx, record); err != nil {
-				return "", operational("store acknowledged adapter session", err)
+				active.mu.Unlock()
+				return "", true, operational("store acknowledged adapter session", err)
 			}
 			active.sessionRef = result.ObservedSessionRef
+			active.mu.Unlock()
 		}
 		if observation.BlocksAuthority && blocked == "" {
 			blocked = observation.Witness
@@ -814,21 +873,101 @@ func (s *Service) recordResultLocked(ctx context.Context, active *activeExecutio
 			}
 		}
 	}
-	return blocked, nil
+	return blocked, true, nil
 }
 
-func (s *Service) stopFailureLocked(ctx context.Context, active *activeExecution, failure error) error {
-	if active.stopRequested {
-		active.stopped = true
-		return failure
+func (s *Service) requestFailureStop(ctx context.Context, active *activeExecution, failure error) {
+	active.mu.Lock()
+	owner := active.state == activeRunning
+	if owner {
+		active.state = activeStopRequested
+		active.terminalCause = failure
+	} else if active.state == activeStopRequested {
+		active.terminalCause = errors.Join(active.terminalCause, failure)
 	}
-	active.stopRequested = true
-	_, stopErr := active.stream.Stop(ctx)
-	active.stopped = true
-	if stopErr != nil {
-		return errors.Join(failure, operational("stop failed active run", stopErr))
+	active.mu.Unlock()
+	if owner {
+		s.issueStop(ctx, active)
 	}
-	return failure
+}
+
+func (s *Service) issueStop(ctx context.Context, active *activeExecution) {
+	active.stopIssueOnce.Do(func() {
+		_, err := active.stream.Stop(ctx)
+		active.mu.Lock()
+		active.stopRequestErr = err
+		active.mu.Unlock()
+		close(active.stopIssued)
+	})
+}
+
+func (s *Service) recordStop(ctx context.Context, active *activeExecution, stop AdapterStopResult) (contextevent.EventAck, error) {
+	schema, _ := contextevent.PayloadSchema(contextevent.KindAdapterStop)
+	payload := &contextevent.AdapterStopPayload{Schema: schema, Adapter: active.request.Adapter, AdapterVersion: active.request.AdapterVersion, Session: active.request.Session, ExitCode: stop.ExitCode, ReasonCode: stop.ReasonCode}
+	stamp, err := s.ports.Stamps.NextStamp(ctx)
+	if err != nil {
+		return contextevent.EventAck{}, operational("stop stamp", err)
+	}
+	event, err := buildEvent(active.request, active.workspace, active.sequence, active.priorDigest, nil, stamp, contextevent.KindAdapterStop, payload)
+	if err != nil {
+		return contextevent.EventAck{}, operational("encode stop event", err)
+	}
+	ack, err := active.recorder.Append(ctx, event)
+	if err != nil {
+		return contextevent.EventAck{}, operational("append stop event", err)
+	}
+	if err := validateAck(event, ack, active.priorGlobal); err != nil {
+		return contextevent.EventAck{}, operational("acknowledge stop event", err)
+	}
+	active.acks = append(active.acks, ack)
+	active.sequence++
+	active.priorDigest, active.priorGlobal = event.EventDigest, ack.GlobalSequence
+	return ack, nil
+}
+
+func (s *Service) finishWithoutStopAck(active *activeExecution, authority contextevent.Authority, witnesses []string, failure error) (ExecutionRun, error) {
+	active.mu.Lock()
+	state, stopIssued := active.state, active.stopIssued
+	active.mu.Unlock()
+	if state == activeStopRequested && stopIssued != nil {
+		<-stopIssued
+	}
+	active.mu.Lock()
+	cause := errors.Join(active.terminalCause, failure, operational("unacknowledged stop", errors.New("adapter-stop was not acknowledged")))
+	active.mu.Unlock()
+	return s.finishActive(active, authority, witnesses, contextevent.EventAck{}, cause)
+}
+
+func (s *Service) finishActive(active *activeExecution, authority contextevent.Authority, witnesses []string, stopAck contextevent.EventAck, terminalErr error) (ExecutionRun, error) {
+	active.mu.Lock()
+	if terminalErr != nil {
+		authority = contextevent.AuthorityAdvisory
+		if errors.Is(terminalErr, ErrInterrupted) {
+			witnesses = appendUnique(witnesses, "execution interrupted")
+		} else {
+			witnesses = appendUnique(witnesses, "execution did not reach an authoritative terminal")
+		}
+	}
+	active.state = activeTerminal
+	active.stopAck = stopAck
+	active.terminalErr = terminalErr
+	run := activeRunResult(active, authority, witnesses)
+	close(active.done)
+	active.mu.Unlock()
+	return run, terminalErr
+}
+
+func (s *Service) tryFinishNormally(active *activeExecution, authority contextevent.Authority, witnesses []string) (ExecutionRun, error, bool) {
+	active.mu.Lock()
+	defer active.mu.Unlock()
+	if active.state != activeRunning {
+		return ExecutionRun{}, nil, false
+	}
+	active.state = activeTerminal
+	active.stopIssueOnce.Do(func() { close(active.stopIssued) })
+	run := activeRunResult(active, authority, witnesses)
+	close(active.done)
+	return run, nil, true
 }
 
 func activeRunResult(active *activeExecution, authority contextevent.Authority, witnesses []string) ExecutionRun {
@@ -837,6 +976,19 @@ func activeRunResult(active *activeExecution, authority contextevent.Authority, 
 		Workspace: active.workspace, Profile: active.profile,
 		AdapterSessionRef: active.sessionRef, Acks: append([]contextevent.EventAck(nil), active.acks...),
 	}
+}
+
+func appendUnique(values []string, value string) []string {
+	for _, existing := range values {
+		if existing == value {
+			return append([]string(nil), values...)
+		}
+	}
+	return append(append([]string(nil), values...), value)
+}
+
+func interruptedVerdict() error {
+	return fmt.Errorf("%w: %w", ErrVerdict, ErrInterrupted)
 }
 
 func buildEvent(request ExecutionRequest, workspace WorkspaceFacts, sequence uint64, prior string, priorRevision *contextevent.PriorRevision, stamp string, kind contextevent.Kind, payload any) (contextevent.Event, error) {

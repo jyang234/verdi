@@ -55,7 +55,9 @@ type ProcessStopResult struct {
 }
 
 // ActiveProcess exposes one framed foreign observation per pull and owns the
-// cancellation handle for that exact process.
+// cancellation handle for that exact process. Stop is an idempotent,
+// nonblocking run-bound request: it unblocks one outstanding Next. That pull
+// may return one already-observed complete frame; no later frame is consumed.
 type ActiveProcess interface {
 	Next(context.Context) (ProcessObservation, error)
 	Stop(context.Context) (ProcessStopResult, error)
@@ -166,6 +168,9 @@ type activeRun struct {
 	threadCount     int
 	terminal        bool
 	stopOnce        sync.Once
+	stopDone        chan struct{}
+	stopRequested   bool
+	stopDelivered   bool
 	stopResult      sealedexec.AdapterStopResult
 	stopErr         error
 }
@@ -177,15 +182,31 @@ func (r *activeRun) Next(ctx context.Context) (sealedexec.AdapterResult, error) 
 	r.nextMu.Lock()
 	defer r.nextMu.Unlock()
 	r.mu.Lock()
-	if r.terminal {
+	stopRequested, stopDone := r.stopRequested, r.stopDone
+	if r.terminal && !stopRequested {
 		r.mu.Unlock()
 		return sealedexec.AdapterResult{}, errors.New("sealedexec/codex: next after terminal result")
 	}
 	r.mu.Unlock()
+	if stopRequested {
+		<-stopDone
+		return r.stopTerminal()
+	}
 	item, err := r.process.Next(ctx)
+	r.mu.Lock()
+	stopRequested = r.stopRequested
+	stopDone = r.stopDone
+	r.mu.Unlock()
 	if err != nil {
-		r.cancel()
+		if stopRequested {
+			<-stopDone
+			return r.stopTerminal()
+		}
 		return sealedexec.AdapterResult{}, fmt.Errorf("sealedexec/codex: process stream: %w", err)
+	}
+	if stopRequested && (item.Terminal != nil || item.ForeignJSON == nil || !item.Complete) {
+		<-stopDone
+		return r.stopTerminal()
 	}
 	if item.Terminal != nil {
 		if item.ForeignJSON != nil || item.Complete {
@@ -236,19 +257,45 @@ func (r *activeRun) Stop(ctx context.Context) (sealedexec.AdapterStopResult, err
 		return sealedexec.AdapterStopResult{}, errors.New("sealedexec/codex: stop: nil context")
 	}
 	r.stopOnce.Do(func() {
-		r.cancel()
+		r.mu.Lock()
+		r.stopRequested = true
+		r.stopDone = make(chan struct{})
+		r.mu.Unlock()
 		result, err := r.process.Stop(ctx)
 		if err != nil {
-			r.stopErr = fmt.Errorf("sealedexec/codex: stop process: %w", err)
-			return
+			err = fmt.Errorf("sealedexec/codex: stop process: %w", err)
+		} else if strings.TrimSpace(result.ReasonCode) == "" {
+			err = errors.New("sealedexec/codex: stop process returned an empty reason code")
 		}
-		if strings.TrimSpace(result.ReasonCode) == "" {
-			r.stopErr = errors.New("sealedexec/codex: stop process returned an empty reason code")
-			return
+		r.mu.Lock()
+		if err != nil {
+			r.stopErr = err
+		} else {
+			r.stopResult = sealedexec.AdapterStopResult{ExitCode: result.ExitCode, ReasonCode: result.ReasonCode}
 		}
-		r.stopResult = sealedexec.AdapterStopResult{ExitCode: result.ExitCode, ReasonCode: result.ReasonCode}
+		r.mu.Unlock()
+		r.cancel()
+		close(r.stopDone)
 	})
+	<-r.stopDone
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	return r.stopResult, r.stopErr
+}
+
+func (r *activeRun) stopTerminal() (sealedexec.AdapterResult, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.stopDelivered {
+		return sealedexec.AdapterResult{}, errors.New("sealedexec/codex: next after stop terminal")
+	}
+	r.stopDelivered = true
+	r.terminal = true
+	if r.stopErr != nil {
+		return sealedexec.AdapterResult{}, r.stopErr
+	}
+	stop := r.stopResult
+	return sealedexec.AdapterResult{Stopped: &stop, Observations: []sealedexec.NormalizedObservation{}}, nil
 }
 
 func verifyArgs(request sealedexec.ExecutionRequest, profile sealedexec.ResolvedProfile, workspace sealedexec.WorkspaceFacts) ([]string, error) {

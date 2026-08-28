@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/jyang234/verdi/internal/contextcompile"
@@ -181,9 +182,108 @@ func TestAdapterActiveRunStopUsesNormalizedProcessPort(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Stop: %v", err)
 	}
-	if process.run.stopCalls != 1 || !process.run.cancelObserved || got.ExitCode != 130 || got.ReasonCode != "interrupted" {
-		t.Fatalf("stop calls/cancel/result = %d/%t/%#v", process.run.stopCalls, process.run.cancelObserved, got)
+	select {
+	case <-process.ctx.Done():
+	default:
+		t.Fatal("Stop did not cancel the active process context after requesting process stop")
 	}
+	if process.run.stopCalls != 1 || process.run.cancelObserved || got.ExitCode != 130 || got.ReasonCode != "interrupted" {
+		t.Fatalf("stop calls/premature-cancel/result = %d/%t/%#v", process.run.stopCalls, process.run.cancelObserved, got)
+	}
+}
+
+func TestAdapterStopYieldsRacedCompleteFrameThenOneStopTerminal(t *testing.T) {
+	launch := adapterLaunch(t, sealedexec.ActionResume)
+	processRun := &racingActiveProcess{
+		entered: make(chan struct{}),
+		release: make(chan struct{}),
+		frames: []ProcessObservation{
+			{ForeignJSON: []byte(`{"type":"turn.started"}`), Complete: true},
+			{ForeignJSON: []byte(`{"type":"turn.completed"}`), Complete: true},
+		},
+	}
+	adapter, err := New(&fixedActiveProcess{run: processRun})
+	if err != nil {
+		t.Fatal(err)
+	}
+	run, err := adapter.Resume(context.Background(), launch, "session-1")
+	if err != nil {
+		t.Fatalf("Resume: %v", err)
+	}
+	type nextResult struct {
+		result sealedexec.AdapterResult
+		err    error
+	}
+	firstDone := make(chan nextResult, 1)
+	go func() {
+		result, err := run.Next(context.Background())
+		firstDone <- nextResult{result: result, err: err}
+	}()
+	<-processRun.entered
+	stop, err := run.Stop(context.Background())
+	if err != nil {
+		t.Fatalf("Stop: %v", err)
+	}
+	first := <-firstDone
+	if first.err != nil || !hasKind(first.result.Observations, contextevent.KindProviderSummary) {
+		t.Fatalf("raced first result/error = %#v/%v, want complete provider frame", first.result, first.err)
+	}
+	second, err := run.Next(context.Background())
+	if err != nil {
+		t.Fatalf("Next stop terminal: %v", err)
+	}
+	if second.Stopped == nil || *second.Stopped != stop || second.Terminal != nil || len(second.Observations) != 0 {
+		t.Fatalf("stop terminal = %#v, want exact normalized stop %#v", second, stop)
+	}
+	if _, err := run.Next(context.Background()); err == nil {
+		t.Fatal("Next after stop terminal succeeded")
+	}
+	again, err := run.Stop(context.Background())
+	if err != nil || again != stop || processRun.stopCalls != 1 || processRun.nextCalls != 1 {
+		t.Fatalf("idempotent stop/result process calls = %#v/%v %d/%d, want exact/none 1/1", again, err, processRun.stopCalls, processRun.nextCalls)
+	}
+}
+
+type fixedActiveProcess struct{ run ActiveProcess }
+
+func (p *fixedActiveProcess) Start(context.Context, *exec.Cmd, []byte) (ActiveProcess, error) {
+	return p.run, nil
+}
+
+type racingActiveProcess struct {
+	mu        sync.Mutex
+	entered   chan struct{}
+	release   chan struct{}
+	frames    []ProcessObservation
+	nextCalls int
+	stopCalls int
+}
+
+func (p *racingActiveProcess) Next(context.Context) (ProcessObservation, error) {
+	p.mu.Lock()
+	p.nextCalls++
+	call := p.nextCalls
+	p.mu.Unlock()
+	if call == 1 {
+		close(p.entered)
+		<-p.release
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if len(p.frames) == 0 {
+		return ProcessObservation{}, errors.New("racing process: exhausted")
+	}
+	result := p.frames[0]
+	p.frames = p.frames[1:]
+	return result, nil
+}
+
+func (p *racingActiveProcess) Stop(context.Context) (ProcessStopResult, error) {
+	p.mu.Lock()
+	p.stopCalls++
+	p.mu.Unlock()
+	close(p.release)
+	return ProcessStopResult{ExitCode: 130, ReasonCode: "interrupt-requested"}, nil
 }
 
 type cannedProcess struct {
