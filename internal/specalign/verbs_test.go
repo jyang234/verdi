@@ -116,7 +116,10 @@
 // rely on there.
 package specalign
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestV0CLIVerbInventory(t *testing.T) {
 	root := verdiRepoRoot
@@ -247,4 +250,32 @@ func TestV1CLIVerbForms(t *testing.T) {
 			t.Errorf("verdi obligation scaffold (no store root): exit = %d, want 2 (operational error)", code)
 		}
 	})
+}
+
+// TestCLIExperimentOperationForms pins the Task 11 closed operation
+// registry through the built binary. Bare operation invocations stop at
+// their own required-flag grammar before resolving a store root, so this
+// inventory proof is hermetic even for the mutating human/release forms.
+func TestCLIExperimentOperationForms(t *testing.T) {
+	for _, operation := range []string{
+		"propose-ratification",
+		"publish-capsule",
+		"release-workspaces",
+	} {
+		t.Run(operation, func(t *testing.T) {
+			stdout, stderr, code := runBinary(t, t.TempDir(), "experiment", operation)
+			if code != 2 || stdout != "" || !strings.Contains(stderr, "--spike is required") ||
+				!strings.Contains(stderr, "usage: verdi experiment "+operation) {
+				t.Fatalf("verdi experiment %s: exit/stdout/stderr = %d/%q/%q, want its closed operation grammar", operation, code, stdout, stderr)
+			}
+		})
+	}
+	for _, alias := range []string{"ratify", "capsule", "release"} {
+		t.Run("closed_alias_"+alias, func(t *testing.T) {
+			stdout, stderr, code := runBinary(t, t.TempDir(), "experiment", alias)
+			if code != 2 || stdout != "" || strings.Contains(stderr, "usage: verdi experiment "+alias+" --") {
+				t.Fatalf("verdi experiment %s: exit/stdout/stderr = %d/%q/%q, want namespace-level closed-grammar refusal", alias, code, stdout, stderr)
+			}
+		})
+	}
 }

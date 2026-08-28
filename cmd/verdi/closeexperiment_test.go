@@ -887,7 +887,7 @@ func TestCloseExperimentValidClosurePreservesResolvesEdgeByteIdentical(t *testin
 // Item 18: the built binary's exact 0/1/2 exits, extending the close
 // fixture family (buildCloseFixtureRepo/seedCloseHappyPath's precedent)
 // with a spike variant of gate_test.go's gateSpikeSpecMD.
-func TestCloseExperimentBuiltBinaryExitCodes(t *testing.T) {
+func TestCloseExperimentCloseBuiltBinaryExitCodes(t *testing.T) {
 	bin := buildVerdiBinary(t)
 
 	t.Run("ordinary close, no experiments", func(t *testing.T) {

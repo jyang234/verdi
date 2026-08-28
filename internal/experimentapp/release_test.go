@@ -275,6 +275,50 @@ func releaseManifestPath(root string) string {
 	return filepath.Join(filepath.Dir(mutationDefinitionPath(root)), "selected", "capsule-manifest.json")
 }
 
+func TestPublishRatifiedCapsuleSelectingPublishes(t *testing.T) {
+	fixture := buildReleaseFixture(t, []byte("workload-bytes\n"), experiment.DispositionSelectRecommended, "")
+	result := fixture.service.PublishRatifiedCapsule(context.Background(), fixture.identity)
+	if result.Outcome.Classification != ClassificationClean {
+		t.Fatalf("PublishRatifiedCapsule() outcome = %+v", result.Outcome)
+	}
+	if !result.CapsulePublished || result.Selected != "cache" || result.Disposition != experiment.DispositionSelectRecommended {
+		t.Fatalf("PublishRatifiedCapsule() = %+v, want published capsule selecting the winner", result)
+	}
+	raw, err := os.ReadFile(releaseManifestPath(fixture.root))
+	if err != nil {
+		t.Fatalf("published manifest unreadable: %v", err)
+	}
+	manifest, err := experiment.DecodeCapsuleManifest(raw)
+	if err != nil {
+		t.Fatalf("published manifest does not strict-decode: %v", err)
+	}
+	if manifest.Selected != "cache" || manifest.ResultDigest != fixture.winnerDigest {
+		t.Fatalf("published manifest = %+v", manifest)
+	}
+}
+
+func TestPublishRatifiedCapsuleNonSelectingIsCleanNoOp(t *testing.T) {
+	fixture := buildReleaseFixture(t, []byte("workload-bytes\n"), experiment.DispositionRejectAll, "")
+	result := fixture.service.PublishRatifiedCapsule(context.Background(), fixture.identity)
+	if result.Outcome.Classification != ClassificationClean {
+		t.Fatalf("PublishRatifiedCapsule(reject-all) outcome = %+v", result.Outcome)
+	}
+	if result.CapsulePublished || result.Selected != "" || result.ManifestDigest != "" {
+		t.Fatalf("PublishRatifiedCapsule(reject-all) = %+v, want no capsule", result)
+	}
+	if _, err := os.Lstat(releaseManifestPath(fixture.root)); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("non-selecting disposition published a capsule: %v", err)
+	}
+}
+
+func TestPublishRatifiedCapsuleRequiresAcceptedRatification(t *testing.T) {
+	_, service, identity, _, _ := ratifiableService(t)
+	result := service.PublishRatifiedCapsule(context.Background(), identity)
+	if result.Outcome.Classification != ClassificationVerdict || result.Outcome.Code != "ratification-not-accepted" {
+		t.Fatalf("PublishRatifiedCapsule(no ratification) outcome = %+v", result.Outcome)
+	}
+}
+
 func TestReleaseRatifiedSelectingPublishesCapsuleAndReleases(t *testing.T) {
 	fixture := buildReleaseFixture(t, []byte("workload-bytes\n"), experiment.DispositionSelectRecommended, "")
 	releaser := &fakeWorkspaceReleaser{}

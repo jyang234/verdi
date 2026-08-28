@@ -230,15 +230,17 @@ var showcaseCoverage = map[string][]coverageEvidence{
 	// real behavior the corpus can demonstrate for this verb.
 	"cli:context": {goE2E("internal/showcasealign/cli_showcase_test.go")},
 
-	// cli:experiment (CSE Wave 5B, docs/superpowers/specs/2026-08-23-cse-
+	// cli:experiment (CSE Wave 5C, docs/superpowers/specs/2026-08-23-cse-
 	// wave-5-application-lifecycle-design.md §8, ledger SI-145): added for
-	// the Wave 5B registry — TestCLIShowcaseExperiment
-	// (cli_showcase_test.go) drives `verdi experiment status` against the
+	// the Wave 5C registry — TestCLIShowcaseExperiment
+	// (cli_showcase_test.go) drives `verdi experiment status`,
+	// `propose-ratification`, `publish-capsule`, and `release-workspaces` against the
 	// real provisioned examples/showcase store, which carries no
 	// comparative experiments at all (a genuine, disclosed fact, not a
 	// workaround — cli:context's own no-constitution pattern above),
-	// proving the real binary's typed operational refusal for an
-	// experiment the accepted tree does not carry, with nothing mutated.
+	// proving the real binary's typed operational refusals for an
+	// experiment neither proposal nor accepted tree carries, with nothing
+	// mutated.
 	"cli:experiment": {goE2E("internal/showcasealign/cli_showcase_test.go")},
 
 	// cli:serve: `cmd/e2eharness/main.go` launches the real `verdi serve

@@ -45,7 +45,8 @@ func TestExperimentOperationGrammarBuiltBinary(t *testing.T) {
 	bin := buildVerdiBinary(t)
 	operations := []string{
 		"inspect", "discover-capabilities", "validate-draft", "review-registration", "status", "explain-result",
-		"draft-definition", "capture-candidate", "reconcile-draft", "propose-registration", "start", "resume",
+		"draft-definition", "capture-candidate", "reconcile-draft", "propose-registration", "propose-ratification",
+		"publish-capsule", "release-workspaces", "start", "resume",
 	}
 	for _, operation := range operations {
 		t.Run(operation, func(t *testing.T) {
@@ -676,9 +677,37 @@ func runGitForExperimentTest(t *testing.T, dir string, args ...string) {
 	t.Helper()
 	cmd := exec.Command("git", args...)
 	cmd.Dir = dir
+	if len(args) > 0 && args[0] == "commit" {
+		cmd.Env = experimentFixtureCommitEnvironment(os.Environ())
+	}
 	if output, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("git %v: %v\n%s", args, err, output)
 	}
+}
+
+func experimentFixtureCommitEnvironment(base []string) []string {
+	overrides := []string{
+		"TZ=UTC",
+		"GIT_AUTHOR_NAME=Verdi Fixture",
+		"GIT_AUTHOR_EMAIL=fixture@verdi.invalid",
+		"GIT_AUTHOR_DATE=1704067200 +0000",
+		"GIT_COMMITTER_NAME=Verdi Fixture",
+		"GIT_COMMITTER_EMAIL=fixture@verdi.invalid",
+		"GIT_COMMITTER_DATE=1704067200 +0000",
+	}
+	keys := make(map[string]bool, len(overrides))
+	for _, value := range overrides {
+		key, _, _ := strings.Cut(value, "=")
+		keys[key] = true
+	}
+	environment := make([]string, 0, len(base)+len(overrides))
+	for _, value := range base {
+		key, _, _ := strings.Cut(value, "=")
+		if !keys[key] {
+			environment = append(environment, value)
+		}
+	}
+	return append(environment, overrides...)
 }
 
 func TestExperimentInventoryBuiltBinary(t *testing.T) {
@@ -690,6 +719,24 @@ func TestExperimentInventoryBuiltBinary(t *testing.T) {
 	}
 	if stdout != "" {
 		t.Fatalf("stdout = %q, want empty", stdout)
+	}
+	const legacyWave5BUsage = `usage: verdi experiment <operation> [flags]
+
+operations:
+  inspect
+  discover-capabilities
+  validate-draft
+  review-registration
+  status
+  explain-result
+  draft-definition
+  capture-candidate
+  reconcile-draft
+  propose-registration
+  start
+  resume`
+	if !strings.HasPrefix(stderr, legacyWave5BUsage+"\n") {
+		t.Fatalf("inventory changed through-5B usage bytes:\n%s", stderr)
 	}
 
 	for _, operation := range []string{
@@ -703,6 +750,9 @@ func TestExperimentInventoryBuiltBinary(t *testing.T) {
 		"capture-candidate",
 		"reconcile-draft",
 		"propose-registration",
+		"propose-ratification",
+		"publish-capsule",
+		"release-workspaces",
 		"start",
 		"resume",
 	} {
@@ -711,7 +761,7 @@ func TestExperimentInventoryBuiltBinary(t *testing.T) {
 		}
 	}
 	for _, forbidden := range []string{"ratify", "capsule", "release", "closure"} {
-		if strings.Contains(stderr, forbidden) {
+		if strings.Contains(stderr, "  "+forbidden+"\n") {
 			t.Errorf("inventory contains Wave 5C operation %q:\n%s", forbidden, stderr)
 		}
 	}
