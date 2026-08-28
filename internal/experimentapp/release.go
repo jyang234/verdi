@@ -1,6 +1,6 @@
 // Selected evidence capsules and disposable-workspace release (Wave 5C
 // Task 9; design §§3–5, 9–10; AC-4, DC-8/DC-9, SI-141, SI-146). Only an
-// exact accepted v2 ratification triggers this operation: a selecting
+// exact accepted v3 ratification triggers this operation (SI-150): a selecting
 // disposition first builds, publishes, and re-verifies the immutable
 // capsule manifest from accepted bytes under the checkout writer lock,
 // then releases every receipt-derived disposable workspace; non-selecting
@@ -23,7 +23,7 @@ import (
 	"github.com/jyang234/verdi/internal/draftmutation"
 	"github.com/jyang234/verdi/internal/execworkspace"
 	"github.com/jyang234/verdi/internal/experiment"
-	"github.com/jyang234/verdi/internal/governanceprincipal"
+	"github.com/jyang234/verdi/internal/experimentpolicy"
 )
 
 // capsuleManifestFile is the immutable publication target under the
@@ -37,11 +37,11 @@ type WorkspaceReleaser interface {
 }
 
 // ReleaseAuthority is the configured authority for the release operation:
-// the accepted governance profile and trust-fact reader the ratification
-// proof re-resolves through, plus the workspace releaser.
+// only the workspace releaser (Task 10 correction, SI-150, controller pin
+// P5). Accepted ratification authority is resolved entirely from the
+// accepted Git tree itself — there is no caller-supplied governance
+// profile or trust-fact reader left to configure.
 type ReleaseAuthority struct {
-	Profile  governanceprincipal.Profile
-	Facts    governanceprincipal.TrustFactReader
 	Releaser WorkspaceReleaser
 }
 
@@ -68,8 +68,8 @@ func (s *Service) ReleaseRatified(ctx context.Context, identity Identity, author
 	if err := identity.validate(); err != nil {
 		return ReleaseResult{Outcome: operationalOutcome("invalid-request", err)}
 	}
-	if authority.Facts == nil || authority.Releaser == nil {
-		return ReleaseResult{Outcome: operationalOutcome("release-authority-invalid", fmt.Errorf("experimentapp: release requires a configured trust-fact reader and workspace releaser"))}
+	if authority.Releaser == nil {
+		return ReleaseResult{Outcome: operationalOutcome("release-authority-invalid", fmt.Errorf("experimentapp: release requires a configured workspace releaser"))}
 	}
 
 	snapshot, err := resolveAccepted(ctx, s.git, identity)
@@ -80,7 +80,7 @@ func (s *Service) ReleaseRatified(ctx context.Context, identity Identity, author
 		}
 		return ReleaseResult{Outcome: operationalOutcome("accepted-tree-invalid", err)}
 	}
-	facts, outcome := s.acceptedRatificationAt(ctx, identity, AcceptedRatificationAuthority{Profile: authority.Profile, Facts: authority.Facts}, snapshot)
+	facts, outcome := s.acceptedRatificationAt(ctx, identity, snapshot)
 	if outcome.Classification != ClassificationClean {
 		return ReleaseResult{Outcome: outcome}
 	}
@@ -88,46 +88,9 @@ func (s *Service) ReleaseRatified(ctx context.Context, identity Identity, author
 		AcceptedHead: snapshot.revision.Head, ExperimentPath: snapshot.experimentPath,
 		Disposition: facts.record.Disposition,
 	}
-	definitionDigest, err := experiment.DefinitionDigest(facts.definition)
-	if err != nil {
-		result.Outcome = operationalOutcome("definition-invalid", err)
-		return result
-	}
-	candidatePaths, err := experiment.ValidateCandidatePatchesFromSource(snapshot.source, snapshot.experimentPath, facts.definition)
-	if err != nil {
-		result.Outcome = operationalOutcome("candidate-invalid", err)
-		return result
-	}
-	capabilitiesBytes, err := fs.ReadFile(snapshot.source, path.Join(snapshot.experimentPath, "evaluator-capabilities.json"))
-	if err != nil {
-		result.Outcome = operationalOutcome("capabilities-unreadable", err)
-		return result
-	}
-	capabilities, err := experiment.DecodeCapabilities(capabilitiesBytes)
-	if err != nil {
-		result.Outcome = operationalOutcome("capabilities-invalid", err)
-		return result
-	}
-
-	// Exactly one sealed effective policy decision for the operation; the
-	// retention ceiling is read only through the seal-checked payload
-	// projection (SI-141).
-	decision, err := s.policy.ResolvePolicy(ctx, clonePolicyRequest(PolicyRequest{
-		CheckoutRoot: identity.CheckoutRoot, ExperimentPath: snapshot.experimentPath,
-		Spike: identity.Spike, AcceptedCommit: snapshot.revision.Head,
-		Definition: facts.definition, Capabilities: capabilities, CandidatePaths: candidatePaths,
-	}))
-	if err != nil {
-		result.Outcome = policyResolutionErrorOutcome(err)
-		return result
-	}
-	if decision == nil {
-		result.Outcome = operationalOutcome("policy-resolution-invalid", fmt.Errorf("experimentapp: policy resolver returned nil decision"))
-		return result
-	}
-	payload, err := decision.Payload()
-	if err != nil {
-		result.Outcome = operationalOutcome("policy-resolution-invalid", err)
+	definitionDigest, payload, payloadOutcome := s.resolveEffectivePolicyPayload(ctx, identity, snapshot, facts)
+	if payloadOutcome.Classification != ClassificationClean {
+		result.Outcome = payloadOutcome
 		return result
 	}
 
@@ -242,14 +205,66 @@ func (s *Service) releaseTargets(snapshot acceptedSnapshot, definition experimen
 	return targets, cleanOutcome()
 }
 
-// publishSelectedCapsule assembles the closed retained set from accepted
-// bytes, binds and encodes the manifest, publishes it immutably under the
-// checkout writer lock, and strict-decodes the winning bytes before any
-// release may run.
-func (s *Service) publishSelectedCapsule(ctx context.Context, identity Identity, snapshot acceptedSnapshot, facts acceptedRatificationFacts, definitionDigest string, retainedArtifactBytes int64) (manifestDigest, selected string, outcome Outcome) {
+// resolveEffectivePolicyPayload resolves the accepted definition digest and
+// the one sealed effective policy payload for an accepted, ratified
+// experiment: exactly one PolicyResolver call, with the retention ceiling
+// read only through the seal-checked payload projection (SI-141). Both
+// ReleaseRatified and VerifyAcceptedClosureEvidence (Task 10 correction)
+// share this single resolution path — extracted unchanged from
+// ReleaseRatified's prior body.
+func (s *Service) resolveEffectivePolicyPayload(ctx context.Context, identity Identity, snapshot acceptedSnapshot, facts acceptedRatificationFacts) (definitionDigest string, payload experimentpolicy.Payload, outcome Outcome) {
+	definitionDigest, err := experiment.DefinitionDigest(facts.definition)
+	if err != nil {
+		return "", experimentpolicy.Payload{}, operationalOutcome("definition-invalid", err)
+	}
+	candidatePaths, err := experiment.ValidateCandidatePatchesFromSource(snapshot.source, snapshot.experimentPath, facts.definition)
+	if err != nil {
+		return "", experimentpolicy.Payload{}, operationalOutcome("candidate-invalid", err)
+	}
+	capabilitiesBytes, err := fs.ReadFile(snapshot.source, path.Join(snapshot.experimentPath, "evaluator-capabilities.json"))
+	if err != nil {
+		return "", experimentpolicy.Payload{}, operationalOutcome("capabilities-unreadable", err)
+	}
+	capabilities, err := experiment.DecodeCapabilities(capabilitiesBytes)
+	if err != nil {
+		return "", experimentpolicy.Payload{}, operationalOutcome("capabilities-invalid", err)
+	}
+	decision, err := s.policy.ResolvePolicy(ctx, clonePolicyRequest(PolicyRequest{
+		CheckoutRoot: identity.CheckoutRoot, ExperimentPath: snapshot.experimentPath,
+		Spike: identity.Spike, AcceptedCommit: snapshot.revision.Head,
+		Definition: facts.definition, Capabilities: capabilities, CandidatePaths: candidatePaths,
+	}))
+	if err != nil {
+		return "", experimentpolicy.Payload{}, policyResolutionErrorOutcome(err)
+	}
+	if decision == nil {
+		return "", experimentpolicy.Payload{}, operationalOutcome("policy-resolution-invalid", fmt.Errorf("experimentapp: policy resolver returned nil decision"))
+	}
+	payload, err = decision.Payload()
+	if err != nil {
+		return "", experimentpolicy.Payload{}, operationalOutcome("policy-resolution-invalid", err)
+	}
+	return definitionDigest, payload, cleanOutcome()
+}
+
+// capsuleBindingResult is the deterministic recomputed capsule manifest and
+// its canonical bytes for one accepted, ratified, selecting experiment.
+type capsuleBindingResult struct {
+	manifest experiment.CapsuleManifest
+	encoded  []byte
+}
+
+// resolveCapsuleBinding recomputes the deterministic capsule manifest for
+// one accepted ratification fact set: the complete retained-input
+// gathering and experiment.BindCapsuleManifest. It is the single owner
+// both ReleaseRatified's publication path and
+// VerifyAcceptedClosureEvidence's byte-verification path call (Task 10
+// correction: extraction, not duplication, from publishSelectedCapsule's
+// prior body — ReleaseRatified's behavior is unchanged).
+func (s *Service) resolveCapsuleBinding(ctx context.Context, identity Identity, snapshot acceptedSnapshot, facts acceptedRatificationFacts, definitionDigest string, retainedArtifactBytes int64) (capsuleBindingResult, Outcome) {
 	inputs, inputsOutcome := s.retainedInputs(ctx, identity, snapshot, facts)
 	if inputsOutcome.Classification != ClassificationClean {
-		return "", "", inputsOutcome
+		return capsuleBindingResult{}, inputsOutcome
 	}
 	manifest, err := experiment.BindCapsuleManifest(experiment.CapsuleBindingInput{
 		Definition: facts.definition, DefinitionDigest: definitionDigest,
@@ -258,14 +273,26 @@ func (s *Service) publishSelectedCapsule(ctx context.Context, identity Identity,
 	})
 	if err != nil {
 		if experiment.IsCapsuleArtifactOversized(err) {
-			return "", "", verdictOutcome("capsule-retention-refused", err.Error())
+			return capsuleBindingResult{}, verdictOutcome("capsule-retention-refused", err.Error())
 		}
-		return "", "", operationalOutcome("capsule-binding-invalid", err)
+		return capsuleBindingResult{}, operationalOutcome("capsule-binding-invalid", err)
 	}
 	encoded, err := experiment.EncodeCapsuleManifest(manifest)
 	if err != nil {
-		return "", "", operationalOutcome("capsule-binding-invalid", err)
+		return capsuleBindingResult{}, operationalOutcome("capsule-binding-invalid", err)
 	}
+	return capsuleBindingResult{manifest: manifest, encoded: encoded}, cleanOutcome()
+}
+
+// publishSelectedCapsule recomputes the deterministic capsule binding,
+// publishes it immutably under the checkout writer lock, and strict-decodes
+// the winning bytes before any release may run.
+func (s *Service) publishSelectedCapsule(ctx context.Context, identity Identity, snapshot acceptedSnapshot, facts acceptedRatificationFacts, definitionDigest string, retainedArtifactBytes int64) (manifestDigest, selected string, outcome Outcome) {
+	binding, bindingOutcome := s.resolveCapsuleBinding(ctx, identity, snapshot, facts, definitionDigest, retainedArtifactBytes)
+	if bindingOutcome.Classification != ClassificationClean {
+		return "", "", bindingOutcome
+	}
+	manifest, encoded := binding.manifest, binding.encoded
 
 	manifestPath := path.Join(snapshot.experimentPath, capsuleManifestFile)
 	if err := experiment.ValidateRepoRelativePath(manifestPath); err != nil {

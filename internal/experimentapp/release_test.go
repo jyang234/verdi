@@ -15,6 +15,7 @@ import (
 	"github.com/jyang234/verdi/internal/execworkspace"
 	"github.com/jyang234/verdi/internal/experiment"
 	"github.com/jyang234/verdi/internal/experimentdecision"
+	"github.com/jyang234/verdi/internal/experimenthuman"
 	"github.com/jyang234/verdi/internal/governanceprincipal"
 )
 
@@ -38,7 +39,8 @@ type releaseFixture struct {
 	service      *Service
 	identity     Identity
 	git          *fakeGit
-	resolution   governanceprincipal.PrincipalResolution
+	verification experimenthuman.Verification
+	subjects     []string
 	locked       experiment.Definition
 	defDigest    string
 	winnerDigest string
@@ -188,34 +190,27 @@ func buildReleaseFixture(t *testing.T, workloadBytes []byte, disposition experim
 	winnerDigest := writeReleasableRun(t, root, locked, "run-alpha", 50, workloadBytes)
 	writeReleasableRun(t, root, locked, "run-zeta", 100, workloadBytes)
 
-	resolution := ratificationResolve(t, ratificationFacts("user-123"))
-	record := experiment.Ratification{
-		Schema: experiment.RatificationSchemaV2, ResultDigest: winnerDigest,
-		ActorV2: &experiment.RatificationActor{
-			TrustSource: resolution.Claim.TrustSource, Subject: resolution.Claim.Subject,
-			PrincipalID: string(resolution.PrincipalID),
-		},
-		Disposition: disposition, Candidate: candidate,
-	}
+	// Task 10 correction (SI-150, design §7): release/closure authorize on
+	// a GENUINE v3 retained proof only — generate a real offline-human
+	// Ed25519 identity, sign the exact action-bound challenge over the
+	// accepted HEAD in use, and mint the sealed proof through a genuine
+	// experimenthuman.Verify call before planting the accepted bytes.
+	signer := newRatificationSigner(t)
+	subjects := []string{signer.subject}
+	refreshAcceptedGit(t, service, root, "request-path-v2", subjects...)
+	reasonText := ""
 	if candidate != "" {
-		record.Reason = "explicit selection for the release fixture"
+		reasonText = "explicit selection for the release fixture"
 	}
-	encoded, err := experiment.EncodeRatification(record)
-	if err != nil {
-		t.Fatal(err)
-	}
-	// plantAcceptedRatification writes ratification.yaml first, so build
-	// the pair record against the exact planted layout.
-	experimentDir := filepath.Dir(definitionPath)
-	if err := os.WriteFile(filepath.Join(experimentDir, "ratification.yaml"), encoded, 0o600); err != nil {
-		t.Fatal(err)
-	}
-	attribution, err := governanceprincipal.NewPrincipalAttribution(resolution.PrincipalID)
+	verification := mintRatificationVerification(t, root, identity, signer, subjects, winnerDigest, disposition, candidate, reasonText)
+	encoded := ratificationV3Bytes(t, verification, winnerDigest, disposition, candidate, reasonText)
+	attribution, err := governanceprincipal.NewPrincipalAttribution(verification.Resolution.PrincipalID)
 	if err != nil {
 		t.Fatal(err)
 	}
 	pair := ratificationPairRecord(t, root, encoded, attribution)
 	plantAcceptedRatification(t, root, service, encoded, &pair)
+	plantRatificationGovernanceProfile(service.git.(*fakeGit), subjects...)
 
 	git, ok := service.git.(*fakeGit)
 	if !ok {
@@ -228,7 +223,7 @@ func buildReleaseFixture(t *testing.T, workloadBytes []byte, disposition experim
 	targets := releaseFixtureTargets(t, root, locked, defDigest, []string{"run-alpha", "run-zeta"})
 	return releaseFixture{
 		root: root, service: service, identity: identity, git: git,
-		resolution: resolution, locked: locked, defDigest: defDigest,
+		verification: verification, subjects: subjects, locked: locked, defDigest: defDigest,
 		winnerDigest: winnerDigest, targets: targets,
 	}
 }
@@ -273,10 +268,7 @@ func releaseFixtureTargets(t *testing.T, root string, def experiment.Definition,
 
 func releaseAuthority(t *testing.T, releaser WorkspaceReleaser) ReleaseAuthority {
 	t.Helper()
-	return ReleaseAuthority{
-		Profile: ratificationProfile(t, "github"), Facts: ratificationFacts("user-123"),
-		Releaser: releaser,
-	}
+	return ReleaseAuthority{Releaser: releaser}
 }
 
 func releaseManifestPath(root string) string {
@@ -483,6 +475,7 @@ func TestReleaseRatifiedWorkspaceIdentityMismatchRefused(t *testing.T) {
 	}
 	fixture.service.git = gitFromExperimentDir(t, fixture.root, "request-path-v2")
 	git := fixture.service.git.(*fakeGit)
+	plantRatificationGovernanceProfile(git, fixture.subjects...)
 	addReleaseBlob(t, git, releaseWorkloadPath, []byte("workload-bytes\n"), "100644")
 	addReleaseBlob(t, git, releaseContractPath, releaseContractBytes(), "100644")
 	addReleaseBlob(t, git, releaseFixturePath, releaseFixtureBytes(), "100644")
@@ -520,6 +513,7 @@ func plantReceiptOnlyRun(t *testing.T, fixture releaseFixture, run string, encod
 	}
 	fixture.service.git = gitFromExperimentDir(t, fixture.root, "request-path-v2")
 	git := fixture.service.git.(*fakeGit)
+	plantRatificationGovernanceProfile(git, fixture.subjects...)
 	addReleaseBlob(t, git, releaseWorkloadPath, workloadBytes, "100644")
 	addReleaseBlob(t, git, releaseContractPath, releaseContractBytes(), "100644")
 	addReleaseBlob(t, git, releaseFixturePath, releaseFixtureBytes(), "100644")
