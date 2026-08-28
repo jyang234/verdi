@@ -1,7 +1,8 @@
 # CSE Wave 5 Application and Lifecycle Authority Design
 
 **Status:** Owner-approved design; repository authority becomes effective when
-the reviewed commit carrying this document and SI-139 through SI-149 reaches
+the reviewed commit carrying this document, SI-139 through SI-148, and
+SI-160 through SI-161 reaches
 the configured default branch.
 
 **Planning base:** `8cbb97aa738e34e4703f6d8d57892357b8cf2bd8`
@@ -406,7 +407,7 @@ remain strict decode/state-history compatibility, but neither may be newly
 proposed or authorize capsule publication, workspace release, or closure.
 State derivation may continue to describe their historical ratification
 posture; every authority-bearing consumer refuses them before effects.
-SI-150 supersedes SI-143's and SI-144's V2 accepted-authority mechanism and
+SI-161 supersedes SI-143's and SI-144's V2 accepted-authority mechanism and
 narrows SI-147's no-durable-token rule only for the action-bound ratification
 proof required at accepted use; their remaining decisions stay unchanged.
 
@@ -814,7 +815,7 @@ conformance is green. No unit may absorb another Wave 5 feature lane merely
 because up to three orchestration slots exist.
 
 The Task 10 correction discovered after initial implementation cannot begin
-until this retained-proof amendment and SI-150 receive their one independent
+until this retained-proof amendment and SI-161 receive their one independent
 cross-model authority review and closure. Specification authority is authored
 and repaired by Codex; Claude reviews it read-only. Runtime/schema/test work is
 then implemented by Claude and independently reviewed and adjudicated by
@@ -836,13 +837,13 @@ orchestration and the Wave 3B handoff:
 | Wave 5 CSE CLI and agent adapters | §§2, 3, 8, 11 | One CLI namespace extended in 5B then 5C, plus one unchanged agent-safe MCP union over one core |
 | AC-5 same typed operations | §§2–3, 8 | Adapter parsing/rendering separated from core semantics |
 | AC-5 human registration lock | §§3, 7 | Proposal bytes separated from merge-signaled accepted authority |
-| AC-5 authenticated ratification | §§3, 7–9, SI-150 | Ratification V3 retains the exact action-bound challenge/signature beside the claim/id; accepted use re-verifies genuine evidence against signed and current accepted profile authority before comparing the id; V1/V2 remain history only |
-| Task 10 accepted-use authentication review finding | §§7–11, SI-150 | Role membership is explicitly configuration, never evidence; the retained proof is rebound to accepted ratification input/provenance, capsule bytes, release, closure, and preflight without a caller fact source or second identity store |
+| AC-5 authenticated ratification | §§3, 7–9, SI-161 | Ratification V3 retains the exact action-bound challenge/signature beside the claim/id; accepted use re-verifies genuine evidence against signed and current accepted profile authority before comparing the id; V1/V2 remain history only |
+| Task 10 accepted-use authentication review finding | §§7–11, SI-161 | Role membership is explicitly configuration, never evidence; the retained proof is rebound to accepted ratification input/provenance, capsule bytes, release, closure, and preflight without a caller fact source or second identity store |
 | AC-5 spike closure | §9 | Additive evidence provider consumes one application-core byte-reverified closure result through the existing edge, and real close/preflight/prepare share its predicate; no new edge or adapter-side capsule binder |
 | AC-4 reproduction rule deferred by Wave 3B | §4 | Minimal registered run-count rule over existing unanimous aggregate |
 | AC-4 cleanup deferred by Wave 3B | §§3, 9 | Release only after durable ratification; minimal evidence excluded |
 | AC-4 selected capsule deferred by Wave 3B | §9 | Exact closed inventory over existing capsule v1 manifest |
-| Exact capsule artifact-id vocabulary left unnamed by the inventory | §9, SI-149 | Owner-approved one-to-one member mapping, including `fixture-<registered-fixture-id>`; manifest intentionally excluded as a member |
+| Exact capsule artifact-id vocabulary left unnamed by the inventory | §9, SI-160 | Owner-approved one-to-one member mapping, including `fixture-<registered-fixture-id>`; manifest intentionally excluded as a member |
 | AC-6 concrete policy resolver deferred by Wave 3B | §5 | Generic Context Integrity layered-payload selection plus typed commutative CSE reduction; no feature-local hierarchy |
 | AC-6 policy constraints | §§5, 9 | Paths, classes, evaluators, exact environment values, shared grants, observation/retained-artifact byte ceilings, sources, and mandatory guards; each limit has one owned enforcement boundary |
 | AC-6 mutation provenance | §6 | CSE-specific strict append-only record; read-only detection plus explicit direct-edit reconciliation mutation |
