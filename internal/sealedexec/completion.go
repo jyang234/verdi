@@ -390,7 +390,7 @@ func buildReceiptEvent(request ExecutionRequest, child WorkspaceFacts, resultEve
 		Authority: receipt.Authority, ExecutionEventChainRoot: receipt.EventChainRoot,
 		Detail: contextevent.Detail{
 			Mode: contextevent.DetailInline, MediaType: contextevent.MediaTypeJSON,
-			Digest: digestBytes(receiptBytes), RedactionProfile: contextevent.RedactionProfileStandard,
+			Digest: digestBytes(receiptJSON), RedactionProfile: contextevent.RedactionProfileStandard,
 			RedactedJSON: receiptJSON,
 		},
 	}

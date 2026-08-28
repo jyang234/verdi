@@ -12,6 +12,198 @@ import (
 	"github.com/jyang234/verdi/internal/contextevent"
 )
 
+// EncodeExecutionPartial canonically encodes the actual request/run state
+// available at an incomplete terminal boundary.
+func EncodeExecutionPartial(request ExecutionRequest, run ExecutionRun) ([]byte, error) {
+	if _, err := EncodeExecutionRequest(request); err != nil {
+		return nil, fmt.Errorf("sealedexec: encode execution partial request: %w", err)
+	}
+	if err := validateHandbackRunIdentity(request, run, true); err != nil {
+		return nil, fmt.Errorf("sealedexec: encode execution partial run: %w", err)
+	}
+	_, witnesses, err := completionAuthority(run)
+	if err != nil {
+		return nil, fmt.Errorf("sealedexec: encode execution partial authority: %w", err)
+	}
+	partial := ExecutionPartial{
+		Schema: ExecutionPartialSchemaID, Flight: request.Flight, Lane: request.Lane,
+		Epoch: request.Epoch, Session: request.Session, Action: request.Action,
+		ManifestRevision: request.ManifestRevision, ManifestDigest: request.ManifestDigest,
+		Adapter: request.Adapter, AdapterVersion: request.AdapterVersion,
+		WorkspaceID: run.Workspace.WorkspaceID, AdapterSessionRef: run.AdapterSessionRef,
+		Authority: run.Authority, Witnesses: witnesses,
+		EventAcks: append(make([]contextevent.EventAck, 0, len(run.Acks)), run.Acks...),
+	}
+	if err := validateExecutionPartial(partial); err != nil {
+		return nil, err
+	}
+	return canonjson.Marshal(partial)
+}
+
+// DecodeExecutionPartial strictly decodes canonical incomplete request/run
+// state and rejects unknown, missing, null, or contradictory fields.
+func DecodeExecutionPartial(reader io.Reader) (ExecutionPartial, error) {
+	var partial ExecutionPartial
+	raw, err := decodeStrict(reader, &partial)
+	if err != nil {
+		return ExecutionPartial{}, fmt.Errorf("sealedexec: decode execution partial: %w", err)
+	}
+	if err := requireFields(raw, "schema", "flight", "lane", "epoch", "session", "action", "manifest_revision", "manifest_digest", "adapter", "adapter_version", "workspace_id", "adapter_session_ref", "authority", "witnesses", "event_acks"); err != nil {
+		return ExecutionPartial{}, err
+	}
+	if err := validateExecutionPartial(partial); err != nil {
+		return ExecutionPartial{}, err
+	}
+	canonical, err := canonjson.Marshal(partial)
+	if err != nil {
+		return ExecutionPartial{}, err
+	}
+	if !bytes.Equal(raw, canonical) {
+		return ExecutionPartial{}, fmt.Errorf("sealedexec: execution partial is not byte-canonical")
+	}
+	return partial, nil
+}
+
+func validateExecutionPartial(partial ExecutionPartial) error {
+	if partial.Schema != ExecutionPartialSchemaID {
+		return fmt.Errorf("sealedexec: execution partial schema must be %q", ExecutionPartialSchemaID)
+	}
+	if err := validateControlIdentity(partial.Flight, partial.Lane, partial.Epoch, partial.Session, "runway-not-carried", partial.WorkspaceID, false); err != nil {
+		return err
+	}
+	switch partial.Action {
+	case ActionStart, ActionResume:
+	default:
+		return fmt.Errorf("sealedexec: unknown execution partial action %q", partial.Action)
+	}
+	if err := validateDigest("execution partial manifest_digest", partial.ManifestDigest); err != nil {
+		return err
+	}
+	switch partial.Adapter {
+	case contextevent.AdapterCodex, contextevent.AdapterClaude:
+	default:
+		return fmt.Errorf("sealedexec: unknown execution partial adapter %q", partial.Adapter)
+	}
+	if err := validateControlText("execution partial adapter_version", partial.AdapterVersion, false); err != nil {
+		return err
+	}
+	if err := validateControlText("execution partial adapter_session_ref", partial.AdapterSessionRef, true); err != nil {
+		return err
+	}
+	if partial.Witnesses == nil {
+		return fmt.Errorf("sealedexec: execution partial witnesses must be non-null")
+	}
+	if err := validateSortedTexts("execution partial witnesses", partial.Witnesses); err != nil {
+		return err
+	}
+	switch partial.Authority {
+	case contextevent.AuthorityAuthoritative:
+		if len(partial.Witnesses) != 0 {
+			return fmt.Errorf("sealedexec: authoritative execution partial carries adverse witnesses")
+		}
+	case contextevent.AuthorityAdvisory:
+		if len(partial.Witnesses) == 0 {
+			return fmt.Errorf("sealedexec: advisory execution partial lacks explicit witnesses")
+		}
+	default:
+		return fmt.Errorf("sealedexec: unknown execution partial authority %q", partial.Authority)
+	}
+	if partial.EventAcks == nil {
+		return fmt.Errorf("sealedexec: execution partial event_acks must be non-null")
+	}
+	for i, ack := range partial.EventAcks {
+		encoded, err := contextevent.EncodeEventAck(ack)
+		if err != nil {
+			return fmt.Errorf("sealedexec: execution partial event_acks[%d]: %w", i, err)
+		}
+		canonical, err := contextevent.DecodeEventAck(bytes.NewReader(encoded))
+		if err != nil || canonical != ack {
+			return fmt.Errorf("sealedexec: execution partial event_acks[%d] is not canonical", i)
+		}
+		if ack.Flight != partial.Flight || ack.Lane != partial.Lane || ack.Epoch != partial.Epoch || ack.Session != partial.Session || ack.ManifestRevision != partial.ManifestRevision {
+			return fmt.Errorf("sealedexec: execution partial event_acks[%d] contradicts execution identity", i)
+		}
+		if i > 0 {
+			prior := partial.EventAcks[i-1]
+			if ack.SourceSequence != prior.SourceSequence+1 || ack.GlobalSequence <= prior.GlobalSequence {
+				return fmt.Errorf("sealedexec: execution partial event_acks are discontinuous")
+			}
+		}
+	}
+	return nil
+}
+
+// PreservedExecutionForBytes returns the sole controller-owned locator for the
+// exact carried bytes. None is represented by a non-nil empty byte slice.
+func PreservedExecutionForBytes(state PreservedState, data []byte) (PreservedExecution, error) {
+	switch state {
+	case PreservedNone:
+		if data == nil || len(data) != 0 {
+			return PreservedExecution{}, fmt.Errorf("sealedexec: preserved none requires non-null empty bytes")
+		}
+		return PreservedExecution{State: PreservedNone}, nil
+	case PreservedPartial, PreservedFinalized:
+		if len(data) == 0 {
+			return PreservedExecution{}, fmt.Errorf("sealedexec: preserved %s requires nonempty bytes", state)
+		}
+		digest := digestBytes(data)
+		return PreservedExecution{State: state, Ref: &PreservedExecutionRef{
+			Schema: PreservedExecutionRefSchemaID,
+			ID:     "controller-preserved/sha256/" + strings.TrimPrefix(digest, "sha256:"),
+			Digest: digest,
+		}}, nil
+	default:
+		return PreservedExecution{}, fmt.Errorf("sealedexec: unknown preserved state %q", state)
+	}
+}
+
+// ValidateQuarantinePreservation proves that the quarantine record and the
+// exact controller-carried bytes describe the same preserved execution.
+func ValidateQuarantinePreservation(record QuarantineRecord, data []byte) error {
+	if data == nil {
+		return fmt.Errorf("sealedexec: quarantine preserved bytes must be non-null")
+	}
+	want, err := PreservedExecutionForBytes(record.Preserved.State, data)
+	if err != nil {
+		return err
+	}
+	if !preservedExecutionEqual(record.Preserved, want) {
+		return fmt.Errorf("sealedexec: quarantine preserved locator contradicts exact bytes")
+	}
+	switch record.Preserved.State {
+	case PreservedNone:
+		return nil
+	case PreservedPartial:
+		partial, err := DecodeExecutionPartial(bytes.NewReader(data))
+		if err != nil {
+			return fmt.Errorf("sealedexec: quarantine partial bytes: %w", err)
+		}
+		if partial.Flight != record.Flight || partial.Lane != record.Lane || partial.Epoch != record.Epoch || partial.Session != record.Session || partial.WorkspaceID != record.WorkspaceID {
+			return fmt.Errorf("sealedexec: quarantine partial bytes contradict record identity")
+		}
+	case PreservedFinalized:
+		result, err := DecodeExecutionResult(bytes.NewReader(data))
+		if err != nil {
+			return fmt.Errorf("sealedexec: quarantine finalized bytes: %w", err)
+		}
+		if result.Flight != record.Flight || result.Lane != record.Lane || result.Epoch != record.Epoch || result.Session != record.Session ||
+			result.ATCRunway != record.ATCRunway || result.ExecutionWorkspaceID != record.WorkspaceID ||
+			result.InputCommit != record.Repository.Input.Commit || result.InputTree != record.Repository.Input.Tree ||
+			record.Repository.Output.State != QuarantineOutputObserved || result.OutputCommit != record.Repository.Output.Commit || result.OutputTree != record.Repository.Output.Tree ||
+			record.Receipt.State != QuarantineReceiptDurable || record.Receipt.EventAck == nil || result.Receipt.Digest != record.Receipt.Digest || result.ReceiptEventAck != *record.Receipt.EventAck {
+			return fmt.Errorf("sealedexec: quarantine finalized bytes contradict record facts")
+		}
+	}
+	return nil
+}
+
+func preservedExecutionEqual(left, right PreservedExecution) bool {
+	if left.State != right.State || (left.Ref == nil) != (right.Ref == nil) {
+		return false
+	}
+	return left.Ref == nil || *left.Ref == *right.Ref
+}
+
 // EncodeHandbackRecord validates, self-digests, and canonically encodes a
 // successful handback record. A nonblank stale digest is rejected.
 func EncodeHandbackRecord(record HandbackRecord) ([]byte, error) {
@@ -453,7 +645,8 @@ func validateQuarantineReasonFacts(record QuarantineRecord) error {
 	case QuarantineRunwayDirty, QuarantineRunwayMoved, QuarantineChildDirty,
 		QuarantineNonDescendant, QuarantineProtectedSpecChange,
 		QuarantineFastForwardFailed, QuarantinePostVerificationMismatch,
-		QuarantineRepositoryVerificationFailed, QuarantineChildOutputMismatch:
+		QuarantineRepositoryVerificationFailed, QuarantineChildOutputMismatch,
+		QuarantineHandbackDurabilityFailed:
 		if record.Receipt.State != QuarantineReceiptDurable || record.Preserved.State != PreservedFinalized {
 			return fmt.Errorf("sealedexec: handback quarantine requires a durable finalized result")
 		}
@@ -549,6 +742,10 @@ func validateQuarantineReasonFacts(record QuarantineRecord) error {
 		if !preAll() || record.Observed.FastForward != FastForwardSucceeded || record.Observed.PostRunway.State != RepositoryObserved ||
 			(record.Observed.PostRunway.Clean && record.Observed.PostRunway.Commit == record.Repository.Output.Commit && record.Observed.PostRunway.Tree == record.Repository.Output.Tree) {
 			return fmt.Errorf("sealedexec: post-verification-mismatch lacks a postcheck mismatch")
+		}
+	case QuarantineHandbackDurabilityFailed:
+		if !preAll() || record.Observed.FastForward != FastForwardSucceeded || !postIsOutput() {
+			return fmt.Errorf("sealedexec: handback-durability-failed requires exact clean prechecks, successful fast-forward, and exact clean output postcheck")
 		}
 	case QuarantineNonAuthoritative, QuarantineOutputWriteFailed:
 		if record.Receipt.State != QuarantineReceiptDurable || record.Preserved.State != PreservedFinalized || !noObservations() {

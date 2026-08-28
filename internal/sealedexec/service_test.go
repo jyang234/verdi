@@ -11,7 +11,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jyang234/verdi/internal/canonjson"
 	"github.com/jyang234/verdi/internal/contextcompile"
 	"github.com/jyang234/verdi/internal/contextevent"
 	"github.com/jyang234/verdi/internal/execworkspace"
@@ -444,10 +443,7 @@ func TestContextExecutionAcknowledgedStream_Behavioral(t *testing.T) {
 		t.Fatal(err)
 	}
 	summaryRaw := `{"type":"turn.started"}`
-	summaryDigest, err := canonjson.Digest(map[string]any{"type": "turn.started"})
-	if err != nil {
-		t.Fatal(err)
-	}
+	summaryDigest := rawDigest([]byte(summaryRaw))
 	summaryDetail := contextevent.Detail{
 		Mode: contextevent.DetailInline, MediaType: contextevent.MediaTypeJSON,
 		Digest: summaryDigest, RedactionProfile: contextevent.RedactionProfileStandard,

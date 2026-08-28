@@ -297,17 +297,19 @@ func TestExecutionHandbackService_Behavioral(t *testing.T) {
 		if got, want := fixture.calls, []string{"persist-quarantine"}; !reflect.DeepEqual(got, want) {
 			t.Fatalf("output-write calls = %q, want %q", got, want)
 		}
+		if !bytes.Equal(fixture.control.quarantineBytes, fixture.completion.ResultBytes) {
+			t.Fatalf("controller persisted bytes = %q, want exact finalized bytes %q", fixture.control.quarantineBytes, fixture.completion.ResultBytes)
+		}
 	})
 
 	t.Run("terminal durability failure preserves partial bytes without release", func(t *testing.T) {
 		fixture := newHandbackFixture(t, contextevent.AuthorityAuthoritative)
-		partial := []byte("inspectable provider output\n")
-		partialRef := PreservedExecutionRef{Schema: PreservedExecutionRefSchemaID, ID: "controller/partial-1", Digest: rawDigest(partial)}
+		partial := mustExecutionPartial(t, fixture.request, fixture.run)
 		request := fixture.requestValue()
 		request.Phase = HandbackPhaseTerminalDurabilityFailed
 		request.Completion = nil
 		request.PartialBytes = partial
-		request.Preserved = PreservedExecution{State: PreservedPartial, Ref: &partialRef}
+		request.Preserved = mustPreservedExecution(t, PreservedPartial, partial)
 		outcome, err := fixture.service().Apply(context.Background(), request)
 		assertHandbackFailure(t, fixture, outcome, err, ErrOperational, QuarantineTerminalDurabilityFailed)
 		if !bytes.Equal(outcome.ResultBytes, partial) {
@@ -319,30 +321,47 @@ func TestExecutionHandbackService_Behavioral(t *testing.T) {
 		if got, want := fixture.calls, []string{"persist-quarantine"}; !reflect.DeepEqual(got, want) {
 			t.Fatalf("terminal failure calls = %q, want %q", got, want)
 		}
+		if !bytes.Equal(fixture.control.quarantineBytes, partial) {
+			t.Fatalf("controller persisted bytes = %q, want exact partial bytes %q", fixture.control.quarantineBytes, partial)
+		}
+	})
+
+	t.Run("canonical partial from a different run fails before persistence", func(t *testing.T) {
+		fixture := newHandbackFixture(t, contextevent.AuthorityAuthoritative)
+		otherRun := fixture.run
+		otherRun.AdapterSessionRef = "different-provider-session"
+		partial := mustExecutionPartial(t, fixture.request, otherRun)
+		request := fixture.requestValue()
+		request.Phase = HandbackPhaseTerminalDurabilityFailed
+		request.Completion = nil
+		request.PartialBytes = partial
+		request.Preserved = mustPreservedExecution(t, PreservedPartial, partial)
+		outcome, err := fixture.service().Apply(context.Background(), request)
+		if !errors.Is(err, ErrOperational) || outcome.ExitCode != 2 || outcome.Quarantine != nil || len(fixture.calls) != 0 {
+			t.Fatalf("different-run partial outcome/error/calls = %#v / %v / %q", outcome, err, fixture.calls)
+		}
 	})
 
 	t.Run("execution verdict preserves an optional partial and quarantines", func(t *testing.T) {
 		fixture := newHandbackFixture(t, contextevent.AuthorityAuthoritative)
-		partial := []byte("interrupted output\n")
-		partialRef := PreservedExecutionRef{Schema: PreservedExecutionRefSchemaID, ID: "controller/interrupted-1", Digest: rawDigest(partial)}
+		partial := mustExecutionPartial(t, fixture.request, fixture.run)
 		request := fixture.requestValue()
 		request.Phase = HandbackPhaseExecutionIncompleteVerdict
 		request.Completion = nil
 		request.PartialBytes = partial
-		request.Preserved = PreservedExecution{State: PreservedPartial, Ref: &partialRef}
+		request.Preserved = mustPreservedExecution(t, PreservedPartial, partial)
 		outcome, err := fixture.service().Apply(context.Background(), request)
 		assertHandbackFailure(t, fixture, outcome, err, ErrVerdict, QuarantineExecutionIncomplete)
 	})
 
 	t.Run("provider operational failure preserves partial output and exits operational", func(t *testing.T) {
 		fixture := newHandbackFixture(t, contextevent.AuthorityAuthoritative)
-		partial := []byte("provider failure output\n")
-		partialRef := PreservedExecutionRef{Schema: PreservedExecutionRefSchemaID, ID: "controller/provider-failure-1", Digest: rawDigest(partial)}
+		partial := mustExecutionPartial(t, fixture.request, fixture.run)
 		request := fixture.requestValue()
 		request.Phase = HandbackPhaseExecutionIncompleteOperational
 		request.Completion = nil
 		request.PartialBytes = partial
-		request.Preserved = PreservedExecution{State: PreservedPartial, Ref: &partialRef}
+		request.Preserved = mustPreservedExecution(t, PreservedPartial, partial)
 		outcome, err := fixture.service().Apply(context.Background(), request)
 		assertHandbackFailure(t, fixture, outcome, err, ErrOperational, QuarantineExecutionIncomplete)
 	})
@@ -406,15 +425,58 @@ func TestExecutionHandbackService_Behavioral(t *testing.T) {
 	})
 
 	t.Run("control persistence failures and post-ack release failure retain durable state", func(t *testing.T) {
-		t.Run("handback ack persistence", func(t *testing.T) {
+		t.Run("typed handback persistence failure uses usable controller for finalized quarantine", func(t *testing.T) {
 			fixture := newHandbackFixture(t, contextevent.AuthorityAuthoritative)
 			fixture.control.handbackErr = errors.New("controller persistence unavailable")
 			outcome, err := fixture.service().Apply(context.Background(), fixture.requestValue())
-			if !errors.Is(err, ErrOperational) || outcome.ExitCode != 2 || outcome.Released {
+			if !errors.Is(err, ErrOperational) || outcome.ExitCode != 2 || outcome.Released || outcome.Quarantine == nil || outcome.Quarantine.Reason != QuarantineReason("handback-durability-failed") {
 				t.Fatalf("handback persistence outcome/error = %#v / %v", outcome, err)
 			}
-			if outcome.Handback == nil || !bytes.Equal(outcome.ResultBytes, fixture.completion.ResultBytes) {
+			if outcome.Handback == nil || !bytes.Equal(outcome.ResultBytes, fixture.completion.ResultBytes) || !bytes.Equal(fixture.control.quarantineBytes, fixture.completion.ResultBytes) {
 				t.Fatalf("handback persistence lost record/result: %#v", outcome)
+			}
+			if got, want := fixture.calls[len(fixture.calls)-2:], []string{"persist-handback", "persist-quarantine"}; !reflect.DeepEqual(got, want) {
+				t.Fatalf("handback recovery tail = %q, want %q", got, want)
+			}
+			assertNoReleaseOrForbiddenGit(t, fixture.calls)
+		})
+
+		t.Run("invalid handback acknowledgment uses usable controller for finalized quarantine", func(t *testing.T) {
+			fixture := newHandbackFixture(t, contextevent.AuthorityAuthoritative)
+			fixture.control.invalidHandbackAck = true
+			outcome, err := fixture.service().Apply(context.Background(), fixture.requestValue())
+			if !errors.Is(err, ErrOperational) || outcome.ExitCode != 2 || outcome.Released || outcome.Quarantine == nil || outcome.Quarantine.Reason != QuarantineReason("handback-durability-failed") {
+				t.Fatalf("invalid handback ack outcome/error = %#v / %v", outcome, err)
+			}
+			if got, want := fixture.calls[len(fixture.calls)-2:], []string{"persist-handback", "persist-quarantine"}; !reflect.DeepEqual(got, want) {
+				t.Fatalf("invalid-ack recovery tail = %q, want %q", got, want)
+			}
+			assertNoReleaseOrForbiddenGit(t, fixture.calls)
+		})
+
+		t.Run("poisoned handback transport returns original failure without recovery mutation", func(t *testing.T) {
+			fixture := newHandbackFixture(t, contextevent.AuthorityAuthoritative)
+			fixture.control.handbackErr = errors.New("controller transport poisoned")
+			fixture.control.usable = false
+			outcome, err := fixture.service().Apply(context.Background(), fixture.requestValue())
+			if !errors.Is(err, ErrOperational) || outcome.ExitCode != 2 || outcome.Released || outcome.Quarantine != nil || !strings.Contains(err.Error(), "controller transport poisoned") {
+				t.Fatalf("poisoned handback outcome/error = %#v / %v", outcome, err)
+			}
+			if got := fixture.calls[len(fixture.calls)-1:]; !reflect.DeepEqual(got, []string{"persist-handback"}) {
+				t.Fatalf("poisoned handback tail = %q", got)
+			}
+		})
+
+		t.Run("failed handback recovery quarantine is primary and never releases", func(t *testing.T) {
+			fixture := newHandbackFixture(t, contextevent.AuthorityAuthoritative)
+			fixture.control.handbackErr = errors.New("handback typed failure")
+			fixture.control.quarantineErr = errors.New("recovery quarantine failed")
+			outcome, err := fixture.service().Apply(context.Background(), fixture.requestValue())
+			if !errors.Is(err, ErrOperational) || outcome.ExitCode != 2 || outcome.Released || outcome.Quarantine == nil || !strings.Contains(err.Error(), "recovery quarantine failed") {
+				t.Fatalf("failed recovery quarantine outcome/error = %#v / %v", outcome, err)
+			}
+			if got, want := fixture.calls[len(fixture.calls)-2:], []string{"persist-handback", "persist-quarantine"}; !reflect.DeepEqual(got, want) {
+				t.Fatalf("failed recovery tail = %q, want %q", got, want)
 			}
 			assertNoReleaseOrForbiddenGit(t, fixture.calls)
 		})
@@ -491,8 +553,7 @@ func newHandbackFixture(t *testing.T, authority contextevent.Authority) *handbac
 		t.Fatalf("prepare completion: %v", err)
 	}
 	fixture := &handbackFixture{t: t, request: completionFixture.request, run: completionFixture.run, completion: completion}
-	finalizedRef := PreservedExecutionRef{Schema: PreservedExecutionRefSchemaID, ID: "controller/finalized-1", Digest: rawDigest(completion.ResultBytes)}
-	fixture.preserved = PreservedExecution{State: PreservedFinalized, Ref: &finalizedRef}
+	fixture.preserved = mustPreservedExecution(t, PreservedFinalized, completion.ResultBytes)
 	fixture.repository = &handbackRepositoryFake{fixture: fixture,
 		runway:     RepositoryState{Path: fixture.request.ATCRunway, Commit: fixture.request.InputCommit, Tree: fixture.request.InputTree, Clean: true},
 		child:      RepositoryState{Path: fixture.run.Workspace.Path, Commit: completion.Result.OutputCommit, Tree: completion.Result.OutputTree, Clean: true},
@@ -500,7 +561,7 @@ func newHandbackFixture(t *testing.T, authority contextevent.Authority) *handbac
 		descendant: true, diff: []gitx.DiffEntry{{Status: "M", Path: "internal/example.go"}},
 		fastForwardResult: gitx.FastForwardResult{Category: gitx.FastForwardSucceeded, Attempted: true},
 	}
-	fixture.control = &handbackControlFake{fixture: fixture}
+	fixture.control = &handbackControlFake{fixture: fixture, usable: true}
 	fixture.releaser = &handbackReleaserFake{fixture: fixture}
 	return fixture
 }
@@ -589,10 +650,13 @@ func (f *handbackRepositoryFake) FastForwardOnly(_ context.Context, runway, outp
 }
 
 type handbackControlFake struct {
-	fixture       *handbackFixture
-	handbackErr   error
-	quarantineErr error
-	abortErr      error
+	fixture            *handbackFixture
+	handbackErr        error
+	quarantineErr      error
+	abortErr           error
+	usable             bool
+	invalidHandbackAck bool
+	quarantineBytes    []byte
 }
 
 func (f *handbackControlFake) PersistHandback(_ context.Context, record HandbackRecord) (ControlAck, error) {
@@ -601,16 +665,44 @@ func (f *handbackControlFake) PersistHandback(_ context.Context, record Handback
 	if f.handbackErr != nil {
 		return ControlAck{}, f.handbackErr
 	}
-	return mustCanonicalControlAck(f.fixture.t, validControlAckForHandback(canonical)), nil
+	ack := validControlAckForHandback(canonical)
+	if f.invalidHandbackAck {
+		ack.WorkspaceID = "different-workspace"
+	}
+	return mustCanonicalControlAck(f.fixture.t, ack), nil
 }
 
-func (f *handbackControlFake) PersistQuarantine(_ context.Context, record QuarantineRecord) (ControlAck, error) {
+func (f *handbackControlFake) Usable() bool { return f.usable }
+
+func (f *handbackControlFake) PersistQuarantine(_ context.Context, record QuarantineRecord, preservedBytes []byte) (ControlAck, error) {
 	f.fixture.calls = append(f.fixture.calls, "persist-quarantine")
 	canonical := mustCanonicalQuarantine(f.fixture.t, record)
+	if err := ValidateQuarantinePreservation(canonical, preservedBytes); err != nil {
+		f.fixture.t.Fatalf("invalid quarantine record/bytes pair: %v", err)
+	}
 	if f.quarantineErr != nil {
 		return ControlAck{}, f.quarantineErr
 	}
+	f.quarantineBytes = append([]byte{}, preservedBytes...)
 	return mustCanonicalControlAck(f.fixture.t, validControlAckForQuarantine(canonical)), nil
+}
+
+func mustExecutionPartial(t *testing.T, request ExecutionRequest, run ExecutionRun) []byte {
+	t.Helper()
+	encoded, err := EncodeExecutionPartial(request, run)
+	if err != nil {
+		t.Fatalf("EncodeExecutionPartial: %v", err)
+	}
+	return encoded
+}
+
+func mustPreservedExecution(t *testing.T, state PreservedState, data []byte) PreservedExecution {
+	t.Helper()
+	preserved, err := PreservedExecutionForBytes(state, data)
+	if err != nil {
+		t.Fatalf("PreservedExecutionForBytes: %v", err)
+	}
+	return preserved
 }
 
 func (f *handbackControlFake) PersistAbort(_ context.Context, record AbortRecord) (ControlAck, error) {

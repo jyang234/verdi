@@ -4,8 +4,6 @@ import (
 	"bufio"
 	"bytes"
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -86,7 +84,11 @@ func cmdContextExecution(args []string, stdin io.Reader, stdout, stderr io.Write
 		printSealedContextDiagnostic(stderr, "execution", request, err, runtime.root, run.Workspace.Path, run.Profile.CodexHome, run.Profile.Executable)
 		return 2
 	}
-	preserved := finalizedExecution(completion.ResultBytes)
+	preserved, err := finalizedExecution(completion.ResultBytes)
+	if err != nil {
+		printSealedContextDiagnostic(stderr, "execution", request, err, runtime.root, run.Workspace.Path, run.Profile.CodexHome, run.Profile.Executable)
+		return 2
+	}
 	if err := writeSealedExecutionResult(stdout, outPath, hasOut, completion.ResultBytes); err != nil {
 		outcome, quarantineErr := runtime.handback.Apply(ctx, sealedexec.HandbackRequest{
 			Phase: sealedexec.HandbackPhaseOutputWriteFailed, Request: request, Run: run,
@@ -363,12 +365,12 @@ func writeSealedExecutionResult(stdout io.Writer, outPath string, hasOut bool, d
 	return err
 }
 
-func finalizedExecution(data []byte) sealedexec.PreservedExecution {
-	return sealedexec.PreservedExecution{State: sealedexec.PreservedFinalized, Ref: &sealedexec.PreservedExecutionRef{
-		Schema: sealedexec.PreservedExecutionRefSchemaID,
-		ID:     "execution-result:" + strings.TrimPrefix(sealedBytesDigest(data), "sha256:"),
-		Digest: sealedBytesDigest(data),
-	}}
+func finalizedExecution(data []byte) (sealedexec.PreservedExecution, error) {
+	preserved, err := sealedexec.PreservedExecutionForBytes(sealedexec.PreservedFinalized, data)
+	if err != nil {
+		return sealedexec.PreservedExecution{}, fmt.Errorf("%w: identify finalized execution: %v", sealedexec.ErrOperational, err)
+	}
+	return preserved, nil
 }
 
 func (runtime sealedRuntime) quarantineIncomplete(ctx context.Context, request sealedexec.ExecutionRequest, run sealedexec.ExecutionRun, cause error) error {
@@ -379,9 +381,17 @@ func (runtime sealedRuntime) quarantineIncomplete(ctx context.Context, request s
 	if errors.Is(cause, sealedexec.ErrVerdict) {
 		phase = sealedexec.HandbackPhaseExecutionIncompleteVerdict
 	}
+	partial, err := sealedexec.EncodeExecutionPartial(request, run)
+	if err != nil {
+		return fmt.Errorf("%w: encode incomplete execution preservation: %v", sealedexec.ErrOperational, err)
+	}
+	preserved, err := sealedexec.PreservedExecutionForBytes(sealedexec.PreservedPartial, partial)
+	if err != nil {
+		return fmt.Errorf("%w: identify incomplete execution preservation: %v", sealedexec.ErrOperational, err)
+	}
 	outcome, err := runtime.handback.Apply(ctx, sealedexec.HandbackRequest{
 		Phase: phase, Request: request, Run: run,
-		Preserved: sealedexec.PreservedExecution{State: sealedexec.PreservedNone},
+		PartialBytes: partial, Preserved: preserved,
 	})
 	if sealedQuarantineDurable(outcome) {
 		return nil
@@ -393,9 +403,17 @@ func (runtime sealedRuntime) quarantineIncomplete(ctx context.Context, request s
 }
 
 func (runtime sealedRuntime) quarantineTerminal(ctx context.Context, request sealedexec.ExecutionRequest, run sealedexec.ExecutionRun) error {
+	partial, err := sealedexec.EncodeExecutionPartial(request, run)
+	if err != nil {
+		return fmt.Errorf("%w: encode terminal execution preservation: %v", sealedexec.ErrOperational, err)
+	}
+	preserved, err := sealedexec.PreservedExecutionForBytes(sealedexec.PreservedPartial, partial)
+	if err != nil {
+		return fmt.Errorf("%w: identify terminal execution preservation: %v", sealedexec.ErrOperational, err)
+	}
 	outcome, err := runtime.handback.Apply(ctx, sealedexec.HandbackRequest{
 		Phase: sealedexec.HandbackPhaseTerminalDurabilityFailed, Request: request, Run: run,
-		Preserved: sealedexec.PreservedExecution{State: sealedexec.PreservedNone},
+		PartialBytes: partial, Preserved: preserved,
 	})
 	if sealedQuarantineDurable(outcome) {
 		return nil
@@ -655,9 +673,4 @@ func (run *commandCodexRun) Stop(context.Context) (codex.ProcessStopResult, erro
 		return codex.ProcessStopResult{}, stopErr
 	}
 	return codex.ProcessStopResult{ExitCode: 130, ReasonCode: "interrupt-requested"}, nil
-}
-
-func sealedBytesDigest(data []byte) string {
-	sum := sha256.Sum256(data)
-	return "sha256:" + hex.EncodeToString(sum[:])
 }

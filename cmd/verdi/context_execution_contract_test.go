@@ -815,6 +815,7 @@ func runSuccessfulSealedStart(t *testing.T, bin string, outputFile, outputFailur
 		if !reflect.DeepEqual(fake.quarantines, []sealedexec.QuarantineReason{sealedexec.QuarantineOutputWriteFailed}) {
 			t.Fatalf("output failure quarantines = %v", fake.quarantines)
 		}
+		assertLifecyclePreservation(t, fake, sealedexec.PreservedFinalized)
 		if _, err := os.Stat(execworkspace.ReleasedPath(root, workspaceID)); !errors.Is(err, os.ErrNotExist) {
 			t.Fatalf("output failure release marker exists: %v", err)
 		}
@@ -831,6 +832,7 @@ func runSuccessfulSealedStart(t *testing.T, bin string, outputFile, outputFailur
 		if !reflect.DeepEqual(fake.quarantines, wantQuarantines) {
 			t.Fatalf("provider failure quarantines = %v, want %v", fake.quarantines, wantQuarantines)
 		}
+		assertLifecyclePreservation(t, fake, sealedexec.PreservedPartial)
 		if _, err := os.Stat(execworkspace.ReleasedPath(root, workspaceID)); !errors.Is(err, os.ErrNotExist) {
 			t.Fatalf("provider failure release marker exists: %v", err)
 		}
@@ -868,12 +870,14 @@ func runSuccessfulSealedStart(t *testing.T, bin string, outputFile, outputFailur
 		return
 	}
 	if failOperation == sealedexec.ControllerOperationPersistHandback {
-		if observation.exitCode != 2 || observation.stdout == "" || !strings.Contains(observation.stderr, string(sealedexec.ControllerErrorUnavailable)) {
+		if observation.exitCode != 2 || observation.stdout == "" || !strings.Contains(observation.stderr, string(sealedexec.QuarantineHandbackDurabilityFailed)) {
 			t.Fatalf("failed handback lifecycle = %#v", observation)
 		}
-		if len(fake.quarantines) != 0 {
-			t.Fatalf("failed handback invented quarantine: %v", fake.quarantines)
+		if !reflect.DeepEqual(fake.quarantines, []sealedexec.QuarantineReason{sealedexec.QuarantineHandbackDurabilityFailed}) ||
+			len(fake.calls) == 0 || fake.calls[len(fake.calls)-1] != sealedexec.ControllerOperationPersistQuarantine {
+			t.Fatalf("failed handback quarantine/call tail = %v/%v", fake.quarantines, fake.calls)
 		}
+		assertLifecyclePreservation(t, fake, sealedexec.PreservedFinalized)
 		if _, err := os.Stat(execworkspace.ReleasedPath(root, workspaceID)); !errors.Is(err, os.ErrNotExist) {
 			t.Fatalf("failed handback release marker exists: %v", err)
 		}
@@ -895,6 +899,7 @@ func runSuccessfulSealedStart(t *testing.T, bin string, outputFile, outputFailur
 		if !reflect.DeepEqual(fake.quarantines, []sealedexec.QuarantineReason{sealedexec.QuarantineTerminalDurabilityFailed}) {
 			t.Fatalf("failed completion quarantines = %v", fake.quarantines)
 		}
+		assertLifecyclePreservation(t, fake, sealedexec.PreservedPartial)
 		if _, err := os.Stat(execworkspace.ReleasedPath(root, workspaceID)); !errors.Is(err, os.ErrNotExist) {
 			t.Fatalf("failed completion release marker exists: %v", err)
 		}
@@ -1109,6 +1114,27 @@ func runInterruptedSealedStart(t *testing.T, bin string, signalBeforeActivation 
 		t.Fatalf("provider process %d survived normalized stop: %v", providerPID, err)
 	}
 	providerPID = 0
+	assertLifecyclePreservation(t, fake, sealedexec.PreservedPartial)
+	partial, err := sealedexec.DecodeExecutionPartial(bytes.NewReader(fake.preservedBytes[0]))
+	if err != nil {
+		t.Fatalf("decode interrupted controller-preserved partial: %v", err)
+	}
+	if !reflect.DeepEqual(partial.EventAcks, fake.eventAcks) {
+		t.Fatalf("interrupted preserved event acknowledgments = %#v, want exact controller-issued sequence %#v", partial.EventAcks, fake.eventAcks)
+	}
+	for i := range fake.eventAcks {
+		got, err := contextevent.EncodeEventAck(partial.EventAcks[i])
+		if err != nil {
+			t.Fatalf("encode interrupted preserved event_acks[%d]: %v", i, err)
+		}
+		want, err := contextevent.EncodeEventAck(fake.eventAcks[i])
+		if err != nil {
+			t.Fatalf("encode controller-issued event_acks[%d]: %v", i, err)
+		}
+		if !bytes.Equal(got, want) {
+			t.Fatalf("interrupted preserved event_acks[%d] bytes = %q, want exact controller-issued bytes %q", i, got, want)
+		}
+	}
 }
 
 func countControllerOperation(operations []sealedexec.ControllerOperation, want sealedexec.ControllerOperation) int {
@@ -1798,29 +1824,32 @@ func mustReadFile(t *testing.T, path string) []byte {
 }
 
 type sealedLifecycleController struct {
-	t                *testing.T
-	request          sealedexec.ExecutionRequest
-	profile          sealedexec.ProfileMaterial
-	resolution       sealedexec.ContextResolution
-	epoch            sealedexec.Verification
-	fail             sealedexec.ControllerOperation
-	failEventKind    contextevent.Kind
-	advisory         bool
-	profileMismatch  bool
-	recorderMismatch bool
-	allowQuarantine  bool
-	quarantines      []sealedexec.QuarantineReason
-	initialRevisions []contextevent.Revision
-	checkpointDigest string
-	expansionRoot    string
-	calls            []sealedexec.ControllerOperation
-	events           []contextevent.Event
-	global           uint64
-	eventObserved    chan<- contextevent.Kind
-	activeRevision   *sealedexec.ActiveRevision
-	pauseBeforeReply sealedexec.ControllerOperation
-	operationPaused  chan<- sealedexec.ControllerOperation
-	operationRelease <-chan struct{}
+	t                 *testing.T
+	request           sealedexec.ExecutionRequest
+	profile           sealedexec.ProfileMaterial
+	resolution        sealedexec.ContextResolution
+	epoch             sealedexec.Verification
+	fail              sealedexec.ControllerOperation
+	failEventKind     contextevent.Kind
+	advisory          bool
+	profileMismatch   bool
+	recorderMismatch  bool
+	allowQuarantine   bool
+	quarantines       []sealedexec.QuarantineReason
+	quarantineRecords []sealedexec.QuarantineRecord
+	preservedBytes    [][]byte
+	initialRevisions  []contextevent.Revision
+	checkpointDigest  string
+	expansionRoot     string
+	calls             []sealedexec.ControllerOperation
+	events            []contextevent.Event
+	eventAcks         []contextevent.EventAck
+	global            uint64
+	eventObserved     chan<- contextevent.Kind
+	activeRevision    *sealedexec.ActiveRevision
+	pauseBeforeReply  sealedexec.ControllerOperation
+	operationPaused   chan<- sealedexec.ControllerOperation
+	operationRelease  <-chan struct{}
 }
 
 func (f *sealedLifecycleController) serve(conn net.Conn) error {
@@ -1927,11 +1956,13 @@ func (f *sealedLifecycleController) result(call sealedexec.ControllerCall) (seal
 		event := call.RecorderAppend.Event
 		f.global++
 		f.events = append(f.events, event)
-		result.RecorderAppend = sealedexec.ControllerRecorderAppendResult{Schema: schema, Ack: contextevent.EventAck{
+		ack := contextevent.EventAck{
 			Schema: contextevent.AckSchemaID, Flight: event.Flight, Lane: event.Lane, Epoch: event.Epoch, Session: event.Session,
 			ManifestRevision: event.ManifestRevision, Kind: event.Kind, SourceSequence: event.SourceSequence,
 			EventDigest: event.EventDigest, GlobalSequence: f.global,
-		}}
+		}
+		f.eventAcks = append(f.eventAcks, ack)
+		result.RecorderAppend = sealedexec.ControllerRecorderAppendResult{Schema: schema, Ack: ack}
 	case sealedexec.ControllerOperationStoreAdapterSession:
 		result.StoreAdapterSession = sealedexec.ControllerStoreAdapterSessionResult{Schema: schema}
 	case sealedexec.ControllerOperationResolveReceiptInputs:
@@ -1973,16 +2004,56 @@ func (f *sealedLifecycleController) result(call sealedexec.ControllerCall) (seal
 		if !f.allowQuarantine {
 			return result, fmt.Errorf("unexpected lifecycle quarantine %q: %#v", call.PersistQuarantine.Record.Reason, call.PersistQuarantine.Record.Observed)
 		}
+		if err := sealedexec.ValidateQuarantinePreservation(call.PersistQuarantine.Record, call.PersistQuarantine.PreservedBytes); err != nil {
+			return result, fmt.Errorf("invalid lifecycle quarantine record/bytes pair: %w", err)
+		}
+		f.quarantines = append(f.quarantines, call.PersistQuarantine.Record.Reason)
+		f.quarantineRecords = append(f.quarantineRecords, call.PersistQuarantine.Record)
+		f.preservedBytes = append(f.preservedBytes, append([]byte{}, call.PersistQuarantine.PreservedBytes...))
 		ack, err := f.quarantineAck(call.PersistQuarantine.Record)
 		if err != nil {
 			return result, err
 		}
-		f.quarantines = append(f.quarantines, call.PersistQuarantine.Record.Reason)
 		result.PersistQuarantine = sealedexec.ControllerPersistQuarantineResult{Schema: schema, Ack: ack}
 	default:
 		return result, fmt.Errorf("unexpected lifecycle controller operation %q", call.Operation)
 	}
 	return result, nil
+}
+
+func assertLifecyclePreservation(t *testing.T, fake *sealedLifecycleController, state sealedexec.PreservedState) {
+	t.Helper()
+	if len(fake.quarantineRecords) != 1 || len(fake.preservedBytes) != 1 {
+		t.Fatalf("controller stored record/bytes pairs = %d/%d, want 1/1", len(fake.quarantineRecords), len(fake.preservedBytes))
+	}
+	record, preserved := fake.quarantineRecords[0], fake.preservedBytes[0]
+	if record.Preserved.State != state || record.Preserved.Ref == nil || len(preserved) == 0 {
+		t.Fatalf("controller preservation = %#v / %q, want nonempty %s bytes", record.Preserved, preserved, state)
+	}
+	wantDigest := sealedRawDigest(preserved)
+	wantID := "controller-preserved/sha256/" + strings.TrimPrefix(wantDigest, "sha256:")
+	if record.Preserved.Ref.Digest != wantDigest || record.Preserved.Ref.ID != wantID {
+		t.Fatalf("controller preservation ref = %#v, want id %q digest %q", record.Preserved.Ref, wantID, wantDigest)
+	}
+	switch state {
+	case sealedexec.PreservedPartial:
+		partial, err := sealedexec.DecodeExecutionPartial(bytes.NewReader(preserved))
+		if err != nil {
+			t.Fatalf("decode controller-preserved partial: %v", err)
+		}
+		if partial.Flight != record.Flight || partial.Lane != record.Lane || partial.Epoch != record.Epoch || partial.Session != record.Session || partial.WorkspaceID != record.WorkspaceID {
+			t.Fatalf("controller-preserved partial identity = %#v, record = %#v", partial, record)
+		}
+	case sealedexec.PreservedFinalized:
+		result, err := sealedexec.DecodeExecutionResult(bytes.NewReader(preserved))
+		if err != nil {
+			t.Fatalf("decode controller-preserved result: %v", err)
+		}
+		if result.Flight != record.Flight || result.Lane != record.Lane || result.Epoch != record.Epoch || result.Session != record.Session ||
+			result.ExecutionWorkspaceID != record.WorkspaceID || result.InputCommit != record.Repository.Input.Commit || result.OutputCommit != record.Repository.Output.Commit {
+			t.Fatalf("controller-preserved result identity = %#v, record = %#v", result, record)
+		}
+	}
 }
 
 func (f *sealedLifecycleController) checkpoint(proven sealedexec.Verification) (sealedexec.RecorderCheckpoint, error) {

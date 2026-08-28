@@ -585,10 +585,7 @@ func detailFor(object map[string]any) (contextevent.Detail, error) {
 		return contextevent.Detail{}, err
 	}
 	encoded = bytes.TrimSuffix(encoded, []byte("\n"))
-	digest, err := canonjson.Digest(object)
-	if err != nil {
-		return contextevent.Detail{}, err
-	}
+	digest := digestBytes(encoded)
 	detail := contextevent.Detail{Mode: contextevent.DetailInline, MediaType: contextevent.MediaTypeJSON, Digest: digest, RedactionProfile: contextevent.RedactionProfileStandard, RedactedJSON: json.RawMessage(encoded)}
 	if err := detail.Validate(); err != nil {
 		return contextevent.Detail{}, err

@@ -277,8 +277,9 @@ type ControllerPersistHandbackResult struct {
 	Ack    ControlAck
 }
 type ControllerPersistQuarantineRequest struct {
-	Schema string
-	Record QuarantineRecord
+	Schema         string
+	Record         QuarantineRecord
+	PreservedBytes []byte
 }
 type ControllerPersistQuarantineResult struct {
 	Schema string

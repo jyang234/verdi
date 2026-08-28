@@ -613,10 +613,14 @@ func encodeControllerCallPayload(call ControllerCall) (json.RawMessage, error) {
 		if err != nil {
 			return nil, err
 		}
+		if err := ValidateQuarantinePreservation(call.PersistQuarantine.Record, call.PersistQuarantine.PreservedBytes); err != nil {
+			return nil, err
+		}
 		return marshalControllerPayload(struct {
-			Schema string          `json:"schema"`
-			Record json.RawMessage `json:"record"`
-		}{wantSchema, trimFrame(record)})
+			Schema         string          `json:"schema"`
+			Record         json.RawMessage `json:"record"`
+			PreservedBytes []byte          `json:"preserved_bytes"`
+		}{wantSchema, trimFrame(record), call.PersistQuarantine.PreservedBytes})
 	case ControllerOperationPersistAbort:
 		if err := requireOnlyCallArm(call, call.PersistAbort); err != nil {
 			return nil, err
@@ -885,8 +889,9 @@ func decodeControllerCallPayload(raw json.RawMessage, call *ControllerCall) erro
 		call.PersistHandback = ControllerPersistHandbackRequest{schema, record}
 	case ControllerOperationPersistQuarantine:
 		var wire struct {
-			Schema string          `json:"schema"`
-			Record json.RawMessage `json:"record"`
+			Schema         string          `json:"schema"`
+			Record         json.RawMessage `json:"record"`
+			PreservedBytes []byte          `json:"preserved_bytes"`
 		}
 		if err := unmarshalControllerPayload(raw, &wire); err != nil {
 			return err
@@ -898,7 +903,10 @@ func decodeControllerCallPayload(raw json.RawMessage, call *ControllerCall) erro
 		if err != nil {
 			return err
 		}
-		call.PersistQuarantine = ControllerPersistQuarantineRequest{schema, record}
+		if err := ValidateQuarantinePreservation(record, wire.PreservedBytes); err != nil {
+			return err
+		}
+		call.PersistQuarantine = ControllerPersistQuarantineRequest{Schema: schema, Record: record, PreservedBytes: append([]byte{}, wire.PreservedBytes...)}
 	case ControllerOperationPersistAbort:
 		var wire struct {
 			Schema string          `json:"schema"`
@@ -2484,6 +2492,9 @@ func validateReceiptAppend(a ReceiptAppend, receiptBytes []byte) error {
 	}
 	if payload.Detail.Mode != contextevent.DetailInline || !bytes.Equal(payload.Detail.RedactedJSON, bytes.TrimSuffix(receiptBytes, []byte("\n"))) {
 		return fmt.Errorf("sealedexec: append-receipt detail must carry exact canonical receipt bytes")
+	}
+	if payload.Detail.Digest != digestBytes(payload.Detail.RedactedJSON) {
+		return fmt.Errorf("sealedexec: append-receipt detail digest does not authenticate exact carried receipt bytes")
 	}
 	return nil
 }

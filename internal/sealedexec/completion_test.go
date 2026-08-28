@@ -490,7 +490,7 @@ func assertCompletionIdentity(t *testing.T, fixture *completionFixture, completi
 	if !ok {
 		t.Fatalf("receipt payload type = %T", fixture.receipts.append.Event.Payload)
 	}
-	if !bytes.Equal(receiptPayload.Detail.RedactedJSON, receiptJSON) || receiptPayload.Detail.Digest != rawDigest(receiptBytes) ||
+	if !bytes.Equal(receiptPayload.Detail.RedactedJSON, receiptJSON) || receiptPayload.Detail.Digest != rawDigest(receiptJSON) ||
 		receiptPayload.ReceiptDigest != completion.Receipt.Digest || receiptPayload.ExecutionEventChainRoot != completion.EventChainRoot {
 		t.Fatalf("receipt event detail/identity mismatch: %#v", receiptPayload)
 	}

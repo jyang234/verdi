@@ -94,6 +94,20 @@ func TestAdapterStartUsesPinnedIsolationAndTypedInput(t *testing.T) {
 	}
 }
 
+func TestDetailForDigestsExactCarriedJSON(t *testing.T) {
+	detail, err := detailFor(map[string]any{"type": "turn.completed"})
+	if err != nil {
+		t.Fatalf("detailFor: %v", err)
+	}
+	want := adapterTestDigest(detail.RedactedJSON)
+	if detail.Digest != want {
+		t.Fatalf("detail digest = %q, want exact carried-byte digest %q", detail.Digest, want)
+	}
+	if old := adapterTestDigest(append(append([]byte{}, detail.RedactedJSON...), '\n')); detail.Digest == old {
+		t.Fatalf("detail digest retained obsolete LF framing: %q", detail.Digest)
+	}
+}
+
 func TestAdapterResumeTargetsExplicitVerifiedSession(t *testing.T) {
 	launch := adapterLaunch(t, sealedexec.ActionResume)
 	process := &cannedProcess{output: []byte("{\"type\":\"turn.completed\",\"usage\":{\"input_tokens\":1}}\n")}

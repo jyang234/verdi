@@ -2,6 +2,7 @@ package contextevent
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"unicode/utf8"
@@ -71,10 +72,8 @@ func (d Detail) Validate() error {
 		if !bytes.Equal(d.RedactedJSON, canonical) {
 			return fmt.Errorf("contextevent: inline redacted_json is not canonical")
 		}
-		want, err := canonjson.Digest(value)
-		if err != nil {
-			return err
-		}
+		sum := sha256.Sum256(d.RedactedJSON)
+		want := fmt.Sprintf("sha256:%x", sum)
 		if d.Digest != want {
 			return fmt.Errorf("contextevent: inline detail digest does not match redacted_json")
 		}

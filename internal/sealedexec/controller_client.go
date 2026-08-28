@@ -39,6 +39,17 @@ func NewControllerClient(transport io.ReadWriter) (*ControllerClient, error) {
 	return &ControllerClient{transport: closable, reader: bufio.NewReader(closable), next: 1}, nil
 }
 
+// Usable reports whether this sequential controller capability remains safe
+// for another typed call without exposing transport details.
+func (c *ControllerClient) Usable() bool {
+	if c == nil {
+		return false
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.transport != nil && c.reader != nil && c.poisoned == nil
+}
+
 // VerifyAuthority performs the typed verify-authority call.
 func (c *ControllerClient) VerifyAuthority(ctx context.Context, request ExecutionRequest) (AuthorityFacts, error) {
 	call := ControllerCall{Schema: ControllerCallSchemaID, Operation: ControllerOperationVerifyAuthority}
@@ -239,14 +250,17 @@ func (c *ControllerClient) PersistHandback(ctx context.Context, record HandbackR
 	return result.PersistHandback.Ack, wrapControllerMatchError(call.Operation, err)
 }
 
-// PersistQuarantine persists one exact quarantine record.
-func (c *ControllerClient) PersistQuarantine(ctx context.Context, record QuarantineRecord) (ControlAck, error) {
+// PersistQuarantine persists one exact quarantine record/bytes pair.
+func (c *ControllerClient) PersistQuarantine(ctx context.Context, record QuarantineRecord, preservedBytes []byte) (ControlAck, error) {
 	canonical, err := canonicalQuarantineRecord(record)
 	if err != nil {
 		return ControlAck{}, controllerResultMismatch(ControllerOperationPersistQuarantine, fmt.Sprintf("invalid record: %v", err))
 	}
+	if err := ValidateQuarantinePreservation(canonical, preservedBytes); err != nil {
+		return ControlAck{}, controllerResultMismatch(ControllerOperationPersistQuarantine, fmt.Sprintf("invalid preservation: %v", err))
+	}
 	call := ControllerCall{Schema: ControllerCallSchemaID, Operation: ControllerOperationPersistQuarantine}
-	call.PersistQuarantine = ControllerPersistQuarantineRequest{Schema: controllerRequestSchema(call.Operation), Record: canonical}
+	call.PersistQuarantine = ControllerPersistQuarantineRequest{Schema: controllerRequestSchema(call.Operation), Record: canonical, PreservedBytes: append([]byte{}, preservedBytes...)}
 	result, err := c.invoke(ctx, call)
 	if err == nil {
 		err = ValidateQuarantineAck(canonical, result.PersistQuarantine.Ack)

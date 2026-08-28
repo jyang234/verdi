@@ -8,6 +8,7 @@ import (
 	"io"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -22,6 +23,50 @@ import (
 )
 
 func TestContextControllerWireContract_Static(t *testing.T) {
+	t.Run("persist-quarantine carries required non-null preserved bytes", func(t *testing.T) {
+		record := validQuarantineRecord(t, QuarantineExecutionIncomplete)
+		call := ControllerCall{Schema: ControllerCallSchemaID, CallSequence: 1, Operation: ControllerOperationPersistQuarantine}
+		call.PersistQuarantine = ControllerPersistQuarantineRequest{Schema: controllerRequestSchema(call.Operation), Record: record, PreservedBytes: []byte{}}
+		encoded, err := EncodeControllerCall(call)
+		if err != nil {
+			t.Fatalf("EncodeControllerCall: %v", err)
+		}
+		if !bytes.Contains(encoded, []byte(`"preserved_bytes":""`)) {
+			t.Fatalf("persist-quarantine wire lacks required empty preserved_bytes: %s", encoded)
+		}
+
+		fixture := newHandbackFixture(t, contextevent.AuthorityAuthoritative)
+		partial := mustExecutionPartial(t, fixture.request, fixture.run)
+		partialRecord := QuarantineRecord{
+			Schema: ExecutionQuarantineSchemaID, Flight: fixture.request.Flight, Lane: fixture.request.Lane,
+			Epoch: fixture.request.Epoch, Session: fixture.request.Session, ATCRunway: fixture.request.ATCRunway,
+			WorkspaceID: fixture.run.Workspace.WorkspaceID, Receipt: QuarantineReceipt{State: QuarantineReceiptAbsent},
+			Repository: QuarantineRepository{Input: GitIdentity{Commit: fixture.request.InputCommit, Tree: fixture.request.InputTree}, Output: QuarantineOutput{State: QuarantineOutputAbsent}},
+			Observed:   emptyQuarantineObservations(), Reason: QuarantineExecutionIncomplete,
+			Preserved: mustPreservedExecution(t, PreservedPartial, partial),
+		}
+		partialRecord = mustCanonicalQuarantine(t, partialRecord)
+		for name, mutation := range map[string]func(*ControllerPersistQuarantineRequest){
+			"conflicting bytes": func(request *ControllerPersistQuarantineRequest) {
+				request.PreservedBytes = append(append([]byte{}, partial...), ' ')
+			},
+			"conflicting locator": func(request *ControllerPersistQuarantineRequest) {
+				request.Record.Preserved.Ref.ID = "controller-preserved/sha256/" + strings.Repeat("0", 64)
+				request.Record.Digest = ""
+				request.Record = mustCanonicalQuarantine(t, request.Record)
+			},
+		} {
+			t.Run(name, func(t *testing.T) {
+				request := ControllerPersistQuarantineRequest{Schema: controllerRequestSchema(call.Operation), Record: partialRecord, PreservedBytes: append([]byte{}, partial...)}
+				mutation(&request)
+				bad := ControllerCall{Schema: ControllerCallSchemaID, CallSequence: 1, Operation: ControllerOperationPersistQuarantine, PersistQuarantine: request}
+				if _, err := EncodeControllerCall(bad); err == nil {
+					t.Fatalf("EncodeControllerCall accepted %s", name)
+				}
+			})
+		}
+	})
+
 	t.Run("closed registry and typed canonical envelopes", func(t *testing.T) {
 		literals := []struct {
 			operation     ControllerOperation
@@ -188,7 +233,7 @@ func TestContextControllerWireContract_Static(t *testing.T) {
 				return client.PersistHandback(context.Background(), handbackInput)
 			}},
 			{name: "PersistQuarantine", operation: "persist-quarantine", requestSchema: "verdi.context-controller/persist-quarantine-request/v1", requestField: "record", requestValue: quarantineFrame, reply: persistQuarantineResult, want: persistQuarantineResult.PersistQuarantine.Ack, invoke: func(client *ControllerClient) (any, error) {
-				return client.PersistQuarantine(context.Background(), quarantineInput)
+				return client.PersistQuarantine(context.Background(), quarantineInput, []byte{})
 			}},
 			{name: "PersistAbort", operation: "persist-abort", requestSchema: "verdi.context-controller/persist-abort-request/v1", requestField: "record", requestValue: abortFrame, reply: persistAbortResult, want: persistAbortResult.PersistAbort.Ack, invoke: func(client *ControllerClient) (any, error) {
 				return client.PersistAbort(context.Background(), abortInput)
@@ -400,6 +445,9 @@ func TestContextControllerWireContract_Static(t *testing.T) {
 					if _, err := row.invoke(client); !errors.Is(err, ErrOperational) {
 						t.Fatalf("%s typed error = %v", row.name, err)
 					}
+					if !client.Usable() {
+						t.Fatalf("%s typed error poisoned a usable controller", row.name)
+					}
 				})
 			}
 		})
@@ -481,7 +529,7 @@ func TestContextControllerWireContract_Static(t *testing.T) {
 					return client.PersistHandback(context.Background(), handbackInput)
 				}},
 				{name: "quarantine ack", reply: badQuarantineAck, invoke: func(client *ControllerClient) (any, error) {
-					return client.PersistQuarantine(context.Background(), quarantineInput)
+					return client.PersistQuarantine(context.Background(), quarantineInput, []byte{})
 				}},
 				{name: "abort ack", reply: badAbortAck, invoke: func(client *ControllerClient) (any, error) {
 					return client.PersistAbort(context.Background(), abortInput)
@@ -497,6 +545,9 @@ func TestContextControllerWireContract_Static(t *testing.T) {
 					}
 					if _, err := mismatch.invoke(client); !errors.Is(err, ErrOperational) {
 						t.Fatalf("%s mismatch error = %v", mismatch.name, err)
+					}
+					if !client.Usable() {
+						t.Fatalf("%s operation-specific mismatch poisoned a usable controller", mismatch.name)
 					}
 				})
 			}
@@ -559,6 +610,18 @@ func TestContextControllerWireContract_Static(t *testing.T) {
 
 	t.Run("append receipt owns two-domain identity cross-checks", func(t *testing.T) {
 		request := validExecutionRequest(t, ActionStart)
+		t.Run("represented-byte digest", func(t *testing.T) {
+			receipt, event, _ := controllerReceiptFixture(t, request)
+			appendValue := ReceiptAppend{Receipt: receipt, Event: event}
+			receiptBytes, err := contextreceipt.EncodeReceipt(receipt)
+			if err != nil {
+				t.Fatal(err)
+			}
+			appendValue.Event.Payload.(*contextevent.ReceiptPayload).Detail.Digest = testDigest("wrong-represented-bytes")
+			if err := validateReceiptAppend(appendValue, receiptBytes); err == nil {
+				t.Fatal("validateReceiptAppend accepted a digest that does not authenticate exact carried redacted_json bytes")
+			}
+		})
 		for name, mutate := range map[string]func(*ReceiptAppend){
 			"receipt self digest": func(appendValue *ReceiptAppend) {
 				appendValue.Event.Payload.(*contextevent.ReceiptPayload).ReceiptDigest = testDigest("different-receipt")
@@ -578,13 +641,9 @@ func TestContextControllerWireContract_Static(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				digest, err := canonjson.Digest(value)
-				if err != nil {
-					t.Fatal(err)
-				}
 				detail := &appendValue.Event.Payload.(*contextevent.ReceiptPayload).Detail
 				detail.RedactedJSON = bytes.TrimSuffix(raw, []byte("\n"))
-				detail.Digest = digest
+				detail.Digest = rawDigest(detail.RedactedJSON)
 			},
 		} {
 			t.Run(name, func(t *testing.T) {
@@ -665,6 +724,9 @@ func TestContextControllerWireContract_Static(t *testing.T) {
 					if _, err := client.NextStamp(context.Background()); !errors.Is(err, ErrOperational) {
 						t.Fatalf("replayed reply error = %v", err)
 					}
+					if client.Usable() {
+						t.Fatal("replayed reply sequence left controller usable")
+					}
 					return
 				}
 				transport := &controllerMemoryTransport{read: bytes.NewReader(mustEncodeControllerResult(t, bad))}
@@ -674,6 +736,9 @@ func TestContextControllerWireContract_Static(t *testing.T) {
 				}
 				if _, err := client.NextStamp(context.Background()); !errors.Is(err, ErrOperational) {
 					t.Fatalf("gapped reply error = %v", err)
+				}
+				if client.Usable() {
+					t.Fatal("gapped reply sequence left controller usable")
 				}
 			})
 		}
@@ -690,6 +755,9 @@ func TestContextControllerWireContract_Static(t *testing.T) {
 		}
 		if _, err := client.NextStamp(context.Background()); !errors.Is(err, ErrOperational) {
 			t.Fatalf("poisoned client error = %v", err)
+		}
+		if client.Usable() {
+			t.Fatal("partial transport left controller usable")
 		}
 
 		short := &shortNilControllerTransport{}
@@ -716,6 +784,38 @@ func TestContextControllerWireContract_Static(t *testing.T) {
 		}
 		if _, err := client.NextStamp(context.Background()); !errors.Is(err, ErrOperational) {
 			t.Fatalf("canceled client was reused: %v", err)
+		}
+		if client.Usable() {
+			t.Fatal("pre-canceled context left controller usable")
+		}
+	})
+
+	t.Run("read decode and operation failures poison the client", func(t *testing.T) {
+		rows := []struct {
+			name  string
+			reply []byte
+		}{
+			{name: "read", reply: nil},
+			{name: "decode", reply: []byte("{}\n")},
+			{name: "operation", reply: mustEncodeControllerResult(t, controllerResultFixture(t, 1, ControllerOperationResolveContext))},
+		}
+		for _, row := range rows {
+			row := row
+			t.Run(row.name, func(t *testing.T) {
+				client, err := NewControllerClient(&controllerMemoryTransport{read: bytes.NewReader(row.reply)})
+				if err != nil {
+					t.Fatal(err)
+				}
+				if !client.Usable() {
+					t.Fatal("fresh controller is not usable")
+				}
+				if _, err := client.NextStamp(context.Background()); !errors.Is(err, ErrOperational) {
+					t.Fatalf("%s failure = %v", row.name, err)
+				}
+				if client.Usable() {
+					t.Fatalf("%s failure left controller usable", row.name)
+				}
+			})
 		}
 	})
 
@@ -762,6 +862,9 @@ func TestContextControllerWireContract_Static(t *testing.T) {
 		}
 		if _, err := client.NextStamp(context.Background()); !errors.Is(err, ErrOperational) {
 			t.Fatalf("canceled client was not poisoned: %v", err)
+		}
+		if client.Usable() {
+			t.Fatal("canceled blocking transport left controller usable")
 		}
 		if got := transport.writes.Load(); got != 1 {
 			t.Fatalf("poisoned client retried transport write; count = %d", got)
@@ -866,6 +969,9 @@ func assertLiteralControllerRequestFrame(t *testing.T, frame []byte, want contro
 	if want.requestField != "" {
 		fieldCount = 2
 	}
+	if want.operation == string(ControllerOperationPersistQuarantine) {
+		fieldCount++
+	}
 	if len(payload) != fieldCount {
 		t.Fatalf("%s payload fields = %v, want schema plus %q", want.name, payload, want.requestField)
 	}
@@ -875,6 +981,9 @@ func assertLiteralControllerRequestFrame(t *testing.T, frame []byte, want contro
 	}
 	if want.requestField == "" {
 		return
+	}
+	if want.operation == string(ControllerOperationPersistQuarantine) && !bytes.Equal(payload["preserved_bytes"], []byte(`""`)) {
+		t.Fatalf("%s payload preserved_bytes = %s, want required empty bytes", want.name, payload["preserved_bytes"])
 	}
 	_, ok := payload[want.requestField]
 	if !ok {
@@ -1096,7 +1205,7 @@ func controllerCallFixture(t *testing.T, sequence uint64, operation ControllerOp
 	case ControllerOperationPersistHandback:
 		call.PersistHandback = ControllerPersistHandbackRequest{Schema: controllerRequestSchema(operation), Record: validHandbackRecord(t)}
 	case ControllerOperationPersistQuarantine:
-		call.PersistQuarantine = ControllerPersistQuarantineRequest{Schema: controllerRequestSchema(operation), Record: validQuarantineRecord(t, QuarantineExecutionIncomplete)}
+		call.PersistQuarantine = ControllerPersistQuarantineRequest{Schema: controllerRequestSchema(operation), Record: validQuarantineRecord(t, QuarantineExecutionIncomplete), PreservedBytes: []byte{}}
 	case ControllerOperationPersistAbort:
 		quarantine := validQuarantineRecord(t, QuarantineTerminalDurabilityFailed)
 		quarantine = mustCanonicalQuarantine(t, quarantine)
@@ -1250,14 +1359,7 @@ func controllerReceiptFixture(t *testing.T, request ExecutionRequest) (contextre
 		t.Fatal(err)
 	}
 	receiptJSON := bytes.TrimSuffix(receiptBytes, []byte("\n"))
-	var receiptValue any
-	if err := json.Unmarshal(receiptJSON, &receiptValue); err != nil {
-		t.Fatal(err)
-	}
-	detailDigest, err := canonjson.Digest(receiptValue)
-	if err != nil {
-		t.Fatal(err)
-	}
+	detailDigest := rawDigest(receiptJSON)
 	detail := contextevent.Detail{Mode: contextevent.DetailInline, MediaType: contextevent.MediaTypeJSON, Digest: detailDigest, RedactionProfile: contextevent.RedactionProfileStandard, RedactedJSON: receiptJSON}
 	workspace := WorkspaceFacts{WorkspaceID: workspaceID, CurrentCommit: receipt.OutputCommit, CurrentTree: receipt.OutputTree}
 	event, err := buildEvent(request, workspace, 2, testDigest("execution-result-event"), nil, "2026-08-28T12:34:57Z", contextevent.KindReceipt, &contextevent.ReceiptPayload{Schema: payloadSchema, Role: contextreceipt.RoleBuilder, ReceiptDigest: receipt.Digest, Authority: contextreceipt.AuthorityAuthoritative, ExecutionEventChainRoot: receipt.EventChainRoot, Detail: detail})

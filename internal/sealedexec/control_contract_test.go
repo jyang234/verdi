@@ -8,6 +8,46 @@ import (
 )
 
 func TestExecutionControlRecordContract_Static(t *testing.T) {
+	t.Run("execution partial is strict canonical actual-run state", func(t *testing.T) {
+		fixture := newHandbackFixture(t, contextevent.AuthorityAuthoritative)
+		encoded, err := EncodeExecutionPartial(fixture.request, fixture.run)
+		if err != nil {
+			t.Fatalf("EncodeExecutionPartial: %v", err)
+		}
+		assertCanonicalControlBytes(t, encoded)
+		decoded, err := DecodeExecutionPartial(bytes.NewReader(encoded))
+		if err != nil {
+			t.Fatalf("DecodeExecutionPartial: %v", err)
+		}
+		if decoded.Schema != ExecutionPartialSchemaID || decoded.Flight != fixture.request.Flight ||
+			decoded.Lane != fixture.request.Lane || decoded.Epoch != fixture.request.Epoch ||
+			decoded.Session != fixture.request.Session || decoded.Action != fixture.request.Action ||
+			decoded.ManifestRevision != fixture.request.ManifestRevision || decoded.ManifestDigest != fixture.request.ManifestDigest ||
+			decoded.Adapter != fixture.request.Adapter || decoded.AdapterVersion != fixture.request.AdapterVersion ||
+			decoded.WorkspaceID != fixture.run.Workspace.WorkspaceID || decoded.AdapterSessionRef != fixture.run.AdapterSessionRef ||
+			decoded.Authority != fixture.run.Authority || len(decoded.EventAcks) != len(fixture.run.Acks) {
+			t.Fatalf("decoded execution partial lost request/run identity: %#v", decoded)
+		}
+		for name, mutation := range map[string][]byte{
+			"unknown":      bytes.Replace(encoded, []byte(`"schema":`), []byte(`"future":true,"schema":`), 1),
+			"null acks":    bytes.Replace(encoded, []byte(`"event_acks":[`), []byte(`"event_acks":null,"discard":[`), 1),
+			"noncanonical": append([]byte(" "), encoded...),
+		} {
+			t.Run(name, func(t *testing.T) {
+				if _, err := DecodeExecutionPartial(bytes.NewReader(mutation)); err == nil {
+					t.Fatalf("DecodeExecutionPartial accepted %s mutation", name)
+				}
+			})
+		}
+
+		badRun := fixture.run
+		badRun.Acks = append([]contextevent.EventAck(nil), fixture.run.Acks...)
+		badRun.Acks[0].Session = "other-session"
+		if _, err := EncodeExecutionPartial(fixture.request, badRun); err == nil {
+			t.Fatal("EncodeExecutionPartial accepted an acknowledgment from another run")
+		}
+	})
+
 	t.Run("handback blank-digest canonical round trip", func(t *testing.T) {
 		record := validHandbackRecord(t)
 		encoded, err := EncodeHandbackRecord(record)
@@ -36,8 +76,9 @@ func TestExecutionControlRecordContract_Static(t *testing.T) {
 			QuarantineNonAuthoritative, QuarantineExecutionIncomplete,
 			QuarantineTerminalDurabilityFailed, QuarantineOutputWriteFailed,
 			QuarantineRepositoryVerificationFailed, QuarantineChildOutputMismatch,
+			QuarantineHandbackDurabilityFailed,
 		}
-		if got, want := len(reasons), 13; got != want {
+		if got, want := len(reasons), 14; got != want {
 			t.Fatalf("quarantine reason count = %d, want %d", got, want)
 		}
 		seenReceipt := map[QuarantineReceiptState]bool{}
@@ -400,6 +441,10 @@ func validQuarantineRecord(t *testing.T, reason QuarantineReason) QuarantineReco
 		record.Observed.Runway, record.Observed.Child, record.Observed.Descendant = observedInput, observedChild, proven
 		record.Observed.FastForward = FastForwardSucceeded
 		record.Observed.PostRunway = RepoObservation{State: RepositoryObserved, Commit: testSHA2, Tree: testTree1, Clean: true}
+	case QuarantineHandbackDurabilityFailed:
+		record.Observed.Runway, record.Observed.Child, record.Observed.Descendant = observedInput, observedChild, proven
+		record.Observed.FastForward = FastForwardSucceeded
+		record.Observed.PostRunway = observedChild
 	case QuarantineNonAuthoritative:
 		// No handback observations are made for an advisory finalized result.
 	case QuarantineExecutionIncomplete:

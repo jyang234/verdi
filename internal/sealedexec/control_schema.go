@@ -3,12 +3,33 @@ package sealedexec
 import "github.com/jyang234/verdi/internal/contextevent"
 
 const (
+	ExecutionPartialSchemaID      = "verdi.context-execution-partial/v1"
 	ExecutionHandbackSchemaID     = "verdi.execution-handback/v1"
 	ExecutionQuarantineSchemaID   = "verdi.execution-quarantine/v1"
 	ExecutionAbortSchemaID        = "verdi.execution-abort/v1"
 	PreservedExecutionRefSchemaID = "verdi.preserved-execution-ref/v1"
 	ExecutionControlAckSchemaID   = "verdi.execution-control-ack/v1"
 )
+
+// ExecutionPartial is the canonical inspectable request/run state available
+// before a public execution result has been finalized.
+type ExecutionPartial struct {
+	Schema            string                  `json:"schema"`
+	Flight            string                  `json:"flight"`
+	Lane              string                  `json:"lane"`
+	Epoch             string                  `json:"epoch"`
+	Session           string                  `json:"session"`
+	Action            Action                  `json:"action"`
+	ManifestRevision  uint64                  `json:"manifest_revision"`
+	ManifestDigest    string                  `json:"manifest_digest"`
+	Adapter           contextevent.Adapter    `json:"adapter"`
+	AdapterVersion    string                  `json:"adapter_version"`
+	WorkspaceID       string                  `json:"workspace_id"`
+	AdapterSessionRef string                  `json:"adapter_session_ref"`
+	Authority         contextevent.Authority  `json:"authority"`
+	Witnesses         []string                `json:"witnesses"`
+	EventAcks         []contextevent.EventAck `json:"event_acks"`
+}
 
 // ControlDisposition is the closed private execution-control outcome.
 type ControlDisposition string
@@ -73,6 +94,7 @@ const (
 	QuarantineOutputWriteFailed            QuarantineReason = "output-write-failed"
 	QuarantineRepositoryVerificationFailed QuarantineReason = "repository-verification-failed"
 	QuarantineChildOutputMismatch          QuarantineReason = "child-output-mismatch"
+	QuarantineHandbackDurabilityFailed     QuarantineReason = "handback-durability-failed"
 )
 
 // QuarantineReceiptState closes the receipt union.

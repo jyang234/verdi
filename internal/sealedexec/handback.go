@@ -46,8 +46,9 @@ type HandbackRepository interface {
 // HandbackControlStore durably persists the private release-authorizing
 // records. A release is forbidden until a matching handback or abort ack.
 type HandbackControlStore interface {
+	Usable() bool
 	PersistHandback(context.Context, HandbackRecord) (ControlAck, error)
-	PersistQuarantine(context.Context, QuarantineRecord) (ControlAck, error)
+	PersistQuarantine(context.Context, QuarantineRecord, []byte) (ControlAck, error)
 	PersistAbort(context.Context, AbortRecord) (ControlAck, error)
 }
 
@@ -253,11 +254,11 @@ func (s *HandbackService) applyAuthoritative(ctx context.Context, input Handback
 	ack, err := s.ports.Control.PersistHandback(ctx, canonical)
 	if err != nil {
 		base.ExitCode = 2
-		return base, operational("persist successful handback", err)
+		return s.recoverFailedHandback(ctx, input, base, observed, operational("persist successful handback", err))
 	}
 	if err := ValidateHandbackAck(canonical, ack); err != nil {
 		base.ExitCode = 2
-		return base, operational("acknowledge successful handback", err)
+		return s.recoverFailedHandback(ctx, input, base, observed, operational("acknowledge successful handback", err))
 	}
 	base.ControlAck = ack
 	if err := s.ports.Releaser.Release(ctx, input.Run.Workspace.WorkspaceID); err != nil {
@@ -267,6 +268,15 @@ func (s *HandbackService) applyAuthoritative(ctx context.Context, input Handback
 	base.ExitCode = 0
 	base.Released = true
 	return base, nil
+}
+
+func (s *HandbackService) recoverFailedHandback(ctx context.Context, input HandbackRequest, base HandbackOutcome, observed QuarantineObservations, failure error) (HandbackOutcome, error) {
+	if !s.ports.Control.Usable() {
+		return base, failure
+	}
+	record := finalizedQuarantineRecord(input, QuarantineHandbackDurabilityFailed)
+	record.Observed = observed
+	return s.persistQuarantine(ctx, base, record, ErrOperational)
 }
 
 func (s *HandbackService) resolveFastForwardFailure(ctx context.Context, input HandbackRequest, base HandbackOutcome, observed QuarantineObservations, result gitx.FastForwardResult, cause error) (HandbackOutcome, error) {
@@ -352,7 +362,7 @@ func (s *HandbackService) persistQuarantine(ctx context.Context, base HandbackOu
 		return base, operational("encode execution quarantine", err)
 	}
 	base.Quarantine = &canonical
-	ack, err := s.ports.Control.PersistQuarantine(ctx, canonical)
+	ack, err := s.ports.Control.PersistQuarantine(ctx, canonical, base.ResultBytes)
 	if err != nil {
 		base.ExitCode = 2
 		return base, operational("persist execution quarantine", err)
@@ -455,6 +465,15 @@ func validatePreservedHandbackInput(input HandbackRequest) ([]byte, ExecutionRes
 	if err != nil {
 		return nil, ExecutionResult{}, err
 	}
+	if input.Preserved.State == PreservedPartial {
+		want, err := EncodeExecutionPartial(input.Request, input.Run)
+		if err != nil {
+			return nil, ExecutionResult{}, operational("validate partial execution preservation", err)
+		}
+		if !bytes.Equal(resultBytes, want) {
+			return nil, ExecutionResult{}, operational("validate partial execution preservation", errors.New("partial bytes contradict actual request/run state"))
+		}
+	}
 	return resultBytes, canonicalResult, nil
 }
 
@@ -486,11 +505,11 @@ func validateCompletionForHandback(request ExecutionRequest, run ExecutionRun, c
 }
 
 func resultBytesForPreserved(completion *Completion, partial []byte, preserved PreservedExecution) ([]byte, error) {
-	var result []byte
+	result := []byte{}
 	if completion != nil {
-		result = append([]byte(nil), completion.ResultBytes...)
+		result = append(result, completion.ResultBytes...)
 	} else {
-		result = append([]byte(nil), partial...)
+		result = append(result, partial...)
 	}
 	switch preserved.State {
 	case PreservedNone:
@@ -501,8 +520,9 @@ func resultBytesForPreserved(completion *Completion, partial []byte, preserved P
 		if preserved.Ref == nil || len(result) == 0 {
 			return nil, operational("validate preserved execution", errors.New("preserved execution lacks reference or bytes"))
 		}
-		if preserved.Ref.Digest != digestBytes(result) {
-			return nil, operational("validate preserved execution", errors.New("preserved reference digest does not match exact bytes"))
+		want, err := PreservedExecutionForBytes(preserved.State, result)
+		if err != nil || !preservedExecutionEqual(preserved, want) {
+			return nil, operational("validate preserved execution", errors.New("preserved reference does not match exact controller locator and bytes"))
 		}
 		if completion != nil && preserved.State != PreservedFinalized {
 			return nil, operational("validate preserved execution", errors.New("durable completion is not preserved as finalized"))

@@ -2,7 +2,9 @@ package contextevent
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -142,6 +144,15 @@ func TestContextEventRegistryContract_Static(t *testing.T) {
 	inline := inlineDetail(t)
 	if err := inline.Validate(); err != nil {
 		t.Fatalf("inline Detail.Validate() error = %v", err)
+	}
+	lfDigest, err := canonjson.Digest(map[string]any{"message": "redacted"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	lfDetail := inline
+	lfDetail.Digest = lfDigest
+	if err := lfDetail.Validate(); err == nil {
+		t.Fatal("inline Detail.Validate() accepted digest over redacted_json plus framing LF")
 	}
 	segment := Detail{Mode: DetailSegment, MediaType: MediaTypeJSON, Digest: digestA, RedactionProfile: RedactionProfileStandard, ByteCount: 123, Reference: "vatc-segment:flight-1/0001"}
 	if err := segment.Validate(); err != nil {
@@ -401,15 +412,9 @@ func eventFixture(t *testing.T, kind Kind, adapter Adapter) Event {
 func inlineDetail(t *testing.T) Detail {
 	t.Helper()
 	raw := json.RawMessage(`{"message":"redacted"}`)
-	var value any
-	if err := json.Unmarshal(raw, &value); err != nil {
-		t.Fatal(err)
-	}
-	digest, err := canonjson.Digest(value)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return Detail{Mode: DetailInline, MediaType: MediaTypeJSON, Digest: digest, RedactionProfile: RedactionProfileStandard, RedactedJSON: raw}
+	digest := sha256.Sum256(raw)
+	digestText := fmt.Sprintf("sha256:%x", digest)
+	return Detail{Mode: DetailInline, MediaType: MediaTypeJSON, Digest: digestText, RedactionProfile: RedactionProfileStandard, RedactedJSON: raw}
 }
 
 func principalResolutionFixture(t *testing.T) governanceprincipal.PrincipalResolution {
