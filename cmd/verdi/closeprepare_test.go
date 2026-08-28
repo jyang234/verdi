@@ -1822,6 +1822,87 @@ func assertPreparePreserved(t *testing.T, root, reportPath string, beforeRaw []b
 	}
 }
 
+// TestRunPreparePropagatesExperimentEvidenceParity pins design §9's
+// preflight-parity paragraph one layer up: --prepare reaches readiness
+// through runPreflightWithPrelude (runPrepare's own final call, threading
+// deps.Experiments — Task 10 correction, F3), so a comparison-backed
+// target a real close would refuse on experiment evidence must report
+// MECHANICAL WORK REQUIRED through --prepare too, never a bare next-
+// command READY. The fixture is exp-spike's own comparison-backed,
+// no-ratification shape (closeexperiment_test.go), already dispositioned
+// (writeCloseExperimentGateReport) so preparation's own regeneration and
+// judgment phases are no-ops and it falls straight through to the shared
+// preflight path — the "existing prepare test harness makes it cheap"
+// case the correction brief anticipated.
+func TestRunPreparePropagatesExperimentEvidenceParity(t *testing.T) {
+	repo := buildCloseExperimentProductionFixtureRepo(t, map[string]string{
+		closeExperimentProductionExperimentID + "/experiment.yaml": closeExperimentLockedDefinitionYAML(t),
+	})
+	writeCloseExperimentGateReport(t, repo.Dir, repo.Head)
+
+	var stdout, stderr bytes.Buffer
+	rc := runPrepare(context.Background(), repo.Dir, "spec/exp-spike", &store.Manifest{}, closeDeps{Forge: forgefake.New()}, true, &stdout, &stderr)
+	if rc != 1 {
+		t.Fatalf("runPrepare(comparison-backed, no ratification) = %d, want 1; stdout=%s stderr=%s", rc, stdout.String(), stderr.String())
+	}
+	out := stdout.String()
+	for _, want := range []string{
+		"experiment " + closeExperimentProductionExperimentID,
+		"close: --preflight: NOT READY",
+		"close: --prepare: MECHANICAL WORK REQUIRED",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("stdout missing %q: %s", want, out)
+		}
+	}
+	if strings.Contains(out, "close: --preflight: READY") {
+		t.Fatalf("stdout = %q, want no READY variant reported for an experiment-evidence refusal", out)
+	}
+}
+
+// TestRunPrepareExperimentEvidenceOperationalRefusesWithoutReady mirrors
+// TestClosePreflightExperimentEvidenceOperationalRefusesWithoutReady
+// (closepreflight_test.go) one layer up: --prepare reaches readiness
+// through the SAME runPreflightWithPrelude call
+// TestRunPreparePropagatesExperimentEvidenceParity already proves inherits
+// the verdict-shaped refusal, so it must inherit the operational one too.
+// A worktree-only experiments/ directory (never merged, so the accepted
+// tree resolves the id in zero active/archive locations — the exact
+// TestCloseExperimentWorktreeOnlyExperimentsDirectoryRefusesOperationally
+// shape) makes the production adapter report an operational Outcome; the
+// doubled "close: --preflight: close: --preflight:" prefix on the wrapped
+// error is pre-existing house style (runPreflightWithPrelude's own error
+// wrap over runStoryPreflightGate's own "close: --preflight:"-prefixed
+// error), not a new defect, and is deliberately not asserted away here.
+func TestRunPrepareExperimentEvidenceOperationalRefusesWithoutReady(t *testing.T) {
+	repo := buildCloseExperimentProductionFixtureRepo(t, nil)
+	closeExperimentWriteFixtureFile(t, repo.Dir,
+		".verdi/specs/active/exp-spike/experiments/"+closeExperimentProductionExperimentID+"/experiment.yaml",
+		closeExperimentLockedDefinitionYAML(t))
+	writeCloseExperimentGateReport(t, repo.Dir, repo.Head)
+
+	var stdout, stderr bytes.Buffer
+	rc := runPrepare(context.Background(), repo.Dir, "spec/exp-spike", &store.Manifest{}, closeDeps{Forge: forgefake.New()}, true, &stdout, &stderr)
+	if rc != 2 {
+		t.Fatalf("runPrepare(worktree-only experiment) = %d, want 2; stdout=%s stderr=%s", rc, stdout.String(), stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "close: experiment "+closeExperimentProductionExperimentID+":") {
+		t.Fatalf("stderr = %q, want the worktree-side id detected and named", stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "resolves in 0 active/archive locations") {
+		t.Fatalf("stderr = %q, want the accepted-tree resolution's own honest detail", stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "[accepted-tree-invalid]") {
+		t.Fatalf("stderr = %q, want the operational accepted-tree-invalid code", stderr.String())
+	}
+	if strings.Contains(stdout.String(), "close: --preflight: READY") {
+		t.Fatalf("stdout = %q, want no READY variant on an operational refusal", stdout.String())
+	}
+	if strings.Contains(stdout.String(), "close: --preflight: NOT READY") {
+		t.Fatalf("stdout = %q, want no verdict-shaped NOT READY on an operational refusal", stdout.String())
+	}
+}
+
 var prepareForgeEnvVars = []string{
 	"CI_API_V4_URL",
 	"CI_PROJECT_ID",

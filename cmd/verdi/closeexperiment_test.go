@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"reflect"
 	"strings"
 	"testing"
 
@@ -15,7 +14,6 @@ import (
 	"github.com/jyang234/verdi/internal/experimentapp"
 	"github.com/jyang234/verdi/internal/fixturegit"
 	forgefake "github.com/jyang234/verdi/internal/forge/fake"
-	"github.com/jyang234/verdi/internal/governanceprincipal"
 	"github.com/jyang234/verdi/internal/provider/fake"
 	"github.com/jyang234/verdi/internal/store"
 	"github.com/jyang234/verdi/internal/upstream"
@@ -298,37 +296,18 @@ func runCloseExperimentUnitAt(t *testing.T, repo *fixturegit.Repo, evidence []cl
 	return out.String(), errOut.String(), got, fp
 }
 
-// --- typed-evidence builders (real codecs; CLAUDE.md: never placeholder
-// bytes that would fail earlier validation) ---
+// --- typed-evidence builders (Task 10 correction: closeExperimentEvidence
+// is now the application core's own already-verified facts — flat scalar
+// fields, never a decoded CSE artifact this file re-validates — so these
+// builders construct that flat shape directly rather than real codec
+// output; see the disclosure below on why a mismatched-identity fixture is
+// no longer buildable, or needed, at this layer) ---
 
 // closeExperimentCleanOutcome is the experimentapp.Outcome a genuine
 // accepted-ratification proof reports (experimentapp.cleanOutcome's own
 // shape, unexported there — this is the typed-evidence-building twin).
 func closeExperimentCleanOutcome() experimentapp.Outcome {
 	return experimentapp.Outcome{Classification: experimentapp.ClassificationClean, Code: "clean", Detail: "operation completed"}
-}
-
-// closeExperimentTestDefinition decodes and locks the shared CSE testdata
-// definition (internal/experimentapp/testdata/experiment-v2/experiment.yaml,
-// already used by experiment_test.go's buildExperimentHumanRepoWithSubjects)
-// — real bytes, real strict decode, a real computed lock — rather than a
-// hand-built literal that could silently drift from the schema.
-func closeExperimentTestDefinition(t *testing.T) experiment.Definition {
-	t.Helper()
-	raw, err := os.ReadFile(filepath.Join("..", "..", "internal", "experimentapp", "testdata", "experiment-v2", "experiment.yaml"))
-	if err != nil {
-		t.Fatalf("read experiment definition fixture: %v", err)
-	}
-	def, err := experiment.DecodeDefinition(raw)
-	if err != nil {
-		t.Fatalf("DecodeDefinition: %v", err)
-	}
-	digest, err := experiment.DefinitionDigest(def)
-	if err != nil {
-		t.Fatalf("DefinitionDigest: %v", err)
-	}
-	def.Lock = &experiment.Lock{DefinitionDigest: digest}
-	return def
 }
 
 // closeExperimentProductionExperimentID is the committed experiment
@@ -343,7 +322,8 @@ const closeExperimentProductionExperimentID = "request-path-v2"
 // `spike:` line, replaced wholesale by closeExperimentLockedDefinitionYAML.
 const closeExperimentTestdataSpikeLine = "spike: spec/request-path-spike\n"
 
-// closeExperimentLockedDefinitionYAML is closeExperimentTestDefinition's
+// closeExperimentLockedDefinitionYAML is the shared CSE testdata
+// definition's (internal/experimentapp/testdata/experiment-v2/experiment.yaml)
 // on-disk twin for production-adapter fixtures: the same testdata bytes
 // re-pointed at THIS file's own closure target and with a real computed
 // lock block appended (buildReleaseFixture's own doc-append idiom,
@@ -381,210 +361,67 @@ func closeExperimentLockedDefinitionYAML(t *testing.T) string {
 	return doctored + "lock:\n  definition_digest: " + digest + "\n"
 }
 
-// closeExperimentTestResult builds a real, self-validating v2 result via
-// experiment.NewResultV2 (never a hand-decoded literal): a proven-winner
-// decision naming winner, over the two candidates the shared testdata
-// definition registers (baseline, cache).
-func closeExperimentTestResult(t *testing.T, def experiment.Definition, run, winner string) experiment.Result {
-	t.Helper()
-	defDigest, err := experiment.DefinitionDigest(def)
-	if err != nil {
-		t.Fatalf("DefinitionDigest: %v", err)
-	}
-	decision := experiment.ResultDecision{
-		Experiment: def.ID, DefinitionDigest: defDigest, Run: run,
-		Algorithm: experiment.AlgorithmV1, Verdict: experiment.VerdictProvenWinner, Winner: winner,
-		Reasons: []experiment.Reason{},
-		Candidates: []experiment.DecisionCandidate{
-			{ID: "baseline", Baseline: true, Eligible: true, ExecutionFailures: []experiment.CandidateExecutionFailure{}},
-			{ID: "cache", Baseline: false, Eligible: true, ExecutionFailures: []experiment.CandidateExecutionFailure{}},
-		},
-		ObservationsDigest: experimentRawDigest([]byte("observations-" + run)),
-	}
-	execution := experiment.ResultExecution{
-		ExecutionDigest: experimentRawDigest([]byte("execution-" + run)),
-		Isolation: experiment.ResultIsolation{
-			Network:     experiment.ReceiptNetwork{Mode: experiment.NetworkDeny, Configured: true, Reason: "close-experiment fixture: default-deny isolation"},
-			Disclosures: []experiment.IsolationDisclosure{},
-		},
-		WarmupDiagnostics: experiment.WarmupDiagnostics{
-			Authority: experiment.WarmupAuthorityNonDecisionDiagnostic, Scope: experiment.WarmupScopeFinalInvocation,
-			Failures: []experiment.WarmupFailure{},
-		},
-	}
-	res, err := experiment.NewResultV2(decision, execution)
-	if err != nil {
-		t.Fatalf("NewResultV2: %v", err)
-	}
-	return res
-}
+// Task 10 correction (SI-150): the application core's
+// Service.VerifyAcceptedClosureEvidence now owns EVERY identity comparison
+// design §9 requires (definition/result/candidate/ratification digest
+// parity, and the committed capsule manifest's byte-exact recomputation —
+// internal/experimentapp/closure_test.go's own matrix, in particular
+// TestVerifyAcceptedClosureEvidenceSelectingManifestMismatchIsVerdict for
+// the byte-mismatch case). This file's fake-evidence builders therefore no
+// longer construct real experiment.Result/Ratification/CapsuleManifest
+// values at all: closeExperimentEvidence carries only the seam's already-
+// verified facts (Disposition, Selecting, CapsuleVerified,
+// SelectedCandidate), which the pure judgment below reads at face value —
+// there is nothing left for a fake row to identity-mismatch, because the
+// mismatching is the seam's job now, not this adapter's.
+//
+// DISCLOSED (Task 10 correction brief, Lane 3 test guidance): a
+// production-path test proving a byte-mismatched COMMITTED manifest
+// refuses at exit 1 through the real seam would need a genuine accepted V3
+// ratification chain (real Ed25519 keys, a real challenge bound to a real
+// accepted HEAD, a real accepted governance-profile mapping) landed on
+// `main` before the mismatch is even reachable — no such ratified-chain
+// fixture exists in cmd/verdi, and building one here would duplicate Lane
+// 2's own fixture machinery (internal/experimentapp/ratification_test.go)
+// rather than test anything new. That exact scenario is already pinned at
+// the seam by TestVerifyAcceptedClosureEvidenceSelectingManifestMismatchIsVerdict
+// with genuine fixtures; this file relies on it, plus the defensive
+// fake-provider pin immediately below, for capsule-mismatch coverage.
 
-// closeExperimentTestRatification builds a real, self-validating v2
-// ratification via experiment.Ratification.Validate() — never a
-// hand-decoded literal.
-func closeExperimentTestRatification(t *testing.T, resultDigest string, disposition experiment.Disposition, candidate, reason string) experiment.Ratification {
-	t.Helper()
-	principalID, err := governanceprincipal.CanonicalPrincipalID("offline-human", "close-experiment-fixture-subject")
-	if err != nil {
-		t.Fatalf("CanonicalPrincipalID: %v", err)
-	}
-	r := experiment.Ratification{
-		Schema: experiment.RatificationSchemaV2, ResultDigest: resultDigest,
-		ActorV2: &experiment.RatificationActor{
-			TrustSource: "offline-human", Subject: "close-experiment-fixture-subject", PrincipalID: string(principalID),
-		},
-		Disposition: disposition, Candidate: candidate, Reason: reason,
-	}
-	if err := r.Validate(); err != nil {
-		t.Fatalf("Ratification.Validate: %v", err)
-	}
-	return r
-}
-
-// closeExperimentRequiredArtifactIDs is the CLOSED required capsule
-// inventory design §9's retained set obliges a selecting capsule for the
-// shared testdata definition to carry (DC-8): the nine fixed members,
-// enumerated here in sorted order INDEPENDENTLY of the production
-// adapter's own closeExperimentRequiredCapsuleArtifactIDs (so the two are a
-// genuine cross-check, not a tautology), plus one CapsuleFixtureArtifactID
-// entry per registered fixture. The shared testdata definition registers
-// none — asserted rather than assumed, so this fixture fails loudly instead
-// of silently under-covering if that ever changes.
-func closeExperimentRequiredArtifactIDs(t *testing.T, def experiment.Definition) []string {
-	t.Helper()
-	if len(def.Fixtures) != 0 {
-		t.Fatalf("the shared testdata definition now registers %d fixture(s); extend this fixture's capsule inventory with their CapsuleFixtureArtifactID entries", len(def.Fixtures))
-	}
-	return []string{
-		experiment.CapsuleArtifactCandidatePatch,
-		experiment.CapsuleArtifactContract,
-		experiment.CapsuleArtifactDefinition,
-		experiment.CapsuleArtifactEvaluatorCapabilities,
-		experiment.CapsuleArtifactExecutionReceipt,
-		experiment.CapsuleArtifactObservations,
-		experiment.CapsuleArtifactRatification,
-		experiment.CapsuleArtifactResult,
-		experiment.CapsuleArtifactWorkload,
-	}
-}
-
-// closeExperimentTestCapsule builds a real, self-validating, FULL-inventory
-// capsule manifest — the shape experiment.BindCapsuleManifest itself emits
-// for this definition: every required member of design §9's closed retained
-// set, sorted by id, with sha256-shaped digests. The four members whose
-// digest the real builder binds to a declared reference (the selected
-// candidate's patch, the evaluator capabilities, the contract, the
-// workload) carry exactly those declared digests, and result/ratification
-// carry the genuine ratified identities; the three the builder records
-// unconstrained (definition, execution-receipt, observations bytes) carry
-// arbitrary-but-valid raw digests, since no gate in this file identity-
-// checks them.
-func closeExperimentTestCapsule(t *testing.T, def experiment.Definition, definitionDigest, resultDigest, selected, ratificationDigest string) *experiment.CapsuleManifest {
-	t.Helper()
-	selectedPatchDigest := ""
-	for _, c := range def.Candidates {
-		if c.ID == selected {
-			selectedPatchDigest = c.Digest
-		}
-	}
-	if selectedPatchDigest == "" {
-		t.Fatalf("selected candidate %q is not registered by the shared testdata definition", selected)
-	}
-	digests := map[string]string{
-		experiment.CapsuleArtifactDefinition:            experimentRawDigest([]byte("close-experiment fixture: retained definition bytes")),
-		experiment.CapsuleArtifactCandidatePatch:        selectedPatchDigest,
-		experiment.CapsuleArtifactEvaluatorCapabilities: def.Evaluator.CapabilitiesDigest,
-		experiment.CapsuleArtifactContract:              def.Contract.Digest,
-		experiment.CapsuleArtifactWorkload:              def.Workload.Digest,
-		experiment.CapsuleArtifactExecutionReceipt:      experimentRawDigest([]byte("close-experiment fixture: retained execution-receipt bytes")),
-		experiment.CapsuleArtifactObservations:          experimentRawDigest([]byte("close-experiment fixture: retained observations bytes")),
-		experiment.CapsuleArtifactResult:                resultDigest,
-		experiment.CapsuleArtifactRatification:          ratificationDigest,
-	}
-	required := closeExperimentRequiredArtifactIDs(t, def)
-	artifacts := make([]experiment.CapsuleArtifact, 0, len(required))
-	for _, id := range required {
-		digest, ok := digests[id]
-		if !ok {
-			t.Fatalf("this fixture declares no digest for required capsule artifact %q", id)
-		}
-		artifacts = append(artifacts, experiment.CapsuleArtifact{ID: id, Digest: digest})
-	}
-	m := experiment.CapsuleManifest{
-		Schema: experiment.CapsuleManifestSchema, Experiment: def.ID, DefinitionDigest: definitionDigest,
-		ResultDigest: resultDigest, Selected: selected, Artifacts: artifacts,
-	}
-	if err := m.Validate(); err != nil {
-		t.Fatalf("CapsuleManifest.Validate: %v", err)
-	}
-	return &m
-}
-
-// closeExperimentValidSelectingEvidence builds one complete, mutually
-// consistent, valid selecting closeExperimentEvidence — every identity
-// (definition digest, result digest, selected candidate, ratification
-// digest) real and matching, so it closes clean by itself (items 11/12's
-// base case, and every mismatch item's starting point before its one
-// deliberate corruption).
-func closeExperimentValidSelectingEvidence(t *testing.T, id string, disposition experiment.Disposition, otherCandidate string) closeExperimentEvidence {
-	t.Helper()
-	def := closeExperimentTestDefinition(t)
-	defDigest, err := experiment.DefinitionDigest(def)
-	if err != nil {
-		t.Fatalf("DefinitionDigest: %v", err)
-	}
-	res := closeExperimentTestResult(t, def, "run-1", "cache")
-	resDigest, err := experiment.ResultDigest(res)
-	if err != nil {
-		t.Fatalf("ResultDigest: %v", err)
-	}
-	selected := "cache"
-	candidate, reason := "", ""
-	if disposition == experiment.DispositionSelectOther {
-		selected = otherCandidate
-		candidate = otherCandidate
-		reason = "explicit reviewer selection for the close-experiment fixture"
-	}
-	rat := closeExperimentTestRatification(t, resDigest, disposition, candidate, reason)
-	ratBytes, err := experiment.EncodeRatification(rat)
-	if err != nil {
-		t.Fatalf("EncodeRatification: %v", err)
-	}
-	ratDigest := experimentRawDigest(ratBytes)
-	capsule := closeExperimentTestCapsule(t, def, defDigest, resDigest, selected, ratDigest)
+// closeExperimentSelectingEvidence builds one clean, selecting
+// closeExperimentEvidence — the shape the seam only ever returns alongside
+// a byte-verified capsule (design §9, controller pin P2): CapsuleVerified
+// is always true here.
+func closeExperimentSelectingEvidence(id string, disposition experiment.Disposition, selected string) closeExperimentEvidence {
 	return closeExperimentEvidence{
 		ExperimentID: id, Outcome: closeExperimentCleanOutcome(),
-		Ratification: rat, Capsule: capsule,
-		DefinitionID: def.ID, DefinitionDigest: defDigest, SelectedCandidate: selected, RatificationDigest: ratDigest,
-		RequiredCapsuleArtifactIDs: closeExperimentRequiredArtifactIDs(t, def),
+		Disposition: disposition, Selecting: true, CapsuleVerified: true, SelectedCandidate: selected,
+	}
+}
+
+// closeExperimentUnverifiedCapsuleEvidence builds the ONE defensive shape
+// closeExperimentEvaluate must still refuse even though the production
+// seam (VerifyAcceptedClosureEvidence, controller pin P2) never actually
+// emits it: a clean, selecting outcome whose capsule the seam did NOT
+// byte-verify. A clean, selecting ClosureEvidenceResult always carries a
+// non-nil Capsule in production, so this fixture exists purely to pin the
+// consumer's own fail-closed judgment against a shape its contract
+// forbids (Task 10 correction brief, Lane 3 test (a)) rather than trust
+// that invariant blindly.
+func closeExperimentUnverifiedCapsuleEvidence(id string, disposition experiment.Disposition) closeExperimentEvidence {
+	return closeExperimentEvidence{
+		ExperimentID: id, Outcome: closeExperimentCleanOutcome(),
+		Disposition: disposition, Selecting: true, CapsuleVerified: false,
 	}
 }
 
 // closeExperimentNonSelectingEvidence builds one clean, non-selecting
-// closeExperimentEvidence (Capsule always nil, and therefore
-// RequiredCapsuleArtifactIDs empty — SI-146: only accepted selecting
-// dispositions have a capsule, so only they carry a required inventory).
-func closeExperimentNonSelectingEvidence(t *testing.T, id string, disposition experiment.Disposition) closeExperimentEvidence {
-	t.Helper()
-	def := closeExperimentTestDefinition(t)
-	defDigest, err := experiment.DefinitionDigest(def)
-	if err != nil {
-		t.Fatalf("DefinitionDigest: %v", err)
-	}
-	res := closeExperimentTestResult(t, def, "run-1", "cache")
-	resDigest, err := experiment.ResultDigest(res)
-	if err != nil {
-		t.Fatalf("ResultDigest: %v", err)
-	}
-	rat := closeExperimentTestRatification(t, resDigest, disposition, "", "honest terminal response for the close-experiment fixture")
-	ratBytes, err := experiment.EncodeRatification(rat)
-	if err != nil {
-		t.Fatalf("EncodeRatification: %v", err)
-	}
+// closeExperimentEvidence (Selecting/CapsuleVerified always false: design
+// §9 binds no capsule to a non-selecting disposition at all).
+func closeExperimentNonSelectingEvidence(id string, disposition experiment.Disposition) closeExperimentEvidence {
 	return closeExperimentEvidence{
 		ExperimentID: id, Outcome: closeExperimentCleanOutcome(),
-		Ratification: rat, Capsule: nil,
-		DefinitionID: def.ID, DefinitionDigest: defDigest, SelectedCandidate: "", RatificationDigest: experimentRawDigest(ratBytes),
+		Disposition: disposition,
 	}
 }
 
@@ -603,25 +440,6 @@ func closeExperimentVerdictEvidence(id string) closeExperimentEvidence {
 			Detail:         "no ratification is present at the accepted HEAD; proposal bytes carry no authority",
 		},
 	}
-}
-
-// closeExperimentMutatedCapsule returns a deep copy of base's capsule with
-// mutate applied, still passing CapsuleManifest.Validate() (structurally
-// well-formed, semantically wrong) — the shape every mismatch item (7-10)
-// needs: a capsule that is grammatically valid but identity-mismatched.
-func closeExperimentMutatedCapsule(t *testing.T, base *experiment.CapsuleManifest, mutate func(*experiment.CapsuleManifest)) *experiment.CapsuleManifest {
-	t.Helper()
-	clone := *base
-	clone.Artifacts = append([]experiment.CapsuleArtifact(nil), base.Artifacts...)
-	mutate(&clone)
-	if err := clone.Validate(); err != nil {
-		t.Fatalf("mutated CapsuleManifest.Validate: %v", err)
-	}
-	return &clone
-}
-
-func closeExperimentOtherDigest(seed string) string {
-	return experimentRawDigest([]byte("close-experiment-mismatch-" + seed))
 }
 
 // ================================ matrix ================================
@@ -752,16 +570,21 @@ func TestCloseExperimentWorktreeOnlyExperimentsDirectoryRefusesOperationally(t *
 	}
 }
 
-// Item 4: a selecting disposition with no capsule at all refuses.
-func TestCloseExperimentSelectingWithoutCapsuleRefuses(t *testing.T) {
-	ev := closeExperimentValidSelectingEvidence(t, "comparison", experiment.DispositionSelectRecommended, "")
-	ev.Capsule = nil
+// Item 4 (Task 10 correction test (a) — Lane 3 brief): a clean, selecting
+// outcome whose capsule the seam did NOT byte-verify is a hard failure.
+// The production seam never actually emits this shape (a clean, selecting
+// ClosureEvidenceResult always carries a byte-verified Capsule — controller
+// pin P2), so this pins the consumer's own defensive fail-closed judgment
+// against a shape its contract forbids, rather than trusting that
+// invariant blindly.
+func TestCloseExperimentSelectingWithUnverifiedCapsuleRefuses(t *testing.T) {
+	ev := closeExperimentUnverifiedCapsuleEvidence("comparison", experiment.DispositionSelectRecommended)
 	stdout, stderr, code := runCloseExperimentUnit(t, []closeExperimentEvidence{ev})
 	if code != 1 {
-		t.Fatalf("runClose(selecting, no capsule) = %d, want 1; stdout=%s stderr=%s", code, stdout, stderr)
+		t.Fatalf("runClose(selecting, capsule not byte-verified) = %d, want 1; stdout=%s stderr=%s", code, stdout, stderr)
 	}
-	if !strings.Contains(stdout, "carries no capsule manifest") {
-		t.Fatalf("stdout = %q, want the absent-capsule reason", stdout)
+	if !strings.Contains(stdout, "not byte-verified") {
+		t.Fatalf("stdout = %q, want the unverified-capsule reason", stdout)
 	}
 }
 
@@ -772,7 +595,7 @@ func TestCloseExperimentNonSelectingDispositionsRefuse(t *testing.T) {
 		experiment.DispositionRejectAll, experiment.DispositionMisframed, experiment.DispositionRequestNewRevision,
 	} {
 		t.Run(string(disposition), func(t *testing.T) {
-			ev := closeExperimentNonSelectingEvidence(t, "comparison", disposition)
+			ev := closeExperimentNonSelectingEvidence("comparison", disposition)
 			stdout, stderr, code := runCloseExperimentUnit(t, []closeExperimentEvidence{ev})
 			if code != 1 {
 				t.Fatalf("runClose(%s) = %d, want 1; stdout=%s stderr=%s", disposition, code, stdout, stderr)
@@ -865,142 +688,32 @@ func TestCloseExperimentUnknownOutcomeClassificationExitsTwo(t *testing.T) {
 	}
 }
 
-// Item 7: a capsule whose own definition digest disagrees with the
-// accepted definition digest refuses.
-func TestCloseExperimentDefinitionDigestMismatchRefuses(t *testing.T) {
-	ev := closeExperimentValidSelectingEvidence(t, "comparison", experiment.DispositionSelectRecommended, "")
-	ev.Capsule = closeExperimentMutatedCapsule(t, ev.Capsule, func(m *experiment.CapsuleManifest) {
-		m.DefinitionDigest = closeExperimentOtherDigest("definition")
-	})
-	stdout, stderr, code := runCloseExperimentUnit(t, []closeExperimentEvidence{ev})
-	if code != 1 {
-		t.Fatalf("runClose(definition digest mismatch) = %d, want 1; stdout=%s stderr=%s", code, stdout, stderr)
-	}
-	if !strings.Contains(stdout, "capsule definition digest") {
-		t.Fatalf("stdout = %q, want the definition-digest mismatch reason", stdout)
-	}
-}
-
-// Item 8: a capsule whose result digest disagrees with the ratified
-// result digest refuses.
-func TestCloseExperimentResultDigestMismatchRefuses(t *testing.T) {
-	ev := closeExperimentValidSelectingEvidence(t, "comparison", experiment.DispositionSelectRecommended, "")
-	ev.Capsule = closeExperimentMutatedCapsule(t, ev.Capsule, func(m *experiment.CapsuleManifest) {
-		m.ResultDigest = closeExperimentOtherDigest("result")
-	})
-	stdout, stderr, code := runCloseExperimentUnit(t, []closeExperimentEvidence{ev})
-	if code != 1 {
-		t.Fatalf("runClose(result digest mismatch) = %d, want 1; stdout=%s stderr=%s", code, stdout, stderr)
-	}
-	if !strings.Contains(stdout, "capsule result digest") {
-		t.Fatalf("stdout = %q, want the result-digest mismatch reason", stdout)
-	}
-}
-
-// Item 9: a capsule whose selected candidate disagrees with the ratified
-// selection refuses.
-func TestCloseExperimentSelectedCandidateMismatchRefuses(t *testing.T) {
-	ev := closeExperimentValidSelectingEvidence(t, "comparison", experiment.DispositionSelectRecommended, "")
-	ev.Capsule = closeExperimentMutatedCapsule(t, ev.Capsule, func(m *experiment.CapsuleManifest) {
-		m.Selected = "baseline"
-	})
-	stdout, stderr, code := runCloseExperimentUnit(t, []closeExperimentEvidence{ev})
-	if code != 1 {
-		t.Fatalf("runClose(selected candidate mismatch) = %d, want 1; stdout=%s stderr=%s", code, stdout, stderr)
-	}
-	if !strings.Contains(stdout, "capsule selected candidate") {
-		t.Fatalf("stdout = %q, want the selected-candidate mismatch reason", stdout)
-	}
-}
-
-// Item 10: a capsule whose "ratification" artifact digest disagrees with
-// the accepted ratification's own digest refuses.
-func TestCloseExperimentRatificationDigestMismatchRefuses(t *testing.T) {
-	ev := closeExperimentValidSelectingEvidence(t, "comparison", experiment.DispositionSelectRecommended, "")
-	ev.Capsule = closeExperimentMutatedCapsule(t, ev.Capsule, func(m *experiment.CapsuleManifest) {
-		for i := range m.Artifacts {
-			if m.Artifacts[i].ID == experiment.CapsuleArtifactRatification {
-				m.Artifacts[i].Digest = closeExperimentOtherDigest("ratification")
-			}
-		}
-	})
-	stdout, stderr, code := runCloseExperimentUnit(t, []closeExperimentEvidence{ev})
-	if code != 1 {
-		t.Fatalf("runClose(ratification digest mismatch) = %d, want 1; stdout=%s stderr=%s", code, stdout, stderr)
-	}
-	if !strings.Contains(stdout, "capsule ratification-artifact digest") {
-		t.Fatalf("stdout = %q, want the ratification-artifact digest mismatch reason", stdout)
-	}
-}
-
-// A selecting capsule must also carry design §9's CLOSED retained
-// inventory (DC-8), not merely the matching identities: a capsule missing
-// a required member is not the sealed complete reproduction set §9
-// requires, and one carrying an id outside the closed set is not a capsule
-// the ratified protocol admits. "recommendation" is the set's one OPTIONAL
-// member and must still be admitted. Each case is a SINGLE mutation of the
-// same valid full-inventory base (items 7-10's structure).
-func TestCloseExperimentCapsuleInventoryIsTheClosedRetainedSet(t *testing.T) {
-	tests := []struct {
-		name    string
-		mutate  func(*experiment.CapsuleManifest)
-		want    int
-		wantOut string
-	}{
-		{
-			name: "missing a required member refuses",
-			mutate: func(m *experiment.CapsuleManifest) {
-				kept := make([]experiment.CapsuleArtifact, 0, len(m.Artifacts))
-				for _, a := range m.Artifacts {
-					if a.ID == experiment.CapsuleArtifactWorkload {
-						continue
-					}
-					kept = append(kept, a)
-				}
-				m.Artifacts = kept
-			},
-			want:    1,
-			wantOut: `capsule manifest is missing required artifact "workload"`,
-		},
-		{
-			name: "a member outside the closed set refuses",
-			mutate: func(m *experiment.CapsuleManifest) {
-				m.Artifacts = append(m.Artifacts, experiment.CapsuleArtifact{
-					ID: "stray-artifact", Digest: closeExperimentOtherDigest("stray"),
-				})
-			},
-			want:    1,
-			wantOut: `capsule manifest presents artifact "stray-artifact"`,
-		},
-		{
-			name: "the optional recommendation member is admitted",
-			mutate: func(m *experiment.CapsuleManifest) {
-				m.Artifacts = append(m.Artifacts, experiment.CapsuleArtifact{
-					ID: experiment.CapsuleArtifactRecommendation, Digest: closeExperimentOtherDigest("recommendation"),
-				})
-			},
-			want: 0,
-		},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			ev := closeExperimentValidSelectingEvidence(t, "comparison", experiment.DispositionSelectRecommended, "")
-			ev.Capsule = closeExperimentMutatedCapsule(t, ev.Capsule, tc.mutate)
-			stdout, stderr, code := runCloseExperimentUnit(t, []closeExperimentEvidence{ev})
-			if code != tc.want {
-				t.Fatalf("runClose(%s) = %d, want %d; stdout=%s stderr=%s", tc.name, code, tc.want, stdout, stderr)
-			}
-			if tc.wantOut != "" && !strings.Contains(stdout, tc.wantOut) {
-				t.Fatalf("stdout = %q, want it to name %q", stdout, tc.wantOut)
-			}
-		})
-	}
-}
+// Items 7-10 and the capsule-inventory matrix (a capsule's definition/
+// result/candidate/ratification digest identity, and its exact retained
+// artifact-id inventory) moved to the application core with Task 10's
+// correction (SI-150, controller pin P2): VerifyAcceptedClosureEvidence
+// now re-derives and byte-compares the committed capsule manifest itself,
+// so a mismatch of ANY kind collapses to one verdict outcome at the seam
+// rather than a family of adapter-side identity checks. That exact family
+// is pinned with genuine fixtures in
+// internal/experimentapp/closure_test.go (in particular
+// TestVerifyAcceptedClosureEvidenceSelectingManifestMismatchIsVerdict for
+// the byte-mismatch case, and internal/experiment/capsule_binding_test.go's
+// own inventory matrix for BindCapsuleManifest's required/optional split,
+// unchanged by this correction). DISCLOSED: reproducing a byte-mismatch
+// case here through the REAL production seam would require a genuine accepted V3
+// ratification chain landed on `main` (real Ed25519 keys, a real
+// challenge bound to a real accepted HEAD, a real accepted governance-
+// profile mapping) before the mismatch is even reachable; no such
+// ratified-chain fixture exists in cmd/verdi, and building one here would
+// duplicate Lane 2's own fixture machinery rather than test anything new.
+// TestCloseExperimentSelectingWithUnverifiedCapsuleRefuses above pins this
+// adapter's own fail-closed judgment of the seam's contract instead.
 
 // Item 11: a valid select-recommended ratification with a matching
 // capsule closes clean.
 func TestCloseExperimentValidSelectRecommendedClosesClean(t *testing.T) {
-	ev := closeExperimentValidSelectingEvidence(t, "comparison", experiment.DispositionSelectRecommended, "")
+	ev := closeExperimentSelectingEvidence("comparison", experiment.DispositionSelectRecommended, "cache")
 	stdout, stderr, code := runCloseExperimentUnit(t, []closeExperimentEvidence{ev})
 	if code != 0 {
 		t.Fatalf("runClose(valid select-recommended) = %d, want 0; stdout=%s stderr=%s", code, stdout, stderr)
@@ -1010,7 +723,7 @@ func TestCloseExperimentValidSelectRecommendedClosesClean(t *testing.T) {
 // Item 12: a valid select-other ratification with a matching capsule
 // closes clean.
 func TestCloseExperimentValidSelectOtherClosesClean(t *testing.T) {
-	ev := closeExperimentValidSelectingEvidence(t, "comparison", experiment.DispositionSelectOther, "baseline")
+	ev := closeExperimentSelectingEvidence("comparison", experiment.DispositionSelectOther, "baseline")
 	stdout, stderr, code := runCloseExperimentUnit(t, []closeExperimentEvidence{ev})
 	if code != 0 {
 		t.Fatalf("runClose(valid select-other) = %d, want 0; stdout=%s stderr=%s", code, stdout, stderr)
@@ -1027,51 +740,41 @@ func TestCloseExperimentValidSelectOtherClosesClean(t *testing.T) {
 func TestCloseMultipleExperimentEvidenceComposition(t *testing.T) {
 	tests := []struct {
 		name     string
-		evidence func(t *testing.T) []closeExperimentEvidence
+		evidence []closeExperimentEvidence
 		want     int
 		wantOut  string
 	}{
 		{
 			name: "valid selecting alongside a verdict experiment refuses",
-			evidence: func(t *testing.T) []closeExperimentEvidence {
-				return []closeExperimentEvidence{
-					closeExperimentValidSelectingEvidence(t, "alpha", experiment.DispositionSelectRecommended, ""),
-					closeExperimentVerdictEvidence("beta"),
-				}
+			evidence: []closeExperimentEvidence{
+				closeExperimentSelectingEvidence("alpha", experiment.DispositionSelectRecommended, "cache"),
+				closeExperimentVerdictEvidence("beta"),
 			},
 			want:    1,
 			wantOut: "[FAIL] experiment beta: no ratification is present at the accepted HEAD",
 		},
 		{
 			name: "valid selecting alongside a clean non-selecting experiment closes",
-			evidence: func(t *testing.T) []closeExperimentEvidence {
-				return []closeExperimentEvidence{
-					closeExperimentValidSelectingEvidence(t, "alpha", experiment.DispositionSelectRecommended, ""),
-					closeExperimentNonSelectingEvidence(t, "beta", experiment.DispositionRejectAll),
-				}
+			evidence: []closeExperimentEvidence{
+				closeExperimentSelectingEvidence("alpha", experiment.DispositionSelectRecommended, "cache"),
+				closeExperimentNonSelectingEvidence("beta", experiment.DispositionRejectAll),
 			},
 			want: 0,
 		},
 		{
-			name: "valid selecting alongside a selecting experiment with no capsule refuses",
-			evidence: func(t *testing.T) []closeExperimentEvidence {
-				broken := closeExperimentValidSelectingEvidence(t, "beta", experiment.DispositionSelectOther, "baseline")
-				broken.Capsule = nil
-				return []closeExperimentEvidence{
-					closeExperimentValidSelectingEvidence(t, "alpha", experiment.DispositionSelectRecommended, ""),
-					broken,
-				}
+			name: "valid selecting alongside a selecting experiment whose capsule was not byte-verified refuses",
+			evidence: []closeExperimentEvidence{
+				closeExperimentSelectingEvidence("alpha", experiment.DispositionSelectRecommended, "cache"),
+				closeExperimentUnverifiedCapsuleEvidence("beta", experiment.DispositionSelectOther),
 			},
 			want:    1,
 			wantOut: "[FAIL] experiment beta: disposition",
 		},
 		{
 			name: "two clean non-selecting experiments refuse",
-			evidence: func(t *testing.T) []closeExperimentEvidence {
-				return []closeExperimentEvidence{
-					closeExperimentNonSelectingEvidence(t, "alpha", experiment.DispositionMisframed),
-					closeExperimentNonSelectingEvidence(t, "beta", experiment.DispositionRequestNewRevision),
-				}
+			evidence: []closeExperimentEvidence{
+				closeExperimentNonSelectingEvidence("alpha", experiment.DispositionMisframed),
+				closeExperimentNonSelectingEvidence("beta", experiment.DispositionRequestNewRevision),
 			},
 			want:    1,
 			wantOut: "[FAIL] experiment alpha: disposition",
@@ -1079,7 +782,7 @@ func TestCloseMultipleExperimentEvidenceComposition(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			stdout, stderr, code := runCloseExperimentUnit(t, tc.evidence(t))
+			stdout, stderr, code := runCloseExperimentUnit(t, tc.evidence)
 			if code != tc.want {
 				t.Fatalf("runClose(%s) = %d, want %d; stdout=%s stderr=%s", tc.name, code, tc.want, stdout, stderr)
 			}
@@ -1108,8 +811,7 @@ func TestCloseExperimentRefusalHasZeroPreEffects(t *testing.T) {
 		".verdi/specs/archive/exp-spike/rollup.json",
 	)
 
-	ev := closeExperimentValidSelectingEvidence(t, "comparison", experiment.DispositionSelectRecommended, "")
-	ev.Capsule = nil // item 4's shape: a hard failure, pre-effect.
+	ev := closeExperimentUnverifiedCapsuleEvidence("comparison", experiment.DispositionSelectRecommended) // item 4's shape: a hard failure, pre-effect.
 	stdout, stderr, code, fp := runCloseExperimentUnitAt(t, repo, []closeExperimentEvidence{ev})
 	if code != 1 {
 		t.Fatalf("runClose(refusal) = %d, want 1; stdout=%s stderr=%s", code, stdout, stderr)
@@ -1151,14 +853,14 @@ func closeExperimentAssertParentFeatureUnchanged(t *testing.T, repo *fixturegit.
 func TestCloseExperimentValidClosureLeavesParentFeatureBytesUnchanged(t *testing.T) {
 	repo := buildCloseExperimentSpikeFixtureRepo(t)
 	writeCloseExperimentGateReport(t, repo.Dir, repo.Head)
-	ev := closeExperimentValidSelectingEvidence(t, "comparison", experiment.DispositionSelectRecommended, "")
+	ev := closeExperimentSelectingEvidence("comparison", experiment.DispositionSelectRecommended, "cache")
 	closeExperimentAssertParentFeatureUnchanged(t, repo, []closeExperimentEvidence{ev})
 }
 
 func TestCloseExperimentValidClosureLeavesNoOpenQuestionMutation(t *testing.T) {
 	repo := buildCloseExperimentSpikeFixtureRepo(t)
 	writeCloseExperimentGateReport(t, repo.Dir, repo.Head)
-	ev := closeExperimentValidSelectingEvidence(t, "comparison", experiment.DispositionSelectOther, "baseline")
+	ev := closeExperimentSelectingEvidence("comparison", experiment.DispositionSelectOther, "baseline")
 	closeExperimentAssertParentFeatureUnchanged(t, repo, []closeExperimentEvidence{ev})
 }
 
@@ -1168,7 +870,7 @@ func TestCloseExperimentValidClosureLeavesNoOpenQuestionMutation(t *testing.T) {
 func TestCloseExperimentValidClosurePreservesResolvesEdgeByteIdentical(t *testing.T) {
 	repo := buildCloseExperimentSpikeFixtureRepo(t)
 	writeCloseExperimentGateReport(t, repo.Dir, repo.Head)
-	ev := closeExperimentValidSelectingEvidence(t, "comparison", experiment.DispositionSelectRecommended, "")
+	ev := closeExperimentSelectingEvidence("comparison", experiment.DispositionSelectRecommended, "cache")
 	stdout, stderr, code, _ := runCloseExperimentUnitAt(t, repo, []closeExperimentEvidence{ev})
 	if code != 0 {
 		t.Fatalf("runClose(valid closure) = %d, want 0; stdout=%s stderr=%s", code, stdout, stderr)
@@ -1230,18 +932,44 @@ func TestCloseExperimentBuiltBinaryExitCodes(t *testing.T) {
 			t.Fatalf("stdout = %q, want no experiment-evidence verdict lines on an operational refusal", stdout)
 		}
 	})
+
+	// Preflight parity (Task 10 correction, design §9's preflight-parity
+	// paragraph, F3): the SAME comparison-backed, no-ratification fixture a
+	// real close refuses on above must make `close --preflight` refuse with
+	// the identical classification (1) through the built binary too, never
+	// report READY.
+	t.Run("preflight on committed experiment without accepted ratification", func(t *testing.T) {
+		repo := buildCloseExperimentProductionFixtureRepo(t, map[string]string{
+			closeExperimentProductionExperimentID + "/experiment.yaml": closeExperimentLockedDefinitionYAML(t),
+		})
+		writeCloseExperimentGateReport(t, repo.Dir, repo.Head)
+		stdout, stderr, code := runExperimentBuiltBinary(t, bin, repo.Dir, nil, "close", "--preflight", "--force-local", "spec/exp-spike")
+		if code != 1 {
+			t.Fatalf("close --preflight (definition-only experiment) = %d, want 1; stdout=%s stderr=%s", code, stdout, stderr)
+		}
+		if !strings.Contains(stdout, "experiment "+closeExperimentProductionExperimentID) {
+			t.Fatalf("stdout = %q, want an experiment condition line naming the experiment", stdout)
+		}
+		if !strings.Contains(stdout, "close: --preflight: NOT READY") {
+			t.Fatalf("stdout = %q, want NOT READY — a real close would refuse on experiment evidence", stdout)
+		}
+		if strings.Contains(stdout, "close: --preflight: READY") {
+			t.Fatalf("stdout = %q, want no READY variant reported alongside NOT READY", stdout)
+		}
+	})
 }
 
-// Item 19: the core judgment never mutates injected evidence — deep
-// clones taken BEFORE the call (so a mutation through a shared Capsule/
-// ActorV2 pointer would be visible) must still equal the SAME slice's
-// contents after the call.
+// Item 19: the core judgment never mutates injected evidence. Task 10's
+// correction reshaped closeExperimentEvidence to the seam's own flat,
+// already-verified facts (ExperimentID, Outcome, Disposition, Selecting,
+// CapsuleVerified, SelectedCandidate) — plain values, never a pointer to
+// a Ratification/Capsule this adapter could alias — so the deep-copy
+// discipline this pin exists to protect is now trivially total: a
+// byte-for-byte struct comparison before and after the call is itself the
+// proof that closeExperimentEvaluate reads evidence only.
 func TestCloseExperimentEvidenceDeepCopyNoAlias(t *testing.T) {
-	ev := closeExperimentValidSelectingEvidence(t, "comparison", experiment.DispositionSelectRecommended, "")
-	beforeRatification := ev.Ratification.Clone()
-	beforeCapsule := *ev.Capsule
-	beforeCapsule.Artifacts = append([]experiment.CapsuleArtifact(nil), ev.Capsule.Artifacts...)
-	beforeOutcome := ev.Outcome
+	ev := closeExperimentSelectingEvidence("comparison", experiment.DispositionSelectRecommended, "cache")
+	before := ev
 
 	evidence := []closeExperimentEvidence{ev}
 	stdout, stderr, code := runCloseExperimentUnit(t, evidence)
@@ -1249,19 +977,7 @@ func TestCloseExperimentEvidenceDeepCopyNoAlias(t *testing.T) {
 		t.Fatalf("runClose(valid closure) = %d, want 0; stdout=%s stderr=%s", code, stdout, stderr)
 	}
 
-	got := evidence[0]
-	if !reflect.DeepEqual(got.Ratification, beforeRatification) {
-		t.Fatalf("Ratification mutated across runClose: got %+v, want %+v", got.Ratification, beforeRatification)
-	}
-	if got.Capsule == nil || !reflect.DeepEqual(*got.Capsule, beforeCapsule) {
-		t.Fatalf("Capsule mutated across runClose: got %+v, want %+v", got.Capsule, beforeCapsule)
-	}
-	if got.Outcome != beforeOutcome {
-		t.Fatalf("Outcome mutated across runClose: got %+v, want %+v", got.Outcome, beforeOutcome)
-	}
-	if got.ExperimentID != ev.ExperimentID || got.DefinitionID != ev.DefinitionID ||
-		got.DefinitionDigest != ev.DefinitionDigest || got.SelectedCandidate != ev.SelectedCandidate ||
-		got.RatificationDigest != ev.RatificationDigest {
-		t.Fatalf("scalar evidence field mutated across runClose: got %+v, want %+v", got, ev)
+	if got := evidence[0]; got != before {
+		t.Fatalf("evidence mutated across runClose: got %+v, want %+v", got, before)
 	}
 }
