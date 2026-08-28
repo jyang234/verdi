@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/jyang234/verdi/internal/canonjson"
+	"github.com/jyang234/verdi/internal/execworkspace"
 	"github.com/jyang234/verdi/internal/experiment"
 	"github.com/jyang234/verdi/internal/experimentapp"
 	"github.com/jyang234/verdi/internal/experimentrun"
@@ -30,23 +31,29 @@ operations:
   reconcile-draft
   propose-registration
   start
-  resume`
+  resume
+  propose-ratification
+  publish-capsule
+  release-workspaces`
 
 const experimentInputLimit int64 = 16 << 20
 
 var experimentOperationUsage = map[string]string{
-	"inspect":               "usage: verdi experiment inspect --spike <spec/id> --experiment <id> --accepted-head <sha> [--json]",                                                                   // vocab:identity — CLI usage/flag grammar (identity)
-	"discover-capabilities": "usage: verdi experiment discover-capabilities --spike <spec/id> --experiment <id> --accepted-head <sha> [--json]",                                                     // vocab:identity — CLI usage/flag grammar (identity)
-	"validate-draft":        "usage: verdi experiment validate-draft --spike <spec/id> --experiment <id> --accepted-head <sha> [--json]",                                                            // vocab:identity — CLI usage/flag grammar (identity)
-	"review-registration":   "usage: verdi experiment review-registration --spike <spec/id> --experiment <id> --accepted-head <sha> [--json]",                                                       // vocab:identity — CLI usage/flag grammar (identity)
-	"status":                "usage: verdi experiment status --spike <spec/id> --experiment <id> --accepted-head <sha> [--json]",                                                                    // vocab:identity — CLI usage/flag grammar (identity)
-	"explain-result":        "usage: verdi experiment explain-result --spike <spec/id> --experiment <id> --accepted-head <sha> --run <id> [--json]",                                                 // vocab:identity — CLI usage/flag grammar (identity)
-	"draft-definition":      "usage: verdi experiment draft-definition --spike <spec/id> --experiment <id> --accepted-head <sha> --definition <path|-> --candidate-root <path> [--json]",            // vocab:identity — CLI usage/flag grammar (identity)
-	"capture-candidate":     "usage: verdi experiment capture-candidate --spike <spec/id> --experiment <id> --accepted-head <sha> --candidate <id> --patch <path|-> --definition <path|-> [--json]", // vocab:identity — CLI usage/flag grammar (identity)
-	"reconcile-draft":       "usage: verdi experiment reconcile-draft --spike <spec/id> --experiment <id> --accepted-head <sha> [--human-proof <path>] [--json]",                                    // vocab:identity — CLI usage/flag grammar (identity)
-	"propose-registration":  "usage: verdi experiment propose-registration --spike <spec/id> --experiment <id> --accepted-head <sha> [--human-proof <path>] [--json]",                               // vocab:identity — CLI usage/flag grammar (identity)
-	"start":                 "usage: verdi experiment start --spike <spec/id> --experiment <id> --accepted-head <sha> --run <id> --inputs <path|-> [--json]",                                        // vocab:identity — CLI usage/flag grammar (identity)
-	"resume":                "usage: verdi experiment resume --spike <spec/id> --experiment <id> --accepted-head <sha> --run <id> --inputs <path|-> [--json]",                                       // vocab:identity — CLI usage/flag grammar (identity)
+	"inspect":               "usage: verdi experiment inspect --spike <spec/id> --experiment <id> --accepted-head <sha> [--json]",                                                                                                                  // vocab:identity — CLI usage/flag grammar (identity)
+	"discover-capabilities": "usage: verdi experiment discover-capabilities --spike <spec/id> --experiment <id> --accepted-head <sha> [--json]",                                                                                                    // vocab:identity — CLI usage/flag grammar (identity)
+	"validate-draft":        "usage: verdi experiment validate-draft --spike <spec/id> --experiment <id> --accepted-head <sha> [--json]",                                                                                                           // vocab:identity — CLI usage/flag grammar (identity)
+	"review-registration":   "usage: verdi experiment review-registration --spike <spec/id> --experiment <id> --accepted-head <sha> [--json]",                                                                                                      // vocab:identity — CLI usage/flag grammar (identity)
+	"status":                "usage: verdi experiment status --spike <spec/id> --experiment <id> --accepted-head <sha> [--json]",                                                                                                                   // vocab:identity — CLI usage/flag grammar (identity)
+	"explain-result":        "usage: verdi experiment explain-result --spike <spec/id> --experiment <id> --accepted-head <sha> --run <id> [--json]",                                                                                                // vocab:identity — CLI usage/flag grammar (identity)
+	"draft-definition":      "usage: verdi experiment draft-definition --spike <spec/id> --experiment <id> --accepted-head <sha> --definition <path|-> --candidate-root <path> [--json]",                                                           // vocab:identity — CLI usage/flag grammar (identity)
+	"capture-candidate":     "usage: verdi experiment capture-candidate --spike <spec/id> --experiment <id> --accepted-head <sha> --candidate <id> --patch <path|-> --definition <path|-> [--json]",                                                // vocab:identity — CLI usage/flag grammar (identity)
+	"reconcile-draft":       "usage: verdi experiment reconcile-draft --spike <spec/id> --experiment <id> --accepted-head <sha> [--human-proof <path>] [--json]",                                                                                   // vocab:identity — CLI usage/flag grammar (identity)
+	"propose-registration":  "usage: verdi experiment propose-registration --spike <spec/id> --experiment <id> --accepted-head <sha> [--human-proof <path>] [--json]",                                                                              // vocab:identity — CLI usage/flag grammar (identity)
+	"propose-ratification":  "usage: verdi experiment propose-ratification --spike <spec/id> --experiment <id> --accepted-head <sha> --result <digest> --disposition <value> [--candidate <id>] [--reason <text>] [--human-proof <path>] [--json]", // vocab:identity — CLI usage/flag grammar (identity)
+	"publish-capsule":       "usage: verdi experiment publish-capsule --spike <spec/id> --experiment <id> --accepted-head <sha> [--json]",                                                                                                          // vocab:identity — CLI usage/flag grammar (identity)
+	"release-workspaces":    "usage: verdi experiment release-workspaces --spike <spec/id> --experiment <id> --accepted-head <sha> [--json]",                                                                                                       // vocab:identity — CLI usage/flag grammar (identity)
+	"start":                 "usage: verdi experiment start --spike <spec/id> --experiment <id> --accepted-head <sha> --run <id> --inputs <path|-> [--json]",                                                                                       // vocab:identity — CLI usage/flag grammar (identity)
+	"resume":                "usage: verdi experiment resume --spike <spec/id> --experiment <id> --accepted-head <sha> --run <id> --inputs <path|-> [--json]",                                                                                      // vocab:identity — CLI usage/flag grammar (identity)
 }
 
 type experimentFlags struct {
@@ -114,8 +121,11 @@ func cmdExperiment(args []string, stdin io.Reader, stdout, stderr io.Writer) int
 		return runExperimentDraft(ctx, service, identity, flags, stdin, stdout, stderr)
 	case "capture-candidate":
 		return runExperimentCapture(ctx, service, identity, flags, stdin, stdout, stderr)
-	case "reconcile-draft", "propose-registration":
+	case "reconcile-draft", "propose-registration", "propose-ratification":
 		return runExperimentHuman(ctx, operation, service, identity, flags, stdout, stderr)
+	case "publish-capsule", "release-workspaces":
+		result := service.ReleaseRatified(ctx, identity, experimentapp.ReleaseAuthority{Releaser: execworkspace.NewReleaser(root)})
+		return renderExperimentResult(operation, result.Outcome, result, flags.json, stdout, stderr)
 	case "start", "resume":
 		return runExperimentExecution(ctx, operation, service, identity, flags, stdin, stdout, stderr)
 	default:
@@ -135,6 +145,9 @@ func parseExperimentFlags(operation string, args []string) (experimentFlags, err
 		allowed["candidate"], allowed["patch"], allowed["definition"] = true, true, true
 	case "reconcile-draft", "propose-registration":
 		allowed["human-proof"] = true
+	case "propose-ratification":
+		allowed["result"], allowed["disposition"] = true, true
+		allowed["candidate"], allowed["reason"], allowed["human-proof"] = true, true, true
 	case "start", "resume":
 		allowed["run"], allowed["inputs"] = true, true
 	}
@@ -181,6 +194,8 @@ func parseExperimentFlags(operation string, args []string) (experimentFlags, err
 		required = append(required, "definition", "candidate-root")
 	case "capture-candidate":
 		required = append(required, "candidate", "patch", "definition")
+	case "propose-ratification":
+		required = append(required, "result", "disposition")
 	case "start", "resume":
 		required = append(required, "run", "inputs")
 	}

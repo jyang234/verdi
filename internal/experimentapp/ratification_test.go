@@ -233,7 +233,7 @@ func ratificationChallengeFacts(t *testing.T, root string, identity Identity, re
 	if err != nil {
 		t.Fatal(err)
 	}
-	inputDigest, err := ratificationInputDigest(resultDigest, disposition, candidate, reason)
+	inputDigest, err := RatificationInputDigest(resultDigest, disposition, candidate, reason)
 	if err != nil {
 		t.Fatal(err)
 	}

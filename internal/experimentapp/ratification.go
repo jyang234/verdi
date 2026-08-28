@@ -82,12 +82,13 @@ type ratificationInputDigestFields struct {
 	Reason       string                 `json:"reason"`
 }
 
-// ratificationInputDigest computes the canonical typed ratification-input
+// RatificationInputDigest computes the canonical typed ratification-input
 // digest design §7 defines: exactly the four semantic fields, always
 // present. Both ProposeRatification (proposal-time binding) and
 // verifyRetainedRatificationProof (accepted-use rebinding) call this SAME
-// function so the two can never silently diverge.
-func ratificationInputDigest(resultDigest string, disposition experiment.Disposition, candidate, reason string) (string, error) {
+// function so the two can never silently diverge. CLI adapters use this
+// seam to bind the same typed request without rederiving the projection.
+func RatificationInputDigest(resultDigest string, disposition experiment.Disposition, candidate, reason string) (string, error) {
 	digest, err := canonjson.Digest(ratificationInputDigestFields{
 		ResultDigest: resultDigest, Disposition: disposition, Candidate: candidate, Reason: reason,
 	})
@@ -397,7 +398,7 @@ func (s *Service) ProposeRatification(ctx context.Context, identity Identity, in
 	// symmetry: these are verdicts, not operational failures, because the
 	// record and proof are each individually well-formed and merely fail
 	// to bind each other (the record is well-formed but stale evidence).
-	wantInputDigest, err := ratificationInputDigest(input.ResultDigest, input.Disposition, input.Candidate, input.Reason)
+	wantInputDigest, err := RatificationInputDigest(input.ResultDigest, input.Disposition, input.Candidate, input.Reason)
 	if err != nil {
 		return RatificationProposalResult{Outcome: operationalOutcome("ratification-record-invalid", err)}
 	}
@@ -790,7 +791,7 @@ func (s *Service) verifyRetainedRatificationProof(ctx context.Context, identity 
 	// STATE rebinding (controller pin P1): the retained proof must bind
 	// exactly this accepted ratification's semantic fields and exactly
 	// this accepted pre-ratification artifact projection.
-	wantInputDigest, err := ratificationInputDigest(record.ResultDigest, record.Disposition, record.Candidate, record.Reason)
+	wantInputDigest, err := RatificationInputDigest(record.ResultDigest, record.Disposition, record.Candidate, record.Reason)
 	if err != nil {
 		return "", operationalOutcome("ratification-proof-invalid", err)
 	}

@@ -45,7 +45,8 @@ func TestExperimentOperationGrammarBuiltBinary(t *testing.T) {
 	bin := buildVerdiBinary(t)
 	operations := []string{
 		"inspect", "discover-capabilities", "validate-draft", "review-registration", "status", "explain-result",
-		"draft-definition", "capture-candidate", "reconcile-draft", "propose-registration", "start", "resume",
+		"draft-definition", "capture-candidate", "reconcile-draft", "propose-registration", "propose-ratification",
+		"publish-capsule", "release-workspaces", "start", "resume",
 	}
 	for _, operation := range operations {
 		t.Run(operation, func(t *testing.T) {
@@ -691,6 +692,24 @@ func TestExperimentInventoryBuiltBinary(t *testing.T) {
 	if stdout != "" {
 		t.Fatalf("stdout = %q, want empty", stdout)
 	}
+	const legacyWave5BUsage = `usage: verdi experiment <operation> [flags]
+
+operations:
+  inspect
+  discover-capabilities
+  validate-draft
+  review-registration
+  status
+  explain-result
+  draft-definition
+  capture-candidate
+  reconcile-draft
+  propose-registration
+  start
+  resume`
+	if !strings.HasPrefix(stderr, legacyWave5BUsage+"\n") {
+		t.Fatalf("inventory changed through-5B usage bytes:\n%s", stderr)
+	}
 
 	for _, operation := range []string{
 		"inspect",
@@ -703,6 +722,9 @@ func TestExperimentInventoryBuiltBinary(t *testing.T) {
 		"capture-candidate",
 		"reconcile-draft",
 		"propose-registration",
+		"propose-ratification",
+		"publish-capsule",
+		"release-workspaces",
 		"start",
 		"resume",
 	} {
@@ -711,7 +733,7 @@ func TestExperimentInventoryBuiltBinary(t *testing.T) {
 		}
 	}
 	for _, forbidden := range []string{"ratify", "capsule", "release", "closure"} {
-		if strings.Contains(stderr, forbidden) {
+		if strings.Contains(stderr, "  "+forbidden+"\n") {
 			t.Errorf("inventory contains Wave 5C operation %q:\n%s", forbidden, stderr)
 		}
 	}

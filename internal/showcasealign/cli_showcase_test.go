@@ -1064,15 +1064,17 @@ func TestCLIShowcaseContextCompile(t *testing.T) {
 	}
 }
 
-// TestCLIShowcaseExperiment (cli:experiment, CSE Wave 5B — design §8,
-// ledger SI-145) drives `verdi experiment status` against the real
+// TestCLIShowcaseExperiment (cli:experiment, CSE Wave 5C — design §§8-9,
+// ledger SI-145/SI-146) drives the read, ratification, capsule, and release
+// operation forms against the real
 // provisioned examples/showcase store. The showcase corpus contains no
 // comparative experiments at all — a real, disclosed fact about the store,
 // the same pattern cli:context's mapping uses for its own
 // no-constitution refusal — so this proves the real binary's genuine typed
-// operational refusal (exit 2, `accepted-tree-invalid` in the canonical
-// JSON projection on stdout) for an experiment the accepted tree does not
-// carry, over an otherwise well-formed request naming the real
+// operational refusal (exit 2, each operation's typed missing-location or
+// accepted-tree code in the canonical JSON projection on stdout) for an
+// experiment neither proposal nor accepted tree carries, over an otherwise
+// well-formed request naming the real
 // spec/stale-decline spike, and mutates nothing. mcp_showcase_test.go's
 // own experiment subtest proves the MCP adapter answers the byte-identical
 // typed projection for this same request.
@@ -1090,14 +1092,29 @@ func TestCLIShowcaseExperiment(t *testing.T) {
 		t.Fatalf("test setup: gitx.StatusDirty: %v", err)
 	}
 
-	stdout, stderr, code := runBinary(t, root, "experiment", "status",
-		"--spike", "spec/stale-decline", "--experiment", "showcase-probe",
-		"--accepted-head", head, "--json")
-	if code != 2 || stderr != "" {
-		t.Fatalf("verdi experiment status against the real showcase store: exit %d, want 2\nstdout:\n%s\nstderr:\n%s", code, stdout, stderr)
-	}
-	if !strings.Contains(stdout, `"classification":"operational"`) || !strings.Contains(stdout, `"code":"accepted-tree-invalid"`) {
-		t.Fatalf("stdout = %q, want the typed operational no-such-experiment refusal projection", stdout)
+	for _, test := range []struct {
+		operation string
+		extra     []string
+		wantCode  string
+	}{
+		{operation: "status", wantCode: "accepted-tree-invalid"},
+		{operation: "propose-ratification", extra: []string{"--result", "sha256:" + strings.Repeat("1", 64), "--disposition", "reject-all"}, wantCode: "proposal-location-invalid"},
+		{operation: "publish-capsule", wantCode: "accepted-tree-invalid"},
+		{operation: "release-workspaces", wantCode: "accepted-tree-invalid"},
+	} {
+		t.Run(test.operation, func(t *testing.T) {
+			args := []string{"experiment", test.operation,
+				"--spike", "spec/stale-decline", "--experiment", "showcase-probe",
+				"--accepted-head", head, "--json"}
+			args = append(args, test.extra...)
+			stdout, stderr, code := runBinary(t, root, args...)
+			if code != 2 || stderr != "" {
+				t.Fatalf("verdi experiment %s against the real showcase store: exit %d, want 2\nstdout:\n%s\nstderr:\n%s", test.operation, code, stdout, stderr)
+			}
+			if !strings.Contains(stdout, `"classification":"operational"`) || !strings.Contains(stdout, `"code":"`+test.wantCode+`"`) {
+				t.Fatalf("stdout = %q, want the typed operational %s refusal projection", stdout, test.wantCode)
+			}
+		})
 	}
 
 	headAfter, err := gitx.RevParse(ctx, root, "HEAD")
