@@ -134,6 +134,12 @@ type closeDeps struct {
 	// adapter. Their zero values preserve pre-adoption direct-call behavior.
 	ConflictRequestPath string
 	ConflictProvider    policyconflict.VerdictProvider
+	// Experiments resolves the closure target's CSE experiment evidence
+	// (Wave 5C Task 10, closeexperiment.go): nil means production
+	// (productionCloseExperimentEvidence, mirroring the State field's
+	// nil-is-production precedent). Tests inject a fake to drive the pure
+	// judgment without a real accepted Git tree.
+	Experiments closeExperimentEvidenceProvider
 }
 
 // closeAddPaths and closeCreateCommit are the closure ritual's two post-
@@ -638,6 +644,24 @@ func runClose(ctx context.Context, root, storyArg string, manifest *store.Manife
 	if !ok {
 		fmt.Fprintln(stdout, "close: FAIL (closure gate not satisfied; see conditions above)")
 		return 1
+	}
+
+	// Wave 5C Task 10 (closeexperiment.go, design §9's final paragraph):
+	// an ADDITIVE gate over CSE experiment evidence, run immediately after
+	// the closure gate holds and strictly before every mutation below
+	// (AC-5: the ratification record joins the normal closure review).
+	// nil means production (the deps.State nil-is-production precedent).
+	experimentEvidenceProvider := deps.Experiments
+	if experimentEvidenceProvider == nil {
+		experimentEvidenceProvider = productionCloseExperimentEvidence{}
+	}
+	experimentEvidence, err := experimentEvidenceProvider.CloseEvidence(ctx, root, spec)
+	if err != nil {
+		fmt.Fprintln(stderr, "close:", err)
+		return 2
+	}
+	if rc := closeExperimentGate(experimentEvidence, stdout, stderr); rc != 0 {
+		return rc
 	}
 
 	// Recompute the fold for the rollup payload: the closure gate above

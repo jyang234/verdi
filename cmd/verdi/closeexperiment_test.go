@@ -1,0 +1,1267 @@
+package main
+
+import (
+	"bytes"
+	"context"
+	"fmt"
+	"os"
+	"path/filepath"
+	"reflect"
+	"strings"
+	"testing"
+
+	"github.com/jyang234/verdi/internal/artifact"
+	"github.com/jyang234/verdi/internal/experiment"
+	"github.com/jyang234/verdi/internal/experimentapp"
+	"github.com/jyang234/verdi/internal/fixturegit"
+	forgefake "github.com/jyang234/verdi/internal/forge/fake"
+	"github.com/jyang234/verdi/internal/governanceprincipal"
+	"github.com/jyang234/verdi/internal/provider/fake"
+	"github.com/jyang234/verdi/internal/store"
+	"github.com/jyang234/verdi/internal/upstream"
+)
+
+// closeExperimentSpikeSpecMD is the statusless (merge-accepted) comparison
+// spike this whole file's tests close: a `spike: true` story with exactly
+// one `resolves` edge back to spec/loan-mgmt (featureV1SpecMD,
+// cascadecheck_test.go), zero acceptance criteria (a spike declares none —
+// gate_test.go's TestGate_SpikeBranch_EvidenceExempt), and no persisted
+// status line at all — the VL-002/VL-010 statusless (merge-accepted)
+// shape, so a valid closure's archive move is a PURE RENAME (item 16's
+// byte-identical archive) exactly as
+// TestGate_Condition1_StatuslessExactDefaultBranch_Passes proves for the
+// closure-gate's own condition 1.
+// ac-1 exists only so the closure gate's own evidence.Fold has a
+// nonempty acceptance_criteria list to fold at all (evidence.Fold hard-
+// errors on a spec declaring zero ACs — checkClosureEligible, unlike
+// `verdi gate`'s own condition 2, carries no spike evidence-exemption
+// carve-out; that gap is a pre-existing property of close.go's own
+// closure gate, out of this task's scope, so every fixture in this file
+// works around it the same proven way close_test.go's own waiver tests
+// do — TestRunClose_DisclosesFoldRecordsMissingFromHEAD's "no evidence
+// records at all: ac-1 folds to eligible ONLY through the waiver").
+const closeExperimentSpikeSpecMD = `---
+id: spec/exp-spike
+kind: spec
+class: story
+title: "Comparison spike"
+owners: [platform-team]
+story: jira:EXP-1
+spike: true
+problem: { text: "which candidate wins", anchor: "#problem" }
+outcome: { text: "a recommendation recorded", anchor: "#outcome" }
+acceptance_criteria:
+  - { id: ac-1, text: "the spike records a recommendation", evidence: [static] }
+links:
+  - { type: resolves, ref: "spec/loan-mgmt#oq-1" }
+---
+# Comparison spike
+## Problem
+which candidate wins
+## Outcome
+a recommendation recorded
+`
+
+// closeExperimentWaiverSlug is store.RefSlug of closeExperimentSpikeSpecMD's
+// own story ref, computed once.
+var closeExperimentWaiverSlug = store.RefSlug("jira:EXP-1")
+
+// writeCloseExperimentWaiver waives ac-1 (writeCloseFixtureWaiver's own
+// pattern, close_test.go) so the closure gate's fold reaches Eligible
+// without any real self-hosted evidence production — this file's spikes
+// need only prove THIS task's own experiment-evidence gate, never the
+// pre-existing AC-fold machinery a real spike would separately satisfy.
+func writeCloseExperimentWaiver(t *testing.T, root, frozenCommit string) {
+	t.Helper()
+	path := store.WaiverPath(root, closeExperimentWaiverSlug, "ac-1")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("mkdir waiver dir: %v", err)
+	}
+	content := `---
+id: waiver/` + closeExperimentWaiverSlug + `--ac-1
+kind: waiver
+title: "Close-experiment fixture waiver"
+owners: [platform-team]
+status: active
+reason: "the fixture AC is waived; this file exercises the experiment-evidence gate, not AC-fold evidence"
+frozen: { at: 2024-01-01, commit: ` + frozenCommit + ` }
+---
+# Waiver
+`
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("writing waiver: %v", err)
+	}
+}
+
+// closeExperimentProfileMD is the hermetic accepted governance profile the
+// production adapter's ONE policyauthority.LoadFromSource/SelectedProfile
+// call must resolve — its content is never actually exercised by most of
+// this file's tests (a "no accepted ratification" or "malformed id"
+// experiment refuses before the kernel ever re-resolves a persisted
+// claim), but a valid, sealed profile must be loadable for the production
+// adapter to reach that refusal honestly rather than failing operationally
+// on its own plumbing. Mirrors buildExperimentHumanRepoWithSubjects'
+// inline profile (experiment_test.go) against the same testdata
+// constitution.
+const closeExperimentProfileMD = `---
+schema: verdi.governance-profile/v1
+id: solo-default
+class: solo
+applicable_transitions: [accept]
+identity_trust_sources:
+  - {id: offline-human, kind: identity-provider}
+role_mappings:
+  - {role: author, trust_source: offline-human, subjects: ["close-experiment-fixture-subject"]}
+ownership_sources: []
+signature_requirements: []
+required_approvers: []
+distinctness_rules: []
+evidence_source_restrictions: []
+escalation_thresholds: []
+---
+Hermetic close-experiment fixture profile.
+`
+
+// closeExperimentPolicyFiles returns the accepted-tree policy scaffolding
+// (constitution + selected profile) every production-adapter test commits
+// alongside the spike, read from experimentapp's own testdata so this file
+// never forks a second copy of the constitution fixture.
+func closeExperimentPolicyFiles(t *testing.T) map[string]string {
+	t.Helper()
+	raw, err := os.ReadFile(filepath.Join("..", "..", "internal", "experimentapp", "testdata", "policy", "constitution.md"))
+	if err != nil {
+		t.Fatalf("read policy constitution fixture: %v", err)
+	}
+	return map[string]string{
+		".verdi/policy/constitution.md":          string(raw),
+		".verdi/policy/profiles/solo-default.md": closeExperimentProfileMD,
+	}
+}
+
+// buildCloseExperimentSpikeFixtureRepo builds the base fixture every unit-
+// matrix test (driven through a fake closeDeps.Experiments provider) uses:
+// the parent feature, the comparison spike, and NO committed experiments/
+// tree at all — the production adapter's own detection is exercised only
+// by the production-path tests below, never by the fake-provider ones.
+func buildCloseExperimentSpikeFixtureRepo(t *testing.T) *fixturegit.Repo {
+	t.Helper()
+	t.Setenv("CI_DEFAULT_BRANCH", "main")
+	repo := fixturegit.Build(t, []fixturegit.Layer{{
+		Files: map[string]string{
+			".verdi/verdi.yaml":                     "schema: verdi.layout/v1\nforge: github\n",
+			".verdi/specs/active/loan-mgmt/spec.md": featureV1SpecMD,
+			".verdi/specs/active/exp-spike/spec.md": closeExperimentSpikeSpecMD,
+		},
+		Message: "close-experiment fixture: parent feature + comparison spike",
+	}})
+	writeCloseExperimentWaiver(t, repo.Dir, repo.Head)
+	return repo
+}
+
+// closeExperimentWriteFixtureFile writes content to root/rel, creating
+// parent directories as needed — the plain-write half of the two-commit
+// production fixture below (mirrors installConflictPolicyStore's own
+// idiom, conflictgate_test.go).
+func closeExperimentWriteFixtureFile(t *testing.T, root, rel, content string) {
+	t.Helper()
+	path := filepath.Join(root, filepath.FromSlash(rel))
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("mkdir %s: %v", filepath.Dir(path), err)
+	}
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("write %s: %v", rel, err)
+	}
+}
+
+// buildCloseExperimentProductionFixtureRepo is buildCloseExperimentSpikeFixtureRepo
+// plus the accepted policy scaffolding (constitution + selected profile)
+// and, when non-nil, a committed experiments/ subtree (relative paths
+// keyed under specs/active/exp-spike/experiments/) — the fixture every
+// PRODUCTION-adapter test (items 2/3/18) closes.
+//
+// The policy scaffolding is committed as a SECOND commit on `main`, and
+// the checkout is then moved BACK (detached) to the first commit — main
+// stays ahead, carrying the accepted profile and experiments tree the
+// production adapter reads via git plumbing (ResolveDefaultBranch +
+// ListTree, independent of what is checked out), while the checked-out
+// WORKING TREE close's own preamble inspects
+// (probeConflictGate/policyconflict.ProbeAdoption, which reads
+// policyauthority.Load(root) directly off disk) never carries a policy
+// store at all and so is never "adopted" — exactly as an operator who
+// adopted governance policy on `main` after this spike had already
+// landed would see from an older checkout. This is a faithful accepted-
+// state fixture, not a shortcut around either seam's own contract: the
+// spike's own spec.md bytes are byte-identical between both commits, so
+// closePrecondition's statusless landed-blob comparison is unaffected.
+func buildCloseExperimentProductionFixtureRepo(t *testing.T, experimentFiles map[string]string) *fixturegit.Repo {
+	t.Helper()
+	t.Setenv("CI_DEFAULT_BRANCH", "main")
+	repo := fixturegit.Build(t, []fixturegit.Layer{{
+		Files: map[string]string{
+			// providers.jira.mode: fake so the BUILT BINARY's own real
+			// buildProviderRegistry (rollup.go) — not a test-injected fake
+			// registry — resolves the jira:EXP-1 story scheme to the round-6
+			// hermetic fake provider (dc-2) rather than refusing with
+			// ErrUnknownScheme (rollup_test.go's own DecodeManifest precedent).
+			".verdi/verdi.yaml":                     "schema: verdi.layout/v1\nforge: github\nproviders:\n  jira:\n    mode: fake\n    base_url: https://example.atlassian.net\n    rollup_field: customfield_00000\n",
+			".verdi/specs/active/loan-mgmt/spec.md": featureV1SpecMD,
+			".verdi/specs/active/exp-spike/spec.md": closeExperimentSpikeSpecMD,
+		},
+		Message: "close-experiment production fixture: parent feature + comparison spike",
+	}})
+	workingHead := repo.Head
+
+	for rel, content := range closeExperimentPolicyFiles(t) {
+		closeExperimentWriteFixtureFile(t, repo.Dir, rel, content)
+	}
+	for rel, content := range experimentFiles {
+		closeExperimentWriteFixtureFile(t, repo.Dir, ".verdi/specs/active/exp-spike/experiments/"+rel, content)
+	}
+	gitOutput(t, repo.Dir, "add", "-A")
+	gitOutput(t, repo.Dir, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "--quiet", "--no-verify", "-m", "accept the CSE governance profile and committed experiments")
+	gitOutput(t, repo.Dir, "checkout", "--detach", "-q", workingHead)
+	repo.Head = workingHead
+	// Written AFTER the checkout so it stays untracked at C1 (never
+	// staged, never committed) — writing it before the "git add -A"
+	// commit above would have made checkout DELETE it again on the way
+	// back to C1 (tracked at C2, absent from C1's tree).
+	writeCloseExperimentWaiver(t, repo.Dir, workingHead)
+	return repo
+}
+
+// writeCloseExperimentGateReport writes a living, fully-dispositioned
+// deviation-report.md covering head directly into the spike's active-zone
+// directory (writeCloseGateReport's own pattern, close_test.go) — closure
+// gate condition 4 requires this before close's freeze step will take the
+// freeze-in-place path, and the experiment-evidence gate (this file) never
+// even runs until the closure gate above it holds.
+func writeCloseExperimentGateReport(t *testing.T, root, covers string) {
+	t.Helper()
+	dir := filepath.Join(root, ".verdi", "specs", "active", "exp-spike")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir %s: %v", dir, err)
+	}
+	content := fmt.Sprintf(`---
+schema: verdi.deviation/v1
+covers: %s
+findings:
+%s
+digest: sha256:%s
+---
+# Alignment report
+`, covers, dispositionedFindingYAML, strings.Repeat("0", 64))
+	if err := os.WriteFile(filepath.Join(dir, "deviation-report.md"), []byte(content), 0o644); err != nil {
+		t.Fatalf("writing deviation-report.md: %v", err)
+	}
+}
+
+// closeExperimentFakeProvider is the unit-matrix's injected
+// closeDeps.Experiments fake: it returns exactly the typed evidence (or
+// error) a test built with real internal/experiment codecs, independent
+// of any real accepted Git tree.
+type closeExperimentFakeProvider struct {
+	evidence []closeExperimentEvidence
+	err      error
+}
+
+func (p closeExperimentFakeProvider) CloseEvidence(context.Context, string, *artifact.SpecFrontmatter) ([]closeExperimentEvidence, error) {
+	return p.evidence, p.err
+}
+
+// runCloseExperimentUnit drives the whole runClose ritual over
+// buildCloseExperimentSpikeFixtureRepo with evidence injected through a
+// fake provider — the unit-matrix's one shared driver (items 4-17, 19).
+func runCloseExperimentUnit(t *testing.T, evidence []closeExperimentEvidence) (stdout, stderr string, code int) {
+	t.Helper()
+	repo := buildCloseExperimentSpikeFixtureRepo(t)
+	writeCloseExperimentGateReport(t, repo.Dir, repo.Head)
+	stdout, stderr, code, _ = runCloseExperimentUnitAt(t, repo, evidence)
+	return stdout, stderr, code
+}
+
+// runCloseExperimentUnitAt is runCloseExperimentUnit's split form for
+// tests that need the repo handle (e.g. to read collateral files before
+// and after) or the fake provider registry runClose actually used (e.g.
+// to assert PublishRollup was — or was not — called on the SAME instance
+// deps.Registry wired, never a second, untouched fake.New() the test
+// built for itself).
+func runCloseExperimentUnitAt(t *testing.T, repo *fixturegit.Repo, evidence []closeExperimentEvidence) (stdout, stderr string, code int, registry *fake.Provider) {
+	t.Helper()
+	fp := fake.New()
+	fg := forgefake.New()
+	deps := closeDeps{
+		Forge: fg, Registry: fp, Runner: upstream.NewFakeRunner(),
+		Experiments: closeExperimentFakeProvider{evidence: evidence},
+	}
+	var out, errOut bytes.Buffer
+	got := runClose(context.Background(), repo.Dir, "spec/exp-spike", &store.Manifest{}, deps, &out, &errOut)
+	return out.String(), errOut.String(), got, fp
+}
+
+// --- typed-evidence builders (real codecs; CLAUDE.md: never placeholder
+// bytes that would fail earlier validation) ---
+
+// closeExperimentCleanOutcome is the experimentapp.Outcome a genuine
+// accepted-ratification proof reports (experimentapp.cleanOutcome's own
+// shape, unexported there — this is the typed-evidence-building twin).
+func closeExperimentCleanOutcome() experimentapp.Outcome {
+	return experimentapp.Outcome{Classification: experimentapp.ClassificationClean, Code: "clean", Detail: "operation completed"}
+}
+
+// closeExperimentTestDefinition decodes and locks the shared CSE testdata
+// definition (internal/experimentapp/testdata/experiment-v2/experiment.yaml,
+// already used by experiment_test.go's buildExperimentHumanRepoWithSubjects)
+// — real bytes, real strict decode, a real computed lock — rather than a
+// hand-built literal that could silently drift from the schema.
+func closeExperimentTestDefinition(t *testing.T) experiment.Definition {
+	t.Helper()
+	raw, err := os.ReadFile(filepath.Join("..", "..", "internal", "experimentapp", "testdata", "experiment-v2", "experiment.yaml"))
+	if err != nil {
+		t.Fatalf("read experiment definition fixture: %v", err)
+	}
+	def, err := experiment.DecodeDefinition(raw)
+	if err != nil {
+		t.Fatalf("DecodeDefinition: %v", err)
+	}
+	digest, err := experiment.DefinitionDigest(def)
+	if err != nil {
+		t.Fatalf("DefinitionDigest: %v", err)
+	}
+	def.Lock = &experiment.Lock{DefinitionDigest: digest}
+	return def
+}
+
+// closeExperimentProductionExperimentID is the committed experiment
+// DIRECTORY name every production-adapter fixture in this file uses. It is
+// the shared testdata definition's own `id` on purpose: the adapter refuses
+// (operationally) any accepted definition whose id does not name its own
+// experiment directory, so a self-consistent production fixture cannot pick
+// an arbitrary directory name.
+const closeExperimentProductionExperimentID = "request-path-v2"
+
+// closeExperimentTestdataSpikeLine is the shared testdata definition's own
+// `spike:` line, replaced wholesale by closeExperimentLockedDefinitionYAML.
+const closeExperimentTestdataSpikeLine = "spike: spec/request-path-spike\n"
+
+// closeExperimentLockedDefinitionYAML is closeExperimentTestDefinition's
+// on-disk twin for production-adapter fixtures: the same testdata bytes
+// re-pointed at THIS file's own closure target and with a real computed
+// lock block appended (buildReleaseFixture's own doc-append idiom,
+// internal/experimentapp/release_test.go).
+//
+// The `spike:` re-point is required for the fixture to be self-consistent,
+// not a convenience: the adapter refuses (operationally) an accepted
+// definition whose `spike` does not name the target being closed, and this
+// file's target is spec/exp-spike. The `question:` line deliberately keeps
+// the testdata's own spike ref — Definition.Validate checks the two
+// independently, and this file's gate never reads `question`. The lock
+// digest is computed AFTER the replace, over the exact bytes committed, so
+// experiment.Locked still holds.
+func closeExperimentLockedDefinitionYAML(t *testing.T) string {
+	t.Helper()
+	raw, err := os.ReadFile(filepath.Join("..", "..", "internal", "experimentapp", "testdata", "experiment-v2", "experiment.yaml"))
+	if err != nil {
+		t.Fatalf("read experiment definition fixture: %v", err)
+	}
+	doctored := strings.Replace(string(raw), closeExperimentTestdataSpikeLine, "spike: spec/exp-spike\n", 1)
+	if doctored == string(raw) {
+		t.Fatalf("the shared testdata definition no longer carries the exact line %q; re-point this fixture's spike replacement", closeExperimentTestdataSpikeLine)
+	}
+	def, err := experiment.DecodeDefinition([]byte(doctored))
+	if err != nil {
+		t.Fatalf("DecodeDefinition: %v", err)
+	}
+	if def.ID != closeExperimentProductionExperimentID {
+		t.Fatalf("the shared testdata definition's id is %q, but this file's production fixtures commit it under %q", def.ID, closeExperimentProductionExperimentID)
+	}
+	digest, err := experiment.DefinitionDigest(def)
+	if err != nil {
+		t.Fatalf("DefinitionDigest: %v", err)
+	}
+	return doctored + "lock:\n  definition_digest: " + digest + "\n"
+}
+
+// closeExperimentTestResult builds a real, self-validating v2 result via
+// experiment.NewResultV2 (never a hand-decoded literal): a proven-winner
+// decision naming winner, over the two candidates the shared testdata
+// definition registers (baseline, cache).
+func closeExperimentTestResult(t *testing.T, def experiment.Definition, run, winner string) experiment.Result {
+	t.Helper()
+	defDigest, err := experiment.DefinitionDigest(def)
+	if err != nil {
+		t.Fatalf("DefinitionDigest: %v", err)
+	}
+	decision := experiment.ResultDecision{
+		Experiment: def.ID, DefinitionDigest: defDigest, Run: run,
+		Algorithm: experiment.AlgorithmV1, Verdict: experiment.VerdictProvenWinner, Winner: winner,
+		Reasons: []experiment.Reason{},
+		Candidates: []experiment.DecisionCandidate{
+			{ID: "baseline", Baseline: true, Eligible: true, ExecutionFailures: []experiment.CandidateExecutionFailure{}},
+			{ID: "cache", Baseline: false, Eligible: true, ExecutionFailures: []experiment.CandidateExecutionFailure{}},
+		},
+		ObservationsDigest: experimentRawDigest([]byte("observations-" + run)),
+	}
+	execution := experiment.ResultExecution{
+		ExecutionDigest: experimentRawDigest([]byte("execution-" + run)),
+		Isolation: experiment.ResultIsolation{
+			Network:     experiment.ReceiptNetwork{Mode: experiment.NetworkDeny, Configured: true, Reason: "close-experiment fixture: default-deny isolation"},
+			Disclosures: []experiment.IsolationDisclosure{},
+		},
+		WarmupDiagnostics: experiment.WarmupDiagnostics{
+			Authority: experiment.WarmupAuthorityNonDecisionDiagnostic, Scope: experiment.WarmupScopeFinalInvocation,
+			Failures: []experiment.WarmupFailure{},
+		},
+	}
+	res, err := experiment.NewResultV2(decision, execution)
+	if err != nil {
+		t.Fatalf("NewResultV2: %v", err)
+	}
+	return res
+}
+
+// closeExperimentTestRatification builds a real, self-validating v2
+// ratification via experiment.Ratification.Validate() — never a
+// hand-decoded literal.
+func closeExperimentTestRatification(t *testing.T, resultDigest string, disposition experiment.Disposition, candidate, reason string) experiment.Ratification {
+	t.Helper()
+	principalID, err := governanceprincipal.CanonicalPrincipalID("offline-human", "close-experiment-fixture-subject")
+	if err != nil {
+		t.Fatalf("CanonicalPrincipalID: %v", err)
+	}
+	r := experiment.Ratification{
+		Schema: experiment.RatificationSchemaV2, ResultDigest: resultDigest,
+		ActorV2: &experiment.RatificationActor{
+			TrustSource: "offline-human", Subject: "close-experiment-fixture-subject", PrincipalID: string(principalID),
+		},
+		Disposition: disposition, Candidate: candidate, Reason: reason,
+	}
+	if err := r.Validate(); err != nil {
+		t.Fatalf("Ratification.Validate: %v", err)
+	}
+	return r
+}
+
+// closeExperimentRequiredArtifactIDs is the CLOSED required capsule
+// inventory design §9's retained set obliges a selecting capsule for the
+// shared testdata definition to carry (DC-8): the nine fixed members,
+// enumerated here in sorted order INDEPENDENTLY of the production
+// adapter's own closeExperimentRequiredCapsuleArtifactIDs (so the two are a
+// genuine cross-check, not a tautology), plus one CapsuleFixtureArtifactID
+// entry per registered fixture. The shared testdata definition registers
+// none — asserted rather than assumed, so this fixture fails loudly instead
+// of silently under-covering if that ever changes.
+func closeExperimentRequiredArtifactIDs(t *testing.T, def experiment.Definition) []string {
+	t.Helper()
+	if len(def.Fixtures) != 0 {
+		t.Fatalf("the shared testdata definition now registers %d fixture(s); extend this fixture's capsule inventory with their CapsuleFixtureArtifactID entries", len(def.Fixtures))
+	}
+	return []string{
+		experiment.CapsuleArtifactCandidatePatch,
+		experiment.CapsuleArtifactContract,
+		experiment.CapsuleArtifactDefinition,
+		experiment.CapsuleArtifactEvaluatorCapabilities,
+		experiment.CapsuleArtifactExecutionReceipt,
+		experiment.CapsuleArtifactObservations,
+		experiment.CapsuleArtifactRatification,
+		experiment.CapsuleArtifactResult,
+		experiment.CapsuleArtifactWorkload,
+	}
+}
+
+// closeExperimentTestCapsule builds a real, self-validating, FULL-inventory
+// capsule manifest — the shape experiment.BindCapsuleManifest itself emits
+// for this definition: every required member of design §9's closed retained
+// set, sorted by id, with sha256-shaped digests. The four members whose
+// digest the real builder binds to a declared reference (the selected
+// candidate's patch, the evaluator capabilities, the contract, the
+// workload) carry exactly those declared digests, and result/ratification
+// carry the genuine ratified identities; the three the builder records
+// unconstrained (definition, execution-receipt, observations bytes) carry
+// arbitrary-but-valid raw digests, since no gate in this file identity-
+// checks them.
+func closeExperimentTestCapsule(t *testing.T, def experiment.Definition, definitionDigest, resultDigest, selected, ratificationDigest string) *experiment.CapsuleManifest {
+	t.Helper()
+	selectedPatchDigest := ""
+	for _, c := range def.Candidates {
+		if c.ID == selected {
+			selectedPatchDigest = c.Digest
+		}
+	}
+	if selectedPatchDigest == "" {
+		t.Fatalf("selected candidate %q is not registered by the shared testdata definition", selected)
+	}
+	digests := map[string]string{
+		experiment.CapsuleArtifactDefinition:            experimentRawDigest([]byte("close-experiment fixture: retained definition bytes")),
+		experiment.CapsuleArtifactCandidatePatch:        selectedPatchDigest,
+		experiment.CapsuleArtifactEvaluatorCapabilities: def.Evaluator.CapabilitiesDigest,
+		experiment.CapsuleArtifactContract:              def.Contract.Digest,
+		experiment.CapsuleArtifactWorkload:              def.Workload.Digest,
+		experiment.CapsuleArtifactExecutionReceipt:      experimentRawDigest([]byte("close-experiment fixture: retained execution-receipt bytes")),
+		experiment.CapsuleArtifactObservations:          experimentRawDigest([]byte("close-experiment fixture: retained observations bytes")),
+		experiment.CapsuleArtifactResult:                resultDigest,
+		experiment.CapsuleArtifactRatification:          ratificationDigest,
+	}
+	required := closeExperimentRequiredArtifactIDs(t, def)
+	artifacts := make([]experiment.CapsuleArtifact, 0, len(required))
+	for _, id := range required {
+		digest, ok := digests[id]
+		if !ok {
+			t.Fatalf("this fixture declares no digest for required capsule artifact %q", id)
+		}
+		artifacts = append(artifacts, experiment.CapsuleArtifact{ID: id, Digest: digest})
+	}
+	m := experiment.CapsuleManifest{
+		Schema: experiment.CapsuleManifestSchema, Experiment: def.ID, DefinitionDigest: definitionDigest,
+		ResultDigest: resultDigest, Selected: selected, Artifacts: artifacts,
+	}
+	if err := m.Validate(); err != nil {
+		t.Fatalf("CapsuleManifest.Validate: %v", err)
+	}
+	return &m
+}
+
+// closeExperimentValidSelectingEvidence builds one complete, mutually
+// consistent, valid selecting closeExperimentEvidence — every identity
+// (definition digest, result digest, selected candidate, ratification
+// digest) real and matching, so it closes clean by itself (items 11/12's
+// base case, and every mismatch item's starting point before its one
+// deliberate corruption).
+func closeExperimentValidSelectingEvidence(t *testing.T, id string, disposition experiment.Disposition, otherCandidate string) closeExperimentEvidence {
+	t.Helper()
+	def := closeExperimentTestDefinition(t)
+	defDigest, err := experiment.DefinitionDigest(def)
+	if err != nil {
+		t.Fatalf("DefinitionDigest: %v", err)
+	}
+	res := closeExperimentTestResult(t, def, "run-1", "cache")
+	resDigest, err := experiment.ResultDigest(res)
+	if err != nil {
+		t.Fatalf("ResultDigest: %v", err)
+	}
+	selected := "cache"
+	candidate, reason := "", ""
+	if disposition == experiment.DispositionSelectOther {
+		selected = otherCandidate
+		candidate = otherCandidate
+		reason = "explicit reviewer selection for the close-experiment fixture"
+	}
+	rat := closeExperimentTestRatification(t, resDigest, disposition, candidate, reason)
+	ratBytes, err := experiment.EncodeRatification(rat)
+	if err != nil {
+		t.Fatalf("EncodeRatification: %v", err)
+	}
+	ratDigest := experimentRawDigest(ratBytes)
+	capsule := closeExperimentTestCapsule(t, def, defDigest, resDigest, selected, ratDigest)
+	return closeExperimentEvidence{
+		ExperimentID: id, Outcome: closeExperimentCleanOutcome(),
+		Ratification: rat, Capsule: capsule,
+		DefinitionID: def.ID, DefinitionDigest: defDigest, SelectedCandidate: selected, RatificationDigest: ratDigest,
+		RequiredCapsuleArtifactIDs: closeExperimentRequiredArtifactIDs(t, def),
+	}
+}
+
+// closeExperimentNonSelectingEvidence builds one clean, non-selecting
+// closeExperimentEvidence (Capsule always nil, and therefore
+// RequiredCapsuleArtifactIDs empty — SI-146: only accepted selecting
+// dispositions have a capsule, so only they carry a required inventory).
+func closeExperimentNonSelectingEvidence(t *testing.T, id string, disposition experiment.Disposition) closeExperimentEvidence {
+	t.Helper()
+	def := closeExperimentTestDefinition(t)
+	defDigest, err := experiment.DefinitionDigest(def)
+	if err != nil {
+		t.Fatalf("DefinitionDigest: %v", err)
+	}
+	res := closeExperimentTestResult(t, def, "run-1", "cache")
+	resDigest, err := experiment.ResultDigest(res)
+	if err != nil {
+		t.Fatalf("ResultDigest: %v", err)
+	}
+	rat := closeExperimentTestRatification(t, resDigest, disposition, "", "honest terminal response for the close-experiment fixture")
+	ratBytes, err := experiment.EncodeRatification(rat)
+	if err != nil {
+		t.Fatalf("EncodeRatification: %v", err)
+	}
+	return closeExperimentEvidence{
+		ExperimentID: id, Outcome: closeExperimentCleanOutcome(),
+		Ratification: rat, Capsule: nil,
+		DefinitionID: def.ID, DefinitionDigest: defDigest, SelectedCandidate: "", RatificationDigest: experimentRawDigest(ratBytes),
+	}
+}
+
+// closeExperimentVerdictEvidence builds one non-clean, VERDICT
+// closeExperimentEvidence: a well-formed experiment whose accepted
+// ratification proof simply did not hold (experimentapp's own
+// ratification-not-accepted verdict — the exact shape
+// TestCloseExperimentProductionAdapterNoAcceptedRatification observes from
+// the real service). Only Outcome is meaningful for such an experiment.
+func closeExperimentVerdictEvidence(id string) closeExperimentEvidence {
+	return closeExperimentEvidence{
+		ExperimentID: id,
+		Outcome: experimentapp.Outcome{
+			Classification: experimentapp.ClassificationVerdict,
+			Code:           "ratification-not-accepted",
+			Detail:         "no ratification is present at the accepted HEAD; proposal bytes carry no authority",
+		},
+	}
+}
+
+// closeExperimentMutatedCapsule returns a deep copy of base's capsule with
+// mutate applied, still passing CapsuleManifest.Validate() (structurally
+// well-formed, semantically wrong) — the shape every mismatch item (7-10)
+// needs: a capsule that is grammatically valid but identity-mismatched.
+func closeExperimentMutatedCapsule(t *testing.T, base *experiment.CapsuleManifest, mutate func(*experiment.CapsuleManifest)) *experiment.CapsuleManifest {
+	t.Helper()
+	clone := *base
+	clone.Artifacts = append([]experiment.CapsuleArtifact(nil), base.Artifacts...)
+	mutate(&clone)
+	if err := clone.Validate(); err != nil {
+		t.Fatalf("mutated CapsuleManifest.Validate: %v", err)
+	}
+	return &clone
+}
+
+func closeExperimentOtherDigest(seed string) string {
+	return experimentRawDigest([]byte("close-experiment-mismatch-" + seed))
+}
+
+// ================================ matrix ================================
+
+// Item 1: an ordinary spike carrying no experiment evidence at all closes
+// exactly as before — the empty-evidence path is a genuine zero-behavior-
+// change no-op (closeExperimentGate's very first check).
+func TestCloseOrdinarySpikeExperimentAbsentClosesUnchanged(t *testing.T) {
+	stdout, stderr, code := runCloseExperimentUnit(t, nil)
+	if code != 0 {
+		t.Fatalf("runClose(no experiment evidence) = %d, want 0; stdout=%s stderr=%s", code, stdout, stderr)
+	}
+	if strings.Contains(stdout, "experiment evidence") {
+		t.Fatalf("stdout = %q, want no experiment-evidence prose for a target with none", stdout)
+	}
+}
+
+// Item 2 (and this file's RED capture): a comparison-backed spike — one
+// carrying a committed, LOCKED experiment with no accepted ratification —
+// is DETECTED by the production adapter and the gate ENGAGES: the target
+// refuses (1) rather than closing (0). Before this task's implementation,
+// runClose never looked at the experiments/ tree at all and this same
+// fixture closed with exit 0 — that differential IS the RED witness.
+func TestCloseComparisonBackedSpikeExperimentDetectionEngagesGate(t *testing.T) {
+	repo := buildCloseExperimentProductionFixtureRepo(t, map[string]string{
+		closeExperimentProductionExperimentID + "/experiment.yaml": closeExperimentLockedDefinitionYAML(t),
+	})
+	writeCloseExperimentGateReport(t, repo.Dir, repo.Head)
+
+	// The same before/after snapshot items 13/14 take over the unit path,
+	// applied to the PRODUCTION adapter's own refusal: the gate is strictly
+	// pre-effect no matter WHICH provider produced the evidence.
+	before := takeConflictLifecycleSnapshot(t, repo.Dir,
+		".verdi/specs/active/exp-spike/spec.md",
+		".verdi/specs/active/exp-spike/deviation-report.md",
+		".verdi/specs/active/exp-spike/rollup.json",
+		".verdi/specs/archive/exp-spike/spec.md",
+		".verdi/specs/archive/exp-spike/deviation-report.md",
+		".verdi/specs/archive/exp-spike/rollup.json",
+	)
+
+	fp := fake.New()
+	fg := forgefake.New()
+	deps := closeDeps{Forge: fg, Registry: fp, Runner: upstream.NewFakeRunner()}
+	var stdout, stderr bytes.Buffer
+	got := runClose(context.Background(), repo.Dir, "spec/exp-spike", &store.Manifest{}, deps, &stdout, &stderr)
+	if got != 1 {
+		t.Fatalf("runClose(comparison-backed, no ratification) = %d, want 1 (detection must engage the gate); stdout=%s stderr=%s", got, stdout.String(), stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "close: FAIL (experiment evidence not satisfied; see conditions above)") {
+		t.Fatalf("stdout = %q, want the experiment-evidence FAIL summary", stdout.String())
+	}
+	assertConflictLifecycleSnapshot(t, repo.Dir, before)
+	if hasLocalBranch(t, repo.Dir, "close/exp-spike") {
+		t.Fatal("close/exp-spike branch created across a production-path experiment-evidence refusal")
+	}
+	if _, published := fp.PublishedField("jira:EXP-1"); published {
+		t.Fatal("rollup published across an experiment-evidence refusal")
+	}
+}
+
+// Item 3: the production adapter's own AcceptedRatification proof, over a
+// locked, definition-only committed experiment (no ratification.yaml at
+// all) reports the specific "no ratification is present" verdict — the
+// controller's stop-gate audit's named example.
+func TestCloseExperimentProductionAdapterNoAcceptedRatification(t *testing.T) {
+	repo := buildCloseExperimentProductionFixtureRepo(t, map[string]string{
+		closeExperimentProductionExperimentID + "/experiment.yaml": closeExperimentLockedDefinitionYAML(t),
+	})
+	writeCloseExperimentGateReport(t, repo.Dir, repo.Head)
+
+	fp := fake.New()
+	fg := forgefake.New()
+	deps := closeDeps{Forge: fg, Registry: fp, Runner: upstream.NewFakeRunner()}
+	var stdout, stderr bytes.Buffer
+	got := runClose(context.Background(), repo.Dir, "spec/exp-spike", &store.Manifest{}, deps, &stdout, &stderr)
+	if got != 1 {
+		t.Fatalf("runClose = %d, want 1; stdout=%s stderr=%s", got, stdout.String(), stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "no ratification is present at the accepted HEAD") {
+		t.Fatalf("stdout = %q, want the accepted ratification proof's own honest detail", stdout.String())
+	}
+}
+
+// An experiments/ directory that exists ONLY in the working tree — written
+// after every fixture commit, never staged, absent from the accepted tree
+// entirely — still ENGAGES the gate (closeExperimentIDUnion's os.ReadDir
+// branch is a real detection source, not a convenience), and the
+// AcceptedRatification proof then refuses it: the accepted experiment
+// resolves in ZERO active/archive locations, which is uninterpretable
+// accepted evidence rather than an unsatisfied one, so exit 2.
+//
+// That is the unmerged-proposal posture design §9 requires: proposal bytes
+// sitting in a checkout carry no authority (DC-9), and a target whose only
+// experiment is unmerged is NEVER read as "no experiments" and closed
+// (CO-1 fail-closed, design §10's no-favorable-reading-of-a-missing-fact).
+func TestCloseExperimentWorktreeOnlyExperimentsDirectoryRefusesOperationally(t *testing.T) {
+	repo := buildCloseExperimentProductionFixtureRepo(t, nil)
+	// Written after the fixture's own commits and its detached checkout, so
+	// it is untracked at the checked-out revision and absent from `main`.
+	closeExperimentWriteFixtureFile(t, repo.Dir,
+		".verdi/specs/active/exp-spike/experiments/"+closeExperimentProductionExperimentID+"/experiment.yaml",
+		closeExperimentLockedDefinitionYAML(t))
+	writeCloseExperimentGateReport(t, repo.Dir, repo.Head)
+
+	fp := fake.New()
+	fg := forgefake.New()
+	deps := closeDeps{Forge: fg, Registry: fp, Runner: upstream.NewFakeRunner()}
+	var stdout, stderr bytes.Buffer
+	got := runClose(context.Background(), repo.Dir, "spec/exp-spike", &store.Manifest{}, deps, &stdout, &stderr)
+	if got != 2 {
+		t.Fatalf("runClose(worktree-only experiment) = %d, want 2; stdout=%s stderr=%s", got, stdout.String(), stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "close: experiment "+closeExperimentProductionExperimentID+":") {
+		t.Fatalf("stderr = %q, want the worktree-side id detected and named", stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "resolves in 0 active/archive locations") {
+		t.Fatalf("stderr = %q, want the accepted-tree resolution's own honest detail", stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "[accepted-tree-invalid]") {
+		t.Fatalf("stderr = %q, want the operational accepted-tree-invalid code", stderr.String())
+	}
+	if strings.Contains(stdout.String(), "experiment evidence not satisfied") || strings.Contains(stdout.String(), "[FAIL] experiment") {
+		t.Fatalf("stdout = %q, want no experiment-evidence verdict lines on an operational refusal", stdout.String())
+	}
+	if _, published := fp.PublishedField("jira:EXP-1"); published {
+		t.Fatal("rollup published across an experiment-evidence refusal")
+	}
+}
+
+// Item 4: a selecting disposition with no capsule at all refuses.
+func TestCloseExperimentSelectingWithoutCapsuleRefuses(t *testing.T) {
+	ev := closeExperimentValidSelectingEvidence(t, "comparison", experiment.DispositionSelectRecommended, "")
+	ev.Capsule = nil
+	stdout, stderr, code := runCloseExperimentUnit(t, []closeExperimentEvidence{ev})
+	if code != 1 {
+		t.Fatalf("runClose(selecting, no capsule) = %d, want 1; stdout=%s stderr=%s", code, stdout, stderr)
+	}
+	if !strings.Contains(stdout, "carries no capsule manifest") {
+		t.Fatalf("stdout = %q, want the absent-capsule reason", stdout)
+	}
+}
+
+// Item 5: every non-selecting disposition is an honest terminal response
+// that does not satisfy closure by itself.
+func TestCloseExperimentNonSelectingDispositionsRefuse(t *testing.T) {
+	for _, disposition := range []experiment.Disposition{
+		experiment.DispositionRejectAll, experiment.DispositionMisframed, experiment.DispositionRequestNewRevision,
+	} {
+		t.Run(string(disposition), func(t *testing.T) {
+			ev := closeExperimentNonSelectingEvidence(t, "comparison", disposition)
+			stdout, stderr, code := runCloseExperimentUnit(t, []closeExperimentEvidence{ev})
+			if code != 1 {
+				t.Fatalf("runClose(%s) = %d, want 1; stdout=%s stderr=%s", disposition, code, stdout, stderr)
+			}
+			if !strings.Contains(stdout, "does not select a candidate") {
+				t.Fatalf("stdout = %q, want the non-selecting reason", stdout)
+			}
+		})
+	}
+}
+
+// Item 6: an operational Outcome anywhere in the evidence, and a provider
+// Go error, both exit 2 (never folded into the 0/1 verdict).
+func TestCloseExperimentOperationalOutcomeAndProviderErrorExitTwo(t *testing.T) {
+	t.Run("operational evidence", func(t *testing.T) {
+		ev := closeExperimentEvidence{
+			ExperimentID: "comparison",
+			Outcome:      experimentapp.Outcome{Classification: experimentapp.ClassificationOperational, Code: "state-invalid", Detail: "accepted tree carries corrupted state"},
+		}
+		stdout, stderr, code := runCloseExperimentUnit(t, []closeExperimentEvidence{ev})
+		if code != 2 {
+			t.Fatalf("runClose(operational evidence) = %d, want 2; stdout=%s stderr=%s", code, stdout, stderr)
+		}
+		// The closure gate above this file's own gate already printed its
+		// [PASS]/[FAIL] lines (unaffected, pre-existing behavior); this
+		// gate itself must print no per-experiment condition line and no
+		// FAIL summary — an operational refusal exits before the pure
+		// judgment (closeExperimentEvaluate) ever runs.
+		if strings.Contains(stdout, "experiment evidence not satisfied") || strings.Contains(stdout, "[FAIL] experiment") {
+			t.Fatalf("stdout = %q, want no experiment-evidence verdict lines on an operational refusal", stdout)
+		}
+		if !strings.Contains(stderr, "accepted tree carries corrupted state") {
+			t.Fatalf("stderr = %q, want the operational detail", stderr)
+		}
+	})
+	t.Run("provider error", func(t *testing.T) {
+		repo := buildCloseExperimentSpikeFixtureRepo(t)
+		writeCloseExperimentGateReport(t, repo.Dir, repo.Head)
+		fp := fake.New()
+		fg := forgefake.New()
+		deps := closeDeps{
+			Forge: fg, Registry: fp, Runner: upstream.NewFakeRunner(),
+			Experiments: closeExperimentFakeProvider{err: fmt.Errorf("close-experiment fixture: provider unavailable")},
+		}
+		var stdout, stderr bytes.Buffer
+		got := runClose(context.Background(), repo.Dir, "spec/exp-spike", &store.Manifest{}, deps, &stdout, &stderr)
+		if got != 2 {
+			t.Fatalf("runClose(provider error) = %d, want 2; stdout=%s stderr=%s", got, stdout.String(), stderr.String())
+		}
+		if strings.Contains(stdout.String(), "experiment evidence not satisfied") || strings.Contains(stdout.String(), "[FAIL] experiment") {
+			t.Fatalf("stdout = %q, want no experiment-evidence verdict lines on a provider error", stdout.String())
+		}
+		if !strings.Contains(stderr.String(), "provider unavailable") {
+			t.Fatalf("stderr = %q, want the provider's own error", stderr.String())
+		}
+	})
+}
+
+// TestCloseExperimentUnknownOutcomeClassificationExitsTwo pins the
+// differential from the Tier 3 re-review: closeExperimentGate's pre-scan
+// (closeexperiment.go) is defined over exactly the two interpretable
+// classifications (clean, verdict); ANY OTHER Outcome.Classification —
+// the zero value, or any string this build does not recognize at all —
+// is an uninterpretable condition and must exit 2, never be read as a
+// verdict (design §10 / CO-4: no operational→verdict collapse). Before
+// the pre-scan existed, an unrecognized classification fell through to
+// closeExperimentEvaluate's own `default:` arm and exited 1 — this test
+// exists specifically to catch a regression back to that collapse.
+func TestCloseExperimentUnknownOutcomeClassificationExitsTwo(t *testing.T) {
+	for _, classification := range []experimentapp.Classification{"", "wat"} {
+		t.Run(string(classification)+"/zero-or-unknown", func(t *testing.T) {
+			ev := closeExperimentEvidence{
+				ExperimentID: "comparison",
+				Outcome:      experimentapp.Outcome{Classification: classification, Code: "unrecognized", Detail: "outcome classification is neither clean nor verdict"},
+			}
+			stdout, stderr, code := runCloseExperimentUnit(t, []closeExperimentEvidence{ev})
+			if code != 2 {
+				t.Fatalf("runClose(Outcome.Classification=%q) = %d, want 2; stdout=%s stderr=%s", classification, code, stdout, stderr)
+			}
+			if !strings.Contains(stderr, "close: experiment comparison:") {
+				t.Fatalf("stderr = %q, want the per-experiment operational line", stderr)
+			}
+			if strings.Contains(stdout, "[FAIL] experiment") {
+				t.Fatalf("stdout = %q, want no per-experiment [FAIL] condition line on an operational refusal", stdout)
+			}
+			if strings.Contains(stdout, "experiment evidence not satisfied") {
+				t.Fatalf("stdout = %q, want no experiment-evidence FAIL summary on an operational refusal", stdout)
+			}
+		})
+	}
+}
+
+// Item 7: a capsule whose own definition digest disagrees with the
+// accepted definition digest refuses.
+func TestCloseExperimentDefinitionDigestMismatchRefuses(t *testing.T) {
+	ev := closeExperimentValidSelectingEvidence(t, "comparison", experiment.DispositionSelectRecommended, "")
+	ev.Capsule = closeExperimentMutatedCapsule(t, ev.Capsule, func(m *experiment.CapsuleManifest) {
+		m.DefinitionDigest = closeExperimentOtherDigest("definition")
+	})
+	stdout, stderr, code := runCloseExperimentUnit(t, []closeExperimentEvidence{ev})
+	if code != 1 {
+		t.Fatalf("runClose(definition digest mismatch) = %d, want 1; stdout=%s stderr=%s", code, stdout, stderr)
+	}
+	if !strings.Contains(stdout, "capsule definition digest") {
+		t.Fatalf("stdout = %q, want the definition-digest mismatch reason", stdout)
+	}
+}
+
+// Item 8: a capsule whose result digest disagrees with the ratified
+// result digest refuses.
+func TestCloseExperimentResultDigestMismatchRefuses(t *testing.T) {
+	ev := closeExperimentValidSelectingEvidence(t, "comparison", experiment.DispositionSelectRecommended, "")
+	ev.Capsule = closeExperimentMutatedCapsule(t, ev.Capsule, func(m *experiment.CapsuleManifest) {
+		m.ResultDigest = closeExperimentOtherDigest("result")
+	})
+	stdout, stderr, code := runCloseExperimentUnit(t, []closeExperimentEvidence{ev})
+	if code != 1 {
+		t.Fatalf("runClose(result digest mismatch) = %d, want 1; stdout=%s stderr=%s", code, stdout, stderr)
+	}
+	if !strings.Contains(stdout, "capsule result digest") {
+		t.Fatalf("stdout = %q, want the result-digest mismatch reason", stdout)
+	}
+}
+
+// Item 9: a capsule whose selected candidate disagrees with the ratified
+// selection refuses.
+func TestCloseExperimentSelectedCandidateMismatchRefuses(t *testing.T) {
+	ev := closeExperimentValidSelectingEvidence(t, "comparison", experiment.DispositionSelectRecommended, "")
+	ev.Capsule = closeExperimentMutatedCapsule(t, ev.Capsule, func(m *experiment.CapsuleManifest) {
+		m.Selected = "baseline"
+	})
+	stdout, stderr, code := runCloseExperimentUnit(t, []closeExperimentEvidence{ev})
+	if code != 1 {
+		t.Fatalf("runClose(selected candidate mismatch) = %d, want 1; stdout=%s stderr=%s", code, stdout, stderr)
+	}
+	if !strings.Contains(stdout, "capsule selected candidate") {
+		t.Fatalf("stdout = %q, want the selected-candidate mismatch reason", stdout)
+	}
+}
+
+// Item 10: a capsule whose "ratification" artifact digest disagrees with
+// the accepted ratification's own digest refuses.
+func TestCloseExperimentRatificationDigestMismatchRefuses(t *testing.T) {
+	ev := closeExperimentValidSelectingEvidence(t, "comparison", experiment.DispositionSelectRecommended, "")
+	ev.Capsule = closeExperimentMutatedCapsule(t, ev.Capsule, func(m *experiment.CapsuleManifest) {
+		for i := range m.Artifacts {
+			if m.Artifacts[i].ID == experiment.CapsuleArtifactRatification {
+				m.Artifacts[i].Digest = closeExperimentOtherDigest("ratification")
+			}
+		}
+	})
+	stdout, stderr, code := runCloseExperimentUnit(t, []closeExperimentEvidence{ev})
+	if code != 1 {
+		t.Fatalf("runClose(ratification digest mismatch) = %d, want 1; stdout=%s stderr=%s", code, stdout, stderr)
+	}
+	if !strings.Contains(stdout, "capsule ratification-artifact digest") {
+		t.Fatalf("stdout = %q, want the ratification-artifact digest mismatch reason", stdout)
+	}
+}
+
+// A selecting capsule must also carry design §9's CLOSED retained
+// inventory (DC-8), not merely the matching identities: a capsule missing
+// a required member is not the sealed complete reproduction set §9
+// requires, and one carrying an id outside the closed set is not a capsule
+// the ratified protocol admits. "recommendation" is the set's one OPTIONAL
+// member and must still be admitted. Each case is a SINGLE mutation of the
+// same valid full-inventory base (items 7-10's structure).
+func TestCloseExperimentCapsuleInventoryIsTheClosedRetainedSet(t *testing.T) {
+	tests := []struct {
+		name    string
+		mutate  func(*experiment.CapsuleManifest)
+		want    int
+		wantOut string
+	}{
+		{
+			name: "missing a required member refuses",
+			mutate: func(m *experiment.CapsuleManifest) {
+				kept := make([]experiment.CapsuleArtifact, 0, len(m.Artifacts))
+				for _, a := range m.Artifacts {
+					if a.ID == experiment.CapsuleArtifactWorkload {
+						continue
+					}
+					kept = append(kept, a)
+				}
+				m.Artifacts = kept
+			},
+			want:    1,
+			wantOut: `capsule manifest is missing required artifact "workload"`,
+		},
+		{
+			name: "a member outside the closed set refuses",
+			mutate: func(m *experiment.CapsuleManifest) {
+				m.Artifacts = append(m.Artifacts, experiment.CapsuleArtifact{
+					ID: "stray-artifact", Digest: closeExperimentOtherDigest("stray"),
+				})
+			},
+			want:    1,
+			wantOut: `capsule manifest presents artifact "stray-artifact"`,
+		},
+		{
+			name: "the optional recommendation member is admitted",
+			mutate: func(m *experiment.CapsuleManifest) {
+				m.Artifacts = append(m.Artifacts, experiment.CapsuleArtifact{
+					ID: experiment.CapsuleArtifactRecommendation, Digest: closeExperimentOtherDigest("recommendation"),
+				})
+			},
+			want: 0,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			ev := closeExperimentValidSelectingEvidence(t, "comparison", experiment.DispositionSelectRecommended, "")
+			ev.Capsule = closeExperimentMutatedCapsule(t, ev.Capsule, tc.mutate)
+			stdout, stderr, code := runCloseExperimentUnit(t, []closeExperimentEvidence{ev})
+			if code != tc.want {
+				t.Fatalf("runClose(%s) = %d, want %d; stdout=%s stderr=%s", tc.name, code, tc.want, stdout, stderr)
+			}
+			if tc.wantOut != "" && !strings.Contains(stdout, tc.wantOut) {
+				t.Fatalf("stdout = %q, want it to name %q", stdout, tc.wantOut)
+			}
+		})
+	}
+}
+
+// Item 11: a valid select-recommended ratification with a matching
+// capsule closes clean.
+func TestCloseExperimentValidSelectRecommendedClosesClean(t *testing.T) {
+	ev := closeExperimentValidSelectingEvidence(t, "comparison", experiment.DispositionSelectRecommended, "")
+	stdout, stderr, code := runCloseExperimentUnit(t, []closeExperimentEvidence{ev})
+	if code != 0 {
+		t.Fatalf("runClose(valid select-recommended) = %d, want 0; stdout=%s stderr=%s", code, stdout, stderr)
+	}
+}
+
+// Item 12: a valid select-other ratification with a matching capsule
+// closes clean.
+func TestCloseExperimentValidSelectOtherClosesClean(t *testing.T) {
+	ev := closeExperimentValidSelectingEvidence(t, "comparison", experiment.DispositionSelectOther, "baseline")
+	stdout, stderr, code := runCloseExperimentUnit(t, []closeExperimentEvidence{ev})
+	if code != 0 {
+		t.Fatalf("runClose(valid select-other) = %d, want 0; stdout=%s stderr=%s", code, stdout, stderr)
+	}
+}
+
+// The multi-experiment composition itself (this file's header comment and
+// the brief's disclosed per-experiment composition of design §9's singular
+// rule): a comparison-backed target may close only when EVERY discovered
+// experiment's evidence is clean AND at least one supplies a valid
+// selecting ratification. CO-1 fail-closed — one broken experiment blocks
+// closure even alongside another that already satisfies it, while a
+// non-selecting experiment merely fails to CONTRIBUTE the selection.
+func TestCloseMultipleExperimentEvidenceComposition(t *testing.T) {
+	tests := []struct {
+		name     string
+		evidence func(t *testing.T) []closeExperimentEvidence
+		want     int
+		wantOut  string
+	}{
+		{
+			name: "valid selecting alongside a verdict experiment refuses",
+			evidence: func(t *testing.T) []closeExperimentEvidence {
+				return []closeExperimentEvidence{
+					closeExperimentValidSelectingEvidence(t, "alpha", experiment.DispositionSelectRecommended, ""),
+					closeExperimentVerdictEvidence("beta"),
+				}
+			},
+			want:    1,
+			wantOut: "[FAIL] experiment beta: no ratification is present at the accepted HEAD",
+		},
+		{
+			name: "valid selecting alongside a clean non-selecting experiment closes",
+			evidence: func(t *testing.T) []closeExperimentEvidence {
+				return []closeExperimentEvidence{
+					closeExperimentValidSelectingEvidence(t, "alpha", experiment.DispositionSelectRecommended, ""),
+					closeExperimentNonSelectingEvidence(t, "beta", experiment.DispositionRejectAll),
+				}
+			},
+			want: 0,
+		},
+		{
+			name: "valid selecting alongside a selecting experiment with no capsule refuses",
+			evidence: func(t *testing.T) []closeExperimentEvidence {
+				broken := closeExperimentValidSelectingEvidence(t, "beta", experiment.DispositionSelectOther, "baseline")
+				broken.Capsule = nil
+				return []closeExperimentEvidence{
+					closeExperimentValidSelectingEvidence(t, "alpha", experiment.DispositionSelectRecommended, ""),
+					broken,
+				}
+			},
+			want:    1,
+			wantOut: "[FAIL] experiment beta: disposition",
+		},
+		{
+			name: "two clean non-selecting experiments refuse",
+			evidence: func(t *testing.T) []closeExperimentEvidence {
+				return []closeExperimentEvidence{
+					closeExperimentNonSelectingEvidence(t, "alpha", experiment.DispositionMisframed),
+					closeExperimentNonSelectingEvidence(t, "beta", experiment.DispositionRequestNewRevision),
+				}
+			},
+			want:    1,
+			wantOut: "[FAIL] experiment alpha: disposition",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			stdout, stderr, code := runCloseExperimentUnit(t, tc.evidence(t))
+			if code != tc.want {
+				t.Fatalf("runClose(%s) = %d, want %d; stdout=%s stderr=%s", tc.name, code, tc.want, stdout, stderr)
+			}
+			if tc.wantOut != "" && !strings.Contains(stdout, tc.wantOut) {
+				t.Fatalf("stdout = %q, want it to name %q", stdout, tc.wantOut)
+			}
+			if tc.want == 0 && strings.Contains(stdout, "[FAIL] experiment") {
+				t.Fatalf("stdout = %q, want no experiment FAIL line on a satisfied composition", stdout)
+			}
+		})
+	}
+}
+
+// Items 13/14: on a refusal, ZERO effects — no close/<name> branch, no
+// frozen report, no rollup.json, no archive move, no staged paths, no
+// commit, no provider PublishRollup call, worktree byte-identical.
+func TestCloseExperimentRefusalHasZeroPreEffects(t *testing.T) {
+	repo := buildCloseExperimentSpikeFixtureRepo(t)
+	writeCloseExperimentGateReport(t, repo.Dir, repo.Head)
+	before := takeConflictLifecycleSnapshot(t, repo.Dir,
+		".verdi/specs/active/exp-spike/spec.md",
+		".verdi/specs/active/exp-spike/deviation-report.md",
+		".verdi/specs/active/exp-spike/rollup.json",
+		".verdi/specs/archive/exp-spike/spec.md",
+		".verdi/specs/archive/exp-spike/deviation-report.md",
+		".verdi/specs/archive/exp-spike/rollup.json",
+	)
+
+	ev := closeExperimentValidSelectingEvidence(t, "comparison", experiment.DispositionSelectRecommended, "")
+	ev.Capsule = nil // item 4's shape: a hard failure, pre-effect.
+	stdout, stderr, code, fp := runCloseExperimentUnitAt(t, repo, []closeExperimentEvidence{ev})
+	if code != 1 {
+		t.Fatalf("runClose(refusal) = %d, want 1; stdout=%s stderr=%s", code, stdout, stderr)
+	}
+	assertConflictLifecycleSnapshot(t, repo.Dir, before)
+	if hasLocalBranch(t, repo.Dir, "close/exp-spike") {
+		t.Fatal("close/exp-spike branch created across an experiment-evidence refusal")
+	}
+	if _, published := fp.PublishedField("jira:EXP-1"); published {
+		t.Fatal("rollup published across an experiment-evidence refusal")
+	}
+}
+
+// Item 15 / item 17 (the brief's own "same assert as 15"): a valid,
+// experiment-gated closure never writes to the parent feature the spike's
+// `resolves` edge names — no new edge, no parent-feature edit, and
+// therefore no open-question mutation either (SI-146 option c: the
+// ratified answer flows through the spike's EXISTING edge alone).
+func closeExperimentAssertParentFeatureUnchanged(t *testing.T, repo *fixturegit.Repo, evidence []closeExperimentEvidence) {
+	t.Helper()
+	featurePath := filepath.Join(repo.Dir, ".verdi", "specs", "active", "loan-mgmt", "spec.md")
+	before, err := os.ReadFile(featurePath)
+	if err != nil {
+		t.Fatalf("read parent feature spec.md: %v", err)
+	}
+	stdout, stderr, code, _ := runCloseExperimentUnitAt(t, repo, evidence)
+	if code != 0 {
+		t.Fatalf("runClose(valid closure) = %d, want 0; stdout=%s stderr=%s", code, stdout, stderr)
+	}
+	after, err := os.ReadFile(featurePath)
+	if err != nil {
+		t.Fatalf("read parent feature spec.md after close: %v", err)
+	}
+	if string(after) != string(before) {
+		t.Fatalf("parent feature spec.md changed across a valid experiment-gated closure:\n--- before ---\n%s\n--- after ---\n%s", before, after)
+	}
+}
+
+func TestCloseExperimentValidClosureLeavesParentFeatureBytesUnchanged(t *testing.T) {
+	repo := buildCloseExperimentSpikeFixtureRepo(t)
+	writeCloseExperimentGateReport(t, repo.Dir, repo.Head)
+	ev := closeExperimentValidSelectingEvidence(t, "comparison", experiment.DispositionSelectRecommended, "")
+	closeExperimentAssertParentFeatureUnchanged(t, repo, []closeExperimentEvidence{ev})
+}
+
+func TestCloseExperimentValidClosureLeavesNoOpenQuestionMutation(t *testing.T) {
+	repo := buildCloseExperimentSpikeFixtureRepo(t)
+	writeCloseExperimentGateReport(t, repo.Dir, repo.Head)
+	ev := closeExperimentValidSelectingEvidence(t, "comparison", experiment.DispositionSelectOther, "baseline")
+	closeExperimentAssertParentFeatureUnchanged(t, repo, []closeExperimentEvidence{ev})
+}
+
+// Item 16: statusless spike -> pure rename -> the archived spec.md is
+// byte-identical to the pre-close spec.md, links block (the resolves
+// edge) included — no new edge is ever written.
+func TestCloseExperimentValidClosurePreservesResolvesEdgeByteIdentical(t *testing.T) {
+	repo := buildCloseExperimentSpikeFixtureRepo(t)
+	writeCloseExperimentGateReport(t, repo.Dir, repo.Head)
+	ev := closeExperimentValidSelectingEvidence(t, "comparison", experiment.DispositionSelectRecommended, "")
+	stdout, stderr, code, _ := runCloseExperimentUnitAt(t, repo, []closeExperimentEvidence{ev})
+	if code != 0 {
+		t.Fatalf("runClose(valid closure) = %d, want 0; stdout=%s stderr=%s", code, stdout, stderr)
+	}
+	archived, err := os.ReadFile(filepath.Join(repo.Dir, ".verdi", "specs", "archive", "exp-spike", "spec.md"))
+	if err != nil {
+		t.Fatalf("read archived spec.md: %v", err)
+	}
+	if string(archived) != closeExperimentSpikeSpecMD {
+		t.Fatalf("archived spec.md is not a byte-identical pure rename:\n--- got ---\n%s\n--- want ---\n%s", archived, closeExperimentSpikeSpecMD)
+	}
+}
+
+// Item 18: the built binary's exact 0/1/2 exits, extending the close
+// fixture family (buildCloseFixtureRepo/seedCloseHappyPath's precedent)
+// with a spike variant of gate_test.go's gateSpikeSpecMD.
+func TestCloseExperimentBuiltBinaryExitCodes(t *testing.T) {
+	bin := buildVerdiBinary(t)
+
+	t.Run("ordinary close, no experiments", func(t *testing.T) {
+		repo := buildCloseExperimentProductionFixtureRepo(t, nil)
+		writeCloseExperimentGateReport(t, repo.Dir, repo.Head)
+		stdout, stderr, code := runExperimentBuiltBinary(t, bin, repo.Dir, nil, "close", "--force-local", "spec/exp-spike")
+		if code != 0 {
+			t.Fatalf("close (no experiments) = %d, want 0; stdout=%s stderr=%s", code, stdout, stderr)
+		}
+	})
+
+	t.Run("committed experiment without accepted ratification", func(t *testing.T) {
+		repo := buildCloseExperimentProductionFixtureRepo(t, map[string]string{
+			closeExperimentProductionExperimentID + "/experiment.yaml": closeExperimentLockedDefinitionYAML(t),
+		})
+		writeCloseExperimentGateReport(t, repo.Dir, repo.Head)
+		stdout, stderr, code := runExperimentBuiltBinary(t, bin, repo.Dir, nil, "close", "--force-local", "spec/exp-spike")
+		if code != 1 {
+			t.Fatalf("close (definition-only experiment) = %d, want 1; stdout=%s stderr=%s", code, stdout, stderr)
+		}
+		if !strings.Contains(stdout, "experiment "+closeExperimentProductionExperimentID) {
+			t.Fatalf("stdout = %q, want an experiment condition line naming the experiment", stdout)
+		}
+	})
+
+	t.Run("malformed committed experiment id", func(t *testing.T) {
+		repo := buildCloseExperimentProductionFixtureRepo(t, map[string]string{
+			"Bad_ID/experiment.yaml": "not a valid definition\n",
+		})
+		writeCloseExperimentGateReport(t, repo.Dir, repo.Head)
+		stdout, stderr, code := runExperimentBuiltBinary(t, bin, repo.Dir, nil, "close", "--force-local", "spec/exp-spike")
+		if code != 2 {
+			t.Fatalf("close (malformed experiment id) = %d, want 2; stdout=%s stderr=%s", code, stdout, stderr)
+		}
+		// Exit 2 alone would also be satisfied by an unrelated operational
+		// failure anywhere else in the ritual, so pin THIS gate's own
+		// refusal line, naming the malformed id it fail-closed on.
+		if !strings.Contains(stderr, "close: experiment Bad_ID:") {
+			t.Fatalf("stderr = %q, want the experiment gate's own operational refusal naming Bad_ID", stderr)
+		}
+		if strings.Contains(stdout, "experiment evidence not satisfied") || strings.Contains(stdout, "[FAIL] experiment") {
+			t.Fatalf("stdout = %q, want no experiment-evidence verdict lines on an operational refusal", stdout)
+		}
+	})
+}
+
+// Item 19: the core judgment never mutates injected evidence — deep
+// clones taken BEFORE the call (so a mutation through a shared Capsule/
+// ActorV2 pointer would be visible) must still equal the SAME slice's
+// contents after the call.
+func TestCloseExperimentEvidenceDeepCopyNoAlias(t *testing.T) {
+	ev := closeExperimentValidSelectingEvidence(t, "comparison", experiment.DispositionSelectRecommended, "")
+	beforeRatification := ev.Ratification.Clone()
+	beforeCapsule := *ev.Capsule
+	beforeCapsule.Artifacts = append([]experiment.CapsuleArtifact(nil), ev.Capsule.Artifacts...)
+	beforeOutcome := ev.Outcome
+
+	evidence := []closeExperimentEvidence{ev}
+	stdout, stderr, code := runCloseExperimentUnit(t, evidence)
+	if code != 0 {
+		t.Fatalf("runClose(valid closure) = %d, want 0; stdout=%s stderr=%s", code, stdout, stderr)
+	}
+
+	got := evidence[0]
+	if !reflect.DeepEqual(got.Ratification, beforeRatification) {
+		t.Fatalf("Ratification mutated across runClose: got %+v, want %+v", got.Ratification, beforeRatification)
+	}
+	if got.Capsule == nil || !reflect.DeepEqual(*got.Capsule, beforeCapsule) {
+		t.Fatalf("Capsule mutated across runClose: got %+v, want %+v", got.Capsule, beforeCapsule)
+	}
+	if got.Outcome != beforeOutcome {
+		t.Fatalf("Outcome mutated across runClose: got %+v, want %+v", got.Outcome, beforeOutcome)
+	}
+	if got.ExperimentID != ev.ExperimentID || got.DefinitionID != ev.DefinitionID ||
+		got.DefinitionDigest != ev.DefinitionDigest || got.SelectedCandidate != ev.SelectedCandidate ||
+		got.RatificationDigest != ev.RatificationDigest {
+		t.Fatalf("scalar evidence field mutated across runClose: got %+v, want %+v", got, ev)
+	}
+}
