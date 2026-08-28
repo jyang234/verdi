@@ -397,33 +397,81 @@ exact ratification bytes, bound result, definition, receipt, observations, and
 candidate patches resolve from one accepted tree. An unmerged proposal never
 enables execution, cleanup, or closure.
 
-Wave 5 emits `verdi.experiment-ratification/v2`. Its actor block persists the
-adapter-resolved `governanceprincipal.PrincipalClaim` (`trust_source` plus
-stable `subject`) and the kernel-derived `principal_id`; it does not persist a
-forgeable `PrincipalResolution` seal. V1 remains strict decode/state-history
-compatibility but cannot be newly proposed or authorize release/closure.
+Wave 5 originally emitted `verdi.experiment-ratification/v2`. Task 10's
+independent closure review proved that its persisted claim and principal id
+could not support accepted-use authentication: role-mapping membership is
+configuration, not evidence that the subject asserted this operation. Fresh
+authority therefore emits `verdi.experiment-ratification/v3`. V1 and V2
+remain strict decode/state-history compatibility, but neither may be newly
+proposed or authorize capsule publication, workspace release, or closure.
+State derivation may continue to describe their historical ratification
+posture; every authority-bearing consumer refuses them before effects.
+SI-150 supersedes SI-143's and SI-144's V2 accepted-authority mechanism and
+narrows SI-147's no-durable-token rule only for the action-bound ratification
+proof required at accepted use; their remaining decisions stay unchanged.
 
 ```yaml
-schema: verdi.experiment-ratification/v2
+schema: verdi.experiment-ratification/v3
 result_digest: sha256:...
 actor:
-  trust_source: github
-  subject: stable-adapter-subject
-  principal_id: principal/github/...
+  trust_source: offline-human
+  subject: ed25519:...
+  principal_id: principal/offline-human/...
+authentication_proof:
+  schema: verdi.experiment-human-proof/v1
+  challenge_base64url: ...
+  signature_base64url: ...
 disposition: select-recommended
 ```
 
-The actor keys are explicit ratification-v2 schema fields; the record does not
-serialize the Go structure or inherit its incidental JSON/YAML field names.
+The actor and authentication-proof keys are explicit ratification-v3 schema
+fields; the record does not serialize either Go structure or inherit
+incidental field names. `challenge_base64url` is canonical unpadded
+`base64.RawURLEncoding` of the exact canonical
+`verdi.experiment-human-challenge/v1` JSON bytes. The challenge schema and its
+closed operation vocabulary do not change. `signature_base64url` is the same
+canonical encoding of exactly 64 raw Ed25519 signature bytes. Alternate
+base64 spellings, a malformed or noncanonical challenge, a proof schema other
+than `verdi.experiment-human-proof/v1`, or any other signature length are
+operational. The retained proof is action-bound evidence, not a session,
+credential, reusable identity token, or serialized `PrincipalResolution`.
 
-At the accepted revision the human adapter resolves the persisted claim
-through the configured governance profile and trust-fact reader, requires an
-authenticated sealed result, and requires exact principal-id equality with
-the record. Unproven authentication is a blocking verdict. A malformed claim,
-principal mismatch, missing configured trust source, or internally
-inconsistent identity evidence is operational. This uses the existing kernel
-API; no adapter supplies a prebuilt principal ID and no feature-local identity
-parser exists.
+At proposal time only a successful `experimenthuman.Verify` may mint the
+sealed retained-proof value transported with its sealed resolution. The
+application requires the two seals to name the same exact claim, principal,
+and proof evidence digest before it projects the proof into V3. It also
+requires the challenge to bind `propose-ratification`, the exact spike and
+experiment, the accepted and proposal HEAD strings used at proof time, the
+canonical typed ratification-input digest, and the pre-ratification human
+artifact-set digest. The canonical ratification-input digest covers exactly
+the four semantic fields `result_digest`, `disposition`, `candidate`, and
+`reason`, with all four keys present; it excludes actor, resolution, and proof
+transport.
+
+At accepted use the application strict-decodes the retained proof and re-runs
+the existing Ed25519 verification against the selected policy profile read
+from the exact Git tree named by the challenge's signed `accepted_head`. That
+historical accepted commit must remain resolvable; absence or unreadability is
+an operational refusal, never an invitation to substitute the current
+worktree or current profile. The signed proposal HEAD need not remain
+reachable after a squash or rebase: its role is retained context, while the
+signed `proposal_digest` is independently required to equal the accepted
+ratification provenance's exact pre-ratification artifact projection.
+Likewise, the signed input digest is recomputed from the accepted V3 semantic
+fields, and operation, spike, experiment, trust source, and actor subject must
+all match exactly.
+
+Successful historical signature verification supplies the only normalized
+trust fact. The same subject must still be mapped under the same trust source
+in the current exact accepted profile; the application then resolves that
+verified fact through `governanceprincipal.Resolver` against the current
+profile and requires exact principal-id equality with the actor and
+provenance. No caller supplies a `TrustFactReader`, membership is never itself
+reported as evidence, and no feature-local identity resolver exists.
+Unmapped, invalid, stale, or absent proof is a blocking verdict. Malformed
+proof bytes, an unreadable signed accepted HEAD, a broken profile/fact
+contract, or internally inconsistent claim/principal/provenance identity is
+operational.
 
 ## 8. CLI and MCP adapters
 
@@ -520,7 +568,11 @@ wrong-length proof, unsafe or ambiguous accepted-tree state, failed exact-tree
 policy loading, or broken fact-port contract is operational. A successful
 proof is single-state: either the human operation changes the bound proposal
 digest, so replay no longer matches, or a no-op/refused operation confers no
-durable actor token or serialized resolver seal.
+durable actor token or serialized resolver seal. The one exception is a
+successful `propose-ratification`: its exact action-bound challenge and
+signature are retained inside ratification V3 so later use can re-verify the
+assertion rather than treating role membership as evidence. Reconciliation
+and registration proofs remain ephemeral.
 
 The JSON and human renderings include the challenge and manual signing prompt
 as data. MCP structurally omits all three human operations and never accepts a
@@ -579,13 +631,22 @@ data.
 
 ## 9. Ratification, capsule, release, and closure
 
-The human adapter obtains one sealed authenticated principal resolution before
-building a ratification proposal. It copies the resolution's exact claim and
-kernel-derived principal id into the v2 actor block and runs the record and
-binding validators. The core cannot accept any actor field supplied by the
-request. Accepted use repeats the kernel resolution from that persisted claim
-and compares the derived id; the original in-memory seal is neither serialized
-nor treated as reconstructable proof.
+The human adapter obtains one sealed authenticated principal resolution and
+its matching sealed retained proof before building a ratification proposal.
+It copies the resolution's exact claim and kernel-derived principal id plus
+the proof projection into the V3 record and runs the record, proof, and
+binding validators. The core cannot accept an actor or unsealed proof supplied
+by request bytes. Accepted use re-verifies the retained signature, resolves
+the resulting fact against the current accepted profile, and compares the
+derived id; the original in-memory seal is neither serialized nor treated as
+reconstructable proof.
+
+The V2-to-V3 authorization change applies at every existing authority site,
+not only closure: deterministic ratification encoding emits only V3, the
+capsule kernel admits only V3 ratification, and accepted ratification
+resolution admits only V3 before capsule publication, release, or closure.
+V1 and V2 fixture families remain decode/history tests; positive
+authority-bearing fixtures are rebuilt around V3.
 
 For a selecting ratification, the selected candidate is:
 
@@ -628,7 +689,10 @@ must already satisfy the capsule artifact-id grammar when prefixed by
 `fixture-`. The capsule manifest describes this inventory and is not itself a
 retained member. No builder or adapter may derive an artifact id from a path,
 display label, media type, or local naming convention. Digests are recomputed
-from exact bytes.
+from exact bytes. The existing `ratification` member contains the embedded V3
+authentication proof and therefore retains and digest-binds it. There is no
+proof sidecar, no new capsule member or artifact id, and no capsule-manifest
+version change.
 The builder rejects missing, extra, duplicate, mutable, symlinked,
 non-regular, or digest-mismatched inputs. The manifest is published immutably
 under the writer lock and re-decoded before release begins.
@@ -640,13 +704,32 @@ prototype checkout, is the retained reproduction set. Non-selecting
 ratification releases every disposable workspace without producing a capsule.
 Minimal experiment artifacts are never release targets.
 
-The existing spike-close service receives an additive CSE evidence provider.
-For a comparison-backed spike it requires accepted ratification. A selecting
-disposition additionally requires a valid capsule whose definition, result,
-candidate, and ratification identities match. It then uses the ratified answer
-through the spike's existing `resolves` edge. It adds no edge and never edits
-the parent feature. Non-selecting dispositions remain honest terminal human
-responses to an experiment but do not satisfy open-question closure.
+The application core exposes one read-only
+`Service.VerifyAcceptedClosureEvidence(ctx, identity)` operation with no
+authority or trust-fact parameter. It resolves one current accepted snapshot,
+verifies the retained V3 proof, reuses accepted-ratification resolution and
+the existing retained-input gathering, resolves one sealed effective-policy
+decision, re-runs the sole `experiment.BindCapsuleManifest` authority, and
+requires the committed manifest's strict canonical bytes to equal the
+recomputed bytes. Its result contains only deep-copied typed closure facts.
+The CLI does not re-derive protected inputs, duplicate the closed capsule
+inventory, or construct a trust fact.
+
+The existing spike-close service consumes that operation through its additive
+CSE evidence provider. For a comparison-backed spike it requires accepted V3
+ratification. A selecting disposition additionally requires the byte-verified
+capsule whose definition, result, candidate, ratification, and retained-member
+identities match. It then uses the ratified answer through the spike's existing
+`resolves` edge. It adds no edge and never edits the parent feature.
+Non-selecting dispositions remain honest terminal human responses to an
+experiment but do not satisfy open-question closure.
+
+Real close and `verdi close --preflight` invoke the same experiment-evidence
+predicate and preserve the same verdict/operational classification;
+`--prepare` inherits it through the preflight path. No second gate or new flag
+exists. The evidence predicate runs before every real-close mutation, and a
+preflight rehearsal never reports READY for an experiment state the real
+close would refuse.
 
 ## 10. Failure and exit semantics
 
@@ -664,10 +747,11 @@ errors.
 
 Examples of verdict outcomes include policy refusal, unauthenticated human
 authority, an agent request for a human-only operation, unreproduced posture,
-an inconclusive comparison, and unsatisfied closure evidence. Examples of
-operational outcomes include malformed or noncanonical bytes, ambiguous Git
-state, unsafe filesystem shape, lock contention, evaluator/harness failure,
-and cleanup failure.
+an invalid, unmapped, stale, or missing retained human proof, an inconclusive
+comparison, and unsatisfied closure evidence. Examples of operational outcomes
+include malformed or noncanonical bytes, an unresolvable signed historical
+accepted HEAD, ambiguous Git state, unsafe filesystem shape, lock contention,
+evaluator/harness failure, and cleanup failure.
 
 No operational error becomes a comparison verdict. No cleanup error rewrites
 ratification. No missing fact is interpreted favorably.
@@ -699,14 +783,22 @@ unit crosses its authority boundary. Required evidence includes:
   operation/input/proposal binding, source-backed accepted-profile loading,
   mapped Ed25519 keys, malformed/invalid signatures, stale inputs, replay, and
   proof-free agent refusal;
+- ratification-V3 strict grammar, deterministic encoding, canonical base64url,
+  V1/V2 history-only dispatch, sealed proof/resolution parity, accepted-use
+  signature re-verification, historical accepted-HEAD unreachability, current
+  mapping removal, and proof/principal/provenance mismatch tests;
 - registration immutability, read-only unreconciled review, and explicit
   direct-edit reconciliation tests;
 - reproduction tables over zero, incomplete, agreeing, disagreeing,
   malformed, and extra visible runs;
-- capsule exact-inventory/digest tests;
+- capsule exact-inventory/digest tests, including retained-proof binding
+  through the existing `ratification` member and byte-exact recomputation of a
+  committed manifest through `VerifyAcceptedClosureEvidence`;
 - cleanup tests for symlink, nonregular, missing, partial, contended, retried,
   selecting, and non-selecting states;
-- closure tests proving no new edge or automatic question resolution;
+- closure tests proving no new edge or automatic question resolution, plus
+  real-close/preflight/prepare parity for every experiment verdict and
+  operational refusal;
 - `go test -race ./...`; and
 - `make verify`, including spec-align, showcase, and existing Playwright gates.
 
@@ -720,6 +812,14 @@ Wave 5B begins only after Wave 5A's exact head receives independent review and
 the CLI/MCP registries are free. Wave 5C begins only after Wave 5B adapter
 conformance is green. No unit may absorb another Wave 5 feature lane merely
 because up to three orchestration slots exist.
+
+The Task 10 correction discovered after initial implementation cannot begin
+until this retained-proof amendment and SI-150 receive their one independent
+cross-model authority review and closure. Specification authority is authored
+and repaired by Codex; Claude reviews it read-only. Runtime/schema/test work is
+then implemented by Claude and independently reviewed and adjudicated by
+Codex. No implementation may use the superseded V2 membership-as-evidence
+contract while this authority is pending.
 
 Each unit lands in its own pull request. Each PR is based on current main,
 contains only its owned packages and authority-aligned inventory changes, and
@@ -736,8 +836,9 @@ orchestration and the Wave 3B handoff:
 | Wave 5 CSE CLI and agent adapters | §§2, 3, 8, 11 | One CLI namespace extended in 5B then 5C, plus one unchanged agent-safe MCP union over one core |
 | AC-5 same typed operations | §§2–3, 8 | Adapter parsing/rendering separated from core semantics |
 | AC-5 human registration lock | §§3, 7 | Proposal bytes separated from merge-signaled accepted authority |
-| AC-5 authenticated ratification | §§3, 7, 9 | Ratification v2 persists the kernel claim/id operands; accepted use re-resolves the claim and compares the id |
-| AC-5 spike closure | §9 | Additive evidence provider into the existing closure path; no new edge |
+| AC-5 authenticated ratification | §§3, 7–9, SI-150 | Ratification V3 retains the exact action-bound challenge/signature beside the claim/id; accepted use re-verifies genuine evidence against signed and current accepted profile authority before comparing the id; V1/V2 remain history only |
+| Task 10 accepted-use authentication review finding | §§7–11, SI-150 | Role membership is explicitly configuration, never evidence; the retained proof is rebound to accepted ratification input/provenance, capsule bytes, release, closure, and preflight without a caller fact source or second identity store |
+| AC-5 spike closure | §9 | Additive evidence provider consumes one application-core byte-reverified closure result through the existing edge, and real close/preflight/prepare share its predicate; no new edge or adapter-side capsule binder |
 | AC-4 reproduction rule deferred by Wave 3B | §4 | Minimal registered run-count rule over existing unanimous aggregate |
 | AC-4 cleanup deferred by Wave 3B | §§3, 9 | Release only after durable ratification; minimal evidence excluded |
 | AC-4 selected capsule deferred by Wave 3B | §9 | Exact closed inventory over existing capsule v1 manifest |
@@ -747,7 +848,7 @@ orchestration and the Wave 3B handoff:
 | AC-6 mutation provenance | §6 | CSE-specific strict append-only record; read-only detection plus explicit direct-edit reconciliation mutation |
 | DC-2 derived state | §§3–4, 7 | One experiment state algorithm over filesystem or exact-tree byte sources; no new state artifact or preferred-run pointer |
 | DC-7 human-only decisions | §§3, 7–9 | Agent surface structurally omits authority operations |
-| DC-7 human authentication evidence | §8 | Manual detached Ed25519 signature binds the exact operation and proposal bytes; the public key comes from the exact accepted profile and the existing kernel mints the actor, while Verdi never handles private credentials |
+| DC-7 human authentication evidence | §§7–9 | Manual detached Ed25519 signature binds the exact operation and proposal bytes; ratification V3 retains only that action-bound proof, accepted use re-verifies it under signed and current accepted profiles, and the existing kernel mints the actor while Verdi never handles private credentials |
 | AC-3/AC-4 execution input path custody | §8 | One strict per-operation slot/id/digest/path document feeds the shared runner resolver; raw bytes, protected-path membership, and receipt binding remain with the landed execution proof |
 | DC-8 durable reasoning/disposable prototypes | §9 | Capsule first, then workspace release |
 | DC-9 no patch promotion | §§1, 9 | Capsule is evidence only; product source untouched |
@@ -763,6 +864,6 @@ orchestration and the Wave 3B handoff:
 | Wave 6 CSE workbench | Explicitly omitted in §§1, 8, 11–12 | Deferred unchanged to FABLE-owned Wave 6 |
 | Wave 7 genuine comparison | Explicitly omitted in §12 | Deferred unchanged until Wave 5C lands |
 
-Coverage: **29 of 29 source obligations mapped**. No source capability is
+Coverage: **30 of 30 source obligations mapped**. No source capability is
 silently removed. Candidate-reported corroboration remains the canonical
 unresolved OQ-2 and is intentionally omitted from decision eligibility.
