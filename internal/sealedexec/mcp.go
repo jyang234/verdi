@@ -428,6 +428,9 @@ func (m *ScopedMCP) appendEvent(ctx context.Context, state *FlightStateSnapshot,
 	if err := validateAck(event, ack, state.LastGlobalSequence); err != nil {
 		return contextevent.EventAck{}, event, operational("acknowledge MCP event", err)
 	}
+	if state.NextSourceSequence == 1 {
+		state.PriorRevision = nil
+	}
 	state.NextSourceSequence++
 	state.PriorEventDigest = event.EventDigest
 	state.LastGlobalSequence = ack.GlobalSequence
@@ -510,8 +513,13 @@ func EncodeInspectionResult(result InspectionResult) ([]byte, error) {
 			return nil, errors.New("sealedexec: flight-plan inspection cannot carry a context arm")
 		}
 		if result.FlightPlan.Flight == "" || result.FlightPlan.Lane == "" || result.FlightPlan.Epoch == "" || result.FlightPlan.Session == "" ||
-			result.FlightPlan.ManifestDigest == "" || result.FlightPlan.ProjectionDigest == "" || result.FlightPlan.ExpansionRoot == "" {
+			result.FlightPlan.ManifestDigest == "" || result.FlightPlan.ProjectionDigest == "" {
 			return nil, errors.New("sealedexec: incomplete flight-plan inspection")
+		}
+		if result.FlightPlan.ExpansionRoot != "" {
+			if err := validateDigest("flight-plan expansion root", result.FlightPlan.ExpansionRoot); err != nil {
+				return nil, err
+			}
 		}
 		wire.FlightPlan = &flightPlanInspectionWire{
 			Flight: result.FlightPlan.Flight, Lane: result.FlightPlan.Lane, Epoch: result.FlightPlan.Epoch,

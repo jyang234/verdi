@@ -98,6 +98,15 @@ func TestExecutionCompletionService_Behavioral(t *testing.T) {
 			wantLast: "checkpoint", wantClass: ErrOperational,
 		},
 		{
+			name: "active recorder revision",
+			configure: func(f *completionFixture) {
+				f.recorder.mutateCheckpoint = func(checkpoint *RecorderCheckpoint) {
+					checkpoint.ActiveRevision = &ActiveRevision{Revision: 3, ManifestDigest: testDigest("active-manifest"), NextSourceSequence: 2, PriorEventDigest: testDigest("active-event"), LastGlobalSequence: checkpoint.TerminalGlobalSequence + 1}
+				}
+			},
+			wantLast: "checkpoint", wantClass: ErrOperational,
+		},
+		{
 			name: "bad runner principal",
 			configure: func(f *completionFixture) {
 				f.inputs.inputs.RunnerPrincipal = completionPrincipal(t, contextevent.AuthorityAdvisory)

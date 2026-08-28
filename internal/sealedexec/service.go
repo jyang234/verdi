@@ -29,6 +29,10 @@ var (
 	// ErrInterrupted marks a run whose ordered adapter-stop was acknowledged.
 	// It is always returned together with ErrVerdict.
 	ErrInterrupted = errors.New("sealedexec: execution interrupted")
+	// ErrInterruptNotActive marks a registered start/resume whose provider
+	// stream has not yet been installed when signal normalization attempts a stop.
+	// It is always returned together with ErrVerdict.
+	ErrInterruptNotActive = errors.New("sealedexec: interrupt target is not active")
 )
 
 // FailureCode is the closed reason category accompanying a non-proven fact.
@@ -140,6 +144,19 @@ type RecorderCheckpoint struct {
 	EventChainRoot         string
 	TerminalSourceSequence uint64
 	TerminalGlobalSequence uint64
+	ActiveRevision         *ActiveRevision
+}
+
+// ActiveRevision is the exact durable append position of one in-progress
+// manifest revision. Complete checkpoint revisions exclude this tail.
+type ActiveRevision struct {
+	Revision           uint64
+	ManifestDigest     string
+	NextSourceSequence uint64
+	PriorEventDigest   string
+	PriorRevision      *contextevent.PriorRevision
+	LastGlobalSequence uint64
+	Invalidated        bool
 }
 
 // OpaqueIdentity is the only vendor-boundary information exposed to a port.
@@ -504,7 +521,7 @@ func (s *Service) Execute(ctx context.Context, request ExecutionRequest, data []
 	if err := requireProven("recorder checkpoint", checkpoint.Verification); err != nil {
 		return ExecutionRun{}, err
 	}
-	if request.Action == ActionStart && (len(checkpoint.Revisions) != 0 || checkpoint.EventChainRoot != "" || checkpoint.TerminalSourceSequence != 0 || checkpoint.TerminalGlobalSequence != 0) {
+	if request.Action == ActionStart && (checkpoint.ActiveRevision != nil || len(checkpoint.Revisions) != 0 || checkpoint.EventChainRoot != "" || checkpoint.TerminalSourceSequence != 0 || checkpoint.TerminalGlobalSequence != 0) {
 		return ExecutionRun{}, verdict("start recorder checkpoint is not empty")
 	}
 
@@ -550,6 +567,10 @@ func (s *Service) Execute(ctx context.Context, request ExecutionRequest, data []
 	}
 
 	launch := AdapterLaunch{Request: request, Profile: profile, Workspace: workspace, Input: input}
+	partial := ExecutionRun{
+		Authority: authorityMode, Witnesses: append([]string(nil), witnesses...),
+		Workspace: workspace, Profile: profile,
+	}
 	var stream ActiveAdapterRun
 	if request.Action == ActionStart {
 		stream, err = s.ports.Adapter.Start(ctx, launch)
@@ -557,10 +578,10 @@ func (s *Service) Execute(ctx context.Context, request ExecutionRequest, data []
 		stream, err = s.ports.Adapter.Resume(ctx, launch, sessionFacts.SessionRef)
 	}
 	if err != nil {
-		return ExecutionRun{}, operational("provider process", err)
+		return partial, operational("provider process", err)
 	}
 	if stream == nil {
-		return ExecutionRun{}, operational("provider process", errors.New("adapter returned a nil active run"))
+		return partial, operational("provider process", errors.New("adapter returned a nil active run"))
 	}
 	sequence, priorDigest, priorGlobal := uint64(1), "", uint64(0)
 	if request.Action == ActionResume {
@@ -622,6 +643,28 @@ func (s *Service) Interrupt(ctx context.Context, request InterruptRequest) (cont
 		return contextevent.EventAck{}, active.terminalErr
 	}
 	return contextevent.EventAck{}, operational("interrupt", errors.New("adapter-stop was not acknowledged"))
+}
+
+// InterruptRegistered snapshots the already-verified workspace and session
+// facts of the matching active run and delegates to the strict interrupt
+// identity check. It does not construct an identity when no provider is active.
+func (s *Service) InterruptRegistered(ctx context.Context, request ExecutionRequest) (contextevent.EventAck, error) {
+	s.mu.Lock()
+	active := s.active[executionKey(request)]
+	if active == nil || (active.operation != string(ActionStart) && active.operation != string(ActionResume)) {
+		s.mu.Unlock()
+		return contextevent.EventAck{}, verdict("interrupt has no matching active run")
+	}
+	active.mu.Lock()
+	s.mu.Unlock()
+	if active.stream == nil {
+		active.mu.Unlock()
+		return contextevent.EventAck{}, fmt.Errorf("%w: %w", ErrVerdict, ErrInterruptNotActive)
+	}
+	workspace := active.workspace
+	sessionRef := active.sessionRef
+	active.mu.Unlock()
+	return s.Interrupt(ctx, InterruptRequest{Request: request, Workspace: workspace, AdapterSessionRef: sessionRef})
 }
 
 func interruptSessionMatches(active *activeExecution, operand string) bool {
@@ -1120,7 +1163,7 @@ func validateResumeFacts(request ExecutionRequest, runway RunwayFacts, workspace
 	if err != nil {
 		return verdict("fresh recorder revision chain is incomplete or invalid")
 	}
-	if runway.Commit != c.InputCommit || runway.Tree != c.InputTree || !runway.Clean ||
+	if checkpoint.ActiveRevision != nil || runway.Commit != c.InputCommit || runway.Tree != c.InputTree || !runway.Clean ||
 		workspace.WorkspaceID != c.ExecutionWorkspaceID || workspaceDigest != c.ExecutionWorkspaceRequestDigest ||
 		workspace.CurrentCommit != c.CurrentCommit || workspace.CurrentTree != c.CurrentTree || !workspace.Clean ||
 		profile.Digest != c.ProfileDigest || digestBytes(grantBytes) != c.GrantDigest || authority.AuthorityDigest != c.AuthorityVerdictDigest ||

@@ -64,6 +64,21 @@ func TestScopedContextMCPContract_Static(t *testing.T) {
 		if !reflect.DeepEqual(decoded, result) {
 			t.Fatalf("inspection round trip = %#v, want %#v", decoded, result)
 		}
+		noLedger := result
+		noLedger.FlightPlan.ExpansionRoot = ""
+		encodedNoLedger, err := EncodeInspectionResult(noLedger)
+		if err != nil {
+			t.Fatalf("EncodeInspectionResult(no installed expansion ledger): %v", err)
+		}
+		decodedNoLedger, err := DecodeInspectionResult(bytes.NewReader(encodedNoLedger))
+		if err != nil || decodedNoLedger.FlightPlan.ExpansionRoot != "" {
+			t.Fatalf("no-ledger flight plan roundtrip = %#v/%v", decodedNoLedger, err)
+		}
+		malformedRoot := result
+		malformedRoot.FlightPlan.ExpansionRoot = "relative"
+		if _, err := EncodeInspectionResult(malformedRoot); err == nil {
+			t.Fatal("encoded flight-plan inspection with malformed installed root")
+		}
 		for _, bad := range [][]byte{duplicateFirstKey(encoded), withUnknownField(encoded), append(append([]byte(nil), encoded...), []byte("{}\n")...)} {
 			if _, err := DecodeInspectionResult(bytes.NewReader(bad)); err == nil {
 				t.Fatalf("accepted non-strict inspection result %q", bad)
@@ -103,6 +118,15 @@ func TestScopedContextMCPContract_Static(t *testing.T) {
 			t.Fatalf("installed state = %#v", snapshot)
 		}
 		priorRevision := *snapshot.PriorRevision
+		bridgeFake := &mcpFake{t: t, request: req, kinds: make([]contextevent.Kind, snapshot.LastGlobalSequence)}
+		bridgeServer := &ScopedMCP{ports: ScopedMCPPorts{Recorder: bridgeFake, Stamps: bridgeFake}}
+		transition := snapshot
+		if err := bridgeServer.appendContextRequest(context.Background(), &transition, "bridge-request", "spec/extra", "consume bridge"); err != nil {
+			t.Fatalf("append first child event: %v", err)
+		}
+		if transition.PriorRevision != nil {
+			t.Fatalf("installed revision bridge survived sequence one: %#v", transition.PriorRevision)
+		}
 		if _, err := server.Call(context.Background(), ToolRequestContext, []byte(`{"purpose":"needed again","ref":"spec/extra"}`)); err != nil {
 			t.Fatalf("second request_context: %v", err)
 		}

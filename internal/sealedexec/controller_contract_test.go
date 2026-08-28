@@ -217,6 +217,156 @@ func TestContextControllerWireContract_Static(t *testing.T) {
 			})
 		}
 
+		t.Run("expansion facts close absent and installed ledger states", func(t *testing.T) {
+			freshEpoch := controllerCallFixture(t, 1, ControllerOperationVerifyEpoch)
+			freshEpoch.VerifyEpoch.Check.Snapshot.ExpansionRoot = ""
+			if _, err := EncodeControllerCall(freshEpoch); err != nil {
+				t.Fatalf("EncodeControllerCall(initial no-ledger epoch): %v", err)
+			}
+
+			fresh := controllerResultFixture(t, 1, ControllerOperationVerifyExpansion)
+			fresh.VerifyExpansion.Facts.Root = ""
+			encoded, err := EncodeControllerResult(fresh)
+			if err != nil {
+				t.Fatalf("EncodeControllerResult(proven no-ledger): %v", err)
+			}
+			decoded, err := DecodeControllerResult(bytes.NewReader(encoded))
+			if err != nil || decoded.VerifyExpansion.Facts.Root != "" || decoded.VerifyExpansion.Facts.State != contextcompile.ResolutionProven {
+				t.Fatalf("proven no-ledger roundtrip = %#v/%v", decoded.VerifyExpansion.Facts, err)
+			}
+
+			unproven := fresh
+			unproven.VerifyExpansion.Facts.Verification = Verification{
+				State: contextcompile.ResolutionUnproven, Failure: FailureUnproven,
+				Witnesses: []string{"expansion ledger unavailable"},
+			}
+			if _, err := EncodeControllerResult(unproven); err != nil {
+				t.Fatalf("EncodeControllerResult(unproven empty root): %v", err)
+			}
+			for _, mutation := range []struct {
+				name   string
+				result ControllerResult
+			}{
+				{name: "unproven digest", result: func() ControllerResult {
+					bad := unproven
+					bad.VerifyExpansion.Facts.Root = testDigest("forbidden-unproven-root")
+					return bad
+				}()},
+				{name: "proven malformed root", result: func() ControllerResult {
+					bad := fresh
+					bad.VerifyExpansion.Facts.Root = "relative"
+					return bad
+				}()},
+			} {
+				t.Run(mutation.name, func(t *testing.T) {
+					if _, err := EncodeControllerResult(mutation.result); err == nil {
+						t.Fatal("EncodeControllerResult accepted an invalid expansion-root union")
+					}
+				})
+			}
+		})
+
+		t.Run("recorder checkpoint carries an exact active revision tail", func(t *testing.T) {
+			pristine := controllerResultFixture(t, 1, ControllerOperationRecorderCheckpoint)
+			pristine.RecorderCheckpoint.Checkpoint.Revisions = []contextevent.Revision{}
+			pristine.RecorderCheckpoint.Checkpoint.EventChainRoot = ""
+			pristine.RecorderCheckpoint.Checkpoint.TerminalSourceSequence = 0
+			pristine.RecorderCheckpoint.Checkpoint.TerminalGlobalSequence = 0
+			pristine.RecorderCheckpoint.Checkpoint.ActiveRevision = nil
+			pristineBytes := mustEncodeControllerResult(t, pristine)
+			if decoded, err := DecodeControllerResult(bytes.NewReader(pristineBytes)); err != nil || decoded.RecorderCheckpoint.Checkpoint.ActiveRevision != nil {
+				t.Fatalf("pristine active revision = %#v/%v", decoded.RecorderCheckpoint.Checkpoint.ActiveRevision, err)
+			}
+			missingActive := bytes.Replace(pristineBytes, []byte(`"active_revision":null,`), nil, 1)
+			if bytes.Equal(missingActive, pristineBytes) {
+				t.Fatal("fixture did not contain required active_revision:null")
+			}
+			if _, err := DecodeControllerResult(bytes.NewReader(missingActive)); err == nil {
+				t.Fatal("DecodeControllerResult accepted missing active_revision")
+			}
+
+			active := pristine
+			active.RecorderCheckpoint.Checkpoint.ActiveRevision = &ActiveRevision{
+				Revision: 1, ManifestDigest: testDigest("active-manifest"), NextSourceSequence: 2,
+				PriorEventDigest: testDigest("active-event"), LastGlobalSequence: 1,
+			}
+			decoded, err := DecodeControllerResult(bytes.NewReader(mustEncodeControllerResult(t, active)))
+			if err != nil || !reflect.DeepEqual(decoded.RecorderCheckpoint.Checkpoint.ActiveRevision, active.RecorderCheckpoint.Checkpoint.ActiveRevision) {
+				t.Fatalf("active revision roundtrip = %#v/%v", decoded.RecorderCheckpoint.Checkpoint.ActiveRevision, err)
+			}
+
+			completed := controllerResultFixture(t, 1, ControllerOperationRecorderCheckpoint)
+			terminal := completed.RecorderCheckpoint.Checkpoint.Revisions[len(completed.RecorderCheckpoint.Checkpoint.Revisions)-1]
+			bridge := &contextevent.PriorRevision{
+				ManifestRevision: terminal.ManifestRevision, ManifestDigest: terminal.ManifestDigest,
+				EventRoot: terminal.EventRoot, TerminalSourceSequence: terminal.TerminalSourceSequence,
+				TerminalGlobalSequence: terminal.TerminalGlobalSequence,
+			}
+			completed.RecorderCheckpoint.Checkpoint.ActiveRevision = &ActiveRevision{
+				Revision: terminal.ManifestRevision + 1, ManifestDigest: testDigest("next-manifest"),
+				NextSourceSequence: 1, PriorRevision: bridge, LastGlobalSequence: terminal.TerminalGlobalSequence,
+			}
+			if _, err := EncodeControllerResult(completed); err != nil {
+				t.Fatalf("EncodeControllerResult(sequence-one bridge): %v", err)
+			}
+
+			expansionClosed := pristine
+			expansionBridge := &contextevent.PriorRevision{
+				ManifestRevision: 1, ManifestDigest: testDigest("expansion-parent-manifest"),
+				EventRoot: testDigest("expansion-parent-event"), TerminalSourceSequence: 3,
+				TerminalGlobalSequence: 7,
+			}
+			expansionClosed.RecorderCheckpoint.Checkpoint.ActiveRevision = &ActiveRevision{
+				Revision: 2, ManifestDigest: testDigest("expansion-child-manifest"), NextSourceSequence: 1,
+				PriorRevision: expansionBridge, LastGlobalSequence: expansionBridge.TerminalGlobalSequence,
+			}
+			if _, err := EncodeControllerResult(expansionClosed); err != nil {
+				t.Fatalf("EncodeControllerResult(expansion-closed predecessor bridge): %v", err)
+			}
+
+			for _, mutation := range []struct {
+				name   string
+				mutate func(*RecorderCheckpoint)
+			}{
+				{name: "zero next sequence", mutate: func(c *RecorderCheckpoint) {
+					c.ActiveRevision = cloneActive(c.ActiveRevision)
+					c.ActiveRevision.NextSourceSequence = 0
+				}},
+				{name: "sequence one prior event", mutate: func(c *RecorderCheckpoint) {
+					c.ActiveRevision = cloneActive(c.ActiveRevision)
+					c.ActiveRevision.PriorEventDigest = testDigest("forbidden")
+				}},
+				{name: "later sequence bridge", mutate: func(c *RecorderCheckpoint) {
+					c.ActiveRevision = cloneActive(c.ActiveRevision)
+					c.ActiveRevision.NextSourceSequence = 2
+				}},
+				{name: "stale last global", mutate: func(c *RecorderCheckpoint) {
+					c.ActiveRevision = cloneActive(c.ActiveRevision)
+					c.ActiveRevision.LastGlobalSequence--
+				}},
+				{name: "wrong bridge", mutate: func(c *RecorderCheckpoint) {
+					c.ActiveRevision = cloneActive(c.ActiveRevision)
+					c.ActiveRevision.PriorRevision = &contextevent.PriorRevision{ManifestRevision: 99, ManifestDigest: testDigest("wrong"), EventRoot: testDigest("wrong-event"), TerminalSourceSequence: 1, TerminalGlobalSequence: 1}
+				}},
+				{name: "later sequence skips completed revision", mutate: func(c *RecorderCheckpoint) {
+					c.ActiveRevision = cloneActive(c.ActiveRevision)
+					c.ActiveRevision.Revision++
+					c.ActiveRevision.NextSourceSequence = 2
+					c.ActiveRevision.PriorEventDigest = testDigest("active-event")
+					c.ActiveRevision.PriorRevision = nil
+					c.ActiveRevision.LastGlobalSequence++
+				}},
+			} {
+				t.Run(mutation.name, func(t *testing.T) {
+					bad := completed
+					mutation.mutate(&bad.RecorderCheckpoint.Checkpoint)
+					if _, err := EncodeControllerResult(bad); err == nil {
+						t.Fatal("EncodeControllerResult accepted invalid active revision")
+					}
+				})
+			}
+		})
+
 		t.Run("shared typed errors reach wrappers without bespoke identity checks", func(t *testing.T) {
 			needsTypedError := map[string]bool{
 				"RecorderCheckpoint":   true,
@@ -783,6 +933,18 @@ func typedControllerRequestValue(t *testing.T, call ControllerCall, operation st
 		t.Fatalf("missing typed request projection for literal operation %q", operation)
 		return nil
 	}
+}
+
+func cloneActive(active *ActiveRevision) *ActiveRevision {
+	if active == nil {
+		return nil
+	}
+	copy := *active
+	if active.PriorRevision != nil {
+		bridge := *active.PriorRevision
+		copy.PriorRevision = &bridge
+	}
+	return &copy
 }
 
 type controllerMemoryTransport struct {

@@ -84,6 +84,9 @@ func TestContextExecutionContract_Static(t *testing.T) {
 			p.checkpoint.TerminalSourceSequence = 1
 			p.checkpoint.TerminalGlobalSequence = 1
 		}},
+		{"start recorder carries an active revision", func(p *serviceFake) {
+			p.checkpoint.ActiveRevision = &ActiveRevision{Revision: 1, ManifestDigest: testDigest("active-manifest"), NextSourceSequence: 1}
+		}},
 		{"recorder unavailable", func(p *serviceFake) { p.recorder.Verification = unproven(FailureUnavailable) }},
 		{"opaque boundary unproven", func(p *serviceFake) { p.opaque.Verification = unproven(FailureUnproven) }},
 		{"adapter version mismatch", func(p *serviceFake) { p.adapterFacts.AdapterVersion = "other" }},
@@ -180,6 +183,40 @@ func TestContextExecutionContract_Static(t *testing.T) {
 		}
 	})
 
+	t.Run("provider launch refusal preserves only the verified partial run", func(t *testing.T) {
+		for _, test := range []struct {
+			name      string
+			action    Action
+			nilActive bool
+		}{
+			{name: "start error", action: ActionStart},
+			{name: "start nil active run", action: ActionStart, nilActive: true},
+			{name: "resume error", action: ActionResume},
+			{name: "resume nil active run", action: ActionResume, nilActive: true},
+		} {
+			t.Run(test.name, func(t *testing.T) {
+				request := serviceRequest(t, test.action)
+				svc, ports := newServiceHarness(t, request)
+				ports.nilActive = test.nilActive
+				if !test.nilActive {
+					ports.launchErr = errors.New("provider launch refused")
+				}
+
+				run, err := svc.Execute(context.Background(), request, []contextcompile.DataItem{})
+				if !errors.Is(err, ErrOperational) {
+					t.Fatalf("Execute error = %v, want operational launch refusal", err)
+				}
+				if run.Authority != contextevent.AuthorityAuthoritative || len(run.Witnesses) != 0 ||
+					!reflect.DeepEqual(run.Workspace, ports.workspace) || !reflect.DeepEqual(run.Profile, ports.profile) {
+					t.Fatalf("partial launch run = %#v, want exact verified authority/workspace/profile", run)
+				}
+				if run.AdapterSessionRef != "" || len(run.Acks) != 0 {
+					t.Fatalf("partial launch session/acks = %q/%#v, want empty", run.AdapterSessionRef, run.Acks)
+				}
+			})
+		}
+	})
+
 	t.Run("malformed provider output is durably recorded then remains operational", func(t *testing.T) {
 		svc, ports := newServiceHarness(t, req)
 		schema, err := contextevent.PayloadSchema(contextevent.KindTelemetryGap)
@@ -209,6 +246,68 @@ func TestContextExecutionContract_Static(t *testing.T) {
 		}
 		if ports.stopCalls != 0 || len(ports.appended) != 0 {
 			t.Fatalf("stop calls/events = %d/%v, want none", ports.stopCalls, ports.appended)
+		}
+		if _, err := svc.InterruptRegistered(context.Background(), req); !errors.Is(err, ErrVerdict) || errors.Is(err, ErrInterruptNotActive) {
+			t.Fatalf("InterruptRegistered error = %v, want permanent absent-run verdict", err)
+		}
+		if ports.stopCalls != 0 || len(ports.appended) != 0 {
+			t.Fatalf("registered no-active stop calls/events = %d/%v, want none", ports.stopCalls, ports.appended)
+		}
+	})
+
+	t.Run("registered interruption classifies only pending activation as retryable", func(t *testing.T) {
+		svc, ports := newServiceHarness(t, req)
+		ports.launchEntered = make(chan struct{})
+		ports.launchRelease = make(chan struct{})
+		type executionResult struct {
+			run ExecutionRun
+			err error
+		}
+		done := make(chan executionResult, 1)
+		go func() {
+			run, err := svc.Execute(context.Background(), req, []contextcompile.DataItem{})
+			done <- executionResult{run: run, err: err}
+		}()
+		<-ports.launchEntered
+
+		if _, err := svc.InterruptRegistered(context.Background(), req); !errors.Is(err, ErrVerdict) || !errors.Is(err, ErrInterruptNotActive) {
+			t.Fatalf("InterruptRegistered pending activation error = %v, want retryable no-active verdict", err)
+		}
+		if ports.stopCount() != 0 || len(ports.appendedEvents()) != 0 {
+			t.Fatalf("pending activation stop/events = %d/%v, want none", ports.stopCount(), ports.appendedEvents())
+		}
+		close(ports.launchRelease)
+		if executed := <-done; executed.err != nil {
+			t.Fatalf("Execute after pending activation signal: %v", executed.err)
+		}
+	})
+
+	t.Run("registered interruption snapshots the verified active identity", func(t *testing.T) {
+		request := serviceRequest(t, ActionResume)
+		svc, ports := newServiceHarness(t, request)
+		ports.resumeEntered = make(chan struct{})
+		ports.resumeRelease = make(chan struct{})
+		type executionResult struct {
+			run ExecutionRun
+			err error
+		}
+		done := make(chan executionResult, 1)
+		go func() {
+			run, err := svc.Execute(context.Background(), request, []contextcompile.DataItem{})
+			done <- executionResult{run: run, err: err}
+		}()
+		<-ports.resumeEntered
+
+		ack, err := svc.InterruptRegistered(context.Background(), request)
+		if err != nil {
+			t.Fatalf("InterruptRegistered: %v", err)
+		}
+		executed := <-done
+		if !errors.Is(executed.err, ErrVerdict) || !errors.Is(executed.err, ErrInterrupted) {
+			t.Fatalf("Execute error = %v, want normalized interruption verdict", executed.err)
+		}
+		if ports.stopCount() != 1 || len(executed.run.Acks) != 1 || executed.run.Acks[0] != ack || ack.Kind != contextevent.KindAdapterStop {
+			t.Fatalf("registered stop/acks = %d/%#v/%#v, want one exact adapter-stop", ports.stopCount(), executed.run.Acks, ack)
 		}
 	})
 }
@@ -258,6 +357,9 @@ func TestContextExecutionResumeContract_Behavioral(t *testing.T) {
 		mutate func(*serviceFake)
 	}{
 		{"recorder checkpoint", func(p *serviceFake) { p.checkpoint.Digest = testDigest("wrong-checkpoint") }},
+		{"active recorder revision", func(p *serviceFake) {
+			p.checkpoint.ActiveRevision = &ActiveRevision{Revision: 2, ManifestDigest: testDigest("active-manifest"), NextSourceSequence: 2, PriorEventDigest: testDigest("active-event"), LastGlobalSequence: 2}
+		}},
 		{"runway commit", func(p *serviceFake) { p.runway.Commit = testSHA2 }},
 		{"runway tree", func(p *serviceFake) { p.runway.Tree = testTree2 }},
 		{"profile", func(p *serviceFake) { p.profile.Digest = testDigest("wrong-profile") }},
@@ -957,6 +1059,10 @@ type serviceFake struct {
 	sessionStored             string
 	startCalls                int
 	resumeCalls               int
+	launchErr                 error
+	nilActive                 bool
+	launchEntered             chan struct{}
+	launchRelease             chan struct{}
 	sessionVerifyCalls        int
 	stopCalls                 int
 	stopEntered               chan struct{}
@@ -1175,7 +1281,19 @@ func (p *serviceFake) Start(_ context.Context, launch AdapterLaunch) (ActiveAdap
 	p.mu.Lock()
 	p.startCalls++
 	p.input = launch.Input
+	launchErr, nilActive := p.launchErr, p.nilActive
+	launchEntered, launchRelease := p.launchEntered, p.launchRelease
 	p.mu.Unlock()
+	if launchEntered != nil {
+		close(launchEntered)
+		<-launchRelease
+	}
+	if launchErr != nil {
+		return nil, launchErr
+	}
+	if nilActive {
+		return nil, nil
+	}
 	var deliveries []AdapterResult
 	if len(p.startDeliveries) != 0 {
 		deliveries = append([]AdapterResult(nil), p.startDeliveries...)
@@ -1198,7 +1316,14 @@ func (p *serviceFake) Resume(_ context.Context, launch AdapterLaunch, session st
 	p.resumeCalls++
 	p.resumedSession = session
 	p.input = launch.Input
+	launchErr, nilActive := p.launchErr, p.nilActive
 	p.mu.Unlock()
+	if launchErr != nil {
+		return nil, launchErr
+	}
+	if nilActive {
+		return nil, nil
+	}
 	var deliveries []AdapterResult
 	if len(p.resumeDeliveries) != 0 {
 		deliveries = append([]AdapterResult(nil), p.resumeDeliveries...)

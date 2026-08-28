@@ -316,6 +316,9 @@ func validateCompletionCheckpoint(request ExecutionRequest, event contextevent.E
 	if err := requireProven("completed recorder checkpoint", checkpoint.Verification); err != nil {
 		return nil, "", err
 	}
+	if checkpoint.ActiveRevision != nil {
+		return nil, "", errors.New("completed recorder checkpoint carries an active revision")
+	}
 	root, err := contextevent.EventChainRoot(checkpoint.Revisions)
 	if err != nil {
 		return nil, "", err

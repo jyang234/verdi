@@ -109,6 +109,17 @@ type recorderCheckpointWire struct {
 	EventChainRoot         string                    `json:"event_chain_root"`
 	TerminalSourceSequence uint64                    `json:"terminal_source_sequence"`
 	TerminalGlobalSequence uint64                    `json:"terminal_global_sequence"`
+	ActiveRevision         json.RawMessage           `json:"active_revision"`
+}
+
+type activeRevisionWire struct {
+	Revision           uint64                      `json:"revision"`
+	ManifestDigest     string                      `json:"manifest_digest"`
+	NextSourceSequence uint64                      `json:"next_source_sequence"`
+	PriorEventDigest   string                      `json:"prior_event_digest"`
+	PriorRevision      *contextevent.PriorRevision `json:"prior_revision"`
+	LastGlobalSequence uint64                      `json:"last_global_sequence"`
+	Invalidated        bool                        `json:"invalidated"`
 }
 
 type opaqueIdentityWire struct {
@@ -1759,16 +1770,134 @@ func recorderCheckpointToWire(c RecorderCheckpoint) (recorderCheckpointWire, err
 			return recorderCheckpointWire{}, fmt.Errorf("sealedexec: recorder checkpoint terminal facts mismatch")
 		}
 	}
-	return recorderCheckpointWire{c.State, c.Failure, c.Witnesses, c.Digest, c.Revisions, c.EventChainRoot, c.TerminalSourceSequence, c.TerminalGlobalSequence}, nil
+	active, err := activeRevisionToWire(c.ActiveRevision, c.Revisions, c.TerminalGlobalSequence)
+	if err != nil {
+		return recorderCheckpointWire{}, err
+	}
+	return recorderCheckpointWire{c.State, c.Failure, c.Witnesses, c.Digest, c.Revisions, c.EventChainRoot, c.TerminalSourceSequence, c.TerminalGlobalSequence, active}, nil
 }
 func recorderCheckpointFromWire(w recorderCheckpointWire) (RecorderCheckpoint, error) {
 	v, e := verificationFromWire(verificationWire{w.State, w.Failure, w.Witnesses})
 	if e != nil {
 		return RecorderCheckpoint{}, e
 	}
-	c := RecorderCheckpoint{Verification: v, Digest: w.Digest, Revisions: w.Revisions, EventChainRoot: w.EventChainRoot, TerminalSourceSequence: w.TerminalSourceSequence, TerminalGlobalSequence: w.TerminalGlobalSequence}
+	active, e := activeRevisionFromWire(w.ActiveRevision)
+	if e != nil {
+		return RecorderCheckpoint{}, e
+	}
+	c := RecorderCheckpoint{Verification: v, Digest: w.Digest, Revisions: w.Revisions, EventChainRoot: w.EventChainRoot, TerminalSourceSequence: w.TerminalSourceSequence, TerminalGlobalSequence: w.TerminalGlobalSequence, ActiveRevision: active}
 	_, e = recorderCheckpointToWire(c)
 	return c, e
+}
+
+func activeRevisionToWire(active *ActiveRevision, revisions []contextevent.Revision, terminalGlobal uint64) (json.RawMessage, error) {
+	if active == nil {
+		return json.RawMessage("null"), nil
+	}
+	if err := validateDigest("active revision manifest digest", active.ManifestDigest); err != nil {
+		return nil, err
+	}
+	if active.NextSourceSequence == 0 {
+		return nil, fmt.Errorf("sealedexec: active revision next_source_sequence must be positive")
+	}
+	if active.LastGlobalSequence < terminalGlobal {
+		return nil, fmt.Errorf("sealedexec: active revision last_global_sequence precedes the complete checkpoint")
+	}
+	if len(revisions) != 0 && active.Revision != revisions[len(revisions)-1].ManifestRevision+1 {
+		return nil, fmt.Errorf("sealedexec: active revision does not immediately follow the complete checkpoint")
+	}
+	if active.NextSourceSequence == 1 {
+		if active.PriorEventDigest != "" {
+			return nil, fmt.Errorf("sealedexec: sequence-one active revision cannot carry a prior event digest")
+		}
+		if len(revisions) == 0 {
+			if active.PriorRevision == nil {
+				if active.LastGlobalSequence != terminalGlobal {
+					return nil, fmt.Errorf("sealedexec: pristine active revision cannot advance the global sequence")
+				}
+			} else {
+				if err := validateActiveRevisionBridge(*active.PriorRevision); err != nil {
+					return nil, err
+				}
+				if active.Revision == 0 || active.PriorRevision.ManifestRevision != active.Revision-1 || active.LastGlobalSequence != active.PriorRevision.TerminalGlobalSequence {
+					return nil, fmt.Errorf("sealedexec: sequence-one active revision does not exactly bridge its omitted predecessor")
+				}
+			}
+		} else {
+			terminal := revisions[len(revisions)-1]
+			want := contextevent.PriorRevision{
+				ManifestRevision: terminal.ManifestRevision, ManifestDigest: terminal.ManifestDigest,
+				EventRoot: terminal.EventRoot, TerminalSourceSequence: terminal.TerminalSourceSequence,
+				TerminalGlobalSequence: terminal.TerminalGlobalSequence,
+			}
+			if active.PriorRevision == nil || *active.PriorRevision != want || active.Revision != terminal.ManifestRevision+1 {
+				return nil, fmt.Errorf("sealedexec: sequence-one active revision does not exactly bridge the complete checkpoint")
+			}
+			if active.LastGlobalSequence != terminalGlobal {
+				return nil, fmt.Errorf("sealedexec: sequence-one active revision cannot advance beyond its predecessor")
+			}
+		}
+	} else {
+		if err := validateDigest("active revision prior event digest", active.PriorEventDigest); err != nil {
+			return nil, err
+		}
+		if active.PriorRevision != nil {
+			return nil, fmt.Errorf("sealedexec: later active source sequence cannot retain a prior-revision bridge")
+		}
+		if active.LastGlobalSequence <= terminalGlobal {
+			return nil, fmt.Errorf("sealedexec: active events must advance beyond the complete checkpoint global sequence")
+		}
+	}
+	wire := activeRevisionWire{
+		Revision: active.Revision, ManifestDigest: active.ManifestDigest,
+		NextSourceSequence: active.NextSourceSequence, PriorEventDigest: active.PriorEventDigest,
+		LastGlobalSequence: active.LastGlobalSequence, Invalidated: active.Invalidated,
+	}
+	if active.PriorRevision != nil {
+		copy := *active.PriorRevision
+		wire.PriorRevision = &copy
+	}
+	encoded, err := canonjson.Marshal(wire)
+	if err != nil {
+		return nil, err
+	}
+	return json.RawMessage(bytes.TrimSuffix(encoded, []byte{'\n'})), nil
+}
+
+func validateActiveRevisionBridge(bridge contextevent.PriorRevision) error {
+	if err := validateDigest("active revision bridge manifest digest", bridge.ManifestDigest); err != nil {
+		return err
+	}
+	if err := validateDigest("active revision bridge event root", bridge.EventRoot); err != nil {
+		return err
+	}
+	if bridge.TerminalSourceSequence == 0 || bridge.TerminalGlobalSequence == 0 {
+		return fmt.Errorf("sealedexec: active revision bridge terminal sequences must be positive")
+	}
+	return nil
+}
+
+func activeRevisionFromWire(raw json.RawMessage) (*ActiveRevision, error) {
+	if len(raw) == 0 {
+		return nil, fmt.Errorf("sealedexec: recorder checkpoint active_revision is required")
+	}
+	if bytes.Equal(raw, []byte("null")) {
+		return nil, nil
+	}
+	var wire activeRevisionWire
+	if err := unmarshalControllerPayload(raw, &wire); err != nil {
+		return nil, err
+	}
+	active := &ActiveRevision{
+		Revision: wire.Revision, ManifestDigest: wire.ManifestDigest,
+		NextSourceSequence: wire.NextSourceSequence, PriorEventDigest: wire.PriorEventDigest,
+		LastGlobalSequence: wire.LastGlobalSequence, Invalidated: wire.Invalidated,
+	}
+	if wire.PriorRevision != nil {
+		copy := *wire.PriorRevision
+		active.PriorRevision = &copy
+	}
+	return active, nil
 }
 
 func opaqueFactsToWire(f OpaqueBoundaryFacts) (opaqueFactsWire, error) {
@@ -1842,8 +1971,14 @@ func expansionFactsToWire(f ExpansionFacts) (expansionFactsWire, error) {
 	if err := validateControllerVerification(f.Verification); err != nil {
 		return expansionFactsWire{}, err
 	}
-	if err := validateDigest("expansion root", f.Root); err != nil {
-		return expansionFactsWire{}, err
+	if f.State == contextcompile.ResolutionProven {
+		if f.Root != "" {
+			if err := validateDigest("expansion root", f.Root); err != nil {
+				return expansionFactsWire{}, err
+			}
+		}
+	} else if f.Root != "" {
+		return expansionFactsWire{}, fmt.Errorf("sealedexec: non-proven expansion facts cannot carry an installed root")
 	}
 	return expansionFactsWire{f.State, f.Failure, f.Witnesses, f.Root}, nil
 }
@@ -2026,8 +2161,13 @@ func flightSnapshotToWire(s FlightStateSnapshot) (flightStateSnapshotWire, error
 			return flightStateSnapshotWire{}, err
 		}
 	}
-	for field, value := range map[string]string{"manifest_digest": s.ManifestDigest, "projection_digest": s.ProjectionDigest, "expansion_root": s.ExpansionRoot} {
+	for field, value := range map[string]string{"manifest_digest": s.ManifestDigest, "projection_digest": s.ProjectionDigest} {
 		if err := validateDigest(field, value); err != nil {
+			return flightStateSnapshotWire{}, err
+		}
+	}
+	if s.ExpansionRoot != "" {
+		if err := validateDigest("expansion_root", s.ExpansionRoot); err != nil {
 			return flightStateSnapshotWire{}, err
 		}
 	}
