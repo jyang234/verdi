@@ -35,8 +35,9 @@ func TestExecutionControlRecordContract_Static(t *testing.T) {
 			QuarantineFastForwardFailed, QuarantinePostVerificationMismatch,
 			QuarantineNonAuthoritative, QuarantineExecutionIncomplete,
 			QuarantineTerminalDurabilityFailed, QuarantineOutputWriteFailed,
+			QuarantineRepositoryVerificationFailed, QuarantineChildOutputMismatch,
 		}
-		if got, want := len(reasons), 11; got != want {
+		if got, want := len(reasons), 13; got != want {
 			t.Fatalf("quarantine reason count = %d, want %d", got, want)
 		}
 		seenReceipt := map[QuarantineReceiptState]bool{}
@@ -93,6 +94,63 @@ func TestExecutionControlRecordContract_Static(t *testing.T) {
 		for _, state := range []PreservedState{PreservedNone, PreservedPartial, PreservedFinalized} {
 			if !seenPreserved[state] {
 				t.Errorf("preserved state %q not exercised", state)
+			}
+		}
+	})
+
+	t.Run("I-83 operational prefixes and attempt-aware factual alternatives", func(t *testing.T) {
+		observedInput := RepoObservation{State: RepositoryObserved, Commit: testSHA1, Tree: testTree1, Clean: true}
+		observedChild := RepoObservation{State: RepositoryObserved, Commit: testSHA2, Tree: testTree2, Clean: true}
+		proven := Proof{State: ProofProven, Witnesses: []string{}}
+		unproven := RepoObservation{State: RepositoryUnproven}
+
+		prefixes := []QuarantineObservations{
+			validQuarantineRecord(t, QuarantineRepositoryVerificationFailed).Observed,
+			{Runway: observedInput, Child: unproven, Descendant: Proof{State: ProofUnproven, Witnesses: []string{"not observed"}}, ProtectedPaths: []string{}, FastForward: FastForwardNotAttempted, PostRunway: unproven},
+			{Runway: observedInput, Child: observedChild, Descendant: Proof{State: ProofUnproven, Witnesses: []string{"not observed"}}, ProtectedPaths: []string{}, FastForward: FastForwardNotAttempted, PostRunway: unproven},
+			{Runway: observedInput, Child: observedChild, Descendant: proven, ProtectedPaths: []string{}, FastForward: FastForwardNotAttempted, PostRunway: unproven},
+			{Runway: observedInput, Child: observedChild, Descendant: proven, ProtectedPaths: []string{}, FastForward: FastForwardFailed, PostRunway: unproven},
+			{Runway: observedInput, Child: observedChild, Descendant: proven, ProtectedPaths: []string{}, FastForward: FastForwardSucceeded, PostRunway: unproven},
+		}
+		for i, observed := range prefixes {
+			record := validQuarantineRecord(t, QuarantineRepositoryVerificationFailed)
+			record.Observed = observed
+			if _, err := EncodeQuarantineRecord(record); err != nil {
+				t.Fatalf("repository-verification prefix %d: %v", i, err)
+			}
+		}
+
+		missingRunwayPrefix := validQuarantineRecord(t, QuarantineRepositoryVerificationFailed)
+		missingRunwayPrefix.Observed.Child = observedChild
+		if _, err := EncodeQuarantineRecord(missingRunwayPrefix); err == nil {
+			t.Fatal("repository-verification accepted a child observation without the earlier runway prefix")
+		}
+
+		for _, attempt := range []FastForwardState{FastForwardNotAttempted, FastForwardFailed} {
+			for _, test := range []struct {
+				reason QuarantineReason
+				post   RepoObservation
+			}{
+				{reason: QuarantineRunwayDirty, post: RepoObservation{State: RepositoryObserved, Commit: testSHA1, Tree: testTree1, Clean: false}},
+				{reason: QuarantineRunwayMoved, post: RepoObservation{State: RepositoryObserved, Commit: testSHA2, Tree: testTree1, Clean: true}},
+			} {
+				record := validQuarantineRecord(t, QuarantineRepositoryVerificationFailed)
+				record.Reason = test.reason
+				record.Observed = QuarantineObservations{Runway: observedInput, Child: observedChild, Descendant: proven, ProtectedPaths: []string{}, FastForward: attempt, PostRunway: test.post}
+				if _, err := EncodeQuarantineRecord(record); err != nil {
+					t.Fatalf("late %s with %s: %v", test.reason, attempt, err)
+				}
+			}
+		}
+
+		for name, post := range map[string]RepoObservation{
+			"clean input":  observedInput,
+			"exact output": observedChild,
+		} {
+			record := validQuarantineRecord(t, QuarantineFastForwardFailed)
+			record.Observed.PostRunway = post
+			if _, err := EncodeQuarantineRecord(record); err != nil {
+				t.Fatalf("attempted merge failure at %s: %v", name, err)
 			}
 		}
 	})
@@ -337,6 +395,7 @@ func validQuarantineRecord(t *testing.T, reason QuarantineReason) QuarantineReco
 	case QuarantineFastForwardFailed:
 		record.Observed.Runway, record.Observed.Child, record.Observed.Descendant = observedInput, observedChild, proven
 		record.Observed.FastForward = FastForwardFailed
+		record.Observed.PostRunway = observedInput
 	case QuarantinePostVerificationMismatch:
 		record.Observed.Runway, record.Observed.Child, record.Observed.Descendant = observedInput, observedChild, proven
 		record.Observed.FastForward = FastForwardSucceeded
@@ -354,6 +413,11 @@ func validQuarantineRecord(t *testing.T, reason QuarantineReason) QuarantineReco
 		record.Preserved = PreservedExecution{State: PreservedPartial, Ref: &partialRef}
 	case QuarantineOutputWriteFailed:
 		// Durable finalized result, but handback observations remain unproven.
+	case QuarantineRepositoryVerificationFailed:
+		// Durable finalized result with no valid repository observation prefix.
+	case QuarantineChildOutputMismatch:
+		record.Observed.Runway = observedInput
+		record.Observed.Child = RepoObservation{State: RepositoryObserved, Commit: testSHA1, Tree: testTree1, Clean: true}
 	default:
 		t.Fatalf("unknown quarantine reason %q", reason)
 	}

@@ -452,18 +452,13 @@ func validateQuarantineReasonFacts(record QuarantineRecord) error {
 	switch record.Reason {
 	case QuarantineRunwayDirty, QuarantineRunwayMoved, QuarantineChildDirty,
 		QuarantineNonDescendant, QuarantineProtectedSpecChange,
-		QuarantineFastForwardFailed, QuarantinePostVerificationMismatch:
+		QuarantineFastForwardFailed, QuarantinePostVerificationMismatch,
+		QuarantineRepositoryVerificationFailed, QuarantineChildOutputMismatch:
 		if record.Receipt.State != QuarantineReceiptDurable || record.Preserved.State != PreservedFinalized {
-			return fmt.Errorf("sealedexec: factual handback quarantine requires a durable finalized result")
+			return fmt.Errorf("sealedexec: handback quarantine requires a durable finalized result")
 		}
 	}
 
-	noAttempt := func() error {
-		if record.Observed.FastForward != FastForwardNotAttempted || record.Observed.PostRunway.State != RepositoryUnproven {
-			return fmt.Errorf("sealedexec: quarantine reason %q contradicts fast-forward/post facts", record.Reason)
-		}
-		return nil
-	}
 	preRunway := func() bool {
 		return record.Observed.Runway.State == RepositoryObserved && record.Observed.Runway.Clean &&
 			record.Observed.Runway.Commit == record.Repository.Input.Commit && record.Observed.Runway.Tree == record.Repository.Input.Tree
@@ -475,41 +470,79 @@ func validateQuarantineReasonFacts(record QuarantineRecord) error {
 	preAll := func() bool {
 		return preRunway() && preChild() && record.Observed.Descendant.State == ProofProven && len(record.Observed.ProtectedPaths) == 0
 	}
+	unprovenChild := func() bool {
+		return record.Observed.Child.State == RepositoryUnproven
+	}
+	unprovenDescendant := func() bool {
+		return record.Observed.Descendant.State == ProofUnproven
+	}
+	unprovenPost := func() bool {
+		return record.Observed.PostRunway.State == RepositoryUnproven
+	}
+	noLaterFacts := func() bool {
+		return unprovenChild() && unprovenDescendant() && len(record.Observed.ProtectedPaths) == 0 &&
+			record.Observed.FastForward == FastForwardNotAttempted && unprovenPost()
+	}
 	noObservations := func() bool {
 		return record.Observed.Runway.State == RepositoryUnproven && record.Observed.Child.State == RepositoryUnproven &&
 			record.Observed.Descendant.State == ProofUnproven && len(record.Observed.ProtectedPaths) == 0 &&
 			record.Observed.FastForward == FastForwardNotAttempted && record.Observed.PostRunway.State == RepositoryUnproven
 	}
+	postIsInput := func() bool {
+		return record.Observed.PostRunway.State == RepositoryObserved && record.Observed.PostRunway.Clean &&
+			record.Observed.PostRunway.Commit == record.Repository.Input.Commit && record.Observed.PostRunway.Tree == record.Repository.Input.Tree
+	}
+	postIsOutput := func() bool {
+		return record.Repository.Output.State == QuarantineOutputObserved && record.Observed.PostRunway.State == RepositoryObserved &&
+			record.Observed.PostRunway.Clean && record.Observed.PostRunway.Commit == record.Repository.Output.Commit &&
+			record.Observed.PostRunway.Tree == record.Repository.Output.Tree
+	}
+	lateAttemptState := func() bool {
+		return record.Observed.FastForward == FastForwardNotAttempted || record.Observed.FastForward == FastForwardFailed
+	}
 
 	switch record.Reason {
 	case QuarantineRunwayDirty:
-		if record.Observed.Runway.State != RepositoryObserved || record.Observed.Runway.Clean {
-			return fmt.Errorf("sealedexec: runway-dirty requires an observed dirty runway")
+		initial := record.Observed.Runway.State == RepositoryObserved && !record.Observed.Runway.Clean && noLaterFacts()
+		late := preAll() && lateAttemptState() && record.Observed.PostRunway.State == RepositoryObserved && !record.Observed.PostRunway.Clean
+		if !initial && !late {
+			return fmt.Errorf("sealedexec: runway-dirty requires an initial or late observed dirty runway with truthful attempt facts")
 		}
-		return noAttempt()
 	case QuarantineRunwayMoved:
-		if record.Observed.Runway.State != RepositoryObserved || !record.Observed.Runway.Clean ||
-			(record.Observed.Runway.Commit == record.Repository.Input.Commit && record.Observed.Runway.Tree == record.Repository.Input.Tree) {
-			return fmt.Errorf("sealedexec: runway-moved requires a clean observed mismatch")
+		initial := record.Observed.Runway.State == RepositoryObserved && record.Observed.Runway.Clean &&
+			(record.Observed.Runway.Commit != record.Repository.Input.Commit || record.Observed.Runway.Tree != record.Repository.Input.Tree) && noLaterFacts()
+		lateMoved := record.Observed.PostRunway.State == RepositoryObserved && record.Observed.PostRunway.Clean && !postIsInput()
+		if record.Observed.FastForward == FastForwardFailed {
+			lateMoved = lateMoved && !postIsOutput()
 		}
-		return noAttempt()
+		late := preAll() && lateAttemptState() && lateMoved
+		if !initial && !late {
+			return fmt.Errorf("sealedexec: runway-moved requires an initial or late clean mismatch with truthful attempt facts")
+		}
 	case QuarantineChildDirty:
-		if !preRunway() || record.Observed.Child.State != RepositoryObserved || record.Observed.Child.Clean {
+		if !preRunway() || record.Observed.Child.State != RepositoryObserved || record.Observed.Child.Clean ||
+			!unprovenDescendant() || len(record.Observed.ProtectedPaths) != 0 || record.Observed.FastForward != FastForwardNotAttempted || !unprovenPost() {
 			return fmt.Errorf("sealedexec: child-dirty contradicts repository observations")
 		}
-		return noAttempt()
+	case QuarantineChildOutputMismatch:
+		childMismatch := record.Repository.Output.State == QuarantineOutputObserved && record.Observed.Child.State == RepositoryObserved && record.Observed.Child.Clean &&
+			(record.Observed.Child.Commit != record.Repository.Output.Commit || record.Observed.Child.Tree != record.Repository.Output.Tree)
+		if !preRunway() || !childMismatch || !unprovenDescendant() || len(record.Observed.ProtectedPaths) != 0 ||
+			record.Observed.FastForward != FastForwardNotAttempted || !unprovenPost() {
+			return fmt.Errorf("sealedexec: child-output-mismatch contradicts repository observations")
+		}
 	case QuarantineNonDescendant:
-		if !preRunway() || !preChild() || record.Observed.Descendant.State != ProofViolatedWithWitness || len(record.Observed.ProtectedPaths) != 0 {
+		if !preRunway() || !preChild() || record.Observed.Descendant.State != ProofViolatedWithWitness || len(record.Observed.ProtectedPaths) != 0 ||
+			record.Observed.FastForward != FastForwardNotAttempted || !unprovenPost() {
 			return fmt.Errorf("sealedexec: non-descendant contradicts precheck facts")
 		}
-		return noAttempt()
 	case QuarantineProtectedSpecChange:
-		if !preRunway() || !preChild() || record.Observed.Descendant.State != ProofProven || len(record.Observed.ProtectedPaths) == 0 {
+		if !preRunway() || !preChild() || record.Observed.Descendant.State != ProofProven || len(record.Observed.ProtectedPaths) == 0 ||
+			record.Observed.FastForward != FastForwardNotAttempted || !unprovenPost() {
 			return fmt.Errorf("sealedexec: protected-spec-change contradicts precheck facts")
 		}
-		return noAttempt()
 	case QuarantineFastForwardFailed:
-		if !preAll() || record.Observed.FastForward != FastForwardFailed || record.Observed.PostRunway.State != RepositoryUnproven {
+		if !preAll() || record.Observed.FastForward != FastForwardFailed || (!postIsInput() && !postIsOutput()) {
 			return fmt.Errorf("sealedexec: fast-forward-failed contradicts precheck/attempt facts")
 		}
 	case QuarantinePostVerificationMismatch:
@@ -529,6 +562,18 @@ func validateQuarantineReasonFacts(record QuarantineRecord) error {
 	case QuarantineTerminalDurabilityFailed:
 		if record.Receipt.State != QuarantineReceiptAbsent || record.Preserved.State == PreservedFinalized || !noObservations() {
 			return fmt.Errorf("sealedexec: terminal-durability-failed facts contradict phase")
+		}
+	case QuarantineRepositoryVerificationFailed:
+		if len(record.Observed.ProtectedPaths) != 0 || !unprovenPost() {
+			return fmt.Errorf("sealedexec: repository-verification-failed requires an exact prefix and unproven post-runway")
+		}
+		beforeRunway := noObservations()
+		afterRunway := preRunway() && unprovenChild() && unprovenDescendant() && record.Observed.FastForward == FastForwardNotAttempted
+		afterChild := preRunway() && preChild() && unprovenDescendant() && record.Observed.FastForward == FastForwardNotAttempted
+		afterRepositoryChecks := preAll() && (record.Observed.FastForward == FastForwardNotAttempted ||
+			record.Observed.FastForward == FastForwardFailed || record.Observed.FastForward == FastForwardSucceeded)
+		if !beforeRunway && !afterRunway && !afterChild && !afterRepositoryChecks {
+			return fmt.Errorf("sealedexec: repository-verification-failed carries a non-prefix repository state")
 		}
 	default:
 		return fmt.Errorf("sealedexec: unknown quarantine reason %q", record.Reason)

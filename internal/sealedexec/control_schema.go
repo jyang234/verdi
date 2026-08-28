@@ -60,17 +60,19 @@ type HandbackRecord struct {
 type QuarantineReason string
 
 const (
-	QuarantineRunwayDirty              QuarantineReason = "runway-dirty"
-	QuarantineRunwayMoved              QuarantineReason = "runway-moved"
-	QuarantineChildDirty               QuarantineReason = "child-dirty"
-	QuarantineNonDescendant            QuarantineReason = "non-descendant"
-	QuarantineProtectedSpecChange      QuarantineReason = "protected-spec-change"
-	QuarantineFastForwardFailed        QuarantineReason = "fast-forward-failed"
-	QuarantinePostVerificationMismatch QuarantineReason = "post-verification-mismatch"
-	QuarantineNonAuthoritative         QuarantineReason = "non-authoritative"
-	QuarantineExecutionIncomplete      QuarantineReason = "execution-incomplete"
-	QuarantineTerminalDurabilityFailed QuarantineReason = "terminal-durability-failed"
-	QuarantineOutputWriteFailed        QuarantineReason = "output-write-failed"
+	QuarantineRunwayDirty                  QuarantineReason = "runway-dirty"
+	QuarantineRunwayMoved                  QuarantineReason = "runway-moved"
+	QuarantineChildDirty                   QuarantineReason = "child-dirty"
+	QuarantineNonDescendant                QuarantineReason = "non-descendant"
+	QuarantineProtectedSpecChange          QuarantineReason = "protected-spec-change"
+	QuarantineFastForwardFailed            QuarantineReason = "fast-forward-failed"
+	QuarantinePostVerificationMismatch     QuarantineReason = "post-verification-mismatch"
+	QuarantineNonAuthoritative             QuarantineReason = "non-authoritative"
+	QuarantineExecutionIncomplete          QuarantineReason = "execution-incomplete"
+	QuarantineTerminalDurabilityFailed     QuarantineReason = "terminal-durability-failed"
+	QuarantineOutputWriteFailed            QuarantineReason = "output-write-failed"
+	QuarantineRepositoryVerificationFailed QuarantineReason = "repository-verification-failed"
+	QuarantineChildOutputMismatch          QuarantineReason = "child-output-mismatch"
 )
 
 // QuarantineReceiptState closes the receipt union.
