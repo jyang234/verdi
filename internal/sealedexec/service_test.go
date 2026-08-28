@@ -2,12 +2,15 @@ package sealedexec
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"path/filepath"
 	"reflect"
 	"sync"
 	"testing"
+	"time"
 
+	"github.com/jyang234/verdi/internal/canonjson"
 	"github.com/jyang234/verdi/internal/contextcompile"
 	"github.com/jyang234/verdi/internal/contextevent"
 	"github.com/jyang234/verdi/internal/execworkspace"
@@ -141,16 +144,16 @@ func TestContextExecutionContract_Static(t *testing.T) {
 		}
 	})
 
-	t.Run("interruption uses normalized stop and records result", func(t *testing.T) {
+	t.Run("interruption without an active run is refused", func(t *testing.T) {
 		svc, ports := newServiceHarness(t, req)
 		_, err := svc.Interrupt(context.Background(), InterruptRequest{
 			Request: req, Workspace: ports.workspace, AdapterSessionRef: "codex-session-1",
 		})
-		if err != nil {
-			t.Fatalf("Interrupt: %v", err)
+		if !errors.Is(err, ErrVerdict) {
+			t.Fatalf("Interrupt error = %v, want verdict", err)
 		}
-		if ports.stopCalls != 1 || ports.appended[len(ports.appended)-1].Kind != contextevent.KindAdapterStop {
-			t.Fatalf("stop calls/events = %d/%v", ports.stopCalls, ports.appended)
+		if ports.stopCalls != 0 || len(ports.appended) != 0 {
+			t.Fatalf("stop calls/events = %d/%v, want none", ports.stopCalls, ports.appended)
 		}
 	})
 }
@@ -190,8 +193,8 @@ func TestContextExecutionResumeContract_Behavioral(t *testing.T) {
 		if !errors.Is(err, ErrVerdict) {
 			t.Fatalf("Execute error = %v, want verdict", err)
 		}
-		if ports.resumeCalls != 1 || ports.sessionVerifyCalls != 2 {
-			t.Fatalf("resume/session verification calls = %d/%d, want 1/2", ports.resumeCalls, ports.sessionVerifyCalls)
+		if ports.resumeCalls != 1 || ports.sessionVerifyCalls != 2 || ports.stopCalls != 1 {
+			t.Fatalf("resume/session verification/stop calls = %d/%d/%d, want 1/2/1", ports.resumeCalls, ports.sessionVerifyCalls, ports.stopCalls)
 		}
 	})
 
@@ -264,6 +267,316 @@ func TestContextExecutionResumeContract_Behavioral(t *testing.T) {
 	})
 }
 
+func TestContextExecutionAcknowledgedStream_Behavioral(t *testing.T) {
+	start := serviceRequest(t, ActionStart)
+	workspaceRequestDigest, err := ExecutionWorkspaceRequestDigest(start.ExecutionWorkspaceRequest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	startObservation := NormalizedObservation{
+		Kind: contextevent.KindAdapterStart,
+		Payload: &contextevent.AdapterStartPayload{
+			Schema: "verdi.context-event-payload/adapter-start/v1", Adapter: contextevent.AdapterCodex,
+			AdapterVersion: start.AdapterVersion, Session: start.Session,
+			ProfileDigest:          start.Profile.Digest,
+			WorkspaceRequestDigest: workspaceRequestDigest,
+		},
+	}
+	summarySchema, err := contextevent.PayloadSchema(contextevent.KindProviderSummary)
+	if err != nil {
+		t.Fatal(err)
+	}
+	summaryRaw := `{"type":"turn.started"}`
+	summaryDigest, err := canonjson.Digest(map[string]any{"type": "turn.started"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	summaryDetail := contextevent.Detail{
+		Mode: contextevent.DetailInline, MediaType: contextevent.MediaTypeJSON,
+		Digest: summaryDigest, RedactionProfile: contextevent.RedactionProfileStandard,
+		RedactedJSON: json.RawMessage(summaryRaw),
+	}
+	summaryObservation := NormalizedObservation{
+		Kind: contextevent.KindProviderSummary,
+		Payload: &contextevent.ProviderSummaryPayload{
+			Schema: summarySchema, SummaryID: "summary-1", SummaryDigest: testDigest("summary-1"),
+			Authority: contextevent.AuthorityAdvisory, Detail: summaryDetail,
+		},
+	}
+
+	t.Run("does not consume observation two before observation one acknowledgment", func(t *testing.T) {
+		svc, ports := newServiceHarness(t, start)
+		ports.startDeliveries = []AdapterResult{
+			{ObservedSessionRef: "codex-session-1", Observations: []NormalizedObservation{startObservation}},
+			{Observations: []NormalizedObservation{summaryObservation}},
+		}
+		ports.appendEntered = make(chan struct{})
+		ports.appendRelease = make(chan struct{})
+		done := make(chan error, 1)
+		go func() {
+			_, err := svc.Execute(context.Background(), start, []contextcompile.DataItem{})
+			done <- err
+		}()
+		select {
+		case <-ports.appendEntered:
+		case <-time.After(time.Second):
+			t.Fatal("first observation never reached durable append")
+		}
+		consumed := ports.consumedDeliveries()
+		close(ports.appendRelease)
+		if err := <-done; err != nil {
+			t.Fatalf("Execute: %v", err)
+		}
+		if consumed != 1 {
+			t.Fatalf("provider deliveries consumed before first acknowledgment = %d, want 1", consumed)
+		}
+	})
+
+	t.Run("recorder rejection stops before observation two side effect", func(t *testing.T) {
+		svc, ports := newServiceHarness(t, start)
+		ports.startDeliveries = []AdapterResult{
+			{ObservedSessionRef: "codex-session-1", Observations: []NormalizedObservation{startObservation}},
+			{Observations: []NormalizedObservation{summaryObservation}},
+		}
+		ports.appendErrAt = 1
+		ports.appendErr = errors.New("durable recorder rejected sequence")
+		_, err := svc.Execute(context.Background(), start, []contextcompile.DataItem{})
+		if !errors.Is(err, ErrOperational) {
+			t.Fatalf("Execute error = %v, want operational", err)
+		}
+		if ports.stopCount() != 1 || ports.consumedDeliveries() != 1 {
+			t.Fatalf("stop calls/deliveries consumed = %d/%d, want 1/1", ports.stopCount(), ports.consumedDeliveries())
+		}
+		if len(ports.appendedEvents()) != 0 {
+			t.Fatalf("rejected or later observation was appended: %#v", ports.appendedEvents())
+		}
+	})
+
+	t.Run("stream failure stops after acknowledged partial output", func(t *testing.T) {
+		svc, ports := newServiceHarness(t, start)
+		ports.startDeliveries = []AdapterResult{{ObservedSessionRef: "codex-session-1", Observations: []NormalizedObservation{startObservation}}}
+		ports.streamErrAt = 2
+		_, err := svc.Execute(context.Background(), start, []contextcompile.DataItem{})
+		if !errors.Is(err, ErrOperational) {
+			t.Fatalf("Execute error = %v, want operational", err)
+		}
+		if ports.stopCount() != 1 || ports.consumedDeliveries() != 1 || len(ports.appendedEvents()) != 1 {
+			t.Fatalf("stop/deliveries/acknowledged events = %d/%d/%d, want 1/1/1", ports.stopCount(), ports.consumedDeliveries(), len(ports.appendedEvents()))
+		}
+	})
+
+	t.Run("session persistence failure stops after lifecycle acknowledgment", func(t *testing.T) {
+		svc, ports := newServiceHarness(t, start)
+		ports.startDeliveries = []AdapterResult{{ObservedSessionRef: "codex-session-1", Observations: []NormalizedObservation{startObservation}}}
+		ports.sessionStoreErr = errors.New("session store unavailable")
+		_, err := svc.Execute(context.Background(), start, []contextcompile.DataItem{})
+		if !errors.Is(err, ErrOperational) {
+			t.Fatalf("Execute error = %v, want operational", err)
+		}
+		if ports.stopCount() != 1 || ports.sessionStored != "" || len(ports.appendedEvents()) != 1 {
+			t.Fatalf("stop/stored/acknowledged events = %d/%q/%d, want 1/empty/1", ports.stopCount(), ports.sessionStored, len(ports.appendedEvents()))
+		}
+	})
+
+	t.Run("blocked active resume is interruptible and stop follows acknowledged activity", func(t *testing.T) {
+		resume := serviceRequest(t, ActionResume)
+		svc, ports := newServiceHarness(t, resume)
+		ports.resumeDeliveries = []AdapterResult{{Observations: []NormalizedObservation{summaryObservation}}}
+		ports.resumeEntered = make(chan struct{})
+		ports.resumeRelease = make(chan struct{})
+		ports.stopEntered = make(chan struct{})
+		executeDone := make(chan error, 1)
+		go func() {
+			_, err := svc.Execute(context.Background(), resume, []contextcompile.DataItem{})
+			executeDone <- err
+		}()
+		select {
+		case <-ports.resumeEntered:
+		case <-time.After(time.Second):
+			t.Fatal("resume stream did not block")
+		}
+		interruptDone := make(chan error, 1)
+		go func() {
+			_, err := svc.Interrupt(context.Background(), InterruptRequest{
+				Request: resume, Workspace: ports.workspace,
+				AdapterSessionRef: resume.Resume.Continuity.AdapterSessionRef,
+			})
+			interruptDone <- err
+		}()
+		var reached bool
+		select {
+		case <-ports.stopEntered:
+			reached = true
+		case <-time.After(250 * time.Millisecond):
+		}
+		ports.releaseResume()
+		executeErr := <-executeDone
+		interruptErr := <-interruptDone
+		if !reached {
+			t.Fatal("interrupt could not reach the blocked active run")
+		}
+		if executeErr != nil || interruptErr != nil {
+			t.Fatalf("execute/interrupt errors = %v/%v", executeErr, interruptErr)
+		}
+		got := ports.appendedEvents()
+		if len(got) != 2 || got[0].Kind != contextevent.KindProviderSummary || got[1].Kind != contextevent.KindAdapterStop {
+			t.Fatalf("acknowledged event order = %v, want provider-summary then adapter-stop", observationEventKinds(got))
+		}
+	})
+
+	t.Run("concurrent replacement remains refused while stream is active", func(t *testing.T) {
+		resume := serviceRequest(t, ActionResume)
+		svc, ports := newServiceHarness(t, resume)
+		ports.resumeEntered = make(chan struct{})
+		ports.resumeRelease = make(chan struct{})
+		done := make(chan error, 1)
+		go func() {
+			_, err := svc.Execute(context.Background(), resume, []contextcompile.DataItem{})
+			done <- err
+		}()
+		<-ports.resumeEntered
+		release, err := svc.BeginReplacement(executionKey(resume))
+		ports.releaseResume()
+		if executeErr := <-done; executeErr != nil {
+			t.Fatalf("Execute: %v", executeErr)
+		}
+		if !errors.Is(err, ErrConcurrentDispatch) || release != nil {
+			t.Fatalf("replacement release/error = %t/%v, want false/concurrent refusal", release != nil, err)
+		}
+	})
+
+	t.Run("no-active and mismatched interrupts cannot stop or append", func(t *testing.T) {
+		svc, ports := newServiceHarness(t, start)
+		interrupt := InterruptRequest{Request: start, Workspace: ports.workspace, AdapterSessionRef: "codex-session-1"}
+		if _, err := svc.Interrupt(context.Background(), interrupt); !errors.Is(err, ErrVerdict) {
+			t.Errorf("no-active Interrupt error = %v, want verdict", err)
+		}
+		if ports.stopCount() != 0 || len(ports.appendedEvents()) != 0 {
+			t.Errorf("no-active stop/appends = %d/%d, want 0/0", ports.stopCount(), len(ports.appendedEvents()))
+		}
+
+		resume := serviceRequest(t, ActionResume)
+		svc, ports = newServiceHarness(t, resume)
+		ports.resumeEntered = make(chan struct{})
+		ports.resumeRelease = make(chan struct{})
+		done := make(chan error, 1)
+		go func() {
+			_, err := svc.Execute(context.Background(), resume, []contextcompile.DataItem{})
+			done <- err
+		}()
+		<-ports.resumeEntered
+		mismatchDone := make(chan error, 1)
+		go func() {
+			_, err := svc.Interrupt(context.Background(), InterruptRequest{
+				Request: resume, Workspace: ports.workspace,
+				AdapterSessionRef: "different-session",
+			})
+			mismatchDone <- err
+		}()
+		var mismatchReached bool
+		var mismatchErr error
+		select {
+		case mismatchErr = <-mismatchDone:
+			mismatchReached = true
+		case <-time.After(250 * time.Millisecond):
+		}
+		ports.releaseResume()
+		if err := <-done; err != nil {
+			t.Fatalf("Execute: %v", err)
+		}
+		if !mismatchReached {
+			mismatchErr = <-mismatchDone
+		}
+		if !mismatchReached || !errors.Is(mismatchErr, ErrVerdict) {
+			t.Errorf("mismatched Interrupt reached active lookup/error = %t/%v, want true/verdict", mismatchReached, mismatchErr)
+		}
+		if ports.stopCount() != 0 || len(ports.appendedEvents()) != 0 {
+			t.Errorf("mismatched stop/appends = %d/%d, want 0/0", ports.stopCount(), len(ports.appendedEvents()))
+		}
+	})
+
+	t.Run("duplicate interrupt is refused without a second stop or event", func(t *testing.T) {
+		resume := serviceRequest(t, ActionResume)
+		svc, ports := newServiceHarness(t, resume)
+		ports.resumeEntered = make(chan struct{})
+		ports.resumeRelease = make(chan struct{})
+		ports.stopEntered = make(chan struct{})
+		executeDone := make(chan error, 1)
+		go func() {
+			_, err := svc.Execute(context.Background(), resume, []contextcompile.DataItem{})
+			executeDone <- err
+		}()
+		<-ports.resumeEntered
+		request := InterruptRequest{Request: resume, Workspace: ports.workspace, AdapterSessionRef: resume.Resume.Continuity.AdapterSessionRef}
+		interrupts := make(chan error, 2)
+		gate := make(chan struct{})
+		for i := 0; i < 2; i++ {
+			go func() {
+				<-gate
+				_, err := svc.Interrupt(context.Background(), request)
+				interrupts <- err
+			}()
+		}
+		close(gate)
+		var succeeded, refused int
+		for i := 0; i < 2; i++ {
+			select {
+			case err := <-interrupts:
+				if err == nil {
+					succeeded++
+				} else if errors.Is(err, ErrVerdict) {
+					refused++
+				} else {
+					t.Errorf("Interrupt error = %v, want nil or verdict", err)
+				}
+			case <-time.After(time.Second):
+				ports.releaseResume()
+				t.Fatal("concurrent interrupts did not terminate")
+			}
+		}
+		if err := <-executeDone; err != nil {
+			t.Fatalf("Execute: %v", err)
+		}
+		if succeeded != 1 || refused != 1 {
+			t.Fatalf("successful/refused interrupts = %d/%d, want 1/1", succeeded, refused)
+		}
+		if ports.stopCount() != 1 || countEventKind(ports.appendedEvents(), contextevent.KindAdapterStop) != 1 {
+			t.Fatalf("duplicate stop calls/events = %d/%d, want 1/1", ports.stopCount(), countEventKind(ports.appendedEvents(), contextevent.KindAdapterStop))
+		}
+	})
+
+	t.Run("malformed truncated and unknown deliveries stop before later observations", func(t *testing.T) {
+		gapSchema, schemaErr := contextevent.PayloadSchema(contextevent.KindTelemetryGap)
+		if schemaErr != nil {
+			t.Fatal(schemaErr)
+		}
+		errorSchema, schemaErr := contextevent.PayloadSchema(contextevent.KindAdapterError)
+		if schemaErr != nil {
+			t.Fatal(schemaErr)
+		}
+		for _, reason := range []string{"malformed-json", "truncated-final-line", "unknown-outer-type"} {
+			t.Run(reason, func(t *testing.T) {
+				svc, ports := newServiceHarness(t, start)
+				ports.startDeliveries = []AdapterResult{
+					{OperationalFailure: reason, Observations: []NormalizedObservation{
+						{Kind: contextevent.KindTelemetryGap, BlocksAuthority: true, Witness: reason, Payload: &contextevent.TelemetryGapPayload{Schema: gapSchema, Source: "codex-jsonl", FromSequence: 1, ToSequence: 1, ReasonCode: reason, Availability: "unavailable"}},
+						{Kind: contextevent.KindAdapterError, BlocksAuthority: true, Witness: reason, ForeignDetail: summaryDetail, Payload: &contextevent.AdapterErrorPayload{Schema: errorSchema, Adapter: start.Adapter, AdapterVersion: start.AdapterVersion, Session: start.Session, Operation: "decode-jsonl", ReasonCode: reason, ErrorDigest: summaryDetail.Digest, Detail: summaryDetail}},
+					}},
+					{Observations: []NormalizedObservation{summaryObservation}},
+				}
+				_, err := svc.Execute(context.Background(), start, []contextcompile.DataItem{})
+				if !errors.Is(err, ErrOperational) {
+					t.Fatalf("Execute error = %v, want operational", err)
+				}
+				got := ports.appendedEvents()
+				if ports.stopCount() != 1 || ports.consumedDeliveries() != 1 || len(got) != 2 || got[0].Kind != contextevent.KindTelemetryGap || got[1].Kind != contextevent.KindAdapterError {
+					t.Fatalf("stop/deliveries/events = %d/%d/%v, want 1/1/[telemetry-gap adapter-error]", ports.stopCount(), ports.consumedDeliveries(), observationEventKinds(got))
+				}
+			})
+		}
+	})
+}
+
 type serviceFake struct {
 	t                     *testing.T
 	mu                    sync.Mutex
@@ -283,18 +596,30 @@ type serviceFake struct {
 	input                 ProviderInput
 	appended              []contextevent.Event
 	appendErr             error
+	appendErrAt           int
+	appendCalls           int
+	appendEntered         chan struct{}
+	appendRelease         chan struct{}
 	sessionErr            error
+	sessionStoreErr       error
 	sessionStored         string
 	startCalls            int
 	resumeCalls           int
 	sessionVerifyCalls    int
 	stopCalls             int
+	stopEntered           chan struct{}
 	resumedSession        string
 	resumeObservedSession string
 	resumeObservations    []NormalizedObservation
 	startResult           *AdapterResult
+	startDeliveries       []AdapterResult
+	resumeDeliveries      []AdapterResult
+	deliveriesConsumed    int
+	streamNextCalls       int
+	streamErrAt           int
 	resumeEntered         chan struct{}
 	resumeRelease         chan struct{}
+	resumeReleaseOnce     sync.Once
 }
 
 func newServiceHarness(t *testing.T, req ExecutionRequest) (*Service, *serviceFake) {
@@ -414,6 +739,25 @@ func (p *serviceFake) calls() []string {
 	return append([]string(nil), p.log...)
 }
 func (p *serviceFake) startedInput() ProviderInput { p.mu.Lock(); defer p.mu.Unlock(); return p.input }
+func (p *serviceFake) consumedDeliveries() int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.deliveriesConsumed
+}
+func (p *serviceFake) stopCount() int { p.mu.Lock(); defer p.mu.Unlock(); return p.stopCalls }
+func (p *serviceFake) appendedEvents() []contextevent.Event {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return append([]contextevent.Event(nil), p.appended...)
+}
+func (p *serviceFake) releaseResume() {
+	p.mu.Lock()
+	release := p.resumeRelease
+	p.mu.Unlock()
+	if release != nil {
+		p.resumeReleaseOnce.Do(func() { close(release) })
+	}
+}
 
 func (p *serviceFake) VerifyAuthority(context.Context, ExecutionRequest) (AuthorityFacts, error) {
 	p.record("authority")
@@ -469,49 +813,145 @@ func (p *serviceFake) VerifyExpansion(context.Context, ExecutionKey) (ExpansionF
 	p.record("expansion-verify")
 	return p.expansion, nil
 }
-func (p *serviceFake) Start(_ context.Context, launch AdapterLaunch) (AdapterResult, error) {
+func (p *serviceFake) Start(_ context.Context, launch AdapterLaunch) (ActiveAdapterRun, error) {
 	p.record("adapter-start")
 	p.mu.Lock()
 	p.startCalls++
 	p.input = launch.Input
 	p.mu.Unlock()
-	if p.startResult != nil {
-		return *p.startResult, nil
+	var deliveries []AdapterResult
+	if len(p.startDeliveries) != 0 {
+		deliveries = append([]AdapterResult(nil), p.startDeliveries...)
+	} else if p.startResult != nil {
+		deliveries = []AdapterResult{*p.startResult}
+	} else {
+		deliveries = []AdapterResult{{ObservedSessionRef: "codex-session-1", Observations: []NormalizedObservation{{
+			Kind:    contextevent.KindAdapterStart,
+			Payload: &contextevent.AdapterStartPayload{Schema: "verdi.context-event-payload/adapter-start/v1", Adapter: contextevent.AdapterCodex, AdapterVersion: launch.Request.AdapterVersion, Session: launch.Request.Session, ProfileDigest: launch.Profile.Digest, WorkspaceRequestDigest: launch.Workspace.RequestDigest},
+		}}}}
 	}
-	return AdapterResult{ObservedSessionRef: "codex-session-1", Observations: []NormalizedObservation{{
-		Kind:    contextevent.KindAdapterStart,
-		Payload: &contextevent.AdapterStartPayload{Schema: "verdi.context-event-payload/adapter-start/v1", Adapter: contextevent.AdapterCodex, AdapterVersion: launch.Request.AdapterVersion, Session: launch.Request.Session, ProfileDigest: launch.Profile.Digest, WorkspaceRequestDigest: launch.Workspace.RequestDigest},
-	}}}, nil
+	return &serviceAdapterRun{ports: p, deliveries: deliveries}, nil
 }
-func (p *serviceFake) Resume(_ context.Context, launch AdapterLaunch, session string) (AdapterResult, error) {
+func (p *serviceFake) Resume(_ context.Context, launch AdapterLaunch, session string) (ActiveAdapterRun, error) {
 	p.record("adapter-resume")
 	p.mu.Lock()
 	p.resumeCalls++
 	p.resumedSession = session
 	p.input = launch.Input
-	entered, release := p.resumeEntered, p.resumeRelease
+	p.mu.Unlock()
+	var deliveries []AdapterResult
+	if len(p.resumeDeliveries) != 0 {
+		deliveries = append([]AdapterResult(nil), p.resumeDeliveries...)
+	} else if p.resumeObservedSession != "" || len(p.resumeObservations) != 0 {
+		deliveries = []AdapterResult{{ObservedSessionRef: p.resumeObservedSession, Observations: append([]NormalizedObservation(nil), p.resumeObservations...)}}
+	}
+	return &serviceAdapterRun{ports: p, deliveries: deliveries, resume: true}, nil
+}
+func (p *serviceFake) stopActive() (AdapterStopResult, error) {
+	p.record("adapter-stop")
+	p.mu.Lock()
+	p.stopCalls++
+	entered := p.stopEntered
 	p.mu.Unlock()
 	if entered != nil {
-		close(entered)
-		<-release
+		select {
+		case <-entered:
+		default:
+			close(entered)
+		}
 	}
-	return AdapterResult{ObservedSessionRef: p.resumeObservedSession, Observations: append([]NormalizedObservation(nil), p.resumeObservations...)}, nil
-}
-func (p *serviceFake) Stop(context.Context, AdapterStopRequest) (AdapterStopResult, error) {
-	p.record("adapter-stop")
-	p.stopCalls++
+	p.releaseResume()
 	return AdapterStopResult{ExitCode: 130, ReasonCode: "interrupt-requested"}, nil
 }
 func (p *serviceFake) Append(_ context.Context, event contextevent.Event) (contextevent.EventAck, error) {
 	p.record("append")
-	if p.appendErr != nil {
+	p.mu.Lock()
+	p.appendCalls++
+	call := p.appendCalls
+	entered, release := p.appendEntered, p.appendRelease
+	appendErr, appendErrAt := p.appendErr, p.appendErrAt
+	p.mu.Unlock()
+	if entered != nil && call == 1 {
+		close(entered)
+		<-release
+	}
+	if appendErr != nil && (appendErrAt == 0 || appendErrAt == call) {
 		return contextevent.EventAck{}, p.appendErr
 	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
 	p.appended = append(p.appended, event)
 	return contextevent.EventAck{Schema: contextevent.AckSchemaID, Flight: event.Flight, Lane: event.Lane, Epoch: event.Epoch, Session: event.Session, ManifestRevision: event.ManifestRevision, Kind: event.Kind, SourceSequence: event.SourceSequence, EventDigest: event.EventDigest, GlobalSequence: p.checkpoint.TerminalGlobalSequence + uint64(len(p.appended))}, nil
 }
+
+type serviceAdapterRun struct {
+	ports      *serviceFake
+	deliveries []AdapterResult
+	resume     bool
+	index      int
+	blocked    bool
+	terminal   bool
+}
+
+func (r *serviceAdapterRun) Next(context.Context) (AdapterResult, error) {
+	r.ports.mu.Lock()
+	r.ports.streamNextCalls++
+	nextCall, streamErrAt := r.ports.streamNextCalls, r.ports.streamErrAt
+	r.ports.mu.Unlock()
+	if streamErrAt != 0 && nextCall == streamErrAt {
+		return AdapterResult{}, errors.New("fake adapter: stream failed")
+	}
+	if r.index < len(r.deliveries) {
+		result := r.deliveries[r.index]
+		r.index++
+		r.ports.mu.Lock()
+		r.ports.deliveriesConsumed++
+		r.ports.mu.Unlock()
+		return result, nil
+	}
+	if r.resume && !r.blocked {
+		r.blocked = true
+		r.ports.mu.Lock()
+		entered, release := r.ports.resumeEntered, r.ports.resumeRelease
+		r.ports.mu.Unlock()
+		if entered != nil {
+			close(entered)
+			<-release
+		}
+	}
+	if r.terminal {
+		return AdapterResult{}, errors.New("fake adapter: next after terminal")
+	}
+	r.terminal = true
+	return AdapterResult{Terminal: &AdapterTerminalResult{ExitCode: 0}, Observations: []NormalizedObservation{}}, nil
+}
+
+func (r *serviceAdapterRun) Stop(context.Context) (AdapterStopResult, error) {
+	return r.ports.stopActive()
+}
+
+func observationEventKinds(events []contextevent.Event) []contextevent.Kind {
+	kinds := make([]contextevent.Kind, len(events))
+	for i, event := range events {
+		kinds[i] = event.Kind
+	}
+	return kinds
+}
+
+func countEventKind(events []contextevent.Event, kind contextevent.Kind) int {
+	count := 0
+	for _, event := range events {
+		if event.Kind == kind {
+			count++
+		}
+	}
+	return count
+}
 func (p *serviceFake) StoreAdapterSession(context.Context, SessionRecord) error {
 	p.record("store-session")
+	if p.sessionStoreErr != nil {
+		return p.sessionStoreErr
+	}
 	p.sessionStored = "codex-session-1"
 	return nil
 }

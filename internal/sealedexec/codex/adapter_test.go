@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -34,9 +35,18 @@ func TestAdapterStartUsesPinnedIsolationAndTypedInput(t *testing.T) {
 		t.Fatalf("adapter facts = %#v", facts)
 	}
 
-	result, err := adapter.Start(context.Background(), launch)
+	run, err := adapter.Start(context.Background(), launch)
 	if err != nil {
 		t.Fatalf("Start: %v", err)
+	}
+	if process.run.nextCalls != 0 {
+		t.Fatalf("Start consumed %d observations before the consumer's first pull", process.run.nextCalls)
+	}
+	result := collectRun(t, run)
+	select {
+	case <-process.ctx.Done():
+	default:
+		t.Fatal("terminal result did not cancel the active process context")
 	}
 	wantArgs := []string{
 		launch.Profile.Executable, "exec", "--json", "--strict-config", "--ignore-user-config", "--ignore-rules",
@@ -91,10 +101,11 @@ func TestAdapterResumeTargetsExplicitVerifiedSession(t *testing.T) {
 		t.Fatal(err)
 	}
 	session := "0199a213-81c0-7800-8aa1-bbab2a035a53"
-	result, err := adapter.Resume(context.Background(), launch, session)
+	run, err := adapter.Resume(context.Background(), launch, session)
 	if err != nil {
 		t.Fatalf("Resume: %v", err)
 	}
+	result := collectRun(t, run)
 	want := []string{launch.Profile.Executable, "exec", "resume", "--json", "--strict-config", "--ignore-user-config", "--ignore-rules", session, "-"}
 	if !reflect.DeepEqual(process.command.Args, want) || result.ObservedSessionRef != "" {
 		t.Fatalf("resume argv/session = %v/%q, want %v/empty optional repeat", process.command.Args, result.ObservedSessionRef, want)
@@ -104,10 +115,11 @@ func TestAdapterResumeTargetsExplicitVerifiedSession(t *testing.T) {
 	}
 
 	process.output = []byte("{\"type\":\"thread.started\",\"thread_id\":\"different\"}\n")
-	result, err = adapter.Resume(context.Background(), launch, session)
+	run, err = adapter.Resume(context.Background(), launch, session)
 	if err != nil {
 		t.Fatalf("Resume mismatched repeat: %v", err)
 	}
+	result = collectUntilBoundary(t, run)
 	if result.ObservedSessionRef != "different" || !blocksAuthority(result.Observations) || !hasKind(result.Observations, contextevent.KindTelemetryGap) || !hasKind(result.Observations, contextevent.KindAdapterError) {
 		t.Fatalf("mismatched resumed identity did not normalize gap/error: %#v", result)
 	}
@@ -127,6 +139,7 @@ func TestAdapterForeignDecoderFailsClosed(t *testing.T) {
 		{"trailing object", []byte("{\"type\":\"turn.started\"}{}\n"), true, true},
 		{"truncated final line", []byte("{\"type\":\"turn.started\"}"), true, true},
 		{"malformed", []byte("{not-json}\n"), true, true},
+		{"empty line", []byte("\n"), true, true},
 		{"provider error", []byte("{\"type\":\"error\",\"message\":\"provider unavailable\"}\n"), true, false},
 		{"forbidden web search", []byte("{\"type\":\"thread.started\",\"thread_id\":\"session-1\"}\n{\"type\":\"item.started\",\"item\":{\"id\":\"w1\",\"type\":\"web_search\",\"query\":\"secret\"}}\n"), false, true},
 		{"file change missing before after", []byte("{\"type\":\"item.completed\",\"item\":{\"id\":\"f1\",\"type\":\"file_change\",\"path\":\"main.go\"}}\n"), true, true},
@@ -138,10 +151,11 @@ func TestAdapterForeignDecoderFailsClosed(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			result, err := adapter.Start(context.Background(), launch)
+			run, err := adapter.Start(context.Background(), launch)
 			if err != nil {
 				t.Fatalf("Start returned operational error instead of normalized gap: %v", err)
 			}
+			result := collectUntilBoundary(t, run)
 			if !blocksAuthority(result.Observations) || (tt.wantGap && !hasKind(result.Observations, contextevent.KindTelemetryGap)) || !hasKind(result.Observations, contextevent.KindAdapterError) {
 				t.Fatalf("observations = %#v, want blocking adapter error (gap=%t)", result.Observations, tt.wantGap)
 			}
@@ -152,43 +166,139 @@ func TestAdapterForeignDecoderFailsClosed(t *testing.T) {
 	}
 }
 
-func TestAdapterStopUsesNormalizedProcessPort(t *testing.T) {
+func TestAdapterActiveRunStopUsesNormalizedProcessPort(t *testing.T) {
 	launch := adapterLaunch(t, sealedexec.ActionStart)
 	process := &cannedProcess{stop: ProcessStopResult{ExitCode: 130, ReasonCode: "interrupted"}}
 	adapter, err := New(process)
 	if err != nil {
 		t.Fatal(err)
 	}
-	got, err := adapter.Stop(context.Background(), sealedexec.AdapterStopRequest{Request: launch.Request, Workspace: launch.Workspace, AdapterSessionRef: "session-explicit"})
+	run, err := adapter.Start(context.Background(), launch)
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	got, err := run.Stop(context.Background())
 	if err != nil {
 		t.Fatalf("Stop: %v", err)
 	}
-	if process.stopRequest.SessionRef != "session-explicit" || got.ExitCode != 130 || got.ReasonCode != "interrupted" {
-		t.Fatalf("stop request/result = %#v/%#v", process.stopRequest, got)
+	if process.run.stopCalls != 1 || !process.run.cancelObserved || got.ExitCode != 130 || got.ReasonCode != "interrupted" {
+		t.Fatalf("stop calls/cancel/result = %d/%t/%#v", process.run.stopCalls, process.run.cancelObserved, got)
 	}
 }
 
 type cannedProcess struct {
-	command     *exec.Cmd
-	stdin       []byte
-	output      []byte
-	err         error
-	stopRequest ProcessStopRequest
-	stop        ProcessStopResult
+	command *exec.Cmd
+	stdin   []byte
+	output  []byte
+	err     error
+	stop    ProcessStopResult
+	run     *cannedActiveProcess
+	ctx     context.Context
 }
 
-func (p *cannedProcess) Run(_ context.Context, command *exec.Cmd, stdin []byte) (ProcessResult, error) {
+func (p *cannedProcess) Start(ctx context.Context, command *exec.Cmd, stdin []byte) (ActiveProcess, error) {
 	p.command = command
 	p.stdin = append([]byte(nil), stdin...)
+	p.ctx = ctx
 	if p.err != nil {
-		return ProcessResult{}, p.err
+		return nil, p.err
 	}
-	return ProcessResult{Stdout: append([]byte(nil), p.output...), ExitCode: 0}, nil
+	p.run = &cannedActiveProcess{parent: p, observations: processObservations(p.output)}
+	return p.run, nil
 }
 
-func (p *cannedProcess) Stop(_ context.Context, request ProcessStopRequest) (ProcessStopResult, error) {
-	p.stopRequest = request
-	return p.stop, p.err
+type cannedActiveProcess struct {
+	parent         *cannedProcess
+	observations   []ProcessObservation
+	nextCalls      int
+	stopCalls      int
+	cancelObserved bool
+	terminal       bool
+}
+
+func (p *cannedActiveProcess) Next(context.Context) (ProcessObservation, error) {
+	p.nextCalls++
+	if len(p.observations) != 0 {
+		observation := p.observations[0]
+		p.observations = p.observations[1:]
+		return observation, nil
+	}
+	if p.terminal {
+		return ProcessObservation{}, errors.New("canned process: next after terminal")
+	}
+	p.terminal = true
+	return ProcessObservation{Terminal: &ProcessResult{ExitCode: 0}}, nil
+}
+
+func (p *cannedActiveProcess) Stop(context.Context) (ProcessStopResult, error) {
+	p.stopCalls++
+	select {
+	case <-p.parent.ctx.Done():
+		p.cancelObserved = true
+	default:
+	}
+	return p.parent.stop, p.parent.err
+}
+
+func processObservations(output []byte) []ProcessObservation {
+	if len(output) == 0 {
+		return nil
+	}
+	complete := output[len(output)-1] == '\n'
+	parts := bytes.Split(output, []byte("\n"))
+	if complete {
+		parts = parts[:len(parts)-1]
+	}
+	observations := make([]ProcessObservation, len(parts))
+	for i, part := range parts {
+		foreignJSON := make([]byte, len(part))
+		copy(foreignJSON, part)
+		observations[i] = ProcessObservation{ForeignJSON: foreignJSON, Complete: complete || i < len(parts)-1}
+	}
+	return observations
+}
+
+func collectRun(t *testing.T, run sealedexec.ActiveAdapterRun) sealedexec.AdapterResult {
+	t.Helper()
+	var collected sealedexec.AdapterResult
+	for {
+		result, err := run.Next(context.Background())
+		if err != nil {
+			t.Fatalf("Next: %v", err)
+		}
+		mergeAdapterResult(&collected, result)
+		if result.Terminal != nil {
+			return collected
+		}
+	}
+}
+
+func collectUntilBoundary(t *testing.T, run sealedexec.ActiveAdapterRun) sealedexec.AdapterResult {
+	t.Helper()
+	var collected sealedexec.AdapterResult
+	for {
+		result, err := run.Next(context.Background())
+		if err != nil {
+			t.Fatalf("Next: %v", err)
+		}
+		mergeAdapterResult(&collected, result)
+		if result.Terminal != nil || result.OperationalFailure != "" || blocksAuthority(result.Observations) {
+			return collected
+		}
+	}
+}
+
+func mergeAdapterResult(target *sealedexec.AdapterResult, result sealedexec.AdapterResult) {
+	if result.ObservedSessionRef != "" {
+		target.ObservedSessionRef = result.ObservedSessionRef
+	}
+	target.Observations = append(target.Observations, result.Observations...)
+	if target.OperationalFailure == "" {
+		target.OperationalFailure = result.OperationalFailure
+	}
+	if result.Terminal != nil {
+		target.Terminal = result.Terminal
+	}
 }
 
 func adapterLaunch(t *testing.T, action sealedexec.Action) sealedexec.AdapterLaunch {

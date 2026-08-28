@@ -197,20 +197,29 @@ type AdapterLaunch struct {
 	Input     ProviderInput
 }
 
-// AdapterResult is a normalized, already-redacted provider stream.
+// AdapterTerminalResult is the explicit terminal process result. A provider
+// observation is never inferred to be terminal merely because Next blocks or
+// returns no normalized events.
+type AdapterTerminalResult struct {
+	ExitCode int
+}
+
+// AdapterResult is one pull from an acknowledged active-run stream. One
+// non-terminal result represents exactly one foreign provider observation;
+// normalization may map that observation to more than one canonical event.
 type AdapterResult struct {
 	ObservedSessionRef string
 	Observations       []NormalizedObservation
-	ExitCode           int
 	OperationalFailure string
+	Terminal           *AdapterTerminalResult
 }
 
-// AdapterStopRequest selects the normalized stop path; it is not a public
-// command.
-type AdapterStopRequest struct {
-	Request           ExecutionRequest
-	Workspace         WorkspaceFacts
-	AdapterSessionRef string
+// ActiveAdapterRun is consumer-driven: the service does not request the next
+// provider observation until every event from the current result is durably
+// acknowledged.
+type ActiveAdapterRun interface {
+	Next(context.Context) (AdapterResult, error)
+	Stop(context.Context) (AdapterStopResult, error)
 }
 
 // AdapterStopResult is the normalized process stop outcome.
@@ -284,9 +293,8 @@ type OpaqueBoundaryVerifier interface {
 }
 type ExecutionAdapter interface {
 	VerifyAdapter(context.Context, AdapterCheck) (AdapterFacts, error)
-	Start(context.Context, AdapterLaunch) (AdapterResult, error)
-	Resume(context.Context, AdapterLaunch, string) (AdapterResult, error)
-	Stop(context.Context, AdapterStopRequest) (AdapterStopResult, error)
+	Start(context.Context, AdapterLaunch) (ActiveAdapterRun, error)
+	Resume(context.Context, AdapterLaunch, string) (ActiveAdapterRun, error)
 }
 type ProviderSessionVerifier interface {
 	VerifyProviderSession(context.Context, ProviderSessionCheck) (ProviderSessionFacts, error)
@@ -322,7 +330,27 @@ type ServicePorts struct {
 type Service struct {
 	ports  ServicePorts
 	mu     sync.Mutex
-	active map[ExecutionKey]string
+	active map[ExecutionKey]*activeExecution
+}
+
+type activeExecution struct {
+	mu               sync.Mutex
+	operation        string
+	stream           ActiveAdapterRun
+	request          ExecutionRequest
+	canonicalRequest []byte
+	workspace        WorkspaceFacts
+	profile          ResolvedProfile
+	recorder         Recorder
+	sequence         uint64
+	priorDigest      string
+	priorGlobal      uint64
+	sessionRef       string
+	acks             []contextevent.EventAck
+	stopRequested    bool
+	stopped          bool
+	finished         bool
+	resumeRechecked  bool
 }
 
 // NewService refuses a missing proof or execution dependency.
@@ -343,7 +371,7 @@ func NewService(ports ServicePorts) (*Service, error) {
 		sort.Strings(missing)
 		return nil, fmt.Errorf("sealedexec: new service: missing ports %v", missing)
 	}
-	return &Service{ports: ports, active: make(map[ExecutionKey]string)}, nil
+	return &Service{ports: ports, active: make(map[ExecutionKey]*activeExecution)}, nil
 }
 
 // Execute verifies every prerequisite and launches last.
@@ -351,12 +379,13 @@ func (s *Service) Execute(ctx context.Context, request ExecutionRequest, data []
 	if ctx == nil {
 		return ExecutionRun{}, operational("execute", errors.New("nil context"))
 	}
-	release, err := s.acquire(executionKey(request), string(request.Action))
+	active, release, err := s.acquire(executionKey(request), string(request.Action))
 	if err != nil {
 		return ExecutionRun{}, err
 	}
 	defer release()
-	if _, err := EncodeExecutionRequest(request); err != nil {
+	canonicalRequest, err := EncodeExecutionRequest(request)
+	if err != nil {
 		return ExecutionRun{}, operational("validate canonical request", err)
 	}
 	input := ProviderInput{Instructions: InstructionAuthority{Projection: request.InstructionProjection}, Data: data}
@@ -503,41 +532,26 @@ func (s *Service) Execute(ctx context.Context, request ExecutionRequest, data []
 	}
 
 	launch := AdapterLaunch{Request: request, Profile: profile, Workspace: workspace, Input: input}
-	var adapterResult AdapterResult
+	var stream ActiveAdapterRun
 	if request.Action == ActionStart {
-		adapterResult, err = s.ports.Adapter.Start(ctx, launch)
+		stream, err = s.ports.Adapter.Start(ctx, launch)
 	} else {
-		adapterResult, err = s.ports.Adapter.Resume(ctx, launch, sessionFacts.SessionRef)
+		stream, err = s.ports.Adapter.Resume(ctx, launch, sessionFacts.SessionRef)
 	}
 	if err != nil {
 		return ExecutionRun{}, operational("provider process", err)
 	}
-	acks, blocked, err := s.recordObservations(ctx, recorder, request, workspace, profile, checkpoint, adapterResult)
-	if err != nil {
-		return ExecutionRun{}, err
+	if stream == nil {
+		return ExecutionRun{}, operational("provider process", errors.New("adapter returned a nil active run"))
 	}
+	sequence, priorDigest, priorGlobal := uint64(1), "", uint64(0)
 	if request.Action == ActionResume {
-		if _, err := s.verifySession(ctx, request, profile, workspace); err != nil {
-			return ExecutionRun{}, err
-		}
+		sequence = checkpoint.TerminalSourceSequence + 1
+		priorDigest = terminalRoot(checkpoint)
+		priorGlobal = checkpoint.TerminalGlobalSequence
 	}
-	if adapterResult.OperationalFailure != "" {
-		return ExecutionRun{}, operational("provider observation", errors.New(adapterResult.OperationalFailure))
-	}
-	if request.Action == ActionStart && strings.TrimSpace(adapterResult.ObservedSessionRef) == "" {
-		return ExecutionRun{}, verdict("start stream did not establish an adapter session identity")
-	}
-	if request.Action == ActionResume && adapterResult.ObservedSessionRef != "" && adapterResult.ObservedSessionRef != sessionFacts.SessionRef {
-		return ExecutionRun{}, verdict("resumed stream session identity mismatch")
-	}
-	if blocked != "" {
-		return ExecutionRun{}, verdict(blocked)
-	}
-	sessionRef := adapterResult.ObservedSessionRef
-	if request.Action == ActionResume {
-		sessionRef = sessionFacts.SessionRef
-	}
-	return ExecutionRun{Authority: authorityMode, Witnesses: witnesses, Workspace: workspace, Profile: profile, AdapterSessionRef: sessionRef, Acks: acks}, nil
+	s.activate(active, stream, request, canonicalRequest, workspace, profile, recorder, sequence, priorDigest, priorGlobal, sessionFacts.SessionRef)
+	return s.consumeActive(ctx, active, authorityMode, witnesses)
 }
 
 // Interrupt requests the adapter's normalized stop path and records its
@@ -546,63 +560,110 @@ func (s *Service) Interrupt(ctx context.Context, request InterruptRequest) (cont
 	if ctx == nil {
 		return contextevent.EventAck{}, operational("interrupt", errors.New("nil context"))
 	}
-	if _, err := EncodeExecutionRequest(request.Request); err != nil {
+	canonicalRequest, err := EncodeExecutionRequest(request.Request)
+	if err != nil {
 		return contextevent.EventAck{}, operational("interrupt request", err)
 	}
-	release, err := s.acquire(executionKey(request.Request), "interrupt")
-	if err != nil {
-		return contextevent.EventAck{}, err
+	active := s.activeRun(executionKey(request.Request))
+	if active == nil {
+		return contextevent.EventAck{}, verdict("interrupt has no matching active run")
 	}
-	defer release()
-	facts, recorder, err := s.ports.Recorders.ResolveRecorder(ctx, request.Request.RecorderEndpoint)
-	if err != nil {
-		return contextevent.EventAck{}, operational("interrupt recorder", err)
+	active.mu.Lock()
+	defer active.mu.Unlock()
+	if active.finished || active.stopped || active.stopRequested {
+		return contextevent.EventAck{}, verdict("interrupt has no stoppable active run")
 	}
-	if err := requireProven("interrupt recorder", facts.Verification); err != nil {
-		return contextevent.EventAck{}, err
+	if !bytes.Equal(canonicalRequest, active.canonicalRequest) || !reflect.DeepEqual(request.Workspace, active.workspace) ||
+		request.AdapterSessionRef == "" || request.AdapterSessionRef != active.sessionRef {
+		return contextevent.EventAck{}, verdict("interrupt identity does not match the verified active run")
 	}
-	checkpoint, err := recorder.Checkpoint(ctx, executionKey(request.Request))
+	active.stopRequested = true
+	stop, err := active.stream.Stop(ctx)
 	if err != nil {
-		return contextevent.EventAck{}, operational("interrupt checkpoint", err)
-	}
-	stop, err := s.ports.Adapter.Stop(ctx, AdapterStopRequest(request))
-	if err != nil {
+		active.stopped = true
 		return contextevent.EventAck{}, operational("adapter stop", err)
 	}
 	schema, _ := contextevent.PayloadSchema(contextevent.KindAdapterStop)
-	payload := &contextevent.AdapterStopPayload{Schema: schema, Adapter: request.Request.Adapter, AdapterVersion: request.Request.AdapterVersion, Session: request.Request.Session, ExitCode: stop.ExitCode, ReasonCode: stop.ReasonCode}
+	payload := &contextevent.AdapterStopPayload{Schema: schema, Adapter: active.request.Adapter, AdapterVersion: active.request.AdapterVersion, Session: active.request.Session, ExitCode: stop.ExitCode, ReasonCode: stop.ReasonCode}
 	stamp, err := s.ports.Stamps.NextStamp(ctx)
 	if err != nil {
+		active.stopped = true
 		return contextevent.EventAck{}, operational("interrupt stamp", err)
 	}
-	event, err := buildEvent(request.Request, request.Workspace, checkpoint.TerminalSourceSequence+1, terminalRoot(checkpoint), nil, stamp, contextevent.KindAdapterStop, payload)
+	event, err := buildEvent(active.request, active.workspace, active.sequence, active.priorDigest, nil, stamp, contextevent.KindAdapterStop, payload)
 	if err != nil {
+		active.stopped = true
 		return contextevent.EventAck{}, operational("encode stop event", err)
 	}
-	ack, err := recorder.Append(ctx, event)
+	ack, err := active.recorder.Append(ctx, event)
 	if err != nil {
+		active.stopped = true
 		return contextevent.EventAck{}, operational("append stop event", err)
 	}
-	if err := validateAck(event, ack, checkpoint.TerminalGlobalSequence); err != nil {
+	if err := validateAck(event, ack, active.priorGlobal); err != nil {
+		active.stopped = true
 		return contextevent.EventAck{}, operational("acknowledge stop event", err)
 	}
+	active.acks = append(active.acks, ack)
+	active.sequence++
+	active.priorDigest, active.priorGlobal = event.EventDigest, ack.GlobalSequence
+	active.stopped = true
 	return ack, nil
 }
 
 // BeginReplacement reserves the same exclusion key used by start/resume.
 func (s *Service) BeginReplacement(key ExecutionKey) (func(), error) {
-	return s.acquire(key, "replacement")
+	_, release, err := s.acquire(key, "replacement")
+	return release, err
 }
 
-func (s *Service) acquire(key ExecutionKey, operation string) (func(), error) {
+func (s *Service) acquire(key ExecutionKey, operation string) (*activeExecution, func(), error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if current, ok := s.active[key]; ok {
-		return nil, fmt.Errorf("%w: %s cannot coexist with %s for %v", ErrConcurrentDispatch, operation, current, key)
+		return nil, nil, fmt.Errorf("%w: %s cannot coexist with %s for %v", ErrConcurrentDispatch, operation, current.operation, key)
 	}
-	s.active[key] = operation
+	active := &activeExecution{operation: operation}
+	s.active[key] = active
 	var once sync.Once
-	return func() { once.Do(func() { s.mu.Lock(); delete(s.active, key); s.mu.Unlock() }) }, nil
+	release := func() {
+		once.Do(func() {
+			s.mu.Lock()
+			if s.active[key] == active {
+				delete(s.active, key)
+			}
+			s.mu.Unlock()
+		})
+	}
+	return active, release, nil
+}
+
+func (s *Service) activate(active *activeExecution, stream ActiveAdapterRun, request ExecutionRequest, canonicalRequest []byte, workspace WorkspaceFacts, profile ResolvedProfile, recorder Recorder, sequence uint64, priorDigest string, priorGlobal uint64, sessionRef string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	active.mu.Lock()
+	defer active.mu.Unlock()
+	active.stream = stream
+	active.request = request
+	active.canonicalRequest = append([]byte(nil), canonicalRequest...)
+	active.workspace = workspace
+	active.profile = profile
+	active.recorder = recorder
+	active.sequence = sequence
+	active.priorDigest = priorDigest
+	active.priorGlobal = priorGlobal
+	active.sessionRef = sessionRef
+	active.acks = []contextevent.EventAck{}
+}
+
+func (s *Service) activeRun(key ExecutionKey) *activeExecution {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	active := s.active[key]
+	if active == nil || active.stream == nil {
+		return nil
+	}
+	return active
 }
 
 func (s *Service) verifySession(ctx context.Context, request ExecutionRequest, profile ResolvedProfile, workspace WorkspaceFacts) (ProviderSessionFacts, error) {
@@ -620,62 +681,162 @@ func (s *Service) verifySession(ctx context.Context, request ExecutionRequest, p
 	return facts, nil
 }
 
-func (s *Service) recordObservations(ctx context.Context, recorder Recorder, request ExecutionRequest, workspace WorkspaceFacts, profile ResolvedProfile, checkpoint RecorderCheckpoint, result AdapterResult) ([]contextevent.EventAck, string, error) {
-	sequence := uint64(1)
-	prior := ""
-	priorGlobal := uint64(0)
-	if request.Action == ActionResume {
-		sequence = checkpoint.TerminalSourceSequence + 1
-		prior = terminalRoot(checkpoint)
-		priorGlobal = checkpoint.TerminalGlobalSequence
+func (s *Service) consumeActive(ctx context.Context, active *activeExecution, authority contextevent.Authority, witnesses []string) (ExecutionRun, error) {
+	for {
+		result, nextErr := active.stream.Next(ctx)
+		active.mu.Lock()
+		if active.stopped {
+			run := activeRunResult(active, authority, witnesses)
+			active.finished = true
+			active.mu.Unlock()
+			return run, nil
+		}
+		if nextErr != nil {
+			failure := operational("provider stream", nextErr)
+			failure = s.stopFailureLocked(ctx, active, failure)
+			run := activeRunResult(active, authority, witnesses)
+			active.finished = true
+			active.mu.Unlock()
+			return run, failure
+		}
+		if result.Terminal == nil && len(result.Observations) == 0 {
+			failure := operational("provider stream", errors.New("non-terminal result has no normalized observations"))
+			failure = s.stopFailureLocked(ctx, active, failure)
+			run := activeRunResult(active, authority, witnesses)
+			active.finished = true
+			active.mu.Unlock()
+			return run, failure
+		}
+		blocked, recordErr := s.recordResultLocked(ctx, active, result)
+		if recordErr != nil {
+			recordErr = s.stopFailureLocked(ctx, active, recordErr)
+			run := activeRunResult(active, authority, witnesses)
+			active.finished = true
+			active.mu.Unlock()
+			return run, recordErr
+		}
+		if active.request.Action == ActionResume && !active.resumeRechecked {
+			if _, err := s.verifySession(ctx, active.request, active.profile, active.workspace); err != nil {
+				err = s.stopFailureLocked(ctx, active, err)
+				run := activeRunResult(active, authority, witnesses)
+				active.finished = true
+				active.mu.Unlock()
+				return run, err
+			}
+			active.resumeRechecked = true
+		}
+		if result.OperationalFailure != "" {
+			failure := operational("provider observation", errors.New(result.OperationalFailure))
+			failure = s.stopFailureLocked(ctx, active, failure)
+			run := activeRunResult(active, authority, witnesses)
+			active.finished = true
+			active.mu.Unlock()
+			return run, failure
+		}
+		if active.request.Action == ActionResume && result.ObservedSessionRef != "" && result.ObservedSessionRef != active.sessionRef {
+			failure := verdict("resumed stream session identity mismatch")
+			failure = s.stopFailureLocked(ctx, active, failure)
+			run := activeRunResult(active, authority, witnesses)
+			active.finished = true
+			active.mu.Unlock()
+			return run, failure
+		}
+		if blocked != "" {
+			failure := verdict(blocked)
+			failure = s.stopFailureLocked(ctx, active, failure)
+			run := activeRunResult(active, authority, witnesses)
+			active.finished = true
+			active.mu.Unlock()
+			return run, failure
+		}
+		if result.Terminal == nil {
+			active.mu.Unlock()
+			continue
+		}
+		if result.Terminal.ExitCode != 0 {
+			failure := operational("provider process", fmt.Errorf("unreported nonzero exit %d", result.Terminal.ExitCode))
+			failure = s.stopFailureLocked(ctx, active, failure)
+			run := activeRunResult(active, authority, witnesses)
+			active.finished = true
+			active.mu.Unlock()
+			return run, failure
+		}
+		if active.request.Action == ActionStart && strings.TrimSpace(active.sessionRef) == "" {
+			failure := verdict("start stream did not establish an acknowledged adapter session identity")
+			failure = s.stopFailureLocked(ctx, active, failure)
+			run := activeRunResult(active, authority, witnesses)
+			active.finished = true
+			active.mu.Unlock()
+			return run, failure
+		}
+		active.finished = true
+		run := activeRunResult(active, authority, witnesses)
+		active.mu.Unlock()
+		return run, nil
 	}
-	acks := make([]contextevent.EventAck, 0, len(result.Observations))
+}
+
+func (s *Service) recordResultLocked(ctx context.Context, active *activeExecution, result AdapterResult) (string, error) {
 	blocked := ""
 	for _, observation := range result.Observations {
 		stamp, err := s.ports.Stamps.NextStamp(ctx)
 		if err != nil {
-			return nil, "", operational("observation stamp", err)
+			return "", operational("observation stamp", err)
 		}
-		event, err := buildEvent(request, workspace, sequence, prior, nil, stamp, observation.Kind, observation.Payload)
+		event, err := buildEvent(active.request, active.workspace, active.sequence, active.priorDigest, nil, stamp, observation.Kind, observation.Payload)
 		if err != nil {
-			return nil, "", operational("normalize adapter observation", err)
+			return "", operational("normalize adapter observation", err)
 		}
-		ack, err := recorder.Append(ctx, event)
+		ack, err := active.recorder.Append(ctx, event)
 		if err != nil {
-			return nil, "", operational("append adapter observation", err)
+			return "", operational("append adapter observation", err)
 		}
-		if err := validateAck(event, ack, priorGlobal); err != nil {
-			return nil, "", operational("acknowledge adapter observation", err)
+		if err := validateAck(event, ack, active.priorGlobal); err != nil {
+			return "", operational("acknowledge adapter observation", err)
 		}
-		acks = append(acks, ack)
-		if request.Action == ActionStart && observation.Kind == contextevent.KindAdapterStart {
-			if result.ObservedSessionRef == "" {
-				return nil, "", verdict("adapter-start lacks session identity")
+		active.acks = append(active.acks, ack)
+		active.sequence++
+		active.priorDigest, active.priorGlobal = event.EventDigest, ack.GlobalSequence
+		if active.request.Action == ActionStart && observation.Kind == contextevent.KindAdapterStart {
+			if result.ObservedSessionRef == "" || (active.sessionRef != "" && active.sessionRef != result.ObservedSessionRef) {
+				return "", verdict("adapter-start lacks one stable session identity")
 			}
-			record := SessionRecord{Key: executionKey(request), SessionRef: result.ObservedSessionRef, AdapterVersion: request.AdapterVersion, ProfileDigest: profile.Digest, WorkspaceID: workspace.WorkspaceID, LifecycleAck: ack}
+			record := SessionRecord{Key: executionKey(active.request), SessionRef: result.ObservedSessionRef, AdapterVersion: active.request.AdapterVersion, ProfileDigest: active.profile.Digest, WorkspaceID: active.workspace.WorkspaceID, LifecycleAck: ack}
 			if err := s.ports.SessionStore.StoreAdapterSession(ctx, record); err != nil {
-				return nil, "", operational("store acknowledged adapter session", err)
+				return "", operational("store acknowledged adapter session", err)
 			}
+			active.sessionRef = result.ObservedSessionRef
 		}
-		if observation.BlocksAuthority {
+		if observation.BlocksAuthority && blocked == "" {
 			blocked = observation.Witness
 			if blocked == "" {
 				blocked = "adapter observation blocks authoritative continuation"
 			}
 		}
-		sequence++
-		prior, priorGlobal = event.EventDigest, ack.GlobalSequence
 	}
-	if request.Action == ActionStart && result.OperationalFailure == "" {
-		stored := false
-		for _, observation := range result.Observations {
-			stored = stored || observation.Kind == contextevent.KindAdapterStart
-		}
-		if !stored {
-			return nil, "", verdict("start lifecycle event was not durably recorded")
-		}
+	return blocked, nil
+}
+
+func (s *Service) stopFailureLocked(ctx context.Context, active *activeExecution, failure error) error {
+	if active.stopRequested {
+		active.stopped = true
+		return failure
 	}
-	return acks, blocked, nil
+	active.stopRequested = true
+	_, stopErr := active.stream.Stop(ctx)
+	active.stopped = true
+	if stopErr != nil {
+		return errors.Join(failure, operational("stop failed active run", stopErr))
+	}
+	return failure
+}
+
+func activeRunResult(active *activeExecution, authority contextevent.Authority, witnesses []string) ExecutionRun {
+	return ExecutionRun{
+		Authority: authority, Witnesses: append([]string(nil), witnesses...),
+		Workspace: active.workspace, Profile: active.profile,
+		AdapterSessionRef: active.sessionRef, Acks: append([]contextevent.EventAck(nil), active.acks...),
+	}
 }
 
 func buildEvent(request ExecutionRequest, workspace WorkspaceFacts, sequence uint64, prior string, priorRevision *contextevent.PriorRevision, stamp string, kind contextevent.Kind, payload any) (contextevent.Event, error) {

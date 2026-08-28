@@ -17,6 +17,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"unicode/utf8"
 
 	"github.com/jyang234/verdi/internal/canonjson"
@@ -33,16 +34,18 @@ const (
 
 var canonicalDigest = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
 
-// ProcessResult is a canned or real process port's completed observation.
+// ProcessResult is the explicit terminal process result.
 type ProcessResult struct {
-	Stdout   []byte
 	ExitCode int
 }
 
-// ProcessStopRequest selects one explicit adapter session.
-type ProcessStopRequest struct {
-	SessionRef    string
-	WorkspacePath string
+// ProcessObservation is one pull from the process boundary. ForeignJSON is
+// one JSONL frame; Complete reports whether its newline framing completed.
+// Terminal is the mutually exclusive explicit process result.
+type ProcessObservation struct {
+	ForeignJSON []byte
+	Complete    bool
+	Terminal    *ProcessResult
 }
 
 // ProcessStopResult is the provider's normalized stop outcome.
@@ -51,11 +54,17 @@ type ProcessStopResult struct {
 	ReasonCode string
 }
 
-// Process is the adapter's consumer-defined process boundary. Tests never
+// ActiveProcess exposes one framed foreign observation per pull and owns the
+// cancellation handle for that exact process.
+type ActiveProcess interface {
+	Next(context.Context) (ProcessObservation, error)
+	Stop(context.Context) (ProcessStopResult, error)
+}
+
+// Process is the adapter's consumer-defined launch boundary. Tests never
 // start Codex; a production provider may start the already-constructed Cmd.
 type Process interface {
-	Run(context.Context, *exec.Cmd, []byte) (ProcessResult, error)
-	Stop(context.Context, ProcessStopRequest) (ProcessStopResult, error)
+	Start(context.Context, *exec.Cmd, []byte) (ActiveProcess, error)
 }
 
 // Adapter owns the pinned argv, typed stdin, and version-selected decoder.
@@ -102,72 +111,144 @@ func (a *Adapter) VerifyAdapter(ctx context.Context, check sealedexec.AdapterChe
 }
 
 // Start invokes the exact non-interactive start form.
-func (a *Adapter) Start(ctx context.Context, launch sealedexec.AdapterLaunch) (sealedexec.AdapterResult, error) {
+func (a *Adapter) Start(ctx context.Context, launch sealedexec.AdapterLaunch) (sealedexec.ActiveAdapterRun, error) {
 	args := []string{"exec", "--json", "--strict-config", "--ignore-user-config", "--ignore-rules", "--profile", launch.Profile.Name, "--sandbox", "workspace-write", "--cd", launch.Workspace.Path, "-"}
 	return a.run(ctx, launch, args, "", true)
 }
 
 // Resume invokes only an explicit independently verified session id.
-func (a *Adapter) Resume(ctx context.Context, launch sealedexec.AdapterLaunch, sessionRef string) (sealedexec.AdapterResult, error) {
+func (a *Adapter) Resume(ctx context.Context, launch sealedexec.AdapterLaunch, sessionRef string) (sealedexec.ActiveAdapterRun, error) {
 	if err := validateSessionRef(sessionRef); err != nil {
-		return sealedexec.AdapterResult{}, err
+		return nil, err
 	}
 	args := []string{"exec", "resume", "--json", "--strict-config", "--ignore-user-config", "--ignore-rules", sessionRef, "-"}
 	return a.run(ctx, launch, args, sessionRef, false)
 }
 
-// Stop requests the process port's normalized stop path; it creates no CLI
-// command or selector.
-func (a *Adapter) Stop(ctx context.Context, request sealedexec.AdapterStopRequest) (sealedexec.AdapterStopResult, error) {
+func (a *Adapter) run(ctx context.Context, launch sealedexec.AdapterLaunch, args []string, expectedSession string, start bool) (sealedexec.ActiveAdapterRun, error) {
 	if ctx == nil {
-		return sealedexec.AdapterStopResult{}, errors.New("sealedexec/codex: stop: nil context")
-	}
-	if err := validateSessionRef(request.AdapterSessionRef); err != nil {
-		return sealedexec.AdapterStopResult{}, err
-	}
-	result, err := a.process.Stop(ctx, ProcessStopRequest{SessionRef: request.AdapterSessionRef, WorkspacePath: request.Workspace.Path})
-	if err != nil {
-		return sealedexec.AdapterStopResult{}, fmt.Errorf("sealedexec/codex: stop process: %w", err)
-	}
-	if strings.TrimSpace(result.ReasonCode) == "" {
-		return sealedexec.AdapterStopResult{}, errors.New("sealedexec/codex: stop process returned an empty reason code")
-	}
-	return sealedexec.AdapterStopResult{ExitCode: result.ExitCode, ReasonCode: result.ReasonCode}, nil
-}
-
-func (a *Adapter) run(ctx context.Context, launch sealedexec.AdapterLaunch, args []string, expectedSession string, start bool) (sealedexec.AdapterResult, error) {
-	if ctx == nil {
-		return sealedexec.AdapterResult{}, errors.New("sealedexec/codex: run: nil context")
+		return nil, errors.New("sealedexec/codex: run: nil context")
 	}
 	if launch.Profile.DecoderProfile != DecoderProfileV1 || launch.Profile.AdapterVersion != launch.Request.AdapterVersion {
-		return sealedexec.AdapterResult{}, errors.New("sealedexec/codex: selected profile does not bind decoder/version")
+		return nil, errors.New("sealedexec/codex: selected profile does not bind decoder/version")
 	}
 	stdin, err := EncodeProviderInput(launch.Input)
 	if err != nil {
-		return sealedexec.AdapterResult{}, err
+		return nil, err
 	}
 	command, runCtx, cancel, err := launch.Profile.Profile.Command(ctx, launch.Profile.Executable, args...)
 	if err != nil {
-		return sealedexec.AdapterResult{}, fmt.Errorf("sealedexec/codex: construct process: %w", err)
+		return nil, fmt.Errorf("sealedexec/codex: construct process: %w", err)
 	}
-	defer cancel()
 	command.Dir = launch.Workspace.Path
 	command.Stdin = bytes.NewReader(stdin)
-	processResult, err := a.process.Run(runCtx, command, stdin)
+	processRun, err := a.process.Start(runCtx, command, stdin)
 	if err != nil {
-		return sealedexec.AdapterResult{}, fmt.Errorf("sealedexec/codex: process: %w", err)
+		cancel()
+		return nil, fmt.Errorf("sealedexec/codex: process: %w", err)
 	}
-	result := decodeJSONL(processResult.Stdout, launch, expectedSession, start)
-	result.ExitCode = processResult.ExitCode
-	if processResult.ExitCode != 0 {
-		detail, detailErr := detailFor(map[string]any{"exit_code": processResult.ExitCode, "type": "process.exit"})
-		if detailErr != nil {
-			return sealedexec.AdapterResult{}, detailErr
+	if processRun == nil {
+		cancel()
+		return nil, errors.New("sealedexec/codex: process returned a nil active run")
+	}
+	return &activeRun{process: processRun, launch: launch, expectedSession: expectedSession, start: start, cancel: cancel}, nil
+}
+
+type activeRun struct {
+	process         ActiveProcess
+	launch          sealedexec.AdapterLaunch
+	expectedSession string
+	start           bool
+	cancel          context.CancelFunc
+	nextMu          sync.Mutex
+	mu              sync.Mutex
+	line            uint64
+	threadCount     int
+	terminal        bool
+	stopOnce        sync.Once
+	stopResult      sealedexec.AdapterStopResult
+	stopErr         error
+}
+
+func (r *activeRun) Next(ctx context.Context) (sealedexec.AdapterResult, error) {
+	if ctx == nil {
+		return sealedexec.AdapterResult{}, errors.New("sealedexec/codex: next: nil context")
+	}
+	r.nextMu.Lock()
+	defer r.nextMu.Unlock()
+	r.mu.Lock()
+	if r.terminal {
+		r.mu.Unlock()
+		return sealedexec.AdapterResult{}, errors.New("sealedexec/codex: next after terminal result")
+	}
+	r.mu.Unlock()
+	item, err := r.process.Next(ctx)
+	if err != nil {
+		r.cancel()
+		return sealedexec.AdapterResult{}, fmt.Errorf("sealedexec/codex: process stream: %w", err)
+	}
+	if item.Terminal != nil {
+		if item.ForeignJSON != nil || item.Complete {
+			r.cancel()
+			return sealedexec.AdapterResult{}, errors.New("sealedexec/codex: process stream terminal/result union is invalid")
 		}
-		result.Observations = append(result.Observations, adapterErrorObservation(launch, detail, "process-exit", "nonzero-exit", true))
-		result.OperationalFailure = "nonzero-exit"
+		r.mu.Lock()
+		r.terminal = true
+		threadCount := r.threadCount
+		line := r.line + 1
+		r.mu.Unlock()
+		r.cancel()
+		result := sealedexec.AdapterResult{Terminal: &sealedexec.AdapterTerminalResult{ExitCode: item.Terminal.ExitCode}, Observations: []sealedexec.NormalizedObservation{}}
+		if r.start && threadCount != 1 {
+			detail := malformedDetail(nil, "missing-thread-started")
+			result.Observations = append(result.Observations, gapObservations(r.launch, detail, line, "missing-thread-started")...)
+			result.OperationalFailure = "missing-thread-started"
+		}
+		if item.Terminal.ExitCode != 0 {
+			detail, detailErr := detailFor(map[string]any{"exit_code": item.Terminal.ExitCode, "type": "process.exit"})
+			if detailErr != nil {
+				return sealedexec.AdapterResult{}, detailErr
+			}
+			result.Observations = append(result.Observations, adapterErrorObservation(r.launch, detail, "process-exit", "nonzero-exit", true))
+			if result.OperationalFailure == "" {
+				result.OperationalFailure = "nonzero-exit"
+			}
+		}
+		return result, nil
 	}
-	return result, nil
+	if item.ForeignJSON == nil {
+		r.cancel()
+		return sealedexec.AdapterResult{}, errors.New("sealedexec/codex: process stream observation/result union is invalid")
+	}
+	r.mu.Lock()
+	r.line++
+	line := r.line
+	r.mu.Unlock()
+	if !item.Complete {
+		detail := malformedDetail(item.ForeignJSON, "truncated-final-line")
+		return sealedexec.AdapterResult{Observations: gapObservations(r.launch, detail, line, "truncated-final-line"), OperationalFailure: "truncated-final-line"}, nil
+	}
+	return r.normalize(item.ForeignJSON, line), nil
+}
+
+func (r *activeRun) Stop(ctx context.Context) (sealedexec.AdapterStopResult, error) {
+	if ctx == nil {
+		return sealedexec.AdapterStopResult{}, errors.New("sealedexec/codex: stop: nil context")
+	}
+	r.stopOnce.Do(func() {
+		r.cancel()
+		result, err := r.process.Stop(ctx)
+		if err != nil {
+			r.stopErr = fmt.Errorf("sealedexec/codex: stop process: %w", err)
+			return
+		}
+		if strings.TrimSpace(result.ReasonCode) == "" {
+			r.stopErr = errors.New("sealedexec/codex: stop process returned an empty reason code")
+			return
+		}
+		r.stopResult = sealedexec.AdapterStopResult{ExitCode: result.ExitCode, ReasonCode: result.ReasonCode}
+	})
+	return r.stopResult, r.stopErr
 }
 
 func verifyArgs(request sealedexec.ExecutionRequest, profile sealedexec.ResolvedProfile, workspace sealedexec.WorkspaceFacts) ([]string, error) {
@@ -273,73 +354,59 @@ func DecodeProviderInput(reader io.Reader) (sealedexec.ProviderInput, error) {
 	return input, nil
 }
 
-func decodeJSONL(output []byte, launch sealedexec.AdapterLaunch, expectedSession string, start bool) sealedexec.AdapterResult {
+func (r *activeRun) normalize(line []byte, lineNumber uint64) sealedexec.AdapterResult {
 	result := sealedexec.AdapterResult{Observations: []sealedexec.NormalizedObservation{}}
-	if len(output) == 0 || output[len(output)-1] != '\n' {
-		detail := malformedDetail(output, "truncated-final-line")
-		result.Observations = append(result.Observations, gapObservations(launch, detail, 1, "truncated-final-line")...)
-		result.OperationalFailure = "truncated-final-line"
+	if len(line) == 0 {
+		detail := malformedDetail(line, "empty-line")
+		result.Observations = append(result.Observations, gapObservations(r.launch, detail, lineNumber, "empty-line")...)
+		result.OperationalFailure = "empty-line"
 		return result
 	}
-	lines := bytes.Split(output[:len(output)-1], []byte("\n"))
-	threadCount := 0
-	for i, line := range lines {
-		lineNumber := uint64(i + 1)
-		if len(line) == 0 {
-			detail := malformedDetail(line, "empty-line")
-			result.Observations = append(result.Observations, gapObservations(launch, detail, lineNumber, "empty-line")...)
-			result.OperationalFailure = "empty-line"
+	object, err := sealedexec.DecodeUniqueJSONObject(line)
+	if err != nil {
+		detail := malformedDetail(line, "malformed-json")
+		result.Observations = append(result.Observations, gapObservations(r.launch, detail, lineNumber, "malformed-json")...)
+		result.OperationalFailure = "malformed-json"
+		return result
+	}
+	detail, err := detailFor(object)
+	if err != nil {
+		detail = malformedDetail(line, "canonicalization-failed")
+		result.Observations = append(result.Observations, gapObservations(r.launch, detail, lineNumber, "canonicalization-failed")...)
+		result.OperationalFailure = "canonicalization-failed"
+		return result
+	}
+	outer, ok := nonemptyString(object["type"])
+	if !ok {
+		result.Observations = append(result.Observations, gapObservations(r.launch, detail, lineNumber, "missing-outer-type")...)
+		result.OperationalFailure = "missing-outer-type"
+		return result
+	}
+	if outer == "thread.started" {
+		r.mu.Lock()
+		r.threadCount++
+		threadCount := r.threadCount
+		r.mu.Unlock()
+		threadID, ok := nonemptyString(object["thread_id"])
+		if !ok || threadCount != 1 {
+			result.Observations = append(result.Observations, gapObservations(r.launch, detail, lineNumber, "session-identity-mismatch")...)
 			return result
 		}
-		object, err := sealedexec.DecodeUniqueJSONObject(line)
-		if err != nil {
-			detail := malformedDetail(line, "malformed-json")
-			result.Observations = append(result.Observations, gapObservations(launch, detail, lineNumber, "malformed-json")...)
-			result.OperationalFailure = "malformed-json"
-			return result
-		}
-		detail, err := detailFor(object)
-		if err != nil {
-			detail = malformedDetail(line, "canonicalization-failed")
-			result.Observations = append(result.Observations, gapObservations(launch, detail, lineNumber, "canonicalization-failed")...)
-			result.OperationalFailure = "canonicalization-failed"
-			return result
-		}
-		outer, ok := nonemptyString(object["type"])
-		if !ok {
-			result.Observations = append(result.Observations, gapObservations(launch, detail, lineNumber, "missing-outer-type")...)
-			result.OperationalFailure = "missing-outer-type"
-			return result
-		}
-		if outer == "thread.started" {
-			threadCount++
-			threadID, ok := nonemptyString(object["thread_id"])
-			if !ok || threadCount != 1 {
-				result.Observations = append(result.Observations, gapObservations(launch, detail, lineNumber, "session-identity-mismatch")...)
-				return result
-			}
-			result.ObservedSessionRef = threadID
-			if !start && threadID != expectedSession {
-				result.Observations = append(result.Observations, gapObservations(launch, detail, lineNumber, "session-identity-mismatch")...)
-				return result
-			}
-		}
-		observations, reason := mapForeign(launch, outer, object, detail, lineNumber)
-		if reason != "" {
-			result.Observations = append(result.Observations, gapObservations(launch, detail, lineNumber, reason)...)
-			result.OperationalFailure = reason
-			return result
-		}
-		result.Observations = append(result.Observations, observations...)
-		if outer == "turn.failed" || outer == "error" {
-			result.OperationalFailure = "provider-error"
+		result.ObservedSessionRef = threadID
+		if !r.start && threadID != r.expectedSession {
+			result.Observations = append(result.Observations, gapObservations(r.launch, detail, lineNumber, "session-identity-mismatch")...)
 			return result
 		}
 	}
-	if start && threadCount != 1 {
-		detail := malformedDetail(output, "missing-thread-started")
-		result.Observations = append(result.Observations, gapObservations(launch, detail, uint64(len(lines)+1), "missing-thread-started")...)
-		result.OperationalFailure = "missing-thread-started"
+	observations, reason := mapForeign(r.launch, outer, object, detail, lineNumber)
+	if reason != "" {
+		result.Observations = append(result.Observations, gapObservations(r.launch, detail, lineNumber, reason)...)
+		result.OperationalFailure = reason
+		return result
+	}
+	result.Observations = append(result.Observations, observations...)
+	if outer == "turn.failed" || outer == "error" {
+		result.OperationalFailure = "provider-error"
 	}
 	return result
 }
