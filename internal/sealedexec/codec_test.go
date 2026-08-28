@@ -261,6 +261,21 @@ func TestExecutionResultCodec_Static(t *testing.T) {
 	if _, err := EncodeExecutionResult(advisory); err != nil {
 		t.Fatalf("EncodeExecutionResult(valid advisory): %v", err)
 	}
+	interleaved := result
+	interleaved.ReceiptEventAck.GlobalSequence = result.TerminalGlobalSequence + 7
+	validCases := []struct {
+		name   string
+		result ExecutionResult
+	}{
+		{"globally interleaved receipt acknowledgment", interleaved},
+	}
+	for _, tt := range validCases {
+		t.Run(tt.name, func(t *testing.T) {
+			if _, err := EncodeExecutionResult(tt.result); err != nil {
+				t.Fatalf("EncodeExecutionResult(valid): %v", err)
+			}
+		})
+	}
 
 	tests := []struct {
 		name string
@@ -347,6 +362,30 @@ func TestExecutionResultCodec_Static(t *testing.T) {
 		{"ack identity mismatch", func() error {
 			bad := result
 			bad.ReceiptEventAck.Session = "other"
+			_, err := EncodeExecutionResult(bad)
+			return err
+		}},
+		{"nonadjacent ack source sequence", func() error {
+			bad := result
+			bad.ReceiptEventAck.SourceSequence++
+			_, err := EncodeExecutionResult(bad)
+			return err
+		}},
+		{"ack global sequence equal to terminal", func() error {
+			bad := result
+			bad.ReceiptEventAck.GlobalSequence = result.TerminalGlobalSequence
+			_, err := EncodeExecutionResult(bad)
+			return err
+		}},
+		{"ack global sequence earlier than terminal", func() error {
+			bad := result
+			bad.ReceiptEventAck.GlobalSequence = result.TerminalGlobalSequence - 1
+			_, err := EncodeExecutionResult(bad)
+			return err
+		}},
+		{"zero ack global sequence", func() error {
+			bad := result
+			bad.ReceiptEventAck.GlobalSequence = 0
 			_, err := EncodeExecutionResult(bad)
 			return err
 		}},

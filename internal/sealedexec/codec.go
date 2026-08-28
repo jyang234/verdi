@@ -821,7 +821,7 @@ func validateExecutionResult(result ExecutionResult) error {
 	if err != nil {
 		return err
 	}
-	if ack.Flight != result.Flight || ack.Lane != result.Lane || ack.Epoch != result.Epoch || ack.Session != result.Session || ack.ManifestRevision != result.TerminalManifestRevision || ack.SourceSequence != result.TerminalSourceSequence+1 || ack.GlobalSequence != result.TerminalGlobalSequence+1 || ack.ReceiptDigest != receipt.Digest {
+	if ack.Flight != result.Flight || ack.Lane != result.Lane || ack.Epoch != result.Epoch || ack.Session != result.Session || ack.ManifestRevision != result.TerminalManifestRevision || ack.SourceSequence != result.TerminalSourceSequence+1 || ack.GlobalSequence <= result.TerminalGlobalSequence || ack.ReceiptDigest != receipt.Digest {
 		return fmt.Errorf("sealedexec: execution result receipt_event_ack identity does not match result and receipt")
 	}
 	switch result.Authority {
