@@ -861,9 +861,6 @@ func validatePayloadFields(payload any) error {
 		if err := p.Detail.Validate(); err != nil {
 			return err
 		}
-		if p.Detail.Digest != p.ReceiptDigest {
-			return fmt.Errorf("contextevent: receipt detail digest must equal receipt_digest")
-		}
 		return nil
 	case *RetryPayload:
 		if err := texts(p.ReasonCode, p.PriorSession, p.NextSession); err != nil {

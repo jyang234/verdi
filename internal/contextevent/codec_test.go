@@ -161,6 +161,23 @@ func TestContextEventRegistryContract_Static(t *testing.T) {
 		}
 	}
 
+	t.Run("receipt self digest and represented detail digest are distinct domains", func(t *testing.T) {
+		event := eventFixture(t, KindReceipt, AdapterCodex)
+		payload := event.Payload.(*ReceiptPayload)
+		payload.ReceiptDigest = digestA
+		if payload.Detail.Digest == payload.ReceiptDigest {
+			t.Fatal("fixture did not produce distinct receipt and detail digests")
+		}
+		if _, err := EncodeEvent(event); err != nil {
+			t.Fatalf("EncodeEvent(distinct valid digest domains) error = %v", err)
+		}
+
+		payload.Detail.Digest = digestB
+		if _, err := EncodeEvent(event); err == nil {
+			t.Fatal("EncodeEvent(malformed represented-byte digest) error = nil")
+		}
+	})
+
 	t.Run("explicitly ratified enums are closed", func(t *testing.T) {
 		tests := []struct {
 			name   string
