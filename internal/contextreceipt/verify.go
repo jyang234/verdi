@@ -31,6 +31,7 @@ type Verifier struct {
 	authority AuthorityResolver
 	execution ExecutionProofDecoder
 	expansion ExpansionProofVerifier
+	evidence  EvidenceProofVerifier
 	review    ReviewProofVerifier
 }
 
@@ -46,6 +47,9 @@ func NewVerifierWithExecutionProof(authority AuthorityResolver, execution Execut
 	if expansion, ok := execution.(ExpansionProofVerifier); ok {
 		verifier.expansion = expansion
 	}
+	if evidence, ok := execution.(EvidenceProofVerifier); ok {
+		verifier.evidence = evidence
+	}
 	if review, ok := execution.(ReviewProofVerifier); ok {
 		verifier.review = review
 	}
@@ -53,8 +57,8 @@ func NewVerifierWithExecutionProof(authority AuthorityResolver, execution Execut
 }
 
 // NewVerifierWithProofs assembles the cycle-free component proof ports.
-func NewVerifierWithProofs(authority AuthorityResolver, execution ExecutionProofDecoder, expansion ExpansionProofVerifier, review ReviewProofVerifier) *Verifier {
-	return &Verifier{authority: authority, execution: execution, expansion: expansion, review: review}
+func NewVerifierWithProofs(authority AuthorityResolver, execution ExecutionProofDecoder, expansion ExpansionProofVerifier, evidence EvidenceProofVerifier, review ReviewProofVerifier) *Verifier {
+	return &Verifier{authority: authority, execution: execution, expansion: expansion, evidence: evidence, review: review}
 }
 
 // Verify returns one deterministic nineteen-operand verdict for a valid
@@ -174,19 +178,19 @@ func (v *Verifier) Verify(ctx context.Context, request VerifyRequest) (Verdict, 
 	appendOperand("expansions", expansionState, expansionExpected, expansionObserved, "expansion-incomplete", nil)
 
 	obligationExpected := mustProjectionDigest(request.Receipt.Obligations)
-	obligationState, err := verifyObligationDocuments(request.Proofs.ObligationBytes, request.Receipt.Obligations)
+	obligationState, observedObligations, err := verifyObligationDocuments(request.Proofs.ObligationBytes, request.Receipt.Obligations, repository)
 	if err != nil {
 		return Verdict{}, err
 	}
-	obligationObserved := observedProjectionDigest(obligationState, request.Receipt.Obligations, request.Proofs.ObligationBytes)
+	obligationObserved := mustProjectionDigest(observedObligations)
 	appendOperand("obligations", obligationState, obligationExpected, obligationObserved, "obligation-mismatch", nil)
 
 	evidenceExpected := mustProjectionDigest(request.Receipt.Evidence)
-	evidenceState, err := verifyEvidenceDocuments(request.Proofs.EvidenceResultBytes, request.Receipt.Evidence)
+	evidenceState, observedEvidence, err := v.verifyEvidenceDocuments(request.Proofs.EvidenceResultBytes, request.Receipt.Evidence)
 	if err != nil {
 		return Verdict{}, err
 	}
-	evidenceObserved := observedProjectionDigest(evidenceState, request.Receipt.Evidence, request.Proofs.EvidenceResultBytes)
+	evidenceObserved := mustProjectionDigest(observedEvidence)
 	appendOperand("evidence", evidenceState, evidenceExpected, evidenceObserved, "evidence-mismatch", nil)
 
 	receiptEventExpected, receiptEventObserved, receiptEventState, receiptAckExpected, receiptAckObserved, receiptAckState := receiptCompletionOperands(request.Receipt, receiptEvent, request.ReceiptEventAck, executionAcks[len(executionAcks)-1].GlobalSequence)
@@ -228,7 +232,7 @@ func (v *Verifier) Verify(ctx context.Context, request VerifyRequest) (Verdict, 
 	}
 	appendOperand("isolation", isolationState, isolationExpected, isolationObserved, isolationFinding(isolationState), authority.Isolation.Witnesses)
 
-	reviewProjection, err := v.reviewProjection(request, execution, events, executionAcks)
+	reviewProjection, err := v.reviewProjection(request, execution, events, executionAcks, repository)
 	if err != nil {
 		return Verdict{}, err
 	}
@@ -246,7 +250,7 @@ func (v *Verifier) Verify(ctx context.Context, request VerifyRequest) (Verdict, 
 	return DecodeVerdict(bytes.NewReader(encodedVerdict))
 }
 
-func (v *Verifier) reviewProjection(request VerifyRequest, execution ExecutionProjection, events []contextevent.Event, acks []contextevent.EventAck) (ReviewProofProjection, error) {
+func (v *Verifier) reviewProjection(request VerifyRequest, execution ExecutionProjection, events []contextevent.Event, acks []contextevent.EventAck, repository RepositoryProof) (ReviewProofProjection, error) {
 	if request.Receipt.Role == RoleBuilder {
 		packetDigest := mustProjectionDigest([]ReviewInput{})
 		linkDigest := mustProjectionDigest([]string{})
@@ -286,7 +290,7 @@ func (v *Verifier) reviewProjection(request VerifyRequest, execution ExecutionPr
 	if err != nil {
 		return ReviewProofProjection{}, err
 	}
-	projection, err := v.review.VerifyReviewProof(append([]byte{}, request.Proofs.ReviewPacketBytes...), request.Receipt, request.Candidate, launch)
+	projection, err := v.review.VerifyReviewProof(append([]byte{}, request.Proofs.ReviewPacketBytes...), request.Receipt, request.Candidate, repository, launch)
 	if err != nil {
 		return ReviewProofProjection{}, fmt.Errorf("contextreceipt: review packet proof: %w", err)
 	}
@@ -491,21 +495,16 @@ func visitTree(oid string, objects map[string]RepositoryObject, reachable map[st
 		return fmt.Errorf("missing tree %s", oid)
 	}
 	reachable[oid] = true
-	content := object.Content
-	for len(content) != 0 {
-		space := bytes.IndexByte(content, ' ')
-		nul := bytes.IndexByte(content, 0)
-		if space <= 0 || nul <= space+1 || len(content) < nul+21 {
-			return fmt.Errorf("tree %s has malformed entry", oid)
-		}
-		mode := string(content[:space])
-		child := hex.EncodeToString(content[nul+1 : nul+21])
-		if mode == "40000" || mode == "040000" {
-			if err := visitTree(child, objects, reachable); err != nil {
+	entries, err := parseRepositoryTreeEntries(object.Content)
+	if err != nil {
+		return fmt.Errorf("tree %s: %w", oid, err)
+	}
+	for _, entry := range entries {
+		if entry.mode == "40000" || entry.mode == "040000" {
+			if err := visitTree(entry.oid, objects, reachable); err != nil {
 				return err
 			}
 		}
-		content = content[nul+21:]
 	}
 	return nil
 }
@@ -928,52 +927,173 @@ func (v *Verifier) verifyExpansionDocuments(documents [][]byte, expansions []Exp
 	return state, nil
 }
 
-func verifyObligationDocuments(documents [][]byte, obligations []Obligation) (State, error) {
+func verifyObligationDocuments(documents [][]byte, obligations []Obligation, repository RepositoryProof) (State, []Obligation, error) {
 	state := StateProven
+	observed := make([]Obligation, 0, len(documents))
+	headBlobs, treeErr := repositoryBlobPaths(repository, repository.Candidate.HeadTree)
+	if treeErr != nil && (len(documents) != 0 || len(obligations) != 0) {
+		state = StateViolated
+	}
 	for i, document := range documents {
 		obligation, err := artifact.DecodeObligation(document)
 		if err != nil {
-			return "", fmt.Errorf("contextreceipt: obligation proof[%d]: %w", i, err)
+			return "", nil, fmt.Errorf("contextreceipt: obligation proof[%d]: %w", i, err)
 		}
-		if i >= len(obligations) || obligation.ID != obligations[i].Ref || obligation.ForKind != obligations[i].Kind || digestRaw(document) != obligations[i].ContentDigest {
+		ref, err := artifact.ParseRef(obligation.ID)
+		if err != nil {
+			return "", nil, fmt.Errorf("contextreceipt: obligation proof[%d] identity: %w", i, err)
+		}
+		story, ac, forKind, ok := artifact.SplitObligationName(ref.Name)
+		if !ok {
+			return "", nil, fmt.Errorf("contextreceipt: obligation proof[%d] has an invalid compound identity", i)
+		}
+		derived := Obligation{
+			Ref: obligation.ID, Path: ".verdi/obligations/" + story + "/" + ac + "--" + forKind + ".md",
+			AC: ac, Kind: obligation.ForKind, ContentDigest: digestRaw(document),
+		}
+		if obligation.Quality != nil && obligation.Quality.State == artifact.ObligationQualityElaborated {
+			derived.Producer = obligation.Quality.Producer.Ref
+		} else {
+			state = StateViolated
+		}
+		observed = append(observed, derived)
+		blobOID := gitObjectOID("blob", document)
+		if treeErr != nil || headBlobs[derived.Path] != blobOID || i >= len(obligations) || derived != obligations[i] {
 			state = StateViolated
 		}
 	}
 	if len(documents) != len(obligations) {
 		state = StateViolated
 	}
-	return state, nil
+	return state, observed, nil
 }
 
-func verifyEvidenceDocuments(documents [][]byte, evidence []Evidence) (State, error) {
+func (v *Verifier) verifyEvidenceDocuments(documents [][]byte, evidence []Evidence) (State, []Evidence, error) {
+	if (len(documents) != 0 || len(evidence) != 0) && v.evidence == nil {
+		return "", nil, fmt.Errorf("contextreceipt: evidence proof verifier is unavailable")
+	}
 	state := StateProven
+	observed := make([]Evidence, 0, len(documents))
 	for i, document := range documents {
-		if err := validateCanonicalJSONDocument(document, fmt.Sprintf("evidence result proof[%d]", i)); err != nil {
-			return "", err
+		projection, err := v.evidence.VerifyEvidenceProof(append([]byte(nil), document...))
+		if err != nil {
+			return "", nil, fmt.Errorf("contextreceipt: evidence result proof[%d]: %w", i, err)
 		}
-		if i >= len(evidence) || digestRaw(document) != evidence[i].OutputDigest {
+		if err := validateEvidenceProofProjection(projection); err != nil {
+			return "", nil, fmt.Errorf("contextreceipt: evidence result proof[%d]: %w", i, err)
+		}
+		derived := Evidence{
+			CommandID: projection.CommandID, Argv: append([]string(nil), projection.Argv...), ExitCode: projection.ExitCode,
+			Verdict: projection.Verdict, OutputDigest: projection.OutputDigest,
+		}
+		observed = append(observed, derived)
+		if i >= len(evidence) || !evidenceRowsEqual(derived, evidence[i]) {
 			state = StateViolated
 		}
 	}
 	if len(documents) != len(evidence) {
 		state = StateViolated
 	}
-	return state, nil
+	return state, observed, nil
 }
 
-func validateCanonicalJSONDocument(document []byte, name string) error {
-	var decoded any
-	if err := artifact.DecodeExactJSON(document, &decoded); err != nil {
-		return fmt.Errorf("contextreceipt: %s: %w", name, err)
+func validateEvidenceProofProjection(projection EvidenceProofProjection) error {
+	if err := requireReceiptText("evidence proof command_id", projection.CommandID); err != nil {
+		return err
 	}
-	canonical, err := canonjson.Marshal(decoded)
+	if len(projection.Argv) == 0 {
+		return fmt.Errorf("contextreceipt: evidence proof argv must be non-null and nonempty")
+	}
+	for i, arg := range projection.Argv {
+		if err := requireReceiptText(fmt.Sprintf("evidence proof argv[%d]", i), arg); err != nil {
+			return err
+		}
+	}
+	if err := validateReceiptVerdict(projection.Verdict); err != nil {
+		return err
+	}
+	return validateReceiptDigest("evidence proof output_digest", projection.OutputDigest)
+}
+
+func evidenceRowsEqual(left, right Evidence) bool {
+	return left.CommandID == right.CommandID && compareStringSlices(left.Argv, right.Argv) == 0 &&
+		left.ExitCode == right.ExitCode && left.Verdict == right.Verdict && left.OutputDigest == right.OutputDigest
+}
+
+type repositoryTreeEntry struct {
+	mode string
+	name string
+	oid  string
+}
+
+func repositoryBlobPaths(proof RepositoryProof, root string) (map[string]string, error) {
+	objects := make(map[string]RepositoryObject, len(proof.Objects))
+	for _, object := range proof.Objects {
+		objects[object.OID] = object
+	}
+	paths := make(map[string]string)
+	if err := collectRepositoryBlobPaths(root, "", objects, make(map[string]bool), paths); err != nil {
+		return nil, err
+	}
+	return paths, nil
+}
+
+func collectRepositoryBlobPaths(oid, prefix string, objects map[string]RepositoryObject, active map[string]bool, paths map[string]string) error {
+	if active[oid] {
+		return fmt.Errorf("repository tree cycle at %s", oid)
+	}
+	object, ok := objects[oid]
+	if !ok || object.Type != "tree" || gitObjectOID("tree", object.Content) != oid {
+		return fmt.Errorf("missing or corrupt repository tree %s", oid)
+	}
+	active[oid] = true
+	defer delete(active, oid)
+	entries, err := parseRepositoryTreeEntries(object.Content)
 	if err != nil {
-		return fmt.Errorf("contextreceipt: %s: %w", name, err)
+		return fmt.Errorf("repository tree %s: %w", oid, err)
 	}
-	if !bytes.Equal(document, canonical) {
-		return fmt.Errorf("contextreceipt: %s is not byte-canonical", name)
+	for _, entry := range entries {
+		entryPath := entry.name
+		if prefix != "" {
+			entryPath = prefix + "/" + entry.name
+		}
+		switch entry.mode {
+		case "40000", "040000":
+			if err := collectRepositoryBlobPaths(entry.oid, entryPath, objects, active, paths); err != nil {
+				return err
+			}
+		case "100644", "100755", "120000":
+			if _, duplicate := paths[entryPath]; duplicate {
+				return fmt.Errorf("duplicate repository path %q", entryPath)
+			}
+			paths[entryPath] = entry.oid
+		}
 	}
 	return nil
+}
+
+func parseRepositoryTreeEntries(content []byte) ([]repositoryTreeEntry, error) {
+	entries := make([]repositoryTreeEntry, 0)
+	for len(content) != 0 {
+		space := bytes.IndexByte(content, ' ')
+		nul := bytes.IndexByte(content, 0)
+		if space <= 0 || nul <= space+1 || len(content) < nul+21 {
+			return nil, fmt.Errorf("malformed tree entry")
+		}
+		name := string(content[space+1 : nul])
+		if name == "" || name == "." || name == ".." || strings.Contains(name, "/") {
+			return nil, fmt.Errorf("invalid tree entry name %q", name)
+		}
+		entries = append(entries, repositoryTreeEntry{mode: string(content[:space]), name: name, oid: hex.EncodeToString(content[nul+1 : nul+21])})
+		content = content[nul+21:]
+	}
+	return entries, nil
+}
+
+func gitObjectOID(kind string, content []byte) string {
+	preimage := append([]byte(kind+" "+strconv.Itoa(len(content))+"\x00"), content...)
+	sum := sha1.Sum(preimage)
+	return hex.EncodeToString(sum[:])
 }
 
 func observedProjectionDigest(state State, expected any, documents [][]byte) string {

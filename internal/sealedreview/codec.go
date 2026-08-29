@@ -138,6 +138,20 @@ func DecodeEvidenceResult(reader io.Reader) (EvidenceResult, error) {
 	return cloneEvidenceResult(result), nil
 }
 
+// VerifyEvidenceProof strict-decodes the component-owned result, including
+// its self-digest and exact output digest, and returns only contextreceipt's
+// closed cycle-free projection.
+func VerifyEvidenceProof(raw []byte) (contextreceipt.EvidenceProofProjection, error) {
+	result, err := DecodeEvidenceResult(bytes.NewReader(raw))
+	if err != nil {
+		return contextreceipt.EvidenceProofProjection{}, err
+	}
+	return contextreceipt.EvidenceProofProjection{
+		CommandID: result.CommandID, Argv: append([]string(nil), result.Argv...), ExitCode: result.ExitCode,
+		Verdict: result.Verdict, OutputDigest: result.OutputDigest,
+	}, nil
+}
+
 // EncodeEvidenceBundle validates and self-digests one evidence wrapper.
 func EncodeEvidenceBundle(bundle EvidenceBundle) ([]byte, error) {
 	if err := validateEvidenceBundle(bundle, false); err != nil {
@@ -322,6 +336,9 @@ func validatePacket(packet Packet, requireSelfDigest bool) error {
 			return err
 		}
 	}
+	if err := validateBuilderEvidenceReceiptBinding(packet.Items[2].Content, packet.Items[3].Content); err != nil {
+		return err
+	}
 	if !equalStrings(packet.Exclusions, packetExclusions) {
 		return fmt.Errorf("sealedreview: packet exclusions do not match the fixed exclusion set")
 	}
@@ -338,6 +355,32 @@ func validatePacket(packet Packet, requireSelfDigest bool) error {
 		}
 		if packet.Digest != want {
 			return fmt.Errorf("sealedreview: packet digest does not match canonical packet")
+		}
+	}
+	return nil
+}
+
+func validateBuilderEvidenceReceiptBinding(bundleBytes, receiptBytes []byte) error {
+	bundle, err := DecodeEvidenceBundle(bytes.NewReader(bundleBytes))
+	if err != nil {
+		return fmt.Errorf("sealedreview: builder evidence binding: %w", err)
+	}
+	receipt, err := contextreceipt.DecodeReceipt(bytes.NewReader(receiptBytes))
+	if err != nil {
+		return fmt.Errorf("sealedreview: builder evidence receipt binding: %w", err)
+	}
+	if len(bundle.Rows) != len(receipt.Evidence) {
+		return fmt.Errorf("sealedreview: builder evidence count does not match embedded builder receipt")
+	}
+	for i, row := range bundle.Rows {
+		projection, err := VerifyEvidenceProof(row.ResultBytes)
+		if err != nil {
+			return fmt.Errorf("sealedreview: builder evidence row[%d]: %w", i, err)
+		}
+		want := receipt.Evidence[i]
+		if projection.CommandID != want.CommandID || !equalStrings(projection.Argv, want.Argv) ||
+			projection.ExitCode != want.ExitCode || projection.Verdict != want.Verdict || projection.OutputDigest != want.OutputDigest {
+			return fmt.Errorf("sealedreview: builder evidence row[%d] does not match embedded builder receipt", i)
 		}
 	}
 	return nil

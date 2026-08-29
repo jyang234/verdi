@@ -10,10 +10,13 @@ import (
 	"reflect"
 	"sort"
 	"strconv"
+	"strings"
 	"testing"
 
+	"github.com/jyang234/verdi/internal/artifact"
 	"github.com/jyang234/verdi/internal/canonjson"
 	"github.com/jyang234/verdi/internal/contextevent"
+	"github.com/jyang234/verdi/internal/countersign"
 	gp "github.com/jyang234/verdi/internal/governanceprincipal"
 )
 
@@ -283,7 +286,12 @@ func TestContextReceiptVerifyContract_Behavioral(t *testing.T) {
 		Link:      ReviewOperandProjection{State: StateProven, ExpectedDigest: reviewDigest, ObservedDigest: reviewDigest},
 		Freshness: ReviewOperandProjection{State: StateProven, ExpectedDigest: reviewDigest, ObservedDigest: reviewDigest},
 	}, wantRaw: append([]byte(nil), reviewerRequest.Proofs.ReviewPacketBytes...), wantReceiptDigest: reviewerRequest.Receipt.Digest, wantCandidate: reviewerRequest.Candidate}
-	projectionResult, err := (&Verifier{review: reviewPort}).reviewProjection(reviewerRequest, ExecutionProjection{}, nil, nil)
+	reviewerRepository, err := DecodeRepositoryProof(bytes.NewReader(reviewerRequest.Proofs.RepositoryProofBytes))
+	if err != nil {
+		t.Fatal(err)
+	}
+	reviewPort.wantRepository = &reviewerRepository
+	projectionResult, err := (&Verifier{review: reviewPort}).reviewProjection(reviewerRequest, ExecutionProjection{}, nil, nil, reviewerRepository)
 	if err != nil {
 		t.Fatalf("matching review proof projection error = %v", err)
 	}
@@ -297,12 +305,12 @@ func TestContextReceiptVerifyContract_Behavioral(t *testing.T) {
 	launchExecution := ExecutionProjection{Flight: "flight-review"}
 	wantLaunch := ReviewLaunchProof{Present: true, Execution: launchExecution, Event: launchEvent, Ack: launchAck}
 	reviewPort.wantLaunch = &wantLaunch
-	if _, err := (&Verifier{review: reviewPort}).reviewProjection(reviewerRequest, launchExecution, []contextevent.Event{launchEvent}, []contextevent.EventAck{launchAck}); err != nil {
+	if _, err := (&Verifier{review: reviewPort}).reviewProjection(reviewerRequest, launchExecution, []contextevent.Event{launchEvent}, []contextevent.EventAck{launchAck}, reviewerRepository); err != nil {
 		t.Fatalf("acknowledged launch proof selection error = %v", err)
 	}
 	reviewPort.wantLaunch = nil
 	reviewPort.projection.Freshness = ReviewOperandProjection{State: StateViolated, ExpectedDigest: reviewDigest, ObservedDigest: receiptDigestA}
-	projectionResult, err = (&Verifier{review: reviewPort}).reviewProjection(reviewerRequest, ExecutionProjection{}, nil, nil)
+	projectionResult, err = (&Verifier{review: reviewPort}).reviewProjection(reviewerRequest, ExecutionProjection{}, nil, nil, reviewerRepository)
 	if err != nil {
 		t.Fatalf("stale review proof projection error = %v", err)
 	}
@@ -311,7 +319,7 @@ func TestContextReceiptVerifyContract_Behavioral(t *testing.T) {
 	}
 	reviewPort.projection.Freshness = ReviewOperandProjection{State: StateProven, ExpectedDigest: reviewDigest, ObservedDigest: reviewDigest}
 	reviewPort.projection.Link = ReviewOperandProjection{State: StateViolated, ExpectedDigest: reviewDigest, ObservedDigest: receiptDigestA}
-	projectionResult, err = (&Verifier{review: reviewPort}).reviewProjection(reviewerRequest, ExecutionProjection{}, nil, nil)
+	projectionResult, err = (&Verifier{review: reviewPort}).reviewProjection(reviewerRequest, ExecutionProjection{}, nil, nil, reviewerRepository)
 	if err != nil {
 		t.Fatalf("wrong-link review proof projection error = %v", err)
 	}
@@ -320,11 +328,11 @@ func TestContextReceiptVerifyContract_Behavioral(t *testing.T) {
 	}
 	reviewPort.projection.Link = ReviewOperandProjection{State: StateProven, ExpectedDigest: reviewDigest, ObservedDigest: reviewDigest}
 	reviewPort.projection.Packet.ObservedDigest = receiptDigestA
-	if _, err := (&Verifier{review: reviewPort}).reviewProjection(reviewerRequest, ExecutionProjection{}, nil, nil); err == nil {
+	if _, err := (&Verifier{review: reviewPort}).reviewProjection(reviewerRequest, ExecutionProjection{}, nil, nil, reviewerRepository); err == nil {
 		t.Fatal("contradictory proven review proof projection error = nil")
 	}
 	reviewPort.err = errors.New("broken review port")
-	if _, err := (&Verifier{review: reviewPort}).reviewProjection(reviewerRequest, ExecutionProjection{}, nil, nil); err == nil {
+	if _, err := (&Verifier{review: reviewPort}).reviewProjection(reviewerRequest, ExecutionProjection{}, nil, nil, reviewerRepository); err == nil {
 		t.Fatal("broken review proof port error = nil")
 	}
 
@@ -389,12 +397,135 @@ func TestContextReceiptVerifyContract_Behavioral(t *testing.T) {
 	if _, err := (&Verifier{expansion: expansionPort}).verifyExpansionDocuments([][]byte{[]byte("malformed extra proof")}, []Expansion{}); err == nil {
 		t.Fatal("malformed extra expansion proof error = nil")
 	}
-	if _, err := verifyObligationDocuments([][]byte{[]byte("{}\n")}, []Obligation{}); err == nil {
+	if _, _, err := verifyObligationDocuments([][]byte{[]byte("{}\n")}, []Obligation{}, RepositoryProof{}); err == nil {
 		t.Fatal("malformed extra obligation proof error = nil")
 	}
-	if _, err := verifyEvidenceDocuments([][]byte{[]byte("not json")}, []Evidence{}); err == nil {
+	if _, _, err := (&Verifier{evidence: staticEvidenceProof{err: errors.New("malformed evidence result")}}).verifyEvidenceDocuments([][]byte{[]byte("not json")}, []Evidence{}); err == nil {
 		t.Fatal("malformed extra evidence proof error = nil")
 	}
+
+	t.Run("complete nonempty obligation and evidence rows are derived from owner proofs", func(t *testing.T) {
+		obligationBytes := []byte(`---
+id: obligation/example--ac-1--behavioral
+kind: obligation
+title: "Example behavioral obligation"
+owners: [platform-team]
+for_kind: behavioral
+quality:
+  state: elaborated
+  claim: "The behavioral producer proves the complete receipt row."
+  falsifier: "Any copied receipt field can make a stale proof pass."
+  scope: "The exact obligation document and authenticated candidate tree."
+  producer: {kind: test, ref: "go-test:internal/example:TestBehavioral"}
+  authoritative_source: {kind: ci-job, ref: "verify"}
+  freshness:
+    invalidated_by: [spec, code]
+    rule: "Rerun at the exact candidate commit."
+links:
+  - {type: verifies, ref: "spec/example"}
+frozen: {at: 2026-08-29, commit: abcdef0}
+---
+# Example behavioral obligation
+`)
+		wantObligation := Obligation{
+			Ref: "obligation/example--ac-1--behavioral", Path: ".verdi/obligations/example/ac-1--behavioral.md",
+			AC: "ac-1", Kind: artifact.EvidenceBehavioral, ContentDigest: digestRaw(obligationBytes),
+			Producer: "go-test:internal/example:TestBehavioral",
+		}
+		repository := obligationRepositoryProofFixture(t, wantObligation.Path, obligationBytes)
+		state, observed, err := verifyObligationDocuments([][]byte{obligationBytes}, []Obligation{wantObligation}, repository)
+		if err != nil || state != StateProven || !reflect.DeepEqual(observed, []Obligation{wantObligation}) {
+			t.Fatalf("complete obligation proof = %q/%#v/%v, want exact derived row", state, observed, err)
+		}
+		obligationMutations := []struct {
+			name   string
+			mutate func(*Obligation)
+		}{
+			{name: "ref", mutate: func(row *Obligation) { row.Ref = "obligation/other--ac-1--behavioral" }},
+			{name: "path", mutate: func(row *Obligation) { row.Path = ".verdi/obligations/other/ac-1--behavioral.md" }},
+			{name: "ac", mutate: func(row *Obligation) { row.AC = "ac-2" }},
+			{name: "kind", mutate: func(row *Obligation) { row.Kind = artifact.EvidenceStatic }},
+			{name: "content digest", mutate: func(row *Obligation) { row.ContentDigest = receiptDigestA }},
+			{name: "producer", mutate: func(row *Obligation) { row.Producer = "go-test:internal/example:TestOther" }},
+		}
+		for _, mutation := range obligationMutations {
+			t.Run("obligation "+mutation.name, func(t *testing.T) {
+				declared := wantObligation
+				mutation.mutate(&declared)
+				state, observed, err := verifyObligationDocuments([][]byte{obligationBytes}, []Obligation{declared}, repository)
+				if err != nil || state != StateViolated {
+					t.Fatalf("mutated obligation proof = %q/%v, want violated", state, err)
+				}
+				if !reflect.DeepEqual(observed, []Obligation{wantObligation}) {
+					t.Fatalf("observed obligation = %#v, want document-derived %#v", observed, []Obligation{wantObligation})
+				}
+			})
+		}
+		wrongTree := obligationRepositoryProofFixture(t, wantObligation.Path, []byte("different blob bytes\n"))
+		if state, _, err := verifyObligationDocuments([][]byte{obligationBytes}, []Obligation{wantObligation}, wrongTree); err != nil || state != StateViolated {
+			t.Fatalf("wrong head-tree blob proof = %q/%v, want violated", state, err)
+		}
+		unelaboratedBytes := []byte(`---
+id: obligation/example--ac-1--behavioral
+kind: obligation
+title: "Example unresolved obligation"
+owners: [platform-team]
+for_kind: behavioral
+quality:
+  state: unresolved-design-debt
+links:
+  - {type: verifies, ref: "spec/example"}
+frozen: {at: 2026-08-29, commit: abcdef0}
+---
+# Example unresolved obligation
+`)
+		unelaboratedDeclared := wantObligation
+		unelaboratedDeclared.ContentDigest = digestRaw(unelaboratedBytes)
+		unelaboratedRepository := obligationRepositoryProofFixture(t, wantObligation.Path, unelaboratedBytes)
+		if state, _, err := verifyObligationDocuments([][]byte{unelaboratedBytes}, []Obligation{unelaboratedDeclared}, unelaboratedRepository); err != nil || state != StateViolated {
+			t.Fatalf("unelaborated obligation proof = %q/%v, want violated", state, err)
+		}
+
+		wantEvidence := Evidence{
+			CommandID: "verify", Argv: []string{"make", "verify"}, ExitCode: 0,
+			Verdict: countersign.VerdictProven, OutputDigest: digestRaw([]byte("verified\n")),
+		}
+		evidencePort := staticEvidenceProof{projection: EvidenceProofProjection{
+			CommandID: wantEvidence.CommandID, Argv: append([]string(nil), wantEvidence.Argv...),
+			ExitCode: wantEvidence.ExitCode, Verdict: wantEvidence.Verdict, OutputDigest: wantEvidence.OutputDigest,
+		}}
+		state, observedEvidence, err := (&Verifier{evidence: evidencePort}).verifyEvidenceDocuments([][]byte{[]byte("owner-typed-result")}, []Evidence{wantEvidence})
+		if err != nil || state != StateProven || !reflect.DeepEqual(observedEvidence, []Evidence{wantEvidence}) {
+			t.Fatalf("complete evidence proof = %q/%#v/%v, want exact derived row", state, observedEvidence, err)
+		}
+		evidenceMutations := []struct {
+			name   string
+			mutate func(*Evidence)
+		}{
+			{name: "command id", mutate: func(row *Evidence) { row.CommandID = "other" }},
+			{name: "argv", mutate: func(row *Evidence) { row.Argv = []string{"make", "test"} }},
+			{name: "exit code", mutate: func(row *Evidence) { row.ExitCode = 1 }},
+			{name: "verdict", mutate: func(row *Evidence) { row.Verdict = countersign.VerdictViolated }},
+			{name: "output digest", mutate: func(row *Evidence) { row.OutputDigest = receiptDigestA }},
+		}
+		for _, mutation := range evidenceMutations {
+			t.Run("evidence "+mutation.name, func(t *testing.T) {
+				declared := wantEvidence
+				declared.Argv = append([]string(nil), wantEvidence.Argv...)
+				mutation.mutate(&declared)
+				state, observed, err := (&Verifier{evidence: evidencePort}).verifyEvidenceDocuments([][]byte{[]byte("owner-typed-result")}, []Evidence{declared})
+				if err != nil || state != StateViolated {
+					t.Fatalf("mutated evidence proof = %q/%v, want violated", state, err)
+				}
+				if !reflect.DeepEqual(observed, []Evidence{wantEvidence}) {
+					t.Fatalf("observed evidence = %#v, want owner-derived %#v", observed, []Evidence{wantEvidence})
+				}
+			})
+		}
+		if _, _, err := (&Verifier{}).verifyEvidenceDocuments([][]byte{[]byte("owner-typed-result")}, []Evidence{wantEvidence}); err == nil {
+			t.Fatal("missing evidence proof verifier error = nil")
+		}
+	})
 }
 
 func TestVerifierBuilderFreshnessProjection(t *testing.T) {
@@ -433,7 +564,7 @@ func TestVerifierBuilderFreshnessProjection(t *testing.T) {
 			projection, err := (&Verifier{}).reviewProjection(VerifyRequest{
 				Receipt:   Receipt{Role: RoleBuilder},
 				Candidate: tt.candidate,
-			}, ExecutionProjection{}, nil, nil)
+			}, ExecutionProjection{}, nil, nil, RepositoryProof{})
 			if err != nil {
 				t.Fatalf("reviewProjection() error = %v", err)
 			}
@@ -495,16 +626,27 @@ type staticExpansionProof struct {
 	err        error
 }
 
+type staticEvidenceProof struct {
+	projection EvidenceProofProjection
+	err        error
+}
+
+func (f staticEvidenceProof) VerifyEvidenceProof([]byte) (EvidenceProofProjection, error) {
+	f.projection.Argv = append([]string(nil), f.projection.Argv...)
+	return f.projection, f.err
+}
+
 type staticReviewProof struct {
 	projection        ReviewProofProjection
 	err               error
 	wantRaw           []byte
 	wantReceiptDigest string
 	wantCandidate     Candidate
+	wantRepository    *RepositoryProof
 	wantLaunch        *ReviewLaunchProof
 }
 
-func (f staticReviewProof) VerifyReviewProof(raw []byte, receipt Receipt, candidate Candidate, launch ReviewLaunchProof) (ReviewProofProjection, error) {
+func (f staticReviewProof) VerifyReviewProof(raw []byte, receipt Receipt, candidate Candidate, repository RepositoryProof, launch ReviewLaunchProof) (ReviewProofProjection, error) {
 	if f.wantRaw != nil && !bytes.Equal(raw, f.wantRaw) {
 		return ReviewProofProjection{}, errors.New("review packet bytes changed at verifier port")
 	}
@@ -513,6 +655,9 @@ func (f staticReviewProof) VerifyReviewProof(raw []byte, receipt Receipt, candid
 	}
 	if f.wantCandidate != (Candidate{}) && candidate != f.wantCandidate {
 		return ReviewProofProjection{}, errors.New("review candidate changed at verifier port")
+	}
+	if f.wantRepository != nil && !reflect.DeepEqual(repository, *f.wantRepository) {
+		return ReviewProofProjection{}, errors.New("review repository proof changed at verifier port")
 	}
 	if f.wantLaunch != nil && !reflect.DeepEqual(launch, *f.wantLaunch) {
 		return ReviewProofProjection{}, errors.New("review launch proof changed at verifier port")
@@ -680,6 +825,48 @@ func verifierGitOID(kind string, content []byte) string {
 	preimage := append([]byte(kind+" "+strconv.Itoa(len(content))+"\x00"), content...)
 	sum := sha1.Sum(preimage)
 	return hex.EncodeToString(sum[:])
+}
+
+func obligationRepositoryProofFixture(t *testing.T, documentPath string, document []byte) RepositoryProof {
+	t.Helper()
+	const prefix = ".verdi/obligations/example/"
+	if !strings.HasPrefix(documentPath, prefix) {
+		t.Fatalf("obligation fixture path = %q, want prefix %q", documentPath, prefix)
+	}
+	blobOID := verifierGitOID("blob", document)
+	leaf := verifierTreeBody(t, "100644", strings.TrimPrefix(documentPath, prefix), blobOID)
+	leafOID := verifierGitOID("tree", leaf)
+	obligations := verifierTreeBody(t, "40000", "example", leafOID)
+	obligationsOID := verifierGitOID("tree", obligations)
+	verdi := verifierTreeBody(t, "40000", "obligations", obligationsOID)
+	verdiOID := verifierGitOID("tree", verdi)
+	root := verifierTreeBody(t, "40000", ".verdi", verdiOID)
+	rootOID := verifierGitOID("tree", root)
+	commitBody := []byte("tree " + rootOID + "\n\nobligation fixture\n")
+	commitOID := verifierGitOID("commit", commitBody)
+	objects := []RepositoryObject{
+		{OID: commitOID, Type: "commit", Content: commitBody},
+		{OID: leafOID, Type: "tree", Content: leaf},
+		{OID: obligationsOID, Type: "tree", Content: obligations},
+		{OID: verdiOID, Type: "tree", Content: verdi},
+		{OID: rootOID, Type: "tree", Content: root},
+	}
+	sort.Slice(objects, func(i, j int) bool { return objects[i].OID < objects[j].OID })
+	candidate := Candidate{BaseCommit: commitOID, BaseTree: rootOID, HeadCommit: commitOID, HeadTree: rootOID}
+	return RepositoryProof{
+		Schema: RepositoryProofSchemaID, ObjectFormat: "sha1", Candidate: candidate, Objects: objects,
+		ExecutionObservation: ExecutionObservation{WorkspaceID: "workspace-obligation", Commit: commitOID, Tree: rootOID, Clean: true, EventDigest: receiptDigestA},
+	}
+}
+
+func verifierTreeBody(t *testing.T, mode, name, oid string) []byte {
+	t.Helper()
+	rawOID, err := hex.DecodeString(oid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := append([]byte(mode+" "+name+"\x00"), rawOID...)
+	return body
 }
 
 func executionEventAckBytes(t *testing.T, event contextevent.Event, globalSequence uint64) []byte {

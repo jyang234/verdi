@@ -85,6 +85,32 @@ func TestSealedReviewPacketContract_Behavioral(t *testing.T) {
 		BuilderReceiptBytes: builderReceiptBytes, BuilderEvidenceResultBytes: [][]byte{builderEvidence},
 	}
 
+	t.Run("evidence proof port strict-decodes the owner wire", func(t *testing.T) {
+		projection, err := VerifyEvidenceProof(builderEvidence)
+		if err != nil {
+			t.Fatalf("VerifyEvidenceProof(valid) error = %v", err)
+		}
+		want := contextreceipt.EvidenceProofProjection{
+			CommandID: "verify", Argv: []string{"make", "verify"}, ExitCode: 0,
+			Verdict: countersign.VerdictProven, OutputDigest: rawDigestForTest([]byte("builder evidence\n")),
+		}
+		if !reflect.DeepEqual(projection, want) {
+			t.Fatalf("evidence proof projection = %#v, want exact %#v", projection, want)
+		}
+		for name, raw := range map[string][]byte{
+			"unknown field": bytes.Replace(builderEvidence, []byte(`"schema":`), []byte(`"extra":true,"schema":`), 1),
+			"trailing data": append(append([]byte(nil), builderEvidence...), []byte("{}")...),
+			"output digest": bytes.Replace(builderEvidence, []byte(want.OutputDigest), []byte(testDigestA), 1),
+			"self digest":   bytes.Replace(builderEvidence, []byte(`"digest":"sha256:c899e11a0c7383ce916fc594c817ddf9d1abc38cf33fb44dd8ebac0937b7c40b"`), []byte(`"digest":"`+testDigestA+`"`), 1),
+		} {
+			t.Run(name, func(t *testing.T) {
+				if _, err := VerifyEvidenceProof(raw); err == nil {
+					t.Fatal("VerifyEvidenceProof(mutated) error = nil")
+				}
+			})
+		}
+	})
+
 	t.Run("context compilation rejects arbitrary bytes despite a matching sidecar", func(t *testing.T) {
 		unboundPort := &packetCompilerFake{rebuiltEvidence: [][]byte{currentEvidence}, unboundCompilation: true}
 		unboundCompiler, err := NewPacketCompiler(PacketCompilerPorts{Repository: repository, Compiler: unboundPort})
@@ -100,6 +126,7 @@ func TestSealedReviewPacketContract_Behavioral(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Compile(R0) error = %v", err)
 	}
+	repositoryProof := reviewRepositoryProofFixture(t, repository, candidate)
 	wantR0Kinds := []ItemKind{"accepted-spec", "current-diff", "evidence-bundle", "builder-receipt", "review-policy"}
 	wantExclusions := []string{"ambient-context", "builder-conversation", "global-memory", "personal-memory", "prior-reviewer-conversation"}
 	assertPacketInventory(t, r0.Packet, wantR0Kinds, wantExclusions)
@@ -293,6 +320,37 @@ func TestSealedReviewPacketContract_Behavioral(t *testing.T) {
 		wrongContent.Items[0].Content = append(wrongContent.Items[0].Content, 'x')
 		if _, err := EncodePacket(wrongContent); err == nil {
 			t.Fatal("EncodePacket(content digest mismatch) error = nil")
+		}
+
+		emptyBundleBytes, err := EncodeEvidenceBundle(EvidenceBundle{
+			Schema: EvidenceBundleSchemaID, Scope: EvidenceScopeBuilder, Candidate: candidate, Rows: []EvidenceRow{},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		emptyEvidence := r0.Packet
+		emptyEvidence.Digest = ""
+		emptyEvidence.Items = cloneItemsForTest(r0.Packet.Items)
+		emptyEvidence.Items[2].Content = emptyBundleBytes
+		emptyEvidence.Items[2].ContentDigest = rawDigestForTest(emptyBundleBytes)
+		if _, err := EncodePacket(emptyEvidence); err == nil {
+			t.Fatal("EncodePacket(self-consistent empty builder evidence) error = nil")
+		}
+
+		unrelatedSummary := builderReceipt.Evidence[0]
+		unrelatedSummary.CommandID = "unrelated"
+		unrelatedBytes := evidenceResultBytes(t, unrelatedSummary, []byte("builder evidence\n"))
+		_, unrelatedBundleBytes, err := compileEvidenceBundle(EvidenceScopeBuilder, candidate, [][]byte{unrelatedBytes}, []contextreceipt.Evidence{unrelatedSummary})
+		if err != nil {
+			t.Fatal(err)
+		}
+		unrelatedEvidence := r0.Packet
+		unrelatedEvidence.Digest = ""
+		unrelatedEvidence.Items = cloneItemsForTest(r0.Packet.Items)
+		unrelatedEvidence.Items[2].Content = unrelatedBundleBytes
+		unrelatedEvidence.Items[2].ContentDigest = rawDigestForTest(unrelatedBundleBytes)
+		if _, err := EncodePacket(unrelatedEvidence); err == nil {
+			t.Fatal("EncodePacket(self-consistent unrelated builder evidence) error = nil")
 		}
 
 		otherCandidate := candidate
@@ -602,7 +660,7 @@ func TestSealedReviewPacketContract_Behavioral(t *testing.T) {
 
 	t.Run("review proof emits consumer-valid unproven freshness without acknowledged launch facts", func(t *testing.T) {
 		reviewerReceipt, _ := reviewReceiptFixture(t, candidate, builderReceipt.Digest, packetProjection(r0.Packet))
-		projection, err := VerifyReviewProof(r0.PacketBytes, reviewerReceipt, candidate, contextreceipt.ReviewLaunchProof{})
+		projection, err := VerifyReviewProof(r0.PacketBytes, reviewerReceipt, candidate, repositoryProof, contextreceipt.ReviewLaunchProof{})
 		if err != nil {
 			t.Fatalf("VerifyReviewProof(exact R0) error = %v", err)
 		}
@@ -620,7 +678,7 @@ func TestSealedReviewPacketContract_Behavioral(t *testing.T) {
 
 		staleCandidate := candidate
 		staleCandidate.HeadCommit = repository.oidFor([]byte("other commit"))
-		projection, err = VerifyReviewProof(r0.PacketBytes, reviewerReceipt, staleCandidate, contextreceipt.ReviewLaunchProof{})
+		projection, err = VerifyReviewProof(r0.PacketBytes, reviewerReceipt, staleCandidate, repositoryProof, contextreceipt.ReviewLaunchProof{})
 		if err != nil {
 			t.Fatalf("VerifyReviewProof(stale candidate) operational error = %v", err)
 		}
@@ -636,7 +694,7 @@ func TestSealedReviewPacketContract_Behavioral(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		projection, err = VerifyReviewProof(selfAuthenticatedBytes, reviewerReceipt, candidate, contextreceipt.ReviewLaunchProof{})
+		projection, err = VerifyReviewProof(selfAuthenticatedBytes, reviewerReceipt, candidate, repositoryProof, contextreceipt.ReviewLaunchProof{})
 		if err != nil {
 			t.Fatalf("VerifyReviewProof(self-authenticated reviewer) operational error = %v", err)
 		}
@@ -647,7 +705,7 @@ func TestSealedReviewPacketContract_Behavioral(t *testing.T) {
 		wrongLink := reviewerReceipt
 		wrongLink.ReviewOf = []string{testDigestB}
 		wrongLink.Digest = ""
-		projection, err = VerifyReviewProof(r0.PacketBytes, wrongLink, candidate, contextreceipt.ReviewLaunchProof{})
+		projection, err = VerifyReviewProof(r0.PacketBytes, wrongLink, candidate, repositoryProof, contextreceipt.ReviewLaunchProof{})
 		if err != nil {
 			t.Fatalf("VerifyReviewProof(wrong link) operational error = %v", err)
 		}
@@ -662,7 +720,7 @@ func TestSealedReviewPacketContract_Behavioral(t *testing.T) {
 		wrongPacket := reviewerReceipt
 		wrongPacket.ReviewInputs = []contextreceipt.ReviewInput{}
 		wrongPacket.Digest = ""
-		projection, err = VerifyReviewProof(r0.PacketBytes, wrongPacket, candidate, contextreceipt.ReviewLaunchProof{})
+		projection, err = VerifyReviewProof(r0.PacketBytes, wrongPacket, candidate, repositoryProof, contextreceipt.ReviewLaunchProof{})
 		if err != nil {
 			t.Fatalf("VerifyReviewProof(wrong packet projection) operational error = %v", err)
 		}
@@ -673,12 +731,55 @@ func TestSealedReviewPacketContract_Behavioral(t *testing.T) {
 			t.Fatalf("wrong-packet freshness projection = %#v, want review-input-independent expected digest %q with absent observation", projection.Freshness, wantFreshness)
 		}
 
-		if _, err := VerifyReviewProof([]byte("{}\n"), reviewerReceipt, candidate, contextreceipt.ReviewLaunchProof{}); err == nil {
+		if _, err := VerifyReviewProof([]byte("{}\n"), reviewerReceipt, candidate, repositoryProof, contextreceipt.ReviewLaunchProof{}); err == nil {
 			t.Fatal("VerifyReviewProof(malformed packet) error = nil")
 		}
 
+		emptyDiffBytes, err := EncodeDiff(Diff{
+			Schema: DiffSchemaID, BaseCommit: candidate.BaseCommit, BaseTree: candidate.BaseTree,
+			HeadCommit: candidate.HeadCommit, HeadTree: candidate.HeadTree, Entries: []DiffEntry{},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		wrongDiffPacket := r0.Packet
+		wrongDiffPacket.Digest = ""
+		wrongDiffPacket.Items = cloneItemsForTest(r0.Packet.Items)
+		wrongDiffPacket.Items[1].Content = emptyDiffBytes
+		wrongDiffPacket.Items[1].ContentDigest = rawDigestForTest(emptyDiffBytes)
+		wrongDiffBytes, err := EncodePacket(wrongDiffPacket)
+		if err != nil {
+			t.Fatal(err)
+		}
+		wrongDiffPacket, err = DecodePacket(bytes.NewReader(wrongDiffBytes))
+		if err != nil {
+			t.Fatal(err)
+		}
+		wrongDiffReceipt, _ := reviewReceiptFixture(t, candidate, builderReceipt.Digest, packetProjection(wrongDiffPacket))
+		projection, err = VerifyReviewProof(wrongDiffBytes, wrongDiffReceipt, candidate, repositoryProof, contextreceipt.ReviewLaunchProof{})
+		if err != nil {
+			t.Fatalf("VerifyReviewProof(self-consistent wrong diff) operational error = %v", err)
+		}
+		if projection.Packet.State != contextreceipt.StateViolated || projection.Packet.ExpectedDigest == projection.Packet.ObservedDigest {
+			t.Fatalf("wrong authenticated diff packet = %#v, want violated with distinct digests", projection.Packet)
+		}
+
+		corruptProof := repositoryProof
+		corruptProof.Objects = append([]contextreceipt.RepositoryObject(nil), repositoryProof.Objects...)
+		corruptProof.Objects[0].Content = append(corruptProof.Objects[0].Content, '!')
+		corruptProof = recanonicalizeRepositoryProof(t, corruptProof)
+		if _, err := VerifyReviewProof(r0.PacketBytes, reviewerReceipt, candidate, corruptProof, contextreceipt.ReviewLaunchProof{}); err == nil {
+			t.Fatal("VerifyReviewProof(corrupt repository object) error = nil")
+		}
+		missingProof := repositoryProof
+		missingProof.Objects = append([]contextreceipt.RepositoryObject(nil), repositoryProof.Objects[1:]...)
+		missingProof = recanonicalizeRepositoryProof(t, missingProof)
+		if _, err := VerifyReviewProof(r0.PacketBytes, reviewerReceipt, candidate, missingProof, contextreceipt.ReviewLaunchProof{}); err == nil {
+			t.Fatal("VerifyReviewProof(missing repository object) error = nil")
+		}
+
 		launch := reviewLaunchProofFixture(t, r0.Packet, reviewerReceipt)
-		projection, err = VerifyReviewProof(r0.PacketBytes, reviewerReceipt, candidate, launch)
+		projection, err = VerifyReviewProof(r0.PacketBytes, reviewerReceipt, candidate, repositoryProof, launch)
 		if err != nil {
 			t.Fatalf("VerifyReviewProof(acknowledged launch facts): %v", err)
 		}
@@ -701,7 +802,7 @@ func TestSealedReviewPacketContract_Behavioral(t *testing.T) {
 			payload.Detail.Digest = rawDigestForTest(factsBytes)
 		})
 		mismatched.Ack.EventDigest = mismatched.Event.EventDigest
-		projection, err = VerifyReviewProof(r0.PacketBytes, reviewerReceipt, candidate, mismatched)
+		projection, err = VerifyReviewProof(r0.PacketBytes, reviewerReceipt, candidate, repositoryProof, mismatched)
 		if err != nil {
 			t.Fatalf("VerifyReviewProof(valid model mismatch) operational error = %v", err)
 		}
@@ -715,7 +816,7 @@ func TestSealedReviewPacketContract_Behavioral(t *testing.T) {
 		})
 		envelopeMismatch.Ack.Lane = envelopeMismatch.Event.Lane
 		envelopeMismatch.Ack.EventDigest = envelopeMismatch.Event.EventDigest
-		projection, err = VerifyReviewProof(r0.PacketBytes, reviewerReceipt, candidate, envelopeMismatch)
+		projection, err = VerifyReviewProof(r0.PacketBytes, reviewerReceipt, candidate, repositoryProof, envelopeMismatch)
 		if err != nil {
 			t.Fatalf("VerifyReviewProof(valid envelope mismatch) operational error = %v", err)
 		}
@@ -730,14 +831,70 @@ func TestSealedReviewPacketContract_Behavioral(t *testing.T) {
 			payload.Detail.Digest = rawDigestForTest(bad)
 		})
 		malformed.Ack.EventDigest = malformed.Event.EventDigest
-		if _, err := VerifyReviewProof(r0.PacketBytes, reviewerReceipt, candidate, malformed); err == nil {
+		if _, err := VerifyReviewProof(r0.PacketBytes, reviewerReceipt, candidate, repositoryProof, malformed); err == nil {
 			t.Fatal("VerifyReviewProof(malformed present launch facts) error = nil")
 		}
 
 		mispaired := launch
 		mispaired.Ack.EventDigest = testDigestB
-		if _, err := VerifyReviewProof(r0.PacketBytes, reviewerReceipt, candidate, mispaired); err == nil {
+		if _, err := VerifyReviewProof(r0.PacketBytes, reviewerReceipt, candidate, repositoryProof, mispaired); err == nil {
 			t.Fatal("VerifyReviewProof(mispaired launch ack) error = nil")
+		}
+	})
+
+	t.Run("packet evidence verifier re-reads authenticated candidate facts", func(t *testing.T) {
+		if err := compiler.VerifyPacketEvidence(context.Background(), r0.Packet); err != nil {
+			t.Fatalf("VerifyPacketEvidence(nonempty R0) error = %v", err)
+		}
+		if err := compiler.VerifyPacketEvidence(context.Background(), r2.Packet); err != nil {
+			t.Fatalf("VerifyPacketEvidence(nonempty R2) error = %v", err)
+		}
+
+		wrongDiff := r0.Packet
+		wrongDiff.Digest = ""
+		wrongDiff.Items = cloneItemsForTest(r0.Packet.Items)
+		empty, err := EncodeDiff(Diff{
+			Schema: DiffSchemaID, BaseCommit: candidate.BaseCommit, BaseTree: candidate.BaseTree,
+			HeadCommit: candidate.HeadCommit, HeadTree: candidate.HeadTree, Entries: []DiffEntry{},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		wrongDiff.Items[1].Content = empty
+		wrongDiff.Items[1].ContentDigest = rawDigestForTest(empty)
+		wrongDiffBytes, err := EncodePacket(wrongDiff)
+		if err != nil {
+			t.Fatal(err)
+		}
+		wrongDiff, err = DecodePacket(bytes.NewReader(wrongDiffBytes))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := compiler.VerifyPacketEvidence(context.Background(), wrongDiff); err == nil {
+			t.Fatal("VerifyPacketEvidence(self-consistent wrong diff) error = nil")
+		}
+
+		wrongCurrent := r2.Packet
+		wrongCurrent.Digest = ""
+		wrongCurrent.Items = cloneItemsForTest(r2.Packet.Items)
+		emptyCurrent, err := EncodeEvidenceBundle(EvidenceBundle{
+			Schema: EvidenceBundleSchemaID, Scope: EvidenceScopeCurrentCandidate, Candidate: candidate, Rows: []EvidenceRow{},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		wrongCurrent.Items[6].Content = emptyCurrent
+		wrongCurrent.Items[6].ContentDigest = rawDigestForTest(emptyCurrent)
+		wrongCurrentBytes, err := EncodePacket(wrongCurrent)
+		if err != nil {
+			t.Fatal(err)
+		}
+		wrongCurrent, err = DecodePacket(bytes.NewReader(wrongCurrentBytes))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := compiler.VerifyPacketEvidence(context.Background(), wrongCurrent); err == nil {
+			t.Fatal("VerifyPacketEvidence(stale current-candidate evidence) error = nil")
 		}
 	})
 
@@ -1032,6 +1189,48 @@ Review policy rationale.
 	return &reviewRepository{objects: objects}, contextreceipt.Candidate{
 		BaseCommit: baseCommit, BaseTree: baseTree, HeadCommit: headCommit, HeadTree: headTree,
 	}, acceptedSpec, reviewPolicy
+}
+
+func reviewRepositoryProofFixture(t *testing.T, repository *reviewRepository, candidate contextreceipt.Candidate) contextreceipt.RepositoryProof {
+	t.Helper()
+	objects := make([]contextreceipt.RepositoryObject, 0)
+	for oid, object := range repository.objects {
+		if object.Type != "commit" && object.Type != "tree" {
+			continue
+		}
+		objects = append(objects, contextreceipt.RepositoryObject{OID: oid, Type: object.Type, Content: append([]byte(nil), object.Content...)})
+	}
+	sort.Slice(objects, func(i, j int) bool { return objects[i].OID < objects[j].OID })
+	proof := contextreceipt.RepositoryProof{
+		Schema: contextreceipt.RepositoryProofSchemaID, ObjectFormat: "sha1", Candidate: candidate, Objects: objects,
+		ExecutionObservation: contextreceipt.ExecutionObservation{
+			WorkspaceID: "workspace-review", Commit: candidate.HeadCommit, Tree: candidate.HeadTree,
+			Clean: true, EventDigest: testDigestA,
+		},
+	}
+	raw, err := contextreceipt.EncodeRepositoryProof(proof)
+	if err != nil {
+		t.Fatal(err)
+	}
+	proof, err = contextreceipt.DecodeRepositoryProof(bytes.NewReader(raw))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return proof
+}
+
+func recanonicalizeRepositoryProof(t *testing.T, proof contextreceipt.RepositoryProof) contextreceipt.RepositoryProof {
+	t.Helper()
+	proof.Digest = ""
+	raw, err := contextreceipt.EncodeRepositoryProof(proof)
+	if err != nil {
+		t.Fatal(err)
+	}
+	proof, err = contextreceipt.DecodeRepositoryProof(bytes.NewReader(raw))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return proof
 }
 
 type gitTreeFixtureEntry struct{ mode, name, oid string }

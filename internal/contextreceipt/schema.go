@@ -309,6 +309,23 @@ type ExpansionProofVerifier interface {
 	VerifyExpansionProof([]byte, Expansion) (ExpansionProofProjection, error)
 }
 
+// EvidenceProofProjection is the complete receipt-owned view of one strict
+// component evidence result. The sealed-review owner decodes its own wire and
+// returns only these fields across the cycle-free proof boundary.
+type EvidenceProofProjection struct {
+	CommandID    string
+	Argv         []string
+	ExitCode     int
+	Verdict      countersign.Verdict
+	OutputDigest string
+}
+
+// EvidenceProofVerifier keeps the evidence-result schema and digest rules in
+// their owning component while letting contextreceipt compare complete rows.
+type EvidenceProofVerifier interface {
+	VerifyEvidenceProof([]byte) (EvidenceProofProjection, error)
+}
+
 // ReviewOperandProjection is one closed I-92 proof result. The review
 // component owns packet decoding and freshness semantics; contextreceipt owns
 // only their reduction into the fixed verifier operands.
@@ -339,5 +356,5 @@ type ReviewLaunchProof struct {
 // ReviewProofVerifier strictly verifies the component-owned I-92 packet and
 // returns only contextreceipt's closed three-operand projection.
 type ReviewProofVerifier interface {
-	VerifyReviewProof([]byte, Receipt, Candidate, ReviewLaunchProof) (ReviewProofProjection, error)
+	VerifyReviewProof([]byte, Receipt, Candidate, RepositoryProof, ReviewLaunchProof) (ReviewProofProjection, error)
 }

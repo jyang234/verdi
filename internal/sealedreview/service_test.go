@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/jyang234/verdi/internal/contextcompile"
@@ -55,7 +56,13 @@ func TestSealedReviewFreshnessContract_Behavioral(t *testing.T) {
 
 	executor := &reviewExecutorFake{providerSessions: []string{"provider-review-r0", "provider-review-r2"}}
 	completion := &reviewCompletionFake{}
-	service, err := NewService(ServicePorts{Executor: executor, Completion: completion})
+	builderRuntime := BuilderRuntime{
+		ReceiptDigest: builderReceipt.Digest, VerdiSession: "session-builder", ProviderSession: "provider-builder",
+		WorkspaceID: builderReceipt.ExecutionWorkspaceID,
+	}
+	runtimeResolver := &builderRuntimeResolverFake{runtime: builderRuntime}
+	packetVerifier := &packetEvidenceVerifierFake{}
+	service, err := NewService(ServicePorts{Executor: executor, Completion: completion, BuilderRuntime: runtimeResolver, PacketEvidence: packetVerifier})
 	if err != nil {
 		t.Fatalf("NewService(valid): %v", err)
 	}
@@ -129,6 +136,9 @@ func TestSealedReviewFreshnessContract_Behavioral(t *testing.T) {
 	}
 	if got, want := completion.calls[1].ReviewOf, []string{builderReceipt.Digest}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("R2 review_of = %#v, want %#v", got, want)
+	}
+	if got := packetVerifier.callCount(); got != 2 {
+		t.Fatalf("packet evidence verification calls = %d, want exact R0/R2 prelaunch checks", got)
 	}
 
 	if got, want := []any{
@@ -265,7 +275,7 @@ func TestSealedReviewFreshnessContract_Behavioral(t *testing.T) {
 				}
 			})
 		}
-		fresh, err := NewService(ServicePorts{Executor: executor, Completion: completion})
+		fresh, err := NewService(ServicePorts{Executor: executor, Completion: completion, BuilderRuntime: runtimeResolver, PacketEvidence: packetVerifier})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -296,7 +306,7 @@ func TestSealedReviewFreshnessContract_Behavioral(t *testing.T) {
 			t.Run(tc.name, func(t *testing.T) {
 				localExecutor := &reviewExecutorFake{providerSessions: []string{"provider-negative-" + strings.ReplaceAll(tc.name, " ", "-")}, mutateRun: tc.mutate}
 				localCompletion := &reviewCompletionFake{}
-				local, err := NewService(ServicePorts{Executor: localExecutor, Completion: localCompletion})
+				local, err := NewService(ServicePorts{Executor: localExecutor, Completion: localCompletion, BuilderRuntime: runtimeResolver, PacketEvidence: packetVerifier})
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -313,7 +323,7 @@ func TestSealedReviewFreshnessContract_Behavioral(t *testing.T) {
 	t.Run("R2 provider-session reuse never reaches reviewer completion", func(t *testing.T) {
 		localExecutor := &reviewExecutorFake{providerSessions: []string{"provider-reused", "provider-reused"}}
 		localCompletion := &reviewCompletionFake{}
-		local, err := NewService(ServicePorts{Executor: localExecutor, Completion: localCompletion})
+		local, err := NewService(ServicePorts{Executor: localExecutor, Completion: localCompletion, BuilderRuntime: runtimeResolver, PacketEvidence: packetVerifier})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -331,10 +341,158 @@ func TestSealedReviewFreshnessContract_Behavioral(t *testing.T) {
 		}
 	})
 
+	t.Run("builder runtime authority prevents conversation identity reuse", func(t *testing.T) {
+		if len(runtimeResolver.receiptDigests) < 2 {
+			t.Fatalf("builder runtime resolver calls = %d, want at least R0 and R2", len(runtimeResolver.receiptDigests))
+		}
+		for _, digest := range runtimeResolver.receiptDigests {
+			if digest != builderReceipt.Digest {
+				t.Fatalf("builder runtime resolver key = %q, want only exact builder digest %q", digest, builderReceipt.Digest)
+			}
+		}
+
+		reusedSession := cloneReviewRequest(t, r0Request)
+		reusedSession.ExecutionRequest = reviewExecutionRequest(t, r0Packet, builderRuntime.VerdiSession, "epoch-builder-reuse")
+		beforeLaunch := len(executor.calls)
+		if _, err := service.Review(context.Background(), reusedSession); err == nil {
+			t.Fatal("Review(builder Verdi-session reuse) error = nil")
+		}
+		if len(executor.calls) != beforeLaunch {
+			t.Fatal("builder Verdi-session reuse reached provider launch")
+		}
+
+		providerExecutor := &reviewExecutorFake{providerSessions: []string{builderRuntime.ProviderSession}}
+		providerCompletion := &reviewCompletionFake{}
+		providerService, err := NewService(ServicePorts{Executor: providerExecutor, Completion: providerCompletion, BuilderRuntime: &builderRuntimeResolverFake{runtime: builderRuntime}, PacketEvidence: packetVerifier})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := providerService.Review(context.Background(), r0Request); err == nil {
+			t.Fatal("Review(builder provider-session reuse) error = nil")
+		}
+		if len(providerCompletion.calls) != 0 {
+			t.Fatal("builder provider-session reuse reached reviewer completion")
+		}
+
+		for _, mutation := range []struct {
+			name    string
+			runtime BuilderRuntime
+		}{
+			{name: "empty receipt", runtime: BuilderRuntime{VerdiSession: "session-builder", ProviderSession: "provider-builder", WorkspaceID: builderReceipt.ExecutionWorkspaceID}},
+			{name: "empty Verdi session", runtime: BuilderRuntime{ReceiptDigest: builderReceipt.Digest, ProviderSession: "provider-builder", WorkspaceID: builderReceipt.ExecutionWorkspaceID}},
+			{name: "empty provider session", runtime: BuilderRuntime{ReceiptDigest: builderReceipt.Digest, VerdiSession: "session-builder", WorkspaceID: builderReceipt.ExecutionWorkspaceID}},
+			{name: "empty workspace", runtime: BuilderRuntime{ReceiptDigest: builderReceipt.Digest, VerdiSession: "session-builder", ProviderSession: "provider-builder"}},
+			{name: "receipt mismatch", runtime: BuilderRuntime{ReceiptDigest: testDigestB, VerdiSession: "session-builder", ProviderSession: "provider-builder", WorkspaceID: builderReceipt.ExecutionWorkspaceID}},
+			{name: "workspace mismatch", runtime: BuilderRuntime{ReceiptDigest: builderReceipt.Digest, VerdiSession: "session-builder", ProviderSession: "provider-builder", WorkspaceID: "workspace-other"}},
+		} {
+			t.Run(mutation.name, func(t *testing.T) {
+				localExecutor := &reviewExecutorFake{providerSessions: []string{"provider-unused"}}
+				localCompletion := &reviewCompletionFake{}
+				local, err := NewService(ServicePorts{
+					Executor: localExecutor, Completion: localCompletion,
+					BuilderRuntime: &builderRuntimeResolverFake{runtime: mutation.runtime},
+					PacketEvidence: packetVerifier,
+				})
+				if err != nil {
+					t.Fatal(err)
+				}
+				if _, err := local.Review(context.Background(), r0Request); err == nil {
+					t.Fatal("Review(invalid builder runtime) error = nil")
+				}
+				if len(localExecutor.calls) != 0 || len(localCompletion.calls) != 0 {
+					t.Fatal("invalid builder runtime crossed a launch or completion boundary")
+				}
+			})
+		}
+	})
+
+	t.Run("packet evidence failure refuses before provider launch", func(t *testing.T) {
+		localExecutor := &reviewExecutorFake{providerSessions: []string{"provider-unused"}}
+		localCompletion := &reviewCompletionFake{}
+		localVerifier := &packetEvidenceVerifierFake{err: errors.New("authenticated packet mismatch")}
+		local, err := NewService(ServicePorts{
+			Executor: localExecutor, Completion: localCompletion, BuilderRuntime: runtimeResolver, PacketEvidence: localVerifier,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := local.Review(context.Background(), r0Request); err == nil {
+			t.Fatal("Review(packet evidence mismatch) error = nil")
+		}
+		if localVerifier.callCount() != 1 || len(localExecutor.calls) != 0 || len(localCompletion.calls) != 0 {
+			t.Fatal("packet evidence mismatch crossed a launch or receipt boundary")
+		}
+	})
+
+	t.Run("R0 reservation is atomic and owner rollback permits retry", func(t *testing.T) {
+		blockingExecutor := newBlockingReviewExecutor()
+		blockingCompletion := &reviewCompletionFake{}
+		local, err := NewService(ServicePorts{
+			Executor: blockingExecutor, Completion: blockingCompletion, BuilderRuntime: runtimeResolver,
+			PacketEvidence: &packetEvidenceVerifierFake{},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		type reviewOutcome struct {
+			result Result
+			err    error
+		}
+		firstDone := make(chan reviewOutcome, 1)
+		go func() {
+			result, reviewErr := local.Review(context.Background(), r0Request)
+			firstDone <- reviewOutcome{result: result, err: reviewErr}
+		}()
+		<-blockingExecutor.started
+		duplicateResult, duplicateErr := local.Review(context.Background(), r0Request)
+		close(blockingExecutor.release)
+		first := <-firstDone
+		if first.err != nil {
+			t.Fatalf("reserved owner Review(R0) error = %v", first.err)
+		}
+		if duplicateErr == nil || !reflect.DeepEqual(duplicateResult, Result{}) {
+			t.Fatalf("concurrent duplicate result/error = %#v/%v, want refusal", duplicateResult, duplicateErr)
+		}
+		if got := blockingExecutor.callCount(); got != 1 {
+			t.Fatalf("concurrent duplicate provider launches = %d, want 1", got)
+		}
+		if got := len(blockingCompletion.calls); got != 1 {
+			t.Fatalf("concurrent duplicate receipt mints = %d, want 1", got)
+		}
+		if result, err := local.Review(context.Background(), r0Request); err == nil || !reflect.DeepEqual(result, Result{}) {
+			t.Fatalf("completed duplicate result/error = %#v/%v, want prelaunch refusal", result, err)
+		}
+		if got := blockingExecutor.callCount(); got != 1 {
+			t.Fatalf("completed duplicate provider launches = %d, want 1", got)
+		}
+		if got := len(blockingCompletion.calls); got != 1 {
+			t.Fatalf("completed duplicate receipt mints = %d, want 1", got)
+		}
+
+		retryExecutor := &retryReviewExecutor{}
+		retryCompletion := &reviewCompletionFake{}
+		retryService, err := NewService(ServicePorts{
+			Executor: retryExecutor, Completion: retryCompletion, BuilderRuntime: runtimeResolver,
+			PacketEvidence: &packetEvidenceVerifierFake{},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if result, err := retryService.Review(context.Background(), r0Request); err == nil || !reflect.DeepEqual(result, Result{}) {
+			t.Fatalf("first failed owner result/error = %#v/%v", result, err)
+		}
+		if result, err := retryService.Review(context.Background(), r0Request); err != nil || result.ReviewReceipt.Digest == "" {
+			t.Fatalf("retry after owner rollback result/error = %#v/%v", result, err)
+		}
+		if retryExecutor.callCount() != 2 || len(retryCompletion.calls) != 1 {
+			t.Fatalf("retry launch/completion counts = %d/%d, want 2/1", retryExecutor.callCount(), len(retryCompletion.calls))
+		}
+	})
+
 	t.Run("execution or completion failures return no review result", func(t *testing.T) {
 		failedExecutor := &reviewExecutorFake{err: errors.New("provider failed")}
 		failedCompletion := &reviewCompletionFake{}
-		failed, _ := NewService(ServicePorts{Executor: failedExecutor, Completion: failedCompletion})
+		failed, _ := NewService(ServicePorts{Executor: failedExecutor, Completion: failedCompletion, BuilderRuntime: runtimeResolver, PacketEvidence: packetVerifier})
 		if result, err := failed.Review(context.Background(), r0Request); err == nil || !reflect.DeepEqual(result, Result{}) {
 			t.Fatalf("execution failure result/error = %#v/%v", result, err)
 		}
@@ -344,11 +502,99 @@ func TestSealedReviewFreshnessContract_Behavioral(t *testing.T) {
 
 		okExecutor := &reviewExecutorFake{providerSessions: []string{"provider-completion-failure"}}
 		brokenCompletion := &reviewCompletionFake{err: errors.New("receipt ack failed")}
-		broken, _ := NewService(ServicePorts{Executor: okExecutor, Completion: brokenCompletion})
+		broken, _ := NewService(ServicePorts{Executor: okExecutor, Completion: brokenCompletion, BuilderRuntime: runtimeResolver, PacketEvidence: packetVerifier})
 		if result, err := broken.Review(context.Background(), r0Request); err == nil || !reflect.DeepEqual(result, Result{}) {
 			t.Fatalf("completion failure result/error = %#v/%v", result, err)
 		}
 	})
+}
+
+type blockingReviewExecutor struct {
+	mu      sync.Mutex
+	calls   int
+	started chan struct{}
+	release chan struct{}
+}
+
+func newBlockingReviewExecutor() *blockingReviewExecutor {
+	return &blockingReviewExecutor{started: make(chan struct{}), release: make(chan struct{})}
+}
+
+func (f *blockingReviewExecutor) ExecuteReview(ctx context.Context, request sealedexec.ExecutionRequest, _ []contextcompile.DataItem, launch sealedexec.ReviewLaunch) (sealedexec.ExecutionRun, error) {
+	f.mu.Lock()
+	f.calls++
+	call := f.calls
+	f.mu.Unlock()
+	if call == 1 {
+		close(f.started)
+		select {
+		case <-f.release:
+		case <-ctx.Done():
+			return sealedexec.ExecutionRun{}, ctx.Err()
+		}
+	}
+	return reviewExecutionRun(tContext{}, request, launch, fmt.Sprintf("provider-blocking-%d", call)), nil
+}
+
+func (f *blockingReviewExecutor) callCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.calls
+}
+
+type retryReviewExecutor struct {
+	mu    sync.Mutex
+	calls int
+}
+
+func (f *retryReviewExecutor) ExecuteReview(_ context.Context, request sealedexec.ExecutionRequest, _ []contextcompile.DataItem, launch sealedexec.ReviewLaunch) (sealedexec.ExecutionRun, error) {
+	f.mu.Lock()
+	f.calls++
+	call := f.calls
+	f.mu.Unlock()
+	if call == 1 {
+		return sealedexec.ExecutionRun{}, errors.New("provider failed once")
+	}
+	return reviewExecutionRun(tContext{}, request, launch, "provider-retry"), nil
+}
+
+func (f *retryReviewExecutor) callCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.calls
+}
+
+type packetEvidenceVerifierFake struct {
+	mu      sync.Mutex
+	err     error
+	packets []Packet
+}
+
+func (f *packetEvidenceVerifierFake) VerifyPacketEvidence(_ context.Context, packet Packet) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.packets = append(f.packets, clonePacket(packet))
+	return f.err
+}
+
+func (f *packetEvidenceVerifierFake) callCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return len(f.packets)
+}
+
+type builderRuntimeResolverFake struct {
+	mu             sync.Mutex
+	runtime        BuilderRuntime
+	err            error
+	receiptDigests []string
+}
+
+func (f *builderRuntimeResolverFake) ResolveBuilderRuntime(_ context.Context, receiptDigest string) (BuilderRuntime, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.receiptDigests = append(f.receiptDigests, receiptDigest)
+	return f.runtime, f.err
 }
 
 type reviewExecutionCall struct {

@@ -197,6 +197,57 @@ func (c *PacketCompiler) Compile(ctx context.Context, request PacketRequest) (Pa
 	return result, nil
 }
 
+// VerifyPacketEvidence re-reads the authenticated candidate objects and, for
+// R2, re-runs the receipt-declared commands before any review launch.
+func (c *PacketCompiler) VerifyPacketEvidence(ctx context.Context, packet Packet) error {
+	if ctx == nil {
+		return fmt.Errorf("sealedreview: verify packet evidence: nil context")
+	}
+	if c == nil || c.repository == nil || c.compiler == nil {
+		return fmt.Errorf("sealedreview: packet compiler is not constructed")
+	}
+	packetBytes, err := EncodePacket(packet)
+	if err != nil {
+		return fmt.Errorf("sealedreview: verify packet evidence: %w", err)
+	}
+	packet, err = DecodePacket(bytes.NewReader(packetBytes))
+	if err != nil {
+		return fmt.Errorf("sealedreview: verify packet evidence: %w", err)
+	}
+	view, err := c.readCandidate(ctx, packet.Candidate)
+	if err != nil {
+		return fmt.Errorf("sealedreview: verify packet evidence candidate: %w", err)
+	}
+	_, diffBytes, err := c.compileDiff(ctx, packet.Candidate, view)
+	if err != nil {
+		return fmt.Errorf("sealedreview: verify packet evidence diff: %w", err)
+	}
+	if !bytes.Equal(diffBytes, packet.Items[1].Content) {
+		return fmt.Errorf("sealedreview: packet diff does not match authenticated candidate objects")
+	}
+	if packet.Round != RoundR2 {
+		return nil
+	}
+	builderReceipt, err := contextreceipt.DecodeReceipt(bytes.NewReader(packet.Items[3].Content))
+	if err != nil {
+		return fmt.Errorf("sealedreview: verify packet evidence builder receipt: %w", err)
+	}
+	rebuilt, err := c.compiler.RebuildEvidence(ctx, EvidenceRebuildRequest{
+		Candidate: packet.Candidate, Commands: cloneEvidenceSummaries(builderReceipt.Evidence),
+	})
+	if err != nil {
+		return fmt.Errorf("sealedreview: rebuild current-candidate evidence: %w", err)
+	}
+	_, currentBytes, err := compileEvidenceBundle(EvidenceScopeCurrentCandidate, packet.Candidate, rebuilt, builderReceipt.Evidence)
+	if err != nil {
+		return fmt.Errorf("sealedreview: current-candidate evidence: %w", err)
+	}
+	if !bytes.Equal(currentBytes, packet.Items[6].Content) {
+		return fmt.Errorf("sealedreview: packet current-candidate evidence is stale")
+	}
+	return nil
+}
+
 func validatePriorR0Receipt(receipt contextreceipt.Receipt, builderDigest string, candidate contextreceipt.Candidate, wantInputs []contextreceipt.ReviewInput) error {
 	if receipt.Role != contextreceipt.RoleReviewer || len(receipt.ReviewOf) != 1 || receipt.ReviewOf[0] != builderDigest {
 		return fmt.Errorf("sealedreview: prior R0 receipt does not link to the builder")
@@ -230,7 +281,7 @@ func validateAdjudicationCandidate(adjudication Adjudication, candidate contextr
 
 // VerifyReviewProof verifies exact packet content and projects the three
 // reviewer-only operands owned by contextreceipt.
-func VerifyReviewProof(raw []byte, receipt contextreceipt.Receipt, candidate contextreceipt.Candidate, launch contextreceipt.ReviewLaunchProof) (contextreceipt.ReviewProofProjection, error) {
+func VerifyReviewProof(raw []byte, receipt contextreceipt.Receipt, candidate contextreceipt.Candidate, repository contextreceipt.RepositoryProof, launch contextreceipt.ReviewLaunchProof) (contextreceipt.ReviewProofProjection, error) {
 	packet, err := DecodePacket(bytes.NewReader(raw))
 	if err != nil {
 		return contextreceipt.ReviewProofProjection{}, err
@@ -254,6 +305,19 @@ func VerifyReviewProof(raw []byte, receipt contextreceipt.Receipt, candidate con
 		Packet:    reviewOperand(expectedPacket, observedPacket),
 		Link:      reviewOperand(expectedLink, observedLink),
 		Freshness: contextreceipt.ReviewOperandProjection{State: contextreceipt.StateUnproven, ExpectedDigest: expectedFreshness},
+	}
+	diffMatches, err := packetDiffMatchesRepository(packet, repository)
+	if err != nil {
+		return contextreceipt.ReviewProofProjection{}, fmt.Errorf("sealedreview: authenticated packet diff: %w", err)
+	}
+	if !diffMatches {
+		if projection.Packet.ExpectedDigest == projection.Packet.ObservedDigest {
+			projection.Packet.ObservedDigest = projectionDigest(struct {
+				Inputs            []contextreceipt.ReviewInput `json:"inputs"`
+				AuthenticatedDiff string                       `json:"authenticated_diff"`
+			}{Inputs: observedInputs, AuthenticatedDiff: "mismatch"})
+		}
+		projection.Packet.State = contextreceipt.StateViolated
 	}
 	if !launch.Present {
 		if !reflect.DeepEqual(launch.Execution, contextreceipt.ExecutionProjection{}) || launch.Event.Schema != "" || launch.Event.Kind != "" || launch.Ack.Schema != "" {
@@ -404,6 +468,187 @@ type treeFile struct {
 type candidateView struct {
 	base map[string]treeFile
 	head map[string]treeFile
+}
+
+func packetDiffMatchesRepository(packet Packet, proof contextreceipt.RepositoryProof) (bool, error) {
+	proofBytes, err := contextreceipt.EncodeRepositoryProof(proof)
+	if err != nil {
+		return false, err
+	}
+	proof, err = contextreceipt.DecodeRepositoryProof(bytes.NewReader(proofBytes))
+	if err != nil {
+		return false, err
+	}
+	view, err := candidateViewFromRepositoryProof(proof)
+	if err != nil {
+		return false, err
+	}
+	if proof.Candidate != packet.Candidate {
+		return false, nil
+	}
+	diff, err := DecodeDiff(bytes.NewReader(packet.Items[1].Content))
+	if err != nil {
+		return false, err
+	}
+	return diffMatchesCandidateView(diff, view), nil
+}
+
+func candidateViewFromRepositoryProof(proof contextreceipt.RepositoryProof) (candidateView, error) {
+	objects := make(map[string]contextreceipt.RepositoryObject, len(proof.Objects))
+	for _, object := range proof.Objects {
+		if object.Type != "commit" && object.Type != "tree" {
+			return candidateView{}, fmt.Errorf("object %s has unsupported type %q", object.OID, object.Type)
+		}
+		if gitObjectOID(object.Type, object.Content) != object.OID {
+			return candidateView{}, fmt.Errorf("object %s content identity mismatch", object.OID)
+		}
+		if _, duplicate := objects[object.OID]; duplicate {
+			return candidateView{}, fmt.Errorf("duplicate object %s", object.OID)
+		}
+		objects[object.OID] = object
+	}
+	reachable := make(map[string]bool, len(objects))
+	readSide := func(commitOID, treeOID string) (map[string]treeFile, error) {
+		commit, ok := objects[commitOID]
+		if !ok || commit.Type != "commit" {
+			return nil, fmt.Errorf("missing commit %s", commitOID)
+		}
+		reachable[commitOID] = true
+		root, err := repositoryProofCommitRoot(commit.Content)
+		if err != nil {
+			return nil, fmt.Errorf("commit %s: %w", commitOID, err)
+		}
+		if root != treeOID {
+			return nil, fmt.Errorf("commit %s tree mismatch", commitOID)
+		}
+		return repositoryProofTree(treeOID, "", objects, reachable, make(map[string]bool))
+	}
+	base, err := readSide(proof.Candidate.BaseCommit, proof.Candidate.BaseTree)
+	if err != nil {
+		return candidateView{}, err
+	}
+	head, err := readSide(proof.Candidate.HeadCommit, proof.Candidate.HeadTree)
+	if err != nil {
+		return candidateView{}, err
+	}
+	if len(reachable) != len(objects) {
+		return candidateView{}, fmt.Errorf("repository proof contains unreachable objects")
+	}
+	return candidateView{base: base, head: head}, nil
+}
+
+func repositoryProofCommitRoot(content []byte) (string, error) {
+	headers := strings.SplitN(string(content), "\n\n", 2)[0]
+	root := ""
+	for _, line := range strings.Split(headers, "\n") {
+		if !strings.HasPrefix(line, "tree ") {
+			continue
+		}
+		if root != "" || len(line) != len("tree ")+40 {
+			return "", fmt.Errorf("malformed tree header")
+		}
+		root = strings.TrimPrefix(line, "tree ")
+		if err := requireGitOID("commit tree", root); err != nil {
+			return "", err
+		}
+	}
+	if root == "" {
+		return "", fmt.Errorf("missing tree header")
+	}
+	return root, nil
+}
+
+func repositoryProofTree(oid, prefix string, objects map[string]contextreceipt.RepositoryObject, reachable, active map[string]bool) (map[string]treeFile, error) {
+	if active[oid] {
+		return nil, fmt.Errorf("tree cycle at %s", oid)
+	}
+	object, ok := objects[oid]
+	if !ok || object.Type != "tree" {
+		return nil, fmt.Errorf("missing tree %s", oid)
+	}
+	active[oid] = true
+	reachable[oid] = true
+	defer delete(active, oid)
+	entries, err := parseTreeEntries(object.Content)
+	if err != nil {
+		return nil, fmt.Errorf("tree %s: %w", oid, err)
+	}
+	files := make(map[string]treeFile)
+	for _, entry := range entries {
+		name := entry.name
+		if prefix != "" {
+			name = prefix + "/" + entry.name
+		}
+		if entry.mode == "40000" || entry.mode == "040000" {
+			children, err := repositoryProofTree(entry.oid, name, objects, reachable, active)
+			if err != nil {
+				return nil, err
+			}
+			for childName, child := range children {
+				if _, duplicate := files[childName]; duplicate {
+					return nil, fmt.Errorf("duplicate tree path %q", childName)
+				}
+				files[childName] = child
+			}
+			continue
+		}
+		switch entry.mode {
+		case "100644", "100755", "120000":
+		default:
+			return nil, fmt.Errorf("path %q has unsupported mode %q", name, entry.mode)
+		}
+		if _, duplicate := files[name]; duplicate {
+			return nil, fmt.Errorf("duplicate tree path %q", name)
+		}
+		files[name] = treeFile{mode: entry.mode, oid: entry.oid}
+	}
+	return files, nil
+}
+
+func diffMatchesCandidateView(diff Diff, view candidateView) bool {
+	paths := make([]string, 0, len(view.base)+len(view.head))
+	seen := make(map[string]bool, len(view.base)+len(view.head))
+	for name := range view.base {
+		seen[name] = true
+		paths = append(paths, name)
+	}
+	for name := range view.head {
+		if !seen[name] {
+			paths = append(paths, name)
+		}
+	}
+	sort.Strings(paths)
+	index := 0
+	for _, name := range paths {
+		before, hadBefore := view.base[name]
+		after, hasAfter := view.head[name]
+		if hadBefore && hasAfter && before == after {
+			continue
+		}
+		if index >= len(diff.Entries) {
+			return false
+		}
+		entry := diff.Entries[index]
+		index++
+		if !bytes.Equal(entry.Path, []byte(name)) {
+			return false
+		}
+		switch {
+		case !hadBefore:
+			if entry.State != DiffAdded || entry.BeforeMode != "" || entry.BeforeBlob != "" || entry.AfterMode != after.mode || entry.AfterBlob != after.oid {
+				return false
+			}
+		case !hasAfter:
+			if entry.State != DiffDeleted || entry.BeforeMode != before.mode || entry.BeforeBlob != before.oid || entry.AfterMode != "" || entry.AfterBlob != "" {
+				return false
+			}
+		default:
+			if entry.State != DiffModified || entry.BeforeMode != before.mode || entry.BeforeBlob != before.oid || entry.AfterMode != after.mode || entry.AfterBlob != after.oid {
+				return false
+			}
+		}
+	}
+	return index == len(diff.Entries)
 }
 
 func (c *PacketCompiler) readCandidate(ctx context.Context, candidate contextreceipt.Candidate) (candidateView, error) {

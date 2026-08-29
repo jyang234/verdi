@@ -63,8 +63,10 @@ type ReviewCompletion interface {
 }
 
 type ServicePorts struct {
-	Executor   ReviewExecutor
-	Completion ReviewCompletion
+	Executor       ReviewExecutor
+	Completion     ReviewCompletion
+	BuilderRuntime BuilderRuntimeResolver
+	PacketEvidence PacketEvidenceVerifier
 }
 
 type completedR0 struct {
@@ -75,21 +77,30 @@ type completedR0 struct {
 	providerSession string
 }
 
+type r0Reservation struct{ token byte }
+
+type r0State struct {
+	reservation *r0Reservation
+	completed   *completedR0
+}
+
 // Service owns the R0-to-R2 runtime lineage. A service instance accepts at
 // most one actual R0 receipt for a builder/candidate and never treats caller
 // assertions as proof that an R0 occurred.
 type Service struct {
 	executor   ReviewExecutor
 	completion ReviewCompletion
+	builder    BuilderRuntimeResolver
+	evidence   PacketEvidenceVerifier
 	mu         sync.Mutex
-	r0         map[string]completedR0
+	r0         map[string]r0State
 }
 
 func NewService(ports ServicePorts) (*Service, error) {
-	if ports.Executor == nil || ports.Completion == nil {
-		return nil, errors.New("sealedreview: executor and completion ports are required")
+	if ports.Executor == nil || ports.Completion == nil || ports.BuilderRuntime == nil || ports.PacketEvidence == nil {
+		return nil, errors.New("sealedreview: executor, completion, builder runtime, and packet evidence ports are required")
 	}
-	return &Service{executor: ports.Executor, completion: ports.Completion, r0: make(map[string]completedR0)}, nil
+	return &Service{executor: ports.Executor, completion: ports.Completion, builder: ports.BuilderRuntime, evidence: ports.PacketEvidence, r0: make(map[string]r0State)}, nil
 }
 
 // Review validates every caller-controlled relationship before launch, then
@@ -99,7 +110,7 @@ func (s *Service) Review(ctx context.Context, request Request) (Result, error) {
 	if ctx == nil {
 		return Result{}, errors.New("sealedreview: review: nil context")
 	}
-	if s == nil || s.executor == nil || s.completion == nil {
+	if s == nil || s.executor == nil || s.completion == nil || s.builder == nil || s.evidence == nil {
 		return Result{}, errors.New("sealedreview: service is not constructed")
 	}
 	canonicalRequest, err := EncodeRequest(request)
@@ -110,11 +121,26 @@ func (s *Service) Review(ctx context.Context, request Request) (Result, error) {
 	if err != nil {
 		return Result{}, fmt.Errorf("sealedreview: strict-roundtrip request: %w", err)
 	}
-	packetBytes, builderBytes, data, launch, prior, err := s.validateBeforeLaunch(request)
+	packetBytes, builderBytes, data, launch, prior, builderRuntime, err := s.validateBeforeLaunch(ctx, request)
 	if err != nil {
 		return Result{}, err
 	}
 	_ = builderBytes
+	if err := s.evidence.VerifyPacketEvidence(ctx, request.Packet); err != nil {
+		return Result{}, fmt.Errorf("sealedreview: verify packet evidence: %w", err)
+	}
+	reservation, err := s.reserveR0(request)
+	if err != nil {
+		return Result{}, err
+	}
+	reservationCompleted := false
+	if reservation != nil {
+		defer func() {
+			if !reservationCompleted {
+				s.rollbackR0(request, reservation)
+			}
+		}()
+	}
 
 	run, err := s.executor.ExecuteReview(ctx, request.ExecutionRequest, []contextcompile.DataItem{data}, launch)
 	if err != nil {
@@ -122,6 +148,9 @@ func (s *Service) Review(ctx context.Context, request Request) (Result, error) {
 	}
 	if err := validateAcknowledgedLaunch(request, packetBytes, launch, run); err != nil {
 		return Result{}, err
+	}
+	if run.AdapterSessionRef == builderRuntime.ProviderSession {
+		return Result{}, errors.New("sealedreview: review reused the builder provider session")
 	}
 	if prior != nil && run.AdapterSessionRef == prior.providerSession {
 		return Result{}, errors.New("sealedreview: R2 reused the R0 provider session")
@@ -166,104 +195,160 @@ func (s *Service) Review(ctx context.Context, request Request) (Result, error) {
 	}
 
 	if request.Packet.Round == RoundR0 {
-		s.mu.Lock()
-		key := r0Key(request.BuilderReceipt.Digest, request.Packet.Candidate)
-		if _, exists := s.r0[key]; exists {
-			s.mu.Unlock()
-			return Result{}, errors.New("sealedreview: an actual R0 is already recorded for this builder and candidate")
-		}
-		s.r0[key] = completedR0{
+		completed := completedR0{
 			packet: clonePacket(request.Packet), receipt: completion.Receipt, reviewer: request.Packet.Reviewer,
 			request: request.ExecutionRequest, providerSession: run.AdapterSessionRef,
 		}
-		s.mu.Unlock()
+		if err := s.completeR0(request, reservation, completed); err != nil {
+			return Result{}, err
+		}
+		reservationCompleted = true
 	}
 	return result, nil
 }
 
-func (s *Service) validateBeforeLaunch(request Request) ([]byte, []byte, contextcompile.DataItem, sealedexec.ReviewLaunch, *completedR0, error) {
+func (s *Service) reserveR0(request Request) (*r0Reservation, error) {
+	if request.Packet.Round != RoundR0 {
+		return nil, nil
+	}
+	owner := &r0Reservation{token: 1}
+	key := r0Key(request.BuilderReceipt.Digest, request.Packet.Candidate)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, exists := s.r0[key]; exists {
+		return nil, errors.New("sealedreview: an R0 is already reserved or completed for this builder and candidate")
+	}
+	s.r0[key] = r0State{reservation: owner}
+	return owner, nil
+}
+
+func (s *Service) rollbackR0(request Request, owner *r0Reservation) {
+	key := r0Key(request.BuilderReceipt.Digest, request.Packet.Candidate)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	state, exists := s.r0[key]
+	if exists && state.reservation == owner && state.completed == nil {
+		delete(s.r0, key)
+	}
+}
+
+func (s *Service) completeR0(request Request, owner *r0Reservation, completed completedR0) error {
+	key := r0Key(request.BuilderReceipt.Digest, request.Packet.Candidate)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	state, exists := s.r0[key]
+	if !exists || state.reservation != owner || state.completed != nil {
+		return errors.New("sealedreview: R0 reservation ownership was lost before completion")
+	}
+	state.reservation = nil
+	state.completed = &completed
+	s.r0[key] = state
+	return nil
+}
+
+func (s *Service) validateBeforeLaunch(ctx context.Context, request Request) ([]byte, []byte, contextcompile.DataItem, sealedexec.ReviewLaunch, *completedR0, BuilderRuntime, error) {
 	packetBytes, err := EncodePacket(request.Packet)
 	if err != nil {
-		return nil, nil, contextcompile.DataItem{}, sealedexec.ReviewLaunch{}, nil, fmt.Errorf("sealedreview: packet: %w", err)
+		return nil, nil, contextcompile.DataItem{}, sealedexec.ReviewLaunch{}, nil, BuilderRuntime{}, fmt.Errorf("sealedreview: packet: %w", err)
 	}
 	builderBytes, err := contextreceipt.EncodeReceipt(request.BuilderReceipt)
 	if err != nil {
-		return nil, nil, contextcompile.DataItem{}, sealedexec.ReviewLaunch{}, nil, fmt.Errorf("sealedreview: builder receipt: %w", err)
+		return nil, nil, contextcompile.DataItem{}, sealedexec.ReviewLaunch{}, nil, BuilderRuntime{}, fmt.Errorf("sealedreview: builder receipt: %w", err)
 	}
 	if request.BuilderReceipt.Role != contextreceipt.RoleBuilder || request.BuilderReceipt.Digest != request.Packet.BuilderReceiptDigest {
-		return nil, nil, contextcompile.DataItem{}, sealedexec.ReviewLaunch{}, nil, errors.New("sealedreview: packet does not bind the supplied builder receipt")
+		return nil, nil, contextcompile.DataItem{}, sealedexec.ReviewLaunch{}, nil, BuilderRuntime{}, errors.New("sealedreview: packet does not bind the supplied builder receipt")
 	}
 	if len(request.Packet.Items) < 4 || request.Packet.Items[3].Kind != ItemBuilderReceipt ||
 		request.Packet.Items[3].ID != request.BuilderReceipt.Digest || !bytes.Equal(request.Packet.Items[3].Content, builderBytes) {
-		return nil, nil, contextcompile.DataItem{}, sealedexec.ReviewLaunch{}, nil, errors.New("sealedreview: packet builder-receipt item is not the supplied canonical receipt")
+		return nil, nil, contextcompile.DataItem{}, sealedexec.ReviewLaunch{}, nil, BuilderRuntime{}, errors.New("sealedreview: packet builder-receipt item is not the supplied canonical receipt")
 	}
 	if request.BuilderReceipt.OutputCommit != request.Packet.Candidate.HeadCommit ||
 		request.BuilderReceipt.OutputTree != request.Packet.Candidate.HeadTree || !request.BuilderReceipt.Clean {
-		return nil, nil, contextcompile.DataItem{}, sealedexec.ReviewLaunch{}, nil, errors.New("sealedreview: builder receipt is stale for the packet candidate")
+		return nil, nil, contextcompile.DataItem{}, sealedexec.ReviewLaunch{}, nil, BuilderRuntime{}, errors.New("sealedreview: builder receipt is stale for the packet candidate")
+	}
+	builderRuntime, err := s.builder.ResolveBuilderRuntime(ctx, request.BuilderReceipt.Digest)
+	if err != nil {
+		return nil, nil, contextcompile.DataItem{}, sealedexec.ReviewLaunch{}, nil, BuilderRuntime{}, fmt.Errorf("sealedreview: resolve builder runtime: %w", err)
+	}
+	if err := validateBuilderRuntime(builderRuntime, request.BuilderReceipt); err != nil {
+		return nil, nil, contextcompile.DataItem{}, sealedexec.ReviewLaunch{}, nil, BuilderRuntime{}, err
 	}
 
 	exec := request.ExecutionRequest
 	if exec.Action != sealedexec.ActionStart || exec.Start == nil || exec.Resume != nil {
-		return nil, nil, contextcompile.DataItem{}, sealedexec.ReviewLaunch{}, nil, errors.New("sealedreview: reviews are start-only")
+		return nil, nil, contextcompile.DataItem{}, sealedexec.ReviewLaunch{}, nil, BuilderRuntime{}, errors.New("sealedreview: reviews are start-only")
+	}
+	if exec.Session == builderRuntime.VerdiSession {
+		return nil, nil, contextcompile.DataItem{}, sealedexec.ReviewLaunch{}, nil, BuilderRuntime{}, errors.New("sealedreview: review reused the builder Verdi session")
 	}
 	if exec.Lane != request.Packet.Reviewer.Lane || exec.Adapter != request.Packet.Reviewer.Adapter ||
 		exec.AdapterVersion != request.Packet.Reviewer.AdapterVersion || exec.Profile.ID != request.Packet.Reviewer.ProfileID ||
 		exec.Profile.Digest != request.Packet.Reviewer.ProfileDigest {
-		return nil, nil, contextcompile.DataItem{}, sealedexec.ReviewLaunch{}, nil, errors.New("sealedreview: execution request reviewer identity contradicts packet")
+		return nil, nil, contextcompile.DataItem{}, sealedexec.ReviewLaunch{}, nil, BuilderRuntime{}, errors.New("sealedreview: execution request reviewer identity contradicts packet")
 	}
 	if exec.InputCommit != request.Packet.Candidate.HeadCommit || exec.InputTree != request.Packet.Candidate.HeadTree {
-		return nil, nil, contextcompile.DataItem{}, sealedexec.ReviewLaunch{}, nil, errors.New("sealedreview: execution request candidate contradicts packet")
+		return nil, nil, contextcompile.DataItem{}, sealedexec.ReviewLaunch{}, nil, BuilderRuntime{}, errors.New("sealedreview: execution request candidate contradicts packet")
 	}
 	if err := validatePacketCompilation(request.Packet, exec); err != nil {
-		return nil, nil, contextcompile.DataItem{}, sealedexec.ReviewLaunch{}, nil, err
+		return nil, nil, contextcompile.DataItem{}, sealedexec.ReviewLaunch{}, nil, BuilderRuntime{}, err
 	}
 	workspaceID, err := exec.ExecutionWorkspaceRequest.WorkspaceID()
 	if err != nil {
-		return nil, nil, contextcompile.DataItem{}, sealedexec.ReviewLaunch{}, nil, fmt.Errorf("sealedreview: derive workspace: %w", err)
+		return nil, nil, contextcompile.DataItem{}, sealedexec.ReviewLaunch{}, nil, BuilderRuntime{}, fmt.Errorf("sealedreview: derive workspace: %w", err)
 	}
 	if workspaceID == request.BuilderReceipt.ExecutionWorkspaceID {
-		return nil, nil, contextcompile.DataItem{}, sealedexec.ReviewLaunch{}, nil, errors.New("sealedreview: review reused the builder workspace")
+		return nil, nil, contextcompile.DataItem{}, sealedexec.ReviewLaunch{}, nil, BuilderRuntime{}, errors.New("sealedreview: review reused the builder workspace")
 	}
 	data, _, err := contextcompile.BuildDataItem(contextcompile.Candidate{
 		ID: "ref:spec/review-packet", Source: contextcompile.SourceDeclaredContext, Ref: "spec/review-packet",
 	}, contextcompile.IncludedDeclaredContextRef, packetBytes)
 	if err != nil {
-		return nil, nil, contextcompile.DataItem{}, sealedexec.ReviewLaunch{}, nil, fmt.Errorf("sealedreview: wrap packet data: %w", err)
+		return nil, nil, contextcompile.DataItem{}, sealedexec.ReviewLaunch{}, nil, BuilderRuntime{}, fmt.Errorf("sealedreview: wrap packet data: %w", err)
 	}
 
 	launch := sealedexec.ReviewLaunch{Round: string(request.Packet.Round), PacketDigest: request.Packet.Digest, Model: request.Packet.Reviewer.Model}
 	switch request.Packet.Round {
 	case RoundR0:
 		if request.PriorReview != nil {
-			return nil, nil, contextcompile.DataItem{}, sealedexec.ReviewLaunch{}, nil, errors.New("sealedreview: R0 prior_review must be null")
+			return nil, nil, contextcompile.DataItem{}, sealedexec.ReviewLaunch{}, nil, BuilderRuntime{}, errors.New("sealedreview: R0 prior_review must be null")
 		}
-		return packetBytes, builderBytes, data, launch, nil, nil
+		return packetBytes, builderBytes, data, launch, nil, builderRuntime, nil
 	case RoundR2:
 		if request.PriorReview == nil {
-			return nil, nil, contextcompile.DataItem{}, sealedexec.ReviewLaunch{}, nil, errors.New("sealedreview: R2 requires prior_review")
+			return nil, nil, contextcompile.DataItem{}, sealedexec.ReviewLaunch{}, nil, BuilderRuntime{}, errors.New("sealedreview: R2 requires prior_review")
 		}
 		prior, err := s.actualR0(request)
 		if err != nil {
-			return nil, nil, contextcompile.DataItem{}, sealedexec.ReviewLaunch{}, nil, err
+			return nil, nil, contextcompile.DataItem{}, sealedexec.ReviewLaunch{}, nil, BuilderRuntime{}, err
 		}
 		if err := validateR2Lineage(request, prior); err != nil {
-			return nil, nil, contextcompile.DataItem{}, sealedexec.ReviewLaunch{}, nil, err
+			return nil, nil, contextcompile.DataItem{}, sealedexec.ReviewLaunch{}, nil, BuilderRuntime{}, err
 		}
 		launch.PriorReview = &sealedexec.ReviewPrior{ReceiptDigest: request.PriorReview.ReceiptDigest, AdjudicationDigest: request.PriorReview.AdjudicationDigest}
-		return packetBytes, builderBytes, data, launch, &prior, nil
+		return packetBytes, builderBytes, data, launch, &prior, builderRuntime, nil
 	default:
-		return nil, nil, contextcompile.DataItem{}, sealedexec.ReviewLaunch{}, nil, fmt.Errorf("sealedreview: unknown round %q", request.Packet.Round)
+		return nil, nil, contextcompile.DataItem{}, sealedexec.ReviewLaunch{}, nil, BuilderRuntime{}, fmt.Errorf("sealedreview: unknown round %q", request.Packet.Round)
 	}
+}
+
+func validateBuilderRuntime(runtime BuilderRuntime, receipt contextreceipt.Receipt) error {
+	if !digestPattern.MatchString(runtime.ReceiptDigest) || runtime.VerdiSession == "" || runtime.ProviderSession == "" || runtime.WorkspaceID == "" {
+		return errors.New("sealedreview: builder runtime is incomplete")
+	}
+	if runtime.ReceiptDigest != receipt.Digest || runtime.WorkspaceID != receipt.ExecutionWorkspaceID {
+		return errors.New("sealedreview: builder runtime contradicts the supplied receipt")
+	}
+	return nil
 }
 
 func (s *Service) actualR0(request Request) (completedR0, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	prior, ok := s.r0[r0Key(request.BuilderReceipt.Digest, request.Packet.Candidate)]
-	if !ok {
+	if !ok || prior.completed == nil {
 		return completedR0{}, errors.New("sealedreview: R2 has no actual completed R0 for this builder and candidate")
 	}
-	return prior, nil
+	return *prior.completed, nil
 }
 
 func validateR2Lineage(request Request, prior completedR0) error {
@@ -468,7 +553,7 @@ func validateCompletion(request Request, completion sealedexec.Completion) error
 }
 
 func r0Key(builderDigest string, candidate contextreceipt.Candidate) string {
-	return builderDigest + "\x00" + candidate.HeadCommit + "\x00" + candidate.HeadTree
+	return builderDigest + "\x00" + candidate.BaseCommit + "\x00" + candidate.BaseTree + "\x00" + candidate.HeadCommit + "\x00" + candidate.HeadTree
 }
 
 type requestDoc struct {

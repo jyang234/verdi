@@ -251,3 +251,24 @@ type PacketResult struct {
 	CurrentCandidateEvidence *EvidenceBundle
 	Compilation              ContextCompileResult
 }
+
+// BuilderRuntime is the exact durable runtime identity of a completed
+// builder execution. It is resolved only by the canonical builder receipt
+// digest and is never supplied by the review caller.
+type BuilderRuntime struct {
+	ReceiptDigest   string
+	VerdiSession    string
+	ProviderSession string
+	WorkspaceID     string
+}
+
+// BuilderRuntimeResolver returns durable completed-builder runtime identity.
+type BuilderRuntimeResolver interface {
+	ResolveBuilderRuntime(context.Context, string) (BuilderRuntime, error)
+}
+
+// PacketEvidenceVerifier re-reads the authenticated candidate and current
+// evidence through their owning ports before a reviewer process is launched.
+type PacketEvidenceVerifier interface {
+	VerifyPacketEvidence(context.Context, Packet) error
+}
