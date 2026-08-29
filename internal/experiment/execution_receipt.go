@@ -41,6 +41,50 @@ type ExecutionFingerprint struct {
 	InputDigests map[string]string  `json:"input_digests"`
 }
 
+// ReceiptInputs preserves the explicit resolved path for every locked input
+// role. Fingerprint.InputDigests remains the environment fingerprint's
+// path-to-content projection; this role-shaped record is the durable custody
+// needed to distinguish two slots that legitimately share one digest.
+type ReceiptInputs struct {
+	Workload ResolvedArtifact   `json:"workload"`
+	Fixtures []ResolvedArtifact `json:"fixtures"`
+	Contract ResolvedArtifact   `json:"contract"`
+}
+
+// Validate checks the receipt-local shape and unique path custody. Exact
+// correspondence to a locked definition is owned by
+// ValidateReceiptInputAuthority, where the definition is available.
+func (i ReceiptInputs) Validate() error {
+	if err := i.Workload.Validate("receipt.inputs.workload"); err != nil {
+		return err
+	}
+	if i.Fixtures == nil {
+		return fmt.Errorf("experiment: receipt.inputs.fixtures must be present")
+	}
+	seenPaths := map[string]bool{i.Workload.Path: true}
+	seenFixtureIDs := make(map[string]bool, len(i.Fixtures))
+	for index, fixture := range i.Fixtures {
+		if err := fixture.Validate(fmt.Sprintf("receipt.inputs.fixtures[%d]", index)); err != nil {
+			return err
+		}
+		if seenFixtureIDs[fixture.ID] {
+			return fmt.Errorf("experiment: receipt.inputs fixture %q is duplicated", fixture.ID)
+		}
+		if seenPaths[fixture.Path] {
+			return fmt.Errorf("experiment: receipt.inputs path %q is duplicated", fixture.Path)
+		}
+		seenFixtureIDs[fixture.ID] = true
+		seenPaths[fixture.Path] = true
+	}
+	if err := i.Contract.Validate("receipt.inputs.contract"); err != nil {
+		return err
+	}
+	if seenPaths[i.Contract.Path] {
+		return fmt.Errorf("experiment: receipt.inputs path %q is duplicated", i.Contract.Path)
+	}
+	return nil
+}
+
 func (f ExecutionFingerprint) Validate() error {
 	if f.OS == "" || f.Arch == "" {
 		return fmt.Errorf("experiment: receipt fingerprint os and arch must be nonempty")
@@ -196,6 +240,7 @@ type ExecutionReceipt struct {
 	ScheduleDigest     string               `json:"schedule_digest"`
 	GrantsDigest       string               `json:"grants_digest"`
 	Fingerprint        ExecutionFingerprint `json:"fingerprint"`
+	Inputs             ReceiptInputs        `json:"inputs"`
 	Enforcement        []ReceiptEnforcement `json:"enforcement"`
 	Network            ReceiptNetwork       `json:"network"`
 	Candidates         []ReceiptCandidate   `json:"candidates"`
@@ -219,6 +264,9 @@ func (r ExecutionReceipt) Validate() error {
 		return fmt.Errorf("experiment: receipt.environment_policy must be nonempty")
 	}
 	if err := r.Fingerprint.Validate(); err != nil {
+		return err
+	}
+	if err := r.Inputs.Validate(); err != nil {
 		return err
 	}
 	if r.Enforcement == nil {
@@ -329,7 +377,7 @@ func ValidateExecutionReceiptBinding(def Definition, observations []Observation,
 	if err := validateAuthoritativeExecutionControls(receipt); err != nil {
 		return err
 	}
-	if err := validateLockedInputDigests(def, receipt.Fingerprint.InputDigests); err != nil {
+	if err := ValidateReceiptInputAuthority(def, receipt); err != nil {
 		return err
 	}
 	return ValidateReceiptCandidateAuthority(def, receipt)
@@ -409,7 +457,15 @@ func validateAuthoritativeExecutionControls(receipt ExecutionReceipt) error {
 	return nil
 }
 
-func validateLockedInputDigests(def Definition, got map[string]string) error {
+// ValidateReceiptInputAuthority proves the receipt's durable role-to-path
+// custody and the environment fingerprint are one exact projection of the
+// locked definition. It is shared by result/capsule validation and retained
+// input loading so no consumer reassigns paths by digest.
+func ValidateReceiptInputAuthority(def Definition, receipt ExecutionReceipt) error {
+	if err := receipt.Inputs.Validate(); err != nil {
+		return err
+	}
+	got := receipt.Fingerprint.InputDigests
 	// The evaluator is not an ArtifactRef resolved by InputResolver. Keep its
 	// reserved key bound separately to the exact locked argv[0] and digest.
 	evaluatorKey := "evaluator:" + def.Evaluator.Argv[0]
@@ -418,38 +474,40 @@ func validateLockedInputDigests(def Definition, got map[string]string) error {
 		return fmt.Errorf("experiment: receipt fingerprint evaluator input %q digest %q does not match locked digest %q", evaluatorKey, got[evaluatorKey], evaluatorDigest)
 	}
 
-	want := make(map[string]int, 2+len(def.Fixtures))
-	want[strings.TrimPrefix(def.Workload.Digest, "sha256:")]++
-	want[strings.TrimPrefix(def.Contract.Digest, "sha256:")]++
-	for _, fixture := range def.Fixtures {
-		want[strings.TrimPrefix(fixture.Digest, "sha256:")]++
-	}
-	wantCount := 2 + len(def.Fixtures)
-	if len(got) != wantCount+1 {
-		return fmt.Errorf("experiment: receipt fingerprint input set has %d entries, want one evaluator plus %d locked workload/fixture/contract inputs", len(got), wantCount)
-	}
-
 	protected := make(map[string]bool, len(def.ProtectedPaths))
 	for _, path := range def.ProtectedPaths {
 		protected[path] = true
 	}
-	resolved := make(map[string]int, len(want))
-	for path, digest := range got {
-		if path == evaluatorKey {
-			continue
+	validate := func(field string, ref ArtifactRef, resolved ResolvedArtifact) error {
+		if resolved.ID != ref.ID || resolved.Digest != ref.Digest {
+			return fmt.Errorf("experiment: receipt input %s identity does not match the locked definition", field)
 		}
-		if err := ValidateRepoRelativePath(path); err != nil {
-			return fmt.Errorf("experiment: receipt fingerprint resolved input %q: %w", path, err)
+		if !protected[resolved.Path] {
+			return fmt.Errorf("experiment: receipt input %s path %q is absent from definition.protected_paths", field, resolved.Path)
 		}
-		if !protected[path] {
-			return fmt.Errorf("experiment: receipt fingerprint resolved input %q is absent from definition.protected_paths", path)
+		wantDigest := strings.TrimPrefix(ref.Digest, "sha256:")
+		if got[resolved.Path] != wantDigest {
+			return fmt.Errorf("experiment: receipt fingerprint input %q digest %q does not match %s locked digest %q", resolved.Path, got[resolved.Path], field, wantDigest)
 		}
-		resolved[digest]++
+		return nil
 	}
-	for digest, count := range want {
-		if resolved[digest] != count {
-			return fmt.Errorf("experiment: receipt fingerprint has %d resolved inputs with locked digest %q, want %d", resolved[digest], digest, count)
+	if err := validate("workload", def.Workload, receipt.Inputs.Workload); err != nil {
+		return err
+	}
+	if len(receipt.Inputs.Fixtures) != len(def.Fixtures) {
+		return fmt.Errorf("experiment: receipt input fixture set has %d entries, want %d", len(receipt.Inputs.Fixtures), len(def.Fixtures))
+	}
+	for index, fixture := range def.Fixtures {
+		if err := validate(fmt.Sprintf("fixture %q", fixture.ID), fixture, receipt.Inputs.Fixtures[index]); err != nil {
+			return err
 		}
+	}
+	if err := validate("contract", def.Contract, receipt.Inputs.Contract); err != nil {
+		return err
+	}
+	wantCount := 3 + len(def.Fixtures)
+	if len(got) != wantCount {
+		return fmt.Errorf("experiment: receipt fingerprint input set has %d entries, want one evaluator plus %d locked workload/fixture/contract inputs", len(got), wantCount-1)
 	}
 	return nil
 }

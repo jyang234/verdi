@@ -136,15 +136,15 @@ func TestV2GoldenFixtureByteDigests(t *testing.T) {
 	wants := map[string]map[string]string{
 		"caching-proven": {
 			"evaluator-capabilities.json": "1300bce65fc6717bba6623464f054675229ec531909b01385e73ce5e4ca4a6bf",
-			"execution.json":              "e2e64ad59263cb0a184dcc0d7d36ff8b0e08c92e7c8ff95bf9f6faef00010d1c",
+			"execution.json":              "3519e6948bf5238c4c377706b1177fa0fd6f61b8abb7a4ccae742c120973a79b",
 			"observations.jsonl":          "5638a788b245d40611237da388599c6fd24d7bb7407ba44d64a086b50ede7f7f",
-			"result.json":                 "bbcff620f69c154b2343c540a4954fd0baf14d931999038384c9b2669b5296fb",
+			"result.json":                 "9417813890938576f5c92d3131b7a24e468f64065cbe1a9321928a441640228a",
 		},
 		"caching-inconclusive": {
 			"evaluator-capabilities.json": "1300bce65fc6717bba6623464f054675229ec531909b01385e73ce5e4ca4a6bf",
-			"execution.json":              "af3d71f835363f3841aaf72147d3ae671dbae438c9609759fb7b2ceb24f18948",
+			"execution.json":              "0608176fabadb161c113c143d8a065f23dcb2a4deb41709085acf0d094d39d80",
 			"observations.jsonl":          "6f7c3a4692a369203a1c5718644393a3ec927b630a79167c970598217372bf0d",
-			"result.json":                 "56185875ab6c9454a6c8c7802225861c458e786c5945218fdbea8fbc08812bfb",
+			"result.json":                 "fc17bdac0df0256249185a11d5716cd184b52c82ecd3f543c86a192339466fbd",
 		},
 	}
 	for name, files := range wants {

@@ -398,6 +398,10 @@ func ratifiableReceipt(t *testing.T, def experiment.Definition, run string) expe
 			Materialization: experiment.WorkspaceIdentity{Shape: experiment.WorkspaceBasePlusPatch, RunID: workspaceID, CommitSHA: candidate.Base, PatchSHA256: strings.TrimPrefix(candidate.Digest, "sha256:")},
 		})
 	}
+	fixtureInputs := make([]experiment.ResolvedArtifact, len(def.Fixtures))
+	for index, fixture := range def.Fixtures {
+		fixtureInputs[index] = experiment.ResolvedArtifact{ID: fixture.ID, Path: "fixtures/" + fixture.ID + ".bin", Digest: fixture.Digest}
+	}
 	return experiment.ExecutionReceipt{
 		Schema: experiment.ExecutionReceiptSchema, ExperimentDigest: definitionDigest, Run: run,
 		EnvironmentPolicy: def.Execution.EnvironmentPolicy,
@@ -406,6 +410,11 @@ func ratifiableReceipt(t *testing.T, def experiment.Definition, run string) expe
 		Fingerprint: experiment.ExecutionFingerprint{OS: "linux", Arch: "amd64", ToolVersions: map[string]string{"evaluator": "2.1.0", "verdi": "0.1.0"}, Env: map[string]*string{}, InputDigests: map[string]string{
 			"inputs/workload.txt": strings.TrimPrefix(def.Workload.Digest, "sha256:"),
 		}},
+		Inputs: experiment.ReceiptInputs{
+			Workload: experiment.ResolvedArtifact{ID: def.Workload.ID, Path: "inputs/workload.txt", Digest: def.Workload.Digest},
+			Fixtures: fixtureInputs,
+			Contract: experiment.ResolvedArtifact{ID: def.Contract.ID, Path: "inputs/contract.txt", Digest: def.Contract.Digest},
+		},
 		Enforcement: []experiment.ReceiptEnforcement{{Kind: "process-execution", Applied: true, Reason: "allowlist applied"}, {Kind: "timeouts", Applied: true, Reason: "deadline applied"}},
 		Network:     experiment.ReceiptNetwork{Mode: experiment.NetworkDeny, Configured: true, Reason: "network namespace configured"},
 		Candidates:  candidates,

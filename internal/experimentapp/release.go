@@ -480,6 +480,9 @@ func (s *Service) retainedProtectedInputs(ctx context.Context, identity Identity
 	if err != nil {
 		return nil, operationalOutcome("receipt-invalid", err)
 	}
+	if err := experiment.ValidateReceiptInputAuthority(facts.definition, receipt); err != nil {
+		return nil, operationalOutcome("receipt-invalid", err)
+	}
 
 	// The snapshot retains the ORIGINAL complete tree enumeration, so no
 	// second ListTree runs for the same accepted commit (design §7).
@@ -489,38 +492,24 @@ func (s *Service) retainedProtectedInputs(ctx context.Context, identity Identity
 	}
 
 	type role struct {
-		id     string
-		digest string
+		id       string
+		resolved experiment.ResolvedArtifact
 	}
 	roles := []role{
-		{id: experiment.CapsuleArtifactWorkload, digest: facts.definition.Workload.Digest},
-		{id: experiment.CapsuleArtifactContract, digest: facts.definition.Contract.Digest},
+		{id: experiment.CapsuleArtifactWorkload, resolved: receipt.Inputs.Workload},
+		{id: experiment.CapsuleArtifactContract, resolved: receipt.Inputs.Contract},
 	}
-	for _, fixture := range facts.definition.Fixtures {
+	for index, fixture := range facts.definition.Fixtures {
 		id, err := experiment.CapsuleFixtureArtifactID(fixture.ID)
 		if err != nil {
 			return nil, operationalOutcome("capsule-binding-invalid", err)
 		}
-		roles = append(roles, role{id: id, digest: fixture.Digest})
+		roles = append(roles, role{id: id, resolved: receipt.Inputs.Fixtures[index]})
 	}
 
 	inputs := make([]experiment.CapsuleRetainedArtifact, 0, len(roles))
 	for _, want := range roles {
-		wantHex := strings.TrimPrefix(want.digest, "sha256:")
-		candidates := make([]string, 0, 1)
-		for receiptPath, digest := range receipt.Fingerprint.InputDigests {
-			if strings.HasPrefix(receiptPath, "evaluator:") {
-				continue
-			}
-			if digest == wantHex {
-				candidates = append(candidates, receiptPath)
-			}
-		}
-		if len(candidates) == 0 {
-			return nil, operationalOutcome("capsule-input-unreadable", fmt.Errorf("experimentapp: the selected run's receipt resolves no path for retained artifact %q", want.id))
-		}
-		sort.Strings(candidates)
-		resolvedPath := candidates[0]
+		resolvedPath := want.resolved.Path
 		entry, ok := entriesByPath[resolvedPath]
 		if !ok {
 			return nil, operationalOutcome("capsule-input-unreadable", fmt.Errorf("experimentapp: retained artifact %q path %q is absent from the accepted tree", want.id, resolvedPath))
@@ -532,8 +521,8 @@ func (s *Service) retainedProtectedInputs(ctx context.Context, identity Identity
 		if err != nil {
 			return nil, operationalOutcome("capsule-input-unreadable", err)
 		}
-		if rawDigest(data) != want.digest {
-			return nil, operationalOutcome("capsule-input-invalid", fmt.Errorf("experimentapp: retained artifact %q bytes at %q do not recompute to the locked digest %s", want.id, resolvedPath, want.digest))
+		if rawDigest(data) != want.resolved.Digest {
+			return nil, operationalOutcome("capsule-input-invalid", fmt.Errorf("experimentapp: retained artifact %q bytes at %q do not recompute to the locked digest %s", want.id, resolvedPath, want.resolved.Digest))
 		}
 		inputs = append(inputs, experiment.CapsuleRetainedArtifact{ID: want.id, Bytes: data})
 	}

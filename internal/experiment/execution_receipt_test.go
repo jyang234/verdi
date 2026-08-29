@@ -34,6 +34,11 @@ func validExecutionReceipt(t *testing.T) ExecutionReceipt {
 		EnvironmentPolicy: "local-isolated-v1", AuthorityDigest: digestOf("b"), CapabilitiesDigest: digestOf("c"),
 		ScheduleDigest: digestOf("d"), GrantsDigest: digestOf("e"),
 		Fingerprint: ExecutionFingerprint{OS: "linux", Arch: "amd64", ToolVersions: map[string]string{"evaluator": "2.1.0", "verdi": "0.1.0"}, Env: map[string]*string{}, InputDigests: map[string]string{"workload": strings.TrimPrefix(digestOf("f"), "sha256:")}},
+		Inputs: ReceiptInputs{
+			Workload: ResolvedArtifact{ID: "workload", Path: "inputs/workload.json", Digest: digestOf("f")},
+			Fixtures: []ResolvedArtifact{},
+			Contract: ResolvedArtifact{ID: "contract", Path: "contracts/behavioral.json", Digest: digestOf("7")},
+		},
 		Enforcement: []ReceiptEnforcement{{Kind: "process-execution", Applied: true, Reason: "argv allowlist applied"}, {Kind: "timeouts", Applied: true, Reason: "deadline applied"}},
 		Network:     ReceiptNetwork{Mode: NetworkDeny, Configured: true, Reason: "network namespace configured"},
 		Candidates:  []ReceiptCandidate{{ID: "facts-cache", BaseCommit: base40, PatchDigest: digestOf("9"), WorkspaceRunID: workspaceRunID, Materialization: WorkspaceIdentity{Shape: WorkspaceBasePlusPatch, RunID: workspaceRunID, CommitSHA: base40, PatchSHA256: strings.TrimPrefix(digestOf("9"), "sha256:")}}},
@@ -89,6 +94,16 @@ func TestExecutionReceiptExactCodecDigestAndUnionRules(t *testing.T) {
 	bad.Fingerprint.Env = map[string]*string{"BAD=KEY": nil}
 	if _, err := EncodeExecutionReceipt(bad); err == nil {
 		t.Fatalf("EncodeExecutionReceipt(invalid fingerprint environment key) = nil error")
+	}
+	bad = validExecutionReceipt(t)
+	bad.Inputs.Fixtures = nil
+	if _, err := EncodeExecutionReceipt(bad); err == nil {
+		t.Fatalf("EncodeExecutionReceipt(null receipt input fixtures) = nil error")
+	}
+	bad = validExecutionReceipt(t)
+	bad.Inputs.Contract.Path = bad.Inputs.Workload.Path
+	if _, err := EncodeExecutionReceipt(bad); err == nil {
+		t.Fatalf("EncodeExecutionReceipt(duplicate receipt input path) = nil error")
 	}
 }
 

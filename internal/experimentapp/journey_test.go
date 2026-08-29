@@ -380,7 +380,7 @@ func TestCompleteExperimentApplicationJourney(t *testing.T) {
 			t.Fatalf("faster incorrect candidate became favorable: fast=%+v correct=%+v", fast, correct)
 		}
 		digest, err := experiment.ResultDigest(result)
-		if err != nil || digest != "sha256:bbcff620f69c154b2343c540a4954fd0baf14d931999038384c9b2669b5296fb" {
+		if err != nil || digest != "sha256:9417813890938576f5c92d3131b7a24e468f64065cbe1a9321928a441640228a" {
 			t.Fatalf("fixture result digest=%q err=%v", digest, err)
 		}
 	})

@@ -436,11 +436,64 @@ func TestBuildExecutionReceiptStrictRoundTripDigestAndCloneSafety(t *testing.T) 
 
 	input.Authorization.Authorization.DeclaredEnv["LANG"] = "mutated"
 	input.CandidatePatches["alpha"] = []byte("mutated")
+	input.Inputs.Workload.Path = "mutated/workload.json"
 	if value := receipt.Fingerprint.Env["LANG"]; value == nil || *value != "C" {
 		t.Fatal("receipt aliases authorization environment")
 	}
+	if receipt.Inputs.Workload.Path != "inputs/workload.json" {
+		t.Fatalf("receipt input custody aliases resolved inputs: %+v", receipt.Inputs.Workload)
+	}
 	if err := verifyExecutionReceipt(input, receipt, host); err == nil {
 		t.Fatal("VerifyExecutionReceipt() accepted changed candidate patch input")
+	}
+}
+
+func TestVerifyExecutionReceiptRejectsChangedSlotPathsWhenDigestsEqual(t *testing.T) {
+	def, caps, capsBytes := testDefinition(t, []string{"alpha", "beta"}, 0)
+	def.Contract.Digest = def.Workload.Digest
+	def = relockDefinition(t, def)
+	root := t.TempDir()
+	for relative, contents := range map[string]string{
+		"inputs/workload.json":      "workload",
+		"contracts/behavioral.json": "workload",
+		"fixtures/request-log.json": "fixture",
+	} {
+		writeTestFile(t, root, relative, contents)
+	}
+	resolver := staticInputs{values: map[string]ResolvedInput{
+		def.Workload.ID:    {ID: def.Workload.ID, Path: "inputs/workload.json", Digest: def.Workload.Digest},
+		def.Fixtures[0].ID: {ID: def.Fixtures[0].ID, Path: "fixtures/request-log.json", Digest: def.Fixtures[0].Digest},
+		def.Contract.ID:    {ID: def.Contract.ID, Path: "contracts/behavioral.json", Digest: def.Contract.Digest},
+	}}
+	resolved, err := ResolveInputs(context.Background(), resolver, root, def)
+	if err != nil {
+		t.Fatal(err)
+	}
+	auth := testAuthorization(t, def, false)
+	input := ReceiptInput{
+		Definition: def, Run: "run-1", Capabilities: caps, CapabilitiesBytes: capsBytes,
+		Authorization: mustResolveAuthorization(t, def, caps, auth), Inputs: resolved,
+		CandidatePatches: candidatePatches(t, def), Fingerprint: testFingerprint(t, def, caps, auth, resolved),
+		Enforcement: execworkspace.EnforcementReport{
+			Rows: []execworkspace.EnforcementReportRow{
+				{Kind: execworkspace.GrantProcessExecution, Applied: true, Reason: "allowlist applied"},
+				{Kind: execworkspace.GrantTimeouts, Applied: true, Reason: "timeout applied"},
+			},
+			Network: execworkspace.NetworkEnforcement{Mode: execworkspace.NetworkDeny, Configured: true, Reason: "linux namespace configured"},
+		},
+		Versions: experiment.ReceiptVersions{Verdi: "v-test", RecommendationEngine: string(def.Algorithm)},
+	}
+	host := linuxHostRuntimeFacts()
+	receipt, err := buildExecutionReceipt(input, host)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	changed := cloneReceiptInput(input)
+	changed.Inputs.Workload.Path, changed.Inputs.Contract.Path = changed.Inputs.Contract.Path, changed.Inputs.Workload.Path
+	changed.Fingerprint = testFingerprint(t, def, caps, auth, changed.Inputs)
+	if err := verifyExecutionReceipt(changed, receipt, host); err == nil {
+		t.Fatal("VerifyExecutionReceipt() accepted exchanged workload/contract paths under one shared digest")
 	}
 }
 

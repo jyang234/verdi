@@ -177,6 +177,7 @@ func buildExecutionReceipt(input ReceiptInput, host hostRuntimeFacts) (experimen
 		ScheduleDigest:     scheduleDigest,
 		GrantsDigest:       digestBytes(authorized.Authorization.GrantBytes),
 		Fingerprint:        fingerprint,
+		Inputs:             receiptInputs(input.Inputs),
 		Enforcement:        enforcement,
 		Network:            network,
 		Candidates:         candidates,
@@ -187,6 +188,14 @@ func buildExecutionReceipt(input ReceiptInput, host hostRuntimeFacts) (experimen
 		return experiment.ExecutionReceipt{}, fmt.Errorf("experimentrun: build receipt validation: %w", err)
 	}
 	return receipt, nil
+}
+
+func receiptInputs(inputs ResolvedInputs) experiment.ReceiptInputs {
+	return experiment.ReceiptInputs{
+		Workload: inputs.Workload,
+		Fixtures: append([]experiment.ResolvedArtifact(nil), inputs.Fixtures...),
+		Contract: inputs.Contract,
+	}
 }
 
 // VerifyExecutionReceipt proves receipt is byte-identical to the complete

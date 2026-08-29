@@ -495,6 +495,29 @@ func TestReleaseRatifiedSymlinkedRetainedInputRefused(t *testing.T) {
 	}
 }
 
+func TestPublishRatifiedCapsuleUsesReceiptSlotPathsWhenDigestsEqual(t *testing.T) {
+	sharedBytes := releaseContractBytes()
+	fixture := buildReleaseFixture(t, sharedBytes, experiment.DispositionSelectRecommended, "")
+	fixture.git.blobCalls = nil
+
+	result := fixture.service.PublishRatifiedCapsule(context.Background(), fixture.identity)
+	if result.Outcome.Classification != ClassificationClean {
+		t.Fatalf("PublishRatifiedCapsule() outcome = %+v", result.Outcome)
+	}
+	wantCalls := map[string]int{releaseWorkloadPath: 1, releaseContractPath: 1}
+	gotCalls := map[string]int{}
+	for _, call := range fixture.git.blobCalls {
+		for retainedPath := range wantCalls {
+			if strings.HasSuffix(call, ":"+retainedPath) {
+				gotCalls[retainedPath]++
+			}
+		}
+	}
+	if gotCalls[releaseWorkloadPath] != wantCalls[releaseWorkloadPath] || gotCalls[releaseContractPath] != wantCalls[releaseContractPath] {
+		t.Fatalf("protected-input reads = %#v, want exact receipt slot paths %#v", gotCalls, wantCalls)
+	}
+}
+
 func TestReleaseRatifiedConflictingManifestRefusedBeforeRelease(t *testing.T) {
 	fixture := buildReleaseFixture(t, []byte("workload-bytes\n"), experiment.DispositionSelectRecommended, "")
 	if err := os.MkdirAll(filepath.Dir(releaseManifestPath(fixture.root)), 0o755); err != nil {

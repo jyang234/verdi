@@ -504,6 +504,11 @@ func writeWave5CAcceptedRun(t *testing.T, root string, definition experiment.Def
 				wave5CContractPath:                          strings.TrimPrefix(definition.Contract.Digest, "sha256:"),
 			},
 		},
+		Inputs: experiment.ReceiptInputs{
+			Workload: experiment.ResolvedArtifact{ID: definition.Workload.ID, Path: wave5CWorkloadPath, Digest: definition.Workload.Digest},
+			Fixtures: []experiment.ResolvedArtifact{},
+			Contract: experiment.ResolvedArtifact{ID: definition.Contract.ID, Path: wave5CContractPath, Digest: definition.Contract.Digest},
+		},
 		Enforcement: []experiment.ReceiptEnforcement{{Kind: "process-execution", Applied: true, Reason: "allowlist applied"}, {Kind: "timeouts", Applied: true, Reason: "deadline applied"}},
 		Network:     experiment.ReceiptNetwork{Mode: experiment.NetworkDeny, Configured: true, Reason: "network namespace configured"},
 		Candidates:  candidates, Versions: experiment.ReceiptVersions{Verdi: "dev", RecommendationEngine: string(experiment.AlgorithmV1)},
