@@ -29,9 +29,9 @@ the Wave 3.5 pilot plan/report, orchestration Wave 6, and SI-162–SI-168.
 
 **Planning base:** `915529f792f7a672e9631f42909995b38ed12655`
 
-**Execution status:** Blocked until this consolidated planning head completes
-one independent Claude read-only review, at most one Codex correction pass,
-the same Claude reviewer's one closure check, owner approval, and merge.
+**Execution status:** Independently reviewed and owner-approved; blocked only
+until this exact planning head merges to the configured default branch. No
+implementation prompt may execute from an unmerged planning branch.
 
 ## Contents
 

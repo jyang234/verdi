@@ -1,9 +1,8 @@
 # Wave 6 Workbench Presentation Authority Design
 
-**Status:** Owner-approved planning authority; implementation remains blocked
-until this consolidated exact head passes its one independent Claude read-only
-review, any one Codex-authored correction pass, and the same Claude reviewer's one
-closure check.
+**Status:** Owner-approved and independently reviewed planning authority;
+implementation remains blocked until this exact planning head merges to the
+configured default branch.
 
 **Planning base:** `915529f792f7a672e9631f42909995b38ed12655`
 
