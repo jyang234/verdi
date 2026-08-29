@@ -119,6 +119,13 @@ filesystem and zero-effect safety, CLI/MCP/browser parity, test bite and
 determinism, and—when frontend is present—keyboard/focus, accessibility,
 responsive layout, refresh races, and shadow persistence.
 
+After every Playwright invocation in every UI unit, the report records this
+scan and requires no output:
+
+```bash
+find e2e -type f \( -path '*/test-results/*' -o -path '*/playwright-report/*' -o -name '*.webm' -o -name '*.mp4' -o -name 'trace.zip' \) -print
+```
+
 ## Task 1: Complete the ASD application core and adapter parity
 
 **Owner:** Sonnet implementation worker under FABLE orchestration. Opus reviews
@@ -147,8 +154,8 @@ and fixes. No frontend files.
       SI-163, existing board/draft/provenance code, and CLI/MCP registry rules.
 - [ ] Define consumer-owned ports in `internal/designapp`; do not move schema or
       mutation algorithms out of their existing owners.
-- [ ] Write a semantic RED proving the current board mutation path and missing
-      adapter operations cannot satisfy one conformance suite.
+- [ ] Write a semantic RED proving the missing `designapp` and adapter
+      operations cannot satisfy one conformance suite.
 - [ ] Implement strict, deep-copy-safe application request/results for all six
       operations.
 - [ ] Route every CLI/MCP operation to the same application methods. MCP actor
@@ -156,9 +163,9 @@ and fixes. No frontend files.
 - [ ] Prove bounded context, direct-edit disclosure, stale revision refusal,
       exact capability enforcement, deterministic review, and provenance only
       on explicit request.
-- [ ] Prove `boardspecapi.go` no longer owns a parallel mutation algorithm via a
-      package-level conformance test or remove that path in Task 2 when the UI
-      calls `designapp` directly; no period with two active algorithms may merge.
+- [ ] Leave the pre-existing shipped `boardspecapi.go` splice path byte-for-byte
+      unchanged. Task 1 is limited to `designapp` plus CLI/MCP adapters; it must
+      not connect the workbench to `designapp` or add a second board path.
 - [ ] Run focused and full affected-package race tests, built-binary ASD tests,
       live MCP tests, vet, lint, gofmt, and diff checks.
 - [ ] Complete FABLE/Opus producer review and stop for independent Codex review.
@@ -190,6 +197,11 @@ wiring if FABLE delegates it explicitly; FABLE owns every resulting UI fix.
 - [ ] Validate slug/path grammar before authoring and preview exact graduation
       refs, paths, relationships, affected downstream facts, and unknowns before
       any durable mutation.
+- [ ] Support capability-driven in-place correction of existing stubs and
+      objects after creation through the same typed transaction.
+- [ ] Atomically rewire every existing board mutation to `designapp` and delete
+      the direct splice/write algorithm from `boardspecapi.go` in this unit. A
+      merged workbench with both active paths is forbidden.
 - [ ] Drive every mutation through `designapp` with explicit
       unauthenticated-human attribution when no real principal proof exists.
 - [ ] Add unsaved-edit protection and conditional refresh preserving form
@@ -353,6 +365,10 @@ fixtures. Application semantics remain in `experimentapp`.
 - [ ] Render registration, immutable inputs, capabilities, policy, schedule,
       run state, explanation, reproduction, ratification, capsule, release, and
       closure posture from application results.
+- [ ] Keep the initial passive page to one accepted-snapshot projection. Load
+      capsule, closure, and detailed run evidence as explicit on-demand
+      projections when existing operations do not provide one aggregate read;
+      do not compose duplicate accepted-tree enumerations into one projection.
 - [ ] Implement offline proof UX: exact canonical challenge display/download,
       manual signing instruction, raw 64-byte signature upload, and zero
       credential access.

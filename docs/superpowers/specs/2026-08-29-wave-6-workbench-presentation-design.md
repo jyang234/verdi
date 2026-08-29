@@ -56,6 +56,11 @@ does not contain all Wave 5 predecessors promised for ASD, CI, and GLG. The
 missing behavior is therefore delivered as named predecessor units rather than
 silently implemented in HTTP handlers or JavaScript.
 
+Those predecessor units retain their original Wave 5 obligation identities;
+the owner-approved Wave 6 campaign is their delivery position, not a claim that
+the unticked orchestration rows were already complete or a renaming of their
+semantics. Each row becomes complete only when its predecessor unit merges.
+
 This design does not add:
 
 - a browser database, local-storage authority, service worker, event-sourced UI
@@ -297,7 +302,13 @@ static markup tests alone do not satisfy this contract.
 
 ### 5.3 Deterministic performance budgets
 
-Wave 6 uses structural budgets instead of flaky wall-clock thresholds:
+Wave 6 uses structural budgets instead of flaky wall-clock thresholds. A
+*projection* is one independently requested passive page or on-demand panel;
+the initial page does not compose several operations that each re-enumerate the
+accepted tree. Heavy CSE capsule, closure, or run-detail panels remain explicit
+on-demand projections when no single existing aggregate read owns those facts.
+
+The budgets are:
 
 - one page projection performs one accepted-HEAD resolution and one accepted
   tree enumeration unless a cited predecessor API proves a separate immutable
@@ -324,8 +335,13 @@ operations already fixed by AC-8:
 - `prepare_design_review`.
 
 It composes the existing artifact, `draftmutation`, `designprovenance`,
-context, Git, and board projection owners. CLI, MCP, and workbench call it.
-`internal/workbench/boardspecapi.go` stops applying artifact mutations itself.
+context, Git, and board projection owners. In the final Task 2 state CLI, MCP,
+and workbench call it. Task 1 routes CLI/MCP through it but intentionally leaves
+the pre-existing shipped board splice path unchanged because Task 1 cannot
+touch frontend files. Task 2 must atomically rewire every board mutation to
+`designapp` and delete the splice path in the same unit. The forbidden state is
+a merged workbench that calls `designapp` while its legacy direct mutation path
+remains active.
 
 The predecessor proves strict request/response contracts, deep-copy custody,
 stale-revision refusal, capability enforcement, direct-edit disclosure,
@@ -340,6 +356,8 @@ The existing board gains:
 - synchronized canonical object rendering;
 - slug/path grammar validation before an author invests in the draft, with the
   rejected bytes and corrective grammar shown at the relevant field;
+- capability-driven in-place correction of existing stubs and objects after
+  creation, through the same typed transaction rather than delete/recreate;
 - unsaved-edit protection across refresh and navigation;
 - typed mutation forms driven by returned capabilities;
 - on-demand provenance kept collapsed by default;
@@ -582,13 +600,13 @@ The consolidated authority carries 35/35 source groups:
 | 19 | CI AC-2 manifest/derivation | §7 | Rule ledger and derivation consume context/policy owners. |
 | 20 | CI AC-3 conflict honesty | §7 | Mechanical/semantic/exemption/unknown distinctions retained. |
 | 21 | CI AC-6 governance ledger | §§7.1–7.2 | Git-backed proposal and impact review; no UI approval state. |
-| 22 | CI CO-6 browser parity | §§3, 7 | One application result feeds every adapter. |
+| 22 | CI AC-6 workbench flow and CO-6 verification | §§3, 5, 7, 11 | One application result feeds every adapter; browser and gate coverage remains explicit. |
 | 23 | GLG AC-1 journey/readiness | §8 | Current and eventual posture completed through core. |
 | 24 | GLG AC-6 attestation | §8 | Typed scaffold/review and workbench projection retained. |
 | 25 | GLG AC-7 recovery | §§4.1, 8 | Exact diagnosis-first and confirmation boundary retained. |
 | 26 | GLG AC-8 metrics | §8 | Privacy-bounded observational metrics; never gate state. |
 | 27 | CSE AC-5 application parity | §9 | Same 15 operations; human-only MCP refusal unchanged. |
-| 28 | CSE AC-7/CO-7 human proof | §§4.1, 9 | Existing detached-proof authority extracted, never weakened or reimplemented. |
+| 28 | CSE AC-5/DC-7/DC-16 human proof and CO-7 verification | §§4.1, 9, 11 | Existing detached-proof authority is extracted, never weakened or reimplemented, and retains its negative proof matrix. |
 | 29 | SI-144–SI-148/SI-160–SI-161 | §§4, 9 | Registration, proof, input binding, capsule, and accepted-use authority retained unchanged. |
 | 30 | Current workbench/serve/e2e implementation | §§2.1, 3, 5, 11 | Existing server-rendered, dependency-free, hermetic structure reused; no frontend framework introduced. |
 | 31 | Wave 6 handoff current-main/worktree boundary | §§1–2 | Remote base is reverified; the stale user-owned checkout stays untouched; isolated worktree use is mandatory. |
