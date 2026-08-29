@@ -377,8 +377,8 @@ func TestContextExecutionContract_Static(t *testing.T) {
 		if !errors.Is(executed.err, ErrVerdict) || !errors.Is(executed.err, ErrInterrupted) {
 			t.Fatalf("Execute error = %v, want normalized interruption verdict", executed.err)
 		}
-		if ports.stopCount() != 1 || len(executed.run.Acks) != 1 || executed.run.Acks[0] != ack || ack.Kind != contextevent.KindAdapterStop {
-			t.Fatalf("registered stop/acks = %d/%#v/%#v, want one exact adapter-stop", ports.stopCount(), executed.run.Acks, ack)
+		if ports.stopCount() != 1 || len(executed.run.Acks) != 3 || executed.run.Acks[2] != ack || ack.Kind != contextevent.KindAdapterStop {
+			t.Fatalf("registered stop/acks = %d/%#v/%#v, want resume+suspension+adapter-stop", ports.stopCount(), executed.run.Acks, ack)
 		}
 	})
 }
@@ -644,8 +644,8 @@ func TestContextExecutionAcknowledgedStream_Behavioral(t *testing.T) {
 			t.Fatalf("execute/interrupt errors = %v/%v, want interruption verdict/nil", executeErr, interruptErr)
 		}
 		got := ports.appendedEvents()
-		if len(got) != 2 || got[0].Kind != contextevent.KindProviderSummary || got[1].Kind != contextevent.KindAdapterStop {
-			t.Fatalf("acknowledged event order = %v, want provider-summary then adapter-stop", observationEventKinds(got))
+		if len(got) != 4 || got[0].Kind != contextevent.KindResume || got[1].Kind != contextevent.KindProviderSummary || got[2].Kind != contextevent.KindSuspension || got[3].Kind != contextevent.KindAdapterStop {
+			t.Fatalf("acknowledged event order = %v, want resume provider-summary suspension adapter-stop", observationEventKinds(got))
 		}
 	})
 
@@ -693,10 +693,10 @@ func TestContextExecutionAcknowledgedStream_Behavioral(t *testing.T) {
 			t.Fatalf("Execute error = %v, want explicit interruption verdict", executed.err)
 		}
 		got := ports.appendedEvents()
-		if len(got) != 2 || got[0].Kind != contextevent.KindProviderSummary || got[1].Kind != contextevent.KindAdapterStop {
-			t.Fatalf("acknowledged event order = %v, want provider-summary then adapter-stop", observationEventKinds(got))
+		if len(got) != 4 || got[0].Kind != contextevent.KindResume || got[1].Kind != contextevent.KindProviderSummary || got[2].Kind != contextevent.KindSuspension || got[3].Kind != contextevent.KindAdapterStop {
+			t.Fatalf("acknowledged event order = %v, want resume provider-summary suspension adapter-stop", observationEventKinds(got))
 		}
-		if len(executed.run.Acks) != 2 || executed.run.Acks[1] != interrupt.ack || executed.run.Authority == contextevent.AuthorityAuthoritative {
+		if len(executed.run.Acks) != 4 || executed.run.Acks[3] != interrupt.ack || executed.run.Authority == contextevent.AuthorityAuthoritative {
 			t.Fatalf("partial run/interrupt ack = %#v/%#v, want identical terminal ack and non-authoritative run", executed.run, interrupt.ack)
 		}
 		if ports.consumedDeliveries() != 1 {
@@ -778,7 +778,7 @@ func TestContextExecutionAcknowledgedStream_Behavioral(t *testing.T) {
 		ports.resumeRelease = make(chan struct{})
 		ports.appendEntered = make(chan struct{})
 		ports.appendRelease = make(chan struct{})
-		ports.appendBlockAt = 1
+		ports.appendBlockAt = 3
 		executeDone := make(chan error, 1)
 		go func() {
 			_, err := svc.Execute(context.Background(), resume, []contextcompile.DataItem{})
@@ -811,8 +811,8 @@ func TestContextExecutionAcknowledgedStream_Behavioral(t *testing.T) {
 			t.Fatalf("Execute error = %v, want interruption verdict", err)
 		}
 		events := ports.appendedEvents()
-		if len(events) != 1 || interrupt.ack.Kind != contextevent.KindAdapterStop || interrupt.ack.EventDigest != events[0].EventDigest {
-			t.Fatalf("Interrupt ack/events = %#v/%#v, want exact adapter-stop ack", interrupt.ack, events)
+		if len(events) != 3 || interrupt.ack.Kind != contextevent.KindAdapterStop || interrupt.ack.EventDigest != events[2].EventDigest {
+			t.Fatalf("Interrupt ack/events = %#v/%#v, want resume+suspension+adapter-stop", interrupt.ack, events)
 		}
 	})
 
@@ -907,7 +907,7 @@ func TestContextExecutionAcknowledgedStream_Behavioral(t *testing.T) {
 			t.Fatalf("Execute error = %v, want joined interruption verdict and caller-cancellation operational error", executed.err)
 		}
 		got := ports.appendedEvents()
-		if len(got) != 1 || got[0].Kind != contextevent.KindAdapterStop || len(executed.run.Acks) != 1 || executed.run.Acks[0] != interrupt.ack {
+		if len(got) != 3 || got[0].Kind != contextevent.KindResume || got[2].Kind != contextevent.KindAdapterStop || len(executed.run.Acks) != 3 || executed.run.Acks[2] != interrupt.ack {
 			t.Fatalf("cancellation/interrupt events/run/ack = %v/%#v/%#v", observationEventKinds(got), executed.run, interrupt.ack)
 		}
 	})
@@ -1011,8 +1011,9 @@ func TestContextExecutionAcknowledgedStream_Behavioral(t *testing.T) {
 		if !mismatchReached || !errors.Is(mismatchErr, ErrVerdict) {
 			t.Errorf("mismatched Interrupt reached active lookup/error = %t/%v, want true/verdict", mismatchReached, mismatchErr)
 		}
-		if ports.stopCount() != 0 || len(ports.appendedEvents()) != 0 {
-			t.Errorf("mismatched stop/appends = %d/%d, want 0/0", ports.stopCount(), len(ports.appendedEvents()))
+		events := ports.appendedEvents()
+		if ports.stopCount() != 0 || len(events) != 1 || events[0].Kind != contextevent.KindResume {
+			t.Errorf("mismatched stop/appends = %d/%v, want 0/[resume-only from normal execute]", ports.stopCount(), observationEventKinds(events))
 		}
 	})
 

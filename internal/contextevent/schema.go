@@ -11,7 +11,26 @@ const (
 	AckSchemaID = "verdi.context-event-ack/v1"
 	// ReceiptAckSchemaID is the specialized receipt-event acknowledgment schema.
 	ReceiptAckSchemaID = "verdi.receipt-event-ack/v1"
+	// EventPrefixSchemaID is the durable execution-prefix anchor schema.
+	EventPrefixSchemaID = "verdi.context-event-prefix/v1"
 )
+
+// EventPrefix is a durable anchor summarizing the terminal state of a completed
+// or in-progress execution for replay identification. All digest fields carry
+// sha256: prefixes. Epoch is a monotonic counter, not a timestamp string.
+type EventPrefix struct {
+	Schema                  string `json:"schema"`
+	Flight                  string `json:"flight"`
+	Lane                    string `json:"lane"`
+	Session                 string `json:"session"`
+	Epoch                   uint64 `json:"epoch"`
+	ManifestRevision        uint64 `json:"manifest_revision"`
+	ManifestDigest          string `json:"manifest_digest"`
+	TerminalSourceSequence  uint64 `json:"terminal_source_sequence"`
+	TerminalGlobalSequence  uint64 `json:"terminal_global_sequence"`
+	TerminalEventDigest     string `json:"terminal_event_digest"`
+	CompletedEventChainRoot string `json:"completed_event_chain_root"`
+}
 
 // Adapter is the closed sealed-execution adapter vocabulary.
 type Adapter string

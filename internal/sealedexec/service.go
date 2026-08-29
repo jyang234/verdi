@@ -489,32 +489,34 @@ type Service struct {
 }
 
 type activeExecution struct {
-	mu               sync.Mutex
-	operation        string
-	stream           ActiveAdapterRun
-	request          ExecutionRequest
-	canonicalRequest []byte
-	workspace        WorkspaceFacts
-	profile          ResolvedProfile
-	recorder         Recorder
-	sequence         uint64
-	priorDigest      string
-	priorGlobal      uint64
-	sessionRef       string
-	review           *ReviewLaunch
-	reviewFacts      *ReviewLaunchFacts
-	reviewEvent      *contextevent.Event
-	reviewAck        *contextevent.EventAck
-	acks             []contextevent.EventAck
-	state            activeExecutionState
-	stopIssued       chan struct{}
-	stopIssueOnce    sync.Once
-	stopRequestErr   error
-	terminalCause    error
-	done             chan struct{}
-	stopAck          contextevent.EventAck
-	terminalErr      error
-	resumeRechecked  bool
+	mu                    sync.Mutex
+	operation             string
+	stream                ActiveAdapterRun
+	request               ExecutionRequest
+	canonicalRequest      []byte
+	workspace             WorkspaceFacts
+	profile               ResolvedProfile
+	recorder              Recorder
+	sequence              uint64
+	priorDigest           string
+	priorGlobal           uint64
+	sessionRef            string
+	review                *ReviewLaunch
+	reviewFacts           *ReviewLaunchFacts
+	reviewEvent           *contextevent.Event
+	reviewAck             *contextevent.EventAck
+	acks                  []contextevent.EventAck
+	state                 activeExecutionState
+	stopIssued            chan struct{}
+	stopIssueOnce         sync.Once
+	stopRequestErr        error
+	terminalCause         error
+	done                  chan struct{}
+	stopAck               contextevent.EventAck
+	terminalErr           error
+	resumeRechecked       bool
+	isInterrupt           bool   // set by Interrupt; triggers suspension before adapter-stop
+	initialEventChainRoot string // checkpoint EventChainRoot at session start (resume only)
 }
 
 type activeExecutionState uint8
@@ -737,12 +739,44 @@ func (s *Service) execute(ctx context.Context, request ExecutionRequest, data []
 		return partial, operational("provider process", errors.New("adapter returned a nil active run"))
 	}
 	sequence, priorDigest, priorGlobal := uint64(1), "", uint64(0)
+	var initialAcks []contextevent.EventAck
+	initialEventChainRoot := ""
 	if request.Action == ActionResume {
 		sequence = checkpoint.TerminalSourceSequence + 1
 		priorDigest = terminalRoot(checkpoint)
 		priorGlobal = checkpoint.TerminalGlobalSequence
+		// Prepend the resume observation: emit KindResume before activating the stream.
+		resumeSchema, _ := contextevent.PayloadSchema(contextevent.KindResume)
+		resumePayload := &contextevent.ResumePayload{
+			Schema:           resumeSchema,
+			PriorSession:     request.Resume.Continuity.Session,
+			CurrentSession:   request.Session,
+			ContinuityDigest: request.Resume.ContinuityDigest,
+			ManifestDigest:   request.ManifestDigest,
+			EventChainRoot:   checkpoint.EventChainRoot,
+		}
+		resumeStamp, err := s.ports.Stamps.NextStamp(ctx)
+		if err != nil {
+			return partial, operational("resume event stamp", err)
+		}
+		resumeEvent, err := buildEvent(request, workspace, sequence, priorDigest, nil, resumeStamp, contextevent.KindResume, resumePayload)
+		if err != nil {
+			return partial, operational("build resume event", err)
+		}
+		resumeAck, err := recorder.Append(ctx, resumeEvent)
+		if err != nil {
+			return partial, operational("append resume event", err)
+		}
+		if err := validateAck(resumeEvent, resumeAck, priorGlobal); err != nil {
+			return partial, operational("acknowledge resume event", err)
+		}
+		initialAcks = []contextevent.EventAck{resumeAck}
+		initialEventChainRoot = checkpoint.EventChainRoot
+		sequence++
+		priorDigest = resumeEvent.EventDigest
+		priorGlobal = resumeAck.GlobalSequence
 	}
-	s.activate(active, stream, request, canonicalRequest, workspace, profile, recorder, sequence, priorDigest, priorGlobal, sessionFacts.SessionRef, review)
+	s.activate(active, stream, request, canonicalRequest, workspace, profile, recorder, sequence, priorDigest, priorGlobal, sessionFacts.SessionRef, review, initialAcks, initialEventChainRoot)
 	return s.consumeActive(ctx, active, authorityMode, witnesses)
 }
 
@@ -772,6 +806,7 @@ func (s *Service) Interrupt(ctx context.Context, request InterruptRequest) (cont
 	}
 	active.state = activeStopRequested
 	active.terminalCause = interruptedVerdict()
+	active.isInterrupt = true
 	done := active.done
 	active.mu.Unlock()
 
@@ -854,7 +889,7 @@ func (s *Service) acquire(key ExecutionKey, operation string) (*activeExecution,
 	return active, release, nil
 }
 
-func (s *Service) activate(active *activeExecution, stream ActiveAdapterRun, request ExecutionRequest, canonicalRequest []byte, workspace WorkspaceFacts, profile ResolvedProfile, recorder Recorder, sequence uint64, priorDigest string, priorGlobal uint64, sessionRef string, review *ReviewLaunch) {
+func (s *Service) activate(active *activeExecution, stream ActiveAdapterRun, request ExecutionRequest, canonicalRequest []byte, workspace WorkspaceFacts, profile ResolvedProfile, recorder Recorder, sequence uint64, priorDigest string, priorGlobal uint64, sessionRef string, review *ReviewLaunch, initialAcks []contextevent.EventAck, initialEventChainRoot string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	active.mu.Lock()
@@ -870,7 +905,8 @@ func (s *Service) activate(active *activeExecution, stream ActiveAdapterRun, req
 	active.priorGlobal = priorGlobal
 	active.sessionRef = sessionRef
 	active.review = cloneReviewLaunch(review)
-	active.acks = []contextevent.EventAck{}
+	active.acks = append([]contextevent.EventAck(nil), initialAcks...)
+	active.initialEventChainRoot = initialEventChainRoot
 	active.state = activeRunning
 	active.stopIssued = make(chan struct{})
 	active.done = make(chan struct{})
@@ -1112,6 +1148,39 @@ func (s *Service) issueStop(ctx context.Context, active *activeExecution) {
 }
 
 func (s *Service) recordStop(ctx context.Context, active *activeExecution, stop AdapterStopResult) (contextevent.EventAck, error) {
+	// Interruption-triggered stops prepend a suspension observation when there is
+	// at least one acknowledged event in this session (priorDigest non-empty).
+	if active.isInterrupt && active.priorDigest != "" {
+		suspSchema, _ := contextevent.PayloadSchema(contextevent.KindSuspension)
+		chainRoot := active.initialEventChainRoot
+		if chainRoot == "" {
+			chainRoot = active.priorDigest
+		}
+		suspPayload := &contextevent.SuspensionPayload{
+			Schema:           suspSchema,
+			ReasonCode:       "interrupted",
+			ContinuityDigest: active.priorDigest,
+			EventChainRoot:   chainRoot,
+		}
+		suspStamp, err := s.ports.Stamps.NextStamp(ctx)
+		if err != nil {
+			return contextevent.EventAck{}, operational("suspension stamp", err)
+		}
+		suspEvent, err := buildEvent(active.request, active.workspace, active.sequence, active.priorDigest, nil, suspStamp, contextevent.KindSuspension, suspPayload)
+		if err != nil {
+			return contextevent.EventAck{}, operational("encode suspension event", err)
+		}
+		suspAck, err := active.recorder.Append(ctx, suspEvent)
+		if err != nil {
+			return contextevent.EventAck{}, operational("append suspension event", err)
+		}
+		if err := validateAck(suspEvent, suspAck, active.priorGlobal); err != nil {
+			return contextevent.EventAck{}, operational("acknowledge suspension event", err)
+		}
+		active.acks = append(active.acks, suspAck)
+		active.sequence++
+		active.priorDigest, active.priorGlobal = suspEvent.EventDigest, suspAck.GlobalSequence
+	}
 	schema, _ := contextevent.PayloadSchema(contextevent.KindAdapterStop)
 	payload := &contextevent.AdapterStopPayload{Schema: schema, Adapter: active.request.Adapter, AdapterVersion: active.request.AdapterVersion, Session: active.request.Session, ExitCode: stop.ExitCode, ReasonCode: stop.ReasonCode}
 	stamp, err := s.ports.Stamps.NextStamp(ctx)

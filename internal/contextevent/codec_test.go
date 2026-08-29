@@ -115,6 +115,108 @@ func TestContextEventEnvelopeContract_Static(t *testing.T) {
 	if _, err := EncodeReceiptEventAck(receiptAck); err == nil {
 		t.Fatal("EncodeReceiptEventAck(non-receipt) error = nil")
 	}
+
+	t.Run("event prefix digest is canonical and deterministic", func(t *testing.T) {
+		prefix := EventPrefix{
+			Schema:                  EventPrefixSchemaID,
+			Flight:                  "flight-1",
+			Lane:                    "builder",
+			Session:                 "session-1",
+			Epoch:                   1,
+			ManifestRevision:        0,
+			ManifestDigest:          digestA,
+			TerminalSourceSequence:  9,
+			TerminalGlobalSequence:  19,
+			TerminalEventDigest:     digestB,
+			CompletedEventChainRoot: digestC,
+		}
+		d1, err := EventPrefixDigest(prefix)
+		if err != nil {
+			t.Fatalf("EventPrefixDigest() error = %v", err)
+		}
+		if !strings.HasPrefix(d1, "sha256:") || len(d1) != 71 {
+			t.Fatalf("EventPrefixDigest() = %q, want canonical sha256 digest", d1)
+		}
+		d2, err := EventPrefixDigest(prefix)
+		if err != nil {
+			t.Fatalf("EventPrefixDigest() second call error = %v", err)
+		}
+		if d1 != d2 {
+			t.Fatal("EventPrefixDigest() is not deterministic")
+		}
+		mutated := prefix
+		mutated.TerminalGlobalSequence = 20
+		d3, err := EventPrefixDigest(mutated)
+		if err != nil {
+			t.Fatalf("EventPrefixDigest(mutated) error = %v", err)
+		}
+		if d1 == d3 {
+			t.Fatal("EventPrefixDigest() did not distinguish mutated terminal sequence")
+		}
+	})
+
+	t.Run("identical replay returns original ack", func(t *testing.T) {
+		ev := eventFixture(t, KindToolCall, AdapterCodex)
+		ev.SourceSequence = 2
+		ev.PriorEventDigest = digestA
+		ack := EventAck{
+			Schema: AckSchemaID, Flight: ev.Flight, Lane: ev.Lane, Epoch: ev.Epoch,
+			Session: ev.Session, ManifestRevision: ev.ManifestRevision, Kind: ev.Kind,
+			SourceSequence: ev.SourceSequence, EventDigest: "", GlobalSequence: 11,
+		}
+		encoded, err := EncodeEvent(ev)
+		if err != nil {
+			t.Fatalf("EncodeEvent: %v", err)
+		}
+		decoded, err := DecodeEvent(bytes.NewReader(encoded))
+		if err != nil {
+			t.Fatalf("DecodeEvent: %v", err)
+		}
+		ack.EventDigest = decoded.EventDigest
+		got, err := ValidateReplay(decoded, ack, decoded)
+		if err != nil {
+			t.Fatalf("ValidateReplay(identical) error = %v", err)
+		}
+		if got != ack {
+			t.Fatalf("ValidateReplay(identical) = %#v, want original ack", got)
+		}
+	})
+
+	t.Run("conflicting replay fails closed", func(t *testing.T) {
+		ev1 := eventFixture(t, KindToolCall, AdapterCodex)
+		ev1.SourceSequence = 2
+		ev1.PriorEventDigest = digestA
+		encoded1, err := EncodeEvent(ev1)
+		if err != nil {
+			t.Fatalf("EncodeEvent ev1: %v", err)
+		}
+		decoded1, err := DecodeEvent(bytes.NewReader(encoded1))
+		if err != nil {
+			t.Fatalf("DecodeEvent ev1: %v", err)
+		}
+		ack := EventAck{
+			Schema: AckSchemaID, Flight: decoded1.Flight, Lane: decoded1.Lane,
+			Epoch: decoded1.Epoch, Session: decoded1.Session,
+			ManifestRevision: decoded1.ManifestRevision, Kind: decoded1.Kind,
+			SourceSequence: decoded1.SourceSequence, EventDigest: decoded1.EventDigest,
+			GlobalSequence: 11,
+		}
+		// Different payload — different kind
+		ev2 := eventFixture(t, KindRead, AdapterCodex)
+		ev2.SourceSequence = 2
+		ev2.PriorEventDigest = digestA
+		encoded2, err := EncodeEvent(ev2)
+		if err != nil {
+			t.Fatalf("EncodeEvent ev2: %v", err)
+		}
+		decoded2, err := DecodeEvent(bytes.NewReader(encoded2))
+		if err != nil {
+			t.Fatalf("DecodeEvent ev2: %v", err)
+		}
+		if _, err := ValidateReplay(decoded1, ack, decoded2); err == nil {
+			t.Fatal("ValidateReplay(conflicting) error = nil")
+		}
+	})
 }
 
 func TestContextEventRegistryContract_Static(t *testing.T) {

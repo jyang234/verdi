@@ -235,6 +235,58 @@ func TestExecutionCompletionService_Behavioral(t *testing.T) {
 	}
 }
 
+// TestReceiptDigestDomains verifies that the inline receipt detail carries two
+// distinct digest domains: the self-digest (sha256 of inline bytes as-is) and
+// the represented-byte digest (sha256 of receipt with Digest field cleared), and
+// that the inline bytes are byte-canonical on re-encode.
+func TestReceiptDigestDomains(t *testing.T) {
+	fixture := newCompletionFixture(t, contextevent.AuthorityAuthoritative)
+	completion, err := fixture.service().Complete(context.Background(), fixture.requestValue())
+	if err != nil {
+		t.Fatalf("Complete: %v", err)
+	}
+	receiptPayload, ok := fixture.receipts.append.Event.Payload.(*contextevent.ReceiptPayload)
+	if !ok {
+		t.Fatalf("receipt payload type = %T", fixture.receipts.append.Event.Payload)
+	}
+	if receiptPayload.Detail.Mode != contextevent.DetailInline {
+		t.Fatalf("receipt detail mode = %q, want inline", receiptPayload.Detail.Mode)
+	}
+	inlineBytes := []byte(receiptPayload.Detail.RedactedJSON)
+
+	// Self-digest domain: Detail.Digest = sha256(inlineBytes as-is).
+	wantSelfDigest := digestBytes(inlineBytes)
+	if receiptPayload.Detail.Digest != wantSelfDigest {
+		t.Fatalf("self-digest = %q, want %q", receiptPayload.Detail.Digest, wantSelfDigest)
+	}
+
+	// Represented-byte domain: receipt.Digest is content-addressed (Digest="" cleared in preimage).
+	representedDigest := completion.Receipt.Digest
+	if representedDigest == "" {
+		t.Fatalf("receipt.Digest is empty")
+	}
+
+	// The two domains must be distinct (different preimages: self has Digest field embedded;
+	// represented has Digest="" cleared).
+	if receiptPayload.Detail.Digest == representedDigest {
+		t.Fatalf("self-digest and represented-byte digest must be distinct, both = %q", representedDigest)
+	}
+
+	// Strict re-decode/re-encode: inline bytes with LF appended must be byte-canonical.
+	representedBytes := append(append([]byte(nil), inlineBytes...), '\n')
+	reDecoded, rerr := contextreceipt.DecodeReceipt(bytes.NewReader(representedBytes))
+	if rerr != nil {
+		t.Fatalf("re-decode inline receipt: %v", rerr)
+	}
+	reEncoded, rerr := contextreceipt.EncodeReceipt(reDecoded)
+	if rerr != nil {
+		t.Fatalf("re-encode inline receipt: %v", rerr)
+	}
+	if !bytes.Equal(representedBytes, reEncoded) {
+		t.Fatalf("inline receipt is not byte-canonical on re-encode")
+	}
+}
+
 type completionFixture struct {
 	t         *testing.T
 	request   ExecutionRequest

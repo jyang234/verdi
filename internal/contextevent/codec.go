@@ -106,6 +106,15 @@ func EventChainRoot(revisions []Revision) (string, error) {
 	return canonjson.Digest(revisions)
 }
 
+// EventPrefixDigest returns the canonical sha256 digest of prefix. The prefix
+// must carry EventPrefixSchemaID; any field mutation produces a distinct digest.
+func EventPrefixDigest(prefix EventPrefix) (string, error) {
+	if prefix.Schema != EventPrefixSchemaID {
+		return "", fmt.Errorf("contextevent: prefix schema must be %q", EventPrefixSchemaID)
+	}
+	return canonjson.Digest(prefix)
+}
+
 // EncodeEventAck validates and canonically encodes a general acknowledgment.
 func EncodeEventAck(ack EventAck) ([]byte, error) {
 	if err := validateEventAck(ack); err != nil {

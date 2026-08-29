@@ -456,6 +456,38 @@ func validateSpecializedReceiptAck(event contextevent.Event, receipt contextrece
 		canonical.GlobalSequence <= resultAck.GlobalSequence || canonical.ReceiptDigest != receipt.Digest {
 		return errors.New("receipt acknowledgment does not bind receipt event and finalized receipt")
 	}
+	// Cross-validate the inline receipt detail. Two digest domains must remain distinct:
+	//   - Self-digest domain: Detail.Digest = sha256(RedactedJSON bytes as-is, no added LF)
+	//   - Represented-byte domain: receipt.Digest = sha256(receipt JSON with Digest="" cleared)
+	// The inline bytes must also strict-decode/re-encode to the same canonical receipt.
+	receiptPayload, ok := event.Payload.(*contextevent.ReceiptPayload)
+	if !ok {
+		return errors.New("receipt event carries non-receipt payload type")
+	}
+	if receiptPayload.Detail.Mode == contextevent.DetailInline {
+		// Self-digest: Detail.Digest must equal sha256(RedactedJSON bytes).
+		if receiptPayload.Detail.Digest != digestBytes(receiptPayload.Detail.RedactedJSON) {
+			return errors.New("receipt inline detail self-digest contradicts RedactedJSON bytes")
+		}
+		// Strict decode/re-encode: inline content appended with LF must re-encode canonically.
+		representedBytes := append(append([]byte(nil), receiptPayload.Detail.RedactedJSON...), '\n')
+		reDecoded, rerr := contextreceipt.DecodeReceipt(bytes.NewReader(representedBytes))
+		if rerr != nil {
+			return fmt.Errorf("receipt inline detail re-decode: %w", rerr)
+		}
+		reEncoded, rerr := contextreceipt.EncodeReceipt(reDecoded)
+		if rerr != nil {
+			return fmt.Errorf("receipt inline detail re-encode: %w", rerr)
+		}
+		if !bytes.Equal(representedBytes, reEncoded) {
+			return errors.New("receipt inline detail is not byte-canonical on re-encode")
+		}
+		// The two domains must be distinct: self-digest (preimage includes Digest field)
+		// differs from represented-byte digest (preimage has Digest="" cleared).
+		if receiptPayload.Detail.Digest == receipt.Digest {
+			return errors.New("receipt self-digest and represented-byte digest must be distinct")
+		}
+	}
 	return nil
 }
 
