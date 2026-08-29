@@ -30,9 +30,11 @@ func TestDetailProcessorConstructionAndOperationalFailures(t *testing.T) {
 		if err != nil {
 			t.Fatalf("NewDetailProcessor: %v", err)
 		}
+		//nolint:staticcheck // deliberately exercise the fail-closed nil-context seam.
 		if _, err := processor.Process(nil, []byte(`{"value":1}`), [][]byte{[]byte("classified")}); err == nil {
 			t.Fatal("Process accepted nil context")
 		}
+		//nolint:staticcheck // deliberately exercise the fail-closed nil-context seam.
 		if _, err := processor.Resolve(nil, contextevent.Detail{}); err == nil {
 			t.Fatal("Resolve accepted nil context")
 		}
