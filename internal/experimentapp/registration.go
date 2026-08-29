@@ -289,7 +289,11 @@ func (s *Service) acceptedRegistrationAt(identity Identity, snapshot acceptedSna
 	last := records[len(records)-1]
 	wantIdentity := experiment.ProvenanceExperiment{Spike: identity.Spike, ID: identity.ExperimentID}
 	wantPaths := []string{path.Join(snapshot.experimentPath, "evaluator-capabilities.json"), path.Join(snapshot.experimentPath, "experiment.yaml")}
-	if last.Operation != experiment.MutationProposeRegistration || last.Experiment != wantIdentity || last.ResultDigest != artifactDigest || last.Attribution.Unauthenticated || !slices.Equal(last.Paths, wantPaths) {
+	priorMatches, err := registrationPreviousDigestMatches(snapshot.source.files, snapshot.experimentPath, definitionBytes, definition, last.PreviousDigest)
+	if err != nil {
+		return RegistrationResult{Outcome: operationalOutcome("artifact-digest-invalid", err)}
+	}
+	if last.Operation != experiment.MutationProposeRegistration || last.Experiment != wantIdentity || last.ResultDigest != artifactDigest || !priorMatches || last.Attribution.Unauthenticated || !slices.Equal(last.Paths, wantPaths) {
 		return RegistrationResult{Outcome: verdictOutcome("registration-not-accepted", "accepted lock and provenance do not form one complete registration pair")}
 	}
 	definitionDigest, err := experiment.DefinitionDigest(definition)
@@ -300,6 +304,49 @@ func (s *Service) acceptedRegistrationAt(identity Identity, snapshot acceptedSna
 		Outcome: cleanOutcome(), AcceptedHead: snapshot.revision.Head, ExperimentPath: snapshot.experimentPath,
 		DefinitionDigest: definitionDigest, ArtifactDigest: artifactDigest, ProvenanceDigest: last.Digest, Accepted: true,
 	}
+}
+
+// registrationPreviousDigestMatches proves that previousDigest names an
+// exact mutation-artifact set that the sole ProposeRegistration transform
+// can turn into the accepted locked bytes. The transform appends one fixed
+// lock block and creates or replaces evaluator-capabilities.json. Accepted
+// bytes therefore preserve every possible prior byte except two bounded
+// distinctions: whether the unlocked definition already ended in a newline,
+// and whether the capabilities bytes were absent or already byte-identical.
+// Enumerating those reversible preimages lets the record's digest select the
+// exact prior without accepting an arbitrary first-record anchor.
+func registrationPreviousDigestMatches(files map[string][]byte, experimentPath string, definitionBytes []byte, definition experiment.Definition, previousDigest string) (bool, error) {
+	if definition.Lock == nil {
+		return false, nil
+	}
+	lockSuffix := []byte("lock:\n  definition_digest: " + definition.Lock.DefinitionDigest + "\n")
+	if !bytes.HasSuffix(definitionBytes, lockSuffix) {
+		return false, nil
+	}
+	unlockedWithSeparator := bytes.TrimSuffix(definitionBytes, lockSuffix)
+	unlockedCandidates := [][]byte{append([]byte(nil), unlockedWithSeparator...)}
+	if bytes.HasSuffix(unlockedWithSeparator, []byte("\n")) {
+		unlockedCandidates = append(unlockedCandidates, append([]byte(nil), unlockedWithSeparator[:len(unlockedWithSeparator)-1]...))
+	}
+	definitionPath := path.Join(experimentPath, "experiment.yaml")
+	capabilitiesPath := path.Join(experimentPath, "evaluator-capabilities.json")
+	for _, unlocked := range unlockedCandidates {
+		for _, capabilitiesPresent := range []bool{false, true} {
+			preimage := cloneFileMap(files)
+			preimage[definitionPath] = unlocked
+			if !capabilitiesPresent {
+				delete(preimage, capabilitiesPath)
+			}
+			digest, err := artifactSetDigest(preimage, experimentPath)
+			if err != nil {
+				return false, err
+			}
+			if digest == previousDigest {
+				return true, nil
+			}
+		}
+	}
+	return false, nil
 }
 
 func appendRegistrationLock(definitionBytes []byte, digest string) []byte {

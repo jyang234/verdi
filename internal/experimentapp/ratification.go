@@ -631,6 +631,13 @@ func (s *Service) acceptedRatificationAt(ctx context.Context, identity Identity,
 		predecessor.ResultDigest != preimageDigest || !slices.Equal(predecessor.Paths, wantRegistrationPaths) {
 		return acceptedRatificationFacts{}, verdictOutcome("ratification-provenance-incomplete", "the record preceding the ratification is not the complete accepted propose-registration pair")
 	}
+	registrationPriorMatches, err := registrationPreviousDigestMatches(preimageFiles, snapshot.experimentPath, definitionBytes, definition, predecessor.PreviousDigest)
+	if err != nil {
+		return acceptedRatificationFacts{}, operationalOutcome("artifact-digest-invalid", err)
+	}
+	if !registrationPriorMatches {
+		return acceptedRatificationFacts{}, verdictOutcome("ratification-provenance-incomplete", "the accepted propose-registration record does not bind the exact pre-registration artifact set")
+	}
 	if predecessor.Attribution.Unauthenticated || predecessor.Attribution.PrincipalID == "" {
 		return acceptedRatificationFacts{}, operationalOutcome("ratification-provenance-identity", fmt.Errorf("experimentapp: the accepted propose-registration record is not attributed to an authenticated principal"))
 	}

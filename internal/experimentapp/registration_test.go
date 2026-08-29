@@ -176,6 +176,45 @@ func TestRegistrationAcceptedTreeDoesNotResolveWorktreePolicy(t *testing.T) {
 	}
 }
 
+func TestAcceptedRegistrationBindsExactPreRegistrationArtifactDigest(t *testing.T) {
+	root, service := mutationTestService(t)
+	identity := testIdentity(t, root, "request-path-v2")
+	identity.Actor = authenticatedHuman(t)
+	review := service.ReviewRegistration(context.Background(), identity)
+	if review.Outcome.Classification != ClassificationClean {
+		t.Fatalf("ReviewRegistration() outcome = %+v", review.Outcome)
+	}
+	proposal := service.ProposeRegistration(context.Background(), identity, RegistrationInput{ReviewPacketDigest: review.PacketDigest})
+	if proposal.Outcome.Classification != ClassificationClean {
+		t.Fatalf("ProposeRegistration() outcome = %+v", proposal.Outcome)
+	}
+
+	git := gitFromExperimentDir(t, root, "request-path-v2")
+	provenancePath := acceptedExperimentFilePath("request-path-v2", experiment.ProvenanceFile)
+	records, err := experiment.DecodeProvenanceLog(git.blobs[provenancePath])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(records) != 1 || records[0].Operation != experiment.MutationProposeRegistration {
+		t.Fatalf("registration provenance = %+v", records)
+	}
+	records[0].PreviousDigest = rawDigest([]byte("forged pre-registration state"))
+	if err := records[0].Seal(); err != nil {
+		t.Fatal(err)
+	}
+	forged, err := experiment.EncodeProvenanceRecord(records[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	git.blobs[provenancePath] = forged
+	service.git = git
+
+	accepted := service.AcceptedRegistration(context.Background(), identity)
+	if accepted.Outcome.Classification != ClassificationVerdict || accepted.Outcome.Code != "registration-not-accepted" {
+		t.Fatalf("AcceptedRegistration(forged first-record previous digest) = %+v, want registration-not-accepted verdict", accepted.Outcome)
+	}
+}
+
 func TestDirectEditReconciliationPreservesMergedTypedHistory(t *testing.T) {
 	root, service := mutationTestService(t)
 	definitionPath := mutationDefinitionPath(root)
