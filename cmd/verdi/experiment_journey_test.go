@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"crypto/ed25519"
 	"encoding/json"
 	"os"
@@ -12,11 +13,16 @@ import (
 	"testing"
 
 	"github.com/jyang234/verdi/internal/canonjson"
+	"github.com/jyang234/verdi/internal/contextcompile"
 	"github.com/jyang234/verdi/internal/execworkspace"
 	"github.com/jyang234/verdi/internal/experiment"
 	"github.com/jyang234/verdi/internal/experimentapp"
 	"github.com/jyang234/verdi/internal/experimentrun"
 	"github.com/jyang234/verdi/internal/fixturegit"
+	forgefake "github.com/jyang234/verdi/internal/forge/fake"
+	"github.com/jyang234/verdi/internal/instructionprojection"
+	"github.com/jyang234/verdi/internal/policyconflict"
+	"github.com/jyang234/verdi/internal/store"
 )
 
 func TestCompleteExperimentCLIJourneyBuiltBinary(t *testing.T) {
@@ -60,6 +66,28 @@ func TestCompleteExperimentCLIJourneyBuiltBinary(t *testing.T) {
 	// make one direct Git edit and require explicit human reconciliation.
 	repo := buildExperimentHumanRepo(t, privateKey.Public().(ed25519.PublicKey))
 	experimentDir := filepath.Dir(wave5CDefinitionPath(repo.Dir))
+	policyDir := filepath.Join(repo.Dir, ".verdi", "policy", "policies")
+	basePolicy := mustReadWave5CFile(t, filepath.Join(policyDir, "experiment.md"))
+	organizationPolicy := bytes.Replace(basePolicy, []byte("id: policy/experiment"), []byte("id: policy/organization"), 1)
+	projectPolicy := bytes.Replace(basePolicy, []byte("id: policy/experiment"), []byte("id: policy/project"), 1)
+	projectPolicy = bytes.Replace(projectPolicy, []byte("classes: [request-path-performance]"), []byte("classes: [request-path-performance, storage-throughput]"), 1)
+	if bytes.Equal(projectPolicy, basePolicy) {
+		t.Fatal("project policy fixture did not attempt the expected allowance weakening")
+	}
+	if err := os.Remove(filepath.Join(policyDir, "experiment.md")); err != nil {
+		t.Fatal(err)
+	}
+	for name, content := range map[string][]byte{
+		"organization.md": organizationPolicy,
+		"project.md":      projectPolicy,
+	} {
+		if err := os.WriteFile(filepath.Join(policyDir, name), content, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	runGitForExperimentTest(t, repo.Dir, "add", "-A", ".verdi/policy/policies")
+	runGitForExperimentTest(t, repo.Dir, "commit", "-q", "-m", "adopt layered journey policy")
+	repo.Head = contextE2ECurrentHead(t, repo.Dir)
 	newDefinition := wave5CProtectedDefinition(t, repo.Dir)
 	newDefinition = bytes.Replace(newDefinition, []byte("#oq-cache\n"), []byte("#oq-cache-cli-journey\n"), 1)
 	candidateRoot := t.TempDir()
@@ -77,12 +105,40 @@ func TestCompleteExperimentCLIJourneyBuiltBinary(t *testing.T) {
 		t.Fatal(err)
 	}
 	installCLIJourneyClosureTarget(t, repo)
-	wave5CWriteProtectedInputs(t, repo.Dir)
 	definitionInput := filepath.Join(t.TempDir(), "experiment-v2.yaml")
-	if err := os.WriteFile(definitionInput, newDefinition, 0o600); err != nil {
+	weakeningProbeDefinition := bytes.Replace(newDefinition, []byte("class: request-path-performance"), []byte("class: storage-throughput"), 1)
+	if bytes.Equal(weakeningProbeDefinition, newDefinition) {
+		t.Fatal("definition fixture did not carry the expected experiment class")
+	}
+	if err := os.WriteFile(definitionInput, weakeningProbeDefinition, 0o600); err != nil {
 		t.Fatal(err)
 	}
 	draftArgs := []string{
+		"experiment", "draft-definition", "--spike", "spec/request-path-spike", "--experiment", "request-path-v2",
+		"--accepted-head", repo.Head, "--definition", definitionInput, "--candidate-root", candidateRoot, "--json",
+	}
+	beforePolicyRefusal := contextE2EPorcelainStatus(t, repo.Dir)
+	policyOut, policyCode := callJSON(repo.Dir, draftArgs...)
+	if policyCode != 1 || !strings.Contains(policyOut, `"code":"policy-refused"`) || !strings.Contains(policyOut, "storage-throughput") || contextE2EPorcelainStatus(t, repo.Dir) != beforePolicyRefusal {
+		t.Fatalf("real layered-policy refusal=%d/%q or mutated the worktree", policyCode, policyOut)
+	}
+	if _, err := os.Stat(experimentDir); !os.IsNotExist(err) {
+		t.Fatalf("real layered-policy refusal created experiment state: %v", err)
+	}
+	repairedProjectPolicy := bytes.Replace(projectPolicy, []byte("classes: [request-path-performance, storage-throughput]"), []byte("classes: [request-path-performance]"), 1)
+	repairedProjectPolicy = bytes.Replace(repairedProjectPolicy, []byte("observation_bytes: 262144"), []byte("observation_bytes: 131072"), 1)
+	repairedProjectPolicy = bytes.Replace(repairedProjectPolicy, []byte("retained_artifact_bytes: 8388608"), []byte("retained_artifact_bytes: 4194304"), 1)
+	if err := os.WriteFile(filepath.Join(policyDir, "project.md"), repairedProjectPolicy, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runGitForExperimentTest(t, repo.Dir, "add", ".verdi/policy/policies/project.md")
+	runGitForExperimentTest(t, repo.Dir, "commit", "-q", "-m", "narrow project experiment policy")
+	repo.Head = contextE2ECurrentHead(t, repo.Dir)
+	wave5CWriteProtectedInputs(t, repo.Dir)
+	if err := os.WriteFile(definitionInput, newDefinition, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	draftArgs = []string{
 		"experiment", "draft-definition", "--spike", "spec/request-path-spike", "--experiment", "request-path-v2",
 		"--accepted-head", repo.Head, "--definition", definitionInput, "--candidate-root", candidateRoot, "--json",
 	}
@@ -275,24 +331,84 @@ func TestCompleteExperimentCLIJourneyBuiltBinary(t *testing.T) {
 
 	// Closure consumes the capsule only after those exact bytes are accepted
 	// in the same repository that carried the unlocked draft and every prior
-	// authority transition.
-	runGitForExperimentTest(t, repo.Dir, "add", ".verdi/specs/active/request-path-spike/experiments/request-path-v2/selected/capsule-manifest.json")
-	runGitForExperimentTest(t, repo.Dir, "commit", "-q", "-m", "accept journey capsule")
-	acceptedCapsuleHead := contextE2ECurrentHead(t, repo.Dir)
-	// Mirror the established production close fixture: keep main at the
-	// accepted capsule, but use a clean detached checkout without locally
-	// adopted policy so the pre-existing conflict gate does not replace this
-	// test's experiment-evidence subject with a separate review ceremony.
-	runGitForExperimentTest(t, repo.Dir, "checkout", "-q", "--detach", acceptedCapsuleHead)
-	runGitForExperimentTest(t, repo.Dir, "rm", "-q", "-r", ".verdi/policy")
-	runGitForExperimentTest(t, repo.Dir, "commit", "-q", "-m", "prepare journey closure checkout")
+	// authority transition. Keep the adopted real policy and its generated
+	// instruction projection in that accepted tree, and exercise the real
+	// conflict gate through its established hermetic no-conflict provider
+	// seam. The gate still probes the real adopted store, strict-decodes the
+	// real context request, seals the current branch/HEAD, and only then lets
+	// the real CSE closure evidence provider run.
+	if _, err := instructionprojection.Generate(repo.Dir); err != nil {
+		t.Fatalf("generate retained journey policy projection: %v", err)
+	}
+	honestManifest := append([]byte(nil), manifestBytes...)
+	tamperedManifest, err := experiment.DecodeCapsuleManifest(honestManifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tamperedManifest.Selected = "baseline"
+	tamperedBytes, err := experiment.EncodeCapsuleManifest(tamperedManifest)
+	if err != nil {
+		t.Fatalf("encode schema-valid tampered capsule: %v", err)
+	}
+	if err := os.WriteFile(wave5CCapsuleManifestPath(repo.Dir), tamperedBytes, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runGitForExperimentTest(t, repo.Dir, "add",
+		".verdi/specs/active/request-path-spike/experiments/request-path-v2/selected/capsule-manifest.json",
+		".verdi/policy/projections", "AGENTS.md")
+	runGitForExperimentTest(t, repo.Dir, "commit", "-q", "-m", "accept adversarial journey capsule")
 	repo.Head = contextE2ECurrentHead(t, repo.Dir)
 	writeCloseExperimentWaiver(t, repo.Dir, repo.Head)
 	writeCloseExperimentGateReportFor(t, repo.Dir, "request-path-spike", repo.Head)
-	closeOut, closeErr, closeCode := runExperimentBuiltBinary(t, bin, repo.Dir, nil,
-		"close", "--preflight", "--force-local", "spec/request-path-spike")
-	if closeCode != 0 || closeErr != "" || !strings.Contains(closeOut, "close: --preflight: READY") {
+	requestPath := contextLifecycleRequestFile(t, repo.Dir, "journey-close-context.json", "spec/request-path-spike", contextcompile.PhaseReview, nil)
+	conflictCalls := 0
+	conflictProvider := contextConflictProviderFunc(func(_ context.Context, request policyconflict.Request) (policyconflict.Result, error) {
+		conflictCalls++
+		accepted := request.Target.AcceptedContext
+		if request.Target.Kind != policyconflict.TargetAcceptedContext || accepted == nil || accepted.Phase != contextcompile.PhaseReview || accepted.Spec != "spec/request-path-spike" {
+			t.Fatalf("journey close conflict target=%+v, want accepted review context", request.Target)
+		}
+		return lifecycleConflictResult(policyconflict.VerdictPass), nil
+	})
+	runJourneyPreflight := func() (string, string, int) {
+		t.Helper()
+		cfg, err := store.Open(repo.Dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var stdout, stderr bytes.Buffer
+		code := runPreflightWithConflict(context.Background(), repo.Dir, "spec/request-path-spike", cfg.Manifest, cfg.Model, forgefake.New(), true, requestPath, conflictProvider, &stdout, &stderr)
+		return stdout.String(), stderr.String(), code
+	}
+	beforeCloseRefusal := contextE2EPorcelainStatus(t, repo.Dir)
+	closeOut, closeErr, closeCode := runJourneyPreflight()
+	if closeCode != 1 || closeErr != "" || !strings.Contains(closeOut, "constitutional conflict: state: pass") || !strings.Contains(closeOut, "[FAIL] experiment request-path-v2") || !strings.Contains(closeOut, "close: --preflight: NOT READY") {
+		t.Fatalf("combined conflict/CSE refusal exit/stdout/stderr=%d/%q/%q", closeCode, closeOut, closeErr)
+	}
+	if contextE2ECurrentHead(t, repo.Dir) != repo.Head || contextE2EPorcelainStatus(t, repo.Dir) != beforeCloseRefusal || !bytes.Equal(tamperedBytes, mustReadWave5CFile(t, wave5CCapsuleManifestPath(repo.Dir))) {
+		t.Fatal("combined conflict/CSE preflight refusal mutated repository state")
+	}
+	if err := os.WriteFile(wave5CCapsuleManifestPath(repo.Dir), honestManifest, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runGitForExperimentTest(t, repo.Dir, "add", ".verdi/specs/active/request-path-spike/experiments/request-path-v2/selected/capsule-manifest.json")
+	runGitForExperimentTest(t, repo.Dir, "commit", "-q", "-m", "restore verified journey capsule")
+	repo.Head = contextE2ECurrentHead(t, repo.Dir)
+	writeCloseExperimentWaiver(t, repo.Dir, repo.Head)
+	writeCloseExperimentGateReportFor(t, repo.Dir, "request-path-spike", repo.Head)
+	closeOut, closeErr, closeCode = runJourneyPreflight()
+	if closeCode != 0 || closeErr != "" || !strings.Contains(closeOut, "constitutional conflict: state: pass") || !strings.Contains(closeOut, "close: --preflight: READY") {
 		t.Fatalf("close --preflight exit/stdout/stderr=%d/%q/%q", closeCode, closeOut, closeErr)
+	}
+	for _, policy := range []string{"organization.md", "project.md"} {
+		runGitForExperimentTest(t, repo.Dir, "cat-file", "-e", "HEAD:.verdi/policy/policies/"+policy)
+	}
+	acceptedProjectPolicy := experimentGitOutput(t, repo.Dir, "show", "HEAD:.verdi/policy/policies/project.md")
+	if strings.Contains(acceptedProjectPolicy, "storage-throughput") || !strings.Contains(acceptedProjectPolicy, "observation_bytes: 131072") || !strings.Contains(acceptedProjectPolicy, "retained_artifact_bytes: 4194304") {
+		t.Fatalf("accepted project policy was not the honest narrowed layer:\n%s", acceptedProjectPolicy)
+	}
+	if conflictCalls != 2 {
+		t.Fatalf("journey close conflict provider calls=%d, want one per CSE preflight", conflictCalls)
 	}
 
 	wantOperations := []string{
@@ -300,13 +416,21 @@ func TestCompleteExperimentCLIJourneyBuiltBinary(t *testing.T) {
 		"propose-ratification", "propose-registration", "publish-capsule", "reconcile-draft",
 		"release-workspaces", "resume", "review-registration", "start", "status", "validate-draft",
 	}
+	registeredOperations := make([]string, 0, len(experimentOperationUsage))
+	for operation := range experimentOperationUsage {
+		registeredOperations = append(registeredOperations, operation)
+	}
+	sort.Strings(registeredOperations)
+	if !reflect.DeepEqual(registeredOperations, wantOperations) {
+		t.Fatalf("production CLI experiment registry=%v, want fixed authority set %v", registeredOperations, wantOperations)
+	}
 	gotOperations := make([]string, 0, len(seen))
 	for operation := range seen {
 		gotOperations = append(gotOperations, operation)
 	}
 	sort.Strings(gotOperations)
-	if !reflect.DeepEqual(gotOperations, wantOperations) {
-		t.Fatalf("CLI experiment operation set=%v, want exactly all 15 %v", gotOperations, wantOperations)
+	if !reflect.DeepEqual(gotOperations, registeredOperations) {
+		t.Fatalf("CLI experiment operation set=%v, want every registered operation %v", gotOperations, registeredOperations)
 	}
 	if !exits[0] || !exits[1] || !exits[2] {
 		t.Fatalf("CLI journey exit classes=%v, want 0/1/2", exits)

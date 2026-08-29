@@ -20,6 +20,15 @@ type journeyWorkspaceReleaser struct {
 	sawFirst bool
 }
 
+// journeyResultVerifier keeps the continuous application journey wired to
+// the one closed decision verifier used by production composition. It is an
+// adapter only: no decision logic is reproduced in this package.
+type journeyResultVerifier struct{}
+
+func (journeyResultVerifier) VerifyResult(def experiment.Definition, observations []experiment.Observation, receipt *experiment.ExecutionReceipt, result experiment.Result) error {
+	return experimentdecision.VerifyResult(def, observations, receipt, result)
+}
+
 func (r *journeyWorkspaceReleaser) Release(workspaceID string) error {
 	r.calls = append(r.calls, workspaceID)
 	if len(r.calls) == 1 {
@@ -150,6 +159,7 @@ func TestCompleteExperimentApplicationJourney(t *testing.T) {
 		// registered experiment, then continue every accepted-state operation
 		// against that one repository identity.
 		identity.ExpectedAcceptedHEAD = testHead
+		service.results = journeyResultVerifier{}
 		locked, err := experiment.DecodeDefinition(mustReadFile(t, definitionPath))
 		if err != nil {
 			t.Fatal(err)
@@ -163,6 +173,73 @@ func TestCompleteExperimentApplicationJourney(t *testing.T) {
 
 		first, second := newRatificationSigner(t), newRatificationSigner(t)
 		subjects := []string{first.subject, second.subject}
+		experimentDir := filepath.Dir(definitionPath)
+		resultPath := filepath.Join(experimentDir, "runs", "run-alpha", "result.json")
+		honestResult := mustReadFile(t, resultPath)
+		forged, err := experiment.DecodeResult(honestResult)
+		if err != nil {
+			t.Fatal(err)
+		}
+		forged.Decision.Winner = "baseline"
+		for i := range forged.Decision.Candidates {
+			switch forged.Decision.Candidates[i].ID {
+			case "baseline":
+				forged.Decision.Candidates[i].Baseline = false
+				forged.Decision.Candidates[i].Eligible = true
+				forged.Decision.Candidates[i].Violations = nil
+			case "cache":
+				forged.Decision.Candidates[i].Baseline = true
+			}
+		}
+		forgedResult, err := experiment.EncodeResult(forged)
+		if err != nil {
+			t.Fatalf("schema-valid forged result: %v", err)
+		}
+		if _, err := experiment.DecodeResult(forgedResult); err != nil {
+			t.Fatalf("strict-decode forged result: %v", err)
+		}
+		if err := os.WriteFile(resultPath, forgedResult, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		forgedDigest, err := experiment.ResultDigest(forged)
+		if err != nil {
+			t.Fatal(err)
+		}
+		git = refreshAcceptedGit(t, service, root, "request-path-v2", subjects...)
+		addReleaseProtectedInputs(t, git, workloadBytes)
+		forgedProof := mintRatificationVerification(t, root, identity, first, subjects, forgedDigest, experiment.DispositionSelectRecommended, "", "")
+		forgedHuman := humanRatificationIdentity(t, identity, forgedProof.Resolution)
+		beforeForgery := snapshotWorktree(t, root)
+		forgedProposal := service.ProposeRatification(ctx, forgedHuman, ratificationProposalInputFrom(forgedProof, forgedDigest, experiment.DispositionSelectRecommended, "", ""))
+		assertJourneyOutcome(t, "forged ratification", forgedProposal.Outcome, ClassificationOperational, "state-invalid")
+		forgedReleaser := &journeyWorkspaceReleaser{manifest: releaseManifestPath(root)}
+		for _, refusal := range []struct {
+			operation string
+			outcome   Outcome
+		}{
+			{operation: "forged publish", outcome: service.PublishRatifiedCapsule(ctx, identity).Outcome},
+			{operation: "forged release", outcome: service.ReleaseRatified(ctx, identity, releaseAuthority(t, forgedReleaser)).Outcome},
+			{operation: "forged closure", outcome: service.VerifyAcceptedClosureEvidence(ctx, identity).Outcome},
+		} {
+			if refusal.outcome.Classification == ClassificationClean {
+				t.Fatalf("%s accepted forged evidence: %+v", refusal.operation, refusal.outcome)
+			}
+		}
+		if len(forgedReleaser.calls) != 0 {
+			t.Fatalf("forged evidence released workspaces: %v", forgedReleaser.calls)
+		}
+		if _, err := os.Stat(filepath.Join(filepath.Dir(definitionPath), "ratification.yaml")); !os.IsNotExist(err) {
+			t.Fatalf("forged evidence wrote ratification: %v", err)
+		}
+		if _, err := os.Stat(releaseManifestPath(root)); !os.IsNotExist(err) {
+			t.Fatalf("forged evidence wrote capsule: %v", err)
+		}
+		if !mapsEqual(beforeForgery, snapshotWorktree(t, root)) {
+			t.Fatal("forged evidence refusals mutated the proposal")
+		}
+		if err := os.WriteFile(resultPath, honestResult, 0o600); err != nil {
+			t.Fatal(err)
+		}
 		git = refreshAcceptedGit(t, service, root, "request-path-v2", subjects...)
 		addReleaseProtectedInputs(t, git, workloadBytes)
 		firstProof := mintRatificationVerification(t, root, identity, first, subjects, winnerDigest, experiment.DispositionSelectRecommended, "", "")
@@ -200,6 +277,19 @@ func TestCompleteExperimentApplicationJourney(t *testing.T) {
 		if status.State != experiment.StateRatified || len(status.Runs) != 2 || status.Reproduction.Reproduced || status.Reproduction.ValidRuns != 2 {
 			t.Fatalf("status omitted an inconclusive rerun or overstated reproduction: %+v", status)
 		}
+		var inconclusive *experiment.RunState
+		for index := range status.Runs {
+			if status.Runs[index].Run == "run-zeta" {
+				inconclusive = &status.Runs[index]
+			}
+		}
+		inconclusiveResult, err := experiment.DecodeResult(mustReadFile(t, filepath.Join(experimentDir, "runs", "run-zeta", "result.json")))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if inconclusive == nil || inconclusive.State != experiment.StateInconclusive || inconclusiveResult.Decision.Winner != "" || inconclusiveResult.Decision.Verdict != experiment.VerdictDisclosedUnproven || len(inconclusiveResult.Decision.Reasons) != 1 || inconclusiveResult.Decision.Reasons[0].Code != experiment.ReasonInsufficientBaselineImprovement {
+			t.Fatalf("run-zeta did not retain its disclosed-unproven insufficient-improvement result: state=%+v result=%+v", inconclusive, inconclusiveResult.Decision)
+		}
 		explained := fixture.service.Explain(ctx, fixture.identity, ExplainInput{Run: "run-alpha"})
 		assertJourneyOutcome(t, "explain", explained.Outcome, ClassificationClean, "clean")
 		if explained.Decision.Winner != "cache" || explained.Reproduction.Reproduced {
@@ -219,7 +309,7 @@ func TestCompleteExperimentApplicationJourney(t *testing.T) {
 			t.Fatalf("published manifest invalid: manifest=%+v err=%v", manifest, err)
 		}
 
-		experimentDir := filepath.Dir(mutationDefinitionPath(fixture.root))
+		experimentDir = filepath.Dir(mutationDefinitionPath(fixture.root))
 		durableBefore := map[string][]byte{
 			"ratification": mustReadFile(t, filepath.Join(experimentDir, "ratification.yaml")),
 			"result":       mustReadFile(t, filepath.Join(experimentDir, "runs", "run-alpha", "result.json")),
