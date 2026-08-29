@@ -215,6 +215,65 @@ func TestAcceptedRegistrationBindsExactPreRegistrationArtifactDigest(t *testing.
 	}
 }
 
+func TestAcceptedRegistrationPreservesArbitraryReconciledCapabilitiesPreimage(t *testing.T) {
+	root, service := mutationTestService(t)
+	identity := testIdentity(t, root, "request-path-v2")
+	identity.Actor = authenticatedHuman(t)
+	capabilitiesPath := filepath.Join(filepath.Dir(mutationDefinitionPath(root)), "evaluator-capabilities.json")
+	priorCapabilities := []byte("arbitrary pre-registration capabilities bytes\n")
+	if err := os.WriteFile(capabilitiesPath, priorCapabilities, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	direct := service.ReviewRegistration(context.Background(), identity)
+	if direct.Outcome.Classification != ClassificationVerdict || direct.Outcome.Code != "direct-draft-unreconciled" {
+		t.Fatalf("ReviewRegistration(direct capabilities edit) outcome = %+v", direct.Outcome)
+	}
+	reconciled := service.ReconcileDraft(context.Background(), identity)
+	if reconciled.Outcome.Classification != ClassificationClean {
+		t.Fatalf("ReconcileDraft(arbitrary prior capabilities) outcome = %+v", reconciled.Outcome)
+	}
+	review := service.ReviewRegistration(context.Background(), identity)
+	if review.Outcome.Classification != ClassificationClean {
+		t.Fatalf("ReviewRegistration(reconciled prior capabilities) outcome = %+v", review.Outcome)
+	}
+	proposal := service.ProposeRegistration(context.Background(), identity, RegistrationInput{ReviewPacketDigest: review.PacketDigest})
+	if proposal.Outcome.Classification != ClassificationClean {
+		t.Fatalf("ProposeRegistration() outcome = %+v", proposal.Outcome)
+	}
+
+	git := gitFromExperimentDir(t, root, "request-path-v2")
+	service.git = git
+	accepted := service.AcceptedRegistration(context.Background(), identity)
+	if accepted.Outcome.Classification != ClassificationClean || !accepted.Accepted {
+		t.Fatalf("AcceptedRegistration(genuine arbitrary preimage) = %+v, want clean", accepted)
+	}
+
+	provenancePath := acceptedExperimentFilePath("request-path-v2", experiment.ProvenanceFile)
+	records, err := experiment.DecodeProvenanceLog(git.blobs[provenancePath])
+	if err != nil {
+		t.Fatal(err)
+	}
+	registration := &records[len(records)-1]
+	registration.PreviousDigest = rawDigest([]byte("forged arbitrary prior"))
+	if err := registration.Seal(); err != nil {
+		t.Fatal(err)
+	}
+	var forged bytes.Buffer
+	for _, record := range records {
+		encoded, err := experiment.EncodeProvenanceRecord(record)
+		if err != nil {
+			t.Fatal(err)
+		}
+		forged.Write(encoded)
+	}
+	git.blobs[provenancePath] = forged.Bytes()
+	accepted = service.AcceptedRegistration(context.Background(), identity)
+	if accepted.Outcome.Classification == ClassificationClean {
+		t.Fatalf("AcceptedRegistration(forged arbitrary prior) = %+v, want refusal", accepted.Outcome)
+	}
+}
+
 func TestDirectEditReconciliationPreservesMergedTypedHistory(t *testing.T) {
 	root, service := mutationTestService(t)
 	definitionPath := mutationDefinitionPath(root)

@@ -631,7 +631,7 @@ func (s *Service) acceptedRatificationAt(ctx context.Context, identity Identity,
 		predecessor.ResultDigest != preimageDigest || !slices.Equal(predecessor.Paths, wantRegistrationPaths) {
 		return acceptedRatificationFacts{}, verdictOutcome("ratification-provenance-incomplete", "the record preceding the ratification is not the complete accepted propose-registration pair")
 	}
-	registrationPriorMatches, err := registrationPreviousDigestMatches(preimageFiles, snapshot.experimentPath, definitionBytes, definition, predecessor.PreviousDigest)
+	registrationPriorMatches, err := registrationPreviousDigestMatches(preimageFiles, snapshot.experimentPath, definitionBytes, definition, predecessor)
 	if err != nil {
 		return acceptedRatificationFacts{}, operationalOutcome("artifact-digest-invalid", err)
 	}

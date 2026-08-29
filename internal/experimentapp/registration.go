@@ -178,13 +178,22 @@ func (s *Service) proposeRegistration(ctx context.Context, identity Identity, in
 	if err != nil {
 		return RegistrationResult{Outcome: operationalOutcome("artifact-digest-invalid", err)}
 	}
+	registrationPaths := []string{capabilitiesPath, definitionPath}
+	previousFiles := make([]experiment.ProvenanceFileSnapshot, len(registrationPaths))
+	for index, filePath := range registrationPaths {
+		data, present := proposed[filePath]
+		previousFiles[index], err = experiment.NewProvenanceFileSnapshot(filePath, data, present)
+		if err != nil {
+			return RegistrationResult{Outcome: operationalOutcome("mutation-provenance-invalid", err)}
+		}
+	}
 	record := experiment.ProvenanceRecord{
 		Schema: experiment.ProvenanceSchema, Experiment: review.Packet.Experiment,
 		Operation:      experiment.MutationProposeRegistration,
 		PreviousDigest: review.ProposedArtifactDigest, ResultDigest: resultDigest,
 		PolicyDigest:   review.Packet.PolicyDigest,
 		PolicyDecision: experiment.ProvenancePolicyDecision{State: experiment.PolicyAllowed, Reasons: []experiment.ProvenancePolicyReason{}},
-		Attribution:    identity.Actor.Attribution(), Paths: []string{capabilitiesPath, definitionPath},
+		Attribution:    identity.Actor.Attribution(), Paths: registrationPaths, PreviousFiles: previousFiles,
 	}
 	sealed, provenanceFile, err := appendProvenance(proposed, review.Packet.ExperimentPath, record)
 	if err != nil {
@@ -289,7 +298,7 @@ func (s *Service) acceptedRegistrationAt(identity Identity, snapshot acceptedSna
 	last := records[len(records)-1]
 	wantIdentity := experiment.ProvenanceExperiment{Spike: identity.Spike, ID: identity.ExperimentID}
 	wantPaths := []string{path.Join(snapshot.experimentPath, "evaluator-capabilities.json"), path.Join(snapshot.experimentPath, "experiment.yaml")}
-	priorMatches, err := registrationPreviousDigestMatches(snapshot.source.files, snapshot.experimentPath, definitionBytes, definition, last.PreviousDigest)
+	priorMatches, err := registrationPreviousDigestMatches(snapshot.source.files, snapshot.experimentPath, definitionBytes, definition, last)
 	if err != nil {
 		return RegistrationResult{Outcome: operationalOutcome("artifact-digest-invalid", err)}
 	}
@@ -306,47 +315,49 @@ func (s *Service) acceptedRegistrationAt(identity Identity, snapshot acceptedSna
 	}
 }
 
-// registrationPreviousDigestMatches proves that previousDigest names an
-// exact mutation-artifact set that the sole ProposeRegistration transform
-// can turn into the accepted locked bytes. The transform appends one fixed
-// lock block and creates or replaces evaluator-capabilities.json. Accepted
-// bytes therefore preserve every possible prior byte except two bounded
-// distinctions: whether the unlocked definition already ended in a newline,
-// and whether the capabilities bytes were absent or already byte-identical.
-// Enumerating those reversible preimages lets the record's digest select the
-// exact prior without accepting an arbitrary first-record anchor.
-func registrationPreviousDigestMatches(files map[string][]byte, experimentPath string, definitionBytes []byte, definition experiment.Definition, previousDigest string) (bool, error) {
+// registrationPreviousDigestMatches restores the exact pre-registration
+// bytes retained in the sealed provenance record, proves the definition
+// transition is the sole appendRegistrationLock transform, and recomputes the
+// prior mutation-artifact digest through the shared artifactSetDigest seam.
+// Retaining the overwritten file bytes is necessary because arbitrary prior
+// evaluator-capabilities bytes are absent from the accepted result tree.
+func registrationPreviousDigestMatches(files map[string][]byte, experimentPath string, definitionBytes []byte, definition experiment.Definition, record experiment.ProvenanceRecord) (bool, error) {
 	if definition.Lock == nil {
 		return false, nil
 	}
-	lockSuffix := []byte("lock:\n  definition_digest: " + definition.Lock.DefinitionDigest + "\n")
-	if !bytes.HasSuffix(definitionBytes, lockSuffix) {
+	if len(record.PreviousFiles) != len(record.Paths) {
 		return false, nil
 	}
-	unlockedWithSeparator := bytes.TrimSuffix(definitionBytes, lockSuffix)
-	unlockedCandidates := [][]byte{append([]byte(nil), unlockedWithSeparator...)}
-	if bytes.HasSuffix(unlockedWithSeparator, []byte("\n")) {
-		unlockedCandidates = append(unlockedCandidates, append([]byte(nil), unlockedWithSeparator[:len(unlockedWithSeparator)-1]...))
-	}
 	definitionPath := path.Join(experimentPath, "experiment.yaml")
-	capabilitiesPath := path.Join(experimentPath, "evaluator-capabilities.json")
-	for _, unlocked := range unlockedCandidates {
-		for _, capabilitiesPresent := range []bool{false, true} {
-			preimage := cloneFileMap(files)
-			preimage[definitionPath] = unlocked
-			if !capabilitiesPresent {
-				delete(preimage, capabilitiesPath)
-			}
-			digest, err := artifactSetDigest(preimage, experimentPath)
-			if err != nil {
-				return false, err
-			}
-			if digest == previousDigest {
-				return true, nil
-			}
+	preimage := cloneFileMap(files)
+	var priorDefinition []byte
+	definitionPresent := false
+	for index, previous := range record.PreviousFiles {
+		if previous.Path != record.Paths[index] {
+			return false, nil
+		}
+		data, present, err := previous.Bytes()
+		if err != nil {
+			return false, err
+		}
+		if present {
+			preimage[previous.Path] = data
+		} else {
+			delete(preimage, previous.Path)
+		}
+		if previous.Path == definitionPath {
+			priorDefinition = data
+			definitionPresent = present
 		}
 	}
-	return false, nil
+	if !definitionPresent || !bytes.Equal(appendRegistrationLock(priorDefinition, definition.Lock.DefinitionDigest), definitionBytes) {
+		return false, nil
+	}
+	digest, err := artifactSetDigest(preimage, experimentPath)
+	if err != nil {
+		return false, err
+	}
+	return digest == record.PreviousDigest, nil
 }
 
 func appendRegistrationLock(definitionBytes []byte, digest string) []byte {

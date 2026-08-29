@@ -1401,14 +1401,14 @@ func TestAcceptedRatificationRequiresRegistrationHistory(t *testing.T) {
 	ratificationPaths := []string{experimentPath + "/ratification.yaml"}
 	seed := "sha256:" + strings.Repeat("5", 64)
 
-	build := func(t *testing.T) (root string, service *Service, human Identity, registrationPrior, preimage, full string, principal governanceprincipal.PrincipalID, subjects []string) {
+	build := func(t *testing.T) (root string, service *Service, human Identity, registrationRecord experiment.ProvenanceRecord, preimage, full string, principal governanceprincipal.PrincipalID, subjects []string) {
 		t.Helper()
 		root, service, identity, winnerDigest, _ := ratifiableService(t)
 		registrationRecords := mutationProvenance(t, root)
 		if len(registrationRecords) == 0 || registrationRecords[len(registrationRecords)-1].Operation != experiment.MutationProposeRegistration {
 			t.Fatalf("ratifiable fixture registration provenance = %+v", registrationRecords)
 		}
-		registrationPrior = registrationRecords[len(registrationRecords)-1].PreviousDigest
+		registrationRecord = registrationRecords[len(registrationRecords)-1]
 		signerA := newRatificationSigner(t)
 		signerB := newRatificationSigner(t)
 		subjects = []string{signerA.subject, signerB.subject}
@@ -1421,7 +1421,7 @@ func TestAcceptedRatificationRequiresRegistrationHistory(t *testing.T) {
 			t.Fatal(err)
 		}
 		preimage, full = ratificationChainDigests(t, root, encoded)
-		return root, service, human, registrationPrior, preimage, full, verification.Resolution.PrincipalID, subjects
+		return root, service, human, registrationRecord, preimage, full, verification.Resolution.PrincipalID, subjects
 	}
 
 	t.Run("single propose-ratification record is not clean", func(t *testing.T) {
@@ -1496,7 +1496,7 @@ func TestAcceptedRatificationRequiresRegistrationHistory(t *testing.T) {
 	})
 
 	t.Run("distinct authenticated principals may register and ratify", func(t *testing.T) {
-		root, service, human, registrationPrior, preimage, full, principal, subjects := build(t)
+		root, service, human, registrationRecord, preimage, full, principal, subjects := build(t)
 		ratifierAttribution, err := governanceprincipal.NewPrincipalAttribution(principal)
 		if err != nil {
 			t.Fatal(err)
@@ -1509,8 +1509,10 @@ func TestAcceptedRatificationRequiresRegistrationHistory(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+		registration := ratificationHistoryRecord(experiment.MutationProposeRegistration, registrationRecord.PreviousDigest, preimage, registrationPaths, registrarAttribution)
+		registration.PreviousFiles = append([]experiment.ProvenanceFileSnapshot(nil), registrationRecord.PreviousFiles...)
 		writeRatificationProvenanceLog(t, root, service, []experiment.ProvenanceRecord{
-			ratificationHistoryRecord(experiment.MutationProposeRegistration, registrationPrior, preimage, registrationPaths, registrarAttribution),
+			registration,
 			ratificationHistoryRecord(experiment.MutationProposeRatification, preimage, full, ratificationPaths, ratifierAttribution),
 		})
 		plantRatificationGovernanceProfile(service.git.(*fakeGit), subjects...)
