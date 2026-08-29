@@ -451,6 +451,56 @@ func TestBuildExecutionReceiptStrictRoundTripDigestAndCloneSafety(t *testing.T) 
 	}
 }
 
+func TestBuildExecutionReceiptEncodesZeroFixturesAsPresentEmptyArray(t *testing.T) {
+	def, caps, capsBytes := testDefinition(t, []string{"alpha", "beta"}, 0)
+	def.Fixtures = []experiment.ArtifactRef{}
+	def.ProtectedPaths = []string{"contracts/behavioral.json", "inputs/workload.json"}
+	def = relockDefinition(t, def)
+
+	root := t.TempDir()
+	writeTestFile(t, root, "inputs/workload.json", "workload")
+	writeTestFile(t, root, "contracts/behavioral.json", "contract")
+	resolved, err := ResolveInputs(context.Background(), staticInputs{values: map[string]ResolvedInput{
+		def.Workload.ID: {ID: def.Workload.ID, Path: "inputs/workload.json", Digest: def.Workload.Digest},
+		def.Contract.ID: {ID: def.Contract.ID, Path: "contracts/behavioral.json", Digest: def.Contract.Digest},
+	}}, root, def)
+	if err != nil {
+		t.Fatal(err)
+	}
+	auth := testAuthorization(t, def, false)
+	receipt, err := buildExecutionReceipt(ReceiptInput{
+		Definition:        def,
+		Run:               "run-1",
+		Capabilities:      caps,
+		CapabilitiesBytes: capsBytes,
+		Authorization:     mustResolveAuthorization(t, def, caps, auth),
+		Inputs:            resolved,
+		CandidatePatches:  candidatePatches(t, def),
+		Fingerprint:       testFingerprint(t, def, caps, auth, resolved),
+		Enforcement: execworkspace.EnforcementReport{
+			Rows: []execworkspace.EnforcementReportRow{
+				{Kind: execworkspace.GrantProcessExecution, Applied: true, Reason: "allowlist applied"},
+				{Kind: execworkspace.GrantTimeouts, Applied: true, Reason: "timeout applied"},
+			},
+			Network: execworkspace.NetworkEnforcement{Mode: execworkspace.NetworkDeny, Configured: true, Reason: "linux namespace configured"},
+		},
+		Versions: experiment.ReceiptVersions{Verdi: "v-test", RecommendationEngine: string(def.Algorithm)},
+	}, linuxHostRuntimeFacts())
+	if err != nil {
+		t.Fatalf("BuildExecutionReceipt(zero fixtures): %v", err)
+	}
+	if receipt.Inputs == nil || receipt.Inputs.Fixtures == nil || len(receipt.Inputs.Fixtures) != 0 {
+		t.Fatalf("receipt inputs fixtures = %#v, want present empty array", receipt.Inputs)
+	}
+	encoded, err := experiment.EncodeExecutionReceipt(receipt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(encoded), `"fixtures":[]`) {
+		t.Fatalf("encoded zero-fixture receipt = %s, want fixtures:[]", encoded)
+	}
+}
+
 func TestVerifyExecutionReceiptRejectsChangedSlotPathsWhenDigestsEqual(t *testing.T) {
 	def, caps, capsBytes := testDefinition(t, []string{"alpha", "beta"}, 0)
 	def.Contract.Digest = def.Workload.Digest
@@ -787,6 +837,14 @@ func candidatePatches(t *testing.T, def experiment.Definition) map[string][]byte
 
 func testFingerprint(t *testing.T, def experiment.Definition, caps experiment.Capabilities, authorization ExecutionAuthorization, inputs ResolvedInputs) []byte {
 	t.Helper()
+	inputDigests := map[string]string{
+		"evaluator:" + def.Evaluator.Argv[0]: strings.TrimPrefix(def.Evaluator.Digest, "sha256:"),
+		inputs.Workload.Path:                 strings.TrimPrefix(inputs.Workload.Digest, "sha256:"),
+		inputs.Contract.Path:                 strings.TrimPrefix(inputs.Contract.Digest, "sha256:"),
+	}
+	for _, fixture := range inputs.Fixtures {
+		inputDigests[fixture.Path] = strings.TrimPrefix(fixture.Digest, "sha256:")
+	}
 	fingerprint := experiment.ExecutionFingerprint{
 		OS:   "linux",
 		Arch: "amd64",
@@ -796,13 +854,8 @@ func testFingerprint(t *testing.T, def experiment.Definition, caps experiment.Ca
 			"runtime":               runtime.Version(),
 			"verdi":                 "v-test",
 		},
-		Env: map[string]*string{"LANG": pointer(authorization.DeclaredEnv["LANG"])},
-		InputDigests: map[string]string{
-			"evaluator:" + def.Evaluator.Argv[0]: strings.TrimPrefix(def.Evaluator.Digest, "sha256:"),
-			inputs.Workload.Path:                 strings.TrimPrefix(inputs.Workload.Digest, "sha256:"),
-			inputs.Fixtures[0].Path:              strings.TrimPrefix(inputs.Fixtures[0].Digest, "sha256:"),
-			inputs.Contract.Path:                 strings.TrimPrefix(inputs.Contract.Digest, "sha256:"),
-		},
+		Env:          map[string]*string{"LANG": pointer(authorization.DeclaredEnv["LANG"])},
+		InputDigests: inputDigests,
 	}
 	bytes, err := canonjson.Marshal(fingerprint)
 	if err != nil {

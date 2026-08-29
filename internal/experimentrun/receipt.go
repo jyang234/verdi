@@ -191,9 +191,11 @@ func buildExecutionReceipt(input ReceiptInput, host hostRuntimeFacts) (experimen
 }
 
 func receiptInputs(inputs ResolvedInputs) *experiment.ReceiptInputs {
+	fixtures := make([]experiment.ResolvedArtifact, len(inputs.Fixtures))
+	copy(fixtures, inputs.Fixtures)
 	return &experiment.ReceiptInputs{
 		Workload: inputs.Workload,
-		Fixtures: append([]experiment.ResolvedArtifact(nil), inputs.Fixtures...),
+		Fixtures: fixtures,
 		Contract: inputs.Contract,
 	}
 }
