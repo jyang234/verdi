@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -1593,4 +1594,113 @@ func envValue(env []string, name string) string {
 		}
 	}
 	return ""
+}
+
+// TestValidateProfileAdapterArms proves Amendment 002 §3's consumer-local
+// profile arms: a Claude request carries an exact model and
+// CLAUDE_CONFIG_DIR bound to the activated profile and no Codex home, while a
+// Codex request is unchanged and admits neither Claude field.
+func TestValidateProfileAdapterArms(t *testing.T) {
+	t.Parallel()
+
+	newArmProfile := func(t *testing.T, adapter contextevent.Adapter) (ExecutionRequest, WorkspaceFacts, ResolvedProfile) {
+		t.Helper()
+		envRoot := t.TempDir()
+		workspacePath := filepath.Join(envRoot, "workspace")
+		if err := os.MkdirAll(workspacePath, 0o755); err != nil {
+			t.Fatalf("mkdir workspace: %v", err)
+		}
+		claudeConfigDir := filepath.Join(envRoot, "claude-config")
+		codexHome := filepath.Join(envRoot, "codex-home")
+		executable := "/usr/bin/adapter-test"
+		grants := execworkspace.GrantSet{Grants: []execworkspace.Grant{
+			// Network is granted because deny is unconfigurable on darwin, where
+			// BuildProfile refuses an unappliable required control.
+			{Kind: execworkspace.GrantNetwork},
+			{Kind: execworkspace.GrantProcessExecution, Argv0s: []string{executable}},
+		}}
+		declared := map[string]string{"CODEX_HOME": codexHome}
+		if adapter == contextevent.AdapterClaude {
+			declared = map[string]string{"CLAUDE_CONFIG_DIR": claudeConfigDir}
+		}
+		profile, enforcement, err := execworkspace.BuildProfile(workspacePath, envRoot, grants, declared)
+		if err != nil {
+			t.Fatalf("BuildProfile: %v", err)
+		}
+		ref := LogicalRef{Digest: "sha256:" + strings.Repeat("b", 64)}
+		request := ExecutionRequest{
+			Adapter: adapter, AdapterVersion: "1.2.3", Profile: ref, Grants: grants,
+		}
+		workspace := WorkspaceFacts{Verification: proven(), Path: workspacePath}
+		resolved := ResolvedProfile{
+			Verification: proven(), Ref: ref, Digest: ref.Digest,
+			Name: "sealed-project", Executable: executable,
+			AdapterVersion: "1.2.3", DecoderProfile: "decoder-v1",
+			WorkspacePath: workspacePath, Profile: profile, Grants: grants,
+			Enforcement:        *enforcement,
+			PolicySecretValues: [][]byte{[]byte("fixture-classified-secret")}, ClassificationComplete: true,
+		}
+		if adapter == contextevent.AdapterClaude {
+			resolved.Model = "claude-model-full-id"
+			resolved.ClaudeConfigDir = claudeConfigDir
+		} else {
+			resolved.CodexHome = codexHome
+		}
+		return request, workspace, resolved
+	}
+
+	t.Run("claude_arm_accepted", func(t *testing.T) {
+		t.Parallel()
+		request, workspace, profile := newArmProfile(t, contextevent.AdapterClaude)
+		if err := validateProfile(request, workspace, profile); err != nil {
+			t.Fatalf("validateProfile(claude arm) = %v, want nil", err)
+		}
+	})
+
+	t.Run("codex_arm_accepted", func(t *testing.T) {
+		t.Parallel()
+		request, workspace, profile := newArmProfile(t, contextevent.AdapterCodex)
+		if err := validateProfile(request, workspace, profile); err != nil {
+			t.Fatalf("validateProfile(codex arm) = %v, want nil", err)
+		}
+	})
+
+	negatives := []struct {
+		name    string
+		adapter contextevent.Adapter
+		mutate  func(*ResolvedProfile)
+	}{
+		{"claude_missing_model", contextevent.AdapterClaude, func(p *ResolvedProfile) { p.Model = "" }},
+		{"claude_carries_codex_home", contextevent.AdapterClaude, func(p *ResolvedProfile) { p.CodexHome = "/abs/codex" }},
+		{"claude_missing_config_dir", contextevent.AdapterClaude, func(p *ResolvedProfile) { p.ClaudeConfigDir = "" }},
+		{"claude_relative_config_dir", contextevent.AdapterClaude, func(p *ResolvedProfile) { p.ClaudeConfigDir = "relative/claude" }},
+		{"claude_config_dir_unbound", contextevent.AdapterClaude, func(p *ResolvedProfile) { p.ClaudeConfigDir = "/other/claude-config" }},
+		{"codex_carries_model", contextevent.AdapterCodex, func(p *ResolvedProfile) { p.Model = "claude-model-full-id" }},
+		{"codex_carries_claude_config_dir", contextevent.AdapterCodex, func(p *ResolvedProfile) { p.ClaudeConfigDir = "/abs/claude-config" }},
+		{"codex_missing_codex_home", contextevent.AdapterCodex, func(p *ResolvedProfile) { p.CodexHome = "" }},
+	}
+	for _, tc := range negatives {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			request, workspace, profile := newArmProfile(t, tc.adapter)
+			tc.mutate(&profile)
+			err := validateProfile(request, workspace, profile)
+			if err == nil {
+				t.Fatalf("validateProfile(%s) = nil, want verdict", tc.name)
+			}
+			if !errors.Is(err, ErrVerdict) {
+				t.Fatalf("validateProfile(%s) = %v, want a verdict failure", tc.name, err)
+			}
+		})
+	}
+
+	t.Run("unknown_adapter_fails_closed", func(t *testing.T) {
+		t.Parallel()
+		request, workspace, profile := newArmProfile(t, contextevent.AdapterClaude)
+		request.Adapter = contextevent.Adapter("unknown-adapter")
+		err := validateProfile(request, workspace, profile)
+		if err == nil || !errors.Is(err, ErrVerdict) {
+			t.Fatalf("validateProfile(unknown adapter) = %v, want a verdict failure", err)
+		}
+	})
 }

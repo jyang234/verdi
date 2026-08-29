@@ -941,7 +941,7 @@ func runSuccessfulSealedStart(t *testing.T, bin string, outputFile, outputFailur
 	if strings.Contains(string(envBytes), "VERDI_HOSTILE_AMBIENT_SECRET") || !strings.Contains(string(envBytes), "CODEX_HOME="+codexHome) {
 		t.Fatalf("provider environment crossed ambient boundary: %s", envBytes)
 	}
-	providerInput, err := sealedcodex.DecodeProviderInput(bytes.NewReader(mustReadFile(t, stdinPath)))
+	providerInput, err := sealedexec.DecodeProviderInput(bytes.NewReader(mustReadFile(t, stdinPath)))
 	if err != nil {
 		t.Fatalf("provider input: %v", err)
 	}
@@ -1288,7 +1288,7 @@ func runSuccessfulSealedResume(t *testing.T, bin string) {
 	if string(argvBytes) != wantArgv {
 		t.Fatalf("resume provider argv = %q, want %q", argvBytes, wantArgv)
 	}
-	if _, err := sealedcodex.DecodeProviderInput(bytes.NewReader(mustReadFile(t, stdinPath))); err != nil {
+	if _, err := sealedexec.DecodeProviderInput(bytes.NewReader(mustReadFile(t, stdinPath))); err != nil {
 		t.Fatalf("resume provider input: %v", err)
 	}
 	marker, err := os.ReadFile(execworkspace.ReleasedPath(fixture.root, workspaceID))
@@ -2450,4 +2450,143 @@ func sealedTestDigest(value string) string { return sealedRawDigest([]byte(value
 func sealedRawDigest(data []byte) string {
 	sum := sha256.Sum256(data)
 	return "sha256:" + hex.EncodeToString(sum[:])
+}
+
+// TestResolvedProfileFromMaterialArms proves the consumer-local resolved
+// profile copies Amendment 002 §3's Claude model and configuration directory
+// exactly from the controller material, declares the Amendment's fixed Claude
+// environment rows, and never substitutes the logical profile name for a
+// model.
+func TestResolvedProfileFromMaterialArms(t *testing.T) {
+	t.Parallel()
+
+	newMaterial := func(t *testing.T, claude bool) (sealedexec.ProfileMaterial, string, string, execworkspace.GrantSet) {
+		t.Helper()
+		envRoot := t.TempDir()
+		workspacePath := filepath.Join(envRoot, "workspace")
+		if err := os.MkdirAll(workspacePath, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		executable := filepath.Join(envRoot, "provider")
+		if err := os.WriteFile(executable, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		grants := execworkspace.GrantSet{Grants: []execworkspace.Grant{
+			// Network is granted because deny is unconfigurable on darwin.
+			{Kind: execworkspace.GrantNetwork},
+			{Kind: execworkspace.GrantProcessExecution, Argv0s: []string{executable}},
+		}}
+		ref := sealedexec.LogicalRef{Digest: "sha256:" + strings.Repeat("c", 64)}
+		material := sealedexec.ProfileMaterial{
+			Ref: ref, Name: "sealed-project", AbsoluteExecutable: executable,
+			AbsoluteEnvRoot: envRoot, AbsoluteCodexHome: filepath.Join(envRoot, "codex-home"),
+			AdapterVersion: "1.2.3", DecoderProfile: "codex-jsonl-v1",
+		}
+		if claude {
+			material.AbsoluteCodexHome = ""
+			material.Model = "claude-model-full-id"
+			material.ClaudeConfigDir = filepath.Join(envRoot, "claude-config")
+			material.DecoderProfile = "claude-stream-json-v1"
+		}
+		return material, workspacePath, envRoot, grants
+	}
+
+	t.Run("claude_arm_copied_and_declared", func(t *testing.T) {
+		t.Parallel()
+		material, workspacePath, _, grants := newMaterial(t, true)
+		resolved, err := resolvedProfileFromMaterial(material, material.Ref, workspacePath, grants)
+		if err != nil {
+			t.Fatalf("resolvedProfileFromMaterial(claude) = %v, want nil", err)
+		}
+		if resolved.Model != material.Model {
+			t.Fatalf("Model = %q, want exactly %q", resolved.Model, material.Model)
+		}
+		if resolved.ClaudeConfigDir != material.ClaudeConfigDir {
+			t.Fatalf("ClaudeConfigDir = %q, want exactly %q", resolved.ClaudeConfigDir, material.ClaudeConfigDir)
+		}
+		if resolved.Name == resolved.Model {
+			t.Fatal("the logical profile name must never be the provider model")
+		}
+		if resolved.CodexHome != "" {
+			t.Fatalf("CodexHome = %q, want empty on the Claude arm", resolved.CodexHome)
+		}
+		env := resolved.Profile.Env()
+		for name, want := range map[string]string{
+			"CLAUDE_CONFIG_DIR":                        material.ClaudeConfigDir,
+			"DISABLE_AUTOUPDATER":                      "1",
+			"CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
+			"CLAUDE_CODE_AUTO_CONNECT_IDE":             "false",
+		} {
+			if got := testEnvValue(env, name); got != want {
+				t.Fatalf("activated %s = %q, want %q", name, got, want)
+			}
+		}
+		if testEnvValue(env, "CODEX_HOME") != "" {
+			t.Fatal("the Claude arm must not declare CODEX_HOME")
+		}
+	})
+
+	t.Run("codex_arm_unchanged", func(t *testing.T) {
+		t.Parallel()
+		material, workspacePath, _, grants := newMaterial(t, false)
+		resolved, err := resolvedProfileFromMaterial(material, material.Ref, workspacePath, grants)
+		if err != nil {
+			t.Fatalf("resolvedProfileFromMaterial(codex) = %v, want nil", err)
+		}
+		if resolved.Model != "" || resolved.ClaudeConfigDir != "" {
+			t.Fatalf("codex arm carries Claude fields: model=%q dir=%q", resolved.Model, resolved.ClaudeConfigDir)
+		}
+		env := resolved.Profile.Env()
+		if got := testEnvValue(env, "CODEX_HOME"); got != material.AbsoluteCodexHome {
+			t.Fatalf("activated CODEX_HOME = %q, want %q", got, material.AbsoluteCodexHome)
+		}
+		if testEnvValue(env, "CLAUDE_CONFIG_DIR") != "" {
+			t.Fatal("the Codex arm must not declare CLAUDE_CONFIG_DIR")
+		}
+	})
+
+	negatives := []struct {
+		name   string
+		claude bool
+		mutate func(*sealedexec.ProfileMaterial)
+	}{
+		{"both_arms_selected", true, func(m *sealedexec.ProfileMaterial) { m.AbsoluteCodexHome = "/abs/codex-home" }},
+		{"no_arm_selected", false, func(m *sealedexec.ProfileMaterial) { m.AbsoluteCodexHome = "" }},
+		{"claude_missing_model", true, func(m *sealedexec.ProfileMaterial) { m.Model = "" }},
+		{"claude_relative_config_dir", true, func(m *sealedexec.ProfileMaterial) { m.ClaudeConfigDir = "claude-config" }},
+		{"claude_config_dir_outside_env_root", true, func(m *sealedexec.ProfileMaterial) { m.ClaudeConfigDir = "/tmp/elsewhere/claude-config" }},
+		{"claude_config_dir_is_env_root", true, func(m *sealedexec.ProfileMaterial) { m.ClaudeConfigDir = m.AbsoluteEnvRoot }},
+		{"codex_relative_home", false, func(m *sealedexec.ProfileMaterial) { m.AbsoluteCodexHome = "codex-home" }},
+		{"relative_executable", false, func(m *sealedexec.ProfileMaterial) { m.AbsoluteExecutable = "provider" }},
+	}
+	for _, tc := range negatives {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			material, workspacePath, _, grants := newMaterial(t, tc.claude)
+			tc.mutate(&material)
+			_, err := resolvedProfileFromMaterial(material, material.Ref, workspacePath, grants)
+			if err == nil {
+				t.Fatalf("resolvedProfileFromMaterial(%s) = nil, want a refusal", tc.name)
+			}
+		})
+	}
+
+	t.Run("material_ref_mismatch_refused", func(t *testing.T) {
+		t.Parallel()
+		material, workspacePath, _, grants := newMaterial(t, true)
+		other := sealedexec.LogicalRef{Digest: "sha256:" + strings.Repeat("d", 64)}
+		if _, err := resolvedProfileFromMaterial(material, other, workspacePath, grants); err == nil {
+			t.Fatal("resolvedProfileFromMaterial with a contradicting ref = nil, want a refusal")
+		}
+	})
+}
+
+func testEnvValue(env []string, name string) string {
+	prefix := name + "="
+	for _, row := range env {
+		if strings.HasPrefix(row, prefix) {
+			return strings.TrimPrefix(row, prefix)
+		}
+	}
+	return ""
 }

@@ -36,23 +36,23 @@ func TestClaudeAdapterParityContract_Static(t *testing.T) {
 
 	t.Run("nil_process_rejected", func(t *testing.T) {
 		dp := newTestProcessor(t)
-		_, err := New(nil, dp)
+		_, err := New(nil, dp, claudeTestMCPConfig(t.TempDir()))
 		if err == nil {
 			t.Fatal("New(nil process) should return error")
 		}
 	})
 
 	t.Run("nil_processor_rejected", func(t *testing.T) {
-		_, err := New(&testProbeProcess{}, nil)
+		_, err := New(&testProbeProcess{}, nil, claudeTestMCPConfig(t.TempDir()))
 		if err == nil {
 			t.Fatal("New(nil processor) should return error")
 		}
 	})
 
 	t.Run("verify_adapter_identity_checks", func(t *testing.T) {
-		launch, _ := claudeTestLaunch(t, sealedexec.ActionStart)
+		launch, envRoot := claudeTestLaunch(t, sealedexec.ActionStart)
 		dp := newTestProcessor(t)
-		adapter, err := New(&testProbeProcess{version: launch.Request.AdapterVersion}, dp)
+		adapter, err := newClaudeTestAdapter(t, &testProbeProcess{version: launch.Request.AdapterVersion}, dp, envRoot)
 		if err != nil {
 			t.Fatalf("New: %v", err)
 		}
@@ -78,10 +78,10 @@ func TestClaudeAdapterParityContract_Static(t *testing.T) {
 	})
 
 	t.Run("version_probe_argv", func(t *testing.T) {
-		launch, _ := claudeTestLaunch(t, sealedexec.ActionStart)
+		launch, envRoot := claudeTestLaunch(t, sealedexec.ActionStart)
 		pp := &testProbeProcess{version: launch.Request.AdapterVersion}
 		dp := newTestProcessor(t)
-		adapter, err := New(pp, dp)
+		adapter, err := newClaudeTestAdapter(t, pp, dp, envRoot)
 		if err != nil {
 			t.Fatalf("New: %v", err)
 		}
@@ -105,7 +105,7 @@ func TestClaudeAdapterParityContract_Static(t *testing.T) {
 		launch, envRoot := claudeTestLaunch(t, sealedexec.ActionStart)
 		pp := &testProbeProcess{version: launch.Request.AdapterVersion}
 		dp := newTestProcessor(t)
-		adapter, err := New(pp, dp)
+		adapter, err := newClaudeTestAdapter(t, pp, dp, envRoot)
 		if err != nil {
 			t.Fatalf("New: %v", err)
 		}
@@ -123,7 +123,7 @@ func TestClaudeAdapterParityContract_Static(t *testing.T) {
 			"--input-format", "stream-json",
 			"--output-format", "stream-json",
 			"--verbose",
-			"--model", launch.Profile.Name,
+			"--model", launch.Profile.Model,
 			"--permission-mode", "bypassPermissions",
 			"--strict-mcp-config",
 			"--mcp-config", mcpConfigPath,
@@ -148,7 +148,7 @@ func TestClaudeAdapterParityContract_Static(t *testing.T) {
 		launch, envRoot := claudeTestLaunch(t, sealedexec.ActionResume)
 		pp := &testProbeProcess{version: launch.Request.AdapterVersion}
 		dp := newTestProcessor(t)
-		adapter, err := New(pp, dp)
+		adapter, err := newClaudeTestAdapter(t, pp, dp, envRoot)
 		if err != nil {
 			t.Fatalf("New: %v", err)
 		}
@@ -167,7 +167,7 @@ func TestClaudeAdapterParityContract_Static(t *testing.T) {
 			"--input-format", "stream-json",
 			"--output-format", "stream-json",
 			"--verbose",
-			"--model", launch.Profile.Name,
+			"--model", launch.Profile.Model,
 			"--permission-mode", "bypassPermissions",
 			"--strict-mcp-config",
 			"--mcp-config", mcpConfigPath,
@@ -180,10 +180,10 @@ func TestClaudeAdapterParityContract_Static(t *testing.T) {
 	})
 
 	t.Run("stdin_exact_format", func(t *testing.T) {
-		launch, _ := claudeTestLaunch(t, sealedexec.ActionStart)
+		launch, envRoot := claudeTestLaunch(t, sealedexec.ActionStart)
 		pp := &testProbeProcess{version: launch.Request.AdapterVersion}
 		dp := newTestProcessor(t)
-		adapter, err := New(pp, dp)
+		adapter, err := newClaudeTestAdapter(t, pp, dp, envRoot)
 		if err != nil {
 			t.Fatalf("New: %v", err)
 		}
@@ -220,11 +220,11 @@ func TestClaudeAdapterParityContract_Static(t *testing.T) {
 	})
 
 	t.Run("api_key_not_in_policy_secrets_refuses", func(t *testing.T) {
-		launch, _ := claudeTestLaunch(t, sealedexec.ActionStart)
+		launch, envRoot := claudeTestLaunch(t, sealedexec.ActionStart)
 		launch.Profile.PolicySecretValues = [][]byte{[]byte("other-secret-not-api-key")}
 		pp := &testProbeProcess{version: launch.Request.AdapterVersion}
 		dp := newTestProcessor(t)
-		adapter, err := New(pp, dp)
+		adapter, err := newClaudeTestAdapter(t, pp, dp, envRoot)
 		if err != nil {
 			t.Fatalf("New: %v", err)
 		}
@@ -257,7 +257,7 @@ func TestClaudeAdapterParityContract_Static(t *testing.T) {
 		launch.Profile.Executable = executable
 		pp := &testProbeProcess{version: launch.Request.AdapterVersion}
 		dp := newTestProcessor(t)
-		adapter, err := New(pp, dp)
+		adapter, err := newClaudeTestAdapter(t, pp, dp, envRoot)
 		if err != nil {
 			t.Fatalf("New: %v", err)
 		}
@@ -268,11 +268,11 @@ func TestClaudeAdapterParityContract_Static(t *testing.T) {
 	})
 
 	t.Run("classification_incomplete_refuses", func(t *testing.T) {
-		launch, _ := claudeTestLaunch(t, sealedexec.ActionStart)
+		launch, envRoot := claudeTestLaunch(t, sealedexec.ActionStart)
 		launch.Profile.ClassificationComplete = false
 		pp := &testProbeProcess{version: launch.Request.AdapterVersion}
 		dp := newTestProcessor(t)
-		adapter, err := New(pp, dp)
+		adapter, err := newClaudeTestAdapter(t, pp, dp, envRoot)
 		if err != nil {
 			t.Fatalf("New: %v", err)
 		}
@@ -283,10 +283,10 @@ func TestClaudeAdapterParityContract_Static(t *testing.T) {
 	})
 
 	t.Run("review_resume_refused", func(t *testing.T) {
-		launch, _ := claudeTestLaunch(t, sealedexec.ActionResume)
+		launch, envRoot := claudeTestLaunch(t, sealedexec.ActionResume)
 		launch.Review = &sealedexec.ReviewLaunch{Round: "r0", PacketDigest: claudeTestDigest([]byte("packet")), Model: "some-model"}
 		dp := newTestProcessor(t)
-		adapter, err := New(&testProbeProcess{}, dp)
+		adapter, err := newClaudeTestAdapter(t, &testProbeProcess{}, dp, envRoot)
 		if err != nil {
 			t.Fatalf("New: %v", err)
 		}
@@ -297,9 +297,9 @@ func TestClaudeAdapterParityContract_Static(t *testing.T) {
 	})
 
 	t.Run("nil_context_refused", func(t *testing.T) {
-		launch, _ := claudeTestLaunch(t, sealedexec.ActionStart)
+		launch, envRoot := claudeTestLaunch(t, sealedexec.ActionStart)
 		dp := newTestProcessor(t)
-		adapter, err := New(&testProbeProcess{}, dp)
+		adapter, err := newClaudeTestAdapter(t, &testProbeProcess{}, dp, envRoot)
 		if err != nil {
 			t.Fatalf("New: %v", err)
 		}
@@ -310,10 +310,10 @@ func TestClaudeAdapterParityContract_Static(t *testing.T) {
 	})
 
 	t.Run("version_mismatch_refuses", func(t *testing.T) {
-		launch, _ := claudeTestLaunch(t, sealedexec.ActionStart)
+		launch, envRoot := claudeTestLaunch(t, sealedexec.ActionStart)
 		pp := &testProbeProcess{version: "WRONG-VERSION"}
 		dp := newTestProcessor(t)
-		adapter, err := New(pp, dp)
+		adapter, err := newClaudeTestAdapter(t, pp, dp, envRoot)
 		if err != nil {
 			t.Fatalf("New: %v", err)
 		}
@@ -332,10 +332,10 @@ func TestClaudeAdapterParityContract_Static(t *testing.T) {
 
 func TestClaudeAdapterParityContract_Behavioral(t *testing.T) {
 	t.Run("start_fixture_observation_kinds", func(t *testing.T) {
-		launch, _ := claudeTestLaunch(t, sealedexec.ActionStart)
+		launch, envRoot := claudeTestLaunch(t, sealedexec.ActionStart)
 		pp := &testProbeProcess{version: launch.Request.AdapterVersion, output: mustClaudeFixture(t, "claude-start.jsonl")}
 		dp := newTestProcessor(t)
-		adapter, err := New(pp, dp)
+		adapter, err := newClaudeTestAdapter(t, pp, dp, envRoot)
 		if err != nil {
 			t.Fatalf("New: %v", err)
 		}
@@ -360,10 +360,10 @@ func TestClaudeAdapterParityContract_Behavioral(t *testing.T) {
 	})
 
 	t.Run("start_fixture_adapter_start_has_no_detail", func(t *testing.T) {
-		launch, _ := claudeTestLaunch(t, sealedexec.ActionStart)
+		launch, envRoot := claudeTestLaunch(t, sealedexec.ActionStart)
 		pp := &testProbeProcess{version: launch.Request.AdapterVersion, output: mustClaudeFixture(t, "claude-start.jsonl")}
 		dp := newTestProcessor(t)
-		adapter, err := New(pp, dp)
+		adapter, err := newClaudeTestAdapter(t, pp, dp, envRoot)
 		if err != nil {
 			t.Fatalf("New: %v", err)
 		}
@@ -385,11 +385,11 @@ func TestClaudeAdapterParityContract_Behavioral(t *testing.T) {
 	})
 
 	t.Run("resume_fixture_starts_with_resume_kind", func(t *testing.T) {
-		launch, _ := claudeTestLaunch(t, sealedexec.ActionResume)
+		launch, envRoot := claudeTestLaunch(t, sealedexec.ActionResume)
 		session := "claude-sess-resume-001"
 		pp := &testProbeProcess{version: launch.Request.AdapterVersion, output: mustClaudeFixture(t, "claude-resume.jsonl")}
 		dp := newTestProcessor(t)
-		adapter, err := New(pp, dp)
+		adapter, err := newClaudeTestAdapter(t, pp, dp, envRoot)
 		if err != nil {
 			t.Fatalf("New: %v", err)
 		}
@@ -411,11 +411,11 @@ func TestClaudeAdapterParityContract_Behavioral(t *testing.T) {
 	})
 
 	t.Run("resume_fixture_thinking_yields_provider_summary", func(t *testing.T) {
-		launch, _ := claudeTestLaunch(t, sealedexec.ActionResume)
+		launch, envRoot := claudeTestLaunch(t, sealedexec.ActionResume)
 		session := "claude-sess-resume-001"
 		pp := &testProbeProcess{version: launch.Request.AdapterVersion, output: mustClaudeFixture(t, "claude-resume.jsonl")}
 		dp := newTestProcessor(t)
-		adapter, err := New(pp, dp)
+		adapter, err := newClaudeTestAdapter(t, pp, dp, envRoot)
 		if err != nil {
 			t.Fatalf("New: %v", err)
 		}
@@ -437,10 +437,10 @@ func TestClaudeAdapterParityContract_Behavioral(t *testing.T) {
 	})
 
 	t.Run("advisory_fixture_retry_and_error_kinds", func(t *testing.T) {
-		launch, _ := claudeTestLaunch(t, sealedexec.ActionStart)
+		launch, envRoot := claudeTestLaunch(t, sealedexec.ActionStart)
 		pp := &testProbeProcess{version: launch.Request.AdapterVersion, output: mustClaudeFixture(t, "claude-advisory.jsonl")}
 		dp := newTestProcessor(t)
-		adapter, err := New(pp, dp)
+		adapter, err := newClaudeTestAdapter(t, pp, dp, envRoot)
 		if err != nil {
 			t.Fatalf("New: %v", err)
 		}
@@ -459,10 +459,10 @@ func TestClaudeAdapterParityContract_Behavioral(t *testing.T) {
 	})
 
 	t.Run("empty_line_yields_telemetry_gap", func(t *testing.T) {
-		launch, _ := claudeTestLaunch(t, sealedexec.ActionStart)
+		launch, envRoot := claudeTestLaunch(t, sealedexec.ActionStart)
 		pp := &testProbeProcess{version: launch.Request.AdapterVersion, output: []byte("\n")}
 		dp := newTestProcessor(t)
-		adapter, err := New(pp, dp)
+		adapter, err := newClaudeTestAdapter(t, pp, dp, envRoot)
 		if err != nil {
 			t.Fatalf("New: %v", err)
 		}
@@ -477,10 +477,10 @@ func TestClaudeAdapterParityContract_Behavioral(t *testing.T) {
 	})
 
 	t.Run("malformed_json_yields_telemetry_gap", func(t *testing.T) {
-		launch, _ := claudeTestLaunch(t, sealedexec.ActionStart)
+		launch, envRoot := claudeTestLaunch(t, sealedexec.ActionStart)
 		pp := &testProbeProcess{version: launch.Request.AdapterVersion, output: []byte("{not-json}\n")}
 		dp := newTestProcessor(t)
-		adapter, err := New(pp, dp)
+		adapter, err := newClaudeTestAdapter(t, pp, dp, envRoot)
 		if err != nil {
 			t.Fatalf("New: %v", err)
 		}
@@ -495,10 +495,10 @@ func TestClaudeAdapterParityContract_Behavioral(t *testing.T) {
 	})
 
 	t.Run("unknown_family_yields_telemetry_gap", func(t *testing.T) {
-		launch, _ := claudeTestLaunch(t, sealedexec.ActionStart)
+		launch, envRoot := claudeTestLaunch(t, sealedexec.ActionStart)
 		pp := &testProbeProcess{version: launch.Request.AdapterVersion, output: []byte("{\"type\":\"future.event\",\"value\":1}\n")}
 		dp := newTestProcessor(t)
-		adapter, err := New(pp, dp)
+		adapter, err := newClaudeTestAdapter(t, pp, dp, envRoot)
 		if err != nil {
 			t.Fatalf("New: %v", err)
 		}
@@ -513,11 +513,11 @@ func TestClaudeAdapterParityContract_Behavioral(t *testing.T) {
 	})
 
 	t.Run("result_before_init_yields_gap", func(t *testing.T) {
-		launch, _ := claudeTestLaunch(t, sealedexec.ActionStart)
+		launch, envRoot := claudeTestLaunch(t, sealedexec.ActionStart)
 		resultLine := []byte(`{"type":"result","subtype":"success","is_error":false,"result":"success","session_id":"s1","uuid":"u1","duration_ms":1,"duration_api_ms":1,"num_turns":0,"total_cost_usd":0.0,"usage":{"input_tokens":0,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":0},"permission_denials":[]}` + "\n")
 		pp := &testProbeProcess{version: launch.Request.AdapterVersion, output: resultLine}
 		dp := newTestProcessor(t)
-		adapter, err := New(pp, dp)
+		adapter, err := newClaudeTestAdapter(t, pp, dp, envRoot)
 		if err != nil {
 			t.Fatalf("New: %v", err)
 		}
@@ -535,11 +535,11 @@ func TestClaudeAdapterParityContract_Behavioral(t *testing.T) {
 
 	t.Run("mutation_outer_tag_fails_init_row", func(t *testing.T) {
 		// Mutate "system" outer type to "future" — init start row must not succeed
-		launch, _ := claudeTestLaunch(t, sealedexec.ActionStart)
+		launch, envRoot := claudeTestLaunch(t, sealedexec.ActionStart)
 		mutatedInit := []byte(`{"type":"future","subtype":"init","session_id":"s1","model":"claude-opus-5-test","mcp_servers":[{"name":"verdi-context","status":"connected"}],"cwd":"/workspace","tools":[],"permissionMode":"bypassPermissions","apiKeySource":"ANTHROPIC_API_KEY","claude_code_version":"1.2.3","slash_commands":[],"output_style":"default","agents":[],"skills":[],"plugins":[],"uuid":"u1"}` + "\n")
 		pp := &testProbeProcess{version: launch.Request.AdapterVersion, output: mutatedInit}
 		dp := newTestProcessor(t)
-		adapter, err := New(pp, dp)
+		adapter, err := newClaudeTestAdapter(t, pp, dp, envRoot)
 		if err != nil {
 			t.Fatalf("New: %v", err)
 		}
@@ -555,12 +555,12 @@ func TestClaudeAdapterParityContract_Behavioral(t *testing.T) {
 
 	t.Run("mutation_block_tag_fails_assistant_text_row", func(t *testing.T) {
 		// Mutate "text" block type to "unknown_block" — provider-message must not be produced
-		launch, _ := claudeTestLaunch(t, sealedexec.ActionStart)
+		launch, envRoot := claudeTestLaunch(t, sealedexec.ActionStart)
 		initLine := []byte(`{"type":"system","subtype":"init","session_id":"claude-sess-start-001","model":"claude-opus-5-test","mcp_servers":[{"name":"verdi-context","status":"connected"}],"cwd":"/workspace","tools":[],"permissionMode":"bypassPermissions","apiKeySource":"ANTHROPIC_API_KEY","claude_code_version":"1.2.3","slash_commands":[],"output_style":"default","agents":[],"skills":[],"plugins":[],"uuid":"u1"}` + "\n")
 		mutatedAssistant := []byte(`{"type":"assistant","session_id":"claude-sess-start-001","uuid":"mu","message":{"id":"msg_m","type":"message","role":"assistant","model":"claude-opus-5-test","content":[{"type":"unknown_block","text":"hello"}],"usage":{"input_tokens":1,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":1}}}` + "\n")
 		pp := &testProbeProcess{version: launch.Request.AdapterVersion, output: append(initLine, mutatedAssistant...)}
 		dp := newTestProcessor(t)
-		adapter, err := New(pp, dp)
+		adapter, err := newClaudeTestAdapter(t, pp, dp, envRoot)
 		if err != nil {
 			t.Fatalf("New: %v", err)
 		}
@@ -580,10 +580,10 @@ func TestClaudeAdapterParityContract_Behavioral(t *testing.T) {
 	t.Run("mutation_id_derivation_fails_message_row", func(t *testing.T) {
 		// The compound message ID must be "message_id:block_index".
 		// If the id were different, the message_digest would differ.
-		launch, _ := claudeTestLaunch(t, sealedexec.ActionStart)
+		launch, envRoot := claudeTestLaunch(t, sealedexec.ActionStart)
 		pp := &testProbeProcess{version: launch.Request.AdapterVersion, output: mustClaudeFixture(t, "claude-start.jsonl")}
 		dp := newTestProcessor(t)
-		adapter, err := New(pp, dp)
+		adapter, err := newClaudeTestAdapter(t, pp, dp, envRoot)
 		if err != nil {
 			t.Fatalf("New: %v", err)
 		}
@@ -621,11 +621,11 @@ func TestClaudeAdapterParityContract_Behavioral(t *testing.T) {
 
 	t.Run("mutation_thinking_retention_fails_summary_row", func(t *testing.T) {
 		// Thinking bytes must NOT enter the detail digest; detail is {content_type,omitted:true}.
-		launch, _ := claudeTestLaunch(t, sealedexec.ActionResume)
+		launch, envRoot := claudeTestLaunch(t, sealedexec.ActionResume)
 		session := "claude-sess-resume-001"
 		pp := &testProbeProcess{version: launch.Request.AdapterVersion, output: mustClaudeFixture(t, "claude-resume.jsonl")}
 		dp := newTestProcessor(t)
-		adapter, err := New(pp, dp)
+		adapter, err := newClaudeTestAdapter(t, pp, dp, envRoot)
 		if err != nil {
 			t.Fatalf("New: %v", err)
 		}
@@ -679,6 +679,13 @@ func mustClaudeFixture(t *testing.T, name string) []byte {
 // Returns the launch and the envRoot (HOME directory) for path assertions.
 func claudeTestLaunch(t *testing.T, action sealedexec.Action) (sealedexec.AdapterLaunch, string) {
 	t.Helper()
+	return claudeTestLaunchEnv(t, action, nil)
+}
+
+// claudeTestLaunchEnv builds the same launch as claudeTestLaunch and applies
+// mutate to the Amendment 002 §3 environment table before activation.
+func claudeTestLaunchEnv(t *testing.T, action sealedexec.Action, mutate func(map[string]string)) (sealedexec.AdapterLaunch, string) {
+	t.Helper()
 	envRoot := t.TempDir()
 	workspace := filepath.Join(envRoot, "data", "execution", "workspace-1")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
@@ -696,11 +703,15 @@ func claudeTestLaunch(t *testing.T, action sealedexec.Action) (sealedexec.Adapte
 		{Kind: execworkspace.GrantTimeouts, Seconds: 30},
 	}}
 	declaredEnv := map[string]string{
-		"ANTHROPIC_API_KEY":                        apiKey,
-		"CLAUDE_CONFIG_DIR":                        claudeConfigDir,
-		"DISABLE_AUTOUPDATER":                      "1",
+		"ANTHROPIC_API_KEY":   apiKey,
+		"CLAUDE_CONFIG_DIR":   claudeConfigDir,
+		"PATH":                "/usr/bin:/bin",
+		"DISABLE_AUTOUPDATER": "1",
 		"CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
 		"CLAUDE_CODE_AUTO_CONNECT_IDE":             "false",
+	}
+	if mutate != nil {
+		mutate(declaredEnv)
 	}
 	profile, report, err := execworkspace.BuildProfile(workspace, envRoot, grants, declaredEnv)
 	if err != nil {
@@ -736,15 +747,15 @@ func claudeTestLaunch(t *testing.T, action sealedexec.Action) (sealedexec.Adapte
 		Session:        "verdi-session-1",
 		Profile:        sealedexec.LogicalRef{Digest: claudeTestDigest([]byte("claude-profile"))},
 	}
-	// profile.Name carries the model identifier.
-	// (service.go lacks a Model field on ResolvedProfile; this is documented in the task-4 report.)
 	return sealedexec.AdapterLaunch{
 		Request: request,
 		Profile: sealedexec.ResolvedProfile{
 			Verification:           sealedexec.Verification{State: contextcompile.ResolutionProven, Witnesses: []string{}},
 			Ref:                    request.Profile,
 			Digest:                 request.Profile.Digest,
-			Name:                   "claude-opus-5-test", // model identifier
+			Name:                   "sealed-project",
+			Model:                  "claude-opus-5-test",
+			ClaudeConfigDir:        claudeConfigDir,
 			Executable:             executable,
 			AdapterVersion:         adapterVersion,
 			DecoderProfile:         DecoderProfileV1,
@@ -769,6 +780,21 @@ func claudeTestLaunch(t *testing.T, action sealedexec.Action) (sealedexec.Adapte
 			Data:         []contextcompile.DataItem{item},
 		},
 	}, envRoot
+}
+
+// claudeTestMCPConfig is the exact Task 3 scoped configuration a per-command
+// adapter receives; the adapter never derives it from HOME.
+func claudeTestMCPConfig(envRoot string) MCPConfig {
+	return MCPConfig{
+		Path:          filepath.Join(envRoot, claudeMCPConfigName),
+		URL:           "http://127.0.0.1:54321/mcp",
+		Authorization: "Bearer sha256:" + strings.Repeat("a", 64),
+	}
+}
+
+func newClaudeTestAdapter(t *testing.T, process Process, processor *sealedexec.DetailProcessor, envRoot string) (*Adapter, error) {
+	t.Helper()
+	return New(process, processor, claudeTestMCPConfig(envRoot))
 }
 
 func claudeTestDigest(data []byte) string {
@@ -1070,4 +1096,192 @@ func min(a, b int) int {
 		return a
 	}
 	return b
+}
+
+// TestClaudeAdapterProfileAndCommandAuthority proves Amendment 002 §3/§4
+// profile and command authority: the model comes from the resolved profile
+// (never its logical name), the MCP configuration path is the exact
+// per-command Task 3 value (never derived from HOME), the environment table
+// is closed against missing rows and forbidden names, and the version probe
+// runs the launch executable, environment, and working directory.
+func TestClaudeAdapterProfileAndCommandAuthority(t *testing.T) {
+	t.Run("argv_uses_resolved_model_and_supplied_mcp_path", func(t *testing.T) {
+		launch, envRoot := claudeTestLaunch(t, sealedexec.ActionStart)
+		// The supplied configuration deliberately lives outside the profile
+		// HOME parent so a HOME-derived path cannot reproduce it.
+		supplied := MCPConfig{
+			Path:          filepath.Join(t.TempDir(), claudeMCPConfigName),
+			URL:           "http://127.0.0.1:54321/mcp",
+			Authorization: "Bearer sha256:" + strings.Repeat("b", 64),
+		}
+		if supplied.Path == filepath.Join(envRoot, claudeMCPConfigName) {
+			t.Fatal("fixture: supplied config path must differ from the env-root derivation")
+		}
+		pp := &testProbeProcess{version: launch.Request.AdapterVersion}
+		adapter, err := New(pp, newTestProcessor(t), supplied)
+		if err != nil {
+			t.Fatalf("New: %v", err)
+		}
+		if _, err := adapter.Start(context.Background(), launch); err != nil {
+			t.Fatalf("Start: %v", err)
+		}
+		wantArgs := []string{
+			launch.Profile.Executable, "--bare", "-p",
+			"--input-format", "stream-json", "--output-format", "stream-json", "--verbose",
+			"--model", launch.Profile.Model,
+			"--permission-mode", "bypassPermissions",
+			"--strict-mcp-config", "--mcp-config", supplied.Path, "--no-chrome",
+		}
+		if !reflect.DeepEqual(pp.startCmd.Args, wantArgs) {
+			t.Fatalf("start argv = %v, want %v", pp.startCmd.Args, wantArgs)
+		}
+		for _, arg := range pp.startCmd.Args {
+			if arg == launch.Profile.Name {
+				t.Fatalf("the logical profile name %q reached argv", launch.Profile.Name)
+			}
+		}
+	})
+
+	t.Run("resume_argv_uses_resolved_model_and_supplied_mcp_path", func(t *testing.T) {
+		launch, envRoot := claudeTestLaunch(t, sealedexec.ActionResume)
+		supplied := claudeTestMCPConfig(envRoot)
+		pp := &testProbeProcess{version: launch.Request.AdapterVersion}
+		adapter, err := New(pp, newTestProcessor(t), supplied)
+		if err != nil {
+			t.Fatalf("New: %v", err)
+		}
+		if _, err := adapter.Resume(context.Background(), launch, "claude-sess-resume-001"); err != nil {
+			t.Fatalf("Resume: %v", err)
+		}
+		wantTail := []string{"--mcp-config", supplied.Path, "--no-chrome", "--resume", "claude-sess-resume-001"}
+		got := pp.startCmd.Args[len(pp.startCmd.Args)-len(wantTail):]
+		if !reflect.DeepEqual(got, wantTail) {
+			t.Fatalf("resume argv tail = %v, want %v", got, wantTail)
+		}
+	})
+
+	t.Run("missing_resolved_model_refuses_launch", func(t *testing.T) {
+		launch, envRoot := claudeTestLaunch(t, sealedexec.ActionStart)
+		launch.Profile.Model = ""
+		pp := &testProbeProcess{version: launch.Request.AdapterVersion}
+		adapter, err := newClaudeTestAdapter(t, pp, newTestProcessor(t), envRoot)
+		if err != nil {
+			t.Fatalf("New: %v", err)
+		}
+		if _, err := adapter.Start(context.Background(), launch); err == nil {
+			t.Fatal("Start without a resolved model = nil, want refusal")
+		}
+		if pp.startCmd != nil {
+			t.Fatal("a process was launched without a resolved model")
+		}
+	})
+
+	mcpConfigs := []struct {
+		name   string
+		config MCPConfig
+	}{
+		{"zero_value", MCPConfig{}},
+		{"relative_path", MCPConfig{Path: "claude-mcp.json", URL: "http://127.0.0.1:1/mcp", Authorization: "Bearer sha256:" + strings.Repeat("a", 64)}},
+		{"unclean_path", MCPConfig{Path: "/tmp/../tmp/claude-mcp.json", URL: "http://127.0.0.1:1/mcp", Authorization: "Bearer sha256:" + strings.Repeat("a", 64)}},
+		{"wrong_basename", MCPConfig{Path: "/tmp/mcp.json", URL: "http://127.0.0.1:1/mcp", Authorization: "Bearer sha256:" + strings.Repeat("a", 64)}},
+		{"missing_url", MCPConfig{Path: "/tmp/claude-mcp.json", Authorization: "Bearer sha256:" + strings.Repeat("a", 64)}},
+		{"missing_authorization", MCPConfig{Path: "/tmp/claude-mcp.json", URL: "http://127.0.0.1:1/mcp"}},
+		{"unscoped_authorization", MCPConfig{Path: "/tmp/claude-mcp.json", URL: "http://127.0.0.1:1/mcp", Authorization: "Bearer opaque-token"}},
+		{"short_capability_digest", MCPConfig{Path: "/tmp/claude-mcp.json", URL: "http://127.0.0.1:1/mcp", Authorization: "Bearer sha256:" + strings.Repeat("a", 63)}},
+	}
+	for _, tc := range mcpConfigs {
+		t.Run("mcp_config_rejected_"+tc.name, func(t *testing.T) {
+			if _, err := New(&testProbeProcess{}, newTestProcessor(t), tc.config); err == nil {
+				t.Fatalf("New with %s MCP config = nil, want refusal", tc.name)
+			}
+		})
+	}
+
+	t.Run("version_probe_shares_launch_executable_environment_and_directory", func(t *testing.T) {
+		launch, envRoot := claudeTestLaunch(t, sealedexec.ActionStart)
+		pp := &testProbeProcess{version: launch.Request.AdapterVersion}
+		adapter, err := newClaudeTestAdapter(t, pp, newTestProcessor(t), envRoot)
+		if err != nil {
+			t.Fatalf("New: %v", err)
+		}
+		if _, err := adapter.Start(context.Background(), launch); err != nil {
+			t.Fatalf("Start: %v", err)
+		}
+		if pp.probeCmd.Dir != launch.Workspace.Path {
+			t.Fatalf("probe working directory = %q, want the launch workspace %q", pp.probeCmd.Dir, launch.Workspace.Path)
+		}
+		if pp.probeCmd.Dir != pp.startCmd.Dir {
+			t.Fatalf("probe directory %q != launch directory %q", pp.probeCmd.Dir, pp.startCmd.Dir)
+		}
+		if pp.probeCmd.Path != pp.startCmd.Path {
+			t.Fatalf("probe executable %q != launch executable %q", pp.probeCmd.Path, pp.startCmd.Path)
+		}
+		if !reflect.DeepEqual(pp.probeCmd.Env, pp.startCmd.Env) {
+			t.Fatal("probe environment differs from the launch environment")
+		}
+	})
+
+	environments := []struct {
+		name   string
+		mutate func(map[string]string)
+	}{
+		{"missing_claude_config_dir", func(e map[string]string) { delete(e, "CLAUDE_CONFIG_DIR") }},
+		{"unbound_claude_config_dir", func(e map[string]string) { e["CLAUDE_CONFIG_DIR"] = "/other/claude-config" }},
+		{"relative_claude_config_dir", func(e map[string]string) { e["CLAUDE_CONFIG_DIR"] = "relative/claude" }},
+		{"missing_path", func(e map[string]string) { delete(e, "PATH") }},
+		{"empty_path", func(e map[string]string) { e["PATH"] = "" }},
+		{"relative_path_entry", func(e map[string]string) { e["PATH"] = "/usr/bin:tools" }},
+		{"empty_path_entry", func(e map[string]string) { e["PATH"] = "/usr/bin:" }},
+		{"missing_autoupdater_control", func(e map[string]string) { delete(e, "DISABLE_AUTOUPDATER") }},
+		{"wrong_autoupdater_control", func(e map[string]string) { e["DISABLE_AUTOUPDATER"] = "0" }},
+		{"missing_nonessential_traffic_control", func(e map[string]string) {
+			delete(e, "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC")
+		}},
+		{"wrong_nonessential_traffic_control", func(e map[string]string) {
+			e["CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"] = "true"
+		}},
+		{"missing_ide_control", func(e map[string]string) { delete(e, "CLAUDE_CODE_AUTO_CONNECT_IDE") }},
+		{"wrong_ide_control", func(e map[string]string) { e["CLAUDE_CODE_AUTO_CONNECT_IDE"] = "true" }},
+		{"forbidden_extra_anthropic_name", func(e map[string]string) { e["ANTHROPIC_MODEL"] = "claude-alias" }},
+		{"forbidden_extra_claude_name", func(e map[string]string) { e["CLAUDE_CODE_USE_BEDROCK"] = "1" }},
+		{"forbidden_cloud_provider_name", func(e map[string]string) { e["AWS_PROFILE"] = "default" }},
+		{"forbidden_proxy_name", func(e map[string]string) { e["HTTPS_PROXY"] = "http://127.0.0.1:8080" }},
+		{"forbidden_lowercase_proxy_name", func(e map[string]string) { e["https_proxy"] = "http://127.0.0.1:8080" }},
+		{"forbidden_shell_startup_name", func(e map[string]string) { e["BASH_ENV"] = "/tmp/startup.sh" }},
+		{"forbidden_ide_name", func(e map[string]string) { e["VSCODE_PID"] = "1" }},
+		{"forbidden_plugin_name", func(e map[string]string) { e["MY_PLUGIN_DIR"] = "/tmp/plugins" }},
+		{"forbidden_hook_name", func(e map[string]string) { e["PRE_TOOL_HOOK"] = "/tmp/hook.sh" }},
+		{"forbidden_telemetry_export_name", func(e map[string]string) { e["OTEL_EXPORTER_OTLP_ENDPOINT"] = "http://127.0.0.1:4317" }},
+		{"forbidden_model_selection_name", func(e map[string]string) { e["DEFAULT_MODEL_ID"] = "claude-alias" }},
+	}
+	for _, tc := range environments {
+		t.Run("environment_"+tc.name, func(t *testing.T) {
+			launch, envRoot := claudeTestLaunchEnv(t, sealedexec.ActionStart, tc.mutate)
+			pp := &testProbeProcess{version: launch.Request.AdapterVersion}
+			adapter, err := newClaudeTestAdapter(t, pp, newTestProcessor(t), envRoot)
+			if err != nil {
+				t.Fatalf("New: %v", err)
+			}
+			if _, err := adapter.Start(context.Background(), launch); err == nil {
+				t.Fatalf("Start with %s = nil, want refusal", tc.name)
+			}
+			if pp.probeCmd != nil || pp.startCmd != nil {
+				t.Fatalf("%s reached the process boundary before validation", tc.name)
+			}
+		})
+	}
+
+	t.Run("baseline_environment_names_remain_admitted", func(t *testing.T) {
+		launch, envRoot := claudeTestLaunchEnv(t, sealedexec.ActionStart, func(e map[string]string) {
+			e["LANG"] = "C"
+			e["SOURCE_DATE_EPOCH"] = "0"
+		})
+		adapter, err := newClaudeTestAdapter(t, &testProbeProcess{version: launch.Request.AdapterVersion}, newTestProcessor(t), envRoot)
+		if err != nil {
+			t.Fatalf("New: %v", err)
+		}
+		if _, err := adapter.Start(context.Background(), launch); err != nil {
+			t.Fatalf("Start with deterministic baseline names = %v, want nil", err)
+		}
+	})
 }

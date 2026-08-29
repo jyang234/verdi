@@ -115,10 +115,17 @@ type WorkspaceFacts struct {
 // ResolvedProfile is a freshly resolved logical project profile. Profile is
 // the activated execution-workspace mechanism; no ambient environment is
 // accepted by this type.
+//
+// Exactly one provider arm is populated. CodexHome carries the Codex arm.
+// Model and ClaudeConfigDir carry the Amendment 002 §3 Claude arm and are
+// copied exactly from the controller's credential-free ProfileMaterial:
+// Model is a full provider model identifier and Name — the logical profile
+// name — is never a model substitute.
 type ResolvedProfile struct {
 	Verification
 	Ref                                 LogicalRef
 	Digest, Name, Executable, CodexHome string
+	Model, ClaudeConfigDir              string
 	AdapterVersion, DecoderProfile      string
 	WorkspacePath                       string
 	Profile                             execworkspace.Profile
@@ -1332,12 +1339,30 @@ func validateProfile(request ExecutionRequest, workspace WorkspaceFacts, profile
 	}
 	if profile.Ref != request.Profile || profile.Digest != request.Profile.Digest || profile.AdapterVersion != request.AdapterVersion ||
 		profile.WorkspacePath != workspace.Path || profile.Name == "" || profile.DecoderProfile == "" ||
-		!filepath.IsAbs(profile.Executable) || profile.CodexHome == "" {
+		!filepath.IsAbs(profile.Executable) {
 		return verdict("resolved profile identity/version/workspace is mismatched")
 	}
-	if !filepath.IsAbs(profile.CodexHome) || filepath.Clean(profile.CodexHome) != profile.CodexHome ||
-		envValueFromProfile(profile.Profile.Env(), "CODEX_HOME") != profile.CodexHome {
-		return verdict("resolved profile CODEX_HOME identity is not isolated and exact")
+	// Amendment 002 §3: the resolved profile selects exactly one provider arm.
+	// An unknown adapter fails closed rather than defaulting to either arm.
+	switch request.Adapter {
+	case contextevent.AdapterCodex:
+		if profile.Model != "" || profile.ClaudeConfigDir != "" || profile.CodexHome == "" {
+			return verdict("resolved Codex profile must carry a Codex home and no Claude arm")
+		}
+		if !filepath.IsAbs(profile.CodexHome) || filepath.Clean(profile.CodexHome) != profile.CodexHome ||
+			envValueFromProfile(profile.Profile.Env(), "CODEX_HOME") != profile.CodexHome {
+			return verdict("resolved profile CODEX_HOME identity is not isolated and exact")
+		}
+	case contextevent.AdapterClaude:
+		if profile.CodexHome != "" || profile.Model == "" {
+			return verdict("resolved Claude profile must carry a model and no Codex home")
+		}
+		if !filepath.IsAbs(profile.ClaudeConfigDir) || filepath.Clean(profile.ClaudeConfigDir) != profile.ClaudeConfigDir ||
+			envValueFromProfile(profile.Profile.Env(), "CLAUDE_CONFIG_DIR") != profile.ClaudeConfigDir {
+			return verdict("resolved profile CLAUDE_CONFIG_DIR identity is not isolated and exact")
+		}
+	default:
+		return verdict("resolved profile adapter arm is unknown")
 	}
 	if !profile.ClassificationComplete || len(profile.PolicySecretValues) == 0 {
 		return verdict("resolved profile secret classification is incomplete")

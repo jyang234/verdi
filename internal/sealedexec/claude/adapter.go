@@ -62,21 +62,48 @@ type Process interface {
 	Start(context.Context, *exec.Cmd, []byte) (ActiveProcess, error)
 }
 
-// Adapter owns the pinned argv, typed stdin, and Claude stream-json decoder.
+// Adapter owns the pinned argv, typed stdin, and Claude stream-json decoder
+// for exactly one command. Its scoped MCP configuration is supplied by the
+// owner of the scoped server's lifecycle and is never derived from HOME or
+// any other environment-root fact.
 type Adapter struct {
 	process   Process
 	processor *sealedexec.DetailProcessor
+	mcpConfig MCPConfig
 }
 
-// New constructs an adapter over explicit process and detail-processor ports.
-func New(process Process, processor *sealedexec.DetailProcessor) (*Adapter, error) {
+// New constructs a per-command adapter over explicit process and
+// detail-processor ports and the exact scoped MCP configuration that the
+// command's server lifecycle owner already started.
+func New(process Process, processor *sealedexec.DetailProcessor, mcpConfig MCPConfig) (*Adapter, error) {
 	if process == nil {
 		return nil, errors.New("sealedexec/claude: process port is nil")
 	}
 	if processor == nil {
 		return nil, errors.New("sealedexec/claude: detail processor is nil")
 	}
-	return &Adapter{process: process, processor: processor}, nil
+	if err := validateSuppliedMCPConfig(mcpConfig); err != nil {
+		return nil, err
+	}
+	return &Adapter{process: process, processor: processor, mcpConfig: mcpConfig}, nil
+}
+
+// validateSuppliedMCPConfig proves the supplied configuration is the scoped
+// one StartScopedMCP produced: Amendment 002 §4's exact file name at a clean
+// absolute path, a transport URL, and the scoped capability bearer token.
+func validateSuppliedMCPConfig(config MCPConfig) error {
+	if !filepath.IsAbs(config.Path) || filepath.Clean(config.Path) != config.Path ||
+		filepath.Base(config.Path) != claudeMCPConfigName {
+		return fmt.Errorf("sealedexec/claude: scoped MCP config path must be a clean absolute %s", claudeMCPConfigName)
+	}
+	if config.URL == "" {
+		return errors.New("sealedexec/claude: scoped MCP config has no transport URL")
+	}
+	token, ok := strings.CutPrefix(config.Authorization, "Bearer ")
+	if !ok || !claudeMCPDigestRE.MatchString(token) {
+		return errors.New("sealedexec/claude: scoped MCP config lacks the scoped capability authorization")
+	}
+	return nil
 }
 
 // VerifyAdapter proves the selected executable/profile/version/decoder and
@@ -124,7 +151,7 @@ func (a *Adapter) Start(ctx context.Context, launch sealedexec.AdapterLaunch) (s
 	if err := validateClaudeProfile(launch.Profile); err != nil {
 		return nil, err
 	}
-	args, err := startArgs(launch.Profile)
+	args, err := startArgs(launch.Profile, a.mcpConfig.Path)
 	if err != nil {
 		return nil, err
 	}
@@ -146,7 +173,7 @@ func (a *Adapter) Resume(ctx context.Context, launch sealedexec.AdapterLaunch, s
 	if err := validateClaudeProfile(launch.Profile); err != nil {
 		return nil, err
 	}
-	args, err := resumeArgs(launch.Profile, sessionRef)
+	args, err := resumeArgs(launch.Profile, a.mcpConfig.Path, sessionRef)
 	if err != nil {
 		return nil, err
 	}
@@ -158,12 +185,19 @@ func (a *Adapter) run(ctx context.Context, launch sealedexec.AdapterLaunch, args
 		return nil, errors.New("sealedexec/claude: selected profile does not bind decoder/version")
 	}
 
-	// §3: Before every start or resume, probe the version.
+	workingDir := launch.Workspace.Path
+	if !filepath.IsAbs(workingDir) || filepath.Clean(workingDir) != workingDir {
+		return nil, errors.New("sealedexec/claude: launch workspace path must be a clean absolute path")
+	}
+
+	// §3: Before every start or resume, probe the version with the same
+	// absolute executable, environment, and working directory as the launch.
 	probeCmd, _, probeCancel, err := launch.Profile.Profile.Command(ctx, launch.Profile.Executable, "--version")
 	if err != nil {
 		return nil, fmt.Errorf("sealedexec/claude: construct version probe: %w", err)
 	}
 	probeCancel()
+	probeCmd.Dir = workingDir
 	stdout, stderr, exitCode, err := a.process.Probe(ctx, probeCmd)
 	if err != nil {
 		return nil, fmt.Errorf("sealedexec/claude: version probe: %w", err)
@@ -190,7 +224,11 @@ func (a *Adapter) run(ctx context.Context, launch sealedexec.AdapterLaunch, args
 	if err != nil {
 		return nil, fmt.Errorf("sealedexec/claude: construct process: %w", err)
 	}
-	command.Dir = launch.Workspace.Path
+	command.Dir = workingDir
+	if command.Path != probeCmd.Path || command.Dir != probeCmd.Dir || !equalStrings(command.Env, probeCmd.Env) {
+		cancel()
+		return nil, errors.New("sealedexec/claude: launch command contradicts the proven version probe")
+	}
 	command.Stdin = bytes.NewReader(stdin)
 	processRun, err := a.process.Start(runCtx, command, stdin)
 	if err != nil {
@@ -243,17 +281,152 @@ func validateClaudeProfile(profile sealedexec.ResolvedProfile) error {
 	if len(apiKey) < 8 {
 		return errors.New("sealedexec/claude: ANTHROPIC_API_KEY must be at least 8 UTF-8 bytes")
 	}
+	return validateClaudeEnvironment(profile)
+}
+
+// requiredClaudeEnv is Amendment 002 §3's fixed-value half of the activated
+// environment table. CLAUDE_CONFIG_DIR is checked separately because its
+// required value is the resolved profile's own configuration directory, and
+// ANTHROPIC_API_KEY is checked by validateClaudeProfile against the
+// classified secret set.
+var requiredClaudeEnv = map[string]string{
+	"DISABLE_AUTOUPDATER":                      "1",
+	"CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
+	"CLAUDE_CODE_AUTO_CONNECT_IDE":             "false",
+}
+
+// admittedClaudeEnv is the exact set of §3 Claude-specific names. Every other
+// name in a forbidden class is refused; the deterministic process baseline
+// (HOME, TMPDIR, PATH, XDG roots, and similar) is admitted because §3 adds the
+// Claude table to that baseline rather than replacing it.
+var admittedClaudeEnv = map[string]bool{
+	"ANTHROPIC_API_KEY":                        true,
+	"CLAUDE_CONFIG_DIR":                        true,
+	"DISABLE_AUTOUPDATER":                      true,
+	"CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": true,
+	"CLAUDE_CODE_AUTO_CONNECT_IDE":             true,
+}
+
+// forbiddenClaudeEnvPrefixes and forbiddenClaudeEnvNames close §3's
+// "no other ... variable is admitted" sentence over its named classes. Names
+// are compared case-insensitively because the proxy controls are conventionally
+// spelled in both cases and the OS environment is case-sensitive.
+var forbiddenClaudeEnvPrefixes = map[string]string{
+	"ANTHROPIC_": "provider",
+	"CLAUDE_":    "provider",
+	"AWS_":       "cloud-provider",
+	"AMAZON_":    "cloud-provider",
+	"AZURE_":     "cloud-provider",
+	"BEDROCK_":   "cloud-provider",
+	"CLOUDSDK_":  "cloud-provider",
+	"GCLOUD_":    "cloud-provider",
+	"GCP_":       "cloud-provider",
+	"GOOGLE_":    "cloud-provider",
+	"VERTEX_":    "cloud-provider",
+	"IDEA_":      "ide",
+	"JETBRAINS_": "ide",
+	"VSCODE_":    "ide",
+	"OTEL_":      "telemetry-export",
+}
+
+var forbiddenClaudeEnvNames = map[string]string{
+	"ALL_PROXY":       "proxy",
+	"BASHOPTS":        "shell-startup",
+	"BASH_ENV":        "shell-startup",
+	"CLOUD_ML_REGION": "cloud-provider",
+	"ENV":             "shell-startup",
+	"FTP_PROXY":       "proxy",
+	"HTTPS_PROXY":     "proxy",
+	"HTTP_PROXY":      "proxy",
+	"IFS":             "shell-startup",
+	"NO_PROXY":        "proxy",
+	"PROMPT_COMMAND":  "shell-startup",
+	"SHELL":           "shell-startup",
+	"SHELLOPTS":       "shell-startup",
+	"TERM_PROGRAM":    "ide",
+	"ZDOTDIR":         "shell-startup",
+}
+
+// forbiddenClaudeEnvName reports the §3 forbidden class of name, or "" when
+// the name is admitted.
+func forbiddenClaudeEnvName(name string) string {
+	if admittedClaudeEnv[name] {
+		return ""
+	}
+	upper := strings.ToUpper(name)
+	if class, ok := forbiddenClaudeEnvNames[upper]; ok {
+		return class
+	}
+	for prefix, class := range forbiddenClaudeEnvPrefixes {
+		if strings.HasPrefix(upper, prefix) {
+			return class
+		}
+	}
+	if strings.Contains(upper, "PLUGIN") {
+		return "plugin"
+	}
+	if strings.Contains(upper, "HOOK") {
+		return "hook"
+	}
+	if strings.Contains(upper, "MODEL") {
+		return "model-selection"
+	}
+	return ""
+}
+
+// validateClaudeEnvironment closes Amendment 002 §3's activated environment
+// table: every required row is present with its exact required value, and no
+// name in a forbidden class is admitted. Only names ever appear in an error;
+// values never do.
+func validateClaudeEnvironment(profile sealedexec.ResolvedProfile) error {
+	env := profile.Profile.Env()
+	if profile.ClaudeConfigDir == "" || !filepath.IsAbs(profile.ClaudeConfigDir) ||
+		filepath.Clean(profile.ClaudeConfigDir) != profile.ClaudeConfigDir {
+		return errors.New("sealedexec/claude: resolved profile carries no clean absolute Claude configuration directory")
+	}
+	if envValueFromEnv(env, "CLAUDE_CONFIG_DIR") != profile.ClaudeConfigDir {
+		return errors.New("sealedexec/claude: activated CLAUDE_CONFIG_DIR is not the resolved Claude configuration directory")
+	}
+	for _, name := range []string{"HOME", "TMPDIR"} {
+		value := envValueFromEnv(env, name)
+		if value == "" || !filepath.IsAbs(value) || filepath.Clean(value) != value {
+			return fmt.Errorf("sealedexec/claude: activated %s must be a clean absolute path", name)
+		}
+	}
+	path := envValueFromEnv(env, "PATH")
+	if path == "" {
+		return errors.New("sealedexec/claude: activated PATH is absent or empty")
+	}
+	for _, entry := range strings.Split(path, string(filepath.ListSeparator)) {
+		if entry == "" || !filepath.IsAbs(entry) || filepath.Clean(entry) != entry {
+			return errors.New("sealedexec/claude: activated PATH is not a deterministic list of clean absolute directories")
+		}
+	}
+	for name, want := range requiredClaudeEnv {
+		if envValueFromEnv(env, name) != want {
+			return fmt.Errorf("sealedexec/claude: activated %s does not equal its required value", name)
+		}
+	}
+	for _, row := range env {
+		name, _, ok := strings.Cut(row, "=")
+		if !ok {
+			return errors.New("sealedexec/claude: activated environment row is not a NAME=VALUE entry")
+		}
+		if class := forbiddenClaudeEnvName(name); class != "" {
+			return fmt.Errorf("sealedexec/claude: activated environment admits forbidden %s variable %s", class, name)
+		}
+	}
 	return nil
 }
 
-func startArgs(profile sealedexec.ResolvedProfile) ([]string, error) {
-	model := profile.Name // §3: model is stored in profile.Name (pragmatic gap — service.go lacks Model field)
+// startArgs is Amendment 002 §4's normative start order. The model is the
+// resolved profile's exact full identifier: the logical profile name is never
+// a model substitute, and a moving alias is refused upstream by the
+// controller material.
+func startArgs(profile sealedexec.ResolvedProfile, mcpConfigPath string) ([]string, error) {
+	model := profile.Model
 	if model == "" {
-		return nil, errors.New("sealedexec/claude: profile.Name (model) is empty")
-	}
-	mcpConfigPath, err := mcpConfigPathFromProfile(profile)
-	if err != nil {
-		return nil, err
+		return nil, errors.New("sealedexec/claude: resolved profile carries no Claude model")
 	}
 	return []string{
 		"--bare", "-p",
@@ -268,27 +441,12 @@ func startArgs(profile sealedexec.ResolvedProfile) ([]string, error) {
 	}, nil
 }
 
-func resumeArgs(profile sealedexec.ResolvedProfile, sessionRef string) ([]string, error) {
-	args, err := startArgs(profile)
+func resumeArgs(profile sealedexec.ResolvedProfile, mcpConfigPath, sessionRef string) ([]string, error) {
+	args, err := startArgs(profile, mcpConfigPath)
 	if err != nil {
 		return nil, err
 	}
 	return append(args, "--resume", sessionRef), nil
-}
-
-// mcpConfigPathFromProfile derives the MCP config path: <envRoot>/claude-mcp.json.
-// HOME in the profile env is <envRoot>/.home (set by execworkspace.BuildProfile),
-// so envRoot = filepath.Dir(HOME).
-func mcpConfigPathFromProfile(profile sealedexec.ResolvedProfile) (string, error) {
-	home := envValueFromEnv(profile.Profile.Env(), "HOME")
-	if home == "" {
-		return "", errors.New("sealedexec/claude: profile env has no HOME")
-	}
-	envRoot := filepath.Dir(home)
-	if envRoot == "." || envRoot == "" {
-		return "", errors.New("sealedexec/claude: profile HOME does not have a valid parent directory")
-	}
-	return filepath.Join(envRoot, "claude-mcp.json"), nil
 }
 
 // encodeClaudeStdin wraps the shared provider input in the Claude user-message format.
@@ -664,8 +822,8 @@ func (r *claudeActiveRun) handleInit(ctx context.Context, object map[string]any,
 		return sealedexec.AdapterResult{Observations: r.gapObservations(detail, seq, "missing-foreign-field"), OperationalFailure: "missing-foreign-field"}
 	}
 
-	// §5: observed model equals profile model (profile.Name).
-	profileModel := r.launch.Profile.Name
+	// §5: observed model equals the exact resolved profile model.
+	profileModel := r.launch.Profile.Model
 	if model != profileModel {
 		detail := r.fixedSafeDetail(ctx, map[string]any{"reason": "model-mismatch", "observed": model, "expected": profileModel})
 		return sealedexec.AdapterResult{Observations: r.gapObservations(detail, seq, "model-mismatch"), OperationalFailure: "model-mismatch"}
@@ -844,7 +1002,7 @@ func (r *claudeActiveRun) handleAssistant(ctx context.Context, object map[string
 		return sealedexec.AdapterResult{Observations: r.gapObservations(detail, seq, "invalid-foreign-field"), OperationalFailure: "invalid-foreign-field"}
 	}
 	msgModel, _ := nonemptyString(message["model"])
-	if msgModel != r.launch.Profile.Name {
+	if msgModel != r.launch.Profile.Model {
 		detail := r.fixedSafeDetail(ctx, map[string]any{"reason": "model-mismatch"})
 		return sealedexec.AdapterResult{Observations: r.gapObservations(detail, seq, "model-mismatch"), OperationalFailure: "model-mismatch"}
 	}

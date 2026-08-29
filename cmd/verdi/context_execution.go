@@ -285,7 +285,11 @@ func assembleSealedRuntime(ctx context.Context, request sealedexec.ExecutionRequ
 	if err != nil {
 		return sealedRuntime{}, fmt.Errorf("construct execution materializer: %w", err)
 	}
-	adapter, err := codex.New(commandCodexProcess{})
+	processor, err := sealedexec.NewDetailProcessor(controller)
+	if err != nil {
+		return sealedRuntime{}, err
+	}
+	adapter, err := codex.New(commandCodexProcess{}, processor)
 	if err != nil {
 		return sealedRuntime{}, err
 	}
@@ -509,21 +513,64 @@ func (r controllerProfileResolver) ResolveProfile(ctx context.Context, ref seale
 	if err != nil {
 		return sealedexec.ResolvedProfile{}, err
 	}
-	if material.Ref != ref || !filepath.IsAbs(material.AbsoluteExecutable) || !filepath.IsAbs(material.AbsoluteEnvRoot) || !filepath.IsAbs(material.AbsoluteCodexHome) {
+	return resolvedProfileFromMaterial(material, ref, workspacePath, grants)
+}
+
+// resolvedProfileFromMaterial activates exactly one provider arm of the
+// credential-free controller material. Amendment 002 §3 requires the Claude
+// arm to carry a full model identifier and an absolute configuration
+// directory beneath the resolved environment root, and requires the activated
+// profile to bind that directory plus the amendment's three fixed Claude
+// controls; the Codex arm is unchanged and admits neither Claude field. The
+// locally activated ANTHROPIC_API_KEY and the classified secret set are
+// credential material and are never fabricated here.
+func resolvedProfileFromMaterial(material sealedexec.ProfileMaterial, ref sealedexec.LogicalRef, workspacePath string, grants execworkspace.GrantSet) (sealedexec.ResolvedProfile, error) {
+	if material.Ref != ref || !filepath.IsAbs(material.AbsoluteExecutable) || !filepath.IsAbs(material.AbsoluteEnvRoot) {
 		return sealedexec.ResolvedProfile{}, fmt.Errorf("%w: resolved profile material contradicts request or contains a relative path", sealedexec.ErrVerdict)
 	}
-	profile, enforcement, err := execworkspace.BuildProfile(workspacePath, material.AbsoluteEnvRoot, grants, map[string]string{"CODEX_HOME": material.AbsoluteCodexHome})
+	claudeArm := material.Model != "" || material.ClaudeConfigDir != ""
+	declaredEnv := map[string]string{}
+	switch {
+	case claudeArm && material.AbsoluteCodexHome != "":
+		return sealedexec.ResolvedProfile{}, fmt.Errorf("%w: resolved profile material selects both the Codex and Claude arms", sealedexec.ErrVerdict)
+	case claudeArm:
+		if material.Model == "" || !cleanPathBelow(material.AbsoluteEnvRoot, material.ClaudeConfigDir) {
+			return sealedexec.ResolvedProfile{}, fmt.Errorf("%w: resolved Claude profile material lacks an exact model or a configuration directory beneath the environment root", sealedexec.ErrVerdict)
+		}
+		declaredEnv["CLAUDE_CONFIG_DIR"] = material.ClaudeConfigDir
+		declaredEnv["DISABLE_AUTOUPDATER"] = "1"
+		declaredEnv["CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"] = "1"
+		declaredEnv["CLAUDE_CODE_AUTO_CONNECT_IDE"] = "false"
+	default:
+		if !filepath.IsAbs(material.AbsoluteCodexHome) {
+			return sealedexec.ResolvedProfile{}, fmt.Errorf("%w: resolved profile material contradicts request or contains a relative path", sealedexec.ErrVerdict)
+		}
+		declaredEnv["CODEX_HOME"] = material.AbsoluteCodexHome
+	}
+	profile, enforcement, err := execworkspace.BuildProfile(workspacePath, material.AbsoluteEnvRoot, grants, declaredEnv)
 	if err != nil {
-		message := redactSealedPathMessage(err.Error(), workspacePath, material.AbsoluteExecutable, material.AbsoluteEnvRoot, filepath.Dir(material.AbsoluteEnvRoot), material.AbsoluteCodexHome)
+		message := redactSealedPathMessage(err.Error(), workspacePath, material.AbsoluteExecutable, material.AbsoluteEnvRoot, filepath.Dir(material.AbsoluteEnvRoot), material.AbsoluteCodexHome, material.ClaudeConfigDir)
 		return sealedexec.ResolvedProfile{}, errors.New(message)
 	}
 	return sealedexec.ResolvedProfile{
 		Verification: sealedexec.Verification{State: contextcompile.ResolutionProven, Witnesses: []string{}},
 		Ref:          ref, Digest: ref.Digest, Name: material.Name, Executable: material.AbsoluteExecutable,
-		CodexHome: material.AbsoluteCodexHome, AdapterVersion: material.AdapterVersion,
+		CodexHome: material.AbsoluteCodexHome, Model: material.Model, ClaudeConfigDir: material.ClaudeConfigDir,
+		AdapterVersion: material.AdapterVersion,
 		DecoderProfile: material.DecoderProfile, WorkspacePath: workspacePath,
 		Profile: profile, Grants: grants, Enforcement: *enforcement,
 	}, nil
+}
+
+// cleanPathBelow reports whether child is a clean absolute path strictly
+// beneath parent.
+func cleanPathBelow(parent, child string) bool {
+	if !filepath.IsAbs(child) || filepath.Clean(child) != child {
+		return false
+	}
+	relative, err := filepath.Rel(parent, child)
+	return err == nil && relative != "." && relative != ".." &&
+		!filepath.IsAbs(relative) && !strings.HasPrefix(relative, ".."+string(filepath.Separator))
 }
 
 type controllerRecorder struct{ client *sealedexec.ControllerClient }
