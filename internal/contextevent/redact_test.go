@@ -6,6 +6,8 @@ import (
 	"crypto/sha256"
 	"errors"
 	"fmt"
+	"os"
+	"os/exec"
 	"reflect"
 	"strings"
 	"testing"
@@ -28,11 +30,11 @@ func TestContextEventRedactionContinuityContract_Behavioral(t *testing.T) {
 				raw := []byte(fmt.Sprintf(`{"%s":{"nested":"must disappear"}}`, key))
 				got, err := contextevent.RedactStandardV1(raw, protected)
 				if err != nil {
-					t.Fatalf("RedactStandardV1: %v", err)
+					t.Fatal("RedactStandardV1 rejected a sensitive-key fixture")
 				}
 				want := []byte(fmt.Sprintf(`{"%s":"[REDACTED]"}`, key))
 				if !bytes.Equal(got, want) {
-					t.Fatalf("redacted bytes = %s, want %s", got, want)
+					failByteMismatch(t, "sensitive-key redaction mismatch", got, want)
 				}
 			})
 		}
@@ -45,10 +47,10 @@ func TestContextEventRedactionContinuityContract_Behavioral(t *testing.T) {
 			[][]byte{[]byte("different-classified-value")},
 		)
 		if err != nil {
-			t.Fatalf("RedactStandardV1 omitted API key fixture: %v", err)
+			t.Fatal("RedactStandardV1 rejected an omitted API-key fixture")
 		}
 		if want := `{"api_key":"[REDACTED]"}`; string(got) != want {
-			t.Fatalf("omitted API key sensitive field = %s, want %s", got, want)
+			failByteMismatch(t, "omitted API-key redaction mismatch", got, []byte(want))
 		}
 	})
 
@@ -64,17 +66,17 @@ func TestContextEventRedactionContinuityContract_Behavioral(t *testing.T) {
 		want := []byte(`{"array":["[REDACTED]",{"value":"xx[REDACTED]yy"}],"number":1.25,"text":"pre [REDACTED] and [REDACTED] post"}`)
 		got, err := contextevent.RedactStandardV1(raw, protected)
 		if err != nil {
-			t.Fatalf("RedactStandardV1: %v", err)
+			t.Fatal("RedactStandardV1 rejected a recursive overlap fixture")
 		}
 		if !bytes.Equal(got, want) {
-			t.Fatalf("redacted bytes = %s, want %s", got, want)
+			failByteMismatch(t, "recursive overlap redaction mismatch", got, want)
 		}
 		again, err := contextevent.RedactStandardV1(got, protected)
 		if err != nil {
-			t.Fatalf("idempotent RedactStandardV1: %v", err)
+			t.Fatal("RedactStandardV1 rejected already-redacted bytes")
 		}
 		if !bytes.Equal(again, want) {
-			t.Fatalf("second redaction = %s, want %s", again, want)
+			failByteMismatch(t, "idempotent redaction mismatch", again, want)
 		}
 	})
 
@@ -82,13 +84,13 @@ func TestContextEventRedactionContinuityContract_Behavioral(t *testing.T) {
 		protected := [][]byte{[]byte("fixed-secret")}
 		for _, value := range []string{"message-fixed-secret-id", "fixed-secret-tool-name"} {
 			if err := contextevent.ValidateFixedPayloadValue(value, protected); err == nil {
-				t.Fatalf("ValidateFixedPayloadValue(%q) accepted protected bytes", value)
+				t.Fatal("ValidateFixedPayloadValue accepted protected bytes")
 			} else if strings.Contains(err.Error(), "fixed-secret") || strings.Contains(err.Error(), value) {
-				t.Fatalf("fixed-field error disclosed protected input: %v", err)
+				t.Fatal("fixed-field error disclosed protected input")
 			}
 		}
 		if err := contextevent.ValidateFixedPayloadValue("safe-provider-id", protected); err != nil {
-			t.Fatalf("ValidateFixedPayloadValue safe value: %v", err)
+			t.Fatal("ValidateFixedPayloadValue rejected a safe value")
 		}
 	})
 
@@ -111,7 +113,7 @@ func TestContextEventRedactionContinuityContract_Behavioral(t *testing.T) {
 				if _, err := contextevent.RedactStandardV1(row.raw, row.protected); err == nil {
 					t.Fatal("RedactStandardV1 accepted unsafe classification/input")
 				} else if row.secret != "" && strings.Contains(err.Error(), row.secret) {
-					t.Fatalf("redaction error disclosed protected bytes: %v", err)
+					t.Fatal("redaction error disclosed protected bytes")
 				}
 			})
 		}
@@ -134,27 +136,57 @@ func TestContextEventRedactionContinuityContract_Behavioral(t *testing.T) {
 				if _, err := contextevent.RedactStandardV1(row.raw, [][]byte{[]byte("secret-one")}); err == nil {
 					t.Fatal("RedactStandardV1 accepted malformed/non-unique input")
 				} else if strings.Contains(err.Error(), "secret-one") {
-					t.Fatalf("redaction error disclosed raw input: %v", err)
+					t.Fatal("redaction error disclosed raw input")
 				}
 
 				got, err := contextevent.SafeRawDetail(row.raw, row.reason)
 				if err != nil {
-					t.Fatalf("SafeRawDetail: %v", err)
+					t.Fatal("SafeRawDetail rejected a closed reason")
 				}
 				sum := sha256.Sum256(row.raw)
 				want := fmt.Sprintf(`{"raw_digest":"sha256:%x","reason":%q}`, sum, row.reason)
 				if string(got) != want {
-					t.Fatalf("safe detail = %s, want %s", got, want)
+					failByteMismatch(t, "safe raw-detail mismatch", got, []byte(want))
 				}
 				if bytes.Contains(got, row.raw) {
-					t.Fatalf("safe detail contains original raw bytes: %q", got)
+					t.Fatal("safe detail contains original raw bytes")
 				}
 			})
 		}
 		if _, err := contextevent.SafeRawDetail([]byte("private"), "caller-invented-reason"); err == nil {
 			t.Fatal("SafeRawDetail accepted an open reason")
 		} else if strings.Contains(err.Error(), "private") || strings.Contains(err.Error(), "caller-invented-reason") {
-			t.Fatalf("SafeRawDetail error disclosed caller input: %v", err)
+			t.Fatal("SafeRawDetail error disclosed caller input")
+		}
+	})
+
+	t.Run("failure diagnostics do not disclose protected fixture members", func(t *testing.T) {
+		protected := [][]byte{[]byte("secret-one"), []byte("fixed-secret")}
+		if os.Getenv("VERDI_TEST_REDACTION_DIAGNOSTIC_HELPER") == "1" {
+			failByteMismatch(t, "forced redaction mismatch", protected[0], protected[1])
+		}
+
+		executable, err := os.Executable()
+		if err != nil {
+			t.Fatal("locate current test executable")
+		}
+		cmd := exec.Command(executable,
+			"-test.run=^TestContextEventRedactionContinuityContract_Behavioral$/^failure_diagnostics_do_not_disclose_protected_fixture_members$",
+			"-test.v",
+		)
+		cmd.Env = append(os.Environ(), "VERDI_TEST_REDACTION_DIAGNOSTIC_HELPER=1")
+		output, err := cmd.CombinedOutput()
+		if err == nil {
+			t.Fatal("diagnostic helper unexpectedly passed")
+		}
+		var exitErr *exec.ExitError
+		if !errors.As(err, &exitErr) || exitErr.ExitCode() != 1 {
+			t.Fatal("diagnostic helper did not fail through a test assertion")
+		}
+		for _, member := range protected {
+			if bytes.Contains(output, member) {
+				t.Fatal("failure diagnostic disclosed a protected fixture member")
+			}
 		}
 	})
 
@@ -169,14 +201,14 @@ func TestContextEventRedactionContinuityContract_Behavioral(t *testing.T) {
 		inlineRaw := exactJSONSize(t, contextevent.InlineDetailCeiling)
 		inline, err := processor.Process(context.Background(), inlineRaw, protected)
 		if err != nil {
-			t.Fatalf("Process inline: %v", err)
+			t.Fatal("Process rejected the inline boundary fixture")
 		}
 		if inline.Mode != contextevent.DetailInline || !bytes.Equal(inline.RedactedJSON, inlineRaw) || store.storeCalls != 0 {
 			t.Fatalf("inline detail/store calls = %#v/%d", inline, store.storeCalls)
 		}
 		resolvedInline, err := processor.Resolve(context.Background(), inline)
 		if err != nil {
-			t.Fatalf("Resolve inline: %v", err)
+			t.Fatal("Resolve rejected the inline boundary fixture")
 		}
 		if !bytes.Equal(resolvedInline, inlineRaw) || store.resolveCalls != 0 {
 			t.Fatalf("resolved inline/store calls mismatch")
@@ -185,7 +217,7 @@ func TestContextEventRedactionContinuityContract_Behavioral(t *testing.T) {
 		segmentRaw := exactJSONSize(t, contextevent.InlineDetailCeiling+1)
 		segment, err := processor.Process(context.Background(), segmentRaw, protected)
 		if err != nil {
-			t.Fatalf("Process segment: %v", err)
+			t.Fatal("Process rejected the segment boundary fixture")
 		}
 		if !store.storeReturned || store.storeCalls != 1 {
 			t.Fatal("Process returned a segment reference before the store completed")
@@ -194,11 +226,11 @@ func TestContextEventRedactionContinuityContract_Behavioral(t *testing.T) {
 			t.Fatalf("segment detail = %#v", segment)
 		}
 		if err := segment.Validate(); err != nil {
-			t.Fatalf("segment detail validation: %v", err)
+			t.Fatal("Process returned invalid segment metadata")
 		}
 		resolved, err := processor.Resolve(context.Background(), segment)
 		if err != nil {
-			t.Fatalf("Resolve segment: %v", err)
+			t.Fatal("Resolve rejected the stored segment fixture")
 		}
 		if !bytes.Equal(resolved, segmentRaw) || store.resolveCalls != 1 {
 			t.Fatalf("resolved segment mismatch")
@@ -206,10 +238,60 @@ func TestContextEventRedactionContinuityContract_Behavioral(t *testing.T) {
 
 		replayed, err := processor.Process(context.Background(), segmentRaw, protected)
 		if err != nil {
-			t.Fatalf("idempotent Process: %v", err)
+			t.Fatal("Process rejected an exact segment replay")
 		}
 		if !reflect.DeepEqual(replayed, segment) || len(store.rows) != 1 {
 			t.Fatalf("idempotent detail/row count = %#v/%d, want %#v/1", replayed, len(store.rows), segment)
+		}
+	})
+
+	t.Run("detail representation boundary rejects contradictory external values", func(t *testing.T) {
+		oversizedInlineJSON := exactJSONSize(t, contextevent.InlineDetailCeiling+1)
+		oversizedInlineSum := sha256.Sum256(oversizedInlineJSON)
+		oversizedInline := contextevent.Detail{
+			Mode:             contextevent.DetailInline,
+			MediaType:        contextevent.MediaTypeJSON,
+			Digest:           fmt.Sprintf("sha256:%x", oversizedInlineSum),
+			RedactionProfile: contextevent.RedactionProfileStandard,
+			RedactedJSON:     oversizedInlineJSON,
+		}
+		undersizedSegment := contextevent.Detail{
+			Mode:             contextevent.DetailSegment,
+			MediaType:        contextevent.MediaTypeJSON,
+			Digest:           "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+			RedactionProfile: contextevent.RedactionProfileStandard,
+			ByteCount:        contextevent.InlineDetailCeiling,
+			Reference:        "controller-segment/sha256/0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+		}
+
+		for name, detail := range map[string]contextevent.Detail{
+			"oversized inline":   oversizedInline,
+			"undersized segment": undersizedSegment,
+		} {
+			t.Run(name, func(t *testing.T) {
+				if err := detail.Validate(); err == nil {
+					t.Fatal("Detail.Validate accepted a contradictory representation")
+				}
+			})
+		}
+
+		store := newMemorySegmentStore()
+		processor, err := sealedexec.NewDetailProcessor(store)
+		if err != nil {
+			t.Fatal("NewDetailProcessor rejected a concrete store")
+		}
+		for name, detail := range map[string]contextevent.Detail{
+			"oversized inline":   oversizedInline,
+			"undersized segment": undersizedSegment,
+		} {
+			t.Run("resolve "+name, func(t *testing.T) {
+				if _, err := processor.Resolve(context.Background(), detail); err == nil {
+					t.Fatal("Resolve accepted a contradictory representation")
+				}
+			})
+		}
+		if store.resolveCalls != 0 {
+			t.Fatal("Resolve sent an invalid segment representation to storage")
 		}
 	})
 
@@ -245,7 +327,7 @@ func TestContextEventRedactionContinuityContract_Behavioral(t *testing.T) {
 		}
 		detail, err := processor.Process(context.Background(), exactJSONSize(t, contextevent.InlineDetailCeiling+1), [][]byte{[]byte("classified-value")})
 		if err != nil {
-			t.Fatalf("Process: %v", err)
+			t.Fatal("Process rejected the missing-segment setup fixture")
 		}
 
 		delete(store.rows, detail.Reference)
@@ -260,7 +342,7 @@ func TestContextEventRedactionContinuityContract_Behavioral(t *testing.T) {
 		}
 		detail, err = processor.Process(context.Background(), exactJSONSize(t, contextevent.InlineDetailCeiling+1), [][]byte{[]byte("classified-value")})
 		if err != nil {
-			t.Fatalf("Process replacement: %v", err)
+			t.Fatal("Process rejected the mismatched-segment setup fixture")
 		}
 		stored := store.rows[detail.Reference]
 		stored.MediaType = "text/plain"
@@ -269,6 +351,13 @@ func TestContextEventRedactionContinuityContract_Behavioral(t *testing.T) {
 			t.Fatal("Resolve accepted mismatched segment metadata")
 		}
 	})
+}
+
+func failByteMismatch(t *testing.T, fact string, got, want []byte) {
+	t.Helper()
+	gotDigest := sha256.Sum256(got)
+	wantDigest := sha256.Sum256(want)
+	t.Fatalf("%s: got_digest=sha256:%x want_digest=sha256:%x", fact, gotDigest, wantDigest)
 }
 
 func exactJSONSize(t *testing.T, size int) []byte {

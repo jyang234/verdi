@@ -165,7 +165,7 @@ func TestContextEventRegistryContract_Static(t *testing.T) {
 	if err := lfDetail.Validate(); err == nil {
 		t.Fatal("inline Detail.Validate() accepted digest over redacted_json plus framing LF")
 	}
-	segment := Detail{Mode: DetailSegment, MediaType: MediaTypeJSON, Digest: digestA, RedactionProfile: RedactionProfileStandard, ByteCount: 123, Reference: "vatc-segment:flight-1/0001"}
+	segment := Detail{Mode: DetailSegment, MediaType: MediaTypeJSON, Digest: digestA, RedactionProfile: RedactionProfileStandard, ByteCount: InlineDetailCeiling + 1, Reference: "vatc-segment:flight-1/0001"}
 	if err := segment.Validate(); err != nil {
 		t.Fatalf("segment Detail.Validate() error = %v", err)
 	}

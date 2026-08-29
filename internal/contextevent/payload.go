@@ -25,7 +25,7 @@ const (
 )
 
 // Detail is the strict already-redacted inline-or-segment union. Resolution,
-// redaction, storage, and inline-ceiling selection belong to later services.
+// redaction, and storage belong to later services.
 type Detail struct {
 	Mode             DetailMode      `json:"mode"`
 	MediaType        string          `json:"media_type"`
@@ -51,6 +51,9 @@ func (d Detail) Validate() error {
 	case DetailInline:
 		if d.RedactedJSON == nil {
 			return fmt.Errorf("contextevent: inline detail requires redacted_json")
+		}
+		if len(d.RedactedJSON) > InlineDetailCeiling {
+			return fmt.Errorf("contextevent: inline detail exceeds the byte ceiling")
 		}
 		if d.ByteCount != 0 || d.Reference != "" {
 			return fmt.Errorf("contextevent: inline detail forbids segment fields")
@@ -82,8 +85,8 @@ func (d Detail) Validate() error {
 		if d.RedactedJSON != nil {
 			return fmt.Errorf("contextevent: segment detail forbids redacted_json")
 		}
-		if d.ByteCount == 0 {
-			return fmt.Errorf("contextevent: segment detail byte_count must be positive")
+		if d.ByteCount <= InlineDetailCeiling {
+			return fmt.Errorf("contextevent: segment detail byte_count must exceed the inline ceiling")
 		}
 		if d.Reference == "" || !utf8.ValidString(d.Reference) {
 			return fmt.Errorf("contextevent: segment detail reference must be nonempty UTF-8")
