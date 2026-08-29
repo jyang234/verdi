@@ -157,7 +157,7 @@ func conformanceStore(t *testing.T) string {
 	return root
 }
 
-func runCLI(t *testing.T, bin, dir string, args ...string) (stdout string, code int) {
+func runCLI(t *testing.T, bin, dir string, args ...string) (stdout string, stderr string, code int) {
 	t.Helper()
 	cmd := exec.Command(bin, args...)
 	cmd.Dir = filepath.FromSlash(dir)
@@ -166,13 +166,13 @@ func runCLI(t *testing.T, bin, dir string, args ...string) (stdout string, code 
 	cmd.Stdout, cmd.Stderr = &out, &errOut
 	err := cmd.Run()
 	if err == nil {
-		return out.String(), 0
+		return out.String(), errOut.String(), 0
 	}
 	if exitErr, ok := err.(*exec.ExitError); ok {
-		return out.String(), exitErr.ExitCode()
+		return out.String(), errOut.String(), exitErr.ExitCode()
 	}
 	t.Fatalf("running verdi %v: %v\nstderr: %s", args, err, errOut.String())
-	return "", 0
+	return "", "", 0
 }
 
 // callMCP drives one tools/call against a fresh in-process server rooted
@@ -269,7 +269,7 @@ func TestASDAdapterConformance(t *testing.T) {
 			cliRoot := conformanceStore(t)
 			mcpRoot := conformanceStore(t)
 
-			cliOut, code := runCLI(t, bin, cliRoot, tc.cliArgs...)
+			cliOut, _, code := runCLI(t, bin, cliRoot, tc.cliArgs...)
 			if code != 0 {
 				t.Fatalf("CLI %v: exit %d, stdout=%s", tc.cliArgs, code, cliOut)
 			}
@@ -324,7 +324,85 @@ func TestASDAdapterConformance(t *testing.T) {
 		}
 
 		assertConformant(t, "mutate_draft", cliOut.String(), cliRoot, mcpOut, mcpRoot)
+
+		// CO-9's adapter conformance names the "provenance record" as its
+		// own conformance object, alongside the result: two adapters that
+		// return the same result but write different custody records have
+		// not conformed. designprovenance.Entry carries no checkout, branch,
+		// or HEAD (record.go) — its content is spec identity, digests,
+		// attribution, policy digest, operations, changes, and excerpts — so
+		// two content-identical repositories must produce byte-identical
+		// sidecars, seal digest included. Path normalization is applied
+		// anyway, so a future field carrying the checkout path would fail
+		// here as a real divergence rather than as a false alarm.
+		cliProvenance := readProvenanceSidecar(t, cliRoot)
+		mcpProvenance := readProvenanceSidecar(t, mcpRoot)
+		if len(cliProvenance) == 0 {
+			t.Fatal("mutate_draft: CLI wrote no provenance sidecar")
+		}
+		gotCLI := normalizeCheckout(string(cliProvenance), cliRoot)
+		gotMCP := normalizeCheckout(string(mcpProvenance), mcpRoot)
+		if gotCLI != gotMCP {
+			t.Fatalf("mutate_draft: provenance sidecars diverge\nCLI: %s\nMCP: %s", gotCLI, gotMCP)
+		}
 	})
+
+	// One invalid request, both transports: the typed classification and
+	// code must be identical. CLI renders "<verb>: <code>: <detail>" on
+	// stderr with exit 1; MCP renders "<tool>: <code>: <detail>" as a tool
+	// error. Only the leading verb/tool name legitimately differs, so
+	// everything after it is compared byte-for-byte.
+	t.Run("refusal parity", func(t *testing.T) {
+		cliRoot := conformanceStore(t)
+		mcpRoot := conformanceStore(t)
+
+		cliOut, cliErr, code := runCLI(t, bin, cliRoot, "design", "capabilities", "spec/does-not-exist")
+		if code != 1 {
+			t.Fatalf("CLI design capabilities (unknown spec): exit %d, stdout=%s, stderr=%s", code, cliOut, cliErr)
+		}
+		if cliOut != "" {
+			t.Fatalf("CLI refusal wrote to stdout: %q", cliOut)
+		}
+		mcpOut, isError := callMCP(t, mcpRoot, "get_design_capabilities", map[string]any{"ref": "spec/does-not-exist"})
+		if !isError {
+			t.Fatalf("MCP get_design_capabilities (unknown spec): isError=false: %s", mcpOut)
+		}
+
+		cliDiagnostic := diagnosticAfterVerb(t, "CLI", normalizeCheckout(strings.TrimRight(cliErr, "\n"), cliRoot))
+		mcpDiagnostic := diagnosticAfterVerb(t, "MCP", normalizeCheckout(strings.TrimRight(mcpOut, "\n"), mcpRoot))
+		if cliDiagnostic != mcpDiagnostic {
+			t.Fatalf("refusal parity: CLI and MCP diverge\nCLI: %s\nMCP: %s", cliDiagnostic, mcpDiagnostic)
+		}
+		if !strings.HasPrefix(cliDiagnostic, "spec-not-found: ") {
+			t.Fatalf("refusal diagnostic = %q, want the typed spec-not-found code first", cliDiagnostic)
+		}
+	})
+}
+
+// readProvenanceSidecar returns the exact committed sidecar bytes for the
+// conformance fixture spec, or nil when none was written.
+func readProvenanceSidecar(t *testing.T, root string) []byte {
+	t.Helper()
+	raw, err := os.ReadFile(store.DesignProvenancePath(root, store.ZoneActive, "sample"))
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		t.Fatalf("reading provenance sidecar: %v", err)
+	}
+	return raw
+}
+
+// diagnosticAfterVerb strips the leading "<verb-or-tool>: " prefix, the
+// one part of a diagnostic line that legitimately differs between the two
+// adapters, and returns the "<code>: <detail>" remainder.
+func diagnosticAfterVerb(t *testing.T, adapter, line string) string {
+	t.Helper()
+	_, rest, found := strings.Cut(line, ": ")
+	if !found {
+		t.Fatalf("%s diagnostic %q does not carry a verb prefix", adapter, line)
+	}
+	return rest
 }
 
 // gitHeadOf resolves root's current HEAD commit, for constructing the

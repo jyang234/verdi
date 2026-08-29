@@ -119,8 +119,17 @@ func (ConstitutionPolicySource) ResolveEffectivePolicy(_ context.Context, root s
 	return policyauthority.Resolve(store)
 }
 
+// PolicyGrant is the resolved design_assistance authority: the typed
+// payload's own field values plus the sealed effective-policy digest and
+// the policy id that carried it. Layout carries the payload's reserved
+// `layout:` posture verbatim (policyartifact.DesignAssistancePayload
+// validates it as false in v1) rather than being re-derived — a reader
+// reporting the applicable policy content (AC-3/AC-5) must show what the
+// policy actually says, never a hardcoded constant that would silently
+// stop tracking the payload if the reserved field ever opens.
 type PolicyGrant struct {
 	Mode     string
+	Layout   bool
 	Digest   string
 	PolicyID string
 }
@@ -173,7 +182,7 @@ func ResolvePolicyGrant(ctx context.Context, root string, identity Identity, sou
 	if err := payload.Validate(); err != nil {
 		return PolicyGrant{}, WrapError(CodeAuthorityInvalid, identity, "invalid design_assistance payload", err)
 	}
-	return PolicyGrant{Mode: payload.Mode, Digest: digest, PolicyID: policyID}, nil
+	return PolicyGrant{Mode: payload.Mode, Layout: payload.Layout, Digest: digest, PolicyID: policyID}, nil
 }
 
 // AuthorizePolicy consumes only the sealed effective-policy digest and the

@@ -56,19 +56,53 @@ type ReviewPosture struct {
 	SemanticPacketAvailable bool `json:"semantic_packet_available"`
 }
 
+// The closed vocabulary of mutability preconditions
+// get_design_capabilities can name as unmet. They are exactly the three
+// facts the mutation kernel itself enforces before any write, in the same
+// order Service.Mutate applies them: draftmutation.AuthorizeState checks
+// the design/<spec-name> branch and then the Git-derived proposal state,
+// and draftmutation.AuthorizePolicy then checks the design_assistance
+// mode. When more than one is unmet, the FIRST one in that order is
+// named — the same one a real mutate_draft attempt would refuse on.
+const (
+	// PreconditionDesignBranch: the checkout is not on this spec's own
+	// mutable design/<spec-name> branch.
+	PreconditionDesignBranch = "design-branch"
+	// PreconditionProposalState: the spec's Git-derived state is not
+	// `proposed` (CO-3/AC-3: "only draft specs accept semantic
+	// mutations"; CO-1: an accepted or review-mode spec is refused).
+	PreconditionProposalState = "proposal-state"
+	// PreconditionPolicyMode: the resolved design_assistance mode is not
+	// draft-write, so a delegated agent may not write at all.
+	PreconditionPolicyMode = "policy-mode"
+)
+
+// MutabilityRefusal is the machine-readable reason PermittedOperations is
+// empty: which single precondition fails, and the human-readable detail.
+// It is present exactly when Mutable is false — CO-1's "refuse semantic
+// mutation even if an adapter mistakenly advertises it" is enforced by the
+// kernel, and this field is how a capability response avoids being the
+// adapter that mistakenly advertises it in the first place.
+type MutabilityRefusal struct {
+	Precondition string `json:"precondition"`
+	Detail       string `json:"detail"`
+}
+
 // CapabilitiesResult is get_design_capabilities' exact content (AC-3):
 // schema versions, checkout/branch/HEAD/spec/current digest, current spec
 // state, permitted operations, provenance/direct-Markdown posture, review
-// requirements, and the six available ASD operation surfaces.
+// requirements, and the available ASD operation surfaces.
 //
-// PolicyDigest is AC-3's "project and policy digests": v1 exposes exactly
-// one digest (internal/policyauthority.EffectivePolicy.Digest(), the same
-// value draftmutation.PolicyGrant already carries for mutation
-// authorization) because no second, distinct "project" digest exists
-// anywhere in the accepted policy-authority schema today — reporting a
-// second, fabricated digest here would invent authority this package does
-// not own (disclosed interpretation, not a silent narrowing).
+// Schema is this envelope's own version (CO-2). PolicyDigest is AC-3's
+// "project and policy digests": v1 exposes exactly one digest
+// (internal/policyauthority.EffectivePolicy.Digest(), the same value
+// draftmutation.PolicyGrant already carries for mutation authorization)
+// because no second, distinct "project" digest exists anywhere in the
+// accepted policy-authority schema today — reporting a second, fabricated
+// digest here would invent authority this package does not own (disclosed
+// interpretation, not a silent narrowing).
 type CapabilitiesResult struct {
+	Schema              string                        `json:"schema"`
 	Identity            draftmutation.Identity        `json:"identity"`
 	MutationSchema      string                        `json:"mutation_schema"`
 	ResultSchema        string                        `json:"result_schema"`
@@ -76,6 +110,8 @@ type CapabilitiesResult struct {
 	SpecState           specstate.State               `json:"spec_state"`
 	PolicyDigest        string                        `json:"policy_digest"`
 	PolicyMode          string                        `json:"policy_mode"`
+	Mutable             bool                          `json:"mutable"`
+	MutabilityRefusal   *MutabilityRefusal            `json:"mutability_refusal,omitempty"`
 	PermittedOperations []draftmutation.OperationKind `json:"permitted_operations"`
 	Layout              bool                          `json:"layout"`
 	DirectMarkdown      DirectMarkdownPosture         `json:"direct_markdown"`
@@ -85,10 +121,10 @@ type CapabilitiesResult struct {
 }
 
 // draftWriteOperations is AC-1's closed operation vocabulary, reported in
-// full as PermittedOperations exactly when the resolved design_assistance
-// mode is "draft-write" — draftmutation.Apply enforces the same closed set
-// independently, so this list can never grant more than the mutation core
-// itself would accept.
+// full as PermittedOperations exactly when this spec is genuinely mutable
+// (see resolveMutability) — draftmutation.Apply enforces the same closed
+// set independently, so this list can never grant more than the mutation
+// core itself would accept.
 var draftWriteOperations = []draftmutation.OperationKind{
 	draftmutation.OpSetProblem, draftmutation.OpSetOutcome,
 	draftmutation.OpAddAC, draftmutation.OpEditAC, draftmutation.OpRemoveAC, draftmutation.OpReorderAC, draftmutation.OpSetACEvidence,
@@ -101,10 +137,62 @@ var draftWriteOperations = []draftmutation.OperationKind{
 }
 
 // availableASDOperations is AC-8's exact six-operation surface, reported
-// verbatim so a caller can discover the whole ASD contract from one read.
+// verbatim for a genuinely mutable spec so a caller can discover the whole
+// ASD contract from one read.
 var availableASDOperations = []string{
 	"get_board", "get_design_context", "get_design_capabilities",
 	"mutate_draft", "get_design_provenance", "prepare_design_review",
+}
+
+// readOnlyASDOperations is the same surface with mutate_draft withheld —
+// what a non-mutable spec reports. CO-1's last failure-behavior bullet
+// ("accepted or review-mode spec: refuse semantic mutation even if an
+// adapter mistakenly advertises it") makes the kernel the backstop for an
+// adapter that advertises a write it cannot honor; this list is how
+// get_design_capabilities avoids being that adapter, rather than relying
+// on the backstop.
+var readOnlyASDOperations = []string{
+	"get_board", "get_design_context", "get_design_capabilities",
+	"get_design_provenance", "prepare_design_review",
+}
+
+// resolveMutability applies the same three facts, in the same order, that
+// draftmutation.AuthorizeState and draftmutation.AuthorizePolicy apply
+// inside Service.Mutate — over the values this operation has ALREADY
+// resolved through the very same seams (identity from
+// draftmutation.ResolveCanonicalIdentity, state from the shared
+// draftmutation.StateProjector port, mode from
+// draftmutation.ResolvePolicyGrant). It is a parallel of those checks over
+// shared inputs, never a second authorization algorithm: it computes no
+// Git or policy fact of its own, and grants nothing — the kernel still
+// re-decides every one of them at write time.
+//
+// The delegated-agent posture is the one reported (SI-163: "MCP actor
+// stays delegated-agent"); AuthorizePolicy's authenticated-human bypass is
+// a workbench/CLI-authenticated-caller concern outside this read-only
+// discovery response, exactly as GetDesignCapabilities' own doc comment
+// records.
+func resolveMutability(identity draftmutation.Identity, specName string, state specstate.State, mode string) *MutabilityRefusal {
+	wantBranch := "design/" + specName
+	switch {
+	case identity.Branch != wantBranch:
+		return &MutabilityRefusal{
+			Precondition: PreconditionDesignBranch,
+			Detail:       "branch " + identity.Branch + " is not mutable design branch " + wantBranch,
+		}
+	case state != specstate.Proposed:
+		return &MutabilityRefusal{
+			Precondition: PreconditionProposalState,
+			Detail:       "Git-derived state " + string(state) + " is not mutable proposal state",
+		}
+	case mode != "draft-write":
+		return &MutabilityRefusal{
+			Precondition: PreconditionPolicyMode,
+			// vocab:identity — "draft-write" is the accepted ASD spec's literal enum value
+			Detail: "design_assistance mode " + mode + " forbids delegated-agent writes",
+		}
+	}
+	return nil
 }
 
 // GetDesignCapabilities declares the active schema, checkout/branch/HEAD/
@@ -115,6 +203,15 @@ var availableASDOperations = []string{
 // delegated-agent"); an authenticated human actor's own broader posture
 // (AuthorizePolicy's human bypass) is a workbench/CLI-authenticated-caller
 // concern outside this read-only discovery response.
+//
+// The write vocabulary is reported only when all three of the kernel's own
+// mutability preconditions hold — the design/<spec-name> branch, the
+// Git-derived `proposed` state, and design_assistance mode draft-write
+// (resolveMutability). Otherwise PermittedOperations is empty,
+// AvailableOperations withholds mutate_draft, and MutabilityRefusal names
+// the exact failing precondition: AC-3's "only draft specs accept semantic
+// mutations" is a fact this response must REFLECT, not a claim it may
+// overstate and leave the kernel to walk back (CO-1).
 func (s Service) GetDesignCapabilities(ctx context.Context, start string, req GetDesignCapabilitiesRequest) (*CapabilitiesResult, *Error) {
 	if err := req.validate(); err != nil {
 		return nil, inputInvalid("input-invalid", err.Error())
@@ -153,12 +250,16 @@ func (s Service) GetDesignCapabilities(ctx context.Context, start string, req Ge
 		return nil, translateDraftmutationError(policyErr)
 	}
 
+	refusal := resolveMutability(identity, ref.Name, state.State, grant.Mode)
 	permitted := []draftmutation.OperationKind{}
-	if grant.Mode == "draft-write" {
+	available := readOnlyASDOperations
+	if refusal == nil {
 		permitted = append(permitted, draftWriteOperations...)
+		available = availableASDOperations
 	}
 
 	return &CapabilitiesResult{
+		Schema:              CapabilitiesResultSchema,
 		Identity:            identity,
 		MutationSchema:      draftmutation.RequestSchema,
 		ResultSchema:        draftmutation.ResultSchema,
@@ -166,8 +267,10 @@ func (s Service) GetDesignCapabilities(ctx context.Context, start string, req Ge
 		SpecState:           state.State,
 		PolicyDigest:        grant.Digest,
 		PolicyMode:          grant.Mode,
+		Mutable:             refusal == nil,
+		MutabilityRefusal:   refusal,
 		PermittedOperations: permitted,
-		Layout:              false,
+		Layout:              grant.Layout,
 		DirectMarkdown:      DirectMarkdownPosture{Origin: "disclose"},
 		Provenance: ProvenancePosture{
 			Authoritative:       false,
@@ -181,6 +284,6 @@ func (s Service) GetDesignCapabilities(ctx context.Context, start string, req Ge
 			},
 		},
 		Review:              ReviewPosture{SemanticPacketAvailable: true},
-		AvailableOperations: append([]string(nil), availableASDOperations...),
+		AvailableOperations: append([]string(nil), available...),
 	}, nil
 }

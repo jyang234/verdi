@@ -3,10 +3,12 @@ package designapp
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/jyang234/verdi/internal/align"
 	"github.com/jyang234/verdi/internal/artifact"
+	"github.com/jyang234/verdi/internal/specstate"
 )
 
 // fakeAlignFindings is a fixed-answer AlignFindings port fake: production
@@ -36,11 +38,29 @@ func TestGetDesignContext(t *testing.T) {
 		if err != nil {
 			t.Fatalf("GetDesignContext: %v", err)
 		}
+		if result.Schema != ContextResultSchema {
+			t.Fatalf("Schema = %q, want %q", result.Schema, ContextResultSchema)
+		}
 		if result.CurrentDraft == nil || result.CurrentDraft.ID != "spec/sample" {
 			t.Fatalf("CurrentDraft = %+v", result.CurrentDraft)
 		}
-		if len(result.RatifiedDecisions) != 1 || result.RatifiedDecisions[0].ID != "dc-1" {
-			t.Fatalf("RatifiedDecisions = %+v", result.RatifiedDecisions)
+		// AC-5's applicable project POLICY, not merely its digest.
+		if result.ApplicablePolicy.Mode != "draft-write" || result.ApplicablePolicy.PolicyID == "" {
+			t.Fatalf("ApplicablePolicy = %+v, want the resolved design_assistance content", result.ApplicablePolicy)
+		}
+		if result.ApplicablePolicy.Layout {
+			t.Fatal("ApplicablePolicy.Layout must be false in v1")
+		}
+		// The draft's OWN decisions are never ratified authority: dc-1 is
+		// visible inside CurrentDraft and nowhere in ratified_decisions.
+		if len(result.RatifiedDecisions) != 0 {
+			t.Fatalf("RatifiedDecisions = %+v, want empty (the draft's own decisions are not ratified)", result.RatifiedDecisions)
+		}
+		if result.RatifiedDecisionsPosture.Reason != RatifiedNoParentFeature {
+			t.Fatalf("RatifiedDecisionsPosture = %+v, want reason %q", result.RatifiedDecisionsPosture, RatifiedNoParentFeature)
+		}
+		if len(result.CurrentDraft.Decisions) != 1 || result.CurrentDraft.Decisions[0].ID != "dc-1" {
+			t.Fatalf("CurrentDraft.Decisions = %+v, want the draft's own dc-1 still visible", result.CurrentDraft.Decisions)
 		}
 		if !result.VerdiGoFindings.Available || len(result.VerdiGoFindings.Findings) != 1 {
 			t.Fatalf("VerdiGoFindings = %+v", result.VerdiGoFindings)
@@ -53,8 +73,13 @@ func TestGetDesignContext(t *testing.T) {
 		}
 	})
 
-	t.Run("an implements link resolves the parent feature", func(t *testing.T) {
+	t.Run("an ACCEPTED parent feature's decisions are ratified authority", func(t *testing.T) {
 		root := newTestStore(t, "draft-write")
+		// Commit the parent feature's exact current bytes onto the default
+		// branch: its Git-derived state becomes accepted-pending-build (the
+		// exact active-zone revision is reachable from main), which is what
+		// makes its decisions ratified rather than proposed.
+		acceptTestSpec(t, root, []byte(testSpec))
 		writeChildStory(t, root, "child-one") // links: implements spec/sample#ac-1 (a feature)
 		svc := NewService()
 		svc.Align = fakeAlignFindings{err: ErrAlignUnavailable}
@@ -65,16 +90,41 @@ func TestGetDesignContext(t *testing.T) {
 		if result.ParentFeature == nil || result.ParentFeature.Ref != "spec/sample#ac-1" || result.ParentFeature.Content == nil || result.ParentFeature.Content.ID != "spec/sample" {
 			t.Fatalf("ParentFeature = %+v, want spec/sample resolved", result.ParentFeature)
 		}
-		// The resolved parent feature's own ratified decisions are folded
-		// in alongside the current draft's own (context.go).
-		found := false
-		for _, decision := range result.RatifiedDecisions {
-			if decision.ID == "dc-1" {
-				found = true
-			}
+		if result.ParentFeature.State != specstate.AcceptedPendingBuild {
+			t.Fatalf("ParentFeature.State = %q, want accepted-pending-build", result.ParentFeature.State)
 		}
-		if !found {
-			t.Fatalf("RatifiedDecisions = %+v, want the parent feature's dc-1 folded in", result.RatifiedDecisions)
+		if len(result.RatifiedDecisions) != 1 || result.RatifiedDecisions[0].ID != "dc-1" {
+			t.Fatalf("RatifiedDecisions = %+v, want the accepted parent's dc-1", result.RatifiedDecisions)
+		}
+		if result.RatifiedDecisionsPosture.Reason != RatifiedFromAcceptedParent ||
+			result.RatifiedDecisionsPosture.Source != "spec/sample#ac-1" {
+			t.Fatalf("RatifiedDecisionsPosture = %+v", result.RatifiedDecisionsPosture)
+		}
+	})
+
+	t.Run("a PROPOSED parent feature contributes no ratified decisions", func(t *testing.T) {
+		root := newTestStore(t, "draft-write")
+		writeChildStory(t, root, "child-one")
+		svc := NewService()
+		svc.Align = fakeAlignFindings{err: ErrAlignUnavailable}
+		result, err := svc.GetDesignContext(context.Background(), root, GetDesignContextRequest{Spec: "spec/child-one"})
+		if err != nil {
+			t.Fatalf("GetDesignContext: %v", err)
+		}
+		if result.ParentFeature == nil || result.ParentFeature.State != specstate.Proposed {
+			t.Fatalf("ParentFeature = %+v, want a resolved, proposed parent", result.ParentFeature)
+		}
+		if len(result.RatifiedDecisions) != 0 {
+			t.Fatalf("RatifiedDecisions = %+v, want empty for a proposed parent", result.RatifiedDecisions)
+		}
+		if result.RatifiedDecisionsPosture.Reason != RatifiedParentNotAccepted ||
+			result.RatifiedDecisionsPosture.ParentState != specstate.Proposed {
+			t.Fatalf("RatifiedDecisionsPosture = %+v, want the disclosed not-accepted posture", result.RatifiedDecisionsPosture)
+		}
+		// The parent's own decisions remain visible inside parent_feature —
+		// withheld from "ratified", never hidden.
+		if len(result.ParentFeature.Content.Decisions) != 1 {
+			t.Fatalf("ParentFeature.Content.Decisions = %+v, want the parent's own dc-1 still visible", result.ParentFeature.Content.Decisions)
 		}
 	})
 
@@ -174,6 +224,65 @@ func TestGetDesignContext(t *testing.T) {
 		_, err := svc.GetDesignContext(context.Background(), root, GetDesignContextRequest{Spec: "spec/sample"})
 		if err == nil || err.Classification != ClassificationOperational {
 			t.Fatalf("GetDesignContext(nil policy) = %+v, want operational", err)
+		}
+	})
+
+	t.Run("nil state projector is operational when a parent must be classified", func(t *testing.T) {
+		root := newTestStore(t, "draft-write")
+		writeChildStory(t, root, "child-one")
+		svc := NewService()
+		svc.State = nil
+		svc.Align = fakeAlignFindings{err: ErrAlignUnavailable}
+		_, err := svc.GetDesignContext(context.Background(), root, GetDesignContextRequest{Spec: "spec/child-one"})
+		if err == nil || err.Classification != ClassificationOperational {
+			t.Fatalf("GetDesignContext(nil state) = %+v, want operational", err)
+		}
+	})
+}
+
+// TestGetDesignContextPinnedReferences covers AC-5's "the spec's declared
+// pinned context references" on a spec that actually declares some — the
+// happy resolution through the shared internal/index seam, and the
+// disclosed refusal when a well-formed pinned ref names nothing that
+// resolves (never a silently dropped entry).
+func TestGetDesignContextPinnedReferences(t *testing.T) {
+	t.Run("declared pinned refs resolve through the shared index seam", func(t *testing.T) {
+		root := newTestStore(t, "draft-write")
+		head := gitHead(t, root)
+		writePinnedContextSpec(t, root, "adr/0001-context@"+head)
+		svc := NewService()
+		svc.Align = fakeAlignFindings{err: ErrAlignUnavailable}
+		result, err := svc.GetDesignContext(context.Background(), root, GetDesignContextRequest{Spec: "spec/sample"})
+		if err != nil {
+			t.Fatalf("GetDesignContext: %v", err)
+		}
+		if len(result.PinnedContext) != 1 {
+			t.Fatalf("PinnedContext = %+v, want exactly one resolved entry", result.PinnedContext)
+		}
+		item := result.PinnedContext[0]
+		if item.Kind != "adr" || item.Title != "Pinned context ADR" || item.Body == "" {
+			t.Fatalf("PinnedContext[0] = %+v, want the committed ADR's own kind/title/body", item)
+		}
+		if item.Ref != "adr/0001-context" {
+			t.Fatalf("PinnedContext[0].Ref = %q", item.Ref)
+		}
+	})
+
+	t.Run("an unresolvable pinned ref is a disclosed failure, never a silent omission", func(t *testing.T) {
+		root := newTestStore(t, "draft-write")
+		head := gitHead(t, root)
+		writePinnedContextSpec(t, root, "adr/does-not-exist@"+head)
+		svc := NewService()
+		svc.Align = fakeAlignFindings{err: ErrAlignUnavailable}
+		result, err := svc.GetDesignContext(context.Background(), root, GetDesignContextRequest{Spec: "spec/sample"})
+		if err == nil {
+			t.Fatalf("GetDesignContext(unresolvable pinned ref) = %+v, want a typed failure", result)
+		}
+		if err.Classification != ClassificationOperational || err.Code != "io-failure" {
+			t.Fatalf("GetDesignContext(unresolvable pinned ref) = %+v, want operational io-failure", err)
+		}
+		if !strings.Contains(err.Detail, "adr/does-not-exist") {
+			t.Fatalf("Detail = %q, must name the unresolvable ref", err.Detail)
 		}
 	})
 }

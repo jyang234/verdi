@@ -36,7 +36,10 @@ func (r GetDesignProvenanceRequest) validate() error {
 // names (AC-8). An empty Entries slice (never null) is the honest answer
 // for a draft that has never been typed-mutated yet — provenance is
 // non-authoritative and its absence is not a fault (CO-1).
+// Schema versions this envelope (CO-2) and is deliberately distinct from
+// each entry's own designprovenance.Schema — see schema.go.
 type ProvenanceResult struct {
+	Schema   string                   `json:"schema"`
 	Identity draftmutation.Identity   `json:"identity"`
 	Entries  []designprovenance.Entry `json:"entries"`
 }
@@ -72,7 +75,7 @@ func (s Service) GetDesignProvenance(ctx context.Context, start string, req GetD
 	path := store.DesignProvenancePath(identity.Checkout, store.ZoneActive, ref.Name)
 	raw, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
-		return &ProvenanceResult{Identity: identity, Entries: []designprovenance.Entry{}}, nil
+		return &ProvenanceResult{Schema: ProvenanceResultSchema, Identity: identity, Entries: []designprovenance.Entry{}}, nil
 	}
 	if err != nil {
 		return nil, operational("io-failure", "reading design provenance", err)
@@ -90,5 +93,5 @@ func (s Service) GetDesignProvenance(ctx context.Context, start string, req GetD
 	if entries == nil {
 		entries = []designprovenance.Entry{}
 	}
-	return &ProvenanceResult{Identity: identity, Entries: entries}, nil
+	return &ProvenanceResult{Schema: ProvenanceResultSchema, Identity: identity, Entries: entries}, nil
 }

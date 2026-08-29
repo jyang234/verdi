@@ -13,6 +13,9 @@ func TestGetDesignProvenance(t *testing.T) {
 		if err != nil {
 			t.Fatalf("GetDesignProvenance: %v", err)
 		}
+		if result.Schema != ProvenanceResultSchema {
+			t.Fatalf("Schema = %q, want %q", result.Schema, ProvenanceResultSchema)
+		}
 		if result.Entries == nil || len(result.Entries) != 0 {
 			t.Fatalf("Entries = %v, want non-nil empty", result.Entries)
 		}

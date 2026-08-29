@@ -42,9 +42,15 @@ type ReviewBaseline struct {
 	Commit    string `json:"commit,omitempty"`
 }
 
-// ExcerptFlag names one semantic object whose most recent provenance
-// excerpt is ai-inferred or unresolved (AC-6: "objects classified as
-// ai-inferred or unresolved").
+// ExcerptFlag names one semantic object that has EVER carried an
+// ai-inferred or unresolved provenance excerpt (AC-6: "objects classified
+// as ai-inferred or unresolved"). "Ever", not "most recently": a later
+// human-stated excerpt on the same target adds a human's own account
+// alongside the earlier one — the sidecar is append-only and no entry
+// retracts a prior classification — so a target that was once inferred
+// stays flagged for the reviewer. Classification is the LAST
+// ai-inferred/unresolved value recorded for that target, in sidecar file
+// order.
 type ExcerptFlag struct {
 	Target         string `json:"target"`
 	Classification string `json:"classification"`
@@ -65,22 +71,23 @@ type UnclassifiedEdit struct {
 // method that could (doc.go: no accept/approve/merge operation exists
 // anywhere in designapp).
 type ReviewResult struct {
-	Identity             draftmutation.Identity         `json:"identity"`
-	Problem              string                         `json:"problem"`
-	Outcome              string                         `json:"outcome"`
-	AcceptanceCriteria   []artifact.AcceptanceCriterion `json:"acceptance_criteria"`
-	Constraints          []artifact.Constraint          `json:"constraints"`
-	Decisions            []artifact.Decision            `json:"decisions"`
-	OpenQuestions        []artifact.OpenQuestion        `json:"open_questions"`
-	Links                []artifact.Link                `json:"links"`
-	Stubs                []artifact.Stub                `json:"stubs"`
-	Baseline             ReviewBaseline                 `json:"baseline"`
-	Changes              []draftmutation.Change         `json:"changes"`
-	Warnings             []draftmutation.Warning        `json:"warnings"`
-	InferredOrUnresolved []ExcerptFlag                  `json:"inferred_or_unresolved"`
-	UnclassifiedEdits    []UnclassifiedEdit             `json:"unclassified_edits"`
-	PolicyDigest         string                         `json:"policy_digest"`
-	PolicyMode           string                         `json:"policy_mode"`
+	Schema               string                  `json:"schema"`
+	Identity             draftmutation.Identity  `json:"identity"`
+	Problem              string                  `json:"problem"`
+	Outcome              string                  `json:"outcome"`
+	AcceptanceCriteria   []AcceptanceCriterion   `json:"acceptance_criteria"`
+	Constraints          []Constraint            `json:"constraints"`
+	Decisions            []Decision              `json:"decisions"`
+	OpenQuestions        []OpenQuestion          `json:"open_questions"`
+	Links                []artifact.Link         `json:"links"`
+	Stubs                []Stub                  `json:"stubs"`
+	Baseline             ReviewBaseline          `json:"baseline"`
+	Changes              []draftmutation.Change  `json:"changes"`
+	Warnings             []draftmutation.Warning `json:"warnings"`
+	InferredOrUnresolved []ExcerptFlag           `json:"inferred_or_unresolved"`
+	UnclassifiedEdits    []UnclassifiedEdit      `json:"unclassified_edits"`
+	PolicyDigest         string                  `json:"policy_digest"`
+	PolicyMode           string                  `json:"policy_mode"`
 }
 
 // PrepareDesignReview derives the semantic review packet without changing
@@ -145,15 +152,16 @@ func (s Service) PrepareDesignReview(ctx context.Context, start string, req Prep
 	}
 
 	return &ReviewResult{
+		Schema:               ReviewResultSchema,
 		Identity:             identity,
 		Problem:              problem,
 		Outcome:              outcome,
-		AcceptanceCriteria:   append([]artifact.AcceptanceCriterion{}, spec.AcceptanceCriteria...),
-		Constraints:          append([]artifact.Constraint{}, spec.Constraints...),
-		Decisions:            append([]artifact.Decision{}, spec.Decisions...),
-		OpenQuestions:        append([]artifact.OpenQuestion{}, spec.OpenQuestions...),
-		Links:                append([]artifact.Link{}, spec.Links...),
-		Stubs:                append([]artifact.Stub{}, spec.Stubs...),
+		AcceptanceCriteria:   projectAcceptanceCriteria(spec.AcceptanceCriteria),
+		Constraints:          projectConstraints(spec.Constraints),
+		Decisions:            projectDecisions(spec.Decisions),
+		OpenQuestions:        projectOpenQuestions(spec.OpenQuestions),
+		Links:                projectLinks(spec.Links),
+		Stubs:                projectStubs(spec.Stubs),
 		Baseline:             baseline,
 		Changes:              changes,
 		Warnings:             warnings,
@@ -172,6 +180,16 @@ func (s Service) PrepareDesignReview(ctx context.Context, start string, req Prep
 // has never yet been accepted) is a disclosed, non-fatal "no baseline"
 // rather than an error: draftmutation.Diff requires two decodable spec
 // documents on both sides, and an empty byte string is not one.
+//
+// Absence is PROVEN, never inferred from a failure. `git show` collapses
+// "path genuinely absent at a resolvable commit" and "git could not answer
+// at all" into one indistinguishable non-zero exit, so a caller that read
+// every Show error as absence would report a verdict-free "not yet
+// accepted" on a broken repository — a silent pass exactly where CO-1
+// forbids one. gitx.PathExistsAt draws that three-way instead (its own doc
+// comment records the distinction): an absent path at a resolvable commit
+// is empty output and exit 0, and only a real git failure is an error,
+// which propagates operationally.
 func (s Service) resolveReviewBaseline(ctx context.Context, root, name string, current []byte) (ReviewBaseline, []draftmutation.Change, []draftmutation.Warning, *Error) {
 	empty := []draftmutation.Change{}
 	emptyWarnings := []draftmutation.Warning{}
@@ -181,9 +199,16 @@ func (s Service) resolveReviewBaseline(ctx context.Context, root, name string, c
 		return ReviewBaseline{Available: false, Reason: "default branch is unresolved"}, empty, emptyWarnings, nil
 	}
 	relPath := store.SpecRelPath(store.ZoneActive, name)
+	present, err := gitx.PathExistsAt(ctx, root, branch.Ref, relPath)
+	if err != nil {
+		return ReviewBaseline{}, nil, nil, operational("io-failure", "reading the default branch's review base", err)
+	}
+	if !present {
+		return ReviewBaseline{Available: false, Reason: "spec is not yet present on the default branch", Branch: branch.Name}, empty, emptyWarnings, nil
+	}
 	baseBytes, err := gitx.Show(ctx, root, branch.Ref, relPath)
 	if err != nil {
-		return ReviewBaseline{Available: false, Reason: "spec is not yet present on the default branch", Branch: branch.Name}, empty, emptyWarnings, nil
+		return ReviewBaseline{}, nil, nil, operational("io-failure", "reading the default branch's review base", err)
 	}
 	commit, err := gitx.RevParse(ctx, root, branch.Ref)
 	if err != nil {
@@ -204,10 +229,11 @@ func (s Service) resolveReviewBaseline(ctx context.Context, root, name string, c
 
 // resolveReviewProvenance scans the committed provenance sidecar (never
 // re-parsed or re-classified — internal/designprovenance owns its own
-// codec) for AC-6's two provenance-derived disclosures: objects whose
-// most recent excerpt is ai-inferred/unresolved, and every unclassified
-// direct-edit gap, including the open one between the sidecar's last
-// recorded typed digest and the current spec bytes.
+// codec) for AC-6's two provenance-derived disclosures: objects that ever
+// carried an ai-inferred/unresolved excerpt (see ExcerptFlag for why
+// "ever" and not "most recent"), and every unclassified direct-edit gap,
+// including the open one between the sidecar's last recorded typed digest
+// and the current spec bytes.
 func (s Service) resolveReviewProvenance(root, name string, current []byte) ([]ExcerptFlag, []UnclassifiedEdit, *Error) {
 	path := store.DesignProvenancePath(root, store.ZoneActive, name)
 	raw, err := os.ReadFile(path)

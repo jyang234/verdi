@@ -1,23 +1,40 @@
 package designapp
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
+	"errors"
+	"os"
 	"path/filepath"
 	"testing"
 
 	"github.com/jyang234/verdi/internal/canonjson"
 	"github.com/jyang234/verdi/internal/draftmutation"
+	"github.com/jyang234/verdi/internal/store"
 )
 
 func mutateRequest(t *testing.T, root, branch, head string, base []byte, operations []map[string]any) draftmutation.Request {
 	t.Helper()
-	raw, err := canonjson.Marshal(map[string]any{
+	return mutateRequestWithExcerpts(t, root, branch, head, base, operations, nil)
+}
+
+// mutateRequestWithExcerpts is mutateRequest plus AC-4's optional bounded
+// supporting excerpts, so a test can seed a provenance sidecar carrying a
+// real ai-inferred/unresolved classification through the typed core rather
+// than hand-writing a sidecar file the core never produced.
+func mutateRequestWithExcerpts(t *testing.T, root, branch, head string, base []byte, operations, excerpts []map[string]any) draftmutation.Request {
+	t.Helper()
+	payload := map[string]any{
 		"schema": draftmutation.RequestSchema, "spec": "spec/sample",
 		"base_digest": draftmutation.DigestBytes(base), "base_spec_b64": base64.StdEncoding.EncodeToString(base),
 		"expected":   map[string]any{"checkout": filepath.ToSlash(root), "branch": branch, "head": head},
 		"operations": operations,
-	})
+	}
+	if len(excerpts) > 0 {
+		payload["excerpts"] = excerpts
+	}
+	raw, err := canonjson.Marshal(payload)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -77,6 +94,16 @@ func TestMutateDraft(t *testing.T) {
 	t.Run("stale base digest is refused with zero effect", func(t *testing.T) {
 		root := newTestStore(t, "draft-write")
 		base := []byte(testSpec)
+		specPath := store.SpecPath(root, store.ZoneActive, "sample")
+		before, err := os.ReadFile(specPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		provenancePath := store.DesignProvenancePath(root, store.ZoneActive, "sample")
+		if _, statErr := os.Stat(provenancePath); !errors.Is(statErr, os.ErrNotExist) {
+			t.Fatalf("provenance sidecar exists before any mutation: %v", statErr)
+		}
+
 		req := mutateRequest(t, root, "design/sample", gitHead(t, root), base, []map[string]any{
 			{"op": "set-problem", "text": "new problem", "anchor": "#problem"},
 		})
@@ -88,6 +115,19 @@ func TestMutateDraft(t *testing.T) {
 		}
 		if response.Stale == nil {
 			t.Fatal("MutateDraft(stale) did not return the structured stale refusal")
+		}
+		// "no write" (CO-1's first failure-behavior bullet) is a claim about
+		// BYTES, not about the returned union: prove the on-disk spec is
+		// byte-identical and no provenance sidecar was created.
+		after, err := os.ReadFile(specPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !bytes.Equal(before, after) {
+			t.Fatalf("stale refusal changed the on-disk spec bytes:\nbefore: %q\nafter:  %q", before, after)
+		}
+		if _, statErr := os.Stat(provenancePath); !errors.Is(statErr, os.ErrNotExist) {
+			t.Fatalf("stale refusal created a provenance sidecar: %v", statErr)
 		}
 	})
 

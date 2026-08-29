@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/jyang234/verdi/internal/draftmutation"
@@ -108,6 +109,30 @@ func TestMutateDraft_Negative(t *testing.T) {
 		}
 		if out.Code != "stale-base" || out.CurrentDigest == "" {
 			t.Fatalf("stale refusal = %+v, want the typed stale-base payload", out)
+		}
+	})
+
+	// The 1 MiB ceiling must bind the RAW incoming arguments, not this
+	// server's smaller canonical re-marshal of them. The oversize payload
+	// rides in a field the wire schema accepts (an excerpt's text), so the
+	// refusal can only come from the byte ceiling itself.
+	t.Run("arguments over the request ceiling are refused", func(t *testing.T) {
+		b, root := newASDTestBackend(t)
+		args := mutateDraftArgsFor(t, root, []map[string]any{{"op": "set-problem", "text": "x", "anchor": "#problem"}})
+		args["excerpts"] = []map[string]any{{
+			"target": "problem", "classification": "human-stated",
+			"representation": "verbatim", "text": strings.Repeat("a", draftmutation.MaxRequestBytes+1),
+		}}
+		raw := mustArgs(t, args)
+		if len(raw) <= draftmutation.MaxRequestBytes {
+			t.Fatalf("oversize fixture is only %d bytes", len(raw))
+		}
+		result := b.MutateDraft(ctx, raw)
+		if !isToolError(result) {
+			t.Fatal("mutate_draft(oversize arguments): want isError")
+		}
+		if text := toolResultText(t, result); !strings.Contains(text, "1 MiB") {
+			t.Fatalf("mutate_draft(oversize arguments) = %q, want the request-ceiling refusal", text)
 		}
 	})
 

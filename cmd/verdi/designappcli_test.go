@@ -3,9 +3,14 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
+	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
+
+	"github.com/jyang234/verdi/internal/store"
 )
 
 // runDesignSubBinary runs `verdi design <subcommand> <args...>` against
@@ -29,6 +34,44 @@ func runDesignSubBinary(t *testing.T, bin, dir string, args ...string) designMut
 	}
 	t.Fatalf("running verdi design %v: %v", args, err)
 	return designMutateRun{}
+}
+
+// cliChildStoryTemplate is a minimal, independently valid story spec
+// written straight into the active zone (the read path reads the working
+// tree, so no commit is needed) — the fixture behind the repeated
+// --child-story assertions below.
+const cliChildStoryTemplate = `---
+id: spec/%[1]s
+kind: spec
+class: story
+title: Child story %[1]s
+owners: [platform-team]
+story: jira:CHILD-1
+links: [ { type: implements, ref: spec/sample#ac-1 } ]
+problem: { text: "child problem", anchor: "#problem" }
+outcome: { text: "child outcome", anchor: "#outcome" }
+---
+# Child story %[1]s
+
+## Problem
+
+Child problem.
+
+## Outcome
+
+Child outcome.
+`
+
+func writeCLIChildStory(t *testing.T, root, name string) {
+	t.Helper()
+	dir := store.SpecDir(filepath.FromSlash(root), store.ZoneActive, name)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	path := store.SpecPath(filepath.FromSlash(root), store.ZoneActive, name)
+	if err := os.WriteFile(path, []byte(fmt.Sprintf(cliChildStoryTemplate, name)), 0o644); err != nil {
+		t.Fatal(err)
+	}
 }
 
 // TestDesignReadOnlySubcommandsBuiltBinary proves the five new
@@ -87,11 +130,42 @@ func TestDesignReadOnlySubcommandsBuiltBinary(t *testing.T) {
 	})
 
 	t.Run("context accepts repeated --child-story", func(t *testing.T) {
-		run := runDesignSubBinary(t, bin, root, "context", "spec/sample", "--child-story", "spec/does-not-exist")
-		// The named child story does not exist: a verdict refusal, never a
-		// silently ignored flag.
+		// The flag is passed TWICE — the repetition is the behavior under
+		// test (a parser that kept only the last occurrence, or that treated
+		// the second as a stray positional, would not produce this exact
+		// diagnostic). Neither named child story exists: a verdict refusal
+		// naming the FIRST one, never a silently ignored flag.
+		run := runDesignSubBinary(t, bin, root, "context", "spec/sample",
+			"--child-story", "spec/does-not-exist", "--child-story", "spec/also-missing")
 		if run.code != 1 {
 			t.Fatalf("verdi design context --child-story (missing): exit = %d, stdout=%s, stderr=%s", run.code, run.stdout, run.stderr)
+		}
+		if !strings.Contains(run.stderr, "spec/does-not-exist") {
+			t.Fatalf("stderr = %q, want the first named child story refused", run.stderr)
+		}
+	})
+
+	t.Run("context resolves two repeated --child-story values", func(t *testing.T) {
+		// Both named stories exist, so BOTH must appear in child_stories:
+		// proving the repetition accumulates rather than merely erroring.
+		writeCLIChildStory(t, root, "child-one")
+		writeCLIChildStory(t, root, "child-two")
+		run := runDesignSubBinary(t, bin, root, "context", "spec/sample",
+			"--child-story", "spec/child-one", "--child-story", "spec/child-two")
+		if run.code != 0 || run.stderr != "" {
+			t.Fatalf("verdi design context (two child stories): exit/stderr = %d/%q", run.code, run.stderr)
+		}
+		var decoded struct {
+			ChildStories []struct {
+				Ref string `json:"ref"`
+			} `json:"child_stories"`
+		}
+		if err := json.Unmarshal([]byte(run.stdout), &decoded); err != nil {
+			t.Fatalf("decoding stdout: %v\n%s", err, run.stdout)
+		}
+		if len(decoded.ChildStories) != 2 ||
+			decoded.ChildStories[0].Ref != "spec/child-one" || decoded.ChildStories[1].Ref != "spec/child-two" {
+			t.Fatalf("child_stories = %+v, want both repeated values in order", decoded.ChildStories)
 		}
 	})
 }

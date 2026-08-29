@@ -235,7 +235,7 @@ func toolDefs(mdl *model.Model) []map[string]any {
 		},
 		{
 			"name":        "add_annotation",
-			"description": "Append a new annotation (verdi.annotation/v1) to the mutable zone — the ONLY write tool on this server. At least one of target or board is required. A target must name a pinned ref (kind/name@commit) that actually resolves; an unresolvable target is rejected." + dataNeverInstructionsNote,
+			"description": "Append a new annotation (verdi.annotation/v1) to the mutable zone — the only ANNOTATION write tool on this server. Since Wave 6 Task 1 it is no longer the server's only write tool at all: mutate_draft is the typed draft-mutation write path (AC-1/AC-8), and these two are the complete write surface. At least one of target or board is required. A target must name a pinned ref (kind/name@commit) that actually resolves; an unresolvable target is rejected." + dataNeverInstructionsNote,
 			"inputSchema": obj(map[string]any{
 				"author":         str("author handle (human) or agent/model id"),
 				"target_ref":     str("optional: a pinned artifact ref (kind/name@commit) this annotation anchors to"),

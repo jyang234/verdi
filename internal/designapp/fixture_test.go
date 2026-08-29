@@ -111,6 +111,23 @@ var testSpecAccepted = func() string {
 	return replaced
 }()
 
+// testADR is one committed, independently valid ADR every test store
+// carries, so a pinned context reference (kind/name@commit) has a real
+// historical target to resolve against — internal/index's own pinned-ref
+// fixture shape (internal/index/pinned_test.go), reproduced here rather
+// than shared across the package boundary.
+const testADR = `---
+id: adr/0001-context
+kind: adr
+title: "Pinned context ADR"
+status: proposed
+owners: [platform-team]
+---
+# Pinned context ADR
+
+Body.
+`
+
 // newTestStore builds a hermetic fixturegit repository carrying the
 // existing internal/policyauthority ASD policy fixture (the same
 // testdata designmutate_test.go and policy_test.go already share — never
@@ -127,7 +144,11 @@ func newTestStore(t *testing.T, mode string) string {
 	// exactly for this hermetic-test shape — never a second default-branch
 	// resolution invented here.
 	t.Setenv("CI_DEFAULT_BRANCH", "main")
-	files := map[string]string{".verdi/verdi.yaml": "schema: verdi.layout/v1\n", ".verdi/.gitignore": "data/\n"}
+	files := map[string]string{
+		".verdi/verdi.yaml":          "schema: verdi.layout/v1\n",
+		".verdi/.gitignore":          "data/\n",
+		".verdi/adr/0001-context.md": testADR,
+	}
 	source := filepath.Join("..", "policyauthority", "testdata", "store")
 	if err := filepath.WalkDir(source, func(path string, entry os.DirEntry, walkErr error) error {
 		if walkErr != nil {
@@ -219,6 +240,81 @@ func writeChildStory(t *testing.T, root, name string) {
 
 func sprintfChildStory(name string) string {
 	return fmt.Sprintf(childStorySpecTemplate, name)
+}
+
+// runGit runs one git command inside root, failing the test on any
+// non-zero exit — the shared shape acceptTestSpec and the branch/repo
+// manipulating helpers below all use.
+func runGit(t *testing.T, root string, args ...string) {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = filepath.FromSlash(root)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git %v: %v\n%s", args, err, output)
+	}
+}
+
+// checkoutNewBranch moves the checkout onto a NEW branch cut from the
+// current one, leaving the untracked active spec.md in place — the
+// hermetic way to reach the "not on this spec's own design/<name> branch"
+// mutability precondition.
+func checkoutNewBranch(t *testing.T, root, name string) {
+	t.Helper()
+	runGit(t, root, "checkout", "-b", name)
+}
+
+// writePinnedContextSpec rewrites the active sample spec's `context:`
+// block to the given pinned refs. The spec schema requires every context
+// entry to parse as a pinned ref (artifact.ParsePinnedRef), so a caller
+// proving the UNRESOLVABLE case must pass a well-formed pinned ref naming
+// something that does not exist — not a malformed string, which the spec
+// itself would reject long before resolvePinnedContext ran.
+func writePinnedContextSpec(t *testing.T, root string, refs ...string) {
+	t.Helper()
+	block := "context: ["
+	for i, ref := range refs {
+		if i > 0 {
+			block += ", "
+		}
+		block += ref
+	}
+	block += "]"
+	replaced := strings.Replace(testSpec, "context: []", block, 1)
+	if replaced == testSpec {
+		panic("designapp: fixture text context: [] not found in testSpec")
+	}
+	if err := os.WriteFile(store.SpecPath(root, store.ZoneActive, "sample"), []byte(replaced), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// breakDefaultBranchRef repoints the default branch's ref at a real BLOB
+// object instead of a commit. The result is a genuinely broken repository
+// in exactly the shape that separates "path absent from the default
+// branch" from "git could not answer at all": `git show-ref --verify` and
+// `git rev-parse --verify` both still succeed (the object exists), so
+// specstate.ResolveDefaultBranch still resolves a ref, while every tree
+// read against it fails. It returns nothing: the point is the failure the
+// caller then observes.
+func breakDefaultBranchRef(t *testing.T, root, branch string) {
+	t.Helper()
+	cmd := exec.Command("git", "hash-object", "-w", filepath.Join(".verdi", "verdi.yaml"))
+	cmd.Dir = filepath.FromSlash(root)
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("git hash-object: %v", err)
+	}
+	blob := strings.TrimSpace(string(out))
+	// `git update-ref` refuses to point a branch at a non-commit, so the
+	// loose ref file is written directly. A loose ref always wins over a
+	// packed one, so this holds whether or not the fixture packed its refs.
+	refPath := filepath.Join(filepath.FromSlash(root), ".git", "refs", "heads", filepath.FromSlash(branch))
+	if err := os.MkdirAll(filepath.Dir(refPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(refPath, []byte(blob+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 }
 
 // acceptTestSpec commits accepted onto the checkout's default branch

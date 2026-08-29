@@ -43,6 +43,18 @@ type mutateDraftArgs struct {
 // other verdict/operational diagnostic is a plain toolError, exactly as
 // unstructured as the CLI's own non-stale diagnostic line.
 func (b *Backend) MutateDraft(ctx context.Context, argsRaw json.RawMessage) map[string]any {
+	// draftmutation.DecodeRequest enforces MaxRequestBytes against the
+	// bytes it is handed, and the bytes it is handed here are this
+	// server's own canonical re-marshal — which can be SMALLER than what
+	// the caller actually sent (canonicalization drops insignificant
+	// whitespace, and the flattened harness/session fields are stripped
+	// before re-marshaling). Checking the raw incoming argument bytes
+	// first restores the ceiling as a real resource bound on caller input,
+	// rather than one on a projection of it: an oversized payload is
+	// refused before this server allocates a decoded copy of it.
+	if len(argsRaw) > draftmutation.MaxRequestBytes {
+		return toolError("mutate_draft: arguments exceed 1 MiB")
+	}
 	var args mutateDraftArgs
 	if err := strictUnmarshal(argsRaw, &args); err != nil {
 		return toolError("mutate_draft: malformed arguments: " + err.Error())

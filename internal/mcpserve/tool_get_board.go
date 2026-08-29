@@ -13,7 +13,9 @@ import (
 // page — element taxonomy, computed badges, mode-appropriate annotations —
 // so agents work from what humans see rather than a second-hand summary
 // (05 §MCP server's get_board row). Read-only: get_board never mutates
-// anything; add_annotation stays the only write tool.
+// anything. (add_annotation is no longer the server's only write tool —
+// Wave 6 Task 1 added mutate_draft, the typed draft-mutation write path;
+// see tooldefs.go's add_annotation row.)
 //
 // Wave 6 Task 1: routes through internal/designapp.Service.GetBoard
 // (AC-8's own six-operation ASD surface, of which get_board is one) —

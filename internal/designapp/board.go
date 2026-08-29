@@ -44,12 +44,16 @@ func (r GetBoardRequest) validate() error {
 	return nil
 }
 
-// BoardResult is get_board's exact result shape: the board projection
-// itself, marshaled exactly as computed — get_board never reimplements
-// the projection (AC-8) — plus the pre-existing, unrelated I-1(b)
-// review-population disclosure (present only when a configured forge
-// could not be consulted).
+// BoardResult is get_board's exact result shape: this envelope's own
+// version (CO-2), the board projection itself, marshaled exactly as
+// computed — get_board never reimplements the projection (AC-8) — plus the
+// pre-existing, unrelated I-1(b) review-population disclosure (present
+// only when a configured forge could not be consulted). Schema versions
+// THIS envelope; the embedded projection's own fields keep workbench's
+// existing grammar byte-for-byte, since the workbench splice path renders
+// the same struct.
 type BoardResult struct {
+	Schema string `json:"schema"`
 	*workbench.BoardProjection
 	Identity          draftmutation.Identity `json:"identity"`
 	ReviewUnavailable string                 `json:"review_unavailable,omitempty"`
@@ -81,5 +85,5 @@ func (s Service) GetBoard(ctx context.Context, start string, req GetBoardRequest
 	if err != nil {
 		return nil, operational("board-load-failed", "loading board projection", err)
 	}
-	return &BoardResult{BoardProjection: proj, Identity: identity, ReviewUnavailable: reviewNotice}, nil
+	return &BoardResult{Schema: BoardResultSchema, BoardProjection: proj, Identity: identity, ReviewUnavailable: reviewNotice}, nil
 }

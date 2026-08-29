@@ -2,9 +2,12 @@ package designapp
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"testing"
 
+	"github.com/jyang234/verdi/internal/canonjson"
+	"github.com/jyang234/verdi/internal/designprovenance"
 	"github.com/jyang234/verdi/internal/store"
 )
 
@@ -15,6 +18,9 @@ func TestPrepareDesignReview(t *testing.T) {
 		result, err := svc.PrepareDesignReview(context.Background(), root, PrepareDesignReviewRequest{Spec: "spec/sample"})
 		if err != nil {
 			t.Fatalf("PrepareDesignReview: %v", err)
+		}
+		if result.Schema != ReviewResultSchema {
+			t.Fatalf("Schema = %q, want %q", result.Schema, ReviewResultSchema)
 		}
 		if result.Baseline.Available {
 			t.Fatalf("Baseline = %+v, want unavailable (never accepted yet)", result.Baseline)
@@ -131,4 +137,136 @@ func TestPrepareDesignReview(t *testing.T) {
 			t.Fatalf("PrepareDesignReview(nil policy) = %+v, want operational", err)
 		}
 	})
+
+	// A broken repository must NOT be reported as the verdict-free "spec is
+	// not yet present on the default branch": that would silently pass off
+	// an unanswerable question as a proven absence (CO-1). The default
+	// branch's ref is repointed at a real blob, so it still resolves as a
+	// ref while every tree read against it fails.
+	t.Run("a git failure reading the review base is operational, not an absent baseline", func(t *testing.T) {
+		root := newTestStore(t, "draft-write")
+		breakDefaultBranchRef(t, root, "main")
+		svc := NewService()
+		result, err := svc.PrepareDesignReview(context.Background(), root, PrepareDesignReviewRequest{Spec: "spec/sample"})
+		if err == nil {
+			t.Fatalf("PrepareDesignReview(broken default branch) = %+v, want an operational failure", result.Baseline)
+		}
+		if err.Classification != ClassificationOperational || err.Code != "io-failure" {
+			t.Fatalf("PrepareDesignReview(broken default branch) = %+v, want operational io-failure", err)
+		}
+	})
+}
+
+// TestPrepareDesignReviewWireGrammar proves the packet's nested
+// projections speak snake_case and carry exactly AC-6's content list —
+// "acceptance criteria and declared evidence kinds" included — with no
+// leaked Go field name (CO-2). It asserts over the marshaled keys, since
+// a typed decode would match field names case-insensitively.
+func TestPrepareDesignReviewWireGrammar(t *testing.T) {
+	root := newTestStore(t, "draft-write")
+	svc := NewService()
+	result, err := svc.PrepareDesignReview(context.Background(), root, PrepareDesignReviewRequest{Spec: "spec/sample"})
+	if err != nil {
+		t.Fatalf("PrepareDesignReview: %v", err)
+	}
+	encoded, marshalErr := canonjson.Marshal(result)
+	if marshalErr != nil {
+		t.Fatal(marshalErr)
+	}
+	var decoded struct {
+		Schema             string                       `json:"schema"`
+		AcceptanceCriteria []map[string]json.RawMessage `json:"acceptance_criteria"`
+		Constraints        []map[string]json.RawMessage `json:"constraints"`
+		Decisions          []map[string]json.RawMessage `json:"decisions"`
+		OpenQuestions      []map[string]json.RawMessage `json:"open_questions"`
+		Stubs              []map[string]json.RawMessage `json:"stubs"`
+	}
+	if unmarshalErr := json.Unmarshal(encoded, &decoded); unmarshalErr != nil {
+		t.Fatalf("decoding packet: %v\n%s", unmarshalErr, encoded)
+	}
+	if decoded.Schema != ReviewResultSchema {
+		t.Fatalf("schema = %q", decoded.Schema)
+	}
+	for _, want := range []string{"id", "text", "evidence", "anchor"} {
+		if _, ok := decoded.AcceptanceCriteria[0][want]; !ok {
+			t.Fatalf("acceptance_criteria[0] is missing %q: %v", want, decoded.AcceptanceCriteria[0])
+		}
+	}
+	for _, forbidden := range []string{"ID", "Text", "Evidence", "Anchor"} {
+		if _, ok := decoded.AcceptanceCriteria[0][forbidden]; ok {
+			t.Fatalf("acceptance_criteria[0] leaks the Go-named key %q", forbidden)
+		}
+	}
+	for name, block := range map[string][]map[string]json.RawMessage{
+		"constraints": decoded.Constraints, "decisions": decoded.Decisions, "open_questions": decoded.OpenQuestions,
+	} {
+		if len(block) != 1 {
+			t.Fatalf("%s = %v, want exactly the fixture's one entry", name, block)
+		}
+		if _, ok := block[0]["id"]; !ok {
+			t.Fatalf("%s[0] is missing the snake_case id key: %v", name, block[0])
+		}
+	}
+	if len(decoded.Stubs) != 1 {
+		t.Fatalf("stubs = %v", decoded.Stubs)
+	}
+	if _, ok := decoded.Stubs[0]["acceptance_criteria"]; !ok {
+		t.Fatalf("stubs[0] is missing acceptance_criteria: %v", decoded.Stubs[0])
+	}
+}
+
+// TestPrepareDesignReviewInferredOrUnresolved covers AC-6's "objects
+// classified as ai-inferred or unresolved" disclosure on a real sidecar
+// produced by the typed core (excerpts carried on the mutation request),
+// for both classifications, and proves a human-stated excerpt is not
+// flagged.
+func TestPrepareDesignReviewInferredOrUnresolved(t *testing.T) {
+	for _, tc := range []struct {
+		name           string
+		classification designprovenance.ExcerptClassification
+		wantFlagged    bool
+	}{
+		{name: "ai-inferred", classification: designprovenance.ClassificationAIInferred, wantFlagged: true},
+		{name: "unresolved", classification: designprovenance.ClassificationUnresolved, wantFlagged: true},
+		{name: "human-stated", classification: designprovenance.ClassificationHumanStated},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root := newTestStore(t, "draft-write")
+			base := []byte(testSpec)
+			req := mutateRequestWithExcerpts(t, root, "design/sample", gitHead(t, root), base,
+				[]map[string]any{{"op": "set-problem", "text": "restated problem", "anchor": "#problem"}},
+				[]map[string]any{{
+					"target": "problem", "classification": string(tc.classification),
+					"representation": string(designprovenance.RepresentationParaphrase),
+					"text":           "the agent's own restatement",
+				}})
+			svc := NewService()
+			if _, typed := svc.MutateDraft(context.Background(), root, req, mutateActor(t)); typed != nil {
+				t.Fatalf("seeding mutation: %v", typed)
+			}
+
+			result, err := svc.PrepareDesignReview(context.Background(), root, PrepareDesignReviewRequest{Spec: "spec/sample"})
+			if err != nil {
+				t.Fatalf("PrepareDesignReview: %v", err)
+			}
+			var flagged *ExcerptFlag
+			for i, flag := range result.InferredOrUnresolved {
+				if flag.Target == "problem" {
+					flagged = &result.InferredOrUnresolved[i]
+				}
+			}
+			if !tc.wantFlagged {
+				if flagged != nil {
+					t.Fatalf("InferredOrUnresolved = %+v, want no flag for a human-stated excerpt", result.InferredOrUnresolved)
+				}
+				return
+			}
+			if flagged == nil {
+				t.Fatalf("InferredOrUnresolved = %+v, want the problem target flagged", result.InferredOrUnresolved)
+			}
+			if flagged.Classification != string(tc.classification) {
+				t.Fatalf("flag classification = %q, want %q", flagged.Classification, tc.classification)
+			}
+		})
+	}
 }

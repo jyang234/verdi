@@ -8,6 +8,24 @@
 // of the row unverified. Grown again for CSE Wave 5B's `experiment` tool
 // (SI-145) and Wave 6 Task 1's five new ASD tools (AC-8) — the gate
 // grows, never shrinks (CLAUDE.md).
+//
+// BINDING NOTE — this want-list DIVERGES from verdi-surfaces §MCP server.
+// That specification's tool table is the nominal authority for this
+// inventory, and it does not carry the six ASD rows; its add_annotation
+// row still reads "append to the mutable zone (the only write tool)",
+// which mutate_draft's arrival makes false. The divergence is deliberate
+// and disclosed, not an oversight: the ASD specification
+// (.verdi/specs/active/ai-assisted-spec-design/spec.md, AC-8) fixes the
+// six-operation surface, both specifications are accepted, and reconciling
+// them requires a verdi-surfaces amendment — owner-routed, and outside a
+// Task 1 implementation unit's write set (the Task 1 brief excludes
+// "specifications, plans, invention-ledger entries").
+//
+// Until that amendment lands, THIS self-owned want-list is the operative
+// inventory: it is what the live server is gated against, and a reader
+// must not take verdi-surfaces' table as the current truth for the MCP
+// tool set or for which tools write. When the amendment lands, this note
+// goes away and that table becomes the single authority again.
 package specalign
 
 import (

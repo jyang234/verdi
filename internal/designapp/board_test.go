@@ -16,6 +16,9 @@ func TestGetBoard(t *testing.T) {
 		if err != nil {
 			t.Fatalf("GetBoard: %v", err)
 		}
+		if result.Schema != BoardResultSchema {
+			t.Fatalf("Schema = %q, want %q", result.Schema, BoardResultSchema)
+		}
 		if result.BoardProjection == nil {
 			t.Fatal("GetBoard: nil board projection")
 		}
