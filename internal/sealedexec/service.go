@@ -489,34 +489,44 @@ type Service struct {
 }
 
 type activeExecution struct {
-	mu                    sync.Mutex
-	operation             string
-	stream                ActiveAdapterRun
-	request               ExecutionRequest
-	canonicalRequest      []byte
-	workspace             WorkspaceFacts
-	profile               ResolvedProfile
-	recorder              Recorder
-	sequence              uint64
-	priorDigest           string
-	priorGlobal           uint64
-	sessionRef            string
-	review                *ReviewLaunch
-	reviewFacts           *ReviewLaunchFacts
-	reviewEvent           *contextevent.Event
-	reviewAck             *contextevent.EventAck
-	acks                  []contextevent.EventAck
-	state                 activeExecutionState
-	stopIssued            chan struct{}
-	stopIssueOnce         sync.Once
-	stopRequestErr        error
-	terminalCause         error
-	done                  chan struct{}
-	stopAck               contextevent.EventAck
-	terminalErr           error
-	resumeRechecked       bool
-	isInterrupt           bool   // set by Interrupt; triggers suspension before adapter-stop
-	initialEventChainRoot string // checkpoint EventChainRoot at session start (resume only)
+	mu                      sync.Mutex
+	operation               string
+	stream                  ActiveAdapterRun
+	request                 ExecutionRequest
+	canonicalRequest        []byte
+	workspace               WorkspaceFacts
+	profile                 ResolvedProfile
+	recorder                Recorder
+	sequence                uint64
+	priorDigest             string
+	priorGlobal             uint64
+	sessionRef              string
+	review                  *ReviewLaunch
+	reviewFacts             *ReviewLaunchFacts
+	reviewEvent             *contextevent.Event
+	reviewAck               *contextevent.EventAck
+	acks                    []contextevent.EventAck
+	state                   activeExecutionState
+	stopIssued              chan struct{}
+	stopIssueOnce           sync.Once
+	stopRequestErr          error
+	terminalCause           error
+	done                    chan struct{}
+	stopAck                 contextevent.EventAck
+	terminalErr             error
+	resumeRechecked         bool
+	isInterrupt             bool   // set by Interrupt; triggers suspension before adapter-stop
+	completedEventChainRoot string // Amendment 002 §7 completed revision-chain root
+	retained                map[uint64]retainedEvent
+}
+
+// retainedEvent is the exact canonical event the live caller retains together
+// with its durable acknowledgment. Amendment 002 §7 permits retrying only
+// those exact bytes: a byte-identical retry returns the original
+// acknowledgment without a write or a new global sequence.
+type retainedEvent struct {
+	event contextevent.Event
+	ack   contextevent.EventAck
 }
 
 type activeExecutionState uint8
@@ -681,6 +691,7 @@ func (s *Service) execute(ctx context.Context, request ExecutionRequest, data []
 	}
 
 	var sessionFacts ProviderSessionFacts
+	var plan restartPlan
 	if request.Action == ActionResume {
 		expansion, err := s.ports.Expansions.VerifyExpansion(ctx, executionKey(request))
 		if err != nil {
@@ -691,6 +702,18 @@ func (s *Service) execute(ctx context.Context, request ExecutionRequest, data []
 		}
 		if err := validateResumeFacts(request, runway, workspace, profile, authority, checkpoint, expansion); err != nil {
 			return ExecutionRun{}, err
+		}
+		plan, err = planRestart(request, checkpoint)
+		if err != nil {
+			return ExecutionRun{}, err
+		}
+		// Amendment 002 §7: an unconfirmed initial adapter-start means no
+		// provider session was ever acknowledged. The restarted command
+		// records the fixed recorder gap and error, preserves the exact
+		// acknowledged prefix, and never resumes, relaunches, or invents a
+		// session.
+		if plan.gapSequence != 0 && !plan.priorSessionAcked {
+			return s.refuseUnconfirmedInitialSession(ctx, request, workspace, profile, recorder, plan, witnesses)
 		}
 		sessionFacts, err = s.verifySession(ctx, request, profile, workspace)
 		if err != nil {
@@ -740,20 +763,45 @@ func (s *Service) execute(ctx context.Context, request ExecutionRequest, data []
 	}
 	sequence, priorDigest, priorGlobal := uint64(1), "", uint64(0)
 	var initialAcks []contextevent.EventAck
-	initialEventChainRoot := ""
+	completedEventChainRoot := ""
+	retained := make(map[uint64]retainedEvent, 4)
 	if request.Action == ActionResume {
-		sequence = checkpoint.TerminalSourceSequence + 1
-		priorDigest = terminalRoot(checkpoint)
-		priorGlobal = checkpoint.TerminalGlobalSequence
-		// Prepend the resume observation: emit KindResume before activating the stream.
+		// Restore the exact acknowledged prefix reconstructed from the
+		// checkpoint before any new durable position is allocated.
+		sequence, priorDigest, priorGlobal = plan.sequence, plan.priorDigest, plan.priorGlobal
+		initialAcks = append(initialAcks, plan.acks...)
+		completedEventChainRoot = plan.completedEventChainRoot
+		partial.Acks = append([]contextevent.EventAck(nil), initialAcks...)
+		if plan.gapSequence != 0 {
+			// §7: an earlier acknowledged provider session exists, so resume
+			// first appends the fixed authority-blocking recorder gap.
+			gapEvent, gapAck, err := s.appendRecorderGap(ctx, request, workspace, recorder, retained, sequence, priorDigest, priorGlobal)
+			if err != nil {
+				return partial, err
+			}
+			initialAcks = append(initialAcks, gapAck)
+			partial.Acks = append([]contextevent.EventAck(nil), initialAcks...)
+			sequence++
+			priorDigest, priorGlobal = gapEvent.EventDigest, gapAck.GlobalSequence
+		}
+		// §7: resume's event_chain_root is the digest of the acknowledged
+		// prefix document built from the actual terminal facts.
+		chainRoot, err := contextevent.EventPrefixDigest(acknowledgedPrefix(request, completedEventChainRoot, sequence-1, priorGlobal, priorDigest))
+		if err != nil {
+			return partial, operational("digest resume acknowledged prefix", err)
+		}
+		// §7: prior_session and current_session are provider-session
+		// identities. Claude --resume requires the resumed provider session to
+		// equal the requested explicit session, and the continuity proof names
+		// exactly that one verified identity.
 		resumeSchema, _ := contextevent.PayloadSchema(contextevent.KindResume)
 		resumePayload := &contextevent.ResumePayload{
 			Schema:           resumeSchema,
-			PriorSession:     request.Resume.Continuity.Session,
-			CurrentSession:   request.Session,
+			PriorSession:     sessionFacts.SessionRef,
+			CurrentSession:   sessionFacts.SessionRef,
 			ContinuityDigest: request.Resume.ContinuityDigest,
 			ManifestDigest:   request.ManifestDigest,
-			EventChainRoot:   checkpoint.EventChainRoot,
+			EventChainRoot:   chainRoot,
 		}
 		resumeStamp, err := s.ports.Stamps.NextStamp(ctx)
 		if err != nil {
@@ -763,20 +811,17 @@ func (s *Service) execute(ctx context.Context, request ExecutionRequest, data []
 		if err != nil {
 			return partial, operational("build resume event", err)
 		}
-		resumeAck, err := recorder.Append(ctx, resumeEvent)
+		resumeAck, err := appendRetained(ctx, recorder, retained, resumeEvent, priorGlobal)
 		if err != nil {
 			return partial, operational("append resume event", err)
 		}
-		if err := validateAck(resumeEvent, resumeAck, priorGlobal); err != nil {
-			return partial, operational("acknowledge resume event", err)
-		}
-		initialAcks = []contextevent.EventAck{resumeAck}
-		initialEventChainRoot = checkpoint.EventChainRoot
+		initialAcks = append(initialAcks, resumeAck)
+		partial.Acks = append([]contextevent.EventAck(nil), initialAcks...)
 		sequence++
 		priorDigest = resumeEvent.EventDigest
 		priorGlobal = resumeAck.GlobalSequence
 	}
-	s.activate(active, stream, request, canonicalRequest, workspace, profile, recorder, sequence, priorDigest, priorGlobal, sessionFacts.SessionRef, review, initialAcks, initialEventChainRoot)
+	s.activate(active, stream, request, canonicalRequest, workspace, profile, recorder, sequence, priorDigest, priorGlobal, sessionFacts.SessionRef, review, initialAcks, completedEventChainRoot, retained)
 	return s.consumeActive(ctx, active, authorityMode, witnesses)
 }
 
@@ -889,7 +934,7 @@ func (s *Service) acquire(key ExecutionKey, operation string) (*activeExecution,
 	return active, release, nil
 }
 
-func (s *Service) activate(active *activeExecution, stream ActiveAdapterRun, request ExecutionRequest, canonicalRequest []byte, workspace WorkspaceFacts, profile ResolvedProfile, recorder Recorder, sequence uint64, priorDigest string, priorGlobal uint64, sessionRef string, review *ReviewLaunch, initialAcks []contextevent.EventAck, initialEventChainRoot string) {
+func (s *Service) activate(active *activeExecution, stream ActiveAdapterRun, request ExecutionRequest, canonicalRequest []byte, workspace WorkspaceFacts, profile ResolvedProfile, recorder Recorder, sequence uint64, priorDigest string, priorGlobal uint64, sessionRef string, review *ReviewLaunch, initialAcks []contextevent.EventAck, completedEventChainRoot string, retained map[uint64]retainedEvent) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	active.mu.Lock()
@@ -906,7 +951,11 @@ func (s *Service) activate(active *activeExecution, stream ActiveAdapterRun, req
 	active.sessionRef = sessionRef
 	active.review = cloneReviewLaunch(review)
 	active.acks = append([]contextevent.EventAck(nil), initialAcks...)
-	active.initialEventChainRoot = initialEventChainRoot
+	active.completedEventChainRoot = completedEventChainRoot
+	if retained == nil {
+		retained = make(map[uint64]retainedEvent, 4)
+	}
+	active.retained = retained
 	active.state = activeRunning
 	active.stopIssued = make(chan struct{})
 	active.done = make(chan struct{})
@@ -1152,9 +1201,13 @@ func (s *Service) recordStop(ctx context.Context, active *activeExecution, stop 
 	// at least one acknowledged event in this session (priorDigest non-empty).
 	if active.isInterrupt && active.priorDigest != "" {
 		suspSchema, _ := contextevent.PayloadSchema(contextevent.KindSuspension)
-		chainRoot := active.initialEventChainRoot
-		if chainRoot == "" {
-			chainRoot = active.priorDigest
+		// §7: suspension's event_chain_root is the digest of the acknowledged
+		// prefix document built from this run's actual terminal facts. The
+		// completed revision-chain root is carried only as
+		// completed_event_chain_root; there is no bare-event-digest fallback.
+		chainRoot, err := contextevent.EventPrefixDigest(acknowledgedPrefix(active.request, active.completedEventChainRoot, active.sequence-1, active.priorGlobal, active.priorDigest))
+		if err != nil {
+			return contextevent.EventAck{}, operational("digest suspension acknowledged prefix", err)
 		}
 		suspPayload := &contextevent.SuspensionPayload{
 			Schema:           suspSchema,
@@ -1170,12 +1223,9 @@ func (s *Service) recordStop(ctx context.Context, active *activeExecution, stop 
 		if err != nil {
 			return contextevent.EventAck{}, operational("encode suspension event", err)
 		}
-		suspAck, err := active.recorder.Append(ctx, suspEvent)
+		suspAck, err := appendRetained(ctx, active.recorder, active.retained, suspEvent, active.priorGlobal)
 		if err != nil {
 			return contextevent.EventAck{}, operational("append suspension event", err)
-		}
-		if err := validateAck(suspEvent, suspAck, active.priorGlobal); err != nil {
-			return contextevent.EventAck{}, operational("acknowledge suspension event", err)
 		}
 		active.acks = append(active.acks, suspAck)
 		active.sequence++
@@ -1191,12 +1241,9 @@ func (s *Service) recordStop(ctx context.Context, active *activeExecution, stop 
 	if err != nil {
 		return contextevent.EventAck{}, operational("encode stop event", err)
 	}
-	ack, err := active.recorder.Append(ctx, event)
+	ack, err := appendRetained(ctx, active.recorder, active.retained, event, active.priorGlobal)
 	if err != nil {
 		return contextevent.EventAck{}, operational("append stop event", err)
-	}
-	if err := validateAck(event, ack, active.priorGlobal); err != nil {
-		return contextevent.EventAck{}, operational("acknowledge stop event", err)
 	}
 	active.acks = append(active.acks, ack)
 	active.sequence++
@@ -1519,7 +1566,7 @@ func validateResumeFacts(request ExecutionRequest, runway RunwayFacts, workspace
 	if err != nil {
 		return verdict("fresh recorder revision chain is incomplete or invalid")
 	}
-	if checkpoint.ActiveRevision != nil || runway.Commit != c.InputCommit || runway.Tree != c.InputTree || !runway.Clean ||
+	if runway.Commit != c.InputCommit || runway.Tree != c.InputTree || !runway.Clean ||
 		workspace.WorkspaceID != c.ExecutionWorkspaceID || workspaceDigest != c.ExecutionWorkspaceRequestDigest ||
 		workspace.CurrentCommit != c.CurrentCommit || workspace.CurrentTree != c.CurrentTree || !workspace.Clean ||
 		profile.Digest != c.ProfileDigest || digestBytes(grantBytes) != c.GrantDigest || authority.AuthorityDigest != c.AuthorityVerdictDigest ||
@@ -1587,4 +1634,225 @@ func terminalRoot(checkpoint RecorderCheckpoint) string {
 		return ""
 	}
 	return checkpoint.Revisions[len(checkpoint.Revisions)-1].EventRoot
+}
+
+// recorderGapSource is Amendment 002 §7's fixed telemetry-gap source for a
+// durable position whose acknowledgment the recorder could not confirm.
+const recorderGapSource = "vatc-recorder"
+
+// recorderGapReason is the closed reason carried by that fixed gap in both §7
+// restart arms.
+const recorderGapReason = "recorder-append-failed"
+
+// unconfirmedInitialSessionReason is §7's closed adapter-error reason for a
+// restart whose initial adapter-start was never acknowledged.
+const unconfirmedInitialSessionReason = "unconfirmed-initial-session"
+
+// restartPlan is the acknowledged prefix Verdi reconstructs before a resume.
+// gapSequence is zero when the checkpoint carries no unconfirmed durable
+// position, in which case the ambiguous event committed and nothing is
+// replayed.
+type restartPlan struct {
+	sequence                uint64
+	priorDigest             string
+	priorGlobal             uint64
+	acks                    []contextevent.EventAck
+	completedEventChainRoot string
+	gapSequence             uint64
+	priorSessionAcked       bool
+}
+
+// acknowledgedPrefix builds Amendment 002 §7's exact eleven-field
+// acknowledged-prefix document from actual terminal facts. The completed
+// revision-chain root is carried only as completed_event_chain_root.
+func acknowledgedPrefix(request ExecutionRequest, completedRoot string, terminalSource, terminalGlobal uint64, terminalDigest string) contextevent.EventPrefix {
+	return contextevent.EventPrefix{
+		Schema:                  contextevent.EventPrefixSchemaID,
+		Flight:                  request.Flight,
+		Lane:                    request.Lane,
+		Session:                 request.Session,
+		Epoch:                   request.Epoch,
+		ManifestRevision:        request.ManifestRevision,
+		ManifestDigest:          request.ManifestDigest,
+		TerminalSourceSequence:  terminalSource,
+		TerminalGlobalSequence:  terminalGlobal,
+		TerminalEventDigest:     terminalDigest,
+		CompletedEventChainRoot: completedRoot,
+	}
+}
+
+// appendRetained is the durable append seam for service-constructed events.
+// Amendment 002 §7 forbids a second write at a source sequence the live caller
+// already retained: the exact retained bytes replay to the original
+// acknowledgment without a new global sequence, and any contradiction fails
+// closed.
+func appendRetained(ctx context.Context, recorder Recorder, retained map[uint64]retainedEvent, event contextevent.Event, priorGlobal uint64) (contextevent.EventAck, error) {
+	if prior, ok := retained[event.SourceSequence]; ok {
+		return contextevent.ValidateReplay(prior.event, prior.ack, event)
+	}
+	ack, err := recorder.Append(ctx, event)
+	if err != nil {
+		return contextevent.EventAck{}, err
+	}
+	if err := validateAck(event, ack, priorGlobal); err != nil {
+		return contextevent.EventAck{}, err
+	}
+	if retained != nil {
+		retained[event.SourceSequence] = retainedEvent{event: event, ack: ack}
+	}
+	return ack, nil
+}
+
+// planRestart reconstructs the acknowledged prefix for one resume. A checkpoint
+// without an active revision means every durable position committed, so resume
+// continues from the completed revision terminal and replays nothing. An active
+// revision means the previous process left one unconfirmed position: its exact
+// acknowledgments are restored and the absent position is recorded as a gap.
+func planRestart(request ExecutionRequest, checkpoint RecorderCheckpoint) (restartPlan, error) {
+	completedRoot, err := contextevent.EventChainRoot(checkpoint.Revisions)
+	if err != nil {
+		return restartPlan{}, verdict("fresh recorder revision chain is incomplete or invalid")
+	}
+	active := checkpoint.ActiveRevision
+	if active == nil {
+		return restartPlan{
+			sequence:                checkpoint.TerminalSourceSequence + 1,
+			priorDigest:             terminalRoot(checkpoint),
+			priorGlobal:             checkpoint.TerminalGlobalSequence,
+			completedEventChainRoot: completedRoot,
+		}, nil
+	}
+	if active.Invalidated {
+		return restartPlan{}, operational("restore active revision", errors.New("checkpoint active revision is invalidated"))
+	}
+	if active.Revision != request.ManifestRevision || active.ManifestDigest != request.ManifestDigest {
+		return restartPlan{}, verdict("checkpoint active revision contradicts the requested manifest revision")
+	}
+	if active.NextSourceSequence == 0 {
+		return restartPlan{}, operational("restore active revision", errors.New("active revision has no next source sequence"))
+	}
+	if active.EventAcks == nil || uint64(len(active.EventAcks)) != active.NextSourceSequence-1 {
+		return restartPlan{}, operational("restore active revision", errors.New("active acknowledgments do not end at next_source_sequence-1"))
+	}
+	restored := make([]contextevent.EventAck, 0, len(active.EventAcks))
+	priorSessionAcked := false
+	for i, ack := range active.EventAcks {
+		encoded, err := contextevent.EncodeEventAck(ack)
+		if err != nil {
+			return restartPlan{}, operational("restore active acknowledgment", err)
+		}
+		canonical, err := contextevent.DecodeEventAck(bytes.NewReader(encoded))
+		if err != nil {
+			return restartPlan{}, operational("restore active acknowledgment", err)
+		}
+		if canonical.Flight != request.Flight || canonical.Lane != request.Lane || canonical.Epoch != request.Epoch ||
+			canonical.Session != request.Session || canonical.ManifestRevision != request.ManifestRevision {
+			return restartPlan{}, verdict("restored active acknowledgment identity contradicts request")
+		}
+		if canonical.SourceSequence != uint64(i)+1 {
+			return restartPlan{}, operational("restore active acknowledgment", errors.New("restored active source order is discontinuous"))
+		}
+		if i != 0 && canonical.GlobalSequence <= restored[i-1].GlobalSequence {
+			return restartPlan{}, operational("restore active acknowledgment", errors.New("restored active global order does not strictly increase"))
+		}
+		if canonical.Kind == contextevent.KindAdapterStart {
+			priorSessionAcked = true
+		}
+		restored = append(restored, canonical)
+	}
+	if len(restored) == 0 {
+		if active.PriorEventDigest != "" || active.LastGlobalSequence != checkpoint.TerminalGlobalSequence {
+			return restartPlan{}, operational("restore active revision", errors.New("empty active acknowledgments contradict the active append position"))
+		}
+	} else {
+		final := restored[len(restored)-1]
+		if final.EventDigest != active.PriorEventDigest || final.GlobalSequence != active.LastGlobalSequence {
+			return restartPlan{}, operational("restore active revision", errors.New("final active acknowledgment contradicts the active append position"))
+		}
+	}
+	return restartPlan{
+		sequence:                active.NextSourceSequence,
+		priorDigest:             active.PriorEventDigest,
+		priorGlobal:             active.LastGlobalSequence,
+		acks:                    restored,
+		completedEventChainRoot: completedRoot,
+		gapSequence:             active.NextSourceSequence,
+		priorSessionAcked:       priorSessionAcked,
+	}, nil
+}
+
+// appendRecorderGap records Amendment 002 §7's fixed authority-blocking
+// telemetry-gap over the single absent source sequence.
+func (s *Service) appendRecorderGap(ctx context.Context, request ExecutionRequest, workspace WorkspaceFacts, recorder Recorder, retained map[uint64]retainedEvent, sequence uint64, priorDigest string, priorGlobal uint64) (contextevent.Event, contextevent.EventAck, error) {
+	schema, _ := contextevent.PayloadSchema(contextevent.KindTelemetryGap)
+	payload := &contextevent.TelemetryGapPayload{
+		Schema:       schema,
+		Source:       recorderGapSource,
+		FromSequence: sequence,
+		ToSequence:   sequence,
+		ReasonCode:   recorderGapReason,
+		Availability: "unavailable",
+	}
+	stamp, err := s.ports.Stamps.NextStamp(ctx)
+	if err != nil {
+		return contextevent.Event{}, contextevent.EventAck{}, operational("recorder gap stamp", err)
+	}
+	event, err := buildEvent(request, workspace, sequence, priorDigest, nil, stamp, contextevent.KindTelemetryGap, payload)
+	if err != nil {
+		return contextevent.Event{}, contextevent.EventAck{}, operational("build recorder gap event", err)
+	}
+	ack, err := appendRetained(ctx, recorder, retained, event, priorGlobal)
+	if err != nil {
+		return contextevent.Event{}, contextevent.EventAck{}, operational("append recorder gap event", err)
+	}
+	return event, ack, nil
+}
+
+// refuseUnconfirmedInitialSession records Amendment 002 §7's fixed recorder gap
+// and adapter-error for a restart whose initial adapter-start was never
+// acknowledged. It preserves the exact acknowledged prefix, exits operational,
+// and never resumes, relaunches start, or invents a provider session.
+func (s *Service) refuseUnconfirmedInitialSession(ctx context.Context, request ExecutionRequest, workspace WorkspaceFacts, profile ResolvedProfile, recorder Recorder, plan restartPlan, witnesses []string) (ExecutionRun, error) {
+	run := ExecutionRun{
+		Authority: contextevent.AuthorityAdvisory,
+		Witnesses: appendUnique(witnesses, unconfirmedInitialSessionReason),
+		Workspace: workspace, Profile: profile,
+		Acks: append([]contextevent.EventAck(nil), plan.acks...),
+	}
+	retained := make(map[uint64]retainedEvent, 2)
+	gapEvent, gapAck, err := s.appendRecorderGap(ctx, request, workspace, recorder, retained, plan.sequence, plan.priorDigest, plan.priorGlobal)
+	if err != nil {
+		return run, err
+	}
+	run.Acks = append(run.Acks, gapAck)
+
+	raw, err := contextevent.SafeRawDetail(nil, unconfirmedInitialSessionReason)
+	if err != nil {
+		return run, operational("build unconfirmed initial session detail", err)
+	}
+	detail := contextevent.Detail{
+		Mode: contextevent.DetailInline, MediaType: contextevent.MediaTypeJSON,
+		Digest: digestBytes(raw), RedactionProfile: contextevent.RedactionProfileStandard,
+		RedactedJSON: raw,
+	}
+	schema, _ := contextevent.PayloadSchema(contextevent.KindAdapterError)
+	payload := &contextevent.AdapterErrorPayload{
+		Schema: schema, Adapter: request.Adapter, AdapterVersion: request.AdapterVersion,
+		Session: request.Session, Operation: "recorder", ReasonCode: unconfirmedInitialSessionReason,
+		ErrorDigest: detail.Digest, Detail: detail,
+	}
+	stamp, err := s.ports.Stamps.NextStamp(ctx)
+	if err != nil {
+		return run, operational("unconfirmed initial session stamp", err)
+	}
+	event, err := buildEvent(request, workspace, plan.sequence+1, gapEvent.EventDigest, nil, stamp, contextevent.KindAdapterError, payload)
+	if err != nil {
+		return run, operational("build unconfirmed initial session error", err)
+	}
+	ack, err := appendRetained(ctx, recorder, retained, event, gapAck.GlobalSequence)
+	if err != nil {
+		return run, operational("append unconfirmed initial session error", err)
+	}
+	run.Acks = append(run.Acks, ack)
+	return run, operational("restore active revision", errors.New("recorder could not confirm the initial provider session"))
 }

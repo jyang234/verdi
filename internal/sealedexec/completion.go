@@ -32,6 +32,10 @@ type CompletionPorts struct {
 	Inputs    ReceiptInputsResolver
 	Receipts  ReceiptAppender
 	Stamps    StampSource
+	// Segments owns durable redacted-segment bytes. Amendment 002 §6 stores a
+	// canonical receipt of 16,385 bytes or more before its event is appended;
+	// without this port an oversized receipt is refused rather than inlined.
+	Segments SegmentStore
 }
 
 // CompletionRequest binds one canonical dispatch to U4c's terminal run.
@@ -60,7 +64,8 @@ type Completion struct {
 // CompletionService owns the acyclic execution-result, receipt, and public
 // result terminal order.
 type CompletionService struct {
-	ports CompletionPorts
+	ports   CompletionPorts
+	details *DetailProcessor
 }
 
 // NewCompletionService rejects an incomplete terminal dependency set.
@@ -84,7 +89,15 @@ func NewCompletionService(ports CompletionPorts) (*CompletionService, error) {
 	if len(missing) != 0 {
 		return nil, fmt.Errorf("sealedexec: new completion service: missing ports %v", missing)
 	}
-	return &CompletionService{ports: ports}, nil
+	service := &CompletionService{ports: ports}
+	if !nilInterface(ports.Segments) {
+		details, err := NewDetailProcessor(ports.Segments)
+		if err != nil {
+			return nil, err
+		}
+		service.details = details
+	}
+	return service, nil
 }
 
 // Complete finalizes one successful U4c run. No public result bytes are
@@ -170,7 +183,7 @@ func (s *CompletionService) Complete(ctx context.Context, input CompletionReques
 	if err != nil {
 		return Completion{}, operational("stamp receipt event", err)
 	}
-	receiptEvent, err := buildReceiptEvent(input.Request, child, resultEvent, receipt, receiptBytes, receiptStamp)
+	receiptEvent, err := s.buildReceiptEvent(ctx, input.Request, child, resultEvent, receipt, receiptBytes, receiptStamp, input.Run.Profile.PolicySecretValues)
 	if err != nil {
 		return Completion{}, operational("build receipt event", err)
 	}
@@ -178,7 +191,7 @@ func (s *CompletionService) Complete(ctx context.Context, input CompletionReques
 	if err != nil {
 		return Completion{}, operational("append canonical receipt", err)
 	}
-	if err := validateSpecializedReceiptAck(receiptEvent, receipt, resultAck, receiptAck); err != nil {
+	if err := s.validateSpecializedReceiptAck(ctx, receiptEvent, receipt, resultAck, receiptAck); err != nil {
 		return Completion{}, operational("acknowledge canonical receipt", err)
 	}
 
@@ -420,7 +433,7 @@ func buildCompletionReceipt(request ExecutionRequest, authority contextevent.Aut
 	return canonical, encoded, nil
 }
 
-func buildReceiptEvent(request ExecutionRequest, child WorkspaceFacts, resultEvent contextevent.Event, receipt contextreceipt.Receipt, receiptBytes []byte, stamp string) (contextevent.Event, error) {
+func (s *CompletionService) buildReceiptEvent(ctx context.Context, request ExecutionRequest, child WorkspaceFacts, resultEvent contextevent.Event, receipt contextreceipt.Receipt, receiptBytes []byte, stamp string, protectedValues [][]byte) (contextevent.Event, error) {
 	if len(receiptBytes) == 0 || receiptBytes[len(receiptBytes)-1] != '\n' {
 		return contextevent.Event{}, errors.New("canonical receipt lacks trailing newline")
 	}
@@ -429,19 +442,52 @@ func buildReceiptEvent(request ExecutionRequest, child WorkspaceFacts, resultEve
 		return contextevent.Event{}, err
 	}
 	receiptJSON := append([]byte(nil), receiptBytes[:len(receiptBytes)-1]...)
+	detail, err := s.receiptDetail(ctx, receiptJSON, protectedValues)
+	if err != nil {
+		return contextevent.Event{}, err
+	}
 	payload := &contextevent.ReceiptPayload{
 		Schema: schema, Role: receipt.Role, ReceiptDigest: receipt.Digest,
 		Authority: receipt.Authority, ExecutionEventChainRoot: receipt.EventChainRoot,
-		Detail: contextevent.Detail{
-			Mode: contextevent.DetailInline, MediaType: contextevent.MediaTypeJSON,
-			Digest: digestBytes(receiptJSON), RedactionProfile: contextevent.RedactionProfileStandard,
-			RedactedJSON: receiptJSON,
-		},
+		Detail: detail,
 	}
 	return buildEvent(request, child, resultEvent.SourceSequence+1, resultEvent.EventDigest, nil, stamp, contextevent.KindReceipt, payload)
 }
 
-func validateSpecializedReceiptAck(event contextevent.Event, receipt contextreceipt.Receipt, resultAck contextevent.EventAck, ack contextevent.ReceiptEventAck) error {
+// receiptDetail selects Amendment 002 §6's inline-or-segment representation for
+// the exact finalized canonical receipt. A receipt of 16,385 bytes or more is
+// stored before its event is appended, and the represented bytes must remain
+// byte-identical to the receipt they represent.
+func (s *CompletionService) receiptDetail(ctx context.Context, receiptJSON []byte, protectedValues [][]byte) (contextevent.Detail, error) {
+	if s.details == nil {
+		if len(receiptJSON) > contextevent.InlineDetailCeiling {
+			return contextevent.Detail{}, fmt.Errorf("canonical receipt of %d bytes needs a segment store", len(receiptJSON))
+		}
+		detail := contextevent.Detail{
+			Mode: contextevent.DetailInline, MediaType: contextevent.MediaTypeJSON,
+			Digest: digestBytes(receiptJSON), RedactionProfile: contextevent.RedactionProfileStandard,
+			RedactedJSON: append([]byte(nil), receiptJSON...),
+		}
+		if err := detail.Validate(); err != nil {
+			return contextevent.Detail{}, err
+		}
+		return detail, nil
+	}
+	detail, err := s.details.Process(ctx, receiptJSON, protectedValues)
+	if err != nil {
+		return contextevent.Detail{}, err
+	}
+	represented, err := s.details.Resolve(ctx, detail)
+	if err != nil {
+		return contextevent.Detail{}, err
+	}
+	if !bytes.Equal(represented, receiptJSON) {
+		return contextevent.Detail{}, errors.New("receipt detail does not represent the exact canonical receipt")
+	}
+	return detail, nil
+}
+
+func (s *CompletionService) validateSpecializedReceiptAck(ctx context.Context, event contextevent.Event, receipt contextreceipt.Receipt, resultAck contextevent.EventAck, ack contextevent.ReceiptEventAck) error {
 	encoded, err := contextevent.EncodeReceiptEventAck(ack)
 	if err != nil {
 		return err
@@ -456,39 +502,61 @@ func validateSpecializedReceiptAck(event contextevent.Event, receipt contextrece
 		canonical.GlobalSequence <= resultAck.GlobalSequence || canonical.ReceiptDigest != receipt.Digest {
 		return errors.New("receipt acknowledgment does not bind receipt event and finalized receipt")
 	}
-	// Cross-validate the inline receipt detail. Two digest domains must remain distinct:
-	//   - Self-digest domain: Detail.Digest = sha256(RedactedJSON bytes as-is, no added LF)
-	//   - Represented-byte domain: receipt.Digest = sha256(receipt JSON with Digest="" cleared)
-	// The inline bytes must also strict-decode/re-encode to the same canonical receipt.
+	// Amendment 002 §8: the controller resolves segment detail when necessary,
+	// recomputes detail.digest over the exact represented bytes, and
+	// strict-decodes and canonically re-encodes the receipt. The two digest
+	// domains stay distinct and are never compared for equality:
+	//   - represented-byte domain: detail.digest = sha256(exact canonical
+	//     receipt JSON, inline or resolved, without a trailing LF);
+	//   - self-digest domain: receipt.digest is the blank-top-level-digest
+	//     self-digest carried inside the receipt.
 	receiptPayload, ok := event.Payload.(*contextevent.ReceiptPayload)
 	if !ok {
 		return errors.New("receipt event carries non-receipt payload type")
 	}
-	if receiptPayload.Detail.Mode == contextevent.DetailInline {
-		// Self-digest: Detail.Digest must equal sha256(RedactedJSON bytes).
-		if receiptPayload.Detail.Digest != digestBytes(receiptPayload.Detail.RedactedJSON) {
-			return errors.New("receipt inline detail self-digest contradicts RedactedJSON bytes")
-		}
-		// Strict decode/re-encode: inline content appended with LF must re-encode canonically.
-		representedBytes := append(append([]byte(nil), receiptPayload.Detail.RedactedJSON...), '\n')
-		reDecoded, rerr := contextreceipt.DecodeReceipt(bytes.NewReader(representedBytes))
-		if rerr != nil {
-			return fmt.Errorf("receipt inline detail re-decode: %w", rerr)
-		}
-		reEncoded, rerr := contextreceipt.EncodeReceipt(reDecoded)
-		if rerr != nil {
-			return fmt.Errorf("receipt inline detail re-encode: %w", rerr)
-		}
-		if !bytes.Equal(representedBytes, reEncoded) {
-			return errors.New("receipt inline detail is not byte-canonical on re-encode")
-		}
-		// The two domains must be distinct: self-digest (preimage includes Digest field)
-		// differs from represented-byte digest (preimage has Digest="" cleared).
-		if receiptPayload.Detail.Digest == receipt.Digest {
-			return errors.New("receipt self-digest and represented-byte digest must be distinct")
-		}
+	representedJSON, err := s.resolveReceiptDetail(ctx, receiptPayload.Detail)
+	if err != nil {
+		return err
+	}
+	if receiptPayload.Detail.Digest != digestBytes(representedJSON) {
+		return errors.New("receipt detail digest contradicts the represented receipt bytes")
+	}
+	representedBytes := append(append([]byte(nil), representedJSON...), '\n')
+	reDecoded, err := contextreceipt.DecodeReceipt(bytes.NewReader(representedBytes))
+	if err != nil {
+		return fmt.Errorf("receipt detail re-decode: %w", err)
+	}
+	reEncoded, err := contextreceipt.EncodeReceipt(reDecoded)
+	if err != nil {
+		return fmt.Errorf("receipt detail re-encode: %w", err)
+	}
+	if !bytes.Equal(representedBytes, reEncoded) {
+		return errors.New("represented receipt bytes are not byte-canonical on re-encode")
+	}
+	if reDecoded.Digest != receipt.Digest || reDecoded.Role != receipt.Role ||
+		reDecoded.Authority != receipt.Authority || reDecoded.EventChainRoot != receipt.EventChainRoot {
+		return errors.New("represented receipt contradicts the finalized receipt role, authority, chain root, or self-digest")
+	}
+	if receiptPayload.Detail.Digest == receipt.Digest {
+		return errors.New("receipt self-digest and represented-byte digest must be distinct")
 	}
 	return nil
+}
+
+// resolveReceiptDetail returns the exact receipt bytes an inline or stored
+// segment detail represents. A segment detail without a segment store refuses
+// acknowledgment rather than assuming the bytes.
+func (s *CompletionService) resolveReceiptDetail(ctx context.Context, detail contextevent.Detail) ([]byte, error) {
+	if detail.Mode == contextevent.DetailInline {
+		if err := detail.Validate(); err != nil {
+			return nil, fmt.Errorf("receipt inline detail: %w", err)
+		}
+		return append([]byte(nil), detail.RedactedJSON...), nil
+	}
+	if s.details == nil {
+		return nil, errors.New("receipt segment detail cannot be resolved without a segment store")
+	}
+	return s.details.Resolve(ctx, detail)
 }
 
 func sortedUniqueStrings(values []string) []string {

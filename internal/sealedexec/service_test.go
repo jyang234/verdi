@@ -1,6 +1,7 @@
 package sealedexec
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -474,6 +475,208 @@ func TestContextExecutionResumeContract_Behavioral(t *testing.T) {
 		}
 	})
 
+	t.Run("resume anchors event_chain_root in the acknowledged prefix digest", func(t *testing.T) {
+		svc, ports := newServiceHarness(t, req)
+		if _, err := svc.Execute(context.Background(), req, []contextcompile.DataItem{}); err != nil {
+			t.Fatalf("Execute resume: %v", err)
+		}
+		resume := requireResumePayload(t, ports.appendedEvents())
+		completedRoot, err := contextevent.EventChainRoot(req.Resume.Continuity.RevisionSegments)
+		if err != nil {
+			t.Fatalf("EventChainRoot: %v", err)
+		}
+		want, err := contextevent.EventPrefixDigest(acknowledgedPrefix(req, completedRoot,
+			req.Resume.Continuity.TerminalSourceSequence, req.Resume.Continuity.TerminalGlobalSequence,
+			req.Resume.Continuity.RevisionSegments[len(req.Resume.Continuity.RevisionSegments)-1].EventRoot))
+		if err != nil {
+			t.Fatalf("EventPrefixDigest: %v", err)
+		}
+		if resume.EventChainRoot != want {
+			t.Fatalf("resume event_chain_root = %q, want the acknowledged prefix digest %q", resume.EventChainRoot, want)
+		}
+		if resume.EventChainRoot == completedRoot {
+			t.Fatal("resume event_chain_root is the bare revision-chain root, not the prefix digest")
+		}
+	})
+
+	t.Run("resume sessions are provider-session identities", func(t *testing.T) {
+		svc, ports := newServiceHarness(t, req)
+		if _, err := svc.Execute(context.Background(), req, []contextcompile.DataItem{}); err != nil {
+			t.Fatalf("Execute resume: %v", err)
+		}
+		resume := requireResumePayload(t, ports.appendedEvents())
+		provider := req.Resume.Continuity.AdapterSessionRef
+		if resume.PriorSession != provider || resume.CurrentSession != provider {
+			t.Fatalf("resume prior/current session = %q/%q, want the verified provider session %q", resume.PriorSession, resume.CurrentSession, provider)
+		}
+		if resume.PriorSession == req.Session || resume.CurrentSession == req.Session {
+			t.Fatalf("resume carries the Verdi execution session %q", req.Session)
+		}
+	})
+
+	t.Run("restart with an acknowledged provider session gaps then resumes", func(t *testing.T) {
+		svc, ports := newServiceHarness(t, req)
+		restored := restoredActiveAcks(t, req, contextevent.KindAdapterStart)
+		ports.checkpoint.ActiveRevision = activeRevisionFor(req, restored)
+		run, err := svc.Execute(context.Background(), req, []contextcompile.DataItem{})
+		if err != nil {
+			t.Fatalf("Execute restart resume: %v", err)
+		}
+		events := ports.appendedEvents()
+		if len(events) < 2 || events[0].Kind != contextevent.KindTelemetryGap || events[1].Kind != contextevent.KindResume {
+			t.Fatalf("restart appended %v, want the fixed gap before resume", observationEventKinds(events))
+		}
+		gap, ok := events[0].Payload.(*contextevent.TelemetryGapPayload)
+		if !ok {
+			t.Fatalf("gap payload type = %T", events[0].Payload)
+		}
+		absent := ports.checkpoint.ActiveRevision.NextSourceSequence
+		if gap.Source != recorderGapSource || gap.FromSequence != absent || gap.ToSequence != absent || gap.Availability != "unavailable" {
+			t.Fatalf("recorder gap = %#v, want %q over [%d,%d]", gap, recorderGapSource, absent, absent)
+		}
+		if events[0].SourceSequence != absent || events[1].SourceSequence != absent+1 {
+			t.Fatalf("restart source order = %d/%d, want %d/%d", events[0].SourceSequence, events[1].SourceSequence, absent, absent+1)
+		}
+		if ports.resumeCalls != 1 {
+			t.Fatalf("resume calls = %d, want one explicit resume", ports.resumeCalls)
+		}
+		// The restored acknowledgments are the prefix of the I-88 partial bytes.
+		if len(run.Acks) < len(restored) {
+			t.Fatalf("run carries %d acknowledgments, want at least the %d restored rows", len(run.Acks), len(restored))
+		}
+		for i, ack := range restored {
+			if run.Acks[i] != ack {
+				t.Fatalf("restored acknowledgment %d = %#v, want %#v", i, run.Acks[i], ack)
+			}
+		}
+		partial, err := EncodeExecutionPartial(req, run)
+		if err != nil {
+			t.Fatalf("EncodeExecutionPartial: %v", err)
+		}
+		decoded, err := DecodeExecutionPartial(bytes.NewReader(partial))
+		if err != nil {
+			t.Fatalf("DecodeExecutionPartial: %v", err)
+		}
+		if len(decoded.EventAcks) < len(restored) || decoded.EventAcks[0] != restored[0] {
+			t.Fatalf("I-88 partial acknowledgments = %d rows starting %#v", len(decoded.EventAcks), decoded.EventAcks)
+		}
+	})
+
+	t.Run("restart without an acknowledged initial session refuses", func(t *testing.T) {
+		svc, ports := newServiceHarness(t, req)
+		restored := restoredActiveAcks(t, req, contextevent.KindPrompt)
+		ports.checkpoint.ActiveRevision = activeRevisionFor(req, restored)
+		run, err := svc.Execute(context.Background(), req, []contextcompile.DataItem{})
+		if !errors.Is(err, ErrOperational) {
+			t.Fatalf("Execute = %v, want an operational refusal", err)
+		}
+		if ports.resumeCalls != 0 || ports.startCalls != 0 || ports.sessionVerifyCalls != 0 {
+			t.Fatalf("restart launched or verified a session: resume=%d start=%d session=%d", ports.resumeCalls, ports.startCalls, ports.sessionVerifyCalls)
+		}
+		events := ports.appendedEvents()
+		if len(events) != 2 || events[0].Kind != contextevent.KindTelemetryGap || events[1].Kind != contextevent.KindAdapterError {
+			t.Fatalf("restart appended %v, want the fixed gap then adapter-error", observationEventKinds(events))
+		}
+		failure, ok := events[1].Payload.(*contextevent.AdapterErrorPayload)
+		if !ok {
+			t.Fatalf("adapter-error payload type = %T", events[1].Payload)
+		}
+		if failure.Operation != "recorder" || failure.ReasonCode != unconfirmedInitialSessionReason {
+			t.Fatalf("adapter-error = operation %q reason %q, want recorder/%s", failure.Operation, failure.ReasonCode, unconfirmedInitialSessionReason)
+		}
+		if countEventKind(events, contextevent.KindAdapterStop) != 0 || countEventKind(events, contextevent.KindResume) != 0 {
+			t.Fatalf("restart emitted a stop or resume in %v", observationEventKinds(events))
+		}
+		if run.AdapterSessionRef != "" {
+			t.Fatalf("refused restart invented session %q", run.AdapterSessionRef)
+		}
+		if len(run.Acks) != len(restored)+2 {
+			t.Fatalf("refused restart carries %d acknowledgments, want the %d restored rows plus gap and error", len(run.Acks), len(restored))
+		}
+		for i, ack := range restored {
+			if run.Acks[i] != ack {
+				t.Fatalf("preserved prefix row %d = %#v, want %#v", i, run.Acks[i], ack)
+			}
+		}
+	})
+
+	t.Run("contradicting active revisions are refused", func(t *testing.T) {
+		base := restoredActiveAcks(t, req, contextevent.KindAdapterStart)
+		for _, tt := range []struct {
+			name   string
+			mutate func(*ActiveRevision)
+		}{
+			{"null acknowledgments", func(a *ActiveRevision) { a.EventAcks = nil }},
+			{"short acknowledgments", func(a *ActiveRevision) { a.EventAcks = a.EventAcks[:len(a.EventAcks)-1] }},
+			{"invalidated", func(a *ActiveRevision) { a.Invalidated = true }},
+			{"other revision", func(a *ActiveRevision) { a.Revision++ }},
+			{"other manifest digest", func(a *ActiveRevision) { a.ManifestDigest = testDigest("other-manifest") }},
+			{"zero next source sequence", func(a *ActiveRevision) { a.NextSourceSequence = 0 }},
+			{"other execution session", func(a *ActiveRevision) { a.EventAcks[0].Session = "other-session" }},
+			{"source gap", func(a *ActiveRevision) { a.EventAcks[1].SourceSequence++ }},
+			{"global regression", func(a *ActiveRevision) { a.EventAcks[1].GlobalSequence = a.EventAcks[0].GlobalSequence }},
+			{"final digest drift", func(a *ActiveRevision) { a.PriorEventDigest = testDigest("drift") }},
+			{"final global drift", func(a *ActiveRevision) { a.LastGlobalSequence++ }},
+		} {
+			t.Run(tt.name, func(t *testing.T) {
+				svc, ports := newServiceHarness(t, req)
+				active := activeRevisionFor(req, restoredActiveAcks(t, req, contextevent.KindAdapterStart))
+				tt.mutate(active)
+				ports.checkpoint.ActiveRevision = active
+				_, err := svc.Execute(context.Background(), req, []contextcompile.DataItem{})
+				if err == nil {
+					t.Fatal("Execute error = nil, want a closed refusal")
+				}
+				if len(ports.appendedEvents()) != 0 || ports.resumeCalls != 0 {
+					t.Fatalf("contradicting checkpoint appended %v or resumed %d times", observationEventKinds(ports.appendedEvents()), ports.resumeCalls)
+				}
+			})
+		}
+		if len(base) != 2 {
+			t.Fatalf("restored fixture rows = %d, want 2", len(base))
+		}
+	})
+
+	t.Run("retained bytes replay to the original acknowledgment", func(t *testing.T) {
+		svc, ports := newServiceHarness(t, req)
+		_ = svc
+		event, err := buildEvent(req, ports.workspace, 4, testDigest("prior"), nil, "2026-08-29T10:00:00Z",
+			contextevent.KindTelemetryGap, &contextevent.TelemetryGapPayload{
+				Schema: "verdi.context-event-payload/telemetry-gap/v1", Source: recorderGapSource,
+				FromSequence: 4, ToSequence: 4, ReasonCode: recorderGapReason, Availability: "unavailable",
+			})
+		if err != nil {
+			t.Fatalf("buildEvent: %v", err)
+		}
+		retained := map[uint64]retainedEvent{}
+		first, err := appendRetained(context.Background(), ports, retained, event, 3)
+		if err != nil {
+			t.Fatalf("appendRetained first: %v", err)
+		}
+		appendsAfterFirst := len(ports.appendedEvents())
+		second, err := appendRetained(context.Background(), ports, retained, event, 3)
+		if err != nil {
+			t.Fatalf("appendRetained replay: %v", err)
+		}
+		if second != first {
+			t.Fatalf("replay ack = %#v, want the original %#v", second, first)
+		}
+		if len(ports.appendedEvents()) != appendsAfterFirst {
+			t.Fatal("byte-identical replay allocated a second durable write")
+		}
+		conflicting, err := buildEvent(req, ports.workspace, 4, testDigest("prior"), nil, "2026-08-29T10:00:01Z",
+			contextevent.KindTelemetryGap, &contextevent.TelemetryGapPayload{
+				Schema: "verdi.context-event-payload/telemetry-gap/v1", Source: recorderGapSource,
+				FromSequence: 4, ToSequence: 4, ReasonCode: recorderGapReason, Availability: "unavailable",
+			})
+		if err != nil {
+			t.Fatalf("buildEvent conflicting: %v", err)
+		}
+		if _, err := appendRetained(context.Background(), ports, retained, conflicting, 3); err == nil {
+			t.Fatal("conflicting replay error = nil, want a closed refusal")
+		}
+	})
+
 	t.Run("resume excludes concurrent replacement", func(t *testing.T) {
 		svc, ports := newServiceHarness(t, req)
 		ports.resumeEntered = make(chan struct{})
@@ -646,6 +849,31 @@ func TestContextExecutionAcknowledgedStream_Behavioral(t *testing.T) {
 		got := ports.appendedEvents()
 		if len(got) != 4 || got[0].Kind != contextevent.KindResume || got[1].Kind != contextevent.KindProviderSummary || got[2].Kind != contextevent.KindSuspension || got[3].Kind != contextevent.KindAdapterStop {
 			t.Fatalf("acknowledged event order = %v, want resume provider-summary suspension adapter-stop", observationEventKinds(got))
+		}
+		// §7: suspension's event_chain_root is the acknowledged-prefix digest
+		// over this run's actual terminal facts, never a bare event digest.
+		suspension, ok := got[2].Payload.(*contextevent.SuspensionPayload)
+		if !ok {
+			t.Fatalf("suspension payload type = %T", got[2].Payload)
+		}
+		completedRoot, err := contextevent.EventChainRoot(resume.Resume.Continuity.RevisionSegments)
+		if err != nil {
+			t.Fatalf("EventChainRoot: %v", err)
+		}
+		summaryAck := ports.appendedAck(t, got[1])
+		wantRoot, err := contextevent.EventPrefixDigest(acknowledgedPrefix(resume, completedRoot,
+			got[1].SourceSequence, summaryAck.GlobalSequence, got[1].EventDigest))
+		if err != nil {
+			t.Fatalf("EventPrefixDigest: %v", err)
+		}
+		if suspension.EventChainRoot != wantRoot {
+			t.Fatalf("suspension event_chain_root = %q, want the acknowledged prefix digest %q", suspension.EventChainRoot, wantRoot)
+		}
+		if suspension.EventChainRoot == got[1].EventDigest || suspension.EventChainRoot == completedRoot {
+			t.Fatal("suspension event_chain_root fell back to a bare event or revision-chain digest")
+		}
+		if suspension.ContinuityDigest != got[1].EventDigest {
+			t.Fatalf("suspension continuity_digest = %q, want the last acknowledged event digest", suspension.ContinuityDigest)
 		}
 	})
 
@@ -1468,7 +1696,14 @@ func (p *serviceFake) Append(_ context.Context, event contextevent.Event) (conte
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.appended = append(p.appended, event)
-	return contextevent.EventAck{Schema: contextevent.AckSchemaID, Flight: event.Flight, Lane: event.Lane, Epoch: event.Epoch, Session: event.Session, ManifestRevision: event.ManifestRevision, Kind: event.Kind, SourceSequence: event.SourceSequence, EventDigest: event.EventDigest, GlobalSequence: p.checkpoint.TerminalGlobalSequence + uint64(len(p.appended))}, nil
+	// VATC's global order never resets, so allocation continues past the
+	// active revision's last acknowledged position as well as the completed
+	// revision terminal.
+	allocated := p.checkpoint.TerminalGlobalSequence
+	if p.checkpoint.ActiveRevision != nil && p.checkpoint.ActiveRevision.LastGlobalSequence > allocated {
+		allocated = p.checkpoint.ActiveRevision.LastGlobalSequence
+	}
+	return contextevent.EventAck{Schema: contextevent.AckSchemaID, Flight: event.Flight, Lane: event.Lane, Epoch: event.Epoch, Session: event.Session, ManifestRevision: event.ManifestRevision, Kind: event.Kind, SourceSequence: event.SourceSequence, EventDigest: event.EventDigest, GlobalSequence: allocated + uint64(len(p.appended))}, nil
 }
 
 type serviceAdapterRun struct {
@@ -1704,4 +1939,76 @@ func TestValidateProfileAdapterArms(t *testing.T) {
 			t.Fatalf("validateProfile(unknown adapter) = %v, want a verdict failure", err)
 		}
 	})
+}
+
+func requireResumePayload(t *testing.T, events []contextevent.Event) *contextevent.ResumePayload {
+	t.Helper()
+	for _, event := range events {
+		if event.Kind != contextevent.KindResume {
+			continue
+		}
+		payload, ok := event.Payload.(*contextevent.ResumePayload)
+		if !ok {
+			t.Fatalf("resume payload type = %T", event.Payload)
+		}
+		return payload
+	}
+	t.Fatalf("no resume event in %v", observationEventKinds(events))
+	return nil
+}
+
+// restoredActiveAcks builds the exact active-revision acknowledgments a
+// restarted resume reconstructs. terminalKind selects whether the prefix
+// records an acknowledged provider session.
+func restoredActiveAcks(t *testing.T, req ExecutionRequest, terminalKind contextevent.Kind) []contextevent.EventAck {
+	t.Helper()
+	base := req.Resume.Continuity.TerminalGlobalSequence
+	rows := []contextevent.EventAck{
+		{Schema: contextevent.AckSchemaID, Flight: req.Flight, Lane: req.Lane, Epoch: req.Epoch, Session: req.Session,
+			ManifestRevision: req.ManifestRevision, Kind: contextevent.KindPrompt, SourceSequence: 1,
+			EventDigest: testDigest("restored-1"), GlobalSequence: base + 2},
+		{Schema: contextevent.AckSchemaID, Flight: req.Flight, Lane: req.Lane, Epoch: req.Epoch, Session: req.Session,
+			ManifestRevision: req.ManifestRevision, Kind: terminalKind, SourceSequence: 2,
+			EventDigest: testDigest("restored-2"), GlobalSequence: base + 5},
+	}
+	for _, ack := range rows {
+		if _, err := contextevent.EncodeEventAck(ack); err != nil {
+			t.Fatalf("EncodeEventAck restored fixture: %v", err)
+		}
+	}
+	return rows
+}
+
+func activeRevisionFor(req ExecutionRequest, acks []contextevent.EventAck) *ActiveRevision {
+	final := acks[len(acks)-1]
+	return &ActiveRevision{
+		Revision: req.ManifestRevision, ManifestDigest: req.ManifestDigest,
+		NextSourceSequence: final.SourceSequence + 1, PriorEventDigest: final.EventDigest,
+		LastGlobalSequence: final.GlobalSequence,
+		EventAcks:          append([]contextevent.EventAck(nil), acks...),
+	}
+}
+
+// appendedAck recomputes the acknowledgment the fake recorder allocated for one
+// already-appended event.
+func (p *serviceFake) appendedAck(t *testing.T, event contextevent.Event) contextevent.EventAck {
+	t.Helper()
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	allocated := p.checkpoint.TerminalGlobalSequence
+	if p.checkpoint.ActiveRevision != nil && p.checkpoint.ActiveRevision.LastGlobalSequence > allocated {
+		allocated = p.checkpoint.ActiveRevision.LastGlobalSequence
+	}
+	for i, appended := range p.appended {
+		if appended.EventDigest == event.EventDigest {
+			return contextevent.EventAck{
+				Schema: contextevent.AckSchemaID, Flight: event.Flight, Lane: event.Lane, Epoch: event.Epoch,
+				Session: event.Session, ManifestRevision: event.ManifestRevision, Kind: event.Kind,
+				SourceSequence: event.SourceSequence, EventDigest: event.EventDigest,
+				GlobalSequence: allocated + uint64(i) + 1,
+			}
+		}
+	}
+	t.Fatalf("event %q was never appended", event.EventDigest)
+	return contextevent.EventAck{}
 }

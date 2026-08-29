@@ -15,15 +15,17 @@ const (
 	EventPrefixSchemaID = "verdi.context-event-prefix/v1"
 )
 
-// EventPrefix is a durable anchor summarizing the terminal state of a completed
-// or in-progress execution for replay identification. All digest fields carry
-// sha256: prefixes. Epoch is a monotonic counter, not a timestamp string.
+// EventPrefix is the Amendment 002 §7 acknowledged-prefix document whose digest
+// anchors resume and suspension. Its eleven fields are exactly the §7 field set
+// and all digest fields carry sha256: prefixes. Epoch is the ratified execution
+// epoch identity, which the event envelope, acknowledgment, and continuity
+// schemas all carry as an opaque string.
 type EventPrefix struct {
 	Schema                  string `json:"schema"`
 	Flight                  string `json:"flight"`
 	Lane                    string `json:"lane"`
 	Session                 string `json:"session"`
-	Epoch                   uint64 `json:"epoch"`
+	Epoch                   string `json:"epoch"`
 	ManifestRevision        uint64 `json:"manifest_revision"`
 	ManifestDigest          string `json:"manifest_digest"`
 	TerminalSourceSequence  uint64 `json:"terminal_source_sequence"`

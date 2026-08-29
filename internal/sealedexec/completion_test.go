@@ -4,13 +4,16 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/jyang234/verdi/internal/canonjson"
 	"github.com/jyang234/verdi/internal/contextcompile"
 	"github.com/jyang234/verdi/internal/contextevent"
 	"github.com/jyang234/verdi/internal/contextreceipt"
+	"github.com/jyang234/verdi/internal/countersign"
 	"github.com/jyang234/verdi/internal/execworkspace"
 	gp "github.com/jyang234/verdi/internal/governanceprincipal"
 )
@@ -506,6 +509,7 @@ func (f *completionInputsFake) ResolveReceiptInputs(_ context.Context, query Rec
 type completionReceiptFake struct {
 	fixture    *completionFixture
 	append     ReceiptAppend
+	ack        contextevent.ReceiptEventAck
 	missingAck bool
 	mutateAck  func(*contextevent.ReceiptEventAck)
 	err        error
@@ -539,6 +543,7 @@ func (f *completionReceiptFake) AppendReceipt(_ context.Context, appendValue Rec
 	if f.mutateAck != nil {
 		f.mutateAck(&ack)
 	}
+	f.ack = ack
 	return ack, nil
 }
 
@@ -618,4 +623,194 @@ func lastCompletionCall(calls []string) string {
 		return ""
 	}
 	return calls[len(calls)-1]
+}
+
+// completionSegmentFake is the hermetic §6 controller segment namespace.
+type completionSegmentFake struct {
+	rows         map[string]RedactedSegment
+	storeCalls   int
+	resolveCalls int
+}
+
+func newCompletionSegmentFake() *completionSegmentFake {
+	return &completionSegmentFake{rows: map[string]RedactedSegment{}}
+}
+
+func (f *completionSegmentFake) StoreRedactedSegment(_ context.Context, segment RedactedSegment) (StoredSegment, error) {
+	f.storeCalls++
+	reference, err := segmentReference(segment.Digest)
+	if err != nil {
+		return StoredSegment{}, err
+	}
+	if existing, ok := f.rows[reference]; ok && !bytes.Equal(existing.Bytes, segment.Bytes) {
+		return StoredSegment{}, errors.New("segment reference collision")
+	}
+	f.rows[reference] = segment
+	return StoredSegment{
+		Schema: storedSegmentSchemaID, MediaType: segment.MediaType,
+		RedactionProfile: segment.RedactionProfile, Digest: segment.Digest,
+		ByteCount: segment.ByteCount, Reference: reference,
+	}, nil
+}
+
+func (f *completionSegmentFake) ResolveRedactedSegment(_ context.Context, reference string) (RedactedSegment, error) {
+	f.resolveCalls++
+	segment, ok := f.rows[reference]
+	if !ok {
+		return RedactedSegment{}, errors.New("unknown segment reference")
+	}
+	return segment, nil
+}
+
+func (f *completionFixture) serviceWithSegments(store SegmentStore) *CompletionService {
+	f.t.Helper()
+	service, err := NewCompletionService(CompletionPorts{
+		Workspace: f.workspace, Recorder: f.recorder, Inputs: f.inputs,
+		Receipts: f.receipts, Stamps: f.stamps, Segments: store,
+	})
+	if err != nil {
+		f.t.Fatalf("NewCompletionService: %v", err)
+	}
+	return service
+}
+
+// padReceiptInputs grows the canonical receipt past the inline ceiling using
+// evidence rows only; every other terminal fact is unchanged.
+func padReceiptInputs(fixture *completionFixture, rows int) {
+	evidence := make([]contextreceipt.Evidence, 0, rows)
+	for i := 0; i < rows; i++ {
+		evidence = append(evidence, contextreceipt.Evidence{
+			CommandID:    fmt.Sprintf("command-%04d", i),
+			Argv:         []string{"go", "test", fmt.Sprintf("./pkg/%04d/%s", i, strings.Repeat("p", 40))},
+			ExitCode:     0,
+			Verdict:      countersign.VerdictProven,
+			OutputDigest: testDigest(fmt.Sprintf("evidence-%04d", i)),
+		})
+	}
+	fixture.inputs.inputs.Evidence = evidence
+}
+
+func TestReceiptSegmentLifecycle(t *testing.T) {
+	t.Run("canonical receipt at or above the ceiling stores before append", func(t *testing.T) {
+		fixture := newCompletionFixture(t, contextevent.AuthorityAuthoritative)
+		fixture.run.Profile.PolicySecretValues = [][]byte{[]byte("fixture-classified-secret")}
+		padReceiptInputs(fixture, 120)
+		store := newCompletionSegmentFake()
+		completion, err := fixture.serviceWithSegments(store).Complete(context.Background(), fixture.requestValue())
+		if err != nil {
+			t.Fatalf("Complete: %v", err)
+		}
+		receiptBytes, err := contextreceipt.EncodeReceipt(completion.Receipt)
+		if err != nil {
+			t.Fatalf("EncodeReceipt: %v", err)
+		}
+		receiptJSON := receiptBytes[:len(receiptBytes)-1]
+		if len(receiptJSON) < contextevent.InlineDetailCeiling+1 {
+			t.Fatalf("padded canonical receipt is %d bytes, want at least %d", len(receiptJSON), contextevent.InlineDetailCeiling+1)
+		}
+		payload, ok := fixture.receipts.append.Event.Payload.(*contextevent.ReceiptPayload)
+		if !ok {
+			t.Fatalf("receipt payload type = %T", fixture.receipts.append.Event.Payload)
+		}
+		if payload.Detail.Mode != contextevent.DetailSegment {
+			t.Fatalf("receipt detail mode = %q, want segment", payload.Detail.Mode)
+		}
+		if store.storeCalls == 0 {
+			t.Fatal("oversized receipt was appended without storing its segment")
+		}
+		if payload.Detail.ByteCount != uint64(len(receiptJSON)) {
+			t.Fatalf("segment byte_count = %d, want %d", payload.Detail.ByteCount, len(receiptJSON))
+		}
+		// Represented-byte domain: detail.digest covers the exact receipt JSON.
+		if payload.Detail.Digest != digestBytes(receiptJSON) {
+			t.Fatalf("segment detail digest = %q, want the represented receipt digest", payload.Detail.Digest)
+		}
+		// The two domains stay distinct and are never compared for equality.
+		if payload.Detail.Digest == completion.Receipt.Digest {
+			t.Fatal("represented-byte digest collided with the receipt self-digest")
+		}
+		resolved, err := store.ResolveRedactedSegment(context.Background(), payload.Detail.Reference)
+		if err != nil {
+			t.Fatalf("ResolveRedactedSegment: %v", err)
+		}
+		if !bytes.Equal(resolved.Bytes, receiptJSON) {
+			t.Fatal("stored segment bytes are not the exact canonical receipt")
+		}
+		if store.resolveCalls == 0 {
+			t.Fatal("specialized acknowledgment did not resolve the segment detail")
+		}
+	})
+
+	t.Run("oversized receipt without a segment store refuses", func(t *testing.T) {
+		fixture := newCompletionFixture(t, contextevent.AuthorityAuthoritative)
+		padReceiptInputs(fixture, 120)
+		if _, err := fixture.service().Complete(context.Background(), fixture.requestValue()); err == nil {
+			t.Fatal("Complete error = nil, want a refusal for an unstorable receipt")
+		} else if !strings.Contains(err.Error(), "segment store") {
+			t.Fatalf("Complete error = %v, want a missing segment store witness", err)
+		}
+	})
+
+	t.Run("inline receipt keeps the existing representation", func(t *testing.T) {
+		fixture := newCompletionFixture(t, contextevent.AuthorityAuthoritative)
+		fixture.run.Profile.PolicySecretValues = [][]byte{[]byte("fixture-classified-secret")}
+		store := newCompletionSegmentFake()
+		if _, err := fixture.serviceWithSegments(store).Complete(context.Background(), fixture.requestValue()); err != nil {
+			t.Fatalf("Complete: %v", err)
+		}
+		payload, ok := fixture.receipts.append.Event.Payload.(*contextevent.ReceiptPayload)
+		if !ok {
+			t.Fatalf("receipt payload type = %T", fixture.receipts.append.Event.Payload)
+		}
+		if payload.Detail.Mode != contextevent.DetailInline || store.storeCalls != 0 {
+			t.Fatalf("inline receipt mode/store calls = %q/%d, want inline/0", payload.Detail.Mode, store.storeCalls)
+		}
+	})
+
+	t.Run("unresolvable or contradicting segment detail refuses acknowledgment", func(t *testing.T) {
+		fixture := newCompletionFixture(t, contextevent.AuthorityAuthoritative)
+		fixture.run.Profile.PolicySecretValues = [][]byte{[]byte("fixture-classified-secret")}
+		padReceiptInputs(fixture, 120)
+		store := newCompletionSegmentFake()
+		service := fixture.serviceWithSegments(store)
+		if _, err := service.Complete(context.Background(), fixture.requestValue()); err != nil {
+			t.Fatalf("Complete: %v", err)
+		}
+		event := fixture.receipts.append.Event
+		payload := event.Payload.(*contextevent.ReceiptPayload)
+		receipt := fixture.receipts.append.Receipt
+		ack := fixture.receipts.ack
+
+		t.Run("resolution failure", func(t *testing.T) {
+			empty := newCompletionSegmentFake()
+			bare := fixture.serviceWithSegments(empty)
+			if err := bare.validateSpecializedReceiptAck(context.Background(), event, receipt, fixture.recorder.ack, ack); err == nil {
+				t.Fatal("error = nil, want a refusal for an unresolvable segment")
+			}
+		})
+
+		t.Run("no segment store", func(t *testing.T) {
+			if err := fixture.service().validateSpecializedReceiptAck(context.Background(), event, receipt, fixture.recorder.ack, ack); err == nil {
+				t.Fatal("error = nil, want a refusal without a segment store")
+			}
+		})
+
+		t.Run("represented bytes contradict the detail digest", func(t *testing.T) {
+			mutated := event
+			mutatedPayload := *payload
+			mutatedPayload.Detail.Digest = testDigest("other-detail")
+			mutated.Payload = &mutatedPayload
+			if err := service.validateSpecializedReceiptAck(context.Background(), mutated, receipt, fixture.recorder.ack, ack); err == nil {
+				t.Fatal("error = nil, want a digest-domain refusal")
+			}
+		})
+
+		t.Run("represented receipt contradicts the finalized receipt", func(t *testing.T) {
+			other := receipt
+			other.Digest = testDigest("other-receipt")
+			if err := service.validateSpecializedReceiptAck(context.Background(), event, other, fixture.recorder.ack, ack); err == nil {
+				t.Fatal("error = nil, want a receipt cross-match refusal")
+			}
+		})
+	})
 }

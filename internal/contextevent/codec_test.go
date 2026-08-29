@@ -122,7 +122,7 @@ func TestContextEventEnvelopeContract_Static(t *testing.T) {
 			Flight:                  "flight-1",
 			Lane:                    "builder",
 			Session:                 "session-1",
-			Epoch:                   1,
+			Epoch:                   "epoch-1",
 			ManifestRevision:        0,
 			ManifestDigest:          digestA,
 			TerminalSourceSequence:  9,
