@@ -18,7 +18,7 @@ func TestHTTPMCPProtocol(t *testing.T) {
 		{Name: "get_flight_plan", Description: "Inspect the flight.", InputSchema: json.RawMessage(`{"additionalProperties":false,"properties":{},"type":"object"}`)},
 		{Name: "request_context", Description: "Request context.", InputSchema: json.RawMessage(`{"additionalProperties":false,"properties":{"purpose":{"type":"string"},"ref":{"type":"string"}},"required":["ref","purpose"],"type":"object"}`)},
 	}}
-	httpHandler, err := NewHTTPHandler(httpTestToken, handler)
+	httpHandler, _, err := NewHTTPHandler(httpTestToken, handler)
 	if err != nil {
 		t.Fatalf("NewHTTPHandler: %v", err)
 	}
@@ -116,7 +116,7 @@ func TestHTTPMCPProtocol(t *testing.T) {
 
 func TestHTTPMCPRejectsWrongRequestShape(t *testing.T) {
 	handler := &httpTestHandler{tools: []HandlerTool{}}
-	httpHandler, err := NewHTTPHandler(httpTestToken, handler)
+	httpHandler, _, err := NewHTTPHandler(httpTestToken, handler)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -166,7 +166,7 @@ func TestHTTPMCPRejectsWrongRequestShape(t *testing.T) {
 }
 
 func TestHTTPMCPMalformedAndUnknownJSONRPC(t *testing.T) {
-	httpHandler, err := NewHTTPHandler(httpTestToken, &httpTestHandler{tools: []HandlerTool{}})
+	httpHandler, _, err := NewHTTPHandler(httpTestToken, &httpTestHandler{tools: []HandlerTool{}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -223,11 +223,151 @@ func TestNewHTTPHandlerRejectsInvalidConfiguration(t *testing.T) {
 		{name: "nil handler", token: httpTestToken, handler: nil},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			if _, err := NewHTTPHandler(test.token, test.handler); err == nil {
+			if _, _, err := NewHTTPHandler(test.token, test.handler); err == nil {
 				t.Fatal("NewHTTPHandler accepted invalid configuration")
 			}
 		})
 	}
+}
+
+const (
+	httpTerminalToolBody  = `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"request_context","arguments":{"purpose":"implementation","ref":"spec/extra"}}}`
+	httpUnknownMethodBody = `{"jsonrpc":"2.0","id":2,"method":"ambient/method"}`
+	httpUnparseableBody   = `{not-json}`
+	httpPlainToolCallBody = `{"jsonrpc":"2.0","id":6,"method":"tools/call","params":{"name":"get_flight_plan","arguments":{}}}`
+)
+
+func TestHTTPMCPTerminalFollowsWrittenFrame(t *testing.T) {
+	for _, test := range []struct {
+		name         string
+		body         string
+		wantExitCode int
+	}{
+		{name: "tool result terminal", body: httpTerminalToolBody, wantExitCode: 1},
+		{name: "unknown method", body: httpUnknownMethodBody, wantExitCode: 2},
+		{name: "malformed tools/call params", body: `{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"","arguments":{}}}`, wantExitCode: 2},
+		{name: "unknown tool", body: `{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"extra_tool","arguments":{}}}`, wantExitCode: 2},
+		{name: "unparseable frame", body: httpUnparseableBody, wantExitCode: 2},
+		{name: "initialize", body: `{"jsonrpc":"2.0","id":5,"method":"initialize"}`},
+		{name: "non-terminal tool result", body: httpPlainToolCallBody},
+		{name: "notification", body: `{"jsonrpc":"2.0","method":"notifications/initialized"}`},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			httpHandler, terminals, err := NewHTTPHandler(httpTestToken, newHTTPTestHandler())
+			if err != nil {
+				t.Fatalf("NewHTTPHandler: %v", err)
+			}
+			writer := &httpHookedWriter{ResponseRecorder: httptest.NewRecorder(), onWrite: func() {
+				if len(terminals) != 0 {
+					t.Error("terminal was observable before its response frame was written")
+				}
+			}}
+			serveHTTPMCP(httpHandler, writer, test.body)
+
+			if test.wantExitCode == 0 {
+				assertNoHTTPTerminal(t, terminals)
+				return
+			}
+			if writer.Body.Len() == 0 {
+				t.Fatal("terminal request produced no response frame")
+			}
+			select {
+			case terminal := <-terminals:
+				if terminal == nil || terminal.ExitCode != test.wantExitCode {
+					t.Fatalf("terminal = %#v, want exit %d", terminal, test.wantExitCode)
+				}
+			default:
+				t.Fatal("no terminal was observable after its response frame was written")
+			}
+		})
+	}
+}
+
+func TestHTTPMCPWriteFailureWithholdsTerminal(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		body string
+	}{
+		{name: "tool result terminal", body: httpTerminalToolBody},
+		{name: "unknown method", body: httpUnknownMethodBody},
+		{name: "unparseable frame", body: httpUnparseableBody},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			httpHandler, terminals, err := NewHTTPHandler(httpTestToken, newHTTPTestHandler())
+			if err != nil {
+				t.Fatalf("NewHTTPHandler: %v", err)
+			}
+			writer := &httpHookedWriter{ResponseRecorder: httptest.NewRecorder(), writeErr: errors.New("frame write failed")}
+			serveHTTPMCP(httpHandler, writer, test.body)
+			if writer.writes != 1 {
+				t.Fatalf("response frame writes = %d, want 1", writer.writes)
+			}
+			assertNoHTTPTerminal(t, terminals)
+		})
+	}
+}
+
+func TestHTTPMCPDeliversTheFirstTerminalOnly(t *testing.T) {
+	httpHandler, terminals, err := NewHTTPHandler(httpTestToken, newHTTPTestHandler())
+	if err != nil {
+		t.Fatalf("NewHTTPHandler: %v", err)
+	}
+	for range 2 {
+		response := postHTTPMCP(t, httpHandler, httpTerminalToolBody)
+		assertHTTPJSONResponse(t, response, http.StatusOK)
+	}
+	select {
+	case terminal := <-terminals:
+		if terminal == nil || terminal.ExitCode != 1 {
+			t.Fatalf("first terminal = %#v, want exit 1", terminal)
+		}
+	default:
+		t.Fatal("no terminal was observable after the first response frame was written")
+	}
+	assertNoHTTPTerminal(t, terminals)
+}
+
+func assertNoHTTPTerminal(t *testing.T, terminals <-chan *HandlerTerminal) {
+	t.Helper()
+	select {
+	case terminal := <-terminals:
+		t.Fatalf("unexpected terminal %#v", terminal)
+	default:
+	}
+}
+
+func serveHTTPMCP(handler http.Handler, writer http.ResponseWriter, body string) {
+	request := httptest.NewRequest(http.MethodPost, "/mcp", strings.NewReader(body))
+	request.Header.Set("Authorization", "Bearer "+httpTestToken)
+	request.Header.Set("Content-Type", "application/json")
+	handler.ServeHTTP(writer, request)
+}
+
+// httpHookedWriter observes and optionally fails the single response-frame
+// write so terminal ordering can be witnessed on both sides of it.
+type httpHookedWriter struct {
+	*httptest.ResponseRecorder
+	onWrite  func()
+	writeErr error
+	writes   int
+}
+
+func (w *httpHookedWriter) Write(frame []byte) (int, error) {
+	w.writes++
+	if w.onWrite != nil {
+		w.onWrite()
+	}
+	if w.writeErr != nil {
+		return 0, w.writeErr
+	}
+	return w.ResponseRecorder.Write(frame)
+}
+
+func newHTTPTestHandler() *httpTestHandler {
+	return &httpTestHandler{tools: []HandlerTool{
+		{Name: "get_flight_plan", Description: "Inspect the flight.", InputSchema: json.RawMessage(`{"additionalProperties":false,"properties":{},"type":"object"}`)},
+		{Name: "request_context", Description: "Request context.", InputSchema: json.RawMessage(`{"additionalProperties":false,"properties":{},"type":"object"}`)},
+	}}
 }
 
 type httpTestHandler struct {

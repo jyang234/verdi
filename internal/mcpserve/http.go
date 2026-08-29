@@ -19,19 +19,23 @@ var httpMCPTokenRE = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
 type Handler = ToolHandler
 
 // NewHTTPHandler exposes one capability-bound streamable-HTTP MCP endpoint.
-func NewHTTPHandler(token string, handler Handler) (http.Handler, error) {
+// The returned channel carries the first requested terminal, delivered only
+// after its response frame was written.
+func NewHTTPHandler(token string, handler Handler) (http.Handler, <-chan *HandlerTerminal, error) {
 	if !httpMCPTokenRE.MatchString(token) {
-		return nil, errors.New("mcpserve: HTTP capability must be a canonical sha256 digest")
+		return nil, nil, errors.New("mcpserve: HTTP capability must be a canonical sha256 digest")
 	}
 	if handler == nil {
-		return nil, errors.New("mcpserve: HTTP handler is required")
+		return nil, nil, errors.New("mcpserve: HTTP handler is required")
 	}
-	return &scopedHTTPHandler{authorization: "Bearer " + token, handler: handler}, nil
+	terminals := make(chan *HandlerTerminal, 1)
+	return &scopedHTTPHandler{authorization: "Bearer " + token, handler: handler, terminals: terminals}, terminals, nil
 }
 
 type scopedHTTPHandler struct {
 	authorization string
 	handler       Handler
+	terminals     chan *HandlerTerminal
 }
 
 func (h *scopedHTTPHandler) ServeHTTP(w http.ResponseWriter, request *http.Request) {
@@ -66,7 +70,11 @@ func (h *scopedHTTPHandler) ServeHTTP(w http.ResponseWriter, request *http.Reque
 
 	var rpcRequest rpcRequest
 	if err := decodeHandlerRequest(body, &rpcRequest); err != nil {
-		writeHTTPRPCResponse(w, rpcResponse{JSONRPC: "2.0", ID: json.RawMessage("null"), Error: &rpcError{Code: -32700, Message: "parse error"}})
+		if writeHTTPRPCResponse(w, rpcResponse{JSONRPC: "2.0", ID: json.RawMessage("null"), Error: &rpcError{Code: -32700, Message: "parse error"}}) {
+			// An unparseable frame on the scoped surface is operational, as it
+			// is for ServeHandler's parse terminal.
+			h.observeTerminal(&HandlerTerminal{ExitCode: 2})
+		}
 		return
 	}
 	if rpcRequest.ID == nil {
@@ -78,10 +86,23 @@ func (h *scopedHTTPHandler) ServeHTTP(w http.ResponseWriter, request *http.Reque
 	if !writeHTTPRPCResponse(w, response) {
 		return
 	}
-	// The HTTP request has no process exit channel. Reaching this point is the
-	// terminal barrier: dispatch terminal state is observed only after its
-	// JSON-RPC frame was written, matching ServeHandler's ordering contract.
-	_ = terminal
+	// The HTTP request has no process exit channel, so the terminal reaches the
+	// sealed lifecycle owner here — only after its JSON-RPC frame was written,
+	// matching ServeHandler's ordering contract.
+	h.observeTerminal(terminal)
+}
+
+// observeTerminal hands the sealed lifecycle owner the first terminal of the
+// run. The buffered single delivery keeps a later terminal, or an owner that
+// never reads, from blocking the response path; the run ends on the first one.
+func (h *scopedHTTPHandler) observeTerminal(terminal *HandlerTerminal) {
+	if terminal == nil {
+		return
+	}
+	select {
+	case h.terminals <- terminal:
+	default:
+	}
 }
 
 func writeHTTPRPCResponse(w http.ResponseWriter, response rpcResponse) bool {

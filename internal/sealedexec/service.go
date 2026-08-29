@@ -1339,8 +1339,14 @@ func validateProfile(request ExecutionRequest, workspace WorkspaceFacts, profile
 		envValueFromProfile(profile.Profile.Env(), "CODEX_HOME") != profile.CodexHome {
 		return verdict("resolved profile CODEX_HOME identity is not isolated and exact")
 	}
-	if !profile.ClassificationComplete || profile.PolicySecretValues == nil {
+	if !profile.ClassificationComplete || len(profile.PolicySecretValues) == 0 {
 		return verdict("resolved profile secret classification is incomplete")
+	}
+	for _, classified := range profile.PolicySecretValues {
+		// Only the emptiness of a member is reportable; its bytes never are.
+		if len(classified) == 0 {
+			return verdict("resolved profile secret classification has an empty member")
+		}
 	}
 	requested, err := execworkspace.EncodeGrantSet(request.Grants)
 	if err != nil {

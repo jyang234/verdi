@@ -39,8 +39,10 @@ type MCPConfig struct {
 }
 
 // StartScopedMCP starts the injected loopback listener and atomically writes
-// Claude's sole MCP server configuration beneath envRoot. The returned close
-// function is idempotent; callers invoke it only after the provider is reaped.
+// Claude's sole MCP server configuration beneath envRoot. The returned channel
+// carries the first handler terminal of the run, observable only after its
+// response frame was written. The returned close function is idempotent;
+// callers invoke it only after the provider is reaped.
 func StartScopedMCP(
 	ctx context.Context,
 	listener net.Listener,
@@ -49,40 +51,40 @@ func StartScopedMCP(
 	profileDigest string,
 	workspaceID string,
 	handler mcpserve.Handler,
-) (MCPConfig, func(context.Context) error, error) {
+) (MCPConfig, <-chan *mcpserve.HandlerTerminal, func(context.Context) error, error) {
 	if ctx == nil {
-		return MCPConfig{}, nil, errors.New("claude: start scoped MCP: nil context")
+		return MCPConfig{}, nil, nil, errors.New("claude: start scoped MCP: nil context")
 	}
 	if err := ctx.Err(); err != nil {
-		return MCPConfig{}, nil, fmt.Errorf("claude: start scoped MCP: %w", err)
+		return MCPConfig{}, nil, nil, fmt.Errorf("claude: start scoped MCP: %w", err)
 	}
 	if listener == nil {
-		return MCPConfig{}, nil, errors.New("claude: start scoped MCP: listener is required")
+		return MCPConfig{}, nil, nil, errors.New("claude: start scoped MCP: listener is required")
 	}
 	if !filepath.IsAbs(envRoot) || filepath.Clean(envRoot) != envRoot {
-		return MCPConfig{}, nil, errors.New("claude: start scoped MCP: environment root must be a clean absolute path")
+		return MCPConfig{}, nil, nil, errors.New("claude: start scoped MCP: environment root must be a clean absolute path")
 	}
 	requestDigest, err := canonicalExecutionRequestDigest(canonicalRequest)
 	if err != nil {
-		return MCPConfig{}, nil, err
+		return MCPConfig{}, nil, nil, err
 	}
 	if !claudeMCPDigestRE.MatchString(profileDigest) {
-		return MCPConfig{}, nil, errors.New("claude: start scoped MCP: profile digest must be a canonical sha256 digest")
+		return MCPConfig{}, nil, nil, errors.New("claude: start scoped MCP: profile digest must be a canonical sha256 digest")
 	}
 	if !execworkspace.ValidWorkspaceID(workspaceID) {
-		return MCPConfig{}, nil, errors.New("claude: start scoped MCP: invalid workspace id")
+		return MCPConfig{}, nil, nil, errors.New("claude: start scoped MCP: invalid workspace id")
 	}
 	address, err := scopedMCPAddress(listener)
 	if err != nil {
-		return MCPConfig{}, nil, err
+		return MCPConfig{}, nil, nil, err
 	}
 	token, err := scopedMCPCapability(requestDigest, profileDigest, workspaceID)
 	if err != nil {
-		return MCPConfig{}, nil, err
+		return MCPConfig{}, nil, nil, err
 	}
-	httpHandler, err := mcpserve.NewHTTPHandler(token, handler)
+	httpHandler, terminals, err := mcpserve.NewHTTPHandler(token, handler)
 	if err != nil {
-		return MCPConfig{}, nil, fmt.Errorf("claude: start scoped MCP: %w", err)
+		return MCPConfig{}, nil, nil, fmt.Errorf("claude: start scoped MCP: %w", err)
 	}
 
 	config := MCPConfig{
@@ -92,10 +94,10 @@ func StartScopedMCP(
 	}
 	configBytes, err := encodeMCPConfig(config)
 	if err != nil {
-		return MCPConfig{}, nil, err
+		return MCPConfig{}, nil, nil, err
 	}
 	if err := atomicfile.Write(config.Path, configBytes, 0o600); err != nil {
-		return MCPConfig{}, nil, fmt.Errorf("claude: write scoped MCP config: %w", err)
+		return MCPConfig{}, nil, nil, fmt.Errorf("claude: write scoped MCP config: %w", err)
 	}
 
 	server := &http.Server{Handler: httpHandler}
@@ -132,7 +134,7 @@ func StartScopedMCP(
 		return closeErr
 	}
 
-	return config, closeMCP, nil
+	return config, terminals, closeMCP, nil
 }
 
 func canonicalExecutionRequestDigest(canonicalRequest []byte) (string, error) {

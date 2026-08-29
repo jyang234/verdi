@@ -37,7 +37,7 @@ func TestScopedMCPConfigLifecycle(t *testing.T) {
 	listener := listenScopedMCP(t)
 	handler := &scopedHTTPTestHandler{}
 
-	config, closeMCP, err := StartScopedMCP(context.Background(), listener, envRoot, testCanonicalRequest, testProfileDigest, testWorkspaceID, handler)
+	config, _, closeMCP, err := StartScopedMCP(context.Background(), listener, envRoot, testCanonicalRequest, testProfileDigest, testWorkspaceID, handler)
 	if err != nil {
 		t.Fatalf("StartScopedMCP: %v", err)
 	}
@@ -142,7 +142,7 @@ func TestScopedMCPCapabilityBindsAllInputs(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			listener := listenScopedMCP(t)
-			config, closeMCP, err := StartScopedMCP(context.Background(), listener, t.TempDir(), test.request, test.profile, test.workspace, &scopedHTTPTestHandler{})
+			config, _, closeMCP, err := StartScopedMCP(context.Background(), listener, t.TempDir(), test.request, test.profile, test.workspace, &scopedHTTPTestHandler{})
 			if err != nil {
 				t.Fatalf("StartScopedMCP: %v", err)
 			}
@@ -220,7 +220,7 @@ func TestStartScopedMCPRejectsInvalidInputs(t *testing.T) {
 			if test.name != "nil handler" {
 				handler = &scopedHTTPTestHandler{}
 			}
-			if _, _, err := StartScopedMCP(ctx, listener, envRoot, request, profile, workspace, handler); err == nil {
+			if _, _, _, err := StartScopedMCP(ctx, listener, envRoot, request, profile, workspace, handler); err == nil {
 				t.Fatal("StartScopedMCP accepted invalid input")
 			}
 			if _, err := os.Stat(filepath.Join(envRoot, "claude-mcp.json")); !os.IsNotExist(err) {
@@ -266,7 +266,7 @@ func TestScopedMCPProviderChildFDInventory(t *testing.T) {
 	})
 
 	listener := listenScopedMCP(t)
-	config, closeMCP, err := StartScopedMCP(context.Background(), listener, t.TempDir(), testCanonicalRequest, testProfileDigest, testWorkspaceID, &scopedHTTPTestHandler{})
+	config, _, closeMCP, err := StartScopedMCP(context.Background(), listener, t.TempDir(), testCanonicalRequest, testProfileDigest, testWorkspaceID, &scopedHTTPTestHandler{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -294,9 +294,57 @@ func TestScopedMCPProviderChildFDInventory(t *testing.T) {
 	}
 }
 
+func TestScopedMCPDeliversHandlerTerminalToParent(t *testing.T) {
+	for _, test := range []struct {
+		name         string
+		body         string
+		wantExitCode int
+	}{
+		{
+			name:         "tool result terminal",
+			body:         `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"request_context","arguments":{"purpose":"implementation","ref":"spec/extra"}}}`,
+			wantExitCode: 1,
+		},
+		{
+			name:         "unknown method",
+			body:         `{"jsonrpc":"2.0","id":2,"method":"ambient/method"}`,
+			wantExitCode: 2,
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			listener := listenScopedMCP(t)
+			handler := &scopedHTTPTestHandler{terminal: &mcpserve.HandlerTerminal{ExitCode: 1}}
+			config, terminals, closeMCP, err := StartScopedMCP(context.Background(), listener, t.TempDir(), testCanonicalRequest, testProfileDigest, testWorkspaceID, handler)
+			if err != nil {
+				t.Fatalf("StartScopedMCP: %v", err)
+			}
+			registerScopedMCPCleanup(t, closeMCP)
+			select {
+			case terminal := <-terminals:
+				t.Fatalf("terminal %#v was observable before any scoped call", terminal)
+			default:
+			}
+
+			client := &http.Client{Timeout: 5 * time.Second}
+			if frame := callScopedMCP(t, client, config, test.body); frame == "" {
+				t.Fatal("scoped call produced no response frame")
+			}
+			select {
+			case terminal := <-terminals:
+				if terminal == nil || terminal.ExitCode != test.wantExitCode {
+					t.Fatalf("terminal = %#v, want exit %d", terminal, test.wantExitCode)
+				}
+			case <-time.After(5 * time.Second):
+				t.Fatal("no terminal reached the parent after the response frame was written")
+			}
+		})
+	}
+}
+
 type scopedHTTPTestHandler struct {
-	mu    sync.Mutex
-	calls []string
+	mu       sync.Mutex
+	calls    []string
+	terminal *mcpserve.HandlerTerminal
 }
 
 func (h *scopedHTTPTestHandler) Tools() []mcpserve.HandlerTool {
@@ -314,7 +362,7 @@ func (h *scopedHTTPTestHandler) Call(_ context.Context, name string, _ json.RawM
 	case "get_flight_plan":
 		return mcpserve.HandlerCallResult{Text: `{"kind":"flight-plan"}`}, nil
 	case "request_context":
-		return mcpserve.HandlerCallResult{Text: `{"kind":"context-approved"}`}, nil
+		return mcpserve.HandlerCallResult{Text: `{"kind":"context-approved"}`, Terminal: h.terminal}, nil
 	default:
 		return mcpserve.HandlerCallResult{}, fmt.Errorf("unknown scoped tool %q", name)
 	}

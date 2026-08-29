@@ -140,14 +140,25 @@ func TestContextExecutionContract_Static(t *testing.T) {
 			t.Fatalf("adapter start calls = %d, want 1", ports.startCalls)
 		}
 	})
-	t.Run("complete non-null local secret classification permits an empty member", func(t *testing.T) {
-		svc, ports := newServiceHarness(t, req)
-		ports.profile.PolicySecretValues = [][]byte{[]byte{}}
-		if _, err := svc.Execute(context.Background(), req, []contextcompile.DataItem{}); err != nil {
-			t.Fatalf("Execute with empty classified value: %v", err)
-		}
-		if ports.startCalls != 1 {
-			t.Fatalf("adapter start calls = %d, want 1", ports.startCalls)
+	t.Run("empty classified secret set or member refuses launch", func(t *testing.T) {
+		for _, test := range []struct {
+			name   string
+			values [][]byte
+		}{
+			{name: "zero-length set", values: [][]byte{}},
+			{name: "sole empty member", values: [][]byte{{}}},
+			{name: "empty member beside a classified value", values: [][]byte{[]byte("classified-value"), {}}},
+		} {
+			t.Run(test.name, func(t *testing.T) {
+				svc, ports := newServiceHarness(t, req)
+				ports.profile.PolicySecretValues = test.values
+				if _, err := svc.Execute(context.Background(), req, []contextcompile.DataItem{}); !errors.Is(err, ErrVerdict) {
+					t.Fatalf("Execute error = %v, want verdict failure", err)
+				}
+				if ports.startCalls != 0 {
+					t.Fatalf("adapter launched %d times", ports.startCalls)
+				}
+			})
 		}
 	})
 	for _, tt := range tests {
@@ -1201,7 +1212,7 @@ func newServiceHarness(t *testing.T, req ExecutionRequest) (*Service, *serviceFa
 			CodexHome: filepath.Join(t.TempDir(), "codex-home"), AdapterVersion: req.AdapterVersion,
 			DecoderProfile: "codex-jsonl-v1", WorkspacePath: workspacePath,
 			Profile: profile, Grants: req.Grants, Enforcement: *enforcement,
-			PolicySecretValues: [][]byte{}, ClassificationComplete: true,
+			PolicySecretValues: [][]byte{[]byte("fixture-classified-secret")}, ClassificationComplete: true,
 		},
 		conflict:   ConflictFacts{Verification: proven(), Report: req.AuthorityVerdict},
 		recorder:   RecorderFacts{Verification: proven(), Ref: req.RecorderEndpoint},
