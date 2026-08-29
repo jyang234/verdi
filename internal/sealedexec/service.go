@@ -1342,11 +1342,6 @@ func validateProfile(request ExecutionRequest, workspace WorkspaceFacts, profile
 	if !profile.ClassificationComplete || profile.PolicySecretValues == nil {
 		return verdict("resolved profile secret classification is incomplete")
 	}
-	for _, value := range profile.PolicySecretValues {
-		if len(value) == 0 {
-			return verdict("resolved profile secret classification contains an empty value")
-		}
-	}
 	requested, err := execworkspace.EncodeGrantSet(request.Grants)
 	if err != nil {
 		return operational("encode requested grants", err)

@@ -115,7 +115,6 @@ func TestContextExecutionContract_Static(t *testing.T) {
 		{"profile mismatch", func(p *serviceFake) { p.profile.Digest = testDigest("wrong-profile") }},
 		{"profile classification incomplete", func(p *serviceFake) { p.profile.ClassificationComplete = false }},
 		{"profile classification null", func(p *serviceFake) { p.profile.PolicySecretValues = nil }},
-		{"profile classification empty member", func(p *serviceFake) { p.profile.PolicySecretValues = [][]byte{[]byte{}} }},
 		{"grants rejected", func(p *serviceFake) { p.profile.Verification = violated(FailureRejected) }},
 		{"enforcement row identity mismatch", func(p *serviceFake) { p.profile.Enforcement.Rows[0].Kind = execworkspace.GrantTimeouts }},
 		{"conflict violated", func(p *serviceFake) { p.conflict.Verification = violated(FailureRejected) }},
@@ -136,6 +135,16 @@ func TestContextExecutionContract_Static(t *testing.T) {
 		ports.profile.PolicySecretValues = [][]byte{[]byte("classified-value")}
 		if _, err := svc.Execute(context.Background(), req, []contextcompile.DataItem{}); err != nil {
 			t.Fatalf("Execute with complete classification: %v", err)
+		}
+		if ports.startCalls != 1 {
+			t.Fatalf("adapter start calls = %d, want 1", ports.startCalls)
+		}
+	})
+	t.Run("complete non-null local secret classification permits an empty member", func(t *testing.T) {
+		svc, ports := newServiceHarness(t, req)
+		ports.profile.PolicySecretValues = [][]byte{[]byte{}}
+		if _, err := svc.Execute(context.Background(), req, []contextcompile.DataItem{}); err != nil {
+			t.Fatalf("Execute with empty classified value: %v", err)
 		}
 		if ports.startCalls != 1 {
 			t.Fatalf("adapter start calls = %d, want 1", ports.startCalls)
