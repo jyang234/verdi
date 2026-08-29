@@ -240,6 +240,23 @@ type receiptAppendWire struct {
 	Event   json.RawMessage `json:"event"`
 }
 
+type receiptVerificationTrustFactWire struct {
+	SourceID       string             `json:"source_id"`
+	SourceKind     gp.TrustSourceKind `json:"source_kind"`
+	Subjects       []string           `json:"subjects"`
+	EvidenceDigest string             `json:"evidence_digest"`
+	Available      bool               `json:"available"`
+	Valid          bool               `json:"valid"`
+	Reason         string             `json:"reason"`
+}
+
+type receiptVerificationAuthorityWire struct {
+	Profile     contextreceipt.ProfileAuthority     `json:"profile"`
+	TrustFact   receiptVerificationTrustFactWire    `json:"trust_fact"`
+	Isolation   contextreceipt.IsolationAuthority   `json:"isolation"`
+	Persistence contextreceipt.PersistenceAuthority `json:"persistence"`
+}
+
 // EncodeControllerCall validates and canonically encodes one typed call.
 func EncodeControllerCall(call ControllerCall) ([]byte, error) {
 	if call.Schema != ControllerCallSchemaID {
@@ -587,6 +604,20 @@ func encodeControllerCallPayload(call ControllerCall) (json.RawMessage, error) {
 			Schema string            `json:"schema"`
 			Append receiptAppendWire `json:"append"`
 		}{wantSchema, wire})
+	case ControllerOperationResolveReceiptVerificationAuthority:
+		if err := requireOnlyCallArm(call, call.ResolveReceiptVerificationAuthority); err != nil {
+			return nil, err
+		}
+		if call.ResolveReceiptVerificationAuthority.Schema != wantSchema {
+			return nil, operationSchemaError(call.Operation)
+		}
+		if err := validateReceiptVerificationAuthorityQuery(call.ResolveReceiptVerificationAuthority.Query); err != nil {
+			return nil, err
+		}
+		return marshalControllerPayload(struct {
+			Schema string                        `json:"schema"`
+			Query  contextreceipt.AuthorityQuery `json:"query"`
+		}{wantSchema, call.ResolveReceiptVerificationAuthority.Query})
 	case ControllerOperationPersistHandback:
 		if err := requireOnlyCallArm(call, call.PersistHandback); err != nil {
 			return nil, err
@@ -871,6 +902,21 @@ func decodeControllerCallPayload(raw json.RawMessage, call *ControllerCall) erro
 			return err
 		}
 		call.AppendReceipt = ControllerAppendReceiptRequest{schema, appendValue}
+	case ControllerOperationResolveReceiptVerificationAuthority:
+		var wire struct {
+			Schema string                        `json:"schema"`
+			Query  contextreceipt.AuthorityQuery `json:"query"`
+		}
+		if err := unmarshalControllerPayload(raw, &wire); err != nil {
+			return err
+		}
+		if wire.Schema != schema {
+			return operationSchemaError(call.Operation)
+		}
+		if err := validateReceiptVerificationAuthorityQuery(wire.Query); err != nil {
+			return err
+		}
+		call.ResolveReceiptVerificationAuthority = ControllerResolveReceiptVerificationAuthorityRequest{schema, cloneReceiptVerificationAuthorityQuery(wire.Query)}
 	case ControllerOperationPersistHandback:
 		var wire struct {
 			Schema string          `json:"schema"`
@@ -1116,6 +1162,18 @@ func encodeControllerSuccessPayload(result ControllerResult) (json.RawMessage, e
 			Schema string                       `json:"schema"`
 			Ack    contextevent.ReceiptEventAck `json:"ack"`
 		}{wantSchema, ack})
+	case ControllerOperationResolveReceiptVerificationAuthority:
+		if result.ResolveReceiptVerificationAuthority.Schema != wantSchema {
+			return nil, operationSchemaError(result.Operation)
+		}
+		wire, err := receiptVerificationAuthorityToWire(result.ResolveReceiptVerificationAuthority.Authority)
+		if err != nil {
+			return nil, err
+		}
+		return marshalControllerPayload(struct {
+			Schema    string                           `json:"schema"`
+			Authority receiptVerificationAuthorityWire `json:"authority"`
+		}{wantSchema, wire})
 	case ControllerOperationPersistHandback:
 		if result.PersistHandback.Schema != wantSchema {
 			return nil, operationSchemaError(result.Operation)
@@ -1402,6 +1460,22 @@ func decodeControllerSuccessPayload(raw json.RawMessage, result *ControllerResul
 			return err
 		}
 		result.AppendReceipt = ControllerAppendReceiptResult{schema, ack}
+	case ControllerOperationResolveReceiptVerificationAuthority:
+		var wire struct {
+			Schema    string                           `json:"schema"`
+			Authority receiptVerificationAuthorityWire `json:"authority"`
+		}
+		if err := unmarshalControllerPayload(raw, &wire); err != nil {
+			return err
+		}
+		if wire.Schema != schema {
+			return operationSchemaError(result.Operation)
+		}
+		authority, err := receiptVerificationAuthorityFromWire(wire.Authority)
+		if err != nil {
+			return err
+		}
+		result.ResolveReceiptVerificationAuthority = ControllerResolveReceiptVerificationAuthorityResult{schema, authority}
 	case ControllerOperationPersistHandback, ControllerOperationPersistQuarantine, ControllerOperationPersistAbort:
 		var wire struct {
 			Schema string          `json:"schema"`
@@ -1550,6 +1624,8 @@ func requireOnlyCallArm(call ControllerCall, selected any) error {
 		want.ResolveReceiptInputs = selected.(ControllerResolveReceiptInputsRequest)
 	case ControllerOperationAppendReceipt:
 		want.AppendReceipt = selected.(ControllerAppendReceiptRequest)
+	case ControllerOperationResolveReceiptVerificationAuthority:
+		want.ResolveReceiptVerificationAuthority = selected.(ControllerResolveReceiptVerificationAuthorityRequest)
 	case ControllerOperationPersistHandback:
 		want.PersistHandback = selected.(ControllerPersistHandbackRequest)
 	case ControllerOperationPersistQuarantine:
@@ -1603,6 +1679,8 @@ func controllerSuccessArmsMatch(result ControllerResult) bool {
 		want.ResolveReceiptInputs = result.ResolveReceiptInputs
 	case ControllerOperationAppendReceipt:
 		want.AppendReceipt = result.AppendReceipt
+	case ControllerOperationResolveReceiptVerificationAuthority:
+		want.ResolveReceiptVerificationAuthority = result.ResolveReceiptVerificationAuthority
 	case ControllerOperationPersistHandback:
 		want.PersistHandback = result.PersistHandback
 	case ControllerOperationPersistQuarantine:
@@ -2450,6 +2528,220 @@ func validateControllerPrincipal(p gp.PrincipalResolution) error {
 		}
 	}
 	return nil
+}
+
+func validateReceiptVerificationAuthorityQuery(query contextreceipt.AuthorityQuery) error {
+	for field, value := range map[string]string{
+		"receipt verification request digest": query.RequestDigest,
+		"receipt verification receipt digest": query.ReceiptDigest,
+		"receipt verification profile digest": query.ProfileRef.Digest,
+	} {
+		if err := validateDigest(field, value); err != nil {
+			return err
+		}
+	}
+	for field, value := range map[string]string{
+		"receipt verification candidate commit": query.CandidateCommit,
+		"receipt verification candidate tree":   query.CandidateTree,
+	} {
+		if len(value) != 40 {
+			return fmt.Errorf("sealedexec: %s must be a SHA-1 Git object", field)
+		}
+		if err := validateGitOID(field, value, true); err != nil {
+			return err
+		}
+	}
+	if query.ProfileRef.Schema != ProjectProfileRefSchemaID {
+		return fmt.Errorf("sealedexec: receipt verification profile_ref schema must be %q", ProjectProfileRefSchemaID)
+	}
+	if err := gp.ValidateID(query.ProfileRef.ID); err != nil {
+		return fmt.Errorf("sealedexec: receipt verification profile_ref id: %w", err)
+	}
+	if err := query.RunnerClaim.Validate(); err != nil {
+		return fmt.Errorf("sealedexec: receipt verification runner claim: %w", err)
+	}
+	return nil
+}
+
+func receiptVerificationAuthorityToWire(authority contextreceipt.AuthorityFacts) (receiptVerificationAuthorityWire, error) {
+	if err := validateReceiptVerificationAuthority(authority); err != nil {
+		return receiptVerificationAuthorityWire{}, err
+	}
+	return receiptVerificationAuthorityWire{
+		Profile: authority.Profile,
+		TrustFact: receiptVerificationTrustFactWire{
+			SourceID: authority.TrustFact.SourceID, SourceKind: authority.TrustFact.SourceKind,
+			Subjects: append([]string{}, authority.TrustFact.Subjects...), EvidenceDigest: authority.TrustFact.EvidenceDigest,
+			Available: authority.TrustFact.Available, Valid: authority.TrustFact.Valid, Reason: authority.TrustFact.Reason,
+		},
+		Isolation: authority.Isolation, Persistence: authority.Persistence,
+	}, nil
+}
+
+func receiptVerificationAuthorityFromWire(wire receiptVerificationAuthorityWire) (contextreceipt.AuthorityFacts, error) {
+	authority := contextreceipt.AuthorityFacts{
+		Profile: wire.Profile,
+		TrustFact: gp.TrustFact{
+			SourceID: wire.TrustFact.SourceID, SourceKind: wire.TrustFact.SourceKind,
+			Subjects: append([]string{}, wire.TrustFact.Subjects...), EvidenceDigest: wire.TrustFact.EvidenceDigest,
+			Available: wire.TrustFact.Available, Valid: wire.TrustFact.Valid, Reason: wire.TrustFact.Reason,
+		},
+		Isolation: wire.Isolation, Persistence: wire.Persistence,
+	}
+	if err := validateReceiptVerificationAuthority(authority); err != nil {
+		return contextreceipt.AuthorityFacts{}, err
+	}
+	return cloneReceiptVerificationAuthority(authority), nil
+}
+
+func validateReceiptVerificationAuthority(authority contextreceipt.AuthorityFacts) error {
+	if authority.Profile.ProfileBytes == nil {
+		return fmt.Errorf("sealedexec: receipt verification profile_bytes must be non-null")
+	}
+	if err := validateReceiptAuthorityState("profile", authority.Profile.State, len(authority.Profile.ProfileBytes) != 0, authority.Profile.Witnesses); err != nil {
+		return err
+	}
+	if err := validateReceiptVerificationTrustFact(authority.TrustFact); err != nil {
+		return err
+	}
+	isolationPresent := authority.Isolation.ProfileID != "" || authority.Isolation.ProfileDigest != "" || authority.Isolation.Session != "" || authority.Isolation.WorkspaceID != ""
+	if err := validateReceiptAuthorityState("isolation", authority.Isolation.State, isolationPresent, authority.Isolation.Witnesses); err != nil {
+		return err
+	}
+	if authority.Isolation.State == contextreceipt.StateProven {
+		if err := gp.ValidateID(authority.Isolation.ProfileID); err != nil {
+			return fmt.Errorf("sealedexec: receipt verification isolation profile_id: %w", err)
+		}
+		if err := validateDigest("receipt verification isolation profile_digest", authority.Isolation.ProfileDigest); err != nil {
+			return err
+		}
+		for field, value := range map[string]string{"session": authority.Isolation.Session, "workspace_id": authority.Isolation.WorkspaceID} {
+			if err := requireText("receipt verification isolation "+field, value); err != nil {
+				return err
+			}
+		}
+	} else if isolationPresent {
+		return fmt.Errorf("sealedexec: non-proven receipt verification isolation carries identity fields")
+	}
+	persistencePresent := authority.Persistence.ReceiptDigest != "" || authority.Persistence.ReceiptEventDigest != "" || authority.Persistence.ReceiptAckDigest != ""
+	switch authority.Persistence.State {
+	case contextreceipt.StateProven:
+		if !persistencePresent || authority.Persistence.Witnesses == nil || len(authority.Persistence.Witnesses) != 0 {
+			return fmt.Errorf("sealedexec: proven receipt verification persistence requires all digests and empty witnesses")
+		}
+	case contextreceipt.StateViolated, contextreceipt.StateUnproven:
+		if len(authority.Persistence.Witnesses) == 0 {
+			return fmt.Errorf("sealedexec: non-proven receipt verification persistence requires nonempty witnesses")
+		}
+	default:
+		return fmt.Errorf("sealedexec: receipt verification persistence has unknown state %q", authority.Persistence.State)
+	}
+	if err := validateReceiptVerificationWitnesses(authority.Persistence.Witnesses); err != nil {
+		return err
+	}
+	for field, value := range map[string]string{
+		"receipt_digest":       authority.Persistence.ReceiptDigest,
+		"receipt_event_digest": authority.Persistence.ReceiptEventDigest,
+		"receipt_ack_digest":   authority.Persistence.ReceiptAckDigest,
+	} {
+		if authority.Persistence.State == contextreceipt.StateProven && value == "" {
+			return fmt.Errorf("sealedexec: proven receipt verification persistence requires %s", field)
+		}
+		if value != "" {
+			if err := validateDigest("receipt verification persistence "+field, value); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func validateReceiptAuthorityState(name string, state contextreceipt.State, present bool, witnesses []gp.Witness) error {
+	switch state {
+	case contextreceipt.StateProven:
+		if !present || witnesses == nil || len(witnesses) != 0 {
+			return fmt.Errorf("sealedexec: proven receipt verification %s requires facts and empty witnesses", name)
+		}
+	case contextreceipt.StateViolated, contextreceipt.StateUnproven:
+		if present || len(witnesses) == 0 {
+			return fmt.Errorf("sealedexec: non-proven receipt verification %s requires no facts and nonempty witnesses", name)
+		}
+	default:
+		return fmt.Errorf("sealedexec: receipt verification %s has unknown state %q", name, state)
+	}
+	return validateReceiptVerificationWitnesses(witnesses)
+}
+
+func validateReceiptVerificationWitnesses(witnesses []gp.Witness) error {
+	if witnesses == nil {
+		return fmt.Errorf("sealedexec: receipt verification witnesses must be non-null")
+	}
+	for i, witness := range witnesses {
+		if err := requireText("receipt verification witness code", witness.Code); err != nil {
+			return err
+		}
+		if err := requireText("receipt verification witness source_id", witness.SourceID); err != nil {
+			return err
+		}
+		if witness.EvidenceDigest != "" {
+			if err := validateDigest("receipt verification witness evidence_digest", witness.EvidenceDigest); err != nil {
+				return err
+			}
+		}
+		if i > 0 && controllerCompareStrings(
+			[]string{witnesses[i-1].Code, witnesses[i-1].SourceID, witnesses[i-1].EvidenceDigest, witnesses[i-1].Detail},
+			[]string{witness.Code, witness.SourceID, witness.EvidenceDigest, witness.Detail},
+		) >= 0 {
+			return fmt.Errorf("sealedexec: receipt verification witnesses must be sorted and deduplicated")
+		}
+	}
+	return nil
+}
+
+func validateReceiptVerificationTrustFact(fact gp.TrustFact) error {
+	if err := gp.ValidateID(fact.SourceID); err != nil {
+		return fmt.Errorf("sealedexec: receipt verification trust source: %w", err)
+	}
+	if err := fact.SourceKind.Validate(); err != nil {
+		return err
+	}
+	if fact.Subjects == nil {
+		return fmt.Errorf("sealedexec: receipt verification trust subjects must be non-null")
+	}
+	for i, subject := range fact.Subjects {
+		if err := requireText("receipt verification trust subject", subject); err != nil {
+			return err
+		}
+		if i > 0 && fact.Subjects[i-1] >= subject {
+			return fmt.Errorf("sealedexec: receipt verification trust subjects must be sorted and deduplicated")
+		}
+	}
+	if !fact.Available {
+		if fact.Valid || len(fact.Subjects) != 0 || fact.EvidenceDigest != "" || fact.Reason == "" {
+			return fmt.Errorf("sealedexec: unavailable receipt verification trust fact is contradictory")
+		}
+		return nil
+	}
+	if err := validateDigest("receipt verification trust evidence_digest", fact.EvidenceDigest); err != nil {
+		return err
+	}
+	if !fact.Valid && fact.Reason == "" {
+		return fmt.Errorf("sealedexec: invalid receipt verification trust fact requires a reason")
+	}
+	return nil
+}
+
+func cloneReceiptVerificationAuthorityQuery(query contextreceipt.AuthorityQuery) contextreceipt.AuthorityQuery {
+	return query
+}
+
+func cloneReceiptVerificationAuthority(authority contextreceipt.AuthorityFacts) contextreceipt.AuthorityFacts {
+	authority.Profile.ProfileBytes = append([]byte{}, authority.Profile.ProfileBytes...)
+	authority.Profile.Witnesses = append([]gp.Witness{}, authority.Profile.Witnesses...)
+	authority.TrustFact.Subjects = append([]string{}, authority.TrustFact.Subjects...)
+	authority.Isolation.Witnesses = append([]gp.Witness{}, authority.Isolation.Witnesses...)
+	authority.Persistence.Witnesses = append([]gp.Witness{}, authority.Persistence.Witnesses...)
+	return authority
 }
 
 func receiptAppendToWire(a ReceiptAppend) (receiptAppendWire, error) {

@@ -14,6 +14,7 @@ import (
 
 	"github.com/jyang234/verdi/internal/contextcompile"
 	"github.com/jyang234/verdi/internal/contextevent"
+	"github.com/jyang234/verdi/internal/contextreceipt"
 	"github.com/jyang234/verdi/internal/policyconflict"
 )
 
@@ -233,6 +234,26 @@ func (c *ControllerClient) AppendReceipt(ctx context.Context, appendValue Receip
 		}
 	}
 	return ack, err
+}
+
+// ResolveReceiptVerificationAuthority obtains the exact read-only selected
+// profile, trust, isolation, and persistence facts for one verify request.
+func (c *ControllerClient) ResolveReceiptVerificationAuthority(ctx context.Context, query contextreceipt.AuthorityQuery) (contextreceipt.AuthorityFacts, error) {
+	call := ControllerCall{Schema: ControllerCallSchemaID, Operation: ControllerOperationResolveReceiptVerificationAuthority}
+	call.ResolveReceiptVerificationAuthority = ControllerResolveReceiptVerificationAuthorityRequest{Schema: controllerRequestSchema(call.Operation), Query: query}
+	result, err := c.invoke(ctx, call)
+	authority := result.ResolveReceiptVerificationAuthority.Authority
+	if err == nil {
+		switch {
+		case authority.TrustFact.SourceID != query.RunnerClaim.TrustSource:
+			err = controllerResultMismatch(call.Operation, "trust fact source contradicts runner claim")
+		case authority.Isolation.State == contextreceipt.StateProven && (authority.Isolation.ProfileID != query.ProfileRef.ID || authority.Isolation.ProfileDigest != query.ProfileRef.Digest):
+			err = controllerResultMismatch(call.Operation, "isolation profile contradicts query")
+		case authority.Persistence.ReceiptDigest != "" && authority.Persistence.ReceiptDigest != query.ReceiptDigest:
+			err = controllerResultMismatch(call.Operation, "persistence receipt contradicts query")
+		}
+	}
+	return authority, err
 }
 
 // PersistHandback persists one exact successful handback record.

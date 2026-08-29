@@ -19,25 +19,26 @@ const (
 type ControllerOperation string
 
 const (
-	ControllerOperationVerifyAuthority       ControllerOperation = "verify-authority"
-	ControllerOperationResolveProfile        ControllerOperation = "resolve-profile"
-	ControllerOperationVerifyConflict        ControllerOperation = "verify-conflict"
-	ControllerOperationResolveRecorder       ControllerOperation = "resolve-recorder"
-	ControllerOperationRecorderCheckpoint    ControllerOperation = "recorder-checkpoint"
-	ControllerOperationRecorderAppend        ControllerOperation = "recorder-append"
-	ControllerOperationVerifyOpaqueBoundary  ControllerOperation = "verify-opaque-boundary"
-	ControllerOperationVerifyProviderSession ControllerOperation = "verify-provider-session"
-	ControllerOperationVerifyExpansion       ControllerOperation = "verify-expansion"
-	ControllerOperationStoreAdapterSession   ControllerOperation = "store-adapter-session"
-	ControllerOperationNextStamp             ControllerOperation = "next-stamp"
-	ControllerOperationResolveContext        ControllerOperation = "resolve-context"
-	ControllerOperationVerifyEpoch           ControllerOperation = "verify-epoch"
-	ControllerOperationInstallExpansion      ControllerOperation = "install-expansion"
-	ControllerOperationResolveReceiptInputs  ControllerOperation = "resolve-receipt-inputs"
-	ControllerOperationAppendReceipt         ControllerOperation = "append-receipt"
-	ControllerOperationPersistHandback       ControllerOperation = "persist-handback"
-	ControllerOperationPersistQuarantine     ControllerOperation = "persist-quarantine"
-	ControllerOperationPersistAbort          ControllerOperation = "persist-abort"
+	ControllerOperationVerifyAuthority                     ControllerOperation = "verify-authority"
+	ControllerOperationResolveProfile                      ControllerOperation = "resolve-profile"
+	ControllerOperationVerifyConflict                      ControllerOperation = "verify-conflict"
+	ControllerOperationResolveRecorder                     ControllerOperation = "resolve-recorder"
+	ControllerOperationRecorderCheckpoint                  ControllerOperation = "recorder-checkpoint"
+	ControllerOperationRecorderAppend                      ControllerOperation = "recorder-append"
+	ControllerOperationVerifyOpaqueBoundary                ControllerOperation = "verify-opaque-boundary"
+	ControllerOperationVerifyProviderSession               ControllerOperation = "verify-provider-session"
+	ControllerOperationVerifyExpansion                     ControllerOperation = "verify-expansion"
+	ControllerOperationStoreAdapterSession                 ControllerOperation = "store-adapter-session"
+	ControllerOperationNextStamp                           ControllerOperation = "next-stamp"
+	ControllerOperationResolveContext                      ControllerOperation = "resolve-context"
+	ControllerOperationVerifyEpoch                         ControllerOperation = "verify-epoch"
+	ControllerOperationInstallExpansion                    ControllerOperation = "install-expansion"
+	ControllerOperationResolveReceiptInputs                ControllerOperation = "resolve-receipt-inputs"
+	ControllerOperationAppendReceipt                       ControllerOperation = "append-receipt"
+	ControllerOperationResolveReceiptVerificationAuthority ControllerOperation = "resolve-receipt-verification-authority"
+	ControllerOperationPersistHandback                     ControllerOperation = "persist-handback"
+	ControllerOperationPersistQuarantine                   ControllerOperation = "persist-quarantine"
+	ControllerOperationPersistAbort                        ControllerOperation = "persist-abort"
 )
 
 var controllerOperations = []ControllerOperation{
@@ -57,6 +58,7 @@ var controllerOperations = []ControllerOperation{
 	ControllerOperationInstallExpansion,
 	ControllerOperationResolveReceiptInputs,
 	ControllerOperationAppendReceipt,
+	ControllerOperationResolveReceiptVerificationAuthority,
 	ControllerOperationPersistHandback,
 	ControllerOperationPersistQuarantine,
 	ControllerOperationPersistAbort,
@@ -268,6 +270,14 @@ type ControllerAppendReceiptResult struct {
 	Schema string
 	Ack    contextevent.ReceiptEventAck
 }
+type ControllerResolveReceiptVerificationAuthorityRequest struct {
+	Schema string
+	Query  contextreceipt.AuthorityQuery
+}
+type ControllerResolveReceiptVerificationAuthorityResult struct {
+	Schema    string
+	Authority contextreceipt.AuthorityFacts
+}
 type ControllerPersistHandbackRequest struct {
 	Schema string
 	Record HandbackRecord
@@ -301,25 +311,26 @@ type ControllerCall struct {
 	CallSequence uint64
 	Operation    ControllerOperation
 
-	VerifyAuthority       ControllerVerifyAuthorityRequest
-	ResolveProfile        ControllerResolveProfileRequest
-	VerifyConflict        ControllerVerifyConflictRequest
-	ResolveRecorder       ControllerResolveRecorderRequest
-	RecorderCheckpoint    ControllerRecorderCheckpointRequest
-	RecorderAppend        ControllerRecorderAppendRequest
-	VerifyOpaqueBoundary  ControllerVerifyOpaqueBoundaryRequest
-	VerifyProviderSession ControllerVerifyProviderSessionRequest
-	VerifyExpansion       ControllerVerifyExpansionRequest
-	StoreAdapterSession   ControllerStoreAdapterSessionRequest
-	NextStamp             ControllerNextStampRequest
-	ResolveContext        ControllerResolveContextRequest
-	VerifyEpoch           ControllerVerifyEpochRequest
-	InstallExpansion      ControllerInstallExpansionRequest
-	ResolveReceiptInputs  ControllerResolveReceiptInputsRequest
-	AppendReceipt         ControllerAppendReceiptRequest
-	PersistHandback       ControllerPersistHandbackRequest
-	PersistQuarantine     ControllerPersistQuarantineRequest
-	PersistAbort          ControllerPersistAbortRequest
+	VerifyAuthority                     ControllerVerifyAuthorityRequest
+	ResolveProfile                      ControllerResolveProfileRequest
+	VerifyConflict                      ControllerVerifyConflictRequest
+	ResolveRecorder                     ControllerResolveRecorderRequest
+	RecorderCheckpoint                  ControllerRecorderCheckpointRequest
+	RecorderAppend                      ControllerRecorderAppendRequest
+	VerifyOpaqueBoundary                ControllerVerifyOpaqueBoundaryRequest
+	VerifyProviderSession               ControllerVerifyProviderSessionRequest
+	VerifyExpansion                     ControllerVerifyExpansionRequest
+	StoreAdapterSession                 ControllerStoreAdapterSessionRequest
+	NextStamp                           ControllerNextStampRequest
+	ResolveContext                      ControllerResolveContextRequest
+	VerifyEpoch                         ControllerVerifyEpochRequest
+	InstallExpansion                    ControllerInstallExpansionRequest
+	ResolveReceiptInputs                ControllerResolveReceiptInputsRequest
+	AppendReceipt                       ControllerAppendReceiptRequest
+	ResolveReceiptVerificationAuthority ControllerResolveReceiptVerificationAuthorityRequest
+	PersistHandback                     ControllerPersistHandbackRequest
+	PersistQuarantine                   ControllerPersistQuarantineRequest
+	PersistAbort                        ControllerPersistAbortRequest
 }
 
 // ControllerResult is a closed typed result/error union. A valid reply has
@@ -330,23 +341,24 @@ type ControllerResult struct {
 	Operation    ControllerOperation
 	Error        *ControllerError
 
-	VerifyAuthority       ControllerVerifyAuthorityResult
-	ResolveProfile        ControllerResolveProfileResult
-	VerifyConflict        ControllerVerifyConflictResult
-	ResolveRecorder       ControllerResolveRecorderResult
-	RecorderCheckpoint    ControllerRecorderCheckpointResult
-	RecorderAppend        ControllerRecorderAppendResult
-	VerifyOpaqueBoundary  ControllerVerifyOpaqueBoundaryResult
-	VerifyProviderSession ControllerVerifyProviderSessionResult
-	VerifyExpansion       ControllerVerifyExpansionResult
-	StoreAdapterSession   ControllerStoreAdapterSessionResult
-	NextStamp             ControllerNextStampResult
-	ResolveContext        ControllerResolveContextResult
-	VerifyEpoch           ControllerVerifyEpochResult
-	InstallExpansion      ControllerInstallExpansionResult
-	ResolveReceiptInputs  ControllerResolveReceiptInputsResult
-	AppendReceipt         ControllerAppendReceiptResult
-	PersistHandback       ControllerPersistHandbackResult
-	PersistQuarantine     ControllerPersistQuarantineResult
-	PersistAbort          ControllerPersistAbortResult
+	VerifyAuthority                     ControllerVerifyAuthorityResult
+	ResolveProfile                      ControllerResolveProfileResult
+	VerifyConflict                      ControllerVerifyConflictResult
+	ResolveRecorder                     ControllerResolveRecorderResult
+	RecorderCheckpoint                  ControllerRecorderCheckpointResult
+	RecorderAppend                      ControllerRecorderAppendResult
+	VerifyOpaqueBoundary                ControllerVerifyOpaqueBoundaryResult
+	VerifyProviderSession               ControllerVerifyProviderSessionResult
+	VerifyExpansion                     ControllerVerifyExpansionResult
+	StoreAdapterSession                 ControllerStoreAdapterSessionResult
+	NextStamp                           ControllerNextStampResult
+	ResolveContext                      ControllerResolveContextResult
+	VerifyEpoch                         ControllerVerifyEpochResult
+	InstallExpansion                    ControllerInstallExpansionResult
+	ResolveReceiptInputs                ControllerResolveReceiptInputsResult
+	AppendReceipt                       ControllerAppendReceiptResult
+	ResolveReceiptVerificationAuthority ControllerResolveReceiptVerificationAuthorityResult
+	PersistHandback                     ControllerPersistHandbackResult
+	PersistQuarantine                   ControllerPersistQuarantineResult
+	PersistAbort                        ControllerPersistAbortResult
 }

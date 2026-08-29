@@ -2,6 +2,8 @@ package contextreceipt
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -211,4 +213,109 @@ func TestContextReceiptFixtureIsDeterministicallyOrdered(t *testing.T) {
 	if !strings.HasSuffix(string(encoded), "\n") {
 		t.Fatalf("canonical receipt lacks trailing newline: %q", encoded)
 	}
+}
+
+func TestContextReceiptContract_Behavioral(t *testing.T) {
+	t.Parallel()
+
+	builder := receiptFixture(t, RoleBuilder)
+	encodedBuilder, err := EncodeReceipt(builder)
+	if err != nil {
+		t.Fatalf("EncodeReceipt(builder) error = %v", err)
+	}
+	builder, err = DecodeReceipt(bytes.NewReader(encodedBuilder))
+	if err != nil {
+		t.Fatalf("DecodeReceipt(builder) error = %v", err)
+	}
+	eventBytes, ack := receiptCompletionFixture(t, builder, encodedBuilder)
+	if err := validateReceiptCompletion(builder, eventBytes, ack); err != nil {
+		t.Fatalf("validateReceiptCompletion(builder) error = %v", err)
+	}
+
+	reviewer := receiptFixture(t, RoleReviewer)
+	reviewer.ReviewOf = []string{builder.Digest}
+	encodedReviewer, err := EncodeReceipt(reviewer)
+	if err != nil {
+		t.Fatalf("EncodeReceipt(reviewer) error = %v", err)
+	}
+	reviewer, err = DecodeReceipt(bytes.NewReader(encodedReviewer))
+	if err != nil {
+		t.Fatalf("DecodeReceipt(reviewer) error = %v", err)
+	}
+	reviewerEvent, reviewerAck := receiptCompletionFixture(t, reviewer, encodedReviewer)
+	if err := validateReceiptCompletion(reviewer, reviewerEvent, reviewerAck); err != nil {
+		t.Fatalf("validateReceiptCompletion(reviewer) error = %v", err)
+	}
+
+	tests := []struct {
+		name   string
+		mutate func(*Receipt, *[]byte, *contextevent.ReceiptEventAck)
+	}{
+		{"missing expansion", func(r *Receipt, _ *[]byte, _ *contextevent.ReceiptEventAck) { r.Expansions = nil }},
+		{"missing obligation", func(r *Receipt, _ *[]byte, _ *contextevent.ReceiptEventAck) { r.Obligations = nil }},
+		{"missing evidence", func(r *Receipt, _ *[]byte, _ *contextevent.ReceiptEventAck) { r.Evidence = nil }},
+		{"missing reviewer link", func(r *Receipt, _ *[]byte, _ *contextevent.ReceiptEventAck) { r.Role = RoleReviewer; r.ReviewOf = nil }},
+		{"missing event", func(_ *Receipt, event *[]byte, _ *contextevent.ReceiptEventAck) { *event = nil }},
+		{"mismatched acknowledgment", func(_ *Receipt, _ *[]byte, ack *contextevent.ReceiptEventAck) { ack.ReceiptDigest = receiptDigestA }},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			receipt := builder
+			event := append([]byte(nil), eventBytes...)
+			candidateAck := ack
+			tt.mutate(&receipt, &event, &candidateAck)
+			if err := validateReceiptCompletion(receipt, event, candidateAck); err == nil {
+				t.Fatal("validateReceiptCompletion() error = nil")
+			}
+		})
+	}
+}
+
+func receiptCompletionFixture(t *testing.T, receipt Receipt, receiptBytes []byte) ([]byte, contextevent.ReceiptEventAck) {
+	t.Helper()
+	represented := bytes.TrimSuffix(receiptBytes, []byte("\n"))
+	representedDigest := fmt.Sprintf("sha256:%x", sha256.Sum256(represented))
+	event := contextevent.Event{
+		Schema:               contextevent.EventSchemaID,
+		SourceSequence:       receipt.TerminalSourceSequence + 1,
+		Flight:               "flight-1",
+		Lane:                 "builder",
+		Epoch:                "epoch-1",
+		ManifestRevision:     receipt.TerminalManifestRevision,
+		ManifestDigest:       receipt.ManifestDigest,
+		Session:              "session-1",
+		ATCRunway:            receipt.ATCRunway,
+		ExecutionWorkspaceID: receipt.ExecutionWorkspaceID,
+		CandidateCommit:      receipt.OutputCommit,
+		CandidateTree:        receipt.OutputTree,
+		Adapter:              receipt.Adapter,
+		AdapterVersion:       receipt.AdapterVersion,
+		OccurredAt:           "2026-08-28T12:34:56Z",
+		Kind:                 contextevent.KindReceipt,
+		PayloadSchema:        "verdi.context-event-payload/receipt/v1",
+		Payload: &contextevent.ReceiptPayload{
+			Schema:                  "verdi.context-event-payload/receipt/v1",
+			Role:                    receipt.Role,
+			ReceiptDigest:           receipt.Digest,
+			Authority:               receipt.Authority,
+			ExecutionEventChainRoot: receipt.EventChainRoot,
+			Detail:                  contextevent.Detail{Mode: contextevent.DetailInline, MediaType: contextevent.MediaTypeJSON, Digest: representedDigest, RedactionProfile: contextevent.RedactionProfileStandard, RedactedJSON: represented},
+		},
+		PriorEventDigest: receipt.RevisionSegments[len(receipt.RevisionSegments)-1].EventRoot,
+	}
+	encoded, err := contextevent.EncodeEvent(event)
+	if err != nil {
+		t.Fatalf("EncodeEvent(receipt) error = %v", err)
+	}
+	event, err = contextevent.DecodeEvent(bytes.NewReader(encoded))
+	if err != nil {
+		t.Fatalf("DecodeEvent(receipt) error = %v", err)
+	}
+	ack := contextevent.ReceiptEventAck{
+		Schema: contextevent.ReceiptAckSchemaID, Flight: event.Flight, Lane: event.Lane,
+		Epoch: event.Epoch, Session: event.Session, ManifestRevision: event.ManifestRevision,
+		Kind: event.Kind, SourceSequence: event.SourceSequence, EventDigest: event.EventDigest,
+		GlobalSequence: receipt.TerminalGlobalSequence + 1, ReceiptDigest: receipt.Digest,
+	}
+	return encoded, ack
 }

@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/jyang234/verdi/internal/contextcompile"
+	"github.com/jyang234/verdi/internal/contextreceipt"
 )
 
 func TestCanonicalChildCompiler(t *testing.T) {
@@ -114,6 +115,33 @@ func TestCanonicalChildCompiler(t *testing.T) {
 				t.Fatal("CompileChild accepted invalid transition")
 			}
 		})
+	}
+}
+
+func TestVerifyExpansionDataProof(t *testing.T) {
+	data, dataBytes, err := contextcompile.BuildDataItem(contextcompile.Candidate{
+		Source: contextcompile.SourceHeadTree, ID: "path:README.md", Path: "README.md",
+		Object: strings.Repeat("1", 40), Mode: "100644", Type: "blob",
+	}, contextcompile.IncludedRepositoryFile, []byte("expansion proof\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	dataDigest := testSHA256(string(dataBytes))
+	expansion := contextreceipt.Expansion{
+		RequestID: "context-request:fixture", ParentRevision: 2, ParentManifestDigest: testSHA256("parent"),
+		ChildRevision: 3, ChildManifestDigest: testSHA256("child"),
+	}
+	expansion.ExpansionDigest = testSHA256(fmt.Sprintf("{\"child_manifest_digest\":\"%s\",\"child_revision\":3,\"data_digest\":\"%s\",\"parent_manifest_digest\":\"%s\",\"parent_revision\":2,\"request_id\":\"context-request:fixture\",\"schema\":\"verdi.context-expansion/v1\"}\n", expansion.ChildManifestDigest, dataDigest, expansion.ParentManifestDigest))
+
+	projection, err := VerifyExpansionDataProof(dataBytes, expansion)
+	if err != nil {
+		t.Fatalf("VerifyExpansionDataProof: %v", err)
+	}
+	if projection.DataDigest != dataDigest || projection.ExpansionDigest != expansion.ExpansionDigest || projection.DataItemDigest != data.Digest {
+		t.Fatalf("projection = %#v", projection)
+	}
+	if _, err := VerifyExpansionDataProof(append(dataBytes, []byte("{}\n")...), expansion); err == nil {
+		t.Fatal("VerifyExpansionDataProof accepted trailing data")
 	}
 }
 

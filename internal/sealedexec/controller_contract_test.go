@@ -89,6 +89,7 @@ func TestContextControllerWireContract_Static(t *testing.T) {
 			{operation: "install-expansion", requestSchema: "verdi.context-controller/install-expansion-request/v1", resultSchema: "verdi.context-controller/install-expansion-result/v1"},
 			{operation: "resolve-receipt-inputs", requestSchema: "verdi.context-controller/resolve-receipt-inputs-request/v1", resultSchema: "verdi.context-controller/resolve-receipt-inputs-result/v1"},
 			{operation: "append-receipt", requestSchema: "verdi.context-controller/append-receipt-request/v1", resultSchema: "verdi.context-controller/append-receipt-result/v1"},
+			{operation: "resolve-receipt-verification-authority", requestSchema: "verdi.context-controller/resolve-receipt-verification-authority-request/v1", resultSchema: "verdi.context-controller/resolve-receipt-verification-authority-result/v1"},
 			{operation: "persist-handback", requestSchema: "verdi.context-controller/persist-handback-request/v1", resultSchema: "verdi.context-controller/persist-handback-result/v1"},
 			{operation: "persist-quarantine", requestSchema: "verdi.context-controller/persist-quarantine-request/v1", resultSchema: "verdi.context-controller/persist-quarantine-result/v1"},
 			{operation: "persist-abort", requestSchema: "verdi.context-controller/persist-abort-request/v1", resultSchema: "verdi.context-controller/persist-abort-result/v1"},
@@ -157,6 +158,7 @@ func TestContextControllerWireContract_Static(t *testing.T) {
 		expansionInstall := ExpansionInstall{Key: key, RequestID: "request-1", ParentRevision: 0, ParentManifestDigest: request.ManifestDigest, ChildRevision: 1, ChildManifestDigest: testDigest("child-manifest"), ExpansionDigest: testDigest("expansion"), ExpansionRoot: testDigest("expansion-root"), TerminalAck: eventAck}
 		receiptQuery := ReceiptInputsQuery{Request: request, WorkspaceID: "workspace-1", DispatchDigest: testDigest("dispatch"), TerminalRevision: 0, TerminalSourceSequence: 1, TerminalGlobalSequence: 1, EventChainRoot: receipt.EventChainRoot, ResultFactsDigest: testDigest("result-facts")}
 		receiptAppend := ReceiptAppend{Receipt: receipt, Event: receiptEvent}
+		authorityQuery := contextreceipt.AuthorityQuery{RequestDigest: testDigest("verify-request"), ReceiptDigest: receipt.Digest, CandidateCommit: receipt.OutputCommit, CandidateTree: receipt.OutputTree, ProfileRef: contextreceipt.ProfileRef{Schema: request.Profile.Schema, ID: request.Profile.ID, Digest: request.Profile.Digest}, RunnerClaim: receipt.RunnerPrincipalResolution.Claim}
 		handbackInput := validHandbackRecord(t)
 		handbackFrame := mustCanonicalHandback(t, handbackInput)
 		quarantineInput := validQuarantineRecord(t, QuarantineExecutionIncomplete)
@@ -182,6 +184,7 @@ func TestContextControllerWireContract_Static(t *testing.T) {
 		installExpansionResult := controllerResultFixture(t, 1, "install-expansion")
 		resolveReceiptInputsResult := controllerResultFixture(t, 1, "resolve-receipt-inputs")
 		appendReceiptResult := controllerResultFixture(t, 1, "append-receipt")
+		resolveReceiptAuthorityResult := controllerResultFixture(t, 1, "resolve-receipt-verification-authority")
 		persistHandbackResult := controllerResultFixture(t, 1, "persist-handback")
 		persistQuarantineResult := controllerResultFixture(t, 1, "persist-quarantine")
 		persistAbortResult := controllerResultFixture(t, 1, "persist-abort")
@@ -229,6 +232,9 @@ func TestContextControllerWireContract_Static(t *testing.T) {
 			{name: "AppendReceipt", operation: "append-receipt", requestSchema: "verdi.context-controller/append-receipt-request/v1", requestField: "append", requestValue: receiptAppend, reply: appendReceiptResult, want: appendReceiptResult.AppendReceipt.Ack, invoke: func(client *ControllerClient) (any, error) {
 				return client.AppendReceipt(context.Background(), receiptAppend)
 			}},
+			{name: "ResolveReceiptVerificationAuthority", operation: "resolve-receipt-verification-authority", requestSchema: "verdi.context-controller/resolve-receipt-verification-authority-request/v1", requestField: "query", requestValue: authorityQuery, reply: resolveReceiptAuthorityResult, want: resolveReceiptAuthorityResult.ResolveReceiptVerificationAuthority.Authority, invoke: func(client *ControllerClient) (any, error) {
+				return client.ResolveReceiptVerificationAuthority(context.Background(), authorityQuery)
+			}},
 			{name: "PersistHandback", operation: "persist-handback", requestSchema: "verdi.context-controller/persist-handback-request/v1", requestField: "record", requestValue: handbackFrame, reply: persistHandbackResult, want: persistHandbackResult.PersistHandback.Ack, invoke: func(client *ControllerClient) (any, error) {
 				return client.PersistHandback(context.Background(), handbackInput)
 			}},
@@ -240,7 +246,7 @@ func TestContextControllerWireContract_Static(t *testing.T) {
 			}},
 		}
 
-		if got, want := len(rows), 19; got != want {
+		if got, want := len(rows), 20; got != want {
 			t.Fatalf("typed wrapper row count = %d, want %d", got, want)
 		}
 		for _, row := range rows {
@@ -308,6 +314,28 @@ func TestContextControllerWireContract_Static(t *testing.T) {
 						t.Fatal("EncodeControllerResult accepted an invalid expansion-root union")
 					}
 				})
+			}
+		})
+
+		t.Run("non-proven receipt persistence retains only observed digests", func(t *testing.T) {
+			result := controllerResultFixture(t, 1, ControllerOperationResolveReceiptVerificationAuthority)
+			result.ResolveReceiptVerificationAuthority.Authority.Persistence = contextreceipt.PersistenceAuthority{
+				State:         contextreceipt.StateViolated,
+				ReceiptDigest: testDigest("observed-receipt"),
+				Witnesses: []gp.Witness{{
+					Code: "persistence-mismatch", SourceID: "controller", Detail: "receipt digest observed before mismatch",
+				}},
+			}
+			encoded, err := EncodeControllerResult(result)
+			if err != nil {
+				t.Fatalf("EncodeControllerResult(partial observed persistence): %v", err)
+			}
+			decoded, err := DecodeControllerResult(bytes.NewReader(encoded))
+			if err != nil {
+				t.Fatalf("DecodeControllerResult(partial observed persistence): %v", err)
+			}
+			if got := decoded.ResolveReceiptVerificationAuthority.Authority.Persistence; !reflect.DeepEqual(got, result.ResolveReceiptVerificationAuthority.Authority.Persistence) {
+				t.Fatalf("persistence = %#v, want %#v", got, result.ResolveReceiptVerificationAuthority.Authority.Persistence)
 			}
 		})
 
@@ -482,6 +510,13 @@ func TestContextControllerWireContract_Static(t *testing.T) {
 			badContext.ResolveContext.Resolution.Ref = "spec/other#ac-1"
 			badReceiptAck := controllerResultFixture(t, 1, "append-receipt")
 			badReceiptAck.AppendReceipt.Ack.ReceiptDigest = testDigest("different-receipt")
+			badReceiptAuthority := controllerResultFixture(t, 1, "resolve-receipt-verification-authority")
+			badReceiptAuthority.ResolveReceiptVerificationAuthority.Authority.Isolation = contextreceipt.IsolationAuthority{
+				State: contextreceipt.StateProven, ProfileID: "different-profile", ProfileDigest: testDigest("different-profile"),
+				Session: "session-1", WorkspaceID: "workspace-1", Witnesses: []contextreceipt.Witness{},
+			}
+			badPartialPersistence := controllerResultFixture(t, 1, "resolve-receipt-verification-authority")
+			badPartialPersistence.ResolveReceiptVerificationAuthority.Authority.Persistence.ReceiptDigest = testDigest("different-receipt")
 			badHandbackAck := controllerResultFixture(t, 1, "persist-handback")
 			badHandbackAck.PersistHandback.Ack.WorkspaceID = "different-workspace"
 			badHandbackAck.PersistHandback.Ack.Digest = ""
@@ -524,6 +559,12 @@ func TestContextControllerWireContract_Static(t *testing.T) {
 				}},
 				{name: "receipt ack", reply: badReceiptAck, invoke: func(client *ControllerClient) (any, error) {
 					return client.AppendReceipt(context.Background(), receiptAppend)
+				}},
+				{name: "receipt verification isolation", reply: badReceiptAuthority, invoke: func(client *ControllerClient) (any, error) {
+					return client.ResolveReceiptVerificationAuthority(context.Background(), authorityQuery)
+				}},
+				{name: "receipt verification partial persistence", reply: badPartialPersistence, invoke: func(client *ControllerClient) (any, error) {
+					return client.ResolveReceiptVerificationAuthority(context.Background(), authorityQuery)
 				}},
 				{name: "handback ack", reply: badHandbackAck, invoke: func(client *ControllerClient) (any, error) {
 					return client.PersistHandback(context.Background(), handbackInput)
@@ -1032,6 +1073,8 @@ func typedControllerRequestValue(t *testing.T, call ControllerCall, operation st
 		return call.ResolveReceiptInputs.Query
 	case "append-receipt":
 		return call.AppendReceipt.Append
+	case "resolve-receipt-verification-authority":
+		return call.ResolveReceiptVerificationAuthority.Query
 	case "persist-handback":
 		return call.PersistHandback.Record
 	case "persist-quarantine":
@@ -1202,6 +1245,8 @@ func controllerCallFixture(t *testing.T, sequence uint64, operation ControllerOp
 		call.ResolveReceiptInputs = ControllerResolveReceiptInputsRequest{Schema: controllerRequestSchema(operation), Query: ReceiptInputsQuery{Request: request, WorkspaceID: "workspace-1", DispatchDigest: testDigest("dispatch"), TerminalRevision: 0, TerminalSourceSequence: 1, TerminalGlobalSequence: 1, EventChainRoot: receipt.EventChainRoot, ResultFactsDigest: testDigest("result-facts")}}
 	case ControllerOperationAppendReceipt:
 		call.AppendReceipt = ControllerAppendReceiptRequest{Schema: controllerRequestSchema(operation), Append: ReceiptAppend{Receipt: receipt, Event: receiptEvent}}
+	case ControllerOperationResolveReceiptVerificationAuthority:
+		call.ResolveReceiptVerificationAuthority = ControllerResolveReceiptVerificationAuthorityRequest{Schema: controllerRequestSchema(operation), Query: controllerReceiptAuthorityQuery(request, receipt)}
 	case ControllerOperationPersistHandback:
 		call.PersistHandback = ControllerPersistHandbackRequest{Schema: controllerRequestSchema(operation), Record: validHandbackRecord(t)}
 	case ControllerOperationPersistQuarantine:
@@ -1262,6 +1307,8 @@ func controllerResultFixture(t *testing.T, sequence uint64, operation Controller
 		result.ResolveReceiptInputs = ControllerResolveReceiptInputsResult{Schema: controllerResultSchema(operation), Inputs: ReceiptInputs{Expansions: []contextreceipt.Expansion{}, Obligations: []contextreceipt.Obligation{}, Evidence: []contextreceipt.Evidence{}, ReviewInputs: []contextreceipt.ReviewInput{}, RunnerPrincipal: receipt.RunnerPrincipalResolution}}
 	case ControllerOperationAppendReceipt:
 		result.AppendReceipt = ControllerAppendReceiptResult{Schema: controllerResultSchema(operation), Ack: receiptAck}
+	case ControllerOperationResolveReceiptVerificationAuthority:
+		result.ResolveReceiptVerificationAuthority = ControllerResolveReceiptVerificationAuthorityResult{Schema: controllerResultSchema(operation), Authority: controllerReceiptAuthorityFacts(receipt.RunnerPrincipalResolution.Claim.TrustSource)}
 	case ControllerOperationPersistHandback:
 		record := mustCanonicalHandback(t, validHandbackRecord(t))
 		result.PersistHandback = ControllerPersistHandbackResult{Schema: controllerResultSchema(operation), Ack: mustCanonicalControlAck(t, validControlAckForHandback(record))}
@@ -1277,6 +1324,25 @@ func controllerResultFixture(t *testing.T, sequence uint64, operation Controller
 	}
 	_ = event
 	return result
+}
+
+func controllerReceiptAuthorityQuery(request ExecutionRequest, receipt contextreceipt.Receipt) contextreceipt.AuthorityQuery {
+	return contextreceipt.AuthorityQuery{
+		RequestDigest: testDigest("verify-request"), ReceiptDigest: receipt.Digest,
+		CandidateCommit: receipt.OutputCommit, CandidateTree: receipt.OutputTree,
+		ProfileRef:  contextreceipt.ProfileRef{Schema: request.Profile.Schema, ID: request.Profile.ID, Digest: request.Profile.Digest},
+		RunnerClaim: receipt.RunnerPrincipalResolution.Claim,
+	}
+}
+
+func controllerReceiptAuthorityFacts(trustSource string) contextreceipt.AuthorityFacts {
+	witness := gp.Witness{Code: "authority-unavailable", SourceID: "controller", Detail: "unavailable"}
+	return contextreceipt.AuthorityFacts{
+		Profile:     contextreceipt.ProfileAuthority{State: contextreceipt.StateUnproven, ProfileBytes: []byte{}, Witnesses: []gp.Witness{witness}},
+		TrustFact:   gp.TrustFact{SourceID: trustSource, SourceKind: gp.TrustSourceIdentityProvider, Subjects: []string{}, Available: false, Valid: false, Reason: "unavailable"},
+		Isolation:   contextreceipt.IsolationAuthority{State: contextreceipt.StateUnproven, Witnesses: []gp.Witness{witness}},
+		Persistence: contextreceipt.PersistenceAuthority{State: contextreceipt.StateUnproven, Witnesses: []gp.Witness{witness}},
+	}
 }
 
 func controllerEventFixture(t *testing.T, request ExecutionRequest) (contextevent.Event, contextevent.EventAck) {

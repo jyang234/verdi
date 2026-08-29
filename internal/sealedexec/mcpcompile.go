@@ -10,6 +10,7 @@ import (
 
 	"github.com/jyang234/verdi/internal/canonjson"
 	"github.com/jyang234/verdi/internal/contextcompile"
+	"github.com/jyang234/verdi/internal/contextreceipt"
 )
 
 const (
@@ -68,19 +69,10 @@ func (canonicalChildCompiler) CompileChild(ctx context.Context, request ChildCom
 	if err != nil {
 		return ChildManifest{}, operational("digest context child manifest", err)
 	}
-	expansionDigest, err := canonjson.Digest(struct {
-		Schema               string `json:"schema"`
-		RequestID            string `json:"request_id"`
-		ParentRevision       uint64 `json:"parent_revision"`
-		ParentManifestDigest string `json:"parent_manifest_digest"`
-		ChildRevision        uint64 `json:"child_revision"`
-		ChildManifestDigest  string `json:"child_manifest_digest"`
-		DataDigest           string `json:"data_digest"`
-	}{
-		Schema: contextExpansionSchema, RequestID: request.RequestID,
-		ParentRevision: request.Snapshot.Revision, ParentManifestDigest: request.Snapshot.ManifestDigest,
-		ChildRevision: childRevision, ChildManifestDigest: childDigest, DataDigest: dataDigest,
-	})
+	expansionDigest, err := contextExpansionDigest(contextreceipt.Expansion{
+		RequestID: request.RequestID, ParentRevision: request.Snapshot.Revision, ParentManifestDigest: request.Snapshot.ManifestDigest,
+		ChildRevision: childRevision, ChildManifestDigest: childDigest,
+	}, dataDigest)
 	if err != nil {
 		return ChildManifest{}, operational("digest context expansion", err)
 	}
@@ -103,6 +95,37 @@ func (canonicalChildCompiler) CompileChild(ctx context.Context, request ChildCom
 		ExpansionDigest:      expansionDigest,
 		ExpansionRoot:        expansionRoot,
 	}, nil
+}
+
+func contextExpansionDigest(expansion contextreceipt.Expansion, dataDigest string) (string, error) {
+	return canonjson.Digest(struct {
+		Schema               string `json:"schema"`
+		RequestID            string `json:"request_id"`
+		ParentRevision       uint64 `json:"parent_revision"`
+		ParentManifestDigest string `json:"parent_manifest_digest"`
+		ChildRevision        uint64 `json:"child_revision"`
+		ChildManifestDigest  string `json:"child_manifest_digest"`
+		DataDigest           string `json:"data_digest"`
+	}{
+		Schema: contextExpansionSchema, RequestID: expansion.RequestID,
+		ParentRevision: expansion.ParentRevision, ParentManifestDigest: expansion.ParentManifestDigest,
+		ChildRevision: expansion.ChildRevision, ChildManifestDigest: expansion.ChildManifestDigest, DataDigest: dataDigest,
+	})
+}
+
+// VerifyExpansionDataProof strict-decodes one canonical DataItem and
+// recomputes the existing I-84 expansion preimage without consulting state.
+func VerifyExpansionDataProof(data []byte, expansion contextreceipt.Expansion) (contextreceipt.ExpansionProofProjection, error) {
+	item, err := contextcompile.DecodeDataItem(data)
+	if err != nil {
+		return contextreceipt.ExpansionProofProjection{}, fmt.Errorf("sealedexec: decode expansion data proof: %w", err)
+	}
+	dataDigest := digestBytes(data)
+	expansionDigest, err := contextExpansionDigest(expansion, dataDigest)
+	if err != nil {
+		return contextreceipt.ExpansionProofProjection{}, fmt.Errorf("sealedexec: digest expansion data proof: %w", err)
+	}
+	return contextreceipt.ExpansionProofProjection{DataItemDigest: item.Digest, DataDigest: dataDigest, ExpansionDigest: expansionDigest}, nil
 }
 
 func validateChildCompileRequest(request ChildCompileRequest) error {
