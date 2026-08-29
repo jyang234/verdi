@@ -21,6 +21,7 @@ const (
 
 	MediaTypeJSON            = "application/json"
 	RedactionProfileStandard = "verdi.redaction/standard-v1"
+	InlineDetailCeiling      = 16384
 )
 
 // Detail is the strict already-redacted inline-or-segment union. Resolution,

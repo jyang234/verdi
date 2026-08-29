@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jyang234/verdi/internal/artifact"
 	"github.com/jyang234/verdi/internal/canonjson"
 	"github.com/jyang234/verdi/internal/countersign"
 	gp "github.com/jyang234/verdi/internal/governanceprincipal"
@@ -1020,19 +1021,27 @@ func principalWitnessLess(a, b gp.Witness) bool {
 }
 
 func decodeOne(raw []byte, target any) error {
-	decoder := json.NewDecoder(bytes.NewReader(raw))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(target); err != nil {
-		return err
+	return artifact.DecodeExactJSON(raw, target)
+}
+
+func decodeUniqueJSONValue(raw []byte) (any, error) {
+	var preserved json.RawMessage
+	if err := artifact.DecodeExactJSON(raw, &preserved); err != nil {
+		return nil, err
 	}
-	var trailing any
-	if err := decoder.Decode(&trailing); err != io.EOF {
+	decoder := json.NewDecoder(bytes.NewReader(preserved))
+	decoder.UseNumber()
+	var value any
+	if err := decoder.Decode(&value); err != nil {
+		return nil, err
+	}
+	if err := decoder.Decode(new(any)); err != io.EOF {
 		if err == nil {
-			return fmt.Errorf("trailing data")
+			return nil, fmt.Errorf("trailing data")
 		}
-		return fmt.Errorf("trailing data: %w", err)
+		return nil, err
 	}
-	return nil
+	return value, nil
 }
 
 func decodeCanonicalReader(reader io.Reader, target any) error {
