@@ -147,8 +147,8 @@ func receiptFixture(t *testing.T, role Role) Receipt {
 	t.Helper()
 	revisions := []contextevent.Revision{
 		{Schema: contextevent.RevisionSchemaID, ManifestRevision: 0, ManifestDigest: receiptDigestA, FirstGlobalSequence: 1, TerminalGlobalSequence: 4, TerminalSourceSequence: 4, TerminalKind: contextevent.KindChildManifest, EventRoot: receiptDigestA},
-		{Schema: contextevent.RevisionSchemaID, ManifestRevision: 1, ManifestDigest: receiptDigestB, FirstGlobalSequence: 5, TerminalGlobalSequence: 7, TerminalSourceSequence: 3, TerminalKind: contextevent.KindChildManifest, EventRoot: receiptDigestB},
-		{Schema: contextevent.RevisionSchemaID, ManifestRevision: 2, ManifestDigest: receiptDigestC, FirstGlobalSequence: 8, TerminalGlobalSequence: 12, TerminalSourceSequence: 5, TerminalKind: contextevent.KindExecutionResult, EventRoot: receiptDigestC},
+		{Schema: contextevent.RevisionSchemaID, ManifestRevision: 1, ManifestDigest: receiptDigestB, FirstGlobalSequence: 8, TerminalGlobalSequence: 12, TerminalSourceSequence: 3, TerminalKind: contextevent.KindChildManifest, EventRoot: receiptDigestB},
+		{Schema: contextevent.RevisionSchemaID, ManifestRevision: 2, ManifestDigest: receiptDigestC, FirstGlobalSequence: 15, TerminalGlobalSequence: 21, TerminalSourceSequence: 5, TerminalKind: contextevent.KindExecutionResult, EventRoot: receiptDigestC},
 	}
 	root, err := contextevent.EventChainRoot(revisions)
 	if err != nil {
@@ -177,7 +177,7 @@ func receiptFixture(t *testing.T, role Role) Receipt {
 		EventChainRoot:                  root,
 		TerminalManifestRevision:        2,
 		TerminalSourceSequence:          5,
-		TerminalGlobalSequence:          12,
+		TerminalGlobalSequence:          21,
 		Expansions: []Expansion{
 			{RequestID: "request-1", ParentRevision: 0, ParentManifestDigest: receiptDigestA, ChildRevision: 1, ChildManifestDigest: receiptDigestB, ExpansionDigest: receiptDigestA},
 			{RequestID: "request-2", ParentRevision: 1, ParentManifestDigest: receiptDigestB, ChildRevision: 2, ChildManifestDigest: receiptDigestC, ExpansionDigest: receiptDigestB},

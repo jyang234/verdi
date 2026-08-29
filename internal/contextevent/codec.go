@@ -313,8 +313,8 @@ func validateRevisions(revisions []Revision) error {
 		if revision.ManifestRevision != prior.ManifestRevision+1 {
 			return fmt.Errorf("contextevent: revision array is not contiguous")
 		}
-		if revision.FirstGlobalSequence != prior.TerminalGlobalSequence+1 {
-			return fmt.Errorf("contextevent: revision global sequence bridge is not contiguous")
+		if revision.FirstGlobalSequence <= prior.TerminalGlobalSequence {
+			return fmt.Errorf("contextevent: revision global sequence bridge does not strictly increase")
 		}
 	}
 	return nil

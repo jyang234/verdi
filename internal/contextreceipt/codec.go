@@ -238,10 +238,11 @@ func validateVerifyRequest(request VerifyRequest, requireDigest bool) error {
 		}
 	}
 	for field, value := range map[string][][]byte{
-		"execution_event_bytes": proofs.ExecutionEventBytes,
-		"expansion_data_bytes":  proofs.ExpansionDataBytes,
-		"obligation_bytes":      proofs.ObligationBytes,
-		"evidence_result_bytes": proofs.EvidenceResultBytes,
+		"execution_event_bytes":     proofs.ExecutionEventBytes,
+		"execution_event_ack_bytes": proofs.ExecutionEventAckBytes,
+		"expansion_data_bytes":      proofs.ExpansionDataBytes,
+		"obligation_bytes":          proofs.ObligationBytes,
+		"evidence_result_bytes":     proofs.EvidenceResultBytes,
 	} {
 		if value == nil {
 			return fmt.Errorf("contextreceipt: verify request proofs.%s must be non-null", field)
@@ -254,6 +255,9 @@ func validateVerifyRequest(request VerifyRequest, requireDigest bool) error {
 	}
 	if len(proofs.ExecutionEventBytes) == 0 {
 		return fmt.Errorf("contextreceipt: verify request proofs.execution_event_bytes must be nonempty")
+	}
+	if len(proofs.ExecutionEventAckBytes) != len(proofs.ExecutionEventBytes) {
+		return fmt.Errorf("contextreceipt: verify request proofs.execution_event_ack_bytes must parallel execution_event_bytes")
 	}
 	if proofs.ReviewPacketBytes == nil {
 		return fmt.Errorf("contextreceipt: verify request proofs.review_packet_bytes must be non-null")
@@ -550,6 +554,7 @@ func cloneVerifyRequest(request VerifyRequest) VerifyRequest {
 	request.Proofs.ExecutionRequestBytes = append([]byte{}, request.Proofs.ExecutionRequestBytes...)
 	request.Proofs.RepositoryProofBytes = append([]byte{}, request.Proofs.RepositoryProofBytes...)
 	request.Proofs.ExecutionEventBytes = cloneByteDocuments(request.Proofs.ExecutionEventBytes)
+	request.Proofs.ExecutionEventAckBytes = cloneByteDocuments(request.Proofs.ExecutionEventAckBytes)
 	request.Proofs.ReceiptEventBytes = append([]byte{}, request.Proofs.ReceiptEventBytes...)
 	request.Proofs.ExpansionDataBytes = cloneByteDocuments(request.Proofs.ExpansionDataBytes)
 	request.Proofs.ObligationBytes = cloneByteDocuments(request.Proofs.ObligationBytes)

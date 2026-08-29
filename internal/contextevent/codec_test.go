@@ -76,6 +76,17 @@ func TestContextEventEnvelopeContract_Static(t *testing.T) {
 	if !strings.HasPrefix(root, "sha256:") {
 		t.Fatalf("EventChainRoot() = %q, want canonical digest", root)
 	}
+	interleaved := append([]Revision(nil), revisions...)
+	interleaved[1].FirstGlobalSequence = 23
+	interleaved[1].TerminalGlobalSequence = 24
+	if _, err := EventChainRoot(interleaved); err != nil {
+		t.Fatalf("EventChainRoot(cross-flight interleaving gap) error = %v", err)
+	}
+	overlapped := append([]Revision(nil), revisions...)
+	overlapped[1].FirstGlobalSequence = revisions[0].TerminalGlobalSequence
+	if _, err := EventChainRoot(overlapped); err == nil {
+		t.Fatal("EventChainRoot(overlapping cross-revision global sequence) error = nil")
+	}
 	if _, err := EventChainRoot([]Revision{revisions[0]}); err == nil {
 		t.Fatal("EventChainRoot(non-final child-manifest) error = nil")
 	}

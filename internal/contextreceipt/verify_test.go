@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/sha1"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"reflect"
 	"sort"
@@ -55,12 +56,50 @@ func TestContextReceiptVerifyContract_Static(t *testing.T) {
 	if !bytes.Equal(encoded, reencoded) {
 		t.Fatalf("verify request round trip changed bytes\nfirst: %s\nagain: %s", encoded, reencoded)
 	}
+	if decoded.Proofs.ExecutionEventAckBytes == nil || len(decoded.Proofs.ExecutionEventAckBytes) != len(decoded.Proofs.ExecutionEventBytes) {
+		t.Fatalf("execution acknowledgment proofs = %#v, want non-null parallel array", decoded.Proofs.ExecutionEventAckBytes)
+	}
+	for i, raw := range decoded.Proofs.ExecutionEventAckBytes {
+		if _, err := contextevent.DecodeEventAck(bytes.NewReader(raw)); err != nil {
+			t.Fatalf("execution acknowledgment proof[%d] is not an exact canonical EventAck: %v", i, err)
+		}
+	}
+
+	invalidShapes := []struct {
+		name   string
+		mutate func(*VerifyRequest)
+	}{
+		{name: "nil event acknowledgments", mutate: func(r *VerifyRequest) { r.Proofs.ExecutionEventAckBytes = nil }},
+		{name: "short event acknowledgments", mutate: func(r *VerifyRequest) { r.Proofs.ExecutionEventAckBytes = [][]byte{} }},
+		{name: "empty event acknowledgment", mutate: func(r *VerifyRequest) { r.Proofs.ExecutionEventAckBytes[0] = []byte{} }},
+	}
+	for _, tt := range invalidShapes {
+		t.Run(tt.name, func(t *testing.T) {
+			invalid := verifyRequestCodecFixture(t)
+			tt.mutate(&invalid)
+			if _, err := EncodeVerifyRequest(invalid); err == nil {
+				t.Fatal("EncodeVerifyRequest(invalid acknowledgment shape) error = nil")
+			}
+		})
+	}
+	ackArray, err := json.Marshal(decoded.Proofs.ExecutionEventAckBytes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ackField := append([]byte(`"execution_event_ack_bytes":`), ackArray...)
+	nullAcknowledgments := bytes.Replace(encoded, ackField, []byte(`"execution_event_ack_bytes":null`), 1)
+	missingAcknowledgments := bytes.Replace(encoded, append([]byte(","), ackField...), nil, 1)
+	if bytes.Equal(nullAcknowledgments, encoded) || bytes.Equal(missingAcknowledgments, encoded) {
+		t.Fatal("failed to construct exact acknowledgment-field mutations")
+	}
 
 	for name, mutated := range map[string][]byte{
-		"unknown field":        bytes.Replace(encoded, []byte(`"schema":`), []byte(`"unknown":true,"schema":`), 1),
-		"duplicate field":      bytes.Replace(encoded, []byte(`"schema":`), []byte(`"schema":"verdi.context-receipt-verify-request/v1","schema":`), 1),
-		"null event documents": bytes.Replace(encoded, []byte(`"execution_event_bytes":["e30K"]`), []byte(`"execution_event_bytes":null`), 1),
-		"trailing data":        append(append([]byte(nil), encoded...), []byte("{}")...),
+		"unknown field":              bytes.Replace(encoded, []byte(`"schema":`), []byte(`"unknown":true,"schema":`), 1),
+		"duplicate field":            bytes.Replace(encoded, []byte(`"schema":`), []byte(`"schema":"verdi.context-receipt-verify-request/v1","schema":`), 1),
+		"null event documents":       bytes.Replace(encoded, []byte(`"execution_event_bytes":["e30K"]`), []byte(`"execution_event_bytes":null`), 1),
+		"null event acknowledgments": nullAcknowledgments,
+		"missing acknowledgments":    missingAcknowledgments,
+		"trailing data":              append(append([]byte(nil), encoded...), []byte("{}")...),
 	} {
 		t.Run(name, func(t *testing.T) {
 			if _, err := DecodeVerifyRequest(bytes.NewReader(mutated)); err == nil {
@@ -119,6 +158,112 @@ func TestContextReceiptVerifyContract_Behavioral(t *testing.T) {
 		if operand.State != StateProven || operand.ExpectedDigest != operand.ObservedDigest || len(operand.Witnesses) != 0 {
 			t.Fatalf("builder %s operand = %#v, want exact empty-arm proof", kind, operand)
 		}
+	}
+
+	for _, tt := range []struct {
+		name   string
+		mutate func(*contextevent.EventAck)
+	}{
+		{name: "first revision endpoint", mutate: func(ack *contextevent.EventAck) { ack.GlobalSequence++ }},
+		{name: "terminal revision endpoint", mutate: func(ack *contextevent.EventAck) { ack.GlobalSequence-- }},
+		{name: "global order", mutate: func(ack *contextevent.EventAck) { ack.GlobalSequence = 11 }},
+	} {
+		t.Run(tt.name+" contradiction is a verdict", func(t *testing.T) {
+			contradictory := request
+			ackIndex := 0
+			if tt.name != "first revision endpoint" {
+				ackIndex = len(contradictory.Proofs.ExecutionEventAckBytes) - 1
+			}
+			ack, err := contextevent.DecodeEventAck(bytes.NewReader(contradictory.Proofs.ExecutionEventAckBytes[ackIndex]))
+			if err != nil {
+				t.Fatal(err)
+			}
+			tt.mutate(&ack)
+			contradictory.Proofs.ExecutionEventAckBytes = cloneByteDocuments(contradictory.Proofs.ExecutionEventAckBytes)
+			contradictory.Proofs.ExecutionEventAckBytes[ackIndex], err = contextevent.EncodeEventAck(ack)
+			if err != nil {
+				t.Fatal(err)
+			}
+			contradictory.Digest = ""
+			verdict, err := authoritative.Verify(context.Background(), contradictory)
+			if err != nil {
+				t.Fatalf("Verify(valid contradictory acknowledgments) operational error = %v", err)
+			}
+			for _, kind := range []OperandKind{"events", "event-chain"} {
+				operand := verdict.Operands[operandKindIndex(kind)]
+				if operand.State != StateViolated {
+					t.Fatalf("%s operand = %#v, want acknowledgment contradiction witness", kind, operand)
+				}
+				if kind == "event-chain" && operand.ExpectedDigest == operand.ObservedDigest {
+					t.Fatalf("event-chain operand = %#v, want independently observed acknowledgment endpoints", operand)
+				}
+			}
+		})
+	}
+
+	t.Run("receipt acknowledgment follows observed execution terminal", func(t *testing.T) {
+		contradictory := request
+		contradictory.Proofs.ExecutionEventAckBytes = cloneByteDocuments(contradictory.Proofs.ExecutionEventAckBytes)
+		last := len(contradictory.Proofs.ExecutionEventAckBytes) - 1
+		ack, err := contextevent.DecodeEventAck(bytes.NewReader(contradictory.Proofs.ExecutionEventAckBytes[last]))
+		if err != nil {
+			t.Fatal(err)
+		}
+		ack.GlobalSequence = contradictory.ReceiptEventAck.GlobalSequence
+		contradictory.Proofs.ExecutionEventAckBytes[last], err = contextevent.EncodeEventAck(ack)
+		if err != nil {
+			t.Fatal(err)
+		}
+		contradictory.Digest = ""
+		verdict, err := authoritative.Verify(context.Background(), contradictory)
+		if err != nil {
+			t.Fatalf("Verify(receipt acknowledgment at observed execution terminal) error = %v", err)
+		}
+		if operand := verdict.Operands[operandKindIndex("receipt-ack")]; operand.State != StateViolated {
+			t.Fatalf("receipt-ack operand = %#v, want strict post-execution order violation", operand)
+		}
+	})
+
+	t.Run("malformed event acknowledgment is operational", func(t *testing.T) {
+		invalid := request
+		invalid.Proofs.ExecutionEventAckBytes = cloneByteDocuments(invalid.Proofs.ExecutionEventAckBytes)
+		invalid.Proofs.ExecutionEventAckBytes[0] = []byte("{}\n")
+		invalid.Digest = ""
+		if verdict, err := authoritative.Verify(context.Background(), invalid); err == nil {
+			t.Fatalf("Verify(malformed acknowledgment) returned verdict %#v, want operational error", verdict)
+		}
+	})
+
+	for _, tt := range []struct {
+		name   string
+		mutate func(*contextevent.EventAck)
+	}{
+		{name: "flight", mutate: func(ack *contextevent.EventAck) { ack.Flight += "-other" }},
+		{name: "lane", mutate: func(ack *contextevent.EventAck) { ack.Lane += "-other" }},
+		{name: "epoch", mutate: func(ack *contextevent.EventAck) { ack.Epoch += "-other" }},
+		{name: "session", mutate: func(ack *contextevent.EventAck) { ack.Session += "-other" }},
+		{name: "manifest revision", mutate: func(ack *contextevent.EventAck) { ack.ManifestRevision++ }},
+		{name: "kind", mutate: func(ack *contextevent.EventAck) { ack.Kind = contextevent.KindWrite }},
+		{name: "source sequence", mutate: func(ack *contextevent.EventAck) { ack.SourceSequence++ }},
+		{name: "event digest", mutate: func(ack *contextevent.EventAck) { ack.EventDigest = receiptDigestA }},
+	} {
+		t.Run("mispaired "+tt.name+" is operational", func(t *testing.T) {
+			invalid := request
+			invalid.Proofs.ExecutionEventAckBytes = cloneByteDocuments(invalid.Proofs.ExecutionEventAckBytes)
+			ack, err := contextevent.DecodeEventAck(bytes.NewReader(invalid.Proofs.ExecutionEventAckBytes[0]))
+			if err != nil {
+				t.Fatal(err)
+			}
+			tt.mutate(&ack)
+			invalid.Proofs.ExecutionEventAckBytes[0], err = contextevent.EncodeEventAck(ack)
+			if err != nil {
+				t.Fatal(err)
+			}
+			invalid.Digest = ""
+			if verdict, err := authoritative.Verify(context.Background(), invalid); err == nil {
+				t.Fatalf("Verify(mispaired %s acknowledgment) returned verdict %#v, want operational error", tt.name, verdict)
+			}
+		})
 	}
 
 	reviewerRequest := reviewerVerifierRequestFixture(t, request)
@@ -219,6 +364,84 @@ func TestContextReceiptVerifyContract_Behavioral(t *testing.T) {
 	}
 }
 
+func TestVerifierBuilderFreshnessProjection(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name      string
+		candidate Candidate
+		want      string
+	}{
+		{
+			name: "candidate one",
+			candidate: Candidate{
+				BaseCommit: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+				BaseTree:   "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+				HeadCommit: "cccccccccccccccccccccccccccccccccccccccc",
+				HeadTree:   "dddddddddddddddddddddddddddddddddddddddd",
+			},
+			want: "sha256:7d1cfa95a2bda603281d2f03c382c2ae1c9c131075d5127c679a15335a2a9aa2",
+		},
+		{
+			name: "candidate two",
+			candidate: Candidate{
+				BaseCommit: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+				BaseTree:   "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+				HeadCommit: "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+				HeadTree:   "dddddddddddddddddddddddddddddddddddddddd",
+			},
+			want: "sha256:562854b899c548cfc28e272177735ecf3e71fd338a61540a228aa72a0e77c836",
+		},
+	}
+
+	digests := make([]string, 0, len(tests))
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			projection, err := (&Verifier{}).reviewProjection(VerifyRequest{
+				Receipt:   Receipt{Role: RoleBuilder},
+				Candidate: tt.candidate,
+			})
+			if err != nil {
+				t.Fatalf("reviewProjection() error = %v", err)
+			}
+			digests = append(digests, projection.Freshness.ExpectedDigest)
+			if got := projection.Freshness.ExpectedDigest; got != tt.want {
+				t.Fatalf("builder freshness expected digest = %q, want independent literal %q", got, tt.want)
+			}
+			if got := projection.Freshness.ObservedDigest; got != tt.want {
+				t.Fatalf("builder freshness observed digest = %q, want independent literal %q", got, tt.want)
+			}
+		})
+	}
+	if digests[0] == digests[1] {
+		t.Fatalf("builder freshness digests are candidate-insensitive: %q", digests[0])
+	}
+}
+
+func TestVerifierAcceptsNonAdjacentReceiptAckGlobalSequence(t *testing.T) {
+	t.Parallel()
+
+	request, execution, authority := validVerifierRequestFixture(t)
+	request.ReceiptEventAck.GlobalSequence = request.Receipt.TerminalGlobalSequence + 7
+	request.Digest = ""
+	ackDigest, err := canonjson.Digest(request.ReceiptEventAck)
+	if err != nil {
+		t.Fatalf("digest receipt acknowledgment: %v", err)
+	}
+	authority.Persistence.ReceiptAckDigest = ackDigest
+
+	verdict, err := NewVerifierWithExecutionProof(staticAuthorityResolver{facts: authority}, staticExecutionProof{projection: execution}).Verify(context.Background(), request)
+	if err != nil {
+		t.Fatalf("Verify(receipt acknowledgment with interleaved global sequence) error = %v", err)
+	}
+	if operand := verdict.Operands[operandKindIndex("receipt-ack")]; operand.State != StateProven || operand.ExpectedDigest != operand.ObservedDigest {
+		t.Fatalf("receipt-ack operand = %#v, want carried later global sequence proven", operand)
+	}
+	if verdict.State != StateProven {
+		t.Fatalf("verdict state = %q, want %q", verdict.State, StateProven)
+	}
+}
+
 type staticExecutionProof struct{ projection ExecutionProjection }
 
 func (f staticExecutionProof) DecodeExecutionProof([]byte) (ExecutionProjection, error) {
@@ -301,14 +524,40 @@ func validVerifierRequestFixture(t *testing.T) (VerifyRequest, ExecutionProjecti
 	if err != nil {
 		t.Fatal(err)
 	}
-	executionEvent := contextevent.Event{
+	promptSchema, err := contextevent.PayloadSchema(contextevent.KindPrompt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	promptDetail := contextevent.Detail{
+		Mode: contextevent.DetailInline, MediaType: contextevent.MediaTypeJSON,
+		Digest: digestRawNoFrame([]byte(`{"prompt":"redacted"}`)), RedactionProfile: contextevent.RedactionProfileStandard,
+		RedactedJSON: []byte(`{"prompt":"redacted"}`),
+	}
+	promptEvent := contextevent.Event{
 		Schema: contextevent.EventSchemaID, SourceSequence: 1, Flight: "flight-1", Lane: "builder", Epoch: "epoch-1",
+		ManifestRevision: 0, ManifestDigest: receipt.ManifestDigest, Session: "session-1", ATCRunway: receipt.ATCRunway,
+		ExecutionWorkspaceID: receipt.ExecutionWorkspaceID, CandidateCommit: commitOID, CandidateTree: treeOID,
+		Adapter: receipt.Adapter, AdapterVersion: receipt.AdapterVersion, OccurredAt: "2026-08-28T12:34:55Z",
+		Kind: contextevent.KindPrompt, PayloadSchema: promptSchema,
+		Payload: &contextevent.PromptPayload{Schema: promptSchema, PromptDigest: receiptDigestA, Detail: promptDetail},
+	}
+	promptEventBytes, err := contextevent.EncodeEvent(promptEvent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	promptEvent, err = contextevent.DecodeEvent(bytes.NewReader(promptEventBytes))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	executionEvent := contextevent.Event{
+		Schema: contextevent.EventSchemaID, SourceSequence: 2, Flight: "flight-1", Lane: "builder", Epoch: "epoch-1",
 		ManifestRevision: 0, ManifestDigest: receipt.ManifestDigest, Session: "session-1", ATCRunway: receipt.ATCRunway,
 		ExecutionWorkspaceID: receipt.ExecutionWorkspaceID, CandidateCommit: commitOID, CandidateTree: treeOID,
 		Adapter: receipt.Adapter, AdapterVersion: receipt.AdapterVersion, OccurredAt: "2026-08-28T12:34:56Z",
 		Kind: contextevent.KindExecutionResult, PayloadSchema: schema,
 		Payload:          &contextevent.ExecutionResultPayload{Schema: schema, Authority: contextevent.AuthorityAuthoritative, InputCommit: commitOID, OutputCommit: commitOID, OutputTree: treeOID, Clean: true, ManifestDigest: receipt.ManifestDigest, ResultFactsDigest: receiptDigestB},
-		PriorEventDigest: "",
+		PriorEventDigest: promptEvent.EventDigest,
 	}
 	executionEventBytes, err := contextevent.EncodeEvent(executionEvent)
 	if err != nil {
@@ -318,12 +567,12 @@ func validVerifierRequestFixture(t *testing.T) (VerifyRequest, ExecutionProjecti
 	if err != nil {
 		t.Fatal(err)
 	}
-	receipt.RevisionSegments = []contextevent.Revision{{Schema: contextevent.RevisionSchemaID, ManifestRevision: 0, ManifestDigest: receipt.ManifestDigest, FirstGlobalSequence: 1, TerminalGlobalSequence: 1, TerminalSourceSequence: 1, TerminalKind: contextevent.KindExecutionResult, EventRoot: executionEvent.EventDigest}}
+	receipt.RevisionSegments = []contextevent.Revision{{Schema: contextevent.RevisionSchemaID, ManifestRevision: 0, ManifestDigest: receipt.ManifestDigest, FirstGlobalSequence: 11, TerminalGlobalSequence: 19, TerminalSourceSequence: 2, TerminalKind: contextevent.KindExecutionResult, EventRoot: executionEvent.EventDigest}}
 	receipt.EventChainRoot, err = contextevent.EventChainRoot(receipt.RevisionSegments)
 	if err != nil {
 		t.Fatal(err)
 	}
-	receipt.TerminalManifestRevision, receipt.TerminalSourceSequence, receipt.TerminalGlobalSequence = 0, 1, 1
+	receipt.TerminalManifestRevision, receipt.TerminalSourceSequence, receipt.TerminalGlobalSequence = 0, 2, 19
 	receiptBytes, err := EncodeReceipt(receipt)
 	if err != nil {
 		t.Fatal(err)
@@ -347,9 +596,11 @@ func validVerifierRequestFixture(t *testing.T) (VerifyRequest, ExecutionProjecti
 	if err != nil {
 		t.Fatal(err)
 	}
+	promptAckBytes := executionEventAckBytes(t, promptEvent, 11)
+	resultAckBytes := executionEventAckBytes(t, executionEvent, 19)
 	requestBytes, err := EncodeVerifyRequest(VerifyRequest{
 		Schema: VerifyRequestSchemaID, Receipt: receipt, ReceiptEventAck: ack, Candidate: candidate,
-		Proofs: ProofBundle{ExecutionRequestBytes: executionBytes, RepositoryProofBytes: repositoryBytes, ExecutionEventBytes: [][]byte{executionEventBytes}, ReceiptEventBytes: receiptEventBytes, ExpansionDataBytes: [][]byte{}, ObligationBytes: [][]byte{}, EvidenceResultBytes: [][]byte{}, ReviewPacketBytes: []byte{}},
+		Proofs: ProofBundle{ExecutionRequestBytes: executionBytes, RepositoryProofBytes: repositoryBytes, ExecutionEventBytes: [][]byte{promptEventBytes, executionEventBytes}, ExecutionEventAckBytes: [][]byte{promptAckBytes, resultAckBytes}, ReceiptEventBytes: receiptEventBytes, ExpansionDataBytes: [][]byte{}, ObligationBytes: [][]byte{}, EvidenceResultBytes: [][]byte{}, ReviewPacketBytes: []byte{}},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -380,6 +631,19 @@ func verifierGitOID(kind string, content []byte) string {
 	preimage := append([]byte(kind+" "+strconv.Itoa(len(content))+"\x00"), content...)
 	sum := sha1.Sum(preimage)
 	return hex.EncodeToString(sum[:])
+}
+
+func executionEventAckBytes(t *testing.T, event contextevent.Event, globalSequence uint64) []byte {
+	t.Helper()
+	encoded, err := contextevent.EncodeEventAck(contextevent.EventAck{
+		Schema: contextevent.AckSchemaID, Flight: event.Flight, Lane: event.Lane, Epoch: event.Epoch,
+		Session: event.Session, ManifestRevision: event.ManifestRevision, Kind: event.Kind,
+		SourceSequence: event.SourceSequence, EventDigest: event.EventDigest, GlobalSequence: globalSequence,
+	})
+	if err != nil {
+		t.Fatalf("EncodeEventAck fixture: %v", err)
+	}
+	return encoded
 }
 
 func reviewerVerifierRequestFixture(t *testing.T, request VerifyRequest) VerifyRequest {
@@ -425,6 +689,13 @@ func verifyRequestCodecFixture(t *testing.T) VerifyRequest {
 		t.Fatal(err)
 	}
 	_, ack := receiptCompletionFixture(t, receipt, receiptBytes)
+	eventAckBytes, err := contextevent.EncodeEventAck(contextevent.EventAck{
+		Schema: contextevent.AckSchemaID, Flight: "flight-1", Lane: "builder", Epoch: "epoch-1", Session: "session-1",
+		ManifestRevision: 0, Kind: contextevent.KindExecutionResult, SourceSequence: 1, EventDigest: receiptDigestA, GlobalSequence: 1,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
 	return VerifyRequest{
 		Schema:          VerifyRequestSchemaID,
 		Receipt:         receipt,
@@ -432,7 +703,7 @@ func verifyRequestCodecFixture(t *testing.T) VerifyRequest {
 		Candidate:       Candidate{BaseCommit: receipt.InputCommit, BaseTree: receipt.InputTree, HeadCommit: receipt.OutputCommit, HeadTree: receipt.OutputTree},
 		Proofs: ProofBundle{
 			ExecutionRequestBytes: []byte("{}\n"), RepositoryProofBytes: []byte("{}\n"),
-			ExecutionEventBytes: [][]byte{[]byte("{}\n")}, ReceiptEventBytes: []byte("{}\n"),
+			ExecutionEventBytes: [][]byte{[]byte("{}\n")}, ExecutionEventAckBytes: [][]byte{eventAckBytes}, ReceiptEventBytes: []byte("{}\n"),
 			ExpansionDataBytes: [][]byte{}, ObligationBytes: [][]byte{},
 			EvidenceResultBytes: [][]byte{}, ReviewPacketBytes: []byte{},
 		},

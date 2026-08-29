@@ -124,14 +124,15 @@ type Candidate struct {
 
 // ProofBundle carries every exact content proof consumed offline.
 type ProofBundle struct {
-	ExecutionRequestBytes []byte   `json:"execution_request_bytes"`
-	RepositoryProofBytes  []byte   `json:"repository_proof_bytes"`
-	ExecutionEventBytes   [][]byte `json:"execution_event_bytes"`
-	ReceiptEventBytes     []byte   `json:"receipt_event_bytes"`
-	ExpansionDataBytes    [][]byte `json:"expansion_data_bytes"`
-	ObligationBytes       [][]byte `json:"obligation_bytes"`
-	EvidenceResultBytes   [][]byte `json:"evidence_result_bytes"`
-	ReviewPacketBytes     []byte   `json:"review_packet_bytes"`
+	ExecutionRequestBytes  []byte   `json:"execution_request_bytes"`
+	RepositoryProofBytes   []byte   `json:"repository_proof_bytes"`
+	ExecutionEventBytes    [][]byte `json:"execution_event_bytes"`
+	ExecutionEventAckBytes [][]byte `json:"execution_event_ack_bytes"`
+	ReceiptEventBytes      []byte   `json:"receipt_event_bytes"`
+	ExpansionDataBytes     [][]byte `json:"expansion_data_bytes"`
+	ObligationBytes        [][]byte `json:"obligation_bytes"`
+	EvidenceResultBytes    [][]byte `json:"evidence_result_bytes"`
+	ReviewPacketBytes      []byte   `json:"review_packet_bytes"`
 }
 
 // VerifyRequest is the self-digested public offline-verification request.

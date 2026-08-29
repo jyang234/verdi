@@ -127,6 +127,88 @@ func TestContextReceiptVerifyCLI_BuiltBinary(t *testing.T) {
 		}
 	})
 
+	t.Run("malformed and mispaired execution acknowledgments are operational", func(t *testing.T) {
+		for _, tt := range []struct {
+			name   string
+			mutate func(*contextreceipt.VerifyRequest)
+		}{
+			{name: "malformed", mutate: func(request *contextreceipt.VerifyRequest) {
+				request.Proofs.ExecutionEventAckBytes[0] = []byte("{}\n")
+			}},
+			{name: "mispaired", mutate: func(request *contextreceipt.VerifyRequest) {
+				ack, err := contextevent.DecodeEventAck(bytes.NewReader(request.Proofs.ExecutionEventAckBytes[0]))
+				if err != nil {
+					t.Fatal(err)
+				}
+				ack.EventDigest = receiptTestDigest("mispaired-event")
+				request.Proofs.ExecutionEventAckBytes[0], err = contextevent.EncodeEventAck(ack)
+				if err != nil {
+					t.Fatal(err)
+				}
+			}},
+		} {
+			t.Run(tt.name, func(t *testing.T) {
+				request := fixture.request
+				request.Proofs.ExecutionEventAckBytes = cloneReceiptProofDocuments(request.Proofs.ExecutionEventAckBytes)
+				tt.mutate(&request)
+				request.Digest = ""
+				requestBytes, err := contextreceipt.EncodeVerifyRequest(request)
+				if err != nil {
+					t.Fatal(err)
+				}
+				result := runReceiptBinary(t, binary, t.TempDir(), requestBytes, nil, "context", "receipt", "verify", "--request", "-")
+				if result.exitCode != 2 || result.stdout != "" || !strings.HasPrefix(result.stderr, "context receipt:") {
+					t.Fatalf("%s acknowledgment result = %#v, want operational exit", tt.name, result)
+				}
+			})
+		}
+	})
+
+	t.Run("execution acknowledgment order and endpoints are violated verdicts", func(t *testing.T) {
+		for _, tt := range []struct {
+			name     string
+			ackIndex int
+			global   uint64
+		}{
+			{name: "first endpoint", ackIndex: 0, global: 12},
+			{name: "terminal endpoint", ackIndex: 1, global: 18},
+			{name: "global order", ackIndex: 1, global: 11},
+		} {
+			t.Run(tt.name, func(t *testing.T) {
+				request := fixture.request
+				request.Proofs.ExecutionEventAckBytes = cloneReceiptProofDocuments(request.Proofs.ExecutionEventAckBytes)
+				ack, err := contextevent.DecodeEventAck(bytes.NewReader(request.Proofs.ExecutionEventAckBytes[tt.ackIndex]))
+				if err != nil {
+					t.Fatal(err)
+				}
+				ack.GlobalSequence = tt.global
+				request.Proofs.ExecutionEventAckBytes[tt.ackIndex], err = contextevent.EncodeEventAck(ack)
+				if err != nil {
+					t.Fatal(err)
+				}
+				request.Digest = ""
+				requestBytes, err := contextreceipt.EncodeVerifyRequest(request)
+				if err != nil {
+					t.Fatal(err)
+				}
+				result := runReceiptBinary(t, binary, t.TempDir(), requestBytes, nil, "context", "receipt", "verify", "--request", "-")
+				verdict, decodeErr := contextreceipt.DecodeVerdict(strings.NewReader(result.stdout))
+				if result.exitCode != 1 || result.stderr != "" || decodeErr != nil || verdict.State != contextreceipt.StateViolated {
+					t.Fatalf("%s result = %#v, verdict=%#v/%v", tt.name, result, verdict, decodeErr)
+				}
+				for _, kind := range []contextreceipt.OperandKind{"events", "event-chain"} {
+					operand := receiptVerdictOperand(t, verdict, kind)
+					if operand.State != contextreceipt.StateViolated {
+						t.Fatalf("%s operand = %#v, want independent acknowledgment contradiction", kind, operand)
+					}
+					if kind == "event-chain" && operand.ExpectedDigest == operand.ObservedDigest {
+						t.Fatalf("event-chain operand = %#v, want independently observed acknowledgment endpoints", operand)
+					}
+				}
+			})
+		}
+	})
+
 	t.Run("exact controller proof makes every operand proven", func(t *testing.T) {
 		result, call := runReceiptWithControllerReply(t, binary, fixture.requestBytes, func(call sealedexec.ControllerCall) []byte {
 			return receiptAuthorityResultBytes(t, call, fixture.authority)
@@ -269,13 +351,37 @@ func newReceiptCLIFixture(t *testing.T) receiptCLIFixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	executionEvent := contextevent.Event{
+	promptSchema, err := contextevent.PayloadSchema(contextevent.KindPrompt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	promptDetailBytes := []byte(`{"prompt":"redacted"}`)
+	promptEvent := contextevent.Event{
 		Schema: contextevent.EventSchemaID, SourceSequence: 1, Flight: execution.Flight, Lane: execution.Lane, Epoch: execution.Epoch,
+		ManifestRevision: 0, ManifestDigest: execution.ManifestDigest, Session: execution.Session, ATCRunway: execution.ATCRunway,
+		ExecutionWorkspaceID: workspaceID, CandidateCommit: commitOID, CandidateTree: treeOID, Adapter: execution.Adapter, AdapterVersion: execution.AdapterVersion,
+		OccurredAt: "2026-08-28T12:34:55Z", Kind: contextevent.KindPrompt, PayloadSchema: promptSchema,
+		Payload: &contextevent.PromptPayload{Schema: promptSchema, PromptDigest: receiptTestDigest("prompt"), Detail: contextevent.Detail{
+			Mode: contextevent.DetailInline, MediaType: contextevent.MediaTypeJSON, Digest: receiptRawDigest(promptDetailBytes),
+			RedactionProfile: contextevent.RedactionProfileStandard, RedactedJSON: promptDetailBytes,
+		}},
+	}
+	promptEventBytes, err := contextevent.EncodeEvent(promptEvent)
+	if err != nil {
+		t.Fatalf("EncodeEvent prompt: %v", err)
+	}
+	promptEvent, err = contextevent.DecodeEvent(bytes.NewReader(promptEventBytes))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	executionEvent := contextevent.Event{
+		Schema: contextevent.EventSchemaID, SourceSequence: 2, Flight: execution.Flight, Lane: execution.Lane, Epoch: execution.Epoch,
 		ManifestRevision: 0, ManifestDigest: execution.ManifestDigest, Session: execution.Session, ATCRunway: execution.ATCRunway,
 		ExecutionWorkspaceID: workspaceID, CandidateCommit: commitOID, CandidateTree: treeOID, Adapter: execution.Adapter, AdapterVersion: execution.AdapterVersion,
 		OccurredAt: "2026-08-28T12:34:56Z", Kind: contextevent.KindExecutionResult, PayloadSchema: resultSchema,
 		Payload:          &contextevent.ExecutionResultPayload{Schema: resultSchema, Authority: contextevent.AuthorityAuthoritative, InputCommit: commitOID, OutputCommit: commitOID, OutputTree: treeOID, Clean: true, ManifestDigest: execution.ManifestDigest, ResultFactsDigest: receiptTestDigest("result-facts")},
-		PriorEventDigest: "",
+		PriorEventDigest: promptEvent.EventDigest,
 	}
 	executionEventBytes, err := contextevent.EncodeEvent(executionEvent)
 	if err != nil {
@@ -285,7 +391,7 @@ func newReceiptCLIFixture(t *testing.T) receiptCLIFixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	revisions := []contextevent.Revision{{Schema: contextevent.RevisionSchemaID, ManifestRevision: 0, ManifestDigest: execution.ManifestDigest, FirstGlobalSequence: 1, TerminalGlobalSequence: 1, TerminalSourceSequence: 1, TerminalKind: contextevent.KindExecutionResult, EventRoot: executionEvent.EventDigest}}
+	revisions := []contextevent.Revision{{Schema: contextevent.RevisionSchemaID, ManifestRevision: 0, ManifestDigest: execution.ManifestDigest, FirstGlobalSequence: 11, TerminalGlobalSequence: 19, TerminalSourceSequence: 2, TerminalKind: contextevent.KindExecutionResult, EventRoot: executionEvent.EventDigest}}
 	eventChainRoot, err := contextevent.EventChainRoot(revisions)
 	if err != nil {
 		t.Fatal(err)
@@ -295,7 +401,7 @@ func newReceiptCLIFixture(t *testing.T) receiptCLIFixture {
 		ManifestDigest: execution.ManifestDigest, DispatchDigest: receiptRawDigest(executionBytes), ATCRunway: execution.ATCRunway,
 		ExecutionWorkspaceRequestDigest: workspaceDigest, ExecutionWorkspaceID: workspaceID,
 		InputCommit: commitOID, InputTree: treeOID, OutputCommit: commitOID, OutputTree: treeOID, Clean: true,
-		RevisionSegments: revisions, EventChainRoot: eventChainRoot, TerminalManifestRevision: 0, TerminalSourceSequence: 1, TerminalGlobalSequence: 1,
+		RevisionSegments: revisions, EventChainRoot: eventChainRoot, TerminalManifestRevision: 0, TerminalSourceSequence: 2, TerminalGlobalSequence: 19,
 		Expansions: []contextreceipt.Expansion{}, Obligations: []contextreceipt.Obligation{}, Evidence: []contextreceipt.Evidence{},
 		RunnerPrincipalResolution: resolution, Adapter: execution.Adapter, AdapterVersion: execution.AdapterVersion,
 		ReviewInputs: []contextreceipt.ReviewInput{},
@@ -319,9 +425,11 @@ func newReceiptCLIFixture(t *testing.T) receiptCLIFixture {
 	if err != nil {
 		t.Fatal(err)
 	}
+	promptAckBytes := receiptExecutionAckBytes(t, promptEvent, 11)
+	resultAckBytes := receiptExecutionAckBytes(t, executionEvent, 19)
 	requestBytes, err := contextreceipt.EncodeVerifyRequest(contextreceipt.VerifyRequest{
 		Schema: contextreceipt.VerifyRequestSchemaID, Receipt: receipt, ReceiptEventAck: ack, Candidate: candidate,
-		Proofs: contextreceipt.ProofBundle{ExecutionRequestBytes: executionBytes, RepositoryProofBytes: repositoryBytes, ExecutionEventBytes: [][]byte{executionEventBytes}, ReceiptEventBytes: receiptEventBytes, ExpansionDataBytes: [][]byte{}, ObligationBytes: [][]byte{}, EvidenceResultBytes: [][]byte{}, ReviewPacketBytes: []byte{}},
+		Proofs: contextreceipt.ProofBundle{ExecutionRequestBytes: executionBytes, RepositoryProofBytes: repositoryBytes, ExecutionEventBytes: [][]byte{promptEventBytes, executionEventBytes}, ExecutionEventAckBytes: [][]byte{promptAckBytes, resultAckBytes}, ReceiptEventBytes: receiptEventBytes, ExpansionDataBytes: [][]byte{}, ObligationBytes: [][]byte{}, EvidenceResultBytes: [][]byte{}, ReviewPacketBytes: []byte{}},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -371,6 +479,38 @@ func receiptCompletionForCLI(t *testing.T, receipt contextreceipt.Receipt, recei
 		t.Fatal(err)
 	}
 	return encoded, event, ack
+}
+
+func receiptExecutionAckBytes(t *testing.T, event contextevent.Event, globalSequence uint64) []byte {
+	t.Helper()
+	encoded, err := contextevent.EncodeEventAck(contextevent.EventAck{
+		Schema: contextevent.AckSchemaID, Flight: event.Flight, Lane: event.Lane, Epoch: event.Epoch,
+		Session: event.Session, ManifestRevision: event.ManifestRevision, Kind: event.Kind,
+		SourceSequence: event.SourceSequence, EventDigest: event.EventDigest, GlobalSequence: globalSequence,
+	})
+	if err != nil {
+		t.Fatalf("EncodeEventAck fixture: %v", err)
+	}
+	return encoded
+}
+
+func cloneReceiptProofDocuments(documents [][]byte) [][]byte {
+	cloned := make([][]byte, len(documents))
+	for i := range documents {
+		cloned[i] = append([]byte(nil), documents[i]...)
+	}
+	return cloned
+}
+
+func receiptVerdictOperand(t *testing.T, verdict contextreceipt.Verdict, kind contextreceipt.OperandKind) contextreceipt.Operand {
+	t.Helper()
+	for _, operand := range verdict.Operands {
+		if operand.Kind == kind {
+			return operand
+		}
+	}
+	t.Fatalf("verdict omits operand %q", kind)
+	return contextreceipt.Operand{}
 }
 
 func runReceiptBinary(t *testing.T, binary, dir string, stdin []byte, extraFiles []*os.File, args ...string) sealedContextObservation {

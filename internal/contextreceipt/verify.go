@@ -88,6 +88,10 @@ func (v *Verifier) Verify(ctx context.Context, request VerifyRequest) (Verdict, 
 	if err != nil {
 		return Verdict{}, err
 	}
+	executionAcks, err := decodeExecutionEventAcks(request.Proofs.ExecutionEventAckBytes, events)
+	if err != nil {
+		return Verdict{}, err
+	}
 	receiptEvent, err := contextevent.DecodeEvent(bytes.NewReader(request.Proofs.ReceiptEventBytes))
 	if err != nil {
 		return Verdict{}, fmt.Errorf("contextreceipt: receipt event proof: %w", err)
@@ -147,7 +151,7 @@ func (v *Verifier) Verify(ctx context.Context, request VerifyRequest) (Verdict, 
 	dispatchObserved := digestRaw(request.Proofs.ExecutionRequestBytes)
 	appendOperand("dispatch", stateForEqual(request.Receipt.DispatchDigest, dispatchObserved), request.Receipt.DispatchDigest, dispatchObserved, "dispatch-mismatch", nil)
 
-	eventState, eventChainState := verifyExecutionEventContinuity(events, request.Receipt, execution)
+	eventState, eventChainState := verifyExecutionEventContinuity(events, executionAcks, request.Receipt, execution)
 	eventDigestProjection := terminalEventDigestsFromEvents(events)
 	eventsObservedDigest := mustProjectionDigest(eventDigestProjection)
 	eventsExpectedDigest := mustProjectionDigest(terminalEventDigests(request.Receipt.RevisionSegments))
@@ -155,7 +159,7 @@ func (v *Verifier) Verify(ctx context.Context, request VerifyRequest) (Verdict, 
 		eventState = StateViolated
 	}
 	appendOperand("events", eventState, eventsExpectedDigest, eventsObservedDigest, "event-mismatch", nil)
-	eventChainObserved := mustProjectionDigest(revisionsFromEvents(events, request.Receipt.RevisionSegments))
+	eventChainObserved := mustProjectionDigest(revisionsFromEvents(events, executionAcks, request.Receipt.RevisionSegments))
 	if eventChainObserved != request.Receipt.EventChainRoot {
 		eventChainState = StateViolated
 	}
@@ -185,7 +189,7 @@ func (v *Verifier) Verify(ctx context.Context, request VerifyRequest) (Verdict, 
 	evidenceObserved := observedProjectionDigest(evidenceState, request.Receipt.Evidence, request.Proofs.EvidenceResultBytes)
 	appendOperand("evidence", evidenceState, evidenceExpected, evidenceObserved, "evidence-mismatch", nil)
 
-	receiptEventExpected, receiptEventObserved, receiptEventState, receiptAckExpected, receiptAckObserved, receiptAckState := receiptCompletionOperands(request.Receipt, receiptEvent, request.ReceiptEventAck)
+	receiptEventExpected, receiptEventObserved, receiptEventState, receiptAckExpected, receiptAckObserved, receiptAckState := receiptCompletionOperands(request.Receipt, receiptEvent, request.ReceiptEventAck, executionAcks[len(executionAcks)-1].GlobalSequence)
 	appendOperand("receipt-event", receiptEventState, receiptEventExpected, receiptEventObserved, "receipt-event-mismatch", nil)
 	appendOperand("receipt-ack", receiptAckState, receiptAckExpected, receiptAckObserved, "receipt-ack-mismatch", nil)
 
@@ -246,7 +250,12 @@ func (v *Verifier) reviewProjection(request VerifyRequest) (ReviewProofProjectio
 	if request.Receipt.Role == RoleBuilder {
 		packetDigest := mustProjectionDigest([]ReviewInput{})
 		linkDigest := mustProjectionDigest([]string{})
-		freshnessDigest := mustProjectionDigest(struct{}{})
+		freshnessDigest := mustProjectionDigest(struct {
+			Candidate    Candidate `json:"candidate"`
+			Round        string    `json:"round"`
+			PacketDigest string    `json:"packet_digest"`
+			PriorReview  *struct{} `json:"prior_review"`
+		}{request.Candidate, "builder", "", nil})
 		return ReviewProofProjection{
 			Packet:    ReviewOperandProjection{State: StateProven, ExpectedDigest: packetDigest, ObservedDigest: packetDigest},
 			Link:      ReviewOperandProjection{State: StateProven, ExpectedDigest: linkDigest, ObservedDigest: linkDigest},
@@ -321,14 +330,14 @@ func validateReceiptCompletion(receipt Receipt, eventBytes []byte, ack contextev
 	if err != nil {
 		return err
 	}
-	_, _, eventState, _, _, ackState := receiptCompletionOperands(receipt, event, ack)
+	_, _, eventState, _, _, ackState := receiptCompletionOperands(receipt, event, ack, receipt.TerminalGlobalSequence)
 	if eventState != StateProven || ackState != StateProven {
 		return fmt.Errorf("contextreceipt: receipt event or acknowledgment does not bind exact receipt completion")
 	}
 	return nil
 }
 
-func receiptCompletionOperands(receipt Receipt, event contextevent.Event, ack contextevent.ReceiptEventAck) (string, string, State, string, string, State) {
+func receiptCompletionOperands(receipt Receipt, event contextevent.Event, ack contextevent.ReceiptEventAck, executionTerminalGlobalSequence uint64) (string, string, State, string, string, State) {
 	receiptBytes, err := EncodeReceipt(receipt)
 	if err != nil {
 		return "", "", StateViolated, "", "", StateViolated
@@ -368,7 +377,7 @@ func receiptCompletionOperands(receipt Receipt, event contextevent.Event, ack co
 		ReceiptDigest     string `json:"receipt_digest"`
 		ResultEventDigest string `json:"result_event_digest"`
 		GlobalSequence    uint64 `json:"global_sequence"`
-	}{event.EventDigest, receipt.Digest, receipt.RevisionSegments[len(receipt.RevisionSegments)-1].EventRoot, receipt.TerminalGlobalSequence + 1}
+	}{event.EventDigest, receipt.Digest, receipt.RevisionSegments[len(receipt.RevisionSegments)-1].EventRoot, ack.GlobalSequence}
 	observedAck := struct {
 		EventDigest       string `json:"event_digest"`
 		ReceiptDigest     string `json:"receipt_digest"`
@@ -377,7 +386,7 @@ func receiptCompletionOperands(receipt Receipt, event contextevent.Event, ack co
 	}{ack.EventDigest, ack.ReceiptDigest, receipt.RevisionSegments[len(receipt.RevisionSegments)-1].EventRoot, ack.GlobalSequence}
 	expectedAckDigest, observedAckDigest := mustProjectionDigest(expectedAck), mustProjectionDigest(observedAck)
 	ackState := StateViolated
-	if _, err := contextevent.EncodeReceiptEventAck(ack); err == nil && ack.EventDigest == event.EventDigest && ack.ReceiptDigest == receipt.Digest && ack.ManifestRevision == event.ManifestRevision && ack.SourceSequence == event.SourceSequence && ack.GlobalSequence == receipt.TerminalGlobalSequence+1 && ack.Flight == event.Flight && ack.Lane == event.Lane && ack.Epoch == event.Epoch && ack.Session == event.Session && ack.Kind == event.Kind {
+	if _, err := contextevent.EncodeReceiptEventAck(ack); err == nil && ack.EventDigest == event.EventDigest && ack.ReceiptDigest == receipt.Digest && ack.ManifestRevision == event.ManifestRevision && ack.SourceSequence == event.SourceSequence && ack.GlobalSequence > executionTerminalGlobalSequence && ack.Flight == event.Flight && ack.Lane == event.Lane && ack.Epoch == event.Epoch && ack.Session == event.Session && ack.Kind == event.Kind {
 		ackState = StateProven
 	}
 	return expectedEventDigest, observedEventDigest, eventState, expectedAckDigest, observedAckDigest, ackState
@@ -495,8 +504,27 @@ func decodeExecutionEvents(documents [][]byte) ([]contextevent.Event, error) {
 	return events, nil
 }
 
-func verifyExecutionEventContinuity(events []contextevent.Event, receipt Receipt, execution ExecutionProjection) (State, State) {
-	if len(events) == 0 {
+func decodeExecutionEventAcks(documents [][]byte, events []contextevent.Event) ([]contextevent.EventAck, error) {
+	if len(documents) != len(events) {
+		return nil, fmt.Errorf("contextreceipt: execution event acknowledgment proof count does not match events")
+	}
+	acks := make([]contextevent.EventAck, len(documents))
+	for i, document := range documents {
+		ack, err := contextevent.DecodeEventAck(bytes.NewReader(document))
+		if err != nil {
+			return nil, fmt.Errorf("contextreceipt: execution event acknowledgment proof[%d]: %w", i, err)
+		}
+		event := events[i]
+		if ack.Flight != event.Flight || ack.Lane != event.Lane || ack.Epoch != event.Epoch || ack.Session != event.Session || ack.ManifestRevision != event.ManifestRevision || ack.Kind != event.Kind || ack.SourceSequence != event.SourceSequence || ack.EventDigest != event.EventDigest {
+			return nil, fmt.Errorf("contextreceipt: execution event acknowledgment proof[%d] does not bind its parallel event", i)
+		}
+		acks[i] = ack
+	}
+	return acks, nil
+}
+
+func verifyExecutionEventContinuity(events []contextevent.Event, acks []contextevent.EventAck, receipt Receipt, execution ExecutionProjection) (State, State) {
+	if len(events) == 0 || len(acks) != len(events) {
 		return StateViolated, StateViolated
 	}
 	revisionIndex := 0
@@ -505,10 +533,17 @@ func verifyExecutionEventContinuity(events []contextevent.Event, receipt Receipt
 			return StateViolated, StateViolated
 		}
 		revision := receipt.RevisionSegments[revisionIndex]
+		ack := acks[i]
+		if i > 0 && ack.GlobalSequence <= acks[i-1].GlobalSequence {
+			return StateViolated, StateViolated
+		}
 		if event.ManifestRevision != revision.ManifestRevision || event.ManifestDigest != revision.ManifestDigest || event.Flight != execution.Flight || event.Lane != execution.Lane || event.Epoch != execution.Epoch || event.Session != execution.Session || event.ATCRunway != receipt.ATCRunway || event.ExecutionWorkspaceID != receipt.ExecutionWorkspaceID || event.Adapter != receipt.Adapter || event.AdapterVersion != receipt.AdapterVersion {
 			return StateViolated, StateViolated
 		}
 		if event.SourceSequence == 1 {
+			if ack.GlobalSequence != revision.FirstGlobalSequence {
+				return StateViolated, StateViolated
+			}
 			if revisionIndex == 0 {
 				if event.PriorRevision != nil {
 					return StateViolated, StateViolated
@@ -523,7 +558,7 @@ func verifyExecutionEventContinuity(events []contextevent.Event, receipt Receipt
 			return StateViolated, StateViolated
 		}
 		if event.EventDigest == revision.EventRoot {
-			if event.SourceSequence != revision.TerminalSourceSequence || event.Kind != revision.TerminalKind {
+			if event.SourceSequence != revision.TerminalSourceSequence || event.Kind != revision.TerminalKind || ack.GlobalSequence != revision.TerminalGlobalSequence {
 				return StateViolated, StateViolated
 			}
 			revisionIndex++
@@ -814,10 +849,10 @@ func terminalEventDigests(revisions []contextevent.Revision) []string {
 	}
 	return out
 }
-func revisionsFromEvents(events []contextevent.Event, declared []contextevent.Revision) []contextevent.Revision {
+func revisionsFromEvents(events []contextevent.Event, acks []contextevent.EventAck, declared []contextevent.Revision) []contextevent.Revision {
 	observed := make([]contextevent.Revision, 0, len(declared))
 	start := 0
-	for index, expected := range declared {
+	for _, expected := range declared {
 		end := start
 		for end < len(events) && events[end].ManifestRevision == expected.ManifestRevision {
 			end++
@@ -829,11 +864,10 @@ func revisionsFromEvents(events []contextevent.Event, declared []contextevent.Re
 		terminal := events[end-1]
 		observed = append(observed, contextevent.Revision{
 			Schema: contextevent.RevisionSchemaID, ManifestRevision: terminal.ManifestRevision, ManifestDigest: terminal.ManifestDigest,
-			FirstGlobalSequence: expected.FirstGlobalSequence, TerminalGlobalSequence: expected.TerminalGlobalSequence,
+			FirstGlobalSequence: acks[start].GlobalSequence, TerminalGlobalSequence: acks[end-1].GlobalSequence,
 			TerminalSourceSequence: terminal.SourceSequence, TerminalKind: terminal.Kind, EventRoot: terminal.EventDigest,
 		})
 		start = end
-		_ = index
 	}
 	return observed
 }
