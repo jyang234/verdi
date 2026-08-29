@@ -7,10 +7,12 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -333,7 +335,7 @@ func TestClaudeAdapterParityContract_Static(t *testing.T) {
 func TestClaudeAdapterParityContract_Behavioral(t *testing.T) {
 	t.Run("start_fixture_observation_kinds", func(t *testing.T) {
 		launch, envRoot := claudeTestLaunch(t, sealedexec.ActionStart)
-		pp := &testProbeProcess{version: launch.Request.AdapterVersion, output: mustClaudeFixture(t, "claude-start.jsonl")}
+		pp := &testProbeProcess{version: launch.Request.AdapterVersion, output: mustClaudeFixture(t, "claude-start.jsonl", launch.Workspace.Path)}
 		dp := newTestProcessor(t)
 		adapter, err := newClaudeTestAdapter(t, pp, dp, envRoot)
 		if err != nil {
@@ -361,7 +363,7 @@ func TestClaudeAdapterParityContract_Behavioral(t *testing.T) {
 
 	t.Run("start_fixture_adapter_start_has_no_detail", func(t *testing.T) {
 		launch, envRoot := claudeTestLaunch(t, sealedexec.ActionStart)
-		pp := &testProbeProcess{version: launch.Request.AdapterVersion, output: mustClaudeFixture(t, "claude-start.jsonl")}
+		pp := &testProbeProcess{version: launch.Request.AdapterVersion, output: mustClaudeFixture(t, "claude-start.jsonl", launch.Workspace.Path)}
 		dp := newTestProcessor(t)
 		adapter, err := newClaudeTestAdapter(t, pp, dp, envRoot)
 		if err != nil {
@@ -384,10 +386,10 @@ func TestClaudeAdapterParityContract_Behavioral(t *testing.T) {
 		}
 	})
 
-	t.Run("resume_fixture_starts_with_resume_kind", func(t *testing.T) {
+	t.Run("resume_fixture_prefix_is_adapter_start_then_summary", func(t *testing.T) {
 		launch, envRoot := claudeTestLaunch(t, sealedexec.ActionResume)
 		session := "claude-sess-resume-001"
-		pp := &testProbeProcess{version: launch.Request.AdapterVersion, output: mustClaudeFixture(t, "claude-resume.jsonl")}
+		pp := &testProbeProcess{version: launch.Request.AdapterVersion, output: mustClaudeFixture(t, "claude-resume.jsonl", launch.Workspace.Path)}
 		dp := newTestProcessor(t)
 		adapter, err := newClaudeTestAdapter(t, pp, dp, envRoot)
 		if err != nil {
@@ -401,10 +403,12 @@ func TestClaudeAdapterParityContract_Behavioral(t *testing.T) {
 		if result.ObservedSessionRef != session {
 			t.Fatalf("observed session = %q, want %q", result.ObservedSessionRef, session)
 		}
-		if len(result.Observations) == 0 || result.Observations[0].Kind != contextevent.KindResume {
-			t.Fatalf("first observation should be resume, got %v", observationKindsC(result.Observations))
+		// Amendment 002 §7 / Codex ruling 3: Task 5 owns the exact
+		// acknowledged-prefix resume observation. The adapter never invents one.
+		if hasKindC(result.Observations, contextevent.KindResume) {
+			t.Fatalf("adapter must not invent a resume observation, got %v", observationKindsC(result.Observations))
 		}
-		wantPrefix := []contextevent.Kind{contextevent.KindResume, contextevent.KindAdapterStart, contextevent.KindProviderSummary}
+		wantPrefix := []contextevent.Kind{contextevent.KindAdapterStart, contextevent.KindProviderSummary}
 		if len(result.Observations) < len(wantPrefix) || !reflect.DeepEqual(observationKindsC(result.Observations[:len(wantPrefix)]), wantPrefix) {
 			t.Fatalf("resume prefix kinds = %v, want %v", observationKindsC(result.Observations), wantPrefix)
 		}
@@ -413,7 +417,7 @@ func TestClaudeAdapterParityContract_Behavioral(t *testing.T) {
 	t.Run("resume_fixture_thinking_yields_provider_summary", func(t *testing.T) {
 		launch, envRoot := claudeTestLaunch(t, sealedexec.ActionResume)
 		session := "claude-sess-resume-001"
-		pp := &testProbeProcess{version: launch.Request.AdapterVersion, output: mustClaudeFixture(t, "claude-resume.jsonl")}
+		pp := &testProbeProcess{version: launch.Request.AdapterVersion, output: mustClaudeFixture(t, "claude-resume.jsonl", launch.Workspace.Path)}
 		dp := newTestProcessor(t)
 		adapter, err := newClaudeTestAdapter(t, pp, dp, envRoot)
 		if err != nil {
@@ -438,7 +442,7 @@ func TestClaudeAdapterParityContract_Behavioral(t *testing.T) {
 
 	t.Run("advisory_fixture_retry_and_error_kinds", func(t *testing.T) {
 		launch, envRoot := claudeTestLaunch(t, sealedexec.ActionStart)
-		pp := &testProbeProcess{version: launch.Request.AdapterVersion, output: mustClaudeFixture(t, "claude-advisory.jsonl")}
+		pp := &testProbeProcess{version: launch.Request.AdapterVersion, output: mustClaudeFixture(t, "claude-advisory.jsonl", launch.Workspace.Path)}
 		dp := newTestProcessor(t)
 		adapter, err := newClaudeTestAdapter(t, pp, dp, envRoot)
 		if err != nil {
@@ -556,7 +560,7 @@ func TestClaudeAdapterParityContract_Behavioral(t *testing.T) {
 	t.Run("mutation_block_tag_fails_assistant_text_row", func(t *testing.T) {
 		// Mutate "text" block type to "unknown_block" — provider-message must not be produced
 		launch, envRoot := claudeTestLaunch(t, sealedexec.ActionStart)
-		initLine := []byte(`{"type":"system","subtype":"init","session_id":"claude-sess-start-001","model":"claude-opus-5-test","mcp_servers":[{"name":"verdi-context","status":"connected"}],"cwd":"/workspace","tools":[],"permissionMode":"bypassPermissions","apiKeySource":"ANTHROPIC_API_KEY","claude_code_version":"1.2.3","slash_commands":[],"output_style":"default","agents":[],"skills":[],"plugins":[],"uuid":"u1"}` + "\n")
+		initLine := []byte(claudeInitLine("claude-sess-start-001", launch.Workspace.Path) + "\n")
 		mutatedAssistant := []byte(`{"type":"assistant","session_id":"claude-sess-start-001","uuid":"mu","message":{"id":"msg_m","type":"message","role":"assistant","model":"claude-opus-5-test","content":[{"type":"unknown_block","text":"hello"}],"usage":{"input_tokens":1,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":1}}}` + "\n")
 		pp := &testProbeProcess{version: launch.Request.AdapterVersion, output: append(initLine, mutatedAssistant...)}
 		dp := newTestProcessor(t)
@@ -581,7 +585,7 @@ func TestClaudeAdapterParityContract_Behavioral(t *testing.T) {
 		// The compound message ID must be "message_id:block_index".
 		// If the id were different, the message_digest would differ.
 		launch, envRoot := claudeTestLaunch(t, sealedexec.ActionStart)
-		pp := &testProbeProcess{version: launch.Request.AdapterVersion, output: mustClaudeFixture(t, "claude-start.jsonl")}
+		pp := &testProbeProcess{version: launch.Request.AdapterVersion, output: mustClaudeFixture(t, "claude-start.jsonl", launch.Workspace.Path)}
 		dp := newTestProcessor(t)
 		adapter, err := newClaudeTestAdapter(t, pp, dp, envRoot)
 		if err != nil {
@@ -623,7 +627,7 @@ func TestClaudeAdapterParityContract_Behavioral(t *testing.T) {
 		// Thinking bytes must NOT enter the detail digest; detail is {content_type,omitted:true}.
 		launch, envRoot := claudeTestLaunch(t, sealedexec.ActionResume)
 		session := "claude-sess-resume-001"
-		pp := &testProbeProcess{version: launch.Request.AdapterVersion, output: mustClaudeFixture(t, "claude-resume.jsonl")}
+		pp := &testProbeProcess{version: launch.Request.AdapterVersion, output: mustClaudeFixture(t, "claude-resume.jsonl", launch.Workspace.Path)}
 		dp := newTestProcessor(t)
 		adapter, err := newClaudeTestAdapter(t, pp, dp, envRoot)
 		if err != nil {
@@ -660,19 +664,307 @@ func TestClaudeAdapterParityContract_Behavioral(t *testing.T) {
 			t.Fatal("including thinking bytes must produce different digest (independence witness)")
 		}
 	})
+
+	// -----------------------------------------------------------------
+	// Wave B: closed stream grammar (C1), safe malformed reduction (C2),
+	// stderr-bearing process terminal (C3), exact process reason/operation/
+	// source/precedence (C6), and I1-I5.
+	// -----------------------------------------------------------------
+
+	t.Run("init_rejects_unknown_outer_field", func(t *testing.T) {
+		launch, envRoot := claudeTestLaunch(t, sealedexec.ActionStart)
+		line := strings.Replace(claudeInitLine("s1", launch.Workspace.Path),
+			`"uuid":"u-init"`, `"uuid":"u-init","future_key":1`, 1)
+		result := runClaudeLines(t, launch, envRoot, line)
+		assertClaudeGapReason(t, result, "unknown-foreign-field", "decode", claudeSource)
+	})
+
+	t.Run("init_rejects_missing_required_field", func(t *testing.T) {
+		launch, envRoot := claudeTestLaunch(t, sealedexec.ActionStart)
+		line := strings.Replace(claudeInitLine("s1", launch.Workspace.Path),
+			`,"uuid":"u-init"`, ``, 1)
+		result := runClaudeLines(t, launch, envRoot, line)
+		assertClaudeGapReason(t, result, "missing-foreign-field", "decode", claudeSource)
+	})
+
+	t.Run("init_rejects_foreign_cwd", func(t *testing.T) {
+		launch, envRoot := claudeTestLaunch(t, sealedexec.ActionStart)
+		result := runClaudeLines(t, launch, envRoot, claudeInitLine("s1", "/elsewhere"))
+		assertClaudeGapReason(t, result, "invalid-foreign-field", "decode", claudeSource)
+	})
+
+	t.Run("init_rejects_version_contradiction", func(t *testing.T) {
+		launch, envRoot := claudeTestLaunch(t, sealedexec.ActionStart)
+		line := strings.Replace(claudeInitLine("s1", launch.Workspace.Path),
+			`"claude_code_version":"1.2.3"`, `"claude_code_version":"9.9.9"`, 1)
+		result := runClaudeLines(t, launch, envRoot, line)
+		assertClaudeGapReason(t, result, "invalid-foreign-field", "decode", claudeSource)
+	})
+
+	t.Run("init_rejects_foreign_api_key_source", func(t *testing.T) {
+		launch, envRoot := claudeTestLaunch(t, sealedexec.ActionStart)
+		line := strings.Replace(claudeInitLine("s1", launch.Workspace.Path),
+			`"apiKeySource":"ANTHROPIC_API_KEY"`, `"apiKeySource":"/login"`, 1)
+		result := runClaudeLines(t, launch, envRoot, line)
+		assertClaudeGapReason(t, result, "invalid-foreign-field", "decode", claudeSource)
+	})
+
+	t.Run("init_rejects_duplicate_tool_names", func(t *testing.T) {
+		launch, envRoot := claudeTestLaunch(t, sealedexec.ActionStart)
+		line := strings.Replace(claudeInitLine("s1", launch.Workspace.Path),
+			`"tools":["Task"]`, `"tools":["Task","Task"]`, 1)
+		result := runClaudeLines(t, launch, envRoot, line)
+		assertClaudeGapReason(t, result, "invalid-foreign-field", "decode", claudeSource)
+	})
+
+	t.Run("assistant_rejects_unknown_message_field", func(t *testing.T) {
+		launch, envRoot := claudeTestLaunch(t, sealedexec.ActionStart)
+		bad := `{"type":"assistant","session_id":"s1","uuid":"mu","message":{"id":"msg_1","type":"message","role":"assistant","model":"claude-opus-5-test","content":[{"type":"text","text":"hi"}],"usage":{"input_tokens":1,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":1},"future_key":true}}`
+		result := runClaudeLines(t, launch, envRoot, claudeInitLine("s1", launch.Workspace.Path), bad)
+		assertClaudeGapReason(t, result, "unknown-foreign-field", "decode", claudeSource)
+	})
+
+	t.Run("assistant_rejects_missing_usage", func(t *testing.T) {
+		launch, envRoot := claudeTestLaunch(t, sealedexec.ActionStart)
+		bad := `{"type":"assistant","session_id":"s1","uuid":"mu","message":{"id":"msg_1","type":"message","role":"assistant","model":"claude-opus-5-test","content":[{"type":"text","text":"hi"}]}}`
+		result := runClaudeLines(t, launch, envRoot, claudeInitLine("s1", launch.Workspace.Path), bad)
+		assertClaudeGapReason(t, result, "missing-foreign-field", "decode", claudeSource)
+	})
+
+	t.Run("assistant_rejects_unknown_service_tier", func(t *testing.T) {
+		launch, envRoot := claudeTestLaunch(t, sealedexec.ActionStart)
+		bad := `{"type":"assistant","session_id":"s1","uuid":"mu","message":{"id":"msg_1","type":"message","role":"assistant","model":"claude-opus-5-test","content":[{"type":"text","text":"hi"}],"usage":{"input_tokens":1,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":1,"service_tier":"platinum"}}}`
+		result := runClaudeLines(t, launch, envRoot, claudeInitLine("s1", launch.Workspace.Path), bad)
+		assertClaudeGapReason(t, result, "invalid-foreign-field", "decode", claudeSource)
+	})
+
+	t.Run("retry_rejects_unknown_field", func(t *testing.T) {
+		launch, envRoot := claudeTestLaunch(t, sealedexec.ActionStart)
+		bad := `{"type":"system","subtype":"api_retry","attempt":1,"max_retries":3,"retry_delay_ms":10,"error":{"type":"rate_limit","message":"slow down"},"uuid":"ru","session_id":"s1","future_key":1}`
+		result := runClaudeLines(t, launch, envRoot, claudeInitLine("s1", launch.Workspace.Path), bad)
+		assertClaudeGapReason(t, result, "unknown-foreign-field", "decode", claudeSource)
+	})
+
+	t.Run("malformed_frame_detail_is_digest_only", func(t *testing.T) {
+		launch, envRoot := claudeTestLaunch(t, sealedexec.ActionStart)
+		raw := `{not-json SENTINEL-FOREIGN-BYTES}`
+		result := runClaudeLines(t, launch, envRoot, raw)
+		gap := claudeGapPayload(t, result.Observations)
+		if gap.ReasonCode != "malformed-foreign-frame" {
+			t.Fatalf("reason = %q, want malformed-foreign-frame", gap.ReasonCode)
+		}
+		detail := result.Observations[0].ForeignDetail
+		if detail.Mode != contextevent.DetailInline {
+			t.Fatalf("malformed detail mode = %q, want inline", detail.Mode)
+		}
+		want := fmt.Sprintf(`{"raw_digest":%q,"reason":"malformed-foreign-frame"}`, claudeTestDigest([]byte(raw)))
+		if string(detail.RedactedJSON) != want {
+			t.Fatalf("malformed detail = %s, want %s", detail.RedactedJSON, want)
+		}
+		if bytes.Contains(detail.RedactedJSON, []byte("SENTINEL-FOREIGN-BYTES")) {
+			t.Fatal("malformed detail disclosed raw foreign bytes")
+		}
+	})
+
+	t.Run("truncated_final_line_uses_malformed_foreign_frame", func(t *testing.T) {
+		launch, envRoot := claudeTestLaunch(t, sealedexec.ActionStart)
+		pp := &testProbeProcess{version: launch.Request.AdapterVersion, output: []byte(`{"type":"system"`)}
+		result := runClaudeProcess(t, launch, envRoot, pp)
+		assertClaudeGapReason(t, result, "malformed-foreign-frame", "decode", claudeSource)
+	})
+
+	t.Run("success_result_with_stderr_is_terminal_failure", func(t *testing.T) {
+		launch, envRoot := claudeTestLaunch(t, sealedexec.ActionStart)
+		pp := &testProbeProcess{
+			version: launch.Request.AdapterVersion,
+			output:  mustClaudeFixture(t, "claude-start.jsonl", launch.Workspace.Path),
+			stderr:  []byte("panic: SENTINEL-STDERR-BYTES\n"),
+		}
+		result := runClaudeProcess(t, launch, envRoot, pp)
+		if result.OperationalFailure != "provider-stderr" {
+			t.Fatalf("operational failure = %q, want provider-stderr", result.OperationalFailure)
+		}
+		for _, obs := range result.Observations {
+			if summary, ok := obs.Payload.(*contextevent.ProviderSummaryPayload); ok && summary.SummaryID == "terminal-result" {
+				t.Fatal("nonempty stderr must not admit the success terminal-result summary")
+			}
+			if bytes.Contains(obs.ForeignDetail.RedactedJSON, []byte("SENTINEL-STDERR-BYTES")) {
+				t.Fatal("diagnostics disclosed stderr bytes")
+			}
+		}
+		gap := claudeGapPayload(t, result.Observations)
+		if gap.Source != "claude-process" || gap.ReasonCode != "provider-stderr" {
+			t.Fatalf("process gap = %+v, want source claude-process reason provider-stderr", gap)
+		}
+		errPayload := claudeErrorPayload(t, result.Observations)
+		if errPayload.Operation != "process" || errPayload.ReasonCode != "provider-stderr" {
+			t.Fatalf("adapter-error = operation %q reason %q, want process/provider-stderr", errPayload.Operation, errPayload.ReasonCode)
+		}
+		stop := claudeStopPayload(t, result.Observations)
+		if stop.ReasonCode != "provider-stderr" {
+			t.Fatalf("adapter-stop reason = %q, want provider-stderr", stop.ReasonCode)
+		}
+	})
+
+	t.Run("nonzero_exit_uses_provider_exit_nonzero_at_result_sequence", func(t *testing.T) {
+		launch, envRoot := claudeTestLaunch(t, sealedexec.ActionStart)
+		pp := &testProbeProcess{
+			version:  launch.Request.AdapterVersion,
+			output:   mustClaudeFixture(t, "claude-start.jsonl", launch.Workspace.Path),
+			exitCode: 7,
+		}
+		result := runClaudeProcess(t, launch, envRoot, pp)
+		if result.OperationalFailure != "provider-exit-nonzero" {
+			t.Fatalf("operational failure = %q, want provider-exit-nonzero", result.OperationalFailure)
+		}
+		gap := claudeGapPayload(t, result.Observations)
+		if gap.Source != "claude-process" || gap.FromSequence != 3 || gap.ToSequence != 3 {
+			t.Fatalf("process gap = %+v, want source claude-process range 3..3 (terminal result sequence)", gap)
+		}
+		errPayload := claudeErrorPayload(t, result.Observations)
+		if errPayload.Operation != "process" {
+			t.Fatalf("adapter-error operation = %q, want process", errPayload.Operation)
+		}
+		stop := claudeStopPayload(t, result.Observations)
+		if stop.ExitCode != 7 || stop.ReasonCode != "provider-exit-nonzero" {
+			t.Fatalf("adapter-stop = %+v, want exit 7 reason provider-exit-nonzero", stop)
+		}
+	})
+
+	t.Run("stderr_outranks_nonzero_exit", func(t *testing.T) {
+		launch, envRoot := claudeTestLaunch(t, sealedexec.ActionStart)
+		pp := &testProbeProcess{
+			version:  launch.Request.AdapterVersion,
+			output:   mustClaudeFixture(t, "claude-start.jsonl", launch.Workspace.Path),
+			exitCode: 7,
+			stderr:   []byte("boom\n"),
+		}
+		result := runClaudeProcess(t, launch, envRoot, pp)
+		if result.OperationalFailure != "provider-stderr" {
+			t.Fatalf("operational failure = %q, want provider-stderr (stderr outranks exit)", result.OperationalFailure)
+		}
+		if claudeStopPayload(t, result.Observations).ExitCode != 7 {
+			t.Fatal("adapter-stop must carry the actual exit code")
+		}
+	})
+
+	t.Run("missing_terminal_result_gap_uses_next_foreign_sequence", func(t *testing.T) {
+		launch, envRoot := claudeTestLaunch(t, sealedexec.ActionStart)
+		result := runClaudeLines(t, launch, envRoot, claudeInitLine("s1", launch.Workspace.Path))
+		if result.OperationalFailure != "missing-terminal-result" {
+			t.Fatalf("operational failure = %q, want missing-terminal-result", result.OperationalFailure)
+		}
+		gap := claudeGapPayload(t, result.Observations)
+		if gap.Source != "claude-process" || gap.FromSequence != 2 || gap.ToSequence != 2 {
+			t.Fatalf("process gap = %+v, want source claude-process range 2..2 (next foreign sequence)", gap)
+		}
+		if claudeErrorPayload(t, result.Observations).Operation != "decode" {
+			t.Fatal("missing-terminal-result adapter-error operation must be decode")
+		}
+	})
+
+	t.Run("eof_with_incomplete_tool_call_is_operational", func(t *testing.T) {
+		launch, envRoot := claudeTestLaunch(t, sealedexec.ActionStart)
+		toolUse := `{"type":"assistant","session_id":"s1","uuid":"mu","message":{"id":"msg_1","type":"message","role":"assistant","model":"claude-opus-5-test","content":[{"type":"tool_use","id":"call_1","name":"Read","input":{"path":"README.md"}}],"usage":{"input_tokens":1,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":1}}}`
+		result := runClaudeLines(t, launch, envRoot,
+			claudeInitLine("s1", launch.Workspace.Path), toolUse, claudeResultLine("s1", "success", false))
+		if result.OperationalFailure != "incomplete-tool-call" {
+			t.Fatalf("operational failure = %q, want incomplete-tool-call", result.OperationalFailure)
+		}
+		for _, obs := range result.Observations {
+			if summary, ok := obs.Payload.(*contextevent.ProviderSummaryPayload); ok && summary.SummaryID == "terminal-result" {
+				t.Fatal("an incomplete tool call must never admit the success terminal-result summary")
+			}
+		}
+		if claudeErrorPayload(t, result.Observations).Operation != "decode" {
+			t.Fatal("incomplete-tool-call adapter-error operation must be decode")
+		}
+	})
+
+	t.Run("duplicate_message_id_is_refused", func(t *testing.T) {
+		launch, envRoot := claudeTestLaunch(t, sealedexec.ActionStart)
+		msg := `{"type":"assistant","session_id":"s1","uuid":"mu","message":{"id":"msg_1","type":"message","role":"assistant","model":"claude-opus-5-test","content":[{"type":"text","text":"hi"}],"usage":{"input_tokens":1,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":1}}}`
+		result := runClaudeLines(t, launch, envRoot, claudeInitLine("s1", launch.Workspace.Path), msg, msg)
+		assertClaudeGapReason(t, result, "duplicate-message-id", "decode", claudeSource)
+	})
+
+	t.Run("duplicate_tool_result_is_refused", func(t *testing.T) {
+		launch, envRoot := claudeTestLaunch(t, sealedexec.ActionStart)
+		toolUse := `{"type":"assistant","session_id":"s1","uuid":"mu","message":{"id":"msg_1","type":"message","role":"assistant","model":"claude-opus-5-test","content":[{"type":"tool_use","id":"call_1","name":"Read","input":{"path":"README.md"}}],"usage":{"input_tokens":1,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":1}}}`
+		toolResult := `{"type":"user","session_id":"s1","uuid":"tu","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"call_1","content":"ok"}]}}`
+		result := runClaudeLines(t, launch, envRoot,
+			claudeInitLine("s1", launch.Workspace.Path), toolUse, toolResult, toolResult)
+		assertClaudeGapReason(t, result, "duplicate-tool-result", "decode", claudeSource)
+	})
+
+	t.Run("user_non_tool_result_block_is_refused", func(t *testing.T) {
+		launch, envRoot := claudeTestLaunch(t, sealedexec.ActionStart)
+		userText := `{"type":"user","session_id":"s1","uuid":"tu","message":{"role":"user","content":[{"type":"text","text":"prose"}]}}`
+		result := runClaudeLines(t, launch, envRoot, claudeInitLine("s1", launch.Workspace.Path), userText)
+		assertClaudeGapReason(t, result, "unknown-content-block", "decode", claudeSource)
+	})
+
+	t.Run("terminal_result_rejects_unknown_subtype", func(t *testing.T) {
+		launch, envRoot := claudeTestLaunch(t, sealedexec.ActionStart)
+		result := runClaudeLines(t, launch, envRoot,
+			claudeInitLine("s1", launch.Workspace.Path), claudeResultLine("s1", "error_unlisted", true))
+		assertClaudeGapReason(t, result, "invalid-foreign-field", "decode", claudeSource)
+	})
+
+	t.Run("terminal_result_rejects_missing_permission_denials", func(t *testing.T) {
+		launch, envRoot := claudeTestLaunch(t, sealedexec.ActionStart)
+		line := strings.Replace(claudeResultLine("s1", "success", false), `,"permission_denials":[]`, ``, 1)
+		result := runClaudeLines(t, launch, envRoot, claudeInitLine("s1", launch.Workspace.Path), line)
+		assertClaudeGapReason(t, result, "missing-foreign-field", "decode", claudeSource)
+	})
+
+	t.Run("terminal_result_rejects_foreign_model_usage_key", func(t *testing.T) {
+		launch, envRoot := claudeTestLaunch(t, sealedexec.ActionStart)
+		line := strings.Replace(claudeResultLine("s1", "success", false), `,"permission_denials":[]`,
+			`,"permission_denials":[],"modelUsage":{"some-other-model":{"input_tokens":1,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":1}}`, 1)
+		result := runClaudeLines(t, launch, envRoot, claudeInitLine("s1", launch.Workspace.Path), line)
+		assertClaudeGapReason(t, result, "invalid-foreign-field", "decode", claudeSource)
+	})
+
+	t.Run("safe_detail_failure_propagates_operational_error", func(t *testing.T) {
+		launch, envRoot := claudeTestLaunch(t, sealedexec.ActionStart)
+		// A classified secret colliding with a fixed safe-detail object key
+		// makes the fixed reduction itself unrepresentable.
+		launch.Profile.PolicySecretValues = append(launch.Profile.PolicySecretValues, []byte("reason"))
+		pp := &testProbeProcess{version: launch.Request.AdapterVersion, output: []byte("{not-json}\n")}
+		dp := newTestProcessor(t)
+		adapter, err := newClaudeTestAdapter(t, pp, dp, envRoot)
+		if err != nil {
+			t.Fatalf("New: %v", err)
+		}
+		run, err := adapter.Start(context.Background(), launch)
+		if err != nil {
+			t.Fatalf("Start: %v", err)
+		}
+		got, err := run.Next(context.Background())
+		if err == nil {
+			t.Fatalf("Next must propagate the lower-layer failure, got result %+v", got)
+		}
+		if len(got.Observations) != 0 {
+			t.Fatal("no replacement detail or observation may be fabricated")
+		}
+	})
 }
 
 // ---------------------------------------------------------------------------
 // Test helpers
 // ---------------------------------------------------------------------------
 
-func mustClaudeFixture(t *testing.T, name string) []byte {
+// mustClaudeFixture loads a committed fixture and binds its deterministic
+// "/workspace" cwd placeholder to the launch's real execution workspace, which
+// Amendment 002 §5 requires init to observe exactly.
+func mustClaudeFixture(t *testing.T, name, workspace string) []byte {
 	t.Helper()
 	data, err := os.ReadFile(filepath.Join("testdata", name))
 	if err != nil {
 		t.Fatalf("read fixture: %v", err)
 	}
-	return data
+	return bytes.ReplaceAll(data, []byte(`"cwd":"/workspace"`), []byte(`"cwd":"`+workspace+`"`))
 }
 
 // claudeTestLaunch builds an AdapterLaunch for the claude adapter in tests.
@@ -921,6 +1213,8 @@ type testProbeProcess struct {
 	startStdin []byte
 	version    string
 	output     []byte
+	stderr     []byte
+	exitCode   int
 	err        error
 	run        *testClaudeActiveProcess
 }
@@ -946,13 +1240,19 @@ func (p *testProbeProcess) Start(_ context.Context, cmd *exec.Cmd, stdin []byte)
 	if p.err != nil {
 		return nil, p.err
 	}
-	p.run = &testClaudeActiveProcess{observations: claudeTestObservations(p.output)}
+	p.run = &testClaudeActiveProcess{
+		observations: claudeTestObservations(p.output),
+		stderr:       append([]byte(nil), p.stderr...),
+		exitCode:     p.exitCode,
+	}
 	return p.run, nil
 }
 
 type testClaudeActiveProcess struct {
 	mu           sync.Mutex
 	observations []ProcessObservation
+	stderr       []byte
+	exitCode     int
 	terminal     bool
 }
 
@@ -968,7 +1268,7 @@ func (p *testClaudeActiveProcess) Next(_ context.Context) (ProcessObservation, e
 		return ProcessObservation{}, errors.New("testClaudeActiveProcess: next after terminal")
 	}
 	p.terminal = true
-	return ProcessObservation{Terminal: &ProcessResult{ExitCode: 0}}, nil
+	return ProcessObservation{Terminal: &ProcessResult{ExitCode: p.exitCode, Stderr: append([]byte(nil), p.stderr...)}}, nil
 }
 
 func (p *testClaudeActiveProcess) Stop(_ context.Context) (ProcessStopResult, error) {
@@ -1284,4 +1584,99 @@ func TestClaudeAdapterProfileAndCommandAuthority(t *testing.T) {
 			t.Fatalf("Start with deterministic baseline names = %v, want nil", err)
 		}
 	})
+}
+
+// ---------------------------------------------------------------------------
+// Wave B literal line builders and assertions
+// ---------------------------------------------------------------------------
+
+// claudeInitLine is the exact Amendment 002 §5 system/init accepted-key set,
+// written as an independent literal rather than produced by the decoder.
+func claudeInitLine(session, cwd string) string {
+	return `{"type":"system","subtype":"init","session_id":"` + session +
+		`","model":"claude-opus-5-test","mcp_servers":[{"name":"verdi-context","status":"connected"}],"cwd":"` + cwd +
+		`","tools":["Task"],"permissionMode":"bypassPermissions","apiKeySource":"ANTHROPIC_API_KEY","claude_code_version":"1.2.3","slash_commands":[],"output_style":"default","agents":[],"skills":[],"plugins":[],"uuid":"u-init"}`
+}
+
+// claudeResultLine is the exact terminal result accepted-key set.
+func claudeResultLine(session, subtype string, isError bool) string {
+	return `{"type":"result","subtype":"` + subtype + `","is_error":` + strconv.FormatBool(isError) +
+		`,"result":"done","session_id":"` + session +
+		`","uuid":"u-result","duration_ms":10,"duration_api_ms":9,"num_turns":1,"total_cost_usd":0.001,"usage":{"input_tokens":1,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":1},"permission_denials":[]}`
+}
+
+// runClaudeLines streams the exact LF-delimited lines and collects until the
+// first authority boundary or terminal.
+func runClaudeLines(t *testing.T, launch sealedexec.AdapterLaunch, envRoot string, lines ...string) sealedexec.AdapterResult {
+	t.Helper()
+	var output []byte
+	for _, line := range lines {
+		output = append(output, line...)
+		output = append(output, '\n')
+	}
+	return runClaudeProcess(t, launch, envRoot, &testProbeProcess{version: launch.Request.AdapterVersion, output: output})
+}
+
+func runClaudeProcess(t *testing.T, launch sealedexec.AdapterLaunch, envRoot string, pp *testProbeProcess) sealedexec.AdapterResult {
+	t.Helper()
+	adapter, err := newClaudeTestAdapter(t, pp, newTestProcessor(t), envRoot)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	run, err := adapter.Start(context.Background(), launch)
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	return collectClaudeUntilBoundary(t, run)
+}
+
+func claudeGapPayload(t *testing.T, rows []sealedexec.NormalizedObservation) *contextevent.TelemetryGapPayload {
+	t.Helper()
+	for _, obs := range rows {
+		if payload, ok := obs.Payload.(*contextevent.TelemetryGapPayload); ok {
+			return payload
+		}
+	}
+	t.Fatalf("no telemetry-gap observation in %v", observationKindsC(rows))
+	return nil
+}
+
+func claudeErrorPayload(t *testing.T, rows []sealedexec.NormalizedObservation) *contextevent.AdapterErrorPayload {
+	t.Helper()
+	for _, obs := range rows {
+		if payload, ok := obs.Payload.(*contextevent.AdapterErrorPayload); ok {
+			return payload
+		}
+	}
+	t.Fatalf("no adapter-error observation in %v", observationKindsC(rows))
+	return nil
+}
+
+func claudeStopPayload(t *testing.T, rows []sealedexec.NormalizedObservation) *contextevent.AdapterStopPayload {
+	t.Helper()
+	for _, obs := range rows {
+		if payload, ok := obs.Payload.(*contextevent.AdapterStopPayload); ok {
+			return payload
+		}
+	}
+	t.Fatalf("no adapter-stop observation in %v", observationKindsC(rows))
+	return nil
+}
+
+func assertClaudeGapReason(t *testing.T, result sealedexec.AdapterResult, reason, operation, source string) {
+	t.Helper()
+	if result.OperationalFailure != reason {
+		t.Fatalf("operational failure = %q, want %q", result.OperationalFailure, reason)
+	}
+	if !blocksAuthorityC(result.Observations) {
+		t.Fatalf("%s must block authority: %v", reason, observationKindsC(result.Observations))
+	}
+	gap := claudeGapPayload(t, result.Observations)
+	if gap.ReasonCode != reason || gap.Source != source {
+		t.Fatalf("telemetry-gap = reason %q source %q, want %q/%q", gap.ReasonCode, gap.Source, reason, source)
+	}
+	errPayload := claudeErrorPayload(t, result.Observations)
+	if errPayload.ReasonCode != reason || errPayload.Operation != operation {
+		t.Fatalf("adapter-error = reason %q operation %q, want %q/%q", errPayload.ReasonCode, errPayload.Operation, reason, operation)
+	}
 }

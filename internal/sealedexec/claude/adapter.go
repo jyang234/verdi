@@ -26,11 +26,19 @@ const (
 	DecoderProfileV1 = "claude-stream-json-v1"
 
 	claudeSource = "claude-stream-json-v1"
+
+	// claudeProcessSource is Amendment 002 §5's telemetry-gap source for
+	// process-level (as opposed to stream-level) conditions.
+	claudeProcessSource = "claude-process"
 )
 
-// ProcessResult is the explicit terminal process result.
+// ProcessResult is the explicit terminal process result. Amendment 002 §5
+// makes nonempty stderr always operational, so the reaped child's stderr is a
+// required operand of the terminal decision. The adapter only ever hashes and
+// discards these bytes; they never reach a detail.
 type ProcessResult struct {
 	ExitCode int
+	Stderr   []byte
 }
 
 // ProcessObservation is one pull from the process boundary.
@@ -512,14 +520,16 @@ type claudeActiveRun struct {
 	initReceived    bool
 	resultReceived  bool
 
-	// Tool call tracking: call_id -> tool_name
-	pendingToolCalls map[string]string
+	// Stream-identity uniqueness within the active provider session.
+	seenMessageIDs   map[string]bool
+	pendingToolCalls map[string]string // call_id -> tool_name, still unmatched
+	closedToolCalls  map[string]bool   // call_id already answered exactly once
 
 	// Foreign sequence counter (1-based)
 	foreignSeq uint64
 
 	// Terminal buffering
-	pendingResultObs *pendingResultObservations
+	pendingResult *pendingTerminal
 
 	// Stop machinery
 	terminal      bool
@@ -531,10 +541,13 @@ type claudeActiveRun struct {
 	stopErr       error
 }
 
-// pendingResultObservations buffers the terminal result until process exit.
-type pendingResultObservations struct {
+// pendingTerminal buffers the exact terminal result until the child is reaped.
+// reason is empty for the success family and the closed provider-result reason
+// for the provider-failure family.
+type pendingTerminal struct {
+	seq          uint64
 	observations []sealedexec.NormalizedObservation
-	failure      string
+	reason       string
 }
 
 func (r *claudeActiveRun) Next(ctx context.Context) (sealedexec.AdapterResult, error) {
@@ -598,68 +611,91 @@ func (r *claudeActiveRun) Next(ctx context.Context) (sealedexec.AdapterResult, e
 	seq := r.foreignSeq
 	r.mu.Unlock()
 
+	// A record whose LF framing never completed is not a decodable frame; §5's
+	// closed reason set reduces it to malformed-foreign-frame.
 	if !item.Complete {
-		detail := r.malformedSafeDetail(ctx, item.ForeignJSON, "truncated-final-line")
-		return sealedexec.AdapterResult{
-			Observations:       r.gapObservations(detail, seq, "truncated-final-line"),
-			OperationalFailure: "truncated-final-line",
-		}, nil
+		return r.rawFailure(ctx, seq, "malformed-foreign-frame", item.ForeignJSON)
 	}
 
-	return r.normalize(ctx, item.ForeignJSON, seq), nil
+	return r.normalize(ctx, item.ForeignJSON, seq)
 }
 
+// handleProcessTerminal applies Amendment 002 §5's terminal precedence over the
+// reaped child. A success result is admitted only by exit zero, empty stderr,
+// and a fully matched tool-call set.
 func (r *claudeActiveRun) handleProcessTerminal(ctx context.Context, proc *ProcessResult) (sealedexec.AdapterResult, error) {
-	result := sealedexec.AdapterResult{Observations: []sealedexec.NormalizedObservation{}}
-
 	r.mu.Lock()
-	pending := r.pendingResultObs
+	pending := r.pendingResult
+	incomplete := len(r.pendingToolCalls) != 0
+	// §5: process-level gaps range over the terminal result's sequence, or the
+	// next foreign sequence when no result exists (EOF uses the next line).
+	gapSeq := uint64(0)
+	if pending != nil {
+		gapSeq = pending.seq
+	} else {
+		r.foreignSeq++
+		gapSeq = r.foreignSeq
+	}
 	r.mu.Unlock()
 
-	if pending == nil {
-		// No terminal result was received before process exit.
-		r.mu.Lock()
-		r.foreignSeq++
-		seq := r.foreignSeq
-		r.mu.Unlock()
-		detail := r.fixedSafeDetail(ctx, map[string]any{"reason": "missing-terminal-result"})
-		result.Observations = append(result.Observations, r.gapObservations(detail, seq, "missing-terminal-result")...)
-		result.Observations = append(result.Observations, adapterStopObservation(r.launch, proc.ExitCode, "missing-terminal-result"))
-		result.OperationalFailure = "missing-terminal-result"
-		result.Terminal = &sealedexec.AdapterTerminalResult{ExitCode: proc.ExitCode}
-		return result, nil
+	result := sealedexec.AdapterResult{
+		Observations: []sealedexec.NormalizedObservation{},
+		Terminal:     &sealedexec.AdapterTerminalResult{ExitCode: proc.ExitCode},
 	}
 
-	// Emit pending result observations.
-	result.Observations = append(result.Observations, pending.observations...)
-	if pending.failure != "" {
-		result.OperationalFailure = pending.failure
-	}
-
-	// Determine final stop.
-	if pending.failure != "" {
-		// Provider failure: adapter-stop with actual exit code.
-		result.Observations = append(result.Observations, adapterStopObservation(r.launch, proc.ExitCode, pending.failure))
-	} else {
-		// Success: only emit if exit 0 and empty stderr.
-		// (Stderr check: this adapter does not re-read stderr here;
-		//  the process boundary owns stderr handling. For test purposes,
-		//  we trust exit 0 as success.)
-		if proc.ExitCode != 0 {
-			r.mu.Lock()
-			r.foreignSeq++
-			seq := r.foreignSeq
-			r.mu.Unlock()
-			detail := r.fixedSafeDetail(ctx, map[string]any{"exit_code": proc.ExitCode, "reason": "nonzero-exit"})
-			result.Observations = append(result.Observations, r.gapObservations(detail, seq, "nonzero-exit")...)
-			result.Observations = append(result.Observations, adapterStopObservation(r.launch, proc.ExitCode, "nonzero-exit"))
-			result.OperationalFailure = "nonzero-exit"
-		} else {
-			result.Observations = append(result.Observations, adapterStopObservation(r.launch, 0, "completed"))
+	// §5 terminal precedence. No lower-priority terminal event is also emitted.
+	switch {
+	case len(proc.Stderr) != 0:
+		// Stderr is hashed while read and discarded; only the fixed digest
+		// detail may be emitted, never the bytes.
+		detail, err := r.rawSafeDetail(ctx, proc.Stderr, "provider-stderr")
+		if err != nil {
+			return sealedexec.AdapterResult{}, err
 		}
+		return r.terminalFailure(result, detail, gapSeq, "provider-stderr", proc.ExitCode), nil
+
+	case incomplete:
+		detail, err := r.fixedSafeDetail(ctx, map[string]any{"reason": "incomplete-tool-call"})
+		if err != nil {
+			return sealedexec.AdapterResult{}, err
+		}
+		return r.terminalFailure(result, detail, gapSeq, "incomplete-tool-call", proc.ExitCode), nil
+
+	case pending == nil:
+		detail, err := r.fixedSafeDetail(ctx, map[string]any{"reason": "missing-terminal-result"})
+		if err != nil {
+			return sealedexec.AdapterResult{}, err
+		}
+		return r.terminalFailure(result, detail, gapSeq, "missing-terminal-result", proc.ExitCode), nil
+
+	case pending.reason != "":
+		// Provider-declared failure: adapter-error over the exact result
+		// detail, then adapter-stop with the actual exit. No gap is defined.
+		result.Observations = append(result.Observations, pending.observations...)
+		result.Observations = append(result.Observations, adapterStopObservation(r.launch, proc.ExitCode, pending.reason))
+		result.OperationalFailure = pending.reason
+		return result, nil
+
+	case proc.ExitCode != 0:
+		detail, err := r.fixedSafeDetail(ctx, map[string]any{"exit_code": proc.ExitCode, "reason": "provider-exit-nonzero"})
+		if err != nil {
+			return sealedexec.AdapterResult{}, err
+		}
+		return r.terminalFailure(result, detail, gapSeq, "provider-exit-nonzero", proc.ExitCode), nil
 	}
-	result.Terminal = &sealedexec.AdapterTerminalResult{ExitCode: proc.ExitCode}
+
+	result.Observations = append(result.Observations, pending.observations...)
+	result.Observations = append(result.Observations, adapterStopObservation(r.launch, 0, "completed"))
 	return result, nil
+}
+
+// terminalFailure emits the fixed process gap, adapter-error, and adapter-stop
+// for one closed terminal reason and discards every lower-priority event.
+func (r *claudeActiveRun) terminalFailure(result sealedexec.AdapterResult, detail contextevent.Detail, seq uint64, reason string, exitCode int) sealedexec.AdapterResult {
+	result.Observations = append(result.Observations, r.gapObservations(detail, seq, reason, claudeProcessSource)...)
+	result.Observations = append(result.Observations, adapterStopObservation(r.launch, exitCode, reason))
+	result.OperationalFailure = reason
+	return result
 }
 
 func (r *claudeActiveRun) Stop(ctx context.Context) (sealedexec.AdapterStopResult, error) {
@@ -709,608 +745,817 @@ func (r *claudeActiveRun) stopTerminal() (sealedexec.AdapterResult, error) {
 }
 
 // ---------------------------------------------------------------------------
+// Closed stream grammar
+// ---------------------------------------------------------------------------
+
+// The exact accepted-key sets of Amendment 002 §5. Every family is decoded
+// with DisallowUnknownFields into these types; required keys are pointers so an
+// absent key is distinguishable from a present zero value. No family is ever
+// accepted through a map-shaped read.
+
+type claudeMCPRow struct {
+	Name   *string `json:"name"`
+	Status *string `json:"status"`
+}
+
+type claudeInitFrame struct {
+	Type              *string            `json:"type"`
+	Subtype           *string            `json:"subtype"`
+	SessionID         *string            `json:"session_id"`
+	Model             *string            `json:"model"`
+	MCPServers        *[]claudeMCPRow    `json:"mcp_servers"`
+	CWD               *string            `json:"cwd"`
+	Tools             *[]string          `json:"tools"`
+	PermissionMode    *string            `json:"permissionMode"`
+	APIKeySource      *string            `json:"apiKeySource"`
+	ClaudeCodeVersion *string            `json:"claude_code_version"`
+	SlashCommands     *[]string          `json:"slash_commands"`
+	OutputStyle       *string            `json:"output_style"`
+	Agents            *[]string          `json:"agents"`
+	Skills            *[]string          `json:"skills"`
+	Plugins           *[]json.RawMessage `json:"plugins"`
+	UUID              *string            `json:"uuid"`
+}
+
+type claudeRetryError struct {
+	Type    *string `json:"type"`
+	Message *string `json:"message"`
+}
+
+type claudeRetryFrame struct {
+	Type         *string           `json:"type"`
+	Subtype      *string           `json:"subtype"`
+	Attempt      *uint64           `json:"attempt"`
+	MaxRetries   *uint64           `json:"max_retries"`
+	RetryDelayMS *uint64           `json:"retry_delay_ms"`
+	Error        *claudeRetryError `json:"error"`
+	UUID         *string           `json:"uuid"`
+	SessionID    *string           `json:"session_id"`
+}
+
+type claudeUsage struct {
+	InputTokens              *uint64 `json:"input_tokens"`
+	CacheCreationInputTokens *uint64 `json:"cache_creation_input_tokens"`
+	CacheReadInputTokens     *uint64 `json:"cache_read_input_tokens"`
+	OutputTokens             *uint64 `json:"output_tokens"`
+	ServiceTier              *string `json:"service_tier"`
+}
+
+type claudeAssistantMessage struct {
+	ID           *string            `json:"id"`
+	Type         *string            `json:"type"`
+	Role         *string            `json:"role"`
+	Model        *string            `json:"model"`
+	Content      *[]json.RawMessage `json:"content"`
+	Usage        *json.RawMessage   `json:"usage"`
+	StopReason   *string            `json:"stop_reason"`
+	StopSequence *string            `json:"stop_sequence"`
+}
+
+type claudeAssistantFrame struct {
+	Type            *string                 `json:"type"`
+	SessionID       *string                 `json:"session_id"`
+	UUID            *string                 `json:"uuid"`
+	Message         *claudeAssistantMessage `json:"message"`
+	ParentToolUseID *string                 `json:"parent_tool_use_id"`
+}
+
+type claudeUserMessage struct {
+	Role    *string            `json:"role"`
+	Content *[]json.RawMessage `json:"content"`
+}
+
+type claudeUserFrame struct {
+	Type            *string            `json:"type"`
+	SessionID       *string            `json:"session_id"`
+	UUID            *string            `json:"uuid"`
+	Message         *claudeUserMessage `json:"message"`
+	ParentToolUseID *string            `json:"parent_tool_use_id"`
+	ToolUseResult   *json.RawMessage   `json:"tool_use_result"`
+}
+
+type claudeResultFrame struct {
+	Type              *string          `json:"type"`
+	Subtype           *string          `json:"subtype"`
+	IsError           *bool            `json:"is_error"`
+	Result            *string          `json:"result"`
+	SessionID         *string          `json:"session_id"`
+	UUID              *string          `json:"uuid"`
+	DurationMS        *uint64          `json:"duration_ms"`
+	DurationAPIMS     *uint64          `json:"duration_api_ms"`
+	NumTurns          *uint64          `json:"num_turns"`
+	TotalCostUSD      *json.RawMessage `json:"total_cost_usd"`
+	Usage             *json.RawMessage `json:"usage"`
+	PermissionDenials *json.RawMessage `json:"permission_denials"`
+	ModelUsage        *json.RawMessage `json:"modelUsage"`
+}
+
+type claudePermissionDenial struct {
+	ToolName  *string          `json:"tool_name"`
+	ToolUseID *string          `json:"tool_use_id"`
+	ToolInput *json.RawMessage `json:"tool_input"`
+}
+
+type claudeBlockDiscriminator struct {
+	Type *string `json:"type"`
+}
+
+type claudeTextBlock struct {
+	Type *string `json:"type"`
+	Text *string `json:"text"`
+}
+
+type claudeToolUseBlock struct {
+	Type  *string          `json:"type"`
+	ID    *string          `json:"id"`
+	Name  *string          `json:"name"`
+	Input *json.RawMessage `json:"input"`
+}
+
+type claudeThinkingBlock struct {
+	Type      *string `json:"type"`
+	Thinking  *string `json:"thinking"`
+	Signature *string `json:"signature"`
+}
+
+type claudeRedactedThinkingBlock struct {
+	Type *string `json:"type"`
+	Data *string `json:"data"`
+}
+
+type claudeToolResultBlock struct {
+	Type      *string          `json:"type"`
+	ToolUseID *string          `json:"tool_use_id"`
+	Content   *json.RawMessage `json:"content"`
+	IsError   *bool            `json:"is_error"`
+}
+
+// strictDecodeReason decodes raw into target with unknown-field rejection and
+// trailing-data rejection. It returns "" on success or the closed §5 decode
+// reason that describes the refusal.
+func strictDecodeReason(raw []byte, target any) string {
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(target); err != nil {
+		if strings.Contains(err.Error(), "unknown field") {
+			return "unknown-foreign-field"
+		}
+		return "invalid-foreign-field"
+	}
+	if decoder.More() {
+		return "malformed-foreign-frame"
+	}
+	return ""
+}
+
+// validUniqueStrings proves a non-null array of unique nonempty UTF-8 strings.
+func validUniqueStrings(values *[]string) bool {
+	if values == nil {
+		return false
+	}
+	seen := make(map[string]struct{}, len(*values))
+	for _, value := range *values {
+		if value == "" || !utf8.ValidString(value) {
+			return false
+		}
+		if _, duplicate := seen[value]; duplicate {
+			return false
+		}
+		seen[value] = struct{}{}
+	}
+	return true
+}
+
+// validateUsage proves §5's exact nonnegative-integer usage object.
+func validateUsage(raw *json.RawMessage) string {
+	if raw == nil {
+		return "missing-foreign-field"
+	}
+	var usage claudeUsage
+	if reason := strictDecodeReason(*raw, &usage); reason != "" {
+		return reason
+	}
+	if usage.InputTokens == nil || usage.CacheCreationInputTokens == nil ||
+		usage.CacheReadInputTokens == nil || usage.OutputTokens == nil {
+		return "missing-foreign-field"
+	}
+	if usage.ServiceTier != nil {
+		switch *usage.ServiceTier {
+		case "standard", "priority", "batch":
+		default:
+			return "invalid-foreign-field"
+		}
+	}
+	return ""
+}
+
+// ---------------------------------------------------------------------------
 // Normalization
 // ---------------------------------------------------------------------------
 
-func (r *claudeActiveRun) normalize(ctx context.Context, line []byte, seq uint64) sealedexec.AdapterResult {
-	result := sealedexec.AdapterResult{Observations: []sealedexec.NormalizedObservation{}}
-
+func (r *claudeActiveRun) normalize(ctx context.Context, line []byte, seq uint64) (sealedexec.AdapterResult, error) {
 	if len(line) == 0 {
-		detail := r.malformedSafeDetail(ctx, line, "empty-foreign-record")
-		result.Observations = r.gapObservations(detail, seq, "empty-foreign-record")
-		result.OperationalFailure = "empty-foreign-record"
-		return result
+		return r.rawFailure(ctx, seq, "empty-foreign-record", line)
 	}
 
+	// Unique-key strict JSON is the only admissible frame shape. The decoded
+	// object is used solely to read the type/subtype discriminators; every
+	// acceptance below is a closed struct decode of the same bytes.
 	object, err := sealedexec.DecodeUniqueJSONObject(line)
 	if err != nil {
-		detail := r.malformedSafeDetail(ctx, line, "malformed-foreign-frame")
-		result.Observations = r.gapObservations(detail, seq, "malformed-foreign-frame")
-		result.OperationalFailure = "malformed-foreign-frame"
-		return result
+		return r.rawFailure(ctx, seq, "malformed-foreign-frame", line)
 	}
 
 	outer, ok := nonemptyString(object["type"])
 	if !ok {
-		detail := r.fixedSafeDetail(ctx, map[string]any{"reason": "missing-foreign-field", "field": "type"})
-		result.Observations = r.gapObservations(detail, seq, "missing-foreign-field")
-		result.OperationalFailure = "missing-foreign-field"
-		return result
+		return r.decodeFailure(ctx, seq, "missing-foreign-field", map[string]any{"field": "type"})
 	}
-
 	subtype, _ := nonemptyString(object["subtype"])
-	family := outer
-	if subtype != "" {
-		family = outer + "/" + subtype
-	}
 
-	// Check global state machine constraints.
 	r.mu.Lock()
 	initReceived := r.initReceived
 	resultReceived := r.resultReceived
 	r.mu.Unlock()
 
 	if outer == "result" && !initReceived {
-		detail := r.fixedSafeDetail(ctx, map[string]any{"reason": "result-before-init", "family": family})
-		result.Observations = r.gapObservations(detail, seq, "result-before-init")
-		result.OperationalFailure = "result-before-init"
-		return result
+		return r.decodeFailure(ctx, seq, "result-before-init", nil)
+	}
+	if resultReceived {
+		return r.decodeFailure(ctx, seq, "observation-after-result", nil)
 	}
 
-	if resultReceived && outer != "result" {
-		detail := r.fixedSafeDetail(ctx, map[string]any{"reason": "observation-after-result", "family": family})
-		result.Observations = r.gapObservations(detail, seq, "observation-after-result")
-		result.OperationalFailure = "observation-after-result"
-		return result
-	}
-
-	if outer == "system" && subtype == "init" {
+	switch {
+	case outer == "system" && subtype == "init":
 		if initReceived {
-			detail := r.fixedSafeDetail(ctx, map[string]any{"reason": "duplicate-init"})
-			result.Observations = r.gapObservations(detail, seq, "duplicate-init")
-			result.OperationalFailure = "duplicate-init"
-			return result
+			return r.decodeFailure(ctx, seq, "duplicate-init", nil)
 		}
-		return r.handleInit(ctx, object, seq)
+		return r.handleInit(ctx, line, seq)
+	case outer == "system" && subtype == "api_retry":
+		return r.handleRetry(ctx, line, seq)
+	case outer == "assistant" && subtype == "":
+		return r.handleAssistant(ctx, line, seq)
+	case outer == "user" && subtype == "":
+		return r.handleToolResult(ctx, line, seq)
+	case outer == "result":
+		return r.handleResult(ctx, line, seq)
 	}
-
-	if outer == "system" && subtype == "api_retry" {
-		return r.handleRetry(ctx, object, seq)
-	}
-
-	if outer == "assistant" {
-		return r.handleAssistant(ctx, object, seq)
-	}
-
-	if outer == "user" {
-		return r.handleToolResult(ctx, object, seq)
-	}
-
-	if outer == "result" {
-		if resultReceived {
-			detail := r.fixedSafeDetail(ctx, map[string]any{"reason": "duplicate-result"})
-			result.Observations = r.gapObservations(detail, seq, "duplicate-result")
-			result.OperationalFailure = "duplicate-result"
-			return result
-		}
-		return r.handleResult(ctx, object, seq)
-	}
-
-	// Unknown family
-	detail := r.fixedSafeDetail(ctx, map[string]any{"reason": "unknown-foreign-family", "type": outer})
-	result.Observations = r.gapObservations(detail, seq, "unknown-foreign-family")
-	result.OperationalFailure = "unknown-foreign-family"
-	return result
+	return r.decodeFailure(ctx, seq, "unknown-foreign-family", nil)
 }
 
 // ---------------------------------------------------------------------------
 // Family handlers
 // ---------------------------------------------------------------------------
 
-func (r *claudeActiveRun) handleInit(ctx context.Context, object map[string]any, seq uint64) sealedexec.AdapterResult {
-	result := sealedexec.AdapterResult{Observations: []sealedexec.NormalizedObservation{}}
-
-	sessionID, ok := nonemptyString(object["session_id"])
-	if !ok {
-		detail := r.fixedSafeDetail(ctx, map[string]any{"reason": "missing-foreign-field", "field": "session_id"})
-		return sealedexec.AdapterResult{Observations: r.gapObservations(detail, seq, "missing-foreign-field"), OperationalFailure: "missing-foreign-field"}
+func (r *claudeActiveRun) handleInit(ctx context.Context, line []byte, seq uint64) (sealedexec.AdapterResult, error) {
+	var frame claudeInitFrame
+	if reason := strictDecodeReason(line, &frame); reason != "" {
+		return r.decodeFailure(ctx, seq, reason, map[string]any{"family": "system/init"})
+	}
+	if frame.Type == nil || frame.Subtype == nil || frame.SessionID == nil || frame.Model == nil ||
+		frame.MCPServers == nil || frame.CWD == nil || frame.Tools == nil || frame.PermissionMode == nil ||
+		frame.APIKeySource == nil || frame.ClaudeCodeVersion == nil || frame.SlashCommands == nil ||
+		frame.OutputStyle == nil || frame.Agents == nil || frame.Skills == nil || frame.Plugins == nil ||
+		frame.UUID == nil {
+		return r.decodeFailure(ctx, seq, "missing-foreign-field", map[string]any{"family": "system/init"})
+	}
+	if *frame.Type != "system" || *frame.Subtype != "init" {
+		return r.decodeFailure(ctx, seq, "invalid-foreign-field", map[string]any{"field": "type"})
 	}
 
-	model, ok := nonemptyString(object["model"])
-	if !ok {
-		detail := r.fixedSafeDetail(ctx, map[string]any{"reason": "missing-foreign-field", "field": "model"})
-		return sealedexec.AdapterResult{Observations: r.gapObservations(detail, seq, "missing-foreign-field"), OperationalFailure: "missing-foreign-field"}
+	sessionID := *frame.SessionID
+	if !nonemptyStringValue(sessionID) || !nonemptyStringValue(*frame.UUID) {
+		return r.decodeFailure(ctx, seq, "invalid-foreign-field", map[string]any{"field": "session_id"})
+	}
+	if *frame.Model != r.launch.Profile.Model {
+		return r.decodeFailure(ctx, seq, "model-mismatch", nil)
+	}
+	if reason := validateInitMCPServers(*frame.MCPServers); reason != "" {
+		return r.decodeFailure(ctx, seq, reason, nil)
+	}
+	if *frame.CWD != r.launch.Workspace.Path {
+		return r.decodeFailure(ctx, seq, "invalid-foreign-field", map[string]any{"field": "cwd"})
+	}
+	if *frame.ClaudeCodeVersion != r.launch.Request.AdapterVersion {
+		return r.decodeFailure(ctx, seq, "invalid-foreign-field", map[string]any{"field": "claude_code_version"})
+	}
+	if *frame.PermissionMode != "bypassPermissions" {
+		return r.decodeFailure(ctx, seq, "invalid-foreign-field", map[string]any{"field": "permissionMode"})
+	}
+	if *frame.APIKeySource != "ANTHROPIC_API_KEY" {
+		return r.decodeFailure(ctx, seq, "invalid-foreign-field", map[string]any{"field": "apiKeySource"})
+	}
+	if *frame.OutputStyle != "default" {
+		return r.decodeFailure(ctx, seq, "invalid-foreign-field", map[string]any{"field": "output_style"})
+	}
+	if !validUniqueStrings(frame.Tools) || !validUniqueStrings(frame.SlashCommands) ||
+		!validUniqueStrings(frame.Agents) || !validUniqueStrings(frame.Skills) {
+		return r.decodeFailure(ctx, seq, "invalid-foreign-field", map[string]any{"field": "tools"})
+	}
+	if len(*frame.Plugins) != 0 {
+		return r.decodeFailure(ctx, seq, "invalid-foreign-field", map[string]any{"field": "plugins"})
+	}
+	if !r.start && sessionID != r.expectedSession {
+		return r.decodeFailure(ctx, seq, "session-mismatch", nil)
 	}
 
-	// §5: observed model equals the exact resolved profile model.
-	profileModel := r.launch.Profile.Model
-	if model != profileModel {
-		detail := r.fixedSafeDetail(ctx, map[string]any{"reason": "model-mismatch", "observed": model, "expected": profileModel})
-		return sealedexec.AdapterResult{Observations: r.gapObservations(detail, seq, "model-mismatch"), OperationalFailure: "model-mismatch"}
-	}
-
-	// §5: MCP inventory is exactly the scoped server.
-	if reason := validateInitMCPServers(object); reason != "" {
-		detail := r.fixedSafeDetail(ctx, map[string]any{"reason": reason})
-		return sealedexec.AdapterResult{Observations: r.gapObservations(detail, seq, reason), OperationalFailure: reason}
-	}
-
-	// §5: permission mode is bypassPermissions.
-	permMode, _ := nonemptyString(object["permissionMode"])
-	if permMode != "bypassPermissions" {
-		detail := r.fixedSafeDetail(ctx, map[string]any{"reason": "invalid-foreign-field", "field": "permissionMode"})
-		return sealedexec.AdapterResult{Observations: r.gapObservations(detail, seq, "invalid-foreign-field"), OperationalFailure: "invalid-foreign-field"}
-	}
-
-	// §5: plugins is the required empty array.
-	plugins, pluginsOK := object["plugins"]
-	if !pluginsOK {
-		detail := r.fixedSafeDetail(ctx, map[string]any{"reason": "missing-foreign-field", "field": "plugins"})
-		return sealedexec.AdapterResult{Observations: r.gapObservations(detail, seq, "missing-foreign-field"), OperationalFailure: "missing-foreign-field"}
-	}
-	pluginsArr, _ := plugins.([]any)
-	if len(pluginsArr) != 0 {
-		detail := r.fixedSafeDetail(ctx, map[string]any{"reason": "invalid-foreign-field", "field": "plugins"})
-		return sealedexec.AdapterResult{Observations: r.gapObservations(detail, seq, "invalid-foreign-field"), OperationalFailure: "invalid-foreign-field"}
-	}
-
-	// Resume: check session matches.
-	if !r.start {
-		if sessionID != r.expectedSession {
-			detail := r.fixedSafeDetail(ctx, map[string]any{"reason": "session-mismatch"})
-			return sealedexec.AdapterResult{Observations: r.gapObservations(detail, seq, "session-mismatch"), OperationalFailure: "session-mismatch"}
-		}
-	}
-
-	// §3: extract provider session and add to protected-value set BEFORE redacting I.
+	// §5: extract the provider session and protect it before I is redacted.
 	r.mu.Lock()
 	r.initReceived = true
 	r.providerSession = sessionID
-	// Add session ID to protected values for variable detail redaction.
 	r.protectedValues = append(r.protectedValues, []byte(sessionID))
 	protectedValues := append([][]byte(nil), r.protectedValues...)
 	r.mu.Unlock()
 
-	// Build I = {family:"system/init", model, mcp_servers, permission_mode, session_id}.
-	mcpServersRedacted := []map[string]string{{"name": "verdi-context", "status": "connected"}}
-	initPayloadObj := map[string]any{
+	initDetailSource := map[string]any{
 		"family":          "system/init",
-		"mcp_servers":     mcpServersRedacted,
-		"model":           model,
-		"permission_mode": permMode,
+		"mcp_servers":     []map[string]string{{"name": "verdi-context", "status": "connected"}},
+		"model":           *frame.Model,
+		"permission_mode": *frame.PermissionMode,
 		"session_id":      sessionID,
 	}
-	initDetail, err := r.processDetail(ctx, initPayloadObj, protectedValues)
+	detail, err := r.processDetail(ctx, initDetailSource, protectedValues)
 	if err != nil {
-		detail := r.fixedSafeDetail(ctx, map[string]any{"reason": "redaction-failed"})
-		return sealedexec.AdapterResult{Observations: r.gapObservations(detail, seq, "redaction-failed"), OperationalFailure: "redaction-failed"}
+		return r.decodeFailure(ctx, seq, "redaction-failed", nil)
 	}
 
-	// Build adapter-start (nil detail for builder; non-nil only for review).
-	adapterStart := buildAdapterStart(r.launch, nil)
-	initSummary := buildProviderSummary(r.launch, "system/init", initDetail.Digest, contextevent.AuthorityAdvisory, initDetail)
-
-	result.ObservedSessionRef = sessionID
-	result.Observations = []sealedexec.NormalizedObservation{}
-
-	// Resume emits: resume, adapter-start, provider-summary.
-	// Start emits: adapter-start, provider-summary.
-	if !r.start {
-		resumeObs := buildResumeObservation(r.launch, initDetail)
-		result.Observations = append(result.Observations, resumeObs)
-	}
-	result.Observations = append(result.Observations, adapterStart, initSummary)
-	return result
+	// Amendment 002 §7 and the Codex ruling reserve the resume observation for
+	// the acknowledged-prefix owner. The adapter never invents one.
+	return sealedexec.AdapterResult{
+		ObservedSessionRef: sessionID,
+		Observations: []sealedexec.NormalizedObservation{
+			buildAdapterStart(r.launch, nil),
+			buildProviderSummary(r.launch, "system/init", detail.Digest, contextevent.AuthorityAdvisory, detail),
+		},
+	}, nil
 }
 
-func (r *claudeActiveRun) handleRetry(ctx context.Context, object map[string]any, seq uint64) sealedexec.AdapterResult {
-	// Validate required fields.
-	attempt, attemptOK := uintValueF(object["attempt"])
-	maxRetries, maxRetriesOK := uintValueF(object["max_retries"])
-	retryDelay, retryDelayOK := uintValueF(object["retry_delay_ms"])
-	uuid, uuidOK := nonemptyString(object["uuid"])
-	sessionID, sessionOK := nonemptyString(object["session_id"])
-	errorObj, errorOK := object["error"].(map[string]any)
-	errorCategory, categoryOK := nonemptyString(errorObj["type"])
-
-	if !attemptOK || !maxRetriesOK || !retryDelayOK || !uuidOK || !sessionOK || !errorOK || !categoryOK ||
-		attempt == 0 || maxRetries == 0 || attempt > maxRetries {
-		detail := r.fixedSafeDetail(ctx, map[string]any{"reason": "missing-foreign-field", "family": "system/api_retry"})
-		return sealedexec.AdapterResult{Observations: r.gapObservations(detail, seq, "missing-foreign-field"), OperationalFailure: "missing-foreign-field"}
+func (r *claudeActiveRun) handleRetry(ctx context.Context, line []byte, seq uint64) (sealedexec.AdapterResult, error) {
+	var frame claudeRetryFrame
+	if reason := strictDecodeReason(line, &frame); reason != "" {
+		return r.decodeFailure(ctx, seq, reason, map[string]any{"family": "system/api_retry"})
 	}
-
-	// Validate error category.
-	validCategories := map[string]bool{
-		"authentication": true, "billing": true, "rate_limit": true,
-		"server": true, "network": true, "unknown": true,
+	if frame.Type == nil || frame.Subtype == nil || frame.Attempt == nil || frame.MaxRetries == nil ||
+		frame.RetryDelayMS == nil || frame.Error == nil || frame.UUID == nil || frame.SessionID == nil ||
+		frame.Error.Type == nil || frame.Error.Message == nil {
+		return r.decodeFailure(ctx, seq, "missing-foreign-field", map[string]any{"family": "system/api_retry"})
 	}
-	if !validCategories[errorCategory] {
-		detail := r.fixedSafeDetail(ctx, map[string]any{"reason": "invalid-foreign-field", "field": "error.type"})
-		return sealedexec.AdapterResult{Observations: r.gapObservations(detail, seq, "invalid-foreign-field"), OperationalFailure: "invalid-foreign-field"}
+	if *frame.Type != "system" || *frame.Subtype != "api_retry" {
+		return r.decodeFailure(ctx, seq, "invalid-foreign-field", map[string]any{"field": "type"})
+	}
+	if *frame.Attempt == 0 || *frame.MaxRetries == 0 || *frame.Attempt > *frame.MaxRetries ||
+		!nonemptyStringValue(*frame.UUID) || !utf8.ValidString(*frame.Error.Message) {
+		return r.decodeFailure(ctx, seq, "invalid-foreign-field", map[string]any{"family": "system/api_retry"})
+	}
+	switch *frame.Error.Type {
+	case "authentication", "billing", "rate_limit", "server", "network", "unknown":
+	default:
+		return r.decodeFailure(ctx, seq, "invalid-foreign-field", map[string]any{"field": "error.type"})
 	}
 
 	r.mu.Lock()
 	currentSession := r.providerSession
 	protectedValues := append([][]byte(nil), r.protectedValues...)
 	r.mu.Unlock()
-
-	if sessionID != currentSession {
-		detail := r.fixedSafeDetail(ctx, map[string]any{"reason": "session-mismatch"})
-		return sealedexec.AdapterResult{Observations: r.gapObservations(detail, seq, "session-mismatch"), OperationalFailure: "session-mismatch"}
+	if *frame.SessionID != currentSession {
+		return r.decodeFailure(ctx, seq, "session-mismatch", nil)
 	}
 
-	// D = {family:"system/api_retry", attempt, max_retries, retry_delay_ms, error_category, uuid, session_id}
-	retryDetailObj := map[string]any{
-		"attempt":        attempt,
-		"error_category": errorCategory,
+	retryDetailSource := map[string]any{
+		"attempt":        *frame.Attempt,
+		"error_category": *frame.Error.Type,
 		"family":         "system/api_retry",
-		"max_retries":    maxRetries,
-		"retry_delay_ms": retryDelay,
-		"session_id":     sessionID,
-		"uuid":           uuid,
+		"max_retries":    *frame.MaxRetries,
+		"retry_delay_ms": *frame.RetryDelayMS,
+		"session_id":     *frame.SessionID,
+		"uuid":           *frame.UUID,
 	}
-	detail, err := r.processDetail(ctx, retryDetailObj, protectedValues)
+	detail, err := r.processDetail(ctx, retryDetailSource, protectedValues)
 	if err != nil {
-		safeDetail := r.fixedSafeDetail(ctx, map[string]any{"reason": "redaction-failed"})
-		return sealedexec.AdapterResult{Observations: r.gapObservations(safeDetail, seq, "redaction-failed"), OperationalFailure: "redaction-failed"}
+		return r.decodeFailure(ctx, seq, "redaction-failed", nil)
 	}
 
-	reasonCode := "provider-api-" + errorCategory
 	schema, _ := contextevent.PayloadSchema(contextevent.KindRetry)
-	retryPayload := &contextevent.RetryPayload{
-		Schema:           schema,
-		ReasonCode:       reasonCode,
-		PriorSession:     currentSession,
-		NextSession:      currentSession,
-		ContinuityDigest: detail.Digest,
+	retryObs := sealedexec.NormalizedObservation{
+		Kind: contextevent.KindRetry,
+		Payload: &contextevent.RetryPayload{
+			Schema:           schema,
+			ReasonCode:       "provider-api-" + *frame.Error.Type,
+			PriorSession:     currentSession,
+			NextSession:      currentSession,
+			ContinuityDigest: detail.Digest,
+		},
+		ForeignDetail: detail,
 	}
-	retryObs := sealedexec.NormalizedObservation{Kind: contextevent.KindRetry, Payload: retryPayload, ForeignDetail: detail}
-	summaryObs := buildProviderSummary(r.launch, "api-retry/"+fmt.Sprintf("%d", attempt), detail.Digest, contextevent.AuthorityAdvisory, detail)
-	return sealedexec.AdapterResult{Observations: []sealedexec.NormalizedObservation{retryObs, summaryObs}}
+	summaryObs := buildProviderSummary(r.launch, fmt.Sprintf("api-retry/%d", *frame.Attempt), detail.Digest, contextevent.AuthorityAdvisory, detail)
+	return sealedexec.AdapterResult{Observations: []sealedexec.NormalizedObservation{retryObs, summaryObs}}, nil
 }
 
-func (r *claudeActiveRun) handleAssistant(ctx context.Context, object map[string]any, seq uint64) sealedexec.AdapterResult {
-	result := sealedexec.AdapterResult{Observations: []sealedexec.NormalizedObservation{}}
-
-	sessionID, ok := nonemptyString(object["session_id"])
-	if !ok {
-		detail := r.fixedSafeDetail(ctx, map[string]any{"reason": "missing-foreign-field", "field": "session_id"})
-		return sealedexec.AdapterResult{Observations: r.gapObservations(detail, seq, "missing-foreign-field"), OperationalFailure: "missing-foreign-field"}
+func (r *claudeActiveRun) handleAssistant(ctx context.Context, line []byte, seq uint64) (sealedexec.AdapterResult, error) {
+	var frame claudeAssistantFrame
+	if reason := strictDecodeReason(line, &frame); reason != "" {
+		return r.decodeFailure(ctx, seq, reason, map[string]any{"family": "assistant"})
 	}
+	if frame.Type == nil || frame.SessionID == nil || frame.UUID == nil || frame.Message == nil {
+		return r.decodeFailure(ctx, seq, "missing-foreign-field", map[string]any{"family": "assistant"})
+	}
+	message := frame.Message
+	if message.ID == nil || message.Type == nil || message.Role == nil || message.Model == nil ||
+		message.Content == nil || message.Usage == nil {
+		return r.decodeFailure(ctx, seq, "missing-foreign-field", map[string]any{"family": "assistant"})
+	}
+	if *frame.Type != "assistant" || *message.Type != "message" {
+		return r.decodeFailure(ctx, seq, "invalid-foreign-field", map[string]any{"field": "type"})
+	}
+	if *message.Role != "assistant" {
+		return r.decodeFailure(ctx, seq, "invalid-foreign-field", map[string]any{"field": "message.role"})
+	}
+	if !nonemptyStringValue(*message.ID) || !nonemptyStringValue(*frame.UUID) {
+		return r.decodeFailure(ctx, seq, "invalid-foreign-field", map[string]any{"field": "message.id"})
+	}
+	if *message.Model != r.launch.Profile.Model {
+		return r.decodeFailure(ctx, seq, "model-mismatch", nil)
+	}
+	if reason := validateUsage(message.Usage); reason != "" {
+		return r.decodeFailure(ctx, seq, reason, map[string]any{"field": "message.usage"})
+	}
+
 	r.mu.Lock()
 	currentSession := r.providerSession
 	protectedValues := append([][]byte(nil), r.protectedValues...)
+	duplicateMessage := r.seenMessageIDs[*message.ID]
+	if !duplicateMessage {
+		if r.seenMessageIDs == nil {
+			r.seenMessageIDs = make(map[string]bool)
+		}
+		r.seenMessageIDs[*message.ID] = true
+	}
 	r.mu.Unlock()
-	if sessionID != currentSession {
-		detail := r.fixedSafeDetail(ctx, map[string]any{"reason": "session-mismatch"})
-		return sealedexec.AdapterResult{Observations: r.gapObservations(detail, seq, "session-mismatch"), OperationalFailure: "session-mismatch"}
+
+	if *frame.SessionID != currentSession {
+		return r.decodeFailure(ctx, seq, "session-mismatch", nil)
+	}
+	// §5: a repeated provider message id is a stream contradiction.
+	if duplicateMessage {
+		return r.decodeFailure(ctx, seq, "duplicate-message-id", nil)
 	}
 
-	message, ok := object["message"].(map[string]any)
-	if !ok {
-		detail := r.fixedSafeDetail(ctx, map[string]any{"reason": "missing-foreign-field", "field": "message"})
-		return sealedexec.AdapterResult{Observations: r.gapObservations(detail, seq, "missing-foreign-field"), OperationalFailure: "missing-foreign-field"}
-	}
-	messageID, ok := nonemptyString(message["id"])
-	if !ok {
-		detail := r.fixedSafeDetail(ctx, map[string]any{"reason": "missing-foreign-field", "field": "message.id"})
-		return sealedexec.AdapterResult{Observations: r.gapObservations(detail, seq, "missing-foreign-field"), OperationalFailure: "missing-foreign-field"}
-	}
-	role, _ := nonemptyString(message["role"])
-	if role != "assistant" {
-		detail := r.fixedSafeDetail(ctx, map[string]any{"reason": "invalid-foreign-field", "field": "message.role"})
-		return sealedexec.AdapterResult{Observations: r.gapObservations(detail, seq, "invalid-foreign-field"), OperationalFailure: "invalid-foreign-field"}
-	}
-	msgModel, _ := nonemptyString(message["model"])
-	if msgModel != r.launch.Profile.Model {
-		detail := r.fixedSafeDetail(ctx, map[string]any{"reason": "model-mismatch"})
-		return sealedexec.AdapterResult{Observations: r.gapObservations(detail, seq, "model-mismatch"), OperationalFailure: "model-mismatch"}
-	}
-	content, ok := message["content"].([]any)
-	if !ok {
-		detail := r.fixedSafeDetail(ctx, map[string]any{"reason": "missing-foreign-field", "field": "message.content"})
-		return sealedexec.AdapterResult{Observations: r.gapObservations(detail, seq, "missing-foreign-field"), OperationalFailure: "missing-foreign-field"}
-	}
-
-	for blockIndex, blockAny := range content {
-		block, ok := blockAny.(map[string]any)
-		if !ok {
-			detail := r.fixedSafeDetail(ctx, map[string]any{"reason": "malformed-foreign-frame", "field": "content_block"})
-			return sealedexec.AdapterResult{Observations: r.gapObservations(detail, seq, "malformed-foreign-frame"), OperationalFailure: "malformed-foreign-frame"}
+	messageID := *message.ID
+	observations := []sealedexec.NormalizedObservation{}
+	for blockIndex, rawBlock := range *message.Content {
+		var discriminator claudeBlockDiscriminator
+		if err := json.Unmarshal(rawBlock, &discriminator); err != nil || discriminator.Type == nil {
+			return r.decodeFailure(ctx, seq, "unknown-content-block", nil)
 		}
-		blockType, ok := nonemptyString(block["type"])
-		if !ok {
-			detail := r.fixedSafeDetail(ctx, map[string]any{"reason": "missing-foreign-field", "field": "content_block.type"})
-			return sealedexec.AdapterResult{Observations: r.gapObservations(detail, seq, "missing-foreign-field"), OperationalFailure: "missing-foreign-field"}
-		}
-
-		switch blockType {
+		switch *discriminator.Type {
 		case "text":
-			text, ok := block["text"].(string)
-			if !ok || text == "" {
-				detail := r.fixedSafeDetail(ctx, map[string]any{"reason": "missing-foreign-field", "field": "text"})
-				return sealedexec.AdapterResult{Observations: r.gapObservations(detail, seq, "missing-foreign-field"), OperationalFailure: "missing-foreign-field"}
+			var block claudeTextBlock
+			if reason := strictDecodeReason(rawBlock, &block); reason != "" {
+				return r.decodeFailure(ctx, seq, reason, map[string]any{"field": "content.text"})
 			}
-			// D = {family:"assistant/text", message_id, block_index, text}
-			detailObj := map[string]any{
+			if block.Text == nil {
+				return r.decodeFailure(ctx, seq, "missing-foreign-field", map[string]any{"field": "content.text"})
+			}
+			if *block.Text == "" || !utf8.ValidString(*block.Text) {
+				return r.decodeFailure(ctx, seq, "invalid-foreign-field", map[string]any{"field": "content.text"})
+			}
+			detail, err := r.processDetail(ctx, map[string]any{
 				"block_index": float64(blockIndex),
 				"family":      "assistant/text",
 				"message_id":  messageID,
-				"text":        text,
-			}
-			detail, err := r.processDetail(ctx, detailObj, protectedValues)
+				"text":        *block.Text,
+			}, protectedValues)
 			if err != nil {
-				safeDetail := r.fixedSafeDetail(ctx, map[string]any{"reason": "redaction-failed"})
-				return sealedexec.AdapterResult{Observations: r.gapObservations(safeDetail, seq, "redaction-failed"), OperationalFailure: "redaction-failed"}
+				return r.decodeFailure(ctx, seq, "redaction-failed", nil)
 			}
-			compoundID := fmt.Sprintf("%s:%d", messageID, blockIndex)
 			schema, _ := contextevent.PayloadSchema(contextevent.KindProviderMessage)
-			msgPayload := &contextevent.ProviderMessagePayload{
-				Schema:        schema,
-				MessageID:     compoundID,
-				Role:          "assistant",
-				MessageDigest: detail.Digest,
-				Detail:        detail,
-			}
-			result.Observations = append(result.Observations, sealedexec.NormalizedObservation{Kind: contextevent.KindProviderMessage, ForeignDetail: detail, Payload: msgPayload})
+			observations = append(observations, sealedexec.NormalizedObservation{
+				Kind:          contextevent.KindProviderMessage,
+				ForeignDetail: detail,
+				Payload: &contextevent.ProviderMessagePayload{
+					Schema:        schema,
+					MessageID:     fmt.Sprintf("%s:%d", messageID, blockIndex),
+					Role:          "assistant",
+					MessageDigest: detail.Digest,
+					Detail:        detail,
+				},
+			})
 
 		case "tool_use":
-			callID, ok := nonemptyString(block["id"])
-			if !ok {
-				detail := r.fixedSafeDetail(ctx, map[string]any{"reason": "missing-foreign-field", "field": "tool_use.id"})
-				return sealedexec.AdapterResult{Observations: r.gapObservations(detail, seq, "missing-foreign-field"), OperationalFailure: "missing-foreign-field"}
+			var block claudeToolUseBlock
+			if reason := strictDecodeReason(rawBlock, &block); reason != "" {
+				return r.decodeFailure(ctx, seq, reason, map[string]any{"field": "content.tool_use"})
 			}
-			toolName, ok := nonemptyString(block["name"])
-			if !ok {
-				detail := r.fixedSafeDetail(ctx, map[string]any{"reason": "missing-foreign-field", "field": "tool_use.name"})
-				return sealedexec.AdapterResult{Observations: r.gapObservations(detail, seq, "missing-foreign-field"), OperationalFailure: "missing-foreign-field"}
+			if block.ID == nil || block.Name == nil || block.Input == nil {
+				return r.decodeFailure(ctx, seq, "missing-foreign-field", map[string]any{"field": "content.tool_use"})
 			}
-			inputRaw := block["input"]
-			// Redact input and build D.
-			inputBytes, err := canonjsonValue(inputRaw)
+			if !nonemptyStringValue(*block.ID) || !nonemptyStringValue(*block.Name) {
+				return r.decodeFailure(ctx, seq, "invalid-foreign-field", map[string]any{"field": "content.tool_use"})
+			}
+			inputBytes, err := canonjsonValue(json.RawMessage(*block.Input))
 			if err != nil {
-				detail := r.fixedSafeDetail(ctx, map[string]any{"reason": "invalid-foreign-field", "field": "tool_use.input"})
-				return sealedexec.AdapterResult{Observations: r.gapObservations(detail, seq, "invalid-foreign-field"), OperationalFailure: "invalid-foreign-field"}
+				return r.decodeFailure(ctx, seq, "invalid-foreign-field", map[string]any{"field": "content.tool_use.input"})
 			}
-			// A = R(input)
 			redactedInput, err := redactBytes(inputBytes, protectedValues)
 			if err != nil {
-				detail := r.fixedSafeDetail(ctx, map[string]any{"reason": "redaction-failed"})
-				return sealedexec.AdapterResult{Observations: r.gapObservations(detail, seq, "redaction-failed"), OperationalFailure: "redaction-failed"}
+				return r.decodeFailure(ctx, seq, "redaction-failed", nil)
 			}
-			argDigest := digestBytes(redactedInput)
-			// D = {family:"assistant/tool_use", message_id, block_index, call_id, tool_name, input:<redacted input>}
-			detailObj := map[string]any{
+			detail, err := r.processDetail(ctx, map[string]any{
 				"block_index": float64(blockIndex),
-				"call_id":     callID,
+				"call_id":     *block.ID,
 				"family":      "assistant/tool_use",
 				"input":       json.RawMessage(redactedInput),
 				"message_id":  messageID,
-				"tool_name":   toolName,
-			}
-			detail, err := r.processDetail(ctx, detailObj, protectedValues)
+				"tool_name":   *block.Name,
+			}, protectedValues)
 			if err != nil {
-				safeDetail := r.fixedSafeDetail(ctx, map[string]any{"reason": "redaction-failed"})
-				return sealedexec.AdapterResult{Observations: r.gapObservations(safeDetail, seq, "redaction-failed"), OperationalFailure: "redaction-failed"}
+				return r.decodeFailure(ctx, seq, "redaction-failed", nil)
 			}
-			// Track the tool call.
 			r.mu.Lock()
 			if r.pendingToolCalls == nil {
 				r.pendingToolCalls = make(map[string]string)
 			}
-			if _, exists := r.pendingToolCalls[callID]; exists {
-				r.mu.Unlock()
-				dupDetail := r.fixedSafeDetail(ctx, map[string]any{"reason": "duplicate-call-id"})
-				return sealedexec.AdapterResult{Observations: r.gapObservations(dupDetail, seq, "duplicate-call-id"), OperationalFailure: "duplicate-call-id"}
+			_, openCall := r.pendingToolCalls[*block.ID]
+			duplicateCall := openCall || r.closedToolCalls[*block.ID]
+			if !duplicateCall {
+				r.pendingToolCalls[*block.ID] = *block.Name
 			}
-			r.pendingToolCalls[callID] = toolName
 			r.mu.Unlock()
-
+			if duplicateCall {
+				return r.decodeFailure(ctx, seq, "duplicate-call-id", nil)
+			}
 			schema, _ := contextevent.PayloadSchema(contextevent.KindToolCall)
-			callPayload := &contextevent.ToolCallPayload{
-				Schema:          schema,
-				CallID:          callID,
-				ToolName:        toolName,
-				ArgumentsDigest: argDigest,
-				Detail:          detail,
-			}
-			result.Observations = append(result.Observations, sealedexec.NormalizedObservation{Kind: contextevent.KindToolCall, ForeignDetail: detail, Payload: callPayload})
+			observations = append(observations, sealedexec.NormalizedObservation{
+				Kind:          contextevent.KindToolCall,
+				ForeignDetail: detail,
+				Payload: &contextevent.ToolCallPayload{
+					Schema:          schema,
+					CallID:          *block.ID,
+					ToolName:        *block.Name,
+					ArgumentsDigest: digestBytes(redactedInput),
+					Detail:          detail,
+				},
+			})
 
-		case "thinking", "redacted_thinking":
-			// §5: thinking/redacted thinking — accepted only to be discarded.
-			// D = {content_type:<discriminator>, omitted:true}
-			// Hidden bytes are not inputs to R or H.
-			detailObj := map[string]any{
-				"content_type": blockType,
-				"omitted":      true,
+		case "thinking":
+			var block claudeThinkingBlock
+			if reason := strictDecodeReason(rawBlock, &block); reason != "" {
+				return r.decodeFailure(ctx, seq, reason, map[string]any{"field": "content.thinking"})
 			}
-			detail, err := r.processDetail(ctx, detailObj, protectedValues)
+			if block.Thinking == nil || block.Signature == nil {
+				return r.decodeFailure(ctx, seq, "missing-foreign-field", map[string]any{"field": "content.thinking"})
+			}
+			observation, err := r.omissionSummary(ctx, "thinking", messageID, blockIndex, protectedValues)
 			if err != nil {
-				safeDetail := r.fixedSafeDetail(ctx, map[string]any{"reason": "redaction-failed"})
-				return sealedexec.AdapterResult{Observations: r.gapObservations(safeDetail, seq, "redaction-failed"), OperationalFailure: "redaction-failed"}
+				return r.decodeFailure(ctx, seq, "redaction-failed", nil)
 			}
-			summaryID := fmt.Sprintf("%s:%d", messageID, blockIndex)
-			summaryObs := buildProviderSummary(r.launch, summaryID, detail.Digest, contextevent.AuthorityAdvisory, detail)
-			result.Observations = append(result.Observations, summaryObs)
+			observations = append(observations, observation)
+
+		case "redacted_thinking":
+			var block claudeRedactedThinkingBlock
+			if reason := strictDecodeReason(rawBlock, &block); reason != "" {
+				return r.decodeFailure(ctx, seq, reason, map[string]any{"field": "content.redacted_thinking"})
+			}
+			if block.Data == nil {
+				return r.decodeFailure(ctx, seq, "missing-foreign-field", map[string]any{"field": "content.redacted_thinking"})
+			}
+			observation, err := r.omissionSummary(ctx, "redacted_thinking", messageID, blockIndex, protectedValues)
+			if err != nil {
+				return r.decodeFailure(ctx, seq, "redaction-failed", nil)
+			}
+			observations = append(observations, observation)
 
 		default:
-			detail := r.fixedSafeDetail(ctx, map[string]any{"reason": "unknown-content-block", "block_type": blockType})
-			return sealedexec.AdapterResult{Observations: r.gapObservations(detail, seq, "unknown-content-block"), OperationalFailure: "unknown-content-block"}
+			return r.decodeFailure(ctx, seq, "unknown-content-block", nil)
 		}
 	}
-
-	return result
+	return sealedexec.AdapterResult{Observations: observations}, nil
 }
 
-func (r *claudeActiveRun) handleToolResult(ctx context.Context, object map[string]any, seq uint64) sealedexec.AdapterResult {
-	sessionID, ok := nonemptyString(object["session_id"])
-	if !ok {
-		detail := r.fixedSafeDetail(ctx, map[string]any{"reason": "missing-foreign-field", "field": "session_id"})
-		return sealedexec.AdapterResult{Observations: r.gapObservations(detail, seq, "missing-foreign-field"), OperationalFailure: "missing-foreign-field"}
+// omissionSummary builds the fixed hidden-content omission summary. Hidden
+// bytes are never inputs to redaction or the digest.
+func (r *claudeActiveRun) omissionSummary(ctx context.Context, contentType, messageID string, blockIndex int, protectedValues [][]byte) (sealedexec.NormalizedObservation, error) {
+	detail, err := r.processDetail(ctx, map[string]any{
+		"content_type": contentType,
+		"omitted":      true,
+	}, protectedValues)
+	if err != nil {
+		return sealedexec.NormalizedObservation{}, err
 	}
+	return buildProviderSummary(r.launch, fmt.Sprintf("%s:%d", messageID, blockIndex), detail.Digest, contextevent.AuthorityAdvisory, detail), nil
+}
+
+func (r *claudeActiveRun) handleToolResult(ctx context.Context, line []byte, seq uint64) (sealedexec.AdapterResult, error) {
+	var frame claudeUserFrame
+	if reason := strictDecodeReason(line, &frame); reason != "" {
+		return r.decodeFailure(ctx, seq, reason, map[string]any{"family": "user"})
+	}
+	if frame.Type == nil || frame.SessionID == nil || frame.UUID == nil || frame.Message == nil ||
+		frame.Message.Role == nil || frame.Message.Content == nil {
+		return r.decodeFailure(ctx, seq, "missing-foreign-field", map[string]any{"family": "user"})
+	}
+	if *frame.Type != "user" || *frame.Message.Role != "user" {
+		return r.decodeFailure(ctx, seq, "invalid-foreign-field", map[string]any{"field": "message.role"})
+	}
+	if !nonemptyStringValue(*frame.UUID) {
+		return r.decodeFailure(ctx, seq, "invalid-foreign-field", map[string]any{"field": "uuid"})
+	}
+
 	r.mu.Lock()
 	currentSession := r.providerSession
 	protectedValues := append([][]byte(nil), r.protectedValues...)
 	r.mu.Unlock()
-	if sessionID != currentSession {
-		detail := r.fixedSafeDetail(ctx, map[string]any{"reason": "session-mismatch"})
-		return sealedexec.AdapterResult{Observations: r.gapObservations(detail, seq, "session-mismatch"), OperationalFailure: "session-mismatch"}
+	if *frame.SessionID != currentSession {
+		return r.decodeFailure(ctx, seq, "session-mismatch", nil)
 	}
 
-	message, ok := object["message"].(map[string]any)
-	if !ok {
-		detail := r.fixedSafeDetail(ctx, map[string]any{"reason": "missing-foreign-field", "field": "message"})
-		return sealedexec.AdapterResult{Observations: r.gapObservations(detail, seq, "missing-foreign-field"), OperationalFailure: "missing-foreign-field"}
-	}
-	blocks, ok := message["content"].([]any)
-	if !ok {
-		detail := r.fixedSafeDetail(ctx, map[string]any{"reason": "missing-foreign-field", "field": "message.content"})
-		return sealedexec.AdapterResult{Observations: r.gapObservations(detail, seq, "missing-foreign-field"), OperationalFailure: "missing-foreign-field"}
-	}
+	observations := []sealedexec.NormalizedObservation{}
+	for _, rawBlock := range *frame.Message.Content {
+		var discriminator claudeBlockDiscriminator
+		if err := json.Unmarshal(rawBlock, &discriminator); err != nil || discriminator.Type == nil {
+			return r.decodeFailure(ctx, seq, "unknown-content-block", nil)
+		}
+		// §5's closed user grammar admits tool_result blocks only.
+		if *discriminator.Type != "tool_result" {
+			return r.decodeFailure(ctx, seq, "unknown-content-block", nil)
+		}
+		var block claudeToolResultBlock
+		if reason := strictDecodeReason(rawBlock, &block); reason != "" {
+			return r.decodeFailure(ctx, seq, reason, map[string]any{"field": "content.tool_result"})
+		}
+		if block.ToolUseID == nil || block.Content == nil {
+			return r.decodeFailure(ctx, seq, "missing-foreign-field", map[string]any{"field": "content.tool_result"})
+		}
+		callID := *block.ToolUseID
+		if !nonemptyStringValue(callID) {
+			return r.decodeFailure(ctx, seq, "invalid-foreign-field", map[string]any{"field": "content.tool_result"})
+		}
 
-	result := sealedexec.AdapterResult{Observations: []sealedexec.NormalizedObservation{}}
-	for _, blockAny := range blocks {
-		block, ok := blockAny.(map[string]any)
-		if !ok {
-			detail := r.fixedSafeDetail(ctx, map[string]any{"reason": "malformed-foreign-frame"})
-			return sealedexec.AdapterResult{Observations: r.gapObservations(detail, seq, "malformed-foreign-frame"), OperationalFailure: "malformed-foreign-frame"}
-		}
-		blockType, _ := nonemptyString(block["type"])
-		if blockType != "tool_result" {
-			continue // skip non-tool-result blocks
-		}
-		callID, ok := nonemptyString(block["tool_use_id"])
-		if !ok {
-			detail := r.fixedSafeDetail(ctx, map[string]any{"reason": "missing-foreign-field", "field": "tool_use_id"})
-			return sealedexec.AdapterResult{Observations: r.gapObservations(detail, seq, "missing-foreign-field"), OperationalFailure: "missing-foreign-field"}
-		}
 		r.mu.Lock()
-		toolName, exists := r.pendingToolCalls[callID]
-		if !exists {
-			r.mu.Unlock()
-			detail := r.fixedSafeDetail(ctx, map[string]any{"reason": "unmatched-tool-result", "call_id": callID})
-			return sealedexec.AdapterResult{Observations: r.gapObservations(detail, seq, "unmatched-tool-result"), OperationalFailure: "unmatched-tool-result"}
+		toolName, open := r.pendingToolCalls[callID]
+		alreadyClosed := r.closedToolCalls[callID]
+		if open {
+			delete(r.pendingToolCalls, callID)
+			if r.closedToolCalls == nil {
+				r.closedToolCalls = make(map[string]bool)
+			}
+			r.closedToolCalls[callID] = true
 		}
-		delete(r.pendingToolCalls, callID)
 		r.mu.Unlock()
 
-		contentRaw := block["content"]
-		contentBytes, err := canonjsonValue(contentRaw)
+		if !open {
+			if alreadyClosed {
+				return r.decodeFailure(ctx, seq, "duplicate-tool-result", nil)
+			}
+			return r.decodeFailure(ctx, seq, "unmatched-tool-result", nil)
+		}
+
+		contentBytes, err := canonjsonValue(json.RawMessage(*block.Content))
 		if err != nil {
-			detail := r.fixedSafeDetail(ctx, map[string]any{"reason": "invalid-foreign-field", "field": "content"})
-			return sealedexec.AdapterResult{Observations: r.gapObservations(detail, seq, "invalid-foreign-field"), OperationalFailure: "invalid-foreign-field"}
+			return r.decodeFailure(ctx, seq, "invalid-foreign-field", map[string]any{"field": "content.tool_result.content"})
 		}
 		redactedContent, err := redactBytes(contentBytes, protectedValues)
 		if err != nil {
-			detail := r.fixedSafeDetail(ctx, map[string]any{"reason": "redaction-failed"})
-			return sealedexec.AdapterResult{Observations: r.gapObservations(detail, seq, "redaction-failed"), OperationalFailure: "redaction-failed"}
+			return r.decodeFailure(ctx, seq, "redaction-failed", nil)
 		}
-		outputDigest := digestBytes(redactedContent)
-
-		isError, _ := block["is_error"].(bool)
 		status := "success"
-		if isError {
+		if block.IsError != nil && *block.IsError {
 			status = "error"
 		}
-
-		detailObj := map[string]any{
+		detail, err := r.processDetail(ctx, map[string]any{
 			"call_id": callID,
 			"content": json.RawMessage(redactedContent),
 			"family":  "user/tool_result",
 			"status":  status,
-		}
-		detail, err := r.processDetail(ctx, detailObj, protectedValues)
+		}, protectedValues)
 		if err != nil {
-			safeDetail := r.fixedSafeDetail(ctx, map[string]any{"reason": "redaction-failed"})
-			return sealedexec.AdapterResult{Observations: r.gapObservations(safeDetail, seq, "redaction-failed"), OperationalFailure: "redaction-failed"}
+			return r.decodeFailure(ctx, seq, "redaction-failed", nil)
 		}
-
 		schema, _ := contextevent.PayloadSchema(contextevent.KindToolResult)
-		toolResultPayload := &contextevent.ToolResultPayload{
-			Schema:       schema,
-			CallID:       callID,
-			ToolName:     toolName,
-			Status:       status,
-			OutputDigest: outputDigest,
-			Detail:       detail,
-		}
-		result.Observations = append(result.Observations, sealedexec.NormalizedObservation{Kind: contextevent.KindToolResult, ForeignDetail: detail, Payload: toolResultPayload})
+		observations = append(observations, sealedexec.NormalizedObservation{
+			Kind:          contextevent.KindToolResult,
+			ForeignDetail: detail,
+			Payload: &contextevent.ToolResultPayload{
+				Schema:       schema,
+				CallID:       callID,
+				ToolName:     toolName,
+				Status:       status,
+				OutputDigest: digestBytes(redactedContent),
+				Detail:       detail,
+			},
+		})
 	}
-	return result
+	return sealedexec.AdapterResult{Observations: observations}, nil
 }
 
-func (r *claudeActiveRun) handleResult(ctx context.Context, object map[string]any, seq uint64) sealedexec.AdapterResult {
+func (r *claudeActiveRun) handleResult(ctx context.Context, line []byte, seq uint64) (sealedexec.AdapterResult, error) {
+	var frame claudeResultFrame
+	if reason := strictDecodeReason(line, &frame); reason != "" {
+		return r.decodeFailure(ctx, seq, reason, map[string]any{"family": "result"})
+	}
+	if frame.Type == nil || frame.Subtype == nil || frame.IsError == nil || frame.Result == nil ||
+		frame.SessionID == nil || frame.UUID == nil || frame.DurationMS == nil || frame.DurationAPIMS == nil ||
+		frame.NumTurns == nil || frame.TotalCostUSD == nil || frame.Usage == nil || frame.PermissionDenials == nil {
+		return r.decodeFailure(ctx, seq, "missing-foreign-field", map[string]any{"family": "result"})
+	}
+	if *frame.Type != "result" {
+		return r.decodeFailure(ctx, seq, "invalid-foreign-field", map[string]any{"field": "type"})
+	}
+	switch *frame.Subtype {
+	case "success", "error_max_turns", "error_during_execution", "error_max_budget_usd", "error_max_structured_output_retries":
+	default:
+		return r.decodeFailure(ctx, seq, "invalid-foreign-field", map[string]any{"field": "subtype"})
+	}
+	if !nonemptyStringValue(*frame.UUID) || !utf8.ValidString(*frame.Result) {
+		return r.decodeFailure(ctx, seq, "invalid-foreign-field", map[string]any{"field": "uuid"})
+	}
+	var totalCost float64
+	if err := json.Unmarshal(*frame.TotalCostUSD, &totalCost); err != nil || totalCost < 0 {
+		return r.decodeFailure(ctx, seq, "invalid-foreign-field", map[string]any{"field": "total_cost_usd"})
+	}
+	if reason := validateUsage(frame.Usage); reason != "" {
+		return r.decodeFailure(ctx, seq, reason, map[string]any{"field": "usage"})
+	}
+	var denials []claudePermissionDenial
+	if reason := strictDecodeReason(*frame.PermissionDenials, &denials); reason != "" {
+		return r.decodeFailure(ctx, seq, reason, map[string]any{"field": "permission_denials"})
+	}
+	if denials == nil {
+		return r.decodeFailure(ctx, seq, "invalid-foreign-field", map[string]any{"field": "permission_denials"})
+	}
+	for _, denial := range denials {
+		if denial.ToolName == nil || denial.ToolUseID == nil || denial.ToolInput == nil {
+			return r.decodeFailure(ctx, seq, "missing-foreign-field", map[string]any{"field": "permission_denials"})
+		}
+	}
+	if frame.ModelUsage != nil {
+		var modelUsage map[string]json.RawMessage
+		if reason := strictDecodeReason(*frame.ModelUsage, &modelUsage); reason != "" {
+			return r.decodeFailure(ctx, seq, reason, map[string]any{"field": "modelUsage"})
+		}
+		usage, sole := modelUsage[r.launch.Profile.Model]
+		if len(modelUsage) != 1 || !sole {
+			return r.decodeFailure(ctx, seq, "invalid-foreign-field", map[string]any{"field": "modelUsage"})
+		}
+		if reason := validateUsage(&usage); reason != "" {
+			return r.decodeFailure(ctx, seq, reason, map[string]any{"field": "modelUsage"})
+		}
+	}
+
 	r.mu.Lock()
 	currentSession := r.providerSession
 	protectedValues := append([][]byte(nil), r.protectedValues...)
 	r.mu.Unlock()
-
-	sessionID, ok := nonemptyString(object["session_id"])
-	if !ok || sessionID != currentSession {
-		reason := "missing-foreign-field"
-		if ok {
-			reason = "session-mismatch"
-		}
-		detail := r.fixedSafeDetail(ctx, map[string]any{"reason": reason})
-		return sealedexec.AdapterResult{Observations: r.gapObservations(detail, seq, reason), OperationalFailure: reason}
+	if *frame.SessionID != currentSession {
+		return r.decodeFailure(ctx, seq, "session-mismatch", nil)
 	}
 
-	subtype, _ := nonemptyString(object["subtype"])
-	isError, _ := object["is_error"].(bool)
-
-	// Build D = redacted projection.
-	durObj := map[string]any{}
-	for _, key := range []string{"duration_ms", "duration_api_ms", "num_turns", "total_cost_usd"} {
-		durObj[key] = object[key]
-	}
-	projObj := map[string]any{
-		"duration_api_ms":    object["duration_api_ms"],
-		"duration_ms":        object["duration_ms"],
+	projection := map[string]any{
+		"duration_api_ms":    *frame.DurationAPIMS,
+		"duration_ms":        *frame.DurationMS,
 		"family":             "result",
-		"is_error":           isError,
-		"num_turns":          object["num_turns"],
-		"permission_denials": object["permission_denials"],
-		"result":             object["result"],
-		"subtype":            subtype,
-		"total_cost_usd":     object["total_cost_usd"],
-		"usage":              object["usage"],
+		"is_error":           *frame.IsError,
+		"num_turns":          *frame.NumTurns,
+		"permission_denials": json.RawMessage(*frame.PermissionDenials),
+		"result":             *frame.Result,
+		"subtype":            *frame.Subtype,
+		"total_cost_usd":     json.RawMessage(*frame.TotalCostUSD),
+		"usage":              json.RawMessage(*frame.Usage),
 	}
-	if mu, ok := object["modelUsage"]; ok {
-		projObj["modelUsage"] = mu
+	if frame.ModelUsage != nil {
+		projection["modelUsage"] = json.RawMessage(*frame.ModelUsage)
 	}
-
-	detail, err := r.processDetail(ctx, projObj, protectedValues)
+	detail, err := r.processDetail(ctx, projection, protectedValues)
 	if err != nil {
-		safeDetail := r.fixedSafeDetail(ctx, map[string]any{"reason": "redaction-failed"})
-		return sealedexec.AdapterResult{Observations: r.gapObservations(safeDetail, seq, "redaction-failed"), OperationalFailure: "redaction-failed"}
-	}
-
-	// Success: subtype "success" and is_error=false.
-	isSuccess := subtype == "success" && !isError
-	// Provider failure: is_error=true or subtype not "success".
-	// Special case: subtype=="success" but is_error==true → reason "provider-result-error".
-	reasonCode := "provider-result-" + subtype
-	if isError && subtype == "success" {
-		reasonCode = "provider-result-error"
+		return r.decodeFailure(ctx, seq, "redaction-failed", nil)
 	}
 
 	r.mu.Lock()
 	r.resultReceived = true
 	r.mu.Unlock()
 
-	if isSuccess {
-		// §5: Hold the exact result until process termination;
-		// on exit 0 with empty stderr → advisory provider-summary + adapter-stop.
-		summaryObs := buildProviderSummary(r.launch, "terminal-result", detail.Digest, contextevent.AuthorityAdvisory, detail)
+	if *frame.Subtype == "success" && !*frame.IsError {
 		r.mu.Lock()
-		r.pendingResultObs = &pendingResultObservations{
-			observations: []sealedexec.NormalizedObservation{summaryObs},
+		r.pendingResult = &pendingTerminal{
+			seq: seq,
+			observations: []sealedexec.NormalizedObservation{
+				buildProviderSummary(r.launch, "terminal-result", detail.Digest, contextevent.AuthorityAdvisory, detail),
+			},
 		}
 		r.mu.Unlock()
-	} else {
-		// §5: adapter-error, no provider-summary.
-		schema, _ := contextevent.PayloadSchema(contextevent.KindAdapterError)
-		errorPayload := &contextevent.AdapterErrorPayload{
+		return sealedexec.AdapterResult{Observations: []sealedexec.NormalizedObservation{}}, nil
+	}
+
+	reasonCode := "provider-result-" + *frame.Subtype
+	if *frame.IsError && *frame.Subtype == "success" {
+		reasonCode = "provider-result-error"
+	}
+	schema, _ := contextevent.PayloadSchema(contextevent.KindAdapterError)
+	errorObs := sealedexec.NormalizedObservation{
+		Kind:            contextevent.KindAdapterError,
+		ForeignDetail:   detail,
+		BlocksAuthority: true,
+		Witness:         reasonCode,
+		Payload: &contextevent.AdapterErrorPayload{
 			Schema:         schema,
 			Adapter:        contextevent.AdapterClaude,
 			AdapterVersion: r.launch.Request.AdapterVersion,
@@ -1319,65 +1564,113 @@ func (r *claudeActiveRun) handleResult(ctx context.Context, object map[string]an
 			ReasonCode:     reasonCode,
 			ErrorDigest:    detail.Digest,
 			Detail:         detail,
-		}
-		errorObs := sealedexec.NormalizedObservation{Kind: contextevent.KindAdapterError, ForeignDetail: detail, BlocksAuthority: true, Witness: reasonCode, Payload: errorPayload}
-		r.mu.Lock()
-		r.pendingResultObs = &pendingResultObservations{
-			observations: []sealedexec.NormalizedObservation{errorObs},
-			failure:      reasonCode,
-		}
-		r.mu.Unlock()
+		},
 	}
-
-	// Return empty (the result observations are buffered until process exit).
-	return sealedexec.AdapterResult{Observations: []sealedexec.NormalizedObservation{}}
+	r.mu.Lock()
+	r.pendingResult = &pendingTerminal{seq: seq, observations: []sealedexec.NormalizedObservation{errorObs}, reason: reasonCode}
+	r.mu.Unlock()
+	return sealedexec.AdapterResult{Observations: []sealedexec.NormalizedObservation{}}, nil
 }
 
 // ---------------------------------------------------------------------------
 // Detail helpers
 // ---------------------------------------------------------------------------
 
-// processDetail marshals the object to canonical JSON and runs it through the processor.
-func (r *claudeActiveRun) processDetail(ctx context.Context, obj map[string]any, protectedValues [][]byte) (contextevent.Detail, error) {
-	encoded, err := canonjson.Marshal(obj)
+// processDetail marshals the exact detail source to canonical JSON and runs it
+// through the shared processor.
+func (r *claudeActiveRun) processDetail(ctx context.Context, source map[string]any, protectedValues [][]byte) (contextevent.Detail, error) {
+	encoded, err := canonjson.Marshal(source)
 	if err != nil {
 		return contextevent.Detail{}, err
 	}
-	encoded = bytes.TrimSuffix(encoded, []byte("\n"))
-	return r.processor.Process(ctx, encoded, protectedValues)
+	return r.processor.Process(ctx, bytes.TrimSuffix(encoded, []byte("\n")), protectedValues)
 }
 
-// fixedSafeDetail produces a fixed safe detail for error observations.
-// It uses only the classified secrets (never variable detail) for fixed payload scanning.
-func (r *claudeActiveRun) fixedSafeDetail(ctx context.Context, obj map[string]any) contextevent.Detail {
+// fixedSafeDetail builds a fixed safe detail from classified secrets only. A
+// failure to represent it is a lower-layer operational failure: §5 forbids
+// inventing a later event, so no replacement detail is ever fabricated.
+func (r *claudeActiveRun) fixedSafeDetail(ctx context.Context, source map[string]any) (contextevent.Detail, error) {
+	encoded, err := canonjson.Marshal(source)
+	if err != nil {
+		return contextevent.Detail{}, fmt.Errorf("sealedexec/claude: encode fixed safe detail: %w", err)
+	}
+	detail, err := r.processor.Process(ctx, bytes.TrimSuffix(encoded, []byte("\n")), r.classifiedOnly())
+	if err != nil {
+		return contextevent.Detail{}, fmt.Errorf("sealedexec/claude: fixed safe detail is unrepresentable: %w", err)
+	}
+	return detail, nil
+}
+
+// rawSafeDetail reduces discarded foreign bytes to §5's sole digest-and-reason
+// object. The bytes themselves are hashed and never converted or embedded.
+func (r *claudeActiveRun) rawSafeDetail(ctx context.Context, raw []byte, reason string) (contextevent.Detail, error) {
+	encoded, err := contextevent.SafeRawDetail(raw, reason)
+	if err != nil {
+		return contextevent.Detail{}, fmt.Errorf("sealedexec/claude: reduce foreign bytes: %w", err)
+	}
+	detail, err := r.processor.Process(ctx, encoded, r.classifiedOnly())
+	if err != nil {
+		return contextevent.Detail{}, fmt.Errorf("sealedexec/claude: safe raw detail is unrepresentable: %w", err)
+	}
+	return detail, nil
+}
+
+func (r *claudeActiveRun) classifiedOnly() [][]byte {
 	r.mu.Lock()
-	classifiedOnly := append([][]byte(nil), r.launch.Profile.PolicySecretValues...)
-	r.mu.Unlock()
-	encoded, err := canonjson.Marshal(obj)
-	if err != nil {
-		fallback := []byte(`{}`)
-		return contextevent.Detail{Mode: contextevent.DetailInline, MediaType: contextevent.MediaTypeJSON, Digest: digestBytes(fallback), RedactionProfile: contextevent.RedactionProfileStandard, RedactedJSON: fallback}
-	}
-	encoded = bytes.TrimSuffix(encoded, []byte("\n"))
-	detail, err := r.processor.Process(ctx, encoded, classifiedOnly)
-	if err != nil {
-		fallback := []byte(`{}`)
-		return contextevent.Detail{Mode: contextevent.DetailInline, MediaType: contextevent.MediaTypeJSON, Digest: digestBytes(fallback), RedactionProfile: contextevent.RedactionProfileStandard, RedactedJSON: fallback}
-	}
-	return detail
+	defer r.mu.Unlock()
+	return append([][]byte(nil), r.launch.Profile.PolicySecretValues...)
 }
 
-// malformedSafeDetail constructs a safe detail for malformed foreign input.
-func (r *claudeActiveRun) malformedSafeDetail(ctx context.Context, raw []byte, reason string) contextevent.Detail {
-	if !utf8.Valid(raw) {
-		raw = []byte(strings.ToValidUTF8(string(raw), ""))
+// decodeFailure emits the fixed telemetry-gap/adapter-error pair for one closed
+// stream reason.
+func (r *claudeActiveRun) decodeFailure(ctx context.Context, seq uint64, reason string, fields map[string]any) (sealedexec.AdapterResult, error) {
+	source := map[string]any{"reason": reason}
+	for key, value := range fields {
+		source[key] = value
 	}
-	obj := map[string]any{"foreign_line": string(raw), "reason": reason}
-	return r.fixedSafeDetail(ctx, obj)
+	detail, err := r.fixedSafeDetail(ctx, source)
+	if err != nil {
+		return sealedexec.AdapterResult{}, err
+	}
+	return sealedexec.AdapterResult{
+		Observations:       r.gapObservations(detail, seq, reason, claudeSource),
+		OperationalFailure: reason,
+	}, nil
 }
 
-// gapObservations produces telemetry-gap + adapter-error for a decode failure.
-func (r *claudeActiveRun) gapObservations(detail contextevent.Detail, seq uint64, reason string) []sealedexec.NormalizedObservation {
+// rawFailure emits the same pair for bytes that never became a frame.
+func (r *claudeActiveRun) rawFailure(ctx context.Context, seq uint64, reason string, raw []byte) (sealedexec.AdapterResult, error) {
+	detail, err := r.rawSafeDetail(ctx, raw, reason)
+	if err != nil {
+		return sealedexec.AdapterResult{}, err
+	}
+	return sealedexec.AdapterResult{
+		Observations:       r.gapObservations(detail, seq, reason, claudeSource),
+		OperationalFailure: reason,
+	}, nil
+}
+
+// claudeErrorOperation is Amendment 002 §5's closed reason-to-operation map.
+func claudeErrorOperation(reason string) string {
+	switch reason {
+	case "secret-classification-unavailable", "redaction-failed", "protected-fixed-field":
+		return "redaction"
+	case "provider-stderr", "provider-exit-nonzero":
+		return "process"
+	case "segment-store-failed", "segment-resolve-failed", "segment-mismatch":
+		return "segment"
+	case "recorder-append-failed", "recorder-ack-invalid", "recorder-replay-conflict", "unconfirmed-initial-session":
+		return "recorder"
+	}
+	if strings.HasPrefix(reason, "provider-result-") {
+		return "process"
+	}
+	return "decode"
+}
+
+// gapObservations produces the telemetry-gap and adapter-error pair for one
+// closed reason over the named gap source.
+func (r *claudeActiveRun) gapObservations(detail contextevent.Detail, seq uint64, reason, source string) []sealedexec.NormalizedObservation {
 	schema, _ := contextevent.PayloadSchema(contextevent.KindTelemetryGap)
 	gap := sealedexec.NormalizedObservation{
 		Kind:            contextevent.KindTelemetryGap,
@@ -1386,7 +1679,7 @@ func (r *claudeActiveRun) gapObservations(detail contextevent.Detail, seq uint64
 		Witness:         reason,
 		Payload: &contextevent.TelemetryGapPayload{
 			Schema:       schema,
-			Source:       claudeSource,
+			Source:       source,
 			FromSequence: seq,
 			ToSequence:   seq,
 			ReasonCode:   reason,
@@ -1394,11 +1687,6 @@ func (r *claudeActiveRun) gapObservations(detail contextevent.Detail, seq uint64
 		},
 	}
 	errorSchema, _ := contextevent.PayloadSchema(contextevent.KindAdapterError)
-	operation := "decode"
-	switch reason {
-	case "redaction-failed", "protected-fixed-field", "secret-classification-unavailable":
-		operation = "redaction"
-	}
 	errorObs := sealedexec.NormalizedObservation{
 		Kind:            contextevent.KindAdapterError,
 		ForeignDetail:   detail,
@@ -1409,7 +1697,7 @@ func (r *claudeActiveRun) gapObservations(detail contextevent.Detail, seq uint64
 			Adapter:        contextevent.AdapterClaude,
 			AdapterVersion: r.launch.Request.AdapterVersion,
 			Session:        r.launch.Request.Session,
-			Operation:      operation,
+			Operation:      claudeErrorOperation(reason),
 			ReasonCode:     reason,
 			ErrorDigest:    detail.Digest,
 			Detail:         detail,
@@ -1434,17 +1722,6 @@ func buildAdapterStart(launch sealedexec.AdapterLaunch, detail *contextevent.Det
 		Detail:                 detail,
 	}
 	return sealedexec.NormalizedObservation{Kind: contextevent.KindAdapterStart, Payload: payload}
-}
-
-func buildResumeObservation(launch sealedexec.AdapterLaunch, detail contextevent.Detail) sealedexec.NormalizedObservation {
-	schema, _ := contextevent.PayloadSchema(contextevent.KindResume)
-	payload := &contextevent.ResumePayload{
-		Schema:           schema,
-		ContinuityDigest: detail.Digest,
-		PriorSession:     launch.Request.Session,
-		CurrentSession:   launch.Request.Session,
-	}
-	return sealedexec.NormalizedObservation{Kind: contextevent.KindResume, Payload: payload, ForeignDetail: detail}
 }
 
 func buildProviderSummary(launch sealedexec.AdapterLaunch, summaryID, summaryDigest string, authority contextevent.Authority, detail contextevent.Detail) sealedexec.NormalizedObservation {
@@ -1476,21 +1753,14 @@ func adapterStopObservation(launch sealedexec.AdapterLaunch, exitCode int, reaso
 // Validation helpers for init
 // ---------------------------------------------------------------------------
 
-func validateInitMCPServers(object map[string]any) string {
-	servers, ok := object["mcp_servers"].([]any)
-	if !ok {
-		return "mcp-mismatch"
-	}
+// validateInitMCPServers proves the observed inventory is exactly the one
+// scoped, connected verdi-context row.
+func validateInitMCPServers(servers []claudeMCPRow) string {
 	if len(servers) != 1 {
 		return "mcp-mismatch"
 	}
-	server, ok := servers[0].(map[string]any)
-	if !ok {
-		return "mcp-mismatch"
-	}
-	name, _ := server["name"].(string)
-	status, _ := server["status"].(string)
-	if name != "verdi-context" || status != "connected" {
+	row := servers[0]
+	if row.Name == nil || row.Status == nil || *row.Name != "verdi-context" || *row.Status != "connected" {
 		return "mcp-mismatch"
 	}
 	return ""
@@ -1530,25 +1800,12 @@ func validateSessionRef(value string) error {
 
 func nonemptyString(value any) (string, bool) {
 	text, ok := value.(string)
-	return text, ok && text != "" && text == strings.TrimSpace(text) && utf8.ValidString(text)
+	return text, ok && nonemptyStringValue(text)
 }
 
-func uintValueF(value any) (uint64, bool) {
-	switch v := value.(type) {
-	case json.Number:
-		n, err := v.Int64()
-		if err != nil || n < 0 {
-			return 0, false
-		}
-		return uint64(n), true
-	case float64:
-		if v < 0 || v != float64(uint64(v)) {
-			return 0, false
-		}
-		return uint64(v), true
-	default:
-		return 0, false
-	}
+// nonemptyStringValue is the closed shape of every §5 identity string.
+func nonemptyStringValue(text string) bool {
+	return text != "" && text == strings.TrimSpace(text) && utf8.ValidString(text)
 }
 
 func digestBytes(data []byte) string {
