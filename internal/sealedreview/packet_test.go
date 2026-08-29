@@ -20,6 +20,7 @@ import (
 	"github.com/jyang234/verdi/internal/contextreceipt"
 	"github.com/jyang234/verdi/internal/countersign"
 	gp "github.com/jyang234/verdi/internal/governanceprincipal"
+	"github.com/jyang234/verdi/internal/sealedexec"
 )
 
 const (
@@ -601,7 +602,7 @@ func TestSealedReviewPacketContract_Behavioral(t *testing.T) {
 
 	t.Run("review proof emits consumer-valid unproven freshness without acknowledged launch facts", func(t *testing.T) {
 		reviewerReceipt, _ := reviewReceiptFixture(t, candidate, builderReceipt.Digest, packetProjection(r0.Packet))
-		projection, err := VerifyReviewProof(r0.PacketBytes, reviewerReceipt, candidate)
+		projection, err := VerifyReviewProof(r0.PacketBytes, reviewerReceipt, candidate, contextreceipt.ReviewLaunchProof{})
 		if err != nil {
 			t.Fatalf("VerifyReviewProof(exact R0) error = %v", err)
 		}
@@ -619,7 +620,7 @@ func TestSealedReviewPacketContract_Behavioral(t *testing.T) {
 
 		staleCandidate := candidate
 		staleCandidate.HeadCommit = repository.oidFor([]byte("other commit"))
-		projection, err = VerifyReviewProof(r0.PacketBytes, reviewerReceipt, staleCandidate)
+		projection, err = VerifyReviewProof(r0.PacketBytes, reviewerReceipt, staleCandidate, contextreceipt.ReviewLaunchProof{})
 		if err != nil {
 			t.Fatalf("VerifyReviewProof(stale candidate) operational error = %v", err)
 		}
@@ -635,7 +636,7 @@ func TestSealedReviewPacketContract_Behavioral(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		projection, err = VerifyReviewProof(selfAuthenticatedBytes, reviewerReceipt, candidate)
+		projection, err = VerifyReviewProof(selfAuthenticatedBytes, reviewerReceipt, candidate, contextreceipt.ReviewLaunchProof{})
 		if err != nil {
 			t.Fatalf("VerifyReviewProof(self-authenticated reviewer) operational error = %v", err)
 		}
@@ -646,7 +647,7 @@ func TestSealedReviewPacketContract_Behavioral(t *testing.T) {
 		wrongLink := reviewerReceipt
 		wrongLink.ReviewOf = []string{testDigestB}
 		wrongLink.Digest = ""
-		projection, err = VerifyReviewProof(r0.PacketBytes, wrongLink, candidate)
+		projection, err = VerifyReviewProof(r0.PacketBytes, wrongLink, candidate, contextreceipt.ReviewLaunchProof{})
 		if err != nil {
 			t.Fatalf("VerifyReviewProof(wrong link) operational error = %v", err)
 		}
@@ -661,7 +662,7 @@ func TestSealedReviewPacketContract_Behavioral(t *testing.T) {
 		wrongPacket := reviewerReceipt
 		wrongPacket.ReviewInputs = []contextreceipt.ReviewInput{}
 		wrongPacket.Digest = ""
-		projection, err = VerifyReviewProof(r0.PacketBytes, wrongPacket, candidate)
+		projection, err = VerifyReviewProof(r0.PacketBytes, wrongPacket, candidate, contextreceipt.ReviewLaunchProof{})
 		if err != nil {
 			t.Fatalf("VerifyReviewProof(wrong packet projection) operational error = %v", err)
 		}
@@ -672,8 +673,71 @@ func TestSealedReviewPacketContract_Behavioral(t *testing.T) {
 			t.Fatalf("wrong-packet freshness projection = %#v, want review-input-independent expected digest %q with absent observation", projection.Freshness, wantFreshness)
 		}
 
-		if _, err := VerifyReviewProof([]byte("{}\n"), reviewerReceipt, candidate); err == nil {
+		if _, err := VerifyReviewProof([]byte("{}\n"), reviewerReceipt, candidate, contextreceipt.ReviewLaunchProof{}); err == nil {
 			t.Fatal("VerifyReviewProof(malformed packet) error = nil")
+		}
+
+		launch := reviewLaunchProofFixture(t, r0.Packet, reviewerReceipt)
+		projection, err = VerifyReviewProof(r0.PacketBytes, reviewerReceipt, candidate, launch)
+		if err != nil {
+			t.Fatalf("VerifyReviewProof(acknowledged launch facts): %v", err)
+		}
+		if projection.Freshness.State != contextreceipt.StateProven || projection.Freshness.ExpectedDigest != projection.Freshness.ObservedDigest {
+			t.Fatalf("acknowledged freshness = %#v, want proven exact equality", projection.Freshness)
+		}
+
+		mismatched := launch
+		mismatched.Event = cloneLaunchEventForTest(t, launch.Event, func(event *contextevent.Event, payload *contextevent.AdapterStartPayload) {
+			facts, decodeErr := sealedexec.DecodeReviewLaunchFacts(bytes.NewReader(payload.Detail.RedactedJSON))
+			if decodeErr != nil {
+				t.Fatal(decodeErr)
+			}
+			facts.Model = "ambient-model"
+			factsBytes, encodeErr := sealedexec.EncodeReviewLaunchFacts(facts)
+			if encodeErr != nil {
+				t.Fatal(encodeErr)
+			}
+			payload.Detail.RedactedJSON = factsBytes
+			payload.Detail.Digest = rawDigestForTest(factsBytes)
+		})
+		mismatched.Ack.EventDigest = mismatched.Event.EventDigest
+		projection, err = VerifyReviewProof(r0.PacketBytes, reviewerReceipt, candidate, mismatched)
+		if err != nil {
+			t.Fatalf("VerifyReviewProof(valid model mismatch) operational error = %v", err)
+		}
+		if projection.Freshness.State != contextreceipt.StateViolated || projection.Freshness.ExpectedDigest == projection.Freshness.ObservedDigest {
+			t.Fatalf("valid model mismatch freshness = %#v, want violated", projection.Freshness)
+		}
+
+		envelopeMismatch := launch
+		envelopeMismatch.Event = cloneLaunchEventForTest(t, launch.Event, func(event *contextevent.Event, _ *contextevent.AdapterStartPayload) {
+			event.Lane = "other-review"
+		})
+		envelopeMismatch.Ack.Lane = envelopeMismatch.Event.Lane
+		envelopeMismatch.Ack.EventDigest = envelopeMismatch.Event.EventDigest
+		projection, err = VerifyReviewProof(r0.PacketBytes, reviewerReceipt, candidate, envelopeMismatch)
+		if err != nil {
+			t.Fatalf("VerifyReviewProof(valid envelope mismatch) operational error = %v", err)
+		}
+		if projection.Freshness.State != contextreceipt.StateViolated {
+			t.Fatalf("valid envelope mismatch freshness = %#v, want violated", projection.Freshness)
+		}
+
+		malformed := launch
+		malformed.Event = cloneLaunchEventForTest(t, launch.Event, func(_ *contextevent.Event, payload *contextevent.AdapterStartPayload) {
+			bad := []byte(`{"schema":"unknown"}`)
+			payload.Detail.RedactedJSON = bad
+			payload.Detail.Digest = rawDigestForTest(bad)
+		})
+		malformed.Ack.EventDigest = malformed.Event.EventDigest
+		if _, err := VerifyReviewProof(r0.PacketBytes, reviewerReceipt, candidate, malformed); err == nil {
+			t.Fatal("VerifyReviewProof(malformed present launch facts) error = nil")
+		}
+
+		mispaired := launch
+		mispaired.Ack.EventDigest = testDigestB
+		if _, err := VerifyReviewProof(r0.PacketBytes, reviewerReceipt, candidate, mispaired); err == nil {
+			t.Fatal("VerifyReviewProof(mispaired launch ack) error = nil")
 		}
 	})
 
@@ -1198,6 +1262,88 @@ func rewriteAdjudicationReceiptForTest(t *testing.T, raw []byte, digest string) 
 		t.Fatal(err)
 	}
 	return encoded
+}
+
+func reviewLaunchProofFixture(t *testing.T, packet Packet, receipt contextreceipt.Receipt) contextreceipt.ReviewLaunchProof {
+	t.Helper()
+	facts := sealedexec.ReviewLaunchFacts{
+		Schema: sealedexec.ReviewLaunchFactsSchemaID, Round: string(packet.Round), PacketDigest: packet.Digest,
+		Lane: packet.Reviewer.Lane, Adapter: packet.Reviewer.Adapter, AdapterVersion: packet.Reviewer.AdapterVersion,
+		Model: packet.Reviewer.Model, ProfileID: packet.Reviewer.ProfileID, ProfileDigest: packet.Reviewer.ProfileDigest,
+		Session: "session-review-proof", WorkspaceID: receipt.ExecutionWorkspaceID,
+	}
+	factsBytes, err := sealedexec.EncodeReviewLaunchFacts(facts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	payloadSchema, err := contextevent.PayloadSchema(contextevent.KindAdapterStart)
+	if err != nil {
+		t.Fatal(err)
+	}
+	event := contextevent.Event{
+		Schema: contextevent.EventSchemaID, SourceSequence: 1, Flight: "flight-review", Lane: facts.Lane,
+		Epoch: "epoch-review", ManifestRevision: receipt.TerminalManifestRevision, ManifestDigest: receipt.ManifestDigest,
+		Session: facts.Session, ATCRunway: receipt.ATCRunway, ExecutionWorkspaceID: facts.WorkspaceID,
+		CandidateCommit: packet.Candidate.HeadCommit, CandidateTree: packet.Candidate.HeadTree,
+		Adapter: facts.Adapter, AdapterVersion: facts.AdapterVersion, OccurredAt: "2026-08-29T12:00:00Z",
+		Kind: contextevent.KindAdapterStart, PayloadSchema: payloadSchema,
+		Payload: &contextevent.AdapterStartPayload{
+			Schema: payloadSchema, Adapter: facts.Adapter, AdapterVersion: facts.AdapterVersion, Session: facts.Session,
+			ProfileDigest: facts.ProfileDigest, WorkspaceRequestDigest: receipt.ExecutionWorkspaceRequestDigest,
+			Detail: &contextevent.Detail{Mode: contextevent.DetailInline, MediaType: contextevent.MediaTypeJSON, Digest: rawDigestForTest(factsBytes), RedactionProfile: contextevent.RedactionProfileStandard, RedactedJSON: factsBytes},
+		},
+	}
+	eventBytes, err := contextevent.EncodeEvent(event)
+	if err != nil {
+		t.Fatal(err)
+	}
+	event, err = contextevent.DecodeEvent(bytes.NewReader(eventBytes))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ack := contextevent.EventAck{
+		Schema: contextevent.AckSchemaID, Flight: event.Flight, Lane: event.Lane, Epoch: event.Epoch,
+		Session: event.Session, ManifestRevision: event.ManifestRevision, Kind: event.Kind,
+		SourceSequence: event.SourceSequence, EventDigest: event.EventDigest, GlobalSequence: 1,
+	}
+	return contextreceipt.ReviewLaunchProof{
+		Present: true,
+		Execution: contextreceipt.ExecutionProjection{
+			Flight: event.Flight, Lane: event.Lane, Epoch: event.Epoch, Session: event.Session,
+			ATCRunway: event.ATCRunway, ManifestRevision: event.ManifestRevision, ManifestDigest: event.ManifestDigest,
+			InputCommit: event.CandidateCommit, InputTree: event.CandidateTree,
+			ExecutionWorkspaceRequestDigest: receipt.ExecutionWorkspaceRequestDigest,
+			Adapter:                         event.Adapter, AdapterVersion: event.AdapterVersion,
+			ProfileRef: contextreceipt.ProfileRef{Schema: sealedexec.ProjectProfileRefSchemaID, ID: facts.ProfileID, Digest: facts.ProfileDigest},
+		},
+		Event: event, Ack: ack,
+	}
+}
+
+func cloneLaunchEventForTest(t *testing.T, event contextevent.Event, mutate func(*contextevent.Event, *contextevent.AdapterStartPayload)) contextevent.Event {
+	t.Helper()
+	payload, ok := event.Payload.(*contextevent.AdapterStartPayload)
+	if !ok {
+		t.Fatalf("launch payload = %T", event.Payload)
+	}
+	payloadCopy := *payload
+	if payload.Detail != nil {
+		detail := *payload.Detail
+		detail.RedactedJSON = append([]byte(nil), payload.Detail.RedactedJSON...)
+		payloadCopy.Detail = &detail
+	}
+	event.Payload = &payloadCopy
+	mutate(&event, &payloadCopy)
+	event.EventDigest = ""
+	encoded, err := contextevent.EncodeEvent(event)
+	if err != nil {
+		t.Fatal(err)
+	}
+	event, err = contextevent.DecodeEvent(bytes.NewReader(encoded))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return event
 }
 
 func rawDigestForTest(data []byte) string {

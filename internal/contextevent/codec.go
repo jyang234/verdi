@@ -895,6 +895,14 @@ func validatePayloadFields(payload any) error {
 		if err := texts(p.AdapterVersion, p.Session); err != nil {
 			return err
 		}
+		if p.Detail != nil {
+			if p.Detail.Mode != DetailInline {
+				return fmt.Errorf("contextevent: adapter-start detail must be inline")
+			}
+			if err := p.Detail.Validate(); err != nil {
+				return err
+			}
+		}
 		return digests(p.ProfileDigest, p.WorkspaceRequestDigest)
 	case *AdapterStopPayload:
 		if err := p.Adapter.Validate(); err != nil {

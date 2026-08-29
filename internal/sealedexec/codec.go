@@ -792,8 +792,8 @@ func validateExecutionResult(result ExecutionResult) error {
 	if result.Receipt.Digest != receipt.Digest {
 		return fmt.Errorf("sealedexec: execution result receipt digest is stale")
 	}
-	if receipt.Role != contextreceipt.RoleBuilder {
-		return fmt.Errorf("sealedexec: execution result requires a builder receipt")
+	if receipt.Role != contextreceipt.RoleBuilder && receipt.Role != contextreceipt.RoleReviewer {
+		return fmt.Errorf("sealedexec: execution result requires a builder or reviewer receipt role")
 	}
 	if receipt.Authority != result.Authority {
 		return fmt.Errorf("sealedexec: execution result authority contradicts receipt")

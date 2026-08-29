@@ -259,6 +259,47 @@ func TestContextEventRegistryContract_Static(t *testing.T) {
 func TestContextEventRegistryContract_Behavioral(t *testing.T) {
 	t.Parallel()
 
+	builderStart := eventFixture(t, KindAdapterStart, AdapterCodex)
+	builderStartBytes, err := EncodeEvent(builderStart)
+	if err != nil {
+		t.Fatalf("EncodeEvent(builder adapter-start): %v", err)
+	}
+	if got := fmt.Sprintf("sha256:%x", sha256.Sum256(builderStartBytes)); got != "sha256:7e5c9c5a76d9d5e1fdf047fd15ff3f2b7cfd08a29ea87af80325a5398d117020" {
+		t.Fatalf("builder adapter-start canonical bytes digest = %q", got)
+	}
+	if bytes.Contains(builderStartBytes, []byte(`"detail"`)) {
+		t.Fatalf("builder adapter-start unexpectedly gained detail: %s", builderStartBytes)
+	}
+	reviewStart := eventFixture(t, KindAdapterStart, AdapterCodex)
+	reviewPayload := reviewStart.Payload.(*AdapterStartPayload)
+	detail := inlineDetail(t)
+	reviewPayload.Detail = &detail
+	reviewStartBytes, err := EncodeEvent(reviewStart)
+	if err != nil {
+		t.Fatalf("EncodeEvent(review adapter-start detail): %v", err)
+	}
+	decodedReviewStart, err := DecodeEvent(bytes.NewReader(reviewStartBytes))
+	if err != nil {
+		t.Fatalf("DecodeEvent(review adapter-start detail): %v", err)
+	}
+	decodedDetail := decodedReviewStart.Payload.(*AdapterStartPayload).Detail
+	if decodedDetail == nil || !bytes.Equal(decodedDetail.RedactedJSON, detail.RedactedJSON) || decodedDetail.Digest != detail.Digest {
+		t.Fatalf("decoded review adapter-start detail = %#v", decodedDetail)
+	}
+	badReviewStart := eventFixture(t, KindAdapterStart, AdapterCodex)
+	badPayload := badReviewStart.Payload.(*AdapterStartPayload)
+	segment := Detail{Mode: DetailSegment, MediaType: MediaTypeJSON, Digest: digestA, RedactionProfile: RedactionProfileStandard, ByteCount: 1, Reference: "segment-1"}
+	badPayload.Detail = &segment
+	if _, err := EncodeEvent(badReviewStart); err == nil {
+		t.Fatal("EncodeEvent(adapter-start segment detail) error = nil")
+	}
+	digestMismatch := detail
+	digestMismatch.Digest = digestA
+	badPayload.Detail = &digestMismatch
+	if _, err := EncodeEvent(badReviewStart); err == nil {
+		t.Fatal("EncodeEvent(adapter-start mismatched inline detail) error = nil")
+	}
+
 	for _, adapter := range []Adapter{AdapterCodex, AdapterClaude} {
 		adapter := adapter
 		for _, kind := range allFixtureKinds() {

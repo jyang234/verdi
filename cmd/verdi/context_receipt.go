@@ -154,8 +154,8 @@ func (sealedExecutionProofDecoder) VerifyExpansionProof(raw []byte, expansion co
 	return sealedexec.VerifyExpansionDataProof(raw, expansion)
 }
 
-func (sealedExecutionProofDecoder) VerifyReviewProof(raw []byte, receipt contextreceipt.Receipt, candidate contextreceipt.Candidate) (contextreceipt.ReviewProofProjection, error) {
-	return sealedreview.VerifyReviewProof(raw, receipt, candidate)
+func (sealedExecutionProofDecoder) VerifyReviewProof(raw []byte, receipt contextreceipt.Receipt, candidate contextreceipt.Candidate, launch contextreceipt.ReviewLaunchProof) (contextreceipt.ReviewProofProjection, error) {
+	return sealedreview.VerifyReviewProof(raw, receipt, candidate, launch)
 }
 
 func printContextReceiptDiagnostic(stderr io.Writer, err error) {

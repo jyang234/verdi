@@ -228,7 +228,7 @@ func (v *Verifier) Verify(ctx context.Context, request VerifyRequest) (Verdict, 
 	}
 	appendOperand("isolation", isolationState, isolationExpected, isolationObserved, isolationFinding(isolationState), authority.Isolation.Witnesses)
 
-	reviewProjection, err := v.reviewProjection(request)
+	reviewProjection, err := v.reviewProjection(request, execution, events, executionAcks)
 	if err != nil {
 		return Verdict{}, err
 	}
@@ -246,7 +246,7 @@ func (v *Verifier) Verify(ctx context.Context, request VerifyRequest) (Verdict, 
 	return DecodeVerdict(bytes.NewReader(encodedVerdict))
 }
 
-func (v *Verifier) reviewProjection(request VerifyRequest) (ReviewProofProjection, error) {
+func (v *Verifier) reviewProjection(request VerifyRequest, execution ExecutionProjection, events []contextevent.Event, acks []contextevent.EventAck) (ReviewProofProjection, error) {
 	if request.Receipt.Role == RoleBuilder {
 		packetDigest := mustProjectionDigest([]ReviewInput{})
 		linkDigest := mustProjectionDigest([]string{})
@@ -282,7 +282,11 @@ func (v *Verifier) reviewProjection(request VerifyRequest) (ReviewProofProjectio
 			},
 		}, nil
 	}
-	projection, err := v.review.VerifyReviewProof(append([]byte{}, request.Proofs.ReviewPacketBytes...), request.Receipt, request.Candidate)
+	launch, err := selectReviewLaunchProof(execution, events, acks)
+	if err != nil {
+		return ReviewProofProjection{}, err
+	}
+	projection, err := v.review.VerifyReviewProof(append([]byte{}, request.Proofs.ReviewPacketBytes...), request.Receipt, request.Candidate, launch)
 	if err != nil {
 		return ReviewProofProjection{}, fmt.Errorf("contextreceipt: review packet proof: %w", err)
 	}
@@ -299,6 +303,23 @@ func (v *Verifier) reviewProjection(request VerifyRequest) (ReviewProofProjectio
 		}
 	}
 	return projection, nil
+}
+
+func selectReviewLaunchProof(execution ExecutionProjection, events []contextevent.Event, acks []contextevent.EventAck) (ReviewLaunchProof, error) {
+	if len(events) != len(acks) {
+		return ReviewLaunchProof{}, fmt.Errorf("contextreceipt: review launch event/ack count mismatch")
+	}
+	var proof ReviewLaunchProof
+	for i, event := range events {
+		if event.Kind != contextevent.KindAdapterStart {
+			continue
+		}
+		if proof.Present {
+			return ReviewLaunchProof{}, fmt.Errorf("contextreceipt: multiple adapter-start events in review proof")
+		}
+		proof = ReviewLaunchProof{Present: true, Execution: execution, Event: event, Ack: acks[i]}
+	}
+	return proof, nil
 }
 
 func validateReviewOperandProjection(name string, projection ReviewOperandProjection) error {

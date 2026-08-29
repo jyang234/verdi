@@ -92,6 +92,72 @@ func TestAdapterStartUsesPinnedIsolationAndTypedInput(t *testing.T) {
 			t.Fatalf("observation[%d] lost canonical foreign detail: %#v", i, observation)
 		}
 	}
+
+	t.Run("review start carries exact explicit model and acknowledged launch facts", func(t *testing.T) {
+		reviewLaunch := adapterLaunch(t, sealedexec.ActionStart)
+		reviewLaunch.Request.Lane = "reviewer"
+		reviewLaunch.Request.Profile.ID = "review-profile"
+		reviewLaunch.Review = &sealedexec.ReviewLaunch{
+			Round: "r0", PacketDigest: adapterTestDigest([]byte("r0-packet")),
+			Model: "gpt-review-pinned",
+		}
+		reviewProcess := &cannedProcess{output: []byte("{\"type\":\"thread.started\",\"thread_id\":\"review-provider-session\"}\n")}
+		reviewAdapter, err := New(reviewProcess)
+		if err != nil {
+			t.Fatal(err)
+		}
+		reviewRun, err := reviewAdapter.Start(context.Background(), reviewLaunch)
+		if err != nil {
+			t.Fatalf("Start(review): %v", err)
+		}
+		reviewResult := collectRun(t, reviewRun)
+		wantReviewArgs := []string{
+			reviewLaunch.Profile.Executable, "exec", "--json", "--strict-config", "--ignore-user-config", "--ignore-rules",
+			"--profile", reviewLaunch.Profile.Name, "--model", "gpt-review-pinned", "--sandbox", "workspace-write", "--cd", reviewLaunch.Workspace.Path, "-",
+		}
+		if !reflect.DeepEqual(reviewProcess.command.Args, wantReviewArgs) {
+			t.Fatalf("review argv = %v, want %v", reviewProcess.command.Args, wantReviewArgs)
+		}
+		if contains(reviewProcess.command.Args, "resume") {
+			t.Fatalf("review argv admitted resume: %v", reviewProcess.command.Args)
+		}
+		startPayload, ok := reviewResult.Observations[0].Payload.(*contextevent.AdapterStartPayload)
+		if !ok || startPayload.Detail == nil {
+			t.Fatalf("review adapter-start payload/detail = %#v", reviewResult.Observations[0].Payload)
+		}
+		facts, err := sealedexec.DecodeReviewLaunchFacts(bytes.NewReader(startPayload.Detail.RedactedJSON))
+		if err != nil {
+			t.Fatalf("DecodeReviewLaunchFacts: %v", err)
+		}
+		if facts.Round != "r0" || facts.PacketDigest != reviewLaunch.Review.PacketDigest || facts.PriorReview != nil ||
+			facts.Lane != reviewLaunch.Request.Lane || facts.Adapter != contextevent.AdapterCodex || facts.AdapterVersion != reviewLaunch.Request.AdapterVersion ||
+			facts.Model != "gpt-review-pinned" || facts.ProfileID != reviewLaunch.Request.Profile.ID || facts.ProfileDigest != reviewLaunch.Profile.Digest ||
+			facts.Session != reviewLaunch.Request.Session || facts.WorkspaceID != reviewLaunch.Workspace.WorkspaceID {
+			t.Fatalf("review launch facts = %#v", facts)
+		}
+	})
+
+	t.Run("review refuses resume and invalid model before process start", func(t *testing.T) {
+		bad := adapterLaunch(t, sealedexec.ActionResume)
+		bad.Request.Lane = "reviewer"
+		bad.Request.Profile.ID = "review-profile"
+		bad.Review = &sealedexec.ReviewLaunch{Round: "r0", PacketDigest: adapterTestDigest([]byte("r0-packet")), Model: "gpt-review-pinned"}
+		badProcess := &cannedProcess{}
+		badAdapter, err := New(badProcess)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := badAdapter.Start(context.Background(), bad); err == nil || badProcess.command != nil {
+			t.Fatalf("Start(review resume) error/process = %v/%#v", err, badProcess.command)
+		}
+		bad = adapterLaunch(t, sealedexec.ActionStart)
+		bad.Request.Lane = "reviewer"
+		bad.Request.Profile.ID = "review-profile"
+		bad.Review = &sealedexec.ReviewLaunch{Round: "r0", PacketDigest: adapterTestDigest([]byte("r0-packet")), Model: ""}
+		if _, err := badAdapter.Start(context.Background(), bad); err == nil || badProcess.command != nil {
+			t.Fatalf("Start(review empty model) error/process = %v/%#v", err, badProcess.command)
+		}
+	})
 }
 
 func TestDetailForDigestsExactCarriedJSON(t *testing.T) {

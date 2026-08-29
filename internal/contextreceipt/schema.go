@@ -326,8 +326,18 @@ type ReviewProofProjection struct {
 	Freshness ReviewOperandProjection
 }
 
+// ReviewLaunchProof is the optional acknowledged adapter-start observation
+// selected from the already strict-decoded parallel execution event/ack
+// streams. Present is false when no review launch facts were recorded.
+type ReviewLaunchProof struct {
+	Present   bool
+	Execution ExecutionProjection
+	Event     contextevent.Event
+	Ack       contextevent.EventAck
+}
+
 // ReviewProofVerifier strictly verifies the component-owned I-92 packet and
 // returns only contextreceipt's closed three-operand projection.
 type ReviewProofVerifier interface {
-	VerifyReviewProof([]byte, Receipt, Candidate) (ReviewProofProjection, error)
+	VerifyReviewProof([]byte, Receipt, Candidate, ReviewLaunchProof) (ReviewProofProjection, error)
 }

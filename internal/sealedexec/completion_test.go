@@ -16,6 +16,67 @@ import (
 )
 
 func TestExecutionCompletionService_Behavioral(t *testing.T) {
+	t.Run("reviewer completion changes only receipt role link and packet projection", func(t *testing.T) {
+		fixture := newCompletionFixture(t, contextevent.AuthorityAuthoritative)
+		inputs := []contextreceipt.ReviewInput{
+			{Kind: "accepted-spec", ContentDigest: testDigest("review-spec")},
+			{Kind: "builder-receipt", ContentDigest: testDigest("builder-receipt-item")},
+		}
+		fixture.inputs.inputs.ReviewInputs = append([]contextreceipt.ReviewInput(nil), inputs...)
+		request := fixture.requestValue()
+		request.ReceiptRole = contextreceipt.RoleReviewer
+		request.ReviewInputs = append([]contextreceipt.ReviewInput(nil), inputs...)
+		request.ReviewOf = []string{testDigest("builder-receipt")}
+		completion, err := fixture.service().Complete(context.Background(), request)
+		if err != nil {
+			t.Fatalf("Complete reviewer: %v", err)
+		}
+		if completion.Receipt.Role != contextreceipt.RoleReviewer || !reflect.DeepEqual(completion.Receipt.ReviewInputs, inputs) || !reflect.DeepEqual(completion.Receipt.ReviewOf, request.ReviewOf) {
+			t.Fatalf("reviewer receipt role/inputs/link = %q/%#v/%#v", completion.Receipt.Role, completion.Receipt.ReviewInputs, completion.Receipt.ReviewOf)
+		}
+		payload, ok := fixture.receipts.append.Event.Payload.(*contextevent.ReceiptPayload)
+		if !ok || payload.Role != contextevent.RoleReviewer {
+			t.Fatalf("reviewer receipt event payload = %#v", fixture.receipts.append.Event.Payload)
+		}
+		if got := fixture.calls; !reflect.DeepEqual(got, []string{"observe-child", "append-execution-result", "checkpoint", "resolve-receipt-inputs", "receipt-roundtrip", "append-receipt"}) {
+			t.Fatalf("reviewer terminal order = %q", got)
+		}
+	})
+
+	reviewerMutations := []struct {
+		name      string
+		configure func(*completionFixture, *CompletionRequest)
+	}{
+		{"missing builder link", func(_ *completionFixture, request *CompletionRequest) { request.ReviewOf = nil }},
+		{"multiple builder links", func(_ *completionFixture, request *CompletionRequest) {
+			request.ReviewOf = append(request.ReviewOf, testDigest("other-builder"))
+		}},
+		{"missing packet projection", func(_ *completionFixture, request *CompletionRequest) { request.ReviewInputs = nil }},
+		{"controller packet projection mismatch", func(f *completionFixture, _ *CompletionRequest) {
+			f.inputs.inputs.ReviewInputs[0].ContentDigest = testDigest("wrong-packet-item")
+		}},
+	}
+	for _, mutation := range reviewerMutations {
+		mutation := mutation
+		t.Run("reviewer refuses "+mutation.name, func(t *testing.T) {
+			fixture := newCompletionFixture(t, contextevent.AuthorityAuthoritative)
+			inputs := []contextreceipt.ReviewInput{{Kind: "accepted-spec", ContentDigest: testDigest("review-spec")}}
+			fixture.inputs.inputs.ReviewInputs = append([]contextreceipt.ReviewInput(nil), inputs...)
+			request := fixture.requestValue()
+			request.ReceiptRole = contextreceipt.RoleReviewer
+			request.ReviewInputs = append([]contextreceipt.ReviewInput(nil), inputs...)
+			request.ReviewOf = []string{testDigest("builder-receipt")}
+			mutation.configure(fixture, &request)
+			completion, err := fixture.service().Complete(context.Background(), request)
+			if !errors.Is(err, ErrOperational) {
+				t.Fatalf("Complete reviewer mutation error = %v, want operational", err)
+			}
+			if completion.Receipt.Digest != "" || fixture.receipts.append.Receipt.Digest != "" {
+				t.Fatalf("reviewer mutation minted receipt: completion=%q append=%q", completion.Receipt.Digest, fixture.receipts.append.Receipt.Digest)
+			}
+		})
+	}
+
 	t.Run("authoritative completion preserves terminal order and every identity", func(t *testing.T) {
 		fixture := newCompletionFixture(t, contextevent.AuthorityAuthoritative)
 		completion, err := fixture.service().Complete(context.Background(), fixture.requestValue())

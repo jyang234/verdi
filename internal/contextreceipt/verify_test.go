@@ -283,7 +283,7 @@ func TestContextReceiptVerifyContract_Behavioral(t *testing.T) {
 		Link:      ReviewOperandProjection{State: StateProven, ExpectedDigest: reviewDigest, ObservedDigest: reviewDigest},
 		Freshness: ReviewOperandProjection{State: StateProven, ExpectedDigest: reviewDigest, ObservedDigest: reviewDigest},
 	}, wantRaw: append([]byte(nil), reviewerRequest.Proofs.ReviewPacketBytes...), wantReceiptDigest: reviewerRequest.Receipt.Digest, wantCandidate: reviewerRequest.Candidate}
-	projectionResult, err := (&Verifier{review: reviewPort}).reviewProjection(reviewerRequest)
+	projectionResult, err := (&Verifier{review: reviewPort}).reviewProjection(reviewerRequest, ExecutionProjection{}, nil, nil)
 	if err != nil {
 		t.Fatalf("matching review proof projection error = %v", err)
 	}
@@ -292,8 +292,17 @@ func TestContextReceiptVerifyContract_Behavioral(t *testing.T) {
 			t.Fatalf("matching reviewer %s projection = %#v, want proven", name, projection)
 		}
 	}
+	launchEvent := contextevent.Event{Kind: contextevent.KindAdapterStart, EventDigest: receiptDigestA}
+	launchAck := contextevent.EventAck{Kind: contextevent.KindAdapterStart, EventDigest: receiptDigestA}
+	launchExecution := ExecutionProjection{Flight: "flight-review"}
+	wantLaunch := ReviewLaunchProof{Present: true, Execution: launchExecution, Event: launchEvent, Ack: launchAck}
+	reviewPort.wantLaunch = &wantLaunch
+	if _, err := (&Verifier{review: reviewPort}).reviewProjection(reviewerRequest, launchExecution, []contextevent.Event{launchEvent}, []contextevent.EventAck{launchAck}); err != nil {
+		t.Fatalf("acknowledged launch proof selection error = %v", err)
+	}
+	reviewPort.wantLaunch = nil
 	reviewPort.projection.Freshness = ReviewOperandProjection{State: StateViolated, ExpectedDigest: reviewDigest, ObservedDigest: receiptDigestA}
-	projectionResult, err = (&Verifier{review: reviewPort}).reviewProjection(reviewerRequest)
+	projectionResult, err = (&Verifier{review: reviewPort}).reviewProjection(reviewerRequest, ExecutionProjection{}, nil, nil)
 	if err != nil {
 		t.Fatalf("stale review proof projection error = %v", err)
 	}
@@ -302,7 +311,7 @@ func TestContextReceiptVerifyContract_Behavioral(t *testing.T) {
 	}
 	reviewPort.projection.Freshness = ReviewOperandProjection{State: StateProven, ExpectedDigest: reviewDigest, ObservedDigest: reviewDigest}
 	reviewPort.projection.Link = ReviewOperandProjection{State: StateViolated, ExpectedDigest: reviewDigest, ObservedDigest: receiptDigestA}
-	projectionResult, err = (&Verifier{review: reviewPort}).reviewProjection(reviewerRequest)
+	projectionResult, err = (&Verifier{review: reviewPort}).reviewProjection(reviewerRequest, ExecutionProjection{}, nil, nil)
 	if err != nil {
 		t.Fatalf("wrong-link review proof projection error = %v", err)
 	}
@@ -311,11 +320,11 @@ func TestContextReceiptVerifyContract_Behavioral(t *testing.T) {
 	}
 	reviewPort.projection.Link = ReviewOperandProjection{State: StateProven, ExpectedDigest: reviewDigest, ObservedDigest: reviewDigest}
 	reviewPort.projection.Packet.ObservedDigest = receiptDigestA
-	if _, err := (&Verifier{review: reviewPort}).reviewProjection(reviewerRequest); err == nil {
+	if _, err := (&Verifier{review: reviewPort}).reviewProjection(reviewerRequest, ExecutionProjection{}, nil, nil); err == nil {
 		t.Fatal("contradictory proven review proof projection error = nil")
 	}
 	reviewPort.err = errors.New("broken review port")
-	if _, err := (&Verifier{review: reviewPort}).reviewProjection(reviewerRequest); err == nil {
+	if _, err := (&Verifier{review: reviewPort}).reviewProjection(reviewerRequest, ExecutionProjection{}, nil, nil); err == nil {
 		t.Fatal("broken review proof port error = nil")
 	}
 
@@ -424,7 +433,7 @@ func TestVerifierBuilderFreshnessProjection(t *testing.T) {
 			projection, err := (&Verifier{}).reviewProjection(VerifyRequest{
 				Receipt:   Receipt{Role: RoleBuilder},
 				Candidate: tt.candidate,
-			})
+			}, ExecutionProjection{}, nil, nil)
 			if err != nil {
 				t.Fatalf("reviewProjection() error = %v", err)
 			}
@@ -492,9 +501,10 @@ type staticReviewProof struct {
 	wantRaw           []byte
 	wantReceiptDigest string
 	wantCandidate     Candidate
+	wantLaunch        *ReviewLaunchProof
 }
 
-func (f staticReviewProof) VerifyReviewProof(raw []byte, receipt Receipt, candidate Candidate) (ReviewProofProjection, error) {
+func (f staticReviewProof) VerifyReviewProof(raw []byte, receipt Receipt, candidate Candidate, launch ReviewLaunchProof) (ReviewProofProjection, error) {
 	if f.wantRaw != nil && !bytes.Equal(raw, f.wantRaw) {
 		return ReviewProofProjection{}, errors.New("review packet bytes changed at verifier port")
 	}
@@ -503,6 +513,9 @@ func (f staticReviewProof) VerifyReviewProof(raw []byte, receipt Receipt, candid
 	}
 	if f.wantCandidate != (Candidate{}) && candidate != f.wantCandidate {
 		return ReviewProofProjection{}, errors.New("review candidate changed at verifier port")
+	}
+	if f.wantLaunch != nil && !reflect.DeepEqual(launch, *f.wantLaunch) {
+		return ReviewProofProjection{}, errors.New("review launch proof changed at verifier port")
 	}
 	return f.projection, f.err
 }

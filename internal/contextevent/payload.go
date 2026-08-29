@@ -419,6 +419,7 @@ type AdapterStartPayload struct {
 	Session                string  `json:"session"`
 	ProfileDigest          string  `json:"profile_digest"`
 	WorkspaceRequestDigest string  `json:"workspace_request_digest"`
+	Detail                 *Detail `json:"detail,omitempty"`
 }
 
 type AdapterStopPayload struct {

@@ -36,8 +36,11 @@ type CompletionPorts struct {
 
 // CompletionRequest binds one canonical dispatch to U4c's terminal run.
 type CompletionRequest struct {
-	Request ExecutionRequest
-	Run     ExecutionRun
+	Request      ExecutionRequest
+	Run          ExecutionRun
+	ReceiptRole  contextreceipt.Role
+	ReviewInputs []contextreceipt.ReviewInput
+	ReviewOf     []string
 }
 
 // Completion is returned only after the receipt event is durably and
@@ -154,7 +157,11 @@ func (s *CompletionService) Complete(ctx context.Context, input CompletionReques
 	if err != nil {
 		return Completion{}, operational("resolve terminal receipt inputs", err)
 	}
-	receipt, receiptBytes, err := buildCompletionReceipt(input.Request, input.Run.Authority, child, query.DispatchDigest, revisions, eventRoot, resultAck, receiptInputs)
+	receiptRole, reviewInputs, reviewOf, err := completionReviewInputs(input, receiptInputs)
+	if err != nil {
+		return Completion{}, operational("validate terminal receipt role inputs", err)
+	}
+	receipt, receiptBytes, err := buildCompletionReceipt(input.Request, input.Run.Authority, child, query.DispatchDigest, revisions, eventRoot, resultAck, receiptInputs, receiptRole, reviewInputs, reviewOf)
 	if err != nil {
 		return Completion{}, operational("build canonical builder receipt", err)
 	}
@@ -333,13 +340,46 @@ func validateCompletionCheckpoint(request ExecutionRequest, event contextevent.E
 	return append([]contextevent.Revision(nil), checkpoint.Revisions...), root, nil
 }
 
-func buildCompletionReceipt(request ExecutionRequest, authority contextevent.Authority, child WorkspaceFacts, dispatchDigest string, revisions []contextevent.Revision, root string, resultAck contextevent.EventAck, inputs ReceiptInputs) (contextreceipt.Receipt, []byte, error) {
+func completionReviewInputs(input CompletionRequest, resolved ReceiptInputs) (contextreceipt.Role, []contextreceipt.ReviewInput, []string, error) {
+	role := input.ReceiptRole
+	if role == "" {
+		role = contextreceipt.RoleBuilder
+	}
+	switch role {
+	case contextreceipt.RoleBuilder:
+		if input.ReviewInputs != nil || input.ReviewOf != nil {
+			return "", nil, nil, errors.New("builder completion forbids explicit reviewer inputs")
+		}
+		return role, append(make([]contextreceipt.ReviewInput, 0, len(resolved.ReviewInputs)), resolved.ReviewInputs...), nil, nil
+	case contextreceipt.RoleReviewer:
+		if len(input.ReviewOf) != 1 || len(input.ReviewInputs) == 0 || !equalReviewInputs(input.ReviewInputs, resolved.ReviewInputs) {
+			return "", nil, nil, errors.New("reviewer completion requires one builder link and exact nonempty packet projection")
+		}
+		return role, append(make([]contextreceipt.ReviewInput, 0, len(input.ReviewInputs)), input.ReviewInputs...), append([]string(nil), input.ReviewOf...), nil
+	default:
+		return "", nil, nil, fmt.Errorf("unknown completion receipt role %q", role)
+	}
+}
+
+func equalReviewInputs(left, right []contextreceipt.ReviewInput) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for i := range left {
+		if left[i] != right[i] {
+			return false
+		}
+	}
+	return true
+}
+
+func buildCompletionReceipt(request ExecutionRequest, authority contextevent.Authority, child WorkspaceFacts, dispatchDigest string, revisions []contextevent.Revision, root string, resultAck contextevent.EventAck, inputs ReceiptInputs, role contextreceipt.Role, reviewInputs []contextreceipt.ReviewInput, reviewOf []string) (contextreceipt.Receipt, []byte, error) {
 	workspaceDigest, err := ExecutionWorkspaceRequestDigest(request.ExecutionWorkspaceRequest)
 	if err != nil {
 		return contextreceipt.Receipt{}, nil, err
 	}
 	receipt := contextreceipt.Receipt{
-		Schema: contextreceipt.SchemaID, Role: contextreceipt.RoleBuilder, Authority: authority,
+		Schema: contextreceipt.SchemaID, Role: role, Authority: authority,
 		ManifestDigest: request.ManifestDigest, DispatchDigest: dispatchDigest, ATCRunway: request.ATCRunway,
 		ExecutionWorkspaceRequestDigest: workspaceDigest, ExecutionWorkspaceID: child.WorkspaceID,
 		InputCommit: request.InputCommit, InputTree: request.InputTree, OutputCommit: child.CurrentCommit,
@@ -350,7 +390,8 @@ func buildCompletionReceipt(request ExecutionRequest, authority contextevent.Aut
 		Obligations:               append(make([]contextreceipt.Obligation, 0, len(inputs.Obligations)), inputs.Obligations...),
 		Evidence:                  append(make([]contextreceipt.Evidence, 0, len(inputs.Evidence)), inputs.Evidence...),
 		RunnerPrincipalResolution: inputs.RunnerPrincipal, Adapter: request.Adapter,
-		AdapterVersion: request.AdapterVersion, ReviewInputs: append(make([]contextreceipt.ReviewInput, 0, len(inputs.ReviewInputs)), inputs.ReviewInputs...),
+		AdapterVersion: request.AdapterVersion, ReviewInputs: append(make([]contextreceipt.ReviewInput, 0, len(reviewInputs)), reviewInputs...),
+		ReviewOf: append([]string(nil), reviewOf...),
 	}
 	// Preserve explicit non-null empty arrays from the controller boundary.
 	if inputs.Expansions == nil {
@@ -362,8 +403,11 @@ func buildCompletionReceipt(request ExecutionRequest, authority contextevent.Aut
 	if inputs.Evidence == nil {
 		receipt.Evidence = nil
 	}
-	if inputs.ReviewInputs == nil {
+	if reviewInputs == nil {
 		receipt.ReviewInputs = nil
+	}
+	if reviewOf == nil {
+		receipt.ReviewOf = nil
 	}
 	encoded, err := contextreceipt.EncodeReceipt(receipt)
 	if err != nil {
@@ -386,7 +430,7 @@ func buildReceiptEvent(request ExecutionRequest, child WorkspaceFacts, resultEve
 	}
 	receiptJSON := append([]byte(nil), receiptBytes[:len(receiptBytes)-1]...)
 	payload := &contextevent.ReceiptPayload{
-		Schema: schema, Role: contextevent.RoleBuilder, ReceiptDigest: receipt.Digest,
+		Schema: schema, Role: receipt.Role, ReceiptDigest: receipt.Digest,
 		Authority: receipt.Authority, ExecutionEventChainRoot: receipt.EventChainRoot,
 		Detail: contextevent.Detail{
 			Mode: contextevent.DetailInline, MediaType: contextevent.MediaTypeJSON,

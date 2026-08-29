@@ -5,12 +5,15 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"path/filepath"
 	"reflect"
 	"sort"
 	"strings"
 	"sync"
 
+	"github.com/jyang234/verdi/internal/artifact"
+	"github.com/jyang234/verdi/internal/canonjson"
 	"github.com/jyang234/verdi/internal/contextcompile"
 	"github.com/jyang234/verdi/internal/contextevent"
 	"github.com/jyang234/verdi/internal/execworkspace"
@@ -207,6 +210,7 @@ type AdapterCheck struct {
 	Request   ExecutionRequest
 	Profile   ResolvedProfile
 	Workspace WorkspaceFacts
+	Review    *ReviewLaunch
 }
 
 // AdapterLaunch structurally separates immutable instructions from data.
@@ -215,6 +219,123 @@ type AdapterLaunch struct {
 	Profile   ResolvedProfile
 	Workspace WorkspaceFacts
 	Input     ProviderInput
+	Review    *ReviewLaunch
+}
+
+const ReviewLaunchFactsSchemaID = "verdi.sealed-review-launch-facts/v1"
+
+// ReviewPrior is the exact R2 lineage identity carried by launch facts.
+type ReviewPrior struct {
+	ReceiptDigest      string `json:"receipt_digest"`
+	AdjudicationDigest string `json:"adjudication_digest"`
+}
+
+// ReviewLaunch carries the review-only provider launch operands. A nil value
+// selects the byte-identical generic builder start path.
+type ReviewLaunch struct {
+	Round        string
+	PacketDigest string
+	PriorReview  *ReviewPrior
+	Model        string
+}
+
+// ReviewLaunchFacts are the exact acknowledged I-97 review-start projection.
+type ReviewLaunchFacts struct {
+	Schema         string               `json:"schema"`
+	Round          string               `json:"round"`
+	PacketDigest   string               `json:"packet_digest"`
+	PriorReview    *ReviewPrior         `json:"prior_review"`
+	Lane           string               `json:"lane"`
+	Adapter        contextevent.Adapter `json:"adapter"`
+	AdapterVersion string               `json:"adapter_version"`
+	Model          string               `json:"model"`
+	ProfileID      string               `json:"profile_id"`
+	ProfileDigest  string               `json:"profile_digest"`
+	Session        string               `json:"session"`
+	WorkspaceID    string               `json:"workspace_id"`
+}
+
+// EncodeReviewLaunchFacts validates and canonically encodes launch facts.
+func EncodeReviewLaunchFacts(facts ReviewLaunchFacts) ([]byte, error) {
+	if err := validateReviewLaunchFacts(facts); err != nil {
+		return nil, err
+	}
+	encoded, err := canonjson.Marshal(facts)
+	return bytes.TrimSuffix(encoded, []byte("\n")), err
+}
+
+// DecodeReviewLaunchFacts strictly decodes one canonical launch-facts document.
+func DecodeReviewLaunchFacts(reader io.Reader) (ReviewLaunchFacts, error) {
+	if reader == nil {
+		return ReviewLaunchFacts{}, errors.New("sealedexec: decode review launch facts: nil reader")
+	}
+	raw, err := io.ReadAll(reader)
+	if err != nil {
+		return ReviewLaunchFacts{}, fmt.Errorf("sealedexec: read review launch facts: %w", err)
+	}
+	var facts ReviewLaunchFacts
+	if err := artifact.DecodeExactJSON(raw, &facts); err != nil {
+		return ReviewLaunchFacts{}, fmt.Errorf("sealedexec: decode review launch facts: %w", err)
+	}
+	if err := validateReviewLaunchFacts(facts); err != nil {
+		return ReviewLaunchFacts{}, err
+	}
+	canonical, err := canonjson.Marshal(facts)
+	if err != nil {
+		return ReviewLaunchFacts{}, err
+	}
+	canonical = bytes.TrimSuffix(canonical, []byte("\n"))
+	if !bytes.Equal(raw, canonical) {
+		return ReviewLaunchFacts{}, errors.New("sealedexec: review launch facts are not byte-canonical")
+	}
+	return cloneReviewLaunchFacts(facts), nil
+}
+
+func validateReviewLaunchFacts(facts ReviewLaunchFacts) error {
+	if facts.Schema != ReviewLaunchFactsSchemaID {
+		return fmt.Errorf("sealedexec: review launch facts schema must be %q", ReviewLaunchFactsSchemaID)
+	}
+	if facts.Round != "r0" && facts.Round != "r2" {
+		return fmt.Errorf("sealedexec: review launch facts has unknown round %q", facts.Round)
+	}
+	for field, value := range map[string]string{
+		"lane": facts.Lane, "adapter_version": facts.AdapterVersion, "model": facts.Model,
+		"profile_id": facts.ProfileID, "session": facts.Session, "workspace_id": facts.WorkspaceID,
+	} {
+		if err := requireText(field, value); err != nil {
+			return err
+		}
+	}
+	if err := facts.Adapter.Validate(); err != nil {
+		return fmt.Errorf("sealedexec: review launch facts: %w", err)
+	}
+	if err := validateDigest("packet_digest", facts.PacketDigest); err != nil {
+		return err
+	}
+	if err := validateDigest("profile_digest", facts.ProfileDigest); err != nil {
+		return err
+	}
+	if facts.Round == "r0" {
+		if facts.PriorReview != nil {
+			return errors.New("sealedexec: R0 review launch facts forbid prior_review")
+		}
+		return nil
+	}
+	if facts.PriorReview == nil {
+		return errors.New("sealedexec: R2 review launch facts require prior_review")
+	}
+	if err := validateDigest("prior_review.receipt_digest", facts.PriorReview.ReceiptDigest); err != nil {
+		return err
+	}
+	return validateDigest("prior_review.adjudication_digest", facts.PriorReview.AdjudicationDigest)
+}
+
+func cloneReviewLaunchFacts(facts ReviewLaunchFacts) ReviewLaunchFacts {
+	if facts.PriorReview != nil {
+		prior := *facts.PriorReview
+		facts.PriorReview = &prior
+	}
+	return facts
 }
 
 // AdapterTerminalResult is the explicit terminal process result. A provider
@@ -272,6 +393,9 @@ type ExecutionRun struct {
 	Workspace         WorkspaceFacts
 	Profile           ResolvedProfile
 	AdapterSessionRef string
+	ReviewLaunchFacts *ReviewLaunchFacts
+	ReviewLaunchEvent *contextevent.Event
+	ReviewLaunchAck   *contextevent.EventAck
 	Acks              []contextevent.EventAck
 }
 
@@ -367,6 +491,10 @@ type activeExecution struct {
 	priorDigest      string
 	priorGlobal      uint64
 	sessionRef       string
+	review           *ReviewLaunch
+	reviewFacts      *ReviewLaunchFacts
+	reviewEvent      *contextevent.Event
+	reviewAck        *contextevent.EventAck
 	acks             []contextevent.EventAck
 	state            activeExecutionState
 	stopIssued       chan struct{}
@@ -411,6 +539,21 @@ func NewService(ports ServicePorts) (*Service, error) {
 
 // Execute verifies every prerequisite and launches last.
 func (s *Service) Execute(ctx context.Context, request ExecutionRequest, data []contextcompile.DataItem) (ExecutionRun, error) {
+	return s.execute(ctx, request, data, nil)
+}
+
+// ExecuteReview verifies and launches one fresh start-only sealed review.
+func (s *Service) ExecuteReview(ctx context.Context, request ExecutionRequest, data []contextcompile.DataItem, review ReviewLaunch) (ExecutionRun, error) {
+	if request.Action != ActionStart || request.Resume != nil {
+		return ExecutionRun{}, verdict("sealed review is start-only")
+	}
+	if err := validateReviewLaunch(review); err != nil {
+		return ExecutionRun{}, operational("validate review launch", err)
+	}
+	return s.execute(ctx, request, data, &review)
+}
+
+func (s *Service) execute(ctx context.Context, request ExecutionRequest, data []contextcompile.DataItem, review *ReviewLaunch) (ExecutionRun, error) {
 	if ctx == nil {
 		return ExecutionRun{}, operational("execute", errors.New("nil context"))
 	}
@@ -553,7 +696,7 @@ func (s *Service) Execute(ctx context.Context, request ExecutionRequest, data []
 	if !reflect.DeepEqual(opaque.Rows, opaqueIdentities(request.Manifest.Opaque)) {
 		return ExecutionRun{}, verdict("opaque vendor identities mismatch")
 	}
-	adapterFacts, err := s.ports.Adapter.VerifyAdapter(ctx, AdapterCheck{Request: request, Profile: profile, Workspace: workspace})
+	adapterFacts, err := s.ports.Adapter.VerifyAdapter(ctx, AdapterCheck{Request: request, Profile: profile, Workspace: workspace, Review: cloneReviewLaunch(review)})
 	if err != nil {
 		return ExecutionRun{}, operational("verify adapter", err)
 	}
@@ -566,7 +709,7 @@ func (s *Service) Execute(ctx context.Context, request ExecutionRequest, data []
 		return ExecutionRun{}, verdict("adapter identity/version/profile/executable mismatch")
 	}
 
-	launch := AdapterLaunch{Request: request, Profile: profile, Workspace: workspace, Input: input}
+	launch := AdapterLaunch{Request: request, Profile: profile, Workspace: workspace, Input: input, Review: cloneReviewLaunch(review)}
 	partial := ExecutionRun{
 		Authority: authorityMode, Witnesses: append([]string(nil), witnesses...),
 		Workspace: workspace, Profile: profile,
@@ -589,7 +732,7 @@ func (s *Service) Execute(ctx context.Context, request ExecutionRequest, data []
 		priorDigest = terminalRoot(checkpoint)
 		priorGlobal = checkpoint.TerminalGlobalSequence
 	}
-	s.activate(active, stream, request, canonicalRequest, workspace, profile, recorder, sequence, priorDigest, priorGlobal, sessionFacts.SessionRef)
+	s.activate(active, stream, request, canonicalRequest, workspace, profile, recorder, sequence, priorDigest, priorGlobal, sessionFacts.SessionRef, review)
 	return s.consumeActive(ctx, active, authorityMode, witnesses)
 }
 
@@ -701,7 +844,7 @@ func (s *Service) acquire(key ExecutionKey, operation string) (*activeExecution,
 	return active, release, nil
 }
 
-func (s *Service) activate(active *activeExecution, stream ActiveAdapterRun, request ExecutionRequest, canonicalRequest []byte, workspace WorkspaceFacts, profile ResolvedProfile, recorder Recorder, sequence uint64, priorDigest string, priorGlobal uint64, sessionRef string) {
+func (s *Service) activate(active *activeExecution, stream ActiveAdapterRun, request ExecutionRequest, canonicalRequest []byte, workspace WorkspaceFacts, profile ResolvedProfile, recorder Recorder, sequence uint64, priorDigest string, priorGlobal uint64, sessionRef string, review *ReviewLaunch) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	active.mu.Lock()
@@ -716,6 +859,7 @@ func (s *Service) activate(active *activeExecution, stream ActiveAdapterRun, req
 	active.priorDigest = priorDigest
 	active.priorGlobal = priorGlobal
 	active.sessionRef = sessionRef
+	active.review = cloneReviewLaunch(review)
 	active.acks = []contextevent.EventAck{}
 	active.state = activeRunning
 	active.stopIssued = make(chan struct{})
@@ -862,6 +1006,14 @@ func (s *Service) consumeActive(ctx context.Context, active *activeExecution, au
 func (s *Service) recordResult(ctx context.Context, active *activeExecution, result AdapterResult) (string, bool, error) {
 	blocked := ""
 	for _, observation := range result.Observations {
+		var reviewFacts *ReviewLaunchFacts
+		if observation.Kind == contextevent.KindAdapterStart {
+			facts, err := reviewFactsFromObservation(active, observation)
+			if err != nil {
+				return "", true, err
+			}
+			reviewFacts = facts
+		}
 		lockSessionBoundary := active.request.Action == ActionStart && observation.Kind == contextevent.KindAdapterStart
 		if lockSessionBoundary {
 			active.mu.Lock()
@@ -907,6 +1059,11 @@ func (s *Service) recordResult(ctx context.Context, active *activeExecution, res
 				return "", true, operational("store acknowledged adapter session", err)
 			}
 			active.sessionRef = result.ObservedSessionRef
+			active.reviewFacts = reviewFacts
+			if reviewFacts != nil {
+				eventCopy, ackCopy := event, ack
+				active.reviewEvent, active.reviewAck = &eventCopy, &ackCopy
+			}
 			active.mu.Unlock()
 		}
 		if observation.BlocksAuthority && blocked == "" {
@@ -1014,11 +1171,104 @@ func (s *Service) tryFinishNormally(active *activeExecution, authority contextev
 }
 
 func activeRunResult(active *activeExecution, authority contextevent.Authority, witnesses []string) ExecutionRun {
+	var reviewFacts *ReviewLaunchFacts
+	var reviewEvent *contextevent.Event
+	var reviewAck *contextevent.EventAck
+	if active.reviewFacts != nil {
+		facts := cloneReviewLaunchFacts(*active.reviewFacts)
+		reviewFacts = &facts
+	}
+	if active.reviewEvent != nil {
+		event := *active.reviewEvent
+		reviewEvent = &event
+	}
+	if active.reviewAck != nil {
+		ack := *active.reviewAck
+		reviewAck = &ack
+	}
 	return ExecutionRun{
 		Authority: authority, Witnesses: append([]string(nil), witnesses...),
 		Workspace: active.workspace, Profile: active.profile,
-		AdapterSessionRef: active.sessionRef, Acks: append([]contextevent.EventAck(nil), active.acks...),
+		AdapterSessionRef: active.sessionRef, ReviewLaunchFacts: reviewFacts,
+		ReviewLaunchEvent: reviewEvent, ReviewLaunchAck: reviewAck,
+		Acks: append([]contextevent.EventAck(nil), active.acks...),
 	}
+}
+
+func validateReviewLaunch(review ReviewLaunch) error {
+	if review.Round != "r0" && review.Round != "r2" {
+		return fmt.Errorf("unknown review round %q", review.Round)
+	}
+	if err := validateDigest("review packet_digest", review.PacketDigest); err != nil {
+		return err
+	}
+	if err := requireText("review model", review.Model); err != nil {
+		return err
+	}
+	if review.Round == "r0" {
+		if review.PriorReview != nil {
+			return errors.New("R0 review launch forbids prior review")
+		}
+		return nil
+	}
+	if review.PriorReview == nil {
+		return errors.New("R2 review launch requires prior review")
+	}
+	if err := validateDigest("review prior receipt", review.PriorReview.ReceiptDigest); err != nil {
+		return err
+	}
+	return validateDigest("review prior adjudication", review.PriorReview.AdjudicationDigest)
+}
+
+func cloneReviewLaunch(review *ReviewLaunch) *ReviewLaunch {
+	if review == nil {
+		return nil
+	}
+	cloned := *review
+	if review.PriorReview != nil {
+		prior := *review.PriorReview
+		cloned.PriorReview = &prior
+	}
+	return &cloned
+}
+
+func reviewFactsFromObservation(active *activeExecution, observation NormalizedObservation) (*ReviewLaunchFacts, error) {
+	payload, ok := observation.Payload.(*contextevent.AdapterStartPayload)
+	if !ok {
+		return nil, operational("review adapter-start facts", fmt.Errorf("unexpected payload %T", observation.Payload))
+	}
+	if active.review == nil {
+		if payload.Detail != nil {
+			return nil, verdict("builder adapter-start carries review-only launch facts")
+		}
+		return nil, nil
+	}
+	if payload.Detail == nil {
+		return nil, operational("review adapter-start facts", errors.New("acknowledged launch facts are missing"))
+	}
+	facts, err := DecodeReviewLaunchFacts(bytes.NewReader(payload.Detail.RedactedJSON))
+	if err != nil {
+		return nil, operational("review adapter-start facts", err)
+	}
+	want := ReviewLaunchFacts{
+		Schema: ReviewLaunchFactsSchemaID, Round: active.review.Round, PacketDigest: active.review.PacketDigest,
+		PriorReview: active.review.PriorReview, Lane: active.request.Lane, Adapter: active.request.Adapter,
+		AdapterVersion: active.request.AdapterVersion, Model: active.review.Model, ProfileID: active.request.Profile.ID,
+		ProfileDigest: active.profile.Digest, Session: active.request.Session, WorkspaceID: active.workspace.WorkspaceID,
+	}
+	wantBytes, err := EncodeReviewLaunchFacts(want)
+	if err != nil {
+		return nil, operational("review expected launch facts", err)
+	}
+	gotBytes, err := EncodeReviewLaunchFacts(facts)
+	if err != nil {
+		return nil, operational("review observed launch facts", err)
+	}
+	if !bytes.Equal(wantBytes, gotBytes) {
+		return nil, verdict("review launch facts contradict verified request and workspace")
+	}
+	canonical := cloneReviewLaunchFacts(facts)
+	return &canonical, nil
 }
 
 func appendUnique(values []string, value string) []string {

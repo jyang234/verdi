@@ -91,7 +91,7 @@ func (a *Adapter) VerifyAdapter(ctx context.Context, check sealedexec.AdapterChe
 		check.Profile.Digest != check.Request.Profile.Digest || check.Profile.WorkspacePath != check.Workspace.Path {
 		return sealedexec.AdapterFacts{}, errors.New("sealedexec/codex: adapter identity/profile/version mismatch")
 	}
-	args, err := verifyArgs(check.Request, check.Profile, check.Workspace)
+	args, err := verifyArgs(check.Request, check.Profile, check.Workspace, check.Review)
 	if err != nil {
 		return sealedexec.AdapterFacts{}, err
 	}
@@ -115,11 +115,20 @@ func (a *Adapter) VerifyAdapter(ctx context.Context, check sealedexec.AdapterChe
 // Start invokes the exact non-interactive start form.
 func (a *Adapter) Start(ctx context.Context, launch sealedexec.AdapterLaunch) (sealedexec.ActiveAdapterRun, error) {
 	args := []string{"exec", "--json", "--strict-config", "--ignore-user-config", "--ignore-rules", "--profile", launch.Profile.Name, "--sandbox", "workspace-write", "--cd", launch.Workspace.Path, "-"}
+	if launch.Review != nil {
+		if err := validateReviewLaunch(launch); err != nil {
+			return nil, err
+		}
+		args = []string{"exec", "--json", "--strict-config", "--ignore-user-config", "--ignore-rules", "--profile", launch.Profile.Name, "--model", launch.Review.Model, "--sandbox", "workspace-write", "--cd", launch.Workspace.Path, "-"}
+	}
 	return a.run(ctx, launch, args, "", true)
 }
 
 // Resume invokes only an explicit independently verified session id.
 func (a *Adapter) Resume(ctx context.Context, launch sealedexec.AdapterLaunch, sessionRef string) (sealedexec.ActiveAdapterRun, error) {
+	if launch.Review != nil {
+		return nil, errors.New("sealedexec/codex: sealed review is start-only")
+	}
 	if err := validateSessionRef(sessionRef); err != nil {
 		return nil, err
 	}
@@ -298,11 +307,21 @@ func (r *activeRun) stopTerminal() (sealedexec.AdapterResult, error) {
 	return sealedexec.AdapterResult{Stopped: &stop, Observations: []sealedexec.NormalizedObservation{}}, nil
 }
 
-func verifyArgs(request sealedexec.ExecutionRequest, profile sealedexec.ResolvedProfile, workspace sealedexec.WorkspaceFacts) ([]string, error) {
+func verifyArgs(request sealedexec.ExecutionRequest, profile sealedexec.ResolvedProfile, workspace sealedexec.WorkspaceFacts, review *sealedexec.ReviewLaunch) ([]string, error) {
 	switch request.Action {
 	case sealedexec.ActionStart:
+		if review != nil {
+			launch := sealedexec.AdapterLaunch{Request: request, Profile: profile, Workspace: workspace, Review: review}
+			if err := validateReviewLaunch(launch); err != nil {
+				return nil, err
+			}
+			return []string{"exec", "--json", "--strict-config", "--ignore-user-config", "--ignore-rules", "--profile", profile.Name, "--model", review.Model, "--sandbox", "workspace-write", "--cd", workspace.Path, "-"}, nil
+		}
 		return []string{"exec", "--json", "--strict-config", "--ignore-user-config", "--ignore-rules", "--profile", profile.Name, "--sandbox", "workspace-write", "--cd", workspace.Path, "-"}, nil
 	case sealedexec.ActionResume:
+		if review != nil {
+			return nil, errors.New("sealedexec/codex: sealed review is start-only")
+		}
 		if request.Resume == nil {
 			return nil, errors.New("sealedexec/codex: resume request has no continuity arm")
 		}
@@ -313,6 +332,21 @@ func verifyArgs(request sealedexec.ExecutionRequest, profile sealedexec.Resolved
 	default:
 		return nil, fmt.Errorf("sealedexec/codex: unsupported action %q", request.Action)
 	}
+}
+
+func validateReviewLaunch(launch sealedexec.AdapterLaunch) error {
+	if launch.Request.Action != sealedexec.ActionStart || launch.Review == nil {
+		return errors.New("sealedexec/codex: sealed review requires a start launch")
+	}
+	facts := sealedexec.ReviewLaunchFacts{
+		Schema: sealedexec.ReviewLaunchFactsSchemaID, Round: launch.Review.Round,
+		PacketDigest: launch.Review.PacketDigest, PriorReview: launch.Review.PriorReview,
+		Lane: launch.Request.Lane, Adapter: launch.Request.Adapter, AdapterVersion: launch.Request.AdapterVersion,
+		Model: launch.Review.Model, ProfileID: launch.Request.Profile.ID, ProfileDigest: launch.Profile.Digest,
+		Session: launch.Request.Session, WorkspaceID: launch.Workspace.WorkspaceID,
+	}
+	_, err := sealedexec.EncodeReviewLaunchFacts(facts)
+	return err
 }
 
 type providerInputWire struct {
@@ -462,11 +496,27 @@ func mapForeign(launch sealedexec.AdapterLaunch, outer string, object map[string
 	switch outer {
 	case "thread.started":
 		schema, _ := contextevent.PayloadSchema(contextevent.KindAdapterStart)
-		primary := sealedexec.NormalizedObservation{Kind: contextevent.KindAdapterStart, ForeignDetail: detail, Payload: &contextevent.AdapterStartPayload{
+		payload := &contextevent.AdapterStartPayload{
 			Schema: schema, Adapter: contextevent.AdapterCodex, AdapterVersion: launch.Request.AdapterVersion,
 			Session: launch.Request.Session, ProfileDigest: launch.Profile.Digest,
 			WorkspaceRequestDigest: launch.Workspace.RequestDigest,
-		}}
+		}
+		if launch.Review != nil {
+			facts := sealedexec.ReviewLaunchFacts{
+				Schema: sealedexec.ReviewLaunchFactsSchemaID, Round: launch.Review.Round,
+				PacketDigest: launch.Review.PacketDigest, PriorReview: launch.Review.PriorReview,
+				Lane: launch.Request.Lane, Adapter: launch.Request.Adapter, AdapterVersion: launch.Request.AdapterVersion,
+				Model: launch.Review.Model, ProfileID: launch.Request.Profile.ID, ProfileDigest: launch.Profile.Digest,
+				Session: launch.Request.Session, WorkspaceID: launch.Workspace.WorkspaceID,
+			}
+			encoded, err := sealedexec.EncodeReviewLaunchFacts(facts)
+			if err != nil {
+				return nil, "invalid-review-launch-facts"
+			}
+			redacted := bytes.TrimSuffix(encoded, []byte("\n"))
+			payload.Detail = &contextevent.Detail{Mode: contextevent.DetailInline, MediaType: contextevent.MediaTypeJSON, Digest: digestBytes(redacted), RedactionProfile: contextevent.RedactionProfileStandard, RedactedJSON: append([]byte(nil), redacted...)}
+		}
+		primary := sealedexec.NormalizedObservation{Kind: contextevent.KindAdapterStart, ForeignDetail: detail, Payload: payload}
 		return []sealedexec.NormalizedObservation{primary, summaryObservation(detail, "thread-started")}, ""
 	case "turn.started", "turn.completed":
 		return []sealedexec.NormalizedObservation{summaryObservation(detail, outer)}, ""

@@ -66,6 +66,43 @@ func TestContextExecutionContract_Static(t *testing.T) {
 		}
 	})
 
+	t.Run("review execution is start-only and binds acknowledged launch facts", func(t *testing.T) {
+		svc, ports := newServiceHarness(t, req)
+		review := ReviewLaunch{Round: "r0", PacketDigest: testDigest("review-packet"), Model: "gpt-review-pinned"}
+		run, err := svc.ExecuteReview(context.Background(), req, []contextcompile.DataItem{}, review)
+		if err != nil {
+			t.Fatalf("ExecuteReview: %v", err)
+		}
+		if ports.reviewCheck == nil || ports.reviewLaunch == nil || !reflect.DeepEqual(*ports.reviewCheck, review) || !reflect.DeepEqual(*ports.reviewLaunch, review) {
+			t.Fatalf("review verify/start operands = %#v/%#v, want %#v", ports.reviewCheck, ports.reviewLaunch, review)
+		}
+		if run.ReviewLaunchFacts == nil {
+			t.Fatal("review run omitted acknowledged launch facts")
+		}
+		if run.ReviewLaunchEvent == nil || run.ReviewLaunchAck == nil || run.ReviewLaunchEvent.Kind != contextevent.KindAdapterStart ||
+			run.ReviewLaunchAck.EventDigest != run.ReviewLaunchEvent.EventDigest || run.ReviewLaunchAck.SourceSequence != run.ReviewLaunchEvent.SourceSequence {
+			t.Fatalf("review run launch event/ack = %#v/%#v", run.ReviewLaunchEvent, run.ReviewLaunchAck)
+		}
+		facts := *run.ReviewLaunchFacts
+		if facts.Round != review.Round || facts.PacketDigest != review.PacketDigest || facts.PriorReview != nil || facts.Model != review.Model ||
+			facts.Lane != req.Lane || facts.Session != req.Session || facts.WorkspaceID != ports.workspace.WorkspaceID {
+			t.Fatalf("review run launch facts = %#v", facts)
+		}
+		payload := ports.appended[0].Payload.(*contextevent.AdapterStartPayload)
+		if payload.Detail == nil || payload.Detail.Digest != rawDigest(payload.Detail.RedactedJSON) {
+			t.Fatalf("acknowledged adapter-start detail = %#v", payload.Detail)
+		}
+
+		resume := serviceRequest(t, ActionResume)
+		resumeService, resumePorts := newServiceHarness(t, resume)
+		if _, err := resumeService.ExecuteReview(context.Background(), resume, []contextcompile.DataItem{}, review); !errors.Is(err, ErrVerdict) {
+			t.Fatalf("ExecuteReview(resume) error = %v, want verdict", err)
+		}
+		if resumePorts.startCalls != 0 || resumePorts.resumeCalls != 0 {
+			t.Fatalf("review resume launched start/resume = %d/%d", resumePorts.startCalls, resumePorts.resumeCalls)
+		}
+	})
+
 	tests := []struct {
 		name   string
 		mutate func(*serviceFake)
@@ -1079,6 +1116,8 @@ type serviceFake struct {
 	startBlockedBeforeSession bool
 	startBlockAfterDeliveries bool
 	stopRequested             bool
+	reviewCheck               *ReviewLaunch
+	reviewLaunch              *ReviewLaunch
 }
 
 func newServiceHarness(t *testing.T, req ExecutionRequest) (*Service, *serviceFake) {
@@ -1254,8 +1293,12 @@ func (p *serviceFake) VerifyOpaqueBoundary(context.Context, []contextcompile.Opa
 	p.record("opaque")
 	return p.opaque, nil
 }
-func (p *serviceFake) VerifyAdapter(context.Context, AdapterCheck) (AdapterFacts, error) {
+func (p *serviceFake) VerifyAdapter(_ context.Context, check AdapterCheck) (AdapterFacts, error) {
 	p.record("adapter-verify")
+	if check.Review != nil {
+		review := *check.Review
+		p.reviewCheck = &review
+	}
 	return p.adapterFacts, nil
 }
 func (p *serviceFake) VerifyProviderSession(context.Context, ProviderSessionCheck) (ProviderSessionFacts, error) {
@@ -1277,6 +1320,10 @@ func (p *serviceFake) Start(_ context.Context, launch AdapterLaunch) (ActiveAdap
 	p.mu.Lock()
 	p.startCalls++
 	p.input = launch.Input
+	if launch.Review != nil {
+		review := *launch.Review
+		p.reviewLaunch = &review
+	}
 	launchErr, nilActive := p.launchErr, p.nilActive
 	launchEntered, launchRelease := p.launchEntered, p.launchRelease
 	p.mu.Unlock()
@@ -1296,9 +1343,23 @@ func (p *serviceFake) Start(_ context.Context, launch AdapterLaunch) (ActiveAdap
 	} else if p.startResult != nil {
 		deliveries = []AdapterResult{*p.startResult}
 	} else {
+		var detail *contextevent.Detail
+		if launch.Review != nil {
+			facts := ReviewLaunchFacts{
+				Schema: ReviewLaunchFactsSchemaID, Round: launch.Review.Round, PacketDigest: launch.Review.PacketDigest,
+				PriorReview: launch.Review.PriorReview, Lane: launch.Request.Lane, Adapter: launch.Request.Adapter,
+				AdapterVersion: launch.Request.AdapterVersion, Model: launch.Review.Model, ProfileID: launch.Request.Profile.ID,
+				ProfileDigest: launch.Profile.Digest, Session: launch.Request.Session, WorkspaceID: launch.Workspace.WorkspaceID,
+			}
+			encoded, err := EncodeReviewLaunchFacts(facts)
+			if err != nil {
+				p.t.Fatalf("EncodeReviewLaunchFacts fake: %v", err)
+			}
+			detail = &contextevent.Detail{Mode: contextevent.DetailInline, MediaType: contextevent.MediaTypeJSON, Digest: rawDigest(encoded), RedactionProfile: contextevent.RedactionProfileStandard, RedactedJSON: encoded}
+		}
 		deliveries = []AdapterResult{{ObservedSessionRef: "codex-session-1", Observations: []NormalizedObservation{{
 			Kind:    contextevent.KindAdapterStart,
-			Payload: &contextevent.AdapterStartPayload{Schema: "verdi.context-event-payload/adapter-start/v1", Adapter: contextevent.AdapterCodex, AdapterVersion: launch.Request.AdapterVersion, Session: launch.Request.Session, ProfileDigest: launch.Profile.Digest, WorkspaceRequestDigest: launch.Workspace.RequestDigest},
+			Payload: &contextevent.AdapterStartPayload{Schema: "verdi.context-event-payload/adapter-start/v1", Adapter: contextevent.AdapterCodex, AdapterVersion: launch.Request.AdapterVersion, Session: launch.Request.Session, ProfileDigest: launch.Profile.Digest, WorkspaceRequestDigest: launch.Workspace.RequestDigest, Detail: detail},
 		}}}}
 	}
 	if p.startBlockedBeforeSession {

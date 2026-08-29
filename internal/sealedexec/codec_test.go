@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"testing"
 
 	"github.com/jyang234/verdi/internal/canonjson"
@@ -249,6 +250,9 @@ func TestExecutionContinuityCodec_Static(t *testing.T) {
 func TestExecutionResultCodec_Static(t *testing.T) {
 	result := validExecutionResult(t, contextcompile.ResolutionProven, contextevent.AuthorityAuthoritative)
 	encoded := mustEncodeExecutionResult(t, result)
+	if got := fmt.Sprintf("sha256:%x", sha256.Sum256(encoded)); got != "sha256:dc0b793279055a2dbcf9cf317139f7fcb8a8100892ba523dd713e8948fa80237" {
+		t.Fatalf("builder execution-result canonical bytes digest = %q", got)
+	}
 	decoded, err := DecodeExecutionResult(bytes.NewReader(encoded))
 	if err != nil {
 		t.Fatalf("DecodeExecutionResult(valid authoritative): %v", err)
@@ -260,6 +264,28 @@ func TestExecutionResultCodec_Static(t *testing.T) {
 	advisory := validExecutionResult(t, contextcompile.ResolutionUnproven, contextevent.AuthorityAdvisory)
 	if _, err := EncodeExecutionResult(advisory); err != nil {
 		t.Fatalf("EncodeExecutionResult(valid advisory): %v", err)
+	}
+	reviewer := result
+	reviewer.Receipt.Role = contextreceipt.RoleReviewer
+	reviewer.Receipt.ReviewInputs = []contextreceipt.ReviewInput{{Kind: "accepted-spec", ContentDigest: testDigest("accepted-spec")}}
+	reviewer.Receipt.ReviewOf = []string{testDigest("builder-receipt")}
+	reviewer.Receipt.Digest = ""
+	reviewerReceiptBytes, err := contextreceipt.EncodeReceipt(reviewer.Receipt)
+	if err != nil {
+		t.Fatalf("EncodeReceipt(reviewer): %v", err)
+	}
+	reviewer.Receipt, err = contextreceipt.DecodeReceipt(bytes.NewReader(reviewerReceiptBytes))
+	if err != nil {
+		t.Fatalf("DecodeReceipt(reviewer): %v", err)
+	}
+	reviewer.ReceiptEventAck.ReceiptDigest = reviewer.Receipt.Digest
+	if _, err := EncodeExecutionResult(reviewer); err != nil {
+		t.Fatalf("EncodeExecutionResult(valid reviewer): %v", err)
+	}
+	unknownRole := result
+	unknownRole.Receipt.Role = contextreceipt.Role("other")
+	if _, err := EncodeExecutionResult(unknownRole); err == nil {
+		t.Fatal("EncodeExecutionResult(unknown receipt role) error = nil")
 	}
 	interleaved := result
 	interleaved.ReceiptEventAck.GlobalSequence = result.TerminalGlobalSequence + 7

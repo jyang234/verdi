@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"fmt"
+	"reflect"
 	"sort"
 	"strings"
 
@@ -14,6 +15,7 @@ import (
 	"github.com/jyang234/verdi/internal/contextevent"
 	"github.com/jyang234/verdi/internal/contextreceipt"
 	"github.com/jyang234/verdi/internal/policyartifact"
+	"github.com/jyang234/verdi/internal/sealedexec"
 )
 
 // PacketCompiler compiles one exact packet over immutable, consumer-supplied
@@ -228,7 +230,7 @@ func validateAdjudicationCandidate(adjudication Adjudication, candidate contextr
 
 // VerifyReviewProof verifies exact packet content and projects the three
 // reviewer-only operands owned by contextreceipt.
-func VerifyReviewProof(raw []byte, receipt contextreceipt.Receipt, candidate contextreceipt.Candidate) (contextreceipt.ReviewProofProjection, error) {
+func VerifyReviewProof(raw []byte, receipt contextreceipt.Receipt, candidate contextreceipt.Candidate, launch contextreceipt.ReviewLaunchProof) (contextreceipt.ReviewProofProjection, error) {
 	packet, err := DecodePacket(bytes.NewReader(raw))
 	if err != nil {
 		return contextreceipt.ReviewProofProjection{}, err
@@ -248,11 +250,112 @@ func VerifyReviewProof(raw []byte, receipt contextreceipt.Receipt, candidate con
 	}
 	expectedFreshness := projectionDigest(freshnessExpectation{Candidate: candidate, ReviewOf: receipt.ReviewOf})
 
-	return contextreceipt.ReviewProofProjection{
+	projection := contextreceipt.ReviewProofProjection{
 		Packet:    reviewOperand(expectedPacket, observedPacket),
 		Link:      reviewOperand(expectedLink, observedLink),
 		Freshness: contextreceipt.ReviewOperandProjection{State: contextreceipt.StateUnproven, ExpectedDigest: expectedFreshness},
-	}, nil
+	}
+	if !launch.Present {
+		if !reflect.DeepEqual(launch.Execution, contextreceipt.ExecutionProjection{}) || launch.Event.Schema != "" || launch.Event.Kind != "" || launch.Ack.Schema != "" {
+			return contextreceipt.ReviewProofProjection{}, fmt.Errorf("sealedreview: absent launch proof carries an event or acknowledgment")
+		}
+		return projection, nil
+	}
+	return projectAcknowledgedFreshness(packet, receipt, candidate, launch, projection)
+}
+
+type launchFreshnessProjection struct {
+	Candidate      contextreceipt.Candidate `json:"candidate"`
+	Round          string                   `json:"round"`
+	PacketDigest   string                   `json:"packet_digest"`
+	PriorReview    *PriorReview             `json:"prior_review"`
+	Lane           string                   `json:"lane"`
+	Adapter        contextevent.Adapter     `json:"adapter"`
+	AdapterVersion string                   `json:"adapter_version"`
+	Model          string                   `json:"model"`
+	ProfileID      string                   `json:"profile_id"`
+	ProfileDigest  string                   `json:"profile_digest"`
+}
+
+func projectAcknowledgedFreshness(packet Packet, receipt contextreceipt.Receipt, candidate contextreceipt.Candidate, launch contextreceipt.ReviewLaunchProof, projection contextreceipt.ReviewProofProjection) (contextreceipt.ReviewProofProjection, error) {
+	eventBytes, err := contextevent.EncodeEvent(launch.Event)
+	if err != nil {
+		return contextreceipt.ReviewProofProjection{}, fmt.Errorf("sealedreview: review launch event: %w", err)
+	}
+	event, err := contextevent.DecodeEvent(bytes.NewReader(eventBytes))
+	if err != nil {
+		return contextreceipt.ReviewProofProjection{}, fmt.Errorf("sealedreview: review launch event: %w", err)
+	}
+	ackBytes, err := contextevent.EncodeEventAck(launch.Ack)
+	if err != nil {
+		return contextreceipt.ReviewProofProjection{}, fmt.Errorf("sealedreview: review launch acknowledgment: %w", err)
+	}
+	ack, err := contextevent.DecodeEventAck(bytes.NewReader(ackBytes))
+	if err != nil {
+		return contextreceipt.ReviewProofProjection{}, fmt.Errorf("sealedreview: review launch acknowledgment: %w", err)
+	}
+	if ack.Flight != event.Flight || ack.Lane != event.Lane || ack.Epoch != event.Epoch || ack.Session != event.Session ||
+		ack.ManifestRevision != event.ManifestRevision || ack.Kind != event.Kind || ack.SourceSequence != event.SourceSequence || ack.EventDigest != event.EventDigest {
+		return contextreceipt.ReviewProofProjection{}, fmt.Errorf("sealedreview: review launch acknowledgment does not bind its event")
+	}
+	payload, ok := event.Payload.(*contextevent.AdapterStartPayload)
+	if !ok || event.Kind != contextevent.KindAdapterStart {
+		return contextreceipt.ReviewProofProjection{}, fmt.Errorf("sealedreview: review launch proof is not adapter-start")
+	}
+	if payload.Detail == nil {
+		return projection, nil
+	}
+	if payload.Detail.Mode != contextevent.DetailInline {
+		return contextreceipt.ReviewProofProjection{}, fmt.Errorf("sealedreview: review launch facts must be inline")
+	}
+	facts, err := sealedexec.DecodeReviewLaunchFacts(bytes.NewReader(payload.Detail.RedactedJSON))
+	if err != nil {
+		return contextreceipt.ReviewProofProjection{}, fmt.Errorf("sealedreview: review launch facts: %w", err)
+	}
+	var expectedPrior *PriorReview
+	if facts.PriorReview != nil {
+		expectedPrior = &PriorReview{ReceiptDigest: facts.PriorReview.ReceiptDigest, AdjudicationDigest: facts.PriorReview.AdjudicationDigest}
+	}
+	var observedPrior *PriorReview
+	if packet.Round == RoundR2 && len(packet.Items) == 7 {
+		observedPrior = &PriorReview{ReceiptDigest: packet.Items[5].ID, AdjudicationDigest: packet.Items[5].ContentDigest}
+	}
+	expected := launchFreshnessProjection{
+		Candidate: candidate, Round: facts.Round, PacketDigest: facts.PacketDigest, PriorReview: expectedPrior,
+		Lane: facts.Lane, Adapter: facts.Adapter, AdapterVersion: facts.AdapterVersion, Model: facts.Model,
+		ProfileID: facts.ProfileID, ProfileDigest: facts.ProfileDigest,
+	}
+	observed := launchFreshnessProjection{
+		Candidate: packet.Candidate, Round: string(packet.Round), PacketDigest: packet.Digest, PriorReview: observedPrior,
+		Lane: packet.Reviewer.Lane, Adapter: packet.Reviewer.Adapter, AdapterVersion: packet.Reviewer.AdapterVersion,
+		Model: packet.Reviewer.Model, ProfileID: packet.Reviewer.ProfileID, ProfileDigest: packet.Reviewer.ProfileDigest,
+	}
+	expectedDigest, observedDigest := projectionDigest(expected), projectionDigest(observed)
+	execution := launch.Execution
+	envelopeMatches := event.Flight == execution.Flight && event.Lane == execution.Lane && event.Epoch == execution.Epoch &&
+		event.ManifestRevision == execution.ManifestRevision && event.ManifestDigest == execution.ManifestDigest &&
+		event.Session == execution.Session && event.ATCRunway == execution.ATCRunway &&
+		event.Lane == facts.Lane && event.Adapter == facts.Adapter && event.AdapterVersion == facts.AdapterVersion &&
+		event.Session == facts.Session && event.ExecutionWorkspaceID == facts.WorkspaceID &&
+		event.CandidateCommit == candidate.HeadCommit && event.CandidateTree == candidate.HeadTree &&
+		event.ExecutionWorkspaceID == receipt.ExecutionWorkspaceID &&
+		event.Adapter == receipt.Adapter && event.AdapterVersion == receipt.AdapterVersion &&
+		event.Adapter == execution.Adapter && event.AdapterVersion == execution.AdapterVersion &&
+		payload.Adapter == facts.Adapter && payload.AdapterVersion == facts.AdapterVersion && payload.Session == facts.Session &&
+		payload.ProfileDigest == facts.ProfileDigest && payload.WorkspaceRequestDigest == execution.ExecutionWorkspaceRequestDigest &&
+		payload.WorkspaceRequestDigest == receipt.ExecutionWorkspaceRequestDigest &&
+		facts.ProfileID == execution.ProfileRef.ID && facts.ProfileDigest == execution.ProfileRef.Digest
+	if !envelopeMatches && expectedDigest == observedDigest {
+		observedDigest = projectionDigest(struct {
+			Projection  launchFreshnessProjection `json:"projection"`
+			EventDigest string                    `json:"event_digest"`
+		}{observed, event.EventDigest})
+	}
+	projection.Freshness = reviewOperand(expectedDigest, observedDigest)
+	if !envelopeMatches {
+		projection.Freshness.State = contextreceipt.StateViolated
+	}
+	return projection, nil
 }
 
 func validatePacketRequestShape(request PacketRequest) error {
@@ -613,7 +716,7 @@ func validateContextCompilation(compilation ContextCompileResult, packet Packet,
 	if manifest.Phase != contextcompile.PhaseReview {
 		return fmt.Errorf("sealedreview: compiled manifest phase must be review")
 	}
-	if manifest.Repository.Head.Known != true || manifest.Repository.Head.Value != packet.Candidate.HeadCommit {
+	if !manifest.Repository.Head.Known || manifest.Repository.Head.Value != packet.Candidate.HeadCommit {
 		return fmt.Errorf("sealedreview: compiled manifest repository head does not match packet candidate")
 	}
 	if manifest.AcceptedSpec.Ref != packet.Items[0].ID || manifest.AcceptedSpec.Commit != packet.Candidate.HeadCommit || manifest.AcceptedSpec.ContentDigest != packet.Items[0].ContentDigest {
