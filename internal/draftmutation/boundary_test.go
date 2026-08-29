@@ -16,13 +16,23 @@ import (
 
 const draftMutationImport = "github.com/jyang234/verdi/internal/draftmutation"
 
-func TestLaterWorkbenchAndMCPAdaptersDoNotImportDraftMutation(t *testing.T) {
+// TestLaterWorkbenchAdapterDoesNotImportDraftMutation guards the one
+// delivery unit still ahead: internal/workbench must keep NO direct
+// dependency on this package until its own Task 2 unit lands (Wave 6
+// authority design §6.1 — "Task 2 must atomically rewire every board
+// mutation to designapp and delete the splice path in the same unit").
+// The MCP delivery unit this test originally also guarded (mcpserve,
+// cmd/verdi/mcp.go, cmd/verdi/serve.go) has now legitimately arrived —
+// Wave 6 Task 1 routes mutate_draft through
+// internal/designapp.Service.MutateDraft, and its MCP adapter
+// (internal/mcpserve/tool_mutate_draft.go) imports draftmutation directly
+// for the exact wire-schema types (Request/Actor/NewDelegatedAgent) AC-1's
+// mutation contract fixes — so those three are removed from this guard's
+// scope rather than left as a stale false-positive.
+func TestLaterWorkbenchAdapterDoesNotImportDraftMutation(t *testing.T) {
 	repositoryRoot := filepath.Join("..", "..")
 	targets := []string{
 		filepath.Join(repositoryRoot, "internal", "workbench"),
-		filepath.Join(repositoryRoot, "internal", "mcpserve"),
-		filepath.Join(repositoryRoot, "cmd", "verdi", "mcp.go"),
-		filepath.Join(repositoryRoot, "cmd", "verdi", "serve.go"),
 	}
 	parsed := 0
 	for _, target := range targets {

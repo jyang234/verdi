@@ -1,12 +1,13 @@
 // MCP tool inventory (deliverable 1c): the live server's tools/list
-// result must equal 05-surfaces.md §MCP server's table exactly — the nine
-// named tools, no more, no fewer, same spelling. Grown at V1-P9 (item 4,
-// the spec-align regrowth): get_board (05's own coverage gap, closed at
-// V1-P9 item 1) joins the inventory, and list_annotations' description is
-// now asserted to actually document its mirrored review-sticky population
-// (05: "covers... and (mirrored) review stickies") rather than silently
-// leaving that half of the row unverified — the gate grows, never
-// shrinks (CLAUDE.md).
+// result must equal this file's own `want` list exactly — no more, no
+// fewer, same spelling. Grown at V1-P9 (item 4, the spec-align
+// regrowth): get_board (05's own coverage gap, closed at V1-P9 item 1)
+// joined the inventory, and list_annotations' description is asserted to
+// actually document its mirrored review-sticky population (05: "covers...
+// and (mirrored) review stickies") rather than silently leaving that half
+// of the row unverified. Grown again for CSE Wave 5B's `experiment` tool
+// (SI-145) and Wave 6 Task 1's five new ASD tools (AC-8) — the gate
+// grows, never shrinks (CLAUDE.md).
 package specalign
 
 import (
@@ -67,6 +68,12 @@ func TestMCPToolInventory(t *testing.T) {
 	// gateway over internal/experimentapp, registered in the same commit as
 	// its live tooldefs.go row (the MCP tool inventory is a serialized
 	// shared registry).
+	// Wave 6 Task 1 (docs/superpowers/plans/2026-08-29-wave-6-workbench-
+	// presentation.md §6.1, AC-8): adds the five remaining ASD operations
+	// alongside the pre-existing get_board, completing AC-8's exact
+	// six-operation surface — the MCP tool inventory is a serialized
+	// shared registry; its spec-align row changes in the same commit as
+	// the live tooldefs.go registration.
 	want := []string{
 		"search_artifacts",
 		"get_artifact",
@@ -78,6 +85,11 @@ func TestMCPToolInventory(t *testing.T) {
 		"get_board",
 		"add_annotation",
 		"experiment",
+		"get_design_context",
+		"get_design_capabilities",
+		"mutate_draft",
+		"get_design_provenance",
+		"prepare_design_review",
 	}
 
 	tools := listMCPTools(t)

@@ -9,11 +9,19 @@ import (
 	"strings"
 
 	"github.com/jyang234/verdi/internal/canonjson"
+	"github.com/jyang234/verdi/internal/designapp"
 	"github.com/jyang234/verdi/internal/draftmutation"
 )
 
+// designMutator is designapp.Service's mutate_draft method, isolated as
+// an interface so tests can inject a fake without constructing a real
+// Service. `verdi design mutate` routes through designapp (Wave 6 Task 1:
+// "Existing verdi design mutate must route through designapp") rather
+// than calling draftmutation.Service directly; MutateDraft is a
+// byte-identical pass-through (internal/designapp/mutate.go's doc
+// comment), so this adapter's own output contract is unchanged.
 type designMutator interface {
-	Mutate(context.Context, string, draftmutation.Request, draftmutation.Actor) (draftmutation.Response, *draftmutation.Error)
+	MutateDraft(context.Context, string, draftmutation.Request, draftmutation.Actor) (draftmutation.Response, *draftmutation.Error)
 }
 
 type designMutateFlags struct {
@@ -23,12 +31,12 @@ type designMutateFlags struct {
 }
 
 func cmdDesignMutate(args []string, stdout, stderr io.Writer) int {
-	return runDesignMutate(context.Background(), ".", args, os.Stdin, stdout, stderr, draftmutation.NewService())
+	return runDesignMutate(context.Background(), ".", args, os.Stdin, stdout, stderr, designapp.NewService())
 }
 
 // runDesignMutate is a deliberately thin adapter: it parses transport-only
 // flags, strict-decodes one request, mints the fixed delegated-agent actor,
-// calls the kernel, and maps its closed result/error sets to 0/1/2.
+// calls the application core, and maps its closed result/error sets to 0/1/2.
 func runDesignMutate(ctx context.Context, start string, args []string, stdin io.Reader, stdout, stderr io.Writer, service designMutator) int {
 	flags, err := parseDesignMutateFlags(args)
 	if err != nil {
@@ -52,7 +60,7 @@ func runDesignMutate(ctx context.Context, start string, args []string, stdin io.
 		return 2
 	}
 
-	response, diagnostic := service.Mutate(ctx, start, request, actor)
+	response, diagnostic := service.MutateDraft(ctx, start, request, actor)
 	if diagnostic != nil {
 		if diagnostic.Code == draftmutation.CodeStaleBase && response.Stale != nil {
 			encoded, err := draftmutation.EncodeStaleRefusal(*response.Stale)

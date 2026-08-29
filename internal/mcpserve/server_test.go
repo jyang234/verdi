@@ -113,11 +113,11 @@ func TestServer_InitializeHandshake(t *testing.T) {
 	}
 }
 
-// TestServer_ToolsListAndCall proves tools/list enumerates all nine
-// tools (each carrying the data-never-instructions note) and tools/call
-// round-trips a real tool (per-tool business logic is exhaustively
-// covered in backend_test.go; this proves the JSON-RPC plumbing gets a
-// call there and back).
+// TestServer_ToolsListAndCall proves tools/list enumerates every
+// registered tool (each carrying the data-never-instructions note) and
+// tools/call round-trips a real tool (per-tool business logic is
+// exhaustively covered in backend_test.go; this proves the JSON-RPC
+// plumbing gets a call there and back).
 func TestServer_ToolsListAndCall(t *testing.T) {
 	sockPath, stop := startTestServer(t, mustRepoDir(t))
 	defer stop()
@@ -128,15 +128,21 @@ func TestServer_ToolsListAndCall(t *testing.T) {
 	listResp := c.call(t, "tools/list", nil)
 	result := listResp["result"].(map[string]any)
 	tools, _ := result["tools"].([]any)
-	// 05 §MCP server's nine tools plus `experiment` (CSE Wave 5B, design §8,
-	// ledger SI-145 — registered in the same commit as its tooldefs.go row).
-	if len(tools) != 10 {
-		t.Fatalf("tools/list returned %d tools, want 10: %#v", len(tools), tools)
+	// 05 §MCP server's nine tools, `experiment` (CSE Wave 5B, design §8,
+	// ledger SI-145), and Wave 6 Task 1's five new ASD tools (AC-8) —
+	// registered in the same commit as their tooldefs.go rows.
+	if len(tools) != 15 {
+		t.Fatalf("tools/list returned %d tools, want 15: %#v", len(tools), tools)
 	}
 	wantNames := map[string]bool{
 		"search_artifacts": true, "get_artifact": true, "get_links": true, "get_matrix": true,
 		"get_context_bundle": true, "list_annotations": true, "list_tasks": true, "get_board": true, "add_annotation": true,
-		"experiment": true,
+		"experiment":              true,
+		"get_design_context":      true,
+		"get_design_capabilities": true,
+		"mutate_draft":            true,
+		"get_design_provenance":   true,
+		"prepare_design_review":   true,
 	}
 	for _, raw := range tools {
 		def := raw.(map[string]any)
