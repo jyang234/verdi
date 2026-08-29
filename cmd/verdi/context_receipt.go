@@ -13,6 +13,7 @@ import (
 	"github.com/jyang234/verdi/internal/atomicfile"
 	"github.com/jyang234/verdi/internal/contextreceipt"
 	"github.com/jyang234/verdi/internal/sealedexec"
+	"github.com/jyang234/verdi/internal/sealedreview"
 )
 
 const contextReceiptUsage = "context receipt: usage: verdi context receipt verify --request <path|-> [--out <path>]"
@@ -151,6 +152,10 @@ func (sealedExecutionProofDecoder) DecodeExecutionProof(raw []byte) (contextrece
 
 func (sealedExecutionProofDecoder) VerifyExpansionProof(raw []byte, expansion contextreceipt.Expansion) (contextreceipt.ExpansionProofProjection, error) {
 	return sealedexec.VerifyExpansionDataProof(raw, expansion)
+}
+
+func (sealedExecutionProofDecoder) VerifyReviewProof(raw []byte, receipt contextreceipt.Receipt, candidate contextreceipt.Candidate) (contextreceipt.ReviewProofProjection, error) {
+	return sealedreview.VerifyReviewProof(raw, receipt, candidate)
 }
 
 func printContextReceiptDiagnostic(stderr io.Writer, err error) {
