@@ -14,6 +14,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/jyang234/verdi/internal/canonjson"
 	"github.com/jyang234/verdi/internal/contextcompile"
 	"github.com/jyang234/verdi/internal/contextevent"
 	"github.com/jyang234/verdi/internal/execworkspace"
@@ -23,7 +24,7 @@ import (
 func TestAdapterStartUsesPinnedIsolationAndTypedInput(t *testing.T) {
 	launch := adapterLaunch(t, sealedexec.ActionStart)
 	process := &cannedProcess{output: mustFixture(t, "codex-valid.jsonl")}
-	adapter, err := New(process)
+	adapter, err := New(process, newTestProcessorForCodex(t))
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -64,7 +65,7 @@ func TestAdapterStartUsesPinnedIsolationAndTypedInput(t *testing.T) {
 			t.Fatalf("argv contains forbidden flag %q: %v", forbidden, process.command.Args)
 		}
 	}
-	decoded, err := DecodeProviderInput(bytes.NewReader(process.stdin))
+	decoded, err := sealedexec.DecodeProviderInput(bytes.NewReader(process.stdin))
 	if err != nil {
 		t.Fatalf("DecodeProviderInput: %v\nstdin=%s", err, process.stdin)
 	}
@@ -102,7 +103,7 @@ func TestAdapterStartUsesPinnedIsolationAndTypedInput(t *testing.T) {
 			Model: "gpt-review-pinned",
 		}
 		reviewProcess := &cannedProcess{output: []byte("{\"type\":\"thread.started\",\"thread_id\":\"review-provider-session\"}\n")}
-		reviewAdapter, err := New(reviewProcess)
+		reviewAdapter, err := New(reviewProcess, newTestProcessorForCodex(t))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -143,7 +144,7 @@ func TestAdapterStartUsesPinnedIsolationAndTypedInput(t *testing.T) {
 		bad.Request.Profile.ID = "review-profile"
 		bad.Review = &sealedexec.ReviewLaunch{Round: "r0", PacketDigest: adapterTestDigest([]byte("r0-packet")), Model: "gpt-review-pinned"}
 		badProcess := &cannedProcess{}
-		badAdapter, err := New(badProcess)
+		badAdapter, err := New(badProcess, newTestProcessorForCodex(t))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -160,16 +161,25 @@ func TestAdapterStartUsesPinnedIsolationAndTypedInput(t *testing.T) {
 	})
 }
 
-func TestDetailForDigestsExactCarriedJSON(t *testing.T) {
-	detail, err := detailFor(map[string]any{"type": "turn.completed"})
+func TestDetailProcessorDigestsExactCarriedJSON(t *testing.T) {
+	dp := newTestProcessorForCodex(t)
+	obj := map[string]any{"type": "turn.completed"}
+	encoded, err := canonjson.Marshal(obj)
 	if err != nil {
-		t.Fatalf("detailFor: %v", err)
+		t.Fatalf("marshal: %v", err)
 	}
-	want := adapterTestDigest(detail.RedactedJSON)
+	encoded = bytes.TrimSuffix(encoded, []byte("\n"))
+	// Use a nonsecret placeholder; protectedValues must be nonempty per RedactStandardV1.
+	detail, err := dp.Process(context.Background(), encoded, [][]byte{[]byte("placeholder-nonsecret")})
+	if err != nil {
+		t.Fatalf("Process: %v", err)
+	}
+	want := adapterTestDigest(encoded)
 	if detail.Digest != want {
 		t.Fatalf("detail digest = %q, want exact carried-byte digest %q", detail.Digest, want)
 	}
-	if old := adapterTestDigest(append(append([]byte{}, detail.RedactedJSON...), '\n')); detail.Digest == old {
+	// Mutation: digest with trailing LF must differ (no LF framing in carried bytes).
+	if old := adapterTestDigest(append(append([]byte{}, encoded...), '\n')); detail.Digest == old {
 		t.Fatalf("detail digest retained obsolete LF framing: %q", detail.Digest)
 	}
 }
@@ -177,7 +187,7 @@ func TestDetailForDigestsExactCarriedJSON(t *testing.T) {
 func TestAdapterResumeTargetsExplicitVerifiedSession(t *testing.T) {
 	launch := adapterLaunch(t, sealedexec.ActionResume)
 	process := &cannedProcess{output: []byte("{\"type\":\"turn.completed\",\"usage\":{\"input_tokens\":1}}\n")}
-	adapter, err := New(process)
+	adapter, err := New(process, newTestProcessorForCodex(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -228,7 +238,7 @@ func TestAdapterForeignDecoderFailsClosed(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			adapter, err := New(&cannedProcess{output: tt.output})
+			adapter, err := New(&cannedProcess{output: tt.output}, newTestProcessorForCodex(t))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -250,7 +260,7 @@ func TestAdapterForeignDecoderFailsClosed(t *testing.T) {
 func TestAdapterActiveRunStopUsesNormalizedProcessPort(t *testing.T) {
 	launch := adapterLaunch(t, sealedexec.ActionStart)
 	process := &cannedProcess{stop: ProcessStopResult{ExitCode: 130, ReasonCode: "interrupted"}}
-	adapter, err := New(process)
+	adapter, err := New(process, newTestProcessorForCodex(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -282,7 +292,7 @@ func TestAdapterStopYieldsRacedCompleteFrameThenOneStopTerminal(t *testing.T) {
 			{ForeignJSON: []byte(`{"type":"turn.completed"}`), Complete: true},
 		},
 	}
-	adapter, err := New(&fixedActiveProcess{run: processRun})
+	adapter, err := New(&fixedActiveProcess{run: processRun}, newTestProcessorForCodex(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -521,6 +531,7 @@ func adapterLaunch(t *testing.T, action sealedexec.Action) sealedexec.AdapterLau
 			Ref:          request.Profile, Digest: request.Profile.Digest, Name: "sealed-project", Executable: executable,
 			CodexHome: codexHome, AdapterVersion: request.AdapterVersion, DecoderProfile: DecoderProfileV1,
 			WorkspacePath: workspace, Profile: profile, Grants: grants, Enforcement: *report,
+			PolicySecretValues: [][]byte{[]byte("test-codex-secret-value")}, ClassificationComplete: true,
 		},
 		Workspace: sealedexec.WorkspaceFacts{
 			Verification: sealedexec.Verification{State: contextcompile.ResolutionProven, Witnesses: []string{}},
@@ -578,4 +589,52 @@ func contains(rows []string, value string) bool {
 func adapterTestDigest(data []byte) string {
 	sum := sha256.Sum256(data)
 	return "sha256:" + hex.EncodeToString(sum[:])
+}
+
+// ---------------------------------------------------------------------------
+// Fake segment store for DetailProcessor
+// ---------------------------------------------------------------------------
+
+const codexTestSegmentSchemaStored = "verdi.context-redacted-segment-stored/v1"
+const codexTestSegmentRefPrefix = "controller-segment/sha256/"
+
+type codexTestSegmentStore struct {
+	mu       sync.Mutex
+	segments map[string]sealedexec.RedactedSegment
+}
+
+func (s *codexTestSegmentStore) StoreRedactedSegment(_ context.Context, seg sealedexec.RedactedSegment) (sealedexec.StoredSegment, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.segments[seg.Digest] = seg
+	ref := codexTestSegmentRefPrefix + strings.TrimPrefix(seg.Digest, "sha256:")
+	return sealedexec.StoredSegment{
+		Schema:           codexTestSegmentSchemaStored,
+		Reference:        ref,
+		MediaType:        seg.MediaType,
+		RedactionProfile: seg.RedactionProfile,
+		Digest:           seg.Digest,
+		ByteCount:        seg.ByteCount,
+	}, nil
+}
+
+func (s *codexTestSegmentStore) ResolveRedactedSegment(_ context.Context, ref string) (sealedexec.RedactedSegment, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	digest := "sha256:" + strings.TrimPrefix(ref, codexTestSegmentRefPrefix)
+	seg, ok := s.segments[digest]
+	if !ok {
+		return sealedexec.RedactedSegment{}, errors.New("segment not found: " + ref)
+	}
+	return seg, nil
+}
+
+func newTestProcessorForCodex(t *testing.T) *sealedexec.DetailProcessor {
+	t.Helper()
+	store := &codexTestSegmentStore{segments: make(map[string]sealedexec.RedactedSegment)}
+	proc, err := sealedexec.NewDetailProcessor(store)
+	if err != nil {
+		t.Fatalf("NewDetailProcessor: %v", err)
+	}
+	return proc
 }

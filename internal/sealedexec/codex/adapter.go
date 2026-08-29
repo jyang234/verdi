@@ -10,7 +10,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"os/exec"
 	"path/filepath"
 	"regexp"
@@ -28,8 +27,7 @@ import (
 
 const (
 	// DecoderProfileV1 is the I-71 witnessed foreign JSONL mapping.
-	DecoderProfileV1      = "codex-jsonl-v1"
-	providerInputSchemaID = "verdi.codex-provider-input/v1"
+	DecoderProfileV1 = "codex-jsonl-v1"
 )
 
 var canonicalDigest = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
@@ -70,14 +68,20 @@ type Process interface {
 }
 
 // Adapter owns the pinned argv, typed stdin, and version-selected decoder.
-type Adapter struct{ process Process }
+type Adapter struct {
+	process   Process
+	processor *sealedexec.DetailProcessor
+}
 
-// New constructs an adapter over an explicit process port.
-func New(process Process) (*Adapter, error) {
+// New constructs an adapter over an explicit process port and detail processor.
+func New(process Process, processor *sealedexec.DetailProcessor) (*Adapter, error) {
 	if process == nil {
 		return nil, errors.New("sealedexec/codex: process port is nil")
 	}
-	return &Adapter{process: process}, nil
+	if processor == nil {
+		return nil, errors.New("sealedexec/codex: detail processor is nil")
+	}
+	return &Adapter{process: process, processor: processor}, nil
 }
 
 // VerifyAdapter proves the selected executable/profile/version/decoder and
@@ -143,7 +147,7 @@ func (a *Adapter) run(ctx context.Context, launch sealedexec.AdapterLaunch, args
 	if launch.Profile.DecoderProfile != DecoderProfileV1 || launch.Profile.AdapterVersion != launch.Request.AdapterVersion {
 		return nil, errors.New("sealedexec/codex: selected profile does not bind decoder/version")
 	}
-	stdin, err := EncodeProviderInput(launch.Input)
+	stdin, err := sealedexec.EncodeProviderInput(launch.Input)
 	if err != nil {
 		return nil, err
 	}
@@ -162,15 +166,18 @@ func (a *Adapter) run(ctx context.Context, launch sealedexec.AdapterLaunch, args
 		cancel()
 		return nil, errors.New("sealedexec/codex: process returned a nil active run")
 	}
-	return &activeRun{process: processRun, launch: launch, expectedSession: expectedSession, start: start, cancel: cancel}, nil
+	protectedValues := append([][]byte(nil), launch.Profile.PolicySecretValues...)
+	return &activeRun{process: processRun, processor: a.processor, launch: launch, expectedSession: expectedSession, start: start, cancel: cancel, protectedValues: protectedValues}, nil
 }
 
 type activeRun struct {
 	process         ActiveProcess
+	processor       *sealedexec.DetailProcessor
 	launch          sealedexec.AdapterLaunch
 	expectedSession string
 	start           bool
 	cancel          context.CancelFunc
+	protectedValues [][]byte
 	nextMu          sync.Mutex
 	mu              sync.Mutex
 	line            uint64
@@ -230,14 +237,23 @@ func (r *activeRun) Next(ctx context.Context) (sealedexec.AdapterResult, error) 
 		r.cancel()
 		result := sealedexec.AdapterResult{Terminal: &sealedexec.AdapterTerminalResult{ExitCode: item.Terminal.ExitCode}, Observations: []sealedexec.NormalizedObservation{}}
 		if r.start && threadCount != 1 {
-			detail := malformedDetail(nil, "missing-thread-started")
+			detail := r.malformedDetail(ctx, nil, "missing-thread-started")
 			result.Observations = append(result.Observations, gapObservations(r.launch, detail, line, "missing-thread-started")...)
 			result.OperationalFailure = "missing-thread-started"
 		}
 		if item.Terminal.ExitCode != 0 {
-			detail, detailErr := detailFor(map[string]any{"exit_code": item.Terminal.ExitCode, "type": "process.exit"})
-			if detailErr != nil {
-				return sealedexec.AdapterResult{}, detailErr
+			obj := map[string]any{"exit_code": item.Terminal.ExitCode, "type": "process.exit"}
+			encoded, encErr := canonjson.Marshal(obj)
+			var detail contextevent.Detail
+			if encErr == nil {
+				encoded = bytes.TrimSuffix(encoded, []byte("\n"))
+				r.mu.Lock()
+				pv := append([][]byte(nil), r.protectedValues...)
+				r.mu.Unlock()
+				detail, encErr = r.processor.Process(ctx, encoded, pv)
+			}
+			if encErr != nil {
+				return sealedexec.AdapterResult{}, fmt.Errorf("sealedexec/codex: encode exit detail: %w", encErr)
 			}
 			result.Observations = append(result.Observations, adapterErrorObservation(r.launch, detail, "process-exit", "nonzero-exit", true))
 			if result.OperationalFailure == "" {
@@ -255,10 +271,10 @@ func (r *activeRun) Next(ctx context.Context) (sealedexec.AdapterResult, error) 
 	line := r.line
 	r.mu.Unlock()
 	if !item.Complete {
-		detail := malformedDetail(item.ForeignJSON, "truncated-final-line")
+		detail := r.malformedDetail(ctx, item.ForeignJSON, "truncated-final-line")
 		return sealedexec.AdapterResult{Observations: gapObservations(r.launch, detail, line, "truncated-final-line"), OperationalFailure: "truncated-final-line"}, nil
 	}
-	return r.normalize(item.ForeignJSON, line), nil
+	return r.normalize(ctx, item.ForeignJSON, line), nil
 }
 
 func (r *activeRun) Stop(ctx context.Context) (sealedexec.AdapterStopResult, error) {
@@ -349,112 +365,37 @@ func validateReviewLaunch(launch sealedexec.AdapterLaunch) error {
 	return err
 }
 
-type providerInputWire struct {
-	Schema       string                   `json:"schema"`
-	Instructions providerInstructionsWire `json:"instructions"`
-	Data         []json.RawMessage        `json:"data"`
-}
-
-type providerInstructionsWire struct {
-	InstructionProjection json.RawMessage `json:"instruction_projection"`
-}
-
-// EncodeProviderInput returns the one canonical typed stdin envelope.
-func EncodeProviderInput(input sealedexec.ProviderInput) ([]byte, error) {
-	if err := input.Validate(); err != nil {
-		return nil, fmt.Errorf("sealedexec/codex: provider input: %w", err)
-	}
-	projection, err := sealedexec.EncodeInstructionProjection(input.Instructions.Projection)
-	if err != nil {
-		return nil, err
-	}
-	data := make([]json.RawMessage, len(input.Data))
-	for i, item := range input.Data {
-		encoded, err := contextcompile.EncodeDataItem(item)
-		if err != nil {
-			return nil, fmt.Errorf("sealedexec/codex: provider input data[%d]: %w", i, err)
-		}
-		data[i] = json.RawMessage(bytes.TrimSuffix(encoded, []byte("\n")))
-	}
-	return canonjson.Marshal(providerInputWire{
-		Schema:       providerInputSchemaID,
-		Instructions: providerInstructionsWire{InstructionProjection: json.RawMessage(bytes.TrimSuffix(projection, []byte("\n")))},
-		Data:         data,
-	})
-}
-
-// DecodeProviderInput strict-decodes the adapter-owned stdin envelope.
-func DecodeProviderInput(reader io.Reader) (sealedexec.ProviderInput, error) {
-	raw, err := io.ReadAll(reader)
-	if err != nil {
-		return sealedexec.ProviderInput{}, err
-	}
-	if _, err := sealedexec.DecodeUniqueJSONObject(raw); err != nil {
-		return sealedexec.ProviderInput{}, fmt.Errorf("sealedexec/codex: decode provider input: %w", err)
-	}
-	var wire providerInputWire
-	decoder := json.NewDecoder(bytes.NewReader(raw))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&wire); err != nil {
-		return sealedexec.ProviderInput{}, fmt.Errorf("sealedexec/codex: decode provider input: %w", err)
-	}
-	var trailing any
-	if err := decoder.Decode(&trailing); err != io.EOF {
-		return sealedexec.ProviderInput{}, errors.New("sealedexec/codex: decode provider input: trailing data")
-	}
-	if wire.Schema != providerInputSchemaID || wire.Instructions.InstructionProjection == nil || wire.Data == nil {
-		return sealedexec.ProviderInput{}, errors.New("sealedexec/codex: decode provider input: missing or wrong mandatory field")
-	}
-	projectionBytes, err := canonjson.Marshal(wire.Instructions.InstructionProjection)
-	if err != nil {
-		return sealedexec.ProviderInput{}, err
-	}
-	projection, err := sealedexec.DecodeInstructionProjection(bytes.NewReader(projectionBytes))
-	if err != nil {
-		return sealedexec.ProviderInput{}, err
-	}
-	items := make([]contextcompile.DataItem, len(wire.Data))
-	for i, encoded := range wire.Data {
-		itemBytes, err := canonjson.Marshal(encoded)
-		if err != nil {
-			return sealedexec.ProviderInput{}, err
-		}
-		items[i], err = contextcompile.DecodeDataItem(itemBytes)
-		if err != nil {
-			return sealedexec.ProviderInput{}, fmt.Errorf("sealedexec/codex: decode provider input data[%d]: %w", i, err)
-		}
-	}
-	input := sealedexec.ProviderInput{Instructions: sealedexec.InstructionAuthority{Projection: projection}, Data: items}
-	canonical, err := EncodeProviderInput(input)
-	if err != nil {
-		return sealedexec.ProviderInput{}, err
-	}
-	if !bytes.Equal(canonical, raw) {
-		return sealedexec.ProviderInput{}, errors.New("sealedexec/codex: provider input is not canonical")
-	}
-	return input, nil
-}
-
-func (r *activeRun) normalize(line []byte, lineNumber uint64) sealedexec.AdapterResult {
+func (r *activeRun) normalize(ctx context.Context, line []byte, lineNumber uint64) sealedexec.AdapterResult {
 	result := sealedexec.AdapterResult{Observations: []sealedexec.NormalizedObservation{}}
 	if len(line) == 0 {
-		detail := malformedDetail(line, "empty-line")
+		detail := r.malformedDetail(ctx, line, "empty-line")
 		result.Observations = append(result.Observations, gapObservations(r.launch, detail, lineNumber, "empty-line")...)
 		result.OperationalFailure = "empty-line"
 		return result
 	}
 	object, err := sealedexec.DecodeUniqueJSONObject(line)
 	if err != nil {
-		detail := malformedDetail(line, "malformed-json")
+		detail := r.malformedDetail(ctx, line, "malformed-json")
 		result.Observations = append(result.Observations, gapObservations(r.launch, detail, lineNumber, "malformed-json")...)
 		result.OperationalFailure = "malformed-json"
 		return result
 	}
-	detail, err := detailFor(object)
-	if err != nil {
-		detail = malformedDetail(line, "canonicalization-failed")
+	encoded, encErr := canonjson.Marshal(object)
+	if encErr != nil {
+		detail := r.malformedDetail(ctx, line, "canonicalization-failed")
 		result.Observations = append(result.Observations, gapObservations(r.launch, detail, lineNumber, "canonicalization-failed")...)
 		result.OperationalFailure = "canonicalization-failed"
+		return result
+	}
+	encoded = bytes.TrimSuffix(encoded, []byte("\n"))
+	r.mu.Lock()
+	protectedValues := append([][]byte(nil), r.protectedValues...)
+	r.mu.Unlock()
+	detail, err := r.processor.Process(ctx, encoded, protectedValues)
+	if err != nil {
+		detail = r.malformedDetail(ctx, line, "detail-processor-failed")
+		result.Observations = append(result.Observations, gapObservations(r.launch, detail, lineNumber, "detail-processor-failed")...)
+		result.OperationalFailure = "detail-processor-failed"
 		return result
 	}
 	outer, ok := nonemptyString(object["type"])
@@ -629,30 +570,24 @@ func gapObservations(launch sealedexec.AdapterLaunch, detail contextevent.Detail
 	return []sealedexec.NormalizedObservation{gap, adapterErrorObservation(launch, detail, "decode-jsonl", reason, true)}
 }
 
-func detailFor(object map[string]any) (contextevent.Detail, error) {
-	encoded, err := canonjson.Marshal(object)
-	if err != nil {
-		return contextevent.Detail{}, err
-	}
-	encoded = bytes.TrimSuffix(encoded, []byte("\n"))
-	digest := digestBytes(encoded)
-	detail := contextevent.Detail{Mode: contextevent.DetailInline, MediaType: contextevent.MediaTypeJSON, Digest: digest, RedactionProfile: contextevent.RedactionProfileStandard, RedactedJSON: json.RawMessage(encoded)}
-	if err := detail.Validate(); err != nil {
-		return contextevent.Detail{}, err
-	}
-	return detail, nil
-}
-
-func malformedDetail(raw []byte, reason string) contextevent.Detail {
+func (r *activeRun) malformedDetail(ctx context.Context, raw []byte, reason string) contextevent.Detail {
 	if !utf8.Valid(raw) {
-		raw = []byte(strings.ToValidUTF8(string(raw), "�"))
+		raw = []byte(strings.ToValidUTF8(string(raw), ""))
 	}
-	detail, err := detailFor(map[string]any{"foreign_line": string(raw), "reason": reason})
-	if err != nil {
-		fallback := json.RawMessage(`{}`)
-		return contextevent.Detail{Mode: contextevent.DetailInline, MediaType: contextevent.MediaTypeJSON, Digest: digestBytes(fallback), RedactionProfile: contextevent.RedactionProfileStandard, RedactedJSON: fallback}
+	obj := map[string]any{"foreign_line": string(raw), "reason": reason}
+	encoded, err := canonjson.Marshal(obj)
+	if err == nil {
+		encoded = bytes.TrimSuffix(encoded, []byte("\n"))
+		r.mu.Lock()
+		protectedValues := append([][]byte(nil), r.protectedValues...)
+		r.mu.Unlock()
+		detail, pErr := r.processor.Process(ctx, encoded, protectedValues)
+		if pErr == nil {
+			return detail
+		}
 	}
-	return detail
+	fallback := json.RawMessage(`{}`)
+	return contextevent.Detail{Mode: contextevent.DetailInline, MediaType: contextevent.MediaTypeJSON, Digest: digestBytes(fallback), RedactionProfile: contextevent.RedactionProfileStandard, RedactedJSON: fallback}
 }
 
 func workspaceRelativePath(path string) bool {
