@@ -113,6 +113,9 @@ func TestContextExecutionContract_Static(t *testing.T) {
 		{"materializer outcome unknown", func(p *serviceFake) { p.materialized.Outcome = execworkspace.OutcomeUnknown }},
 		{"workspace mismatch", func(p *serviceFake) { p.workspace.WorkspaceID = "wrong" }},
 		{"profile mismatch", func(p *serviceFake) { p.profile.Digest = testDigest("wrong-profile") }},
+		{"profile classification incomplete", func(p *serviceFake) { p.profile.ClassificationComplete = false }},
+		{"profile classification null", func(p *serviceFake) { p.profile.PolicySecretValues = nil }},
+		{"profile classification empty member", func(p *serviceFake) { p.profile.PolicySecretValues = [][]byte{[]byte{}} }},
 		{"grants rejected", func(p *serviceFake) { p.profile.Verification = violated(FailureRejected) }},
 		{"enforcement row identity mismatch", func(p *serviceFake) { p.profile.Enforcement.Rows[0].Kind = execworkspace.GrantTimeouts }},
 		{"conflict violated", func(p *serviceFake) { p.conflict.Verification = violated(FailureRejected) }},
@@ -127,6 +130,17 @@ func TestContextExecutionContract_Static(t *testing.T) {
 		{"opaque boundary unproven", func(p *serviceFake) { p.opaque.Verification = unproven(FailureUnproven) }},
 		{"adapter version mismatch", func(p *serviceFake) { p.adapterFacts.AdapterVersion = "other" }},
 	}
+
+	t.Run("complete non-null local secret classification permits launch", func(t *testing.T) {
+		svc, ports := newServiceHarness(t, req)
+		ports.profile.PolicySecretValues = [][]byte{[]byte("classified-value")}
+		if _, err := svc.Execute(context.Background(), req, []contextcompile.DataItem{}); err != nil {
+			t.Fatalf("Execute with complete classification: %v", err)
+		}
+		if ports.startCalls != 1 {
+			t.Fatalf("adapter start calls = %d, want 1", ports.startCalls)
+		}
+	})
 	for _, tt := range tests {
 		t.Run("launch blocked when "+tt.name, func(t *testing.T) {
 			svc, ports := newServiceHarness(t, req)
@@ -1178,6 +1192,7 @@ func newServiceHarness(t *testing.T, req ExecutionRequest) (*Service, *serviceFa
 			CodexHome: filepath.Join(t.TempDir(), "codex-home"), AdapterVersion: req.AdapterVersion,
 			DecoderProfile: "codex-jsonl-v1", WorkspacePath: workspacePath,
 			Profile: profile, Grants: req.Grants, Enforcement: *enforcement,
+			PolicySecretValues: [][]byte{}, ClassificationComplete: true,
 		},
 		conflict:   ConflictFacts{Verification: proven(), Report: req.AuthorityVerdict},
 		recorder:   RecorderFacts{Verification: proven(), Ref: req.RecorderEndpoint},

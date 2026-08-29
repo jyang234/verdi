@@ -110,7 +110,16 @@ func (c *ControllerClient) RecorderCheckpoint(ctx context.Context, key Execution
 	call := ControllerCall{Schema: ControllerCallSchemaID, Operation: ControllerOperationRecorderCheckpoint}
 	call.RecorderCheckpoint = ControllerRecorderCheckpointRequest{Schema: controllerRequestSchema(call.Operation), Key: key}
 	result, err := c.invoke(ctx, call)
-	return result.RecorderCheckpoint.Checkpoint, err
+	checkpoint := result.RecorderCheckpoint.Checkpoint
+	if err == nil && checkpoint.ActiveRevision != nil {
+		for _, ack := range checkpoint.ActiveRevision.EventAcks {
+			if ack.Flight != key.Flight || ack.Lane != key.Lane || ack.Epoch != key.Epoch {
+				err = controllerResultMismatch(call.Operation, "active revision acknowledgment contradicts execution key")
+				break
+			}
+		}
+	}
+	return checkpoint, err
 }
 
 // RecorderAppend atomically appends one canonical context event.
@@ -130,6 +139,48 @@ func (c *ControllerClient) RecorderAppend(ctx context.Context, event contexteven
 		}
 	}
 	return ack, err
+}
+
+// StoreRedactedSegment stores one canonical redacted JSON segment.
+func (c *ControllerClient) StoreRedactedSegment(ctx context.Context, segment RedactedSegment) (StoredSegment, error) {
+	wire, err := redactedSegmentToWire(segment)
+	if err != nil {
+		return StoredSegment{}, controllerResultMismatch(ControllerOperationStoreRedactedSegment, fmt.Sprintf("invalid segment: %v", err))
+	}
+	canonical, err := redactedSegmentFromWire(wire)
+	if err != nil {
+		return StoredSegment{}, controllerResultMismatch(ControllerOperationStoreRedactedSegment, fmt.Sprintf("invalid segment: %v", err))
+	}
+	call := ControllerCall{Schema: ControllerCallSchemaID, Operation: ControllerOperationStoreRedactedSegment}
+	call.StoreRedactedSegment = ControllerStoreRedactedSegmentRequest{Schema: controllerRequestSchema(call.Operation), Segment: canonical}
+	result, err := c.invoke(ctx, call)
+	stored := result.StoreRedactedSegment.Stored
+	if err == nil {
+		wantReference, referenceErr := segmentReference(canonical.Digest)
+		if referenceErr != nil || stored.Reference != wantReference || stored.MediaType != canonical.MediaType ||
+			stored.RedactionProfile != canonical.RedactionProfile || stored.ByteCount != canonical.ByteCount || stored.Digest != canonical.Digest {
+			err = controllerResultMismatch(call.Operation, "stored segment contradicts request")
+		}
+	}
+	return stored, err
+}
+
+// ResolveRedactedSegment resolves and revalidates one controller-owned segment.
+func (c *ControllerClient) ResolveRedactedSegment(ctx context.Context, reference string) (RedactedSegment, error) {
+	if err := validateSegmentReference(reference); err != nil {
+		return RedactedSegment{}, controllerResultMismatch(ControllerOperationResolveRedactedSegment, fmt.Sprintf("invalid reference: %v", err))
+	}
+	call := ControllerCall{Schema: ControllerCallSchemaID, Operation: ControllerOperationResolveRedactedSegment}
+	call.ResolveRedactedSegment = ControllerResolveRedactedSegmentRequest{Schema: controllerRequestSchema(call.Operation), Reference: reference}
+	result, err := c.invoke(ctx, call)
+	segment := result.ResolveRedactedSegment.Segment
+	if err == nil {
+		wantReference, referenceErr := segmentReference(segment.Digest)
+		if referenceErr != nil || wantReference != reference {
+			err = controllerResultMismatch(call.Operation, "resolved segment contradicts reference")
+		}
+	}
+	return segment, err
 }
 
 // VerifyOpaqueBoundary proves the ordered identity-only opaque ledger.

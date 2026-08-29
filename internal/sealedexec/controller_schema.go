@@ -25,6 +25,8 @@ const (
 	ControllerOperationResolveRecorder                     ControllerOperation = "resolve-recorder"
 	ControllerOperationRecorderCheckpoint                  ControllerOperation = "recorder-checkpoint"
 	ControllerOperationRecorderAppend                      ControllerOperation = "recorder-append"
+	ControllerOperationStoreRedactedSegment                ControllerOperation = "store-redacted-segment"
+	ControllerOperationResolveRedactedSegment              ControllerOperation = "resolve-redacted-segment"
 	ControllerOperationVerifyOpaqueBoundary                ControllerOperation = "verify-opaque-boundary"
 	ControllerOperationVerifyProviderSession               ControllerOperation = "verify-provider-session"
 	ControllerOperationVerifyExpansion                     ControllerOperation = "verify-expansion"
@@ -48,6 +50,8 @@ var controllerOperations = []ControllerOperation{
 	ControllerOperationResolveRecorder,
 	ControllerOperationRecorderCheckpoint,
 	ControllerOperationRecorderAppend,
+	ControllerOperationStoreRedactedSegment,
+	ControllerOperationResolveRedactedSegment,
 	ControllerOperationVerifyOpaqueBoundary,
 	ControllerOperationVerifyProviderSession,
 	ControllerOperationVerifyExpansion,
@@ -62,6 +66,11 @@ var controllerOperations = []ControllerOperation{
 	ControllerOperationPersistHandback,
 	ControllerOperationPersistQuarantine,
 	ControllerOperationPersistAbort,
+}
+
+// ControllerOperations returns the exact closed FD-3 operation registry.
+func ControllerOperations() []ControllerOperation {
+	return append([]ControllerOperation(nil), controllerOperations...)
 }
 
 func controllerRequestSchema(operation ControllerOperation) string {
@@ -114,8 +123,30 @@ type ProfileMaterial struct {
 	AbsoluteExecutable string
 	AbsoluteEnvRoot    string
 	AbsoluteCodexHome  string
+	Model              string
+	ClaudeConfigDir    string
 	AdapterVersion     string
 	DecoderProfile     string
+}
+
+// RedactedSegment is one canonical JSON detail stored through the controller.
+type RedactedSegment struct {
+	Schema           string
+	MediaType        string
+	RedactionProfile string
+	Digest           string
+	ByteCount        uint64
+	Bytes            []byte
+}
+
+// StoredSegment is the controller-owned content-addressed segment identity.
+type StoredSegment struct {
+	Schema           string
+	Reference        string
+	MediaType        string
+	RedactionProfile string
+	Digest           string
+	ByteCount        uint64
 }
 
 // ContextQuery binds one logical expansion read to a flight epoch.
@@ -198,6 +229,22 @@ type ControllerRecorderAppendRequest struct {
 type ControllerRecorderAppendResult struct {
 	Schema string
 	Ack    contextevent.EventAck
+}
+type ControllerStoreRedactedSegmentRequest struct {
+	Schema  string
+	Segment RedactedSegment
+}
+type ControllerStoreRedactedSegmentResult struct {
+	Schema string
+	Stored StoredSegment
+}
+type ControllerResolveRedactedSegmentRequest struct {
+	Schema    string
+	Reference string
+}
+type ControllerResolveRedactedSegmentResult struct {
+	Schema  string
+	Segment RedactedSegment
 }
 type ControllerVerifyOpaqueBoundaryRequest struct {
 	Schema string
@@ -317,6 +364,8 @@ type ControllerCall struct {
 	ResolveRecorder                     ControllerResolveRecorderRequest
 	RecorderCheckpoint                  ControllerRecorderCheckpointRequest
 	RecorderAppend                      ControllerRecorderAppendRequest
+	StoreRedactedSegment                ControllerStoreRedactedSegmentRequest
+	ResolveRedactedSegment              ControllerResolveRedactedSegmentRequest
 	VerifyOpaqueBoundary                ControllerVerifyOpaqueBoundaryRequest
 	VerifyProviderSession               ControllerVerifyProviderSessionRequest
 	VerifyExpansion                     ControllerVerifyExpansionRequest
@@ -347,6 +396,8 @@ type ControllerResult struct {
 	ResolveRecorder                     ControllerResolveRecorderResult
 	RecorderCheckpoint                  ControllerRecorderCheckpointResult
 	RecorderAppend                      ControllerRecorderAppendResult
+	StoreRedactedSegment                ControllerStoreRedactedSegmentResult
+	ResolveRedactedSegment              ControllerResolveRedactedSegmentResult
 	VerifyOpaqueBoundary                ControllerVerifyOpaqueBoundaryResult
 	VerifyProviderSession               ControllerVerifyProviderSessionResult
 	VerifyExpansion                     ControllerVerifyExpansionResult

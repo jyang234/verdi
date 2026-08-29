@@ -124,6 +124,8 @@ type ResolvedProfile struct {
 	Profile                             execworkspace.Profile
 	Grants                              execworkspace.GrantSet
 	Enforcement                         execworkspace.EnforcementReport
+	PolicySecretValues                  [][]byte
+	ClassificationComplete              bool
 }
 
 // ConflictFacts are the freshly verified policy-conflict report facts.
@@ -160,6 +162,7 @@ type ActiveRevision struct {
 	PriorRevision      *contextevent.PriorRevision
 	LastGlobalSequence uint64
 	Invalidated        bool
+	EventAcks          []contextevent.EventAck
 }
 
 // OpaqueIdentity is the only vendor-boundary information exposed to a port.
@@ -1335,6 +1338,14 @@ func validateProfile(request ExecutionRequest, workspace WorkspaceFacts, profile
 	if !filepath.IsAbs(profile.CodexHome) || filepath.Clean(profile.CodexHome) != profile.CodexHome ||
 		envValueFromProfile(profile.Profile.Env(), "CODEX_HOME") != profile.CodexHome {
 		return verdict("resolved profile CODEX_HOME identity is not isolated and exact")
+	}
+	if !profile.ClassificationComplete || profile.PolicySecretValues == nil {
+		return verdict("resolved profile secret classification is incomplete")
+	}
+	for _, value := range profile.PolicySecretValues {
+		if len(value) == 0 {
+			return verdict("resolved profile secret classification contains an empty value")
+		}
 	}
 	requested, err := execworkspace.EncodeGrantSet(request.Grants)
 	if err != nil {

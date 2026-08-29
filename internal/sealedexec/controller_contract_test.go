@@ -79,6 +79,8 @@ func TestContextControllerWireContract_Static(t *testing.T) {
 			{operation: "resolve-recorder", requestSchema: "verdi.context-controller/resolve-recorder-request/v1", resultSchema: "verdi.context-controller/resolve-recorder-result/v1"},
 			{operation: "recorder-checkpoint", requestSchema: "verdi.context-controller/recorder-checkpoint-request/v1", resultSchema: "verdi.context-controller/recorder-checkpoint-result/v1"},
 			{operation: "recorder-append", requestSchema: "verdi.context-controller/recorder-append-request/v1", resultSchema: "verdi.context-controller/recorder-append-result/v1"},
+			{operation: "store-redacted-segment", requestSchema: "verdi.context-controller/store-redacted-segment-request/v1", resultSchema: "verdi.context-controller/store-redacted-segment-result/v1"},
+			{operation: "resolve-redacted-segment", requestSchema: "verdi.context-controller/resolve-redacted-segment-request/v1", resultSchema: "verdi.context-controller/resolve-redacted-segment-result/v1"},
 			{operation: "verify-opaque-boundary", requestSchema: "verdi.context-controller/verify-opaque-boundary-request/v1", resultSchema: "verdi.context-controller/verify-opaque-boundary-result/v1"},
 			{operation: "verify-provider-session", requestSchema: "verdi.context-controller/verify-provider-session-request/v1", resultSchema: "verdi.context-controller/verify-provider-session-result/v1"},
 			{operation: "verify-expansion", requestSchema: "verdi.context-controller/verify-expansion-request/v1", resultSchema: "verdi.context-controller/verify-expansion-result/v1"},
@@ -94,12 +96,17 @@ func TestContextControllerWireContract_Static(t *testing.T) {
 			{operation: "persist-quarantine", requestSchema: "verdi.context-controller/persist-quarantine-request/v1", resultSchema: "verdi.context-controller/persist-quarantine-result/v1"},
 			{operation: "persist-abort", requestSchema: "verdi.context-controller/persist-abort-request/v1", resultSchema: "verdi.context-controller/persist-abort-result/v1"},
 		}
-		if got, want := len(controllerOperations), len(literals); got != want {
+		if got, want := len(ControllerOperations()), 22; got != want {
 			t.Fatalf("controller operation count = %d, want %d", got, want)
+		}
+		operations := ControllerOperations()
+		operations[0] = "mutated"
+		if ControllerOperations()[0] != ControllerOperationVerifyAuthority {
+			t.Fatal("ControllerOperations exposed the mutable registry backing array")
 		}
 		for i, literal := range literals {
 			literal := literal
-			operation := controllerOperations[i]
+			operation := ControllerOperations()[i]
 			t.Run(string(literal.operation), func(t *testing.T) {
 				call := controllerCallFixture(t, uint64(i+1), operation)
 				encodedCall, err := EncodeControllerCall(call)
@@ -145,6 +152,189 @@ func TestContextControllerWireContract_Static(t *testing.T) {
 		}
 	})
 
+	t.Run("segment operations carry exact canonical bytes and fail closed", func(t *testing.T) {
+		segment, stored := controllerSegmentFixtures()
+		storeCall := ControllerCall{Schema: ControllerCallSchemaID, CallSequence: 1, Operation: ControllerOperationStoreRedactedSegment}
+		storeCall.StoreRedactedSegment = ControllerStoreRedactedSegmentRequest{Schema: controllerRequestSchema(storeCall.Operation), Segment: segment}
+		storeResult := ControllerResult{Schema: ControllerResultSchemaID, CallSequence: 1, Operation: ControllerOperationStoreRedactedSegment}
+		storeResult.StoreRedactedSegment = ControllerStoreRedactedSegmentResult{Schema: controllerResultSchema(storeResult.Operation), Stored: stored}
+		resolveCall := ControllerCall{Schema: ControllerCallSchemaID, CallSequence: 1, Operation: ControllerOperationResolveRedactedSegment}
+		resolveCall.ResolveRedactedSegment = ControllerResolveRedactedSegmentRequest{Schema: controllerRequestSchema(resolveCall.Operation), Reference: stored.Reference}
+		resolveResult := ControllerResult{Schema: ControllerResultSchemaID, CallSequence: 1, Operation: ControllerOperationResolveRedactedSegment}
+		resolveResult.ResolveRedactedSegment = ControllerResolveRedactedSegmentResult{Schema: controllerResultSchema(resolveResult.Operation), Segment: segment}
+
+		const digest = "sha256:ecf59a2696ca44a417e20e2a7eabb1b26e82c779f8546bea354a2cc80e8e1eed"
+		const reference = "controller-segment/sha256/ecf59a2696ca44a417e20e2a7eabb1b26e82c779f8546bea354a2cc80e8e1eed"
+		rows := []struct {
+			name   string
+			encode func() ([]byte, error)
+			decode func([]byte) error
+			want   string
+		}{
+			{
+				name: "store call", encode: func() ([]byte, error) { return EncodeControllerCall(storeCall) },
+				decode: func(raw []byte) error { _, err := DecodeControllerCall(bytes.NewReader(raw)); return err },
+				want:   `{"call_sequence":1,"operation":"store-redacted-segment","payload":{"schema":"verdi.context-controller/store-redacted-segment-request/v1","segment":{"byte_count":13,"bytes":"eyJhbnN3ZXIiOjQyfQ==","digest":"` + digest + `","media_type":"application/json","redaction_profile":"verdi.redaction/standard-v1","schema":"verdi.context-redacted-segment/v1"}},"schema":"verdi.context-controller-call/v1"}` + "\n",
+			},
+			{
+				name: "store result", encode: func() ([]byte, error) { return EncodeControllerResult(storeResult) },
+				decode: func(raw []byte) error { _, err := DecodeControllerResult(bytes.NewReader(raw)); return err },
+				want:   `{"call_sequence":1,"operation":"store-redacted-segment","payload":{"result":{"schema":"verdi.context-controller/store-redacted-segment-result/v1","stored":{"byte_count":13,"digest":"` + digest + `","media_type":"application/json","redaction_profile":"verdi.redaction/standard-v1","reference":"` + reference + `","schema":"verdi.context-redacted-segment-stored/v1"}}},"schema":"verdi.context-controller-result/v1"}` + "\n",
+			},
+			{
+				name: "resolve call", encode: func() ([]byte, error) { return EncodeControllerCall(resolveCall) },
+				decode: func(raw []byte) error { _, err := DecodeControllerCall(bytes.NewReader(raw)); return err },
+				want:   `{"call_sequence":1,"operation":"resolve-redacted-segment","payload":{"reference":"` + reference + `","schema":"verdi.context-controller/resolve-redacted-segment-request/v1"},"schema":"verdi.context-controller-call/v1"}` + "\n",
+			},
+			{
+				name: "resolve result", encode: func() ([]byte, error) { return EncodeControllerResult(resolveResult) },
+				decode: func(raw []byte) error { _, err := DecodeControllerResult(bytes.NewReader(raw)); return err },
+				want:   `{"call_sequence":1,"operation":"resolve-redacted-segment","payload":{"result":{"schema":"verdi.context-controller/resolve-redacted-segment-result/v1","segment":{"byte_count":13,"bytes":"eyJhbnN3ZXIiOjQyfQ==","digest":"` + digest + `","media_type":"application/json","redaction_profile":"verdi.redaction/standard-v1","schema":"verdi.context-redacted-segment/v1"}}},"schema":"verdi.context-controller-result/v1"}` + "\n",
+			},
+		}
+		for _, row := range rows {
+			row := row
+			t.Run(row.name, func(t *testing.T) {
+				encoded, err := row.encode()
+				if err != nil {
+					t.Fatalf("encode: %v", err)
+				}
+				if string(encoded) != row.want {
+					t.Fatalf("wire = %s, want %s", encoded, row.want)
+				}
+				if err := row.decode(encoded); err != nil {
+					t.Fatalf("strict decode: %v", err)
+				}
+			})
+		}
+
+		invalidSegments := []struct {
+			name   string
+			mutate func(*RedactedSegment)
+		}{
+			{name: "schema", mutate: func(value *RedactedSegment) { value.Schema = "future" }},
+			{name: "media type", mutate: func(value *RedactedSegment) { value.MediaType = "text/plain" }},
+			{name: "redaction profile", mutate: func(value *RedactedSegment) { value.RedactionProfile = "custom" }},
+			{name: "byte count", mutate: func(value *RedactedSegment) { value.ByteCount++ }},
+			{name: "digest", mutate: func(value *RedactedSegment) { value.Digest = testDigest("wrong") }},
+			{name: "noncanonical bytes", mutate: func(value *RedactedSegment) {
+				value.Bytes = []byte(`{"b":1,"a":2}`)
+				value.ByteCount = uint64(len(value.Bytes))
+				value.Digest = rawDigest(value.Bytes)
+			}},
+			{name: "malformed bytes", mutate: func(value *RedactedSegment) {
+				value.Bytes = []byte(`{"answer":`)
+				value.ByteCount = uint64(len(value.Bytes))
+				value.Digest = rawDigest(value.Bytes)
+			}},
+			{name: "duplicate key", mutate: func(value *RedactedSegment) {
+				value.Bytes = []byte(`{"answer":42,"answer":43}`)
+				value.ByteCount = uint64(len(value.Bytes))
+				value.Digest = rawDigest(value.Bytes)
+			}},
+			{name: "trailing data", mutate: func(value *RedactedSegment) {
+				value.Bytes = []byte(`{"answer":42}{}`)
+				value.ByteCount = uint64(len(value.Bytes))
+				value.Digest = rawDigest(value.Bytes)
+			}},
+		}
+		for _, mutation := range invalidSegments {
+			mutation := mutation
+			t.Run("invalid segment/"+mutation.name, func(t *testing.T) {
+				bad := segment
+				bad.Bytes = append([]byte{}, segment.Bytes...)
+				mutation.mutate(&bad)
+				call := storeCall
+				call.StoreRedactedSegment.Segment = bad
+				if _, err := EncodeControllerCall(call); err == nil {
+					t.Fatalf("EncodeControllerCall accepted invalid %s", mutation.name)
+				}
+			})
+		}
+
+		for name, mutation := range map[string][]byte{
+			"unknown segment field": bytes.Replace([]byte(rows[0].want), []byte(`"byte_count":13`), []byte(`"byte_count":13,"future":true`), 1),
+			"unknown stored field":  bytes.Replace([]byte(rows[1].want), []byte(`"byte_count":13`), []byte(`"byte_count":13,"future":true`), 1),
+		} {
+			t.Run(name, func(t *testing.T) {
+				if strings.Contains(name, "stored") {
+					if _, err := DecodeControllerResult(bytes.NewReader(mutation)); err == nil {
+						t.Fatal("DecodeControllerResult accepted unknown stored field")
+					}
+					return
+				}
+				if _, err := DecodeControllerCall(bytes.NewReader(mutation)); err == nil {
+					t.Fatal("DecodeControllerCall accepted unknown segment field")
+				}
+			})
+		}
+
+		badReference := resolveCall
+		badReference.ResolveRedactedSegment.Reference = "controller-segment/sha256/" + strings.Repeat("A", 64)
+		if _, err := EncodeControllerCall(badReference); err == nil {
+			t.Fatal("EncodeControllerCall accepted non-lowercase segment reference")
+		}
+		badStored := storeResult
+		badStored.StoreRedactedSegment.Stored.Reference = "controller-segment/sha256/" + strings.Repeat("0", 64)
+		if _, err := EncodeControllerResult(badStored); err == nil {
+			t.Fatal("EncodeControllerResult accepted a reference unrelated to the digest")
+		}
+	})
+
+	t.Run("profile wire has a closed Codex or Claude material union", func(t *testing.T) {
+		ref := LogicalRef{Schema: ProjectProfileRefSchemaID, ID: "project/default", Digest: "sha256:" + strings.Repeat("0", 64)}
+		codex := ProfileMaterial{
+			Ref: ref, Name: "project", AbsoluteExecutable: "/usr/local/bin/codex",
+			AbsoluteEnvRoot: "/var/lib/verdi/env", AbsoluteCodexHome: "/var/lib/verdi/env/codex",
+			AdapterVersion: "codex-cli 1.2.3", DecoderProfile: "codex-jsonl-v1",
+		}
+		claude := ProfileMaterial{
+			Ref: ref, Name: "project", AbsoluteExecutable: "/usr/local/bin/claude",
+			AbsoluteEnvRoot: "/var/lib/verdi/env", Model: "claude-sonnet-4-5-20250929",
+			ClaudeConfigDir: "/var/lib/verdi/env/claude", AdapterVersion: "2.0.0",
+			DecoderProfile: "claude-stream-json-v1",
+		}
+		resultFor := func(material ProfileMaterial) ControllerResult {
+			result := ControllerResult{Schema: ControllerResultSchemaID, CallSequence: 1, Operation: ControllerOperationResolveProfile}
+			result.ResolveProfile = ControllerResolveProfileResult{Schema: controllerResultSchema(result.Operation), Material: material}
+			return result
+		}
+		codexBytes := mustEncodeControllerResult(t, resultFor(codex))
+		wantCodex := `{"call_sequence":1,"operation":"resolve-profile","payload":{"result":{"material":{"absolute_codex_home":"/var/lib/verdi/env/codex","absolute_env_root":"/var/lib/verdi/env","absolute_executable":"/usr/local/bin/codex","adapter_version":"codex-cli 1.2.3","decoder_profile":"codex-jsonl-v1","name":"project","ref":{"digest":"sha256:` + strings.Repeat("0", 64) + `","id":"project/default","schema":"verdi.sealed-project-profile-ref/v1"}},"schema":"verdi.context-controller/resolve-profile-result/v1"}},"schema":"verdi.context-controller-result/v1"}` + "\n"
+		if string(codexBytes) != wantCodex {
+			t.Fatalf("Codex profile bytes changed:\n got %s want %s", codexBytes, wantCodex)
+		}
+		claudeBytes := mustEncodeControllerResult(t, resultFor(claude))
+		wantClaude := `{"call_sequence":1,"operation":"resolve-profile","payload":{"result":{"material":{"absolute_claude_config_dir":"/var/lib/verdi/env/claude","absolute_env_root":"/var/lib/verdi/env","absolute_executable":"/usr/local/bin/claude","adapter_version":"2.0.0","decoder_profile":"claude-stream-json-v1","model":"claude-sonnet-4-5-20250929","name":"project","ref":{"digest":"sha256:` + strings.Repeat("0", 64) + `","id":"project/default","schema":"verdi.sealed-project-profile-ref/v1"}},"schema":"verdi.context-controller/resolve-profile-result/v1"}},"schema":"verdi.context-controller-result/v1"}` + "\n"
+		if string(claudeBytes) != wantClaude {
+			t.Fatalf("Claude profile bytes = %s, want %s", claudeBytes, wantClaude)
+		}
+		if bytes.Contains(claudeBytes, []byte("secret")) || bytes.Contains(claudeBytes, []byte("classification")) {
+			t.Fatalf("controller profile wire contains local classification material: %s", claudeBytes)
+		}
+
+		for _, row := range []struct {
+			name     string
+			material ProfileMaterial
+		}{
+			{name: "Codex with model", material: func() ProfileMaterial { bad := codex; bad.Model = "claude-sonnet-4-5-20250929"; return bad }()},
+			{name: "Codex with Claude config", material: func() ProfileMaterial { bad := codex; bad.ClaudeConfigDir = "/var/lib/verdi/env/claude"; return bad }()},
+			{name: "Claude missing model", material: func() ProfileMaterial { bad := claude; bad.Model = ""; return bad }()},
+			{name: "Claude missing config", material: func() ProfileMaterial { bad := claude; bad.ClaudeConfigDir = ""; return bad }()},
+			{name: "Claude config outside env", material: func() ProfileMaterial { bad := claude; bad.ClaudeConfigDir = "/var/lib/other/claude"; return bad }()},
+		} {
+			t.Run(row.name, func(t *testing.T) {
+				if _, err := EncodeControllerResult(resultFor(row.material)); err == nil {
+					t.Fatal("EncodeControllerResult accepted contradictory profile material")
+				}
+			})
+		}
+		unknown := bytes.Replace(claudeBytes, []byte(`"model":`), []byte(`"future":true,"model":`), 1)
+		if _, err := DecodeControllerResult(bytes.NewReader(unknown)); err == nil {
+			t.Fatal("DecodeControllerResult accepted unknown Claude profile material field")
+		}
+	})
+
 	t.Run("all typed wrappers carry literal requests and return typed results", func(t *testing.T) {
 		request := validExecutionRequest(t, ActionStart)
 		event, eventAck := controllerEventFixture(t, request)
@@ -167,6 +357,7 @@ func TestContextControllerWireContract_Static(t *testing.T) {
 		abortInput := validAbortRecord(t, abortQuarantine)
 		abortFrame := mustCanonicalAbort(t, abortInput)
 		opaqueRows := []contextcompile.OpaqueEntry{}
+		segment, storedSegment := controllerSegmentFixtures()
 
 		verifyAuthorityResult := controllerResultFixture(t, 1, "verify-authority")
 		resolveProfileResult := controllerResultFixture(t, 1, "resolve-profile")
@@ -174,6 +365,8 @@ func TestContextControllerWireContract_Static(t *testing.T) {
 		resolveRecorderResult := controllerResultFixture(t, 1, "resolve-recorder")
 		recorderCheckpointResult := controllerResultFixture(t, 1, "recorder-checkpoint")
 		recorderAppendResult := controllerResultFixture(t, 1, "recorder-append")
+		storeSegmentResult := controllerResultFixture(t, 1, "store-redacted-segment")
+		resolveSegmentResult := controllerResultFixture(t, 1, "resolve-redacted-segment")
 		verifyOpaqueResult := controllerResultFixture(t, 1, "verify-opaque-boundary")
 		verifyProviderResult := controllerResultFixture(t, 1, "verify-provider-session")
 		verifyExpansionResult := controllerResultFixture(t, 1, "verify-expansion")
@@ -206,6 +399,12 @@ func TestContextControllerWireContract_Static(t *testing.T) {
 				return client.RecorderCheckpoint(context.Background(), key)
 			}},
 			{name: "RecorderAppend", operation: "recorder-append", requestSchema: "verdi.context-controller/recorder-append-request/v1", requestField: "event", requestValue: event, reply: recorderAppendResult, want: recorderAppendResult.RecorderAppend.Ack, invoke: func(client *ControllerClient) (any, error) { return client.RecorderAppend(context.Background(), event) }},
+			{name: "StoreRedactedSegment", operation: "store-redacted-segment", requestSchema: "verdi.context-controller/store-redacted-segment-request/v1", requestField: "segment", requestValue: segment, reply: storeSegmentResult, want: storedSegment, invoke: func(client *ControllerClient) (any, error) {
+				return client.StoreRedactedSegment(context.Background(), segment)
+			}},
+			{name: "ResolveRedactedSegment", operation: "resolve-redacted-segment", requestSchema: "verdi.context-controller/resolve-redacted-segment-request/v1", requestField: "reference", requestValue: storedSegment.Reference, reply: resolveSegmentResult, want: segment, invoke: func(client *ControllerClient) (any, error) {
+				return client.ResolveRedactedSegment(context.Background(), storedSegment.Reference)
+			}},
 			{name: "VerifyOpaqueBoundary", operation: "verify-opaque-boundary", requestSchema: "verdi.context-controller/verify-opaque-boundary-request/v1", requestField: "rows", requestValue: opaqueRows, reply: verifyOpaqueResult, want: verifyOpaqueResult.VerifyOpaqueBoundary.Facts, invoke: func(client *ControllerClient) (any, error) {
 				return client.VerifyOpaqueBoundary(context.Background(), opaqueRows)
 			}},
@@ -246,7 +445,7 @@ func TestContextControllerWireContract_Static(t *testing.T) {
 			}},
 		}
 
-		if got, want := len(rows), 20; got != want {
+		if got, want := len(rows), 22; got != want {
 			t.Fatalf("typed wrapper row count = %d, want %d", got, want)
 		}
 		for _, row := range rows {
@@ -359,9 +558,11 @@ func TestContextControllerWireContract_Static(t *testing.T) {
 			}
 
 			active := pristine
+			activeAck := controllerActiveAck(1, 1, 1, testDigest("active-event"))
 			active.RecorderCheckpoint.Checkpoint.ActiveRevision = &ActiveRevision{
 				Revision: 1, ManifestDigest: testDigest("active-manifest"), NextSourceSequence: 2,
 				PriorEventDigest: testDigest("active-event"), LastGlobalSequence: 1,
+				EventAcks: []contextevent.EventAck{activeAck},
 			}
 			decoded, err := DecodeControllerResult(bytes.NewReader(mustEncodeControllerResult(t, active)))
 			if err != nil || !reflect.DeepEqual(decoded.RecorderCheckpoint.Checkpoint.ActiveRevision, active.RecorderCheckpoint.Checkpoint.ActiveRevision) {
@@ -378,6 +579,7 @@ func TestContextControllerWireContract_Static(t *testing.T) {
 			completed.RecorderCheckpoint.Checkpoint.ActiveRevision = &ActiveRevision{
 				Revision: terminal.ManifestRevision + 1, ManifestDigest: testDigest("next-manifest"),
 				NextSourceSequence: 1, PriorRevision: bridge, LastGlobalSequence: terminal.TerminalGlobalSequence,
+				EventAcks: []contextevent.EventAck{},
 			}
 			if _, err := EncodeControllerResult(completed); err != nil {
 				t.Fatalf("EncodeControllerResult(sequence-one bridge): %v", err)
@@ -392,9 +594,53 @@ func TestContextControllerWireContract_Static(t *testing.T) {
 			expansionClosed.RecorderCheckpoint.Checkpoint.ActiveRevision = &ActiveRevision{
 				Revision: 2, ManifestDigest: testDigest("expansion-child-manifest"), NextSourceSequence: 1,
 				PriorRevision: expansionBridge, LastGlobalSequence: expansionBridge.TerminalGlobalSequence,
+				EventAcks: []contextevent.EventAck{},
 			}
 			if _, err := EncodeControllerResult(expansionClosed); err != nil {
 				t.Fatalf("EncodeControllerResult(expansion-closed predecessor bridge): %v", err)
+			}
+
+			ordered := pristine
+			ordered.RecorderCheckpoint.Checkpoint.ActiveRevision = &ActiveRevision{
+				Revision: 1, ManifestDigest: testDigest("active-manifest"), NextSourceSequence: 3,
+				PriorEventDigest: testDigest("active-event-2"), LastGlobalSequence: 4,
+				EventAcks: []contextevent.EventAck{
+					controllerActiveAck(1, 1, 2, testDigest("active-event-1")),
+					controllerActiveAck(1, 2, 4, testDigest("active-event-2")),
+				},
+			}
+			orderedBytes := mustEncodeControllerResult(t, ordered)
+			if !bytes.Contains(orderedBytes, []byte(`"event_acks":[`)) {
+				t.Fatalf("active revision omits required event_acks: %s", orderedBytes)
+			}
+			if decoded, err := DecodeControllerResult(bytes.NewReader(orderedBytes)); err != nil || !reflect.DeepEqual(decoded.RecorderCheckpoint.Checkpoint.ActiveRevision, ordered.RecorderCheckpoint.Checkpoint.ActiveRevision) {
+				t.Fatalf("ordered active acknowledgments roundtrip = %#v/%v", decoded.RecorderCheckpoint.Checkpoint.ActiveRevision, err)
+			}
+			missingAcks := bytes.Replace(orderedBytes, []byte(`"event_acks":[`), []byte(`"discard":[`), 1)
+			if _, err := DecodeControllerResult(bytes.NewReader(missingAcks)); err == nil {
+				t.Fatal("DecodeControllerResult accepted missing event_acks")
+			}
+
+			for _, mutation := range []struct {
+				name   string
+				mutate func(*ActiveRevision)
+			}{
+				{name: "null acknowledgments", mutate: func(active *ActiveRevision) { active.EventAcks = nil }},
+				{name: "different execution", mutate: func(active *ActiveRevision) { active.EventAcks[1].Session = "other-session" }},
+				{name: "different revision", mutate: func(active *ActiveRevision) { active.EventAcks[1].ManifestRevision++ }},
+				{name: "source gap", mutate: func(active *ActiveRevision) { active.EventAcks[1].SourceSequence++ }},
+				{name: "global regression", mutate: func(active *ActiveRevision) { active.EventAcks[1].GlobalSequence = active.EventAcks[0].GlobalSequence }},
+				{name: "final digest mismatch", mutate: func(active *ActiveRevision) { active.EventAcks[1].EventDigest = testDigest("other") }},
+				{name: "final global mismatch", mutate: func(active *ActiveRevision) { active.EventAcks[1].GlobalSequence++ }},
+			} {
+				t.Run("ack/"+mutation.name, func(t *testing.T) {
+					bad := ordered
+					bad.RecorderCheckpoint.Checkpoint.ActiveRevision = cloneActive(ordered.RecorderCheckpoint.Checkpoint.ActiveRevision)
+					mutation.mutate(bad.RecorderCheckpoint.Checkpoint.ActiveRevision)
+					if _, err := EncodeControllerResult(bad); err == nil {
+						t.Fatal("EncodeControllerResult accepted contradictory active acknowledgments")
+					}
+				})
 			}
 
 			for _, mutation := range []struct {
@@ -442,13 +688,15 @@ func TestContextControllerWireContract_Static(t *testing.T) {
 
 		t.Run("shared typed errors reach wrappers without bespoke identity checks", func(t *testing.T) {
 			needsTypedError := map[string]bool{
-				"RecorderCheckpoint":   true,
-				"VerifyExpansion":      true,
-				"StoreAdapterSession":  true,
-				"NextStamp":            true,
-				"VerifyEpoch":          true,
-				"InstallExpansion":     true,
-				"ResolveReceiptInputs": true,
+				"RecorderCheckpoint":     true,
+				"StoreRedactedSegment":   true,
+				"ResolveRedactedSegment": true,
+				"VerifyExpansion":        true,
+				"StoreAdapterSession":    true,
+				"NextStamp":              true,
+				"VerifyEpoch":            true,
+				"InstallExpansion":       true,
+				"ResolveReceiptInputs":   true,
 			}
 			for _, row := range rows {
 				if !needsTypedError[row.name] {
@@ -500,8 +748,26 @@ func TestContextControllerWireContract_Static(t *testing.T) {
 			badConflict := controllerResultFixture(t, 1, "verify-conflict")
 			badRecorder := controllerResultFixture(t, 1, "resolve-recorder")
 			badRecorder.ResolveRecorder.Facts.Ref = LogicalRef{Schema: request.RecorderEndpoint.Schema, ID: "different-recorder", Digest: testDigest("different-recorder")}
+			badCheckpointIdentity := controllerResultFixture(t, 1, "recorder-checkpoint")
+			checkpointAck := controllerActiveAck(1, 1, 2, testDigest("active-checkpoint-event"))
+			checkpointAck.Flight = "different-flight"
+			badCheckpointIdentity.RecorderCheckpoint.Checkpoint.Revisions = []contextevent.Revision{}
+			badCheckpointIdentity.RecorderCheckpoint.Checkpoint.EventChainRoot = ""
+			badCheckpointIdentity.RecorderCheckpoint.Checkpoint.TerminalSourceSequence = 0
+			badCheckpointIdentity.RecorderCheckpoint.Checkpoint.TerminalGlobalSequence = 0
+			badCheckpointIdentity.RecorderCheckpoint.Checkpoint.ActiveRevision = &ActiveRevision{
+				Revision: 1, ManifestDigest: testDigest("active-checkpoint-manifest"), NextSourceSequence: 2,
+				PriorEventDigest: checkpointAck.EventDigest, LastGlobalSequence: checkpointAck.GlobalSequence,
+				EventAcks: []contextevent.EventAck{checkpointAck},
+			}
 			badEventAck := controllerResultFixture(t, 1, "recorder-append")
 			badEventAck.RecorderAppend.Ack.EventDigest = testDigest("different-event")
+			badStoredSegment := controllerResultFixture(t, 1, "store-redacted-segment")
+			badStoredSegment.StoreRedactedSegment.Stored.ByteCount++
+			badResolvedSegment := controllerResultFixture(t, 1, "resolve-redacted-segment")
+			badResolvedSegment.ResolveRedactedSegment.Segment.Bytes = []byte(`{"answer":43}`)
+			badResolvedSegment.ResolveRedactedSegment.Segment.ByteCount = uint64(len(badResolvedSegment.ResolveRedactedSegment.Segment.Bytes))
+			badResolvedSegment.ResolveRedactedSegment.Segment.Digest = rawDigest(badResolvedSegment.ResolveRedactedSegment.Segment.Bytes)
 			badOpaque := controllerResultFixture(t, 1, "verify-opaque-boundary")
 			badOpaque.VerifyOpaqueBoundary.Facts.Rows = []OpaqueIdentity{{ID: "opaque-other", Kind: "other", AdapterID: "adapter", AdapterVersion: "1.0.0"}}
 			badProvider := controllerResultFixture(t, 1, "verify-provider-session")
@@ -547,7 +813,16 @@ func TestContextControllerWireContract_Static(t *testing.T) {
 				{name: "recorder ref", reply: badRecorder, invoke: func(client *ControllerClient) (any, error) {
 					return client.ResolveRecorder(context.Background(), request.RecorderEndpoint)
 				}},
+				{name: "checkpoint execution identity", reply: badCheckpointIdentity, invoke: func(client *ControllerClient) (any, error) {
+					return client.RecorderCheckpoint(context.Background(), key)
+				}},
 				{name: "recorder event ack", reply: badEventAck, invoke: func(client *ControllerClient) (any, error) { return client.RecorderAppend(context.Background(), event) }},
+				{name: "stored segment", reply: badStoredSegment, invoke: func(client *ControllerClient) (any, error) {
+					return client.StoreRedactedSegment(context.Background(), segment)
+				}},
+				{name: "resolved segment", reply: badResolvedSegment, invoke: func(client *ControllerClient) (any, error) {
+					return client.ResolveRedactedSegment(context.Background(), storedSegment.Reference)
+				}},
 				{name: "opaque rows", reply: badOpaque, invoke: func(client *ControllerClient) (any, error) {
 					return client.VerifyOpaqueBoundary(context.Background(), opaqueRows)
 				}},
@@ -1055,6 +1330,10 @@ func typedControllerRequestValue(t *testing.T, call ControllerCall, operation st
 		return call.RecorderCheckpoint.Key
 	case "recorder-append":
 		return call.RecorderAppend.Event
+	case "store-redacted-segment":
+		return call.StoreRedactedSegment.Segment
+	case "resolve-redacted-segment":
+		return call.ResolveRedactedSegment.Reference
 	case "verify-opaque-boundary":
 		return call.VerifyOpaqueBoundary.Rows
 	case "verify-provider-session":
@@ -1092,6 +1371,7 @@ func cloneActive(active *ActiveRevision) *ActiveRevision {
 		return nil
 	}
 	copy := *active
+	copy.EventAcks = append([]contextevent.EventAck{}, active.EventAcks...)
 	if active.PriorRevision != nil {
 		bridge := *active.PriorRevision
 		copy.PriorRevision = &bridge
@@ -1205,12 +1485,37 @@ func mustEncodeControllerResult(t *testing.T, result ControllerResult) []byte {
 	return encoded
 }
 
+func controllerSegmentFixtures() (RedactedSegment, StoredSegment) {
+	const digest = "sha256:ecf59a2696ca44a417e20e2a7eabb1b26e82c779f8546bea354a2cc80e8e1eed"
+	segment := RedactedSegment{
+		Schema: "verdi.context-redacted-segment/v1", MediaType: "application/json",
+		RedactionProfile: "verdi.redaction/standard-v1", ByteCount: 13,
+		Digest: digest, Bytes: []byte(`{"answer":42}`),
+	}
+	stored := StoredSegment{
+		Schema:    "verdi.context-redacted-segment-stored/v1",
+		Reference: "controller-segment/sha256/ecf59a2696ca44a417e20e2a7eabb1b26e82c779f8546bea354a2cc80e8e1eed",
+		MediaType: "application/json", RedactionProfile: "verdi.redaction/standard-v1",
+		ByteCount: 13, Digest: digest,
+	}
+	return segment, stored
+}
+
+func controllerActiveAck(revision, source, global uint64, eventDigest string) contextevent.EventAck {
+	return contextevent.EventAck{
+		Schema: contextevent.AckSchemaID, Flight: "flight-1", Lane: "lane-1", Epoch: "epoch-1",
+		Session: "session-1", ManifestRevision: revision, Kind: contextevent.KindAdapterStart,
+		SourceSequence: source, EventDigest: eventDigest, GlobalSequence: global,
+	}
+}
+
 func controllerCallFixture(t *testing.T, sequence uint64, operation ControllerOperation) ControllerCall {
 	t.Helper()
 	request := validExecutionRequest(t, ActionStart)
 	event, ack := controllerEventFixture(t, request)
 	receipt, receiptEvent, _ := controllerReceiptFixture(t, request)
 	resolution := controllerContextResolutionFixture(t)
+	segment, stored := controllerSegmentFixtures()
 	call := ControllerCall{Schema: ControllerCallSchemaID, CallSequence: sequence, Operation: operation}
 	switch operation {
 	case ControllerOperationVerifyAuthority:
@@ -1225,6 +1530,10 @@ func controllerCallFixture(t *testing.T, sequence uint64, operation ControllerOp
 		call.RecorderCheckpoint = ControllerRecorderCheckpointRequest{Schema: controllerRequestSchema(operation), Key: executionKey(request)}
 	case ControllerOperationRecorderAppend:
 		call.RecorderAppend = ControllerRecorderAppendRequest{Schema: controllerRequestSchema(operation), Event: event}
+	case ControllerOperationStoreRedactedSegment:
+		call.StoreRedactedSegment = ControllerStoreRedactedSegmentRequest{Schema: controllerRequestSchema(operation), Segment: segment}
+	case ControllerOperationResolveRedactedSegment:
+		call.ResolveRedactedSegment = ControllerResolveRedactedSegmentRequest{Schema: controllerRequestSchema(operation), Reference: stored.Reference}
 	case ControllerOperationVerifyOpaqueBoundary:
 		call.VerifyOpaqueBoundary = ControllerVerifyOpaqueBoundaryRequest{Schema: controllerRequestSchema(operation), Rows: []contextcompile.OpaqueEntry{}}
 	case ControllerOperationVerifyProviderSession:
@@ -1268,6 +1577,7 @@ func controllerResultFixture(t *testing.T, sequence uint64, operation Controller
 	event, ack := controllerEventFixture(t, request)
 	receipt, _, receiptAck := controllerReceiptFixture(t, request)
 	verification := Verification{State: contextcompile.ResolutionProven, Failure: FailureNone, Witnesses: []string{}}
+	segment, stored := controllerSegmentFixtures()
 	revision := contextevent.Revision{Schema: contextevent.RevisionSchemaID, ManifestRevision: 0, ManifestDigest: request.ManifestDigest, FirstGlobalSequence: 1, TerminalGlobalSequence: 1, TerminalSourceSequence: 1, TerminalKind: contextevent.KindExecutionResult, EventRoot: testDigest("terminal-event")}
 	root, err := contextevent.EventChainRoot([]contextevent.Revision{revision})
 	if err != nil {
@@ -1287,6 +1597,10 @@ func controllerResultFixture(t *testing.T, sequence uint64, operation Controller
 		result.RecorderCheckpoint = ControllerRecorderCheckpointResult{Schema: controllerResultSchema(operation), Checkpoint: RecorderCheckpoint{Verification: verification, Digest: testDigest("checkpoint"), Revisions: []contextevent.Revision{revision}, EventChainRoot: root, TerminalSourceSequence: 1, TerminalGlobalSequence: 1}}
 	case ControllerOperationRecorderAppend:
 		result.RecorderAppend = ControllerRecorderAppendResult{Schema: controllerResultSchema(operation), Ack: ack}
+	case ControllerOperationStoreRedactedSegment:
+		result.StoreRedactedSegment = ControllerStoreRedactedSegmentResult{Schema: controllerResultSchema(operation), Stored: stored}
+	case ControllerOperationResolveRedactedSegment:
+		result.ResolveRedactedSegment = ControllerResolveRedactedSegmentResult{Schema: controllerResultSchema(operation), Segment: segment}
 	case ControllerOperationVerifyOpaqueBoundary:
 		result.VerifyOpaqueBoundary = ControllerVerifyOpaqueBoundaryResult{Schema: controllerResultSchema(operation), Facts: OpaqueBoundaryFacts{Verification: verification, Rows: []OpaqueIdentity{}}}
 	case ControllerOperationVerifyProviderSession:

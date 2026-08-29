@@ -21,6 +21,12 @@ import (
 	"github.com/jyang234/verdi/internal/policyconflict"
 )
 
+const (
+	redactedSegmentSchemaID = "verdi.context-redacted-segment/v1"
+	storedSegmentSchemaID   = "verdi.context-redacted-segment-stored/v1"
+	segmentReferencePrefix  = "controller-segment/sha256/"
+)
+
 type controllerCallWire struct {
 	Schema       string              `json:"schema"`
 	CallSequence uint64              `json:"call_sequence"`
@@ -81,9 +87,29 @@ type profileMaterialWire struct {
 	Name               string     `json:"name"`
 	AbsoluteExecutable string     `json:"absolute_executable"`
 	AbsoluteEnvRoot    string     `json:"absolute_env_root"`
-	AbsoluteCodexHome  string     `json:"absolute_codex_home"`
+	AbsoluteCodexHome  string     `json:"absolute_codex_home,omitempty"`
+	Model              string     `json:"model,omitempty"`
+	ClaudeConfigDir    string     `json:"absolute_claude_config_dir,omitempty"`
 	AdapterVersion     string     `json:"adapter_version"`
 	DecoderProfile     string     `json:"decoder_profile"`
+}
+
+type redactedSegmentWire struct {
+	Schema           string `json:"schema"`
+	MediaType        string `json:"media_type"`
+	RedactionProfile string `json:"redaction_profile"`
+	ByteCount        uint64 `json:"byte_count"`
+	Digest           string `json:"digest"`
+	Bytes            []byte `json:"bytes"`
+}
+
+type storedSegmentWire struct {
+	Schema           string `json:"schema"`
+	Reference        string `json:"reference"`
+	MediaType        string `json:"media_type"`
+	RedactionProfile string `json:"redaction_profile"`
+	ByteCount        uint64 `json:"byte_count"`
+	Digest           string `json:"digest"`
 }
 
 type conflictFactsWire struct {
@@ -120,6 +146,7 @@ type activeRevisionWire struct {
 	PriorRevision      *contextevent.PriorRevision `json:"prior_revision"`
 	LastGlobalSequence uint64                      `json:"last_global_sequence"`
 	Invalidated        bool                        `json:"invalidated"`
+	EventAcks          []contextevent.EventAck     `json:"event_acks"`
 }
 
 type opaqueIdentityWire struct {
@@ -463,6 +490,35 @@ func encodeControllerCallPayload(call ControllerCall) (json.RawMessage, error) {
 			Schema string          `json:"schema"`
 			Event  json.RawMessage `json:"event"`
 		}{wantSchema, trimFrame(event)})
+	case ControllerOperationStoreRedactedSegment:
+		if err := requireOnlyCallArm(call, call.StoreRedactedSegment); err != nil {
+			return nil, err
+		}
+		if call.StoreRedactedSegment.Schema != wantSchema {
+			return nil, operationSchemaError(call.Operation)
+		}
+		segment, err := redactedSegmentToWire(call.StoreRedactedSegment.Segment)
+		if err != nil {
+			return nil, err
+		}
+		return marshalControllerPayload(struct {
+			Schema  string              `json:"schema"`
+			Segment redactedSegmentWire `json:"segment"`
+		}{wantSchema, segment})
+	case ControllerOperationResolveRedactedSegment:
+		if err := requireOnlyCallArm(call, call.ResolveRedactedSegment); err != nil {
+			return nil, err
+		}
+		if call.ResolveRedactedSegment.Schema != wantSchema {
+			return nil, operationSchemaError(call.Operation)
+		}
+		if err := validateSegmentReference(call.ResolveRedactedSegment.Reference); err != nil {
+			return nil, err
+		}
+		return marshalControllerPayload(struct {
+			Schema    string `json:"schema"`
+			Reference string `json:"reference"`
+		}{wantSchema, call.ResolveRedactedSegment.Reference})
 	case ControllerOperationVerifyOpaqueBoundary:
 		if err := requireOnlyCallArm(call, call.VerifyOpaqueBoundary); err != nil {
 			return nil, err
@@ -763,6 +819,37 @@ func decodeControllerCallPayload(raw json.RawMessage, call *ControllerCall) erro
 			return err
 		}
 		call.RecorderAppend = ControllerRecorderAppendRequest{schema, event}
+	case ControllerOperationStoreRedactedSegment:
+		var wire struct {
+			Schema  string              `json:"schema"`
+			Segment redactedSegmentWire `json:"segment"`
+		}
+		if err := unmarshalControllerPayload(raw, &wire); err != nil {
+			return err
+		}
+		if wire.Schema != schema {
+			return operationSchemaError(call.Operation)
+		}
+		segment, err := redactedSegmentFromWire(wire.Segment)
+		if err != nil {
+			return err
+		}
+		call.StoreRedactedSegment = ControllerStoreRedactedSegmentRequest{schema, segment}
+	case ControllerOperationResolveRedactedSegment:
+		var wire struct {
+			Schema    string `json:"schema"`
+			Reference string `json:"reference"`
+		}
+		if err := unmarshalControllerPayload(raw, &wire); err != nil {
+			return err
+		}
+		if wire.Schema != schema {
+			return operationSchemaError(call.Operation)
+		}
+		if err := validateSegmentReference(wire.Reference); err != nil {
+			return err
+		}
+		call.ResolveRedactedSegment = ControllerResolveRedactedSegmentRequest{schema, wire.Reference}
 	case ControllerOperationVerifyOpaqueBoundary:
 		var wire struct {
 			Schema string                       `json:"schema"`
@@ -1053,6 +1140,30 @@ func encodeControllerSuccessPayload(result ControllerResult) (json.RawMessage, e
 			Schema string                `json:"schema"`
 			Ack    contextevent.EventAck `json:"ack"`
 		}{wantSchema, ack})
+	case ControllerOperationStoreRedactedSegment:
+		if result.StoreRedactedSegment.Schema != wantSchema {
+			return nil, operationSchemaError(result.Operation)
+		}
+		stored, err := storedSegmentToWire(result.StoreRedactedSegment.Stored)
+		if err != nil {
+			return nil, err
+		}
+		return marshalControllerPayload(struct {
+			Schema string            `json:"schema"`
+			Stored storedSegmentWire `json:"stored"`
+		}{wantSchema, stored})
+	case ControllerOperationResolveRedactedSegment:
+		if result.ResolveRedactedSegment.Schema != wantSchema {
+			return nil, operationSchemaError(result.Operation)
+		}
+		segment, err := redactedSegmentToWire(result.ResolveRedactedSegment.Segment)
+		if err != nil {
+			return nil, err
+		}
+		return marshalControllerPayload(struct {
+			Schema  string              `json:"schema"`
+			Segment redactedSegmentWire `json:"segment"`
+		}{wantSchema, segment})
 	case ControllerOperationVerifyOpaqueBoundary:
 		if result.VerifyOpaqueBoundary.Schema != wantSchema {
 			return nil, operationSchemaError(result.Operation)
@@ -1314,6 +1425,38 @@ func decodeControllerSuccessPayload(raw json.RawMessage, result *ControllerResul
 			return err
 		}
 		result.RecorderAppend = ControllerRecorderAppendResult{schema, ack}
+	case ControllerOperationStoreRedactedSegment:
+		var wire struct {
+			Schema string            `json:"schema"`
+			Stored storedSegmentWire `json:"stored"`
+		}
+		if err := unmarshalControllerPayload(raw, &wire); err != nil {
+			return err
+		}
+		if wire.Schema != schema {
+			return operationSchemaError(result.Operation)
+		}
+		stored, err := storedSegmentFromWire(wire.Stored)
+		if err != nil {
+			return err
+		}
+		result.StoreRedactedSegment = ControllerStoreRedactedSegmentResult{schema, stored}
+	case ControllerOperationResolveRedactedSegment:
+		var wire struct {
+			Schema  string              `json:"schema"`
+			Segment redactedSegmentWire `json:"segment"`
+		}
+		if err := unmarshalControllerPayload(raw, &wire); err != nil {
+			return err
+		}
+		if wire.Schema != schema {
+			return operationSchemaError(result.Operation)
+		}
+		segment, err := redactedSegmentFromWire(wire.Segment)
+		if err != nil {
+			return err
+		}
+		result.ResolveRedactedSegment = ControllerResolveRedactedSegmentResult{schema, segment}
 	case ControllerOperationVerifyOpaqueBoundary:
 		var wire struct {
 			Schema string          `json:"schema"`
@@ -1604,6 +1747,10 @@ func requireOnlyCallArm(call ControllerCall, selected any) error {
 		want.RecorderCheckpoint = selected.(ControllerRecorderCheckpointRequest)
 	case ControllerOperationRecorderAppend:
 		want.RecorderAppend = selected.(ControllerRecorderAppendRequest)
+	case ControllerOperationStoreRedactedSegment:
+		want.StoreRedactedSegment = selected.(ControllerStoreRedactedSegmentRequest)
+	case ControllerOperationResolveRedactedSegment:
+		want.ResolveRedactedSegment = selected.(ControllerResolveRedactedSegmentRequest)
 	case ControllerOperationVerifyOpaqueBoundary:
 		want.VerifyOpaqueBoundary = selected.(ControllerVerifyOpaqueBoundaryRequest)
 	case ControllerOperationVerifyProviderSession:
@@ -1659,6 +1806,10 @@ func controllerSuccessArmsMatch(result ControllerResult) bool {
 		want.RecorderCheckpoint = result.RecorderCheckpoint
 	case ControllerOperationRecorderAppend:
 		want.RecorderAppend = result.RecorderAppend
+	case ControllerOperationStoreRedactedSegment:
+		want.StoreRedactedSegment = result.StoreRedactedSegment
+	case ControllerOperationResolveRedactedSegment:
+		want.ResolveRedactedSegment = result.ResolveRedactedSegment
 	case ControllerOperationVerifyOpaqueBoundary:
 		want.VerifyOpaqueBoundary = result.VerifyOpaqueBoundary
 	case ControllerOperationVerifyProviderSession:
@@ -1779,10 +1930,26 @@ func profileMaterialToWire(material ProfileMaterial) (profileMaterialWire, error
 			return profileMaterialWire{}, err
 		}
 	}
-	for field, value := range map[string]string{"absolute_executable": material.AbsoluteExecutable, "absolute_env_root": material.AbsoluteEnvRoot, "absolute_codex_home": material.AbsoluteCodexHome} {
+	for field, value := range map[string]string{"absolute_executable": material.AbsoluteExecutable, "absolute_env_root": material.AbsoluteEnvRoot} {
 		if !filepath.IsAbs(value) || filepath.Clean(value) != value {
 			return profileMaterialWire{}, fmt.Errorf("sealedexec: %s must be absolute and clean", field)
 		}
+	}
+	claudeSelected := material.Model != "" || material.ClaudeConfigDir != ""
+	switch {
+	case material.AbsoluteCodexHome != "" && !claudeSelected:
+		if !filepath.IsAbs(material.AbsoluteCodexHome) || filepath.Clean(material.AbsoluteCodexHome) != material.AbsoluteCodexHome {
+			return profileMaterialWire{}, fmt.Errorf("sealedexec: absolute_codex_home must be absolute and clean")
+		}
+	case material.AbsoluteCodexHome == "" && material.Model != "" && material.ClaudeConfigDir != "":
+		if err := requireText("model", material.Model); err != nil {
+			return profileMaterialWire{}, err
+		}
+		if !cleanPathBelow(material.AbsoluteEnvRoot, material.ClaudeConfigDir) {
+			return profileMaterialWire{}, fmt.Errorf("sealedexec: absolute_claude_config_dir must be a clean absolute child of absolute_env_root")
+		}
+	default:
+		return profileMaterialWire{}, fmt.Errorf("sealedexec: profile material must select exactly one Codex or Claude arm")
 	}
 	return profileMaterialWire(material), nil
 }
@@ -1790,6 +1957,123 @@ func profileMaterialFromWire(w profileMaterialWire) (ProfileMaterial, error) {
 	m := ProfileMaterial(w)
 	_, e := profileMaterialToWire(m)
 	return m, e
+}
+
+func cleanPathBelow(parent, child string) bool {
+	if !filepath.IsAbs(child) || filepath.Clean(child) != child {
+		return false
+	}
+	relative, err := filepath.Rel(parent, child)
+	return err == nil && relative != "." && relative != ".." && !filepath.IsAbs(relative) && !strings.HasPrefix(relative, ".."+string(filepath.Separator))
+}
+
+func redactedSegmentToWire(segment RedactedSegment) (redactedSegmentWire, error) {
+	if segment.Schema != redactedSegmentSchemaID {
+		return redactedSegmentWire{}, fmt.Errorf("sealedexec: redacted segment schema must be %q", redactedSegmentSchemaID)
+	}
+	if segment.MediaType != contextevent.MediaTypeJSON {
+		return redactedSegmentWire{}, fmt.Errorf("sealedexec: redacted segment media_type must be %q", contextevent.MediaTypeJSON)
+	}
+	if segment.RedactionProfile != contextevent.RedactionProfileStandard {
+		return redactedSegmentWire{}, fmt.Errorf("sealedexec: redacted segment redaction_profile must be %q", contextevent.RedactionProfileStandard)
+	}
+	if segment.Bytes == nil {
+		return redactedSegmentWire{}, fmt.Errorf("sealedexec: redacted segment bytes must be non-null")
+	}
+	if segment.ByteCount != uint64(len(segment.Bytes)) {
+		return redactedSegmentWire{}, fmt.Errorf("sealedexec: redacted segment byte_count does not match bytes")
+	}
+	if err := validateDigest("redacted segment digest", segment.Digest); err != nil {
+		return redactedSegmentWire{}, err
+	}
+	if segment.Digest != digestBytes(segment.Bytes) {
+		return redactedSegmentWire{}, fmt.Errorf("sealedexec: redacted segment digest does not authenticate bytes")
+	}
+	var raw json.RawMessage
+	if err := artifact.DecodeExactJSON(segment.Bytes, &raw); err != nil {
+		return redactedSegmentWire{}, fmt.Errorf("sealedexec: decode redacted segment bytes: %w", err)
+	}
+	canonical, err := canonjson.Marshal(raw)
+	if err != nil {
+		return redactedSegmentWire{}, fmt.Errorf("sealedexec: canonicalize redacted segment bytes: %w", err)
+	}
+	if !bytes.Equal(segment.Bytes, bytes.TrimSuffix(canonical, []byte("\n"))) {
+		return redactedSegmentWire{}, fmt.Errorf("sealedexec: redacted segment bytes are not canonical JSON")
+	}
+	return redactedSegmentWire{
+		Schema: segment.Schema, MediaType: segment.MediaType, RedactionProfile: segment.RedactionProfile,
+		ByteCount: segment.ByteCount, Digest: segment.Digest, Bytes: append([]byte{}, segment.Bytes...),
+	}, nil
+}
+
+func redactedSegmentFromWire(wire redactedSegmentWire) (RedactedSegment, error) {
+	segment := RedactedSegment{
+		Schema: wire.Schema, MediaType: wire.MediaType, RedactionProfile: wire.RedactionProfile,
+		ByteCount: wire.ByteCount, Digest: wire.Digest, Bytes: append([]byte{}, wire.Bytes...),
+	}
+	if _, err := redactedSegmentToWire(segment); err != nil {
+		return RedactedSegment{}, err
+	}
+	return segment, nil
+}
+
+func storedSegmentToWire(stored StoredSegment) (storedSegmentWire, error) {
+	if stored.Schema != storedSegmentSchemaID {
+		return storedSegmentWire{}, fmt.Errorf("sealedexec: stored segment schema must be %q", storedSegmentSchemaID)
+	}
+	if stored.MediaType != contextevent.MediaTypeJSON {
+		return storedSegmentWire{}, fmt.Errorf("sealedexec: stored segment media_type must be %q", contextevent.MediaTypeJSON)
+	}
+	if stored.RedactionProfile != contextevent.RedactionProfileStandard {
+		return storedSegmentWire{}, fmt.Errorf("sealedexec: stored segment redaction_profile must be %q", contextevent.RedactionProfileStandard)
+	}
+	if stored.ByteCount == 0 {
+		return storedSegmentWire{}, fmt.Errorf("sealedexec: stored segment byte_count must be positive")
+	}
+	if err := validateDigest("stored segment digest", stored.Digest); err != nil {
+		return storedSegmentWire{}, err
+	}
+	wantReference, err := segmentReference(stored.Digest)
+	if err != nil {
+		return storedSegmentWire{}, err
+	}
+	if stored.Reference != wantReference {
+		return storedSegmentWire{}, fmt.Errorf("sealedexec: stored segment reference does not match digest")
+	}
+	return storedSegmentWire{
+		Schema: stored.Schema, Reference: stored.Reference, MediaType: stored.MediaType,
+		RedactionProfile: stored.RedactionProfile, ByteCount: stored.ByteCount, Digest: stored.Digest,
+	}, nil
+}
+
+func storedSegmentFromWire(wire storedSegmentWire) (StoredSegment, error) {
+	stored := StoredSegment{
+		Schema: wire.Schema, Reference: wire.Reference, MediaType: wire.MediaType,
+		RedactionProfile: wire.RedactionProfile, ByteCount: wire.ByteCount, Digest: wire.Digest,
+	}
+	if _, err := storedSegmentToWire(stored); err != nil {
+		return StoredSegment{}, err
+	}
+	return stored, nil
+}
+
+func segmentReference(digest string) (string, error) {
+	if err := validateDigest("segment digest", digest); err != nil {
+		return "", err
+	}
+	return segmentReferencePrefix + strings.TrimPrefix(digest, "sha256:"), nil
+}
+
+func validateSegmentReference(reference string) error {
+	if !strings.HasPrefix(reference, segmentReferencePrefix) {
+		return fmt.Errorf("sealedexec: invalid controller segment reference")
+	}
+	digest := "sha256:" + strings.TrimPrefix(reference, segmentReferencePrefix)
+	want, err := segmentReference(digest)
+	if err != nil || reference != want {
+		return fmt.Errorf("sealedexec: invalid controller segment reference")
+	}
+	return nil
 }
 
 func conflictFactsToWire(f ConflictFacts) (conflictFactsWire, error) {
@@ -1886,6 +2170,38 @@ func activeRevisionToWire(active *ActiveRevision, revisions []contextevent.Revis
 	if active.NextSourceSequence == 0 {
 		return nil, fmt.Errorf("sealedexec: active revision next_source_sequence must be positive")
 	}
+	if active.EventAcks == nil {
+		return nil, fmt.Errorf("sealedexec: active revision event_acks must be non-null")
+	}
+	if uint64(len(active.EventAcks)) != active.NextSourceSequence-1 {
+		return nil, fmt.Errorf("sealedexec: active revision event_acks do not cover the adjacent source prefix")
+	}
+	for i, ack := range active.EventAcks {
+		canonical, err := canonicalEventAck(ack)
+		if err != nil || canonical != ack {
+			return nil, fmt.Errorf("sealedexec: active revision event_acks[%d] is invalid", i)
+		}
+		if ack.ManifestRevision != active.Revision || ack.SourceSequence != uint64(i+1) {
+			return nil, fmt.Errorf("sealedexec: active revision event_acks[%d] contradicts revision or source order", i)
+		}
+		if i == 0 {
+			if ack.GlobalSequence <= terminalGlobal {
+				return nil, fmt.Errorf("sealedexec: active revision event_acks do not advance beyond the complete checkpoint")
+			}
+			continue
+		}
+		prior := active.EventAcks[i-1]
+		if ack.Flight != prior.Flight || ack.Lane != prior.Lane || ack.Epoch != prior.Epoch || ack.Session != prior.Session ||
+			ack.GlobalSequence <= prior.GlobalSequence {
+			return nil, fmt.Errorf("sealedexec: active revision event_acks contradict execution identity or global order")
+		}
+	}
+	if len(active.EventAcks) != 0 {
+		final := active.EventAcks[len(active.EventAcks)-1]
+		if final.SourceSequence != active.NextSourceSequence-1 || final.EventDigest != active.PriorEventDigest || final.GlobalSequence != active.LastGlobalSequence {
+			return nil, fmt.Errorf("sealedexec: active revision terminal acknowledgment facts mismatch")
+		}
+	}
 	if active.LastGlobalSequence < terminalGlobal {
 		return nil, fmt.Errorf("sealedexec: active revision last_global_sequence precedes the complete checkpoint")
 	}
@@ -1938,6 +2254,7 @@ func activeRevisionToWire(active *ActiveRevision, revisions []contextevent.Revis
 		Revision: active.Revision, ManifestDigest: active.ManifestDigest,
 		NextSourceSequence: active.NextSourceSequence, PriorEventDigest: active.PriorEventDigest,
 		LastGlobalSequence: active.LastGlobalSequence, Invalidated: active.Invalidated,
+		EventAcks: append([]contextevent.EventAck{}, active.EventAcks...),
 	}
 	if active.PriorRevision != nil {
 		copy := *active.PriorRevision
@@ -1974,10 +2291,15 @@ func activeRevisionFromWire(raw json.RawMessage) (*ActiveRevision, error) {
 	if err := unmarshalControllerPayload(raw, &wire); err != nil {
 		return nil, err
 	}
+	var eventAcks []contextevent.EventAck
+	if wire.EventAcks != nil {
+		eventAcks = append([]contextevent.EventAck{}, wire.EventAcks...)
+	}
 	active := &ActiveRevision{
 		Revision: wire.Revision, ManifestDigest: wire.ManifestDigest,
 		NextSourceSequence: wire.NextSourceSequence, PriorEventDigest: wire.PriorEventDigest,
 		LastGlobalSequence: wire.LastGlobalSequence, Invalidated: wire.Invalidated,
+		EventAcks: eventAcks,
 	}
 	if wire.PriorRevision != nil {
 		copy := *wire.PriorRevision
