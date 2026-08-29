@@ -16,6 +16,7 @@ import (
 	"github.com/jyang234/verdi/internal/experiment"
 	"github.com/jyang234/verdi/internal/experimentdecision"
 	"github.com/jyang234/verdi/internal/experimenthuman"
+	"github.com/jyang234/verdi/internal/experimentrun"
 	"github.com/jyang234/verdi/internal/governanceprincipal"
 )
 
@@ -55,6 +56,36 @@ const (
 
 func releaseContractBytes() []byte { return []byte("contract-bytes\n") }
 func releaseFixtureBytes() []byte  { return []byte("fixture-bytes\n") }
+
+func releaseDefinitionBytes(t *testing.T, raw, workloadBytes []byte) []byte {
+	t.Helper()
+	doc := string(raw)
+	replace := func(old, new string) {
+		t.Helper()
+		if !strings.Contains(doc, old) {
+			t.Fatalf("definition fixture does not contain %q", old)
+		}
+		doc = strings.Replace(doc, old, new, 1)
+	}
+	replace("digest: sha256:"+strings.Repeat("5", 64), "digest: "+rawDigest(workloadBytes))
+	replace("digest: sha256:"+strings.Repeat("6", 64), "digest: "+rawDigest(releaseContractBytes()))
+	replace("contract:\n", "fixtures:\n  - id: request-log\n    digest: "+rawDigest(releaseFixtureBytes())+"\ncontract:\n")
+	return []byte(doc + "protected_paths:\n" +
+		"  - fixtures/request-log.bin\n" +
+		"  - inputs/contract.txt\n" +
+		"  - inputs/workload.txt\n")
+}
+
+func releaseInputBindings(workloadBytes []byte) experimentrun.InputBindings {
+	return experimentrun.InputBindings{
+		Schema: experimentrun.InputBindingSchema,
+		Inputs: []experimentrun.InputBinding{
+			{Slot: experimentrun.InputSlotContract, ID: "request-contract", Digest: rawDigest(releaseContractBytes()), Path: releaseContractPath},
+			{Slot: "fixture:request-log", ID: "request-log", Digest: rawDigest(releaseFixtureBytes()), Path: releaseFixturePath},
+			{Slot: experimentrun.InputSlotWorkload, ID: "request-mix", Digest: rawDigest(workloadBytes), Path: releaseWorkloadPath},
+		},
+	}
+}
 
 // writeReleasableRun mirrors writeRatifiableRun but its receipt carries the
 // complete resolved-input custody (workload, contract, fixture) release
@@ -136,24 +167,7 @@ func buildReleaseFixture(t *testing.T, workloadBytes []byte, disposition experim
 	if err != nil {
 		t.Fatal(err)
 	}
-	doc := string(raw)
-	replace := func(old, new string) {
-		if !strings.Contains(doc, old) {
-			t.Fatalf("definition fixture does not contain %q", old)
-		}
-		doc = strings.Replace(doc, old, new, 1)
-	}
-	replace("digest: sha256:"+strings.Repeat("5", 64), "digest: "+rawDigest(workloadBytes))
-	replace("digest: sha256:"+strings.Repeat("6", 64), "digest: "+rawDigest(releaseContractBytes()))
-	replace("contract:\n", "fixtures:\n  - id: request-log\n    digest: "+rawDigest(releaseFixtureBytes())+"\ncontract:\n")
-	// The capsule kernel proves the retained receipt with the full
-	// binding validators, so the receipt's resolved-input paths must be
-	// registered protected paths.
-	doc += "protected_paths:\n" +
-		"  - fixtures/request-log.bin\n" +
-		"  - inputs/contract.txt\n" +
-		"  - inputs/workload.txt\n"
-	if err := os.WriteFile(definitionPath, []byte(doc), 0o600); err != nil {
+	if err := os.WriteFile(definitionPath, releaseDefinitionBytes(t, raw, workloadBytes), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -216,9 +230,7 @@ func buildReleaseFixture(t *testing.T, workloadBytes []byte, disposition experim
 	if !ok {
 		t.Fatalf("service.git is %T, want *fakeGit", service.git)
 	}
-	addReleaseBlob(t, git, releaseWorkloadPath, workloadBytes, "100644")
-	addReleaseBlob(t, git, releaseContractPath, releaseContractBytes(), "100644")
-	addReleaseBlob(t, git, releaseFixturePath, releaseFixtureBytes(), "100644")
+	addReleaseProtectedInputs(t, git, workloadBytes)
 
 	targets := releaseFixtureTargets(t, root, locked, defDigest, []string{"run-alpha", "run-zeta"})
 	return releaseFixture{
@@ -226,6 +238,13 @@ func buildReleaseFixture(t *testing.T, workloadBytes []byte, disposition experim
 		verification: verification, subjects: subjects, locked: locked, defDigest: defDigest,
 		winnerDigest: winnerDigest, targets: targets,
 	}
+}
+
+func addReleaseProtectedInputs(t *testing.T, git *fakeGit, workloadBytes []byte) {
+	t.Helper()
+	addReleaseBlob(t, git, releaseWorkloadPath, workloadBytes, "100644")
+	addReleaseBlob(t, git, releaseContractPath, releaseContractBytes(), "100644")
+	addReleaseBlob(t, git, releaseFixturePath, releaseFixtureBytes(), "100644")
 }
 
 func addReleaseBlob(t *testing.T, git *fakeGit, path string, data []byte, mode string) {
@@ -473,6 +492,29 @@ func TestReleaseRatifiedSymlinkedRetainedInputRefused(t *testing.T) {
 	}
 	if len(releaser.calls) != 0 {
 		t.Fatalf("symlinked retained input still released workspaces: %v", releaser.calls)
+	}
+}
+
+func TestPublishRatifiedCapsuleUsesReceiptSlotPathsWhenDigestsEqual(t *testing.T) {
+	sharedBytes := releaseContractBytes()
+	fixture := buildReleaseFixture(t, sharedBytes, experiment.DispositionSelectRecommended, "")
+	fixture.git.blobCalls = nil
+
+	result := fixture.service.PublishRatifiedCapsule(context.Background(), fixture.identity)
+	if result.Outcome.Classification != ClassificationClean {
+		t.Fatalf("PublishRatifiedCapsule() outcome = %+v", result.Outcome)
+	}
+	wantCalls := map[string]int{releaseWorkloadPath: 1, releaseContractPath: 1}
+	gotCalls := map[string]int{}
+	for _, call := range fixture.git.blobCalls {
+		for retainedPath := range wantCalls {
+			if strings.HasSuffix(call, ":"+retainedPath) {
+				gotCalls[retainedPath]++
+			}
+		}
+	}
+	if gotCalls[releaseWorkloadPath] != wantCalls[releaseWorkloadPath] || gotCalls[releaseContractPath] != wantCalls[releaseContractPath] {
+		t.Fatalf("protected-input reads = %#v, want exact receipt slot paths %#v", gotCalls, wantCalls)
 	}
 }
 

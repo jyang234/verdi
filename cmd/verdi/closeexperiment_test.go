@@ -235,7 +235,12 @@ func buildCloseExperimentProductionFixtureRepo(t *testing.T, experimentFiles map
 // even runs until the closure gate above it holds.
 func writeCloseExperimentGateReport(t *testing.T, root, covers string) {
 	t.Helper()
-	dir := filepath.Join(root, ".verdi", "specs", "active", "exp-spike")
+	writeCloseExperimentGateReportFor(t, root, "exp-spike", covers)
+}
+
+func writeCloseExperimentGateReportFor(t *testing.T, root, spikeID, covers string) {
+	t.Helper()
+	dir := filepath.Join(root, ".verdi", "specs", "active", spikeID)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatalf("mkdir %s: %v", dir, err)
 	}

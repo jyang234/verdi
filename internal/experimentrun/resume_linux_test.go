@@ -506,6 +506,51 @@ func TestResumeRejectsChangedReceiptInputsBeforeExecution(t *testing.T) {
 	}
 }
 
+func TestResumeRejectsChangedInputSlotPathsWhenDigestsEqual(t *testing.T) {
+	fixture := newRunFixture(t, "run-1", 0)
+	sharedBytes := []byte("shared workload and contract bytes")
+	sharedDigest := testDigestBytes(sharedBytes)
+	fixture.request.Definition.Workload.Digest = sharedDigest
+	fixture.request.Definition.Contract.Digest = sharedDigest
+	fixture.request.Definition = relockDefinition(t, fixture.request.Definition)
+	fixture.authorization = testAuthorization(t, fixture.request.Definition, true)
+	for _, relative := range []string{"inputs/workload.json", "contracts/behavioral.json"} {
+		if err := os.WriteFile(filepath.Join(fixture.request.Root, filepath.FromSlash(relative)), sharedBytes, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	fixture.inputs.values[fixture.request.Definition.Workload.ID] = ResolvedInput{
+		ID: fixture.request.Definition.Workload.ID, Path: "inputs/workload.json", Digest: sharedDigest,
+	}
+	fixture.inputs.values[fixture.request.Definition.Contract.ID] = ResolvedInput{
+		ID: fixture.request.Definition.Contract.ID, Path: "contracts/behavioral.json", Digest: sharedDigest,
+	}
+
+	interruption := errors.New("interrupt before the first measured observation")
+	starter := newResumeTestService(t, fixture, &interruptingEvaluator{
+		delegate: &recordingEvaluator{}, kind: experiment.CycleMeasured,
+		candidate: "alpha", round: 1, err: interruption,
+	})
+	if _, err := starter.Start(context.Background(), fixture.request); !errors.Is(err, interruption) {
+		t.Fatalf("Start interruption error = %v, want %v", err, interruption)
+	}
+
+	fixture.inputs.values[fixture.request.Definition.Workload.ID] = ResolvedInput{
+		ID: fixture.request.Definition.Workload.ID, Path: "contracts/behavioral.json", Digest: sharedDigest,
+	}
+	fixture.inputs.values[fixture.request.Definition.Contract.ID] = ResolvedInput{
+		ID: fixture.request.Definition.Contract.ID, Path: "inputs/workload.json", Digest: sharedDigest,
+	}
+	evaluator := &recordingEvaluator{}
+	service := newResumeTestService(t, fixture, evaluator)
+	if _, err := service.Resume(context.Background(), ResumeRequest(fixture.request)); err == nil {
+		t.Fatal("Resume with workload/contract paths exchanged under one shared digest = nil error")
+	}
+	if len(evaluator.requests) != 0 {
+		t.Fatalf("changed slot-to-path custody executed %d attempts", len(evaluator.requests))
+	}
+}
+
 func TestStartKeepsCompleteRerunsSeparateWithoutPreferredPointer(t *testing.T) {
 	root := t.TempDir()
 	const experimentDir = "experiments/comparison"

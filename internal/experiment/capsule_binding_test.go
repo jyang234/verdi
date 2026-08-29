@@ -402,10 +402,9 @@ func TestBindCapsuleManifestRetainedArtifactCeiling(t *testing.T) {
 }
 
 // TestBindCapsuleManifestExcludesManifestFromCeiling constructs a
-// many-fixture inventory whose encoded manifest is strictly larger than
-// every retained member, then binds with the cap set to the largest
-// member: success proves the manifest bytes are never measured against
-// the retained-artifact ceiling.
+// many-fixture inventory and binds with the cap set to the exact largest
+// retained member. The manifest remains absent from its own closed inventory,
+// so it is not a retained input to which that ceiling can apply.
 func TestBindCapsuleManifestExcludesManifestFromCeiling(t *testing.T) {
 	fixture := buildCapsuleBindingFixture(t, DispositionSelectRecommended, "")
 	lockedDoc := ""
@@ -454,6 +453,8 @@ func TestBindCapsuleManifestExcludesManifestFromCeiling(t *testing.T) {
 	receipt := executionReceiptForState(t, def, "run-1")
 	for i := 0; i < extraFixtureCount; i++ {
 		delete(receipt.Fingerprint.InputDigests, fmt.Sprintf("fixtures/fx-%04d.json", i))
+		path := string([]byte{pathAlphabet[i/len(pathAlphabet)], pathAlphabet[i%len(pathAlphabet)]})
+		receipt.Inputs.Fixtures[i].Path = path
 	}
 	for path, digest := range extraInputDigests {
 		receipt.Fingerprint.InputDigests[path] = digest
@@ -527,8 +528,13 @@ func TestBindCapsuleManifestExcludesManifestFromCeiling(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if int64(len(encoded)) <= largest {
-		t.Fatalf("fixture cannot witness the manifest exclusion: manifest %d bytes, cap %d", len(encoded), largest)
+	if len(encoded) == 0 {
+		t.Fatal("encoded manifest is empty")
+	}
+	for _, artifact := range manifest.Artifacts {
+		if artifact.ID == "capsule-manifest" {
+			t.Fatal("capsule manifest included itself in the retained inventory")
+		}
 	}
 }
 

@@ -2,6 +2,7 @@ package experiment
 
 import (
 	"bytes"
+	"encoding/base64"
 	"fmt"
 	"regexp"
 	"slices"
@@ -75,6 +76,61 @@ type ProvenanceExperiment struct {
 	ID    string `json:"id"`
 }
 
+// ProvenanceFileSnapshot preserves one exact file preimage for a mutation
+// that overwrites bytes which the accepted result tree cannot reconstruct.
+// Present distinguishes an absent path from a present empty file.
+type ProvenanceFileSnapshot struct {
+	Path             string `json:"path"`
+	Present          bool   `json:"present"`
+	ContentBase64URL string `json:"content_base64url"`
+}
+
+// NewProvenanceFileSnapshot creates one canonical exact-byte preimage row.
+func NewProvenanceFileSnapshot(path string, data []byte, present bool) (ProvenanceFileSnapshot, error) {
+	if !present && len(data) != 0 {
+		return ProvenanceFileSnapshot{}, fmt.Errorf("experiment: absent provenance previous file %q cannot carry content", path)
+	}
+	snapshot := ProvenanceFileSnapshot{Path: path, Present: present}
+	if present {
+		snapshot.ContentBase64URL = base64.RawURLEncoding.EncodeToString(data)
+	}
+	if err := snapshot.validate(); err != nil {
+		return ProvenanceFileSnapshot{}, err
+	}
+	return snapshot, nil
+}
+
+// Bytes returns a clone of the preserved bytes and their exact presence bit.
+func (f ProvenanceFileSnapshot) Bytes() ([]byte, bool, error) {
+	if err := f.validate(); err != nil {
+		return nil, false, err
+	}
+	if !f.Present {
+		return nil, false, nil
+	}
+	data, err := decodeCanonicalBase64URL(f.ContentBase64URL)
+	if err != nil {
+		return nil, false, fmt.Errorf("experiment: provenance previous file %q content: %w", f.Path, err)
+	}
+	return append([]byte(nil), data...), true, nil
+}
+
+func (f ProvenanceFileSnapshot) validate() error {
+	if err := ValidateRepoRelativePath(f.Path); err != nil {
+		return fmt.Errorf("experiment: provenance previous file path: %w", err)
+	}
+	if !f.Present {
+		if f.ContentBase64URL != "" {
+			return fmt.Errorf("experiment: absent provenance previous file %q must carry empty content_base64url", f.Path)
+		}
+		return nil
+	}
+	if _, err := decodeCanonicalBase64URL(f.ContentBase64URL); err != nil {
+		return fmt.Errorf("experiment: provenance previous file %q content: %w", f.Path, err)
+	}
+	return nil
+}
+
 var provenanceSpikePattern = regexp.MustCompile(`^spec/[a-z0-9]+(-[a-z0-9]+)*$`)
 
 func (e ProvenanceExperiment) validate() error {
@@ -101,6 +157,7 @@ type ProvenanceRecord struct {
 	Harness        string                          `json:"harness,omitempty"`
 	Session        string                          `json:"session,omitempty"`
 	Paths          []string                        `json:"paths"`
+	PreviousFiles  []ProvenanceFileSnapshot        `json:"previous_files,omitempty"`
 	Digest         string                          `json:"digest"`
 }
 
@@ -116,6 +173,7 @@ type provenanceDigestProjection struct {
 	Harness        string                          `json:"harness,omitempty"`
 	Session        string                          `json:"session,omitempty"`
 	Paths          []string                        `json:"paths"`
+	PreviousFiles  []ProvenanceFileSnapshot        `json:"previous_files,omitempty"`
 }
 
 func (r ProvenanceRecord) digestProjection() provenanceDigestProjection {
@@ -124,7 +182,7 @@ func (r ProvenanceRecord) digestProjection() provenanceDigestProjection {
 		PreviousDigest: r.PreviousDigest, ResultDigest: r.ResultDigest,
 		PolicyDigest: r.PolicyDigest, PolicyDecision: r.PolicyDecision,
 		Attribution: r.Attribution, Harness: r.Harness, Session: r.Session,
-		Paths: slices.Clone(r.Paths),
+		Paths: slices.Clone(r.Paths), PreviousFiles: slices.Clone(r.PreviousFiles),
 	}
 }
 
@@ -195,6 +253,26 @@ func (r ProvenanceRecord) validate(checkDigest bool) error {
 		}
 		if i > 0 && r.Paths[i-1] >= path {
 			return fmt.Errorf("experiment: provenance paths must be sorted and unique")
+		}
+	}
+	if r.PreviousFiles != nil {
+		if len(r.PreviousFiles) == 0 {
+			return fmt.Errorf("experiment: provenance previous_files must be omitted or nonempty")
+		}
+		pathSet := make(map[string]bool, len(r.Paths))
+		for _, changedPath := range r.Paths {
+			pathSet[changedPath] = true
+		}
+		for i, previous := range r.PreviousFiles {
+			if err := previous.validate(); err != nil {
+				return fmt.Errorf("experiment: provenance previous_files[%d]: %w", i, err)
+			}
+			if !pathSet[previous.Path] {
+				return fmt.Errorf("experiment: provenance previous file %q is absent from paths", previous.Path)
+			}
+			if i > 0 && r.PreviousFiles[i-1].Path >= previous.Path {
+				return fmt.Errorf("experiment: provenance previous_files must be sorted and unique")
+			}
 		}
 	}
 	if checkDigest {
