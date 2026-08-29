@@ -572,7 +572,7 @@ func gapObservations(launch sealedexec.AdapterLaunch, detail contextevent.Detail
 
 func (r *activeRun) malformedDetail(ctx context.Context, raw []byte, reason string) contextevent.Detail {
 	if !utf8.Valid(raw) {
-		raw = []byte(strings.ToValidUTF8(string(raw), ""))
+		raw = []byte(strings.ToValidUTF8(string(raw), "\uFFFD"))
 	}
 	obj := map[string]any{"foreign_line": string(raw), "reason": reason}
 	encoded, err := canonjson.Marshal(obj)

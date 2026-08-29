@@ -5,9 +5,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
-	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -17,7 +15,6 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/jyang234/verdi/internal/canonjson"
 	"github.com/jyang234/verdi/internal/contextcompile"
 	"github.com/jyang234/verdi/internal/contextevent"
 	"github.com/jyang234/verdi/internal/execworkspace"
@@ -193,31 +190,17 @@ func TestClaudeAdapterParityContract_Static(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Start: %v", err)
 		}
-		const marker = "VERDI_SEALED_PROVIDER_INPUT_V1\n"
-		var outer map[string]any
-		dec := json.NewDecoder(bytes.NewReader(pp.startStdin))
-		dec.UseNumber()
-		if err := dec.Decode(&outer); err != nil {
-			t.Fatalf("stdin not valid JSON: %v\nstdin=%s", err, pp.startStdin)
+		// Amendment 002 §4 fixes the whole line. The oracle is assembled from
+		// hand-written canonical literals and a hand-written string escaper,
+		// never from canonjson or the shared provider-input encoder.
+		wantStdin := `{"message":{"content":[{"text":"` +
+			claudeQuoteJSONString(claudeSealedInputMarker+claudeExpectedProviderInput) +
+			`","type":"text"}],"role":"user"},"type":"user"}` + "\n"
+		if string(pp.startStdin) != wantStdin {
+			t.Fatalf("stdin bytes =\n%s\nwant\n%s", pp.startStdin, wantStdin)
 		}
-		if outer["type"] != "user" {
-			t.Fatalf("stdin outer type = %v, want user", outer["type"])
-		}
-		msg, _ := outer["message"].(map[string]any)
-		if msg == nil || msg["role"] != "user" {
-			t.Fatalf("stdin message role wrong: %#v", msg)
-		}
-		content, _ := msg["content"].([]any)
-		if len(content) != 1 {
-			t.Fatalf("stdin content has %d blocks, want 1", len(content))
-		}
-		block, _ := content[0].(map[string]any)
-		if block["type"] != "text" {
-			t.Fatalf("stdin block type = %v, want text", block["type"])
-		}
-		text, _ := block["text"].(string)
-		if !strings.HasPrefix(text, marker) {
-			t.Fatalf("stdin text does not start with marker: %q", text[:min(80, len(text))])
+		if bytes.Count(pp.startStdin, []byte("\n")) != 1 || pp.startStdin[len(pp.startStdin)-1] != '\n' {
+			t.Fatalf("stdin is not exactly one LF-terminated line: %q", pp.startStdin)
 		}
 	})
 
@@ -581,9 +564,9 @@ func TestClaudeAdapterParityContract_Behavioral(t *testing.T) {
 		}
 	})
 
-	t.Run("mutation_id_derivation_fails_message_row", func(t *testing.T) {
-		// The compound message ID must be "message_id:block_index".
-		// If the id were different, the message_digest would differ.
+	t.Run("assistant_text_detail_and_id_are_exact_literals", func(t *testing.T) {
+		// §5 assistant text: D={family,message_id,block_index,text}; the
+		// provider-message id is exactly "<message_id>:<block_index>".
 		launch, envRoot := claudeTestLaunch(t, sealedexec.ActionStart)
 		pp := &testProbeProcess{version: launch.Request.AdapterVersion, output: mustClaudeFixture(t, "claude-start.jsonl", launch.Workspace.Path)}
 		dp := newTestProcessor(t)
@@ -596,35 +579,44 @@ func TestClaudeAdapterParityContract_Behavioral(t *testing.T) {
 			t.Fatalf("Start: %v", err)
 		}
 		result := collectClaudeRun(t, run)
-		var msgPayload *contextevent.ProviderMessagePayload
+		var message sealedexec.NormalizedObservation
+		var found bool
 		for _, obs := range result.Observations {
-			if obs.Kind == contextevent.KindProviderMessage {
-				msgPayload, _ = obs.Payload.(*contextevent.ProviderMessagePayload)
+			if string(obs.Kind) == "provider-message" {
+				message, found = obs, true
 				break
 			}
 		}
-		if msgPayload == nil {
-			t.Fatal("no provider-message observation in start fixture")
+		if !found {
+			t.Fatalf("no provider-message observation; kinds = %v", observationKindsC(result.Observations))
 		}
-		// Compound ID must be "msg_001:0"
-		if msgPayload.MessageID != "msg_001:0" {
-			t.Fatalf("message id = %q, want msg_001:0 (message_id:block_index)", msgPayload.MessageID)
+		payload, ok := message.Payload.(*contextevent.ProviderMessagePayload)
+		if !ok {
+			t.Fatalf("provider-message payload type = %T", message.Payload)
 		}
-		// Digest must be over D={family:"assistant/text",message_id:"msg_001",block_index:0,text:"Analysis complete."}
-		wantD := buildAssistantTextDetail(t, "msg_001", 0, "Analysis complete.")
-		wantDigest := claudeTestDigest(wantD)
-		if msgPayload.MessageDigest != wantDigest {
-			t.Fatalf("message_digest = %q, want %q (H of exact D)", msgPayload.MessageDigest, wantDigest)
+		if payload.MessageID != "msg_001:0" || payload.Role != "assistant" {
+			t.Fatalf("provider-message id/role = %q/%q, want msg_001:0/assistant", payload.MessageID, payload.Role)
 		}
-		// Mutation: different message_id changes digest
-		mutatedD := buildAssistantTextDetail(t, "msg_WRONG", 0, "Analysis complete.")
-		if claudeTestDigest(mutatedD) == wantDigest {
-			t.Fatal("mutated message_id must produce different digest (independence witness)")
+		if string(message.ForeignDetail.RedactedJSON) != claudeAssistantTextDetail {
+			t.Fatalf("assistant text detail bytes =\n%s\nwant\n%s", message.ForeignDetail.RedactedJSON, claudeAssistantTextDetail)
+		}
+		if string(payload.Detail.RedactedJSON) != claudeAssistantTextDetail {
+			t.Fatalf("payload detail bytes =\n%s\nwant\n%s", payload.Detail.RedactedJSON, claudeAssistantTextDetail)
+		}
+		if payload.MessageDigest != claudeAssistantTextDigest || message.ForeignDetail.Digest != claudeAssistantTextDigest {
+			t.Fatalf("message_digest/detail digest = %q/%q, want %q over the exact literal preimage",
+				payload.MessageDigest, message.ForeignDetail.Digest, claudeAssistantTextDigest)
+		}
+		if message.ForeignDetail.Mode != contextevent.DetailInline ||
+			message.ForeignDetail.MediaType != contextevent.MediaTypeJSON ||
+			message.ForeignDetail.RedactionProfile != contextevent.RedactionProfileStandard {
+			t.Fatalf("detail union = %+v, want inline application/json verdi.redaction/standard-v1", message.ForeignDetail)
 		}
 	})
 
-	t.Run("mutation_thinking_retention_fails_summary_row", func(t *testing.T) {
-		// Thinking bytes must NOT enter the detail digest; detail is {content_type,omitted:true}.
+	t.Run("thinking_omission_detail_is_an_exact_literal", func(t *testing.T) {
+		// §5 thinking/redacted thinking: D={content_type,omitted:true}; hidden
+		// bytes are inputs to neither R nor H.
 		launch, envRoot := claudeTestLaunch(t, sealedexec.ActionResume)
 		session := "claude-sess-resume-001"
 		pp := &testProbeProcess{version: launch.Request.AdapterVersion, output: mustClaudeFixture(t, "claude-resume.jsonl", launch.Workspace.Path)}
@@ -638,30 +630,113 @@ func TestClaudeAdapterParityContract_Behavioral(t *testing.T) {
 			t.Fatalf("Resume: %v", err)
 		}
 		result := collectClaudeRun(t, run)
-		// Find the provider-summary for thinking (summary_id = "msg_002:0")
-		var thinkingSummary *contextevent.ProviderSummaryPayload
+		var summary sealedexec.NormalizedObservation
+		var payload *contextevent.ProviderSummaryPayload
 		for _, obs := range result.Observations {
-			if obs.Kind == contextevent.KindProviderSummary {
-				sp, _ := obs.Payload.(*contextevent.ProviderSummaryPayload)
-				if sp != nil && sp.SummaryID == "msg_002:0" {
-					thinkingSummary = sp
-					break
-				}
+			if string(obs.Kind) != "provider-summary" {
+				continue
+			}
+			candidate, _ := obs.Payload.(*contextevent.ProviderSummaryPayload)
+			if candidate != nil && candidate.SummaryID == "msg_002:0" {
+				summary, payload = obs, candidate
+				break
 			}
 		}
-		if thinkingSummary == nil {
-			t.Fatal("no provider-summary for thinking block (msg_002:0)")
+		if payload == nil {
+			t.Fatal("no provider-summary for the thinking block (msg_002:0)")
 		}
-		// Digest must equal H({content_type:"thinking",omitted:true})
-		expectedDetailJSON := buildThinkingOmissionDetail(t, "thinking")
-		wantDigest := claudeTestDigest(expectedDetailJSON)
-		if thinkingSummary.SummaryDigest != wantDigest {
-			t.Fatalf("thinking summary_digest = %q, want digest of {content_type:thinking,omitted:true}", thinkingSummary.SummaryDigest)
+		if string(payload.Authority) != "advisory" {
+			t.Fatalf("thinking summary authority = %q, want advisory", payload.Authority)
 		}
-		// Mutation: including thinking bytes changes digest
-		mutatedJSON := buildThinkingWithBytesDetail(t, "thinking", "internal deliberation")
-		if claudeTestDigest(mutatedJSON) == wantDigest {
-			t.Fatal("including thinking bytes must produce different digest (independence witness)")
+		if string(summary.ForeignDetail.RedactedJSON) != claudeThinkingOmissionDetail {
+			t.Fatalf("thinking detail bytes = %s, want exactly %s", summary.ForeignDetail.RedactedJSON, claudeThinkingOmissionDetail)
+		}
+		if payload.SummaryDigest != claudeThinkingOmissionDigest {
+			t.Fatalf("thinking summary_digest = %q, want %q over the exact literal preimage", payload.SummaryDigest, claudeThinkingOmissionDigest)
+		}
+		for _, obs := range result.Observations {
+			if bytes.Contains(obs.ForeignDetail.RedactedJSON, []byte("internal deliberation")) ||
+				bytes.Contains(obs.ForeignDetail.RedactedJSON, []byte("thinking-signature")) {
+				t.Fatalf("observation %q retained hidden thinking bytes", obs.Kind)
+			}
+		}
+	})
+
+	t.Run("provider_session_is_protected_before_any_detail", func(t *testing.T) {
+		// §5: the private observed session joins the protected-value set before
+		// I is redacted. Prosecuted in a non-sensitive position (assistant text)
+		// so key-class redaction cannot mask a missing protected value.
+		launch, envRoot := claudeTestLaunch(t, sealedexec.ActionStart)
+		const session = "claude-sess-protected-001"
+		assistant := `{"type":"assistant","session_id":"` + session +
+			`","uuid":"u-a","message":{"id":"msg_p","type":"message","role":"assistant","model":"claude-opus-5-test","content":[{"type":"text","text":"session ` + session +
+			` leaked"}],"usage":{"input_tokens":1,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":1}}}`
+		result := runClaudeLines(t, launch, envRoot,
+			claudeInitLine(session, launch.Workspace.Path), assistant)
+		const wantDetail = `{"block_index":0,"family":"assistant/text","message_id":"msg_p","text":"session [REDACTED] leaked"}`
+		var found bool
+		for _, obs := range result.Observations {
+			if string(obs.Kind) != "provider-message" {
+				continue
+			}
+			found = true
+			if string(obs.ForeignDetail.RedactedJSON) != wantDetail {
+				t.Fatalf("assistant detail =\n%s\nwant\n%s", obs.ForeignDetail.RedactedJSON, wantDetail)
+			}
+		}
+		if !found {
+			t.Fatalf("no provider-message observation; kinds = %v", observationKindsC(result.Observations))
+		}
+		for _, obs := range result.Observations {
+			if bytes.Contains(obs.ForeignDetail.RedactedJSON, []byte(session)) {
+				t.Fatalf("observation %q disclosed the provider session", obs.Kind)
+			}
+		}
+	})
+
+	t.Run("init_summary_detail_is_an_exact_literal", func(t *testing.T) {
+		// §5 init start: I={family,model,mcp_servers,permission_mode,session_id}
+		// with the observed provider session already in the protected set.
+		launch, envRoot := claudeTestLaunch(t, sealedexec.ActionStart)
+		pp := &testProbeProcess{version: launch.Request.AdapterVersion, output: mustClaudeFixture(t, "claude-start.jsonl", launch.Workspace.Path)}
+		dp := newTestProcessor(t)
+		adapter, err := newClaudeTestAdapter(t, pp, dp, envRoot)
+		if err != nil {
+			t.Fatalf("New: %v", err)
+		}
+		run, err := adapter.Start(context.Background(), launch)
+		if err != nil {
+			t.Fatalf("Start: %v", err)
+		}
+		result := collectClaudeRun(t, run)
+		var summary sealedexec.NormalizedObservation
+		var payload *contextevent.ProviderSummaryPayload
+		for _, obs := range result.Observations {
+			if string(obs.Kind) != "provider-summary" {
+				continue
+			}
+			candidate, _ := obs.Payload.(*contextevent.ProviderSummaryPayload)
+			if candidate != nil && candidate.SummaryID == "system/init" {
+				summary, payload = obs, candidate
+				break
+			}
+		}
+		if payload == nil {
+			t.Fatalf("no system/init provider-summary; kinds = %v", observationKindsC(result.Observations))
+		}
+		if string(payload.Authority) != "advisory" {
+			t.Fatalf("init summary authority = %q, want advisory", payload.Authority)
+		}
+		if string(summary.ForeignDetail.RedactedJSON) != claudeInitSummaryDetail {
+			t.Fatalf("init detail bytes =\n%s\nwant\n%s", summary.ForeignDetail.RedactedJSON, claudeInitSummaryDetail)
+		}
+		if payload.SummaryDigest != claudeInitSummaryDigest {
+			t.Fatalf("init summary_digest = %q, want %q over the exact literal preimage", payload.SummaryDigest, claudeInitSummaryDigest)
+		}
+		for _, obs := range result.Observations {
+			if bytes.Contains(obs.ForeignDetail.RedactedJSON, []byte("claude-sess-start-001")) {
+				t.Fatalf("observation %q disclosed the provider session", obs.Kind)
+			}
 		}
 	})
 
@@ -757,7 +832,7 @@ func TestClaudeAdapterParityContract_Behavioral(t *testing.T) {
 		if detail.Mode != contextevent.DetailInline {
 			t.Fatalf("malformed detail mode = %q, want inline", detail.Mode)
 		}
-		want := fmt.Sprintf(`{"raw_digest":%q,"reason":"malformed-foreign-frame"}`, claudeTestDigest([]byte(raw)))
+		const want = `{"raw_digest":"` + claudeMalformedFrameRawDigest + `","reason":"malformed-foreign-frame"}`
 		if string(detail.RedactedJSON) != want {
 			t.Fatalf("malformed detail = %s, want %s", detail.RedactedJSON, want)
 		}
@@ -803,6 +878,29 @@ func TestClaudeAdapterParityContract_Behavioral(t *testing.T) {
 		stop := claudeStopPayload(t, result.Observations)
 		if stop.ReasonCode != "provider-stderr" {
 			t.Fatalf("adapter-stop reason = %q, want provider-stderr", stop.ReasonCode)
+		}
+		// §5 fixes the only safe stderr detail to exactly {raw_digest,reason}
+		// over the discarded stderr bytes, and fixes the kind literals.
+		const wantStderrDetail = `{"raw_digest":"` + claudeStderrRawDigest + `","reason":"provider-stderr"}`
+		var sawGap, sawError bool
+		for _, obs := range result.Observations {
+			switch string(obs.Kind) {
+			case "telemetry-gap":
+				sawGap = true
+			case "adapter-error":
+				sawError = true
+			default:
+				continue
+			}
+			if string(obs.ForeignDetail.RedactedJSON) != wantStderrDetail {
+				t.Fatalf("%s stderr detail = %s, want exactly %s", obs.Kind, obs.ForeignDetail.RedactedJSON, wantStderrDetail)
+			}
+		}
+		if !sawGap || !sawError {
+			t.Fatalf("kinds = %v, want both telemetry-gap and adapter-error", observationKindsC(result.Observations))
+		}
+		if errPayload.ErrorDigest != claudeStderrFixedDetailDigest {
+			t.Fatalf("error_digest = %q, want %q over the exact fixed safe-detail bytes", errPayload.ErrorDigest, claudeStderrFixedDetailDigest)
 		}
 	})
 
@@ -1341,63 +1439,6 @@ func newTestProcessor(t *testing.T) *sealedexec.DetailProcessor {
 	return proc
 }
 
-// ---------------------------------------------------------------------------
-// Literal detail builders for mutation witnesses
-// ---------------------------------------------------------------------------
-
-// buildAssistantTextDetail builds the canonical D for an assistant text block.
-// D = {family:"assistant/text", message_id, block_index, text}
-func buildAssistantTextDetail(t *testing.T, messageID string, blockIndex int, text string) []byte {
-	t.Helper()
-	d := map[string]any{
-		"block_index": float64(blockIndex),
-		"family":      "assistant/text",
-		"message_id":  messageID,
-		"text":        text,
-	}
-	raw, err := canonjson.Marshal(d)
-	if err != nil {
-		t.Fatalf("marshal assistant text detail: %v", err)
-	}
-	return bytes.TrimSuffix(raw, []byte("\n"))
-}
-
-// buildThinkingOmissionDetail builds D for a thinking block: {content_type, omitted:true}.
-func buildThinkingOmissionDetail(t *testing.T, contentType string) []byte {
-	t.Helper()
-	d := map[string]any{
-		"content_type": contentType,
-		"omitted":      true,
-	}
-	raw, err := canonjson.Marshal(d)
-	if err != nil {
-		t.Fatalf("marshal thinking omission detail: %v", err)
-	}
-	return bytes.TrimSuffix(raw, []byte("\n"))
-}
-
-// buildThinkingWithBytesDetail is the mutation: includes thinking bytes (wrong).
-func buildThinkingWithBytesDetail(t *testing.T, contentType, thinkingText string) []byte {
-	t.Helper()
-	d := map[string]any{
-		"content_type": contentType,
-		"omitted":      true,
-		"thinking":     thinkingText, // mutation: thinking bytes leaked
-	}
-	raw, err := canonjson.Marshal(d)
-	if err != nil {
-		t.Fatalf("marshal mutated thinking detail: %v", err)
-	}
-	return bytes.TrimSuffix(raw, []byte("\n"))
-}
-
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}
-
 // TestClaudeAdapterProfileAndCommandAuthority proves Amendment 002 §3/§4
 // profile and command authority: the model comes from the resolved profile
 // (never its logical name), the MCP configuration path is the exact
@@ -1680,3 +1721,71 @@ func assertClaudeGapReason(t *testing.T, result sealedexec.AdapterResult, reason
 		t.Fatalf("adapter-error = reason %q operation %q, want %q/%q", errPayload.ReasonCode, errPayload.Operation, reason, operation)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// I7: independent literal byte oracles.
+//
+// Every constant below is transcribed from Amendment 002 §4/§5 and hashed with
+// an out-of-process tool; none is produced by canonjson, the provider-input
+// encoder, or any other production code under test.
+// ---------------------------------------------------------------------------
+
+// claudeSealedInputMarker is §4's exact sealed-input prefix.
+const claudeSealedInputMarker = "VERDI_SEALED_PROVIDER_INPUT_V1\n"
+
+// claudeExpectedProviderInput is the exact canonical
+// verdi.sealed-provider-input/v1 document for claudeTestLaunch's input,
+// without its trailing LF.
+const claudeExpectedProviderInput = `{"data":[{"classification":"non-authoritative-data","content":"CONTEXT DATA","content_digest":"sha256:12a3dc6b79a66a834aed37dfc11d649b18b74941176aef52d50653aaaf8e2abd","digest":"sha256:b973228560c1dd662f3da4151b7c57c4a67728328c1202f550e36d84e24386c8","id":"path:README.md","kind":"repository-file","path":"README.md","schema":"verdi.context-data-item/v1","source":"head-tree"}],"instructions":{"instruction_projection":{"digest":"sha256:0f0039804d2cf11a17f0299a1bf9e8ff633f6c1866e125e2d3e8859f1ccd4e3e","files":[{"content":"sealed\n","content_digest":"sha256:24f2f924f16716eeae930dfc7ca01dd50e4b58754997d9ac3c7e630a0c9d3b71","path":"AGENTS.md"}],"schema":"verdi.instruction-projection/v1"}},"schema":"verdi.sealed-provider-input/v1"}`
+
+// claudeQuoteJSONString is a deliberately independent minimal JSON string
+// escaper. It exists so the stdin oracle never routes through the encoder it
+// is meant to police; it covers exactly the characters the sealed input can
+// contain.
+func claudeQuoteJSONString(value string) string {
+	var out []byte
+	for i := 0; i < len(value); i++ {
+		switch c := value[i]; c {
+		case '"':
+			out = append(out, '\\', '"')
+		case '\\':
+			out = append(out, '\\', '\\')
+		case '\n':
+			out = append(out, '\\', 'n')
+		default:
+			if c < 0x20 {
+				panic("claudeQuoteJSONString: unexpected control byte in oracle input")
+			}
+			out = append(out, c)
+		}
+	}
+	return string(out)
+}
+
+// claudeAssistantTextDetail is §5's exact assistant-text detail source D for
+// the committed start fixture. SHA-256 over these 100 bytes, computed with an
+// out-of-process shasum, is claudeAssistantTextDigest.
+const claudeAssistantTextDetail = `{"block_index":0,"family":"assistant/text","message_id":"msg_001","text":"Analysis complete."}`
+const claudeAssistantTextDigest = "sha256:5f7d796ec32d0d3397919563bb24c25f5d59c2ce3d653706608010c261313200"
+
+// claudeThinkingOmissionDetail is §5's exact thinking/redacted-thinking detail
+// source D. Hidden bytes never appear in it.
+const claudeThinkingOmissionDetail = `{"content_type":"thinking","omitted":true}`
+const claudeThinkingOmissionDigest = "sha256:0ddb70430062cc063da194de71119fc48335d399c9cc6ffe22c31050a761ebb6"
+
+// claudeInitSummaryDetail is §5's exact init detail source I for the committed
+// start fixture, with the observed provider session already redacted by §6.
+const claudeInitSummaryDetail = `{"family":"system/init","mcp_servers":[{"name":"verdi-context","status":"connected"}],"model":"claude-opus-5-test","permission_mode":"bypassPermissions","session_id":"[REDACTED]"}`
+const claudeInitSummaryDigest = "sha256:7b41e049b61e2f8745d1845f2a0e383aecb94dbb931f60c2a59b496e9a0c5a44"
+
+// claudeMalformedFrameRawDigest is SHA-256 over the exact discarded frame
+// `{not-json SENTINEL-FOREIGN-BYTES}`.
+const claudeMalformedFrameRawDigest = "sha256:a6d4b1ec6210407d9ecb9c94f5a8efcf5a3160a9ce312025c703ae5ee1f278ec"
+
+// claudeStderrRawDigest is SHA-256 over the exact discarded stderr bytes
+// "panic: SENTINEL-STDERR-BYTES\n".
+const claudeStderrRawDigest = "sha256:52e6abf2893c5e80e4efe11b4188d6a0fe2c306071a5936e998de0b8e84b206a"
+
+// claudeStderrFixedDetailDigest is SHA-256 over the exact canonical fixed
+// safe-detail bytes {"raw_digest":<claudeStderrRawDigest>,"reason":"provider-stderr"}.
+const claudeStderrFixedDetailDigest = "sha256:78d98527296f16f9169ba95128d3b3a352c39beb585781b4415d135e963336c6"

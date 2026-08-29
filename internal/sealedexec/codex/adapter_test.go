@@ -638,3 +638,171 @@ func newTestProcessorForCodex(t *testing.T) *sealedexec.DetailProcessor {
 	}
 	return proc
 }
+
+// ---------------------------------------------------------------------------
+// I8: Codex parity regressions through the shared DetailProcessor.
+//
+// Every oracle below is a hand-assembled canonical byte string, never a second
+// call to the encoder under test. Amendment 002 §6 fixes the redaction profile
+// and the 16384-byte inline ceiling; the shared processor must apply exactly
+// those to Codex as it does to Claude, without either side's semantics moving.
+// ---------------------------------------------------------------------------
+
+func TestCodexDetailParityThroughSharedProcessor(t *testing.T) {
+	const secret = "test-codex-secret-value"
+
+	t.Run("below_ceiling_raw_detail_bytes", func(t *testing.T) {
+		// Source order is deliberately non-canonical so the oracle cannot be
+		// an echo of the input line.
+		const source = `{"usage":{"input_tokens":1},"type":"turn.completed"}`
+		const wantDetail = `{"type":"turn.completed","usage":{"input_tokens":1}}`
+		const wantDigest = "sha256:" + codexTurnCompletedDetailHex
+
+		launch := adapterLaunch(t, sealedexec.ActionResume)
+		adapter, err := New(&cannedProcess{output: []byte(source + "\n")}, newTestProcessorForCodex(t))
+		if err != nil {
+			t.Fatal(err)
+		}
+		run, err := adapter.Resume(context.Background(), launch, "session-1")
+		if err != nil {
+			t.Fatalf("Resume: %v", err)
+		}
+		detail := firstCodexForeignDetail(t, collectRun(t, run).Observations)
+		if string(detail.RedactedJSON) != wantDetail {
+			t.Fatalf("inline detail bytes = %q, want exactly %q", detail.RedactedJSON, wantDetail)
+		}
+		if detail.Mode != contextevent.DetailInline || detail.MediaType != contextevent.MediaTypeJSON ||
+			detail.RedactionProfile != contextevent.RedactionProfileStandard {
+			t.Fatalf("detail union = %+v, want inline application/json verdi.redaction/standard-v1", detail)
+		}
+		if detail.Digest != wantDigest {
+			t.Fatalf("detail digest = %q, want %q (H over the exact no-LF preimage %q)", detail.Digest, wantDigest, wantDetail)
+		}
+		// Digest-domain witness: the LF-framed preimage is a different domain.
+		if adapterTestDigest([]byte(wantDetail+"\n")) == wantDigest {
+			t.Fatal("LF-framed preimage must not share the no-LF digest")
+		}
+	})
+
+	t.Run("protected_secret_is_redacted_in_detail", func(t *testing.T) {
+		const source = `{"type":"item.completed","item":{"type":"agent_message","text":"leak ` + secret + ` here","id":"i1"}}`
+		const wantDetail = `{"item":{"id":"i1","text":"leak [REDACTED] here","type":"agent_message"},"type":"item.completed"}`
+
+		launch := adapterLaunch(t, sealedexec.ActionResume)
+		if len(launch.Profile.PolicySecretValues) != 1 || string(launch.Profile.PolicySecretValues[0]) != secret {
+			t.Fatalf("launch protected values = %q, want exactly [%q]", launch.Profile.PolicySecretValues, secret)
+		}
+		adapter, err := New(&cannedProcess{output: []byte(source + "\n")}, newTestProcessorForCodex(t))
+		if err != nil {
+			t.Fatal(err)
+		}
+		run, err := adapter.Resume(context.Background(), launch, "session-1")
+		if err != nil {
+			t.Fatalf("Resume: %v", err)
+		}
+		result := collectRun(t, run)
+		detail := firstCodexForeignDetail(t, result.Observations)
+		if string(detail.RedactedJSON) != wantDetail {
+			t.Fatalf("redacted detail bytes = %q, want exactly %q", detail.RedactedJSON, wantDetail)
+		}
+		for _, observation := range result.Observations {
+			if bytes.Contains(observation.ForeignDetail.RedactedJSON, []byte(secret)) {
+				t.Fatalf("observation %q leaked the protected value", observation.Kind)
+			}
+		}
+	})
+
+	t.Run("above_ceiling_detail_becomes_stored_segment", func(t *testing.T) {
+		text := strings.Repeat("A", contextevent.InlineDetailCeiling+1)
+		// Hand-assembled canonical bytes: keys sorted at every level.
+		wantBytes := `{"item":{"id":"i1","text":"` + text + `","type":"agent_message"},"type":"item.completed"}`
+		if len(wantBytes) <= contextevent.InlineDetailCeiling {
+			t.Fatalf("oracle preimage is %d bytes, must exceed the %d ceiling", len(wantBytes), contextevent.InlineDetailCeiling)
+		}
+		source := `{"type":"item.completed","item":{"type":"agent_message","text":"` + text + `","id":"i1"}}`
+
+		launch := adapterLaunch(t, sealedexec.ActionResume)
+		processor, store := newCodexProcessorWithStore(t)
+		adapter, err := New(&cannedProcess{output: []byte(source + "\n")}, processor)
+		if err != nil {
+			t.Fatal(err)
+		}
+		run, err := adapter.Resume(context.Background(), launch, "session-1")
+		if err != nil {
+			t.Fatalf("Resume: %v", err)
+		}
+		detail := firstCodexForeignDetail(t, collectRun(t, run).Observations)
+		wantDigest := adapterTestDigest([]byte(wantBytes))
+		if detail.Mode != contextevent.DetailSegment {
+			t.Fatalf("detail mode = %q, want segment above the %d-byte ceiling", detail.Mode, contextevent.InlineDetailCeiling)
+		}
+		if len(detail.RedactedJSON) != 0 {
+			t.Fatalf("segment detail carried %d inline bytes, want none", len(detail.RedactedJSON))
+		}
+		if detail.Digest != wantDigest || detail.ByteCount != uint64(len(wantBytes)) ||
+			detail.Reference != codexTestSegmentRefPrefix+strings.TrimPrefix(wantDigest, "sha256:") ||
+			detail.MediaType != contextevent.MediaTypeJSON || detail.RedactionProfile != contextevent.RedactionProfileStandard {
+			t.Fatalf("segment detail = %+v, want digest %q byte_count %d", detail, wantDigest, len(wantBytes))
+		}
+		segment, err := store.ResolveRedactedSegment(context.Background(), detail.Reference)
+		if err != nil {
+			t.Fatalf("ResolveRedactedSegment: %v", err)
+		}
+		if string(segment.Bytes) != wantBytes {
+			t.Fatalf("stored segment bytes differ from the hand-assembled canonical oracle (%d vs %d bytes)", len(segment.Bytes), len(wantBytes))
+		}
+	})
+
+	t.Run("invalid_utf8_maps_to_replacement_runes", func(t *testing.T) {
+		// Historical accepted mapping: strings.ToValidUTF8(raw, "�").
+		// Dropping the invalid run instead would silently shorten the frame.
+		source := []byte("{not-json \xff}\n")
+		const wantDetail = "{\"foreign_line\":\"{not-json �}\",\"reason\":\"malformed-json\"}"
+
+		launch := adapterLaunch(t, sealedexec.ActionResume)
+		adapter, err := New(&cannedProcess{output: source}, newTestProcessorForCodex(t))
+		if err != nil {
+			t.Fatal(err)
+		}
+		run, err := adapter.Resume(context.Background(), launch, "session-1")
+		if err != nil {
+			t.Fatalf("Resume: %v", err)
+		}
+		result := collectUntilBoundary(t, run)
+		if result.OperationalFailure != "malformed-json" {
+			t.Fatalf("operational failure = %q, want malformed-json", result.OperationalFailure)
+		}
+		detail := firstCodexForeignDetail(t, result.Observations)
+		if string(detail.RedactedJSON) != wantDetail {
+			t.Fatalf("malformed detail bytes = %q, want exactly %q", detail.RedactedJSON, wantDetail)
+		}
+		if detail.Digest != adapterTestDigest([]byte(wantDetail)) {
+			t.Fatalf("malformed detail digest = %q, want H over the exact oracle bytes", detail.Digest)
+		}
+	})
+}
+
+// codexTurnCompletedDetailHex is SHA-256 over the 52 canonical no-LF bytes
+// `{"type":"turn.completed","usage":{"input_tokens":1}}`.
+const codexTurnCompletedDetailHex = "d37366a138abc859f6ae8e6fb4ab84eccd94a22a67283b065390339eece824a0"
+
+func firstCodexForeignDetail(t *testing.T, observations []sealedexec.NormalizedObservation) contextevent.Detail {
+	t.Helper()
+	for _, observation := range observations {
+		if observation.ForeignDetail.Digest != "" {
+			return observation.ForeignDetail
+		}
+	}
+	t.Fatal("no observation carried a foreign detail")
+	return contextevent.Detail{}
+}
+
+func newCodexProcessorWithStore(t *testing.T) (*sealedexec.DetailProcessor, *codexTestSegmentStore) {
+	t.Helper()
+	store := &codexTestSegmentStore{segments: make(map[string]sealedexec.RedactedSegment)}
+	processor, err := sealedexec.NewDetailProcessor(store)
+	if err != nil {
+		t.Fatalf("NewDetailProcessor: %v", err)
+	}
+	return processor, store
+}
