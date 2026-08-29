@@ -3,6 +3,8 @@ package experiment
 import (
 	"strings"
 	"testing"
+
+	"github.com/jyang234/verdi/internal/canonjson"
 )
 
 var resolvedInputPaths = []string{
@@ -30,11 +32,11 @@ func validExecutionReceipt(t *testing.T) ExecutionReceipt {
 		t.Fatal(err)
 	}
 	return ExecutionReceipt{
-		Schema: ExecutionReceiptSchema, ExperimentDigest: digestOf("a"), Run: "run-1",
+		Schema: ExecutionReceiptSchemaV2, ExperimentDigest: digestOf("a"), Run: "run-1",
 		EnvironmentPolicy: "local-isolated-v1", AuthorityDigest: digestOf("b"), CapabilitiesDigest: digestOf("c"),
 		ScheduleDigest: digestOf("d"), GrantsDigest: digestOf("e"),
 		Fingerprint: ExecutionFingerprint{OS: "linux", Arch: "amd64", ToolVersions: map[string]string{"evaluator": "2.1.0", "verdi": "0.1.0"}, Env: map[string]*string{}, InputDigests: map[string]string{"workload": strings.TrimPrefix(digestOf("f"), "sha256:")}},
-		Inputs: ReceiptInputs{
+		Inputs: &ReceiptInputs{
 			Workload: ResolvedArtifact{ID: "workload", Path: "inputs/workload.json", Digest: digestOf("f")},
 			Fixtures: []ResolvedArtifact{},
 			Contract: ResolvedArtifact{ID: "contract", Path: "contracts/behavioral.json", Digest: digestOf("7")},
@@ -72,7 +74,7 @@ func TestExecutionReceiptExactCodecDigestAndUnionRules(t *testing.T) {
 		append(append([]byte(nil), b...), []byte(`{}`)...),
 		[]byte(strings.Replace(string(b), `{"authority_digest"`, `{ "authority_digest"`, 1)),
 		[]byte(strings.Replace(string(b), `"run":"run-1"`, `"run":"run-1","run":"run-2"`, 1)),
-		[]byte(strings.Replace(string(b), `"schema":"verdi.experiment-execution/v1"`, `"schema":"verdi.experiment-execution/v1","unknown":true`, 1)),
+		[]byte(strings.Replace(string(b), `"schema":"verdi.experiment-execution/v2"`, `"schema":"verdi.experiment-execution/v2","unknown":true`, 1)),
 	} {
 		if _, err := DecodeExecutionReceipt(data); err == nil {
 			t.Fatalf("DecodeExecutionReceipt(mutated bytes) = nil error")
@@ -104,6 +106,40 @@ func TestExecutionReceiptExactCodecDigestAndUnionRules(t *testing.T) {
 	bad.Inputs.Contract.Path = bad.Inputs.Workload.Path
 	if _, err := EncodeExecutionReceipt(bad); err == nil {
 		t.Fatalf("EncodeExecutionReceipt(duplicate receipt input path) = nil error")
+	}
+}
+
+func TestExecutionReceiptV1IsStrictDecodeOnlyHistory(t *testing.T) {
+	historical := validExecutionReceipt(t)
+	historical.Schema = ExecutionReceiptSchemaV1
+	historical.Inputs = nil
+	raw, err := canonjson.Marshal(historical)
+	if err != nil {
+		t.Fatal(err)
+	}
+	decoded, err := DecodeExecutionReceipt(raw)
+	if err != nil {
+		t.Fatalf("DecodeExecutionReceipt(canonical historical v1): %v", err)
+	}
+	if decoded.Schema != ExecutionReceiptSchemaV1 || decoded.Inputs != nil {
+		t.Fatalf("decoded historical receipt = schema %q inputs %+v", decoded.Schema, decoded.Inputs)
+	}
+	if _, err := EncodeExecutionReceipt(decoded); err == nil {
+		t.Fatal("EncodeExecutionReceipt(historical v1) = nil error, want decode-only refusal")
+	}
+	if err := ValidateReceiptInputAuthority(Definition{}, decoded); err == nil || !strings.Contains(err.Error(), "no durable input slot custody") {
+		t.Fatalf("ValidateReceiptInputAuthority(historical v1) error = %v, want explicit custody refusal", err)
+	}
+
+	forged := historical
+	inputs := validExecutionReceipt(t).Inputs
+	forged.Inputs = inputs
+	withV2Field, err := canonjson.Marshal(forged)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := DecodeExecutionReceipt(withV2Field); err == nil {
+		t.Fatal("DecodeExecutionReceipt(v1 carrying v2 inputs field) = nil error")
 	}
 }
 

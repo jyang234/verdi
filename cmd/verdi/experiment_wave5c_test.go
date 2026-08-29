@@ -504,7 +504,7 @@ func writeWave5CAcceptedRun(t *testing.T, root string, definition experiment.Def
 				wave5CContractPath:                          strings.TrimPrefix(definition.Contract.Digest, "sha256:"),
 			},
 		},
-		Inputs: experiment.ReceiptInputs{
+		Inputs: &experiment.ReceiptInputs{
 			Workload: experiment.ResolvedArtifact{ID: definition.Workload.ID, Path: wave5CWorkloadPath, Digest: definition.Workload.Digest},
 			Fixtures: []experiment.ResolvedArtifact{},
 			Contract: experiment.ResolvedArtifact{ID: definition.Contract.ID, Path: wave5CContractPath, Digest: definition.Contract.Digest},

@@ -830,7 +830,7 @@ func executionReceiptForState(t *testing.T, def Definition, run string) Executio
 		Schema: ExecutionReceiptSchema, ExperimentDigest: digest, Run: run, EnvironmentPolicy: def.Execution.EnvironmentPolicy,
 		AuthorityDigest: digestOf("1"), CapabilitiesDigest: def.Evaluator.CapabilitiesDigest, ScheduleDigest: digestOf("2"), GrantsDigest: digestOf("3"),
 		Fingerprint: ExecutionFingerprint{OS: "linux", Arch: "amd64", ToolVersions: map[string]string{"evaluator": "2.1.0", "verdi": "0.1.0"}, Env: map[string]*string{}, InputDigests: inputDigests},
-		Inputs: ReceiptInputs{
+		Inputs: &ReceiptInputs{
 			Workload: ResolvedArtifact{ID: def.Workload.ID, Path: "inputs/workload.json", Digest: def.Workload.Digest},
 			Fixtures: fixtureInputs,
 			Contract: ResolvedArtifact{ID: def.Contract.ID, Path: "contracts/equivalence.json", Digest: def.Contract.Digest},

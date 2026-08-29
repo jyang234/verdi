@@ -8,7 +8,17 @@ import (
 	"github.com/jyang234/verdi/internal/canonjson"
 )
 
-const ExecutionReceiptSchema = "verdi.experiment-execution/v1"
+const (
+	// ExecutionReceiptSchemaV1 is strict decode-only run history. Its
+	// fingerprint preserves path-to-digest facts but cannot distinguish roles
+	// that share a digest.
+	ExecutionReceiptSchemaV1 = "verdi.experiment-execution/v1"
+	// ExecutionReceiptSchemaV2 is the emitted slot-aware receipt schema.
+	ExecutionReceiptSchemaV2 = "verdi.experiment-execution/v2"
+
+	// ExecutionReceiptSchema names the schema emitted by current writers.
+	ExecutionReceiptSchema = ExecutionReceiptSchemaV2
+)
 
 type NetworkMode string
 
@@ -240,7 +250,7 @@ type ExecutionReceipt struct {
 	ScheduleDigest     string               `json:"schedule_digest"`
 	GrantsDigest       string               `json:"grants_digest"`
 	Fingerprint        ExecutionFingerprint `json:"fingerprint"`
-	Inputs             ReceiptInputs        `json:"inputs"`
+	Inputs             *ReceiptInputs       `json:"inputs,omitempty"`
 	Enforcement        []ReceiptEnforcement `json:"enforcement"`
 	Network            ReceiptNetwork       `json:"network"`
 	Candidates         []ReceiptCandidate   `json:"candidates"`
@@ -249,8 +259,20 @@ type ExecutionReceipt struct {
 }
 
 func (r ExecutionReceipt) Validate() error {
-	if r.Schema != ExecutionReceiptSchema {
-		return fmt.Errorf("experiment: unknown execution receipt schema %q", r.Schema)
+	switch r.Schema {
+	case ExecutionReceiptSchemaV1:
+		if r.Inputs != nil {
+			return fmt.Errorf("experiment: execution receipt v1 forbids slot-aware inputs")
+		}
+	case ExecutionReceiptSchemaV2:
+		if r.Inputs == nil {
+			return fmt.Errorf("experiment: execution receipt v2 requires slot-aware inputs")
+		}
+		if err := r.Inputs.Validate(); err != nil {
+			return err
+		}
+	default:
+		return fmt.Errorf("experiment: unknown execution receipt schema %q, want %q or %q", r.Schema, ExecutionReceiptSchemaV1, ExecutionReceiptSchemaV2)
 	}
 	for field, value := range map[string]string{"experiment_digest": r.ExperimentDigest, "authority_digest": r.AuthorityDigest, "capabilities_digest": r.CapabilitiesDigest, "schedule_digest": r.ScheduleDigest, "grants_digest": r.GrantsDigest} {
 		if err := ValidateDigest(value); err != nil {
@@ -264,9 +286,6 @@ func (r ExecutionReceipt) Validate() error {
 		return fmt.Errorf("experiment: receipt.environment_policy must be nonempty")
 	}
 	if err := r.Fingerprint.Validate(); err != nil {
-		return err
-	}
-	if err := r.Inputs.Validate(); err != nil {
 		return err
 	}
 	if r.Enforcement == nil {
@@ -317,6 +336,9 @@ func (r ExecutionReceipt) Validate() error {
 }
 
 func EncodeExecutionReceipt(r ExecutionReceipt) ([]byte, error) {
+	if r.Schema != ExecutionReceiptSchemaV2 {
+		return nil, fmt.Errorf("experiment: only execution receipt %s is emitted; %q is decode-only history", ExecutionReceiptSchemaV2, r.Schema)
+	}
 	if err := r.Validate(); err != nil {
 		return nil, err
 	}
@@ -377,8 +399,15 @@ func ValidateExecutionReceiptBinding(def Definition, observations []Observation,
 	if err := validateAuthoritativeExecutionControls(receipt); err != nil {
 		return err
 	}
-	if err := ValidateReceiptInputAuthority(def, receipt); err != nil {
-		return err
+	switch receipt.Schema {
+	case ExecutionReceiptSchemaV1:
+		if err := validateHistoricalReceiptInputDigests(def, receipt.Fingerprint.InputDigests); err != nil {
+			return err
+		}
+	case ExecutionReceiptSchemaV2:
+		if err := ValidateReceiptInputAuthority(def, receipt); err != nil {
+			return err
+		}
 	}
 	return ValidateReceiptCandidateAuthority(def, receipt)
 }
@@ -462,6 +491,9 @@ func validateAuthoritativeExecutionControls(receipt ExecutionReceipt) error {
 // locked definition. It is shared by result/capsule validation and retained
 // input loading so no consumer reassigns paths by digest.
 func ValidateReceiptInputAuthority(def Definition, receipt ExecutionReceipt) error {
+	if receipt.Schema != ExecutionReceiptSchemaV2 || receipt.Inputs == nil {
+		return fmt.Errorf("experiment: execution receipt %q carries no durable input slot custody", receipt.Schema)
+	}
 	if err := receipt.Inputs.Validate(); err != nil {
 		return err
 	}
@@ -508,6 +540,53 @@ func ValidateReceiptInputAuthority(def Definition, receipt ExecutionReceipt) err
 	wantCount := 3 + len(def.Fixtures)
 	if len(got) != wantCount {
 		return fmt.Errorf("experiment: receipt fingerprint input set has %d entries, want one evaluator plus %d locked workload/fixture/contract inputs", len(got), wantCount-1)
+	}
+	return nil
+}
+
+// validateHistoricalReceiptInputDigests preserves the exact v1 at-rest
+// binding semantics. V1 recorded only path-to-digest multiplicity, so this
+// function is intentionally history-only; new execution and every consumer
+// requiring explicit slot custody use V2 and ValidateReceiptInputAuthority.
+func validateHistoricalReceiptInputDigests(def Definition, got map[string]string) error {
+	evaluatorKey := "evaluator:" + def.Evaluator.Argv[0]
+	evaluatorDigest := strings.TrimPrefix(def.Evaluator.Digest, "sha256:")
+	if got[evaluatorKey] != evaluatorDigest {
+		return fmt.Errorf("experiment: receipt fingerprint evaluator input %q digest %q does not match locked digest %q", evaluatorKey, got[evaluatorKey], evaluatorDigest)
+	}
+
+	want := make(map[string]int, 2+len(def.Fixtures))
+	want[strings.TrimPrefix(def.Workload.Digest, "sha256:")]++
+	want[strings.TrimPrefix(def.Contract.Digest, "sha256:")]++
+	for _, fixture := range def.Fixtures {
+		want[strings.TrimPrefix(fixture.Digest, "sha256:")]++
+	}
+	wantCount := 2 + len(def.Fixtures)
+	if len(got) != wantCount+1 {
+		return fmt.Errorf("experiment: receipt fingerprint input set has %d entries, want one evaluator plus %d locked workload/fixture/contract inputs", len(got), wantCount)
+	}
+
+	protected := make(map[string]bool, len(def.ProtectedPaths))
+	for _, protectedPath := range def.ProtectedPaths {
+		protected[protectedPath] = true
+	}
+	resolved := make(map[string]int, len(want))
+	for resolvedPath, digest := range got {
+		if resolvedPath == evaluatorKey {
+			continue
+		}
+		if err := ValidateRepoRelativePath(resolvedPath); err != nil {
+			return fmt.Errorf("experiment: receipt fingerprint resolved input %q: %w", resolvedPath, err)
+		}
+		if !protected[resolvedPath] {
+			return fmt.Errorf("experiment: receipt fingerprint resolved input %q is absent from definition.protected_paths", resolvedPath)
+		}
+		resolved[digest]++
+	}
+	for digest, count := range want {
+		if resolved[digest] != count {
+			return fmt.Errorf("experiment: receipt fingerprint has %d resolved inputs with locked digest %q, want %d", resolved[digest], digest, count)
+		}
 	}
 	return nil
 }

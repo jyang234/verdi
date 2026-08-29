@@ -168,7 +168,7 @@ func buildExecutionReceipt(input ReceiptInput, host hostRuntimeFacts) (experimen
 		return experiment.ExecutionReceipt{}, err
 	}
 	receipt := experiment.ExecutionReceipt{
-		Schema:             experiment.ExecutionReceiptSchema,
+		Schema:             experiment.ExecutionReceiptSchemaV2,
 		ExperimentDigest:   experimentDigest,
 		Run:                input.Run,
 		EnvironmentPolicy:  authorized.Authorization.EnvironmentPolicy,
@@ -190,8 +190,8 @@ func buildExecutionReceipt(input ReceiptInput, host hostRuntimeFacts) (experimen
 	return receipt, nil
 }
 
-func receiptInputs(inputs ResolvedInputs) experiment.ReceiptInputs {
-	return experiment.ReceiptInputs{
+func receiptInputs(inputs ResolvedInputs) *experiment.ReceiptInputs {
+	return &experiment.ReceiptInputs{
 		Workload: inputs.Workload,
 		Fixtures: append([]experiment.ResolvedArtifact(nil), inputs.Fixtures...),
 		Contract: inputs.Contract,

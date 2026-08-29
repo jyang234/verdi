@@ -136,15 +136,15 @@ func TestV2GoldenFixtureByteDigests(t *testing.T) {
 	wants := map[string]map[string]string{
 		"caching-proven": {
 			"evaluator-capabilities.json": "1300bce65fc6717bba6623464f054675229ec531909b01385e73ce5e4ca4a6bf",
-			"execution.json":              "3519e6948bf5238c4c377706b1177fa0fd6f61b8abb7a4ccae742c120973a79b",
+			"execution.json":              "e2e64ad59263cb0a184dcc0d7d36ff8b0e08c92e7c8ff95bf9f6faef00010d1c",
 			"observations.jsonl":          "5638a788b245d40611237da388599c6fd24d7bb7407ba44d64a086b50ede7f7f",
-			"result.json":                 "9417813890938576f5c92d3131b7a24e468f64065cbe1a9321928a441640228a",
+			"result.json":                 "bbcff620f69c154b2343c540a4954fd0baf14d931999038384c9b2669b5296fb",
 		},
 		"caching-inconclusive": {
 			"evaluator-capabilities.json": "1300bce65fc6717bba6623464f054675229ec531909b01385e73ce5e4ca4a6bf",
-			"execution.json":              "0608176fabadb161c113c143d8a065f23dcb2a4deb41709085acf0d094d39d80",
+			"execution.json":              "af3d71f835363f3841aaf72147d3ae671dbae438c9609759fb7b2ceb24f18948",
 			"observations.jsonl":          "6f7c3a4692a369203a1c5718644393a3ec927b630a79167c970598217372bf0d",
-			"result.json":                 "fc17bdac0df0256249185a11d5716cd184b52c82ecd3f543c86a192339466fbd",
+			"result.json":                 "56185875ab6c9454a6c8c7802225861c458e786c5945218fdbea8fbc08812bfb",
 		},
 	}
 	for name, files := range wants {
@@ -176,6 +176,20 @@ func TestNoPersistedRealExperimentNeedsRunLayoutMigration(t *testing.T) {
 	}
 	if len(found) != 0 {
 		t.Fatalf("persisted real experiments require migration: %v", found)
+	}
+}
+
+func TestHistoricalV1ExecutionReceiptRetainsStateSemantics(t *testing.T) {
+	receipt := goldenReceipt(t, "caching-proven")
+	if receipt.Schema != experiment.ExecutionReceiptSchemaV1 || receipt.Inputs != nil {
+		t.Fatalf("historical receipt schema/inputs = %q/%+v", receipt.Schema, receipt.Inputs)
+	}
+	state, _, err := experiment.DeriveState("testdata", "caching-proven", VerifyResult)
+	if err != nil {
+		t.Fatalf("DeriveState(historical v1 receipt): %v", err)
+	}
+	if state != experiment.StateRecommended {
+		t.Fatalf("DeriveState(historical v1 receipt) = %q, want %q", state, experiment.StateRecommended)
 	}
 }
 

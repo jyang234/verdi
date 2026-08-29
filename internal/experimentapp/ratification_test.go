@@ -410,7 +410,7 @@ func ratifiableReceipt(t *testing.T, def experiment.Definition, run string) expe
 		Fingerprint: experiment.ExecutionFingerprint{OS: "linux", Arch: "amd64", ToolVersions: map[string]string{"evaluator": "2.1.0", "verdi": "0.1.0"}, Env: map[string]*string{}, InputDigests: map[string]string{
 			"inputs/workload.txt": strings.TrimPrefix(def.Workload.Digest, "sha256:"),
 		}},
-		Inputs: experiment.ReceiptInputs{
+		Inputs: &experiment.ReceiptInputs{
 			Workload: experiment.ResolvedArtifact{ID: def.Workload.ID, Path: "inputs/workload.txt", Digest: def.Workload.Digest},
 			Fixtures: fixtureInputs,
 			Contract: experiment.ResolvedArtifact{ID: def.Contract.ID, Path: "inputs/contract.txt", Digest: def.Contract.Digest},

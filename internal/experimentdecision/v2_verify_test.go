@@ -36,7 +36,7 @@ func receiptFor(t *testing.T, def experiment.Definition, run string) experiment.
 			"evaluator:" + def.Evaluator.Argv[0]: strings.TrimPrefix(def.Evaluator.Digest, "sha256:"),
 			"inputs/workload.json":               strings.TrimPrefix(def.Workload.Digest, "sha256:"),
 		}},
-		Inputs: experiment.ReceiptInputs{
+		Inputs: &experiment.ReceiptInputs{
 			Workload: experiment.ResolvedArtifact{ID: def.Workload.ID, Path: "inputs/workload.json", Digest: def.Workload.Digest},
 			Fixtures: fixtureInputs,
 			Contract: experiment.ResolvedArtifact{ID: def.Contract.ID, Path: "contracts/equivalence.json", Digest: def.Contract.Digest},

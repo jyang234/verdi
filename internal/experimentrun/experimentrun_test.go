@@ -408,6 +408,9 @@ func TestBuildExecutionReceiptStrictRoundTripDigestAndCloneSafety(t *testing.T) 
 	if err != nil {
 		t.Fatalf("BuildExecutionReceipt(): %v", err)
 	}
+	if receipt.Schema != experiment.ExecutionReceiptSchemaV2 || receipt.Inputs == nil {
+		t.Fatalf("new execution receipt schema/inputs = %q/%+v, want slot-aware v2", receipt.Schema, receipt.Inputs)
+	}
 	if receipt.Candidates[0].ID != "alpha" || receipt.Candidates[1].ID != "zeta" {
 		t.Fatalf("receipt candidate order = %+v", receipt.Candidates)
 	}
@@ -488,7 +491,6 @@ func TestVerifyExecutionReceiptRejectsChangedSlotPathsWhenDigestsEqual(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
-
 	changed := cloneReceiptInput(input)
 	changed.Inputs.Workload.Path, changed.Inputs.Contract.Path = changed.Inputs.Contract.Path, changed.Inputs.Workload.Path
 	changed.Fingerprint = testFingerprint(t, def, caps, auth, changed.Inputs)
