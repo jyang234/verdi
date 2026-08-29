@@ -92,7 +92,8 @@ func TestContextReceiptVerifyContract_Behavioral(t *testing.T) {
 	if err == nil {
 		t.Fatalf("Verify() with malformed declared proof bytes returned verdict %#v, want operational error", verdict)
 	}
-	if _, err := NewVerifier(nil).Verify(nil, malformed); err == nil {
+	var nilContext context.Context
+	if _, err := NewVerifier(nil).Verify(nilContext, malformed); err == nil {
 		t.Fatal("Verify(nil context) error = nil")
 	}
 

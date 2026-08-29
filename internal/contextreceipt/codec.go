@@ -306,7 +306,7 @@ func validateRepositoryProofShape(proof RepositoryProof, requireDigest bool) err
 	if err := validateCandidate(proof.Candidate); err != nil {
 		return err
 	}
-	if proof.Objects == nil || len(proof.Objects) == 0 {
+	if len(proof.Objects) == 0 {
 		return fmt.Errorf("contextreceipt: repository proof objects must be non-null and nonempty")
 	}
 	for i, object := range proof.Objects {

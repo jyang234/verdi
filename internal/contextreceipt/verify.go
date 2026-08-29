@@ -351,9 +351,10 @@ func receiptCompletionOperands(receipt Receipt, event contextevent.Event, ack co
 		}{event.EventDigest, payload.ReceiptDigest, payload.Detail.Digest}
 		observedEventDigest = mustProjectionDigest(observedEvent)
 		detailMatches := payload.Detail.Digest == representedDigest
-		if payload.Detail.Mode == contextevent.DetailInline {
+		switch payload.Detail.Mode {
+		case contextevent.DetailInline:
 			detailMatches = detailMatches && bytes.Equal(payload.Detail.RedactedJSON, represented)
-		} else if payload.Detail.Mode == contextevent.DetailSegment {
+		case contextevent.DetailSegment:
 			detailMatches = detailMatches && payload.Detail.ByteCount == uint64(len(represented))
 		}
 		if detailMatches && payload.ReceiptDigest == receipt.Digest && payload.Role == receipt.Role && payload.Authority == receipt.Authority && payload.ExecutionEventChainRoot == receipt.EventChainRoot &&
