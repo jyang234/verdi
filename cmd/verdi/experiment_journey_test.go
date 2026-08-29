@@ -16,6 +16,7 @@ import (
 	"github.com/jyang234/verdi/internal/experiment"
 	"github.com/jyang234/verdi/internal/experimentapp"
 	"github.com/jyang234/verdi/internal/experimentrun"
+	"github.com/jyang234/verdi/internal/fixturegit"
 )
 
 func TestCompleteExperimentCLIJourneyBuiltBinary(t *testing.T) {
@@ -57,24 +58,40 @@ func TestCompleteExperimentCLIJourneyBuiltBinary(t *testing.T) {
 
 	// Begin unlocked: author through the typed draft/candidate seams, then
 	// make one direct Git edit and require explicit human reconciliation.
-	draftRepo := buildExperimentHumanRepo(t, privateKey.Public().(ed25519.PublicKey))
-	experimentDir := filepath.Dir(wave5CDefinitionPath(draftRepo.Dir))
-	originalDefinition := mustReadWave5CFile(t, wave5CDefinitionPath(draftRepo.Dir))
-	newDefinition := bytes.Replace(originalDefinition, []byte("id: request-path-v2"), []byte("id: request-path-v3"), 1)
-	definitionInput := filepath.Join(t.TempDir(), "experiment-v3.yaml")
+	repo := buildExperimentHumanRepo(t, privateKey.Public().(ed25519.PublicKey))
+	experimentDir := filepath.Dir(wave5CDefinitionPath(repo.Dir))
+	newDefinition := wave5CProtectedDefinition(t, repo.Dir)
+	newDefinition = bytes.Replace(newDefinition, []byte("#oq-cache\n"), []byte("#oq-cache-cli-journey\n"), 1)
+	candidateRoot := t.TempDir()
+	for _, name := range []string{"baseline.patch", "cache.patch"} {
+		data := mustReadWave5CFile(t, filepath.Join(experimentDir, "candidates", name))
+		target := filepath.Join(candidateRoot, "candidates", name)
+		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(target, data, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.RemoveAll(experimentDir); err != nil {
+		t.Fatal(err)
+	}
+	installCLIJourneyClosureTarget(t, repo)
+	wave5CWriteProtectedInputs(t, repo.Dir)
+	definitionInput := filepath.Join(t.TempDir(), "experiment-v2.yaml")
 	if err := os.WriteFile(definitionInput, newDefinition, 0o600); err != nil {
 		t.Fatal(err)
 	}
 	draftArgs := []string{
-		"experiment", "draft-definition", "--spike", "spec/request-path-spike", "--experiment", "request-path-v3",
-		"--accepted-head", draftRepo.Head, "--definition", definitionInput, "--candidate-root", experimentDir, "--json",
+		"experiment", "draft-definition", "--spike", "spec/request-path-spike", "--experiment", "request-path-v2",
+		"--accepted-head", repo.Head, "--definition", definitionInput, "--candidate-root", candidateRoot, "--json",
 	}
-	if _, code := callJSON(draftRepo.Dir, draftArgs...); code != 0 {
-		t.Fatalf("draft-definition exit=%d, want clean", code)
+	if out, code := callJSON(repo.Dir, draftArgs...); code != 0 {
+		t.Fatalf("draft-definition exit/output=%d/%q, want clean", code, out)
 	}
 
 	changedPatch := []byte("diff --git a/spikes/cache.go b/spikes/cache.go\nindex 1111111..2222222 100644\n--- a/spikes/cache.go\n+++ b/spikes/cache.go\n@@ -1 +1 @@\n-old\n+cli-journey\n")
-	changedDefinition := bytes.Replace(originalDefinition,
+	changedDefinition := bytes.Replace(newDefinition,
 		[]byte("sha256:948705e2b8a093896358025d2b75282fbd1c36557c278881add34f4c75cbecc7"),
 		[]byte(experimentRawDigest(changedPatch)), 1)
 	inputDir := t.TempDir()
@@ -86,29 +103,29 @@ func TestCompleteExperimentCLIJourneyBuiltBinary(t *testing.T) {
 	if err := os.WriteFile(definitionV2Input, changedDefinition, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	captureArgs := append(base("capture-candidate", draftRepo.Head)[:len(base("capture-candidate", draftRepo.Head))-1],
+	captureArgs := append(base("capture-candidate", repo.Head)[:len(base("capture-candidate", repo.Head))-1],
 		"--candidate", "cache", "--patch", patchInput, "--definition", definitionV2Input, "--json")
-	if _, code := callJSON(draftRepo.Dir, captureArgs...); code != 0 {
+	if _, code := callJSON(repo.Dir, captureArgs...); code != 0 {
 		t.Fatalf("capture-candidate exit=%d, want clean", code)
 	}
 
-	runGitForExperimentTest(t, draftRepo.Dir, "checkout", "-q", "-b", "journey-proposal")
+	runGitForExperimentTest(t, repo.Dir, "checkout", "-q", "-b", "journey-proposal")
 	if err := os.WriteFile(filepath.Join(experimentDir, "human-note.txt"), []byte("direct Git reconciliation witness\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	runGitForExperimentTest(t, draftRepo.Dir, "add", ".")
-	runGitForExperimentTest(t, draftRepo.Dir, "commit", "-q", "-m", "capture direct journey edit")
-	beforeReview := contextE2EPorcelainStatus(t, draftRepo.Dir)
-	reviewOut, reviewCode := callJSON(draftRepo.Dir, base("review-registration", draftRepo.Head)...)
-	if reviewCode != 1 || !strings.Contains(reviewOut, `"code":"direct-draft-unreconciled"`) || contextE2EPorcelainStatus(t, draftRepo.Dir) != beforeReview {
+	runGitForExperimentTest(t, repo.Dir, "add", ".")
+	runGitForExperimentTest(t, repo.Dir, "commit", "-q", "-m", "capture direct journey edit")
+	beforeReview := contextE2EPorcelainStatus(t, repo.Dir)
+	reviewOut, reviewCode := callJSON(repo.Dir, base("review-registration", repo.Head)...)
+	if reviewCode != 1 || !strings.Contains(reviewOut, `"code":"direct-draft-unreconciled"`) || contextE2EPorcelainStatus(t, repo.Dir) != beforeReview {
 		t.Fatalf("unreconciled review=%d/%q or mutated the worktree", reviewCode, reviewOut)
 	}
 
 	proofDir := t.TempDir()
 	humanOperation := func(operation string) {
 		t.Helper()
-		args := base(operation, draftRepo.Head)
-		challengeOut, code := callJSON(draftRepo.Dir, args...)
+		args := base(operation, repo.Head)
+		challengeOut, code := callJSON(repo.Dir, args...)
 		if code != 1 {
 			t.Fatalf("%s challenge exit=%d", operation, code)
 		}
@@ -122,19 +139,32 @@ func TestCompleteExperimentCLIJourneyBuiltBinary(t *testing.T) {
 			t.Fatal(err)
 		}
 		withProof := append(args[:len(args)-1], "--human-proof", proofPath, "--json")
-		if out, proofCode := callJSON(draftRepo.Dir, withProof...); proofCode != 0 || !strings.Contains(out, `"classification":"clean"`) {
+		if out, proofCode := callJSON(repo.Dir, withProof...); proofCode != 0 || !strings.Contains(out, `"classification":"clean"`) {
 			t.Fatalf("%s proof exit=%d output=%q", operation, proofCode, out)
 		}
 	}
 	humanOperation("reconcile-draft")
 	humanOperation("propose-registration")
 
-	// Continue from a deterministic accepted lock and retained result. This
-	// helper itself uses the same built binary for the accepted lock; the
-	// calls below cover the complete public operation set as one journey.
-	fixture := buildWave5CAcceptedResult(t, bin)
-	repo := fixture.repo
-	acceptedResultHead := repo.Head
+	// Accept that exact proposal, then install hermetic Linux-run evidence in
+	// the same repository because the Darwin test host cannot execute the
+	// production isolation runner.
+	runGitForExperimentTest(t, repo.Dir, "add", ".")
+	runGitForExperimentTest(t, repo.Dir, "commit", "-q", "-m", "propose journey registration")
+	runGitForExperimentTest(t, repo.Dir, "checkout", "-q", "main")
+	runGitForExperimentTest(t, repo.Dir, "merge", "-q", "--ff-only", "journey-proposal")
+	repo.Head = contextE2ECurrentHead(t, repo.Dir)
+	definition, err := experiment.DecodeDefinition(mustReadWave5CFile(t, wave5CDefinitionPath(repo.Dir)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	resultDigest, targets := writeWave5CAcceptedRun(t, repo.Dir, definition, "run-alpha", 50)
+	runGitForExperimentTest(t, repo.Dir, "add", ".")
+	runGitForExperimentTest(t, repo.Dir, "commit", "-q", "-m", "accept journey result")
+	repo.Head = contextE2ECurrentHead(t, repo.Dir)
+	runGitForExperimentTest(t, repo.Dir, "checkout", "-q", "-b", "ratification")
+	fixture := wave5CExperimentFixture{repo: repo, privateKey: privateKey, resultDigest: resultDigest, targets: targets}
+
 	for _, operation := range []string{"inspect", "discover-capabilities", "validate-draft", "status"} {
 		if _, code := callJSON(repo.Dir, base(operation, repo.Head)...); code != 0 {
 			t.Fatalf("%s exit=%d, want clean", operation, code)
@@ -243,6 +273,28 @@ func TestCompleteExperimentCLIJourneyBuiltBinary(t *testing.T) {
 		t.Fatalf("human/JSON parity=%d/%q/%q versus JSON %d", humanCode, humanOut, humanErr, retryCode)
 	}
 
+	// Closure consumes the capsule only after those exact bytes are accepted
+	// in the same repository that carried the unlocked draft and every prior
+	// authority transition.
+	runGitForExperimentTest(t, repo.Dir, "add", ".verdi/specs/active/request-path-spike/experiments/request-path-v2/selected/capsule-manifest.json")
+	runGitForExperimentTest(t, repo.Dir, "commit", "-q", "-m", "accept journey capsule")
+	acceptedCapsuleHead := contextE2ECurrentHead(t, repo.Dir)
+	// Mirror the established production close fixture: keep main at the
+	// accepted capsule, but use a clean detached checkout without locally
+	// adopted policy so the pre-existing conflict gate does not replace this
+	// test's experiment-evidence subject with a separate review ceremony.
+	runGitForExperimentTest(t, repo.Dir, "checkout", "-q", "--detach", acceptedCapsuleHead)
+	runGitForExperimentTest(t, repo.Dir, "rm", "-q", "-r", ".verdi/policy")
+	runGitForExperimentTest(t, repo.Dir, "commit", "-q", "-m", "prepare journey closure checkout")
+	repo.Head = contextE2ECurrentHead(t, repo.Dir)
+	writeCloseExperimentWaiver(t, repo.Dir, repo.Head)
+	writeCloseExperimentGateReportFor(t, repo.Dir, "request-path-spike", repo.Head)
+	closeOut, closeErr, closeCode := runExperimentBuiltBinary(t, bin, repo.Dir, nil,
+		"close", "--preflight", "--force-local", "spec/request-path-spike")
+	if closeCode != 0 || closeErr != "" || !strings.Contains(closeOut, "close: --preflight: READY") {
+		t.Fatalf("close --preflight exit/stdout/stderr=%d/%q/%q", closeCode, closeOut, closeErr)
+	}
+
 	wantOperations := []string{
 		"capture-candidate", "discover-capabilities", "draft-definition", "explain-result", "inspect",
 		"propose-ratification", "propose-registration", "publish-capsule", "reconcile-draft",
@@ -260,13 +312,39 @@ func TestCompleteExperimentCLIJourneyBuiltBinary(t *testing.T) {
 		t.Fatalf("CLI journey exit classes=%v, want 0/1/2", exits)
 	}
 
-	// Equivalent fixture construction is independent of ambient Git identity
-	// and pins the accepted HEAD, result digest, and workspace identities.
-	second := buildWave5CAcceptedResult(t, bin)
-	if second.repo.Head != acceptedResultHead || second.resultDigest != fixture.resultDigest || !reflect.DeepEqual(second.targets, fixture.targets) {
+	// Equivalent standalone fixture construction remains independent of
+	// ambient Git identity; it is an adversarial determinism witness, never a
+	// replacement for a stage of the continuous journey above.
+	first, second := buildWave5CAcceptedResult(t, bin), buildWave5CAcceptedResult(t, bin)
+	if second.repo.Head != first.repo.Head || second.resultDigest != first.resultDigest || !reflect.DeepEqual(second.targets, first.targets) {
 		t.Fatalf("fixture identity drift: first=%s/%s/%v second=%s/%s/%v",
-			acceptedResultHead, fixture.resultDigest, fixture.targets, second.repo.Head, second.resultDigest, second.targets)
+			first.repo.Head, first.resultDigest, first.targets, second.repo.Head, second.resultDigest, second.targets)
 	}
+}
+
+func installCLIJourneyClosureTarget(t *testing.T, repo *fixturegit.Repo) {
+	t.Helper()
+	spike := strings.Replace(closeExperimentSpikeSpecMD, "id: spec/exp-spike", "id: spec/request-path-spike", 1)
+	if spike == closeExperimentSpikeSpecMD {
+		t.Fatal("close experiment spike fixture no longer has the expected id")
+	}
+	feature := strings.Replace(featureV1SpecMD,
+		"frozen: { at: 2024-01-01, commit: 0000000000000000000000000000000000000a }",
+		"open_questions:\n  - { id: oq-1, text: \"which candidate wins\", anchor: oq-1 }\n"+
+			"frozen: { at: 2024-01-01, commit: 0000000000000000000000000000000000000a }", 1)
+	if feature == featureV1SpecMD {
+		t.Fatal("parent feature fixture no longer has the expected frozen block")
+	}
+	for name, content := range map[string]string{
+		".verdi/verdi.yaml":                              "schema: verdi.layout/v1\nforge: github\nproviders:\n  jira:\n    mode: fake\n    base_url: https://example.atlassian.net\n    rollup_field: customfield_00000\n",
+		".verdi/specs/active/loan-mgmt/spec.md":          feature,
+		".verdi/specs/active/request-path-spike/spec.md": spike,
+	} {
+		closeExperimentWriteFixtureFile(t, repo.Dir, name, content)
+	}
+	runGitForExperimentTest(t, repo.Dir, "add", ".")
+	runGitForExperimentTest(t, repo.Dir, "commit", "-q", "-m", "add journey closure target")
+	repo.Head = contextE2ECurrentHead(t, repo.Dir)
 }
 
 func assertCLIJourneyCanonicalJSON(t *testing.T, operation, raw string) {

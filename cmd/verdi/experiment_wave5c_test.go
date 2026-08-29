@@ -396,18 +396,30 @@ func buildWave5CAcceptedResult(t *testing.T, bin string) wave5CExperimentFixture
 
 func wave5CBindProtectedInputs(t *testing.T, repo *fixturegit.Repo) {
 	t.Helper()
-	workload := []byte("wave-5c workload\n")
-	contract := []byte("wave-5c contract\n")
 	definitionPath := wave5CDefinitionPath(repo.Dir)
-	doc := string(mustReadWave5CFile(t, definitionPath))
-	doc = strings.Replace(doc, "sha256:"+strings.Repeat("5", 64), experimentRawDigest(workload), 1)
-	doc = strings.Replace(doc, "sha256:"+strings.Repeat("6", 64), experimentRawDigest(contract), 1)
-	doc += "protected_paths:\n  - inputs/contract.txt\n  - inputs/workload.txt\n"
-	if err := os.WriteFile(definitionPath, []byte(doc), 0o600); err != nil {
+	if err := os.WriteFile(definitionPath, wave5CProtectedDefinition(t, repo.Dir), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	wave5CWriteProtectedInputs(t, repo.Dir)
+	runGitForExperimentTest(t, repo.Dir, "add", ".")
+	runGitForExperimentTest(t, repo.Dir, "commit", "-q", "-m", "bind release inputs")
+	repo.Head = contextE2ECurrentHead(t, repo.Dir)
+}
+
+func wave5CProtectedDefinition(t *testing.T, root string) []byte {
+	t.Helper()
+	workload, contract := wave5CProtectedInputBytes()
+	doc := string(mustReadWave5CFile(t, wave5CDefinitionPath(root)))
+	doc = strings.Replace(doc, "sha256:"+strings.Repeat("5", 64), experimentRawDigest(workload), 1)
+	doc = strings.Replace(doc, "sha256:"+strings.Repeat("6", 64), experimentRawDigest(contract), 1)
+	return []byte(doc + "protected_paths:\n  - inputs/contract.txt\n  - inputs/workload.txt\n")
+}
+
+func wave5CWriteProtectedInputs(t *testing.T, root string) {
+	t.Helper()
+	workload, contract := wave5CProtectedInputBytes()
 	for name, data := range map[string][]byte{wave5CWorkloadPath: workload, wave5CContractPath: contract} {
-		absolute := filepath.Join(repo.Dir, filepath.FromSlash(name))
+		absolute := filepath.Join(root, filepath.FromSlash(name))
 		if err := os.MkdirAll(filepath.Dir(absolute), 0o755); err != nil {
 			t.Fatal(err)
 		}
@@ -415,9 +427,10 @@ func wave5CBindProtectedInputs(t *testing.T, repo *fixturegit.Repo) {
 			t.Fatal(err)
 		}
 	}
-	runGitForExperimentTest(t, repo.Dir, "add", ".")
-	runGitForExperimentTest(t, repo.Dir, "commit", "-q", "-m", "bind release inputs")
-	repo.Head = contextE2ECurrentHead(t, repo.Dir)
+}
+
+func wave5CProtectedInputBytes() (workload, contract []byte) {
+	return []byte("wave-5c workload\n"), []byte("wave-5c contract\n")
 }
 
 func writeWave5CAcceptedRun(t *testing.T, root string, definition experiment.Definition, run string, cacheValue int) (string, []string) {

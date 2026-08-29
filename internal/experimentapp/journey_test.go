@@ -35,11 +35,12 @@ func (r *journeyWorkspaceReleaser) Release(workspaceID string) error {
 func TestCompleteExperimentApplicationJourney(t *testing.T) {
 	ctx := context.Background()
 
-	t.Run("unlocked proposal through accepted execution", func(t *testing.T) {
+	t.Run("one experiment from unlocked draft through closure evidence", func(t *testing.T) {
 		root, service := mutationTestService(t)
 		identity := testIdentity(t, root, "request-path-v2")
 		definitionPath := mutationDefinitionPath(root)
-		definition := mustReadFile(t, definitionPath)
+		workloadBytes := []byte("journey-workload\n")
+		definition := releaseDefinitionBytes(t, mustReadFile(t, definitionPath), workloadBytes)
 		definition = bytes.Replace(definition, []byte("#oq-cache\n"), []byte("#oq-cache-journey\n"), 1)
 
 		drafted := service.DraftDefinition(ctx, identity, DraftDefinitionInput{DefinitionBytes: definition})
@@ -127,7 +128,8 @@ func TestCompleteExperimentApplicationJourney(t *testing.T) {
 		}
 		runner := &recordingExecutionRunner{}
 		service.runner = runner
-		refused := service.Start(ctx, identity, ExecutionInput{Run: "run-divergent", Bindings: applicationInputBindings()})
+		bindings := releaseInputBindings(workloadBytes)
+		refused := service.Start(ctx, identity, ExecutionInput{Run: "run-divergent", Bindings: bindings})
 		assertJourneyOutcome(t, "divergent execution", refused.Outcome, ClassificationOperational, "locked-input-mismatch")
 		if len(runner.starts) != 0 {
 			t.Fatalf("runner received a refused execution: %+v", runner.starts)
@@ -135,23 +137,37 @@ func TestCompleteExperimentApplicationJourney(t *testing.T) {
 		if err := os.WriteFile(notePath, originalNote, 0o600); err != nil {
 			t.Fatal(err)
 		}
-		started := service.Start(ctx, identity, ExecutionInput{Run: "run-journey", Bindings: applicationInputBindings()})
-		resumed := service.Resume(ctx, identity, ExecutionInput{Run: "run-journey", Bindings: applicationInputBindings()})
+		started := service.Start(ctx, identity, ExecutionInput{Run: "run-journey", Bindings: bindings})
+		resumed := service.Resume(ctx, identity, ExecutionInput{Run: "run-journey", Bindings: bindings})
 		assertJourneyOutcome(t, "start", started.Outcome, ClassificationClean, "clean")
 		assertJourneyOutcome(t, "resume", resumed.Outcome, ClassificationClean, "clean")
 		if len(runner.starts) != 1 || len(runner.resumes) != 1 {
 			t.Fatalf("runner calls start=%d resume=%d, want 1/1", len(runner.starts), len(runner.resumes))
 		}
-	})
 
-	t.Run("authenticated ratification refuses substitution", func(t *testing.T) {
-		root, service, identity, winnerDigest, _ := ratifiableService(t)
+		// Darwin cannot execute the Linux-isolation runner. Install the
+		// authoritative receipt/observation/result records into this same
+		// registered experiment, then continue every accepted-state operation
+		// against that one repository identity.
+		identity.ExpectedAcceptedHEAD = testHead
+		locked, err := experiment.DecodeDefinition(mustReadFile(t, definitionPath))
+		if err != nil {
+			t.Fatal(err)
+		}
+		definitionDigest, err := experiment.DefinitionDigest(locked)
+		if err != nil {
+			t.Fatal(err)
+		}
+		winnerDigest := writeReleasableRun(t, root, locked, "run-alpha", 50, workloadBytes)
+		writeReleasableRun(t, root, locked, "run-zeta", 100, workloadBytes)
+
 		first, second := newRatificationSigner(t), newRatificationSigner(t)
 		subjects := []string{first.subject, second.subject}
-		refreshAcceptedGit(t, service, root, "request-path-v2", subjects...)
+		git = refreshAcceptedGit(t, service, root, "request-path-v2", subjects...)
+		addReleaseProtectedInputs(t, git, workloadBytes)
 		firstProof := mintRatificationVerification(t, root, identity, first, subjects, winnerDigest, experiment.DispositionSelectRecommended, "", "")
 		secondProof := mintRatificationVerification(t, root, identity, second, subjects, winnerDigest, experiment.DispositionSelectRecommended, "", "")
-		human := humanRatificationIdentity(t, identity, firstProof.Resolution)
+		human = humanRatificationIdentity(t, identity, firstProof.Resolution)
 
 		before := snapshotWorktree(t, root)
 		substituted := ratificationProposalInputFrom(firstProof, winnerDigest, experiment.DispositionSelectRecommended, "", "")
@@ -168,13 +184,17 @@ func TestCompleteExperimentApplicationJourney(t *testing.T) {
 		assertJourneyOutcome(t, "ratification proposal", proposal.Outcome, ClassificationClean, "clean")
 		unaccepted := service.AcceptedRatification(ctx, human)
 		assertJourneyOutcome(t, "unaccepted ratification", unaccepted.Outcome, ClassificationVerdict, "ratification-not-accepted")
-		refreshAcceptedGit(t, service, root, "request-path-v2", subjects...)
-		accepted := service.AcceptedRatification(ctx, human)
-		assertJourneyOutcome(t, "accepted ratification", accepted.Outcome, ClassificationClean, "clean")
-	})
+		git = refreshAcceptedGit(t, service, root, "request-path-v2", subjects...)
+		addReleaseProtectedInputs(t, git, workloadBytes)
+		acceptedRatification := service.AcceptedRatification(ctx, human)
+		assertJourneyOutcome(t, "accepted ratification", acceptedRatification.Outcome, ClassificationClean, "clean")
 
-	t.Run("inconclusive reproduction capsule release retry and closure", func(t *testing.T) {
-		fixture := buildReleaseFixture(t, []byte("journey-workload\n"), experiment.DispositionSelectRecommended, "")
+		fixture := releaseFixture{
+			root: root, service: service, identity: identity, git: git,
+			verification: firstProof, subjects: subjects, locked: locked,
+			defDigest: definitionDigest, winnerDigest: winnerDigest,
+			targets: releaseFixtureTargets(t, root, locked, definitionDigest, []string{"run-alpha", "run-zeta"}),
+		}
 		status := fixture.service.Status(ctx, fixture.identity)
 		assertJourneyOutcome(t, "ratified status", status.Outcome, ClassificationClean, "clean")
 		if status.State != experiment.StateRatified || len(status.Runs) != 2 || status.Reproduction.Reproduced || status.Reproduction.ValidRuns != 2 {
