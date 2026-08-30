@@ -8,6 +8,7 @@ import (
 	"reflect"
 	"testing"
 
+	"github.com/jyang234/verdi/internal/canonjson"
 	"github.com/jyang234/verdi/internal/contextcompile"
 	"github.com/jyang234/verdi/internal/contextevent"
 	"github.com/jyang234/verdi/internal/countersign"
@@ -119,12 +120,12 @@ func TestScopedContextMCPContract_Static(t *testing.T) {
 		}
 		priorRevision := *snapshot.PriorRevision
 		bridgeFake := &mcpFake{t: t, request: req, kinds: make([]contextevent.Kind, snapshot.LastGlobalSequence)}
-		bridgeServer := &ScopedMCP{ports: ScopedMCPPorts{Recorder: bridgeFake, Stamps: bridgeFake}}
-		transition := snapshot
-		if err := bridgeServer.appendContextRequest(context.Background(), &transition, "bridge-request", "spec/extra", "consume bridge"); err != nil {
+		bridgeState := NewFlightState(snapshot)
+		bridgeServer := &ScopedMCP{ports: ScopedMCPPorts{Recorder: bridgeFake, Stamps: bridgeFake}, state: bridgeState}
+		if err := bridgeServer.appendContextRequest(context.Background(), "bridge-request", "spec/extra", "consume bridge"); err != nil {
 			t.Fatalf("append first child event: %v", err)
 		}
-		if transition.PriorRevision != nil {
+		if transition := bridgeState.Snapshot(); transition.PriorRevision != nil {
 			t.Fatalf("installed revision bridge survived sequence one: %#v", transition.PriorRevision)
 		}
 		if _, err := server.Call(context.Background(), ToolRequestContext, []byte(`{"purpose":"needed again","ref":"spec/extra"}`)); err != nil {
@@ -270,6 +271,222 @@ func TestScopedContextMCPContract_Static(t *testing.T) {
 			t.Fatalf("lost expansion = error %v, state %#v, installs %d", err, localState.Snapshot(), lost.installs)
 		}
 	})
+}
+
+// TestSharedFlightStateSerializesServiceAndMCPAppends proves I-115's single
+// append owner. Its recorder prosecutes Amendment 002 §7's durable identity
+// (flight,lane,epoch,manifest_revision,source_sequence), so an implementation
+// in which the execution service and the embedded scoped MCP each own a
+// counter cannot stay green: the two owners collide on the same key.
+func TestSharedFlightStateSerializesServiceAndMCPAppends(t *testing.T) {
+	req := serviceRequest(t, ActionStart)
+	workspace := sharedStateWorkspace(t, req)
+
+	t.Run("one shared state serializes lifecycle and context appends", func(t *testing.T) {
+		state := NewFlightState(mcpSnapshot(t, req, ""))
+		recorder := &duplicateKeyRecorder{}
+		fake := &mcpFake{t: t, request: req, state: state}
+		server, err := NewScopedMCP(ScopedMCPPorts{Resolver: fake, Compiler: fake, Verifier: fake, Recorder: recorder, Store: fake, Stamps: fake}, state)
+		if err != nil {
+			t.Fatalf("NewScopedMCP: %v", err)
+		}
+
+		// The service's own lifecycle event opens the shared source order.
+		start, err := state.append(context.Background(), recorder, fake, workspace, contextevent.KindAdapterStart, sharedStartPayload(t, req))
+		if err != nil {
+			t.Fatalf("service adapter-start through shared state: %v", err)
+		}
+		if start.Event.SourceSequence != 1 || start.Event.ManifestRevision != req.ManifestRevision {
+			t.Fatalf("adapter-start identity = revision %d sequence %d, want the request revision at sequence 1", start.Event.ManifestRevision, start.Event.SourceSequence)
+		}
+
+		// A successful tool call continues that same order and installs the
+		// child manifest.
+		result, err := server.Call(context.Background(), ToolRequestContext, []byte(`{"purpose":"needed for implementation","ref":"spec/extra"}`))
+		if err != nil {
+			t.Fatalf("request_context: %v", err)
+		}
+		if result.Kind != InspectionContextApproved || fake.installs != 1 {
+			t.Fatalf("request_context = %#v, installs %d, want one approved installed expansion", result, fake.installs)
+		}
+
+		// The next service-owned provider observation must consume the child
+		// revision the tool installed, not the original request revision.
+		final, err := state.append(context.Background(), recorder, fake, workspace, contextevent.KindProviderMessage, sharedMessagePayload(t))
+		if err != nil {
+			t.Fatalf("service provider observation through shared state: %v", err)
+		}
+
+		wantKinds := []contextevent.Kind{
+			contextevent.KindAdapterStart,
+			contextevent.KindContextRequest,
+			contextevent.KindContextDecision,
+			contextevent.KindChildManifest,
+			contextevent.KindProviderMessage,
+		}
+		if got := recorder.kinds(); !reflect.DeepEqual(got, wantKinds) {
+			t.Fatalf("acknowledged kinds = %v, want %v", got, wantKinds)
+		}
+		if recorder.conflicts != 0 || recorder.replays != 0 {
+			t.Fatalf("recorder saw %d duplicate-key conflicts and %d replays, want a unique key per event", recorder.conflicts, recorder.replays)
+		}
+		if err := recorder.assertStrictGlobalOrder(); err != nil {
+			t.Fatal(err)
+		}
+
+		childRevision := req.ManifestRevision + 1
+		if final.Event.ManifestRevision != childRevision || final.Event.SourceSequence != 1 {
+			t.Fatalf("provider observation identity = revision %d sequence %d, want child revision %d at sequence 1", final.Event.ManifestRevision, final.Event.SourceSequence, childRevision)
+		}
+		child := recorder.events[3]
+		wantBridge := contextevent.PriorRevision{
+			ManifestRevision: req.ManifestRevision, ManifestDigest: req.ManifestDigest,
+			EventRoot: child.EventDigest, TerminalSourceSequence: child.SourceSequence,
+			TerminalGlobalSequence: recorder.acks[3].GlobalSequence,
+		}
+		if final.Event.PriorRevision == nil || *final.Event.PriorRevision != wantBridge {
+			t.Fatalf("provider observation bridge = %#v, want the exact acknowledged predecessor %#v", final.Event.PriorRevision, wantBridge)
+		}
+		if snapshot := state.Snapshot(); snapshot.Revision != childRevision || snapshot.NextSourceSequence != 2 || snapshot.PriorRevision != nil || snapshot.LastGlobalSequence != final.Ack.GlobalSequence {
+			t.Fatalf("shared state after the transition = %#v", snapshot)
+		}
+	})
+
+	t.Run("an independent service counter allocates a duplicate key", func(t *testing.T) {
+		// The pre-correction shape: scoped MCP advances one state while the
+		// execution service allocates from its own. The recorder refuses the
+		// collision instead of silently accepting a second event at one key.
+		shared := NewFlightState(mcpSnapshot(t, req, ""))
+		independent := NewFlightState(mcpSnapshot(t, req, ""))
+		recorder := &duplicateKeyRecorder{}
+		fake := &mcpFake{t: t, request: req, state: shared}
+		server, err := NewScopedMCP(ScopedMCPPorts{Resolver: fake, Compiler: fake, Verifier: fake, Recorder: recorder, Store: fake, Stamps: fake}, shared)
+		if err != nil {
+			t.Fatalf("NewScopedMCP: %v", err)
+		}
+		if _, err := server.Call(context.Background(), ToolRequestContext, []byte(`{"purpose":"needed for implementation","ref":"spec/extra"}`)); err != nil {
+			t.Fatalf("request_context: %v", err)
+		}
+		if _, err := independent.append(context.Background(), recorder, fake, workspace, contextevent.KindAdapterStart, sharedStartPayload(t, req)); !errors.Is(err, ErrOperational) {
+			t.Fatalf("independent service counter append error = %v, want an operational duplicate-key refusal", err)
+		}
+		if recorder.conflicts != 1 {
+			t.Fatalf("recorder duplicate-key conflicts = %d, want exactly the independent allocation", recorder.conflicts)
+		}
+		if got := independent.Snapshot().NextSourceSequence; got != 1 {
+			t.Fatalf("refused append advanced the independent state to sequence %d, want 1", got)
+		}
+	})
+}
+
+// duplicateKeyRecorder is Amendment 002 §7's recorder table: an absent key
+// stores the exact bytes and allocates the next never-resetting global
+// sequence, byte-identical replay returns the original acknowledgment without
+// a write, and contradictory bytes at a committed key fail operationally
+// without allocating order.
+type duplicateKeyRecorder struct {
+	committed map[eventKey]recordedEvent
+	events    []contextevent.Event
+	acks      []contextevent.EventAck
+	global    uint64
+	conflicts int
+	replays   int
+}
+
+type recordedEvent struct {
+	event contextevent.Event
+	ack   contextevent.EventAck
+}
+
+func (r *duplicateKeyRecorder) Append(_ context.Context, event contextevent.Event) (contextevent.EventAck, error) {
+	key := eventKey{revision: event.ManifestRevision, sequence: event.SourceSequence}
+	if prior, ok := r.committed[key]; ok {
+		ack, err := contextevent.ValidateReplay(prior.event, prior.ack, event)
+		if err != nil {
+			r.conflicts++
+			return contextevent.EventAck{}, fmt.Errorf("duplicate event identity %+v: %w", key, err)
+		}
+		r.replays++
+		return ack, nil
+	}
+	r.global++
+	ack := contextevent.EventAck{
+		Schema: contextevent.AckSchemaID, Flight: event.Flight, Lane: event.Lane, Epoch: event.Epoch,
+		Session: event.Session, ManifestRevision: event.ManifestRevision, Kind: event.Kind,
+		SourceSequence: event.SourceSequence, EventDigest: event.EventDigest, GlobalSequence: r.global,
+	}
+	if r.committed == nil {
+		r.committed = map[eventKey]recordedEvent{}
+	}
+	r.committed[key] = recordedEvent{event: event, ack: ack}
+	r.events = append(r.events, event)
+	r.acks = append(r.acks, ack)
+	return ack, nil
+}
+
+func (r *duplicateKeyRecorder) kinds() []contextevent.Kind {
+	out := make([]contextevent.Kind, len(r.events))
+	for i, event := range r.events {
+		out[i] = event.Kind
+	}
+	return out
+}
+
+func (r *duplicateKeyRecorder) assertStrictGlobalOrder() error {
+	for i := 1; i < len(r.acks); i++ {
+		if r.acks[i].GlobalSequence <= r.acks[i-1].GlobalSequence {
+			return fmt.Errorf("acknowledged global order %d then %d does not strictly increase", r.acks[i-1].GlobalSequence, r.acks[i].GlobalSequence)
+		}
+	}
+	return nil
+}
+
+// sharedStateWorkspace is the exact verified candidate identity the service
+// stamps its own lifecycle events with.
+func sharedStateWorkspace(t *testing.T, req ExecutionRequest) WorkspaceFacts {
+	t.Helper()
+	workspaceID, err := req.ExecutionWorkspaceRequest.WorkspaceID()
+	if err != nil {
+		t.Fatalf("WorkspaceID: %v", err)
+	}
+	return WorkspaceFacts{WorkspaceID: workspaceID, CurrentCommit: req.InputCommit, CurrentTree: req.InputTree}
+}
+
+func sharedStartPayload(t *testing.T, req ExecutionRequest) *contextevent.AdapterStartPayload {
+	t.Helper()
+	schema, err := contextevent.PayloadSchema(contextevent.KindAdapterStart)
+	if err != nil {
+		t.Fatalf("adapter-start schema: %v", err)
+	}
+	workspaceDigest, err := ExecutionWorkspaceRequestDigest(req.ExecutionWorkspaceRequest)
+	if err != nil {
+		t.Fatalf("workspace request digest: %v", err)
+	}
+	return &contextevent.AdapterStartPayload{
+		Schema: schema, Adapter: req.Adapter, AdapterVersion: req.AdapterVersion,
+		Session: req.Session, ProfileDigest: req.Profile.Digest, WorkspaceRequestDigest: workspaceDigest,
+	}
+}
+
+func sharedMessagePayload(t *testing.T) *contextevent.ProviderMessagePayload {
+	t.Helper()
+	schema, err := contextevent.PayloadSchema(contextevent.KindProviderMessage)
+	if err != nil {
+		t.Fatalf("provider-message schema: %v", err)
+	}
+	encoded, err := canonjson.Marshal(map[string]string{"family": "assistant/text", "text": "shared state witness"})
+	if err != nil {
+		t.Fatalf("encode provider-message detail: %v", err)
+	}
+	raw := bytes.TrimSuffix(encoded, []byte("\n"))
+	detail := contextevent.Detail{
+		Mode: contextevent.DetailInline, MediaType: contextevent.MediaTypeJSON,
+		Digest: rawDigest(raw), RedactionProfile: contextevent.RedactionProfileStandard, RedactedJSON: raw,
+	}
+	return &contextevent.ProviderMessagePayload{
+		Schema: schema, MessageID: "msg-shared-state:0", Role: "assistant",
+		MessageDigest: detail.Digest, Detail: detail,
+	}
 }
 
 type mcpFake struct {

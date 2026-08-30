@@ -131,12 +131,157 @@ func NewFlightState(snapshot FlightStateSnapshot) *FlightState {
 func (s *FlightState) Snapshot() FlightStateSnapshot {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	return s.currentLocked()
+}
+
+// currentLocked returns an isolated copy of the transition state for a caller
+// that already holds the state's mutex.
+func (s *FlightState) currentLocked() FlightStateSnapshot {
 	out := s.snapshot
 	if out.PriorRevision != nil {
-		copy := *out.PriorRevision
-		out.PriorRevision = &copy
+		bridge := *out.PriorRevision
+		out.PriorRevision = &bridge
 	}
 	return out
+}
+
+// eventKey is Amendment 002 §7's durable event identity within one execution
+// key: the manifest revision plus the never-reused source sequence. Source
+// order restarts at one inside each expansion-installed revision, so the
+// revision is part of the identity rather than a decoration on it.
+type eventKey struct{ revision, sequence uint64 }
+
+// flightAppendResult is one event durably acknowledged through the shared
+// flight state.
+type flightAppendResult struct {
+	Event contextevent.Event
+	Ack   contextevent.EventAck
+}
+
+// eventAppender is the durable recorder seam every shared-state append goes
+// through. Both the execution service's Recorder and the scoped MCP recorder
+// port satisfy it.
+type eventAppender interface {
+	Append(context.Context, contextevent.Event) (contextevent.EventAck, error)
+}
+
+// eventReplay is Amendment 002 §7's retained-bytes seam. A live caller that
+// already holds the exact canonical event for a durable position replays only
+// those bytes instead of allocating a second one; a nil replay means the
+// caller retains nothing.
+type eventReplay interface {
+	// replay returns the original acknowledgment when the caller already
+	// retains this durable position.
+	replay(contextevent.Event) (contextevent.EventAck, bool, error)
+	// retain records the exact acknowledged bytes for a later exact retry.
+	retain(contextevent.Event, contextevent.EventAck)
+}
+
+// appendLocked is the single append transaction over the shared flight state.
+// It builds the event from the exact current revision, manifest, source
+// sequence, prior-event digest, and revision bridge, appends it, validates the
+// acknowledgment against the event and the last acknowledged global sequence,
+// and only then advances the state. A stamp, build, append, or acknowledgment
+// failure leaves the state exactly as it was.
+//
+// The caller must hold s.mu.
+func (s *FlightState) appendLocked(
+	ctx context.Context, recorder eventAppender, stamps StampSource,
+	workspace WorkspaceFacts, kind contextevent.Kind, payload any,
+) (flightAppendResult, error) {
+	return s.appendReplayLocked(ctx, recorder, stamps, workspace, nil, kind, payload)
+}
+
+// append is appendLocked under the state's own mutex. It is the sole
+// serialization boundary between the execution service's lifecycle events and
+// the scoped MCP context transition.
+func (s *FlightState) append(
+	ctx context.Context, recorder eventAppender, stamps StampSource,
+	workspace WorkspaceFacts, kind contextevent.Kind, payload any,
+) (flightAppendResult, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.appendLocked(ctx, recorder, stamps, workspace, kind, payload)
+}
+
+// appendReplayLocked is appendLocked with the optional §7 retained-bytes seam.
+// The caller must hold s.mu.
+func (s *FlightState) appendReplayLocked(
+	ctx context.Context, recorder eventAppender, stamps StampSource,
+	workspace WorkspaceFacts, retained eventReplay, kind contextevent.Kind, payload any,
+) (flightAppendResult, error) {
+	if ctx == nil {
+		return flightAppendResult{}, operational("append sealed event", errors.New("nil context"))
+	}
+	if recorder == nil || stamps == nil {
+		return flightAppendResult{}, operational("append sealed event", errors.New("shared flight state requires a recorder and a stamp source"))
+	}
+	stamp, err := stamps.NextStamp(ctx)
+	if err != nil {
+		return flightAppendResult{}, operational("sealed event stamp", err)
+	}
+	state := &s.snapshot
+	request := state.Request
+	request.ManifestRevision, request.ManifestDigest = state.Revision, state.ManifestDigest
+	// I-86: the acknowledged predecessor bridge belongs to the first event of a
+	// revision only; every later source sequence carries a prior-event digest.
+	var priorRevision *contextevent.PriorRevision
+	if state.NextSourceSequence == 1 {
+		priorRevision = state.PriorRevision
+	}
+	event, err := buildEvent(request, workspace, state.NextSourceSequence, state.PriorEventDigest, priorRevision, stamp, kind, payload)
+	if err != nil {
+		return flightAppendResult{}, operational("encode sealed event", err)
+	}
+	ack, replayed, err := replayRetained(retained, event)
+	if err != nil {
+		return flightAppendResult{Event: event}, operational("replay sealed event", err)
+	}
+	if !replayed {
+		ack, err = recorder.Append(ctx, event)
+		if err != nil {
+			return flightAppendResult{Event: event}, operational("append sealed event", err)
+		}
+		if err := validateAck(event, ack, state.LastGlobalSequence); err != nil {
+			return flightAppendResult{Event: event}, operational("acknowledge sealed event", err)
+		}
+		if retained != nil {
+			retained.retain(event, ack)
+		}
+	}
+	if state.NextSourceSequence == 1 {
+		state.PriorRevision = nil
+	}
+	state.NextSourceSequence++
+	state.PriorEventDigest = event.EventDigest
+	state.LastGlobalSequence = ack.GlobalSequence
+	return flightAppendResult{Event: event, Ack: ack}, nil
+}
+
+func replayRetained(retained eventReplay, event contextevent.Event) (contextevent.EventAck, bool, error) {
+	if retained == nil {
+		return contextevent.EventAck{}, false, nil
+	}
+	return retained.replay(event)
+}
+
+// installExpansionLocked advances the shared manifest state after the
+// child-manifest acknowledgment and the atomic install have both succeeded.
+// Source order restarts at one inside the child revision and carries the exact
+// acknowledged predecessor bridge; the never-resetting global order is
+// untouched. The caller must hold s.mu.
+func (s *FlightState) installExpansionLocked(child ChildManifest, terminal flightAppendResult) {
+	state := &s.snapshot
+	state.Revision = child.ChildRevision
+	state.ManifestDigest = child.ChildManifestDigest
+	state.ExpansionRoot = child.ExpansionRoot
+	state.NextSourceSequence = 1
+	state.PriorEventDigest = ""
+	state.PriorRevision = &contextevent.PriorRevision{
+		ManifestRevision: child.ParentRevision, ManifestDigest: child.ParentManifestDigest,
+		EventRoot: terminal.Event.EventDigest, TerminalSourceSequence: terminal.Event.SourceSequence,
+		TerminalGlobalSequence: terminal.Ack.GlobalSequence,
+	}
 }
 
 // ContextResolution is the resolver's identity-bound data result.
@@ -286,7 +431,7 @@ func (m *ScopedMCP) requestContext(ctx context.Context, ref, purpose string) (In
 	if resolution.Ref != ref {
 		return InspectionResult{}, verdict("context resolver returned a different ref")
 	}
-	if err := m.appendContextRequest(ctx, snapshot, requestID, ref, purpose); err != nil {
+	if err := m.appendContextRequest(ctx, requestID, ref, purpose); err != nil {
 		snapshot.Invalidated = true
 		return InspectionResult{}, err
 	}
@@ -297,7 +442,7 @@ func (m *ScopedMCP) requestContext(ctx context.Context, ref, purpose string) (In
 		if resolution.State == contextcompile.ResolutionUnproven {
 			decision = countersign.VerdictUnproven
 		}
-		if err := m.appendContextDecision(ctx, snapshot, requestID, decision, "context-denied", "", witnesses); err != nil {
+		if err := m.appendContextDecision(ctx, requestID, decision, "context-denied", "", witnesses); err != nil {
 			snapshot.Invalidated = true
 			return InspectionResult{}, err
 		}
@@ -323,7 +468,7 @@ func (m *ScopedMCP) requestContext(ctx context.Context, ref, purpose string) (In
 		if epochVerification.State == contextcompile.ResolutionUnproven {
 			decision = countersign.VerdictUnproven
 		}
-		if err := m.appendContextDecision(ctx, snapshot, requestID, decision, "epoch-invalidated", "", witnesses); err != nil {
+		if err := m.appendContextDecision(ctx, requestID, decision, "epoch-invalidated", "", witnesses); err != nil {
 			snapshot.Invalidated = true
 			return InspectionResult{}, err
 		}
@@ -345,11 +490,11 @@ func (m *ScopedMCP) requestContext(ctx context.Context, ref, purpose string) (In
 		snapshot.Invalidated = true
 		return InspectionResult{}, verdict("child manifest transition identity mismatch")
 	}
-	if err := m.appendContextDecision(ctx, snapshot, requestID, countersign.VerdictProven, "approved", child.ChildManifestDigest, []string{}); err != nil {
+	if err := m.appendContextDecision(ctx, requestID, countersign.VerdictProven, "approved", child.ChildManifestDigest, []string{}); err != nil {
 		snapshot.Invalidated = true
 		return InspectionResult{}, err
 	}
-	ack, event, err := m.appendChildManifest(ctx, snapshot, child)
+	terminal, err := m.appendChildManifest(ctx, child)
 	if err != nil {
 		snapshot.Invalidated = true
 		return InspectionResult{}, err
@@ -358,83 +503,52 @@ func (m *ScopedMCP) requestContext(ctx context.Context, ref, purpose string) (In
 		Key: snapshot.Key, RequestID: requestID, ParentRevision: child.ParentRevision,
 		ParentManifestDigest: child.ParentManifestDigest, ChildRevision: child.ChildRevision,
 		ChildManifestDigest: child.ChildManifestDigest, ExpansionDigest: child.ExpansionDigest,
-		ExpansionRoot: child.ExpansionRoot, TerminalAck: ack,
+		ExpansionRoot: child.ExpansionRoot, TerminalAck: terminal.Ack,
 	}
 	if err := m.ports.Store.InstallExpansion(ctx, install); err != nil {
 		snapshot.Invalidated = true
 		return InspectionResult{}, operational("install acknowledged expansion", err)
 	}
-	snapshot.Revision = child.ChildRevision
-	snapshot.ManifestDigest = child.ChildManifestDigest
-	snapshot.ExpansionRoot = child.ExpansionRoot
-	snapshot.NextSourceSequence = 1
-	snapshot.PriorEventDigest = ""
-	snapshot.PriorRevision = &contextevent.PriorRevision{
-		ManifestRevision: child.ParentRevision, ManifestDigest: child.ParentManifestDigest,
-		EventRoot: event.EventDigest, TerminalSourceSequence: event.SourceSequence,
-		TerminalGlobalSequence: ack.GlobalSequence,
-	}
+	m.state.installExpansionLocked(child, terminal)
 	return InspectionResult{Kind: InspectionContextApproved, Context: ContextInspection{
 		RequestID: requestID, Ref: ref, Purpose: purpose, Data: resolution.Data,
 		ChildRevision: child.ChildRevision, ChildManifestDigest: child.ChildManifestDigest, Witnesses: []string{},
 	}}, nil
 }
 
-func (m *ScopedMCP) appendContextRequest(ctx context.Context, state *FlightStateSnapshot, requestID, ref, purpose string) error {
+func (m *ScopedMCP) appendContextRequest(ctx context.Context, requestID, ref, purpose string) error {
 	schema, _ := contextevent.PayloadSchema(contextevent.KindContextRequest)
 	payload := &contextevent.ContextRequestPayload{Schema: schema, RequestID: requestID, Ref: ref, Purpose: purpose}
-	_, _, err := m.appendEvent(ctx, state, contextevent.KindContextRequest, payload)
+	_, err := m.appendEvent(ctx, contextevent.KindContextRequest, payload)
 	return err
 }
 
-func (m *ScopedMCP) appendContextDecision(ctx context.Context, state *FlightStateSnapshot, requestID string, decision countersign.Verdict, reason, childDigest string, witnesses []string) error {
+func (m *ScopedMCP) appendContextDecision(ctx context.Context, requestID string, decision countersign.Verdict, reason, childDigest string, witnesses []string) error {
 	schema, _ := contextevent.PayloadSchema(contextevent.KindContextDecision)
+	parentDigest := m.state.snapshot.ManifestDigest
 	if childDigest == "" {
 		// A denial or invalidation installs no child; equality records the exact
 		// no-transition manifest identity without inventing a digest.
-		childDigest = state.ManifestDigest
+		childDigest = parentDigest
 	}
-	payload := &contextevent.ContextDecisionPayload{Schema: schema, RequestID: requestID, Verdict: decision, ReasonCode: reason, ParentManifestDigest: state.ManifestDigest, ChildManifestDigest: childDigest, Witnesses: nonNilSorted(witnesses)}
-	_, _, err := m.appendEvent(ctx, state, contextevent.KindContextDecision, payload)
+	payload := &contextevent.ContextDecisionPayload{Schema: schema, RequestID: requestID, Verdict: decision, ReasonCode: reason, ParentManifestDigest: parentDigest, ChildManifestDigest: childDigest, Witnesses: nonNilSorted(witnesses)}
+	_, err := m.appendEvent(ctx, contextevent.KindContextDecision, payload)
 	return err
 }
 
-func (m *ScopedMCP) appendChildManifest(ctx context.Context, state *FlightStateSnapshot, child ChildManifest) (contextevent.EventAck, contextevent.Event, error) {
+func (m *ScopedMCP) appendChildManifest(ctx context.Context, child ChildManifest) (flightAppendResult, error) {
 	schema, _ := contextevent.PayloadSchema(contextevent.KindChildManifest)
 	payload := &contextevent.ChildManifestPayload{Schema: schema, RequestID: child.RequestID, ParentRevision: child.ParentRevision, ParentManifestDigest: child.ParentManifestDigest, ChildRevision: child.ChildRevision, ChildManifestDigest: child.ChildManifestDigest, ExpansionDigest: child.ExpansionDigest}
-	return m.appendEvent(ctx, state, contextevent.KindChildManifest, payload)
+	return m.appendEvent(ctx, contextevent.KindChildManifest, payload)
 }
 
-func (m *ScopedMCP) appendEvent(ctx context.Context, state *FlightStateSnapshot, kind contextevent.Kind, payload any) (contextevent.EventAck, contextevent.Event, error) {
-	stamp, err := m.ports.Stamps.NextStamp(ctx)
-	if err != nil {
-		return contextevent.EventAck{}, contextevent.Event{}, operational("MCP event stamp", err)
-	}
-	request := state.Request
-	request.ManifestRevision, request.ManifestDigest = state.Revision, state.ManifestDigest
+// appendEvent delegates one context-transition event to the shared append
+// transaction. The whole transition already holds the state's mutex, so the
+// service cannot interleave a lifecycle event into these source sequences.
+func (m *ScopedMCP) appendEvent(ctx context.Context, kind contextevent.Kind, payload any) (flightAppendResult, error) {
+	state := m.state.snapshot
 	workspace := WorkspaceFacts{WorkspaceID: state.WorkspaceID, CurrentCommit: state.CandidateCommit, CurrentTree: state.CandidateTree}
-	var priorRevision *contextevent.PriorRevision
-	if state.NextSourceSequence == 1 {
-		priorRevision = state.PriorRevision
-	}
-	event, err := buildEvent(request, workspace, state.NextSourceSequence, state.PriorEventDigest, priorRevision, stamp, kind, payload)
-	if err != nil {
-		return contextevent.EventAck{}, contextevent.Event{}, operational("encode MCP event", err)
-	}
-	ack, err := m.ports.Recorder.Append(ctx, event)
-	if err != nil {
-		return contextevent.EventAck{}, event, operational("append MCP event", err)
-	}
-	if err := validateAck(event, ack, state.LastGlobalSequence); err != nil {
-		return contextevent.EventAck{}, event, operational("acknowledge MCP event", err)
-	}
-	if state.NextSourceSequence == 1 {
-		state.PriorRevision = nil
-	}
-	state.NextSourceSequence++
-	state.PriorEventDigest = event.EventDigest
-	state.LastGlobalSequence = ack.GlobalSequence
-	return ack, event, nil
+	return m.state.appendLocked(ctx, m.ports.Recorder, m.ports.Stamps, workspace, kind, payload)
 }
 
 func contextRequestID(state FlightStateSnapshot, ref, purpose string) (string, error) {
