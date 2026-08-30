@@ -12,6 +12,7 @@ import (
 	"github.com/jyang234/verdi/internal/artifact"
 	"github.com/jyang234/verdi/internal/evidence"
 	"github.com/jyang234/verdi/internal/fixturegit"
+	"github.com/jyang234/verdi/internal/matrixprojection"
 )
 
 // v2FixtureRoot is examples/showcase's own directory, relative to this
@@ -521,8 +522,11 @@ func TestPrintFeatureMatrix_SupersededFeatureStatusLine(t *testing.T) {
 	// compatibility reading, so the effective value here matches the raw
 	// one this test used to pass through the spec literal).
 	spec := &artifact.SpecFrontmatter{}
-	result := evidence.FeatureResult{SpecRef: "spec/legacy-feature"}
-	printFeatureMatrix(&buf, spec, artifact.Status("superseded"), result, evidence.StubReconciliation{}, nil, nil, false, nil)
+	record := matrixprojection.Record{
+		Target:  matrixprojection.Target{Class: matrixprojection.ClassFeature, SpecRef: "spec/legacy-feature"},
+		Feature: &matrixprojection.FeatureBody{ACs: []matrixprojection.FeatureAC{}},
+	}
+	printFeatureMatrix(&buf, spec, artifact.Status("superseded"), record, evidence.StubReconciliation{}, nil, nil, nil)
 
 	if !strings.Contains(buf.String(), "\nstatus: superseded\n") {
 		t.Fatalf("feature matrix must render the feature's own superseded status line; got:\n%s", buf.String())

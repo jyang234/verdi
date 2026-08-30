@@ -187,10 +187,19 @@ type preflightPrelude struct {
 // whose preflight IS the whole run, so nothing has been rehearsed or disclosed
 // before it reaches here — the empty prelude.
 func runPreflight(ctx context.Context, root, storyArg string, manifest *store.Manifest, mdl *model.Model, f forge.Forge, forceLocal bool, stdout, stderr io.Writer) int {
-	return runPreflightWithPrelude(ctx, root, storyArg, manifest, mdl, f, forceLocal, nil, preflightPrelude{}, stdout, stderr)
+	return runPreflightWithPreludeAndCountersign(ctx, root, storyArg, manifest, mdl, f, forceLocal, nil, preflightPrelude{}, nil, stdout, stderr)
 }
 
-// runPreflightWithPrelude is `--preflight`'s testable dispatch core: resolves
+// runPreflightWithCountersign is the standalone `--preflight` entry that
+// additionally carries a lifecycle countersign resolver. Like runPreflight it
+// passes a nil experiments provider, so the experiment-evidence rehearsal runs
+// against production exactly as it does for every other non---prepare
+// preflight entry.
+func runPreflightWithCountersign(ctx context.Context, root, storyArg string, manifest *store.Manifest, mdl *model.Model, f forge.Forge, forceLocal bool, countersignResolver lifecycleCountersignResolver, stdout, stderr io.Writer) int {
+	return runPreflightWithPreludeAndCountersign(ctx, root, storyArg, manifest, mdl, f, forceLocal, nil, preflightPrelude{}, countersignResolver, stdout, stderr)
+}
+
+// runPreflightWithPreludeAndCountersign is `--preflight`'s testable dispatch core: resolves
 // storyArg exactly as runClose does (storyresolve.Resolve, the identical I-30
 // two-form contract), then routes to the story or feature preflight gate by
 // the resolved spec's Class — the same dispatch runClose itself performs
@@ -211,7 +220,11 @@ func runPreflight(ctx context.Context, root, storyArg string, manifest *store.Ma
 // rehearsal can invoke the IDENTICAL experiment-evidence gate real close
 // evaluates (design §9's preflight-parity paragraph, Task 10 correction
 // F3): no second implementation, no new flag.
-func runPreflightWithPrelude(ctx context.Context, root, storyArg string, manifest *store.Manifest, mdl *model.Model, f forge.Forge, forceLocal bool, experiments closeExperimentEvidenceProvider, prelude preflightPrelude, stdout, stderr io.Writer) int {
+//
+// countersignResolver is the same lifecycle countersign seam real close
+// consumes (closeDeps.Countersign): nil leaves the countersign condition
+// unrehearsed, exactly as an unconfigured close leaves it unevaluated.
+func runPreflightWithPreludeAndCountersign(ctx context.Context, root, storyArg string, manifest *store.Manifest, mdl *model.Model, f forge.Forge, forceLocal bool, experiments closeExperimentEvidenceProvider, prelude preflightPrelude, countersignResolver lifecycleCountersignResolver, stdout, stderr io.Writer) int {
 	fmt.Fprintf(stdout, "close: --preflight %s (dry run: rehearses the closure gate only; nothing on disk changes and nothing is published)\n", storyArg)
 
 	// Rehearsed FIRST, in the real ritual's own order: requireCleanIndex is
@@ -249,6 +262,20 @@ func runPreflightWithPrelude(ctx context.Context, root, storyArg string, manifes
 		return 2
 	}
 	defaultBranchRef := lint.ResolveDefaultBranch(ctx, root)
+	var countersignCondition *gateCondition
+	if countersignResolver != nil {
+		result, err := resolveLifecycleCountersign(ctx, countersignResolver, root, manifest, mdl, string(spec.Class), defaultBranchRef, head)
+		if err != nil {
+			fmt.Fprintln(stderr, "close: --preflight:", err)
+			return 2
+		}
+		number := 5
+		if spec.Class == artifact.ClassFeature {
+			number = 7
+		}
+		condition := lifecycleCountersignCondition(number, result)
+		countersignCondition = &condition
+	}
 
 	var outcome closureGateOutcome
 	// experimentGateRefused records whether the experiment-evidence
@@ -265,6 +292,15 @@ func runPreflightWithPrelude(ctx context.Context, root, storyArg string, manifes
 	if err != nil {
 		fmt.Fprintln(stderr, "close: --preflight:", err)
 		return 2
+	}
+	if countersignCondition != nil {
+		label := "closure: "
+		if spec.Class == artifact.ClassFeature {
+			label = "closure(" + mdl.DisplayClass("feature") + "): "
+		}
+		countersignOutcome := reportClosureGateConditions(stdout, label, []gateCondition{*countersignCondition})
+		outcome.Ready = outcome.Ready && countersignOutcome.Ready
+		outcome.Disclosures += countersignOutcome.Disclosures
 	}
 	outcome.Disclosures += disclosures
 
@@ -322,7 +358,7 @@ func runPreflightWithPrelude(ctx context.Context, root, storyArg string, manifes
 //
 // The second return value reports whether the experiment-evidence gate —
 // rather than the closure gate above it — is the reason outcome.Ready came
-// back false, so runPreflightWithPrelude's terminal line can name the
+// back false, so runPreflightWithPreludeAndCountersign's terminal line can name the
 // actual cause instead of always blaming the closure gate.
 func runStoryPreflightGate(ctx context.Context, root string, spec *artifact.SpecFrontmatter, manifest *store.Manifest, mdl *model.Model, f forge.Forge, defaultBranchRef, head string, experiments closeExperimentEvidenceProvider, stdout, stderr io.Writer) (closureGateOutcome, bool, error) {
 	outcome, err := runClosureGateOutcome(ctx, root, spec, f, defaultBranchRef, manifest, mdl, head, stdout)

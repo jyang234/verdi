@@ -1370,8 +1370,8 @@ func TestCmdClose_Preflight_Dispatch(t *testing.T) {
 		t.Chdir(buildReadyDir(t))
 		var stdout, stderr bytes.Buffer
 		rc := cmdClose([]string{"--preflight", "spec/close-fixture"}, &stdout, &stderr)
-		if rc != 0 {
-			t.Fatalf("cmdClose(--preflight, ready) = %d, want 0; stdout=%s stderr=%s", rc, stdout.String(), stderr.String())
+		if rc != 1 {
+			t.Fatalf("cmdClose(--preflight, missing countersign config) = %d, want 1; stdout=%s stderr=%s", rc, stdout.String(), stderr.String())
 		}
 	})
 
@@ -1379,8 +1379,8 @@ func TestCmdClose_Preflight_Dispatch(t *testing.T) {
 		t.Chdir(buildReadyDir(t))
 		var stdout, stderr bytes.Buffer
 		rc := cmdClose([]string{"spec/close-fixture", "--preflight"}, &stdout, &stderr)
-		if rc != 0 {
-			t.Fatalf("cmdClose(story, --preflight) = %d, want 0; stdout=%s stderr=%s", rc, stdout.String(), stderr.String())
+		if rc != 1 {
+			t.Fatalf("cmdClose(story, --preflight, missing countersign config) = %d, want 1; stdout=%s stderr=%s", rc, stdout.String(), stderr.String())
 		}
 	})
 
@@ -1388,8 +1388,8 @@ func TestCmdClose_Preflight_Dispatch(t *testing.T) {
 		t.Chdir(buildReadyDir(t))
 		var stdout, stderr bytes.Buffer
 		rc := cmdClose([]string{"--preflight", "spec/close-fixture"}, &stdout, &stderr)
-		if rc != 0 {
-			t.Fatalf("cmdClose(--preflight) = %d, want 0; stdout=%s stderr=%s", rc, stdout.String(), stderr.String())
+		if rc != 1 {
+			t.Fatalf("cmdClose(--preflight, missing countersign config) = %d, want 1; stdout=%s stderr=%s", rc, stdout.String(), stderr.String())
 		}
 		if strings.Contains(stderr.String(), "refusing to publish outside CI") {
 			t.Fatalf("--preflight must never hit the CI-only publish-guard refusal: stderr=%s", stderr.String())
@@ -1403,8 +1403,8 @@ func TestCmdClose_Preflight_Dispatch(t *testing.T) {
 		t.Chdir(buildReadyDir(t))
 		var stdout, stderr bytes.Buffer
 		rc := cmdClose([]string{"--force-local", "--preflight", "spec/close-fixture"}, &stdout, &stderr)
-		if rc != 0 {
-			t.Fatalf("cmdClose(--force-local, --preflight) = %d, want 0; stdout=%s stderr=%s", rc, stdout.String(), stderr.String())
+		if rc != 1 {
+			t.Fatalf("cmdClose(--force-local, --preflight, missing countersign config) = %d, want 1; stdout=%s stderr=%s", rc, stdout.String(), stderr.String())
 		}
 		if strings.Contains(stdout.String(), "preflight-publish-guard") {
 			t.Fatalf("--force-local should suppress the guard disclosure: %s", stdout.String())

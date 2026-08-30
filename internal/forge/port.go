@@ -20,6 +20,12 @@ import (
 // (05 §CLI: "regenerates locally when no bundle exists").
 var ErrNoBundle = errors.New("forge: no evidence bundle available for this ref/commit")
 
+// ErrUnavailable identifies a configured forge read that could not be
+// completed because the provider transport or HTTP service was unavailable.
+// Callers preserve this as an unavailable operand; JSON/schema violations do
+// not wrap this sentinel and remain operational contract errors.
+var ErrUnavailable = errors.New("forge: provider unavailable")
+
 // DerivedTree is the verdi-evidence CI artifact's full contents: every
 // derived bundle file one (ref, commit) CI run wrote under
 // .verdi/data/derived/, keyed by path RELATIVE to that directory (e.g.
@@ -71,6 +77,9 @@ type CIInfo struct {
 
 // Forge is the I-22 port.
 type Forge interface {
+	// ListApprovals returns the forge's current provider facts for changeID,
+	// including the forge-reported candidate head and an explicit empty set.
+	ListApprovals(ctx context.Context, changeID string) (ApprovalSnapshot, error)
 	// FetchEvidenceBundle retrieves the latest successful verdi-evidence
 	// CI run's artifact for (ref, commit) through the forge's own API and
 	// returns its full derived tree (every bundle file keyed by path

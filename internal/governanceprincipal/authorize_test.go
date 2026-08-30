@@ -510,6 +510,47 @@ func TestHoldsRoleIsTheOneValidatedRoleQuery(t *testing.T) {
 	})
 }
 
+func TestHasTrustSourceKindIsASealedMembershipQuery(t *testing.T) {
+	t.Parallel()
+
+	profile := mustDecode(t, profileYAML())
+	got, err := HasTrustSourceKind(profile, "github", TrustSourceForge)
+	if err != nil || !got {
+		t.Fatalf("HasTrustSourceKind(github, forge) = %v, %v; want true, nil", got, err)
+	}
+	for _, tc := range []struct {
+		name string
+		id   string
+		kind TrustSourceKind
+	}{
+		{"missing source", "missing", TrustSourceForge},
+		{"wrong kind", "github", TrustSourceIdentityProvider},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := HasTrustSourceKind(profile, tc.id, tc.kind)
+			if err != nil || got {
+				t.Fatalf("HasTrustSourceKind(%q, %q) = %v, %v; want false, nil", tc.id, tc.kind, got, err)
+			}
+		})
+	}
+	for _, tc := range []struct {
+		name    string
+		profile Profile
+		id      string
+		kind    TrustSourceKind
+	}{
+		{"unsealed profile", Profile{}, "github", TrustSourceForge},
+		{"malformed source id", profile, "GitHub", TrustSourceForge},
+		{"unknown source kind", profile, "github", TrustSourceKind("unknown")},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := HasTrustSourceKind(tc.profile, tc.id, tc.kind); err == nil {
+				t.Fatal("HasTrustSourceKind unexpectedly accepted malformed input")
+			}
+		})
+	}
+}
+
 func TestAuthorizeSoloCollapse(t *testing.T) {
 	solo := mustDecode(t, []byte(soloYAML))
 	req := AuthorizationRequest{

@@ -85,7 +85,7 @@ func TestCmdJourney_Usage(t *testing.T) {
 			if stdout.Len() != 0 {
 				t.Fatalf("stdout = %q, want empty on a usage error", stdout.String())
 			}
-			const want = "usage: verdi journey <feature-or-story-ref>\n"
+			const want = "usage: verdi journey [--json] <feature-or-story-ref>\n"
 			if stderr.String() != want {
 				t.Fatalf("stderr = %q, want exactly %q", stderr.String(), want)
 			}

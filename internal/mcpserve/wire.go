@@ -48,6 +48,19 @@ type rpcError struct {
 // across DIFFERENT connections is the caller's job (Server.Serve spawns a
 // goroutine per accepted connection).
 func ServeConn(ctx context.Context, r io.Reader, w io.Writer, srv *Server) error {
+	_, err := serveFrames(ctx, r, w, nil, nil, func(ctx context.Context, req rpcRequest) (rpcResponse, *HandlerTerminal) {
+		return srv.dispatch(ctx, req), nil
+	})
+	return err
+}
+
+type frameDispatcher func(context.Context, rpcRequest) (rpcResponse, *HandlerTerminal)
+type frameDecoder func([]byte, *rpcRequest) error
+
+// serveFrames is the one JSON-RPC/NDJSON read-dispatch-write seam shared by
+// the generic artifact catalog and consumer-defined typed handlers. A
+// terminal is observable only after its response frame is written.
+func serveFrames(ctx context.Context, r io.Reader, w io.Writer, parseTerminal *HandlerTerminal, decode frameDecoder, dispatch frameDispatcher) (*HandlerTerminal, error) {
 	sc := bufio.NewScanner(r)
 	sc.Buffer(make([]byte, 0, 1<<16), 1<<24)
 	enc := json.NewEncoder(w)
@@ -57,23 +70,36 @@ func ServeConn(ctx context.Context, r io.Reader, w io.Writer, srv *Server) error
 			continue
 		}
 		var req rpcRequest
-		if err := json.Unmarshal(line, &req); err != nil {
+		var decodeErr error
+		if decode == nil {
+			decodeErr = json.Unmarshal(line, &req)
+		} else {
+			decodeErr = decode(line, &req)
+		}
+		if decodeErr != nil {
 			// A malformed request: if it named an id we could recover, a
 			// silently-dropped response would hang the caller forever;
 			// since the id is unrecoverable from unparseable input, reply
 			// with a null-id JSON-RPC parse error instead (mirrors
 			// groundwork's own serveMCP).
 			if encErr := enc.Encode(rpcResponse{JSONRPC: "2.0", ID: json.RawMessage("null"), Error: &rpcError{Code: -32700, Message: "parse error"}}); encErr != nil {
-				return encErr
+				return nil, encErr
+			}
+			if parseTerminal != nil {
+				return parseTerminal, nil
 			}
 			continue
 		}
 		if req.ID == nil {
 			continue // a notification: JSON-RPC produces no response
 		}
-		if err := enc.Encode(srv.dispatch(ctx, req)); err != nil {
-			return err
+		response, terminal := dispatch(ctx, req)
+		if err := enc.Encode(response); err != nil {
+			return nil, err
+		}
+		if terminal != nil {
+			return terminal, nil
 		}
 	}
-	return sc.Err()
+	return nil, sc.Err()
 }

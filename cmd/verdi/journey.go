@@ -1,11 +1,12 @@
-// verdi journey <feature-or-story-ref> (GLG v3 AC-1,
+// verdi journey [--json] <feature-or-story-ref> (GLG v3 AC-1,
 // .verdi/specs/active/guided-lifecycle-governance-v3/spec.md): the
 // read-only CLI surface over internal/journey's projection — the first
 // GLG runtime verb. It resolves arg to a target spec/story
 // (journey.Projector.Project's own two-form contract, I-30), gathers
 // every repository and lifecycle fact AC-1 names, derives blockers,
 // principals, and safe actions from the operating-model catalog, and
-// prints exactly one line of this store's canonical JSON
+// prints exactly one line of this store's canonical JSON; the explicit flag
+// and legacy no-flag form delegate to these same calls and are byte-identical
 // (journey.Canonical — sorted keys, digest-bound). No status flip, no
 // stamp write, no staging, no commit, no forge call: GLG DC-1 is explicit
 // that a journey record is a projection's output, never lifecycle state
@@ -48,12 +49,17 @@ import (
 // posture), so a bare or malformed invocation fails fast and
 // identically regardless of cwd.
 func cmdJourney(args []string, stdout, stderr io.Writer) int {
-	if len(args) != 1 {
+	var ref string
+	switch {
+	case len(args) == 1 && !strings.HasPrefix(args[0], "-"):
+		ref = args[0]
+	case len(args) == 2 && args[0] == "--json" && !strings.HasPrefix(args[1], "-"):
+		ref = args[1]
+	default:
 		// vocab:identity — CLI usage grammar (identity arg placeholders)
-		fmt.Fprintln(stderr, "usage: verdi journey <feature-or-story-ref>")
+		fmt.Fprintln(stderr, "usage: verdi journey [--json] <feature-or-story-ref>")
 		return 2
 	}
-	ref := args[0]
 
 	root, err := store.FindRoot(".")
 	if err != nil {

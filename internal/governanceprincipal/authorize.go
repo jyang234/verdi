@@ -458,6 +458,23 @@ func HoldsRole(profile Profile, claim PrincipalClaim, role string) (bool, error)
 	return holdsRole(profile, claim, role), nil
 }
 
+// HasTrustSourceKind reports whether id names a trust source of kind in an
+// unmodified decoded profile. It is a membership query only: true does not
+// authenticate a claim or authorize an action.
+func HasTrustSourceKind(profile Profile, id string, kind TrustSourceKind) (bool, error) {
+	if err := profile.checkSeal(); err != nil {
+		return false, err
+	}
+	if err := ValidateID(id); err != nil {
+		return false, fmt.Errorf("governanceprincipal: trust source id: %w", err)
+	}
+	if err := kind.Validate(); err != nil {
+		return false, err
+	}
+	source, ok := profile.trustSource(id)
+	return ok && source.Kind == kind, nil
+}
+
 // holdsRole reports whether a role mapping grants role to the claim's
 // trust source and subject. It is the single inner predicate both the
 // kernel's own rule evaluation and the exported HoldsRole query run, so

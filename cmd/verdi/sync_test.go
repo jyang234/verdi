@@ -1001,6 +1001,10 @@ func TestRunSync_Negative_ForgeError(t *testing.T) {
 // treats that as operational regardless of --or-regen.
 type erroringForge struct{}
 
+func (erroringForge) ListApprovals(ctx context.Context, changeID string) (forgepkg.ApprovalSnapshot, error) {
+	return forgepkg.ApprovalSnapshot{}, errors.New("forge: simulated transport failure")
+}
+
 func (erroringForge) FetchEvidenceBundle(ctx context.Context, ref, commit string) (forgepkg.DerivedTree, error) {
 	return nil, errors.New("forge: simulated transport failure")
 }

@@ -228,6 +228,57 @@ func TestDecodeManifest_MinimalRequiredOnly(t *testing.T) {
 	}
 }
 
+func TestDecodeManifest_Countersign(t *testing.T) {
+	t.Run("valid explicit policy", func(t *testing.T) {
+		m, err := DecodeManifest([]byte(`schema: verdi.layout/v1
+countersign:
+  trust_source: gitlab-reviewers
+  freshness_policy_id: current-forge-approval
+  maximum_observation_age_seconds: 300
+  maximum_approval_age_seconds: 86400
+`))
+		if err != nil {
+			t.Fatalf("DecodeManifest: %v", err)
+		}
+		if m.Countersign == nil {
+			t.Fatal("Countersign = nil, want configured block")
+		}
+		if got := *m.Countersign; got.TrustSource != "gitlab-reviewers" || got.FreshnessPolicyID != "current-forge-approval" || got.MaximumObservationAgeSeconds != 300 || got.MaximumApprovalAgeSeconds != 86400 {
+			t.Fatalf("Countersign = %+v", got)
+		}
+	})
+
+	t.Run("absent has no default", func(t *testing.T) {
+		m, err := DecodeManifest([]byte("schema: verdi.layout/v1\n"))
+		if err != nil {
+			t.Fatalf("DecodeManifest: %v", err)
+		}
+		if m.Countersign != nil {
+			t.Fatalf("Countersign = %+v, want nil", m.Countersign)
+		}
+	})
+
+	for _, tc := range []struct {
+		name string
+		body string
+	}{
+		{"unknown field", "  unexpected: true\n"},
+		{"missing trust source", "  freshness_policy_id: policy\n  maximum_observation_age_seconds: 1\n  maximum_approval_age_seconds: 0\n"},
+		{"missing policy id", "  trust_source: forge\n  maximum_observation_age_seconds: 1\n  maximum_approval_age_seconds: 0\n"},
+		{"malformed trust source", "  trust_source: Forge Reviewers\n  freshness_policy_id: policy\n  maximum_observation_age_seconds: 1\n  maximum_approval_age_seconds: 0\n"},
+		{"malformed policy id", "  trust_source: forge\n  freshness_policy_id: Current/Policy\n  maximum_observation_age_seconds: 1\n  maximum_approval_age_seconds: 0\n"},
+		{"nonpositive observation age", "  trust_source: forge\n  freshness_policy_id: policy\n  maximum_observation_age_seconds: 0\n  maximum_approval_age_seconds: 0\n"},
+		{"negative approval age", "  trust_source: forge\n  freshness_policy_id: policy\n  maximum_observation_age_seconds: 1\n  maximum_approval_age_seconds: -1\n"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			data := "schema: verdi.layout/v1\ncountersign:\n" + tc.body
+			if _, err := DecodeManifest([]byte(data)); err == nil {
+				t.Fatalf("DecodeManifest(%s): want error", tc.name)
+			}
+		})
+	}
+}
+
 func TestDecodeManifest_Negative(t *testing.T) {
 	cases := []struct {
 		name string

@@ -24,6 +24,7 @@ type Forge struct {
 
 	comments   map[string][]forge.Comment          // mrID -> comment feed
 	threads    map[string][]forge.ThreadResolution // mrID -> thread resolutions
+	approvals  map[string]forge.ApprovalSnapshot   // changeID -> current facts
 	nextCommID int
 }
 
@@ -37,8 +38,40 @@ func New() *Forge {
 		files:      make(map[string]map[string][]byte),
 		comments:   make(map[string][]forge.Comment),
 		threads:    make(map[string][]forge.ThreadResolution),
+		approvals:  make(map[string]forge.ApprovalSnapshot),
 		nextCommID: 1,
 	}
+}
+
+// SeedApprovalSnapshot makes ListApprovals return snapshot for changeID.
+func (f *Forge) SeedApprovalSnapshot(changeID string, snapshot forge.ApprovalSnapshot) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.approvals[changeID] = cloneApprovalSnapshot(snapshot)
+}
+
+// ListApprovals implements forge.Forge.
+func (f *Forge) ListApprovals(ctx context.Context, changeID string) (forge.ApprovalSnapshot, error) {
+	if err := ctx.Err(); err != nil {
+		return forge.ApprovalSnapshot{}, err
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	snapshot, ok := f.approvals[changeID]
+	if !ok {
+		return forge.ApprovalSnapshot{}, fmt.Errorf("fake: no approval snapshot seeded for change %q", changeID)
+	}
+	return cloneApprovalSnapshot(snapshot), nil
+}
+
+func cloneApprovalSnapshot(snapshot forge.ApprovalSnapshot) forge.ApprovalSnapshot {
+	snapshot.Approvals = append([]forge.Approval(nil), snapshot.Approvals...)
+	for i := range snapshot.Approvals {
+		if snapshot.Approvals[i].ProviderWitnesses != nil {
+			snapshot.Approvals[i].ProviderWitnesses = append([]forge.ProviderWitness(nil), snapshot.Approvals[i].ProviderWitnesses...)
+		}
+	}
+	return snapshot
 }
 
 func bundleKey(ref, commit string) string { return ref + "@" + commit }
