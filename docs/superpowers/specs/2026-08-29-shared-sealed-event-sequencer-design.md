@@ -57,6 +57,8 @@ The shared state carries the current:
 - next source sequence;
 - prior event digest and optional revision bridge;
 - last acknowledged global sequence; and
+- the complete canonical acknowledgment stream, including authenticated
+  restart history and both service- and MCP-owned appends; and
 - invalidation state.
 
 Its mutex is the sole in-process serialization boundary. A valid recorder
@@ -70,6 +72,15 @@ The service must stop storing an independently authoritative sequence tuple.
 It may cache values for reporting, but every event build must take the current
 state under the shared lock and every successful append must update that same
 state before releasing the lock.
+
+`ExecutionRun` carries an immutable terminal snapshot and copy of that complete
+acknowledgment stream. Completion validates the stream against the snapshot and
+builds `execution-result` from the snapshot's current manifest revision,
+manifest digest, next source sequence, prior-event digest, and last global
+sequence. The completed recorder checkpoint, receipt, and public result must
+cross-match that actual terminal revision. Completion does not poll the
+controller to reconstruct state and does not fall back to the original request
+revision after an expansion.
 
 ## Initialization
 
@@ -149,7 +160,9 @@ then proves:
 7. standalone `context mcp` still refuses a completed-null checkpoint;
 8. Codex start/resume bytes and existing service/package behavior remain
    unchanged; and
-9. the exact seven frozen U6 producers remain the only producer set.
+9. completion after either embedded expansion consumes the complete shared
+   acknowledgment stream and emits result/receipt at the child revision; and
+10. the exact seven frozen U6 producers remain the only producer set.
 
 Focused TDD and race checks belong to genuine Opus. Full `go test ./...`, full
 race, and `make verify` remain Codex-owned final gates.
