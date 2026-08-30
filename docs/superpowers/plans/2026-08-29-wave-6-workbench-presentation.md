@@ -224,6 +224,10 @@ DC-9, CO-2–CO-6/CO-9; SI-163 and SI-176.
 - [ ] RED a mode `off` browser-human mutation against valid adopted authority;
       it must currently refuse and later succeed while recording the effective
       digest.
+- [ ] RED a valid adopted effective policy with no `design_assistance` payload;
+      the browser-human mutation must succeed and record the effective-policy
+      digest, while the delegated-agent path retains its missing-payload
+      refusal.
 - [ ] RED an unproven/violated `NewTrustedHuman` mutation under `off` and prove
       it remains refused after the correction.
 - [ ] RED V1 history decode and mixed V1/V2 log continuity before version
@@ -245,7 +249,8 @@ DC-9, CO-2–CO-6/CO-9; SI-163 and SI-176.
       current CLI/MCP/request-decoder path can call or mint it. Task 2 adds the
       one browser call and updates the inventory to exactly one.
 - [ ] Run focused and full affected-package races, vet, lint, gofmt, strict
-      fixture/golden ratchets, spec-align, and diff checks.
+      fixture/golden ratchets, `internal/specalign`, `internal/showcasealign`,
+      and diff checks.
 - [ ] Complete FABLE/Opus producer review and stop for independent Codex review.
 
 **Required semantic RED:**

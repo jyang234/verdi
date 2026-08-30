@@ -249,6 +249,13 @@ unchanged. Mixed V1/V2 logs decode and validate in order, while no current
 writer emits V1. No sentinel or hash of absence may be presented as a policy
 identity.
 
+The accepted ASD feature specification's sentence that each entry uses
+`verdi.design-provenance/v1` describes the original schema at ratification.
+SI-176 and this owner-approved Wave 6 amendment explicitly supersede that
+historical writer version without editing the frozen accepted artifact, using
+the same ledger-plus-wave-authority evolution pattern as SI-161's ratification
+V3 transition.
+
 CI and GLG operations use the authority required by their typed core. If an
 operation needs authenticated human authority and no accepted proof seam
 exists, its predecessor stops; the browser cannot downgrade it to an
