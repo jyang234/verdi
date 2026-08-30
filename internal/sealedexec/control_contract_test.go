@@ -144,6 +144,135 @@ func TestExecutionControlRecordContract_Static(t *testing.T) {
 		}
 	})
 
+	// I-118/SI-166: the atomic child-install/first-child-append boundary is a
+	// closed partial-only exception. After `child-manifest` is acknowledged at
+	// revision R and the install succeeds, the shared state opens R+1 at source
+	// one with no prior-event digest and the unchanged global order, while the
+	// acknowledged stream still ends at R. A failure there must preserve the
+	// installed child manifest plus the complete parent prefix; successful
+	// completion stays strict because it appends its terminal event on the
+	// child.
+	t.Run("execution partial preserves an installed child with no child acknowledgment", func(t *testing.T) {
+		fixture := newCompletionFixture(t, contextevent.AuthorityAuthoritative)
+		request := fixture.request
+		parent := request.ManifestRevision
+		child := parent + 1
+		childDigest := testDigest("installed-child-manifest")
+		acks := []contextevent.EventAck{
+			completionAck(request, parent, 1, 1, contextevent.KindAdapterStart, testDigest("adapter-start")),
+			completionAck(request, parent, 2, 2, contextevent.KindContextRequest, testDigest("context-request")),
+			completionAck(request, parent, 3, 3, contextevent.KindContextDecision, testDigest("context-decision")),
+			completionAck(request, parent, 4, 4, contextevent.KindChildManifest, testDigest("child-manifest")),
+		}
+		last := acks[len(acks)-1]
+		run := fixture.run
+		run.Acks = acks
+		run.Terminal = installedChildTerminal(request, childDigest, last)
+
+		// Successful completion remains strict: its terminal cross-match still
+		// refuses a snapshot the acknowledged stream has not reached.
+		if err := validateRunTerminal(request, run.Terminal, last); err == nil {
+			t.Fatal("completion's terminal validator accepted an installed child with no child acknowledgment")
+		}
+
+		encoded, err := EncodeExecutionPartial(request, run)
+		if err != nil {
+			t.Fatalf("EncodeExecutionPartial: %v", err)
+		}
+		assertCanonicalControlBytes(t, encoded)
+		decoded, err := DecodeExecutionPartial(bytes.NewReader(encoded))
+		if err != nil {
+			t.Fatalf("DecodeExecutionPartial: %v", err)
+		}
+		// The installed child manifest is represented with the complete parent
+		// acknowledgment prefix; nothing is dropped and nothing is invented.
+		if decoded.ManifestRevision != child || decoded.ManifestDigest != childDigest {
+			t.Fatalf("partial manifest = revision %d digest %q, want the installed child %d/%q",
+				decoded.ManifestRevision, decoded.ManifestDigest, child, childDigest)
+		}
+		if len(decoded.EventAcks) != len(acks) {
+			t.Fatalf("partial carries %d acknowledgments, want the complete parent prefix of %d", len(decoded.EventAcks), len(acks))
+		}
+		for i, ack := range decoded.EventAcks {
+			if ack != acks[i] {
+				t.Fatalf("partial acknowledgment %d = %#v, want %#v", i, ack, acks[i])
+			}
+		}
+		if final := decoded.EventAcks[len(decoded.EventAcks)-1]; final.ManifestRevision != parent {
+			t.Fatalf("partial stream ends at revision %d, want the parent %d", final.ManifestRevision, parent)
+		}
+		// Encoding is idempotent over its own decoded value.
+		reencoded, err := canonjson.Marshal(decoded)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !bytes.Equal(reencoded, encoded) {
+			t.Fatalf("execution partial round trip is not byte-stable:\n%s\n%s", encoded, reencoded)
+		}
+
+		// Every deviation from the exact opening position stays closed: the
+		// arm admits one shape, not a class of stale terminals.
+		for name, mutate := range map[string]func(*ExecutionRun){
+			"absent bridge":              func(r *ExecutionRun) { r.Terminal.PriorRevision = nil },
+			"bridge to another revision": func(r *ExecutionRun) { r.Terminal.PriorRevision.ManifestRevision = parent - 1 },
+			"bridge to another event":    func(r *ExecutionRun) { r.Terminal.PriorRevision.EventRoot = testDigest("other-event") },
+			"bridge to another source sequence": func(r *ExecutionRun) {
+				r.Terminal.PriorRevision.TerminalSourceSequence = last.SourceSequence - 1
+			},
+			"bridge to another global sequence": func(r *ExecutionRun) {
+				r.Terminal.PriorRevision.TerminalGlobalSequence = last.GlobalSequence - 1
+			},
+			"child source order already advanced": func(r *ExecutionRun) { r.Terminal.NextSourceSequence = 2 },
+			"child carries a prior event digest":  func(r *ExecutionRun) { r.Terminal.PriorEventDigest = last.EventDigest },
+			"global order already advanced":       func(r *ExecutionRun) { r.Terminal.LastGlobalSequence = last.GlobalSequence + 1 },
+			"skipped child revision":              func(r *ExecutionRun) { r.Terminal.Revision = parent + 2 },
+			"backward child revision":             func(r *ExecutionRun) { r.Terminal.Revision = parent },
+			"empty installed manifest digest":     func(r *ExecutionRun) { r.Terminal.ManifestDigest = "" },
+			"noncanonical installed digest":       func(r *ExecutionRun) { r.Terminal.ManifestDigest = "sha256:not-a-digest" },
+			"snapshot from another flight":        func(r *ExecutionRun) { r.Terminal.Key.Flight = "other-flight" },
+			"snapshot of another request revision": func(r *ExecutionRun) {
+				r.Terminal.Request.ManifestRevision = parent + 1
+			},
+			"snapshot of another request manifest": func(r *ExecutionRun) {
+				r.Terminal.Request.ManifestDigest = testDigest("other-manifest")
+			},
+		} {
+			t.Run("refuses "+name, func(t *testing.T) {
+				bad := run
+				bad.Acks = append([]contextevent.EventAck(nil), acks...)
+				bridge := *run.Terminal.PriorRevision
+				bad.Terminal.PriorRevision = &bridge
+				mutate(&bad)
+				if _, err := EncodeExecutionPartial(request, bad); err == nil {
+					t.Fatalf("EncodeExecutionPartial accepted %s", name)
+				}
+			})
+		}
+
+		// The private wire admits a last acknowledgment only on the represented
+		// revision or its exact immediate predecessor. A skipped revision is
+		// still refused on decode.
+		skipped := decoded
+		skipped.ManifestRevision = parent + 2
+		skippedBytes, err := canonjson.Marshal(skipped)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := DecodeExecutionPartial(bytes.NewReader(skippedBytes)); err == nil {
+			t.Fatal("DecodeExecutionPartial accepted a partial that skips a manifest revision past its stream")
+		}
+		// A backward representation is refused for the same reason.
+		backward := decoded
+		backward.ManifestRevision = parent - 1
+		backwardBytes, err := canonjson.Marshal(backward)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := DecodeExecutionPartial(bytes.NewReader(backwardBytes)); err == nil {
+			t.Fatal("DecodeExecutionPartial accepted a partial that predates its own acknowledged stream")
+		}
+	})
+
 	// Pre-shared-state compatibility: a run that carries no terminal snapshot —
 	// and a run that has not yet acknowledged anything — still preserves the
 	// dispatched request manifest exactly as before.
@@ -702,4 +831,22 @@ func mustCanonicalControlAck(t *testing.T, ack ControlAck) ControlAck {
 		t.Fatal(err)
 	}
 	return decoded
+}
+
+// installedChildTerminal is the exact opening position the shared flight state
+// holds after installExpansionLocked has advanced it: the child revision at
+// source one with no prior-event digest, the unchanged never-resetting global
+// order, and the exact non-null bridge to the acknowledged parent terminal.
+func installedChildTerminal(request ExecutionRequest, childDigest string, last contextevent.EventAck) FlightStateSnapshot {
+	return FlightStateSnapshot{
+		Request: request, Key: executionKey(request), Revision: last.ManifestRevision + 1,
+		ManifestDigest: childDigest, ProjectionDigest: request.ProjectionDigest,
+		NextSourceSequence: 1, PriorEventDigest: "",
+		LastGlobalSequence: last.GlobalSequence,
+		PriorRevision: &contextevent.PriorRevision{
+			ManifestRevision: last.ManifestRevision, ManifestDigest: request.ManifestDigest,
+			EventRoot: last.EventDigest, TerminalSourceSequence: last.SourceSequence,
+			TerminalGlobalSequence: last.GlobalSequence,
+		},
+	}
 }

@@ -41,8 +41,14 @@ func EncodeExecutionPartial(request ExecutionRequest, run ExecutionRun) ([]byte,
 		// The snapshot is authoritative only after it has been cross-matched
 		// against the stream that actually reached it, exactly as completion
 		// cross-matches its own terminal position.
+		// I-118/SI-166 admits exactly one further partial-only shape: the
+		// opening position of a child revision whose atomic install succeeded
+		// before any child append could be acknowledged. Successful completion
+		// stays strict because it appends its terminal event on that child.
 		if err := validateRunTerminal(request, run.Terminal, last); err != nil {
-			return nil, fmt.Errorf("sealedexec: encode execution partial terminal state: %w", err)
+			if !installedChildOpening(request, run.Terminal, last) {
+				return nil, fmt.Errorf("sealedexec: encode execution partial terminal state: %w", err)
+			}
 		}
 		revision, digest = run.Terminal.Revision, run.Terminal.ManifestDigest
 	}
@@ -59,6 +65,36 @@ func EncodeExecutionPartial(request ExecutionRequest, run ExecutionRun) ([]byte,
 		return nil, err
 	}
 	return canonjson.Marshal(partial)
+}
+
+// installedChildOpening reports whether the terminal snapshot is exactly the
+// position installExpansionLocked leaves after a successful atomic install
+// whose first child append has not been acknowledged (I-118/SI-166). Every
+// operand is checked against the live final acknowledgment, so no stale,
+// skipped, backward, or fabricated terminal can enter through this arm: the
+// snapshot must carry the exact dispatched request and key identity, a
+// canonical installed manifest digest, the immediate successor revision opened
+// at source one with no prior-event digest and the unchanged never-resetting
+// global order, and a non-null bridge that exactly names the last
+// acknowledgment's revision, event, terminal source order, and terminal global
+// order.
+func installedChildOpening(request ExecutionRequest, terminal FlightStateSnapshot, last contextevent.EventAck) bool {
+	if terminal.Key != executionKey(request) || terminal.Request.ManifestRevision != request.ManifestRevision ||
+		terminal.Request.ManifestDigest != request.ManifestDigest {
+		return false
+	}
+	if validateDigest("execution partial installed child manifest_digest", terminal.ManifestDigest) != nil {
+		return false
+	}
+	if terminal.Revision != last.ManifestRevision+1 || terminal.NextSourceSequence != 1 ||
+		terminal.PriorEventDigest != "" || terminal.LastGlobalSequence != last.GlobalSequence {
+		return false
+	}
+	bridge := terminal.PriorRevision
+	return bridge != nil && bridge.ManifestRevision == last.ManifestRevision &&
+		bridge.EventRoot == last.EventDigest &&
+		bridge.TerminalSourceSequence == last.SourceSequence &&
+		bridge.TerminalGlobalSequence == last.GlobalSequence
 }
 
 // DecodeExecutionPartial strictly decodes canonical incomplete request/run
@@ -141,9 +177,13 @@ func validateExecutionPartial(partial ExecutionPartial) error {
 // order, source order contiguous inside each revision, a child revision exactly
 // one past its predecessor restarting at source one, and no skipped or backward
 // revision. Because the represented manifest revision is the terminal one, a
-// nonempty stream must end exactly there. A decoded partial cannot know the
-// dispatched request revision, so the stream's own base is its floor; the
-// encode path applies the request floor before it builds the partial.
+// nonempty stream must end exactly there, or — for I-118/SI-166's installed
+// child whose first append was never acknowledged — exactly one revision before
+// it. A skipped, backward, nonmonotonic, or source-gapped stream stays closed,
+// as does any wider distance between the stream and the represented revision. A
+// decoded partial cannot know the dispatched request revision, so the stream's
+// own base is its floor; the encode path applies the request floor before it
+// builds the partial.
 func validateExecutionPartialAcks(partial ExecutionPartial) error {
 	for i, ack := range partial.EventAcks {
 		encoded, err := contextevent.EncodeEventAck(ack)
@@ -162,7 +202,8 @@ func validateExecutionPartialAcks(partial ExecutionPartial) error {
 	if err != nil {
 		return fmt.Errorf("sealedexec: execution partial event_acks: %w", err)
 	}
-	if len(partial.EventAcks) != 0 && last.ManifestRevision != partial.ManifestRevision {
+	if len(partial.EventAcks) != 0 &&
+		last.ManifestRevision != partial.ManifestRevision && last.ManifestRevision+1 != partial.ManifestRevision {
 		return fmt.Errorf("sealedexec: execution partial represents manifest revision %d but its acknowledgments end at %d",
 			partial.ManifestRevision, last.ManifestRevision)
 	}

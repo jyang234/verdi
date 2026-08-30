@@ -12,10 +12,13 @@ package main
 // existing cmd/verdi behavioral evidence base.
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
 	"net"
 	"os"
 	"os/exec"
@@ -31,6 +34,7 @@ import (
 
 	"github.com/jyang234/verdi/internal/contextcompile"
 	"github.com/jyang234/verdi/internal/contextevent"
+	"github.com/jyang234/verdi/internal/contextreceipt"
 	"github.com/jyang234/verdi/internal/execworkspace"
 	gp "github.com/jyang234/verdi/internal/governanceprincipal"
 	"github.com/jyang234/verdi/internal/policyartifact"
@@ -764,6 +768,115 @@ type claudeLifecycleOptions struct {
 	// oversizedDetail makes the provider emit an assistant text larger than the
 	// fixed inline detail ceiling, forcing a durable controller segment.
 	oversizedDetail bool
+	// approvedContext makes the controller resolve the provider's real
+	// `request_context` call to proven data on a proven epoch, so the embedded
+	// scoped MCP compiles, acknowledges, and installs one child manifest. The
+	// shared flight state therefore moves to the child revision mid-run and
+	// every terminal artifact must bind that revision.
+	approvedContext bool
+}
+
+// serveWithAcknowledgedExpansionLedger runs the shared lifecycle controller
+// wire and supplies the two durable facts the shared single-revision fixture
+// cannot know in advance: once the embedded scoped MCP has actually
+// acknowledged a `child-manifest`, the durable recorder carries one terminal
+// revision segment per acknowledged revision, and the receipt's expansion
+// ledger must name that exact acknowledged transition. Both are derived only
+// from the acknowledged events and their own acknowledgments, so neither can
+// assert a transition or an order the run did not make. Every other result, and
+// the call-sequence bookkeeping, is the shared fixture's own.
+func serveWithAcknowledgedExpansionLedger(fake *sealedLifecycleController, conn net.Conn) error {
+	reader := bufio.NewReader(conn)
+	var installed []contextreceipt.Expansion
+	revisions := append([]contextevent.Revision{}, fake.initialRevisions...)
+	for {
+		frame, err := reader.ReadBytes('\n')
+		if errors.Is(err, io.EOF) && len(frame) == 0 {
+			return nil
+		}
+		if err != nil {
+			return fmt.Errorf("read controller frame: %w", err)
+		}
+		call, err := sealedexec.DecodeControllerCall(bytes.NewReader(frame))
+		if err != nil {
+			return fmt.Errorf("decode controller call: %w", err)
+		}
+		if call.CallSequence != uint64(len(fake.calls)+1) {
+			return fmt.Errorf("controller call sequence %d, want %d", call.CallSequence, len(fake.calls)+1)
+		}
+		fake.calls = append(fake.calls, call.Operation)
+		result, err := fake.result(call)
+		if err != nil {
+			// The shared fixture's checkpoint builder models exactly one
+			// revision, so an installed expansion is the one case it cannot
+			// represent. Everything else stays its own failure.
+			if call.Operation != sealedexec.ControllerOperationRecorderCheckpoint || len(installed) == 0 {
+				return err
+			}
+			result = sealedexec.ControllerResult{
+				Schema: sealedexec.ControllerResultSchemaID, CallSequence: call.CallSequence, Operation: call.Operation,
+				RecorderCheckpoint: sealedexec.ControllerRecorderCheckpointResult{
+					Schema: "verdi.context-controller/" + string(call.Operation) + "-result/v1",
+					Checkpoint: sealedexec.RecorderCheckpoint{
+						Verification: sealedexec.Verification{State: contextcompile.ResolutionProven, Witnesses: []string{}},
+						Digest:       sealedTestDigest(fmt.Sprintf("checkpoint-%d", len(fake.events))),
+					},
+				},
+			}
+		}
+		if call.Operation == sealedexec.ControllerOperationRecorderAppend && result.Error == nil {
+			event, ack := call.RecorderAppend.Event, result.RecorderAppend.Ack
+			if child, ok := event.Payload.(*contextevent.ChildManifestPayload); ok {
+				installed = append(installed, contextreceipt.Expansion{
+					RequestID: child.RequestID, ParentRevision: child.ParentRevision,
+					ParentManifestDigest: child.ParentManifestDigest, ChildRevision: child.ChildRevision,
+					ChildManifestDigest: child.ChildManifestDigest, ExpansionDigest: child.ExpansionDigest,
+				})
+			}
+			if len(revisions) != 0 && revisions[len(revisions)-1].ManifestRevision == event.ManifestRevision {
+				current := revisions[len(revisions)-1]
+				current.TerminalGlobalSequence = ack.GlobalSequence
+				current.TerminalSourceSequence = event.SourceSequence
+				current.TerminalKind = event.Kind
+				current.EventRoot = event.EventDigest
+				revisions[len(revisions)-1] = current
+			} else {
+				revisions = append(revisions, contextevent.Revision{
+					Schema: contextevent.RevisionSchemaID, ManifestRevision: event.ManifestRevision,
+					ManifestDigest: event.ManifestDigest, FirstGlobalSequence: ack.GlobalSequence,
+					TerminalGlobalSequence: ack.GlobalSequence, TerminalSourceSequence: event.SourceSequence,
+					TerminalKind: event.Kind, EventRoot: event.EventDigest,
+				})
+			}
+		}
+		if len(installed) != 0 && result.Error == nil {
+			switch call.Operation {
+			case sealedexec.ControllerOperationResolveReceiptInputs:
+				inputs := result.ResolveReceiptInputs.Inputs
+				inputs.Expansions = append(append([]contextreceipt.Expansion(nil), inputs.Expansions...), installed...)
+				result.ResolveReceiptInputs.Inputs = inputs
+			case sealedexec.ControllerOperationRecorderCheckpoint:
+				checkpoint := result.RecorderCheckpoint.Checkpoint
+				checkpoint.Revisions = append([]contextevent.Revision(nil), revisions...)
+				root, rootErr := contextevent.EventChainRoot(checkpoint.Revisions)
+				if rootErr != nil {
+					return fmt.Errorf("acknowledged revision chain root: %w", rootErr)
+				}
+				terminal := checkpoint.Revisions[len(checkpoint.Revisions)-1]
+				checkpoint.EventChainRoot = root
+				checkpoint.TerminalSourceSequence = terminal.TerminalSourceSequence
+				checkpoint.TerminalGlobalSequence = terminal.TerminalGlobalSequence
+				result.RecorderCheckpoint.Checkpoint = checkpoint
+			}
+		}
+		encoded, err := sealedexec.EncodeControllerResult(result)
+		if err != nil {
+			return fmt.Errorf("encode %s result: %w", call.Operation, err)
+		}
+		if _, err := conn.Write(encoded); err != nil {
+			return fmt.Errorf("write %s result: %w", call.Operation, err)
+		}
+	}
 }
 
 type claudeLifecycleObservation struct {
@@ -841,6 +954,15 @@ func runClaudeSealedLifecycle(t *testing.T, bin string, options claudeLifecycleO
 			Data:         fixture.compiled.DataItems[0],
 		},
 	}
+	if options.approvedContext {
+		// A proven resolution on a proven epoch is the only difference: the
+		// scoped MCP then runs its real compile/acknowledge/install path.
+		fake.resolution = sealedexec.ContextResolution{
+			Verification: sealedexec.Verification{State: contextcompile.ResolutionProven, Witnesses: []string{}},
+			Data:         fixture.compiled.DataItems[0],
+		}
+		fake.epoch = sealedexec.Verification{State: contextcompile.ResolutionProven, Witnesses: []string{}}
+	}
 	fake.expansionRoot = options.expansionRoot
 	if options.resume {
 		// The durable state the prepared continuity asserts: the completed prior
@@ -873,6 +995,10 @@ func runClaudeSealedLifecycle(t *testing.T, bin string, options claudeLifecycleO
 	served := make(chan error, 1)
 	go func() {
 		defer controllerConn.Close()
+		if options.approvedContext {
+			served <- serveWithAcknowledgedExpansionLedger(fake, controllerConn)
+			return
+		}
 		served <- fake.serve(controllerConn)
 	}()
 
@@ -996,19 +1122,21 @@ func TestClaudeBuiltBinaryLifecycle_Behavioral(t *testing.T) {
 	bin := buildVerdiBinary(t)
 
 	t.Run("sealed_start_drives_the_public_claude_assembly", func(t *testing.T) {
-		run := runClaudeSealedLifecycle(t, bin, claudeLifecycleOptions{})
+		run := runClaudeSealedLifecycle(t, bin, claudeLifecycleOptions{approvedContext: true})
 		assertClaudeAssemblySurface(t, run)
 		assertClaudeSuccessfulLifecycle(t, run)
+		assertClaudeChildRevisionBinding(t, run)
 	})
 
 	// Amendment 002 §9 requires real built sealed-resume evidence, so this row
 	// drives the resume arm itself: --out is only an orthogonal choice of public
 	// output channel and never the thing that distinguishes resume from start.
 	t.Run("sealed_resume_drives_the_public_claude_assembly", func(t *testing.T) {
-		run := runClaudeSealedLifecycle(t, bin, claudeLifecycleOptions{resume: true, outFile: true})
+		run := runClaudeSealedLifecycle(t, bin, claudeLifecycleOptions{resume: true, outFile: true, approvedContext: true})
 		assertClaudeAssemblySurface(t, run)
 		assertClaudeSuccessfulLifecycle(t, run)
 		assertClaudeResumeWitness(t, run)
+		assertClaudeChildRevisionBinding(t, run)
 	})
 
 	// Amendment 002 §6: a projected detail larger than the fixed inline ceiling
@@ -1382,6 +1510,129 @@ func assertClaudeSuccessfulLifecycle(t *testing.T, run claudeLifecycleObservatio
 	if got := countControllerOperation(run.fake.calls, sealedexec.ControllerOperationPersistHandback); got != 1 {
 		t.Fatalf("persist-handback calls = %d, want exactly 1", got)
 	}
+}
+
+// assertClaudeChildRevisionBinding proves the real built row's successful
+// `request_context` call actually moved the shared flight state, and that every
+// terminal artifact binds the installed child rather than the dispatched request
+// revision (I-115–I-117/SI-162–SI-164). It pins: the acknowledged
+// `child-manifest` transition and the revision its own event carries; the next
+// provider-owned event, which must open the child revision at source order one
+// across the exact acknowledged bridge; the `execution-result` event and its
+// payload manifest; the receipt event acknowledgment; the public result's
+// terminal manifest revision and digest; and the receipt's terminal revision
+// segment.
+func assertClaudeChildRevisionBinding(t *testing.T, run claudeLifecycleObservation) {
+	t.Helper()
+	events := run.fake.events
+
+	// Exactly one acknowledged child-manifest names the parent→child install.
+	child, childIndex := (*contextevent.ChildManifestPayload)(nil), -1
+	for i, event := range events {
+		payload, ok := event.Payload.(*contextevent.ChildManifestPayload)
+		if !ok {
+			continue
+		}
+		if childIndex >= 0 {
+			t.Fatalf("acknowledged %d child-manifest events, want exactly the one installed expansion", 2)
+		}
+		child, childIndex = payload, i
+	}
+	if childIndex < 0 {
+		t.Fatalf("no acknowledged child-manifest; kinds = %v", sealedEventKinds(events))
+	}
+	parentRevision := run.fixture.request.ManifestRevision
+	if child.ParentRevision != parentRevision || child.ParentManifestDigest != run.fixture.request.ManifestDigest {
+		t.Fatalf("child-manifest parent = revision %d digest %q, want the dispatched request %d/%q",
+			child.ParentRevision, child.ParentManifestDigest, parentRevision, run.fixture.request.ManifestDigest)
+	}
+	childRevision := parentRevision + 1
+	if child.ChildRevision != childRevision || child.ChildManifestDigest == "" ||
+		child.ChildManifestDigest == child.ParentManifestDigest {
+		t.Fatalf("child-manifest child = revision %d digest %q, want the successor %d with its own manifest",
+			child.ChildRevision, child.ChildManifestDigest, childRevision)
+	}
+	// The child-manifest event itself closes the parent revision.
+	if events[childIndex].ManifestRevision != parentRevision {
+		t.Fatalf("child-manifest event carries revision %d, want the closing parent revision %d",
+			events[childIndex].ManifestRevision, parentRevision)
+	}
+
+	// The next acknowledged event is provider-owned and opens the installed
+	// child revision at source order one across the exact bridge.
+	if childIndex+1 >= len(events) {
+		t.Fatalf("no acknowledged event follows the installed expansion; kinds = %v", sealedEventKinds(events))
+	}
+	next := events[childIndex+1]
+	if next.ManifestRevision != childRevision || next.ManifestDigest != child.ChildManifestDigest {
+		t.Fatalf("event after the expansion = revision %d digest %q, want the installed child %d/%q",
+			next.ManifestRevision, next.ManifestDigest, childRevision, child.ChildManifestDigest)
+	}
+	if next.SourceSequence != 1 || next.PriorEventDigest != "" {
+		t.Fatalf("event after the expansion = source %d prior %q, want the child revision to open at source 1 with no prior event",
+			next.SourceSequence, next.PriorEventDigest)
+	}
+	if next.PriorRevision == nil || next.PriorRevision.ManifestRevision != parentRevision ||
+		next.PriorRevision.EventRoot != events[childIndex].EventDigest ||
+		next.PriorRevision.TerminalSourceSequence != events[childIndex].SourceSequence {
+		t.Fatalf("event after the expansion bridges %#v, want the exact acknowledged child-manifest terminal", next.PriorRevision)
+	}
+
+	// The terminal execution-result is acknowledged on the child revision and
+	// its payload binds the installed child manifest.
+	terminal := events[len(events)-1]
+	resultPayload, ok := terminal.Payload.(*contextevent.ExecutionResultPayload)
+	if !ok {
+		t.Fatalf("terminal acknowledged event = %s, want execution-result", terminal.Kind)
+	}
+	if terminal.ManifestRevision != childRevision || terminal.ManifestDigest != child.ChildManifestDigest ||
+		resultPayload.ManifestDigest != child.ChildManifestDigest {
+		t.Fatalf("execution-result = revision %d event digest %q payload digest %q, want the installed child %d/%q",
+			terminal.ManifestRevision, terminal.ManifestDigest, resultPayload.ManifestDigest, childRevision, child.ChildManifestDigest)
+	}
+
+	// The public result, its receipt event acknowledgment, and the receipt's
+	// terminal revision segment all bind that same child revision.
+	result := claudePublicResult(t, run)
+	if result.TerminalManifestRevision != childRevision || result.TerminalManifestDigest != child.ChildManifestDigest {
+		t.Fatalf("public result terminal manifest = revision %d digest %q, want the installed child %d/%q",
+			result.TerminalManifestRevision, result.TerminalManifestDigest, childRevision, child.ChildManifestDigest)
+	}
+	if result.ReceiptEventAck.ManifestRevision != childRevision {
+		t.Fatalf("receipt event acknowledgment carries revision %d, want the installed child %d",
+			result.ReceiptEventAck.ManifestRevision, childRevision)
+	}
+	if result.Receipt.TerminalManifestRevision != childRevision || result.Receipt.ManifestDigest != child.ChildManifestDigest {
+		t.Fatalf("receipt terminal = revision %d manifest %q, want the installed child %d/%q",
+			result.Receipt.TerminalManifestRevision, result.Receipt.ManifestDigest, childRevision, child.ChildManifestDigest)
+	}
+	segments := result.Receipt.RevisionSegments
+	if len(segments) == 0 {
+		t.Fatal("receipt carries no revision segments")
+	}
+	last := segments[len(segments)-1]
+	if last.ManifestRevision != childRevision || last.ManifestDigest != child.ChildManifestDigest {
+		t.Fatalf("receipt terminal revision segment = %d/%q, want the installed child %d/%q",
+			last.ManifestRevision, last.ManifestDigest, childRevision, child.ChildManifestDigest)
+	}
+	if len(segments) < 2 || segments[len(segments)-2].ManifestRevision != parentRevision {
+		t.Fatalf("receipt revision segments = %#v, want the parent segment preserved before the child", segments)
+	}
+}
+
+// claudePublicResult decodes the public execution-result bytes from whichever
+// channel the row requested.
+func claudePublicResult(t *testing.T, run claudeLifecycleObservation) sealedexec.ExecutionResult {
+	t.Helper()
+	resultBytes := []byte(run.obs.stdout)
+	if run.outPath != "" {
+		resultBytes = mustReadFile(t, run.outPath)
+	}
+	result, err := sealedexec.DecodeExecutionResult(bytes.NewReader(resultBytes))
+	if err != nil {
+		t.Fatalf("decode claude execution result: %v\n%s", err, resultBytes)
+	}
+	return result
 }
 
 // assertClaudeAcknowledgedDetails proves every acknowledged Claude detail is a

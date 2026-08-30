@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"os"
 	"os/exec"
@@ -994,6 +995,86 @@ func TestClaudeAdapterParityContract_Behavioral(t *testing.T) {
 		result := runClaudeLines(t, launch, envRoot,
 			claudeInitLine("s1", launch.Workspace.Path), toolUse, toolResult, toolResult)
 		assertClaudeGapReason(t, result, "duplicate-tool-result", "decode", claudeSource)
+	})
+
+	// Amendment 002 §6 / I-109 / SI-165: a provider-derived string bound for a
+	// fixed payload field is checked against the run's complete classified set
+	// before the event is built. A match is refused with the closed
+	// `protected-fixed-field` reduction — the fixed field is never rewritten,
+	// the value never enters a diagnostic, detail, state map, or durable
+	// payload, and no normalized observation carrying it is produced.
+	t.Run("classified_secret_in_a_fixed_provider_field_is_refused", func(t *testing.T) {
+		// The exact key claudeTestLaunch activates as PolicySecretValues.
+		const apiKey = "test-api-key-1234567890"
+		safeToolUse := `{"type":"assistant","session_id":"s1","uuid":"mu","message":{"id":"msg_1","type":"message","role":"assistant","model":"claude-opus-5-test","content":[{"type":"tool_use","id":"call_1","name":"Read","input":{"path":"README.md"}}],"usage":{"input_tokens":1,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":1}}}`
+		assistantWith := func(blocks string) string {
+			return `{"type":"assistant","session_id":"s1","uuid":"mu","message":{"id":"MSGID","type":"message","role":"assistant","model":"claude-opus-5-test","content":[` + blocks +
+				`],"usage":{"input_tokens":1,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":1}}}`
+		}
+		for name, frames := range map[string][]string{
+			// The assistant message id lands in the fixed provider-message id.
+			"assistant_message_id": {
+				strings.Replace(assistantWith(`{"type":"text","text":"hi"}`), "MSGID", "msg_"+apiKey, 1),
+			},
+			// The same id derives the omission summary's fixed summary id.
+			"omission_summary_id": {
+				strings.Replace(assistantWith(`{"type":"thinking","thinking":"hidden","signature":"sig"}`), "MSGID", "msg_"+apiKey, 1),
+			},
+			// The tool-use call id lands in the fixed tool-call id.
+			"tool_use_call_id": {
+				strings.Replace(assistantWith(`{"type":"tool_use","id":"call_`+apiKey+`","name":"Read","input":{"path":"README.md"}}`), "MSGID", "msg_1", 1),
+			},
+			// The tool name lands in the fixed tool-call name.
+			"tool_use_tool_name": {
+				strings.Replace(assistantWith(`{"type":"tool_use","id":"call_1","name":"Read`+apiKey+`","input":{"path":"README.md"}}`), "MSGID", "msg_1", 1),
+			},
+			// The tool-result identity is refused before it is even probed
+			// against the open-call state map, so its reduction is the fixed
+			// protected refusal rather than an unmatched-call verdict.
+			"tool_result_identity": {
+				safeToolUse,
+				`{"type":"user","session_id":"s1","uuid":"tu","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"call_` + apiKey + `","content":"ok"}]}}`,
+			},
+		} {
+			t.Run(name, func(t *testing.T) {
+				launch, envRoot := claudeTestLaunch(t, sealedexec.ActionStart)
+				lines := append([]string{claudeInitLine("s1", launch.Workspace.Path)}, frames...)
+				result := runClaudeLines(t, launch, envRoot, lines...)
+				// Containment first: no normalized observation — fixed field,
+				// detail, witness, or diagnostic — may carry the value.
+				assertNoClaudePlaintext(t, result.Observations, apiKey)
+				assertClaudeGapReason(t, result, "protected-fixed-field", "redaction", claudeSource)
+			})
+		}
+
+		// The same classified set leaves every safe fixed byte untouched.
+		t.Run("safe_identities_keep_their_exact_bytes", func(t *testing.T) {
+			launch, envRoot := claudeTestLaunch(t, sealedexec.ActionStart)
+			toolResult := `{"type":"user","session_id":"s1","uuid":"tu","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"call_1","content":"ok"}]}}`
+			result := runClaudeLines(t, launch, envRoot,
+				claudeInitLine("s1", launch.Workspace.Path), safeToolUse, toolResult,
+				claudeResultLine("s1", "success", false))
+			if result.OperationalFailure != "" {
+				t.Fatalf("safe identities were refused: %q", result.OperationalFailure)
+			}
+			call, callFound := (*contextevent.ToolCallPayload)(nil), false
+			out, outFound := (*contextevent.ToolResultPayload)(nil), false
+			for _, obs := range result.Observations {
+				switch payload := obs.Payload.(type) {
+				case *contextevent.ToolCallPayload:
+					call, callFound = payload, true
+				case *contextevent.ToolResultPayload:
+					out, outFound = payload, true
+				}
+			}
+			if !callFound || !outFound {
+				t.Fatalf("safe stream lost its tool observations: %v", observationKindsC(result.Observations))
+			}
+			if call.CallID != "call_1" || call.ToolName != "Read" || out.CallID != "call_1" || out.ToolName != "Read" {
+				t.Fatalf("safe fixed identities = %q/%q and %q/%q, want the exact provider bytes",
+					call.CallID, call.ToolName, out.CallID, out.ToolName)
+			}
+		})
 	})
 
 	t.Run("user_non_tool_result_block_is_refused", func(t *testing.T) {
@@ -2174,6 +2255,28 @@ func claudeStopPayload(t *testing.T, rows []sealedexec.NormalizedObservation) *c
 	}
 	t.Fatalf("no adapter-stop observation in %v", observationKindsC(rows))
 	return nil
+}
+
+// assertNoClaudePlaintext proves the classified value appears nowhere in the
+// emitted observations: not in a fixed payload field, not in a detail, and not
+// in a witness or diagnostic string. It serializes each observation's complete
+// payload and detail rather than inspecting selected fields.
+func assertNoClaudePlaintext(t *testing.T, rows []sealedexec.NormalizedObservation, secret string) {
+	t.Helper()
+	for i, obs := range rows {
+		encoded, err := json.Marshal(struct {
+			Kind    contextevent.Kind
+			Payload any
+			Detail  contextevent.Detail
+			Witness string
+		}{Kind: obs.Kind, Payload: obs.Payload, Detail: obs.ForeignDetail, Witness: obs.Witness})
+		if err != nil {
+			t.Fatalf("marshal observation %d: %v", i, err)
+		}
+		if bytes.Contains(encoded, []byte(secret)) {
+			t.Fatalf("observation %d (%s) carries the classified value in plaintext: %s", i, obs.Kind, encoded)
+		}
+	}
 }
 
 func assertClaudeGapReason(t *testing.T, result sealedexec.AdapterResult, reason, operation, source string) {
