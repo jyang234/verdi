@@ -142,6 +142,11 @@ so it cannot race a context transition into duplicate event identities.
 - A failed MCP response write still does not publish a terminal.
 - No error path resets source order, creates a second state, or falls back to
   controller polling.
+- If an error after expansion requires I-88 preservation, the unchanged partial
+  schema represents the shared state's current manifest revision/digest and its
+  complete acknowledgment stream. Validation uses the same per-revision source
+  continuity and strictly increasing global order as successful completion;
+  it never discards the MCP acknowledgments to fit the original request.
 
 ## Test contract
 
