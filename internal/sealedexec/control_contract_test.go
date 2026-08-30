@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"testing"
 
+	"github.com/jyang234/verdi/internal/canonjson"
 	"github.com/jyang234/verdi/internal/contextevent"
 )
 
@@ -45,6 +46,144 @@ func TestExecutionControlRecordContract_Static(t *testing.T) {
 		badRun.Acks[0].Session = "other-session"
 		if _, err := EncodeExecutionPartial(fixture.request, badRun); err == nil {
 			t.Fatal("EncodeExecutionPartial accepted an acknowledgment from another run")
+		}
+	})
+
+	// I-117/SI-164: after an embedded scoped-MCP expansion the shared flight
+	// state's terminal manifest — not the dispatched request manifest — is what
+	// the preserved partial represents, and its complete acknowledgment stream is
+	// validated with exactly the authority successful completion applies.
+	t.Run("execution partial represents the shared post-expansion terminal", func(t *testing.T) {
+		fixture := newExpandedCompletionFixture(t)
+		request, run := fixture.request, fixture.run
+		parent, child := request.ManifestRevision, run.Terminal.Revision
+		if child != parent+1 || run.Terminal.ManifestDigest == request.ManifestDigest {
+			t.Fatalf("expanded fixture terminal = revision %d digest %q, want the installed child past request revision %d",
+				child, run.Terminal.ManifestDigest, parent)
+		}
+		encoded, err := EncodeExecutionPartial(request, run)
+		if err != nil {
+			t.Fatalf("EncodeExecutionPartial: %v", err)
+		}
+		assertCanonicalControlBytes(t, encoded)
+		decoded, err := DecodeExecutionPartial(bytes.NewReader(encoded))
+		if err != nil {
+			t.Fatalf("DecodeExecutionPartial: %v", err)
+		}
+		// The partial binds the actual post-expansion manifest, and no
+		// acknowledged MCP-owned event was dropped to fit the original request.
+		if decoded.ManifestRevision != child || decoded.ManifestDigest != run.Terminal.ManifestDigest {
+			t.Fatalf("partial manifest = revision %d digest %q, want the terminal revision %d digest %q",
+				decoded.ManifestRevision, decoded.ManifestDigest, child, run.Terminal.ManifestDigest)
+		}
+		if len(decoded.EventAcks) != len(run.Acks) {
+			t.Fatalf("partial carries %d acknowledgments, want the complete stream of %d", len(decoded.EventAcks), len(run.Acks))
+		}
+		// The child revision is exactly the successor and restarts source order.
+		crossed := 0
+		for i, ack := range decoded.EventAcks {
+			if ack != run.Acks[i] {
+				t.Fatalf("partial acknowledgment %d = %#v, want %#v", i, ack, run.Acks[i])
+			}
+			if i > 0 && ack.ManifestRevision == decoded.EventAcks[i-1].ManifestRevision+1 {
+				crossed++
+				if ack.SourceSequence != 1 {
+					t.Fatalf("child revision %d opened at source %d, want 1", ack.ManifestRevision, ack.SourceSequence)
+				}
+			}
+		}
+		if crossed != 1 || decoded.EventAcks[len(decoded.EventAcks)-1].ManifestRevision != child {
+			t.Fatalf("partial stream crossed %d revisions ending at %d, want exactly one crossing into %d",
+				crossed, decoded.EventAcks[len(decoded.EventAcks)-1].ManifestRevision, child)
+		}
+
+		// A decoded partial whose represented revision is stale against its own
+		// acknowledged stream is refused: the last acknowledgment fixes it.
+		stale := decoded
+		stale.ManifestRevision = parent
+		staleBytes, err := canonjson.Marshal(stale)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := DecodeExecutionPartial(bytes.NewReader(staleBytes)); err == nil {
+			t.Fatal("DecodeExecutionPartial accepted a partial that predates its own acknowledged terminal revision")
+		}
+
+		for name, mutate := range map[string]func(*ExecutionRun){
+			"same-revision source gap":                          func(r *ExecutionRun) { r.Acks[2].SourceSequence++ },
+			"child revision that does not restart source order": func(r *ExecutionRun) { r.Acks[4].SourceSequence = 5 },
+			"skipped child revision": func(r *ExecutionRun) {
+				for i := 4; i < len(r.Acks); i++ {
+					r.Acks[i].ManifestRevision = parent + 2
+				}
+				r.Terminal.Revision = parent + 2
+			},
+			"backward child revision":     func(r *ExecutionRun) { r.Acks[len(r.Acks)-1].ManifestRevision = parent },
+			"non-increasing global order": func(r *ExecutionRun) { r.Acks[5].GlobalSequence = r.Acks[4].GlobalSequence },
+			"stale terminal snapshot revision": func(r *ExecutionRun) {
+				r.Terminal.Revision = parent
+				r.Terminal.ManifestDigest = r.Terminal.Request.ManifestDigest
+			},
+			// These two are caught only by the terminal cross-match: the
+			// represented revision still agrees with the stream, but the snapshot
+			// the partial is built from did not reach it.
+			"terminal snapshot behind the final acknowledgment": func(r *ExecutionRun) {
+				r.Terminal.NextSourceSequence--
+				r.Terminal.LastGlobalSequence--
+			},
+			"terminal snapshot from another flight": func(r *ExecutionRun) { r.Terminal.Key.Flight = "other-flight" },
+		} {
+			t.Run("refuses "+name, func(t *testing.T) {
+				bad := run
+				bad.Acks = append([]contextevent.EventAck(nil), run.Acks...)
+				mutate(&bad)
+				if _, err := EncodeExecutionPartial(request, bad); err == nil {
+					t.Fatalf("EncodeExecutionPartial accepted %s", name)
+				}
+			})
+		}
+	})
+
+	// Pre-shared-state compatibility: a run that carries no terminal snapshot —
+	// and a run that has not yet acknowledged anything — still preserves the
+	// dispatched request manifest exactly as before.
+	t.Run("execution partial without shared terminal state keeps the request manifest", func(t *testing.T) {
+		fixture := newCompletionFixture(t, contextevent.AuthorityAuthoritative)
+		for name, run := range map[string]ExecutionRun{
+			"acknowledged stream without a snapshot": func() ExecutionRun {
+				run := fixture.run
+				run.Terminal = FlightStateSnapshot{}
+				return run
+			}(),
+			"empty stream": func() ExecutionRun {
+				run := fixture.run
+				run.Acks = nil
+				run.Terminal = FlightStateSnapshot{}
+				return run
+			}(),
+			"empty stream with an opening snapshot": func() ExecutionRun {
+				run := fixture.run
+				run.Acks = nil
+				return run
+			}(),
+		} {
+			t.Run(name, func(t *testing.T) {
+				encoded, err := EncodeExecutionPartial(fixture.request, run)
+				if err != nil {
+					t.Fatalf("EncodeExecutionPartial: %v", err)
+				}
+				decoded, err := DecodeExecutionPartial(bytes.NewReader(encoded))
+				if err != nil {
+					t.Fatalf("DecodeExecutionPartial: %v", err)
+				}
+				if decoded.ManifestRevision != fixture.request.ManifestRevision || decoded.ManifestDigest != fixture.request.ManifestDigest {
+					t.Fatalf("partial manifest = revision %d digest %q, want the request manifest",
+						decoded.ManifestRevision, decoded.ManifestDigest)
+				}
+				if decoded.EventAcks == nil || len(decoded.EventAcks) != len(run.Acks) {
+					t.Fatalf("partial carries %#v, want the exact %d acknowledgments", decoded.EventAcks, len(run.Acks))
+				}
+			})
 		}
 	})
 

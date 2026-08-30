@@ -13,7 +13,12 @@ import (
 )
 
 // EncodeExecutionPartial canonically encodes the actual request/run state
-// available at an incomplete terminal boundary.
+// available at an incomplete terminal boundary. I-117/SI-164: once the shared
+// flight state carries a terminal snapshot, the partial represents that state's
+// actual manifest revision and digest, which an installed embedded expansion
+// has moved past the dispatched request revision. Before the shared state
+// exists, and for a run that has acknowledged nothing, the original request
+// manifest is preserved unchanged.
 func EncodeExecutionPartial(request ExecutionRequest, run ExecutionRun) ([]byte, error) {
 	if _, err := EncodeExecutionRequest(request); err != nil {
 		return nil, fmt.Errorf("sealedexec: encode execution partial request: %w", err)
@@ -25,10 +30,26 @@ func EncodeExecutionPartial(request ExecutionRequest, run ExecutionRun) ([]byte,
 	if err != nil {
 		return nil, fmt.Errorf("sealedexec: encode execution partial authority: %w", err)
 	}
+	// The one shared stream validator also fixes the lowest revision the stream
+	// may carry: no acknowledgment may predate the dispatched request.
+	last, err := validateRunAcknowledgments(request, run.Acks, true)
+	if err != nil {
+		return nil, fmt.Errorf("sealedexec: encode execution partial acknowledgments: %w", err)
+	}
+	revision, digest := request.ManifestRevision, request.ManifestDigest
+	if len(run.Acks) != 0 && run.Terminal.Key != (ExecutionKey{}) {
+		// The snapshot is authoritative only after it has been cross-matched
+		// against the stream that actually reached it, exactly as completion
+		// cross-matches its own terminal position.
+		if err := validateRunTerminal(request, run.Terminal, last); err != nil {
+			return nil, fmt.Errorf("sealedexec: encode execution partial terminal state: %w", err)
+		}
+		revision, digest = run.Terminal.Revision, run.Terminal.ManifestDigest
+	}
 	partial := ExecutionPartial{
 		Schema: ExecutionPartialSchemaID, Flight: request.Flight, Lane: request.Lane,
 		Epoch: request.Epoch, Session: request.Session, Action: request.Action,
-		ManifestRevision: request.ManifestRevision, ManifestDigest: request.ManifestDigest,
+		ManifestRevision: revision, ManifestDigest: digest,
 		Adapter: request.Adapter, AdapterVersion: request.AdapterVersion,
 		WorkspaceID: run.Workspace.WorkspaceID, AdapterSessionRef: run.AdapterSessionRef,
 		Authority: run.Authority, Witnesses: witnesses,
@@ -111,6 +132,19 @@ func validateExecutionPartial(partial ExecutionPartial) error {
 	if partial.EventAcks == nil {
 		return fmt.Errorf("sealedexec: execution partial event_acks must be non-null")
 	}
+	return validateExecutionPartialAcks(partial)
+}
+
+// validateExecutionPartialAcks validates the partial's complete canonical
+// acknowledgment stream through the same helper a successful completion uses
+// (I-117/SI-164): one fixed execution identity, strictly increasing global
+// order, source order contiguous inside each revision, a child revision exactly
+// one past its predecessor restarting at source one, and no skipped or backward
+// revision. Because the represented manifest revision is the terminal one, a
+// nonempty stream must end exactly there. A decoded partial cannot know the
+// dispatched request revision, so the stream's own base is its floor; the
+// encode path applies the request floor before it builds the partial.
+func validateExecutionPartialAcks(partial ExecutionPartial) error {
 	for i, ack := range partial.EventAcks {
 		encoded, err := contextevent.EncodeEventAck(ack)
 		if err != nil {
@@ -120,15 +154,17 @@ func validateExecutionPartial(partial ExecutionPartial) error {
 		if err != nil || canonical != ack {
 			return fmt.Errorf("sealedexec: execution partial event_acks[%d] is not canonical", i)
 		}
-		if ack.Flight != partial.Flight || ack.Lane != partial.Lane || ack.Epoch != partial.Epoch || ack.Session != partial.Session || ack.ManifestRevision != partial.ManifestRevision {
-			return fmt.Errorf("sealedexec: execution partial event_acks[%d] contradicts execution identity", i)
-		}
-		if i > 0 {
-			prior := partial.EventAcks[i-1]
-			if ack.SourceSequence != prior.SourceSequence+1 || ack.GlobalSequence <= prior.GlobalSequence {
-				return fmt.Errorf("sealedexec: execution partial event_acks are discontinuous")
-			}
-		}
+	}
+	identity := ExecutionRequest{
+		Flight: partial.Flight, Lane: partial.Lane, Epoch: partial.Epoch, Session: partial.Session,
+	}
+	last, err := validateRunAcknowledgments(identity, partial.EventAcks, true)
+	if err != nil {
+		return fmt.Errorf("sealedexec: execution partial event_acks: %w", err)
+	}
+	if len(partial.EventAcks) != 0 && last.ManifestRevision != partial.ManifestRevision {
+		return fmt.Errorf("sealedexec: execution partial represents manifest revision %d but its acknowledgments end at %d",
+			partial.ManifestRevision, last.ManifestRevision)
 	}
 	return nil
 }

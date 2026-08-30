@@ -2297,6 +2297,12 @@ func (f *sealedLifecycleController) assertSequence() {
 		sealedexec.ControllerOperationVerifyConflict,
 		sealedexec.ControllerOperationResolveRecorder,
 		sealedexec.ControllerOperationRecorderCheckpoint,
+		// I-115/SI-162: the execution service — the sole owner of the one shared
+		// flight state — cross-matches the recorder checkpoint against the
+		// installed expansion ledger before it constructs that state, so a start
+		// reads the ledger exactly once here and the embedded adapter never
+		// reconstructs a second one.
+		sealedexec.ControllerOperationVerifyExpansion,
 		sealedexec.ControllerOperationVerifyOpaqueBoundary,
 		sealedexec.ControllerOperationNextStamp,
 		sealedexec.ControllerOperationRecorderAppend,

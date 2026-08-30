@@ -517,6 +517,23 @@ func run() error {
 	if err != nil {
 		return err
 	}
+	// Amendment 002 §4/§7 provider order: a real Claude announces its session
+	// before it can call a scoped tool, so the exact valid system/init frame is
+	// written — and its write completed — before the scoped MCP surface is
+	// exercised at all. The parent therefore reduces init into adapter-start
+	// ahead of any MCP-owned context transition, which is what makes a prepared
+	// resume open on resume, adapter-start.
+	if err := emit(map[string]any{
+		"type": "system", "subtype": "init", "session_id": session, "model": model,
+		"mcp_servers":    []map[string]string{{"name": "verdi-context", "status": "connected"}},
+		"cwd":            workspace,
+		"tools":          []string{},
+		"permissionMode": "bypassPermissions", "apiKeySource": "ANTHROPIC_API_KEY",
+		"claude_code_version": version, "slash_commands": []string{}, "output_style": "default",
+		"agents": []string{}, "skills": []string{}, "plugins": []string{}, "uuid": "init-uuid-e2e",
+	}); err != nil {
+		return err
+	}
 	observed := []string{}
 	listed, err := post(url, authorization, ` + "`" + `{"jsonrpc":"2.0","id":1,"method":"tools/list"}` + "`" + `)
 	if err != nil {
@@ -548,35 +565,27 @@ func run() error {
 			return err
 		}
 	}
-	emit(map[string]any{
-		"type": "system", "subtype": "init", "session_id": session, "model": model,
-		"mcp_servers":    []map[string]string{{"name": "verdi-context", "status": "connected"}},
-		"cwd":            workspace,
-		"tools":          []string{},
-		"permissionMode": "bypassPermissions", "apiKeySource": "ANTHROPIC_API_KEY",
-		"claude_code_version": version, "slash_commands": []string{}, "output_style": "default",
-		"agents": []string{}, "skills": []string{}, "plugins": []string{}, "uuid": "init-uuid-e2e",
-	})
 	text := "Sealed witness complete."
 	if bigText {
 		text = strings.Repeat("a", 20000)
 	}
-	emit(map[string]any{
+	if err := emit(map[string]any{
 		"type": "assistant", "session_id": session, "uuid": "msg-uuid-e2e",
 		"message": map[string]any{
 			"id": "msg_e2e", "type": "message", "role": "assistant", "model": model,
 			"content": []map[string]any{{"type": "text", "text": text}},
 			"usage":   map[string]any{"input_tokens": 1, "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0, "output_tokens": 1},
 		},
-	})
-	emit(map[string]any{
+	}); err != nil {
+		return err
+	}
+	return emit(map[string]any{
 		"type": "result", "subtype": "success", "is_error": false, "result": "success",
 		"session_id": session, "uuid": "result-uuid-e2e", "duration_ms": 1, "duration_api_ms": 1,
 		"num_turns": 1, "total_cost_usd": 0.0,
 		"usage":              map[string]any{"input_tokens": 1, "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0, "output_tokens": 1},
 		"permission_denials": []any{},
 	})
-	return nil
 }
 
 func providerCommit() error {
@@ -594,12 +603,23 @@ func providerCommit() error {
 	return nil
 }
 
-func emit(frame map[string]any) {
+// emit writes one complete stream-json frame and returns only after that write
+// has actually happened, so a later scoped MCP call cannot overtake a frame the
+// provider has not yet handed to the parent.
+func emit(frame map[string]any) error {
 	encoded, err := json.Marshal(frame)
 	if err != nil {
-		panic(err)
+		return err
 	}
-	os.Stdout.Write(append(encoded, '\n'))
+	encoded = append(encoded, '\n')
+	written, err := os.Stdout.Write(encoded)
+	if err != nil {
+		return err
+	}
+	if written != len(encoded) {
+		return fmt.Errorf("short frame write: %d of %d bytes", written, len(encoded))
+	}
+	return nil
 }
 
 func mcpTransport(args []string) (string, string, error) {
