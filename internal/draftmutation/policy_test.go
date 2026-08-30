@@ -363,6 +363,58 @@ func TestAuthorizeBrowserHumanPolicyPosture(t *testing.T) {
 	})
 }
 
+// TestPolicyIdentityFailureDetailsAreCallerVisible pins the two
+// pre-existing, operator-visible effective-policy resolution diagnostics on
+// EVERY entry point that composes the one shared resolution path: a nil
+// PolicySource still refuses with the exact detail "policy source is nil"
+// and no wrapped cause, and unsealed/forged resolver output still refuses
+// with "effective policy is not sealed resolver output" wrapping the
+// digest failure. Both remain the operational CodeAuthorityInvalid
+// classification, so the resolvePolicyIdentity split stays diagnostically
+// as well as behaviorally transparent.
+func TestPolicyIdentityFailureDetailsAreCallerVisible(t *testing.T) {
+	identity := testIdentity()
+	agent, err := NewDelegatedAgent("codex", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	browserHuman, err := NewUnauthenticatedHuman()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, tt := range []struct {
+		name      string
+		source    PolicySource
+		detail    string
+		wantCause bool
+	}{
+		{"nil policy source", nil, "policy source is nil", false},
+		{"unsealed effective policy", staticPolicySource{policy: &policyauthority.EffectivePolicy{}}, "effective policy is not sealed resolver output", true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			check := func(entry string, typed *Error) {
+				t.Helper()
+				if typed == nil || typed.Code != CodeAuthorityInvalid || typed.Identity != identity {
+					t.Fatalf("%s(%s) = %v, want operational authority-invalid", entry, tt.name, typed)
+				}
+				if typed.Detail != tt.detail {
+					t.Fatalf("%s(%s) detail = %q, want %q", entry, tt.name, typed.Detail, tt.detail)
+				}
+				if (typed.Cause != nil) != tt.wantCause {
+					t.Fatalf("%s(%s) cause = %v, want cause present = %v", entry, tt.name, typed.Cause, tt.wantCause)
+				}
+			}
+			_, typed := ResolvePolicyGrant(context.Background(), "/repo", identity, tt.source)
+			check("ResolvePolicyGrant", typed)
+			_, typed = AuthorizePolicy(context.Background(), "/repo", identity, agent, tt.source)
+			check("AuthorizePolicy", typed)
+			_, typed = AuthorizeBrowserHuman(context.Background(), "/repo", identity, browserHuman, tt.source)
+			check("AuthorizeBrowserHuman", typed)
+		})
+	}
+}
+
 func TestPolicyActorsRequireAdapterControlledSealedAttribution(t *testing.T) {
 	for _, harness := range []string{"", "   "} {
 		if _, err := NewDelegatedAgent(harness, ""); err == nil {

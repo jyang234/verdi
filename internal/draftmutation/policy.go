@@ -196,6 +196,43 @@ type PolicyGrant struct {
 	PolicyID string
 }
 
+// policyIdentityFailure discriminates the exact effective-policy identity
+// resolution failure and IS the operator-visible detail each caller
+// surfaces verbatim. Carrying the kind out of resolvePolicyIdentity — never
+// collapsing every failure into one caller-side detail — is what keeps the
+// pre-existing per-kind diagnostics ("policy source is nil", "effective
+// policy is not sealed resolver output") reachable through BOTH
+// ResolvePolicyGrant and AuthorizeBrowserHuman rather than buried inside a
+// wrapped cause. The refusal classifications and codes are decided by the
+// callers below and are unchanged by this discrimination.
+type policyIdentityFailure string
+
+const (
+	// policyIdentityResolved is the success discriminant: no failure.
+	policyIdentityResolved policyIdentityFailure = ""
+	// policyIdentityNilSource is the one arm with no underlying cause, so
+	// it renders as an unwrapped refusal exactly as it always has.
+	policyIdentityNilSource policyIdentityFailure = "policy source is nil"
+	// policyIdentityNotAdopted is exactly the canonical
+	// errors.Is(err, policyauthority.ErrNotAdopted) condition — the only
+	// failure a caller may read as genuine non-adoption.
+	policyIdentityNotAdopted policyIdentityFailure = "project has not adopted policy authority"
+	// policyIdentityUnresolvable is every other store/resolver failure.
+	policyIdentityUnresolvable policyIdentityFailure = "resolving effective policy"
+	// policyIdentityUnsealed is unsealed or forged resolver output.
+	policyIdentityUnsealed policyIdentityFailure = "effective policy is not sealed resolver output"
+)
+
+// authorityInvalid renders a failure that is not non-adoption as the shared
+// operational refusal, preserving each kind's own detail and the
+// nil-source arm's lack of a cause.
+func (f policyIdentityFailure) authorityInvalid(identity Identity, cause error) *Error {
+	if cause == nil {
+		return NewError(CodeAuthorityInvalid, identity, string(f))
+	}
+	return WrapError(CodeAuthorityInvalid, identity, string(f), cause)
+}
+
 // resolvePolicyIdentity resolves the sealed effective-policy digest alone —
 // the ONE shared effective-policy identity resolution path every
 // authorization composes, never a second policy interpretation.
@@ -203,27 +240,30 @@ type PolicyGrant struct {
 // top of this; AuthorizeBrowserHuman consumes it directly, so a browser-
 // human mutation can resolve the digest without requiring the payload
 // AuthorizePolicy's design_assistance-gated callers still need (Wave 6
-// design §4.1, SI-176). notAdopted reports exactly the canonical
-// errors.Is(err, policyauthority.ErrNotAdopted) condition, distinct from
-// every other resolution failure (nil source, malformed store, unsealed or
-// forged resolver output), which every caller must still treat
-// operationally rather than as non-adoption.
-func resolvePolicyIdentity(ctx context.Context, root string, source PolicySource) (effective *policyauthority.EffectivePolicy, digest string, notAdopted bool, err error) {
+// design §4.1, SI-176). failure is the single failure discriminant
+// (policyIdentityResolved means success) and carries the caller-facing
+// detail; cause carries the underlying error and is nil only for
+// policyIdentityNilSource, which genuinely has no cause. Only
+// policyIdentityNotAdopted reports the canonical
+// errors.Is(err, policyauthority.ErrNotAdopted) condition; every other
+// failure (nil source, malformed store, unsealed or forged resolver
+// output) must still be treated operationally rather than as non-adoption.
+func resolvePolicyIdentity(ctx context.Context, root string, source PolicySource) (*policyauthority.EffectivePolicy, string, policyIdentityFailure, error) {
 	if source == nil {
-		return nil, "", false, fmt.Errorf("draftmutation: policy source is nil")
+		return nil, "", policyIdentityNilSource, nil
 	}
-	effective, err = source.ResolveEffectivePolicy(ctx, root)
+	effective, err := source.ResolveEffectivePolicy(ctx, root)
 	if err != nil {
 		if errors.Is(err, policyauthority.ErrNotAdopted) {
-			return nil, "", true, err
+			return nil, "", policyIdentityNotAdopted, err
 		}
-		return nil, "", false, err
+		return nil, "", policyIdentityUnresolvable, err
 	}
-	digest, err = effective.Digest()
+	digest, err := effective.Digest()
 	if err != nil {
-		return nil, "", false, fmt.Errorf("effective policy is not sealed resolver output: %w", err)
+		return nil, "", policyIdentityUnsealed, err
 	}
-	return effective, digest, false, nil
+	return effective, digest, policyIdentityResolved, nil
 }
 
 // ResolvePolicyGrant resolves the sealed effective-policy digest and the
@@ -237,12 +277,12 @@ func resolvePolicyIdentity(ctx context.Context, root string, source PolicySource
 // "proposal-only" for a delegated agent) so a capability-discovery reader
 // never re-derives this exact policy lookup a second time.
 func ResolvePolicyGrant(ctx context.Context, root string, identity Identity, source PolicySource) (PolicyGrant, *Error) {
-	effective, digest, notAdopted, err := resolvePolicyIdentity(ctx, root, source)
-	if err != nil {
-		if notAdopted {
-			return PolicyGrant{}, WrapError(CodePolicyForbidden, identity, "project has not adopted policy authority", err)
+	effective, digest, failure, cause := resolvePolicyIdentity(ctx, root, source)
+	if failure != policyIdentityResolved {
+		if failure == policyIdentityNotAdopted {
+			return PolicyGrant{}, WrapError(CodePolicyForbidden, identity, string(failure), cause)
 		}
-		return PolicyGrant{}, WrapError(CodeAuthorityInvalid, identity, "resolving effective policy", err)
+		return PolicyGrant{}, failure.authorityInvalid(identity, cause)
 	}
 	var payload *policyartifact.DesignAssistancePayload
 	var policyID string
@@ -314,7 +354,9 @@ type PolicyPosture struct {
 // canonical errors.Is(err, policyauthority.ErrNotAdopted) condition becomes
 // PolicyPosture{Adopted: false}; a nil source, malformed store, or unsealed
 // or forged resolver output all remain an operational CodeAuthorityInvalid
-// refusal, never a silent non-adoption. Every actor other than the one
+// refusal — each carrying its own policyIdentityFailure detail, the same
+// operator-visible diagnostic ResolvePolicyGrant surfaces for that kind —
+// never a silent non-adoption. Every actor other than the one
 // minted by NewUnauthenticatedHuman is refused with CodeActorForbidden,
 // including a violated or unproven NewTrustedHuman actor, which keeps
 // routing through AuthorizePolicy's own unchanged matrix instead.
@@ -325,12 +367,12 @@ func AuthorizeBrowserHuman(ctx context.Context, root string, identity Identity, 
 	if !actor.isExplicitBrowserHuman() {
 		return PolicyPosture{}, NewError(CodeActorForbidden, identity, "browser-human authorization requires the explicit unauthenticated-human actor")
 	}
-	_, digest, notAdopted, err := resolvePolicyIdentity(ctx, root, source)
-	if err != nil {
-		if notAdopted {
+	_, digest, failure, cause := resolvePolicyIdentity(ctx, root, source)
+	if failure != policyIdentityResolved {
+		if failure == policyIdentityNotAdopted {
 			return PolicyPosture{Adopted: false}, nil
 		}
-		return PolicyPosture{}, WrapError(CodeAuthorityInvalid, identity, "resolving effective policy", err)
+		return PolicyPosture{}, failure.authorityInvalid(identity, cause)
 	}
 	return PolicyPosture{Adopted: true, Digest: digest}, nil
 }

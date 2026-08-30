@@ -496,7 +496,11 @@ func (e *Entry) UnmarshalJSON(data []byte) error {
 	type plain Entry
 	var decoded plain
 	if err := decodeStrictJSON(data, &decoded); err != nil {
-		return fmt.Errorf("designprovenance: decoding entry: %w", err)
+		// Returned unwrapped: DecodeEntry already prefixes
+		// "designprovenance: decoding entry", so wrapping here doubled
+		// that prefix in every operator-visible strict-decode diagnostic.
+		// Strictness is unchanged — the same error, same rejections.
+		return err
 	}
 	*e = Entry(decoded)
 
@@ -606,9 +610,25 @@ func (e Entry) validate(checkDigest bool) error {
 		// not-applicable posture, so a harness-bearing v2 entry recording
 		// anything but a resolved policy is structurally impossible from
 		// any conforming writer and fails closed here as a defense-in-
-		// depth witness of that invariant.
+		// depth witness of that invariant. The general shape rule below
+		// subsumes this case; it is kept ahead of that rule solely for its
+		// more specific operator diagnostic.
 		if e.Harness != "" && e.Policy.State != PolicyResolved {
 			return fmt.Errorf("designprovenance: delegated-agent entries must record a resolved policy")
+		}
+		// PolicyNotApplicable is reachable from exactly ONE writer shape:
+		// the explicit browser-human actor (draftmutation's
+		// NewUnauthenticatedHuman), which carries the kernel's
+		// unauthenticated attribution with no principal id and no
+		// harness/session at all. Every other conforming writer — a
+		// delegated agent (nonblank harness) or a resolved principal
+		// human (nonempty PrincipalID) — records a resolved policy, so
+		// binding the not-applicable arm to that exact shape makes an
+		// entry claiming non-adoption from a shape that could never have
+		// produced it fail closed rather than pass as honest history.
+		if e.Policy.State == PolicyNotApplicable &&
+			(!e.Attribution.Unauthenticated || e.Attribution.PrincipalID != "" || e.Harness != "" || e.Session != "") {
+			return fmt.Errorf("designprovenance: not-applicable policy requires the explicit unauthenticated-human shape with no principal, harness, or session")
 		}
 	}
 	if err := e.Attribution.Validate(); err != nil {

@@ -159,8 +159,17 @@ func TestDesignProvenanceV2PolicyUnionStrictDecode(t *testing.T) {
 			if tt.raw == trimmed {
 				t.Fatalf("mutation %q did not change the fixture", tt.name)
 			}
-			if _, err := DecodeEntry([]byte(tt.raw)); err == nil || !strings.Contains(err.Error(), tt.want) {
+			err := func() error {
+				_, err := DecodeEntry([]byte(tt.raw))
+				return err
+			}()
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
 				t.Fatalf("DecodeEntry error = %v, want it to contain %q", err, tt.want)
+			}
+			// DecodeEntry owns the one "decoding entry" prefix;
+			// Entry.UnmarshalJSON must not add a second copy of it.
+			if got := strings.Count(err.Error(), "designprovenance: decoding entry"); got > 1 {
+				t.Fatalf("DecodeEntry error %q repeats the decode prefix %d times, want at most 1", err, got)
 			}
 		})
 	}
@@ -224,6 +233,69 @@ func TestDesignProvenanceV2AgentAlwaysResolvedInvariant(t *testing.T) {
 	agentResolved.Harness = "codex"
 	if err := agentResolved.Seal(); err != nil {
 		t.Fatalf("Seal agent resolved: %v", err)
+	}
+}
+
+// TestDesignProvenanceV2NotApplicableRequiresBrowserHumanShape binds the
+// not-applicable arm to the ONE writer shape that can reach it: the
+// explicit browser-human actor's unauthenticated attribution with no
+// principal id and no harness/session. A principal-carrying entry claiming
+// non-adoption could never have been produced by a conforming writer (a
+// resolved principal human always routes through AuthorizePolicy, which
+// records a resolved digest), so it fails closed instead of passing as
+// honest history.
+func TestDesignProvenanceV2NotApplicableRequiresBrowserHumanShape(t *testing.T) {
+	principal, err := governanceprincipal.CanonicalPrincipalID("github-org", "alice")
+	if err != nil {
+		t.Fatal(err)
+	}
+	principalAttribution, err := governanceprincipal.NewPrincipalAttribution(principal)
+	if err != nil {
+		t.Fatal(err)
+	}
+	notApplicable := Policy{State: PolicyNotApplicable}
+
+	for _, tt := range []struct {
+		name    string
+		mutate  func(*Entry)
+		wantErr string
+	}{
+		{
+			"principal attribution claiming non-adoption",
+			func(e *Entry) { e.Attribution = principalAttribution },
+			"not-applicable policy requires the explicit unauthenticated-human shape",
+		},
+		{
+			"delegated-agent harness claiming non-adoption",
+			func(e *Entry) { e.Harness = "codex" },
+			"delegated-agent entries must record a resolved policy",
+		},
+		{
+			"harness and session claiming non-adoption",
+			func(e *Entry) { e.Harness = "codex"; e.Session = "session-1" },
+			"delegated-agent entries must record a resolved policy",
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			e := v2Entry(t, Policy{State: PolicyResolved, Digest: digestC})
+			e.Policy = &notApplicable
+			tt.mutate(&e)
+			if err := e.Seal(); err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("Seal(%s) error = %v, want it to contain %q", tt.name, err, tt.wantErr)
+			}
+		})
+	}
+
+	// The one conforming shape is still accepted, and a principal-carrying
+	// RESOLVED entry (the other real writer) is untouched by the new rule.
+	browserHuman := v2Entry(t, notApplicable)
+	if err := browserHuman.Validate(); err != nil {
+		t.Fatalf("browser-human not-applicable entry rejected: %v", err)
+	}
+	resolvedPrincipal := v2Entry(t, Policy{State: PolicyResolved, Digest: digestC})
+	resolvedPrincipal.Attribution = principalAttribution
+	if err := resolvedPrincipal.Seal(); err != nil {
+		t.Fatalf("Seal principal resolved: %v", err)
 	}
 }
 
