@@ -14,16 +14,15 @@ import (
 // file: an active→archive spec move) from a content change.
 type DiffEntry struct {
 	// Status is git's raw status letter: "A" (added), "M" (modified), "D"
-	// (deleted), or "R" (renamed) — "C" (copied) never appears since
-	// DiffNameStatus does not pass -C.
+	// (deleted), "R" (renamed), or "C" (copied). Copy entries are emitted
+	// only by the handback-specific DiffNameStatusCopies seam.
 	Status string
 	// Score is the similarity percentage git attached to a rename (0-100);
-	// meaningful only when Status == "R". A pure rename (identical content)
-	// scores 100.
+	// meaningful only when Status is "R" or "C". Identical content scores 100.
 	Score int
 	// Path is the current (post-change) path.
 	Path string
-	// OldPath is the pre-change path; empty unless Status == "R".
+	// OldPath is the pre-change/source path; empty unless Status is "R" or "C".
 	OldPath string
 }
 
@@ -39,9 +38,22 @@ func (e DiffEntry) Pure() bool {
 // base per I-14 (merge-base(HEAD, default branch), supplied by the caller
 // via the engine's Context rather than computed here).
 func DiffNameStatus(ctx context.Context, dir, base, head string) ([]DiffEntry, error) {
-	out, err := run(ctx, dir, "diff", "--name-status", "-M", base, head)
+	return diffNameStatus(ctx, "DiffNameStatus", dir, base, head, "-M")
+}
+
+// DiffNameStatusCopies returns the complete handback diff with rename and
+// copy detection, including unchanged copy sources via --find-copies-harder.
+// DiffNameStatus remains rename-only for its existing VL-010 callers.
+func DiffNameStatusCopies(ctx context.Context, dir, base, head string) ([]DiffEntry, error) {
+	return diffNameStatus(ctx, "DiffNameStatusCopies", dir, base, head, "-M", "-C", "--find-copies-harder")
+}
+
+func diffNameStatus(ctx context.Context, operation, dir, base, head string, detectionArgs ...string) ([]DiffEntry, error) {
+	args := append([]string{"diff", "--name-status"}, detectionArgs...)
+	args = append(args, base, head)
+	out, err := run(ctx, dir, args...)
 	if err != nil {
-		return nil, fmt.Errorf("gitx: DiffNameStatus(%s..%s): %w", base, head, err)
+		return nil, fmt.Errorf("gitx: %s(%s..%s): %w", operation, base, head, err)
 	}
 
 	trimmed := strings.TrimSpace(string(out))
@@ -53,15 +65,16 @@ func DiffNameStatus(ctx context.Context, dir, base, head string) ([]DiffEntry, e
 	for _, line := range strings.Split(trimmed, "\n") {
 		fields := strings.Split(line, "\t")
 		if len(fields) < 2 {
-			return nil, fmt.Errorf("gitx: DiffNameStatus(%s..%s): malformed line %q", base, head, line)
+			return nil, fmt.Errorf("gitx: %s(%s..%s): malformed line %q", operation, base, head, line)
 		}
 		code := fields[0]
-		if strings.HasPrefix(code, "R") {
+		if strings.HasPrefix(code, "R") || strings.HasPrefix(code, "C") {
 			if len(fields) != 3 {
-				return nil, fmt.Errorf("gitx: DiffNameStatus(%s..%s): malformed rename line %q", base, head, line)
+				return nil, fmt.Errorf("gitx: %s(%s..%s): malformed rename/copy line %q", operation, base, head, line)
 			}
-			score, _ := strconv.Atoi(strings.TrimPrefix(code, "R"))
-			entries = append(entries, DiffEntry{Status: "R", Score: score, OldPath: fields[1], Path: fields[2]})
+			status := code[:1]
+			score, _ := strconv.Atoi(strings.TrimPrefix(code, status))
+			entries = append(entries, DiffEntry{Status: status, Score: score, OldPath: fields[1], Path: fields[2]})
 			continue
 		}
 		entries = append(entries, DiffEntry{Status: code, Path: fields[1]})

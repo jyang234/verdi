@@ -58,6 +58,25 @@ func runCloseFeature(ctx context.Context, root string, spec *artifact.SpecFrontm
 		return 2
 	}
 	defaultBranchRef := lint.ResolveDefaultBranch(ctx, root)
+	var countersignProjection *artifact.RollupCountersign
+	var countersignCondition *gateCondition
+	countersignConfigured := manifest != nil && manifest.Countersign != nil
+	if deps.Countersign != nil {
+		result, err := resolveLifecycleCountersign(ctx, deps.Countersign, root, manifest, deps.Model, string(spec.Class), defaultBranchRef, head)
+		if err != nil {
+			fmt.Fprintln(stderr, "close:", err)
+			return 2
+		}
+		condition := lifecycleCountersignCondition(7, result)
+		countersignCondition = &condition
+		if condition.OK {
+			countersignProjection, err = countersignRollupProjection(result)
+			if err != nil {
+				fmt.Fprintln(stderr, "close:", err)
+				return 2
+			}
+		}
+	}
 
 	specRef, err := artifact.ParseRef(spec.ID)
 	if err != nil {
@@ -73,6 +92,24 @@ func runCloseFeature(ctx context.Context, root string, spec *artifact.SpecFrontm
 	statusMode, rc := closePrecondition(ctx, root, spec, specRef, deps.State, deps.Model, stderr)
 	if rc != 0 {
 		return rc
+	}
+	if countersignCondition != nil && countersignConfigured {
+		label := "closure(" + deps.Model.DisplayClass("feature") + "): "
+		counterOutcome := reportClosureGateConditions(stdout, label, []gateCondition{*countersignCondition})
+		if !counterOutcome.Ready {
+			fmt.Fprintf(stdout, "close: FAIL (%s closure gate not satisfied; see conditions above)\n", deps.Model.DisplayClass("feature"))
+			return 1
+		}
+		adopted, err := probeConflictGate(root, deps.ConflictRequestPath)
+		if err != nil {
+			fmt.Fprintln(stderr, "close:", err)
+			return 2
+		}
+		if adopted {
+			if rc := runCloseConflictGateForSpec(ctx, root, spec, deps.ConflictRequestPath, deps.ConflictProvider, stdout, stderr); rc != 0 {
+				return rc
+			}
+		}
 	}
 
 	// Discover implementing stories the same way `verdi matrix <feature>`
@@ -110,7 +147,14 @@ func runCloseFeature(ctx context.Context, root string, spec *artifact.SpecFrontm
 		fmt.Fprintf(stdout, "close: FAIL (%s closure gate not satisfied; see conditions above)\n", deps.Model.DisplayClass("feature"))
 		return 1
 	}
-
+	if countersignCondition != nil && !countersignConfigured {
+		label := "closure(" + deps.Model.DisplayClass("feature") + "): "
+		counterOutcome := reportClosureGateConditions(stdout, label, []gateCondition{*countersignCondition})
+		if !counterOutcome.Ready {
+			fmt.Fprintf(stdout, "close: FAIL (%s closure gate not satisfied; see conditions above)\n", deps.Model.DisplayClass("feature"))
+			return 1
+		}
+	}
 	// The feature half of the story ritual's own uncommitted-fold-record
 	// disclosure (close.go's closeUncommittedRecordSource), on the same shared
 	// predicate. Attestations only: there is no waived status at the feature
@@ -163,7 +207,7 @@ func runCloseFeature(ctx context.Context, root string, spec *artifact.SpecFrontm
 		return rc
 	}
 
-	if err := writeFeatureRollup(root, specRef, spec, head, fold); err != nil {
+	if err := writeFeatureRollup(root, specRef, spec, head, fold, countersignProjection); err != nil {
 		fmt.Fprintln(stderr, "close:", err)
 		reportUncommittedFreezeResidue(specRef.Name, closureBranch, freezeReachedReport, stderr)
 		return 2
@@ -362,14 +406,15 @@ func mapFeatureRollupCriteria(acs []evidence.FeatureACResult) []artifact.RollupC
 // empty Story exactly for this reason; the rollup is still a complete,
 // self-contained, digest-verifiable record of the fold even when there is
 // nowhere to publish it.
-func writeFeatureRollup(root string, specRef artifact.Ref, spec *artifact.SpecFrontmatter, head string, fold evidence.FeatureResult) error {
+func writeFeatureRollup(root string, specRef artifact.Ref, spec *artifact.SpecFrontmatter, head string, fold evidence.FeatureResult, countersignProjection *artifact.RollupCountersign) error {
 	roll := artifact.Rollup{
-		Schema:   "verdi.rollup/v1",
-		Story:    spec.Story,
-		Ref:      specRef.String(),
-		Commit:   head,
-		Criteria: mapFeatureRollupCriteria(fold.ACs),
-		Eligible: featureAllEvidenced(fold),
+		Schema:      "verdi.rollup/v1",
+		Story:       spec.Story,
+		Ref:         specRef.String(),
+		Commit:      head,
+		Criteria:    mapFeatureRollupCriteria(fold.ACs),
+		Eligible:    featureAllEvidenced(fold),
+		Countersign: countersignProjection,
 	}
 	digest, err := rollupDigest(roll)
 	if err != nil {

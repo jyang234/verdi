@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/jyang234/verdi/internal/fixturegit"
 )
 
 // renameRepo mirrors fixturegit.Repo's shape (Dir/Head/Heads) but is built
@@ -17,6 +19,23 @@ type renameRepo struct {
 	Dir   string
 	Heads []string
 	Head  string
+}
+
+func TestDiffNameStatus_CopyDetectionForHandback(t *testing.T) {
+	repo := fixturegit.Build(t, []fixturegit.Layer{
+		{Files: map[string]string{".verdi/specs/example/spec.md": "protected authority\n", "README.md": "base\n"}, Message: "base"},
+		{Files: map[string]string{"docs/copied.md": "protected authority\n"}, Message: "copy protected authority"},
+	})
+	entries, err := DiffNameStatusCopies(context.Background(), repo.Dir, repo.Heads[0], repo.Head)
+	if err != nil {
+		t.Fatalf("DiffNameStatusCopies: %v", err)
+	}
+	for _, entry := range entries {
+		if entry.Status == "C" && entry.Score == 100 && entry.OldPath == ".verdi/specs/example/spec.md" && entry.Path == "docs/copied.md" {
+			return
+		}
+	}
+	t.Fatalf("copy-aware diff omitted protected old path: %+v", entries)
 }
 
 // buildRenameRepo builds a two-commit repo: layer 1 creates a spec file

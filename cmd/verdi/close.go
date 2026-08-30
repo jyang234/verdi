@@ -93,6 +93,7 @@ import (
 	"github.com/jyang234/verdi/internal/evidence"
 	"github.com/jyang234/verdi/internal/forge"
 	"github.com/jyang234/verdi/internal/gitx"
+	"github.com/jyang234/verdi/internal/lifecyclecountersign"
 	"github.com/jyang234/verdi/internal/lint"
 	"github.com/jyang234/verdi/internal/model"
 	"github.com/jyang234/verdi/internal/policyconflict"
@@ -117,7 +118,11 @@ type closeDeps struct {
 	// like align.go's own alignDeps.JudgeTimeout.
 	JudgeTimeout time.Duration
 	Forge        forge.Forge
-	Registry     provider.StoryProvider
+	// Countersign is nil only for pre-U2c direct-call tests. cmdClose always
+	// wires the live read-only lifecycle resolver, including with a nil Forge
+	// so missing reachability becomes a blocking unproven operand.
+	Countersign lifecycleCountersignResolver
+	Registry    provider.StoryProvider
 	// Model is the store's resolved operating model (store.Open's config
 	// bottleneck) — display vocabulary for the gate lines and ritual prose
 	// this verb prints (L-M13(1)). nil (every pre-existing test literal)
@@ -325,7 +330,8 @@ func cmdClose(args []string, stdout, stderr io.Writer) int {
 			fmt.Fprintln(stderr, "close:", err)
 			return 2
 		}
-		return runPreflightWithConflict(ctx, root, storyArg, cfg.Manifest, cfg.Model, buildForgeBestEffort(ctx, root), forceLocal, requestPath, localLifecycleConflictProvider{root: root}, stdout, stderr)
+		f := buildForgeBestEffort(ctx, root)
+		return runPreflightWithConflictAndCountersign(ctx, root, storyArg, cfg.Manifest, cfg.Model, f, forceLocal, requestPath, localLifecycleConflictProvider{root: root}, lifecyclecountersign.Resolver{Forge: f}, stdout, stderr)
 	}
 	// 04 §Semantics: "PublishRollup runs in CI only" — close calls it
 	// directly (ac-2), so the same CI-only discipline `rollup --publish`
@@ -372,12 +378,14 @@ func cmdClose(args []string, stdout, stderr io.Writer) int {
 		}
 	}
 
+	f := buildForgeBestEffort(ctx, root)
 	deps := closeDeps{
 		Runner:              runner,
 		JudgeCmd:            judgeCmd,
 		JudgeRequired:       judgeRequired,
 		JudgeTimeout:        judgeTimeout,
-		Forge:               buildForgeBestEffort(ctx, root),
+		Forge:               f,
+		Countersign:         lifecyclecountersign.Resolver{Forge: f},
 		Registry:            buildProviderRegistry(manifest),
 		Model:               cfg.Model,
 		ConflictRequestPath: requestPath,
@@ -390,18 +398,31 @@ func cmdClose(args []string, stdout, stderr io.Writer) int {
 }
 
 func runPreflightWithConflict(ctx context.Context, root, storyArg string, manifest *store.Manifest, mdl *model.Model, f forge.Forge, forceLocal bool, requestPath string, provider policyconflict.VerdictProvider, stdout, stderr io.Writer) int {
+	return runPreflightWithConflictAndCountersign(ctx, root, storyArg, manifest, mdl, f, forceLocal, requestPath, provider, nil, stdout, stderr)
+}
+
+func runPreflightWithConflictAndCountersign(ctx context.Context, root, storyArg string, manifest *store.Manifest, mdl *model.Model, f forge.Forge, forceLocal bool, requestPath string, provider policyconflict.VerdictProvider, countersignResolver lifecycleCountersignResolver, stdout, stderr io.Writer) int {
 	adopted, err := probeConflictGate(root, requestPath)
 	if err != nil {
 		fmt.Fprintln(stderr, "close:", err)
 		return 2
 	}
 	if !adopted {
-		return runPreflight(ctx, root, storyArg, manifest, mdl, f, forceLocal, stdout, stderr)
+		return runPreflightWithCountersign(ctx, root, storyArg, manifest, mdl, f, forceLocal, countersignResolver, stdout, stderr)
+	}
+	if countersignResolver != nil && manifest != nil && manifest.Countersign != nil {
+		if rc := reportConfiguredCountersignBeforeConflict(ctx, root, storyArg, manifest, mdl, countersignResolver, stdout, stderr); rc != 0 {
+			return rc
+		}
+		if rc := runCloseConflictGate(ctx, root, storyArg, requestPath, provider, stdout, stderr); rc != 0 {
+			return rc
+		}
+		return runPreflightWithCountersign(ctx, root, storyArg, manifest, mdl, f, forceLocal, nil, stdout, stderr)
 	}
 	if rc := runCloseConflictGate(ctx, root, storyArg, requestPath, provider, stdout, stderr); rc != 0 {
 		return rc
 	}
-	return runPreflight(ctx, root, storyArg, manifest, mdl, f, forceLocal, stdout, stderr)
+	return runPreflightWithCountersign(ctx, root, storyArg, manifest, mdl, f, forceLocal, countersignResolver, stdout, stderr)
 }
 
 func runPrepareWithConflict(ctx context.Context, root, storyArg string, manifest *store.Manifest, deps closeDeps, forceLocal bool, requestPath string, provider policyconflict.VerdictProvider, stdout, stderr io.Writer) int {
@@ -413,10 +434,55 @@ func runPrepareWithConflict(ctx context.Context, root, storyArg string, manifest
 	if !adopted {
 		return runPrepare(ctx, root, storyArg, manifest, deps, forceLocal, stdout, stderr)
 	}
+	if deps.Countersign != nil && manifest != nil && manifest.Countersign != nil {
+		if rc := reportConfiguredCountersignBeforeConflict(ctx, root, storyArg, manifest, deps.Model, deps.Countersign, stdout, stderr); rc != 0 {
+			return rc
+		}
+		if rc := runCloseConflictGate(ctx, root, storyArg, requestPath, provider, stdout, stderr); rc != 0 {
+			return rc
+		}
+		deps.Countersign = nil
+		return runPrepare(ctx, root, storyArg, manifest, deps, forceLocal, stdout, stderr)
+	}
 	if rc := runCloseConflictGate(ctx, root, storyArg, requestPath, provider, stdout, stderr); rc != 0 {
 		return rc
 	}
 	return runPrepare(ctx, root, storyArg, manifest, deps, forceLocal, stdout, stderr)
+}
+
+// reportConfiguredCountersignBeforeConflict resolves and renders the configured
+// production countersign operand before an independently adopted constitutional
+// conflict can block the lifecycle entry point. Callers remove the resolver
+// from the later delegated core only after this precheck passes, avoiding a
+// duplicate forge observation while preserving legacy conflict-first behavior
+// for repositories without configured countersigning.
+func reportConfiguredCountersignBeforeConflict(ctx context.Context, root, storyArg string, manifest *store.Manifest, mdl *model.Model, resolver lifecycleCountersignResolver, stdout, stderr io.Writer) int {
+	spec, err := storyresolve.Resolve(root, storyArg)
+	if err != nil {
+		fmt.Fprintln(stderr, "close:", err)
+		return 2
+	}
+	head, err := gitx.RevParse(ctx, root, "HEAD")
+	if err != nil {
+		fmt.Fprintln(stderr, "close:", err)
+		return 2
+	}
+	result, err := resolveLifecycleCountersign(ctx, resolver, root, manifest, mdl, string(spec.Class), lint.ResolveDefaultBranch(ctx, root), head)
+	if err != nil {
+		fmt.Fprintln(stderr, "close:", err)
+		return 2
+	}
+	number := 5
+	label := "closure: "
+	if spec.Class == artifact.ClassFeature {
+		number = 7
+		label = "closure(" + mdl.DisplayClass("feature") + "): "
+	}
+	outcome := reportClosureGateConditions(stdout, label, []gateCondition{lifecycleCountersignCondition(number, result)})
+	if !outcome.Ready {
+		return 1
+	}
+	return 0
 }
 
 func runCloseConflictGate(ctx context.Context, root, storyArg, requestPath string, provider policyconflict.VerdictProvider, stdout, stderr io.Writer) int {
@@ -601,7 +667,11 @@ func runClose(ctx context.Context, root, storyArg string, manifest *store.Manife
 		fmt.Fprintln(stderr, "close:", err)
 		return 2
 	}
-	if adopted {
+	// Preserve the pre-U2c order for nil-injected tests and adopted legacy
+	// stores that have not configured countersigning. Configured live runs
+	// resolve and render their read-only countersign first so an independent
+	// constitutional refusal cannot mask that exact result (I-55).
+	if adopted && (deps.Countersign == nil || manifest == nil || manifest.Countersign == nil) {
 		if rc := runCloseConflictGateForSpec(ctx, root, spec, deps.ConflictRequestPath, deps.ConflictProvider, stdout, stderr); rc != 0 {
 			return rc
 		}
@@ -632,6 +702,37 @@ func runClose(ctx context.Context, root, storyArg string, manifest *store.Manife
 		return 2
 	}
 	defaultBranchRef := lint.ResolveDefaultBranch(ctx, root)
+	var countersignProjection *artifact.RollupCountersign
+	var countersignCondition *gateCondition
+	countersignConfigured := manifest != nil && manifest.Countersign != nil
+	if deps.Countersign != nil {
+		result, err := resolveLifecycleCountersign(ctx, deps.Countersign, root, manifest, deps.Model, string(spec.Class), defaultBranchRef, head)
+		if err != nil {
+			fmt.Fprintln(stderr, "close:", err)
+			return 2
+		}
+		condition := lifecycleCountersignCondition(5, result)
+		countersignCondition = &condition
+		if condition.OK {
+			countersignProjection, err = countersignRollupProjection(result)
+			if err != nil {
+				fmt.Fprintln(stderr, "close:", err)
+				return 2
+			}
+		}
+		if countersignConfigured {
+			counterOutcome := reportClosureGateConditions(stdout, "closure: ", []gateCondition{condition})
+			if !counterOutcome.Ready {
+				fmt.Fprintln(stdout, "close: FAIL (closure gate not satisfied; see conditions above)")
+				return 1
+			}
+			if adopted {
+				if rc := runCloseConflictGateForSpec(ctx, root, spec, deps.ConflictRequestPath, deps.ConflictProvider, stdout, stderr); rc != 0 {
+					return rc
+				}
+			}
+		}
+	}
 
 	// The closure gate (co-1: authoritative evidence only — runClosureGate
 	// folds via internal/evidence.Fold with Preview false, exactly as
@@ -644,6 +745,13 @@ func runClose(ctx context.Context, root, storyArg string, manifest *store.Manife
 	if !ok {
 		fmt.Fprintln(stdout, "close: FAIL (closure gate not satisfied; see conditions above)")
 		return 1
+	}
+	if countersignCondition != nil && !countersignConfigured {
+		counterOutcome := reportClosureGateConditions(stdout, "closure: ", []gateCondition{*countersignCondition})
+		if !counterOutcome.Ready {
+			fmt.Fprintln(stdout, "close: FAIL (closure gate not satisfied; see conditions above)")
+			return 1
+		}
 	}
 
 	// Wave 5C Task 10 (closeexperiment.go, design §9's final paragraph):
@@ -737,7 +845,7 @@ func runClose(ctx context.Context, root, storyArg string, manifest *store.Manife
 		return rc
 	}
 
-	if err := writeRollup(root, specRef, spec, head, fold); err != nil {
+	if err := writeRollup(root, specRef, spec, head, fold, countersignProjection); err != nil {
 		fmt.Fprintln(stderr, "close:", err)
 		reportUncommittedFreezeResidue(specRef.Name, closureBranch, freezeReachedReport, stderr)
 		return 2
@@ -1323,14 +1431,15 @@ func flipSpecStatusToClosed(root, name string) error {
 // writeRollup builds, self-validates, and writes rollup.json into
 // specs/active/<name>/ (still under the active zone — store.ArchiveMove
 // moves it with the rest of the target spec directory immediately afterward).
-func writeRollup(root string, specRef artifact.Ref, spec *artifact.SpecFrontmatter, head string, fold evidence.StoryResult) error {
+func writeRollup(root string, specRef artifact.Ref, spec *artifact.SpecFrontmatter, head string, fold evidence.StoryResult, countersignProjection *artifact.RollupCountersign) error {
 	roll := artifact.Rollup{
-		Schema:   "verdi.rollup/v1",
-		Story:    spec.Story,
-		Ref:      specRef.String(),
-		Commit:   head,
-		Criteria: mapRollupCriteria(fold.ACs),
-		Eligible: fold.Eligible,
+		Schema:      "verdi.rollup/v1",
+		Story:       spec.Story,
+		Ref:         specRef.String(),
+		Commit:      head,
+		Criteria:    mapRollupCriteria(fold.ACs),
+		Eligible:    fold.Eligible,
+		Countersign: countersignProjection,
 	}
 	digest, err := rollupDigest(roll)
 	if err != nil {

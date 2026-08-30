@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/jyang234/verdi/internal/artifact"
+	gp "github.com/jyang234/verdi/internal/governanceprincipal"
 )
 
 const manifestSchema = "verdi.layout/v1"
@@ -109,6 +110,34 @@ type ToolchainConfig struct {
 	Commit string `yaml:"commit"`
 }
 
+// CountersignConfig is the optional repository-governed forge countersign
+// policy. Absence is meaningful and has no default: lifecycle consumers must
+// preserve it as a blocking unproven operand.
+type CountersignConfig struct {
+	TrustSource                  string `yaml:"trust_source"`
+	FreshnessPolicyID            string `yaml:"freshness_policy_id"`
+	MaximumObservationAgeSeconds int64  `yaml:"maximum_observation_age_seconds"`
+	MaximumApprovalAgeSeconds    int64  `yaml:"maximum_approval_age_seconds"`
+}
+
+// Validate rejects incomplete or nonsensical countersign policy operands.
+// The countersign package remains the sole owner of policy digest creation.
+func (c CountersignConfig) Validate() error {
+	if err := gp.ValidateID(c.TrustSource); err != nil {
+		return fmt.Errorf("store: verdi.yaml countersign.trust_source: %w", err)
+	}
+	if err := gp.ValidateID(c.FreshnessPolicyID); err != nil {
+		return fmt.Errorf("store: verdi.yaml countersign.freshness_policy_id: %w", err)
+	}
+	if c.MaximumObservationAgeSeconds <= 0 {
+		return fmt.Errorf("store: verdi.yaml countersign.maximum_observation_age_seconds must be positive")
+	}
+	if c.MaximumApprovalAgeSeconds < 0 {
+		return fmt.Errorf("store: verdi.yaml countersign.maximum_approval_age_seconds must be nonnegative")
+	}
+	return nil
+}
+
 // AuditConfig is verdi.yaml's `audit:` block (R4-I-10, 01 §Store manifest):
 // the exemption/deviation counterweight thresholds (spec-realignment
 // concept §2, §3b). Both fields are tunable, both documented as
@@ -159,12 +188,13 @@ func (a AuditConfig) Validate() error {
 // Manifest is the store manifest, `verdi.yaml`, schema verdi.layout/v1
 // (01 §Store manifest). Decode is strict: unknown top-level keys fail.
 type Manifest struct {
-	Schema    string           `yaml:"schema"`
-	Forge     string           `yaml:"forge,omitempty"`
-	Providers *ProvidersConfig `yaml:"providers,omitempty"`
-	Lint      *LintConfig      `yaml:"lint,omitempty"`
-	Align     *AlignConfig     `yaml:"align,omitempty"`
-	Audit     *AuditConfig     `yaml:"audit,omitempty"`
+	Schema      string             `yaml:"schema"`
+	Forge       string             `yaml:"forge,omitempty"`
+	Providers   *ProvidersConfig   `yaml:"providers,omitempty"`
+	Lint        *LintConfig        `yaml:"lint,omitempty"`
+	Align       *AlignConfig       `yaml:"align,omitempty"`
+	Audit       *AuditConfig       `yaml:"audit,omitempty"`
+	Countersign *CountersignConfig `yaml:"countersign,omitempty"`
 	// SpikePaths is the VL-016 path-glob fence a spike build branch's diff
 	// must stay inside (01 §Store manifest, R4-I-10). Fails closed: an
 	// absent or empty list admits no spike diffs at all — a repo must
@@ -228,6 +258,11 @@ func (m Manifest) Validate() error {
 	}
 	if m.Align != nil {
 		if err := m.Align.Validate(); err != nil {
+			return err
+		}
+	}
+	if m.Countersign != nil {
+		if err := m.Countersign.Validate(); err != nil {
 			return err
 		}
 	}

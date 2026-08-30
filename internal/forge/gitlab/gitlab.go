@@ -27,6 +27,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/jyang234/verdi/internal/forge"
 	"github.com/jyang234/verdi/internal/httpjson"
@@ -62,6 +63,8 @@ type Config struct {
 	HTTPClient *http.Client
 	// Getenv defaults to os.Getenv; overridable for hermetic CIContext tests.
 	Getenv func(string) string
+	// Clock supplies approval observation time. Defaults to time.Now.
+	Clock func() time.Time
 }
 
 // Adapter implements forge.Forge against the GitLab API.
@@ -80,6 +83,9 @@ func New(cfg Config) *Adapter {
 	}
 	if cfg.Getenv == nil {
 		cfg.Getenv = os.Getenv
+	}
+	if cfg.Clock == nil {
+		cfg.Clock = time.Now
 	}
 	return &Adapter{cfg: cfg, transport: &httpjson.Client{HTTPClient: cfg.HTTPClient}}
 }
@@ -199,13 +205,13 @@ func (a *Adapter) setAuth(req *http.Request) {
 func (a *Adapter) classify(method, url string, wantStatus int) httpjson.Classify {
 	return func(resp *http.Response, transportErr error) error {
 		if transportErr != nil {
-			return fmt.Errorf("gitlab: %s %s: %w", method, url, transportErr)
+			return fmt.Errorf("%w: gitlab: %s %s: %w", forge.ErrUnavailable, method, url, transportErr)
 		}
 		if resp.StatusCode == http.StatusTooManyRequests {
-			return fmt.Errorf("gitlab: %s %s: rate limited: status %s", method, url, resp.Status)
+			return fmt.Errorf("%w: gitlab: %s %s: rate limited: status %s", forge.ErrUnavailable, method, url, resp.Status)
 		}
 		if resp.StatusCode != wantStatus {
-			return fmt.Errorf("gitlab: %s %s: unexpected status %s", method, url, resp.Status)
+			return fmt.Errorf("%w: gitlab: %s %s: unexpected status %s", forge.ErrUnavailable, method, url, resp.Status)
 		}
 		return nil
 	}

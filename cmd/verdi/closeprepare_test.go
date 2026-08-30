@@ -151,11 +151,11 @@ func TestCmdClose_PrepareAcceptsExplicitStoryAndFeatureRefs(t *testing.T) {
 
 		var stdout, stderr bytes.Buffer
 		rc := cmdClose([]string{"--prepare", "spec/close-fixture", "--force-local"}, &stdout, &stderr)
-		if rc != 0 {
-			t.Fatalf("cmdClose(--prepare story) = %d, want 0; stdout=%s stderr=%s", rc, stdout.String(), stderr.String())
+		if rc != 1 {
+			t.Fatalf("cmdClose(--prepare story, missing countersign config) = %d, want 1; stdout=%s stderr=%s", rc, stdout.String(), stderr.String())
 		}
-		if !strings.Contains(stdout.String(), "close: --prepare: next command: verdi close spec/close-fixture --force-local") {
-			t.Fatalf("stdout does not prove --prepare dispatch: %s", stdout.String())
+		if !strings.Contains(stdout.String(), "forge countersign") || !strings.Contains(stdout.String(), "MECHANICAL WORK REQUIRED") {
+			t.Fatalf("stdout does not prove delegated countersign preflight: %s", stdout.String())
 		}
 		if _, err := os.Stat(filepath.Join(repo.Dir, ".verdi", "specs", "active", "close-fixture", "spec.md")); err != nil {
 			t.Fatalf("--prepare archived or removed the active story: %v", err)
@@ -172,11 +172,11 @@ func TestCmdClose_PrepareAcceptsExplicitStoryAndFeatureRefs(t *testing.T) {
 
 		var stdout, stderr bytes.Buffer
 		rc := cmdClose([]string{"jira:FIXTURE-EPIC-1", "--prepare", "--force-local"}, &stdout, &stderr)
-		if rc != 0 {
-			t.Fatalf("cmdClose(--prepare feature) = %d, want 0; stdout=%s stderr=%s", rc, stdout.String(), stderr.String())
+		if rc != 1 {
+			t.Fatalf("cmdClose(--prepare feature, missing countersign config) = %d, want 1; stdout=%s stderr=%s", rc, stdout.String(), stderr.String())
 		}
-		if !strings.Contains(stdout.String(), "close: --prepare: next command: verdi close jira:FIXTURE-EPIC-1 --force-local") {
-			t.Fatalf("stdout does not prove feature --prepare dispatch: %s", stdout.String())
+		if !strings.Contains(stdout.String(), "forge countersign") || !strings.Contains(stdout.String(), "MECHANICAL WORK REQUIRED") {
+			t.Fatalf("stdout does not prove delegated feature countersign preflight: %s", stdout.String())
 		}
 		if _, err := os.Stat(filepath.Join(repo.Dir, ".verdi", "specs", "active", "close-feature-fixture", "spec.md")); err != nil {
 			t.Fatalf("--prepare archived or removed the active feature: %v", err)
@@ -192,11 +192,11 @@ func TestCmdClose_PrepareRunsOutsideCIWithoutForceLocal(t *testing.T) {
 
 	var stdout, stderr bytes.Buffer
 	rc := cmdClose([]string{"--prepare", "spec/close-fixture"}, &stdout, &stderr)
-	if rc != 0 {
-		t.Fatalf("cmdClose(--prepare outside CI) = %d, want 0; stdout=%s stderr=%s", rc, stdout.String(), stderr.String())
+	if rc != 1 {
+		t.Fatalf("cmdClose(--prepare outside CI, missing countersign config) = %d, want 1; stdout=%s stderr=%s", rc, stdout.String(), stderr.String())
 	}
-	if !strings.Contains(stdout.String(), "close: --prepare: next command: verdi close spec/close-fixture\n") {
-		t.Fatalf("stdout does not contain the unguarded local preparation result: %s", stdout.String())
+	if !strings.Contains(stdout.String(), "forge countersign") || !strings.Contains(stdout.String(), "MECHANICAL WORK REQUIRED") {
+		t.Fatalf("stdout does not contain the delegated countersign preflight result: %s", stdout.String())
 	}
 	if strings.Contains(stderr.String(), "refusing to publish outside CI") {
 		t.Fatalf("--prepare was incorrectly restored behind the publish guard: %s", stderr.String())
@@ -1824,7 +1824,7 @@ func assertPreparePreserved(t *testing.T, root, reportPath string, beforeRaw []b
 
 // TestRunPreparePropagatesExperimentEvidenceParity pins design §9's
 // preflight-parity paragraph one layer up: --prepare reaches readiness
-// through runPreflightWithPrelude (runPrepare's own final call, threading
+// through runPreflightWithPreludeAndCountersign (runPrepare's own final call, threading
 // deps.Experiments — Task 10 correction, F3), so a comparison-backed
 // target a real close would refuse on experiment evidence must report
 // MECHANICAL WORK REQUIRED through --prepare too, never a bare next-
@@ -1863,7 +1863,7 @@ func TestRunPreparePropagatesExperimentEvidenceParity(t *testing.T) {
 // TestRunPrepareExperimentEvidenceOperationalRefusesWithoutReady mirrors
 // TestClosePreflightExperimentEvidenceOperationalRefusesWithoutReady
 // (closepreflight_test.go) one layer up: --prepare reaches readiness
-// through the SAME runPreflightWithPrelude call
+// through the SAME runPreflightWithPreludeAndCountersign call
 // TestRunPreparePropagatesExperimentEvidenceParity already proves inherits
 // the verdict-shaped refusal, so it must inherit the operational one too.
 // A worktree-only experiments/ directory (never merged, so the accepted
@@ -1871,7 +1871,7 @@ func TestRunPreparePropagatesExperimentEvidenceParity(t *testing.T) {
 // TestCloseExperimentWorktreeOnlyExperimentsDirectoryRefusesOperationally
 // shape) makes the production adapter report an operational Outcome; the
 // doubled "close: --preflight: close: --preflight:" prefix on the wrapped
-// error is pre-existing house style (runPreflightWithPrelude's own error
+// error is pre-existing house style (runPreflightWithPreludeAndCountersign's own error
 // wrap over runStoryPreflightGate's own "close: --preflight:"-prefixed
 // error), not a new defect, and is deliberately not asserted away here.
 func TestRunPrepareExperimentEvidenceOperationalRefusesWithoutReady(t *testing.T) {

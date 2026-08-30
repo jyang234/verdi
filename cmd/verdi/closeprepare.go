@@ -414,7 +414,7 @@ func runPrepare(ctx context.Context, root, storyArg string, manifest *store.Mani
 		return 1
 	}
 
-	rc := runPreflightWithPrelude(ctx, root, storyArg, manifest, deps.Model, deps.Forge, forceLocal, deps.Experiments, prelude, stdout, stderr)
+	rc := runPreflightWithPreludeAndCountersign(ctx, root, storyArg, manifest, deps.Model, deps.Forge, forceLocal, deps.Experiments, prelude, deps.Countersign, stdout, stderr)
 	if rc == 1 {
 		fmt.Fprintln(stdout, "close: --prepare: MECHANICAL WORK REQUIRED (closure preflight is NOT READY; see its diagnostics above)")
 		return 1

@@ -107,3 +107,10 @@ func TestForge_Negative_NoBundleWrapsErrNoBundle(t *testing.T) {
 		t.Fatalf("error = %v, want errors.Is(err, forge.ErrNoBundle)", err)
 	}
 }
+
+func TestForge_ListApprovals_Negative_NotSeeded(t *testing.T) {
+	f := New()
+	if _, err := f.ListApprovals(context.Background(), "17"); err == nil {
+		t.Fatal("ListApprovals with nothing seeded: want error, got nil")
+	}
+}

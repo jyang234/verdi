@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/jyang234/verdi/internal/boardio"
+	"github.com/jyang234/verdi/internal/matrixprojection"
 )
 
 // annotationIDShapeRe mirrors artifact's private annotationIDRe (I-11):
@@ -143,24 +144,24 @@ func TestGetLinks_Negative(t *testing.T) {
 func TestGetMatrix_Happy(t *testing.T) {
 	b, _, _ := newTestBackend(t)
 	result := b.GetMatrix(context.Background(), mustArgs(t, map[string]any{"story": "jira:LOAN-1482"}))
-	var out matrixResult
+	var out matrixprojection.Record
 	toolResultJSON(t, result, &out)
-	if out.SpecRef != "spec/widget-retry" {
-		t.Fatalf("SpecRef = %q, want spec/widget-retry", out.SpecRef)
+	if out.Target.SpecRef != "spec/widget-retry" {
+		t.Fatalf("Target.SpecRef = %q, want spec/widget-retry", out.Target.SpecRef)
 	}
-	if len(out.ACs) != 1 || out.ACs[0].ID != "ac-1" {
-		t.Fatalf("ACs = %+v, want one ac-1", out.ACs)
+	if out.Story == nil || len(out.Story.ACs) != 1 || out.Story.ACs[0].ID != "ac-1" {
+		t.Fatalf("Story = %+v, want one ac-1", out.Story)
 	}
-	if !strings.Contains(out.ACs[0].Summary, "obligation-quality:missing") {
-		t.Fatalf("Summary = %q, want shared fold obligation-quality projection", out.ACs[0].Summary)
+	if !strings.Contains(out.Story.ACs[0].Summary, "obligation-quality:missing") {
+		t.Fatalf("Summary = %q, want shared fold obligation-quality projection", out.Story.ACs[0].Summary)
 	}
 
 	// Also resolvable by spec ref, per I-30's two accepted forms.
 	bySpec := b.GetMatrix(context.Background(), mustArgs(t, map[string]any{"story": "spec/widget-retry"}))
-	var bySpecOut matrixResult
+	var bySpecOut matrixprojection.Record
 	toolResultJSON(t, bySpec, &bySpecOut)
-	if bySpecOut.SpecRef != "spec/widget-retry" {
-		t.Fatalf("get_matrix(spec ref) SpecRef = %q, want spec/widget-retry", bySpecOut.SpecRef)
+	if bySpecOut.Target.SpecRef != "spec/widget-retry" {
+		t.Fatalf("get_matrix(spec ref) Target.SpecRef = %q, want spec/widget-retry", bySpecOut.Target.SpecRef)
 	}
 }
 

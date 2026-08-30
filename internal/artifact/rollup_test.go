@@ -1,6 +1,9 @@
 package artifact
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestDecodeRollup_Happy(t *testing.T) {
 	y := `{"schema":"verdi.rollup/v1","story":"jira:LOAN-1482","ref":"spec/stale-decline","commit":"7f3c2a1",
@@ -15,6 +18,73 @@ func TestDecodeRollup_Happy(t *testing.T) {
 	}
 	if !r.Eligible {
 		t.Fatal("Eligible = false")
+	}
+}
+
+func TestDecodeRollup_CountersignProjection(t *testing.T) {
+	y := `{"schema":"verdi.rollup/v1","story":"jira:LOAN-1482","ref":"spec/stale-decline","commit":"7f3c2a1",
+		"criteria":[{"id":"ac-1","text":"static check","status":"evidenced","summary":"3/3 obligations pass"}],
+		"eligible":true,
+		"countersign":{"record_digest":"sha256:` + hex64 + `","verdict":"proven",
+			"approvals":[{"approval_id":"17","approval_ref":"gid://review/17","principal_id":"forge-live:101","principal_state":"authenticated"}],
+			"eligible_approval_ids":["17"],"distinct_principal_ids":["forge-live:101"],
+			"witnesses":["countersign-verdict:value=proven"]},
+		"digest":"sha256:` + hex64 + `"}`
+	r, err := DecodeRollup([]byte(y))
+	if err != nil {
+		t.Fatalf("DecodeRollup: %v", err)
+	}
+	if r.Countersign == nil || r.Countersign.RecordDigest != "sha256:"+hex64 || len(r.Countersign.Approvals) != 1 || r.Countersign.Approvals[0].ApprovalRef != "gid://review/17" {
+		t.Fatalf("Countersign = %+v", r.Countersign)
+	}
+
+	for _, tc := range []struct {
+		name string
+		old  string
+		new  string
+	}{
+		{name: "empty approvals", old: `"approvals":[{"approval_id":"17","approval_ref":"gid://review/17","principal_id":"forge-live:101","principal_state":"authenticated"}]`, new: `"approvals":[]`},
+		{name: "empty eligible approval ids", old: `"eligible_approval_ids":["17"]`, new: `"eligible_approval_ids":[]`},
+		{name: "empty distinct principal ids", old: `"distinct_principal_ids":["forge-live:101"]`, new: `"distinct_principal_ids":[]`},
+		{name: "empty witnesses", old: `"witnesses":["countersign-verdict:value=proven"]`, new: `"witnesses":[]`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			projection := strings.Replace(y, tc.old, tc.new, 1)
+			if projection == y {
+				t.Fatalf("test setup did not replace %s", tc.name)
+			}
+			if _, err := DecodeRollup([]byte(projection)); err == nil {
+				t.Fatalf("DecodeRollup with %s: want error", tc.name)
+			}
+		})
+	}
+
+	for _, tc := range []struct {
+		name string
+		edit func(*Rollup)
+	}{
+		{"non-proven verdict", func(r *Rollup) { r.Countersign.Verdict = "unproven" }},
+		{"missing record digest", func(r *Rollup) { r.Countersign.RecordDigest = "" }},
+		{"null approvals", func(r *Rollup) { r.Countersign.Approvals = nil }},
+		{"missing approval ref", func(r *Rollup) { r.Countersign.Approvals[0].ApprovalRef = "" }},
+		{"unknown principal state", func(r *Rollup) { r.Countersign.Approvals[0].PrincipalState = "mystery" }},
+		{"null eligible ids", func(r *Rollup) { r.Countersign.EligibleApprovalIDs = nil }},
+		{"null principals", func(r *Rollup) { r.Countersign.DistinctPrincipalIDs = nil }},
+		{"null witnesses", func(r *Rollup) { r.Countersign.Witnesses = nil }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			copy := *r
+			projection := *r.Countersign
+			projection.Approvals = append([]RollupCountersignApproval{}, projection.Approvals...)
+			projection.EligibleApprovalIDs = append([]string{}, projection.EligibleApprovalIDs...)
+			projection.DistinctPrincipalIDs = append([]string{}, projection.DistinctPrincipalIDs...)
+			projection.Witnesses = append([]string{}, projection.Witnesses...)
+			copy.Countersign = &projection
+			tc.edit(&copy)
+			if err := copy.Validate(); err == nil {
+				t.Fatalf("Validate(%s): want error", tc.name)
+			}
+		})
 	}
 }
 

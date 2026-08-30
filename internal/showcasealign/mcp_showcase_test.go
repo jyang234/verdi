@@ -31,14 +31,12 @@
 //   - get_links: stale-decline's real `implements` edge to
 //     adr/0002-outbox-events, plus the computed inverse "implemented-by"
 //     backlink.
-//   - get_matrix: story jira:LOAN-1482 resolves to spec/stale-decline's
-//     real 4 ACs; ac-4's real, active (no-expiry) waiver
-//     (.verdi/waivers/jira-loan-1482/ac-4.md) folds to "waived" — a
-//     genuine, non-trivial fact about committed showcase content, not a
-//     synthetic assertion. (ac-1..ac-3 fold to no-signal/pending because
+//   - get_matrix: jira:LOAN-1482 resolves to spec/stale-decline's canonical
+//     feature projection with its real 4 ACs; ac-4 names the real
+//     spec/escrow-notify-v2 implementing story and folds to pending because
 //     provisionShowcaseStore's own doc comment discloses it does not copy
 //     examples/showcase/derived/ into the provisioned store — disclosed,
-//     not silently assumed.)
+//     not silently assumed.
 //   - get_context_bundle: an explicit pinned-refs manifest resolves
 //     adr/0002-outbox-events@HEAD to its real historical body. (The
 //     `spec:` form is deliberately not exercised here: both specs in the
@@ -253,37 +251,47 @@ func TestMCPShowcaseCoverage(t *testing.T) {
 	})
 
 	t.Run("get_matrix", func(t *testing.T) {
+		t.Setenv("CI_DEFAULT_BRANCH", "main")
 		text := callMCPToolOK(t, srv, "get_matrix", map[string]any{"story": "jira:LOAN-1482"})
 		var out struct {
-			SpecRef string `json:"spec_ref"`
-			ACs     []struct {
-				ID     string `json:"id"`
-				Status string `json:"status"`
-			} `json:"acs"`
-			Eligible bool `json:"eligible"`
+			Target struct {
+				Class   string `json:"class"`
+				SpecRef string `json:"spec_ref"`
+			} `json:"target"`
+			Feature *struct {
+				ACs []struct {
+					ID                  string   `json:"id"`
+					ImplementingStories []string `json:"implementing_stories"`
+					Status              string   `json:"status"`
+				} `json:"acs"`
+			} `json:"feature"`
 		}
 		decodeToolJSON(t, text, &out)
-		if out.SpecRef != "spec/stale-decline" {
-			t.Fatalf("get_matrix(jira:LOAN-1482).SpecRef = %q, want spec/stale-decline", out.SpecRef)
+		if out.Target.Class != "feature" || out.Target.SpecRef != "spec/stale-decline" {
+			t.Fatalf("get_matrix(jira:LOAN-1482).Target = %+v, want feature spec/stale-decline", out.Target)
 		}
-		if len(out.ACs) != 4 {
-			t.Fatalf("get_matrix(jira:LOAN-1482) returned %d ACs, want 4 (ac-1..ac-4): %+v", len(out.ACs), out.ACs)
+		if out.Feature == nil {
+			t.Fatalf("get_matrix(jira:LOAN-1482).Feature = nil, want canonical feature arm; text: %s", text)
+		}
+		if len(out.Feature.ACs) != 4 {
+			t.Fatalf("get_matrix(jira:LOAN-1482) returned %d ACs, want 4 (ac-1..ac-4): %+v", len(out.Feature.ACs), out.Feature.ACs)
 		}
 
 		gotAC4 := false
-		for _, ac := range out.ACs {
-			if ac.ID == "ac-4" {
-				gotAC4 = true
-				if ac.Status != "waived" {
-					t.Fatalf("get_matrix(jira:LOAN-1482) ac-4.Status = %q, want waived (examples/showcase's own real, active, no-expiry waiver)", ac.Status)
-				}
+		for _, ac := range out.Feature.ACs {
+			if ac.ID != "ac-4" {
+				continue
+			}
+			gotAC4 = true
+			if ac.Status != "pending" {
+				t.Fatalf("get_matrix(jira:LOAN-1482) ac-4.Status = %q, want pending without copied derived evidence", ac.Status)
+			}
+			if len(ac.ImplementingStories) != 1 || ac.ImplementingStories[0] != "spec/escrow-notify-v2" {
+				t.Fatalf("get_matrix(jira:LOAN-1482) ac-4.ImplementingStories = %+v, want [spec/escrow-notify-v2]", ac.ImplementingStories)
 			}
 		}
 		if !gotAC4 {
-			t.Fatalf("get_matrix(jira:LOAN-1482) missing ac-4: %+v", out.ACs)
-		}
-		if out.Eligible {
-			t.Fatalf("get_matrix(jira:LOAN-1482).Eligible = true, want false (ac-1..ac-3 carry no derived evidence under this harness's provisioning — helpers_test.go's own disclosed gap: examples/showcase/derived/ is not copied)")
+			t.Fatalf("get_matrix(jira:LOAN-1482) missing ac-4: %+v", out.Feature.ACs)
 		}
 	})
 

@@ -59,6 +59,12 @@ func cmdContext(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		return cmdContextCompile(args[1:], stdin, stdout, stderr)
 	case "conflict":
 		return cmdContextConflict(args[1:], stdin, stdout, stderr)
+	case "execution":
+		return cmdContextExecution(args[1:], stdin, stdout, stderr)
+	case "mcp":
+		return cmdContextMCP(args[1:], stdin, stdout, stderr)
+	case "receipt":
+		return cmdContextReceipt(args[1:], stdin, stdout, stderr)
 	default:
 		fmt.Fprintln(stderr, contextCompileUsage)
 		return 2
