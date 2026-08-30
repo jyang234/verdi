@@ -356,10 +356,8 @@ func TestCountersignLifecycleContract_Behavioral(t *testing.T) {
 		}
 		f.SeedApprovalSnapshot("17", snapshot)
 
-		result, err := (lifecyclecountersign.Resolver{Forge: f}).Resolve(context.Background(), lifecyclecountersign.Request{
-			Root: repo.Dir, Manifest: cfg.Manifest, Model: cfg.Model, TargetClass: "story",
-			DefaultBranch: "main", SourceBranch: branch, LocalCandidateSHA: head,
-		})
+		result, err := resolveLifecycleCountersign(context.Background(), lifecyclecountersign.Resolver{Forge: f},
+			repo.Dir, cfg.Manifest, cfg.Model, "story", "main", head)
 		if err != nil {
 			t.Fatalf("resolve dismissed approval: %v", err)
 		}
@@ -677,6 +675,16 @@ func installCountersignContractAuthority(t *testing.T, root string, withForge, w
 	}
 	gitOutput(t, root, addArgs...)
 	gitOutput(t, root, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "--quiet", "--no-verify", "-m", "configure countersign authority")
+	// I-121: the selected governance profile is authenticated from the
+	// ACCEPTED default-branch tree, never from this mutable checkout, so a
+	// fixture that adopts governance must land it on the default branch
+	// too — the shape an operator has after adopting on main and branching
+	// the candidate from it. The candidate branch keeps the identical
+	// bytes on disk, so the working-tree conflict-adoption probe this
+	// fixture also exercises sees exactly what it saw before.
+	if strings.TrimSpace(gitOutput(t, root, "rev-parse", "--abbrev-ref", "HEAD")) != "main" {
+		gitOutput(t, root, "branch", "-f", "main", "HEAD")
+	}
 	return strings.TrimSpace(gitOutput(t, root, "rev-parse", "HEAD"))
 }
 

@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"sort"
 	"time"
 
@@ -32,6 +33,19 @@ type Request struct {
 	DefaultBranch     string
 	SourceBranch      string
 	LocalCandidateSHA string
+	// AcceptedBranch, AcceptedCommit, and AcceptedProfileSource pin the ONE
+	// accepted default-branch Git tree this invocation authenticates
+	// against. Governance authority is acceptance truth, never mutable
+	// checkout state (I-121): AcceptedProfileSource is a read-only view of
+	// the tree at AcceptedCommit, and AcceptedBranch is the default-branch
+	// name that commit was resolved from, cross-matched here against
+	// DefaultBranch — the same branch identity forge targeting uses — so a
+	// profile can never arrive from some other branch than the one the
+	// candidate is being countersigned into. Root remains the mutable
+	// checkout's own identity; it is never a governance source.
+	AcceptedBranch        string
+	AcceptedCommit        string
+	AcceptedProfileSource fs.FS
 }
 
 // Result preserves either a full canonical record or a stable unproven
@@ -44,12 +58,14 @@ type Result struct {
 
 // Resolver owns MR discovery, approval observation, selected-profile loading,
 // provider-fact authentication, candidate-author resolution, and countersign
-// reduction. LoadProfile and Clock are explicit deterministic test seams;
-// their nil values select the live read-only implementations.
+// reduction. Clock is an explicit deterministic test seam; its nil value
+// selects the live implementation. The selected profile has no seam at all:
+// it is decoded from Request.AcceptedProfileSource through the ONE
+// policyauthority decoder, so no caller can substitute profile bytes the
+// accepted tree does not carry.
 type Resolver struct {
-	Forge       forge.Forge
-	LoadProfile func(root string) (gp.Profile, error)
-	Clock       func() time.Time
+	Forge forge.Forge
+	Clock func() time.Time
 }
 
 // Resolve reads current authority facts and returns a three-valued result.
@@ -104,16 +120,19 @@ func (r Resolver) Resolve(ctx context.Context, request Request) (Result, error) 
 		return Result{}, fmt.Errorf("lifecycle countersign: provider snapshot change_id %q does not match discovered change %q", snapshot.ChangeID, changeID)
 	}
 
-	loadProfile := r.LoadProfile
-	if loadProfile == nil {
-		loadProfile = loadSelectedProfile
+	if request.AcceptedProfileSource == nil || request.AcceptedCommit == "" || request.AcceptedBranch == "" {
+		return unproven("accepted-tree", "accepted default-branch governance tree is unresolved"), nil
 	}
-	profile, err := loadProfile(request.Root)
+	if request.AcceptedBranch != request.DefaultBranch {
+		// vocab:identity — forge provider resource name, not a Verdi lifecycle class.
+		return unproven("accepted-tree", fmt.Sprintf("pinned governance branch %q is not the forge target branch %q", request.AcceptedBranch, request.DefaultBranch)), nil
+	}
+	profile, err := loadSelectedProfile(request.AcceptedProfileSource)
 	if err != nil {
 		if errors.Is(err, ErrProfileUnavailable) {
 			return unproven("profile", err.Error()), nil
 		}
-		return Result{}, fmt.Errorf("lifecycle countersign: load selected governance profile: %w", err)
+		return Result{}, fmt.Errorf("lifecycle countersign: load selected governance profile from accepted tree %s: %w", request.AcceptedCommit, err)
 	}
 
 	policy, err := countersign.NewFreshnessPolicy(config.FreshnessPolicyID, config.MaximumObservationAgeSeconds, config.MaximumApprovalAgeSeconds)
@@ -201,8 +220,12 @@ func lifecycleObligation(mdl *model.Model, class string) (string, int, error) {
 	return role, counts[0], nil
 }
 
-func loadSelectedProfile(root string) (gp.Profile, error) {
-	policyStore, err := policyauthority.Load(root)
+// loadSelectedProfile decodes the accepted tree's selected sealed
+// governance profile through policyauthority's single decoder. An
+// unadopted or incompletely adopted accepted tree is a MISSING operand
+// (unproven); every other structural failure stays operational.
+func loadSelectedProfile(source fs.FS) (gp.Profile, error) {
+	policyStore, err := policyauthority.LoadFromSource(source)
 	if err != nil {
 		if errors.Is(err, policyauthority.ErrNotAdopted) || errors.Is(err, policyauthority.ErrIncompleteAdoption) {
 			return gp.Profile{}, fmt.Errorf("%w: %v", ErrProfileUnavailable, err)

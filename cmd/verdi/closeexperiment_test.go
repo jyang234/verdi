@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jyang234/verdi/internal/artifact"
 	"github.com/jyang234/verdi/internal/experiment"
@@ -105,11 +106,13 @@ const closeExperimentProfileMD = `---
 schema: verdi.governance-profile/v1
 id: solo-default
 class: solo
-applicable_transitions: [accept]
+applicable_transitions: [accept, close]
 identity_trust_sources:
   - {id: offline-human, kind: identity-provider}
+  - {id: forge-live, kind: forge}
 role_mappings:
   - {role: author, trust_source: offline-human, subjects: ["close-experiment-fixture-subject"]}
+  - {role: story-review, trust_source: forge-live, subjects: ["101", "900"]}
 ownership_sources: []
 signature_requirements: []
 required_approvers: []
@@ -124,14 +127,48 @@ Hermetic close-experiment fixture profile.
 // (constitution + selected profile) every production-adapter test commits
 // alongside the spike, read from experimentapp's own testdata so this file
 // never forks a second copy of the constitution fixture.
-func closeExperimentPolicyFiles(t *testing.T) map[string]string {
-	t.Helper()
-	raw, err := os.ReadFile(filepath.Join("..", "..", "internal", "experimentapp", "testdata", "policy", "constitution.md"))
-	if err != nil {
-		t.Fatalf("read policy constitution fixture: %v", err)
-	}
+// closeExperimentConstitutionMD is this file's own accepted constitution.
+// It began as internal/experimentapp/testdata/policy/constitution.md (the
+// experiment application core's own hermetic fixture, still that
+// package's) and adds exactly what the lifecycle countersign gate needs
+// on top: the `close` transition and the `story-review` role, so the ONE
+// selected profile this accepted tree carries can serve BOTH gates this
+// fixture now crosses — the experiment adapter's accepted-tree policy
+// resolution and the countersign gate's accepted-tree profile (I-121).
+// The shared testdata constitution stays untouched for its own package's
+// tests, which declare no close transition at all.
+const closeExperimentConstitutionMD = `---
+schema: verdi.policy-constitution/v1
+id: policy-constitution/constitution
+kind: policy-constitution
+title: "Experiment application fixture constitution"
+owners: [platform-team]
+selected_profile: solo-default
+environments: [local]
+catalog:
+  roles: [author, reviewer, policy-owner, story-review]
+  transitions: [accept, close]
+  evidence_sources: [ci]
+  escalation_metrics: [age-days]
+subjects:
+  action: []
+  configuration: []
+  capability: []
+  resource: []
+  identity: []
+  evidence: []
+adapters:
+  - id: codex
+    version: "1"
+    managed: [AGENTS.md]
+    discovery_filenames: [AGENTS.md]
+---
+Hermetic policy fixture for the experiment application core.
+`
+
+func closeExperimentPolicyFiles() map[string]string {
 	return map[string]string{
-		".verdi/policy/constitution.md":          string(raw),
+		".verdi/policy/constitution.md":          closeExperimentConstitutionMD,
 		".verdi/policy/profiles/solo-default.md": closeExperimentProfileMD,
 	}
 }
@@ -191,6 +228,11 @@ func closeExperimentWriteFixtureFile(t *testing.T, root, rel, content string) {
 // state fixture, not a shortcut around either seam's own contract: the
 // spike's own spec.md bytes are byte-identical between both commits, so
 // closePrecondition's statusless landed-blob comparison is unaffected.
+// closeExperimentCandidateBranch is the candidate branch every production
+// fixture below is checked out on — the merge-request source branch the
+// countersign gate discovers against the accepted default branch.
+const closeExperimentCandidateBranch = "feature/exp-spike"
+
 func buildCloseExperimentProductionFixtureRepo(t *testing.T, experimentFiles map[string]string) *fixturegit.Repo {
 	t.Helper()
 	t.Setenv("CI_DEFAULT_BRANCH", "main")
@@ -201,7 +243,13 @@ func buildCloseExperimentProductionFixtureRepo(t *testing.T, experimentFiles map
 			// registry — resolves the jira:EXP-1 story scheme to the round-6
 			// hermetic fake provider (dc-2) rather than refusing with
 			// ErrUnknownScheme (rollup_test.go's own DecodeManifest precedent).
-			".verdi/verdi.yaml":                     "schema: verdi.layout/v1\nforge: github\nproviders:\n  jira:\n    mode: fake\n    base_url: https://example.atlassian.net\n    rollup_field: customfield_00000\n",
+			// forge: gitlab plus the countersign block is this candidate's
+			// own U2 lifecycle-countersign configuration — closure condition
+			// 5 is mandatory and unweakened, so a fixture that means to
+			// reach the EXPERIMENT gate below it must supply the same real
+			// authority any candidate does (I-120/I-121), observed here
+			// against the hermetic read-only GitLab fixture server.
+			".verdi/verdi.yaml":                     "schema: verdi.layout/v1\nforge: gitlab\nproviders:\n  jira:\n    mode: fake\n    base_url: https://example.atlassian.net\n    rollup_field: customfield_00000\ncountersign:\n  trust_source: forge-live\n  freshness_policy_id: forge-current\n  maximum_observation_age_seconds: 300\n  maximum_approval_age_seconds: 3600\n",
 			".verdi/specs/active/loan-mgmt/spec.md": featureV1SpecMD,
 			".verdi/specs/active/exp-spike/spec.md": closeExperimentSpikeSpecMD,
 		},
@@ -209,7 +257,7 @@ func buildCloseExperimentProductionFixtureRepo(t *testing.T, experimentFiles map
 	}})
 	workingHead := repo.Head
 
-	for rel, content := range closeExperimentPolicyFiles(t) {
+	for rel, content := range closeExperimentPolicyFiles() {
 		closeExperimentWriteFixtureFile(t, repo.Dir, rel, content)
 	}
 	for rel, content := range experimentFiles {
@@ -217,7 +265,11 @@ func buildCloseExperimentProductionFixtureRepo(t *testing.T, experimentFiles map
 	}
 	gitOutput(t, repo.Dir, "add", "-A")
 	gitOutput(t, repo.Dir, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "--quiet", "--no-verify", "-m", "accept the CSE governance profile and committed experiments")
-	gitOutput(t, repo.Dir, "checkout", "--detach", "-q", workingHead)
+	// A named candidate branch, not a detached HEAD: merge-request
+	// discovery needs a source branch to target the accepted default
+	// branch FROM. `main` stays ahead at the accepted commit, so the
+	// checkout is still unadopted for the working-tree conflict probe.
+	gitOutput(t, repo.Dir, "checkout", "-q", "-B", closeExperimentCandidateBranch, workingHead)
 	repo.Head = workingHead
 	// Written AFTER the checkout so it stays untracked at C1 (never
 	// staged, never committed) — writing it before the "git add -A"
@@ -892,12 +944,58 @@ func TestCloseExperimentValidClosurePreservesResolvesEdgeByteIdentical(t *testin
 // Item 18: the built binary's exact 0/1/2 exits, extending the close
 // fixture family (buildCloseFixtureRepo/seedCloseHappyPath's precedent)
 // with a spike variant of gate_test.go's gateSpikeSpecMD.
+// startCloseExperimentCountersignForge seeds the hermetic, read-only
+// GitLab fixture the built binary's own countersign resolver observes: one
+// open merge request from this candidate branch into the accepted default
+// branch, approved for the candidate's exact head by a story-review
+// subject the ACCEPTED tree's profile maps and who is not the candidate
+// author. No network, no mutation.
+func startCloseExperimentCountersignForge(t *testing.T, repo *fixturegit.Repo) {
+	t.Helper()
+	server, _ := newCountersignGitLabServer(t, countersignGitLabScenario{
+		CandidateSHA: repo.Head, SourceBranch: closeExperimentCandidateBranch, AuthorID: 900,
+		Approvers: []int64{101}, ApprovedAt: time.Now().Add(-time.Minute), OpenMR: true,
+	})
+	t.Cleanup(server.Close)
+	setCountersignGitLabEnv(t, server.URL)
+}
+
+// TestCloseExperimentAcceptedTreeProfileProvesCountersignOnUnadoptedCheckout
+// is I-121's built-binary falsifier. The candidate checkout carries NO
+// constitution store at all — the working-tree conflict-adoption probe
+// still sees an unadopted repository, unchanged — yet closure condition 5
+// proves countersign, because the selected governance profile is
+// authenticated from the pinned accepted default-branch tree. The two
+// questions are different: adoption is about the checkout being mutated,
+// governance authority is acceptance truth.
+func TestCloseExperimentAcceptedTreeProfileProvesCountersignOnUnadoptedCheckout(t *testing.T) {
+	bin := buildVerdiBinary(t)
+	repo := buildCloseExperimentProductionFixtureRepo(t, nil)
+	writeCloseExperimentGateReport(t, repo.Dir, repo.Head)
+	startCloseExperimentCountersignForge(t, repo)
+
+	if _, err := os.Stat(filepath.Join(repo.Dir, ".verdi", "policy")); !os.IsNotExist(err) {
+		t.Fatalf("checkout .verdi/policy stat error = %v, want the candidate checkout to carry no constitution store", err)
+	}
+	stdout, stderr, code := runExperimentBuiltBinary(t, bin, repo.Dir, nil, "close", "--force-local", "spec/exp-spike")
+	if code != 0 {
+		t.Fatalf("close on an unadopted checkout = %d, want 0; stdout=%s stderr=%s", code, stdout, stderr)
+	}
+	if !strings.Contains(stdout, "[PASS] closure: 5. forge countersign proven") {
+		t.Fatalf("stdout = %q, want the accepted-tree profile to prove closure condition 5", stdout)
+	}
+	if !strings.Contains(stdout, "countersign record: sha256:") {
+		t.Fatalf("stdout = %q, want the proven countersign record digest", stdout)
+	}
+}
+
 func TestCloseExperimentCloseBuiltBinaryExitCodes(t *testing.T) {
 	bin := buildVerdiBinary(t)
 
 	t.Run("ordinary close, no experiments", func(t *testing.T) {
 		repo := buildCloseExperimentProductionFixtureRepo(t, nil)
 		writeCloseExperimentGateReport(t, repo.Dir, repo.Head)
+		startCloseExperimentCountersignForge(t, repo)
 		stdout, stderr, code := runExperimentBuiltBinary(t, bin, repo.Dir, nil, "close", "--force-local", "spec/exp-spike")
 		if code != 0 {
 			t.Fatalf("close (no experiments) = %d, want 0; stdout=%s stderr=%s", code, stdout, stderr)
@@ -909,6 +1007,7 @@ func TestCloseExperimentCloseBuiltBinaryExitCodes(t *testing.T) {
 			closeExperimentProductionExperimentID + "/experiment.yaml": closeExperimentLockedDefinitionYAML(t),
 		})
 		writeCloseExperimentGateReport(t, repo.Dir, repo.Head)
+		startCloseExperimentCountersignForge(t, repo)
 		stdout, stderr, code := runExperimentBuiltBinary(t, bin, repo.Dir, nil, "close", "--force-local", "spec/exp-spike")
 		if code != 1 {
 			t.Fatalf("close (definition-only experiment) = %d, want 1; stdout=%s stderr=%s", code, stdout, stderr)
@@ -923,6 +1022,7 @@ func TestCloseExperimentCloseBuiltBinaryExitCodes(t *testing.T) {
 			"Bad_ID/experiment.yaml": "not a valid definition\n",
 		})
 		writeCloseExperimentGateReport(t, repo.Dir, repo.Head)
+		startCloseExperimentCountersignForge(t, repo)
 		stdout, stderr, code := runExperimentBuiltBinary(t, bin, repo.Dir, nil, "close", "--force-local", "spec/exp-spike")
 		if code != 2 {
 			t.Fatalf("close (malformed experiment id) = %d, want 2; stdout=%s stderr=%s", code, stdout, stderr)
@@ -948,6 +1048,7 @@ func TestCloseExperimentCloseBuiltBinaryExitCodes(t *testing.T) {
 			closeExperimentProductionExperimentID + "/experiment.yaml": closeExperimentLockedDefinitionYAML(t),
 		})
 		writeCloseExperimentGateReport(t, repo.Dir, repo.Head)
+		startCloseExperimentCountersignForge(t, repo)
 		stdout, stderr, code := runExperimentBuiltBinary(t, bin, repo.Dir, nil, "close", "--preflight", "--force-local", "spec/exp-spike")
 		if code != 1 {
 			t.Fatalf("close --preflight (definition-only experiment) = %d, want 1; stdout=%s stderr=%s", code, stdout, stderr)
