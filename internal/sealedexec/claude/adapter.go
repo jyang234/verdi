@@ -557,67 +557,91 @@ func (r *claudeActiveRun) Next(ctx context.Context) (sealedexec.AdapterResult, e
 	r.nextMu.Lock()
 	defer r.nextMu.Unlock()
 
-	r.mu.Lock()
-	stopRequested, stopDone := r.stopRequested, r.stopDone
-	if r.terminal && !stopRequested {
+	// §5 holds the exact terminal result until the child is reaped, and an
+	// assistant frame may carry no admissible block, so a foreign frame can be
+	// fully consumed without yielding a normalized observation. The shared
+	// stream loop refuses a non-terminal AdapterResult that carries nothing to
+	// record, so such a frame is never surfaced: the adapter keeps reading its
+	// own process stream until it has a terminal, a stop, or something to
+	// report. Stop, terminal precedence, and sequence allocation are unchanged.
+	for {
+		r.mu.Lock()
+		stopRequested, stopDone := r.stopRequested, r.stopDone
+		if r.terminal && !stopRequested {
+			r.mu.Unlock()
+			return sealedexec.AdapterResult{}, errors.New("sealedexec/claude: next after terminal result")
+		}
 		r.mu.Unlock()
-		return sealedexec.AdapterResult{}, errors.New("sealedexec/claude: next after terminal result")
-	}
-	r.mu.Unlock()
 
-	if stopRequested {
-		<-stopDone
-		return r.stopTerminal()
-	}
-
-	item, err := r.process.Next(ctx)
-	r.mu.Lock()
-	stopRequested = r.stopRequested
-	stopDone = r.stopDone
-	r.mu.Unlock()
-
-	if err != nil {
 		if stopRequested {
 			<-stopDone
 			return r.stopTerminal()
 		}
-		return sealedexec.AdapterResult{}, fmt.Errorf("sealedexec/claude: process stream: %w", err)
-	}
 
-	if stopRequested && (item.Terminal != nil || item.ForeignJSON == nil || !item.Complete) {
-		<-stopDone
-		return r.stopTerminal()
-	}
-
-	if item.Terminal != nil {
-		if item.ForeignJSON != nil || item.Complete {
-			r.cancel()
-			return sealedexec.AdapterResult{}, errors.New("sealedexec/claude: process stream terminal/result union is invalid")
-		}
+		item, err := r.process.Next(ctx)
 		r.mu.Lock()
-		r.terminal = true
+		stopRequested = r.stopRequested
+		stopDone = r.stopDone
 		r.mu.Unlock()
-		r.cancel()
-		return r.handleProcessTerminal(ctx, item.Terminal)
+
+		if err != nil {
+			if stopRequested {
+				<-stopDone
+				return r.stopTerminal()
+			}
+			return sealedexec.AdapterResult{}, fmt.Errorf("sealedexec/claude: process stream: %w", err)
+		}
+
+		if stopRequested && (item.Terminal != nil || item.ForeignJSON == nil || !item.Complete) {
+			<-stopDone
+			return r.stopTerminal()
+		}
+
+		if item.Terminal != nil {
+			if item.ForeignJSON != nil || item.Complete {
+				r.cancel()
+				return sealedexec.AdapterResult{}, errors.New("sealedexec/claude: process stream terminal/result union is invalid")
+			}
+			r.mu.Lock()
+			r.terminal = true
+			r.mu.Unlock()
+			r.cancel()
+			return r.handleProcessTerminal(ctx, item.Terminal)
+		}
+
+		if item.ForeignJSON == nil {
+			r.cancel()
+			return sealedexec.AdapterResult{}, errors.New("sealedexec/claude: process stream observation/result union is invalid")
+		}
+
+		r.mu.Lock()
+		r.foreignSeq++
+		seq := r.foreignSeq
+		r.mu.Unlock()
+
+		var result sealedexec.AdapterResult
+		// A record whose LF framing never completed is not a decodable frame;
+		// §5's closed reason set reduces it to malformed-foreign-frame.
+		if !item.Complete {
+			result, err = r.rawFailure(ctx, seq, "malformed-foreign-frame", item.ForeignJSON)
+		} else {
+			result, err = r.normalize(ctx, item.ForeignJSON, seq)
+		}
+		if err != nil {
+			return sealedexec.AdapterResult{}, err
+		}
+		if reportableClaudeResult(result) {
+			return result, nil
+		}
 	}
+}
 
-	if item.ForeignJSON == nil {
-		r.cancel()
-		return sealedexec.AdapterResult{}, errors.New("sealedexec/claude: process stream observation/result union is invalid")
-	}
-
-	r.mu.Lock()
-	r.foreignSeq++
-	seq := r.foreignSeq
-	r.mu.Unlock()
-
-	// A record whose LF framing never completed is not a decodable frame; §5's
-	// closed reason set reduces it to malformed-foreign-frame.
-	if !item.Complete {
-		return r.rawFailure(ctx, seq, "malformed-foreign-frame", item.ForeignJSON)
-	}
-
-	return r.normalize(ctx, item.ForeignJSON, seq)
+// reportableClaudeResult reports whether an AdapterResult carries anything the
+// shared stream loop can act on. An observation-free non-terminal result is
+// buffered adapter state, never a shared-service observation.
+func reportableClaudeResult(result sealedexec.AdapterResult) bool {
+	return result.Terminal != nil || result.Stopped != nil || len(result.Observations) != 0 ||
+		result.OperationalFailure != "" || result.ObservedSessionRef != ""
 }
 
 // handleProcessTerminal applies Amendment 002 §5's terminal precedence over the
@@ -1075,7 +1099,7 @@ func (r *claudeActiveRun) handleInit(ctx context.Context, line []byte, seq uint6
 	}
 	detail, err := r.processDetail(ctx, initDetailSource, protectedValues)
 	if err != nil {
-		return r.decodeFailure(ctx, seq, "redaction-failed", nil)
+		return r.decodeFailure(ctx, seq, detailFailureReason(err), nil)
 	}
 
 	// Amendment 002 §7 and the Codex ruling reserve the resume observation for
@@ -1131,7 +1155,7 @@ func (r *claudeActiveRun) handleRetry(ctx context.Context, line []byte, seq uint
 	}
 	detail, err := r.processDetail(ctx, retryDetailSource, protectedValues)
 	if err != nil {
-		return r.decodeFailure(ctx, seq, "redaction-failed", nil)
+		return r.decodeFailure(ctx, seq, detailFailureReason(err), nil)
 	}
 
 	schema, _ := contextevent.PayloadSchema(contextevent.KindRetry)
@@ -1225,7 +1249,7 @@ func (r *claudeActiveRun) handleAssistant(ctx context.Context, line []byte, seq 
 				"text":        *block.Text,
 			}, protectedValues)
 			if err != nil {
-				return r.decodeFailure(ctx, seq, "redaction-failed", nil)
+				return r.decodeFailure(ctx, seq, detailFailureReason(err), nil)
 			}
 			schema, _ := contextevent.PayloadSchema(contextevent.KindProviderMessage)
 			observations = append(observations, sealedexec.NormalizedObservation{
@@ -1268,7 +1292,7 @@ func (r *claudeActiveRun) handleAssistant(ctx context.Context, line []byte, seq 
 				"tool_name":   *block.Name,
 			}, protectedValues)
 			if err != nil {
-				return r.decodeFailure(ctx, seq, "redaction-failed", nil)
+				return r.decodeFailure(ctx, seq, detailFailureReason(err), nil)
 			}
 			r.mu.Lock()
 			if r.pendingToolCalls == nil {
@@ -1306,7 +1330,7 @@ func (r *claudeActiveRun) handleAssistant(ctx context.Context, line []byte, seq 
 			}
 			observation, err := r.omissionSummary(ctx, "thinking", messageID, blockIndex, protectedValues)
 			if err != nil {
-				return r.decodeFailure(ctx, seq, "redaction-failed", nil)
+				return r.decodeFailure(ctx, seq, detailFailureReason(err), nil)
 			}
 			observations = append(observations, observation)
 
@@ -1320,7 +1344,7 @@ func (r *claudeActiveRun) handleAssistant(ctx context.Context, line []byte, seq 
 			}
 			observation, err := r.omissionSummary(ctx, "redacted_thinking", messageID, blockIndex, protectedValues)
 			if err != nil {
-				return r.decodeFailure(ctx, seq, "redaction-failed", nil)
+				return r.decodeFailure(ctx, seq, detailFailureReason(err), nil)
 			}
 			observations = append(observations, observation)
 
@@ -1428,7 +1452,7 @@ func (r *claudeActiveRun) handleToolResult(ctx context.Context, line []byte, seq
 			"status":  status,
 		}, protectedValues)
 		if err != nil {
-			return r.decodeFailure(ctx, seq, "redaction-failed", nil)
+			return r.decodeFailure(ctx, seq, detailFailureReason(err), nil)
 		}
 		schema, _ := contextevent.PayloadSchema(contextevent.KindToolResult)
 		observations = append(observations, sealedexec.NormalizedObservation{
@@ -1526,7 +1550,7 @@ func (r *claudeActiveRun) handleResult(ctx context.Context, line []byte, seq uin
 	}
 	detail, err := r.processDetail(ctx, projection, protectedValues)
 	if err != nil {
-		return r.decodeFailure(ctx, seq, "redaction-failed", nil)
+		return r.decodeFailure(ctx, seq, detailFailureReason(err), nil)
 	}
 
 	r.mu.Lock()
@@ -1575,6 +1599,25 @@ func (r *claudeActiveRun) handleResult(ctx context.Context, line []byte, seq uin
 // ---------------------------------------------------------------------------
 // Detail helpers
 // ---------------------------------------------------------------------------
+
+// detailFailureReason maps a shared DetailProcessor failure to Amendment 002
+// §5's exact closed reason. The category is read from the processor's typed
+// failure, never from the error text: a segment store/resolve/mismatch failure
+// keeps its segment reason and the `segment` operation, and every redaction or
+// classification inability — including an unclassified operational failure —
+// keeps `redaction-failed` and the `redaction` operation.
+func detailFailureReason(err error) string {
+	category, _ := sealedexec.DetailFailureOf(err)
+	switch category {
+	case sealedexec.DetailFailureSegmentStore:
+		return "segment-store-failed"
+	case sealedexec.DetailFailureSegmentResolve:
+		return "segment-resolve-failed"
+	case sealedexec.DetailFailureSegmentMismatch:
+		return "segment-mismatch"
+	}
+	return "redaction-failed"
+}
 
 // processDetail marshals the exact detail source to canonical JSON and runs it
 // through the shared processor.

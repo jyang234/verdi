@@ -1098,16 +1098,66 @@ func TestClaudeAdapterParityContract_Behavioral(t *testing.T) {
 		})
 	}
 
-	// Segment-reason witness: I-109/IL-073 require a detail-processor segment
-	// failure to carry the `segment-store-failed` reason and the `segment`
-	// operation, and decodeFailure's own table already maps that pair. Every
-	// processDetail call site in adapter.go nevertheless hard-codes
-	// "redaction-failed", so the reachable reason/operation is the pinned
-	// boundary below. Repairing it requires discriminating the underlying error
-	// class inside adapter.go, which is outside this correction pass's declared
-	// write set; the exact non-conforming pair is disclosed rather than hidden,
-	// and this row fails the moment either the store stops being reached or the
-	// mapping changes.
+	// Amendment 002 §5 holds the exact success result until process termination
+	// and §7 makes the reaped child emit the advisory `provider-summary` then
+	// `adapter-stop`. The shared U4 stream loop refuses any non-terminal
+	// AdapterResult carrying no normalized observation
+	// (internal/sealedexec/service.go, "non-terminal result has no normalized
+	// observations"), so the buffered success frame must never reach Service as
+	// its own observation-free result.
+	t.Run("buffered_success_result_never_surfaces_an_empty_nonterminal", func(t *testing.T) {
+		launch, envRoot := claudeTestLaunch(t, sealedexec.ActionStart)
+		pp := &testProbeProcess{version: launch.Request.AdapterVersion, output: mustClaudeFixture(t, "claude-start.jsonl", launch.Workspace.Path)}
+		adapter, err := newClaudeTestAdapter(t, pp, newTestProcessor(t), envRoot)
+		if err != nil {
+			t.Fatalf("New: %v", err)
+		}
+		run, err := adapter.Start(context.Background(), launch)
+		if err != nil {
+			t.Fatalf("Start: %v", err)
+		}
+		var last sealedexec.AdapterResult
+		for step := 0; ; step++ {
+			result, err := run.Next(context.Background())
+			if err != nil {
+				t.Fatalf("Next[%d]: %v", step, err)
+			}
+			if result.Terminal == nil && result.Stopped == nil && len(result.Observations) == 0 {
+				t.Fatalf("Next[%d] returned an observation-free non-terminal result %#v; the shared service refuses that shape", step, result)
+			}
+			last = result
+			if result.Terminal != nil || result.Stopped != nil {
+				break
+			}
+		}
+		// The reaped success emits exactly the advisory terminal-result summary
+		// followed by adapter-stop with exit 0 and reason "completed".
+		if last.OperationalFailure != "" {
+			t.Fatalf("successful reap operational failure = %q, want none", last.OperationalFailure)
+		}
+		if got := observationKindsC(last.Observations); !reflect.DeepEqual(got, []contextevent.Kind{contextevent.KindProviderSummary, contextevent.KindAdapterStop}) {
+			t.Fatalf("terminal observation kinds = %v, want [provider-summary adapter-stop]", got)
+		}
+		summary, ok := last.Observations[0].Payload.(*contextevent.ProviderSummaryPayload)
+		if !ok || summary.SummaryID != "terminal-result" || summary.Authority != contextevent.AuthorityAdvisory {
+			t.Fatalf("terminal summary payload = %#v, want advisory terminal-result", last.Observations[0].Payload)
+		}
+		stop := claudeStopPayload(t, last.Observations)
+		if stop.ExitCode != 0 || stop.ReasonCode != "completed" {
+			t.Fatalf("adapter-stop = exit %d reason %q, want exit 0 reason completed", stop.ExitCode, stop.ReasonCode)
+		}
+		if last.Terminal == nil || last.Terminal.ExitCode != 0 {
+			t.Fatalf("terminal = %#v, want exit 0", last.Terminal)
+		}
+	})
+
+	// Segment-reason witness: Amendment 002 §5's closed table maps a segment
+	// store/resolve/mismatch failure to `segment-store-failed` /
+	// `segment-resolve-failed` / `segment-mismatch` over the `segment`
+	// operation, and a redaction inability to `redaction-failed` over
+	// `redaction`. The call site must read the processor's typed failure
+	// category — never an error string — so the reachable pair is exact. This
+	// row fails both if the store is never reached and if the mapping changes.
 	t.Run("segment_store_failure_maps_to_segment_operation", func(t *testing.T) {
 		launch, envRoot := claudeTestLaunch(t, sealedexec.ActionStart)
 		errStore := &errorSegmentStore{err: errors.New("segment-store-failed: simulated")}
@@ -1152,7 +1202,7 @@ func TestClaudeAdapterParityContract_Behavioral(t *testing.T) {
 				if payload.ReasonCode == "segment-store-failed" || payload.ReasonCode == "redaction-failed" {
 					segmentObserved = true
 					if payload.ReasonCode+"/"+payload.Operation != claudeSegmentStoreFailureBoundary {
-						t.Errorf("segment-store failure reason/operation = %q, want the pinned boundary %q",
+						t.Errorf("segment-store failure reason/operation = %q, want %q",
 							payload.ReasonCode+"/"+payload.Operation, claudeSegmentStoreFailureBoundary)
 					}
 				}
@@ -1163,6 +1213,58 @@ func TestClaudeAdapterParityContract_Behavioral(t *testing.T) {
 		}
 		if !segmentObserved {
 			t.Fatalf("segment-store failure never produced its adapter-error; observed reasons = %v", observedReasons)
+		}
+	})
+
+	// A store that acknowledges different bytes than it was handed is a segment
+	// mismatch, not a store failure and not a redaction inability.
+	t.Run("segment_store_contradiction_maps_to_segment_mismatch", func(t *testing.T) {
+		launch, envRoot := claudeTestLaunch(t, sealedexec.ActionStart)
+		proc, err := sealedexec.NewDetailProcessor(&contradictingSegmentStore{})
+		if err != nil {
+			t.Fatalf("NewDetailProcessor: %v", err)
+		}
+		pp := &testProbeProcess{
+			version: launch.Request.AdapterVersion,
+			output:  claudeOversizedStartStream(t, launch.Workspace.Path),
+		}
+		adapter, err := newClaudeTestAdapter(t, pp, proc, envRoot)
+		if err != nil {
+			t.Fatalf("New: %v", err)
+		}
+		run, err := adapter.Start(context.Background(), launch)
+		if err != nil {
+			t.Fatalf("Start: %v", err)
+		}
+		observedReasons := []string{}
+		mismatchObserved := false
+		for {
+			result, err := run.Next(context.Background())
+			if err != nil {
+				break
+			}
+			for _, obs := range result.Observations {
+				if obs.Kind != contextevent.KindAdapterError {
+					continue
+				}
+				payload, ok := obs.Payload.(*contextevent.AdapterErrorPayload)
+				if !ok {
+					t.Fatalf("adapter-error payload = %T, want *contextevent.AdapterErrorPayload", obs.Payload)
+				}
+				observedReasons = append(observedReasons, payload.ReasonCode+"/"+payload.Operation)
+				if payload.ReasonCode == "segment-mismatch" || payload.ReasonCode == "redaction-failed" || payload.ReasonCode == "segment-store-failed" {
+					mismatchObserved = true
+					if got := payload.ReasonCode + "/" + payload.Operation; got != "segment-mismatch/segment" {
+						t.Errorf("segment contradiction reason/operation = %q, want %q", got, "segment-mismatch/segment")
+					}
+				}
+			}
+			if result.Terminal != nil {
+				break
+			}
+		}
+		if !mismatchObserved {
+			t.Fatalf("segment contradiction never produced its adapter-error; observed reasons = %v", observedReasons)
 		}
 	})
 
@@ -1184,6 +1286,7 @@ func TestClaudeAdapterParityContract_Behavioral(t *testing.T) {
 		rows := []string{
 			"sealed_start_drives_the_public_claude_assembly",
 			"sealed_resume_drives_the_public_claude_assembly",
+			"oversized_detail_is_stored_as_a_controller_segment",
 			"pristine_checkpoint_contradicting_the_expansion_ledger_is_refused",
 			"undeclared_scoped_tool_ends_the_run_operationally",
 			"missing_api_key_refuses_with_the_exact_safe_classification_diagnostic",
@@ -1333,11 +1436,9 @@ var amendment002DestinationKinds = map[contextevent.Kind]string{
 	contextevent.KindAdapterError:          "provider adapter",
 }
 
-// claudeSegmentStoreFailureBoundary is the exact reason/operation pair a failed
-// controller segment store currently produces. I-109/IL-073 require
-// "segment-store-failed/segment"; this ratchet pins the disclosed
-// non-conforming value so the gap cannot be mistaken for conformance.
-const claudeSegmentStoreFailureBoundary = "redaction-failed/redaction"
+// claudeSegmentStoreFailureBoundary is the exact Amendment 002 §5
+// reason/operation pair a failed controller segment store must produce.
+const claudeSegmentStoreFailureBoundary = "segment-store-failed/segment"
 
 // claudeOversizedStartStream returns the committed start fixture with its
 // assistant text expanded past the fixed 16,384-byte inline detail ceiling.
@@ -1364,6 +1465,26 @@ func (s *errorSegmentStore) StoreRedactedSegment(_ context.Context, _ sealedexec
 }
 func (s *errorSegmentStore) ResolveRedactedSegment(_ context.Context, _ string) (sealedexec.RedactedSegment, error) {
 	return sealedexec.RedactedSegment{}, s.err
+}
+
+// contradictingSegmentStore acknowledges a segment whose stored facts differ
+// from the bytes it was handed, which Amendment 002 §5 reduces to
+// "segment-mismatch" over the "segment" operation.
+type contradictingSegmentStore struct{}
+
+func (s *contradictingSegmentStore) StoreRedactedSegment(_ context.Context, seg sealedexec.RedactedSegment) (sealedexec.StoredSegment, error) {
+	return sealedexec.StoredSegment{
+		Schema:           testSegmentSchemaStored,
+		Reference:        testSegmentRefPrefix + strings.TrimPrefix(seg.Digest, "sha256:"),
+		MediaType:        seg.MediaType,
+		RedactionProfile: seg.RedactionProfile,
+		Digest:           seg.Digest,
+		ByteCount:        seg.ByteCount + 1,
+	}, nil
+}
+
+func (s *contradictingSegmentStore) ResolveRedactedSegment(_ context.Context, _ string) (sealedexec.RedactedSegment, error) {
+	return sealedexec.RedactedSegment{}, errors.New("contradictingSegmentStore: resolve is not used")
 }
 
 // claudeTestBuildBinary builds ./cmd/verdi from the module root and returns

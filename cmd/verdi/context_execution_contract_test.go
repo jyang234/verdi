@@ -1918,6 +1918,7 @@ type sealedLifecycleController struct {
 	quarantineRecords []sealedexec.QuarantineRecord
 	preservedBytes    [][]byte
 	initialRevisions  []contextevent.Revision
+	segments          map[string]sealedexec.RedactedSegment
 	checkpointDigest  string
 	expansionRoot     string
 	calls             []sealedexec.ControllerOperation
@@ -1929,6 +1930,20 @@ type sealedLifecycleController struct {
 	pauseBeforeReply  sealedexec.ControllerOperation
 	operationPaused   chan<- sealedexec.ControllerOperation
 	operationRelease  <-chan struct{}
+}
+
+// The exact stored-segment wire schema and reference grammar the shared
+// controller codec requires. They are literals here because the fixture speaks
+// the controller wire rather than importing the codec's unexported constants.
+const (
+	sealedLifecycleStoredSegmentSchema = "verdi.context-redacted-segment-stored/v1"
+	sealedLifecycleSegmentRefPrefix    = "controller-segment/sha256/"
+)
+
+// sealedLifecycleSegmentReference derives the deterministic controller
+// reference for one canonical segment digest.
+func sealedLifecycleSegmentReference(digest string) string {
+	return sealedLifecycleSegmentRefPrefix + strings.TrimPrefix(digest, "sha256:")
 }
 
 func (f *sealedLifecycleController) serve(conn net.Conn) error {
@@ -2042,6 +2057,25 @@ func (f *sealedLifecycleController) result(call sealedexec.ControllerCall) (seal
 		}
 		f.eventAcks = append(f.eventAcks, ack)
 		result.RecorderAppend = sealedexec.ControllerRecorderAppendResult{Schema: schema, Ack: ack}
+	case sealedexec.ControllerOperationStoreRedactedSegment:
+		// Durable controller-backed segment store: the fixture keeps the exact
+		// bytes and returns the deterministic digest-derived reference.
+		segment := call.StoreRedactedSegment.Segment
+		reference := sealedLifecycleSegmentReference(segment.Digest)
+		if f.segments == nil {
+			f.segments = map[string]sealedexec.RedactedSegment{}
+		}
+		f.segments[reference] = segment
+		result.StoreRedactedSegment = sealedexec.ControllerStoreRedactedSegmentResult{Schema: schema, Stored: sealedexec.StoredSegment{
+			Schema: sealedLifecycleStoredSegmentSchema, Reference: reference, MediaType: segment.MediaType,
+			RedactionProfile: segment.RedactionProfile, Digest: segment.Digest, ByteCount: segment.ByteCount,
+		}}
+	case sealedexec.ControllerOperationResolveRedactedSegment:
+		segment, ok := f.segments[call.ResolveRedactedSegment.Reference]
+		if !ok {
+			return result, fmt.Errorf("resolve-redacted-segment: unknown reference %q", call.ResolveRedactedSegment.Reference)
+		}
+		result.ResolveRedactedSegment = sealedexec.ControllerResolveRedactedSegmentResult{Schema: schema, Segment: segment}
 	case sealedexec.ControllerOperationStoreAdapterSession:
 		result.StoreAdapterSession = sealedexec.ControllerStoreAdapterSessionResult{Schema: schema}
 	case sealedexec.ControllerOperationResolveReceiptInputs:

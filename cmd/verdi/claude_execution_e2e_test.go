@@ -451,6 +451,9 @@ type fakeClaudeSpec struct {
 	// to be refused by the scoped surface.
 	extraTool string
 	commit    bool
+	// bigText makes the assistant text exceed the fixed inline detail ceiling,
+	// so its projected detail must become a durable controller segment.
+	bigText bool
 }
 
 const fakeClaudeSource = `package main
@@ -479,6 +482,7 @@ const (
 	workspace = __WORKSPACE__
 	extraTool = __EXTRA__
 	doCommit  = __COMMIT__
+	bigText   = __BIGTEXT__
 )
 
 func main() {
@@ -553,11 +557,15 @@ func run() error {
 		"claude_code_version": version, "slash_commands": []string{}, "output_style": "default",
 		"agents": []string{}, "skills": []string{}, "plugins": []string{}, "uuid": "init-uuid-e2e",
 	})
+	text := "Sealed witness complete."
+	if bigText {
+		text = strings.Repeat("a", 20000)
+	}
 	emit(map[string]any{
 		"type": "assistant", "session_id": session, "uuid": "msg-uuid-e2e",
 		"message": map[string]any{
 			"id": "msg_e2e", "type": "message", "role": "assistant", "model": model,
-			"content": []map[string]any{{"type": "text", "text": "Sealed witness complete."}},
+			"content": []map[string]any{{"type": "text", "text": text}},
 			"usage":   map[string]any{"input_tokens": 1, "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0, "output_tokens": 1},
 		},
 	})
@@ -685,6 +693,7 @@ func buildFakeClaude(t *testing.T, dir string, spec fakeClaudeSpec) string {
 		"__WORKSPACE__", strconv.Quote(spec.workspace),
 		"__EXTRA__", strconv.Quote(spec.extraTool),
 		"__COMMIT__", strconv.FormatBool(spec.commit),
+		"__BIGTEXT__", strconv.FormatBool(spec.bigText),
 	).Replace(fakeClaudeSource)
 	moduleDir := filepath.Join(dir, "fake-claude-src")
 	if err := os.MkdirAll(moduleDir, 0o755); err != nil {
@@ -727,6 +736,9 @@ type claudeLifecycleOptions struct {
 	failOperation sealedexec.ControllerOperation
 	// outFile routes the public result through --out.
 	outFile bool
+	// oversizedDetail makes the provider emit an assistant text larger than the
+	// fixed inline detail ceiling, forcing a durable controller segment.
+	oversizedDetail bool
 }
 
 type claudeLifecycleObservation struct {
@@ -781,6 +793,7 @@ func runClaudeSealedLifecycle(t *testing.T, bin string, options claudeLifecycleO
 		version: fixture.request.AdapterVersion, model: claudeE2EModel, session: claudeE2ESession,
 		argvPath: argvPath, envPath: envPath, stdinPath: stdinPath, toolsPath: toolsPath,
 		gitPath: gitPath, workspace: workspacePath, extraTool: options.extraTool, commit: true,
+		bigText: options.oversizedDetail,
 	})
 	if built != claudePath {
 		t.Fatalf("fake claude built at %q, want the granted argv0 %q", built, claudePath)
@@ -857,18 +870,6 @@ func readClaudeFixtureLines(path string) []string {
 	return strings.Split(strings.TrimSuffix(string(data), "\n"), "\n")
 }
 
-// sealedClaudeUnreducedResultDiagnostic is the exact boundary the public Claude
-// success path currently reaches. Amendment 002 §5 makes the adapter withhold
-// its terminal `provider-summary` until the child is reaped, so the ratified
-// success frame yields one observation-free, non-terminal AdapterResult; the
-// shared U4 stream loop refuses that shape
-// (internal/sealedexec/service.go, "non-terminal result has no normalized
-// observations"). Repairing it requires editing that shared service, which is
-// outside this correction pass's declared write set. Until then, Claude
-// result/receipt/public-output bytes are disclosed as unproven and this row
-// pins the exact reachable boundary so the seam repair is visible.
-const sealedClaudeUnreducedResultDiagnostic = "provider stream: non-terminal result has no normalized observations"
-
 // TestClaudeBuiltBinaryLifecycle_Behavioral drives the real built candidate
 // binary through sealed Claude execution against a fake Claude executable, a
 // strict FD-3 controller, and the parent-hosted scoped MCP server. It is an
@@ -880,16 +881,44 @@ func TestClaudeBuiltBinaryLifecycle_Behavioral(t *testing.T) {
 	t.Run("sealed_start_drives_the_public_claude_assembly", func(t *testing.T) {
 		run := runClaudeSealedLifecycle(t, bin, claudeLifecycleOptions{})
 		assertClaudeAssemblySurface(t, run)
-		assertClaudeQuarantinedBoundary(t, run)
+		assertClaudeSuccessfulLifecycle(t, run)
 	})
 
 	t.Run("sealed_resume_drives_the_public_claude_assembly", func(t *testing.T) {
 		run := runClaudeSealedLifecycle(t, bin, claudeLifecycleOptions{outFile: true})
 		assertClaudeAssemblySurface(t, run)
-		assertClaudeQuarantinedBoundary(t, run)
-		// No public bytes are written on a quarantined boundary.
-		if _, err := os.Stat(run.outPath); !errors.Is(err, os.ErrNotExist) {
-			t.Fatalf("quarantined claude run wrote %q: %v", run.outPath, err)
+		assertClaudeSuccessfulLifecycle(t, run)
+	})
+
+	// Amendment 002 §6: a projected detail larger than the fixed inline ceiling
+	// is stored through the controller-backed segment port and the acknowledged
+	// event carries only its deterministic reference, never the bytes.
+	t.Run("oversized_detail_is_stored_as_a_controller_segment", func(t *testing.T) {
+		run := runClaudeSealedLifecycle(t, bin, claudeLifecycleOptions{oversizedDetail: true})
+		assertClaudeSuccessfulLifecycle(t, run)
+		if got := countControllerOperation(run.fake.calls, sealedexec.ControllerOperationStoreRedactedSegment); got == 0 {
+			t.Fatalf("store-redacted-segment calls = %d, want at least one", got)
+		}
+		segmented := 0
+		for _, event := range run.fake.events {
+			detail := eventDetail(event)
+			if detail == nil || detail.Mode != contextevent.DetailSegment {
+				continue
+			}
+			segmented++
+			if len(detail.RedactedJSON) != 0 {
+				t.Fatalf("acknowledged %s segment detail inlined %d bytes", event.Kind, len(detail.RedactedJSON))
+			}
+			stored, ok := run.fake.segments[detail.Reference]
+			if !ok || uint64(len(stored.Bytes)) != detail.ByteCount {
+				t.Fatalf("acknowledged %s reference %q resolved to %d bytes, want %d", event.Kind, detail.Reference, len(stored.Bytes), detail.ByteCount)
+			}
+			if detail.ByteCount <= 16384 {
+				t.Fatalf("segment detail is %d bytes, want more than the 16,384 inline ceiling", detail.ByteCount)
+			}
+		}
+		if segmented == 0 {
+			t.Fatalf("no acknowledged claude detail became a controller segment; kinds = %v", sealedEventKinds(run.fake.events))
 		}
 	})
 
@@ -1054,22 +1083,130 @@ func assertClaudeAssemblySurface(t *testing.T, run claudeLifecycleObservation) {
 	}
 }
 
-// assertClaudeQuarantinedBoundary pins the disclosed shared-service boundary:
-// the run stops operationally at the unreduced success result, preserves its
-// acknowledged prefix durably, and mints neither a receipt nor public bytes.
-func assertClaudeQuarantinedBoundary(t *testing.T, run claudeLifecycleObservation) {
+// eventDetail returns the acknowledged event's detail, or nil for the kinds
+// that carry none. It fails closed: an unrecognized payload has no detail.
+func eventDetail(event contextevent.Event) *contextevent.Detail {
+	switch payload := event.Payload.(type) {
+	case *contextevent.ProviderSummaryPayload:
+		return &payload.Detail
+	case *contextevent.ProviderMessagePayload:
+		return &payload.Detail
+	case *contextevent.ToolCallPayload:
+		return &payload.Detail
+	case *contextevent.ToolResultPayload:
+		return &payload.Detail
+	case *contextevent.AdapterErrorPayload:
+		return &payload.Detail
+	case *contextevent.PromptPayload:
+		return &payload.Detail
+	case *contextevent.FlightPlanPayload:
+		return &payload.Detail
+	case *contextevent.InstructionProjectionPayload:
+		return &payload.Detail
+	case *contextevent.ReceiptPayload:
+		return &payload.Detail
+	case *contextevent.AdapterStartPayload:
+		return payload.Detail
+	}
+	return nil
+}
+
+// assertClaudeSuccessfulLifecycle proves the public Claude success path reaches
+// completion: Amendment 002 §5 holds the exact result until the child is reaped
+// and §7 then emits the advisory `provider-summary` and `adapter-stop`, after
+// which shared completion appends `execution-result`, mints exactly one
+// receipt, and writes the public execution-result bytes. Nothing is
+// quarantined and the scoped resources are reclaimed.
+func assertClaudeSuccessfulLifecycle(t *testing.T, run claudeLifecycleObservation) {
 	t.Helper()
-	if run.obs.exitCode != 2 || run.obs.stdout != "" {
-		t.Fatalf("claude boundary run = %#v, want an operational stop with no public bytes", run.obs)
+	wantStdout := run.outPath == ""
+	if run.obs.exitCode != 0 || run.obs.stderr != "" || (wantStdout && run.obs.stdout == "") || (!wantStdout && run.obs.stdout != "") {
+		t.Fatalf("claude success lifecycle = %#v", run.obs)
 	}
-	if !strings.Contains(run.obs.stderr, sealedClaudeUnreducedResultDiagnostic) {
-		t.Fatalf("claude boundary stderr = %q, want %q", run.obs.stderr, sealedClaudeUnreducedResultDiagnostic)
+
+	// Public execution-result bytes, on the requested public channel only.
+	resultBytes := []byte(run.obs.stdout)
+	if !wantStdout {
+		resultBytes = mustReadFile(t, run.outPath)
 	}
-	if got := countControllerOperation(run.fake.calls, sealedexec.ControllerOperationAppendReceipt); got != 0 {
-		t.Fatalf("append-receipt calls at the disclosed boundary = %d, want 0", got)
+	result, err := sealedexec.DecodeExecutionResult(bytes.NewReader(resultBytes))
+	if err != nil {
+		t.Fatalf("decode claude execution result: %v\n%s", err, resultBytes)
 	}
-	if !reflect.DeepEqual(run.fake.quarantines, []sealedexec.QuarantineReason{sealedexec.QuarantineExecutionIncomplete}) {
-		t.Fatalf("claude boundary quarantines = %v", run.fake.quarantines)
+	if result.InputCommit != run.fixture.head || result.OutputCommit == "" || !result.Clean {
+		t.Fatalf("claude execution result git identity = %#v", result)
 	}
-	assertLifecyclePreservation(t, run.fake, sealedexec.PreservedPartial)
+
+	// Exactly one receipt, no quarantine, and the terminal preserved state.
+	if got := countControllerOperation(run.fake.calls, sealedexec.ControllerOperationAppendReceipt); got != 1 {
+		t.Fatalf("append-receipt calls = %d, want exactly 1", got)
+	}
+	// A completed run preserves nothing: there is no quarantine record, no
+	// preserved-partial bytes, and the workspace is handed back normally.
+	if len(run.fake.quarantines) != 0 || len(run.fake.quarantineRecords) != 0 || len(run.fake.preservedBytes) != 0 {
+		t.Fatalf("successful claude run quarantined %v / %d records / %d preserved payloads",
+			run.fake.quarantines, len(run.fake.quarantineRecords), len(run.fake.preservedBytes))
+	}
+
+	// Terminal acknowledged kinds: the reaped success summary, adapter-stop,
+	// then the shared execution-result.
+	kinds := sealedEventKinds(run.fake.events)
+	if len(kinds) < 3 {
+		t.Fatalf("acknowledged claude event kinds = %v, want a terminal tail", kinds)
+	}
+	wantTail := []contextevent.Kind{
+		contextevent.KindProviderSummary, contextevent.KindAdapterStop, contextevent.KindExecutionResult,
+	}
+	if !reflect.DeepEqual(kinds[len(kinds)-3:], wantTail) {
+		t.Fatalf("acknowledged claude event tail = %v, want %v", kinds, wantTail)
+	}
+	if got := countEventKindInFixture(run.fake.events, contextevent.KindExecutionResult); got != 1 {
+		t.Fatalf("execution-result acknowledgments = %d, want exactly 1", got)
+	}
+
+	// The terminal detail bytes survived redaction and the controller segment
+	// store: every acknowledged detail is representable and no reference dangles.
+	assertClaudeAcknowledgedDetails(t, run)
+
+	// Cleanup: only the scoped configuration is removed and the workspace is
+	// released exactly once.
+	if _, err := os.Stat(run.mcpConfig); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("scoped MCP config survived the successful run: %v", err)
+	}
+	if got := countControllerOperation(run.fake.calls, sealedexec.ControllerOperationPersistHandback); got != 1 {
+		t.Fatalf("persist-handback calls = %d, want exactly 1", got)
+	}
+}
+
+// assertClaudeAcknowledgedDetails proves every acknowledged Claude detail is a
+// valid inline or controller-segment representation, and that each segment
+// reference actually resolves to the exact stored bytes.
+func assertClaudeAcknowledgedDetails(t *testing.T, run claudeLifecycleObservation) {
+	t.Helper()
+	inline, segment := 0, 0
+	for _, event := range run.fake.events {
+		detail := eventDetail(event)
+		if detail == nil {
+			continue
+		}
+		if err := detail.Validate(); err != nil {
+			t.Fatalf("acknowledged %s detail is invalid: %v", event.Kind, err)
+		}
+		switch detail.Mode {
+		case contextevent.DetailInline:
+			inline++
+		case contextevent.DetailSegment:
+			segment++
+			stored, ok := run.fake.segments[detail.Reference]
+			if !ok {
+				t.Fatalf("acknowledged %s detail references unstored segment %q", event.Kind, detail.Reference)
+			}
+			if stored.Digest != detail.Digest || stored.ByteCount != detail.ByteCount {
+				t.Fatalf("acknowledged %s segment = digest %s/%d bytes, want %s/%d", event.Kind, stored.Digest, stored.ByteCount, detail.Digest, detail.ByteCount)
+			}
+		}
+	}
+	if inline == 0 {
+		t.Fatalf("no acknowledged claude detail was inline; kinds = %v", sealedEventKinds(run.fake.events))
+	}
 }
