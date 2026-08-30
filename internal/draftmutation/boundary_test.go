@@ -1,6 +1,7 @@
 package draftmutation_test
 
 import (
+	"go/ast"
 	"go/parser"
 	"go/token"
 	"os"
@@ -80,6 +81,151 @@ func TestLaterWorkbenchAdapterDoesNotImportDraftMutation(t *testing.T) {
 	}
 	if parsed == 0 {
 		t.Fatal("adapter import witness parsed no production Go files")
+	}
+}
+
+// TestNewUnauthenticatedHumanHasNoNonTestProductionCaller structurally
+// proves clause E of Wave 6 Task 1A's bounded contract: today (before
+// Task 2's workbench handler exists) there is exactly ZERO non-test
+// production caller of draftmutation.NewUnauthenticatedHuman anywhere in
+// the repository — CLI, MCP, internal/designapp, and internal/workbench
+// alike. Combined with the constructor itself taking no request-derived
+// argument at all (policy.go), this also proves no request decoder can
+// mint the actor: there is no code path, let alone a data-driven one, that
+// even calls it outside this package's own definition and tests.
+func TestNewUnauthenticatedHumanHasNoNonTestProductionCaller(t *testing.T) {
+	parsed, references, err := productionReferencesToConstructor(filepath.Join("..", ".."), unauthenticatedHumanConstructor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if parsed == 0 {
+		t.Fatal("caller-inventory witness parsed no production Go files")
+	}
+	if len(references) != 0 {
+		t.Fatalf("%s referenced outside its own declaration in non-test production code: %v", unauthenticatedHumanConstructor, references)
+	}
+}
+
+const unauthenticatedHumanConstructor = "NewUnauthenticatedHuman"
+
+// productionReferencesToConstructor AST-walks every non-test .go file under
+// root and returns every reference to constructorName that is not inside
+// the constructor's own declaring FuncDecl.
+//
+// It matches any *ast.Ident or *ast.SelectorExpr naming the constructor,
+// not only a *ast.CallExpr: `handler := draftmutation.NewUnauthenticatedHuman`
+// hands the minting capability to a data-driven dispatch table just as
+// completely as calling it does, and a CallExpr-only matcher would report
+// that escape as zero callers.
+//
+// The exclusion is the declaring FuncDecl alone — not the whole file that
+// declares it — so a second production caller added elsewhere in
+// policy.go (or anywhere else in package draftmutation) stays visible to
+// the witness. Test files remain excluded: the constructor is exercised by
+// this package's own tests by design.
+func productionReferencesToConstructor(root, constructorName string) (parsed int, references []string, err error) {
+	walkErr := filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if entry.IsDir() {
+			switch entry.Name() {
+			case ".git", "node_modules":
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
+			return nil
+		}
+		fileSet := token.NewFileSet()
+		file, parseErr := parser.ParseFile(fileSet, path, nil, 0)
+		if parseErr != nil {
+			return parseErr
+		}
+		parsed++
+		ast.Inspect(file, func(n ast.Node) bool {
+			switch node := n.(type) {
+			case *ast.FuncDecl:
+				// Skip the constructor's own declaration (name and body)
+				// and nothing else.
+				return node.Recv != nil || node.Name == nil || node.Name.Name != constructorName
+			case *ast.SelectorExpr:
+				if node.Sel != nil && node.Sel.Name == constructorName {
+					references = append(references, fileSet.Position(node.Pos()).String())
+					return false
+				}
+			case *ast.Ident:
+				if node.Name == constructorName {
+					references = append(references, fileSet.Position(node.Pos()).String())
+				}
+			}
+			return true
+		})
+		return nil
+	})
+	return parsed, references, walkErr
+}
+
+// TestConstructorReferenceWitnessDetectsFunctionValueReferences proves the
+// caller-inventory witness above actually bites: over a synthetic tree it
+// must report a bare function-value reference and a qualified
+// function-value reference (neither of which is a CallExpr), must report a
+// production call site in the very file that declares the constructor, and
+// must stay silent for the declaring FuncDecl itself and for test files.
+// Without this, a matcher that quietly stopped matching would still report
+// "zero callers" and read as a pass.
+func TestConstructorReferenceWitnessDetectsFunctionValueReferences(t *testing.T) {
+	root := t.TempDir()
+	write := func(name, source string) {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(root, name), []byte(source), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// The declaring file also holds an in-package caller: the exclusion is
+	// the FuncDecl, so that caller must still be reported.
+	write("policy.go", `package draftmutation
+
+func NewUnauthenticatedHuman() (int, error) { return 0, nil }
+
+func inPackageProductionCaller() (int, error) { return NewUnauthenticatedHuman() }
+`)
+	write("escape.go", `package adapter
+
+var mintHuman = NewUnauthenticatedHuman
+`)
+	write("qualified.go", `package adapter
+
+import "example.com/draftmutation"
+
+var table = map[string]any{"human": draftmutation.NewUnauthenticatedHuman}
+`)
+	write("boundary_probe_test.go", `package adapter
+
+func probe() { _ = NewUnauthenticatedHuman }
+`)
+
+	parsed, references, err := productionReferencesToConstructor(root, unauthenticatedHumanConstructor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if parsed != 3 {
+		t.Fatalf("parsed = %d production files, want 3 (the test file must be skipped)", parsed)
+	}
+	if len(references) != 3 {
+		t.Fatalf("references = %v, want exactly the in-package caller and the two function-value references", references)
+	}
+	for _, want := range []string{"policy.go", "escape.go", "qualified.go"} {
+		found := false
+		for _, reference := range references {
+			if strings.Contains(reference, want) {
+				found = true
+			}
+		}
+		if !found {
+			t.Fatalf("references %v missing the %s reference", references, want)
+		}
 	}
 }
 
