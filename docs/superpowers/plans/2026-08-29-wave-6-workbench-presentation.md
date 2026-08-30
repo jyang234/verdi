@@ -25,7 +25,8 @@ tests, live MCP tests, and Playwright.
 **Authority:**
 `docs/superpowers/specs/2026-08-29-wave-6-workbench-presentation-design.md`,
 the four effective accepted feature specs, the Wave 5 CSE lifecycle design,
-the Wave 3.5 pilot plan/report, orchestration Wave 6, and SI-162–SI-168.
+the Wave 3.5 pilot plan/report, orchestration Wave 6, SI-162–SI-168, and the
+owner-approved Task 2 stop-gate correction in SI-176.
 
 **Planning base:** `915529f792f7a672e9631f42909995b38ed12655`
 
@@ -38,16 +39,17 @@ implementation prompt may execute from an unmerged planning branch.
 1. Global constraints
 2. Unit protocol and evidence bundle
 3. Task 1 — ASD application predecessor
-4. Task 2 — ASD workbench
-5. Task 3 — Constitution application predecessor
-6. Task 4 — Constitution workbench
-7. Task 5 — GLG predecessors
-8. Task 6 — GLG workbench
-9. Task 7 — CSE human-proof coordinator
-10. Task 8 — CSE workbench
-11. Task 9 — Wave 6 integration
-12. Planning authority review gate
-13. Exact Claude Code handoff template
+4. Task 1A — ASD browser-human authority correction
+5. Task 2 — ASD workbench
+6. Task 3 — Constitution application predecessor
+7. Task 4 — Constitution workbench
+8. Task 5 — GLG predecessors
+9. Task 6 — GLG workbench
+10. Task 7 — CSE human-proof coordinator
+11. Task 8 — CSE workbench
+12. Task 9 — Wave 6 integration
+13. Planning authority review gate
+14. Exact Claude Code handoff template
 
 ## Global constraints
 
@@ -67,6 +69,8 @@ implementation prompt may execute from an unmerged planning branch.
   performance contracts in the design.
 - No push, PR, merge, rebase, amend of reviewed history, or next-unit work from
   a Claude implementation session.
+- Task 2 remains paused until Task 1A is independently reviewed, owner-approved,
+  and merged. Its frontend branch must restart from that merged exact head.
 
 ## Unit protocol and evidence bundle
 
@@ -173,6 +177,92 @@ and fixes. No frontend files.
 **Stop gate:** If semantic review, context, or actor attribution needs a new
 schema/authority choice, stop before production edits and report it.
 
+## Task 1A: Correct ASD browser-human mutation authority
+
+**Owner:** Sonnet implementation worker under FABLE orchestration. Opus reviews
+and fixes. Codex independently adjudicates the completed unit. No frontend
+files.
+
+**Authority:** Wave 6 design §§4.1 and 6.1.1; ASD AC-1/AC-3/AC-4/AC-7,
+DC-9, CO-2–CO-6/CO-9; SI-163 and SI-176.
+
+**Likely files:**
+
+- Modify `internal/draftmutation/policy.go`, `service.go`, and focused tests.
+- Modify `internal/designprovenance` schema/codec/record owners and tests.
+- Modify directly affected `internal/designapp` and adapter conformance tests
+  only for the V2 provenance projection and constructor-call inventory.
+- Modify deterministic fixtures/goldens only when their exact V2 bytes move.
+- Do not modify `internal/workbench`, `cmd/verdi/serve*`, assets, CSS,
+  JavaScript, Playwright, accepted feature specs, this plan, or the ledger.
+
+**Interfaces:**
+
+- Produce `draftmutation.NewUnauthenticatedHuman() (Actor, error)` as the only
+  public constructor for the explicit browser-human actor.
+- Keep `Actor.Kind() == ActorHuman`, kernel unauthenticated attribution, and no
+  harness/session, while sealing a private basis distinct from
+  `NewTrustedHuman` with violated or unproven resolution.
+- Preserve delegated-agent policy behavior and the existing no-bypass matrix
+  for violated/unproven principal resolution.
+- Add strict `verdi.design-provenance/v2`; keep V1 strict decode-only history;
+  make all new writers emit V2.
+- V2 forbids `policy_digest` and instead requires one non-null top-level
+  `policy` object with exactly one arm:
+  `{"state":"resolved","digest":"sha256:..."}` or
+  `{"state":"not-applicable"}`. The latter forbids `digest` and is emitted
+  only for the explicit browser-human actor when policy authority returns the
+  canonical not-adopted condition. V1 retains required `policy_digest` and
+  forbids `policy`; unknown, missing, null, duplicate, cross-arm, and trailing
+  data fail closed in both versions.
+- For explicit browser humans, a valid adopted effective policy contributes
+  only its sealed digest; `design_assistance` presence/mode cannot authorize or
+  refuse the mutation. Malformed adopted authority remains operational.
+
+- [ ] RED the missing constructor, the no-policy browser refusal, and the V2
+      schema symbols before production edits.
+- [ ] RED a mode `off` browser-human mutation against valid adopted authority;
+      it must currently refuse and later succeed while recording the effective
+      digest.
+- [ ] RED an unproven/violated `NewTrustedHuman` mutation under `off` and prove
+      it remains refused after the correction.
+- [ ] RED V1 history decode and mixed V1/V2 log continuity before version
+      dispatch; prove exact historical bytes remain accepted and unchanged.
+- [ ] Implement the sealed actor basis and actor-first authorization split.
+- [ ] Implement one shared effective-policy identity resolution path. Treat
+      only `policyauthority.ErrNotAdopted` as `not-applicable`; reject nil,
+      malformed, unsealed, or otherwise failing adopted authority
+      operationally.
+- [ ] Implement strict V1/V2 dispatch, V2 deterministic encoding, closed policy
+      arms, alias-safe projections, canonical round-trip validation, and own
+      digest binding. Do not hash or synthesize a no-policy sentinel.
+- [ ] Prove agent V2 entries always use `resolved`, browser-human absent-policy
+      entries use `not-applicable`, and valid-policy browser-human entries use
+      `resolved` without mode gating.
+- [ ] Prove the sole production caller inventory for
+      `NewUnauthenticatedHuman`: the resumed workbench handler is not present
+      yet, so this unit exposes the constructor and structurally proves no
+      current CLI/MCP/request-decoder path can call or mint it. Task 2 adds the
+      one browser call and updates the inventory to exactly one.
+- [ ] Run focused and full affected-package races, vet, lint, gofmt, strict
+      fixture/golden ratchets, spec-align, and diff checks.
+- [ ] Complete FABLE/Opus producer review and stop for independent Codex review.
+
+**Required semantic RED:**
+
+```bash
+GOCACHE=/private/tmp/verdi-wave6-task1a-gocache \
+go test ./internal/draftmutation ./internal/designprovenance \
+  -run 'Test.*(UnauthenticatedHuman|HumanPolicyPosture|DesignProvenanceV2)' \
+  -count=1
+```
+
+Expected: compile/test failure on the missing constructor, V2 schema/policy
+union, and no-policy browser authorization path. A sandbox-only cache failure
+is not semantic RED evidence.
+
+**Commit subject:** `Permit explicit browser-human draft mutations`
+
 ## Task 2: Build the ASD synchronized workbench
 
 **Owner:** FABLE frontend worker. Sonnet may supply only non-visual handler
@@ -186,6 +276,9 @@ wiring if FABLE delegates it explicitly; FABLE owns every resulting UI fix.
 - Add `e2e/*design*` Playwright coverage and deterministic `testdata/` fixtures.
 - Do not change feature schemas, mutation grammar, provenance grammar, context
   compilation, or semantic-review algorithms.
+- Start only from the owner-merged Task 1A head. Call
+  `draftmutation.NewUnauthenticatedHuman` only in the browser mutation adapter;
+  do not reconstruct, wrap, or expose the actor through request data.
 
 - [ ] RED: a built handler/Playwright journey proves unsaved edits are currently
       lost or direct mutation bypasses `designapp`.
@@ -435,9 +528,11 @@ FABLE/worker lane.
 
 ## Planning authority review gate
 
-Before any implementation prompt is issued, Codex freezes this design, plan,
-and SI-162–SI-168 as one exact-head spec-only tranche and creates one immutable
-diff package with a published SHA-256. Claude receives a read-only prompt that:
+The initial planning authority used this gate for the design, plan, and
+SI-162–SI-168. Before Task 1A receives an implementation prompt, Codex applies
+the same gate to the consolidated SI-176 amendment across this design, this
+plan, and the ledger, creating one immutable exact-range diff package with a
+published SHA-256. Claude receives a read-only prompt that:
 
 - names the exact base/head/range and diff-package path;
 - requires `/fable-orchestration` only to structure the read-only challenge;
