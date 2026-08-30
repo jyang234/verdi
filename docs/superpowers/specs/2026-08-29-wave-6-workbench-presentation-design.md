@@ -8,8 +8,10 @@ configured default branch.
 
 **Owners:** platform-team
 
-**Delivery shape:** eight serialized predecessor/presentation units followed by
-one integrated Wave 6 gate. Each unit is one reviewed pull request.
+**Delivery shape:** nine serialized predecessor/presentation units followed by
+one integrated Wave 6 gate. Each unit is one reviewed pull request. The added
+unit is the owner-approved ASD browser-human authority correction inserted
+after the Task 2 stop gate; it must merge before the ASD workbench resumes.
 
 **Frontend owner:** FABLE. Sonnet workers implement non-frontend predecessors;
 Opus workers challenge and repair accepted defects; Codex independently judges
@@ -35,15 +37,16 @@ every completed unit after the Claude/FABLE producer chain stops.
 Wave 6 delivers the four ratified workbench presentations in this fixed order:
 
 1. AI-assisted spec design (ASD) application predecessor;
-2. ASD workbench;
-3. Context Integrity (CI) application predecessor;
-4. CI workbench;
-5. Guided Lifecycle and Governance (GLG) Wave 5 predecessors;
-6. GLG workbench;
-7. Comparative Spike Experiments (CSE) browser-neutral human-proof
+2. ASD browser-human mutation-authority correction;
+3. ASD workbench;
+4. Context Integrity (CI) application predecessor;
+5. CI workbench;
+6. Guided Lifecycle and Governance (GLG) Wave 5 predecessors;
+7. GLG workbench;
+8. Comparative Spike Experiments (CSE) browser-neutral human-proof
    coordinator;
-8. CSE workbench; and
-9. integrated Wave 6 review and gates.
+9. CSE workbench; and
+10. integrated Wave 6 review and gates.
 
 The sequence is fully serialized. A later unit starts only from the
 owner-merged, independently Codex-approved head of its predecessor. The split
@@ -210,6 +213,49 @@ attribution when no real principal evidence exists. The browser, form fields,
 cookies, OS user, Git author, and server process identity cannot mint a
 principal. This attribution is provenance only.
 
+That state is minted only by a sealed `NewUnauthenticatedHuman` kernel
+constructor. Its private sealed basis is distinct from a human actor produced
+by a violated or unproven governance-principal resolution even though both
+serialize the kernel's unauthenticated attribution. The latter retains the
+existing policy-gated behavior; a failed identity proof does not acquire the
+browser-human allowance. MCP and request decoders have no route to construct
+the browser-human actor.
+
+The `design_assistance` payload governs agent participation, not this explicit
+browser-human draft action. The browser-human action therefore does not require
+policy-authority adoption and does not consult the assistance mode as an
+authorization input. If a valid effective policy exists, the mutation records
+its sealed digest as provenance only. If policy authority is genuinely not
+adopted, the mutation proceeds with the explicit policy posture
+`not-applicable`. Any adopted but malformed or unsealed policy authority still
+fails operationally; absence is not allowed to hide corruption.
+
+This requires `verdi.design-provenance/v2`. V1 remains strict decode-only
+history. New writers emit V2 with one required, non-null top-level `policy`
+object and exactly one closed arm:
+
+- `{"state":"resolved","digest":"sha256:..."}` when a valid effective
+  policy identity exists; or
+- `{"state":"not-applicable"}` only for the explicit unauthenticated-human
+  shape when policy authority is genuinely not adopted.
+
+The `resolved` arm requires a canonical effective-policy digest; the
+`not-applicable` arm forbids a digest. Delegated-agent entries always require
+`resolved`. V2 forbids the V1 `policy_digest` field, while V1 continues to
+require it and forbids `policy`. Unknown, missing, null, duplicate, cross-arm,
+and trailing data fail closed. Existing mutation, chain, attribution, context,
+operation, change, excerpt, canonical-JSON, and self-digest rules are
+unchanged. Mixed V1/V2 logs decode and validate in order, while no current
+writer emits V1. No sentinel or hash of absence may be presented as a policy
+identity.
+
+The accepted ASD feature specification's sentence that each entry uses
+`verdi.design-provenance/v1` describes the original schema at ratification.
+SI-176 and this owner-approved Wave 6 amendment explicitly supersede that
+historical writer version without editing the frozen accepted artifact, using
+the same ledger-plus-wave-authority evolution pattern as SI-161's ratification
+V3 transition.
+
 CI and GLG operations use the authority required by their typed core. If an
 operation needs authenticated human authority and no accepted proof seam
 exists, its predecessor stops; the browser cannot downgrade it to an
@@ -346,6 +392,30 @@ The predecessor proves strict request/response contracts, deep-copy custody,
 stale-revision refusal, capability enforcement, direct-edit disclosure,
 bounded context, on-demand provenance, deterministic semantic review, and
 CLI/MCP conformance. It adds no frontend files.
+
+#### 6.1.1 Browser-human authority correction
+
+The Task 2 stop gate proved that the merged predecessor cannot yet construct
+the exact browser actor required by §4.1 and that the current mutation service
+requires `design_assistance` even for the AI-free workbench journey. Before
+Task 2 resumes, one non-frontend predecessor unit must:
+
+1. add the sealed explicit unauthenticated-human constructor and basis;
+2. preserve the existing delegated-agent and unproven/violated-resolution
+   authorization matrix byte-for-byte;
+3. authorize the explicit browser-human path independently of assistance mode
+   and policy adoption while retaining operational refusal for malformed
+   adopted authority;
+4. implement the V1-decode/V2-write provenance dispatch and exact policy union
+   from §4.1; and
+5. prove that no current CLI, MCP, or request-decoder path can mint the actor,
+   no policy is fabricated, and existing V1 history remains readable. Task 2
+   separately proves that its browser mutation adapter becomes the sole
+   production caller.
+
+This correction touches no frontend, route, board, JavaScript, CSS, or
+Playwright file. It merges as its own independently reviewed predecessor before
+the FABLE-owned ASD workbench implementation continues.
 
 ### 6.2 ASD workbench
 
@@ -574,12 +644,12 @@ The final review additionally proves:
 
 ## 12. Lossless source-coverage witness
 
-The consolidated authority carries 35/35 source groups:
+The consolidated authority carries 36/36 source groups:
 
 | # | Source authority | Destination | Transformation or intentional omission |
 |---:|---|---|---|
 | 1 | Workspace `AGENTS.md` authority-first workflow | §§1, 10–11 | Preserved; spec-only authored by Codex, implementation routed by FABLE/Sonnet/Opus, Codex independently gates. |
-| 2 | Orchestration Wave 6 concurrency `1` | §§1, 10 | Preserved as eight serialized units and one integration gate. |
+| 2 | Orchestration Wave 6 concurrency `1` | §§1, 10 | Preserved as nine serialized units and one integration gate. |
 | 3 | Orchestration Wave 6 per-unit PR rule | §§1, 10 | Preserved; no long-lived combined implementation branch. |
 | 4 | Orchestration Wave 6 exit gate | §§3–5, 11 | Expanded into exact parity, posture, accessibility, and no-shadow-authority witnesses. |
 | 5 | Wave 3.5 hybrid rail/queue shell | §§3.1, 8.2 | Promoted unchanged as presentation, not lifecycle state. |
@@ -613,6 +683,7 @@ The consolidated authority carries 35/35 source groups:
 | 33 | Wave 6 handoff FABLE model routing | §10 | Sonnet implementation, Opus finding/fix/re-review, FABLE adjudication, and no producer claim of Codex approval retained exactly. |
 | 34 | Wave 6 handoff Codex independent review | §§10–11 | Exact diff/authority/probes and reachable-state findings required; one bounded correction and one Codex closure only. |
 | 35 | Wave 6 handoff browser/test/controller gates | §§5 and 11 | Server-rendered/dependency-free/no-network, Playwright keyboard/responsive coverage, recording scan, alternate-port disclosure, full race/verify/spec-align retained. |
+| 36 | Task 2 browser-human stop-gate witness and SI-176 | §§1, 4.1, 6.1.1, 10–11 | Preserves unconditional AI-free browser authoring, explicit unauthenticated provenance, failed-resolution non-bypass, agent policy enforcement, honest policy absence, V1 history, and serialized predecessor review; no runtime or frontend implementation is folded into authority. |
 
 No source group, semantic rule, public effect, deferral, threat-model boundary,
 or closure disclosure is intentionally omitted. Wave 7 dogfood is explicitly
