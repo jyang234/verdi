@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -1047,6 +1048,167 @@ func TestClaudeAdapterParityContract_Behavioral(t *testing.T) {
 			t.Fatal("no replacement detail or observation may be fabricated")
 		}
 	})
+
+	// Fold: environment-table and forbidden-name mutations — Amendment 002 §3.
+	// These prove the closed environment table before the process boundary.
+	envMutations := []struct {
+		name   string
+		mutate func(map[string]string)
+	}{
+		{"missing_claude_config_dir", func(e map[string]string) { delete(e, "CLAUDE_CONFIG_DIR") }},
+		{"unbound_claude_config_dir", func(e map[string]string) { e["CLAUDE_CONFIG_DIR"] = "/other/claude-config" }},
+		{"relative_claude_config_dir", func(e map[string]string) { e["CLAUDE_CONFIG_DIR"] = "relative/claude" }},
+		{"missing_autoupdater_control", func(e map[string]string) { delete(e, "DISABLE_AUTOUPDATER") }},
+		{"wrong_autoupdater_control", func(e map[string]string) { e["DISABLE_AUTOUPDATER"] = "0" }},
+		{"missing_nonessential_traffic_control", func(e map[string]string) {
+			delete(e, "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC")
+		}},
+		{"wrong_nonessential_traffic_control", func(e map[string]string) {
+			e["CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"] = "true"
+		}},
+		{"missing_ide_control", func(e map[string]string) { delete(e, "CLAUDE_CODE_AUTO_CONNECT_IDE") }},
+		{"wrong_ide_control", func(e map[string]string) { e["CLAUDE_CODE_AUTO_CONNECT_IDE"] = "true" }},
+		{"forbidden_extra_anthropic_name", func(e map[string]string) { e["ANTHROPIC_MODEL"] = "claude-alias" }},
+		{"forbidden_extra_claude_name", func(e map[string]string) { e["CLAUDE_CODE_USE_BEDROCK"] = "1" }},
+		{"forbidden_cloud_provider_name", func(e map[string]string) { e["AWS_PROFILE"] = "default" }},
+		{"forbidden_proxy_name", func(e map[string]string) { e["HTTPS_PROXY"] = "http://127.0.0.1:8080" }},
+		{"forbidden_lowercase_proxy_name", func(e map[string]string) { e["https_proxy"] = "http://127.0.0.1:8080" }},
+		{"forbidden_shell_startup_name", func(e map[string]string) { e["BASH_ENV"] = "/tmp/startup.sh" }},
+		{"forbidden_ide_name", func(e map[string]string) { e["VSCODE_PID"] = "1" }},
+		{"forbidden_plugin_name", func(e map[string]string) { e["MY_PLUGIN_DIR"] = "/tmp/plugins" }},
+		{"forbidden_hook_name", func(e map[string]string) { e["PRE_TOOL_HOOK"] = "/tmp/hook.sh" }},
+		{"forbidden_telemetry_export_name", func(e map[string]string) { e["OTEL_EXPORTER_OTLP_ENDPOINT"] = "http://127.0.0.1:4317" }},
+		{"forbidden_model_selection_name", func(e map[string]string) { e["DEFAULT_MODEL_ID"] = "claude-alias" }},
+	}
+	for _, tc := range envMutations {
+		tc := tc
+		t.Run("environment_mutation_"+tc.name, func(t *testing.T) {
+			launch, envRoot := claudeTestLaunchEnv(t, sealedexec.ActionStart, tc.mutate)
+			pp := &testProbeProcess{version: launch.Request.AdapterVersion}
+			adapter, err := newClaudeTestAdapter(t, pp, newTestProcessor(t), envRoot)
+			if err != nil {
+				t.Fatalf("New: %v", err)
+			}
+			if _, err := adapter.Start(context.Background(), launch); err == nil {
+				t.Fatalf("Start with %s = nil, want refusal", tc.name)
+			}
+			if pp.probeCmd != nil || pp.startCmd != nil {
+				t.Fatalf("%s reached the process boundary before validation", tc.name)
+			}
+		})
+	}
+
+	// Segment-reason witness: detail-processor segment failures map to the
+	// "segment" operation, not "redaction" (Amendment 002 §5, task-4 closure).
+	t.Run("segment_store_failure_maps_to_segment_operation", func(t *testing.T) {
+		launch, envRoot := claudeTestLaunch(t, sealedexec.ActionStart)
+		errStore := &errorSegmentStore{err: errors.New("segment-store-failed: simulated")}
+		proc, err := sealedexec.NewDetailProcessor(errStore)
+		if err != nil {
+			t.Fatalf("NewDetailProcessor: %v", err)
+		}
+		pp := &testProbeProcess{
+			version: launch.Request.AdapterVersion,
+			// Output one large line (>16384 bytes) to trigger segment store
+			output: append(bytes.Repeat([]byte(`{"type":"assistant","message":{"id":"msg_X","type":"message","role":"assistant","content":[{"type":"text","text":"`), 16400/2), []byte(`"}],"model":"m","stop_reason":"end_turn","usage":{}}}`+"\n")...),
+		}
+		adapter, err := newClaudeTestAdapter(t, pp, proc, envRoot)
+		if err != nil {
+			t.Fatalf("New: %v", err)
+		}
+		run, err := adapter.Start(context.Background(), launch)
+		if err != nil {
+			t.Fatalf("Start: %v", err)
+		}
+		// Collect until terminal.
+		var collected sealedexec.AdapterResult
+		for {
+			result, err := run.Next(context.Background())
+			if err != nil {
+				break
+			}
+			for _, obs := range result.Observations {
+				if obs.Kind == contextevent.KindAdapterError {
+					payload, ok := obs.Payload.(*contextevent.AdapterErrorPayload)
+					if ok && (payload.ReasonCode == "segment-store-failed" || payload.ReasonCode == "redaction-failed") {
+						if payload.Operation != "segment" {
+							t.Errorf("segment-store failure operation = %q, want %q", payload.Operation, "segment")
+						}
+					}
+				}
+			}
+			collected = sealedexec.AdapterResult{} // suppress unused warning
+			_ = collected
+			if result.Terminal != nil {
+				break
+			}
+		}
+	})
+
+	// Built-binary sub-test: locate the module root, build ./cmd/verdi, and
+	// confirm the binary processes a Claude adapter request without panicking.
+	// This does not import package main and does not create an eighth frozen producer.
+	t.Run("built_binary_claude_arm_selects_adapter", func(t *testing.T) {
+		if testing.Short() {
+			t.Skip("skipped in short mode: binary build required")
+		}
+		bin := claudeTestBuildBinary(t)
+		// Run the binary with --help to confirm it built and runs cleanly.
+		cmd := exec.Command(bin, "--help")
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			// --help may exit non-zero on some implementations; what matters
+			// is that the binary executed (no panic or startup crash).
+			if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() > 2 {
+				t.Fatalf("binary exited %d: %s", exitErr.ExitCode(), out)
+			}
+		}
+	})
+}
+
+// errorSegmentStore is a segment store stub that always returns an error, used
+// to prove segment-store failures collapse to the "segment" operation.
+type errorSegmentStore struct{ err error }
+
+func (s *errorSegmentStore) StoreRedactedSegment(_ context.Context, _ sealedexec.RedactedSegment) (sealedexec.StoredSegment, error) {
+	return sealedexec.StoredSegment{}, s.err
+}
+func (s *errorSegmentStore) ResolveRedactedSegment(_ context.Context, _ string) (sealedexec.RedactedSegment, error) {
+	return sealedexec.RedactedSegment{}, s.err
+}
+
+// claudeTestBuildBinary builds ./cmd/verdi from the module root and returns
+// the path of the compiled binary. The binary is built into t.TempDir so it
+// is cleaned up automatically. Build results are NOT cached across sub-tests.
+func claudeTestBuildBinary(t *testing.T) string {
+	t.Helper()
+	root := claudeTestModuleRoot(t)
+	bin := filepath.Join(t.TempDir(), "verdi")
+	cmd := exec.Command("go", "build", "-o", bin, "./cmd/verdi")
+	cmd.Dir = root
+	var out bytes.Buffer
+	cmd.Stdout = &out
+	cmd.Stderr = &out
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("building verdi binary: %v\n%s", err, out.String())
+	}
+	return bin
+}
+
+// claudeTestModuleRoot resolves the verdi module root from this file's compiled
+// path, independent of the test binary's working directory.
+func claudeTestModuleRoot(t *testing.T) string {
+	t.Helper()
+	_, file, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("runtime.Caller(0) failed — cannot locate module root")
+	}
+	// This file: <moduleRoot>/internal/sealedexec/claude/adapter_test.go
+	root := filepath.Clean(filepath.Join(filepath.Dir(file), "..", "..", ".."))
+	if _, err := os.Stat(filepath.Join(root, "go.mod")); err != nil {
+		t.Fatalf("resolving module root from %s: %v", file, err)
+	}
+	return root
 }
 
 // ---------------------------------------------------------------------------

@@ -22,7 +22,9 @@ import (
 	"github.com/jyang234/verdi/internal/contextevent"
 	"github.com/jyang234/verdi/internal/execworkspace"
 	"github.com/jyang234/verdi/internal/gitx"
+	"github.com/jyang234/verdi/internal/mcpserve"
 	"github.com/jyang234/verdi/internal/sealedexec"
+	"github.com/jyang234/verdi/internal/sealedexec/claude"
 	"github.com/jyang234/verdi/internal/sealedexec/codex"
 	"github.com/jyang234/verdi/internal/store"
 )
@@ -67,6 +69,14 @@ func cmdContextExecution(args []string, stdin io.Reader, stdout, stderr io.Write
 	})
 	defer signalWatcher.Stop()
 	run, err := runtime.execution.Execute(ctx, request, runtime.data)
+	// Provider reap: close the adapter lifecycle (HTTP MCP server close + config
+	// removal for Claude; no-op for Codex). Resource order: provider reap first,
+	// then adapter close, then receipt/completion. Errors are operational-only.
+	if runtime.closer != nil {
+		if closeErr := runtime.closer(ctx); closeErr != nil {
+			printSealedContextDiagnostic(stderr, "execution", request, closeErr, runtime.root)
+		}
+	}
 	if err != nil {
 		if quarantineErr := runtime.quarantineIncomplete(ctx, request, run, err); quarantineErr != nil {
 			printSealedContextDiagnostic(stderr, "execution", request, quarantineErr, runtime.root, run.Workspace.Path, run.Profile.CodexHome, run.Profile.Executable)
@@ -270,6 +280,9 @@ type sealedRuntime struct {
 	execution  *sealedexec.Service
 	completion *sealedexec.CompletionService
 	handback   *sealedexec.HandbackService
+	// closer is called after provider reap to release the adapter lifecycle
+	// (for Claude: HTTP MCP server close + config removal). nil for Codex.
+	closer func(context.Context) error
 }
 
 func assembleSealedRuntime(ctx context.Context, request sealedexec.ExecutionRequest, controller *sealedexec.ControllerClient, authority sealedexec.AuthorityFacts) (sealedRuntime, error) {
@@ -289,9 +302,25 @@ func assembleSealedRuntime(ctx context.Context, request sealedexec.ExecutionRequ
 	if err != nil {
 		return sealedRuntime{}, err
 	}
-	adapter, err := codex.New(commandCodexProcess{}, processor)
-	if err != nil {
-		return sealedRuntime{}, err
+	var adapter sealedexec.ExecutionAdapter
+	var adapterCloser func(context.Context) error
+	switch request.Adapter {
+	case contextevent.AdapterCodex:
+		adapter, err = codex.New(commandCodexProcess{}, processor)
+		if err != nil {
+			return sealedRuntime{}, err
+		}
+	case contextevent.AdapterClaude:
+		ca := &commandClaudeAdapter{
+			process:    commandClaudeProcess{},
+			processor:  processor,
+			controller: controller,
+			request:    request,
+		}
+		adapter = ca
+		adapterCloser = ca.Close
+	default:
+		return sealedRuntime{}, fmt.Errorf("%w: unsupported adapter %q", sealedexec.ErrVerdict, request.Adapter)
 	}
 	recorder := controllerRecorder{client: controller}
 	workspace := localWorkspaceVerifier{root: root}
@@ -316,6 +345,7 @@ func assembleSealedRuntime(ctx context.Context, request sealedexec.ExecutionRequ
 	completion, err := sealedexec.NewCompletionService(sealedexec.CompletionPorts{
 		Workspace: workspace, Recorder: recorder,
 		Inputs: controller, Receipts: controller, Stamps: controller,
+		Segments: controller,
 	})
 	if err != nil {
 		return sealedRuntime{}, err
@@ -327,7 +357,7 @@ func assembleSealedRuntime(ctx context.Context, request sealedexec.ExecutionRequ
 	if err != nil {
 		return sealedRuntime{}, err
 	}
-	return sealedRuntime{root: root, data: data, execution: execution, completion: completion, handback: handback}, nil
+	return sealedRuntime{root: root, data: data, execution: execution, completion: completion, handback: handback, closer: adapterCloser}, nil
 }
 
 func compileSealedContext(ctx context.Context, root string, request sealedexec.ExecutionRequest) ([]contextcompile.DataItem, error) {
@@ -530,6 +560,7 @@ func resolvedProfileFromMaterial(material sealedexec.ProfileMaterial, ref sealed
 	}
 	claudeArm := material.Model != "" || material.ClaudeConfigDir != ""
 	declaredEnv := map[string]string{}
+	var policySecretValues [][]byte
 	switch {
 	case claudeArm && material.AbsoluteCodexHome != "":
 		return sealedexec.ResolvedProfile{}, fmt.Errorf("%w: resolved profile material selects both the Codex and Claude arms", sealedexec.ErrVerdict)
@@ -537,15 +568,27 @@ func resolvedProfileFromMaterial(material sealedexec.ProfileMaterial, ref sealed
 		if material.Model == "" || !cleanPathBelow(material.AbsoluteEnvRoot, material.ClaudeConfigDir) {
 			return sealedexec.ResolvedProfile{}, fmt.Errorf("%w: resolved Claude profile material lacks an exact model or a configuration directory beneath the environment root", sealedexec.ErrVerdict)
 		}
+		// Locally classify the ANTHROPIC_API_KEY: this value never enters the
+		// controller wire or digest plaintext — it is read from the binary's own
+		// process environment and must be at least 8 UTF-8 bytes (Amendment 002 §3).
+		apiKey := os.Getenv("ANTHROPIC_API_KEY")
+		if len(apiKey) < 8 {
+			return sealedexec.ResolvedProfile{}, fmt.Errorf("%w: ANTHROPIC_API_KEY must be present and at least 8 bytes for Claude activation", sealedexec.ErrVerdict)
+		}
+		declaredEnv["ANTHROPIC_API_KEY"] = apiKey
 		declaredEnv["CLAUDE_CONFIG_DIR"] = material.ClaudeConfigDir
 		declaredEnv["DISABLE_AUTOUPDATER"] = "1"
 		declaredEnv["CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"] = "1"
 		declaredEnv["CLAUDE_CODE_AUTO_CONNECT_IDE"] = "false"
+		policySecretValues = [][]byte{[]byte(apiKey)}
 	default:
 		if !filepath.IsAbs(material.AbsoluteCodexHome) {
 			return sealedexec.ResolvedProfile{}, fmt.Errorf("%w: resolved profile material contradicts request or contains a relative path", sealedexec.ErrVerdict)
 		}
 		declaredEnv["CODEX_HOME"] = material.AbsoluteCodexHome
+		// Classify the Codex home path as the policy secret: the exact
+		// execution-unit path is redacted from any provider-observable channel.
+		policySecretValues = [][]byte{[]byte(material.AbsoluteCodexHome)}
 	}
 	profile, enforcement, err := execworkspace.BuildProfile(workspacePath, material.AbsoluteEnvRoot, grants, declaredEnv)
 	if err != nil {
@@ -559,6 +602,7 @@ func resolvedProfileFromMaterial(material sealedexec.ProfileMaterial, ref sealed
 		AdapterVersion: material.AdapterVersion,
 		DecoderProfile: material.DecoderProfile, WorkspacePath: workspacePath,
 		Profile: profile, Grants: grants, Enforcement: *enforcement,
+		PolicySecretValues: policySecretValues, ClassificationComplete: true,
 	}, nil
 }
 
@@ -720,4 +764,307 @@ func (run *commandCodexRun) Stop(context.Context) (codex.ProcessStopResult, erro
 		return codex.ProcessStopResult{}, stopErr
 	}
 	return codex.ProcessStopResult{ExitCode: 130, ReasonCode: "interrupt-requested"}, nil
+}
+
+// ---------------------------------------------------------------------------
+// Claude adapter: lazy process and HTTP MCP lifecycle
+// ---------------------------------------------------------------------------
+
+// commandClaudeAdapter is the binary-side Claude adapter that defers the HTTP
+// MCP server and real Adapter construction to VerifyAdapter time. This allows
+// the profile's env root (required for the scoped config path) to be resolved
+// by the service before the MCP lifecycle is committed.
+type commandClaudeAdapter struct {
+	process    claude.Process
+	processor  *sealedexec.DetailProcessor
+	controller *sealedexec.ControllerClient
+	request    sealedexec.ExecutionRequest
+
+	mu        sync.Mutex
+	inner     *claude.Adapter
+	closeMCP  func(context.Context) error
+	terminals <-chan *mcpserve.HandlerTerminal
+}
+
+// init starts the scoped HTTP MCP server and constructs the real claude.Adapter.
+// It is called once at VerifyAdapter time when the profile and workspace are
+// resolved. Subsequent calls are no-ops (the inner adapter is already set).
+func (a *commandClaudeAdapter) init(ctx context.Context, check sealedexec.AdapterCheck) error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.inner != nil {
+		return nil
+	}
+
+	// Derive the env root from HOME in the profile env: profile sets
+	// HOME = filepath.Join(envRoot, ".home"), so parent is envRoot.
+	home := sealedEnvValue(check.Profile.Profile.Env(), "HOME")
+	if home == "" {
+		return errors.New("commandClaudeAdapter: resolved profile env is missing HOME")
+	}
+	envRoot := filepath.Dir(home)
+	if !filepath.IsAbs(envRoot) {
+		return errors.New("commandClaudeAdapter: derived env root is not absolute")
+	}
+
+	// Encode the canonical request bytes for the MCP server digest.
+	requestBytes, err := sealedexec.EncodeExecutionRequest(check.Request)
+	if err != nil {
+		return fmt.Errorf("commandClaudeAdapter: encode request: %w", err)
+	}
+
+	// Create the loopback listener for the scoped HTTP MCP server.
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		return fmt.Errorf("commandClaudeAdapter: create MCP listener: %w", err)
+	}
+
+	// Build the ScopedMCP server: same ports as context_mcp.go.
+	key := sealedexec.ExecutionKey{Flight: check.Request.Flight, Lane: check.Request.Lane, Epoch: check.Request.Epoch}
+	recorder := controllerRecorder{client: a.controller}
+	server, err := sealedexec.NewScopedMCP(sealedexec.ScopedMCPPorts{
+		Resolver: mcpControllerResolver{client: a.controller, key: key},
+		Compiler: sealedexec.NewCanonicalChildCompiler(),
+		Verifier: a.controller,
+		Recorder: recorder,
+		Store:    a.controller,
+		Stamps:   a.controller,
+	}, sealedexec.NewFlightState(sealedexec.FlightStateSnapshot{
+		Request:            check.Request,
+		Key:                key,
+		WorkspaceID:        check.Workspace.WorkspaceID,
+		CandidateCommit:    check.Workspace.CurrentCommit,
+		CandidateTree:      check.Workspace.CurrentTree,
+		Revision:           check.Request.ManifestRevision,
+		ManifestDigest:     check.Request.ManifestDigest,
+		ProjectionDigest:   check.Request.ProjectionDigest,
+		NextSourceSequence: 1,
+	}))
+	if err != nil {
+		_ = listener.Close()
+		return fmt.Errorf("commandClaudeAdapter: create scoped MCP server: %w", err)
+	}
+
+	// Start the HTTP MCP server. The returned closeMCP is called after provider
+	// reap (in commandClaudeAdapter.Close) to shut down the server and remove
+	// the config file.
+	mcpConfig, terminals, closeMCP, err := claude.StartScopedMCP(
+		ctx, listener, envRoot, requestBytes,
+		check.Profile.Digest, check.Workspace.WorkspaceID,
+		scopedMCPHandler{server: server},
+	)
+	if err != nil {
+		_ = listener.Close()
+		return fmt.Errorf("commandClaudeAdapter: start scoped MCP: %w", err)
+	}
+
+	// Construct the real per-command Claude adapter.
+	inner, err := claude.New(a.process, a.processor, mcpConfig)
+	if err != nil {
+		_ = closeMCP(ctx)
+		return fmt.Errorf("commandClaudeAdapter: construct Claude adapter: %w", err)
+	}
+
+	a.inner = inner
+	a.closeMCP = closeMCP
+	a.terminals = terminals
+	return nil
+}
+
+func (a *commandClaudeAdapter) VerifyAdapter(ctx context.Context, check sealedexec.AdapterCheck) (sealedexec.AdapterFacts, error) {
+	if err := a.init(ctx, check); err != nil {
+		return sealedexec.AdapterFacts{}, err
+	}
+	return a.inner.VerifyAdapter(ctx, check)
+}
+
+func (a *commandClaudeAdapter) Start(ctx context.Context, launch sealedexec.AdapterLaunch) (sealedexec.ActiveAdapterRun, error) {
+	a.mu.Lock()
+	inner := a.inner
+	a.mu.Unlock()
+	if inner == nil {
+		return nil, errors.New("commandClaudeAdapter: Start called before initialization")
+	}
+	return inner.Start(ctx, launch)
+}
+
+func (a *commandClaudeAdapter) Resume(ctx context.Context, launch sealedexec.AdapterLaunch, sessionRef string) (sealedexec.ActiveAdapterRun, error) {
+	a.mu.Lock()
+	inner := a.inner
+	a.mu.Unlock()
+	if inner == nil {
+		return nil, errors.New("commandClaudeAdapter: Resume called before initialization")
+	}
+	return inner.Resume(ctx, launch, sessionRef)
+}
+
+// Close is called after provider reap. It consumes the first typed HTTP terminal
+// (if any, non-blocking) and then shuts down the MCP server + removes the config.
+func (a *commandClaudeAdapter) Close(ctx context.Context) error {
+	a.mu.Lock()
+	closeFn := a.closeMCP
+	terminals := a.terminals
+	a.mu.Unlock()
+
+	// Consume the first terminal promptly (non-blocking: the channel has capacity
+	// 1, and the provider may or may not have called any MCP tool).
+	if terminals != nil {
+		select {
+		case <-terminals:
+		default:
+		}
+	}
+
+	if closeFn != nil {
+		return closeFn(ctx)
+	}
+	return nil
+}
+
+// sealedEnvValue looks up name in a sorted KEY=VALUE env slice and returns
+// the value, or "" when absent. It is the binary-local counterpart to the
+// unexported envValueFromProfile in internal/sealedexec/service.go.
+func sealedEnvValue(env []string, name string) string {
+	prefix := name + "="
+	for _, kv := range env {
+		if strings.HasPrefix(kv, prefix) {
+			return strings.TrimPrefix(kv, prefix)
+		}
+	}
+	return ""
+}
+
+// commandClaudeProcess implements the claude.Process interface for the real
+// binary environment. Probe runs the version probe synchronously; Start
+// launches the provider and returns a pumping active run.
+type commandClaudeProcess struct{}
+
+func (commandClaudeProcess) Probe(_ context.Context, command *exec.Cmd) (stdout, stderr []byte, exitCode int, err error) {
+	if command == nil {
+		return nil, nil, 0, errors.New("sealed claude process: nil probe command")
+	}
+	var outBuf, errBuf bytes.Buffer
+	command.Stdout = &outBuf
+	command.Stderr = &errBuf
+	runErr := command.Run()
+	var exitErr *exec.ExitError
+	if runErr != nil && !errors.As(runErr, &exitErr) {
+		return nil, nil, 0, runErr
+	}
+	code := 0
+	if exitErr != nil {
+		code = exitErr.ExitCode()
+	}
+	return outBuf.Bytes(), errBuf.Bytes(), code, nil
+}
+
+func (commandClaudeProcess) Start(_ context.Context, command *exec.Cmd, stdin []byte) (claude.ActiveProcess, error) {
+	if command == nil {
+		return nil, errors.New("sealed claude process: nil start command")
+	}
+	if len(command.ExtraFiles) != 0 {
+		return nil, errors.New("sealed claude process: provider child must not inherit extra files")
+	}
+	stdoutPipe, err := command.StdoutPipe()
+	if err != nil {
+		return nil, fmt.Errorf("sealed claude process: stdout pipe: %w", err)
+	}
+	stderrPipe, err := command.StderrPipe()
+	if err != nil {
+		return nil, fmt.Errorf("sealed claude process: stderr pipe: %w", err)
+	}
+	command.Stdin = bytes.NewReader(stdin)
+	if err := command.Start(); err != nil {
+		message := strings.ReplaceAll(err.Error(), command.Path, "<profile-executable>")
+		return nil, errors.New(message)
+	}
+	active := &commandClaudeRun{
+		command: command,
+		frames:  make(chan commandClaudeFrame, 16),
+	}
+	go active.pump(stdoutPipe, stderrPipe)
+	return active, nil
+}
+
+type commandClaudeFrame struct {
+	obs claude.ProcessObservation
+	err error
+}
+
+type commandClaudeRun struct {
+	command  *exec.Cmd
+	frames   chan commandClaudeFrame
+	stopOnce sync.Once
+}
+
+func (run *commandClaudeRun) pump(stdout io.Reader, stderrReader io.Reader) {
+	defer close(run.frames)
+
+	// Accumulate stderr in a background goroutine so it does not block stdout.
+	var stderrBuf bytes.Buffer
+	stderrDone := make(chan struct{})
+	go func() {
+		defer close(stderrDone)
+		_, _ = io.Copy(&stderrBuf, stderrReader)
+	}()
+
+	// Emit JSONL frames from stdout.
+	reader := bufio.NewReader(stdout)
+	for {
+		line, err := reader.ReadBytes('\n')
+		if len(line) != 0 {
+			complete := err == nil
+			if complete {
+				line = bytes.TrimSuffix(line, []byte{'\n'})
+			}
+			run.frames <- commandClaudeFrame{obs: claude.ProcessObservation{ForeignJSON: line, Complete: complete}}
+		}
+		if err != nil {
+			if !errors.Is(err, io.EOF) {
+				run.frames <- commandClaudeFrame{err: err}
+			}
+			break
+		}
+	}
+
+	// Wait for stderr reader to finish before Wait().
+	<-stderrDone
+
+	// Reap the process and emit the terminal observation.
+	waitErr := run.command.Wait()
+	exitCode := 0
+	if waitErr != nil {
+		var exitErr *exec.ExitError
+		if !errors.As(waitErr, &exitErr) {
+			run.frames <- commandClaudeFrame{err: waitErr}
+			return
+		}
+		exitCode = exitErr.ExitCode()
+	}
+	run.frames <- commandClaudeFrame{obs: claude.ProcessObservation{
+		Terminal: &claude.ProcessResult{ExitCode: exitCode, Stderr: stderrBuf.Bytes()},
+	}}
+}
+
+func (run *commandClaudeRun) Next(ctx context.Context) (claude.ProcessObservation, error) {
+	select {
+	case <-ctx.Done():
+		return claude.ProcessObservation{}, ctx.Err()
+	case frame, ok := <-run.frames:
+		if !ok {
+			return claude.ProcessObservation{}, io.EOF
+		}
+		return frame.obs, frame.err
+	}
+}
+
+func (run *commandClaudeRun) Stop(context.Context) (claude.ProcessStopResult, error) {
+	var stopErr error
+	run.stopOnce.Do(func() {
+		stopErr = run.command.Process.Kill()
+	})
+	if stopErr != nil && !errors.Is(stopErr, os.ErrProcessDone) {
+		return claude.ProcessStopResult{}, stopErr
+	}
+	return claude.ProcessStopResult{ExitCode: 130, ReasonCode: "interrupt-requested"}, nil
 }
