@@ -148,6 +148,7 @@ func TestExecutionCompletionService_Behavioral(t *testing.T) {
 			configure: func(f *completionFixture) {
 				f.request.ManifestRevision = 1
 				f.run.Acks[0].ManifestRevision = 1
+				f.run.Terminal = completionTerminal(f.request, f.request.ManifestDigest, f.run.Acks)
 				f.recorder.mutateCheckpoint = func(checkpoint *RecorderCheckpoint) {
 					checkpoint.Revisions = checkpoint.Revisions[1:]
 				}
@@ -290,6 +291,188 @@ func TestReceiptDigestDomains(t *testing.T) {
 	}
 }
 
+// TestExecutionCompletionSharedStream_Behavioral prosecutes SI-163: completion
+// consumes the one shared canonical acknowledgment stream, refuses a stream
+// that hides the embedded scoped-MCP transition or contradicts the terminal
+// snapshot, and binds every terminal artifact to the actual post-expansion
+// manifest revision and digest rather than the original request revision.
+func TestExecutionCompletionSharedStream_Behavioral(t *testing.T) {
+	t.Run("completion binds the actual post-expansion terminal revision", func(t *testing.T) {
+		fixture := newExpandedCompletionFixture(t)
+		childDigest := fixture.run.Terminal.ManifestDigest
+		if childDigest == fixture.request.ManifestDigest {
+			t.Fatal("expanded fixture must install a distinct child manifest digest")
+		}
+		completion, err := fixture.service().Complete(context.Background(), fixture.requestValue())
+		if err != nil {
+			t.Fatalf("Complete after an embedded expansion: %v", err)
+		}
+		last := fixture.run.Acks[len(fixture.run.Acks)-1]
+		event := fixture.recorder.event
+		if event.ManifestRevision != last.ManifestRevision || event.ManifestDigest != childDigest ||
+			event.SourceSequence != last.SourceSequence+1 || event.PriorEventDigest != last.EventDigest {
+			t.Fatalf("execution-result identity = revision %d digest %q sequence %d prior %q, want the shared terminal position",
+				event.ManifestRevision, event.ManifestDigest, event.SourceSequence, event.PriorEventDigest)
+		}
+		payload, ok := event.Payload.(*contextevent.ExecutionResultPayload)
+		if !ok || payload.ManifestDigest != childDigest {
+			t.Fatalf("execution-result payload = %#v, want the actual terminal manifest digest %q", event.Payload, childDigest)
+		}
+		if completion.Result.TerminalManifestRevision != last.ManifestRevision || completion.Result.TerminalManifestDigest != childDigest ||
+			completion.Result.TerminalSourceSequence != event.SourceSequence {
+			t.Fatalf("public result terminal = revision %d digest %q sequence %d", completion.Result.TerminalManifestRevision, completion.Result.TerminalManifestDigest, completion.Result.TerminalSourceSequence)
+		}
+		if completion.Receipt.TerminalManifestRevision != last.ManifestRevision || completion.Receipt.ManifestDigest != childDigest {
+			t.Fatalf("receipt terminal = revision %d digest %q, want the actual child revision/digest", completion.Receipt.TerminalManifestRevision, completion.Receipt.ManifestDigest)
+		}
+		receiptEvent := fixture.receipts.append.Event
+		if receiptEvent.ManifestRevision != last.ManifestRevision || receiptEvent.ManifestDigest != childDigest || receiptEvent.SourceSequence != event.SourceSequence+1 {
+			t.Fatalf("receipt event = revision %d digest %q sequence %d", receiptEvent.ManifestRevision, receiptEvent.ManifestDigest, receiptEvent.SourceSequence)
+		}
+	})
+
+	mutations := []struct {
+		name      string
+		configure func(*completionFixture)
+		wantLast  string
+	}{
+		{
+			name: "service-only acknowledgment subset hides the transition",
+			configure: func(f *completionFixture) {
+				f.run.Acks = []contextevent.EventAck{f.run.Acks[0], f.run.Acks[4], f.run.Acks[7]}
+			},
+		},
+		{
+			name:      "stale terminal revision",
+			configure: func(f *completionFixture) { f.run.Terminal.Revision = f.request.ManifestRevision },
+		},
+		{
+			name:      "stale terminal next source sequence",
+			configure: func(f *completionFixture) { f.run.Terminal.NextSourceSequence-- },
+		},
+		{
+			name:      "stale terminal prior event digest",
+			configure: func(f *completionFixture) { f.run.Terminal.PriorEventDigest = testDigest("wrong-prior-event") },
+		},
+		{
+			name:      "stale terminal global sequence",
+			configure: func(f *completionFixture) { f.run.Terminal.LastGlobalSequence-- },
+		},
+		{
+			name:      "terminal snapshot from another execution",
+			configure: func(f *completionFixture) { f.run.Terminal.Key.Flight = "other-flight" },
+		},
+		{
+			name: "tampered terminal manifest digest",
+			configure: func(f *completionFixture) {
+				honest := f.run.Terminal.ManifestDigest
+				f.run.Terminal.ManifestDigest = f.request.ManifestDigest
+				f.recorder.mutateCheckpoint = func(checkpoint *RecorderCheckpoint) {
+					checkpoint.Revisions[len(checkpoint.Revisions)-1].ManifestDigest = honest
+				}
+			},
+			wantLast: "checkpoint",
+		},
+		{
+			name: "child transition skips a manifest revision",
+			configure: func(f *completionFixture) {
+				for i := 4; i < len(f.run.Acks); i++ {
+					f.run.Acks[i].ManifestRevision++
+				}
+				f.run.Terminal.Revision++
+			},
+		},
+		{
+			name: "child revision does not restart source order",
+			configure: func(f *completionFixture) {
+				for i := 4; i < len(f.run.Acks); i++ {
+					f.run.Acks[i].SourceSequence += 4
+				}
+				f.run.Terminal.NextSourceSequence += 4
+			},
+		},
+		{
+			name:      "source sequence gap inside one revision",
+			configure: func(f *completionFixture) { f.run.Acks[1].SourceSequence++ },
+		},
+		{
+			name:      "global order does not strictly increase",
+			configure: func(f *completionFixture) { f.run.Acks[4].GlobalSequence = f.run.Acks[3].GlobalSequence },
+		},
+	}
+	for _, mutation := range mutations {
+		mutation := mutation
+		t.Run("refuses "+mutation.name, func(t *testing.T) {
+			fixture := newExpandedCompletionFixture(t)
+			mutation.configure(fixture)
+			completion, err := fixture.service().Complete(context.Background(), fixture.requestValue())
+			if err == nil {
+				t.Fatal("Complete accepted a contradictory shared acknowledgment stream")
+			}
+			if len(completion.ResultBytes) != 0 || completion.Receipt.Digest != "" || fixture.receipts.append.Receipt.Digest != "" {
+				t.Fatalf("refused completion minted terminal artifacts: bytes=%d receipt=%q", len(completion.ResultBytes), completion.Receipt.Digest)
+			}
+			if got := lastCompletionCall(fixture.calls); got != mutation.wantLast {
+				t.Fatalf("last call = %q, want %q; transcript %q", got, mutation.wantLast, fixture.calls)
+			}
+		})
+	}
+}
+
+// newExpandedCompletionFixture is one authoritative run whose shared stream
+// carries the embedded scoped-MCP transitions: the service opens the request
+// revision, MCP appends request/decision/child-manifest, the remaining
+// lifecycle events continue inside the installed child revision, and a second
+// denied request installs no child. Only the complete stream is continuous —
+// the service-owned subset alone has a hole where each transition ran.
+func newExpandedCompletionFixture(t *testing.T) *completionFixture {
+	t.Helper()
+	fixture := newCompletionFixture(t, contextevent.AuthorityAuthoritative)
+	request := fixture.request
+	parent, child := request.ManifestRevision, request.ManifestRevision+1
+	childDigest := testDigest("child-manifest-1")
+	fixture.run.Acks = []contextevent.EventAck{
+		completionAck(request, parent, 1, 1, contextevent.KindAdapterStart, testDigest("adapter-start")),
+		completionAck(request, parent, 2, 2, contextevent.KindContextRequest, testDigest("context-request")),
+		completionAck(request, parent, 3, 3, contextevent.KindContextDecision, testDigest("context-decision")),
+		completionAck(request, parent, 4, 4, contextevent.KindChildManifest, testDigest("child-manifest")),
+		completionAck(request, child, 1, 5, contextevent.KindProviderMessage, testDigest("provider-message")),
+		completionAck(request, child, 2, 6, contextevent.KindContextRequest, testDigest("denied-request")),
+		completionAck(request, child, 3, 7, contextevent.KindContextDecision, testDigest("denied-decision")),
+		completionAck(request, child, 4, 8, contextevent.KindAdapterStop, testDigest("adapter-stop")),
+	}
+	fixture.run.Terminal = completionTerminal(request, childDigest, fixture.run.Acks)
+	// The controller's terminal rows name the one installed transition; the
+	// completed checkpoint carries both revisions.
+	fixture.inputs.inputs.Expansions = []contextreceipt.Expansion{{
+		RequestID: "context-request:expanded", ParentRevision: parent,
+		ParentManifestDigest: testDigest("manifest-0"), ChildRevision: child,
+		ChildManifestDigest: childDigest, ExpansionDigest: testDigest("expansion-1"),
+	}}
+	return fixture
+}
+
+// completionAck is one canonical row of the shared acknowledgment stream.
+func completionAck(request ExecutionRequest, revision, sequence, global uint64, kind contextevent.Kind, digest string) contextevent.EventAck {
+	return contextevent.EventAck{
+		Schema: contextevent.AckSchemaID, Flight: request.Flight, Lane: request.Lane,
+		Epoch: request.Epoch, Session: request.Session, ManifestRevision: revision,
+		Kind: kind, SourceSequence: sequence, EventDigest: digest, GlobalSequence: global,
+	}
+}
+
+// completionTerminal is the immutable terminal position the shared flight state
+// reached at the end of the given stream.
+func completionTerminal(request ExecutionRequest, manifestDigest string, stream []contextevent.EventAck) FlightStateSnapshot {
+	last := stream[len(stream)-1]
+	return FlightStateSnapshot{
+		Request: request, Key: executionKey(request), Revision: last.ManifestRevision,
+		ManifestDigest: manifestDigest, ProjectionDigest: request.ProjectionDigest,
+		NextSourceSequence: last.SourceSequence + 1, PriorEventDigest: last.EventDigest,
+		LastGlobalSequence: last.GlobalSequence,
+	}
+}
+
 type completionFixture struct {
 	t         *testing.T
 	request   ExecutionRequest
@@ -339,6 +522,7 @@ func newCompletionFixture(t *testing.T, authority contextevent.Authority) *compl
 			EventDigest: testDigest("adapter-stop"), GlobalSequence: 3,
 		}},
 	}
+	fixture.run.Terminal = completionTerminal(request, request.ManifestDigest, fixture.run.Acks)
 	fixture.workspace = &completionWorkspaceFake{fixture: fixture, facts: WorkspaceFacts{
 		Verification:  provenVerification(),
 		WorkspaceID:   workspaceID,

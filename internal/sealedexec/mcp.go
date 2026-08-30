@@ -91,15 +91,35 @@ type FlightStateSnapshot struct {
 	Invalidated                      bool
 }
 
+// FlightTerminal is one isolated view of a shared flight state: the exact
+// transition position it has reached together with the complete canonical
+// acknowledgment stream that reached it. Both members are copies, so no holder
+// can reach back into live state.
+type FlightTerminal struct {
+	Snapshot FlightStateSnapshot
+	Acks     []contextevent.EventAck
+}
+
 // FlightState serializes event admission with expansion installation.
 type FlightState struct {
 	mu       sync.Mutex
 	snapshot FlightStateSnapshot
+	// acks is Amendment 002 §7's complete canonical acknowledgment stream for
+	// this execution: the authenticated restart history plus every service- and
+	// MCP-owned append this state has since acknowledged, in durable order.
+	acks []contextevent.EventAck
 }
 
 // NewFlightState constructs state from the already-decoded request and any
-// explicit continuation position.
+// explicit continuation position, with no acknowledged history.
 func NewFlightState(snapshot FlightStateSnapshot) *FlightState {
+	return NewFlightStateAt(snapshot, nil)
+}
+
+// NewFlightStateAt constructs state that continues an already authenticated
+// acknowledgment stream. The stream is copied, so the caller's slice cannot
+// later change what this state believes was acknowledged.
+func NewFlightStateAt(snapshot FlightStateSnapshot, acknowledged []contextevent.EventAck) *FlightState {
 	if snapshot.Key == (ExecutionKey{}) {
 		snapshot.Key = executionKey(snapshot.Request)
 	}
@@ -124,7 +144,7 @@ func NewFlightState(snapshot FlightStateSnapshot) *FlightState {
 	if snapshot.NextSourceSequence == 0 {
 		snapshot.NextSourceSequence = 1
 	}
-	return &FlightState{snapshot: snapshot}
+	return &FlightState{snapshot: snapshot, acks: append([]contextevent.EventAck(nil), acknowledged...)}
 }
 
 // Snapshot returns an isolated copy of the current transition state.
@@ -132,6 +152,33 @@ func (s *FlightState) Snapshot() FlightStateSnapshot {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.currentLocked()
+}
+
+// Terminal returns an isolated copy of the current transition position and of
+// the complete canonical acknowledgment stream that reached it.
+func (s *FlightState) Terminal() FlightTerminal {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return FlightTerminal{Snapshot: s.currentLocked(), Acks: s.streamLocked()}
+}
+
+// streamLocked copies the complete acknowledgment stream for a caller that
+// already holds the state's mutex.
+func (s *FlightState) streamLocked() []contextevent.EventAck {
+	return append([]contextevent.EventAck(nil), s.acks...)
+}
+
+// recordAckLocked appends one acknowledgment to the complete stream. Amendment
+// 002 §7's durable position is never recorded twice, so an exact replay of an
+// already acknowledged (revision, source sequence) leaves the stream alone.
+// The caller must hold s.mu.
+func (s *FlightState) recordAckLocked(ack contextevent.EventAck) {
+	for _, prior := range s.acks {
+		if prior.ManifestRevision == ack.ManifestRevision && prior.SourceSequence == ack.SourceSequence {
+			return
+		}
+	}
+	s.acks = append(s.acks, ack)
 }
 
 // currentLocked returns an isolated copy of the transition state for a caller
@@ -204,6 +251,16 @@ func (s *FlightState) append(
 	return s.appendLocked(ctx, recorder, stamps, workspace, kind, payload)
 }
 
+// appendReplay is appendReplayLocked under the state's own mutex.
+func (s *FlightState) appendReplay(
+	ctx context.Context, recorder eventAppender, stamps StampSource,
+	workspace WorkspaceFacts, retained eventReplay, kind contextevent.Kind, payload any,
+) (flightAppendResult, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.appendReplayLocked(ctx, recorder, stamps, workspace, retained, kind, payload)
+}
+
 // appendReplayLocked is appendLocked with the optional §7 retained-bytes seam.
 // The caller must hold s.mu.
 func (s *FlightState) appendReplayLocked(
@@ -255,6 +312,7 @@ func (s *FlightState) appendReplayLocked(
 	state.NextSourceSequence++
 	state.PriorEventDigest = event.EventDigest
 	state.LastGlobalSequence = ack.GlobalSequence
+	s.recordAckLocked(ack)
 	return flightAppendResult{Event: event, Ack: ack}, nil
 }
 

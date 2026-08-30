@@ -448,6 +448,61 @@ func TestSharedFlightStateOwnershipContract_Behavioral(t *testing.T) {
 	}
 }
 
+// TestSharedFlightStreamRunContract_Behavioral proves SI-163 from the service
+// side: ExecutionRun carries the one complete canonical acknowledgment stream
+// — including the embedded scoped-MCP context transition, exactly once — plus
+// the immutable terminal position that stream ends at.
+func TestSharedFlightStreamRunContract_Behavioral(t *testing.T) {
+	req := serviceRequest(t, ActionStart)
+	svc, ports := newServiceHarness(t, req)
+	mcp := &mcpFake{t: t, request: req}
+	ports.embedded = func(state *FlightState) {
+		server, err := NewScopedMCP(ScopedMCPPorts{Resolver: mcp, Compiler: mcp, Verifier: mcp, Recorder: ports, Store: mcp, Stamps: mcp}, state)
+		if err != nil {
+			t.Fatalf("NewScopedMCP over the shared state: %v", err)
+		}
+		if _, err := server.Call(context.Background(), ToolRequestContext, []byte(`{"purpose":"needed for implementation","ref":"spec/extra"}`)); err != nil {
+			t.Fatalf("embedded request_context: %v", err)
+		}
+	}
+	run, err := svc.Execute(context.Background(), req, []contextcompile.DataItem{})
+	if err != nil {
+		t.Fatalf("Execute with an embedded context transition: %v", err)
+	}
+	state, _ := ports.sharedState()
+	if state == nil {
+		t.Fatal("adapter received no shared flight state")
+	}
+	terminal := state.Terminal()
+	if !reflect.DeepEqual(run.Acks, terminal.Acks) {
+		t.Fatalf("run stream = %#v, want the complete shared stream %#v", run.Acks, terminal.Acks)
+	}
+	if !reflect.DeepEqual(run.Terminal, terminal.Snapshot) {
+		t.Fatalf("run terminal = %#v, want the shared terminal position %#v", run.Terminal, terminal.Snapshot)
+	}
+	counts := map[contextevent.Kind]int{}
+	for _, ack := range run.Acks {
+		counts[ack.Kind]++
+	}
+	for _, kind := range []contextevent.Kind{contextevent.KindContextRequest, contextevent.KindContextDecision, contextevent.KindChildManifest} {
+		if counts[kind] != 1 {
+			t.Fatalf("run stream carries %d %q acknowledgments, want exactly one; stream %#v", counts[kind], kind, run.Acks)
+		}
+	}
+	child := req.ManifestRevision + 1
+	if run.Terminal.Revision != child || run.Terminal.ManifestDigest == req.ManifestDigest {
+		t.Fatalf("run terminal revision/digest = %d/%q, want the installed child revision %d", run.Terminal.Revision, run.Terminal.ManifestDigest, child)
+	}
+	last := run.Acks[len(run.Acks)-1]
+	if last.ManifestRevision != child || run.Terminal.NextSourceSequence != last.SourceSequence+1 ||
+		run.Terminal.PriorEventDigest != last.EventDigest || run.Terminal.LastGlobalSequence != last.GlobalSequence {
+		t.Fatalf("run terminal = %#v does not cross-match the final acknowledgment %#v", run.Terminal, last)
+	}
+	if _, err := validateRunAcknowledgments(req, run.Acks, false); err != nil {
+		t.Fatalf("completion refused the actual shared stream: %v", err)
+	}
+}
+
 func TestContextExecutionResumeContract_Behavioral(t *testing.T) {
 	req := serviceRequest(t, ActionResume)
 
@@ -1408,6 +1463,7 @@ type serviceFake struct {
 	session                   ProviderSessionFacts
 	expansion                 ExpansionFacts
 	input                     ProviderInput
+	embedded                  func(*FlightState)
 	appended                  []contextevent.Event
 	appendErr                 error
 	appendErrAt               int
@@ -1676,7 +1732,13 @@ func (p *serviceFake) Start(_ context.Context, launch AdapterLaunch) (ActiveAdap
 	}
 	launchErr, nilActive := p.launchErr, p.nilActive
 	launchEntered, launchRelease := p.launchEntered, p.launchRelease
+	embedded, embeddedState := p.embedded, p.adapterState
 	p.mu.Unlock()
+	// The embedded scoped MCP server runs inside the launched provider and
+	// appends through the exact state the service handed the adapter.
+	if embedded != nil {
+		embedded(embeddedState)
+	}
 	if launchEntered != nil {
 		close(launchEntered)
 		<-launchRelease

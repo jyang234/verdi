@@ -410,7 +410,14 @@ type ExecutionRun struct {
 	ReviewLaunchFacts *ReviewLaunchFacts
 	ReviewLaunchEvent *contextevent.Event
 	ReviewLaunchAck   *contextevent.EventAck
-	Acks              []contextevent.EventAck
+	// Acks is the complete canonical acknowledgment stream this run reached:
+	// the authenticated restart history plus every service- and embedded scoped
+	// MCP-owned append, in one durable order (SI-163).
+	Acks []contextevent.EventAck
+	// Terminal is the immutable position the shared flight state ended at. It
+	// carries the actual terminal manifest revision and digest, which an
+	// installed expansion moves past the original request revision.
+	Terminal FlightStateSnapshot
 }
 
 // InterruptRequest carries the already-decoded execution identity needed to
@@ -507,7 +514,6 @@ type activeExecution struct {
 	reviewFacts             *ReviewLaunchFacts
 	reviewEvent             *contextevent.Event
 	reviewAck               *contextevent.EventAck
-	acks                    []contextevent.EventAck
 	state                   activeExecutionState
 	stopIssued              chan struct{}
 	stopIssueOnce           sync.Once
@@ -813,28 +819,24 @@ func (s *Service) execute(ctx context.Context, request ExecutionRequest, data []
 	if stream == nil {
 		return partial, operational("provider process", errors.New("adapter returned a nil active run"))
 	}
-	var initialAcks []contextevent.EventAck
 	completedEventChainRoot := ""
 	if request.Action == ActionResume {
-		// Restore the exact acknowledged prefix reconstructed from the
-		// checkpoint before any new durable position is allocated. The shared
-		// state already opened at that position.
-		initialAcks = append(initialAcks, plan.acks...)
+		// The shared state already opened at the authenticated restart position
+		// and already retains the exact acknowledged prefix reconstructed from
+		// the checkpoint, so every partial view reads it from there.
 		completedEventChainRoot = plan.completedEventChainRoot
-		partial.Acks = append([]contextevent.EventAck(nil), initialAcks...)
+		partial.Acks, partial.Terminal = flightRunState(flight)
 		if plan.gapSequence != 0 {
 			// §7: an earlier acknowledged provider session exists, so resume
 			// first appends the fixed authority-blocking recorder gap.
-			gap, err := s.appendLifecycle(ctx, flight, recorder, retained, workspace, contextevent.KindTelemetryGap, func(snapshot FlightStateSnapshot) (any, error) {
+			if _, err := s.appendLifecycle(ctx, flight, recorder, retained, workspace, contextevent.KindTelemetryGap, func(snapshot FlightStateSnapshot) (any, error) {
 				return recorderGapPayload(snapshot.NextSourceSequence), nil
-			})
-			if err != nil {
+			}); err != nil {
 				return partial, err
 			}
-			initialAcks = append(initialAcks, gap.Ack)
-			partial.Acks = append([]contextevent.EventAck(nil), initialAcks...)
+			partial.Acks, partial.Terminal = flightRunState(flight)
 		}
-		resume, err := s.appendLifecycle(ctx, flight, recorder, retained, workspace, contextevent.KindResume, func(snapshot FlightStateSnapshot) (any, error) {
+		_, err := s.appendLifecycle(ctx, flight, recorder, retained, workspace, contextevent.KindResume, func(snapshot FlightStateSnapshot) (any, error) {
 			// §7: resume's event_chain_root is the digest of the acknowledged
 			// prefix document built from the actual terminal facts.
 			chainRoot, err := contextevent.EventPrefixDigest(acknowledgedPrefix(request, completedEventChainRoot, snapshot.NextSourceSequence-1, snapshot.LastGlobalSequence, snapshot.PriorEventDigest))
@@ -858,10 +860,9 @@ func (s *Service) execute(ctx context.Context, request ExecutionRequest, data []
 		if err != nil {
 			return partial, err
 		}
-		initialAcks = append(initialAcks, resume.Ack)
-		partial.Acks = append([]contextevent.EventAck(nil), initialAcks...)
+		partial.Acks, partial.Terminal = flightRunState(flight)
 	}
-	s.activate(active, stream, request, canonicalRequest, workspace, profile, recorder, flight, sessionFacts.SessionRef, review, initialAcks, completedEventChainRoot, retained)
+	s.activate(active, stream, request, canonicalRequest, workspace, profile, recorder, flight, sessionFacts.SessionRef, review, completedEventChainRoot, retained)
 	return s.consumeActive(ctx, active, authorityMode, witnesses)
 }
 
@@ -974,7 +975,7 @@ func (s *Service) acquire(key ExecutionKey, operation string) (*activeExecution,
 	return active, release, nil
 }
 
-func (s *Service) activate(active *activeExecution, stream ActiveAdapterRun, request ExecutionRequest, canonicalRequest []byte, workspace WorkspaceFacts, profile ResolvedProfile, recorder Recorder, flight *FlightState, sessionRef string, review *ReviewLaunch, initialAcks []contextevent.EventAck, completedEventChainRoot string, retained *retainedEvents) {
+func (s *Service) activate(active *activeExecution, stream ActiveAdapterRun, request ExecutionRequest, canonicalRequest []byte, workspace WorkspaceFacts, profile ResolvedProfile, recorder Recorder, flight *FlightState, sessionRef string, review *ReviewLaunch, completedEventChainRoot string, retained *retainedEvents) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	active.mu.Lock()
@@ -988,7 +989,6 @@ func (s *Service) activate(active *activeExecution, stream ActiveAdapterRun, req
 	active.flight = flight
 	active.sessionRef = sessionRef
 	active.review = cloneReviewLaunch(review)
-	active.acks = append([]contextevent.EventAck(nil), initialAcks...)
 	active.completedEventChainRoot = completedEventChainRoot
 	if retained == nil {
 		retained = newRetainedEvents()
@@ -1168,7 +1168,6 @@ func (s *Service) recordResult(ctx context.Context, active *activeExecution, res
 			return "", !recorderUnusable(err), err
 		}
 		event, ack := appended.Event, appended.Ack
-		active.acks = append(active.acks, ack)
 		if active.request.Action == ActionStart && observation.Kind == contextevent.KindAdapterStart {
 			if result.ObservedSessionRef == "" || (active.sessionRef != "" && active.sessionRef != result.ObservedSessionRef) {
 				active.mu.Unlock()
@@ -1227,7 +1226,7 @@ func (s *Service) recordStop(ctx context.Context, active *activeExecution, stop 
 	// at least one acknowledged event in this session (prior-event digest
 	// non-empty in the shared state).
 	if active.isInterrupt && active.flight != nil && active.flight.Snapshot().PriorEventDigest != "" {
-		suspension, err := s.appendLifecycle(ctx, active.flight, active.recorder, active.retained, active.workspace, contextevent.KindSuspension, func(snapshot FlightStateSnapshot) (any, error) {
+		_, err := s.appendLifecycle(ctx, active.flight, active.recorder, active.retained, active.workspace, contextevent.KindSuspension, func(snapshot FlightStateSnapshot) (any, error) {
 			suspSchema, _ := contextevent.PayloadSchema(contextevent.KindSuspension)
 			// §7: suspension's event_chain_root is the digest of the
 			// acknowledged prefix document built from this run's actual
@@ -1248,7 +1247,6 @@ func (s *Service) recordStop(ctx context.Context, active *activeExecution, stop 
 		if err != nil {
 			return contextevent.EventAck{}, err
 		}
-		active.acks = append(active.acks, suspension.Ack)
 	}
 	schema, _ := contextevent.PayloadSchema(contextevent.KindAdapterStop)
 	payload := &contextevent.AdapterStopPayload{Schema: schema, Adapter: active.request.Adapter, AdapterVersion: active.request.AdapterVersion, Session: active.request.Session, ExitCode: stop.ExitCode, ReasonCode: stop.ReasonCode}
@@ -1258,7 +1256,6 @@ func (s *Service) recordStop(ctx context.Context, active *activeExecution, stop 
 	if err != nil {
 		return contextevent.EventAck{}, err
 	}
-	active.acks = append(active.acks, result.Ack)
 	return result.Ack, nil
 }
 
@@ -1323,13 +1320,27 @@ func activeRunResult(active *activeExecution, authority contextevent.Authority, 
 		ack := *active.reviewAck
 		reviewAck = &ack
 	}
+	// SI-163: the run's acknowledgment stream is the shared flight state's own
+	// complete order. Returning only the service-owned subset would drop every
+	// acknowledged scoped-MCP context event and make a valid run look
+	// discontinuous to completion.
+	terminal := flightTerminal(active.flight)
 	return ExecutionRun{
 		Authority: authority, Witnesses: append([]string(nil), witnesses...),
 		Workspace: active.workspace, Profile: active.profile,
 		AdapterSessionRef: active.sessionRef, ReviewLaunchFacts: reviewFacts,
 		ReviewLaunchEvent: reviewEvent, ReviewLaunchAck: reviewAck,
-		Acks: append([]contextevent.EventAck(nil), active.acks...),
+		Acks: terminal.Acks, Terminal: terminal.Snapshot,
 	}
+}
+
+// flightTerminal reads one isolated terminal view of the shared flight state.
+// A refusal before the state exists carries no acknowledged position.
+func flightTerminal(flight *FlightState) FlightTerminal {
+	if flight == nil {
+		return FlightTerminal{}
+	}
+	return flight.Terminal()
 }
 
 func validateReviewLaunch(review ReviewLaunch) error {
@@ -1810,8 +1821,18 @@ func newExecutionFlightState(request ExecutionRequest, workspace WorkspaceFacts,
 		snapshot.NextSourceSequence = plan.sequence
 		snapshot.PriorEventDigest = plan.priorDigest
 		snapshot.LastGlobalSequence = plan.priorGlobal
+		// SI-163: the authenticated restart acknowledgments open the complete
+		// stream, so nothing already proven durable disappears from continuity.
+		return NewFlightStateAt(snapshot, plan.acks)
 	}
 	return NewFlightState(snapshot)
+}
+
+// flightRunState reads the complete acknowledgment stream and terminal position
+// a partial ExecutionRun must report.
+func flightRunState(flight *FlightState) ([]contextevent.EventAck, FlightStateSnapshot) {
+	terminal := flightTerminal(flight)
+	return terminal.Acks, terminal.Snapshot
 }
 
 // appendLifecycle appends one service-owned event through the shared flight

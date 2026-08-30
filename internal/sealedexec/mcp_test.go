@@ -379,6 +379,105 @@ func TestSharedFlightStateSerializesServiceAndMCPAppends(t *testing.T) {
 	})
 }
 
+// TestSharedFlightStreamContract_Behavioral prosecutes SI-163's retained
+// stream: the one shared flight state keeps the complete canonical
+// acknowledgment order across service and embedded scoped-MCP appends, hands
+// callers isolated copies, invents nothing on a failed append, and never
+// records a replayed durable position twice.
+func TestSharedFlightStreamContract_Behavioral(t *testing.T) {
+	req := serviceRequest(t, ActionStart)
+	workspace := sharedStateWorkspace(t, req)
+
+	t.Run("every acknowledged append enters the stream exactly once", func(t *testing.T) {
+		state := NewFlightState(mcpSnapshot(t, req, ""))
+		recorder := &duplicateKeyRecorder{}
+		fake := &mcpFake{t: t, request: req, state: state}
+		server, err := NewScopedMCP(ScopedMCPPorts{Resolver: fake, Compiler: fake, Verifier: fake, Recorder: recorder, Store: fake, Stamps: fake}, state)
+		if err != nil {
+			t.Fatalf("NewScopedMCP: %v", err)
+		}
+		if _, err := state.append(context.Background(), recorder, fake, workspace, contextevent.KindAdapterStart, sharedStartPayload(t, req)); err != nil {
+			t.Fatalf("service adapter-start: %v", err)
+		}
+		if _, err := server.Call(context.Background(), ToolRequestContext, []byte(`{"purpose":"needed for implementation","ref":"spec/extra"}`)); err != nil {
+			t.Fatalf("request_context: %v", err)
+		}
+		if _, err := state.append(context.Background(), recorder, fake, workspace, contextevent.KindProviderMessage, sharedMessagePayload(t)); err != nil {
+			t.Fatalf("service provider observation: %v", err)
+		}
+		terminal := state.Terminal()
+		if !reflect.DeepEqual(terminal.Acks, recorder.acks) {
+			t.Fatalf("shared stream = %#v, want the exact acknowledged order %#v", terminal.Acks, recorder.acks)
+		}
+		last := recorder.acks[len(recorder.acks)-1]
+		if terminal.Snapshot.Revision != last.ManifestRevision || terminal.Snapshot.NextSourceSequence != last.SourceSequence+1 ||
+			terminal.Snapshot.PriorEventDigest != last.EventDigest || terminal.Snapshot.LastGlobalSequence != last.GlobalSequence {
+			t.Fatalf("terminal position = %#v, want the last acknowledgment %#v", terminal.Snapshot, last)
+		}
+	})
+
+	t.Run("callers receive isolated copies of the stream", func(t *testing.T) {
+		state := NewFlightState(mcpSnapshot(t, req, ""))
+		recorder := &duplicateKeyRecorder{}
+		fake := &mcpFake{t: t, request: req, state: state}
+		if _, err := state.append(context.Background(), recorder, fake, workspace, contextevent.KindAdapterStart, sharedStartPayload(t, req)); err != nil {
+			t.Fatalf("service adapter-start: %v", err)
+		}
+		copied := state.Terminal()
+		if len(copied.Acks) != 1 {
+			t.Fatalf("stream = %#v, want exactly the acknowledged adapter-start", copied.Acks)
+		}
+		copied.Acks[0].GlobalSequence = 99
+		copied.Acks = append(copied.Acks, copied.Acks[0])
+		if again := state.Terminal(); len(again.Acks) != 1 || again.Acks[0].GlobalSequence != recorder.acks[0].GlobalSequence {
+			t.Fatalf("mutating a returned copy changed live state: %#v", again.Acks)
+		}
+	})
+
+	t.Run("a failed append leaves the stream and position exact", func(t *testing.T) {
+		state := NewFlightState(mcpSnapshot(t, req, ""))
+		recorder := &duplicateKeyRecorder{}
+		fake := &mcpFake{t: t, request: req, state: state}
+		if _, err := state.append(context.Background(), recorder, fake, workspace, contextevent.KindAdapterStart, sharedStartPayload(t, req)); err != nil {
+			t.Fatalf("service adapter-start: %v", err)
+		}
+		before := state.Terminal()
+		rejecting := &mcpFake{t: t, request: req, appendErrAt: 1}
+		if _, err := state.append(context.Background(), rejecting, fake, workspace, contextevent.KindProviderMessage, sharedMessagePayload(t)); !errors.Is(err, ErrOperational) {
+			t.Fatalf("rejected append error = %v, want an operational refusal", err)
+		}
+		after := state.Terminal()
+		if !reflect.DeepEqual(after, before) {
+			t.Fatalf("rejected append altered shared state: %#v, want %#v", after, before)
+		}
+	})
+
+	t.Run("an exact replay does not record a second stream row", func(t *testing.T) {
+		state := NewFlightState(mcpSnapshot(t, req, ""))
+		recorder := &duplicateKeyRecorder{}
+		fake := &mcpFake{t: t, request: req, state: state}
+		retained := newRetainedEvents()
+		first, err := state.appendReplay(context.Background(), recorder, fake, workspace, retained, contextevent.KindAdapterStart, sharedStartPayload(t, req))
+		if err != nil {
+			t.Fatalf("retained adapter-start: %v", err)
+		}
+		// The same authenticated position is reopened with its acknowledgment
+		// already in the stream; the exact retained bytes replay without a
+		// recorder write and must not be counted twice.
+		reopened := NewFlightStateAt(mcpSnapshot(t, req, ""), []contextevent.EventAck{first.Ack})
+		replayed, err := reopened.appendReplay(context.Background(), recorder, fake, workspace, retained, contextevent.KindAdapterStart, sharedStartPayload(t, req))
+		if err != nil {
+			t.Fatalf("replayed adapter-start: %v", err)
+		}
+		if replayed.Ack != first.Ack || recorder.replays != 0 || len(recorder.acks) != 1 {
+			t.Fatalf("replay = %#v, recorder replays %d, want the retained acknowledgment without a recorder write", replayed.Ack, recorder.replays)
+		}
+		if got := reopened.Terminal().Acks; len(got) != 1 || got[0] != first.Ack {
+			t.Fatalf("replayed stream = %#v, want exactly one row", got)
+		}
+	})
+}
+
 // duplicateKeyRecorder is Amendment 002 §7's recorder table: an absent key
 // stores the exact bytes and allocates the next never-resetting global
 // sequence, byte-identical replay returns the original acknowledgment without

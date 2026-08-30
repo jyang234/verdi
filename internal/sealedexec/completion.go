@@ -114,10 +114,13 @@ func (s *CompletionService) Complete(ctx context.Context, input CompletionReques
 	if err != nil {
 		return Completion{}, err
 	}
-	lastAck, err := validateCompletionRun(input.Request, input.Run)
-	if err != nil {
+	if _, err := validateCompletionRun(input.Request, input.Run); err != nil {
 		return Completion{}, err
 	}
+	// SI-163: the shared flight state's terminal position, not the dispatched
+	// request revision, is what every terminal artifact binds.
+	terminal := input.Run.Terminal
+	terminalRequest := terminalExecutionRequest(input.Request, terminal)
 
 	child, err := s.ports.Workspace.VerifyWorkspace(ctx, input.Run.Workspace.Path, input.Request.ExecutionWorkspaceRequest)
 	if err != nil {
@@ -127,7 +130,7 @@ func (s *CompletionService) Complete(ctx context.Context, input CompletionReques
 		return Completion{}, err
 	}
 
-	resultPayload, err := newExecutionResultPayload(input.Request, input.Run.Authority, child)
+	resultPayload, err := newExecutionResultPayload(terminalRequest, input.Run.Authority, child)
 	if err != nil {
 		return Completion{}, operational("build execution-result payload", err)
 	}
@@ -135,7 +138,14 @@ func (s *CompletionService) Complete(ctx context.Context, input CompletionReques
 	if err != nil {
 		return Completion{}, operational("stamp execution-result", err)
 	}
-	resultEvent, err := buildEvent(input.Request, child, lastAck.SourceSequence+1, lastAck.EventDigest, nil, resultStamp, contextevent.KindExecutionResult, resultPayload)
+	// I-86: only the first event of a revision carries the acknowledged
+	// predecessor bridge, so a completion that opens an installed child revision
+	// carries it and any later position does not.
+	var priorRevision *contextevent.PriorRevision
+	if terminal.NextSourceSequence == 1 {
+		priorRevision = terminal.PriorRevision
+	}
+	resultEvent, err := buildEvent(terminalRequest, child, terminal.NextSourceSequence, terminal.PriorEventDigest, priorRevision, resultStamp, contextevent.KindExecutionResult, resultPayload)
 	if err != nil {
 		return Completion{}, operational("build execution-result event", err)
 	}
@@ -143,7 +153,7 @@ func (s *CompletionService) Complete(ctx context.Context, input CompletionReques
 	if err != nil {
 		return Completion{}, operational("append execution-result", err)
 	}
-	if err := validateAck(resultEvent, resultAck, lastAck.GlobalSequence); err != nil {
+	if err := validateAck(resultEvent, resultAck, terminal.LastGlobalSequence); err != nil {
 		return Completion{}, operational("acknowledge execution-result", err)
 	}
 
@@ -151,7 +161,7 @@ func (s *CompletionService) Complete(ctx context.Context, input CompletionReques
 	if err != nil {
 		return Completion{}, operational("query completed recorder checkpoint", err)
 	}
-	revisions, eventRoot, err := validateCompletionCheckpoint(input.Request, resultEvent, resultAck, checkpoint)
+	revisions, eventRoot, err := validateCompletionCheckpoint(terminalRequest, resultEvent, resultAck, checkpoint)
 	if err != nil {
 		return Completion{}, operational("validate completed recorder checkpoint", err)
 	}
@@ -174,7 +184,7 @@ func (s *CompletionService) Complete(ctx context.Context, input CompletionReques
 	if err != nil {
 		return Completion{}, operational("validate terminal receipt role inputs", err)
 	}
-	receipt, receiptBytes, err := buildCompletionReceipt(input.Request, input.Run.Authority, child, query.DispatchDigest, revisions, eventRoot, resultAck, receiptInputs, receiptRole, reviewInputs, reviewOf)
+	receipt, receiptBytes, err := buildCompletionReceipt(terminalRequest, input.Run.Authority, child, query.DispatchDigest, revisions, eventRoot, resultAck, receiptInputs, receiptRole, reviewInputs, reviewOf)
 	if err != nil {
 		return Completion{}, operational("build canonical builder receipt", err)
 	}
@@ -183,7 +193,7 @@ func (s *CompletionService) Complete(ctx context.Context, input CompletionReques
 	if err != nil {
 		return Completion{}, operational("stamp receipt event", err)
 	}
-	receiptEvent, err := s.buildReceiptEvent(ctx, input.Request, child, resultEvent, receipt, receiptBytes, receiptStamp, input.Run.Profile.PolicySecretValues)
+	receiptEvent, err := s.buildReceiptEvent(ctx, terminalRequest, child, resultEvent, receipt, receiptBytes, receiptStamp, input.Run.Profile.PolicySecretValues)
 	if err != nil {
 		return Completion{}, operational("build receipt event", err)
 	}
@@ -255,9 +265,23 @@ func validateCompletionRun(request ExecutionRequest, run ExecutionRun) (contexte
 	if run.AdapterSessionRef == "" {
 		return contextevent.EventAck{}, verdict("execution run lacks adapter session identity")
 	}
-	return validateRunAcknowledgments(request, run.Acks, false)
+	last, err := validateRunAcknowledgments(request, run.Acks, false)
+	if err != nil {
+		return contextevent.EventAck{}, err
+	}
+	if err := validateRunTerminal(request, run.Terminal, last); err != nil {
+		return contextevent.EventAck{}, err
+	}
+	return last, nil
 }
 
+// validateRunAcknowledgments validates one complete canonical acknowledgment
+// stream. Amendment 002 §7's source order restarts at one inside each
+// expansion-installed revision, so the stream is contiguous per revision and
+// may cross into a child revision exactly once per installed expansion; the
+// never-resetting global order stays strictly increasing throughout. Requiring
+// every acknowledgment to carry the original request revision would refuse a
+// valid post-expansion run.
 func validateRunAcknowledgments(request ExecutionRequest, acknowledgments []contextevent.EventAck, allowEmpty bool) (contextevent.EventAck, error) {
 	if len(acknowledgments) == 0 {
 		if allowEmpty {
@@ -276,18 +300,60 @@ func validateRunAcknowledgments(request ExecutionRequest, acknowledgments []cont
 			return contextevent.EventAck{}, operational("validate execution run acknowledgments", err)
 		}
 		if roundtripped.Flight != request.Flight || roundtripped.Lane != request.Lane || roundtripped.Epoch != request.Epoch ||
-			roundtripped.Session != request.Session || roundtripped.ManifestRevision != request.ManifestRevision {
+			roundtripped.Session != request.Session || roundtripped.ManifestRevision < request.ManifestRevision {
 			return contextevent.EventAck{}, verdict("execution run acknowledgment identity contradicts request")
 		}
 		canonical = append(canonical, roundtripped)
 	}
 	for i := 1; i < len(canonical); i++ {
 		prior, current := canonical[i-1], canonical[i]
-		if current.SourceSequence != prior.SourceSequence+1 || current.GlobalSequence <= prior.GlobalSequence {
+		if current.GlobalSequence <= prior.GlobalSequence {
 			return contextevent.EventAck{}, operational("validate execution run acknowledgments", errors.New("execution run acknowledgment order is discontinuous"))
+		}
+		switch current.ManifestRevision {
+		case prior.ManifestRevision:
+			if current.SourceSequence != prior.SourceSequence+1 {
+				return contextevent.EventAck{}, operational("validate execution run acknowledgments", errors.New("execution run acknowledgment order is discontinuous"))
+			}
+		case prior.ManifestRevision + 1:
+			if current.SourceSequence != 1 {
+				return contextevent.EventAck{}, operational("validate execution run acknowledgments", errors.New("execution run child revision does not restart source order"))
+			}
+		default:
+			return contextevent.EventAck{}, operational("validate execution run acknowledgments", errors.New("execution run acknowledgment skips a manifest revision"))
 		}
 	}
 	return canonical[len(canonical)-1], nil
+}
+
+// validateRunTerminal cross-matches the shared flight state's immutable
+// terminal position against the stream that reached it. A stale or tampered
+// snapshot cannot be used to build the terminal artifacts.
+func validateRunTerminal(request ExecutionRequest, terminal FlightStateSnapshot, last contextevent.EventAck) error {
+	key := executionKey(request)
+	if terminal.Key != key || terminal.Request.ManifestRevision != request.ManifestRevision ||
+		terminal.Request.ManifestDigest != request.ManifestDigest {
+		return verdict("execution run terminal state identity contradicts request")
+	}
+	if terminal.Revision < request.ManifestRevision || terminal.ManifestDigest == "" {
+		return verdict("execution run terminal state carries no reachable manifest identity")
+	}
+	if terminal.Revision != last.ManifestRevision || terminal.NextSourceSequence != last.SourceSequence+1 ||
+		terminal.PriorEventDigest != last.EventDigest || terminal.LastGlobalSequence != last.GlobalSequence {
+		return operational("validate execution run terminal state", errors.New("terminal flight state contradicts the final acknowledgment"))
+	}
+	return nil
+}
+
+// terminalExecutionRequest rebinds the dispatched request to the manifest
+// revision and digest the shared flight state actually ended at. Every terminal
+// artifact — the execution-result event and payload, the completed checkpoint
+// expectation, the canonical receipt, and its event — is built from these
+// actual facts rather than from a request revision an expansion moved past.
+func terminalExecutionRequest(request ExecutionRequest, terminal FlightStateSnapshot) ExecutionRequest {
+	request.ManifestRevision = terminal.Revision
+	request.ManifestDigest = terminal.ManifestDigest
+	return request
 }
 
 func validateCompletionChild(request ExecutionRequest, run ExecutionRun, child WorkspaceFacts) error {
