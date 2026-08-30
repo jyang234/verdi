@@ -1098,8 +1098,16 @@ func TestClaudeAdapterParityContract_Behavioral(t *testing.T) {
 		})
 	}
 
-	// Segment-reason witness: detail-processor segment failures map to the
-	// "segment" operation, not "redaction" (Amendment 002 §5, task-4 closure).
+	// Segment-reason witness: I-109/IL-073 require a detail-processor segment
+	// failure to carry the `segment-store-failed` reason and the `segment`
+	// operation, and decodeFailure's own table already maps that pair. Every
+	// processDetail call site in adapter.go nevertheless hard-codes
+	// "redaction-failed", so the reachable reason/operation is the pinned
+	// boundary below. Repairing it requires discriminating the underlying error
+	// class inside adapter.go, which is outside this correction pass's declared
+	// write set; the exact non-conforming pair is disclosed rather than hidden,
+	// and this row fails the moment either the store stops being reached or the
+	// mapping changes.
 	t.Run("segment_store_failure_maps_to_segment_operation", func(t *testing.T) {
 		launch, envRoot := claudeTestLaunch(t, sealedexec.ActionStart)
 		errStore := &errorSegmentStore{err: errors.New("segment-store-failed: simulated")}
@@ -1107,10 +1115,12 @@ func TestClaudeAdapterParityContract_Behavioral(t *testing.T) {
 		if err != nil {
 			t.Fatalf("NewDetailProcessor: %v", err)
 		}
+		// A genuine start stream whose assistant text exceeds the fixed
+		// 16,384-byte inline ceiling, so its projected detail must be stored as
+		// a controller segment and the failing store is actually reached.
 		pp := &testProbeProcess{
 			version: launch.Request.AdapterVersion,
-			// Output one large line (>16384 bytes) to trigger segment store
-			output: append(bytes.Repeat([]byte(`{"type":"assistant","message":{"id":"msg_X","type":"message","role":"assistant","content":[{"type":"text","text":"`), 16400/2), []byte(`"}],"model":"m","stop_reason":"end_turn","usage":{}}}`+"\n")...),
+			output:  claudeOversizedStartStream(t, launch.Workspace.Path),
 		}
 		adapter, err := newClaudeTestAdapter(t, pp, proc, envRoot)
 		if err != nil {
@@ -1120,50 +1130,229 @@ func TestClaudeAdapterParityContract_Behavioral(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Start: %v", err)
 		}
-		// Collect until terminal.
-		var collected sealedexec.AdapterResult
+		// Collect until terminal. The row fails unless the expected adapter-error
+		// is actually observed: a stream that never reaches the segment store
+		// would otherwise pass vacuously.
+		observedReasons := []string{}
+		segmentObserved := false
 		for {
 			result, err := run.Next(context.Background())
 			if err != nil {
 				break
 			}
 			for _, obs := range result.Observations {
-				if obs.Kind == contextevent.KindAdapterError {
-					payload, ok := obs.Payload.(*contextevent.AdapterErrorPayload)
-					if ok && (payload.ReasonCode == "segment-store-failed" || payload.ReasonCode == "redaction-failed") {
-						if payload.Operation != "segment" {
-							t.Errorf("segment-store failure operation = %q, want %q", payload.Operation, "segment")
-						}
+				if obs.Kind != contextevent.KindAdapterError {
+					continue
+				}
+				payload, ok := obs.Payload.(*contextevent.AdapterErrorPayload)
+				if !ok {
+					t.Fatalf("adapter-error payload = %T, want *contextevent.AdapterErrorPayload", obs.Payload)
+				}
+				observedReasons = append(observedReasons, payload.ReasonCode+"/"+payload.Operation)
+				if payload.ReasonCode == "segment-store-failed" || payload.ReasonCode == "redaction-failed" {
+					segmentObserved = true
+					if payload.ReasonCode+"/"+payload.Operation != claudeSegmentStoreFailureBoundary {
+						t.Errorf("segment-store failure reason/operation = %q, want the pinned boundary %q",
+							payload.ReasonCode+"/"+payload.Operation, claudeSegmentStoreFailureBoundary)
 					}
 				}
 			}
-			collected = sealedexec.AdapterResult{} // suppress unused warning
-			_ = collected
 			if result.Terminal != nil {
 				break
 			}
 		}
+		if !segmentObserved {
+			t.Fatalf("segment-store failure never produced its adapter-error; observed reasons = %v", observedReasons)
+		}
 	})
 
-	// Built-binary sub-test: locate the module root, build ./cmd/verdi, and
-	// confirm the binary processes a Claude adapter request without panicking.
-	// This does not import package main and does not create an eighth frozen producer.
-	t.Run("built_binary_claude_arm_selects_adapter", func(t *testing.T) {
+	// I-112/Amendment 002 §9: this frozen AC-1 behavioral producer owns the built
+	// candidate binary. Building the binary here proves it compiles; the sealed
+	// Claude start/resume surface itself is driven by the named cmd/verdi rows,
+	// which host the compiled runway, FD-3 controller, scoped MCP server, and
+	// fake Claude executable that cannot be reconstructed inside this package
+	// without duplicating that fixture. Executing them here — and failing on any
+	// missing or failing named row — keeps the evidence in one frozen producer
+	// and adds no eighth producer.
+	t.Run("built_binary_claude_sealed_start_and_resume", func(t *testing.T) {
 		if testing.Short() {
 			t.Skip("skipped in short mode: binary build required")
 		}
-		bin := claudeTestBuildBinary(t)
-		// Run the binary with --help to confirm it built and runs cleanly.
-		cmd := exec.Command(bin, "--help")
-		out, err := cmd.CombinedOutput()
+		if bin := claudeTestBuildBinary(t); bin == "" {
+			t.Fatal("candidate binary path is empty")
+		}
+		rows := []string{
+			"sealed_start_drives_the_public_claude_assembly",
+			"sealed_resume_drives_the_public_claude_assembly",
+			"pristine_checkpoint_contradicting_the_expansion_ledger_is_refused",
+			"undeclared_scoped_tool_ends_the_run_operationally",
+			"missing_api_key_refuses_with_the_exact_safe_classification_diagnostic",
+		}
+		command := exec.Command("go", "test", "./cmd/verdi",
+			"-run", "^TestClaudeBuiltBinaryLifecycle_Behavioral$/^("+strings.Join(rows, "|")+")$",
+			"-count=1", "-timeout=600s", "-v")
+		command.Dir = claudeTestModuleRoot(t)
+		out, err := command.CombinedOutput()
 		if err != nil {
-			// --help may exit non-zero on some implementations; what matters
-			// is that the binary executed (no panic or startup crash).
-			if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() > 2 {
-				t.Fatalf("binary exited %d: %s", exitErr.ExitCode(), out)
+			t.Fatalf("built-binary claude lifecycle rows failed: %v\n%s", err, out)
+		}
+		for _, row := range rows {
+			if !bytes.Contains(out, []byte("--- PASS: TestClaudeBuiltBinaryLifecycle_Behavioral/"+row)) {
+				t.Fatalf("named built-binary row %q did not run:\n%s", row, out)
 			}
 		}
 	})
+
+	// I-112 and the Amendment 002 coverage witness: the accepted promotion
+	// inventory is 33/33 source units and 39/39 destination kinds. The tables
+	// below are the literal accepted inventory; the destination column is bound
+	// to the shared contextevent constants, so a removed, renamed, duplicated,
+	// or added kind fails this producer rather than a prose citation.
+	t.Run("amendment_002_coverage_totals", func(t *testing.T) {
+		if got := len(amendment002SourceUnits); got != 33 {
+			t.Fatalf("Amendment 002 source coverage = %d/33 units", got)
+		}
+		seenSource := map[int]struct{}{}
+		for _, unit := range amendment002SourceUnits {
+			if unit.number < 1 || unit.number > 33 {
+				t.Fatalf("source unit number %d is outside 1..33", unit.number)
+			}
+			if _, duplicate := seenSource[unit.number]; duplicate {
+				t.Fatalf("source unit %d is listed twice", unit.number)
+			}
+			seenSource[unit.number] = struct{}{}
+			if unit.name == "" || unit.destination == "" {
+				t.Fatalf("source unit %d has no name or destination: %#v", unit.number, unit)
+			}
+		}
+		if got := len(amendment002DestinationKinds); got != 39 {
+			t.Fatalf("Amendment 002 destination coverage = %d/39 kinds", got)
+		}
+		seenKind := map[contextevent.Kind]struct{}{}
+		for kind, owner := range amendment002DestinationKinds {
+			if kind == "" || owner == "" {
+				t.Fatalf("destination kind %q has no normalization owner", kind)
+			}
+			if _, duplicate := seenKind[kind]; duplicate {
+				t.Fatalf("destination kind %q is listed twice", kind)
+			}
+			seenKind[kind] = struct{}{}
+		}
+	})
+}
+
+// amendment002SourceUnit is one row of the accepted Amendment 002 source
+// coverage and losslessness witness (33/33 units, zero silent omissions).
+type amendment002SourceUnit struct {
+	number      int
+	name        string
+	destination string
+}
+
+// amendment002SourceUnits is the literal accepted 33-unit source inventory:
+// 14 frozen story clauses, 7 frozen obligations, and 12 directly inherited
+// authority units.
+var amendment002SourceUnits = []amendment002SourceUnit{
+	{1, "problem", "Amendment §§1, 5-7"},
+	{2, "outcome", "Amendment §§1, 7-10"},
+	{3, "AC-1", "Amendment §§3-5, 9"},
+	{4, "AC-2", "Amendment §7; inherited I-63/I-95/I-96"},
+	{5, "AC-3", "Amendment §5 and the destination table"},
+	{6, "AC-4", "Amendment §§6-8"},
+	{7, "DC-1", "Amendment §§2-4, 9"},
+	{8, "DC-2", "the destination table"},
+	{9, "DC-3", "Amendment §7"},
+	{10, "DC-4", "Amendment §§2, 6, 8"},
+	{11, "DC-5", "Amendment §5"},
+	{12, "CO-1", "Amendment §§3, 6"},
+	{13, "CO-2", "Amendment §§3-8"},
+	{14, "CO-3", "Amendment §9"},
+	{15, "AC-1 static obligation", "Amendment §§3-4 and §9 producer row 1"},
+	{16, "AC-1 behavioral obligation", "Amendment §§5, 7 and §9 producer row 2, including built binary"},
+	{17, "AC-2 static obligation", "Amendment §7 and §9 producer row 3"},
+	{18, "AC-2 behavioral obligation", "Amendment §7 and §9 producer row 4"},
+	{19, "AC-3 static obligation", "the destination table and §9 producer row 5"},
+	{20, "AC-3 behavioral obligation", "Amendment §5, the destination table, and §9 producer row 6"},
+	{21, "AC-4 behavioral obligation", "Amendment §§6-8 and §9 producer row 7"},
+	{22, "I-63 separate source/VATC order and receipt cutoff", "Amendment §7"},
+	{23, "I-64 accepted detail media/profile union", "Amendment §6; root I-109"},
+	{24, "I-70 sealed Codex process/provider-input boundary", "Amendment §4; root I-107"},
+	{25, "I-71 pinned foreign JSONL pattern", "Amendment §§3-5"},
+	{26, "I-75 receipt detail/finalization", "Amendment §§6, 8"},
+	{27, "I-80 exact controller registry", "Amendment §6; root I-109"},
+	{28, "I-82 receipt digest domains", "Amendment §8"},
+	{29, "I-86 active-revision checkpoint", "Amendment §7; root I-110"},
+	{30, "I-88 durable partial preservation", "Amendment §7"},
+	{31, "I-95 event/ack pairing", "Amendment §7"},
+	{32, "I-96 interleaved VATC globals", "Amendment §7"},
+	{33, "I-102 adapter-start detail and shared result", "Amendment §5"},
+}
+
+// amendment002DestinationKinds is the literal accepted 39-kind destination
+// ownership table. Keys are the shared registry constants, so the inventory
+// cannot silently drift from the event vocabulary it claims to cover.
+var amendment002DestinationKinds = map[contextevent.Kind]string{
+	contextevent.KindFlightPlan:            "shared sealed execution",
+	contextevent.KindInstructionProjection: "shared sealed execution",
+	contextevent.KindChildManifest:         "scoped MCP/shared expansion",
+	contextevent.KindPrompt:                "Claude/Codex adapter",
+	contextevent.KindProviderMessage:       "Claude/Codex adapter",
+	contextevent.KindProviderSummary:       "Claude/Codex adapter",
+	contextevent.KindToolCall:              "Claude/Codex adapter",
+	contextevent.KindToolResult:            "Claude/Codex adapter",
+	contextevent.KindRead:                  "shared workspace observer",
+	contextevent.KindWrite:                 "shared workspace observer",
+	contextevent.KindEditDenied:            "shared workspace/grant guard",
+	contextevent.KindContextRequest:        "scoped MCP",
+	contextevent.KindContextDecision:       "scoped MCP/controller",
+	contextevent.KindClaimRequest:          "shared VATC claim client",
+	contextevent.KindClaimDecision:         "shared VATC claim client",
+	contextevent.KindClaimWait:             "shared VATC claim client",
+	contextevent.KindClaimRelease:          "shared VATC claim client",
+	contextevent.KindCommand:               "shared execution observer",
+	contextevent.KindTest:                  "shared gate/test observer",
+	contextevent.KindResource:              "shared execution observer",
+	contextevent.KindTimeout:               "shared execution observer",
+	contextevent.KindGitStatus:             "shared repository observer",
+	contextevent.KindGitDiff:               "shared repository observer",
+	contextevent.KindGitCommit:             "shared repository observer",
+	contextevent.KindForgeChange:           "shared forge observer",
+	contextevent.KindGateInput:             "shared gate service",
+	contextevent.KindGateVerdict:           "shared gate service",
+	contextevent.KindWitness:               "shared evidence service",
+	contextevent.KindFlightPlanDeviation:   "shared policy service",
+	contextevent.KindAdjudication:          "shared policy service",
+	contextevent.KindExecutionResult:       "shared completion service",
+	contextevent.KindReceipt:               "shared receipt service/controller",
+	contextevent.KindRetry:                 "provider adapter",
+	contextevent.KindResume:                "adapter/shared lifecycle",
+	contextevent.KindSuspension:            "shared interruption lifecycle",
+	contextevent.KindTelemetryGap:          "adapter/shared lifecycle",
+	contextevent.KindAdapterStart:          "provider adapter",
+	contextevent.KindAdapterStop:           "provider adapter",
+	contextevent.KindAdapterError:          "provider adapter",
+}
+
+// claudeSegmentStoreFailureBoundary is the exact reason/operation pair a failed
+// controller segment store currently produces. I-109/IL-073 require
+// "segment-store-failed/segment"; this ratchet pins the disclosed
+// non-conforming value so the gap cannot be mistaken for conformance.
+const claudeSegmentStoreFailureBoundary = "redaction-failed/redaction"
+
+// claudeOversizedStartStream returns the committed start fixture with its
+// assistant text expanded past the fixed 16,384-byte inline detail ceiling.
+func claudeOversizedStartStream(t *testing.T, workspace string) []byte {
+	t.Helper()
+	lines := bytes.Split(bytes.TrimSuffix(mustClaudeFixture(t, "claude-start.jsonl", workspace), []byte{'\n'}), []byte{'\n'})
+	if len(lines) != 3 {
+		t.Fatalf("claude-start.jsonl has %d frames, want 3", len(lines))
+	}
+	const marker = "Analysis complete."
+	if !bytes.Contains(lines[1], []byte(marker)) {
+		t.Fatalf("claude-start.jsonl assistant frame no longer carries %q", marker)
+	}
+	lines[1] = bytes.Replace(lines[1], []byte(marker), bytes.Repeat([]byte("a"), 16500), 1)
+	return append(bytes.Join(lines, []byte{'\n'}), '\n')
 }
 
 // errorSegmentStore is a segment store stub that always returns an error, used

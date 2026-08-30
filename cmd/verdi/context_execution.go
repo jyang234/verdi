@@ -31,6 +31,10 @@ import (
 
 const contextExecutionUsage = "usage: verdi context execution --request <path|-> [--out <path>]"
 
+// sealedClaudeToolPath is the fixed deterministic tool path activated for the
+// Claude arm (Amendment 002 §3). It never inherits the caller's PATH.
+const sealedClaudeToolPath = "/usr/bin:/bin"
+
 func cmdContextExecution(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	requestPath, outPath, hasOut, ok := parseContextExecutionArgs(args)
 	if !ok {
@@ -77,6 +81,9 @@ func cmdContextExecution(args []string, stdin io.Reader, stdout, stderr io.Write
 			printSealedContextDiagnostic(stderr, "execution", request, closeErr, runtime.root)
 		}
 	}
+	// A typed scoped-MCP terminal ends the run: exit 1 is a verdict, exit 2 is
+	// operational, and neither reaches completion or a receipt.
+	err = sealedTerminalOutcome(err, runtime.terminals.observed())
 	if err != nil {
 		if quarantineErr := runtime.quarantineIncomplete(ctx, request, run, err); quarantineErr != nil {
 			printSealedContextDiagnostic(stderr, "execution", request, quarantineErr, runtime.root, run.Workspace.Path, run.Profile.CodexHome, run.Profile.Executable)
@@ -283,6 +290,83 @@ type sealedRuntime struct {
 	// closer is called after provider reap to release the adapter lifecycle
 	// (for Claude: HTTP MCP server close + config removal). nil for Codex.
 	closer func(context.Context) error
+	// terminals records the first typed scoped-MCP terminal of the run. nil for
+	// Codex, whose scoped surface is a separate process with its own exit code.
+	terminals *sealedMCPTerminalObserver
+}
+
+// sealedMCPTerminalObserver consumes the first typed terminal the parent-hosted
+// scoped MCP surface raises while Execute is still live. The terminal is
+// delivered only after its JSON-RPC frame was written, so a failed response
+// write never signals one. Observing it ends the run through the same
+// interruption seam SIGTERM uses, and its exit code classifies the run.
+type sealedMCPTerminalObserver struct {
+	mu        sync.Mutex
+	terminal  *mcpserve.HandlerTerminal
+	interrupt func() error
+}
+
+// bind installs the live interruption seam. It is called once, after the
+// execution service exists and before Execute starts.
+func (o *sealedMCPTerminalObserver) bind(interrupt func() error) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.interrupt = interrupt
+}
+
+// observe records the first terminal and asks the live run to stop. Later
+// terminals are ignored: the run ends on the first one.
+func (o *sealedMCPTerminalObserver) observe(terminal *mcpserve.HandlerTerminal) {
+	if terminal == nil {
+		return
+	}
+	o.mu.Lock()
+	if o.terminal != nil {
+		o.mu.Unlock()
+		return
+	}
+	first := *terminal
+	o.terminal = &first
+	interrupt := o.interrupt
+	o.mu.Unlock()
+	if interrupt != nil {
+		// The interruption verdict is carried by Execute's own error; a stop
+		// that finds no active run is not an additional failure here.
+		_ = interrupt()
+	}
+}
+
+func (o *sealedMCPTerminalObserver) observed() *mcpserve.HandlerTerminal {
+	if o == nil {
+		return nil
+	}
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	if o.terminal == nil {
+		return nil
+	}
+	first := *o.terminal
+	return &first
+}
+
+// sealedTerminalOutcome maps the first scoped-MCP terminal onto the lifecycle's
+// exit classes: exit 1 is a verdict, and any other terminal is operational. An
+// operational terminal never downgrades to a verdict, and an observed terminal
+// always yields a non-nil error so no completion or receipt can follow.
+func sealedTerminalOutcome(cause error, terminal *mcpserve.HandlerTerminal) error {
+	if terminal == nil {
+		return cause
+	}
+	if terminal.ExitCode == 1 {
+		if cause != nil {
+			return cause
+		}
+		return fmt.Errorf("%w: scoped MCP ended the run with a verdict terminal", sealedexec.ErrVerdict)
+	}
+	if cause == nil {
+		return fmt.Errorf("%w: scoped MCP ended the run with an operational terminal (exit %d)", sealedexec.ErrOperational, terminal.ExitCode)
+	}
+	return fmt.Errorf("%w: scoped MCP ended the run with an operational terminal (exit %d): %v", sealedexec.ErrOperational, terminal.ExitCode, cause)
 }
 
 func assembleSealedRuntime(ctx context.Context, request sealedexec.ExecutionRequest, controller *sealedexec.ControllerClient, authority sealedexec.AuthorityFacts) (sealedRuntime, error) {
@@ -304,6 +388,7 @@ func assembleSealedRuntime(ctx context.Context, request sealedexec.ExecutionRequ
 	}
 	var adapter sealedexec.ExecutionAdapter
 	var adapterCloser func(context.Context) error
+	var terminals *sealedMCPTerminalObserver
 	switch request.Adapter {
 	case contextevent.AdapterCodex:
 		adapter, err = codex.New(commandCodexProcess{}, processor)
@@ -311,11 +396,13 @@ func assembleSealedRuntime(ctx context.Context, request sealedexec.ExecutionRequ
 			return sealedRuntime{}, err
 		}
 	case contextevent.AdapterClaude:
+		terminals = &sealedMCPTerminalObserver{}
 		ca := &commandClaudeAdapter{
 			process:    commandClaudeProcess{},
 			processor:  processor,
 			controller: controller,
 			request:    request,
+			observer:   terminals,
 		}
 		adapter = ca
 		adapterCloser = ca.Close
@@ -357,7 +444,13 @@ func assembleSealedRuntime(ctx context.Context, request sealedexec.ExecutionRequ
 	if err != nil {
 		return sealedRuntime{}, err
 	}
-	return sealedRuntime{root: root, data: data, execution: execution, completion: completion, handback: handback, closer: adapterCloser}, nil
+	if terminals != nil {
+		terminals.bind(func() error {
+			_, err := execution.InterruptRegistered(context.Background(), request)
+			return err
+		})
+	}
+	return sealedRuntime{root: root, data: data, execution: execution, completion: completion, handback: handback, closer: adapterCloser, terminals: terminals}, nil
 }
 
 func compileSealedContext(ctx context.Context, root string, request sealedexec.ExecutionRequest) ([]contextcompile.DataItem, error) {
@@ -577,6 +670,11 @@ func resolvedProfileFromMaterial(material sealedexec.ProfileMaterial, ref sealed
 		}
 		declaredEnv["ANTHROPIC_API_KEY"] = apiKey
 		declaredEnv["CLAUDE_CONFIG_DIR"] = material.ClaudeConfigDir
+		// Amendment 002 §3 requires an exact profile-selected deterministic tool
+		// path. The controller material carries no PATH field, so the binary
+		// selects the fixed system tool path: it is absolute, clean, ambient-free,
+		// and identical on every run.
+		declaredEnv["PATH"] = sealedClaudeToolPath
 		declaredEnv["DISABLE_AUTOUPDATER"] = "1"
 		declaredEnv["CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"] = "1"
 		declaredEnv["CLAUDE_CODE_AUTO_CONNECT_IDE"] = "false"
@@ -780,10 +878,13 @@ type commandClaudeAdapter struct {
 	controller *sealedexec.ControllerClient
 	request    sealedexec.ExecutionRequest
 
+	observer *sealedMCPTerminalObserver
+
 	mu        sync.Mutex
 	inner     *claude.Adapter
 	closeMCP  func(context.Context) error
 	terminals <-chan *mcpserve.HandlerTerminal
+	watching  chan struct{}
 }
 
 // init starts the scoped HTTP MCP server and constructs the real claude.Adapter.
@@ -813,6 +914,27 @@ func (a *commandClaudeAdapter) init(ctx context.Context, check sealedexec.Adapte
 		return fmt.Errorf("commandClaudeAdapter: encode request: %w", err)
 	}
 
+	// I-86/I-110: the parent-hosted scoped surface never invents its own append
+	// position. It reconstructs the exact durable state from the authoritative
+	// controller checkpoint and expansion ledger through the same
+	// buildMCPFlightSnapshot gate the out-of-process `verdi context mcp` server
+	// uses, so a pristine, active-tail, or invalidated flight keeps its ratified
+	// meaning instead of being presented as sequence one.
+	key := sealedexec.ExecutionKey{Flight: check.Request.Flight, Lane: check.Request.Lane, Epoch: check.Request.Epoch}
+	recorder := controllerRecorder{client: a.controller}
+	checkpoint, err := recorder.Checkpoint(ctx, key)
+	if err != nil {
+		return fmt.Errorf("commandClaudeAdapter: recorder checkpoint: %w", err)
+	}
+	expansion, err := a.controller.VerifyExpansion(ctx, key)
+	if err != nil {
+		return fmt.Errorf("commandClaudeAdapter: verify expansion ledger: %w", err)
+	}
+	snapshot, err := buildMCPFlightSnapshot(check.Request, check.Workspace, checkpoint, expansion)
+	if err != nil {
+		return fmt.Errorf("commandClaudeAdapter: reconstruct scoped MCP flight state: %w", err)
+	}
+
 	// Create the loopback listener for the scoped HTTP MCP server.
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -820,8 +942,6 @@ func (a *commandClaudeAdapter) init(ctx context.Context, check sealedexec.Adapte
 	}
 
 	// Build the ScopedMCP server: same ports as context_mcp.go.
-	key := sealedexec.ExecutionKey{Flight: check.Request.Flight, Lane: check.Request.Lane, Epoch: check.Request.Epoch}
-	recorder := controllerRecorder{client: a.controller}
 	server, err := sealedexec.NewScopedMCP(sealedexec.ScopedMCPPorts{
 		Resolver: mcpControllerResolver{client: a.controller, key: key},
 		Compiler: sealedexec.NewCanonicalChildCompiler(),
@@ -829,17 +949,7 @@ func (a *commandClaudeAdapter) init(ctx context.Context, check sealedexec.Adapte
 		Recorder: recorder,
 		Store:    a.controller,
 		Stamps:   a.controller,
-	}, sealedexec.NewFlightState(sealedexec.FlightStateSnapshot{
-		Request:            check.Request,
-		Key:                key,
-		WorkspaceID:        check.Workspace.WorkspaceID,
-		CandidateCommit:    check.Workspace.CurrentCommit,
-		CandidateTree:      check.Workspace.CurrentTree,
-		Revision:           check.Request.ManifestRevision,
-		ManifestDigest:     check.Request.ManifestDigest,
-		ProjectionDigest:   check.Request.ProjectionDigest,
-		NextSourceSequence: 1,
-	}))
+	}, sealedexec.NewFlightState(snapshot))
 	if err != nil {
 		_ = listener.Close()
 		return fmt.Errorf("commandClaudeAdapter: create scoped MCP server: %w", err)
@@ -868,6 +978,18 @@ func (a *commandClaudeAdapter) init(ctx context.Context, check sealedexec.Adapte
 	a.inner = inner
 	a.closeMCP = closeMCP
 	a.terminals = terminals
+	// Consume the first typed terminal promptly, while Execute is still live,
+	// so epoch invalidation or a malformed scoped frame ends the run before any
+	// completion or receipt is attempted.
+	watching := make(chan struct{})
+	a.watching = watching
+	go func() {
+		select {
+		case terminal := <-terminals:
+			a.observer.observe(terminal)
+		case <-watching:
+		}
+	}()
 	return nil
 }
 
@@ -898,19 +1020,27 @@ func (a *commandClaudeAdapter) Resume(ctx context.Context, launch sealedexec.Ada
 	return inner.Resume(ctx, launch, sessionRef)
 }
 
-// Close is called after provider reap. It consumes the first typed HTTP terminal
-// (if any, non-blocking) and then shuts down the MCP server + removes the config.
+// Close is called after provider reap. It retires the terminal watcher, drains
+// any terminal raised in the reap window, and then shuts the HTTP MCP server
+// down and removes only the scoped configuration, in that order.
 func (a *commandClaudeAdapter) Close(ctx context.Context) error {
 	a.mu.Lock()
 	closeFn := a.closeMCP
 	terminals := a.terminals
+	watching := a.watching
+	a.watching = nil
 	a.mu.Unlock()
 
-	// Consume the first terminal promptly (non-blocking: the channel has capacity
-	// 1, and the provider may or may not have called any MCP tool).
+	if watching != nil {
+		close(watching)
+	}
+	// The watcher may have retired between the provider's last framed response
+	// and this reap; the buffered single delivery is drained here so the run is
+	// still classified by that terminal.
 	if terminals != nil {
 		select {
-		case <-terminals:
+		case terminal := <-terminals:
+			a.observer.observe(terminal)
 		default:
 		}
 	}

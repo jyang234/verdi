@@ -331,6 +331,28 @@ func TestScopedContextMCPContract_Behavioral(t *testing.T) {
 			t.Fatalf("fresh snapshot = %#v/%v", fresh, err)
 		}
 
+		// I-86/I-110 active tail: the reconstruction continues the durable append
+		// position and carries the invalidation fact, so the parent-hosted Claude
+		// surface cannot present an invalidated or resumed flight as sequence one.
+		activeCheckpoint := checkpoint
+		activeCheckpoint.ActiveRevision = &sealedexec.ActiveRevision{
+			Revision: request.ManifestRevision, ManifestDigest: request.ManifestDigest,
+			NextSourceSequence: 4, PriorEventDigest: sealedTestDigest("active-prior"),
+			LastGlobalSequence: 3, EventAcks: []contextevent.EventAck{},
+		}
+		tail, err := buildMCPFlightSnapshot(request, workspace, activeCheckpoint, expansion)
+		if err != nil || tail.NextSourceSequence != 4 || tail.PriorEventDigest != sealedTestDigest("active-prior") ||
+			tail.LastGlobalSequence != 3 || tail.Invalidated {
+			t.Fatalf("active-tail snapshot = %#v/%v", tail, err)
+		}
+		invalidatedCheckpoint := activeCheckpoint
+		invalidatedCheckpoint.ActiveRevision = cloneSealedActiveRevision(activeCheckpoint.ActiveRevision)
+		invalidatedCheckpoint.ActiveRevision.Invalidated = true
+		invalidated, err := buildMCPFlightSnapshot(request, workspace, invalidatedCheckpoint, expansion)
+		if err != nil || !invalidated.Invalidated {
+			t.Fatalf("invalidated snapshot = %#v/%v, want the invalidation carried into scoped MCP", invalidated, err)
+		}
+
 		laterCheckpoint := checkpoint
 		laterCheckpoint.Revisions = []contextevent.Revision{revision}
 		laterCheckpoint.EventChainRoot, err = contextevent.EventChainRoot(laterCheckpoint.Revisions)
@@ -1098,10 +1120,16 @@ func runInterruptedSealedStart(t *testing.T, bin string, signalBeforeActivation 
 	if !reflect.DeepEqual(fake.quarantines, []sealedexec.QuarantineReason{sealedexec.QuarantineExecutionIncomplete}) {
 		t.Fatalf("interrupt quarantines = %v", fake.quarantines)
 	}
-	if len(fake.events) != 3 || fake.events[0].Kind != contextevent.KindAdapterStart || fake.events[1].Kind != contextevent.KindProviderSummary ||
-		fake.events[2].Kind != contextevent.KindAdapterStop || fake.events[0].SourceSequence != 1 || fake.events[1].SourceSequence != 2 ||
-		fake.events[2].SourceSequence != 3 || countEventKindInFixture(fake.events, contextevent.KindAdapterStop) != 1 {
-		t.Fatalf("interrupt events = %#v, want acknowledged start/summary then one adapter-stop", fake.events)
+	// Amendment 002 §7: the active interrupt/owner transition emits `suspension`
+	// then `adapter-stop`, so the exact acknowledged prefix is start, summary,
+	// suspension, stop — one suspension and one stop, never a fabricated pair.
+	assertSealedEventPrefix(t, fake.events, []contextevent.Kind{
+		contextevent.KindAdapterStart, contextevent.KindProviderSummary,
+		contextevent.KindSuspension, contextevent.KindAdapterStop,
+	})
+	if countEventKindInFixture(fake.events, contextevent.KindAdapterStop) != 1 ||
+		countEventKindInFixture(fake.events, contextevent.KindSuspension) != 1 {
+		t.Fatalf("interrupt events = %#v, want exactly one suspension and one adapter-stop", fake.events)
 	}
 	if got := fake.calls; countControllerOperation(got, sealedexec.ControllerOperationPersistQuarantine) != 1 ||
 		countControllerOperation(got, sealedexec.ControllerOperationPersistAbort) != 0 || countControllerOperation(got, sealedexec.ControllerOperationPersistHandback) != 0 {
@@ -1304,6 +1332,10 @@ func runSuccessfulSealedResume(t *testing.T, bin string) {
 		sealedexec.ControllerOperationVerifyExpansion,
 		sealedexec.ControllerOperationVerifyProviderSession,
 		sealedexec.ControllerOperationVerifyOpaqueBoundary,
+		// Amendment 002 §7 prepared-resume: `resume` then `adapter-start`, each
+		// stamped and acknowledged before the provider stream is reduced.
+		sealedexec.ControllerOperationNextStamp,
+		sealedexec.ControllerOperationRecorderAppend,
 		sealedexec.ControllerOperationNextStamp,
 		sealedexec.ControllerOperationRecorderAppend,
 		sealedexec.ControllerOperationVerifyProviderSession,
@@ -1318,6 +1350,50 @@ func runSuccessfulSealedResume(t *testing.T, bin string) {
 	if !reflect.DeepEqual(fake.calls, wantCalls) {
 		t.Fatalf("resume controller sequence = %v, want %v", fake.calls, wantCalls)
 	}
+	// The extra acknowledgment is Amendment 002 §7's explicit `resume` event,
+	// not a duplicated adapter-start. This Codex fixture's provider stream
+	// carries no session-init family, so no adapter-start follows it.
+	assertSealedEventPrefix(t, fake.events, []contextevent.Kind{
+		contextevent.KindResume, contextevent.KindProviderSummary, contextevent.KindExecutionResult,
+	})
+	if fake.events[0].SourceSequence != revision.TerminalSourceSequence+1 {
+		t.Fatalf("resume first acknowledged source sequence = %d, want continuation of %d", fake.events[0].SourceSequence, revision.TerminalSourceSequence)
+	}
+}
+
+// assertSealedEventPrefix proves the acknowledged events are exactly the given
+// kinds in order, on contiguous source sequences starting at the first
+// acknowledged sequence. It fails on a missing, extra, reordered, or
+// resequenced acknowledgment.
+func assertSealedEventPrefix(t *testing.T, events []contextevent.Event, want []contextevent.Kind) {
+	t.Helper()
+	if len(events) != len(want) {
+		t.Fatalf("acknowledged events = %d kinds %v, want %d kinds %v", len(events), sealedEventKinds(events), len(want), want)
+	}
+	for i, kind := range want {
+		if events[i].Kind != kind {
+			t.Fatalf("acknowledged event kinds = %v, want %v", sealedEventKinds(events), want)
+		}
+		if i > 0 && events[i].SourceSequence != events[i-1].SourceSequence+1 {
+			t.Fatalf("acknowledged source sequences = %v, want contiguous", sealedEventSequences(events))
+		}
+	}
+}
+
+func sealedEventKinds(events []contextevent.Event) []contextevent.Kind {
+	kinds := make([]contextevent.Kind, len(events))
+	for i, event := range events {
+		kinds[i] = event.Kind
+	}
+	return kinds
+}
+
+func sealedEventSequences(events []contextevent.Event) []uint64 {
+	sequences := make([]uint64, len(events))
+	for i, event := range events {
+		sequences[i] = event.SourceSequence
+	}
+	return sequences
 }
 
 func runSuccessfulScopedMCP(t *testing.T, bin string, pathMode bool) {
@@ -1533,6 +1609,9 @@ func runScopedMCPLaterCheckpoint(t *testing.T, bin, mutation string, wantExit in
 	active := &sealedexec.ActiveRevision{
 		Revision: fixture.request.ManifestRevision + 1, ManifestDigest: sealedTestDigest("child-manifest"),
 		NextSourceSequence: 1, PriorRevision: bridge, LastGlobalSequence: bridge.TerminalGlobalSequence,
+		// I-110 grew the active tail with the exact acknowledged prefix; a
+		// sequence-one tail carries an empty, never null, acknowledgment array.
+		EventAcks: []contextevent.EventAck{},
 	}
 	switch mutation {
 	case "":
@@ -2458,7 +2537,8 @@ func sealedRawDigest(data []byte) string {
 // environment rows, and never substitutes the logical profile name for a
 // model.
 func TestResolvedProfileFromMaterialArms(t *testing.T) {
-	t.Parallel()
+	// Not parallel: the Claude arm binds ANTHROPIC_API_KEY through t.Setenv,
+	// which Go forbids inside a parallel test tree.
 
 	newMaterial := func(t *testing.T, claude bool) (sealedexec.ProfileMaterial, string, string, execworkspace.GrantSet) {
 		t.Helper()
@@ -2492,7 +2572,10 @@ func TestResolvedProfileFromMaterialArms(t *testing.T) {
 	}
 
 	t.Run("claude_arm_copied_and_declared", func(t *testing.T) {
-		t.Parallel()
+		// Amendment 002 §3 activates the API key from the binary's own process
+		// environment, so this arm binds it explicitly instead of depending on
+		// an ambient credential (and therefore cannot run in parallel).
+		t.Setenv("ANTHROPIC_API_KEY", "sk-ant-arms-fixture-key")
 		material, workspacePath, _, grants := newMaterial(t, true)
 		resolved, err := resolvedProfileFromMaterial(material, material.Ref, workspacePath, grants)
 		if err != nil {
