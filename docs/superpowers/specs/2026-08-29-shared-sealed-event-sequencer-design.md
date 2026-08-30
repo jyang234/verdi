@@ -147,6 +147,12 @@ so it cannot race a context transition into duplicate event identities.
   complete acknowledgment stream. Validation uses the same per-revision source
   continuity and strictly increasing global order as successful completion;
   it never discards the MCP acknowledgments to fit the original request.
+- The atomic child-install/first-child-append boundary is a closed partial-only
+  exception: the stream may end on the parent while the terminal snapshot opens
+  exactly the next revision at source one, with empty prior-event digest,
+  unchanged last-global order, and the exact non-null bridge to that parent ack.
+  A failure there preserves the installed child manifest plus the parent prefix;
+  successful completion still requires its terminal event on the child.
 
 ## Test contract
 
