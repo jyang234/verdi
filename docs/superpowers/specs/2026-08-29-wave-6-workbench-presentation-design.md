@@ -1,17 +1,21 @@
 # Wave 6 Workbench Presentation Authority Design
 
-**Status:** Owner-approved and independently reviewed planning authority;
-implementation remains blocked until this exact planning head merges to the
-configured default branch.
+**Status:** Owner-approved planning authority with the SI-177 amendment pending
+its one independent review and owner merge. Task 1B implementation and Task 2
+resumption remain blocked until that amended exact head reaches the configured
+default branch.
 
 **Planning base:** `915529f792f7a672e9631f42909995b38ed12655`
 
+**SI-177 amendment base:** `ab7518975b6621aceeef4607cca29d9a87cd75b7`
+
 **Owners:** platform-team
 
-**Delivery shape:** nine serialized predecessor/presentation units followed by
+**Delivery shape:** ten serialized predecessor/presentation units followed by
 one integrated Wave 6 gate. Each unit is one reviewed pull request. The added
-unit is the owner-approved ASD browser-human authority correction inserted
-after the Task 2 stop gate; it must merge before the ASD workbench resumes.
+units are the owner-approved ASD browser-human authority correction and
+writer-process transaction correction inserted after successive Task 2 stop
+gates; both must merge before the ASD workbench resumes.
 
 **Frontend owner:** FABLE. Sonnet workers implement non-frontend predecessors;
 Opus workers challenge and repair accepted defects; Codex independently judges
@@ -38,15 +42,16 @@ Wave 6 delivers the four ratified workbench presentations in this fixed order:
 
 1. AI-assisted spec design (ASD) application predecessor;
 2. ASD browser-human mutation-authority correction;
-3. ASD workbench;
-4. Context Integrity (CI) application predecessor;
-5. CI workbench;
-6. Guided Lifecycle and Governance (GLG) Wave 5 predecessors;
-7. GLG workbench;
-8. Comparative Spike Experiments (CSE) browser-neutral human-proof
+3. ASD writer-process transaction correction;
+4. ASD workbench;
+5. Context Integrity (CI) application predecessor;
+6. CI workbench;
+7. Guided Lifecycle and Governance (GLG) Wave 5 predecessors;
+8. GLG workbench;
+9. Comparative Spike Experiments (CSE) browser-neutral human-proof
    coordinator;
-9. CSE workbench; and
-10. integrated Wave 6 review and gates.
+10. CSE workbench; and
+11. integrated Wave 6 review and gates.
 
 The sequence is fully serialized. A later unit starts only from the
 owner-merged, independently Codex-approved head of its predecessor. The split
@@ -417,6 +422,57 @@ This correction touches no frontend, route, board, JavaScript, CSS, or
 Playwright file. It merges as its own independently reviewed predecessor before
 the FABLE-owned ASD workbench implementation continues.
 
+#### 6.1.2 Writer-process transaction correction
+
+The second Task 2 stop gate proved that the application operation is still
+unreachable from its production hosts. `verdi serve` and standalone
+`verdi mcp` acquire `.verdi/data/writer.lock` for their lifetime as I-12's one
+writer process, while every `draftmutation.Service.Mutate` attempts to acquire
+that same non-reentrant file lock. `filelock.Acquire` correctly refuses the
+live holder even when it is the caller's process, so served workbench and live
+MCP mutations fail operationally before the transaction begins.
+
+The correction preserves the lock's process boundary and adds the missing
+transaction boundary inside that process:
+
+1. `filelock.Acquire` remains non-reentrant. A live existing lock still
+   returns `ErrHeld`; no caller receives a second lock handle or implicit
+   ownership merely because the lock body names its PID.
+2. `filelock` records successful acquisitions in a synchronized process-local
+   ownership registry. A read-only query reports current-process ownership
+   only when the exact requested lock path still names the same file acquired
+   by this process. PID text, liveness, or a caller-authored lock body alone is
+   never ownership proof.
+3. `draftmutation.WithWriterLock` serializes complete transactions with a
+   process-local mutex scoped to the canonical checkout writer-lock path.
+   Different checkouts are not globally serialized.
+4. After entering that mutex, `WithWriterLock` first uses the ordinary
+   acquisition path. If it acquires the lock, it releases exactly that handle
+   after the callback. If acquisition returns `ErrHeld` and the registry proves
+   this process owns the exact still-present lock, it reuses the outer
+   exclusion and does not release it. Every other held, malformed, replaced,
+   unreadable, or unproven case remains an operational refusal.
+5. The mutex covers validation, journal recovery/write, spec and provenance
+   writes, fsync, callback completion, and any inner-acquired release. Crash
+   safety, journal ordering, stale-lock takeover, symlink refusal, and
+   cross-process contention remain unchanged.
+
+SI-177 narrowly supersedes SI-69's phrase “refusing while serve/another writer
+holds it” only when “serve” is this caller process and the process-local
+registry proves its exact outer lock. “Another writer” continues to mean every
+other process and every unproven, forged, or replaced local lock, all of which
+remain refused. The registry is ephemeral lock custody, never durable state,
+request input, artifact authority, or a substitute for the on-disk exclusion;
+it disappears on crash, leaving the existing stale-lock takeover protocol to
+recover the checkout.
+
+This is process-bound reuse, not recursive transaction nesting: a mutation
+callback must not call `WithWriterLock` again. The correction creates no actor,
+request, route, or browser authority and changes no artifact bytes. It repairs
+the already-shipped live `mutate_draft` MCP path and supplies the same kernel
+behavior to the later workbench adapter. A dedicated non-frontend Task 1B
+merges and is independently Codex-approved before Task 2 resumes.
+
 ### 6.2 ASD workbench
 
 The existing board gains:
@@ -575,7 +631,7 @@ unchanged application authority.
 
 ## 10. Serialized delivery and review protocol
 
-All eight implementation units are Tier 3. Each Claude Code session starts
+All ten implementation units are Tier 3. Each Claude Code session starts
 with `/fable-orchestration`; FABLE remains chief architect and final
 producer-side judge.
 
@@ -644,12 +700,12 @@ The final review additionally proves:
 
 ## 12. Lossless source-coverage witness
 
-The consolidated authority carries 36/36 source groups:
+The consolidated authority carries 37/37 source groups:
 
 | # | Source authority | Destination | Transformation or intentional omission |
 |---:|---|---|---|
 | 1 | Workspace `AGENTS.md` authority-first workflow | §§1, 10–11 | Preserved; spec-only authored by Codex, implementation routed by FABLE/Sonnet/Opus, Codex independently gates. |
-| 2 | Orchestration Wave 6 concurrency `1` | §§1, 10 | Preserved as nine serialized units and one integration gate. |
+| 2 | Orchestration Wave 6 concurrency `1` | §§1, 10 | Preserved as ten serialized units and one integration gate. |
 | 3 | Orchestration Wave 6 per-unit PR rule | §§1, 10 | Preserved; no long-lived combined implementation branch. |
 | 4 | Orchestration Wave 6 exit gate | §§3–5, 11 | Expanded into exact parity, posture, accessibility, and no-shadow-authority witnesses. |
 | 5 | Wave 3.5 hybrid rail/queue shell | §§3.1, 8.2 | Promoted unchanged as presentation, not lifecycle state. |
@@ -684,6 +740,7 @@ The consolidated authority carries 36/36 source groups:
 | 34 | Wave 6 handoff Codex independent review | §§10–11 | Exact diff/authority/probes and reachable-state findings required; one bounded correction and one Codex closure only. |
 | 35 | Wave 6 handoff browser/test/controller gates | §§5 and 11 | Server-rendered/dependency-free/no-network, Playwright keyboard/responsive coverage, recording scan, alternate-port disclosure, full race/verify/spec-align retained. |
 | 36 | Task 2 browser-human stop-gate witness and SI-176 | §§1, 4.1, 6.1.1, 10–11 | Preserves unconditional AI-free browser authoring, explicit unauthenticated provenance, failed-resolution non-bypass, agent policy enforcement, honest policy absence, V1 history, and serialized predecessor review; no runtime or frontend implementation is folded into authority. |
+| 37 | Task 2 same-process writer-lock stop-gate witness and SI-177 | §§1, 6.1.2, 10–11 | Preserves I-12's one-writer-process exclusion and SI-69's crash-safe transaction while narrowly superseding SI-69's serve-held refusal only for this caller process's registry-proven exact outer lock; served mutation becomes reachable through that reuse plus per-checkout in-process serialization, while PID text, cross-process bypass, outer-lock release, durable registry authority, and frontend-owned locking remain excluded. |
 
 No source group, semantic rule, public effect, deferral, threat-model boundary,
 or closure disclosure is intentionally omitted. Wave 7 dogfood is explicitly

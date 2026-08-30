@@ -10,12 +10,13 @@
 ASD, CI, GLG, and CSE over the same typed application cores used by CLI and MCP,
 without browser-owned authority or a shadow database.
 
-**Architecture:** Complete four missing browser-neutral predecessor seams, then
-add four fully serialized server-rendered workbench units. Reuse the Wave 3.5
-four-area shell and dependency-free JavaScript. Every read and action delegates
-to a typed application operation; accepted Git, strict artifacts, policies,
-governance kernels, execution receipts, and lifecycle derivations remain the
-only authority.
+**Architecture:** Complete four missing browser-neutral predecessor seams and
+the two ASD stop-gate corrections, then add four fully serialized
+server-rendered workbench units. Reuse the Wave 3.5 four-area shell and
+dependency-free JavaScript. Every read and action delegates to a typed
+application operation; accepted Git, strict artifacts, policies, governance
+kernels, execution receipts, and lifecycle derivations remain the only
+authority.
 
 **Tech stack:** Go, `internal/artifact`, feature application packages,
 `internal/workbench`, `cmd/verdi`, server-rendered HTML, dependency-free
@@ -26,13 +27,17 @@ tests, live MCP tests, and Playwright.
 `docs/superpowers/specs/2026-08-29-wave-6-workbench-presentation-design.md`,
 the four effective accepted feature specs, the Wave 5 CSE lifecycle design,
 the Wave 3.5 pilot plan/report, orchestration Wave 6, SI-162–SI-168, and the
-owner-approved Task 2 stop-gate correction in SI-176.
+owner-approved Task 2 stop-gate corrections in SI-176–SI-177.
 
 **Planning base:** `915529f792f7a672e9631f42909995b38ed12655`
 
-**Execution status:** Independently reviewed and owner-approved; blocked only
-until this exact planning head merges to the configured default branch. No
-implementation prompt may execute from an unmerged planning branch.
+**SI-177 amendment base:** `ab7518975b6621aceeef4607cca29d9a87cd75b7`
+
+**Execution status:** The original planning authority and SI-176 amendment are
+independently reviewed, owner-approved, and merged. Task 1B and Task 2 are
+blocked until the consolidated SI-177 amendment passes its one independent
+review and closure and its exact head merges to the configured default branch.
+No implementation prompt may execute from an unmerged authority branch.
 
 ## Contents
 
@@ -40,16 +45,17 @@ implementation prompt may execute from an unmerged planning branch.
 2. Unit protocol and evidence bundle
 3. Task 1 — ASD application predecessor
 4. Task 1A — ASD browser-human authority correction
-5. Task 2 — ASD workbench
-6. Task 3 — Constitution application predecessor
-7. Task 4 — Constitution workbench
-8. Task 5 — GLG predecessors
-9. Task 6 — GLG workbench
-10. Task 7 — CSE human-proof coordinator
-11. Task 8 — CSE workbench
-12. Task 9 — Wave 6 integration
-13. Planning authority review gate
-14. Exact Claude Code handoff template
+5. Task 1B — ASD writer-process transaction correction
+6. Task 2 — ASD workbench
+7. Task 3 — Constitution application predecessor
+8. Task 4 — Constitution workbench
+9. Task 5 — GLG predecessors
+10. Task 6 — GLG workbench
+11. Task 7 — CSE human-proof coordinator
+12. Task 8 — CSE workbench
+13. Task 9 — Wave 6 integration
+14. Planning authority review gate
+15. Exact Claude Code handoff template
 
 ## Global constraints
 
@@ -69,14 +75,17 @@ implementation prompt may execute from an unmerged planning branch.
   performance contracts in the design.
 - No push, PR, merge, rebase, amend of reviewed history, or next-unit work from
   a Claude implementation session.
-- Task 2 remains paused until Task 1A is independently reviewed, owner-approved,
-  and merged. Its frontend branch must restart from that merged exact head.
+- Task 2 remains paused until Tasks 1A and 1B are independently reviewed,
+  owner-approved, and merged. Its frontend branch must restart from the Task 1B
+  owner-merge exact head.
 
 ## Unit protocol and evidence bundle
 
 | Task | Branch after predecessor merge | Risk | Report leaf | Commit subject |
 |---:|---|---|---|---|
 | 1 | `agent/wave6-asd-core` | Tier 3 | `task-1-asd-core-report.md` | `Complete AI-assisted design application operations` |
+| 1A | `agent/wave6-asd-human-authority` | Tier 3 | `task-1a-asd-human-authority-report.md` | `Permit explicit browser-human draft mutations` |
+| 1B | `agent/wave6-asd-writer-reentry` | Tier 3 | `task-1b-asd-writer-reentry-report.md` | `Permit mutations inside the writer process` |
 | 2 | `agent/wave6-asd-workbench` | Tier 3 | `task-2-asd-workbench-report.md` | `Present synchronized AI-assisted design` |
 | 3 | `agent/wave6-constitution-core` | Tier 3 | `task-3-constitution-core-report.md` | `Establish the constitution application workflow` |
 | 4 | `agent/wave6-constitution-workbench` | Tier 3 | `task-4-constitution-workbench-report.md` | `Present the project constitution` |
@@ -268,6 +277,92 @@ is not semantic RED evidence.
 
 **Commit subject:** `Permit explicit browser-human draft mutations`
 
+## Task 1B: Correct ASD writer-process transaction custody
+
+**Owner:** Sonnet implementation worker under FABLE orchestration. Opus reviews
+and fixes. Codex independently adjudicates the completed unit. No frontend
+files.
+
+**Authority:** Wave 6 design §6.1.2; ASD AC-7/AC-8; I-12; SI-69 and SI-177.
+
+SI-177 supersedes SI-69 only for a registry-proven outer lock owned by the
+caller process. Every foreign or unproven serve/writer holder retains SI-69's
+existing refusal.
+
+**Likely files:**
+
+- Modify `internal/filelock/filelock.go` and focused tests for synchronized,
+  exact-file process-local ownership registration and its read-only query.
+- Modify `internal/draftmutation/transaction.go` and focused tests for
+  per-checkout in-process serialization and proven outer-lock reuse.
+- Modify `cmd/verdi/serve_integration_test.go` and narrowly related MCP
+  integration fixtures/tests to prove a real served `mutate_draft` succeeds.
+- Modify no `internal/workbench`, board handler, asset, CSS, JavaScript,
+  Playwright, artifact schema, provenance schema, policy, actor, accepted spec,
+  this plan, design, or ledger file.
+
+**Interfaces:**
+
+- Produce `filelock.HeldByCurrentProcess(path string) (bool, error)` as a
+  read-only ownership query. It returns true only when `path` resolves to the
+  exact still-open file identity registered by this process's successful
+  `Acquire`; matching PID/start bytes without a registry entry return false.
+- Keep `filelock.Acquire(path)` non-reentrant and `Release(file, path)` as the
+  sole owner release. Registration begins only after successful acquisition
+  and ends only when that exact registered handle is released.
+- Keep `draftmutation.WithWriterLock`'s public signature unchanged. Its inner
+  reuse is private and may occur only after ordinary acquisition returns
+  `ErrHeld` and `HeldByCurrentProcess` proves ownership.
+
+- [ ] Read I-12, SI-69/SI-177, filelock acquisition/release/stale-takeover
+      tests, draftmutation transaction/journal tests, `verdi serve`, standalone
+      `verdi mcp`, and the live MCP `mutate_draft` adapter before editing.
+- [ ] RED a process that acquires the checkout writer lock and then calls
+      `WithWriterLock` on that checkout: base must return `ErrHeld`; GREEN must
+      run the callback and leave the outer lock present and owned afterward.
+- [ ] RED two concurrent `WithWriterLock` calls under one outer process-owned
+      lock; prove their callbacks never overlap and both complete in a
+      deterministic order controlled by the test. Also prove different
+      checkout lock paths are not globally serialized.
+- [ ] RED a forged lock file carrying the current PID/start but absent from the
+      process-local registry; it must remain held/unproven and the mutation must
+      refuse with zero journal/spec/provenance effects.
+- [ ] Implement synchronized ownership registration using exact acquired file
+      identity, not PID comparison. Refuse replaced, removed/recreated,
+      unreadable, or path-mismatched lock files.
+- [ ] Implement the per-canonical-lock-path transaction mutex. Hold it across
+      validation, acquisition/reuse, callback/journal work, and any
+      inner-acquired release. Release only a handle acquired by that invocation.
+- [ ] Prove existing live foreign-holder refusal, malformed-lock refusal,
+      symlink refusal, stale/dead-holder takeover, PID-reuse protection, and
+      crash-retained journal recovery remain unchanged.
+- [ ] Add one real `verdi serve` MCP-socket regression that sends a valid
+      policy-authorized `mutate_draft`, observes the canonical clean result and
+      exact spec/provenance mutation, and proves the outer writer lock remains
+      continuously held. Retain the existing external built-binary mutation
+      refusal while serve owns the lock.
+- [ ] Run focused and full `internal/filelock`, `internal/draftmutation`,
+      `internal/designapp`, and `internal/mcpserve` races; the focused live
+      serve/MCP integration race; `go vet` over affected packages; gofmt,
+      golangci-lint, spec-align, showcase-align, and diff checks.
+- [ ] Complete FABLE/Opus producer review and stop for independent Codex review.
+
+**Required semantic RED:**
+
+```bash
+GOCACHE=/private/tmp/verdi-wave6-task1b-gocache \
+go test ./internal/draftmutation ./cmd/verdi \
+  -run 'Test(WithWriterLockReusesCurrentProcessHolder|ServeMutateDraftUsesHeldWriterLock)' \
+  -count=1
+```
+
+Expected: the draftmutation test returns the existing live-holder refusal and
+the live-serve mutation returns the corresponding operational result before
+any mutation. A sandbox-only cache or local-socket denial is not semantic RED
+evidence; rerun the identical command with the required local permissions.
+
+**Commit subject:** `Permit mutations inside the writer process`
+
 ## Task 2: Build the ASD synchronized workbench
 
 **Owner:** FABLE frontend worker. Sonnet may supply only non-visual handler
@@ -281,9 +376,12 @@ wiring if FABLE delegates it explicitly; FABLE owns every resulting UI fix.
 - Add `e2e/*design*` Playwright coverage and deterministic `testdata/` fixtures.
 - Do not change feature schemas, mutation grammar, provenance grammar, context
   compilation, or semantic-review algorithms.
-- Start only from the owner-merged Task 1A head. Call
+- Start only from the owner-merged Task 1B head. Call
   `draftmutation.NewUnauthenticatedHuman` only in the browser mutation adapter;
   do not reconstruct, wrap, or expose the actor through request data.
+- Consume Task 1B's `WithWriterLock` behavior unchanged. Do not add a frontend
+  lock, release the serve lock, bypass the transaction, or infer ownership from
+  PID/lock-file bytes in the workbench.
 
 - [ ] RED: a built handler/Playwright journey proves unsaved edits are currently
       lost or direct mutation bypasses `designapp`.
@@ -534,9 +632,10 @@ FABLE/worker lane.
 ## Planning authority review gate
 
 The initial planning authority used this gate for the design, plan, and
-SI-162–SI-168. Before Task 1A receives an implementation prompt, Codex applies
-the same gate to the consolidated SI-176 amendment across this design, this
-plan, and the ledger, creating one immutable exact-range diff package with a
+SI-162–SI-168. Codex applied the same gate to the consolidated SI-176 amendment
+before Task 1A. Before Task 1B receives an implementation prompt, Codex applies
+it again to the consolidated SI-177 amendment across this design, this plan,
+and the ledger, creating one immutable exact-range diff package with a
 published SHA-256. Claude receives a read-only prompt that:
 
 - names the exact base/head/range and diff-package path;
