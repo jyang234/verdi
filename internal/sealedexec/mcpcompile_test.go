@@ -116,6 +116,66 @@ func TestCanonicalChildCompiler(t *testing.T) {
 			}
 		})
 	}
+
+	// I-115: at the public request revision a start has proven a pristine
+	// recorder and an empty ledger, while a resume continues the authenticated
+	// ledger its continuity names. The prior root is therefore read from the
+	// request arm, not from whatever the current state happens to carry.
+	t.Run("expansion at the request revision is action aware", func(t *testing.T) {
+		resumeRequest := serviceRequest(t, ActionResume)
+		resumeWorkspaceID, err := resumeRequest.ExecutionWorkspaceRequest.WorkspaceID()
+		if err != nil {
+			t.Fatal(err)
+		}
+		ledgerRoot := resumeRequest.Resume.Continuity.ExpansionLedgerRoot
+		if ledgerRoot == "" {
+			t.Fatal("resume fixture has no installed expansion ledger root")
+		}
+		base := FlightStateSnapshot{
+			Request: resumeRequest, Key: executionKey(resumeRequest), WorkspaceID: resumeWorkspaceID,
+			CandidateCommit: resumeRequest.InputCommit, CandidateTree: resumeRequest.InputTree,
+			Revision: resumeRequest.ManifestRevision, ManifestDigest: resumeRequest.ManifestDigest,
+			ProjectionDigest: resumeRequest.ProjectionDigest, NextSourceSequence: 4,
+		}
+		for _, tc := range []struct {
+			name    string
+			action  Action
+			root    string
+			wantErr bool
+		}{
+			{name: "start-empty", action: ActionStart, root: ""},
+			{name: "start-nonempty", action: ActionStart, root: ledgerRoot, wantErr: true},
+			{name: "resume-exact", action: ActionResume, root: ledgerRoot},
+			{name: "resume-empty", action: ActionResume, root: "", wantErr: true},
+			{name: "resume-mismatch", action: ActionResume, root: testDigest("other-ledger-root"), wantErr: true},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				in := base
+				if tc.action == ActionStart {
+					in.Request = publicRequest
+					in.Key = executionKey(publicRequest)
+					in.WorkspaceID = workspaceID
+					in.CandidateCommit, in.CandidateTree = publicRequest.InputCommit, publicRequest.InputTree
+					in.Revision, in.ManifestDigest = publicRequest.ManifestRevision, publicRequest.ManifestDigest
+					in.ProjectionDigest = publicRequest.ProjectionDigest
+				}
+				in.ExpansionRoot = tc.root
+				id, err := contextRequestID(in, ref, purpose)
+				if err != nil {
+					t.Fatal(err)
+				}
+				_, err = compiler.CompileChild(context.Background(), ChildCompileRequest{
+					RequestID: id, Ref: ref, Purpose: purpose, Data: data, Snapshot: in,
+				})
+				if tc.wantErr && err == nil {
+					t.Fatal("CompileChild accepted a prior expansion root the request does not authorize")
+				}
+				if !tc.wantErr && err != nil {
+					t.Fatalf("CompileChild: %v", err)
+				}
+			})
+		}
+	})
 }
 
 func TestVerifyExpansionDataProof(t *testing.T) {

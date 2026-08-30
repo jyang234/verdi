@@ -185,7 +185,22 @@ func validateChildCompileRequest(request ChildCompileRequest) error {
 		if snapshot.ManifestDigest != snapshot.Request.ManifestDigest {
 			return errors.New("first expansion manifest digest does not match the public execution request")
 		}
-		if snapshot.ExpansionRoot != "" {
+		// I-115: at the public request revision a start has proven a pristine
+		// recorder and therefore an empty expansion ledger, while a resume
+		// continues an authenticated flight whose ledger root the continuity
+		// already names. The two arms are distinguished by the request itself
+		// rather than by trusting whichever root the state happens to hold.
+		if snapshot.Request.Action == ActionResume {
+			if snapshot.Request.Resume == nil {
+				return errors.New("resume expansion requires the canonical resume arm")
+			}
+			if err := validateDigest("resumed prior expansion root", snapshot.ExpansionRoot); err != nil {
+				return err
+			}
+			if snapshot.ExpansionRoot != snapshot.Request.Resume.Continuity.ExpansionLedgerRoot {
+				return errors.New("resumed prior expansion root does not match the request continuity")
+			}
+		} else if snapshot.ExpansionRoot != "" {
 			return errors.New("first expansion requires an empty prior expansion root")
 		}
 	} else {

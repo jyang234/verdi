@@ -384,6 +384,67 @@ func TestContextExecutionContract_Static(t *testing.T) {
 	})
 }
 
+// TestSharedFlightStateOwnershipContract_Behavioral proves I-115's ownership
+// rule from the service side: exactly one flight state exists per execution,
+// the adapter receives that exact pointer, and every service lifecycle
+// acknowledgment is visible through it.
+func TestSharedFlightStateOwnershipContract_Behavioral(t *testing.T) {
+	for _, action := range []Action{ActionStart, ActionResume} {
+		t.Run(string(action), func(t *testing.T) {
+			req := serviceRequest(t, action)
+			svc, ports := newServiceHarness(t, req)
+			run, err := svc.Execute(context.Background(), req, []contextcompile.DataItem{})
+			if err != nil {
+				t.Fatalf("Execute %s: %v", action, err)
+			}
+			state, checks := ports.sharedState()
+			if state == nil || checks != 1 {
+				t.Fatalf("adapter received state %v across %d checks, want exactly one nonnil pointer", state, checks)
+			}
+			if len(run.Acks) == 0 {
+				t.Fatal("execution acknowledged no events")
+			}
+
+			// The service's own acknowledgments advanced this exact state: the
+			// last one is the state's prior-event and last-global position.
+			snapshot := state.Snapshot()
+			last := run.Acks[len(run.Acks)-1]
+			if snapshot.LastGlobalSequence != last.GlobalSequence || snapshot.NextSourceSequence != last.SourceSequence+1 {
+				t.Fatalf("shared state position = sequence %d global %d, want continuation of the final acknowledgment %#v", snapshot.NextSourceSequence, snapshot.LastGlobalSequence, last)
+			}
+			if snapshot.Key != executionKey(req) || snapshot.Revision != req.ManifestRevision || snapshot.ManifestDigest != req.ManifestDigest {
+				t.Fatalf("shared state identity = %#v, want the verified request identity", snapshot)
+			}
+			if action == ActionResume {
+				// The resume arm opens at the authenticated restart position
+				// and carries the freshly proven expansion ledger root.
+				if snapshot.ExpansionRoot != req.Resume.Continuity.ExpansionLedgerRoot {
+					t.Fatalf("resumed expansion root = %q, want the proven continuity root %q", snapshot.ExpansionRoot, req.Resume.Continuity.ExpansionLedgerRoot)
+				}
+				first := run.Acks[0]
+				if first.Kind != contextevent.KindResume || first.SourceSequence != req.Resume.Continuity.TerminalSourceSequence+1 {
+					t.Fatalf("first resumed acknowledgment = %#v, want `resume` continuing the checkpoint terminal", first)
+				}
+			} else if snapshot.ExpansionRoot != "" {
+				t.Fatalf("started expansion root = %q, want the pristine empty ledger", snapshot.ExpansionRoot)
+			}
+
+			// Mutation: a second state is a second append owner. Driving the
+			// same source order through it re-allocates positions the service
+			// already acknowledged.
+			second := NewFlightState(FlightStateSnapshot{
+				Request: req, Key: executionKey(req), WorkspaceID: ports.workspace.WorkspaceID,
+				CandidateCommit: ports.workspace.CurrentCommit, CandidateTree: ports.workspace.CurrentTree,
+				Revision: req.ManifestRevision, ManifestDigest: req.ManifestDigest,
+				ProjectionDigest: req.ProjectionDigest, NextSourceSequence: 1,
+			})
+			if second.Snapshot().NextSourceSequence >= snapshot.NextSourceSequence {
+				t.Fatalf("second state opened at sequence %d, which does not contradict the shared state at %d", second.Snapshot().NextSourceSequence, snapshot.NextSourceSequence)
+			}
+		})
+	}
+}
+
 func TestContextExecutionResumeContract_Behavioral(t *testing.T) {
 	req := serviceRequest(t, ActionResume)
 
@@ -648,7 +709,7 @@ func TestContextExecutionResumeContract_Behavioral(t *testing.T) {
 		if err != nil {
 			t.Fatalf("buildEvent: %v", err)
 		}
-		retained := map[uint64]retainedEvent{}
+		retained := map[eventKey]retainedEvent{}
 		first, err := appendRetained(context.Background(), ports, retained, event, 3)
 		if err != nil {
 			t.Fatalf("appendRetained first: %v", err)
@@ -1381,6 +1442,8 @@ type serviceFake struct {
 	startBlockAfterDeliveries bool
 	stopRequested             bool
 	reviewCheck               *ReviewLaunch
+	adapterState              *FlightState
+	adapterStateChecks        int
 	reviewLaunch              *ReviewLaunch
 }
 
@@ -1564,7 +1627,24 @@ func (p *serviceFake) VerifyAdapter(_ context.Context, check AdapterCheck) (Adap
 		review := *check.Review
 		p.reviewCheck = &review
 	}
+	// I-115: the service owns the one flight state and hands it to the adapter.
+	// An adapter never defaults or reconstructs one, so a missing pointer is a
+	// contract violation rather than an empty option.
+	if check.State == nil {
+		p.t.Fatal("AdapterCheck carried no shared flight state")
+	}
+	p.mu.Lock()
+	p.adapterState = check.State
+	p.adapterStateChecks++
+	p.mu.Unlock()
 	return p.adapterFacts, nil
+}
+
+// sharedState returns the exact flight state the service passed the adapter.
+func (p *serviceFake) sharedState() (*FlightState, int) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.adapterState, p.adapterStateChecks
 }
 func (p *serviceFake) VerifyProviderSession(context.Context, ProviderSessionCheck) (ProviderSessionFacts, error) {
 	p.record("session-verify")

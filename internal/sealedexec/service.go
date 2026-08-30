@@ -215,12 +215,16 @@ type NormalizedObservation struct {
 	Witness         string
 }
 
-// AdapterCheck carries only already-verified launch identities.
+// AdapterCheck carries only already-verified launch identities. State is the
+// one mutable flight state the execution service constructed after proving
+// every prerequisite (I-115): an embedded scoped surface serializes its context
+// transitions through exactly this pointer and never reconstructs a second one.
 type AdapterCheck struct {
 	Request   ExecutionRequest
 	Profile   ResolvedProfile
 	Workspace WorkspaceFacts
 	Review    *ReviewLaunch
+	State     *FlightState
 }
 
 // AdapterLaunch structurally separates immutable instructions from data.
@@ -497,9 +501,7 @@ type activeExecution struct {
 	workspace               WorkspaceFacts
 	profile                 ResolvedProfile
 	recorder                Recorder
-	sequence                uint64
-	priorDigest             string
-	priorGlobal             uint64
+	flight                  *FlightState
 	sessionRef              string
 	review                  *ReviewLaunch
 	reviewFacts             *ReviewLaunchFacts
@@ -517,7 +519,7 @@ type activeExecution struct {
 	resumeRechecked         bool
 	isInterrupt             bool   // set by Interrupt; triggers suspension before adapter-stop
 	completedEventChainRoot string // Amendment 002 §7 completed revision-chain root
-	retained                map[uint64]retainedEvent
+	retained                *retainedEvents
 }
 
 // retainedEvent is the exact canonical event the live caller retains together
@@ -527,6 +529,38 @@ type activeExecution struct {
 type retainedEvent struct {
 	event contextevent.Event
 	ack   contextevent.EventAck
+}
+
+// retainedEvents is the live caller's §7 retained window, keyed by the durable
+// event identity. An installed expansion restarts source order at one inside
+// the child revision, so the revision is part of the key and a later revision
+// can never replay a predecessor's bytes.
+type retainedEvents struct{ byKey map[eventKey]retainedEvent }
+
+func newRetainedEvents() *retainedEvents {
+	return &retainedEvents{byKey: make(map[eventKey]retainedEvent, 4)}
+}
+
+func (r *retainedEvents) replay(event contextevent.Event) (contextevent.EventAck, bool, error) {
+	if r == nil {
+		return contextevent.EventAck{}, false, nil
+	}
+	prior, ok := r.byKey[eventKey{revision: event.ManifestRevision, sequence: event.SourceSequence}]
+	if !ok {
+		return contextevent.EventAck{}, false, nil
+	}
+	ack, err := contextevent.ValidateReplay(prior.event, prior.ack, event)
+	if err != nil {
+		return contextevent.EventAck{}, false, err
+	}
+	return ack, true, nil
+}
+
+func (r *retainedEvents) retain(event contextevent.Event, ack contextevent.EventAck) {
+	if r == nil || r.byKey == nil {
+		return
+	}
+	r.byKey[eventKey{revision: event.ManifestRevision, sequence: event.SourceSequence}] = retainedEvent{event: event, ack: ack}
 }
 
 type activeExecutionState uint8
@@ -692,6 +726,7 @@ func (s *Service) execute(ctx context.Context, request ExecutionRequest, data []
 
 	var sessionFacts ProviderSessionFacts
 	var plan restartPlan
+	resumeExpansionRoot := ""
 	if request.Action == ActionResume {
 		expansion, err := s.ports.Expansions.VerifyExpansion(ctx, executionKey(request))
 		if err != nil {
@@ -703,6 +738,10 @@ func (s *Service) execute(ctx context.Context, request ExecutionRequest, data []
 		if err := validateResumeFacts(request, runway, workspace, profile, authority, checkpoint, expansion); err != nil {
 			return ExecutionRun{}, err
 		}
+		// I-85: the freshly proven ledger root is now cross-matched to the
+		// continuity operand, so it is the exact prior root the shared state
+		// continues from.
+		resumeExpansionRoot = expansion.Root
 		plan, err = planRestart(request, checkpoint)
 		if err != nil {
 			return ExecutionRun{}, err
@@ -731,7 +770,12 @@ func (s *Service) execute(ctx context.Context, request ExecutionRequest, data []
 	if !reflect.DeepEqual(opaque.Rows, opaqueIdentities(request.Manifest.Opaque)) {
 		return ExecutionRun{}, verdict("opaque vendor identities mismatch")
 	}
-	adapterFacts, err := s.ports.Adapter.VerifyAdapter(ctx, AdapterCheck{Request: request, Profile: profile, Workspace: workspace, Review: cloneReviewLaunch(review)})
+	// I-115: every prerequisite is now proven, so the service constructs the one
+	// mutable flight state for this execution and hands the embedded adapter
+	// exactly that pointer. Nothing downstream reconstructs a second one.
+	flight := newExecutionFlightState(request, workspace, plan, resumeExpansionRoot)
+	retained := newRetainedEvents()
+	adapterFacts, err := s.ports.Adapter.VerifyAdapter(ctx, AdapterCheck{Request: request, Profile: profile, Workspace: workspace, Review: cloneReviewLaunch(review), State: flight})
 	if err != nil {
 		return ExecutionRun{}, operational("verify adapter", err)
 	}
@@ -761,67 +805,55 @@ func (s *Service) execute(ctx context.Context, request ExecutionRequest, data []
 	if stream == nil {
 		return partial, operational("provider process", errors.New("adapter returned a nil active run"))
 	}
-	sequence, priorDigest, priorGlobal := uint64(1), "", uint64(0)
 	var initialAcks []contextevent.EventAck
 	completedEventChainRoot := ""
-	retained := make(map[uint64]retainedEvent, 4)
 	if request.Action == ActionResume {
 		// Restore the exact acknowledged prefix reconstructed from the
-		// checkpoint before any new durable position is allocated.
-		sequence, priorDigest, priorGlobal = plan.sequence, plan.priorDigest, plan.priorGlobal
+		// checkpoint before any new durable position is allocated. The shared
+		// state already opened at that position.
 		initialAcks = append(initialAcks, plan.acks...)
 		completedEventChainRoot = plan.completedEventChainRoot
 		partial.Acks = append([]contextevent.EventAck(nil), initialAcks...)
 		if plan.gapSequence != 0 {
 			// §7: an earlier acknowledged provider session exists, so resume
 			// first appends the fixed authority-blocking recorder gap.
-			gapEvent, gapAck, err := s.appendRecorderGap(ctx, request, workspace, recorder, retained, sequence, priorDigest, priorGlobal)
+			gap, err := s.appendLifecycle(ctx, flight, recorder, retained, workspace, contextevent.KindTelemetryGap, func(snapshot FlightStateSnapshot) (any, error) {
+				return recorderGapPayload(snapshot.NextSourceSequence), nil
+			})
 			if err != nil {
 				return partial, err
 			}
-			initialAcks = append(initialAcks, gapAck)
+			initialAcks = append(initialAcks, gap.Ack)
 			partial.Acks = append([]contextevent.EventAck(nil), initialAcks...)
-			sequence++
-			priorDigest, priorGlobal = gapEvent.EventDigest, gapAck.GlobalSequence
 		}
-		// §7: resume's event_chain_root is the digest of the acknowledged
-		// prefix document built from the actual terminal facts.
-		chainRoot, err := contextevent.EventPrefixDigest(acknowledgedPrefix(request, completedEventChainRoot, sequence-1, priorGlobal, priorDigest))
+		resume, err := s.appendLifecycle(ctx, flight, recorder, retained, workspace, contextevent.KindResume, func(snapshot FlightStateSnapshot) (any, error) {
+			// §7: resume's event_chain_root is the digest of the acknowledged
+			// prefix document built from the actual terminal facts.
+			chainRoot, err := contextevent.EventPrefixDigest(acknowledgedPrefix(request, completedEventChainRoot, snapshot.NextSourceSequence-1, snapshot.LastGlobalSequence, snapshot.PriorEventDigest))
+			if err != nil {
+				return nil, operational("digest resume acknowledged prefix", err)
+			}
+			// §7: prior_session and current_session are provider-session
+			// identities. Claude --resume requires the resumed provider session
+			// to equal the requested explicit session, and the continuity proof
+			// names exactly that one verified identity.
+			resumeSchema, _ := contextevent.PayloadSchema(contextevent.KindResume)
+			return &contextevent.ResumePayload{
+				Schema:           resumeSchema,
+				PriorSession:     sessionFacts.SessionRef,
+				CurrentSession:   sessionFacts.SessionRef,
+				ContinuityDigest: request.Resume.ContinuityDigest,
+				ManifestDigest:   request.ManifestDigest,
+				EventChainRoot:   chainRoot,
+			}, nil
+		})
 		if err != nil {
-			return partial, operational("digest resume acknowledged prefix", err)
+			return partial, err
 		}
-		// §7: prior_session and current_session are provider-session
-		// identities. Claude --resume requires the resumed provider session to
-		// equal the requested explicit session, and the continuity proof names
-		// exactly that one verified identity.
-		resumeSchema, _ := contextevent.PayloadSchema(contextevent.KindResume)
-		resumePayload := &contextevent.ResumePayload{
-			Schema:           resumeSchema,
-			PriorSession:     sessionFacts.SessionRef,
-			CurrentSession:   sessionFacts.SessionRef,
-			ContinuityDigest: request.Resume.ContinuityDigest,
-			ManifestDigest:   request.ManifestDigest,
-			EventChainRoot:   chainRoot,
-		}
-		resumeStamp, err := s.ports.Stamps.NextStamp(ctx)
-		if err != nil {
-			return partial, operational("resume event stamp", err)
-		}
-		resumeEvent, err := buildEvent(request, workspace, sequence, priorDigest, nil, resumeStamp, contextevent.KindResume, resumePayload)
-		if err != nil {
-			return partial, operational("build resume event", err)
-		}
-		resumeAck, err := appendRetained(ctx, recorder, retained, resumeEvent, priorGlobal)
-		if err != nil {
-			return partial, operational("append resume event", err)
-		}
-		initialAcks = append(initialAcks, resumeAck)
+		initialAcks = append(initialAcks, resume.Ack)
 		partial.Acks = append([]contextevent.EventAck(nil), initialAcks...)
-		sequence++
-		priorDigest = resumeEvent.EventDigest
-		priorGlobal = resumeAck.GlobalSequence
 	}
-	s.activate(active, stream, request, canonicalRequest, workspace, profile, recorder, sequence, priorDigest, priorGlobal, sessionFacts.SessionRef, review, initialAcks, completedEventChainRoot, retained)
+	s.activate(active, stream, request, canonicalRequest, workspace, profile, recorder, flight, sessionFacts.SessionRef, review, initialAcks, completedEventChainRoot, retained)
 	return s.consumeActive(ctx, active, authorityMode, witnesses)
 }
 
@@ -934,7 +966,7 @@ func (s *Service) acquire(key ExecutionKey, operation string) (*activeExecution,
 	return active, release, nil
 }
 
-func (s *Service) activate(active *activeExecution, stream ActiveAdapterRun, request ExecutionRequest, canonicalRequest []byte, workspace WorkspaceFacts, profile ResolvedProfile, recorder Recorder, sequence uint64, priorDigest string, priorGlobal uint64, sessionRef string, review *ReviewLaunch, initialAcks []contextevent.EventAck, completedEventChainRoot string, retained map[uint64]retainedEvent) {
+func (s *Service) activate(active *activeExecution, stream ActiveAdapterRun, request ExecutionRequest, canonicalRequest []byte, workspace WorkspaceFacts, profile ResolvedProfile, recorder Recorder, flight *FlightState, sessionRef string, review *ReviewLaunch, initialAcks []contextevent.EventAck, completedEventChainRoot string, retained *retainedEvents) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	active.mu.Lock()
@@ -945,15 +977,13 @@ func (s *Service) activate(active *activeExecution, stream ActiveAdapterRun, req
 	active.workspace = workspace
 	active.profile = profile
 	active.recorder = recorder
-	active.sequence = sequence
-	active.priorDigest = priorDigest
-	active.priorGlobal = priorGlobal
+	active.flight = flight
 	active.sessionRef = sessionRef
 	active.review = cloneReviewLaunch(review)
 	active.acks = append([]contextevent.EventAck(nil), initialAcks...)
 	active.completedEventChainRoot = completedEventChainRoot
 	if retained == nil {
-		retained = make(map[uint64]retainedEvent, 4)
+		retained = newRetainedEvents()
 	}
 	active.retained = retained
 	active.state = activeRunning
@@ -1113,36 +1143,24 @@ func (s *Service) recordResult(ctx context.Context, active *activeExecution, res
 		if lockSessionBoundary {
 			active.mu.Lock()
 		}
-		stamp, err := s.ports.Stamps.NextStamp(ctx)
+		// Every observation is stamped, built, appended, and acknowledged inside
+		// the shared flight state's single transaction, so a scoped MCP context
+		// transition can neither interleave into this source sequence nor leave
+		// this event on a stale manifest revision.
+		appended, err := s.appendLifecycle(ctx, active.flight, active.recorder, active.retained, active.workspace, observation.Kind, func(FlightStateSnapshot) (any, error) {
+			return observation.Payload, nil
+		})
 		if err != nil {
 			if lockSessionBoundary {
 				active.mu.Unlock()
 			}
-			return "", true, operational("observation stamp", err)
+			// A recorder append or acknowledgment failure leaves no usable
+			// recorder for the remaining lifecycle events; a stamp or encoding
+			// failure leaves the recorder itself intact.
+			return "", !recorderUnusable(err), err
 		}
-		event, err := buildEvent(active.request, active.workspace, active.sequence, active.priorDigest, nil, stamp, observation.Kind, observation.Payload)
-		if err != nil {
-			if lockSessionBoundary {
-				active.mu.Unlock()
-			}
-			return "", true, operational("normalize adapter observation", err)
-		}
-		ack, err := active.recorder.Append(ctx, event)
-		if err != nil {
-			if lockSessionBoundary {
-				active.mu.Unlock()
-			}
-			return "", false, operational("append adapter observation", err)
-		}
-		if err := validateAck(event, ack, active.priorGlobal); err != nil {
-			if lockSessionBoundary {
-				active.mu.Unlock()
-			}
-			return "", false, operational("acknowledge adapter observation", err)
-		}
+		event, ack := appended.Event, appended.Ack
 		active.acks = append(active.acks, ack)
-		active.sequence++
-		active.priorDigest, active.priorGlobal = event.EventDigest, ack.GlobalSequence
 		if active.request.Action == ActionStart && observation.Kind == contextevent.KindAdapterStart {
 			if result.ObservedSessionRef == "" || (active.sessionRef != "" && active.sessionRef != result.ObservedSessionRef) {
 				active.mu.Unlock()
@@ -1198,57 +1216,42 @@ func (s *Service) issueStop(ctx context.Context, active *activeExecution) {
 
 func (s *Service) recordStop(ctx context.Context, active *activeExecution, stop AdapterStopResult) (contextevent.EventAck, error) {
 	// Interruption-triggered stops prepend a suspension observation when there is
-	// at least one acknowledged event in this session (priorDigest non-empty).
-	if active.isInterrupt && active.priorDigest != "" {
-		suspSchema, _ := contextevent.PayloadSchema(contextevent.KindSuspension)
-		// §7: suspension's event_chain_root is the digest of the acknowledged
-		// prefix document built from this run's actual terminal facts. The
-		// completed revision-chain root is carried only as
-		// completed_event_chain_root; there is no bare-event-digest fallback.
-		chainRoot, err := contextevent.EventPrefixDigest(acknowledgedPrefix(active.request, active.completedEventChainRoot, active.sequence-1, active.priorGlobal, active.priorDigest))
+	// at least one acknowledged event in this session (prior-event digest
+	// non-empty in the shared state).
+	if active.isInterrupt && active.flight != nil && active.flight.Snapshot().PriorEventDigest != "" {
+		suspension, err := s.appendLifecycle(ctx, active.flight, active.recorder, active.retained, active.workspace, contextevent.KindSuspension, func(snapshot FlightStateSnapshot) (any, error) {
+			suspSchema, _ := contextevent.PayloadSchema(contextevent.KindSuspension)
+			// §7: suspension's event_chain_root is the digest of the
+			// acknowledged prefix document built from this run's actual
+			// terminal facts. The completed revision-chain root is carried only
+			// as completed_event_chain_root; there is no bare-event-digest
+			// fallback.
+			chainRoot, err := contextevent.EventPrefixDigest(acknowledgedPrefix(active.request, active.completedEventChainRoot, snapshot.NextSourceSequence-1, snapshot.LastGlobalSequence, snapshot.PriorEventDigest))
+			if err != nil {
+				return nil, operational("digest suspension acknowledged prefix", err)
+			}
+			return &contextevent.SuspensionPayload{
+				Schema:           suspSchema,
+				ReasonCode:       "interrupted",
+				ContinuityDigest: snapshot.PriorEventDigest,
+				EventChainRoot:   chainRoot,
+			}, nil
+		})
 		if err != nil {
-			return contextevent.EventAck{}, operational("digest suspension acknowledged prefix", err)
+			return contextevent.EventAck{}, err
 		}
-		suspPayload := &contextevent.SuspensionPayload{
-			Schema:           suspSchema,
-			ReasonCode:       "interrupted",
-			ContinuityDigest: active.priorDigest,
-			EventChainRoot:   chainRoot,
-		}
-		suspStamp, err := s.ports.Stamps.NextStamp(ctx)
-		if err != nil {
-			return contextevent.EventAck{}, operational("suspension stamp", err)
-		}
-		suspEvent, err := buildEvent(active.request, active.workspace, active.sequence, active.priorDigest, nil, suspStamp, contextevent.KindSuspension, suspPayload)
-		if err != nil {
-			return contextevent.EventAck{}, operational("encode suspension event", err)
-		}
-		suspAck, err := appendRetained(ctx, active.recorder, active.retained, suspEvent, active.priorGlobal)
-		if err != nil {
-			return contextevent.EventAck{}, operational("append suspension event", err)
-		}
-		active.acks = append(active.acks, suspAck)
-		active.sequence++
-		active.priorDigest, active.priorGlobal = suspEvent.EventDigest, suspAck.GlobalSequence
+		active.acks = append(active.acks, suspension.Ack)
 	}
 	schema, _ := contextevent.PayloadSchema(contextevent.KindAdapterStop)
 	payload := &contextevent.AdapterStopPayload{Schema: schema, Adapter: active.request.Adapter, AdapterVersion: active.request.AdapterVersion, Session: active.request.Session, ExitCode: stop.ExitCode, ReasonCode: stop.ReasonCode}
-	stamp, err := s.ports.Stamps.NextStamp(ctx)
+	result, err := s.appendLifecycle(ctx, active.flight, active.recorder, active.retained, active.workspace, contextevent.KindAdapterStop, func(FlightStateSnapshot) (any, error) {
+		return payload, nil
+	})
 	if err != nil {
-		return contextevent.EventAck{}, operational("stop stamp", err)
+		return contextevent.EventAck{}, err
 	}
-	event, err := buildEvent(active.request, active.workspace, active.sequence, active.priorDigest, nil, stamp, contextevent.KindAdapterStop, payload)
-	if err != nil {
-		return contextevent.EventAck{}, operational("encode stop event", err)
-	}
-	ack, err := appendRetained(ctx, active.recorder, active.retained, event, active.priorGlobal)
-	if err != nil {
-		return contextevent.EventAck{}, operational("append stop event", err)
-	}
-	active.acks = append(active.acks, ack)
-	active.sequence++
-	active.priorDigest, active.priorGlobal = event.EventDigest, ack.GlobalSequence
-	return ack, nil
+	active.acks = append(active.acks, result.Ack)
+	return result.Ack, nil
 }
 
 func (s *Service) finishWithoutStopAck(active *activeExecution, authority contextevent.Authority, witnesses []string, failure error) (ExecutionRun, error) {
@@ -1686,8 +1689,8 @@ func acknowledgedPrefix(request ExecutionRequest, completedRoot string, terminal
 // already retained: the exact retained bytes replay to the original
 // acknowledgment without a new global sequence, and any contradiction fails
 // closed.
-func appendRetained(ctx context.Context, recorder Recorder, retained map[uint64]retainedEvent, event contextevent.Event, priorGlobal uint64) (contextevent.EventAck, error) {
-	if prior, ok := retained[event.SourceSequence]; ok {
+func appendRetained(ctx context.Context, recorder Recorder, retained map[eventKey]retainedEvent, event contextevent.Event, priorGlobal uint64) (contextevent.EventAck, error) {
+	if prior, ok := retained[eventKey{revision: event.ManifestRevision, sequence: event.SourceSequence}]; ok {
 		return contextevent.ValidateReplay(prior.event, prior.ack, event)
 	}
 	ack, err := recorder.Append(ctx, event)
@@ -1698,7 +1701,7 @@ func appendRetained(ctx context.Context, recorder Recorder, retained map[uint64]
 		return contextevent.EventAck{}, err
 	}
 	if retained != nil {
-		retained[event.SourceSequence] = retainedEvent{event: event, ack: ack}
+		retained[eventKey{revision: event.ManifestRevision, sequence: event.SourceSequence}] = retainedEvent{event: event, ack: ack}
 	}
 	return ack, nil
 }
@@ -1781,11 +1784,50 @@ func planRestart(request ExecutionRequest, checkpoint RecorderCheckpoint) (resta
 	}, nil
 }
 
-// appendRecorderGap records Amendment 002 §7's fixed authority-blocking
+// newExecutionFlightState constructs the one mutable flight state for a
+// verified execution (I-115). A start opens the public request revision at
+// source sequence one with no prior event, no expansion root, no revision
+// bridge, and global sequence zero. A resume opens at the authenticated
+// restart plan's position with the freshly proven expansion ledger root; it
+// invents nothing and never reconstructs a standalone MCP snapshot.
+func newExecutionFlightState(request ExecutionRequest, workspace WorkspaceFacts, plan restartPlan, expansionRoot string) *FlightState {
+	snapshot := FlightStateSnapshot{
+		Request: request, Key: executionKey(request), WorkspaceID: workspace.WorkspaceID,
+		CandidateCommit: workspace.CurrentCommit, CandidateTree: workspace.CurrentTree,
+		Revision: request.ManifestRevision, ManifestDigest: request.ManifestDigest,
+		ProjectionDigest: request.ProjectionDigest, NextSourceSequence: 1,
+	}
+	if request.Action == ActionResume {
+		snapshot.ExpansionRoot = expansionRoot
+		snapshot.NextSourceSequence = plan.sequence
+		snapshot.PriorEventDigest = plan.priorDigest
+		snapshot.LastGlobalSequence = plan.priorGlobal
+	}
+	return NewFlightState(snapshot)
+}
+
+// appendLifecycle appends one service-owned event through the shared flight
+// state. The payload is built from the exact pre-append snapshot under the same
+// lock, so a continuity or chain-root payload can never be stamped from a state
+// other than the one its event is built from.
+func (s *Service) appendLifecycle(ctx context.Context, flight *FlightState, recorder Recorder, retained *retainedEvents, workspace WorkspaceFacts, kind contextevent.Kind, build func(FlightStateSnapshot) (any, error)) (flightAppendResult, error) {
+	if flight == nil {
+		return flightAppendResult{}, operational("append lifecycle event", errors.New("execution has no shared flight state"))
+	}
+	flight.mu.Lock()
+	defer flight.mu.Unlock()
+	payload, err := build(flight.currentLocked())
+	if err != nil {
+		return flightAppendResult{}, err
+	}
+	return flight.appendReplayLocked(ctx, recorder, s.ports.Stamps, workspace, retained, kind, payload)
+}
+
+// recorderGapPayload is Amendment 002 §7's fixed authority-blocking
 // telemetry-gap over the single absent source sequence.
-func (s *Service) appendRecorderGap(ctx context.Context, request ExecutionRequest, workspace WorkspaceFacts, recorder Recorder, retained map[uint64]retainedEvent, sequence uint64, priorDigest string, priorGlobal uint64) (contextevent.Event, contextevent.EventAck, error) {
+func recorderGapPayload(sequence uint64) *contextevent.TelemetryGapPayload {
 	schema, _ := contextevent.PayloadSchema(contextevent.KindTelemetryGap)
-	payload := &contextevent.TelemetryGapPayload{
+	return &contextevent.TelemetryGapPayload{
 		Schema:       schema,
 		Source:       recorderGapSource,
 		FromSequence: sequence,
@@ -1793,6 +1835,12 @@ func (s *Service) appendRecorderGap(ctx context.Context, request ExecutionReques
 		ReasonCode:   recorderGapReason,
 		Availability: "unavailable",
 	}
+}
+
+// appendRecorderGap records the §7 gap on the pre-launch refusal path, which
+// has no shared flight state because no provider session was ever proven.
+func (s *Service) appendRecorderGap(ctx context.Context, request ExecutionRequest, workspace WorkspaceFacts, recorder Recorder, retained map[eventKey]retainedEvent, sequence uint64, priorDigest string, priorGlobal uint64) (contextevent.Event, contextevent.EventAck, error) {
+	payload := recorderGapPayload(sequence)
 	stamp, err := s.ports.Stamps.NextStamp(ctx)
 	if err != nil {
 		return contextevent.Event{}, contextevent.EventAck{}, operational("recorder gap stamp", err)
@@ -1819,7 +1867,7 @@ func (s *Service) refuseUnconfirmedInitialSession(ctx context.Context, request E
 		Workspace: workspace, Profile: profile,
 		Acks: append([]contextevent.EventAck(nil), plan.acks...),
 	}
-	retained := make(map[uint64]retainedEvent, 2)
+	retained := make(map[eventKey]retainedEvent, 2)
 	gapEvent, gapAck, err := s.appendRecorderGap(ctx, request, workspace, recorder, retained, plan.sequence, plan.priorDigest, plan.priorGlobal)
 	if err != nil {
 		return run, err

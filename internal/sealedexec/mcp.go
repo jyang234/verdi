@@ -240,10 +240,10 @@ func (s *FlightState) appendReplayLocked(
 	if !replayed {
 		ack, err = recorder.Append(ctx, event)
 		if err != nil {
-			return flightAppendResult{Event: event}, operational("append sealed event", err)
+			return flightAppendResult{Event: event}, operational("append sealed event", recorderFailure{err: err})
 		}
 		if err := validateAck(event, ack, state.LastGlobalSequence); err != nil {
-			return flightAppendResult{Event: event}, operational("acknowledge sealed event", err)
+			return flightAppendResult{Event: event}, operational("acknowledge sealed event", recorderFailure{err: err})
 		}
 		if retained != nil {
 			retained.retain(event, ack)
@@ -256,6 +256,21 @@ func (s *FlightState) appendReplayLocked(
 	state.PriorEventDigest = event.EventDigest
 	state.LastGlobalSequence = ack.GlobalSequence
 	return flightAppendResult{Event: event, Ack: ack}, nil
+}
+
+// recorderFailure marks a shared-state append failure raised by the recorder
+// itself — a rejected append or a contradictory acknowledgment — rather than by
+// stamping or encoding. Amendment 002 §7 forbids inventing a later lifecycle
+// event once the recorder can no longer confirm one.
+type recorderFailure struct{ err error }
+
+func (e recorderFailure) Error() string { return e.err.Error() }
+func (e recorderFailure) Unwrap() error { return e.err }
+
+// recorderUnusable reports whether err came from the recorder itself.
+func recorderUnusable(err error) bool {
+	var failure recorderFailure
+	return errors.As(err, &failure)
 }
 
 func replayRetained(retained eventReplay, event contextevent.Event) (contextevent.EventAck, bool, error) {
