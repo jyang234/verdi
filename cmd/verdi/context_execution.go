@@ -914,26 +914,19 @@ func (a *commandClaudeAdapter) init(ctx context.Context, check sealedexec.Adapte
 		return fmt.Errorf("commandClaudeAdapter: encode request: %w", err)
 	}
 
-	// I-86/I-110: the parent-hosted scoped surface never invents its own append
-	// position. It reconstructs the exact durable state from the authoritative
-	// controller checkpoint and expansion ledger through the same
-	// buildMCPFlightSnapshot gate the out-of-process `verdi context mcp` server
-	// uses, so a pristine, active-tail, or invalidated flight keeps its ratified
-	// meaning instead of being presented as sequence one.
+	// I-115: the execution service already proved this flight's authority,
+	// checkpoint, expansion ledger, and — on resume — its continuity and
+	// provider session, and constructed the one mutable state from those proofs.
+	// The embedded scoped surface serializes its context transitions through
+	// exactly that pointer; it never re-queries the controller for a second
+	// checkpoint and never reconstructs a second state. Standalone
+	// `verdi context mcp` keeps its own I-86 reconstruction, including the
+	// completed-null refusal.
+	if check.State == nil {
+		return errors.New("commandClaudeAdapter: execution service supplied no shared flight state")
+	}
 	key := sealedexec.ExecutionKey{Flight: check.Request.Flight, Lane: check.Request.Lane, Epoch: check.Request.Epoch}
 	recorder := controllerRecorder{client: a.controller}
-	checkpoint, err := recorder.Checkpoint(ctx, key)
-	if err != nil {
-		return fmt.Errorf("commandClaudeAdapter: recorder checkpoint: %w", err)
-	}
-	expansion, err := a.controller.VerifyExpansion(ctx, key)
-	if err != nil {
-		return fmt.Errorf("commandClaudeAdapter: verify expansion ledger: %w", err)
-	}
-	snapshot, err := buildMCPFlightSnapshot(check.Request, check.Workspace, checkpoint, expansion)
-	if err != nil {
-		return fmt.Errorf("commandClaudeAdapter: reconstruct scoped MCP flight state: %w", err)
-	}
 
 	// Create the loopback listener for the scoped HTTP MCP server.
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
@@ -949,7 +942,7 @@ func (a *commandClaudeAdapter) init(ctx context.Context, check sealedexec.Adapte
 		Recorder: recorder,
 		Store:    a.controller,
 		Stamps:   a.controller,
-	}, sealedexec.NewFlightState(snapshot))
+	}, check.State)
 	if err != nil {
 		_ = listener.Close()
 		return fmt.Errorf("commandClaudeAdapter: create scoped MCP server: %w", err)

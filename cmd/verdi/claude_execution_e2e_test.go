@@ -734,8 +734,13 @@ type claudeLifecycleOptions struct {
 	noAPIKey bool
 	// failOperation makes the controller refuse one operation.
 	failOperation sealedexec.ControllerOperation
-	// outFile routes the public result through --out.
+	// outFile routes the public result through --out. It is only a choice of
+	// public output channel and never selects an execution arm.
 	outFile bool
+	// resume drives the sealed resume arm: the request carries the canonical
+	// continuity checkpoint instead of the start arm, so the built binary must
+	// take the Claude adapter's Resume and the `--resume S` argv.
+	resume bool
 	// oversizedDetail makes the provider emit an assistant text larger than the
 	// fixed inline detail ceiling, forcing a durable controller segment.
 	oversizedDetail bool
@@ -785,6 +790,10 @@ func runClaudeSealedLifecycle(t *testing.T, bin string, options claudeLifecycleO
 		t.Fatal(err)
 	}
 	workspacePath := execworkspace.UnitPath(fixture.root, workspaceID)
+	resumeCheckpoint := claudeResumeCheckpoint{}
+	if options.resume {
+		resumeCheckpoint = prepareClaudeResume(t, &fixture, workspaceID)
+	}
 	argvPath := filepath.Join(providerRoot, "argv")
 	envPath := filepath.Join(providerRoot, "env.txt")
 	stdinPath := filepath.Join(providerRoot, "stdin")
@@ -813,6 +822,15 @@ func runClaudeSealedLifecycle(t *testing.T, bin string, options claudeLifecycleO
 		},
 	}
 	fake.expansionRoot = options.expansionRoot
+	if options.resume {
+		// The durable state the prepared continuity asserts: the completed prior
+		// revision, its recorder checkpoint digest, and the installed expansion
+		// ledger root the resumed flight reconstructs from.
+		fake.initialRevisions = []contextevent.Revision{resumeCheckpoint.revision}
+		fake.checkpointDigest = resumeCheckpoint.checkpointDigest
+		fake.expansionRoot = resumeCheckpoint.expansionRoot
+		fake.global = resumeCheckpoint.revision.TerminalGlobalSequence
+	}
 
 	if options.noAPIKey {
 		t.Setenv("ANTHROPIC_API_KEY", "")
@@ -860,6 +878,85 @@ func runClaudeSealedLifecycle(t *testing.T, bin string, options claudeLifecycleO
 	}
 }
 
+// claudeResumeCheckpoint is the durable state the prepared continuity asserts.
+// The controller must report exactly these facts or the built binary refuses
+// the resume before any provider is launched.
+type claudeResumeCheckpoint struct {
+	revision         contextevent.Revision
+	checkpointDigest string
+	expansionRoot    string
+}
+
+// prepareClaudeResume rewrites the compiled start fixture into the sealed
+// resume arm and returns the controller facts its continuity claims. The
+// workspace is materialized first because a resume continues an existing
+// execution workspace rather than creating one, and the continuity names
+// claudeE2ESession as the adapter session ref — exactly the session the fake
+// provider reports — so the binary's resumed-stream identity check and the
+// `--resume S` operand both bind one real provider session.
+func prepareClaudeResume(t *testing.T, fixture *claudeCompiledFixture, workspaceID string) claudeResumeCheckpoint {
+	t.Helper()
+	materializer, err := execworkspace.NewMaterializer(fixture.root, fixture.root, execworkspace.NewGitReconciler(fixture.root))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := materializer.Materialize(context.Background(), execworkspace.Request{Identity: fixture.request.ExecutionWorkspaceRequest}); err != nil {
+		t.Fatalf("materialize claude resume workspace: %v", err)
+	}
+	workspaceDigest, err := sealedexec.ExecutionWorkspaceRequestDigest(fixture.request.ExecutionWorkspaceRequest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	grantBytes, err := execworkspace.EncodeGrantSet(fixture.request.Grants)
+	if err != nil {
+		t.Fatal(err)
+	}
+	revision := contextevent.Revision{
+		Schema: contextevent.RevisionSchemaID, ManifestRevision: fixture.request.ManifestRevision,
+		ManifestDigest: fixture.request.ManifestDigest, FirstGlobalSequence: 1,
+		TerminalGlobalSequence: 3, TerminalSourceSequence: 3,
+		TerminalKind: contextevent.KindExecutionResult, EventRoot: sealedTestDigest("claude-resume-prior-event"),
+	}
+	revisionRoot, err := contextevent.EventChainRoot([]contextevent.Revision{revision})
+	if err != nil {
+		t.Fatal(err)
+	}
+	checkpoint := claudeResumeCheckpoint{
+		revision:         revision,
+		checkpointDigest: sealedTestDigest("claude-resume-checkpoint"),
+		expansionRoot:    sealedTestDigest("claude-resume-expansion-root"),
+	}
+	continuity := sealedexec.ExecutionContinuity{
+		Schema: sealedexec.ExecutionContinuitySchemaID,
+		Flight: fixture.request.Flight, Lane: fixture.request.Lane, Epoch: fixture.request.Epoch, Session: fixture.request.Session,
+		Adapter: fixture.request.Adapter, AdapterVersion: fixture.request.AdapterVersion, ATCRunway: fixture.root,
+		InputCommit: fixture.head, InputTree: fixture.tree, CurrentCommit: fixture.head, CurrentTree: fixture.tree,
+		ExecutionWorkspaceID: workspaceID, ExecutionWorkspaceRequestDigest: workspaceDigest,
+		ProfileDigest: fixture.request.Profile.Digest, GrantDigest: sealedRawDigest(grantBytes),
+		AuthorityVerdictDigest:  fixture.request.AuthorityVerdict.Digest,
+		CurrentManifestRevision: fixture.request.ManifestRevision, CurrentManifestDigest: fixture.request.ManifestDigest,
+		ProjectionDigest: fixture.request.ProjectionDigest,
+		RevisionSegments: []contextevent.Revision{revision}, EventChainRoot: revisionRoot,
+		ExpansionLedgerRoot:    checkpoint.expansionRoot,
+		TerminalSourceSequence: revision.TerminalSourceSequence, TerminalGlobalSequence: revision.TerminalGlobalSequence,
+		RecorderCheckpointDigest: checkpoint.checkpointDigest, AdapterSessionRef: claudeE2ESession,
+	}
+	continuityBytes, err := sealedexec.EncodeExecutionContinuity(continuity)
+	if err != nil {
+		t.Fatalf("encode claude resume continuity: %v", err)
+	}
+	if continuity, err = sealedexec.DecodeExecutionContinuity(bytes.NewReader(continuityBytes)); err != nil {
+		t.Fatal(err)
+	}
+	fixture.request.Action = sealedexec.ActionResume
+	fixture.request.Start = nil
+	fixture.request.Resume = &sealedexec.ResumeArm{Continuity: continuity, ContinuityDigest: continuity.Digest}
+	if fixture.requestBytes, err = sealedexec.EncodeExecutionRequest(fixture.request); err != nil {
+		t.Fatalf("encode claude resume request: %v", err)
+	}
+	return checkpoint
+}
+
 // readClaudeFixtureLines returns the recorded provider observation lines, or
 // nil when the provider never wrote the file.
 func readClaudeFixtureLines(path string) []string {
@@ -884,10 +981,14 @@ func TestClaudeBuiltBinaryLifecycle_Behavioral(t *testing.T) {
 		assertClaudeSuccessfulLifecycle(t, run)
 	})
 
+	// Amendment 002 §9 requires real built sealed-resume evidence, so this row
+	// drives the resume arm itself: --out is only an orthogonal choice of public
+	// output channel and never the thing that distinguishes resume from start.
 	t.Run("sealed_resume_drives_the_public_claude_assembly", func(t *testing.T) {
-		run := runClaudeSealedLifecycle(t, bin, claudeLifecycleOptions{outFile: true})
+		run := runClaudeSealedLifecycle(t, bin, claudeLifecycleOptions{resume: true, outFile: true})
 		assertClaudeAssemblySurface(t, run)
 		assertClaudeSuccessfulLifecycle(t, run)
+		assertClaudeResumeWitness(t, run)
 	})
 
 	// Amendment 002 §6: a projected detail larger than the fixed inline ceiling
@@ -922,8 +1023,9 @@ func TestClaudeBuiltBinaryLifecycle_Behavioral(t *testing.T) {
 		}
 	})
 
-	// Reconstruction witness: the parent-hosted scoped surface reads the
-	// authoritative checkpoint and expansion ledger. A pristine checkpoint that
+	// Ownership witness: the execution service reads the authoritative
+	// checkpoint and expansion ledger and cross-matches them before it
+	// constructs the one shared flight state. A pristine checkpoint that
 	// contradicts an installed expansion root must be refused; a fabricated
 	// literal sequence-one state could never notice the contradiction.
 	t.Run("pristine_checkpoint_contradicting_the_expansion_ledger_is_refused", func(t *testing.T) {
@@ -931,7 +1033,7 @@ func TestClaudeBuiltBinaryLifecycle_Behavioral(t *testing.T) {
 		if run.obs.exitCode != 1 || run.obs.stdout != "" {
 			t.Fatalf("contradicted reconstruction run = %#v, want a verdict refusal", run.obs)
 		}
-		if !strings.Contains(run.obs.stderr, "reconstruct scoped MCP flight state") {
+		if !strings.Contains(run.obs.stderr, "pristine start checkpoint contradicts an installed expansion ledger") {
 			t.Fatalf("contradicted reconstruction stderr = %q", run.obs.stderr)
 		}
 		if run.argv != nil {
@@ -985,12 +1087,23 @@ func TestClaudeBuiltBinaryLifecycle_Behavioral(t *testing.T) {
 func assertClaudeAssemblySurface(t *testing.T, run claudeLifecycleObservation) {
 	t.Helper()
 
+	// An empty argv means the fake provider never ran, so the binary refused
+	// before launch. Report that refusal rather than an unreadable nil diff.
+	if len(run.argv) == 0 {
+		t.Fatalf("provider was never launched: exit %d\nstderr: %s\nstdout: %s", run.obs.exitCode, run.obs.stderr, run.obs.stdout)
+	}
+
 	// Exact Amendment 002 §4 start argv, including the full model and the one
 	// scoped MCP configuration path beneath the resolved environment root.
 	wantArgv := []string{
 		"--bare", "-p", "--input-format", "stream-json", "--output-format", "stream-json",
 		"--verbose", "--model", claudeE2EModel, "--permission-mode", "bypassPermissions",
 		"--strict-mcp-config", "--mcp-config", run.mcpConfig, "--no-chrome",
+	}
+	// Amendment 002 §4 resume order: the start argv with the verified provider
+	// session appended as the exact `--resume S` tail.
+	if run.fixture.request.Action == sealedexec.ActionResume {
+		wantArgv = append(wantArgv, "--resume", run.fixture.request.Resume.Continuity.AdapterSessionRef)
 	}
 	if !reflect.DeepEqual(run.argv, wantArgv) {
 		t.Fatalf("claude provider argv = %#v, want %#v", run.argv, wantArgv)
@@ -1052,13 +1165,17 @@ func assertClaudeAssemblySurface(t *testing.T, run claudeLifecycleObservation) {
 		t.Fatalf("claude typed stdin (%d lines) = %.200q…, want one sealed user frame", len(lines), stdin)
 	}
 
-	// Reconstruction witness: the Claude assembly reads the authoritative
-	// durable checkpoint and expansion ledger before serving scoped MCP.
-	if got := countControllerOperation(run.fake.calls, sealedexec.ControllerOperationRecorderCheckpoint); got < 2 {
-		t.Fatalf("recorder-checkpoint calls = %d, want the service and adapter reads", got)
+	// I-115 ownership witness: the execution service alone reads the durable
+	// checkpoint and expansion ledger, then constructs the one flight state and
+	// hands the embedded Claude assembly that exact pointer. The assembly
+	// therefore performs no second reconstruction read — only the service's
+	// prerequisite proof and completion's terminal checkpoint remain, and only
+	// the resume arm proves the expansion ledger.
+	if got := countControllerOperation(run.fake.calls, sealedexec.ControllerOperationVerifyExpansion); got != 1 {
+		t.Fatalf("verify-expansion calls = %d, want exactly the one service cross-match and no adapter reconstruction", got)
 	}
-	if got := countControllerOperation(run.fake.calls, sealedexec.ControllerOperationVerifyExpansion); got < 1 {
-		t.Fatalf("verify-expansion calls = %d, want the adapter reconstruction read", got)
+	if got := countControllerOperation(run.fake.calls, sealedexec.ControllerOperationRecorderCheckpoint); got != 2 {
+		t.Fatalf("recorder-checkpoint calls = %d, want exactly the service prerequisite and the completion terminal read\nexit %d\nstderr: %s", got, run.obs.exitCode, run.obs.stderr)
 	}
 
 	// Normalized events: the scoped MCP expansion pair plus the exact Claude
@@ -1080,6 +1197,75 @@ func assertClaudeAssemblySurface(t *testing.T, run claudeLifecycleObservation) {
 	}
 	if _, err := os.Stat(run.envRoot); err != nil {
 		t.Fatalf("resolved environment root was removed: %v", err)
+	}
+}
+
+// assertClaudeResumeWitness proves the built candidate really took the sealed
+// resume arm rather than a start that merely differs by output routing: the
+// encoded request carries ActionResume with the canonical continuity, the
+// provider was launched through the Claude adapter's Resume with the exact
+// `--resume S` operand, the controller verified that one provider session both
+// before launch and on the live re-check, and Amendment 002 §7's acknowledged
+// prefix is `resume` followed by `adapter-start` continuing the checkpoint.
+func assertClaudeResumeWitness(t *testing.T, run claudeLifecycleObservation) {
+	t.Helper()
+	request := run.fixture.request
+	if request.Action != sealedexec.ActionResume || request.Resume == nil || request.Start != nil {
+		t.Fatalf("built resume row drove action %q (start arm present = %v, resume arm present = %v), want the sealed resume arm",
+			request.Action, request.Start != nil, request.Resume != nil)
+	}
+	continuity := request.Resume.Continuity
+	if request.Resume.ContinuityDigest != continuity.Digest {
+		t.Fatalf("resume arm continuity digest = %q, want the continuity self-digest %q", request.Resume.ContinuityDigest, continuity.Digest)
+	}
+	// The continuation names exactly the provider session the fake actually
+	// reports, so the binary's resumed-stream identity check has a real subject.
+	if continuity.AdapterSessionRef != claudeE2ESession {
+		t.Fatalf("resume continuity adapter session ref = %q, want the session the provider reports (%q)",
+			continuity.AdapterSessionRef, claudeE2ESession)
+	}
+
+	// Exact `--resume S`: the verified session identity is the argv tail, never
+	// a bare flag and never an option-shaped substitute.
+	if n := len(run.argv); n < 2 || run.argv[n-2] != "--resume" || run.argv[n-1] != continuity.AdapterSessionRef {
+		t.Fatalf("claude provider argv = %#v, want the exact `--resume %s` tail", run.argv, continuity.AdapterSessionRef)
+	}
+
+	// The controller verified the provider session before launch and again on
+	// the live resume re-check; a start arm verifies none.
+	if got := countControllerOperation(run.fake.calls, sealedexec.ControllerOperationVerifyProviderSession); got < 2 {
+		t.Fatalf("verify-provider-session calls = %d, want the pre-launch and live resume re-checks", got)
+	}
+
+	// Amendment 002 §7 prepared-resume: the explicit `resume` acknowledgment,
+	// then the session-init reduction's `adapter-start`.
+	assertClaudeAcknowledgedPrefix(t, run.fake.events, []contextevent.Kind{
+		contextevent.KindResume, contextevent.KindAdapterStart,
+	})
+	// The acknowledged prefix continues the checkpoint instead of restarting at
+	// sequence one.
+	if run.fake.events[0].SourceSequence != continuity.TerminalSourceSequence+1 {
+		t.Fatalf("resume first acknowledged source sequence = %d, want continuation of terminal %d",
+			run.fake.events[0].SourceSequence, continuity.TerminalSourceSequence)
+	}
+}
+
+// assertClaudeAcknowledgedPrefix proves the acknowledged events open with
+// exactly these kinds, in order, on contiguous source sequences. Unlike the
+// whole-run assertSealedEventPrefix it constrains only the leading kinds,
+// because the Claude stream reduction continues past them.
+func assertClaudeAcknowledgedPrefix(t *testing.T, events []contextevent.Event, want []contextevent.Kind) {
+	t.Helper()
+	if len(events) < len(want) {
+		t.Fatalf("acknowledged claude kinds = %v, want a leading %v", sealedEventKinds(events), want)
+	}
+	for i, kind := range want {
+		if events[i].Kind != kind {
+			t.Fatalf("acknowledged claude kinds = %v, want a leading %v", sealedEventKinds(events), want)
+		}
+		if i > 0 && events[i].SourceSequence != events[i-1].SourceSequence+1 {
+			t.Fatalf("acknowledged claude source sequences = %v, want contiguous", sealedEventSequences(events))
+		}
 	}
 }
 

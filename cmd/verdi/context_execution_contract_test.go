@@ -1902,6 +1902,16 @@ func mustReadFile(t *testing.T, path string) []byte {
 	return data
 }
 
+// sealedLifecycleEventKey is Amendment 002 §7's durable event identity within
+// one execution key: source order restarts at one inside every
+// expansion-installed revision, so the revision is part of the identity.
+type sealedLifecycleEventKey struct{ revision, sequence uint64 }
+
+type sealedLifecycleRecordedEvent struct {
+	event contextevent.Event
+	ack   contextevent.EventAck
+}
+
 type sealedLifecycleController struct {
 	t                 *testing.T
 	request           sealedexec.ExecutionRequest
@@ -1924,6 +1934,8 @@ type sealedLifecycleController struct {
 	calls             []sealedexec.ControllerOperation
 	events            []contextevent.Event
 	eventAcks         []contextevent.EventAck
+	committed         map[sealedLifecycleEventKey]sealedLifecycleRecordedEvent
+	duplicateKeys     []sealedLifecycleEventKey
 	global            uint64
 	eventObserved     chan<- contextevent.Kind
 	activeRevision    *sealedexec.ActiveRevision
@@ -2047,7 +2059,24 @@ func (f *sealedLifecycleController) result(call sealedexec.ControllerCall) (seal
 	case sealedexec.ControllerOperationNextStamp:
 		result.NextStamp = sealedexec.ControllerNextStampResult{Schema: schema, Stamp: fmt.Sprintf("2026-08-27T12:00:%02dZ", len(f.calls))}
 	case sealedexec.ControllerOperationRecorderAppend:
+		// Amendment 002 §7's recorder table over the durable event identity
+		// (manifest_revision, source_sequence): an absent key stores the exact
+		// bytes and allocates the next never-resetting global sequence,
+		// byte-identical replay returns the original acknowledgment without a
+		// write, and contradictory bytes at a committed key are an operational
+		// duplicate conflict that allocates no order. Two independent append
+		// owners inside one execution therefore cannot stay green.
 		event := call.RecorderAppend.Event
+		key := sealedLifecycleEventKey{revision: event.ManifestRevision, sequence: event.SourceSequence}
+		if prior, ok := f.committed[key]; ok {
+			ack, err := contextevent.ValidateReplay(prior.event, prior.ack, event)
+			if err != nil {
+				f.duplicateKeys = append(f.duplicateKeys, key)
+				return result, fmt.Errorf("recorder-append: duplicate event identity revision %d source %d: %w", key.revision, key.sequence, err)
+			}
+			result.RecorderAppend = sealedexec.ControllerRecorderAppendResult{Schema: schema, Ack: ack}
+			break
+		}
 		f.global++
 		f.events = append(f.events, event)
 		ack := contextevent.EventAck{
@@ -2056,6 +2085,10 @@ func (f *sealedLifecycleController) result(call sealedexec.ControllerCall) (seal
 			EventDigest: event.EventDigest, GlobalSequence: f.global,
 		}
 		f.eventAcks = append(f.eventAcks, ack)
+		if f.committed == nil {
+			f.committed = map[sealedLifecycleEventKey]sealedLifecycleRecordedEvent{}
+		}
+		f.committed[key] = sealedLifecycleRecordedEvent{event: event, ack: ack}
 		result.RecorderAppend = sealedexec.ControllerRecorderAppendResult{Schema: schema, Ack: ack}
 	case sealedexec.ControllerOperationStoreRedactedSegment:
 		// Durable controller-backed segment store: the fixture keeps the exact

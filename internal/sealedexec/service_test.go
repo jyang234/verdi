@@ -42,8 +42,11 @@ func TestContextExecutionContract_Static(t *testing.T) {
 		}
 		wantOrder := []string{
 			"authority", "runway", "materialize", "workspace", "profile", "conflict",
-			"recorder", "checkpoint", "opaque", "adapter-verify", "adapter-start",
-			"stamp", "append", "store-session",
+			// I-115: the service cross-matches the installed expansion ledger
+			// against the pristine checkpoint itself, because it is now the sole
+			// owner of the flight state the embedded scoped surface serves from.
+			"recorder", "checkpoint", "expansion-verify", "opaque", "adapter-verify",
+			"adapter-start", "stamp", "append", "store-session",
 		}
 		if !reflect.DeepEqual(ports.calls(), wantOrder) {
 			t.Fatalf("prelaunch/launch order = %v, want %v", ports.calls(), wantOrder)
@@ -1466,7 +1469,9 @@ func newServiceHarness(t *testing.T, req ExecutionRequest) (*Service, *serviceFa
 	}
 	currentCommit, currentTree := req.InputCommit, req.InputTree
 	checkpoint := RecorderCheckpoint{Verification: proven(), Digest: "", Revisions: []contextevent.Revision{}, EventChainRoot: ""}
-	expansion := ExpansionFacts{Verification: proven(), Root: testDigest("empty-expansion")}
+	// I-85: an empty root is the proven absence of an installed expansion
+	// ledger, which is the only state a pristine start checkpoint may carry.
+	expansion := ExpansionFacts{Verification: proven(), Root: ""}
 	session := ProviderSessionFacts{Verification: proven()}
 	if req.Action == ActionResume {
 		continuity := req.Resume.Continuity

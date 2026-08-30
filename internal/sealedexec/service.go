@@ -724,17 +724,25 @@ func (s *Service) execute(ctx context.Context, request ExecutionRequest, data []
 		return ExecutionRun{}, verdict("start recorder checkpoint is not empty")
 	}
 
+	// I-85/I-115: the service is the sole owner of the flight state, so it — not
+	// a second reconstruction inside the adapter — cross-matches the recorder
+	// checkpoint against the installed expansion ledger. A pristine start
+	// checkpoint that contradicts an installed ledger is refused before launch.
+	expansion, err := s.ports.Expansions.VerifyExpansion(ctx, executionKey(request))
+	if err != nil {
+		return ExecutionRun{}, operational("verify expansion ledger", err)
+	}
+	if err := requireProven("expansion ledger", expansion.Verification); err != nil {
+		return ExecutionRun{}, err
+	}
+	if request.Action == ActionStart && expansion.Root != "" {
+		return ExecutionRun{}, verdict("pristine start checkpoint contradicts an installed expansion ledger")
+	}
+
 	var sessionFacts ProviderSessionFacts
 	var plan restartPlan
 	resumeExpansionRoot := ""
 	if request.Action == ActionResume {
-		expansion, err := s.ports.Expansions.VerifyExpansion(ctx, executionKey(request))
-		if err != nil {
-			return ExecutionRun{}, operational("verify expansion ledger", err)
-		}
-		if err := requireProven("expansion ledger", expansion.Verification); err != nil {
-			return ExecutionRun{}, err
-		}
 		if err := validateResumeFacts(request, runway, workspace, profile, authority, checkpoint, expansion); err != nil {
 			return ExecutionRun{}, err
 		}
