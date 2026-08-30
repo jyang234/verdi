@@ -472,17 +472,18 @@ func TestD3_ConcurrentSecondProcessRoutesThroughSocket(t *testing.T) {
 
 	// tools/list through the shim too — a second full round-trip proving
 	// this is a real, working proxy, not a one-shot fluke. The count is the
-	// authoritative live inventory: 05 §MCP server's nine tools plus
-	// `experiment` (CSE Wave 5B, ledger SI-145) — the same ten
-	// mcpserve/server_test.go and specalign's TestMCPToolInventory pin.
+	// authoritative live inventory: 05 §MCP server's nine tools,
+	// `experiment` (CSE Wave 5B, ledger SI-145), and Wave 6 Task 1's five
+	// new ASD tools (AC-8) — the same fifteen mcpserve/server_test.go and
+	// specalign's TestMCPToolInventory pin.
 	toolsResp := ndjsonRPC(t, stdin, sc, 2, "tools/list", nil)
 	toolsResult, ok := toolsResp["result"].(map[string]any)
 	if !ok {
 		t.Fatalf("verdi mcp tools/list: no result: %#v", toolsResp)
 	}
 	tools, _ := toolsResult["tools"].([]any)
-	if len(tools) != 10 {
-		t.Fatalf("verdi mcp tools/list returned %d tools through the socket, want 10", len(tools))
+	if len(tools) != 15 {
+		t.Fatalf("verdi mcp tools/list returned %d tools through the socket, want 15", len(tools))
 	}
 
 	// Clean up process B: closing stdin signals EOF on the stdin->socket

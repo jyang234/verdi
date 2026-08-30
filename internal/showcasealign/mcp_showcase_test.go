@@ -67,10 +67,14 @@ package showcasealign
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/jyang234/verdi/internal/draftmutation"
 	"github.com/jyang234/verdi/internal/gitx"
 	"github.com/jyang234/verdi/internal/mcpserve"
 )
@@ -447,6 +451,121 @@ func TestMCPShowcaseCoverage(t *testing.T) {
 		}
 		if cliOut != text {
 			t.Fatalf("CLI and MCP typed result projections differ over real showcase content:\nCLI: %s\nMCP: %s", cliOut, text)
+		}
+	})
+
+	// mcp:get_design_context / mcp:get_design_capabilities /
+	// mcp:get_design_provenance / mcp:prepare_design_review /
+	// mcp:mutate_draft (ASD, AC-8, Wave 6 Task 1): all five driven against
+	// spec/stale-decline, the same real feature every other subtest above
+	// uses. examples/showcase adopts no .verdi/policy/ constitution tree
+	// and cuts no design/<spec> branch (grep-verified against its own
+	// layers.txt and committed .verdi/ tree — the identical disclosed
+	// facts cli:context's and mcp:experiment's own mappings already rest
+	// on), so four of the five tools' most meaningful REAL behavior against
+	// this corpus is their genuine typed refusal, each pinned to the exact
+	// classification/code observed by actually calling the live tool
+	// against the real store (never guessed):
+	//
+	//   - get_design_context fails resolving stale-decline's own committed
+	//     `context: [adr/0002-outbox-events@<sha>]` pin — an operational
+	//     io-failure. This is the SAME unresolvable historical pin
+	//     get_context_bundle's own subtest above discloses and works
+	//     around by using an explicit refs list instead of the spec: form;
+	//     get_design_context has no such alternate form (AC-5's bounded
+	//     context always resolves the spec's OWN declared pins), so the
+	//     genuine failure is the real, disclosed proof for this tool.
+	//   - get_design_capabilities and prepare_design_review both resolve
+	//     the effective design_assistance policy unconditionally
+	//     (AC-3/AC-6); with no constitution adopted, both fail identically
+	//     with the real internal/policyauthority.ErrNotAdopted verdict.
+	//   - mutate_draft, given a well-formed request over stale-decline's
+	//     own real current bytes (a genuine base_digest/base_spec_b64,
+	//     never a synthetic stand-in), fails the mutation kernel's own
+	//     first precondition: stale-decline's checkout sits on "main", not
+	//     the mutable design/stale-decline branch AC-1/CO-3 require —
+	//     draftmutation.AuthorizeState's real state-forbidden verdict,
+	//     proven before policy is ever consulted.
+	//   - get_design_provenance is the one clean, positive case: the
+	//     corpus predates ASD's provenance sidecar entirely, so it
+	//     genuinely has none for stale-decline to report — a real empty
+	//     result, not a synthetic one.
+	t.Run("get_design_context", func(t *testing.T) {
+		text, isError := callMCPTool(t, srv, "get_design_context", map[string]any{"ref": "spec/stale-decline"})
+		var out struct {
+			Classification string `json:"classification"`
+			Code           string `json:"code"`
+			Detail         string `json:"detail"`
+		}
+		decodeToolJSON(t, text, &out)
+		if !isError || out.Classification != "operational" || out.Code != "io-failure" || !strings.Contains(out.Detail, "adr/0002-outbox-events") {
+			t.Fatalf("get_design_context(spec/stale-decline) = isError=%v %+v, want the real operational io-failure resolving stale-decline's own unresolvable historical context: pin", isError, out)
+		}
+	})
+
+	t.Run("get_design_capabilities", func(t *testing.T) {
+		text, isError := callMCPTool(t, srv, "get_design_capabilities", map[string]any{"ref": "spec/stale-decline"})
+		var out struct {
+			Classification string `json:"classification"`
+			Code           string `json:"code"`
+			Detail         string `json:"detail"`
+		}
+		decodeToolJSON(t, text, &out)
+		if !isError || out.Classification != "verdict" || out.Code != "policy-forbidden" || !strings.Contains(out.Detail, "has not adopted policy authority") {
+			t.Fatalf("get_design_capabilities(spec/stale-decline) = isError=%v %+v, want the real verdict refusal for examples/showcase's genuine no-constitution-adopted state", isError, out)
+		}
+	})
+
+	t.Run("prepare_design_review", func(t *testing.T) {
+		text, isError := callMCPTool(t, srv, "prepare_design_review", map[string]any{"ref": "spec/stale-decline"})
+		var out struct {
+			Classification string `json:"classification"`
+			Code           string `json:"code"`
+			Detail         string `json:"detail"`
+		}
+		decodeToolJSON(t, text, &out)
+		if !isError || out.Classification != "verdict" || out.Code != "policy-forbidden" || !strings.Contains(out.Detail, "has not adopted policy authority") {
+			t.Fatalf("prepare_design_review(spec/stale-decline) = isError=%v %+v, want the real verdict refusal for examples/showcase's genuine no-constitution-adopted state", isError, out)
+		}
+	})
+
+	t.Run("get_design_provenance", func(t *testing.T) {
+		text := callMCPToolOK(t, srv, "get_design_provenance", map[string]any{"ref": "spec/stale-decline"})
+		var out struct {
+			Entries  []json.RawMessage `json:"entries"`
+			Identity struct {
+				Spec string `json:"spec"`
+			} `json:"identity"`
+		}
+		decodeToolJSON(t, text, &out)
+		if out.Identity.Spec != "spec/stale-decline" || out.Entries == nil || len(out.Entries) != 0 {
+			t.Fatalf("get_design_provenance(spec/stale-decline) = %+v, want a genuine empty entries array (the corpus predates ASD's provenance sidecar)", out)
+		}
+	})
+
+	t.Run("mutate_draft", func(t *testing.T) {
+		specBytes, err := os.ReadFile(filepath.Join(root, ".verdi", "specs", "active", "stale-decline", "spec.md"))
+		if err != nil {
+			t.Fatalf("reading stale-decline's real committed spec bytes: %v", err)
+		}
+		resolvedRoot, err := filepath.EvalSymlinks(root)
+		if err != nil {
+			t.Fatalf("resolving provisioned store's canonical checkout path: %v", err)
+		}
+		text, isError := callMCPTool(t, srv, "mutate_draft", map[string]any{
+			"harness": "showcase-coverage-test", "schema": draftmutation.RequestSchema, "spec": "spec/stale-decline",
+			"base_digest": draftmutation.DigestBytes(specBytes), "base_spec_b64": base64.StdEncoding.EncodeToString(specBytes),
+			"expected":   map[string]any{"checkout": filepath.ToSlash(resolvedRoot), "branch": "main", "head": head},
+			"operations": []map[string]any{{"op": "set-problem", "text": "showcase-coverage probe", "anchor": "#problem"}},
+		})
+		var out struct {
+			Classification string `json:"classification"`
+			Code           string `json:"code"`
+			Detail         string `json:"detail"`
+		}
+		decodeToolJSON(t, text, &out)
+		if !isError || out.Classification != "verdict" || out.Code != "state-forbidden" || !strings.Contains(out.Detail, "not mutable design branch") {
+			t.Fatalf("mutate_draft(spec/stale-decline, real base bytes) = isError=%v %+v, want the real verdict refusal for stale-decline's genuine absence of a design/ branch", isError, out)
 		}
 	})
 }

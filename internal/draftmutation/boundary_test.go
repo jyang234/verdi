@@ -16,11 +16,26 @@ import (
 
 const draftMutationImport = "github.com/jyang234/verdi/internal/draftmutation"
 
-func TestLaterWorkbenchAndMCPAdaptersDoNotImportDraftMutation(t *testing.T) {
+// TestLaterWorkbenchAdapterDoesNotImportDraftMutation guards the delivery
+// units still ahead: internal/workbench must keep NO direct dependency on
+// this package until its own Task 2 unit lands (Wave 6 authority design
+// §6.1 — "Task 2 must atomically rewire every board mutation to designapp
+// and delete the splice path in the same unit"), and the two CLI server
+// entrypoints (cmd/verdi/mcp.go, cmd/verdi/serve.go) must keep routing
+// draft mutation through their adapters rather than reaching into this
+// package themselves.
+//
+// Exactly ONE guarded path legitimately fell away in Wave 6 Task 1:
+// internal/mcpserve, whose tool_mutate_draft.go now imports draftmutation
+// directly for the exact wire-schema types (Request/Actor/
+// NewDelegatedAgent) AC-1's mutation contract fixes. That package alone is
+// out of scope now; mcp.go and serve.go still hold the boundary and stay
+// guarded, so a future regression that pulls draftmutation into either
+// entrypoint still fails here (the gate grows, never shrinks — CLAUDE.md).
+func TestLaterWorkbenchAdapterDoesNotImportDraftMutation(t *testing.T) {
 	repositoryRoot := filepath.Join("..", "..")
 	targets := []string{
 		filepath.Join(repositoryRoot, "internal", "workbench"),
-		filepath.Join(repositoryRoot, "internal", "mcpserve"),
 		filepath.Join(repositoryRoot, "cmd", "verdi", "mcp.go"),
 		filepath.Join(repositoryRoot, "cmd", "verdi", "serve.go"),
 	}

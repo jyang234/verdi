@@ -119,18 +119,32 @@ func (ConstitutionPolicySource) ResolveEffectivePolicy(_ context.Context, root s
 	return policyauthority.Resolve(store)
 }
 
+// PolicyGrant is the resolved design_assistance authority: the typed
+// payload's own field values plus the sealed effective-policy digest and
+// the policy id that carried it. Layout carries the payload's reserved
+// `layout:` posture verbatim (policyartifact.DesignAssistancePayload
+// validates it as false in v1) rather than being re-derived — a reader
+// reporting the applicable policy content (AC-3/AC-5) must show what the
+// policy actually says, never a hardcoded constant that would silently
+// stop tracking the payload if the reserved field ever opens.
 type PolicyGrant struct {
 	Mode     string
+	Layout   bool
 	Digest   string
 	PolicyID string
 }
 
-// AuthorizePolicy consumes only the sealed effective-policy digest and the
-// one typed design_assistance payload. It never interprets a second hierarchy.
-func AuthorizePolicy(ctx context.Context, root string, identity Identity, actor Actor, source PolicySource) (PolicyGrant, *Error) {
-	if err := actor.validate(); err != nil {
-		return PolicyGrant{}, WrapError(CodeActorForbidden, identity, "actor is not adapter-controlled", err)
-	}
+// ResolvePolicyGrant resolves the sealed effective-policy digest and the
+// one typed design_assistance payload, with no actor-conditional
+// authorization decision at all — the shared prologue AuthorizePolicy
+// itself now composes. Wave 6 Task 1 exports this narrow slice (a
+// behavior-preserving split of AuthorizePolicy's own former body, proven
+// necessary because get_design_capabilities (AC-3) must honestly report
+// the design_assistance mode/digest for actor kinds that AuthorizePolicy
+// would otherwise refuse before ever returning it, e.g. mode "off"/
+// "proposal-only" for a delegated agent) so a capability-discovery reader
+// never re-derives this exact policy lookup a second time.
+func ResolvePolicyGrant(ctx context.Context, root string, identity Identity, source PolicySource) (PolicyGrant, *Error) {
 	if source == nil {
 		return PolicyGrant{}, NewError(CodeAuthorityInvalid, identity, "policy source is nil")
 	}
@@ -168,12 +182,25 @@ func AuthorizePolicy(ctx context.Context, root string, identity Identity, actor 
 	if err := payload.Validate(); err != nil {
 		return PolicyGrant{}, WrapError(CodeAuthorityInvalid, identity, "invalid design_assistance payload", err)
 	}
-	grant := PolicyGrant{Mode: payload.Mode, Digest: digest, PolicyID: policyID}
+	return PolicyGrant{Mode: payload.Mode, Layout: payload.Layout, Digest: digest, PolicyID: policyID}, nil
+}
+
+// AuthorizePolicy consumes only the sealed effective-policy digest and the
+// one typed design_assistance payload. It never interprets a second
+// hierarchy.
+func AuthorizePolicy(ctx context.Context, root string, identity Identity, actor Actor, source PolicySource) (PolicyGrant, *Error) {
+	if err := actor.validate(); err != nil {
+		return PolicyGrant{}, WrapError(CodeActorForbidden, identity, "actor is not adapter-controlled", err)
+	}
+	grant, typed := ResolvePolicyGrant(ctx, root, identity, source)
+	if typed != nil {
+		return PolicyGrant{}, typed
+	}
 	if actor.kind == ActorHuman && actor.attribution.PrincipalID != "" {
 		return grant, nil
 	}
-	if payload.Mode != "draft-write" {
-		return PolicyGrant{}, NewError(CodePolicyForbidden, identity, fmt.Sprintf("policy %s design_assistance mode %q forbids delegated-agent writes", policyID, payload.Mode))
+	if grant.Mode != "draft-write" {
+		return PolicyGrant{}, NewError(CodePolicyForbidden, identity, fmt.Sprintf("policy %s design_assistance mode %q forbids delegated-agent writes", grant.PolicyID, grant.Mode))
 	}
 	return grant, nil
 }
