@@ -42,7 +42,7 @@ func (b *Backend) GetBoard(ctx context.Context, argsRaw json.RawMessage) map[str
 	app.Board = backendBoardLoader{backend: b}
 	result, appErr := app.GetBoard(ctx, b.Root, designapp.GetBoardRequest{Spec: ref.String()})
 	if appErr != nil {
-		return toolErrorForDesignApp("get_board", appErr)
+		return toolErrorForDesignApp(appErr)
 	}
 	return toolJSON(result)
 }

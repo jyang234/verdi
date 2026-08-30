@@ -60,6 +60,18 @@ type ExcerptFlag struct {
 // provenance chain — either a historical gap an entry already recorded,
 // or the open gap between the last recorded typed digest and the current
 // spec bytes (AC-6: "direct edits whose origin is unclassified").
+//
+// An EMPTY FromDigest is the widest such gap and its own distinct fact:
+// the typed chain records no result digest at all for this spec, so the
+// whole of the current content — not a delta on top of something
+// attributable — is unclassified. That is the ordinary state of a draft
+// authored entirely in raw Markdown (AC-4 keeps that a first-class
+// workflow), and it must be disclosed rather than read as full coverage:
+// deriving the disclosure only from entries that already exist would let a
+// spec with NO provenance report the same clean packet as one whose every
+// byte is attributed (AC-6's "direct edits whose origin is unclassified",
+// CO-1's "missing or ambiguous facts are never silently treated as a
+// pass").
 type UnclassifiedEdit struct {
 	FromDigest string `json:"from_digest"`
 	ToDigest   string `json:"to_digest"`
@@ -265,12 +277,21 @@ func (s Service) resolveReviewProvenance(root, name string, current []byte) ([]E
 			}
 		}
 	}
-	if len(entries) > 0 {
-		currentDigest := draftmutation.DigestBytes(current)
-		last := entries[len(entries)-1]
-		if last.ResultDigest != currentDigest {
-			unclassifiedEdits = append(unclassifiedEdits, UnclassifiedEdit{FromDigest: last.ResultDigest, ToDigest: currentDigest})
-		}
+	// The OPEN gap: how much of the content on disk right now the typed
+	// chain fails to account for. Coverage is judged from the current
+	// content backwards, never from the sidecar forwards — a sidecar that
+	// records nothing accounts for nothing, so its silence is the largest
+	// possible gap, not the absence of one.
+	currentDigest := draftmutation.DigestBytes(current)
+	if len(entries) == 0 {
+		// No typed entry has ever landed for this spec (no sidecar at all,
+		// or one that covers nothing): every byte of the current content
+		// arrived by a path Verdi cannot attribute, so the whole of it is
+		// one unclassified direct edit. FromDigest is empty because there
+		// is no recorded typed digest to have departed from.
+		unclassifiedEdits = append(unclassifiedEdits, UnclassifiedEdit{ToDigest: currentDigest})
+	} else if last := entries[len(entries)-1]; last.ResultDigest != currentDigest {
+		unclassifiedEdits = append(unclassifiedEdits, UnclassifiedEdit{FromDigest: last.ResultDigest, ToDigest: currentDigest})
 	}
 
 	flags := make([]ExcerptFlag, 0, len(classifications))

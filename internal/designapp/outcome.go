@@ -72,6 +72,65 @@ func (e *Error) ExitCode() int {
 	}
 }
 
+// Failure is the ONE typed, versioned projection of an application
+// failure for transports that carry no exit-code channel — the MCP tool
+// surface (internal/mcpserve/designappbridge.go). The CLI distinguishes a
+// refusal from a breakage by exiting 1 or 2; an MCP caller reads
+// Classification instead, so the same distinction survives both adapters
+// (CO-9's adapter conformance names "error classifications" as a
+// conformance object in its own right). Code and Detail are the same two
+// strings the CLI prints, so the two transports' diagnostics stay
+// comparable field-for-field.
+//
+// Cause is deliberately absent: it is an in-process %w handle for Go
+// callers, not wire content, and its text can carry local filesystem
+// paths that would make two conformant adapters' output differ for
+// reasons that are not about the failure at all.
+type Failure struct {
+	Schema         string         `json:"schema"`
+	Classification Classification `json:"classification"`
+	Code           string         `json:"code"`
+	Detail         string         `json:"detail"`
+}
+
+// Failure projects this error into the wire envelope. A nil receiver is
+// still a Failure — an adapter that reached this call has already decided
+// something failed — and fails closed as operational rather than
+// materializing a classification-free (and therefore silently favorable)
+// value.
+func (e *Error) Failure() Failure {
+	if e == nil {
+		return NewFailure(ClassificationOperational, "result-invalid", "an unspecified application failure was reported without a diagnostic")
+	}
+	classification := e.Classification
+	switch classification {
+	case ClassificationVerdict, ClassificationOperational:
+	default:
+		// Fails closed exactly as ExitCode does: an unknown internal value
+		// never becomes the favorable answer — and neither does
+		// ClassificationClean, which no constructor here produces and which
+		// on a value that already failed would be a contradiction, not a
+		// pass.
+		classification = ClassificationOperational
+	}
+	return NewFailure(classification, e.Code, e.Detail)
+}
+
+// NewFailure builds the typed envelope directly, for an adapter-detected
+// application failure that never had an *Error to carry it (mcpserve's
+// invalid-response-union guard).
+func NewFailure(classification Classification, code, detail string) Failure {
+	return Failure{Schema: FailureSchema, Classification: classification, Code: code, Detail: detail}
+}
+
+// MutationFailure projects mutate_draft's own diagnostic union into the
+// same envelope, taking its classification from draftmutation.Verdict()
+// rather than re-deriving one (AC-1: the mutation contract owns that
+// judgment and this package must not interpret it a second time).
+func MutationFailure(err *draftmutation.Error) Failure {
+	return translateDraftmutationError(err).Failure()
+}
+
 func inputInvalid(code, detail string) *Error {
 	return &Error{Classification: ClassificationVerdict, Code: code, Detail: detail}
 }

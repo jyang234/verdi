@@ -40,8 +40,17 @@ type mutateDraftArgs struct {
 // renders its typed JSON with no isError; a stale refusal renders its
 // typed StaleRefusal JSON WITH isError (05 §MCP server: "verdict ...
 // results are tool errors carrying the same typed JSON projection"); any
-// other verdict/operational diagnostic is a plain toolError, exactly as
-// unstructured as the CLI's own non-stale diagnostic line.
+// other application diagnostic renders designapp's typed failure envelope,
+// carrying the exact 0/1/2 classification the CLI projects onto its exit
+// code.
+//
+// The failures BEFORE the application call — an oversized argument
+// payload, malformed arguments, a rejected harness id, a request this
+// server could not re-encode or the mutation codec would not decode —
+// stay plain text tool errors. They are transport- and argument-level
+// faults of the MCP call itself, not classifications the application core
+// produced, so projecting them into its envelope would attribute a
+// verdict to a core that never ran.
 func (b *Backend) MutateDraft(ctx context.Context, argsRaw json.RawMessage) map[string]any {
 	// draftmutation.DecodeRequest enforces MaxRequestBytes against the
 	// bytes it is handed, and the bytes it is handed here are this
@@ -81,15 +90,29 @@ func (b *Backend) MutateDraft(ctx context.Context, argsRaw json.RawMessage) map[
 	response, diagnostic := app.MutateDraft(ctx, b.Root, request, actor)
 	if diagnostic != nil {
 		if diagnostic.Code == draftmutation.CodeStaleBase && response.Stale != nil {
+			// The stale refusal keeps draftmutation's OWN typed projection
+			// verbatim: it is the CO-9 conformance object the CLI writes to
+			// stdout byte-for-byte, and it already carries both its own
+			// versioned schema and the current digest plus changed object
+			// identities CO-1 requires for a reload. Wrapping it in the
+			// generic failure envelope would trade those reload facts, and
+			// the CLI's byte-identical parity, for a classification field
+			// its schema already implies (a stale base is always a verdict:
+			// the CLI exits 1 on exactly this branch).
 			rendered := toolJSON(response.Stale)
 			rendered["isError"] = true
 			return rendered
 		}
-		return toolError("mutate_draft: " + string(diagnostic.Code) + ": " + diagnostic.Error())
+		// Every other diagnostic carries its 0/1/2 classification from
+		// draftmutation's own Verdict(), so an agent can tell a refusal it
+		// should correct from a breakage it should report — the same
+		// distinction the CLI makes by exiting 1 or 2.
+		return designAppToolFailure(designapp.MutationFailure(diagnostic))
 	}
 	if response.Result == nil {
-		// vocab:identity — ASD protocol/tool name in an operational diagnostic
-		return toolError("mutate_draft: result-invalid: draft mutation service returned an invalid response union")
+		return designAppToolFailure(designapp.NewFailure(designapp.ClassificationOperational, "result-invalid",
+			// vocab:identity — ASD protocol/tool name in an operational diagnostic
+			"draft mutation service returned an invalid response union"))
 	}
 	return toolJSON(response.Result)
 }

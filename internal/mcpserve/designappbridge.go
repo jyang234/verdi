@@ -16,12 +16,34 @@ import (
 // toolErrorForDesignApp projects a *designapp.Error into this server's
 // tool-error shape (map[string]any, isError: true — 05 §MCP server's own
 // contract: "tool failures are MCP tool results ..., never protocol
-// errors"). The verdict/operational Classification is not otherwise
-// surfaced over the wire — MCP tool results carry no separate exit-code
-// channel — but the message names the exact Code so a caller can still
-// distinguish a refusal from an operational failure by text.
-func toolErrorForDesignApp(toolName string, err *designapp.Error) map[string]any {
-	return toolError(toolName + ": " + err.Code + ": " + err.Detail)
+// errors").
+//
+// The payload is designapp's own typed, versioned failure envelope rather
+// than a prose line. MCP tool results carry no exit-code channel, so a
+// text-only rendering would erase the verdict/operational classification
+// the application core computed: two failures agreeing on code and detail
+// but disagreeing on 0/1/2 would reach the agent as the same bytes, and a
+// refusal it should correct would be indistinguishable from a breakage it
+// should report (CO-1; CO-9 names "error classifications" as an adapter-
+// conformance object in its own right). The CLI's exit code and this
+// field are the same fact on two transports.
+//
+// The tool name is deliberately NOT part of the payload (and no longer a
+// parameter): the caller named the tool it invoked, and keeping it out
+// leaves the envelope comparable field-for-field with the CLI's own
+// diagnostic line.
+func toolErrorForDesignApp(err *designapp.Error) map[string]any {
+	return designAppToolFailure(err.Failure())
+}
+
+// designAppToolFailure renders one typed failure envelope as a tool error
+// — the single place this server turns a designapp classification into
+// the wire, mirroring tool_experiment.go's experimentToolResult (typed
+// projection preserved, isError set, never a JSON-RPC framing error).
+func designAppToolFailure(failure designapp.Failure) map[string]any {
+	rendered := toolJSON(failure)
+	rendered["isError"] = true
+	return rendered
 }
 
 // backendBoardLoader adapts one Backend's Forge (or its absence) into

@@ -8,6 +8,7 @@ import (
 
 	"github.com/jyang234/verdi/internal/canonjson"
 	"github.com/jyang234/verdi/internal/designprovenance"
+	"github.com/jyang234/verdi/internal/draftmutation"
 	"github.com/jyang234/verdi/internal/store"
 )
 
@@ -153,6 +154,78 @@ func TestPrepareDesignReview(t *testing.T) {
 		}
 		if err.Classification != ClassificationOperational || err.Code != "io-failure" {
 			t.Fatalf("PrepareDesignReview(broken default branch) = %+v, want operational io-failure", err)
+		}
+	})
+}
+
+// TestPrepareDesignReviewUnclassifiedCoverage covers AC-4/AC-6's
+// direct-edit disclosure at the level that actually matters to a reviewer:
+// how much of the CURRENT content the provenance chain accounts for. A
+// draft authored entirely by raw Markdown has no sidecar at all, so the
+// whole of its current content is unclassified — and reporting ZERO
+// unclassified edits there would be the exact silent pass CO-1 forbids
+// ("Verdi exposes their origin as unclassified in review"; a false clean
+// audit trail is worse than an incomplete one).
+func TestPrepareDesignReviewUnclassifiedCoverage(t *testing.T) {
+	t.Run("no sidecar at all is one open unclassified gap over the whole content", func(t *testing.T) {
+		root := newTestStore(t, "draft-write")
+		// No typed mutation ever ran: the draft on disk is direct Markdown.
+		if _, err := os.Stat(store.DesignProvenancePath(root, store.ZoneActive, "sample")); !os.IsNotExist(err) {
+			t.Fatalf("fixture must have no provenance sidecar: %v", err)
+		}
+		svc := NewService()
+		result, appErr := svc.PrepareDesignReview(context.Background(), root, PrepareDesignReviewRequest{Spec: "spec/sample"})
+		if appErr != nil {
+			t.Fatalf("PrepareDesignReview: %v", appErr)
+		}
+		if len(result.UnclassifiedEdits) != 1 {
+			t.Fatalf("UnclassifiedEdits = %+v, want exactly one open gap covering the whole content", result.UnclassifiedEdits)
+		}
+		gap := result.UnclassifiedEdits[0]
+		if gap.FromDigest != "" {
+			t.Fatalf("gap.FromDigest = %q, want empty (no recorded typed origin at all)", gap.FromDigest)
+		}
+		current, err := os.ReadFile(store.SpecPath(root, store.ZoneActive, "sample"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if gap.ToDigest != draftmutation.DigestBytes(current) {
+			t.Fatalf("gap.ToDigest = %q, want the current spec digest", gap.ToDigest)
+		}
+	})
+
+	t.Run("a sidecar covering nothing discloses the same open gap", func(t *testing.T) {
+		root := newTestStore(t, "draft-write")
+		path := store.DesignProvenancePath(root, store.ZoneActive, "sample")
+		if err := os.WriteFile(path, nil, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		svc := NewService()
+		result, appErr := svc.PrepareDesignReview(context.Background(), root, PrepareDesignReviewRequest{Spec: "spec/sample"})
+		if appErr != nil {
+			t.Fatalf("PrepareDesignReview: %v", appErr)
+		}
+		if len(result.UnclassifiedEdits) != 1 || result.UnclassifiedEdits[0].FromDigest != "" {
+			t.Fatalf("UnclassifiedEdits = %+v, want the same single open gap an absent sidecar yields", result.UnclassifiedEdits)
+		}
+	})
+
+	t.Run("a sidecar covering the current content discloses no gap", func(t *testing.T) {
+		root := newTestStore(t, "draft-write")
+		base := []byte(testSpec)
+		req := mutateRequest(t, root, "design/sample", gitHead(t, root), base, []map[string]any{
+			{"op": "set-problem", "text": "typed edit", "anchor": "#problem"},
+		})
+		svc := NewService()
+		if _, typed := svc.MutateDraft(context.Background(), root, req, mutateActor(t)); typed != nil {
+			t.Fatalf("seeding mutation: %v", typed)
+		}
+		result, appErr := svc.PrepareDesignReview(context.Background(), root, PrepareDesignReviewRequest{Spec: "spec/sample"})
+		if appErr != nil {
+			t.Fatalf("PrepareDesignReview: %v", appErr)
+		}
+		if len(result.UnclassifiedEdits) != 0 {
+			t.Fatalf("UnclassifiedEdits = %+v, want none: the last typed entry accounts for the current content", result.UnclassifiedEdits)
 		}
 	})
 }

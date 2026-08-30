@@ -34,7 +34,7 @@ func (b *Backend) GetDesignContext(ctx context.Context, argsRaw json.RawMessage)
 	app := designapp.NewService()
 	result, appErr := app.GetDesignContext(ctx, b.Root, designapp.GetDesignContextRequest{Spec: ref.String(), ChildStories: args.ChildStories})
 	if appErr != nil {
-		return toolErrorForDesignApp("get_design_context", appErr)
+		return toolErrorForDesignApp(appErr)
 	}
 	return toolJSON(result)
 }

@@ -24,7 +24,7 @@ func (b *Backend) GetDesignCapabilities(ctx context.Context, argsRaw json.RawMes
 	app := designapp.NewService()
 	result, appErr := app.GetDesignCapabilities(ctx, b.Root, designapp.GetDesignCapabilitiesRequest{Spec: ref.String()})
 	if appErr != nil {
-		return toolErrorForDesignApp("get_design_capabilities", appErr)
+		return toolErrorForDesignApp(appErr)
 	}
 	return toolJSON(result)
 }

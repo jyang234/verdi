@@ -26,6 +26,7 @@ import (
 	"testing"
 
 	"github.com/jyang234/verdi/internal/canonjson"
+	"github.com/jyang234/verdi/internal/designapp"
 	"github.com/jyang234/verdi/internal/draftmutation"
 	"github.com/jyang234/verdi/internal/fixturegit"
 	"github.com/jyang234/verdi/internal/mcpserve"
@@ -347,36 +348,138 @@ func TestASDAdapterConformance(t *testing.T) {
 		}
 	})
 
-	// One invalid request, both transports: the typed classification and
-	// code must be identical. CLI renders "<verb>: <code>: <detail>" on
-	// stderr with exit 1; MCP renders "<tool>: <code>: <detail>" as a tool
-	// error. Only the leading verb/tool name legitimately differs, so
-	// everything after it is compared byte-for-byte.
-	t.Run("refusal parity", func(t *testing.T) {
-		cliRoot := conformanceStore(t)
-		mcpRoot := conformanceStore(t)
+}
 
-		cliOut, cliErr, code := runCLI(t, bin, cliRoot, "design", "capabilities", "spec/does-not-exist")
-		if code != 1 {
-			t.Fatalf("CLI design capabilities (unknown spec): exit %d, stdout=%s, stderr=%s", code, cliOut, cliErr)
-		}
-		if cliOut != "" {
-			t.Fatalf("CLI refusal wrote to stdout: %q", cliOut)
-		}
-		mcpOut, isError := callMCP(t, mcpRoot, "get_design_capabilities", map[string]any{"ref": "spec/does-not-exist"})
-		if !isError {
-			t.Fatalf("MCP get_design_capabilities (unknown spec): isError=false: %s", mcpOut)
-		}
+// TestASDCrossTransportClassificationParity proves the 0/1/2
+// classification the application core computed survives BOTH adapters
+// (CO-1: "The core distinguishes verdict failures from operational
+// failures and makes every refusal explicit"; CO-9 names "error
+// classifications" as an adapter-conformance object in its own right).
+//
+// The two transports carry the same fact differently and neither may
+// discard it: the CLI projects it onto its exit code (1 verdict / 2
+// operational) and MCP onto the machine-readable classification field of
+// designapp's typed failure envelope, since a tool result has no exit-code
+// channel. Code and detail must then agree byte-for-byte.
+//
+// BOTH a verdict and an operational failure are exercised: a suite that
+// only ever drove one of them would pass against an adapter that hard-
+// coded that one answer, which is precisely the defect this test exists
+// to keep out.
+func TestASDCrossTransportClassificationParity(t *testing.T) {
+	bin := conformanceBinary(t)
 
-		cliDiagnostic := diagnosticAfterVerb(t, "CLI", normalizeCheckout(strings.TrimRight(cliErr, "\n"), cliRoot))
-		mcpDiagnostic := diagnosticAfterVerb(t, "MCP", normalizeCheckout(strings.TrimRight(mcpOut, "\n"), mcpRoot))
-		if cliDiagnostic != mcpDiagnostic {
-			t.Fatalf("refusal parity: CLI and MCP diverge\nCLI: %s\nMCP: %s", cliDiagnostic, mcpDiagnostic)
-		}
-		if !strings.HasPrefix(cliDiagnostic, "spec-not-found: ") {
-			t.Fatalf("refusal diagnostic = %q, want the typed spec-not-found code first", cliDiagnostic)
-		}
-	})
+	for _, tc := range []struct {
+		name string
+		// setup makes the failure reachable through both transports.
+		setup   func(t *testing.T, root string)
+		cliArgs []string
+		mcpTool string
+		mcpArgs map[string]any
+		// wantExit is the CLI's projection; wantClassification is MCP's.
+		// They are the same fact, asserted on each transport's own channel.
+		wantExit           int
+		wantClassification string
+		wantCode           string
+	}{
+		{
+			name:               "verdict",
+			setup:              func(*testing.T, string) {},
+			cliArgs:            []string{"design", "capabilities", "spec/does-not-exist"},
+			mcpTool:            "get_design_capabilities",
+			mcpArgs:            map[string]any{"ref": "spec/does-not-exist"},
+			wantExit:           1,
+			wantClassification: "verdict",
+			wantCode:           "spec-not-found",
+		},
+		{
+			// A repository whose default-branch ref points at a blob: the
+			// ref still resolves, every tree read against it fails. That is
+			// an unanswerable question, not a proven absence, so both
+			// adapters must report an operational failure rather than the
+			// verdict-free "not yet on the default branch".
+			name:               "operational",
+			setup:              breakConformanceDefaultBranch,
+			cliArgs:            []string{"design", "review", "spec/sample"},
+			mcpTool:            "prepare_design_review",
+			mcpArgs:            map[string]any{"ref": "spec/sample"},
+			wantExit:           2,
+			wantClassification: "operational",
+			wantCode:           "io-failure",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cliRoot := conformanceStore(t)
+			mcpRoot := conformanceStore(t)
+			tc.setup(t, cliRoot)
+			tc.setup(t, mcpRoot)
+
+			cliOut, cliErr, code := runCLI(t, bin, cliRoot, tc.cliArgs...)
+			if code != tc.wantExit {
+				t.Fatalf("CLI %v: exit %d, want %d\nstdout=%s\nstderr=%s", tc.cliArgs, code, tc.wantExit, cliOut, cliErr)
+			}
+			if cliOut != "" {
+				t.Fatalf("CLI failure wrote to stdout: %q", cliOut)
+			}
+
+			mcpOut, isError := callMCP(t, mcpRoot, tc.mcpTool, tc.mcpArgs)
+			if !isError {
+				t.Fatalf("MCP %s: isError=false: %s", tc.mcpTool, mcpOut)
+			}
+			var failure struct {
+				Schema         string `json:"schema"`
+				Classification string `json:"classification"`
+				Code           string `json:"code"`
+				Detail         string `json:"detail"`
+			}
+			if err := json.Unmarshal([]byte(normalizeCheckout(strings.TrimRight(mcpOut, "\n"), mcpRoot)), &failure); err != nil {
+				t.Fatalf("MCP %s failure is not the typed envelope: %v\n%s", tc.mcpTool, err, mcpOut)
+			}
+			if failure.Schema != designapp.FailureSchema {
+				t.Fatalf("MCP failure schema = %q, want %q", failure.Schema, designapp.FailureSchema)
+			}
+			if failure.Classification != tc.wantClassification {
+				t.Fatalf("MCP failure classification = %q, want %q (the CLI exited %d)", failure.Classification, tc.wantClassification, code)
+			}
+			if failure.Code != tc.wantCode {
+				t.Fatalf("MCP failure code = %q, want %q", failure.Code, tc.wantCode)
+			}
+
+			// The remaining "<code>: <detail>" must be identical on both
+			// transports — only the CLI's leading verb legitimately differs.
+			cliDiagnostic := diagnosticAfterVerb(t, "CLI", normalizeCheckout(strings.TrimRight(cliErr, "\n"), cliRoot))
+			if want := failure.Code + ": " + failure.Detail; cliDiagnostic != want {
+				t.Fatalf("classification parity: CLI and MCP diverge\nCLI: %s\nMCP: %s", cliDiagnostic, want)
+			}
+		})
+	}
+}
+
+// breakConformanceDefaultBranch repoints the default branch at a real BLOB
+// object, producing a repository where `git rev-parse --verify` still
+// answers and every tree read fails. It reproduces
+// internal/designapp's own breakDefaultBranchRef helper, which this
+// external test package cannot reach across the package boundary (the same
+// reason conformanceStore reproduces newTestStore).
+func breakConformanceDefaultBranch(t *testing.T, root string) {
+	t.Helper()
+	cmd := exec.Command("git", "hash-object", "-w", filepath.Join(".verdi", "verdi.yaml"))
+	cmd.Dir = filepath.FromSlash(root)
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("git hash-object: %v", err)
+	}
+	blob := strings.TrimSpace(string(out))
+	// `git update-ref` refuses to point a branch at a non-commit, so the
+	// loose ref file is written directly. A loose ref always wins over a
+	// packed one.
+	refPath := filepath.Join(filepath.FromSlash(root), ".git", "refs", "heads", "main")
+	if err := os.MkdirAll(filepath.Dir(refPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(refPath, []byte(blob+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 }
 
 // readProvenanceSidecar returns the exact committed sidecar bytes for the

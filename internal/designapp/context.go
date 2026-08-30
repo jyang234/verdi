@@ -169,6 +169,17 @@ const (
 	// Git-derived state is not accepted — its decisions are proposals,
 	// not ratified authority, so none are included.
 	RatifiedParentNotAccepted = "parent-feature-not-accepted"
+	// RatifiedParentDeclaredMissing: the draft DECLARES a parent feature
+	// whose target is genuinely absent from the active zone. Deliberately
+	// distinct from RatifiedNoParentFeature: "this draft names no parent"
+	// and "this draft names a parent that is not there" are different
+	// facts, and collapsing the second into the first would report an
+	// inconsistent draft as a consistent one with nothing to resolve
+	// (AC-5/CO-1: a fact Verdi could not read is never the favorable
+	// answer). Source carries the exact declared ref; the read itself
+	// stays clean, because an honest read of an inconsistent draft is not
+	// an operational fault.
+	RatifiedParentDeclaredMissing = "parent-declared-missing"
 )
 
 // RatifiedDecisionsPosture discloses WHY RatifiedDecisions holds what it
@@ -176,6 +187,14 @@ const (
 // names the parent ref consulted, when there was one, and ParentState is
 // that parent's Git-derived state — the fact the inclusion decision turns
 // on.
+//
+// It is also where the read's PARENT posture is reported, because the
+// parent edge is what ratification turns on: Reason separates "this draft
+// declares no parent" (RatifiedNoParentFeature) from "this draft declares
+// a parent that is not in the active zone" (RatifiedParentDeclaredMissing,
+// with Source naming the exact declared ref). ParentFeature above is nil
+// in both cases — there is no content to report either way — so the
+// posture is the only place the difference between them survives.
 type RatifiedDecisionsPosture struct {
 	Reason      string          `json:"reason"`
 	Source      string          `json:"source,omitempty"`
@@ -242,35 +261,7 @@ func (s Service) GetDesignContext(ctx context.Context, start string, req GetDesi
 		return nil, operational("io-failure", "loading current draft", err)
 	}
 
-	var parent *ParentFeature
-	var parentErr *Error
-	for _, link := range current.Links {
-		if link.Type != artifact.LinkImplements {
-			continue
-		}
-		// A story's own implements link ordinarily names one acceptance
-		// criterion on the parent feature (cmd/verdi/design.go's own
-		// scaffold: "spec/todo-replace-feature-name#ac-1"), so the target
-		// ref carries a fragment; Name still names the whole parent spec to
-		// load. A document-level implements link with no fragment at all is
-		// also accepted (a story that implements a whole feature, not one
-		// AC) — either shape resolves the same parent.
-		parentRef, parseErr := artifact.ParseRef(link.Ref)
-		if parseErr != nil || parentRef.Kind != artifact.KindSpec {
-			continue
-		}
-		content, loadErr := storyresolve.LoadActiveSpec(identity.Checkout, parentRef.Name)
-		if loadErr != nil {
-			continue
-		}
-		state, stateErr := s.resolveSpecState(ctx, identity.Checkout, parentRef.Name)
-		if stateErr != nil {
-			parentErr = stateErr
-			break
-		}
-		parent = &ParentFeature{Ref: link.Ref, Content: projectSpec(content), State: state}
-		break
-	}
+	parent, declaredMissing, parentErr := s.resolveParentFeature(ctx, identity.Checkout, current.Links)
 	if parentErr != nil {
 		return nil, parentErr
 	}
@@ -289,7 +280,7 @@ func (s Service) GetDesignContext(ctx context.Context, start string, req GetDesi
 		children = append(children, ChildStory{Ref: childSpec, Content: projectSpec(content)})
 	}
 
-	decisions, posture := ratifiedDecisions(parent)
+	decisions, posture := ratifiedDecisions(parent, declaredMissing)
 
 	pinned, pinErr := s.resolvePinnedContext(ctx, identity.Checkout, current.Context)
 	if pinErr != nil {
@@ -327,6 +318,61 @@ func (s Service) GetDesignContext(ctx context.Context, start string, req GetDesi
 	return result, nil
 }
 
+// resolveParentFeature resolves the draft's OWN declared document-level
+// parent-feature edge (see ParentFeature's doc comment for the scoping
+// rule). It returns exactly one of three outcomes, and the caller must be
+// able to tell them apart:
+//
+//   - a resolved parent (declaredMissing empty);
+//   - no parent resolved because the declared edge's target is genuinely
+//     ABSENT from the active zone — declaredMissing names that exact
+//     declared ref, and the read stays clean, because an honest read of an
+//     inconsistent draft is not an operational fault;
+//   - an operational failure, when the target IS there but could not be
+//     turned into a parent: undecodable frontmatter, an unreadable path,
+//     or a state projection that could not answer. Reporting any of those
+//     as "no parent" would report an unanswered question as a proven
+//     absence, which is exactly what CO-1 forbids.
+//
+// The FIRST spec-kind implements edge is the declared parent, whatever its
+// fate: scanning past an absent one to a later resolvable edge would
+// silently drop the very fact this function exists to disclose. A
+// non-spec-kind implements target (an ADR, a service boundary) is not a
+// parent-feature edge at all and is skipped — that is an unrelated,
+// genuinely inapplicable link, not a missing fact.
+func (s Service) resolveParentFeature(ctx context.Context, root string, links []artifact.Link) (*ParentFeature, string, *Error) {
+	for _, link := range links {
+		if link.Type != artifact.LinkImplements {
+			continue
+		}
+		// A story's own implements link ordinarily names one acceptance
+		// criterion on the parent feature (cmd/verdi/design.go's own
+		// scaffold: "spec/todo-replace-feature-name#ac-1"), so the target
+		// ref carries a fragment; Name still names the whole parent spec to
+		// load. A document-level implements link with no fragment at all is
+		// also accepted (a story that implements a whole feature, not one
+		// AC) — either shape resolves the same parent.
+		parentRef, parseErr := artifact.ParseRef(link.Ref)
+		if parseErr != nil || parentRef.Kind != artifact.KindSpec {
+			continue
+		}
+		content, loadErr := storyresolve.LoadActiveSpec(root, parentRef.Name)
+		if loadErr != nil {
+			if errors.Is(loadErr, os.ErrNotExist) {
+				return nil, link.Ref, nil
+			}
+			// vocab:identity — operational diagnostic naming AC-5's own declared parent-feature edge, identity
+			return nil, "", operational("authority-invalid", "loading declared parent feature "+link.Ref, loadErr)
+		}
+		state, stateErr := s.resolveSpecState(ctx, root, parentRef.Name)
+		if stateErr != nil {
+			return nil, "", stateErr
+		}
+		return &ParentFeature{Ref: link.Ref, Content: projectSpec(content), State: state}, "", nil
+	}
+	return nil, "", nil
+}
+
 // ratifiedDecisions applies AC-5's ratification rule: a decision is
 // ratified authority only when it lives on an ACCEPTED parent feature.
 // specstate.AcceptedPendingBuild is the accepted state (the exact
@@ -334,9 +380,17 @@ func (s Service) GetDesignContext(ctx context.Context, start string, req GetDesi
 // closed nor superseded) — a proposed, superseded, closed, or unproven
 // parent all yield an empty list plus the posture naming why, never a
 // silent empty (CO-1).
-func ratifiedDecisions(parent *ParentFeature) ([]Decision, RatifiedDecisionsPosture) {
+//
+// declaredMissing is resolveParentFeature's second outcome: the exact ref
+// a draft declared as its parent and that is not in the active zone. It
+// carries its own posture reason precisely so it is never reported as the
+// draft declaring no parent at all.
+func ratifiedDecisions(parent *ParentFeature, declaredMissing string) ([]Decision, RatifiedDecisionsPosture) {
 	empty := []Decision{}
 	if parent == nil {
+		if declaredMissing != "" {
+			return empty, RatifiedDecisionsPosture{Reason: RatifiedParentDeclaredMissing, Source: declaredMissing}
+		}
 		return empty, RatifiedDecisionsPosture{Reason: RatifiedNoParentFeature}
 	}
 	posture := RatifiedDecisionsPosture{Source: parent.Ref, ParentState: parent.State}

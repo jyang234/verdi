@@ -46,6 +46,18 @@ const (
 	// ReviewResultSchema versions prepare_design_review's AC-6 semantic
 	// review packet envelope.
 	ReviewResultSchema = "verdi.design-review/v1"
+
+	// FailureSchema versions the ONE typed failure envelope every ASD
+	// operation's application failure projects into (outcome.go's Failure).
+	// It is the seventh member of this family and follows its naming shape
+	// exactly. It exists because 0/1/2 classification is a result the
+	// application core computed (CO-1: "The core distinguishes verdict
+	// failures from operational failures and makes every refusal
+	// explicit"), and a transport with no exit-code channel — MCP — can
+	// only preserve it by carrying it in a machine-readable field. A
+	// caller must never have to parse prose to tell a refusal from a
+	// breakage.
+	FailureSchema = "verdi.design-failure/v1"
 )
 
 // MutationResultSchema is mutate_draft's envelope version. It is

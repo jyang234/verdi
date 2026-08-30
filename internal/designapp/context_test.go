@@ -3,12 +3,14 @@ package designapp
 import (
 	"context"
 	"errors"
+	"os"
 	"strings"
 	"testing"
 
 	"github.com/jyang234/verdi/internal/align"
 	"github.com/jyang234/verdi/internal/artifact"
 	"github.com/jyang234/verdi/internal/specstate"
+	"github.com/jyang234/verdi/internal/store"
 )
 
 // fakeAlignFindings is a fixed-answer AlignFindings port fake: production
@@ -238,6 +240,140 @@ func TestGetDesignContext(t *testing.T) {
 			t.Fatalf("GetDesignContext(nil state) = %+v, want operational", err)
 		}
 	})
+}
+
+// TestGetDesignContextDeclaredParent covers the four distinguishable fates
+// of a draft's OWN declared document-level `implements` edge (AC-5/CO-1: a
+// fact Verdi could not read is never reported as a fact that does not
+// exist). The four cases are mutually exclusive and each has its own
+// outcome:
+//
+//   - the draft declares no parent at all -> clean, RatifiedNoParentFeature;
+//   - it declares one whose target is genuinely absent from the active zone
+//     -> clean, RatifiedParentDeclaredMissing NAMING the declared ref;
+//   - it declares one whose target is present but undecodable -> operational;
+//   - it declares one whose target cannot be read at all -> operational.
+//
+// The second case is the one this suite exists for: reporting it as
+// "the draft declares no parent" would let an inconsistent draft read as a
+// consistent one with nothing to resolve.
+func TestGetDesignContextDeclaredParent(t *testing.T) {
+	const declaredRef = "spec/sample#ac-1" // childStorySpecTemplate's own implements edge
+
+	// malformedSpec is a well-framed spec document carrying an unknown
+	// frontmatter field: SplitFrontmatter succeeds and the strict decoder
+	// refuses it, which is exactly "present but undecodable".
+	const malformedSpec = `---
+id: spec/sample
+kind: spec
+class: feature
+title: Sample
+owners: [platform-team]
+unknown_field: nope
+---
+# Sample
+`
+
+	for _, tc := range []struct {
+		name string
+		// spec is the ref GetDesignContext is asked for.
+		spec string
+		// setup breaks (or leaves alone) the declared parent's target.
+		setup func(t *testing.T, root string)
+		// wantOperational is true when the fate must be an operational
+		// failure rather than an honest read.
+		wantOperational bool
+		wantReason      string
+		wantSource      string
+	}{
+		{
+			name:       "no declared parent is the true-absence control",
+			spec:       "spec/sample", // testSpec's only link is depends-on
+			setup:      func(*testing.T, string) {},
+			wantReason: RatifiedNoParentFeature,
+		},
+		{
+			name: "declared parent absent from the active zone is disclosed by name",
+			spec: "spec/child-one",
+			setup: func(t *testing.T, root string) {
+				t.Helper()
+				if err := os.RemoveAll(store.SpecDir(root, store.ZoneActive, "sample")); err != nil {
+					t.Fatal(err)
+				}
+			},
+			wantReason: RatifiedParentDeclaredMissing,
+			wantSource: declaredRef,
+		},
+		{
+			name: "declared parent present but undecodable is operational",
+			spec: "spec/child-one",
+			setup: func(t *testing.T, root string) {
+				t.Helper()
+				path := store.SpecPath(root, store.ZoneActive, "sample")
+				if err := os.WriteFile(path, []byte(malformedSpec), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			},
+			wantOperational: true,
+		},
+		{
+			name: "declared parent that cannot be read at all is operational",
+			spec: "spec/child-one",
+			setup: func(t *testing.T, root string) {
+				t.Helper()
+				// A directory where spec.md belongs: os.ReadFile fails with
+				// EISDIR, which is emphatically NOT os.ErrNotExist — the
+				// "git/filesystem could not answer" case, hermetic and
+				// independent of the test process's own privileges.
+				path := store.SpecPath(root, store.ZoneActive, "sample")
+				if err := os.Remove(path); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Mkdir(path, 0o755); err != nil {
+					t.Fatal(err)
+				}
+			},
+			wantOperational: true,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root := newTestStore(t, "draft-write")
+			writeChildStory(t, root, "child-one")
+			tc.setup(t, root)
+
+			svc := NewService()
+			svc.Align = fakeAlignFindings{err: ErrAlignUnavailable}
+			result, err := svc.GetDesignContext(context.Background(), root, GetDesignContextRequest{Spec: tc.spec})
+
+			if tc.wantOperational {
+				if err == nil {
+					t.Fatalf("GetDesignContext = %+v, want an operational failure", result.RatifiedDecisionsPosture)
+				}
+				if err.Classification != ClassificationOperational {
+					t.Fatalf("GetDesignContext = %+v, want operational", err)
+				}
+				if !strings.Contains(err.Detail, declaredRef) {
+					t.Fatalf("Detail = %q, must name the declared parent ref", err.Detail)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("GetDesignContext: %v", err)
+			}
+			if result.ParentFeature != nil {
+				t.Fatalf("ParentFeature = %+v, want nil (no parent resolved)", result.ParentFeature)
+			}
+			if result.RatifiedDecisionsPosture.Reason != tc.wantReason {
+				t.Fatalf("posture = %+v, want reason %q", result.RatifiedDecisionsPosture, tc.wantReason)
+			}
+			if result.RatifiedDecisionsPosture.Source != tc.wantSource {
+				t.Fatalf("posture = %+v, want source %q", result.RatifiedDecisionsPosture, tc.wantSource)
+			}
+			if len(result.RatifiedDecisions) != 0 {
+				t.Fatalf("RatifiedDecisions = %+v, want empty", result.RatifiedDecisions)
+			}
+		})
+	}
 }
 
 // TestGetDesignContextPinnedReferences covers AC-5's "the spec's declared

@@ -23,7 +23,7 @@ func (b *Backend) GetDesignProvenance(ctx context.Context, argsRaw json.RawMessa
 	app := designapp.NewService()
 	result, appErr := app.GetDesignProvenance(ctx, b.Root, designapp.GetDesignProvenanceRequest{Spec: ref.String()})
 	if appErr != nil {
-		return toolErrorForDesignApp("get_design_provenance", appErr)
+		return toolErrorForDesignApp(appErr)
 	}
 	return toolJSON(result)
 }

@@ -26,7 +26,7 @@ func (b *Backend) PrepareDesignReview(ctx context.Context, argsRaw json.RawMessa
 	app := designapp.NewService()
 	result, appErr := app.PrepareDesignReview(ctx, b.Root, designapp.PrepareDesignReviewRequest{Spec: ref.String()})
 	if appErr != nil {
-		return toolErrorForDesignApp("prepare_design_review", appErr)
+		return toolErrorForDesignApp(appErr)
 	}
 	return toolJSON(result)
 }

@@ -85,5 +85,107 @@ func (s Service) GetBoard(ctx context.Context, start string, req GetBoardRequest
 	if err != nil {
 		return nil, operational("board-load-failed", "loading board projection", err)
 	}
-	return &BoardResult{Schema: BoardResultSchema, BoardProjection: proj, Identity: identity, ReviewUnavailable: reviewNotice}, nil
+	return &BoardResult{
+		Schema: BoardResultSchema, BoardProjection: cloneBoardProjection(proj),
+		Identity: identity, ReviewUnavailable: reviewNotice,
+	}, nil
+}
+
+// cloneBoardProjection returns a deep copy of the loader's projection.
+// GetBoard hands the result to a caller it does not control, and the
+// BoardLoader port is free to retain, cache, or share the value it
+// returned; handing back that same pointer would let a caller mutate the
+// port's own state through the result (Task 1's contract: results are
+// "deterministic, deep-copy safe"). This is a copy, never a second
+// projection: not one field's value is computed, reordered, or reinterpreted
+// here — the element taxonomy stays workbench's alone (AC-8).
+//
+// The initial struct assignment copies every scalar AND workbench's own
+// unexported render vocabulary, which this package cannot name (and must
+// not: it holds a shared, read-only *model.Model, so copying the handle
+// is the correct depth). Every exported field that carries a slice or map
+// is then replaced with its own copy, descending into the nested
+// collections the element types carry. TestBoardProjectionCloneCoverage
+// ratchets the field inventory this walk is written against, so a field
+// added upstream fails a test here instead of silently staying aliased.
+func cloneBoardProjection(p *workbench.BoardProjection) *workbench.BoardProjection {
+	if p == nil {
+		return nil
+	}
+	clone := *p
+	clone.Cards = cloneSlice(p.Cards)
+	for i := range clone.Cards {
+		clone.Cards[i].Anchored = cloneSlice(p.Cards[i].Anchored)
+		clone.Cards[i].Obligations = cloneSlice(p.Cards[i].Obligations)
+		// Badges (here and on stubs and the case file) is the one nested
+		// element type carrying collections of its own. workbench's badge
+		// view type is unexported, so it cannot be named in a shared
+		// helper's signature; the copy is written out at each of its three
+		// sites instead, against the same ratcheted field inventory.
+		clone.Cards[i].Badges = cloneSlice(p.Cards[i].Badges)
+		for j := range clone.Cards[i].Badges {
+			src := p.Cards[i].Badges[j]
+			clone.Cards[i].Badges[j].Inputs = cloneSlice(src.Inputs)
+			clone.Cards[i].Badges[j].Records = cloneSlice(src.Records)
+			clone.Cards[i].Badges[j].Disclosures = cloneSlice(src.Disclosures)
+			clone.Cards[i].Badges[j].Provenance = cloneSlice(src.Provenance)
+		}
+	}
+	clone.RefCards = cloneSlice(p.RefCards)
+	clone.Edges = cloneSlice(p.Edges)
+	clone.Stickies = cloneSlice(p.Stickies)
+	clone.Tray = cloneSlice(p.Tray)
+	clone.StubViews = cloneSlice(p.StubViews)
+	for i := range clone.StubViews {
+		clone.StubViews[i].Resolves = cloneSlice(p.StubViews[i].Resolves)
+		clone.StubViews[i].AcceptanceCriteria = cloneSlice(p.StubViews[i].AcceptanceCriteria)
+		clone.StubViews[i].StoryLinks = cloneSlice(p.StubViews[i].StoryLinks)
+		clone.StubViews[i].Badges = cloneSlice(p.StubViews[i].Badges)
+		for j := range clone.StubViews[i].Badges {
+			src := p.StubViews[i].Badges[j]
+			clone.StubViews[i].Badges[j].Inputs = cloneSlice(src.Inputs)
+			clone.StubViews[i].Badges[j].Records = cloneSlice(src.Records)
+			clone.StubViews[i].Badges[j].Disclosures = cloneSlice(src.Disclosures)
+			clone.StubViews[i].Badges[j].Provenance = cloneSlice(src.Provenance)
+		}
+	}
+	clone.ACCoverage = cloneMap(p.ACCoverage)
+	clone.OQClaims = cloneMap(p.OQClaims)
+	clone.CreateFields = cloneSlice(p.CreateFields)
+	clone.Notices = cloneSlice(p.Notices)
+	clone.CaseFileBadges = cloneSlice(p.CaseFileBadges)
+	for j := range clone.CaseFileBadges {
+		src := p.CaseFileBadges[j]
+		clone.CaseFileBadges[j].Inputs = cloneSlice(src.Inputs)
+		clone.CaseFileBadges[j].Records = cloneSlice(src.Records)
+		clone.CaseFileBadges[j].Disclosures = cloneSlice(src.Disclosures)
+		clone.CaseFileBadges[j].Provenance = cloneSlice(src.Provenance)
+	}
+	clone.CaseFileDisclosures = cloneSlice(p.CaseFileDisclosures)
+	return &clone
+}
+
+// cloneSlice copies one slice, preserving the nil/empty distinction — a
+// nil slice and an empty one marshal differently (null vs []), and this
+// package's whole point is that two adapters serialize identically.
+func cloneSlice[T any](in []T) []T {
+	if in == nil {
+		return nil
+	}
+	out := make([]T, len(in))
+	copy(out, in)
+	return out
+}
+
+// cloneMap copies one map, preserving nil for the same reason cloneSlice
+// does.
+func cloneMap[K comparable, V any](in map[K]V) map[K]V {
+	if in == nil {
+		return nil
+	}
+	out := make(map[K]V, len(in))
+	for key, value := range in {
+		out[key] = value
+	}
+	return out
 }
