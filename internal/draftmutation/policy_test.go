@@ -216,6 +216,153 @@ func TestResolvedHumanAttributionStateMatrix(t *testing.T) {
 	}
 }
 
+// TestNewUnauthenticatedHumanBasisDistinctFromViolatedUnprovenTrustedHuman
+// proves §4.1/SI-176's core distinction: NewUnauthenticatedHuman and a
+// violated- or unproven-resolution NewTrustedHuman actor serialize the
+// IDENTICAL kernel unauthenticated attribution (Kind/Attribution/Harness/
+// Session all equal), yet only the explicit constructor's product is
+// accepted by AuthorizeBrowserHuman — a failed identity proof never
+// acquires the browser-human allowance.
+func TestNewUnauthenticatedHumanBasisDistinctFromViolatedUnprovenTrustedHuman(t *testing.T) {
+	browserHuman, err := NewUnauthenticatedHuman()
+	if err != nil {
+		t.Fatalf("NewUnauthenticatedHuman: %v", err)
+	}
+	if browserHuman.Kind() != ActorHuman || browserHuman.Harness() != "" || browserHuman.Session() != "" {
+		t.Fatalf("browser-human actor shape = %+v", browserHuman)
+	}
+	if !browserHuman.Attribution().Unauthenticated || browserHuman.Attribution().PrincipalID != "" {
+		t.Fatalf("browser-human attribution = %+v, want the explicit unauthenticated marker", browserHuman.Attribution())
+	}
+
+	for _, state := range []governanceprincipal.ResolutionState{governanceprincipal.ResolutionViolated, governanceprincipal.ResolutionUnproven} {
+		t.Run(string(state), func(t *testing.T) {
+			unproven, err := NewTrustedHuman(resolutionForActor(t, state))
+			if err != nil {
+				t.Fatalf("NewTrustedHuman: %v", err)
+			}
+			// Identical serialized shape (§4.1: "even though both serialize
+			// the kernel's unauthenticated attribution").
+			if unproven.Kind() != browserHuman.Kind() || unproven.Attribution() != browserHuman.Attribution() ||
+				unproven.Harness() != browserHuman.Harness() || unproven.Session() != browserHuman.Session() {
+				t.Fatalf("%s trusted-human shape = %+v, want it identical to the browser-human's serialized shape", state, unproven)
+			}
+
+			identity := testIdentity()
+			policy := resolvedPolicy(t, "off", true)
+
+			// AuthorizeBrowserHuman refuses the failed-identity-proof actor
+			// even under a valid adopted policy — no bypass.
+			if _, typed := AuthorizeBrowserHuman(context.Background(), "/repo", identity, unproven, staticPolicySource{policy: policy}); typed == nil || typed.Code != CodeActorForbidden {
+				t.Fatalf("AuthorizeBrowserHuman(%s trusted-human) = %v, want actor-forbidden", state, typed)
+			}
+			// The explicit browser-human actor succeeds under the identical
+			// mode-off policy AuthorizePolicy would have refused it under.
+			posture, typed := AuthorizeBrowserHuman(context.Background(), "/repo", identity, browserHuman, staticPolicySource{policy: policy})
+			if typed != nil || !posture.Adopted || posture.Digest == "" {
+				t.Fatalf("AuthorizeBrowserHuman(browser-human) = %+v, %v, want adopted digest", posture, typed)
+			}
+			// AuthorizePolicy, unchanged, still refuses the failed-identity
+			// actor under mode off (the byte-for-byte preserved matrix).
+			if _, typed := AuthorizePolicy(context.Background(), "/repo", identity, unproven, staticPolicySource{policy: policy}); typed == nil || typed.Code != CodePolicyForbidden {
+				t.Fatalf("AuthorizePolicy(%s trusted-human, mode off) = %v, want policy-forbidden", state, typed)
+			}
+		})
+	}
+}
+
+// TestAuthorizeBrowserHumanPolicyPosture is the browser-human authorization
+// matrix (Wave 6 design §4.1, SI-176): valid adopted policy resolves
+// regardless of mode or design_assistance payload presence; only
+// errors.Is(err, policyauthority.ErrNotAdopted) becomes the honest
+// not-applicable posture; every other resolution failure (nil source,
+// malformed/forged policy) remains an operational refusal; and any actor
+// other than the explicit browser-human is refused outright.
+func TestAuthorizeBrowserHumanPolicyPosture(t *testing.T) {
+	browserHuman, err := NewUnauthenticatedHuman()
+	if err != nil {
+		t.Fatal(err)
+	}
+	identity := testIdentity()
+
+	for _, tt := range []struct {
+		name    string
+		mode    string
+		payload bool
+	}{
+		{"mode off with payload", "off", true},
+		{"mode proposal-only with payload", "proposal-only", true},
+		{"mode draft-write with payload", "draft-write", true},
+		{"mode off with no design_assistance payload at all", "off", false},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			policy := resolvedPolicy(t, tt.mode, tt.payload)
+			wantDigest, err := policy.Digest()
+			if err != nil {
+				t.Fatal(err)
+			}
+			posture, typed := AuthorizeBrowserHuman(context.Background(), "/repo", identity, browserHuman, staticPolicySource{policy: policy})
+			if typed != nil || !posture.Adopted || posture.Digest != wantDigest {
+				t.Fatalf("AuthorizeBrowserHuman = %+v, %v, want adopted %q", posture, typed, wantDigest)
+			}
+		})
+	}
+
+	t.Run("genuine non-adoption is the honest not-applicable posture", func(t *testing.T) {
+		posture, typed := AuthorizeBrowserHuman(context.Background(), "/repo", identity, browserHuman, staticPolicySource{err: policyauthority.ErrNotAdopted})
+		if typed != nil || posture.Adopted || posture.Digest != "" {
+			t.Fatalf("AuthorizeBrowserHuman(not adopted) = %+v, %v, want not-applicable", posture, typed)
+		}
+	})
+
+	for _, tt := range []struct {
+		name   string
+		source PolicySource
+	}{
+		{"nil policy source", nil},
+		{"malformed policy source error", staticPolicySource{err: errors.New("policy store is corrupt")}},
+		{"unsealed effective policy", staticPolicySource{policy: &policyauthority.EffectivePolicy{}}},
+		{"forged effective policy", func() PolicySource {
+			policy := resolvedPolicy(t, "draft-write", true)
+			policy.ProfileID = "forged"
+			return staticPolicySource{policy: policy}
+		}()},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			posture, typed := AuthorizeBrowserHuman(context.Background(), "/repo", identity, browserHuman, tt.source)
+			if typed == nil || typed.Code != CodeAuthorityInvalid || typed.Verdict() || posture.Adopted {
+				t.Fatalf("AuthorizeBrowserHuman(%s) = %+v, %v, want operational authority-invalid", tt.name, posture, typed)
+			}
+		})
+	}
+
+	t.Run("delegated agent is refused outright, never reaching policy resolution", func(t *testing.T) {
+		agent, err := NewDelegatedAgent("codex", "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, typed := AuthorizeBrowserHuman(context.Background(), "/repo", identity, agent, staticPolicySource{policy: resolvedPolicy(t, "draft-write", true)}); typed == nil || typed.Code != CodeActorForbidden {
+			t.Fatalf("AuthorizeBrowserHuman(delegated agent) = %v, want actor-forbidden", typed)
+		}
+	})
+
+	t.Run("resolved trusted-human is refused outright too", func(t *testing.T) {
+		human, err := NewTrustedHuman(resolutionForActor(t, governanceprincipal.ResolutionAuthenticated))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, typed := AuthorizeBrowserHuman(context.Background(), "/repo", identity, human, staticPolicySource{policy: resolvedPolicy(t, "draft-write", true)}); typed == nil || typed.Code != CodeActorForbidden {
+			t.Fatalf("AuthorizeBrowserHuman(resolved trusted-human) = %v, want actor-forbidden", typed)
+		}
+	})
+
+	t.Run("zero actor is refused before basis is ever checked", func(t *testing.T) {
+		if _, typed := AuthorizeBrowserHuman(context.Background(), "/repo", identity, Actor{}, staticPolicySource{policy: resolvedPolicy(t, "draft-write", true)}); typed == nil || typed.Code != CodeActorForbidden {
+			t.Fatalf("AuthorizeBrowserHuman(zero actor) = %v, want actor-forbidden", typed)
+		}
+	})
+}
+
 func TestPolicyActorsRequireAdapterControlledSealedAttribution(t *testing.T) {
 	for _, harness := range []string{"", "   "} {
 		if _, err := NewDelegatedAgent(harness, ""); err == nil {

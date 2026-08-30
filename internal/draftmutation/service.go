@@ -85,7 +85,7 @@ func (s Service) Mutate(ctx context.Context, start string, request Request, acto
 		if _, typed := AuthorizeState(ctx, filepath.FromSlash(identity.Checkout), identity, current, s.State); typed != nil {
 			return typed
 		}
-		grant, typed := AuthorizePolicy(ctx, filepath.FromSlash(identity.Checkout), identity, actor, s.Policy)
+		policy, typed := authorizeMutationPolicy(ctx, filepath.FromSlash(identity.Checkout), identity, actor, s.Policy)
 		if typed != nil {
 			return typed
 		}
@@ -125,10 +125,10 @@ func (s Service) Mutate(ctx context.Context, start string, request Request, acto
 		}
 
 		entry := designprovenance.Entry{
-			Schema: designprovenance.Schema, Spec: identity.Spec,
+			Schema: designprovenance.SchemaV2, Spec: identity.Spec,
 			PreviousDigest: currentDigest, ResultDigest: applied.Result.ResultDigest,
 			UnclassifiedGap: gap, Attribution: actor.Attribution(), Harness: actor.Harness(), Session: actor.Session(),
-			PolicyDigest: grant.Digest, Context: designprovenance.UnavailableContext(),
+			Policy: &policy, Context: designprovenance.UnavailableContext(),
 			Operations: append(make([]designprovenance.Operation, 0, len(request.Operations)), request.Operations...),
 			Changes:    append(make([]designprovenance.Change, 0, len(applied.Result.Changes)), applied.Result.Changes...),
 			Excerpts:   append(make([]designprovenance.Excerpt, 0, len(applied.ProvenanceExcerpts)), applied.ProvenanceExcerpts...),
@@ -167,6 +167,31 @@ func (s Service) Mutate(ctx context.Context, start string, request Request, acto
 	}
 	// vocab:identity — ASD protocol/transaction name in a machinery diagnostic
 	return response, WrapError(CodeIOFailure, identity, "running checkout-wide draft mutation transaction", transactionErr)
+}
+
+// authorizeMutationPolicy is Mutate's one policy-authorization dispatch: the
+// explicit browser-human actor (isExplicitBrowserHuman) routes through
+// AuthorizeBrowserHuman, independent of design_assistance mode/adoption
+// (§4.1, SI-176); every other actor keeps AuthorizePolicy's existing,
+// unchanged matrix. Both outcomes project onto the same v2 policy union so
+// every current writer emits exactly one closed arm: a resolved digest, or
+// the explicit browser-human's honest not-applicable declaration.
+func authorizeMutationPolicy(ctx context.Context, root string, identity Identity, actor Actor, source PolicySource) (designprovenance.Policy, *Error) {
+	if actor.isExplicitBrowserHuman() {
+		posture, typed := AuthorizeBrowserHuman(ctx, root, identity, actor, source)
+		if typed != nil {
+			return designprovenance.Policy{}, typed
+		}
+		if !posture.Adopted {
+			return designprovenance.Policy{State: designprovenance.PolicyNotApplicable}, nil
+		}
+		return designprovenance.Policy{State: designprovenance.PolicyResolved, Digest: posture.Digest}, nil
+	}
+	grant, typed := AuthorizePolicy(ctx, root, identity, actor, source)
+	if typed != nil {
+		return designprovenance.Policy{}, typed
+	}
+	return designprovenance.Policy{State: designprovenance.PolicyResolved, Digest: grant.Digest}, nil
 }
 
 func readMutationState(identity Identity, name string) ([]byte, []byte, bool, *Error) {

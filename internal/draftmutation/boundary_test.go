@@ -1,6 +1,7 @@
 package draftmutation_test
 
 import (
+	"go/ast"
 	"go/parser"
 	"go/token"
 	"os"
@@ -80,6 +81,80 @@ func TestLaterWorkbenchAdapterDoesNotImportDraftMutation(t *testing.T) {
 	}
 	if parsed == 0 {
 		t.Fatal("adapter import witness parsed no production Go files")
+	}
+}
+
+// TestNewUnauthenticatedHumanHasNoNonTestProductionCaller structurally
+// proves clause E of Wave 6 Task 1A's bounded contract: today (before
+// Task 2's workbench handler exists) there is exactly ZERO non-test
+// production caller of draftmutation.NewUnauthenticatedHuman anywhere in
+// the repository — CLI, MCP, internal/designapp, and internal/workbench
+// alike. Combined with the constructor itself taking no request-derived
+// argument at all (policy.go), this also proves no request decoder can
+// mint the actor: there is no code path, let alone a data-driven one, that
+// even calls it outside this package's own definition and tests.
+func TestNewUnauthenticatedHumanHasNoNonTestProductionCaller(t *testing.T) {
+	repositoryRoot := filepath.Join("..", "..")
+	definitionFile, err := filepath.Abs("policy.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	const constructorName = "NewUnauthenticatedHuman"
+	parsed := 0
+	var callers []string
+	walkErr := filepath.WalkDir(repositoryRoot, func(path string, entry os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if entry.IsDir() {
+			switch entry.Name() {
+			case ".git", "node_modules":
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
+			return nil
+		}
+		abs, err := filepath.Abs(path)
+		if err != nil {
+			return err
+		}
+		if abs == definitionFile {
+			return nil
+		}
+		file, err := parser.ParseFile(token.NewFileSet(), path, nil, 0)
+		if err != nil {
+			return err
+		}
+		parsed++
+		ast.Inspect(file, func(n ast.Node) bool {
+			call, ok := n.(*ast.CallExpr)
+			if !ok {
+				return true
+			}
+			switch fn := call.Fun.(type) {
+			case *ast.Ident:
+				if fn.Name == constructorName {
+					callers = append(callers, path)
+				}
+			case *ast.SelectorExpr:
+				if fn.Sel.Name == constructorName {
+					callers = append(callers, path)
+				}
+			}
+			return true
+		})
+		return nil
+	})
+	if walkErr != nil {
+		t.Fatal(walkErr)
+	}
+	if parsed == 0 {
+		t.Fatal("caller-inventory witness parsed no production Go files")
+	}
+	if len(callers) != 0 {
+		t.Fatalf("%s called outside its own definition in non-test production code: %v", constructorName, callers)
 	}
 }
 
