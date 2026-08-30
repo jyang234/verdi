@@ -553,7 +553,15 @@ func (e Entry) digestProjection() any {
 }
 
 // Seal validates the entry and sets its own canonical projection digest.
+//
+// It is a WRITER surface, so it refuses Schema (v1) before touching the
+// entry: minting a fresh v1 digest is exactly the decode-only violation.
+// Verifying an already-committed v1 digest is a READER concern and stays on
+// Validate's own version-neutral projection path below.
 func (e *Entry) Seal() error {
+	if err := refuseDecodeOnlyWrite(e.Schema); err != nil {
+		return err
+	}
 	e.Digest = ""
 	if err := e.validate(false); err != nil {
 		return err
