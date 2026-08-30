@@ -291,7 +291,7 @@ func TestReceiptDigestDomains(t *testing.T) {
 	}
 }
 
-// TestExecutionCompletionSharedStream_Behavioral prosecutes SI-163: completion
+// TestExecutionCompletionSharedStream_Behavioral prosecutes SI-172: completion
 // consumes the one shared canonical acknowledgment stream, refuses a stream
 // that hides the embedded scoped-MCP transition or contradicts the terminal
 // snapshot, and binds every terminal artifact to the actual post-expansion

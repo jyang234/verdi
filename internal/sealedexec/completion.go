@@ -117,7 +117,7 @@ func (s *CompletionService) Complete(ctx context.Context, input CompletionReques
 	if _, err := validateCompletionRun(input.Request, input.Run); err != nil {
 		return Completion{}, err
 	}
-	// SI-163: the shared flight state's terminal position, not the dispatched
+	// SI-172: the shared flight state's terminal position, not the dispatched
 	// request revision, is what every terminal artifact binds.
 	terminal := input.Run.Terminal
 	terminalRequest := terminalExecutionRequest(input.Request, terminal)

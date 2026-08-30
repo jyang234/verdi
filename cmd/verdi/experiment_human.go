@@ -6,6 +6,7 @@ import (
 	"io"
 
 	"github.com/jyang234/verdi/internal/canonjson"
+	"github.com/jyang234/verdi/internal/experiment"
 	"github.com/jyang234/verdi/internal/experimentapp"
 	"github.com/jyang234/verdi/internal/experimenthuman"
 	"github.com/jyang234/verdi/internal/gitx"
@@ -33,11 +34,23 @@ func runExperimentHuman(ctx context.Context, operation string, service *experime
 	}
 	inputDigest := review.PacketDigest
 	humanOperation := experimenthuman.OperationProposeRegistration
-	if operation == "reconcile-draft" {
+	switch operation {
+	case "reconcile-draft":
 		humanOperation = experimenthuman.OperationReconcileDraft
 		inputDigest, err = canonjson.Digest(struct{}{})
 		if err != nil {
 			return experimentOperational(operation, fmt.Errorf("digesting reconciliation input: %w", err), stderr)
+		}
+	case "propose-ratification":
+		humanOperation = experimenthuman.OperationProposeRatification
+		inputDigest, err = experimentapp.RatificationInputDigest(
+			flags.values["result"],
+			experiment.Disposition(flags.values["disposition"]),
+			flags.values["candidate"],
+			flags.values["reason"],
+		)
+		if err != nil {
+			return experimentOperational(operation, err, stderr)
 		}
 	}
 	facts := experimenthuman.ChallengeFacts{
@@ -101,6 +114,14 @@ func runExperimentHuman(ctx context.Context, operation string, service *experime
 	identity.Actor = actor
 	if operation == "reconcile-draft" {
 		result := service.ReconcileDraft(ctx, identity)
+		return renderExperimentResult(operation, result.Outcome, result, flags.json, stdout, stderr)
+	}
+	if operation == "propose-ratification" {
+		result := service.ProposeRatification(ctx, identity, experimentapp.RatificationProposalInput{
+			ResultDigest: flags.values["result"], Disposition: experiment.Disposition(flags.values["disposition"]),
+			Candidate: flags.values["candidate"], Reason: flags.values["reason"],
+			Resolution: verification.Resolution, Proof: verification.Retained,
+		})
 		return renderExperimentResult(operation, result.Outcome, result, flags.json, stdout, stderr)
 	}
 	result := service.ProposeRegistration(ctx, identity, experimentapp.RegistrationInput{ReviewPacketDigest: review.PacketDigest})

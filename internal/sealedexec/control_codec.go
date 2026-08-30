@@ -13,7 +13,7 @@ import (
 )
 
 // EncodeExecutionPartial canonically encodes the actual request/run state
-// available at an incomplete terminal boundary. I-117/SI-164: once the shared
+// available at an incomplete terminal boundary. I-117/SI-173: once the shared
 // flight state carries a terminal snapshot, the partial represents that state's
 // actual manifest revision and digest, which an installed embedded expansion
 // has moved past the dispatched request revision. Before the shared state
@@ -41,7 +41,7 @@ func EncodeExecutionPartial(request ExecutionRequest, run ExecutionRun) ([]byte,
 		// The snapshot is authoritative only after it has been cross-matched
 		// against the stream that actually reached it, exactly as completion
 		// cross-matches its own terminal position.
-		// I-118/SI-166 admits exactly one further partial-only shape: the
+		// I-118/SI-175 admits exactly one further partial-only shape: the
 		// opening position of a child revision whose atomic install succeeded
 		// before any child append could be acknowledged. Successful completion
 		// stays strict because it appends its terminal event on that child.
@@ -69,7 +69,7 @@ func EncodeExecutionPartial(request ExecutionRequest, run ExecutionRun) ([]byte,
 
 // installedChildOpening reports whether the terminal snapshot is exactly the
 // position installExpansionLocked leaves after a successful atomic install
-// whose first child append has not been acknowledged (I-118/SI-166). Every
+// whose first child append has not been acknowledged (I-118/SI-175). Every
 // operand is checked against the live final acknowledgment, so no stale,
 // skipped, backward, or fabricated terminal can enter through this arm: the
 // snapshot must carry the exact dispatched request and key identity, a
@@ -173,11 +173,11 @@ func validateExecutionPartial(partial ExecutionPartial) error {
 
 // validateExecutionPartialAcks validates the partial's complete canonical
 // acknowledgment stream through the same helper a successful completion uses
-// (I-117/SI-164): one fixed execution identity, strictly increasing global
+// (I-117/SI-173): one fixed execution identity, strictly increasing global
 // order, source order contiguous inside each revision, a child revision exactly
 // one past its predecessor restarting at source one, and no skipped or backward
 // revision. Because the represented manifest revision is the terminal one, a
-// nonempty stream must end exactly there, or — for I-118/SI-166's installed
+// nonempty stream must end exactly there, or — for I-118/SI-175's installed
 // child whose first append was never acknowledged — exactly one revision before
 // it. A skipped, backward, nonmonotonic, or source-gapped stream stays closed,
 // as does any wider distance between the stream and the represented revision. A

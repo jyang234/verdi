@@ -179,6 +179,20 @@ func TestNoPersistedRealExperimentNeedsRunLayoutMigration(t *testing.T) {
 	}
 }
 
+func TestHistoricalV1ExecutionReceiptRetainsStateSemantics(t *testing.T) {
+	receipt := goldenReceipt(t, "caching-proven")
+	if receipt.Schema != experiment.ExecutionReceiptSchemaV1 || receipt.Inputs != nil {
+		t.Fatalf("historical receipt schema/inputs = %q/%+v", receipt.Schema, receipt.Inputs)
+	}
+	state, _, err := experiment.DeriveState("testdata", "caching-proven", VerifyResult)
+	if err != nil {
+		t.Fatalf("DeriveState(historical v1 receipt): %v", err)
+	}
+	if state != experiment.StateRecommended {
+		t.Fatalf("DeriveState(historical v1 receipt) = %q, want %q", state, experiment.StateRecommended)
+	}
+}
+
 // TestCachingProvenFixture is CO-7's required committed deterministic
 // caching fixture: a faster incorrect candidate (final-cache) loses to a
 // slower correct candidate (facts-cache), end to end from the committed

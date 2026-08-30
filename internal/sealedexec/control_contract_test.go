@@ -49,7 +49,7 @@ func TestExecutionControlRecordContract_Static(t *testing.T) {
 		}
 	})
 
-	// I-117/SI-164: after an embedded scoped-MCP expansion the shared flight
+	// I-117/SI-173: after an embedded scoped-MCP expansion the shared flight
 	// state's terminal manifest — not the dispatched request manifest — is what
 	// the preserved partial represents, and its complete acknowledgment stream is
 	// validated with exactly the authority successful completion applies.
@@ -144,7 +144,7 @@ func TestExecutionControlRecordContract_Static(t *testing.T) {
 		}
 	})
 
-	// I-118/SI-166: the atomic child-install/first-child-append boundary is a
+	// I-118/SI-175: the atomic child-install/first-child-append boundary is a
 	// closed partial-only exception. After `child-manifest` is acknowledged at
 	// revision R and the install succeeds, the shared state opens R+1 at source
 	// one with no prior-event digest and the unchanged global order, while the

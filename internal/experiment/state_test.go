@@ -822,10 +822,19 @@ func executionReceiptForState(t *testing.T, def Definition, run string) Executio
 	for _, fixture := range def.Fixtures {
 		inputDigests["fixtures/"+fixture.ID+".json"] = strings.TrimPrefix(fixture.Digest, "sha256:")
 	}
+	fixtureInputs := make([]ResolvedArtifact, len(def.Fixtures))
+	for index, fixture := range def.Fixtures {
+		fixtureInputs[index] = ResolvedArtifact{ID: fixture.ID, Path: "fixtures/" + fixture.ID + ".json", Digest: fixture.Digest}
+	}
 	return ExecutionReceipt{
 		Schema: ExecutionReceiptSchema, ExperimentDigest: digest, Run: run, EnvironmentPolicy: def.Execution.EnvironmentPolicy,
 		AuthorityDigest: digestOf("1"), CapabilitiesDigest: def.Evaluator.CapabilitiesDigest, ScheduleDigest: digestOf("2"), GrantsDigest: digestOf("3"),
 		Fingerprint: ExecutionFingerprint{OS: "linux", Arch: "amd64", ToolVersions: map[string]string{"evaluator": "2.1.0", "verdi": "0.1.0"}, Env: map[string]*string{}, InputDigests: inputDigests},
+		Inputs: &ReceiptInputs{
+			Workload: ResolvedArtifact{ID: def.Workload.ID, Path: "inputs/workload.json", Digest: def.Workload.Digest},
+			Fixtures: fixtureInputs,
+			Contract: ResolvedArtifact{ID: def.Contract.ID, Path: "contracts/equivalence.json", Digest: def.Contract.Digest},
+		},
 		Enforcement: []ReceiptEnforcement{{Kind: "process-execution", Applied: true, Reason: "allowlist applied"}, {Kind: "timeouts", Applied: true, Reason: "deadline applied"}},
 		Network:     ReceiptNetwork{Mode: NetworkDeny, Configured: true, Reason: "network namespace configured"}, Candidates: candidates,
 		Versions:    ReceiptVersions{Verdi: "0.1.0", RecommendationEngine: string(AlgorithmV1)},

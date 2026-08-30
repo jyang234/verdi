@@ -12,7 +12,7 @@
 
 ## Global Constraints
 
-- Binding authority: Amendment 002 §§4, 7, and 9; I-86, I-110, I-115; IL-079; SI-162.
+- Binding authority: Amendment 002 §§4, 7, and 9; I-86, I-110, I-115; IL-079; SI-171.
 - Every Claude invocation begins with `/fable-orchestration`, selects first-party `claude-opus-5`, and uses no delegation or subagent.
 - Preserve the exact seven frozen U6 producer names and cardinality.
 - Preserve standalone `verdi context mcp` completed-null refusal.

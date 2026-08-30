@@ -1440,3 +1440,129 @@ func TestCmdClose_Preflight_Dispatch(t *testing.T) {
 		}
 	})
 }
+
+// TestClosePreflightExperimentEvidenceParity pins design §9's preflight-
+// parity paragraph (Task 10 correction, F3 of the original Codex review):
+// real close and `verdi close --preflight` invoke the SAME experiment-
+// evidence predicate and preserve the same verdict/operational
+// classification. The fixture is the exact one
+// TestCloseComparisonBackedSpikeExperimentDetectionEngagesGate
+// (closeexperiment_test.go) already proves a real close refuses on at exit
+// 1 — a comparison-backed spike whose committed experiment carries no
+// accepted ratification at all — driven here through runPreflight, the
+// SAME function every other test in this file drives.
+//
+// Before this correction's preflight wiring, closepreflight.go had NO
+// awareness of experiment evidence at all: this exact fixture reported
+// READY (rc 0), even though the real `verdi close` on the same fixture
+// exits 1. That differential is this test's own RED capture — recorded
+// here as the property this test locks in going forward, since the fix is
+// already applied: a preflight rehearsal must never report READY for an
+// experiment state a real close would refuse.
+func TestClosePreflightExperimentEvidenceParity(t *testing.T) {
+	buildFixture := func(t *testing.T) *fixturegit.Repo {
+		t.Helper()
+		repo := buildCloseExperimentProductionFixtureRepo(t, map[string]string{
+			closeExperimentProductionExperimentID + "/experiment.yaml": closeExperimentLockedDefinitionYAML(t),
+		})
+		writeCloseExperimentGateReport(t, repo.Dir, repo.Head)
+		return repo
+	}
+
+	t.Run("real close refuses", func(t *testing.T) {
+		repo := buildFixture(t)
+		fp := fake.New()
+		fg := forgefake.New()
+		deps := closeDeps{Forge: fg, Registry: fp, Runner: upstream.NewFakeRunner()}
+		var stdout, stderr bytes.Buffer
+		got := runClose(context.Background(), repo.Dir, "spec/exp-spike", &store.Manifest{}, deps, &stdout, &stderr)
+		if got != 1 {
+			t.Fatalf("runClose(comparison-backed, no ratification) = %d, want 1; stdout=%s stderr=%s", got, stdout.String(), stderr.String())
+		}
+	})
+
+	t.Run("preflight refuses with the same classification, never READY", func(t *testing.T) {
+		repo := buildFixture(t)
+		var stdout, stderr bytes.Buffer
+		rc := runPreflight(context.Background(), repo.Dir, "spec/exp-spike", &store.Manifest{}, nil, forgefake.New(), true, &stdout, &stderr)
+		if rc != 1 {
+			t.Fatalf("runPreflight(comparison-backed, no ratification) = %d, want 1; stdout=%s stderr=%s", rc, stdout.String(), stderr.String())
+		}
+		out := stdout.String()
+		if !strings.Contains(out, "close: --preflight: NOT READY") {
+			t.Fatalf("stdout = %q, want NOT READY", out)
+		}
+		if strings.Contains(out, "close: --preflight: READY") {
+			t.Fatalf("stdout = %q, want no READY variant alongside NOT READY", out)
+		}
+		if !strings.Contains(out, "experiment "+closeExperimentProductionExperimentID) {
+			t.Fatalf("stdout = %q, want the experiment condition rendered, naming %s", out, closeExperimentProductionExperimentID)
+		}
+		if !strings.Contains(out, "no ratification is present at the accepted HEAD") {
+			t.Fatalf("stdout = %q, want the accepted ratification proof's own honest detail", out)
+		}
+	})
+}
+
+// TestClosePreflightExperimentEvidenceOrdinarySpikeStaysReady is the
+// parity property's negative case: a target carrying no experiment
+// evidence at all (buildCloseExperimentSpikeFixtureRepo — no committed
+// experiments/ tree) is untouched by this correction's wiring, exactly as
+// TestCloseOrdinarySpikeExperimentAbsentClosesUnchanged proves for real
+// close.
+func TestClosePreflightExperimentEvidenceOrdinarySpikeStaysReady(t *testing.T) {
+	repo := buildCloseExperimentSpikeFixtureRepo(t)
+	writeCloseExperimentGateReport(t, repo.Dir, repo.Head)
+	var stdout, stderr bytes.Buffer
+	rc := runPreflight(context.Background(), repo.Dir, "spec/exp-spike", &store.Manifest{}, nil, forgefake.New(), true, &stdout, &stderr)
+	if rc != 0 {
+		t.Fatalf("runPreflight(ordinary spike, no experiments) = %d, want 0; stdout=%s stderr=%s", rc, stdout.String(), stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "close: --preflight: READY") {
+		t.Fatalf("stdout = %q, want READY", stdout.String())
+	}
+	if strings.Contains(stdout.String(), "experiment evidence") {
+		t.Fatalf("stdout = %q, want no experiment-evidence prose for a target with none", stdout.String())
+	}
+}
+
+// TestClosePreflightExperimentEvidenceOperationalRefusesWithoutReady pins
+// the operational (exit 2) branch of the experiment-evidence rehearsal,
+// mirroring TestCloseExperimentWorktreeOnlyExperimentsDirectoryRefusesOperationally
+// (closeexperiment_test.go) exactly: an experiments/ directory that exists
+// ONLY in the working tree resolves in ZERO active/archive locations at the
+// accepted HEAD — uninterpretable accepted evidence, never "no experiments"
+// — so the production adapter reports an operational Outcome and
+// closeExperimentGate's own pre-scan prints the offending line straight to
+// stderr and returns 2. Preflight must surface that SAME stderr line and
+// exit 2 itself — never a verdict-shaped NOT READY, and never READY.
+func TestClosePreflightExperimentEvidenceOperationalRefusesWithoutReady(t *testing.T) {
+	repo := buildCloseExperimentProductionFixtureRepo(t, nil)
+	// Written after the fixture's own commits and its detached checkout, so
+	// it is untracked at the checked-out revision and absent from `main`.
+	closeExperimentWriteFixtureFile(t, repo.Dir,
+		".verdi/specs/active/exp-spike/experiments/"+closeExperimentProductionExperimentID+"/experiment.yaml",
+		closeExperimentLockedDefinitionYAML(t))
+	writeCloseExperimentGateReport(t, repo.Dir, repo.Head)
+
+	var stdout, stderr bytes.Buffer
+	rc := runPreflight(context.Background(), repo.Dir, "spec/exp-spike", &store.Manifest{}, nil, forgefake.New(), true, &stdout, &stderr)
+	if rc != 2 {
+		t.Fatalf("runPreflight(worktree-only experiment) = %d, want 2; stdout=%s stderr=%s", rc, stdout.String(), stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "close: experiment "+closeExperimentProductionExperimentID+":") {
+		t.Fatalf("stderr = %q, want the worktree-side id detected and named", stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "resolves in 0 active/archive locations") {
+		t.Fatalf("stderr = %q, want the accepted-tree resolution's own honest detail", stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "[accepted-tree-invalid]") {
+		t.Fatalf("stderr = %q, want the operational accepted-tree-invalid code", stderr.String())
+	}
+	if strings.Contains(stdout.String(), "close: --preflight: READY") {
+		t.Fatalf("stdout = %q, want no READY variant on an operational refusal", stdout.String())
+	}
+	if strings.Contains(stdout.String(), "close: --preflight: NOT READY") {
+		t.Fatalf("stdout = %q, want no verdict-shaped NOT READY on an operational refusal", stdout.String())
+	}
+}

@@ -1515,7 +1515,7 @@ func assertClaudeSuccessfulLifecycle(t *testing.T, run claudeLifecycleObservatio
 // assertClaudeChildRevisionBinding proves the real built row's successful
 // `request_context` call actually moved the shared flight state, and that every
 // terminal artifact binds the installed child rather than the dispatched request
-// revision (I-115–I-117/SI-162–SI-164). It pins: the acknowledged
+// revision (I-115–I-117/SI-171–SI-173). It pins: the acknowledged
 // `child-manifest` transition and the revision its own event carries; the next
 // provider-owned event, which must open the child revision at source order one
 // across the exact acknowledged bridge; the `execution-result` event and its

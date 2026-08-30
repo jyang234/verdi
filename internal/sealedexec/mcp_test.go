@@ -379,7 +379,7 @@ func TestSharedFlightStateSerializesServiceAndMCPAppends(t *testing.T) {
 	})
 }
 
-// TestSharedFlightStreamContract_Behavioral prosecutes SI-163's retained
+// TestSharedFlightStreamContract_Behavioral prosecutes SI-172's retained
 // stream: the one shared flight state keeps the complete canonical
 // acknowledgment order across service and embedded scoped-MCP appends, hands
 // callers isolated copies, invents nothing on a failed append, and never

@@ -32,3 +32,45 @@ func EncodeRawNode(n *RawNode) ([]byte, error) {
 	}
 	return data, nil
 }
+
+// RawNodeStringScalar reports the node's value when it is exactly a plain
+// string scalar — the seam-owned shape test sibling packages use inside
+// custom unmarshalers without importing gopkg.in/yaml.v3 or comparing raw
+// node-kind constants themselves.
+func RawNodeStringScalar(n *RawNode) (string, bool) {
+	if n == nil || n.Kind != yaml.ScalarNode || n.Tag != "!!str" {
+		return "", false
+	}
+	return n.Value, true
+}
+
+// RawNodeStringMapping projects a mapping node whose keys and values are
+// all plain string scalars. ok=false reports a node that is not a mapping
+// at all (the caller decides what other shapes mean); a mapping that
+// breaks the string-only or unique-key contract is an error naming the
+// offending key. Closed key sets and required keys remain the caller's
+// grammar — this owns only the strict shape.
+func RawNodeStringMapping(n *RawNode) (map[string]string, bool, error) {
+	if n == nil || n.Kind != yaml.MappingNode {
+		return nil, false, nil
+	}
+	if len(n.Content)%2 != 0 {
+		return nil, true, fmt.Errorf("artifact: malformed mapping node")
+	}
+	fields := make(map[string]string, len(n.Content)/2)
+	for i := 0; i < len(n.Content); i += 2 {
+		key, ok := RawNodeStringScalar(n.Content[i])
+		if !ok {
+			return nil, true, fmt.Errorf("artifact: mapping key is not a plain string")
+		}
+		if _, duplicate := fields[key]; duplicate {
+			return nil, true, fmt.Errorf("artifact: mapping key %q is duplicated", key)
+		}
+		value, ok := RawNodeStringScalar(n.Content[i+1])
+		if !ok {
+			return nil, true, fmt.Errorf("artifact: mapping value for %q is not a plain string", key)
+		}
+		fields[key] = value
+	}
+	return fields, true, nil
+}

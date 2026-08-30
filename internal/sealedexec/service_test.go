@@ -448,7 +448,7 @@ func TestSharedFlightStateOwnershipContract_Behavioral(t *testing.T) {
 	}
 }
 
-// TestSharedFlightStreamRunContract_Behavioral proves SI-163 from the service
+// TestSharedFlightStreamRunContract_Behavioral proves SI-172 from the service
 // side: ExecutionRun carries the one complete canonical acknowledgment stream
 // — including the embedded scoped-MCP context transition, exactly once — plus
 // the immutable terminal position that stream ends at.

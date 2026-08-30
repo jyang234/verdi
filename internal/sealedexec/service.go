@@ -412,7 +412,7 @@ type ExecutionRun struct {
 	ReviewLaunchAck   *contextevent.EventAck
 	// Acks is the complete canonical acknowledgment stream this run reached:
 	// the authenticated restart history plus every service- and embedded scoped
-	// MCP-owned append, in one durable order (SI-163).
+	// MCP-owned append, in one durable order (SI-172).
 	Acks []contextevent.EventAck
 	// Terminal is the immutable position the shared flight state ended at. It
 	// carries the actual terminal manifest revision and digest, which an
@@ -1320,7 +1320,7 @@ func activeRunResult(active *activeExecution, authority contextevent.Authority, 
 		ack := *active.reviewAck
 		reviewAck = &ack
 	}
-	// SI-163: the run's acknowledgment stream is the shared flight state's own
+	// SI-172: the run's acknowledgment stream is the shared flight state's own
 	// complete order. Returning only the service-owned subset would drop every
 	// acknowledged scoped-MCP context event and make a valid run look
 	// discontinuous to completion.
@@ -1821,7 +1821,7 @@ func newExecutionFlightState(request ExecutionRequest, workspace WorkspaceFacts,
 		snapshot.NextSourceSequence = plan.sequence
 		snapshot.PriorEventDigest = plan.priorDigest
 		snapshot.LastGlobalSequence = plan.priorGlobal
-		// SI-163: the authenticated restart acknowledgments open the complete
+		// SI-172: the authenticated restart acknowledgments open the complete
 		// stream, so nothing already proven durable disappears from continuity.
 		return NewFlightStateAt(snapshot, plan.acks)
 	}

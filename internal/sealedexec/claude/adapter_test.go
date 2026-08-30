@@ -997,7 +997,7 @@ func TestClaudeAdapterParityContract_Behavioral(t *testing.T) {
 		assertClaudeGapReason(t, result, "duplicate-tool-result", "decode", claudeSource)
 	})
 
-	// Amendment 002 §6 / I-109 / SI-165: a provider-derived string bound for a
+	// Amendment 002 §6 / I-109 / SI-174: a provider-derived string bound for a
 	// fixed payload field is checked against the run's complete classified set
 	// before the event is built. A match is refused with the closed
 	// `protected-fixed-field` reduction — the fixed field is never rewritten,

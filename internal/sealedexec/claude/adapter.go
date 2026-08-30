@@ -1208,7 +1208,7 @@ func (r *claudeActiveRun) handleAssistant(ctx context.Context, line []byte, seq 
 	protectedValues := append([][]byte(nil), r.protectedValues...)
 	r.mu.Unlock()
 
-	// §6/SI-165: the provider message id becomes the fixed provider-message and
+	// §6/SI-174: the provider message id becomes the fixed provider-message and
 	// omission-summary ids, so it is refused before it can reach a fixed field
 	// or this run's duplicate-identity state map.
 	if !fixedPayloadValuesSafe(protectedValues, *message.ID) {
@@ -1290,7 +1290,7 @@ func (r *claudeActiveRun) handleAssistant(ctx context.Context, line []byte, seq 
 			if !nonemptyStringValue(*block.ID) || !nonemptyStringValue(*block.Name) {
 				return r.decodeFailure(ctx, seq, "invalid-foreign-field", map[string]any{"field": "content.tool_use"})
 			}
-			// §6/SI-165: the call id and tool name are fixed tool-call fields
+			// §6/SI-174: the call id and tool name are fixed tool-call fields
 			// and are also this run's open-call state-map key and value, so
 			// both are refused before either use.
 			if !fixedPayloadValuesSafe(protectedValues, *block.ID, *block.Name) {
@@ -1384,7 +1384,7 @@ func (r *claudeActiveRun) handleAssistant(ctx context.Context, line []byte, seq 
 
 // omissionSummary builds the fixed hidden-content omission summary. Hidden
 // bytes are never inputs to redaction or the digest. Its summary id is derived
-// from the provider message id, so §6/SI-165 checks the exact composed fixed
+// from the provider message id, so §6/SI-174 checks the exact composed fixed
 // value before it is placed; ok reports that the value was safe.
 func (r *claudeActiveRun) omissionSummary(ctx context.Context, contentType, messageID string, blockIndex int, protectedValues [][]byte) (obs sealedexec.NormalizedObservation, ok bool, err error) {
 	summaryID := fmt.Sprintf("%s:%d", messageID, blockIndex)
@@ -1446,7 +1446,7 @@ func (r *claudeActiveRun) handleToolResult(ctx context.Context, line []byte, seq
 		if !nonemptyStringValue(callID) {
 			return r.decodeFailure(ctx, seq, "invalid-foreign-field", map[string]any{"field": "content.tool_result"})
 		}
-		// §6/SI-165: the tool-result call id is a fixed payload field and this
+		// §6/SI-174: the tool-result call id is a fixed payload field and this
 		// run's open-call state-map key, so it is refused before it is probed.
 		if !fixedPayloadValuesSafe(protectedValues, callID) {
 			return r.decodeFailure(ctx, seq, "protected-fixed-field", nil)
@@ -1479,7 +1479,7 @@ func (r *claudeActiveRun) handleToolResult(ctx context.Context, line []byte, seq
 		if err != nil {
 			return r.decodeFailure(ctx, seq, "redaction-failed", nil)
 		}
-		// The retained tool name is placed in a second fixed field; §6/SI-165
+		// The retained tool name is placed in a second fixed field; §6/SI-174
 		// checks it against the classified set current at this observation.
 		if !fixedPayloadValuesSafe(protectedValues, toolName) {
 			return r.decodeFailure(ctx, seq, "protected-fixed-field", nil)
@@ -1930,7 +1930,7 @@ func redactBytes(raw []byte, protectedValues [][]byte) ([]byte, error) {
 
 // fixedPayloadValuesSafe reports whether every provider-derived string bound for
 // a fixed event payload field is safe to emit against the run's complete
-// classified set (Amendment 002 §6, I-109/SI-165). Amendment 002 §6 forbids
+// classified set (Amendment 002 §6, I-109/SI-174). Amendment 002 §6 forbids
 // rewriting a fixed field, so a match — or an unavailable/invalid classification
 // — has exactly one closed outcome at the call site: the `protected-fixed-field`
 // reduction, whose operation is `redaction`. The unsafe value is never returned,

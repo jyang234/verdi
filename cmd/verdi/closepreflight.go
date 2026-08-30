@@ -187,14 +187,19 @@ type preflightPrelude struct {
 // whose preflight IS the whole run, so nothing has been rehearsed or disclosed
 // before it reaches here — the empty prelude.
 func runPreflight(ctx context.Context, root, storyArg string, manifest *store.Manifest, mdl *model.Model, f forge.Forge, forceLocal bool, stdout, stderr io.Writer) int {
-	return runPreflightWithPreludeAndCountersign(ctx, root, storyArg, manifest, mdl, f, forceLocal, preflightPrelude{}, nil, stdout, stderr)
+	return runPreflightWithPreludeAndCountersign(ctx, root, storyArg, manifest, mdl, f, forceLocal, nil, preflightPrelude{}, nil, stdout, stderr)
 }
 
+// runPreflightWithCountersign is the standalone `--preflight` entry that
+// additionally carries a lifecycle countersign resolver. Like runPreflight it
+// passes a nil experiments provider, so the experiment-evidence rehearsal runs
+// against production exactly as it does for every other non---prepare
+// preflight entry.
 func runPreflightWithCountersign(ctx context.Context, root, storyArg string, manifest *store.Manifest, mdl *model.Model, f forge.Forge, forceLocal bool, countersignResolver lifecycleCountersignResolver, stdout, stderr io.Writer) int {
-	return runPreflightWithPreludeAndCountersign(ctx, root, storyArg, manifest, mdl, f, forceLocal, preflightPrelude{}, countersignResolver, stdout, stderr)
+	return runPreflightWithPreludeAndCountersign(ctx, root, storyArg, manifest, mdl, f, forceLocal, nil, preflightPrelude{}, countersignResolver, stdout, stderr)
 }
 
-// runPreflightWithPrelude is `--preflight`'s testable dispatch core: resolves
+// runPreflightWithPreludeAndCountersign is `--preflight`'s testable dispatch core: resolves
 // storyArg exactly as runClose does (storyresolve.Resolve, the identical I-30
 // two-form contract), then routes to the story or feature preflight gate by
 // the resolved spec's Class — the same dispatch runClose itself performs
@@ -207,7 +212,19 @@ func runPreflightWithCountersign(ctx context.Context, root, storyArg string, man
 // disclosed (--prepare's regeneration disclosure); its count joins this
 // function's own so the readiness summary describes the whole run rather than
 // its last phase.
-func runPreflightWithPreludeAndCountersign(ctx context.Context, root, storyArg string, manifest *store.Manifest, mdl *model.Model, f forge.Forge, forceLocal bool, prelude preflightPrelude, countersignResolver lifecycleCountersignResolver, stdout, stderr io.Writer) int {
+//
+// experiments is the SAME closeExperimentEvidenceProvider seam real close
+// consumes (closeDeps.Experiments, closeexperiment.go) — nil means
+// production (productionCloseExperimentEvidence{}, the deps.State
+// nil-is-production precedent) — threaded through so a story-class
+// rehearsal can invoke the IDENTICAL experiment-evidence gate real close
+// evaluates (design §9's preflight-parity paragraph, Task 10 correction
+// F3): no second implementation, no new flag.
+//
+// countersignResolver is the same lifecycle countersign seam real close
+// consumes (closeDeps.Countersign): nil leaves the countersign condition
+// unrehearsed, exactly as an unconfigured close leaves it unevaluated.
+func runPreflightWithPreludeAndCountersign(ctx context.Context, root, storyArg string, manifest *store.Manifest, mdl *model.Model, f forge.Forge, forceLocal bool, experiments closeExperimentEvidenceProvider, prelude preflightPrelude, countersignResolver lifecycleCountersignResolver, stdout, stderr io.Writer) int {
 	fmt.Fprintf(stdout, "close: --preflight %s (dry run: rehearses the closure gate only; nothing on disk changes and nothing is published)\n", storyArg)
 
 	// Rehearsed FIRST, in the real ritual's own order: requireCleanIndex is
@@ -261,10 +278,16 @@ func runPreflightWithPreludeAndCountersign(ctx context.Context, root, storyArg s
 	}
 
 	var outcome closureGateOutcome
+	// experimentGateRefused records whether the experiment-evidence
+	// rehearsal (never reachable for a feature-class target, which has no
+	// CSE evidence gate at all) is the reason outcome.Ready flipped false,
+	// so the terminal line below names the actual cause rather than always
+	// blaming the closure gate.
+	var experimentGateRefused bool
 	if spec.Class == artifact.ClassFeature {
 		outcome, err = runFeaturePreflightGate(ctx, root, spec, manifest, mdl, f, defaultBranchRef, head, stdout)
 	} else {
-		outcome, err = runStoryPreflightGate(ctx, root, spec, manifest, mdl, f, defaultBranchRef, head, stdout)
+		outcome, experimentGateRefused, err = runStoryPreflightGate(ctx, root, spec, manifest, mdl, f, defaultBranchRef, head, experiments, stdout, stderr)
 	}
 	if err != nil {
 		fmt.Fprintln(stderr, "close: --preflight:", err)
@@ -288,7 +311,12 @@ func runPreflightWithPreludeAndCountersign(ctx context.Context, root, storyArg s
 
 	if !outcome.Ready {
 		// vocab:identity — CLI invocation grammar: "a real close" names a real `verdi close` run (identity)
-		fmt.Fprintln(stdout, "close: --preflight: NOT READY (closure gate would refuse a real close; see conditions above)")
+		cause := "closure gate would refuse a real close"
+		if experimentGateRefused {
+			// vocab:identity — CLI invocation grammar: "a real close" names a real `verdi close` run (identity)
+			cause = "experiment evidence would refuse a real close"
+		}
+		fmt.Fprintf(stdout, "close: --preflight: NOT READY (%s; see conditions above)\n", cause)
 		return 1
 	}
 	if outcome.Disclosures > 0 {
@@ -309,10 +337,54 @@ func runPreflightWithPreludeAndCountersign(ctx context.Context, root, storyArg s
 // kind/path detail ac-1 requires (dc-4) and condition 2's spec-stale line
 // with the deviation-report.md path ac-1 additionally requires (neither of
 // which the shared gate's own Reason strings carry today).
-func runStoryPreflightGate(ctx context.Context, root string, spec *artifact.SpecFrontmatter, manifest *store.Manifest, mdl *model.Model, f forge.Forge, defaultBranchRef, head string, stdout io.Writer) (closureGateOutcome, error) {
+//
+// It then rehearses design §9's preflight-parity requirement (Task 10
+// correction, F3): the IDENTICAL experiment-evidence gate real close
+// evaluates next (close.go's runClose, immediately after its own closure
+// gate holds — closeExperimentGateCore over closeExperimentEvidenceProvider,
+// closeexperiment.go), through the SAME core function real close's own
+// closeExperimentGate wraps, so a comparison-backed target a real close
+// would refuse on experiment evidence is never reported READY here either.
+// This is reached only when outcome.Ready is still true, exactly mirroring
+// runClose's own conditional ("if !ok { return 1 }" runs BEFORE the
+// experiment gate there too): a closure gate that already refuses is never
+// further diagnosed by a provider a real close would never even query.
+// closeExperimentGateCore itself prints NO terminal summary (only the
+// [PASS]/[FAIL] condition lines) — that stays each caller's own line
+// (closeExperimentGateCore's own doc comment), which is exactly why this
+// function calls the core directly rather than runClose's own
+// closeExperimentGate wrapper: a bare, unprefixed "close: FAIL" line has no
+// place in a dry run that mutated nothing.
+//
+// The second return value reports whether the experiment-evidence gate —
+// rather than the closure gate above it — is the reason outcome.Ready came
+// back false, so runPreflightWithPreludeAndCountersign's terminal line can name the
+// actual cause instead of always blaming the closure gate.
+func runStoryPreflightGate(ctx context.Context, root string, spec *artifact.SpecFrontmatter, manifest *store.Manifest, mdl *model.Model, f forge.Forge, defaultBranchRef, head string, experiments closeExperimentEvidenceProvider, stdout, stderr io.Writer) (closureGateOutcome, bool, error) {
 	outcome, err := runClosureGateOutcome(ctx, root, spec, f, defaultBranchRef, manifest, mdl, head, stdout)
 	if err != nil {
-		return closureGateOutcome{}, err
+		return closureGateOutcome{}, false, err
+	}
+
+	experimentGateRefused := false
+	if outcome.Ready {
+		provider := experiments
+		if provider == nil {
+			provider = productionCloseExperimentEvidence{}
+		}
+		evidence, err := provider.CloseEvidence(ctx, root, spec)
+		if err != nil {
+			return closureGateOutcome{}, false, fmt.Errorf("close: --preflight: rehearsing the experiment-evidence gate: %w", err)
+		}
+		switch rc := closeExperimentGateCore(evidence, stdout, stderr); rc {
+		case 0:
+			// Clean, or not comparison-backed: no change to outcome.
+		case 1:
+			outcome.Ready = false
+			experimentGateRefused = true
+		default:
+			return closureGateOutcome{}, false, fmt.Errorf("close: --preflight: the experiment-evidence gate reported an uninterpretable condition (see stderr above)")
+		}
 	}
 
 	// dc-2: recompute the SAME fold a second time (deterministic, pure,
@@ -325,7 +397,7 @@ func runStoryPreflightGate(ctx context.Context, root string, spec *artifact.Spec
 	// record set (ADJ-56).
 	result, err := foldStoryEvidence(ctx, root, spec, head, false)
 	if err != nil {
-		return closureGateOutcome{}, fmt.Errorf("close: --preflight: %w", err)
+		return closureGateOutcome{}, false, fmt.Errorf("close: --preflight: %w", err)
 	}
 
 	// Rehearsed in the real ritual's own order too: a real close discloses
@@ -333,21 +405,21 @@ func runStoryPreflightGate(ctx context.Context, root string, spec *artifact.Spec
 	// cut (close.go's runClose). The slug is the story-scope one (dc-6).
 	rehearsed, err := rehearseUncommittedFoldRecords(ctx, root, head, storyFoldRecordPaths(store.RefSlug(spec.Story), result.ACs), stdout)
 	if err != nil {
-		return closureGateOutcome{}, fmt.Errorf("close: --preflight: %w", err)
+		return closureGateOutcome{}, false, fmt.Errorf("close: --preflight: %w", err)
 	}
 	outcome.Disclosures += rehearsed
 
 	derivedRel, excluded, err := preflightDerivedContext(ctx, root, spec.ID, head)
 	if err != nil {
-		return closureGateOutcome{}, fmt.Errorf("close: --preflight: %w", err)
+		return closureGateOutcome{}, false, fmt.Errorf("close: --preflight: %w", err)
 	}
 	printACDetail(stdout, unmetStoryACDetail(result.ACs, store.RefSlug(spec.Story), derivedRel, excluded))
 
 	if err := printSpecStalePathIfFailing(stdout, root, spec, manifest); err != nil {
-		return closureGateOutcome{}, fmt.Errorf("close: --preflight: %w", err)
+		return closureGateOutcome{}, false, fmt.Errorf("close: --preflight: %w", err)
 	}
 
-	return outcome, nil
+	return outcome, experimentGateRefused, nil
 }
 
 // printSpecStalePathIfFailing recomputes checkSpecStaleCondition (the
