@@ -279,7 +279,6 @@ func TestLegacyBoardSpliceSerializesWithWriterTransaction(t *testing.T) {
 	}
 	if mutateRanInsideWindow {
 		raceOutcome = <-mutateDone
-		raceOutcomeReady = true
 		close(pauseRelease)
 	} else {
 		close(pauseRelease)
