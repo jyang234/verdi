@@ -440,3 +440,210 @@ func TestPeek_Negative(t *testing.T) {
 		t.Fatal("Peek(malformed lock file): want error, got nil")
 	}
 }
+
+// TestHeldByCurrentProcess_TrueOnlyForOurExactOpenHandle proves SI-177's
+// registry-proven query: after our own successful Acquire, the query
+// reports true for that exact path — and false again immediately after
+// Release, since the registered handle is deregistered before the lock
+// file is even removed.
+func TestHeldByCurrentProcess_TrueOnlyForOurExactOpenHandle(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "writer.lock")
+	f, err := Acquire(path)
+	if err != nil {
+		t.Fatalf("Acquire: %v", err)
+	}
+	held, err := HeldByCurrentProcess(path)
+	if err != nil || !held {
+		t.Fatalf("HeldByCurrentProcess(after Acquire) = %t, %v, want true, nil", held, err)
+	}
+	if err := Release(f, path); err != nil {
+		t.Fatalf("Release: %v", err)
+	}
+	held, err = HeldByCurrentProcess(path)
+	if err != nil || held {
+		t.Fatalf("HeldByCurrentProcess(after Release) = %t, %v, want false, nil", held, err)
+	}
+}
+
+// TestHeldByCurrentProcess_NoFileNeverAcquired proves a path this process
+// never called Acquire on reports false, not an error — the ordinary
+// "nothing to prove" case, distinct from the forged-lock case below.
+func TestHeldByCurrentProcess_NoFileNeverAcquired(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "writer.lock")
+	held, err := HeldByCurrentProcess(path)
+	if err != nil || held {
+		t.Fatalf("HeldByCurrentProcess(never acquired) = %t, %v, want false, nil", held, err)
+	}
+}
+
+// TestHeldByCurrentProcess_ForgedLockWithOurOwnPIDIsNeverHeld is SI-177's
+// "forged-lock rule": a lock file naming this process's own real pid/start
+// bytes — but written directly to disk, never through this process's own
+// successful Acquire — must NOT be reported held. Matching PID/start bytes
+// alone is never ownership proof; only the registry is.
+func TestHeldByCurrentProcess_ForgedLockWithOurOwnPIDIsNeverHeld(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "writer.lock")
+	info := Info{PID: os.Getpid(), Start: time.Now().Unix()}
+	data, err := json.Marshal(info)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		t.Fatalf("seeding forged lock file: %v", err)
+	}
+	held, err := HeldByCurrentProcess(path)
+	if err != nil || held {
+		t.Fatalf("HeldByCurrentProcess(forged, our own pid, no registry entry) = %t, %v, want false, nil", held, err)
+	}
+}
+
+// TestHeldByCurrentProcess_ReplacedFileIsNotHeld proves that once the
+// registered lock path is removed and a NEW file (even one with identical
+// bytes) takes its place, the query reports false: the registry proves
+// ownership of an exact open file identity, not of a path spelling.
+func TestHeldByCurrentProcess_ReplacedFileIsNotHeld(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "writer.lock")
+	f, err := Acquire(path)
+	if err != nil {
+		t.Fatalf("Acquire: %v", err)
+	}
+	defer func() { _ = f.Close() }()
+
+	original, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, original, 0o644); err != nil {
+		t.Fatalf("recreating lock with identical bytes: %v", err)
+	}
+
+	held, err := HeldByCurrentProcess(path)
+	if err != nil || held {
+		t.Fatalf("HeldByCurrentProcess(removed+recreated, identical bytes) = %t, %v, want false, nil", held, err)
+	}
+}
+
+// TestHeldByCurrentProcess_RemovedFileIsNotHeld proves a registered lock
+// whose path has simply been removed (never recreated) also reports
+// false, not an error.
+func TestHeldByCurrentProcess_RemovedFileIsNotHeld(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "writer.lock")
+	f, err := Acquire(path)
+	if err != nil {
+		t.Fatalf("Acquire: %v", err)
+	}
+	defer func() { _ = f.Close() }()
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	held, err := HeldByCurrentProcess(path)
+	if err != nil || held {
+		t.Fatalf("HeldByCurrentProcess(removed, not recreated) = %t, %v, want false, nil", held, err)
+	}
+}
+
+// TestHeldByCurrentProcess_SymlinkToTheStillOpenFileIsNotHeld pins the
+// documented symlink guarantee against mutation: it is not enough for
+// path's ultimate TARGET to be our still-open registered file — path
+// itself must directly name that exact open file identity. Here the
+// registered file is renamed aside (the open *os.File handle stays valid,
+// still referring to the exact same inode) and a symlink is placed at the
+// ORIGINAL path pointing at that renamed-aside file. A query using
+// os.Stat (which follows symlinks) would incorrectly resolve the symlink
+// to the same inode and report true; only os.Lstat's refusal to follow
+// the symlink — comparing the SYMLINK's own identity, not its target's —
+// correctly reports false. This is exactly the mutation
+// (os.Lstat -> os.Stat at HeldByCurrentProcess's disk-side stat) that
+// must fail this test.
+func TestHeldByCurrentProcess_SymlinkToTheStillOpenFileIsNotHeld(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "writer.lock")
+	f, err := Acquire(path)
+	if err != nil {
+		t.Fatalf("Acquire: %v", err)
+	}
+	defer func() { _ = f.Close() }()
+
+	aside := filepath.Join(dir, "writer.lock.real")
+	if err := os.Rename(path, aside); err != nil {
+		t.Fatalf("renaming the registered lock aside: %v", err)
+	}
+	if err := os.Symlink(aside, path); err != nil {
+		t.Fatalf("symlinking path back at the still-open registered file: %v", err)
+	}
+
+	held, err := HeldByCurrentProcess(path)
+	if err != nil || held {
+		t.Fatalf("HeldByCurrentProcess(symlink at path pointing at the still-open registered file) = %t, %v, want false, nil", held, err)
+	}
+}
+
+// TestHeldByCurrentProcess_ClosedRegisteredHandleIsAnError drives a real
+// stat failure into HeldByCurrentProcess's held.Stat() error branch
+// (filelock.go's "stating held lock handle" path): the registry still
+// names a handle, but that handle was closed out from under it (bypassing
+// Release, which would have deregistered it first) — held.Stat() on an
+// already-closed *os.File fails. The query must return the honest error,
+// never a guessed boolean either way.
+func TestHeldByCurrentProcess_ClosedRegisteredHandleIsAnError(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "writer.lock")
+	f, err := Acquire(path)
+	if err != nil {
+		t.Fatalf("Acquire: %v", err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatalf("closing the registered handle directly: %v", err)
+	}
+	t.Cleanup(func() {
+		deregisterAcquired(path, f)
+		_ = os.Remove(path)
+	})
+
+	held, err := HeldByCurrentProcess(path)
+	if err == nil {
+		t.Fatalf("HeldByCurrentProcess(closed registered handle) = %t, nil, want a non-nil error (never a guessed boolean)", held)
+	}
+	if held {
+		t.Fatalf("HeldByCurrentProcess(closed registered handle) = true, %v, want false alongside the error", err)
+	}
+}
+
+// TestHeldByCurrentProcess_UnreadableLockPathIsAnError drives a real stat
+// failure into HeldByCurrentProcess's os.Lstat(path) error branch (the
+// "stating lock path" path, distinct from held.Stat()'s branch above): the
+// registered handle itself is perfectly healthy, but the lock path's
+// parent directory has been made unreadable, so os.Lstat(path) fails with
+// something other than os.ErrNotExist. The query must return the honest
+// error rather than reporting either boolean.
+func TestHeldByCurrentProcess_UnreadableLockPathIsAnError(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("running as root: directory permission bits do not restrict access")
+	}
+	parent := t.TempDir()
+	sub := filepath.Join(parent, "sub")
+	if err := os.Mkdir(sub, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(sub, "writer.lock")
+	f, err := Acquire(path)
+	if err != nil {
+		t.Fatalf("Acquire: %v", err)
+	}
+	defer func() { _ = f.Close() }()
+
+	if err := os.Chmod(sub, 0o000); err != nil {
+		t.Fatalf("removing directory permissions: %v", err)
+	}
+	defer func() { _ = os.Chmod(sub, 0o755) }()
+
+	held, err := HeldByCurrentProcess(path)
+	if err == nil {
+		t.Skipf("HeldByCurrentProcess(unreadable lock directory) = %t, nil — this environment does not enforce directory permission bits (want a non-nil error where it does)", held)
+	}
+	if held {
+		t.Fatalf("HeldByCurrentProcess(unreadable lock directory) = true, %v, want false alongside the error", err)
+	}
+}

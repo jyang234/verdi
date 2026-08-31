@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"github.com/jyang234/verdi/internal/artifact"
 	"github.com/jyang234/verdi/internal/canonjson"
@@ -72,8 +73,51 @@ type LockedWriter struct {
 	coordinator Coordinator
 }
 
+// checkoutMutexRegistryMu/checkoutMutexRegistry are SI-177's per-checkout
+// in-process transaction mutex registry (design §6.1.2 item 3): one
+// *sync.Mutex per validated checkout writer-lock path's cleaned absolute
+// spelling, created lazily and never removed (parity with filelock's own
+// process-local registry — cardinality is bounded by the number of
+// distinct checkouts one process ever touches, not by call volume).
+// Keying different checkouts under different mutexes is what keeps them
+// from being globally serialized by this mechanism.
+var (
+	checkoutMutexRegistryMu sync.Mutex
+	checkoutMutexRegistry   = map[string]*sync.Mutex{}
+)
+
+func checkoutMutexFor(key string) *sync.Mutex {
+	checkoutMutexRegistryMu.Lock()
+	defer checkoutMutexRegistryMu.Unlock()
+	mu, ok := checkoutMutexRegistry[key]
+	if !ok {
+		mu = &sync.Mutex{}
+		checkoutMutexRegistry[key] = mu
+	}
+	return mu
+}
+
 // WithWriterLock acquires the existing checkout-wide lock, performs work, and
-// releases it. It never creates a per-spec lock.
+// releases it — UNLESS this process already owns that exact lock (SI-177,
+// Wave 6 design §6.1.2), in which case it reuses the outer exclusion
+// without releasing it. It never creates a per-spec lock.
+//
+// Non-recursive contract: a work callback passed to WithWriterLock must
+// NEVER call WithWriterLock again, whether directly or through a nested
+// operation. Reuse only lets ONE outer holder (this process's own
+// already-acquired lock, such as `verdi serve`'s lifetime lock) and ONE
+// inner WithWriterLock invocation share that single exclusion; there is no
+// recursion detection or guard here, and none is authorized — a violation
+// is a programming error in the caller, not a condition this function
+// diagnoses.
+//
+// The wait to enter the per-checkout mutex below is, by design, both
+// uncancellable and unbounded: ctx is never consulted while waiting on
+// that mutex (only after it is held), because design §6.1.2 items 3 and 5
+// command that every concurrent transaction on the same checkout fully
+// serialize, and a context-cancellable wait there would let one caller's
+// cancellation reorder or interleave with another's already-admitted
+// transaction.
 func WithWriterLock(ctx context.Context, root string, coordinator Coordinator, work func(*LockedWriter) error) (resultErr error) {
 	if ctx == nil {
 		return fmt.Errorf("draftmutation: nil context")
@@ -93,16 +137,45 @@ func WithWriterLock(ctx context.Context, root string, coordinator Coordinator, w
 	if err := validateRegularDestination(lockPath, false); err != nil {
 		return fmt.Errorf("draftmutation: validating global writer lock: %w", err)
 	}
-	lockFile, err := filelock.Acquire(lockPath)
+
+	// The mutex key is the cleaned absolute spelling of lockPath, derived
+	// ONLY after the symlink/non-directory validation above has already
+	// refused a forbidden symlink spelling — a rejected path never reaches
+	// here, so it can never be resolved into an alternate authorized key
+	// (design §6.1.2 item 3).
+	key, err := filepath.Abs(lockPath)
 	if err != nil {
-		return fmt.Errorf("draftmutation: acquiring global writer lock: %w", err)
+		return fmt.Errorf("draftmutation: resolving global writer lock path: %w", err)
 	}
-	defer func() {
-		if releaseErr := filelock.Release(lockFile, lockPath); releaseErr != nil && resultErr == nil {
-			resultErr = releaseErr
+	key = filepath.Clean(key)
+	mu := checkoutMutexFor(key)
+	mu.Lock()
+	defer mu.Unlock()
+
+	lockFile, err := filelock.Acquire(lockPath)
+	if err == nil {
+		defer func() {
+			if releaseErr := filelock.Release(lockFile, lockPath); releaseErr != nil && resultErr == nil {
+				resultErr = releaseErr
+			}
+		}()
+		return work(writer)
+	}
+	var held *filelock.ErrHeld
+	if errors.As(err, &held) {
+		// SI-177's registry-proven reuse: ordinary acquisition failed
+		// because a lock is live, but if the process-local registry proves
+		// THIS process holds the exact still-open file at lockPath (never
+		// PID/start text, never a caller-authored lock body alone), reuse
+		// that outer exclusion instead of failing — and do NOT release it;
+		// it is not ours to release. Every other case (a genuinely foreign
+		// live holder, an unproven or errored query, a replaced/forged
+		// lock) falls through to the existing operational refusal below.
+		if owned, proveErr := filelock.HeldByCurrentProcess(lockPath); proveErr == nil && owned {
+			return work(writer)
 		}
-	}()
-	return work(writer)
+	}
+	return fmt.Errorf("draftmutation: acquiring global writer lock: %w", err)
 }
 
 // Transaction carries exact old/new bytes for one spec and its complete

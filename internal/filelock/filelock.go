@@ -11,7 +11,14 @@
 // the wave-4 S4 spike's proven design (read-only reference, reimplemented
 // here); the PID-reuse gap closure (ps -o lstart= cross-check, with a
 // documented kill-probe-only fallback) is this package's own addition, per
-// PLAN.md Phase 9 exit criteria.
+// PLAN.md Phase 9 exit criteria. SI-177 (Wave 6 design §6.1.2) is this
+// package's second own addition: a synchronized process-local ownership
+// registry recording exact successful Acquire handles, and the read-only
+// HeldByCurrentProcess query over it. Acquire itself stays non-reentrant —
+// a live existing lock always returns ErrHeld, even to its own owning
+// process — the registry only lets a caller PROVE after the fact that an
+// ErrHeld it just received actually names this process's own still-open
+// lock, so it can make its own reuse decision instead of failing outright.
 package filelock
 
 import (
@@ -21,8 +28,10 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -143,6 +152,78 @@ func alive(pid int, recordedStart int64) bool {
 	return time.Duration(diff)*time.Second <= lockStartTolerance
 }
 
+// registryMu/registry are SI-177's synchronized process-local ownership
+// registry: on every successful Acquire, the exact *os.File handle this
+// process was just granted is recorded here, keyed by the exact path
+// string Acquire was called with. HeldByCurrentProcess (below) is the
+// only reader; Release is the only remover. Neither the lock body's PID
+// text nor liveness is ever consulted here — registration begins only at
+// a genuine successful O_CREATE|O_EXCL and ends only when the exact
+// registered handle is released, so a caller-authored or foreign lock
+// file naming this process's own pid/start bytes is never proof of
+// ownership by itself (the "forged-lock rule": matching bytes without a
+// registry entry is not held by us).
+var (
+	registryMu sync.Mutex
+	registry   = map[string]*os.File{}
+)
+
+func registerAcquired(path string, f *os.File) {
+	key := filepath.Clean(path)
+	registryMu.Lock()
+	registry[key] = f
+	registryMu.Unlock()
+}
+
+// deregisterAcquired removes path's registry entry only if it still names
+// exactly f — the handle THIS release call owns — so a mismatched or
+// stale Release call can never evict another, still-valid registration.
+func deregisterAcquired(path string, f *os.File) {
+	key := filepath.Clean(path)
+	registryMu.Lock()
+	if registry[key] == f {
+		delete(registry, key)
+	}
+	registryMu.Unlock()
+}
+
+// HeldByCurrentProcess is SI-177's read-only ownership query. It reports
+// true only when path resolves to the exact still-open file identity this
+// process's own successful Acquire registered — never from PID/start text,
+// liveness, or a caller-authored lock body alone. A replaced lock (the
+// path now names a different file, even one with identical bytes), a
+// removed/recreated lock, a symlinked path, or a path this process never
+// itself Acquired (no registry entry at all — the forged-lock rule) all
+// report false. A path that cannot be inspected right now (a transient
+// stat failure distinct from the file simply being gone) is reported as an
+// error rather than a guessed answer, so a caller treats it as unproven
+// rather than as proven ownership.
+func HeldByCurrentProcess(path string) (bool, error) {
+	key := filepath.Clean(path)
+	registryMu.Lock()
+	held, ok := registry[key]
+	registryMu.Unlock()
+	if !ok {
+		return false, nil
+	}
+	heldInfo, err := held.Stat()
+	if err != nil {
+		return false, fmt.Errorf("filelock: stating held lock handle for %s: %w", path, err)
+	}
+	diskInfo, err := os.Lstat(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return false, nil // removed out from under the registered handle
+	}
+	if err != nil {
+		return false, fmt.Errorf("filelock: stating lock path %s: %w", path, err)
+	}
+	// os.SameFile compares device+inode; a symlink, a removed-and-recreated
+	// file, or any other replacement at path never shares the open handle's
+	// identity, so this single comparison covers every "not actually the
+	// file we hold" case without a separate symlink-mode check.
+	return os.SameFile(heldInfo, diskInfo), nil
+}
+
 // Acquire implements I-12(a) end to end: create path with O_CREATE|O_EXCL
 // and write {pid,start} JSON on success. If the path already exists,
 // inspect the holder recorded inside — alive (per alive, above) yields
@@ -164,6 +245,7 @@ func acquire(path string, retriesLeft int) (*os.File, error) {
 			_ = os.Remove(path)
 			return nil, fmt.Errorf("filelock: writing lock %s: %w", path, encErr)
 		}
+		registerAcquired(path, f)
 		return f, nil
 	}
 	if !errors.Is(err, os.ErrExist) {
@@ -232,7 +314,13 @@ func acquire(path string, retriesLeft int) (*os.File, error) {
 // Release closes f and removes path — the holder's own clean path. A
 // crash leaves the lock behind on disk exactly as I-12 intends: the next
 // acquirer's alive() probe discovers the dead pid and takes over.
+// Release is the sole owner release and deregisters exactly the
+// registered handle (deregisterAcquired only removes a registry entry
+// that still names this exact *os.File), before closing it — so no
+// window exists where a still-registered entry names an already-closing
+// handle.
 func Release(f *os.File, path string) error {
+	deregisterAcquired(path, f)
 	if cerr := f.Close(); cerr != nil {
 		return fmt.Errorf("filelock: closing lock %s: %w", path, cerr)
 	}

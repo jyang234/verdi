@@ -33,6 +33,19 @@ const draftMutationImport = "github.com/jyang234/verdi/internal/draftmutation"
 // out of scope now; mcp.go and serve.go still hold the boundary and stay
 // guarded, so a future regression that pulls draftmutation into either
 // entrypoint still fails here (the gate grows, never shrinks — CLAUDE.md).
+//
+// A SECOND narrow path fell away in Wave 6 Task 1B (design §6.1.2 item 6:
+// "Task 1B routes boardSpecServer.spliceSpec's complete
+// read/parse/apply/validate/atomic-write callback through WithWriterLock";
+// plan Task 1B "Route only the legacy spliceSpec callback through
+// WithWriterLock"): internal/workbench/boardspecapi.go alone now imports
+// draftmutation, exclusively so the surviving legacy spec.md splice runs
+// inside the checkout-wide writer transaction boundary until Task 2
+// deletes that path atomically. Every OTHER internal/workbench production
+// file stays guarded — the Task 2 mutation-adapter boundary (designapp
+// rewiring, browser-actor minting) has NOT landed, and a draftmutation
+// import appearing anywhere else in the package before that unit still
+// fails here.
 func TestLaterWorkbenchAdapterDoesNotImportDraftMutation(t *testing.T) {
 	repositoryRoot := filepath.Join("..", "..")
 	targets := []string{
@@ -40,6 +53,9 @@ func TestLaterWorkbenchAdapterDoesNotImportDraftMutation(t *testing.T) {
 		filepath.Join(repositoryRoot, "cmd", "verdi", "mcp.go"),
 		filepath.Join(repositoryRoot, "cmd", "verdi", "serve.go"),
 	}
+	// Task 1B's one commanded exception (design §6.1.2 item 6): the legacy
+	// board splice's WithWriterLock participation lives in this exact file.
+	spliceException := filepath.Join(repositoryRoot, "internal", "workbench", "boardspecapi.go")
 	parsed := 0
 	for _, target := range targets {
 		info, err := os.Stat(target)
@@ -73,7 +89,7 @@ func TestLaterWorkbenchAdapterDoesNotImportDraftMutation(t *testing.T) {
 				if err != nil {
 					t.Fatalf("unquoting import in %s: %v", path, err)
 				}
-				if value == draftMutationImport {
+				if value == draftMutationImport && path != spliceException {
 					t.Fatalf("later adapter %s imports draftmutation before its delivery unit", path)
 				}
 			}

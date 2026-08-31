@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -426,9 +427,16 @@ func TestConcurrentGlobalLockContentionStaleTakeoverAndNoPerSpecLock(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = WithWriterLock(context.Background(), root, Coordinator{}, func(*LockedWriter) error { return nil })
-	if err == nil || !strings.Contains(err.Error(), "held") {
-		t.Fatalf("WithWriterLock contention error = %v", err)
+	// SI-177: this process already owns the exact outer lock (acquired
+	// directly, above, exactly as `verdi serve`'s lifetime lock would be),
+	// so WithWriterLock now PROVES that ownership via the registry and
+	// reuses the outer exclusion rather than failing — the dedicated,
+	// thorough proof of this lives in
+	// TestWithWriterLockReusesCurrentProcessHolder; this call only checks
+	// that reuse does not disturb the surrounding contention/takeover
+	// scenario this test otherwise covers.
+	if err := WithWriterLock(context.Background(), root, Coordinator{}, func(*LockedWriter) error { return nil }); err != nil {
+		t.Fatalf("WithWriterLock reuse of our own outer lock = %v, want nil", err)
 	}
 	if err := filelock.Release(lock, lockPath); err != nil {
 		t.Fatal(err)
@@ -469,6 +477,248 @@ func TestConcurrentProcessHelper(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatal(err)
+	}
+}
+
+// TestWithWriterLockReusesCurrentProcessHolder is Task 1B's required
+// semantic RED (design §6.1.2 item 4, ledger SI-177): a process that
+// already owns the checkout's outer writer lock (acquired directly here,
+// exactly as `verdi serve`'s lifetime lock is) calls WithWriterLock on the
+// SAME checkout. Base: filelock.Acquire's ordinary path returns ErrHeld
+// with nothing further, so WithWriterLock fails and the callback never
+// runs. GREEN: WithWriterLock proves ownership via
+// filelock.HeldByCurrentProcess, runs the callback under the reused outer
+// exclusion, and leaves the exact same outer lock file present and
+// registry-proven owned afterward — it is never released or replaced by
+// the inner reuse.
+func TestWithWriterLockReusesCurrentProcessHolder(t *testing.T) {
+	root := transactionRoot(t)
+	lockPath := store.WriterLockPath(root)
+	lock, err := filelock.Acquire(lockPath)
+	if err != nil {
+		t.Fatalf("Acquire (simulating serve's lifetime lock): %v", err)
+	}
+	defer func() { _ = filelock.Release(lock, lockPath) }()
+
+	before, err := os.Stat(lockPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	callbackRan := false
+	err = WithWriterLock(context.Background(), root, Coordinator{}, func(*LockedWriter) error {
+		callbackRan = true
+		held, herr := filelock.HeldByCurrentProcess(lockPath)
+		if herr != nil || !held {
+			t.Fatalf("HeldByCurrentProcess during reuse = %t, %v, want true, nil", held, herr)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("WithWriterLock(reentrant reuse) = %v, want nil (the outer lock is already ours)", err)
+	}
+	if !callbackRan {
+		t.Fatal("WithWriterLock(reentrant reuse) did not run the callback")
+	}
+
+	after, statErr := os.Stat(lockPath)
+	if statErr != nil {
+		t.Fatalf("outer lock is gone after reuse: %v", statErr)
+	}
+	if !os.SameFile(before, after) {
+		t.Fatal("outer lock file identity changed across reuse — it was released and recreated rather than reused")
+	}
+	held, herr := filelock.HeldByCurrentProcess(lockPath)
+	if herr != nil || !held {
+		t.Fatalf("HeldByCurrentProcess after reuse returns = %t, %v, want true, nil (the outer lock must remain owned)", held, herr)
+	}
+}
+
+// TestWithWriterLockSerializesConcurrentReuseUnderOneOuterLock proves the
+// per-checkout in-process transaction mutex: two concurrent WithWriterLock
+// calls reusing the SAME already-held outer lock never run their
+// callbacks at the same time, and complete in a deterministic,
+// test-controlled order.
+func TestWithWriterLockSerializesConcurrentReuseUnderOneOuterLock(t *testing.T) {
+	root := transactionRoot(t)
+	lockPath := store.WriterLockPath(root)
+	lock, err := filelock.Acquire(lockPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = filelock.Release(lock, lockPath) }()
+
+	var mu sync.Mutex
+	var order []string
+	record := func(event string) {
+		mu.Lock()
+		order = append(order, event)
+		mu.Unlock()
+	}
+
+	firstEntered := make(chan struct{})
+	releaseFirst := make(chan struct{})
+	first := make(chan error, 1)
+	go func() {
+		first <- WithWriterLock(context.Background(), root, Coordinator{}, func(*LockedWriter) error {
+			record("first-enter")
+			close(firstEntered)
+			<-releaseFirst
+			record("first-exit")
+			return nil
+		})
+	}()
+	select {
+	case <-firstEntered:
+	case err := <-first:
+		t.Fatalf("first WithWriterLock returned before entering its callback: %v (want it to reuse the already-held outer lock)", err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("first WithWriterLock never entered its callback")
+	}
+
+	secondEntered := make(chan struct{})
+	second := make(chan error, 1)
+	go func() {
+		second <- WithWriterLock(context.Background(), root, Coordinator{}, func(*LockedWriter) error {
+			record("second-enter")
+			close(secondEntered)
+			return nil
+		})
+	}()
+
+	select {
+	case <-secondEntered:
+		t.Fatal("second WithWriterLock entered its callback while the first still held the mutex — callbacks overlapped")
+	case <-time.After(150 * time.Millisecond):
+	}
+
+	close(releaseFirst)
+	if err := <-first; err != nil {
+		t.Fatalf("first WithWriterLock: %v", err)
+	}
+	select {
+	case <-secondEntered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("second WithWriterLock never entered its callback after the first released the mutex")
+	}
+	if err := <-second; err != nil {
+		t.Fatalf("second WithWriterLock: %v", err)
+	}
+
+	mu.Lock()
+	got := append([]string(nil), order...)
+	mu.Unlock()
+	want := []string{"first-enter", "first-exit", "second-enter"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("callback order = %v, want %v (no overlap, deterministic order)", got, want)
+	}
+
+	if held, herr := filelock.HeldByCurrentProcess(lockPath); herr != nil || !held {
+		t.Fatalf("HeldByCurrentProcess after both reuses = %t, %v, want true, nil", held, herr)
+	}
+}
+
+// TestWithWriterLockDifferentCheckoutsAreNotGloballySerialized proves the
+// mutex is scoped per validated checkout writer-lock path: two DIFFERENT
+// checkouts, each already locked by this process, run their reused
+// WithWriterLock callbacks CONCURRENTLY rather than blocking on each
+// other.
+func TestWithWriterLockDifferentCheckoutsAreNotGloballySerialized(t *testing.T) {
+	rootA := transactionRoot(t)
+	rootB := transactionRoot(t)
+	lockPathA, lockPathB := store.WriterLockPath(rootA), store.WriterLockPath(rootB)
+
+	lockA, err := filelock.Acquire(lockPathA)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = filelock.Release(lockA, lockPathA) }()
+	lockB, err := filelock.Acquire(lockPathB)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = filelock.Release(lockB, lockPathB) }()
+
+	aEntered := make(chan struct{})
+	bEntered := make(chan struct{})
+	release := make(chan struct{})
+	errA := make(chan error, 1)
+	errB := make(chan error, 1)
+
+	go func() {
+		errA <- WithWriterLock(context.Background(), rootA, Coordinator{}, func(*LockedWriter) error {
+			close(aEntered)
+			<-release
+			return nil
+		})
+	}()
+	go func() {
+		errB <- WithWriterLock(context.Background(), rootB, Coordinator{}, func(*LockedWriter) error {
+			close(bEntered)
+			<-release
+			return nil
+		})
+	}()
+
+	waitingFor := map[string]bool{"a": true, "b": true}
+	timeout := time.After(5 * time.Second)
+	for len(waitingFor) > 0 {
+		select {
+		case <-aEntered:
+			delete(waitingFor, "a")
+			aEntered = nil
+		case <-bEntered:
+			delete(waitingFor, "b")
+			bEntered = nil
+		case <-timeout:
+			t.Fatalf("different checkouts appear globally serialized: still waiting for %v to enter its callback", waitingFor)
+		}
+	}
+	close(release)
+	if err := <-errA; err != nil {
+		t.Fatalf("checkout A: %v", err)
+	}
+	if err := <-errB; err != nil {
+		t.Fatalf("checkout B: %v", err)
+	}
+}
+
+// TestWithWriterLockForgedLockWithoutRegistryEntryRefuses is SI-177's
+// forged-lock RED family: a lock file naming this process's own real
+// pid/start bytes, written directly to disk (never through this
+// process's own successful filelock.Acquire), carries no registry entry
+// — HeldByCurrentProcess must report false, and WithWriterLock must stay
+// refused exactly as it would for any other live foreign holder, with
+// zero journal/spec/provenance effects and the forged lock file left
+// completely untouched (never treated as stale, since it does name a
+// genuinely live pid).
+func TestWithWriterLockForgedLockWithoutRegistryEntryRefuses(t *testing.T) {
+	root := transactionRoot(t)
+	lockPath := store.WriterLockPath(root)
+	forged, err := json.Marshal(filelock.Info{PID: os.Getpid(), Start: time.Now().Unix()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(lockPath, forged, 0o644); err != nil {
+		t.Fatalf("seeding forged lock file: %v", err)
+	}
+
+	err = runTransaction(t, root, Coordinator{})
+	if err == nil || !strings.Contains(err.Error(), "held") {
+		t.Fatalf("WithWriterLock(forged lock, no registry entry) error = %v, want a held refusal", err)
+	}
+
+	if _, statErr := os.Stat(store.DraftMutationDir(root, transactionSpecName)); !os.IsNotExist(statErr) {
+		t.Fatalf("journal/staging effects leaked from a refused forged-lock transaction: stat err=%v", statErr)
+	}
+	if spec, rerr := os.ReadFile(store.SpecPath(root, store.ZoneActive, transactionSpecName)); rerr != nil || string(spec) != string(oldSpecBytes) {
+		t.Fatalf("spec bytes mutated despite refused forged-lock transaction: %q, %v", spec, rerr)
+	}
+	if provenance, rerr := os.ReadFile(store.DesignProvenancePath(root, store.ZoneActive, transactionSpecName)); rerr != nil || string(provenance) != string(oldProvenanceBytes) {
+		t.Fatalf("provenance mutated despite refused forged-lock transaction: %q, %v", provenance, rerr)
+	}
+	if _, statErr := os.Stat(lockPath); statErr != nil {
+		t.Fatalf("forged lock file was removed (a genuinely live pid must never be treated as stale): %v", statErr)
 	}
 }
 

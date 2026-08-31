@@ -18,6 +18,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/jyang234/verdi/internal/artifact"
@@ -26,6 +27,7 @@ import (
 	"github.com/jyang234/verdi/internal/boardio"
 	"github.com/jyang234/verdi/internal/boardlayout"
 	"github.com/jyang234/verdi/internal/designscaffold"
+	"github.com/jyang234/verdi/internal/draftmutation"
 	"github.com/jyang234/verdi/internal/gitx"
 	"github.com/jyang234/verdi/internal/model"
 	"github.com/jyang234/verdi/internal/store"
@@ -191,40 +193,94 @@ func (s *boardSpecServer) boardSpecAPIHandler() http.HandlerFunc {
 	}
 }
 
+// spliceSpecTestPause, when set non-nil, is invoked by spliceSpec between
+// its pristine read of spec.md and its atomic write — a narrow TEST-ONLY
+// injection point (Task 1B's owner-carried closure minor) that lets the
+// focused race test deterministically hold the legacy splice open inside
+// its read-modify-write window. It holds nil in production and is stored
+// only by this package's own tests. The atomic.Pointer keeps the hook's
+// store/load pairing race-clean even if a future test runs parallel
+// splices; the production fast path stays a single atomic nil load.
+var spliceSpecTestPause atomic.Pointer[func()]
+
 // spliceSpec runs one splice transaction against the spec's document:
 // parse the pristine buffer, compute edits, apply tail-to-head, strict
 // re-decode (validate-before-write), then atomically replace the file.
 // An invalid result never touches the working tree (S7 §5).
+//
+// Until Task 2 deletes this legacy path, the complete
+// read/parse/apply/validate/atomic-write runs INSIDE the checkout-wide
+// writer transaction boundary — draftmutation.WithWriterLock (Wave 6
+// design §6.1.2 item 6, SI-177) — because it writes the same spec.md
+// bytes a draft-mutation transaction replaces; without that exclusion the
+// two writers' read-modify-write windows can silently lose one update.
+// The callback keeps the exact legacy behavior: no journal, no
+// provenance entry, and response bytes unchanged for the success path
+// and every callback error (WithWriterLock returns the callback's error
+// verbatim). One NEW error class is now reachable, by design: when this
+// host process does not own the checkout's writer lock and cannot
+// acquire it (a live foreign holder), the action surfaces
+// "draftmutation: acquiring global writer lock: filelock: lock held by
+// live pid ..." through the handler's existing action-error path (HTTP
+// 400 with that text) — the refusal outcome §6.1.2 commands for every
+// unproven holder. Per WithWriterLock's non-recursive contract the
+// callback never calls WithWriterLock again. Under `verdi serve`, which
+// holds the checkout's lifetime writer lock, WithWriterLock reuses that
+// registry-proven outer lock; standalone hosts acquire and release it
+// per call.
+//
+// Blocking semantics (design §6.1.2 items 3/5 command them): spliceSpec
+// now blocks — uncancellably and without bound — on the per-checkout
+// transaction mutex until any in-flight draft-mutation transaction
+// completes, and it does so while the caller still holds the handler's
+// writeMu, so a slow draft transaction queues EVERY board mutation on
+// this server behind it. That is the intended serialization: the mutex
+// must cover a complete transaction, and losing an update silently was
+// the alternative.
+//
+// The zero-value Coordinator means real filesystem
+// operations, and context.Background() keeps spliceSpec's signature
+// unchanged (plan Task 1B: modify only spliceSpec) while ensuring an
+// unrelated HTTP cancellation never interrupts the exclusion mid-write.
+// boardio annotation/graduation writes stay OUTSIDE this boundary by
+// design: they own distinct JSONL files that are never part of the
+// spec/provenance transaction projection (§6.1.2's explicit boardio
+// boundary).
 func (s *boardSpecServer) spliceSpec(name string, mutate func(d *splice.Doc) ([]splice.Edit, error)) error {
-	path := filepath.Join(s.specDir(name), "spec.md")
-	src, err := os.ReadFile(path)
-	if err != nil {
-		return fmt.Errorf("workbench: reading spec %s: %w", name, err)
-	}
-	doc, err := splice.Parse(src)
-	if err != nil {
-		return err
-	}
-	edits, err := mutate(doc)
-	if err != nil {
-		return err
-	}
-	out, err := doc.Apply(edits)
-	if err != nil {
-		return err
-	}
-	if err := splice.Validate(out); err != nil {
-		return err
-	}
-	// atomicfile.Write (MkdirAll + CreateTemp + fsync + Rename-into-place)
-	// — this repo's one shared crash-durability primitive — never a private
-	// CreateTemp->Write->Close->Rename copy, so a crash mid-write can never
-	// leave a torn spec.md nor lose the fsync that copy lacked
-	// (CLEANUP-BEFORE #1).
-	if err := atomicfile.Write(path, out, 0o644); err != nil {
-		return fmt.Errorf("workbench: %w", err)
-	}
-	return nil
+	return draftmutation.WithWriterLock(context.Background(), s.root, draftmutation.Coordinator{}, func(*draftmutation.LockedWriter) error {
+		path := filepath.Join(s.specDir(name), "spec.md")
+		src, err := os.ReadFile(path)
+		if err != nil {
+			return fmt.Errorf("workbench: reading spec %s: %w", name, err)
+		}
+		if pause := spliceSpecTestPause.Load(); pause != nil {
+			(*pause)()
+		}
+		doc, err := splice.Parse(src)
+		if err != nil {
+			return err
+		}
+		edits, err := mutate(doc)
+		if err != nil {
+			return err
+		}
+		out, err := doc.Apply(edits)
+		if err != nil {
+			return err
+		}
+		if err := splice.Validate(out); err != nil {
+			return err
+		}
+		// atomicfile.Write (MkdirAll + CreateTemp + fsync + Rename-into-place)
+		// — this repo's one shared crash-durability primitive — never a private
+		// CreateTemp->Write->Close->Rename copy, so a crash mid-write can never
+		// leave a torn spec.md nor lose the fsync that copy lacked
+		// (CLEANUP-BEFORE #1).
+		if err := atomicfile.Write(path, out, 0o644); err != nil {
+			return fmt.Errorf("workbench: %w", err)
+		}
+		return nil
+	})
 }
 
 // actionEditText: the inline card editor's blur — editing the card IS
