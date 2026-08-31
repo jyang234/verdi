@@ -444,8 +444,11 @@ transaction boundary inside that process:
    by this process. PID text, liveness, or a caller-authored lock body alone is
    never ownership proof.
 3. `draftmutation.WithWriterLock` serializes complete transactions with a
-   process-local mutex scoped to the canonical checkout writer-lock path.
-   Different checkouts are not globally serialized.
+   process-local mutex scoped to the validated checkout writer-lock path's
+   cleaned absolute spelling. Existing component-by-component `lstat` refusal
+   runs before the key is trusted, so a symlink spelling cannot become an
+   alternate ownership or mutex identity. Different checkouts are not globally
+   serialized.
 4. After entering that mutex, `WithWriterLock` first uses the ordinary
    acquisition path. If it acquires the lock, it releases exactly that handle
    after the callback. If acquisition returns `ErrHeld` and the registry proves
@@ -456,6 +459,12 @@ transaction boundary inside that process:
    writes, fsync, callback completion, and any inner-acquired release. Crash
    safety, journal ordering, stale-lock takeover, symlink refusal, and
    cross-process contention remain unchanged.
+6. Until Task 2 deletes the legacy board splice writer, Task 1B routes
+   `boardSpecServer.spliceSpec`'s complete read/parse/apply/validate/atomic-write
+   callback through `WithWriterLock`. That temporary adapter participates in
+   the same per-checkout serialization without gaining a second lock or
+   journal algorithm. Task 2 removes the legacy path atomically as already
+   required.
 
 SI-177 narrowly supersedes SI-69's phrase “refusing while serve/another writer
 holds it” only when “serve” is this caller process and the process-local
@@ -467,11 +476,23 @@ it disappears on crash, leaving the existing stale-lock takeover protocol to
 recover the checkout.
 
 This is process-bound reuse, not recursive transaction nesting: a mutation
-callback must not call `WithWriterLock` again. The correction creates no actor,
-request, route, or browser authority and changes no artifact bytes. It repairs
-the already-shipped live `mutate_draft` MCP path and supplies the same kernel
-behavior to the later workbench adapter. A dedicated non-frontend Task 1B
-merges and is independently Codex-approved before Task 2 resumes.
+callback must not call `WithWriterLock` again, and the public Go documentation
+retains that non-recursive contract. The serialization claim covers
+`WithWriterLock` transactions and the temporary legacy `spec.md` splice routed
+through that operation; it is not a claim that every file written by the serve
+process shares one mutex. In particular, `boardio` owns distinct annotation
+JSONL files outside the spec/provenance transaction projection. SI-177 neither
+aliases those files to `spec.md` nor claims a transaction write can replace an
+annotation append; Task 2 retains the existing boardio owner and its explicit
+post-clean-transaction ordering.
+
+The correction creates no actor, request, route, or browser authority and
+changes no artifact bytes. It repairs the already-shipped live `mutate_draft`
+MCP path and supplies the same kernel behavior to the later workbench adapter.
+Task 1B is non-visual, but its temporary legacy-handler participation is owned
+by a FABLE frontend worker under the repository's frontend exception; Sonnet
+owns the filelock/draftmutation kernel. The unit merges and is independently
+Codex-approved before Task 2 resumes.
 
 ### 6.2 ASD workbench
 
@@ -740,7 +761,7 @@ The consolidated authority carries 37/37 source groups:
 | 34 | Wave 6 handoff Codex independent review | §§10–11 | Exact diff/authority/probes and reachable-state findings required; one bounded correction and one Codex closure only. |
 | 35 | Wave 6 handoff browser/test/controller gates | §§5 and 11 | Server-rendered/dependency-free/no-network, Playwright keyboard/responsive coverage, recording scan, alternate-port disclosure, full race/verify/spec-align retained. |
 | 36 | Task 2 browser-human stop-gate witness and SI-176 | §§1, 4.1, 6.1.1, 10–11 | Preserves unconditional AI-free browser authoring, explicit unauthenticated provenance, failed-resolution non-bypass, agent policy enforcement, honest policy absence, V1 history, and serialized predecessor review; no runtime or frontend implementation is folded into authority. |
-| 37 | Task 2 same-process writer-lock stop-gate witness and SI-177 | §§1, 6.1.2, 10–11 | Preserves I-12's one-writer-process exclusion and SI-69's crash-safe transaction while narrowly superseding SI-69's serve-held refusal only for this caller process's registry-proven exact outer lock; served mutation becomes reachable through that reuse plus per-checkout in-process serialization, while PID text, cross-process bypass, outer-lock release, durable registry authority, and frontend-owned locking remain excluded. |
+| 37 | Task 2 same-process writer-lock stop-gate witness and SI-177 | §§1, 6.1.2, 10–11 | Preserves I-12's one-writer-process exclusion and SI-69's crash-safe transaction while narrowly superseding SI-69's serve-held refusal only for this caller process's registry-proven exact outer lock; `WithWriterLock` transactions and the temporary legacy `spec.md` splice share per-checkout serialization until Task 2 deletes the splice, while distinct boardio annotation files retain their existing owner and ordering; PID text, cross-process bypass, outer-lock release, durable registry authority, and a system-wide all-file mutex claim remain excluded. |
 
 No source group, semantic rule, public effect, deferral, threat-model boundary,
 or closure disclosure is intentionally omitted. Wave 7 dogfood is explicitly

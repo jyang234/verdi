@@ -279,11 +279,15 @@ is not semantic RED evidence.
 
 ## Task 1B: Correct ASD writer-process transaction custody
 
-**Owner:** Sonnet implementation worker under FABLE orchestration. Opus reviews
-and fixes. Codex independently adjudicates the completed unit. No frontend
-files.
+**Owner:** Sonnet implements and fixes `internal/filelock` and
+`internal/draftmutation` under FABLE orchestration. A FABLE frontend worker
+owns the correction and any fix in `internal/workbench/boardspecapi.go` plus
+its browser-handler tests. Opus independently reviews and fixes accepted
+non-frontend defects; Codex independently adjudicates the completed unit. No
+markup, CSS, JavaScript, asset, visual, or Playwright file changes.
 
-**Authority:** Wave 6 design §6.1.2; ASD AC-7/AC-8; I-12; SI-69 and SI-177.
+**Authority:** Wave 6 design §6.1.2; ASD AC-2/AC-7/AC-8; I-12; SI-69 and
+SI-177.
 
 SI-177 supersedes SI-69 only for a registry-proven outer lock owned by the
 caller process. Every foreign or unproven serve/writer holder retains SI-69's
@@ -295,11 +299,14 @@ existing refusal.
   exact-file process-local ownership registration and its read-only query.
 - Modify `internal/draftmutation/transaction.go` and focused tests for
   per-checkout in-process serialization and proven outer-lock reuse.
+- Modify only `boardSpecServer.spliceSpec` and its focused tests under
+  `internal/workbench` to run the surviving legacy `spec.md` splice inside
+  `WithWriterLock` until Task 2 deletes that path.
 - Modify `cmd/verdi/serve_integration_test.go` and narrowly related MCP
   integration fixtures/tests to prove a real served `mutate_draft` succeeds.
-- Modify no `internal/workbench`, board handler, asset, CSS, JavaScript,
-  Playwright, artifact schema, provenance schema, policy, actor, accepted spec,
-  this plan, design, or ledger file.
+- Modify no other board handler, asset, CSS, JavaScript, Playwright, artifact
+  schema, provenance schema, policy, actor, accepted spec, this plan, design,
+  or ledger file.
 
 **Interfaces:**
 
@@ -313,6 +320,13 @@ existing refusal.
 - Keep `draftmutation.WithWriterLock`'s public signature unchanged. Its inner
   reuse is private and may occur only after ordinary acquisition returns
   `ErrHeld` and `HeldByCurrentProcess` proves ownership.
+- Derive the in-process mutex key as the cleaned absolute writer-lock path only
+  after the existing component-by-component symlink/non-directory checks. Do
+  not resolve a forbidden symlink into an allowed alternate key.
+- Keep `boardio` annotation JSONL outside the draft spec/provenance transaction;
+  Task 1B makes no system-wide all-file serialization claim. The temporary
+  legacy splice participates because it writes the same `spec.md` bytes that a
+  draft transaction replaces.
 
 - [ ] Read I-12, SI-69/SI-177, filelock acquisition/release/stale-takeover
       tests, draftmutation transaction/journal tests, `verdi serve`, standalone
@@ -324,6 +338,11 @@ existing refusal.
       lock; prove their callbacks never overlap and both complete in a
       deterministic order controlled by the test. Also prove different
       checkout lock paths are not globally serialized.
+- [ ] RED a legacy `boardSpecServer.spliceSpec` read/modify/write racing a live
+      MCP `mutate_draft` on the same spec. At base, deterministically pause both
+      after their reads and prove one silently loses the other's update; GREEN
+      must run the legacy splice first and the MCP transaction second, preserve
+      both ordered results, and leave design provenance matching the final spec.
 - [ ] RED a forged lock file carrying the current PID/start but absent from the
       process-local registry; it must remain held/unproven and the mutation must
       refuse with zero journal/spec/provenance effects.
@@ -333,32 +352,40 @@ existing refusal.
 - [ ] Implement the per-canonical-lock-path transaction mutex. Hold it across
       validation, acquisition/reuse, callback/journal work, and any
       inner-acquired release. Release only a handle acquired by that invocation.
+- [ ] Route only the legacy `spliceSpec` callback through `WithWriterLock` and
+      retain its existing parse/edit/validate/atomic-write behavior inside the
+      callback. Do not create provenance for that legacy path or change its
+      response bytes; Task 2 still deletes it completely.
 - [ ] Prove existing live foreign-holder refusal, malformed-lock refusal,
       symlink refusal, stale/dead-holder takeover, PID-reuse protection, and
       crash-retained journal recovery remain unchanged.
 - [ ] Add one real `verdi serve` MCP-socket regression that sends a valid
       policy-authorized `mutate_draft`, observes the canonical clean result and
       exact spec/provenance mutation, and proves the outer writer lock remains
-      continuously held. Retain the existing external built-binary mutation
+      continuously held. Its base RED must assert the exact typed
+      `operational` / `io-failure` MCP classification and zero mutation, not
+      merely error text. Retain the existing external built-binary mutation
       refusal while serve owns the lock.
 - [ ] Run focused and full `internal/filelock`, `internal/draftmutation`,
-      `internal/designapp`, and `internal/mcpserve` races; the focused live
-      serve/MCP integration race; `go vet` over affected packages; gofmt,
-      golangci-lint, spec-align, showcase-align, and diff checks.
+      `internal/designapp`, `internal/mcpserve`, and `internal/workbench` races;
+      the focused live serve/MCP integration race; `go vet` over affected
+      packages; gofmt, golangci-lint, spec-align, showcase-align, and diff
+      checks.
 - [ ] Complete FABLE/Opus producer review and stop for independent Codex review.
 
 **Required semantic RED:**
 
 ```bash
 GOCACHE=/private/tmp/verdi-wave6-task1b-gocache \
-go test ./internal/draftmutation ./cmd/verdi \
-  -run 'Test(WithWriterLockReusesCurrentProcessHolder|ServeMutateDraftUsesHeldWriterLock)' \
+go test ./internal/draftmutation ./internal/workbench ./cmd/verdi \
+  -run 'Test(WithWriterLockReusesCurrentProcessHolder|LegacyBoardSpliceSerializesWithWriterTransaction|ServeMutateDraftUsesHeldWriterLock)' \
   -count=1
 ```
 
 Expected: the draftmutation test returns the existing live-holder refusal and
-the live-serve mutation returns the corresponding operational result before
-any mutation. A sandbox-only cache or local-socket denial is not semantic RED
+the live-serve mutation returns typed `operational` / `io-failure` before any
+mutation, while the deterministic legacy-splice race loses one of the two
+updates. A sandbox-only cache or local-socket denial is not semantic RED
 evidence; rerun the identical command with the required local permissions.
 
 **Commit subject:** `Permit mutations inside the writer process`
@@ -382,6 +409,12 @@ wiring if FABLE delegates it explicitly; FABLE owns every resulting UI fix.
 - Consume Task 1B's `WithWriterLock` behavior unchanged. Do not add a frontend
   lock, release the serve lock, bypass the transaction, or infer ownership from
   PID/lock-file bytes in the workbench.
+- Delete the now-serialized legacy `spliceSpec` path in the same change that
+  routes every domain mutation through `designapp`; do not retain it as a
+  second serialized writer. Keep annotation append/graduation/deletion on the
+  distinct `boardio` files and preserve their existing explicit
+  post-clean-transaction ordering rather than folding them into the
+  spec/provenance transaction.
 
 - [ ] RED: a built handler/Playwright journey proves unsaved edits are currently
       lost or direct mutation bypasses `designapp`.
