@@ -751,3 +751,202 @@ func TestConcurrentProcessesSerializeOnGlobalLock(t *testing.T) {
 		t.Fatalf("child: %v", err)
 	}
 }
+
+// writerLockAcquireProbeRootEnv/writerLockAcquireProbeVerdictEnv drive the
+// child half of secondProcessAcquireVerdict, below.
+const (
+	writerLockAcquireProbeRootEnv    = "VERDI_DRAFTMUTATION_ACQUIRE_PROBE_ROOT"
+	writerLockAcquireProbeVerdictEnv = "VERDI_DRAFTMUTATION_ACQUIRE_PROBE_VERDICT"
+)
+
+// TestWriterLockAcquireProbeHelper is the child process of
+// secondProcessAcquireVerdict: a genuinely SEPARATE OS process (this test
+// binary re-executed with -test.run) that attempts one ordinary
+// filelock.Acquire of the named checkout's writer lock and records whether
+// it won. It is inert (returns immediately) in the ordinary parent run —
+// the same env-gated helper-process shape
+// TestConcurrentProcessesSerializeOnGlobalLock already uses.
+func TestWriterLockAcquireProbeHelper(t *testing.T) {
+	root := os.Getenv(writerLockAcquireProbeRootEnv)
+	if root == "" {
+		return
+	}
+	verdictPath := os.Getenv(writerLockAcquireProbeVerdictEnv)
+	if verdictPath == "" {
+		t.Fatalf("%s set without %s", writerLockAcquireProbeRootEnv, writerLockAcquireProbeVerdictEnv)
+	}
+	lockPath := store.WriterLockPath(root)
+	verdict := ""
+	f, err := filelock.Acquire(lockPath)
+	if err == nil {
+		verdict = "acquired"
+		_ = filelock.Release(f, lockPath)
+	} else {
+		verdict = "refused: " + err.Error()
+	}
+	if werr := os.WriteFile(verdictPath, []byte(verdict), 0o644); werr != nil {
+		t.Fatal(werr)
+	}
+}
+
+// secondProcessAcquireVerdict runs one real second-process acquisition
+// attempt against root's checkout writer lock and returns "acquired" or
+// "refused: <error>". A second OS process is the strongest honest
+// construction available here: filelock's exclusion is a real on-disk
+// O_CREATE|O_EXCL lock plus a liveness probe, so only a foreign process
+// can prove that the exclusion actually still bars an outside writer.
+func secondProcessAcquireVerdict(t *testing.T, root string) string {
+	t.Helper()
+	verdictPath := filepath.Join(t.TempDir(), "verdict")
+	command := exec.Command(os.Args[0], "-test.run=^TestWriterLockAcquireProbeHelper$")
+	command.Env = append(os.Environ(),
+		writerLockAcquireProbeRootEnv+"="+root,
+		writerLockAcquireProbeVerdictEnv+"="+verdictPath,
+	)
+	out, err := command.CombinedOutput()
+	if err != nil {
+		t.Fatalf("second-process acquire probe: %v\n%s", err, out)
+	}
+	verdict, rerr := os.ReadFile(verdictPath)
+	if rerr != nil {
+		t.Fatalf("reading second-process probe verdict: %v\n%s", rerr, out)
+	}
+	return string(verdict)
+}
+
+// TestWithWriterLockHoldsOuterLockThroughReusedCallback is Codex's
+// shutdown probe (round 1, P1): the reuse path's ownership proof used to be
+// a point-in-time boolean, so the OUTER owner could release the lifetime
+// lock while a reused callback was still running — production-reachable via
+// SIGTERM, since http.Server.Close does not wait for active handlers while
+// a routed mutation continues under context.Background. The lock file was
+// then removed mid-callback and a SECOND process could acquire the very
+// same checkout, overlapping the still-running transaction (violating
+// SI-177 / design §6.1.2's continuous exclusion).
+//
+// Base (RED): the outer Release completes immediately mid-callback and a
+// separate OS process acquires the lock. Fixed (GREEN): the reuse path
+// holds a registry lease for the callback's whole lifetime, so (a) a
+// second process is still refused while the callback is in flight, (b) the
+// owner's Release blocks until the callback finishes, and (c) a fresh
+// acquisition succeeds afterwards.
+func TestWithWriterLockHoldsOuterLockThroughReusedCallback(t *testing.T) {
+	root := transactionRoot(t)
+	lockPath := store.WriterLockPath(root)
+	lock, err := filelock.Acquire(lockPath)
+	if err != nil {
+		t.Fatalf("Acquire (simulating serve's lifetime lock): %v", err)
+	}
+
+	entered := make(chan struct{})
+	finish := make(chan struct{})
+	callbackDone := make(chan error, 1)
+	go func() {
+		callbackDone <- WithWriterLock(context.Background(), root, Coordinator{}, func(*LockedWriter) error {
+			close(entered)
+			<-finish
+			return nil
+		})
+	}()
+	<-entered
+
+	// The owner releases while the reused callback is still in flight —
+	// exactly what serve's deferred Release does on SIGTERM.
+	releaseDone := make(chan error, 1)
+	go func() { releaseDone <- filelock.Release(lock, lockPath) }()
+
+	// A Release that does not wait for the callback returns in
+	// microseconds, so this bound is enormously generous for the RED; once
+	// fixed it is a pure liveness bound and never the verdict (the verdict
+	// is the second-process probe plus the ordering assertions below).
+	releasedEarly := false
+	select {
+	case relErr := <-releaseDone:
+		releasedEarly = true
+		if relErr != nil {
+			t.Logf("outer Release returned mid-callback with: %v", relErr)
+		}
+	case <-time.After(time.Second):
+	}
+
+	verdict := secondProcessAcquireVerdict(t, root)
+	if !strings.HasPrefix(verdict, "refused") {
+		close(finish)
+		t.Fatalf("a second process %s the checkout writer lock while a reused writer callback was still running (outer Release completed mid-callback = %t)", verdict, releasedEarly)
+	}
+	if releasedEarly {
+		close(finish)
+		t.Fatal("the outer owner's Release completed while the reused writer callback was still running — the exclusion was dropped under the running transaction")
+	}
+
+	close(finish)
+	if cbErr := <-callbackDone; cbErr != nil {
+		t.Fatalf("reused WithWriterLock returned %v, want nil", cbErr)
+	}
+	select {
+	case relErr := <-releaseDone:
+		if relErr != nil {
+			t.Fatalf("outer Release after the callback finished: %v", relErr)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("outer Release never completed after the reused callback finished (deadlock)")
+	}
+
+	if _, statErr := os.Stat(lockPath); !os.IsNotExist(statErr) {
+		t.Fatalf("lock file still present after the drained Release: err=%v", statErr)
+	}
+	fresh, ferr := filelock.Acquire(lockPath)
+	if ferr != nil {
+		t.Fatalf("fresh Acquire after the drained Release: %v", ferr)
+	}
+	if rerr := filelock.Release(fresh, lockPath); rerr != nil {
+		t.Fatalf("releasing the fresh lock: %v", rerr)
+	}
+}
+
+// TestReleaseDoesNotDeadlockWithCompletingReusedCallback is the
+// no-deadlock half of the same custody rule: an owner Release racing a
+// reused callback that completes normally must return promptly, never
+// hang, whichever order the two happen to interleave in.
+func TestReleaseDoesNotDeadlockWithCompletingReusedCallback(t *testing.T) {
+	root := transactionRoot(t)
+	lockPath := store.WriterLockPath(root)
+	lock, err := filelock.Acquire(lockPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	callbackDone := make(chan error, 1)
+	releaseDone := make(chan error, 1)
+	start := make(chan struct{})
+	go func() {
+		<-start
+		callbackDone <- WithWriterLock(context.Background(), root, Coordinator{}, func(*LockedWriter) error { return nil })
+	}()
+	go func() {
+		<-start
+		releaseDone <- filelock.Release(lock, lockPath)
+	}()
+	close(start)
+
+	for i := 0; i < 2; i++ {
+		select {
+		case cbErr := <-callbackDone:
+			// Three interleavings are all legitimate: the call reused the
+			// still-held outer lock; it lost the race and acquired the lock
+			// itself after the owner's Release had already completed; or it
+			// saw ErrHeld and then found the lock already gone before it could
+			// prove ownership, which is the ordinary operational refusal. Only
+			// a hang — or some other error class — is a defect.
+			if cbErr != nil && !strings.Contains(cbErr.Error(), "acquiring global writer lock") {
+				t.Fatalf("reused/racing WithWriterLock returned %v, want nil or the operational lock refusal", cbErr)
+			}
+		case relErr := <-releaseDone:
+			if relErr != nil {
+				t.Fatalf("owner Release returned %v, want nil", relErr)
+			}
+		case <-time.After(15 * time.Second):
+			t.Fatal("Release raced with a normally-completing reused callback did not finish (deadlock)")
+		}
+	}
+}

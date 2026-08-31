@@ -102,6 +102,17 @@ func checkoutMutexFor(key string) *sync.Mutex {
 // Wave 6 design §6.1.2), in which case it reuses the outer exclusion
 // without releasing it. It never creates a per-spec lock.
 //
+// Custody on the reuse path: ownership is not merely proven once on entry,
+// it is HELD for the callback's whole lifetime. The reuse path takes a
+// filelock lease against the outer owner's exact registered handle
+// (proof and lease in one atomic step) and drops it only after work
+// returns, which makes the owner's own filelock.Release block rather than
+// drop the checkout's exclusion under a running transaction. The outer
+// lock is still never released or replaced here — the lease only delays
+// the owner's release; the callback's exclusion is therefore continuous
+// from entry to return, and no second process can acquire the checkout in
+// between.
+//
 // Non-recursive contract: a work callback passed to WithWriterLock must
 // NEVER call WithWriterLock again, whether directly or through a nested
 // operation. Reuse only lets ONE outer holder (this process's own
@@ -171,7 +182,20 @@ func WithWriterLock(ctx context.Context, root string, coordinator Coordinator, w
 		// it is not ours to release. Every other case (a genuinely foreign
 		// live holder, an unproven or errored query, a replaced/forged
 		// lock) falls through to the existing operational refusal below.
-		if owned, proveErr := filelock.HeldByCurrentProcess(lockPath); proveErr == nil && owned {
+		//
+		// The proof is taken as a LEASE, not as a point-in-time boolean:
+		// LeaseIfHeldByCurrentProcess proves ownership and takes custody in
+		// one atomic step, and filelock.Release of that outer handle then
+		// BLOCKS until the lease is dropped. Without it the outer owner
+		// could release its lifetime lock mid-callback (serve's deferred
+		// Release on SIGTERM, since http.Server.Close does not wait for
+		// active handlers) and a second process could acquire the checkout
+		// on top of this still-running transaction. The lease is dropped
+		// when work returns, and — because this defer is registered after
+		// the checkout mutex's — strictly BEFORE the per-checkout mutex is
+		// unlocked, so custody never lapses between the two.
+		if releaseLease, owned, proveErr := filelock.LeaseIfHeldByCurrentProcess(lockPath); proveErr == nil && owned {
+			defer releaseLease()
 			return work(writer)
 		}
 	}

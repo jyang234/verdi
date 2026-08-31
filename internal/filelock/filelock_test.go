@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -645,5 +646,281 @@ func TestHeldByCurrentProcess_UnreadableLockPathIsAnError(t *testing.T) {
 	}
 	if held {
 		t.Fatalf("HeldByCurrentProcess(unreadable lock directory) = true, %v, want false alongside the error", err)
+	}
+}
+
+// leaseCount reports the outstanding lease count registered for path — a
+// white-box read used only to prove that failed/erroring lease attempts
+// leak nothing.
+func leaseCount(t *testing.T, path string) int {
+	t.Helper()
+	registryMu.Lock()
+	defer registryMu.Unlock()
+	entry, ok := registry[filepath.Clean(path)]
+	if !ok {
+		return -1
+	}
+	return entry.leases
+}
+
+// TestLeaseIfHeldByCurrentProcess_MirrorsTheOwnershipQuery pins that the
+// lease form answers exactly what HeldByCurrentProcess answers on every
+// not-held shape — never acquired, forged with our own pid, released, or
+// replaced at the path — and that each such refusal hands back no release
+// func and leaves no lease behind.
+func TestLeaseIfHeldByCurrentProcess_MirrorsTheOwnershipQuery(t *testing.T) {
+	t.Run("never acquired", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "writer.lock")
+		release, held, err := LeaseIfHeldByCurrentProcess(path)
+		if release != nil || held || err != nil {
+			t.Fatalf("LeaseIfHeldByCurrentProcess(never acquired) = release!=nil %t, held %t, err %v, want false, false, nil", release != nil, held, err)
+		}
+	})
+
+	t.Run("forged lock with our own pid", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "writer.lock")
+		data, err := json.Marshal(Info{PID: os.Getpid(), Start: time.Now().Unix()})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, data, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		release, held, err := LeaseIfHeldByCurrentProcess(path)
+		if release != nil || held || err != nil {
+			t.Fatalf("LeaseIfHeldByCurrentProcess(forged) = release!=nil %t, held %t, err %v, want false, false, nil", release != nil, held, err)
+		}
+	})
+
+	t.Run("after release", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "writer.lock")
+		f, err := Acquire(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := Release(f, path); err != nil {
+			t.Fatal(err)
+		}
+		release, held, err := LeaseIfHeldByCurrentProcess(path)
+		if release != nil || held || err != nil {
+			t.Fatalf("LeaseIfHeldByCurrentProcess(after Release) = release!=nil %t, held %t, err %v, want false, false, nil", release != nil, held, err)
+		}
+	})
+
+	t.Run("replaced file leaves no lease behind", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "writer.lock")
+		f, err := Acquire(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = Release(f, path) }()
+		original, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Remove(path); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, original, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		release, held, err := LeaseIfHeldByCurrentProcess(path)
+		if release != nil || held || err != nil {
+			t.Fatalf("LeaseIfHeldByCurrentProcess(replaced file) = release!=nil %t, held %t, err %v, want false, false, nil", release != nil, held, err)
+		}
+		if n := leaseCount(t, path); n != 0 {
+			t.Fatalf("outstanding leases after a refused lease = %d, want 0 (a refused proof must drop its provisional lease)", n)
+		}
+	})
+
+	t.Run("closed registered handle is an error with no lease left", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "writer.lock")
+		f, err := Acquire(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := f.Close(); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() {
+			deregisterAcquired(path, f)
+			_ = os.Remove(path)
+		})
+		release, held, err := LeaseIfHeldByCurrentProcess(path)
+		if err == nil {
+			t.Fatalf("LeaseIfHeldByCurrentProcess(closed handle) = release!=nil %t, held %t, err nil, want a non-nil error", release != nil, held)
+		}
+		if release != nil || held {
+			t.Fatalf("LeaseIfHeldByCurrentProcess(closed handle) = release!=nil %t, held %t, err %v, want false, false alongside the error", release != nil, held, err)
+		}
+		if n := leaseCount(t, path); n != 0 {
+			t.Fatalf("outstanding leases after an errored lease = %d, want 0", n)
+		}
+	})
+}
+
+// TestLease_BlocksReleaseUntilDrained is the kernel half of Codex's
+// shutdown finding: while a lease is outstanding, the owner's Release must
+// not complete, must leave the lock file on disk (so no other process can
+// acquire the checkout), and must complete promptly once the lease drops.
+func TestLease_BlocksReleaseUntilDrained(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "writer.lock")
+	f, err := Acquire(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	release, held, err := LeaseIfHeldByCurrentProcess(path)
+	if err != nil || !held {
+		t.Fatalf("LeaseIfHeldByCurrentProcess(our own lock) = %t, %v, want true, nil", held, err)
+	}
+
+	released := make(chan error, 1)
+	go func() { released <- Release(f, path) }()
+
+	select {
+	case relErr := <-released:
+		t.Fatalf("Release completed while a lease was outstanding (err=%v)", relErr)
+	case <-time.After(250 * time.Millisecond):
+	}
+	if _, statErr := os.Stat(path); statErr != nil {
+		t.Fatalf("lock file removed while a lease was outstanding: %v", statErr)
+	}
+	// A blocked Release must not deregister early either: ownership is
+	// continuously provable for as long as the lease lasts.
+	if ok, herr := HeldByCurrentProcess(path); herr != nil || !ok {
+		t.Fatalf("HeldByCurrentProcess during a blocked Release = %t, %v, want true, nil", ok, herr)
+	}
+
+	release()
+	select {
+	case relErr := <-released:
+		if relErr != nil {
+			t.Fatalf("Release after the lease drained: %v", relErr)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("Release never completed after its last lease was released")
+	}
+	if _, statErr := os.Stat(path); !os.IsNotExist(statErr) {
+		t.Fatalf("lock file still present after the drained Release: err=%v", statErr)
+	}
+}
+
+// TestLease_DoubleReleaseIsInert pins the documented lease-release
+// discipline: calling the returned func more than once is idempotent, so a
+// defensive extra call can never decrement another caller's lease. A
+// second, independent lease taken alongside it must still hold Release.
+func TestLease_DoubleReleaseIsInert(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "writer.lock")
+	f, err := Acquire(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, held, err := LeaseIfHeldByCurrentProcess(path)
+	if err != nil || !held {
+		t.Fatalf("first lease = %t, %v, want true, nil", held, err)
+	}
+	second, held, err := LeaseIfHeldByCurrentProcess(path)
+	if err != nil || !held {
+		t.Fatalf("second lease = %t, %v, want true, nil", held, err)
+	}
+	if n := leaseCount(t, path); n != 2 {
+		t.Fatalf("outstanding leases = %d, want 2", n)
+	}
+
+	first()
+	first()
+	first()
+	if n := leaseCount(t, path); n != 1 {
+		t.Fatalf("outstanding leases after three calls of one lease's release = %d, want 1 (double release must be inert)", n)
+	}
+
+	released := make(chan error, 1)
+	go func() { released <- Release(f, path) }()
+	select {
+	case relErr := <-released:
+		t.Fatalf("Release completed while the second lease was still outstanding (err=%v)", relErr)
+	case <-time.After(250 * time.Millisecond):
+	}
+
+	second()
+	select {
+	case relErr := <-released:
+		if relErr != nil {
+			t.Fatalf("Release after both leases drained: %v", relErr)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("Release never completed after both leases were released")
+	}
+}
+
+// TestLease_ReleaseWithoutLeasesNeverWaits is the negative/no-regression
+// half: the overwhelmingly common Release — no lease was ever taken — must
+// not wait at all, and a lease taken and dropped before Release leaves no
+// residue.
+func TestLease_ReleaseWithoutLeasesNeverWaits(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "writer.lock")
+	f, err := Acquire(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	release, held, err := LeaseIfHeldByCurrentProcess(path)
+	if err != nil || !held {
+		t.Fatalf("lease = %t, %v, want true, nil", held, err)
+	}
+	release()
+
+	done := make(chan error, 1)
+	go func() { done <- Release(f, path) }()
+	select {
+	case relErr := <-done:
+		if relErr != nil {
+			t.Fatalf("Release with no outstanding leases: %v", relErr)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("Release with no outstanding leases blocked")
+	}
+}
+
+// TestLease_ConcurrentLeasesAndReleaseAreRaceClean hammers the lease
+// accounting under -race: many concurrent take/drop cycles against one
+// registered handle, with the owner's Release racing them. Every lease
+// must drain and Release must return exactly once, without a data race and
+// without hanging.
+func TestLease_ConcurrentLeasesAndReleaseAreRaceClean(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "writer.lock")
+	f, err := Acquire(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var wg sync.WaitGroup
+	for i := 0; i < 16; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for j := 0; j < 32; j++ {
+				release, held, lerr := LeaseIfHeldByCurrentProcess(path)
+				if lerr != nil {
+					t.Errorf("lease: %v", lerr)
+					return
+				}
+				if !held {
+					return // the owner's Release won; nothing left to lease
+				}
+				release()
+			}
+		}()
+	}
+
+	released := make(chan error, 1)
+	go func() { released <- Release(f, path) }()
+	wg.Wait()
+	select {
+	case relErr := <-released:
+		if relErr != nil {
+			t.Fatalf("Release racing concurrent leases: %v", relErr)
+		}
+	case <-time.After(30 * time.Second):
+		t.Fatal("Release racing concurrent leases never completed")
 	}
 }
