@@ -13,6 +13,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -25,6 +26,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jyang234/verdi/internal/designprovenance"
 	"github.com/jyang234/verdi/internal/filelock"
 	"github.com/jyang234/verdi/internal/fixturegit"
 	"github.com/jyang234/verdi/internal/mcpserve"
@@ -596,5 +598,148 @@ func TestShim_ExitsPromptlyWhenServeDies(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		_ = mcpCmd.Process.Kill() // don't leak the hung process even though the test already failed
 		t.Fatal("verdi mcp did not exit within 5s of serve being killed — this is the S4 hang case: a naive wait-for-both-directions shutdown blocks forever on the still-open stdin Read")
+	}
+}
+
+// toolCallResultText extracts an MCP tool result's first text content item
+// — the same shape internal/mcpserve.toolText/toolJSON produce — driven
+// here from the OUTSIDE, over the real socket, exactly like ndjsonRPC.
+func toolCallResultText(t *testing.T, result map[string]any) string {
+	t.Helper()
+	content, ok := result["content"].([]any)
+	if !ok || len(content) == 0 {
+		t.Fatalf("tool result has no content: %#v", result)
+	}
+	item, ok := content[0].(map[string]any)
+	if !ok {
+		t.Fatalf("tool result content[0] is not an object: %#v", content[0])
+	}
+	text, ok := item["text"].(string)
+	if !ok {
+		t.Fatalf("tool result content[0] has no text: %#v", item)
+	}
+	return text
+}
+
+// TestServeMutateDraftUsesHeldWriterLock is Task 1B's second required
+// semantic RED (Wave 6 design §6.1.2, ledger SI-69/SI-177): `verdi serve`
+// acquires the checkout's writer lock for its entire lifetime (I-12), and
+// every draftmutation.Service.Mutate call — including the one this real
+// mutate_draft MCP call drives — used to attempt that SAME non-reentrant
+// lock a second time and fail operationally before the transaction ever
+// began, even though serve is the sole writer and nothing is actually
+// contended. SI-177 narrowly supersedes that refusal only for this exact
+// caller process's registry-proven outer lock.
+//
+// Base RED (pre-fix): the typed MCP result is isError with the exact
+// {"classification":"operational","code":"io-failure",...} envelope
+// (internal/designapp.MutationFailure over draftmutation's CodeIOFailure),
+// and zero mutation — the spec/provenance sidecar on disk is untouched.
+// GREEN: the canonical clean mutate_draft result, the exact spec and
+// provenance mutation landed on disk, and the outer writer lock proven to
+// remain the SAME continuously-held open file (never released and
+// recreated) across the whole served call.
+func TestServeMutateDraftUsesHeldWriterLock(t *testing.T) {
+	bin := buildVerdiBinary(t)
+	root, head, base := designMutateStore(t)
+
+	serve := exec.Command(bin, "serve", "--http", "127.0.0.1:0")
+	serve.Dir = filepath.FromSlash(root)
+	serve.Env = commandEnvironment(map[string]string{"CI_DEFAULT_BRANCH": "main"})
+	var serveOutput bytes.Buffer
+	serve.Stdout, serve.Stderr = &serveOutput, &serveOutput
+	if err := serve.Start(); err != nil {
+		t.Fatalf("starting verdi serve: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = serve.Process.Signal(syscall.SIGTERM)
+		_ = serve.Wait()
+	})
+
+	sockPath := waitForPointerFile(t, filepath.FromSlash(root), 10*time.Second)
+	lockPath := filepath.Join(filepath.FromSlash(root), ".verdi", "data", "writer.lock")
+	lockBefore, err := os.Stat(lockPath)
+	if err != nil {
+		t.Fatalf("stating writer lock before the served mutation: %v", err)
+	}
+	infoBefore := readLockInfo(t, root)
+	if infoBefore.PID != serve.Process.Pid {
+		t.Fatalf("writer lock pid = %d, want serve's own pid %d", infoBefore.PID, serve.Process.Pid)
+	}
+
+	conn, err := net.Dial("unix", sockPath)
+	if err != nil {
+		t.Fatalf("dialing serve's MCP socket: %v", err)
+	}
+	defer conn.Close()
+	sc := bufio.NewScanner(conn)
+	sc.Buffer(make([]byte, 0, 1<<16), 1<<24)
+
+	initResp := ndjsonRPC(t, conn, sc, 1, "initialize", map[string]any{"protocolVersion": mcpserve.ProtocolVersion})
+	if _, ok := initResp["result"].(map[string]any); !ok {
+		t.Fatalf("initialize: no result: %#v", initResp)
+	}
+
+	requestBytes := designMutateRequest(t, root, "design/sample", head, base, []map[string]any{
+		{"op": "set-problem", "text": "served mutation", "anchor": "#problem"},
+	})
+	var args map[string]any
+	if err := json.Unmarshal(requestBytes, &args); err != nil {
+		t.Fatal(err)
+	}
+	args["harness"] = "codex"
+	args["session"] = "session-1"
+
+	callResp := ndjsonRPC(t, conn, sc, 2, "tools/call", map[string]any{"name": "mutate_draft", "arguments": args})
+	result, ok := callResp["result"].(map[string]any)
+	if !ok {
+		t.Fatalf("tools/call mutate_draft: no result: %#v", callResp)
+	}
+	if isErr, _ := result["isError"].(bool); isErr {
+		// Zero-mutation proof for the exact failure this base RED captures:
+		// a typed operational/io-failure refusal must never have touched the
+		// spec on disk.
+		unmutated, readErr := os.ReadFile(store.SpecPath(filepath.FromSlash(root), store.ZoneActive, "sample"))
+		t.Fatalf("mutate_draft over the live serve MCP socket returned an error result (want the canonical clean result): %s\nspec on disk unchanged=%t (read err=%v)\nserve output:\n%s",
+			toolCallResultText(t, result), readErr == nil && bytes.Equal(unmutated, base), readErr, serveOutput.String())
+	}
+
+	mutation := decodeMutationResult(t, toolCallResultText(t, result))
+	if len(mutation.Changes) != 1 || mutation.Changes[0].Target != "problem" || mutation.Changes[0].Change != "replaced" {
+		t.Fatalf("mutate_draft changes = %+v", mutation.Changes)
+	}
+
+	specBytes, err := os.ReadFile(store.SpecPath(filepath.FromSlash(root), store.ZoneActive, "sample"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(specBytes, []byte("served mutation")) {
+		t.Fatalf("spec on disk was not mutated by the served mutate_draft call: %s", specBytes)
+	}
+	logBytes, err := os.ReadFile(store.DesignProvenancePath(filepath.FromSlash(root), store.ZoneActive, "sample"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	entries, err := designprovenance.DecodeLog(logBytes)
+	if err != nil || len(entries) != 1 {
+		t.Fatalf("provenance = %+v, %v", entries, err)
+	}
+	if !entries[0].Attribution.Unauthenticated || entries[0].Harness != "codex" {
+		t.Fatalf("served mutation provenance attribution = %+v", entries[0])
+	}
+
+	// The outer writer lock must remain the SAME open file identity
+	// throughout — proof it was never released and recreated by the
+	// mutation's inner reuse of serve's own lifetime lock.
+	lockAfter, err := os.Stat(lockPath)
+	if err != nil {
+		t.Fatalf("writer lock is gone after the served mutation: %v", err)
+	}
+	if !os.SameFile(lockBefore, lockAfter) {
+		t.Fatal("writer lock file identity changed across the served mutation — it was released and recreated, not held continuously")
+	}
+	infoAfter := readLockInfo(t, root)
+	if infoAfter.PID != serve.Process.Pid {
+		t.Fatalf("writer lock pid after mutation = %d, want serve's own pid %d (lock must remain continuously held by serve)", infoAfter.PID, serve.Process.Pid)
 	}
 }

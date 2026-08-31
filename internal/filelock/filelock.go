@@ -11,7 +11,14 @@
 // the wave-4 S4 spike's proven design (read-only reference, reimplemented
 // here); the PID-reuse gap closure (ps -o lstart= cross-check, with a
 // documented kill-probe-only fallback) is this package's own addition, per
-// PLAN.md Phase 9 exit criteria.
+// PLAN.md Phase 9 exit criteria. SI-177 (Wave 6 design §6.1.2) is this
+// package's second own addition: a synchronized process-local ownership
+// registry recording exact successful Acquire handles, and the read-only
+// HeldByCurrentProcess query over it. Acquire itself stays non-reentrant —
+// a live existing lock always returns ErrHeld, even to its own owning
+// process — the registry only lets a caller PROVE after the fact that an
+// ErrHeld it just received actually names this process's own still-open
+// lock, so it can make its own reuse decision instead of failing outright.
 package filelock
 
 import (
@@ -21,8 +28,10 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -143,6 +152,184 @@ func alive(pid int, recordedStart int64) bool {
 	return time.Duration(diff)*time.Second <= lockStartTolerance
 }
 
+// registryMu/registry are SI-177's synchronized process-local ownership
+// registry: on every successful Acquire, the exact *os.File handle this
+// process was just granted is recorded here, keyed by the exact path
+// string Acquire was called with. HeldByCurrentProcess and
+// LeaseIfHeldByCurrentProcess (below) are the only readers; Release is the
+// only remover. Neither the lock body's PID text nor liveness is ever
+// consulted here — registration begins only at a genuine successful
+// O_CREATE|O_EXCL and ends only when the exact registered handle is
+// released, so a caller-authored or foreign lock file naming this
+// process's own pid/start bytes is never proof of ownership by itself
+// (the "forged-lock rule": matching bytes without a registry entry is not
+// held by us).
+//
+// Each entry also carries a LEASE COUNT: the number of in-flight
+// operations that have proven ownership of this exact handle and are
+// still running under it (design §6.1.2's continuous exclusion, as
+// corrected in Codex review round 1). Ownership proof alone is a
+// point-in-time fact; a lease turns it into custody for the length of the
+// work, because Release BLOCKS while any lease on that exact handle is
+// outstanding. registryCond (over registryMu) is how a draining Release
+// waits — a synchronized wait, never a poll.
+var (
+	registryMu   sync.Mutex
+	registryCond = sync.NewCond(&registryMu)
+	registry     = map[string]*registryEntry{}
+)
+
+// registryEntry is one registered acquisition: the exact granted handle
+// plus the number of outstanding leases against it. Both fields are
+// guarded by registryMu.
+type registryEntry struct {
+	file   *os.File
+	leases int
+}
+
+func registerAcquired(path string, f *os.File) {
+	key := filepath.Clean(path)
+	registryMu.Lock()
+	registry[key] = &registryEntry{file: f}
+	registryMu.Unlock()
+}
+
+// deregisterAcquired removes path's registry entry only if it still names
+// exactly f — the handle THIS release call owns — so a mismatched or
+// stale Release call can never evict another, still-valid registration.
+// It BLOCKS while that entry has outstanding leases, waking on
+// registryCond each time a lease drains and re-reading the registry (the
+// entry may have been deregistered, or the path re-registered under a
+// different handle, while this call waited — either case means the entry
+// is no longer ours to remove and the wait ends).
+func deregisterAcquired(path string, f *os.File) {
+	key := filepath.Clean(path)
+	registryMu.Lock()
+	defer registryMu.Unlock()
+	for {
+		entry, ok := registry[key]
+		if !ok || entry.file != f {
+			return
+		}
+		if entry.leases == 0 {
+			delete(registry, key)
+			return
+		}
+		registryCond.Wait()
+	}
+}
+
+// releaseLease drops one lease taken by LeaseIfHeldByCurrentProcess and
+// wakes any Release draining that entry. It operates on the entry pointer
+// the lease was taken against, so it stays correct even if the path has
+// meanwhile been deregistered or re-registered under a different handle.
+// The zero guard is defence in depth only: each granted lease is returned
+// wrapped in a sync.Once, so a repeated release never reaches here and the
+// count cannot go negative.
+func releaseLease(entry *registryEntry) {
+	registryMu.Lock()
+	if entry.leases > 0 {
+		entry.leases--
+	}
+	registryMu.Unlock()
+	registryCond.Broadcast()
+}
+
+// HeldByCurrentProcess is SI-177's read-only ownership query. It reports
+// true only when path resolves to the exact still-open file identity this
+// process's own successful Acquire registered — never from PID/start text,
+// liveness, or a caller-authored lock body alone. A replaced lock (the
+// path now names a different file, even one with identical bytes), a
+// removed/recreated lock, a symlinked path, or a path this process never
+// itself Acquired (no registry entry at all — the forged-lock rule) all
+// report false. A path that cannot be inspected right now (a transient
+// stat failure distinct from the file simply being gone) is reported as an
+// error rather than a guessed answer, so a caller treats it as unproven
+// rather than as proven ownership.
+func HeldByCurrentProcess(path string) (bool, error) {
+	key := filepath.Clean(path)
+	registryMu.Lock()
+	entry, ok := registry[key]
+	registryMu.Unlock()
+	if !ok {
+		return false, nil
+	}
+	return stillOurRegisteredFile(entry.file, path)
+}
+
+// stillOurRegisteredFile is the identity half both ownership queries
+// share: does path right now name the exact still-open file this process
+// registered? os.SameFile compares device+inode; a symlink, a
+// removed-and-recreated file, or any other replacement at path never
+// shares the open handle's identity, so this single comparison covers
+// every "not actually the file we hold" case without a separate
+// symlink-mode check (os.Lstat, never os.Stat, so a symlink AT path is
+// never followed to the file it names).
+func stillOurRegisteredFile(held *os.File, path string) (bool, error) {
+	heldInfo, err := held.Stat()
+	if err != nil {
+		return false, fmt.Errorf("filelock: stating held lock handle for %s: %w", path, err)
+	}
+	diskInfo, err := os.Lstat(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return false, nil // removed out from under the registered handle
+	}
+	if err != nil {
+		return false, fmt.Errorf("filelock: stating lock path %s: %w", path, err)
+	}
+	return os.SameFile(heldInfo, diskInfo), nil
+}
+
+// LeaseIfHeldByCurrentProcess is the CUSTODY form of the ownership query
+// above, for a caller that will go on to do work under an exclusion this
+// process already owns (internal/draftmutation's writer-lock reuse path).
+// It answers exactly the question HeldByCurrentProcess answers — same
+// registry, same forged-lock rule, same exact-open-file identity test —
+// and, when the answer is yes, takes a LEASE against that registration in
+// the SAME critical section, so no concurrent Release can slip between the
+// proof and the lease. While a lease is outstanding, Release of that exact
+// handle BLOCKS: the lock file stays on disk and no second process can
+// acquire the checkout, which is what makes the proven ownership hold for
+// the whole length of the caller's work rather than for one instant.
+//
+// A lease NEVER releases the outer lock and is not a claim on it: only the
+// original acquirer's own Release closes and removes the lock file. The
+// lease's only effect is to make that owner's Release wait.
+//
+// held is true only together with a non-nil release func; the caller must
+// call it (defer) as soon as its work under the exclusion is done, or the
+// owner's Release blocks forever. Calling the returned func more than once
+// is INERT (it is idempotent by construction), so a defensive extra call
+// during error unwinding can never corrupt another lease's accounting.
+// (false, nil) and any error carry no lease and no release func — the
+// caller must treat both as unproven and refuse, exactly as with
+// HeldByCurrentProcess.
+func LeaseIfHeldByCurrentProcess(path string) (release func(), held bool, err error) {
+	key := filepath.Clean(path)
+	registryMu.Lock()
+	entry, ok := registry[key]
+	if ok {
+		// Taken BEFORE the identity check and inside the same lock the
+		// registry itself is guarded by: from here on a concurrent Release
+		// of this entry must wait for us, so the proof below cannot be
+		// invalidated by a release racing between query and lease. A proof
+		// that then fails simply drops the lease again.
+		entry.leases++
+	}
+	registryMu.Unlock()
+	if !ok {
+		return nil, false, nil
+	}
+
+	ours, err := stillOurRegisteredFile(entry.file, path)
+	if err != nil || !ours {
+		releaseLease(entry)
+		return nil, false, err
+	}
+	var once sync.Once
+	return func() { once.Do(func() { releaseLease(entry) }) }, true, nil
+}
+
 // Acquire implements I-12(a) end to end: create path with O_CREATE|O_EXCL
 // and write {pid,start} JSON on success. If the path already exists,
 // inspect the holder recorded inside — alive (per alive, above) yields
@@ -164,6 +351,7 @@ func acquire(path string, retriesLeft int) (*os.File, error) {
 			_ = os.Remove(path)
 			return nil, fmt.Errorf("filelock: writing lock %s: %w", path, encErr)
 		}
+		registerAcquired(path, f)
 		return f, nil
 	}
 	if !errors.Is(err, os.ErrExist) {
@@ -232,7 +420,25 @@ func acquire(path string, retriesLeft int) (*os.File, error) {
 // Release closes f and removes path — the holder's own clean path. A
 // crash leaves the lock behind on disk exactly as I-12 intends: the next
 // acquirer's alive() probe discovers the dead pid and takes over.
+// Release is the sole owner release and deregisters exactly the
+// registered handle (deregisterAcquired only removes a registry entry
+// that still names this exact *os.File), before closing it — so no
+// window exists where a still-registered entry names an already-closing
+// handle.
+//
+// BLOCKING: Release waits, uncancellably and without a timeout, until
+// every lease taken against this exact handle
+// (LeaseIfHeldByCurrentProcess) has been released; only then does it
+// deregister, close, and remove. That wait is the point — it is what keeps
+// the on-disk exclusion continuously in force while an operation this
+// process already admitted under the lock is still running, so a shutdown
+// path that does not itself wait for in-flight work (an http.Server.Close
+// on SIGTERM, say) can never drop the lock under a running writer and let
+// a second process in. A caller that never releases its lease therefore
+// hangs its own Release: the lease contract is defer-and-release.
+// Releasing a handle with no leases (the common case) never waits.
 func Release(f *os.File, path string) error {
+	deregisterAcquired(path, f)
 	if cerr := f.Close(); cerr != nil {
 		return fmt.Errorf("filelock: closing lock %s: %w", path, cerr)
 	}
