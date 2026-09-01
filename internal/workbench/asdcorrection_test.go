@@ -8,7 +8,12 @@ package workbench
 //     turns read-only accepted, and a cached pre-merge Mutable:true
 //     posture would claim delegated agents can write on a sealed wall),
 //     and operational failures must never be memoized (closure N-1, the
-//     I-2 poisoning shape: cache successes only).
+//     I-2 poisoning shape: cache successes only). Closure reopen: the
+//     accepted head must be resolved at the AUTHORITATIVE default-branch
+//     rev (specstate.Branch.Ref — origin/<name> when the remote-tracking
+//     ref exists, the projector's own preference), never the local
+//     branch NAME: in the ordinary cloned shape acceptance moves on
+//     origin/<name> while refs/heads/<name> stays a stale shadow.
 //   - Finding 2: a projection failure AFTER designapp.MutateDraft landed
 //     must disclose the landed transaction, any post-transaction
 //     disclosures, and the projection failure itself, classified
@@ -26,6 +31,8 @@ import (
 	"strings"
 	"sync"
 	"testing"
+
+	"github.com/jyang234/verdi/internal/gitx"
 )
 
 // scriptedCapsBridge is testDesignBridge with a scripted, call-counted
@@ -51,41 +58,76 @@ func (b *scriptedCapsBridge) callCount() int {
 	return b.calls
 }
 
-// advanceDefaultBranch advances the fixture's resolved default branch
-// (the local `main` ref — buildAuthoringFixture leaves the checkout on
-// the design branch, so refs/heads/main is safe to move) by one commit
-// carrying main's SAME tree: the owner-merge shape as seen from an
-// untouched design checkout. The worktree, its branch, its HEAD, the
-// spec bytes, and the policy tree all stay byte-identical; only the
-// accepted head moves. Dates are pinned so the fixture stays
-// deterministic across runs.
-func advanceDefaultBranch(t *testing.T, dir string) {
+// advanceRef advances one git ref (the checkout sits on the design
+// branch, so neither refs/heads/main nor a remote-tracking ref is ever
+// checked out) by one commit carrying that ref's SAME tree: the
+// owner-merge shape as seen from an untouched design checkout. The
+// worktree, its branch, its HEAD, the spec bytes, and the policy tree
+// all stay byte-identical; only the advanced ref moves. Dates are pinned
+// so the fixture stays deterministic across runs.
+func advanceRef(t *testing.T, dir, ref string) {
 	t.Helper()
-	commit := exec.Command("git", "-C", dir, "commit-tree", "main^{tree}", "-p", "main", "-m", "advance accepted head")
+	commit := exec.Command("git", "-C", dir, "commit-tree", ref+"^{tree}", "-p", ref, "-m", "advance accepted head")
 	commit.Env = append(os.Environ(),
 		"GIT_AUTHOR_NAME=fixture", "GIT_AUTHOR_EMAIL=fixture@example.invalid", "GIT_AUTHOR_DATE=2026-01-02T03:04:05Z",
 		"GIT_COMMITTER_NAME=fixture", "GIT_COMMITTER_EMAIL=fixture@example.invalid", "GIT_COMMITTER_DATE=2026-01-02T03:04:05Z",
 	)
 	out, err := commit.Output()
 	if err != nil {
-		t.Fatalf("commit-tree: %v", err)
+		t.Fatalf("commit-tree %s: %v", ref, err)
 	}
 	sha := strings.TrimSpace(string(out))
-	if raw, err := exec.Command("git", "-C", dir, "update-ref", "refs/heads/main", sha).CombinedOutput(); err != nil {
-		t.Fatalf("update-ref refs/heads/main %s: %v\n%s", sha, err, raw)
+	if raw, err := exec.Command("git", "-C", dir, "update-ref", ref, sha).CombinedOutput(); err != nil {
+		t.Fatalf("update-ref %s %s: %v\n%s", ref, sha, err, raw)
 	}
+}
+
+// revParse resolves one ref in the fixture repo.
+func revParse(t *testing.T, root, ref string) string {
+	t.Helper()
+	head, err := gitx.RevParse(context.Background(), root, ref)
+	if err != nil {
+		t.Fatalf("rev-parse %s: %v", ref, err)
+	}
+	return head
 }
 
 // --- Finding 1: stale capabilities after an accepted-branch advance ------
 
 // TestCachedCapabilities_RefreshesOnAcceptedHeadAdvance reproduces the
-// Codex witness in unit form: the accepted head advances while the design
-// checkout, its HEAD, the spec bytes, and the policy tree are all held
-// fixed. The second render's agent posture must be freshly consulted —
-// a memo key that omits the accepted head serves the pre-advance
-// Mutable:true posture on a wall whose authority state moved.
+// Codex witness in unit form, in BOTH default-branch authority shapes
+// (specstate.Branch.Ref): the hermetic no-origin fixture resolves the
+// LOCAL branch; the ordinary cloned shape resolves origin/<name>, which
+// the state projector deliberately prefers because local refs can be a
+// stale shadow. In each shape acceptance advances on the AUTHORITATIVE
+// ref while the design checkout, its HEAD, the spec bytes, and the
+// policy tree are all held fixed — and the second render's accepted-head
+// facts (memo key, posture-header AcceptedHead, ahead/behind) must all
+// follow that ref, freshly consulted.
 func TestCachedCapabilities_RefreshesOnAcceptedHeadAdvance(t *testing.T) {
-	root := newBoardFixture(t)
+	t.Run("local-branch authority (no origin ref)", func(t *testing.T) {
+		root := newBoardFixture(t)
+		assertAcceptedAdvanceRefreshes(t, root, "refs/heads/main", "main")
+	})
+	t.Run("remote-tracking authority (origin ref advances)", func(t *testing.T) {
+		root := newBoardFixture(t)
+		// The ordinary cloned shape: refs/remotes/origin/main exists, so
+		// the resolved default-branch REF is origin/main while the local
+		// main ref stays behind as a possibly-stale shadow (closure
+		// reopen of finding 1 — the reviewer's overlay probe).
+		if raw, err := exec.Command("git", "-C", root, "update-ref", "refs/remotes/origin/main", "refs/heads/main").CombinedOutput(); err != nil {
+			t.Fatalf("creating refs/remotes/origin/main: %v\n%s", err, raw)
+		}
+		assertAcceptedAdvanceRefreshes(t, root, "refs/remotes/origin/main", "origin/main")
+	})
+}
+
+// assertAcceptedAdvanceRefreshes renders once, advances ONLY the named
+// authority ref (same tree), renders again, and asserts the second
+// render's accepted-head facts ride the authoritative ref with a fresh
+// capabilities consultation.
+func assertAcceptedAdvanceRefreshes(t *testing.T, root, advanceable, authorityRef string) {
+	t.Helper()
 	bridge := &scriptedCapsBridge{script: func(call int) (DesignReadOutcome, *DesignCapabilitiesView) {
 		if call == 1 {
 			return DesignReadOutcome{JSON: []byte(`{}`)}, &DesignCapabilitiesView{Mutable: true, PolicyMode: "draft-write", PolicyDigest: "sha256:caps-1"}
@@ -102,20 +144,34 @@ func TestCachedCapabilities_RefreshesOnAcceptedHeadAdvance(t *testing.T) {
 	if first.Caps == nil || !first.Caps.Mutable {
 		t.Fatalf("first render Caps = %+v, want the scripted Mutable:true posture", first.Caps)
 	}
+	if !first.AheadBehindKnown {
+		t.Fatal("first render resolved no ahead/behind; the fixture cannot witness the counts riding the authoritative ref")
+	}
 
-	advanceDefaultBranch(t, root)
+	advanceRef(t, root, advanceable)
+	authorityHead := revParse(t, root, authorityRef)
+	if authorityHead == first.AcceptedHead {
+		t.Fatalf("the authoritative ref %s did not advance (%q); the fixture cannot exercise the memo key", authorityRef, authorityHead)
+	}
 
 	_, _, second, err := s.loadASD(ctx, boardFixtureName)
 	if err != nil {
 		t.Fatalf("second loadASD: %v", err)
 	}
-	// Fixture premise witnesses: ONLY the accepted head moved.
-	if second.AcceptedHead == first.AcceptedHead {
-		t.Fatalf("accepted head did not advance (%q); the fixture cannot exercise the memo key", second.AcceptedHead)
-	}
+	// Fixture premise witnesses: ONLY the authoritative ref moved.
 	if second.WorktreeHead != first.WorktreeHead || second.Branch != first.Branch || second.BaseDigest != first.BaseDigest {
 		t.Fatalf("fixture moved more than the accepted head: worktree %q->%q branch %q->%q digest %q->%q",
 			first.WorktreeHead, second.WorktreeHead, first.Branch, second.Branch, first.BaseDigest, second.BaseDigest)
+	}
+	// The accepted head is the AUTHORITATIVE ref's — the same rev the
+	// state projector reads accepted bytes at — never a stale local
+	// shadow (the posture header prints exactly this value).
+	if second.AcceptedHead != authorityHead {
+		t.Fatalf("render 2 AcceptedHead = %q, want the authoritative %s head %q — the posture header prints a stale accepted head and the memo key cannot see the advance", second.AcceptedHead, authorityRef, authorityHead)
+	}
+	// Ahead/behind rides the same ref: one same-tree commit landed on it.
+	if !second.AheadBehindKnown || second.Behind != first.Behind+1 {
+		t.Fatalf("render 2 behind = %d (known %v), want %d: ahead/behind is not counted against the authoritative ref", second.Behind, second.AheadBehindKnown, first.Behind+1)
 	}
 	// The posture must be FRESH, not the cached pre-advance one.
 	if got := bridge.callCount(); got != 2 {

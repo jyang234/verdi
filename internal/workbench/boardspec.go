@@ -216,6 +216,28 @@ type boardGitState struct {
 	DefaultBranch string   `json:"defaultBranch"`
 	Branches      []string `json:"branches"`
 	Dirty         bool     `json:"dirty"`
+
+	// defaultRef is the resolved default branch's AUTHORITATIVE rev
+	// (specstate.Branch.Ref): "origin/<name>" when that remote-tracking
+	// ref exists, otherwise the local branch — the projector's own
+	// preference, because a local ref can be a stale shadow of the
+	// remote default. Every accepted-head fact (the posture header's
+	// Accepted HEAD, ahead/behind, the capabilities memo key) must ride
+	// this rev; DefaultBranch above keeps the display NAME only (Codex
+	// correction round 1, finding 1 — closure reopen). Unexported: a
+	// server-side authority fact, never part of the wire model.
+	defaultRef string
+}
+
+// acceptedRef is the rev accepted-head facts resolve against — the
+// authoritative default-branch ref, falling back to the display name for
+// state constructed without one (fixture/test literals; gitState always
+// sets both together).
+func (g *boardGitState) acceptedRef() string {
+	if g.defaultRef != "" {
+		return g.defaultRef
+	}
+	return g.DefaultBranch
 }
 
 // loadBoard assembles the projection's four inputs and the git state. The
@@ -566,9 +588,11 @@ func (s *boardSpecServer) gitState(ctx context.Context) (*boardGitState, string,
 		return nil, "", err
 	}
 	def := ""
+	defRef := ""
 	notice := ""
 	if resolved, ok := specstate.ResolveDefaultBranch(ctx, s.root); ok {
 		def = resolved.Name
+		defRef = resolved.Ref
 	} else {
 		notice = unresolvedDefaultBranchNotice
 	}
@@ -580,7 +604,7 @@ func (s *boardSpecServer) gitState(ctx context.Context) (*boardGitState, string,
 	if err != nil {
 		return nil, "", err
 	}
-	return &boardGitState{Branch: branch, DefaultBranch: def, Branches: branches, Dirty: dirty}, notice, nil
+	return &boardGitState{Branch: branch, DefaultBranch: def, Branches: branches, Dirty: dirty, defaultRef: defRef}, notice, nil
 }
 
 // ErrBoardNotFound distinguishes 404 from operational failures.

@@ -457,10 +457,17 @@ func (s *boardSpecServer) buildASDView(ctx context.Context, name string, proj *B
 		v.WorktreeHead = head
 	}
 	if git.DefaultBranch != "" {
-		if accepted, err := gitx.RevParse(ctx, s.root, git.DefaultBranch); err == nil {
+		// Accepted-head facts resolve at the AUTHORITATIVE default-branch
+		// rev (specstate.Branch.Ref — origin/<name> when it exists), the
+		// same rev the state projector reads accepted bytes at: keying on
+		// the display NAME would ride a possibly-stale local shadow while
+		// acceptance moves on the remote-tracking ref (Codex correction
+		// round 1, finding 1 — closure reopen).
+		acceptedRef := git.acceptedRef()
+		if accepted, err := gitx.RevParse(ctx, s.root, acceptedRef); err == nil {
 			v.AcceptedHead = accepted
 		}
-		if ahead, behind, err := gitx.AheadBehind(ctx, s.root, "HEAD", git.DefaultBranch); err == nil {
+		if ahead, behind, err := gitx.AheadBehind(ctx, s.root, "HEAD", acceptedRef); err == nil {
 			v.Ahead, v.Behind, v.AheadBehindKnown = ahead, behind, true
 		}
 	}
