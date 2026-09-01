@@ -529,13 +529,20 @@ func run() error {
 	// Amendment 003: both required registrations complete their initialize
 	// handshake before any useful work. Recording them in order is what proves
 	// the ordering to the parent.
-	observed := []string{}
-	// Each observation is flushed as it is made. The parent may interrupt this
-	// provider the moment the scoped surface raises a terminal, so a single
-	// end-of-run write would lose the entire record to that race.
+	// The record is append-only: every observation is one write to a file opened
+	// once in append mode, so a row is durable the moment its record call
+	// returns. The parent may interrupt this provider the moment the scoped
+	// surface raises a terminal, and rewriting the whole file per observation
+	// would lose every already-durable row whenever that interruption landed
+	// between the truncate and the write.
+	tools, err := os.OpenFile(toolsPath, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0o644)
+	if err != nil {
+		return err
+	}
+	defer tools.Close()
 	record := func(row string) error {
-		observed = append(observed, row)
-		return os.WriteFile(toolsPath, []byte(strings.Join(observed, "\n")+"\n"), 0o644)
+		_, err := tools.Write([]byte(row + "\n"))
+		return err
 	}
 	for _, handshake := range []struct{ name, url, authorization string }{
 		{"vatc", claimURL, claimAuthorization},
@@ -609,6 +616,13 @@ func run() error {
 		return err
 	}
 	if extraTool != "" {
+		// The undeclared call is recorded before it is issued, so the fact that
+		// this provider made it is durable. Its refusal frame arrives while the
+		// scoped surface is already raising the terminal that interrupts this
+		// provider, so only that last row races the interruption.
+		if err := record("extra_call " + extraTool); err != nil {
+			return err
+		}
 		refused, err := post(url, authorization, ` + "`" + `{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"` + "`" + `+extraTool+` + "`" + `","arguments":{}}}` + "`" + `)
 		if err != nil {
 			return err
@@ -1383,8 +1397,23 @@ func TestClaudeBuiltBinaryLifecycle_Behavioral(t *testing.T) {
 	// operational with no completion or receipt.
 	t.Run("undeclared_scoped_tool_ends_the_run_operationally", func(t *testing.T) {
 		run := runClaudeSealedLifecycle(t, bin, claudeLifecycleOptions{extraTool: "not_a_scoped_tool"})
-		if len(run.tools) != 9 || !strings.Contains(run.tools[8], "unknown scoped tool") {
+		// Both required handshakes and every declared-catalogue call are durably
+		// recorded before the undeclared call is issued, and the undeclared call
+		// itself is recorded before it is sent. Those nine rows are proof.
+		assertClaudeDurableScopedPrelude(t, run)
+		if len(run.tools) < 9 || run.tools[8] != "extra_call not_a_scoped_tool" {
 			t.Fatalf("undeclared scoped observations = %#v; observation=%#v", run.tools, run.obs)
+		}
+		// The refusal frame is the one row that races the parent's interruption:
+		// the scoped surface answers `isError` and raises the terminal that kills
+		// this provider in the same instant. It is asserted exactly when the
+		// provider durably recorded it and never invented when it did not, and no
+		// row may follow it either way.
+		if len(run.tools) > 10 {
+			t.Fatalf("provider recorded %d rows past the undeclared call = %#v, want at most its refusal", len(run.tools)-9, run.tools)
+		}
+		if len(run.tools) == 10 && !strings.Contains(run.tools[9], "unknown scoped tool") {
+			t.Fatalf("undeclared scoped refusal = %q, want the scoped surface's refusal", run.tools[9])
 		}
 		if run.obs.exitCode != 2 || run.obs.stdout != "" {
 			t.Fatalf("undeclared scoped tool run = %#v, want the operational terminal", run.obs)
@@ -1415,6 +1444,32 @@ func TestClaudeBuiltBinaryLifecycle_Behavioral(t *testing.T) {
 			t.Fatalf("recorder-append calls before classification = %d, want 0", got)
 		}
 	})
+}
+
+// assertClaudeDurableScopedPrelude proves the eight scoped observations every
+// launched provider records before it can reach any further tool call:
+// Amendment 003's two required initialize handshakes first, then the ATC-owned
+// claim answered on its own server, each server refusing the other's
+// capability, and only then useful work against the Verdi-owned catalogue.
+//
+// Every one of these rows is appended by a write that returned before the next
+// request was issued, so they are durable: a later parent interruption can
+// neither erase nor truncate them, and an empty or short record is a real
+// provider failure rather than a recording race.
+func assertClaudeDurableScopedPrelude(t *testing.T, run claudeLifecycleObservation) {
+	t.Helper()
+	wantPrefix := []string{"initialize vatc", "initialize verdi-context"}
+	if len(run.tools) < 8 || !reflect.DeepEqual(run.tools[:2], wantPrefix) ||
+		!strings.HasPrefix(run.tools[2], "claim_paths ") || run.tools[3] != "cross_token 401" ||
+		run.tools[4] != "reverse_cross_token 401" || run.tools[5] != "tools/list get_flight_plan,request_context" {
+		t.Fatalf("provider scoped MCP observations = %#v", run.tools)
+	}
+	if !strings.HasPrefix(run.tools[6], "get_flight_plan ") || !strings.Contains(run.tools[6], run.fixture.request.ManifestDigest) {
+		t.Fatalf("get_flight_plan observation = %q", run.tools[6])
+	}
+	if !strings.HasPrefix(run.tools[7], "request_context ") {
+		t.Fatalf("request_context observation = %q", run.tools[7])
+	}
 }
 
 // assertClaudeAssemblySurface proves the public Claude assembly reached adapter
@@ -1480,22 +1535,7 @@ func assertClaudeAssemblySurface(t *testing.T, run claudeLifecycleObservation) {
 		}
 	}
 
-	// Amendment 003: both required registrations complete their initialize
-	// handshake first, the ATC-owned claim tool answers on its own server, each
-	// server refuses the other's capability, and only then does the provider do
-	// useful work against the Verdi-owned catalogue.
-	wantPrefix := []string{"initialize vatc", "initialize verdi-context"}
-	if len(run.tools) < 6 || !reflect.DeepEqual(run.tools[:2], wantPrefix) ||
-		!strings.HasPrefix(run.tools[2], "claim_paths ") || run.tools[3] != "cross_token 401" ||
-		run.tools[4] != "reverse_cross_token 401" || run.tools[5] != "tools/list get_flight_plan,request_context" {
-		t.Fatalf("provider scoped MCP observations = %#v", run.tools)
-	}
-	if !strings.HasPrefix(run.tools[6], "get_flight_plan ") || !strings.Contains(run.tools[6], run.fixture.request.ManifestDigest) {
-		t.Fatalf("get_flight_plan observation = %q", run.tools[6])
-	}
-	if !strings.HasPrefix(run.tools[7], "request_context ") {
-		t.Fatalf("request_context observation = %q", run.tools[7])
-	}
+	assertClaudeDurableScopedPrelude(t, run)
 
 	// Exactly one typed stdin line: the Amendment 002 §4 user envelope carrying
 	// the sealed provider input under its fixed marker.
