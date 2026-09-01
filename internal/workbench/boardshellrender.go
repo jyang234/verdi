@@ -293,7 +293,7 @@ func writeASDPanels(b *strings.Builder, name string) {
 // forms are dialogs driven by boardspecasd.js; each maps one gesture to
 // one typed operation, with the operation name declared on the control.
 func writeASDForms(b *strings.Builder, p *BoardProjection, asd *asdView) {
-	if p.Mode != modeAuthoring {
+	if p.Mode != modeAuthoring || p.DomainRefusal != "" {
 		return
 	}
 	esc := stdhtml.EscapeString

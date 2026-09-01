@@ -212,15 +212,29 @@ func deriveASDShell(in asdShellInput) asdShell {
 		add(asdConcern{ID: "context/policy", Area: asdAreaContext, State: asdStateProven, Blocking: true,
 			Summary:   "Design-assistance policy is adopted (mode " + in.Caps.PolicyMode + ").",
 			Witnesses: witnesses})
-		if in.Caps.Mutable {
+		switch {
+		case in.Caps.Mutable:
 			add(asdConcern{ID: "context/agent-writes", Area: asdAreaContext, State: asdStateProven, Blocking: false,
 				// vocab:identity — "draft writes"/"draft-write" is the design_assistance mode's own enum family (AC-3), not the lifecycle state word
 				Summary:   "Delegated agents may apply typed draft writes here.",
 				Witnesses: []string{"mutable=true for the delegated-agent posture"}})
-		} else {
+		case in.Caps.RefusalPrecondition == "policy-mode":
+			// The ONE agent-specific precondition (review fix I-1):
+			// AuthorizePolicy's mode gate binds delegated agents alone —
+			// the browser human writes regardless of design_assistance
+			// mode.
 			add(asdConcern{ID: "context/agent-writes", Area: asdAreaContext, State: asdStateProven, Blocking: false,
 				// vocab:identity — "this draft" names AC-1's canonical draft (ASD protocol term), not a lifecycle state word
 				Summary:   "Delegated agents cannot write to this draft (" + in.Caps.RefusalPrecondition + ").",
+				Witnesses: []string{in.Caps.RefusalDetail}})
+		default:
+			// design-branch and proposal-state bind EVERY writer
+			// (AuthorizeState runs for human and agent alike) — agent-only
+			// wording here would invite the human into a doomed edit
+			// (review fix I-1).
+			add(asdConcern{ID: "context/draft-writes", Area: asdAreaContext, State: asdStateProven, Blocking: false,
+				// vocab:identity — "draft writes" is the ASD mutation contract's protocol phrasing (AC-1), not the lifecycle state word
+				Summary:   "Typed draft writes are refused here for humans and agents alike (" + in.Caps.RefusalPrecondition + ").",
 				Witnesses: []string{in.Caps.RefusalDetail}})
 		}
 	case in.CapsFailure != nil && in.CapsFailure.Code == "policy-forbidden":

@@ -509,10 +509,15 @@ func newTrashStubFixture(t *testing.T) string {
 		})
 }
 
-// TestBoardSpec_ObjectTrash_StubClaimsAC proves object-trash refuses to
-// remove an AC a stub's acceptance_criteria still claims (a stub with an
-// emptied AC list has no defined meaning — fail closed, name the stub),
-// while an unclaimed AC still trashes.
+// TestBoardSpec_ObjectTrash_StubClaimsAC proves the ADJUDICATED trash
+// semantics for a stub-claimed AC on the typed path: removing it is a
+// LEGAL draft operation through the shared core (kernel-equal semantics,
+// AC-2) — both the unclaimed and the stub-claimed AC trash cleanly. The
+// dangling stub claim the second removal creates is the lint gate's
+// finding (VL-006), never a board refusal; the browser's part is honesty
+// BEFORE the gesture — the trash confirmation names the claiming stub
+// from the scoping-layer chips (boardspec.js scopingChipsFor, asserted
+// in e2e/tests/50-design-workbench.spec.ts).
 func TestBoardSpec_ObjectTrash_StubClaimsAC(t *testing.T) {
 	specPath := func(root string) string {
 		return filepath.Join(root, ".verdi", "specs", "active", boardFixtureName, "spec.md")
@@ -534,8 +539,11 @@ func TestBoardSpec_ObjectTrash_StubClaimsAC(t *testing.T) {
 	// draft operation through the shared core — exactly what `verdi design
 	// mutate` would do — and the dangling stub claim it creates is the lint
 	// gate's finding (VL-006), not a board-local refusal. The legacy
-	// board-side guard is retired with the splice path; the browser client
-	// still warns pre-flight from the rendered coverage facts.
+	// board-side guard is retired with the splice path. (Stub claims are
+	// scoping-layer attributions, not declared LINKS, so the I-3 removal-
+	// coverage guard deliberately does not hold the removal either; the
+	// browser surfaces the claim in the trash confirmation instead —
+	// scopingChipsFor in boardspec.js.)
 	root2 := newTrashStubFixture(t)
 	h2 := newBoardTestHandler(root2)
 	rec, out := postMutate(t, h2, root2, boardFixtureName, []map[string]any{

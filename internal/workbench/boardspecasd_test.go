@@ -117,6 +117,54 @@ func TestDeriveASDShell(t *testing.T) {
 		}
 	})
 
+	t.Run("design-branch and proposal-state refusals speak to humans and agents alike", func(t *testing.T) {
+		// Review fix I-1: only the policy-mode precondition is agent-
+		// specific (AuthorizePolicy's human bypass); the design-branch and
+		// proposal-state preconditions refuse the browser human too
+		// (AuthorizeState runs for every actor), so agent-only wording
+		// would be dishonest.
+		for _, tc := range []struct{ precondition, detail string }{
+			{"design-branch", "branch main is not mutable design branch design/x"},
+			{"proposal-state", "Git-derived state accepted-pending-build is not mutable proposal state"},
+		} {
+			in := baseInput()
+			in.Caps = &DesignCapabilitiesView{PolicyMode: "draft-write", PolicyDigest: "sha256:abc", RefusalPrecondition: tc.precondition, RefusalDetail: tc.detail}
+			shell := deriveASDShell(in)
+			found := false
+			for _, c := range shell.All {
+				if c.ID != "context/draft-writes" {
+					continue
+				}
+				found = true
+				if strings.Contains(c.Summary, "Delegated agents") {
+					t.Fatalf("%s: summary %q is agent-only wording; the refusal binds the human writer too", tc.precondition, c.Summary)
+				}
+				if !strings.Contains(c.Summary, tc.precondition) {
+					t.Fatalf("%s: summary %q does not name the failing precondition", tc.precondition, c.Summary)
+				}
+				witnessed := false
+				for _, w := range c.Witnesses {
+					if w == tc.detail {
+						witnessed = true
+					}
+				}
+				if !witnessed {
+					t.Fatalf("%s: witnesses %q do not carry the kernel detail %q", tc.precondition, c.Witnesses, tc.detail)
+				}
+			}
+			if !found {
+				t.Fatalf("%s: no context/draft-writes concern in %+v", tc.precondition, shell.All)
+			}
+		}
+		// The policy-mode precondition keeps its agent-specific label.
+		shell := deriveASDShell(baseInput())
+		for _, c := range shell.All {
+			if c.ID == "context/agent-writes" && !strings.Contains(c.Summary, "Delegated agents") {
+				t.Fatalf("policy-mode summary %q lost its agent-specific labeling", c.Summary)
+			}
+		}
+	})
+
 	t.Run("not-adopted policy is honest absence, not a violation", func(t *testing.T) {
 		in := baseInput()
 		in.Caps = nil

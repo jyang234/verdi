@@ -174,22 +174,29 @@ func resolveExpectedIdentity(ctx context.Context, root, name string) (checkout, 
 	return identity.Checkout, identity.Branch, identity.Head, nil
 }
 
-// cachedCanonicalCheckout resolves — once per server instance — the exact
-// canonical CHECKOUT string the mutation kernel derives for this root
-// (path canonicalization only; it never changes for a live server). The
-// per-render branch/HEAD facts stay fresh; only the stable path
-// resolution is cached, so every poll stops re-resolving the worktree
-// toplevel through git.
+// cachedCanonicalCheckout resolves — successfully at most once per server
+// instance — the exact canonical CHECKOUT string the mutation kernel
+// derives for this root (path canonicalization only; it never changes for
+// a live server). The per-render branch/HEAD facts stay fresh; only the
+// stable path resolution is cached, so every poll stops re-resolving the
+// worktree toplevel through git. A failure (typically the CALLER'S
+// request context aborting mid-resolution) is returned to that caller
+// alone and never memoized: the next call retries with its own context
+// (review fix I-2 — the sync.Once variant cached the first request's
+// "context canceled" for the server's lifetime, refusing every later
+// mutation as identity-invalid).
 func (s *boardSpecServer) cachedCanonicalCheckout(ctx context.Context, name string) (string, error) {
-	s.checkoutOnce.Do(func() {
-		checkout, _, _, err := resolveExpectedIdentity(ctx, s.root, name)
-		if err != nil {
-			s.checkoutErr = err
-			return
-		}
-		s.checkoutCanonical = checkout
-	})
-	return s.checkoutCanonical, s.checkoutErr
+	s.checkoutMu.Lock()
+	defer s.checkoutMu.Unlock()
+	if s.checkoutCanonical != "" {
+		return s.checkoutCanonical, nil
+	}
+	checkout, _, _, err := resolveExpectedIdentity(ctx, s.root, name)
+	if err != nil {
+		return "", err
+	}
+	s.checkoutCanonical = checkout
+	return checkout, nil
 }
 
 // designActionRequest is the strict transport envelope for POST
@@ -458,7 +465,7 @@ func (s *boardSpecServer) handleMutateDraft(w http.ResponseWriter, r *http.Reque
 	s.writeMu.Lock()
 	defer s.writeMu.Unlock()
 
-	proj, _, _, _, err := s.loadBoard(r.Context(), name)
+	proj, _, _, extras, err := s.loadBoard(r.Context(), name)
 	if errors.Is(err, ErrBoardNotFound) {
 		http.NotFound(w, r)
 		return
@@ -474,10 +481,29 @@ func (s *boardSpecServer) handleMutateDraft(w http.ResponseWriter, r *http.Reque
 		writeJSONError(w, http.StatusForbidden, fmt.Sprintf("board for %s is in %s mode; only an authoring board (%s spec on a design branch) accepts writes", name, proj.Mode, s.model.DisplayState(proj.Class, "draft")))
 		return
 	}
+	// The kernel's design/<spec-name> branch precondition, refused HERE
+	// with the same explanation the wall shows (review fix I-1): the
+	// kernel remains the backstop (AuthorizeState would answer
+	// state-forbidden), but the adapter never invites a doomed write.
+	if proj.DomainRefusal != "" {
+		writeJSONError(w, http.StatusForbidden, proj.DomainRefusal)
+		return
+	}
 	// The gesture's annotation routing is validated against the live
 	// projection BEFORE the transaction, so an unknown record refuses with
 	// ZERO mutation rather than surfacing as a post-transaction surprise.
 	if err := validateAnnotationRouting(proj, envelope.GraduateAnnotations, envelope.DeleteAnnotations); err != nil {
+		writeJSONError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	// Removal coverage (review fix I-3, the legacy object-trash
+	// enumeration): a transaction removing a declared object must also
+	// remove every OTHER declared link naming its fragment — enumerated
+	// from the decoded frontmatter itself, never from what happened to be
+	// rendered — or be refused with ZERO mutation, disclosing exactly
+	// which links hold the object (VL-003 stays green through the typed
+	// path).
+	if err := validateRemovalCoverage(name, extras.fm, request.Operations); err != nil {
 		writeJSONError(w, http.StatusBadRequest, err.Error())
 		return
 	}
@@ -627,6 +653,89 @@ func validateAnnotationRouting(proj *BoardProjection, graduate, remove []string)
 		if !live[id] {
 			return fmt.Errorf("delete_annotations names %q, which is not a live annotation on this board — it may have been deleted or graduated since this wall was last refreshed", id)
 		}
+	}
+	return nil
+}
+
+// refNamesFragment reports whether a stored link ref names spec/<name>'s
+// declared fragment id — the legacy edgeRefMatcher semantics: the bare
+// id, the canonical spec/<name>#id form, and any parseable ref (pinned
+// forms included) normalizing to either.
+func refNamesFragment(name, id, ref string) bool {
+	internal := "spec/" + name + "#" + id
+	if ref == id || ref == internal {
+		return true
+	}
+	r, err := artifact.ParseRef(ref)
+	if err != nil {
+		return false
+	}
+	normalized := string(r.Kind) + "/" + r.Name
+	if r.Object != "" {
+		normalized += "#" + r.Object
+	}
+	return normalized == id || normalized == internal
+}
+
+// validateRemovalCoverage enforces the legacy object-trash enumeration on
+// the typed path (review fix I-3): for every remove-ac/-constraint/
+// -decision/-question operation in the transaction, ALL declared links
+// naming the removed fragment — every link type, from the decoded
+// frontmatter, never from the rendered chips — must either belong to a
+// decision removed in the same transaction or be covered by a matching
+// remove-link operation (exact stored source/type/ref/note). A fragment
+// named by the document-level links: block refuses outright: the board
+// cannot edit that block. The refusal is a zero-mutation 400 disclosing
+// every uncovered link, so no transaction can land a dangling ref
+// (VL-003) through this adapter.
+func validateRemovalCoverage(name string, fm *artifact.SpecFrontmatter, ops []draftmutation.Operation) error {
+	var removedIDs []string
+	removed := map[string]bool{}
+	removedDecisions := map[string]bool{}
+	coverage := map[string]int{}
+	for _, op := range ops {
+		switch op.Op {
+		case draftmutation.OpRemoveAC, draftmutation.OpRemoveConstraint, draftmutation.OpRemoveDecision, draftmutation.OpRemoveQuestion:
+			if !removed[op.ID] {
+				removed[op.ID] = true
+				removedIDs = append(removedIDs, op.ID)
+			}
+			if op.Op == draftmutation.OpRemoveDecision {
+				removedDecisions[op.ID] = true
+			}
+		case draftmutation.OpRemoveLink:
+			coverage[op.Source+"\x00"+string(op.Type)+"\x00"+op.Ref+"\x00"+op.Note]++
+		}
+	}
+	if len(removedIDs) == 0 {
+		return nil
+	}
+	var uncovered []string
+	for _, id := range removedIDs {
+		for _, l := range fm.Links {
+			if refNamesFragment(name, id, l.Ref) {
+				return fmt.Errorf("%s is named by the spec document's own links: block (%s %s), which the board cannot edit — the object stays", id, l.Type, l.Ref)
+			}
+		}
+		for _, dc := range fm.Decisions {
+			if dc.ID == id || removedDecisions[dc.ID] {
+				continue // its own entry (or a same-batch removal) goes whole, links included
+			}
+			for _, l := range dc.Links {
+				if !refNamesFragment(name, id, l.Ref) {
+					continue
+				}
+				key := dc.ID + "\x00" + string(l.Type) + "\x00" + l.Ref + "\x00" + l.Note
+				if coverage[key] > 0 {
+					coverage[key]--
+					continue
+				}
+				uncovered = append(uncovered, fmt.Sprintf("decision %s's %s %s", dc.ID, l.Type, l.Ref))
+			}
+		}
+	}
+	if len(uncovered) > 0 {
+		return fmt.Errorf("removing a declared object would leave dangling link(s) in the spec document: %s — remove them in the same transaction (a remove-link operation per stored source/type/ref/note tuple)", strings.Join(uncovered, "; "))
 	}
 	return nil
 }

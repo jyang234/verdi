@@ -23,6 +23,12 @@
   var region = document.getElementById("boardv2-region");
   var statusEl = document.getElementById("autosave-status");
   var authoring = state.mode === "authoring";
+  // Domain writes (typed spec mutations) are refused when the server
+  // says so (review fix I-1: the kernel accepts spec writes only from
+  // the design/<spec-name> branch); the scratch tier stays live. Every
+  // domain gesture refuses UP FRONT with the server's own explanation.
+  var domainRefusal = state.domainRefusal || "";
+  var domainWrites = authoring && !domainRefusal;
 
   // The board's own mount prefix (spec/draft-boards dc-1): the same page
   // serves at the unprefixed /board/spec/<name> and beneath a
@@ -306,11 +312,28 @@
   // is absent — never a silent no-op.
   function mutateOps(ops, extras) {
     heldRefresh = false;
+    if (!domainWrites && domainRefusal) {
+      // The kernel would refuse this write (state-forbidden); the wall
+      // says why instead of posting a doomed transaction (review fix
+      // I-1). Backstop only — every domain entry point is gated before
+      // this.
+      refuseDomain();
+      return Promise.resolve(null);
+    }
     if (!window.__verdiASD) {
       setStatus("error: the design transport is not loaded");
       return Promise.reject(new Error("no __verdiASD"));
     }
     return window.__verdiASD.mutate(ops, extras || {});
+  }
+
+  // refuseDomain speaks the server's own domain-write refusal — the
+  // designed constraint dialog, visible at the gesture, naming the
+  // required design branch (review fix I-1).
+  function refuseDomain() {
+    openConfirm("This wall cannot edit the spec", domainRefusal, false);
+    var ok = document.getElementById("edge-confirm-ok");
+    if (ok) ok.hidden = true;
   }
 
   // specEdgeChipEls collects the spec-layer chip ELEMENTS touching a key
@@ -1528,6 +1551,19 @@
     return out;
   }
 
+  // scopingChipsFor collects the scoping-layer chips touching a key —
+  // the stub claims an object-trash confirmation must name (F-08).
+  function scopingChipsFor(key) {
+    var out = [];
+    var chips = region.querySelectorAll('.yarn-chip[data-layer="scoping"]');
+    for (var i = 0; i < chips.length; i++) {
+      var from = chips[i].getAttribute("data-from");
+      var to = chips[i].getAttribute("data-to");
+      if (from === key || to === key) out.push({ from: from, to: to, type: chips[i].getAttribute("data-edge-type") });
+    }
+    return out;
+  }
+
   // gateRitualCopy appends the removal consequence for every gate-bearing
   // type among the named edges — the same ritual voice removal wears at
   // the chip's own × (a trash drop must not be a quieter path).
@@ -1582,6 +1618,13 @@
     if (g.kind === "refcard") {
       var ref = g.el.getAttribute("data-ref");
       var edges = specEdgeChipsFor(ref);
+      if (edges.length > 0 && !domainWrites) {
+        // Removing the holding edges is a spec write the kernel refuses
+        // here; a pure pin (no spec edges) still dies from the scratch
+        // tier below.
+        refuseDomain();
+        return;
+      }
       var docHeld = edges.some(function (c) {
         return c.from === "spec";
       });
@@ -1625,6 +1668,10 @@
     }
     // A declared object card: removing it removes its declaration from
     // the spec document plus every edge touching it — prose stays.
+    if (!domainWrites) {
+      refuseDomain();
+      return;
+    }
     var id = g.el.getAttribute("data-id");
     var edges2 = specEdgeChipsFor(id);
     var msg2 = "Removes " + id + " from the spec document";
@@ -1637,6 +1684,23 @@
       msg2 += ", and the " + (edges2.length === 1 ? "edge" : edges2.length + " edges") + " touching it (" + names2 + ")";
     }
     msg2 += ". Its body prose stays in the document — the board never deletes prose." + gateRitualCopy(edges2);
+    // The scoping-layer claims on this object (a stub covering an AC, a
+    // spike resolving an OQ) are part of the removal's impact (F-08):
+    // the claim itself is spec content in the stubs: block and will
+    // DANGLE until the stub is repointed — said BEFORE the confirm,
+    // never discovered from a lint finding later (review fix I-3).
+    var claims = scopingChipsFor(id);
+    if (claims.length > 0) {
+      var claimNames = claims
+        .map(function (c) {
+          return c.from.replace(/^stub:/, "") + " (" + c.type + ")";
+        })
+        .join(", ");
+      msg2 +=
+        " Declared stub" + (claims.length === 1 ? " " : "s ") + claimNames +
+        " still claim" + (claims.length === 1 ? "s" : "") + " " + id +
+        " — that claim will dangle until the stub is corrected (the lint gate flags it).";
+    }
     pending = { trashObject: id };
     openConfirm("Remove " + id + " from the spec", msg2, false);
   }
@@ -1787,11 +1851,19 @@
     openCardEditor(card);
   }
 
+  // openCardEditor's domain gate lives INSIDE the one shared entry, so
+  // mouse and keyboard paths refuse identically — before any text is
+  // invested (review fix I-1).
+
   // openCardEditor is the ONE inline-editor entry, shared by the mouse
   // (double-click) and the keyboard (Enter on a focused card) — complete
   // keyboard access without a second edit path (design §5.2).
   function openCardEditor(card) {
     if (!authoring || editing) return;
+    if (!domainWrites) {
+      refuseDomain();
+      return;
+    }
     var textEl = card.querySelector(".card-text");
     if (!textEl) return;
     cancelExpand(); // editing a card wins over the click-to-expand it shares

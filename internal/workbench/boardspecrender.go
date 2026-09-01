@@ -32,10 +32,16 @@ type boardClientPayload struct {
 	// control offers story/spike proto-stickies ONLY on feature-class
 	// walls — the same gate the server enforces (spec/scoping-canvas
 	// dc-5; the menu never offers what the server would refuse).
-	Class        string              `json:"class"`
-	Git          *boardGitState      `json:"git"`
-	Legal        map[string][]string `json:"legal"`
-	Consequences map[string]string   `json:"consequences"`
+	Class string `json:"class"`
+	// DomainRefusal mirrors the projection's domain-write refusal
+	// (review fix I-1): non-empty means the client must not offer any
+	// spec-editing gesture — the server names why, verbatim, so the
+	// constraint is visible at the gesture point rather than after a
+	// doomed round-trip.
+	DomainRefusal string              `json:"domainRefusal,omitempty"`
+	Git           *boardGitState      `json:"git"`
+	Legal         map[string][]string `json:"legal"`
+	Consequences  map[string]string   `json:"consequences"`
 	// Removals are the gate-bearing types' removal consequences — the
 	// confirmation ritual mirrors creation (owner UAT round 6, item 3).
 	Removals map[string]string `json:"removals"`
@@ -132,15 +138,16 @@ func renderBoardSpecPage(p *BoardProjection, git *boardGitState, asd *asdView) (
 		Expected:    asdExpectedWire{Checkout: asd.ExpectedCheckout, Branch: asd.ExpectedBranch, Head: asd.ExpectedHead},
 	})
 	payload := boardClientPayload{
-		Spec:         p.Spec,
-		Mode:         string(p.Mode),
-		Class:        p.Class,
-		Git:          git,
-		Legal:        legalPairTable(),
-		Consequences: consequenceLabelsFor(p.words),
-		Removals:     removalConsequenceLabels,
-		Gate:         gateBearingTypes(),
-		Words:        p.words.renamed(),
+		Spec:          p.Spec,
+		Mode:          string(p.Mode),
+		Class:         p.Class,
+		DomainRefusal: p.DomainRefusal,
+		Git:           git,
+		Legal:         legalPairTable(),
+		Consequences:  consequenceLabelsFor(p.words),
+		Removals:      removalConsequenceLabels,
+		Gate:          gateBearingTypes(),
+		Words:         p.words.renamed(),
 		Asd: &asdClientPayload{
 			Revision:    revision,
 			BaseDigest:  asd.BaseDigest,
@@ -218,6 +225,11 @@ func renderBoardRegion(p *BoardProjection, git *boardGitState, asd *asdView) str
 	var b strings.Builder
 	esc := stdhtml.EscapeString
 	authoring := p.Mode == modeAuthoring
+	// The domain-write surface (typed spec mutations) renders only when
+	// the kernel would accept it: an authoring wall on a non-namesake
+	// branch keeps its scratch tier but offers no spec-editing
+	// affordance the mutation core refuses (review fix I-1).
+	domainLive := authoring && p.DomainRefusal == ""
 	edgeFactSeen := map[string]int{}
 
 	// Disclosed-unavailable notices (I-1(b)/I-2/M-4): a configured-but-
@@ -241,6 +253,13 @@ func renderBoardRegion(p *BoardProjection, git *boardGitState, asd *asdView) str
 			writeCaseDisclosures(&b, p)
 		}
 		b.WriteString(`</div>`)
+	}
+
+	// The domain-refusal explanation (review fix I-1): why this live
+	// scratch wall offers no spec edits, named BEFORE any gesture is
+	// attempted — the kernel's own branch precondition, verbatim.
+	if p.DomainRefusal != "" {
+		b.WriteString(`<div class="board-notice asd-domain-refusal" data-testid="asd-domain-refusal" role="status">` + esc(p.DomainRefusal) + `</div>`)
 	}
 
 	writeASDPosture(&b, p, git, asd)
@@ -346,7 +365,10 @@ func renderBoardRegion(p *BoardProjection, git *boardGitState, asd *asdView) str
 		// a locus-declaring finding names, so the non-empty slice is the
 		// whole gate, exactly like Obligations above.
 		writeBadgeChips(&b, c.ID, c.Badges)
-		if authoring {
+		// A card's yarn handle draws a typed SPEC edge (add-link) — domain
+		// surface, offered only where the kernel accepts it (proto-sticky
+		// attribution handles stay: those draw annotation threads).
+		if domainLive {
 			b.WriteString(`<button type="button" class="yarn-handle" data-testid="yarn-handle-` + esc(c.ID) + `" aria-label="Draw yarn from ` + esc(c.ID) + `" title="drag to another card to string yarn"></button>`)
 		}
 		for _, rs := range c.Anchored {
@@ -468,7 +490,7 @@ func renderBoardRegion(p *BoardProjection, git *boardGitState, asd *asdView) str
 			}
 			b.WriteString(`</a>`)
 		}
-		if authoring {
+		if domainLive {
 			// In-place stub correction (F-06, design §6.2): the SAME typed
 			// transaction corrects an existing stub after creation — an
 			// edit-stub for its bindings, an atomic remove+add for a slug
@@ -533,12 +555,16 @@ func renderBoardRegion(p *BoardProjection, git *boardGitState, asd *asdView) str
 		if authoring && obligationYarn {
 			b.WriteString(`<button type="button" class="yarn-handle yarn-handle--proto yarn-handle--obligation" data-testid="yarn-handle-` + esc(s.ID) + `" aria-label="Draw an obligation thread from this sticky" title="drag to ` + esc(p.words.indefinite("story")) + ` acceptance criterion to author its evidence obligation"></button>`)
 		}
-		if authoring {
+		if domainLive {
+			// Graduation writes the spec document (add-ac/-stub/…): the
+			// affordance renders only where the kernel accepts it.
 			if proto {
 				b.WriteString(`<button type="button" class="graduate-btn" data-graduate="stub">Graduate</button>`)
 			} else {
 				b.WriteString(`<button type="button" class="graduate-btn" data-graduate="sticky">Graduate</button>`)
 			}
+		}
+		if authoring {
 			b.WriteString(`<button type="button" class="delete-btn" data-delete="sticky" aria-label="Delete sticky" title="the sticky dies; the spec is untouched">×</button>`)
 		}
 		b.WriteString(`</div>`)
@@ -554,7 +580,7 @@ func renderBoardRegion(p *BoardProjection, git *boardGitState, asd *asdView) str
 	// document-level chip (From "spec") gets neither: its edge lives in
 	// the frontmatter links: block the board cannot edit.
 	for _, e := range p.Edges {
-		editableSpecEdge := authoring && e.Layer == "spec" && e.From != "spec"
+		editableSpecEdge := domainLive && e.Layer == "spec" && e.From != "spec"
 		chipClass := "yarn-chip yarn-chip--" + esc(e.Layer)
 		if e.From == "spec" {
 			chipClass += " yarn-chip--doc"
@@ -587,7 +613,9 @@ func renderBoardRegion(p *BoardProjection, git *boardGitState, asd *asdView) str
 			// 5.4) never graduates through the type picker: its meaning IS
 			// the endpoint pair (dc-5), and stub-graduate on the sticky is
 			// what consumes it. It still dies from its own ×.
-			if !artifact.IsAnnotationID(e.From) && !artifact.IsAnnotationID(e.To) {
+			// Thread graduation writes a typed spec link (add-link) —
+			// domain surface, offered only where the kernel accepts it.
+			if domainLive && !artifact.IsAnnotationID(e.From) && !artifact.IsAnnotationID(e.To) {
 				b.WriteString(`<button type="button" class="graduate-btn" data-graduate="thread">Graduate</button>`)
 			}
 			b.WriteString(`<button type="button" class="delete-btn" data-delete="thread" aria-label="Delete thread" title="the thread dies; the spec is untouched">×</button>`)
@@ -1231,6 +1259,13 @@ func renderBoardDialogs(p *BoardProjection) string {
 // renderASDDialogs renders the ASD typed-operation dialogs (authoring
 // only — the callers gate on mode).
 func renderASDDialogs(p *BoardProjection) string {
+	// The typed-operation dialogs serve the domain surface alone; a wall
+	// whose domain writes are refused (review fix I-1) renders none of
+	// their entry points, so the chrome would be dead weight dressed as
+	// an affordance.
+	if p.DomainRefusal != "" {
+		return ""
+	}
 	var b strings.Builder
 	writeASDTextDialog(&b)
 	writeASDImpactDialog(&b)

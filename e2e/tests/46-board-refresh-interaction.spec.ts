@@ -172,17 +172,24 @@ test.describe("board refresh vs. live interaction (owner jank report)", () => {
     );
     await page.mouse.move(300, 400, { steps: 4 });
     await page.mouse.up();
-    await dropPosted;
-    await page.waitForResponse(
-      (r) => r.url().includes("/snapshot") && r.status() === 200,
-      { timeout: 15_000 },
-    );
+    // The drop's own POST body is the exact server truth for this
+    // mutation; the wait below is keyed to the OBSERVABLE — the wall
+    // showing exactly those coordinates — never to "any /snapshot 200"
+    // (indistinguishable from the 2s poll's) plus a sleep.
+    const dropResp = await dropPosted;
+    const posted = dropResp.request().postDataJSON() as { x: number; y: number };
     await expectAutosaved(page);
-    await page.waitForTimeout(250); // application settles after the 200
-    const final = await page.evaluate((sid) => {
-      const el = document.querySelector(`.sticky[data-id="${sid}"]`) as HTMLElement;
-      return { left: parseFloat(el.style.left), top: parseFloat(el.style.top) };
-    }, id);
+    await expect
+      .poll(
+        () =>
+          page.evaluate((sid) => {
+            const el = document.querySelector(`.sticky[data-id="${sid}"]`) as HTMLElement;
+            return { left: parseFloat(el.style.left), top: parseFloat(el.style.top) };
+          }, id),
+        { timeout: 15_000 },
+      )
+      .toEqual({ left: posted.x, top: posted.y });
+    const final = { left: posted.x, top: posted.y };
 
     await page.reload();
     const persisted = await page.evaluate((sid) => {
@@ -212,18 +219,29 @@ test.describe("board refresh vs. live interaction (owner jank report)", () => {
     await dragBy(page, sticky, 140, 40);
     await hold.captured;
     // Mutation 2: drop at B — its refresh flows through and applies.
-    const dropB = page.waitForResponse(
-      (r) => r.url().includes("/api/sticky-position") && r.ok(),
-      { timeout: 15_000 },
-    );
     await dragBy(page, sticky, 60, 80);
-    await dropB;
-    await page.waitForResponse(
-      (r) => r.url().includes("/snapshot") && r.status() === 200,
-      { timeout: 15_000 },
-    );
+    // The drop's optimistic coordinates ARE the posted bytes (the client
+    // posts exactly the style values it just set) — the expected value
+    // for the applied projection. Key the wait to the OBSERVABLE: after
+    // the mutation chain settles ("saved"), the wall still renders B's
+    // exact coordinates — never "any /snapshot 200" (the 2s poll answers
+    // 200 too) plus a sleep. (A waitForResponse on the POST is racy
+    // here: drag 1's response event can be delivered late and match.)
+    const droppedB = await page.evaluate((sid) => {
+      const el = document.querySelector(`.sticky[data-id="${sid}"]`) as HTMLElement;
+      return { left: parseFloat(el.style.left), top: parseFloat(el.style.top) };
+    }, id);
     await expectAutosaved(page);
-    await page.waitForTimeout(250); // application settles after the 200
+    await expect
+      .poll(
+        () =>
+          page.evaluate((sid) => {
+            const el = document.querySelector(`.sticky[data-id="${sid}"]`) as HTMLElement;
+            return { left: parseFloat(el.style.left), top: parseFloat(el.style.top) };
+          }, id),
+        { timeout: 15_000 },
+      )
+      .toEqual(droppedB);
 
     const atB = await page.evaluate((sid) => {
       const el = document.querySelector(`.sticky[data-id="${sid}"]`) as HTMLElement;

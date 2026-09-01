@@ -1,7 +1,7 @@
 import { test, expect, Page } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
 import { SHOWCASE, boardPath } from "./fixtures";
-import { addSticky, expectAutosaved, uncommittedIndicator } from "./helpers";
+import { addSticky, dragToTrash, expectAutosaved, uncommittedIndicator } from "./helpers";
 
 // Wave 6 Task 2 — the ASD synchronized workbench (design §§3-6, SI-163/
 // SI-165/SI-167/SI-168; ASD AC-2/AC-4..AC-8, CO-9 §Browser behavior).
@@ -592,22 +592,136 @@ test.describe("typed forms", () => {
   });
 
   test("in-place stub correction rides the same typed transaction (F-06)", async ({ page }) => {
+    // Review fix I-4: the fixture GUARANTEES a stub (seeded through the
+    // typed API), the correction is APPLIED (edit-stub) and asserted in
+    // both the projection and the persisted spec bytes, and the slug
+    // rename exercises the atomic [remove-stub, add-stub] batch. No
+    // skip, no Cancel-only walkthrough.
+    const seedSlug = "stub-correct-seed";
+    const renamedSlug = "stub-correct-renamed";
+    await expectClean(
+      await postMutate(page, DRAFT_B(), SHOWCASE.SHOWCASE_DRAFT_SPEC, [
+        { op: "add-stub", slug: seedSlug, acceptance_criteria: ["ac-1"] },
+      ]),
+    );
     await page.goto(DRAFT_B());
-    const stubCard = page.locator(".stubcard").first();
-    if ((await stubCard.count()) === 0) {
-      test.skip(true, "no stub on the draft wall to correct");
-    }
-    await stubCard.locator("[data-asd-correct-stub]").click();
+    const seeded = page.locator(`.stubcard[data-stub="${seedSlug}"]`);
+    await expect(seeded).toBeVisible();
+
+    await seeded.locator("[data-asd-correct-stub]").click();
     const dialog = page.locator("#asd-stub-dialog");
     await expect(dialog).toBeVisible();
-    // Grammar validation at the field, live.
+
+    // Grammar validation at the field, live (F-06's field-level refusal).
     const slugField = page.getByTestId("asd-stub-slug");
     await slugField.fill("Not Kebab");
     await expect(page.getByTestId("asd-stub-slug-error")).toBeVisible();
     await expect(page.getByTestId("asd-stub-slug-error")).toContainText("kebab-case");
-    await slugField.fill("kebab-corrected-slug");
+    await slugField.fill(seedSlug);
     await expect(page.getByTestId("asd-stub-slug-error")).toBeHidden();
+
+    // APPLY a binding correction: the stub claims ac-2 as well — ONE
+    // edit-stub through the shared core.
+    await dialog.locator('[data-asd-stub-ac="ac-2"]').check();
+    const editPosted = page.waitForResponse(
+      (r) => r.url().includes("/api/mutate_draft") && r.ok(),
+      { timeout: 20_000 },
+    );
+    await page.getByTestId("asd-stub-ok").click();
+    await editPosted;
+    // Projection: the corrected binding is on the wall (data attributes,
+    // lane rule).
+    await expect(page.locator(`.stubcard[data-stub="${seedSlug}"]`)).toHaveAttribute(
+      "data-acs",
+      "ac-1,ac-2",
+      { timeout: 10_000 },
+    );
+    // Persisted spec: the snapshot's exact base bytes carry the
+    // corrected stub declaration.
+    const afterEdit = await snapshotOf(page, DRAFT_B());
+    const specAfterEdit = Buffer.from(afterEdit.base_spec_b64, "base64").toString("utf8");
+    const editedLine = specAfterEdit
+      .split("\n")
+      .find((l: string) => l.includes(seedSlug));
+    expect(editedLine, specAfterEdit).toBeTruthy();
+    expect(editedLine!).toContain("ac-2");
+
+    // RENAME: a slug change is ONE atomic [remove-stub, add-stub] batch.
+    await page
+      .locator(`.stubcard[data-stub="${seedSlug}"]`)
+      .locator("[data-asd-correct-stub]")
+      .click();
+    await expect(dialog).toBeVisible();
+    await slugField.fill(renamedSlug);
+    const renamePosted = page.waitForResponse(
+      (r) => r.url().includes("/api/mutate_draft") && r.ok(),
+      { timeout: 20_000 },
+    );
+    await page.getByTestId("asd-stub-ok").click();
+    await renamePosted;
+    await expect(page.locator(`.stubcard[data-stub="${renamedSlug}"]`)).toBeVisible({
+      timeout: 10_000,
+    });
+    await expect(page.locator(`.stubcard[data-stub="${seedSlug}"]`)).toHaveCount(0);
+    // The rename carried the bindings and replaced the slug atomically in
+    // the persisted spec.
+    const afterRename = await snapshotOf(page, DRAFT_B());
+    const specAfterRename = Buffer.from(afterRename.base_spec_b64, "base64").toString("utf8");
+    expect(specAfterRename).toContain(renamedSlug);
+    expect(specAfterRename).not.toContain(seedSlug);
+    const renamedLine = specAfterRename
+      .split("\n")
+      .find((l: string) => l.includes(renamedSlug));
+    expect(renamedLine, specAfterRename).toBeTruthy();
+    expect(renamedLine!).toContain("ac-1");
+    expect(renamedLine!).toContain("ac-2");
+
+    // Cleanup: the probe stub leaves through the same typed surface, so
+    // the shared wall returns to its provisioned shape.
+    await expectClean(
+      await postMutate(page, DRAFT_B(), SHOWCASE.SHOWCASE_DRAFT_SPEC, [
+        { op: "remove-stub", slug: renamedSlug },
+      ]),
+    );
+  });
+
+  test("the trash confirmation names a scoping-layer stub claim before anything is removed (F-08)", async ({ page }) => {
+    // Review fix I-3(b): the stub's claim on an AC is a SCOPING-layer
+    // chip; the trash impact preview must name it — the spec-layer chip
+    // filter alone never saw it, so the confirm was silent about the
+    // dangling claim the removal would create.
+    const slug = "trash-claim-probe";
+    await expectClean(
+      await postMutate(page, DRAFT_B(), SHOWCASE.SHOWCASE_DRAFT_SPEC, [
+        { op: "add-stub", slug, acceptance_criteria: ["ac-1"] },
+      ]),
+    );
+    await page.goto(DRAFT_B());
+    // The claim hangs on the wall as a scoping chip (chip classes, lane
+    // rule).
+    await expect(
+      page.locator(`.yarn-chip--scoping[data-from="stub:${slug}"][data-to="ac-1"]`),
+    ).toHaveCount(1);
+
+    await dragToTrash(page, page.getByTestId("card-ac-1"));
+    const confirm = page.locator("#edge-confirm");
+    await expect(confirm).toBeVisible();
+    await expect(confirm).toContainText(slug);
+    await expect(confirm).toContainText("dangle");
+
+    // Cancel leaves everything standing.
     await page.getByRole("button", { name: "Cancel" }).click();
+    await expect(page.getByTestId("card-ac-1")).toBeVisible();
+    await expect(
+      page.locator(`.yarn-chip--scoping[data-from="stub:${slug}"][data-to="ac-1"]`),
+    ).toHaveCount(1);
+
+    // Cleanup the probe stub through the same typed surface.
+    await expectClean(
+      await postMutate(page, DRAFT_B(), SHOWCASE.SHOWCASE_DRAFT_SPEC, [
+        { op: "remove-stub", slug },
+      ]),
+    );
   });
 
   test("the add-object form declares through one typed operation", async ({ page }) => {

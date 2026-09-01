@@ -165,12 +165,16 @@ type boardSpecServer struct {
 	// doc comment). nil means the design service is not wired.
 	design DesignBridge
 
-	// checkoutOnce/checkoutCanonical/checkoutErr cache the kernel's
-	// canonical checkout-path resolution for this root (stable for the
-	// server's lifetime) so per-poll renders stop re-resolving it.
-	checkoutOnce      sync.Once
+	// checkoutMu/checkoutCanonical cache the kernel's canonical
+	// checkout-path resolution for this root (stable for the server's
+	// lifetime) so per-poll renders stop re-resolving it. SUCCESS ONLY is
+	// memoized (review fix I-2): the resolution runs under the request's
+	// context, so a browser-aborted first request must fail that request
+	// alone — never poison the memo with "context canceled" for the
+	// server's lifetime. An empty checkoutCanonical means unresolved;
+	// the next call retries.
+	checkoutMu        sync.Mutex
 	checkoutCanonical string
-	checkoutErr       error
 
 	// capsMu/capsCache memoize one spec's capabilities consultation per
 	// exact fact key (branch, worktree HEAD, current spec digest, policy
@@ -318,6 +322,25 @@ func (s *boardSpecServer) loadBoard(ctx context.Context, name string) (*BoardPro
 	proj, err := buildProjection(name, fm, bodyBytes, stored, annotations, comments, mode, string(st.ArtifactStatus()))
 	if err != nil {
 		return nil, nil, "", nil, err
+	}
+	// The DOMAIN surface (typed spec mutations) is honest about the
+	// kernel's own branch precondition (review fix I-1): AuthorizeState
+	// accepts spec writes only from exactly design/<spec-name>, for the
+	// browser human and every other actor alike — so a proposed draft
+	// served from any other branch renders the projection and its live
+	// scratch tier WITHOUT the forms, card editors, spec-edge removal,
+	// or trash affordances every one of which the kernel would refuse
+	// with state-forbidden. The refusal is precondition-specific and
+	// names the required branch (constraints visible BEFORE the author
+	// invests, design §6.2) — the same fact designapp reports as
+	// MutabilityRefusal{Precondition:"design-branch"} when capabilities
+	// are derivable; deriving it here from the identical branch fact
+	// keeps the wall honest even where policy authority is not adopted
+	// and the capabilities consultation fails before reaching it.
+	if mode == modeAuthoring && git.Branch != "design/"+name {
+		proj.DomainRefusal = fmt.Sprintf(
+			"spec/%s is a proposed draft, but branch %q is not its mutable design branch %q — the shared mutation core refuses spec writes from any other checkout (state-forbidden), so this wall offers reading and scratch annotations only. Check out %q (or open that branch's own /b/ draft board) to edit the spec",
+			name, git.Branch, "design/"+name, "design/"+name)
 	}
 	// The state resolution's own disclosures (an unproven default branch,
 	// an incomplete corpus scan, a legacy-status migration note) render in
