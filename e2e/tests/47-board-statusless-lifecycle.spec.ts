@@ -17,7 +17,16 @@ test.describe("statusless lifecycle (merge-signaled acceptance)", () => {
   test("a statusless draft on its design branch is a live authoring wall: a sticky lands and survives reload", async ({
     page,
   }) => {
-    await page.goto(boardPath(EDGE.STATUSLESS_DRAFT_SPEC));
+    // Wave 6 Task 2: typed draft mutations ride the shared core, whose
+    // mutable-branch rule is design/<spec-name> exactly (AC-2's identical
+    // semantics). The statusless draft's own namesake branch board is the
+    // editable wall; the serving checkout's copy remains a projection.
+    await page.goto(
+      "/b/" +
+        encodeURIComponent("design/" + EDGE.STATUSLESS_DRAFT_SPEC) +
+        "/board/spec/" +
+        EDGE.STATUSLESS_DRAFT_SPEC,
+    );
     await expect(page.getByTestId("board")).toHaveAttribute(
       "data-board-mode",
       "authoring",
@@ -37,7 +46,16 @@ test.describe("statusless lifecycle (merge-signaled acceptance)", () => {
   test("a statusless draft accepts a real spec edit (the design-start → serve → board-edit flow)", async ({
     page,
   }) => {
-    await page.goto(boardPath(EDGE.STATUSLESS_DRAFT_SPEC));
+    // Wave 6 Task 2: typed draft mutations ride the shared core, whose
+    // mutable-branch rule is design/<spec-name> exactly (AC-2's identical
+    // semantics). The statusless draft's own namesake branch board is the
+    // editable wall; the serving checkout's copy remains a projection.
+    await page.goto(
+      "/b/" +
+        encodeURIComponent("design/" + EDGE.STATUSLESS_DRAFT_SPEC) +
+        "/board/spec/" +
+        EDGE.STATUSLESS_DRAFT_SPEC,
+    );
     await expect(page.getByTestId("board")).toHaveAttribute(
       "data-board-mode",
       "authoring",

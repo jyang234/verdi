@@ -100,6 +100,7 @@ func (b *branchBoards) server(ctx context.Context, branch string) (*boardSpecSer
 		reviewUnavailable: b.deps.ReviewUnavailable,
 		supersession:      b.deps.SupersessionCandidates,
 		model:             b.deps.Model,
+		design:            b.deps.Design,
 		fixedBranch:       branch,
 	}
 	b.servers[branch] = s
@@ -196,18 +197,52 @@ func (b *branchBoards) serveSealed(w http.ResponseWriter, r *http.Request, branc
 		renderError(w, http.StatusInternalServerError, err)
 		return
 	}
+	asd := sealedASDView(branch, ref, proj)
 	if rt.suffix == routeBoardFragment {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		_, _ = w.Write([]byte(renderBoardRegion(proj, git)))
+		_, _ = w.Write([]byte(renderBoardRegion(proj, git, asd)))
 		return
 	}
-	out, err := renderBoardSpecPage(proj, git)
+	out, err := renderBoardSpecPage(proj, git, asd)
 	if err != nil {
 		renderError(w, http.StatusInternalServerError, err)
 		return
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	_, _ = w.Write(out) // response body write; post-header error is unactionable
+}
+
+// sealedASDView is the degraded ASD view for a remote-only branch's
+// sealed render: no working tree exists, so there is no base to mutate
+// against, no expected identity, and no capabilities consultation — each
+// disclosed honestly (the shell's context row carries the exact reason)
+// rather than fabricated.
+func sealedASDView(branch, ref string, proj *BoardProjection) *asdView {
+	v := &asdView{
+		Checkout:       ref + " (remote-tracking ref; sealed render, no working tree)",
+		Branch:         branch,
+		StateFormal:    proj.Status,
+		SlugPattern:    specNameRe.String(),
+		NextIDs:        map[string]string{},
+		ObjectAnchors:  map[string]string{},
+		ObjectEvidence: map[string]string{},
+		StickySlugs:    map[string]string{},
+		EdgeFacts:      map[string][]asdEdgeFact{},
+		DesignWired:    true,
+		CapsFailure: &DesignFailure{Classification: "operational", Code: "sealed-remote-board",
+			Detail: "a remote-only branch's board is a sealed render of " + ref + "; capabilities require a working tree"},
+	}
+	v.Shell = deriveASDShell(asdShellInput{
+		ProblemPresent: proj.Problem != "",
+		OutcomePresent: proj.Outcome != "",
+		Class:          proj.Class,
+		Mode:           string(proj.Mode),
+		Branch:         branch,
+		StateFormal:    proj.Status,
+		DesignWired:    true,
+		CapsFailure:    v.CapsFailure,
+	})
+	return v
 }
 
 // loadSealed assembles the sealed board for a remote-only branch from the

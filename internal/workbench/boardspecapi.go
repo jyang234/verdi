@@ -1,12 +1,18 @@
 package workbench
 
 // The v1 board's write surface: POST /board/spec/{name}/api/{action}.
-// Every spec write goes through internal/artifact/splice (surgical splice +
-// validate-before-write, S7) and lands in the working tree only;
-// annotation writes go to the mutable zone and never dirty the spec
-// tree; git acts are explicit rituals (05 §Workbench "Authoring").
-// Everything is authoring-mode-only: review is a mirror, read-only is a
-// document.
+// Since Wave 6 Task 2 every DOMAIN spec write is a typed mutate_draft
+// transaction through the one designapp application core
+// (boardspecdesign.go) — the legacy splice path is deleted (AC-2: the
+// migrated workbench retains no parallel interpretation of domain
+// mutations). This file keeps only the pre-existing NON-domain
+// affordances on their existing owners: annotation writes go to the
+// mutable zone (boardio, the same owner MCP's add_annotation uses) and
+// never dirty the spec tree; layout positions go to boardlayout; git
+// acts are explicit rituals (gitx); scaffolding rides
+// stubinstantiate/designscaffold; the obligation arm of sticky-graduate
+// rides internal/evidence. Everything but stub-instantiate/create is
+// authoring-mode-only: review is a mirror, read-only is a document.
 
 import (
 	"context"
@@ -15,19 +21,13 @@ import (
 	"io"
 	"net/http"
 	"os"
-	"path/filepath"
-	"sort"
 	"strings"
-	"sync/atomic"
 	"time"
 
 	"github.com/jyang234/verdi/internal/artifact"
-	"github.com/jyang234/verdi/internal/artifact/splice"
-	"github.com/jyang234/verdi/internal/atomicfile"
 	"github.com/jyang234/verdi/internal/boardio"
 	"github.com/jyang234/verdi/internal/boardlayout"
 	"github.com/jyang234/verdi/internal/designscaffold"
-	"github.com/jyang234/verdi/internal/draftmutation"
 	"github.com/jyang234/verdi/internal/gitx"
 	"github.com/jyang234/verdi/internal/model"
 	"github.com/jyang234/verdi/internal/store"
@@ -37,19 +37,24 @@ import (
 // boardAPIRequest is the one strict-decoded body shape every action
 // reads its fields from; unknown fields fail closed.
 type boardAPIRequest struct {
-	ID      string  `json:"id,omitempty"`
-	Ref     string  `json:"ref,omitempty"`
-	Text    string  `json:"text,omitempty"`
-	From    string  `json:"from,omitempty"`
-	To      string  `json:"to,omitempty"`
-	Type    string  `json:"type,omitempty"`
-	NewType string  `json:"newType,omitempty"`
-	Note    string  `json:"note,omitempty"`
-	Kind    string  `json:"kind,omitempty"`
-	X       float64 `json:"x,omitempty"`
-	Y       float64 `json:"y,omitempty"`
-	Message string  `json:"message,omitempty"`
-	Branch  string  `json:"branch,omitempty"`
+	ID string `json:"id,omitempty"`
+	// IDs is annotation-delete's batch form (Wave 6 Task 2): one gesture
+	// deleting several mutable-zone records (a trashed reference card's
+	// pin plus its threads) in one action — same owner, same semantics,
+	// plural addressing.
+	IDs     []string `json:"ids,omitempty"`
+	Ref     string   `json:"ref,omitempty"`
+	Text    string   `json:"text,omitempty"`
+	From    string   `json:"from,omitempty"`
+	To      string   `json:"to,omitempty"`
+	Type    string   `json:"type,omitempty"`
+	NewType string   `json:"newType,omitempty"`
+	Note    string   `json:"note,omitempty"`
+	Kind    string   `json:"kind,omitempty"`
+	X       float64  `json:"x,omitempty"`
+	Y       float64  `json:"y,omitempty"`
+	Message string   `json:"message,omitempty"`
+	Branch  string   `json:"branch,omitempty"`
 	// Name, Values, and ACs are the create action's inputs
 	// (spec/creation-form ac-2): the new spec's kebab-case name, the
 	// form's submitted values keyed by the enumerated field descriptors
@@ -75,6 +80,17 @@ func (s *boardSpecServer) boardSpecAPIHandler() http.HandlerFunc {
 		}
 		name := r.PathValue("name")
 		action := r.PathValue("action")
+		// The closed route/action grammar (SI-167): anything outside the
+		// exact inventory union fails before ANY other work.
+		if !boardActionInventory()[action] {
+			http.NotFound(w, r)
+			return
+		}
+		// The six application operations (design §3.2) have their own
+		// strict transport and dispatch (boardspecdesign.go).
+		if s.designActionHandler(w, r, name, action) {
+			return
+		}
 
 		// Serialize every mutation against this server's other in-flight
 		// mutations: each action is a read-modify-write of the working tree
@@ -96,7 +112,7 @@ func (s *boardSpecServer) boardSpecAPIHandler() http.HandlerFunc {
 			return
 		}
 
-		proj, _, _, err := s.loadBoard(r.Context(), name)
+		proj, _, _, _, err := s.loadBoard(r.Context(), name)
 		if errors.Is(err, ErrBoardNotFound) {
 			http.NotFound(w, r)
 			return
@@ -126,46 +142,29 @@ func (s *boardSpecServer) boardSpecAPIHandler() http.HandlerFunc {
 
 		ctx := r.Context()
 		switch action {
-		case "edit-text":
-			err = s.actionEditText(name, req)
-		case "edge":
-			err = s.actionEdge(name, proj, req)
 		case "sticky":
 			err = s.actionSticky(name, proj, req)
 		case "sticky-graduate":
-			// A sticky graduates into a declared spec object (the object
-			// menu's ac/co/dc/oq) OR — on a story wall, kind
-			// "obligation:<for-kind>" — into an evidence-obligation artifact
-			// bound to the story AC it was dropped on (spec/obligation-
-			// artifact ac-3). One action, one graduation ritual; the kind
-			// prefix selects the destination.
+			// Only the obligation arm survives here (spec/obligation-
+			// artifact ac-3, an evidence-artifact write through the one
+			// shared internal/evidence seam). A spec-object graduation
+			// (the object menu's ac/co/dc/oq) is a DOMAIN mutation and is
+			// a typed mutate_draft transaction now (Wave 6 Task 2).
 			if strings.HasPrefix(req.Kind, obligationGraduatePrefix) {
 				err = s.actionObligationGraduate(ctx, name, proj, req)
 			} else {
-				err = s.actionStickyGraduate(name, proj, req)
+				err = fmt.Errorf("sticky-graduate graduates only evidence obligations (kind obligation:<for-kind>) now; graduating a sticky into a declared spec object is a typed mutate_draft transaction")
 			}
-		case "stub-graduate":
-			err = s.actionStubGraduate(name, proj, req)
 		case "stub-instantiate":
 			err = s.actionStubInstantiate(ctx, name, proj, req)
 		case "create":
 			err = s.actionCreate(ctx, name, proj, req)
 		case "relates":
 			err = s.actionRelates(ctx, name, proj, req)
-		case "relates-graduate":
-			err = s.actionRelatesGraduate(name, proj, req)
 		case "pin":
 			err = s.actionPin(ctx, name, proj, req)
-		case "ref-trash":
-			err = s.actionRefTrash(name, proj, req)
-		case "object-trash":
-			err = s.actionObjectTrash(name, proj, req)
 		case "annotation-delete":
 			err = s.actionAnnotationDelete(name, proj, req)
-		case "edge-delete":
-			err = s.actionEdgeDelete(name, proj, req)
-		case "edge-retype":
-			err = s.actionEdgeRetype(name, proj, req)
 		case "position":
 			err = s.actionPosition(name, proj, req)
 		case "sticky-position":
@@ -176,6 +175,8 @@ func (s *boardSpecServer) boardSpecAPIHandler() http.HandlerFunc {
 			s.actionGitSwitch(ctx, w, req)
 			return
 		default:
+			// Unreachable: the inventory guard above already refused
+			// every unknown action. Kept as the fail-closed backstop.
 			http.NotFound(w, r)
 			return
 		}
@@ -191,111 +192,6 @@ func (s *boardSpecServer) boardSpecAPIHandler() http.HandlerFunc {
 		}
 		writeJSON(w, http.StatusOK, boardAPIResponse{Dirty: dirty})
 	}
-}
-
-// spliceSpecTestPause, when set non-nil, is invoked by spliceSpec between
-// its pristine read of spec.md and its atomic write — a narrow TEST-ONLY
-// injection point (Task 1B's owner-carried closure minor) that lets the
-// focused race test deterministically hold the legacy splice open inside
-// its read-modify-write window. It holds nil in production and is stored
-// only by this package's own tests. The atomic.Pointer keeps the hook's
-// store/load pairing race-clean even if a future test runs parallel
-// splices; the production fast path stays a single atomic nil load.
-var spliceSpecTestPause atomic.Pointer[func()]
-
-// spliceSpec runs one splice transaction against the spec's document:
-// parse the pristine buffer, compute edits, apply tail-to-head, strict
-// re-decode (validate-before-write), then atomically replace the file.
-// An invalid result never touches the working tree (S7 §5).
-//
-// Until Task 2 deletes this legacy path, the complete
-// read/parse/apply/validate/atomic-write runs INSIDE the checkout-wide
-// writer transaction boundary — draftmutation.WithWriterLock (Wave 6
-// design §6.1.2 item 6, SI-177) — because it writes the same spec.md
-// bytes a draft-mutation transaction replaces; without that exclusion the
-// two writers' read-modify-write windows can silently lose one update.
-// The callback keeps the exact legacy behavior: no journal, no
-// provenance entry, and response bytes unchanged for the success path
-// and every callback error (WithWriterLock returns the callback's error
-// verbatim). One NEW error class is now reachable, by design: when this
-// host process does not own the checkout's writer lock and cannot
-// acquire it (a live foreign holder), the action surfaces
-// "draftmutation: acquiring global writer lock: filelock: lock held by
-// live pid ..." through the handler's existing action-error path (HTTP
-// 400 with that text) — the refusal outcome §6.1.2 commands for every
-// unproven holder. Per WithWriterLock's non-recursive contract the
-// callback never calls WithWriterLock again. Under `verdi serve`, which
-// holds the checkout's lifetime writer lock, WithWriterLock reuses that
-// registry-proven outer lock; standalone hosts acquire and release it
-// per call.
-//
-// Blocking semantics (design §6.1.2 items 3/5 command them): spliceSpec
-// now blocks — uncancellably and without bound — on the per-checkout
-// transaction mutex until any in-flight draft-mutation transaction
-// completes, and it does so while the caller still holds the handler's
-// writeMu, so a slow draft transaction queues EVERY board mutation on
-// this server behind it. That is the intended serialization: the mutex
-// must cover a complete transaction, and losing an update silently was
-// the alternative.
-//
-// The zero-value Coordinator means real filesystem
-// operations, and context.Background() keeps spliceSpec's signature
-// unchanged (plan Task 1B: modify only spliceSpec) while ensuring an
-// unrelated HTTP cancellation never interrupts the exclusion mid-write.
-// boardio annotation/graduation writes stay OUTSIDE this boundary by
-// design: they own distinct JSONL files that are never part of the
-// spec/provenance transaction projection (§6.1.2's explicit boardio
-// boundary).
-func (s *boardSpecServer) spliceSpec(name string, mutate func(d *splice.Doc) ([]splice.Edit, error)) error {
-	return draftmutation.WithWriterLock(context.Background(), s.root, draftmutation.Coordinator{}, func(*draftmutation.LockedWriter) error {
-		path := filepath.Join(s.specDir(name), "spec.md")
-		src, err := os.ReadFile(path)
-		if err != nil {
-			return fmt.Errorf("workbench: reading spec %s: %w", name, err)
-		}
-		if pause := spliceSpecTestPause.Load(); pause != nil {
-			(*pause)()
-		}
-		doc, err := splice.Parse(src)
-		if err != nil {
-			return err
-		}
-		edits, err := mutate(doc)
-		if err != nil {
-			return err
-		}
-		out, err := doc.Apply(edits)
-		if err != nil {
-			return err
-		}
-		if err := splice.Validate(out); err != nil {
-			return err
-		}
-		// atomicfile.Write (MkdirAll + CreateTemp + fsync + Rename-into-place)
-		// — this repo's one shared crash-durability primitive — never a private
-		// CreateTemp->Write->Close->Rename copy, so a crash mid-write can never
-		// leave a torn spec.md nor lose the fsync that copy lacked
-		// (CLEANUP-BEFORE #1).
-		if err := atomicfile.Write(path, out, 0o644); err != nil {
-			return fmt.Errorf("workbench: %w", err)
-		}
-		return nil
-	})
-}
-
-// actionEditText: the inline card editor's blur — editing the card IS
-// editing the spec object (05 §Workbench: bidirectional authoring).
-func (s *boardSpecServer) actionEditText(name string, req boardAPIRequest) error {
-	if req.ID == "" || req.Text == "" {
-		return fmt.Errorf("edit-text requires id and text")
-	}
-	return s.spliceSpec(name, func(d *splice.Doc) ([]splice.Edit, error) {
-		e, err := d.SetObjectText(req.ID, req.Text)
-		if err != nil {
-			return nil, err
-		}
-		return []splice.Edit{e}, nil
-	})
 }
 
 // declaredKindsOf indexes a projection's cards by id → kind.
@@ -334,58 +230,6 @@ func liveKeys(proj *BoardProjection) map[string]bool {
 		live["stub:"+sv.Slug] = true
 	}
 	return live
-}
-
-// checkEdgeLegal re-checks the picker's own table server-side: the menu
-// can only OFFER what this function permits, but the server never
-// trusts the menu.
-func checkEdgeLegal(proj *BoardProjection, from, to, edgeType string) error {
-	kinds := declaredKindsOf(proj)
-	sourceKind, ok := kinds[from]
-	if !ok {
-		return fmt.Errorf("edge source %q is not a declared object", from)
-	}
-	targetKind := targetKindOf(kinds, to)
-	for _, t := range legalEdgeTypes(sourceKind, targetKind) {
-		if t == edgeType {
-			return nil
-		}
-	}
-	return fmt.Errorf("edge type %q is not legal for a (%s, %s) pair (02 §Link taxonomy)", edgeType, sourceKind, targetKind)
-}
-
-// edgeRefFor renders a yarn target endpoint as the link ref the spec
-// document stores: an internal object becomes a same-spec fragment; an
-// external endpoint is stored as written.
-func edgeRefFor(proj *BoardProjection, name, to string) string {
-	if _, ok := declaredKindsOf(proj)[to]; ok {
-		return "spec/" + name + "#" + to
-	}
-	return to
-}
-
-// actionEdge: the type picker's commit — a declared typed edge lands in
-// the decision's own links: via splice.
-func (s *boardSpecServer) actionEdge(name string, proj *BoardProjection, req boardAPIRequest) error {
-	if req.From == "" || req.To == "" || req.Type == "" {
-		return fmt.Errorf("edge requires from, to, and type")
-	}
-	if err := checkEdgeLegal(proj, req.From, req.To, req.Type); err != nil {
-		return err
-	}
-	link := artifact.Link{Type: artifact.LinkType(req.Type), Ref: edgeRefFor(proj, name, req.To), Note: req.Note}
-	if err := s.spliceSpec(name, func(d *splice.Doc) ([]splice.Edit, error) {
-		e, err := d.AppendDecisionLink(req.From, link)
-		if err != nil {
-			return nil, err
-		}
-		return []splice.Edit{e}, nil
-	}); err != nil {
-		return err
-	}
-	// Drawing a typed edge to a pinned target IS the pin's graduation
-	// (02 §Record schemas): the record flips, the card stays.
-	return s.graduatePinsFor(proj, req.To)
 }
 
 // Sticky landing geometry: the rendered sticky footprint estimate
@@ -543,164 +387,6 @@ func (s *boardSpecServer) actionSticky(name string, proj *BoardProjection, req b
 	x, y := stickyLanePosition(proj, typ)
 	a.Board = &artifact.BoardAnchor{Story: name, X: x, Y: y}
 	return boardio.AppendAnnotation(boardio.AnnotationsDir(s.root), boardio.AnnotationFileForBoard(store.RefSlug(name)), a)
-}
-
-// graduationBlocks maps the graduate menu's object kinds to id prefixes.
-var graduationBlocks = map[string]string{
-	string(boardlayout.ZoneAC):           "ac",
-	string(boardlayout.ZoneConstraint):   "co",
-	string(boardlayout.ZoneDecision):     "dc",
-	string(boardlayout.ZoneOpenQuestion): "oq",
-}
-
-// actionStickyGraduate: graduation is an ordinary edit — the sticky's
-// text becomes a declared object (05 §Workbench: "a sticky becomes a
-// real object ... or they die"), and the record flips to graduated.
-// A graduated acceptance criterion declares the outcome-evidence floor
-// (attestation) as its expected evidence; the author refines it in the
-// document like any other spec edit.
-func (s *boardSpecServer) actionStickyGraduate(name string, proj *BoardProjection, req boardAPIRequest) error {
-	prefix, ok := graduationBlocks[req.Kind]
-	if !ok {
-		return fmt.Errorf("unknown graduation kind %q", req.Kind)
-	}
-	var sticky *scratchStickyView
-	for i := range proj.Stickies {
-		if proj.Stickies[i].ID == req.ID {
-			sticky = &proj.Stickies[i]
-			break
-		}
-	}
-	if sticky == nil {
-		return fmt.Errorf("no sticky %q on the board for spec/%s — it may have been deleted or already graduated since this wall was last refreshed", req.ID, name)
-	}
-
-	var existing []string
-	for _, c := range proj.Cards {
-		existing = append(existing, c.ID)
-	}
-	objectID := splice.NextID(existing, prefix)
-	var evidence []artifact.EvidenceKind
-	if prefix == "ac" {
-		evidence = []artifact.EvidenceKind{artifact.EvidenceAttestation}
-	}
-
-	if err := s.spliceSpec(name, func(d *splice.Doc) ([]splice.Edit, error) {
-		return d.AppendObject(objectID, sticky.Body, evidence)
-	}); err != nil {
-		return err
-	}
-	_, err := boardio.GraduateStickies(boardio.AnnotationsDir(s.root), []string{req.ID})
-	return err
-}
-
-// actionStubGraduate: a story (or spike) proto-sticky plus its coverage
-// (or resolution) yarn graduates into a declared stub (spec/scoping-
-// canvas ac-2/ac-5, DC-1/DC-2) — a story sticky's relates-threads to
-// acceptance criteria become the stub's acceptance_criteria list; a spike
-// sticky's threads to open questions become its resolves list. The slug
-// is RefSlug of the sticky's own body (its working title): a body that
-// does not produce a usable kebab-case slug is refused by the splice
-// write's own validate-before-write step, honestly, rather than silently
-// repaired here. Refuses with a plain-language error when the sticky has
-// no attribution yarn at all, or a slug collision with an already-
-// declared stub. On success, the sticky and every thread that fed the
-// stub flip to graduated — the same GraduateStickies machinery
-// sticky-graduate uses.
-func (s *boardSpecServer) actionStubGraduate(name string, proj *BoardProjection, req boardAPIRequest) error {
-	if req.ID == "" {
-		return fmt.Errorf("stub-graduate requires id")
-	}
-	var sticky *scratchStickyView
-	for i := range proj.Stickies {
-		if proj.Stickies[i].ID == req.ID {
-			sticky = &proj.Stickies[i]
-			break
-		}
-	}
-	if sticky == nil {
-		return fmt.Errorf("no sticky %q on the board for spec/%s — it may have been deleted or already graduated since this wall was last refreshed", req.ID, name)
-	}
-
-	var spike bool
-	switch artifact.AnnotationType(sticky.Type) {
-	case artifact.AnnotationStory:
-		spike = false
-	case artifact.AnnotationSpike:
-		spike = true
-	default:
-		// vocab:identity — sticky/annotation TYPE enum values (wire)
-		return fmt.Errorf("sticky %q is a %s, not a story or spike proto-sticky; stub-graduate does not apply", req.ID, sticky.Type)
-	}
-
-	// The attribution threads this sticky's stub is built from, filtered to
-	// the kind dc-5 lets this sticky type tie to. Every thread minted since
-	// checkProtoYarnLegal landed is already type-checked at the write (the
-	// relates action refuses a crossed pair outright), so for new stores
-	// this filter never drops anything. It STAYS because a store written
-	// before that check may still hold a crossed thread, and folding an
-	// open question into a stub's acceptance_criteria (or the mirror) would
-	// be a silently wrong declaration — fail closed on the old data instead.
-	wantPrefix, noun := "ac-", "acceptance criteria"
-	if spike {
-		wantPrefix, noun = "oq-", "open questions"
-	}
-	seen := map[string]bool{}
-	var ids []string
-	var threadIDs []string
-	for _, e := range proj.Edges {
-		if e.Layer != "annotation" {
-			continue
-		}
-		var other string
-		switch {
-		case e.From == req.ID:
-			other = e.To
-		case e.To == req.ID:
-			other = e.From
-		default:
-			continue
-		}
-		if !strings.HasPrefix(other, wantPrefix) {
-			continue
-		}
-		threadIDs = append(threadIDs, e.AnnotationID)
-		if !seen[other] {
-			seen[other] = true
-			ids = append(ids, other)
-		}
-	}
-	if len(ids) == 0 {
-		return fmt.Errorf("sticky %q has no attribution yarn to %s yet; draw coverage yarn first", req.ID, noun)
-	}
-	sort.Strings(ids)
-
-	slug := store.RefSlug(sticky.Body)
-	for _, sv := range proj.StubViews {
-		if sv.Slug == slug {
-			return fmt.Errorf("a stub named %q already exists on this spec (slug collision)", slug)
-		}
-	}
-
-	if err := s.spliceSpec(name, func(d *splice.Doc) ([]splice.Edit, error) {
-		var e splice.Edit
-		var err error
-		if spike {
-			e, err = d.AppendSpikeStub(slug, ids)
-		} else {
-			e, err = d.AppendStub(slug, ids)
-		}
-		if err != nil {
-			return nil, err
-		}
-		return []splice.Edit{e}, nil
-	}); err != nil {
-		return err
-	}
-
-	graduate := append([]string{req.ID}, threadIDs...)
-	_, err := boardio.GraduateStickies(boardio.AnnotationsDir(s.root), graduate)
-	return err
 }
 
 // stubInstantiatePlaceholderStoryRef re-exports stubinstantiate's own
@@ -1044,45 +730,6 @@ func (s *boardSpecServer) actionRelates(ctx context.Context, name string, proj *
 	return boardio.AppendAnnotation(boardio.AnnotationsDir(s.root), boardio.AnnotationFileForTarget(artifact.Ref{Kind: artifact.KindSpec, Name: name}), a)
 }
 
-// actionRelatesGraduate: the thread's graduation to a typed edge via the
-// picker — an ordinary spec edit replacing the annotation (05
-// §Workbench; 02 §Record schemas: "graduation to a real object edge ...
-// is an ordinary spec edit, not an automatic promotion").
-func (s *boardSpecServer) actionRelatesGraduate(name string, proj *BoardProjection, req boardAPIRequest) error {
-	if req.ID == "" || req.Type == "" {
-		return fmt.Errorf("relates-graduate requires id and type")
-	}
-	var thread *edgeView
-	for i := range proj.Edges {
-		if proj.Edges[i].AnnotationID == req.ID {
-			thread = &proj.Edges[i]
-			break
-		}
-	}
-	if thread == nil {
-		return fmt.Errorf("no relates thread %q on this board", req.ID)
-	}
-	if err := checkEdgeLegal(proj, thread.From, thread.To, req.Type); err != nil {
-		return err
-	}
-	link := artifact.Link{Type: artifact.LinkType(req.Type), Ref: edgeRefFor(proj, name, thread.To), Note: req.Note}
-	if err := s.spliceSpec(name, func(d *splice.Doc) ([]splice.Edit, error) {
-		e, err := d.AppendDecisionLink(thread.From, link)
-		if err != nil {
-			return nil, err
-		}
-		return []splice.Edit{e}, nil
-	}); err != nil {
-		return err
-	}
-	if _, err := boardio.GraduateStickies(boardio.AnnotationsDir(s.root), []string{req.ID}); err != nil {
-		return err
-	}
-	// The graduated thread's typed edge also graduates any pin holding
-	// its target (02 §Record schemas).
-	return s.graduatePinsFor(proj, thread.To)
-}
-
 // actionAnnotationDelete: a scratch sticky or an untyped relates thread
 // dies from the mutable stream (05 §Workbench: they graduate or they
 // die; owner UAT round 6, item 3). Only records this board actually
@@ -1092,100 +739,43 @@ func (s *boardSpecServer) actionRelatesGraduate(name string, proj *BoardProjecti
 // missing, unclear where" popups were these messages firing on stale
 // double-deletes without naming their board.
 func (s *boardSpecServer) actionAnnotationDelete(name string, proj *BoardProjection, req boardAPIRequest) error {
-	if req.ID == "" {
-		return fmt.Errorf("annotation-delete requires id")
+	ids := req.IDs
+	if req.ID != "" {
+		ids = append([]string{req.ID}, ids...)
 	}
-	onBoard := false
+	if len(ids) == 0 {
+		return fmt.Errorf("annotation-delete requires id or ids")
+	}
+	live := map[string]bool{}
 	for _, st := range proj.Stickies {
-		if st.ID == req.ID {
-			onBoard = true
-			break
+		live[st.ID] = true
+	}
+	for _, e := range proj.Edges {
+		if e.AnnotationID != "" {
+			live[e.AnnotationID] = true
 		}
 	}
-	if !onBoard {
-		for _, e := range proj.Edges {
-			if e.AnnotationID == req.ID {
-				onBoard = true
-				break
-			}
+	// A trashed reference card's own pin record dies with its threads
+	// (the ref-trash gesture's annotation half rides this action now).
+	for _, rc := range proj.RefCards {
+		if rc.Pinned {
+			live[rc.PinID] = true
 		}
 	}
-	if !onBoard {
-		return fmt.Errorf("no annotation %q on the board for spec/%s — it may already have been deleted or graduated since this wall was last refreshed", req.ID, name)
+	for _, id := range ids {
+		if !live[id] {
+			return fmt.Errorf("no annotation %q on the board for spec/%s — it may already have been deleted or graduated since this wall was last refreshed", id, name)
+		}
 	}
 	dir := boardio.AnnotationsDir(s.root)
-	n, err := boardio.DeleteAnnotations(dir, []string{req.ID})
+	n, err := boardio.DeleteAnnotations(dir, ids)
 	if err != nil {
 		return err
 	}
-	if n == 0 {
-		return fmt.Errorf("annotation %q was not found in any mutable stream under %s", req.ID, dir)
+	if n != len(ids) {
+		return fmt.Errorf("only %d of %d annotation record(s) were found to delete in the mutable streams under %s", n, len(ids), dir)
 	}
 	return nil
-}
-
-// edgeRefMatcher matches a stored link ref against a board endpoint the
-// way the projection derives endpoints (edgeEndpoint): verbatim, the
-// same-spec fragment form, or the pin-dropped kind/name#object form —
-// so a pinned stored ref still matches the chip's unpinned data-to.
-func edgeRefMatcher(name, to string) func(string) bool {
-	internal := "spec/" + name + "#" + to
-	return func(ref string) bool {
-		if ref == to || ref == internal {
-			return true
-		}
-		r, err := artifact.ParseRef(ref)
-		if err != nil {
-			return false
-		}
-		normalized := string(r.Kind) + "/" + r.Name
-		if r.Object != "" {
-			normalized += "#" + r.Object
-		}
-		return normalized == to || normalized == internal
-	}
-}
-
-// actionEdgeDelete: removing a spec-layer typed edge is the exact
-// inverse of drawing it — an ordinary spec edit through the splice
-// write path (owner UAT round 6, item 3; the gate-bearing confirmation
-// is the client's ritual, mirroring creation).
-func (s *boardSpecServer) actionEdgeDelete(name string, proj *BoardProjection, req boardAPIRequest) error {
-	if req.From == "" || req.To == "" || req.Type == "" {
-		return fmt.Errorf("edge-delete requires from, to, and type")
-	}
-	if _, ok := declaredKindsOf(proj)[req.From]; !ok {
-		return fmt.Errorf("edge source %q is not a declared object (a document-level edge lives in the frontmatter links: block, which the board cannot edit)", req.From)
-	}
-	return s.spliceSpec(name, func(d *splice.Doc) ([]splice.Edit, error) {
-		e, err := d.RemoveDecisionLink(req.From, req.Type, edgeRefMatcher(name, req.To))
-		if err != nil {
-			return nil, err
-		}
-		return []splice.Edit{e}, nil
-	})
-}
-
-// actionEdgeRetype: the relationship's type is updatable in place
-// (owner directive, round 6 UAT follow-up) — one splice edit replacing
-// only the type scalar, so the stored ref (pins included) and note
-// survive verbatim and the document never passes through a linkless
-// state. The new type must be legal for the pair, same table as
-// creation.
-func (s *boardSpecServer) actionEdgeRetype(name string, proj *BoardProjection, req boardAPIRequest) error {
-	if req.From == "" || req.To == "" || req.Type == "" || req.NewType == "" {
-		return fmt.Errorf("edge-retype requires from, to, type, and newType")
-	}
-	if err := checkEdgeLegal(proj, req.From, req.To, req.NewType); err != nil {
-		return err
-	}
-	return s.spliceSpec(name, func(d *splice.Doc) ([]splice.Edit, error) {
-		e, err := d.RetypeDecisionLink(req.From, req.Type, edgeRefMatcher(name, req.To), req.NewType)
-		if err != nil {
-			return nil, err
-		}
-		return []splice.Edit{e}, nil
-	})
 }
 
 // actionPosition: a card drag landed — resolve the drop against every

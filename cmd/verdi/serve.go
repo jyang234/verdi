@@ -188,6 +188,9 @@ func runServe(root, httpAddr string, readiness *readinesspilot.Snapshot, stdout,
 	// branch state.
 	forgePort, configuredKind := forgeBestEffort(context.Background(), root)
 	deps := workbench.Deps{Readiness: readiness}
+	// The ASD design bridge (Wave 6 Task 2): the one application core the
+	// CLI and MCP already use, injected behind the workbench's port.
+	deps.Design = newServeDesignBridge()
 	switch {
 	case forgePort != nil:
 		deps.CommentFeed = newForgeCommentFeed(forgePort, root)

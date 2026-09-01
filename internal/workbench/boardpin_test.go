@@ -40,7 +40,7 @@ func readAnnotations(t *testing.T, root string) []*artifact.Annotation {
 
 func TestBoardSpec_PinLifecycle(t *testing.T) {
 	root := newBoardFixture(t)
-	h := NewHandler(root)
+	h := newBoardTestHandler(root)
 
 	// Import: pin an artifact nothing on the wall names yet.
 	rec := postBoardAPI(t, h, boardFixtureName, "pin", `{"ref":"adr/0007-retry-budget"}`)
@@ -100,9 +100,11 @@ func TestBoardSpec_PinLifecycle(t *testing.T) {
 	// Graduation IS drawing a typed edge to the pinned target (02): the
 	// record flips to graduated, the card stays (the edge projects it now)
 	// and files into the references lane — the pin no longer holds it.
-	rec = postBoardAPI(t, h, boardFixtureName, "edge", `{"from":"dc-2","to":"adr/0007-retry-budget","type":"exempts"}`)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("edge = %d\n%s", rec.Code, rec.Body.String())
+	mrec, mout := postMutate(t, h, root, boardFixtureName, []map[string]any{
+		{"op": "add-link", "source": "dc-2", "type": "exempts", "ref": "adr/0007-retry-budget"},
+	}, nil, nil)
+	if mrec.Code != http.StatusOK || mout.Result == nil {
+		t.Fatalf("edge = %d\n%s", mrec.Code, mrec.Body.String())
 	}
 	as = readAnnotations(t, root)
 	if len(as) != 1 || as[0].Status != artifact.AnnotationGraduated {
@@ -270,7 +272,7 @@ func newTrashFixture(t *testing.T) string {
 
 func TestBoardSpec_RefTrash(t *testing.T) {
 	root := newBoardFixture(t)
-	h := NewHandler(root)
+	h := newBoardTestHandler(root)
 
 	// Give the adr/0001 card a scratch thread too: trash must take the
 	// typed edge AND the thread in one act.
@@ -282,13 +284,16 @@ func TestBoardSpec_RefTrash(t *testing.T) {
 		t.Fatalf("annotations = %+v, want the one thread", as)
 	}
 
-	rec = postBoardAPI(t, h, boardFixtureName, "ref-trash", `{"ref":"adr/0001-outbox-events"}`)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("ref-trash = %d\n%s", rec.Code, rec.Body.String())
+	// The ref-trash gesture is one typed remove-link transaction plus the
+	// dead scratch record riding delete_annotations.
+	threadID := readAnnotations(t, root)[0].ID
+	mrec, mout := postMutate(t, h, root, boardFixtureName, []map[string]any{
+		{"op": "remove-link", "source": "dc-1", "type": "exempts", "ref": "adr/0001-outbox-events", "note": "async by design"},
+	}, nil, []string{threadID})
+	if mrec.Code != http.StatusOK || mout.Result == nil {
+		t.Fatalf("ref trash = %d\n%s", mrec.Code, mrec.Body.String())
 	}
-	var resp boardAPIResponse
-	_ = json.Unmarshal(rec.Body.Bytes(), &resp)
-	if !resp.Dirty {
+	if mout.Projection == nil || !mout.Projection.Dirty {
 		t.Error("removing a declared edge did not dirty the spec tree")
 	}
 
@@ -307,7 +312,7 @@ func TestBoardSpec_RefTrash(t *testing.T) {
 
 func TestBoardSpec_RefTrash_PinWithThreads(t *testing.T) {
 	root := newBoardFixture(t)
-	h := NewHandler(root)
+	h := newBoardTestHandler(root)
 
 	if rec := postBoardAPI(t, h, boardFixtureName, "pin", `{"ref":"adr/0007-retry-budget"}`); rec.Code != http.StatusOK {
 		t.Fatalf("pin = %d", rec.Code)
@@ -320,10 +325,13 @@ func TestBoardSpec_RefTrash_PinWithThreads(t *testing.T) {
 	}
 
 	// A pin with no typed edges dies without ceremony — taking its own
-	// relates threads with it (02 §Record schemas), spec untouched.
-	rec := postBoardAPI(t, h, boardFixtureName, "ref-trash", `{"ref":"adr/0007-retry-budget"}`)
+	// relates threads with it (02 §Record schemas), spec untouched: one
+	// batch annotation-delete on the same mutable-zone owner.
+	as := readAnnotations(t, root)
+	ids := []string{as[0].ID, as[1].ID}
+	rec := postBoardAPI(t, h, boardFixtureName, "annotation-delete", `{"ids":["`+ids[0]+`","`+ids[1]+`"]}`)
 	if rec.Code != http.StatusOK {
-		t.Fatalf("ref-trash = %d\n%s", rec.Code, rec.Body.String())
+		t.Fatalf("annotation-delete batch = %d\n%s", rec.Code, rec.Body.String())
 	}
 	var resp boardAPIResponse
 	_ = json.Unmarshal(rec.Body.Bytes(), &resp)
@@ -335,71 +343,53 @@ func TestBoardSpec_RefTrash_PinWithThreads(t *testing.T) {
 	}
 }
 
+// TestBoardSpec_RefTrash_Negative: the annotation routing riding a
+// mutation is validated against the live projection BEFORE the
+// transaction — an unknown record refuses the whole gesture with ZERO
+// mutation (never a landed spec edit beside a failed annotation act).
 func TestBoardSpec_RefTrash_Negative(t *testing.T) {
-	// A document-level edge (frontmatter links:) is not board-editable:
-	// trashing its reference card is refused, with the reason named.
-	storySpec := `---
-id: spec/refi-story
-kind: spec
-class: story
-title: "Refi story"
-status: draft
-owners: [platform-team]
-story: jira:LOAN-9
-problem: { text: "p", anchor: "#problem" }
-outcome: { text: "o", anchor: "#outcome" }
-links:
-  - { type: implements, ref: "spec/escrow-autopay#ac-1" }
----
-# Refi story
-
-## Problem
-
-Prose.
-
-## Outcome
-
-Prose.
-`
-	root := buildAuthoringFixture(t, "design/refi-story",
-		map[string]string{".verdi/.gitignore": "data/\n"},
-		map[string]string{".verdi/specs/active/refi-story/spec.md": storySpec})
-	h := NewHandler(root)
-
-	rec := postBoardAPI(t, h, "refi-story", "ref-trash", `{"ref":"spec/escrow-autopay#ac-1"}`)
+	root := newBoardFixture(t)
+	h := newBoardTestHandler(root)
+	before, _ := os.ReadFile(filepath.Join(root, ".verdi", "specs", "active", boardFixtureName, "spec.md"))
+	rec, _ := postMutate(t, h, root, boardFixtureName, []map[string]any{
+		{"op": "remove-link", "source": "dc-1", "type": "exempts", "ref": "adr/0001-outbox-events", "note": "async by design"},
+	}, nil, []string{"a-01J8Z0K3AAAAAAAAAAAAAAAAAA"})
 	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("ref-trash on a document-level edge = %d, want 400\n%s", rec.Code, rec.Body.String())
+		t.Fatalf("mutation with an unknown delete_annotations id = %d, want 400\n%s", rec.Code, rec.Body.String())
 	}
-	if !strings.Contains(rec.Body.String(), "document") {
-		t.Errorf("the refusal does not name the document-level edge: %s", rec.Body.String())
+	after, _ := os.ReadFile(filepath.Join(root, ".verdi", "specs", "active", boardFixtureName, "spec.md"))
+	if string(before) != string(after) {
+		t.Error("the refused gesture still mutated the spec (zero-mutation refusal broken)")
 	}
-
-	// Unknown refs fail closed.
-	root = newBoardFixture(t)
-	h2 := NewHandler(root)
-	rec = postBoardAPI(t, h2, boardFixtureName, "ref-trash", `{"ref":"adr/not-on-this-wall"}`)
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("ref-trash on an absent ref = %d, want 400", rec.Code)
+	// The batch annotation-delete fails closed on unknown ids too.
+	if rec := postBoardAPI(t, h, boardFixtureName, "annotation-delete", `{"ids":["a-01J8Z0K3AAAAAAAAAAAAAAAAAA"]}`); rec.Code != http.StatusBadRequest {
+		t.Fatalf("annotation-delete of an unknown id = %d, want 400", rec.Code)
 	}
 }
 
 func TestBoardSpec_ObjectTrash(t *testing.T) {
 	root := newTrashFixture(t)
-	h := NewHandler(root)
+	h := newBoardTestHandler(root)
 
 	// A relates thread touching the object dies with it (the owner's
 	// verbatim ask: removal disconnects any existing relationship yarn).
 	if rec := postBoardAPI(t, h, boardFixtureName, "relates", `{"from":"ac-1","to":"dc-1"}`); rec.Code != http.StatusOK {
 		t.Fatalf("relates = %d", rec.Code)
 	}
+	threadID := readAnnotations(t, root)[0].ID
 
-	rec := postBoardAPI(t, h, boardFixtureName, "object-trash", `{"id":"dc-1"}`)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("object-trash = %d\n%s", rec.Code, rec.Body.String())
+	// The object-trash gesture: one atomic transaction removing every
+	// cross-link naming the object's fragment plus the object itself
+	// (VL-003 stays green because the WHOLE batch validates before write),
+	// the dead scratch thread riding delete_annotations.
+	rec, out := postMutate(t, h, root, boardFixtureName, []map[string]any{
+		{"op": "remove-link", "source": "dc-2", "type": "supersedes", "ref": "spec/refi-test#dc-1"},
+		{"op": "remove-decision", "id": "dc-1"},
+	}, nil, []string{threadID})
+	if rec.Code != http.StatusOK || out.Result == nil {
+		t.Fatalf("object trash = %d\n%s", rec.Code, rec.Body.String())
 	}
-	var resp boardAPIResponse
-	_ = json.Unmarshal(rec.Body.Bytes(), &resp)
-	if !resp.Dirty {
+	if out.Projection == nil || !out.Projection.Dirty {
 		t.Error("object removal did not dirty the spec tree")
 	}
 
@@ -427,11 +417,13 @@ func TestBoardSpec_ObjectTrash(t *testing.T) {
 
 func TestBoardSpec_ObjectTrash_PrunesLayout(t *testing.T) {
 	root := newTrashFixture(t)
-	h := NewHandler(root)
+	h := newBoardTestHandler(root)
 
-	rec := postBoardAPI(t, h, boardFixtureName, "object-trash", `{"id":"ac-1"}`)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("object-trash = %d\n%s", rec.Code, rec.Body.String())
+	rec, out := postMutate(t, h, root, boardFixtureName, []map[string]any{
+		{"op": "remove-ac", "id": "ac-1"},
+	}, nil, nil)
+	if rec.Code != http.StatusOK || out.Result == nil {
+		t.Fatalf("object trash = %d\n%s", rec.Code, rec.Body.String())
 	}
 	layout, _ := os.ReadFile(filepath.Join(root, ".verdi", "specs", "active", boardFixtureName, "layout.json"))
 	if strings.Contains(string(layout), "ac-1") {
@@ -441,28 +433,32 @@ func TestBoardSpec_ObjectTrash_PrunesLayout(t *testing.T) {
 
 func TestBoardSpec_ObjectTrash_Negative(t *testing.T) {
 	root := newTrashFixture(t)
-	h := NewHandler(root)
+	h := newBoardTestHandler(root)
 
-	rec := postBoardAPI(t, h, boardFixtureName, "object-trash", `{"id":"oq-9"}`)
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("object-trash on an undeclared id = %d, want 400", rec.Code)
+	rec, out := postMutate(t, h, root, boardFixtureName, []map[string]any{
+		{"op": "remove-question", "id": "oq-9"},
+	}, nil, nil)
+	if rec.Code != http.StatusOK || out.Failure == nil || out.Failure.Classification != "verdict" {
+		t.Fatalf("removing an undeclared id = %d %+v, want a typed verdict", rec.Code, out.Failure)
 	}
 
 	// Removing the LAST acceptance criterion would leave an invalid
 	// feature spec: validate-before-write refuses, and nothing is written.
-	before, _ := os.ReadFile(filepath.Join(root, ".verdi", "specs", "active", boardFixtureName, "spec.md"))
-	if rec := postBoardAPI(t, h, boardFixtureName, "object-trash", `{"id":"ac-2"}`); rec.Code != http.StatusOK {
-		t.Fatalf("object-trash ac-2 = %d", rec.Code)
+	if rec, out := postMutate(t, h, root, boardFixtureName, []map[string]any{
+		{"op": "remove-ac", "id": "ac-2"},
+	}, nil, nil); rec.Code != http.StatusOK || out.Result == nil {
+		t.Fatalf("removing ac-2 = %d\n%s", rec.Code, rec.Body.String())
 	}
-	rec = postBoardAPI(t, h, boardFixtureName, "object-trash", `{"id":"ac-1"}`)
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("removing the last AC = %d, want 400 (feature needs one)", rec.Code)
+	rec, out = postMutate(t, h, root, boardFixtureName, []map[string]any{
+		{"op": "remove-ac", "id": "ac-1"},
+	}, nil, nil)
+	if rec.Code != http.StatusOK || out.Failure == nil || out.Failure.Classification != "verdict" {
+		t.Fatalf("removing the last AC = %d %+v, want a typed verdict (feature needs one)", rec.Code, out.Failure)
 	}
 	after, _ := os.ReadFile(filepath.Join(root, ".verdi", "specs", "active", boardFixtureName, "spec.md"))
 	if !strings.Contains(string(after), "{ id: ac-1,") {
 		t.Error("the refused removal still changed the spec")
 	}
-	_ = before
 }
 
 // trashStubFixtureSpec is a feature spec whose stubs: scoping record
@@ -524,35 +520,36 @@ func TestBoardSpec_ObjectTrash_StubClaimsAC(t *testing.T) {
 
 	// Happy: an AC no stub claims still trashes.
 	root := newTrashStubFixture(t)
-	h := NewHandler(root)
-	if rec := postBoardAPI(t, h, boardFixtureName, "object-trash", `{"id":"ac-1"}`); rec.Code != http.StatusOK {
-		t.Fatalf("trashing an unclaimed AC = %d, want 200\n%s", rec.Code, rec.Body.String())
+	h := newBoardTestHandler(root)
+	if rec, out := postMutate(t, h, root, boardFixtureName, []map[string]any{
+		{"op": "remove-ac", "id": "ac-1"},
+	}, nil, nil); rec.Code != http.StatusOK || out.Result == nil {
+		t.Fatalf("trashing an unclaimed AC = %d, want a clean result\n%s", rec.Code, rec.Body.String())
 	}
 	if data, _ := os.ReadFile(specPath(root)); strings.Contains(string(data), "{ id: ac-1,") {
 		t.Errorf("ac-1's frontmatter entry survived a successful trash:\n%s", data)
 	}
 
-	// Negative: an AC a stub claims refuses, names the stub, and leaves the
-	// spec file byte-for-byte unchanged.
+	// Kernel-equal semantics (AC-2): removing a stub-claimed AC is a LEGAL
+	// draft operation through the shared core — exactly what `verdi design
+	// mutate` would do — and the dangling stub claim it creates is the lint
+	// gate's finding (VL-006), not a board-local refusal. The legacy
+	// board-side guard is retired with the splice path; the browser client
+	// still warns pre-flight from the rendered coverage facts.
 	root2 := newTrashStubFixture(t)
-	h2 := NewHandler(root2)
-	before, err := os.ReadFile(specPath(root2))
-	if err != nil {
-		t.Fatal(err)
-	}
-	rec := postBoardAPI(t, h2, boardFixtureName, "object-trash", `{"id":"ac-2"}`)
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("trashing a stub-claimed AC = %d, want 400\n%s", rec.Code, rec.Body.String())
-	}
-	if !strings.Contains(rec.Body.String(), "badge-computes") {
-		t.Errorf("the refusal does not name the claiming stub: %s", rec.Body.String())
+	h2 := newBoardTestHandler(root2)
+	rec, out := postMutate(t, h2, root2, boardFixtureName, []map[string]any{
+		{"op": "remove-ac", "id": "ac-2"},
+	}, nil, nil)
+	if rec.Code != http.StatusOK || out.Result == nil {
+		t.Fatalf("trashing a stub-claimed AC through the shared core = %d, want a clean result\n%s", rec.Code, rec.Body.String())
 	}
 	after, err := os.ReadFile(specPath(root2))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(before) != string(after) {
-		t.Errorf("the refused trash changed the spec file:\nbefore:\n%s\nafter:\n%s", before, after)
+	if strings.Contains(string(after), "{ id: ac-2,") {
+		t.Error("the accepted removal did not land")
 	}
 }
 
@@ -573,11 +570,13 @@ func TestBoardSpec_ObjectTrash_PrunesLayout_KeepsStubKey(t *testing.T) {
 	if err := os.WriteFile(layoutPath, []byte(seedLayout), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	h := NewHandler(root)
+	h := newBoardTestHandler(root)
 
-	rec := postBoardAPI(t, h, boardFixtureName, "object-trash", `{"id":"ac-1"}`)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("object-trash = %d\n%s", rec.Code, rec.Body.String())
+	rec, out := postMutate(t, h, root, boardFixtureName, []map[string]any{
+		{"op": "remove-ac", "id": "ac-1"},
+	}, nil, nil)
+	if rec.Code != http.StatusOK || out.Result == nil {
+		t.Fatalf("object trash = %d\n%s", rec.Code, rec.Body.String())
 	}
 	layout, err := os.ReadFile(layoutPath)
 	if err != nil {
@@ -603,16 +602,14 @@ func TestBoardSpec_PinActionsAreAuthoringOnly(t *testing.T) {
 		t.Fatal(err)
 	}
 	writeWorkingTreeSpec(t, root, boardFixtureName, boardFixtureSpec)
-	h := NewHandler(root)
-	for action, body := range map[string]string{
-		"pin":          `{"ref":"adr/0007-retry-budget"}`,
-		"ref-trash":    `{"ref":"adr/0001-outbox-events"}`,
-		"object-trash": `{"id":"ac-1"}`,
-	} {
-		rec := postBoardAPI(t, h, boardFixtureName, action, body)
-		if rec.Code != http.StatusForbidden {
-			t.Errorf("%s outside authoring = %d, want 403", action, rec.Code)
-		}
+	h := newBoardTestHandler(root)
+	if rec := postBoardAPI(t, h, boardFixtureName, "pin", `{"ref":"adr/0007-retry-budget"}`); rec.Code != http.StatusForbidden {
+		t.Errorf("pin outside authoring = %d, want 403", rec.Code)
+	}
+	if rec, _ := postMutate(t, h, root, boardFixtureName, []map[string]any{
+		{"op": "remove-ac", "id": "ac-1"},
+	}, nil, nil); rec.Code != http.StatusForbidden {
+		t.Errorf("mutate_draft outside authoring = %d, want 403", rec.Code)
 	}
 	if rec := getPinSearch(t, h, boardFixtureName, ""); rec.Code != http.StatusForbidden {
 		t.Errorf("pinsearch outside authoring = %d, want 403", rec.Code)

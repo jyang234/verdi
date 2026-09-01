@@ -33,28 +33,37 @@ import { addSticky, expectAutosaved } from "./helpers";
 // re-fetches the projection so the wall never keeps showing a state the
 // server rejected.
 
-// Hold the NEXT board-fragment response: the body is fetched from the
-// server at request time (so it is genuinely that moment's projection),
-// but delivery to the page waits until the returned release() is called.
-// Later fragment requests flow through untouched.
-async function holdNextFragment(page: Page): Promise<() => Promise<void>> {
+// Hold the NEXT snapshot response (Wave 6 Task 2 moved the board's
+// refresh onto the conditional /snapshot projection): the body is fetched
+// from the server at request time (so it is genuinely that moment's
+// projection), but delivery to the page waits until the returned
+// release() is called. Later snapshot requests flow through untouched.
+async function holdNextFragment(
+  page: Page,
+): Promise<{ captured: Promise<void>; release: () => Promise<void> }> {
   let release!: () => void;
   const gate = new Promise<void>((resolve) => (release = resolve));
   let delivered!: () => void;
   const done = new Promise<void>((resolve) => (delivered = resolve));
+  let markCaptured!: () => void;
+  const captured = new Promise<void>((resolve) => (markCaptured = resolve));
   let armed = true;
-  await page.route("**/board/spec/**/fragment", async (route) => {
+  await page.route("**/board/spec/**/snapshot", async (route) => {
     if (!armed) return route.continue();
     armed = false;
+    markCaptured();
     const resp = await route.fetch();
     const body = await resp.text();
     await gate;
     await route.fulfill({ response: resp, body });
     delivered();
   });
-  return async () => {
-    release();
-    await done;
+  return {
+    captured,
+    release: async () => {
+      release();
+      await done;
+    },
   };
 }
 
@@ -109,12 +118,16 @@ test.describe("board refresh vs. live interaction (owner jank report)", () => {
     const id = (await sticky.getAttribute("data-id"))!;
     await sticky.scrollIntoViewIfNeeded();
 
-    const releaseFragment = await holdNextFragment(page);
+    const hold = await holdNextFragment(page);
+    const releaseFragment = hold.release;
 
     // Drag 1 drops the sticky; its post-mutation refresh is now in
-    // flight (held). The next gesture starts before it lands — exactly
-    // the owner's "moving stickies around while the refresh delays".
+    // flight (held) — awaited explicitly, so the NEXT gesture's own
+    // refresh can never be the captured one. The next gesture starts
+    // before the held response lands — exactly the owner's "moving
+    // stickies around while the refresh delays".
     await dragBy(page, sticky, 120, 60);
+    await hold.captured;
 
     // Drag 2: press and move, and STAY mid-gesture.
     await dragBy(page, sticky, 90, 45, { noUp: true });
@@ -150,10 +163,22 @@ test.describe("board refresh vs. live interaction (owner jank report)", () => {
     expect(after!.left).toBe(before.left);
     expect(after!.top).toBe(before.top);
 
-    // Finish the drag; the drop commits and persists.
+    // Finish the drag; the drop commits and persists. The reads below
+    // wait for the drop's own POST and the following applied projection,
+    // so they always see server truth (never the optimistic mid-swap DOM).
+    const dropPosted = page.waitForResponse(
+      (r) => r.url().includes("/api/sticky-position") && r.ok(),
+      { timeout: 15_000 },
+    );
     await page.mouse.move(300, 400, { steps: 4 });
     await page.mouse.up();
+    await dropPosted;
+    await page.waitForResponse(
+      (r) => r.url().includes("/snapshot") && r.status() === 200,
+      { timeout: 15_000 },
+    );
     await expectAutosaved(page);
+    await page.waitForTimeout(250); // application settles after the 200
     const final = await page.evaluate((sid) => {
       const el = document.querySelector(`.sticky[data-id="${sid}"]`) as HTMLElement;
       return { left: parseFloat(el.style.left), top: parseFloat(el.style.top) };
@@ -179,13 +204,26 @@ test.describe("board refresh vs. live interaction (owner jank report)", () => {
     const id = (await sticky.getAttribute("data-id"))!;
     await sticky.scrollIntoViewIfNeeded();
 
-    const releaseFragment = await holdNextFragment(page);
+    const hold = await holdNextFragment(page);
+    const releaseFragment = hold.release;
 
-    // Mutation 1: drop at A — its fragment (rendering A) is held.
+    // Mutation 1: drop at A — its refresh (rendering A) is held, awaited
+    // so mutation 2's own refresh is never the captured one.
     await dragBy(page, sticky, 140, 40);
-    // Mutation 2: drop at B — its fragment flows through and applies.
+    await hold.captured;
+    // Mutation 2: drop at B — its refresh flows through and applies.
+    const dropB = page.waitForResponse(
+      (r) => r.url().includes("/api/sticky-position") && r.ok(),
+      { timeout: 15_000 },
+    );
     await dragBy(page, sticky, 60, 80);
+    await dropB;
+    await page.waitForResponse(
+      (r) => r.url().includes("/snapshot") && r.status() === 200,
+      { timeout: 15_000 },
+    );
     await expectAutosaved(page);
+    await page.waitForTimeout(250); // application settles after the 200
 
     const atB = await page.evaluate((sid) => {
       const el = document.querySelector(`.sticky[data-id="${sid}"]`) as HTMLElement;
@@ -210,7 +248,8 @@ test.describe("board refresh vs. live interaction (owner jank report)", () => {
     const sticky = await addSticky(page, "dies once, quietly", "question");
     await sticky.scrollIntoViewIfNeeded();
 
-    const releaseFragment = await holdNextFragment(page);
+    const hold = await holdNextFragment(page);
+    const releaseFragment = hold.release;
 
     // The × posts the delete; until the refresh lands the old DOM is all
     // the user can see. The dead sticky must not keep standing there
