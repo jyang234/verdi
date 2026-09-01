@@ -23,6 +23,78 @@ import (
 )
 
 func TestContextControllerWireContract_Static(t *testing.T) {
+	t.Run("resolve-claim-mcp extends the closed registry to exactly 23 operations", func(t *testing.T) {
+		operations := ControllerOperations()
+		if len(operations) != 23 {
+			t.Fatalf("controller operation count = %d, want the Amendment 003 registry of 23", len(operations))
+		}
+		if got := operations[22]; got != ControllerOperation("resolve-claim-mcp") {
+			t.Fatalf("operation 23 = %q, want %q", got, "resolve-claim-mcp")
+		}
+
+		// Amendment 003 §operation 23: the exact canonical request and success
+		// payloads, byte for byte.
+		digest := testDigest("claim-request")
+		call := ControllerCall{Schema: ControllerCallSchemaID, CallSequence: 1, Operation: ControllerOperationResolveClaimMCP}
+		call.ResolveClaimMCP = ControllerResolveClaimMCPRequest{Schema: controllerRequestSchema(call.Operation), Query: ClaimMCPQuery{RequestDigest: digest}}
+		encodedCall, err := EncodeControllerCall(call)
+		if err != nil {
+			t.Fatalf("EncodeControllerCall: %v", err)
+		}
+		wantCall := `{"call_sequence":1,"operation":"resolve-claim-mcp","payload":{"query":{"request_digest":"` + digest +
+			`","schema":"verdi.claim-mcp-query/v1"},"schema":"verdi.context-controller/resolve-claim-mcp-request/v1"},"schema":"verdi.context-controller-call/v1"}` + "\n"
+		if string(encodedCall) != wantCall {
+			t.Fatalf("resolve-claim-mcp call wire =\n%s\nwant\n%s", encodedCall, wantCall)
+		}
+
+		result := ControllerResult{Schema: ControllerResultSchemaID, CallSequence: 1, Operation: ControllerOperationResolveClaimMCP}
+		result.ResolveClaimMCP = ControllerResolveClaimMCPResult{Schema: controllerResultSchema(result.Operation), Registration: ClaimMCPRegistration{
+			Name: RequiredClaimMCPName, Type: RequiredMCPType, URL: "http://127.0.0.1:45001/mcp",
+			Tools: []string{ToolClaimPaths}, RequestDigest: digest,
+		}}
+		encodedResult, err := EncodeControllerResult(result)
+		if err != nil {
+			t.Fatalf("EncodeControllerResult: %v", err)
+		}
+		wantResult := `{"call_sequence":1,"operation":"resolve-claim-mcp","payload":{"result":{"registration":{"name":"vatc","request_digest":"` + digest +
+			`","schema":"verdi.claim-mcp-registration/v1","tools":["claim_paths"],"type":"http","url":"http://127.0.0.1:45001/mcp"},` +
+			`"schema":"verdi.context-controller/resolve-claim-mcp-result/v1"}},"schema":"verdi.context-controller-result/v1"}` + "\n"
+		if string(encodedResult) != wantResult {
+			t.Fatalf("resolve-claim-mcp result wire =\n%s\nwant\n%s", encodedResult, wantResult)
+		}
+		// The result never carries a bearer, credential, or provider state.
+		for _, forbidden := range []string{"Bearer", "authorization", "capability", "token"} {
+			if bytes.Contains(bytes.ToLower(encodedResult), []byte(strings.ToLower(forbidden))) {
+				t.Fatalf("resolve-claim-mcp result wire leaked %q: %s", forbidden, encodedResult)
+			}
+		}
+
+		// Every registration defect fails closed on both encode and decode.
+		for name, mutate := range map[string]func(*ClaimMCPRegistration){
+			"renamed":        func(r *ClaimMCPRegistration) { r.Name = "vatc-shadow" },
+			"wrong type":     func(r *ClaimMCPRegistration) { r.Type = "stdio" },
+			"extra tool":     func(r *ClaimMCPRegistration) { r.Tools = []string{ToolClaimPaths, ToolGetFlightPlan} },
+			"foreign tool":   func(r *ClaimMCPRegistration) { r.Tools = []string{ToolGetFlightPlan} },
+			"no tools":       func(r *ClaimMCPRegistration) { r.Tools = nil },
+			"non-loopback":   func(r *ClaimMCPRegistration) { r.URL = "http://10.1.1.1:45001/mcp" },
+			"query":          func(r *ClaimMCPRegistration) { r.URL = "http://127.0.0.1:45001/mcp?a=1" },
+			"zero port":      func(r *ClaimMCPRegistration) { r.URL = "http://127.0.0.1:0/mcp" },
+			"wrong path":     func(r *ClaimMCPRegistration) { r.URL = "http://127.0.0.1:45001/rpc" },
+			"absent request": func(r *ClaimMCPRegistration) { r.RequestDigest = "" },
+		} {
+			t.Run(name, func(t *testing.T) {
+				bad := result
+				registration := bad.ResolveClaimMCP.Registration
+				registration.Tools = append([]string(nil), registration.Tools...)
+				mutate(&registration)
+				bad.ResolveClaimMCP.Registration = registration
+				if _, err := EncodeControllerResult(bad); err == nil {
+					t.Fatalf("EncodeControllerResult accepted a %s registration", name)
+				}
+			})
+		}
+	})
+
 	t.Run("persist-quarantine carries required non-null preserved bytes", func(t *testing.T) {
 		record := validQuarantineRecord(t, QuarantineExecutionIncomplete)
 		call := ControllerCall{Schema: ControllerCallSchemaID, CallSequence: 1, Operation: ControllerOperationPersistQuarantine}
@@ -95,8 +167,9 @@ func TestContextControllerWireContract_Static(t *testing.T) {
 			{operation: "persist-handback", requestSchema: "verdi.context-controller/persist-handback-request/v1", resultSchema: "verdi.context-controller/persist-handback-result/v1"},
 			{operation: "persist-quarantine", requestSchema: "verdi.context-controller/persist-quarantine-request/v1", resultSchema: "verdi.context-controller/persist-quarantine-result/v1"},
 			{operation: "persist-abort", requestSchema: "verdi.context-controller/persist-abort-request/v1", resultSchema: "verdi.context-controller/persist-abort-result/v1"},
+			{operation: "resolve-claim-mcp", requestSchema: "verdi.context-controller/resolve-claim-mcp-request/v1", resultSchema: "verdi.context-controller/resolve-claim-mcp-result/v1"},
 		}
-		if got, want := len(ControllerOperations()), 22; got != want {
+		if got, want := len(ControllerOperations()), 23; got != want {
 			t.Fatalf("controller operation count = %d, want %d", got, want)
 		}
 		operations := ControllerOperations()
@@ -1564,6 +1637,8 @@ func controllerCallFixture(t *testing.T, sequence uint64, operation ControllerOp
 		quarantine := validQuarantineRecord(t, QuarantineTerminalDurabilityFailed)
 		quarantine = mustCanonicalQuarantine(t, quarantine)
 		call.PersistAbort = ControllerPersistAbortRequest{Schema: controllerRequestSchema(operation), Record: validAbortRecord(t, quarantine)}
+	case ControllerOperationResolveClaimMCP:
+		call.ResolveClaimMCP = ControllerResolveClaimMCPRequest{Schema: controllerRequestSchema(operation), Query: ClaimMCPQuery{RequestDigest: testDigest("claim-request")}}
 	default:
 		t.Fatalf("unknown fixture operation %q", operation)
 	}
@@ -1633,6 +1708,11 @@ func controllerResultFixture(t *testing.T, sequence uint64, operation Controller
 		quarantine := mustCanonicalQuarantine(t, validQuarantineRecord(t, QuarantineTerminalDurabilityFailed))
 		record := mustCanonicalAbort(t, validAbortRecord(t, quarantine))
 		result.PersistAbort = ControllerPersistAbortResult{Schema: controllerResultSchema(operation), Ack: mustCanonicalControlAck(t, validControlAckForAbort(record))}
+	case ControllerOperationResolveClaimMCP:
+		result.ResolveClaimMCP = ControllerResolveClaimMCPResult{Schema: controllerResultSchema(operation), Registration: ClaimMCPRegistration{
+			Name: RequiredClaimMCPName, Type: RequiredMCPType, URL: "http://127.0.0.1:45001/mcp",
+			Tools: []string{ToolClaimPaths}, RequestDigest: testDigest("claim-request"),
+		}}
 	default:
 		t.Fatalf("unknown fixture operation %q", operation)
 	}

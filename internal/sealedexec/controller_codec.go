@@ -3,6 +3,7 @@ package sealedexec
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"path/filepath"
@@ -285,6 +286,91 @@ type receiptVerificationAuthorityWire struct {
 }
 
 // EncodeControllerCall validates and canonically encodes one typed call.
+type claimMCPQueryWire struct {
+	RequestDigest string `json:"request_digest"`
+	Schema        string `json:"schema"`
+}
+
+type claimMCPRegistrationWire struct {
+	Name          string   `json:"name"`
+	RequestDigest string   `json:"request_digest"`
+	Schema        string   `json:"schema"`
+	Tools         []string `json:"tools"`
+	Type          string   `json:"type"`
+	URL           string   `json:"url"`
+}
+
+const (
+	claimMCPQuerySchemaID        = "verdi.claim-mcp-query/v1"
+	claimMCPRegistrationSchemaID = "verdi.claim-mcp-registration/v1"
+)
+
+func claimMCPQueryToWire(query ClaimMCPQuery) (claimMCPQueryWire, error) {
+	if !scopedMCPDigestRE.MatchString(query.RequestDigest) {
+		return claimMCPQueryWire{}, errors.New("sealedexec: claim MCP query requires a canonical request digest")
+	}
+	return claimMCPQueryWire{RequestDigest: query.RequestDigest, Schema: claimMCPQuerySchemaID}, nil
+}
+
+func claimMCPQueryFromWire(wire claimMCPQueryWire) (ClaimMCPQuery, error) {
+	if wire.Schema != claimMCPQuerySchemaID || !scopedMCPDigestRE.MatchString(wire.RequestDigest) {
+		return ClaimMCPQuery{}, errors.New("sealedexec: claim MCP query is not a canonical query row")
+	}
+	return ClaimMCPQuery{RequestDigest: wire.RequestDigest}, nil
+}
+
+// validateClaimMCPRegistration enforces the fixed name, transport, catalogue,
+// loopback origin, and request binding. Anything else fails closed.
+func validateClaimMCPRegistration(registration ClaimMCPRegistration) error {
+	if registration.Name != RequiredClaimMCPName {
+		return fmt.Errorf("sealedexec: claim MCP registration name %q, want %q", registration.Name, RequiredClaimMCPName)
+	}
+	if registration.Type != RequiredMCPType {
+		return fmt.Errorf("sealedexec: claim MCP registration type %q, want %q", registration.Type, RequiredMCPType)
+	}
+	if err := ValidateRequiredMCPURL(registration.URL); err != nil {
+		return fmt.Errorf("sealedexec: claim MCP registration: %w", err)
+	}
+	want := requiredClaimTools()
+	if len(registration.Tools) != len(want) {
+		return fmt.Errorf("sealedexec: claim MCP registration declares %d tools, want %d", len(registration.Tools), len(want))
+	}
+	for i, tool := range want {
+		if registration.Tools[i] != tool {
+			return fmt.Errorf("sealedexec: claim MCP registration tool %d = %q, want %q", i, registration.Tools[i], tool)
+		}
+	}
+	if !scopedMCPDigestRE.MatchString(registration.RequestDigest) {
+		return errors.New("sealedexec: claim MCP registration requires a canonical request digest")
+	}
+	return nil
+}
+
+func claimMCPRegistrationToWire(registration ClaimMCPRegistration) (claimMCPRegistrationWire, error) {
+	if err := validateClaimMCPRegistration(registration); err != nil {
+		return claimMCPRegistrationWire{}, err
+	}
+	return claimMCPRegistrationWire{
+		Name: registration.Name, RequestDigest: registration.RequestDigest,
+		Schema: claimMCPRegistrationSchemaID, Tools: append([]string(nil), registration.Tools...),
+		Type: registration.Type, URL: registration.URL,
+	}, nil
+}
+
+func claimMCPRegistrationFromWire(wire claimMCPRegistrationWire) (ClaimMCPRegistration, error) {
+	if wire.Schema != claimMCPRegistrationSchemaID {
+		return ClaimMCPRegistration{}, errors.New("sealedexec: claim MCP registration schema is not canonical")
+	}
+	registration := ClaimMCPRegistration{
+		Name: wire.Name, Type: wire.Type, URL: wire.URL,
+		Tools: append([]string(nil), wire.Tools...), RequestDigest: wire.RequestDigest,
+	}
+	if err := validateClaimMCPRegistration(registration); err != nil {
+		return ClaimMCPRegistration{}, err
+	}
+	return registration, nil
+}
+
 func EncodeControllerCall(call ControllerCall) ([]byte, error) {
 	if call.Schema != ControllerCallSchemaID {
 		return nil, fmt.Errorf("sealedexec: controller call schema must be %q", ControllerCallSchemaID)
@@ -723,6 +809,21 @@ func encodeControllerCallPayload(call ControllerCall) (json.RawMessage, error) {
 			Schema string          `json:"schema"`
 			Record json.RawMessage `json:"record"`
 		}{wantSchema, trimFrame(record)})
+	case ControllerOperationResolveClaimMCP:
+		if err := requireOnlyCallArm(call, call.ResolveClaimMCP); err != nil {
+			return nil, err
+		}
+		if call.ResolveClaimMCP.Schema != wantSchema {
+			return nil, operationSchemaError(call.Operation)
+		}
+		query, err := claimMCPQueryToWire(call.ResolveClaimMCP.Query)
+		if err != nil {
+			return nil, err
+		}
+		return marshalControllerPayload(struct {
+			Query  claimMCPQueryWire `json:"query"`
+			Schema string            `json:"schema"`
+		}{query, wantSchema})
 	default:
 		return nil, fmt.Errorf("sealedexec: unknown controller operation %q", call.Operation)
 	}
@@ -1056,6 +1157,22 @@ func decodeControllerCallPayload(raw json.RawMessage, call *ControllerCall) erro
 			return err
 		}
 		call.PersistAbort = ControllerPersistAbortRequest{schema, record}
+	case ControllerOperationResolveClaimMCP:
+		var wire struct {
+			Query  claimMCPQueryWire `json:"query"`
+			Schema string            `json:"schema"`
+		}
+		if err := unmarshalControllerPayload(raw, &wire); err != nil {
+			return err
+		}
+		if wire.Schema != schema {
+			return operationSchemaError(call.Operation)
+		}
+		query, err := claimMCPQueryFromWire(wire.Query)
+		if err != nil {
+			return err
+		}
+		call.ResolveClaimMCP = ControllerResolveClaimMCPRequest{schema, query}
 	default:
 		return fmt.Errorf("sealedexec: unknown controller operation %q", call.Operation)
 	}
@@ -1321,6 +1438,18 @@ func encodeControllerSuccessPayload(result ControllerResult) (json.RawMessage, e
 			Schema string          `json:"schema"`
 			Ack    json.RawMessage `json:"ack"`
 		}{wantSchema, ack})
+	case ControllerOperationResolveClaimMCP:
+		if result.ResolveClaimMCP.Schema != wantSchema {
+			return nil, operationSchemaError(result.Operation)
+		}
+		registration, err := claimMCPRegistrationToWire(result.ResolveClaimMCP.Registration)
+		if err != nil {
+			return nil, err
+		}
+		return marshalControllerPayload(struct {
+			Registration claimMCPRegistrationWire `json:"registration"`
+			Schema       string                   `json:"schema"`
+		}{registration, wantSchema})
 	default:
 		return nil, fmt.Errorf("sealedexec: unknown controller operation %q", result.Operation)
 	}
@@ -1642,6 +1771,22 @@ func decodeControllerSuccessPayload(raw json.RawMessage, result *ControllerResul
 		case ControllerOperationPersistAbort:
 			result.PersistAbort = ControllerPersistAbortResult{schema, ack}
 		}
+	case ControllerOperationResolveClaimMCP:
+		var wire struct {
+			Registration claimMCPRegistrationWire `json:"registration"`
+			Schema       string                   `json:"schema"`
+		}
+		if err := unmarshalControllerPayload(raw, &wire); err != nil {
+			return err
+		}
+		if wire.Schema != schema {
+			return operationSchemaError(result.Operation)
+		}
+		registration, err := claimMCPRegistrationFromWire(wire.Registration)
+		if err != nil {
+			return err
+		}
+		result.ResolveClaimMCP = ControllerResolveClaimMCPResult{schema, registration}
 	default:
 		return fmt.Errorf("sealedexec: unknown controller operation %q", result.Operation)
 	}
@@ -1779,6 +1924,8 @@ func requireOnlyCallArm(call ControllerCall, selected any) error {
 		want.PersistQuarantine = selected.(ControllerPersistQuarantineRequest)
 	case ControllerOperationPersistAbort:
 		want.PersistAbort = selected.(ControllerPersistAbortRequest)
+	case ControllerOperationResolveClaimMCP:
+		want.ResolveClaimMCP = selected.(ControllerResolveClaimMCPRequest)
 	}
 	if !reflect.DeepEqual(call, want) {
 		return fmt.Errorf("sealedexec: controller call carries wrong or multiple operation payloads")
@@ -1838,6 +1985,8 @@ func controllerSuccessArmsMatch(result ControllerResult) bool {
 		want.PersistQuarantine = result.PersistQuarantine
 	case ControllerOperationPersistAbort:
 		want.PersistAbort = result.PersistAbort
+	case ControllerOperationResolveClaimMCP:
+		want.ResolveClaimMCP = result.ResolveClaimMCP
 	}
 	return reflect.DeepEqual(result, want)
 }

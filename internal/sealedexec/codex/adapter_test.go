@@ -24,7 +24,7 @@ import (
 func TestAdapterStartUsesPinnedIsolationAndTypedInput(t *testing.T) {
 	launch := adapterLaunch(t, sealedexec.ActionStart)
 	process := &cannedProcess{output: mustFixture(t, "codex-valid.jsonl")}
-	adapter, err := New(process, newTestProcessorForCodex(t))
+	adapter, err := New(process, newTestProcessorForCodex(t), testRequiredMCPSet())
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -50,10 +50,11 @@ func TestAdapterStartUsesPinnedIsolationAndTypedInput(t *testing.T) {
 	default:
 		t.Fatal("terminal result did not cancel the active process context")
 	}
-	wantArgs := []string{
+	wantArgs := append([]string{
 		launch.Profile.Executable, "exec", "--json", "--strict-config", "--ignore-user-config", "--ignore-rules",
-		"--profile", launch.Profile.Name, "--sandbox", "workspace-write", "--cd", launch.Workspace.Path, "-",
-	}
+		"--profile", launch.Profile.Name,
+	}, wantMCPOperands...)
+	wantArgs = append(wantArgs, "--sandbox", "workspace-write", "--cd", launch.Workspace.Path, "-")
 	if !reflect.DeepEqual(process.command.Args, wantArgs) || process.command.Dir != launch.Workspace.Path {
 		t.Fatalf("command argv/dir = %v/%q, want %v/%q", process.command.Args, process.command.Dir, wantArgs, launch.Workspace.Path)
 	}
@@ -94,6 +95,41 @@ func TestAdapterStartUsesPinnedIsolationAndTypedInput(t *testing.T) {
 		}
 	}
 
+	// Amendment 003 §Codex: the twelve pairs sit immediately after the pinned
+	// `--profile <profile>` prefix and before the sandbox/workspace tail. Each
+	// operand is mutated individually so no single element can drift unnoticed.
+	t.Run("amendment 003 inserts the twelve ordered dynamic MCP operands after the profile", func(t *testing.T) {
+		assertMCPOperandsAt(t, process.command.Args, 8)
+		for i := range wantMCPOperands {
+			if i%2 == 0 {
+				continue
+			}
+			mutated := testRequiredMCPSet()
+			switch {
+			case strings.Contains(wantMCPOperands[i], "vatc.url"):
+				mutated.Claim.URL = "http://127.0.0.1:45009/mcp"
+			case strings.Contains(wantMCPOperands[i], "vatc.http_headers"):
+				mutated.Claim.Authorization = "Bearer " + testContextCapability
+			case strings.Contains(wantMCPOperands[i], "vatc.enabled_tools"):
+				mutated.Claim.Tools = []string{"get_flight_plan"}
+			case strings.Contains(wantMCPOperands[i], "verdi-context.url"):
+				mutated.Context.URL = "http://127.0.0.1:45009/mcp"
+			case strings.Contains(wantMCPOperands[i], "verdi-context.http_headers"):
+				mutated.Context.Authorization = "Bearer " + testClaimCapability
+			case strings.Contains(wantMCPOperands[i], "verdi-context.enabled_tools"):
+				mutated.Context.Tools = []string{"claim_paths"}
+			default:
+				// enabled/required/supports_parallel_tool_calls are fixed
+				// literals with no operand-bearing input to mutate.
+				continue
+			}
+			operands := mcpConfigOperands(mutated)
+			if operands[i] == wantMCPOperands[i] {
+				t.Fatalf("operand %d did not change when its input changed: %q", i, operands[i])
+			}
+		}
+	})
+
 	t.Run("review start carries exact explicit model and acknowledged launch facts", func(t *testing.T) {
 		reviewLaunch := adapterLaunch(t, sealedexec.ActionStart)
 		reviewLaunch.Request.Lane = "reviewer"
@@ -103,7 +139,7 @@ func TestAdapterStartUsesPinnedIsolationAndTypedInput(t *testing.T) {
 			Model: "gpt-review-pinned",
 		}
 		reviewProcess := &cannedProcess{output: []byte("{\"type\":\"thread.started\",\"thread_id\":\"review-provider-session\"}\n")}
-		reviewAdapter, err := New(reviewProcess, newTestProcessorForCodex(t))
+		reviewAdapter, err := New(reviewProcess, newTestProcessorForCodex(t), testRequiredMCPSet())
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -112,10 +148,11 @@ func TestAdapterStartUsesPinnedIsolationAndTypedInput(t *testing.T) {
 			t.Fatalf("Start(review): %v", err)
 		}
 		reviewResult := collectRun(t, reviewRun)
-		wantReviewArgs := []string{
+		wantReviewArgs := append([]string{
 			reviewLaunch.Profile.Executable, "exec", "--json", "--strict-config", "--ignore-user-config", "--ignore-rules",
-			"--profile", reviewLaunch.Profile.Name, "--model", "gpt-review-pinned", "--sandbox", "workspace-write", "--cd", reviewLaunch.Workspace.Path, "-",
-		}
+			"--profile", reviewLaunch.Profile.Name,
+		}, wantMCPOperands...)
+		wantReviewArgs = append(wantReviewArgs, "--model", "gpt-review-pinned", "--sandbox", "workspace-write", "--cd", reviewLaunch.Workspace.Path, "-")
 		if !reflect.DeepEqual(reviewProcess.command.Args, wantReviewArgs) {
 			t.Fatalf("review argv = %v, want %v", reviewProcess.command.Args, wantReviewArgs)
 		}
@@ -144,7 +181,7 @@ func TestAdapterStartUsesPinnedIsolationAndTypedInput(t *testing.T) {
 		bad.Request.Profile.ID = "review-profile"
 		bad.Review = &sealedexec.ReviewLaunch{Round: "r0", PacketDigest: adapterTestDigest([]byte("r0-packet")), Model: "gpt-review-pinned"}
 		badProcess := &cannedProcess{}
-		badAdapter, err := New(badProcess, newTestProcessorForCodex(t))
+		badAdapter, err := New(badProcess, newTestProcessorForCodex(t), testRequiredMCPSet())
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -187,7 +224,7 @@ func TestDetailProcessorDigestsExactCarriedJSON(t *testing.T) {
 func TestAdapterResumeTargetsExplicitVerifiedSession(t *testing.T) {
 	launch := adapterLaunch(t, sealedexec.ActionResume)
 	process := &cannedProcess{output: []byte("{\"type\":\"turn.completed\",\"usage\":{\"input_tokens\":1}}\n")}
-	adapter, err := New(process, newTestProcessorForCodex(t))
+	adapter, err := New(process, newTestProcessorForCodex(t), testRequiredMCPSet())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -197,13 +234,44 @@ func TestAdapterResumeTargetsExplicitVerifiedSession(t *testing.T) {
 		t.Fatalf("Resume: %v", err)
 	}
 	result := collectRun(t, run)
-	want := []string{launch.Profile.Executable, "exec", "resume", "--json", "--strict-config", "--ignore-user-config", "--ignore-rules", session, "-"}
+	want := append([]string{launch.Profile.Executable, "exec", "resume", "--json", "--strict-config", "--ignore-user-config", "--ignore-rules"}, wantMCPOperands...)
+	want = append(want, session, "-")
 	if !reflect.DeepEqual(process.command.Args, want) || result.ObservedSessionRef != "" {
 		t.Fatalf("resume argv/session = %v/%q, want %v/empty optional repeat", process.command.Args, result.ObservedSessionRef, want)
 	}
 	if contains(process.command.Args, "--last") || contains(process.command.Args, "--all") {
 		t.Fatalf("resume used a selector: %v", process.command.Args)
 	}
+	t.Run("amendment 003 inserts the twelve ordered dynamic MCP operands after --ignore-rules", func(t *testing.T) {
+		assertMCPOperandsAt(t, process.command.Args, 7)
+	})
+
+	// Amendment 003: a set that is not exactly two separately owned
+	// registrations with disjoint catalogues never reaches argv at all.
+	t.Run("amendment 003 refuses a malformed required registration set", func(t *testing.T) {
+		for name, mutate := range map[string]func(*sealedexec.RequiredMCPSet){
+			"renamed claim":      func(s *sealedexec.RequiredMCPSet) { s.Claim.Name = "vatc-2" },
+			"renamed context":    func(s *sealedexec.RequiredMCPSet) { s.Context.Name = "verdi_context" },
+			"non-loopback":       func(s *sealedexec.RequiredMCPSet) { s.Claim.URL = "http://10.0.0.1:45001/mcp" },
+			"wrong path":         func(s *sealedexec.RequiredMCPSet) { s.Context.URL = "http://127.0.0.1:45002/rpc" },
+			"query component":    func(s *sealedexec.RequiredMCPSet) { s.Claim.URL = "http://127.0.0.1:45001/mcp?x=1" },
+			"zero port":          func(s *sealedexec.RequiredMCPSet) { s.Claim.URL = "http://127.0.0.1:0/mcp" },
+			"bare capability":    func(s *sealedexec.RequiredMCPSet) { s.Claim.Authorization = testClaimCapability },
+			"shared capability":  func(s *sealedexec.RequiredMCPSet) { s.Claim.Authorization = testContextAuthorization },
+			"shared origin":      func(s *sealedexec.RequiredMCPSet) { s.Claim.URL = testContextMCPURL },
+			"overlapping tools":  func(s *sealedexec.RequiredMCPSet) { s.Context.Tools = []string{"get_flight_plan", "claim_paths"} },
+			"extra claim tool":   func(s *sealedexec.RequiredMCPSet) { s.Claim.Tools = []string{"claim_paths", "get_flight_plan"} },
+			"missing claim tool": func(s *sealedexec.RequiredMCPSet) { s.Claim.Tools = nil },
+		} {
+			t.Run(name, func(t *testing.T) {
+				servers := testRequiredMCPSet()
+				mutate(&servers)
+				if _, err := New(&cannedProcess{}, newTestProcessorForCodex(t), servers); err == nil {
+					t.Fatalf("New accepted a %s registration set", name)
+				}
+			})
+		}
+	})
 
 	process.output = []byte("{\"type\":\"thread.started\",\"thread_id\":\"different\"}\n")
 	run, err = adapter.Resume(context.Background(), launch, session)
@@ -238,7 +306,7 @@ func TestAdapterForeignDecoderFailsClosed(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			adapter, err := New(&cannedProcess{output: tt.output}, newTestProcessorForCodex(t))
+			adapter, err := New(&cannedProcess{output: tt.output}, newTestProcessorForCodex(t), testRequiredMCPSet())
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -260,7 +328,7 @@ func TestAdapterForeignDecoderFailsClosed(t *testing.T) {
 func TestAdapterActiveRunStopUsesNormalizedProcessPort(t *testing.T) {
 	launch := adapterLaunch(t, sealedexec.ActionStart)
 	process := &cannedProcess{stop: ProcessStopResult{ExitCode: 130, ReasonCode: "interrupted"}}
-	adapter, err := New(process, newTestProcessorForCodex(t))
+	adapter, err := New(process, newTestProcessorForCodex(t), testRequiredMCPSet())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -292,7 +360,7 @@ func TestAdapterStopYieldsRacedCompleteFrameThenOneStopTerminal(t *testing.T) {
 			{ForeignJSON: []byte(`{"type":"turn.completed"}`), Complete: true},
 		},
 	}
-	adapter, err := New(&fixedActiveProcess{run: processRun}, newTestProcessorForCodex(t))
+	adapter, err := New(&fixedActiveProcess{run: processRun}, newTestProcessorForCodex(t), testRequiredMCPSet())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -577,6 +645,95 @@ func blocksAuthority(rows []sealedexec.NormalizedObservation) bool {
 	return false
 }
 
+const (
+	testClaimMCPURL          = "http://127.0.0.1:45001/mcp"
+	testContextMCPURL        = "http://127.0.0.1:45002/mcp"
+	testClaimCapability      = "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+	testContextCapability    = "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+	testClaimAuthorization   = "Bearer " + testClaimCapability
+	testContextAuthorization = "Bearer " + testContextCapability
+)
+
+// testRequiredMCPSet is the exact pair of required registrations Amendment 003
+// injects. Ports and capabilities are fixed so argv is byte-comparable.
+func testRequiredMCPSet() sealedexec.RequiredMCPSet {
+	return sealedexec.RequiredMCPSet{
+		Claim: sealedexec.RequiredMCP{
+			Name: "vatc", URL: testClaimMCPURL, Authorization: testClaimAuthorization,
+			Tools: []string{"claim_paths"},
+		},
+		Context: sealedexec.RequiredMCP{
+			Name: "verdi-context", URL: testContextMCPURL, Authorization: testContextAuthorization,
+			Tools: []string{"get_flight_plan", "request_context"},
+		},
+	}
+}
+
+// wantMCPOperands is Amendment 003's exact ordered twelve `-c key=value` pairs,
+// each value one literal argv element following its own `-c`.
+var wantMCPOperands = []string{
+	"-c", `mcp_servers.vatc.url="` + testClaimMCPURL + `"`,
+	"-c", `mcp_servers.vatc.http_headers={Authorization="` + testClaimAuthorization + `"}`,
+	"-c", "mcp_servers.vatc.enabled=true",
+	"-c", "mcp_servers.vatc.required=true",
+	"-c", "mcp_servers.vatc.supports_parallel_tool_calls=false",
+	"-c", `mcp_servers.vatc.enabled_tools=["claim_paths"]`,
+	"-c", `mcp_servers.verdi-context.url="` + testContextMCPURL + `"`,
+	"-c", `mcp_servers.verdi-context.http_headers={Authorization="` + testContextAuthorization + `"}`,
+	"-c", "mcp_servers.verdi-context.enabled=true",
+	"-c", "mcp_servers.verdi-context.required=true",
+	"-c", "mcp_servers.verdi-context.supports_parallel_tool_calls=false",
+	"-c", `mcp_servers.verdi-context.enabled_tools=["get_flight_plan","request_context"]`,
+}
+
+// assertMCPOperandsAt proves the twelve pairs occupy exactly the fixed argv
+// window starting at index start, and appear nowhere else.
+func assertMCPOperandsAt(t *testing.T, args []string, start int) {
+	t.Helper()
+	end := start + len(wantMCPOperands)
+	if len(args) < end {
+		t.Fatalf("argv %v is shorter than the required operand window [%d,%d)", args, start, end)
+	}
+	if got := args[start:end]; !reflect.DeepEqual(got, wantMCPOperands) {
+		t.Fatalf("argv operand window = %v, want %v", got, wantMCPOperands)
+	}
+	if got, want := configOperandKeys(args), wantMCPOperandKeys; !reflect.DeepEqual(got, want) {
+		t.Fatalf("argv -c operand keys = %v, want exactly %v", got, want)
+	}
+}
+
+// wantMCPOperandKeys is Amendment 003's exact ordered dynamic operand key list.
+var wantMCPOperandKeys = []string{
+	"mcp_servers.vatc.url",
+	"mcp_servers.vatc.http_headers",
+	"mcp_servers.vatc.enabled",
+	"mcp_servers.vatc.required",
+	"mcp_servers.vatc.supports_parallel_tool_calls",
+	"mcp_servers.vatc.enabled_tools",
+	"mcp_servers.verdi-context.url",
+	"mcp_servers.verdi-context.http_headers",
+	"mcp_servers.verdi-context.enabled",
+	"mcp_servers.verdi-context.required",
+	"mcp_servers.verdi-context.supports_parallel_tool_calls",
+	"mcp_servers.verdi-context.enabled_tools",
+}
+
+// configOperandKeys returns the ordered key half of every `-c key=value` pair.
+func configOperandKeys(args []string) []string {
+	keys := []string{}
+	for i, arg := range args {
+		if arg != "-c" || i+1 >= len(args) {
+			continue
+		}
+		key, _, ok := strings.Cut(args[i+1], "=")
+		if !ok {
+			key = args[i+1]
+		}
+		keys = append(keys, key)
+	}
+	return keys
+}
+
 func contains(rows []string, value string) bool {
 	for _, row := range rows {
 		if row == value {
@@ -659,7 +816,7 @@ func TestCodexDetailParityThroughSharedProcessor(t *testing.T) {
 		const wantDigest = "sha256:" + codexTurnCompletedDetailHex
 
 		launch := adapterLaunch(t, sealedexec.ActionResume)
-		adapter, err := New(&cannedProcess{output: []byte(source + "\n")}, newTestProcessorForCodex(t))
+		adapter, err := New(&cannedProcess{output: []byte(source + "\n")}, newTestProcessorForCodex(t), testRequiredMCPSet())
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -692,7 +849,7 @@ func TestCodexDetailParityThroughSharedProcessor(t *testing.T) {
 		if len(launch.Profile.PolicySecretValues) != 1 || string(launch.Profile.PolicySecretValues[0]) != secret {
 			t.Fatalf("launch protected values = %q, want exactly [%q]", launch.Profile.PolicySecretValues, secret)
 		}
-		adapter, err := New(&cannedProcess{output: []byte(source + "\n")}, newTestProcessorForCodex(t))
+		adapter, err := New(&cannedProcess{output: []byte(source + "\n")}, newTestProcessorForCodex(t), testRequiredMCPSet())
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -723,7 +880,7 @@ func TestCodexDetailParityThroughSharedProcessor(t *testing.T) {
 
 		launch := adapterLaunch(t, sealedexec.ActionResume)
 		processor, store := newCodexProcessorWithStore(t)
-		adapter, err := New(&cannedProcess{output: []byte(source + "\n")}, processor)
+		adapter, err := New(&cannedProcess{output: []byte(source + "\n")}, processor, testRequiredMCPSet())
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -760,7 +917,7 @@ func TestCodexDetailParityThroughSharedProcessor(t *testing.T) {
 		const wantDetail = "{\"foreign_line\":\"{not-json �}\",\"reason\":\"malformed-json\"}"
 
 		launch := adapterLaunch(t, sealedexec.ActionResume)
-		adapter, err := New(&cannedProcess{output: source}, newTestProcessorForCodex(t))
+		adapter, err := New(&cannedProcess{output: source}, newTestProcessorForCodex(t), testRequiredMCPSet())
 		if err != nil {
 			t.Fatal(err)
 		}

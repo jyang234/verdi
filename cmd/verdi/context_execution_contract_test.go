@@ -15,6 +15,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"strconv"
 	"strings"
 	"syscall"
@@ -223,6 +224,21 @@ func TestContextExecutionPublicContract_Behavioral(t *testing.T) {
 		permanentWatcher.Stop()
 		if permanentNotifier.notifyCalls != 1 || permanentNotifier.stopCalls != 1 {
 			t.Fatalf("permanent watcher notify/stop = %d/%d, want 1/1", permanentNotifier.notifyCalls, permanentNotifier.stopCalls)
+		}
+	})
+
+	// Amendment 003: the claim registration is a required prerequisite with no
+	// fallback, so a controller that cannot resolve it ends the run operationally
+	// before any provider is launched.
+	t.Run("unresolvable claim registration is operational before provider launch", func(t *testing.T) {
+		// approvedContext makes the identical run succeed when the claim
+		// registration resolves, so exit 2 here can only come from the refusal.
+		run := runClaudeSealedLifecycle(t, bin, claudeLifecycleOptions{approvedContext: true, failOperation: sealedexec.ControllerOperation("resolve-claim-mcp")})
+		if run.obs.exitCode != 2 || run.obs.stdout != "" {
+			t.Fatalf("unresolvable claim registration = %#v, want operational refusal with clean stdout", run.obs)
+		}
+		if got := countControllerOperation(run.fake.calls, sealedexec.ControllerOperationStoreAdapterSession); got != 0 {
+			t.Fatalf("store-adapter-session calls = %d, want none after a refused claim registration", got)
 		}
 	})
 }
@@ -952,10 +968,9 @@ func runSuccessfulSealedStart(t *testing.T, bin string, outputFile, outputFailur
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantArgv := strings.Join([]string{"exec", "--json", "--strict-config", "--ignore-user-config", "--ignore-rules", "--profile", "compiled-fixture", "--sandbox", "workspace-write", "--cd", execworkspace.UnitPath(root, workspaceID), "-", ""}, "\n")
-	if string(argvBytes) != wantArgv {
-		t.Fatalf("provider argv = %q, want %q", argvBytes, wantArgv)
-	}
+	assertSealedProviderArgv(t, argvBytes,
+		[]string{"exec", "--json", "--strict-config", "--ignore-user-config", "--ignore-rules", "--profile", "compiled-fixture"},
+		[]string{"--sandbox", "workspace-write", "--cd", execworkspace.UnitPath(root, workspaceID), "-"})
 	envBytes, err := os.ReadFile(envPath)
 	if err != nil {
 		t.Fatal(err)
@@ -1165,6 +1180,92 @@ func runInterruptedSealedStart(t *testing.T, bin string, signalBeforeActivation 
 	}
 }
 
+// sealedProviderMCPOperandKeys is Amendment 003's exact ordered operand key
+// list, and sealedProviderMCPFixedValues the operands whose values are fixed
+// literals rather than per-invocation identities.
+var (
+	sealedProviderMCPOperandKeys = []string{
+		"mcp_servers.vatc.url",
+		"mcp_servers.vatc.http_headers",
+		"mcp_servers.vatc.enabled",
+		"mcp_servers.vatc.required",
+		"mcp_servers.vatc.supports_parallel_tool_calls",
+		"mcp_servers.vatc.enabled_tools",
+		"mcp_servers.verdi-context.url",
+		"mcp_servers.verdi-context.http_headers",
+		"mcp_servers.verdi-context.enabled",
+		"mcp_servers.verdi-context.required",
+		"mcp_servers.verdi-context.supports_parallel_tool_calls",
+		"mcp_servers.verdi-context.enabled_tools",
+	}
+	sealedProviderMCPFixedValues = map[string]string{
+		"mcp_servers.vatc.enabled":                               "true",
+		"mcp_servers.vatc.required":                              "true",
+		"mcp_servers.vatc.supports_parallel_tool_calls":          "false",
+		"mcp_servers.vatc.enabled_tools":                         `["claim_paths"]`,
+		"mcp_servers.verdi-context.enabled":                      "true",
+		"mcp_servers.verdi-context.required":                     "true",
+		"mcp_servers.verdi-context.supports_parallel_tool_calls": "false",
+		"mcp_servers.verdi-context.enabled_tools":                `["get_flight_plan","request_context"]`,
+	}
+	sealedProviderMCPURLValue     = regexp.MustCompile(`^"http://127\.0\.0\.1:[1-9][0-9]{0,4}/mcp"$`)
+	sealedProviderMCPHeadersValue = regexp.MustCompile(`^\{Authorization="Bearer sha256:[0-9a-f]{64}"\}$`)
+)
+
+// assertSealedProviderArgv proves the built binary handed the provider the
+// pinned prefix, Amendment 003's exact twelve ordered `-c` pairs immediately
+// after it, and then the pinned tail. Per-invocation origins and capabilities
+// are proven by grammar and distinctness rather than by a fixed literal.
+func assertSealedProviderArgv(t *testing.T, argvBytes []byte, wantPrefix, wantTail []string) {
+	t.Helper()
+	argv := strings.Split(strings.TrimSuffix(string(argvBytes), "\n"), "\n")
+	want := len(wantPrefix) + 2*len(sealedProviderMCPOperandKeys) + len(wantTail)
+	if len(argv) != want {
+		t.Fatalf("provider argv has %d elements, want %d: %q", len(argv), want, argvBytes)
+	}
+	if got := argv[:len(wantPrefix)]; !reflect.DeepEqual(got, wantPrefix) {
+		t.Fatalf("provider argv prefix = %v, want %v", got, wantPrefix)
+	}
+	if got := argv[len(argv)-len(wantTail):]; !reflect.DeepEqual(got, wantTail) {
+		t.Fatalf("provider argv tail = %v, want %v", got, wantTail)
+	}
+	block := argv[len(wantPrefix) : len(argv)-len(wantTail)]
+	values := map[string]string{}
+	for i, key := range sealedProviderMCPOperandKeys {
+		if block[2*i] != "-c" {
+			t.Fatalf("operand %d is not introduced by -c: %q", i, block[2*i])
+		}
+		gotKey, gotValue, ok := strings.Cut(block[2*i+1], "=")
+		if !ok || gotKey != key {
+			t.Fatalf("operand %d = %q, want key %q", i, block[2*i+1], key)
+		}
+		values[key] = gotValue
+	}
+	for key, wantValue := range sealedProviderMCPFixedValues {
+		if values[key] != wantValue {
+			t.Fatalf("operand %s = %q, want %q", key, values[key], wantValue)
+		}
+	}
+	for _, key := range []string{"mcp_servers.vatc.url", "mcp_servers.verdi-context.url"} {
+		if !sealedProviderMCPURLValue.MatchString(values[key]) {
+			t.Fatalf("operand %s = %q, want a quoted IPv4-loopback /mcp origin", key, values[key])
+		}
+	}
+	for _, key := range []string{"mcp_servers.vatc.http_headers", "mcp_servers.verdi-context.http_headers"} {
+		if !sealedProviderMCPHeadersValue.MatchString(values[key]) {
+			t.Fatalf("operand %s = %q, want a single canonical bearer header", key, values[key])
+		}
+	}
+	// The two registrations are separately owned: neither origin nor capability
+	// is ever shared between them.
+	if values["mcp_servers.vatc.url"] == values["mcp_servers.verdi-context.url"] {
+		t.Fatalf("both registrations were injected with one origin: %q", values["mcp_servers.vatc.url"])
+	}
+	if values["mcp_servers.vatc.http_headers"] == values["mcp_servers.verdi-context.http_headers"] {
+		t.Fatalf("both registrations were injected with one capability")
+	}
+}
+
 func countControllerOperation(operations []sealedexec.ControllerOperation, want sealedexec.ControllerOperation) int {
 	count := 0
 	for _, operation := range operations {
@@ -1312,10 +1413,9 @@ func runSuccessfulSealedResume(t *testing.T, bin string) {
 		t.Fatalf("resume result = %#v", result)
 	}
 	argvBytes := mustReadFile(t, argvPath)
-	wantArgv := strings.Join([]string{"exec", "resume", "--json", "--strict-config", "--ignore-user-config", "--ignore-rules", sessionRef, "-", ""}, "\n")
-	if string(argvBytes) != wantArgv {
-		t.Fatalf("resume provider argv = %q, want %q", argvBytes, wantArgv)
-	}
+	assertSealedProviderArgv(t, argvBytes,
+		[]string{"exec", "resume", "--json", "--strict-config", "--ignore-user-config", "--ignore-rules"},
+		[]string{sessionRef, "-"})
 	if _, err := sealedexec.DecodeProviderInput(bytes.NewReader(mustReadFile(t, stdinPath))); err != nil {
 		t.Fatalf("resume provider input: %v", err)
 	}
@@ -1332,6 +1432,9 @@ func runSuccessfulSealedResume(t *testing.T, bin string) {
 		sealedexec.ControllerOperationVerifyExpansion,
 		sealedexec.ControllerOperationVerifyProviderSession,
 		sealedexec.ControllerOperationVerifyOpaqueBoundary,
+		// Amendment 003: the ATC-owned claim registration resolves once, at
+		// adapter verification, before any provider launch or acknowledgment.
+		sealedexec.ControllerOperationResolveClaimMCP,
 		// Amendment 002 §7 prepared-resume: `resume` then `adapter-start`, each
 		// stamped and acknowledged before the provider stream is reduced.
 		sealedexec.ControllerOperationNextStamp,
@@ -1931,6 +2034,7 @@ type sealedLifecycleController struct {
 	segments          map[string]sealedexec.RedactedSegment
 	checkpointDigest  string
 	expansionRoot     string
+	claimMCPURL       string
 	calls             []sealedexec.ControllerOperation
 	events            []contextevent.Event
 	eventAcks         []contextevent.EventAck
@@ -2001,6 +2105,16 @@ func (f *sealedLifecycleController) serve(conn net.Conn) error {
 	}
 }
 
+// claimURL returns the ATC-owned registration origin. Fixtures whose provider
+// never contacts the claim surface use a structurally valid but unserved
+// loopback origin; fixtures that do exercise it inject a real server.
+func (f *sealedLifecycleController) claimURL() string {
+	if f.claimMCPURL != "" {
+		return f.claimMCPURL
+	}
+	return "http://127.0.0.1:1/mcp"
+}
+
 func (f *sealedLifecycleController) result(call sealedexec.ControllerCall) (sealedexec.ControllerResult, error) {
 	result := sealedexec.ControllerResult{Schema: sealedexec.ControllerResultSchemaID, CallSequence: call.CallSequence, Operation: call.Operation}
 	if call.Operation == f.fail && (call.Operation != sealedexec.ControllerOperationRecorderAppend || f.failEventKind == "" || call.RecorderAppend.Event.Kind == f.failEventKind) {
@@ -2021,6 +2135,14 @@ func (f *sealedLifecycleController) result(call sealedexec.ControllerCall) (seal
 			Verification: proven, ManifestRevision: f.request.ManifestRevision, ManifestDigest: f.request.ManifestDigest,
 			ProjectionDigest: f.request.ProjectionDigest, AuthorityDigest: f.request.AuthorityVerdict.Digest,
 			AcceptedSpecCommit: f.request.Manifest.AcceptedSpec.Commit,
+		}}
+	case sealedexec.ControllerOperationResolveClaimMCP:
+		// Amendment 003 op 23: the ATC-owned registration, cross-matched to this
+		// invocation. It carries no bearer — the capability is derived locally on
+		// both sides from the same request digest.
+		result.ResolveClaimMCP = sealedexec.ControllerResolveClaimMCPResult{Schema: schema, Registration: sealedexec.ClaimMCPRegistration{
+			Name: "vatc", Type: "http", URL: f.claimURL(), Tools: []string{"claim_paths"},
+			RequestDigest: call.ResolveClaimMCP.Query.RequestDigest,
 		}}
 	case sealedexec.ControllerOperationResolveProfile:
 		material := f.profile
@@ -2304,6 +2426,9 @@ func (f *sealedLifecycleController) assertSequence() {
 		// reconstructs a second one.
 		sealedexec.ControllerOperationVerifyExpansion,
 		sealedexec.ControllerOperationVerifyOpaqueBoundary,
+		// Amendment 003: the ATC-owned claim registration resolves once, at
+		// adapter verification, before any provider launch or acknowledgment.
+		sealedexec.ControllerOperationResolveClaimMCP,
 		sealedexec.ControllerOperationNextStamp,
 		sealedexec.ControllerOperationRecorderAppend,
 		sealedexec.ControllerOperationStoreAdapterSession,

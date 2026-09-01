@@ -37,7 +37,7 @@ func TestScopedMCPConfigLifecycle(t *testing.T) {
 	listener := listenScopedMCP(t)
 	handler := &scopedHTTPTestHandler{}
 
-	config, _, closeMCP, err := StartScopedMCP(context.Background(), listener, envRoot, testCanonicalRequest, testProfileDigest, testWorkspaceID, handler)
+	config, _, closeMCP, err := StartScopedMCP(context.Background(), listener, envRoot, testCanonicalRequest, testProfileDigest, testWorkspaceID, claudeTestClaimMCP(), handler)
 	if err != nil {
 		t.Fatalf("StartScopedMCP: %v", err)
 	}
@@ -48,10 +48,16 @@ func TestScopedMCPConfigLifecycle(t *testing.T) {
 	wantToken := testDigest([]byte(preimage))
 	wantAuthorization := "Bearer " + wantToken
 	wantURL := "http://" + listener.Addr().String() + "/mcp"
-	if config.Path != filepath.Join(envRoot, "claude-mcp.json") || config.URL != wantURL || config.Authorization != wantAuthorization {
-		t.Fatalf("config = %#v, want path=%q url=%q authorization=%q", config, filepath.Join(envRoot, "claude-mcp.json"), wantURL, wantAuthorization)
+	claim := claudeTestClaimMCP()
+	if config.Path != filepath.Join(envRoot, "claude-mcp.json") || config.Servers.Context.URL != wantURL ||
+		config.Servers.Context.Authorization != wantAuthorization || !reflect.DeepEqual(config.Servers.Claim, claim) {
+		t.Fatalf("config = %#v, want path=%q context url=%q authorization=%q claim=%#v", config, filepath.Join(envRoot, "claude-mcp.json"), wantURL, wantAuthorization, claim)
 	}
-	wantConfig := fmt.Sprintf("{\"mcpServers\":{\"verdi-context\":{\"alwaysLoad\":true,\"headers\":{\"Authorization\":%q},\"type\":\"http\",\"url\":%q}}}\n", wantAuthorization, wantURL)
+	// Amendment 003's exact canonical two-row document plus one LF.
+	wantConfig := fmt.Sprintf(
+		"{\"mcpServers\":{\"vatc\":{\"alwaysLoad\":true,\"headers\":{\"Authorization\":%q},\"type\":\"http\",\"url\":%q},"+
+			"\"verdi-context\":{\"alwaysLoad\":true,\"headers\":{\"Authorization\":%q},\"type\":\"http\",\"url\":%q}}}\n",
+		claim.Authorization, claim.URL, wantAuthorization, wantURL)
 	configBytes, err := os.ReadFile(config.Path)
 	if err != nil {
 		t.Fatalf("read config: %v", err)
@@ -114,11 +120,11 @@ func TestScopedMCPConfigLifecycle(t *testing.T) {
 		t.Fatalf("close changed sibling file: content=%q err=%v", content, err)
 	}
 
-	request, err := http.NewRequest(http.MethodPost, config.URL, strings.NewReader(`{"jsonrpc":"2.0","id":9,"method":"initialize"}`))
+	request, err := http.NewRequest(http.MethodPost, config.Servers.Context.URL, strings.NewReader(`{"jsonrpc":"2.0","id":9,"method":"initialize"}`))
 	if err != nil {
 		t.Fatal(err)
 	}
-	request.Header.Set("Authorization", config.Authorization)
+	request.Header.Set("Authorization", config.Servers.Context.Authorization)
 	request.Header.Set("Content-Type", "application/json")
 	if response, err := client.Do(request); err == nil {
 		_ = response.Body.Close()
@@ -142,7 +148,7 @@ func TestScopedMCPCapabilityBindsAllInputs(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			listener := listenScopedMCP(t)
-			config, _, closeMCP, err := StartScopedMCP(context.Background(), listener, t.TempDir(), test.request, test.profile, test.workspace, &scopedHTTPTestHandler{})
+			config, _, closeMCP, err := StartScopedMCP(context.Background(), listener, t.TempDir(), test.request, test.profile, test.workspace, claudeTestClaimMCP(), &scopedHTTPTestHandler{})
 			if err != nil {
 				t.Fatalf("StartScopedMCP: %v", err)
 			}
@@ -152,10 +158,10 @@ func TestScopedMCPCapabilityBindsAllInputs(t *testing.T) {
 			if err := closeMCP(closeCtx); err != nil {
 				t.Fatalf("close MCP: %v", err)
 			}
-			if prior, exists := seen[config.Authorization]; exists {
-				t.Fatalf("capability %q reused by %q and %q", config.Authorization, prior, test.name)
+			if prior, exists := seen[config.Servers.Context.Authorization]; exists {
+				t.Fatalf("capability %q reused by %q and %q", config.Servers.Context.Authorization, prior, test.name)
 			}
-			seen[config.Authorization] = test.name
+			seen[config.Servers.Context.Authorization] = test.name
 		})
 	}
 }
@@ -220,7 +226,7 @@ func TestStartScopedMCPRejectsInvalidInputs(t *testing.T) {
 			if test.name != "nil handler" {
 				handler = &scopedHTTPTestHandler{}
 			}
-			if _, _, _, err := StartScopedMCP(ctx, listener, envRoot, request, profile, workspace, handler); err == nil {
+			if _, _, _, err := StartScopedMCP(ctx, listener, envRoot, request, profile, workspace, claudeTestClaimMCP(), handler); err == nil {
 				t.Fatal("StartScopedMCP accepted invalid input")
 			}
 			if _, err := os.Stat(filepath.Join(envRoot, "claude-mcp.json")); !os.IsNotExist(err) {
@@ -266,7 +272,7 @@ func TestScopedMCPProviderChildFDInventory(t *testing.T) {
 	})
 
 	listener := listenScopedMCP(t)
-	config, _, closeMCP, err := StartScopedMCP(context.Background(), listener, t.TempDir(), testCanonicalRequest, testProfileDigest, testWorkspaceID, &scopedHTTPTestHandler{})
+	config, _, closeMCP, err := StartScopedMCP(context.Background(), listener, t.TempDir(), testCanonicalRequest, testProfileDigest, testWorkspaceID, claudeTestClaimMCP(), &scopedHTTPTestHandler{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -314,7 +320,7 @@ func TestScopedMCPDeliversHandlerTerminalToParent(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			listener := listenScopedMCP(t)
 			handler := &scopedHTTPTestHandler{terminal: &mcpserve.HandlerTerminal{ExitCode: 1}}
-			config, terminals, closeMCP, err := StartScopedMCP(context.Background(), listener, t.TempDir(), testCanonicalRequest, testProfileDigest, testWorkspaceID, handler)
+			config, terminals, closeMCP, err := StartScopedMCP(context.Background(), listener, t.TempDir(), testCanonicalRequest, testProfileDigest, testWorkspaceID, claudeTestClaimMCP(), handler)
 			if err != nil {
 				t.Fatalf("StartScopedMCP: %v", err)
 			}
@@ -396,11 +402,11 @@ func registerScopedMCPCleanup(t *testing.T, closeMCP func(context.Context) error
 
 func callScopedMCP(t *testing.T, client *http.Client, config MCPConfig, body string) string {
 	t.Helper()
-	request, err := http.NewRequest(http.MethodPost, config.URL, strings.NewReader(body))
+	request, err := http.NewRequest(http.MethodPost, config.Servers.Context.URL, strings.NewReader(body))
 	if err != nil {
 		t.Fatal(err)
 	}
-	request.Header.Set("Authorization", config.Authorization)
+	request.Header.Set("Authorization", config.Servers.Context.Authorization)
 	request.Header.Set("Content-Type", "application/json")
 	response, err := client.Do(request)
 	if err != nil {

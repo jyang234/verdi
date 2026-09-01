@@ -20,14 +20,17 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"reflect"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"testing"
+	"time"
 
 	"github.com/jyang234/verdi/internal/fixturegit"
 	"github.com/jyang234/verdi/internal/instructionprojection"
@@ -517,9 +520,33 @@ func run() error {
 	if err := os.WriteFile(stdinPath, stdin, 0o644); err != nil {
 		return err
 	}
-	url, authorization, err := mcpTransport(args)
+	servers, err := mcpTransport(args)
 	if err != nil {
 		return err
+	}
+	url, authorization := servers["verdi-context"].URL, servers["verdi-context"].Headers["Authorization"]
+	claimURL, claimAuthorization := servers["vatc"].URL, servers["vatc"].Headers["Authorization"]
+	// Amendment 003: both required registrations complete their initialize
+	// handshake before any useful work. Recording them in order is what proves
+	// the ordering to the parent.
+	observed := []string{}
+	// Each observation is flushed as it is made. The parent may interrupt this
+	// provider the moment the scoped surface raises a terminal, so a single
+	// end-of-run write would lose the entire record to that race.
+	record := func(row string) error {
+		observed = append(observed, row)
+		return os.WriteFile(toolsPath, []byte(strings.Join(observed, "\n")+"\n"), 0o644)
+	}
+	for _, handshake := range []struct{ name, url, authorization string }{
+		{"vatc", claimURL, claimAuthorization},
+		{"verdi-context", url, authorization},
+	} {
+		if _, err := post(handshake.url, handshake.authorization, ` + "`" + `{"jsonrpc":"2.0","id":0,"method":"initialize"}` + "`" + `); err != nil {
+			return err
+		}
+		if err := record("initialize " + handshake.name); err != nil {
+			return err
+		}
 	}
 	// Amendment 002 §4/§7 provider order: a real Claude announces its session
 	// before it can call a scoped tool, so the exact valid system/init frame is
@@ -529,7 +556,7 @@ func run() error {
 	// resume open on resume, adapter-start.
 	if err := emit(map[string]any{
 		"type": "system", "subtype": "init", "session_id": session, "model": model,
-		"mcp_servers":    []map[string]string{{"name": "verdi-context", "status": "connected"}},
+		"mcp_servers":    []map[string]string{{"name": "vatc", "status": "connected"}, {"name": "verdi-context", "status": "connected"}},
 		"cwd":            workspace,
 		"tools":          []string{},
 		"permissionMode": "bypassPermissions", "apiKeySource": "ANTHROPIC_API_KEY",
@@ -538,31 +565,57 @@ func run() error {
 	}); err != nil {
 		return err
 	}
-	observed := []string{}
+	claimed, err := post(claimURL, claimAuthorization, ` + "`" + `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"claim_paths","arguments":{}}}` + "`" + `)
+	if err != nil {
+		return err
+	}
+	if err := record("claim_paths " + compact(claimed)); err != nil {
+		return err
+	}
+	// A cross token must be refused by the server that did not mint it.
+	crossStatus, err := postStatus(claimURL, authorization, ` + "`" + `{"jsonrpc":"2.0","id":2,"method":"initialize"}` + "`" + `)
+	if err != nil {
+		return err
+	}
+	if err := record(fmt.Sprintf("cross_token %d", crossStatus)); err != nil {
+		return err
+	}
+	reverseStatus, err := postStatus(url, claimAuthorization, ` + "`" + `{"jsonrpc":"2.0","id":3,"method":"initialize"}` + "`" + `)
+	if err != nil {
+		return err
+	}
+	if err := record(fmt.Sprintf("reverse_cross_token %d", reverseStatus)); err != nil {
+		return err
+	}
 	listed, err := post(url, authorization, ` + "`" + `{"jsonrpc":"2.0","id":1,"method":"tools/list"}` + "`" + `)
 	if err != nil {
 		return err
 	}
-	observed = append(observed, "tools/list "+toolNames(listed))
+	if err := record("tools/list " + toolNames(listed)); err != nil {
+		return err
+	}
 	plan, err := post(url, authorization, ` + "`" + `{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"get_flight_plan","arguments":{}}}` + "`" + `)
 	if err != nil {
 		return err
 	}
-	observed = append(observed, "get_flight_plan "+compact(plan))
+	if err := record("get_flight_plan " + compact(plan)); err != nil {
+		return err
+	}
 	expansion, err := post(url, authorization, ` + "`" + `{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"request_context","arguments":{"ref":"spec/feature-alpha","purpose":"sealed claude witness"}}}` + "`" + `)
 	if err != nil {
 		return err
 	}
-	observed = append(observed, "request_context "+compact(expansion))
+	if err := record("request_context " + compact(expansion)); err != nil {
+		return err
+	}
 	if extraTool != "" {
 		refused, err := post(url, authorization, ` + "`" + `{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"` + "`" + `+extraTool+` + "`" + `","arguments":{}}}` + "`" + `)
 		if err != nil {
 			return err
 		}
-		observed = append(observed, "extra "+compact(refused))
-	}
-	if err := os.WriteFile(toolsPath, []byte(strings.Join(observed, "\n")+"\n"), 0o644); err != nil {
-		return err
+		if err := record("extra " + compact(refused)); err != nil {
+			return err
+		}
 	}
 	if doCommit {
 		if err := providerCommit(); err != nil {
@@ -626,7 +679,13 @@ func emit(frame map[string]any) error {
 	return nil
 }
 
-func mcpTransport(args []string) (string, string, error) {
+type mcpServerConfig struct {
+	Type    string            ` + "`json:\"type\"`" + `
+	URL     string            ` + "`json:\"url\"`" + `
+	Headers map[string]string ` + "`json:\"headers\"`" + `
+}
+
+func mcpTransport(args []string) (map[string]mcpServerConfig, error) {
 	path := ""
 	for i, arg := range args {
 		if arg == "--mcp-config" && i+1 < len(args) {
@@ -634,27 +693,47 @@ func mcpTransport(args []string) (string, string, error) {
 		}
 	}
 	if path == "" {
-		return "", "", fmt.Errorf("argv carries no --mcp-config operand")
+		return nil, fmt.Errorf("argv carries no --mcp-config operand")
 	}
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return "", "", err
+		return nil, err
 	}
 	var document struct {
-		MCPServers map[string]struct {
-			Type    string            ` + "`json:\"type\"`" + `
-			URL     string            ` + "`json:\"url\"`" + `
-			Headers map[string]string ` + "`json:\"headers\"`" + `
-		} ` + "`json:\"mcpServers\"`" + `
+		MCPServers map[string]mcpServerConfig ` + "`json:\"mcpServers\"`" + `
 	}
 	if err := json.Unmarshal(data, &document); err != nil {
-		return "", "", err
+		return nil, err
 	}
-	server, ok := document.MCPServers["verdi-context"]
-	if !ok || len(document.MCPServers) != 1 {
-		return "", "", fmt.Errorf("scoped MCP config does not declare exactly verdi-context: %s", data)
+	if len(document.MCPServers) != 2 {
+		return nil, fmt.Errorf("scoped MCP config does not declare exactly two servers: %s", data)
 	}
-	return server.URL, server.Headers["Authorization"], nil
+	for _, name := range []string{"vatc", "verdi-context"} {
+		server, ok := document.MCPServers[name]
+		if !ok || server.Type != "http" || server.URL == "" || server.Headers["Authorization"] == "" {
+			return nil, fmt.Errorf("scoped MCP config does not declare required server %q: %s", name, data)
+		}
+	}
+	if document.MCPServers["vatc"].Headers["Authorization"] == document.MCPServers["verdi-context"].Headers["Authorization"] {
+		return nil, fmt.Errorf("scoped MCP config reused one capability across both servers: %s", data)
+	}
+	return document.MCPServers, nil
+}
+
+func postStatus(url, authorization, body string) (int, error) {
+	request, err := http.NewRequest(http.MethodPost, url, strings.NewReader(body))
+	if err != nil {
+		return 0, err
+	}
+	request.Header.Set("Authorization", authorization)
+	request.Header.Set("Content-Type", "application/json")
+	response, err := http.DefaultClient.Do(request)
+	if err != nil {
+		return 0, err
+	}
+	defer response.Body.Close()
+	_, _ = io.ReadAll(response.Body)
+	return response.StatusCode, nil
 }
 
 func post(url, authorization, body string) ([]byte, error) {
@@ -890,6 +969,7 @@ type claudeLifecycleObservation struct {
 	stdinPath string
 	mcpConfig string
 	outPath   string
+	claim     *fakeClaimMCP
 }
 
 // runClaudeSealedLifecycle drives the built candidate binary through one real
@@ -963,6 +1043,12 @@ func runClaudeSealedLifecycle(t *testing.T, bin string, options claudeLifecycleO
 		}
 		fake.epoch = sealedexec.Verification{State: contextcompile.ResolutionProven, Witnesses: []string{}}
 	}
+	// Amendment 003: vatc is ATC-owned, so the harness — not Verdi — hosts it.
+	// Its capability is derived independently from the same canonical request
+	// bytes, which is exactly how the real ATC parent authenticates the caller.
+	claimServer := startFakeClaimMCP(t, fixture.requestBytes)
+	fake.claimMCPURL = claimServer.url
+
 	fake.expansionRoot = options.expansionRoot
 	if options.resume {
 		// The durable state the prepared continuity asserts: the completed prior
@@ -1013,7 +1099,7 @@ func runClaudeSealedLifecycle(t *testing.T, bin string, options claudeLifecycleO
 		t.Fatalf("claude lifecycle controller: %v; observation=%#v", err, observation)
 	}
 	return claudeLifecycleObservation{
-		fixture: fixture, fake: fake, obs: observation,
+		fixture: fixture, fake: fake, obs: observation, claim: claimServer,
 		argv:      readClaudeFixtureLines(argvPath),
 		env:       readClaudeFixtureLines(envPath),
 		tools:     readClaudeFixtureLines(toolsPath),
@@ -1022,6 +1108,97 @@ func runClaudeSealedLifecycle(t *testing.T, bin string, options claudeLifecycleO
 		mcpConfig: filepath.Join(envRoot, "claude-mcp.json"),
 		outPath:   outPath,
 	}
+}
+
+// fakeClaimMCP is the ATC-owned vatc server. It derives the invocation-scoped
+// capability from the same canonical request bytes Verdi uses, so a token minted
+// for a different request — or the Verdi context token — is refused.
+type fakeClaimMCP struct {
+	url    string
+	server *http.Server
+
+	mu        sync.Mutex
+	accepted  []string
+	rejected  int
+	initCount int
+}
+
+func (f *fakeClaimMCP) observed() ([]string, int, int) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.accepted...), f.rejected, f.initCount
+}
+
+func startFakeClaimMCP(t *testing.T, requestBytes []byte) *fakeClaimMCP {
+	t.Helper()
+	requestDigest, err := sealedexec.CanonicalRequestDigest(requestBytes)
+	if err != nil {
+		t.Fatalf("canonical request digest: %v", err)
+	}
+	capability, err := sealedexec.ClaimMCPCapability(requestDigest)
+	if err != nil {
+		t.Fatalf("claim capability: %v", err)
+	}
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen claim MCP: %v", err)
+	}
+	claim := &fakeClaimMCP{url: "http://" + listener.Addr().String() + "/mcp"}
+	authorization := "Bearer " + capability
+	claim.server = &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/mcp" {
+			http.NotFound(w, r)
+			return
+		}
+		if r.Header.Get("Authorization") != authorization {
+			claim.mu.Lock()
+			claim.rejected++
+			claim.mu.Unlock()
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		var frame struct {
+			ID     any    `json:"id"`
+			Method string `json:"method"`
+			Params struct {
+				Name string `json:"name"`
+			} `json:"params"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&frame); err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		claim.mu.Lock()
+		switch frame.Method {
+		case "initialize":
+			claim.initCount++
+		case "tools/call":
+			claim.accepted = append(claim.accepted, frame.Params.Name)
+		}
+		claim.mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		switch frame.Method {
+		case "initialize":
+			fmt.Fprintf(w, `{"jsonrpc":"2.0","id":%v,"result":{"protocolVersion":"2024-11-05","serverInfo":{"name":"vatc","version":"1"}}}`, frame.ID)
+		case "tools/list":
+			fmt.Fprintf(w, `{"jsonrpc":"2.0","id":%v,"result":{"tools":[{"name":"claim_paths"}]}}`, frame.ID)
+		case "tools/call":
+			if frame.Params.Name != "claim_paths" {
+				fmt.Fprintf(w, `{"jsonrpc":"2.0","id":%v,"error":{"code":-32601,"message":"unknown tool"}}`, frame.ID)
+				return
+			}
+			fmt.Fprintf(w, `{"jsonrpc":"2.0","id":%v,"result":{"content":[{"type":"text","text":"{\"kind\":\"claim-recorded\"}"}]}}`, frame.ID)
+		default:
+			fmt.Fprintf(w, `{"jsonrpc":"2.0","id":%v,"error":{"code":-32601,"message":"unknown method"}}`, frame.ID)
+		}
+	})}
+	go func() { _ = claim.server.Serve(listener) }()
+	t.Cleanup(func() {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		_ = claim.server.Shutdown(shutdownCtx)
+	})
+	return claim
 }
 
 // claudeResumeCheckpoint is the durable state the prepared continuity asserts.
@@ -1128,6 +1305,18 @@ func TestClaudeBuiltBinaryLifecycle_Behavioral(t *testing.T) {
 		assertClaudeChildRevisionBinding(t, run)
 	})
 
+	// Amendment 003: every sealed session resolves exactly one ATC-owned claim
+	// registration over FD 3 and hands the provider exactly two required
+	// registrations, neither of which leaks its capability or bearer.
+	t.Run("amendment_003_resolves_and_projects_both_required_registrations", func(t *testing.T) {
+		run := runClaudeSealedLifecycle(t, bin, claudeLifecycleOptions{approvedContext: true})
+		assertClaudeSuccessfulLifecycle(t, run)
+		if got := countControllerOperation(run.fake.calls, sealedexec.ControllerOperation("resolve-claim-mcp")); got != 1 {
+			t.Fatalf("resolve-claim-mcp calls = %d, want exactly one", got)
+		}
+		assertClaudeDualRegistrationWitness(t, run)
+	})
+
 	// Amendment 002 §9 requires real built sealed-resume evidence, so this row
 	// drives the resume arm itself: --out is only an orthogonal choice of public
 	// output channel and never the thing that distinguishes resume from start.
@@ -1194,8 +1383,8 @@ func TestClaudeBuiltBinaryLifecycle_Behavioral(t *testing.T) {
 	// operational with no completion or receipt.
 	t.Run("undeclared_scoped_tool_ends_the_run_operationally", func(t *testing.T) {
 		run := runClaudeSealedLifecycle(t, bin, claudeLifecycleOptions{extraTool: "not_a_scoped_tool"})
-		if len(run.tools) != 4 || !strings.Contains(run.tools[3], "unknown scoped tool") {
-			t.Fatalf("undeclared scoped observations = %#v", run.tools)
+		if len(run.tools) != 9 || !strings.Contains(run.tools[8], "unknown scoped tool") {
+			t.Fatalf("undeclared scoped observations = %#v; observation=%#v", run.tools, run.obs)
 		}
 		if run.obs.exitCode != 2 || run.obs.stdout != "" {
 			t.Fatalf("undeclared scoped tool run = %#v, want the operational terminal", run.obs)
@@ -1291,16 +1480,21 @@ func assertClaudeAssemblySurface(t *testing.T, run claudeLifecycleObservation) {
 		}
 	}
 
-	// The provider exercised both declared scoped tools over the parent-hosted
-	// loopback HTTP MCP surface named by its own configuration operand.
-	if len(run.tools) < 3 || run.tools[0] != "tools/list get_flight_plan,request_context" {
+	// Amendment 003: both required registrations complete their initialize
+	// handshake first, the ATC-owned claim tool answers on its own server, each
+	// server refuses the other's capability, and only then does the provider do
+	// useful work against the Verdi-owned catalogue.
+	wantPrefix := []string{"initialize vatc", "initialize verdi-context"}
+	if len(run.tools) < 6 || !reflect.DeepEqual(run.tools[:2], wantPrefix) ||
+		!strings.HasPrefix(run.tools[2], "claim_paths ") || run.tools[3] != "cross_token 401" ||
+		run.tools[4] != "reverse_cross_token 401" || run.tools[5] != "tools/list get_flight_plan,request_context" {
 		t.Fatalf("provider scoped MCP observations = %#v", run.tools)
 	}
-	if !strings.HasPrefix(run.tools[1], "get_flight_plan ") || !strings.Contains(run.tools[1], run.fixture.request.ManifestDigest) {
-		t.Fatalf("get_flight_plan observation = %q", run.tools[1])
+	if !strings.HasPrefix(run.tools[6], "get_flight_plan ") || !strings.Contains(run.tools[6], run.fixture.request.ManifestDigest) {
+		t.Fatalf("get_flight_plan observation = %q", run.tools[6])
 	}
-	if !strings.HasPrefix(run.tools[2], "request_context ") {
-		t.Fatalf("request_context observation = %q", run.tools[2])
+	if !strings.HasPrefix(run.tools[7], "request_context ") {
+		t.Fatalf("request_context observation = %q", run.tools[7])
 	}
 
 	// Exactly one typed stdin line: the Amendment 002 §4 user envelope carrying
@@ -1355,6 +1549,66 @@ func assertClaudeAssemblySurface(t *testing.T, run claudeLifecycleObservation) {
 // `--resume S` operand, the controller verified that one provider session both
 // before launch and on the live re-check, and Amendment 002 §7's acknowledged
 // prefix is `resume` followed by `adapter-start` continuing the checkpoint.
+// assertClaudeDualRegistrationWitness proves the provider completed exactly one
+// required initialize handshake against each of the two registrations before any
+// useful work, and that no authorization value reached durable or public
+// evidence.
+func assertClaudeDualRegistrationWitness(t *testing.T, run claudeLifecycleObservation) {
+	t.Helper()
+	firstUseful := -1
+	handshakes := map[string]int{}
+	for i, row := range run.tools {
+		name, isHandshake := strings.CutPrefix(row, "initialize ")
+		if !isHandshake {
+			if firstUseful < 0 {
+				firstUseful = i
+			}
+			continue
+		}
+		if _, duplicate := handshakes[name]; duplicate {
+			t.Fatalf("provider repeated the initialize handshake for %q: %v", name, run.tools)
+		}
+		handshakes[name] = i
+	}
+	if len(handshakes) != 2 {
+		t.Fatalf("provider completed %d initialize handshakes, want exactly two: %v", len(handshakes), run.tools)
+	}
+	for _, name := range []string{"vatc", "verdi-context"} {
+		index, ok := handshakes[name]
+		if !ok {
+			t.Fatalf("provider never completed a required initialize handshake for %q: %v", name, run.tools)
+		}
+		if firstUseful >= 0 && index > firstUseful {
+			t.Fatalf("initialize for %q followed useful work at row %d: %v", name, firstUseful, run.tools)
+		}
+	}
+	// The ATC-owned parent service independently observed exactly one successful
+	// initialize handshake and one claim call on its own capability, and refused
+	// the Verdi context capability presented to it.
+	accepted, rejected, inits := run.claim.observed()
+	if inits != 1 {
+		t.Fatalf("claim server observed %d initialize handshakes, want exactly one", inits)
+	}
+	if !reflect.DeepEqual(accepted, []string{"claim_paths"}) {
+		t.Fatalf("claim server tool calls = %v, want exactly [claim_paths]", accepted)
+	}
+	if rejected != 1 {
+		t.Fatalf("claim server rejected %d cross-capability requests, want exactly one", rejected)
+	}
+	for _, event := range run.fake.events {
+		encoded, err := contextevent.EncodeEvent(event)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if bytes.Contains(encoded, []byte("Bearer ")) {
+			t.Fatalf("acknowledged event carried an authorization value: %s", encoded)
+		}
+	}
+	if strings.Contains(run.obs.stdout, "Bearer ") || strings.Contains(run.obs.stderr, "Bearer ") {
+		t.Fatalf("public output carried an authorization value: %#v", run.obs)
+	}
+}
+
 func assertClaudeResumeWitness(t *testing.T, run claudeLifecycleObservation) {
 	t.Helper()
 	request := run.fixture.request

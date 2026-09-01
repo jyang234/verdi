@@ -41,6 +41,7 @@ const (
 	ControllerOperationPersistHandback                     ControllerOperation = "persist-handback"
 	ControllerOperationPersistQuarantine                   ControllerOperation = "persist-quarantine"
 	ControllerOperationPersistAbort                        ControllerOperation = "persist-abort"
+	ControllerOperationResolveClaimMCP                     ControllerOperation = "resolve-claim-mcp"
 )
 
 var controllerOperations = []ControllerOperation{
@@ -66,6 +67,7 @@ var controllerOperations = []ControllerOperation{
 	ControllerOperationPersistHandback,
 	ControllerOperationPersistQuarantine,
 	ControllerOperationPersistAbort,
+	ControllerOperationResolveClaimMCP,
 }
 
 // ControllerOperations returns the exact closed FD-3 operation registry.
@@ -351,6 +353,32 @@ type ControllerPersistAbortResult struct {
 	Ack    ControlAck
 }
 
+// ClaimMCPQuery binds one claim-registration lookup to this invocation's exact
+// canonical request digest. It carries no credential and no provider state.
+type ClaimMCPQuery struct {
+	RequestDigest string
+}
+
+// ClaimMCPRegistration is the controller-owned ATC registration row. It carries
+// no bearer, credential, provider state, plan content, claim decision, or any
+// identity beyond the request digest it cross-matches.
+type ClaimMCPRegistration struct {
+	Name          string
+	Type          string
+	URL           string
+	Tools         []string
+	RequestDigest string
+}
+
+type ControllerResolveClaimMCPRequest struct {
+	Schema string
+	Query  ClaimMCPQuery
+}
+type ControllerResolveClaimMCPResult struct {
+	Schema       string
+	Registration ClaimMCPRegistration
+}
+
 // ControllerCall is a closed typed request union. Operation selects exactly
 // one operation-specific value; the wire codec emits only that payload.
 type ControllerCall struct {
@@ -380,6 +408,7 @@ type ControllerCall struct {
 	PersistHandback                     ControllerPersistHandbackRequest
 	PersistQuarantine                   ControllerPersistQuarantineRequest
 	PersistAbort                        ControllerPersistAbortRequest
+	ResolveClaimMCP                     ControllerResolveClaimMCPRequest
 }
 
 // ControllerResult is a closed typed result/error union. A valid reply has
@@ -412,4 +441,5 @@ type ControllerResult struct {
 	PersistHandback                     ControllerPersistHandbackResult
 	PersistQuarantine                   ControllerPersistQuarantineResult
 	PersistAbort                        ControllerPersistAbortResult
+	ResolveClaimMCP                     ControllerResolveClaimMCPResult
 }

@@ -29,6 +29,25 @@ import (
 // ---------------------------------------------------------------------------
 
 func TestClaudeAdapterParityContract_Static(t *testing.T) {
+	t.Run("amendment 003 writes both required rows into the scoped configuration", func(t *testing.T) {
+		envRoot := t.TempDir()
+		listener := listenScopedMCP(t)
+		config, _, closeMCP, err := StartScopedMCP(context.Background(), listener, envRoot, testCanonicalRequest, testProfileDigest, testWorkspaceID, claudeTestClaimMCP(), &scopedHTTPTestHandler{})
+		if err != nil {
+			t.Fatalf("StartScopedMCP: %v", err)
+		}
+		registerScopedMCPCleanup(t, closeMCP)
+		configBytes, err := os.ReadFile(config.Path)
+		if err != nil {
+			t.Fatalf("read scoped MCP config: %v", err)
+		}
+		for _, want := range []string{`"vatc":{`, `"verdi-context":{`} {
+			if !strings.Contains(string(configBytes), want) {
+				t.Fatalf("scoped MCP config %s lacks required row %s", configBytes, want)
+			}
+		}
+	})
+
 	t.Run("decoder_profile_literal", func(t *testing.T) {
 		if DecoderProfileV1 != "claude-stream-json-v1" {
 			t.Fatalf("DecoderProfileV1 = %q, want %q", DecoderProfileV1, "claude-stream-json-v1")
@@ -318,6 +337,31 @@ func TestClaudeAdapterParityContract_Static(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestClaudeAdapterParityContract_Behavioral(t *testing.T) {
+	t.Run("amendment 003 admits exactly the two connected required rows in either order", func(t *testing.T) {
+		row := func(name, status string) claudeMCPRow {
+			return claudeMCPRow{Name: &name, Status: &status}
+		}
+		vatc := row("vatc", "connected")
+		verdi := row("verdi-context", "connected")
+		for _, accepted := range [][]claudeMCPRow{{vatc, verdi}, {verdi, vatc}} {
+			if reason := validateInitMCPServers(accepted); reason != "" {
+				t.Fatalf("dual connected inventory %v refused as %q", accepted, reason)
+			}
+		}
+		for name, rejected := range map[string][]claudeMCPRow{
+			"missing claim":   {verdi},
+			"missing context": {vatc},
+			"duplicate":       {vatc, vatc},
+			"extra":           {vatc, verdi, row("third", "connected")},
+			"disconnected":    {vatc, row("verdi-context", "disconnected")},
+			"renamed":         {vatc, row("verdi_context", "connected")},
+		} {
+			if reason := validateInitMCPServers(rejected); reason != "mcp-mismatch" {
+				t.Fatalf("%s inventory reason = %q, want mcp-mismatch", name, reason)
+			}
+		}
+	})
+
 	t.Run("start_fixture_observation_kinds", func(t *testing.T) {
 		launch, envRoot := claudeTestLaunch(t, sealedexec.ActionStart)
 		pp := &testProbeProcess{version: launch.Request.AdapterVersion, output: mustClaudeFixture(t, "claude-start.jsonl", launch.Workspace.Path)}
@@ -525,7 +569,7 @@ func TestClaudeAdapterParityContract_Behavioral(t *testing.T) {
 	t.Run("mutation_outer_tag_fails_init_row", func(t *testing.T) {
 		// Mutate "system" outer type to "future" — init start row must not succeed
 		launch, envRoot := claudeTestLaunch(t, sealedexec.ActionStart)
-		mutatedInit := []byte(`{"type":"future","subtype":"init","session_id":"s1","model":"claude-opus-5-test","mcp_servers":[{"name":"verdi-context","status":"connected"}],"cwd":"/workspace","tools":[],"permissionMode":"bypassPermissions","apiKeySource":"ANTHROPIC_API_KEY","claude_code_version":"1.2.3","slash_commands":[],"output_style":"default","agents":[],"skills":[],"plugins":[],"uuid":"u1"}` + "\n")
+		mutatedInit := []byte(`{"type":"future","subtype":"init","session_id":"s1","model":"claude-opus-5-test","mcp_servers":[{"name":"vatc","status":"connected"},{"name":"verdi-context","status":"connected"}],"cwd":"/workspace","tools":[],"permissionMode":"bypassPermissions","apiKeySource":"ANTHROPIC_API_KEY","claude_code_version":"1.2.3","slash_commands":[],"output_style":"default","agents":[],"skills":[],"plugins":[],"uuid":"u1"}` + "\n")
 		pp := &testProbeProcess{version: launch.Request.AdapterVersion, output: mutatedInit}
 		dp := newTestProcessor(t)
 		adapter, err := newClaudeTestAdapter(t, pp, dp, envRoot)
@@ -1609,12 +1653,25 @@ func claudeTestModuleRoot(t *testing.T) string {
 // mustClaudeFixture loads a committed fixture and binds its deterministic
 // "/workspace" cwd placeholder to the launch's real execution workspace, which
 // Amendment 002 §5 requires init to observe exactly.
+//
+// The three committed captures predate Amendment 003 and still record the
+// single verdi-context init row, so the loader also binds the recorded
+// inventory to Amendment 003's required dual inventory. Refreshing the captures
+// themselves would touch internal/sealedexec/claude/testdata/*.jsonl, which is
+// outside this task's authorized write scope; the substitution is exact and
+// reversible, and it fails loudly if the recorded row ever changes shape.
 func mustClaudeFixture(t *testing.T, name, workspace string) []byte {
 	t.Helper()
 	data, err := os.ReadFile(filepath.Join("testdata", name))
 	if err != nil {
 		t.Fatalf("read fixture: %v", err)
 	}
+	recorded := []byte(`"mcp_servers":[{"name":"verdi-context","status":"connected"}]`)
+	required := []byte(`"mcp_servers":[{"name":"vatc","status":"connected"},{"name":"verdi-context","status":"connected"}]`)
+	if !bytes.Contains(data, recorded) {
+		t.Fatalf("fixture %s no longer records the Amendment 002 init inventory this loader upgrades", name)
+	}
+	data = bytes.ReplaceAll(data, recorded, required)
 	return bytes.ReplaceAll(data, []byte(`"cwd":"/workspace"`), []byte(`"cwd":"`+workspace+`"`))
 }
 
@@ -1729,10 +1786,23 @@ func claudeTestLaunchEnv(t *testing.T, action sealedexec.Action, mutate func(map
 // adapter receives; the adapter never derives it from HOME.
 func claudeTestMCPConfig(envRoot string) MCPConfig {
 	return MCPConfig{
-		Path:          filepath.Join(envRoot, claudeMCPConfigName),
-		URL:           "http://127.0.0.1:54321/mcp",
-		Authorization: "Bearer sha256:" + strings.Repeat("a", 64),
+		Path:    filepath.Join(envRoot, claudeMCPConfigName),
+		Servers: claudeTestMCPServers(),
 	}
+}
+
+// claudeTestMCPServers is Amendment 003's exact pair of required registrations
+// with fixed ports and capabilities, so configuration bytes are comparable.
+func claudeTestMCPServers() sealedexec.RequiredMCPSet {
+	return sealedexec.RequiredMCPSet{
+		Claim:   claudeTestClaimMCP(),
+		Context: sealedexec.RequiredMCP{Name: "verdi-context", URL: "http://127.0.0.1:54321/mcp", Authorization: "Bearer sha256:" + strings.Repeat("a", 64), Tools: []string{"get_flight_plan", "request_context"}},
+	}
+}
+
+// claudeTestClaimMCP is the ATC-owned registration the controller resolves.
+func claudeTestClaimMCP() sealedexec.RequiredMCP {
+	return sealedexec.RequiredMCP{Name: "vatc", URL: "http://127.0.0.1:54322/mcp", Authorization: "Bearer sha256:" + strings.Repeat("b", 64), Tools: []string{"claim_paths"}}
 }
 
 func newClaudeTestAdapter(t *testing.T, process Process, processor *sealedexec.DetailProcessor, envRoot string) (*Adapter, error) {
@@ -2004,9 +2074,8 @@ func TestClaudeAdapterProfileAndCommandAuthority(t *testing.T) {
 		// The supplied configuration deliberately lives outside the profile
 		// HOME parent so a HOME-derived path cannot reproduce it.
 		supplied := MCPConfig{
-			Path:          filepath.Join(t.TempDir(), claudeMCPConfigName),
-			URL:           "http://127.0.0.1:54321/mcp",
-			Authorization: "Bearer sha256:" + strings.Repeat("b", 64),
+			Path:    filepath.Join(t.TempDir(), claudeMCPConfigName),
+			Servers: claudeTestMCPServers(),
 		}
 		if supplied.Path == filepath.Join(envRoot, claudeMCPConfigName) {
 			t.Fatal("fixture: supplied config path must differ from the env-root derivation")
@@ -2070,23 +2139,36 @@ func TestClaudeAdapterProfileAndCommandAuthority(t *testing.T) {
 		}
 	})
 
-	mcpConfigs := []struct {
-		name   string
-		config MCPConfig
-	}{
-		{"zero_value", MCPConfig{}},
-		{"relative_path", MCPConfig{Path: "claude-mcp.json", URL: "http://127.0.0.1:1/mcp", Authorization: "Bearer sha256:" + strings.Repeat("a", 64)}},
-		{"unclean_path", MCPConfig{Path: "/tmp/../tmp/claude-mcp.json", URL: "http://127.0.0.1:1/mcp", Authorization: "Bearer sha256:" + strings.Repeat("a", 64)}},
-		{"wrong_basename", MCPConfig{Path: "/tmp/mcp.json", URL: "http://127.0.0.1:1/mcp", Authorization: "Bearer sha256:" + strings.Repeat("a", 64)}},
-		{"missing_url", MCPConfig{Path: "/tmp/claude-mcp.json", Authorization: "Bearer sha256:" + strings.Repeat("a", 64)}},
-		{"missing_authorization", MCPConfig{Path: "/tmp/claude-mcp.json", URL: "http://127.0.0.1:1/mcp"}},
-		{"unscoped_authorization", MCPConfig{Path: "/tmp/claude-mcp.json", URL: "http://127.0.0.1:1/mcp", Authorization: "Bearer opaque-token"}},
-		{"short_capability_digest", MCPConfig{Path: "/tmp/claude-mcp.json", URL: "http://127.0.0.1:1/mcp", Authorization: "Bearer sha256:" + strings.Repeat("a", 63)}},
+	// Amendment 003: the supplied configuration must be the exact scoped file
+	// path plus exactly two separately owned registrations. Every path defect
+	// and every per-server defect fails closed at construction.
+	mcpConfigs := map[string]func(*MCPConfig){
+		"zero_value":              func(c *MCPConfig) { *c = MCPConfig{} },
+		"relative_path":           func(c *MCPConfig) { c.Path = "claude-mcp.json" },
+		"unclean_path":            func(c *MCPConfig) { c.Path = "/tmp/../tmp/claude-mcp.json" },
+		"wrong_basename":          func(c *MCPConfig) { c.Path = "/tmp/mcp.json" },
+		"missing_context_url":     func(c *MCPConfig) { c.Servers.Context.URL = "" },
+		"missing_claim_url":       func(c *MCPConfig) { c.Servers.Claim.URL = "" },
+		"missing_authorization":   func(c *MCPConfig) { c.Servers.Context.Authorization = "" },
+		"unscoped_authorization":  func(c *MCPConfig) { c.Servers.Claim.Authorization = "Bearer opaque-token" },
+		"short_capability_digest": func(c *MCPConfig) { c.Servers.Context.Authorization = "Bearer sha256:" + strings.Repeat("a", 63) },
+		"missing_claim_row":       func(c *MCPConfig) { c.Servers.Claim = sealedexec.RequiredMCP{} },
+		"missing_context_row":     func(c *MCPConfig) { c.Servers.Context = sealedexec.RequiredMCP{} },
+		"renamed_claim_row":       func(c *MCPConfig) { c.Servers.Claim.Name = "vatc-shadow" },
+		"renamed_context_row":     func(c *MCPConfig) { c.Servers.Context.Name = "verdi_context" },
+		"duplicated_row":          func(c *MCPConfig) { c.Servers.Claim = c.Servers.Context },
+		"shared_capability":       func(c *MCPConfig) { c.Servers.Claim.Authorization = c.Servers.Context.Authorization },
+		"shared_origin":           func(c *MCPConfig) { c.Servers.Claim.URL = c.Servers.Context.URL },
+		"overlapping_catalogues":  func(c *MCPConfig) { c.Servers.Context.Tools = []string{"get_flight_plan", "claim_paths"} },
+		"non_loopback_origin":     func(c *MCPConfig) { c.Servers.Claim.URL = "http://198.51.100.7:1/mcp" },
+		"url_fragment":            func(c *MCPConfig) { c.Servers.Context.URL = "http://127.0.0.1:1/mcp#f" },
 	}
-	for _, tc := range mcpConfigs {
-		t.Run("mcp_config_rejected_"+tc.name, func(t *testing.T) {
-			if _, err := New(&testProbeProcess{}, newTestProcessor(t), tc.config); err == nil {
-				t.Fatalf("New with %s MCP config = nil, want refusal", tc.name)
+	for name, mutate := range mcpConfigs {
+		t.Run("mcp_config_rejected_"+name, func(t *testing.T) {
+			config := claudeTestMCPConfig(t.TempDir())
+			mutate(&config)
+			if _, err := New(&testProbeProcess{}, newTestProcessor(t), config); err == nil {
+				t.Fatalf("New with %s MCP config = nil, want refusal", name)
 			}
 		})
 	}
@@ -2188,7 +2270,7 @@ func TestClaudeAdapterProfileAndCommandAuthority(t *testing.T) {
 // written as an independent literal rather than produced by the decoder.
 func claudeInitLine(session, cwd string) string {
 	return `{"type":"system","subtype":"init","session_id":"` + session +
-		`","model":"claude-opus-5-test","mcp_servers":[{"name":"verdi-context","status":"connected"}],"cwd":"` + cwd +
+		`","model":"claude-opus-5-test","mcp_servers":[{"name":"vatc","status":"connected"},{"name":"verdi-context","status":"connected"}],"cwd":"` + cwd +
 		`","tools":["Task"],"permissionMode":"bypassPermissions","apiKeySource":"ANTHROPIC_API_KEY","claude_code_version":"1.2.3","slash_commands":[],"output_style":"default","agents":[],"skills":[],"plugins":[],"uuid":"u-init"}`
 }
 
@@ -2350,8 +2432,10 @@ const claudeThinkingOmissionDigest = "sha256:0ddb70430062cc063da194de71119fc4833
 
 // claudeInitSummaryDetail is §5's exact init detail source I for the committed
 // start fixture, with the observed provider session already redacted by §6.
-const claudeInitSummaryDetail = `{"family":"system/init","mcp_servers":[{"name":"verdi-context","status":"connected"}],"model":"claude-opus-5-test","permission_mode":"bypassPermissions","session_id":"[REDACTED]"}`
-const claudeInitSummaryDigest = "sha256:7b41e049b61e2f8745d1845f2a0e383aecb94dbb931f60c2a59b496e9a0c5a44"
+const claudeInitSummaryDetail = `{"family":"system/init","mcp_servers":[{"name":"vatc","status":"connected"},{"name":"verdi-context","status":"connected"}],"model":"claude-opus-5-test","permission_mode":"bypassPermissions","session_id":"[REDACTED]"}`
+
+// Amendment 003 ratchet: the digest of the exact two-row init projection above.
+const claudeInitSummaryDigest = "sha256:46dcd234620ebd3679a7c82a9a2de8e58f7e73aa542f2814e941d5473a9cb195"
 
 // claudeMalformedFrameRawDigest is SHA-256 over the exact discarded frame
 // `{not-json SENTINEL-FOREIGN-BYTES}`.
