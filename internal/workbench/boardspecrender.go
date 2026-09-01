@@ -238,8 +238,19 @@ func renderBoardRegion(p *BoardProjection, git *boardGitState, asd *asdView) str
 	// (renderBoardRegion feeds both page and fragment) so the board never
 	// renders as if a skipped input were simply absent (constitution 2/10).
 	hasCaseFile := p.Problem != "" || p.Outcome != ""
-	if len(p.Notices) > 0 || (!hasCaseFile && len(p.CaseFileDisclosures) > 0) {
+	if p.DomainRefusal != "" || len(p.Notices) > 0 || (!hasCaseFile && len(p.CaseFileDisclosures) > 0) {
 		b.WriteString(`<div class="board-notices">`)
+		// The domain-refusal explanation (review fix I-1): why this live
+		// scratch wall offers no spec edits, named FIRST — before any
+		// gesture is attempted — with the kernel's own branch
+		// precondition, verbatim. It rides INSIDE the .board-notices
+		// wrapper deliberately: #boardv2-region is a placed grid
+		// (style.css), and a new unplaced direct child would derail the
+		// dense auto-placement and strand the canvas below the fold
+		// (owner-witnessed 38-board-size-smell drag regression).
+		if p.DomainRefusal != "" {
+			b.WriteString(`<div class="board-notice asd-domain-refusal" data-testid="asd-domain-refusal" role="status">` + esc(p.DomainRefusal) + `</div>`)
+		}
 		for _, n := range p.Notices {
 			b.WriteString(`<div class="board-notice" data-testid="board-notice" role="status">` + esc(n) + `</div>`)
 		}
@@ -253,13 +264,6 @@ func renderBoardRegion(p *BoardProjection, git *boardGitState, asd *asdView) str
 			writeCaseDisclosures(&b, p)
 		}
 		b.WriteString(`</div>`)
-	}
-
-	// The domain-refusal explanation (review fix I-1): why this live
-	// scratch wall offers no spec edits, named BEFORE any gesture is
-	// attempted — the kernel's own branch precondition, verbatim.
-	if p.DomainRefusal != "" {
-		b.WriteString(`<div class="board-notice asd-domain-refusal" data-testid="asd-domain-refusal" role="status">` + esc(p.DomainRefusal) + `</div>`)
 	}
 
 	writeASDPosture(&b, p, git, asd)

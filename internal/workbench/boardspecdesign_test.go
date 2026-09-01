@@ -112,6 +112,17 @@ func TestBoardSpec_WrongBranchDraft_RefusesDomainSurface(t *testing.T) {
 	if !strings.Contains(html, `data-testid="asd-domain-refusal"`) {
 		t.Error("the wrong-branch wall renders no domain-refusal explanation")
 	}
+	// Regression guard (owner-witnessed: 38-board-size-smell's drag died
+	// at y≈1453): #boardv2-region is a two-column GRID whose direct
+	// children carry explicit placements (.board-notices/.asd-posture
+	// span, .asd-shell col 2, .asd-main col 1 — style.css). The refusal
+	// banner must live INSIDE the .board-notices wrapper, never as a new
+	// unplaced grid child — an unplaced item derails the dense
+	// auto-placement and strands the canvas below the fold, killing every
+	// raw-coordinate drag on the wall.
+	if !strings.Contains(html, `<div class="board-notices"><div class="board-notice asd-domain-refusal"`) {
+		t.Error("the domain-refusal banner is not the leading child of the .board-notices wrapper (an unplaced #boardv2-region grid child breaks the canvas-beside-shell layout)")
+	}
 	if strings.Contains(html, `id="asd-forms"`) {
 		t.Error("the wrong-branch wall still renders the typed-operation forms panel")
 	}
