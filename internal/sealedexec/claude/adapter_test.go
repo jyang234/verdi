@@ -48,6 +48,49 @@ func TestClaudeAdapterParityContract_Static(t *testing.T) {
 		}
 	})
 
+	t.Run("claude_fixtures_record_the_committed_dual_inventory", func(t *testing.T) {
+		// Amendment 003 fixes the accepted init inventory as a *provider*
+		// observation, so the committed captures must record it themselves. The
+		// loader is proven to add nothing but the deterministic workspace binding:
+		// reversing that binding reproduces the committed bytes exactly. No
+		// fixture-driven assertion can therefore be satisfied by a synthesized
+		// inventory, and a capture that regressed to one row would fail here.
+		type mcpRow struct {
+			Name   string `json:"name"`
+			Status string `json:"status"`
+		}
+		want := []mcpRow{{Name: "vatc", Status: "connected"}, {Name: "verdi-context", Status: "connected"}}
+		workspace := t.TempDir()
+		for _, name := range claudeFixtureNames() {
+			t.Run(name, func(t *testing.T) {
+				onDisk, err := os.ReadFile(filepath.Join("testdata", name))
+				if err != nil {
+					t.Fatalf("read committed capture: %v", err)
+				}
+				if !bytes.Contains(onDisk, []byte(claudeFixtureInventory)) {
+					t.Fatalf("committed capture %s does not record %s", name, claudeFixtureInventory)
+				}
+				var recorded struct {
+					MCPServers []mcpRow `json:"mcp_servers"`
+				}
+				if err := json.Unmarshal(bytes.SplitN(onDisk, []byte{'\n'}, 2)[0], &recorded); err != nil {
+					t.Fatalf("decode committed init row: %v", err)
+				}
+				if !reflect.DeepEqual(recorded.MCPServers, want) {
+					t.Fatalf("committed init inventory = %v, want %v", recorded.MCPServers, want)
+				}
+				loaded := mustClaudeFixture(t, name, workspace)
+				if bytes.Contains(loaded, []byte(`"cwd":"/workspace"`)) || !bytes.Contains(loaded, []byte(`"cwd":"`+workspace+`"`)) {
+					t.Fatalf("loader left the workspace placeholder unbound in %s", name)
+				}
+				restored := bytes.ReplaceAll(loaded, []byte(`"cwd":"`+workspace+`"`), []byte(`"cwd":"/workspace"`))
+				if !bytes.Equal(restored, onDisk) {
+					t.Fatalf("loader synthesized bytes beyond the workspace binding in %s:\n%s\nwant\n%s", name, restored, onDisk)
+				}
+			})
+		}
+	})
+
 	t.Run("decoder_profile_literal", func(t *testing.T) {
 		if DecoderProfileV1 != "claude-stream-json-v1" {
 			t.Fatalf("DecoderProfileV1 = %q, want %q", DecoderProfileV1, "claude-stream-json-v1")
@@ -1652,27 +1695,28 @@ func claudeTestModuleRoot(t *testing.T) string {
 
 // mustClaudeFixture loads a committed fixture and binds its deterministic
 // "/workspace" cwd placeholder to the launch's real execution workspace, which
-// Amendment 002 §5 requires init to observe exactly.
-//
-// The three committed captures predate Amendment 003 and still record the
-// single verdi-context init row, so the loader also binds the recorded
-// inventory to Amendment 003's required dual inventory. Refreshing the captures
-// themselves would touch internal/sealedexec/claude/testdata/*.jsonl, which is
-// outside this task's authorized write scope; the substitution is exact and
-// reversible, and it fails loudly if the recorded row ever changes shape.
+// Amendment 002 §5 requires init to observe exactly. The recorded init
+// inventory is never rewritten: the captures themselves record Amendment 003's
+// dual inventory, so every fixture-driven assertion runs against the exact
+// committed provider bytes. `claude_fixtures_record_the_committed_dual_inventory`
+// pins both halves of that property.
 func mustClaudeFixture(t *testing.T, name, workspace string) []byte {
 	t.Helper()
 	data, err := os.ReadFile(filepath.Join("testdata", name))
 	if err != nil {
 		t.Fatalf("read fixture: %v", err)
 	}
-	recorded := []byte(`"mcp_servers":[{"name":"verdi-context","status":"connected"}]`)
-	required := []byte(`"mcp_servers":[{"name":"vatc","status":"connected"},{"name":"verdi-context","status":"connected"}]`)
-	if !bytes.Contains(data, recorded) {
-		t.Fatalf("fixture %s no longer records the Amendment 002 init inventory this loader upgrades", name)
-	}
-	data = bytes.ReplaceAll(data, recorded, required)
 	return bytes.ReplaceAll(data, []byte(`"cwd":"/workspace"`), []byte(`"cwd":"`+workspace+`"`))
+}
+
+// claudeFixtureInventory is the exact accepted two-row init inventory, in the
+// canonical provider observation order the three committed captures record.
+const claudeFixtureInventory = `"mcp_servers":[{"name":"vatc","status":"connected"},{"name":"verdi-context","status":"connected"}]`
+
+// claudeFixtureNames is every committed provider capture the adapter tests
+// consume.
+func claudeFixtureNames() []string {
+	return []string{"claude-start.jsonl", "claude-resume.jsonl", "claude-advisory.jsonl"}
 }
 
 // claudeTestLaunch builds an AdapterLaunch for the claude adapter in tests.

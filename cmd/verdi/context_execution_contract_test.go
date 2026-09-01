@@ -970,7 +970,8 @@ func runSuccessfulSealedStart(t *testing.T, bin string, outputFile, outputFailur
 	}
 	assertSealedProviderArgv(t, argvBytes,
 		[]string{"exec", "--json", "--strict-config", "--ignore-user-config", "--ignore-rules", "--profile", "compiled-fixture"},
-		[]string{"--sandbox", "workspace-write", "--cd", execworkspace.UnitPath(root, workspaceID), "-"})
+		[]string{"--sandbox", "workspace-write", "--cd", execworkspace.UnitPath(root, workspaceID), "-"},
+		sealedProviderMCPCrossMatchFor(t, requestBytes, fake.claimURL(), request.Profile.Digest, workspaceID))
 	envBytes, err := os.ReadFile(envPath)
 	if err != nil {
 		t.Fatal(err)
@@ -1208,15 +1209,53 @@ var (
 		"mcp_servers.verdi-context.supports_parallel_tool_calls": "false",
 		"mcp_servers.verdi-context.enabled_tools":                `["get_flight_plan","request_context"]`,
 	}
-	sealedProviderMCPURLValue     = regexp.MustCompile(`^"http://127\.0\.0\.1:[1-9][0-9]{0,4}/mcp"$`)
-	sealedProviderMCPHeadersValue = regexp.MustCompile(`^\{Authorization="Bearer sha256:[0-9a-f]{64}"\}$`)
+	sealedProviderMCPURLValue = regexp.MustCompile(`^"http://127\.0\.0\.1:[1-9][0-9]{0,4}/mcp"$`)
 )
+
+// sealedProviderMCPCrossMatch carries the exact per-invocation identities
+// Amendment 003 binds into the Codex argv: the origin the controller returned
+// for operation 23, and both complete authorization strings.
+type sealedProviderMCPCrossMatch struct {
+	claimURL             string
+	claimAuthorization   string
+	contextAuthorization string
+}
+
+// sealedProviderMCPCrossMatchFor derives those identities from fixture inputs
+// alone. RQ is `sha256:` plus the lowercase SHA-256 of the exact canonical
+// request bytes the test handed the built binary — the authority extract's own
+// definition — so nothing here reuses the binary's re-encoding of its decoded
+// request. A canonical-but-lossy re-encode, a swapped capability domain, or any
+// bearer the ATC and context servers would refuse therefore fails the
+// cross-match instead of passing a grammar check.
+func sealedProviderMCPCrossMatchFor(t *testing.T, requestBytes []byte, claimURL, profileDigest, workspaceID string) sealedProviderMCPCrossMatch {
+	t.Helper()
+	sum := sha256.Sum256(requestBytes)
+	requestDigest := "sha256:" + hex.EncodeToString(sum[:])
+	claimCapability, err := sealedexec.ClaimMCPCapability(requestDigest)
+	if err != nil {
+		t.Fatalf("derive claim MCP capability: %v", err)
+	}
+	contextCapability, err := sealedexec.ContextMCPCapability(requestDigest, profileDigest, workspaceID)
+	if err != nil {
+		t.Fatalf("derive context MCP capability: %v", err)
+	}
+	if claimCapability == contextCapability {
+		t.Fatal("the two capability domains collapsed onto one value")
+	}
+	return sealedProviderMCPCrossMatch{
+		claimURL:             claimURL,
+		claimAuthorization:   "Bearer " + claimCapability,
+		contextAuthorization: "Bearer " + contextCapability,
+	}
+}
 
 // assertSealedProviderArgv proves the built binary handed the provider the
 // pinned prefix, Amendment 003's exact twelve ordered `-c` pairs immediately
-// after it, and then the pinned tail. Per-invocation origins and capabilities
-// are proven by grammar and distinctness rather than by a fixed literal.
-func assertSealedProviderArgv(t *testing.T, argvBytes []byte, wantPrefix, wantTail []string) {
+// after it, and then the pinned tail. The claim origin and both authorization
+// operands are proven by exact equality against independently derived values;
+// only the context origin, whose port is allocated per run, stays a grammar.
+func assertSealedProviderArgv(t *testing.T, argvBytes []byte, wantPrefix, wantTail []string, cross sealedProviderMCPCrossMatch) {
 	t.Helper()
 	argv := strings.Split(strings.TrimSuffix(string(argvBytes), "\n"), "\n")
 	want := len(wantPrefix) + 2*len(sealedProviderMCPOperandKeys) + len(wantTail)
@@ -1246,14 +1285,19 @@ func assertSealedProviderArgv(t *testing.T, argvBytes []byte, wantPrefix, wantTa
 			t.Fatalf("operand %s = %q, want %q", key, values[key], wantValue)
 		}
 	}
-	for _, key := range []string{"mcp_servers.vatc.url", "mcp_servers.verdi-context.url"} {
-		if !sealedProviderMCPURLValue.MatchString(values[key]) {
-			t.Fatalf("operand %s = %q, want a quoted IPv4-loopback /mcp origin", key, values[key])
-		}
+	if !sealedProviderMCPURLValue.MatchString(values["mcp_servers.verdi-context.url"]) {
+		t.Fatalf("operand mcp_servers.verdi-context.url = %q, want a quoted IPv4-loopback /mcp origin", values["mcp_servers.verdi-context.url"])
 	}
-	for _, key := range []string{"mcp_servers.vatc.http_headers", "mcp_servers.verdi-context.http_headers"} {
-		if !sealedProviderMCPHeadersValue.MatchString(values[key]) {
-			t.Fatalf("operand %s = %q, want a single canonical bearer header", key, values[key])
+	// The cross-match itself: each of these three operands must equal the value
+	// this test derived from the request bytes and the controller reply, byte for
+	// byte. They are reported together so one run exposes every divergence.
+	for _, want := range []struct{ key, value string }{
+		{"mcp_servers.vatc.url", strconv.Quote(cross.claimURL)},
+		{"mcp_servers.vatc.http_headers", "{Authorization=" + strconv.Quote(cross.claimAuthorization) + "}"},
+		{"mcp_servers.verdi-context.http_headers", "{Authorization=" + strconv.Quote(cross.contextAuthorization) + "}"},
+	} {
+		if values[want.key] != want.value {
+			t.Errorf("operand %s = %q, want the independently derived %q", want.key, values[want.key], want.value)
 		}
 	}
 	// The two registrations are separately owned: neither origin nor capability
@@ -1415,7 +1459,8 @@ func runSuccessfulSealedResume(t *testing.T, bin string) {
 	argvBytes := mustReadFile(t, argvPath)
 	assertSealedProviderArgv(t, argvBytes,
 		[]string{"exec", "resume", "--json", "--strict-config", "--ignore-user-config", "--ignore-rules"},
-		[]string{sessionRef, "-"})
+		[]string{sessionRef, "-"},
+		sealedProviderMCPCrossMatchFor(t, requestBytes, fake.claimURL(), request.Profile.Digest, workspaceID))
 	if _, err := sealedexec.DecodeProviderInput(bytes.NewReader(mustReadFile(t, stdinPath))); err != nil {
 		t.Fatalf("resume provider input: %v", err)
 	}
