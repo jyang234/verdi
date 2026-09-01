@@ -29,6 +29,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync/atomic"
 
 	"github.com/jyang234/verdi/internal/artifact"
 	"github.com/jyang234/verdi/internal/boardio"
@@ -756,14 +757,28 @@ func (s *boardSpecServer) pruneLayoutKey(name string, proj *BoardProjection, key
 	return boardlayout.WriteFile(s.specDir(name), stored, live)
 }
 
+// mutationSnapshotTestHook, when non-nil, injects a post-transaction
+// state-resolution failure at the exact point writeMutationOutcome renders
+// the fresh projection — the spliceSpecTestPause-shaped seam package tests
+// use to witness the disclosure contract for a projection that fails AFTER
+// a durable mutation landed. Production never stores into it.
+var mutationSnapshotTestHook atomic.Pointer[func(name string) error]
+
 // writeMutationOutcome renders one mutation response: the caller's typed
 // fields plus one fresh projection (region HTML, revision token, base
 // digest/bytes, dirtiness) — the fresh-projection half of §4.3's clean
 // contract and adjudication 3's stale contract.
 func (s *boardSpecServer) writeMutationOutcome(w http.ResponseWriter, r *http.Request, name string, fields map[string]json.RawMessage) {
-	snap, err := s.loadSnapshot(r.Context(), name)
+	var snap *asdSnapshot
+	var err error
+	if hook := mutationSnapshotTestHook.Load(); hook != nil {
+		err = (*hook)(name)
+	}
+	if err == nil {
+		snap, err = s.loadSnapshot(r.Context(), name)
+	}
 	if err != nil {
-		writeJSONError(w, http.StatusInternalServerError, "rendering fresh projection: "+err.Error())
+		writeUnrefreshedOutcome(w, fields, fmt.Errorf("rendering fresh projection: %w", err))
 		return
 	}
 	projection := mutationProjection{
@@ -775,7 +790,7 @@ func (s *boardSpecServer) writeMutationOutcome(w http.ResponseWriter, r *http.Re
 	}
 	projJSON, err := json.Marshal(projection)
 	if err != nil {
-		writeJSONError(w, http.StatusInternalServerError, err.Error())
+		writeUnrefreshedOutcome(w, fields, fmt.Errorf("encoding fresh projection: %w", err))
 		return
 	}
 	out := make(map[string]json.RawMessage, len(fields)+1)
@@ -784,6 +799,37 @@ func (s *boardSpecServer) writeMutationOutcome(w http.ResponseWriter, r *http.Re
 	}
 	out["projection"] = projJSON
 	writeJSON(w, http.StatusOK, out)
+}
+
+// writeUnrefreshedOutcome renders a mutation outcome whose fresh
+// projection could NOT be derived (Codex correction round 1, finding 2).
+// It runs AFTER the kernel transaction and every post-transaction effect
+// committed, so discarding the caller's fields would present a durable
+// mutation as unapplied — a direct §4.3 "no partial action effect may be
+// hidden" violation. Every typed field the caller assembled (the landed
+// result, any post_transaction_error disclosure, a stale refusal or
+// verdict failure) is preserved verbatim, and the projection failure
+// itself rides beside them as one typed operational envelope. The HTTP
+// 500 is transport posture only (§4.3): the body never claims a clean,
+// refreshed state — and never hides the landed facts.
+func writeUnrefreshedOutcome(w http.ResponseWriter, fields map[string]json.RawMessage, err error) {
+	failureJSON, encErr := json.Marshal(map[string]string{
+		"schema":         designFailureSchema,
+		"classification": "operational",
+		"code":           "projection-unavailable",
+		"detail":         err.Error(),
+	})
+	if encErr != nil {
+		// Marshaling a map of strings cannot fail; fail closed regardless.
+		writeJSONError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	out := make(map[string]json.RawMessage, len(fields)+1)
+	for k, v := range fields {
+		out[k] = v
+	}
+	out["projection_failure"] = failureJSON
+	writeJSON(w, http.StatusInternalServerError, out)
 }
 
 // digestSpecBytes exposes the kernel's one digest derivation for the

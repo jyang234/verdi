@@ -254,6 +254,22 @@
         }
         if (d.result) {
           var changed = (d.result.changes || []).map(function (c) { return c.target + " " + c.change; }).join(", ");
+          if (d.projection_failure) {
+            // The transaction LANDED but the fresh projection could not
+            // be rendered (the server's typed operational disclosure —
+            // §4.3: no partial action effect may be hidden). Never
+            // present the landed write as a failure, never claim a
+            // refreshed wall: the durable facts and the refresh failure
+            // are both named, and the ordinary conditional refresh (or a
+            // reload) reconciles the view.
+            var followUp = d.post_transaction_error ? " A follow-up also failed and is disclosed: " + d.post_transaction_error + "." : "";
+            showResult("applied-unrefreshed", "Saved — the edit landed" + (changed ? " (changed: " + changed + ")" : "") +
+              ", but the fresh view could not be rendered: " + d.projection_failure.detail + "." + followUp +
+              " The wall may be stale; use Refresh or reload the page.");
+            announce("Saved; the view could not be refreshed");
+            setStatus("saved — view refresh failed");
+            return d;
+          }
           if (d.post_transaction_error) {
             showResult("partial", "Saved, but a follow-up failed and is disclosed: " + d.post_transaction_error);
             announce("Saved with a disclosed follow-up failure");
@@ -266,11 +282,17 @@
         }
         if (d.stale) {
           var changedT = (d.stale.changed_targets || []).join(", ");
+          // Claim a refreshed board only when a fresh projection actually
+          // rode the refusal; a projection failure beside it is disclosed
+          // instead (never a favorable substitution).
+          var reconcile = d.projection
+            ? "The board has been refreshed; redo the edit on the current text."
+            : "The board could NOT be refreshed (" + (d.projection_failure ? d.projection_failure.detail : "projection unavailable") + "); use Refresh, then redo the edit.";
           showResult("stale", "Not applied: the draft changed underneath this edit (stale base). " +
             (changedT ? "Changed since your view: " + changedT + ". " : "") +
-            "The board has been refreshed; redo the edit on the current text. Your input was: " +
+            reconcile + " Your input was: " +
             JSON.stringify(ops));
-          announce("Edit refused: stale base — board refreshed");
+          announce(d.projection ? "Edit refused: stale base — board refreshed" : "Edit refused: stale base — refresh manually");
           setStatus("stale — redo on the refreshed board");
           return d;
         }
@@ -448,9 +470,41 @@
   });
 
   var stubState = null;
+  // rebuildStubChoices re-derives the dialog's AC/question checkboxes
+  // from the CURRENT server-rendered region (Codex correction round 1,
+  // finding 3): the dialog lives OUTSIDE the snapshot-replaced region, so
+  // its server-rendered choices are the page-load inventory only — a
+  // criterion added since load must be offered, a removed object must
+  // not. One source of truth: the region's own object cards, in the
+  // projection's order. Runs ONLY at open — an open, actively edited
+  // dialog is never rebuilt (the applyProjection interaction-guard
+  // precedent: in-flight input belongs to the author).
+  function rebuildStubChoices(dialog) {
+    function fill(fieldsetID, kind, attr) {
+      var fs = dialog.querySelector("#" + fieldsetID);
+      if (!fs) return;
+      var old = fs.querySelectorAll("label");
+      for (var i = 0; i < old.length; i++) fs.removeChild(old[i]);
+      var cards = document.querySelectorAll('#boardv2-region .objcard[data-object-kind="' + kind + '"]');
+      for (var j = 0; j < cards.length; j++) {
+        var id = cards[j].getAttribute("data-id");
+        if (!id) continue;
+        var label = document.createElement("label");
+        var box = document.createElement("input");
+        box.type = "checkbox";
+        box.setAttribute(attr, id);
+        label.appendChild(box);
+        label.appendChild(document.createTextNode(" " + id));
+        fs.appendChild(label);
+      }
+    }
+    fill("asd-stub-acs", "acceptance-criterion", "data-asd-stub-ac");
+    fill("asd-stub-oqs", "open-question", "data-asd-stub-oq");
+  }
   function openStubDialog(stubCard) {
     var dialog = document.getElementById("asd-stub-dialog");
     if (!dialog || !stubCard) return;
+    rebuildStubChoices(dialog);
     var slug = stubCard.getAttribute("data-stub");
     stubState = {
       slug: slug,

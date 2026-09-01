@@ -176,11 +176,14 @@ type boardSpecServer struct {
 	checkoutMu        sync.Mutex
 	checkoutCanonical string
 
-	// capsMu/capsCache memoize one spec's capabilities consultation per
-	// exact fact key (branch, worktree HEAD, current spec digest, policy
-	// tree stamp): the conditional 2s poll re-derives capabilities only
-	// when one of the facts they depend on can have moved, instead of
-	// re-running the full identity/state/policy resolution every tick.
+	// capsMu/capsCache memoize one spec's SUCCESSFUL capabilities
+	// consultation per exact fact key (branch, worktree HEAD, accepted/
+	// default-branch head, current spec digest, policy tree stamp): the
+	// conditional 2s poll re-derives capabilities only when one of the
+	// facts they depend on can have moved, instead of re-running the full
+	// identity/state/policy resolution every tick. Operational failures
+	// are never memoized (the same success-only rule checkoutCanonical
+	// above follows).
 	capsMu    sync.Mutex
 	capsCache map[string]capsCacheEntry
 

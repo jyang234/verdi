@@ -467,7 +467,9 @@ func (s *boardSpecServer) buildASDView(ctx context.Context, name string, proj *B
 
 	if s.design != nil {
 		v.DesignWired = true
-		view, failure := s.cachedCapabilities(ctx, name, git.Branch, worktreeHead, v.BaseDigest)
+		// v.AcceptedHead is this render's own fresh resolution above —
+		// the memo key rides it without a second git call (finding 1).
+		view, failure := s.cachedCapabilities(ctx, name, git.Branch, worktreeHead, v.AcceptedHead, v.BaseDigest)
 		v.Caps = view
 		v.CapsFailure = failure
 	}
@@ -647,10 +649,10 @@ func asdCountLabel(n int, singular, plural string) string {
 	return strconv.Itoa(n) + " " + plural
 }
 
-// capsCacheEntry is one memoized capabilities consultation.
+// capsCacheEntry is one memoized capabilities consultation — successful
+// consultations only (an operational failure is never memoized).
 type capsCacheEntry struct {
-	view    *DesignCapabilitiesView
-	failure *DesignFailure
+	view *DesignCapabilitiesView
 }
 
 // policyStamp fingerprints the working tree's policy authority inputs
@@ -684,15 +686,27 @@ func (s *boardSpecServer) policyStamp() string {
 // exact fact key. The consultation itself stays designapp's alone — this
 // is transport-level memoization of an unchanged operation over unchanged
 // inputs, never a second derivation.
-func (s *boardSpecServer) cachedCapabilities(ctx context.Context, name, branch, head, digest string) (*DesignCapabilitiesView, *DesignFailure) {
-	key := name + "\x00" + branch + "\x00" + head + "\x00" + digest + "\x00" + s.policyStamp()
+//
+// The key carries the accepted/default-branch head the caller already
+// resolved for this render (Codex correction round 1, finding 1): an
+// owner merge advances the accepted head while the design checkout, its
+// spec bytes, and the policy tree all stay fixed, and the pre-merge
+// Mutable:true posture must never be served on a wall whose accepted
+// state moved. SUCCESS ONLY is memoized (closure N-1, the review-fix I-2
+// shape): an operational failure is returned to that render alone and the
+// next render retries.
+func (s *boardSpecServer) cachedCapabilities(ctx context.Context, name, branch, head, acceptedHead, digest string) (*DesignCapabilitiesView, *DesignFailure) {
+	key := name + "\x00" + branch + "\x00" + head + "\x00" + acceptedHead + "\x00" + digest + "\x00" + s.policyStamp()
 	s.capsMu.Lock()
 	if entry, ok := s.capsCache[key]; ok {
 		s.capsMu.Unlock()
-		return entry.view, entry.failure
+		return entry.view, nil
 	}
 	s.capsMu.Unlock()
 	outcome, view := s.design.GetDesignCapabilities(ctx, s.root, "spec/"+name)
+	if outcome.Failure != nil {
+		return view, outcome.Failure
+	}
 	s.capsMu.Lock()
 	if s.capsCache == nil {
 		s.capsCache = map[string]capsCacheEntry{}
@@ -705,7 +719,7 @@ func (s *boardSpecServer) cachedCapabilities(ctx context.Context, name, branch, 
 			delete(s.capsCache, k)
 		}
 	}
-	s.capsCache[key] = capsCacheEntry{view: view, failure: outcome.Failure}
+	s.capsCache[key] = capsCacheEntry{view: view}
 	s.capsMu.Unlock()
-	return view, outcome.Failure
+	return view, nil
 }

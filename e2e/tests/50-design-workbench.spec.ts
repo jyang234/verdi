@@ -1,7 +1,7 @@
 import { test, expect, Page } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
 import { SHOWCASE, boardPath } from "./fixtures";
-import { addSticky, dragToTrash, expectAutosaved, uncommittedIndicator } from "./helpers";
+import { addSticky, dragToTrash, uncommittedIndicator } from "./helpers";
 
 // Wave 6 Task 2 — the ASD synchronized workbench (design §§3-6, SI-163/
 // SI-165/SI-167/SI-168; ASD AC-2/AC-4..AC-8, CO-9 §Browser behavior).
@@ -344,6 +344,56 @@ test.describe("failure classes", () => {
     expect(body.code).toBeTruthy();
     expect(body.detail).toBeTruthy();
   });
+
+  test("a projection failure after a landed mutation renders applied-but-unrefreshed", async ({ page }) => {
+    // Codex correction round 1, finding 2 (client half): the server's
+    // disclosure shape for a post-commit projection failure is pinned by
+    // the Go adapter test; here the page's OWN transport receives exactly
+    // that shape (the real response with the fresh projection withheld
+    // and the typed operational disclosure added) and must render
+    // applied-but-unrefreshed — never failure-to-apply (§4.3: no partial
+    // action effect may be hidden).
+    await page.goto(DESIGN());
+    await page.route("**/api/mutate_draft", async (route) => {
+      const resp = await route.fetch();
+      const body = await resp.json();
+      delete body.projection;
+      body.projection_failure = {
+        schema: "verdi.design-failure/v1",
+        classification: "operational",
+        code: "projection-unavailable",
+        detail: "rendering fresh projection: injected client probe",
+      };
+      await route.fulfill({
+        status: 500,
+        contentType: "application/json; charset=utf-8",
+        body: JSON.stringify(body),
+      });
+    });
+    await page.locator("#asd-add-object").click();
+    await page.locator("#asd-op-kind").selectOption("add-question");
+    const preview = await page.getByTestId("asd-op-id-preview").textContent();
+    const newID = preview!.replace("will be declared as ", "").trim();
+    await page.getByTestId("asd-op-text").fill("applied but unrefreshed probe [f2-client]");
+    await page.getByTestId("asd-op-ok").click();
+    const result = page.getByTestId("asd-last-result");
+    // Applied-but-unrefreshed, never a failed mutation.
+    await expect(result).toHaveAttribute("data-result-kind", "applied-unrefreshed", {
+      timeout: 10_000,
+    });
+    await expect(result).toContainText("landed");
+    await expect(result).toContainText("could not be rendered");
+    // The wall recovers through the ordinary conditional refresh once the
+    // projection is derivable again — the landed write appears.
+    await page.unroute("**/api/mutate_draft");
+    await expect(page.getByTestId("card-" + newID)).toBeVisible({ timeout: 10_000 });
+    // Cleanup through the same typed surface.
+    await expectClean(
+      await postMutate(page, DESIGN(), SHOWCASE.DESIGN_SPEC, [
+        { op: "remove-question", id: newID },
+      ]),
+    );
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -681,6 +731,134 @@ test.describe("typed forms", () => {
     await expectClean(
       await postMutate(page, DRAFT_B(), SHOWCASE.SHOWCASE_DRAFT_SPEC, [
         { op: "remove-stub", slug: renamedSlug },
+      ]),
+    );
+  });
+
+  test("the stub-correction dialog offers the wall's current objects, not the page-load inventory", async ({ page }) => {
+    // Codex correction round 1, finding 3: the dialog's AC/question
+    // choices must track the fresh projection — a criterion added on this
+    // very page is offered and bindable, and an object removed since page
+    // load is no longer offered.
+    const slug = "stub-choices-probe";
+    // A probe question that EXISTS AT PAGE LOAD, so the frozen-inventory
+    // defect is observable on the removal half.
+    const preSnap = await snapshotOf(page, DRAFT_B());
+    const oqMatch = (preSnap.html as string).match(/data-next-id-oq="([^"]+)"/);
+    expect(oqMatch, "snapshot html carries data-next-id-oq").toBeTruthy();
+    const probeOQ = oqMatch![1];
+    await expectClean(
+      await postMutate(page, DRAFT_B(), SHOWCASE.SHOWCASE_DRAFT_SPEC, [
+        { op: "add-question", id: probeOQ, text: "stub-choice probe question [f3]", anchor: "#" + probeOQ },
+      ]),
+    );
+    await expectClean(
+      await postMutate(page, DRAFT_B(), SHOWCASE.SHOWCASE_DRAFT_SPEC, [
+        { op: "add-stub", slug, acceptance_criteria: ["ac-1"] },
+      ]),
+    );
+    await page.goto(DRAFT_B());
+    const dialog = page.locator("#asd-stub-dialog");
+
+    // (a) An AC added on the SAME page via the typed form is offered and
+    // bindable.
+    await page.locator("#asd-add-object").click();
+    await page.locator("#asd-op-kind").selectOption("add-ac");
+    const preview = await page.getByTestId("asd-op-id-preview").textContent();
+    const newAC = preview!.replace("will be declared as ", "").trim();
+    await page.getByTestId("asd-op-text").fill("a criterion added after page load [f3]");
+    const posted = page.waitForResponse(
+      (r) => r.url().includes("/api/mutate_draft") && r.ok(),
+      { timeout: 20_000 },
+    );
+    await page.getByTestId("asd-op-ok").click();
+    await posted;
+    await expect(page.getByTestId("card-" + newAC)).toBeVisible({ timeout: 10_000 });
+
+    await page.locator(`.stubcard[data-stub="${slug}"]`).locator("[data-asd-correct-stub]").click();
+    await expect(dialog).toBeVisible();
+    const newChoice = dialog.locator(`[data-asd-stub-ac="${newAC}"]`);
+    await expect(newChoice, "a newly added AC must be offered").toHaveCount(1);
+    await newChoice.check();
+    const bindPosted = page.waitForResponse(
+      (r) => r.url().includes("/api/mutate_draft") && r.ok(),
+      { timeout: 20_000 },
+    );
+    await page.getByTestId("asd-stub-ok").click();
+    await bindPosted;
+    await expect(page.locator(`.stubcard[data-stub="${slug}"]`)).toHaveAttribute(
+      "data-acs",
+      "ac-1," + newAC,
+      { timeout: 10_000 },
+    );
+
+    // (b) An object removed since page load is no longer offered.
+    await expectClean(
+      await postMutate(page, DRAFT_B(), SHOWCASE.SHOWCASE_DRAFT_SPEC, [
+        { op: "remove-question", id: probeOQ },
+      ]),
+    );
+    await expect(page.getByTestId("card-" + probeOQ)).toHaveCount(0, { timeout: 10_000 });
+    await page.locator(`.stubcard[data-stub="${slug}"]`).locator("[data-asd-correct-stub]").click();
+    await expect(dialog).toBeVisible();
+    await expect(
+      dialog.locator(`[data-asd-stub-oq="${probeOQ}"]`),
+      "a removed question must not be offered",
+    ).toHaveCount(0);
+    await page.locator("#asd-stub-cancel").click();
+
+    // Cleanup through the same typed surface.
+    await expectClean(
+      await postMutate(page, DRAFT_B(), SHOWCASE.SHOWCASE_DRAFT_SPEC, [
+        { op: "remove-stub", slug },
+      ]),
+    );
+    await expectClean(
+      await postMutate(page, DRAFT_B(), SHOWCASE.SHOWCASE_DRAFT_SPEC, [
+        { op: "remove-ac", id: newAC },
+      ]),
+    );
+  });
+
+  test("an applying snapshot never clobbers the open stub-correction dialog", async ({ page }) => {
+    // Codex correction round 1, finding 3 (the guard half): a snapshot
+    // that lands while the dialog is OPEN must not overwrite the author's
+    // in-flight input — typed slug and changed choices survive the swap
+    // (the applyProjection interaction-guard precedent, held for dialogs
+    // by deriving choices only at open).
+    const slug = "stub-hold-probe";
+    await expectClean(
+      await postMutate(page, DRAFT_B(), SHOWCASE.SHOWCASE_DRAFT_SPEC, [
+        { op: "add-stub", slug, acceptance_criteria: ["ac-1"] },
+      ]),
+    );
+    await page.goto(DRAFT_B());
+    await page.locator(`.stubcard[data-stub="${slug}"]`).locator("[data-asd-correct-stub]").click();
+    const dialog = page.locator("#asd-stub-dialog");
+    await expect(dialog).toBeVisible();
+    // In-flight input: a half-typed slug and a changed binding choice.
+    await page.getByTestId("asd-stub-slug").fill("half-typed-rename");
+    await dialog.locator('[data-asd-stub-ac="ac-2"]').check();
+    // A server-state change lands so the next poll APPLIES (not 304)…
+    const resp = await page.request.post(DRAFT_B() + "/api/sticky", {
+      data: { text: "poll probe [f3-hold]", type: "comment" },
+    });
+    expect(resp.ok()).toBeTruthy();
+    // …and the region refreshes under the open dialog.
+    const sticky = page.locator('[data-testid^="sticky-"]').filter({ hasText: "[f3-hold]" });
+    await expect(sticky).toHaveCount(1, { timeout: 10_000 });
+    // The open dialog is untouched: typed slug, changed choice, existing
+    // choice.
+    await expect(page.getByTestId("asd-stub-slug")).toHaveValue("half-typed-rename");
+    await expect(dialog.locator('[data-asd-stub-ac="ac-2"]')).toBeChecked();
+    await expect(dialog.locator('[data-asd-stub-ac="ac-1"]')).toBeChecked();
+    await page.locator("#asd-stub-cancel").click();
+    // Cleanup: the sticky dies by its own affordance; the stub through
+    // the typed surface.
+    await sticky.first().getByRole("button", { name: "Delete sticky" }).click();
+    await expectClean(
+      await postMutate(page, DRAFT_B(), SHOWCASE.SHOWCASE_DRAFT_SPEC, [
+        { op: "remove-stub", slug },
       ]),
     );
   });

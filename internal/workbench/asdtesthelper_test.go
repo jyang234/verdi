@@ -115,7 +115,8 @@ type mutateOutcome struct {
 	Projection *struct {
 		Dirty bool `json:"dirty"`
 	} `json:"projection"`
-	PostTransactionError string `json:"post_transaction_error"`
+	PostTransactionError string         `json:"post_transaction_error"`
+	ProjectionFailure    *DesignFailure `json:"projection_failure"`
 }
 
 // postMutate posts one browser mutation envelope built from the CURRENT

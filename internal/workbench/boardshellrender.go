@@ -310,6 +310,12 @@ func writeASDForms(b *strings.Builder, p *BoardProjection, asd *asdView) {
 // (F-06's fix: capability-driven correction of an existing stub through
 // the same typed transaction — a slug rename is one atomic
 // [remove-stub, add-stub] batch; a binding change is one edit-stub).
+//
+// The AC/question checkbox lists rendered here are the PAGE-LOAD
+// inventory only (the dialog lives outside the snapshot-replaced region):
+// boardspecasd.js re-derives them from the fresh region's object cards at
+// every open (Codex correction round 1, finding 3), so this markup is the
+// no-JS-visible initial state, never the live source of truth.
 func writeASDEditStubDialog(b *strings.Builder, p *BoardProjection) {
 	esc := stdhtml.EscapeString
 	b.WriteString(`<div role="dialog" aria-label="Correct stub" class="board-dialog asd-stub-dialog" id="asd-stub-dialog" hidden>`)
