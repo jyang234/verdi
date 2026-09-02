@@ -40,11 +40,11 @@ func TestCompleteCoverageRefusesCallerOnlyPassingSubset(t *testing.T) {
 
 	coverage := plan.Complete(
 		[]Evaluation{{
-			ConsumerIdentity: passingID,
-			Consumer:         passing,
-			Result:           passResult,
+			ConsumerIdentity: passingID, Consumer: passing,
+			AcceptedManifestDigest: passResult.Report.Input.Target.Accepted.ManifestDigest,
+			Result:                 passResult,
 		}},
-		[]SupplementalTarget{{Consumer: passing, Result: passResult}},
+		[]SupplementalTarget{testSupplemental(passing, passResult)},
 	)
 
 	if coverage.State != StateViolatedWithWitness {

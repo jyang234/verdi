@@ -11,7 +11,7 @@ func TestCompleteCoverageClosedEvaluationStates(t *testing.T) {
 	plan := testPlan(t, []Consumer{consumer}, []Consumer{consumer}, testChangedLayer())
 	identity, _ := consumer.Identity()
 	pass := resultForPlan(t, plan, true)
-	valid := Evaluation{ConsumerIdentity: identity, Consumer: consumer, Result: pass}
+	valid := testEvaluation(consumer, pass)
 
 	tests := []struct {
 		name        string
@@ -31,14 +31,21 @@ func TestCompleteCoverageClosedEvaluationStates(t *testing.T) {
 		}}, wantState: StateViolatedWithWitness, wantReason: ReasonEvaluationExtra},
 		{name: "duplicate is violated", evaluations: []Evaluation{valid, valid}, wantState: StateViolatedWithWitness, wantReason: ReasonEvaluationDuplicate},
 		{name: "identity mismatch is violated", evaluations: []Evaluation{{
-			ConsumerIdentity: identity, Consumer: testConsumer("spec/registered", "production"), Result: pass,
+			ConsumerIdentity: identity, Consumer: testConsumer("spec/registered", "production"),
+			AcceptedManifestDigest: pass.Report.Input.Target.Accepted.ManifestDigest, Result: pass,
 		}}, wantState: StateViolatedWithWitness, wantReason: ReasonEvaluationIdentityMismatch},
 		{name: "invalid result is violated", evaluations: []Evaluation{{
 			ConsumerIdentity: identity, Consumer: consumer,
-			Result: &policyconflict.Result{Report: pass.Report, ReportBytes: []byte("not-the-report")},
+			AcceptedManifestDigest: pass.Report.Input.Target.Accepted.ManifestDigest,
+			Result:                 &policyconflict.Result{Report: pass.Report, ReportBytes: []byte("not-the-report")},
 		}}, wantState: StateViolatedWithWitness, wantReason: ReasonEvaluationResultInvalid},
 		{name: "operand mismatch is violated", evaluations: []Evaluation{{
-			ConsumerIdentity: identity, Consumer: consumer, Result: mismatchedResult(t, pass),
+			ConsumerIdentity: identity, Consumer: consumer,
+			AcceptedManifestDigest: pass.Report.Input.Target.Accepted.ManifestDigest, Result: mismatchedResult(t, pass),
+		}}, wantState: StateViolatedWithWitness, wantReason: ReasonEvaluationOperandMismatch},
+		{name: "context mismatch is violated", evaluations: []Evaluation{{
+			ConsumerIdentity: identity, Consumer: consumer,
+			AcceptedManifestDigest: "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd", Result: pass,
 		}}, wantState: StateViolatedWithWitness, wantReason: ReasonEvaluationOperandMismatch},
 	}
 	for _, test := range tests {
@@ -62,7 +69,10 @@ func TestCompleteCoverageTreatsConflictVerdictSeparatelyFromCompleteness(t *test
 	plan := testPlan(t, []Consumer{consumer}, []Consumer{consumer}, testChangedLayer())
 	identity, _ := consumer.Identity()
 	blockedUnproven := resultForPlan(t, plan, false)
-	coverage := plan.Complete([]Evaluation{{ConsumerIdentity: identity, Consumer: consumer, Result: blockedUnproven}}, nil)
+	coverage := plan.Complete([]Evaluation{{
+		ConsumerIdentity: identity, Consumer: consumer,
+		AcceptedManifestDigest: blockedUnproven.Report.Input.Target.Accepted.ManifestDigest, Result: blockedUnproven,
+	}}, nil)
 	if coverage.State != StateProven {
 		t.Fatalf("coverage state = %q, want completeness proven independently of conflict verdict", coverage.State)
 	}
@@ -78,11 +88,11 @@ func TestCompleteCoverageIsDeterministicAndAliasSafe(t *testing.T) {
 	result := resultForPlan(t, plan, true)
 	firstID, _ := first.Identity()
 	secondID, _ := second.Identity()
-	evaluations := []Evaluation{
-		{ConsumerIdentity: secondID, Consumer: second, Result: result},
-		{ConsumerIdentity: firstID, Consumer: first, Result: result},
+	evaluations := []Evaluation{testEvaluation(second, result), testEvaluation(first, result)}
+	if evaluations[0].ConsumerIdentity != secondID || evaluations[1].ConsumerIdentity != firstID {
+		t.Fatal("test setup: identities differ")
 	}
-	supplemental := []SupplementalTarget{{Consumer: second, Result: result}, {Consumer: first, Result: result}}
+	supplemental := []SupplementalTarget{testSupplemental(second, result), testSupplemental(first, result)}
 	coverage := plan.Complete(evaluations, supplemental)
 	if coverage.State != StateProven {
 		t.Fatalf("coverage = %+v", coverage)

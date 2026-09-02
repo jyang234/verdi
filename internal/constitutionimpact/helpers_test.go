@@ -96,3 +96,19 @@ func resultForPlan(t *testing.T, plan Plan, pass bool) *policyconflict.Result {
 	}
 	return &policyconflict.Result{Report: canonical, ReportBytes: encoded}
 }
+
+func testEvaluation(consumer Consumer, result *policyconflict.Result) Evaluation {
+	identity, _ := consumer.Identity()
+	return Evaluation{
+		ConsumerIdentity: identity, Consumer: consumer,
+		AcceptedManifestDigest: result.Report.Input.Target.Accepted.ManifestDigest,
+		Result:                 result,
+	}
+}
+
+func testSupplemental(consumer Consumer, result *policyconflict.Result) SupplementalTarget {
+	return SupplementalTarget{
+		Consumer: consumer, AcceptedManifestDigest: result.Report.Input.Target.Accepted.ManifestDigest,
+		Result: result,
+	}
+}

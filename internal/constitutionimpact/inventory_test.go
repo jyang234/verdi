@@ -5,6 +5,8 @@ import (
 	"os"
 	"strings"
 	"testing"
+
+	"github.com/jyang234/verdi/internal/execworkspace"
 )
 
 func TestInventoryCanonicalRoundTripAndIdentity(t *testing.T) {
@@ -46,6 +48,34 @@ func TestInventoryCanonicalRoundTripAndIdentity(t *testing.T) {
 	}
 	if again.Consumers[0].GovernedOperations[0] != "make-verify" || again.Consumers[0].Request.Scope.Phases[0] != "build" {
 		t.Fatal("DecodeInventory returned aliased nested values")
+	}
+}
+
+func TestInventoryDeepCopiesExecutionGrantsAndPreservesExplicitEmptySets(t *testing.T) {
+	consumer := testConsumer("spec/granted", "local")
+	consumer.Request.Grants.Grants = []execworkspace.Grant{{Kind: execworkspace.GrantPathRead, Paths: []string{"docs"}}}
+	consumer.GovernedOperations = []string{}
+	raw, err := EncodeInventory(Inventory{Schema: InventorySchema, Consumers: []Consumer{consumer}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(raw, []byte(`"governed_operations":null`)) {
+		t.Fatalf("explicit empty operation set encoded as null: %s", raw)
+	}
+	decoded, err := DecodeInventory(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	planRows, _, err := plannedConsumers("test", decoded)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan := Plan{consumers: planRows}
+	first := plan.Consumers()
+	first[0].Request.Grants.Grants[0].Paths[0] = "mutated"
+	again := plan.Consumers()
+	if again[0].Request.Grants.Grants[0].Paths[0] != "docs" || again[0].GovernedOperations == nil {
+		t.Fatal("consumer clone aliased grant payload or lost an explicit empty operation set")
 	}
 }
 

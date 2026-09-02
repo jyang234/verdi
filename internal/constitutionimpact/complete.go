@@ -107,13 +107,16 @@ func completeEvaluation(row *EvaluationCoverage, expected plannedConsumer, evalu
 		*reasons = append(*reasons, Reason{Code: ReasonEvaluationUnresolved, Witnesses: []string{expected.identity}})
 		return
 	}
+	row.AcceptedManifestDigest = evaluation.AcceptedManifestDigest
 	report, valid := canonicalReport(*evaluation.Result)
 	if !valid {
 		*reasons = append(*reasons, Reason{Code: ReasonEvaluationResultInvalid, Witnesses: []string{expected.identity}})
 		row.Refusal = refusal(ReasonEvaluationResultInvalid, expected.identity)
 		return
 	}
-	if report.Input.Target.Kind != policyconflict.TargetAcceptedContext ||
+	if evaluation.AcceptedManifestDigest == "" || report.Input.Target.Accepted == nil ||
+		report.Input.Target.Accepted.ManifestDigest != evaluation.AcceptedManifestDigest ||
+		report.Input.Target.Kind != policyconflict.TargetAcceptedContext ||
 		!report.Input.Repository.Head.Known || report.Input.Repository.Head.Value != proposed.Commit ||
 		(proposed.ConstitutionDigest != "" && report.Input.ConstitutionDigest != proposed.ConstitutionDigest) {
 		*reasons = append(*reasons, Reason{Code: ReasonEvaluationOperandMismatch, Witnesses: []string{expected.identity}})
@@ -139,10 +142,12 @@ func cloneSupplemental(in []SupplementalTarget) []SupplementalTarget {
 	out := make([]SupplementalTarget, len(in))
 	for i, target := range in {
 		out[i].Consumer = cloneConsumer(target.Consumer)
+		out[i].AcceptedManifestDigest = target.AcceptedManifestDigest
 		if target.Result != nil {
 			if report, ok := canonicalReport(*target.Result); ok {
-				bytes, _ := policyconflict.EncodeReport(report)
-				out[i].Result = &policyconflict.Result{Report: report, ReportBytes: bytes}
+				out[i].Result = &policyconflict.Result{
+					Report: report, ReportBytes: append([]byte(nil), target.Result.ReportBytes...),
+				}
 			}
 		}
 		if target.Refusal != nil {

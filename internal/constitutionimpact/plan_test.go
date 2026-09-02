@@ -135,7 +135,9 @@ func TestBuildPlanDuplicateInventoryIsViolatedAndEnvironmentIsIdentityBound(t *t
 	evaluations := make([]Evaluation, 0, 2)
 	for _, consumer := range plan.Consumers() {
 		identity, _ := consumer.Identity()
-		evaluations = append(evaluations, Evaluation{ConsumerIdentity: identity, Consumer: consumer, Result: result})
+		evaluation := testEvaluation(consumer, result)
+		evaluation.ConsumerIdentity = identity
+		evaluations = append(evaluations, evaluation)
 	}
 	coverage := plan.Complete(evaluations, nil)
 	if coverage.State != StateViolatedWithWitness || !hasReasonCode(coverage.Reasons, ReasonInventoryDuplicate) {

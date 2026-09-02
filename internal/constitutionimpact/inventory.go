@@ -53,7 +53,7 @@ func DecodeInventory(data []byte) (Inventory, error) {
 	if !bytes.Equal(canonical, data) {
 		return Inventory{}, fmt.Errorf("constitutionimpact: decoding inventory: input bytes are not canonical")
 	}
-	return cloneInventory(inventory), nil
+	return inventory, nil
 }
 
 // EncodeInventory returns canonical bytes for a strict v1 inventory.
@@ -155,14 +155,6 @@ func validateConsumer(consumer Consumer) error {
 		}
 	}
 	return nil
-}
-
-func cloneInventory(in Inventory) Inventory {
-	out := Inventory{Schema: in.Schema, Consumers: make([]Consumer, len(in.Consumers))}
-	for i := range in.Consumers {
-		out.Consumers[i] = cloneConsumer(in.Consumers[i])
-	}
-	return out
 }
 
 func cloneConsumer(in Consumer) Consumer {

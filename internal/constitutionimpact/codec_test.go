@@ -12,8 +12,8 @@ func TestCoverageCanonicalRoundTripReusesNestedOwnerCodecs(t *testing.T) {
 	identity, _ := consumer.Identity()
 	result := resultForPlan(t, plan, true)
 	coverage := plan.Complete(
-		[]Evaluation{{ConsumerIdentity: identity, Consumer: consumer, Result: result}},
-		[]SupplementalTarget{{Consumer: consumer, Result: result}},
+		[]Evaluation{{ConsumerIdentity: identity, Consumer: consumer, AcceptedManifestDigest: result.Report.Input.Target.Accepted.ManifestDigest, Result: result}},
+		[]SupplementalTarget{testSupplemental(consumer, result)},
 	)
 	encoded, err := EncodeCoverage(coverage)
 	if err != nil {
@@ -102,7 +102,7 @@ func TestDecodeCoverageRejectsUnknownNestedRequestAndReportFields(t *testing.T) 
 	plan := testPlan(t, []Consumer{consumer}, []Consumer{consumer}, testChangedLayer())
 	identity, _ := consumer.Identity()
 	result := resultForPlan(t, plan, true)
-	raw, err := EncodeCoverage(plan.Complete([]Evaluation{{ConsumerIdentity: identity, Consumer: consumer, Result: result}}, nil))
+	raw, err := EncodeCoverage(plan.Complete([]Evaluation{{ConsumerIdentity: identity, Consumer: consumer, AcceptedManifestDigest: result.Report.Input.Target.Accepted.ManifestDigest, Result: result}}, nil))
 	if err != nil {
 		t.Fatal(err)
 	}
