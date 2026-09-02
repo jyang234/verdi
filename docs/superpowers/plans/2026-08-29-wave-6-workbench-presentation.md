@@ -481,9 +481,50 @@ submit-preparation over one exact accepted/proposed Git identity.
 **Stop gate:** Any new rule grammar, precedence, approval record, applicability
 operator, or conflict semantics is `NEEDS_CONTEXT`.
 
+**SI-179 closure correction (must merge before Task 4):**
+
+- [ ] RED the nonempty-but-incomplete caller target case: two registered
+      consumers exist, the caller supplies only the passing one, and the
+      pre-correction packet incorrectly reports `ready_for_submission: true`.
+- [ ] Create `internal/constitutionimpact` as the sole owner of strict
+      `verdi.constitution-consumer-inventory/v1` at
+      `.verdi/constitution/consumers.json` and canonical
+      `verdi.constitution-impact-coverage/v1`; reuse the nested
+      `contextcompile.Request`, execution-grant capability document, active
+      action-subject vocabulary, and `policyconflict` result without copying
+      their grammars or algorithms.
+- [ ] Load accepted and proposed inventories at the same exact identities as
+      the application operation; for a nonempty constitution layer diff,
+      derive the sorted union and evaluate every member through the existing
+      accepted-context conflict path. A removed row stays in the union.
+- [ ] Prove the closed coverage states. Missing inventory/unknown evaluation is
+      disclosed-unproven; duplicate, omitted, extra, or identity-mismatched
+      rows are violated-with-witness; malformed present bytes are operational;
+      only complete exact evaluation is proven.
+- [ ] Demote request `targets` to supplemental preview/presentation inputs.
+      They may add output but can never remove canonical rows, establish
+      completeness, or improve submission readiness.
+- [ ] Make `SubmitPreparation` require proven coverage plus passing canonical
+      conflict verdicts. Pin missing inventory, removed-consumer union,
+      malformed inventory, unknown evaluation, omitted/extra evaluation,
+      supplemental-only success, no-layer-change, accepted/proposed identity,
+      CLI/MCP byte parity, and zero-effect behavior.
+- [ ] Keep `policyartifact`, `policyauthority`, `contextcompile`, and
+      `policyconflict` behavior unchanged; this correction consumes their
+      exported contracts and adds no reverse matcher or second evaluator.
+- [ ] Run races for `internal/constitutionimpact`, `internal/constitutionapp`,
+      `internal/contextcompile`, and `internal/policyconflict`; full
+      `cmd/verdi` and `internal/mcpserve` conformance; spec-align, showcase,
+      vet, lint, gofmt, and diff checks. Complete the Tier 3 FABLE/Opus chain
+      and stop for independent Codex review.
+
 ## Task 4: Build the Constitution workbench
 
 **Owner:** FABLE frontend worker.
+
+**Precondition:** Task 3 and its SI-179 completeness correction are
+owner-merged. The workbench consumes the canonical coverage witness through
+`constitutionapp`; it cannot derive, substitute, or repair the affected set.
 
 **Likely files:** create `internal/workbench/constitution*.go` plus tests,
 route-scoped assets, `cmd/verdi/serve` injection, Playwright, and fixtures.

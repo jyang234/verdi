@@ -1,9 +1,10 @@
 # Wave 6 Workbench Presentation Authority Design
 
-**Status:** Owner-approved planning authority with the SI-177 amendment pending
-its one independent review and owner merge. Task 1B implementation and Task 2
-resumption remain blocked until that amended exact head reaches the configured
-default branch.
+**Status:** Owner-approved planning authority through SI-177. The SI-179
+affected-consumer completeness amendment is pending its one independent review
+and owner merge; Task 3 publication and Task 4 remain blocked until that
+amended exact head reaches the configured default branch and the bounded Task 3
+correction consumes it.
 
 **Planning base:** `915529f792f7a672e9631f42909995b38ed12655`
 
@@ -542,6 +543,77 @@ refuses commit, submission, approval, exemption ownership, and semantic
 disposition. Record parity means those adapters consume the same application
 records, not that an agent receives every human operation.
 
+#### 7.1.1 Canonical affected-consumer inventory and completeness witness
+
+The phrase "affected consumers" denotes a complete, mechanically bounded set,
+not whatever subset a caller remembers to send. The repository therefore owns
+one authored, Git-backed inventory at
+`.verdi/constitution/consumers.json`, strict-decoded by the new
+`internal/constitutionimpact` package as
+`verdi.constitution-consumer-inventory/v1`. The file is constitution impact
+metadata, not a policy, overlay, exemption, disposition, generated projection,
+or approval record; it stays outside `.verdi/policy/` so the frozen
+`policyartifact` and `policyauthority` grammars and effective-policy identity do
+not acquire a second meaning.
+
+Each inventory entry carries one complete canonical
+`verdi.context-compile-request/v1` accepted-context request, the exact declared
+environment used for that consumer, and a present sorted-unique
+`governed_operations` array whose values must already exist in the active
+constitution's action-subject catalog. The nested request's existing
+`grants`/`verdi.execution-grants/v1` document is the capability declaration; the
+inventory does not create a second capability grammar. Entry identity is the
+digest of those canonical existing operands. There is no new free-form id,
+scope matcher, applicability operator, operation vocabulary, or precedence
+rule.
+
+`internal/constitutionimpact` is the single derivation owner. For each impact
+review it loads the inventory from the same exact accepted Git tree and the
+same exact proposal identity used by `constitutionapp`. When the constitution
+source-layer diff is non-empty, v1 takes the sorted union of accepted and
+proposed entries and evaluates every member through the existing
+`policyconflict` accepted-context path against the proposed constitution. A
+removed inventory row therefore remains covered for the proposal that removes
+it. This first version intentionally treats that complete union as the
+conservative potentially-affected set: it may evaluate a consumer whose result
+does not change, but it cannot infer a favorable omission. A future narrower
+reverse-applicability algorithm requires its own authority; it cannot silently
+replace this rule.
+
+The derivation returns one canonical
+`verdi.constitution-impact-coverage/v1` witness containing:
+
+- accepted and proposed inventory presence and content digests;
+- the exact accepted/proposed Git identities and constitution layer changes;
+- the sorted union of canonical consumer identities;
+- exactly one evaluation row per union member, carrying its exact context,
+  capabilities, governed operations, and conflict result or typed refusal;
+- separately identified caller-supplemental targets; and
+- one closed coverage state: `proven`, `violated-with-witness`, or
+  `disclosed-as-unproven`, with deterministic reasons for every non-proven
+  state.
+
+Coverage is `proven` only when both inventories required by the repository
+state strict-decode, the union is sorted and duplicate-free, every member has
+exactly one identity-bound evaluation, and none of those evaluations is
+unknown or unresolved. A malformed present inventory is operational authority
+failure. A missing inventory in an adopted repository, an unavailable exact
+tree, an unavailable evaluator, or an evaluation whose applicability/conflict
+posture is unknown is disclosed as unproven and blocks authoritative
+progression. A known duplicate, missing row, extra row, identity mismatch, or
+result bound to different operands is violated with its witness and also
+blocks. With no constitution layer change, the witness may prove the empty
+impact set without requiring a synthetic evaluation.
+
+Caller-declared `targets` are demoted to supplemental preview inputs. They may
+add an ad-hoc evaluation or narrow which already-derived rows a presentation
+expands, but they cannot delete an inventory member, alter the witness's union,
+turn a non-proven coverage state into `proven`, or participate in
+`ready_for_submission`. `SubmitPreparation` is ready only when the coverage
+witness is proven and every canonical consumer conflict verdict passes. Task 4
+renders this record through `constitutionapp`; it does not scan the corpus,
+author the inventory, or repair an incomplete witness in the browser.
+
 ### 7.2 Constitution workbench
 
 The constitution page presents:
@@ -721,7 +793,7 @@ The final review additionally proves:
 
 ## 12. Lossless source-coverage witness
 
-The consolidated authority carries 37/37 source groups:
+The consolidated authority carries 38/38 source groups:
 
 | # | Source authority | Destination | Transformation or intentional omission |
 |---:|---|---|---|
@@ -762,6 +834,7 @@ The consolidated authority carries 37/37 source groups:
 | 35 | Wave 6 handoff browser/test/controller gates | §§5 and 11 | Server-rendered/dependency-free/no-network, Playwright keyboard/responsive coverage, recording scan, alternate-port disclosure, full race/verify/spec-align retained. |
 | 36 | Task 2 browser-human stop-gate witness and SI-176 | §§1, 4.1, 6.1.1, 10–11 | Preserves unconditional AI-free browser authoring, explicit unauthenticated provenance, failed-resolution non-bypass, agent policy enforcement, honest policy absence, V1 history, and serialized predecessor review; no runtime or frontend implementation is folded into authority. |
 | 37 | Task 2 same-process writer-lock stop-gate witness and SI-177 | §§1, 6.1.2, 10–11 | Preserves I-12's one-writer-process exclusion and SI-69's crash-safe transaction while narrowly superseding SI-69's serve-held refusal only for this caller process's registry-proven exact outer lock; `WithWriterLock` transactions and the temporary legacy `spec.md` splice share per-checkout serialization until Task 2 deletes the splice, while distinct boardio annotation files retain their existing owner and ordering; PID text, cross-process bypass, outer-lock release, durable registry authority, and a system-wide all-file mutex claim remain excluded. |
+| 38 | Task 3 affected-consumer completeness stop-gate and SI-179 | §§7.1–7.2, 10–11 | Converts the caller-vacuous impact set into one Git-backed canonical consumer inventory and three-valued coverage witness; the accepted/proposed union is evaluated conservatively through existing CI owners, caller targets become supplemental only, missing/unknown evidence blocks, Task 4 cannot become a reverse-applicability core, and no new policy, capability, operation, scope, or approval grammar is introduced. |
 
 No source group, semantic rule, public effect, deferral, threat-model boundary,
 or closure disclosure is intentionally omitted. Wave 7 dogfood is explicitly
