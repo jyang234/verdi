@@ -167,14 +167,27 @@ type ProposeResult struct {
 // branch/HEAD precondition (a stale-head refusal, verdict, never silently
 // rebased over).
 //
-// Every request and CONTENT validation runs before the first repository
-// mutation, so a refused Propose leaves branch, HEAD, the local-branch set,
-// and the working tree byte-identical to what it found. That ordering is
-// load-bearing rather than stylistic: this operation's refusal path returns
-// only a *Error, whose Failure envelope carries no Identity at all, so a
-// mutation performed before a refusal would be undisclosed — a caller could
-// not learn from the refusal that its checkout had been moved onto a new,
-// empty proposal branch.
+// Every request, CONTENT, path-custody, and branch/HEAD precondition check
+// that can be decided WITHOUT touching the repository runs before the first
+// repository mutation, so a refusal from any of them — input-invalid,
+// corrupted-policy, name-mismatch, authority-invalid, the pre-mutation
+// unsafe-path proof, and both stale-head variants — leaves branch, HEAD, the
+// local-branch set, and the working tree byte-identical to what it found.
+// That ordering is load-bearing rather than stylistic: this operation's
+// refusal path returns only a *Error, whose Failure envelope carries no
+// Identity at all, so a mutation performed before a refusal would be
+// undisclosed — a caller could not learn from the refusal that its checkout
+// had been moved onto a new, empty proposal branch.
+//
+// The guarantee is therefore exactly that scope, and no wider. Three classes
+// of failure are decidable only AFTER the checkout has already selected (and,
+// for a brand-new proposal, created) req.Branch, and each can leave the
+// checkout there: the post-checkout unsafe-path proof retaken against the
+// branch's own materialized tree, a divergent-worktree refusal, and any
+// operational failure of the write/stage/commit sequence itself. Each is
+// documented at its own site below. Closing that residual would take a
+// repository-level transaction this operation does not have; it is disclosed
+// rather than silently implied away.
 //
 // It stages and commits exactly the one requested artifact
 // path via gitx.AddPaths — never gitx.AddAll — so an unrelated sibling
