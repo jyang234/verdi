@@ -78,6 +78,8 @@ Principles inherited from verdi-go and binding here:
   policy/                          # CI constitution/policy/overlay/exemption/disposition artifacts;
                                    #   internal grammar owned by spec/policy-authority
     dispositions/<name>.md         # authored-living semantic rulings, schema verdi.policy-disposition/v1
+  constitution/                    # authored constitution impact-consumer metadata (SI-179)
+    consumers.json                 # schema verdi.constitution-consumer-inventory/v1
   data/                            # working area — gitignored, per-checkout
     writer.lock                    # single-writer enforcement (D3)
     serve.path                     # pointer file naming the real socket path (D3); the
@@ -236,8 +238,17 @@ Notes:
   `policy-disposition/<name>`; `spec/context-integrity`'s conflict gate alone
   interprets whether a loaded disposition matches the current semantic input
   (SI-97). The top-level `policy/` admission and matching VL-007 enumeration
-  remain the single D1 entry established by SI-6; this amendment adds no
-  second authority root.
+  remain the D1 policy entry established by SI-6. The separately ratified
+  `constitution/` entry below carries impact-consumer metadata only and does
+  not alter this policy-authority root or its grammar.
+- `constitution/`: the committed top-level home for SI-179's one authored
+  affected-consumer inventory. Its v1 grammar contains exactly
+  `consumers.json`, schema `verdi.constitution-consumer-inventory/v1`, and is
+  strict-decoded by the single `internal/constitutionimpact` owner. The file
+  is proposal metadata under ordinary Git custody, not policy authority,
+  generated state, or an approval record. D1 and VL-007 admit the top-level
+  name; internal content validation stays loader-owned, following SI-36's
+  policy-store precedent rather than creating a second lint grammar.
 - GLG human records: of GLG ac-4's five kinds, attestations, waivers,
   deviation reports, and semantic dispositions have homes in this layout
   (`attestations/`, `waivers/`, archive `deviation-report.md`, and
