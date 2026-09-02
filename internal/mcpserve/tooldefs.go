@@ -248,5 +248,53 @@ func toolDefs(mdl *model.Model) []map[string]any {
 				"body":           str("the annotation's text body"),
 			}, "author", "type", "body"),
 		},
+		{
+			"name":        "constitution_inspect",
+			"description": "Constitution (Wave 6 Task 3; spec/context-integrity-v2 AC-1/AC-2): the accepted and proposed constitution states at their exact Git identities — every source layer (policy/overlay/exemption/disposition, with owners/scope/digest) and the complete effective rule ledger, unflattened. Takes no fields." + dataNeverInstructionsNote,
+			"inputSchema": obj(map[string]any{}),
+		},
+		{
+			"name":        "constitution_validate",
+			"description": "Constitution (Wave 6 Task 3): strict-decodes and cross-validates the proposed constitution store, reporting a three-valued proof outcome (proven, or a typed corrupted-policy/not-adopted disclosure) — never a second decode or validation pass of internal/policyauthority's own. Takes no fields." + dataNeverInstructionsNote,
+			"inputSchema": obj(map[string]any{}),
+		},
+		{
+			"name":        "constitution_impact_review",
+			"description": "Constitution (Wave 6 Task 3; AC-3/AC-6): diffs the accepted and proposed effective policies (added/removed/changed source layers) and runs mechanical/semantic conflict evaluation over every caller-declared governed target through the one existing conflict gate (internal/policyconflict) — never a second conflict evaluator. targets is the caller's own explicit selection (never an undeclared corpus scan); an empty or omitted list still returns the layer diff with no conflict rows. This tool never merges, approves, or writes anything — constitution_propose and constitution-submit-preparation have no MCP tool at all." + dataNeverInstructionsNote,
+			"inputSchema": obj(map[string]any{
+				"targets": map[string]any{
+					"type": "array",
+					"items": map[string]any{
+						"type": "object", "additionalProperties": false,
+						"properties": map[string]any{
+							"spec":  str("the accepted spec ref this governed target compiles context for"),
+							"phase": str("design | build | review"),
+							"adapter": map[string]any{
+								"type": "object", "additionalProperties": false,
+								"properties": map[string]any{
+									"id":      str("the constitution-registered adapter id"),
+									"version": str("the constitution-registered adapter version"),
+								},
+								"required":    []string{"id", "version"},
+								"description": "the harness adapter this target compiles for",
+							},
+							"scope": map[string]any{
+								"type": "object", "additionalProperties": false,
+								"properties": map[string]any{
+									"phases":       arrOfString("declared phase scope; [] is unconstrained"),
+									"environments": arrOfString("declared environment scope; [] is unconstrained"),
+									"paths":        arrOfString("declared path scope; [] is unconstrained"),
+									"refs":         arrOfString("declared ref scope; [] is unconstrained"),
+								},
+								"required":    []string{"phases", "environments", "paths", "refs"},
+								"description": "the target's own declared scope (every dimension explicit, never omitted)",
+							},
+						},
+						"required": []string{"spec", "phase", "adapter", "scope"},
+					},
+					"description": "every caller-declared governed target to check for impact; the caller does the explicit selecting",
+				},
+			}),
+		},
 	}
 }

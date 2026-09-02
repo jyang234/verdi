@@ -568,4 +568,66 @@ func TestMCPShowcaseCoverage(t *testing.T) {
 			t.Fatalf("mutate_draft(spec/stale-decline, real base bytes) = isError=%v %+v, want the real verdict refusal for stale-decline's genuine absence of a design/ branch", isError, out)
 		}
 	})
+
+	// mcp:constitution_inspect / mcp:constitution_validate /
+	// mcp:constitution_impact_review (Wave 6 Task 3): driven against the
+	// same provisioned showcase store, which adopts no .verdi/policy/
+	// constitution tree at all (the identical genuine fact
+	// get_design_capabilities' and prepare_design_review's own subtests
+	// above already rest on). Unlike those two, "not adopted" is NOT an
+	// error for constitutionapp's own operations — it is a disclosed,
+	// proven fact (CO-1: an honest "no constitution here" is not a
+	// fault) — so all three tools return a CLEAN result naming
+	// Adopted=false on both the accepted and proposed side, never a tool
+	// error.
+	t.Run("constitution_inspect", func(t *testing.T) {
+		text := callMCPToolOK(t, srv, "constitution_inspect", map[string]any{})
+		var out struct {
+			Schema   string `json:"schema"`
+			Accepted struct {
+				Adopted bool `json:"adopted"`
+			} `json:"accepted"`
+			Proposed struct {
+				Adopted bool `json:"adopted"`
+			} `json:"proposed"`
+		}
+		decodeToolJSON(t, text, &out)
+		if out.Schema != "verdi.constitution-inspect/v1" || out.Accepted.Adopted || out.Proposed.Adopted {
+			t.Fatalf("constitution_inspect() = %+v, want a clean result disclosing no adopted constitution on either side", out)
+		}
+	})
+
+	t.Run("constitution_validate", func(t *testing.T) {
+		text := callMCPToolOK(t, srv, "constitution_validate", map[string]any{})
+		var out struct {
+			Proven   bool `json:"proven"`
+			Snapshot struct {
+				Adopted bool   `json:"adopted"`
+				Reason  string `json:"reason"`
+			} `json:"snapshot"`
+		}
+		decodeToolJSON(t, text, &out)
+		if !out.Proven || out.Snapshot.Adopted || out.Snapshot.Reason == "" {
+			t.Fatalf("constitution_validate() = %+v, want a clean Proven result disclosing no adopted constitution with a non-empty reason", out)
+		}
+	})
+
+	t.Run("constitution_impact_review", func(t *testing.T) {
+		text := callMCPToolOK(t, srv, "constitution_impact_review", map[string]any{})
+		var out struct {
+			Accepted struct {
+				Adopted bool `json:"adopted"`
+			} `json:"accepted"`
+			Proposed struct {
+				Adopted bool `json:"adopted"`
+			} `json:"proposed"`
+			Layers            []json.RawMessage `json:"layers"`
+			Conflicts         []json.RawMessage `json:"conflicts"`
+			AffectedConsumers []json.RawMessage `json:"affected_consumers"`
+		}
+		decodeToolJSON(t, text, &out)
+		if out.Accepted.Adopted || out.Proposed.Adopted || len(out.Layers) != 0 || len(out.Conflicts) != 0 || len(out.AffectedConsumers) != 0 {
+			t.Fatalf("constitution_impact_review() = %+v, want a clean empty-diff result with no declared targets and no adopted constitution", out)
+		}
+	})
 }
