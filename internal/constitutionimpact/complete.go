@@ -101,7 +101,7 @@ func completeEvaluation(row *EvaluationCoverage, expected plannedConsumer, evalu
 			row.Refusal = refusal(ReasonEvaluationResultInvalid, expected.identity)
 			return
 		}
-		witnesses := append([]string(nil), evaluation.Refusal.Witnesses...)
+		witnesses := cloneStrings(evaluation.Refusal.Witnesses)
 		sort.Strings(witnesses)
 		row.Refusal = &EvaluationRefusal{Code: ReasonEvaluationUnresolved, Witnesses: witnesses}
 		*reasons = append(*reasons, Reason{Code: ReasonEvaluationUnresolved, Witnesses: []string{expected.identity}})
@@ -146,7 +146,7 @@ func cloneSupplemental(in []SupplementalTarget) []SupplementalTarget {
 			}
 		}
 		if target.Refusal != nil {
-			out[i].Refusal = &EvaluationRefusal{Code: target.Refusal.Code, Witnesses: append([]string(nil), target.Refusal.Witnesses...)}
+			out[i].Refusal = &EvaluationRefusal{Code: target.Refusal.Code, Witnesses: cloneStrings(target.Refusal.Witnesses)}
 			sort.Strings(out[i].Refusal.Witnesses)
 		}
 	}

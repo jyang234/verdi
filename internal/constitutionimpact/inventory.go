@@ -10,6 +10,7 @@ import (
 	"github.com/jyang234/verdi/internal/artifact"
 	"github.com/jyang234/verdi/internal/canonjson"
 	"github.com/jyang234/verdi/internal/contextcompile"
+	"github.com/jyang234/verdi/internal/execworkspace"
 )
 
 type inventoryDoc struct {
@@ -102,7 +103,7 @@ func consumerFromDoc(doc consumerDoc) (Consumer, error) {
 	consumer := Consumer{
 		Request:            request,
 		Environment:        *doc.Environment,
-		GovernedOperations: append([]string(nil), (*doc.GovernedOperations)...),
+		GovernedOperations: cloneStrings(*doc.GovernedOperations),
 	}
 	if err := validateConsumer(consumer); err != nil {
 		return Consumer{}, err
@@ -119,7 +120,7 @@ func consumerDocFor(consumer Consumer) (consumerDoc, error) {
 		return consumerDoc{}, fmt.Errorf("request: %w", err)
 	}
 	environment := consumer.Environment
-	operations := append([]string(nil), consumer.GovernedOperations...)
+	operations := cloneStrings(consumer.GovernedOperations)
 	return consumerDoc{
 		Request:            json.RawMessage(bytes.TrimSuffix(request, []byte{'\n'})),
 		Environment:        &environment,
@@ -166,14 +167,35 @@ func cloneInventory(in Inventory) Inventory {
 
 func cloneConsumer(in Consumer) Consumer {
 	out := in
-	// GrantSet contains maps and slices, so use its owning codec through the
-	// request codec rather than maintaining a shadow clone grammar.
-	encoded, err := contextcompile.EncodeRequest(in.Request)
-	if err == nil {
-		if decoded, decodeErr := contextcompile.DecodeRequest(encoded); decodeErr == nil {
-			out.Request = decoded
+	if in.Request.Expected != nil {
+		expected := *in.Request.Expected
+		out.Request.Expected = &expected
+	}
+	out.Request.Scope.Phases = cloneStrings(in.Request.Scope.Phases)
+	out.Request.Scope.Environments = cloneStrings(in.Request.Scope.Environments)
+	out.Request.Scope.Paths = cloneStrings(in.Request.Scope.Paths)
+	out.Request.Scope.Refs = cloneStrings(in.Request.Scope.Refs)
+	out.Request.Grants.Grants = make([]execworkspace.Grant, len(in.Request.Grants.Grants))
+	for i, grant := range in.Request.Grants.Grants {
+		out.Request.Grants.Grants[i] = grant
+		out.Request.Grants.Grants[i].Paths = cloneStrings(grant.Paths)
+		out.Request.Grants.Grants[i].Argv0s = cloneStrings(grant.Argv0s)
+		if grant.Ceilings != nil {
+			out.Request.Grants.Grants[i].Ceilings = make(map[string]int, len(grant.Ceilings))
+			for name, limit := range grant.Ceilings {
+				out.Request.Grants.Grants[i].Ceilings[name] = limit
+			}
 		}
 	}
-	out.GovernedOperations = append([]string(nil), in.GovernedOperations...)
+	out.GovernedOperations = cloneStrings(in.GovernedOperations)
+	return out
+}
+
+func cloneStrings(in []string) []string {
+	if in == nil {
+		return nil
+	}
+	out := make([]string, len(in))
+	copy(out, in)
 	return out
 }

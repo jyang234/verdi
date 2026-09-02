@@ -192,7 +192,8 @@ func canonicalLayerChanges(layers []LayerChange) ([]LayerChange, error) {
 	if layers == nil {
 		return []LayerChange{}, nil
 	}
-	out := append([]LayerChange(nil), layers...)
+	out := make([]LayerChange, len(layers))
+	copy(out, layers)
 	for i, layer := range out {
 		if layer.Kind == "" || layer.ID == "" {
 			return nil, fmt.Errorf("layers[%d] kind and id are mandatory", i)
@@ -252,7 +253,7 @@ func catalogUnavailableReason(side string) Reason {
 func cloneReasons(in []Reason) []Reason {
 	out := make([]Reason, len(in))
 	for i := range in {
-		out[i] = Reason{Code: in[i].Code, Witnesses: append([]string(nil), in[i].Witnesses...)}
+		out[i] = Reason{Code: in[i].Code, Witnesses: cloneStrings(in[i].Witnesses)}
 	}
 	return out
 }
