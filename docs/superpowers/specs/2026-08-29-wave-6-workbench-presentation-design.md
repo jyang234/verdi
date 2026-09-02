@@ -1,10 +1,10 @@
 # Wave 6 Workbench Presentation Authority Design
 
-**Status:** Owner-approved planning authority through SI-177. The SI-179
-affected-consumer completeness amendment is pending its one independent review
-and owner merge; Task 3 publication and Task 4 remain blocked until that
-amended exact head reaches the configured default branch and the bounded Task 3
-correction consumes it.
+**Status:** Owner-approved planning authority through SI-180. The SI-179
+affected-consumer completeness amendment and its SI-180 evidence-binding
+clarification remain pending owner merge; Task 3B and Task 4 stay blocked until
+the SI-180 exact head passes its one independent review and closure and the
+bounded Task 3A correction consumes it.
 
 **Planning base:** `915529f792f7a672e9631f42909995b38ed12655`
 
@@ -583,6 +583,24 @@ and canonical sorted governed-operation set together. There is no new
 free-form id, scope matcher, applicability operator, operation vocabulary, or
 precedence rule.
 
+For `verdi.constitution-consumer-inventory/v1`, the nested request's
+`scope.environments` array contains exactly one environment and that value is
+byte-equal to the entry's declared `environment`. A consumer that operates in
+multiple environments is represented by one complete entry per environment;
+v1 does not add a scalar-environment input to the context compiler or infer one
+from a broader scope. This restriction binds the separately declared
+environment through the existing context-manifest authority without changing
+the frozen `contextcompile` or `policyconflict` contracts.
+
+Conflict evidence is bound to the canonical request and exact environment, not
+to the governed-operation list. Two distinct inventory identities whose
+request and environment are identical but whose sorted
+`governed_operations` differ may therefore carry the same canonical context
+manifest and conflict report. They remain separate union members and require
+separate evaluation rows. Evidence reuse across different requests or
+environments remains an identity mismatch. This is evidence reuse, not row
+deduplication and not permission to omit an operation-distinct consumer.
+
 The inventory is authored and reviewed through ordinary Git proposal custody;
 `constitutionapp.Propose` neither synthesizes nor maintains it. A proposal may
 update the proposed inventory alongside its constitution artifact, but the
@@ -818,7 +836,7 @@ The final review additionally proves:
 
 ## 12. Lossless source-coverage witness
 
-The consolidated authority carries 38/38 source groups:
+The consolidated authority carries 39/39 source groups:
 
 | # | Source authority | Destination | Transformation or intentional omission |
 |---:|---|---|---|
@@ -860,6 +878,7 @@ The consolidated authority carries 38/38 source groups:
 | 36 | Task 2 browser-human stop-gate witness and SI-176 | §§1, 4.1, 6.1.1, 10–11 | Preserves unconditional AI-free browser authoring, explicit unauthenticated provenance, failed-resolution non-bypass, agent policy enforcement, honest policy absence, V1 history, and serialized predecessor review; no runtime or frontend implementation is folded into authority. |
 | 37 | Task 2 same-process writer-lock stop-gate witness and SI-177 | §§1, 6.1.2, 10–11 | Preserves I-12's one-writer-process exclusion and SI-69's crash-safe transaction while narrowly superseding SI-69's serve-held refusal only for this caller process's registry-proven exact outer lock; `WithWriterLock` transactions and the temporary legacy `spec.md` splice share per-checkout serialization until Task 2 deletes the splice, while distinct boardio annotation files retain their existing owner and ordering; PID text, cross-process bypass, outer-lock release, durable registry authority, and a system-wide all-file mutex claim remain excluded. |
 | 38 | Task 3 affected-consumer completeness stop-gate and SI-179 | §§7.1–7.2, 10–11 | Converts the caller-vacuous impact set into one Git-backed canonical consumer inventory and three-valued coverage witness; the accepted/proposed union is evaluated conservatively through existing CI owners, caller targets become supplemental only, missing/unknown evidence blocks, Task 4 cannot become a reverse-applicability core, and no new policy, capability, operation, scope, or approval grammar is introduced. |
+| 39 | Task 3A closure evidence-binding gap and SI-180 | §§7.1.1, 10–11 | Binds each v1 inventory row to one exact request-scope environment through the existing context manifest, represents multi-environment consumers as separate complete rows, permits operation-distinct identities with identical request/environment operands to reuse the same conflict evidence while still requiring one row per identity, and preserves mismatch refusal across different requests or environments without changing frozen compiler/conflict grammars. |
 
 No source group, semantic rule, public effect, deferral, threat-model boundary,
 or closure disclosure is intentionally omitted. Wave 7 dogfood is explicitly

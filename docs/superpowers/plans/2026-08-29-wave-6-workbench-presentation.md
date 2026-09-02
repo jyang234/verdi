@@ -481,7 +481,7 @@ submit-preparation over one exact accepted/proposed Git identity.
 **Stop gate:** Any new rule grammar, precedence, approval record, applicability
 operator, or conflict semantics is `NEEDS_CONTEXT`.
 
-**SI-179 closure correction (must merge before Task 4):**
+**SI-179/SI-180 closure correction (must merge before Task 4):**
 
 - [ ] RED the nonempty-but-incomplete caller target case: two registered
       consumers exist, the caller supplies only the passing one, and the
@@ -513,6 +513,15 @@ operator, or conflict semantics is `NEEDS_CONTEXT`.
       the canonical nested context request, the canonical declared environment,
       and the sorted governed-operation set. Pin otherwise-identical requests
       with different environments as distinct entries.
+- [ ] For inventory v1, require the nested request's environment scope to
+      contain exactly the one declared environment. Represent a consumer used
+      in multiple environments as separate complete rows; do not add a scalar
+      environment input to `contextcompile` or infer one from a broader scope.
+- [ ] Bind conflict evidence to request plus environment, not to the
+      governed-operation list. Permit operation-distinct consumer identities
+      with identical request/environment operands to reuse the same canonical
+      manifest/report while still requiring one evaluation row per full
+      identity. Refuse reuse across different requests or environments.
 - [ ] Prove the closed coverage states. Missing inventory/unknown evaluation is
       disclosed-unproven; duplicate, omitted, extra, or identity-mismatched
       rows are violated-with-witness; malformed present bytes are operational;
