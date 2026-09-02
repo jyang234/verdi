@@ -2,9 +2,26 @@ package constitutionimpact
 
 import (
 	"context"
+	"errors"
+	"io/fs"
 	"strings"
 	"testing"
+	"testing/fstest"
 )
+
+type cancelOnReadFS struct {
+	fs.FS
+	cancel context.CancelFunc
+	path   string
+}
+
+func (f cancelOnReadFS) Open(name string) (fs.File, error) {
+	file, err := f.FS.Open(name)
+	if name == f.path {
+		f.cancel()
+	}
+	return file, err
+}
 
 func TestBuildPlanUsesSortedAcceptedProposedUnionAndRetainsRemovedRows(t *testing.T) {
 	removed := testConsumer("spec/removed", "local")
@@ -131,17 +148,67 @@ func TestBuildPlanDuplicateInventoryIsViolatedAndEnvironmentIsIdentityBound(t *t
 	if len(plan.Consumers()) != 2 {
 		t.Fatalf("union size = %d, want distinct local and production entries", len(plan.Consumers()))
 	}
-	result := resultForPlan(t, plan, true)
 	evaluations := make([]Evaluation, 0, 2)
 	for _, consumer := range plan.Consumers() {
 		identity, _ := consumer.Identity()
-		evaluation := testEvaluation(consumer, result)
+		result, manifest := resultForConsumer(t, plan, consumer, true)
+		evaluation := testEvaluation(consumer, result, manifest)
 		evaluation.ConsumerIdentity = identity
 		evaluations = append(evaluations, evaluation)
 	}
 	coverage := plan.Complete(evaluations, nil)
 	if coverage.State != StateViolatedWithWitness || !hasReasonCode(coverage.Reasons, ReasonInventoryDuplicate) {
 		t.Fatalf("coverage = %+v", coverage)
+	}
+}
+
+func TestBuildPlanRejectsMalformedExactTreeAndLayerIdentities(t *testing.T) {
+	consumer := testConsumer("spec/registered", "local")
+	constitution := testConstitutionBytes(t)
+	inventory := testInventoryBytes(t, consumer)
+	validAccepted := ExactTree{Commit: testAcceptedCommit, Tree: testAcceptedTree, FS: testTree(inventory, constitution)}
+	validProposed := ExactTree{Commit: testProposedCommit, Tree: testProposedTree, FS: testTree(inventory, constitution)}
+
+	tests := []struct {
+		name     string
+		accepted ExactTree
+		proposed ExactTree
+		layers   []LayerChange
+	}{
+		{name: "malformed commit", accepted: ExactTree{Commit: "HEAD", Tree: testAcceptedTree, FS: validAccepted.FS}, proposed: validProposed, layers: testChangedLayer()},
+		{name: "malformed tree", accepted: ExactTree{Commit: testAcceptedCommit, Tree: "tree", FS: validAccepted.FS}, proposed: validProposed, layers: testChangedLayer()},
+		{name: "malformed layer digest", accepted: validAccepted, proposed: validProposed, layers: []LayerChange{{Kind: "policy", ID: "go-toolchain", Change: "changed", AcceptedDigest: "not-a-digest", ProposedDigest: testChangedLayer()[0].ProposedDigest}}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if _, err := BuildPlan(context.Background(), test.accepted, test.proposed, test.layers); err == nil {
+				t.Fatal("BuildPlan accepted malformed proof identity")
+			}
+		})
+	}
+}
+
+func TestBuildPlanObservesCancellationDuringFinalTreeRead(t *testing.T) {
+	consumer := testConsumer("spec/registered", "local")
+	constitution := testConstitutionBytes(t)
+	inventory := testInventoryBytes(t, consumer)
+	ctx, cancel := context.WithCancel(context.Background())
+	proposedFS := cancelOnReadFS{
+		FS: fstest.MapFS{
+			InventoryPath:    &fstest.MapFile{Data: inventory, Mode: 0o644},
+			constitutionPath: &fstest.MapFile{Data: constitution, Mode: 0o644},
+		},
+		cancel: cancel,
+		path:   constitutionPath,
+	}
+
+	_, err := BuildPlan(ctx,
+		ExactTree{Commit: testAcceptedCommit, Tree: testAcceptedTree, FS: testTree(inventory, constitution)},
+		ExactTree{Commit: testProposedCommit, Tree: testProposedTree, FS: proposedFS},
+		testChangedLayer(),
+	)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("BuildPlan cancellation error = %v, want context.Canceled", err)
 	}
 }
 

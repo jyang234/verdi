@@ -1,13 +1,11 @@
 package constitutionimpact
 
 import (
-	"os"
 	"testing"
 
 	"github.com/jyang234/verdi/internal/contextcompile"
 	"github.com/jyang234/verdi/internal/execworkspace"
 	"github.com/jyang234/verdi/internal/policyartifact"
-	"github.com/jyang234/verdi/internal/policyconflict"
 )
 
 // TestCompleteCoverageRefusesCallerOnlyPassingSubset is SI-179's semantic
@@ -24,27 +22,16 @@ func TestCompleteCoverageRefusesCallerOnlyPassingSubset(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	planned, _, err := plannedConsumers("test", Inventory{Schema: InventorySchema, Consumers: []Consumer{passing, omitted}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	plan := Plan{
-		layerChanged: true,
-		proposed: InventoryEvidence{
-			Commit:             "0123456789abcdef0123456789abcdef01234567",
-			ConstitutionDigest: "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
-		},
-		consumers: planned,
-	}
-	passResult := testPassResult(t)
+	plan := testPlan(t, []Consumer{passing, omitted}, []Consumer{passing, omitted}, testChangedLayer())
+	passResult, manifest := resultForConsumer(t, plan, passing, true)
 
 	coverage := plan.Complete(
 		[]Evaluation{{
 			ConsumerIdentity: passingID, Consumer: passing,
-			AcceptedManifestDigest: passResult.Report.Input.Target.Accepted.ManifestDigest,
-			Result:                 passResult,
+			AcceptedManifestBytes: manifest,
+			Result:                passResult,
 		}},
-		[]SupplementalTarget{testSupplemental(passing, passResult)},
+		[]SupplementalTarget{testSupplemental(passing, passResult, manifest)},
 	)
 
 	if coverage.State != StateViolatedWithWitness {
@@ -66,7 +53,7 @@ func testConsumer(spec, environment string) Consumer {
 			Grants:  execworkspace.GrantSet{Grants: []execworkspace.Grant{}},
 			Phase:   contextcompile.PhaseBuild,
 			Scope: policyartifact.Scope{
-				Phases: []string{policyartifact.PhaseBuild}, Environments: []string{},
+				Phases: []string{policyartifact.PhaseBuild}, Environments: []string{environment},
 				Paths: []string{}, Refs: []string{},
 			},
 			Spec: spec,
@@ -74,30 +61,6 @@ func testConsumer(spec, environment string) Consumer {
 		Environment:        environment,
 		GovernedOperations: []string{"make-verify"},
 	}
-}
-
-func testPassResult(t *testing.T) *policyconflict.Result {
-	t.Helper()
-	raw, err := os.ReadFile("../policyconflict/testdata/report.json")
-	if err != nil {
-		t.Fatal(err)
-	}
-	report, err := policyconflict.DecodeReport(raw)
-	if err != nil {
-		t.Fatal(err)
-	}
-	report.Semantic = []policyconflict.SemanticEvaluation{}
-	report.Verdict = policyconflict.VerdictPass
-	report.Digest = ""
-	encoded, err := policyconflict.EncodeReport(report)
-	if err != nil {
-		t.Fatal(err)
-	}
-	canonical, err := policyconflict.DecodeReport(encoded)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return &policyconflict.Result{Report: canonical, ReportBytes: encoded}
 }
 
 func hasReason(reasons []Reason, code ReasonCode, witness string) bool {

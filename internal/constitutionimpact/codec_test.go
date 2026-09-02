@@ -11,10 +11,10 @@ func TestCoverageCanonicalRoundTripReusesNestedOwnerCodecs(t *testing.T) {
 	consumer := testConsumer("spec/registered", "local")
 	plan := testPlan(t, []Consumer{consumer}, []Consumer{consumer}, testChangedLayer())
 	identity, _ := consumer.Identity()
-	result := resultForPlan(t, plan, true)
+	result, manifest := resultForConsumer(t, plan, consumer, true)
 	coverage := plan.Complete(
-		[]Evaluation{{ConsumerIdentity: identity, Consumer: consumer, AcceptedManifestDigest: result.Report.Input.Target.Accepted.ManifestDigest, Result: result}},
-		[]SupplementalTarget{testSupplemental(consumer, result)},
+		[]Evaluation{{ConsumerIdentity: identity, Consumer: consumer, AcceptedManifestBytes: manifest, Result: result}},
+		[]SupplementalTarget{testSupplemental(consumer, result, manifest)},
 	)
 	encoded, err := EncodeCoverage(coverage)
 	if err != nil {
@@ -40,7 +40,7 @@ func TestCoverageCanonicalRoundTripReusesNestedOwnerCodecs(t *testing.T) {
 	if len(wire.SupplementalTargets) != 1 {
 		t.Fatalf("supplemental targets = %d, want 1", len(wire.SupplementalTargets))
 	}
-	for _, key := range []string{"accepted_manifest_digest", "report", "request", "request_digest"} {
+	for _, key := range []string{"accepted_manifest", "report", "request", "request_digest"} {
 		if _, ok := wire.SupplementalTargets[0][key]; !ok {
 			t.Fatalf("supplemental target missing %q: %s", key, encoded)
 		}
@@ -69,10 +69,10 @@ func TestCoverageCanonicalRoundTripReusesNestedOwnerCodecs(t *testing.T) {
 func TestDecodeCoverageRejectsSupplementalRequestDigestMismatch(t *testing.T) {
 	consumer := testConsumer("spec/registered", "local")
 	plan := testPlan(t, []Consumer{consumer}, []Consumer{consumer}, testChangedLayer())
-	result := resultForPlan(t, plan, true)
+	result, manifest := resultForConsumer(t, plan, consumer, true)
 	raw, err := EncodeCoverage(plan.Complete(
-		[]Evaluation{testEvaluation(consumer, result)},
-		[]SupplementalTarget{testSupplemental(consumer, result)},
+		[]Evaluation{testEvaluation(consumer, result, manifest)},
+		[]SupplementalTarget{testSupplemental(consumer, result, manifest)},
 	))
 	if err != nil {
 		t.Fatal(err)
@@ -148,18 +148,63 @@ func TestDecodeCoverageRejectsUnknownNestedRequestAndReportFields(t *testing.T) 
 	consumer := testConsumer("spec/registered", "local")
 	plan := testPlan(t, []Consumer{consumer}, []Consumer{consumer}, testChangedLayer())
 	identity, _ := consumer.Identity()
-	result := resultForPlan(t, plan, true)
-	raw, err := EncodeCoverage(plan.Complete([]Evaluation{{ConsumerIdentity: identity, Consumer: consumer, AcceptedManifestDigest: result.Report.Input.Target.Accepted.ManifestDigest, Result: result}}, nil))
+	result, manifest := resultForConsumer(t, plan, consumer, true)
+	raw, err := EncodeCoverage(plan.Complete([]Evaluation{{ConsumerIdentity: identity, Consumer: consumer, AcceptedManifestBytes: manifest, Result: result}}, nil))
 	if err != nil {
 		t.Fatal(err)
 	}
 	requestUnknown := bytes.Replace(raw, []byte(`"adapter":`), []byte(`"unknown":true,"adapter":`), 1)
-	reportUnknown := bytes.Replace(raw, []byte(`"digest":`), []byte(`"unknown":true,"digest":`), 1)
+	reportUnknown := bytes.Replace(raw, []byte(`"verdict":`), []byte(`"unknown":true,"verdict":`), 1)
 	for name, input := range map[string][]byte{"request": requestUnknown, "report": reportUnknown} {
 		t.Run(name, func(t *testing.T) {
 			if _, err := DecodeCoverage(input); err == nil {
 				t.Fatal("DecodeCoverage accepted unknown nested owner field")
 			}
 		})
+	}
+}
+
+func TestEncodeCoverageRefusesMalformedEvidenceIdentities(t *testing.T) {
+	consumer := testConsumer("spec/registered", "local")
+	plan := testPlan(t, []Consumer{consumer}, []Consumer{consumer}, testChangedLayer())
+	result, manifest := resultForConsumer(t, plan, consumer, true)
+	base := plan.Complete([]Evaluation{testEvaluation(consumer, result, manifest)}, nil)
+	tests := []struct {
+		name   string
+		mutate func(*Coverage)
+	}{
+		{name: "inventory digest", mutate: func(c *Coverage) { c.Accepted.InventoryDigest = "not-a-digest" }},
+		{name: "constitution digest", mutate: func(c *Coverage) { c.Accepted.ConstitutionDigest = "not-a-digest" }},
+		{name: "commit", mutate: func(c *Coverage) { c.Accepted.Commit = "HEAD" }},
+		{name: "tree", mutate: func(c *Coverage) { c.Accepted.Tree = "tree" }},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			coverage := base
+			test.mutate(&coverage)
+			if _, err := EncodeCoverage(coverage); err == nil {
+				t.Fatal("EncodeCoverage accepted malformed evidence identity")
+			}
+		})
+	}
+}
+
+func TestEncodeCoverageNeverEmitsNilReasonWitnesses(t *testing.T) {
+	coverage := Coverage{
+		Schema:   CoverageSchema,
+		Accepted: InventoryEvidence{Commit: testAcceptedCommit, Tree: testAcceptedTree, Presence: PresenceMissing},
+		Proposed: InventoryEvidence{Commit: testProposedCommit, Tree: testProposedTree, Presence: PresenceMissing},
+		Layers:   []LayerChange{}, Consumers: []Consumer{}, Evaluations: []EvaluationCoverage{}, SupplementalTargets: []SupplementalTarget{},
+		State: StateDisclosedUnproven,
+		Reasons: []Reason{
+			{Code: ReasonAcceptedInventoryMissing, Witnesses: nil},
+			{Code: ReasonProposedInventoryMissing, Witnesses: []string{InventoryPath}},
+		},
+	}
+	if encoded, err := EncodeCoverage(coverage); err == nil {
+		if _, decodeErr := DecodeCoverage(encoded); decodeErr != nil {
+			t.Fatalf("EncodeCoverage emitted bytes DecodeCoverage rejects: %v\n%s", decodeErr, encoded)
+		}
+		t.Fatal("EncodeCoverage accepted nil reason witnesses instead of refusing them")
 	}
 }

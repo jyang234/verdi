@@ -31,6 +31,7 @@ func TestInventoryCanonicalRoundTripAndIdentity(t *testing.T) {
 	}
 	production := cloneConsumer(inventory.Consumers[0])
 	production.Environment = "production"
+	production.Request.Scope.Environments = []string{"production"}
 	productionID, err := production.Identity()
 	if err != nil {
 		t.Fatal(err)
@@ -127,5 +128,13 @@ func TestEncodeInventorySortsConsumersAndRefusesInvalidFields(t *testing.T) {
 	}
 	if _, err := EncodeInventory(Inventory{Schema: InventorySchema}); err == nil {
 		t.Fatal("EncodeInventory accepted nil consumers")
+	}
+}
+
+func TestEncodeInventoryRefusesEnvironmentOutsideExactRequestScope(t *testing.T) {
+	consumer := testConsumer("spec/registered", "local")
+	consumer.Request.Scope.Environments = []string{"production"}
+	if _, err := EncodeInventory(Inventory{Schema: InventorySchema, Consumers: []Consumer{consumer}}); err == nil || !strings.Contains(err.Error(), "environment") {
+		t.Fatalf("EncodeInventory environment mismatch error = %v", err)
 	}
 }

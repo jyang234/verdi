@@ -2,9 +2,11 @@ package constitutionimpact
 
 import (
 	"bytes"
+	"reflect"
 	"sort"
 
 	"github.com/jyang234/verdi/internal/canonjson"
+	"github.com/jyang234/verdi/internal/contextcompile"
 	"github.com/jyang234/verdi/internal/policyconflict"
 )
 
@@ -33,6 +35,7 @@ func (p Plan) Complete(evaluations []Evaluation, supplemental []SupplementalTarg
 	}
 
 	rows := make([]EvaluationCoverage, 0, len(p.consumers))
+	usedManifests := make(map[string]string, len(p.consumers))
 	for _, expected := range p.consumers {
 		row := EvaluationCoverage{
 			ConsumerIdentity: expected.identity,
@@ -44,7 +47,7 @@ func (p Plan) Complete(evaluations []Evaluation, supplemental []SupplementalTarg
 			reasons = append(reasons, Reason{Code: ReasonEvaluationOmitted, Witnesses: []string{expected.identity}})
 			row.Refusal = refusal(ReasonEvaluationOmitted, expected.identity)
 		case 1:
-			completeEvaluation(&row, expected, claimed[0], p.proposed, &reasons)
+			completeEvaluation(&row, expected, claimed[0], p.proposed, usedManifests, &reasons)
 		default:
 			reasons = append(reasons, Reason{Code: ReasonEvaluationDuplicate, Witnesses: []string{expected.identity}})
 			row.Refusal = refusal(ReasonEvaluationDuplicate, expected.identity)
@@ -56,7 +59,7 @@ func (p Plan) Complete(evaluations []Evaluation, supplemental []SupplementalTarg
 	for i := range p.consumers {
 		coverageConsumers[i] = cloneConsumer(p.consumers[i].consumer)
 	}
-	supplementalCopy := cloneSupplemental(supplemental)
+	supplementalCopy := completeSupplemental(supplemental, p.proposed)
 	reasons = normalizedReasons(reasons)
 	return Coverage{
 		Schema:              CoverageSchema,
@@ -71,7 +74,7 @@ func (p Plan) Complete(evaluations []Evaluation, supplemental []SupplementalTarg
 	}
 }
 
-func completeEvaluation(row *EvaluationCoverage, expected plannedConsumer, evaluation Evaluation, proposed InventoryEvidence, reasons *[]Reason) {
+func completeEvaluation(row *EvaluationCoverage, expected plannedConsumer, evaluation Evaluation, proposed InventoryEvidence, usedManifests map[string]string, reasons *[]Reason) {
 	doc, err := consumerDocFor(evaluation.Consumer)
 	if err != nil {
 		*reasons = append(*reasons, Reason{Code: ReasonEvaluationIdentityMismatch, Witnesses: []string{expected.identity}})
@@ -96,6 +99,11 @@ func completeEvaluation(row *EvaluationCoverage, expected plannedConsumer, evalu
 		return
 	}
 	if evaluation.Refusal != nil {
+		if len(evaluation.AcceptedManifestBytes) != 0 {
+			*reasons = append(*reasons, Reason{Code: ReasonEvaluationResultInvalid, Witnesses: []string{expected.identity}})
+			row.Refusal = refusal(ReasonEvaluationResultInvalid, expected.identity)
+			return
+		}
 		if evaluation.Refusal.Code != ReasonEvaluationUnresolved {
 			*reasons = append(*reasons, Reason{Code: ReasonEvaluationResultInvalid, Witnesses: []string{expected.identity}})
 			row.Refusal = refusal(ReasonEvaluationResultInvalid, expected.identity)
@@ -107,23 +115,35 @@ func completeEvaluation(row *EvaluationCoverage, expected plannedConsumer, evalu
 		*reasons = append(*reasons, Reason{Code: ReasonEvaluationUnresolved, Witnesses: []string{expected.identity}})
 		return
 	}
-	row.AcceptedManifestDigest = evaluation.AcceptedManifestDigest
 	report, valid := canonicalReport(*evaluation.Result)
 	if !valid {
 		*reasons = append(*reasons, Reason{Code: ReasonEvaluationResultInvalid, Witnesses: []string{expected.identity}})
 		row.Refusal = refusal(ReasonEvaluationResultInvalid, expected.identity)
 		return
 	}
-	if evaluation.AcceptedManifestDigest == "" || report.Input.Target.Accepted == nil ||
-		report.Input.Target.Accepted.ManifestDigest != evaluation.AcceptedManifestDigest ||
-		report.Input.Target.Kind != policyconflict.TargetAcceptedContext ||
-		!report.Input.Repository.Head.Known || report.Input.Repository.Head.Value != proposed.Commit ||
-		(proposed.ConstitutionDigest != "" && report.Input.ConstitutionDigest != proposed.ConstitutionDigest) {
+	manifest, manifestBytes, valid := canonicalManifest(evaluation.AcceptedManifestBytes)
+	if !valid {
+		*reasons = append(*reasons, Reason{Code: ReasonEvaluationResultInvalid, Witnesses: []string{expected.identity}})
+		row.Refusal = refusal(ReasonEvaluationResultInvalid, expected.identity)
+		return
+	}
+	if !manifestMatchesRequest(manifest, expected.consumer.Request) || !manifestMatchesEvidence(manifest, proposed) ||
+		!reportMatchesManifest(report, manifest) {
 		*reasons = append(*reasons, Reason{Code: ReasonEvaluationOperandMismatch, Witnesses: []string{expected.identity}})
 		row.Refusal = refusal(ReasonEvaluationOperandMismatch, expected.identity)
 		return
 	}
+	if previous, exists := usedManifests[manifest.Digest]; exists && previous != expected.identity {
+		*reasons = append(*reasons, Reason{Code: ReasonEvaluationOperandMismatch, Witnesses: []string{expected.identity}})
+		row.Refusal = refusal(ReasonEvaluationOperandMismatch, expected.identity)
+		return
+	}
+	usedManifests[manifest.Digest] = expected.identity
+	row.AcceptedManifestBytes = manifestBytes
 	row.Report = &report
+	if report.Verdict == policyconflict.VerdictBlockedUnproven {
+		*reasons = append(*reasons, Reason{Code: ReasonEvaluationUnresolved, Witnesses: []string{expected.identity}})
+	}
 }
 
 func canonicalReport(result policyconflict.Result) (policyconflict.Report, bool) {
@@ -138,21 +158,91 @@ func canonicalReport(result policyconflict.Result) (policyconflict.Report, bool)
 	return decoded, true
 }
 
-func cloneSupplemental(in []SupplementalTarget) []SupplementalTarget {
+func canonicalManifest(data []byte) (contextcompile.Manifest, []byte, bool) {
+	manifest, err := contextcompile.DecodeManifest(data)
+	if err != nil {
+		return contextcompile.Manifest{}, nil, false
+	}
+	encoded, err := contextcompile.EncodeManifest(manifest)
+	if err != nil || !bytes.Equal(encoded, data) {
+		return contextcompile.Manifest{}, nil, false
+	}
+	return manifest, append([]byte(nil), encoded...), true
+}
+
+func manifestMatchesRequest(manifest contextcompile.Manifest, request contextcompile.Request) bool {
+	if manifest.Adapter != request.Adapter || manifest.Phase != request.Phase || manifest.AcceptedSpec.Ref != request.Spec ||
+		!reflect.DeepEqual(manifest.Scope, request.Scope) || !reflect.DeepEqual(manifest.Capabilities, request.Grants) {
+		return false
+	}
+	if request.Expected == nil {
+		return true
+	}
+	return manifest.Repository.Branch.Known && manifest.Repository.Branch.Value == request.Expected.Branch &&
+		manifest.Repository.Head.Known && manifest.Repository.Head.Value == request.Expected.Head
+}
+
+func manifestMatchesEvidence(manifest contextcompile.Manifest, proposed InventoryEvidence) bool {
+	return manifest.Repository.Head.Known && manifest.Repository.Head.Value == proposed.Commit &&
+		proposed.ConstitutionDigest != "" && manifest.Policy.ConstitutionDigest == proposed.ConstitutionDigest
+}
+
+func reportMatchesManifest(report policyconflict.Report, manifest contextcompile.Manifest) bool {
+	if report.Input.Target.Kind != policyconflict.TargetAcceptedContext || report.Input.Target.Accepted == nil ||
+		report.Input.Target.Accepted.ManifestDigest != manifest.Digest ||
+		report.Input.ConstitutionDigest != manifest.Policy.ConstitutionDigest ||
+		report.Input.EffectivePolicyDigest != manifest.Policy.EffectiveDigest ||
+		report.Input.Profile.ID != manifest.Policy.ProfileID ||
+		report.Input.Profile.Digest != manifest.Policy.ProfileDigest ||
+		report.Input.Profile.ID != manifest.GovernanceProfile.ID ||
+		report.Input.Profile.Class != string(manifest.GovernanceProfile.Class) ||
+		report.Input.Profile.Digest != manifest.GovernanceProfile.Digest ||
+		!reportRepositoryMatchesManifest(report, manifest) || len(report.Input.PolicyEntries) != len(manifest.Policy.Entries) {
+		return false
+	}
+	for i, entry := range report.Input.PolicyEntries {
+		manifestEntry := manifest.Policy.Entries[i]
+		if entry.Kind != manifestEntry.Kind || entry.ID != manifestEntry.ID || entry.Digest != manifestEntry.Digest {
+			return false
+		}
+	}
+	return true
+}
+
+func reportRepositoryMatchesManifest(report policyconflict.Report, manifest contextcompile.Manifest) bool {
+	left, right := report.Input.Repository, manifest.Repository
+	return left.RemoteOrigin.Known == right.RemoteOrigin.Known && left.RemoteOrigin.Value == right.RemoteOrigin.Value &&
+		left.Branch.Known == right.Branch.Known && left.Branch.Value == right.Branch.Value &&
+		left.Head.Known == right.Head.Known && left.Head.Value == right.Head.Value &&
+		left.DefaultBranch.Known == right.DefaultBranch.Known && left.DefaultBranch.Name == right.DefaultBranch.Name &&
+		left.DefaultBranch.Ref == right.DefaultBranch.Ref && left.DefaultBranch.Head == right.DefaultBranch.Head &&
+		left.Relationship == right.Relationship && left.Dirty.Known == right.Dirty.Known && left.Dirty.Value == right.Dirty.Value &&
+		left.Staged.Known == right.Staged.Known && left.Staged.Value == right.Staged.Value &&
+		left.Worktree.Managed == right.Worktree.Managed && left.Worktree.Name == right.Worktree.Name && string(left.Source) == right.Source
+}
+
+func completeSupplemental(in []SupplementalTarget, proposed InventoryEvidence) []SupplementalTarget {
 	out := make([]SupplementalTarget, len(in))
 	for i, target := range in {
 		out[i].Request = cloneRequest(target.Request)
-		out[i].AcceptedManifestDigest = target.AcceptedManifestDigest
-		if target.Result != nil {
-			if report, ok := canonicalReport(*target.Result); ok {
-				out[i].Result = &policyconflict.Result{
-					Report: report, ReportBytes: append([]byte(nil), target.Result.ReportBytes...),
-				}
+		witness, _ := supplementalRequestDigest(target.Request)
+		switch {
+		case target.Result != nil && target.Refusal == nil:
+			report, reportOK := canonicalReport(*target.Result)
+			manifest, manifestBytes, manifestOK := canonicalManifest(target.AcceptedManifestBytes)
+			if !reportOK || !manifestOK {
+				out[i].Refusal = refusal(ReasonEvaluationResultInvalid, witness)
+			} else if !manifestMatchesRequest(manifest, target.Request) || !manifestMatchesEvidence(manifest, proposed) || !reportMatchesManifest(report, manifest) {
+				out[i].Refusal = refusal(ReasonEvaluationOperandMismatch, witness)
+			} else {
+				out[i].AcceptedManifestBytes = manifestBytes
+				out[i].Result = &policyconflict.Result{Report: report, ReportBytes: append([]byte(nil), target.Result.ReportBytes...)}
 			}
-		}
-		if target.Refusal != nil {
+		case target.Result == nil && target.Refusal != nil && len(target.AcceptedManifestBytes) == 0:
 			out[i].Refusal = &EvaluationRefusal{Code: target.Refusal.Code, Witnesses: cloneStrings(target.Refusal.Witnesses)}
 			sort.Strings(out[i].Refusal.Witnesses)
+		default:
+			out[i].Refusal = refusal(ReasonEvaluationResultInvalid, witness)
 		}
 	}
 	sort.SliceStable(out, func(i, j int) bool {

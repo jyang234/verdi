@@ -151,6 +151,9 @@ func validateConsumer(consumer Consumer) error {
 	if consumer.Environment == "" {
 		return fmt.Errorf("environment must be non-empty")
 	}
+	if len(consumer.Request.Scope.Environments) != 1 || consumer.Request.Scope.Environments[0] != consumer.Environment {
+		return fmt.Errorf("environment %q must equal the request scope's single exact environment", consumer.Environment)
+	}
 	if consumer.GovernedOperations == nil {
 		return fmt.Errorf("governed_operations must be non-nil")
 	}

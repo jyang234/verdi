@@ -115,29 +115,29 @@ type EvaluationRefusal struct {
 // Evaluation is a claimed canonical row. ConsumerIdentity is checked against
 // Consumer, and exactly one of Result or Refusal must be present.
 type Evaluation struct {
-	ConsumerIdentity       string
-	Consumer               Consumer
-	AcceptedManifestDigest string
-	Result                 *policyconflict.Result
-	Refusal                *EvaluationRefusal
+	ConsumerIdentity      string
+	Consumer              Consumer
+	AcceptedManifestBytes []byte
+	Result                *policyconflict.Result
+	Refusal               *EvaluationRefusal
 }
 
 // SupplementalTarget is caller-provided preview input. It is retained in the
 // witness but never participates in union membership or completeness.
 type SupplementalTarget struct {
-	Request                contextcompile.Request
-	AcceptedManifestDigest string
-	Result                 *policyconflict.Result
-	Refusal                *EvaluationRefusal
+	Request               contextcompile.Request
+	AcceptedManifestBytes []byte
+	Result                *policyconflict.Result
+	Refusal               *EvaluationRefusal
 }
 
 // EvaluationCoverage is one registered union member's closed row.
 type EvaluationCoverage struct {
-	ConsumerIdentity       string
-	Consumer               Consumer
-	AcceptedManifestDigest string
-	Report                 *policyconflict.Report
-	Refusal                *EvaluationRefusal
+	ConsumerIdentity      string
+	Consumer              Consumer
+	AcceptedManifestBytes []byte
+	Report                *policyconflict.Report
+	Refusal               *EvaluationRefusal
 }
 
 // Coverage is the canonical complete witness for one plan.

@@ -10,7 +10,9 @@ import (
 	"io/fs"
 	"sort"
 
+	"github.com/jyang234/verdi/internal/artifact"
 	"github.com/jyang234/verdi/internal/canonjson"
+	"github.com/jyang234/verdi/internal/gitx"
 	"github.com/jyang234/verdi/internal/policyartifact"
 )
 
@@ -94,8 +96,11 @@ func (p Plan) Consumers() []Consumer {
 }
 
 func validateExactTree(name string, tree ExactTree) error {
-	if tree.Commit == "" || tree.Tree == "" {
-		return fmt.Errorf("constitutionimpact: build plan: %s commit and tree identities are mandatory", name)
+	if err := gitx.ValidateFullOID(tree.Commit); err != nil {
+		return fmt.Errorf("constitutionimpact: build plan: %s commit identity: %w", name, err)
+	}
+	if err := gitx.ValidateFullOID(tree.Tree); err != nil {
+		return fmt.Errorf("constitutionimpact: build plan: %s tree identity: %w", name, err)
 	}
 	return nil
 }
@@ -127,6 +132,9 @@ func loadSide(ctx context.Context, name string, tree ExactTree) (loadedSide, err
 		return loadedSide{}, fmt.Errorf("constitutionimpact: loading %s tree: %w", name, err)
 	}
 	constitutionBytes, err := fs.ReadFile(tree.FS, constitutionPath)
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return loadedSide{}, fmt.Errorf("constitutionimpact: loading %s tree: %w", name, ctxErr)
+	}
 	if errors.Is(err, fs.ErrNotExist) || err != nil {
 		consumers, duplicateReasons, makeErr := plannedConsumers(name, inventory)
 		if makeErr != nil {
@@ -203,13 +211,22 @@ func canonicalLayerChanges(layers []LayerChange) ([]LayerChange, error) {
 			if layer.AcceptedDigest != "" || layer.ProposedDigest == "" {
 				return nil, fmt.Errorf("layers[%d] added change must carry only proposed_digest", i)
 			}
+			if !artifact.ValidDigest(layer.ProposedDigest) {
+				return nil, fmt.Errorf("layers[%d] proposed_digest is not a canonical sha256 digest", i)
+			}
 		case "removed":
 			if layer.AcceptedDigest == "" || layer.ProposedDigest != "" {
 				return nil, fmt.Errorf("layers[%d] removed change must carry only accepted_digest", i)
 			}
+			if !artifact.ValidDigest(layer.AcceptedDigest) {
+				return nil, fmt.Errorf("layers[%d] accepted_digest is not a canonical sha256 digest", i)
+			}
 		case "changed":
 			if layer.AcceptedDigest == "" || layer.ProposedDigest == "" || layer.AcceptedDigest == layer.ProposedDigest {
 				return nil, fmt.Errorf("layers[%d] changed change must carry distinct accepted/proposed digests", i)
+			}
+			if !artifact.ValidDigest(layer.AcceptedDigest) || !artifact.ValidDigest(layer.ProposedDigest) {
+				return nil, fmt.Errorf("layers[%d] accepted/proposed digests must be canonical sha256 digests", i)
 			}
 		default:
 			return nil, fmt.Errorf("layers[%d] unknown change %q", i, layer.Change)

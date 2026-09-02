@@ -9,6 +9,7 @@ import (
 	"github.com/jyang234/verdi/internal/artifact"
 	"github.com/jyang234/verdi/internal/canonjson"
 	"github.com/jyang234/verdi/internal/contextcompile"
+	"github.com/jyang234/verdi/internal/gitx"
 	"github.com/jyang234/verdi/internal/policyconflict"
 )
 
@@ -32,18 +33,18 @@ type coverageConsumerDoc struct {
 }
 
 type coverageEvaluationDoc struct {
-	Consumer               *coverageConsumerDoc `json:"consumer"`
-	AcceptedManifestDigest *string              `json:"accepted_manifest_digest"`
-	Report                 *json.RawMessage     `json:"report,omitempty"`
-	Refusal                *EvaluationRefusal   `json:"refusal,omitempty"`
+	Consumer         *coverageConsumerDoc `json:"consumer"`
+	AcceptedManifest *json.RawMessage     `json:"accepted_manifest,omitempty"`
+	Report           *json.RawMessage     `json:"report,omitempty"`
+	Refusal          *EvaluationRefusal   `json:"refusal,omitempty"`
 }
 
 type supplementalTargetDoc struct {
-	Request                json.RawMessage    `json:"request"`
-	RequestDigest          *string            `json:"request_digest"`
-	AcceptedManifestDigest *string            `json:"accepted_manifest_digest"`
-	Report                 *json.RawMessage   `json:"report,omitempty"`
-	Refusal                *EvaluationRefusal `json:"refusal,omitempty"`
+	Request          json.RawMessage    `json:"request"`
+	RequestDigest    *string            `json:"request_digest"`
+	AcceptedManifest *json.RawMessage   `json:"accepted_manifest,omitempty"`
+	Report           *json.RawMessage   `json:"report,omitempty"`
+	Refusal          *EvaluationRefusal `json:"refusal,omitempty"`
 }
 
 // EncodeCoverage returns the strict canonical coverage witness.
@@ -101,9 +102,14 @@ func coverageDocFor(coverage Coverage) (coverageDoc, error) {
 		if *consumer.Identity != evaluation.ConsumerIdentity {
 			return coverageDoc{}, fmt.Errorf("evaluations[%d]: consumer identity mismatch", i)
 		}
-		digest := evaluation.AcceptedManifestDigest
-		row := coverageEvaluationDoc{Consumer: &consumer, AcceptedManifestDigest: &digest}
+		row := coverageEvaluationDoc{Consumer: &consumer}
 		if evaluation.Report != nil {
+			_, manifest, ok := canonicalManifest(evaluation.AcceptedManifestBytes)
+			if !ok {
+				return coverageDoc{}, fmt.Errorf("evaluations[%d].accepted_manifest is not canonical", i)
+			}
+			manifestRaw := json.RawMessage(bytes.TrimSuffix(manifest, []byte{'\n'}))
+			row.AcceptedManifest = &manifestRaw
 			report, err := policyconflict.EncodeReport(*evaluation.Report)
 			if err != nil {
 				return coverageDoc{}, fmt.Errorf("evaluations[%d].report: %w", i, err)
@@ -123,14 +129,18 @@ func coverageDocFor(coverage Coverage) (coverageDoc, error) {
 			return coverageDoc{}, fmt.Errorf("supplemental_targets[%d].request: %w", i, err)
 		}
 		requestDigest := digestBytes(request)
-		digest := target.AcceptedManifestDigest
 		row := supplementalTargetDoc{
-			Request:                json.RawMessage(bytes.TrimSuffix(request, []byte{'\n'})),
-			RequestDigest:          &requestDigest,
-			AcceptedManifestDigest: &digest,
+			Request:       json.RawMessage(bytes.TrimSuffix(request, []byte{'\n'})),
+			RequestDigest: &requestDigest,
 		}
 		if target.Result != nil {
-			_, ok := canonicalReport(*target.Result)
+			_, manifest, ok := canonicalManifest(target.AcceptedManifestBytes)
+			if !ok {
+				return coverageDoc{}, fmt.Errorf("supplemental_targets[%d].accepted_manifest is not canonical", i)
+			}
+			manifestRaw := json.RawMessage(bytes.TrimSuffix(manifest, []byte{'\n'}))
+			row.AcceptedManifest = &manifestRaw
+			_, ok = canonicalReport(*target.Result)
 			if !ok {
 				return coverageDoc{}, fmt.Errorf("supplemental_targets[%d].report is not a canonical policyconflict result", i)
 			}
@@ -173,32 +183,40 @@ func coverageFromDoc(doc coverageDoc) (Coverage, error) {
 	}
 	evaluations := make([]EvaluationCoverage, len(*doc.Evaluations))
 	for i, row := range *doc.Evaluations {
-		if row.Consumer == nil || row.AcceptedManifestDigest == nil || (row.Report == nil) == (row.Refusal == nil) {
-			return Coverage{}, fmt.Errorf("evaluations[%d]: consumer, accepted_manifest_digest, and exactly one of report/refusal are mandatory", i)
+		if row.Consumer == nil || (row.Report == nil) == (row.Refusal == nil) {
+			return Coverage{}, fmt.Errorf("evaluations[%d]: consumer and exactly one of report/refusal are mandatory", i)
 		}
 		identity, consumer, err := consumerFromCoverageDoc(*row.Consumer)
 		if err != nil {
 			return Coverage{}, fmt.Errorf("evaluations[%d].consumer: %w", i, err)
 		}
-		decoded := EvaluationCoverage{
-			ConsumerIdentity: identity, Consumer: consumer,
-			AcceptedManifestDigest: *row.AcceptedManifestDigest,
-		}
+		decoded := EvaluationCoverage{ConsumerIdentity: identity, Consumer: consumer}
 		if row.Report != nil {
+			if row.AcceptedManifest == nil {
+				return Coverage{}, fmt.Errorf("evaluations[%d]: accepted_manifest is mandatory with report", i)
+			}
+			manifestBytes := append(append([]byte(nil), (*row.AcceptedManifest)...), '\n')
+			if _, _, ok := canonicalManifest(manifestBytes); !ok {
+				return Coverage{}, fmt.Errorf("evaluations[%d].accepted_manifest is not canonical", i)
+			}
+			decoded.AcceptedManifestBytes = manifestBytes
 			report, err := policyconflict.DecodeReport(append(append([]byte(nil), (*row.Report)...), '\n'))
 			if err != nil {
 				return Coverage{}, fmt.Errorf("evaluations[%d].report: %w", i, err)
 			}
 			decoded.Report = &report
 		} else {
+			if row.AcceptedManifest != nil {
+				return Coverage{}, fmt.Errorf("evaluations[%d]: refusal cannot carry accepted_manifest", i)
+			}
 			decoded.Refusal = cloneRefusal(row.Refusal)
 		}
 		evaluations[i] = decoded
 	}
 	supplemental := make([]SupplementalTarget, len(*doc.SupplementalTargets))
 	for i, row := range *doc.SupplementalTargets {
-		if len(row.Request) == 0 || row.RequestDigest == nil || row.AcceptedManifestDigest == nil || (row.Report == nil) == (row.Refusal == nil) {
-			return Coverage{}, fmt.Errorf("supplemental_targets[%d]: request, request_digest, accepted_manifest_digest, and exactly one of report/refusal are mandatory", i)
+		if len(row.Request) == 0 || row.RequestDigest == nil || (row.Report == nil) == (row.Refusal == nil) {
+			return Coverage{}, fmt.Errorf("supplemental_targets[%d]: request, request_digest, and exactly one of report/refusal are mandatory", i)
 		}
 		requestBytes := append(append([]byte(nil), row.Request...), '\n')
 		request, err := contextcompile.DecodeRequest(requestBytes)
@@ -208,8 +226,16 @@ func coverageFromDoc(doc coverageDoc) (Coverage, error) {
 		if got := digestBytes(requestBytes); got != *row.RequestDigest {
 			return Coverage{}, fmt.Errorf("supplemental_targets[%d]: request digest mismatch", i)
 		}
-		target := SupplementalTarget{Request: request, AcceptedManifestDigest: *row.AcceptedManifestDigest}
+		target := SupplementalTarget{Request: request}
 		if row.Report != nil {
+			if row.AcceptedManifest == nil {
+				return Coverage{}, fmt.Errorf("supplemental_targets[%d]: accepted_manifest is mandatory with report", i)
+			}
+			manifestBytes := append(append([]byte(nil), (*row.AcceptedManifest)...), '\n')
+			if _, _, ok := canonicalManifest(manifestBytes); !ok {
+				return Coverage{}, fmt.Errorf("supplemental_targets[%d].accepted_manifest is not canonical", i)
+			}
+			target.AcceptedManifestBytes = manifestBytes
 			reportBytes := append(append([]byte(nil), (*row.Report)...), '\n')
 			report, err := policyconflict.DecodeReport(reportBytes)
 			if err != nil {
@@ -217,6 +243,9 @@ func coverageFromDoc(doc coverageDoc) (Coverage, error) {
 			}
 			target.Result = &policyconflict.Result{Report: report, ReportBytes: reportBytes}
 		} else {
+			if row.AcceptedManifest != nil {
+				return Coverage{}, fmt.Errorf("supplemental_targets[%d]: refusal cannot carry accepted_manifest", i)
+			}
 			target.Refusal = cloneRefusal(row.Refusal)
 		}
 		supplemental[i] = target
@@ -292,6 +321,7 @@ func validateCoverageEnvelope(coverage Coverage) error {
 	if len(coverage.Evaluations) != len(coverage.Consumers) {
 		return fmt.Errorf("evaluations must contain exactly one row per consumer")
 	}
+	usedManifests := make(map[string]string, len(coverage.Evaluations))
 	for i, evaluation := range coverage.Evaluations {
 		if evaluation.ConsumerIdentity != consumerIDs[i] {
 			return fmt.Errorf("evaluations[%d] does not match consumers[%d]", i, i)
@@ -304,16 +334,27 @@ func validateCoverageEnvelope(coverage Coverage) error {
 			return fmt.Errorf("evaluations[%d] must carry exactly one report/refusal", i)
 		}
 		if evaluation.Report != nil {
-			if _, err := policyconflict.EncodeReport(*evaluation.Report); err != nil {
-				return fmt.Errorf("evaluations[%d].report: %w", i, err)
+			manifest, _, manifestOK := canonicalManifest(evaluation.AcceptedManifestBytes)
+			if !manifestOK {
+				return fmt.Errorf("evaluations[%d].accepted_manifest is not canonical", i)
 			}
-			if evaluation.AcceptedManifestDigest == "" || evaluation.Report.Input.Target.Accepted == nil ||
-				evaluation.Report.Input.Target.Accepted.ManifestDigest != evaluation.AcceptedManifestDigest ||
-				!reportMatchesEvidence(*evaluation.Report, coverage.Proposed) {
+			if !manifestMatchesRequest(manifest, evaluation.Consumer.Request) ||
+				!manifestMatchesEvidence(manifest, coverage.Proposed) ||
+				!reportMatchesManifest(*evaluation.Report, manifest) {
 				return fmt.Errorf("evaluations[%d].report is bound to different operands", i)
+			}
+			if previous, exists := usedManifests[manifest.Digest]; exists && previous != evaluation.ConsumerIdentity {
+				return fmt.Errorf("evaluations[%d].accepted_manifest is reused by a different consumer", i)
+			}
+			usedManifests[manifest.Digest] = evaluation.ConsumerIdentity
+			unresolved := reasonHasWitness(coverage.Reasons, ReasonEvaluationUnresolved, evaluation.ConsumerIdentity)
+			if (evaluation.Report.Verdict == policyconflict.VerdictBlockedUnproven) != unresolved {
+				return fmt.Errorf("evaluations[%d] unresolved reason does not match report verdict", i)
 			}
 		} else if err := validateRefusal(evaluation.Refusal); err != nil {
 			return fmt.Errorf("evaluations[%d].refusal: %w", i, err)
+		} else if len(evaluation.AcceptedManifestBytes) != 0 {
+			return fmt.Errorf("evaluations[%d].refusal cannot carry accepted_manifest", i)
 		} else if !reasonHasWitness(coverage.Reasons, evaluation.Refusal.Code, evaluation.ConsumerIdentity) {
 			return fmt.Errorf("evaluations[%d].refusal has no matching coverage reason", i)
 		}
@@ -336,12 +377,20 @@ func validateCoverageEnvelope(coverage Coverage) error {
 			if !ok {
 				return fmt.Errorf("supplemental_targets[%d].result is not canonical", i)
 			}
-			if target.AcceptedManifestDigest == "" || report.Input.Target.Accepted == nil ||
-				report.Input.Target.Accepted.ManifestDigest != target.AcceptedManifestDigest {
-				return fmt.Errorf("supplemental_targets[%d].result is bound to a different accepted context", i)
+			manifest, _, manifestOK := canonicalManifest(target.AcceptedManifestBytes)
+			if !manifestOK || !manifestMatchesRequest(manifest, target.Request) ||
+				!manifestMatchesEvidence(manifest, coverage.Proposed) || !reportMatchesManifest(report, manifest) {
+				return fmt.Errorf("supplemental_targets[%d].result is bound to different operands", i)
 			}
 		} else if err := validateRefusal(target.Refusal); err != nil {
 			return fmt.Errorf("supplemental_targets[%d].refusal: %w", i, err)
+		} else if len(target.AcceptedManifestBytes) != 0 {
+			return fmt.Errorf("supplemental_targets[%d].refusal cannot carry accepted_manifest", i)
+		}
+	}
+	for i, reason := range coverage.Reasons {
+		if reason.Witnesses == nil {
+			return fmt.Errorf("reasons[%d].witnesses must be non-nil", i)
 		}
 	}
 	normalized := normalizedReasons(coverage.Reasons)
@@ -363,13 +412,19 @@ func validateCoverageEnvelope(coverage Coverage) error {
 }
 
 func validateEvidence(name string, evidence InventoryEvidence) error {
-	if evidence.Commit == "" || evidence.Tree == "" {
-		return fmt.Errorf("%s evidence commit and tree are mandatory", name)
+	if err := gitx.ValidateFullOID(evidence.Commit); err != nil {
+		return fmt.Errorf("%s evidence commit: %w", name, err)
+	}
+	if err := gitx.ValidateFullOID(evidence.Tree); err != nil {
+		return fmt.Errorf("%s evidence tree: %w", name, err)
 	}
 	switch evidence.Presence {
 	case PresencePresent:
-		if evidence.InventoryDigest == "" {
-			return fmt.Errorf("%s present inventory digest is mandatory", name)
+		if !artifact.ValidDigest(evidence.InventoryDigest) {
+			return fmt.Errorf("%s present inventory digest is not a canonical sha256 digest", name)
+		}
+		if evidence.ConstitutionDigest != "" && !artifact.ValidDigest(evidence.ConstitutionDigest) {
+			return fmt.Errorf("%s constitution digest is not a canonical sha256 digest", name)
 		}
 	case PresenceMissing, PresenceUnavailable:
 		if evidence.InventoryDigest != "" || evidence.ConstitutionDigest != "" {
@@ -442,12 +497,6 @@ func validateRefusal(refusal *EvaluationRefusal) error {
 		}
 	}
 	return nil
-}
-
-func reportMatchesEvidence(report policyconflict.Report, proposed InventoryEvidence) bool {
-	return report.Input.Target.Kind == policyconflict.TargetAcceptedContext &&
-		report.Input.Repository.Head.Known && report.Input.Repository.Head.Value == proposed.Commit &&
-		(proposed.ConstitutionDigest == "" || report.Input.ConstitutionDigest == proposed.ConstitutionDigest)
 }
 
 func knownReason(code ReasonCode) bool {
