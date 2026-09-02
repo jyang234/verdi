@@ -35,7 +35,6 @@ func (p Plan) Complete(evaluations []Evaluation, supplemental []SupplementalTarg
 	}
 
 	rows := make([]EvaluationCoverage, 0, len(p.consumers))
-	usedManifests := make(map[string]string, len(p.consumers))
 	for _, expected := range p.consumers {
 		row := EvaluationCoverage{
 			ConsumerIdentity: expected.identity,
@@ -47,7 +46,7 @@ func (p Plan) Complete(evaluations []Evaluation, supplemental []SupplementalTarg
 			reasons = append(reasons, Reason{Code: ReasonEvaluationOmitted, Witnesses: []string{expected.identity}})
 			row.Refusal = refusal(ReasonEvaluationOmitted, expected.identity)
 		case 1:
-			completeEvaluation(&row, expected, claimed[0], p.proposed, usedManifests, &reasons)
+			completeEvaluation(&row, expected, claimed[0], p.proposed, &reasons)
 		default:
 			reasons = append(reasons, Reason{Code: ReasonEvaluationDuplicate, Witnesses: []string{expected.identity}})
 			row.Refusal = refusal(ReasonEvaluationDuplicate, expected.identity)
@@ -74,7 +73,7 @@ func (p Plan) Complete(evaluations []Evaluation, supplemental []SupplementalTarg
 	}
 }
 
-func completeEvaluation(row *EvaluationCoverage, expected plannedConsumer, evaluation Evaluation, proposed InventoryEvidence, usedManifests map[string]string, reasons *[]Reason) {
+func completeEvaluation(row *EvaluationCoverage, expected plannedConsumer, evaluation Evaluation, proposed InventoryEvidence, reasons *[]Reason) {
 	doc, err := consumerDocFor(evaluation.Consumer)
 	if err != nil {
 		*reasons = append(*reasons, Reason{Code: ReasonEvaluationIdentityMismatch, Witnesses: []string{expected.identity}})
@@ -133,12 +132,6 @@ func completeEvaluation(row *EvaluationCoverage, expected plannedConsumer, evalu
 		row.Refusal = refusal(ReasonEvaluationOperandMismatch, expected.identity)
 		return
 	}
-	if previous, exists := usedManifests[manifest.Digest]; exists && previous != expected.identity {
-		*reasons = append(*reasons, Reason{Code: ReasonEvaluationOperandMismatch, Witnesses: []string{expected.identity}})
-		row.Refusal = refusal(ReasonEvaluationOperandMismatch, expected.identity)
-		return
-	}
-	usedManifests[manifest.Digest] = expected.identity
 	row.AcceptedManifestBytes = manifestBytes
 	row.Report = &report
 	if report.Verdict == policyconflict.VerdictBlockedUnproven {

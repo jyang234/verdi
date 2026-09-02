@@ -1,6 +1,7 @@
 package constitutionimpact
 
 import (
+	"bytes"
 	"context"
 	"testing"
 
@@ -98,9 +99,10 @@ func TestCompleteCoverageKeepsBlockedViolatedEvaluationProven(t *testing.T) {
 	}
 }
 
-func TestCompleteCoverageRefusesReportReplayAcrossDistinctConsumers(t *testing.T) {
-	first := testConsumer("spec/first", "local")
-	second := testConsumer("spec/second", "production")
+func TestCompleteCoverageAllowsSharedEvidenceForOperationDistinctConsumers(t *testing.T) {
+	first := testConsumer("spec/shared", "local")
+	second := cloneConsumer(first)
+	second.GovernedOperations = []string{}
 	plan := testPlan(t, []Consumer{first, second}, []Consumer{first, second}, testChangedLayer())
 	result, manifest := resultForConsumer(t, plan, first, true)
 
@@ -109,15 +111,73 @@ func TestCompleteCoverageRefusesReportReplayAcrossDistinctConsumers(t *testing.T
 		testEvaluation(second, result, manifest),
 	}, nil)
 
-	if coverage.State != StateViolatedWithWitness {
-		t.Fatalf("coverage state = %q, want replay violation; reasons=%+v", coverage.State, coverage.Reasons)
+	if coverage.State != StateProven {
+		t.Fatalf("coverage state = %q, want %q; reasons=%+v", coverage.State, StateProven, coverage.Reasons)
 	}
-	secondID, err := second.Identity()
+	if len(coverage.Evaluations) != 2 {
+		t.Fatalf("evaluation rows = %d, want one row for each operation-distinct identity", len(coverage.Evaluations))
+	}
+	for i, evaluation := range coverage.Evaluations {
+		if evaluation.Report == nil {
+			t.Fatalf("evaluations[%d] report is nil, want shared canonical report retained", i)
+		}
+	}
+
+	encoded, err := EncodeCoverage(coverage)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("EncodeCoverage: %v", err)
 	}
-	if !hasReason(coverage.Reasons, ReasonEvaluationOperandMismatch, secondID) {
-		t.Fatalf("reasons = %+v, want operand mismatch for replayed second consumer %s", coverage.Reasons, secondID)
+	decoded, err := DecodeCoverage(encoded)
+	if err != nil {
+		t.Fatalf("DecodeCoverage: %v", err)
+	}
+	again, err := EncodeCoverage(decoded)
+	if err != nil {
+		t.Fatalf("EncodeCoverage decoded coverage: %v", err)
+	}
+	if !bytes.Equal(encoded, again) {
+		t.Fatal("operation-distinct shared-evidence coverage changed across canonical round trip")
+	}
+}
+
+func TestCompleteCoverageRefusesReportReplayAcrossDifferentOperands(t *testing.T) {
+	tests := []struct {
+		name   string
+		first  Consumer
+		second Consumer
+	}{
+		{
+			name:   "different request",
+			first:  testConsumer("spec/first", "local"),
+			second: testConsumer("spec/second", "local"),
+		},
+		{
+			name:   "different environment",
+			first:  testConsumer("spec/shared", "local"),
+			second: testConsumer("spec/shared", "production"),
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			plan := testPlan(t, []Consumer{test.first, test.second}, []Consumer{test.first, test.second}, testChangedLayer())
+			result, manifest := resultForConsumer(t, plan, test.first, true)
+
+			coverage := plan.Complete([]Evaluation{
+				testEvaluation(test.first, result, manifest),
+				testEvaluation(test.second, result, manifest),
+			}, nil)
+
+			if coverage.State != StateViolatedWithWitness {
+				t.Fatalf("coverage state = %q, want replay violation; reasons=%+v", coverage.State, coverage.Reasons)
+			}
+			secondID, err := test.second.Identity()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !hasReason(coverage.Reasons, ReasonEvaluationOperandMismatch, secondID) {
+				t.Fatalf("reasons = %+v, want operand mismatch for replayed second consumer %s", coverage.Reasons, secondID)
+			}
+		})
 	}
 }
 

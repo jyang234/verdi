@@ -321,7 +321,6 @@ func validateCoverageEnvelope(coverage Coverage) error {
 	if len(coverage.Evaluations) != len(coverage.Consumers) {
 		return fmt.Errorf("evaluations must contain exactly one row per consumer")
 	}
-	usedManifests := make(map[string]string, len(coverage.Evaluations))
 	for i, evaluation := range coverage.Evaluations {
 		if evaluation.ConsumerIdentity != consumerIDs[i] {
 			return fmt.Errorf("evaluations[%d] does not match consumers[%d]", i, i)
@@ -343,10 +342,6 @@ func validateCoverageEnvelope(coverage Coverage) error {
 				!reportMatchesManifest(*evaluation.Report, manifest) {
 				return fmt.Errorf("evaluations[%d].report is bound to different operands", i)
 			}
-			if previous, exists := usedManifests[manifest.Digest]; exists && previous != evaluation.ConsumerIdentity {
-				return fmt.Errorf("evaluations[%d].accepted_manifest is reused by a different consumer", i)
-			}
-			usedManifests[manifest.Digest] = evaluation.ConsumerIdentity
 			unresolved := reasonHasWitness(coverage.Reasons, ReasonEvaluationUnresolved, evaluation.ConsumerIdentity)
 			if (evaluation.Report.Verdict == policyconflict.VerdictBlockedUnproven) != unresolved {
 				return fmt.Errorf("evaluations[%d] unresolved reason does not match report verdict", i)
