@@ -45,7 +45,7 @@ type GitReader interface {
 	HasLocalBranch(ctx context.Context, root, name string) (bool, error)
 	CheckoutNewBranch(ctx context.Context, root, name string) error
 	CheckoutExisting(ctx context.Context, root, branch string) error
-	AddAll(ctx context.Context, root string) error
+	AddPaths(ctx context.Context, root string, paths ...string) error
 	CreateCommit(ctx context.Context, root, message string) (string, error)
 	LsTreeEntries(ctx context.Context, root, ref string) ([]gitx.TreeEntry, error)
 	Show(ctx context.Context, root, ref, path string) ([]byte, error)
@@ -78,8 +78,13 @@ func (gitxReader) CheckoutExisting(ctx context.Context, root, branch string) err
 	// deliberately skips it only for one narrow internal unwind path.
 	return gitx.Checkout(ctx, root, branch)
 }
-func (gitxReader) AddAll(ctx context.Context, root string) error {
-	return gitx.AddAll(ctx, root)
+func (gitxReader) AddPaths(ctx context.Context, root string, paths ...string) error {
+	// gitx.AddPaths, never gitx.AddAll: Propose must stage exactly the one
+	// artifact path it wrote, never sweep an unrelated sibling file (a
+	// caller's own --request document, another in-progress edit, ...)
+	// into its commit — gitx.AddPaths' own doc comment records the exact
+	// prior defect this scoping avoids (D6-33).
+	return gitx.AddPaths(ctx, root, paths...)
 }
 func (gitxReader) CreateCommit(ctx context.Context, root, message string) (string, error) {
 	return gitx.CreateCommit(ctx, root, message)

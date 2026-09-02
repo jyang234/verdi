@@ -158,9 +158,12 @@ type ProposeResult struct {
 // Propose creates or amends one Git-backed policy/overlay/exemption
 // proposal artifact on req.Branch, guarded by req.Expected's exact
 // branch/HEAD precondition (a stale-head refusal, verdict, never silently
-// rebased over). It never merges, approves, or writes anything outside the
-// one requested artifact path — merge/approval stay the normal Git
-// pull-request boundary (design §7.1).
+// rebased over). It stages and commits exactly the one requested artifact
+// path via gitx.AddPaths — never gitx.AddAll — so an unrelated sibling
+// file elsewhere in the checkout (a caller's own --request document,
+// another in-progress edit) can never be swept into this commit. It never
+// merges, approves, or writes anything outside that one path — merge/
+// approval stay the normal Git pull-request boundary (design §7.1).
 func (s Service) Propose(ctx context.Context, root string, req ProposeRequest) (*ProposeResult, *Error) {
 	if root == "" {
 		return nil, inputInvalid("input-invalid", errRootRequired.Error())
@@ -191,39 +194,16 @@ func (s Service) Propose(ctx context.Context, root string, req ProposeRequest) (
 		}
 		if currentBranch != req.Branch {
 			// gitx.Checkout (constitutionapp's own GitReader.CheckoutExisting
-			// adapter) refuses a dirty working tree itself, so no separate
-			// guard is needed on this branch of the dispatch.
+			// adapter) refuses a dirty working tree itself for a genuine
+			// branch switch — a caller mid-edit on a DIFFERENT branch is
+			// stopped here, before anything below runs.
 			if err := s.Git.CheckoutExisting(ctx, root, req.Branch); err != nil {
 				return nil, operational("io-failure", "checking out proposal branch", err)
 			}
-		} else if dirty, err := s.Git.StatusDirty(ctx, root); err != nil {
-			return nil, operational("io-failure", "checking working-tree cleanliness", err)
-		} else if dirty {
-			// Already on req.Branch, so no checkout guard runs at all —
-			// without this explicit check, AddAll below would sweep any
-			// pre-existing uncommitted change into this commit, silently
-			// widening the write footprint beyond the one requested
-			// artifact path (design §7.1's "prepare submission without
-			// merging or inventing approval" boundary starts here: Propose
-			// must never durably absorb content the caller did not ask it
-			// to write).
-			return nil, operational("checkout-dirty", "the working tree has uncommitted changes unrelated to this proposal; commit or discard them first", nil)
 		}
 	} else {
 		if req.Expected.Head != "" {
 			return nil, verdict("stale-head", fmt.Sprintf("branch %q does not exist, expected HEAD %s", req.Branch, req.Expected.Head))
-		}
-		// gitx.CheckoutNewBranch carries no dirty-tree guard of its own
-		// (unlike gitx.Checkout): it only ever moves HEAD to a fresh branch
-		// at the SAME commit, so no tracked file changes and no data is at
-		// risk from that operation alone. But a dirty tree here would still
-		// let AddAll below sweep unrelated uncommitted content into the
-		// first commit on a brand-new proposal branch — the same
-		// write-footprint concern as the already-on-branch case above.
-		if dirty, err := s.Git.StatusDirty(ctx, root); err != nil {
-			return nil, operational("io-failure", "checking working-tree cleanliness", err)
-		} else if dirty {
-			return nil, operational("checkout-dirty", "the working tree has uncommitted changes unrelated to this proposal; commit or discard them first", nil)
 		}
 		if err := s.Git.CheckoutNewBranch(ctx, root, req.Branch); err != nil {
 			return nil, operational("io-failure", "creating proposal branch", err)
@@ -259,7 +239,7 @@ func (s Service) Propose(ctx context.Context, root string, req ProposeRequest) (
 	if err := atomicfile.Write(full, req.Content, 0o644); err != nil {
 		return nil, operational("io-failure", "writing proposal artifact", err)
 	}
-	if err := s.Git.AddAll(ctx, root); err != nil {
+	if err := s.Git.AddPaths(ctx, root, full); err != nil {
 		return nil, operational("io-failure", "staging proposal artifact", err)
 	}
 	message := req.CommitMessage

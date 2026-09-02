@@ -3,6 +3,7 @@ package constitutionapp
 import (
 	"context"
 	"os"
+	"os/exec"
 	"strings"
 	"testing"
 )
@@ -110,26 +111,50 @@ func TestPropose_StaleHeadOnFreshBranchExpectingExisting(t *testing.T) {
 	}
 }
 
-// TestPropose_RefusesDirtyWorkingTreeOnNewBranch proves Propose never lets
-// AddAll sweep pre-existing, unrelated uncommitted content into its own
-// commit: gitx.CheckoutNewBranch carries no dirty-tree guard of its own, so
-// constitutionapp must check explicitly before creating a fresh proposal
-// branch.
-func TestPropose_RefusesDirtyWorkingTreeOnNewBranch(t *testing.T) {
+// TestPropose_NeverSweepsUnrelatedUntrackedFile proves Propose stages and
+// commits exactly the one requested artifact path (gitx.AddPaths), never
+// gitx.AddAll's whole-tree sweep: an unrelated untracked file elsewhere in
+// the checkout (the normal shape of a caller's own --request document
+// sitting alongside the checkout, exactly what the CLI/e2e adapters do)
+// must neither block Propose nor be absorbed into its commit.
+func TestPropose_NeverSweepsUnrelatedUntrackedFile(t *testing.T) {
 	root := buildFixtureRepo(t)
 	svc := testService()
 
-	if err := os.WriteFile(root+"/unrelated-dirty-file.txt", []byte("stray edit\n"), 0o644); err != nil {
+	siblingPath := root + "/unrelated-request.json"
+	if err := os.WriteFile(siblingPath, []byte(`{"not":"part of this proposal"}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
-	_, typed := svc.Propose(context.Background(), root, ProposeRequest{
-		Branch: "policy/dirty-new", Kind: KindOverlay, Name: "frontend-go-version",
-		Content: []byte(newOverlayContent(t, root)), Expected: Expected{Branch: "policy/dirty-new"},
+	content := strings.Replace(newOverlayContent(t, root), `title: "Frontend Go version overlay"`, `title: "Frontend Go version overlay (sibling-file)"`, 1)
+	result, typed := svc.Propose(context.Background(), root, ProposeRequest{
+		Branch: "policy/sibling-file", Kind: KindOverlay, Name: "frontend-go-version",
+		Content: []byte(content), Expected: Expected{Branch: "policy/sibling-file"},
 	})
-	if typed == nil || typed.Code != "checkout-dirty" {
-		t.Fatalf("expected a checkout-dirty refusal, got %+v", typed)
+	if typed != nil {
+		t.Fatalf("Propose: %v", typed)
 	}
+	if result.ZeroEffect || result.Commit == "" {
+		t.Fatalf("expected a real committed effect, got %+v", result)
+	}
+	if _, err := os.Stat(siblingPath); err != nil {
+		t.Fatalf("the unrelated sibling file must still exist untouched: %v", err)
+	}
+	status := gitStatusPorcelain(t, root)
+	if !strings.Contains(status, "unrelated-request.json") {
+		t.Fatalf("expected the sibling file to remain untracked after Propose, git status: %q", status)
+	}
+}
+
+func gitStatusPorcelain(t *testing.T, dir string) string {
+	t.Helper()
+	cmd := exec.Command("git", "status", "--porcelain")
+	cmd.Dir = dir
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("git status --porcelain: %v", err)
+	}
+	return string(out)
 }
 
 func TestPropose_CorruptedContentRefused(t *testing.T) {
