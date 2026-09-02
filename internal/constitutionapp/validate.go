@@ -12,18 +12,24 @@ type ValidateRequest struct{}
 
 func (r ValidateRequest) validate() error { return nil }
 
-// ValidateResult is Validate's three-valued proof outcome over the proposed
-// constitution store: Proven when the whole store strict-decodes,
-// cross-validates, and resolves; not-adopted/incomplete-adoption are
-// disclosed via Snapshot.Adopted/Reason on a clean (proven) result, since
-// "there is no constitution here yet" is not itself a corruption. Any other
-// decode/cross-validation/resolution failure returns a *Error with
-// Classification=verdict and Code="corrupted-policy" instead — Validate
-// never returns a proven result over a store it could not fully resolve.
+// ValidateResult is Validate's outcome over the proposed constitution
+// store. It carries no separate "proven" flag: a returned ValidateResult
+// exists only for a store Validate fully strict-decoded, cross-validated,
+// and resolved, so such a flag could only ever be the constant true — a
+// field that reads affirmatively while carrying no information, and whose
+// consumers' "not proven" branches are unreachable by construction.
+//
+// The three-valued outcome is instead carried where it is actually decided,
+// once: any decode/cross-validation/resolution failure returns a *Error
+// (Classification=verdict, Code="corrupted-policy") and no result at all,
+// while the one non-corrupt state that is still not a resolved constitution
+// — not-adopted or incomplete adoption — is disclosed on Snapshot.Adopted
+// with its own policyauthority Reason, since "there is no constitution here
+// yet" is not a corruption (CO-1). SubmitPreparation reads exactly that
+// field, so its blocking branch is live rather than dead.
 type ValidateResult struct {
 	Schema   string   `json:"schema"`
 	Identity Identity `json:"identity"`
-	Proven   bool     `json:"proven"`
 	Snapshot Snapshot `json:"snapshot"`
 }
 
@@ -48,5 +54,5 @@ func (s Service) Validate(ctx context.Context, root string, req ValidateRequest)
 	if typed != nil {
 		return nil, typed
 	}
-	return &ValidateResult{Schema: ValidateResultSchema, Identity: identity, Proven: true, Snapshot: snapshot}, nil
+	return &ValidateResult{Schema: ValidateResultSchema, Identity: identity, Snapshot: snapshot}, nil
 }

@@ -600,15 +600,22 @@ func TestMCPShowcaseCoverage(t *testing.T) {
 	t.Run("constitution_validate", func(t *testing.T) {
 		text := callMCPToolOK(t, srv, "constitution_validate", map[string]any{})
 		var out struct {
-			Proven   bool `json:"proven"`
+			Schema   string `json:"schema"`
 			Snapshot struct {
 				Adopted bool   `json:"adopted"`
 				Reason  string `json:"reason"`
 			} `json:"snapshot"`
 		}
 		decodeToolJSON(t, text, &out)
-		if !out.Proven || out.Snapshot.Adopted || out.Snapshot.Reason == "" {
-			t.Fatalf("constitution_validate() = %+v, want a clean Proven result disclosing no adopted constitution with a non-empty reason", out)
+		// The result carries no separate affirmative "proven" flag: a
+		// returned result exists only for a store Validate fully resolved,
+		// and the one remaining non-resolved state — no constitution
+		// adopted here — is disclosed on the snapshot with its own reason.
+		if out.Schema != "verdi.constitution-validate/v1" || out.Snapshot.Adopted || out.Snapshot.Reason == "" {
+			t.Fatalf("constitution_validate() = %+v, want a clean result disclosing no adopted constitution with a non-empty reason", out)
+		}
+		if strings.Contains(text, `"proven"`) {
+			t.Fatalf("constitution_validate() must not carry a constant-true proven flag: %s", text)
 		}
 	})
 

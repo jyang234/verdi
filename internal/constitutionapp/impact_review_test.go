@@ -128,10 +128,16 @@ func TestImpactReview_UnavailableJudgeTarget(t *testing.T) {
 
 // TestImpactReview_UnauthorizedExemptionTarget proves the required
 // unauthorized-exemption test scenario: a mechanically PROVEN conflict
-// (AC-3) whose only applicable exemption cannot authorize covering it (its
-// scope does not reach the conflict's proven universal overlap) stays
+// (AC-3) whose only applicable exemption cannot authorize covering it stays
 // blocked-violated, with the exemption resolution recorded and visible
 // rather than silently applied.
+//
+// The failing authority substate is AUTHORIZATION, not scope: the fixture's
+// exemption is deliberately declared at the same UNIVERSAL scope as the
+// conflict itself (buildUnauthorizedExemptionFixtureRepo, fixture_test.go),
+// so Match/Freshness/Scope/Bound are all trivially proven and the single
+// isolated failure is its approval naming a role/principal pair the
+// governing solo-default profile does not map.
 func TestImpactReview_UnauthorizedExemptionTarget(t *testing.T) {
 	root := buildUnauthorizedExemptionFixtureRepo(t)
 	svc := testService()

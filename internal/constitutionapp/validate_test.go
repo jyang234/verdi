@@ -5,9 +5,11 @@ import (
 	"os"
 	"strings"
 	"testing"
+
+	"github.com/jyang234/verdi/internal/fixturegit"
 )
 
-func TestValidate_Proven(t *testing.T) {
+func TestValidate_ResolvedStore(t *testing.T) {
 	root := buildFixtureRepo(t)
 	svc := testService()
 
@@ -15,11 +17,38 @@ func TestValidate_Proven(t *testing.T) {
 	if typed != nil {
 		t.Fatalf("Validate: %v", typed)
 	}
-	if !result.Proven {
-		t.Fatal("expected Proven == true")
+	if !result.Snapshot.Adopted {
+		t.Fatal("expected the fixture store to resolve as adopted")
+	}
+	if result.Snapshot.Effective == nil {
+		t.Fatal("expected the resolved effective policy to be carried")
 	}
 	if result.Schema != ValidateResultSchema {
 		t.Fatalf("schema = %q, want %q", result.Schema, ValidateResultSchema)
+	}
+}
+
+// TestValidate_NotAdoptedIsCleanAndDisclosed proves the one non-corrupt
+// state a clean ValidateResult can still describe: a store with no adopted
+// constitution is not an error (CO-1), but it is disclosed on the snapshot
+// with policyauthority's own reason rather than flattened into an
+// affirmative "proven" flag.
+func TestValidate_NotAdoptedIsCleanAndDisclosed(t *testing.T) {
+	t.Setenv("CI_DEFAULT_BRANCH", "main")
+	repo := fixturegit.Build(t, []fixturegit.Layer{
+		{Files: map[string]string{"README.md": "no constitution here\n"}, Message: "init"},
+	})
+	svc := testService()
+
+	result, typed := svc.Validate(context.Background(), repo.Dir, ValidateRequest{})
+	if typed != nil {
+		t.Fatalf("Validate: %v", typed)
+	}
+	if result.Snapshot.Adopted {
+		t.Fatal("expected Snapshot.Adopted == false")
+	}
+	if result.Snapshot.Reason == "" {
+		t.Fatal("expected a disclosed not-adopted reason")
 	}
 }
 

@@ -5,6 +5,7 @@
 package main
 
 import (
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"os"
@@ -12,7 +13,10 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/jyang234/verdi/internal/constitutionapp"
 	"github.com/jyang234/verdi/internal/fixturegit"
+	"github.com/jyang234/verdi/internal/mcpserve"
+	"github.com/jyang234/verdi/internal/store"
 )
 
 // constitutionStoreFiles reads internal/constitutionapp's own testdata
@@ -195,6 +199,67 @@ func TestContextConstitutionE2E_OutFile(t *testing.T) {
 	if result.Schema != "verdi.constitution-inspect/v1" {
 		t.Fatalf("schema = %q", result.Schema)
 	}
+}
+
+// TestContextConstitution_CLIAndMCPRecordsAreByteIdentical proves the
+// "byte-equivalent CLI/workbench-capable records" contract directly rather
+// than by inspection: one fixture store, one root, both adapters, and a
+// byte comparison of what each actually emits — the CLI's own
+// dispatchConstitutionOp bytes (exactly what runConstitutionOp writes to
+// stdout or --out) against the MCP tool's own text content item, for each of
+// the three operations MCP registers.
+func TestContextConstitution_CLIAndMCPRecordsAreByteIdentical(t *testing.T) {
+	repo := buildConstitutionRepo(t)
+	root, err := store.FindRoot(repo.Dir)
+	if err != nil {
+		t.Fatalf("store.FindRoot: %v", err)
+	}
+
+	ctx := context.Background()
+	svc := constitutionapp.NewService()
+	backend := &mcpserve.Backend{Root: root}
+
+	cases := []struct {
+		op   string
+		call func() map[string]any
+	}{
+		{"inspect", func() map[string]any { return backend.ConstitutionInspect(ctx, json.RawMessage(`{}`)) }},
+		{"validate", func() map[string]any { return backend.ConstitutionValidate(ctx, json.RawMessage(`{}`)) }},
+		{"impact-review", func() map[string]any { return backend.ConstitutionImpactReview(ctx, json.RawMessage(`{}`)) }},
+	}
+	for _, c := range cases {
+		t.Run(c.op, func(t *testing.T) {
+			cliBytes, typed, decodeErr := dispatchConstitutionOp(ctx, svc, root, c.op, []byte(`{}`))
+			if decodeErr != nil {
+				t.Fatalf("CLI path: %v", decodeErr)
+			}
+			if typed != nil {
+				t.Fatalf("CLI path: %v", typed)
+			}
+			mcpText := constitutionToolText(t, c.call())
+			if string(cliBytes) != mcpText {
+				t.Fatalf("CLI and MCP records differ for %s:\nCLI = %q\nMCP = %q", c.op, string(cliBytes), mcpText)
+			}
+		})
+	}
+}
+
+// constitutionToolText extracts the single text content item from an MCP
+// tool result, failing the test on an error result or any other shape.
+func constitutionToolText(t *testing.T, result map[string]any) string {
+	t.Helper()
+	if isErr, ok := result["isError"]; ok && isErr == true {
+		t.Fatalf("MCP tool returned an error result: %+v", result)
+	}
+	items, ok := result["content"].([]map[string]any)
+	if !ok || len(items) != 1 {
+		t.Fatalf("unexpected MCP tool result shape: %+v", result)
+	}
+	text, ok := items[0]["text"].(string)
+	if !ok {
+		t.Fatalf("MCP tool result carries no text content item: %+v", result)
+	}
+	return text
 }
 
 // TestContextConstitutionE2E_UnknownSubcommand_ExitTwo proves the usage

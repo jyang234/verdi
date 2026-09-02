@@ -142,9 +142,14 @@ func decodeProposed(kind, name string, content []byte) (id, digest string, typed
 }
 
 // ProposeResult is Propose's exact envelope. ZeroEffect is true when the
-// requested Content is byte-identical to what is already committed at the
-// resolved path — Propose then reports success without creating an empty
-// commit (Wave 6 Task 3's required "zero-effect" test).
+// requested Content is byte-identical to what is already COMMITTED at the
+// resolved path on the proposal branch — Propose then reports success
+// without creating an empty commit (Wave 6 Task 3's required "zero-effect"
+// test). It is deliberately never measured against the working tree: an
+// uncommitted edit carrying exactly the requested bytes is a REAL effect
+// (the branch a proposal submits is its COMMITTED tree), and short-
+// circuiting on it would report exit-0 success over a branch that never
+// received the change.
 type ProposeResult struct {
 	Schema     string   `json:"schema"`
 	Identity   Identity `json:"identity"`
@@ -158,7 +163,18 @@ type ProposeResult struct {
 // Propose creates or amends one Git-backed policy/overlay/exemption
 // proposal artifact on req.Branch, guarded by req.Expected's exact
 // branch/HEAD precondition (a stale-head refusal, verdict, never silently
-// rebased over). It stages and commits exactly the one requested artifact
+// rebased over).
+//
+// Every request and CONTENT validation runs before the first repository
+// mutation, so a refused Propose leaves branch, HEAD, the local-branch set,
+// and the working tree byte-identical to what it found. That ordering is
+// load-bearing rather than stylistic: this operation's refusal path returns
+// only a *Error, whose Failure envelope carries no Identity at all, so a
+// mutation performed before a refusal would be undisclosed — a caller could
+// not learn from the refusal that its checkout had been moved onto a new,
+// empty proposal branch.
+//
+// It stages and commits exactly the one requested artifact
 // path via gitx.AddPaths — never gitx.AddAll — so an unrelated sibling
 // file elsewhere in the checkout (a caller's own --request document,
 // another in-progress edit) can never be swept into this commit. It never
@@ -174,6 +190,24 @@ func (s Service) Propose(ctx context.Context, root string, req ProposeRequest) (
 	if s.Git == nil {
 		return nil, operational("git-reader-unavailable", "git reader is not configured", nil)
 	}
+
+	// Content validation FIRST — decodeProposed owns every corrupted-policy,
+	// name-mismatch, and authority-invalid refusal, and nothing below it has
+	// run yet, so each of those refusals is provably side-effect-free.
+	artifactID, digest, typed := decodeProposed(req.Kind, req.Name, req.Content)
+	if typed != nil {
+		return nil, typed
+	}
+	rel, relErr := policyRelPath(req.Kind, req.Name)
+	if relErr != nil {
+		return nil, inputInvalid("input-invalid", relErr.Error())
+	}
+	// gitPath is the repository-relative path; full is its absolute
+	// filesystem twin. Both are derived here, before any mutation, so the
+	// write path below performs no further derivation that could fail after
+	// the checkout has already moved.
+	gitPath := constitutionPolicyDir + "/" + rel
+	full := filepath.Join(root, filepath.FromSlash(gitPath))
 
 	currentBranch, err := s.Git.CurrentBranch(ctx, root)
 	if err != nil {
@@ -210,27 +244,26 @@ func (s Service) Propose(ctx context.Context, root string, req ProposeRequest) (
 		}
 	}
 
-	artifactID, digest, typed := decodeProposed(req.Kind, req.Name, req.Content)
-	if typed != nil {
-		return nil, typed
-	}
-
-	rel, relErr := policyRelPath(req.Kind, req.Name)
-	if relErr != nil {
-		return nil, inputInvalid("input-invalid", relErr.Error())
-	}
-	full := filepath.Join(root, ".verdi", "policy", filepath.FromSlash(rel))
-
-	existing, readErr := os.ReadFile(full)
-	if readErr == nil && bytes.Equal(existing, req.Content) {
+	// Zero-effect is decided against the proposal branch's COMMITTED blob.
+	// A Show failure means the branch's committed tree does not carry this
+	// path (a brand-new artifact) or Git could not read it at all; both are
+	// resolved in the conservative direction — do the work — never as a
+	// zero-effect success, and a genuinely broken Git surfaces immediately
+	// at the AddPaths/CreateCommit calls below.
+	//
+	// The converse case — the committed blob already IS req.Content while the
+	// working tree carries some further, uncommitted edit at that path — is
+	// genuinely zero-effect for what was requested, so that edit is left
+	// exactly where the caller put it rather than being reverted or swept
+	// into a commit nobody asked for. Identity.Dirty on the returned result
+	// discloses that the checkout is not clean.
+	committed, showErr := s.Git.Show(ctx, root, req.Branch, gitPath)
+	if showErr == nil && bytes.Equal(committed, req.Content) {
 		identity, typedIdentity := s.resolveIdentity(ctx, root)
 		if typedIdentity != nil {
 			return nil, typedIdentity
 		}
 		return &ProposeResult{Schema: ProposeResultSchema, Identity: identity, Path: rel, ArtifactID: artifactID, Digest: digest, ZeroEffect: true}, nil
-	}
-	if readErr != nil && !os.IsNotExist(readErr) {
-		return nil, operational("io-failure", "reading existing proposal artifact", readErr)
 	}
 
 	if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
