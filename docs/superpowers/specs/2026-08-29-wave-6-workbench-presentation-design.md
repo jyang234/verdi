@@ -554,18 +554,40 @@ one authored, Git-backed inventory at
 metadata, not a policy, overlay, exemption, disposition, generated projection,
 or approval record; it stays outside `.verdi/policy/` so the frozen
 `policyartifact` and `policyauthority` grammars and effective-policy identity do
-not acquire a second meaning.
+not acquire a second meaning. The owner merge of SI-179 ratifies
+`constitution/` as one additive committed top-level entry in
+`verdi.layout/v1`; its v1 grammar contains exactly `consumers.json` and is owned
+by `internal/constitutionimpact`, following SI-36's loader-owned posture rather
+than minting a second lint grammar. Before any writer may create the inventory,
+the Task 3 correction must synchronize the source and self-hosted
+`verdi-store-layout` specifications, record the change in
+`08-revision-notes.md`, admit `constitution` in D1's
+`knownTopLevelEntries`/VL-007 implementation, and pin both the admitted path and
+every still-unknown top-level name. Those clerical authority edits are authored
+by Codex under the spec-only exception; the Sonnet runtime producer does not
+author or reinterpret them.
 
 Each inventory entry carries one complete canonical
 `verdi.context-compile-request/v1` accepted-context request, the exact declared
 environment used for that consumer, and a present sorted-unique
-`governed_operations` array whose values must already exist in the active
-constitution's action-subject catalog. The nested request's existing
+`governed_operations` array. An accepted-tree entry validates those operations
+against the accepted constitution's action-subject catalog; a proposed-tree
+entry validates them against the proposed constitution's catalog. Catalog
+membership changes between the trees are therefore impact-evaluation facts,
+not a reason to reinterpret or operationally reject the other tree's otherwise
+valid inventory. The nested request's existing
 `grants`/`verdi.execution-grants/v1` document is the capability declaration; the
 inventory does not create a second capability grammar. Entry identity is the
-digest of those canonical existing operands. There is no new free-form id,
-scope matcher, applicability operator, operation vocabulary, or precedence
-rule.
+digest of the canonical request bytes, canonical declared-environment value,
+and canonical sorted governed-operation set together. There is no new
+free-form id, scope matcher, applicability operator, operation vocabulary, or
+precedence rule.
+
+The inventory is authored and reviewed through ordinary Git proposal custody;
+`constitutionapp.Propose` neither synthesizes nor maintains it. A proposal may
+update the proposed inventory alongside its constitution artifact, but the
+application operation cannot infer a row from corpus contents or silently
+repair either exact-tree inventory.
 
 `internal/constitutionimpact` is the single derivation owner. For each impact
 review it loads the inventory from the same exact accepted Git tree and the
@@ -602,8 +624,11 @@ tree, an unavailable evaluator, or an evaluation whose applicability/conflict
 posture is unknown is disclosed as unproven and blocks authoritative
 progression. A known duplicate, missing row, extra row, identity mismatch, or
 result bound to different operands is violated with its witness and also
-blocks. With no constitution layer change, the witness may prove the empty
-impact set without requiring a synthetic evaluation.
+blocks. For a non-empty constitution layer change, a present but empty derived
+union is `disclosed-as-unproven` with reason `consumer-universe-empty` and can
+never read submission-ready; this preserves SI-178's non-vacuity rule. Only
+with no constitution layer change may the witness prove the empty impact set
+without requiring a synthetic evaluation.
 
 Caller-declared `targets` are demoted to supplemental preview inputs. They may
 add an ad-hoc evaluation or narrow which already-derived rows a presentation
