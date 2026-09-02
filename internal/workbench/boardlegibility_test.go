@@ -123,7 +123,7 @@ func TestBoardLegibility_ZoneLabels(t *testing.T) {
 	}
 	for _, mode := range []boardModeKind{modeReadOnly, modeReview} {
 		proj.Mode = mode
-		frozen := renderBoardRegion(proj, &boardGitState{})
+		frozen := renderBoardRegion(proj, &boardGitState{}, testASDView())
 		if !strings.Contains(frozen, `data-testid="zone-label-acceptance-criterion"`) {
 			t.Errorf("%s board missing its occupied zone's label", mode)
 		}
@@ -145,7 +145,7 @@ func TestBoardLegibility_ZoneLabels(t *testing.T) {
 // already hangs its implements thread, and its wall still invites.
 func TestBoardLegibility_EmptyWall(t *testing.T) {
 	empty := &BoardProjection{Spec: "fresh", Mode: modeAuthoring}
-	body := renderBoardRegion(empty, &boardGitState{Branch: "design/fresh"})
+	body := renderBoardRegion(empty, &boardGitState{Branch: "design/fresh"}, testASDView())
 	if !strings.Contains(body, `data-testid="board-empty"`) {
 		t.Fatal("empty authoring board renders no empty-wall state")
 	}
@@ -162,13 +162,13 @@ func TestBoardLegibility_EmptyWall(t *testing.T) {
 		RefCards: []refCardView{{Ref: "spec/f#ac-1", X: 40, Y: 40}},
 		Edges:    []edgeView{{Type: "implements", From: "spec", To: "spec/f#ac-1", Layer: "spec"}},
 	}
-	if !strings.Contains(renderBoardRegion(refOnly, &boardGitState{}), `data-testid="board-empty"`) {
+	if !strings.Contains(renderBoardRegion(refOnly, &boardGitState{}, testASDView()), `data-testid="board-empty"`) {
 		t.Error("a wall holding only reference cards lost its invitation")
 	}
 
 	for _, mode := range []boardModeKind{modeReadOnly, modeReview} {
 		empty.Mode = mode
-		frozen := renderBoardRegion(empty, &boardGitState{})
+		frozen := renderBoardRegion(empty, &boardGitState{}, testASDView())
 		if !strings.Contains(frozen, `data-testid="board-empty"`) {
 			t.Errorf("empty %s board renders no empty state", mode)
 		}
@@ -185,7 +185,7 @@ func TestBoardLegibility_EmptyWall(t *testing.T) {
 		Spec: "fresh", Mode: modeAuthoring,
 		Stickies: []scratchStickyView{{ID: "a-1", Type: "comment", Body: "b"}},
 	}
-	if strings.Contains(renderBoardRegion(occupied, &boardGitState{}), `data-testid="board-empty"`) {
+	if strings.Contains(renderBoardRegion(occupied, &boardGitState{}, testASDView()), `data-testid="board-empty"`) {
 		t.Error("a board holding a sticky still renders the empty-wall state")
 	}
 }
@@ -203,7 +203,7 @@ func TestBoardLegibility_YarnKey(t *testing.T) {
 			{Type: "exempts", From: "dc-1", To: "adr/a", Layer: "spec"},
 		},
 	}
-	body := renderBoardRegion(proj, &boardGitState{})
+	body := renderBoardRegion(proj, &boardGitState{}, testASDView())
 	if !strings.Contains(body, `data-testid="yarn-key"`) {
 		t.Fatal("board with edges renders no yarn key")
 	}
@@ -225,7 +225,7 @@ func TestBoardLegibility_YarnKey(t *testing.T) {
 	}
 
 	proj.Edges = nil
-	if strings.Contains(renderBoardRegion(proj, &boardGitState{}), `data-testid="yarn-key"`) {
+	if strings.Contains(renderBoardRegion(proj, &boardGitState{}, testASDView()), `data-testid="yarn-key"`) {
 		t.Error("yarn key renders on a wall with no threads")
 	}
 }
@@ -265,7 +265,7 @@ func TestBoardLegibility_Guide(t *testing.T) {
 
 	// A story wall keeps the four-move copy, with no class note.
 	story := &BoardProjection{Spec: "s", Mode: modeAuthoring, Class: "story", StoryRef: "jira:LOAN-7"}
-	storyBody := renderBoardRegion(story, &boardGitState{Branch: "design/s"})
+	storyBody := renderBoardRegion(story, &boardGitState{Branch: "design/s"}, testASDView())
 	for _, want := range []string{
 		`data-testid="board-guide"`,
 		"case file", "acceptance criteria", "yarn", "Commit",
@@ -282,7 +282,7 @@ func TestBoardLegibility_Guide(t *testing.T) {
 	proj := &BoardProjection{Spec: "s", Mode: modeReadOnly, Cards: []cardView{{ID: "ac-1", Kind: "acceptance-criterion", Text: "x"}}}
 	for _, mode := range []boardModeKind{modeReadOnly, modeReview} {
 		proj.Mode = mode
-		if strings.Contains(renderBoardRegion(proj, &boardGitState{}), `data-testid="board-guide"`) {
+		if strings.Contains(renderBoardRegion(proj, &boardGitState{}, testASDView()), `data-testid="board-guide"`) {
 			t.Errorf("%s board renders the authoring guide", mode)
 		}
 	}
@@ -307,7 +307,7 @@ func TestBoardLegibility_ModeChrome(t *testing.T) {
 		modeReview:   "mirror of the MR",
 		modeReadOnly: "sealed record",
 	} {
-		page, err := renderBoardSpecPage(&BoardProjection{Spec: "s", Title: "S", Mode: mode}, &boardGitState{})
+		page, err := renderBoardSpecPage(&BoardProjection{Spec: "s", Title: "S", Mode: mode}, &boardGitState{}, testASDView())
 		if err != nil {
 			t.Fatalf("rendering %s page: %v", mode, err)
 		}
@@ -336,7 +336,7 @@ func TestBoardLegibility_CaseFileAndDocChip(t *testing.T) {
 	// A spec carrying neither attribute (grandfathered v0 artifacts) gets
 	// no folder header at all — never an empty tab.
 	bare := &BoardProjection{Spec: "s", Mode: modeReadOnly, Cards: []cardView{{ID: "ac-1", Kind: "acceptance-criterion", Text: "x"}}}
-	if strings.Contains(renderBoardRegion(bare, &boardGitState{}), "case-tab") {
+	if strings.Contains(renderBoardRegion(bare, &boardGitState{}, testASDView()), "case-tab") {
 		t.Error("a spec with no problem/outcome still renders the case-file tab")
 	}
 
@@ -345,7 +345,7 @@ func TestBoardLegibility_CaseFileAndDocChip(t *testing.T) {
 		Edges:    []edgeView{{Type: "implements", From: "spec", To: "adr/a", Layer: "spec"}},
 		RefCards: []refCardView{{Ref: "adr/a", X: 40, Y: 40}},
 	}
-	frozen := renderBoardRegion(proj, &boardGitState{})
+	frozen := renderBoardRegion(proj, &boardGitState{}, testASDView())
 	if !strings.Contains(frozen, `yarn-chip--doc`) {
 		t.Error("document-level chip not marked yarn-chip--doc")
 	}
@@ -355,7 +355,7 @@ func TestBoardLegibility_CaseFileAndDocChip(t *testing.T) {
 	// A card-sourced chip carries no document prefix.
 	proj.Edges = []edgeView{{Type: "exempts", From: "dc-1", To: "adr/a", Layer: "spec"}}
 	proj.Cards = []cardView{{ID: "dc-1", Kind: "decision", Text: "x"}}
-	if strings.Contains(renderBoardRegion(proj, &boardGitState{}), "yarn-chip--doc") {
+	if strings.Contains(renderBoardRegion(proj, &boardGitState{}, testASDView()), "yarn-chip--doc") {
 		t.Error("card-sourced chip wrongly marked as the document's")
 	}
 }
@@ -394,7 +394,7 @@ func TestBoardLegibility_CaseClassTag(t *testing.T) {
 				proj := tc.proj
 				proj.Spec, proj.Mode = "s", mode
 				proj.Problem, proj.Outcome = "p", "o"
-				if got := renderBoardRegion(&proj, &boardGitState{}); !strings.Contains(got, tc.want) {
+				if got := renderBoardRegion(&proj, &boardGitState{}, testASDView()); !strings.Contains(got, tc.want) {
 					t.Errorf("%s board missing class stamp %s", mode, tc.want)
 				}
 			}
@@ -403,7 +403,7 @@ func TestBoardLegibility_CaseClassTag(t *testing.T) {
 
 	// No class → no stamp (never an empty tag).
 	bare := &BoardProjection{Spec: "s", Mode: modeReadOnly, Problem: "p", Outcome: "o"}
-	if strings.Contains(renderBoardRegion(bare, &boardGitState{}), "case-class-tag") {
+	if strings.Contains(renderBoardRegion(bare, &boardGitState{}, testASDView()), "case-class-tag") {
 		t.Error("a projection with no class still renders a class stamp")
 	}
 }

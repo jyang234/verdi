@@ -23,6 +23,12 @@
   var region = document.getElementById("boardv2-region");
   var statusEl = document.getElementById("autosave-status");
   var authoring = state.mode === "authoring";
+  // Domain writes (typed spec mutations) are refused when the server
+  // says so (review fix I-1: the kernel accepts spec writes only from
+  // the design/<spec-name> branch); the scratch tier stays live. Every
+  // domain gesture refuses UP FRONT with the server's own explanation.
+  var domainRefusal = state.domainRefusal || "";
+  var domainWrites = authoring && !domainRefusal;
 
   // The board's own mount prefix (spec/draft-boards dc-1): the same page
   // serves at the unprefixed /board/spec/<name> and beneath a
@@ -170,6 +176,17 @@
 
   function interactionLive() {
     if (gesture || editing) return true;
+    // An OPEN typed-operation dialog is an active interaction (Codex
+    // closure round 1): its draft input is bound to the base it was
+    // opened against, so the projection swap AND the mutation-base
+    // adoption are both held until the dialog terminates — a concurrent
+    // change then surfaces as the kernel's typed STALE refusal when the
+    // preserved input is applied, never a silent overwrite riding a
+    // freshly adopted base.
+    var op = document.getElementById("asd-op-dialog");
+    if (op && !op.hidden) return true;
+    var stub = document.getElementById("asd-stub-dialog");
+    if (stub && !stub.hidden) return true;
     var c = canvas();
     return !!(c && c.querySelector(".sticky-draft"));
   }
@@ -192,7 +209,11 @@
     markClamped();
   }
 
-  function refreshFragment() {
+  function refreshFragment(force) {
+    // The ASD transport owns the conditional projection (revision token,
+    // base digest, state preservation); route every refresh through it so
+    // the mutation base can never go silently stale.
+    if (window.__verdiASD) return window.__verdiASD.refresh(force);
     var seq = ++fragmentSeq;
     return fetch(
       boardURL("/fragment")
@@ -237,11 +258,170 @@
       .catch(function (err) {
         setStatus("error: " + err.message);
         // Reconcile: the wall must never keep showing a state the server
-        // refused (a dragged card at a refused position is a lie).
-        refreshFragment().catch(function () {
+        // refused (a dragged card at a refused position is a lie). FORCED:
+        // a refusal changes no server fact, so the conditional token would
+        // 304 and leave the optimistic divergence standing.
+        refreshFragment(true).catch(function () {
           // The error status above stays; the next mutation refreshes.
         });
       });
+  }
+
+  // -- typed draft operations (Wave 6 Task 2) ------------------------------
+  //
+  // Every DOMAIN gesture is now ONE typed mutate_draft transaction through
+  // the shared application core (AC-2: no parallel interpretation). The
+  // gesture-to-operation mapping lives here; every value it uses is
+  // server-derived data (data-* attributes, the embedded ASD state) — the
+  // client never derives spec semantics of its own, and the kernel
+  // validates the complete result before any byte lands.
+
+  var EDIT_OPS = {
+    "acceptance-criterion": "edit-ac",
+    "constraint": "edit-constraint",
+    "decision": "edit-decision",
+    "open-question": "edit-question",
+  };
+  var ADD_OPS = {
+    "acceptance-criterion": { op: "add-ac", prefix: "ac" },
+    "constraint": { op: "add-constraint", prefix: "co" },
+    "decision": { op: "add-decision", prefix: "dc" },
+    "open-question": { op: "add-question", prefix: "oq" },
+  };
+
+  // refFor renders a yarn endpoint as the link ref the spec document
+  // stores: an on-wall declared object becomes a same-spec fragment; an
+  // external endpoint is stored as written (the server's own historical
+  // mapping, now applied at request construction).
+  function refFor(to) {
+    var el = endpointElement(to);
+    if (el && el.classList.contains("objcard")) return "spec/" + state.spec + "#" + to;
+    return to;
+  }
+
+  function chipStoredLink(chip, fallbackTo) {
+    return {
+      ref: chip && chip.getAttribute("data-stored-ref") ? chip.getAttribute("data-stored-ref") : refFor(fallbackTo),
+      note: chip && chip.getAttribute("data-note") ? chip.getAttribute("data-note") : "",
+    };
+  }
+
+  function addLinkOp(source, type, ref, note) {
+    var op = { op: "add-link", source: source, type: type, ref: ref };
+    if (note) op.note = note;
+    return op;
+  }
+  function removeLinkOp(source, type, ref, note) {
+    var op = { op: "remove-link", source: source, type: type, ref: ref };
+    if (note) op.note = note;
+    return op;
+  }
+
+  // mutateOps posts one typed transaction through the ASD transport
+  // (boardspecasd.js owns the envelope, base digest, expected identity,
+  // and the fresh-projection swap). Falls back loudly when the ASD asset
+  // is absent — never a silent no-op.
+  function mutateOps(ops, extras) {
+    heldRefresh = false;
+    if (!domainWrites && domainRefusal) {
+      // The kernel would refuse this write (state-forbidden); the wall
+      // says why instead of posting a doomed transaction (review fix
+      // I-1). Backstop only — every domain entry point is gated before
+      // this.
+      refuseDomain();
+      return Promise.resolve(null);
+    }
+    if (!window.__verdiASD) {
+      setStatus("error: the design transport is not loaded");
+      return Promise.reject(new Error("no __verdiASD"));
+    }
+    return window.__verdiASD.mutate(ops, extras || {});
+  }
+
+  // refuseDomain speaks the server's own domain-write refusal — the
+  // designed constraint dialog, visible at the gesture, naming the
+  // required design branch (review fix I-1).
+  function refuseDomain() {
+    openConfirm("This wall cannot edit the spec", domainRefusal, false);
+    var ok = document.getElementById("edge-confirm-ok");
+    if (ok) ok.hidden = true;
+  }
+
+  // specEdgeChipEls collects the spec-layer chip ELEMENTS touching a key
+  // (the trash flows need each chip's stored tuple, not just its labels).
+  function specEdgeChipEls(key) {
+    var out = [];
+    var chips = region.querySelectorAll('.yarn-chip[data-layer="spec"]');
+    for (var i = 0; i < chips.length; i++) {
+      var from = chips[i].getAttribute("data-from");
+      var to = chips[i].getAttribute("data-to");
+      if (from === key || to === key) out.push(chips[i]);
+    }
+    return out;
+  }
+
+  // annotationChipIdsFor collects the annotation-layer thread record ids
+  // touching a key — the scratch records that die with a trashed element.
+  function annotationChipIdsFor(key) {
+    var out = [];
+    var chips = region.querySelectorAll('.yarn-chip[data-layer="annotation"]');
+    for (var i = 0; i < chips.length; i++) {
+      var from = chips[i].getAttribute("data-from");
+      var to = chips[i].getAttribute("data-to");
+      var id = chips[i].getAttribute("data-annotation-id");
+      if (id && (from === key || to === key)) out.push(id);
+    }
+    return out;
+  }
+
+  // stubGraduationPlan derives the graduation transaction for a
+  // proto-sticky from server-rendered facts alone: the server-derived slug
+  // (data-slug), the sticky's typed target kind, its attribution threads,
+  // and the wall's declared stubs. Every refusal is decided BEFORE the
+  // durable mutation (F-06), naming the rejected bytes and the grammar.
+  function stubGraduationPlan(stickyEl) {
+    var spike = stickyEl.getAttribute("data-annotation-type") === "spike";
+    var slug = stickyEl.getAttribute("data-slug") || "";
+    var pattern = window.__verdiASD ? window.__verdiASD.slugPattern() : "^[a-z0-9]+(?:-[a-z0-9]+)*$";
+    var slugOK = false;
+    try {
+      slugOK = !!slug && new RegExp(pattern).test(slug);
+    } catch (err) {
+      slugOK = /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(slug);
+    }
+    if (!slugOK) {
+      return { error: "The derived slug " + JSON.stringify(slug) + " is not kebab-case (" + pattern + "). Rewrite the sticky's first line so it typesets to a kebab-case slug, then graduate." };
+    }
+    if (region.querySelector('.stubcard[data-stub="' + slug + '"]')) {
+      return { error: "A stub named \"" + slug + "\" already exists on this spec (slug collision). Rewrite the sticky's title first." };
+    }
+    var stickyID = stickyEl.getAttribute("data-id");
+    var wantKind = spike ? "open-question" : "acceptance-criterion";
+    var targets = [];
+    var threads = [];
+    var seen = {};
+    var chips = region.querySelectorAll('.yarn-chip[data-layer="annotation"]');
+    for (var i = 0; i < chips.length; i++) {
+      var from = chips[i].getAttribute("data-from");
+      var to = chips[i].getAttribute("data-to");
+      var other = from === stickyID ? to : to === stickyID ? from : null;
+      if (!other) continue;
+      var el = endpointElement(other);
+      if (!el || el.getAttribute("data-object-kind") !== wantKind) continue;
+      threads.push(chips[i].getAttribute("data-annotation-id"));
+      if (!seen[other]) {
+        seen[other] = true;
+        targets.push(other);
+      }
+    }
+    if (targets.length === 0) {
+      return { error: "This sticky has no attribution yarn to " + (spike ? "open questions" : "acceptance criteria") + " yet; draw coverage yarn first." };
+    }
+    targets.sort();
+    var op = spike
+      ? { op: "add-stub", slug: slug, spike: true, resolves: targets }
+      : { op: "add-stub", slug: slug, acceptance_criteria: targets };
+    return { slug: slug, spike: spike, targets: targets, op: op, graduate: [stickyID].concat(threads) };
   }
 
   // -- yarn: SVG threads under HTML chips ----------------------------------
@@ -908,11 +1088,21 @@
   function commitEdge(t, note) {
     hideAllDialogs();
     if (pending.retype) {
-      mutate("edge-retype", { from: pending.from, to: pending.to, type: pending.retype, newType: t });
+      // Retype = remove + add in ONE atomic typed transaction, the stored
+      // ref and note surviving verbatim (the chip carries the exact
+      // stored tuple).
+      var stored = { ref: pending.storedRef || refFor(pending.to), note: pending.storedNote || "" };
+      mutateOps([
+        removeLinkOp(pending.from, pending.retype, stored.ref, stored.note),
+        addLinkOp(pending.from, t, stored.ref, stored.note),
+      ]);
     } else if (pending.annotationId) {
-      mutate("relates-graduate", { id: pending.annotationId, type: t, note: note });
+      // The thread's graduation: one add-link transaction, the thread
+      // flip riding the same gesture (annotation owner, after the clean
+      // transaction).
+      mutateOps([addLinkOp(pending.from, t, refFor(pending.to), note)], { graduate: [pending.annotationId] });
     } else {
-      mutate("edge", { from: pending.from, to: pending.to, type: t, note: note });
+      mutateOps([addLinkOp(pending.from, t, refFor(pending.to), note)]);
     }
   }
 
@@ -1372,6 +1562,19 @@
     return out;
   }
 
+  // scopingChipsFor collects the scoping-layer chips touching a key —
+  // the stub claims an object-trash confirmation must name (F-08).
+  function scopingChipsFor(key) {
+    var out = [];
+    var chips = region.querySelectorAll('.yarn-chip[data-layer="scoping"]');
+    for (var i = 0; i < chips.length; i++) {
+      var from = chips[i].getAttribute("data-from");
+      var to = chips[i].getAttribute("data-to");
+      if (from === key || to === key) out.push({ from: from, to: to, type: chips[i].getAttribute("data-edge-type") });
+    }
+    return out;
+  }
+
   // gateRitualCopy appends the removal consequence for every gate-bearing
   // type among the named edges — the same ritual voice removal wears at
   // the chip's own × (a trash drop must not be a quieter path).
@@ -1426,6 +1629,13 @@
     if (g.kind === "refcard") {
       var ref = g.el.getAttribute("data-ref");
       var edges = specEdgeChipsFor(ref);
+      if (edges.length > 0 && !domainWrites) {
+        // Removing the holding edges is a spec write the kernel refuses
+        // here; a pure pin (no spec edges) still dies from the scratch
+        // tier below.
+        refuseDomain();
+        return;
+      }
       var docHeld = edges.some(function (c) {
         return c.from === "spec";
       });
@@ -1442,8 +1652,12 @@
       }
       if (edges.length === 0) {
         // A pure pin (or a card held only by scratch threads): the
-        // scratch tier's "or they die" — no ceremony.
-        mutate("ref-trash", { ref: ref });
+        // scratch tier's "or they die" — no ceremony, one batch delete on
+        // the annotation owner.
+        var deadIds = annotationChipIdsFor(ref);
+        var pinId = g.el.getAttribute("data-pin-id");
+        if (pinId) deadIds.push(pinId);
+        if (deadIds.length > 0) mutate("annotation-delete", { ids: deadIds });
         return;
       }
       var names = edges
@@ -1459,12 +1673,16 @@
       if (g.el.hasAttribute("data-pin-id")) {
         msg += " Its pin and scratch threads go with it.";
       }
-      pending = { trashRef: ref };
+      pending = { trashRef: ref, trashRefPinID: g.el.getAttribute("data-pin-id") || "" };
       openConfirm("Take " + ref + " off the wall", msg, false);
       return;
     }
     // A declared object card: removing it removes its declaration from
     // the spec document plus every edge touching it — prose stays.
+    if (!domainWrites) {
+      refuseDomain();
+      return;
+    }
     var id = g.el.getAttribute("data-id");
     var edges2 = specEdgeChipsFor(id);
     var msg2 = "Removes " + id + " from the spec document";
@@ -1477,6 +1695,23 @@
       msg2 += ", and the " + (edges2.length === 1 ? "edge" : edges2.length + " edges") + " touching it (" + names2 + ")";
     }
     msg2 += ". Its body prose stays in the document — the board never deletes prose." + gateRitualCopy(edges2);
+    // The scoping-layer claims on this object (a stub covering an AC, a
+    // spike resolving an OQ) are part of the removal's impact (F-08):
+    // the claim itself is spec content in the stubs: block and will
+    // DANGLE until the stub is repointed — said BEFORE the confirm,
+    // never discovered from a lint finding later (review fix I-3).
+    var claims = scopingChipsFor(id);
+    if (claims.length > 0) {
+      var claimNames = claims
+        .map(function (c) {
+          return c.from.replace(/^stub:/, "") + " (" + c.type + ")";
+        })
+        .join(", ");
+      msg2 +=
+        " Declared stub" + (claims.length === 1 ? " " : "s ") + claimNames +
+        " still claim" + (claims.length === 1 ? "s" : "") + " " + id +
+        " — that claim will dangle until the stub is corrected (the lint gate flags it).";
+    }
     pending = { trashObject: id };
     openConfirm("Remove " + id + " from the spec", msg2, false);
   }
@@ -1624,6 +1859,22 @@
     if (!authoring || editing) return;
     var card = e.target.closest(".objcard");
     if (!card) return;
+    openCardEditor(card);
+  }
+
+  // openCardEditor's domain gate lives INSIDE the one shared entry, so
+  // mouse and keyboard paths refuse identically — before any text is
+  // invested (review fix I-1).
+
+  // openCardEditor is the ONE inline-editor entry, shared by the mouse
+  // (double-click) and the keyboard (Enter on a focused card) — complete
+  // keyboard access without a second edit path (design §5.2).
+  function openCardEditor(card) {
+    if (!authoring || editing) return;
+    if (!domainWrites) {
+      refuseDomain();
+      return;
+    }
     var textEl = card.querySelector(".card-text");
     if (!textEl) return;
     cancelExpand(); // editing a card wins over the click-to-expand it shares
@@ -1642,7 +1893,16 @@
       textEl.hidden = false;
       editing = false;
       if (next && next !== original) {
-        mutate("edit-text", { id: card.getAttribute("data-id"), text: next });
+        var editOp = {
+          op: EDIT_OPS[card.getAttribute("data-object-kind")],
+          id: card.getAttribute("data-id"),
+          text: next,
+          anchor: card.getAttribute("data-anchor") || "#" + card.getAttribute("data-id"),
+        };
+        if (editOp.op === "edit-ac") {
+          editOp.evidence = (card.getAttribute("data-evidence") || "").split(",").filter(Boolean);
+        }
+        mutateOps([editOp]);
       }
       resumeHeldRefresh(); // an unchanged edit ends the hold with no mutation
     });
@@ -2181,26 +2441,23 @@
           mutate("relates", { from: rel.from, to: rel.to });
           return;
         }
-        // Stub graduation (dc-6's register ceremony). The server's
-        // refusals — zero yarn, slug collision — come back in plain
-        // language; surface them in the same dialog, never a raw toast.
-        if (pending && pending.stubGraduate) {
-          var gradID = pending.stubGraduate;
+        // Sticky → declared-object graduation: one typed transaction plus
+        // the annotation flip riding the same gesture.
+        if (pending && pending.stickyObjectGraduate) {
+          var sog = pending.stickyObjectGraduate;
           pending = null;
           hideAllDialogs();
-          setStatus("saving…");
-          api("stub-graduate", { id: gradID })
-            .then(function (data) {
-              if (typeof data.dirty === "boolean") state.git.dirty = data.dirty;
-              return refreshFragment().then(function () {
-                setStatus("saved");
-              });
-            })
-            .catch(function (err) {
-              setStatus("");
-              openConfirm("Not yet a stub", err.message, false);
-              document.getElementById("edge-confirm-ok").hidden = true;
-            });
+          mutateOps([sog.op], { graduate: sog.graduate });
+          return;
+        }
+        // Stub graduation (dc-6's register ceremony): the plan was built
+        // and validated BEFORE this confirm; apply it now as one typed
+        // transaction, its sticky and threads flipping with it.
+        if (pending && pending.stubGraduate) {
+          var plan2 = pending.stubGraduate;
+          pending = null;
+          hideAllDialogs();
+          mutateOps([plan2.op], { graduate: plan2.graduate });
           return;
         }
         // Instantiate (ac-6): the sealed wall's one live affordance.
@@ -2238,23 +2495,53 @@
           var removal = pending;
           pending = null;
           hideAllDialogs();
-          mutate("edge-delete", { from: removal.from, to: removal.to, type: removal.type });
+          mutateOps([removeLinkOp(removal.from, removal.type, removal.storedRef, removal.storedNote)]);
           return;
         }
         // The trash confirmations (owner directive): removal happens
         // ONLY here — cancel or Escape leaves everything standing.
         if (pending && pending.trashRef) {
           var deadRef = pending.trashRef;
+          var deadPin = pending.trashRefPinID;
           pending = null;
           hideAllDialogs();
-          mutate("ref-trash", { ref: deadRef });
+          // One typed transaction removing every spec-layer tuple holding
+          // the card, its pin and scratch threads riding the same gesture
+          // through the annotation owner.
+          var refOps = specEdgeChipEls(deadRef)
+            .filter(function (chip) { return chip.getAttribute("data-from") !== "spec"; })
+            .map(function (chip) {
+              var storedT = chipStoredLink(chip, deadRef);
+              return removeLinkOp(chip.getAttribute("data-from"), chip.getAttribute("data-edge-type"), storedT.ref, storedT.note);
+            });
+          var refDead = annotationChipIdsFor(deadRef);
+          if (deadPin) refDead.push(deadPin);
+          if (refOps.length > 0) {
+            mutateOps(refOps, { del: refDead });
+          } else if (refDead.length > 0) {
+            mutate("annotation-delete", { ids: refDead });
+          }
           return;
         }
         if (pending && pending.trashObject) {
           var deadObject = pending.trashObject;
           pending = null;
           hideAllDialogs();
-          mutate("object-trash", { id: deadObject });
+          // The object's own declaration plus every OTHER spec-layer edge
+          // naming it leave in ONE atomic transaction; its scratch
+          // threads die with it (annotation owner, after the clean
+          // transaction). Layout pruning is the server's follow-up.
+          var objCard = region.querySelector('.objcard[data-id="' + deadObject + '"]');
+          var removeSpec = ADD_OPS[objCard ? objCard.getAttribute("data-object-kind") : ""];
+          if (!removeSpec) return;
+          var objOps = specEdgeChipEls(deadObject)
+            .filter(function (chip) { return chip.getAttribute("data-from") !== "spec" && chip.getAttribute("data-from") !== deadObject; })
+            .map(function (chip) {
+              var storedO = chipStoredLink(chip, deadObject);
+              return removeLinkOp(chip.getAttribute("data-from"), chip.getAttribute("data-edge-type"), storedO.ref, storedO.note);
+            });
+          objOps.push({ op: removeSpec.op.replace("add-", "remove-"), id: deadObject });
+          mutateOps(objOps, { del: annotationChipIdsFor(deadObject) });
           return;
         }
         commitEdge(pending.type, document.getElementById("edge-confirm-reason").value.trim());
@@ -2323,16 +2610,19 @@
         mutate("annotation-delete", { id: deadChip.getAttribute("data-annotation-id") });
       } else {
         var edgeChip = del.closest(".yarn-chip");
+        var stored = chipStoredLink(edgeChip, edgeChip.getAttribute("data-to"));
         var edge = {
           from: edgeChip.getAttribute("data-from"),
           to: edgeChip.getAttribute("data-to"),
           type: edgeChip.getAttribute("data-edge-type"),
+          storedRef: stored.ref,
+          storedNote: stored.note,
         };
         if (state.gate.indexOf(edge.type) >= 0) {
-          pending = { remove: true, from: edge.from, to: edge.to, type: edge.type };
+          pending = { remove: true, from: edge.from, to: edge.to, type: edge.type, storedRef: edge.storedRef, storedNote: edge.storedNote };
           openConfirm("Remove " + edge.type, state.removals[edge.type] || "", false);
         } else {
-          mutate("edge-delete", edge);
+          mutateOps([removeLinkOp(edge.from, edge.type, edge.storedRef, edge.storedNote)]);
         }
       }
       return;
@@ -2343,6 +2633,7 @@
     var retypeBtn = t.closest("[data-retype]");
     if (retypeBtn) {
       var retypeChip = retypeBtn.closest(".yarn-chip");
+      var retypeStored = chipStoredLink(retypeChip, retypeChip.getAttribute("data-to"));
       var rFrom = endpointElement(retypeChip.getAttribute("data-from"));
       var rTo = endpointElement(retypeChip.getAttribute("data-to"));
       openPicker({
@@ -2351,6 +2642,8 @@
         to: retypeChip.getAttribute("data-to"),
         toKind: rTo ? kindOfElement(rTo) : "unknown",
         retype: retypeChip.getAttribute("data-edge-type"),
+        storedRef: retypeStored.ref,
+        storedNote: retypeStored.note,
       });
       return;
     }
@@ -2377,15 +2670,26 @@
     if (grad) {
       if (grad.getAttribute("data-graduate") === "stub") {
         // The proto-sticky's graduation: the kind is already the
-        // sticky's type, so there is no menu — one confirmation naming
-        // the ceremony (dc-6: the band stays, the voice changes).
+        // sticky's type, so there is no menu — one confirmation carrying
+        // the FULL impact preview (F-06/F-08): the server-derived slug is
+        // validated against the server's own grammar BEFORE the durable
+        // mutation, and the exact resulting refs/paths/bindings are
+        // spoken first.
         var protoEl = grad.closest(".sticky");
-        pending = { stubGraduate: protoEl.getAttribute("data-id") };
+        var plan = stubGraduationPlan(protoEl);
+        if (plan.error) {
+          pending = null;
+          openConfirm("Not yet a stub", plan.error, false);
+          document.getElementById("edge-confirm-ok").hidden = true;
+          return;
+        }
+        pending = { stubGraduate: plan };
         openConfirm(
-          "Graduate into a stub",
-          "Typesets this sticky in place: its text becomes the stub's slug, its yarn " +
-            "the coverage it claims — an ordinary spec edit into the stubs registry. " +
-            "The handwriting becomes the record.",
+          "Graduate into stub “" + plan.slug + "”",
+          "One typed operation (add-stub) declares slug " + plan.slug + " in this spec's stubs registry, " +
+            (plan.spike ? "resolving open questions " : "covering acceptance criteria ") + plan.targets.join(", ") +
+            ". Its yarn graduates with it. Instantiating it later cuts branch design/" + plan.slug +
+            " carrying spec/" + plan.slug + " at .verdi/specs/active/" + plan.slug + "/spec.md.",
           false
         );
       } else if (grad.getAttribute("data-graduate") === "sticky") {
@@ -2409,7 +2713,34 @@
     if (gradItem) {
       var kind = gradItem.getAttribute("data-object-kind");
       hideAllDialogs();
-      mutate("sticky-graduate", { id: pendingSticky, kind: kind });
+      var spec2 = ADD_OPS[kind];
+      var stickyEl2 = region.querySelector('.sticky[data-id="' + pendingSticky + '"]');
+      var c3 = canvas();
+      if (!spec2 || !stickyEl2 || !c3) {
+        pendingSticky = null;
+        return;
+      }
+      var newID = c3.getAttribute("data-next-id-" + spec2.prefix);
+      var bodyEl = stickyEl2.querySelector(".sticky-body");
+      var text2 = bodyEl ? bodyEl.textContent : "";
+      // Graduation impact preview (F-08, adjudication 6): the exact
+      // resulting id, kind, and evidence floor — server-derived facts —
+      // shown BEFORE the durable mutation.
+      pending = {
+        stickyObjectGraduate: {
+          op: { op: spec2.op, id: newID, text: text2, anchor: "#" + newID },
+          graduate: [pendingSticky],
+          evidence: spec2.op === "add-ac",
+        },
+      };
+      if (spec2.op === "add-ac") pending.stickyObjectGraduate.op.evidence = ["attestation"];
+      openConfirm(
+        "Graduate into " + newID,
+        "One typed operation (" + spec2.op + ") declares " + newID + " in the spec document with this sticky's text" +
+          (spec2.op === "add-ac" ? ", carrying the attestation evidence floor (refine it in the document)" : "") +
+          ". The sticky's record flips to graduated. The resulting object anchors at #" + newID + " in spec/" + state.spec + ".",
+        false
+      );
       pendingSticky = null;
       return;
     }
@@ -2444,6 +2775,11 @@
   }
 
   function onKeyDown(e) {
+    if (e.key === "Enter" && e.target && e.target.classList && e.target.classList.contains("objcard")) {
+      openCardEditor(e.target);
+      e.preventDefault();
+      return;
+    }
     if (e.key === "Escape") {
       pending = null;
       cancelExpand();
@@ -2476,4 +2812,21 @@
 
   layoutYarn();
   markClamped();
+
+  // The ASD transport's hooks (boardspecasd.js): the region swap, the
+  // interaction-hold contract, and the status line — one owner each, no
+  // duplicated machinery.
+  window.__BOARDV2API__ = {
+    applyFragment: applyFragment,
+    interactionLive: interactionLive,
+    noteHeld: function () { heldRefresh = true; },
+    resumeHeldRefresh: resumeHeldRefresh,
+    setStatus: setStatus,
+    setDirty: function (dirty) { state.git.dirty = dirty; },
+    openNotice: function (title, message) {
+      openConfirm(title, message, false);
+      var ok = document.getElementById("edge-confirm-ok");
+      if (ok) ok.hidden = true;
+    },
+  };
 })();

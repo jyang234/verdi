@@ -327,6 +327,19 @@ type BoardProjection struct {
 	// status is always "draft", by Mode's own construction, so Status only
 	// adds information off the authoring path).
 	Status string `json:"status,omitempty"`
+	// DomainRefusal, when non-empty, is the disclosed reason this
+	// authoring wall's DOMAIN surface (typed spec mutations: forms, card
+	// editors, spec-layer yarn, object/ref trash) is refused even though
+	// the scratch tier stays live: the mutation kernel
+	// (draftmutation.AuthorizeState) accepts spec writes only from the
+	// exact design/<spec-name> branch, so any other checkout renders the
+	// projection without offering writes the kernel would refuse with
+	// state-forbidden (review fix I-1: constraints visible BEFORE the
+	// author invests). Empty means the domain surface is live — the
+	// useful zero value: projections built outside loadBoard (tests,
+	// pure renders) keep today's authoring affordances, and mode gating
+	// remains the primary seal for review/read-only walls.
+	DomainRefusal string `json:"domain_refusal,omitempty"`
 	// Class identity (02 §Kind registry): which kind of wall this is —
 	// a feature (outcome ACs + stubs, downward-blind) or a story (the
 	// unit of build, pointing up at its feature's AC fragments), with

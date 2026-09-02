@@ -34,18 +34,17 @@ const draftMutationImport = "github.com/jyang234/verdi/internal/draftmutation"
 // guarded, so a future regression that pulls draftmutation into either
 // entrypoint still fails here (the gate grows, never shrinks — CLAUDE.md).
 //
-// A SECOND narrow path fell away in Wave 6 Task 1B (design §6.1.2 item 6:
-// "Task 1B routes boardSpecServer.spliceSpec's complete
-// read/parse/apply/validate/atomic-write callback through WithWriterLock";
-// plan Task 1B "Route only the legacy spliceSpec callback through
-// WithWriterLock"): internal/workbench/boardspecapi.go alone now imports
-// draftmutation, exclusively so the surviving legacy spec.md splice runs
-// inside the checkout-wide writer transaction boundary until Task 2
-// deletes that path atomically. Every OTHER internal/workbench production
-// file stays guarded — the Task 2 mutation-adapter boundary (designapp
-// rewiring, browser-actor minting) has NOT landed, and a draftmutation
-// import appearing anywhere else in the package before that unit still
-// fails here.
+// The SECOND narrow path moved in Wave 6 Task 2: Task 1B temporarily
+// routed the legacy boardspecapi.go splice through WithWriterLock, and
+// Task 2 deleted that splice path atomically (design §6.1's forbidden
+// mixed state) — boardspecapi.go is strictly guarded again. The one
+// authorized workbench import site is now the Task 2 browser mutation
+// adapter itself, internal/workbench/boardspecdesign.go, which consumes
+// the exact wire-schema types (Request/DecodeRequest/Actor/
+// NewUnauthenticatedHuman/StaleRefusal) for the six application
+// operations. Every OTHER internal/workbench production file stays
+// guarded, so a second draftmutation import appearing anywhere else in
+// the package still fails here.
 func TestLaterWorkbenchAdapterDoesNotImportDraftMutation(t *testing.T) {
 	repositoryRoot := filepath.Join("..", "..")
 	targets := []string{
@@ -53,9 +52,9 @@ func TestLaterWorkbenchAdapterDoesNotImportDraftMutation(t *testing.T) {
 		filepath.Join(repositoryRoot, "cmd", "verdi", "mcp.go"),
 		filepath.Join(repositoryRoot, "cmd", "verdi", "serve.go"),
 	}
-	// Task 1B's one commanded exception (design §6.1.2 item 6): the legacy
-	// board splice's WithWriterLock participation lives in this exact file.
-	spliceException := filepath.Join(repositoryRoot, "internal", "workbench", "boardspecapi.go")
+	// Task 2's one commanded exception: the browser mutation adapter — the
+	// single workbench file that speaks draftmutation's wire types.
+	spliceException := filepath.Join(repositoryRoot, "internal", "workbench", "boardspecdesign.go")
 	parsed := 0
 	for _, target := range targets {
 		info, err := os.Stat(target)
@@ -100,16 +99,17 @@ func TestLaterWorkbenchAdapterDoesNotImportDraftMutation(t *testing.T) {
 	}
 }
 
-// TestNewUnauthenticatedHumanHasNoNonTestProductionCaller structurally
-// proves clause E of Wave 6 Task 1A's bounded contract: today (before
-// Task 2's workbench handler exists) there is exactly ZERO non-test
-// production caller of draftmutation.NewUnauthenticatedHuman anywhere in
-// the repository — CLI, MCP, internal/designapp, and internal/workbench
-// alike. Combined with the constructor itself taking no request-derived
-// argument at all (policy.go), this also proves no request decoder can
-// mint the actor: there is no code path, let alone a data-driven one, that
-// even calls it outside this package's own definition and tests.
-func TestNewUnauthenticatedHumanHasNoNonTestProductionCaller(t *testing.T) {
+// TestNewUnauthenticatedHumanHasExactlyOneProductionCaller structurally
+// proves the Wave 6 Task 2 caller inventory (plan Task 1A: "Task 2 adds
+// the one browser call and updates the inventory to exactly one"): the
+// repository's ONLY non-test production reference to
+// draftmutation.NewUnauthenticatedHuman is the workbench browser mutation
+// adapter's mintBrowserActor (internal/workbench/boardspecdesign.go).
+// Combined with the constructor taking no request-derived argument at all
+// (policy.go), this proves no CLI, MCP, or request-decoder path can mint
+// the browser-human actor: exactly one adapter call site exists, and it
+// is the browser one.
+func TestNewUnauthenticatedHumanHasExactlyOneProductionCaller(t *testing.T) {
 	parsed, references, err := productionReferencesToConstructor(filepath.Join("..", ".."), unauthenticatedHumanConstructor)
 	if err != nil {
 		t.Fatal(err)
@@ -117,8 +117,9 @@ func TestNewUnauthenticatedHumanHasNoNonTestProductionCaller(t *testing.T) {
 	if parsed == 0 {
 		t.Fatal("caller-inventory witness parsed no production Go files")
 	}
-	if len(references) != 0 {
-		t.Fatalf("%s referenced outside its own declaration in non-test production code: %v", unauthenticatedHumanConstructor, references)
+	adapter := filepath.Join("internal", "workbench", "boardspecdesign.go")
+	if len(references) != 1 || !strings.Contains(references[0], adapter) {
+		t.Fatalf("%s production references = %v, want exactly one at %s", unauthenticatedHumanConstructor, references, adapter)
 	}
 }
 

@@ -46,7 +46,10 @@ async function drawAttribution(
 async function graduateProto(page: Page, sticky: import("@playwright/test").Locator) {
   await sticky.locator('[data-graduate="stub"]').click();
   await expect(confirmDialog(page)).toBeVisible();
-  await expect(confirmDialog(page)).toContainText(/typesets this sticky in place/i);
+  // Wave 6 Task 2: the confirm IS the graduation impact preview (F-08) —
+  // the exact resulting slug, bindings, and downstream refs/paths, spoken
+  // before the one typed add-stub transaction.
+  await expect(confirmDialog(page)).toContainText(/declares slug/i);
   await confirmOk(page).click();
   await expectAutosaved(page);
 }
@@ -163,10 +166,10 @@ test.describe("scoping canvas: the feature wall authors its stubs", () => {
     await page.goto(boardPath(SHOWCASE.DESIGN_SPEC));
     const sticky = await addSticky(page, "orphan claim", "story");
     await sticky.locator('[data-graduate="stub"]').click();
-    await confirmOk(page).click();
 
-    // The server's refusal surfaces in the dialog's own voice — a
-    // designed state, not a raw error toast.
+    // Wave 6 Task 2: the refusal now comes BEFORE any durable act — the
+    // graduation plan is validated against the wall's own facts at the
+    // moment of the gesture (F-06), in the dialog's own voice.
     await expect(confirmDialog(page)).toBeVisible();
     await expect(confirmDialog(page)).toContainText("Not yet a stub");
     await expect(confirmDialog(page)).toContainText(/draw coverage yarn first/);

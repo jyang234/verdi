@@ -7,7 +7,7 @@ import (
 	"github.com/jyang234/verdi/internal/dex"
 )
 
-//go:embed assets/board.js assets/boardspec.js assets/boarddiagram.js assets/readiness.js
+//go:embed assets/board.js assets/boardspec.js assets/boardspecasd.js assets/boarddiagram.js assets/readiness.js
 var embeddedAssets embed.FS
 
 // mermaidHandler serves dex's vendored mermaid.min.js (05 §Workbench:
@@ -60,6 +60,14 @@ func boardJSHandler() http.HandlerFunc {
 // dependency-free posture as the v0 board's.
 func boardSpecJSHandler() http.HandlerFunc {
 	return embeddedJSHandler("assets/boardspec.js")
+}
+
+// boardSpecASDJSHandler serves the ASD workbench's route-scoped asset
+// (Wave 6 Task 2): conditional refresh, typed mutation transport, and
+// panel wiring — dependency-free, and structurally capped at 64 KiB
+// uncompressed (SI-168; TestBoardSpecASDAssetBudget).
+func boardSpecASDJSHandler() http.HandlerFunc {
+	return embeddedJSHandler("assets/boardspecasd.js")
 }
 
 // boardDiagramJSHandler serves the diagram editor's one JS file

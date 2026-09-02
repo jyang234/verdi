@@ -2,8 +2,9 @@ package workbench
 
 import (
 	"context"
-	"encoding/json"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -163,7 +164,7 @@ func createSticky(t *testing.T, h http.Handler, root, name, typ, text string) st
 // attribution thread flip to graduated.
 func TestBoardSpec_StubGraduate_Story(t *testing.T) {
 	root := newScopingWallFixture(t)
-	h := NewHandler(root)
+	h := newBoardTestHandler(root)
 
 	stickyID := createSticky(t, h, root, scopingWallName, "story", "Borrower self serve update")
 	rec := postBoardAPI(t, h, scopingWallName, "relates", `{"from":"`+stickyID+`","to":"ac-1"}`)
@@ -181,17 +182,17 @@ func TestBoardSpec_StubGraduate_Story(t *testing.T) {
 		t.Fatal("no relates thread recorded")
 	}
 
-	rec = postBoardAPI(t, h, scopingWallName, "stub-graduate", `{"id":"`+stickyID+`"}`)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("stub-graduate = %d\n%s", rec.Code, rec.Body.String())
+	grec, gout := postMutate(t, h, root, scopingWallName, []map[string]any{
+		{"op": "add-stub", "slug": "borrower-self-serve-update", "acceptance_criteria": []string{"ac-1"}},
+	}, []string{stickyID, threadID}, nil)
+	if grec.Code != http.StatusOK || gout.Result == nil {
+		t.Fatalf("stub graduation = %d\n%s", grec.Code, grec.Body.String())
 	}
-	var resp boardAPIResponse
-	_ = json.Unmarshal(rec.Body.Bytes(), &resp)
-	if !resp.Dirty {
-		t.Error("stub-graduate did not dirty the spec working tree (it IS a spec edit)")
+	if gout.Projection == nil || !gout.Projection.Dirty {
+		t.Error("stub graduation did not dirty the spec working tree (it IS a spec edit)")
 	}
 
-	proj, _, _, err := (&boardSpecServer{root: root}).loadBoard(context.Background(), scopingWallName)
+	proj, _, _, _, err := (&boardSpecServer{root: root}).loadBoard(context.Background(), scopingWallName)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -225,7 +226,7 @@ func TestBoardSpec_StubGraduate_Story(t *testing.T) {
 // resolution yarn to open questions graduates into a spike stub.
 func TestBoardSpec_StubGraduate_Spike(t *testing.T) {
 	root := newScopingWallFixture(t)
-	h := NewHandler(root)
+	h := newBoardTestHandler(root)
 
 	stickyID := createSticky(t, h, root, scopingWallName, "spike", "Retry strategy")
 	rec := postBoardAPI(t, h, scopingWallName, "relates", `{"from":"`+stickyID+`","to":"oq-1"}`)
@@ -233,12 +234,21 @@ func TestBoardSpec_StubGraduate_Spike(t *testing.T) {
 		t.Fatalf("relates = %d\n%s", rec.Code, rec.Body.String())
 	}
 
-	rec = postBoardAPI(t, h, scopingWallName, "stub-graduate", `{"id":"`+stickyID+`"}`)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("stub-graduate = %d\n%s", rec.Code, rec.Body.String())
+	annotations, _ := boardio.ReadAllAnnotations(boardio.AnnotationsDir(root))
+	var threadID string
+	for _, a := range annotations {
+		if a.Type == artifact.AnnotationRelates {
+			threadID = a.ID
+		}
+	}
+	grec, gout := postMutate(t, h, root, scopingWallName, []map[string]any{
+		{"op": "add-stub", "slug": "retry-strategy", "spike": true, "resolves": []string{"oq-1"}},
+	}, []string{stickyID, threadID}, nil)
+	if grec.Code != http.StatusOK || gout.Result == nil {
+		t.Fatalf("stub graduation = %d\n%s", grec.Code, grec.Body.String())
 	}
 
-	proj, _, _, err := (&boardSpecServer{root: root}).loadBoard(context.Background(), scopingWallName)
+	proj, _, _, _, err := (&boardSpecServer{root: root}).loadBoard(context.Background(), scopingWallName)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -382,54 +392,59 @@ func TestBoardSpec_ProtoYarn_TypeRefusal_ServerSide(t *testing.T) {
 // paths: a missing sticky, a non-proto-sticky type, zero attribution
 // threads, and a slug collision.
 func TestBoardSpec_StubGraduate_Negative(t *testing.T) {
-	t.Run("missing sticky", func(t *testing.T) {
+	t.Run("unknown graduate annotation refuses with zero mutation", func(t *testing.T) {
 		root := newScopingWallFixture(t)
-		h := NewHandler(root)
-		rec := postBoardAPI(t, h, scopingWallName, "stub-graduate", `{"id":"a-01J8Z0K3AAAAAAAAAAAAAAAAAA"}`)
+		h := newBoardTestHandler(root)
+		before, _ := os.ReadFile(filepath.Join(root, ".verdi", "specs", "active", scopingWallName, "spec.md"))
+		rec, _ := postMutate(t, h, root, scopingWallName, []map[string]any{
+			{"op": "add-stub", "slug": "never-lands", "acceptance_criteria": []string{"ac-1"}},
+		}, []string{"a-01J8Z0K3AAAAAAAAAAAAAAAAAA"}, nil)
 		if rec.Code != http.StatusBadRequest {
-			t.Fatalf("stub-graduate(missing) = %d, want 400", rec.Code)
+			t.Fatalf("graduating a missing sticky = %d, want 400", rec.Code)
+		}
+		after, _ := os.ReadFile(filepath.Join(root, ".verdi", "specs", "active", scopingWallName, "spec.md"))
+		if string(before) != string(after) {
+			t.Error("the refused graduation still mutated the spec")
 		}
 	})
 
-	t.Run("wrong sticky type", func(t *testing.T) {
+	t.Run("a slug outside the grammar refuses as a typed verdict", func(t *testing.T) {
 		root := newScopingWallFixture(t)
-		h := NewHandler(root)
-		stickyID := createSticky(t, h, root, scopingWallName, "comment", "just a comment")
-		rec := postBoardAPI(t, h, scopingWallName, "stub-graduate", `{"id":"`+stickyID+`"}`)
-		if rec.Code != http.StatusBadRequest {
-			t.Fatalf("stub-graduate(comment sticky) = %d, want 400", rec.Code)
-		}
-	})
-
-	t.Run("zero attribution threads", func(t *testing.T) {
-		root := newScopingWallFixture(t)
-		h := NewHandler(root)
+		h := newBoardTestHandler(root)
 		stickyID := createSticky(t, h, root, scopingWallName, "story", "No yarn yet")
-		rec := postBoardAPI(t, h, scopingWallName, "stub-graduate", `{"id":"`+stickyID+`"}`)
-		if rec.Code != http.StatusBadRequest {
-			t.Fatalf("stub-graduate(no yarn) = %d, want 400", rec.Code)
+		before, _ := os.ReadFile(filepath.Join(root, ".verdi", "specs", "active", scopingWallName, "spec.md"))
+		rec, out := postMutate(t, h, root, scopingWallName, []map[string]any{
+			{"op": "add-stub", "slug": "Not_A_Slug!", "acceptance_criteria": []string{"ac-1"}},
+		}, []string{stickyID}, nil)
+		if rec.Code != http.StatusOK || out.Failure == nil || out.Failure.Classification != "verdict" {
+			t.Fatalf("bad slug = %d %+v, want a typed verdict\n%s", rec.Code, out.Failure, rec.Body.String())
 		}
-		if !strings.Contains(rec.Body.String(), "yarn") {
-			t.Errorf("error message %q does not mention yarn", rec.Body.String())
+		after, _ := os.ReadFile(filepath.Join(root, ".verdi", "specs", "active", scopingWallName, "spec.md"))
+		if string(before) != string(after) {
+			t.Error("the refused stub still mutated the spec")
 		}
 	})
 
 	t.Run("slug collision", func(t *testing.T) {
 		root := newScopingWallFixture(t)
-		h := NewHandler(root)
+		h := newBoardTestHandler(root)
 
 		firstID := createSticky(t, h, root, scopingWallName, "story", "Duplicate title")
 		postBoardAPI(t, h, scopingWallName, "relates", `{"from":"`+firstID+`","to":"ac-1"}`)
-		rec := postBoardAPI(t, h, scopingWallName, "stub-graduate", `{"id":"`+firstID+`"}`)
-		if rec.Code != http.StatusOK {
-			t.Fatalf("first stub-graduate = %d\n%s", rec.Code, rec.Body.String())
+		rec, out := postMutate(t, h, root, scopingWallName, []map[string]any{
+			{"op": "add-stub", "slug": "duplicate-title", "acceptance_criteria": []string{"ac-1"}},
+		}, []string{firstID}, nil)
+		if rec.Code != http.StatusOK || out.Result == nil {
+			t.Fatalf("first stub graduation = %d\n%s", rec.Code, rec.Body.String())
 		}
 
-		secondID := createSticky(t, h, root, scopingWallName, "story", "Duplicate title")
+		secondID := createSticky(t, h, root, scopingWallName, "story", "Duplicate title second try")
 		postBoardAPI(t, h, scopingWallName, "relates", `{"from":"`+secondID+`","to":"ac-2"}`)
-		rec = postBoardAPI(t, h, scopingWallName, "stub-graduate", `{"id":"`+secondID+`"}`)
-		if rec.Code != http.StatusBadRequest {
-			t.Fatalf("colliding stub-graduate = %d, want 400\n%s", rec.Code, rec.Body.String())
+		rec, out = postMutate(t, h, root, scopingWallName, []map[string]any{
+			{"op": "add-stub", "slug": "duplicate-title", "acceptance_criteria": []string{"ac-2"}},
+		}, []string{secondID}, nil)
+		if rec.Code != http.StatusOK || out.Failure == nil || out.Failure.Classification != "verdict" {
+			t.Fatalf("colliding stub = %d %+v, want a typed verdict\n%s", rec.Code, out.Failure, rec.Body.String())
 		}
 	})
 }
@@ -695,10 +710,12 @@ func TestBoardSpec_StubInstantiate_Negative(t *testing.T) {
 	// stub-instantiate is exempted.
 	t.Run("other actions stay authoring-only on the accepted wall", func(t *testing.T) {
 		repo := newScopingAcceptedFixture(t)
-		h := NewHandler(repo.Dir)
-		rec := postBoardAPI(t, h, scopingAcceptedName, "edit-text", `{"id":"ac-1","text":"x"}`)
+		h := newBoardTestHandler(repo.Dir)
+		rec, _ := postMutate(t, h, repo.Dir, scopingAcceptedName, []map[string]any{
+			{"op": "edit-ac", "id": "ac-1", "text": "x", "evidence": []string{"attestation"}, "anchor": "#ac-1"},
+		}, nil, nil)
 		if rec.Code != http.StatusForbidden {
-			t.Fatalf("edit-text on accepted wall = %d, want 403", rec.Code)
+			t.Fatalf("mutate_draft on accepted wall = %d, want 403", rec.Code)
 		}
 	})
 }

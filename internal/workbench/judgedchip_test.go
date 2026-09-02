@@ -123,7 +123,7 @@ func judgedChip(t *testing.T, proj *BoardProjection) badgeView {
 
 func TestJudgedSweepChip_FreshCompleteThroughLoadBoard(t *testing.T) {
 	root := newJudgedFixture(t, judgedFullScan(), "")
-	proj, _, _, err := (&boardSpecServer{root: root}).loadBoard(context.Background(), judgedFixtureName)
+	proj, _, _, _, err := (&boardSpecServer{root: root}).loadBoard(context.Background(), judgedFixtureName)
 	if err != nil {
 		t.Fatalf("loadBoard: %v", err)
 	}
@@ -151,7 +151,7 @@ func TestJudgedSweepChip_StaleAndPartialDisclosed(t *testing.T) {
 	// while layer 2 rewrote the spec (stale): both contrasts must render
 	// as disclosure lines on the one chip.
 	root := newJudgedFixture(t, []string{"spec/widget-judged#dc-1"}, "an amended outcome")
-	proj, _, _, err := (&boardSpecServer{root: root}).loadBoard(context.Background(), judgedFixtureName)
+	proj, _, _, _, err := (&boardSpecServer{root: root}).loadBoard(context.Background(), judgedFixtureName)
 	if err != nil {
 		t.Fatalf("loadBoard: %v", err)
 	}

@@ -105,6 +105,15 @@ type Deps struct {
 	// /readiness discloses that honestly with a 503 page rather than
 	// rendering anything vacuous.
 	Readiness *readinesspilot.Snapshot
+
+	// Design is the ASD application bridge (Wave 6 Task 2): the one typed
+	// application core (internal/designapp, injected by cmd/verdi's serve
+	// wiring) behind a consumer-owned port (boardspecdesign.go). Every
+	// domain board mutation and every api/<application-operation> action
+	// routes through it. nil means the design service is not wired: the
+	// six design actions disclose that operationally and the shell renders
+	// the honest unwired posture — never a local fallback interpretation.
+	Design DesignBridge
 }
 
 // boardSpecServer holds the board's dependencies for one store root.
@@ -152,11 +161,37 @@ type boardSpecServer struct {
 	// leaves this empty and keeps today's switch semantics.
 	fixedBranch string
 
+	// design is the ASD application bridge (Deps.Design — see that field's
+	// doc comment). nil means the design service is not wired.
+	design DesignBridge
+
+	// checkoutMu/checkoutCanonical cache the kernel's canonical
+	// checkout-path resolution for this root (stable for the server's
+	// lifetime) so per-poll renders stop re-resolving it. SUCCESS ONLY is
+	// memoized (review fix I-2): the resolution runs under the request's
+	// context, so a browser-aborted first request must fail that request
+	// alone — never poison the memo with "context canceled" for the
+	// server's lifetime. An empty checkoutCanonical means unresolved;
+	// the next call retries.
+	checkoutMu        sync.Mutex
+	checkoutCanonical string
+
+	// capsMu/capsCache memoize one spec's SUCCESSFUL capabilities
+	// consultation per exact fact key (branch, worktree HEAD, accepted/
+	// default-branch head, current spec digest, policy tree stamp): the
+	// conditional 2s poll re-derives capabilities only when one of the
+	// facts they depend on can have moved, instead of re-running the full
+	// identity/state/policy resolution every tick. Operational failures
+	// are never memoized (the same success-only rule checkoutCanonical
+	// above follows).
+	capsMu    sync.Mutex
+	capsCache map[string]capsCacheEntry
+
 	// writeMu serializes board MUTATIONS within this process. D3's
 	// process-level writer lock (I-12) keeps other processes out, but the
 	// board's HTTP handlers run as concurrent goroutines against the same
 	// files; without this, two overlapping read-modify-write actions
-	// (spliceSpec on spec.md, actionPosition on layout.json, the boardio
+	// (the designapp mutation transaction, actionPosition on layout.json, the boardio
 	// full-file JSONL rewrites) could lose an update (last writer wins).
 	// Atomic temp+rename already prevents a torn file, so this closes the
 	// remaining intra-process lost-update window (M-2). Reads (page/
@@ -181,6 +216,28 @@ type boardGitState struct {
 	DefaultBranch string   `json:"defaultBranch"`
 	Branches      []string `json:"branches"`
 	Dirty         bool     `json:"dirty"`
+
+	// defaultRef is the resolved default branch's AUTHORITATIVE rev
+	// (specstate.Branch.Ref): "origin/<name>" when that remote-tracking
+	// ref exists, otherwise the local branch — the projector's own
+	// preference, because a local ref can be a stale shadow of the
+	// remote default. Every accepted-head fact (the posture header's
+	// Accepted HEAD, ahead/behind, the capabilities memo key) must ride
+	// this rev; DefaultBranch above keeps the display NAME only (Codex
+	// correction round 1, finding 1 — closure reopen). Unexported: a
+	// server-side authority fact, never part of the wire model.
+	defaultRef string
+}
+
+// acceptedRef is the rev accepted-head facts resolve against — the
+// authoritative default-branch ref, falling back to the display name for
+// state constructed without one (fixture/test literals; gitState always
+// sets both together).
+func (g *boardGitState) acceptedRef() string {
+	if g.defaultRef != "" {
+		return g.defaultRef
+	}
+	return g.DefaultBranch
 }
 
 // loadBoard assembles the projection's four inputs and the git state. The
@@ -192,33 +249,33 @@ type boardGitState struct {
 // (internal/mcpserve), via the exported LoadProjection below — can surface
 // it as its own field, matching list_annotations' review_unavailable
 // pattern (commit 1348e79) rather than parsing prose notices.
-func (s *boardSpecServer) loadBoard(ctx context.Context, name string) (*BoardProjection, *boardGitState, string, error) {
+func (s *boardSpecServer) loadBoard(ctx context.Context, name string) (*BoardProjection, *boardGitState, string, *boardLoadExtras, error) {
 	if !specNameRe.MatchString(name) {
-		return nil, nil, "", ErrBoardNotFound
+		return nil, nil, "", nil, ErrBoardNotFound
 	}
 	raw, err := os.ReadFile(filepath.Join(s.specDir(name), "spec.md"))
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil, nil, "", ErrBoardNotFound
+			return nil, nil, "", nil, ErrBoardNotFound
 		}
-		return nil, nil, "", fmt.Errorf("workbench: reading spec %s: %w", name, err)
+		return nil, nil, "", nil, fmt.Errorf("workbench: reading spec %s: %w", name, err)
 	}
 	fmBytes, bodyBytes, err := artifact.SplitFrontmatter(raw)
 	if err != nil {
-		return nil, nil, "", fmt.Errorf("workbench: spec %s: %w", name, err)
+		return nil, nil, "", nil, fmt.Errorf("workbench: spec %s: %w", name, err)
 	}
 	fm, err := artifact.DecodeSpec(fmBytes)
 	if err != nil {
-		return nil, nil, "", fmt.Errorf("workbench: spec %s: %w", name, err)
+		return nil, nil, "", nil, fmt.Errorf("workbench: spec %s: %w", name, err)
 	}
 
 	stored, err := boardlayout.ReadFile(s.specDir(name))
 	if err != nil {
-		return nil, nil, "", err
+		return nil, nil, "", nil, err
 	}
 	annotations, err := boardio.ReadAllAnnotations(boardio.AnnotationsDir(s.root))
 	if err != nil {
-		return nil, nil, "", err
+		return nil, nil, "", nil, err
 	}
 
 	// The review feed is NON-BLOCKING on every render (I-2, 04 §Semantics'
@@ -248,7 +305,7 @@ func (s *boardSpecServer) loadBoard(ctx context.Context, name string) (*BoardPro
 
 	git, gitNotice, err := s.gitState(ctx)
 	if err != nil {
-		return nil, nil, "", err
+		return nil, nil, "", nil, err
 	}
 
 	// The spec's effective lifecycle state (merge-signaled acceptance),
@@ -258,7 +315,7 @@ func (s *boardSpecServer) loadBoard(ctx context.Context, name string) (*BoardPro
 	// store path, compared against what the default branch holds.
 	st, err := s.resolveState(ctx, name, raw)
 	if err != nil {
-		return nil, nil, "", fmt.Errorf("workbench: resolving effective state for %s: %w", name, err)
+		return nil, nil, "", nil, fmt.Errorf("workbench: resolving effective state for %s: %w", name, err)
 	}
 
 	// Mode is keyed by EFFECTIVE state plus branch state, never by a
@@ -289,7 +346,27 @@ func (s *boardSpecServer) loadBoard(ctx context.Context, name string) (*BoardPro
 
 	proj, err := buildProjection(name, fm, bodyBytes, stored, annotations, comments, mode, string(st.ArtifactStatus()))
 	if err != nil {
-		return nil, nil, "", err
+		return nil, nil, "", nil, err
+	}
+	// The DOMAIN surface (typed spec mutations) is honest about the
+	// kernel's own branch precondition (review fix I-1): AuthorizeState
+	// accepts spec writes only from exactly design/<spec-name>, for the
+	// browser human and every other actor alike — so a proposed draft
+	// served from any other branch renders the projection and its live
+	// scratch tier WITHOUT the forms, card editors, spec-edge removal,
+	// or trash affordances every one of which the kernel would refuse
+	// with state-forbidden. The refusal is precondition-specific and
+	// names the required branch (constraints visible BEFORE the author
+	// invests, design §6.2) — the same fact designapp reports as
+	// MutabilityRefusal{Precondition:"design-branch"} when capabilities
+	// are derivable; deriving it here from the identical branch fact
+	// keeps the wall honest even where policy authority is not adopted
+	// and the capabilities consultation fails before reaching it.
+	if mode == modeAuthoring && git.Branch != "design/"+name {
+		proj.DomainRefusal = fmt.Sprintf(
+			// vocab:identity — "proposed draft" speaks AC-1's canonical draft (the ASD protocol term this kernel-precondition banner explains; the boardspecasd.go shell rows' classification) and "/b/ draft board" names the spec/draft-boards surface — neither is the display-vocabulary status word, which the CO-1 mode refusal routes via DisplayState where it truly names the state
+			"spec/%s is a proposed draft, but branch %q is not its mutable design branch %q — the shared mutation core refuses spec writes from any other checkout (state-forbidden), so this wall offers reading and scratch annotations only. Check out %q (or open that branch's own /b/ draft board) to edit the spec",
+			name, git.Branch, "design/"+name, "design/"+name)
 	}
 	// The state resolution's own disclosures (an unproven default branch,
 	// an incomplete corpus scan, a legacy-status migration note) render in
@@ -313,7 +390,7 @@ func (s *boardSpecServer) loadBoard(ctx context.Context, name string) (*BoardPro
 	// (the I/O layer) rather than inside the pure projector — the same
 	// posture proj.Notices takes below (spec/obligation-wall ac-2/dc-3).
 	if err := attachObligations(proj, s.root, name, fm); err != nil {
-		return nil, nil, "", err
+		return nil, nil, "", nil, err
 	}
 	// Wall badges (spec/badge-computes dc-1): the SAME store-derived I/O
 	// enrichment posture as attachObligations above — runs after
@@ -321,7 +398,7 @@ func (s *boardSpecServer) loadBoard(ctx context.Context, name string) (*BoardPro
 	// mutation fragment, and get_board's LoadProjection all see the same
 	// badges (ac-1).
 	if err := attachBadges(ctx, proj, s.root, name, raw, fm, s.supersession, s.model); err != nil {
-		return nil, nil, "", err
+		return nil, nil, "", nil, err
 	}
 	// s.fixedBranch distinguishes the two board modes the one call site
 	// serves: "" for the serving checkout's unprefixed board, the design
@@ -337,7 +414,7 @@ func (s *boardSpecServer) loadBoard(ctx context.Context, name string) (*BoardPro
 	// does into attachDiagramEditorHrefs above (ADJ-70): a per-branch
 	// board's family links stay inside the branch they resolved from.
 	if err := attachFamilyLinks(ctx, proj, s.root, s.fixedBranch); err != nil {
-		return nil, nil, "", err
+		return nil, nil, "", nil, err
 	}
 	// The creation form's field descriptors (spec/creation-form ac-2/ac-3):
 	// the same I/O-enrichment posture as every attach* call above. Only a
@@ -358,7 +435,32 @@ func (s *boardSpecServer) loadBoard(ctx context.Context, name string) (*BoardPro
 	if gitNotice != "" {
 		proj.Notices = append(proj.Notices, gitNotice)
 	}
-	return proj, git, reviewNotice, nil
+	return proj, git, reviewNotice, &boardLoadExtras{raw: raw, fm: fm, state: st}, nil
+}
+
+// boardLoadExtras carries the exact already-decoded inputs loadBoard
+// consumed, so the ASD view (buildASDView) is a pure function of them
+// rather than a second read/decode/resolve pass.
+type boardLoadExtras struct {
+	raw   []byte
+	fm    *artifact.SpecFrontmatter
+	state specstate.Result
+}
+
+// loadASD is the ASD page projection: one loadBoard plus the ASD rendered
+// facts (posture header, shell, capabilities view, client mutation
+// facts). The page, fragment, snapshot, and mutation-response renders all
+// come from exactly this one composed projection.
+func (s *boardSpecServer) loadASD(ctx context.Context, name string) (*BoardProjection, *boardGitState, *asdView, error) {
+	proj, git, _, extras, err := s.loadBoard(ctx, name)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	asd, err := s.buildASDView(ctx, name, proj, git, extras.raw, extras.fm, extras.state)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	return proj, git, asd, nil
 }
 
 // attachObligations enriches a STORY board's AC cards with their evidence
@@ -440,7 +542,7 @@ func attachObligations(proj *BoardProjection, root, specName string, fm *artifac
 // shows.
 func LoadProjection(ctx context.Context, root, name string, feed CommentFeed, reviewUnavailable string, superseLoader wallbadge.SupersessionCandidateLoader) (proj *BoardProjection, reviewNotice string, err error) {
 	s := &boardSpecServer{root: root, feed: feed, reviewUnavailable: reviewUnavailable, supersession: superseLoader}
-	proj, _, reviewNotice, err = s.loadBoard(ctx, name)
+	proj, _, reviewNotice, _, err = s.loadBoard(ctx, name)
 	return proj, reviewNotice, err
 }
 
@@ -487,9 +589,11 @@ func (s *boardSpecServer) gitState(ctx context.Context) (*boardGitState, string,
 		return nil, "", err
 	}
 	def := ""
+	defRef := ""
 	notice := ""
 	if resolved, ok := specstate.ResolveDefaultBranch(ctx, s.root); ok {
 		def = resolved.Name
+		defRef = resolved.Ref
 	} else {
 		notice = unresolvedDefaultBranchNotice
 	}
@@ -501,7 +605,7 @@ func (s *boardSpecServer) gitState(ctx context.Context) (*boardGitState, string,
 	if err != nil {
 		return nil, "", err
 	}
-	return &boardGitState{Branch: branch, DefaultBranch: def, Branches: branches, Dirty: dirty}, notice, nil
+	return &boardGitState{Branch: branch, DefaultBranch: def, Branches: branches, Dirty: dirty, defaultRef: defRef}, notice, nil
 }
 
 // ErrBoardNotFound distinguishes 404 from operational failures.
@@ -514,7 +618,7 @@ func (s *boardSpecServer) boardSpecPageHandler() http.HandlerFunc {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
-		proj, git, _, err := s.loadBoard(r.Context(), r.PathValue("name"))
+		proj, git, asd, err := s.loadASD(r.Context(), r.PathValue("name"))
 		if errors.Is(err, ErrBoardNotFound) {
 			http.NotFound(w, r)
 			return
@@ -523,7 +627,7 @@ func (s *boardSpecServer) boardSpecPageHandler() http.HandlerFunc {
 			renderError(w, http.StatusInternalServerError, err)
 			return
 		}
-		out, err := renderBoardSpecPage(proj, git)
+		out, err := renderBoardSpecPage(proj, git, asd)
 		if err != nil {
 			renderError(w, http.StatusInternalServerError, err)
 			return
@@ -543,7 +647,7 @@ func (s *boardSpecServer) boardSpecFragmentHandler() http.HandlerFunc {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
-		proj, git, _, err := s.loadBoard(r.Context(), r.PathValue("name"))
+		proj, git, asd, err := s.loadASD(r.Context(), r.PathValue("name"))
 		if errors.Is(err, ErrBoardNotFound) {
 			http.NotFound(w, r)
 			return
@@ -553,6 +657,37 @@ func (s *boardSpecServer) boardSpecFragmentHandler() http.HandlerFunc {
 			return
 		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		_, _ = w.Write([]byte(renderBoardRegion(proj, git)))
+		_, _ = w.Write([]byte(renderBoardRegion(proj, git, asd)))
+	}
+}
+
+// boardSpecSnapshotHandler answers GET /board/spec/{name}/snapshot: the
+// conditional projection route (SI-165, SI-167). The response is one
+// complete rendered projection plus its machine facts; the ETag carries
+// the deterministic revision token and an unchanged If-None-Match answers
+// 304 with no body, so a poll can leave the page — and its unsaved state
+// — completely untouched. GET only; no polling result ever writes.
+func (s *boardSpecServer) boardSpecSnapshotHandler() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		snap, err := s.loadSnapshot(r.Context(), r.PathValue("name"))
+		if errors.Is(err, ErrBoardNotFound) {
+			http.NotFound(w, r)
+			return
+		}
+		if err != nil {
+			writeJSONError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		etag := `"` + snap.Revision + `"`
+		w.Header().Set("ETag", etag)
+		if match := r.Header.Get("If-None-Match"); match != "" && match == etag {
+			w.WriteHeader(http.StatusNotModified)
+			return
+		}
+		writeJSON(w, http.StatusOK, snap)
 	}
 }

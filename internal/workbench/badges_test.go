@@ -188,7 +188,7 @@ func badgeStubBySlug(proj *BoardProjection, slug string) *StubView {
 func TestAttachBadges_VLPartition(t *testing.T) {
 	root := newBadgeFeatureFixture(t)
 	s := &boardSpecServer{root: root}
-	proj, _, _, err := s.loadBoard(context.Background(), badgeFeatureFixtureName)
+	proj, _, _, _, err := s.loadBoard(context.Background(), badgeFeatureFixtureName)
 	if err != nil {
 		t.Fatalf("loadBoard: %v", err)
 	}
@@ -256,7 +256,7 @@ func TestAttachBadges_VLPartition(t *testing.T) {
 func TestAttachBadges_PendingSupersessionDisclosedUnproven(t *testing.T) {
 	root := newBadgeStoryFixture(t)
 	s := &boardSpecServer{root: root}
-	proj, _, _, err := s.loadBoard(context.Background(), badgeStoryFixtureName)
+	proj, _, _, _, err := s.loadBoard(context.Background(), badgeStoryFixtureName)
 	if err != nil {
 		t.Fatalf("loadBoard: %v", err)
 	}

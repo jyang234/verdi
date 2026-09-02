@@ -23,7 +23,7 @@ func TestBoardSpecPage_SupersededStatusBadge(t *testing.T) {
 				Problem: "borrowers lose a good rate when they pause",
 				Outcome: "borrowers can lock a rate for a window",
 			}
-			out, err := renderBoardSpecPage(proj, &boardGitState{})
+			out, err := renderBoardSpecPage(proj, &boardGitState{}, testASDView())
 			if err != nil {
 				t.Fatalf("renderBoardSpecPage: %v", err)
 			}
@@ -49,7 +49,7 @@ func TestBoardSpecPage_SupersededStatusBadge(t *testing.T) {
 			Status: "accepted-pending-build", Class: "feature",
 			Problem: "p", Outcome: "o",
 		}
-		out, err := renderBoardSpecPage(proj, &boardGitState{})
+		out, err := renderBoardSpecPage(proj, &boardGitState{}, testASDView())
 		if err != nil {
 			t.Fatalf("renderBoardSpecPage: %v", err)
 		}
