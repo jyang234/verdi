@@ -364,6 +364,7 @@ func (s *boardSpecServer) loadBoard(ctx context.Context, name string) (*BoardPro
 	// and the capabilities consultation fails before reaching it.
 	if mode == modeAuthoring && git.Branch != "design/"+name {
 		proj.DomainRefusal = fmt.Sprintf(
+			// vocab:identity — "proposed draft" speaks AC-1's canonical draft (the ASD protocol term this kernel-precondition banner explains; the boardspecasd.go shell rows' classification) and "/b/ draft board" names the spec/draft-boards surface — neither is the display-vocabulary status word, which the CO-1 mode refusal routes via DisplayState where it truly names the state
 			"spec/%s is a proposed draft, but branch %q is not its mutable design branch %q — the shared mutation core refuses spec writes from any other checkout (state-forbidden), so this wall offers reading and scratch annotations only. Check out %q (or open that branch's own /b/ draft board) to edit the spec",
 			name, git.Branch, "design/"+name, "design/"+name)
 	}
