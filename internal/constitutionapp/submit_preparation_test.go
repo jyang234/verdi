@@ -9,12 +9,117 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/jyang234/verdi/internal/constitutionimpact"
 	"github.com/jyang234/verdi/internal/contextcompile"
+	"github.com/jyang234/verdi/internal/execworkspace"
 	"github.com/jyang234/verdi/internal/fixturegit"
+	"github.com/jyang234/verdi/internal/instructionprojection"
 	"github.com/jyang234/verdi/internal/policyartifact"
 	"github.com/jyang234/verdi/internal/policyauthority"
 	"github.com/jyang234/verdi/internal/policyconflict"
 )
+
+type callerPassingConflictEvaluator struct{}
+
+func (callerPassingConflictEvaluator) Evaluate(context.Context, string, policyconflict.Request) (ConflictEvidence, error) {
+	return ConflictEvidence{Result: policyconflict.Result{Report: policyconflict.Report{Verdict: policyconflict.VerdictPass}}}, nil
+}
+
+func TestSubmitPreparation_CallerPassingSubsetCannotEstablishRegisteredCoverage(t *testing.T) {
+	root := buildFixtureRepo(t)
+	consumers := []constitutionimpact.Consumer{
+		{
+			Request: contextcompile.Request{
+				Schema:  contextcompile.RequestSchema,
+				Adapter: contextcompile.AdapterRef{ID: "codex", Version: "1"},
+				Grants:  execworkspace.GrantSet{Grants: []execworkspace.Grant{}},
+				Phase:   contextcompile.PhaseBuild,
+				Scope:   policyartifact.Scope{Phases: []string{"build"}, Environments: []string{"local"}, Paths: []string{}, Refs: []string{}},
+				Spec:    "spec/registered-passing",
+			},
+			Environment:        "local",
+			GovernedOperations: []string{"make-verify"},
+		},
+		{
+			Request: contextcompile.Request{
+				Schema:  contextcompile.RequestSchema,
+				Adapter: contextcompile.AdapterRef{ID: "codex", Version: "1"},
+				Grants:  execworkspace.GrantSet{Grants: []execworkspace.Grant{}},
+				Phase:   contextcompile.PhaseBuild,
+				Scope:   policyartifact.Scope{Phases: []string{"build"}, Environments: []string{"production"}, Paths: []string{}, Refs: []string{}},
+				Spec:    "spec/registered-omitted",
+			},
+			Environment:        "production",
+			GovernedOperations: []string{"make-verify"},
+		},
+	}
+	inventory, err := constitutionimpact.EncodeInventory(constitutionimpact.Inventory{
+		Schema: constitutionimpact.InventorySchema, Consumers: consumers,
+	})
+	if err != nil {
+		t.Fatalf("EncodeInventory: %v", err)
+	}
+	if err := os.MkdirAll(root+"/.verdi/constitution", 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(root+"/"+constitutionimpact.InventoryPath, inventory, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runFixtureGit(t, root, "add", constitutionimpact.InventoryPath)
+	runFixtureGit(t, root, "commit", "--quiet", "--no-verify", "-m", "register consumers")
+
+	svc := testService()
+	svc.Conflict = callerPassingConflictEvaluator{}
+	changed := strings.Replace(readFixtureFile(t, root, "overlays/frontend-go-version.md"),
+		`title: "Frontend Go version overlay"`, `title: "Frontend Go version overlay (changed)"`, 1)
+	if _, typed := svc.Propose(context.Background(), root, ProposeRequest{
+		Branch: "policy/incomplete-impact", Kind: KindOverlay, Name: "frontend-go-version",
+		Content: []byte(changed), Expected: Expected{Branch: "policy/incomplete-impact"},
+	}); typed != nil {
+		t.Fatalf("Propose: %v", typed)
+	}
+
+	prep, typed := svc.SubmitPreparation(context.Background(), root, SubmitPreparationRequest{
+		Targets: []ImpactTarget{{
+			Spec:    "spec/registered-passing",
+			Phase:   contextcompile.PhaseBuild,
+			Adapter: contextcompile.AdapterRef{ID: "codex", Version: "1"},
+			Scope:   policyartifact.Scope{Phases: []string{"build"}, Environments: []string{"local"}, Paths: []string{}, Refs: []string{}},
+		}},
+	})
+	if typed != nil {
+		t.Fatalf("SubmitPreparation: %v", typed)
+	}
+	if prep.ReadyForSubmission {
+		t.Fatal("caller-selected passing target established readiness while a second registered consumer was omitted")
+	}
+	if len(prep.ImpactReview.Coverage.Consumers) != 2 || len(prep.ImpactReview.Coverage.Evaluations) != 2 ||
+		len(prep.ImpactReview.AffectedConsumers) != 2 {
+		t.Fatalf("canonical accepted/proposed union was not evaluated exactly once per registered consumer: %+v", prep.ImpactReview.Coverage)
+	}
+	if len(prep.ImpactReview.Conflicts) != 1 || prep.ImpactReview.Conflicts[0].Report == nil ||
+		prep.ImpactReview.Conflicts[0].Report.Verdict != policyconflict.VerdictPass {
+		t.Fatalf("caller passing target was not retained as a supplemental preview: %+v", prep.ImpactReview.Conflicts)
+	}
+}
+
+func proposeChangedPolicy(t testing.TB, root string, svc Service, branch, kind, name, rel, old, replacement string) {
+	t.Helper()
+	content := strings.Replace(readFixtureFile(t, root, rel), old, replacement, 1)
+	if content == readFixtureFile(t, root, rel) {
+		t.Fatalf("fixture %s does not contain %q", rel, old)
+	}
+	if _, typed := svc.Propose(context.Background(), root, ProposeRequest{
+		Branch: branch, Kind: kind, Name: name, Content: []byte(content), Expected: Expected{Branch: branch},
+	}); typed != nil {
+		t.Fatalf("Propose: %v", typed)
+	}
+	if _, err := instructionprojection.Generate(root); err != nil {
+		t.Fatalf("instructionprojection.Generate: %v", err)
+	}
+	runFixtureGit(t, root, "add", "AGENTS.md", ".verdi/policy/projections/codex.json")
+	runFixtureGit(t, root, "commit", "--quiet", "--no-verify", "-m", "refresh instruction projection")
+}
 
 // unprovenJudgeTarget is the one declared target buildConflictFixtureRepo
 // resolves: mechanically clean, but requiring a semantic evaluation this
@@ -32,6 +137,7 @@ func unprovenJudgeTarget() ImpactTarget {
 func TestSubmitPreparation_BlockedOnProvenConflict(t *testing.T) {
 	root := buildUnauthorizedExemptionFixtureRepo(t)
 	svc := testService()
+	proposeChangedPolicy(t, root, svc, "policy/proven-conflict", KindPolicy, "no-legacy-go", "policies/no-legacy-go.md", "No legacy Go versions", "No legacy Go versions (changed)")
 
 	prep, typed := svc.SubmitPreparation(context.Background(), root, SubmitPreparationRequest{
 		Targets: []ImpactTarget{{
@@ -66,6 +172,7 @@ func TestSubmitPreparation_BlockedOnProvenConflict(t *testing.T) {
 func TestSubmitPreparation_BlockedOnUnprovenJudge(t *testing.T) {
 	root := buildConflictFixtureRepo(t)
 	svc := testService()
+	proposeChangedPolicy(t, root, svc, "policy/unproven-judge", KindPolicy, "go-toolchain", "policies/go-toolchain.md", "Go toolchain policy", "Go toolchain policy (changed)")
 
 	prep, typed := svc.SubmitPreparation(context.Background(), root, SubmitPreparationRequest{
 		Targets: []ImpactTarget{unprovenJudgeTarget()},
@@ -77,8 +184,12 @@ func TestSubmitPreparation_BlockedOnUnprovenJudge(t *testing.T) {
 		t.Fatal("expected ReadyForSubmission == false for a target whose conflict verdict is blocked-unproven")
 	}
 	joined := strings.Join(prep.BlockingReasons, "\n")
-	if !strings.Contains(joined, "spec/operand-feature") {
-		t.Fatalf("expected the unproven target to be named in blocking_reasons, got %v", prep.BlockingReasons)
+	consumerID, err := fixtureConsumer("spec/operand-feature", policyartifact.Scope{Phases: []string{}, Paths: []string{"cmd/"}, Refs: []string{}}).Identity()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(joined, consumerID) {
+		t.Fatalf("expected the unproven registered consumer to be named in blocking_reasons, got %v", prep.BlockingReasons)
 	}
 	if !strings.Contains(joined, string(policyconflict.ReasonJudgeUnavailable)) {
 		t.Fatalf("expected the policyconflict reason %q in blocking_reasons, got %v", policyconflict.ReasonJudgeUnavailable, prep.BlockingReasons)
@@ -93,6 +204,7 @@ func TestSubmitPreparation_BlockedOnUnprovenJudge(t *testing.T) {
 func TestSubmitPreparation_UnprovenTargetsDisclosedOnPacket(t *testing.T) {
 	root := buildConflictFixtureRepo(t)
 	svc := testService()
+	proposeChangedPolicy(t, root, svc, "policy/unproven-packet", KindPolicy, "go-toolchain", "policies/go-toolchain.md", "Go toolchain policy", "Go toolchain policy (changed)")
 
 	prep, typed := svc.SubmitPreparation(context.Background(), root, SubmitPreparationRequest{
 		Targets: []ImpactTarget{unprovenJudgeTarget()},
@@ -106,7 +218,7 @@ func TestSubmitPreparation_UnprovenTargetsDisclosedOnPacket(t *testing.T) {
 	// unproven semantic evaluation.
 	report := prep.ImpactReview.Conflicts[0].Report
 	if report == nil {
-		t.Fatal("expected a completed conflict report")
+		t.Fatalf("expected a completed supplemental conflict report; coverage=%+v supplemental=%+v", prep.ImpactReview.Coverage, prep.ImpactReview.Conflicts)
 	}
 	if report.Verdict != policyconflict.VerdictBlockedUnproven {
 		t.Fatalf("verdict = %q, want %q", report.Verdict, policyconflict.VerdictBlockedUnproven)
@@ -128,7 +240,11 @@ func TestSubmitPreparation_UnprovenTargetsDisclosedOnPacket(t *testing.T) {
 	if decoded["ready_for_submission"] != false {
 		t.Fatalf("ready_for_submission = %v, want false", decoded["ready_for_submission"])
 	}
-	if got, want := decoded["unproven_targets"], []any{"spec/operand-feature"}; !reflect.DeepEqual(got, want) {
+	consumerID, err := fixtureConsumer("spec/operand-feature", policyartifact.Scope{Phases: []string{}, Paths: []string{"cmd/"}, Refs: []string{}}).Identity()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := decoded["unproven_targets"], []any{consumerID}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("unproven_targets = %#v, want %#v — the versioned record must name every unproven target", got, want)
 	}
 }
@@ -213,7 +329,7 @@ type acceptedRefAdvancingGitReader struct {
 }
 
 func (r acceptedRefAdvancingGitReader) RevParse(ctx context.Context, root, rev string) (string, error) {
-	if rev != "HEAD" {
+	if rev != "HEAD" && !strings.Contains(rev, "^{") {
 		*r.calls++
 		if *r.calls == r.shiftAt {
 			return r.advanced, nil
@@ -312,15 +428,9 @@ func TestSubmitPreparation_RefusesWhenProposedStoreChangesMidOperation(t *testin
 }
 
 // TestSubmitPreparation_NotReadyWithoutImpactCoverage proves a changed
-// constitution with ZERO evaluated coverage never reads submission-ready.
-// ReadyForSubmission starts true and only per-target findings lower it, so a
-// caller that declares no target at all would otherwise receive an
-// affirmatively clean packet over a real policy delta whose impact literally
-// nothing examined — zero coverage reported as zero impact. This operation
-// does not derive the affected set (no ratified reverse-applicability seam
-// exists; inventing one is the Task 3 stop gate); it refuses to read clean
-// over the gap, exactly as SI-178(c) refuses to read clean over an unproven
-// conflict verdict.
+// constitution with a present-but-empty canonical registered universe never
+// reads submission-ready. The inventory owner, not caller target selection or
+// a reverse-applicability matcher, establishes the complete set.
 func TestSubmitPreparation_NotReadyWithoutImpactCoverage(t *testing.T) {
 	root := buildFixtureRepo(t)
 	svc := testService()
@@ -345,19 +455,21 @@ func TestSubmitPreparation_NotReadyWithoutImpactCoverage(t *testing.T) {
 	if len(prep.ImpactReview.AffectedConsumers) != 0 {
 		t.Fatalf("test setup: expected no evaluated coverage, got %v", prep.ImpactReview.AffectedConsumers)
 	}
+	if prep.ImpactReview.Coverage.State != constitutionimpact.StateDisclosedUnproven ||
+		!hasImpactReason(prep.ImpactReview.Coverage, constitutionimpact.ReasonConsumerUniverseEmpty) {
+		t.Fatalf("empty changed universe coverage = %+v", prep.ImpactReview.Coverage)
+	}
 	if prep.ReadyForSubmission {
 		t.Fatal("expected ReadyForSubmission == false: the proposal changes the constitution and nothing at all was evaluated for impact")
 	}
-	if !strings.Contains(strings.Join(prep.BlockingReasons, "\n"), "no impact coverage") {
+	if !strings.Contains(strings.Join(prep.BlockingReasons, "\n"), "consumer-universe-empty") {
 		t.Fatalf("expected a disclosed coverage-gap blocking reason, got %v", prep.BlockingReasons)
 	}
 }
 
-// TestSubmitPreparation_ReadyWithoutTargetsWhenNothingChanged is the
-// coverage guard's own negative: with NO policy delta there is nothing whose
-// impact could go unexamined, so an empty declared-target set is not a gap
-// and the packet may still read ready. The guard is about uncovered CHANGE,
-// never about requiring a target for its own sake.
+// TestSubmitPreparation_ReadyWithoutTargetsWhenNothingChanged is the coverage
+// guard's own negative: only with NO constitution layer delta may an empty
+// canonical impact set prove without synthetic evaluations.
 func TestSubmitPreparation_ReadyWithoutTargetsWhenNothingChanged(t *testing.T) {
 	root := buildFixtureRepo(t)
 	svc := testService()
@@ -368,6 +480,10 @@ func TestSubmitPreparation_ReadyWithoutTargetsWhenNothingChanged(t *testing.T) {
 	}
 	if len(prep.ImpactReview.Layers) != 0 {
 		t.Fatalf("test setup: expected an empty policy delta, got %v", prep.ImpactReview.Layers)
+	}
+	if prep.ImpactReview.Coverage.State != constitutionimpact.StateProven || len(prep.ImpactReview.Coverage.Consumers) != 0 ||
+		len(prep.ImpactReview.Coverage.Evaluations) != 0 || len(prep.ImpactReview.Coverage.Reasons) != 0 {
+		t.Fatalf("unchanged empty impact coverage = %+v, want proven empty witness", prep.ImpactReview.Coverage)
 	}
 	if !prep.ReadyForSubmission {
 		t.Fatalf("expected ReadyForSubmission == true with no delta and no target, got blocking reasons %v", prep.BlockingReasons)

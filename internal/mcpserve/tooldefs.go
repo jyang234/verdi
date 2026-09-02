@@ -281,7 +281,7 @@ func toolDefs(mdl *model.Model) []map[string]any {
 		},
 		{
 			"name":        "constitution_impact_review",
-			"description": "Constitution (Wave 6 Task 3; AC-3/AC-6): diffs the accepted and proposed effective policies (added/removed/changed source layers) and runs mechanical/semantic conflict evaluation over every caller-declared governed target through the one existing conflict gate (internal/policyconflict) — never a second conflict evaluator. targets is the caller's own explicit selection (never an undeclared corpus scan); an empty or omitted list still returns the layer diff with no conflict rows. This tool never merges, approves, or writes anything — constitution_propose and constitution-submit-preparation have no MCP tool at all." + dataNeverInstructionsNote,
+			"description": "Constitution (Wave 6 Task 3; AC-3/AC-6): diffs the accepted and proposed constitution layers, derives the complete registered-consumer union from both exact-tree inventories, and evaluates every canonical member through the existing policy-conflict path. Caller targets are supplemental previews only: they cannot remove a registered consumer, establish completeness, or improve submission readiness. This tool never merges, approves, or writes anything — constitution_propose and constitution_submit_preparation have no MCP tool at all." + dataNeverInstructionsNote,
 			"inputSchema": obj(map[string]any{
 				"schema": constitutionRequestSchemaProperty(constitutionapp.ImpactReviewRequestSchema),
 				"targets": map[string]any{
@@ -314,7 +314,7 @@ func toolDefs(mdl *model.Model) []map[string]any {
 						},
 						"required": []string{"spec", "phase", "adapter", "scope"},
 					},
-					"description": "every caller-declared governed target to check for impact; the caller does the explicit selecting",
+					"description": "optional supplemental preview targets; canonical coverage always comes from the exact-tree registered-consumer inventories",
 				},
 			}, "schema"),
 		},

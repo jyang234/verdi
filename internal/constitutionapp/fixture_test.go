@@ -7,8 +7,12 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/jyang234/verdi/internal/constitutionimpact"
+	"github.com/jyang234/verdi/internal/contextcompile"
+	"github.com/jyang234/verdi/internal/execworkspace"
 	"github.com/jyang234/verdi/internal/fixturegit"
 	"github.com/jyang234/verdi/internal/instructionprojection"
+	"github.com/jyang234/verdi/internal/policyartifact"
 )
 
 // storeFixtureFiles reads testdata/store's complete tree into the map shape
@@ -42,7 +46,34 @@ func storeFixtureFiles(t testing.TB) map[string]string {
 	if err != nil {
 		t.Fatalf("reading constitution store fixture: %v", err)
 	}
+	files[constitutionimpact.InventoryPath] = string(fixtureInventory(t))
 	return files
+}
+
+func fixtureInventory(t testing.TB, consumers ...constitutionimpact.Consumer) []byte {
+	t.Helper()
+	if consumers == nil {
+		consumers = []constitutionimpact.Consumer{}
+	}
+	encoded, err := constitutionimpact.EncodeInventory(constitutionimpact.Inventory{
+		Schema: constitutionimpact.InventorySchema, Consumers: consumers,
+	})
+	if err != nil {
+		t.Fatalf("encoding constitution consumer inventory: %v", err)
+	}
+	return encoded
+}
+
+func fixtureConsumer(spec string, scope policyartifact.Scope) constitutionimpact.Consumer {
+	scope.Environments = []string{"local"}
+	return constitutionimpact.Consumer{
+		Request: contextcompile.Request{
+			Schema: contextcompile.RequestSchema, Adapter: contextcompile.AdapterRef{ID: "codex", Version: "1"},
+			Grants: execworkspace.GrantSet{Grants: []execworkspace.Grant{}}, Phase: contextcompile.PhaseDesign,
+			Scope: scope, Spec: spec,
+		},
+		Environment: "local", GovernedOperations: []string{"make-verify"},
+	}
 }
 
 // buildFixtureRepo builds one deterministic fixturegit repository whose
@@ -225,6 +256,10 @@ func buildUnauthorizedExemptionFixtureRepo(t testing.TB) string {
 		".verdi/policy/exemptions/universal-legacy-go.md": unauthorizedExemption,
 		".verdi/specs/active/operand-feature/spec.md":     operandFeatureSpec,
 	}
+	files[constitutionimpact.InventoryPath] = string(fixtureInventory(t, fixtureConsumer(
+		"spec/operand-feature",
+		policyartifact.Scope{Phases: []string{}, Paths: []string{}, Refs: []string{}},
+	)))
 	repo := fixturegit.Build(t, []fixturegit.Layer{{Files: files, Message: "scaffold"}})
 
 	if _, err := instructionprojection.Generate(repo.Dir); err != nil {
@@ -253,6 +288,10 @@ func buildConflictFixtureRepo(t testing.TB) string {
 	t.Setenv("CI_DEFAULT_BRANCH", "main")
 	files := storeFixtureFiles(t)
 	files[".verdi/specs/active/operand-feature/spec.md"] = operandFeatureSpec
+	files[constitutionimpact.InventoryPath] = string(fixtureInventory(t, fixtureConsumer(
+		"spec/operand-feature",
+		policyartifact.Scope{Phases: []string{}, Paths: []string{"cmd/"}, Refs: []string{}},
+	)))
 	repo := fixturegit.Build(t, []fixturegit.Layer{{Files: files, Message: "scaffold"}})
 
 	if _, err := instructionprojection.Generate(repo.Dir); err != nil {

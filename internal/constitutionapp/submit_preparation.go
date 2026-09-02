@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/jyang234/verdi/internal/constitutionimpact"
 	"github.com/jyang234/verdi/internal/policyconflict"
 )
 
@@ -30,12 +31,9 @@ func (r SubmitPreparationRequest) validate() error {
 // committed (design §7.1); merge and approval remain the normal Git
 // pull-request boundary, entirely outside this operation.
 //
-// UnprovenTargets is the packet-level disclosure SI-178 fixes: every
-// declared target whose conflict evaluation reached
-// policyconflict.VerdictBlockedUnproven, named on the record itself rather
-// than discoverable only by walking the nested conflict reports. It is
-// always present (never omitted when empty), so a reader can distinguish
-// "no unproven targets" from "this record does not disclose them."
+// UnprovenTargets names registered consumers whose canonical conflict result
+// is blocked-unproven. It is always present; supplemental caller previews do
+// not participate in readiness.
 type SubmitPreparationResult struct {
 	Schema             string             `json:"schema"`
 	Identity           Identity           `json:"identity"`
@@ -53,14 +51,15 @@ type SubmitPreparationResult struct {
 //   - the proposed store has adopted no constitution at all, or adopted one
 //     incompletely (there is nothing to submit; the disclosed
 //     policyauthority reason travels on Validation.Snapshot.Reason);
-//   - a declared target could not be evaluated at all (its per-target
-//     Refusal);
-//   - a declared target's conflict evaluation reached
+//   - canonical registered-consumer coverage is not proven, including a
+//     missing inventory, empty changed universe, unavailable evaluator, or
+//     unknown applicability/conflict posture;
+//   - a canonical consumer's conflict evaluation reached
 //     policyconflict.VerdictBlockedViolated — a mechanically PROVEN conflict
 //     (AC-3: "A mechanically proven conflict cannot be dismissed as
 //     no-conflict. It must be fixed, superseded, narrowed, or covered by an
 //     authorized exemption");
-//   - a declared target's conflict evaluation reached
+//   - a canonical consumer's conflict evaluation reached
 //     policyconflict.VerdictBlockedUnproven — SI-178's chosen semantics (c).
 //     spec/context-integrity-v2 DC-6/DC-7 hold that unknown and unresolved
 //     states "block authoritative progression," so this public, versioned
@@ -69,17 +68,13 @@ type SubmitPreparationResult struct {
 //     (e.g. judge-unavailable) and repeated in UnprovenTargets. This
 //     invents no approval record and no conflict semantics: merge and
 //     approval stay outside the operation, and a human still acts on the
-//     packet's complete witnesses through the normal pull-request review;
-//   - a target's report carries a verdict outside policyconflict's closed
-//     three-state vocabulary (unknown values fail closed);
-//   - the proposal changes at least one constitution source layer and NO
-//     governed target was evaluated at all. Readiness starts true and only
-//     per-target findings lower it, so an empty declared set over a real
-//     policy delta would otherwise report zero coverage as zero impact. This
-//     operation still derives no affected set of its own — no ratified
-//     reverse-applicability seam exists in this repository and inventing one
-//     is the Task 3 stop gate — it refuses to read clean over the gap, which
-//     the caller closes by declaring its targets.
+//     packet's complete witnesses through the normal pull-request review; or
+//   - a canonical consumer's report carries a verdict outside
+//     policyconflict's closed three-state vocabulary (unknown values fail
+//     closed).
+//
+// Caller targets are supplemental preview rows. They never satisfy coverage,
+// remove a registered consumer, or participate in readiness.
 //
 // It refuses outright, rather than reporting, when the repository or the
 // proposal itself moves mid-operation: one identity is pinned before the two
@@ -134,7 +129,7 @@ func (s Service) SubmitPreparation(ctx context.Context, root string, req SubmitP
 		return nil, operational("identity-shifted", "the proposed constitution changed during submission preparation: "+difference, nil)
 	}
 
-	ready := true
+	ready := review.Coverage.State == constitutionimpact.StateProven
 	blocking := []string{}
 	unproven := []string{}
 
@@ -142,45 +137,34 @@ func (s Service) SubmitPreparation(ctx context.Context, root string, req SubmitP
 		ready = false
 		blocking = append(blocking, "the proposed constitution store has adopted no constitution: "+validation.Snapshot.Reason)
 	}
-	// A non-empty policy delta with NO evaluated coverage at all cannot read
-	// submission-ready: ready starts true and only per-target findings lower
-	// it, so a caller that declares no target would otherwise receive an
-	// affirmatively clean packet over a changed constitution whose impact
-	// nothing examined — zero coverage reported as zero impact. This
-	// operation does not (and must not) derive the affected set itself: no
-	// ratified reverse-applicability seam exists in this repository, and
-	// inventing one is the Task 3 stop gate. It refuses to read clean over
-	// the gap instead, exactly as SI-178(c) refuses to read clean over an
-	// unproven conflict verdict. Declaring the targets closes it.
-	if len(review.Layers) > 0 && len(review.AffectedConsumers) == 0 {
-		ready = false
-		blocking = append(blocking, fmt.Sprintf(
-			"the proposal changes %d constitution source layer(s) but no governed target was evaluated: submission readiness cannot be asserted with no impact coverage at all", len(review.Layers)))
+	if review.Coverage.State != constitutionimpact.StateProven {
+		blocking = append(blocking, "canonical impact coverage is "+string(review.Coverage.State)+": "+coverageReasons(review.Coverage.Reasons))
 	}
-	for _, tc := range review.Conflicts {
+	for _, evaluation := range review.Coverage.Evaluations {
 		switch {
-		case tc.Refusal != "":
+		case evaluation.Refusal != nil:
 			ready = false
-			blocking = append(blocking, "target "+tc.Target.Spec+": "+tc.Refusal)
-		case tc.Report == nil:
+			blocking = append(blocking, "registered consumer "+evaluation.ConsumerIdentity+": conflict evaluation was refused")
+		case evaluation.Report == nil:
 			ready = false
-			blocking = append(blocking, "target "+tc.Target.Spec+": conflict evaluation produced no report")
+			blocking = append(blocking, "registered consumer "+evaluation.ConsumerIdentity+": conflict evaluation produced no report")
 		default:
-			switch tc.Report.Verdict {
+			switch evaluation.Report.Verdict {
 			case policyconflict.VerdictPass:
 			case policyconflict.VerdictBlockedViolated:
 				ready = false
-				blocking = append(blocking, "target "+tc.Target.Spec+": a mechanically proven conflict blocks submission")
+				blocking = append(blocking, "registered consumer "+evaluation.ConsumerIdentity+": a mechanically proven conflict blocks submission")
 			case policyconflict.VerdictBlockedUnproven:
 				ready = false
-				unproven = append(unproven, tc.Target.Spec)
-				blocking = append(blocking, "target "+tc.Target.Spec+": conflict evaluation is unproven ("+unprovenReasons(tc.Report)+") and cannot be recorded as submission-clean")
+				unproven = append(unproven, evaluation.ConsumerIdentity)
+				blocking = append(blocking, "registered consumer "+evaluation.ConsumerIdentity+": conflict evaluation is unproven ("+unprovenReasons(evaluation.Report)+") and cannot be recorded as submission-clean")
 			default:
 				ready = false
-				blocking = append(blocking, "target "+tc.Target.Spec+": unrecognized conflict verdict "+string(tc.Report.Verdict))
+				blocking = append(blocking, "registered consumer "+evaluation.ConsumerIdentity+": unrecognized conflict verdict "+string(evaluation.Report.Verdict))
 			}
 		}
 	}
+	sort.Strings(unproven)
 
 	return &SubmitPreparationResult{
 		Schema:             SubmitPreparationResultSchema,
@@ -191,6 +175,17 @@ func (s Service) SubmitPreparation(ctx context.Context, root string, req SubmitP
 		BlockingReasons:    blocking,
 		UnprovenTargets:    unproven,
 	}, nil
+}
+
+func coverageReasons(reasons []constitutionimpact.Reason) string {
+	parts := make([]string, len(reasons))
+	for i, reason := range reasons {
+		parts[i] = string(reason.Code) + " [" + strings.Join(reason.Witnesses, ", ") + "]"
+	}
+	if len(parts) == 0 {
+		return "no reason disclosed"
+	}
+	return strings.Join(parts, "; ")
 }
 
 // describeIdentity renders one Identity for a refusal diagnostic: every

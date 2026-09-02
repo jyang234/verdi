@@ -121,8 +121,8 @@ func TestImpactReview_UnavailableJudgeTarget(t *testing.T) {
 	if !found {
 		t.Fatalf("expected reason %q, got %v", policyconflict.ReasonJudgeUnavailable, tc.Report.Semantic[0].Reasons)
 	}
-	if len(review.AffectedConsumers) != 1 || review.AffectedConsumers[0] != "spec/operand-feature" {
-		t.Fatalf("affected consumers = %v", review.AffectedConsumers)
+	if len(review.AffectedConsumers) != 0 {
+		t.Fatalf("no constitution layer changed, so the registered affected set must be empty; got %v", review.AffectedConsumers)
 	}
 }
 

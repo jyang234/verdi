@@ -1,23 +1,24 @@
 package constitutionapp
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
-	"os"
+	"fmt"
 	"sort"
 
+	"github.com/jyang234/verdi/internal/constitutionimpact"
 	"github.com/jyang234/verdi/internal/contextcompile"
+	"github.com/jyang234/verdi/internal/execworkspace"
 	"github.com/jyang234/verdi/internal/policyartifact"
 	"github.com/jyang234/verdi/internal/policyconflict"
 )
 
-// ImpactTarget is one caller-declared governed operation to check for
-// impact — the caller does the explicit selecting, exactly as
-// internal/designapp.GetDesignContextRequest.ChildStories already
-// establishes the precedent for this package's sibling: ImpactReview never
-// scans the whole corpus for "every spec that might consume this policy" (a
-// reverse-applicability query this package does not own and the Task 3 stop
-// gate forbids inventing).
+// ImpactTarget is one caller-supplied supplemental preview target. Registered
+// coverage is derived only from the exact-tree constitution consumer
+// inventories; a target here can add presentation detail but cannot remove a
+// registered consumer or improve submission readiness.
 type ImpactTarget struct {
 	Spec    string                    `json:"spec"`
 	Phase   contextcompile.Phase      `json:"phase"`
@@ -25,10 +26,8 @@ type ImpactTarget struct {
 	Scope   policyartifact.Scope      `json:"scope"`
 }
 
-// ImpactReviewRequest is ImpactReview's strict request: every governed
-// target the caller wants checked against the proposed constitution. The
-// checkout root is resolved by the adapter, never accepted as request
-// content (InspectRequest's own doc comment explains why).
+// ImpactReviewRequest is ImpactReview's strict request. Targets are
+// supplemental only; the accepted/proposed inventory union is authoritative.
 type ImpactReviewRequest struct {
 	Schema  string         `json:"schema"`
 	Targets []ImpactTarget `json:"targets"`
@@ -36,53 +35,66 @@ type ImpactReviewRequest struct {
 
 func (r ImpactReviewRequest) validate() error { return validateTargets(r.Targets) }
 
-// LayerChange is one added, removed, or changed source layer between the
-// accepted and proposed constitutions, identified by kind+ID with both
-// digests carried so a caller can see exactly what moved without Verdi
-// collapsing "added" and "changed" into one ambiguous row.
+// LayerChange is one added, removed, or changed constitution source layer.
 type LayerChange struct {
 	Kind           string `json:"kind"`
 	ID             string `json:"id"`
-	Change         string `json:"change"` // "added" | "removed" | "changed"
+	Change         string `json:"change"`
 	AcceptedDigest string `json:"accepted_digest,omitempty"`
 	ProposedDigest string `json:"proposed_digest,omitempty"`
 }
 
-// TargetConflict is one governed target's conflict posture under the
-// proposed constitution, evaluated through the one existing conflict gate
-// (internal/policyconflict). Refusal carries a disclosed, closed reason
-// when the target itself could not be evaluated at all (unknown scope, an
-// unresolvable spec, judge unavailability is instead carried inside Report
-// itself as policyconflict.ReasonJudgeUnavailable — this field is only for
-// a target the evaluator could not accept in the first place).
+// TargetConflict is one supplemental target's conflict posture.
 type TargetConflict struct {
 	Target  ImpactTarget           `json:"target"`
 	Report  *policyconflict.Report `json:"report,omitempty"`
 	Refusal string                 `json:"refusal,omitempty"`
 }
 
-// ImpactReviewResult is ImpactReview's exact envelope: the diff between the
-// accepted and proposed effective policies (never flattened — each row
-// names its own kind/id/digests) plus every declared target's conflict
-// posture. AffectedConsumers restates the exact caller-declared target
-// specs that were evaluated, alongside their verdict — the caller-declared
-// governed-operation set IS the affected-consumers set this operation
-// reports; it is never widened by an undeclared corpus scan.
+// ImpactReviewResult carries the exact accepted/proposed authority snapshots,
+// canonical registered-consumer coverage, and supplemental caller previews.
+// AffectedConsumers is the sorted registered consumer identity set; it no
+// longer restates caller-selected specs.
 type ImpactReviewResult struct {
-	Schema            string           `json:"schema"`
-	Identity          Identity         `json:"identity"`
-	Accepted          Snapshot         `json:"accepted"`
-	Proposed          Snapshot         `json:"proposed"`
-	Layers            []LayerChange    `json:"layers"`
-	Conflicts         []TargetConflict `json:"conflicts"`
-	AffectedConsumers []string         `json:"affected_consumers"`
+	Schema            string                      `json:"schema"`
+	Identity          Identity                    `json:"identity"`
+	Accepted          Snapshot                    `json:"accepted"`
+	Proposed          Snapshot                    `json:"proposed"`
+	Layers            []LayerChange               `json:"layers"`
+	Coverage          constitutionimpact.Coverage `json:"coverage"`
+	Conflicts         []TargetConflict            `json:"conflicts"`
+	AffectedConsumers []string                    `json:"affected_consumers"`
 }
 
-// ImpactReview diffs the accepted and proposed effective policies and runs
-// mechanical/semantic conflict evaluation over every caller-declared target
-// through internal/policyconflict.Service.Evaluate, rooted at the current
-// checkout (the proposed state) — never a second conflict evaluator or a
-// second applicability derivation. It changes no governance state.
+// MarshalJSON embeds Coverage through constitutionimpact's frozen canonical
+// codec. Coverage is a domain struct whose wire grammar intentionally lives in
+// constitutionimpact's private codec document; allowing encoding/json to walk
+// the domain value directly would leak Go field names and bypass its nested
+// request/manifest/report validation.
+func (r ImpactReviewResult) MarshalJSON() ([]byte, error) {
+	coverage, err := constitutionimpact.EncodeCoverage(r.Coverage)
+	if err != nil {
+		return nil, fmt.Errorf("constitutionapp: encoding impact coverage: %w", err)
+	}
+	type impactReviewWire struct {
+		Schema            string           `json:"schema"`
+		Identity          Identity         `json:"identity"`
+		Accepted          Snapshot         `json:"accepted"`
+		Proposed          Snapshot         `json:"proposed"`
+		Layers            []LayerChange    `json:"layers"`
+		Coverage          json.RawMessage  `json:"coverage"`
+		Conflicts         []TargetConflict `json:"conflicts"`
+		AffectedConsumers []string         `json:"affected_consumers"`
+	}
+	return json.Marshal(impactReviewWire{
+		Schema: r.Schema, Identity: r.Identity, Accepted: r.Accepted, Proposed: r.Proposed,
+		Layers: r.Layers, Coverage: json.RawMessage(bytes.TrimSpace(coverage)),
+		Conflicts: r.Conflicts, AffectedConsumers: r.AffectedConsumers,
+	})
+}
+
+// ImpactReview evaluates the complete exact-tree registered union through the
+// existing accepted-context conflict path. Caller targets are supplemental.
 func (s Service) ImpactReview(ctx context.Context, root string, req ImpactReviewRequest) (*ImpactReviewResult, *Error) {
 	if root == "" {
 		return nil, inputInvalid("input-invalid", errRootRequired.Error())
@@ -94,122 +106,286 @@ func (s Service) ImpactReview(ctx context.Context, root string, req ImpactReview
 	if typed != nil {
 		return nil, typed
 	}
-	return s.impactReviewAt(ctx, root, identity, req)
-}
-
-// impactReviewAt is ImpactReview's body over an ALREADY-RESOLVED identity —
-// validateAt's doc comment explains why a composing operation must thread one
-// immutable identity snapshot rather than let each sub-operation resolve its
-// own.
-func (s Service) impactReviewAt(ctx context.Context, root string, identity Identity, req ImpactReviewRequest) (*ImpactReviewResult, *Error) {
-	proposed, typed := loadSnapshot(s.Authority, os.DirFS(root), identity.Head, "corrupted-policy")
+	review, typed := s.impactReviewAt(ctx, root, identity, req)
 	if typed != nil {
 		return nil, typed
 	}
-	var accepted Snapshot
-	if identity.AcceptedKnown {
-		source, err := s.acceptedSource(ctx, root, identity.AcceptedHead)
-		if err != nil {
-			return nil, operational("io-failure", "reading accepted constitution tree", err)
-		}
-		accepted, typed = loadSnapshot(s.Authority, source, identity.AcceptedHead, "corrupted-policy")
-		if typed != nil {
-			return nil, typed
-		}
-	} else {
-		accepted = Snapshot{Adopted: false, Reason: "the accepted default branch is unresolved"}
+	observed, typed := s.resolveIdentity(ctx, root)
+	if typed != nil {
+		return nil, typed
+	}
+	if identity != observed {
+		return nil, operational("identity-shifted", fmt.Sprintf(
+			"the repository moved during impact review: it was observed at %s before, and at %s after",
+			describeIdentity(identity), describeIdentity(observed)), nil)
+	}
+	return review, nil
+}
+
+type impactState struct {
+	acceptedTree     constitutionimpact.ExactTree
+	proposedTree     constitutionimpact.ExactTree
+	acceptedSnapshot Snapshot
+	proposedSnapshot Snapshot
+}
+
+// impactReviewAt consumes an already-resolved identity. Both snapshots and
+// both inventories/catalogs are loaded from the same two exact Git-tree
+// sources, never from current-worktree bytes carrying committed labels.
+func (s Service) impactReviewAt(ctx context.Context, root string, identity Identity, req ImpactReviewRequest) (*ImpactReviewResult, *Error) {
+	state, typed := s.loadImpactState(ctx, root, identity)
+	if typed != nil {
+		return nil, typed
+	}
+	layers := diffImpactLayers(state.acceptedSnapshot, state.proposedSnapshot)
+	plan, err := constitutionimpact.BuildPlan(ctx, state.acceptedTree, state.proposedTree, impactLayerChanges(layers))
+	if err != nil {
+		return nil, operational("impact-evidence-invalid", "building constitution impact coverage", err)
 	}
 
-	layers := diffLayers(accepted.Layers, proposed.Layers)
-
-	conflicts := make([]TargetConflict, 0, len(req.Targets))
-	affected := make([]string, 0, len(req.Targets))
-	for _, target := range req.Targets {
-		request := policyconflict.Request{
-			Schema: policyconflict.RequestSchema,
-			Target: policyconflict.Target{
-				Kind: policyconflict.TargetAcceptedContext,
-				AcceptedContext: &contextcompile.Request{
-					Schema:  contextcompile.RequestSchema,
-					Adapter: target.Adapter,
-					Phase:   target.Phase,
-					Scope:   target.Scope,
-					Spec:    target.Spec,
-				},
-			},
-		}
-		if s.Conflict == nil {
-			return nil, operational("conflict-evaluator-unavailable", "conflict evaluator is not configured", nil)
-		}
-		result, err := s.Conflict.Evaluate(ctx, root, request)
-		if err != nil {
-			if policyconflict.IsNotAdopted(err) {
-				conflicts = append(conflicts, TargetConflict{Target: target, Refusal: "not-adopted: " + err.Error()})
-				continue
-			}
-			var scopeRefusal *contextcompile.DeclaredScopeRefusal
-			var specRefusal *contextcompile.AcceptedSpecRefusal
-			var adapterRefusal *contextcompile.AdapterMismatchRefusal
-			var phaseScopeRefusal *contextcompile.PhaseScopeRefusal
-			switch {
-			case errors.As(err, &scopeRefusal), errors.As(err, &specRefusal), errors.As(err, &adapterRefusal), errors.As(err, &phaseScopeRefusal):
-				// unknown-scope: the target does not resolve to a governed
-				// context this evaluator can accept — recorded per-target,
-				// never aborting the whole review, so one bad declared
-				// target cannot hide every other target's real conflict
-				// posture.
-				conflicts = append(conflicts, TargetConflict{Target: target, Refusal: "unknown-scope: " + err.Error()})
-				continue
-			default:
-				return nil, operational("io-failure", "evaluating conflicts for target "+target.Spec, err)
-			}
-		}
-		report := result.Report
-		conflicts = append(conflicts, TargetConflict{Target: target, Report: &report})
-		affected = append(affected, target.Spec)
+	evaluations, typed := s.evaluateRegisteredConsumers(ctx, root, identity, plan.Consumers())
+	if typed != nil {
+		return nil, typed
 	}
-	sort.Strings(affected)
+	conflicts, supplemental, typed := s.evaluateSupplementalTargets(ctx, root, identity, req.Targets)
+	if typed != nil {
+		return nil, typed
+	}
+	coverage := plan.Complete(evaluations, supplemental)
+	affected := make([]string, len(coverage.Evaluations))
+	for i := range coverage.Evaluations {
+		affected[i] = coverage.Evaluations[i].ConsumerIdentity
+	}
 
 	return &ImpactReviewResult{
 		Schema:            ImpactReviewResultSchema,
 		Identity:          identity,
-		Accepted:          accepted,
-		Proposed:          proposed,
+		Accepted:          state.acceptedSnapshot,
+		Proposed:          state.proposedSnapshot,
 		Layers:            layers,
+		Coverage:          coverage,
 		Conflicts:         conflicts,
 		AffectedConsumers: affected,
 	}, nil
 }
 
-// diffLayers compares accepted and proposed source-layer sets by
-// (kind, id), reporting every addition, removal, and digest change. It
-// never merges or reinterprets a layer's own content — a "changed" row
-// carries both digests and nothing else, leaving the effective rule ledger
-// itself (Snapshot.Effective) as the one place full content lives.
+func (s Service) loadImpactState(ctx context.Context, root string, identity Identity) (impactState, *Error) {
+	if !identity.AcceptedKnown {
+		return impactState{}, operational("accepted-identity-unavailable", "the accepted default branch is unresolved", nil)
+	}
+	proposedTree, err := s.exactTreeAt(ctx, root, identity.Head)
+	if err != nil {
+		return impactState{}, operational("io-failure", "reading proposed constitution tree", err)
+	}
+	acceptedTree := proposedTree
+	if identity.AcceptedHead != identity.Head {
+		acceptedTree, err = s.exactTreeAt(ctx, root, identity.AcceptedHead)
+		if err != nil {
+			return impactState{}, operational("io-failure", "reading accepted constitution tree", err)
+		}
+	}
+	proposed, typed := loadSnapshot(s.Authority, proposedTree.FS, identity.Head, "corrupted-policy")
+	if typed != nil {
+		return impactState{}, typed
+	}
+	accepted, typed := loadSnapshot(s.Authority, acceptedTree.FS, identity.AcceptedHead, "corrupted-policy")
+	if typed != nil {
+		return impactState{}, typed
+	}
+	return impactState{
+		acceptedTree: acceptedTree, proposedTree: proposedTree,
+		acceptedSnapshot: accepted, proposedSnapshot: proposed,
+	}, nil
+}
+
+type cachedEvaluation struct {
+	evidence ConflictEvidence
+	err      error
+}
+
+func (s Service) evaluateRegisteredConsumers(ctx context.Context, root string, identity Identity, consumers []constitutionimpact.Consumer) ([]constitutionimpact.Evaluation, *Error) {
+	out := make([]constitutionimpact.Evaluation, len(consumers))
+	cache := make(map[string]cachedEvaluation, len(consumers))
+	for i, consumer := range consumers {
+		consumerIdentity, _ := consumer.Identity()
+		out[i] = constitutionimpact.Evaluation{ConsumerIdentity: consumerIdentity, Consumer: consumer}
+		if identity.Dirty {
+			out[i].Refusal = unresolvedEvaluation("checkout-dirty")
+			continue
+		}
+		key, err := consumerEvidenceKey(consumer)
+		if err != nil {
+			out[i].Refusal = unresolvedEvaluation(err.Error())
+			continue
+		}
+		cached, ok := cache[key]
+		if !ok {
+			if s.Conflict == nil {
+				cached.err = errors.New("conflict evaluator is not configured")
+			} else {
+				cached.evidence, cached.err = s.Conflict.Evaluate(ctx, root, acceptedContextRequest(consumer.Request))
+			}
+			cache[key] = cached
+		}
+		if cached.err != nil {
+			if isContextFailure(ctx, cached.err) {
+				return nil, operational("evaluation-canceled", "evaluating registered constitution consumer "+consumerIdentity, cached.err)
+			}
+			out[i].Refusal = unresolvedEvaluation(cached.err.Error())
+			continue
+		}
+		result := cached.evidence.Result
+		out[i].AcceptedManifestBytes = append([]byte(nil), cached.evidence.AcceptedManifestBytes...)
+		out[i].Result = &result
+	}
+	return out, nil
+}
+
+func consumerEvidenceKey(consumer constitutionimpact.Consumer) (string, error) {
+	encoded, err := contextcompile.EncodeRequest(consumer.Request)
+	if err != nil {
+		return "", err
+	}
+	return string(encoded) + "\x00" + consumer.Environment, nil
+}
+
+func unresolvedEvaluation(witness string) *constitutionimpact.EvaluationRefusal {
+	return &constitutionimpact.EvaluationRefusal{
+		Code: constitutionimpact.ReasonEvaluationUnresolved, Witnesses: []string{witness},
+	}
+}
+
+func acceptedContextRequest(request contextcompile.Request) policyconflict.Request {
+	requestCopy := request
+	return policyconflict.Request{
+		Schema: policyconflict.RequestSchema,
+		Target: policyconflict.Target{Kind: policyconflict.TargetAcceptedContext, AcceptedContext: &requestCopy},
+	}
+}
+
+func (s Service) evaluateSupplementalTargets(ctx context.Context, root string, identity Identity, targets []ImpactTarget) ([]TargetConflict, []constitutionimpact.SupplementalTarget, *Error) {
+	conflicts := make([]TargetConflict, 0, len(targets))
+	supplemental := make([]constitutionimpact.SupplementalTarget, 0, len(targets))
+	for _, target := range targets {
+		request := contextcompile.Request{
+			Schema: contextcompile.RequestSchema, Adapter: target.Adapter,
+			Grants: execworkspace.GrantSet{Grants: []execworkspace.Grant{}},
+			Phase:  target.Phase, Scope: target.Scope, Spec: target.Spec,
+		}
+		row := constitutionimpact.SupplementalTarget{Request: request}
+		if identity.Dirty {
+			row.Refusal = unresolvedEvaluation("checkout-dirty")
+			conflicts = append(conflicts, TargetConflict{Target: target, Refusal: "unproven: checkout-dirty"})
+			supplemental = append(supplemental, row)
+			continue
+		}
+		if s.Conflict == nil {
+			row.Refusal = unresolvedEvaluation("conflict evaluator is not configured")
+			conflicts = append(conflicts, TargetConflict{Target: target, Refusal: "unproven: conflict evaluator is not configured"})
+			supplemental = append(supplemental, row)
+			continue
+		}
+		evidence, err := s.Conflict.Evaluate(ctx, root, acceptedContextRequest(request))
+		if err != nil {
+			if isContextFailure(ctx, err) {
+				return nil, nil, operational("evaluation-canceled", "evaluating supplemental constitution target "+target.Spec, err)
+			}
+			refusal := supplementalRefusal(err)
+			row.Refusal = unresolvedEvaluation(refusal)
+			conflicts = append(conflicts, TargetConflict{Target: target, Refusal: refusal})
+			supplemental = append(supplemental, row)
+			continue
+		}
+		result := evidence.Result
+		report := result.Report
+		row.AcceptedManifestBytes = append([]byte(nil), evidence.AcceptedManifestBytes...)
+		row.Result = &result
+		conflicts = append(conflicts, TargetConflict{Target: target, Report: &report})
+		supplemental = append(supplemental, row)
+	}
+	return conflicts, supplemental, nil
+}
+
+func isContextFailure(ctx context.Context, err error) bool {
+	return ctx.Err() != nil || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)
+}
+
+func supplementalRefusal(err error) string {
+	if policyconflict.IsNotAdopted(err) {
+		return "not-adopted: " + err.Error()
+	}
+	var scopeRefusal *contextcompile.DeclaredScopeRefusal
+	var specRefusal *contextcompile.AcceptedSpecRefusal
+	var adapterRefusal *contextcompile.AdapterMismatchRefusal
+	var phaseScopeRefusal *contextcompile.PhaseScopeRefusal
+	if errors.As(err, &scopeRefusal) || errors.As(err, &specRefusal) || errors.As(err, &adapterRefusal) || errors.As(err, &phaseScopeRefusal) {
+		return "unknown-scope: " + err.Error()
+	}
+	return "unproven: " + err.Error()
+}
+
+func diffImpactLayers(accepted, proposed Snapshot) []LayerChange {
+	changes := diffLayers(accepted.Layers, proposed.Layers)
+	if accepted.ConstitutionDigest != proposed.ConstitutionDigest {
+		change := LayerChange{Kind: policyartifact.KindConstitution, ID: policyartifact.KindConstitution + "/" + policyartifact.ConstitutionName}
+		switch {
+		case accepted.ConstitutionDigest == "":
+			change.Change = "added"
+			change.ProposedDigest = proposed.ConstitutionDigest
+		case proposed.ConstitutionDigest == "":
+			change.Change = "removed"
+			change.AcceptedDigest = accepted.ConstitutionDigest
+		default:
+			change.Change = "changed"
+			change.AcceptedDigest = accepted.ConstitutionDigest
+			change.ProposedDigest = proposed.ConstitutionDigest
+		}
+		changes = append(changes, change)
+		sort.Slice(changes, func(i, j int) bool {
+			if changes[i].Kind != changes[j].Kind {
+				return changes[i].Kind < changes[j].Kind
+			}
+			return changes[i].ID < changes[j].ID
+		})
+	}
+	return changes
+}
+
+func impactLayerChanges(in []LayerChange) []constitutionimpact.LayerChange {
+	out := make([]constitutionimpact.LayerChange, len(in))
+	for i, row := range in {
+		out[i] = constitutionimpact.LayerChange{
+			Kind: row.Kind, ID: row.ID, Change: row.Change,
+			AcceptedDigest: row.AcceptedDigest, ProposedDigest: row.ProposedDigest,
+		}
+	}
+	return out
+}
+
+// diffLayers compares accepted and proposed source-layer sets by (kind, id).
 func diffLayers(accepted, proposed []SourceLayer) []LayerChange {
 	type key struct{ kind, id string }
 	acceptedByKey := make(map[key]string, len(accepted))
-	for _, l := range accepted {
-		acceptedByKey[key{l.Kind, l.ID}] = l.Digest
+	for _, layer := range accepted {
+		acceptedByKey[key{layer.Kind, layer.ID}] = layer.Digest
 	}
 	proposedByKey := make(map[key]string, len(proposed))
-	for _, l := range proposed {
-		proposedByKey[key{l.Kind, l.ID}] = l.Digest
+	for _, layer := range proposed {
+		proposedByKey[key{layer.Kind, layer.ID}] = layer.Digest
 	}
-
 	changes := []LayerChange{}
-	for k, acceptedDigest := range acceptedByKey {
-		proposedDigest, stillPresent := proposedByKey[k]
+	for identity, acceptedDigest := range acceptedByKey {
+		proposedDigest, present := proposedByKey[identity]
 		switch {
-		case !stillPresent:
-			changes = append(changes, LayerChange{Kind: k.kind, ID: k.id, Change: "removed", AcceptedDigest: acceptedDigest})
+		case !present:
+			changes = append(changes, LayerChange{Kind: identity.kind, ID: identity.id, Change: "removed", AcceptedDigest: acceptedDigest})
 		case proposedDigest != acceptedDigest:
-			changes = append(changes, LayerChange{Kind: k.kind, ID: k.id, Change: "changed", AcceptedDigest: acceptedDigest, ProposedDigest: proposedDigest})
+			changes = append(changes, LayerChange{Kind: identity.kind, ID: identity.id, Change: "changed", AcceptedDigest: acceptedDigest, ProposedDigest: proposedDigest})
 		}
 	}
-	for k, proposedDigest := range proposedByKey {
-		if _, present := acceptedByKey[k]; !present {
-			changes = append(changes, LayerChange{Kind: k.kind, ID: k.id, Change: "added", ProposedDigest: proposedDigest})
+	for identity, proposedDigest := range proposedByKey {
+		if _, present := acceptedByKey[identity]; !present {
+			changes = append(changes, LayerChange{Kind: identity.kind, ID: identity.id, Change: "added", ProposedDigest: proposedDigest})
 		}
 	}
 	sort.Slice(changes, func(i, j int) bool {

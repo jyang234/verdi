@@ -2,6 +2,7 @@ package constitutionapp
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/jyang234/verdi/internal/contextcompile"
@@ -9,11 +10,19 @@ import (
 	"github.com/jyang234/verdi/internal/store"
 )
 
+// ConflictEvidence is one existing accepted-context compiler result paired
+// with the existing conflict gate's result for the identical request.
+type ConflictEvidence struct {
+	AcceptedManifestBytes []byte
+	Result                policyconflict.Result
+}
+
 // ConflictEvaluator is constitutionapp's consumer-owned port over the one
-// existing conflict gate (internal/policyconflict.Service) — never a second
-// mechanical or semantic conflict evaluator (the Task 3 stop gate).
+// existing context compiler and conflict gate. The manifest bytes are needed
+// by constitutionimpact to bind each result to its exact accepted-context
+// operands; this package never reconstructs those bytes from a report.
 type ConflictEvaluator interface {
-	Evaluate(ctx context.Context, root string, request policyconflict.Request) (policyconflict.Result, error)
+	Evaluate(ctx context.Context, root string, request policyconflict.Request) (ConflictEvidence, error)
 }
 
 // localConflictEvaluator constructs one internal/policyconflict.Service per
@@ -28,14 +37,28 @@ type ConflictEvaluator interface {
 // outcome policyconflict itself already defines, never a fabricated pass).
 type localConflictEvaluator struct{}
 
-func (localConflictEvaluator) Evaluate(ctx context.Context, root string, request policyconflict.Request) (policyconflict.Result, error) {
+func (localConflictEvaluator) Evaluate(ctx context.Context, root string, request policyconflict.Request) (ConflictEvidence, error) {
+	if request.Target.Kind != policyconflict.TargetAcceptedContext || request.Target.AcceptedContext == nil {
+		return ConflictEvidence{}, fmt.Errorf("constitutionapp: conflict evidence requires an accepted-context request")
+	}
+	compiled, err := contextcompile.NewCompiler().Compile(ctx, root, *request.Target.AcceptedContext)
+	if err != nil {
+		return ConflictEvidence{}, err
+	}
 	svc := policyconflict.NewService(root, policyconflict.ServiceDeps{
 		Compiler:   contextcompile.NewCompiler(),
 		Refs:       constitutionRefResolver{},
 		TreeHasher: constitutionTreeHasher{},
 		Dates:      constitutionDateSource{},
 	})
-	return svc.Evaluate(ctx, request)
+	result, err := svc.Evaluate(ctx, request)
+	if err != nil {
+		return ConflictEvidence{}, err
+	}
+	return ConflictEvidence{
+		AcceptedManifestBytes: append([]byte(nil), compiled.ManifestBytes...),
+		Result:                result,
+	}, nil
 }
 
 // constitutionRefResolver makes absent local graph proof explicit — every

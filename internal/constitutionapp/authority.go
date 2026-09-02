@@ -8,6 +8,8 @@ import (
 	"sort"
 	"testing/fstest"
 
+	"github.com/jyang234/verdi/internal/constitutionimpact"
+	"github.com/jyang234/verdi/internal/gitx"
 	"github.com/jyang234/verdi/internal/policyartifact"
 	"github.com/jyang234/verdi/internal/policyauthority"
 )
@@ -152,52 +154,86 @@ func sortedKeys[V any](m map[string]*V) []string {
 	return keys
 }
 
-// acceptedSource materializes the accepted tree's constitution-store subtree
-// at commit as a read-only fs.FS, without a second checkout — following the
-// same entry-kind discipline as cmd/verdi/countersign.go's
-// countersignAcceptedPolicySource and cmd/verdi/experiment_ports.go's
-// experimentAcceptedTreeFS (a mode-120000 entry stays a symlink so
-// policyauthority applies its own refusal instead of this adapter silently
-// following a link out of the accepted tree), scoped to .verdi/policy/. It
-// is a narrow, consumer-owned adapter, not a duplicated algorithm: it reads
-// Git objects only, and every decode/validate/resolve step still runs
-// through internal/policyartifact and internal/policyauthority unchanged.
-func (s Service) acceptedSource(ctx context.Context, root, commit string) (fs.FS, error) {
+// exactTreeAt materializes the policy and constitution-impact metadata from
+// one pinned commit as a read-only, non-following fs.FS. One enumeration feeds
+// both the authority snapshot and constitutionimpact.BuildPlan. Git modes are
+// preserved: executable regular blobs stay executable and policy symlinks stay
+// symlinks so policyauthority performs its own refusal rather than consuming a
+// target outside the tree.
+func (s Service) exactTreeAt(ctx context.Context, root, commit string) (constitutionimpact.ExactTree, error) {
 	if s.Git == nil {
-		return nil, errors.New("constitutionapp: git reader is not configured")
+		return constitutionimpact.ExactTree{}, errors.New("constitutionapp: git reader is not configured")
+	}
+	if err := gitx.ValidateFullOID(commit); err != nil {
+		return constitutionimpact.ExactTree{}, fmt.Errorf("constitutionapp: exact tree commit: %w", err)
+	}
+	resolved, err := s.Git.RevParse(ctx, root, commit+"^{commit}")
+	if err != nil {
+		return constitutionimpact.ExactTree{}, fmt.Errorf("constitutionapp: resolve exact commit %s: %w", commit, err)
+	}
+	if resolved != commit {
+		return constitutionimpact.ExactTree{}, fmt.Errorf("constitutionapp: exact commit resolved as %s, want %s", resolved, commit)
+	}
+	tree, err := s.Git.RevParse(ctx, root, commit+"^{tree}")
+	if err != nil {
+		return constitutionimpact.ExactTree{}, fmt.Errorf("constitutionapp: resolve tree for %s: %w", commit, err)
+	}
+	if err := gitx.ValidateFullOID(tree); err != nil {
+		return constitutionimpact.ExactTree{}, fmt.Errorf("constitutionapp: exact tree identity: %w", err)
 	}
 	entries, err := s.Git.LsTreeEntries(ctx, root, commit)
 	if err != nil {
-		return nil, err
+		return constitutionimpact.ExactTree{}, err
 	}
 	source := fstest.MapFS{}
 	for _, entry := range entries {
-		if entry.Type != "blob" || !constitutionPolicyPath(entry.Path) {
+		if !constitutionTreePath(entry.Path) {
 			continue
+		}
+		if entry.Type != "blob" {
+			return constitutionimpact.ExactTree{}, fmt.Errorf("constitutionapp: exact tree entry %s has unsupported object type %s", entry.Path, entry.Type)
 		}
 		var mode fs.FileMode
 		switch entry.Mode {
-		case "100644", "100755":
-			mode = 0o444
+		case "100644":
+			mode = 0o644
+		case "100755":
+			mode = 0o755
 		case "120000":
-			mode = fs.ModeSymlink | 0o444
+			if entry.Path == constitutionimpact.InventoryPath || entry.Path == constitutionImpactDir {
+				return constitutionimpact.ExactTree{}, fmt.Errorf("constitutionapp: exact tree entry %s is a symlink; constitution impact metadata must be a regular file", entry.Path)
+			}
+			mode = fs.ModeSymlink | 0o777
 		default:
-			return nil, fmt.Errorf("constitutionapp: accepted tree entry %s has unsupported blob mode %s", entry.Path, entry.Mode)
+			return constitutionimpact.ExactTree{}, fmt.Errorf("constitutionapp: exact tree entry %s has unsupported blob mode %s", entry.Path, entry.Mode)
 		}
 		data, readErr := s.Git.Show(ctx, root, commit, entry.Path)
 		if readErr != nil {
-			return nil, readErr
+			return constitutionimpact.ExactTree{}, readErr
 		}
 		source[entry.Path] = &fstest.MapFile{Data: data, Mode: mode}
 	}
-	return source, nil
+	return constitutionimpact.ExactTree{Commit: commit, Tree: tree, FS: source}, nil
+}
+
+func (s Service) acceptedSource(ctx context.Context, root, commit string) (fs.FS, error) {
+	exact, err := s.exactTreeAt(ctx, root, commit)
+	if err != nil {
+		return nil, err
+	}
+	return exact.FS, nil
 }
 
 const constitutionPolicyDir = ".verdi/policy"
+const constitutionImpactDir = ".verdi/constitution"
 
 // constitutionPolicyPath reports whether path is the constitution store
 // root itself (a symlink entry there must survive into the source so it is
 // refused, never skipped) or a file inside it.
 func constitutionPolicyPath(path string) bool {
 	return path == constitutionPolicyDir || len(path) > len(constitutionPolicyDir) && path[:len(constitutionPolicyDir)+1] == constitutionPolicyDir+"/"
+}
+
+func constitutionTreePath(path string) bool {
+	return constitutionPolicyPath(path) || path == constitutionImpactDir || path == constitutionimpact.InventoryPath
 }

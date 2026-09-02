@@ -75,6 +75,7 @@ import (
 	"testing"
 
 	"github.com/jyang234/verdi/internal/constitutionapp"
+	"github.com/jyang234/verdi/internal/constitutionimpact"
 	"github.com/jyang234/verdi/internal/draftmutation"
 	"github.com/jyang234/verdi/internal/gitx"
 	"github.com/jyang234/verdi/internal/mcpserve"
@@ -580,7 +581,10 @@ func TestMCPShowcaseCoverage(t *testing.T) {
 	// proven fact (CO-1: an honest "no constitution here" is not a
 	// fault) — so all three tools return a CLEAN result naming
 	// Adopted=false on both the accepted and proposed side, never a tool
-	// error.
+	// error. Impact review additionally requires an exact accepted identity;
+	// the fixture's known main branch is declared here just as the other
+	// exact-tree showcase probes above declare it.
+	t.Setenv("CI_DEFAULT_BRANCH", "main")
 	t.Run("constitution_inspect", func(t *testing.T) {
 		text := callMCPToolOK(t, srv, "constitution_inspect", map[string]any{"schema": constitutionapp.InspectRequestSchema})
 		var out struct {
@@ -629,13 +633,18 @@ func TestMCPShowcaseCoverage(t *testing.T) {
 			Proposed struct {
 				Adopted bool `json:"adopted"`
 			} `json:"proposed"`
-			Layers            []json.RawMessage `json:"layers"`
-			Conflicts         []json.RawMessage `json:"conflicts"`
-			AffectedConsumers []json.RawMessage `json:"affected_consumers"`
+			Coverage          constitutionimpact.Coverage `json:"coverage"`
+			Layers            []json.RawMessage           `json:"layers"`
+			Conflicts         []json.RawMessage           `json:"conflicts"`
+			AffectedConsumers []json.RawMessage           `json:"affected_consumers"`
 		}
 		decodeToolJSON(t, text, &out)
 		if out.Accepted.Adopted || out.Proposed.Adopted || len(out.Layers) != 0 || len(out.Conflicts) != 0 || len(out.AffectedConsumers) != 0 {
 			t.Fatalf("constitution_impact_review() = %+v, want a clean empty-diff result with no declared targets and no adopted constitution", out)
+		}
+		if out.Coverage.Schema != constitutionimpact.CoverageSchema || out.Coverage.State != constitutionimpact.StateDisclosedUnproven ||
+			out.Coverage.Accepted.Presence != constitutionimpact.PresenceMissing || out.Coverage.Proposed.Presence != constitutionimpact.PresenceMissing {
+			t.Fatalf("constitution_impact_review() coverage = %+v, want the canonical missing-inventory disclosure", out.Coverage)
 		}
 	})
 }

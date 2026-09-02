@@ -1,8 +1,13 @@
 package constitutionapp
 
 import (
+	"bytes"
+	"context"
+	"encoding/json"
 	"strings"
 	"testing"
+
+	"github.com/jyang234/verdi/internal/constitutionimpact"
 )
 
 func TestDecodeInspectRequest_StrictDecode(t *testing.T) {
@@ -17,6 +22,39 @@ func TestDecodeInspectRequest_StrictDecode(t *testing.T) {
 	}
 	if _, err := DecodeInspectRequest([]byte(`not json`)); err == nil {
 		t.Fatal("expected a malformed-JSON refusal")
+	}
+}
+
+func TestEncodeResult_EmbedsCanonicalImpactCoverage(t *testing.T) {
+	root := buildFixtureRepo(t)
+	svc := testService()
+	review, typed := svc.ImpactReview(context.Background(), root, ImpactReviewRequest{})
+	if typed != nil {
+		t.Fatalf("ImpactReview: %v", typed)
+	}
+	encoded, err := EncodeResult(review)
+	if err != nil {
+		t.Fatalf("EncodeResult: %v", err)
+	}
+	var envelope struct {
+		Coverage json.RawMessage `json:"coverage"`
+	}
+	if err := json.Unmarshal(encoded, &envelope); err != nil {
+		t.Fatalf("decode result envelope: %v", err)
+	}
+	nested := append(append([]byte(nil), envelope.Coverage...), '\n')
+	if _, err := constitutionimpact.DecodeCoverage(nested); err != nil {
+		t.Fatalf("nested coverage does not satisfy its frozen wire codec: %v\nresult=%s", err, encoded)
+	}
+	want, err := constitutionimpact.EncodeCoverage(review.Coverage)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(nested, want) {
+		t.Fatalf("nested coverage is not byte-canonical:\ngot:  %s\nwant: %s", nested, want)
+	}
+	if bytes.Contains(encoded, []byte(`"Coverage"`)) || bytes.Contains(encoded, []byte(`"ConsumerIdentity"`)) {
+		t.Fatalf("result leaked domain-struct field names instead of the frozen coverage grammar: %s", encoded)
 	}
 }
 

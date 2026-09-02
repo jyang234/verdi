@@ -72,17 +72,13 @@ func TestProposeToImpactReviewFlow(t *testing.T) {
 		t.Fatalf("SubmitPreparation: %v", typed)
 	}
 	// The whole flow composes, and the packet is HONEST about what it does
-	// not know: this call declared no governed target, so the proposal's
-	// changed source layer had its impact examined by nothing at all. A
-	// packet that read affirmatively ready there would report zero coverage
-	// as zero impact. (Declaring targets is what closes the gap;
-	// TestSubmitPreparation_NotReadyWithoutImpactCoverage is this rule's
-	// dedicated pin, and TestSubmitPreparation_ReadyWithoutTargetsWhenNothing
-	// Changed is its negative.)
+	// not know: both exact inventories are present but empty, so this changed
+	// source layer has no complete registered-consumer universe. Caller targets
+	// cannot close that canonical gap; the repository inventory must do so.
 	if prep.ReadyForSubmission {
 		t.Fatal("SubmitPreparation: expected the uncovered policy delta to block readiness")
 	}
-	if !strings.Contains(strings.Join(prep.BlockingReasons, "\n"), "no impact coverage") {
+	if !strings.Contains(strings.Join(prep.BlockingReasons, "\n"), "consumer-universe-empty") {
 		t.Fatalf("SubmitPreparation: expected a disclosed coverage-gap blocking reason, got %v", prep.BlockingReasons)
 	}
 	if !prep.Validation.Snapshot.Adopted || len(prep.ImpactReview.Layers) == 0 {

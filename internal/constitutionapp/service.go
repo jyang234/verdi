@@ -14,9 +14,9 @@ type Service struct {
 	// (authority.go), composing internal/policyauthority unchanged.
 	Authority AuthorityStore
 
-	// Conflict runs mechanical and semantic conflict evaluation over one
-	// governed target through the one existing conflict gate (conflict.go),
-	// composing internal/policyconflict unchanged.
+	// Conflict compiles the exact accepted-context manifest and runs mechanical
+	// and semantic conflict evaluation over the same request through the one
+	// existing compiler and conflict gate (conflict.go).
 	Conflict ConflictEvaluator
 }
 
