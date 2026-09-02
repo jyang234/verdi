@@ -141,7 +141,7 @@ func canonicalReport(result policyconflict.Result) (policyconflict.Report, bool)
 func cloneSupplemental(in []SupplementalTarget) []SupplementalTarget {
 	out := make([]SupplementalTarget, len(in))
 	for i, target := range in {
-		out[i].Consumer = cloneConsumer(target.Consumer)
+		out[i].Request = cloneRequest(target.Request)
 		out[i].AcceptedManifestDigest = target.AcceptedManifestDigest
 		if target.Result != nil {
 			if report, ok := canonicalReport(*target.Result); ok {
@@ -156,8 +156,8 @@ func cloneSupplemental(in []SupplementalTarget) []SupplementalTarget {
 		}
 	}
 	sort.SliceStable(out, func(i, j int) bool {
-		left, _ := out[i].Consumer.Identity()
-		right, _ := out[j].Consumer.Identity()
+		left, _ := supplementalRequestDigest(out[i].Request)
+		right, _ := supplementalRequestDigest(out[j].Request)
 		return left < right
 	})
 	if out == nil {

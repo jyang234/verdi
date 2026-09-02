@@ -108,7 +108,7 @@ func testEvaluation(consumer Consumer, result *policyconflict.Result) Evaluation
 
 func testSupplemental(consumer Consumer, result *policyconflict.Result) SupplementalTarget {
 	return SupplementalTarget{
-		Consumer: consumer, AcceptedManifestDigest: result.Report.Input.Target.Accepted.ManifestDigest,
+		Request: consumer.Request, AcceptedManifestDigest: result.Report.Input.Target.Accepted.ManifestDigest,
 		Result: result,
 	}
 }

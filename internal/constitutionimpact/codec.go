@@ -8,6 +8,7 @@ import (
 
 	"github.com/jyang234/verdi/internal/artifact"
 	"github.com/jyang234/verdi/internal/canonjson"
+	"github.com/jyang234/verdi/internal/contextcompile"
 	"github.com/jyang234/verdi/internal/policyconflict"
 )
 
@@ -38,10 +39,11 @@ type coverageEvaluationDoc struct {
 }
 
 type supplementalTargetDoc struct {
-	Consumer               *coverageConsumerDoc `json:"consumer"`
-	AcceptedManifestDigest *string              `json:"accepted_manifest_digest"`
-	Report                 *json.RawMessage     `json:"report,omitempty"`
-	Refusal                *EvaluationRefusal   `json:"refusal,omitempty"`
+	Request                json.RawMessage    `json:"request"`
+	RequestDigest          *string            `json:"request_digest"`
+	AcceptedManifestDigest *string            `json:"accepted_manifest_digest"`
+	Report                 *json.RawMessage   `json:"report,omitempty"`
+	Refusal                *EvaluationRefusal `json:"refusal,omitempty"`
 }
 
 // EncodeCoverage returns the strict canonical coverage witness.
@@ -116,12 +118,17 @@ func coverageDocFor(coverage Coverage) (coverageDoc, error) {
 	}
 	supplemental := make([]supplementalTargetDoc, len(coverage.SupplementalTargets))
 	for i, target := range coverage.SupplementalTargets {
-		consumer, err := coverageConsumerDocFor(target.Consumer)
+		request, err := contextcompile.EncodeRequest(target.Request)
 		if err != nil {
-			return coverageDoc{}, fmt.Errorf("supplemental_targets[%d].consumer: %w", i, err)
+			return coverageDoc{}, fmt.Errorf("supplemental_targets[%d].request: %w", i, err)
 		}
+		requestDigest := digestBytes(request)
 		digest := target.AcceptedManifestDigest
-		row := supplementalTargetDoc{Consumer: &consumer, AcceptedManifestDigest: &digest}
+		row := supplementalTargetDoc{
+			Request:                json.RawMessage(bytes.TrimSuffix(request, []byte{'\n'})),
+			RequestDigest:          &requestDigest,
+			AcceptedManifestDigest: &digest,
+		}
 		if target.Result != nil {
 			_, ok := canonicalReport(*target.Result)
 			if !ok {
@@ -190,14 +197,18 @@ func coverageFromDoc(doc coverageDoc) (Coverage, error) {
 	}
 	supplemental := make([]SupplementalTarget, len(*doc.SupplementalTargets))
 	for i, row := range *doc.SupplementalTargets {
-		if row.Consumer == nil || row.AcceptedManifestDigest == nil || (row.Report == nil) == (row.Refusal == nil) {
-			return Coverage{}, fmt.Errorf("supplemental_targets[%d]: consumer, accepted_manifest_digest, and exactly one of report/refusal are mandatory", i)
+		if len(row.Request) == 0 || row.RequestDigest == nil || row.AcceptedManifestDigest == nil || (row.Report == nil) == (row.Refusal == nil) {
+			return Coverage{}, fmt.Errorf("supplemental_targets[%d]: request, request_digest, accepted_manifest_digest, and exactly one of report/refusal are mandatory", i)
 		}
-		_, consumer, err := consumerFromCoverageDoc(*row.Consumer)
+		requestBytes := append(append([]byte(nil), row.Request...), '\n')
+		request, err := contextcompile.DecodeRequest(requestBytes)
 		if err != nil {
-			return Coverage{}, fmt.Errorf("supplemental_targets[%d].consumer: %w", i, err)
+			return Coverage{}, fmt.Errorf("supplemental_targets[%d].request: %w", i, err)
 		}
-		target := SupplementalTarget{Consumer: consumer, AcceptedManifestDigest: *row.AcceptedManifestDigest}
+		if got := digestBytes(requestBytes); got != *row.RequestDigest {
+			return Coverage{}, fmt.Errorf("supplemental_targets[%d]: request digest mismatch", i)
+		}
+		target := SupplementalTarget{Request: request, AcceptedManifestDigest: *row.AcceptedManifestDigest}
 		if row.Report != nil {
 			reportBytes := append(append([]byte(nil), (*row.Report)...), '\n')
 			report, err := policyconflict.DecodeReport(reportBytes)
@@ -309,9 +320,9 @@ func validateCoverageEnvelope(coverage Coverage) error {
 	}
 	previousSupplemental := ""
 	for i, target := range coverage.SupplementalTargets {
-		identity, err := target.Consumer.Identity()
+		identity, err := supplementalRequestDigest(target.Request)
 		if err != nil {
-			return fmt.Errorf("supplemental_targets[%d].consumer: %w", i, err)
+			return fmt.Errorf("supplemental_targets[%d].request: %w", i, err)
 		}
 		if i > 0 && previousSupplemental > identity {
 			return fmt.Errorf("supplemental_targets are not in canonical order")

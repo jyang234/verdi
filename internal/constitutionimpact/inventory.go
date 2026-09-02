@@ -91,6 +91,14 @@ func (c Consumer) Identity() (string, error) {
 	return consumerIdentityFromDoc(doc)
 }
 
+func supplementalRequestDigest(request contextcompile.Request) (string, error) {
+	encoded, err := contextcompile.EncodeRequest(request)
+	if err != nil {
+		return "", err
+	}
+	return digestBytes(encoded), nil
+}
+
 func consumerFromDoc(doc consumerDoc) (Consumer, error) {
 	if len(doc.Request) == 0 || doc.Environment == nil || doc.GovernedOperations == nil {
 		return Consumer{}, fmt.Errorf("request, environment, and governed_operations are mandatory")
@@ -159,27 +167,33 @@ func validateConsumer(consumer Consumer) error {
 
 func cloneConsumer(in Consumer) Consumer {
 	out := in
-	if in.Request.Expected != nil {
-		expected := *in.Request.Expected
-		out.Request.Expected = &expected
+	out.Request = cloneRequest(in.Request)
+	out.GovernedOperations = cloneStrings(in.GovernedOperations)
+	return out
+}
+
+func cloneRequest(in contextcompile.Request) contextcompile.Request {
+	out := in
+	if in.Expected != nil {
+		expected := *in.Expected
+		out.Expected = &expected
 	}
-	out.Request.Scope.Phases = cloneStrings(in.Request.Scope.Phases)
-	out.Request.Scope.Environments = cloneStrings(in.Request.Scope.Environments)
-	out.Request.Scope.Paths = cloneStrings(in.Request.Scope.Paths)
-	out.Request.Scope.Refs = cloneStrings(in.Request.Scope.Refs)
-	out.Request.Grants.Grants = make([]execworkspace.Grant, len(in.Request.Grants.Grants))
-	for i, grant := range in.Request.Grants.Grants {
-		out.Request.Grants.Grants[i] = grant
-		out.Request.Grants.Grants[i].Paths = cloneStrings(grant.Paths)
-		out.Request.Grants.Grants[i].Argv0s = cloneStrings(grant.Argv0s)
+	out.Scope.Phases = cloneStrings(in.Scope.Phases)
+	out.Scope.Environments = cloneStrings(in.Scope.Environments)
+	out.Scope.Paths = cloneStrings(in.Scope.Paths)
+	out.Scope.Refs = cloneStrings(in.Scope.Refs)
+	out.Grants.Grants = make([]execworkspace.Grant, len(in.Grants.Grants))
+	for i, grant := range in.Grants.Grants {
+		out.Grants.Grants[i] = grant
+		out.Grants.Grants[i].Paths = cloneStrings(grant.Paths)
+		out.Grants.Grants[i].Argv0s = cloneStrings(grant.Argv0s)
 		if grant.Ceilings != nil {
-			out.Request.Grants.Grants[i].Ceilings = make(map[string]int, len(grant.Ceilings))
+			out.Grants.Grants[i].Ceilings = make(map[string]int, len(grant.Ceilings))
 			for name, limit := range grant.Ceilings {
-				out.Request.Grants.Grants[i].Ceilings[name] = limit
+				out.Grants.Grants[i].Ceilings[name] = limit
 			}
 		}
 	}
-	out.GovernedOperations = cloneStrings(in.GovernedOperations)
 	return out
 }
 

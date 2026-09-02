@@ -100,15 +100,15 @@ func TestCompleteCoverageIsDeterministicAndAliasSafe(t *testing.T) {
 	if coverage.Evaluations[0].ConsumerIdentity >= coverage.Evaluations[1].ConsumerIdentity {
 		t.Fatal("evaluations did not follow canonical union order")
 	}
-	left, _ := coverage.SupplementalTargets[0].Consumer.Identity()
-	right, _ := coverage.SupplementalTargets[1].Consumer.Identity()
+	left, _ := supplementalRequestDigest(coverage.SupplementalTargets[0].Request)
+	right, _ := supplementalRequestDigest(coverage.SupplementalTargets[1].Request)
 	if left > right {
 		t.Fatal("supplemental targets were not canonicalized")
 	}
 
 	evaluations[0].Consumer.GovernedOperations[0] = "mutated"
-	supplemental[0].Consumer.Request.Scope.Phases[0] = "review"
-	if coverage.Evaluations[1].Consumer.GovernedOperations[0] != "make-verify" || coverage.SupplementalTargets[0].Consumer.Request.Scope.Phases[0] != "build" {
+	supplemental[0].Request.Scope.Phases[0] = "review"
+	if coverage.Evaluations[1].Consumer.GovernedOperations[0] != "make-verify" || coverage.SupplementalTargets[0].Request.Scope.Phases[0] != "build" {
 		t.Fatal("coverage retained aliases to caller inputs")
 	}
 }

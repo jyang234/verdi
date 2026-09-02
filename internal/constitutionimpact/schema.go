@@ -125,7 +125,7 @@ type Evaluation struct {
 // SupplementalTarget is caller-provided preview input. It is retained in the
 // witness but never participates in union membership or completeness.
 type SupplementalTarget struct {
-	Consumer               Consumer
+	Request                contextcompile.Request
 	AcceptedManifestDigest string
 	Result                 *policyconflict.Result
 	Refusal                *EvaluationRefusal
