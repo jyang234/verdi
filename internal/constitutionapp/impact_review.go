@@ -30,17 +30,11 @@ type ImpactTarget struct {
 // checkout root is resolved by the adapter, never accepted as request
 // content (InspectRequest's own doc comment explains why).
 type ImpactReviewRequest struct {
+	Schema  string         `json:"schema"`
 	Targets []ImpactTarget `json:"targets"`
 }
 
-func (r ImpactReviewRequest) validate() error {
-	for i, t := range r.Targets {
-		if t.Spec == "" {
-			return errTargetSpecRequired(i)
-		}
-	}
-	return nil
-}
+func (r ImpactReviewRequest) validate() error { return validateTargets(r.Targets) }
 
 // LayerChange is one added, removed, or changed source layer between the
 // accepted and proposed constitutions, identified by kind+ID with both
@@ -100,7 +94,14 @@ func (s Service) ImpactReview(ctx context.Context, root string, req ImpactReview
 	if typed != nil {
 		return nil, typed
 	}
+	return s.impactReviewAt(ctx, root, identity, req)
+}
 
+// impactReviewAt is ImpactReview's body over an ALREADY-RESOLVED identity —
+// validateAt's doc comment explains why a composing operation must thread one
+// immutable identity snapshot rather than let each sub-operation resolve its
+// own.
+func (s Service) impactReviewAt(ctx context.Context, root string, identity Identity, req ImpactReviewRequest) (*ImpactReviewResult, *Error) {
 	proposed, typed := loadSnapshot(s.Authority, os.DirFS(root), identity.Head, "corrupted-policy")
 	if typed != nil {
 		return nil, typed

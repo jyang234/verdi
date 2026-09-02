@@ -21,3 +21,32 @@ var (
 func errTargetSpecRequired(index int) error {
 	return fmt.Errorf("constitutionapp: targets[%d].spec is required", index)
 }
+
+// validateTargets is the ONE declared-target validation both ImpactReview
+// and SubmitPreparation use, so the two requests can carry their own
+// distinct envelope versions without either converting into the other's type
+// merely to reuse a check.
+func validateTargets(targets []ImpactTarget) error {
+	for i, t := range targets {
+		if t.Spec == "" {
+			return errTargetSpecRequired(i)
+		}
+	}
+	return nil
+}
+
+// requireRequestSchema enforces one request envelope's EXACT version. There
+// is no defaulting and no prefix matching: an absent or unrecognized version
+// fails closed (root CLAUDE.md: "unknown enum values fail closed"). The
+// diagnostic names both the expected and the received value, so a caller
+// pinned to an older envelope learns which version it sent rather than only
+// that something was wrong.
+func requireRequestSchema(got, want string) error {
+	if got == want {
+		return nil
+	}
+	if got == "" {
+		return fmt.Errorf("constitutionapp: request is missing its required schema field (want %q)", want)
+	}
+	return fmt.Errorf("constitutionapp: request schema %q is not %q", got, want)
+}

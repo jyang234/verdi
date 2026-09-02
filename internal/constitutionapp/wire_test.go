@@ -6,13 +6,13 @@ import (
 )
 
 func TestDecodeInspectRequest_StrictDecode(t *testing.T) {
-	if _, err := DecodeInspectRequest([]byte(`{}`)); err != nil {
-		t.Fatalf("empty request: %v", err)
+	if _, err := DecodeInspectRequest([]byte(`{"schema":"` + InspectRequestSchema + `"}`)); err != nil {
+		t.Fatalf("versioned request: %v", err)
 	}
-	if _, err := DecodeInspectRequest([]byte(`{"unknown":true}`)); err == nil {
+	if _, err := DecodeInspectRequest([]byte(`{"schema":"` + InspectRequestSchema + `","unknown":true}`)); err == nil {
 		t.Fatal("expected an unknown-field refusal")
 	}
-	if _, err := DecodeInspectRequest([]byte(`{}{}`)); err == nil {
+	if _, err := DecodeInspectRequest([]byte(`{"schema":"` + InspectRequestSchema + `"}{}`)); err == nil {
 		t.Fatal("expected a trailing-data refusal")
 	}
 	if _, err := DecodeInspectRequest([]byte(`not json`)); err == nil {
@@ -20,8 +20,94 @@ func TestDecodeInspectRequest_StrictDecode(t *testing.T) {
 	}
 }
 
+// TestDecodeRequests_RequireExactEnvelopeVersion proves the request half of
+// the .../request/v1 contract is real rather than a doc-comment claim: an
+// absent, empty, or differing schema is refused, never defaulted into
+// whichever version this build happens to implement.
+func TestDecodeRequests_RequireExactEnvelopeVersion(t *testing.T) {
+	decoders := map[string]struct {
+		want   string
+		decode func([]byte) error
+	}{
+		"inspect": {InspectRequestSchema, func(b []byte) error {
+			_, err := DecodeInspectRequest(b)
+			return err
+		}},
+		"validate": {ValidateRequestSchema, func(b []byte) error {
+			_, err := DecodeValidateRequest(b)
+			return err
+		}},
+		"impact-review": {ImpactReviewRequestSchema, func(b []byte) error {
+			_, err := DecodeImpactReviewRequest(b)
+			return err
+		}},
+		"submit-preparation": {SubmitPreparationRequestSchema, func(b []byte) error {
+			_, err := DecodeSubmitPreparationRequest(b)
+			return err
+		}},
+		"propose": {ProposeRequestSchema, func(b []byte) error {
+			_, err := DecodeProposeRequest(b)
+			return err
+		}},
+	}
+	for name, d := range decoders {
+		t.Run(name, func(t *testing.T) {
+			if err := d.decode([]byte(`{}`)); err == nil {
+				t.Fatal("expected a refusal for a request carrying no schema field at all")
+			}
+			if err := d.decode([]byte(`{"schema":""}`)); err == nil {
+				t.Fatal("expected a refusal for an empty schema field")
+			}
+			if err := d.decode([]byte(`{"schema":"verdi.constitution-inspect-request/v99"}`)); err == nil {
+				t.Fatal("expected a refusal for an unrecognized envelope version")
+			}
+			if err := d.decode([]byte(`{"schema":"` + d.want + `"}`)); err != nil {
+				t.Fatalf("expected the exact envelope version to be accepted: %v", err)
+			}
+		})
+	}
+}
+
+// TestDecodeRequests_RejectDuplicateKeysAndNulls proves the closed grammar
+// these envelopes declare: two spellings of one document (a repeated key)
+// and an explicit null (indistinguishable after decoding from both an
+// omitted key and an empty value) are refused rather than silently
+// reinterpreted.
+func TestDecodeRequests_RejectDuplicateKeysAndNulls(t *testing.T) {
+	cases := []struct {
+		name string
+		body string
+		fn   func([]byte) error
+	}{
+		{"impact-review duplicate targets", `{"schema":"` + ImpactReviewRequestSchema + `","targets":[],"targets":[]}`,
+			func(b []byte) error { _, err := DecodeImpactReviewRequest(b); return err }},
+		{"impact-review duplicate schema", `{"schema":"` + ImpactReviewRequestSchema + `","schema":"` + ImpactReviewRequestSchema + `"}`,
+			func(b []byte) error { _, err := DecodeImpactReviewRequest(b); return err }},
+		{"impact-review null targets", `{"schema":"` + ImpactReviewRequestSchema + `","targets":null}`,
+			func(b []byte) error { _, err := DecodeImpactReviewRequest(b); return err }},
+		{"validate whole document null", `null`,
+			func(b []byte) error { _, err := DecodeValidateRequest(b); return err }},
+		{"inspect null schema", `{"schema":null}`,
+			func(b []byte) error { _, err := DecodeInspectRequest(b); return err }},
+		{"propose null content", `{"schema":"` + ProposeRequestSchema + `","content":null}`,
+			func(b []byte) error { _, err := DecodeProposeRequest(b); return err }},
+		{"propose duplicate branch", `{"schema":"` + ProposeRequestSchema + `","branch":"a","branch":"b"}`,
+			func(b []byte) error { _, err := DecodeProposeRequest(b); return err }},
+		{"submit-preparation nested null", `{"schema":"` + SubmitPreparationRequestSchema + `","targets":[{"spec":null}]}`,
+			func(b []byte) error { _, err := DecodeSubmitPreparationRequest(b); return err }},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if err := c.fn([]byte(c.body)); err == nil {
+				t.Fatalf("expected a refusal for %s", c.body)
+			}
+		})
+	}
+}
+
 func TestDecodeProposeRequest_RoundTrip(t *testing.T) {
 	req := ProposeRequest{
+		Schema:  ProposeRequestSchema,
 		Branch:  "policy/x",
 		Kind:    KindPolicy,
 		Name:    "go-toolchain",
@@ -38,10 +124,10 @@ func TestDecodeProposeRequest_RoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("DecodeProposeRequest: %v", err)
 	}
-	if decoded.Branch != req.Branch || decoded.Kind != req.Kind || decoded.Name != req.Name || string(decoded.Content) != string(req.Content) {
+	if decoded.Schema != req.Schema || decoded.Branch != req.Branch || decoded.Kind != req.Kind || decoded.Name != req.Name || string(decoded.Content) != string(req.Content) {
 		t.Fatalf("round trip mismatch: got %+v, want %+v", decoded, req)
 	}
-	if _, err := DecodeProposeRequest([]byte(`{"branch":"x","bogus":1}`)); err == nil {
+	if _, err := DecodeProposeRequest([]byte(`{"schema":"` + ProposeRequestSchema + `","branch":"x","bogus":1}`)); err == nil {
 		t.Fatal("expected an unknown-field refusal")
 	}
 }
@@ -65,16 +151,21 @@ func TestEncodeResult_IsCanonicalAndDeterministic(t *testing.T) {
 }
 
 func TestDecodeValidateAndImpactReviewAndSubmitPreparationRequests(t *testing.T) {
-	if _, err := DecodeValidateRequest([]byte(`{}`)); err != nil {
+	if _, err := DecodeValidateRequest([]byte(`{"schema":"` + ValidateRequestSchema + `"}`)); err != nil {
 		t.Fatalf("ValidateRequest: %v", err)
 	}
-	if _, err := DecodeValidateRequest([]byte(`{"root":"x"}`)); err == nil {
+	if _, err := DecodeValidateRequest([]byte(`{"schema":"` + ValidateRequestSchema + `","root":"x"}`)); err == nil {
 		t.Fatal("expected an unknown-field refusal for a client-supplied root")
 	}
-	if _, err := DecodeImpactReviewRequest([]byte(`{"targets":[]}`)); err != nil {
+	if _, err := DecodeImpactReviewRequest([]byte(`{"schema":"` + ImpactReviewRequestSchema + `","targets":[]}`)); err != nil {
 		t.Fatalf("ImpactReviewRequest: %v", err)
 	}
-	if _, err := DecodeSubmitPreparationRequest([]byte(`{"targets":[]}`)); err != nil {
+	if _, err := DecodeSubmitPreparationRequest([]byte(`{"schema":"` + SubmitPreparationRequestSchema + `","targets":[]}`)); err != nil {
 		t.Fatalf("SubmitPreparationRequest: %v", err)
+	}
+	// Each envelope refuses its SIBLING's version: these are five distinct
+	// contracts, not one interchangeable object with five names.
+	if _, err := DecodeImpactReviewRequest([]byte(`{"schema":"` + SubmitPreparationRequestSchema + `","targets":[]}`)); err == nil {
+		t.Fatal("expected impact-review to refuse a submit-preparation envelope")
 	}
 }

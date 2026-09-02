@@ -5,10 +5,13 @@ import (
 	"os"
 )
 
-// ValidateRequest is Validate's strict request. It carries no field — the
-// checkout root is resolved by the adapter, never accepted as request
-// content (InspectRequest's own doc comment explains why).
-type ValidateRequest struct{}
+// ValidateRequest is Validate's strict request. Beyond its own envelope
+// version it carries no field — the checkout root is resolved by the
+// adapter, never accepted as request content (InspectRequest's own doc
+// comment explains why).
+type ValidateRequest struct {
+	Schema string `json:"schema"`
+}
 
 func (r ValidateRequest) validate() error { return nil }
 
@@ -50,6 +53,16 @@ func (s Service) Validate(ctx context.Context, root string, req ValidateRequest)
 	if typed != nil {
 		return nil, typed
 	}
+	return s.validateAt(root, identity)
+}
+
+// validateAt is Validate's body over an ALREADY-RESOLVED identity, so a
+// composing operation (SubmitPreparation) can pin ONE immutable identity
+// snapshot and thread it through every sub-operation instead of letting each
+// resolve its own. Two independent resolutions are two different repository
+// observations, and a record carrying one beside a neighbour that used the
+// other describes a repository state that never existed.
+func (s Service) validateAt(root string, identity Identity) (*ValidateResult, *Error) {
 	snapshot, typed := loadSnapshot(s.Authority, os.DirFS(root), identity.Head, "corrupted-policy")
 	if typed != nil {
 		return nil, typed

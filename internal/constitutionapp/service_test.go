@@ -71,8 +71,23 @@ func TestProposeToImpactReviewFlow(t *testing.T) {
 	if typed != nil {
 		t.Fatalf("SubmitPreparation: %v", typed)
 	}
-	if !prep.ReadyForSubmission {
-		t.Fatalf("SubmitPreparation: expected ready for submission, got blocking reasons %v", prep.BlockingReasons)
+	// The whole flow composes, and the packet is HONEST about what it does
+	// not know: this call declared no governed target, so the proposal's
+	// changed source layer had its impact examined by nothing at all. A
+	// packet that read affirmatively ready there would report zero coverage
+	// as zero impact. (Declaring targets is what closes the gap;
+	// TestSubmitPreparation_NotReadyWithoutImpactCoverage is this rule's
+	// dedicated pin, and TestSubmitPreparation_ReadyWithoutTargetsWhenNothing
+	// Changed is its negative.)
+	if prep.ReadyForSubmission {
+		t.Fatal("SubmitPreparation: expected the uncovered policy delta to block readiness")
+	}
+	if !strings.Contains(strings.Join(prep.BlockingReasons, "\n"), "no impact coverage") {
+		t.Fatalf("SubmitPreparation: expected a disclosed coverage-gap blocking reason, got %v", prep.BlockingReasons)
+	}
+	if !prep.Validation.Snapshot.Adopted || len(prep.ImpactReview.Layers) == 0 {
+		t.Fatalf("SubmitPreparation: expected a validated, adopted proposal carrying the layer delta (adopted=%v, layers=%d)",
+			prep.Validation.Snapshot.Adopted, len(prep.ImpactReview.Layers))
 	}
 }
 

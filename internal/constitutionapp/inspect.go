@@ -5,14 +5,16 @@ import (
 	"os"
 )
 
-// InspectRequest is Inspect's strict request. It carries no field: Inspect
-// always reports the WHOLE constitution (every source layer and the
-// complete effective rule ledger) for the caller's own checkout, never a
-// caller-selected subset or a caller-named root — root is resolved by the
-// adapter (CLI: the current checkout; MCP: the configured server root),
-// exactly as every other operation in this repository resolves it, never
-// accepted as request content.
-type InspectRequest struct{}
+// InspectRequest is Inspect's strict request. Beyond its own envelope
+// version it carries no field: Inspect always reports the WHOLE constitution
+// (every source layer and the complete effective rule ledger) for the
+// caller's own checkout, never a caller-selected subset or a caller-named
+// root — root is resolved by the adapter (CLI: the current checkout; MCP:
+// the configured server root), exactly as every other operation in this
+// repository resolves it, never accepted as request content.
+type InspectRequest struct {
+	Schema string `json:"schema"`
+}
 
 func (r InspectRequest) validate() error { return nil }
 

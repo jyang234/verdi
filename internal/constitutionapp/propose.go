@@ -3,8 +3,9 @@ package constitutionapp
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
-	"os"
+	"path"
 	"path/filepath"
 
 	"github.com/jyang234/verdi/internal/atomicfile"
@@ -31,6 +32,7 @@ type Expected struct {
 // is the workbench's own "Propose change" convenience (design §7.2),
 // composing internal/humanartifact directly before calling this operation.
 type ProposeRequest struct {
+	Schema        string   `json:"schema"`
 	Branch        string   `json:"branch"`
 	Kind          string   `json:"kind"`
 	Name          string   `json:"name"`
@@ -180,6 +182,16 @@ type ProposeResult struct {
 // another in-progress edit) can never be swept into this commit. It never
 // merges, approves, or writes anything outside that one path — merge/
 // approval stay the normal Git pull-request boundary (design §7.1).
+//
+// Two custody refusals guard the write itself, because "one path" is a claim
+// about the FILESYSTEM, not about a string:
+//
+//   - unsafe-path — a symlinked component of the destination would resolve
+//     the write somewhere else entirely (safepath.go explains why the path
+//     grammar alone cannot establish this);
+//   - divergent-worktree — the working tree carries uncommitted content at
+//     the destination that matches neither the committed blob nor the
+//     request, so the write would erase an edit nobody asked to discard.
 func (s Service) Propose(ctx context.Context, root string, req ProposeRequest) (*ProposeResult, *Error) {
 	if root == "" {
 		return nil, inputInvalid("input-invalid", errRootRequired.Error())
@@ -208,6 +220,19 @@ func (s Service) Propose(ctx context.Context, root string, req ProposeRequest) (
 	// the checkout has already moved.
 	gitPath := constitutionPolicyDir + "/" + rel
 	full := filepath.Join(root, filepath.FromSlash(gitPath))
+
+	// Path custody, taken BEFORE the first repository read or mutation so it
+	// composes with the content-validation hoist above: every component of
+	// the destination that already exists must be a real directory (and the
+	// destination itself, if present, a real regular file). Without this,
+	// filepath.Join + atomicfile.Write silently resolve a symlinked store
+	// directory and land the artifact outside the checkout entirely — the
+	// write happening before `git add` can even refuse the beyond-a-symlink
+	// pathspec, so the escape is a completed side effect of a "failed"
+	// Propose. See safepath.go for the full rationale.
+	if err := checkNoSymlinkedComponent(root, gitPath); err != nil {
+		return nil, verdict("unsafe-path", err.Error())
+	}
 
 	currentBranch, err := s.Git.CurrentBranch(ctx, root)
 	if err != nil {
@@ -244,6 +269,17 @@ func (s Service) Propose(ctx context.Context, root string, req ProposeRequest) (
 		}
 	}
 
+	// Path custody is retaken here because the checkout above materialized the
+	// proposal branch's own committed tree, and that tree can itself carry a
+	// mode-120000 entry at any component of this path — a symlink this
+	// operation never saw during the pre-mutation proof. Only the branch
+	// selection can have happened in between (the pre-mutation proof already
+	// refused everything else), and that movement is itself the same residual
+	// the CreateCommit failure path already carries.
+	if err := checkNoSymlinkedComponent(root, gitPath); err != nil {
+		return nil, verdict("unsafe-path", err.Error())
+	}
+
 	// Zero-effect is decided against the proposal branch's COMMITTED blob.
 	// A Show failure means the branch's committed tree does not carry this
 	// path (a brand-new artifact) or Git could not read it at all; both are
@@ -266,8 +302,30 @@ func (s Service) Propose(ctx context.Context, root string, req ProposeRequest) (
 		return &ProposeResult{Schema: ProposeResultSchema, Identity: identity, Path: rel, ArtifactID: artifactID, Digest: digest, ZeroEffect: true}, nil
 	}
 
-	if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
-		return nil, operational("io-failure", "creating proposal artifact directory", err)
+	// The write is about to REPLACE whatever the working tree carries at this
+	// path. A file there that matches neither the branch's committed blob nor
+	// the requested content is an uncommitted edit nobody asked this
+	// operation to discard: the stale-head precondition proves only that the
+	// branch REF has not moved, so it passes clean while the replacement
+	// erases that edit without ever disclosing it existed. Refuse and name
+	// the divergence; the caller reconciles (commits, stashes, or discards)
+	// its own edit first. The matching case — an uncommitted edit carrying
+	// exactly the requested bytes — is not a divergence at all and still
+	// commits, exactly as before.
+	worktree, worktreeExists, readErr := readRegularFile(full)
+	if readErr != nil {
+		if errors.Is(readErr, errUnsafePathComponent) {
+			return nil, verdict("unsafe-path", readErr.Error())
+		}
+		return nil, operational("io-failure", "reading the proposal artifact's working-tree state", readErr)
+	}
+	if worktreeExists && !bytes.Equal(worktree, req.Content) && (showErr != nil || !bytes.Equal(worktree, committed)) {
+		return nil, verdict("divergent-worktree", fmt.Sprintf(
+			"the working tree carries uncommitted content at %s that differs from both branch %q's committed state and the requested content; reconcile that edit before proposing over it", rel, req.Branch))
+	}
+
+	if err := ensureDirectoryChain(root, constitutionPolicyDir+"/"+path.Dir(rel)); err != nil {
+		return nil, verdict("unsafe-path", err.Error())
 	}
 	if err := atomicfile.Write(full, req.Content, 0o644); err != nil {
 		return nil, operational("io-failure", "writing proposal artifact", err)

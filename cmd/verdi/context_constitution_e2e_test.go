@@ -77,7 +77,9 @@ func writeConstitutionRequestFile(t *testing.T, dir, name string, body map[strin
 func TestContextConstitutionE2E_InspectHappyPath(t *testing.T) {
 	bin := buildVerdiBinary(t)
 	repo := buildConstitutionRepo(t)
-	reqPath := writeConstitutionRequestFile(t, repo.Dir, "inspect.json", map[string]interface{}{})
+	reqPath := writeConstitutionRequestFile(t, repo.Dir, "inspect.json", map[string]interface{}{
+		"schema": constitutionapp.InspectRequestSchema,
+	})
 
 	headBefore := contextE2ECurrentHead(t, repo.Dir)
 
@@ -126,6 +128,7 @@ func TestContextConstitutionE2E_ProposeThenStaleHead(t *testing.T) {
 	retitled := strings.Replace(string(content), "Frontend Go version overlay", "Frontend Go version overlay (e2e)", 1)
 
 	reqPath := writeConstitutionRequestFile(t, repo.Dir, "propose.json", map[string]interface{}{
+		"schema":   constitutionapp.ProposeRequestSchema,
 		"branch":   "policy/e2e-retitle",
 		"kind":     "policy-overlay",
 		"name":     "frontend-go-version",
@@ -149,6 +152,7 @@ func TestContextConstitutionE2E_ProposeThenStaleHead(t *testing.T) {
 	}
 
 	staleReqPath := writeConstitutionRequestFile(t, repo.Dir, "propose-stale.json", map[string]interface{}{
+		"schema":   constitutionapp.ProposeRequestSchema,
 		"branch":   "policy/e2e-retitle",
 		"kind":     "policy-overlay",
 		"name":     "frontend-go-version",
@@ -176,7 +180,9 @@ func TestContextConstitutionE2E_ProposeThenStaleHead(t *testing.T) {
 func TestContextConstitutionE2E_OutFile(t *testing.T) {
 	bin := buildVerdiBinary(t)
 	repo := buildConstitutionRepo(t)
-	reqPath := writeConstitutionRequestFile(t, repo.Dir, "inspect.json", map[string]interface{}{})
+	reqPath := writeConstitutionRequestFile(t, repo.Dir, "inspect.json", map[string]interface{}{
+		"schema": constitutionapp.InspectRequestSchema,
+	})
 	outPath := filepath.Join(repo.Dir, "out.json")
 
 	stdout, stderr, code := runVerdiBinary(t, bin, repo.Dir, []string{"CI_DEFAULT_BRANCH=main"}, "context", "constitution", "inspect", "--request", reqPath, "--out", outPath)
@@ -220,23 +226,27 @@ func TestContextConstitution_CLIAndMCPRecordsAreByteIdentical(t *testing.T) {
 	backend := &mcpserve.Backend{Root: root}
 
 	cases := []struct {
-		op   string
-		call func() map[string]any
+		op      string
+		request string
+		call    func(json.RawMessage) map[string]any
 	}{
-		{"inspect", func() map[string]any { return backend.ConstitutionInspect(ctx, json.RawMessage(`{}`)) }},
-		{"validate", func() map[string]any { return backend.ConstitutionValidate(ctx, json.RawMessage(`{}`)) }},
-		{"impact-review", func() map[string]any { return backend.ConstitutionImpactReview(ctx, json.RawMessage(`{}`)) }},
+		{"inspect", `{"schema":"` + constitutionapp.InspectRequestSchema + `"}`, func(a json.RawMessage) map[string]any { return backend.ConstitutionInspect(ctx, a) }},
+		{"validate", `{"schema":"` + constitutionapp.ValidateRequestSchema + `"}`, func(a json.RawMessage) map[string]any { return backend.ConstitutionValidate(ctx, a) }},
+		{"impact-review", `{"schema":"` + constitutionapp.ImpactReviewRequestSchema + `"}`, func(a json.RawMessage) map[string]any { return backend.ConstitutionImpactReview(ctx, a) }},
 	}
 	for _, c := range cases {
 		t.Run(c.op, func(t *testing.T) {
-			cliBytes, typed, decodeErr := dispatchConstitutionOp(ctx, svc, root, c.op, []byte(`{}`))
+			cliBytes, landed, typed, decodeErr := dispatchConstitutionOp(ctx, svc, root, c.op, []byte(c.request))
 			if decodeErr != nil {
 				t.Fatalf("CLI path: %v", decodeErr)
 			}
 			if typed != nil {
 				t.Fatalf("CLI path: %v", typed)
 			}
-			mcpText := constitutionToolText(t, c.call())
+			if landed != nil {
+				t.Fatalf("a read-only operation must report no landed effect, got %+v", landed)
+			}
+			mcpText := constitutionToolText(t, c.call(json.RawMessage(c.request)))
 			if string(cliBytes) != mcpText {
 				t.Fatalf("CLI and MCP records differ for %s:\nCLI = %q\nMCP = %q", c.op, string(cliBytes), mcpText)
 			}
@@ -260,6 +270,85 @@ func constitutionToolText(t *testing.T, result map[string]any) string {
 		t.Fatalf("MCP tool result carries no text content item: %+v", result)
 	}
 	return text
+}
+
+// TestContextConstitution_OutputFailureDisclosesLandedProposal proves the
+// no-hidden-effect rule for the one MUTATING operation on this surface:
+// `propose` creates a real branch and commit, and only THEN is the result
+// rendered. An output-destination failure at that point (here an --out path
+// that is a directory, so the atomic rename cannot land) used to return a
+// bare exit 2 carrying nothing at all — the caller was told the command
+// failed while a real branch and commit had already landed in its
+// repository, discoverable only by inspecting Git by hand.
+//
+// The exit code stays 2 (the command genuinely did not deliver its result);
+// what changes is that the landed identity travels with the diagnostic.
+func TestContextConstitution_OutputFailureDisclosesLandedProposal(t *testing.T) {
+	repo := buildConstitutionRepo(t)
+	t.Chdir(repo.Dir)
+
+	content, err := os.ReadFile(filepath.Join(repo.Dir, ".verdi", "policy", "overlays", "frontend-go-version.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	retitled := strings.Replace(string(content), "Frontend Go version overlay", "Frontend Go version overlay (out-failure)", 1)
+	reqPath := writeConstitutionRequestFile(t, repo.Dir, "propose-outfail.json", map[string]interface{}{
+		"schema":   constitutionapp.ProposeRequestSchema,
+		"branch":   "policy/out-failure",
+		"kind":     "policy-overlay",
+		"name":     "frontend-go-version",
+		"content":  base64.StdEncoding.EncodeToString([]byte(retitled)),
+		"expected": map[string]interface{}{"branch": "policy/out-failure"},
+	})
+
+	// An existing DIRECTORY at the --out path: atomicfile.Write's final
+	// rename cannot replace it, so the write fails deterministically AFTER
+	// Propose has already committed.
+	outPath := filepath.Join(repo.Dir, "outdir")
+	if err := os.Mkdir(outPath, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout, stderr strings.Builder
+	code := runConstitutionOp("propose", []string{"--request", reqPath, "--out", outPath}, strings.NewReader(""), &stdout, &stderr)
+	if code != 2 {
+		t.Fatalf("exit = %d, want 2 (the result was not delivered)\nstdout: %s\nstderr: %s", code, stdout.String(), stderr.String())
+	}
+
+	// The mutation really landed: the branch exists and carries a commit.
+	landedCommit := strings.TrimSpace(gitOutput(t, repo.Dir, "rev-parse", "policy/out-failure"))
+	if landedCommit == "" {
+		t.Fatal("test setup: expected Propose to have committed onto the proposal branch")
+	}
+
+	diagnostic := stderr.String()
+	for _, want := range []string{"policy/out-failure", landedCommit, "zero_effect"} {
+		if !strings.Contains(diagnostic, want) {
+			t.Fatalf("the diagnostic hides the landed proposal (%q missing):\n%s", want, diagnostic)
+		}
+	}
+}
+
+// TestContextConstitutionE2E_UnversionedRequestRefused proves the request
+// envelope's version is enforced on the real binary's own CLI path: a
+// document with no schema field — exactly what every caller sent before this
+// contract existed — is refused operationally (exit 2) before any store
+// access, rather than read as whichever version this build implements.
+func TestContextConstitutionE2E_UnversionedRequestRefused(t *testing.T) {
+	bin := buildVerdiBinary(t)
+	repo := buildConstitutionRepo(t)
+	reqPath := writeConstitutionRequestFile(t, repo.Dir, "unversioned.json", map[string]interface{}{})
+
+	stdout, stderr, code := runVerdiBinary(t, bin, repo.Dir, []string{"CI_DEFAULT_BRANCH=main"}, "context", "constitution", "inspect", "--request", reqPath)
+	if code != 2 {
+		t.Fatalf("exit = %d, want 2\nstdout: %s\nstderr: %s", code, stdout, stderr)
+	}
+	if stdout != "" {
+		t.Fatalf("stdout = %q, want empty", stdout)
+	}
+	if !strings.Contains(stderr, constitutionapp.InspectRequestSchema) {
+		t.Fatalf("stderr = %q, want the expected envelope version named", stderr)
+	}
 }
 
 // TestContextConstitutionE2E_UnknownSubcommand_ExitTwo proves the usage

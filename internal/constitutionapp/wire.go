@@ -1,27 +1,27 @@
 package constitutionapp
 
 import (
-	"bytes"
-	"encoding/json"
-	"errors"
 	"fmt"
 
+	"github.com/jyang234/verdi/internal/artifact"
 	"github.com/jyang234/verdi/internal/canonjson"
 )
 
-// strictDecode decodes exactly one JSON document into v: unknown fields
-// fail closed (root CLAUDE.md: "JSON via DisallowUnknownFields") and any
-// byte remaining after the one top-level value is rejected as trailing
-// data, the same discipline internal/canonjson.Marshal's own decode half
-// already enforces for every other wire document in this repository.
+// strictDecode decodes exactly one JSON request document into v under the
+// CLOSED grammar every constitutionapp request envelope declares: unknown
+// fields, DUPLICATE KEYS, explicit NULLS, invalid UTF-8, and any byte
+// remaining after the one top-level value all fail closed.
+//
+// It consumes internal/artifact's shared seam rather than re-deriving the
+// rules here (root CLAUDE.md: "schemas/decoding in internal/artifact";
+// "never copy-paste across packages"). The previous local decoder enforced
+// only unknown fields and trailing data, so `{"targets":[],"targets":[...]}`
+// and `{"schema":null}` were both accepted — two spellings of one document
+// meaning whatever the decoder happened to keep, under an envelope whose own
+// doc comments claim an exact `.../request/v1` contract.
 func strictDecode(data []byte, v interface{}) error {
-	dec := json.NewDecoder(bytes.NewReader(data))
-	dec.DisallowUnknownFields()
-	if err := dec.Decode(v); err != nil {
+	if err := artifact.DecodeClosedJSON(data, v); err != nil {
 		return fmt.Errorf("constitutionapp: decoding request: %w", err)
-	}
-	if dec.More() {
-		return errors.New("constitutionapp: trailing data after request document")
 	}
 	return nil
 }
@@ -41,6 +41,9 @@ func DecodeInspectRequest(data []byte) (InspectRequest, error) {
 	if err := strictDecode(data, &req); err != nil {
 		return InspectRequest{}, err
 	}
+	if err := requireRequestSchema(req.Schema, InspectRequestSchema); err != nil {
+		return InspectRequest{}, err
+	}
 	return req, nil
 }
 
@@ -49,6 +52,9 @@ func DecodeInspectRequest(data []byte) (InspectRequest, error) {
 func DecodeValidateRequest(data []byte) (ValidateRequest, error) {
 	var req ValidateRequest
 	if err := strictDecode(data, &req); err != nil {
+		return ValidateRequest{}, err
+	}
+	if err := requireRequestSchema(req.Schema, ValidateRequestSchema); err != nil {
 		return ValidateRequest{}, err
 	}
 	return req, nil
@@ -61,6 +67,9 @@ func DecodeProposeRequest(data []byte) (ProposeRequest, error) {
 	if err := strictDecode(data, &req); err != nil {
 		return ProposeRequest{}, err
 	}
+	if err := requireRequestSchema(req.Schema, ProposeRequestSchema); err != nil {
+		return ProposeRequest{}, err
+	}
 	return req, nil
 }
 
@@ -71,6 +80,9 @@ func DecodeImpactReviewRequest(data []byte) (ImpactReviewRequest, error) {
 	if err := strictDecode(data, &req); err != nil {
 		return ImpactReviewRequest{}, err
 	}
+	if err := requireRequestSchema(req.Schema, ImpactReviewRequestSchema); err != nil {
+		return ImpactReviewRequest{}, err
+	}
 	return req, nil
 }
 
@@ -79,6 +91,9 @@ func DecodeImpactReviewRequest(data []byte) (ImpactReviewRequest, error) {
 func DecodeSubmitPreparationRequest(data []byte) (SubmitPreparationRequest, error) {
 	var req SubmitPreparationRequest
 	if err := strictDecode(data, &req); err != nil {
+		return SubmitPreparationRequest{}, err
+	}
+	if err := requireRequestSchema(req.Schema, SubmitPreparationRequestSchema); err != nil {
 		return SubmitPreparationRequest{}, err
 	}
 	return req, nil

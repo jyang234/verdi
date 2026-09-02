@@ -74,6 +74,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/jyang234/verdi/internal/constitutionapp"
 	"github.com/jyang234/verdi/internal/draftmutation"
 	"github.com/jyang234/verdi/internal/gitx"
 	"github.com/jyang234/verdi/internal/mcpserve"
@@ -581,7 +582,7 @@ func TestMCPShowcaseCoverage(t *testing.T) {
 	// Adopted=false on both the accepted and proposed side, never a tool
 	// error.
 	t.Run("constitution_inspect", func(t *testing.T) {
-		text := callMCPToolOK(t, srv, "constitution_inspect", map[string]any{})
+		text := callMCPToolOK(t, srv, "constitution_inspect", map[string]any{"schema": constitutionapp.InspectRequestSchema})
 		var out struct {
 			Schema   string `json:"schema"`
 			Accepted struct {
@@ -598,7 +599,7 @@ func TestMCPShowcaseCoverage(t *testing.T) {
 	})
 
 	t.Run("constitution_validate", func(t *testing.T) {
-		text := callMCPToolOK(t, srv, "constitution_validate", map[string]any{})
+		text := callMCPToolOK(t, srv, "constitution_validate", map[string]any{"schema": constitutionapp.ValidateRequestSchema})
 		var out struct {
 			Schema   string `json:"schema"`
 			Snapshot struct {
@@ -620,7 +621,7 @@ func TestMCPShowcaseCoverage(t *testing.T) {
 	})
 
 	t.Run("constitution_impact_review", func(t *testing.T) {
-		text := callMCPToolOK(t, srv, "constitution_impact_review", map[string]any{})
+		text := callMCPToolOK(t, srv, "constitution_impact_review", map[string]any{"schema": constitutionapp.ImpactReviewRequestSchema})
 		var out struct {
 			Accepted struct {
 				Adopted bool `json:"adopted"`
