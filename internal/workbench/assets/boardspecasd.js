@@ -364,6 +364,15 @@
     if (opDialog) opDialog.hidden = true;
     var stub = document.getElementById("asd-stub-dialog");
     if (stub) stub.hidden = true;
+    // The dialog's end is an interaction end (Codex closure round 1): a
+    // projection held while it was open resumes now — as a fresh fetch,
+    // never a re-apply of held bytes (resumeHeldRefresh's own contract).
+    // On the Apply path the mutation POST still carries the held base by
+    // construction (mutate() reads it synchronously after this call),
+    // and the mutation's own applied projection supersedes the resumed
+    // fetch through the refreshSeq contract.
+    var a = api2();
+    if (a) a.resumeHeldRefresh();
   }
   function slugPattern() {
     return asdState.slugPattern || "^[a-z0-9]+(?:-[a-z0-9]+)*$";

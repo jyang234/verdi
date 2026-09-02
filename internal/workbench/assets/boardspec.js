@@ -176,6 +176,17 @@
 
   function interactionLive() {
     if (gesture || editing) return true;
+    // An OPEN typed-operation dialog is an active interaction (Codex
+    // closure round 1): its draft input is bound to the base it was
+    // opened against, so the projection swap AND the mutation-base
+    // adoption are both held until the dialog terminates — a concurrent
+    // change then surfaces as the kernel's typed STALE refusal when the
+    // preserved input is applied, never a silent overwrite riding a
+    // freshly adopted base.
+    var op = document.getElementById("asd-op-dialog");
+    if (op && !op.hidden) return true;
+    var stub = document.getElementById("asd-stub-dialog");
+    if (stub && !stub.hidden) return true;
     var c = canvas();
     return !!(c && c.querySelector(".sticky-draft"));
   }

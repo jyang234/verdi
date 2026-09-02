@@ -821,11 +821,12 @@ test.describe("typed forms", () => {
   });
 
   test("an applying snapshot never clobbers the open stub-correction dialog", async ({ page }) => {
-    // Codex correction round 1, finding 3 (the guard half): a snapshot
-    // that lands while the dialog is OPEN must not overwrite the author's
-    // in-flight input — typed slug and changed choices survive the swap
-    // (the applyProjection interaction-guard precedent, held for dialogs
-    // by deriving choices only at open).
+    // Codex correction round 1, finding 3 (the guard half), tightened by
+    // the closure round: an OPEN dialog is an active interaction — the
+    // projection swap AND the mutation base are HELD while it is open
+    // (never adopted under the author's draft), the in-flight input
+    // survives untouched, and the dialog's end is the resume point where
+    // the held projection applies.
     const slug = "stub-hold-probe";
     await expectClean(
       await postMutate(page, DRAFT_B(), SHOWCASE.SHOWCASE_DRAFT_SPEC, [
@@ -839,23 +840,111 @@ test.describe("typed forms", () => {
     // In-flight input: a half-typed slug and a changed binding choice.
     await page.getByTestId("asd-stub-slug").fill("half-typed-rename");
     await dialog.locator('[data-asd-stub-ac="ac-2"]').check();
-    // A server-state change lands so the next poll APPLIES (not 304)…
+    // A server-state change lands while the dialog is open…
     const resp = await page.request.post(DRAFT_B() + "/api/sticky", {
       data: { text: "poll probe [f3-hold]", type: "comment" },
     });
     expect(resp.ok()).toBeTruthy();
-    // …and the region refreshes under the open dialog.
+    // …polls FETCH it (two 200s prove the change was seen), but the swap
+    // is HELD: the wall does not change under the open dialog.
+    await page.waitForResponse((r) => r.url().includes("/snapshot") && r.status() === 200, {
+      timeout: 15_000,
+    });
+    await page.waitForResponse((r) => r.url().includes("/snapshot"), { timeout: 15_000 });
     const sticky = page.locator('[data-testid^="sticky-"]').filter({ hasText: "[f3-hold]" });
-    await expect(sticky).toHaveCount(1, { timeout: 10_000 });
+    await expect(sticky).toHaveCount(0);
     // The open dialog is untouched: typed slug, changed choice, existing
     // choice.
     await expect(page.getByTestId("asd-stub-slug")).toHaveValue("half-typed-rename");
     await expect(dialog.locator('[data-asd-stub-ac="ac-2"]')).toBeChecked();
     await expect(dialog.locator('[data-asd-stub-ac="ac-1"]')).toBeChecked();
+    // The dialog's end is the resume point: the held projection applies.
     await page.locator("#asd-stub-cancel").click();
+    await expect(sticky).toHaveCount(1, { timeout: 10_000 });
     // Cleanup: the sticky dies by its own affordance; the stub through
     // the typed surface.
     await sticky.first().getByRole("button", { name: "Delete sticky" }).click();
+    await expectClean(
+      await postMutate(page, DRAFT_B(), SHOWCASE.SHOWCASE_DRAFT_SPEC, [
+        { op: "remove-stub", slug },
+      ]),
+    );
+  });
+
+  test("applying a dialog drafted against a superseded base is refused stale, never a silent overwrite", async ({ page }) => {
+    // Codex closure round 1 (the reviewer's own probe shape): while a
+    // typed-operation dialog is open, the mutation base must be HELD —
+    // pre-fix, polling adopted the fresh base under the open dialog and
+    // the preserved input then applied CLEANLY over the concurrent
+    // change. The honest outcome is the kernel's typed stale refusal
+    // against the base the dialog was drafted on, with the external
+    // value surviving.
+    await page.goto(DESIGN());
+    const placard = page.locator('[data-testid="placard-problem"] .placard-text');
+    const original = (await placard.textContent())!.trim();
+    const anchorBtn = page.locator("#asd-set-problem");
+    const anchor = (await anchorBtn.getAttribute("data-anchor")) || "#problem";
+    await anchorBtn.click();
+    const dialog = page.locator("#asd-op-dialog");
+    await expect(dialog).toBeVisible();
+    await page.getByTestId("asd-op-text").fill("dialog-stale problem text [c3-op]");
+    // An external typed mutation lands while the dialog is open…
+    await expectClean(
+      await postMutate(page, DESIGN(), SHOWCASE.DESIGN_SPEC, [
+        { op: "set-problem", text: "external problem update [c3-external]", anchor },
+      ]),
+    );
+    // …and a poll FETCHES it (its application is held under the dialog).
+    await page.waitForResponse((r) => r.url().includes("/snapshot") && r.status() === 200, {
+      timeout: 15_000,
+    });
+    await page.getByTestId("asd-op-ok").click();
+    // The typed STALE refusal, never a clean overwrite.
+    await expect(page.getByTestId("asd-last-result")).toHaveAttribute("data-result-kind", "stale", {
+      timeout: 10_000,
+    });
+    // The external value survives on the reconciled wall.
+    await expect(placard).toContainText("[c3-external]", { timeout: 10_000 });
+    // Cleanup: restore the provisioned problem statement.
+    await expectClean(
+      await postMutate(page, DESIGN(), SHOWCASE.DESIGN_SPEC, [
+        { op: "set-problem", text: original, anchor },
+      ]),
+    );
+  });
+
+  test("applying a stub correction drafted against a superseded base is refused stale", async ({ page }) => {
+    // Same closure finding, second dialog type: the stub-correction
+    // dialog's preserved binding state must refuse stale against a
+    // concurrent external binding change, never overwrite it.
+    const slug = "stub-stale-probe";
+    await expectClean(
+      await postMutate(page, DRAFT_B(), SHOWCASE.SHOWCASE_DRAFT_SPEC, [
+        { op: "add-stub", slug, acceptance_criteria: ["ac-1"] },
+      ]),
+    );
+    await page.goto(DRAFT_B());
+    await page.locator(`.stubcard[data-stub="${slug}"]`).locator("[data-asd-correct-stub]").click();
+    const dialog = page.locator("#asd-stub-dialog");
+    await expect(dialog).toBeVisible();
+    // An external binding change lands while the dialog is open…
+    await expectClean(
+      await postMutate(page, DRAFT_B(), SHOWCASE.SHOWCASE_DRAFT_SPEC, [
+        { op: "edit-stub", slug, acceptance_criteria: ["ac-2"] },
+      ]),
+    );
+    await page.waitForResponse((r) => r.url().includes("/snapshot") && r.status() === 200, {
+      timeout: 15_000,
+    });
+    // …then the preserved dialog state (still claiming ac-1) is applied.
+    await page.getByTestId("asd-stub-ok").click();
+    await expect(page.getByTestId("asd-last-result")).toHaveAttribute("data-result-kind", "stale", {
+      timeout: 10_000,
+    });
+    // The external binding survives on the reconciled wall.
+    await expect(page.locator(`.stubcard[data-stub="${slug}"]`)).toHaveAttribute("data-acs", "ac-2", {
+      timeout: 10_000,
+    });
     await expectClean(
       await postMutate(page, DRAFT_B(), SHOWCASE.SHOWCASE_DRAFT_SPEC, [
         { op: "remove-stub", slug },
