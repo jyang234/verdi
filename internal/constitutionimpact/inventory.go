@@ -24,6 +24,11 @@ type consumerDoc struct {
 	GovernedOperations *[]string       `json:"governed_operations"`
 }
 
+type evidenceReuseKey struct {
+	requestBytes string
+	environment  string
+}
+
 // DecodeInventory strict-decodes canonical inventory bytes. Duplicate
 // consumer identities are intentionally retained for coverage classification.
 func DecodeInventory(data []byte) (Inventory, error) {
@@ -97,6 +102,29 @@ func supplementalRequestDigest(request contextcompile.Request) (string, error) {
 		return "", err
 	}
 	return digestBytes(encoded), nil
+}
+
+func consumerEvidenceReuseKey(consumer Consumer) (evidenceReuseKey, error) {
+	doc, err := consumerDocFor(consumer)
+	if err != nil {
+		return evidenceReuseKey{}, err
+	}
+	return evidenceReuseKey{
+		requestBytes: string(doc.Request) + "\n",
+		environment:  *doc.Environment,
+	}, nil
+}
+
+func recordEvidenceReuse(used map[string]evidenceReuseKey, manifestDigest string, consumer Consumer) (bool, error) {
+	reuseKey, err := consumerEvidenceReuseKey(consumer)
+	if err != nil {
+		return false, err
+	}
+	if previous, exists := used[manifestDigest]; exists {
+		return previous == reuseKey, nil
+	}
+	used[manifestDigest] = reuseKey
+	return true, nil
 }
 
 func consumerFromDoc(doc consumerDoc) (Consumer, error) {

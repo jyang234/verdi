@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"os"
 	"testing"
+
+	"github.com/jyang234/verdi/internal/canonjson"
 )
 
 func TestCoverageCanonicalRoundTripReusesNestedOwnerCodecs(t *testing.T) {
@@ -91,6 +93,66 @@ func TestDecodeCoverageRejectsSupplementalRequestDigestMismatch(t *testing.T) {
 	if _, err := DecodeCoverage(mutated); err == nil {
 		t.Fatal("DecodeCoverage accepted a supplemental request digest mismatch")
 	}
+}
+
+func TestCoverageCodecRefusesSharedEvidenceAcrossExpectedAssertionAlias(t *testing.T) {
+	forged := forgedExpectedAssertionAliasCoverage(t)
+
+	t.Run("encode", func(t *testing.T) {
+		if _, err := EncodeCoverage(forged); err == nil {
+			t.Fatal("EncodeCoverage accepted manifest/report reuse across distinct canonical requests")
+		}
+	})
+
+	t.Run("decode", func(t *testing.T) {
+		valid := operationDistinctSharedEvidenceCoverage(t)
+		doc, err := coverageDocFor(valid)
+		if err != nil {
+			t.Fatalf("valid coverage document: %v", err)
+		}
+		consumers := make([]coverageConsumerDoc, len(forged.Consumers))
+		evaluations := make([]coverageEvaluationDoc, len(forged.Evaluations))
+		template := (*doc.Evaluations)[0]
+		for i, evaluation := range forged.Evaluations {
+			consumer, err := coverageConsumerDocFor(evaluation.Consumer)
+			if err != nil {
+				t.Fatal(err)
+			}
+			consumers[i] = consumer
+			evaluationConsumer := consumer
+			evaluations[i] = coverageEvaluationDoc{
+				Consumer:         &evaluationConsumer,
+				AcceptedManifest: template.AcceptedManifest,
+				Report:           template.Report,
+			}
+		}
+		doc.Consumers = &consumers
+		doc.Evaluations = &evaluations
+		raw, err := canonjson.Marshal(doc)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := DecodeCoverage(raw); err == nil {
+			t.Fatal("DecodeCoverage accepted manifest/report reuse across distinct canonical requests")
+		}
+	})
+}
+
+func operationDistinctSharedEvidenceCoverage(t *testing.T) Coverage {
+	t.Helper()
+	first := testConsumer("spec/shared", "local")
+	second := cloneConsumer(first)
+	second.GovernedOperations = []string{}
+	plan := testPlan(t, []Consumer{first, second}, []Consumer{first, second}, testChangedLayer())
+	result, manifest := resultForConsumer(t, plan, first, true)
+	coverage := plan.Complete([]Evaluation{
+		testEvaluation(first, result, manifest),
+		testEvaluation(second, result, manifest),
+	}, nil)
+	if coverage.State != StateProven {
+		t.Fatalf("test setup: operation-distinct coverage = %+v, want proven", coverage)
+	}
+	return coverage
 }
 
 func TestCoverageMissingInventoryFixture(t *testing.T) {

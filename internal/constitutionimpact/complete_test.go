@@ -140,6 +140,37 @@ func TestCompleteCoverageAllowsSharedEvidenceForOperationDistinctConsumers(t *te
 	}
 }
 
+func TestCompleteCoverageRefusesSharedEvidenceAcrossExpectedAssertionAlias(t *testing.T) {
+	plan, unconstrained, constrained, result, manifest := expectedAssertionAliasScenario(t)
+
+	coverage := plan.Complete([]Evaluation{
+		testEvaluation(unconstrained, result, manifest),
+		testEvaluation(constrained, result, manifest),
+	}, nil)
+
+	if coverage.State != StateViolatedWithWitness {
+		t.Fatalf("coverage state = %q, want expected-assertion alias violation; reasons=%+v", coverage.State, coverage.Reasons)
+	}
+	if !hasReasonCode(coverage.Reasons, ReasonEvaluationOperandMismatch) {
+		t.Fatalf("reasons = %+v, want %q", coverage.Reasons, ReasonEvaluationOperandMismatch)
+	}
+	if len(coverage.Evaluations) != 2 {
+		t.Fatalf("evaluation rows = %d, want one row per full consumer identity", len(coverage.Evaluations))
+	}
+	reports, refusals := 0, 0
+	for _, evaluation := range coverage.Evaluations {
+		if evaluation.Report != nil {
+			reports++
+		}
+		if evaluation.Refusal != nil && evaluation.Refusal.Code == ReasonEvaluationOperandMismatch {
+			refusals++
+		}
+	}
+	if reports != 1 || refusals != 1 {
+		t.Fatalf("evaluation rows = %+v, want one retained report and one operand-mismatch refusal", coverage.Evaluations)
+	}
+}
+
 func TestCompleteCoverageRefusesReportReplayAcrossDifferentOperands(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -178,6 +209,47 @@ func TestCompleteCoverageRefusesReportReplayAcrossDifferentOperands(t *testing.T
 				t.Fatalf("reasons = %+v, want operand mismatch for replayed second consumer %s", coverage.Reasons, secondID)
 			}
 		})
+	}
+}
+
+func expectedAssertionAliasScenario(t *testing.T) (Plan, Consumer, Consumer, *policyconflict.Result, []byte) {
+	t.Helper()
+	unconstrained := testConsumer("spec/shared", "local")
+	constrained := cloneConsumer(unconstrained)
+	constrained.Request.Expected = &contextcompile.Expected{Branch: "main", Head: testProposedCommit}
+	plan := testPlan(t, []Consumer{unconstrained, constrained}, []Consumer{unconstrained, constrained}, testChangedLayer())
+	result, manifestBytes := resultForConsumer(t, plan, unconstrained, true)
+	manifest, err := contextcompile.DecodeManifest(manifestBytes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !manifest.Repository.Branch.Known || manifest.Repository.Branch.Value != constrained.Request.Expected.Branch ||
+		!manifest.Repository.Head.Known || manifest.Repository.Head.Value != constrained.Request.Expected.Head {
+		t.Fatalf("test setup: manifest repository = %+v, want matching expected assertion %+v", manifest.Repository, constrained.Request.Expected)
+	}
+	return plan, unconstrained, constrained, result, manifestBytes
+}
+
+func forgedExpectedAssertionAliasCoverage(t *testing.T) Coverage {
+	t.Helper()
+	plan, _, _, result, manifest := expectedAssertionAliasScenario(t)
+	consumers := make([]Consumer, len(plan.consumers))
+	evaluations := make([]EvaluationCoverage, len(plan.consumers))
+	for i, planned := range plan.consumers {
+		consumers[i] = cloneConsumer(planned.consumer)
+		report := result.Report
+		evaluations[i] = EvaluationCoverage{
+			ConsumerIdentity:      planned.identity,
+			Consumer:              cloneConsumer(planned.consumer),
+			AcceptedManifestBytes: append([]byte(nil), manifest...),
+			Report:                &report,
+		}
+	}
+	return Coverage{
+		Schema: CoverageSchema, Accepted: plan.accepted, Proposed: plan.proposed,
+		Layers: append([]LayerChange(nil), plan.layers...), Consumers: consumers,
+		Evaluations: evaluations, SupplementalTargets: []SupplementalTarget{},
+		State: StateProven, Reasons: []Reason{},
 	}
 }
 

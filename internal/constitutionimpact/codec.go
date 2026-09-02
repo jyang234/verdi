@@ -321,6 +321,7 @@ func validateCoverageEnvelope(coverage Coverage) error {
 	if len(coverage.Evaluations) != len(coverage.Consumers) {
 		return fmt.Errorf("evaluations must contain exactly one row per consumer")
 	}
+	usedEvidence := make(map[string]evidenceReuseKey, len(coverage.Evaluations))
 	for i, evaluation := range coverage.Evaluations {
 		if evaluation.ConsumerIdentity != consumerIDs[i] {
 			return fmt.Errorf("evaluations[%d] does not match consumers[%d]", i, i)
@@ -341,6 +342,13 @@ func validateCoverageEnvelope(coverage Coverage) error {
 				!manifestMatchesEvidence(manifest, coverage.Proposed) ||
 				!reportMatchesManifest(*evaluation.Report, manifest) {
 				return fmt.Errorf("evaluations[%d].report is bound to different operands", i)
+			}
+			reuseAllowed, err := recordEvidenceReuse(usedEvidence, manifest.Digest, evaluation.Consumer)
+			if err != nil {
+				return fmt.Errorf("evaluations[%d] consumer evidence key: %w", i, err)
+			}
+			if !reuseAllowed {
+				return fmt.Errorf("evaluations[%d].accepted_manifest is reused across different request/environment operands", i)
 			}
 			unresolved := reasonHasWitness(coverage.Reasons, ReasonEvaluationUnresolved, evaluation.ConsumerIdentity)
 			if (evaluation.Report.Verdict == policyconflict.VerdictBlockedUnproven) != unresolved {

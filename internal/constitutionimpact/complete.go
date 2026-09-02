@@ -35,6 +35,7 @@ func (p Plan) Complete(evaluations []Evaluation, supplemental []SupplementalTarg
 	}
 
 	rows := make([]EvaluationCoverage, 0, len(p.consumers))
+	usedEvidence := make(map[string]evidenceReuseKey, len(p.consumers))
 	for _, expected := range p.consumers {
 		row := EvaluationCoverage{
 			ConsumerIdentity: expected.identity,
@@ -46,7 +47,7 @@ func (p Plan) Complete(evaluations []Evaluation, supplemental []SupplementalTarg
 			reasons = append(reasons, Reason{Code: ReasonEvaluationOmitted, Witnesses: []string{expected.identity}})
 			row.Refusal = refusal(ReasonEvaluationOmitted, expected.identity)
 		case 1:
-			completeEvaluation(&row, expected, claimed[0], p.proposed, &reasons)
+			completeEvaluation(&row, expected, claimed[0], p.proposed, usedEvidence, &reasons)
 		default:
 			reasons = append(reasons, Reason{Code: ReasonEvaluationDuplicate, Witnesses: []string{expected.identity}})
 			row.Refusal = refusal(ReasonEvaluationDuplicate, expected.identity)
@@ -73,7 +74,7 @@ func (p Plan) Complete(evaluations []Evaluation, supplemental []SupplementalTarg
 	}
 }
 
-func completeEvaluation(row *EvaluationCoverage, expected plannedConsumer, evaluation Evaluation, proposed InventoryEvidence, reasons *[]Reason) {
+func completeEvaluation(row *EvaluationCoverage, expected plannedConsumer, evaluation Evaluation, proposed InventoryEvidence, usedEvidence map[string]evidenceReuseKey, reasons *[]Reason) {
 	doc, err := consumerDocFor(evaluation.Consumer)
 	if err != nil {
 		*reasons = append(*reasons, Reason{Code: ReasonEvaluationIdentityMismatch, Witnesses: []string{expected.identity}})
@@ -128,6 +129,17 @@ func completeEvaluation(row *EvaluationCoverage, expected plannedConsumer, evalu
 	}
 	if !manifestMatchesRequest(manifest, expected.consumer.Request) || !manifestMatchesEvidence(manifest, proposed) ||
 		!reportMatchesManifest(report, manifest) {
+		*reasons = append(*reasons, Reason{Code: ReasonEvaluationOperandMismatch, Witnesses: []string{expected.identity}})
+		row.Refusal = refusal(ReasonEvaluationOperandMismatch, expected.identity)
+		return
+	}
+	reuseAllowed, err := recordEvidenceReuse(usedEvidence, manifest.Digest, expected.consumer)
+	if err != nil {
+		*reasons = append(*reasons, Reason{Code: ReasonEvaluationIdentityMismatch, Witnesses: []string{expected.identity}})
+		row.Refusal = refusal(ReasonEvaluationIdentityMismatch, expected.identity)
+		return
+	}
+	if !reuseAllowed {
 		*reasons = append(*reasons, Reason{Code: ReasonEvaluationOperandMismatch, Witnesses: []string{expected.identity}})
 		row.Refusal = refusal(ReasonEvaluationOperandMismatch, expected.identity)
 		return
