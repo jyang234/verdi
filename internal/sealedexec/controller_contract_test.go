@@ -1752,3 +1752,83 @@ func controllerReceiptFixture(t *testing.T, request ExecutionRequest) (contextre
 	}
 	return receipt, event, ack
 }
+
+// TestControllerContractDocument freezes the read-only contract projection.
+//
+// The document is the one thing a caller can learn about this build's sealed
+// controller without starting a sealed execution: the three envelope schemas
+// every call and reply is framed in, and the closed operation registry in wire
+// order. It carries nothing else. Per-operation request and result schemas are
+// derived from the operation name by controllerRequestSchema and
+// controllerResultSchema, so publishing them would create a second place for
+// the wire to drift from the derivation that actually encodes it.
+//
+// The bytes are frozen literally because a consumer strict-decodes them and
+// compares the registry element by element. A reordered, renamed, or
+// re-spelled projection is a different contract even when it names the same
+// operations.
+func TestControllerContractDocument(t *testing.T) {
+	encoded, err := EncodeControllerContract()
+	if err != nil {
+		t.Fatalf("EncodeControllerContract: %v", err)
+	}
+
+	if !bytes.HasSuffix(encoded, []byte("\n")) || bytes.HasSuffix(encoded, []byte("\n\n")) {
+		t.Fatalf("contract does not carry exactly one canonical LF: %q", encoded)
+	}
+	for _, literal := range []string{
+		`"schema":"verdi.context-controller-contract/v1"`,
+		`"controller_call_schema":"verdi.context-controller-call/v1"`,
+		`"controller_result_schema":"verdi.context-controller-result/v1"`,
+		`"controller_error_schema":"verdi.context-controller-error/v1"`,
+	} {
+		if !bytes.Contains(encoded, []byte(literal)) {
+			t.Fatalf("contract lacks literal %s: %s", literal, encoded)
+		}
+	}
+
+	// The published registry is the closed one, in wire order, and nothing is
+	// added or dropped on the way out.
+	var doc struct {
+		Schema                 string   `json:"schema"`
+		ControllerCallSchema   string   `json:"controller_call_schema"`
+		ControllerResultSchema string   `json:"controller_result_schema"`
+		ControllerErrorSchema  string   `json:"controller_error_schema"`
+		Operations             []string `json:"operations"`
+	}
+	decoder := json.NewDecoder(bytes.NewReader(encoded))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&doc); err != nil {
+		t.Fatalf("the contract carries a member outside its declared shape: %v", err)
+	}
+	if _, err := decoder.Token(); !errors.Is(err, io.EOF) {
+		t.Fatalf("the contract carries trailing data: %v", err)
+	}
+	if doc.Schema != ControllerContractSchemaID {
+		t.Fatalf("schema = %q, want %q", doc.Schema, ControllerContractSchemaID)
+	}
+	if doc.ControllerCallSchema != ControllerCallSchemaID ||
+		doc.ControllerResultSchema != ControllerResultSchemaID ||
+		doc.ControllerErrorSchema != ControllerErrorSchemaID {
+		t.Fatalf("envelope schemas = %+v", doc)
+	}
+	if got, want := len(doc.Operations), len(ControllerOperations()); got != want {
+		t.Fatalf("published %d operations, want the closed registry's %d", got, want)
+	}
+	for i, op := range ControllerOperations() {
+		if doc.Operations[i] != string(op) {
+			t.Fatalf("operation %d = %q, want %q; the registry is published in wire order",
+				i, doc.Operations[i], op)
+		}
+	}
+
+	// The projection is a pure function of the registry: encoding twice yields
+	// the same bytes, so a caller may address it by digest.
+	again, err := EncodeControllerContract()
+	if err != nil {
+		t.Fatalf("EncodeControllerContract (second): %v", err)
+	}
+	if !bytes.Equal(encoded, again) {
+		t.Fatal("EncodeControllerContract is not deterministic")
+	}
+}

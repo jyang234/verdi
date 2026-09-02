@@ -33,6 +33,7 @@ import (
 
 	"github.com/jyang234/verdi/internal/atomicfile"
 	"github.com/jyang234/verdi/internal/contextcompile"
+	"github.com/jyang234/verdi/internal/sealedexec"
 	"github.com/jyang234/verdi/internal/store"
 )
 
@@ -59,6 +60,8 @@ func cmdContext(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		return cmdContextCompile(args[1:], stdin, stdout, stderr)
 	case "conflict":
 		return cmdContextConflict(args[1:], stdin, stdout, stderr)
+	case "contract":
+		return cmdContextContract(args[1:], stdout, stderr)
 	case "execution":
 		return cmdContextExecution(args[1:], stdin, stdout, stderr)
 	case "mcp":
@@ -174,6 +177,48 @@ func cmdContextCompile(args []string, stdin io.Reader, stdout, stderr io.Writer)
 	}
 	if err := atomicfile.Write(outCanon, result.ManifestBytes, 0o644); err != nil {
 		printContextDiagnostic(stderr, root, fmt.Errorf("writing manifest: %w", err))
+		return 2
+	}
+	return 0
+}
+
+// contextContractUsage is the exact invocation grammar of the contract query.
+// It takes nothing at all, so the grammar is the verb.
+//
+// vocab:identity — CLI usage/flag grammar (identity)
+const contextContractUsage = "usage: verdi context contract"
+
+// cmdContextContract writes this build's sealed-controller contract.
+//
+// The verb is effect-free in every sense the other context subcommands are not:
+// it resolves no store root, reads no file, accepts no operand, and writes
+// nothing anywhere but the caller's stdout. What it publishes is a pure
+// function of compiled-in constants, so the answer is the same for one build
+// wherever it is run and whatever it is run against.
+//
+// It has no verdict to report. compile and conflict exit 1 when a closed state
+// refusal is the answer to a question about a specification; this verb asks no
+// such question, so its only outcomes are the document (0) and a failure to
+// produce it (2). A caller that treated a verdict as an answer here would be
+// reading a judgement about a story into a statement about a binary.
+func cmdContextContract(args []string, stdout, stderr io.Writer) int {
+	// Any argument at all is a usage error. The grammar is closed and empty, so
+	// there is no operand a caller could pass that this verb would honour, and
+	// silently ignoring one would answer a question that was not asked.
+	if len(args) != 0 {
+		fmt.Fprintln(stderr, contextContractUsage)
+		return 2
+	}
+	document, err := sealedexec.EncodeControllerContract()
+	if err != nil {
+		// No root is resolved on this path, so there is no checkout spelling to
+		// redact; the framing seam is still used so every context diagnostic
+		// reads the same way.
+		printContextCommandDiagnostic(stderr, "contract", "", err)
+		return 2
+	}
+	if _, err := stdout.Write(document); err != nil {
+		printContextCommandDiagnostic(stderr, "contract", "", fmt.Errorf("writing contract to stdout: %w", err))
 		return 2
 	}
 	return 0

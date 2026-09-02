@@ -1,6 +1,7 @@
 package sealedexec
 
 import (
+	"github.com/jyang234/verdi/internal/canonjson"
 	"github.com/jyang234/verdi/internal/contextcompile"
 	"github.com/jyang234/verdi/internal/contextevent"
 	"github.com/jyang234/verdi/internal/contextreceipt"
@@ -14,6 +15,46 @@ const (
 	ControllerResultSchemaID = "verdi.context-controller-result/v1"
 	ControllerErrorSchemaID  = "verdi.context-controller-error/v1"
 )
+
+// ControllerContractSchemaID is the read-only projection of this build's
+// sealed-controller wire: the three envelope schemas above and the closed
+// operation registry below.
+//
+// It exists so a caller can learn which controller this build speaks without
+// starting a sealed execution. Publishing it is not a capability: nothing here
+// serves an operation, and the document is a pure function of constants.
+const ControllerContractSchemaID = "verdi.context-controller-contract/v1"
+
+// controllerContract is the exact published shape.
+//
+// Per-operation request and result schemas are deliberately absent. They are
+// derived from the operation name by controllerRequestSchema and
+// controllerResultSchema, so listing them would create a second place for the
+// wire to drift from the derivation that actually encodes it; comparing the
+// registry compares them all.
+type controllerContract struct {
+	Schema                 string                `json:"schema"`
+	ControllerCallSchema   string                `json:"controller_call_schema"`
+	ControllerResultSchema string                `json:"controller_result_schema"`
+	ControllerErrorSchema  string                `json:"controller_error_schema"`
+	Operations             []ControllerOperation `json:"operations"`
+}
+
+// EncodeControllerContract renders this build's controller contract as one
+// canonical document.
+//
+// It reads no file, opens no store, and takes no operand: the answer is the
+// same for one build wherever it runs, which is what lets a caller address the
+// document by digest and compare two builds by their bytes.
+func EncodeControllerContract() ([]byte, error) {
+	return canonjson.Marshal(controllerContract{
+		Schema:                 ControllerContractSchemaID,
+		ControllerCallSchema:   ControllerCallSchemaID,
+		ControllerResultSchema: ControllerResultSchemaID,
+		ControllerErrorSchema:  ControllerErrorSchemaID,
+		Operations:             ControllerOperations(),
+	})
+}
 
 // ControllerOperation is the exact closed FD-3 operation registry.
 type ControllerOperation string
