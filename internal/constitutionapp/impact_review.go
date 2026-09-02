@@ -137,17 +137,17 @@ func (s Service) impactReviewAt(ctx context.Context, root string, identity Ident
 	if typed != nil {
 		return nil, typed
 	}
-	layers := diffImpactLayers(state.acceptedSnapshot, state.proposedSnapshot)
+	layers := []LayerChange{}
+	if state.acceptedTree.FS != nil && state.proposedTree.FS != nil {
+		layers = diffImpactLayers(state.acceptedSnapshot, state.proposedSnapshot)
+	}
 	plan, err := constitutionimpact.BuildPlan(ctx, state.acceptedTree, state.proposedTree, impactLayerChanges(layers))
 	if err != nil {
 		return nil, operational("impact-evidence-invalid", "building constitution impact coverage", err)
 	}
 
-	evaluations, typed := s.evaluateRegisteredConsumers(ctx, root, identity, plan.Consumers())
-	if typed != nil {
-		return nil, typed
-	}
-	conflicts, supplemental, typed := s.evaluateSupplementalTargets(ctx, root, identity, req.Targets)
+	exactTreesAvailable := state.acceptedTree.FS != nil && state.proposedTree.FS != nil
+	evaluations, conflicts, supplemental, typed := s.evaluateAtProposedCommit(ctx, root, identity, exactTreesAvailable, plan.Consumers(), req.Targets)
 	if typed != nil {
 		return nil, typed
 	}
@@ -184,11 +184,11 @@ func (s Service) loadImpactState(ctx context.Context, root string, identity Iden
 			return impactState{}, operational("io-failure", "reading accepted constitution tree", err)
 		}
 	}
-	proposed, typed := loadSnapshot(s.Authority, proposedTree.FS, identity.Head, "corrupted-policy")
+	proposed, typed := loadExactSnapshot(s.Authority, proposedTree, identity.Head, "corrupted-policy")
 	if typed != nil {
 		return impactState{}, typed
 	}
-	accepted, typed := loadSnapshot(s.Authority, acceptedTree.FS, identity.AcceptedHead, "corrupted-policy")
+	accepted, typed := loadExactSnapshot(s.Authority, acceptedTree, identity.AcceptedHead, "corrupted-policy")
 	if typed != nil {
 		return impactState{}, typed
 	}
@@ -198,9 +198,69 @@ func (s Service) loadImpactState(ctx context.Context, root string, identity Iden
 	}, nil
 }
 
+func loadExactSnapshot(store AuthorityStore, tree constitutionimpact.ExactTree, ref, corruptCode string) (Snapshot, *Error) {
+	if tree.FS == nil {
+		return Snapshot{Ref: ref, Reason: "exact Git tree bytes are unavailable", unavailable: true}, nil
+	}
+	return loadSnapshot(store, tree.FS, ref, corruptCode)
+}
+
 type cachedEvaluation struct {
 	evidence ConflictEvidence
 	err      error
+}
+
+func (s Service) evaluateAtProposedCommit(
+	ctx context.Context,
+	root string,
+	identity Identity,
+	exactTreesAvailable bool,
+	consumers []constitutionimpact.Consumer,
+	targets []ImpactTarget,
+) ([]constitutionimpact.Evaluation, []TargetConflict, []constitutionimpact.SupplementalTarget, *Error) {
+	if !exactTreesAvailable {
+		conflicts, supplemental := unavailableSupplementalTargets(targets)
+		return []constitutionimpact.Evaluation{}, conflicts, supplemental, nil
+	}
+	evaluationRoot := root
+	var checkout *evaluationCheckout
+	if !identity.Dirty && (len(consumers) != 0 || len(targets) != 0) {
+		var err error
+		checkout, err = s.materializeEvaluationCheckout(ctx, root, identity.Head)
+		if err != nil {
+			return nil, nil, nil, operational("io-failure", "materializing proposed constitution evaluation checkout", err)
+		}
+		evaluationRoot = checkout.root
+	}
+
+	evaluations, typed := s.evaluateRegisteredConsumers(ctx, evaluationRoot, identity, consumers)
+	var conflicts []TargetConflict
+	var supplemental []constitutionimpact.SupplementalTarget
+	if typed == nil {
+		conflicts, supplemental, typed = s.evaluateSupplementalTargets(ctx, evaluationRoot, identity, targets)
+	}
+	if checkout != nil {
+		if err := checkout.Close(ctx); err != nil {
+			cause := error(err)
+			if typed != nil {
+				cause = errors.Join(typed, err)
+			}
+			return nil, nil, nil, operational("io-failure", "removing proposed constitution evaluation checkout", cause)
+		}
+	}
+	if typed != nil {
+		return nil, nil, nil, typed
+	}
+	if evaluations == nil {
+		evaluations = []constitutionimpact.Evaluation{}
+	}
+	if conflicts == nil {
+		conflicts = []TargetConflict{}
+	}
+	if supplemental == nil {
+		supplemental = []constitutionimpact.SupplementalTarget{}
+	}
+	return evaluations, conflicts, supplemental, nil
 }
 
 func (s Service) evaluateRegisteredConsumers(ctx context.Context, root string, identity Identity, consumers []constitutionimpact.Consumer) ([]constitutionimpact.Evaluation, *Error) {
@@ -267,11 +327,7 @@ func (s Service) evaluateSupplementalTargets(ctx context.Context, root string, i
 	conflicts := make([]TargetConflict, 0, len(targets))
 	supplemental := make([]constitutionimpact.SupplementalTarget, 0, len(targets))
 	for _, target := range targets {
-		request := contextcompile.Request{
-			Schema: contextcompile.RequestSchema, Adapter: target.Adapter,
-			Grants: execworkspace.GrantSet{Grants: []execworkspace.Grant{}},
-			Phase:  target.Phase, Scope: target.Scope, Spec: target.Spec,
-		}
+		request := supplementalRequest(target)
 		row := constitutionimpact.SupplementalTarget{Request: request}
 		if identity.Dirty {
 			row.Refusal = unresolvedEvaluation("checkout-dirty")
@@ -304,6 +360,27 @@ func (s Service) evaluateSupplementalTargets(ctx context.Context, root string, i
 		supplemental = append(supplemental, row)
 	}
 	return conflicts, supplemental, nil
+}
+
+func unavailableSupplementalTargets(targets []ImpactTarget) ([]TargetConflict, []constitutionimpact.SupplementalTarget) {
+	conflicts := make([]TargetConflict, 0, len(targets))
+	supplemental := make([]constitutionimpact.SupplementalTarget, 0, len(targets))
+	for _, target := range targets {
+		refusal := "unproven: exact-tree-unavailable"
+		conflicts = append(conflicts, TargetConflict{Target: target, Refusal: refusal})
+		supplemental = append(supplemental, constitutionimpact.SupplementalTarget{
+			Request: supplementalRequest(target), Refusal: unresolvedEvaluation("exact-tree-unavailable"),
+		})
+	}
+	return conflicts, supplemental
+}
+
+func supplementalRequest(target ImpactTarget) contextcompile.Request {
+	return contextcompile.Request{
+		Schema: contextcompile.RequestSchema, Adapter: target.Adapter,
+		Grants: execworkspace.GrantSet{Grants: []execworkspace.Grant{}},
+		Phase:  target.Phase, Scope: target.Scope, Spec: target.Spec,
+	}
 }
 
 func isContextFailure(ctx context.Context, err error) bool {

@@ -102,6 +102,27 @@ func TestLsTreeEntries_Happy(t *testing.T) {
 	}
 }
 
+func TestLsTreeEntriesIncludingTrees_Happy(t *testing.T) {
+	repo := buildTreeEntriesRepo(t)
+	got, err := LsTreeEntriesIncludingTrees(context.Background(), repo.Dir, repo.Head)
+	if err != nil {
+		t.Fatalf("LsTreeEntriesIncludingTrees: %v", err)
+	}
+
+	byPath := map[string]TreeEntry{}
+	for _, entry := range got {
+		byPath[entry.Path] = entry
+	}
+	for _, path := range []string{"dir", "scripts"} {
+		if entry := byPath[path]; entry.Mode != "040000" || entry.Type != "tree" || entry.Object == "" {
+			t.Fatalf("tree entry %q = %#v, want mode 040000, type tree, nonempty object", path, entry)
+		}
+	}
+	if entry := byPath["dir/nested.txt"]; entry.Mode != "100644" || entry.Type != "blob" {
+		t.Fatalf("recursive leaf entry = %#v, want regular blob", entry)
+	}
+}
+
 func TestLsTreeEntries_PathOrderIsDeterministic(t *testing.T) {
 	repo := buildTreeEntriesRepo(t)
 	ctx := context.Background()
@@ -135,18 +156,26 @@ func TestLsTreeEntries_Negative(t *testing.T) {
 	repo := buildTreeEntriesRepo(t)
 	ctx := context.Background()
 
-	t.Run("ref does not resolve", func(t *testing.T) {
-		if _, err := LsTreeEntries(ctx, repo.Dir, "not-a-real-ref"); err == nil {
-			t.Fatal("LsTreeEntries(bogus ref): want error, got nil")
-		}
-	})
+	for _, operation := range []struct {
+		name string
+		read func(context.Context, string, string) ([]TreeEntry, error)
+	}{
+		{name: "leaves", read: LsTreeEntries},
+		{name: "leaves and trees", read: LsTreeEntriesIncludingTrees},
+	} {
+		t.Run(operation.name+" ref does not resolve", func(t *testing.T) {
+			if _, err := operation.read(ctx, repo.Dir, "not-a-real-ref"); err == nil {
+				t.Fatalf("%s(bogus ref): want error, got nil", operation.name)
+			}
+		})
 
-	t.Run("not a repository at all", func(t *testing.T) {
-		notARepo := t.TempDir()
-		if _, err := LsTreeEntries(ctx, notARepo, "HEAD"); err == nil {
-			t.Fatal("LsTreeEntries outside a repo: want error, got nil")
-		}
-	})
+		t.Run(operation.name+" not a repository at all", func(t *testing.T) {
+			notARepo := t.TempDir()
+			if _, err := operation.read(ctx, notARepo, "HEAD"); err == nil {
+				t.Fatalf("%s outside a repo: want error, got nil", operation.name)
+			}
+		})
+	}
 }
 
 func TestParseTreeEntries(t *testing.T) {

@@ -125,8 +125,10 @@ func (s Service) SubmitPreparation(ctx context.Context, root string, req SubmitP
 	// packet can describe two different proposals while every Identity field
 	// still agrees. The proposal's own resolved content is therefore pinned
 	// too, through the digests policyauthority already computes.
-	if difference := proposalDifference(validation.Snapshot, review.Proposed); difference != "" {
-		return nil, operational("identity-shifted", "the proposed constitution changed during submission preparation: "+difference, nil)
+	if !review.Proposed.unavailable {
+		if difference := proposalDifference(validation.Snapshot, review.Proposed); difference != "" {
+			return nil, operational("identity-shifted", "the proposed constitution changed during submission preparation: "+difference, nil)
+		}
 	}
 
 	ready := review.Coverage.State == constitutionimpact.StateProven

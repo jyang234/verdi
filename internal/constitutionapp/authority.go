@@ -59,8 +59,10 @@ type SourceLayer struct {
 // disclosed, non-fatal fact, never an error (CO-1: an honest "not adopted"
 // is not a fault). Any OTHER Load/Resolve failure (corrupted YAML, a broken
 // cross-validation invariant, an unresolvable profile) is reported through
-// the caller's own *Error instead — Snapshot itself only ever represents a
-// clean read.
+// the caller's own *Error instead. ImpactReview can also expose a Snapshot
+// whose exact-tree bytes were unavailable; its unexported marker prevents
+// SubmitPreparation from mistaking that disclosed read failure for an
+// identity shift.
 type Snapshot struct {
 	Ref                string                           `json:"ref"`
 	Adopted            bool                             `json:"adopted"`
@@ -71,6 +73,7 @@ type Snapshot struct {
 	ProfileDigest      string                           `json:"profile_digest,omitempty"`
 	Layers             []SourceLayer                    `json:"layers,omitempty"`
 	Effective          *policyauthority.EffectivePolicy `json:"effective,omitempty"`
+	unavailable        bool
 }
 
 // loadSnapshot loads and resolves the constitution store exposed by source,
@@ -159,7 +162,8 @@ func sortedKeys[V any](m map[string]*V) []string {
 // both the authority snapshot and constitutionimpact.BuildPlan. Git modes are
 // preserved: executable regular blobs stay executable and policy symlinks stay
 // symlinks so policyauthority performs its own refusal rather than consuming a
-// target outside the tree.
+// target outside the tree. Directory entries are retained during enumeration
+// so the closed constitution-metadata grammar also sees unexpected trees.
 func (s Service) exactTreeAt(ctx context.Context, root, commit string) (constitutionimpact.ExactTree, error) {
 	if s.Git == nil {
 		return constitutionimpact.ExactTree{}, errors.New("constitutionapp: git reader is not configured")
@@ -181,14 +185,27 @@ func (s Service) exactTreeAt(ctx context.Context, root, commit string) (constitu
 	if err := gitx.ValidateFullOID(tree); err != nil {
 		return constitutionimpact.ExactTree{}, fmt.Errorf("constitutionapp: exact tree identity: %w", err)
 	}
-	entries, err := s.Git.LsTreeEntries(ctx, root, commit)
+	unavailable := constitutionimpact.ExactTree{Commit: commit, Tree: tree}
+	entries, err := s.Git.LsTreeEntriesIncludingTrees(ctx, root, commit)
 	if err != nil {
-		return constitutionimpact.ExactTree{}, err
+		if isContextFailure(ctx, err) {
+			return constitutionimpact.ExactTree{}, err
+		}
+		return unavailable, nil
 	}
 	source := fstest.MapFS{}
 	for _, entry := range entries {
 		if !constitutionTreePath(entry.Path) {
 			continue
+		}
+		if entry.Type == "tree" {
+			if constitutionImpactPath(entry.Path) && entry.Path != constitutionImpactDir {
+				return constitutionimpact.ExactTree{}, fmt.Errorf("constitutionapp: exact tree contains unknown constitution metadata entry %s", entry.Path)
+			}
+			continue
+		}
+		if constitutionImpactPath(entry.Path) && entry.Path != constitutionimpact.InventoryPath {
+			return constitutionimpact.ExactTree{}, fmt.Errorf("constitutionapp: exact tree contains unknown constitution metadata entry %s", entry.Path)
 		}
 		if entry.Type != "blob" {
 			return constitutionimpact.ExactTree{}, fmt.Errorf("constitutionapp: exact tree entry %s has unsupported object type %s", entry.Path, entry.Type)
@@ -209,7 +226,10 @@ func (s Service) exactTreeAt(ctx context.Context, root, commit string) (constitu
 		}
 		data, readErr := s.Git.Show(ctx, root, commit, entry.Path)
 		if readErr != nil {
-			return constitutionimpact.ExactTree{}, readErr
+			if isContextFailure(ctx, readErr) {
+				return constitutionimpact.ExactTree{}, readErr
+			}
+			return unavailable, nil
 		}
 		source[entry.Path] = &fstest.MapFile{Data: data, Mode: mode}
 	}
@@ -220,6 +240,9 @@ func (s Service) acceptedSource(ctx context.Context, root, commit string) (fs.FS
 	exact, err := s.exactTreeAt(ctx, root, commit)
 	if err != nil {
 		return nil, err
+	}
+	if exact.FS == nil {
+		return nil, errors.New("constitutionapp: exact tree bytes are unavailable")
 	}
 	return exact.FS, nil
 }
@@ -235,5 +258,9 @@ func constitutionPolicyPath(path string) bool {
 }
 
 func constitutionTreePath(path string) bool {
-	return constitutionPolicyPath(path) || path == constitutionImpactDir || path == constitutionimpact.InventoryPath
+	return constitutionPolicyPath(path) || constitutionImpactPath(path)
+}
+
+func constitutionImpactPath(path string) bool {
+	return path == constitutionImpactDir || len(path) > len(constitutionImpactDir) && path[:len(constitutionImpactDir)+1] == constitutionImpactDir+"/"
 }

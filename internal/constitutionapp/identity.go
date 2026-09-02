@@ -48,7 +48,10 @@ type GitReader interface {
 	AddPaths(ctx context.Context, root string, paths ...string) error
 	CreateCommit(ctx context.Context, root, message string) (string, error)
 	LsTreeEntries(ctx context.Context, root, ref string) ([]gitx.TreeEntry, error)
+	LsTreeEntriesIncludingTrees(ctx context.Context, root, ref string) ([]gitx.TreeEntry, error)
 	Show(ctx context.Context, root, ref, path string) ([]byte, error)
+	WorktreeAddDetached(ctx context.Context, root, path, commit string) error
+	WorktreeRemove(ctx context.Context, root, path string) error
 }
 
 // gitxReader is the production GitReader: every method is a direct,
@@ -92,8 +95,17 @@ func (gitxReader) CreateCommit(ctx context.Context, root, message string) (strin
 func (gitxReader) LsTreeEntries(ctx context.Context, root, ref string) ([]gitx.TreeEntry, error) {
 	return gitx.LsTreeEntries(ctx, root, ref)
 }
+func (gitxReader) LsTreeEntriesIncludingTrees(ctx context.Context, root, ref string) ([]gitx.TreeEntry, error) {
+	return gitx.LsTreeEntriesIncludingTrees(ctx, root, ref)
+}
 func (gitxReader) Show(ctx context.Context, root, ref, path string) ([]byte, error) {
 	return gitx.Show(ctx, root, ref, path)
+}
+func (gitxReader) WorktreeAddDetached(ctx context.Context, root, path, commit string) error {
+	return gitx.WorktreeAddDetached(ctx, root, path, commit)
+}
+func (gitxReader) WorktreeRemove(ctx context.Context, root, path string) error {
+	return gitx.WorktreeRemove(ctx, root, path)
 }
 
 // resolveIdentity is the shared prologue every operation starts from: the
