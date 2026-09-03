@@ -1826,11 +1826,11 @@ func newExecutionFlightState(request ExecutionRequest, workspace WorkspaceFacts,
 		// SI-172: the authenticated restart acknowledgments open the complete
 		// stream, so nothing already proven durable disappears from continuity.
 		state := NewFlightStateAt(snapshot, plan.acks)
-		state.adapterStartDone = make(chan struct{})
+		state.adapterStart = newAdapterStartLatch()
 		return state
 	}
 	state := NewFlightState(snapshot)
-	state.adapterStartDone = make(chan struct{})
+	state.adapterStart = newAdapterStartLatch()
 	return state
 }
 

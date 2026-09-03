@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/jyang234/verdi/internal/canonjson"
 	"github.com/jyang234/verdi/internal/contextcompile"
@@ -614,7 +615,7 @@ func TestExecutionFlightStateAdapterStartGate(t *testing.T) {
 	req := serviceRequest(t, ActionStart)
 	workspace := sharedStateWorkspace(t, req)
 
-	newServer := func(t *testing.T, state *FlightState, recorder *mcpFake) *ScopedMCP {
+	newServer := func(t *testing.T, state *FlightState, recorder eventAppender) *ScopedMCP {
 		t.Helper()
 		fake := &mcpFake{t: t, request: req, state: state}
 		server, err := NewScopedMCP(ScopedMCPPorts{
@@ -653,6 +654,47 @@ func TestExecutionFlightStateAdapterStartGate(t *testing.T) {
 		}
 	})
 
+	t.Run("caller cancellation does not wait for an adapter start append", func(t *testing.T) {
+		state := newExecutionFlightState(req, workspace, restartPlan{}, "")
+		fake := &mcpFake{t: t, request: req}
+		recorder := &blockingEventAppender{
+			delegate: fake,
+			entered:  make(chan struct{}),
+			release:  make(chan struct{}),
+		}
+		server := newServer(t, state, recorder)
+		appendDone := make(chan error, 1)
+		go func() {
+			_, err := state.append(context.Background(), recorder, fake, workspace, contextevent.KindAdapterStart, sharedStartPayload(t, req))
+			appendDone <- err
+		}()
+		<-recorder.entered
+
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		callDone := make(chan error, 1)
+		go func() {
+			_, err := server.Call(ctx, ToolRequestContext, []byte(`{"purpose":"inspect","ref":"spec/extra"}`))
+			callDone <- err
+		}()
+
+		select {
+		case err := <-callDone:
+			if !errors.Is(err, ErrOperational) || !errors.Is(err, context.Canceled) {
+				t.Fatalf("request_context error = %v, want cancellation wrapped as operational", err)
+			}
+		case <-time.After(time.Second):
+			close(recorder.release)
+			<-appendDone
+			<-callDone
+			t.Fatal("request_context cancellation waited for the in-flight adapter-start append")
+		}
+		close(recorder.release)
+		if err := <-appendDone; err != nil {
+			t.Fatalf("adapter-start append after release: %v", err)
+		}
+	})
+
 	t.Run("adapter start append failure releases a waiting request", func(t *testing.T) {
 		state := newExecutionFlightState(req, workspace, restartPlan{}, "")
 		recorder := &mcpFake{t: t, request: req}
@@ -680,6 +722,24 @@ func TestExecutionFlightStateAdapterStartGate(t *testing.T) {
 			t.Fatalf("failed start recorded %d context events or advanced state to sequence %d", len(recorder.events), state.Snapshot().NextSourceSequence)
 		}
 	})
+}
+
+// blockingEventAppender holds one recorder append at the durable I/O boundary.
+// FlightState deliberately owns the surrounding data-plane lock, so callers can
+// prove admission cancellation remains independent while this append is live.
+type blockingEventAppender struct {
+	delegate eventAppender
+	entered  chan struct{}
+	release  chan struct{}
+	once     sync.Once
+}
+
+func (r *blockingEventAppender) Append(ctx context.Context, event contextevent.Event) (contextevent.EventAck, error) {
+	r.once.Do(func() {
+		close(r.entered)
+		<-r.release
+	})
+	return r.delegate.Append(ctx, event)
 }
 
 // sharedStateWorkspace is the exact verified candidate identity the service
