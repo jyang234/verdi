@@ -481,9 +481,82 @@ submit-preparation over one exact accepted/proposed Git identity.
 **Stop gate:** Any new rule grammar, precedence, approval record, applicability
 operator, or conflict semantics is `NEEDS_CONTEXT`.
 
+**SI-179/SI-180 closure correction (must merge before Task 4):**
+
+- [ ] RED the nonempty-but-incomplete caller target case: two registered
+      consumers exist, the caller supplies only the passing one, and the
+      pre-correction packet incorrectly reports `ready_for_submission: true`.
+- [ ] Create `internal/constitutionimpact` as the sole owner of strict
+      `verdi.constitution-consumer-inventory/v1` at
+      `.verdi/constitution/consumers.json` and canonical
+      `verdi.constitution-impact-coverage/v1`; reuse the nested
+      `contextcompile.Request`, execution-grant capability document, active
+      action-subject vocabulary, and `policyconflict` result without copying
+      their grammars or algorithms.
+- [ ] Before the inventory can be written, execute the SI-179 D1 ratification
+      clerically under Codex's spec-only ownership: synchronize the source and
+      self-hosted `verdi-store-layout` specifications, add the
+      `08-revision-notes.md` entry, and then have the runtime correction admit
+      `constitution` in `knownTopLevelEntries`/VL-007. Pin that
+      `.verdi/constitution/consumers.json` passes lint while every other new
+      top-level name remains refused. The directory's v1 grammar is exactly
+      `consumers.json` and remains loader-owned by `constitutionimpact`, matching
+      SI-36 rather than creating another VL content grammar.
+- [ ] Load accepted and proposed inventories at the same exact identities as
+      the application operation; for a nonempty constitution layer diff,
+      derive the sorted union and evaluate every member through the existing
+      accepted-context conflict path. A removed row stays in the union. Validate
+      each inventory's `governed_operations` against the constitution catalog
+      in that inventory's own exact tree, so catalog shrinkage is evaluated as
+      impact instead of making the accepted inventory operationally invalid.
+- [ ] Define an entry's canonical identity over all three operands together:
+      the canonical nested context request, the canonical declared environment,
+      and the sorted governed-operation set. Pin otherwise-identical requests
+      with different environments as distinct entries.
+- [ ] For inventory v1, require the nested request's environment scope to
+      contain exactly the one declared environment. Represent a consumer used
+      in multiple environments as separate complete rows; do not add a scalar
+      environment input to `contextcompile` or infer one from a broader scope.
+- [ ] Bind conflict evidence to request plus environment, not to the
+      governed-operation list. Permit operation-distinct consumer identities
+      with identical request/environment operands to reuse the same canonical
+      manifest/report while still requiring one evaluation row per full
+      identity. Refuse reuse across different requests or environments.
+- [ ] Prove the closed coverage states. Missing inventory/unknown evaluation is
+      disclosed-unproven; duplicate, omitted, extra, or identity-mismatched
+      rows are violated-with-witness; malformed present bytes are operational;
+      only complete exact evaluation is proven. With a nonempty constitution
+      diff, a present-but-empty accepted/proposed union is
+      disclosed-as-unproven with `consumer-universe-empty` and never ready;
+      pin that case separately from missing inventory and no-layer-change.
+- [ ] Demote request `targets` to supplemental preview/presentation inputs.
+      They may add output but can never remove canonical rows, establish
+      completeness, or improve submission readiness.
+- [ ] Keep inventory maintenance outside `constitutionapp.Propose`: proposed
+      bytes arrive through ordinary Git proposal custody, and neither the
+      application nor Task 4 infers or repairs rows.
+- [ ] Make `SubmitPreparation` require proven coverage plus passing canonical
+      conflict verdicts. Pin missing inventory, removed-consumer union,
+      malformed inventory, unknown evaluation, omitted/extra evaluation,
+      supplemental-only success, no-layer-change, accepted/proposed identity,
+      CLI/MCP byte parity, and zero-effect behavior.
+- [ ] Keep `policyartifact`, `policyauthority`, `contextcompile`, and
+      `policyconflict` behavior unchanged; this correction consumes their
+      exported contracts and adds no reverse matcher or second evaluator.
+- [ ] Run races for `internal/constitutionimpact`, `internal/constitutionapp`,
+      `internal/contextcompile`, and `internal/policyconflict`; full
+      `cmd/verdi` and `internal/mcpserve` conformance; `internal/lint` plus
+      spec-align and showcase layout/fidelity witnesses; vet, lint, gofmt, and
+      diff checks. Complete the Tier 3 FABLE/Opus chain and stop for independent
+      Codex review.
+
 ## Task 4: Build the Constitution workbench
 
 **Owner:** FABLE frontend worker.
+
+**Precondition:** Task 3 and its SI-179 completeness correction are
+owner-merged. The workbench consumes the canonical coverage witness through
+`constitutionapp`; it cannot derive, substitute, or repair the affected set.
 
 **Likely files:** create `internal/workbench/constitution*.go` plus tests,
 route-scoped assets, `cmd/verdi/serve` injection, Playwright, and fixtures.

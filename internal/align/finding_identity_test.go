@@ -171,9 +171,9 @@ func TestGenerate_CollidingJudgeSlugs_DisclosedNeverDeduped(t *testing.T) {
 	svcDir := filepath.Join(repo.Dir, "loansvc")
 	spec := testSpec(repo.Head)
 
-	report, err := Generate(context.Background(), Input{
+	report, err := Generate(judgeTestContext(t), Input{
 		Root: repo.Dir, Runner: seedComputeRunner(svcDir), Spec: spec, Covers: repo.Head,
-		JudgeCmd: []string{writeFakeJudge(t, fakeJudgeCollidingScript)}, JudgeTimeout: time.Second,
+		JudgeCmd:    []string{writeFakeJudge(t, fakeJudgeCollidingScript)},
 		ModelDigest: testModelDigest(t),
 	})
 	if err != nil {

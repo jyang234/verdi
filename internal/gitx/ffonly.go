@@ -45,7 +45,7 @@ func fastForwardOnly(ctx context.Context, runway, outputCommit string, runner co
 	if runway == "" || strings.TrimSpace(runway) != runway || filepath.Clean(runway) != runway {
 		return FastForwardResult{Category: FastForwardInvalidInput}, fmt.Errorf("gitx: FastForwardOnly: runway path %q is not clean", runway)
 	}
-	if err := validateFullGitOID(outputCommit); err != nil {
+	if err := ValidateFullOID(outputCommit); err != nil {
 		return FastForwardResult{Category: FastForwardInvalidInput}, fmt.Errorf("gitx: FastForwardOnly: output commit: %w", err)
 	}
 	status, err := runner(ctx, runway, "status", "--porcelain")
@@ -61,7 +61,9 @@ func fastForwardOnly(ctx context.Context, runway, outputCommit string, runner co
 	return FastForwardResult{Category: FastForwardSucceeded, Attempted: true}, nil
 }
 
-func validateFullGitOID(value string) error {
+// ValidateFullOID reports whether value is a canonical full SHA-1 or SHA-256
+// Git object identity.
+func ValidateFullOID(value string) error {
 	if len(value) != 40 && len(value) != 64 {
 		return errors.New("must be a full 40- or 64-character object id")
 	}
