@@ -205,8 +205,8 @@ func TestFailureRepositoryEffectsCanonicalWire(t *testing.T) {
 		}
 	})
 
-	t.Run("post-mutation failure includes exact effects", func(t *testing.T) {
-		typed := operational("io-failure", "committing proposal artifact", errors.New("refused"))
+	t.Run("post-commit failure includes exact effects", func(t *testing.T) {
+		typed := operational("io-failure", "resolving repository identity", errors.New("refused"))
 		typed.RepositoryEffects = &RepositoryEffects{
 			Operation:        "propose",
 			InitialBranch:    "main",
@@ -215,6 +215,7 @@ func TestFailureRepositoryEffectsCanonicalWire(t *testing.T) {
 			TargetHeadBefore: "",
 			CurrentBranch:    "policy/x",
 			CurrentHead:      "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+			LandedCommit:     "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
 			BranchCreated:    true,
 			WorktreePaths:    []string{".verdi/policy/overlays/x.md"},
 			StagedPaths:      []string{".verdi/policy/overlays/x.md"},
@@ -224,7 +225,7 @@ func TestFailureRepositoryEffectsCanonicalWire(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		const want = "{\"classification\":\"operational\",\"code\":\"io-failure\",\"detail\":\"committing proposal artifact\",\"repository_effects\":{\"branch_created\":true,\"current_branch\":\"policy/x\",\"current_head\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"initial_branch\":\"main\",\"initial_head\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"operation\":\"propose\",\"staged_paths\":[\".verdi/policy/overlays/x.md\"],\"target_branch\":\"policy/x\",\"target_head_before\":\"\",\"unproven\":[],\"worktree_paths\":[\".verdi/policy/overlays/x.md\"]},\"schema\":\"verdi.constitution-failure/v1\"}\n"
+		const want = "{\"classification\":\"operational\",\"code\":\"io-failure\",\"detail\":\"resolving repository identity\",\"repository_effects\":{\"branch_created\":true,\"current_branch\":\"policy/x\",\"current_head\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"initial_branch\":\"main\",\"initial_head\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"landed_commit\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"operation\":\"propose\",\"staged_paths\":[\".verdi/policy/overlays/x.md\"],\"target_branch\":\"policy/x\",\"target_head_before\":\"\",\"unproven\":[],\"worktree_paths\":[\".verdi/policy/overlays/x.md\"]},\"schema\":\"verdi.constitution-failure/v1\"}\n"
 		if string(encoded) != want {
 			t.Fatalf("failure bytes = %s, want %s", encoded, want)
 		}

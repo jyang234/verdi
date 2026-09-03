@@ -80,11 +80,13 @@ type Failure struct {
 // RepositoryEffects discloses the repository state remaining after a failed
 // mutating operation. InitialBranch/InitialHead and TargetHeadBefore are the
 // pre-operation branch-ref facts; CurrentBranch/CurrentHead and BranchCreated
-// make checkout and ref effects explicit. WorktreePaths names operation-owned
-// paths that remain different from CurrentHead. StagedPaths is the complete
-// Git-repository-relative index path set observed after the failure. Unproven
-// names any of the closed dimensions branch, worktree, or index that could
-// not be re-observed; an empty non-nil array means all three were established.
+// make checkout and ref effects explicit. LandedCommit is the exact OID
+// returned by a successful CreateCommit, independent of later observation.
+// WorktreePaths names operation-owned paths that remain different from
+// CurrentHead. StagedPaths is the complete Git-repository-relative index path
+// set observed after the failure. Unproven names any of the closed dimensions
+// branch, worktree, or index that could not be re-observed; an empty non-nil
+// array means all three were established.
 type RepositoryEffects struct {
 	Operation        string   `json:"operation"`
 	InitialBranch    string   `json:"initial_branch"`
@@ -93,6 +95,7 @@ type RepositoryEffects struct {
 	TargetHeadBefore string   `json:"target_head_before"`
 	CurrentBranch    string   `json:"current_branch"`
 	CurrentHead      string   `json:"current_head"`
+	LandedCommit     string   `json:"landed_commit,omitempty"`
 	BranchCreated    bool     `json:"branch_created"`
 	WorktreePaths    []string `json:"worktree_paths"`
 	StagedPaths      []string `json:"staged_paths"`

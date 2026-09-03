@@ -127,7 +127,7 @@ func runConstitutionOp(op string, args []string, stdin io.Reader, stdout, stderr
 			return 2
 		}
 		if _, err := stdout.Write(failureBytes); err != nil {
-			printContextCommandDiagnostic(stderr, "constitution "+op, root, fmt.Errorf("writing failure to stdout: %w", err))
+			printConstitutionFailureOutputFailure(stderr, op, root, failureBytes, fmt.Errorf("writing failure to stdout: %w", err))
 			return 2
 		}
 		return typed.ExitCode()
@@ -159,6 +159,16 @@ type landedEffect struct {
 }
 
 const landedEffectSchema = "verdi.constitution-landed-effect/v1"
+
+// printConstitutionFailureOutputFailure preserves an application Failure when
+// its primary stdout delivery fails. canonicalFailure was encoded before the
+// write attempt, so stderr carries those exact bytes beside the new transport
+// diagnostic rather than reconstructing or reclassifying the application
+// outcome. Exit selection remains the caller's operational 2.
+func printConstitutionFailureOutputFailure(stderr io.Writer, op, root string, canonicalFailure []byte, err error) {
+	printContextCommandDiagnostic(stderr, "constitution "+op, root, err)
+	fmt.Fprint(stderr, string(canonicalFailure))
+}
 
 // printConstitutionOutputFailure renders an output-destination failure that
 // happened AFTER the application call returned. When that call had already

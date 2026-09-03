@@ -27,6 +27,7 @@ type proposeEffectTracker struct {
 	checkoutFailed   bool
 	worktreeUnproven bool
 	wrote            bool
+	landedCommit     string
 }
 
 func newProposeEffectTracker(initialBranch, initialHead, targetBranch, targetHeadBefore string, targetExisted bool, gitPath, fullPath string) *proposeEffectTracker {
@@ -61,6 +62,10 @@ func (t *proposeEffectTracker) wroteArtifact() {
 	t.wrote = true
 }
 
+func (t *proposeEffectTracker) commitLanded(commit string) {
+	t.landedCommit = commit
+}
+
 func (t *proposeEffectTracker) failure(ctx context.Context, svc Service, root string, typed *Error) *Error {
 	if typed == nil || !t.active {
 		return typed
@@ -77,6 +82,7 @@ func (t *proposeEffectTracker) observe(ctx context.Context, svc Service, root st
 		InitialHead:      t.initialHead,
 		TargetBranch:     t.targetBranch,
 		TargetHeadBefore: t.targetHeadBefore,
+		LandedCommit:     t.landedCommit,
 		WorktreePaths:    []string{},
 		StagedPaths:      []string{},
 		Unproven:         []string{},

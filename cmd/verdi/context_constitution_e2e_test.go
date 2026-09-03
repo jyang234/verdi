@@ -395,6 +395,92 @@ func TestContextConstitution_PostCheckoutRefusalEmitsRepositoryEffects(t *testin
 	}
 }
 
+type recordingContextFailingWriter struct {
+	attempted strings.Builder
+}
+
+func (w *recordingContextFailingWriter) Write(p []byte) (int, error) {
+	_, _ = w.attempted.Write(p)
+	return contextFailingWriter{}.Write(p)
+}
+
+// TestContextConstitution_FailureStdoutWriteFailurePreservesRepositoryEffects
+// catches a second transport failure replacing the application failure it was
+// trying to deliver. The exit becomes operational (2), but stderr must carry
+// both that diagnostic and the complete canonical application Failure so the
+// already-moved checkout is never hidden.
+func TestContextConstitution_FailureStdoutWriteFailurePreservesRepositoryEffects(t *testing.T) {
+	repo := buildConstitutionRepo(t)
+	const branch = "policy/cli-unsafe-failure-output"
+
+	gitOutput(t, repo.Dir, "checkout", "-q", "-b", branch)
+	overlays := filepath.Join(repo.Dir, ".verdi", "policy", "overlays")
+	if err := os.RemoveAll(overlays); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(t.TempDir(), overlays); err != nil {
+		t.Fatal(err)
+	}
+	gitOutput(t, repo.Dir, "add", "-A")
+	gitOutput(t, repo.Dir, "commit", "-q", "-m", "install unsafe proposal tree")
+	branchHead := strings.TrimSpace(gitOutput(t, repo.Dir, "rev-parse", "HEAD"))
+	gitOutput(t, repo.Dir, "checkout", "-q", "main")
+
+	content, err := os.ReadFile(filepath.Join(repo.Dir, ".verdi", "policy", "overlays", "frontend-go-version.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	requestPath := writeConstitutionRequestFile(t, t.TempDir(), "propose.json", map[string]interface{}{
+		"schema": constitutionapp.ProposeRequestSchema,
+		"branch": branch,
+		"kind":   constitutionapp.KindOverlay,
+		"name":   "frontend-go-version",
+		"content": base64.StdEncoding.EncodeToString([]byte(strings.Replace(
+			string(content), "Frontend Go version overlay", "Frontend Go version overlay (CLI failure output)", 1))),
+		"expected": map[string]interface{}{"branch": branch, "head": branchHead},
+	})
+
+	t.Chdir(repo.Dir)
+	var stderr strings.Builder
+	stdout := &recordingContextFailingWriter{}
+	code := runConstitutionOp("propose", []string{"--request", requestPath}, strings.NewReader(""), stdout, &stderr)
+	if code != 2 {
+		t.Fatalf("exit = %d, want 2 for failed failure delivery\nstderr: %s", code, stderr.String())
+	}
+	diagnostic, disclosure, found := strings.Cut(stderr.String(), "\n")
+	if !found || !strings.Contains(diagnostic, "writing failure to stdout: stdout unavailable") {
+		t.Fatalf("stderr diagnostic = %q, want failure-output diagnostic", stderr.String())
+	}
+	if disclosure == "" {
+		t.Fatalf("stderr lost the canonical application failure after diagnostic: %q", stderr.String())
+	}
+	if disclosure != stdout.attempted.String() {
+		t.Fatalf("stderr did not preserve the exact attempted failure bytes:\ngot  %q\nwant %q", disclosure, stdout.attempted.String())
+	}
+	var failure constitutionapp.Failure
+	if err := json.Unmarshal([]byte(disclosure), &failure); err != nil {
+		t.Fatalf("decode stderr failure disclosure: %v\nstderr=%s", err, stderr.String())
+	}
+	if failure.Classification != constitutionapp.ClassificationVerdict || failure.Code != "unsafe-path" || failure.RepositoryEffects == nil {
+		t.Fatalf("stderr failure = %+v, want verdict/unsafe-path with effects", failure)
+	}
+	effects := failure.RepositoryEffects
+	if effects.TargetBranch != branch || effects.TargetHeadBefore != branchHead ||
+		effects.CurrentBranch != branch || effects.CurrentHead != branchHead {
+		t.Fatalf("stderr repository effects = %+v", effects)
+	}
+	if effects.LandedCommit != "" {
+		t.Fatalf("stderr landed_commit = %q before CreateCommit, want empty", effects.LandedCommit)
+	}
+	canonical, err := constitutionapp.EncodeResult(failure)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if disclosure != string(canonical) {
+		t.Fatalf("stderr failure is not the canonical record:\ngot  %q\nwant %q", disclosure, canonical)
+	}
+}
+
 // TestContextConstitutionE2E_UnversionedRequestRefused proves the request
 // envelope's version is enforced on the real binary's own CLI path: a
 // document with no schema field — exactly what every caller sent before this

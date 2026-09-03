@@ -173,6 +173,28 @@ func (identityRefusalGitReader) StatusDirty(context.Context, string) (bool, erro
 	return false, errors.New("injected post-commit identity refusal")
 }
 
+type postCommitHeadRefusalGitReader struct {
+	GitReader
+	commitLanded   bool
+	returnedCommit string
+}
+
+func (g *postCommitHeadRefusalGitReader) CreateCommit(ctx context.Context, root, message string) (string, error) {
+	commit, err := g.GitReader.CreateCommit(ctx, root, message)
+	if err == nil {
+		g.commitLanded = true
+		g.returnedCommit = commit
+	}
+	return commit, err
+}
+
+func (g *postCommitHeadRefusalGitReader) RevParse(ctx context.Context, root, rev string) (string, error) {
+	if g.commitLanded && rev == "HEAD" {
+		return "", errors.New("injected post-commit HEAD observation refusal")
+	}
+	return g.GitReader.RevParse(ctx, root, rev)
+}
+
 // TestPropose_StageFailureDisclosesBranchAndWorktreeEffects pins the staging
 // call site to the same honesty contract as the later commit failure. The
 // artifact write has landed, but the real index is still known empty.
@@ -195,6 +217,9 @@ func TestPropose_StageFailureDisclosesBranchAndWorktreeEffects(t *testing.T) {
 	effects := typed.Failure().RepositoryEffects
 	if effects == nil || effects.CurrentBranch != branch || effects.CurrentHead != initialHead || !effects.BranchCreated {
 		t.Fatalf("branch effects = %+v", effects)
+	}
+	if effects.LandedCommit != "" {
+		t.Fatalf("landed_commit = %q before CreateCommit, want empty", effects.LandedCommit)
 	}
 	if want := []string{artifactPath}; !reflect.DeepEqual(effects.WorktreePaths, want) {
 		t.Fatalf("worktree_paths = %v, want %v", effects.WorktreePaths, want)
@@ -227,6 +252,9 @@ func TestPropose_CommitFailureDisclosesBranchWorktreeAndIndexEffects(t *testing.
 	effects := typed.Failure().RepositoryEffects
 	if effects == nil {
 		t.Fatal("commit failure hid the repository effects")
+	}
+	if effects.LandedCommit != "" {
+		t.Fatalf("landed_commit = %q after failed CreateCommit, want empty", effects.LandedCommit)
 	}
 	if effects.InitialBranch != "main" || effects.InitialHead != initialHead || effects.TargetBranch != branch ||
 		effects.CurrentBranch != branch || effects.CurrentHead != initialHead || !effects.BranchCreated {
@@ -296,11 +324,50 @@ func TestPropose_PostCommitIdentityFailureDisclosesLandedCommit(t *testing.T) {
 	}
 	effects := typed.Failure().RepositoryEffects
 	if effects == nil || effects.InitialHead != initialHead || effects.CurrentBranch != branch ||
-		effects.CurrentHead != landedHead || !effects.BranchCreated {
+		effects.CurrentHead != landedHead || effects.LandedCommit != landedHead || !effects.BranchCreated {
 		t.Fatalf("landed branch effects = %+v", effects)
 	}
 	if len(effects.WorktreePaths) != 0 || len(effects.StagedPaths) != 0 || len(effects.Unproven) != 0 {
 		t.Fatalf("post-commit residue = %+v, want known-clean worktree/index", effects)
+	}
+}
+
+// TestPropose_PostCommitHeadObservationFailureStillDisclosesLandedCommit
+// catches the distinction between a fact returned by CreateCommit and one
+// reconstructed later: the commit succeeds, then both identity resolution
+// and failure observation lose HEAD. The returned commit OID must survive as
+// an independent landed fact while branch/worktree observation is unproven.
+func TestPropose_PostCommitHeadObservationFailureStillDisclosesLandedCommit(t *testing.T) {
+	root := buildFixtureRepo(t)
+	reader := &postCommitHeadRefusalGitReader{GitReader: testService().Git}
+	svc := testService()
+	svc.Git = reader
+	const branch = "policy/post-commit-head-refusal"
+
+	_, typed := svc.Propose(context.Background(), root, ProposeRequest{
+		Branch: branch, Kind: KindOverlay, Name: "frontend-go-version",
+		Content:  retitledOverlay(t, "post-commit-head-refusal"),
+		Expected: Expected{Branch: branch},
+	})
+	if typed == nil || typed.Classification != ClassificationOperational || typed.Code != "io-failure" {
+		t.Fatalf("failure = %+v, want operational/io-failure", typed)
+	}
+	landedCommit := strings.TrimSpace(runFixtureGit(t, root, "rev-parse", "HEAD"))
+	if reader.returnedCommit != landedCommit {
+		t.Fatalf("fake CreateCommit returned %q, repository landed %q", reader.returnedCommit, landedCommit)
+	}
+	effects := typed.Failure().RepositoryEffects
+	if effects == nil {
+		t.Fatal("post-commit HEAD refusal hid repository effects")
+	}
+	if effects.LandedCommit != reader.returnedCommit {
+		t.Fatalf("landed_commit = %q, want CreateCommit result %q", effects.LandedCommit, reader.returnedCommit)
+	}
+	if effects.CurrentHead != "" {
+		t.Fatalf("current_head = %q, want unavailable", effects.CurrentHead)
+	}
+	if want := []string{"branch", "worktree"}; !reflect.DeepEqual(effects.Unproven, want) {
+		t.Fatalf("unproven = %v, want %v", effects.Unproven, want)
 	}
 }
 

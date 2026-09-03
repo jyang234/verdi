@@ -182,8 +182,8 @@ type ProposeResult struct {
 // remaining branch/HEAD, worktree, and index state with an uncanceled context,
 // and explicitly marks any dimension it cannot establish as unproven. This
 // includes failures after a commit has landed, such as identity resolution;
-// CurrentHead then names that landed commit instead of hiding it behind the
-// later failure.
+// LandedCommit then preserves CreateCommit's exact returned OID even if the
+// later failure also prevents CurrentHead from being observed.
 //
 // It stages and commits exactly the one requested artifact
 // path via gitx.AddPaths — never gitx.AddAll — so an unrelated sibling
@@ -363,6 +363,7 @@ func (s Service) Propose(ctx context.Context, root string, req ProposeRequest) (
 	if err != nil {
 		return nil, effects.failure(ctx, s, root, operational("io-failure", "committing proposal artifact", err))
 	}
+	effects.commitLanded(commit)
 
 	identity, typedIdentity := s.resolveIdentity(ctx, root)
 	if typedIdentity != nil {
