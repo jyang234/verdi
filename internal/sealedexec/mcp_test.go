@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"strings"
+	"sync"
 	"testing"
 
 	"github.com/jyang234/verdi/internal/canonjson"
@@ -282,6 +284,74 @@ func TestSharedFlightStateSerializesServiceAndMCPAppends(t *testing.T) {
 	req := serviceRequest(t, ActionStart)
 	workspace := sharedStateWorkspace(t, req)
 
+	t.Run("resume acknowledges adapter start before an already attempted context request", func(t *testing.T) {
+		resume := serviceRequest(t, ActionResume)
+		resumeWorkspace := sharedStateWorkspace(t, resume)
+		continuity := resume.Resume.Continuity
+		plan := restartPlan{
+			sequence:                continuity.TerminalSourceSequence + 1,
+			priorDigest:             continuity.RevisionSegments[len(continuity.RevisionSegments)-1].EventRoot,
+			priorGlobal:             continuity.TerminalGlobalSequence,
+			completedEventChainRoot: continuity.EventChainRoot,
+		}
+		state := newExecutionFlightState(resume, resumeWorkspace, plan, continuity.ExpansionLedgerRoot)
+		recorder := &duplicateKeyRecorder{global: plan.priorGlobal}
+		fake := &mcpFake{t: t, request: resume, state: state}
+		server, err := NewScopedMCP(ScopedMCPPorts{Resolver: fake, Compiler: fake, Verifier: fake, Recorder: recorder, Store: fake, Stamps: fake}, state)
+		if err != nil {
+			t.Fatalf("NewScopedMCP: %v", err)
+		}
+		if _, err := state.append(context.Background(), recorder, fake, resumeWorkspace, contextevent.KindResume, sharedResumePayload(t, resume)); err != nil {
+			t.Fatalf("service resume through shared state: %v", err)
+		}
+
+		// Model the real cross-channel boundary: the provider has completed its
+		// init-frame write and begun request_context, but the parent has not yet
+		// reduced and acknowledged that init as adapter-start. The observing
+		// context makes both implementations deterministic without a timeout: a
+		// gated call reads Done while it waits; the broken ungated call completes.
+		ctx := &doneObservedContext{Context: context.Background(), observed: make(chan struct{})}
+		type callResult struct {
+			inspection InspectionResult
+			err        error
+		}
+		callDone := make(chan callResult, 1)
+		go func() {
+			inspection, err := server.Call(ctx, ToolRequestContext, []byte(`{"purpose":"needed for implementation","ref":"spec/extra"}`))
+			callDone <- callResult{inspection: inspection, err: err}
+		}()
+
+		var early *callResult
+		select {
+		case result := <-callDone:
+			early = &result
+		case <-ctx.observed:
+		}
+		if _, err := state.append(context.Background(), recorder, fake, resumeWorkspace, contextevent.KindAdapterStart, sharedStartPayload(t, resume)); err != nil {
+			t.Fatalf("service adapter-start through shared state: %v", err)
+		}
+		result := callResult{}
+		if early != nil {
+			result = *early
+		} else {
+			result = <-callDone
+		}
+		if result.err != nil || result.inspection.Kind != InspectionContextApproved {
+			t.Fatalf("request_context = %#v, error %v, want an approved transition", result.inspection, result.err)
+		}
+
+		wantKinds := []contextevent.Kind{
+			contextevent.KindResume,
+			contextevent.KindAdapterStart,
+			contextevent.KindContextRequest,
+			contextevent.KindContextDecision,
+			contextevent.KindChildManifest,
+		}
+		if got := recorder.kinds(); !reflect.DeepEqual(got, wantKinds) {
+			t.Fatalf("acknowledged kinds = %v, want the causal resume prefix %v", got, wantKinds)
+		}
+	})
+
 	t.Run("one shared state serializes lifecycle and context appends", func(t *testing.T) {
 		state := NewFlightState(mcpSnapshot(t, req, ""))
 		recorder := &duplicateKeyRecorder{}
@@ -540,6 +610,78 @@ func (r *duplicateKeyRecorder) assertStrictGlobalOrder() error {
 	return nil
 }
 
+func TestExecutionFlightStateAdapterStartGate(t *testing.T) {
+	req := serviceRequest(t, ActionStart)
+	workspace := sharedStateWorkspace(t, req)
+
+	newServer := func(t *testing.T, state *FlightState, recorder *mcpFake) *ScopedMCP {
+		t.Helper()
+		fake := &mcpFake{t: t, request: req, state: state}
+		server, err := NewScopedMCP(ScopedMCPPorts{
+			Resolver: fake, Compiler: fake, Verifier: fake,
+			Recorder: recorder, Store: fake, Stamps: fake,
+		}, state)
+		if err != nil {
+			t.Fatalf("NewScopedMCP: %v", err)
+		}
+		return server
+	}
+
+	t.Run("caller cancellation releases a request waiting for adapter start", func(t *testing.T) {
+		state := newExecutionFlightState(req, workspace, restartPlan{}, "")
+		recorder := &mcpFake{t: t, request: req}
+		server := newServer(t, state, recorder)
+		ctx, cancel := context.WithCancel(context.Background())
+		observed := &doneObservedContext{Context: ctx, observed: make(chan struct{})}
+		callDone := make(chan error, 1)
+		go func() {
+			_, err := server.Call(observed, ToolRequestContext, []byte(`{"purpose":"inspect","ref":"spec/extra"}`))
+			callDone <- err
+		}()
+
+		select {
+		case err := <-callDone:
+			t.Fatalf("request_context returned before cancellation with error %v", err)
+		case <-observed.observed:
+		}
+		cancel()
+		if err := <-callDone; !errors.Is(err, ErrOperational) || !errors.Is(err, context.Canceled) {
+			t.Fatalf("request_context error = %v, want cancellation wrapped as operational", err)
+		}
+		if len(recorder.events) != 0 || state.Snapshot().NextSourceSequence != 1 {
+			t.Fatalf("canceled wait recorded %d events or advanced state to sequence %d", len(recorder.events), state.Snapshot().NextSourceSequence)
+		}
+	})
+
+	t.Run("adapter start append failure releases a waiting request", func(t *testing.T) {
+		state := newExecutionFlightState(req, workspace, restartPlan{}, "")
+		recorder := &mcpFake{t: t, request: req}
+		server := newServer(t, state, recorder)
+		observed := &doneObservedContext{Context: context.Background(), observed: make(chan struct{})}
+		callDone := make(chan error, 1)
+		go func() {
+			_, err := server.Call(observed, ToolRequestContext, []byte(`{"purpose":"inspect","ref":"spec/extra"}`))
+			callDone <- err
+		}()
+
+		select {
+		case err := <-callDone:
+			t.Fatalf("request_context returned before adapter-start resolved with error %v", err)
+		case <-observed.observed:
+		}
+		rejecting := &mcpFake{t: t, request: req, appendErrAt: 1}
+		if _, err := state.append(context.Background(), rejecting, rejecting, workspace, contextevent.KindAdapterStart, sharedStartPayload(t, req)); !errors.Is(err, ErrOperational) {
+			t.Fatalf("adapter-start append error = %v, want operational", err)
+		}
+		if err := <-callDone; !errors.Is(err, ErrOperational) || !strings.Contains(err.Error(), "recorder rejected event") {
+			t.Fatalf("request_context error = %v, want the adapter-start append failure", err)
+		}
+		if len(recorder.events) != 0 || state.Snapshot().NextSourceSequence != 1 {
+			t.Fatalf("failed start recorded %d context events or advanced state to sequence %d", len(recorder.events), state.Snapshot().NextSourceSequence)
+		}
+	})
+}
+
 // sharedStateWorkspace is the exact verified candidate identity the service
 // stamps its own lifecycle events with.
 func sharedStateWorkspace(t *testing.T, req ExecutionRequest) WorkspaceFacts {
@@ -565,6 +707,33 @@ func sharedStartPayload(t *testing.T, req ExecutionRequest) *contextevent.Adapte
 		Schema: schema, Adapter: req.Adapter, AdapterVersion: req.AdapterVersion,
 		Session: req.Session, ProfileDigest: req.Profile.Digest, WorkspaceRequestDigest: workspaceDigest,
 	}
+}
+
+func sharedResumePayload(t *testing.T, req ExecutionRequest) *contextevent.ResumePayload {
+	t.Helper()
+	schema, err := contextevent.PayloadSchema(contextevent.KindResume)
+	if err != nil {
+		t.Fatalf("resume schema: %v", err)
+	}
+	session := req.Resume.Continuity.AdapterSessionRef
+	return &contextevent.ResumePayload{
+		Schema: schema, PriorSession: session, CurrentSession: session,
+		ContinuityDigest: req.Resume.ContinuityDigest, ManifestDigest: req.ManifestDigest,
+		EventChainRoot: testDigest("resume-prefix"),
+	}
+}
+
+// doneObservedContext reports the exact instant a waiter consults cancellation.
+// Embedding preserves the other context methods and their production behavior.
+type doneObservedContext struct {
+	context.Context
+	once     sync.Once
+	observed chan struct{}
+}
+
+func (c *doneObservedContext) Done() <-chan struct{} {
+	c.once.Do(func() { close(c.observed) })
+	return c.Context.Done()
 }
 
 func sharedMessagePayload(t *testing.T) *contextevent.ProviderMessagePayload {

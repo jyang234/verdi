@@ -456,18 +456,34 @@ func TestSharedFlightStreamRunContract_Behavioral(t *testing.T) {
 	req := serviceRequest(t, ActionStart)
 	svc, ports := newServiceHarness(t, req)
 	mcp := &mcpFake{t: t, request: req}
+	mcpDone := make(chan error, 1)
+	ports.startBlockAfterDeliveries = true
+	ports.resumeEntered = make(chan struct{})
+	ports.resumeRelease = make(chan struct{})
+	ports.blockedDelivery = &AdapterResult{Observations: []NormalizedObservation{{
+		Kind:    contextevent.KindProviderMessage,
+		Payload: sharedMessagePayload(t),
+	}}}
 	ports.embedded = func(state *FlightState) {
 		server, err := NewScopedMCP(ScopedMCPPorts{Resolver: mcp, Compiler: mcp, Verifier: mcp, Recorder: ports, Store: mcp, Stamps: mcp}, state)
 		if err != nil {
 			t.Fatalf("NewScopedMCP over the shared state: %v", err)
 		}
-		if _, err := server.Call(context.Background(), ToolRequestContext, []byte(`{"purpose":"needed for implementation","ref":"spec/extra"}`)); err != nil {
-			t.Fatalf("embedded request_context: %v", err)
-		}
+		// A real provider invokes the HTTP surface concurrently after process
+		// launch. Keep the fake stream alive until that call finishes, then emit
+		// one post-expansion provider observation in the installed child revision.
+		go func() {
+			_, err := server.Call(context.Background(), ToolRequestContext, []byte(`{"purpose":"needed for implementation","ref":"spec/extra"}`))
+			mcpDone <- err
+			ports.releaseResume()
+		}()
 	}
 	run, err := svc.Execute(context.Background(), req, []contextcompile.DataItem{})
 	if err != nil {
 		t.Fatalf("Execute with an embedded context transition: %v", err)
+	}
+	if err := <-mcpDone; err != nil {
+		t.Fatalf("embedded request_context: %v", err)
 	}
 	state, _ := ports.sharedState()
 	if state == nil {
@@ -500,6 +516,44 @@ func TestSharedFlightStreamRunContract_Behavioral(t *testing.T) {
 	}
 	if _, err := validateRunAcknowledgments(req, run.Acks, false); err != nil {
 		t.Fatalf("completion refused the actual shared stream: %v", err)
+	}
+}
+
+func TestExecutionAdapterStartGateLaunchFailure(t *testing.T) {
+	req := serviceRequest(t, ActionStart)
+	svc, ports := newServiceHarness(t, req)
+	mcp := &mcpFake{t: t, request: req}
+	callDone := make(chan error, 1)
+	ports.embedded = func(state *FlightState) {
+		server, err := NewScopedMCP(ScopedMCPPorts{Resolver: mcp, Compiler: mcp, Verifier: mcp, Recorder: mcp, Store: mcp, Stamps: mcp}, state)
+		if err != nil {
+			t.Fatalf("NewScopedMCP over the shared state: %v", err)
+		}
+		ctx := &doneObservedContext{Context: context.Background(), observed: make(chan struct{})}
+		go func() {
+			_, err := server.Call(ctx, ToolRequestContext, []byte(`{"purpose":"inspect","ref":"spec/extra"}`))
+			callDone <- err
+		}()
+		select {
+		case err := <-callDone:
+			t.Fatalf("request_context returned before launch resolved with error %v", err)
+		case <-ctx.observed:
+		}
+	}
+	ports.launchErr = errors.New("provider launch refused")
+	if _, err := svc.Execute(context.Background(), req, []contextcompile.DataItem{}); !errors.Is(err, ErrOperational) {
+		t.Fatalf("Execute error = %v, want operational launch refusal", err)
+	}
+	select {
+	case err := <-callDone:
+		if !errors.Is(err, ErrOperational) || !strings.Contains(err.Error(), "execution ended before adapter-start acknowledgment") {
+			t.Fatalf("request_context error = %v, want launch failure to release the adapter-start gate", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("request_context remained blocked after provider launch failed")
+	}
+	if got := len(ports.appendedEvents()); got != 0 {
+		t.Fatalf("failed launch recorded %d context events, want none", got)
 	}
 }
 

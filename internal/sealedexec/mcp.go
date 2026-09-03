@@ -108,6 +108,14 @@ type FlightState struct {
 	// this execution: the authenticated restart history plus every service- and
 	// MCP-owned append this state has since acknowledged, in durable order.
 	acks []contextevent.EventAck
+	// adapterStartDone is nonnil only for a state owned by live sealed
+	// execution. The embedded scoped surface may become transport-reachable as
+	// soon as the provider launches, but request_context cannot mutate this
+	// state until the provider's init frame has been reduced and adapter-start
+	// is durably acknowledged. Standalone context MCP states leave it nil.
+	adapterStartDone     chan struct{}
+	adapterStartErr      error
+	adapterStartResolved bool
 }
 
 // NewFlightState constructs state from the already-decoded request and any
@@ -192,6 +200,57 @@ func (s *FlightState) currentLocked() FlightStateSnapshot {
 	return out
 }
 
+// awaitAdapterStart preserves the causal boundary between the provider's init
+// frame and an embedded context transition. A completed provider pipe write is
+// not itself a parent-side acknowledgment, so transport concurrency must wait
+// on this explicit lifecycle fact instead of racing for s.mu.
+func (s *FlightState) awaitAdapterStart(ctx context.Context) error {
+	s.mu.Lock()
+	done := s.adapterStartDone
+	s.mu.Unlock()
+	if done == nil {
+		return nil
+	}
+	select {
+	case <-ctx.Done():
+		return operational("await acknowledged adapter-start", ctx.Err())
+	case <-done:
+	}
+	s.mu.Lock()
+	err := s.adapterStartErr
+	s.mu.Unlock()
+	if err != nil {
+		return operational("await acknowledged adapter-start", err)
+	}
+	return nil
+}
+
+// resolveAdapterStartLocked completes an execution state's adapter-start gate.
+// The first success or failure is terminal for the gate. The caller holds
+// s.mu; standalone states have no gate and remain unchanged.
+func (s *FlightState) resolveAdapterStartLocked(err error) {
+	if s.adapterStartDone == nil || s.adapterStartResolved {
+		return
+	}
+	s.adapterStartErr = err
+	s.adapterStartResolved = true
+	close(s.adapterStartDone)
+}
+
+// failAdapterStart releases an embedded context transition when execution
+// ends or begins stopping before adapter-start can be acknowledged.
+func (s *FlightState) failAdapterStart(err error) {
+	if s == nil {
+		return
+	}
+	if err == nil {
+		err = errors.New("execution ended before adapter-start acknowledgment")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.resolveAdapterStartLocked(err)
+}
+
 // eventKey is Amendment 002 §7's durable event identity within one execution
 // key: the manifest revision plus the never-reused source sequence. Source
 // order restarts at one inside each expansion-installed revision, so the
@@ -266,7 +325,10 @@ func (s *FlightState) appendReplay(
 func (s *FlightState) appendReplayLocked(
 	ctx context.Context, recorder eventAppender, stamps StampSource,
 	workspace WorkspaceFacts, retained eventReplay, kind contextevent.Kind, payload any,
-) (flightAppendResult, error) {
+) (result flightAppendResult, err error) {
+	if kind == contextevent.KindAdapterStart {
+		defer func() { s.resolveAdapterStartLocked(err) }()
+	}
 	if ctx == nil {
 		return flightAppendResult{}, operational("append sealed event", errors.New("nil context"))
 	}
@@ -484,6 +546,9 @@ func (m *ScopedMCP) Call(ctx context.Context, name string, arguments []byte) (In
 }
 
 func (m *ScopedMCP) requestContext(ctx context.Context, ref, purpose string) (InspectionResult, error) {
+	if err := m.state.awaitAdapterStart(ctx); err != nil {
+		return InspectionResult{}, err
+	}
 	m.state.mu.Lock()
 	defer m.state.mu.Unlock()
 	snapshot := &m.state.snapshot
