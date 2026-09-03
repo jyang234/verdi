@@ -329,6 +329,72 @@ func TestContextConstitution_OutputFailureDisclosesLandedProposal(t *testing.T) 
 	}
 }
 
+// TestContextConstitution_PostCheckoutRefusalEmitsRepositoryEffects proves
+// the CLI preserves the application-owned machine disclosure instead of
+// replacing a post-checkout refusal with a bare diagnostic. The proposal
+// branch itself carries the unsafe symlink, so the first safe-tree check on
+// main passes and the refusal happens only after the checkout has moved.
+func TestContextConstitution_PostCheckoutRefusalEmitsRepositoryEffects(t *testing.T) {
+	repo := buildConstitutionRepo(t)
+	const branch = "policy/cli-unsafe-branch-tree"
+
+	gitOutput(t, repo.Dir, "checkout", "-q", "-b", branch)
+	overlays := filepath.Join(repo.Dir, ".verdi", "policy", "overlays")
+	if err := os.RemoveAll(overlays); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(t.TempDir(), overlays); err != nil {
+		t.Fatal(err)
+	}
+	gitOutput(t, repo.Dir, "add", "-A")
+	gitOutput(t, repo.Dir, "commit", "-q", "-m", "install unsafe proposal tree")
+	branchHead := strings.TrimSpace(gitOutput(t, repo.Dir, "rev-parse", "HEAD"))
+	gitOutput(t, repo.Dir, "checkout", "-q", "main")
+	initialHead := strings.TrimSpace(gitOutput(t, repo.Dir, "rev-parse", "HEAD"))
+
+	content, err := os.ReadFile(filepath.Join(repo.Dir, ".verdi", "policy", "overlays", "frontend-go-version.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	requestPath := writeConstitutionRequestFile(t, t.TempDir(), "propose.json", map[string]interface{}{
+		"schema": constitutionapp.ProposeRequestSchema,
+		"branch": branch,
+		"kind":   constitutionapp.KindOverlay,
+		"name":   "frontend-go-version",
+		"content": base64.StdEncoding.EncodeToString([]byte(strings.Replace(
+			string(content), "Frontend Go version overlay", "Frontend Go version overlay (CLI unsafe)", 1))),
+		"expected": map[string]interface{}{"branch": branch, "head": branchHead},
+	})
+
+	t.Chdir(repo.Dir)
+	var stdout, stderr strings.Builder
+	code := runConstitutionOp("propose", []string{"--request", requestPath}, strings.NewReader(""), &stdout, &stderr)
+	if code != 1 {
+		t.Fatalf("exit = %d, want 1\nstdout: %s\nstderr: %s", code, stdout.String(), stderr.String())
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("stderr = %q, want empty typed-failure channel", stderr.String())
+	}
+	var failure constitutionapp.Failure
+	if err := json.Unmarshal([]byte(stdout.String()), &failure); err != nil {
+		t.Fatalf("decode failure: %v\nstdout=%s", err, stdout.String())
+	}
+	if failure.Classification != constitutionapp.ClassificationVerdict || failure.Code != "unsafe-path" {
+		t.Fatalf("failure = %+v, want verdict/unsafe-path", failure)
+	}
+	effects := failure.RepositoryEffects
+	if effects == nil {
+		t.Fatalf("CLI hid post-checkout repository effects: %s", stdout.String())
+	}
+	if effects.InitialBranch != "main" || effects.InitialHead != initialHead || effects.TargetBranch != branch ||
+		effects.TargetHeadBefore != branchHead || effects.CurrentBranch != branch || effects.CurrentHead != branchHead || effects.BranchCreated {
+		t.Fatalf("repository effects = %+v", effects)
+	}
+	if len(effects.WorktreePaths) != 0 || len(effects.StagedPaths) != 0 || len(effects.Unproven) != 0 {
+		t.Fatalf("repository effects carry unexpected uncertainty/residue: %+v", effects)
+	}
+}
+
 // TestContextConstitutionE2E_UnversionedRequestRefused proves the request
 // envelope's version is enforced on the real binary's own CLI path: a
 // document with no schema field — exactly what every caller sent before this

@@ -118,6 +118,9 @@ func runConstitutionOp(op string, args []string, stdin io.Reader, stdout, stderr
 		return 2
 	}
 	if typed != nil {
+		// Project the application error as-is: Failure carries the optional
+		// repository-effects disclosure for any refusal after mutation began.
+		// Reconstructing a fresh envelope here would hide that state.
 		failureBytes, encErr := constitutionapp.EncodeResult(typed.Failure())
 		if encErr != nil {
 			printContextCommandDiagnostic(stderr, "constitution "+op, root, encErr)

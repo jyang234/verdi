@@ -24,6 +24,10 @@ type Error struct {
 	Code           string
 	Detail         string
 	Cause          error
+	// RepositoryEffects is present only when a failed mutating operation may
+	// have changed repository state. Failure() deep-copies it into the wire
+	// projection so adapters cannot hide or alias the disclosure.
+	RepositoryEffects *RepositoryEffects
 }
 
 func (e *Error) Error() string {
@@ -66,10 +70,33 @@ func (e *Error) ExitCode() int {
 // Cause is deliberately absent: it is an in-process %w handle for Go
 // callers, not wire content.
 type Failure struct {
-	Schema         string         `json:"schema"`
-	Classification Classification `json:"classification"`
-	Code           string         `json:"code"`
-	Detail         string         `json:"detail"`
+	Schema            string             `json:"schema"`
+	Classification    Classification     `json:"classification"`
+	Code              string             `json:"code"`
+	Detail            string             `json:"detail"`
+	RepositoryEffects *RepositoryEffects `json:"repository_effects,omitempty"`
+}
+
+// RepositoryEffects discloses the repository state remaining after a failed
+// mutating operation. InitialBranch/InitialHead and TargetHeadBefore are the
+// pre-operation branch-ref facts; CurrentBranch/CurrentHead and BranchCreated
+// make checkout and ref effects explicit. WorktreePaths names operation-owned
+// paths that remain different from CurrentHead. StagedPaths is the complete
+// Git-repository-relative index path set observed after the failure. Unproven
+// names any of the closed dimensions branch, worktree, or index that could
+// not be re-observed; an empty non-nil array means all three were established.
+type RepositoryEffects struct {
+	Operation        string   `json:"operation"`
+	InitialBranch    string   `json:"initial_branch"`
+	InitialHead      string   `json:"initial_head"`
+	TargetBranch     string   `json:"target_branch"`
+	TargetHeadBefore string   `json:"target_head_before"`
+	CurrentBranch    string   `json:"current_branch"`
+	CurrentHead      string   `json:"current_head"`
+	BranchCreated    bool     `json:"branch_created"`
+	WorktreePaths    []string `json:"worktree_paths"`
+	StagedPaths      []string `json:"staged_paths"`
+	Unproven         []string `json:"unproven"`
 }
 
 // Failure projects this error into the wire envelope. A nil receiver still
@@ -85,13 +112,26 @@ func (e *Error) Failure() Failure {
 	default:
 		classification = ClassificationOperational
 	}
-	return NewFailure(classification, e.Code, e.Detail)
+	failure := NewFailure(classification, e.Code, e.Detail)
+	failure.RepositoryEffects = cloneRepositoryEffects(e.RepositoryEffects)
+	return failure
 }
 
 // NewFailure builds the typed envelope directly, for an adapter-detected
 // application failure that never had an *Error to carry it.
 func NewFailure(classification Classification, code, detail string) Failure {
 	return Failure{Schema: FailureSchema, Classification: classification, Code: code, Detail: detail}
+}
+
+func cloneRepositoryEffects(effects *RepositoryEffects) *RepositoryEffects {
+	if effects == nil {
+		return nil
+	}
+	cloned := *effects
+	cloned.WorktreePaths = append([]string{}, effects.WorktreePaths...)
+	cloned.StagedPaths = append([]string{}, effects.StagedPaths...)
+	cloned.Unproven = append([]string{}, effects.Unproven...)
+	return &cloned
 }
 
 func inputInvalid(code, detail string) *Error {

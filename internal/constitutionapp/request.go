@@ -3,6 +3,7 @@ package constitutionapp
 import (
 	"errors"
 	"fmt"
+	"strings"
 )
 
 // Shared request-shape validation errors reused across every operation's
@@ -14,7 +15,15 @@ var (
 	errKindInvalid    = errors.New("constitutionapp: kind must be one of policy, policy-overlay, policy-exemption")
 	errNameRequired   = errors.New("constitutionapp: name is required")
 	errContentEmpty   = errors.New("constitutionapp: content is required")
+	errCommitMessage  = errors.New("constitutionapp: commit_message must not be whitespace-only")
 )
+
+func validateCommitMessage(message string) error {
+	if message != "" && strings.TrimSpace(message) == "" {
+		return errCommitMessage
+	}
+	return nil
+}
 
 // errTargetSpecRequired names which zero-indexed target in a request's
 // Targets slice is missing its required Spec field.

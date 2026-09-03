@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 
@@ -186,6 +187,48 @@ func TestEncodeResult_IsCanonicalAndDeterministic(t *testing.T) {
 	if !strings.HasSuffix(string(first), "\n") {
 		t.Fatal("expected a trailing newline")
 	}
+}
+
+// TestFailureRepositoryEffectsCanonicalWire pins the additive failure
+// disclosure as part of Failure v1. The optional field is absent for
+// side-effect-free refusals and, when present, carries non-null ordered path
+// arrays so an adapter cannot collapse "known empty" into "not observed."
+func TestFailureRepositoryEffectsCanonicalWire(t *testing.T) {
+	t.Run("side-effect-free refusal omits effects", func(t *testing.T) {
+		encoded, err := EncodeResult(verdict("input-invalid", "bad input").Failure())
+		if err != nil {
+			t.Fatal(err)
+		}
+		const want = "{\"classification\":\"verdict\",\"code\":\"input-invalid\",\"detail\":\"bad input\",\"schema\":\"verdi.constitution-failure/v1\"}\n"
+		if string(encoded) != want {
+			t.Fatalf("failure bytes = %s, want %s", encoded, want)
+		}
+	})
+
+	t.Run("post-mutation failure includes exact effects", func(t *testing.T) {
+		typed := operational("io-failure", "committing proposal artifact", errors.New("refused"))
+		typed.RepositoryEffects = &RepositoryEffects{
+			Operation:        "propose",
+			InitialBranch:    "main",
+			InitialHead:      "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+			TargetBranch:     "policy/x",
+			TargetHeadBefore: "",
+			CurrentBranch:    "policy/x",
+			CurrentHead:      "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+			BranchCreated:    true,
+			WorktreePaths:    []string{".verdi/policy/overlays/x.md"},
+			StagedPaths:      []string{".verdi/policy/overlays/x.md"},
+			Unproven:         []string{},
+		}
+		encoded, err := EncodeResult(typed.Failure())
+		if err != nil {
+			t.Fatal(err)
+		}
+		const want = "{\"classification\":\"operational\",\"code\":\"io-failure\",\"detail\":\"committing proposal artifact\",\"repository_effects\":{\"branch_created\":true,\"current_branch\":\"policy/x\",\"current_head\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"initial_branch\":\"main\",\"initial_head\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"operation\":\"propose\",\"staged_paths\":[\".verdi/policy/overlays/x.md\"],\"target_branch\":\"policy/x\",\"target_head_before\":\"\",\"unproven\":[],\"worktree_paths\":[\".verdi/policy/overlays/x.md\"]},\"schema\":\"verdi.constitution-failure/v1\"}\n"
+		if string(encoded) != want {
+			t.Fatalf("failure bytes = %s, want %s", encoded, want)
+		}
+	})
 }
 
 func TestDecodeValidateAndImpactReviewAndSubmitPreparationRequests(t *testing.T) {

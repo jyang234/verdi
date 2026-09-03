@@ -318,3 +318,48 @@ func TestPropose_InputInvalid(t *testing.T) {
 		}
 	}
 }
+
+func TestValidateCommitMessage(t *testing.T) {
+	tests := []struct {
+		name    string
+		message string
+		want    error
+	}{
+		{name: "default", message: ""},
+		{name: "non-whitespace preserved", message: "  reviewed proposal  "},
+		{name: "whitespace only", message: " \t\n", want: errCommitMessage},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := validateCommitMessage(tc.message); got != tc.want {
+				t.Fatalf("validateCommitMessage(%q) = %v, want %v", tc.message, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestPropose_WhitespaceCommitMessageRefusesBeforeMutation catches the
+// validation gap where a non-empty but whitespace-only message passed the
+// application preflight, then failed only after Propose had created and
+// checked out the branch, written the artifact, and staged it. The refusal is
+// an input verdict and must happen before any repository effect.
+func TestPropose_WhitespaceCommitMessageRefusesBeforeMutation(t *testing.T) {
+	root := buildFixtureRepo(t)
+	before := captureRepoState(t, root)
+
+	_, typed := testService().Propose(context.Background(), root, ProposeRequest{
+		Branch:        "policy/whitespace-message",
+		Kind:          KindOverlay,
+		Name:          "frontend-go-version",
+		Content:       retitledOverlay(t, "whitespace-message"),
+		Expected:      Expected{Branch: "policy/whitespace-message"},
+		CommitMessage: " \t\n",
+	})
+	if typed == nil {
+		t.Fatal("expected whitespace-only commit_message to be refused")
+	}
+	assertRefusalLeftRepositoryUntouched(t, root, before, "policy/whitespace-message")
+	if typed.Classification != ClassificationVerdict || typed.Code != "input-invalid" {
+		t.Fatalf("failure = %+v, want verdict/input-invalid", typed)
+	}
+}

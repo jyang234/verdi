@@ -42,6 +42,7 @@ type GitReader interface {
 	CurrentBranch(ctx context.Context, root string) (string, error)
 	RevParse(ctx context.Context, root, rev string) (string, error)
 	StatusDirty(ctx context.Context, root string) (bool, error)
+	StagedPaths(ctx context.Context, root string) ([]string, error)
 	HasLocalBranch(ctx context.Context, root, name string) (bool, error)
 	CheckoutNewBranch(ctx context.Context, root, name string) error
 	CheckoutExisting(ctx context.Context, root, branch string) error
@@ -66,6 +67,9 @@ func (gitxReader) RevParse(ctx context.Context, root, rev string) (string, error
 }
 func (gitxReader) StatusDirty(ctx context.Context, root string) (bool, error) {
 	return gitx.StatusDirty(ctx, root)
+}
+func (gitxReader) StagedPaths(ctx context.Context, root string) ([]string, error) {
+	return gitx.StagedPaths(ctx, root)
 }
 func (gitxReader) HasLocalBranch(ctx context.Context, root, name string) (bool, error) {
 	return gitx.HasLocalBranch(ctx, root, name)

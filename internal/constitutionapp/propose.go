@@ -59,7 +59,7 @@ func (r ProposeRequest) validate() error {
 	if len(r.Content) == 0 {
 		return errContentEmpty
 	}
-	return nil
+	return validateCommitMessage(r.CommitMessage)
 }
 
 func policyRelPath(kind, name string) (string, error) {
@@ -173,21 +173,17 @@ type ProposeResult struct {
 // corrupted-policy, name-mismatch, authority-invalid, the pre-mutation
 // unsafe-path proof, and both stale-head variants — leaves branch, HEAD, the
 // local-branch set, and the working tree byte-identical to what it found.
-// That ordering is load-bearing rather than stylistic: this operation's
-// refusal path returns only a *Error, whose Failure envelope carries no
-// Identity at all, so a mutation performed before a refusal would be
-// undisclosed — a caller could not learn from the refusal that its checkout
-// had been moved onto a new, empty proposal branch.
+// That ordering is load-bearing rather than stylistic: callers need no
+// recovery disclosure when nothing has changed.
 //
-// The guarantee is therefore exactly that scope, and no wider. Three classes
-// of failure are decidable only AFTER the checkout has already selected (and,
-// for a brand-new proposal, created) req.Branch, and each can leave the
-// checkout there: the post-checkout unsafe-path proof retaken against the
-// branch's own materialized tree, a divergent-worktree refusal, and any
-// operational failure of the write/stage/commit sequence itself. Each is
-// documented at its own site below. Closing that residual would take a
-// repository-level transaction this operation does not have; it is disclosed
-// rather than silently implied away.
+// Once checkout or worktree mutation begins, every refusal and operational
+// failure instead carries RepositoryEffects. Propose never force-deletes a
+// branch or overwrites user state to simulate rollback: it re-observes the
+// remaining branch/HEAD, worktree, and index state with an uncanceled context,
+// and explicitly marks any dimension it cannot establish as unproven. This
+// includes failures after a commit has landed, such as identity resolution;
+// CurrentHead then names that landed commit instead of hiding it behind the
+// later failure.
 //
 // It stages and commits exactly the one requested artifact
 // path via gitx.AddPaths — never gitx.AddAll — so an unrelated sibling
@@ -251,10 +247,15 @@ func (s Service) Propose(ctx context.Context, root string, req ProposeRequest) (
 	if err != nil {
 		return nil, operational("io-failure", "resolving current branch", err)
 	}
+	initialHead, err := s.Git.RevParse(ctx, root, "HEAD")
+	if err != nil {
+		return nil, operational("io-failure", "resolving current HEAD", err)
+	}
 	exists, err := s.Git.HasLocalBranch(ctx, root, req.Branch)
 	if err != nil {
 		return nil, operational("io-failure", "checking for existing proposal branch", err)
 	}
+	effects := newProposeEffectTracker(currentBranch, initialHead, req.Branch, req.Expected.Head, exists, gitPath, full)
 
 	if exists {
 		branchHead, err := s.Git.RevParse(ctx, root, req.Branch)
@@ -269,16 +270,20 @@ func (s Service) Propose(ctx context.Context, root string, req ProposeRequest) (
 			// adapter) refuses a dirty working tree itself for a genuine
 			// branch switch — a caller mid-edit on a DIFFERENT branch is
 			// stopped here, before anything below runs.
+			effects.beginCheckout()
 			if err := s.Git.CheckoutExisting(ctx, root, req.Branch); err != nil {
-				return nil, operational("io-failure", "checking out proposal branch", err)
+				effects.checkoutRefused()
+				return nil, effects.failure(ctx, s, root, operational("io-failure", "checking out proposal branch", err))
 			}
 		}
 	} else {
 		if req.Expected.Head != "" {
 			return nil, verdict("stale-head", fmt.Sprintf("branch %q does not exist, expected HEAD %s", req.Branch, req.Expected.Head))
 		}
+		effects.beginCheckout()
 		if err := s.Git.CheckoutNewBranch(ctx, root, req.Branch); err != nil {
-			return nil, operational("io-failure", "creating proposal branch", err)
+			effects.checkoutRefused()
+			return nil, effects.failure(ctx, s, root, operational("io-failure", "creating proposal branch", err))
 		}
 	}
 
@@ -290,7 +295,7 @@ func (s Service) Propose(ctx context.Context, root string, req ProposeRequest) (
 	// refused everything else), and that movement is itself the same residual
 	// the CreateCommit failure path already carries.
 	if err := checkNoSymlinkedComponent(root, gitPath); err != nil {
-		return nil, verdict("unsafe-path", err.Error())
+		return nil, effects.failure(ctx, s, root, verdict("unsafe-path", err.Error()))
 	}
 
 	// Zero-effect is decided against the proposal branch's COMMITTED blob.
@@ -310,7 +315,7 @@ func (s Service) Propose(ctx context.Context, root string, req ProposeRequest) (
 	if showErr == nil && bytes.Equal(committed, req.Content) {
 		identity, typedIdentity := s.resolveIdentity(ctx, root)
 		if typedIdentity != nil {
-			return nil, typedIdentity
+			return nil, effects.failure(ctx, s, root, typedIdentity)
 		}
 		return &ProposeResult{Schema: ProposeResultSchema, Identity: identity, Path: rel, ArtifactID: artifactID, Digest: digest, ZeroEffect: true}, nil
 	}
@@ -328,23 +333,27 @@ func (s Service) Propose(ctx context.Context, root string, req ProposeRequest) (
 	worktree, worktreeExists, readErr := readRegularFile(full)
 	if readErr != nil {
 		if errors.Is(readErr, errUnsafePathComponent) {
-			return nil, verdict("unsafe-path", readErr.Error())
+			return nil, effects.failure(ctx, s, root, verdict("unsafe-path", readErr.Error()))
 		}
-		return nil, operational("io-failure", "reading the proposal artifact's working-tree state", readErr)
+		return nil, effects.failure(ctx, s, root, operational("io-failure", "reading the proposal artifact's working-tree state", readErr))
 	}
 	if worktreeExists && !bytes.Equal(worktree, req.Content) && (showErr != nil || !bytes.Equal(worktree, committed)) {
-		return nil, verdict("divergent-worktree", fmt.Sprintf(
-			"the working tree carries uncommitted content at %s that differs from both branch %q's committed state and the requested content; reconcile that edit before proposing over it", rel, req.Branch))
+		return nil, effects.failure(ctx, s, root, verdict("divergent-worktree", fmt.Sprintf(
+			"the working tree carries uncommitted content at %s that differs from both branch %q's committed state and the requested content; reconcile that edit before proposing over it", rel, req.Branch)))
 	}
 
+	effects.beginWorktreeMutation()
 	if err := ensureDirectoryChain(root, constitutionPolicyDir+"/"+path.Dir(rel)); err != nil {
-		return nil, verdict("unsafe-path", err.Error())
+		effects.worktreeStateUnproven()
+		return nil, effects.failure(ctx, s, root, verdict("unsafe-path", err.Error()))
 	}
 	if err := atomicfile.Write(full, req.Content, 0o644); err != nil {
-		return nil, operational("io-failure", "writing proposal artifact", err)
+		effects.worktreeStateUnproven()
+		return nil, effects.failure(ctx, s, root, operational("io-failure", "writing proposal artifact", err))
 	}
+	effects.wroteArtifact()
 	if err := s.Git.AddPaths(ctx, root, full); err != nil {
-		return nil, operational("io-failure", "staging proposal artifact", err)
+		return nil, effects.failure(ctx, s, root, operational("io-failure", "staging proposal artifact", err))
 	}
 	message := req.CommitMessage
 	if message == "" {
@@ -352,12 +361,12 @@ func (s Service) Propose(ctx context.Context, root string, req ProposeRequest) (
 	}
 	commit, err := s.Git.CreateCommit(ctx, root, message)
 	if err != nil {
-		return nil, operational("io-failure", "committing proposal artifact", err)
+		return nil, effects.failure(ctx, s, root, operational("io-failure", "committing proposal artifact", err))
 	}
 
 	identity, typedIdentity := s.resolveIdentity(ctx, root)
 	if typedIdentity != nil {
-		return nil, typedIdentity
+		return nil, effects.failure(ctx, s, root, typedIdentity)
 	}
 	return &ProposeResult{Schema: ProposeResultSchema, Identity: identity, Path: rel, ArtifactID: artifactID, Digest: digest, Commit: commit}, nil
 }

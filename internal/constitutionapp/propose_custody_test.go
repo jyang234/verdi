@@ -2,8 +2,10 @@ package constitutionapp
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -95,6 +97,211 @@ func TestPropose_RefusesSymlinkedArtifactDestination(t *testing.T) {
 		t.Fatalf("Propose wrote through the destination symlink: content = %q, err = %v", got, err)
 	}
 	assertRefusalLeftRepositoryUntouched(t, root, before, "policy/symlink-destination")
+}
+
+// TestPropose_PostCheckoutUnsafePathDisclosesRepositoryEffects catches the
+// branch-tree variant of unsafe-path: main is safe, but the existing proposal
+// branch itself contains a symlink at the destination. The second custody
+// check can run only after checkout, so its refusal must carry the exact
+// branch/worktree/index state that remains.
+func TestPropose_PostCheckoutUnsafePathDisclosesRepositoryEffects(t *testing.T) {
+	root := buildFixtureRepo(t)
+	ctx := context.Background()
+	const branch = "policy/unsafe-branch-tree"
+
+	runFixtureGit(t, root, "checkout", "-q", "-b", branch)
+	overlays := filepath.Join(root, ".verdi", "policy", "overlays")
+	if err := os.RemoveAll(overlays); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(t.TempDir(), overlays); err != nil {
+		t.Fatal(err)
+	}
+	runFixtureGit(t, root, "add", "-A")
+	runFixtureGit(t, root, "commit", "-q", "-m", "install unsafe proposal tree")
+	branchHead := strings.TrimSpace(runFixtureGit(t, root, "rev-parse", "HEAD"))
+	runFixtureGit(t, root, "checkout", "-q", "main")
+	initialHead := strings.TrimSpace(runFixtureGit(t, root, "rev-parse", "HEAD"))
+
+	_, typed := testService().Propose(ctx, root, ProposeRequest{
+		Branch: branch, Kind: KindOverlay, Name: "frontend-go-version",
+		Content:  retitledOverlay(t, "post-checkout-unsafe"),
+		Expected: Expected{Branch: branch, Head: branchHead},
+	})
+	if typed == nil || typed.Classification != ClassificationVerdict || typed.Code != "unsafe-path" {
+		t.Fatalf("failure = %+v, want verdict/unsafe-path", typed)
+	}
+	effects := typed.Failure().RepositoryEffects
+	if effects == nil {
+		t.Fatal("post-checkout refusal hid the repository effects")
+	}
+	if effects.Operation != "propose" || effects.InitialBranch != "main" || effects.InitialHead != initialHead ||
+		effects.TargetBranch != branch || effects.TargetHeadBefore != branchHead || effects.CurrentBranch != branch ||
+		effects.CurrentHead != branchHead || effects.BranchCreated {
+		t.Fatalf("branch effects = %+v", effects)
+	}
+	if len(effects.WorktreePaths) != 0 || len(effects.StagedPaths) != 0 || len(effects.Unproven) != 0 {
+		t.Fatalf("non-branch effects = %+v, want known-empty worktree/index state", effects)
+	}
+}
+
+type commitRefusalGitReader struct{ GitReader }
+
+func (commitRefusalGitReader) CreateCommit(context.Context, string, string) (string, error) {
+	return "", errors.New("injected commit refusal")
+}
+
+type addRefusalGitReader struct{ GitReader }
+
+func (addRefusalGitReader) AddPaths(context.Context, string, ...string) error {
+	return errors.New("injected staging refusal")
+}
+
+type observationRefusalGitReader struct{ GitReader }
+
+func (observationRefusalGitReader) CreateCommit(context.Context, string, string) (string, error) {
+	return "", errors.New("injected commit refusal")
+}
+
+func (observationRefusalGitReader) StagedPaths(context.Context, string) ([]string, error) {
+	return nil, errors.New("injected index observation refusal")
+}
+
+type identityRefusalGitReader struct{ GitReader }
+
+func (identityRefusalGitReader) StatusDirty(context.Context, string) (bool, error) {
+	return false, errors.New("injected post-commit identity refusal")
+}
+
+// TestPropose_StageFailureDisclosesBranchAndWorktreeEffects pins the staging
+// call site to the same honesty contract as the later commit failure. The
+// artifact write has landed, but the real index is still known empty.
+func TestPropose_StageFailureDisclosesBranchAndWorktreeEffects(t *testing.T) {
+	root := buildFixtureRepo(t)
+	svc := testService()
+	svc.Git = addRefusalGitReader{GitReader: svc.Git}
+	initialHead := strings.TrimSpace(runFixtureGit(t, root, "rev-parse", "HEAD"))
+	const branch = "policy/stage-refusal"
+	const artifactPath = ".verdi/policy/overlays/frontend-go-version.md"
+
+	_, typed := svc.Propose(context.Background(), root, ProposeRequest{
+		Branch: branch, Kind: KindOverlay, Name: "frontend-go-version",
+		Content:  retitledOverlay(t, "stage-refusal"),
+		Expected: Expected{Branch: branch},
+	})
+	if typed == nil || typed.Classification != ClassificationOperational || typed.Code != "io-failure" {
+		t.Fatalf("failure = %+v, want operational/io-failure", typed)
+	}
+	effects := typed.Failure().RepositoryEffects
+	if effects == nil || effects.CurrentBranch != branch || effects.CurrentHead != initialHead || !effects.BranchCreated {
+		t.Fatalf("branch effects = %+v", effects)
+	}
+	if want := []string{artifactPath}; !reflect.DeepEqual(effects.WorktreePaths, want) {
+		t.Fatalf("worktree_paths = %v, want %v", effects.WorktreePaths, want)
+	}
+	if len(effects.StagedPaths) != 0 || len(effects.Unproven) != 0 {
+		t.Fatalf("staged/unproven effects = %+v, want known-empty", effects)
+	}
+}
+
+// TestPropose_CommitFailureDisclosesBranchWorktreeAndIndexEffects exercises
+// the real checkout, atomic write, and scoped git-add path, failing only the
+// final commit. Removing any tracked phase from the failure disclosure must
+// make this test fail.
+func TestPropose_CommitFailureDisclosesBranchWorktreeAndIndexEffects(t *testing.T) {
+	root := buildFixtureRepo(t)
+	svc := testService()
+	svc.Git = commitRefusalGitReader{GitReader: svc.Git}
+	initialHead := strings.TrimSpace(runFixtureGit(t, root, "rev-parse", "HEAD"))
+	const branch = "policy/commit-refusal"
+	const artifactPath = ".verdi/policy/overlays/frontend-go-version.md"
+
+	_, typed := svc.Propose(context.Background(), root, ProposeRequest{
+		Branch: branch, Kind: KindOverlay, Name: "frontend-go-version",
+		Content:  retitledOverlay(t, "commit-refusal"),
+		Expected: Expected{Branch: branch}, CommitMessage: "propose reviewed overlay",
+	})
+	if typed == nil || typed.Classification != ClassificationOperational || typed.Code != "io-failure" {
+		t.Fatalf("failure = %+v, want operational/io-failure", typed)
+	}
+	effects := typed.Failure().RepositoryEffects
+	if effects == nil {
+		t.Fatal("commit failure hid the repository effects")
+	}
+	if effects.InitialBranch != "main" || effects.InitialHead != initialHead || effects.TargetBranch != branch ||
+		effects.CurrentBranch != branch || effects.CurrentHead != initialHead || !effects.BranchCreated {
+		t.Fatalf("branch effects = %+v", effects)
+	}
+	if want := []string{artifactPath}; !reflect.DeepEqual(effects.WorktreePaths, want) {
+		t.Fatalf("worktree_paths = %v, want %v", effects.WorktreePaths, want)
+	}
+	if want := []string{artifactPath}; !reflect.DeepEqual(effects.StagedPaths, want) {
+		t.Fatalf("staged_paths = %v, want %v", effects.StagedPaths, want)
+	}
+	if len(effects.Unproven) != 0 {
+		t.Fatalf("unproven = %v, want exact observed effects", effects.Unproven)
+	}
+}
+
+// TestPropose_EffectObservationFailureIsExplicitlyUnproven ensures a second
+// operational failure while constructing the disclosure cannot collapse an
+// unknown repository dimension into a falsely known-empty array.
+func TestPropose_EffectObservationFailureIsExplicitlyUnproven(t *testing.T) {
+	root := buildFixtureRepo(t)
+	svc := testService()
+	svc.Git = observationRefusalGitReader{GitReader: svc.Git}
+
+	_, typed := svc.Propose(context.Background(), root, ProposeRequest{
+		Branch: "policy/observation-refusal", Kind: KindOverlay, Name: "frontend-go-version",
+		Content:  retitledOverlay(t, "observation-refusal"),
+		Expected: Expected{Branch: "policy/observation-refusal"},
+	})
+	if typed == nil || typed.Classification != ClassificationOperational || typed.Code != "io-failure" {
+		t.Fatalf("failure = %+v, want operational/io-failure", typed)
+	}
+	effects := typed.Failure().RepositoryEffects
+	if effects == nil {
+		t.Fatal("observation failure hid repository effects")
+	}
+	if len(effects.StagedPaths) != 0 {
+		t.Fatalf("staged_paths = %v, want empty with index disclosed as unproven", effects.StagedPaths)
+	}
+	if want := []string{"index"}; !reflect.DeepEqual(effects.Unproven, want) {
+		t.Fatalf("unproven = %v, want %v", effects.Unproven, want)
+	}
+}
+
+// TestPropose_PostCommitIdentityFailureDisclosesLandedCommit covers the last
+// failure edge in Propose: the commit succeeds, then identity resolution
+// fails. CurrentHead must expose the landed commit while the now-clean
+// worktree and index remain known empty.
+func TestPropose_PostCommitIdentityFailureDisclosesLandedCommit(t *testing.T) {
+	root := buildFixtureRepo(t)
+	svc := testService()
+	svc.Git = identityRefusalGitReader{GitReader: svc.Git}
+	initialHead := strings.TrimSpace(runFixtureGit(t, root, "rev-parse", "HEAD"))
+	const branch = "policy/post-commit-identity-refusal"
+
+	_, typed := svc.Propose(context.Background(), root, ProposeRequest{
+		Branch: branch, Kind: KindOverlay, Name: "frontend-go-version",
+		Content:  retitledOverlay(t, "post-commit-identity-refusal"),
+		Expected: Expected{Branch: branch},
+	})
+	if typed == nil || typed.Classification != ClassificationOperational || typed.Code != "io-failure" {
+		t.Fatalf("failure = %+v, want operational/io-failure", typed)
+	}
+	landedHead := strings.TrimSpace(runFixtureGit(t, root, "rev-parse", "HEAD"))
+	if landedHead == initialHead {
+		t.Fatal("injected identity failure occurred before the proposal commit landed")
+	}
+	effects := typed.Failure().RepositoryEffects
+	if effects == nil || effects.InitialHead != initialHead || effects.CurrentBranch != branch ||
+		effects.CurrentHead != landedHead || !effects.BranchCreated {
+		t.Fatalf("landed branch effects = %+v", effects)
+	}
+	if len(effects.WorktreePaths) != 0 || len(effects.StagedPaths) != 0 || len(effects.Unproven) != 0 {
+		t.Fatalf("post-commit residue = %+v, want known-clean worktree/index", effects)
+	}
 }
 
 // TestPropose_RefusesDivergentUncommittedTarget is the reviewer's
