@@ -114,7 +114,19 @@ func ControllerOperations() []ControllerOperation {
 	return append([]ControllerOperation(nil), controllerOperations...)
 }
 
+// controllerRequestSchema derives the request-payload schema for operation.
+//
+// SI-177 adds exactly one exception to the single derivation: the
+// install-expansion request carries the requested ref, the request purpose,
+// and the canonical installed item that make an installed expansion
+// reconstructible after a restart, so it advances to v2. Its v1 spelling is
+// migration-only and is never served, because a v1 document cannot carry
+// those operands. Every other request arm, and every result arm including
+// install-expansion's, stays at the accepted publication base.
 func controllerRequestSchema(operation ControllerOperation) string {
+	if operation == ControllerOperationInstallExpansion {
+		return "verdi.context-controller/" + string(operation) + "-request/v2"
+	}
 	return "verdi.context-controller/" + string(operation) + "-request/v1"
 }
 

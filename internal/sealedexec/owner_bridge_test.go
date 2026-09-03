@@ -470,3 +470,128 @@ func TestContextOwnerBridgeIsPure(t *testing.T) {
 		t.Fatal("DecodeOwnerCall mutated the caller's request bytes")
 	}
 }
+
+// TestContextOwnerBridgeInstallExpansionV2 is the private/public differential
+// for Task 2A's one authority-added exception to §3.3 (SI-177): the
+// install-expansion request advances to v2 on BOTH sides carrying the
+// requested ref, the request purpose, and the canonical installed data item,
+// while its result and all 21 other request arms stay at the publication base.
+//
+// The differential matters because the widened facts are what a restart
+// replays. If the projection dropped one of them, or if the request digest
+// bound the narrow bytes rather than the widened ones, an owner could
+// acknowledge an install whose lineage no later process could reconstruct.
+func TestContextOwnerBridgeInstallExpansionV2(t *testing.T) {
+	const (
+		privateV2 = "verdi.context-controller/install-expansion-request/v2"
+		privateV1 = "verdi.context-controller/install-expansion-request/v1"
+		publicV2  = "verdi.context-owner/install-expansion-request/v2"
+		publicV1  = "verdi.context-owner/install-expansion-request/v1"
+	)
+	operation := ControllerOperationInstallExpansion
+	public := contextowner.Operation(operation)
+	privateRequest := ownerPrivateRequestBytes(t, controllerCallFixture(t, 1, operation))
+
+	t.Run("both sides advance the request only", func(t *testing.T) {
+		if got := controllerRequestSchema(operation); got != privateV2 {
+			t.Fatalf("private install request schema = %q, want %q", got, privateV2)
+		}
+		if got := contextowner.RequestSchema(public); got != publicV2 {
+			t.Fatalf("published install request schema = %q, want %q", got, publicV2)
+		}
+		if got := controllerResultSchema(operation); got != "verdi.context-controller/install-expansion-result/v1" {
+			t.Fatalf("private install result schema = %q, want the publication base", got)
+		}
+		if got := contextowner.ResultSchema(public); got != "verdi.context-owner/install-expansion-result/v1" {
+			t.Fatalf("published install result schema = %q, want the publication base", got)
+		}
+		for _, other := range ControllerOperations() {
+			if other == operation {
+				continue
+			}
+			wantPrivate := "verdi.context-controller/" + string(other) + "-request/v1"
+			wantPublic := "verdi.context-owner/" + string(other) + "-request/v1"
+			if got := controllerRequestSchema(other); got != wantPrivate {
+				t.Fatalf("private request schema for %s = %q, want %q", other, got, wantPrivate)
+			}
+			if got := contextowner.RequestSchema(contextowner.Operation(other)); got != wantPublic {
+				t.Fatalf("published request schema for %s = %q, want %q", other, got, wantPublic)
+			}
+		}
+	})
+
+	t.Run("the widened facts survive the projection", func(t *testing.T) {
+		for _, member := range []string{`"ref":"spec/extra"`, `"purpose":"needed for implementation"`, `"data":{`} {
+			if !bytes.Contains(privateRequest, []byte(member)) {
+				t.Fatalf("private install payload lacks %s: %s", member, privateRequest)
+			}
+		}
+		call, err := DecodeOwnerCall(operation, privateRequest)
+		if err != nil {
+			t.Fatalf("DecodeOwnerCall: %v", err)
+		}
+		arm := ownerPublishedArm(t, privateRequest, privateV2, publicV2)
+		want := ownerPublicCallDocument(operation, ownerRequestDigest(privateRequest), arm)
+		got, err := contextowner.EncodeCall(call)
+		if err != nil {
+			t.Fatalf("EncodeCall: %v", err)
+		}
+		if !bytes.Equal(got, want) {
+			t.Fatalf("published install call\n got %s\nwant %s", got, want)
+		}
+
+		// The reply round trip still returns the exact v1 private result.
+		result := ownerResultFixture(t, operation)
+		privateResult := ownerPrivateResultBytes(t, result)
+		resultArm := ownerPublishedArm(t, privateResult,
+			controllerResultSchema(operation), contextowner.ResultSchema(public))
+		reply := ownerReplyFor(t, operation, want, resultArm)
+		encoded, err := EncodeOwnerReply(operation, reply)
+		if err != nil {
+			t.Fatalf("EncodeOwnerReply: %v", err)
+		}
+		if !bytes.Equal(encoded, privateResult) {
+			t.Fatalf("private install result\n got %s\nwant %s", encoded, privateResult)
+		}
+	})
+
+	t.Run("the v1 install request cannot be served", func(t *testing.T) {
+		legacy := bytes.Replace(privateRequest, []byte(`"`+privateV2+`"`), []byte(`"`+privateV1+`"`), 1)
+		if bytes.Equal(legacy, privateRequest) {
+			t.Fatal("the private install payload does not declare the v2 request schema")
+		}
+		if _, err := DecodeOwnerCall(operation, legacy); err == nil {
+			t.Fatal("DecodeOwnerCall published a migration-only v1 install request")
+		}
+	})
+
+	t.Run("the request digest binds the widened facts", func(t *testing.T) {
+		arm := ownerPublishedArm(t, privateRequest, privateV2, publicV2)
+		callDocument := ownerPublicCallDocument(operation, ownerRequestDigest(privateRequest), arm)
+		result := ownerResultFixture(t, operation)
+		resultArm := ownerPublishedArm(t, ownerPrivateResultBytes(t, result),
+			controllerResultSchema(operation), contextowner.ResultSchema(public))
+		document := ownerPublicReplyDocument(callDocument, resultArm)
+
+		for _, mutation := range []struct{ name, from, to string }{
+			{"rewritten ref", `"ref":"spec/extra"`, `"ref":"spec/other"`},
+			{"rewritten purpose", `"purpose":"needed for implementation"`, `"purpose":"rewritten purpose"`},
+		} {
+			t.Run(mutation.name, func(t *testing.T) {
+				rewritten := bytes.Replace(document, []byte(mutation.from), []byte(mutation.to), 1)
+				if bytes.Equal(rewritten, document) {
+					t.Fatalf("reply does not carry %s", mutation.from)
+				}
+				reply, err := contextowner.DecodeReply(bytes.NewReader(rewritten))
+				if err != nil {
+					// A rewritten fact the public codec already refuses is an
+					// equally closed outcome; nothing reached the bridge.
+					return
+				}
+				if _, err := EncodeOwnerReply(operation, reply); err == nil {
+					t.Fatal("EncodeOwnerReply accepted a reply whose install facts were rewritten")
+				}
+			})
+		}
+	})
+}

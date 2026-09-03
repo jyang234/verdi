@@ -1772,8 +1772,14 @@ func validExpansionInstall(install ExpansionInstall) (ExpansionInstall, error) {
 	if err := validateExecutionKey(install.Key); err != nil {
 		return ExpansionInstall{}, err
 	}
-	if err := requireText("request_id", install.RequestID); err != nil {
-		return ExpansionInstall{}, err
+	for _, row := range []struct{ field, value string }{
+		{"request_id", install.RequestID},
+		{"install ref", install.Ref},
+		{"install purpose", install.Purpose},
+	} {
+		if err := requireText(row.field, row.value); err != nil {
+			return ExpansionInstall{}, err
+		}
 	}
 	if install.ChildRevision != install.ParentRevision+1 {
 		return ExpansionInstall{}, fmt.Errorf("contextowner: child revision must follow parent")
@@ -1788,6 +1794,21 @@ func validExpansionInstall(install ExpansionInstall) (ExpansionInstall, error) {
 			return ExpansionInstall{}, err
 		}
 	}
+	data, err := nestedDocument("installed data item", DataItemSchemaID, install.Data)
+	if err != nil {
+		return ExpansionInstall{}, err
+	}
+	// The row ref stays a separate operand because the published data-item
+	// grammar permits an item to omit its own ref. When the item carries one,
+	// the two must agree, or the row would name a context the item does not.
+	item, err := contextcompile.DecodeDataItem(frameExact(data))
+	if err != nil {
+		return ExpansionInstall{}, fmt.Errorf("contextowner: installed data item is not a valid %s document: %w", DataItemSchemaID, err)
+	}
+	if item.Ref != nil && *item.Ref != install.Ref {
+		return ExpansionInstall{}, fmt.Errorf("contextowner: installed data item ref does not match the install ref")
+	}
+	install.Data = data
 	ack, err := canonicalEventAck(install.TerminalAck)
 	if err != nil {
 		return ExpansionInstall{}, err

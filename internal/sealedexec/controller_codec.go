@@ -241,6 +241,9 @@ type expansionInstallWire struct {
 	ExpansionDigest      string                `json:"expansion_digest"`
 	ExpansionRoot        string                `json:"expansion_root"`
 	TerminalAck          contextevent.EventAck `json:"terminal_ack"`
+	Ref                  string                `json:"ref"`
+	Purpose              string                `json:"purpose"`
+	Data                 json.RawMessage       `json:"data"`
 }
 
 type receiptInputsQueryWire struct {
@@ -2603,8 +2606,10 @@ func expansionInstallToWire(i ExpansionInstall) (expansionInstallWire, error) {
 	if err := validateExecutionKey(i.Key); err != nil {
 		return expansionInstallWire{}, err
 	}
-	if err := requireText("request_id", i.RequestID); err != nil {
-		return expansionInstallWire{}, err
+	for field, value := range map[string]string{"request_id": i.RequestID, "install ref": i.Ref, "install purpose": i.Purpose} {
+		if err := requireText(field, value); err != nil {
+			return expansionInstallWire{}, err
+		}
 	}
 	if i.ChildRevision != i.ParentRevision+1 {
 		return expansionInstallWire{}, fmt.Errorf("sealedexec: child revision must follow parent")
@@ -2614,14 +2619,44 @@ func expansionInstallToWire(i ExpansionInstall) (expansionInstallWire, error) {
 			return expansionInstallWire{}, err
 		}
 	}
+	// The installed item is carried as its own canonical document, so the
+	// component that owns the data-item grammar validates it. An item that
+	// names a ref must name this row's ref: the row ref stays separate only
+	// because the grammar lets an item omit one, never so the two may differ.
+	data, err := contextcompile.EncodeDataItem(i.Data)
+	if err != nil {
+		return expansionInstallWire{}, err
+	}
+	if i.Data.Ref != nil && *i.Data.Ref != i.Ref {
+		return expansionInstallWire{}, fmt.Errorf("sealedexec: installed data item ref does not match the requested ref")
+	}
 	ack, err := canonicalEventAck(i.TerminalAck)
 	if err != nil {
 		return expansionInstallWire{}, err
 	}
-	return expansionInstallWire{executionKeyToWire(i.Key), i.RequestID, i.ParentRevision, i.ParentManifestDigest, i.ChildRevision, i.ChildManifestDigest, i.ExpansionDigest, i.ExpansionRoot, ack}, nil
+	return expansionInstallWire{
+		Key: executionKeyToWire(i.Key), RequestID: i.RequestID,
+		ParentRevision: i.ParentRevision, ParentManifestDigest: i.ParentManifestDigest,
+		ChildRevision: i.ChildRevision, ChildManifestDigest: i.ChildManifestDigest,
+		ExpansionDigest: i.ExpansionDigest, ExpansionRoot: i.ExpansionRoot,
+		TerminalAck: ack, Ref: i.Ref, Purpose: i.Purpose, Data: trimFrame(data),
+	}, nil
 }
 func expansionInstallFromWire(w expansionInstallWire) (ExpansionInstall, error) {
-	i := ExpansionInstall{executionKeyFromWire(w.Key), w.RequestID, w.ParentRevision, w.ParentManifestDigest, w.ChildRevision, w.ChildManifestDigest, w.ExpansionDigest, w.ExpansionRoot, w.TerminalAck}
+	if len(w.Data) == 0 {
+		return ExpansionInstall{}, fmt.Errorf("sealedexec: installed data item is absent")
+	}
+	data, err := contextcompile.DecodeDataItem(frameNested(w.Data))
+	if err != nil {
+		return ExpansionInstall{}, err
+	}
+	i := ExpansionInstall{
+		Key: executionKeyFromWire(w.Key), RequestID: w.RequestID,
+		ParentRevision: w.ParentRevision, ParentManifestDigest: w.ParentManifestDigest,
+		ChildRevision: w.ChildRevision, ChildManifestDigest: w.ChildManifestDigest,
+		ExpansionDigest: w.ExpansionDigest, ExpansionRoot: w.ExpansionRoot,
+		TerminalAck: w.TerminalAck, Ref: w.Ref, Purpose: w.Purpose, Data: data,
+	}
 	_, e := expansionInstallToWire(i)
 	return i, e
 }

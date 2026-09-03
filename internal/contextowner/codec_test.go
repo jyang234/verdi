@@ -63,6 +63,9 @@ const (
 
 	fixtureSegmentDigest    = "sha256:ecf59a2696ca44a417e20e2a7eabb1b26e82c779f8546bea354a2cc80e8e1eed"
 	fixtureSegmentReference = "controller-segment/sha256/ecf59a2696ca44a417e20e2a7eabb1b26e82c779f8546bea354a2cc80e8e1eed"
+
+	fixtureInstallRef     = "spec/extra"
+	fixtureInstallPurpose = "needed for implementation"
 )
 
 // nestedDoc returns one exact standalone canonical JSON document with the
@@ -674,6 +677,39 @@ func fixtureExecutionKey() ExecutionKey {
 	return ExecutionKey{Flight: fixtureFlight, Lane: fixtureLane, Epoch: fixtureEpoch}
 }
 
+// fixtureExpansionInstall is Task 2A's widened install arm: every fact the
+// accepted publication base already carried, plus the requested ref, the
+// non-empty request purpose, and the canonical installed data item that make
+// the lineage reconstructible after a restart (correction §2.2, SI-177).
+func fixtureExpansionInstall(t *testing.T) ExpansionInstall {
+	t.Helper()
+	return ExpansionInstall{
+		Key: fixtureExecutionKey(), RequestID: "request-1", ParentRevision: 0,
+		ParentManifestDigest: fixtureManifestDigest, ChildRevision: 1,
+		ChildManifestDigest: fixtureChildDigest, ExpansionDigest: fixtureExpansionDigest,
+		ExpansionRoot: fixtureExpansionRoot, TerminalAck: fixtureEventAck(),
+		Ref: fixtureInstallRef, Purpose: fixtureInstallPurpose, Data: fixtureDataItemDoc(t),
+	}
+}
+
+// publishedRequestSchema and privateRequestSchema are the two literals §3.3
+// publishes for one operation. Every arm sits at the original publication base
+// except Task 2A's one ratified exception, whose request advances to v2 on
+// both sides while its result stays at v1.
+func publishedRequestSchema(operation Operation) string {
+	if operation == OperationInstallExpansion {
+		return "verdi.context-owner/install-expansion-request/v2"
+	}
+	return "verdi.context-owner/" + string(operation) + "-request/v1"
+}
+
+func privateRequestSchema(operation Operation) string {
+	if operation == OperationInstallExpansion {
+		return "verdi.context-controller/install-expansion-request/v2"
+	}
+	return "verdi.context-controller/" + string(operation) + "-request/v1"
+}
+
 func fixtureProfileRef() LogicalRef {
 	return LogicalRef{Schema: ProfileRefSchemaID, ID: "project", Digest: fixtureProfileDigest}
 }
@@ -796,12 +832,7 @@ func fixtureCall(t *testing.T, operation Operation) Call {
 	case OperationVerifyEpoch:
 		call.VerifyEpoch = VerifyEpochRequest{Schema: schema, Check: fixtureEpochCheck(t)}
 	case OperationInstallExpansion:
-		call.InstallExpansion = InstallExpansionRequest{Schema: schema, Install: ExpansionInstall{
-			Key: fixtureExecutionKey(), RequestID: "request-1", ParentRevision: 0,
-			ParentManifestDigest: fixtureManifestDigest, ChildRevision: 1,
-			ChildManifestDigest: fixtureChildDigest, ExpansionDigest: fixtureExpansionDigest,
-			ExpansionRoot: fixtureExpansionRoot, TerminalAck: fixtureEventAck(),
-		}}
+		call.InstallExpansion = InstallExpansionRequest{Schema: schema, Install: fixtureExpansionInstall(t)}
 	case OperationResolveReceiptInputs:
 		call.ResolveReceiptInputs = ResolveReceiptInputsRequest{Schema: schema, Query: ReceiptInputsQuery{
 			Request: fixtureExecutionRequestDoc(t), WorkspaceID: "workspace-1",
@@ -992,8 +1023,8 @@ func TestContextOwnerContract_Behavioral(t *testing.T) {
 			if got[i] != want[i] {
 				t.Fatalf("registry[%d] = %q, want %q", i, got[i], want[i])
 			}
-			if request := RequestSchema(want[i]); request != "verdi.context-owner/"+string(want[i])+"-request/v1" {
-				t.Fatalf("RequestSchema(%q) = %q", want[i], request)
+			if request := RequestSchema(want[i]); request != publishedRequestSchema(want[i]) {
+				t.Fatalf("RequestSchema(%q) = %q, want %q", want[i], request, publishedRequestSchema(want[i]))
 			}
 			if result := ResultSchema(want[i]); result != "verdi.context-owner/"+string(want[i])+"-result/v1" {
 				t.Fatalf("ResultSchema(%q) = %q", want[i], result)
@@ -1108,7 +1139,7 @@ func TestContextOwnerContract_Behavioral(t *testing.T) {
 				}
 				restored := bytes.Replace(wire.Request,
 					[]byte(`"schema":"`+RequestSchema(row.operation)+`"`),
-					[]byte(`"schema":"verdi.context-controller/`+string(row.operation)+`-request/v1"`), 1)
+					[]byte(`"schema":"`+privateRequestSchema(row.operation)+`"`), 1)
 				canonical, err := canonjson.Marshal(json.RawMessage(restored))
 				if err != nil {
 					t.Fatalf("canonicalize restored private payload: %v", err)
@@ -1143,7 +1174,7 @@ func TestContextOwnerContract_Behavioral(t *testing.T) {
 					t.Fatalf("published arm carries its schema literal %d times, want exactly 1: %s",
 						occurrences, wire.Request)
 				}
-				private := `"schema":"verdi.context-controller/` + string(operation) + `-request/v1"`
+				private := `"schema":"` + privateRequestSchema(operation) + `"`
 				restored := bytes.Replace(wire.Request, []byte(public), []byte(private), 1)
 				canonical, err := canonjson.Marshal(json.RawMessage(restored))
 				if err != nil {
@@ -2410,4 +2441,150 @@ func TestContextOwnerCopiesDecodedValues(t *testing.T) {
 	if second.StoreRedactedSegment.Segment.Bytes[0] != '{' {
 		t.Fatal("decoded segment bytes are shared between decodes")
 	}
+}
+
+// TestContextOwnerInstallExpansionRequestV2 freezes the public half of Task 2A
+// (correction §2.2 and §3.3's sole publication-rule exception, SI-177). The
+// install-expansion REQUEST arm advances to v2 and publishes exactly the
+// requested ref, the non-empty request purpose, and the canonical installed
+// data item alongside every fact the accepted base already carried. Its result
+// arm and all 21 other request arms stay at the publication base, and the v1
+// install request is migration-only.
+func TestContextOwnerInstallExpansionRequestV2(t *testing.T) {
+	const (
+		publicV2 = "verdi.context-owner/install-expansion-request/v2"
+		publicV1 = "verdi.context-owner/install-expansion-request/v1"
+	)
+
+	t.Run("exactly one arm advances", func(t *testing.T) {
+		if got := RequestSchema(OperationInstallExpansion); got != publicV2 {
+			t.Fatalf("RequestSchema(install-expansion) = %q, want %q", got, publicV2)
+		}
+		for _, operation := range Operations() {
+			want := "verdi.context-owner/" + string(operation) + "-result/v1"
+			if got := ResultSchema(operation); got != want {
+				t.Fatalf("ResultSchema(%q) = %q, want %q", operation, got, want)
+			}
+			if operation == OperationInstallExpansion {
+				continue
+			}
+			want = "verdi.context-owner/" + string(operation) + "-request/v1"
+			if got := RequestSchema(operation); got != want {
+				t.Fatalf("RequestSchema(%q) = %q, want %q", operation, got, want)
+			}
+		}
+		// The public and private literals differ, and the version moved on both
+		// sides of the request only: a shared v2 request with a v1 result is
+		// the exact ratified asymmetry.
+		if publishedRequestSchema(OperationInstallExpansion) == privateRequestSchema(OperationInstallExpansion) {
+			t.Fatal("the published and private install literals must differ")
+		}
+		if !strings.HasSuffix(privateRequestSchema(OperationInstallExpansion), "-request/v2") {
+			t.Fatal("the private install request must advance with the published one")
+		}
+	})
+
+	t.Run("widened canonical call bytes", func(t *testing.T) {
+		install := fixtureExpansionInstall(t)
+		ack, err := canonjson.Marshal(install.TerminalAck)
+		if err != nil {
+			t.Fatalf("canonjson.Marshal(terminal ack): %v", err)
+		}
+		want := `{"controller_request_digest":"` + fixtureRequestDigest + `",` +
+			`"operation":"install-expansion",` +
+			`"request":{"install":{` +
+			`"child_manifest_digest":"` + fixtureChildDigest + `",` +
+			`"child_revision":1,` +
+			`"data":` + string(install.Data) + `,` +
+			`"expansion_digest":"` + fixtureExpansionDigest + `",` +
+			`"expansion_root":"` + fixtureExpansionRoot + `",` +
+			`"key":{"epoch":"` + fixtureEpoch + `","flight":"` + fixtureFlight + `","lane":"` + fixtureLane + `"},` +
+			`"parent_manifest_digest":"` + fixtureManifestDigest + `",` +
+			`"parent_revision":0,` +
+			`"purpose":"` + fixtureInstallPurpose + `",` +
+			`"ref":"` + fixtureInstallRef + `",` +
+			`"request_id":"request-1",` +
+			`"terminal_ack":` + string(bytes.TrimSuffix(ack, []byte("\n"))) +
+			`},"schema":"` + publicV2 + `"},` +
+			`"schema":"verdi.context-owner-call/v1"}` + "\n"
+		got, err := EncodeCall(fixtureCall(t, OperationInstallExpansion))
+		if err != nil {
+			t.Fatalf("EncodeCall: %v", err)
+		}
+		if string(got) != want {
+			t.Fatalf("widened install call bytes\n got %s\nwant %s", got, want)
+		}
+
+		// The result arm is untouched by the widening.
+		reply, err := EncodeReply(fixtureReply(t, OperationInstallExpansion))
+		if err != nil {
+			t.Fatalf("EncodeReply: %v", err)
+		}
+		if !bytes.Contains(reply, []byte(`"result":{"schema":"verdi.context-owner/install-expansion-result/v1"}`)) {
+			t.Fatalf("install result arm changed: %s", reply)
+		}
+	})
+
+	t.Run("the v1 install request is migration-only", func(t *testing.T) {
+		encoded, err := EncodeCall(fixtureCall(t, OperationInstallExpansion))
+		if err != nil {
+			t.Fatalf("EncodeCall: %v", err)
+		}
+		legacy := bytes.Replace(encoded, []byte(`"`+publicV2+`"`), []byte(`"`+publicV1+`"`), 1)
+		if bytes.Equal(legacy, encoded) {
+			t.Fatal("the published call does not declare the v2 install request schema")
+		}
+		if _, err := DecodeCall(bytes.NewReader(legacy)); err == nil {
+			t.Fatal("DecodeCall accepted a v1 install-expansion request arm")
+		}
+		stale := fixtureCall(t, OperationInstallExpansion)
+		stale.InstallExpansion.Schema = publicV1
+		if _, err := EncodeCall(stale); err == nil {
+			t.Fatal("EncodeCall published a v1 install-expansion request arm")
+		}
+	})
+
+	t.Run("the three added members are required and bound", func(t *testing.T) {
+		refItem, refItemBytes, err := contextcompile.BuildDataItem(contextcompile.Candidate{
+			Source: contextcompile.SourceDeclaredContext, ID: "ref:" + fixtureInstallRef, Ref: fixtureInstallRef,
+		}, contextcompile.IncludedDeclaredContextRef, []byte("declared context bytes\n"))
+		if err != nil {
+			t.Fatalf("BuildDataItem declared-context fixture: %v", err)
+		}
+		if refItem.Ref == nil || *refItem.Ref != fixtureInstallRef {
+			t.Fatalf("declared-context fixture ref = %v, want %q", refItem.Ref, fixtureInstallRef)
+		}
+		matching := fixtureCall(t, OperationInstallExpansion)
+		matching.InstallExpansion.Install.Data = standaloneDoc(refItemBytes)
+		if _, err := EncodeCall(matching); err != nil {
+			t.Fatalf("EncodeCall(item carrying the row ref): %v", err)
+		}
+
+		for _, tc := range []struct {
+			name   string
+			mutate func(*ExpansionInstall)
+		}{
+			{"missing ref", func(in *ExpansionInstall) { in.Ref = "" }},
+			{"padded ref", func(in *ExpansionInstall) { in.Ref = " " + in.Ref }},
+			{"missing purpose", func(in *ExpansionInstall) { in.Purpose = "" }},
+			{"padded purpose", func(in *ExpansionInstall) { in.Purpose += " " }},
+			{"absent data item", func(in *ExpansionInstall) { in.Data = nil }},
+			{"null data item", func(in *ExpansionInstall) { in.Data = json.RawMessage("null") }},
+			{"data item declaring a foreign schema", func(in *ExpansionInstall) {
+				in.Data = nestedDoc(t, map[string]any{"schema": "verdi.other-item/v1"})
+			}},
+			{"item ref contradicts the row ref", func(in *ExpansionInstall) {
+				in.Data = standaloneDoc(refItemBytes)
+				in.Ref = "spec/other"
+			}},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				call := fixtureCall(t, OperationInstallExpansion)
+				tc.mutate(&call.InstallExpansion.Install)
+				if _, err := EncodeCall(call); err == nil {
+					t.Fatal("EncodeCall published an incomplete or contradicted install arm")
+				}
+			})
+		}
+	})
 }

@@ -273,6 +273,143 @@ func TestScopedContextMCPContract_Static(t *testing.T) {
 	})
 }
 
+// TestScopedMCPInstallsRestartReconstructibleExpansion freezes Task 2A's
+// widened install (correction §2.2, SI-177): the sealed client supplies the
+// requested ref, the non-empty request purpose, and the exact canonical
+// installed data item from the already-approved transition, so the lineage
+// remains reconstructible after a process restart.
+//
+// The compiler here is the real canonical child compiler rather than the
+// package fake, because the claim under test is that the durable row and the
+// owning proof helper agree on the SAME transition — a fake that invented
+// digests could not distinguish a genuine install from an echoed one.
+func TestScopedMCPInstallsRestartReconstructibleExpansion(t *testing.T) {
+	req := serviceRequest(t, ActionStart)
+	state := NewFlightState(mcpSnapshot(t, req, ""))
+	fake := &mcpFake{t: t, request: req, state: state}
+	server, err := NewScopedMCP(ScopedMCPPorts{
+		Resolver: fake, Compiler: NewCanonicalChildCompiler(), Verifier: fake,
+		Recorder: fake, Store: fake, Stamps: fake,
+	}, state)
+	if err != nil {
+		t.Fatalf("NewScopedMCP: %v", err)
+	}
+
+	type expansion struct {
+		ref, purpose string
+		arguments    string
+	}
+	// replayMutation rewrites one operand of a replay. Every row below must
+	// genuinely change the operand it names, or the assertion that follows
+	// would pass on a no-op rather than on a refused rewrite.
+	type replayMutation struct {
+		name  string
+		apply func(*InstalledExpansionInput)
+	}
+	rows := []expansion{
+		{ref: "spec/extra", purpose: "needed for implementation", arguments: `{"purpose":"needed for implementation","ref":"spec/extra"}`},
+		{ref: "spec/extra", purpose: "needed again", arguments: `{"purpose":"needed again","ref":"spec/extra"}`},
+	}
+	for i, row := range rows {
+		parent := state.Snapshot()
+		result, err := server.Call(context.Background(), ToolRequestContext, []byte(row.arguments))
+		if err != nil {
+			t.Fatalf("request_context %d: %v", i, err)
+		}
+		if result.Kind != InspectionContextApproved {
+			t.Fatalf("request_context %d = %#v, want an approved expansion", i, result)
+		}
+		if len(fake.installed) != i+1 {
+			t.Fatalf("installed rows = %d, want %d", len(fake.installed), i+1)
+		}
+		install := fake.installed[i]
+
+		// The three added facts are the approved transition's, not ambient.
+		if install.Ref != row.ref || install.Purpose != row.purpose {
+			t.Fatalf("install %d ref/purpose = %q/%q, want %q/%q", i, install.Ref, install.Purpose, row.ref, row.purpose)
+		}
+		installed, err := contextcompile.EncodeDataItem(install.Data)
+		if err != nil {
+			t.Fatalf("encode installed item %d: %v", i, err)
+		}
+		approved, err := contextcompile.EncodeDataItem(result.Context.Data)
+		if err != nil {
+			t.Fatalf("encode approved item %d: %v", i, err)
+		}
+		if !bytes.Equal(installed, approved) {
+			t.Fatalf("installed item %d\n got %s\nwant the approved item %s", i, installed, approved)
+		}
+
+		// Restart replay: the durable row plus the parent state and prior root
+		// reproduce every identity the row carries, through the one owning
+		// helper rather than a second copy of the preimages.
+		proof, err := ProveInstalledExpansion(InstalledExpansionInput{
+			Key: parent.Key, ParentRevision: parent.Revision, ParentManifestDigest: parent.ManifestDigest,
+			Ref: install.Ref, Purpose: install.Purpose, Item: install.Data,
+			PriorExpansionRoot: parent.ExpansionRoot,
+		})
+		if err != nil {
+			t.Fatalf("ProveInstalledExpansion(row %d): %v", i, err)
+		}
+		if install.RequestID != proof.RequestID || install.ChildManifestDigest != proof.ChildManifestDigest ||
+			install.ExpansionDigest != proof.ExpansionDigest || install.ExpansionRoot != proof.ExpansionRoot {
+			t.Fatalf("install %d = %#v, want the replayed proof %#v", i, install, proof)
+		}
+		if install.Key != parent.Key || install.ParentRevision != parent.Revision ||
+			install.ParentManifestDigest != parent.ManifestDigest || install.ChildRevision != parent.Revision+1 {
+			t.Fatalf("install %d transition identity = %#v, want the parent state %#v", i, install, parent)
+		}
+		if install.TerminalAck.Flight != parent.Key.Flight || install.TerminalAck.Lane != parent.Key.Lane ||
+			install.TerminalAck.Epoch != parent.Key.Epoch || install.TerminalAck.Kind != contextevent.KindChildManifest {
+			t.Fatalf("install %d terminal ack = %#v, want this flight's child-manifest ack", i, install.TerminalAck)
+		}
+		if install.RequestID != result.Context.RequestID || install.ChildManifestDigest != result.Context.ChildManifestDigest {
+			t.Fatalf("install %d contradicts the approved inspection %#v", i, result.Context)
+		}
+
+		// A row rewritten after the fact cannot replay: the recorded digests
+		// bind the exact ref, purpose, item, and prior root that were approved.
+		mutations := []replayMutation{
+			{"changed ref", func(in *InstalledExpansionInput) { in.Ref = "spec/other" }},
+			{"changed purpose", func(in *InstalledExpansionInput) { in.Purpose = "rewritten purpose" }},
+			// A substituted root is a real change at every position: the first
+			// expansion legitimately starts from the empty ledger, so only a
+			// different root — never a dropped one — rewrites it.
+			{"substituted prior root", func(in *InstalledExpansionInput) {
+				in.PriorExpansionRoot = testDigest("other-prior-root")
+			}},
+		}
+		if parent.ExpansionRoot != "" {
+			mutations = append(mutations, replayMutation{
+				"dropped prior root", func(in *InstalledExpansionInput) { in.PriorExpansionRoot = "" },
+			})
+		}
+		for _, mutation := range mutations {
+			replay := InstalledExpansionInput{
+				Key: parent.Key, ParentRevision: parent.Revision, ParentManifestDigest: parent.ManifestDigest,
+				Ref: install.Ref, Purpose: install.Purpose, Item: install.Data,
+				PriorExpansionRoot: parent.ExpansionRoot,
+			}
+			mutation.apply(&replay)
+			rewritten, err := ProveInstalledExpansion(replay)
+			if err != nil {
+				t.Fatalf("ProveInstalledExpansion(install %d, %s): %v", i, mutation.name, err)
+			}
+			if rewritten.ExpansionRoot == install.ExpansionRoot {
+				t.Fatalf("install %d replayed identically after %s", i, mutation.name)
+			}
+		}
+	}
+
+	// The second expansion accumulates onto the first installed root, so the
+	// ordered lineage a restart replays is genuinely chained.
+	if fake.installed[1].ExpansionRoot == fake.installed[0].ExpansionRoot ||
+		fake.installed[1].ParentManifestDigest != fake.installed[0].ChildManifestDigest ||
+		fake.installed[1].ParentRevision != fake.installed[0].ChildRevision {
+		t.Fatalf("second install = %#v, want it chained onto %#v", fake.installed[1], fake.installed[0])
+	}
+}
+
 // TestSharedFlightStateSerializesServiceAndMCPAppends proves I-115's single
 // append owner. Its recorder prosecutes Amendment 002 §7's durable identity
 // (flight,lane,epoch,manifest_revision,source_sequence), so an implementation
@@ -600,6 +737,7 @@ type mcpFake struct {
 	appendErrAt         int
 	storeErr            error
 	installs            int
+	installed           []ExpansionInstall
 }
 
 func (f *mcpFake) ResolveContext(_ context.Context, ref string) (ContextResolution, error) {
@@ -621,9 +759,27 @@ func (f *mcpFake) ResolveContext(_ context.Context, ref string) (ContextResoluti
 	}
 	return ContextResolution{Verification: v, Ref: ref, Data: item}, nil
 }
+
+// CompileChild answers through the owning transition proof rather than with
+// invented digests. SI-177 makes the scoped tool cross-match its compiler
+// against that proof before acknowledging anything, so a fake that fabricated
+// digests would be refused — correctly — and would prove nothing about the
+// ports this fake exists to stand in for.
 func (f *mcpFake) CompileChild(_ context.Context, request ChildCompileRequest) (ChildManifest, error) {
-	childRevision := request.Snapshot.Revision + 1
-	return ChildManifest{Verification: proven(), RequestID: request.RequestID, ParentRevision: request.Snapshot.Revision, ParentManifestDigest: request.Snapshot.ManifestDigest, ChildRevision: childRevision, ChildManifestDigest: testDigest(fmt.Sprintf("child-manifest-%d", childRevision)), ExpansionDigest: testDigest(fmt.Sprintf("expansion-%d", childRevision)), ExpansionRoot: testDigest(fmt.Sprintf("expanded-root-%d", childRevision))}, nil
+	proof, err := ProveInstalledExpansion(InstalledExpansionInput{
+		Key: request.Snapshot.Key, ParentRevision: request.Snapshot.Revision,
+		ParentManifestDigest: request.Snapshot.ManifestDigest, Ref: request.Ref,
+		Purpose: request.Purpose, Item: request.Data, PriorExpansionRoot: request.Snapshot.ExpansionRoot,
+	})
+	if err != nil {
+		return ChildManifest{}, err
+	}
+	return ChildManifest{
+		Verification: proven(), RequestID: request.RequestID,
+		ParentRevision: request.Snapshot.Revision, ParentManifestDigest: request.Snapshot.ManifestDigest,
+		ChildRevision: request.Snapshot.Revision + 1, ChildManifestDigest: proof.ChildManifestDigest,
+		ExpansionDigest: proof.ExpansionDigest, ExpansionRoot: proof.ExpansionRoot,
+	}, nil
 }
 func (f *mcpFake) VerifyEpoch(context.Context, EpochCheck) (Verification, error) {
 	if f.verify.State == "" {
@@ -641,8 +797,9 @@ func (f *mcpFake) Append(_ context.Context, event contextevent.Event) (contextev
 	f.order = append(f.order, "ack:"+string(event.Kind))
 	return contextevent.EventAck{Schema: contextevent.AckSchemaID, Flight: event.Flight, Lane: event.Lane, Epoch: event.Epoch, Session: event.Session, ManifestRevision: event.ManifestRevision, Kind: event.Kind, SourceSequence: event.SourceSequence, EventDigest: event.EventDigest, GlobalSequence: uint64(len(f.kinds))}, nil
 }
-func (f *mcpFake) InstallExpansion(context.Context, ExpansionInstall) error {
+func (f *mcpFake) InstallExpansion(_ context.Context, install ExpansionInstall) error {
 	f.installs++
+	f.installed = append(f.installed, install)
 	f.order = append(f.order, "install")
 	return f.storeErr
 }

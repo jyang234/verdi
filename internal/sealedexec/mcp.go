@@ -388,6 +388,13 @@ type ChildManifest struct {
 }
 
 // ExpansionInstall is atomically persisted immediately after child ack.
+//
+// Ref, Purpose, and Data are SI-177's restart-reconstructible facts: without
+// them a later process holding only this durable row could not replay the
+// transition, because the request id, child-manifest digest, and expansion
+// digest all bind operands the narrow row never carried. Ref stays a separate
+// member because the data-item grammar makes an item's own ref optional; when
+// the item carries one the two must agree.
 type ExpansionInstall struct {
 	Key                  ExecutionKey
 	RequestID            string
@@ -398,6 +405,9 @@ type ExpansionInstall struct {
 	ExpansionDigest      string
 	ExpansionRoot        string
 	TerminalAck          contextevent.EventAck
+	Ref                  string
+	Purpose              string
+	Data                 contextcompile.DataItem
 }
 
 type ContextResolver interface {
@@ -563,6 +573,24 @@ func (m *ScopedMCP) requestContext(ctx context.Context, ref, purpose string) (In
 		snapshot.Invalidated = true
 		return InspectionResult{}, verdict("child manifest transition identity mismatch")
 	}
+	// SI-177: derive the transition independently from the parent state and
+	// the exact facts this call approved, and require the compiler's answer to
+	// match before anything is acknowledged. The same derivation is what a
+	// restart replays from the durable install row below, so a transition that
+	// cannot be reproduced never becomes an approved, installed expansion.
+	proof, err := ProveInstalledExpansion(InstalledExpansionInput{
+		Key: snapshot.Key, ParentRevision: snapshot.Revision, ParentManifestDigest: snapshot.ManifestDigest,
+		Ref: ref, Purpose: purpose, Item: resolution.Data, PriorExpansionRoot: snapshot.ExpansionRoot,
+	})
+	if err != nil {
+		snapshot.Invalidated = true
+		return InspectionResult{}, operational("prove approved expansion transition", err)
+	}
+	if proof.RequestID != requestID || proof.ChildManifestDigest != child.ChildManifestDigest ||
+		proof.ExpansionDigest != child.ExpansionDigest || proof.ExpansionRoot != child.ExpansionRoot {
+		snapshot.Invalidated = true
+		return InspectionResult{}, verdict("child manifest transition does not reproduce the installed expansion proof")
+	}
 	if err := m.appendContextDecision(ctx, requestID, countersign.VerdictProven, "approved", child.ChildManifestDigest, []string{}); err != nil {
 		snapshot.Invalidated = true
 		return InspectionResult{}, err
@@ -577,6 +605,7 @@ func (m *ScopedMCP) requestContext(ctx context.Context, ref, purpose string) (In
 		ParentManifestDigest: child.ParentManifestDigest, ChildRevision: child.ChildRevision,
 		ChildManifestDigest: child.ChildManifestDigest, ExpansionDigest: child.ExpansionDigest,
 		ExpansionRoot: child.ExpansionRoot, TerminalAck: terminal.Ack,
+		Ref: ref, Purpose: purpose, Data: resolution.Data,
 	}
 	if err := m.ports.Store.InstallExpansion(ctx, install); err != nil {
 		snapshot.Invalidated = true
@@ -624,20 +653,12 @@ func (m *ScopedMCP) appendEvent(ctx context.Context, kind contextevent.Kind, pay
 	return m.state.appendLocked(ctx, m.ports.Recorder, m.ports.Stamps, workspace, kind, payload)
 }
 
+// contextRequestID reads the flight identity and parent manifest state a
+// request id binds out of the current flight state. The preimage itself is
+// owned by installedContextRequestID, so the live tool call and a later
+// replay from a durable install row digest exactly the same bytes.
 func contextRequestID(state FlightStateSnapshot, ref, purpose string) (string, error) {
-	digest, err := canonjson.Digest(struct {
-		Flight         string `json:"flight"`
-		Lane           string `json:"lane"`
-		Epoch          string `json:"epoch"`
-		Revision       uint64 `json:"revision"`
-		ManifestDigest string `json:"manifest_digest"`
-		Ref            string `json:"ref"`
-		Purpose        string `json:"purpose"`
-	}{Flight: state.Key.Flight, Lane: state.Key.Lane, Epoch: state.Key.Epoch, Revision: state.Revision, ManifestDigest: state.ManifestDigest, Ref: ref, Purpose: purpose})
-	if err != nil {
-		return "", err
-	}
-	return "context-request:" + strings.TrimPrefix(digest, "sha256:"), nil
+	return installedContextRequestID(state.Key, state.Revision, state.ManifestDigest, ref, purpose)
 }
 
 func nonNilSorted(values []string) []string {

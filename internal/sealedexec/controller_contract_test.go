@@ -88,7 +88,9 @@ func TestContextControllerWireContract_Static(t *testing.T) {
 			{operation: "next-stamp", requestSchema: "verdi.context-controller/next-stamp-request/v1", resultSchema: "verdi.context-controller/next-stamp-result/v1"},
 			{operation: "resolve-context", requestSchema: "verdi.context-controller/resolve-context-request/v1", resultSchema: "verdi.context-controller/resolve-context-result/v1"},
 			{operation: "verify-epoch", requestSchema: "verdi.context-controller/verify-epoch-request/v1", resultSchema: "verdi.context-controller/verify-epoch-result/v1"},
-			{operation: "install-expansion", requestSchema: "verdi.context-controller/install-expansion-request/v1", resultSchema: "verdi.context-controller/install-expansion-result/v1"},
+			// Task 2A's one authority-added exception: only this request arm
+			// advances to v2, and its result arm stays at the publication base.
+			{operation: "install-expansion", requestSchema: "verdi.context-controller/install-expansion-request/v2", resultSchema: "verdi.context-controller/install-expansion-result/v1"},
 			{operation: "resolve-receipt-inputs", requestSchema: "verdi.context-controller/resolve-receipt-inputs-request/v1", resultSchema: "verdi.context-controller/resolve-receipt-inputs-result/v1"},
 			{operation: "append-receipt", requestSchema: "verdi.context-controller/append-receipt-request/v1", resultSchema: "verdi.context-controller/append-receipt-result/v1"},
 			{operation: "resolve-receipt-verification-authority", requestSchema: "verdi.context-controller/resolve-receipt-verification-authority-request/v1", resultSchema: "verdi.context-controller/resolve-receipt-verification-authority-result/v1"},
@@ -345,7 +347,7 @@ func TestContextControllerWireContract_Static(t *testing.T) {
 		sessionRecord := SessionRecord{Key: key, SessionRef: "provider-session", AdapterVersion: request.AdapterVersion, ProfileDigest: request.Profile.Digest, WorkspaceID: "workspace-1", LifecycleAck: eventAck}
 		contextQuery := ContextQuery{Key: key, Ref: "spec/test#ac-1"}
 		epochCheck := controllerEpochCheckFixture(t)
-		expansionInstall := ExpansionInstall{Key: key, RequestID: "request-1", ParentRevision: 0, ParentManifestDigest: request.ManifestDigest, ChildRevision: 1, ChildManifestDigest: testDigest("child-manifest"), ExpansionDigest: testDigest("expansion"), ExpansionRoot: testDigest("expansion-root"), TerminalAck: eventAck}
+		expansionInstall := ExpansionInstall{Key: key, RequestID: "request-1", ParentRevision: 0, ParentManifestDigest: request.ManifestDigest, ChildRevision: 1, ChildManifestDigest: testDigest("child-manifest"), ExpansionDigest: testDigest("expansion"), ExpansionRoot: testDigest("expansion-root"), TerminalAck: eventAck, Ref: "spec/extra", Purpose: "needed for implementation", Data: validDataItem(t)}
 		receiptQuery := ReceiptInputsQuery{Request: request, WorkspaceID: "workspace-1", DispatchDigest: testDigest("dispatch"), TerminalRevision: 0, TerminalSourceSequence: 1, TerminalGlobalSequence: 1, EventChainRoot: receipt.EventChainRoot, ResultFactsDigest: testDigest("result-facts")}
 		receiptAppend := ReceiptAppend{Receipt: receipt, Event: receiptEvent}
 		authorityQuery := contextreceipt.AuthorityQuery{RequestDigest: testDigest("verify-request"), ReceiptDigest: receipt.Digest, CandidateCommit: receipt.OutputCommit, CandidateTree: receipt.OutputTree, ProfileRef: contextreceipt.ProfileRef{Schema: request.Profile.Schema, ID: request.Profile.ID, Digest: request.Profile.Digest}, RunnerClaim: receipt.RunnerPrincipalResolution.Claim}
@@ -422,7 +424,7 @@ func TestContextControllerWireContract_Static(t *testing.T) {
 			{name: "VerifyEpoch", operation: "verify-epoch", requestSchema: "verdi.context-controller/verify-epoch-request/v1", requestField: "check", requestValue: epochCheck, reply: verifyEpochResult, want: verifyEpochResult.VerifyEpoch.Verification, invoke: func(client *ControllerClient) (any, error) {
 				return client.VerifyEpoch(context.Background(), epochCheck)
 			}},
-			{name: "InstallExpansion", operation: "install-expansion", requestSchema: "verdi.context-controller/install-expansion-request/v1", requestField: "install", requestValue: expansionInstall, reply: installExpansionResult, invoke: func(client *ControllerClient) (any, error) {
+			{name: "InstallExpansion", operation: "install-expansion", requestSchema: "verdi.context-controller/install-expansion-request/v2", requestField: "install", requestValue: expansionInstall, reply: installExpansionResult, invoke: func(client *ControllerClient) (any, error) {
 				return nil, client.InstallExpansion(context.Background(), expansionInstall)
 			}},
 			{name: "ResolveReceiptInputs", operation: "resolve-receipt-inputs", requestSchema: "verdi.context-controller/resolve-receipt-inputs-request/v1", requestField: "query", requestValue: receiptQuery, reply: resolveReceiptInputsResult, want: resolveReceiptInputsResult.ResolveReceiptInputs.Inputs, invoke: func(client *ControllerClient) (any, error) {
@@ -1549,7 +1551,7 @@ func controllerCallFixture(t *testing.T, sequence uint64, operation ControllerOp
 	case ControllerOperationVerifyEpoch:
 		call.VerifyEpoch = ControllerVerifyEpochRequest{Schema: controllerRequestSchema(operation), Check: controllerEpochCheckFixture(t)}
 	case ControllerOperationInstallExpansion:
-		call.InstallExpansion = ControllerInstallExpansionRequest{Schema: controllerRequestSchema(operation), Install: ExpansionInstall{Key: executionKey(request), RequestID: "request-1", ParentRevision: 0, ParentManifestDigest: request.ManifestDigest, ChildRevision: 1, ChildManifestDigest: testDigest("child-manifest"), ExpansionDigest: testDigest("expansion"), ExpansionRoot: testDigest("expansion-root"), TerminalAck: ack}}
+		call.InstallExpansion = ControllerInstallExpansionRequest{Schema: controllerRequestSchema(operation), Install: controllerExpansionInstallFixture(t, request, ack)}
 	case ControllerOperationResolveReceiptInputs:
 		call.ResolveReceiptInputs = ControllerResolveReceiptInputsRequest{Schema: controllerRequestSchema(operation), Query: ReceiptInputsQuery{Request: request, WorkspaceID: "workspace-1", DispatchDigest: testDigest("dispatch"), TerminalRevision: 0, TerminalSourceSequence: 1, TerminalGlobalSequence: 1, EventChainRoot: receipt.EventChainRoot, ResultFactsDigest: testDigest("result-facts")}}
 	case ControllerOperationAppendReceipt:
@@ -1694,6 +1696,20 @@ func controllerContextResolutionFixture(t *testing.T) ContextResolution {
 	return ContextResolution{Verification: Verification{State: contextcompile.ResolutionProven, Witnesses: []string{}}, Ref: "spec/test#ac-1", Data: decoded}
 }
 
+// controllerExpansionInstallFixture is Task 2A's widened install row: every
+// fact the accepted v1 row already carried, plus the requested ref, the
+// non-empty request purpose, and the canonical installed data item.
+func controllerExpansionInstallFixture(t *testing.T, request ExecutionRequest, ack contextevent.EventAck) ExpansionInstall {
+	t.Helper()
+	return ExpansionInstall{
+		Key: executionKey(request), RequestID: "request-1", ParentRevision: 0,
+		ParentManifestDigest: request.ManifestDigest, ChildRevision: 1,
+		ChildManifestDigest: testDigest("child-manifest"), ExpansionDigest: testDigest("expansion"),
+		ExpansionRoot: testDigest("expansion-root"), TerminalAck: ack,
+		Ref: "spec/extra", Purpose: "needed for implementation", Data: validDataItem(t),
+	}
+}
+
 func controllerEpochCheckFixture(t *testing.T) EpochCheck {
 	t.Helper()
 	request := validExecutionRequest(t, ActionStart)
@@ -1831,4 +1847,196 @@ func TestControllerContractDocument(t *testing.T) {
 	if !bytes.Equal(encoded, again) {
 		t.Fatal("EncodeControllerContract is not deterministic")
 	}
+}
+
+// TestControllerInstallExpansionRequestV2 freezes the private half of Task 2A
+// (correction §2.2 and §3.3's one ratified exception, SI-177): the
+// install-expansion REQUEST arm advances to v2 carrying exactly the requested
+// ref, the non-empty request purpose, and the canonical installed data item,
+// while its result arm and every other request and result arm stay at the
+// publication base. The v1 request is migration-only and cannot be served,
+// because it lacks the operands a restart needs to reconstruct the lineage.
+func TestControllerInstallExpansionRequestV2(t *testing.T) {
+	const (
+		requestV2 = "verdi.context-controller/install-expansion-request/v2"
+		requestV1 = "verdi.context-controller/install-expansion-request/v1"
+	)
+	request := validExecutionRequest(t, ActionStart)
+	_, ack := controllerEventFixture(t, request)
+	install := controllerExpansionInstallFixture(t, request, ack)
+	callFor := func(row ExpansionInstall) ControllerCall {
+		return ControllerCall{
+			Schema: ControllerCallSchemaID, CallSequence: 1, Operation: ControllerOperationInstallExpansion,
+			InstallExpansion: ControllerInstallExpansionRequest{
+				Schema: controllerRequestSchema(ControllerOperationInstallExpansion), Install: row,
+			},
+		}
+	}
+	payloadOf := func(t *testing.T, call ControllerCall) []byte {
+		t.Helper()
+		frame, err := EncodeControllerCall(call)
+		if err != nil {
+			t.Fatalf("EncodeControllerCall: %v", err)
+		}
+		var envelope struct {
+			Payload json.RawMessage `json:"payload"`
+		}
+		if err := json.Unmarshal(frame, &envelope); err != nil {
+			t.Fatalf("read controller call payload: %v", err)
+		}
+		return envelope.Payload
+	}
+
+	t.Run("only the install request arm advances", func(t *testing.T) {
+		if got := controllerRequestSchema(ControllerOperationInstallExpansion); got != requestV2 {
+			t.Fatalf("install request schema = %q, want %q", got, requestV2)
+		}
+		for _, operation := range ControllerOperations() {
+			want := "verdi.context-controller/" + string(operation) + "-result/v1"
+			if got := controllerResultSchema(operation); got != want {
+				t.Fatalf("result schema for %s = %q, want %q", operation, got, want)
+			}
+			if operation == ControllerOperationInstallExpansion {
+				continue
+			}
+			want = "verdi.context-controller/" + string(operation) + "-request/v1"
+			if got := controllerRequestSchema(operation); got != want {
+				t.Fatalf("request schema for %s = %q, want %q", operation, got, want)
+			}
+		}
+	})
+
+	t.Run("widened canonical request bytes", func(t *testing.T) {
+		itemBytes, err := contextcompile.EncodeDataItem(install.Data)
+		if err != nil {
+			t.Fatalf("EncodeDataItem: %v", err)
+		}
+		ackBytes, err := canonjson.Marshal(ack)
+		if err != nil {
+			t.Fatalf("canonjson.Marshal(ack): %v", err)
+		}
+		want := `{"install":{` +
+			`"child_manifest_digest":"` + install.ChildManifestDigest + `",` +
+			`"child_revision":1,` +
+			`"data":` + string(bytes.TrimSuffix(itemBytes, []byte("\n"))) + `,` +
+			`"expansion_digest":"` + install.ExpansionDigest + `",` +
+			`"expansion_root":"` + install.ExpansionRoot + `",` +
+			`"key":{"epoch":"` + install.Key.Epoch + `","flight":"` + install.Key.Flight + `","lane":"` + install.Key.Lane + `"},` +
+			`"parent_manifest_digest":"` + install.ParentManifestDigest + `",` +
+			`"parent_revision":0,` +
+			`"purpose":"` + install.Purpose + `",` +
+			`"ref":"` + install.Ref + `",` +
+			`"request_id":"` + install.RequestID + `",` +
+			`"terminal_ack":` + string(bytes.TrimSuffix(ackBytes, []byte("\n"))) +
+			`},"schema":"` + requestV2 + `"}`
+		if got := string(payloadOf(t, callFor(install))); got != want {
+			t.Fatalf("widened install payload\n got %s\nwant %s", got, want)
+		}
+
+		// Exactly three members were added; nothing the v1 row carried was
+		// dropped or renamed on the way to v2.
+		var members struct {
+			Install map[string]json.RawMessage `json:"install"`
+		}
+		if err := json.Unmarshal(payloadOf(t, callFor(install)), &members); err != nil {
+			t.Fatalf("read install members: %v", err)
+		}
+		for _, name := range []string{
+			"key", "request_id", "parent_revision", "parent_manifest_digest", "child_revision",
+			"child_manifest_digest", "expansion_digest", "expansion_root", "terminal_ack",
+			"ref", "purpose", "data",
+		} {
+			if _, ok := members.Install[name]; !ok {
+				t.Fatalf("install member %q is absent", name)
+			}
+		}
+		if len(members.Install) != 12 {
+			t.Fatalf("install members = %v, want exactly the accepted nine plus ref, purpose, and data", members.Install)
+		}
+	})
+
+	t.Run("round trip preserves the three added facts", func(t *testing.T) {
+		frame, err := EncodeControllerCall(callFor(install))
+		if err != nil {
+			t.Fatalf("EncodeControllerCall: %v", err)
+		}
+		decoded, err := DecodeControllerCall(bytes.NewReader(frame))
+		if err != nil {
+			t.Fatalf("DecodeControllerCall: %v", err)
+		}
+		got := decoded.InstallExpansion.Install
+		if got.Ref != install.Ref || got.Purpose != install.Purpose {
+			t.Fatalf("decoded ref/purpose = %q/%q, want %q/%q", got.Ref, got.Purpose, install.Ref, install.Purpose)
+		}
+		wantItem, err := contextcompile.EncodeDataItem(install.Data)
+		if err != nil {
+			t.Fatalf("EncodeDataItem: %v", err)
+		}
+		gotItem, err := contextcompile.EncodeDataItem(got.Data)
+		if err != nil {
+			t.Fatalf("EncodeDataItem(decoded): %v", err)
+		}
+		if !bytes.Equal(gotItem, wantItem) {
+			t.Fatalf("decoded item\n got %s\nwant %s", gotItem, wantItem)
+		}
+	})
+
+	t.Run("v1 install request is migration-only", func(t *testing.T) {
+		frame, err := EncodeControllerCall(callFor(install))
+		if err != nil {
+			t.Fatalf("EncodeControllerCall: %v", err)
+		}
+		if got := bytes.Count(frame, []byte(`"`+requestV2+`"`)); got != 1 {
+			t.Fatalf("frame declares the v2 request schema %d times, want exactly 1", got)
+		}
+		legacy := bytes.Replace(frame, []byte(`"`+requestV2+`"`), []byte(`"`+requestV1+`"`), 1)
+		if _, err := DecodeControllerCall(bytes.NewReader(legacy)); err == nil {
+			t.Fatal("DecodeControllerCall served a v1 install-expansion request")
+		}
+		stale := callFor(install)
+		stale.InstallExpansion.Schema = requestV1
+		if _, err := EncodeControllerCall(stale); err == nil {
+			t.Fatal("EncodeControllerCall emitted a v1 install-expansion request")
+		}
+	})
+
+	t.Run("the three added facts are required and bound", func(t *testing.T) {
+		refItem, _, err := contextcompile.BuildDataItem(contextcompile.Candidate{
+			Source: contextcompile.SourceDeclaredContext, ID: "ref:" + install.Ref, Ref: install.Ref,
+		}, contextcompile.IncludedDeclaredContextRef, []byte("declared context bytes\n"))
+		if err != nil {
+			t.Fatalf("BuildDataItem declared-context fixture: %v", err)
+		}
+
+		matching := install
+		matching.Data = refItem
+		if _, err := EncodeControllerCall(callFor(matching)); err != nil {
+			t.Fatalf("EncodeControllerCall(item carrying the row ref): %v", err)
+		}
+
+		for _, tc := range []struct {
+			name   string
+			mutate func(*ExpansionInstall)
+		}{
+			{"missing ref", func(in *ExpansionInstall) { in.Ref = "" }},
+			{"padded ref", func(in *ExpansionInstall) { in.Ref = " " + in.Ref }},
+			{"missing purpose", func(in *ExpansionInstall) { in.Purpose = "" }},
+			{"padded purpose", func(in *ExpansionInstall) { in.Purpose += " " }},
+			{"absent data item", func(in *ExpansionInstall) { in.Data = contextcompile.DataItem{} }},
+			{"data item declaring a foreign schema", func(in *ExpansionInstall) { in.Data.Schema = "verdi.other-item/v1" }},
+			{"data item with no content digest", func(in *ExpansionInstall) { in.Data.ContentDigest = "" }},
+			{"item ref contradicts the row ref", func(in *ExpansionInstall) {
+				in.Data = refItem
+				in.Ref = "spec/other"
+			}},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				bad := install
+				tc.mutate(&bad)
+				if _, err := EncodeControllerCall(callFor(bad)); err == nil {
+					t.Fatal("EncodeControllerCall accepted an incomplete or contradicted install row")
+				}
+			})
+		}
+	})
 }

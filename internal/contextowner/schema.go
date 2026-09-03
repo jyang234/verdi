@@ -49,6 +49,11 @@ const (
 	armSchemaPrefix  = "verdi.context-owner/"
 	requestSchemaTag = "-request/v1"
 	resultSchemaTag  = "-result/v1"
+	// installRequestSchemaTag is SI-177's one ratified exception to the
+	// publication base: the install-expansion request publishes the requested
+	// ref, the request purpose, and the canonical installed item, so it
+	// advances to v2 in lockstep with the private arm it mirrors.
+	installRequestSchemaTag = "-request/v2"
 )
 
 // The schema literals of the nested canonical Verdi documents a published arm
@@ -472,7 +477,14 @@ func Operations() []Operation {
 }
 
 // RequestSchema derives the published request-arm schema for operation.
+//
+// Exactly one arm departs from the base tag: install-expansion's request is
+// published at v2 (SI-177). Its v1 spelling is migration-only and is refused
+// rather than served, and its result arm is unaffected.
 func RequestSchema(operation Operation) string {
+	if operation == OperationInstallExpansion {
+		return armSchemaPrefix + string(operation) + installRequestSchemaTag
+	}
 	return armSchemaPrefix + string(operation) + requestSchemaTag
 }
 
@@ -725,6 +737,11 @@ type EpochCheck struct {
 }
 
 // ExpansionInstall is atomically persisted immediately after a child ack.
+//
+// Ref, Purpose, and Data publish SI-177's restart-reconstructible facts
+// mechanically: they are the accepted private members with no projection
+// choice. Data is the nested canonical data-item document, and an item that
+// carries its own optional ref must carry this row's ref.
 type ExpansionInstall struct {
 	Key                  ExecutionKey          `json:"key"`
 	RequestID            string                `json:"request_id"`
@@ -735,6 +752,9 @@ type ExpansionInstall struct {
 	ExpansionDigest      string                `json:"expansion_digest"`
 	ExpansionRoot        string                `json:"expansion_root"`
 	TerminalAck          contextevent.EventAck `json:"terminal_ack"`
+	Ref                  string                `json:"ref"`
+	Purpose              string                `json:"purpose"`
+	Data                 json.RawMessage       `json:"data"`
 }
 
 // ReceiptInputsQuery binds terminal receipt inputs to exact finalized facts.
