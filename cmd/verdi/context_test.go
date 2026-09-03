@@ -258,6 +258,40 @@ func TestCmdContext_Usage(t *testing.T) {
 	}
 }
 
+// TestCmdContextOwnerRouting proves the namespace routes `owner` to the owner
+// bridge's own closed grammar rather than to the compile usage line, and that
+// adding the subcommand did not widen the namespace: `owner` is recognized,
+// every other unknown word still is not.
+//
+// The routing itself is the property under test. `verdi context owner` is the
+// one subcommand an external controller invokes for every FD-3 operation, so a
+// build that silently fell through to the compile arm would answer an owner
+// call with a usage line about a manifest.
+func TestCmdContextOwnerRouting(t *testing.T) {
+	t.Chdir(t.TempDir())
+
+	var stdout, stderr bytes.Buffer
+	if got := cmdContext([]string{"owner"}, strings.NewReader(""), &stdout, &stderr); got != 2 {
+		t.Fatalf("cmdContext(owner) = %d, want 2", got)
+	}
+	if stdout.Len() != 0 {
+		t.Fatalf("stdout = %q, want empty on a usage error", stdout.String())
+	}
+	if stderr.String() != contextOwnerUsage+"\n" {
+		t.Fatalf("stderr = %q, want the owner usage line %q", stderr.String(), contextOwnerUsage+"\n")
+	}
+
+	// A word that merely starts like the new subcommand is still unknown.
+	stdout.Reset()
+	stderr.Reset()
+	if got := cmdContext([]string{"owners"}, strings.NewReader(""), &stdout, &stderr); got != 2 {
+		t.Fatalf("cmdContext(owners) = %d, want 2", got)
+	}
+	if stderr.String() != contextCompileUsage+"\n" {
+		t.Fatalf("stderr = %q, want the namespace usage line %q", stderr.String(), contextCompileUsage+"\n")
+	}
+}
+
 // TestCmdContextCompile_FlagShapeFailures proves every flag-shape failure
 // Task 8 Step 1 names — missing --request, an empty --request/--out value,
 // duplicate --request/--out, unknown flag, extra positional arguments, and
