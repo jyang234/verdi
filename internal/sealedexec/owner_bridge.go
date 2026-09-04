@@ -62,15 +62,50 @@ type ownerCallFrame struct {
 	Request                 json.RawMessage        `json:"request"`
 }
 
-// OwnerBridgeOperation resolves one caller-supplied operand against the closed
-// published registry, returning the controller operation it names.
+// BridgedOperations is the closed set of operations this bridge covers: the
+// controller registry minus the one operation the correction excludes.
 //
-// Both registries must accept it. They hold the same 22 names by construction,
-// and requiring agreement is what turns a future divergence into a refusal
-// here rather than into a call no owner can answer.
+// Correction §3.4 fixes the exclusion — ATC-owned resolve-claim-mcp remains
+// operation 23 in the ATC controller and never enters the bridge — and the
+// Global Constraint fixes the size: the bridge covers exactly Verdi operations
+// 1–22.
+//
+// The set is derived from ControllerOperations by exclusion rather than written
+// out a second time. That is what makes a future registry change loud: a Verdi
+// operation added to the controller enters this set and fails the mapping
+// producer, where a set derived by agreeing with the published registry would
+// have dropped it without a sound. The returned slice is a fresh copy, so a
+// caller cannot rewrite the closed set.
+func BridgedOperations() []ControllerOperation {
+	registry := ControllerOperations()
+	bridged := make([]ControllerOperation, 0, len(registry))
+	for _, operation := range registry {
+		if isBridgedOperation(operation) {
+			bridged = append(bridged, operation)
+		}
+	}
+	return bridged
+}
+
+// isBridgedOperation is the one place the exclusion is spelled: an operation is
+// bridged when the closed controller registry carries it and it is not the
+// ATC-owned one. BridgedOperations enumerates exactly this predicate over the
+// registry, and both bridge verbs and the relation table consult it, so the
+// set, the membership test, and the refusals cannot disagree.
+func isBridgedOperation(operation ControllerOperation) bool {
+	return containsControllerOperation(operation) && operation != ControllerOperationResolveClaimMCP
+}
+
+// OwnerBridgeOperation resolves one caller-supplied operand against the closed
+// bridged set, returning the controller operation it names.
+//
+// The bridged set and the published registry must both accept it. They hold the
+// same 22 names by construction, and requiring agreement is what turns a future
+// divergence into a refusal here rather than into a call no owner can answer.
+// The ATC-owned operation fails the first test and never reaches the second.
 func OwnerBridgeOperation(name string) (ControllerOperation, bool) {
 	operation := ControllerOperation(name)
-	if !containsControllerOperation(operation) {
+	if !isBridgedOperation(operation) {
 		return "", false
 	}
 	for _, published := range contextowner.Operations() {
@@ -293,7 +328,15 @@ func ownerMember(document []byte, name string) (json.RawMessage, error) {
 // refuses a contradicting pair before the private result is ever framed. The
 // six operations in the final case carry no such relation in the accepted
 // contract; naming them keeps the switch exhaustive rather than silent.
+//
+// The switch classifies bridged operations only. An operation outside the
+// bridged set is refused before classification: falling through an exhaustive
+// switch would read it as one that carries no relation, which is a bridge
+// answer for a call the bridge does not cover.
 func crossMatchOwnerResult(call ControllerCall, result ControllerResult) error {
+	if !isBridgedOperation(call.Operation) {
+		return errors.New("operation is not covered by the bridge")
+	}
 	switch call.Operation {
 	case ControllerOperationVerifyAuthority:
 		request, facts := call.VerifyAuthority.Request, result.VerifyAuthority.Facts

@@ -13,6 +13,7 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"reflect"
 	"strings"
@@ -110,18 +111,91 @@ func ownerReplyFor(t *testing.T, operation ControllerOperation, callDocument, re
 	return reply
 }
 
+// TestContextOwnerBridgeSet pins the Global Constraint: the bridge covers
+// exactly Verdi operations 1–22, and ATC-owned resolve-claim-mcp remains
+// operation 23 in the controller registry without ever entering either bridge
+// verb (§3.4, §3.1/§3.2).
+//
+// The bridged set is proven to be the controller registry minus that one name —
+// an exclusion, not a second hand-written list. The difference is what makes a
+// future registry change loud: a Verdi operation added to the controller enters
+// the bridged set and fails the mapping producer, whereas a set derived by
+// agreeing with the public registry would have quietly dropped it.
+func TestContextOwnerBridgeSet(t *testing.T) {
+	registry := ControllerOperations()
+	if len(registry) != 23 {
+		t.Fatalf("controller registry has %d operations, want 23", len(registry))
+	}
+	if got := registry[22]; got != ControllerOperationResolveClaimMCP {
+		t.Fatalf("operation 23 = %q, want %q", got, ControllerOperationResolveClaimMCP)
+	}
+
+	want := make([]ControllerOperation, 0, len(registry)-1)
+	for _, operation := range registry {
+		if operation != ControllerOperationResolveClaimMCP {
+			want = append(want, operation)
+		}
+	}
+
+	bridged := BridgedOperations()
+	if len(bridged) != 22 {
+		t.Fatalf("bridge covers %d operations, want the closed 22", len(bridged))
+	}
+	if !reflect.DeepEqual(bridged, want) {
+		t.Fatalf("bridged set\n got %v\nwant %v", bridged, want)
+	}
+	for _, operation := range bridged {
+		if operation == ControllerOperationResolveClaimMCP {
+			t.Fatal("ATC-owned resolve-claim-mcp entered the bridged set")
+		}
+	}
+
+	// The one resolver both bridge verbs consult must reach the same closed
+	// answer, in both directions.
+	for _, operation := range bridged {
+		if _, ok := OwnerBridgeOperation(string(operation)); !ok {
+			t.Fatalf("OwnerBridgeOperation refused bridged operation %s", operation)
+		}
+	}
+	if _, ok := OwnerBridgeOperation(string(ControllerOperationResolveClaimMCP)); ok {
+		t.Fatal("OwnerBridgeOperation resolved the ATC-owned operation")
+	}
+
+	// The public wire is the other half of the constraint: operation 23 is
+	// never published, so no owner can be asked to answer it.
+	published := contextowner.Operations()
+	if len(published) != 22 {
+		t.Fatalf("public owner registry publishes %d operations, want 22", len(published))
+	}
+	for i, operation := range published {
+		if string(operation) == string(ControllerOperationResolveClaimMCP) {
+			t.Fatal("the public owner registry publishes ATC-owned resolve-claim-mcp")
+		}
+		if string(operation) != string(want[i]) {
+			t.Fatalf("published[%d] = %q, want the bridged operation %q", i, operation, want[i])
+		}
+	}
+
+	// The bridged set is a copy: a caller cannot rewrite the closed union.
+	bridged[0] = "mutated"
+	if BridgedOperations()[0] != want[0] {
+		t.Fatal("BridgedOperations must return a copy of the closed set")
+	}
+}
+
 // TestContextOwnerBridgeMapping is the 22-row producer §6.5 requires: for every
 // Verdi-owned operation it starts from a valid private request payload, proves
 // the exact public call and its request digest, constructs the matching public
 // reply, and proves the exact private result bytes come back.
 //
-// Coverage is asserted against the closed registry rather than against the
-// number of rows written here, so an operation added to the controller without
-// a bridge row fails this test instead of being silently unmapped.
+// Coverage is asserted against the bridged set rather than against the number
+// of rows written here. Because that set is the controller registry minus only
+// the ATC-owned exclusion, an operation added to the controller without a
+// bridge row fails this test instead of being silently unmapped.
 func TestContextOwnerBridgeMapping(t *testing.T) {
-	operations := ControllerOperations()
+	operations := BridgedOperations()
 	if len(operations) != 22 {
-		t.Fatalf("controller registry has %d operations, want the closed 22", len(operations))
+		t.Fatalf("bridge covers %d operations, want the closed 22", len(operations))
 	}
 
 	for _, operation := range operations {
@@ -192,6 +266,11 @@ func TestContextOwnerBridgeDecodeRefusals(t *testing.T) {
 		{"unknown operation", ControllerOperation("frobnicate"), valid},
 		{"empty operation", ControllerOperation(""), valid},
 		{"atc-owned operation 23", ControllerOperation("resolve-claim-mcp"), valid},
+		// The strongest exclusion row: a private claim query that is exactly
+		// what the ATC controller answers over FD-3, so nothing about the
+		// payload is wrong and only the bridged set refuses it.
+		{"atc-owned operation 23 with its own well-formed payload", ControllerOperationResolveClaimMCP,
+			ownerPrivateRequestBytes(t, controllerCallFixture(t, 1, ControllerOperationResolveClaimMCP))},
 		{"operation mismatched to payload", ControllerOperationVerifyExpansion, valid},
 		{"nil request", operation, nil},
 		{"empty request", operation, []byte{}},
@@ -211,6 +290,9 @@ func TestContextOwnerBridgeDecodeRefusals(t *testing.T) {
 			call, err := DecodeOwnerCall(tc.operation, tc.request)
 			if err == nil {
 				t.Fatalf("DecodeOwnerCall accepted %s: %+v", tc.name, call)
+			}
+			if !errors.Is(err, ErrOwnerRequestRefused) {
+				t.Fatalf("refusal for %s is not a request refusal: %v", tc.name, err)
 			}
 			if !reflect.DeepEqual(call, contextowner.Call{}) {
 				t.Fatalf("DecodeOwnerCall returned a non-zero call with an error: %+v", call)
@@ -296,13 +378,97 @@ func TestContextOwnerBridgeEncodeRefusals(t *testing.T) {
 	})
 }
 
+// assertClosedATCRefusal proves one exclusion diagnostic names a class rather
+// than a value: it carries the declared refusal class, is framed by the package
+// seam, and echoes nothing the refused document carried.
+func assertClosedATCRefusal(t *testing.T, err error, class error, echoed ...string) {
+	t.Helper()
+	if !errors.Is(err, class) {
+		t.Fatalf("refusal is not %v: %v", class, err)
+	}
+	if !strings.HasPrefix(err.Error(), "sealedexec: ") {
+		t.Fatalf("diagnostic is not framed by the package seam: %v", err)
+	}
+	for _, forbidden := range echoed {
+		if forbidden != "" && strings.Contains(err.Error(), forbidden) {
+			t.Fatalf("diagnostic echoes the refused document: %v", err)
+		}
+	}
+}
+
+// TestContextOwnerBridgeRefusesATCOperation prosecutes the Global Constraint
+// from the outside: never a public call for ATC-owned resolve-claim-mcp, and
+// never a private result from a public reply for it.
+//
+// The load-bearing rows are the ones no other guard can account for. A
+// well-formed private claim query is exactly what the ATC controller answers
+// over FD-3, so only the bridged set stops it becoming a public call; and a
+// reply whose nested call also names operation 23 satisfies the
+// operation-mismatch guard, so only the bridged set stops it becoming a private
+// result.
+func TestContextOwnerBridgeRefusesATCOperation(t *testing.T) {
+	t.Run("no public call for a well-formed private claim query", func(t *testing.T) {
+		privateRequest := ownerPrivateRequestBytes(t, controllerCallFixture(t, 1, ControllerOperationResolveClaimMCP))
+		call, err := DecodeOwnerCall(ControllerOperationResolveClaimMCP, privateRequest)
+		if err == nil {
+			t.Fatalf("DecodeOwnerCall published the ATC-owned operation: %+v", call)
+		}
+		if !reflect.DeepEqual(call, contextowner.Call{}) {
+			t.Fatalf("DecodeOwnerCall returned a non-zero call with an error: %+v", call)
+		}
+		assertClosedATCRefusal(t, err, ErrOwnerRequestRefused,
+			string(privateRequest), string(ControllerOperationResolveClaimMCP))
+	})
+
+	// One entirely valid resolve-recorder call/reply pair, reused as the
+	// carrier for the encode rows: everything about it is legal except the
+	// operation the reply is offered under.
+	carrier := ControllerOperationResolveRecorder
+	carrierRequest := ownerPrivateRequestBytes(t, controllerCallFixture(t, 1, carrier))
+	carrierArm := ownerPublishedArm(t, carrierRequest,
+		controllerRequestSchema(carrier), contextowner.RequestSchema(contextowner.Operation(carrier)))
+	carrierDocument := ownerPublicCallDocument(carrier, ownerRequestDigest(carrierRequest), carrierArm)
+	carrierResultArm := ownerPublishedArm(t, ownerPrivateResultBytes(t, ownerResultFixture(t, carrier)),
+		controllerResultSchema(carrier), contextowner.ResultSchema(contextowner.Operation(carrier)))
+
+	encodeRows := []struct {
+		name    string
+		invoked ControllerOperation
+		nested  contextowner.Operation
+	}{
+		{"reply invoked as the ATC operation", ControllerOperationResolveClaimMCP,
+			contextowner.Operation(carrier)},
+		{"reply naming the ATC operation throughout", ControllerOperationResolveClaimMCP,
+			contextowner.Operation(ControllerOperationResolveClaimMCP)},
+		{"bridged reply carrying an ATC nested call", carrier,
+			contextowner.Operation(ControllerOperationResolveClaimMCP)},
+	}
+	for _, row := range encodeRows {
+		t.Run(row.name, func(t *testing.T) {
+			reply := ownerReplyFor(t, carrier, carrierDocument, carrierResultArm)
+			reply.Call.Operation = row.nested
+			encoded, err := EncodeOwnerReply(row.invoked, reply)
+			if err == nil {
+				t.Fatalf("EncodeOwnerReply encoded a private result for %s: %s", row.name, encoded)
+			}
+			if encoded != nil {
+				t.Fatalf("EncodeOwnerReply returned bytes with an error: %s", encoded)
+			}
+			assertClosedATCRefusal(t, err, ErrOwnerReplyRefused,
+				string(ControllerOperationResolveClaimMCP), string(carrierRequest))
+		})
+	}
+}
+
 // TestContextOwnerBridgeCrossMatch prosecutes every private request/result
 // identity relation the controller contract owns, one adverse row per relation.
 //
 // The six operations named in unrelated below carry no request/result relation
 // at all in the accepted contract; they are listed so that adding a relation
 // upstream without a bridge row here fails the completeness assertion rather
-// than passing unnoticed.
+// than passing unnoticed. Completeness is asserted over the bridged set:
+// ATC-owned operation 23 belongs to neither classification, and the relation
+// table must refuse it outright instead of reading as unrelated.
 func TestContextOwnerBridgeCrossMatch(t *testing.T) {
 	unrelated := map[ControllerOperation]bool{
 		ControllerOperationVerifyExpansion:      true,
@@ -391,14 +557,34 @@ func TestContextOwnerBridgeCrossMatch(t *testing.T) {
 		},
 	}
 
-	for _, operation := range ControllerOperations() {
+	for _, operation := range BridgedOperations() {
 		_, related := corrupt[operation]
 		if related == unrelated[operation] {
 			t.Fatalf("operation %s is both related and unrelated, or neither", operation)
 		}
 	}
 
-	for _, operation := range ControllerOperations() {
+	// Operation 23 is ATC-owned, so it is outside both classifications. The
+	// relation table must refuse it before classification: falling through the
+	// exhaustive switch would silently read it as an operation that carries no
+	// request/result relation, which is a bridge answer for a call the bridge
+	// never covers.
+	if _, related := corrupt[ControllerOperationResolveClaimMCP]; related {
+		t.Fatalf("ATC-owned %s is classified as a related bridge operation", ControllerOperationResolveClaimMCP)
+	}
+	if unrelated[ControllerOperationResolveClaimMCP] {
+		t.Fatalf("ATC-owned %s is classified as an unrelated bridge operation", ControllerOperationResolveClaimMCP)
+	}
+	t.Run("atc-owned operation 23 is refused before classification", func(t *testing.T) {
+		operation := ControllerOperationResolveClaimMCP
+		call := controllerCallFixture(t, 1, operation)
+		result := ownerResultFixture(t, operation)
+		if err := crossMatchOwnerResult(call, result); err == nil {
+			t.Fatal("crossMatchOwnerResult classified the ATC-owned operation instead of refusing it")
+		}
+	})
+
+	for _, operation := range BridgedOperations() {
 		mutate, ok := corrupt[operation]
 		if !ok {
 			continue
@@ -505,7 +691,10 @@ func TestContextOwnerBridgeInstallExpansionV2(t *testing.T) {
 		if got := contextowner.ResultSchema(public); got != "verdi.context-owner/install-expansion-result/v1" {
 			t.Fatalf("published install result schema = %q, want the publication base", got)
 		}
-		for _, other := range ControllerOperations() {
+		// The 21 other bridged arms. Operation 23 is excluded because the public
+		// wire publishes no arm for it at all: deriving one here would assert a
+		// published schema for an operation no owner is ever asked to answer.
+		for _, other := range BridgedOperations() {
 			if other == operation {
 				continue
 			}
