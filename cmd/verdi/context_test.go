@@ -292,6 +292,63 @@ func TestCmdContextOwnerRouting(t *testing.T) {
 	}
 }
 
+// TestCmdContextResolveRouting proves the namespace routes `resolve` to the
+// read-only context-item resolver's own closed grammar rather than to the
+// compile usage line, and that adding the subcommand did not widen the
+// namespace: `resolve` is recognized, every other unknown word still is not.
+//
+// The routing itself is the property under test. `verdi context resolve` is
+// the one subcommand an external authority owner invokes for a fresh data
+// item, so a build that silently fell through to the compile arm would answer
+// a resolution request with a usage line about a manifest — and would do so
+// only after resolving a store root the resolve grammar had not yet approved.
+func TestCmdContextResolveRouting(t *testing.T) {
+	t.Chdir(t.TempDir())
+
+	var stdout, stderr bytes.Buffer
+	if got := cmdContext([]string{"resolve"}, strings.NewReader(""), &stdout, &stderr); got != 2 {
+		t.Fatalf("cmdContext(resolve) = %d, want 2", got)
+	}
+	if stdout.Len() != 0 {
+		t.Fatalf("stdout = %q, want empty on a usage error", stdout.String())
+	}
+	if stderr.String() != contextResolveUsage+"\n" {
+		t.Fatalf("stderr = %q, want the resolve usage line %q", stderr.String(), contextResolveUsage+"\n")
+	}
+
+	// The usage line names the one accepted argv verbatim. It is the only
+	// grammar an external controller can read off this binary, so it is frozen
+	// as an exact string rather than pattern-matched.
+	if contextResolveUsage != "usage: verdi context resolve --request -" {
+		t.Fatalf("contextResolveUsage = %q, want the exact two-token grammar", contextResolveUsage)
+	}
+
+	// The `=`-joined spelling reaches the resolver's own grammar and is refused
+	// there, from a directory that is not a store — so the refusal is about the
+	// argv and never about a checkout the caller never got to.
+	stdout.Reset()
+	stderr.Reset()
+	if got := cmdContext([]string{"resolve", "--request=-"}, strings.NewReader(""), &stdout, &stderr); got != 2 {
+		t.Fatalf("cmdContext(resolve --request=-) = %d, want 2", got)
+	}
+	if stdout.Len() != 0 {
+		t.Fatalf("stdout = %q, want empty on a usage error", stdout.String())
+	}
+	if stderr.String() != contextResolveUsage+"\n" {
+		t.Fatalf("stderr = %q, want the resolve usage line %q", stderr.String(), contextResolveUsage+"\n")
+	}
+
+	// A word that merely starts like the new subcommand is still unknown.
+	stdout.Reset()
+	stderr.Reset()
+	if got := cmdContext([]string{"resolves"}, strings.NewReader(""), &stdout, &stderr); got != 2 {
+		t.Fatalf("cmdContext(resolves) = %d, want 2", got)
+	}
+	if stderr.String() != contextCompileUsage+"\n" {
+		t.Fatalf("stderr = %q, want the namespace usage line %q", stderr.String(), contextCompileUsage+"\n")
+	}
+}
+
 // TestCmdContextCompile_FlagShapeFailures proves every flag-shape failure
 // Task 8 Step 1 names — missing --request, an empty --request/--out value,
 // duplicate --request/--out, unknown flag, extra positional arguments, and

@@ -70,6 +70,8 @@ func cmdContext(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		return cmdContextOwner(args[1:], stdin, stdout, stderr)
 	case "receipt":
 		return cmdContextReceipt(args[1:], stdin, stdout, stderr)
+	case "resolve":
+		return cmdContextResolve(args[1:], stdin, stdout, stderr)
 	default:
 		fmt.Fprintln(stderr, contextCompileUsage)
 		return 2
