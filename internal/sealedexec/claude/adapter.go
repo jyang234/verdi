@@ -96,20 +96,17 @@ func New(process Process, processor *sealedexec.DetailProcessor, mcpConfig MCPCo
 	return &Adapter{process: process, processor: processor, mcpConfig: mcpConfig}, nil
 }
 
-// validateSuppliedMCPConfig proves the supplied configuration is the scoped
-// one StartScopedMCP produced: Amendment 002 §4's exact file name at a clean
-// absolute path, a transport URL, and the scoped capability bearer token.
+// validateSuppliedMCPConfig proves the supplied configuration is the scoped one
+// StartScopedMCP produced: Amendment 002 §4's exact file name at a clean
+// absolute path, and Amendment 003's exact pair of separately owned required
+// registrations with disjoint catalogues and distinct capabilities.
 func validateSuppliedMCPConfig(config MCPConfig) error {
 	if !filepath.IsAbs(config.Path) || filepath.Clean(config.Path) != config.Path ||
 		filepath.Base(config.Path) != claudeMCPConfigName {
 		return fmt.Errorf("sealedexec/claude: scoped MCP config path must be a clean absolute %s", claudeMCPConfigName)
 	}
-	if config.URL == "" {
-		return errors.New("sealedexec/claude: scoped MCP config has no transport URL")
-	}
-	token, ok := strings.CutPrefix(config.Authorization, "Bearer ")
-	if !ok || !claudeMCPDigestRE.MatchString(token) {
-		return errors.New("sealedexec/claude: scoped MCP config lacks the scoped capability authorization")
+	if err := config.Servers.Validate(); err != nil {
+		return fmt.Errorf("sealedexec/claude: scoped MCP config: %w", err)
 	}
 	return nil
 }
@@ -248,9 +245,13 @@ func (a *Adapter) run(ctx context.Context, launch sealedexec.AdapterLaunch, args
 		return nil, errors.New("sealedexec/claude: process returned a nil active run")
 	}
 
-	// Build the per-run protected value set: classified secrets.
-	// The provider session (extracted from init) is added before init emission.
+	// Build the per-run protected value set: classified secrets plus Amendment
+	// 003's both raw capabilities and both complete authorization strings. The
+	// set is complete before the first provider observation is processed, so no
+	// capability or bearer can reach a projection, event, or receipt. The
+	// provider session (extracted from init) is added before init emission.
 	protectedValues := append([][]byte(nil), launch.Profile.PolicySecretValues...)
+	protectedValues = append(protectedValues, a.mcpConfig.Servers.ProtectedValues()...)
 
 	return &claudeActiveRun{
 		process:         processRun,
@@ -1090,9 +1091,16 @@ func (r *claudeActiveRun) handleInit(ctx context.Context, line []byte, seq uint6
 	protectedValues := append([][]byte(nil), r.protectedValues...)
 	r.mu.Unlock()
 
+	// Amendment 003 §exact Claude observation: accepted rows are sorted by name
+	// before projecting or digesting, so either observed order yields identical
+	// provider-summary bytes.
+	projectedRows := make([]map[string]string, 0, len(*frame.MCPServers))
+	for _, name := range sealedexec.SortedMCPNames([]string{sealedexec.RequiredClaimMCPName, sealedexec.RequiredContextMCPName}) {
+		projectedRows = append(projectedRows, map[string]string{"name": name, "status": "connected"})
+	}
 	initDetailSource := map[string]any{
 		"family":          "system/init",
-		"mcp_servers":     []map[string]string{{"name": "verdi-context", "status": "connected"}},
+		"mcp_servers":     projectedRows,
 		"model":           *frame.Model,
 		"permission_mode": *frame.PermissionMode,
 		"session_id":      sessionID,
@@ -1839,15 +1847,29 @@ func adapterStopObservation(launch sealedexec.AdapterLaunch, exitCode int, reaso
 // Validation helpers for init
 // ---------------------------------------------------------------------------
 
-// validateInitMCPServers proves the observed inventory is exactly the one
-// scoped, connected verdi-context row.
+// validateInitMCPServers proves the observed inventory is exactly Amendment
+// 003's two connected required rows, in either order. Missing, extra,
+// duplicate, disconnected, or renamed rows are all mcp-mismatch.
 func validateInitMCPServers(servers []claudeMCPRow) string {
-	if len(servers) != 1 {
+	want := sealedexec.SortedMCPNames([]string{sealedexec.RequiredClaimMCPName, sealedexec.RequiredContextMCPName})
+	if len(servers) != len(want) {
 		return "mcp-mismatch"
 	}
-	row := servers[0]
-	if row.Name == nil || row.Status == nil || *row.Name != "verdi-context" || *row.Status != "connected" {
-		return "mcp-mismatch"
+	observed := make([]string, 0, len(servers))
+	for _, row := range servers {
+		if row.Name == nil || row.Status == nil || *row.Status != "connected" {
+			return "mcp-mismatch"
+		}
+		observed = append(observed, *row.Name)
+	}
+	// Accepted rows are sorted by name before projection, so either observed
+	// order canonicalizes to the same inventory, and a duplicate never
+	// satisfies a missing peer.
+	observed = sealedexec.SortedMCPNames(observed)
+	for i, name := range want {
+		if observed[i] != name {
+			return "mcp-mismatch"
+		}
 	}
 	return ""
 }

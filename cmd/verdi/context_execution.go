@@ -287,11 +287,11 @@ type sealedRuntime struct {
 	execution  *sealedexec.Service
 	completion *sealedexec.CompletionService
 	handback   *sealedexec.HandbackService
-	// closer is called after provider reap to release the adapter lifecycle
-	// (for Claude: HTTP MCP server close + config removal). nil for Codex.
+	// closer is called after provider reap to release the adapter lifecycle:
+	// the parent-hosted context server close, plus config removal for Claude.
+	// Amendment 003 gives both providers that lifecycle.
 	closer func(context.Context) error
-	// terminals records the first typed scoped-MCP terminal of the run. nil for
-	// Codex, whose scoped surface is a separate process with its own exit code.
+	// terminals records the first typed scoped-MCP terminal of the run.
 	terminals *sealedMCPTerminalObserver
 }
 
@@ -391,10 +391,15 @@ func assembleSealedRuntime(ctx context.Context, request sealedexec.ExecutionRequ
 	var terminals *sealedMCPTerminalObserver
 	switch request.Adapter {
 	case contextevent.AdapterCodex:
-		adapter, err = codex.New(commandCodexProcess{}, processor)
-		if err != nil {
-			return sealedRuntime{}, err
+		terminals = &sealedMCPTerminalObserver{}
+		ca := &commandCodexAdapter{
+			process:    commandCodexProcess{},
+			processor:  processor,
+			controller: controller,
+			observer:   terminals,
 		}
+		adapter = ca
+		adapterCloser = ca.Close
 	case contextevent.AdapterClaude:
 		terminals = &sealedMCPTerminalObserver{}
 		ca := &commandClaudeAdapter{
@@ -444,12 +449,12 @@ func assembleSealedRuntime(ctx context.Context, request sealedexec.ExecutionRequ
 	if err != nil {
 		return sealedRuntime{}, err
 	}
-	if terminals != nil {
-		terminals.bind(func() error {
-			_, err := execution.InterruptRegistered(context.Background(), request)
-			return err
-		})
-	}
+	// Amendment 003 gives both adapters a parent-hosted context surface, so both
+	// bind the same interruption seam.
+	terminals.bind(func() error {
+		_, err := execution.InterruptRegistered(context.Background(), request)
+		return err
+	})
 	return sealedRuntime{root: root, data: data, execution: execution, completion: completion, handback: handback, closer: adapterCloser, terminals: terminals}, nil
 }
 
@@ -868,6 +873,161 @@ func (run *commandCodexRun) Stop(context.Context) (codex.ProcessStopResult, erro
 // Claude adapter: lazy process and HTTP MCP lifecycle
 // ---------------------------------------------------------------------------
 
+// resolveSealedClaimMCP resolves the ATC-owned claim registration over FD 3 and
+// derives its invocation-scoped capability locally. The controller never returns
+// a bearer, so no authorization value ever crosses the descriptor.
+func resolveSealedClaimMCP(ctx context.Context, controller *sealedexec.ControllerClient, requestBytes []byte) (sealedexec.RequiredMCP, error) {
+	requestDigest, err := sealedexec.CanonicalRequestDigest(requestBytes)
+	if err != nil {
+		return sealedexec.RequiredMCP{}, err
+	}
+	registration, err := controller.ResolveClaimMCP(ctx, sealedexec.ClaimMCPQuery{RequestDigest: requestDigest})
+	if err != nil {
+		return sealedexec.RequiredMCP{}, err
+	}
+	return sealedexec.RequiredClaimMCP(registration, requestDigest)
+}
+
+// newSealedScopedMCP builds the parent-hosted verdi-context surface over the one
+// mutable flight state the execution service already proved (I-115).
+func newSealedScopedMCP(controller *sealedexec.ControllerClient, check sealedexec.AdapterCheck) (*sealedexec.ScopedMCP, error) {
+	if check.State == nil {
+		return nil, errors.New("execution service supplied no shared flight state")
+	}
+	key := sealedexec.ExecutionKey{Flight: check.Request.Flight, Lane: check.Request.Lane, Epoch: check.Request.Epoch}
+	return sealedexec.NewScopedMCP(sealedexec.ScopedMCPPorts{
+		Resolver: mcpControllerResolver{client: controller, key: key},
+		Compiler: sealedexec.NewCanonicalChildCompiler(),
+		Verifier: controller,
+		Recorder: controllerRecorder{client: controller},
+		Store:    controller,
+		Stamps:   controller,
+	}, check.State)
+}
+
+// commandCodexAdapter is the binary-side Codex adapter. Amendment 003 gives
+// Codex the same two required registrations Claude receives, so the context
+// listener and claim resolution are deferred to VerifyAdapter time, where the
+// resolved profile digest and workspace id that bind the context capability
+// first exist.
+type commandCodexAdapter struct {
+	process    codex.Process
+	processor  *sealedexec.DetailProcessor
+	controller *sealedexec.ControllerClient
+
+	observer *sealedMCPTerminalObserver
+
+	mu        sync.Mutex
+	inner     *codex.Adapter
+	closeMCP  func(context.Context) error
+	terminals <-chan *mcpserve.HandlerTerminal
+	watching  chan struct{}
+}
+
+func (a *commandCodexAdapter) init(ctx context.Context, check sealedexec.AdapterCheck) error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.inner != nil {
+		return nil
+	}
+	requestBytes, err := sealedexec.EncodeExecutionRequest(check.Request)
+	if err != nil {
+		return fmt.Errorf("commandCodexAdapter: encode request: %w", err)
+	}
+	server, err := newSealedScopedMCP(a.controller, check)
+	if err != nil {
+		return fmt.Errorf("commandCodexAdapter: create scoped MCP server: %w", err)
+	}
+	claim, err := resolveSealedClaimMCP(ctx, a.controller, requestBytes)
+	if err != nil {
+		return fmt.Errorf("commandCodexAdapter: resolve claim MCP: %w", err)
+	}
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		return fmt.Errorf("commandCodexAdapter: create MCP listener: %w", err)
+	}
+	registration, terminals, closeMCP, err := sealedexec.StartScopedContextMCP(
+		ctx, listener, requestBytes, check.Profile.Digest, check.Workspace.WorkspaceID,
+		scopedMCPHandler{server: server},
+	)
+	if err != nil {
+		_ = listener.Close()
+		return fmt.Errorf("commandCodexAdapter: start scoped MCP: %w", err)
+	}
+	inner, err := codex.New(a.process, a.processor, sealedexec.RequiredMCPSet{Claim: claim, Context: registration})
+	if err != nil {
+		_ = closeMCP(ctx)
+		return fmt.Errorf("commandCodexAdapter: construct Codex adapter: %w", err)
+	}
+	a.inner = inner
+	a.closeMCP = closeMCP
+	a.terminals = terminals
+	watching := make(chan struct{})
+	a.watching = watching
+	go func() {
+		select {
+		case terminal := <-terminals:
+			a.observer.observe(terminal)
+		case <-watching:
+		}
+	}()
+	return nil
+}
+
+func (a *commandCodexAdapter) VerifyAdapter(ctx context.Context, check sealedexec.AdapterCheck) (sealedexec.AdapterFacts, error) {
+	if err := a.init(ctx, check); err != nil {
+		return sealedexec.AdapterFacts{}, err
+	}
+	return a.inner.VerifyAdapter(ctx, check)
+}
+
+func (a *commandCodexAdapter) Start(ctx context.Context, launch sealedexec.AdapterLaunch) (sealedexec.ActiveAdapterRun, error) {
+	a.mu.Lock()
+	inner := a.inner
+	a.mu.Unlock()
+	if inner == nil {
+		return nil, errors.New("commandCodexAdapter: Start called before initialization")
+	}
+	return inner.Start(ctx, launch)
+}
+
+func (a *commandCodexAdapter) Resume(ctx context.Context, launch sealedexec.AdapterLaunch, sessionRef string) (sealedexec.ActiveAdapterRun, error) {
+	a.mu.Lock()
+	inner := a.inner
+	a.mu.Unlock()
+	if inner == nil {
+		return nil, errors.New("commandCodexAdapter: Resume called before initialization")
+	}
+	return inner.Resume(ctx, launch, sessionRef)
+}
+
+// Close is called after provider reap: it retires the terminal watcher, drains a
+// terminal raised in the reap window, and only then shuts the context listener
+// down.
+func (a *commandCodexAdapter) Close(ctx context.Context) error {
+	a.mu.Lock()
+	closeFn := a.closeMCP
+	terminals := a.terminals
+	watching := a.watching
+	a.watching = nil
+	a.mu.Unlock()
+
+	if watching != nil {
+		close(watching)
+	}
+	if terminals != nil {
+		select {
+		case terminal := <-terminals:
+			a.observer.observe(terminal)
+		default:
+		}
+	}
+	if closeFn != nil {
+		return closeFn(ctx)
+	}
+	return nil
+}
+
 // commandClaudeAdapter is the binary-side Claude adapter that defers the HTTP
 // MCP server and real Adapter construction to VerifyAdapter time. This allows
 // the profile's env root (required for the scoped config path) to be resolved
@@ -928,6 +1088,14 @@ func (a *commandClaudeAdapter) init(ctx context.Context, check sealedexec.Adapte
 	key := sealedexec.ExecutionKey{Flight: check.Request.Flight, Lane: check.Request.Lane, Epoch: check.Request.Epoch}
 	recorder := controllerRecorder{client: a.controller}
 
+	// Amendment 003 lifecycle order: resolve the ATC-owned claim registration
+	// before the context listener binds. There is no fallback — an unavailable,
+	// malformed, stale, or contradictory answer is operational before launch.
+	claim, err := resolveSealedClaimMCP(ctx, a.controller, requestBytes)
+	if err != nil {
+		return fmt.Errorf("commandClaudeAdapter: resolve claim MCP: %w", err)
+	}
+
 	// Create the loopback listener for the scoped HTTP MCP server.
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -953,7 +1121,7 @@ func (a *commandClaudeAdapter) init(ctx context.Context, check sealedexec.Adapte
 	// the config file.
 	mcpConfig, terminals, closeMCP, err := claude.StartScopedMCP(
 		ctx, listener, envRoot, requestBytes,
-		check.Profile.Digest, check.Workspace.WorkspaceID,
+		check.Profile.Digest, check.Workspace.WorkspaceID, claim,
 		scopedMCPHandler{server: server},
 	)
 	if err != nil {

@@ -71,17 +71,47 @@ type Process interface {
 type Adapter struct {
 	process   Process
 	processor *sealedexec.DetailProcessor
+	servers   sealedexec.RequiredMCPSet
 }
 
-// New constructs an adapter over an explicit process port and detail processor.
-func New(process Process, processor *sealedexec.DetailProcessor) (*Adapter, error) {
+// New constructs an adapter over an explicit process port, detail processor,
+// and the exact pair of required MCP registrations Amendment 003 injects.
+func New(process Process, processor *sealedexec.DetailProcessor, servers sealedexec.RequiredMCPSet) (*Adapter, error) {
 	if process == nil {
 		return nil, errors.New("sealedexec/codex: process port is nil")
 	}
 	if processor == nil {
 		return nil, errors.New("sealedexec/codex: detail processor is nil")
 	}
-	return &Adapter{process: process, processor: processor}, nil
+	if err := servers.Validate(); err != nil {
+		return nil, fmt.Errorf("sealedexec/codex: required MCP registrations: %w", err)
+	}
+	return &Adapter{process: process, processor: processor, servers: servers}, nil
+}
+
+// mcpConfigOperands returns Amendment 003's exact twelve ordered `-c` pairs.
+// Each key=value is one literal argv element following its own `-c`. Codex has
+// no trusted init-inventory family, so this strict argv — together with the two
+// required HTTP initialize handshakes the parent services observe — is the whole
+// proof; no provider inventory is invented.
+func mcpConfigOperands(servers sealedexec.RequiredMCPSet) []string {
+	operands := make([]string, 0, 24)
+	for _, server := range []sealedexec.RequiredMCP{servers.Claim, servers.Context} {
+		prefix := "mcp_servers." + server.Name + "."
+		quoted := make([]string, 0, len(server.Tools))
+		for _, tool := range server.Tools {
+			quoted = append(quoted, strconv.Quote(tool))
+		}
+		operands = append(operands,
+			"-c", prefix+"url="+strconv.Quote(server.URL),
+			"-c", prefix+"http_headers={Authorization="+strconv.Quote(server.Authorization)+"}",
+			"-c", prefix+"enabled=true",
+			"-c", prefix+"required=true",
+			"-c", prefix+"supports_parallel_tool_calls=false",
+			"-c", prefix+"enabled_tools=["+strings.Join(quoted, ",")+"]",
+		)
+	}
+	return operands
 }
 
 // VerifyAdapter proves the selected executable/profile/version/decoder and
@@ -95,7 +125,7 @@ func (a *Adapter) VerifyAdapter(ctx context.Context, check sealedexec.AdapterChe
 		check.Profile.Digest != check.Request.Profile.Digest || check.Profile.WorkspacePath != check.Workspace.Path {
 		return sealedexec.AdapterFacts{}, errors.New("sealedexec/codex: adapter identity/profile/version mismatch")
 	}
-	args, err := verifyArgs(check.Request, check.Profile, check.Workspace, check.Review)
+	args, err := verifyArgs(check.Request, check.Profile, check.Workspace, check.Review, a.servers)
 	if err != nil {
 		return sealedexec.AdapterFacts{}, err
 	}
@@ -118,14 +148,12 @@ func (a *Adapter) VerifyAdapter(ctx context.Context, check sealedexec.AdapterChe
 
 // Start invokes the exact non-interactive start form.
 func (a *Adapter) Start(ctx context.Context, launch sealedexec.AdapterLaunch) (sealedexec.ActiveAdapterRun, error) {
-	args := []string{"exec", "--json", "--strict-config", "--ignore-user-config", "--ignore-rules", "--profile", launch.Profile.Name, "--sandbox", "workspace-write", "--cd", launch.Workspace.Path, "-"}
 	if launch.Review != nil {
 		if err := validateReviewLaunch(launch); err != nil {
 			return nil, err
 		}
-		args = []string{"exec", "--json", "--strict-config", "--ignore-user-config", "--ignore-rules", "--profile", launch.Profile.Name, "--model", launch.Review.Model, "--sandbox", "workspace-write", "--cd", launch.Workspace.Path, "-"}
 	}
-	return a.run(ctx, launch, args, "", true)
+	return a.run(ctx, launch, startArgs(launch.Profile.Name, launch.Workspace.Path, reviewModel(launch.Review), a.servers), "", true)
 }
 
 // Resume invokes only an explicit independently verified session id.
@@ -136,8 +164,35 @@ func (a *Adapter) Resume(ctx context.Context, launch sealedexec.AdapterLaunch, s
 	if err := validateSessionRef(sessionRef); err != nil {
 		return nil, err
 	}
-	args := []string{"exec", "resume", "--json", "--strict-config", "--ignore-user-config", "--ignore-rules", sessionRef, "-"}
-	return a.run(ctx, launch, args, sessionRef, false)
+	return a.run(ctx, launch, resumeArgs(sessionRef, a.servers), sessionRef, false)
+}
+
+func reviewModel(review *sealedexec.ReviewLaunch) string {
+	if review == nil {
+		return ""
+	}
+	return review.Model
+}
+
+// startArgs is the pinned start form. The twelve dynamic MCP operands sit
+// immediately after the pinned `--profile <profile>` prefix and before the
+// sandbox/workspace tail; an explicit review model keeps its ordering after
+// that block and ahead of the tail.
+func startArgs(profileName, workspacePath, model string, servers sealedexec.RequiredMCPSet) []string {
+	args := []string{"exec", "--json", "--strict-config", "--ignore-user-config", "--ignore-rules", "--profile", profileName}
+	args = append(args, mcpConfigOperands(servers)...)
+	if model != "" {
+		args = append(args, "--model", model)
+	}
+	return append(args, "--sandbox", "workspace-write", "--cd", workspacePath, "-")
+}
+
+// resumeArgs is the pinned resume form. The same twelve operands sit
+// immediately after `--ignore-rules`, then the explicit adapter session ref.
+func resumeArgs(sessionRef string, servers sealedexec.RequiredMCPSet) []string {
+	args := []string{"exec", "resume", "--json", "--strict-config", "--ignore-user-config", "--ignore-rules"}
+	args = append(args, mcpConfigOperands(servers)...)
+	return append(args, sessionRef, "-")
 }
 
 func (a *Adapter) run(ctx context.Context, launch sealedexec.AdapterLaunch, args []string, expectedSession string, start bool) (sealedexec.ActiveAdapterRun, error) {
@@ -166,7 +221,10 @@ func (a *Adapter) run(ctx context.Context, launch sealedexec.AdapterLaunch, args
 		cancel()
 		return nil, errors.New("sealedexec/codex: process returned a nil active run")
 	}
+	// Amendment 003: both raw capabilities and both complete authorization
+	// strings join the protected set before the first provider observation.
 	protectedValues := append([][]byte(nil), launch.Profile.PolicySecretValues...)
+	protectedValues = append(protectedValues, a.servers.ProtectedValues()...)
 	return &activeRun{process: processRun, processor: a.processor, launch: launch, expectedSession: expectedSession, start: start, cancel: cancel, protectedValues: protectedValues}, nil
 }
 
@@ -323,7 +381,7 @@ func (r *activeRun) stopTerminal() (sealedexec.AdapterResult, error) {
 	return sealedexec.AdapterResult{Stopped: &stop, Observations: []sealedexec.NormalizedObservation{}}, nil
 }
 
-func verifyArgs(request sealedexec.ExecutionRequest, profile sealedexec.ResolvedProfile, workspace sealedexec.WorkspaceFacts, review *sealedexec.ReviewLaunch) ([]string, error) {
+func verifyArgs(request sealedexec.ExecutionRequest, profile sealedexec.ResolvedProfile, workspace sealedexec.WorkspaceFacts, review *sealedexec.ReviewLaunch, servers sealedexec.RequiredMCPSet) ([]string, error) {
 	switch request.Action {
 	case sealedexec.ActionStart:
 		if review != nil {
@@ -331,9 +389,8 @@ func verifyArgs(request sealedexec.ExecutionRequest, profile sealedexec.Resolved
 			if err := validateReviewLaunch(launch); err != nil {
 				return nil, err
 			}
-			return []string{"exec", "--json", "--strict-config", "--ignore-user-config", "--ignore-rules", "--profile", profile.Name, "--model", review.Model, "--sandbox", "workspace-write", "--cd", workspace.Path, "-"}, nil
 		}
-		return []string{"exec", "--json", "--strict-config", "--ignore-user-config", "--ignore-rules", "--profile", profile.Name, "--sandbox", "workspace-write", "--cd", workspace.Path, "-"}, nil
+		return startArgs(profile.Name, workspace.Path, reviewModel(review), servers), nil
 	case sealedexec.ActionResume:
 		if review != nil {
 			return nil, errors.New("sealedexec/codex: sealed review is start-only")
@@ -344,7 +401,7 @@ func verifyArgs(request sealedexec.ExecutionRequest, profile sealedexec.Resolved
 		if err := validateSessionRef(request.Resume.Continuity.AdapterSessionRef); err != nil {
 			return nil, err
 		}
-		return []string{"exec", "resume", "--json", "--strict-config", "--ignore-user-config", "--ignore-rules", request.Resume.Continuity.AdapterSessionRef, "-"}, nil
+		return resumeArgs(request.Resume.Continuity.AdapterSessionRef, servers), nil
 	default:
 		return nil, fmt.Errorf("sealedexec/codex: unsupported action %q", request.Action)
 	}
@@ -521,8 +578,11 @@ func mapItem(launch sealedexec.AdapterLaunch, outer string, item map[string]any,
 		payload := &contextevent.WritePayload{Schema: schema, Path: path, ClaimID: id, BeforeDigest: before, AfterDigest: after, ByteCount: count}
 		return []sealedexec.NormalizedObservation{{Kind: contextevent.KindWrite, ForeignDetail: detail, Payload: payload}, summaryObservation(detail, id)}, ""
 	case "mcp_tool_call":
+		// Amendment 003: claim_paths is admitted only as ordinary telemetry.
+		// Committed VATC state remains the sole claim authority, so a foreign
+		// success here still grants nothing and authorizes no write.
 		tool, ok := nonemptyString(item["tool"])
-		if !ok || (tool != sealedexec.ToolGetFlightPlan && tool != sealedexec.ToolRequestContext) {
+		if !ok || (tool != sealedexec.ToolGetFlightPlan && tool != sealedexec.ToolRequestContext && tool != sealedexec.ToolClaimPaths) {
 			return nil, "unscoped-mcp-tool"
 		}
 		if outer == "item.started" {
