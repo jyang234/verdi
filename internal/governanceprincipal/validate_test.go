@@ -255,6 +255,36 @@ evidence_source_restrictions: []
 escalation_thresholds: []
 `
 
+// soloMixedSourcesYAML is a valid solo profile declaring TWO trust
+// sources whose role_mappings bind different subjects: alice under the
+// local-operator source, bob under the forge source. It isolates the
+// per-source half of the role-mapping binding rule — bob is a subject
+// the profile binds, but not one it binds to `local` — so a resolver
+// that asked only "is this subject bound anywhere?" would authenticate a
+// local-operator claim for bob (2026-09-05 local-operator disposition
+// design §2.1: bound "to that source"). Used by resolve_test.go.
+const soloMixedSourcesYAML = `schema: verdi.governance-profile/v1
+id: solo-mixed-sources
+class: solo
+applicable_transitions: [accept, close]
+identity_trust_sources:
+  - { id: github, kind: forge }
+  - { id: local, kind: local-operator }
+role_mappings:
+  - role: author
+    trust_source: local
+    subjects: ["alice@example.com"]
+  - role: reviewer
+    trust_source: github
+    subjects: ["bob@example.com"]
+ownership_sources: []
+signature_requirements: []
+required_approvers: []
+distinctness_rules: []
+evidence_source_restrictions: []
+escalation_thresholds: []
+`
+
 // minimalNonSoloWithLocalOperatorYAML builds the smallest profile of class
 // that still decodes structurally (an empty rule set for every family),
 // declaring a local-operator trust source alongside an ordinary forge
