@@ -292,6 +292,39 @@ func (r Resolver) Resolve(ctx context.Context, profile Profile, claim PrincipalC
 			EvidenceDigest: fact.EvidenceDigest,
 			Detail:         fact.Reason,
 		}}
+	case source.Kind == TrustSourceLocalOperator:
+		// A local-operator claim is a bare self-assertion: fact.Subjects
+		// alone (the adapter's own echo of the same ambient read) is not
+		// enough evidence to authenticate. The kernel additionally
+		// requires the claimed subject to be one the profile's own
+		// role_mappings already bind to this source — a principal the
+		// profile author actually named — before it will mint anything
+		// stronger than violated (2026-09-05 local-operator disposition
+		// design §2.1). Never mints ReasonTrustSubjectVerified for this
+		// kind.
+		if !roleMappingsBind(profile, source.ID, claim.Subject) {
+			res.State = ResolutionViolated
+			res.Witnesses = []Witness{{
+				Code:           ReasonTrustSubjectMismatch,
+				SourceID:       source.ID,
+				EvidenceDigest: fact.EvidenceDigest,
+				Detail:         fmt.Sprintf("self-asserted subject is not bound to any role by profile %q's role_mappings for source %q", profile.ID, source.ID),
+			}}
+			break
+		}
+		id, err := CanonicalPrincipalID(claim.TrustSource, claim.Subject)
+		if err != nil {
+			// Unreachable after claim.Validate, kept as a fail-closed guard.
+			return PrincipalResolution{}, err
+		}
+		res.State = ResolutionAuthenticated
+		res.PrincipalID = id
+		res.Witnesses = []Witness{{
+			Code:           ReasonLocalOperatorAsserted,
+			SourceID:       source.ID,
+			EvidenceDigest: fact.EvidenceDigest,
+			Detail:         fmt.Sprintf("self-asserted subject is bound to a role by profile %q's role_mappings for source %q", profile.ID, source.ID),
+		}}
 	case !contains(fact.Subjects, claim.Subject):
 		res.State = ResolutionViolated
 		res.Witnesses = []Witness{{
@@ -320,4 +353,21 @@ func (r Resolver) Resolve(ctx context.Context, profile Profile, claim PrincipalC
 		return PrincipalResolution{}, err
 	}
 	return res, nil
+}
+
+// roleMappingsBind reports whether ANY role mapping in profile binds
+// subject to trustSource, regardless of which role — the "is this a
+// known local operator" membership check the local-operator kind's
+// self-assertion requires before Resolve will trust it (2026-09-05
+// local-operator disposition design §2.1). Distinct from the
+// role-specific holdsRole/HoldsRole query (authorize.go), which asks
+// whether a subject fills one PARTICULAR role rather than any role at
+// all.
+func roleMappingsBind(profile Profile, trustSource, subject string) bool {
+	for _, m := range profile.RoleMappings {
+		if m.TrustSource == trustSource && contains(m.Subjects, subject) {
+			return true
+		}
+	}
+	return false
 }

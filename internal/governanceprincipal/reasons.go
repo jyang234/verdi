@@ -13,6 +13,13 @@ const (
 	// resolution carries: the claimed subject was observed in valid
 	// evidence, with the evidence digest recorded.
 	ReasonTrustSubjectVerified = "trust-subject-verified"
+	// ReasonLocalOperatorAsserted is the positive witness a local-operator
+	// resolution carries INSTEAD of ReasonTrustSubjectVerified: the
+	// evidence is a bare self-assertion (the checkout's own git identity),
+	// never independently verified, so the witness says so rather than
+	// overclaiming (2026-09-05 local-operator disposition design §2.1,
+	// ledger SI-178).
+	ReasonLocalOperatorAsserted = "local-operator-asserted"
 
 	// Authorization findings.
 	ReasonTransitionNotApplicable = "transition-not-applicable"

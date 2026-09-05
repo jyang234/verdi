@@ -45,18 +45,27 @@ func (c Class) Validate() error {
 // TrustSourceKind is the closed identity-trust-source kind vocabulary.
 type TrustSourceKind string
 
-// The four trust-source kinds. Unknown kinds fail closed.
+// The five trust-source kinds. Unknown kinds fail closed.
 const (
 	TrustSourceForge            TrustSourceKind = "forge"
 	TrustSourceSignedCommit     TrustSourceKind = "signed-commit"
 	TrustSourceOwnership        TrustSourceKind = "ownership"
 	TrustSourceIdentityProvider TrustSourceKind = "identity-provider"
+	// TrustSourceLocalOperator is honest about its strength (2026-09-05
+	// local-operator disposition design §2.1, ledger SI-178): its
+	// evidence is a bare self-assertion (the checkout's own configured
+	// git identity), never independently verified. validateTrustSources
+	// admits it for solo-class profiles only (§2.1's ratified reading of
+	// "one authenticated principal fills every role"), and Resolve mints
+	// the local-operator-asserted witness for it, never
+	// trust-subject-verified.
+	TrustSourceLocalOperator TrustSourceKind = "local-operator"
 )
 
 // Validate fails closed on any kind outside the vocabulary.
 func (k TrustSourceKind) Validate() error {
 	switch k {
-	case TrustSourceForge, TrustSourceSignedCommit, TrustSourceOwnership, TrustSourceIdentityProvider:
+	case TrustSourceForge, TrustSourceSignedCommit, TrustSourceOwnership, TrustSourceIdentityProvider, TrustSourceLocalOperator:
 		return nil
 	}
 	return fmt.Errorf("governanceprincipal: unknown trust-source kind %q", string(k))
