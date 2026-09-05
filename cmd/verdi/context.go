@@ -68,6 +68,8 @@ func cmdContext(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		return cmdContextMCP(args[1:], stdin, stdout, stderr)
 	case "owner":
 		return cmdContextOwner(args[1:], stdin, stdout, stderr)
+	case "project":
+		return cmdContextProject(args[1:], stdout, stderr)
 	case "receipt":
 		return cmdContextReceipt(args[1:], stdin, stdout, stderr)
 	case "resolve":

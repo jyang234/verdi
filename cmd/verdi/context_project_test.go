@@ -558,7 +558,7 @@ func TestCmdContextProject_IdempotentAcrossRepeatedRuns(t *testing.T) {
 	}
 }
 
-// --- --root wired end-to-end ------------------------------------------------
+// --- --root wired end-to-end, and dispatcher routing ------------------------
 
 // TestCmdContextProject_RootFlagOverridesCwd proves --root is honored from
 // a cwd that is itself not a store at all (never falling back to
@@ -576,5 +576,32 @@ func TestCmdContextProject_RootFlagOverridesCwd(t *testing.T) {
 	}
 	if stdout.Len() == 0 {
 		t.Fatal("stdout empty, want the one-adapter output")
+	}
+}
+
+// TestCmdContext_ProjectRouting proves the namespace routes "project" to
+// this verb's own grammar rather than the compile usage line, without
+// widening the namespace to accept a similar-looking word.
+func TestCmdContext_ProjectRouting(t *testing.T) {
+	t.Chdir(t.TempDir())
+
+	var stdout, stderr bytes.Buffer
+	if got := cmdContext([]string{"project"}, strings.NewReader(""), &stdout, &stderr); got != 2 {
+		t.Fatalf("cmdContext(project) = %d, want 2; stderr=%s", got, stderr.String())
+	}
+	if stdout.Len() != 0 {
+		t.Fatalf("stdout = %q, want empty", stdout.String())
+	}
+	if stderr.String() == contextCompileUsage+"\n" {
+		t.Fatal("cmdContext(project) fell through to the namespace usage banner instead of routing to context project")
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	if got := cmdContext([]string{"projects"}, strings.NewReader(""), &stdout, &stderr); got != 2 {
+		t.Fatalf("cmdContext(projects) = %d, want 2", got)
+	}
+	if stderr.String() != contextCompileUsage+"\n" {
+		t.Fatalf("stderr = %q, want the namespace usage line %q", stderr.String(), contextCompileUsage+"\n")
 	}
 }
