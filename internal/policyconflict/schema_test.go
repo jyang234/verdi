@@ -784,11 +784,15 @@ func TestDecodeReport_UnsortedRows(t *testing.T) {
 
 // TestDecodeReport_DisclosureVocabulary proves the disclosure code set is
 // the fourteen existing contextcompile.DisclosureCode values plus exactly
-// "solo-principal-collapse", and that an unknown code fails closed.
+// "solo-principal-collapse" and "local-operator-asserted" (2026-09-05
+// local-operator disposition design §2.2, ledger SI-178: every report
+// relying on a local-operator resolution carries this code so no consumer
+// can read such a pass as an authenticated-identity pass), and that an
+// unknown code fails closed.
 func TestDecodeReport_DisclosureVocabulary(t *testing.T) {
 	base := mustReadFixture(t, "report.json")
 
-	valid := []string{"actor-resolution-unproven", "solo-principal-collapse"}
+	valid := []string{"actor-resolution-unproven", "solo-principal-collapse", "local-operator-asserted"}
 	for _, code := range valid {
 		t.Run("valid/"+code, func(t *testing.T) {
 			tree := setAtPath(t, base, []any{"disclosures"}, []any{

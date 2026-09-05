@@ -139,6 +139,15 @@ type DisclosureCode = contextcompile.DisclosureCode
 // permitted author/approver collapse."
 const DisclosureSoloPrincipalCollapse contextcompile.DisclosureCode = "solo-principal-collapse"
 
+// DisclosureLocalOperatorAsserted is the second disclosure code this
+// package adds beyond contextcompile's fourteen (2026-09-05 local-operator
+// disposition design §2.2, ledger SI-178): every report relying on a
+// local-operator principal resolution carries this code, so no consumer
+// can read such a pass as an authenticated-identity pass. This package
+// only defines and validates the code; emitting it onto a real report is
+// the conflict-service factory's job (design §2.2).
+const DisclosureLocalOperatorAsserted contextcompile.DisclosureCode = "local-operator-asserted"
+
 // --- Request (authority design §2) ------------------------------------------
 
 // AcceptanceCandidate is the Target union's acceptance-candidate arm

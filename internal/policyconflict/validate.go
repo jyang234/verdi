@@ -200,12 +200,13 @@ func (r JudgeRole) Validate() error {
 }
 
 // validateDisclosureCode checks d against the closed vocabulary authority
-// design §10/ledger SI-103 fixes: the fourteen existing
-// contextcompile.DisclosureCode values (checked via that type's own
-// exported Validate — DisclosureCode is a genuine alias, so the method is
-// already inherited) plus exactly DisclosureSoloPrincipalCollapse.
+// design §10/ledger SI-103 fixes, plus ledger SI-178's local-operator
+// addition: the fourteen existing contextcompile.DisclosureCode values
+// (checked via that type's own exported Validate — DisclosureCode is a
+// genuine alias, so the method is already inherited) plus exactly
+// DisclosureSoloPrincipalCollapse and DisclosureLocalOperatorAsserted.
 func validateDisclosureCode(d DisclosureCode) error {
-	if d == DisclosureSoloPrincipalCollapse {
+	if d == DisclosureSoloPrincipalCollapse || d == DisclosureLocalOperatorAsserted {
 		return nil
 	}
 	if err := d.Validate(); err != nil {
