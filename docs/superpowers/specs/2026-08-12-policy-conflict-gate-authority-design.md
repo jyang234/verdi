@@ -994,6 +994,9 @@ operand boundary and canonical path checks close those paths.
 The threat model does not claim deterministic model behavior, inspect vendor
 runtime instructions, authenticate a local username, prove external review
 conditions in v1, or make a report digest prove isolation or actor identity.
+A `solo` profile may declare a `local-operator` trust source whose resolutions
+are self-asserted, carry the `local-operator-asserted` witness, and are
+disclosed in every report that relies on them (SI-178, ratified 2026-09-05).
 Those limitations are recorded, never silently upgraded.
 
 ## 13. Implementation ownership and verification
