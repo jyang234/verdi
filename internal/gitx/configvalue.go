@@ -9,25 +9,36 @@ import (
 	"strings"
 )
 
-// ErrConfigUnset identifies a well-formed `git config --get` miss: the
-// named key is simply not configured anywhere git config consults
-// (repository, then global, then system config) — the benign "not set"
-// state a checkout legitimately has, mirroring RemoteURL's own
-// ErrNoSuchRemote split between "absent" and "operationally broken"
-// (ADJ-64: never conflate unreadable with absent). Callers use errors.Is
-// to tell a genuinely-unset key apart from a real read error they must
-// surface as operational.
+// ErrConfigUnset identifies the benign "no value here" state: the named
+// key carries no usable value, either because it is not configured
+// anywhere git config consults (repository, then global, then system
+// config) or because it is configured to the empty string, which names
+// nobody. Both are the state a checkout legitimately has, mirroring
+// RemoteURL's own ErrNoSuchRemote split between "absent" and
+// "operationally broken" (ADJ-64: never conflate unreadable with
+// absent). Callers use errors.Is to tell a valueless key apart from a
+// real read error they must surface as operational.
 var ErrConfigUnset = errors.New("gitx: git config key is unset")
 
-// ConfigValue reads one git-config string value (`git config --get
-// <key>`) as git itself resolves it from dir's repository, distinguishing
-// three failure shapes local-operator identity resolution depends on
-// (2026-09-05 local-operator disposition design §2.1):
+// ConfigValue reads one git-config string value as git itself resolves
+// it from dir's repository, distinguishing the states local-operator
+// identity resolution depends on (2026-09-05 local-operator disposition
+// design §2.1). Because that value is an authorization input, every
+// judgment here fails closed rather than guessing:
 //
+//   - set: exactly one value, returned as git's own bytes. ConfigValue
+//     strips the single trailing newline git appends and nothing else —
+//     never leading or trailing whitespace, which git itself preserves
+//     for a quoted value, and trimming which would silently return an
+//     identity other than the configured one.
+//   - set-empty: the key is configured to the empty string. Git exits 0
+//     and prints an empty line, so an exit-code-only reading would report
+//     a usable identity of "". An empty value identifies nobody:
+//     ConfigValue reports ErrConfigUnset.
 //   - absent: the key is simply not set anywhere git config consults.
-//     `git config --get` documents exit code 1 with no stderr for exactly
-//     this case; ConfigValue reports ErrConfigUnset (errors.Is-able),
-//     never conflated with a real read failure.
+//     Git documents exit code 1 with no stderr for exactly this case;
+//     ConfigValue reports ErrConfigUnset (errors.Is-able), never
+//     conflated with a real read failure.
 //   - malformed key: git itself refuses the key's syntax (e.g. a key with
 //     no section separator, or a variable name not starting with a
 //     letter). Git also exits 1 for this, but WITH an explanatory stderr
@@ -40,8 +51,17 @@ var ErrConfigUnset = errors.New("gitx: git config key is unset")
 //   - broken configuration: any other git failure (a corrupt config
 //     file, an unreadable repository, a missing git binary). Reported as
 //     a plain operational error carrying git's own stderr.
+//
+// The read uses `--get-all`, never `--get`: for a multi-valued key
+// `--get` exits 0 and silently returns the LAST value, which for an
+// authorization input is a wrong answer dressed as a right one.
+// ConfigValue refuses any key carrying more than one value as an
+// operational error naming the key. Because `--get-all` separates values
+// by newline, a single value that itself contains a newline is
+// indistinguishable from two values and is refused the same way — the
+// fail-closed direction, and never an identity ConfigValue invented.
 func ConfigValue(ctx context.Context, dir, key string) (string, error) {
-	cmd := exec.CommandContext(ctx, "git", "config", "--get", key)
+	cmd := exec.CommandContext(ctx, "git", "config", "--get-all", key)
 	cmd.Dir = dir
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -49,12 +69,21 @@ func ConfigValue(ctx context.Context, dir, key string) (string, error) {
 
 	err := cmd.Run()
 	if err == nil {
-		return strings.TrimSpace(stdout.String()), nil
+		// git terminates every value it prints with one newline; the
+		// value's own bytes are everything before it.
+		out := strings.TrimSuffix(stdout.String(), "\n")
+		if n := strings.Count(out, "\n") + 1; n > 1 {
+			return "", fmt.Errorf("gitx: ConfigValue(%q): key is ambiguous: git config --get-all (dir %s) returned %d values", key, dir, n)
+		}
+		if out == "" {
+			return "", fmt.Errorf("gitx: ConfigValue(%q): configured to the empty string: %w", key, ErrConfigUnset)
+		}
+		return out, nil
 	}
 
 	var exitErr *exec.ExitError
 	if errors.As(err, &exitErr) && exitErr.ExitCode() == 1 && strings.TrimSpace(stderr.String()) == "" {
 		return "", fmt.Errorf("gitx: ConfigValue(%q): %w", key, ErrConfigUnset)
 	}
-	return "", fmt.Errorf("gitx: ConfigValue(%q): git config --get (dir %s): %w: %s", key, dir, err, strings.TrimSpace(stderr.String()))
+	return "", fmt.Errorf("gitx: ConfigValue(%q): git config --get-all (dir %s): %w: %s", key, dir, err, strings.TrimSpace(stderr.String()))
 }

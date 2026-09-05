@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -35,22 +36,108 @@ func initRepo(t *testing.T) string {
 	return dir
 }
 
-func TestConfigValue_Present(t *testing.T) {
-	isolateGitConfig(t)
-	dir := initRepo(t)
-	ctx := context.Background()
-
-	const want = "alice@example.com"
-	if err := exec.Command("git", "-C", dir, "config", "user.email", want).Run(); err != nil {
-		t.Fatalf("git config (test setup): %v", err)
+// setConfig sets user.email to value with one `git config` invocation.
+func setConfig(value string) func(*testing.T, string) {
+	return func(t *testing.T, dir string) {
+		t.Helper()
+		if err := exec.Command("git", "-C", dir, "config", "user.email", value).Run(); err != nil {
+			t.Fatalf("git config user.email %q (test setup): %v", value, err)
+		}
 	}
+}
 
-	got, err := ConfigValue(ctx, dir, "user.email")
-	if err != nil {
-		t.Fatalf("ConfigValue: %v", err)
+// addConfig appends several values to the multi-valued user.email key.
+func addConfig(values ...string) func(*testing.T, string) {
+	return func(t *testing.T, dir string) {
+		t.Helper()
+		for _, v := range values {
+			if err := exec.Command("git", "-C", dir, "config", "--add", "user.email", v).Run(); err != nil {
+				t.Fatalf("git config --add user.email %q (test setup): %v", v, err)
+			}
+		}
 	}
-	if got != want {
-		t.Fatalf("ConfigValue = %q, want %q", got, want)
+}
+
+// TestConfigValue_ValueShapes is the value-shape table: what ConfigValue
+// returns for every way a key can carry — or fail to carry — one usable
+// value once git itself has run successfully. The absent, malformed-key
+// and broken-configuration shapes (git exits nonzero) have their own
+// tests below.
+func TestConfigValue_ValueShapes(t *testing.T) {
+	tests := []struct {
+		name  string
+		setup func(*testing.T, string)
+		// want is the exact value expected when no error is expected.
+		want string
+		// wantUnset requires errors.Is(err, ErrConfigUnset).
+		wantUnset bool
+		// wantErrSubs requires an operational error — never
+		// ErrConfigUnset — containing every listed substring.
+		wantErrSubs []string
+	}{
+		{
+			name:  "single value",
+			setup: setConfig("alice@example.com"),
+			want:  "alice@example.com",
+		},
+		{
+			// The value is an authorization input: ConfigValue returns
+			// git's own bytes, so a padded identity can never be silently
+			// trimmed into a different identity than the one configured.
+			name:  "value padded with spaces is returned byte-exact",
+			setup: setConfig("  padded  "),
+			want:  "  padded  ",
+		},
+		{
+			// `git config --get` exits 0 and prints an empty line here, so
+			// only inspecting the exit code would report a usable identity
+			// of "". An empty value names nobody: it is the unset state.
+			name:      "set but empty is unset",
+			setup:     setConfig(""),
+			wantUnset: true,
+		},
+		{
+			// `git config --get` silently returns the LAST of several
+			// values. For an authorization input that is a wrong answer
+			// dressed as a right one, so ConfigValue refuses instead.
+			name:        "multiple values are ambiguous",
+			setup:       addConfig("a@example.com", "b@example.com"),
+			wantErrSubs: []string{"user.email", "ambiguous"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			isolateGitConfig(t)
+			dir := initRepo(t)
+			tt.setup(t, dir)
+
+			got, err := ConfigValue(context.Background(), dir, "user.email")
+			switch {
+			case tt.wantUnset:
+				if !errors.Is(err, ErrConfigUnset) {
+					t.Fatalf("ConfigValue = (%q, %v), want errors.Is(err, ErrConfigUnset)", got, err)
+				}
+			case len(tt.wantErrSubs) > 0:
+				if err == nil {
+					t.Fatalf("ConfigValue = (%q, nil), want an operational error", got)
+				}
+				if errors.Is(err, ErrConfigUnset) {
+					t.Errorf("ConfigValue err = %v, want NOT ErrConfigUnset: the key is set, just not unambiguously", err)
+				}
+				for _, sub := range tt.wantErrSubs {
+					if !strings.Contains(err.Error(), sub) {
+						t.Errorf("error %q does not contain %q", err.Error(), sub)
+					}
+				}
+			default:
+				if err != nil {
+					t.Fatalf("ConfigValue: %v", err)
+				}
+				if got != tt.want {
+					t.Fatalf("ConfigValue = %q, want %q", got, tt.want)
+				}
+			}
+		})
 	}
 }
 
