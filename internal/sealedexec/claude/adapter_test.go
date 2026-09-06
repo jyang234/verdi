@@ -371,6 +371,61 @@ func TestClaudeAdapterParityContract_Static(t *testing.T) {
 			t.Fatalf("Start with version mismatch should refuse before process start")
 		}
 	})
+
+	// SI-181: Amendment 002 §3 (as annotated 2026-09-06) accepts the probe
+	// line iff it equals the requested adapter version exactly, or equals
+	// that version plus exactly the one fixed suffix " (Claude Code)" (the
+	// real Claude Code CLI 2.1.261 prints "2.1.261 (Claude Code)"). Every
+	// other variant is refused.
+	t.Run("version_probe_accepts_bare_or_claude_code_suffixed_form", func(t *testing.T) {
+		probeLaunch, _ := claudeTestLaunch(t, sealedexec.ActionStart)
+		version := probeLaunch.Request.AdapterVersion
+		const differentVersion = "9.9.9-not-the-requested-version"
+
+		cases := []struct {
+			name           string
+			probeLine      string
+			emptyProbeLine bool
+			accept         bool
+		}{
+			{name: "bare version accepted", probeLine: version, accept: true},
+			{name: "version plus Claude Code suffix accepted", probeLine: version + " (Claude Code)", accept: true},
+			{name: "lowercase suffix refused", probeLine: version + " (claude code)"},
+			{name: "double space before suffix refused", probeLine: version + "  (Claude Code)"},
+			{name: "suffix prefixed instead of appended refused", probeLine: "(Claude Code)" + version},
+			{name: "trailing content after suffix refused", probeLine: version + " (Claude Code) extra"},
+			{name: "different version with suffix refused", probeLine: differentVersion + " (Claude Code)"},
+			{name: "empty probe line refused", emptyProbeLine: true},
+		}
+
+		for _, tc := range cases {
+			t.Run(tc.name, func(t *testing.T) {
+				launch, envRoot := claudeTestLaunch(t, sealedexec.ActionStart)
+				pp := &testProbeProcess{version: tc.probeLine, emptyProbeLine: tc.emptyProbeLine}
+				dp := newTestProcessor(t)
+				adapter, err := newClaudeTestAdapter(t, pp, dp, envRoot)
+				if err != nil {
+					t.Fatalf("New: %v", err)
+				}
+				_, err = adapter.Start(context.Background(), launch)
+				if tc.accept {
+					if err != nil {
+						t.Fatalf("Start with probe line %q should be accepted, got error: %v", tc.probeLine, err)
+					}
+					if pp.startCmd == nil {
+						t.Fatal("Start with an accepted probe line should have launched the process")
+					}
+				} else {
+					if err == nil {
+						t.Fatalf("Start with probe line %q should refuse", tc.probeLine)
+					}
+					if pp.startCmd != nil {
+						t.Fatalf("Start with probe line %q should refuse before process start", tc.probeLine)
+					}
+				}
+			})
+		}
+	})
 }
 
 // ---------------------------------------------------------------------------
@@ -1972,16 +2027,17 @@ func mergeClaudeResult(target *sealedexec.AdapterResult, result sealedexec.Adapt
 // testProbeProcess simulates the Claude process for tests.
 // Probe returns the configured version; Start records the command and streams output.
 type testProbeProcess struct {
-	mu         sync.Mutex
-	probeCmd   *exec.Cmd
-	startCmd   *exec.Cmd
-	startStdin []byte
-	version    string
-	output     []byte
-	stderr     []byte
-	exitCode   int
-	err        error
-	run        *testClaudeActiveProcess
+	mu             sync.Mutex
+	probeCmd       *exec.Cmd
+	startCmd       *exec.Cmd
+	startStdin     []byte
+	version        string
+	emptyProbeLine bool
+	output         []byte
+	stderr         []byte
+	exitCode       int
+	err            error
+	run            *testClaudeActiveProcess
 }
 
 func (p *testProbeProcess) Probe(_ context.Context, cmd *exec.Cmd) (stdout, stderr []byte, exitCode int, err error) {
@@ -1990,6 +2046,10 @@ func (p *testProbeProcess) Probe(_ context.Context, cmd *exec.Cmd) (stdout, stde
 	p.probeCmd = cmd
 	if p.err != nil {
 		return nil, nil, 1, p.err
+	}
+	if p.emptyProbeLine {
+		// A well-formed probe: exit 0, empty stderr, one empty stdout line.
+		return []byte("\n"), nil, 0, nil
 	}
 	if p.version == "" {
 		return nil, nil, 1, errors.New("testProbeProcess: no version configured")

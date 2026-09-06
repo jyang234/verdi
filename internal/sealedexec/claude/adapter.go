@@ -30,6 +30,13 @@ const (
 	// claudeProcessSource is Amendment 002 §5's telemetry-gap source for
 	// process-level (as opposed to stream-level) conditions.
 	claudeProcessSource = "claude-process"
+
+	// claudeVersionProbeSuffix is the single fixed product suffix Amendment
+	// 002 §3 (as annotated 2026-09-06, SI-181) admits after the requested
+	// adapter version in the `--version` probe line. The real Claude Code CLI
+	// 2.1.261 prints "2.1.261 (Claude Code)"; no other suffix or variant is
+	// accepted.
+	claudeVersionProbeSuffix = " (Claude Code)"
 )
 
 // ProcessResult is the explicit terminal process result. Amendment 002 §5
@@ -215,8 +222,13 @@ func (a *Adapter) run(ctx context.Context, launch sealedexec.AdapterLaunch, args
 	if bytes.ContainsAny(probeOut, "\r\n") || !utf8.Valid(probeOut) {
 		return nil, errors.New("sealedexec/claude: version probe: output has unexpected newlines or invalid UTF-8")
 	}
-	if string(probeOut) != launch.Request.AdapterVersion {
-		return nil, fmt.Errorf("sealedexec/claude: version probe: output %q != expected %q", string(probeOut), launch.Request.AdapterVersion)
+	// §3 (SI-181): the probe line is accepted iff it equals the requested
+	// adapter version exactly, or equals that version plus exactly the one
+	// fixed product suffix. Anything else is refused, naming both accepted
+	// forms.
+	suffixedVersion := launch.Request.AdapterVersion + claudeVersionProbeSuffix
+	if string(probeOut) != launch.Request.AdapterVersion && string(probeOut) != suffixedVersion {
+		return nil, fmt.Errorf("sealedexec/claude: version probe: output %q != expected %q or %q", string(probeOut), launch.Request.AdapterVersion, suffixedVersion)
 	}
 
 	// Build and encode the typed stdin envelope.
