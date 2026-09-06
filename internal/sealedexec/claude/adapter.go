@@ -1623,7 +1623,40 @@ func (r *claudeActiveRun) handleAssistant(ctx context.Context, line []byte, obje
 			return r.decodeFailure(ctx, seq, "unknown-content-block", nil)
 		}
 	}
+	// SI-182: a frame with no content block has no block detail to attach the
+	// frame- and message-level disclosure to, so it carries one of its own
+	// rather than dropping the recording obligation on an accepted frame.
+	if len(*message.Content) == 0 {
+		summary, disclosed, err := r.unknownMemberSummary(ctx, "assistant", seq, r.runNewUnknownMembers(messageUnknown), protectedValues)
+		if err != nil {
+			return r.decodeFailure(ctx, seq, detailFailureReason(err), nil)
+		}
+		if disclosed {
+			observations = append(observations, summary)
+		}
+	}
 	return sealedexec.AdapterResult{Observations: observations}, nil
+}
+
+// unknownMemberSummary carries SI-182's disclosure on an advisory provider
+// summary of its own, for a frame whose content is empty: §I-108 records the
+// path regardless of what else the frame contains, and such a frame has no
+// content-block detail to carry it. Its summary id is derived from the source
+// sequence and never from provider bytes, so it places no foreign value in a
+// fixed payload field. paths must already be this launch's run-new set; an
+// empty one yields no observation at all, so a clean frame is unchanged.
+func (r *claudeActiveRun) unknownMemberSummary(ctx context.Context, family string, seq uint64, paths []string, protectedValues [][]byte) (obs sealedexec.NormalizedObservation, disclosed bool, err error) {
+	if len(paths) == 0 {
+		return sealedexec.NormalizedObservation{}, false, nil
+	}
+	source := map[string]any{"family": family}
+	attachUnknownMemberWitness(source, paths)
+	detail, err := r.processDetail(ctx, source, protectedValues)
+	if err != nil {
+		return sealedexec.NormalizedObservation{}, false, err
+	}
+	summaryID := fmt.Sprintf("unknown-members/%d", seq)
+	return buildProviderSummary(r.launch, summaryID, detail.Digest, contextevent.AuthorityAdvisory, detail), true, nil
 }
 
 // omissionSummary builds the fixed hidden-content omission summary. Hidden
@@ -1680,7 +1713,8 @@ func (r *claudeActiveRun) handleToolResult(ctx context.Context, line []byte, obj
 
 	// SI-182: as in the assistant family, every not-yet-disclosed frame/
 	// message-level unknown member is attached to whichever tool-result block
-	// first gets the chance below.
+	// first gets the chance below, or to a disclosure summary of its own when
+	// the frame has no block at all.
 	frameUnknown := unknown.sorted()
 	contentObjects, _ := messageObject["content"].([]any)
 
@@ -1777,6 +1811,17 @@ func (r *claudeActiveRun) handleToolResult(ctx context.Context, line []byte, obj
 				Detail:       detail,
 			},
 		})
+	}
+	// SI-182: as in the assistant family, an accepted frame with no content
+	// block still records its frame- and message-level unknown members.
+	if len(*frame.Message.Content) == 0 {
+		summary, disclosed, err := r.unknownMemberSummary(ctx, "user", seq, r.runNewUnknownMembers(frameUnknown), protectedValues)
+		if err != nil {
+			return r.decodeFailure(ctx, seq, detailFailureReason(err), nil)
+		}
+		if disclosed {
+			observations = append(observations, summary)
+		}
 	}
 	return sealedexec.AdapterResult{Observations: observations}, nil
 }

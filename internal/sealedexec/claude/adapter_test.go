@@ -1092,6 +1092,76 @@ func TestClaudeAdapterParityContract_Behavioral(t *testing.T) {
 		}
 	})
 
+	// SI-182 records the path, full stop — the obligation does not depend on
+	// what else the frame happens to carry. An accepted assistant frame whose
+	// content is empty has no content-block detail to attach the disclosure
+	// to, so it gets a summary of its own instead of dropping it silently.
+	t.Run("assistant_with_empty_content_still_records_its_unknown_members", func(t *testing.T) {
+		launch, envRoot := claudeTestLaunch(t, sealedexec.ActionStart)
+		bad := `{"type":"assistant","session_id":"s1","uuid":"mu","future_frame_key":1,"message":{"id":"msg_1","type":"message","role":"assistant","model":"claude-opus-5-test","content":[],"usage":{"input_tokens":1,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":1},"future_key":true}}`
+		result := runClaudeLinesToTerminal(t, launch, envRoot,
+			claudeInitLine("s1", launch.Workspace.Path), bad, claudeResultLine("s1", "success", false))
+		// The assistant frame is the second source line of the stream.
+		summary := claudeFindProviderSummary(t, result.Observations, "unknown-members/2")
+		const want = `{"family":"assistant","unknown-foreign-member":["future_frame_key","message.future_key"]}`
+		if got := string(summary.ForeignDetail.RedactedJSON); got != want {
+			t.Fatalf("empty-content disclosure detail = %s, want %s", got, want)
+		}
+	})
+
+	// The same obligation on the user family, whose content is likewise
+	// allowed to be empty.
+	t.Run("user_frame_with_empty_content_still_records_its_unknown_members", func(t *testing.T) {
+		launch, envRoot := claudeTestLaunch(t, sealedexec.ActionStart)
+		bad := `{"type":"user","session_id":"s1","uuid":"tu","future_frame_key":1,"message":{"role":"user","content":[],"future_key":true}}`
+		result := runClaudeLinesToTerminal(t, launch, envRoot,
+			claudeInitLine("s1", launch.Workspace.Path), bad, claudeResultLine("s1", "success", false))
+		summary := claudeFindProviderSummary(t, result.Observations, "unknown-members/2")
+		const want = `{"family":"user","unknown-foreign-member":["future_frame_key","message.future_key"]}`
+		if got := string(summary.ForeignDetail.RedactedJSON); got != want {
+			t.Fatalf("empty-content disclosure detail = %s, want %s", got, want)
+		}
+	})
+
+	// The disclosure summary exists only for the disclosure: a clean
+	// empty-content frame still produces no observation of its own, exactly
+	// as it did before SI-182.
+	t.Run("clean_empty_content_frame_yields_no_disclosure_summary", func(t *testing.T) {
+		launch, envRoot := claudeTestLaunch(t, sealedexec.ActionStart)
+		clean := `{"type":"assistant","session_id":"s1","uuid":"mu","message":{"id":"msg_1","type":"message","role":"assistant","model":"claude-opus-5-test","content":[],"usage":{"input_tokens":1,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":1}}}`
+		result := runClaudeLinesToTerminal(t, launch, envRoot,
+			claudeInitLine("s1", launch.Workspace.Path), clean, claudeResultLine("s1", "success", false))
+		for _, obs := range result.Observations {
+			if summary, ok := obs.Payload.(*contextevent.ProviderSummaryPayload); ok &&
+				strings.HasPrefix(summary.SummaryID, "unknown-members/") {
+				t.Fatalf("clean empty-content frame emitted %q: %s", summary.SummaryID, obs.ForeignDetail.RedactedJSON)
+			}
+			if bytes.Contains(obs.ForeignDetail.RedactedJSON, []byte(unknownMemberCode)) {
+				t.Fatalf("clean run disclosed a witness on %s: %s", obs.Kind, obs.ForeignDetail.RedactedJSON)
+			}
+		}
+	})
+
+	// A frame that does carry content keeps disclosing on its first block, so
+	// the disclosure is recorded exactly once either way.
+	t.Run("nonempty_content_keeps_the_disclosure_on_its_first_block", func(t *testing.T) {
+		launch, envRoot := claudeTestLaunch(t, sealedexec.ActionStart)
+		bad := `{"type":"assistant","session_id":"s1","uuid":"mu","future_frame_key":1,"message":{"id":"msg_1","type":"message","role":"assistant","model":"claude-opus-5-test","content":[{"type":"text","text":"hi"}],"usage":{"input_tokens":1,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":1}}}`
+		result := runClaudeLinesToTerminal(t, launch, envRoot,
+			claudeInitLine("s1", launch.Workspace.Path), bad, claudeResultLine("s1", "success", false))
+		message := claudeFindKind(t, result.Observations, contextevent.KindProviderMessage)
+		const want = `"unknown-foreign-member":["future_frame_key"]`
+		if !bytes.Contains(message.ForeignDetail.RedactedJSON, []byte(want)) {
+			t.Fatalf("assistant text detail = %s, want it to contain %s", message.ForeignDetail.RedactedJSON, want)
+		}
+		for _, obs := range result.Observations {
+			if summary, ok := obs.Payload.(*contextevent.ProviderSummaryPayload); ok &&
+				strings.HasPrefix(summary.SummaryID, "unknown-members/") {
+				t.Fatalf("a frame with content blocks must not also emit %q", summary.SummaryID)
+			}
+		}
+	})
+
 	// SI-182's other half: a tolerated member is NEVER READ. The result
 	// detail is rebuilt from the typed decode, so a clean frame's projection
 	// is byte-identical to the passthrough it replaced — this row is the
