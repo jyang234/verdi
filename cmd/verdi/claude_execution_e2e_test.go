@@ -1387,12 +1387,36 @@ func TestClaudeBuiltBinaryLifecycle_Behavioral(t *testing.T) {
 	// SI-182: the real Claude Code CLI 2.1.261 emits system/init and
 	// system/api_retry members Amendment 002 §5's v1 tables do not list
 	// (measured offline by the F12 canary track, 2026-09-06). The sealed run
-	// must tolerate them and proceed to the same successful lifecycle.
+	// must tolerate them, record their exact sorted dotted paths in the
+	// acknowledged event stream, and proceed to the same successful
+	// lifecycle. Tolerance alone is not the contract: §I-108 requires the
+	// disclosure, so the recorded details are asserted, not only the exit.
 	t.Run("sealed_start_tolerates_the_2_1_261_unknown_member_frames", func(t *testing.T) {
 		run := runClaudeSealedLifecycle(t, bin, claudeLifecycleOptions{unknownMembers: true})
 		assertClaudeSuccessfulLifecycle(t, run)
 		if countEventKindInFixture(run.fake.events, contextevent.KindRetry) == 0 {
 			t.Fatalf("unknown-member arm should still produce a retry event; kinds = %v", sealedEventKinds(run.fake.events))
+		}
+		const wantInit = `"unknown-foreign-member":["analytics_disabled","capabilities",` +
+			`"fast_mode_disabled_reason","fast_mode_state","memory_paths","messaging_socket_path",` +
+			`"product_feedback_disabled","terminal_slash_commands"]`
+		const wantRetry = `"unknown-foreign-member":["error_status"]`
+		var initDisclosed, retryDisclosed bool
+		for _, event := range run.fake.events {
+			detail := eventDetail(event)
+			if detail == nil {
+				continue
+			}
+			if bytes.Contains(detail.RedactedJSON, []byte(wantInit)) {
+				initDisclosed = true
+			}
+			if bytes.Contains(detail.RedactedJSON, []byte(wantRetry)) {
+				retryDisclosed = true
+			}
+		}
+		if !initDisclosed || !retryDisclosed {
+			t.Fatalf("acknowledged details disclosed init=%v retry=%v, want both; details = %s",
+				initDisclosed, retryDisclosed, sealedEventDetails(run.fake.events))
 		}
 	})
 
@@ -1790,6 +1814,20 @@ func assertClaudeAcknowledgedPrefix(t *testing.T, events []contextevent.Event, w
 
 // eventDetail returns the acknowledged event's detail, or nil for the kinds
 // that carry none. It fails closed: an unrecognized payload has no detail.
+// sealedEventDetails renders every acknowledged event's inline detail bytes,
+// so a failing assertion can show what the recorded stream actually carried.
+func sealedEventDetails(events []contextevent.Event) string {
+	var parts []string
+	for _, event := range events {
+		detail := eventDetail(event)
+		if detail == nil {
+			continue
+		}
+		parts = append(parts, fmt.Sprintf("%s=%s", event.Kind, detail.RedactedJSON))
+	}
+	return strings.Join(parts, " ")
+}
+
 func eventDetail(event contextevent.Event) *contextevent.Detail {
 	switch payload := event.Payload.(type) {
 	case *contextevent.ProviderSummaryPayload:
