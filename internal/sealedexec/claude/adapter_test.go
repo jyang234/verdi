@@ -386,6 +386,7 @@ func TestClaudeAdapterParityContract_Static(t *testing.T) {
 			name           string
 			probeLine      string
 			emptyProbeLine bool
+			secondLine     bool
 			accept         bool
 		}{
 			{name: "bare version accepted", probeLine: version, accept: true},
@@ -396,12 +397,18 @@ func TestClaudeAdapterParityContract_Static(t *testing.T) {
 			{name: "trailing content after suffix refused", probeLine: version + " (Claude Code) extra"},
 			{name: "different version with suffix refused", probeLine: differentVersion + " (Claude Code)"},
 			{name: "empty probe line refused", emptyProbeLine: true},
+			// SI-181 review F1: the suffix alone, with no version at all, is
+			// neither accepted form and must refuse like any other variant.
+			{name: "suffix without a version refused", probeLine: " (Claude Code)"},
+			// SI-181 review F1: an otherwise-accepted suffixed line followed by
+			// a second stdout line is still more than the one required line.
+			{name: "accepted suffixed line plus a second line refused", probeLine: version + " (Claude Code)", secondLine: true},
 		}
 
 		for _, tc := range cases {
 			t.Run(tc.name, func(t *testing.T) {
 				launch, envRoot := claudeTestLaunch(t, sealedexec.ActionStart)
-				pp := &testProbeProcess{version: tc.probeLine, emptyProbeLine: tc.emptyProbeLine}
+				pp := &testProbeProcess{version: tc.probeLine, emptyProbeLine: tc.emptyProbeLine, secondLine: tc.secondLine}
 				dp := newTestProcessor(t)
 				adapter, err := newClaudeTestAdapter(t, pp, dp, envRoot)
 				if err != nil {
@@ -890,12 +897,89 @@ func TestClaudeAdapterParityContract_Behavioral(t *testing.T) {
 	// source/precedence (C6), and I1-I5.
 	// -----------------------------------------------------------------
 
-	t.Run("init_rejects_unknown_outer_field", func(t *testing.T) {
+	// SI-182: an unknown member at the init frame's own object level is
+	// tolerated (never read) and its dotted path is recorded once, under the
+	// closed code `unknown-foreign-member`, in the init provider-summary
+	// detail — replacing the pre-SI-182 refusal this row used to prove.
+	t.Run("init_tolerates_unknown_top_level_member_and_records_witness", func(t *testing.T) {
 		launch, envRoot := claudeTestLaunch(t, sealedexec.ActionStart)
 		line := strings.Replace(claudeInitLine("s1", launch.Workspace.Path),
 			`"uuid":"u-init"`, `"uuid":"u-init","future_key":1`, 1)
+		result := runClaudeLines(t, launch, envRoot, line, claudeResultLine("s1", "success", false))
+		summary := claudeFindProviderSummary(t, result.Observations, "system/init")
+		const want = `"unknown-foreign-member":["future_key"]`
+		if !bytes.Contains(summary.ForeignDetail.RedactedJSON, []byte(want)) {
+			t.Fatalf("init detail = %s, want it to contain %s", summary.ForeignDetail.RedactedJSON, want)
+		}
+	})
+
+	// SI-182 test row (a): the exact 8 unknown init members the real Claude
+	// Code CLI 2.1.261 emits (measured offline by the F12 canary track,
+	// 2026-09-06), reproduced here with synthetic values — never the measured
+	// bytes — all decode and are listed sorted and deduplicated.
+	t.Run("init_tolerates_the_measured_2_1_261_unknown_member_set", func(t *testing.T) {
+		launch, envRoot := claudeTestLaunch(t, sealedexec.ActionStart)
+		line := strings.Replace(claudeInitLine("s1", launch.Workspace.Path), `"uuid":"u-init"}`,
+			`"analytics_disabled":false,"capabilities":["interrupt_receipt_v1"],`+
+				`"fast_mode_disabled_reason":"sdk_opt_in_required","fast_mode_state":"off",`+
+				`"memory_paths":{"auto":"/synthetic/memory/"},"messaging_socket_path":"/synthetic/cc.sock",`+
+				`"product_feedback_disabled":false,"terminal_slash_commands":["doctor"],"uuid":"u-init"}`, 1)
+		result := runClaudeLines(t, launch, envRoot, line, claudeResultLine("s1", "success", false))
+		summary := claudeFindProviderSummary(t, result.Observations, "system/init")
+		const want = `"unknown-foreign-member":["analytics_disabled","capabilities","fast_mode_disabled_reason",` +
+			`"fast_mode_state","memory_paths","messaging_socket_path","product_feedback_disabled","terminal_slash_commands"]`
+		if !bytes.Contains(summary.ForeignDetail.RedactedJSON, []byte(want)) {
+			t.Fatalf("init detail = %s, want it to contain %s", summary.ForeignDetail.RedactedJSON, want)
+		}
+	})
+
+	// SI-182 test row (i): a clean fixture with no unknown members discloses
+	// no witness entry anywhere in the run.
+	t.Run("no_unknown_members_yields_no_witness_entry", func(t *testing.T) {
+		launch, envRoot := claudeTestLaunch(t, sealedexec.ActionStart)
+		pp := &testProbeProcess{version: launch.Request.AdapterVersion, output: mustClaudeFixture(t, "claude-start.jsonl", launch.Workspace.Path)}
+		dp := newTestProcessor(t)
+		adapter, err := newClaudeTestAdapter(t, pp, dp, envRoot)
+		if err != nil {
+			t.Fatalf("New: %v", err)
+		}
+		run, err := adapter.Start(context.Background(), launch)
+		if err != nil {
+			t.Fatalf("Start: %v", err)
+		}
+		result := collectClaudeRun(t, run)
+		for _, obs := range result.Observations {
+			if bytes.Contains(obs.ForeignDetail.RedactedJSON, []byte(unknownMemberCode)) {
+				t.Fatalf("observation %s disclosed a witness over a clean fixture: %s", obs.Kind, obs.ForeignDetail.RedactedJSON)
+			}
+		}
+	})
+
+	// SI-182 test row (d): an unrecognized subtype of a known "system" type
+	// stays refused exactly as an unrecognized type would.
+	t.Run("unknown_system_subtype_still_refused", func(t *testing.T) {
+		launch, envRoot := claudeTestLaunch(t, sealedexec.ActionStart)
+		result := runClaudeLines(t, launch, envRoot, `{"type":"system","subtype":"heartbeat"}`)
+		assertClaudeGapReason(t, result, "unknown-foreign-family", "decode", claudeSource)
+	})
+
+	// SI-182 test row (f): a duplicate JSON key stays refused exactly as
+	// before — SI-182 tolerates unknown members, never duplicate ones.
+	t.Run("duplicate_key_still_refused", func(t *testing.T) {
+		launch, envRoot := claudeTestLaunch(t, sealedexec.ActionStart)
+		line := strings.Replace(claudeInitLine("s1", launch.Workspace.Path),
+			`"session_id":"s1"`, `"session_id":"s1","session_id":"s1"`, 1)
 		result := runClaudeLines(t, launch, envRoot, line)
-		assertClaudeGapReason(t, result, "unknown-foreign-field", "decode", claudeSource)
+		assertClaudeGapReason(t, result, "malformed-foreign-frame", "decode", claudeSource)
+	})
+
+	// SI-182 test row (g): trailing data after one complete frame value stays
+	// refused exactly as before.
+	t.Run("trailing_data_still_refused", func(t *testing.T) {
+		launch, envRoot := claudeTestLaunch(t, sealedexec.ActionStart)
+		line := claudeInitLine("s1", launch.Workspace.Path) + `{"extra":true}`
+		result := runClaudeLines(t, launch, envRoot, line)
+		assertClaudeGapReason(t, result, "malformed-foreign-frame", "decode", claudeSource)
 	})
 
 	t.Run("init_rejects_missing_required_field", func(t *testing.T) {
@@ -936,11 +1020,33 @@ func TestClaudeAdapterParityContract_Behavioral(t *testing.T) {
 		assertClaudeGapReason(t, result, "invalid-foreign-field", "decode", claudeSource)
 	})
 
-	t.Run("assistant_rejects_unknown_message_field", func(t *testing.T) {
+	// SI-182: an unknown member of the assistant frame's "message" object is
+	// tolerated and its dotted path ("message.<key>") is recorded once,
+	// attached to the message's provider-message detail — replacing the
+	// pre-SI-182 refusal this row used to prove.
+	t.Run("assistant_tolerates_unknown_message_field_and_records_witness", func(t *testing.T) {
 		launch, envRoot := claudeTestLaunch(t, sealedexec.ActionStart)
 		bad := `{"type":"assistant","session_id":"s1","uuid":"mu","message":{"id":"msg_1","type":"message","role":"assistant","model":"claude-opus-5-test","content":[{"type":"text","text":"hi"}],"usage":{"input_tokens":1,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":1},"future_key":true}}`
-		result := runClaudeLines(t, launch, envRoot, claudeInitLine("s1", launch.Workspace.Path), bad)
-		assertClaudeGapReason(t, result, "unknown-foreign-field", "decode", claudeSource)
+		result := runClaudeLines(t, launch, envRoot, claudeInitLine("s1", launch.Workspace.Path), bad, claudeResultLine("s1", "success", false))
+		message := claudeFindKind(t, result.Observations, contextevent.KindProviderMessage)
+		const want = `"unknown-foreign-member":["message.future_key"]`
+		if !bytes.Contains(message.ForeignDetail.RedactedJSON, []byte(want)) {
+			t.Fatalf("assistant text detail = %s, want it to contain %s", message.ForeignDetail.RedactedJSON, want)
+		}
+	})
+
+	// SI-182 test row (h): an unknown member nested inside
+	// assistant.message.usage — a known nested struct — is tolerated and
+	// recorded with its full dotted path.
+	t.Run("assistant_tolerates_unknown_usage_member_and_records_witness", func(t *testing.T) {
+		launch, envRoot := claudeTestLaunch(t, sealedexec.ActionStart)
+		bad := `{"type":"assistant","session_id":"s1","uuid":"mu","message":{"id":"msg_1","type":"message","role":"assistant","model":"claude-opus-5-test","content":[{"type":"text","text":"hi"}],"usage":{"input_tokens":1,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":1,"cache_write_tokens":2}}}`
+		result := runClaudeLines(t, launch, envRoot, claudeInitLine("s1", launch.Workspace.Path), bad, claudeResultLine("s1", "success", false))
+		message := claudeFindKind(t, result.Observations, contextevent.KindProviderMessage)
+		const want = `"unknown-foreign-member":["message.usage.cache_write_tokens"]`
+		if !bytes.Contains(message.ForeignDetail.RedactedJSON, []byte(want)) {
+			t.Fatalf("assistant text detail = %s, want it to contain %s", message.ForeignDetail.RedactedJSON, want)
+		}
 	})
 
 	t.Run("assistant_rejects_missing_usage", func(t *testing.T) {
@@ -957,11 +1063,47 @@ func TestClaudeAdapterParityContract_Behavioral(t *testing.T) {
 		assertClaudeGapReason(t, result, "invalid-foreign-field", "decode", claudeSource)
 	})
 
-	t.Run("retry_rejects_unknown_field", func(t *testing.T) {
+	// SI-182: an unknown member of the api_retry frame's own object level is
+	// tolerated and its dotted path is recorded once, attached to the retry's
+	// provider-summary detail — replacing the pre-SI-182 refusal this row
+	// used to prove.
+	t.Run("retry_tolerates_unknown_field_and_records_witness", func(t *testing.T) {
 		launch, envRoot := claudeTestLaunch(t, sealedexec.ActionStart)
 		bad := `{"type":"system","subtype":"api_retry","attempt":1,"max_retries":3,"retry_delay_ms":10,"error":{"type":"rate_limit","message":"slow down"},"uuid":"ru","session_id":"s1","future_key":1}`
+		result := runClaudeLines(t, launch, envRoot, claudeInitLine("s1", launch.Workspace.Path), bad, claudeResultLine("s1", "success", false))
+		summary := claudeFindProviderSummary(t, result.Observations, "api-retry/1")
+		const want = `"unknown-foreign-member":["future_key"]`
+		if !bytes.Contains(summary.ForeignDetail.RedactedJSON, []byte(want)) {
+			t.Fatalf("retry detail = %s, want it to contain %s", summary.ForeignDetail.RedactedJSON, want)
+		}
+	})
+
+	// SI-182 test row (b): the one unknown api_retry member the real Claude
+	// Code CLI 2.1.261 emits, error_status (measured offline by the F12
+	// canary track, 2026-09-06), reproduced with a synthetic value. error
+	// keeps its required object shape: SI-182 tolerates only the unlisted
+	// member, not the measured capture's separate error-shape mismatch (see
+	// the report's residual risks).
+	t.Run("retry_tolerates_the_measured_error_status_member", func(t *testing.T) {
+		launch, envRoot := claudeTestLaunch(t, sealedexec.ActionStart)
+		bad := `{"type":"system","subtype":"api_retry","attempt":1,"max_retries":10,"retry_delay_ms":510,"error_status":null,"error":{"type":"unknown","message":"connect failed"},"uuid":"ru","session_id":"s1"}`
+		result := runClaudeLines(t, launch, envRoot, claudeInitLine("s1", launch.Workspace.Path), bad, claudeResultLine("s1", "success", false))
+		summary := claudeFindProviderSummary(t, result.Observations, "api-retry/1")
+		const want = `"unknown-foreign-member":["error_status"]`
+		if !bytes.Contains(summary.ForeignDetail.RedactedJSON, []byte(want)) {
+			t.Fatalf("retry detail = %s, want it to contain %s", summary.ForeignDetail.RedactedJSON, want)
+		}
+	})
+
+	// SI-182 test row (e): a known member of the wrong JSON type still
+	// refuses the frame as invalid-foreign-field. This guards the tolerant
+	// decode's removal of DisallowUnknownFields: Go's decoder still refuses a
+	// type mismatch on a known field with no help from that option.
+	t.Run("retry_rejects_wrong_typed_known_field", func(t *testing.T) {
+		launch, envRoot := claudeTestLaunch(t, sealedexec.ActionStart)
+		bad := `{"type":"system","subtype":"api_retry","attempt":"one","max_retries":3,"retry_delay_ms":10,"error":{"type":"rate_limit","message":"slow down"},"uuid":"ru","session_id":"s1"}`
 		result := runClaudeLines(t, launch, envRoot, claudeInitLine("s1", launch.Workspace.Path), bad)
-		assertClaudeGapReason(t, result, "unknown-foreign-field", "decode", claudeSource)
+		assertClaudeGapReason(t, result, "invalid-foreign-field", "decode", claudeSource)
 	})
 
 	t.Run("malformed_frame_detail_is_digest_only", func(t *testing.T) {
@@ -2033,11 +2175,15 @@ type testProbeProcess struct {
 	startStdin     []byte
 	version        string
 	emptyProbeLine bool
-	output         []byte
-	stderr         []byte
-	exitCode       int
-	err            error
-	run            *testClaudeActiveProcess
+	// secondLine appends an extra stdout line after version (SI-181 review
+	// F1): the probe must refuse whenever it prints more than the one
+	// required line, even when that first line is itself an accepted form.
+	secondLine bool
+	output     []byte
+	stderr     []byte
+	exitCode   int
+	err        error
+	run        *testClaudeActiveProcess
 }
 
 func (p *testProbeProcess) Probe(_ context.Context, cmd *exec.Cmd) (stdout, stderr []byte, exitCode int, err error) {
@@ -2054,7 +2200,11 @@ func (p *testProbeProcess) Probe(_ context.Context, cmd *exec.Cmd) (stdout, stde
 	if p.version == "" {
 		return nil, nil, 1, errors.New("testProbeProcess: no version configured")
 	}
-	return []byte(p.version + "\n"), nil, 0, nil
+	out := p.version
+	if p.secondLine {
+		out += "\nunexpected-second-line"
+	}
+	return []byte(out + "\n"), nil, 0, nil
 }
 
 func (p *testProbeProcess) Start(_ context.Context, cmd *exec.Cmd, stdin []byte) (ActiveProcess, error) {
@@ -2441,6 +2591,32 @@ func claudeStopPayload(t *testing.T, rows []sealedexec.NormalizedObservation) *c
 	}
 	t.Fatalf("no adapter-stop observation in %v", observationKindsC(rows))
 	return nil
+}
+
+// claudeFindProviderSummary returns the one provider-summary observation with
+// the exact summary id (SI-182 tests inspect its detail for the disclosure).
+func claudeFindProviderSummary(t *testing.T, rows []sealedexec.NormalizedObservation, summaryID string) sealedexec.NormalizedObservation {
+	t.Helper()
+	for _, obs := range rows {
+		if payload, ok := obs.Payload.(*contextevent.ProviderSummaryPayload); ok && payload.SummaryID == summaryID {
+			return obs
+		}
+	}
+	t.Fatalf("no provider-summary %q in %v", summaryID, observationKindsC(rows))
+	return sealedexec.NormalizedObservation{}
+}
+
+// claudeFindKind returns the first observation of kind (SI-182 tests inspect
+// its detail for the disclosure).
+func claudeFindKind(t *testing.T, rows []sealedexec.NormalizedObservation, kind contextevent.Kind) sealedexec.NormalizedObservation {
+	t.Helper()
+	for _, obs := range rows {
+		if obs.Kind == kind {
+			return obs
+		}
+	}
+	t.Fatalf("no %s observation in %v", kind, observationKindsC(rows))
+	return sealedexec.NormalizedObservation{}
 }
 
 // assertNoClaudePlaintext proves the classified value appears nowhere in the
