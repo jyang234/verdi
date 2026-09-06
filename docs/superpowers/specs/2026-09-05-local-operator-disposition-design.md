@@ -62,6 +62,15 @@ the witness differ from the report. `RenderDisposition` gains multi-claim and `h
 schema changes. Nothing in this verb evaluates anything: it records a human's ruling over a kernel-printed
 witness.
 
+Recording a disposition is a policy change: the effective-policy digest embeds every disposition, and the
+managed instruction projections embed that digest, so a store whose projections predate the recorded
+disposition is refused by the compiler's projection-drift check (exit 2, naming the drifted paths). The
+ratified ordering is therefore: `disposition record` → commit the artifact → `verdi context project` → commit
+the regenerated projections → gate. The policy loader reads the working tree while content resolution reads
+`HEAD`, so an uncommitted disposition can yield a `pass` a fresh clone would not reproduce; the recipe commits
+before it gates. The verb's success line names these steps. (Whole-wave review I-1 and residual 5,
+2026-09-05.)
+
 ### 2.4 Instruction projection regeneration verb
 
 `verdi context project` wraps `instructionprojection.Generate(root)` and prints the manifests and managed
