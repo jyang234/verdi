@@ -255,30 +255,35 @@ func TestCmdContextProject_FlagShapeFailures(t *testing.T) {
 	}
 }
 
-// TestCmdContextProject_Help proves --help and -h print the usage line to
-// stdout and exit 0 (a help request is answered, not refused), regardless
-// of what else appears in args.
-func TestCmdContextProject_Help(t *testing.T) {
+// TestCmdContextProject_HelpIsNotSpecialCased proves --help and -h are NOT
+// accepted flags: no verb in this binary recognizes them, and every
+// sibling verb's own flag-shape diagnostics go to stderr, never stdout.
+// Both are refused exactly like any other malformed invocation — --help
+// as an unknown flag, -h (which does not start with "--") as an
+// unexpected positional argument — exit 2, empty stdout, the usage line
+// on stderr via the same contextProjectFlagError seam every other
+// flag-shape error already goes through.
+func TestCmdContextProject_HelpIsNotSpecialCased(t *testing.T) {
 	cases := []struct {
 		name string
 		args []string
 	}{
 		{"--help alone", []string{"--help"}},
 		{"-h alone", []string{"-h"}},
-		{"--help wins over other flags", []string{"--root", "whatever", "--help"}},
+		{"--help with --root", []string{"--root", "whatever", "--help"}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			var stdout, stderr bytes.Buffer
 			got := cmdContextProject(tc.args, &stdout, &stderr)
-			if got != 0 {
-				t.Fatalf("cmdContextProject(%v) = %d, want 0; stderr=%s", tc.args, got, stderr.String())
+			if got != 2 {
+				t.Fatalf("cmdContextProject(%v) = %d, want 2; stderr=%s", tc.args, got, stderr.String())
 			}
-			if stderr.Len() != 0 {
-				t.Fatalf("stderr = %q, want empty on --help/-h", stderr.String())
+			if stdout.Len() != 0 {
+				t.Fatalf("stdout = %q, want empty (no verb in this binary prints usage to stdout)", stdout.String())
 			}
-			if stdout.String() != contextProjectUsage+"\n" {
-				t.Fatalf("stdout = %q, want exactly the usage line %q", stdout.String(), contextProjectUsage+"\n")
+			if !strings.Contains(stderr.String(), contextProjectUsage) {
+				t.Fatalf("stderr = %q, want it to contain the usage line %q", stderr.String(), contextProjectUsage)
 			}
 		})
 	}
@@ -378,6 +383,13 @@ func TestCmdContextProject_NotAdopted_ExitsVerdict(t *testing.T) {
 	if stderr.Len() == 0 {
 		t.Fatal("stderr empty, want a diagnostic naming the refusal")
 	}
+	// ErrNotAdopted is returned by policyauthority.Load, before Generate's
+	// per-adapter write loop ever runs: this path is PROVEN write-free,
+	// so the partial-projection disclosure (which only ever applies to
+	// the operational, exit-2 arm) must not appear here.
+	if strings.Contains(stderr.String(), "partially projected") {
+		t.Fatalf("stderr = %q, must not disclose a partial write on a proven write-free verdict path", stderr.String())
+	}
 }
 
 func TestCmdContextProject_OverlappingManagedPaths_ExitsVerdict(t *testing.T) {
@@ -394,6 +406,13 @@ func TestCmdContextProject_OverlappingManagedPaths_ExitsVerdict(t *testing.T) {
 	}
 	if !strings.Contains(stderr.String(), "AGENTS.md") {
 		t.Fatalf("stderr = %q, want it to name the overlapping path AGENTS.md", stderr.String())
+	}
+	// ErrOverlappingManagedPath is caught by managedPathOwners before
+	// Generate's per-adapter write loop ever runs: this path is PROVEN
+	// write-free too, so the partial-projection disclosure must not
+	// appear here either.
+	if strings.Contains(stderr.String(), "partially projected") {
+		t.Fatalf("stderr = %q, must not disclose a partial write on a proven write-free verdict path", stderr.String())
 	}
 
 	// Nothing was written: an unsatisfiable constitution is refused before

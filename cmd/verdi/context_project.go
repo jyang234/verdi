@@ -9,9 +9,11 @@
 // deterministically (sorted by repo-relative path, across every adapter),
 // each written path with its sha256 content digest, one
 // "<digest>  <path>" line per file, so a caller can diff two runs' stdout
-// byte-for-byte. Human prose goes to stderr only; on success stdout
-// carries nothing but those lines. On failure stdout is empty, except the
-// one case this command cannot prevent: a destination writer that itself
+// byte-for-byte. Human prose goes to stderr only, on every invocation —
+// including --help/-h, which this verb does not accept and refuses like
+// any other flag-shape error, exit 2 — so stdout carries nothing but
+// those lines on success, and is otherwise always empty, except the one
+// case this command cannot prevent: a destination writer that itself
 // returns a short byte count with a nil error has already accepted those
 // bytes before the failure is detected (see the short-write handling
 // below) — a contract violation on the writer's part, not this command's.
@@ -47,11 +49,13 @@ const contextProjectUsage = "usage: verdi context project [--root DIR]"
 
 // cmdContextProject implements `verdi context project [--root DIR]`.
 //
-// --help/-h is recognized anywhere in args (mirroring common CLI
-// practice: a help request wins over any other flag's own validity) and
-// answers with the usage line on stdout, exit 0 — a help request is
-// answered, not refused, so it is never routed through the flag-shape
-// error path below.
+// --help/-h are NOT accepted flags: no verb in this binary recognizes
+// them, and every sibling verb's own flag-shape diagnostics go to
+// stderr, never stdout. Both fall straight through to the ordinary
+// flag-shape handling below like any other malformed invocation —
+// --help as an unknown flag, -h (which does not start with "--") as an
+// unexpected positional argument — so stdout is never used to answer a
+// help request; there is no such requestable state.
 //
 // Exit-class conventions (mirroring context_conflict.go's own mapping,
 // CLAUDE.md's 0/1/2 contract): a flag-shape error, an unusable root (no
@@ -83,18 +87,15 @@ const contextProjectUsage = "usage: verdi context project [--root DIR]"
 // adapter's managed files and manifest may already be on disk — Generate
 // returns no partial-result value to say so, only the error. This
 // command cannot tell from the error alone which of these two shapes it
-// is looking at, so on ANY Generate failure it discloses the
-// conservative truth: the store may already be partially projected, and
-// re-running this verb is always safe, because Generate is deterministic
-// and idempotent (a clean file or manifest byte-matches what a second
-// run would write anyway). Every error already names the offending
-// repo-relative path and component; this command only needs to relay it.
+// is looking at, so on every OPERATIONAL Generate failure (never the two
+// proven write-free verdict paths above, which are caught before any
+// write is attempted) it discloses the conservative truth: the store may
+// already be partially projected, and re-running this verb is always
+// safe, because Generate is deterministic and idempotent (a clean file
+// or manifest byte-matches what a second run would write anyway). Every
+// error already names the offending repo-relative path and component;
+// this command only needs to relay it.
 func cmdContextProject(args []string, stdout, stderr io.Writer) int {
-	if contextProjectWantsHelp(args) {
-		fmt.Fprintln(stdout, contextProjectUsage)
-		return 0
-	}
-
 	rootFlag, hasRoot, rest, err := extractContextProjectFlags(args)
 	if err != nil {
 		return contextProjectFlagError(stderr, err.Error())
@@ -132,10 +133,10 @@ func cmdContextProject(args []string, stdout, stderr io.Writer) int {
 	result, err := instructionprojection.Generate(root)
 	if err != nil {
 		printContextCommandDiagnostic(stderr, "project", root, err)
-		fmt.Fprintln(stderr, "context project: the store may be partially projected by this failed run; re-running this verb is safe (Generate is idempotent)")
 		if errors.Is(err, policyauthority.ErrNotAdopted) || errors.Is(err, instructionprojection.ErrOverlappingManagedPath) {
 			return 1
 		}
+		fmt.Fprintln(stderr, "context project: the store may be partially projected by this failed run; re-running this verb is safe (Generate is idempotent)")
 		return 2
 	}
 
@@ -187,18 +188,6 @@ func contextProjectFormatResult(res *instructionprojection.Result) []byte {
 		buf.WriteByte('\n')
 	}
 	return buf.Bytes()
-}
-
-// contextProjectWantsHelp reports whether args names --help or -h
-// anywhere at all — a help request is recognized regardless of what else
-// is present or how malformed it is, matching common CLI practice.
-func contextProjectWantsHelp(args []string) bool {
-	for _, a := range args {
-		if a == "--help" || a == "-h" {
-			return true
-		}
-	}
-	return false
 }
 
 // contextProjectFlagError prints "context project: <msg>" followed by
