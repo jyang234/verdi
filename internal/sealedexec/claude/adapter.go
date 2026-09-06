@@ -1466,7 +1466,7 @@ func (r *claudeActiveRun) handleAssistant(ctx context.Context, line []byte, obje
 				return r.decodeFailure(ctx, seq, "invalid-foreign-field", map[string]any{"field": "content.text"})
 			}
 			var blockUnknown unknownMemberSet
-			scanKnownObject(blockObject, claudeTextBlockFields, "content.", &blockUnknown)
+			scanKnownObject(blockObject, claudeTextBlockFields, "message.content.", &blockUnknown)
 			textDetailSource := map[string]any{
 				"block_index": float64(blockIndex),
 				"family":      "assistant/text",
@@ -1522,7 +1522,7 @@ func (r *claudeActiveRun) handleAssistant(ctx context.Context, line []byte, obje
 				return r.decodeFailure(ctx, seq, "redaction-failed", nil)
 			}
 			var blockUnknown unknownMemberSet
-			scanKnownObject(blockObject, claudeToolUseBlockFields, "content.", &blockUnknown)
+			scanKnownObject(blockObject, claudeToolUseBlockFields, "message.content.", &blockUnknown)
 			toolUseDetailSource := map[string]any{
 				"block_index": float64(blockIndex),
 				"call_id":     *block.ID,
@@ -1571,7 +1571,7 @@ func (r *claudeActiveRun) handleAssistant(ctx context.Context, line []byte, obje
 				return r.decodeFailure(ctx, seq, "missing-foreign-field", map[string]any{"field": "content.thinking"})
 			}
 			var blockUnknown unknownMemberSet
-			scanKnownObject(blockObject, claudeThinkingBlockFields, "content.", &blockUnknown)
+			scanKnownObject(blockObject, claudeThinkingBlockFields, "message.content.", &blockUnknown)
 			witness := r.runNewUnknownMembers(append(append([]string(nil), messageUnknown...), blockUnknown.sorted()...))
 			observation, safe, err := r.omissionSummary(ctx, "thinking", messageID, blockIndex, protectedValues, witness)
 			if err != nil {
@@ -1591,7 +1591,7 @@ func (r *claudeActiveRun) handleAssistant(ctx context.Context, line []byte, obje
 				return r.decodeFailure(ctx, seq, "missing-foreign-field", map[string]any{"field": "content.redacted_thinking"})
 			}
 			var blockUnknown unknownMemberSet
-			scanKnownObject(blockObject, claudeRedactedThinkingBlockFields, "content.", &blockUnknown)
+			scanKnownObject(blockObject, claudeRedactedThinkingBlockFields, "message.content.", &blockUnknown)
 			witness := r.runNewUnknownMembers(append(append([]string(nil), messageUnknown...), blockUnknown.sorted()...))
 			observation, safe, err := r.omissionSummary(ctx, "redacted_thinking", messageID, blockIndex, protectedValues, witness)
 			if err != nil {
@@ -1686,7 +1686,7 @@ func (r *claudeActiveRun) handleToolResult(ctx context.Context, line []byte, obj
 			return r.decodeFailure(ctx, seq, "invalid-foreign-field", map[string]any{"field": "content.tool_result"})
 		}
 		var blockUnknown unknownMemberSet
-		scanKnownObject(blockObject, claudeToolResultBlockFields, "content.", &blockUnknown)
+		scanKnownObject(blockObject, claudeToolResultBlockFields, "message.content.", &blockUnknown)
 		if block.ToolUseID == nil || block.Content == nil {
 			return r.decodeFailure(ctx, seq, "missing-foreign-field", map[string]any{"field": "content.tool_result"})
 		}
@@ -1819,7 +1819,9 @@ func (r *claudeActiveRun) handleResult(ctx context.Context, line []byte, object 
 		}
 		modelUsageObject, _ := object["modelUsage"].(map[string]any)
 		perModelObject, _ := modelUsageObject[r.launch.Profile.Model].(map[string]any)
-		if reason := validateUsage(&usage, perModelObject, "modelUsage.", &unknown); reason != "" {
+		// The member lives at modelUsage.<model>.<key>, so the recorded path
+		// names that level and not a nonexistent modelUsage.<key>.
+		if reason := validateUsage(&usage, perModelObject, "modelUsage."+r.launch.Profile.Model+".", &unknown); reason != "" {
 			return r.decodeFailure(ctx, seq, reason, map[string]any{"field": "modelUsage"})
 		}
 	}

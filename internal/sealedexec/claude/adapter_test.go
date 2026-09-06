@@ -1049,6 +1049,49 @@ func TestClaudeAdapterParityContract_Behavioral(t *testing.T) {
 		}
 	})
 
+	// SI-182: a content-block member is recorded at the path it actually
+	// occupies in the frame — message.content.<key> — never at a frame-level
+	// content.<key> that names no object the frame contains.
+	t.Run("assistant_records_a_content_block_member_under_message_content", func(t *testing.T) {
+		launch, envRoot := claudeTestLaunch(t, sealedexec.ActionStart)
+		bad := `{"type":"assistant","session_id":"s1","uuid":"mu","message":{"id":"msg_1","type":"message","role":"assistant","model":"claude-opus-5-test","content":[{"type":"text","text":"hi","future_key":true}],"usage":{"input_tokens":1,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":1}}}`
+		result := runClaudeLines(t, launch, envRoot, claudeInitLine("s1", launch.Workspace.Path), bad, claudeResultLine("s1", "success", false))
+		message := claudeFindKind(t, result.Observations, contextevent.KindProviderMessage)
+		const want = `"unknown-foreign-member":["message.content.future_key"]`
+		if !bytes.Contains(message.ForeignDetail.RedactedJSON, []byte(want)) {
+			t.Fatalf("assistant text detail = %s, want it to contain %s", message.ForeignDetail.RedactedJSON, want)
+		}
+	})
+
+	// The same rooting for the user family's tool_result blocks.
+	t.Run("tool_result_records_a_content_block_member_under_message_content", func(t *testing.T) {
+		launch, envRoot := claudeTestLaunch(t, sealedexec.ActionStart)
+		toolUse := `{"type":"assistant","session_id":"s1","uuid":"mu","message":{"id":"msg_1","type":"message","role":"assistant","model":"claude-opus-5-test","content":[{"type":"tool_use","id":"call_1","name":"Read","input":{"path":"README.md"}}],"usage":{"input_tokens":1,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":1}}}`
+		toolResult := `{"type":"user","session_id":"s1","uuid":"tu","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"call_1","content":"ok","future_key":true}]}}`
+		result := runClaudeLines(t, launch, envRoot,
+			claudeInitLine("s1", launch.Workspace.Path), toolUse, toolResult, claudeResultLine("s1", "success", false))
+		toolResultObs := claudeFindKind(t, result.Observations, contextevent.KindToolResult)
+		const want = `"unknown-foreign-member":["message.content.future_key"]`
+		if !bytes.Contains(toolResultObs.ForeignDetail.RedactedJSON, []byte(want)) {
+			t.Fatalf("tool-result detail = %s, want it to contain %s", toolResultObs.ForeignDetail.RedactedJSON, want)
+		}
+	})
+
+	// SI-182: modelUsage is keyed by model, so a member unknown to the per-
+	// model usage shape is recorded at modelUsage.<model>.<key>. A bare
+	// modelUsage.<key> would name a path the frame does not contain.
+	t.Run("result_records_a_per_model_usage_member_under_its_model_key", func(t *testing.T) {
+		launch, envRoot := claudeTestLaunch(t, sealedexec.ActionStart)
+		line := strings.Replace(claudeResultLine("s1", "success", false), `,"permission_denials":[]`,
+			`,"permission_denials":[],"modelUsage":{"claude-opus-5-test":{"input_tokens":1,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":1,"costUSD":9999}}`, 1)
+		result := runClaudeLinesToTerminal(t, launch, envRoot, claudeInitLine("s1", launch.Workspace.Path), line)
+		summary := claudeFindProviderSummary(t, result.Observations, "terminal-result")
+		const want = `"unknown-foreign-member":["modelUsage.claude-opus-5-test.costUSD"]`
+		if !bytes.Contains(summary.ForeignDetail.RedactedJSON, []byte(want)) {
+			t.Fatalf("result detail = %s, want it to contain %s", summary.ForeignDetail.RedactedJSON, want)
+		}
+	})
+
 	t.Run("assistant_rejects_missing_usage", func(t *testing.T) {
 		launch, envRoot := claudeTestLaunch(t, sealedexec.ActionStart)
 		bad := `{"type":"assistant","session_id":"s1","uuid":"mu","message":{"id":"msg_1","type":"message","role":"assistant","model":"claude-opus-5-test","content":[{"type":"text","text":"hi"}]}}`
@@ -2654,6 +2697,27 @@ func runClaudeLines(t *testing.T, launch sealedexec.AdapterLaunch, envRoot strin
 		output = append(output, '\n')
 	}
 	return runClaudeProcess(t, launch, envRoot, &testProbeProcess{version: launch.Request.AdapterVersion, output: output})
+}
+
+// runClaudeLinesToTerminal streams the exact lines and collects through the
+// reaped terminal, so the held success terminal-result summary is included.
+func runClaudeLinesToTerminal(t *testing.T, launch sealedexec.AdapterLaunch, envRoot string, lines ...string) sealedexec.AdapterResult {
+	t.Helper()
+	var output []byte
+	for _, line := range lines {
+		output = append(output, line...)
+		output = append(output, '\n')
+	}
+	pp := &testProbeProcess{version: launch.Request.AdapterVersion, output: output}
+	adapter, err := newClaudeTestAdapter(t, pp, newTestProcessor(t), envRoot)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	run, err := adapter.Start(context.Background(), launch)
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	return collectClaudeRun(t, run)
 }
 
 func runClaudeProcess(t *testing.T, launch sealedexec.AdapterLaunch, envRoot string, pp *testProbeProcess) sealedexec.AdapterResult {
