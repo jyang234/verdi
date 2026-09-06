@@ -304,3 +304,134 @@ func TestContextConflict_LocalOperator_AbsentIdentity_Unproven(t *testing.T) {
 		t.Fatalf("disclosures = %+v, want local-operator-asserted present even for an unproven resolution", report.Disclosures)
 	}
 }
+
+// --- operational-mapping proofs (review finding: context_conflict.go's
+// factory-error -> exit 2 mapping was previously proven only by reading) --
+
+// localOperatorTwoSourceProfileMD declares two local-operator trust
+// sources — an ambiguous declaration resolveLocalActors refuses rather
+// than guessing which one to trust.
+const localOperatorTwoSourceProfileMD = `---
+schema: verdi.governance-profile/v1
+id: solo-local-ambiguous
+class: solo
+applicable_transitions: [policy-disposition-approval]
+identity_trust_sources:
+  - {id: local, kind: local-operator}
+  - {id: local2, kind: local-operator}
+role_mappings:
+  - {role: policy-owner, trust_source: local, subjects: [wiring-fixture@example.com]}
+  - {role: policy-owner, trust_source: local2, subjects: [wiring-fixture@example.com]}
+ownership_sources: []
+signature_requirements: []
+required_approvers:
+  - {transitions: [policy-disposition-approval], roles: [policy-owner], minimum: 1}
+distinctness_rules: []
+evidence_source_restrictions: []
+escalation_thresholds: []
+---
+Fixture-only profile: declares two local-operator sources to prove
+resolveLocalActors' ambiguity refusal reaches the CLI's exit-2 mapping.
+`
+
+// buildLocalOperatorTwoSourceRepo builds a minimal adopted store (no
+// specs — the factory fails before Evaluate ever needs one) whose
+// selected profile declares two local-operator sources.
+func buildLocalOperatorTwoSourceRepo(t *testing.T) *fixturegit.Repo {
+	t.Helper()
+	const from, to = "selected_profile: solo-local\n", "selected_profile: solo-local-ambiguous\n"
+	constitution := strings.Replace(localOperatorConstitutionMD, from, to, 1)
+	if constitution == localOperatorConstitutionMD {
+		t.Fatalf("expected substitution of %q to change the constitution fixture", from)
+	}
+	return fixturegit.Build(t, []fixturegit.Layer{{Files: map[string]string{
+		".verdi/verdi.yaml":                              "schema: verdi.layout/v1\n",
+		".verdi/policy/constitution.md":                  constitution,
+		".verdi/policy/profiles/solo-local-ambiguous.md": localOperatorTwoSourceProfileMD,
+	}, Message: "adopt a store whose selected profile declares two local-operator sources"}})
+}
+
+// TestContextConflict_LocalOperator_NonTopLevelRoot_Operational proves the
+// exit-2 mapping at context_conflict.go's factory call site actually fires
+// for verifyGitTopLevel's refusal: the fixture is nested one directory
+// below the real Git top level, so store.FindRoot(".") resolves a store
+// root that is NOT itself a Git repository top level.
+func TestContextConflict_LocalOperator_NonTopLevelRoot_Operational(t *testing.T) {
+	files := make(map[string]string)
+	for rel, content := range localOperatorFixtureFiles(t) {
+		files["nested/"+rel] = content
+	}
+	repo := fixturegit.Build(t, []fixturegit.Layer{{Files: files, Message: "adopt the local-operator fixture nested inside a larger repository"}})
+	nestedRoot := filepath.Join(repo.Dir, "nested")
+
+	requestPath := writeContextRequestFile(t, nestedRoot, "conflict-request.json", localOperatorConflictRequestBytes(t, contextcompile.PhaseBuild))
+	t.Chdir(nestedRoot)
+
+	var stdout, stderr bytes.Buffer
+	code := cmdContextConflict([]string{"--request", requestPath}, strings.NewReader(""), &stdout, &stderr)
+	if code != 2 || stdout.Len() != 0 || stderr.Len() == 0 {
+		t.Fatalf("exit=%d stdout=%q stderr=%q, want an operational refusal", code, stdout.String(), stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "top level") {
+		t.Fatalf("stderr = %q, want it to name the top-level check", stderr.String())
+	}
+}
+
+// TestContextConflict_LocalOperator_AmbiguousConfig_Operational proves the
+// same exit-2 mapping for gitx.ConfigValue's ambiguous-value refusal: a
+// second user.email value alongside fixturegit's own is a genuine
+// operational error, never conflated with "no identity configured".
+func TestContextConflict_LocalOperator_AmbiguousConfig_Operational(t *testing.T) {
+	repo := buildLocalOperatorRepo(t)
+	if out, err := exec.Command("git", "-C", repo.Dir, "config", "--add", "user.email", "second@example.com").CombinedOutput(); err != nil {
+		t.Fatalf("git config --add user.email: %v\n%s", err, out)
+	}
+	requestPath := writeContextRequestFile(t, repo.Dir, "conflict-request.json", localOperatorConflictRequestBytes(t, contextcompile.PhaseBuild))
+	t.Chdir(repo.Dir)
+
+	var stdout, stderr bytes.Buffer
+	code := cmdContextConflict([]string{"--request", requestPath}, strings.NewReader(""), &stdout, &stderr)
+	if code != 2 || stdout.Len() != 0 || stderr.Len() == 0 {
+		t.Fatalf("exit=%d stdout=%q stderr=%q, want an operational refusal", code, stdout.String(), stderr.String())
+	}
+}
+
+// TestContextConflict_LocalOperator_TwoSources_Operational proves the same
+// exit-2 mapping for resolveLocalActors' own multi-source refusal.
+func TestContextConflict_LocalOperator_TwoSources_Operational(t *testing.T) {
+	repo := buildLocalOperatorTwoSourceRepo(t)
+	requestPath := writeContextRequestFile(t, repo.Dir, "conflict-request.json", localOperatorConflictRequestBytes(t, contextcompile.PhaseBuild))
+	t.Chdir(repo.Dir)
+
+	var stdout, stderr bytes.Buffer
+	code := cmdContextConflict([]string{"--request", requestPath}, strings.NewReader(""), &stdout, &stderr)
+	if code != 2 || stdout.Len() != 0 || stderr.Len() == 0 {
+		t.Fatalf("exit=%d stdout=%q stderr=%q, want an operational refusal", code, stdout.String(), stderr.String())
+	}
+}
+
+// TestBuildStart_LocalOperator_AmbiguousConfig_Operational is the one
+// build-start-path arm the finding also asks for: the same ambiguous-config
+// factory failure, reached through cmdBuildStart's own conflict-gate call
+// after the accepted/obligation-quality preconditions already passed.
+func TestBuildStart_LocalOperator_AmbiguousConfig_Operational(t *testing.T) {
+	repo := buildLocalOperatorRepo(t)
+	if out, err := exec.Command("git", "-C", repo.Dir, "config", "--add", "user.email", "second@example.com").CombinedOutput(); err != nil {
+		t.Fatalf("git config --add user.email: %v\n%s", err, out)
+	}
+	requestPath := contextLifecycleRequestFile(t, repo.Dir, "build-start-context.json", "spec/localop-story", contextcompile.PhaseBuild, nil)
+	t.Chdir(repo.Dir)
+
+	var stdout, stderr bytes.Buffer
+	code := cmdBuildStart([]string{"spec/localop-story", "--context-request", requestPath}, &stdout, &stderr)
+	if code != 2 || stderr.Len() == 0 {
+		t.Fatalf("exit=%d stdout=%q stderr=%q, want an operational refusal", code, stdout.String(), stderr.String())
+	}
+	branch, err := gitx.CurrentBranch(context.Background(), repo.Dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if branch == "feature/localop-story" {
+		t.Fatal("an operational factory failure must not cut the build branch")
+	}
+}
