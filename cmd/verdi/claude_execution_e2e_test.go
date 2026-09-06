@@ -465,6 +465,12 @@ type fakeClaudeSpec struct {
 	// product suffix (" (Claude Code)") after version instead of the bare
 	// version alone.
 	versionSuffix bool
+	// unknownMembers makes the fake's init frame carry the exact 8 unknown
+	// members and its api_retry frame carry the 1 unknown member the real
+	// Claude Code CLI 2.1.261 emits (SI-182, measured offline by the F12
+	// canary track, 2026-09-06; values here are synthetic, never the measured
+	// bytes). The sealed run must still proceed.
+	unknownMembers bool
 }
 
 const fakeClaudeSource = `package main
@@ -496,6 +502,8 @@ const (
 	bigText   = __BIGTEXT__
 	// versionSuffix selects the SI-181 " (Claude Code)" probe suffix.
 	versionSuffix = __VERSIONSUFFIX__
+	// unknownMembers selects the SI-182 2.1.261-shaped unknown-member frames.
+	unknownMembers = __UNKNOWNMEMBERS__
 )
 
 func main() {
@@ -571,7 +579,7 @@ func run() error {
 	// exercised at all. The parent therefore reduces init into adapter-start
 	// ahead of any MCP-owned context transition, which is what makes a prepared
 	// resume open on resume, adapter-start.
-	if err := emit(map[string]any{
+	initFrame := map[string]any{
 		"type": "system", "subtype": "init", "session_id": session, "model": model,
 		"mcp_servers":    []map[string]string{{"name": "vatc", "status": "connected"}, {"name": "verdi-context", "status": "connected"}},
 		"cwd":            workspace,
@@ -579,8 +587,36 @@ func run() error {
 		"permissionMode": "bypassPermissions", "apiKeySource": "ANTHROPIC_API_KEY",
 		"claude_code_version": version, "slash_commands": []string{}, "output_style": "default",
 		"agents": []string{}, "skills": []string{}, "plugins": []string{}, "uuid": "init-uuid-e2e",
-	}); err != nil {
+	}
+	if unknownMembers {
+		// SI-182: the exact 8 unknown system/init members the real Claude Code
+		// CLI 2.1.261 emits (measured offline by the F12 canary track,
+		// 2026-09-06); values here are synthetic, never the measured bytes.
+		initFrame["analytics_disabled"] = false
+		initFrame["capabilities"] = []string{"interrupt_receipt_v1"}
+		initFrame["fast_mode_disabled_reason"] = "sdk_opt_in_required"
+		initFrame["fast_mode_state"] = "off"
+		initFrame["memory_paths"] = map[string]string{"auto": "/synthetic/memory/"}
+		initFrame["messaging_socket_path"] = "/synthetic/cc.sock"
+		initFrame["product_feedback_disabled"] = false
+		initFrame["terminal_slash_commands"] = []string{"doctor"}
+	}
+	if err := emit(initFrame); err != nil {
 		return err
+	}
+	if unknownMembers {
+		// SI-182: the one unknown system/api_retry member the real Claude Code
+		// CLI 2.1.261 emits, error_status (measured offline by the F12 canary
+		// track, 2026-09-06); error keeps its required object shape here, so
+		// the run proceeds past this frame to the sealed retry observation.
+		if err := emit(map[string]any{
+			"type": "system", "subtype": "api_retry", "session_id": session,
+			"attempt": 1, "max_retries": 10, "retry_delay_ms": 1, "error_status": nil,
+			"error": map[string]string{"type": "unknown", "message": "synthetic retry"},
+			"uuid":  "retry-uuid-e2e",
+		}); err != nil {
+			return err
+		}
 	}
 	claimed, err := post(claimURL, claimAuthorization, ` + "`" + `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"claim_paths","arguments":{}}}` + "`" + `)
 	if err != nil {
@@ -822,6 +858,7 @@ func buildFakeClaude(t *testing.T, dir string, spec fakeClaudeSpec) string {
 		"__COMMIT__", strconv.FormatBool(spec.commit),
 		"__BIGTEXT__", strconv.FormatBool(spec.bigText),
 		"__VERSIONSUFFIX__", strconv.FormatBool(spec.versionSuffix),
+		"__UNKNOWNMEMBERS__", strconv.FormatBool(spec.unknownMembers),
 	).Replace(fakeClaudeSource)
 	moduleDir := filepath.Join(dir, "fake-claude-src")
 	if err := os.MkdirAll(moduleDir, 0o755); err != nil {
@@ -882,6 +919,10 @@ type claudeLifecycleOptions struct {
 	// the SI-181 " (Claude Code)" product suffix after the adapter version
 	// instead of the bare version; the sealed launch must still succeed.
 	claudeCodeSuffix bool
+	// unknownMembers makes the fake provider's init and api_retry frames
+	// carry the SI-182 2.1.261-shaped unknown members; the sealed run must
+	// still proceed.
+	unknownMembers bool
 }
 
 // serveWithAcknowledgedExpansionLedger runs the shared lifecycle controller
@@ -1045,6 +1086,7 @@ func runClaudeSealedLifecycle(t *testing.T, bin string, options claudeLifecycleO
 		argvPath: argvPath, envPath: envPath, stdinPath: stdinPath, toolsPath: toolsPath,
 		gitPath: gitPath, workspace: workspacePath, extraTool: options.extraTool, commit: true,
 		bigText: options.oversizedDetail, versionSuffix: options.claudeCodeSuffix,
+		unknownMembers: options.unknownMembers,
 	})
 	if built != claudePath {
 		t.Fatalf("fake claude built at %q, want the granted argv0 %q", built, claudePath)
@@ -1340,6 +1382,18 @@ func TestClaudeBuiltBinaryLifecycle_Behavioral(t *testing.T) {
 	t.Run("sealed_start_accepts_the_claude_code_suffixed_version_probe", func(t *testing.T) {
 		run := runClaudeSealedLifecycle(t, bin, claudeLifecycleOptions{claudeCodeSuffix: true})
 		assertClaudeSuccessfulLifecycle(t, run)
+	})
+
+	// SI-182: the real Claude Code CLI 2.1.261 emits system/init and
+	// system/api_retry members Amendment 002 §5's v1 tables do not list
+	// (measured offline by the F12 canary track, 2026-09-06). The sealed run
+	// must tolerate them and proceed to the same successful lifecycle.
+	t.Run("sealed_start_tolerates_the_2_1_261_unknown_member_frames", func(t *testing.T) {
+		run := runClaudeSealedLifecycle(t, bin, claudeLifecycleOptions{unknownMembers: true})
+		assertClaudeSuccessfulLifecycle(t, run)
+		if countEventKindInFixture(run.fake.events, contextevent.KindRetry) == 0 {
+			t.Fatalf("unknown-member arm should still produce a retry event; kinds = %v", sealedEventKinds(run.fake.events))
+		}
 	})
 
 	// Amendment 003: every sealed session resolves exactly one ATC-owned claim
