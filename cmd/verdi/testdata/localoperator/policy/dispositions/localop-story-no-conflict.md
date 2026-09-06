@@ -59,7 +59,7 @@ compensating_controls:
 approvals:
   - {role: policy-owner, principal: "principal/local/Zml4dHVyZUB2ZXJkaS5pbnZhbGlk"}
 expiry: 2030-01-01
-template: {identity: "embedded:policy-disposition.md", digest: "sha256:68d5f08e5d114e1345347bdb907c3fd3f057a01abc08f23091647b299e983854"}
+template: {identity: "embedded:policy-disposition.md", digest: "sha256:1812294b80101afd5e9802a6f682955b3bf6619a9c1fbc80486f5ff0c3fc2967"}
 ---
 # Local-operator story claims coexist without conflict
 

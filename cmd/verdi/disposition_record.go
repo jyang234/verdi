@@ -24,6 +24,16 @@
 // specification file: every value not already present in --report comes
 // only from an operand.
 //
+// Recording a disposition is a policy change: the effective-policy
+// digest embeds every disposition, and the managed instruction
+// projections embed that digest, so a store whose projections predate
+// this write is refused by the compiler's projection-drift check
+// (design §2.3). The ratified ordering is disposition record -> commit
+// the artifact -> `verdi context project` -> commit the regenerated
+// projections -> gate; on success this verb names that ordering in one
+// stderr line (I-1, whole-wave review) rather than leaving it to be
+// rediscovered from a later, unrelated gate refusal.
+//
 // --target and --target-digest are this file's two disclosed deviations
 // from the literal task brief, which lists the operand set without them —
 // ledgered as SI-180. The witness's target_digest (authority-design §8:
@@ -67,6 +77,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -108,6 +119,16 @@ type dispositionRecordArgs struct {
 // subcommand "record" — the same first-argument routing cmdContext
 // (context.go) already established for its own "compile"/"conflict"/...
 // subcommands.
+//
+// --root DIR resolves through store.RootAt — an exact-directory check,
+// no ancestor search — exactly like `verdi context project --root DIR`
+// (context_project.go's own cmdContextProject; ledger SI-179, widened at
+// I-3, whole-wave review, to cover this verb too): both verbs' --root
+// names an explicit store-root override, and a subdirectory of a real
+// store must be refused by name rather than silently accepted by
+// walking up to find one. With no --root at all, resolution is
+// unchanged from before this fix: store.FindRoot(".") walks up from the
+// working directory like every other root-finding verb.
 func cmdDispositionRecord(args []string, stdout, stderr io.Writer) int {
 	parsed, err := parseDispositionRecordArgs(args)
 	if err != nil {
@@ -115,11 +136,24 @@ func cmdDispositionRecord(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 
-	root := "."
+	var resolvedRoot string
 	if parsed.hasRoot {
-		root = parsed.root
+		resolvedRoot, err = store.RootAt(parsed.root)
+		if err != nil {
+			// store.RootAt's own message talks about "an explicit --store
+			// override" — accurate for its own doc comment's hypothetical
+			// caller, but this verb's own flag is --root, and relaying
+			// "--store" verbatim would name a flag that does not exist
+			// here. Rewrite the flag name in place rather than editing
+			// internal/store (shared infrastructure other, differently-
+			// named callers may use truthfully) — the same rewrite
+			// context_project.go's cmdContextProject already applies for
+			// the identical reason.
+			err = errors.New(strings.ReplaceAll(err.Error(), "--store", "--root"))
+		}
+	} else {
+		resolvedRoot, err = store.FindRoot(".")
 	}
-	resolvedRoot, err := store.FindRoot(root)
 	if err != nil {
 		fmt.Fprintln(stderr, "disposition record:", err)
 		return 2
@@ -420,6 +454,14 @@ func runDispositionRecord(root string, a dispositionRecordArgs, stdout, stderr i
 	}
 
 	fmt.Fprintf(stdout, "disposition record: wrote %s (policy-disposition/%s)\n", destPath, a.id)
+	// Human prose on success goes to stderr, never stdout (I-1, whole-wave
+	// review; design §2.3's own "the verb's success line names these
+	// steps"): recording a disposition moves the effective-policy digest
+	// every managed instruction projection embeds, so a store whose
+	// projections predate this write is refused at the gate — naming the
+	// ratified recipe here means an operator learns it from this verb,
+	// not from a later, unrelated-looking projection-drift refusal.
+	fmt.Fprintln(stderr, "disposition record: next steps: commit this artifact, run `verdi context project` (recording a disposition moves the effective-policy digest embedded in the projections), commit the regenerated projections, then run the gate")
 	return 0
 }
 

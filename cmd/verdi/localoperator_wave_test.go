@@ -241,6 +241,18 @@ func TestLocalOperatorWave(t *testing.T) {
 	if record.code != 0 {
 		t.Fatalf("disposition record: exit=%d stdout=%q stderr=%q", record.code, record.stdout, record.stderr)
 	}
+	// I-1 (whole-wave review): on success the verb names design §2.3's own
+	// ratified ordering in one stderr line — commit the artifact, run
+	// `verdi context project` (recording a disposition moves the
+	// effective-policy digest the projections embed), commit the
+	// regenerated projections, then run the gate — so an operator learns
+	// the recipe from the verb itself, not from a later projection-drift
+	// refusal at the gate.
+	for _, want := range []string{"next steps", "commit", "verdi context project", "effective-policy digest", "gate"} {
+		if !strings.Contains(record.stderr, want) {
+			t.Fatalf("disposition record stderr = %q, want it to contain %q (the next-steps line)", record.stderr, want)
+		}
+	}
 	dispositionPath := filepath.Join(repo.Dir, filepath.FromSlash(localOperatorDispositionRelPath))
 	writtenBytes, err := os.ReadFile(dispositionPath)
 	if err != nil {
@@ -248,11 +260,14 @@ func TestLocalOperatorWave(t *testing.T) {
 	}
 
 	// --- Step 4: the written artifact equals the committed fixture
-	// disposition in witness, conclusion, origin, and approvals (every
-	// operand above was chosen to match the fixture exactly, so title/
-	// owners/expiry/controls match too). Template.Identity matches;
-	// Template.Digest does NOT — disclosed below, not a defect this task's
-	// write set may fix. ---
+	// disposition in every member `disposition record` can possibly
+	// reproduce (I-2, M-3, whole-wave review). The committed fixture's
+	// own template.digest was refreshed (this task) to the CURRENT
+	// embedded internal/designscaffold/templates/policy-disposition.md's
+	// digest — computed two independent ways for the task report,
+	// humanartifact.ResolveScaffold and a direct sha256 of the embedded
+	// file, in agreement — so Template.Digest is now asserted equal
+	// below, not merely logged. ---
 	committedBytes, err := os.ReadFile(filepath.Join(localOperatorTestdataDir, "policy/dispositions/localop-story-no-conflict.md"))
 	if err != nil {
 		t.Fatalf("reading committed fixture disposition: %v", err)
@@ -265,47 +280,26 @@ func TestLocalOperatorWave(t *testing.T) {
 	if err != nil {
 		t.Fatalf("DecodeDisposition (committed fixture): %v", err)
 	}
-	if !reflect.DeepEqual(written.Witness, committed.Witness) {
-		t.Fatalf("written.Witness = %+v,\nwant (committed) %+v", written.Witness, committed.Witness)
+	if written.Template == nil || committed.Template == nil {
+		t.Fatalf("written.Template = %+v, committed.Template = %+v, want both resolved", written.Template, committed.Template)
 	}
-	if written.Conclusion != committed.Conclusion {
-		t.Fatalf("written.Conclusion = %q, want %q", written.Conclusion, committed.Conclusion)
+	if written.Template.Digest != committed.Template.Digest {
+		t.Fatalf("written.Template.Digest = %s, want %s (the committed fixture's digest tracks the current embedded template — I-2, whole-wave review)", written.Template.Digest, committed.Template.Digest)
 	}
-	if written.Origin != committed.Origin {
-		t.Fatalf("written.Origin = %q, want %q", written.Origin, committed.Origin)
-	}
-	if !reflect.DeepEqual(written.Approvals, committed.Approvals) {
-		t.Fatalf("written.Approvals = %+v, want %+v", written.Approvals, committed.Approvals)
-	}
-	if written.Title != committed.Title || !reflect.DeepEqual(written.Owners, committed.Owners) ||
-		written.Expiry != committed.Expiry || !reflect.DeepEqual(written.CompensatingControls, committed.CompensatingControls) {
-		t.Fatalf("supplied operands drifted from the fixture: title=%q/%q owners=%v/%v expiry=%q/%q controls=%v/%v",
-			written.Title, committed.Title, written.Owners, committed.Owners, written.Expiry, committed.Expiry, written.CompensatingControls, committed.CompensatingControls)
-	}
-	if written.Template == nil || committed.Template == nil || written.Template.Identity != committed.Template.Identity {
-		t.Fatalf("written.Template = %+v, want identity %q to match the committed fixture's %+v", written.Template, "embedded:policy-disposition.md", committed.Template)
-	}
-	// KNOWN, DISCLOSED, PRE-EXISTING discrepancy (not this task's write set
-	// to fix): commit 992ff3a7 ("humanartifact: RenderDisposition gains
-	// multi-claim/human-fallback support", Task 3) edited the embedded
-	// internal/designscaffold/templates/policy-disposition.md AFTER commit
-	// 8f9523c1 ("Add the hermetic local-operator fixture and its end-to-end
-	// proofs", Task 2) authored and recorded this fixture's template.digest
-	// — 992ff3a7's own commit message documents the digest move as
-	// expected ("byte-for-byte unchanged, save for the template's own
-	// self-digest"). The committed fixture's template.digest is therefore
-	// stale relative to the CURRENT embedded template; this has no bearing
-	// on any pass/fail proof below (Disposition.Template is provenance
-	// only — never compared during conflict evaluation).
-	if written.Template.Digest == committed.Template.Digest {
-		t.Logf("NOTE: written and committed template digests now match (%s) — the pre-existing staleness this test disclosed may have been fixed upstream; no action needed here", written.Template.Digest)
-	} else {
-		t.Logf("DISCLOSED (not a defect): template digest differs — written=%s committed(stale, pre-dates commit 992ff3a7)=%s", written.Template.Digest, committed.Template.Digest)
+
+	// Whole-struct equality (M-3, review finding), replacing the former
+	// per-field checks: DeepEqual after zeroing EXACTLY the two members
+	// that cannot agree byte-for-byte, both named here, nothing else —
+	// see dispositionForWholeStructComparison's own doc comment for why
+	// both must go together.
+	gotCmp, wantCmp := dispositionForWholeStructComparison(written), dispositionForWholeStructComparison(committed)
+	if !reflect.DeepEqual(gotCmp, wantCmp) {
+		t.Fatalf("written and committed dispositions differ outside Rationale/body prose:\nwritten=%+v\nwant   =%+v", gotCmp, wantCmp)
 	}
 	if byteEqual := bytes.Equal(writtenBytes, committedBytes); byteEqual {
 		t.Logf("bonus: written disposition is byte-identical to the committed fixture")
 	} else {
-		t.Logf("written disposition is NOT byte-identical to the committed fixture (expected: the embedded scaffold always renders the fixed body placeholder \"TODO: replace with the real rationale before accept.\", never the fixture's own hand-authored rationale prose, and template.digest differs per the note above); every kernel field checked above matches")
+		t.Logf("written disposition is NOT byte-identical to the committed fixture (expected: the embedded scaffold always renders the fixed body placeholder \"TODO: replace with the real rationale before accept.\", never the fixture's own hand-authored rationale prose; every decoded field checked above — including Template.Digest — matches, so this is the ONLY source of the byte difference)")
 	}
 
 	// --- Step 5: commit the artifact (fixture identity/dates, mirroring
@@ -424,4 +418,58 @@ func containsReason(reasons []policyconflict.ReasonCode, want policyconflict.Rea
 		}
 	}
 	return false
+}
+
+// dispositionForWholeStructComparison returns a value copy of d for Step
+// 4's whole-struct equality check (M-3, review finding), with EXACTLY
+// two members left at their zero value — both necessary, both named
+// here, nothing else:
+//
+//   - Rationale (the artifact's body prose): `disposition record` never
+//     accepts rationale text as an operand at all — RenderDisposition
+//     always renders the disposition scaffold's own fixed placeholder
+//     body, "TODO: replace with the real rationale before accept." (the
+//     last line of internal/designscaffold/templates/policy-
+//     disposition.md). The committed fixture instead carries real,
+//     hand-authored rationale prose (Task 2). A byte-for-byte match is
+//     therefore structurally impossible; TestLocalOperatorWave's own
+//     bytes.Equal log after this check discloses that, rather than
+//     silently degrading the proof to something weaker.
+//   - policyartifact.Disposition's own unexported "seal" field:
+//     DecodeDisposition computes it once at decode time
+//     (canonjson.Digest(d) in internal/policyartifact/disposition.go),
+//     over the WHOLE decoded struct INCLUDING Rationale — so it
+//     necessarily differs whenever Rationale does. It is a derived
+//     value, never itself an operand of any verb, and this package
+//     cannot assign it directly (unexported, different package): a
+//     keyed struct literal naming every OTHER field — exactly what this
+//     function returns — leaves it at its zero value on both sides,
+//     which is the only way from here to hold it out of the comparison
+//     without reimplementing canonjson.Digest.
+//
+// Every other field — Schema, ID, Kind, Title, Owners, Scope, Witness,
+// Conclusion, Origin, Judgment, CompensatingControls, Approvals, Expiry,
+// ReviewCondition, and Template (identity AND digest) — stays IN the
+// comparison: each is either a real operand this task's story chose to
+// match the fixture, or (Origin, Judgment, ReviewCondition, Scope) a
+// value this verb always derives identically regardless of operand, so
+// including them only strengthens the proof.
+func dispositionForWholeStructComparison(d *policyartifact.Disposition) policyartifact.Disposition {
+	return policyartifact.Disposition{
+		Schema:               d.Schema,
+		ID:                   d.ID,
+		Kind:                 d.Kind,
+		Title:                d.Title,
+		Owners:               d.Owners,
+		Scope:                d.Scope,
+		Witness:              d.Witness,
+		Conclusion:           d.Conclusion,
+		Origin:               d.Origin,
+		Judgment:             d.Judgment,
+		CompensatingControls: d.CompensatingControls,
+		Approvals:            d.Approvals,
+		Expiry:               d.Expiry,
+		ReviewCondition:      d.ReviewCondition,
+		Template:             d.Template,
+	}
 }

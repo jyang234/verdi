@@ -341,6 +341,16 @@ func TestCmdDispositionRecord_Positive(t *testing.T) {
 	if !strings.Contains(stdout, "story-alpha-no-conflict") {
 		t.Fatalf("stdout = %q, want it to name the written artifact", stdout)
 	}
+	// I-1 (whole-wave review, design §2.3): on success, one stderr line
+	// names the ratified ordering — commit the artifact, run `verdi
+	// context project`, commit the regenerated projections, then run the
+	// gate — since recording a disposition moves the effective-policy
+	// digest the projections embed.
+	for _, want := range []string{"next steps", "commit", "verdi context project", "effective-policy digest", "gate"} {
+		if !strings.Contains(stderr, want) {
+			t.Fatalf("stderr = %q, want it to contain %q (the next-steps line)", stderr, want)
+		}
+	}
 }
 
 // TestCmdDispositionRecord_TargetWithParentClaims is I-1's controller
@@ -773,6 +783,29 @@ func TestCmdDispositionRecord_Refusals(t *testing.T) {
 				return append(dispositionRecordBaseArgs(root, reportPath, "x"), "--bogus-flag", "z")
 			},
 			wantSub: "bogus-flag",
+		},
+		{
+			// I-3, whole-wave review: --root resolves through store.RootAt
+			// (exact directory, no ancestor search) exactly like `context
+			// project --root`, never store.FindRoot's ancestor walk — a
+			// subdirectory of a real store must be refused by name, not
+			// silently accepted by walking up to find the store above it.
+			name: "a subdirectory of a real store is refused (I-3: --root is exact-directory, no ancestor search)",
+			setupRoot: func(t *testing.T) (string, string) {
+				root := writeDispositionRecordStoreRoot(t)
+				path := filepath.Join(root, "report.json")
+				writeTestFile(t, path, dispositionRecordFixtureReport(t))
+				sub := filepath.Join(root, "nested")
+				if err := os.MkdirAll(sub, 0o755); err != nil {
+					t.Fatal(err)
+				}
+				return root, path
+			},
+			mutateArgs: func(root, reportPath string) []string {
+				args := dispositionRecordBaseArgs(root, reportPath, "x")
+				return replaceArgValue(args, "--root", filepath.Join(root, "nested"))
+			},
+			wantSub: "--root",
 		},
 		{
 			name: "missing --report entirely",
