@@ -9,8 +9,12 @@
 // deterministically (sorted by repo-relative path, across every adapter),
 // each written path with its sha256 content digest, one
 // "<digest>  <path>" line per file, so a caller can diff two runs' stdout
-// byte-for-byte. Human prose goes to stderr only; stdout carries nothing
-// but those lines, and stays empty on any failure.
+// byte-for-byte. Human prose goes to stderr only; on success stdout
+// carries nothing but those lines. On failure stdout is empty, except the
+// one case this command cannot prevent: a destination writer that itself
+// returns a short byte count with a nil error has already accepted those
+// bytes before the failure is detected (see the short-write handling
+// below) — a contract violation on the writer's part, not this command's.
 //
 // Kept in its own file per the lint.go/sync.go/matrix.go/dex.go/journey.go
 // convention (context.go's own doc comment), so dispatch.go's — here,
@@ -50,13 +54,25 @@ import (
 // ErrIncompleteAdoption), and the design text names only "no
 // constitution", not this distinct broken-adoption state — so it falls
 // through to the operational default, consistent with that sibling verb.
-// Every other Generate failure (a symlinked projections directory or
-// managed file, a managed path already occupied by something Generate
-// cannot overwrite, a permission or other I/O failure) is likewise
-// operational; Generate's own preflight (internal/instructionprojection's
-// checkProjectionPathsSafe) already refuses before writing anything and
-// already names the offending repo-relative path and component in its
-// error, so this command only needs to relay it.
+// Every other Generate failure is likewise operational, but Generate's
+// own preflight (internal/instructionprojection's
+// checkProjectionPathsSafe) only ever refuses a PRE-EXISTING symlinked
+// projections directory or managed file — genuinely before any adapter
+// is written, across every adapter at once. A managed path already
+// occupied by something Generate cannot overwrite (a plain directory,
+// say), a Render failure, or a permission/other I/O failure is different:
+// Generate writes adapter-by-adapter in sorted-id order
+// (internal/instructionprojection/generate.go's own write loop) and only
+// fails once it reaches the offending adapter, so every EARLIER
+// adapter's managed files and manifest may already be on disk — Generate
+// returns no partial-result value to say so, only the error. This
+// command cannot tell from the error alone which of these two shapes it
+// is looking at, so on ANY Generate failure it discloses the
+// conservative truth: the store may already be partially projected, and
+// re-running this verb is always safe, because Generate is deterministic
+// and idempotent (a clean file or manifest byte-matches what a second
+// run would write anyway). Every error already names the offending
+// repo-relative path and component; this command only needs to relay it.
 func cmdContextProject(args []string, stdout, stderr io.Writer) int {
 	rootFlag, hasRoot, rest, err := extractContextProjectFlags(args)
 	if err != nil {
@@ -86,6 +102,7 @@ func cmdContextProject(args []string, stdout, stderr io.Writer) int {
 	result, err := instructionprojection.Generate(root)
 	if err != nil {
 		printContextCommandDiagnostic(stderr, "project", root, err)
+		fmt.Fprintln(stderr, "context project: the store may be partially projected by this failed run; re-running this verb is safe (Generate is idempotent)")
 		if errors.Is(err, policyauthority.ErrNotAdopted) || errors.Is(err, instructionprojection.ErrOverlappingManagedPath) {
 			return 1
 		}

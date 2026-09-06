@@ -428,9 +428,23 @@ func TestCmdContextProject_SymlinkedManagedFile_Refused(t *testing.T) {
 	}
 }
 
+// TestCmdContextProject_ManagedPathIsDirectory_Refused uses the
+// TWO-adapter fixture deliberately: adapters are written in sorted-id
+// order ("claude-code" before "codex"), so a directory occupying
+// "codex"'s managed path AGENTS.md lets "claude-code" write successfully
+// FIRST — CLAUDE.md and its manifest land on disk — before Generate fails
+// on the second adapter. Generate's own preflight
+// (checkProjectionPathsSafe) only ever catches a pre-existing symlink; it
+// does not — and structurally cannot, since the offending path is a
+// plain directory, not a symlink — refuse this case before writing
+// anything (internal/instructionprojection/generate.go's per-adapter
+// write loop). This test proves both halves of that divergence: the
+// exit/stdout contract, AND that the store really is left partially
+// projected, so the command's own stderr disclosure is checked against
+// files that genuinely exist rather than a hypothetical.
 func TestCmdContextProject_ManagedPathIsDirectory_Refused(t *testing.T) {
 	root := t.TempDir()
-	writeContextProjectTree(t, root, contextProjectOneAdapterFiles(t))
+	writeContextProjectTree(t, root, contextProjectTwoAdapterFiles(t))
 
 	if err := os.MkdirAll(filepath.Join(root, "AGENTS.md"), 0o755); err != nil {
 		t.Fatal(err)
@@ -446,6 +460,19 @@ func TestCmdContextProject_ManagedPathIsDirectory_Refused(t *testing.T) {
 	}
 	if stderr.Len() == 0 {
 		t.Fatal("stderr empty, want a diagnostic")
+	}
+	if !strings.Contains(stderr.String(), "partially projected") || !strings.Contains(stderr.String(), "re-running") {
+		t.Fatalf("stderr = %q, want a disclosure that the store may be partially projected and re-running is safe", stderr.String())
+	}
+
+	// The earlier adapter's files are genuinely on disk: this is not a
+	// hypothetical partial write, and re-running (idempotent) is the
+	// right recovery, not a manual cleanup.
+	if _, err := os.Stat(filepath.Join(root, "CLAUDE.md")); err != nil {
+		t.Fatalf("claude-code's managed file was not written before the failure: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, ".verdi", "policy", "projections", "claude-code.json")); err != nil {
+		t.Fatalf("claude-code's manifest was not written before the failure: %v", err)
 	}
 }
 
