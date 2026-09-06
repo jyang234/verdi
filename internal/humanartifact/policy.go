@@ -55,33 +55,85 @@ type ExemptionScaffoldData struct {
 	TemplateDigest     string
 }
 
+// DispositionClaimData is one claim witness entry a disposition scaffold
+// renders inside witness.claims. DispositionScaffoldData's per-claim shape
+// (Task 3, docs/superpowers/specs/2026-09-05-local-operator-disposition-
+// design.md §2.3) now that RenderDisposition supports a real semantic
+// input's complete, possibly-multi-claim witness — never only the one
+// placeholder claim the original judge-result-only skeleton rendered.
+// Scope is rendered exactly as given — policyartifact's own per-category
+// scope grammar requires most categories' scope.refs to equal exactly
+// [ID] (validateSemanticClaimScope; only policy-instruction accepts an
+// arbitrary, e.g. universal, scope), so a real multi-category witness
+// copied verbatim from a policy-conflict report row cannot render a single
+// fixed scope for every claim the way the original one-claim,
+// policy-instruction-only skeleton always could. Values and Bound are
+// never rendered here (the scaffold's fixed empty values list, exactly
+// like before); a caller needing those carries a claim outside this
+// scaffold's own creation path.
+type DispositionClaimData struct {
+	ID              string
+	Digest          string
+	Category        string
+	AuthorityDigest string
+	Scope           policyartifact.Scope
+}
+
+// DispositionExemptionData is one applicable-exemption identity a
+// disposition scaffold renders inside witness.exemptions. Defaults to an
+// empty list (rendered as the literal `[]` the original skeleton always
+// emitted) when a caller supplies none.
+type DispositionExemptionData struct {
+	ID     string
+	Digest string
+}
+
+// DispositionApprovalData is one approval fact a disposition scaffold
+// renders inside approvals. DispositionScaffoldData's per-approval shape
+// now that RenderDisposition supports more than the one placeholder
+// approval the original judge-result-only skeleton rendered.
+type DispositionApprovalData struct {
+	Role      string
+	Principal string
+}
+
 // DispositionScaffoldData is the policy-disposition.md scaffold's own
-// render input: PolicyScaffoldData's identity fields plus the minimal
-// judge-result witness (target/claim identity), one approval, and an
-// expiry (authority-design §8: judge-result needs no fallback-only control
-// or time bound, but an expiry remains legal — this scaffold's minimal
-// skeleton always renders one so a real disposition has a concrete
-// re-review date to edit rather than a silently absent bound). InputID
-// must already be the exact canonical digest of the witness it describes
-// (Witness.InputID cleared then canonjson-digested, exactly what
-// policyartifact.DecodeDisposition itself re-derives and checks) — the
-// caller computes it, since only the caller knows the complete witness
-// content this minimal single-claim skeleton commits to.
+// render input: PolicyScaffoldData's identity fields plus a complete
+// semantic witness (target digest, every claim, every applicable
+// exemption), the human ruling's conclusion and origin, compensating
+// controls, every approval, and an expiry. InputID must already be the
+// exact canonical digest of the witness it describes (Witness.InputID
+// cleared then canonjson-digested) — the caller computes it, since only
+// the caller knows the complete witness content this scaffold commits to.
+//
+// Conclusion and Origin are the closed policyartifact.DispositionConclusion/
+// DispositionOrigin vocabularies, carried as plain strings (matching this
+// struct's existing category/role fields) rather than imported types —
+// RenderDisposition's own post-render strict decode is what actually
+// enforces the closed sets; a caller passing an unknown value fails there,
+// never silently. CompensatingControls may be empty (the judge-result
+// posture the scaffold originally fixed); a human-fallback ruling requires
+// at least one, enforced by policyartifact.DecodeDisposition on the
+// rendered output, not duplicated here. This scaffold never fabricates a
+// Judgment provenance citation for a judge-result ruling (the persisted
+// policy-conflict report's judge exchange carries no immutable judgment-
+// record digest for this scaffold to cite) — Judgment is always absent,
+// which decode accepts unconditionally (optional regardless of origin).
 type DispositionScaffoldData struct {
-	Name              string
-	Title             string
-	Owners            []string
-	InputID           string
-	TargetDigest      string
-	ClaimID           string
-	ClaimDigest       string
-	Category          string
-	AuthorityDigest   string
-	ApprovalRole      string
-	ApprovalPrincipal string
-	Expiry            string
-	TemplateIdentity  string
-	TemplateDigest    string
+	Name                 string
+	Title                string
+	Owners               []string
+	InputID              string
+	TargetDigest         string
+	Claims               []DispositionClaimData
+	Exemptions           []DispositionExemptionData
+	Conclusion           string
+	Origin               string
+	CompensatingControls []string
+	Approvals            []DispositionApprovalData
+	Expiry               string
+	TemplateIdentity     string
+	TemplateDigest       string
 }
 
 // universalScope is the canonical scaffold's own fixed scope value:
@@ -234,11 +286,17 @@ func RenderExemption(scaffold Scaffold, data ExemptionScaffoldData) (string, err
 // universal scope, AND the disposition-specific kernel fields
 // (kernelFieldTable's disposition row: witness, conclusion, origin,
 // judgment, compensating_controls, approvals, expiry, review_condition)
-// round-trip either what data supplied (witness identity fields, the one
-// approval, expiry) or this scaffold's own fixed canonical defaults
-// (conclusion no-conflict, origin judge-result, no judgment provenance, no
-// compensating controls, no review condition) — a minimal judge-result
-// skeleton, not a creation-verb-exposed artifact (authority-design §8).
+// round-trip exactly what data supplied — every claim, every exemption,
+// conclusion, origin, every compensating control, and every approval, in
+// order — never a template-hardcoded or synthesized value. Judgment is
+// always absent (this scaffold never fabricates judgment provenance);
+// review_condition is always absent (this scaffold renders an expiry
+// only). Task 3 (docs/superpowers/specs/2026-09-05-local-operator-
+// disposition-design.md §2.3) widened this from the original minimal
+// judge-result-only skeleton (one fixed claim, forced conclusion
+// no-conflict/origin judge-result) to a real, possibly-multi-claim
+// witness with a caller-chosen conclusion and origin — see
+// DispositionScaffoldData's own doc comment for the exact contract.
 func RenderDisposition(scaffold Scaffold, data DispositionScaffoldData) (string, error) {
 	content, err := designscaffold.RenderValue(scaffold.Template, data)
 	if err != nil {
@@ -261,35 +319,59 @@ func RenderDisposition(scaffold Scaffold, data DispositionScaffoldData) (string,
 	if d.Witness.TargetDigest != data.TargetDigest {
 		return "", fmt.Errorf("humanartifact: rendered policy-disposition kernel mismatch: witness.target_digest = %q, want %q", d.Witness.TargetDigest, data.TargetDigest)
 	}
-	wantClaim := policyartifact.SemanticClaimWitness{
-		ID:              data.ClaimID,
-		Digest:          data.ClaimDigest,
-		Category:        data.Category,
-		AuthorityDigest: data.AuthorityDigest,
-		Scope:           universalScope,
-		Values:          []string{},
+	wantClaims := make([]policyartifact.SemanticClaimWitness, len(data.Claims))
+	for i, c := range data.Claims {
+		wantClaims[i] = policyartifact.SemanticClaimWitness{
+			ID: c.ID, Digest: c.Digest, Category: c.Category, AuthorityDigest: c.AuthorityDigest,
+			Scope: c.Scope, Values: []string{},
+		}
 	}
-	if len(d.Witness.Claims) != 1 || !semanticClaimWitnessEqual(d.Witness.Claims[0], wantClaim) {
-		return "", fmt.Errorf("humanartifact: rendered policy-disposition kernel mismatch: witness.claims = %+v, want exactly [%+v] (a template must not hardcode, drop, or synthesize a claim witness)", d.Witness.Claims, wantClaim)
+	if len(d.Witness.Claims) != len(wantClaims) {
+		return "", fmt.Errorf("humanartifact: rendered policy-disposition kernel mismatch: witness.claims has %d entries, want %d (a template must not drop or synthesize a claim witness)", len(d.Witness.Claims), len(wantClaims))
 	}
-	if len(d.Witness.Exemptions) != 0 {
-		return "", fmt.Errorf("humanartifact: rendered policy-disposition kernel mismatch: witness.exemptions = %+v, want empty (this scaffold names no exemption)", d.Witness.Exemptions)
+	// Claims are never reordered by DecodeDisposition (it fails closed on
+	// an out-of-order witness rather than silently re-sorting), so a
+	// positional, in-order comparison is the correct round trip here —
+	// unlike approvals below, which decode DOES re-sort.
+	for i := range wantClaims {
+		if !semanticClaimWitnessEqual(d.Witness.Claims[i], wantClaims[i]) {
+			return "", fmt.Errorf("humanartifact: rendered policy-disposition kernel mismatch: witness.claims[%d] = %+v, want %+v (a template must not hardcode, drop, or synthesize a claim witness)", i, d.Witness.Claims[i], wantClaims[i])
+		}
 	}
-	if d.Conclusion != policyartifact.DispositionNoConflict {
-		return "", fmt.Errorf("humanartifact: rendered policy-disposition kernel mismatch: conclusion = %q, want %q (this scaffold's fixed canonical default)", d.Conclusion, policyartifact.DispositionNoConflict)
+	wantExemptions := make([]policyartifact.SemanticExemptionWitness, len(data.Exemptions))
+	for i, e := range data.Exemptions {
+		wantExemptions[i] = policyartifact.SemanticExemptionWitness{ID: e.ID, Digest: e.Digest}
 	}
-	if d.Origin != policyartifact.DispositionJudgeResult {
-		return "", fmt.Errorf("humanartifact: rendered policy-disposition kernel mismatch: origin = %q, want %q (this scaffold's fixed canonical default)", d.Origin, policyartifact.DispositionJudgeResult)
+	if len(d.Witness.Exemptions) != len(wantExemptions) {
+		return "", fmt.Errorf("humanartifact: rendered policy-disposition kernel mismatch: witness.exemptions has %d entries, want %d (a template must not drop or synthesize an exemption witness)", len(d.Witness.Exemptions), len(wantExemptions))
+	}
+	for i := range wantExemptions {
+		if d.Witness.Exemptions[i] != wantExemptions[i] {
+			return "", fmt.Errorf("humanartifact: rendered policy-disposition kernel mismatch: witness.exemptions[%d] = %+v, want %+v", i, d.Witness.Exemptions[i], wantExemptions[i])
+		}
+	}
+	if string(d.Conclusion) != data.Conclusion {
+		return "", fmt.Errorf("humanartifact: rendered policy-disposition kernel mismatch: conclusion = %q, want %q", d.Conclusion, data.Conclusion)
+	}
+	if string(d.Origin) != data.Origin {
+		return "", fmt.Errorf("humanartifact: rendered policy-disposition kernel mismatch: origin = %q, want %q", d.Origin, data.Origin)
 	}
 	if d.Judgment != nil {
 		return "", fmt.Errorf("humanartifact: rendered policy-disposition kernel mismatch: judgment = %+v, want none (this scaffold never fabricates judgment provenance)", d.Judgment)
 	}
-	if len(d.CompensatingControls) != 0 {
-		return "", fmt.Errorf("humanartifact: rendered policy-disposition kernel mismatch: compensating_controls = %v, want empty (a judge-result ruling needs none)", d.CompensatingControls)
+	if !stringSlicesEqualExact(d.CompensatingControls, data.CompensatingControls) {
+		return "", fmt.Errorf("humanartifact: rendered policy-disposition kernel mismatch: compensating_controls = %v, want %v (a template must not hardcode, drop, or synthesize a control)", d.CompensatingControls, data.CompensatingControls)
 	}
-	wantApproval := policyartifact.Approval{Role: data.ApprovalRole, Principal: data.ApprovalPrincipal}
-	if len(d.Approvals) != 1 || d.Approvals[0] != wantApproval {
-		return "", fmt.Errorf("humanartifact: rendered policy-disposition kernel mismatch: approvals = %+v, want exactly [%+v] (a template must not hardcode, drop, or synthesize an approval)", d.Approvals, wantApproval)
+	wantApprovals := make([]policyartifact.Approval, len(data.Approvals))
+	for i, a := range data.Approvals {
+		wantApprovals[i] = policyartifact.Approval{Role: a.Role, Principal: a.Principal}
+	}
+	// Approval ORDER is not preserved through DecodeDisposition (it sorts
+	// by role then principal), so the round trip below compares as a set —
+	// unlike claims/exemptions above, which decode leaves in the witness's
+	// own given order.
+	if !approvalSetEqual(d.Approvals, wantApprovals) {
+		return "", fmt.Errorf("humanartifact: rendered policy-disposition kernel mismatch: approvals = %+v, want the set %+v (a template must not hardcode, drop, or synthesize an approval)", d.Approvals, wantApprovals)
 	}
 	if d.Expiry != data.Expiry {
 		return "", fmt.Errorf("humanartifact: rendered policy-disposition kernel mismatch: expiry = %q, want %q", d.Expiry, data.Expiry)
@@ -371,6 +453,34 @@ func verifyKernelRoundTrip(kind, wantID, wantTitle string, wantOwners []string, 
 		return fmt.Errorf("humanartifact: rendered %s kernel mismatch: template.digest = %q, want %q", kind, gotTemplate.Digest, scaffold.Digest)
 	}
 	return nil
+}
+
+// approvalSetEqual compares got and want as sets (order-insensitive —
+// policyartifact.DecodeDisposition sorts approvals by role then principal,
+// so the witness's own given order is not preserved through decode the way
+// claims/exemptions order is), leaving the input slices untouched.
+func approvalSetEqual(got, want []policyartifact.Approval) bool {
+	if len(got) != len(want) {
+		return false
+	}
+	g := append([]policyartifact.Approval(nil), got...)
+	w := append([]policyartifact.Approval(nil), want...)
+	byRoleThenPrincipal := func(s []policyartifact.Approval) func(i, j int) bool {
+		return func(i, j int) bool {
+			if s[i].Role != s[j].Role {
+				return s[i].Role < s[j].Role
+			}
+			return s[i].Principal < s[j].Principal
+		}
+	}
+	sort.Slice(g, byRoleThenPrincipal(g))
+	sort.Slice(w, byRoleThenPrincipal(w))
+	for i := range g {
+		if g[i] != w[i] {
+			return false
+		}
+	}
+	return true
 }
 
 // equalOwnerSet compares got and want as sets (order-insensitive — the
