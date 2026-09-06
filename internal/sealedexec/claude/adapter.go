@@ -970,14 +970,14 @@ func jsonFieldNames(typ reflect.Type) map[string]struct{} {
 	for i := 0; i < typ.NumField(); i++ {
 		field := typ.Field(i)
 		if field.Anonymous {
-			panic("sealedexec/claude: " + typ.Name() + ": a closed frame shape must not embed a struct")
+			panic("sealedexec/claude: " + typ.Name() + ": a frame shape must not embed a struct")
 		}
 		if !field.IsExported() {
 			continue
 		}
 		tag, tagged := field.Tag.Lookup("json")
 		if !tagged {
-			panic("sealedexec/claude: " + typ.Name() + "." + field.Name + ": a closed frame shape needs an explicit json tag on every exported field")
+			panic("sealedexec/claude: " + typ.Name() + "." + field.Name + ": every exported field of a frame shape needs an explicit json tag")
 		}
 		// encoding/json's exact rule: the whole tag "-" skips the field,
 		// while the tag "-," names the member "-".
@@ -986,7 +986,7 @@ func jsonFieldNames(typ reflect.Type) map[string]struct{} {
 		}
 		name, _, _ := strings.Cut(tag, ",")
 		if name == "" {
-			panic("sealedexec/claude: " + typ.Name() + "." + field.Name + ": a closed frame shape needs an explicit json name on every exported field")
+			panic("sealedexec/claude: " + typ.Name() + "." + field.Name + ": every exported field of a frame shape needs an explicit json name")
 		}
 		names[name] = struct{}{}
 	}
