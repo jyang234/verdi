@@ -54,6 +54,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -268,14 +269,32 @@ func runDispositionRecord(root string, a dispositionRecordArgs, stdout, stderr i
 		return 2
 	}
 
-	row, ok := findSemanticRow(report, a.row)
-	if !ok {
+	row, matches := findSemanticRow(report, a.row)
+	if matches == 0 {
 		fmt.Fprintf(stderr, "disposition record: --row: no semantic row with input_id %q in %s\n", a.row, a.report)
 		return 2
 	}
+	if matches > 1 {
+		fmt.Fprintf(stderr, "disposition record: --row: %d semantic rows share input_id %q in %s; the report is internally ambiguous, refusing rather than picking one\n", matches, a.row, a.report)
+		return 2
+	}
 
-	if !targetDigestMatchesAnyClaim(row.Claims, a.targetDigest) {
-		fmt.Fprintf(stderr, "disposition record: --target-digest: %q matches none of the selected row's claim authority digests; an operand must never make the witness differ from the report\n", a.targetDigest)
+	if !validDispositionID(a.id) {
+		fmt.Fprintf(stderr, "disposition record: --id: %q must be a single kebab-case path component (lowercase letters, digits, and single internal hyphens; no \"/\", \".\", or \"..\")\n", a.id)
+		return 2
+	}
+
+	targetRef, haveTargetRef := targetRefFromReport(report)
+	targetDigests := targetClaimAuthorityDigests(row.Claims, targetRef, haveTargetRef)
+	switch {
+	case len(targetDigests) == 0:
+		fmt.Fprintf(stderr, "disposition record: --target-digest: the selected row's claims include none attributable to the target specification itself; the digest cannot be cross-checked for this report\n")
+		return 2
+	case len(targetDigests) > 1:
+		fmt.Fprintf(stderr, "disposition record: --target-digest: the selected row's claims are ambiguous between the target specification and a governing parent (%d distinct authority digests); the digest cannot be safely cross-checked for this report\n", len(targetDigests))
+		return 2
+	case targetDigests[0] != a.targetDigest:
+		fmt.Fprintf(stderr, "disposition record: --target-digest: %q does not match the target specification's own claim authority digest %q; an operand must never make the witness differ from the report\n", a.targetDigest, targetDigests[0])
 		return 2
 	}
 
@@ -374,37 +393,142 @@ func runDispositionRecord(root string, a dispositionRecordArgs, stdout, stderr i
 }
 
 // findSemanticRow returns the report's semantic row whose InputID equals
-// inputID, and whether one was found. A report's Semantic slice carries at
-// most one row in the current kernel (policyconflict.Service.Evaluate
-// appends at most once), but this loop never assumes that, matching
-// --row's own role as an explicit, checked selector rather than a
-// convenience default.
-func findSemanticRow(report policyconflict.Report, inputID string) (policyconflict.SemanticEvaluation, bool) {
-	for _, row := range report.Semantic {
-		if row.InputID == inputID {
-			return row, true
+// inputID and the number of rows that matched. A report's Semantic slice
+// carries at most one row in the current kernel
+// (policyconflict.Service.Evaluate appends at most once), but this loop
+// never assumes that: --row is an explicit, checked selector, and a
+// report carrying two or more rows sharing one input_id is an internally
+// ambiguous document this verb must refuse rather than silently resolve
+// by picking the first (M-3, review finding). Callers must check matches
+// before trusting the returned row: matches == 0 means not found,
+// matches == 1 means the returned row is the unique match, and
+// matches > 1 means the returned row is only the FIRST of several and
+// must not be used.
+func findSemanticRow(report policyconflict.Report, inputID string) (row policyconflict.SemanticEvaluation, matches int) {
+	for _, r := range report.Semantic {
+		if r.InputID == inputID {
+			if matches == 0 {
+				row = r
+			}
+			matches++
 		}
 	}
-	return policyconflict.SemanticEvaluation{}, false
+	return row, matches
 }
 
-// targetDigestMatchesAnyClaim reports whether digest equals at least one
-// claim's AuthorityDigest — the one cross-check available against the
-// report for --target-digest's disclosed operand (see this file's header
-// doc comment). Vacuously true when claims is empty: with nothing to
-// compare against, there is no contradiction to detect, and this verb
-// must not fabricate a favorable-seeming refusal from an absent claim set
-// decode itself would already have refused earlier as malformed.
-func targetDigestMatchesAnyClaim(claims []policyartifact.SemanticClaimWitness, digest string) bool {
-	if len(claims) == 0 {
-		return true
+// specClaimCategories is the closed set of witness categories only a
+// governing SPECIFICATION — the target itself, or (per internal/
+// contextcompile's buildFragmentProse, conflict.go:1000) a governing
+// PARENT feature fragment — can contribute. policy-instruction
+// (buildPolicyInstructionProse, conflict.go:938), adr-decision
+// (buildADRDecisionProse, conflict.go:1044), and obligation-declaration
+// (buildObligationProse, conflict.go:1061) claims are never the target
+// specification's own identity claim, regardless of which report arm
+// produced the row — review finding I-1.
+var specClaimCategories = map[string]bool{
+	"spec-problem":         true,
+	"spec-outcome":         true,
+	"acceptance-criterion": true,
+	"open-question":        true,
+	"constraint":           true,
+	"decision":             true,
+}
+
+// targetRefFromReport returns the report's own target ref when the report
+// identifies it directly, and whether one was found.
+//
+// Only the acceptance-candidate arm carries this: CandidateIdentity.Ref
+// (policyconflict.CandidateIdentity, schema.go) names the exact ref under
+// evaluation. The accepted-context arm's identity
+// (policyconflict.AcceptedIdentity) carries ONLY the manifest digest —
+// deliberately: using it as (or to find) the target digest would recurse
+// through the effective-policy digest, which folds every disposition
+// (authority design §8; this file's header comment). Docs/superpowers/
+// specs/2026-08-12-policy-conflict-gate-authority-design.md §10 confirms
+// the semantic row itself carries no source-ref field either. So for the
+// accepted-context arm this returns ok=false — see
+// targetClaimAuthorityDigests's own doc comment for how that case is
+// still handled safely, never by guessing a ref.
+func targetRefFromReport(report policyconflict.Report) (ref string, ok bool) {
+	if c := report.Input.Target.Candidate; c != nil && c.Ref != "" {
+		return c.Ref, true
 	}
+	return "", false
+}
+
+// targetClaimAuthorityDigests returns the distinct, sorted AuthorityDigest
+// values among claims attributable to the target specification itself —
+// review finding I-1: claims come from five authority classes (policy
+// instructions, the target spec, governing parent-feature fragments, ADRs,
+// obligations — internal/contextcompile/conflict.go's buildProseClaims and
+// its five builders), and only the target's OWN claims carry the target's
+// content digest; accepting any claim's authority digest (this file's
+// pre-fix behavior) let a parent-feature, policy, ADR, or obligation
+// digest through, which would later resolve inert
+// (policyconflict.ResolveDispositionAuthority / authority.go's
+// resolveDisposition: violated-with-witness, no diagnostic).
+//
+// When targetRef is known (haveRef, the acceptance-candidate arm), this is
+// EXACT: a claim qualifies only when its id's "<source-ref>#<object>"
+// source-ref segment equals targetRef. A policy-instruction, adr-decision,
+// or obligation-declaration claim's id never takes that shape against a
+// spec ref, so those categories are excluded as a side effect of the ref
+// comparison itself, never specially-cased.
+//
+// When targetRef is unknown (the accepted-context arm), this is a
+// disclosed, conservative APPROXIMATION: claims are narrowed to
+// specClaimCategories (excluding policy-instruction/adr-decision/
+// obligation-declaration, which are never the target itself), which is as
+// far as this can go without the ref — internal/contextcompile's
+// buildFragmentProse mirrors buildSpecProse's exact categories and scope
+// shape for a governing PARENT feature, so a parent's spec-shaped claim is
+// structurally indistinguishable from the target's own by category alone.
+// The caller (runDispositionRecord) therefore accepts a target digest only
+// when EXACTLY ONE distinct digest remains after this narrowing: two
+// different real files' content digests colliding by chance is not a risk
+// this verb needs to entertain, so a single remaining digest is
+// unambiguously the target's; two or more distinct digests is exactly the
+// shape a governing parent feature's claims produce, and the caller must
+// refuse rather than guess which one is the target's — fail closed, never
+// accept unverified.
+func targetClaimAuthorityDigests(claims []policyartifact.SemanticClaimWitness, targetRef string, haveRef bool) []string {
+	seen := make(map[string]bool)
 	for _, c := range claims {
-		if c.AuthorityDigest == digest {
-			return true
+		if haveRef {
+			sourceRef, _, _ := strings.Cut(c.ID, "#")
+			if sourceRef != targetRef {
+				continue
+			}
+		} else if !specClaimCategories[c.Category] {
+			continue
 		}
+		seen[c.AuthorityDigest] = true
 	}
-	return false
+	out := make([]string, 0, len(seen))
+	for d := range seen {
+		out = append(out, d)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// dispositionIDRe is the store's disposition id grammar (M-2, review
+// finding): a single kebab-case path component, mirroring
+// policyartifact's own (unexported) kebabRe used by parseKindedID to
+// validate the "<name>" half of "policy-disposition/<name>" — duplicated
+// here, not imported, since it is unexported and internal/policyartifact
+// is outside this fix's write set. --id ultimately names a file
+// (store.PolicyDispositionPath joins root/.verdi/policy/dispositions/ with
+// id+".md"), so this is checked and refused BY NAME before that path is
+// ever built or stat'd, rather than relying on policyartifact's own
+// (later, generic "failed strict decode") rejection of a malformed id.
+var dispositionIDRe = regexp.MustCompile(`^[a-z0-9]+(?:-[a-z0-9]+)*$`)
+
+// validDispositionID reports whether id is a single, kebab-case path
+// component — never empty, never containing "/" or a ".."/"." segment,
+// never any character outside dispositionIDRe's grammar.
+func validDispositionID(id string) bool {
+	return dispositionIDRe.MatchString(id)
 }
 
 // dispositionOrigin derives the disposition's origin from whether row
