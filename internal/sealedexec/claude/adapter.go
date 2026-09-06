@@ -948,13 +948,46 @@ type claudeToolResultBlock struct {
 // unknownMemberCode is SI-182's closed disclosure code.
 const unknownMemberCode = "unknown-foreign-member"
 
-// jsonFieldNames returns the json tag names declared on typ (a struct type),
-// so the tolerant walk's known-member set can never drift from the exact
-// shape the strict typed decode below already accepts.
+// jsonFieldNames returns the json member names declared on typ (a struct
+// type), so the tolerant walk's known-member set can never drift from the
+// exact shape the strict typed decode below already accepts.
+//
+// This helper is the sole point keeping those two decodes in sync, so it
+// fails closed at package construction on any field shape that would break
+// the correspondence rather than inverting SI-182 mid-stream:
+//
+//   - `json:"-"` contributes no name. encoding/json never reads such a field,
+//     so a member literally named "-" is unknown, not known.
+//   - An exported field with no json tag, an empty json name, or an embedded
+//     field is refused: encoding/json would read it under a name this helper
+//     does not know, so the member would be recorded as unknown and still
+//     read — the exact inversion of SI-182's "never read".
+//
+// Unexported fields are skipped: encoding/json never reads them and they name
+// no member.
 func jsonFieldNames(typ reflect.Type) map[string]struct{} {
 	names := make(map[string]struct{}, typ.NumField())
 	for i := 0; i < typ.NumField(); i++ {
-		name, _, _ := strings.Cut(typ.Field(i).Tag.Get("json"), ",")
+		field := typ.Field(i)
+		if field.Anonymous {
+			panic("sealedexec/claude: " + typ.Name() + ": a closed frame shape must not embed a struct")
+		}
+		if !field.IsExported() {
+			continue
+		}
+		tag, tagged := field.Tag.Lookup("json")
+		if !tagged {
+			panic("sealedexec/claude: " + typ.Name() + "." + field.Name + ": a closed frame shape needs an explicit json tag on every exported field")
+		}
+		// encoding/json's exact rule: the whole tag "-" skips the field,
+		// while the tag "-," names the member "-".
+		if tag == "-" {
+			continue
+		}
+		name, _, _ := strings.Cut(tag, ",")
+		if name == "" {
+			panic("sealedexec/claude: " + typ.Name() + "." + field.Name + ": a closed frame shape needs an explicit json name on every exported field")
+		}
 		names[name] = struct{}{}
 	}
 	return names

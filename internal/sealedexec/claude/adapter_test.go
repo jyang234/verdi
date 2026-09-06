@@ -2316,6 +2316,108 @@ func newTestProcessor(t *testing.T) *sealedexec.DetailProcessor {
 	return proc
 }
 
+// TestClaudeClosedFrameShapeFieldNames pins jsonFieldNames, the single point
+// that keeps SI-182's tolerant walk in sync with the strict typed decode. A
+// field shape encoding/json reads under a name the walk does not know would
+// invert SI-182 — the member would be recorded as unknown and still read — so
+// the helper must skip exactly what encoding/json skips and refuse everything
+// it cannot mirror, at construction.
+func TestClaudeClosedFrameShapeFieldNames(t *testing.T) {
+	t.Run("declared_names_are_known_and_skipped_fields_are_not", func(t *testing.T) {
+		type shape struct {
+			Named    *string `json:"named"`
+			Optional string  `json:"optional,omitempty"`
+			Skipped  string  `json:"-"`
+			Dashed   string  `json:"-,"`
+			hidden   string  //nolint:unused // proves an unexported field names no member
+		}
+		got := jsonFieldNames(reflect.TypeOf(shape{}))
+		want := map[string]struct{}{"named": {}, "optional": {}, "-": {}}
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("jsonFieldNames = %v, want %v", got, want)
+		}
+		// The `json:"-"` field must not be known under its Go name either: a
+		// member named "Skipped" is unknown, and the walk must say so.
+		if _, known := got["Skipped"]; known {
+			t.Fatal(`a json:"-" field must contribute no known member name`)
+		}
+	})
+
+	// Negative path: every shape encoding/json would read under a name the
+	// helper cannot derive is refused where the closed shapes are built.
+	t.Run("unmirrorable_field_shapes_are_refused_at_construction", func(t *testing.T) {
+		type promoted struct {
+			Promoted string `json:"promoted"`
+		}
+		for _, row := range []struct {
+			name string
+			typ  reflect.Type
+			want string
+		}{
+			{
+				name: "untagged_exported_field",
+				typ:  reflect.TypeOf(struct{ Untagged string }{}),
+				want: "explicit json tag",
+			},
+			{
+				name: "empty_json_name",
+				typ: reflect.TypeOf(struct {
+					Empty string `json:""`
+				}{}),
+				want: "explicit json name",
+			},
+			{
+				name: "omitempty_without_a_name",
+				typ: reflect.TypeOf(struct {
+					Nameless string `json:",omitempty"`
+				}{}),
+				want: "explicit json name",
+			},
+			{
+				name: "embedded_struct",
+				typ:  reflect.TypeOf(struct{ promoted }{}),
+				want: "must not embed a struct",
+			},
+		} {
+			t.Run(row.name, func(t *testing.T) {
+				defer func() {
+					recovered := recover()
+					message, ok := recovered.(string)
+					if !ok {
+						t.Fatalf("jsonFieldNames(%s) returned without refusing; recover = %v", row.name, recovered)
+					}
+					if !strings.Contains(message, row.want) {
+						t.Fatalf("refusal = %q, want it to mention %q", message, row.want)
+					}
+				}()
+				got := jsonFieldNames(row.typ)
+				t.Fatalf("jsonFieldNames(%s) = %v, want a refusal", row.name, got)
+			})
+		}
+	})
+
+	// The sixteen closed shapes themselves must satisfy the invariant: they
+	// are built at package initialization, so a violation would already have
+	// panicked, but this row states the expectation the guard exists for.
+	t.Run("every_closed_frame_shape_declares_only_mirrorable_fields", func(t *testing.T) {
+		for _, typ := range []reflect.Type{
+			reflect.TypeOf(claudeInitFrame{}), reflect.TypeOf(claudeMCPRow{}),
+			reflect.TypeOf(claudeRetryFrame{}), reflect.TypeOf(claudeRetryError{}),
+			reflect.TypeOf(claudeAssistantFrame{}), reflect.TypeOf(claudeAssistantMessage{}),
+			reflect.TypeOf(claudeUsage{}), reflect.TypeOf(claudeUserFrame{}),
+			reflect.TypeOf(claudeUserMessage{}), reflect.TypeOf(claudeResultFrame{}),
+			reflect.TypeOf(claudePermissionDenial{}), reflect.TypeOf(claudeTextBlock{}),
+			reflect.TypeOf(claudeToolUseBlock{}), reflect.TypeOf(claudeThinkingBlock{}),
+			reflect.TypeOf(claudeRedactedThinkingBlock{}), reflect.TypeOf(claudeToolResultBlock{}),
+		} {
+			names := jsonFieldNames(typ)
+			if len(names) != typ.NumField() {
+				t.Fatalf("%s: %d known member names for %d fields", typ.Name(), len(names), typ.NumField())
+			}
+		}
+	})
+}
+
 // TestClaudeAdapterProfileAndCommandAuthority proves Amendment 002 §3/§4
 // profile and command authority: the model comes from the resolved profile
 // (never its logical name), the MCP configuration path is the exact
