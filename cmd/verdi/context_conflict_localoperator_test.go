@@ -101,7 +101,7 @@ func TestNewLocalContextConflictProvider_NoLocalOperatorSource_NilActors(t *test
 	repo := buildContextCompileRepo(t, map[string]string{
 		".verdi/specs/active/feature-alpha/spec.md": contextFeatureAlphaSpec(t),
 	})
-	provider, err := newLocalContextConflictProvider(repo.Dir, policyconflict.Request{})
+	provider, err := newLocalContextConflictProvider(context.Background(), repo.Dir, policyconflict.Request{})
 	if err != nil {
 		t.Fatalf("newLocalContextConflictProvider: %v", err)
 	}
@@ -121,7 +121,7 @@ func TestNewLocalContextConflictProvider_NotAdopted_NilActorsNoError(t *testing.
 	repo := fixturegit.Build(t, []fixturegit.Layer{{Files: map[string]string{
 		".verdi/verdi.yaml": "schema: verdi.layout/v1\n",
 	}, Message: "no policy store at all"}})
-	provider, err := newLocalContextConflictProvider(repo.Dir, policyconflict.Request{})
+	provider, err := newLocalContextConflictProvider(context.Background(), repo.Dir, policyconflict.Request{})
 	if err != nil {
 		t.Fatalf("newLocalContextConflictProvider: %v, want no error for a not-yet-adopted store", err)
 	}
@@ -139,7 +139,7 @@ func TestNewLocalContextConflictProvider_NotAdopted_NilActorsNoError(t *testing.
 func TestNewLocalContextConflictProvider_LocalOperatorSource_ResolvesActor(t *testing.T) {
 	repo := buildLocalOperatorWiringRepo(t)
 	// fixturegit.Build always configures this exact repo-local identity.
-	provider, err := newLocalContextConflictProvider(repo.Dir, policyconflict.Request{})
+	provider, err := newLocalContextConflictProvider(context.Background(), repo.Dir, policyconflict.Request{})
 	if err != nil {
 		t.Fatalf("newLocalContextConflictProvider: %v", err)
 	}
@@ -174,9 +174,17 @@ func TestContextConflict_NoLocalOperatorSource_ByteIdenticalReport(t *testing.T)
 		Target: policyconflict.Target{Kind: policyconflict.TargetAcceptedContext, AcceptedContext: &request},
 	}
 
-	provider, err := newLocalContextConflictProvider(repo.Dir, conflictRequest)
+	provider, err := newLocalContextConflictProvider(context.Background(), repo.Dir, conflictRequest)
 	if err != nil {
 		t.Fatalf("newLocalContextConflictProvider: %v", err)
+	}
+	// The comparison below is only valid between LIKE services: confirm the
+	// wired factory actually left Primary nil for this fixture (no
+	// manifest.align.judge_cmd declared), so a future fixture that DOES
+	// declare one fails loudly here instead of silently comparing a
+	// judge-carrying service against the judge-less baseline.
+	if svc := asPolicyConflictService(t, provider); svc.Deps.Primary != nil {
+		t.Fatalf("Deps.Primary = %#v, want nil for this fixture (no manifest.align.judge_cmd)", svc.Deps.Primary)
 	}
 	got, err := provider.Evaluate(context.Background(), conflictRequest)
 	if err != nil {

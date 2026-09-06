@@ -73,7 +73,7 @@ func TestCmdContextConflictFlagGrammar(t *testing.T) {
 			var stdout, stderr bytes.Buffer
 			called := false
 			code := cmdContextConflictWithFactory(tc.args, strings.NewReader(""), &stdout, &stderr,
-				func(string, policyconflict.Request) (policyconflict.VerdictProvider, error) {
+				func(context.Context, string, policyconflict.Request) (policyconflict.VerdictProvider, error) {
 					called = true
 					return nil, errors.New("must not construct")
 				})
@@ -111,7 +111,7 @@ func TestCmdContextConflictExitAndOutputMapping(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			var stdout, stderr bytes.Buffer
 			code := cmdContextConflictWithFactory([]string{"--request", requestPath}, strings.NewReader(""), &stdout, &stderr,
-				func(_ string, got policyconflict.Request) (policyconflict.VerdictProvider, error) {
+				func(_ context.Context, _ string, got policyconflict.Request) (policyconflict.VerdictProvider, error) {
 					if got.Schema != policyconflict.RequestSchema {
 						t.Fatalf("request schema = %q", got.Schema)
 					}
@@ -139,7 +139,7 @@ func TestCmdContextConflictFileStdinAndExplicitOutput(t *testing.T) {
 	root, requestPath := contextConflictFixture(t)
 	t.Chdir(root)
 	want := contextConflictResult(policyconflict.VerdictBlockedUnproven)
-	factory := func(string, policyconflict.Request) (policyconflict.VerdictProvider, error) {
+	factory := func(context.Context, string, policyconflict.Request) (policyconflict.VerdictProvider, error) {
 		return contextConflictProviderFunc(func(context.Context, policyconflict.Request) (policyconflict.Result, error) {
 			return want, nil
 		}), nil
@@ -193,7 +193,7 @@ func TestCmdContextConflictStrictRequestAndOutputFence(t *testing.T) {
 	}
 
 	providerCalls := 0
-	factory := func(string, policyconflict.Request) (policyconflict.VerdictProvider, error) {
+	factory := func(context.Context, string, policyconflict.Request) (policyconflict.VerdictProvider, error) {
 		return contextConflictProviderFunc(func(context.Context, policyconflict.Request) (policyconflict.Result, error) {
 			providerCalls++
 			return contextConflictResult(policyconflict.VerdictPass), nil
@@ -272,7 +272,7 @@ func TestCmdContextConflictOutputSymlinksRejectedBeforeProvider(t *testing.T) {
 
 	factoryCalls := 0
 	providerCalls := 0
-	factory := func(string, policyconflict.Request) (policyconflict.VerdictProvider, error) {
+	factory := func(context.Context, string, policyconflict.Request) (policyconflict.VerdictProvider, error) {
 		factoryCalls++
 		return contextConflictProviderFunc(func(context.Context, policyconflict.Request) (policyconflict.Result, error) {
 			providerCalls++
@@ -329,7 +329,7 @@ func TestCmdContextConflictOutputAncestorAliasRejected(t *testing.T) {
 
 	factoryCalls := 0
 	providerCalls := 0
-	factory := func(string, policyconflict.Request) (policyconflict.VerdictProvider, error) {
+	factory := func(context.Context, string, policyconflict.Request) (policyconflict.VerdictProvider, error) {
 		factoryCalls++
 		return contextConflictProviderFunc(func(context.Context, policyconflict.Request) (policyconflict.Result, error) {
 			providerCalls++
@@ -358,7 +358,7 @@ func TestCmdContextConflictNoPartialReportOnFailure(t *testing.T) {
 	out := filepath.Join(root, "report.json")
 	var stdout, stderr bytes.Buffer
 	code := cmdContextConflictWithFactory([]string{"--request", requestPath, "--out", out}, strings.NewReader(""), &stdout, &stderr,
-		func(string, policyconflict.Request) (policyconflict.VerdictProvider, error) {
+		func(context.Context, string, policyconflict.Request) (policyconflict.VerdictProvider, error) {
 			return contextConflictProviderFunc(func(context.Context, policyconflict.Request) (policyconflict.Result, error) {
 				return policyconflict.Result{}, &policyconflict.OperationalError{Op: "judge", Err: errors.New("failed")}
 			}), nil

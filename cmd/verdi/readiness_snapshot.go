@@ -130,7 +130,7 @@ func (b localReadinessSnapshotBuilder) Build(ctx context.Context, root, requestP
 	if providerFactory == nil {
 		providerFactory = newLocalContextConflictProvider
 	}
-	provider, err := providerFactory(root, conflictRequest)
+	provider, err := providerFactory(ctx, root, conflictRequest)
 	if err != nil {
 		return readinesspilot.Snapshot{}, fmt.Errorf("building readiness snapshot: constructing policy-conflict provider: %w", err)
 	}

@@ -18,7 +18,7 @@ import (
 	"github.com/jyang234/verdi/internal/store"
 )
 
-type contextConflictProviderFactory func(string, policyconflict.Request) (policyconflict.VerdictProvider, error)
+type contextConflictProviderFactory func(context.Context, string, policyconflict.Request) (policyconflict.VerdictProvider, error)
 
 // cmdContextConflict exposes the one Task-9 evaluator as a read-only CLI
 // inspection surface. Dependency construction stays behind a narrow factory
@@ -29,6 +29,7 @@ func cmdContextConflict(args []string, stdin io.Reader, stdout, stderr io.Writer
 }
 
 func cmdContextConflictWithFactory(args []string, stdin io.Reader, stdout, stderr io.Writer, factory contextConflictProviderFactory) int {
+	ctx := context.Background()
 	requestArg, hasRequest, outArg, hasOut, rest, err := extractContextCompileFlags(args)
 	if err != nil {
 		fmt.Fprintln(stderr, "context conflict:", err)
@@ -88,7 +89,7 @@ func cmdContextConflictWithFactory(args []string, stdin io.Reader, stdout, stder
 		printContextCommandDiagnostic(stderr, "conflict", root, errors.New("provider factory is nil"))
 		return 2
 	}
-	provider, err := factory(root, request)
+	provider, err := factory(ctx, root, request)
 	if err != nil {
 		printContextCommandDiagnostic(stderr, "conflict", root, err)
 		return 2
@@ -98,7 +99,7 @@ func cmdContextConflictWithFactory(args []string, stdin io.Reader, stdout, stder
 		return 2
 	}
 
-	result, err := provider.Evaluate(context.Background(), request)
+	result, err := provider.Evaluate(ctx, request)
 	if err != nil {
 		printContextCommandDiagnostic(stderr, "conflict", root, err)
 		if policyconflict.IsNotAdopted(err) {
@@ -178,7 +179,7 @@ func contextConflictManagedProjectionPaths(root string) ([]string, error) {
 	return paths, nil
 }
 
-func newLocalContextConflictProvider(root string, request policyconflict.Request) (policyconflict.VerdictProvider, error) {
+func newLocalContextConflictProvider(ctx context.Context, root string, request policyconflict.Request) (policyconflict.VerdictProvider, error) {
 	manifest, err := loadManifest(root)
 	if err != nil {
 		return nil, err
@@ -199,7 +200,7 @@ func newLocalContextConflictProvider(root string, request policyconflict.Request
 			Runner:  contextConflictJudgeRunner{delegate: align.ExecJudgeRunner{}},
 		}
 	}
-	actors, err := resolveConflictActors(root)
+	actors, err := resolveConflictActors(ctx, root)
 	if err != nil {
 		return nil, err
 	}
@@ -226,7 +227,7 @@ func newLocalContextConflictProvider(root string, request policyconflict.Request
 // profile-resolution failure (a present-but-incomplete or malformed
 // store) propagates as an operational error, matching what Evaluate would
 // eventually report for the same store anyway.
-func resolveConflictActors(root string) ([]governanceprincipal.PrincipalResolution, error) {
+func resolveConflictActors(ctx context.Context, root string) ([]governanceprincipal.PrincipalResolution, error) {
 	policyStore, err := policyauthority.Load(root)
 	if err != nil {
 		if errors.Is(err, policyauthority.ErrNotAdopted) {
@@ -238,7 +239,7 @@ func resolveConflictActors(root string) ([]governanceprincipal.PrincipalResoluti
 	if err != nil {
 		return nil, err
 	}
-	return resolveLocalActors(context.Background(), root, profile)
+	return resolveLocalActors(ctx, root, profile)
 }
 
 func contextConflictRequestAdapter(request policyconflict.Request) contextcompile.AdapterRef {

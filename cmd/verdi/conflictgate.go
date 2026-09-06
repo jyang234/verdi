@@ -239,7 +239,7 @@ func validatedConflictRequestPath(root, requestPath string) (string, error) {
 type localLifecycleConflictProvider struct{ root string }
 
 func (p localLifecycleConflictProvider) Evaluate(ctx context.Context, request policyconflict.Request) (policyconflict.Result, error) {
-	provider, err := newLocalContextConflictProvider(p.root, request)
+	provider, err := newLocalContextConflictProvider(ctx, p.root, request)
 	if err != nil {
 		return policyconflict.Result{}, err
 	}
