@@ -1092,6 +1092,77 @@ func TestClaudeAdapterParityContract_Behavioral(t *testing.T) {
 		}
 	})
 
+	// SI-182's other half: a tolerated member is NEVER READ. The result
+	// detail is rebuilt from the typed decode, so a clean frame's projection
+	// is byte-identical to the passthrough it replaced — this row is the
+	// byte-identity ratchet the "never read" rebuild must not disturb.
+	t.Run("clean_result_detail_is_an_exact_literal", func(t *testing.T) {
+		launch, envRoot := claudeTestLaunch(t, sealedexec.ActionStart)
+		result := runClaudeLinesToTerminal(t, launch, envRoot,
+			claudeInitLine("s1", launch.Workspace.Path), claudeResultLine("s1", "success", false))
+		assertClaudeResultDetail(t, result, claudeCleanResultDetail)
+	})
+
+	// SI-182: an unknown member of the result frame's usage object is
+	// recorded and its value never reaches the detail or the hashed digest.
+	// The whole detail is asserted, so the member's absence is proven, not
+	// sampled: 4242 appears nowhere.
+	t.Run("result_never_projects_a_tolerated_usage_member", func(t *testing.T) {
+		launch, envRoot := claudeTestLaunch(t, sealedexec.ActionStart)
+		line := strings.Replace(claudeResultLine("s1", "success", false),
+			`"output_tokens":1}`, `"output_tokens":1,"server_tool_use":{"web_search_requests":4242}}`, 1)
+		result := runClaudeLinesToTerminal(t, launch, envRoot, claudeInitLine("s1", launch.Workspace.Path), line)
+		assertClaudeResultDetail(t, result,
+			`{"duration_api_ms":9,"duration_ms":10,"family":"result","is_error":false,"num_turns":1,`+
+				`"permission_denials":[],"result":"done","subtype":"success","total_cost_usd":0.001,`+
+				`"unknown-foreign-member":["usage.server_tool_use"],`+
+				`"usage":{"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"input_tokens":1,"output_tokens":1}}`)
+	})
+
+	// The same for an unknown member of a permission-denial row: the row is
+	// rebuilt from its three accepted members, so the foreign value cannot
+	// ride along.
+	t.Run("result_never_projects_a_tolerated_permission_denial_member", func(t *testing.T) {
+		launch, envRoot := claudeTestLaunch(t, sealedexec.ActionStart)
+		line := strings.Replace(claudeResultLine("s1", "success", false), `"permission_denials":[]`,
+			`"permission_denials":[{"tool_name":"Bash","tool_use_id":"call_9","tool_input":{"command":"ls"},"future_row_key":"leaked-7777"}]`, 1)
+		result := runClaudeLinesToTerminal(t, launch, envRoot, claudeInitLine("s1", launch.Workspace.Path), line)
+		assertClaudeResultDetail(t, result,
+			`{"duration_api_ms":9,"duration_ms":10,"family":"result","is_error":false,"num_turns":1,`+
+				`"permission_denials":[{"tool_input":{"command":"ls"},"tool_name":"Bash","tool_use_id":"call_9"}],`+
+				`"result":"done","subtype":"success","total_cost_usd":0.001,`+
+				`"unknown-foreign-member":["permission_denials.future_row_key"],`+
+				`"usage":{"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"input_tokens":1,"output_tokens":1}}`)
+	})
+
+	// And for the per-model usage object: modelUsage is rebuilt from the one
+	// accepted model key and its typed usage.
+	t.Run("result_never_projects_a_tolerated_model_usage_member", func(t *testing.T) {
+		launch, envRoot := claudeTestLaunch(t, sealedexec.ActionStart)
+		line := strings.Replace(claudeResultLine("s1", "success", false), `,"permission_denials":[]`,
+			`,"permission_denials":[],"modelUsage":{"claude-opus-5-test":{"input_tokens":1,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":1,"costUSD":9999}}`, 1)
+		result := runClaudeLinesToTerminal(t, launch, envRoot, claudeInitLine("s1", launch.Workspace.Path), line)
+		assertClaudeResultDetail(t, result,
+			`{"duration_api_ms":9,"duration_ms":10,"family":"result","is_error":false,`+
+				`"modelUsage":{"claude-opus-5-test":{"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"input_tokens":1,"output_tokens":1}},`+
+				`"num_turns":1,"permission_denials":[],"result":"done","subtype":"success","total_cost_usd":0.001,`+
+				`"unknown-foreign-member":["modelUsage.claude-opus-5-test.costUSD"],`+
+				`"usage":{"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"input_tokens":1,"output_tokens":1}}`)
+	})
+
+	// An accepted optional member of the known usage shape still survives the
+	// rebuild: "never read" applies to unknown members, not to §5's own.
+	t.Run("result_projects_the_accepted_optional_service_tier", func(t *testing.T) {
+		launch, envRoot := claudeTestLaunch(t, sealedexec.ActionStart)
+		line := strings.Replace(claudeResultLine("s1", "success", false),
+			`"output_tokens":1}`, `"output_tokens":1,"service_tier":"priority"}`, 1)
+		result := runClaudeLinesToTerminal(t, launch, envRoot, claudeInitLine("s1", launch.Workspace.Path), line)
+		assertClaudeResultDetail(t, result,
+			`{"duration_api_ms":9,"duration_ms":10,"family":"result","is_error":false,"num_turns":1,`+
+				`"permission_denials":[],"result":"done","subtype":"success","total_cost_usd":0.001,`+
+				`"usage":{"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"input_tokens":1,"output_tokens":1,"service_tier":"priority"}}`)
+	})
+
 	t.Run("assistant_rejects_missing_usage", func(t *testing.T) {
 		launch, envRoot := claudeTestLaunch(t, sealedexec.ActionStart)
 		bad := `{"type":"assistant","session_id":"s1","uuid":"mu","message":{"id":"msg_1","type":"message","role":"assistant","model":"claude-opus-5-test","content":[{"type":"text","text":"hi"}]}}`
@@ -2889,6 +2960,33 @@ const claudeInitSummaryDetail = `{"family":"system/init","mcp_servers":[{"name":
 
 // Amendment 003 ratchet: the digest of the exact two-row init projection above.
 const claudeInitSummaryDigest = "sha256:46dcd234620ebd3679a7c82a9a2de8e58f7e73aa542f2814e941d5473a9cb195"
+
+// claudeCleanResultDetail is §5's exact terminal-result detail source for
+// claudeResultLine("s1", "success", false) with no unknown member anywhere.
+// SI-182's rebuild of usage / permission_denials / modelUsage from the typed
+// decode must leave these bytes untouched.
+const claudeCleanResultDetail = `{"duration_api_ms":9,"duration_ms":10,"family":"result","is_error":false,"num_turns":1,"permission_denials":[],"result":"done","subtype":"success","total_cost_usd":0.001,"usage":{"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"input_tokens":1,"output_tokens":1}}`
+
+// assertClaudeResultDetail proves the terminal-result detail is exactly want
+// and that both the payload's hashed summary digest and the detail's own
+// digest are SHA-256 over those same bytes. Anything absent from want was
+// therefore neither projected nor hashed.
+func assertClaudeResultDetail(t *testing.T, result sealedexec.AdapterResult, want string) {
+	t.Helper()
+	summary := claudeFindProviderSummary(t, result.Observations, "terminal-result")
+	if got := string(summary.ForeignDetail.RedactedJSON); got != want {
+		t.Fatalf("result detail = %s, want %s", got, want)
+	}
+	payload, ok := summary.Payload.(*contextevent.ProviderSummaryPayload)
+	if !ok {
+		t.Fatalf("terminal summary payload = %#v, want a provider-summary payload", summary.Payload)
+	}
+	digest := claudeTestDigest([]byte(want))
+	if payload.SummaryDigest != digest || summary.ForeignDetail.Digest != digest {
+		t.Fatalf("summary digest = %q, detail digest = %q, want %q over the exact detail bytes",
+			payload.SummaryDigest, summary.ForeignDetail.Digest, digest)
+	}
+}
 
 // claudeMalformedFrameRawDigest is SHA-256 over the exact discarded frame
 // `{not-json SENTINEL-FOREIGN-BYTES}`.

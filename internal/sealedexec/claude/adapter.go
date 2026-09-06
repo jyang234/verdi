@@ -1125,32 +1125,47 @@ func validUniqueStrings(values *[]string) bool {
 	return true
 }
 
-// validateUsage proves §5's exact nonnegative-integer usage object. object is
-// the same usage value already parsed by DecodeUniqueJSONObject (nil when the
-// caller could not locate it), used only to tolerate and record — under
-// prefix, into set — a member absent from the known usage shape; its value is
-// never read (SI-182).
-func validateUsage(raw *json.RawMessage, object map[string]any, prefix string, set *unknownMemberSet) string {
+// validateUsage proves §5's exact nonnegative-integer usage object and
+// returns its exact projection. object is the same usage value already parsed
+// by DecodeUniqueJSONObject (nil when the caller could not locate it), used
+// only to tolerate and record — under prefix, into set — a member absent from
+// the known usage shape; its value is never read (SI-182).
+//
+// The projection is rebuilt from the typed decode rather than passed through
+// from the frame bytes, which is the other half of "never read": a tolerated
+// member cannot reach a projected detail or the digest taken over it.
+func validateUsage(raw *json.RawMessage, object map[string]any, prefix string, set *unknownMemberSet) (map[string]any, string) {
 	if raw == nil {
-		return "missing-foreign-field"
+		return nil, "missing-foreign-field"
 	}
 	var usage claudeUsage
 	if err := json.Unmarshal(*raw, &usage); err != nil {
-		return "invalid-foreign-field"
+		return nil, "invalid-foreign-field"
 	}
 	if usage.InputTokens == nil || usage.CacheCreationInputTokens == nil ||
 		usage.CacheReadInputTokens == nil || usage.OutputTokens == nil {
-		return "missing-foreign-field"
+		return nil, "missing-foreign-field"
 	}
 	if usage.ServiceTier != nil {
 		switch *usage.ServiceTier {
 		case "standard", "priority", "batch":
 		default:
-			return "invalid-foreign-field"
+			return nil, "invalid-foreign-field"
 		}
 	}
 	scanKnownObject(object, claudeUsageFields, prefix, set)
-	return ""
+	projected := map[string]any{
+		"cache_creation_input_tokens": *usage.CacheCreationInputTokens,
+		"cache_read_input_tokens":     *usage.CacheReadInputTokens,
+		"input_tokens":                *usage.InputTokens,
+		"output_tokens":               *usage.OutputTokens,
+	}
+	// §5's one optional accepted member: present in the projection exactly
+	// when the frame carried it, so a frame without it keeps its bytes.
+	if usage.ServiceTier != nil {
+		projected["service_tier"] = *usage.ServiceTier
+	}
+	return projected, ""
 }
 
 // ---------------------------------------------------------------------------
@@ -1401,7 +1416,9 @@ func (r *claudeActiveRun) handleAssistant(ctx context.Context, line []byte, obje
 		return r.decodeFailure(ctx, seq, "model-mismatch", nil)
 	}
 	usageObject, _ := messageObject["usage"].(map[string]any)
-	if reason := validateUsage(message.Usage, usageObject, "message.usage.", &unknown); reason != "" {
+	// The assistant detail projects no usage, so only the proof and the
+	// SI-182 recording are wanted here.
+	if _, reason := validateUsage(message.Usage, usageObject, "message.usage.", &unknown); reason != "" {
 		return r.decodeFailure(ctx, seq, reason, map[string]any{"field": "message.usage"})
 	}
 
@@ -1793,7 +1810,8 @@ func (r *claudeActiveRun) handleResult(ctx context.Context, line []byte, object 
 		return r.decodeFailure(ctx, seq, "invalid-foreign-field", map[string]any{"field": "total_cost_usd"})
 	}
 	usageObject, _ := object["usage"].(map[string]any)
-	if reason := validateUsage(frame.Usage, usageObject, "usage.", &unknown); reason != "" {
+	usageProjection, reason := validateUsage(frame.Usage, usageObject, "usage.", &unknown)
+	if reason != "" {
 		return r.decodeFailure(ctx, seq, reason, map[string]any{"field": "usage"})
 	}
 	var denials []claudePermissionDenial
@@ -1803,11 +1821,21 @@ func (r *claudeActiveRun) handleResult(ctx context.Context, line []byte, object 
 	if denials == nil {
 		return r.decodeFailure(ctx, seq, "invalid-foreign-field", map[string]any{"field": "permission_denials"})
 	}
+	// SI-182: every projected row is rebuilt from the accepted members of the
+	// typed decode, so a tolerated unknown member of a denial row is recorded
+	// and nothing more — it never rides into the detail or its digest.
+	denialRows := make([]map[string]any, 0, len(denials))
 	for _, denial := range denials {
 		if denial.ToolName == nil || denial.ToolUseID == nil || denial.ToolInput == nil {
 			return r.decodeFailure(ctx, seq, "missing-foreign-field", map[string]any{"field": "permission_denials"})
 		}
+		denialRows = append(denialRows, map[string]any{
+			"tool_input":  json.RawMessage(*denial.ToolInput),
+			"tool_name":   *denial.ToolName,
+			"tool_use_id": *denial.ToolUseID,
+		})
 	}
+	var modelUsageProjection map[string]any
 	if frame.ModelUsage != nil {
 		var modelUsage map[string]json.RawMessage
 		if err := json.Unmarshal(*frame.ModelUsage, &modelUsage); err != nil {
@@ -1821,9 +1849,11 @@ func (r *claudeActiveRun) handleResult(ctx context.Context, line []byte, object 
 		perModelObject, _ := modelUsageObject[r.launch.Profile.Model].(map[string]any)
 		// The member lives at modelUsage.<model>.<key>, so the recorded path
 		// names that level and not a nonexistent modelUsage.<key>.
-		if reason := validateUsage(&usage, perModelObject, "modelUsage."+r.launch.Profile.Model+".", &unknown); reason != "" {
+		perModel, reason := validateUsage(&usage, perModelObject, "modelUsage."+r.launch.Profile.Model+".", &unknown)
+		if reason != "" {
 			return r.decodeFailure(ctx, seq, reason, map[string]any{"field": "modelUsage"})
 		}
+		modelUsageProjection = map[string]any{r.launch.Profile.Model: perModel}
 	}
 
 	r.mu.Lock()
@@ -1834,20 +1864,28 @@ func (r *claudeActiveRun) handleResult(ctx context.Context, line []byte, object 
 		return r.decodeFailure(ctx, seq, "session-mismatch", nil)
 	}
 
+	// SI-182: usage, permission_denials and modelUsage are the projection's
+	// three object-shaped members, so each is placed from the rebuilt typed
+	// value above rather than from the frame bytes. Passing the raw bytes
+	// through would project and hash the very members the walk just recorded
+	// as unknown, which is the half of SI-182 that says they are never read.
+	// total_cost_usd stays raw: it decoded as a bare float64, so it has no
+	// members that could hide one, and its verbatim numeric form is
+	// deliberately preserved.
 	projection := map[string]any{
 		"duration_api_ms":    *frame.DurationAPIMS,
 		"duration_ms":        *frame.DurationMS,
 		"family":             "result",
 		"is_error":           *frame.IsError,
 		"num_turns":          *frame.NumTurns,
-		"permission_denials": json.RawMessage(*frame.PermissionDenials),
+		"permission_denials": denialRows,
 		"result":             *frame.Result,
 		"subtype":            *frame.Subtype,
 		"total_cost_usd":     json.RawMessage(*frame.TotalCostUSD),
-		"usage":              json.RawMessage(*frame.Usage),
+		"usage":              usageProjection,
 	}
-	if frame.ModelUsage != nil {
-		projection["modelUsage"] = json.RawMessage(*frame.ModelUsage)
+	if modelUsageProjection != nil {
+		projection["modelUsage"] = modelUsageProjection
 	}
 	attachUnknownMemberWitness(projection, r.runNewUnknownMembers(unknown.sorted()))
 	detail, err := r.processDetail(ctx, projection, protectedValues)
