@@ -461,6 +461,10 @@ type fakeClaudeSpec struct {
 	// bigText makes the assistant text exceed the fixed inline detail ceiling,
 	// so its projected detail must become a durable controller segment.
 	bigText bool
+	// versionSuffix makes the fake's --version probe line print the SI-181
+	// product suffix (" (Claude Code)") after version instead of the bare
+	// version alone.
+	versionSuffix bool
 }
 
 const fakeClaudeSource = `package main
@@ -490,6 +494,8 @@ const (
 	extraTool = __EXTRA__
 	doCommit  = __COMMIT__
 	bigText   = __BIGTEXT__
+	// versionSuffix selects the SI-181 " (Claude Code)" probe suffix.
+	versionSuffix = __VERSIONSUFFIX__
 )
 
 func main() {
@@ -502,7 +508,11 @@ func main() {
 func run() error {
 	args := os.Args[1:]
 	if len(args) == 1 && args[0] == "--version" {
-		fmt.Println(version)
+		if versionSuffix {
+			fmt.Println(version + " (Claude Code)")
+		} else {
+			fmt.Println(version)
+		}
 		return nil
 	}
 	if err := os.WriteFile(argvPath, []byte(strings.Join(args, "\n")+"\n"), 0o644); err != nil {
@@ -811,6 +821,7 @@ func buildFakeClaude(t *testing.T, dir string, spec fakeClaudeSpec) string {
 		"__EXTRA__", strconv.Quote(spec.extraTool),
 		"__COMMIT__", strconv.FormatBool(spec.commit),
 		"__BIGTEXT__", strconv.FormatBool(spec.bigText),
+		"__VERSIONSUFFIX__", strconv.FormatBool(spec.versionSuffix),
 	).Replace(fakeClaudeSource)
 	moduleDir := filepath.Join(dir, "fake-claude-src")
 	if err := os.MkdirAll(moduleDir, 0o755); err != nil {
@@ -867,6 +878,10 @@ type claudeLifecycleOptions struct {
 	// shared flight state therefore moves to the child revision mid-run and
 	// every terminal artifact must bind that revision.
 	approvedContext bool
+	// claudeCodeSuffix makes the fake provider's --version probe line carry
+	// the SI-181 " (Claude Code)" product suffix after the adapter version
+	// instead of the bare version; the sealed launch must still succeed.
+	claudeCodeSuffix bool
 }
 
 // serveWithAcknowledgedExpansionLedger runs the shared lifecycle controller
@@ -1029,7 +1044,7 @@ func runClaudeSealedLifecycle(t *testing.T, bin string, options claudeLifecycleO
 		version: fixture.request.AdapterVersion, model: claudeE2EModel, session: claudeE2ESession,
 		argvPath: argvPath, envPath: envPath, stdinPath: stdinPath, toolsPath: toolsPath,
 		gitPath: gitPath, workspace: workspacePath, extraTool: options.extraTool, commit: true,
-		bigText: options.oversizedDetail,
+		bigText: options.oversizedDetail, versionSuffix: options.claudeCodeSuffix,
 	})
 	if built != claudePath {
 		t.Fatalf("fake claude built at %q, want the granted argv0 %q", built, claudePath)
@@ -1317,6 +1332,14 @@ func TestClaudeBuiltBinaryLifecycle_Behavioral(t *testing.T) {
 		assertClaudeAssemblySurface(t, run)
 		assertClaudeSuccessfulLifecycle(t, run)
 		assertClaudeChildRevisionBinding(t, run)
+	})
+
+	// SI-181: Amendment 002 §3 (as annotated 2026-09-06) also accepts a probe
+	// line carrying the real Claude Code CLI's exact product suffix; the
+	// sealed launch must proceed identically to the bare-form probe above.
+	t.Run("sealed_start_accepts_the_claude_code_suffixed_version_probe", func(t *testing.T) {
+		run := runClaudeSealedLifecycle(t, bin, claudeLifecycleOptions{claudeCodeSuffix: true})
+		assertClaudeSuccessfulLifecycle(t, run)
 	})
 
 	// Amendment 003: every sealed session resolves exactly one ATC-owned claim
