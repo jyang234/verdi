@@ -164,6 +164,16 @@ func blockingCompilerDisclosure(code DisclosureCode) bool {
 		contextcompile.DisclosureReviewEvidenceBundleUnproven,
 		contextcompile.DisclosureReviewBuilderReceiptUnproven:
 		return true
+	case DisclosureLocalOperatorAsserted:
+		// Non-blocking by design (2026-09-05 local-operator disposition
+		// design §2.2): a local-operator resolution is a disclosed
+		// self-assertion, not a proof gap — the report's own disclosure
+		// says so on every row that relies on it, which is exactly the
+		// strength the design intends. Named explicitly (M-2, review
+		// finding) rather than left to the default below, so the next
+		// disclosure code added here must state its own blocking/
+		// non-blocking class instead of silently inheriting one.
+		return false
 	default:
 		return false
 	}
