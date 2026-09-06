@@ -35,7 +35,23 @@ import (
 	"github.com/jyang234/verdi/internal/store"
 )
 
+// contextProjectUsage is this verb's own invocation grammar: printed for
+// --help/-h, and appended after every flag-shape diagnostic below —
+// mirroring context_resolve.go/cmdContextContract's own "always show the
+// one-line grammar" posture, which fits a verb with exactly one optional
+// flag better than context_compile.go/context_conflict.go's per-error,
+// no-banner style (reserved for their own multi-flag grammars).
+//
+// vocab:identity — CLI usage/flag grammar (identity)
+const contextProjectUsage = "usage: verdi context project [--root DIR]"
+
 // cmdContextProject implements `verdi context project [--root DIR]`.
+//
+// --help/-h is recognized anywhere in args (mirroring common CLI
+// practice: a help request wins over any other flag's own validity) and
+// answers with the usage line on stdout, exit 0 — a help request is
+// answered, not refused, so it is never routed through the flag-shape
+// error path below.
 //
 // Exit-class conventions (mirroring context_conflict.go's own mapping,
 // CLAUDE.md's 0/1/2 contract): a flag-shape error, an unusable root (no
@@ -74,18 +90,20 @@ import (
 // run would write anyway). Every error already names the offending
 // repo-relative path and component; this command only needs to relay it.
 func cmdContextProject(args []string, stdout, stderr io.Writer) int {
+	if contextProjectWantsHelp(args) {
+		fmt.Fprintln(stdout, contextProjectUsage)
+		return 0
+	}
+
 	rootFlag, hasRoot, rest, err := extractContextProjectFlags(args)
 	if err != nil {
-		fmt.Fprintln(stderr, "context project:", err)
-		return 2
+		return contextProjectFlagError(stderr, err.Error())
 	}
 	if len(rest) != 0 {
-		fmt.Fprintln(stderr, "context project: unexpected positional argument(s):", strings.Join(rest, " "))
-		return 2
+		return contextProjectFlagError(stderr, "unexpected positional argument(s): "+strings.Join(rest, " "))
 	}
 	if hasRoot && rootFlag == "" {
-		fmt.Fprintln(stderr, "context project: --root requires a value")
-		return 2
+		return contextProjectFlagError(stderr, "--root requires a value")
 	}
 
 	var root string
@@ -169,6 +187,28 @@ func contextProjectFormatResult(res *instructionprojection.Result) []byte {
 		buf.WriteByte('\n')
 	}
 	return buf.Bytes()
+}
+
+// contextProjectWantsHelp reports whether args names --help or -h
+// anywhere at all — a help request is recognized regardless of what else
+// is present or how malformed it is, matching common CLI practice.
+func contextProjectWantsHelp(args []string) bool {
+	for _, a := range args {
+		if a == "--help" || a == "-h" {
+			return true
+		}
+	}
+	return false
+}
+
+// contextProjectFlagError prints "context project: <msg>" followed by
+// this verb's own usage line, and returns the operational exit code 2 —
+// the one seam every flag-shape diagnostic below goes through, so the
+// grammar is always shown alongside the specific reason it was violated.
+func contextProjectFlagError(stderr io.Writer, msg string) int {
+	fmt.Fprintln(stderr, "context project:", msg)
+	fmt.Fprintln(stderr, contextProjectUsage)
+	return 2
 }
 
 // extractContextProjectFlags pulls --root out of args (mirroring

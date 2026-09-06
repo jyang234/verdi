@@ -245,7 +245,53 @@ func TestCmdContextProject_FlagShapeFailures(t *testing.T) {
 			if tc.wantStderr != "" && !strings.Contains(stderr.String(), tc.wantStderr) {
 				t.Fatalf("stderr = %q, want it to contain %q", stderr.String(), tc.wantStderr)
 			}
+			// Every flag-shape error also shows the usage line, matching
+			// context_resolve.go/context_contract.go's own "always show
+			// the grammar" posture for a verb this simple.
+			if !strings.Contains(stderr.String(), contextProjectUsage) {
+				t.Fatalf("stderr = %q, want it to contain the usage line %q", stderr.String(), contextProjectUsage)
+			}
 		})
+	}
+}
+
+// TestCmdContextProject_Help proves --help and -h print the usage line to
+// stdout and exit 0 (a help request is answered, not refused), regardless
+// of what else appears in args.
+func TestCmdContextProject_Help(t *testing.T) {
+	cases := []struct {
+		name string
+		args []string
+	}{
+		{"--help alone", []string{"--help"}},
+		{"-h alone", []string{"-h"}},
+		{"--help wins over other flags", []string{"--root", "whatever", "--help"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var stdout, stderr bytes.Buffer
+			got := cmdContextProject(tc.args, &stdout, &stderr)
+			if got != 0 {
+				t.Fatalf("cmdContextProject(%v) = %d, want 0; stderr=%s", tc.args, got, stderr.String())
+			}
+			if stderr.Len() != 0 {
+				t.Fatalf("stderr = %q, want empty on --help/-h", stderr.String())
+			}
+			if stdout.String() != contextProjectUsage+"\n" {
+				t.Fatalf("stdout = %q, want exactly the usage line %q", stdout.String(), contextProjectUsage+"\n")
+			}
+		})
+	}
+}
+
+// TestContextCompileUsage_MentionsProject proves the "verdi context"
+// namespace's own fallback banner (shown for no subcommand or an unknown
+// one) now names "project" alongside "compile", so a caller who mistypes
+// the subcommand can discover this verb the same way they already
+// discover compile.
+func TestContextCompileUsage_MentionsProject(t *testing.T) {
+	if !strings.Contains(contextCompileUsage, "project") {
+		t.Fatalf("contextCompileUsage = %q, want it to mention project alongside compile", contextCompileUsage)
 	}
 }
 

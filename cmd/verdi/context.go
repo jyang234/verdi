@@ -38,10 +38,14 @@ import (
 )
 
 // contextCompileUsage is the exact invocation grammar the authority design
-// (§2) fixes.
+// (§2) fixes, shown as the "verdi context" namespace's own fallback
+// banner (cmdContext's no-subcommand and unknown-subcommand cases below)
+// alongside context_project.go's own contextProjectUsage, so a caller who
+// mistypes the subcommand can discover project the same way they already
+// discover compile.
 //
 // vocab:identity — CLI usage/flag grammar (identity)
-const contextCompileUsage = "usage: verdi context compile --request <path|-> [--out <path>]"
+const contextCompileUsage = "usage: verdi context compile --request <path|-> [--out <path>]\n       verdi context project [--root DIR]"
 
 // cmdContext dispatches `verdi context <subcommand>`. The namespace exposes
 // the read-only "compile" and "conflict" inspection surfaces; any other
