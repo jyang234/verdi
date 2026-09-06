@@ -36,6 +36,21 @@ func initRepo(t *testing.T) string {
 	return dir
 }
 
+// populateGitGlobalConfig points the global scope at a temp file that
+// really does configure user.email — the standard developer machine, and
+// exactly what internal/fixturegit and cmd/e2eharness provision. Unlike
+// isolateGitConfig it does NOT hide the global scope: the tests using it
+// prove ConfigValue ignores that scope on purpose.
+func populateGitGlobalConfig(t *testing.T, email string) {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "gitconfig-global")
+	if err := os.WriteFile(path, []byte("[user]\n\temail = "+email+"\n"), 0o644); err != nil {
+		t.Fatalf("writing global git config (test setup): %v", err)
+	}
+	t.Setenv("GIT_CONFIG_GLOBAL", path)
+	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
+}
+
 // setConfig sets user.email to value with one `git config` invocation.
 func setConfig(value string) func(*testing.T, string) {
 	return func(t *testing.T, dir string) {
@@ -65,7 +80,13 @@ func addConfig(values ...string) func(*testing.T, string) {
 // tests below.
 func TestConfigValue_ValueShapes(t *testing.T) {
 	tests := []struct {
-		name  string
+		name string
+		// globalEmail, when nonempty, configures user.email in the GLOBAL
+		// scope before the repository is created; empty hides the global
+		// scope entirely.
+		globalEmail string
+		// setup configures the repository (local) scope; nil leaves it
+		// unset.
 		setup func(*testing.T, string)
 		// want is the exact value expected when no error is expected.
 		want string
@@ -100,16 +121,45 @@ func TestConfigValue_ValueShapes(t *testing.T) {
 			// `git config --get` silently returns the LAST of several
 			// values. For an authorization input that is a wrong answer
 			// dressed as a right one, so ConfigValue refuses instead.
-			name:        "multiple values are ambiguous",
+			// Genuinely ambiguous: both values are in .git/config.
+			name:        "multiple local values are ambiguous",
 			setup:       addConfig("a@example.com", "b@example.com"),
 			wantErrSubs: []string{"user.email", "ambiguous"},
+		},
+		{
+			// The standard developer machine: a global identity plus a
+			// repository override. The store's own declaration wins, and
+			// the two scopes are never mistaken for two values of one key.
+			name:        "global set and local set returns the local value",
+			globalEmail: "global@example.com",
+			setup:       setConfig("local@example.com"),
+			want:        "local@example.com",
+		},
+		{
+			// The checkout declares no identity of its own. The machine's
+			// identity is not the store's, so this is the unset state.
+			name:        "global set and local absent is unset",
+			globalEmail: "global@example.com",
+			wantUnset:   true,
+		},
+		{
+			name:        "global set and local empty is unset",
+			globalEmail: "global@example.com",
+			setup:       setConfig(""),
+			wantUnset:   true,
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			isolateGitConfig(t)
+			if tt.globalEmail == "" {
+				isolateGitConfig(t)
+			} else {
+				populateGitGlobalConfig(t, tt.globalEmail)
+			}
 			dir := initRepo(t)
-			tt.setup(t, dir)
+			if tt.setup != nil {
+				tt.setup(t, dir)
+			}
 
 			got, err := ConfigValue(context.Background(), dir, "user.email")
 			switch {
