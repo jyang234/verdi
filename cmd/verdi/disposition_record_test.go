@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/jyang234/verdi/internal/contextcompile"
 	"github.com/jyang234/verdi/internal/policyartifact"
 	"github.com/jyang234/verdi/internal/policyconflict"
 )
@@ -17,6 +18,7 @@ import (
 
 const (
 	dispositionRecordFixtureInputID         = "sha256:2222222222222222222222222222222222222222222222222222222222222222"
+	dispositionRecordFixtureTargetRef       = "spec/example-story"
 	dispositionRecordFixtureAuthorityDigest = "sha256:7777777777777777777777777777777777777777777777777777777777777777"
 	dispositionRecordFixtureClaim1ID        = "policy/example-policy#instruction-1"
 	dispositionRecordFixtureClaim1Digest    = "sha256:9999999999999999999999999999999999999999999999999999999999999999"
@@ -160,6 +162,31 @@ func withExemption(report *policyconflict.Report) {
 	}
 }
 
+// withAcceptanceCandidateTarget mutates report's Input.Target from
+// accepted-context to acceptance-candidate, naming
+// dispositionRecordFixtureTargetRef as the candidate's own ref — the one
+// report arm that DOES carry the target ref directly
+// (CandidateIdentity.Ref), letting --target be cross-checked against it
+// (controller round 2, "candidate arm mismatch ⇒ refused"). Every other
+// CandidateIdentity field is a well-formed placeholder Report.Validate
+// requires but this test does not otherwise exercise.
+func withAcceptanceCandidateTarget(report *policyconflict.Report) {
+	report.Input.Target = policyconflict.TargetIdentity{
+		Kind: policyconflict.TargetAcceptanceCandidate,
+		Candidate: &policyconflict.CandidateIdentity{
+			Ref:           dispositionRecordFixtureTargetRef,
+			Path:          "story-alpha/spec.md",
+			Branch:        "feature/story-alpha",
+			Head:          strings.Repeat("a", 40),
+			Blob:          strings.Repeat("b", 40),
+			ContentDigest: dispositionRecordFixtureAuthorityDigest,
+			Scope:         policyartifact.Scope{Phases: []string{}, Environments: []string{}, Paths: []string{}, Refs: []string{}},
+			Adapter:       contextcompile.AdapterRef{ID: "codex", Version: "1"},
+			GrantDigest:   "sha256:" + strings.Repeat("d", 64),
+		},
+	}
+}
+
 // withDuplicateSemanticRow mutates report so its Semantic slice carries
 // two rows sharing the same input_id — M-3, review finding. The two rows
 // get DIFFERENT ID values (report.semantic[].id, distinct from
@@ -215,6 +242,7 @@ func dispositionRecordBaseArgs(root, reportPath, id string) []string {
 	return []string{
 		"--report", reportPath,
 		"--row", dispositionRecordFixtureInputID,
+		"--target", dispositionRecordFixtureTargetRef,
 		"--target-digest", dispositionRecordFixtureAuthorityDigest,
 		"--conclusion", "no-conflict",
 		"--compensating-control", "Human reviewed manually; no automated judge is configured.",
@@ -315,6 +343,57 @@ func TestCmdDispositionRecord_Positive(t *testing.T) {
 	}
 }
 
+// TestCmdDispositionRecord_TargetWithParentClaims is I-1's controller
+// round-2 ruling, positive half ("story row with parent claims ⇒ accepted
+// with the story's digest"): a row carrying BOTH the target's own claim
+// AND a governing parent feature's claim (a DIFFERENT authority digest)
+// still succeeds when --target names the target's own ref and
+// --target-digest is the target's own digest — exactly the shape round
+// 1's dropped category-narrowing heuristic wrongly refused (a story's row
+// always carries its own problem/outcome AND its parent's). The written
+// witness carries ALL of the row's claims verbatim (the --target/
+// --target-digest operands only select and verify which digest counts as
+// "the target's own"; they never filter witness.claims itself).
+func TestCmdDispositionRecord_TargetWithParentClaims(t *testing.T) {
+	bin := buildVerdiBinary(t)
+	root := writeDispositionRecordStoreRoot(t)
+	reportPath := filepath.Join(root, "report.json")
+	writeTestFile(t, reportPath, mutateFixtureReport(t, withParentFeatureClaim))
+
+	args := dispositionRecordBaseArgs(root, reportPath, "target-with-parent")
+	stdout, stderr, code := runDispositionRecordBinary(t, bin, args...)
+	if code != 0 {
+		t.Fatalf("exit = %d, want 0; stdout=%s stderr=%s", code, stdout, stderr)
+	}
+
+	raw := readFile(t, filepath.Join(root, ".verdi", "policy", "dispositions", "target-with-parent.md"))
+	d, err := policyartifact.DecodeDisposition(raw)
+	if err != nil {
+		t.Fatalf("DecodeDisposition: %v", err)
+	}
+	if d.Witness.TargetDigest != dispositionRecordFixtureAuthorityDigest {
+		t.Fatalf("Witness.TargetDigest = %q, want the target's own %q (never the parent's %q)", d.Witness.TargetDigest, dispositionRecordFixtureAuthorityDigest, dispositionRecordParentFeatureDigest)
+	}
+	// All three claims (policy + the target's own + the parent's) land in
+	// the witness verbatim, sorted — the operand pair only verified WHICH
+	// one is the target's, never filtered the witness itself.
+	if len(d.Witness.Claims) != 3 {
+		t.Fatalf("Witness.Claims = %+v, want all 3 of the row's claims copied verbatim", d.Witness.Claims)
+	}
+	foundParent := false
+	for _, c := range d.Witness.Claims {
+		if c.ID == dispositionRecordParentFeatureID {
+			foundParent = true
+			if c.AuthorityDigest != dispositionRecordParentFeatureDigest {
+				t.Fatalf("parent claim AuthorityDigest = %q, want %q (untouched by target selection)", c.AuthorityDigest, dispositionRecordParentFeatureDigest)
+			}
+		}
+	}
+	if !foundParent {
+		t.Fatalf("Witness.Claims = %+v, want the parent-feature claim %q present verbatim", d.Witness.Claims, dispositionRecordParentFeatureID)
+	}
+}
+
 // TestCmdDispositionRecord_ExemptionRoundTrips is M-5 (review finding):
 // against a fixture variant whose one mechanical row names one applicable
 // exemption, the written artifact's witness.exemptions round-trips —
@@ -384,6 +463,7 @@ func TestCmdDispositionRecord_MultipleRepeatables(t *testing.T) {
 	args := []string{
 		"--report", reportPath,
 		"--row", dispositionRecordFixtureInputID,
+		"--target", dispositionRecordFixtureTargetRef,
 		"--target-digest", dispositionRecordFixtureAuthorityDigest,
 		"--conclusion", "no-conflict",
 		"--compensating-control", "First control.",
@@ -587,7 +667,7 @@ func TestCmdDispositionRecord_Refusals(t *testing.T) {
 			wantSub: "target-digest",
 		},
 		{
-			name: "target-digest: a parent-feature claim's digest is refused (I-1)",
+			name: "target-digest: a parent-feature claim's digest is refused even with the target explicitly named (I-1, controller round 2)",
 			setupRoot: func(t *testing.T) (string, string) {
 				root := writeDispositionRecordStoreRoot(t)
 				path := filepath.Join(root, "report.json")
@@ -598,20 +678,21 @@ func TestCmdDispositionRecord_Refusals(t *testing.T) {
 				args := dispositionRecordBaseArgs(root, reportPath, "x")
 				return replaceArgValue(args, "--target-digest", dispositionRecordParentFeatureDigest)
 			},
-			wantSub: "ambiguous",
+			wantSub: "does not match",
 		},
 		{
-			name: "target-digest: the target's OWN digest is also refused once a parent claim makes the row ambiguous (I-1: never guess)",
+			name: "target: an unknown ref (no claim carries it at all) is refused",
 			setupRoot: func(t *testing.T) (string, string) {
 				root := writeDispositionRecordStoreRoot(t)
 				path := filepath.Join(root, "report.json")
-				writeTestFile(t, path, mutateFixtureReport(t, withParentFeatureClaim))
+				writeTestFile(t, path, dispositionRecordFixtureReport(t))
 				return root, path
 			},
 			mutateArgs: func(root, reportPath string) []string {
-				return dispositionRecordBaseArgs(root, reportPath, "x") // uses the target's real digest
+				args := dispositionRecordBaseArgs(root, reportPath, "x")
+				return replaceArgValue(args, "--target", "spec/no-such-ref-in-this-report")
 			},
-			wantSub: "ambiguous",
+			wantSub: "--target",
 		},
 		{
 			name: "target-digest: a policy-instruction claim's digest is refused even though it is a real digest in the row (I-1)",
@@ -638,7 +719,21 @@ func TestCmdDispositionRecord_Refusals(t *testing.T) {
 			mutateArgs: func(root, reportPath string) []string {
 				return dispositionRecordBaseArgs(root, reportPath, "x")
 			},
-			wantSub: "none attributable to the target",
+			wantSub: "the target contributes no claim to this row",
+		},
+		{
+			name: "target: acceptance-candidate arm mismatch is refused",
+			setupRoot: func(t *testing.T) (string, string) {
+				root := writeDispositionRecordStoreRoot(t)
+				path := filepath.Join(root, "report.json")
+				writeTestFile(t, path, mutateFixtureReport(t, withAcceptanceCandidateTarget))
+				return root, path
+			},
+			mutateArgs: func(root, reportPath string) []string {
+				args := dispositionRecordBaseArgs(root, reportPath, "x")
+				return replaceArgValue(args, "--target", "spec/some-other-ref")
+			},
+			wantSub: "--target",
 		},
 		{
 			name: "malformed --id: not a single kebab-case path component (M-2)",
@@ -920,66 +1015,59 @@ func TestTargetClaimAuthorityDigests(t *testing.T) {
 		name      string
 		claims    []policyartifact.SemanticClaimWitness
 		targetRef string
-		haveRef   bool
 		want      []string
 	}{
 		{
-			name: "haveRef: exact ref match excludes policy/parent claims even when categories overlap",
+			name: "exact ref match excludes policy/parent claims even when categories overlap",
 			claims: []policyartifact.SemanticClaimWitness{
 				{ID: "policy/p#instruction-1", Category: "policy-instruction", AuthorityDigest: digestC},
 				{ID: "spec/parent-feature#outcome", Category: "spec-outcome", AuthorityDigest: digestB},
 				{ID: "spec/story-alpha#ac-1", Category: "acceptance-criterion", AuthorityDigest: digestA},
 			},
-			targetRef: "spec/story-alpha", haveRef: true,
-			want: []string{digestA},
+			targetRef: "spec/story-alpha",
+			want:      []string{digestA},
 		},
 		{
-			name: "haveRef: no claim matches the target ref",
+			name: "the target's row ALSO carries its governing parent's claims (the real spike/story shape): still narrows to the target's own digest alone",
+			claims: []policyartifact.SemanticClaimWitness{
+				{ID: "spec/parent-feature#outcome", Category: "spec-outcome", AuthorityDigest: digestB},
+				{ID: "spec/parent-feature#problem", Category: "spec-problem", AuthorityDigest: digestB},
+				{ID: "spec/story-alpha#ac-1", Category: "acceptance-criterion", AuthorityDigest: digestA},
+				{ID: "spec/story-alpha#outcome", Category: "spec-outcome", AuthorityDigest: digestA},
+				{ID: "spec/story-alpha#problem", Category: "spec-problem", AuthorityDigest: digestA},
+			},
+			targetRef: "spec/story-alpha",
+			want:      []string{digestA},
+		},
+		{
+			name: "no claim matches the target ref",
 			claims: []policyartifact.SemanticClaimWitness{
 				{ID: "spec/parent-feature#outcome", Category: "spec-outcome", AuthorityDigest: digestB},
 			},
-			targetRef: "spec/story-alpha", haveRef: true,
-			want: []string{},
+			targetRef: "spec/story-alpha",
+			want:      []string{},
 		},
 		{
-			name: "haveRef: obligation-declaration id (no '#') never matches a spec ref",
+			name: "obligation-declaration id (no '#') never matches a spec ref",
 			claims: []policyartifact.SemanticClaimWitness{
 				{ID: "obligation/story-alpha--ac-1--behavioral", Category: "obligation-declaration", AuthorityDigest: digestC},
 			},
-			targetRef: "spec/story-alpha", haveRef: true,
-			want: []string{},
+			targetRef: "spec/story-alpha",
+			want:      []string{},
 		},
 		{
-			name: "!haveRef: category narrowing alone, single remaining digest is unambiguous",
+			name: "the target's own claims disagreeing with each other is a genuine inconsistency: both digests remain (caller must refuse on len>1)",
 			claims: []policyartifact.SemanticClaimWitness{
-				{ID: "policy/p#instruction-1", Category: "policy-instruction", AuthorityDigest: digestC},
-				{ID: "obligation/story-alpha--ac-1--behavioral", Category: "obligation-declaration", AuthorityDigest: digestC},
 				{ID: "spec/story-alpha#ac-1", Category: "acceptance-criterion", AuthorityDigest: digestA},
+				{ID: "spec/story-alpha#outcome", Category: "spec-outcome", AuthorityDigest: digestB},
 			},
-			haveRef: false,
-			want:    []string{digestA},
-		},
-		{
-			name: "!haveRef: a governing parent's spec-shaped claim is indistinguishable by category, so both digests remain (caller must refuse on len>1)",
-			claims: []policyartifact.SemanticClaimWitness{
-				{ID: "spec/parent-feature#outcome", Category: "spec-outcome", AuthorityDigest: digestB},
-				{ID: "spec/story-alpha#ac-1", Category: "acceptance-criterion", AuthorityDigest: digestA},
-			},
-			haveRef: false,
-			want:    []string{digestA, digestB}, // sorted
-		},
-		{
-			name: "!haveRef: only non-spec categories present yields none",
-			claims: []policyartifact.SemanticClaimWitness{
-				{ID: "policy/p#instruction-1", Category: "policy-instruction", AuthorityDigest: digestC},
-			},
-			haveRef: false,
-			want:    []string{},
+			targetRef: "spec/story-alpha",
+			want:      []string{digestA, digestB}, // sorted
 		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			got := targetClaimAuthorityDigests(tc.claims, tc.targetRef, tc.haveRef)
+			got := targetClaimAuthorityDigests(tc.claims, tc.targetRef)
 			if len(got) != len(tc.want) {
 				t.Fatalf("targetClaimAuthorityDigests() = %v, want %v", got, tc.want)
 			}

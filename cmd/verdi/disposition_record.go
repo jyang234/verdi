@@ -1,10 +1,10 @@
-// verdi disposition record --report PATH --row INPUT_ID --target-digest
-// DIGEST --conclusion no-conflict|conflict --compensating-control TEXT
-// [--compensating-control TEXT ...] --expiry DATE --approver
-// ROLE=PRINCIPAL_ID [--approver ROLE=PRINCIPAL_ID ...] --id NAME --title
-// TEXT --owner TEXT [--owner TEXT ...] [--root DIR]
+// verdi disposition record --report PATH --row INPUT_ID --target REF
+// --target-digest DIGEST --conclusion no-conflict|conflict
+// --compensating-control TEXT [--compensating-control TEXT ...] --expiry
+// DATE --approver ROLE=PRINCIPAL_ID [--approver ROLE=PRINCIPAL_ID ...]
+// --id NAME --title TEXT --owner TEXT [--owner TEXT ...] [--root DIR]
 // (Task 3, docs/superpowers/specs/2026-09-05-local-operator-disposition-
-// design.md §2.3; ledger SI-178):
+// design.md §2.3; ledger SI-178, SI-180):
 //
 // Records a human's ruling over a kernel-printed policy-conflict witness as
 // one `policy-disposition` artifact. It selects the semantic row named by
@@ -24,30 +24,46 @@
 // specification file: every value not already present in --report comes
 // only from an operand.
 //
-// --target-digest is this file's one disclosed deviation from the literal
-// task brief, which lists the operand set without it. The witness's
-// target_digest (authority-design §8: "both accepted context and an
-// acceptance candidate supply the target specification artifact's exact
-// content digest... The accepted manifest digest remains separately
-// bound... using it inside the disposition would recurse") is NOT, and
-// structurally cannot be, present anywhere in a persisted
-// verdi.policy-conflict-report/v1 document: SemanticEvaluation carries
-// only {id, input_id, claims, unknown_mechanicals, primary, challenger,
-// dispositions, state, reasons} (docs/superpowers/specs/2026-08-12-policy-
-// conflict-gate-authority-design.md §10, unchanged here), the accepted
-// target identity carries only the (explicitly wrong-for-this-purpose)
-// manifest digest, and AuthorityInput.TargetDigest — the actual value
+// --target and --target-digest are this file's two disclosed deviations
+// from the literal task brief, which lists the operand set without them —
+// ledgered as SI-180. The witness's target_digest (authority-design §8:
+// "both accepted context and an acceptance candidate supply the target
+// specification artifact's exact content digest... The accepted manifest
+// digest remains separately bound... using it inside the disposition
+// would recurse") is NOT, and structurally cannot be, present anywhere in
+// a persisted verdi.policy-conflict-report/v1 document for the
+// accepted-context arm: SemanticEvaluation carries only {id, input_id,
+// claims, unknown_mechanicals, primary, challenger, dispositions, state,
+// reasons} (docs/superpowers/specs/2026-08-12-policy-conflict-gate-
+// authority-design.md §10, unchanged here), the accepted target identity
+// carries only the (explicitly wrong-for-this-purpose) manifest digest,
+// and AuthorityInput.TargetDigest — the actual value
 // policyconflict.authority.go's match rule compares against — is computed
-// only in memory during evaluation and never serialized. Recomputing it
-// independently would mean reading the target spec file, which the
-// contract forbids outright, or re-running context-compile evaluation,
-// which "it evaluates nothing" forbids in spirit. The smallest reversible
-// fix is one more operand naming the value directly, cross-checked against
-// the row's own claims (refused, naming --target-digest, as "an operand
-// that would make the witness differ from the report" when the row carries
-// claims but none share the given digest) rather than accepted blind. This
-// is flagged for controller/owner review, not silently decided as settled
-// design.
+// only in memory during evaluation and never serialized there either.
+// Recomputing it independently would mean reading the target spec file,
+// which the contract forbids outright, or re-running context-compile
+// evaluation, which "it evaluates nothing" forbids in spirit.
+//
+// --target REF (a whole spec ref, e.g. spec/story-alpha) names which of
+// the selected row's claims are the target's own: those whose id's
+// "<source-ref>#<object>" source-ref segment equals REF exactly
+// (targetClaimAuthorityDigests). Round 1 tried to avoid this operand by
+// narrowing to "spec-shaped" categories and requiring exactly one
+// remaining digest when the report supplied no ref — WRONG (controller
+// adjudication, round 2): a story's row always carries its own
+// problem/outcome claims AND its governing parent feature's, i.e. TWO
+// distinct spec-shaped digests, so that heuristic refused precisely the
+// case this verb exists for (the spike's own story-alpha row: 5 claims
+// over 2 digests). --target is required for both report arms; for the
+// acceptance-candidate arm it is additionally cross-checked against the
+// report's own CandidateIdentity.Ref (refused, naming --target, on
+// mismatch) since that arm CAN supply the ref directly.
+// --target-digest DIGEST must then equal the authority_digest the
+// target's own claims carry — refused (naming --target-digest) on
+// mismatch, and refused (naming --target) if the target's own claims
+// disagree with each other (a genuine report inconsistency) or if none
+// carry that ref at all. This is flagged for controller/owner review, not
+// silently decided as settled design.
 package main
 
 import (
@@ -67,13 +83,14 @@ import (
 	"github.com/jyang234/verdi/internal/store"
 )
 
-const dispositionRecordUsage = "disposition record: usage: verdi disposition record --report PATH --row INPUT_ID --target-digest DIGEST --conclusion no-conflict|conflict --compensating-control TEXT [--compensating-control TEXT ...] --expiry DATE --approver ROLE=PRINCIPAL_ID [--approver ROLE=PRINCIPAL_ID ...] --id NAME --title TEXT --owner TEXT [--owner TEXT ...] [--root DIR]"
+const dispositionRecordUsage = "disposition record: usage: verdi disposition record --report PATH --row INPUT_ID --target REF --target-digest DIGEST --conclusion no-conflict|conflict --compensating-control TEXT [--compensating-control TEXT ...] --expiry DATE --approver ROLE=PRINCIPAL_ID [--approver ROLE=PRINCIPAL_ID ...] --id NAME --title TEXT --owner TEXT [--owner TEXT ...] [--root DIR]"
 
 // dispositionRecordArgs is parseDispositionRecordArgs's complete, validated
 // operand set.
 type dispositionRecordArgs struct {
 	report               string
 	row                  string
+	target               string
 	targetDigest         string
 	conclusion           string
 	compensatingControls []string
@@ -119,7 +136,7 @@ func cmdDispositionRecord(args []string, stdout, stderr io.Writer) int {
 // report is read.
 func parseDispositionRecordArgs(args []string) (dispositionRecordArgs, error) {
 	var a dispositionRecordArgs
-	var hasReport, hasRow, hasTargetDigest, hasConclusion, hasExpiry, hasID, hasTitle bool
+	var hasReport, hasRow, hasTarget, hasTargetDigest, hasConclusion, hasExpiry, hasID, hasTitle bool
 
 	next := func(i int) (int, string, error) {
 		if i+1 >= len(args) {
@@ -146,6 +163,14 @@ func parseDispositionRecordArgs(args []string) (dispositionRecordArgs, error) {
 				return dispositionRecordArgs{}, err
 			}
 			a.row, hasRow = v, true
+		case "--target":
+			var v string
+			var err error
+			i, v, err = next(i)
+			if err != nil {
+				return dispositionRecordArgs{}, err
+			}
+			a.target, hasTarget = v, true
 		case "--target-digest":
 			var v string
 			var err error
@@ -234,6 +259,8 @@ func parseDispositionRecordArgs(args []string) (dispositionRecordArgs, error) {
 		return dispositionRecordArgs{}, missing("--report")
 	case !hasRow:
 		return dispositionRecordArgs{}, missing("--row")
+	case !hasTarget:
+		return dispositionRecordArgs{}, missing("--target")
 	case !hasTargetDigest:
 		return dispositionRecordArgs{}, missing("--target-digest")
 	case !hasConclusion:
@@ -284,17 +311,21 @@ func runDispositionRecord(root string, a dispositionRecordArgs, stdout, stderr i
 		return 2
 	}
 
-	targetRef, haveTargetRef := targetRefFromReport(report)
-	targetDigests := targetClaimAuthorityDigests(row.Claims, targetRef, haveTargetRef)
+	if reportRef, haveReportRef := targetRefFromReport(report); haveReportRef && a.target != reportRef {
+		fmt.Fprintf(stderr, "disposition record: --target: %q does not match the report's own acceptance-candidate ref %q\n", a.target, reportRef)
+		return 2
+	}
+
+	targetDigests := targetClaimAuthorityDigests(row.Claims, a.target)
 	switch {
 	case len(targetDigests) == 0:
-		fmt.Fprintf(stderr, "disposition record: --target-digest: the selected row's claims include none attributable to the target specification itself; the digest cannot be cross-checked for this report\n")
+		fmt.Fprintf(stderr, "disposition record: --target: no claim in the selected row has source ref %q; the target contributes no claim to this row\n", a.target)
 		return 2
 	case len(targetDigests) > 1:
-		fmt.Fprintf(stderr, "disposition record: --target-digest: the selected row's claims are ambiguous between the target specification and a governing parent (%d distinct authority digests); the digest cannot be safely cross-checked for this report\n", len(targetDigests))
+		fmt.Fprintf(stderr, "disposition record: --target: the claims attributed to %q disagree on authority digest (%d distinct values); the report is internally inconsistent\n", a.target, len(targetDigests))
 		return 2
 	case targetDigests[0] != a.targetDigest:
-		fmt.Fprintf(stderr, "disposition record: --target-digest: %q does not match the target specification's own claim authority digest %q; an operand must never make the witness differ from the report\n", a.targetDigest, targetDigests[0])
+		fmt.Fprintf(stderr, "disposition record: --target-digest: %q does not match %q's own claim authority digest %q; an operand must never make the witness differ from the report\n", a.targetDigest, a.target, targetDigests[0])
 		return 2
 	}
 
@@ -416,24 +447,6 @@ func findSemanticRow(report policyconflict.Report, inputID string) (row policyco
 	return row, matches
 }
 
-// specClaimCategories is the closed set of witness categories only a
-// governing SPECIFICATION — the target itself, or (per internal/
-// contextcompile's buildFragmentProse, conflict.go:1000) a governing
-// PARENT feature fragment — can contribute. policy-instruction
-// (buildPolicyInstructionProse, conflict.go:938), adr-decision
-// (buildADRDecisionProse, conflict.go:1044), and obligation-declaration
-// (buildObligationProse, conflict.go:1061) claims are never the target
-// specification's own identity claim, regardless of which report arm
-// produced the row — review finding I-1.
-var specClaimCategories = map[string]bool{
-	"spec-problem":         true,
-	"spec-outcome":         true,
-	"acceptance-criterion": true,
-	"open-question":        true,
-	"constraint":           true,
-	"decision":             true,
-}
-
 // targetRefFromReport returns the report's own target ref when the report
 // identifies it directly, and whether one was found.
 //
@@ -446,9 +459,10 @@ var specClaimCategories = map[string]bool{
 // (authority design §8; this file's header comment). Docs/superpowers/
 // specs/2026-08-12-policy-conflict-gate-authority-design.md §10 confirms
 // the semantic row itself carries no source-ref field either. So for the
-// accepted-context arm this returns ok=false — see
-// targetClaimAuthorityDigests's own doc comment for how that case is
-// still handled safely, never by guessing a ref.
+// accepted-context arm this returns ok=false — runDispositionRecord then
+// trusts the operator-supplied --target instead of comparing it against
+// anything (controller adjudication, round 2: the operand exists BECAUSE
+// the report cannot supply this value for that arm).
 func targetRefFromReport(report policyconflict.Report) (ref string, ok bool) {
 	if c := report.Input.Target.Candidate; c != nil && c.Ref != "" {
 		return c.Ref, true
@@ -457,49 +471,36 @@ func targetRefFromReport(report policyconflict.Report) (ref string, ok bool) {
 }
 
 // targetClaimAuthorityDigests returns the distinct, sorted AuthorityDigest
-// values among claims attributable to the target specification itself —
-// review finding I-1: claims come from five authority classes (policy
+// values among claims whose id's "<source-ref>#<object>" source-ref
+// segment equals targetRef — review finding I-1, refined by controller
+// adjudication (round 2): claims come from five authority classes (policy
 // instructions, the target spec, governing parent-feature fragments, ADRs,
 // obligations — internal/contextcompile/conflict.go's buildProseClaims and
 // its five builders), and only the target's OWN claims carry the target's
 // content digest; accepting any claim's authority digest (this file's
-// pre-fix behavior) let a parent-feature, policy, ADR, or obligation
+// original behavior) let a parent-feature, policy, ADR, or obligation
 // digest through, which would later resolve inert
 // (policyconflict.ResolveDispositionAuthority / authority.go's
 // resolveDisposition: violated-with-witness, no diagnostic).
 //
-// When targetRef is known (haveRef, the acceptance-candidate arm), this is
-// EXACT: a claim qualifies only when its id's "<source-ref>#<object>"
-// source-ref segment equals targetRef. A policy-instruction, adr-decision,
-// or obligation-declaration claim's id never takes that shape against a
-// spec ref, so those categories are excluded as a side effect of the ref
-// comparison itself, never specially-cased.
-//
-// When targetRef is unknown (the accepted-context arm), this is a
-// disclosed, conservative APPROXIMATION: claims are narrowed to
-// specClaimCategories (excluding policy-instruction/adr-decision/
-// obligation-declaration, which are never the target itself), which is as
-// far as this can go without the ref — internal/contextcompile's
-// buildFragmentProse mirrors buildSpecProse's exact categories and scope
-// shape for a governing PARENT feature, so a parent's spec-shaped claim is
-// structurally indistinguishable from the target's own by category alone.
-// The caller (runDispositionRecord) therefore accepts a target digest only
-// when EXACTLY ONE distinct digest remains after this narrowing: two
-// different real files' content digests colliding by chance is not a risk
-// this verb needs to entertain, so a single remaining digest is
-// unambiguously the target's; two or more distinct digests is exactly the
-// shape a governing parent feature's claims produce, and the caller must
-// refuse rather than guess which one is the target's — fail closed, never
-// accept unverified.
-func targetClaimAuthorityDigests(claims []policyartifact.SemanticClaimWitness, targetRef string, haveRef bool) []string {
+// This is now an EXACT ref match, always, for both report arms —
+// round 1's category-narrowing fallback (accepting the single remaining
+// digest among "spec-shaped" categories when no ref was available) is
+// DROPPED: a story's row always carries its own problem/outcome claims
+// AND its parent feature's, i.e. two distinct spec-shaped digests, so
+// "exactly one remaining digest" refused precisely the case this verb
+// exists for. targetRef therefore always comes from an operand now
+// (--target, cross-checked against the report's own candidate ref when
+// the report supplies one — see runDispositionRecord). A
+// policy-instruction, adr-decision, or obligation-declaration claim's id
+// never takes the "<ref>#<object>" shape against a spec ref, so those
+// categories are excluded as a side effect of the ref comparison itself,
+// never specially-cased.
+func targetClaimAuthorityDigests(claims []policyartifact.SemanticClaimWitness, targetRef string) []string {
 	seen := make(map[string]bool)
 	for _, c := range claims {
-		if haveRef {
-			sourceRef, _, _ := strings.Cut(c.ID, "#")
-			if sourceRef != targetRef {
-				continue
-			}
-		} else if !specClaimCategories[c.Category] {
+		sourceRef, _, _ := strings.Cut(c.ID, "#")
+		if sourceRef != targetRef {
 			continue
 		}
 		seen[c.AuthorityDigest] = true
