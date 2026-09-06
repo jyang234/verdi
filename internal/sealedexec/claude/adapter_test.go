@@ -1097,11 +1097,18 @@ func TestClaudeAdapterParityContract_Behavioral(t *testing.T) {
 
 	// SI-182 test row (e): a known member of the wrong JSON type still
 	// refuses the frame as invalid-foreign-field. This guards the tolerant
-	// decode's removal of DisallowUnknownFields: Go's decoder still refuses a
-	// type mismatch on a known field with no help from that option.
+	// decode's removal of DisallowUnknownFields — the typed unmarshal is the
+	// only thing left refusing a wrong-typed known member — so the mistyped
+	// member is retry_delay_ms and nothing else. encoding/json allocates the
+	// *uint64 before it reports the type error, so a swallowed decode error
+	// leaves a non-nil zero behind, and retry_delay_ms is the one required
+	// api_retry member whose value no later check reads: with the unmarshal
+	// error swallowed this frame is ACCEPTED and this row goes red. (A
+	// mistyped attempt would not bite — its surviving zero fails the
+	// *frame.Attempt == 0 check and yields the same reason either way.)
 	t.Run("retry_rejects_wrong_typed_known_field", func(t *testing.T) {
 		launch, envRoot := claudeTestLaunch(t, sealedexec.ActionStart)
-		bad := `{"type":"system","subtype":"api_retry","attempt":"one","max_retries":3,"retry_delay_ms":10,"error":{"type":"rate_limit","message":"slow down"},"uuid":"ru","session_id":"s1"}`
+		bad := `{"type":"system","subtype":"api_retry","attempt":1,"max_retries":3,"retry_delay_ms":"soon","error":{"type":"rate_limit","message":"slow down"},"uuid":"ru","session_id":"s1"}`
 		result := runClaudeLines(t, launch, envRoot, claudeInitLine("s1", launch.Workspace.Path), bad)
 		assertClaudeGapReason(t, result, "invalid-foreign-field", "decode", claudeSource)
 	})
