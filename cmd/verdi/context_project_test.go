@@ -300,6 +300,17 @@ func TestCmdContextProject_RootFlagUnusable(t *testing.T) {
 			if stderr.Len() == 0 {
 				t.Fatal("stderr empty, want a diagnostic")
 			}
+			// The diagnostic must name THIS verb's own flag: internal/
+			// store.RootAt's own message talks about "an explicit --store
+			// override" (a different, hypothetical flag from a different
+			// caller's doc comment), which would misdirect a reader of
+			// this verb's own output.
+			if !strings.Contains(stderr.String(), "--root") {
+				t.Fatalf("stderr = %q, want it to name --root", stderr.String())
+			}
+			if strings.Contains(stderr.String(), "--store") {
+				t.Fatalf("stderr = %q, must not relay internal/store's unrelated --store wording", stderr.String())
+			}
 		})
 	}
 }

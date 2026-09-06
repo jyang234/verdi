@@ -91,6 +91,18 @@ func cmdContextProject(args []string, stdout, stderr io.Writer) int {
 	var root string
 	if hasRoot {
 		root, err = store.RootAt(rootFlag)
+		if err != nil {
+			// store.RootAt's own message talks about "an explicit --store
+			// override" — accurate for ITS doc comment's hypothetical
+			// caller, but this verb's own flag is --root, and relaying
+			// "--store" verbatim would name a flag that does not exist
+			// here. Rewrite the flag name in place rather than editing
+			// internal/store (shared infrastructure other, differently-
+			// named callers may use truthfully); every other word in the
+			// message (the exact path, the manifest filename, "no
+			// ancestor search") stays accurate and is worth keeping.
+			err = errors.New(strings.ReplaceAll(err.Error(), "--store", "--root"))
+		}
 	} else {
 		root, err = store.FindRoot(".")
 	}
