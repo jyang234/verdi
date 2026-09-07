@@ -496,6 +496,10 @@ func TestScopedContextMCPContract_Behavioral(t *testing.T) {
 		runScopedMCPProtocolFailure(t, bin)
 	})
 
+	t.Run("tolerated envelope members change nothing observable", func(t *testing.T) {
+		runScopedMCPToleratedEnvelopeMembers(t, bin)
+	})
+
 	t.Run("recorder rejection is framed before operational exit", func(t *testing.T) {
 		runScopedMCPRecorderRejection(t, bin)
 	})
@@ -1810,6 +1814,16 @@ func runScopedMCPLaterCheckpoint(t *testing.T, bin, mutation string, wantExit in
 	}
 }
 
+// runScopedMCPProtocolFailure no longer carries an "unknown envelope field"
+// row: that expectation was 548d1c0f's own uncited posture ("Wire sealed
+// execution commands"), the same uncited strictness SI-188 found defective in
+// decodeHandlerCall's params envelope and F1 then found one level up in
+// decodeHandlerRequest's outer JSON-RPC frame. The frame it drove is now
+// tolerated end-to-end, and that tolerance — plus its invisibility — is
+// proven over this same built binary by
+// runScopedMCPToleratedEnvelopeMembers. Everything still refused (a
+// duplicate key at either level, trailing data, a missing or wrong jsonrpc,
+// unparseable bytes) keeps its row below.
 func runScopedMCPProtocolFailure(t *testing.T, bin string) {
 	t.Helper()
 	fixture := buildCompiledExecutionFixture(t, execworkspace.GrantSet{Grants: []execworkspace.Grant{}})
@@ -1828,7 +1842,6 @@ func runScopedMCPProtocolFailure(t *testing.T, bin string) {
 		{name: "unparseable", frame: `{not-json}`},
 		{name: "missing jsonrpc", frame: `{"id":1,"method":"tools/call",` + mutatingParams + `}`},
 		{name: "wrong jsonrpc", frame: `{"jsonrpc":"1.0","id":1,"method":"tools/call",` + mutatingParams + `}`},
-		{name: "unknown envelope field", frame: `{"jsonrpc":"2.0","id":1,"method":"tools/call","unexpected":true,` + mutatingParams + `}`},
 		{name: "duplicate envelope field", frame: `{"jsonrpc":"2.0","id":1,"method":"tools/list","method":"tools/call",` + mutatingParams + `}`},
 		{name: "duplicate call name", frame: `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"get_flight_plan","name":"request_context","arguments":{"ref":"spec/extra","purpose":"needed"}}}`},
 		{name: "duplicate call arguments", frame: `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"request_context","arguments":{},"arguments":{"ref":"spec/extra","purpose":"needed"}}}`},
@@ -1866,6 +1879,140 @@ func runScopedMCPProtocolFailure(t *testing.T, bin string) {
 			}
 		})
 	}
+}
+
+// runScopedMCPToleratedEnvelopeMembers is the end-to-end half of retiring
+// runScopedMCPProtocolFailure's "unknown envelope field" row (SI-188 F1/F5).
+// Over the built binary and the real request_context path it proves that the
+// tolerance SI-188 established at both envelope seams — an unknown member
+// beside jsonrpc/id/method/params in the outer JSON-RPC frame, and MCP's own
+// `_meta` beside name/arguments in the tools/call params envelope, which is
+// what Claude Code 2.1.261 sends on every call — is behaviourally invisible.
+//
+// Each row runs the sealed binary TWICE against ONE fixture: first the
+// undecorated frame, then the row's decorated one, and demands byte-identical
+// stdout plus the identical recorded event sequence and expansion install.
+// Comparing within a fixture rather than across the table is deliberate: the
+// approved response carries the context request id and the child manifest
+// digest, both derived from the compiled manifest digest, which differs
+// between two fixtures built a clock second apart — so a cross-row baseline
+// would compare the fixture, not the frame. The first row decorates nothing
+// and is therefore the run-to-run stability control for the comparison the
+// other three rely on.
+func runScopedMCPToleratedEnvelopeMembers(t *testing.T, bin string) {
+	t.Helper()
+	arguments := `{"purpose":"fixture expansion","ref":"spec/extra"}`
+	plainParams := `"params":{"name":"request_context","arguments":` + arguments + `}`
+	metaParams := `"params":{"name":"request_context","arguments":` + arguments + `,"_meta":{"progressToken":1}}`
+	undecorated := `{"jsonrpc":"2.0","id":1,"method":"tools/call",` + plainParams + `}`
+	for _, test := range []struct {
+		name  string
+		frame string
+	}{
+		{name: "control: the undecorated frame twice", frame: undecorated},
+		{name: "unknown top-level frame member", frame: `{"jsonrpc":"2.0","id":1,"method":"tools/call","unexpected":true,` + plainParams + `}`},
+		{name: "MCP _meta inside params", frame: `{"jsonrpc":"2.0","id":1,"method":"tools/call",` + metaParams + `}`},
+		{name: "both members at once", frame: `{"jsonrpc":"2.0","id":1,"method":"tools/call","unexpected":true,` + metaParams + `}`},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			fixture := buildCompiledExecutionFixture(t, execworkspace.GrantSet{Grants: []execworkspace.Grant{}})
+			materializer, err := execworkspace.NewMaterializer(fixture.root, fixture.root, execworkspace.NewGitReconciler(fixture.root))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := materializer.Materialize(context.Background(), execworkspace.Request{Identity: fixture.request.ExecutionWorkspaceRequest}); err != nil {
+				t.Fatal(err)
+			}
+			if len(fixture.compiled.DataItems) == 0 {
+				t.Fatal("compiled MCP fixture contains no context data")
+			}
+			control := runScopedMCPApprovedContextFrame(t, bin, fixture, undecorated)
+			decorated := runScopedMCPApprovedContextFrame(t, bin, fixture, test.frame)
+			for _, leak := range []string{"unexpected", "_meta", "progressToken"} {
+				if strings.Contains(decorated, leak) {
+					t.Fatalf("tolerated envelope member %q surfaced in %q", leak, decorated)
+				}
+			}
+			// The whole point: a decorated frame is indistinguishable on the
+			// wire from the undecorated one, byte for byte.
+			if decorated != control {
+				t.Fatalf("tolerated envelope stdout = %q, want the undecorated frame's %q", decorated, control)
+			}
+		})
+	}
+}
+
+// runScopedMCPApprovedContextFrame drives one scoped-MCP frame through the
+// built binary against a freshly primed approving controller and returns the
+// binary's stdout, having asserted the whole approved-expansion path actually
+// ran: clean exit, one framed content item decoding to a context-approved
+// inspection at the child revision, the request/decision/child-manifest event
+// sequence, and the expansion installed after the terminal ack.
+func runScopedMCPApprovedContextFrame(t *testing.T, bin string, fixture sealedCompiledExecutionFixture, frame string) string {
+	t.Helper()
+	files, err := syscall.Socketpair(syscall.AF_UNIX, syscall.SOCK_STREAM, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	controllerFile := os.NewFile(uintptr(files[0]), "mcp-tolerance-controller")
+	childFile := os.NewFile(uintptr(files[1]), "mcp-tolerance-child")
+	controllerConn, err := net.FileConn(controllerFile)
+	_ = controllerFile.Close()
+	if err != nil {
+		_ = childFile.Close()
+		t.Fatal(err)
+	}
+	proven := sealedexec.Verification{State: contextcompile.ResolutionProven, Witnesses: []string{}}
+	fake := &sealedLifecycleController{
+		t: t, request: fixture.request,
+		resolution: sealedexec.ContextResolution{Verification: proven, Data: fixture.compiled.DataItems[0]},
+		epoch:      proven,
+	}
+	served := make(chan error, 1)
+	go func() {
+		defer controllerConn.Close()
+		served <- fake.serve(controllerConn)
+	}()
+	stdin := append(append([]byte(nil), fixture.requestBytes...), []byte(frame+"\n")...)
+	observation := runSealedContextBinaryWithFiles(t, bin, fixture.root, stdin, []*os.File{childFile}, "context", "mcp", "--request", "-")
+	if err := <-served; err != nil {
+		t.Fatalf("approved context controller for %s: %v; observation=%#v", frame, err, observation)
+	}
+	if observation.exitCode != 0 || observation.stderr != "" {
+		t.Fatalf("approved context observation for %s = %#v, want a clean exit", frame, observation)
+	}
+	var response struct {
+		Result struct {
+			Content []struct {
+				Text string `json:"text"`
+			} `json:"content"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal([]byte(strings.TrimSpace(observation.stdout)), &response); err != nil {
+		t.Fatal(err)
+	}
+	if len(response.Result.Content) != 1 {
+		t.Fatalf("approved context response content for %s = %#v", frame, response.Result.Content)
+	}
+	inspection, err := sealedexec.DecodeInspectionResult(bytes.NewReader([]byte(response.Result.Content[0].Text)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if inspection.Kind != sealedexec.InspectionContextApproved || inspection.Context.Data.Digest == "" || inspection.Context.ChildRevision != fixture.request.ManifestRevision+1 {
+		t.Fatalf("approved context inspection for %s = %#v", frame, inspection)
+	}
+	gotKinds := make([]contextevent.Kind, len(fake.events))
+	for i, event := range fake.events {
+		gotKinds[i] = event.Kind
+	}
+	wantKinds := []contextevent.Kind{contextevent.KindContextRequest, contextevent.KindContextDecision, contextevent.KindChildManifest}
+	if !reflect.DeepEqual(gotKinds, wantKinds) {
+		t.Fatalf("approved context event kinds for %s = %v, want %v", frame, gotKinds, wantKinds)
+	}
+	if fake.calls[len(fake.calls)-1] != sealedexec.ControllerOperationInstallExpansion {
+		t.Fatalf("approved context did not install after terminal ack for %s: %v", frame, fake.calls)
+	}
+	return observation.stdout
 }
 
 func runScopedMCPRecorderRejection(t *testing.T, bin string) {
