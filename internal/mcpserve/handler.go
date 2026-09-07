@@ -117,16 +117,60 @@ func callHandler(ctx context.Context, handler ToolHandler, params json.RawMessag
 	return framed, result.Terminal
 }
 
+// decodeHandlerCall decodes the tools/call PARAMS envelope (name/arguments,
+// plus whatever else the caller put beside them). Unlike decodeHandlerJSON,
+// it does not disallow unknown fields: see decodeTolerantJSON's doc comment
+// for why (SI-188, spec/fail-loud dc-2).
 func decodeHandlerCall(data []byte, target any) error {
 	if err := rejectDuplicateJSONFields(data); err != nil {
 		return err
 	}
-	return decodeHandlerJSON(data, target)
+	return decodeTolerantJSON(data, target)
 }
 
 func decodeHandlerJSON(data []byte, target any) error {
 	decoder := json.NewDecoder(bytes.NewReader(data))
 	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(target); err != nil {
+		return err
+	}
+	var trailing any
+	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
+		if err == nil {
+			return errors.New("trailing JSON value")
+		}
+		return err
+	}
+	return nil
+}
+
+// decodeTolerantJSON decodes data into target exactly like decodeHandlerJSON
+// does, EXCEPT it never calls DisallowUnknownFields (SI-188). It feeds
+// decodeHandlerCall's tools/call params envelope, which is a JSON-RPC/MCP
+// protocol envelope: spec/fail-loud dc-2 keeps those TOLERANT of unknown
+// members ("expected forward-compat, not a mistake to catch"), the exact
+// posture this package's decode.go doc comment already claims for "wire.go's
+// rpcRequest, server.go's tools/call name/arguments" and server.go's
+// callTool already gives its own params (bare json.Unmarshal). MCP itself
+// defines a `_meta` member on every request's params — Claude Code 2.1.261
+// sends `_meta.progressToken` on every tools/call — and before this helper
+// existed, decodeHandlerCall's DisallowUnknownFields refused it outright
+// ("json: unknown field \"_meta\""), ending the sealed run at Claude's first
+// tool call. An unknown member decoded here is never read, projected,
+// hashed, or logged: target simply has no field for it. `name` and
+// `arguments` stay REQUIRED (callHandler's own presence check) and
+// type-checked — a wrong-typed value is still a decode error — and
+// rejectDuplicateJSONFields, the caller's preceding step, still refuses a
+// duplicate key or a trailing JSON value at any depth, unchanged.
+//
+// The outer JSON-RPC frame decode (decodeHandlerRequest, wire.go's
+// rpcRequest) was inspected for the same defect and deliberately LEFT
+// strict: real MCP/Claude Code traffic never puts an unrecognized member at
+// that level (_meta nests inside params, never beside jsonrpc/id/method),
+// and TestServeHandlerRejectsMalformedEnvelopeBeforeToolDispatch's "unknown
+// envelope field" case already codifies refusing one there on purpose.
+func decodeTolerantJSON(data []byte, target any) error {
+	decoder := json.NewDecoder(bytes.NewReader(data))
 	if err := decoder.Decode(target); err != nil {
 		return err
 	}
