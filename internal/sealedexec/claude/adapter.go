@@ -1025,13 +1025,15 @@ type claudeToolResultBlock struct {
 // own family. A frame whose family — its `type`, or `system` paired with its
 // `subtype` — the family switch in normalize does not know is advisory
 // provider telemetry: never projected, never hashed into any detail or
-// digest, and never itself the subject of an observation. Its family is
-// instead collected under the closed code `unknown-foreign-family`, recorded
-// once per run (first-seen order, deduplicated) using the same disclosure
-// vehicle as unknown-foreign-member. A frame naming no family at all — no
-// `type` string, or a "system" frame with no `subtype` string — still names
-// nothing the decoder can be tolerant of and stays refused, as does a
-// malformed frame of a known family.
+// digest, and never the source of an observation of its own content. Its
+// family NAME alone may ride a last-resort advisory summary, but only when
+// no accepted observation is left to carry it. That name is collected under
+// the closed code `unknown-foreign-family`, recorded once per run
+// (first-seen order, deduplicated) using the same disclosure vehicle as
+// unknown-foreign-member. A frame naming no family at all — no `type`
+// string, or a "system" frame with no `subtype` string — still names nothing
+// the decoder can be tolerant of and stays refused, as does a malformed
+// frame of a known family.
 // ---------------------------------------------------------------------------
 
 // unknownMemberCode is SI-182's closed disclosure code.
