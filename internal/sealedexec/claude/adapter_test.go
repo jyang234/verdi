@@ -1068,20 +1068,7 @@ func TestClaudeAdapterParityContract_Behavioral(t *testing.T) {
 		if result.OperationalFailure != "missing-terminal-result" {
 			t.Fatalf("operational failure = %q, want missing-terminal-result (no result frame ever arrived)", result.OperationalFailure)
 		}
-		const want = `"unknown-foreign-family":["system/thinking_tokens"]`
-		var disclosed bool
-		for _, obs := range result.Observations {
-			payload, ok := obs.Payload.(*contextevent.ProviderSummaryPayload)
-			if !ok || !strings.HasPrefix(payload.SummaryID, "unknown-families/") {
-				continue
-			}
-			if bytes.Contains(obs.ForeignDetail.RedactedJSON, []byte(want)) {
-				disclosed = true
-			}
-		}
-		if !disclosed {
-			t.Fatalf("no terminal unknown-families summary disclosed %s; observations = %v", want, observationKindsC(result.Observations))
-		}
+		assertClaudeTerminalFamilySummary(t, result, `"unknown-foreign-family":["system/thinking_tokens"]`)
 	})
 
 	// SI-187: a frame with no `type` string at all names no family and stays
@@ -1185,6 +1172,43 @@ func TestClaudeAdapterParityContract_Behavioral(t *testing.T) {
 				t.Fatalf("observation %s named the known family unknown: %s", obs.Kind, obs.ForeignDetail.RedactedJSON)
 			}
 		}
+	})
+
+	// SI-187 fix wave (F2): a family drained into an accepted result frame
+	// rides an observation §5's terminal precedence may still discard — here
+	// an incomplete tool call outranks the result. The disclosure must not go
+	// with it: the families the discarded result was carrying return to the
+	// queue and the terminal flush emits them in the advisory
+	// `unknown-families/<seq>` summary, so §I-108/SI-187's "recorded once per
+	// run" holds in this reachable state too.
+	t.Run("unknown_family_carried_by_a_result_that_loses_precedence_is_still_disclosed", func(t *testing.T) {
+		launch, envRoot := claudeTestLaunch(t, sealedexec.ActionStart)
+		toolUse := `{"type":"assistant","session_id":"s1","uuid":"mu","message":{"id":"msg_1","type":"message","role":"assistant","model":"claude-opus-5-test","content":[{"type":"tool_use","id":"call_1","name":"Read","input":{"path":"README.md"}}],"usage":{"input_tokens":1,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":1}}}`
+		result := runClaudeLinesToTerminal(t, launch, envRoot, claudeInitLine("s1", launch.Workspace.Path),
+			toolUse, `{"type":"keep_alive"}`, claudeResultLine("s1", "success", false))
+		if result.OperationalFailure != "incomplete-tool-call" {
+			t.Fatalf("operational failure = %q, want incomplete-tool-call (call_1 never closed)", result.OperationalFailure)
+		}
+		assertClaudeTerminalFamilySummary(t, result, `"unknown-foreign-family":["keep_alive"]`)
+	})
+
+	// SI-187 fix wave (F2): the same at the highest-precedence arm, where the
+	// result frame itself is flawless — non-empty stderr discards it, and the
+	// family it was carrying still reaches the terminal summary.
+	t.Run("unknown_family_carried_by_a_result_discarded_for_stderr_is_still_disclosed", func(t *testing.T) {
+		launch, envRoot := claudeTestLaunch(t, sealedexec.ActionStart)
+		var output []byte
+		for _, line := range []string{claudeInitLine("s1", launch.Workspace.Path), `{"type":"keep_alive"}`,
+			claudeResultLine("s1", "success", false)} {
+			output = append(output, line...)
+			output = append(output, '\n')
+		}
+		pp := &testProbeProcess{version: launch.Request.AdapterVersion, output: output, stderr: []byte("boom\n")}
+		result := runClaudeProcess(t, launch, envRoot, pp)
+		if result.OperationalFailure != "provider-stderr" {
+			t.Fatalf("operational failure = %q, want provider-stderr", result.OperationalFailure)
+		}
+		assertClaudeTerminalFamilySummary(t, result, `"unknown-foreign-family":["keep_alive"]`)
 	})
 
 	// SI-182 test row (f): a duplicate JSON key stays refused exactly as
@@ -3511,6 +3535,24 @@ func assertClaudeGapReason(t *testing.T, result sealedexec.AdapterResult, reason
 	if errPayload.ReasonCode != reason || errPayload.Operation != operation {
 		t.Fatalf("adapter-error = reason %q operation %q, want %q/%q", errPayload.ReasonCode, errPayload.Operation, reason, operation)
 	}
+}
+
+// assertClaudeTerminalFamilySummary proves SI-187's last-resort advisory
+// summary — the `unknown-families/<seq>` provider-summary the terminal emits
+// when no accepted observation is left to carry the disclosure — discloses
+// exactly want.
+func assertClaudeTerminalFamilySummary(t *testing.T, result sealedexec.AdapterResult, want string) {
+	t.Helper()
+	for _, obs := range result.Observations {
+		payload, ok := obs.Payload.(*contextevent.ProviderSummaryPayload)
+		if !ok || !strings.HasPrefix(payload.SummaryID, "unknown-families/") {
+			continue
+		}
+		if bytes.Contains(obs.ForeignDetail.RedactedJSON, []byte(want)) {
+			return
+		}
+	}
+	t.Fatalf("no terminal unknown-families summary disclosed %s; observations = %v", want, observationKindsC(result.Observations))
 }
 
 // ---------------------------------------------------------------------------

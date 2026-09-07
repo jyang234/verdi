@@ -588,11 +588,14 @@ type claudeActiveRun struct {
 
 // pendingTerminal buffers the exact terminal result until the child is reaped.
 // reason is empty for the success family and the closed provider-result reason
-// for the provider-failure family.
+// for the provider-failure family. unknownFamilies is SI-187's disclosure that
+// the buffered detail is carrying: §5's terminal precedence may still discard
+// these observations, and the disclosure must outlive them.
 type pendingTerminal struct {
-	seq          uint64
-	observations []sealedexec.NormalizedObservation
-	reason       string
+	seq             uint64
+	observations    []sealedexec.NormalizedObservation
+	reason          string
+	unknownFamilies []string
 }
 
 func (r *claudeActiveRun) Next(ctx context.Context) (sealedexec.AdapterResult, error) {
@@ -712,22 +715,16 @@ func (r *claudeActiveRun) handleProcessTerminal(ctx context.Context, proc *Proce
 		Terminal:     &sealedexec.AdapterTerminalResult{ExitCode: proc.ExitCode},
 	}
 
-	// SI-187: a result frame always drains the pending unknown-family queue
-	// itself (handleResult ran, if at all, well before the process was
-	// reaped), so this is a no-op whenever one was accepted. When the run
-	// instead ends without any further accepted frame after the last
-	// unknown-family discovery — the stream never reaches a result frame, or
-	// a process-level failure interrupts first — that discovery would
-	// otherwise have no observation left to ride on. It is drained one last
-	// time here into an advisory summary of its own, so the disclosure is
-	// never silently lost.
-	if summary, disclosed, err := r.terminalUnknownFamilySummary(ctx, gapSeq); err != nil {
-		return sealedexec.AdapterResult{}, err
-	} else if disclosed {
-		result.Observations = append(result.Observations, summary)
-	}
-
-	// §5 terminal precedence. No lower-priority terminal event is also emitted.
+	// §5 terminal precedence. No lower-priority terminal event is also
+	// emitted. SI-187's queue is drained by whichever accepted observation
+	// carries it, so for a run that reached a result frame handleResult
+	// drained it well before the child was reaped. Exactly two arms below
+	// emit those buffered result observations, and the disclosure rides them;
+	// every other arm discards the result, so terminalFailure returns the
+	// families that detail was carrying to the queue and flushes them into an
+	// advisory summary of their own. A run that never reached a result frame
+	// leaves the queue full and reaches the same flush through `pending ==
+	// nil`. No arm can silently lose the disclosure.
 	switch {
 	case len(proc.Stderr) != 0:
 		// Stderr is hashed while read and discarded; only the fixed digest
@@ -736,21 +733,21 @@ func (r *claudeActiveRun) handleProcessTerminal(ctx context.Context, proc *Proce
 		if err != nil {
 			return sealedexec.AdapterResult{}, err
 		}
-		return r.terminalFailure(result, detail, gapSeq, "provider-stderr", proc.ExitCode), nil
+		return r.terminalFailure(ctx, result, pending, detail, gapSeq, "provider-stderr", proc.ExitCode)
 
 	case incomplete:
 		detail, err := r.fixedSafeDetail(ctx, map[string]any{"reason": "incomplete-tool-call"})
 		if err != nil {
 			return sealedexec.AdapterResult{}, err
 		}
-		return r.terminalFailure(result, detail, gapSeq, "incomplete-tool-call", proc.ExitCode), nil
+		return r.terminalFailure(ctx, result, pending, detail, gapSeq, "incomplete-tool-call", proc.ExitCode)
 
 	case pending == nil:
 		detail, err := r.fixedSafeDetail(ctx, map[string]any{"reason": "missing-terminal-result"})
 		if err != nil {
 			return sealedexec.AdapterResult{}, err
 		}
-		return r.terminalFailure(result, detail, gapSeq, "missing-terminal-result", proc.ExitCode), nil
+		return r.terminalFailure(ctx, result, pending, detail, gapSeq, "missing-terminal-result", proc.ExitCode)
 
 	case pending.reason != "":
 		// Provider-declared failure: adapter-error over the exact result
@@ -765,7 +762,7 @@ func (r *claudeActiveRun) handleProcessTerminal(ctx context.Context, proc *Proce
 		if err != nil {
 			return sealedexec.AdapterResult{}, err
 		}
-		return r.terminalFailure(result, detail, gapSeq, "provider-exit-nonzero", proc.ExitCode), nil
+		return r.terminalFailure(ctx, result, pending, detail, gapSeq, "provider-exit-nonzero", proc.ExitCode)
 	}
 
 	result.Observations = append(result.Observations, pending.observations...)
@@ -774,12 +771,29 @@ func (r *claudeActiveRun) handleProcessTerminal(ctx context.Context, proc *Proce
 }
 
 // terminalFailure emits the fixed process gap, adapter-error, and adapter-stop
-// for one closed terminal reason and discards every lower-priority event.
-func (r *claudeActiveRun) terminalFailure(result sealedexec.AdapterResult, detail contextevent.Detail, seq uint64, reason string, exitCode int) sealedexec.AdapterResult {
+// for one closed terminal reason and discards every lower-priority event —
+// including the buffered result observations, whenever a result was accepted
+// at all. SI-187's disclosure is the one thing not discarded with them: the
+// unknown families that result's detail was provisionally carrying return to
+// the queue, and the flush here emits whatever the queue then holds as the
+// last-resort advisory summary. That keeps §I-108/SI-187's "recorded once per
+// run" true on every arm of §5's terminal precedence, not only on the two that
+// keep the result.
+func (r *claudeActiveRun) terminalFailure(ctx context.Context, result sealedexec.AdapterResult, pending *pendingTerminal, detail contextevent.Detail, seq uint64, reason string, exitCode int) (sealedexec.AdapterResult, error) {
+	if pending != nil {
+		r.requeueUnknownFamilies(pending.unknownFamilies)
+	}
+	summary, disclosed, err := r.terminalUnknownFamilySummary(ctx, seq)
+	if err != nil {
+		return sealedexec.AdapterResult{}, err
+	}
+	if disclosed {
+		result.Observations = append(result.Observations, summary)
+	}
 	result.Observations = append(result.Observations, r.gapObservations(detail, seq, reason, claudeProcessSource)...)
 	result.Observations = append(result.Observations, adapterStopObservation(r.launch, exitCode, reason))
 	result.OperationalFailure = reason
-	return result
+	return result, nil
 }
 
 func (r *claudeActiveRun) Stop(ctx context.Context) (sealedexec.AdapterStopResult, error) {
@@ -1243,6 +1257,20 @@ func (r *claudeActiveRun) drainPendingUnknownFamilies() []string {
 	families := r.pendingUnknownFamilies
 	r.pendingUnknownFamilies = nil
 	return families
+}
+
+// requeueUnknownFamilies returns families whose only carrier is being
+// discarded to the FRONT of the pending queue, ahead of anything queued after
+// them, so SI-187's first-seen order survives the return. They are already in
+// disclosedUnknownFamilies, where recordUnknownFamily would refuse to queue
+// them a second time, so this is the one path that may put a family back.
+func (r *claudeActiveRun) requeueUnknownFamilies(families []string) {
+	if len(families) == 0 {
+		return
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.pendingUnknownFamilies = append(append([]string(nil), families...), r.pendingUnknownFamilies...)
 }
 
 // attachUnknownFamilyWitness adds SI-187's disclosure to source under its
@@ -2305,7 +2333,12 @@ func (r *claudeActiveRun) handleResult(ctx context.Context, line []byte, object 
 		projection["modelUsage"] = modelUsageProjection
 	}
 	attachUnknownMemberWitness(projection, r.runNewUnknownMembers(unknown.sorted()))
-	attachUnknownFamilyWitness(projection, r.drainPendingUnknownFamilies())
+	// SI-187: this detail is only a PROVISIONAL carrier. §5's terminal
+	// precedence may still discard the observations built from it below, so
+	// what it drained is remembered on the pending terminal and returned to
+	// the queue if that happens.
+	carriedFamilies := r.drainPendingUnknownFamilies()
+	attachUnknownFamilyWitness(projection, carriedFamilies)
 	detail, err := r.processDetail(ctx, projection, protectedValues)
 	if err != nil {
 		return r.decodeFailure(ctx, seq, detailFailureReason(err), nil)
@@ -2322,6 +2355,7 @@ func (r *claudeActiveRun) handleResult(ctx context.Context, line []byte, object 
 			observations: []sealedexec.NormalizedObservation{
 				buildProviderSummary(r.launch, "terminal-result", detail.Digest, contextevent.AuthorityAdvisory, detail),
 			},
+			unknownFamilies: carriedFamilies,
 		}
 		r.mu.Unlock()
 		return sealedexec.AdapterResult{Observations: []sealedexec.NormalizedObservation{}}, nil
@@ -2349,7 +2383,8 @@ func (r *claudeActiveRun) handleResult(ctx context.Context, line []byte, object 
 		},
 	}
 	r.mu.Lock()
-	r.pendingResult = &pendingTerminal{seq: seq, observations: []sealedexec.NormalizedObservation{errorObs}, reason: reasonCode}
+	r.pendingResult = &pendingTerminal{seq: seq, observations: []sealedexec.NormalizedObservation{errorObs},
+		reason: reasonCode, unknownFamilies: carriedFamilies}
 	r.mu.Unlock()
 	return sealedexec.AdapterResult{Observations: []sealedexec.NormalizedObservation{}}, nil
 }
