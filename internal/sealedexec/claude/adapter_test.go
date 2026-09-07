@@ -632,9 +632,21 @@ func TestClaudeAdapterParityContract_Behavioral(t *testing.T) {
 		}
 	})
 
-	t.Run("unknown_family_yields_telemetry_gap", func(t *testing.T) {
+	// SI-187, superseding this row's pre-SI-187 name and assertion: a bare
+	// unrecognized type — even a dotted, non-identifier-shaped one, and even
+	// carrying an extra unread field — is advisory telemetry, not a stream
+	// contradiction. It produces no telemetry-gap of its own; the frame
+	// carries no observation, and the run proceeds to the following
+	// assistant frame, whose detail discloses the tolerated family.
+	t.Run("unrecognized_type_with_extra_field_is_tolerated_advisory_telemetry", func(t *testing.T) {
 		launch, envRoot := claudeTestLaunch(t, sealedexec.ActionStart)
-		pp := &testProbeProcess{version: launch.Request.AdapterVersion, output: []byte("{\"type\":\"future.event\",\"value\":1}\n")}
+		assistant := `{"type":"assistant","session_id":"s1","uuid":"mu","message":{"id":"msg_1","type":"message","role":"assistant","model":"claude-opus-5-test","content":[{"type":"text","text":"hi"}],"usage":{"input_tokens":1,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":1}}}`
+		pp := &testProbeProcess{version: launch.Request.AdapterVersion, output: []byte(
+			claudeInitLine("s1", launch.Workspace.Path) + "\n" +
+				`{"type":"future.event","value":1}` + "\n" +
+				assistant + "\n" +
+				claudeResultLine("s1", "success", false) + "\n",
+		)}
 		dp := newTestProcessor(t)
 		adapter, err := newClaudeTestAdapter(t, pp, dp, envRoot)
 		if err != nil {
@@ -645,8 +657,13 @@ func TestClaudeAdapterParityContract_Behavioral(t *testing.T) {
 			t.Fatalf("Start: %v", err)
 		}
 		result := collectClaudeUntilBoundary(t, run)
-		if !hasKindC(result.Observations, contextevent.KindTelemetryGap) {
-			t.Fatalf("unknown family: want telemetry-gap, got %v", observationKindsC(result.Observations))
+		if hasKindC(result.Observations, contextevent.KindTelemetryGap) {
+			t.Fatalf("unrecognized type: want no telemetry-gap, got %v", observationKindsC(result.Observations))
+		}
+		text := claudeFindKind(t, result.Observations, contextevent.KindProviderMessage)
+		const want = `"unknown-foreign-family":["future.event"]`
+		if !bytes.Contains(text.ForeignDetail.RedactedJSON, []byte(want)) {
+			t.Fatalf("assistant detail = %s, want it to contain %s", text.ForeignDetail.RedactedJSON, want)
 		}
 	})
 
@@ -952,15 +969,137 @@ func TestClaudeAdapterParityContract_Behavioral(t *testing.T) {
 			if bytes.Contains(obs.ForeignDetail.RedactedJSON, []byte(unknownMemberCode)) {
 				t.Fatalf("observation %s disclosed a witness over a clean fixture: %s", obs.Kind, obs.ForeignDetail.RedactedJSON)
 			}
+			// SI-187: a fixture whose stream carries only known families is
+			// byte-identical to its pre-SI-187 output — its witnesses gain no
+			// unknown-foreign-family entry either.
+			if bytes.Contains(obs.ForeignDetail.RedactedJSON, []byte(unknownFamilyCode)) {
+				t.Fatalf("observation %s disclosed a family witness over a clean fixture: %s", obs.Kind, obs.ForeignDetail.RedactedJSON)
+			}
 		}
 	})
 
-	// SI-182 test row (d): an unrecognized subtype of a known "system" type
-	// stays refused exactly as an unrecognized type would.
-	t.Run("unknown_system_subtype_still_refused", func(t *testing.T) {
+	// SI-187: a "system" frame naming no subtype at all names no family the
+	// decoder can be tolerant of (there is nothing to record as advisory
+	// telemetry) and stays refused exactly as before SI-187.
+	t.Run("system_frame_with_no_subtype_still_refused", func(t *testing.T) {
 		launch, envRoot := claudeTestLaunch(t, sealedexec.ActionStart)
-		result := runClaudeLines(t, launch, envRoot, `{"type":"system","subtype":"heartbeat"}`)
+		result := runClaudeLines(t, launch, envRoot, `{"type":"system"}`)
 		assertClaudeGapReason(t, result, "unknown-foreign-family", "decode", claudeSource)
+	})
+
+	// SI-187, superseding the pre-SI-187 "unknown_system_subtype_still_refused"
+	// row: an unrecognized subtype of a known "system" type is now advisory
+	// provider telemetry rather than a refusal. The frame is skipped — no
+	// projection, no digest, no observation of its own — and its family is
+	// recorded once, attached to the next accepted observation (here, the
+	// following assistant frame's own detail), which keeps its ordinary
+	// fixed message id.
+	t.Run("unknown_system_subtype_is_tolerated_and_recorded", func(t *testing.T) {
+		launch, envRoot := claudeTestLaunch(t, sealedexec.ActionStart)
+		assistant := `{"type":"assistant","session_id":"s1","uuid":"mu","message":{"id":"msg_1","type":"message","role":"assistant","model":"claude-opus-5-test","content":[{"type":"text","text":"hi"}],"usage":{"input_tokens":1,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":1}}}`
+		result := runClaudeLines(t, launch, envRoot, claudeInitLine("s1", launch.Workspace.Path),
+			`{"type":"system","subtype":"heartbeat"}`, assistant, claudeResultLine("s1", "success", false))
+		if result.OperationalFailure != "" {
+			t.Fatalf("operational failure = %q, want none (unknown family is advisory telemetry)", result.OperationalFailure)
+		}
+		text := claudeFindKind(t, result.Observations, contextevent.KindProviderMessage)
+		payload, ok := text.Payload.(*contextevent.ProviderMessagePayload)
+		if !ok || payload.MessageID != "msg_1:0" {
+			t.Fatalf("provider-message id = %+v, want msg_1:0 (unaffected by the skipped frame)", text.Payload)
+		}
+		const want = `"unknown-foreign-family":["system/heartbeat"]`
+		if !bytes.Contains(text.ForeignDetail.RedactedJSON, []byte(want)) {
+			t.Fatalf("assistant detail = %s, want it to contain %s", text.ForeignDetail.RedactedJSON, want)
+		}
+	})
+
+	// SI-187: system/thinking_tokens between init and the first assistant
+	// frame — the exact shape that interrupted the F12 canary's eighth
+	// flight — is tolerated and recorded; the assistant frame that follows
+	// keeps its ordinary fixed id.
+	t.Run("system_thinking_tokens_between_init_and_first_assistant_is_tolerated", func(t *testing.T) {
+		launch, envRoot := claudeTestLaunch(t, sealedexec.ActionStart)
+		assistant := `{"type":"assistant","session_id":"s1","uuid":"mu","message":{"id":"msg_1","type":"message","role":"assistant","model":"claude-opus-5-test","content":[{"type":"text","text":"hi"}],"usage":{"input_tokens":1,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":1}}}`
+		result := runClaudeLines(t, launch, envRoot, claudeInitLine("s1", launch.Workspace.Path),
+			`{"type":"system","subtype":"thinking_tokens"}`, assistant, claudeResultLine("s1", "success", false))
+		if result.OperationalFailure != "" {
+			t.Fatalf("operational failure = %q, want none (unknown family is advisory telemetry)", result.OperationalFailure)
+		}
+		text := claudeFindKind(t, result.Observations, contextevent.KindProviderMessage)
+		payload, ok := text.Payload.(*contextevent.ProviderMessagePayload)
+		if !ok || payload.MessageID != "msg_1:0" {
+			t.Fatalf("provider-message id = %+v, want msg_1:0 (unaffected by the skipped frame)", text.Payload)
+		}
+		const want = `"unknown-foreign-family":["system/thinking_tokens"]`
+		if !bytes.Contains(text.ForeignDetail.RedactedJSON, []byte(want)) {
+			t.Fatalf("assistant detail = %s, want it to contain %s", text.ForeignDetail.RedactedJSON, want)
+		}
+	})
+
+	// SI-187: tool_progress, status, rate_limit_event and keep_alive are
+	// further families the real Claude Code CLI 2.1.261 emits; every one is
+	// tolerated. Each distinct family is recorded exactly once, in the
+	// first-seen order they arrived (not sorted, unlike SI-182's member
+	// paths), and a repeated family (tool_progress recurs here) is never
+	// disclosed a second time.
+	t.Run("further_unknown_families_are_tolerated_and_recorded_once_each", func(t *testing.T) {
+		launch, envRoot := claudeTestLaunch(t, sealedexec.ActionStart)
+		assistant := `{"type":"assistant","session_id":"s1","uuid":"mu","message":{"id":"msg_1","type":"message","role":"assistant","model":"claude-opus-5-test","content":[{"type":"text","text":"hi"}],"usage":{"input_tokens":1,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":1}}}`
+		result := runClaudeLines(t, launch, envRoot, claudeInitLine("s1", launch.Workspace.Path),
+			`{"type":"tool_progress"}`, `{"type":"status"}`, `{"type":"rate_limit_event"}`, `{"type":"keep_alive"}`,
+			`{"type":"tool_progress"}`, assistant, claudeResultLine("s1", "success", false))
+		if result.OperationalFailure != "" {
+			t.Fatalf("operational failure = %q, want none (unknown families are advisory telemetry)", result.OperationalFailure)
+		}
+		text := claudeFindKind(t, result.Observations, contextevent.KindProviderMessage)
+		const want = `"unknown-foreign-family":["tool_progress","status","rate_limit_event","keep_alive"]`
+		if !bytes.Contains(text.ForeignDetail.RedactedJSON, []byte(want)) {
+			t.Fatalf("assistant detail = %s, want it to contain %s (first-seen order, deduplicated)", text.ForeignDetail.RedactedJSON, want)
+		}
+	})
+
+	// SI-187: an unknown family discovered with no further accepted frame
+	// afterward — the stream ends before any result frame arrives — has no
+	// ordinary observation left to carry it. The terminal must drain it into
+	// an advisory summary of its own rather than dropping the disclosure.
+	t.Run("unknown_family_pending_at_process_exit_is_disclosed_in_a_terminal_summary", func(t *testing.T) {
+		launch, envRoot := claudeTestLaunch(t, sealedexec.ActionStart)
+		result := runClaudeLines(t, launch, envRoot, claudeInitLine("s1", launch.Workspace.Path), `{"type":"system","subtype":"thinking_tokens"}`)
+		if result.OperationalFailure != "missing-terminal-result" {
+			t.Fatalf("operational failure = %q, want missing-terminal-result (no result frame ever arrived)", result.OperationalFailure)
+		}
+		const want = `"unknown-foreign-family":["system/thinking_tokens"]`
+		var disclosed bool
+		for _, obs := range result.Observations {
+			payload, ok := obs.Payload.(*contextevent.ProviderSummaryPayload)
+			if !ok || !strings.HasPrefix(payload.SummaryID, "unknown-families/") {
+				continue
+			}
+			if bytes.Contains(obs.ForeignDetail.RedactedJSON, []byte(want)) {
+				disclosed = true
+			}
+		}
+		if !disclosed {
+			t.Fatalf("no terminal unknown-families summary disclosed %s; observations = %v", want, observationKindsC(result.Observations))
+		}
+	})
+
+	// SI-187: a frame with no `type` string at all names no family and stays
+	// refused exactly as before.
+	t.Run("frame_with_no_type_is_still_refused", func(t *testing.T) {
+		launch, envRoot := claudeTestLaunch(t, sealedexec.ActionStart)
+		result := runClaudeLines(t, launch, envRoot, `{"subtype":"init"}`)
+		assertClaudeGapReason(t, result, "missing-foreign-field", "decode", claudeSource)
+	})
+
+	// SI-187: a malformed frame of a known family — here, an assistant frame
+	// missing its required message — stays refused exactly as before; SI-187
+	// only tolerates a family the decoder does not recognize at all.
+	t.Run("malformed_frame_of_a_known_family_still_refused", func(t *testing.T) {
+		launch, envRoot := claudeTestLaunch(t, sealedexec.ActionStart)
+		bad := `{"type":"assistant","session_id":"s1","uuid":"mu"}`
+		result := runClaudeLines(t, launch, envRoot, claudeInitLine("s1", launch.Workspace.Path), bad)
+		assertClaudeGapReason(t, result, "missing-foreign-field", "decode", claudeSource)
 	})
 
 	// SI-182 test row (f): a duplicate JSON key stays refused exactly as

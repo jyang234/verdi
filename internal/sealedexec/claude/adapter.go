@@ -561,6 +561,15 @@ type claudeActiveRun struct {
 	// later frame repeating the same stray member never re-discloses it.
 	disclosedUnknownMembers map[string]struct{}
 
+	// disclosedUnknownFamilies is SI-187's run-wide "recorded once" set for
+	// unknown frame families, parallel to disclosedUnknownMembers.
+	// pendingUnknownFamilies is the not-yet-attached queue of freshly
+	// discovered families in first-seen order: an unknown-family frame
+	// yields no observation of its own, so its family rides on whichever
+	// accepted observation the run produces next.
+	disclosedUnknownFamilies map[string]struct{}
+	pendingUnknownFamilies   []string
+
 	// Foreign sequence counter (1-based)
 	foreignSeq uint64
 
@@ -701,6 +710,21 @@ func (r *claudeActiveRun) handleProcessTerminal(ctx context.Context, proc *Proce
 	result := sealedexec.AdapterResult{
 		Observations: []sealedexec.NormalizedObservation{},
 		Terminal:     &sealedexec.AdapterTerminalResult{ExitCode: proc.ExitCode},
+	}
+
+	// SI-187: a result frame always drains the pending unknown-family queue
+	// itself (handleResult ran, if at all, well before the process was
+	// reaped), so this is a no-op whenever one was accepted. When the run
+	// instead ends without any further accepted frame after the last
+	// unknown-family discovery — the stream never reaches a result frame, or
+	// a process-level failure interrupts first — that discovery would
+	// otherwise have no observation left to ride on. It is drained one last
+	// time here into an advisory summary of its own, so the disclosure is
+	// never silently lost.
+	if summary, disclosed, err := r.terminalUnknownFamilySummary(ctx, gapSeq); err != nil {
+		return sealedexec.AdapterResult{}, err
+	} else if disclosed {
+		result.Observations = append(result.Observations, summary)
 	}
 
 	// §5 terminal precedence. No lower-priority terminal event is also emitted.
@@ -981,10 +1005,26 @@ type claudeToolResultBlock struct {
 // is collected under the closed code `unknown-foreign-member`. Everything
 // else — an unknown frame type/subtype, a known member of the wrong shape,
 // duplicate keys, and trailing data — stays refused exactly as before.
+//
+// Amendment 002 §5 / §I-108, as amended 2026-09-07 (SI-187, owner-approved
+// "amend Verdi"): the same tolerance now applies one level up, to the frame's
+// own family. A frame whose family — its `type`, or `system` paired with its
+// `subtype` — the family switch in normalize does not know is advisory
+// provider telemetry: never projected, never hashed into any detail or
+// digest, and never itself the subject of an observation. Its family is
+// instead collected under the closed code `unknown-foreign-family`, recorded
+// once per run (first-seen order, deduplicated) using the same disclosure
+// vehicle as unknown-foreign-member. A frame naming no family at all — no
+// `type` string, or a "system" frame with no `subtype` string — still names
+// nothing the decoder can be tolerant of and stays refused, as does a
+// malformed frame of a known family.
 // ---------------------------------------------------------------------------
 
 // unknownMemberCode is SI-182's closed disclosure code.
 const unknownMemberCode = "unknown-foreign-member"
+
+// unknownFamilyCode is SI-187's closed disclosure code.
+const unknownFamilyCode = "unknown-foreign-family"
 
 // jsonFieldNames returns the json member names declared on typ (a struct
 // type), so the tolerant walk's known-member set can never drift from the
@@ -1170,6 +1210,75 @@ func attachUnknownMemberWitness(source map[string]any, paths []string) {
 		return
 	}
 	source[unknownMemberCode] = paths
+}
+
+// recordUnknownFamily is SI-187's run-wide "recorded once" admission of one
+// unknown frame family: a family already disclosed (or already queued)
+// earlier this launch is never queued again; a fresh one is appended to
+// pendingUnknownFamilies in first-seen order to ride on whichever accepted
+// observation the run produces next.
+func (r *claudeActiveRun) recordUnknownFamily(family string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.disclosedUnknownFamilies == nil {
+		r.disclosedUnknownFamilies = make(map[string]struct{})
+	}
+	if _, already := r.disclosedUnknownFamilies[family]; already {
+		return
+	}
+	r.disclosedUnknownFamilies[family] = struct{}{}
+	r.pendingUnknownFamilies = append(r.pendingUnknownFamilies, family)
+}
+
+// drainPendingUnknownFamilies returns SI-187's queued not-yet-attached
+// families in first-seen order and empties the queue, so the very next
+// accepted observation carries them and no later one repeats them. An empty
+// queue returns nil, leaving an untouched run's detail sources untouched.
+func (r *claudeActiveRun) drainPendingUnknownFamilies() []string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if len(r.pendingUnknownFamilies) == 0 {
+		return nil
+	}
+	families := r.pendingUnknownFamilies
+	r.pendingUnknownFamilies = nil
+	return families
+}
+
+// attachUnknownFamilyWitness adds SI-187's disclosure to source under its
+// closed code when families is nonempty; an empty list leaves source
+// untouched (byte-identical to a run that saw only known families).
+func attachUnknownFamilyWitness(source map[string]any, families []string) {
+	if len(families) == 0 {
+		return
+	}
+	source[unknownFamilyCode] = families
+}
+
+// terminalUnknownFamilySummary drains any unknown families this run has not
+// yet attached to an accepted observation and, when nonempty, builds SI-187's
+// last-resort advisory summary carrying them: the counterpart to
+// unknownMemberSummary for a run that reaches its terminal before any further
+// accepted frame can carry the disclosure itself. Its summary id is derived
+// from the terminal's own gap sequence, never from provider bytes. An empty
+// queue (the ordinary case: a result frame, or any other accepted frame,
+// already drained it) reports no disclosure and builds nothing.
+func (r *claudeActiveRun) terminalUnknownFamilySummary(ctx context.Context, seq uint64) (obs sealedexec.NormalizedObservation, disclosed bool, err error) {
+	families := r.drainPendingUnknownFamilies()
+	if len(families) == 0 {
+		return sealedexec.NormalizedObservation{}, false, nil
+	}
+	r.mu.Lock()
+	protectedValues := append([][]byte(nil), r.protectedValues...)
+	r.mu.Unlock()
+	source := map[string]any{}
+	attachUnknownFamilyWitness(source, families)
+	detail, err := r.processDetail(ctx, source, protectedValues)
+	if err != nil {
+		return sealedexec.NormalizedObservation{}, false, err
+	}
+	summaryID := fmt.Sprintf("unknown-families/%d", seq)
+	return buildProviderSummary(r.launch, summaryID, detail.Digest, contextevent.AuthorityAdvisory, detail), true, nil
 }
 
 // validUniqueStrings proves a non-null array of unique nonempty UTF-8 strings.
@@ -1409,7 +1518,25 @@ func (r *claudeActiveRun) normalize(ctx context.Context, line []byte, seq uint64
 	case outer == "result":
 		return r.handleResult(ctx, line, object, seq)
 	}
-	return r.decodeFailure(ctx, seq, "unknown-foreign-family", nil)
+
+	// SI-187: a frame whose family this switch does not recognize is
+	// advisory provider telemetry, not a stream contradiction, exactly when
+	// its family is well-formed — a nonempty type for any non-"system"
+	// frame, or "system" paired with a nonempty subtype. It is never
+	// projected or hashed and produces no observation of its own here;
+	// its family is queued for whichever accepted observation the run
+	// produces next, and source order, message ids, block indexes and call
+	// ids of every accepted frame are unaffected. A "system" frame naming no
+	// subtype at all names no family and stays refused exactly as before.
+	if outer == "system" && subtype == "" {
+		return r.decodeFailure(ctx, seq, "unknown-foreign-family", nil)
+	}
+	family := outer
+	if outer == "system" {
+		family = outer + "/" + subtype
+	}
+	r.recordUnknownFamily(family)
+	return sealedexec.AdapterResult{}, nil
 }
 
 // ---------------------------------------------------------------------------
@@ -1498,6 +1625,7 @@ func (r *claudeActiveRun) handleInit(ctx context.Context, line []byte, object ma
 		"session_id":      sessionID,
 	}
 	attachUnknownMemberWitness(initDetailSource, r.runNewUnknownMembers(unknown.sorted()))
+	attachUnknownFamilyWitness(initDetailSource, r.drainPendingUnknownFamilies())
 	detail, err := r.processDetail(ctx, initDetailSource, protectedValues)
 	if err != nil {
 		return r.decodeFailure(ctx, seq, detailFailureReason(err), nil)
@@ -1560,6 +1688,7 @@ func (r *claudeActiveRun) handleRetry(ctx context.Context, line []byte, object m
 		"uuid":           *frame.UUID,
 	}
 	attachUnknownMemberWitness(retryDetailSource, r.runNewUnknownMembers(unknown.sorted()))
+	attachUnknownFamilyWitness(retryDetailSource, r.drainPendingUnknownFamilies())
 	detail, err := r.processDetail(ctx, retryDetailSource, protectedValues)
 	if err != nil {
 		return r.decodeFailure(ctx, seq, detailFailureReason(err), nil)
@@ -1701,6 +1830,7 @@ func (r *claudeActiveRun) handleAssistant(ctx context.Context, line []byte, obje
 				"text":        *block.Text,
 			}
 			attachUnknownMemberWitness(textDetailSource, r.runNewUnknownMembers(append(append([]string(nil), messageUnknown...), blockUnknown.sorted()...)))
+			attachUnknownFamilyWitness(textDetailSource, r.drainPendingUnknownFamilies())
 			detail, err := r.processDetail(ctx, textDetailSource, protectedValues)
 			if err != nil {
 				return r.decodeFailure(ctx, seq, detailFailureReason(err), nil)
@@ -1761,6 +1891,7 @@ func (r *claudeActiveRun) handleAssistant(ctx context.Context, line []byte, obje
 				"tool_name":   *block.Name,
 			}
 			attachUnknownMemberWitness(toolUseDetailSource, r.runNewUnknownMembers(append(append([]string(nil), messageUnknown...), blockUnknown.sorted()...)))
+			attachUnknownFamilyWitness(toolUseDetailSource, r.drainPendingUnknownFamilies())
 			detail, err := r.processDetail(ctx, toolUseDetailSource, protectedValues)
 			if err != nil {
 				return r.decodeFailure(ctx, seq, detailFailureReason(err), nil)
@@ -1867,6 +1998,7 @@ func (r *claudeActiveRun) unknownMemberSummary(ctx context.Context, family strin
 	}
 	source := map[string]any{"family": family}
 	attachUnknownMemberWitness(source, paths)
+	attachUnknownFamilyWitness(source, r.drainPendingUnknownFamilies())
 	detail, err := r.processDetail(ctx, source, protectedValues)
 	if err != nil {
 		return sealedexec.NormalizedObservation{}, false, err
@@ -1892,6 +2024,7 @@ func (r *claudeActiveRun) omissionSummary(ctx context.Context, contentType, mess
 		"omitted":      true,
 	}
 	attachUnknownMemberWitness(omissionSource, witness)
+	attachUnknownFamilyWitness(omissionSource, r.drainPendingUnknownFamilies())
 	detail, err := r.processDetail(ctx, omissionSource, protectedValues)
 	if err != nil {
 		return sealedexec.NormalizedObservation{}, false, err
@@ -2016,6 +2149,7 @@ func (r *claudeActiveRun) handleToolResult(ctx context.Context, line []byte, obj
 			"status":  status,
 		}
 		attachUnknownMemberWitness(toolResultDetailSource, r.runNewUnknownMembers(append(append([]string(nil), frameUnknown...), blockUnknown.sorted()...)))
+		attachUnknownFamilyWitness(toolResultDetailSource, r.drainPendingUnknownFamilies())
 		detail, err := r.processDetail(ctx, toolResultDetailSource, protectedValues)
 		if err != nil {
 			return r.decodeFailure(ctx, seq, detailFailureReason(err), nil)
@@ -2162,6 +2296,7 @@ func (r *claudeActiveRun) handleResult(ctx context.Context, line []byte, object 
 		projection["modelUsage"] = modelUsageProjection
 	}
 	attachUnknownMemberWitness(projection, r.runNewUnknownMembers(unknown.sorted()))
+	attachUnknownFamilyWitness(projection, r.drainPendingUnknownFamilies())
 	detail, err := r.processDetail(ctx, projection, protectedValues)
 	if err != nil {
 		return r.decodeFailure(ctx, seq, detailFailureReason(err), nil)
