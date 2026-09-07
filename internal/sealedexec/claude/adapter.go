@@ -1070,30 +1070,56 @@ func (s *unknownMemberSet) sorted() []string {
 }
 
 // scanKnownObject records, into set, the prefix-qualified dotted path of
-// every member of object absent from known. An unknown member's value is
-// never inspected: this is the entire "never read" contract.
-func scanKnownObject(object map[string]any, known map[string]struct{}, prefix string, set *unknownMemberSet) {
+// every member of object absent from known, and reports whether it found no
+// member requiring the caller to refuse the frame instead. An unknown
+// member's value is never inspected: this is the entire "never read"
+// contract.
+//
+// A member whose key is not byte-identical to any known name but
+// case-insensitively (strings.EqualFold) matches one is never treated as
+// unknown: it reports false instead, recording nothing more. §I-108's known
+// members "keep their strict types" via the sibling typed json.Unmarshal —
+// but encoding/json falls back to a case-insensitive match whenever no
+// exact-cased key is present, so such a member would be READ into the known
+// field despite this scan having just filed it as tolerated-and-never-read.
+// That contradiction — a member simultaneously disclosed as unread and
+// consumed into the projected detail and both digests — is what the false
+// return exists to prevent; the caller must refuse the whole frame
+// (invalid-foreign-field) the moment it sees false, never call set.sorted(),
+// and never build a detail from anything scanned so far (review B-F1).
+func scanKnownObject(object map[string]any, known map[string]struct{}, prefix string, set *unknownMemberSet) bool {
 	for key := range object {
-		if _, ok := known[key]; !ok {
-			set.add(prefix + key)
+		if _, ok := known[key]; ok {
+			continue
 		}
+		for name := range known {
+			if strings.EqualFold(key, name) {
+				return false
+			}
+		}
+		set.add(prefix + key)
 	}
+	return true
 }
 
 // scanKnownObjectArray applies scanKnownObject to every object element of an
 // array-shaped member (mcp rows, permission-denial rows). The recorded path
 // never carries an element index: it names the row shape, not one occurrence,
-// so the same stray key in two rows collapses to one entry.
-func scanKnownObjectArray(value any, known map[string]struct{}, prefix string, set *unknownMemberSet) {
+// so the same stray key in two rows collapses to one entry. It reports false
+// — refuse, do not record further — the moment any row's scan does.
+func scanKnownObjectArray(value any, known map[string]struct{}, prefix string, set *unknownMemberSet) bool {
 	array, ok := value.([]any)
 	if !ok {
-		return
+		return true
 	}
 	for _, element := range array {
 		if object, ok := element.(map[string]any); ok {
-			scanKnownObject(object, known, prefix, set)
+			if !scanKnownObject(object, known, prefix, set) {
+				return false
+			}
 		}
 	}
+	return true
 }
 
 // runNewUnknownMembers filters out every path this launch has already
@@ -1176,7 +1202,9 @@ func validateUsage(raw *json.RawMessage, object map[string]any, prefix string, s
 			return nil, "invalid-foreign-field"
 		}
 	}
-	scanKnownObject(object, claudeUsageFields, prefix, set)
+	if !scanKnownObject(object, claudeUsageFields, prefix, set) {
+		return nil, "invalid-foreign-field"
+	}
 	projected := map[string]any{
 		"cache_creation_input_tokens": *usage.CacheCreationInputTokens,
 		"cache_read_input_tokens":     *usage.CacheReadInputTokens,
@@ -1230,7 +1258,9 @@ func validateModelUsage(raw *json.RawMessage, object map[string]any, prefix stri
 			return nil, "invalid-foreign-field"
 		}
 	}
-	scanKnownObject(object, claudeModelUsageFields, prefix, set)
+	if !scanKnownObject(object, claudeModelUsageFields, prefix, set) {
+		return nil, "invalid-foreign-field"
+	}
 	projected := map[string]any{
 		"cacheCreationInputTokens": *usage.CacheCreationInputTokens,
 		"cacheReadInputTokens":     *usage.CacheReadInputTokens,
@@ -1299,7 +1329,9 @@ func decodeRetryError(raw json.RawMessage, value any, unknown *unknownMemberSet)
 		default:
 			return "", "invalid-foreign-field"
 		}
-		scanKnownObject(typed, claudeRetryErrorFields, "error.", unknown)
+		if !scanKnownObject(typed, claudeRetryErrorFields, "error.", unknown) {
+			return "", "invalid-foreign-field"
+		}
 		return *errorFrame.Type, ""
 	case string:
 		if !claudeRetryErrorStringAccepted(typed) {
@@ -1374,8 +1406,12 @@ func (r *claudeActiveRun) handleInit(ctx context.Context, line []byte, object ma
 		return r.decodeFailure(ctx, seq, "invalid-foreign-field", map[string]any{"family": "system/init"})
 	}
 	var unknown unknownMemberSet
-	scanKnownObject(object, claudeInitFrameFields, "", &unknown)
-	scanKnownObjectArray(object["mcp_servers"], claudeMCPRowFields, "mcp_servers.", &unknown)
+	if !scanKnownObject(object, claudeInitFrameFields, "", &unknown) {
+		return r.decodeFailure(ctx, seq, "invalid-foreign-field", map[string]any{"family": "system/init"})
+	}
+	if !scanKnownObjectArray(object["mcp_servers"], claudeMCPRowFields, "mcp_servers.", &unknown) {
+		return r.decodeFailure(ctx, seq, "invalid-foreign-field", map[string]any{"field": "mcp_servers"})
+	}
 	if frame.Type == nil || frame.Subtype == nil || frame.SessionID == nil || frame.Model == nil ||
 		frame.MCPServers == nil || frame.CWD == nil || frame.Tools == nil || frame.PermissionMode == nil ||
 		frame.APIKeySource == nil || frame.ClaudeCodeVersion == nil || frame.SlashCommands == nil ||
@@ -1468,7 +1504,9 @@ func (r *claudeActiveRun) handleRetry(ctx context.Context, line []byte, object m
 		return r.decodeFailure(ctx, seq, "invalid-foreign-field", map[string]any{"family": "system/api_retry"})
 	}
 	var unknown unknownMemberSet
-	scanKnownObject(object, claudeRetryFrameFields, "", &unknown)
+	if !scanKnownObject(object, claudeRetryFrameFields, "", &unknown) {
+		return r.decodeFailure(ctx, seq, "invalid-foreign-field", map[string]any{"family": "system/api_retry"})
+	}
 	if frame.Type == nil || frame.Subtype == nil || frame.Attempt == nil || frame.MaxRetries == nil ||
 		frame.RetryDelayMS == nil || frame.Error == nil || frame.UUID == nil || frame.SessionID == nil {
 		return r.decodeFailure(ctx, seq, "missing-foreign-field", map[string]any{"family": "system/api_retry"})
@@ -1533,9 +1571,13 @@ func (r *claudeActiveRun) handleAssistant(ctx context.Context, line []byte, obje
 		return r.decodeFailure(ctx, seq, "invalid-foreign-field", map[string]any{"family": "assistant"})
 	}
 	var unknown unknownMemberSet
-	scanKnownObject(object, claudeAssistantFrameFields, "", &unknown)
+	if !scanKnownObject(object, claudeAssistantFrameFields, "", &unknown) {
+		return r.decodeFailure(ctx, seq, "invalid-foreign-field", map[string]any{"family": "assistant"})
+	}
 	messageObject, _ := object["message"].(map[string]any)
-	scanKnownObject(messageObject, claudeAssistantMessageFields, "message.", &unknown)
+	if !scanKnownObject(messageObject, claudeAssistantMessageFields, "message.", &unknown) {
+		return r.decodeFailure(ctx, seq, "invalid-foreign-field", map[string]any{"field": "message"})
+	}
 	if frame.Type == nil || frame.SessionID == nil || frame.UUID == nil || frame.Message == nil {
 		return r.decodeFailure(ctx, seq, "missing-foreign-field", map[string]any{"family": "assistant"})
 	}
@@ -1624,7 +1666,9 @@ func (r *claudeActiveRun) handleAssistant(ctx context.Context, line []byte, obje
 				return r.decodeFailure(ctx, seq, "invalid-foreign-field", map[string]any{"field": "content.text"})
 			}
 			var blockUnknown unknownMemberSet
-			scanKnownObject(blockObject, claudeTextBlockFields, "message.content.", &blockUnknown)
+			if !scanKnownObject(blockObject, claudeTextBlockFields, "message.content.", &blockUnknown) {
+				return r.decodeFailure(ctx, seq, "invalid-foreign-field", map[string]any{"field": "content.text"})
+			}
 			textDetailSource := map[string]any{
 				"block_index": float64(blockIndex),
 				"family":      "assistant/text",
@@ -1680,7 +1724,9 @@ func (r *claudeActiveRun) handleAssistant(ctx context.Context, line []byte, obje
 				return r.decodeFailure(ctx, seq, "redaction-failed", nil)
 			}
 			var blockUnknown unknownMemberSet
-			scanKnownObject(blockObject, claudeToolUseBlockFields, "message.content.", &blockUnknown)
+			if !scanKnownObject(blockObject, claudeToolUseBlockFields, "message.content.", &blockUnknown) {
+				return r.decodeFailure(ctx, seq, "invalid-foreign-field", map[string]any{"field": "content.tool_use"})
+			}
 			toolUseDetailSource := map[string]any{
 				"block_index": float64(blockIndex),
 				"call_id":     *block.ID,
@@ -1729,7 +1775,9 @@ func (r *claudeActiveRun) handleAssistant(ctx context.Context, line []byte, obje
 				return r.decodeFailure(ctx, seq, "missing-foreign-field", map[string]any{"field": "content.thinking"})
 			}
 			var blockUnknown unknownMemberSet
-			scanKnownObject(blockObject, claudeThinkingBlockFields, "message.content.", &blockUnknown)
+			if !scanKnownObject(blockObject, claudeThinkingBlockFields, "message.content.", &blockUnknown) {
+				return r.decodeFailure(ctx, seq, "invalid-foreign-field", map[string]any{"field": "content.thinking"})
+			}
 			witness := r.runNewUnknownMembers(append(append([]string(nil), messageUnknown...), blockUnknown.sorted()...))
 			observation, safe, err := r.omissionSummary(ctx, "thinking", messageID, blockIndex, protectedValues, witness)
 			if err != nil {
@@ -1749,7 +1797,9 @@ func (r *claudeActiveRun) handleAssistant(ctx context.Context, line []byte, obje
 				return r.decodeFailure(ctx, seq, "missing-foreign-field", map[string]any{"field": "content.redacted_thinking"})
 			}
 			var blockUnknown unknownMemberSet
-			scanKnownObject(blockObject, claudeRedactedThinkingBlockFields, "message.content.", &blockUnknown)
+			if !scanKnownObject(blockObject, claudeRedactedThinkingBlockFields, "message.content.", &blockUnknown) {
+				return r.decodeFailure(ctx, seq, "invalid-foreign-field", map[string]any{"field": "content.redacted_thinking"})
+			}
 			witness := r.runNewUnknownMembers(append(append([]string(nil), messageUnknown...), blockUnknown.sorted()...))
 			observation, safe, err := r.omissionSummary(ctx, "redacted_thinking", messageID, blockIndex, protectedValues, witness)
 			if err != nil {
@@ -1830,9 +1880,13 @@ func (r *claudeActiveRun) handleToolResult(ctx context.Context, line []byte, obj
 		return r.decodeFailure(ctx, seq, "invalid-foreign-field", map[string]any{"family": "user"})
 	}
 	var unknown unknownMemberSet
-	scanKnownObject(object, claudeUserFrameFields, "", &unknown)
+	if !scanKnownObject(object, claudeUserFrameFields, "", &unknown) {
+		return r.decodeFailure(ctx, seq, "invalid-foreign-field", map[string]any{"family": "user"})
+	}
 	messageObject, _ := object["message"].(map[string]any)
-	scanKnownObject(messageObject, claudeUserMessageFields, "message.", &unknown)
+	if !scanKnownObject(messageObject, claudeUserMessageFields, "message.", &unknown) {
+		return r.decodeFailure(ctx, seq, "invalid-foreign-field", map[string]any{"field": "message"})
+	}
 	if frame.Type == nil || frame.SessionID == nil || frame.UUID == nil || frame.Message == nil ||
 		frame.Message.Role == nil || frame.Message.Content == nil {
 		return r.decodeFailure(ctx, seq, "missing-foreign-field", map[string]any{"family": "user"})
@@ -1878,7 +1932,9 @@ func (r *claudeActiveRun) handleToolResult(ctx context.Context, line []byte, obj
 			return r.decodeFailure(ctx, seq, "invalid-foreign-field", map[string]any{"field": "content.tool_result"})
 		}
 		var blockUnknown unknownMemberSet
-		scanKnownObject(blockObject, claudeToolResultBlockFields, "message.content.", &blockUnknown)
+		if !scanKnownObject(blockObject, claudeToolResultBlockFields, "message.content.", &blockUnknown) {
+			return r.decodeFailure(ctx, seq, "invalid-foreign-field", map[string]any{"field": "content.tool_result"})
+		}
 		if block.ToolUseID == nil || block.Content == nil {
 			return r.decodeFailure(ctx, seq, "missing-foreign-field", map[string]any{"field": "content.tool_result"})
 		}
@@ -1973,8 +2029,12 @@ func (r *claudeActiveRun) handleResult(ctx context.Context, line []byte, object 
 		return r.decodeFailure(ctx, seq, "invalid-foreign-field", map[string]any{"family": "result"})
 	}
 	var unknown unknownMemberSet
-	scanKnownObject(object, claudeResultFrameFields, "", &unknown)
-	scanKnownObjectArray(object["permission_denials"], claudePermissionDenialFields, "permission_denials.", &unknown)
+	if !scanKnownObject(object, claudeResultFrameFields, "", &unknown) {
+		return r.decodeFailure(ctx, seq, "invalid-foreign-field", map[string]any{"family": "result"})
+	}
+	if !scanKnownObjectArray(object["permission_denials"], claudePermissionDenialFields, "permission_denials.", &unknown) {
+		return r.decodeFailure(ctx, seq, "invalid-foreign-field", map[string]any{"field": "permission_denials"})
+	}
 	if frame.Type == nil || frame.Subtype == nil || frame.IsError == nil || frame.Result == nil ||
 		frame.SessionID == nil || frame.UUID == nil || frame.DurationMS == nil || frame.DurationAPIMS == nil ||
 		frame.NumTurns == nil || frame.TotalCostUSD == nil || frame.Usage == nil || frame.PermissionDenials == nil {
