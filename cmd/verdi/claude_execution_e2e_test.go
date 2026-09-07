@@ -473,6 +473,13 @@ type fakeClaudeSpec struct {
 	// error_status (SI-183), and the result frame's modelUsage.<model> value
 	// is the camelCase shape (SI-184). The sealed run must still proceed.
 	unknownMembers bool
+	// multiFrame makes the fake reproduce the real Claude Code CLI 2.1.261's
+	// multi-frame assistant message shape (SI-185, F12 canary flight 5,
+	// 2026-09-07): one assistant frame per content block, both frames of the
+	// single assistant message carrying the same message.id — a thinking
+	// block (block 0) followed by the text block (block 1). The sealed run
+	// must still proceed to its result frame.
+	multiFrame bool
 }
 
 const fakeClaudeSource = `package main
@@ -506,6 +513,9 @@ const (
 	versionSuffix = __VERSIONSUFFIX__
 	// unknownMembers selects the SI-182 2.1.261-shaped unknown-member frames.
 	unknownMembers = __UNKNOWNMEMBERS__
+	// multiFrame selects the SI-185 2.1.261-shaped multi-frame assistant
+	// message.
+	multiFrame = __MULTIFRAME__
 )
 
 func main() {
@@ -689,12 +699,30 @@ func run() error {
 	if bigText {
 		text = strings.Repeat("a", 20000)
 	}
+	usage := map[string]any{"input_tokens": 1, "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0, "output_tokens": 1}
+	if multiFrame {
+		// SI-185: the real Claude Code CLI 2.1.261 emits one assistant frame
+		// per content block, every frame of the one message carrying the
+		// same message.id (F12 canary flight 5, 2026-09-07) — a thinking
+		// block (block 0) in its own frame, then the text block (block 1) in
+		// a second frame sharing that id.
+		if err := emit(map[string]any{
+			"type": "assistant", "session_id": session, "uuid": "msg-uuid-e2e-0",
+			"message": map[string]any{
+				"id": "msg_e2e", "type": "message", "role": "assistant", "model": model,
+				"content": []map[string]any{{"type": "thinking", "thinking": "sealed reasoning", "signature": "sig-e2e"}},
+				"usage":   usage,
+			},
+		}); err != nil {
+			return err
+		}
+	}
 	if err := emit(map[string]any{
 		"type": "assistant", "session_id": session, "uuid": "msg-uuid-e2e",
 		"message": map[string]any{
 			"id": "msg_e2e", "type": "message", "role": "assistant", "model": model,
 			"content": []map[string]any{{"type": "text", "text": text}},
-			"usage":   map[string]any{"input_tokens": 1, "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0, "output_tokens": 1},
+			"usage":   usage,
 		},
 	}); err != nil {
 		return err
@@ -876,6 +904,7 @@ func buildFakeClaude(t *testing.T, dir string, spec fakeClaudeSpec) string {
 		"__BIGTEXT__", strconv.FormatBool(spec.bigText),
 		"__VERSIONSUFFIX__", strconv.FormatBool(spec.versionSuffix),
 		"__UNKNOWNMEMBERS__", strconv.FormatBool(spec.unknownMembers),
+		"__MULTIFRAME__", strconv.FormatBool(spec.multiFrame),
 	).Replace(fakeClaudeSource)
 	moduleDir := filepath.Join(dir, "fake-claude-src")
 	if err := os.MkdirAll(moduleDir, 0o755); err != nil {
@@ -940,6 +969,12 @@ type claudeLifecycleOptions struct {
 	// carry the SI-182 2.1.261-shaped unknown members; the sealed run must
 	// still proceed.
 	unknownMembers bool
+	// multiFrame makes the fake provider emit its one assistant message as
+	// the real Claude Code CLI 2.1.261 does (SI-185): a thinking block and
+	// the text block in two separate frames sharing one message.id, instead
+	// of the single all-in-one-frame assistant message. The sealed run must
+	// still proceed to the same successful lifecycle.
+	multiFrame bool
 }
 
 // serveWithAcknowledgedExpansionLedger runs the shared lifecycle controller
@@ -1103,7 +1138,7 @@ func runClaudeSealedLifecycle(t *testing.T, bin string, options claudeLifecycleO
 		argvPath: argvPath, envPath: envPath, stdinPath: stdinPath, toolsPath: toolsPath,
 		gitPath: gitPath, workspace: workspacePath, extraTool: options.extraTool, commit: true,
 		bigText: options.oversizedDetail, versionSuffix: options.claudeCodeSuffix,
-		unknownMembers: options.unknownMembers,
+		unknownMembers: options.unknownMembers, multiFrame: options.multiFrame,
 	})
 	if built != claudePath {
 		t.Fatalf("fake claude built at %q, want the granted argv0 %q", built, claudePath)
@@ -1434,6 +1469,33 @@ func TestClaudeBuiltBinaryLifecycle_Behavioral(t *testing.T) {
 		if !initDisclosed || !retryDisclosed {
 			t.Fatalf("acknowledged details disclosed init=%v retry=%v, want both; details = %s",
 				initDisclosed, retryDisclosed, sealedEventDetails(run.fake.events))
+		}
+	})
+
+	// SI-185: the real Claude Code CLI 2.1.261 emits one assistant frame per
+	// content block, every frame of the one message carrying the same
+	// message.id (F12 canary flight 5, 2026-09-07). The sealed run must
+	// still complete, continuing the block index across the two frames
+	// rather than refusing the second as a duplicate message id.
+	t.Run("sealed_start_accepts_the_2_1_261_multi_frame_assistant_message", func(t *testing.T) {
+		run := runClaudeSealedLifecycle(t, bin, claudeLifecycleOptions{multiFrame: true})
+		assertClaudeSuccessfulLifecycle(t, run)
+		var thinkingSummaryID, textMessageID string
+		for _, event := range run.fake.events {
+			switch payload := event.Payload.(type) {
+			case *contextevent.ProviderSummaryPayload:
+				if strings.Contains(string(payload.Detail.RedactedJSON), `"content_type":"thinking"`) {
+					thinkingSummaryID = payload.SummaryID
+				}
+			case *contextevent.ProviderMessagePayload:
+				textMessageID = payload.MessageID
+			}
+		}
+		if thinkingSummaryID != "msg_e2e:0" {
+			t.Fatalf("multi-frame thinking summary id = %q, want msg_e2e:0; details = %s", thinkingSummaryID, sealedEventDetails(run.fake.events))
+		}
+		if textMessageID != "msg_e2e:1" {
+			t.Fatalf("multi-frame text message id = %q, want msg_e2e:1; details = %s", textMessageID, sealedEventDetails(run.fake.events))
 		}
 	})
 
