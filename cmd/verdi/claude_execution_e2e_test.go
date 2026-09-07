@@ -488,6 +488,13 @@ type fakeClaudeSpec struct {
 	// different accepted carriers. The sealed run must tolerate both and
 	// still proceed to its result frame.
 	unknownFamilies bool
+	// metaOnCalls makes every tools/call this fake issues (SI-188, F12
+	// canary track, 2026-09-07) carry a top-level `_meta` member beside
+	// `name`/`arguments`, exactly as the real Claude Code CLI 2.1.261 does
+	// on every tools/call (the MCP SDK's request() adds
+	// params._meta.progressToken whenever onprogress is supplied). The
+	// sealed run must still proceed to its result.
+	metaOnCalls bool
 }
 
 const fakeClaudeSource = `package main
@@ -527,6 +534,9 @@ const (
 	// unknownFamilies selects the SI-187 2.1.261-shaped further informational
 	// frame families.
 	unknownFamilies = __UNKNOWNFAMILIES__
+	// metaOnCalls selects the SI-188 2.1.261-shaped _meta member on every
+	// tools/call.
+	metaOnCalls = __METAONCALLS__
 )
 
 func main() {
@@ -652,7 +662,7 @@ func run() error {
 			return err
 		}
 	}
-	claimed, err := post(claimURL, claimAuthorization, ` + "`" + `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"claim_paths","arguments":{}}}` + "`" + `)
+	claimed, err := post(claimURL, claimAuthorization, callBody(1, "claim_paths", "{}"))
 	if err != nil {
 		return err
 	}
@@ -681,14 +691,14 @@ func run() error {
 	if err := record("tools/list " + toolNames(listed)); err != nil {
 		return err
 	}
-	plan, err := post(url, authorization, ` + "`" + `{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"get_flight_plan","arguments":{}}}` + "`" + `)
+	plan, err := post(url, authorization, callBody(2, "get_flight_plan", "{}"))
 	if err != nil {
 		return err
 	}
 	if err := record("get_flight_plan " + compact(plan)); err != nil {
 		return err
 	}
-	expansion, err := post(url, authorization, ` + "`" + `{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"request_context","arguments":{"ref":"spec/feature-alpha","purpose":"sealed claude witness"}}}` + "`" + `)
+	expansion, err := post(url, authorization, callBody(3, "request_context", "{\"ref\":\"spec/feature-alpha\",\"purpose\":\"sealed claude witness\"}"))
 	if err != nil {
 		return err
 	}
@@ -703,7 +713,7 @@ func run() error {
 		if err := record("extra_call " + extraTool); err != nil {
 			return err
 		}
-		refused, err := post(url, authorization, ` + "`" + `{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"` + "`" + `+extraTool+` + "`" + `","arguments":{}}}` + "`" + `)
+		refused, err := post(url, authorization, callBody(4, extraTool, "{}"))
 		if err != nil {
 			return err
 		}
@@ -888,6 +898,17 @@ func post(url, authorization, body string) ([]byte, error) {
 	return io.ReadAll(response.Body)
 }
 
+// callBody builds one tools/call JSON-RPC request body. When metaOnCalls is
+// selected (SI-188) it carries the exact shape the real Claude Code CLI
+// 2.1.261 sends on every tools/call: a top-level _meta member
+// (progressToken: 1) beside name and arguments.
+func callBody(id int, name, argsJSON string) string {
+	if metaOnCalls {
+		return fmt.Sprintf("{\"jsonrpc\":\"2.0\",\"id\":%d,\"method\":\"tools/call\",\"params\":{\"name\":\"%s\",\"arguments\":%s,\"_meta\":{\"progressToken\":1}}}", id, name, argsJSON)
+	}
+	return fmt.Sprintf("{\"jsonrpc\":\"2.0\",\"id\":%d,\"method\":\"tools/call\",\"params\":{\"name\":\"%s\",\"arguments\":%s}}", id, name, argsJSON)
+}
+
 func toolNames(frame []byte) string {
 	var decoded struct {
 		Result struct {
@@ -938,6 +959,7 @@ func buildFakeClaude(t *testing.T, dir string, spec fakeClaudeSpec) string {
 		"__UNKNOWNMEMBERS__", strconv.FormatBool(spec.unknownMembers),
 		"__MULTIFRAME__", strconv.FormatBool(spec.multiFrame),
 		"__UNKNOWNFAMILIES__", strconv.FormatBool(spec.unknownFamilies),
+		"__METAONCALLS__", strconv.FormatBool(spec.metaOnCalls),
 	).Replace(fakeClaudeSource)
 	moduleDir := filepath.Join(dir, "fake-claude-src")
 	if err := os.MkdirAll(moduleDir, 0o755); err != nil {
@@ -1013,6 +1035,11 @@ type claudeLifecycleOptions struct {
 	// after init, tool_progress mid-stream); the sealed run must tolerate
 	// both and still proceed to the same successful lifecycle.
 	unknownFamilies bool
+	// metaOnCalls makes the fake provider carry the SI-188 2.1.261-shaped
+	// `_meta` member on every tools/call; the sealed run must still proceed
+	// to the same successful lifecycle instead of ending at the first tool
+	// call.
+	metaOnCalls bool
 }
 
 // serveWithAcknowledgedExpansionLedger runs the shared lifecycle controller
@@ -1177,7 +1204,7 @@ func runClaudeSealedLifecycle(t *testing.T, bin string, options claudeLifecycleO
 		gitPath: gitPath, workspace: workspacePath, extraTool: options.extraTool, commit: true,
 		bigText: options.oversizedDetail, versionSuffix: options.claudeCodeSuffix,
 		unknownMembers: options.unknownMembers, multiFrame: options.multiFrame,
-		unknownFamilies: options.unknownFamilies,
+		unknownFamilies: options.unknownFamilies, metaOnCalls: options.metaOnCalls,
 	})
 	if built != claudePath {
 		t.Fatalf("fake claude built at %q, want the granted argv0 %q", built, claudePath)
@@ -1580,6 +1607,19 @@ func TestClaudeBuiltBinaryLifecycle_Behavioral(t *testing.T) {
 			t.Fatalf("family carriers = events %d and %d, want two distinct carriers in arrival order; details = %s",
 				firstCarrier, secondCarrier, sealedEventDetails(run.fake.events))
 		}
+	})
+
+	// SI-188: the real Claude Code CLI 2.1.261 sends a top-level `_meta`
+	// member (progressToken) beside `name`/`arguments` on EVERY tools/call —
+	// the MCP SDK's request() adds params._meta.progressToken whenever
+	// onprogress is supplied (F12 canary track, 2026-09-07). The sealed run
+	// must tolerate it on every scoped tool call — claim_paths,
+	// get_flight_plan, and request_context alike — and still complete to
+	// its result, instead of ending at the first tool call.
+	t.Run("sealed_start_tolerates_the_2_1_261_progress_meta_member", func(t *testing.T) {
+		run := runClaudeSealedLifecycle(t, bin, claudeLifecycleOptions{metaOnCalls: true})
+		assertClaudeSuccessfulLifecycle(t, run)
+		assertClaudeDurableScopedPrelude(t, run)
 	})
 
 	// Amendment 003: every sealed session resolves exactly one ATC-owned claim
