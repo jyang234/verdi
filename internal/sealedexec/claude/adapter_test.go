@@ -1366,25 +1366,32 @@ func TestClaudeAdapterParityContract_Behavioral(t *testing.T) {
 	// every non-object error value did before this amendment; an explicit
 	// JSON null continues to surface as the plain absent-key case,
 	// missing-foreign-field, unchanged.
+	//
+	// B-F1 closure review, Minor (B-F4): every accept row pins both the exact
+	// error_category projection and the exact provider-api-<value> retry
+	// reason code, not just acceptance — a projection that normalized or
+	// remapped any of the ten values besides "unknown" would previously have
+	// kept every row green.
 	t.Run("retry_error_member_accepts_the_closed_string_enum_and_the_v1_object", func(t *testing.T) {
 		cases := []struct {
-			name       string
-			errorJSON  string
-			accept     bool
-			wantReason string // only read when !accept; "" means invalid-foreign-field
+			name         string
+			errorJSON    string
+			accept       bool
+			wantCategory string // only read when accept
+			wantReason   string // only read when !accept; "" means invalid-foreign-field
 		}{
-			{name: "authentication_failed accepted", errorJSON: `"authentication_failed"`, accept: true},
-			{name: "oauth_org_not_allowed accepted", errorJSON: `"oauth_org_not_allowed"`, accept: true},
-			{name: "account_on_hold accepted", errorJSON: `"account_on_hold"`, accept: true},
-			{name: "billing_error accepted", errorJSON: `"billing_error"`, accept: true},
-			{name: "rate_limit accepted", errorJSON: `"rate_limit"`, accept: true},
-			{name: "overloaded accepted", errorJSON: `"overloaded"`, accept: true},
-			{name: "invalid_request accepted", errorJSON: `"invalid_request"`, accept: true},
-			{name: "model_not_found accepted", errorJSON: `"model_not_found"`, accept: true},
-			{name: "server_error accepted", errorJSON: `"server_error"`, accept: true},
-			{name: "unknown accepted", errorJSON: `"unknown"`, accept: true},
-			{name: "max_output_tokens accepted", errorJSON: `"max_output_tokens"`, accept: true},
-			{name: "v1 object form still accepted", errorJSON: `{"type":"rate_limit","message":"slow down"}`, accept: true},
+			{name: "authentication_failed accepted", errorJSON: `"authentication_failed"`, accept: true, wantCategory: "authentication_failed"},
+			{name: "oauth_org_not_allowed accepted", errorJSON: `"oauth_org_not_allowed"`, accept: true, wantCategory: "oauth_org_not_allowed"},
+			{name: "account_on_hold accepted", errorJSON: `"account_on_hold"`, accept: true, wantCategory: "account_on_hold"},
+			{name: "billing_error accepted", errorJSON: `"billing_error"`, accept: true, wantCategory: "billing_error"},
+			{name: "rate_limit accepted", errorJSON: `"rate_limit"`, accept: true, wantCategory: "rate_limit"},
+			{name: "overloaded accepted", errorJSON: `"overloaded"`, accept: true, wantCategory: "overloaded"},
+			{name: "invalid_request accepted", errorJSON: `"invalid_request"`, accept: true, wantCategory: "invalid_request"},
+			{name: "model_not_found accepted", errorJSON: `"model_not_found"`, accept: true, wantCategory: "model_not_found"},
+			{name: "server_error accepted", errorJSON: `"server_error"`, accept: true, wantCategory: "server_error"},
+			{name: "unknown accepted", errorJSON: `"unknown"`, accept: true, wantCategory: "unknown"},
+			{name: "max_output_tokens accepted", errorJSON: `"max_output_tokens"`, accept: true, wantCategory: "max_output_tokens"},
+			{name: "v1 object form still accepted", errorJSON: `{"type":"rate_limit","message":"slow down"}`, accept: true, wantCategory: "rate_limit"},
 			{name: "outsider string refused", errorJSON: `"quota_exceeded"`},
 			{name: "empty string refused", errorJSON: `""`},
 			{name: "bare number refused", errorJSON: `1`},
@@ -1397,8 +1404,18 @@ func TestClaudeAdapterParityContract_Behavioral(t *testing.T) {
 					`"error":` + tc.errorJSON + `,"uuid":"ru","session_id":"s1"}`
 				if tc.accept {
 					result := runClaudeLines(t, launch, envRoot, claudeInitLine("s1", launch.Workspace.Path), line, claudeResultLine("s1", "success", false))
-					if !hasKindC(result.Observations, contextevent.KindRetry) {
-						t.Fatalf("error %s should be accepted, observations = %v", tc.errorJSON, observationKindsC(result.Observations))
+					retryObs := claudeFindKind(t, result.Observations, contextevent.KindRetry)
+					retryPayload, ok := retryObs.Payload.(*contextevent.RetryPayload)
+					if !ok {
+						t.Fatalf("retry payload = %#v, want a retry payload", retryObs.Payload)
+					}
+					wantReasonCode := "provider-api-" + tc.wantCategory
+					if retryPayload.ReasonCode != wantReasonCode {
+						t.Fatalf("error %s: retry reason code = %q, want %q", tc.errorJSON, retryPayload.ReasonCode, wantReasonCode)
+					}
+					wantCategory := `"error_category":"` + tc.wantCategory + `"`
+					if !bytes.Contains(retryObs.ForeignDetail.RedactedJSON, []byte(wantCategory)) {
+						t.Fatalf("error %s: retry detail = %s, want it to contain %s", tc.errorJSON, retryObs.ForeignDetail.RedactedJSON, wantCategory)
 					}
 					return
 				}
@@ -1410,6 +1427,58 @@ func TestClaudeAdapterParityContract_Behavioral(t *testing.T) {
 				assertClaudeGapReason(t, result, wantReason, "decode", claudeSource)
 			})
 		}
+	})
+
+	// B-F1 (closure review, Important): scanKnownObject's shape-walk boundary
+	// is shared by every known frame kind, but the sibling json.Unmarshal
+	// falls back to a case-insensitive field match whenever a JSON member has
+	// no exact-cased counterpart in the struct's tags. Before this fix, a
+	// member differing from a known name only by case was filed as
+	// unknown-foreign-member (never read, by the disclosure's own promise)
+	// while ALSO being read into the corresponding typed field by that
+	// fallback — so its value reached the projected detail and both digests
+	// despite the disclosure swearing it never would. Every location below
+	// now refuses invalid-foreign-field instead of tolerating the collision.
+	// Falsify by reverting scanKnownObject to an exact-only map lookup.
+	t.Run("case_variant_of_a_known_member_is_refused_not_tolerated", func(t *testing.T) {
+		t.Run("api_retry frame-level collision", func(t *testing.T) {
+			launch, envRoot := claudeTestLaunch(t, sealedexec.ActionStart)
+			bad := `{"type":"system","subtype":"api_retry","Attempt":1,"max_retries":3,"retry_delay_ms":10,"error":"unknown","uuid":"ru","session_id":"s1"}`
+			result := runClaudeLines(t, launch, envRoot, claudeInitLine("s1", launch.Workspace.Path), bad)
+			assertClaudeGapReason(t, result, "invalid-foreign-field", "decode", claudeSource)
+		})
+
+		t.Run("system/init frame-level collision", func(t *testing.T) {
+			launch, envRoot := claudeTestLaunch(t, sealedexec.ActionStart)
+			bad := strings.Replace(claudeInitLine("s1", launch.Workspace.Path), `"session_id":"s1"`, `"SESSION_ID":"s1"`, 1)
+			result := runClaudeLines(t, launch, envRoot, bad)
+			assertClaudeGapReason(t, result, "invalid-foreign-field", "decode", claudeSource)
+		})
+
+		// The result frame's top-level `usage` member keeps validateUsage's v1
+		// snake_case shape; a case variant of one of its members is refused
+		// the same way.
+		t.Run("result top-level usage collision", func(t *testing.T) {
+			launch, envRoot := claudeTestLaunch(t, sealedexec.ActionStart)
+			line := strings.Replace(claudeResultLine("s1", "success", false),
+				`"output_tokens":1}`, `"output_tokens":1,"INPUT_TOKENS":4242}`, 1)
+			result := runClaudeLines(t, launch, envRoot, claudeInitLine("s1", launch.Workspace.Path), line)
+			assertClaudeGapReason(t, result, "invalid-foreign-field", "decode", claudeSource)
+		})
+
+		// Sharpest form: both the correctly-cased and the colliding key are
+		// present at once. DecodeUniqueJSONObject admits both (byte-distinct
+		// keys), so before this fix the projection silently reported whichever
+		// one the JSON object happened to order last — chosen by exactly the
+		// member the disclosure swore was never read.
+		t.Run("modelUsage.<model> collision beside the correctly-cased key", func(t *testing.T) {
+			launch, envRoot := claudeTestLaunch(t, sealedexec.ActionStart)
+			line := strings.Replace(claudeResultLine("s1", "success", false), `,"permission_denials":[]`,
+				`,"permission_denials":[],"modelUsage":{"claude-opus-5-test":{"inputTokens":1,"InputTokens":9999,`+
+					`"outputTokens":1,"cacheReadInputTokens":0,"cacheCreationInputTokens":0}}`, 1)
+			result := runClaudeLines(t, launch, envRoot, claudeInitLine("s1", launch.Workspace.Path), line)
+			assertClaudeGapReason(t, result, "invalid-foreign-field", "decode", claudeSource)
+		})
 	})
 
 	// SI-182 test row (e): a known member of the wrong JSON type still
