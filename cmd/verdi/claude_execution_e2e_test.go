@@ -465,11 +465,13 @@ type fakeClaudeSpec struct {
 	// product suffix (" (Claude Code)") after version instead of the bare
 	// version alone.
 	versionSuffix bool
-	// unknownMembers makes the fake's init frame carry the exact 8 unknown
-	// members and its api_retry frame carry the 1 unknown member the real
-	// Claude Code CLI 2.1.261 emits (SI-182, measured offline by the F12
-	// canary track, 2026-09-06; values here are synthetic, never the measured
-	// bytes). The sealed run must still proceed.
+	// unknownMembers makes the fake reproduce the 2.1.261-shaped stream the
+	// real Claude Code CLI emits (measured offline by the F12 canary track,
+	// 2026-09-06; values here are synthetic, never the measured bytes): the
+	// init frame carries the exact 8 unknown members (SI-182), the api_retry
+	// frame carries its bare-string `error` plus the 1 unknown member
+	// error_status (SI-183), and the result frame's modelUsage.<model> value
+	// is the camelCase shape (SI-184). The sealed run must still proceed.
 	unknownMembers bool
 }
 
@@ -605,14 +607,15 @@ func run() error {
 		return err
 	}
 	if unknownMembers {
-		// SI-182: the one unknown system/api_retry member the real Claude Code
-		// CLI 2.1.261 emits, error_status (measured offline by the F12 canary
-		// track, 2026-09-06); error keeps its required object shape here, so
-		// the run proceeds past this frame to the sealed retry observation.
+		// SI-182/SI-183: the real Claude Code CLI 2.1.261's measured
+		// system/api_retry frame carries error as a bare string ("unknown")
+		// beside the one unknown member error_status (measured offline by
+		// the F12 canary track, 2026-09-06). The run proceeds past this
+		// frame to the sealed retry observation.
 		if err := emit(map[string]any{
 			"type": "system", "subtype": "api_retry", "session_id": session,
 			"attempt": 1, "max_retries": 10, "retry_delay_ms": 1, "error_status": nil,
-			"error": map[string]string{"type": "unknown", "message": "synthetic retry"},
+			"error": "unknown",
 			"uuid":  "retry-uuid-e2e",
 		}); err != nil {
 			return err
@@ -696,13 +699,27 @@ func run() error {
 	}); err != nil {
 		return err
 	}
-	return emit(map[string]any{
+	resultFrame := map[string]any{
 		"type": "result", "subtype": "success", "is_error": false, "result": "success",
 		"session_id": session, "uuid": "result-uuid-e2e", "duration_ms": 1, "duration_api_ms": 1,
 		"num_turns": 1, "total_cost_usd": 0.0,
 		"usage":              map[string]any{"input_tokens": 1, "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0, "output_tokens": 1},
 		"permission_denials": []any{},
-	})
+	}
+	if unknownMembers {
+		// SI-184: the real Claude Code CLI 2.1.261's result frame
+		// modelUsage.<model> value is its own camelCase shape (bundle
+		// literal, measured offline by the F12 canary track, 2026-09-06);
+		// values here are synthetic, never the measured bytes.
+		resultFrame["modelUsage"] = map[string]any{
+			model: map[string]any{
+				"inputTokens": 1, "outputTokens": 1, "cacheReadInputTokens": 0,
+				"cacheCreationInputTokens": 0, "webSearchRequests": 0, "costUSD": 0.0,
+				"contextWindow": 200000, "maxOutputTokens": 8192,
+			},
+		}
+	}
+	return emit(resultFrame)
 }
 
 func providerCommit() error {
