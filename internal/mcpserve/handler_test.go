@@ -130,6 +130,157 @@ func TestServeHandlerRejectsMalformedEnvelopeBeforeToolDispatch(t *testing.T) {
 	}
 }
 
+// TestDecodeHandlerCallToleratesUnknownParamsMembers is SI-188's core
+// witness at the decode function itself: Claude Code 2.1.261 sends a
+// `_meta` member (e.g. `{"progressToken":1}`) beside `name`/`arguments` on
+// every tools/call — MCP itself defines `_meta` on every request's params —
+// and spec/fail-loud dc-2 keeps a JSON-RPC/MCP protocol envelope TOLERANT
+// of unknown members, matching this package's own decode.go doc comment and
+// server.go's callTool (bare json.Unmarshal on the identical params shape).
+// Before the fix (decodeHandlerJSON's DisallowUnknownFields), every
+// "tolerates" case below failed with `json: unknown field "_meta"` (or
+// "x"), which is exactly the RED this table proves and pins against
+// regression. Table-driven per co-1: the tolerated cases sit beside the
+// still-refused ones (duplicate keys, trailing data, a wrong-typed name) so
+// the exact boundary of the tolerance is visible in one place.
+func TestDecodeHandlerCallToleratesUnknownParamsMembers(t *testing.T) {
+	for _, test := range []struct {
+		name       string
+		data       string
+		wantErr    bool
+		wantErrSub string
+		wantName   string
+		wantArgs   string
+	}{
+		{
+			name:     "tolerates the MCP _meta member",
+			data:     `{"name":"request_context","arguments":{"ref":"spec/story-alpha","purpose":"p"},"_meta":{"progressToken":1}}`,
+			wantName: "request_context",
+			wantArgs: `{"ref":"spec/story-alpha","purpose":"p"}`,
+		},
+		{
+			name:     "tolerates an unrelated unknown member",
+			data:     `{"name":"get_flight_plan","arguments":{},"x":1}`,
+			wantName: "get_flight_plan",
+			wantArgs: `{}`,
+		},
+		{
+			name:       "still refuses a duplicate name key",
+			data:       `{"name":"a","arguments":{},"name":"b"}`,
+			wantErr:    true,
+			wantErrSub: "duplicate",
+		},
+		{
+			name:       "still refuses a duplicate arguments key",
+			data:       `{"name":"a","arguments":{},"arguments":{"x":1}}`,
+			wantErr:    true,
+			wantErrSub: "duplicate",
+		},
+		{
+			name:    "still refuses trailing data",
+			data:    `{"name":"a","arguments":{}}{}`,
+			wantErr: true,
+		},
+		{
+			name:    "still refuses a wrong-typed name",
+			data:    `{"name":1,"arguments":{}}`,
+			wantErr: true,
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			var call struct {
+				Name      string          `json:"name"`
+				Arguments json.RawMessage `json:"arguments"`
+			}
+			err := decodeHandlerCall([]byte(test.data), &call)
+			if test.wantErr {
+				if err == nil {
+					t.Fatalf("decodeHandlerCall(%s) = nil error, want refusal", test.data)
+				}
+				if test.wantErrSub != "" && !strings.Contains(err.Error(), test.wantErrSub) {
+					t.Fatalf("decodeHandlerCall(%s) error = %q, want substring %q", test.data, err.Error(), test.wantErrSub)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("decodeHandlerCall(%s): unexpected error: %v", test.data, err)
+			}
+			if call.Name != test.wantName || string(call.Arguments) != test.wantArgs {
+				t.Fatalf("decodeHandlerCall(%s) = name %q arguments %s, want name %q arguments %s", test.data, call.Name, call.Arguments, test.wantName, test.wantArgs)
+			}
+		})
+	}
+}
+
+// TestServeHandlerToolsCallParamsToleranceReachesTheHandlerUnobserved proves
+// the SI-188 tolerance end to end over the real framing (ServeHandler, not
+// just the decode function): a tolerated unknown member reaches
+// handler.Call with EXACTLY the enclosed `arguments` bytes and is not
+// observable anywhere in the written frame — no projection, no digest, no
+// log — while `name` and `arguments` remain required even when `_meta` is
+// present alongside them.
+func TestServeHandlerToolsCallParamsToleranceReachesTheHandlerUnobserved(t *testing.T) {
+	for _, test := range []struct {
+		name        string
+		input       string
+		wantSuccess bool
+		wantName    string
+		wantArgs    string
+	}{
+		{
+			name:        "the MCP _meta member",
+			input:       `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"request_context","arguments":{"ref":"spec/story-alpha","purpose":"p"},"_meta":{"progressToken":1}}}`,
+			wantSuccess: true,
+			wantName:    "request_context",
+			wantArgs:    `{"ref":"spec/story-alpha","purpose":"p"}`,
+		},
+		{
+			name:        "an unrelated unknown member",
+			input:       `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"get_flight_plan","arguments":{},"x":1}}`,
+			wantSuccess: true,
+			wantName:    "get_flight_plan",
+			wantArgs:    `{}`,
+		},
+		{
+			name:  "name and arguments stay required beside _meta",
+			input: `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"_meta":{"progressToken":1}}}`,
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			handler := &cannedToolHandler{result: HandlerCallResult{Text: "installed"}}
+			var output bytes.Buffer
+			terminal, err := ServeHandler(context.Background(), strings.NewReader(test.input+"\n"), &output, handler)
+			if err != nil {
+				t.Fatalf("ServeHandler: %v", err)
+			}
+			if test.wantSuccess {
+				if terminal != nil {
+					t.Fatalf("terminal = %#v, want nil (run continues)", terminal)
+				}
+				if handler.calls != 1 || handler.lastName != test.wantName {
+					t.Fatalf("handler calls/name = %d/%q, want exactly one %q call", handler.calls, handler.lastName, test.wantName)
+				}
+				if string(handler.lastArguments) != test.wantArgs {
+					t.Fatalf("handler arguments = %s, want exactly %s (the tolerated member must not bleed in)", handler.lastArguments, test.wantArgs)
+				}
+				if strings.Contains(output.String(), "_meta") || strings.Contains(output.String(), "progressToken") {
+					t.Fatalf("response frame observed the tolerated member: %s", output.String())
+				}
+				return
+			}
+			if terminal == nil || terminal.ExitCode != 2 {
+				t.Fatalf("terminal = %#v, want operational termination", terminal)
+			}
+			if handler.calls != 0 {
+				t.Fatalf("handler calls = %d, want 0 (name/arguments still required)", handler.calls)
+			}
+			if !strings.Contains(output.String(), "name and arguments are required") {
+				t.Fatalf("response = %s, want the name/arguments-required refusal", output.String())
+			}
+		})
+	}
+}
+
 func TestServeHandlerCleanEOF(t *testing.T) {
 	terminal, err := ServeHandler(context.Background(), strings.NewReader(""), &bytes.Buffer{}, &cannedToolHandler{tools: []HandlerTool{}})
 	if err != nil || terminal != nil {
