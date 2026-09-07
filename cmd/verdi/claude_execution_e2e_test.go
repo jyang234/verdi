@@ -483,8 +483,10 @@ type fakeClaudeSpec struct {
 	// unknownFamilies makes the fake reproduce the real Claude Code CLI
 	// 2.1.261's further informational frame families (SI-187, F12 canary
 	// flight 8, 2026-09-07): a system/thinking_tokens frame right after init,
-	// before the first tool call, and a tool_progress frame mid-stream. The
-	// sealed run must tolerate both and still proceed to its result frame.
+	// before the first tool call, and a tool_progress frame between the
+	// assistant frame and the result frame — so the two land on two
+	// different accepted carriers. The sealed run must tolerate both and
+	// still proceed to its result frame.
 	unknownFamilies bool
 }
 
@@ -714,14 +716,6 @@ func run() error {
 			return err
 		}
 	}
-	if unknownFamilies {
-		// SI-187: a further informational family arriving mid-stream, after
-		// tool activity has already started, must be tolerated exactly like
-		// the one right after init.
-		if err := emit(map[string]any{"type": "tool_progress"}); err != nil {
-			return err
-		}
-	}
 	text := "Sealed witness complete."
 	if bigText {
 		text = strings.Repeat("a", 20000)
@@ -753,6 +747,17 @@ func run() error {
 		},
 	}); err != nil {
 		return err
+	}
+	if unknownFamilies {
+		// SI-187: a further informational family arriving mid-stream, after
+		// an ACCEPTED assistant frame has already carried the first one
+		// away. This one therefore has to wait for the next accepted
+		// observation of its own — the result frame's — which is the
+		// "carried by a later accepted observation" half of the mechanism,
+		// and is why this arm has two carriers rather than one.
+		if err := emit(map[string]any{"type": "tool_progress"}); err != nil {
+			return err
+		}
 	}
 	resultFrame := map[string]any{
 		"type": "result", "subtype": "success", "is_error": false, "result": "success",
@@ -1540,22 +1545,40 @@ func TestClaudeBuiltBinaryLifecycle_Behavioral(t *testing.T) {
 	// run must tolerate both — no projection, no digest, no observation of
 	// their own — record each family once in the acknowledged event stream,
 	// and still complete to its result.
+	//
+	// The two families arrive on either side of the assistant frame, so each
+	// is carried by a DIFFERENT accepted observation: the first rides the
+	// assistant frame that follows it, and the second has to wait for the
+	// result frame's own summary. Two carriers, asserted separately, are what
+	// exercise the "queued for whichever accepted observation the run
+	// produces next" half of the mechanism end to end.
 	t.Run("sealed_start_tolerates_the_2_1_261_unknown_family_frames", func(t *testing.T) {
 		run := runClaudeSealedLifecycle(t, bin, claudeLifecycleOptions{unknownFamilies: true})
 		assertClaudeSuccessfulLifecycle(t, run)
-		const wantFamilies = `"unknown-foreign-family":["system/thinking_tokens","tool_progress"]`
-		var disclosed bool
-		for _, event := range run.fake.events {
+		const wantFirst = `"unknown-foreign-family":["system/thinking_tokens"]`
+		const wantSecond = `"unknown-foreign-family":["tool_progress"]`
+		firstCarrier, secondCarrier := -1, -1
+		for i, event := range run.fake.events {
 			detail := eventDetail(event)
 			if detail == nil {
 				continue
 			}
-			if bytes.Contains(detail.RedactedJSON, []byte(wantFamilies)) {
-				disclosed = true
+			if bytes.Contains(detail.RedactedJSON, []byte(wantFirst)) {
+				firstCarrier = i
+			}
+			if bytes.Contains(detail.RedactedJSON, []byte(wantSecond)) {
+				secondCarrier = i
 			}
 		}
-		if !disclosed {
-			t.Fatalf("acknowledged details never disclosed the unknown families; details = %s", sealedEventDetails(run.fake.events))
+		if firstCarrier < 0 {
+			t.Fatalf("acknowledged details never disclosed %s; details = %s", wantFirst, sealedEventDetails(run.fake.events))
+		}
+		if secondCarrier < 0 {
+			t.Fatalf("acknowledged details never disclosed %s; details = %s", wantSecond, sealedEventDetails(run.fake.events))
+		}
+		if firstCarrier >= secondCarrier {
+			t.Fatalf("family carriers = events %d and %d, want two distinct carriers in arrival order; details = %s",
+				firstCarrier, secondCarrier, sealedEventDetails(run.fake.events))
 		}
 	})
 
