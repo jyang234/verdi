@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/jyang234/verdi/internal/canonjson"
@@ -35,14 +36,25 @@ func TestScopedContextMCPContract_Static(t *testing.T) {
 	for _, call := range []struct {
 		name string
 		args []byte
+		// wantErrSub, when non-empty, additionally pins that the error text
+		// NAMES the unknown field (SI-188 F2, decode.go's ac-3 promise:
+		// "refused NAMING the unknown field") — not just that a refusal
+		// happened.
+		wantErrSub string
 	}{
-		{ToolGetFlightPlan, []byte(`{"extra":true}`)},
-		{ToolRequestContext, []byte(`{"ref":"spec/extra","purpose":""}`)},
-		{ToolRequestContext, []byte(`{"ref":"spec/extra","purpose":"needed","extra":true}`)},
-		{"read_file", []byte(`{}`)},
+		{name: ToolGetFlightPlan, args: []byte(`{"extra":true}`)},
+		{name: ToolRequestContext, args: []byte(`{"ref":"spec/extra","purpose":""}`)},
+		{name: ToolRequestContext, args: []byte(`{"ref":"spec/extra","purpose":"needed","extra":true}`)},
+		{name: "read_file", args: []byte(`{}`)},
+		{name: ToolGetFlightPlan, args: []byte(`{"extra":1}`), wantErrSub: "extra"},
+		{name: ToolRequestContext, args: []byte(`{"ref":"spec/extra","purpose":"needed","reff":"typo"}`), wantErrSub: "reff"},
 	} {
-		if _, err := server.Call(context.Background(), call.name, call.args); !errors.Is(err, ErrOperational) {
+		_, err := server.Call(context.Background(), call.name, call.args)
+		if !errors.Is(err, ErrOperational) {
 			t.Errorf("Call(%q, %s) error = %v, want strict operational refusal", call.name, call.args, err)
+		}
+		if call.wantErrSub != "" && (err == nil || !strings.Contains(err.Error(), call.wantErrSub)) {
+			t.Errorf("Call(%q, %s) error = %v, want it to NAME %q", call.name, call.args, err, call.wantErrSub)
 		}
 	}
 
