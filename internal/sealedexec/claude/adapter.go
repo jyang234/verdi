@@ -827,14 +827,18 @@ type claudeRetryError struct {
 }
 
 type claudeRetryFrame struct {
-	Type         *string           `json:"type"`
-	Subtype      *string           `json:"subtype"`
-	Attempt      *uint64           `json:"attempt"`
-	MaxRetries   *uint64           `json:"max_retries"`
-	RetryDelayMS *uint64           `json:"retry_delay_ms"`
-	Error        *claudeRetryError `json:"error"`
-	UUID         *string           `json:"uuid"`
-	SessionID    *string           `json:"session_id"`
+	Type         *string `json:"type"`
+	Subtype      *string `json:"subtype"`
+	Attempt      *uint64 `json:"attempt"`
+	MaxRetries   *uint64 `json:"max_retries"`
+	RetryDelayMS *uint64 `json:"retry_delay_ms"`
+	// Error is decoded as raw bytes rather than typed because SI-183 accepts
+	// TWO distinct shapes here (the v1 object or a bare enum string); which
+	// one applies is decided in decodeRetryError from the sibling generic
+	// parse, not by a single static Go field type.
+	Error     *json.RawMessage `json:"error"`
+	UUID      *string          `json:"uuid"`
+	SessionID *string          `json:"session_id"`
 }
 
 type claudeUsage struct {
@@ -843,6 +847,24 @@ type claudeUsage struct {
 	CacheReadInputTokens     *uint64 `json:"cache_read_input_tokens"`
 	OutputTokens             *uint64 `json:"output_tokens"`
 	ServiceTier              *string `json:"service_tier"`
+}
+
+// claudeModelUsage is SI-184's own camelCase shape for the result frame's
+// `modelUsage.<model>` value — distinct from claudeUsage's v1 snake_case
+// shape above, which validateUsage keeps applying unchanged to the result
+// frame's top-level `usage` member. Read from the 2.1.261 bundle's own
+// schema (bundle literal, measured offline by the F12 canary track,
+// 2026-09-06). CostUSD stays raw (never parsed into a Go float and
+// re-serialized) so its exact numeric formatting survives untouched.
+type claudeModelUsage struct {
+	InputTokens              *uint64          `json:"inputTokens"`
+	OutputTokens             *uint64          `json:"outputTokens"`
+	CacheReadInputTokens     *uint64          `json:"cacheReadInputTokens"`
+	CacheCreationInputTokens *uint64          `json:"cacheCreationInputTokens"`
+	WebSearchRequests        *uint64          `json:"webSearchRequests"`
+	CostUSD                  *json.RawMessage `json:"costUSD"`
+	ContextWindow            *uint64          `json:"contextWindow"`
+	MaxOutputTokens          *uint64          `json:"maxOutputTokens"`
 }
 
 type claudeAssistantMessage struct {
@@ -1004,6 +1026,7 @@ var (
 	claudeAssistantFrameFields        = jsonFieldNames(reflect.TypeOf(claudeAssistantFrame{}))
 	claudeAssistantMessageFields      = jsonFieldNames(reflect.TypeOf(claudeAssistantMessage{}))
 	claudeUsageFields                 = jsonFieldNames(reflect.TypeOf(claudeUsage{}))
+	claudeModelUsageFields            = jsonFieldNames(reflect.TypeOf(claudeModelUsage{}))
 	claudeUserFrameFields             = jsonFieldNames(reflect.TypeOf(claudeUserFrame{}))
 	claudeUserMessageFields           = jsonFieldNames(reflect.TypeOf(claudeUserMessage{}))
 	claudeResultFrameFields           = jsonFieldNames(reflect.TypeOf(claudeResultFrame{}))
@@ -1168,6 +1191,126 @@ func validateUsage(raw *json.RawMessage, object map[string]any, prefix string, s
 	return projected, ""
 }
 
+// validateModelUsage proves SI-184's exact camelCase result-frame
+// `modelUsage.<model>` shape — required inputTokens, outputTokens,
+// cacheReadInputTokens, cacheCreationInputTokens; optional
+// webSearchRequests, costUSD, contextWindow, maxOutputTokens — and returns
+// its exact projection under those same names, optional members present
+// only when the frame carried them. raw is the per-model value's own bytes;
+// object is the same value already parsed generically by
+// DecodeUniqueJSONObject, used only to tolerate and record — under prefix,
+// into set — a member absent from this shape (SI-182); its value is never
+// read. A snake_case object here (the v1 `usage` shape) leaves every
+// required member nil and so is refused missing-foreign-field, never
+// silently accepted under the wrong spelling.
+//
+// The projection is rebuilt from the typed decode exactly as validateUsage's
+// is and for the same reason: a tolerated member must never reach a
+// projected detail or the digest taken over it. The top-level result frame
+// `usage` member is unaffected by this shape: it keeps validateUsage's v1
+// snake_case projection, unchanged by SI-184.
+func validateModelUsage(raw *json.RawMessage, object map[string]any, prefix string, set *unknownMemberSet) (map[string]any, string) {
+	if raw == nil {
+		return nil, "missing-foreign-field"
+	}
+	var usage claudeModelUsage
+	if err := json.Unmarshal(*raw, &usage); err != nil {
+		return nil, "invalid-foreign-field"
+	}
+	if usage.InputTokens == nil || usage.OutputTokens == nil ||
+		usage.CacheReadInputTokens == nil || usage.CacheCreationInputTokens == nil {
+		return nil, "missing-foreign-field"
+	}
+	if usage.CostUSD != nil {
+		// Proves the member's JSON type is number without converting it: the
+		// parsed float is discarded and the original bytes are what the
+		// projection below keeps (SI-184: "do not round").
+		var cost float64
+		if err := json.Unmarshal(*usage.CostUSD, &cost); err != nil {
+			return nil, "invalid-foreign-field"
+		}
+	}
+	scanKnownObject(object, claudeModelUsageFields, prefix, set)
+	projected := map[string]any{
+		"cacheCreationInputTokens": *usage.CacheCreationInputTokens,
+		"cacheReadInputTokens":     *usage.CacheReadInputTokens,
+		"inputTokens":              *usage.InputTokens,
+		"outputTokens":             *usage.OutputTokens,
+	}
+	if usage.WebSearchRequests != nil {
+		projected["webSearchRequests"] = *usage.WebSearchRequests
+	}
+	if usage.CostUSD != nil {
+		projected["costUSD"] = json.RawMessage(*usage.CostUSD)
+	}
+	if usage.ContextWindow != nil {
+		projected["contextWindow"] = *usage.ContextWindow
+	}
+	if usage.MaxOutputTokens != nil {
+		projected["maxOutputTokens"] = *usage.MaxOutputTokens
+	}
+	return projected, ""
+}
+
+// claudeRetryErrorStringAccepted is SI-183's exact closed eleven-value
+// system/api_retry `error` string enum the real Claude Code CLI 2.1.261
+// emits in place of the v1 object form, read offline from the bundle's zod
+// schema (measured 2026-09-06). Any other string is refused.
+func claudeRetryErrorStringAccepted(value string) bool {
+	switch value {
+	case "authentication_failed", "oauth_org_not_allowed", "account_on_hold", "billing_error",
+		"rate_limit", "overloaded", "invalid_request", "model_not_found", "server_error",
+		"unknown", "max_output_tokens":
+		return true
+	default:
+		return false
+	}
+}
+
+// decodeRetryError proves SI-183's dual accepted shape of the
+// system/api_retry frame's `error` member: the v1 object `{type,message}`
+// (Amendment 002 §5, unchanged — the same closed six-value error.type
+// vocabulary and message validation as before this amendment) or a bare
+// string from the closed eleven-value enum above. value is the same member
+// already parsed generically by DecodeUniqueJSONObject — read only to select
+// the shape and, for the object form, to record a member scanKnownObject
+// would otherwise miss; raw is frame.Error's own exact bytes, decoded
+// strictly only for the object form. It returns the value to project as
+// `error_category` (reused verbatim as the retry reason-code suffix) or a
+// closed decode-failure reason. Any other string, an empty string, or a
+// non-string non-object value refuses invalid-foreign-field exactly as
+// before this amendment (a bare string of any kind already failed the
+// object-typed decode pre-SI-183).
+func decodeRetryError(raw json.RawMessage, value any, unknown *unknownMemberSet) (string, string) {
+	switch typed := value.(type) {
+	case map[string]any:
+		var errorFrame claudeRetryError
+		if err := json.Unmarshal(raw, &errorFrame); err != nil {
+			return "", "invalid-foreign-field"
+		}
+		if errorFrame.Type == nil || errorFrame.Message == nil {
+			return "", "missing-foreign-field"
+		}
+		if !utf8.ValidString(*errorFrame.Message) {
+			return "", "invalid-foreign-field"
+		}
+		switch *errorFrame.Type {
+		case "authentication", "billing", "rate_limit", "server", "network", "unknown":
+		default:
+			return "", "invalid-foreign-field"
+		}
+		scanKnownObject(typed, claudeRetryErrorFields, "error.", unknown)
+		return *errorFrame.Type, ""
+	case string:
+		if !claudeRetryErrorStringAccepted(typed) {
+			return "", "invalid-foreign-field"
+		}
+		return typed, ""
+	default:
+		return "", "invalid-foreign-field"
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Normalization
 // ---------------------------------------------------------------------------
@@ -1326,25 +1469,23 @@ func (r *claudeActiveRun) handleRetry(ctx context.Context, line []byte, object m
 	}
 	var unknown unknownMemberSet
 	scanKnownObject(object, claudeRetryFrameFields, "", &unknown)
-	if errorObject, ok := object["error"].(map[string]any); ok {
-		scanKnownObject(errorObject, claudeRetryErrorFields, "error.", &unknown)
-	}
 	if frame.Type == nil || frame.Subtype == nil || frame.Attempt == nil || frame.MaxRetries == nil ||
-		frame.RetryDelayMS == nil || frame.Error == nil || frame.UUID == nil || frame.SessionID == nil ||
-		frame.Error.Type == nil || frame.Error.Message == nil {
+		frame.RetryDelayMS == nil || frame.Error == nil || frame.UUID == nil || frame.SessionID == nil {
 		return r.decodeFailure(ctx, seq, "missing-foreign-field", map[string]any{"family": "system/api_retry"})
 	}
 	if *frame.Type != "system" || *frame.Subtype != "api_retry" {
 		return r.decodeFailure(ctx, seq, "invalid-foreign-field", map[string]any{"field": "type"})
 	}
 	if *frame.Attempt == 0 || *frame.MaxRetries == 0 || *frame.Attempt > *frame.MaxRetries ||
-		!nonemptyStringValue(*frame.UUID) || !utf8.ValidString(*frame.Error.Message) {
+		!nonemptyStringValue(*frame.UUID) {
 		return r.decodeFailure(ctx, seq, "invalid-foreign-field", map[string]any{"family": "system/api_retry"})
 	}
-	switch *frame.Error.Type {
-	case "authentication", "billing", "rate_limit", "server", "network", "unknown":
-	default:
-		return r.decodeFailure(ctx, seq, "invalid-foreign-field", map[string]any{"field": "error.type"})
+	// SI-183: error is the v1 {type,message} object (unchanged) or a bare
+	// string from the closed eleven-value enum; any other shape refuses
+	// exactly as it did before this amendment.
+	errorValue, errReason := decodeRetryError(*frame.Error, object["error"], &unknown)
+	if errReason != "" {
+		return r.decodeFailure(ctx, seq, errReason, map[string]any{"field": "error"})
 	}
 
 	r.mu.Lock()
@@ -1357,7 +1498,7 @@ func (r *claudeActiveRun) handleRetry(ctx context.Context, line []byte, object m
 
 	retryDetailSource := map[string]any{
 		"attempt":        *frame.Attempt,
-		"error_category": *frame.Error.Type,
+		"error_category": errorValue,
 		"family":         "system/api_retry",
 		"max_retries":    *frame.MaxRetries,
 		"retry_delay_ms": *frame.RetryDelayMS,
@@ -1375,7 +1516,7 @@ func (r *claudeActiveRun) handleRetry(ctx context.Context, line []byte, object m
 		Kind: contextevent.KindRetry,
 		Payload: &contextevent.RetryPayload{
 			Schema:           schema,
-			ReasonCode:       "provider-api-" + *frame.Error.Type,
+			ReasonCode:       "provider-api-" + errorValue,
 			PriorSession:     currentSession,
 			NextSession:      currentSession,
 			ContinuityDigest: detail.Digest,
@@ -1893,8 +2034,11 @@ func (r *claudeActiveRun) handleResult(ctx context.Context, line []byte, object 
 		modelUsageObject, _ := object["modelUsage"].(map[string]any)
 		perModelObject, _ := modelUsageObject[r.launch.Profile.Model].(map[string]any)
 		// The member lives at modelUsage.<model>.<key>, so the recorded path
-		// names that level and not a nonexistent modelUsage.<key>.
-		perModel, reason := validateUsage(&usage, perModelObject, "modelUsage."+r.launch.Profile.Model+".", &unknown)
+		// names that level and not a nonexistent modelUsage.<key>. SI-184:
+		// the per-model value is its own camelCase shape, distinct from the
+		// v1 snake_case shape validateUsage still applies to the top-level
+		// `usage` member above.
+		perModel, reason := validateModelUsage(&usage, perModelObject, "modelUsage."+r.launch.Profile.Model+".", &unknown)
 		if reason != "" {
 			return r.decodeFailure(ctx, seq, reason, map[string]any{"field": "modelUsage"})
 		}
