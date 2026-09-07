@@ -1666,28 +1666,25 @@ func TestClaudeAdapterParityContract_Behavioral(t *testing.T) {
 	// across the run. The only remaining message-id contradiction is a
 	// frame naming a message id a later, different message id has already
 	// closed.
+	// A message id already closed by a later, different id stays refused
+	// either way: whether the reappearing frame resends the exact block the
+	// closed message already produced (a literal re-send of an
+	// already-produced (message id, block index)) or offers a genuinely new
+	// one (interleaving) — both collapse to the one closed-id refusal.
 	t.Run("duplicate_message_id_is_refused", func(t *testing.T) {
-		// A message id already closed by a later, different id stays
-		// refused even when the reappearing frame resends the exact block
-		// the closed message already produced (a literal re-send of an
-		// already-produced (message id, block index)).
-		launch, envRoot := claudeTestLaunch(t, sealedexec.ActionStart)
-		first := `{"type":"assistant","session_id":"s1","uuid":"mu","message":{"id":"msg_1","type":"message","role":"assistant","model":"claude-opus-5-test","content":[{"type":"text","text":"hi"}],"usage":{"input_tokens":1,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":1}}}`
-		closesIt := `{"type":"assistant","session_id":"s1","uuid":"mu-2","message":{"id":"msg_2","type":"message","role":"assistant","model":"claude-opus-5-test","content":[{"type":"text","text":"other"}],"usage":{"input_tokens":1,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":1}}}`
-		result := runClaudeLines(t, launch, envRoot, claudeInitLine("s1", launch.Workspace.Path), first, closesIt, first)
-		assertClaudeGapReason(t, result, "duplicate-message-id", "decode", claudeSource)
-	})
-
-	t.Run("interleaved_message_id_is_refused", func(t *testing.T) {
-		// The same refusal fires for a genuinely new block too: once
-		// message id msg_a is closed by msg_b, msg_a cannot reopen at all,
-		// whether or not its content is new.
-		launch, envRoot := claudeTestLaunch(t, sealedexec.ActionStart)
-		first := `{"type":"assistant","session_id":"s1","uuid":"mu-a1","message":{"id":"msg_a","type":"message","role":"assistant","model":"claude-opus-5-test","content":[{"type":"text","text":"a-block"}],"usage":{"input_tokens":1,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":1}}}`
-		other := `{"type":"assistant","session_id":"s1","uuid":"mu-b1","message":{"id":"msg_b","type":"message","role":"assistant","model":"claude-opus-5-test","content":[{"type":"text","text":"b-block"}],"usage":{"input_tokens":1,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":1}}}`
-		reopened := `{"type":"assistant","session_id":"s1","uuid":"mu-a2","message":{"id":"msg_a","type":"message","role":"assistant","model":"claude-opus-5-test","content":[{"type":"text","text":"a-again"}],"usage":{"input_tokens":1,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":1}}}`
-		result := runClaudeLines(t, launch, envRoot, claudeInitLine("s1", launch.Workspace.Path), first, other, reopened)
-		assertClaudeGapReason(t, result, "duplicate-message-id", "decode", claudeSource)
+		for name, reopenedText := range map[string]string{
+			"resends_the_closed_messages_own_block": "hi",
+			"offers_a_fresh_block_instead":          "hi-again",
+		} {
+			t.Run(name, func(t *testing.T) {
+				launch, envRoot := claudeTestLaunch(t, sealedexec.ActionStart)
+				first := `{"type":"assistant","session_id":"s1","uuid":"mu-1","message":{"id":"msg_1","type":"message","role":"assistant","model":"claude-opus-5-test","content":[{"type":"text","text":"hi"}],"usage":{"input_tokens":1,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":1}}}`
+				closesIt := `{"type":"assistant","session_id":"s1","uuid":"mu-2","message":{"id":"msg_2","type":"message","role":"assistant","model":"claude-opus-5-test","content":[{"type":"text","text":"other"}],"usage":{"input_tokens":1,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":1}}}`
+				reopened := `{"type":"assistant","session_id":"s1","uuid":"mu-3","message":{"id":"msg_1","type":"message","role":"assistant","model":"claude-opus-5-test","content":[{"type":"text","text":"` + reopenedText + `"}],"usage":{"input_tokens":1,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":1}}}`
+				result := runClaudeLines(t, launch, envRoot, claudeInitLine("s1", launch.Workspace.Path), first, closesIt, reopened)
+				assertClaudeGapReason(t, result, "duplicate-message-id", "decode", claudeSource)
+			})
+		}
 	})
 
 	t.Run("repeated_message_id_without_interleaving_continues_the_message", func(t *testing.T) {
