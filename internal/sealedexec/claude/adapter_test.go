@@ -1667,10 +1667,11 @@ func TestClaudeAdapterParityContract_Behavioral(t *testing.T) {
 	// frame naming a message id a later, different message id has already
 	// closed.
 	// A message id already closed by a later, different id stays refused
-	// either way: whether the reappearing frame resends the exact block the
-	// closed message already produced (a literal re-send of an
-	// already-produced (message id, block index)) or offers a genuinely new
-	// one (interleaving) — both collapse to the one closed-id refusal.
+	// on the closed id alone, whether the reappearing frame's content
+	// happens to repeat the closed message's own block (this row) or
+	// offers a genuinely new one (its sibling, interleaving) — the resent
+	// block is renumbered to a fresh index like any other, so this is not
+	// detection of a repeated (message id, block index) pair.
 	t.Run("duplicate_message_id_is_refused", func(t *testing.T) {
 		for name, reopenedText := range map[string]string{
 			"resends_the_closed_messages_own_block": "hi",
