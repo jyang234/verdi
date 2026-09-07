@@ -52,11 +52,15 @@ func ServeHandler(ctx context.Context, r io.Reader, w io.Writer, handler ToolHan
 	})
 }
 
+// decodeHandlerRequest decodes the sealed path's outer JSON-RPC frame —
+// TOLERANT of unknown top-level members (SI-188 F1); see decodeTolerantJSON's
+// doc comment for why. jsonrpc/method stay required and exact/non-empty, and
+// rejectDuplicateJSONFields still refuses a duplicate key or trailing data.
 func decodeHandlerRequest(data []byte, request *rpcRequest) error {
 	if err := rejectDuplicateJSONFields(data); err != nil {
 		return err
 	}
-	if err := decodeHandlerJSON(data, request); err != nil {
+	if err := decodeTolerantJSON(data, request); err != nil {
 		return err
 	}
 	if request.JSONRPC != "2.0" {
@@ -118,9 +122,9 @@ func callHandler(ctx context.Context, handler ToolHandler, params json.RawMessag
 }
 
 // decodeHandlerCall decodes the tools/call PARAMS envelope (name/arguments,
-// plus whatever else the caller put beside them). Unlike decodeHandlerJSON,
-// it does not disallow unknown fields: see decodeTolerantJSON's doc comment
-// for why (SI-188, spec/fail-loud dc-2).
+// plus whatever else the caller put beside them) — TOLERANT of unknown
+// members; see decodeTolerantJSON's doc comment for why (SI-188,
+// spec/fail-loud dc-2).
 func decodeHandlerCall(data []byte, target any) error {
 	if err := rejectDuplicateJSONFields(data); err != nil {
 		return err
@@ -128,9 +132,17 @@ func decodeHandlerCall(data []byte, target any) error {
 	return decodeTolerantJSON(data, target)
 }
 
-func decodeHandlerJSON(data []byte, target any) error {
+// decodeJSON decodes data into target, applying DisallowUnknownFields only
+// when strict is true; either way it rejects a trailing JSON value after the
+// one decoded. This is the single copy of that 13-line posture (CLAUDE.md:
+// "never copy-paste" — decode.go's own doc comment states the identical
+// rule for this package). See decodeTolerantJSON's doc comment for who
+// calls this with strict=false and why.
+func decodeJSON(data []byte, target any, strict bool) error {
 	decoder := json.NewDecoder(bytes.NewReader(data))
-	decoder.DisallowUnknownFields()
+	if strict {
+		decoder.DisallowUnknownFields()
+	}
 	if err := decoder.Decode(target); err != nil {
 		return err
 	}
@@ -144,44 +156,37 @@ func decodeHandlerJSON(data []byte, target any) error {
 	return nil
 }
 
-// decodeTolerantJSON decodes data into target exactly like decodeHandlerJSON
-// does, EXCEPT it never calls DisallowUnknownFields (SI-188). It feeds
-// decodeHandlerCall's tools/call params envelope, which is a JSON-RPC/MCP
-// protocol envelope: spec/fail-loud dc-2 keeps those TOLERANT of unknown
-// members ("expected forward-compat, not a mistake to catch"), the exact
-// posture this package's decode.go doc comment already claims for "wire.go's
-// rpcRequest, server.go's tools/call name/arguments" and server.go's
-// callTool already gives its own params (bare json.Unmarshal). MCP itself
-// defines a `_meta` member on every request's params — Claude Code 2.1.261
-// sends `_meta.progressToken` on every tools/call — and before this helper
-// existed, decodeHandlerCall's DisallowUnknownFields refused it outright
-// ("json: unknown field \"_meta\""), ending the sealed run at Claude's first
-// tool call. An unknown member decoded here is never read, projected,
-// hashed, or logged: target simply has no field for it. `name` and
-// `arguments` stay REQUIRED (callHandler's own presence check) and
-// type-checked — a wrong-typed value is still a decode error — and
-// rejectDuplicateJSONFields, the caller's preceding step, still refuses a
-// duplicate key or a trailing JSON value at any depth, unchanged.
+// decodeTolerantJSON is decodeJSON with strict=false (SI-188). Both of this
+// package's JSON-RPC/MCP protocol envelope decodes call it: decodeHandlerCall
+// (the tools/call params envelope) and decodeHandlerRequest (the outer
+// rpcRequest frame). spec/fail-loud dc-2 and this package's own decode.go
+// doc comment name both "wire.go's rpcRequest" and "tools/call
+// name/arguments" as envelopes that stay TOLERANT of unknown members
+// ("expected forward-compat, not a mistake to catch"); server.go's callTool
+// already gives its own params the identical treatment via bare
+// json.Unmarshal.
 //
-// The outer JSON-RPC frame decode (decodeHandlerRequest, wire.go's
-// rpcRequest) was inspected for the same defect and deliberately LEFT
-// strict: real MCP/Claude Code traffic never puts an unrecognized member at
-// that level (_meta nests inside params, never beside jsonrpc/id/method),
-// and TestServeHandlerRejectsMalformedEnvelopeBeforeToolDispatch's "unknown
-// envelope field" case already codifies refusing one there on purpose.
+// Before SI-188, both call sites here used strict=true (introduced 548d1c0f,
+// uncited by any ledger row or ratified design). MCP defines a `_meta`
+// member on every request's params, and Claude Code 2.1.261 sends
+// `_meta.progressToken` on EVERY tools/call: decodeHandlerCall's strict
+// decode refused it outright ("json: unknown field \"_meta\""), ending the
+// sealed run at Claude's first tool call, and decodeHandlerRequest's strict
+// decode carried the identical, uncited defect one level up — an
+// unrecognized top-level FRAME member (not nested in params at all) would
+// have killed the run at its very first frame, with a bare
+// {"error":{"code":-32700,"message":"parse error"}} naming nothing. Fixed
+// together, here, the same way.
+//
+// An unknown member decoded here is never read, projected, hashed, or
+// logged: target simply has no field for it. Each caller's own required
+// fields stay required and type-checked (decodeHandlerCall's name/arguments
+// presence check; decodeHandlerRequest's jsonrpc/method checks) — a
+// wrong-typed value is still a decode error — and rejectDuplicateJSONFields,
+// each caller's preceding step, still refuses a duplicate key or a trailing
+// JSON value at any depth, unchanged.
 func decodeTolerantJSON(data []byte, target any) error {
-	decoder := json.NewDecoder(bytes.NewReader(data))
-	if err := decoder.Decode(target); err != nil {
-		return err
-	}
-	var trailing any
-	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
-		if err == nil {
-			return errors.New("trailing JSON value")
-		}
-		return err
-	}
-	return nil
+	return decodeJSON(data, target, false)
 }
 
 func rejectDuplicateJSONFields(data []byte) error {
