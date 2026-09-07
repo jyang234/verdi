@@ -1658,11 +1658,126 @@ func TestClaudeAdapterParityContract_Behavioral(t *testing.T) {
 		}
 	})
 
+	// SI-185: the real Claude Code CLI 2.1.261 emits one assistant frame per
+	// content block, every frame of one message carrying the same
+	// message.id (F12 canary flight 5). Frames sharing one id are the
+	// successive blocks of that one message — the block index continues
+	// across them, so fixed ids stay <message-id>:<block-index> and unique
+	// across the run. The only remaining message-id contradiction is a
+	// frame naming a message id a later, different message id has already
+	// closed.
 	t.Run("duplicate_message_id_is_refused", func(t *testing.T) {
+		// A message id already closed by a later, different id stays
+		// refused even when the reappearing frame resends the exact block
+		// the closed message already produced (a literal re-send of an
+		// already-produced (message id, block index)).
 		launch, envRoot := claudeTestLaunch(t, sealedexec.ActionStart)
-		msg := `{"type":"assistant","session_id":"s1","uuid":"mu","message":{"id":"msg_1","type":"message","role":"assistant","model":"claude-opus-5-test","content":[{"type":"text","text":"hi"}],"usage":{"input_tokens":1,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":1}}}`
-		result := runClaudeLines(t, launch, envRoot, claudeInitLine("s1", launch.Workspace.Path), msg, msg)
+		first := `{"type":"assistant","session_id":"s1","uuid":"mu","message":{"id":"msg_1","type":"message","role":"assistant","model":"claude-opus-5-test","content":[{"type":"text","text":"hi"}],"usage":{"input_tokens":1,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":1}}}`
+		closesIt := `{"type":"assistant","session_id":"s1","uuid":"mu-2","message":{"id":"msg_2","type":"message","role":"assistant","model":"claude-opus-5-test","content":[{"type":"text","text":"other"}],"usage":{"input_tokens":1,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":1}}}`
+		result := runClaudeLines(t, launch, envRoot, claudeInitLine("s1", launch.Workspace.Path), first, closesIt, first)
 		assertClaudeGapReason(t, result, "duplicate-message-id", "decode", claudeSource)
+	})
+
+	t.Run("interleaved_message_id_is_refused", func(t *testing.T) {
+		// The same refusal fires for a genuinely new block too: once
+		// message id msg_a is closed by msg_b, msg_a cannot reopen at all,
+		// whether or not its content is new.
+		launch, envRoot := claudeTestLaunch(t, sealedexec.ActionStart)
+		first := `{"type":"assistant","session_id":"s1","uuid":"mu-a1","message":{"id":"msg_a","type":"message","role":"assistant","model":"claude-opus-5-test","content":[{"type":"text","text":"a-block"}],"usage":{"input_tokens":1,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":1}}}`
+		other := `{"type":"assistant","session_id":"s1","uuid":"mu-b1","message":{"id":"msg_b","type":"message","role":"assistant","model":"claude-opus-5-test","content":[{"type":"text","text":"b-block"}],"usage":{"input_tokens":1,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":1}}}`
+		reopened := `{"type":"assistant","session_id":"s1","uuid":"mu-a2","message":{"id":"msg_a","type":"message","role":"assistant","model":"claude-opus-5-test","content":[{"type":"text","text":"a-again"}],"usage":{"input_tokens":1,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":1}}}`
+		result := runClaudeLines(t, launch, envRoot, claudeInitLine("s1", launch.Workspace.Path), first, other, reopened)
+		assertClaudeGapReason(t, result, "duplicate-message-id", "decode", claudeSource)
+	})
+
+	t.Run("repeated_message_id_without_interleaving_continues_the_message", func(t *testing.T) {
+		// The flight-5 bug this ticket fixes: two consecutive frames
+		// sharing one message id, with no other id between them, are the
+		// successive blocks of one message — not a contradiction — even
+		// when the second frame's block is byte-identical to the first.
+		launch, envRoot := claudeTestLaunch(t, sealedexec.ActionStart)
+		first := `{"type":"assistant","session_id":"s1","uuid":"mu","message":{"id":"msg_same","type":"message","role":"assistant","model":"claude-opus-5-test","content":[{"type":"text","text":"hi"}],"usage":{"input_tokens":1,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":1}}}`
+		second := `{"type":"assistant","session_id":"s1","uuid":"mu-2","message":{"id":"msg_same","type":"message","role":"assistant","model":"claude-opus-5-test","content":[{"type":"text","text":"hi"}],"usage":{"input_tokens":1,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":1}}}`
+		result := runClaudeLines(t, launch, envRoot, claudeInitLine("s1", launch.Workspace.Path), first, second)
+		if result.OperationalFailure != "missing-terminal-result" {
+			t.Fatalf("operational failure = %q, want missing-terminal-result (both blocks accepted, no duplicate)", result.OperationalFailure)
+		}
+		var ids []string
+		for _, obs := range result.Observations {
+			if payload, ok := obs.Payload.(*contextevent.ProviderMessagePayload); ok {
+				ids = append(ids, payload.MessageID)
+			}
+		}
+		if len(ids) != 2 || ids[0] != "msg_same:0" || ids[1] != "msg_same:1" {
+			t.Fatalf("provider-message ids = %v, want [msg_same:0 msg_same:1]", ids)
+		}
+	})
+
+	t.Run("assistant_message_blocks_continue_across_frames_sharing_one_id", func(t *testing.T) {
+		// F12 canary flight 5's exact shape: a thinking block (frame 1,
+		// block 0) followed by a text block (frame 2, block 1) of the same
+		// message, both frames carrying message.id msg_multi.
+		launch, envRoot := claudeTestLaunch(t, sealedexec.ActionStart)
+		thinkingFrame := `{"type":"assistant","session_id":"s1","uuid":"mu-1","message":{"id":"msg_multi","type":"message","role":"assistant","model":"claude-opus-5-test","content":[{"type":"thinking","thinking":"hidden","signature":"sig"}],"usage":{"input_tokens":1,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":1}}}`
+		textFrame := `{"type":"assistant","session_id":"s1","uuid":"mu-2","message":{"id":"msg_multi","type":"message","role":"assistant","model":"claude-opus-5-test","content":[{"type":"text","text":"hi"}],"usage":{"input_tokens":1,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":1}}}`
+		result := runClaudeLinesToTerminal(t, launch, envRoot,
+			claudeInitLine("s1", launch.Workspace.Path), thinkingFrame, textFrame, claudeResultLine("s1", "success", false))
+		thinkingSummary := claudeFindProviderSummary(t, result.Observations, "msg_multi:0")
+		if string(thinkingSummary.ForeignDetail.RedactedJSON) != claudeThinkingOmissionDetail {
+			t.Fatalf("continued thinking detail = %s, want %s", thinkingSummary.ForeignDetail.RedactedJSON, claudeThinkingOmissionDetail)
+		}
+		message := claudeFindKind(t, result.Observations, contextevent.KindProviderMessage)
+		payload, ok := message.Payload.(*contextevent.ProviderMessagePayload)
+		if !ok {
+			t.Fatalf("provider-message payload type = %T", message.Payload)
+		}
+		if payload.MessageID != "msg_multi:1" {
+			t.Fatalf("continued text message id = %q, want msg_multi:1", payload.MessageID)
+		}
+		const wantDetail = `{"block_index":1,"family":"assistant/text","message_id":"msg_multi","text":"hi"}`
+		if string(message.ForeignDetail.RedactedJSON) != wantDetail {
+			t.Fatalf("continued text detail = %s, want %s", message.ForeignDetail.RedactedJSON, wantDetail)
+		}
+	})
+
+	t.Run("assistant_message_continues_through_a_third_frame_with_tool_use", func(t *testing.T) {
+		// A third frame sharing the same message id continues to block
+		// index 2, tool_use included.
+		launch, envRoot := claudeTestLaunch(t, sealedexec.ActionStart)
+		thinkingFrame := `{"type":"assistant","session_id":"s1","uuid":"mu-1","message":{"id":"msg_three","type":"message","role":"assistant","model":"claude-opus-5-test","content":[{"type":"thinking","thinking":"hidden","signature":"sig"}],"usage":{"input_tokens":1,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":1}}}`
+		textFrame := `{"type":"assistant","session_id":"s1","uuid":"mu-2","message":{"id":"msg_three","type":"message","role":"assistant","model":"claude-opus-5-test","content":[{"type":"text","text":"about to read"}],"usage":{"input_tokens":1,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":1}}}`
+		toolUseFrame := `{"type":"assistant","session_id":"s1","uuid":"mu-3","message":{"id":"msg_three","type":"message","role":"assistant","model":"claude-opus-5-test","content":[{"type":"tool_use","id":"call_three","name":"Read","input":{"path":"README.md"}}],"usage":{"input_tokens":1,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":1}}}`
+		result := runClaudeLines(t, launch, envRoot, claudeInitLine("s1", launch.Workspace.Path), thinkingFrame, textFrame, toolUseFrame)
+		toolCall := claudeFindKind(t, result.Observations, contextevent.KindToolCall)
+		payload, ok := toolCall.Payload.(*contextevent.ToolCallPayload)
+		if !ok {
+			t.Fatalf("tool-call payload type = %T", toolCall.Payload)
+		}
+		if payload.CallID != "call_three" {
+			t.Fatalf("tool-call id = %q, want call_three", payload.CallID)
+		}
+		if !bytes.Contains(toolCall.ForeignDetail.RedactedJSON, []byte(`"block_index":2`)) {
+			t.Fatalf("third-frame tool_use detail = %s, want block_index 2", toolCall.ForeignDetail.RedactedJSON)
+		}
+	})
+
+	t.Run("assistant_message_with_two_blocks_then_one_more_continues_the_index", func(t *testing.T) {
+		// A frame may carry more than one new block at once: two blocks in
+		// frame 1 (indices 0,1) then one more in frame 2 (index 2).
+		launch, envRoot := claudeTestLaunch(t, sealedexec.ActionStart)
+		twoBlocks := `{"type":"assistant","session_id":"s1","uuid":"mu-1","message":{"id":"msg_pair","type":"message","role":"assistant","model":"claude-opus-5-test","content":[{"type":"thinking","thinking":"hidden","signature":"sig"},{"type":"text","text":"first"}],"usage":{"input_tokens":1,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":1}}}`
+		oneMore := `{"type":"assistant","session_id":"s1","uuid":"mu-2","message":{"id":"msg_pair","type":"message","role":"assistant","model":"claude-opus-5-test","content":[{"type":"text","text":"second"}],"usage":{"input_tokens":1,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":1}}}`
+		result := runClaudeLines(t, launch, envRoot, claudeInitLine("s1", launch.Workspace.Path), twoBlocks, oneMore)
+		claudeFindProviderSummary(t, result.Observations, "msg_pair:0")
+		var ids []string
+		for _, obs := range result.Observations {
+			if payload, ok := obs.Payload.(*contextevent.ProviderMessagePayload); ok {
+				ids = append(ids, payload.MessageID)
+			}
+		}
+		if len(ids) != 2 || ids[0] != "msg_pair:1" || ids[1] != "msg_pair:2" {
+			t.Fatalf("provider-message ids = %v, want [msg_pair:1 msg_pair:2]", ids)
+		}
 	})
 
 	t.Run("duplicate_tool_result_is_refused", func(t *testing.T) {

@@ -536,9 +536,25 @@ type claudeActiveRun struct {
 	resultReceived  bool
 
 	// Stream-identity uniqueness within the active provider session.
-	seenMessageIDs   map[string]bool
-	pendingToolCalls map[string]string // call_id -> tool_name, still unmatched
-	closedToolCalls  map[string]bool   // call_id already answered exactly once
+	//
+	// SI-185: the real Claude Code CLI 2.1.261 emits one assistant frame per
+	// content block, every frame of one message carrying the same
+	// message.id (F12 canary flight 5), so a repeated message id is not
+	// itself a contradiction — frames sharing one id are the successive
+	// blocks of that one message. openMessageID is the id of the message
+	// still accepting new blocks (the most recently introduced distinct
+	// id); nextMessageBlockIndex is the per-run map message-id -> next
+	// block index, continued across every frame sharing that id, so fixed
+	// ids stay <message-id>:<block-index> and unique across the run. A
+	// message id already present in nextMessageBlockIndex whose value no
+	// longer equals openMessageID has been closed by a later, different
+	// message id: any frame naming it again is refused duplicate-message-id,
+	// whether it offers a fresh block or repeats one the closed message
+	// already produced.
+	openMessageID         string
+	nextMessageBlockIndex map[string]int
+	pendingToolCalls      map[string]string // call_id -> tool_name, still unmatched
+	closedToolCalls       map[string]bool   // call_id already answered exactly once
 
 	// disclosedUnknownMembers is SI-182's run-wide "recorded once" set: every
 	// dotted path already surfaced in an earlier witness this launch, so a
@@ -1618,20 +1634,24 @@ func (r *claudeActiveRun) handleAssistant(ctx context.Context, line []byte, obje
 	}
 
 	r.mu.Lock()
-	duplicateMessage := r.seenMessageIDs[*message.ID]
-	if !duplicateMessage {
-		if r.seenMessageIDs == nil {
-			r.seenMessageIDs = make(map[string]bool)
+	blockStart, everOpened := r.nextMessageBlockIndex[*message.ID]
+	messageClosed := everOpened && r.openMessageID != *message.ID
+	if !messageClosed {
+		if r.nextMessageBlockIndex == nil {
+			r.nextMessageBlockIndex = make(map[string]int)
 		}
-		r.seenMessageIDs[*message.ID] = true
+		r.openMessageID = *message.ID
+		r.nextMessageBlockIndex[*message.ID] = blockStart + len(*message.Content)
 	}
 	r.mu.Unlock()
 
 	if *frame.SessionID != currentSession {
 		return r.decodeFailure(ctx, seq, "session-mismatch", nil)
 	}
-	// §5: a repeated provider message id is a stream contradiction.
-	if duplicateMessage {
+	// §5/SI-185: frames sharing one message id are the successive blocks of
+	// one message, so only a frame naming a message id already closed by a
+	// later, different message id is a stream contradiction.
+	if messageClosed {
 		return r.decodeFailure(ctx, seq, "duplicate-message-id", nil)
 	}
 
@@ -1644,14 +1664,19 @@ func (r *claudeActiveRun) handleAssistant(ctx context.Context, line []byte, obje
 
 	messageID := *message.ID
 	observations := []sealedexec.NormalizedObservation{}
-	for blockIndex, rawBlock := range *message.Content {
+	for localIndex, rawBlock := range *message.Content {
+		// SI-185: every fixed id and hashed detail below uses the index
+		// continued across all frames sharing this message id; only this
+		// frame's own raw content array (and the unknown-member scan) is
+		// addressed by the frame-local position.
+		blockIndex := blockStart + localIndex
 		var discriminator claudeBlockDiscriminator
 		if err := json.Unmarshal(rawBlock, &discriminator); err != nil || discriminator.Type == nil {
 			return r.decodeFailure(ctx, seq, "unknown-content-block", nil)
 		}
 		var blockObject map[string]any
-		if blockIndex < len(contentObjects) {
-			blockObject, _ = contentObjects[blockIndex].(map[string]any)
+		if localIndex < len(contentObjects) {
+			blockObject, _ = contentObjects[localIndex].(map[string]any)
 		}
 		switch *discriminator.Type {
 		case "text":
