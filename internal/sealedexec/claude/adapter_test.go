@@ -1102,6 +1102,91 @@ func TestClaudeAdapterParityContract_Behavioral(t *testing.T) {
 		assertClaudeGapReason(t, result, "missing-foreign-field", "decode", claudeSource)
 	})
 
+	// SI-187 fix wave (F1): the family is the frame's `type`, subtype-qualified
+	// only for "system" (§I-108 as amended by SI-187). An `assistant` frame is
+	// therefore a frame of the KNOWN assistant family whatever `subtype` it
+	// also carries, and is routed by `type` alone into the strict assistant
+	// handler: its content and its fixed ids survive, and the stray `subtype`
+	// is an unknown MEMBER of a known family under SI-182 — recorded, never
+	// read. Before this row, the (type,subtype) switch failed to match such a
+	// frame, the fallback skipped the whole message, "assistant" itself was
+	// named an unknown family, and the run still reported a clean completion.
+	t.Run("assistant_with_a_stray_subtype_decodes_as_an_assistant_message", func(t *testing.T) {
+		launch, envRoot := claudeTestLaunch(t, sealedexec.ActionStart)
+		stray := `{"type":"assistant","subtype":"delta","session_id":"s1","uuid":"mu","message":{"id":"msg_1","type":"message","role":"assistant","model":"claude-opus-5-test","content":[{"type":"text","text":"kept"}],"usage":{"input_tokens":1,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":1}}}`
+		result := runClaudeLinesToTerminal(t, launch, envRoot, claudeInitLine("s1", launch.Workspace.Path),
+			stray, claudeResultLine("s1", "success", false))
+		if result.OperationalFailure != "" {
+			t.Fatalf("operational failure = %q, want none (a known family with a stray subtype still decodes)", result.OperationalFailure)
+		}
+		text := claudeFindKind(t, result.Observations, contextevent.KindProviderMessage)
+		payload, ok := text.Payload.(*contextevent.ProviderMessagePayload)
+		if !ok || payload.MessageID != "msg_1:0" {
+			t.Fatalf("provider-message id = %+v, want msg_1:0 (the frame decodes as an ordinary assistant message)", text.Payload)
+		}
+		if !bytes.Contains(text.ForeignDetail.RedactedJSON, []byte(`"text":"kept"`)) {
+			t.Fatalf("assistant detail = %s, want the message content kept, not skipped", text.ForeignDetail.RedactedJSON)
+		}
+		const wantMember = `"unknown-foreign-member":["subtype"]`
+		if !bytes.Contains(text.ForeignDetail.RedactedJSON, []byte(wantMember)) {
+			t.Fatalf("assistant detail = %s, want it to contain %s", text.ForeignDetail.RedactedJSON, wantMember)
+		}
+		for _, obs := range result.Observations {
+			if bytes.Contains(obs.ForeignDetail.RedactedJSON, []byte(unknownFamilyCode)) {
+				t.Fatalf("observation %s named the known family unknown: %s", obs.Kind, obs.ForeignDetail.RedactedJSON)
+			}
+		}
+	})
+
+	// SI-187 fix wave (F1): the same for the known "user" family, in the exact
+	// shape the 2.1.261 bundle composes (`{type:"user",subtype:i,…}`). The
+	// tool_result decodes and closes its open call, so the run completes;
+	// before the fix the frame was skipped whole, the call stayed open, and
+	// the run degraded to incomplete-tool-call with "user" recorded as an
+	// unknown family.
+	t.Run("user_tool_result_with_a_stray_subtype_decodes", func(t *testing.T) {
+		launch, envRoot := claudeTestLaunch(t, sealedexec.ActionStart)
+		toolUse := `{"type":"assistant","session_id":"s1","uuid":"mu","message":{"id":"msg_1","type":"message","role":"assistant","model":"claude-opus-5-test","content":[{"type":"tool_use","id":"call_1","name":"Read","input":{"path":"README.md"}}],"usage":{"input_tokens":1,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":1}}}`
+		toolResult := `{"type":"user","subtype":"tool_result","session_id":"s1","uuid":"tu","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"call_1","content":"ok"}]}}`
+		result := runClaudeLinesToTerminal(t, launch, envRoot, claudeInitLine("s1", launch.Workspace.Path),
+			toolUse, toolResult, claudeResultLine("s1", "success", false))
+		if result.OperationalFailure != "" {
+			t.Fatalf("operational failure = %q, want none (the tool_result decodes and closes call_1)", result.OperationalFailure)
+		}
+		row := claudeFindKind(t, result.Observations, contextevent.KindToolResult)
+		payload, ok := row.Payload.(*contextevent.ToolResultPayload)
+		if !ok || payload.CallID != "call_1" || payload.Status != "success" {
+			t.Fatalf("tool-result payload = %+v, want call_1/success", row.Payload)
+		}
+		const wantMember = `"unknown-foreign-member":["subtype"]`
+		if !bytes.Contains(row.ForeignDetail.RedactedJSON, []byte(wantMember)) {
+			t.Fatalf("tool-result detail = %s, want it to contain %s", row.ForeignDetail.RedactedJSON, wantMember)
+		}
+		for _, obs := range result.Observations {
+			if bytes.Contains(obs.ForeignDetail.RedactedJSON, []byte(unknownFamilyCode)) {
+				t.Fatalf("observation %s named the known family unknown: %s", obs.Kind, obs.ForeignDetail.RedactedJSON)
+			}
+		}
+	})
+
+	// SI-187 fix wave (F1), guard: "result" is one family too, routed by
+	// `type` alone — but unlike assistant and user its `subtype` is a
+	// required member of the accepted shape with a closed value set. An
+	// unrecognized result subtype is therefore a MALFORMED frame of a known
+	// family: refused exactly as before, never tolerated as an unknown
+	// family, and never named in a family witness.
+	t.Run("result_with_an_unrecognized_subtype_is_still_refused", func(t *testing.T) {
+		launch, envRoot := claudeTestLaunch(t, sealedexec.ActionStart)
+		result := runClaudeLines(t, launch, envRoot, claudeInitLine("s1", launch.Workspace.Path),
+			claudeResultLine("s1", "delta", false))
+		assertClaudeGapReason(t, result, "invalid-foreign-field", "decode", claudeSource)
+		for _, obs := range result.Observations {
+			if bytes.Contains(obs.ForeignDetail.RedactedJSON, []byte(unknownFamilyCode)) {
+				t.Fatalf("observation %s named the known family unknown: %s", obs.Kind, obs.ForeignDetail.RedactedJSON)
+			}
+		}
+	})
+
 	// SI-182 test row (f): a duplicate JSON key stays refused exactly as
 	// before — SI-182 tolerates unknown members, never duplicate ones.
 	t.Run("duplicate_key_still_refused", func(t *testing.T) {

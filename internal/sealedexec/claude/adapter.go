@@ -1511,9 +1511,18 @@ func (r *claudeActiveRun) normalize(ctx context.Context, line []byte, seq uint64
 		return r.handleInit(ctx, line, object, seq)
 	case outer == "system" && subtype == "api_retry":
 		return r.handleRetry(ctx, line, object, seq)
-	case outer == "assistant" && subtype == "":
+	// SI-187 fixes the family at the frame's `type`, subtype-qualified only
+	// for "system". The three non-"system" known families are therefore
+	// routed by `type` alone: a frame of one of them that also carries some
+	// stray `subtype` is a frame of that known family and is decoded
+	// strictly, where the stray member is SI-182's tolerated unknown member
+	// (recorded, never read) and everything else is validated exactly as
+	// before. Matching on the pair here instead would drop such a frame
+	// whole through the tolerant fallback below and name a family the
+	// decoder knows.
+	case outer == "assistant":
 		return r.handleAssistant(ctx, line, object, seq)
-	case outer == "user" && subtype == "":
+	case outer == "user":
 		return r.handleToolResult(ctx, line, object, seq)
 	case outer == "result":
 		return r.handleResult(ctx, line, object, seq)
