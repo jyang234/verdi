@@ -1077,16 +1077,20 @@ func TestClaudeAdapterParityContract_Behavioral(t *testing.T) {
 		}
 	})
 
-	// SI-182: modelUsage is keyed by model, so a member unknown to the per-
-	// model usage shape is recorded at modelUsage.<model>.<key>. A bare
-	// modelUsage.<key> would name a path the frame does not contain.
+	// SI-182/SI-184: modelUsage is keyed by model, so a member unknown to the
+	// per-model camelCase usage shape is recorded at
+	// modelUsage.<model>.<key>. A bare modelUsage.<key> would name a path the
+	// frame does not contain. costUSD is deliberately NOT used as the
+	// unknown member here: SI-184 makes it a known optional member of this
+	// shape (see the SI-184 tests below), so an outsider member is used
+	// instead.
 	t.Run("result_records_a_per_model_usage_member_under_its_model_key", func(t *testing.T) {
 		launch, envRoot := claudeTestLaunch(t, sealedexec.ActionStart)
 		line := strings.Replace(claudeResultLine("s1", "success", false), `,"permission_denials":[]`,
-			`,"permission_denials":[],"modelUsage":{"claude-opus-5-test":{"input_tokens":1,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":1,"costUSD":9999}}`, 1)
+			`,"permission_denials":[],"modelUsage":{"claude-opus-5-test":{"inputTokens":1,"outputTokens":1,"cacheReadInputTokens":0,"cacheCreationInputTokens":0,"latencyMs":9999}}`, 1)
 		result := runClaudeLinesToTerminal(t, launch, envRoot, claudeInitLine("s1", launch.Workspace.Path), line)
 		summary := claudeFindProviderSummary(t, result.Observations, "terminal-result")
-		const want = `"unknown-foreign-member":["modelUsage.claude-opus-5-test.costUSD"]`
+		const want = `"unknown-foreign-member":["modelUsage.claude-opus-5-test.latencyMs"]`
 		if !bytes.Contains(summary.ForeignDetail.RedactedJSON, []byte(want)) {
 			t.Fatalf("result detail = %s, want it to contain %s", summary.ForeignDetail.RedactedJSON, want)
 		}
@@ -1206,18 +1210,81 @@ func TestClaudeAdapterParityContract_Behavioral(t *testing.T) {
 	})
 
 	// And for the per-model usage object: modelUsage is rebuilt from the one
-	// accepted model key and its typed usage.
+	// accepted model key and its typed camelCase usage (SI-184).
 	t.Run("result_never_projects_a_tolerated_model_usage_member", func(t *testing.T) {
 		launch, envRoot := claudeTestLaunch(t, sealedexec.ActionStart)
 		line := strings.Replace(claudeResultLine("s1", "success", false), `,"permission_denials":[]`,
-			`,"permission_denials":[],"modelUsage":{"claude-opus-5-test":{"input_tokens":1,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":1,"costUSD":9999}}`, 1)
+			`,"permission_denials":[],"modelUsage":{"claude-opus-5-test":{"inputTokens":1,"outputTokens":1,"cacheReadInputTokens":0,"cacheCreationInputTokens":0,"latencyMs":9999}}`, 1)
 		result := runClaudeLinesToTerminal(t, launch, envRoot, claudeInitLine("s1", launch.Workspace.Path), line)
 		assertClaudeResultDetail(t, result,
 			`{"duration_api_ms":9,"duration_ms":10,"family":"result","is_error":false,`+
-				`"modelUsage":{"claude-opus-5-test":{"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"input_tokens":1,"output_tokens":1}},`+
+				`"modelUsage":{"claude-opus-5-test":{"cacheCreationInputTokens":0,"cacheReadInputTokens":0,"inputTokens":1,"outputTokens":1}},`+
 				`"num_turns":1,"permission_denials":[],"result":"done","subtype":"success","total_cost_usd":0.001,`+
-				`"unknown-foreign-member":["modelUsage.claude-opus-5-test.costUSD"],`+
+				`"unknown-foreign-member":["modelUsage.claude-opus-5-test.latencyMs"],`+
 				`"usage":{"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"input_tokens":1,"output_tokens":1}}`)
+	})
+
+	// SI-184: the per-model modelUsage.<model> value's own camelCase shape —
+	// required inputTokens, outputTokens, cacheReadInputTokens,
+	// cacheCreationInputTokens; optional webSearchRequests, costUSD,
+	// contextWindow, maxOutputTokens — accepts a real-shaped value carrying
+	// all eight members and projects it byte-exactly under those same names.
+	// costUSD keeps its exact source formatting (proved as a JSON number,
+	// never rounded through a Go float).
+	t.Run("result_accepts_the_real_shaped_eight_member_model_usage_value", func(t *testing.T) {
+		launch, envRoot := claudeTestLaunch(t, sealedexec.ActionStart)
+		line := strings.Replace(claudeResultLine("s1", "success", false), `,"permission_denials":[]`,
+			`,"permission_denials":[],"modelUsage":{"claude-opus-5-test":{"inputTokens":1200,"outputTokens":340,`+
+				`"cacheReadInputTokens":50,"cacheCreationInputTokens":25,"webSearchRequests":2,"costUSD":0.0456,`+
+				`"contextWindow":200000,"maxOutputTokens":8192}}`, 1)
+		result := runClaudeLinesToTerminal(t, launch, envRoot, claudeInitLine("s1", launch.Workspace.Path), line)
+		assertClaudeResultDetail(t, result,
+			`{"duration_api_ms":9,"duration_ms":10,"family":"result","is_error":false,`+
+				`"modelUsage":{"claude-opus-5-test":{"cacheCreationInputTokens":25,"cacheReadInputTokens":50,`+
+				`"contextWindow":200000,"costUSD":0.0456,"inputTokens":1200,"maxOutputTokens":8192,`+
+				`"outputTokens":340,"webSearchRequests":2}},`+
+				`"num_turns":1,"permission_denials":[],"result":"done","subtype":"success","total_cost_usd":0.001,`+
+				`"usage":{"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"input_tokens":1,"output_tokens":1}}`)
+	})
+
+	// The four required members alone (no optional member present) are
+	// likewise accepted, with only those four projected.
+	t.Run("result_accepts_the_four_member_minimal_model_usage_value", func(t *testing.T) {
+		launch, envRoot := claudeTestLaunch(t, sealedexec.ActionStart)
+		line := strings.Replace(claudeResultLine("s1", "success", false), `,"permission_denials":[]`,
+			`,"permission_denials":[],"modelUsage":{"claude-opus-5-test":{"inputTokens":7,"outputTokens":3,`+
+				`"cacheReadInputTokens":0,"cacheCreationInputTokens":0}}`, 1)
+		result := runClaudeLinesToTerminal(t, launch, envRoot, claudeInitLine("s1", launch.Workspace.Path), line)
+		assertClaudeResultDetail(t, result,
+			`{"duration_api_ms":9,"duration_ms":10,"family":"result","is_error":false,`+
+				`"modelUsage":{"claude-opus-5-test":{"cacheCreationInputTokens":0,"cacheReadInputTokens":0,`+
+				`"inputTokens":7,"outputTokens":3}},`+
+				`"num_turns":1,"permission_denials":[],"result":"done","subtype":"success","total_cost_usd":0.001,`+
+				`"usage":{"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"input_tokens":1,"output_tokens":1}}`)
+	})
+
+	// SI-184 makes modelUsage.<model> its own shape, distinct from the v1
+	// usage shape: a snake_case object at that position now leaves every
+	// required camelCase member absent and refuses missing-foreign-field —
+	// it is no longer silently accepted under the old spelling.
+	t.Run("result_rejects_a_snake_case_model_usage_value", func(t *testing.T) {
+		launch, envRoot := claudeTestLaunch(t, sealedexec.ActionStart)
+		line := strings.Replace(claudeResultLine("s1", "success", false), `,"permission_denials":[]`,
+			`,"permission_denials":[],"modelUsage":{"claude-opus-5-test":{"input_tokens":1,`+
+				`"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":1}}`, 1)
+		result := runClaudeLines(t, launch, envRoot, claudeInitLine("s1", launch.Workspace.Path), line)
+		assertClaudeGapReason(t, result, "missing-foreign-field", "decode", claudeSource)
+	})
+
+	// A known member of the modelUsage.<model> shape with the wrong JSON
+	// type still refuses invalid-foreign-field.
+	t.Run("result_rejects_a_wrong_typed_model_usage_member", func(t *testing.T) {
+		launch, envRoot := claudeTestLaunch(t, sealedexec.ActionStart)
+		line := strings.Replace(claudeResultLine("s1", "success", false), `,"permission_denials":[]`,
+			`,"permission_denials":[],"modelUsage":{"claude-opus-5-test":{"inputTokens":"seven","outputTokens":1,`+
+				`"cacheReadInputTokens":0,"cacheCreationInputTokens":0}}`, 1)
+		result := runClaudeLines(t, launch, envRoot, claudeInitLine("s1", launch.Workspace.Path), line)
+		assertClaudeGapReason(t, result, "invalid-foreign-field", "decode", claudeSource)
 	})
 
 	// An accepted optional member of the known usage shape still survives the
@@ -1262,20 +1329,86 @@ func TestClaudeAdapterParityContract_Behavioral(t *testing.T) {
 		}
 	})
 
-	// SI-182 test row (b): the one unknown api_retry member the real Claude
-	// Code CLI 2.1.261 emits, error_status (measured offline by the F12
-	// canary track, 2026-09-06), reproduced with a synthetic value. error
-	// keeps its required object shape: SI-182 tolerates only the unlisted
-	// member, not the measured capture's separate error-shape mismatch (see
-	// the report's residual risks).
+	// SI-183 closes the residual risk the SI-182 row above once flagged: the
+	// real Claude Code CLI 2.1.261's measured system/api_retry frame carries
+	// error as a bare string ("unknown") beside the one unknown member
+	// error_status (both measured offline by the F12 canary track,
+	// 2026-09-06; session/uuid values here are synthetic). Both are now
+	// accepted end to end: error_status still records as an unlisted member
+	// and the bare error string projects as error_category "unknown" with
+	// retry reason code provider-api-unknown.
 	t.Run("retry_tolerates_the_measured_error_status_member", func(t *testing.T) {
 		launch, envRoot := claudeTestLaunch(t, sealedexec.ActionStart)
-		bad := `{"type":"system","subtype":"api_retry","attempt":1,"max_retries":10,"retry_delay_ms":510,"error_status":null,"error":{"type":"unknown","message":"connect failed"},"uuid":"ru","session_id":"s1"}`
+		bad := `{"type":"system","subtype":"api_retry","attempt":1,"max_retries":10,"retry_delay_ms":510,"error_status":null,"error":"unknown","uuid":"ru","session_id":"s1"}`
 		result := runClaudeLines(t, launch, envRoot, claudeInitLine("s1", launch.Workspace.Path), bad, claudeResultLine("s1", "success", false))
 		summary := claudeFindProviderSummary(t, result.Observations, "api-retry/1")
-		const want = `"unknown-foreign-member":["error_status"]`
-		if !bytes.Contains(summary.ForeignDetail.RedactedJSON, []byte(want)) {
-			t.Fatalf("retry detail = %s, want it to contain %s", summary.ForeignDetail.RedactedJSON, want)
+		for _, want := range []string{`"unknown-foreign-member":["error_status"]`, `"error_category":"unknown"`} {
+			if !bytes.Contains(summary.ForeignDetail.RedactedJSON, []byte(want)) {
+				t.Fatalf("retry detail = %s, want it to contain %s", summary.ForeignDetail.RedactedJSON, want)
+			}
+		}
+		retryObs := claudeFindKind(t, result.Observations, contextevent.KindRetry)
+		retryPayload, ok := retryObs.Payload.(*contextevent.RetryPayload)
+		if !ok {
+			t.Fatalf("retry payload = %#v, want a retry payload", retryObs.Payload)
+		}
+		if retryPayload.ReasonCode != "provider-api-unknown" {
+			t.Fatalf("retry reason code = %q, want provider-api-unknown", retryPayload.ReasonCode)
+		}
+	})
+
+	// SI-183: the system/api_retry frame's error member is accepted either as
+	// the v1 object {type,message} (Amendment 002 §5, unchanged) or as a bare
+	// string from the real Claude Code CLI's closed eleven-value enum (read
+	// offline from the bundle's zod schema, measured 2026-09-06). Any other
+	// string — including one outside the enum and the empty string — and any
+	// non-string non-object value refuse invalid-foreign-field exactly as
+	// every non-object error value did before this amendment; an explicit
+	// JSON null continues to surface as the plain absent-key case,
+	// missing-foreign-field, unchanged.
+	t.Run("retry_error_member_accepts_the_closed_string_enum_and_the_v1_object", func(t *testing.T) {
+		cases := []struct {
+			name       string
+			errorJSON  string
+			accept     bool
+			wantReason string // only read when !accept; "" means invalid-foreign-field
+		}{
+			{name: "authentication_failed accepted", errorJSON: `"authentication_failed"`, accept: true},
+			{name: "oauth_org_not_allowed accepted", errorJSON: `"oauth_org_not_allowed"`, accept: true},
+			{name: "account_on_hold accepted", errorJSON: `"account_on_hold"`, accept: true},
+			{name: "billing_error accepted", errorJSON: `"billing_error"`, accept: true},
+			{name: "rate_limit accepted", errorJSON: `"rate_limit"`, accept: true},
+			{name: "overloaded accepted", errorJSON: `"overloaded"`, accept: true},
+			{name: "invalid_request accepted", errorJSON: `"invalid_request"`, accept: true},
+			{name: "model_not_found accepted", errorJSON: `"model_not_found"`, accept: true},
+			{name: "server_error accepted", errorJSON: `"server_error"`, accept: true},
+			{name: "unknown accepted", errorJSON: `"unknown"`, accept: true},
+			{name: "max_output_tokens accepted", errorJSON: `"max_output_tokens"`, accept: true},
+			{name: "v1 object form still accepted", errorJSON: `{"type":"rate_limit","message":"slow down"}`, accept: true},
+			{name: "outsider string refused", errorJSON: `"quota_exceeded"`},
+			{name: "empty string refused", errorJSON: `""`},
+			{name: "bare number refused", errorJSON: `1`},
+			{name: "explicit null still reads as the absent key", errorJSON: `null`, wantReason: "missing-foreign-field"},
+		}
+		for _, tc := range cases {
+			t.Run(tc.name, func(t *testing.T) {
+				launch, envRoot := claudeTestLaunch(t, sealedexec.ActionStart)
+				line := `{"type":"system","subtype":"api_retry","attempt":1,"max_retries":3,"retry_delay_ms":10,` +
+					`"error":` + tc.errorJSON + `,"uuid":"ru","session_id":"s1"}`
+				if tc.accept {
+					result := runClaudeLines(t, launch, envRoot, claudeInitLine("s1", launch.Workspace.Path), line, claudeResultLine("s1", "success", false))
+					if !hasKindC(result.Observations, contextevent.KindRetry) {
+						t.Fatalf("error %s should be accepted, observations = %v", tc.errorJSON, observationKindsC(result.Observations))
+					}
+					return
+				}
+				wantReason := tc.wantReason
+				if wantReason == "" {
+					wantReason = "invalid-foreign-field"
+				}
+				result := runClaudeLines(t, launch, envRoot, claudeInitLine("s1", launch.Workspace.Path), line)
+				assertClaudeGapReason(t, result, wantReason, "decode", claudeSource)
+			})
 		}
 	})
 
@@ -2587,7 +2720,7 @@ func TestClaudeClosedFrameShapeFieldNames(t *testing.T) {
 		}
 	})
 
-	// The sixteen closed shapes themselves must satisfy the invariant: they
+	// The seventeen closed shapes themselves must satisfy the invariant: they
 	// are built at package initialization, so a violation would already have
 	// panicked, but this row states the expectation the guard exists for.
 	t.Run("every_closed_frame_shape_declares_only_mirrorable_fields", func(t *testing.T) {
@@ -2595,7 +2728,8 @@ func TestClaudeClosedFrameShapeFieldNames(t *testing.T) {
 			reflect.TypeOf(claudeInitFrame{}), reflect.TypeOf(claudeMCPRow{}),
 			reflect.TypeOf(claudeRetryFrame{}), reflect.TypeOf(claudeRetryError{}),
 			reflect.TypeOf(claudeAssistantFrame{}), reflect.TypeOf(claudeAssistantMessage{}),
-			reflect.TypeOf(claudeUsage{}), reflect.TypeOf(claudeUserFrame{}),
+			reflect.TypeOf(claudeUsage{}), reflect.TypeOf(claudeModelUsage{}),
+			reflect.TypeOf(claudeUserFrame{}),
 			reflect.TypeOf(claudeUserMessage{}), reflect.TypeOf(claudeResultFrame{}),
 			reflect.TypeOf(claudePermissionDenial{}), reflect.TypeOf(claudeTextBlock{}),
 			reflect.TypeOf(claudeToolUseBlock{}), reflect.TypeOf(claudeThinkingBlock{}),
