@@ -132,41 +132,23 @@ func decodeHandlerCall(data []byte, target any) error {
 	return decodeTolerantJSON(data, target)
 }
 
-// decodeJSON decodes data into target, applying DisallowUnknownFields only
-// when strict is true; either way it rejects a trailing JSON value after the
-// one decoded. This is the single copy of that 13-line posture (CLAUDE.md:
-// "never copy-paste" — decode.go's own doc comment states the identical
-// rule for this package). See decodeTolerantJSON's doc comment for who
-// calls this with strict=false and why.
-func decodeJSON(data []byte, target any, strict bool) error {
-	decoder := json.NewDecoder(bytes.NewReader(data))
-	if strict {
-		decoder.DisallowUnknownFields()
-	}
-	if err := decoder.Decode(target); err != nil {
-		return err
-	}
-	var trailing any
-	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
-		if err == nil {
-			return errors.New("trailing JSON value")
-		}
-		return err
-	}
-	return nil
-}
-
-// decodeTolerantJSON is decodeJSON with strict=false (SI-188). Both of this
-// package's JSON-RPC/MCP protocol envelope decodes call it: decodeHandlerCall
-// (the tools/call params envelope) and decodeHandlerRequest (the outer
-// rpcRequest frame). spec/fail-loud dc-2 and this package's own decode.go
-// doc comment name both "wire.go's rpcRequest" and "tools/call
+// decodeTolerantJSON is this package's one envelope decoder: it decodes data
+// into target WITHOUT DisallowUnknownFields, and rejects a trailing JSON value
+// after the one decoded. It is the single copy of that posture (CLAUDE.md:
+// "never copy-paste" — decode.go's own doc comment states the identical rule
+// for this package), and there is deliberately no strict variant beside it:
+// both of this package's JSON-RPC/MCP protocol envelope decodes are tolerant
+// (decodeHandlerCall, the tools/call params envelope, and
+// decodeHandlerRequest, the outer rpcRequest frame), while the package's
+// STRICT posture for tool ARGUMENTS lives where it belongs, at decode.go's
+// strictUnmarshal → artifact.DecodeStrictJSON. spec/fail-loud dc-2 and
+// decode.go's doc comment name both "wire.go's rpcRequest" and "tools/call
 // name/arguments" as envelopes that stay TOLERANT of unknown members
 // ("expected forward-compat, not a mistake to catch"); server.go's callTool
 // already gives its own params the identical treatment via bare
 // json.Unmarshal.
 //
-// Before SI-188, both call sites here used strict=true (introduced 548d1c0f,
+// Before SI-188, both call sites here were strict (introduced 548d1c0f,
 // uncited by any ledger row or ratified design). MCP defines a `_meta`
 // member on every request's params, and Claude Code 2.1.261 sends
 // `_meta.progressToken` on EVERY tools/call: decodeHandlerCall's strict
@@ -186,7 +168,18 @@ func decodeJSON(data []byte, target any, strict bool) error {
 // each caller's preceding step, still refuses a duplicate key or a trailing
 // JSON value at any depth, unchanged.
 func decodeTolerantJSON(data []byte, target any) error {
-	return decodeJSON(data, target, false)
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	if err := decoder.Decode(target); err != nil {
+		return err
+	}
+	var trailing any
+	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
+		if err == nil {
+			return errors.New("trailing JSON value")
+		}
+		return err
+	}
+	return nil
 }
 
 func rejectDuplicateJSONFields(data []byte) error {
