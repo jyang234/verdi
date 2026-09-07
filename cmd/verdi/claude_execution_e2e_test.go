@@ -480,6 +480,12 @@ type fakeClaudeSpec struct {
 	// block (block 0) followed by the text block (block 1). The sealed run
 	// must still proceed to its result frame.
 	multiFrame bool
+	// unknownFamilies makes the fake reproduce the real Claude Code CLI
+	// 2.1.261's further informational frame families (SI-187, F12 canary
+	// flight 8, 2026-09-07): a system/thinking_tokens frame right after init,
+	// before the first tool call, and a tool_progress frame mid-stream. The
+	// sealed run must tolerate both and still proceed to its result frame.
+	unknownFamilies bool
 }
 
 const fakeClaudeSource = `package main
@@ -516,6 +522,9 @@ const (
 	// multiFrame selects the SI-185 2.1.261-shaped multi-frame assistant
 	// message.
 	multiFrame = __MULTIFRAME__
+	// unknownFamilies selects the SI-187 2.1.261-shaped further informational
+	// frame families.
+	unknownFamilies = __UNKNOWNFAMILIES__
 )
 
 func main() {
@@ -616,6 +625,16 @@ func run() error {
 	if err := emit(initFrame); err != nil {
 		return err
 	}
+	if unknownFamilies {
+		// SI-187: the real Claude Code CLI 2.1.261 emits further
+		// informational frame families an ordinary run (F12 canary flight 8,
+		// 2026-09-07 measured system/thinking_tokens right after init, before
+		// the first tool call). The sealed run must tolerate it — no
+		// projection, no digest, no observation of its own — and proceed.
+		if err := emit(map[string]any{"type": "system", "subtype": "thinking_tokens"}); err != nil {
+			return err
+		}
+	}
 	if unknownMembers {
 		// SI-182/SI-183: the real Claude Code CLI 2.1.261's measured
 		// system/api_retry frame carries error as a bare string ("unknown")
@@ -692,6 +711,14 @@ func run() error {
 	}
 	if doCommit {
 		if err := providerCommit(); err != nil {
+			return err
+		}
+	}
+	if unknownFamilies {
+		// SI-187: a further informational family arriving mid-stream, after
+		// tool activity has already started, must be tolerated exactly like
+		// the one right after init.
+		if err := emit(map[string]any{"type": "tool_progress"}); err != nil {
 			return err
 		}
 	}
@@ -905,6 +932,7 @@ func buildFakeClaude(t *testing.T, dir string, spec fakeClaudeSpec) string {
 		"__VERSIONSUFFIX__", strconv.FormatBool(spec.versionSuffix),
 		"__UNKNOWNMEMBERS__", strconv.FormatBool(spec.unknownMembers),
 		"__MULTIFRAME__", strconv.FormatBool(spec.multiFrame),
+		"__UNKNOWNFAMILIES__", strconv.FormatBool(spec.unknownFamilies),
 	).Replace(fakeClaudeSource)
 	moduleDir := filepath.Join(dir, "fake-claude-src")
 	if err := os.MkdirAll(moduleDir, 0o755); err != nil {
@@ -975,6 +1003,11 @@ type claudeLifecycleOptions struct {
 	// of the single all-in-one-frame assistant message. The sealed run must
 	// still proceed to the same successful lifecycle.
 	multiFrame bool
+	// unknownFamilies makes the fake provider emit the SI-187 2.1.261-shaped
+	// further informational frame families (system/thinking_tokens right
+	// after init, tool_progress mid-stream); the sealed run must tolerate
+	// both and still proceed to the same successful lifecycle.
+	unknownFamilies bool
 }
 
 // serveWithAcknowledgedExpansionLedger runs the shared lifecycle controller
@@ -1139,6 +1172,7 @@ func runClaudeSealedLifecycle(t *testing.T, bin string, options claudeLifecycleO
 		gitPath: gitPath, workspace: workspacePath, extraTool: options.extraTool, commit: true,
 		bigText: options.oversizedDetail, versionSuffix: options.claudeCodeSuffix,
 		unknownMembers: options.unknownMembers, multiFrame: options.multiFrame,
+		unknownFamilies: options.unknownFamilies,
 	})
 	if built != claudePath {
 		t.Fatalf("fake claude built at %q, want the granted argv0 %q", built, claudePath)
@@ -1496,6 +1530,32 @@ func TestClaudeBuiltBinaryLifecycle_Behavioral(t *testing.T) {
 		}
 		if textMessageID != "msg_e2e:1" {
 			t.Fatalf("multi-frame text message id = %q, want msg_e2e:1; details = %s", textMessageID, sealedEventDetails(run.fake.events))
+		}
+	})
+
+	// SI-187: the real Claude Code CLI 2.1.261 emits further informational
+	// frame families in an ordinary run — system/thinking_tokens right after
+	// init, before the first tool call (the exact shape that interrupted the
+	// F12 canary's eighth flight), and tool_progress mid-stream. The sealed
+	// run must tolerate both — no projection, no digest, no observation of
+	// their own — record each family once in the acknowledged event stream,
+	// and still complete to its result.
+	t.Run("sealed_start_tolerates_the_2_1_261_unknown_family_frames", func(t *testing.T) {
+		run := runClaudeSealedLifecycle(t, bin, claudeLifecycleOptions{unknownFamilies: true})
+		assertClaudeSuccessfulLifecycle(t, run)
+		const wantFamilies = `"unknown-foreign-family":["system/thinking_tokens","tool_progress"]`
+		var disclosed bool
+		for _, event := range run.fake.events {
+			detail := eventDetail(event)
+			if detail == nil {
+				continue
+			}
+			if bytes.Contains(detail.RedactedJSON, []byte(wantFamilies)) {
+				disclosed = true
+			}
+		}
+		if !disclosed {
+			t.Fatalf("acknowledged details never disclosed the unknown families; details = %s", sealedEventDetails(run.fake.events))
 		}
 	})
 
