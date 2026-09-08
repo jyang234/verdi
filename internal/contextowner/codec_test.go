@@ -2609,6 +2609,10 @@ func TestContextResolutionDataPresence(t *testing.T) {
 	item := fixtureDataItemDoc(t)
 	const ref = "spec/test#ac-1"
 	nonProven := Verification{State: contextcompile.ResolutionUnproven, Failure: FailureUnproven, Witnesses: []string{"ref-absent"}}
+	// SI-189 F4: the rule is stated over "non-proven" (any state but
+	// proven), not specifically "unproven" — violated-with-witness gets
+	// its own row too.
+	violated := Verification{State: contextcompile.ResolutionViolatedWithWitness, Failure: FailureRejected, Witnesses: []string{"rejected"}}
 
 	for _, tc := range []struct {
 		name       string
@@ -2629,6 +2633,23 @@ func TestContextResolutionDataPresence(t *testing.T) {
 		}, wantErr: true},
 		{name: "non-proven-with-null-data refused", resolution: ContextResolution{
 			State: nonProven.State, Failure: nonProven.Failure, Witnesses: nonProven.Witnesses, Ref: ref, Data: json.RawMessage("null"),
+		}, wantErr: true},
+		// SI-189 F4: "null" (above) decodes to a 4-byte json.RawMessage, so
+		// it happens to be caught by the presence gate the same way any
+		// other non-empty value is — these two rows pin that an empty
+		// object and an empty string are refused too, not merely
+		// tolerated as some special case of "absent".
+		{name: "non-proven-with-empty-object-data refused", resolution: ContextResolution{
+			State: nonProven.State, Failure: nonProven.Failure, Witnesses: nonProven.Witnesses, Ref: ref, Data: json.RawMessage("{}"),
+		}, wantErr: true},
+		{name: "non-proven-with-empty-string-data refused", resolution: ContextResolution{
+			State: nonProven.State, Failure: nonProven.Failure, Witnesses: nonProven.Witnesses, Ref: ref, Data: json.RawMessage(`""`),
+		}, wantErr: true},
+		{name: "violated-without-data ok", resolution: ContextResolution{
+			State: violated.State, Failure: violated.Failure, Witnesses: violated.Witnesses, Ref: ref,
+		}},
+		{name: "violated-with-data refused", resolution: ContextResolution{
+			State: violated.State, Failure: violated.Failure, Witnesses: violated.Witnesses, Ref: ref, Data: item,
 		}, wantErr: true},
 	} {
 		t.Run("reply/"+tc.name, func(t *testing.T) {
@@ -2705,5 +2726,40 @@ func TestContextResolutionDataPresence(t *testing.T) {
 				t.Fatalf("EncodeCall(DecodeCall(w)) = %s, want %s", reEncoded, encoded)
 			}
 		})
+	}
+}
+
+// TestContextResolutionDataPresenceDecodeRefusesHostileDocument pins SI-189
+// F2: every row in TestContextResolutionDataPresence reaches
+// DecodeReply/DecodeCall only through a document EncodeReply/EncodeCall had
+// already accepted, so the decode direction's own refusal was pinned only
+// transitively — through DecodeReply's byte-canonical re-encode self-check,
+// which happens to call EncodeReply internally. A refactor dropping that
+// self-check would silently reopen the decode direction with no test
+// failing. This hand-assembles a hostile non-proven-with-data reply that
+// never passes through EncodeReply, and feeds it straight to DecodeReply,
+// pinning the refusal directly at the decoder rather than transitively.
+func TestContextResolutionDataPresenceDecodeRefusesHostileDocument(t *testing.T) {
+	item := fixtureDataItemDoc(t)
+	call := fixtureCall(t, OperationResolveContext)
+	callBytes, err := EncodeCall(call)
+	if err != nil {
+		t.Fatalf("EncodeCall: %v", err)
+	}
+	// A non-proven resolution carrying a fabricated data item — the exact
+	// illegal shape EncodeReply refuses to construct — assembled by hand
+	// so this document is never blessed by EncodeReply first.
+	resultArm := `{"resolution":{"data":` + string(item) +
+		`,"failure":"unavailable","ref":"spec/test#ac-1","state":"unproven","witnesses":["ref-absent"]},"schema":"` +
+		ResultSchema(OperationResolveContext) + `"}`
+	reply := `{"call":` + string(bytes.TrimSuffix(callBytes, []byte("\n"))) +
+		`,"result":` + resultArm + `,"schema":"` + ReplySchemaID + `"}` + "\n"
+
+	_, err = DecodeReply(strings.NewReader(reply))
+	if err == nil {
+		t.Fatal("DecodeReply accepted a hostile non-proven resolution carrying a fabricated data item")
+	}
+	if !strings.Contains(err.Error(), "non-proven context resolution must not carry a data item") {
+		t.Fatalf("DecodeReply(hostile document) error = %q, want the named SI-189 refusal", err.Error())
 	}
 }
