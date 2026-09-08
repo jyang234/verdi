@@ -19,6 +19,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/jyang234/verdi/internal/contextcompile"
 	"github.com/jyang234/verdi/internal/contextevent"
 	"github.com/jyang234/verdi/internal/contextowner"
 )
@@ -246,6 +247,78 @@ func TestContextOwnerBridgeMapping(t *testing.T) {
 				t.Fatalf("private result does not carry exactly one canonical LF: %q", gotResult)
 			}
 		})
+	}
+}
+
+// TestContextOwnerBridgeResolveContextNonProven extends the mapping producer
+// above with SI-189's specific arm: an honest owner's non-proven ref-absent
+// answer — no data item — round-trips through the full public-document
+// bridge into the exact private controller result, the same way
+// TestContextOwnerBridgeMapping proves the proven arm. Before SI-189's
+// contextowner fix, an owner could not construct this public reply at all
+// without fabricating a data item (contextowner's own EncodeReply refused
+// it); this proves the corrected public wire, routed through
+// EncodeOwnerReply, produces private bytes the sealed controller client
+// decodes back to the identical non-proven, data-free resolution.
+func TestContextOwnerBridgeResolveContextNonProven(t *testing.T) {
+	operation := ControllerOperationResolveContext
+	call := controllerCallFixture(t, 1, operation)
+	privateRequest := ownerPrivateRequestBytes(t, call)
+	digest := ownerRequestDigest(privateRequest)
+
+	publicCall, err := DecodeOwnerCall(operation, privateRequest)
+	if err != nil {
+		t.Fatalf("DecodeOwnerCall(%s): %v", operation, err)
+	}
+	requestArm := ownerPublishedArm(t, privateRequest,
+		controllerRequestSchema(operation), contextowner.RequestSchema(contextowner.Operation(operation)))
+	wantCall := ownerPublicCallDocument(operation, digest, requestArm)
+	gotCall, err := contextowner.EncodeCall(publicCall)
+	if err != nil {
+		t.Fatalf("EncodeCall(%s): %v", operation, err)
+	}
+	if !bytes.Equal(gotCall, wantCall) {
+		t.Fatalf("public call bytes\n got %s\nwant %s", gotCall, wantCall)
+	}
+
+	// The honest owner's answer: non-proven, ref-absent, no data item.
+	result := ControllerResult{
+		Schema: ControllerResultSchemaID, CallSequence: call.CallSequence, Operation: operation,
+		ResolveContext: ControllerResolveContextResult{
+			Schema: controllerResultSchema(operation),
+			Resolution: ContextResolution{
+				Verification: Verification{State: contextcompile.ResolutionUnproven, Failure: FailureUnavailable, Witnesses: []string{"ref-absent"}},
+				Ref:          call.ResolveContext.Query.Ref,
+			},
+		},
+	}
+	privateResult := ownerPrivateResultBytes(t, result)
+	if bytes.Contains(privateResult, []byte(`"data"`)) {
+		t.Fatalf("fixture private result unexpectedly names a data member: %s", privateResult)
+	}
+	resultArm := ownerPublishedArm(t, privateResult,
+		controllerResultSchema(operation), contextowner.ResultSchema(contextowner.Operation(operation)))
+
+	reply := ownerReplyFor(t, operation, wantCall, resultArm)
+	gotResult, err := EncodeOwnerReply(operation, reply)
+	if err != nil {
+		t.Fatalf("EncodeOwnerReply(%s): %v", operation, err)
+	}
+	if !bytes.Equal(gotResult, privateResult) {
+		t.Fatalf("private result bytes\n got %s\nwant %s", gotResult, privateResult)
+	}
+	if bytes.Contains(gotResult, []byte(`"data"`)) {
+		t.Fatalf("bridged non-proven private result names a data member: %s", gotResult)
+	}
+
+	decoded := ControllerResult{Operation: operation}
+	if err := decodeControllerSuccessPayload(gotResult, &decoded); err != nil {
+		t.Fatalf("decodeControllerSuccessPayload(bridged result): %v", err)
+	}
+	resolution := decoded.ResolveContext.Resolution
+	if resolution.State != contextcompile.ResolutionUnproven || resolution.Data != (contextcompile.DataItem{}) ||
+		!reflect.DeepEqual(resolution.Witnesses, []string{"ref-absent"}) || resolution.Ref != call.ResolveContext.Query.Ref {
+		t.Fatalf("decoded controller result resolution = %#v", resolution)
 	}
 }
 

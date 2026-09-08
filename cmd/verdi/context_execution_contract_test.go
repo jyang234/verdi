@@ -24,6 +24,7 @@ import (
 
 	"github.com/jyang234/verdi/internal/contextcompile"
 	"github.com/jyang234/verdi/internal/contextevent"
+	"github.com/jyang234/verdi/internal/contextowner"
 	"github.com/jyang234/verdi/internal/contextreceipt"
 	"github.com/jyang234/verdi/internal/execworkspace"
 	gp "github.com/jyang234/verdi/internal/governanceprincipal"
@@ -494,6 +495,10 @@ func TestScopedContextMCPContract_Behavioral(t *testing.T) {
 
 	t.Run("real scoped MCP refuses an owner's non-proven resolution that carries a fabricated data item", func(t *testing.T) {
 		runScopedMCPContextIllegalResolution(t, bin)
+	})
+
+	t.Run("real scoped MCP denies context through the public owner-document bridge", func(t *testing.T) {
+		runScopedMCPContextViaPublicOwnerBridge(t, bin)
 	})
 
 	t.Run("malformed protocol is framed before operational exit", func(t *testing.T) {
@@ -1817,6 +1822,186 @@ func runScopedMCPContextIllegalResolution(t *testing.T, bin string) {
 	}
 }
 
+// runContextOwnerVerbErr execs the built binary's `verdi context owner
+// <verb> --operation <operation>` over stdin, returning stdout on a clean
+// exit with an empty stderr, or a descriptive error otherwise. It returns
+// an error rather than failing a *testing.T directly because its caller,
+// resolveContextOwnerBridgeAnswer, runs inside sealedLifecycleController's
+// serve goroutine (see serve/.result above), where calling a T fatal method
+// is unsafe; the top-level test asserts on the error through the existing
+// <-served channel instead.
+func runContextOwnerVerbErr(bin, dir, verb, operation string, stdin []byte) ([]byte, error) {
+	cmd := exec.Command(bin, "context", "owner", verb, "--operation", operation)
+	cmd.Dir = dir
+	cmd.Stdin = bytes.NewReader(stdin)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		return nil, fmt.Errorf("verdi context owner %s --operation %s: %w (stderr: %s)", verb, operation, err, stderr.String())
+	}
+	if stderr.Len() != 0 {
+		return nil, fmt.Errorf("verdi context owner %s --operation %s stderr = %q, want empty", verb, operation, stderr.String())
+	}
+	return stdout.Bytes(), nil
+}
+
+// resolveContextOwnerBridgeAnswer builds a resolveContextViaOwnerBridge hook
+// (SI-189) that routes the REAL intercepted resolve-context call through
+// the built binary's public `context owner decode`/`encode` verbs — the
+// same two subprocess calls a real external owner's own tooling (e.g. ATC)
+// would invoke around its own decision — answering with a non-proven
+// ref-absent resolution and no fabricated data item. Before the SI-189
+// contextowner fix, the decode step below could not even construct that
+// reply: contextowner.EncodeReply unconditionally required a nested data
+// document for every resolution state.
+func resolveContextOwnerBridgeAnswer(bin, dir string) func(sealedexec.ControllerCall) (sealedexec.ControllerResult, error) {
+	return func(call sealedexec.ControllerCall) (sealedexec.ControllerResult, error) {
+		fullCall, err := sealedexec.EncodeControllerCall(call)
+		if err != nil {
+			return sealedexec.ControllerResult{}, fmt.Errorf("owner bridge: encode intercepted call: %w", err)
+		}
+		var envelope struct {
+			Payload json.RawMessage `json:"payload"`
+		}
+		if err := json.Unmarshal(fullCall, &envelope); err != nil {
+			return sealedexec.ControllerResult{}, fmt.Errorf("owner bridge: extract call payload: %w", err)
+		}
+		privateRequest := append(append([]byte(nil), envelope.Payload...), '\n')
+
+		publicCall, err := runContextOwnerVerbErr(bin, dir, "decode", "resolve-context", privateRequest)
+		if err != nil {
+			return sealedexec.ControllerResult{}, fmt.Errorf("owner bridge decode: %w", err)
+		}
+
+		// The honest owner's own answer: non-proven, ref-absent, no data
+		// item — exactly the shape the F12 canary's pinned resolver
+		// returned and the real ATC owner could not, pre-fix, express.
+		resultArm := `{"resolution":{"failure":"unavailable","ref":"` + call.ResolveContext.Query.Ref +
+			`","state":"unproven","witnesses":["ref-absent"]},"schema":"` +
+			contextowner.ResultSchema(contextowner.OperationResolveContext) + `"}`
+		reply := contextOwnerReplyDocument(string(publicCall), resultArm)
+
+		privateResult, err := runContextOwnerVerbErr(bin, dir, "encode", "resolve-context", []byte(reply))
+		if err != nil {
+			return sealedexec.ControllerResult{}, fmt.Errorf("owner bridge encode: %w", err)
+		}
+		// context owner encode's stdout is the operation-specific result
+		// PAYLOAD (the shape sealedexec.EncodeControllerResult produces
+		// internally for one operation), not the full call_sequence-framed
+		// controller-result envelope sealedexec.DecodeControllerResult
+		// expects — so this decodes just that payload's own fields
+		// (through generic, exported-type-only JSON, since
+		// contextResolutionFromWire is unexported and this file cannot
+		// import internal/sealedexec's own unexported wire) and lets the
+		// existing serve()/.result() pipeline's own
+		// EncodeControllerResult call re-derive the exact framed bytes —
+		// itself proof that whatever the subprocess said decodes to a
+		// value the private codec accepts.
+		if bytes.Contains(privateResult, []byte(`"data"`)) {
+			return sealedexec.ControllerResult{}, fmt.Errorf("owner bridge: private result unexpectedly names a data member: %s", privateResult)
+		}
+		var resultPayload struct {
+			Resolution struct {
+				State     contextcompile.Resolution `json:"state"`
+				Failure   sealedexec.FailureCode    `json:"failure"`
+				Witnesses []string                  `json:"witnesses"`
+				Ref       string                    `json:"ref"`
+			} `json:"resolution"`
+		}
+		if err := json.Unmarshal(privateResult, &resultPayload); err != nil {
+			return sealedexec.ControllerResult{}, fmt.Errorf("owner bridge: decode private result payload: %w", err)
+		}
+		return sealedexec.ControllerResult{
+			Schema: sealedexec.ControllerResultSchemaID, CallSequence: call.CallSequence, Operation: call.Operation,
+			ResolveContext: sealedexec.ControllerResolveContextResult{
+				Schema: "verdi.context-controller/resolve-context-result/v1",
+				Resolution: sealedexec.ContextResolution{
+					Verification: sealedexec.Verification{
+						State: resultPayload.Resolution.State, Failure: resultPayload.Resolution.Failure,
+						Witnesses: resultPayload.Resolution.Witnesses,
+					},
+					Ref: resultPayload.Resolution.Ref,
+				},
+			},
+		}, nil
+	}
+}
+
+// runScopedMCPContextViaPublicOwnerBridge proves SI-189 end-to-end over the
+// PUBLIC document path: the FD-3 owner's non-proven ref-absent answer is
+// produced and consumed entirely through the built binary's own `context
+// owner decode`/`encode` verbs (real subprocesses — not the in-process
+// fake's private-wire shortcut every other scenario in this file uses),
+// and the running provider — the same built binary, driving the scoped MCP
+// request_context tool — still receives InspectionContextDenied carrying
+// the witnesses, continuing to its result rather than failing
+// operationally.
+func runScopedMCPContextViaPublicOwnerBridge(t *testing.T, bin string) {
+	t.Helper()
+	fixture := buildCompiledExecutionFixture(t, execworkspace.GrantSet{Grants: []execworkspace.Grant{}})
+	materializer, err := execworkspace.NewMaterializer(fixture.root, fixture.root, execworkspace.NewGitReconciler(fixture.root))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := materializer.Materialize(context.Background(), execworkspace.Request{Identity: fixture.request.ExecutionWorkspaceRequest}); err != nil {
+		t.Fatalf("materialize public-owner-bridge workspace: %v", err)
+	}
+
+	fake := &sealedLifecycleController{
+		t: t, request: fixture.request,
+		resolveContextViaOwnerBridge: resolveContextOwnerBridgeAnswer(bin, t.TempDir()),
+	}
+
+	files, err := syscall.Socketpair(syscall.AF_UNIX, syscall.SOCK_STREAM, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	controllerFile := os.NewFile(uintptr(files[0]), "mcp-public-owner-bridge-controller")
+	childFile := os.NewFile(uintptr(files[1]), "mcp-public-owner-bridge-child")
+	controllerConn, err := net.FileConn(controllerFile)
+	_ = controllerFile.Close()
+	if err != nil {
+		_ = childFile.Close()
+		t.Fatal(err)
+	}
+	served := make(chan error, 1)
+	go func() {
+		defer controllerConn.Close()
+		served <- fake.serve(controllerConn)
+	}()
+	frame := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"request_context","arguments":{"purpose":"fixture expansion","ref":"spec/extra"}}}` + "\n"
+	stdin := append(append([]byte(nil), fixture.requestBytes...), []byte(frame)...)
+	observation := runSealedContextBinaryWithFiles(t, bin, fixture.root, stdin, []*os.File{childFile}, "context", "mcp", "--request", "-")
+	if err := <-served; err != nil {
+		t.Fatalf("public owner bridge controller: %v; observation=%#v", err, observation)
+	}
+	if observation.exitCode != 0 || observation.stderr != "" {
+		t.Fatalf("public owner bridge observation = %#v, want a clean exit", observation)
+	}
+	var response struct {
+		Result struct {
+			Content []struct {
+				Text string `json:"text"`
+			} `json:"content"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal([]byte(strings.TrimSpace(observation.stdout)), &response); err != nil {
+		t.Fatal(err)
+	}
+	if len(response.Result.Content) != 1 {
+		t.Fatalf("public owner bridge response content = %#v", response.Result.Content)
+	}
+	inspection, err := sealedexec.DecodeInspectionResult(bytes.NewReader([]byte(response.Result.Content[0].Text)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if inspection.Kind != sealedexec.InspectionContextDenied || inspection.Context.Data.Digest != "" ||
+		!reflect.DeepEqual(inspection.Context.Witnesses, []string{"ref-absent"}) {
+		t.Fatalf("public owner bridge inspection = %#v, want a data-free denial carrying ref-absent", inspection)
+	}
+}
+
 func runScopedMCPLaterCheckpoint(t *testing.T, bin, mutation string, wantExit int) {
 	t.Helper()
 	fixture := buildCompiledExecutionFixture(t, execworkspace.GrantSet{Grants: []execworkspace.Grant{}})
@@ -2311,6 +2496,11 @@ type sealedLifecycleController struct {
 	pauseBeforeReply  sealedexec.ControllerOperation
 	operationPaused   chan<- sealedexec.ControllerOperation
 	operationRelease  <-chan struct{}
+	// resolveContextViaOwnerBridge, when set, answers
+	// ControllerOperationResolveContext by routing the real intercepted
+	// call through the public owner-document path (SI-189) instead of
+	// f.resolution directly — see runScopedMCPContextViaPublicOwnerBridge.
+	resolveContextViaOwnerBridge func(sealedexec.ControllerCall) (sealedexec.ControllerResult, error)
 }
 
 // The exact stored-segment wire schema and reference grammar the shared
@@ -2512,6 +2702,9 @@ func (f *sealedLifecycleController) result(call sealedexec.ControllerCall) (seal
 			ProfileDigest: check.ProfileDigest, WorkspaceID: check.WorkspaceID,
 		}}
 	case sealedexec.ControllerOperationResolveContext:
+		if f.resolveContextViaOwnerBridge != nil {
+			return f.resolveContextViaOwnerBridge(call)
+		}
 		resolution := f.resolution
 		resolution.Ref = call.ResolveContext.Query.Ref
 		result.ResolveContext = sealedexec.ControllerResolveContextResult{Schema: schema, Resolution: resolution}
