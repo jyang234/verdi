@@ -119,6 +119,13 @@ func TestScopedContextMCPContract_Static(t *testing.T) {
 		if result.Kind != InspectionContextApproved || result.InstructionAuthority != nil || result.Context.Data.Content != "declared bytes" {
 			t.Fatalf("approved inspection = %#v", result)
 		}
+		// SI-189 F6: the epochChecks counter used by the non-proven tests'
+		// "never reached" assertions must also be positively live — a
+		// proven resolution's approved path calls VerifyEpoch exactly
+		// once, so a dead counter (always 0) would not silently pass here.
+		if fake.epochChecks != 1 {
+			t.Fatalf("epoch re-verification calls after one approved resolution = %d, want 1", fake.epochChecks)
+		}
 		wantKinds := []contextevent.Kind{contextevent.KindContextRequest, contextevent.KindContextDecision, contextevent.KindChildManifest}
 		if !reflect.DeepEqual(fake.kinds, wantKinds) || fake.installs != 1 {
 			t.Fatalf("events/install = %v/%d", fake.kinds, fake.installs)
