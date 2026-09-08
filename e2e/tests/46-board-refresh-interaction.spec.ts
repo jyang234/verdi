@@ -1,4 +1,4 @@
-import { test, expect, type Locator, type Page } from "@playwright/test";
+import { test, expect, type Locator, type Page, type Request } from "@playwright/test";
 import { SHOWCASE, boardPath } from "./fixtures";
 import { addSticky, expectAutosaved } from "./helpers";
 
@@ -98,6 +98,12 @@ const settleFrame = (page: Page) =>
     () => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))),
   );
 
+// The board posts exactly one sticky-position mutation per drop
+// (boardspec.js finishGesture); addSticky posts to /api/sticky, a
+// different URL, so this names drop requests only.
+const isStickyPositionPost = (r: Request) =>
+  r.method() === "POST" && r.url().includes("/api/sticky-position");
+
 test.describe("board refresh vs. live interaction (owner jank report)", () => {
   test.beforeEach(async ({ page }) => {
     await page.goto(boardPath(SHOWCASE.DESIGN_SPEC));
@@ -121,12 +127,20 @@ test.describe("board refresh vs. live interaction (owner jank report)", () => {
     const hold = await holdNextFragment(page);
     const releaseFragment = hold.release;
 
-    // Drag 1 drops the sticky; its post-mutation refresh is now in
-    // flight (held) — awaited explicitly, so the NEXT gesture's own
-    // refresh can never be the captured one. The next gesture starts
-    // before the held response lands — exactly the owner's "moving
-    // stickies around while the refresh delays".
+    // Drag 1 drops the sticky and the NEXT /snapshot request is held —
+    // awaited explicitly, so drag 2's own refresh can never be the
+    // captured one. The held request may be the board's 2s poll rather
+    // than drag 1's own refresh, so drag 1's POST may still be in flight
+    // when drag 2 drops (the 2026-09-08 owner-run witness). Drag 1's
+    // request is captured at send time (registered before the drag) so
+    // the drop witness below can exclude it by identity. The next
+    // gesture starts before the held response lands — exactly the
+    // owner's "moving stickies around while the refresh delays".
+    const drag1Posted = page.waitForRequest(isStickyPositionPost, {
+      timeout: 15_000,
+    });
     await dragBy(page, sticky, 120, 60);
+    const drag1Request = await drag1Posted;
     await hold.captured;
 
     // Drag 2: press and move, and STAY mid-gesture.
@@ -163,11 +177,14 @@ test.describe("board refresh vs. live interaction (owner jank report)", () => {
     expect(after!.left).toBe(before.left);
     expect(after!.top).toBe(before.top);
 
-    // Finish the drag; the drop commits and persists. The reads below
-    // wait for the drop's own POST and the following applied projection,
-    // so they always see server truth (never the optimistic mid-swap DOM).
-    const dropPosted = page.waitForResponse(
-      (r) => r.url().includes("/api/sticky-position") && r.ok(),
+    // Finish the drag; the drop commits and persists. The drop witness is
+    // REQUEST-level and identity-excluded: the first sticky-position POST
+    // that is not drag 1's. A response predicate ("any ok sticky-position
+    // response") is ambiguous here — drag 1's late response satisfied it
+    // in the 2026-09-08 owner run, so `posted` carried drag 1's body while
+    // the wall correctly showed drag 2's.
+    const dropPosted = page.waitForRequest(
+      (r) => isStickyPositionPost(r) && r !== drag1Request,
       { timeout: 15_000 },
     );
     await page.mouse.move(300, 400, { steps: 4 });
@@ -176,8 +193,11 @@ test.describe("board refresh vs. live interaction (owner jank report)", () => {
     // mutation; the wait below is keyed to the OBSERVABLE — the wall
     // showing exactly those coordinates — never to "any /snapshot 200"
     // (indistinguishable from the 2s poll's) plus a sleep.
-    const dropResp = await dropPosted;
-    const posted = dropResp.request().postDataJSON() as { x: number; y: number };
+    const dropRequest = await dropPosted;
+    const posted = dropRequest.postDataJSON() as { x: number; y: number };
+    const dropResponse = await dropRequest.response();
+    expect(dropResponse, "the drop's POST got no response").not.toBeNull();
+    expect(dropResponse!.ok()).toBe(true);
     await expectAutosaved(page);
     await expect
       .poll(
