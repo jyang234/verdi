@@ -701,14 +701,19 @@ type ContextQuery struct {
 	Ref string       `json:"ref"`
 }
 
-// ContextResolution is the resolver's identity-bound data result. Data is the
-// exact canonical context data item.
+// ContextResolution is the resolver's identity-bound data result. Data is
+// the exact canonical context data item, present and validated in full only
+// when State is proven; a non-proven resolution (a denied or absent ref)
+// omits the member entirely — the identical rule, textually and by shared
+// helper (contextcompile.RequireDataOnlyWhenProven), that
+// internal/sealedexec's private wire enforces for the same resolution
+// (SI-189), so a real external owner never has to fabricate one.
 type ContextResolution struct {
 	State     contextcompile.Resolution `json:"state"`
 	Failure   FailureCode               `json:"failure"`
 	Witnesses []string                  `json:"witnesses"`
 	Ref       string                    `json:"ref"`
-	Data      json.RawMessage           `json:"data"`
+	Data      json.RawMessage           `json:"data,omitempty"`
 }
 
 // FlightStateSnapshot carries the exact state an epoch check must find

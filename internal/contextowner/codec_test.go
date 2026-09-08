@@ -2588,3 +2588,122 @@ func TestContextOwnerInstallExpansionRequestV2(t *testing.T) {
 		}
 	})
 }
+
+// TestContextResolutionDataPresence pins SI-189 at the public wire: a
+// resolve-context reply's resolution (and epoch-check's embedded
+// resolution) requires `data`, validated in full, only when state is
+// proven, and MUST omit the member otherwise — a non-proven resolution
+// carrying data, or a proven one lacking it, is refused by name. Before
+// this entry validContextResolution unconditionally required a nested data
+// document for every state, so a real external owner (e.g. ATC, driven
+// through `verdi context owner encode/decode` — see
+// TestContextOwnerViaBuiltBinaryDeniesNonProvenResolution in cmd/verdi)
+// could not answer a denied or absent ref without fabricating one.
+//
+// This package is tested only through its public API (see this file's
+// leading doc comment), so both directions run through EncodeReply/
+// DecodeReply (the result side) and EncodeCall/DecodeCall (epoch-check's
+// embedded resolution on the request side) rather than the unexported
+// validContextResolution/validEpochCheck directly.
+func TestContextResolutionDataPresence(t *testing.T) {
+	item := fixtureDataItemDoc(t)
+	const ref = "spec/test#ac-1"
+	nonProven := Verification{State: contextcompile.ResolutionUnproven, Failure: FailureUnproven, Witnesses: []string{"ref-absent"}}
+
+	for _, tc := range []struct {
+		name       string
+		resolution ContextResolution
+		wantErr    bool
+	}{
+		{name: "proven-with-data ok", resolution: ContextResolution{
+			State: contextcompile.ResolutionProven, Failure: FailureNone, Witnesses: []string{}, Ref: ref, Data: item,
+		}},
+		{name: "proven-without-data refused", resolution: ContextResolution{
+			State: contextcompile.ResolutionProven, Failure: FailureNone, Witnesses: []string{}, Ref: ref,
+		}, wantErr: true},
+		{name: "non-proven-without-data ok", resolution: ContextResolution{
+			State: nonProven.State, Failure: nonProven.Failure, Witnesses: nonProven.Witnesses, Ref: ref,
+		}},
+		{name: "non-proven-with-data refused", resolution: ContextResolution{
+			State: nonProven.State, Failure: nonProven.Failure, Witnesses: nonProven.Witnesses, Ref: ref, Data: item,
+		}, wantErr: true},
+		{name: "non-proven-with-null-data refused", resolution: ContextResolution{
+			State: nonProven.State, Failure: nonProven.Failure, Witnesses: nonProven.Witnesses, Ref: ref, Data: json.RawMessage("null"),
+		}, wantErr: true},
+	} {
+		t.Run("reply/"+tc.name, func(t *testing.T) {
+			reply := fixtureReply(t, OperationResolveContext)
+			reply.ResolveContext.Resolution = tc.resolution
+			encoded, err := EncodeReply(reply)
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("EncodeReply(%+v) succeeded, want a refusal", tc.resolution)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("EncodeReply(%+v): %v", tc.resolution, err)
+			}
+			proven := tc.resolution.State == contextcompile.ResolutionProven
+			var envelope struct {
+				Result json.RawMessage `json:"result"`
+			}
+			if err := json.Unmarshal(encoded, &envelope); err != nil {
+				t.Fatalf("unmarshal reply envelope: %v", err)
+			}
+			var resultArm struct {
+				Resolution json.RawMessage `json:"resolution"`
+			}
+			if err := json.Unmarshal(envelope.Result, &resultArm); err != nil {
+				t.Fatalf("unmarshal result arm: %v", err)
+			}
+			if proven && len(resultArm.Resolution) == 0 {
+				t.Fatalf("proven resolution arm is empty: %s", encoded)
+			}
+			if !proven && bytes.Contains(resultArm.Resolution, []byte(`"data"`)) {
+				t.Fatalf("non-proven resolution arm names a data member: %s", resultArm.Resolution)
+			}
+
+			// Round trip: DecodeReply(EncodeReply(reply)) re-encodes to the
+			// identical canonical bytes.
+			decoded, err := DecodeReply(bytes.NewReader(encoded))
+			if err != nil {
+				t.Fatalf("DecodeReply round trip: %v", err)
+			}
+			reEncoded, err := EncodeReply(decoded)
+			if err != nil {
+				t.Fatalf("re-EncodeReply(DecodeReply(w)): %v", err)
+			}
+			if !bytes.Equal(reEncoded, encoded) {
+				t.Fatalf("EncodeReply(DecodeReply(w)) = %s, want %s", reEncoded, encoded)
+			}
+		})
+
+		t.Run("epoch-check/"+tc.name, func(t *testing.T) {
+			call := fixtureCall(t, OperationVerifyEpoch)
+			call.VerifyEpoch.Check.Resolution = tc.resolution
+			encoded, err := EncodeCall(call)
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("EncodeCall(%+v) succeeded, want a refusal", tc.resolution)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("EncodeCall(%+v): %v", tc.resolution, err)
+			}
+
+			decoded, err := DecodeCall(bytes.NewReader(encoded))
+			if err != nil {
+				t.Fatalf("DecodeCall round trip: %v", err)
+			}
+			reEncoded, err := EncodeCall(decoded)
+			if err != nil {
+				t.Fatalf("re-EncodeCall(DecodeCall(w)): %v", err)
+			}
+			if !bytes.Equal(reEncoded, encoded) {
+				t.Fatalf("EncodeCall(DecodeCall(w)) = %s, want %s", reEncoded, encoded)
+			}
+		})
+	}
+}

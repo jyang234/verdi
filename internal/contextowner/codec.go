@@ -1694,6 +1694,16 @@ func validateContextQuery(query ContextQuery) error {
 	return requireText("context ref", query.Ref)
 }
 
+// validContextResolution canonicalizes and validates resolution. data is
+// required — and validated as a full verdi.context-data-item/v1 document —
+// only when State is proven; a non-proven resolution MUST omit the member
+// entirely, refused by name otherwise (SI-189), exactly as
+// internal/sealedexec's contextResolutionToWire/FromWire enforce it at the
+// private wire: the shared presence gate is
+// contextcompile.RequireDataOnlyWhenProven, the one helper both codecs call
+// so the rule stays textually identical without either package importing
+// the other (this package's own doc comment: the dependency direction
+// stays one-way, contextowner never imports internal/sealedexec).
 func validContextResolution(resolution ContextResolution) (ContextResolution, error) {
 	if err := validateVerification("context resolution", resolution.State, resolution.Failure, resolution.Witnesses); err != nil {
 		return ContextResolution{}, err
@@ -1701,12 +1711,19 @@ func validContextResolution(resolution ContextResolution) (ContextResolution, er
 	if err := requireText("context resolution ref", resolution.Ref); err != nil {
 		return ContextResolution{}, err
 	}
+	if err := contextcompile.RequireDataOnlyWhenProven("contextowner", resolution.State, len(resolution.Data) != 0); err != nil {
+		return ContextResolution{}, err
+	}
+	resolution.Witnesses = copyTexts(resolution.Witnesses)
+	if resolution.State != contextcompile.ResolutionProven {
+		resolution.Data = nil
+		return resolution, nil
+	}
 	data, err := nestedDocument("context resolution data", DataItemSchemaID, resolution.Data)
 	if err != nil {
 		return ContextResolution{}, err
 	}
 	resolution.Data = data
-	resolution.Witnesses = copyTexts(resolution.Witnesses)
 	return resolution, nil
 }
 
