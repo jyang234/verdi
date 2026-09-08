@@ -129,20 +129,25 @@ func TestServer_ToolsListAndCall(t *testing.T) {
 	result := listResp["result"].(map[string]any)
 	tools, _ := result["tools"].([]any)
 	// 05 §MCP server's nine tools, `experiment` (CSE Wave 5B, design §8,
-	// ledger SI-145), and Wave 6 Task 1's five new ASD tools (AC-8) —
-	// registered in the same commit as their tooldefs.go rows.
-	if len(tools) != 15 {
-		t.Fatalf("tools/list returned %d tools, want 15: %#v", len(tools), tools)
+	// ledger SI-145), Wave 6 Task 1's five new ASD tools (AC-8), and Wave 6
+	// Task 3's three new constitution tools (spec/context-integrity-v2
+	// AC-1/AC-2/AC-3) — registered in the same commit as their tooldefs.go
+	// rows.
+	if len(tools) != 18 {
+		t.Fatalf("tools/list returned %d tools, want 18: %#v", len(tools), tools)
 	}
 	wantNames := map[string]bool{
 		"search_artifacts": true, "get_artifact": true, "get_links": true, "get_matrix": true,
 		"get_context_bundle": true, "list_annotations": true, "list_tasks": true, "get_board": true, "add_annotation": true,
-		"experiment":              true,
-		"get_design_context":      true,
-		"get_design_capabilities": true,
-		"mutate_draft":            true,
-		"get_design_provenance":   true,
-		"prepare_design_review":   true,
+		"experiment":                 true,
+		"get_design_context":         true,
+		"get_design_capabilities":    true,
+		"mutate_draft":               true,
+		"get_design_provenance":      true,
+		"prepare_design_review":      true,
+		"constitution_inspect":       true,
+		"constitution_validate":      true,
+		"constitution_impact_review": true,
 	}
 	for _, raw := range tools {
 		def := raw.(map[string]any)

@@ -73,7 +73,7 @@ func writeASDPosture(b *strings.Builder, p *BoardProjection, git *boardGitState,
 	}
 	b.WriteString(`<span class="asd-posture-tree" data-testid="asd-posture-tree" data-dirty="` + dirtyState + `">working tree: ` + dirtyWord + `</span>`)
 	b.WriteString(`<button type="button" class="asd-refresh" id="asd-refresh" data-testid="asd-refresh">Refresh</button>`)
-	b.WriteString(`<details class="readiness-tech asd-posture-tech"><summary>Repository details</summary><dl class="readiness-tech-facts">`)
+	b.WriteString(`<details class="readiness-tech asd-posture-tech" data-testid="asd-posture-tech"><summary>Repository details</summary><dl class="readiness-tech-facts">`)
 	writeReadinessFact(b, "Checkout", asd.Checkout)
 	writeReadinessFact(b, "Branch", asd.Branch)
 	writeReadinessFact(b, "Worktree HEAD", orUnproven(asd.WorktreeHead))

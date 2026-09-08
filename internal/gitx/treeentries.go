@@ -36,6 +36,21 @@ func LsTreeEntries(ctx context.Context, dir, ref string) ([]TreeEntry, error) {
 	return entries, nil
 }
 
+// LsTreeEntriesIncludingTrees lists every tree and leaf at ref. The -t flag
+// retains directory entries while -r continues through them, allowing closed
+// tree grammars to reject an unexpected directory even when it is empty.
+func LsTreeEntriesIncludingTrees(ctx context.Context, dir, ref string) ([]TreeEntry, error) {
+	out, err := run(ctx, dir, "ls-tree", "-rtz", "--full-tree", ref)
+	if err != nil {
+		return nil, fmt.Errorf("gitx: LsTreeEntriesIncludingTrees(%s): %w", ref, err)
+	}
+	entries, err := parseTreeEntries(out)
+	if err != nil {
+		return nil, fmt.Errorf("gitx: LsTreeEntriesIncludingTrees(%s): %w", ref, err)
+	}
+	return entries, nil
+}
+
 // parseTreeEntries splits `git ls-tree -rz --full-tree` output on NUL bytes
 // (never on newline, which is a legal path byte) and each entry on its
 // first TAB, which separates the space-separated "<mode> <type> <object>"

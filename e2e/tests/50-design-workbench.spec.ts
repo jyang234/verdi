@@ -563,6 +563,14 @@ test.describe("conditional refresh", () => {
     await page.locator(".asd-posture-tech > summary").click();
     await expect(page.locator(".asd-posture-tech")).toHaveAttribute("open", "");
     const targetID = await addFreshQuestion(page, "preservation case seed [50-pres-1]");
+    // Force the changed projection to land in the pre-editor window. This
+    // proves expansion survives the region swap itself instead of relying on
+    // the polling tick to race the editor's interaction hold.
+    await page.getByTestId("asd-refresh").click();
+    await expect(page.getByTestId("card-" + targetID)).toContainText("[50-pres-1]", {
+      timeout: 5_000,
+    });
+    await expect(page.locator(".asd-posture-tech")).toHaveAttribute("open", "");
     // Open the inline editor and type WITHOUT saving.
     await page.getByTestId("card-" + SHOWCASE.AC_IDS[0]).dblclick();
     const editor = page.getByRole("textbox", { name: "Card text" });

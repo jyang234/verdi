@@ -788,6 +788,7 @@ func (s *Service) execute(ctx context.Context, request ExecutionRequest, data []
 	// mutable flight state for this execution and hands the embedded adapter
 	// exactly that pointer. Nothing downstream reconstructs a second one.
 	flight := newExecutionFlightState(request, workspace, plan, resumeExpansionRoot)
+	defer flight.failAdapterStart(nil)
 	retained := newRetainedEvents()
 	adapterFacts, err := s.ports.Adapter.VerifyAdapter(ctx, AdapterCheck{Request: request, Profile: profile, Workspace: workspace, Review: cloneReviewLaunch(review), State: flight})
 	if err != nil {
@@ -1206,6 +1207,7 @@ func (s *Service) requestFailureStop(ctx context.Context, active *activeExecutio
 		active.terminalCause = errors.Join(active.terminalCause, failure)
 	}
 	active.mu.Unlock()
+	active.flight.failAdapterStart(failure)
 	if owner {
 		s.issueStop(ctx, active)
 	}
@@ -1823,9 +1825,13 @@ func newExecutionFlightState(request ExecutionRequest, workspace WorkspaceFacts,
 		snapshot.LastGlobalSequence = plan.priorGlobal
 		// SI-172: the authenticated restart acknowledgments open the complete
 		// stream, so nothing already proven durable disappears from continuity.
-		return NewFlightStateAt(snapshot, plan.acks)
+		state := NewFlightStateAt(snapshot, plan.acks)
+		state.adapterStart = newAdapterStartLatch()
+		return state
 	}
-	return NewFlightState(snapshot)
+	state := NewFlightState(snapshot)
+	state.adapterStart = newAdapterStartLatch()
+	return state
 }
 
 // flightRunState reads the complete acknowledgment stream and terminal position

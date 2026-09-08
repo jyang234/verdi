@@ -37,6 +37,11 @@ import (
 // lint's 02-registry classification walk: the constitution kinds are
 // CI-owned artifacts outside 02 §Kind registry's frozen table, so
 // ClassifyPath deliberately does not learn them.
+//
+// "constitution" is SI-179 D1's registered-consumer inventory home. Its v1
+// content grammar is exactly constitution/consumers.json and remains owned by
+// internal/constitutionimpact; VL-007 admits only the top-level directory and
+// does not create a second content decoder.
 var knownTopLevelEntries = map[string]bool{
 	"verdi.yaml":     true,
 	".gitignore":     true,
@@ -49,6 +54,7 @@ var knownTopLevelEntries = map[string]bool{
 	"reaffirmations": true,
 	"obligations":    true,
 	"policy":         true,
+	"constitution":   true,
 	"bin":            true,
 	"data":           true,
 }

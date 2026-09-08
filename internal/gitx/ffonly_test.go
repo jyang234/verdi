@@ -151,6 +151,19 @@ func TestFastForwardOnly(t *testing.T) {
 	})
 }
 
+func TestValidateFullOID(t *testing.T) {
+	for _, oid := range []string{strings.Repeat("a", 40), strings.Repeat("b", 64)} {
+		if err := ValidateFullOID(oid); err != nil {
+			t.Fatalf("ValidateFullOID(%q): %v", oid, err)
+		}
+	}
+	for _, oid := range []string{"", "HEAD", strings.Repeat("A", 40), strings.Repeat("a", 39), strings.Repeat("g", 40)} {
+		if err := ValidateFullOID(oid); err == nil {
+			t.Fatalf("ValidateFullOID(%q) unexpectedly succeeded", oid)
+		}
+	}
+}
+
 func ffOnlyDivergedFixture(t *testing.T, divergent bool) (string, string, string) {
 	t.Helper()
 	dir := t.TempDir()

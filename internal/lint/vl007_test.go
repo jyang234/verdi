@@ -1,6 +1,7 @@
 package lint
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 )
@@ -25,5 +26,25 @@ func TestVL007_PolicyDirAdmitted(t *testing.T) {
 	findings := runLint(t, repo.Dir, Context{}, Options{})
 	if len(findings) != 0 {
 		t.Fatalf("got %d findings, want 0:\n%s", len(findings), findingsString(findings))
+	}
+}
+
+// TestVL007_ConstitutionInventoryAdmitted pins SI-179 D1's narrow admission:
+// VL-007 recognizes the constitution directory while its consumers.json
+// grammar remains loader-owned by internal/constitutionimpact.
+func TestVL007_ConstitutionInventoryAdmitted(t *testing.T) {
+	repo := buildLintRepo(t, filepath.Join("..", "..", "testdata", "constitutionadmission"))
+	findings := runLint(t, repo.Dir, Context{}, Options{})
+	if len(findings) != 0 {
+		t.Fatalf("got %d findings, want 0:\n%s", len(findings), findingsString(findings))
+	}
+
+	unknown := filepath.Join(repo.Dir, ".verdi", "constitution-next")
+	if err := os.Mkdir(unknown, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	findings = runLint(t, repo.Dir, Context{}, Options{})
+	if len(findings) != 1 || findings[0].Rule != "VL-007" || findings[0].Path != ".verdi/constitution-next" {
+		t.Fatalf("unknown sibling findings = %#v, want one VL-007 refusal", findings)
 	}
 }

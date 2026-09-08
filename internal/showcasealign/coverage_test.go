@@ -300,6 +300,18 @@ var showcaseCoverage = map[string][]coverageEvidence{
 	"mcp:prepare_design_review":   {goE2E("internal/showcasealign/mcp_showcase_test.go")},
 	"mcp:mutate_draft":            {goE2E("internal/showcasealign/mcp_showcase_test.go")},
 
+	// mcp:constitution_inspect, mcp:constitution_validate,
+	// mcp:constitution_impact_review (Wave 6 Task 3, spec/context-
+	// integrity-v2 AC-1/AC-2/AC-3): driven against the same provisioned
+	// showcase store, which adopts no .verdi/policy/ constitution tree —
+	// all three prove the real clean not-adopted disclosure rather than an
+	// error, since absence of a constitution is a proven fact for these
+	// operations, never a fault. See mcp_showcase_test.go's own doc
+	// comment on these subtests for the exact assertion.
+	"mcp:constitution_inspect":       {goE2E("internal/showcasealign/mcp_showcase_test.go")},
+	"mcp:constitution_validate":      {goE2E("internal/showcasealign/mcp_showcase_test.go")},
+	"mcp:constitution_impact_review": {goE2E("internal/showcasealign/mcp_showcase_test.go")},
+
 	// --- Workbench surfaces ---
 	"wb:board":                {playwright("10-board-projection.spec.ts")},
 	"wb:board-scoping-canvas": {playwright("30-board-scoping-canvas.spec.ts")},

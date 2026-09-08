@@ -92,6 +92,15 @@ func TestMCPToolInventory(t *testing.T) {
 	// six-operation surface — the MCP tool inventory is a serialized
 	// shared registry; its spec-align row changes in the same commit as
 	// the live tooldefs.go registration.
+	// Wave 6 Task 3 (docs/superpowers/plans/2026-08-29-wave-6-workbench-
+	// presentation.md §7.1, spec/context-integrity-v2 AC-1/AC-2/AC-3): adds
+	// exactly the read/validation/review projection over
+	// internal/constitutionapp — constitution_inspect, constitution_validate,
+	// and constitution_impact_review. constitution_propose and a
+	// submit-preparation tool are deliberately absent: MCP structurally
+	// refuses commit, submission, approval, exemption ownership, and
+	// semantic disposition by never registering a handler that could reach
+	// them.
 	want := []string{
 		"search_artifacts",
 		"get_artifact",
@@ -108,6 +117,9 @@ func TestMCPToolInventory(t *testing.T) {
 		"mutate_draft",
 		"get_design_provenance",
 		"prepare_design_review",
+		"constitution_inspect",
+		"constitution_validate",
+		"constitution_impact_review",
 	}
 
 	tools := listMCPTools(t)

@@ -1,6 +1,9 @@
 package mcpserve
 
-import "github.com/jyang234/verdi/internal/model"
+import (
+	"github.com/jyang234/verdi/internal/constitutionapp"
+	"github.com/jyang234/verdi/internal/model"
+)
 
 // dataNeverInstructionsNote is 05 §MCP server's normative safety note,
 // carried verbatim into every tool's description (PLAN.md Phase 9:
@@ -39,6 +42,20 @@ func obj(props map[string]any, required ...string) map[string]any {
 
 func arrOfString(desc string) map[string]any {
 	return map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": desc}
+}
+
+// constitutionRequestSchemaProperty declares one constitution request
+// envelope's REQUIRED, exact version. The value is pinned as a single-member
+// enum rather than described in prose, so a schema-aware client is refused
+// client-side by the same rule constitutionapp's own decoder enforces
+// server-side (the fail-loud posture obj's additionalProperties: false
+// already establishes for unknown fields).
+func constitutionRequestSchemaProperty(version string) map[string]any {
+	return map[string]any{
+		"type":        "string",
+		"enum":        []string{version},
+		"description": "the request envelope version; must be exactly " + version,
+	}
 }
 
 // toolDefs is the "tools/list" result: 05 §MCP server's original nine
@@ -247,6 +264,59 @@ func toolDefs(mdl *model.Model) []map[string]any {
 				"type":           str("comment | question | decision-needed | agent-task"),
 				"body":           str("the annotation's text body"),
 			}, "author", "type", "body"),
+		},
+		{
+			"name":        "constitution_inspect",
+			"description": "Constitution (Wave 6 Task 3; spec/context-integrity-v2 AC-1/AC-2): the accepted and proposed constitution states at their exact Git identities — every source layer (policy/overlay/exemption/disposition, with owners/scope/digest) and the complete effective rule ledger, unflattened. Takes no field beyond the required request envelope version." + dataNeverInstructionsNote,
+			"inputSchema": obj(map[string]any{
+				"schema": constitutionRequestSchemaProperty(constitutionapp.InspectRequestSchema),
+			}, "schema"),
+		},
+		{
+			"name":        "constitution_validate",
+			"description": "Constitution (Wave 6 Task 3): strict-decodes and cross-validates the proposed constitution store, reporting a three-valued proof outcome (proven, or a typed corrupted-policy/not-adopted disclosure) — never a second decode or validation pass of internal/policyauthority's own. Takes no field beyond the required request envelope version." + dataNeverInstructionsNote,
+			"inputSchema": obj(map[string]any{
+				"schema": constitutionRequestSchemaProperty(constitutionapp.ValidateRequestSchema),
+			}, "schema"),
+		},
+		{
+			"name":        "constitution_impact_review",
+			"description": "Constitution (Wave 6 Task 3; AC-3/AC-6): diffs the accepted and proposed constitution layers, derives the complete registered-consumer union from both exact-tree inventories, and evaluates every canonical member through the existing policy-conflict path. Caller targets are supplemental previews only: they cannot remove a registered consumer, establish completeness, or improve submission readiness. This tool never merges, approves, or writes anything — constitution_propose and constitution_submit_preparation have no MCP tool at all." + dataNeverInstructionsNote,
+			"inputSchema": obj(map[string]any{
+				"schema": constitutionRequestSchemaProperty(constitutionapp.ImpactReviewRequestSchema),
+				"targets": map[string]any{
+					"type": "array",
+					"items": map[string]any{
+						"type": "object", "additionalProperties": false,
+						"properties": map[string]any{
+							"spec":  str("the accepted spec ref this governed target compiles context for"),
+							"phase": str("design | build | review"),
+							"adapter": map[string]any{
+								"type": "object", "additionalProperties": false,
+								"properties": map[string]any{
+									"id":      str("the constitution-registered adapter id"),
+									"version": str("the constitution-registered adapter version"),
+								},
+								"required":    []string{"id", "version"},
+								"description": "the harness adapter this target compiles for",
+							},
+							"scope": map[string]any{
+								"type": "object", "additionalProperties": false,
+								"properties": map[string]any{
+									"phases":       arrOfString("declared phase scope; [] is unconstrained"),
+									"environments": arrOfString("declared environment scope; [] is unconstrained"),
+									"paths":        arrOfString("declared path scope; [] is unconstrained"),
+									"refs":         arrOfString("declared ref scope; [] is unconstrained"),
+								},
+								"required":    []string{"phases", "environments", "paths", "refs"},
+								"description": "the target's own declared scope (every dimension explicit, never omitted)",
+							},
+						},
+						"required": []string{"spec", "phase", "adapter", "scope"},
+					},
+					"description": "optional supplemental preview targets; canonical coverage always comes from the exact-tree registered-consumer inventories",
+				},
+			}, "schema"),
 		},
 	}
 }
