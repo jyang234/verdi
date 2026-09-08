@@ -2661,7 +2661,10 @@ func validateContextQuery(q ContextQuery) error {
 // full data-item document only when r.State is proven; a non-proven
 // resolution must carry no data item at all (its zero value), and the wire
 // then omits the member entirely (SI-189) — a non-proven resolution that
-// carries data, or a proven one that lacks it, is refused by name.
+// carries data, or a proven one that lacks it, is refused by name. The
+// presence gate itself (contextcompile.RequireDataOnlyWhenProven) is the
+// one helper this rule shares, textually identical, with
+// internal/contextowner's validContextResolution.
 func contextResolutionToWire(r ContextResolution) (contextResolutionWire, error) {
 	if err := validateControllerVerification(r.Verification); err != nil {
 		return contextResolutionWire{}, err
@@ -2669,10 +2672,10 @@ func contextResolutionToWire(r ContextResolution) (contextResolutionWire, error)
 	if err := requireText("context resolution ref", r.Ref); err != nil {
 		return contextResolutionWire{}, err
 	}
+	if err := contextcompile.RequireDataOnlyWhenProven("sealedexec", r.State, r.Data != (contextcompile.DataItem{})); err != nil {
+		return contextResolutionWire{}, err
+	}
 	if r.State != contextcompile.ResolutionProven {
-		if r.Data != (contextcompile.DataItem{}) {
-			return contextResolutionWire{}, fmt.Errorf("sealedexec: non-proven context resolution must not carry a data item")
-		}
 		return contextResolutionWire{r.State, r.Failure, r.Witnesses, r.Ref, nil}, nil
 	}
 	data, err := contextcompile.EncodeDataItem(r.Data)
@@ -2692,17 +2695,15 @@ func contextResolutionFromWire(w contextResolutionWire) (ContextResolution, erro
 	if e != nil {
 		return ContextResolution{}, e
 	}
+	if err := contextcompile.RequireDataOnlyWhenProven("sealedexec", v.State, len(w.Data) != 0); err != nil {
+		return ContextResolution{}, err
+	}
 	var data contextcompile.DataItem
 	if v.State == contextcompile.ResolutionProven {
-		if len(w.Data) == 0 {
-			return ContextResolution{}, fmt.Errorf("sealedexec: proven context resolution requires a data item")
-		}
 		data, e = contextcompile.DecodeDataItem(frameNested(w.Data))
 		if e != nil {
 			return ContextResolution{}, e
 		}
-	} else if len(w.Data) != 0 {
-		return ContextResolution{}, fmt.Errorf("sealedexec: non-proven context resolution must not carry a data item")
 	}
 	r := ContextResolution{Verification: v, Ref: w.Ref, Data: data}
 	_, e = contextResolutionToWire(r)

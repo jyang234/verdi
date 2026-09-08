@@ -965,6 +965,38 @@ func (item DataItem) Validate() error {
 	return nil
 }
 
+// RequireDataOnlyWhenProven enforces the one SI-189 rule shared, textually
+// identical, by both of Verdi's controller-owner wire boundaries: a
+// resolution's accompanying document is required — and, at each wire's own
+// seam, validated in full — only when state is proven, and MUST be absent
+// otherwise. present reports whether the caller's own wire already carries
+// that document; this function decides presence only, never the document's
+// shape, which stays owned by whichever encoding each boundary already uses
+// (internal/sealedexec's contextcompile.EncodeDataItem/DecodeDataItem over a
+// decoded DataItem; internal/contextowner's schema-shape check over a still-
+// opaque json.RawMessage). pkg names the caller's own package so a refusal
+// still reads as that package's error (e.g. "sealedexec", "contextowner").
+//
+// Both boundaries carry a ContextResolution/EpochCheck pair with this exact
+// shape but declare their own local types for it (contextowner restates the
+// contract instead of importing internal/sealedexec, keeping the
+// dependency direction one-way — see internal/contextowner's package doc),
+// so this predicate is the one piece narrow and type-free enough for both
+// to share without a cycle: it closes over neither type, only Resolution
+// and a plain presence bool.
+func RequireDataOnlyWhenProven(pkg string, state Resolution, present bool) error {
+	if state == ResolutionProven {
+		if !present {
+			return fmt.Errorf("%s: proven context resolution requires a data item", pkg)
+		}
+		return nil
+	}
+	if present {
+		return fmt.Errorf("%s: non-proven context resolution must not carry a data item", pkg)
+	}
+	return nil
+}
+
 // rawContentDigest returns data's content address in the shared
 // "sha256:"+hex form, computed over data's exact bytes (never a canonical-
 // JSON re-encoding). Package-local per repo convention (mirrors
