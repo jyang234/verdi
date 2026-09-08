@@ -1218,9 +1218,10 @@ func runClaudeSealedLifecycle(t *testing.T, bin string, options claudeLifecycleO
 	fake := &sealedLifecycleController{
 		t: t, request: fixture.request, profile: profile,
 		fail: options.failOperation, allowQuarantine: true,
+		// SI-189: a non-proven resolution carries no data item — an honest
+		// owner denying this ref does not fabricate one.
 		resolution: sealedexec.ContextResolution{
 			Verification: sealedexec.Verification{State: contextcompile.ResolutionUnproven, Failure: sealedexec.FailureUnproven, Witnesses: []string{"fixture context unavailable"}},
-			Data:         fixture.compiled.DataItems[0],
 		},
 	}
 	if options.approvedContext {

@@ -492,6 +492,10 @@ func TestScopedContextMCPContract_Behavioral(t *testing.T) {
 		}
 	})
 
+	t.Run("real scoped MCP refuses an owner's non-proven resolution that carries a fabricated data item", func(t *testing.T) {
+		runScopedMCPContextIllegalResolution(t, bin)
+	})
+
 	t.Run("malformed protocol is framed before operational exit", func(t *testing.T) {
 		runScopedMCPProtocolFailure(t, bin)
 	})
@@ -1674,7 +1678,11 @@ func runScopedMCPContextScenario(t *testing.T, bin string, kind sealedexec.Inspe
 	}
 	switch kind {
 	case sealedexec.InspectionContextDenied:
-		fake.resolution = sealedexec.ContextResolution{Verification: sealedexec.Verification{State: contextcompile.ResolutionUnproven, Failure: sealedexec.FailureUnproven, Witnesses: []string{"fixture context unavailable"}}, Data: fixture.compiled.DataItems[0]}
+		// SI-189: the owner's non-proven answer carries no data item — this
+		// is the real F12 canary shape (a pinned resolver's exit-1
+		// ref-absent answer), and the run continues to its result rather
+		// than terminating operationally.
+		fake.resolution = sealedexec.ContextResolution{Verification: sealedexec.Verification{State: contextcompile.ResolutionUnproven, Failure: sealedexec.FailureUnproven, Witnesses: []string{"ref-absent"}}}
 	case sealedexec.InspectionEpochInvalidated:
 		fake.epoch = sealedexec.Verification{State: contextcompile.ResolutionViolatedWithWitness, Failure: sealedexec.FailureRejected, Witnesses: []string{"fixture epoch moved"}}
 	}
@@ -1732,6 +1740,14 @@ func runScopedMCPContextScenario(t *testing.T, bin string, kind sealedexec.Inspe
 			t.Fatalf("approved context inspection = %#v", inspection)
 		}
 	}
+	if kind == sealedexec.InspectionContextDenied {
+		// SI-189: the owner's data-free non-proven answer still reaches the
+		// provider as InspectionContextDenied carrying its witnesses, and
+		// the run continues to this result rather than failing operationally.
+		if inspection.Context.Data.Digest != "" || !reflect.DeepEqual(inspection.Context.Witnesses, []string{"ref-absent"}) {
+			t.Fatalf("denied context inspection = %#v", inspection)
+		}
+	}
 	gotKinds := make([]contextevent.Kind, len(fake.events))
 	for i, event := range fake.events {
 		gotKinds[i] = event.Kind
@@ -1741,6 +1757,63 @@ func runScopedMCPContextScenario(t *testing.T, bin string, kind sealedexec.Inspe
 	}
 	if kind == sealedexec.InspectionContextApproved && fake.calls[len(fake.calls)-1] != sealedexec.ControllerOperationInstallExpansion {
 		t.Fatalf("approved context did not install after terminal ack: %v", fake.calls)
+	}
+}
+
+// runScopedMCPContextIllegalResolution proves SI-189's wire refusal reaches
+// the real controller boundary, not only the unit-level codec: an owner
+// that answers a non-proven resolution with a fabricated data item cannot
+// produce a reply the shared controller codec will encode
+// (contextResolutionToWire refuses it by name), so the fake controller's own
+// reply fails, the connection closes without one, and the built binary ends
+// the run operationally rather than silently trusting invented context data.
+func runScopedMCPContextIllegalResolution(t *testing.T, bin string) {
+	t.Helper()
+	fixture := buildCompiledExecutionFixture(t, execworkspace.GrantSet{Grants: []execworkspace.Grant{}})
+	materializer, err := execworkspace.NewMaterializer(fixture.root, fixture.root, execworkspace.NewGitReconciler(fixture.root))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := materializer.Materialize(context.Background(), execworkspace.Request{Identity: fixture.request.ExecutionWorkspaceRequest}); err != nil {
+		t.Fatalf("materialize illegal-resolution workspace: %v", err)
+	}
+	if len(fixture.compiled.DataItems) == 0 {
+		t.Fatal("compiled MCP fixture contains no context data")
+	}
+	fake := &sealedLifecycleController{
+		t: t, request: fixture.request,
+		resolution: sealedexec.ContextResolution{
+			Verification: sealedexec.Verification{State: contextcompile.ResolutionUnproven, Failure: sealedexec.FailureUnproven, Witnesses: []string{"ref-absent"}},
+			Data:         fixture.compiled.DataItems[0],
+		},
+	}
+
+	files, err := syscall.Socketpair(syscall.AF_UNIX, syscall.SOCK_STREAM, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	controllerFile := os.NewFile(uintptr(files[0]), "mcp-illegal-resolution-controller")
+	childFile := os.NewFile(uintptr(files[1]), "mcp-illegal-resolution-child")
+	controllerConn, err := net.FileConn(controllerFile)
+	_ = controllerFile.Close()
+	if err != nil {
+		_ = childFile.Close()
+		t.Fatal(err)
+	}
+	served := make(chan error, 1)
+	go func() {
+		defer controllerConn.Close()
+		served <- fake.serve(controllerConn)
+	}()
+	frame := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"request_context","arguments":{"purpose":"fixture expansion","ref":"spec/extra"}}}` + "\n"
+	stdin := append(append([]byte(nil), fixture.requestBytes...), []byte(frame)...)
+	observation := runSealedContextBinaryWithFiles(t, bin, fixture.root, stdin, []*os.File{childFile}, "context", "mcp", "--request", "-")
+	if err := <-served; err == nil {
+		t.Fatalf("fake controller encoded a non-proven resolution carrying a data item; observation=%#v", observation)
+	}
+	if observation.exitCode != 2 || observation.stderr != "" ||
+		!strings.Contains(observation.stdout, `"isError":true`) || !strings.Contains(observation.stdout, "resolve declared context") {
+		t.Fatalf("illegal resolution observation = %#v, want an operational refusal", observation)
 	}
 }
 
