@@ -2120,3 +2120,149 @@ func TestControllerInstallExpansionRequestV2(t *testing.T) {
 		}
 	})
 }
+
+// TestContextResolutionWireDataPresence pins SI-189: on the resolve-context
+// result wire (and epoch-check's embedded resolution), `data` is required
+// and validated exactly as before when the resolution is proven, and MUST
+// be absent — the member omitted, not nulled — when the resolution is
+// non-proven. Before this entry contextResolutionToWire/FromWire
+// unconditionally required a valid contextcompile.DataItem for every
+// resolution state, so an honest external owner could not answer a denied
+// or absent ref without fabricating a data item.
+func TestContextResolutionWireDataPresence(t *testing.T) {
+	provenState := Verification{State: contextcompile.ResolutionProven, Witnesses: []string{}}
+	nonProvenState := Verification{State: contextcompile.ResolutionUnproven, Failure: FailureUnavailable, Witnesses: []string{"ref-absent"}}
+	item := validDataItem(t)
+
+	t.Run("encode", func(t *testing.T) {
+		for _, tc := range []struct {
+			name    string
+			res     ContextResolution
+			wantErr bool
+		}{
+			{name: "proven-with-data ok", res: ContextResolution{Verification: provenState, Ref: "spec/test#ac-1", Data: item}},
+			{name: "proven-without-data refused", res: ContextResolution{Verification: provenState, Ref: "spec/test#ac-1"}, wantErr: true},
+			{name: "non-proven-without-data ok", res: ContextResolution{Verification: nonProvenState, Ref: "spec/test#ac-1"}},
+			{name: "non-proven-with-data refused", res: ContextResolution{Verification: nonProvenState, Ref: "spec/test#ac-1", Data: item}, wantErr: true},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				wire, err := contextResolutionToWire(tc.res)
+				if tc.wantErr {
+					if err == nil {
+						t.Fatalf("contextResolutionToWire(%+v) = %+v, want a refusal", tc.res, wire)
+					}
+					return
+				}
+				if err != nil {
+					t.Fatalf("contextResolutionToWire(%+v): %v", tc.res, err)
+				}
+				proven := tc.res.State == contextcompile.ResolutionProven
+				if proven && len(wire.Data) == 0 {
+					t.Fatalf("proven wire is missing its data member: %+v", wire)
+				}
+				if !proven && len(wire.Data) != 0 {
+					t.Fatalf("non-proven wire carries a data member: %+v", wire)
+				}
+			})
+		}
+	})
+
+	// The wire encoder must OMIT the member on a non-proven resolution
+	// rather than null it — proven separately from the length check above,
+	// which a `"data":null` payload (4 bytes) would not catch.
+	t.Run("non-proven encoding omits the data member entirely", func(t *testing.T) {
+		wire, err := contextResolutionToWire(ContextResolution{Verification: nonProvenState, Ref: "spec/test#ac-1"})
+		if err != nil {
+			t.Fatalf("contextResolutionToWire: %v", err)
+		}
+		encoded, err := canonjson.Marshal(wire)
+		if err != nil {
+			t.Fatalf("marshal wire: %v", err)
+		}
+		if bytes.Contains(encoded, []byte(`"data"`)) {
+			t.Fatalf("non-proven wire encoding names a data member: %s", encoded)
+		}
+	})
+
+	t.Run("decode", func(t *testing.T) {
+		provenWire, err := contextResolutionToWire(ContextResolution{Verification: provenState, Ref: "spec/test#ac-1", Data: item})
+		if err != nil {
+			t.Fatalf("build proven wire fixture: %v", err)
+		}
+		nonProvenWire, err := contextResolutionToWire(ContextResolution{Verification: nonProvenState, Ref: "spec/test#ac-1"})
+		if err != nil {
+			t.Fatalf("build non-proven wire fixture: %v", err)
+		}
+		missingDataOnProven := provenWire
+		missingDataOnProven.Data = nil
+		dataOnNonProven := nonProvenWire
+		dataOnNonProven.Data = provenWire.Data
+
+		for _, tc := range []struct {
+			name    string
+			wire    contextResolutionWire
+			wantErr bool
+		}{
+			{name: "proven-with-data ok", wire: provenWire},
+			{name: "proven-without-data refused", wire: missingDataOnProven, wantErr: true},
+			{name: "non-proven-without-data ok", wire: nonProvenWire},
+			{name: "non-proven-with-data refused", wire: dataOnNonProven, wantErr: true},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				resolution, err := contextResolutionFromWire(tc.wire)
+				if tc.wantErr {
+					if err == nil {
+						t.Fatalf("contextResolutionFromWire(%+v) = %+v, want a refusal", tc.wire, resolution)
+					}
+					return
+				}
+				if err != nil {
+					t.Fatalf("contextResolutionFromWire(%+v): %v", tc.wire, err)
+				}
+				// Round-trip property: ToWire(FromWire(w)) == w, for both
+				// the proven and the non-proven arm.
+				back, err := contextResolutionToWire(resolution)
+				if err != nil {
+					t.Fatalf("contextResolutionToWire(FromWire(w)): %v", err)
+				}
+				if !reflect.DeepEqual(back, tc.wire) {
+					t.Fatalf("ToWire(FromWire(w)) = %+v, want %+v", back, tc.wire)
+				}
+			})
+		}
+	})
+
+	// epoch-check embeds a resolution and must honor the identical rule
+	// (the Contract explicitly covers "epoch-check's embedded resolution").
+	t.Run("epoch check embeds the same rule", func(t *testing.T) {
+		provenCheck := controllerEpochCheckFixture(t)
+		if _, err := epochCheckToWire(provenCheck); err != nil {
+			t.Fatalf("epochCheckToWire(proven): %v", err)
+		}
+		nonProvenCheck := provenCheck
+		nonProvenCheck.Resolution = ContextResolution{Verification: nonProvenState, Ref: provenCheck.Resolution.Ref}
+		wire, err := epochCheckToWire(nonProvenCheck)
+		if err != nil {
+			t.Fatalf("epochCheckToWire(non-proven, no data): %v", err)
+		}
+		if len(wire.Resolution.Data) != 0 {
+			t.Fatalf("non-proven epoch-check resolution carries data: %+v", wire.Resolution)
+		}
+		illegal := nonProvenCheck
+		illegal.Resolution.Data = provenCheck.Resolution.Data
+		if _, err := epochCheckToWire(illegal); err == nil {
+			t.Fatal("epochCheckToWire accepted a non-proven embedded resolution carrying a data item")
+		}
+		roundTripped, err := epochCheckFromWire(wire)
+		if err != nil {
+			t.Fatalf("epochCheckFromWire: %v", err)
+		}
+		rewired, err := epochCheckToWire(roundTripped)
+		if err != nil {
+			t.Fatalf("re-encode round-tripped epoch check: %v", err)
+		}
+		if !reflect.DeepEqual(rewired, wire) {
+			t.Fatalf("ToWire(FromWire(w)) = %+v, want %+v", rewired, wire)
+		}
+	})
+}

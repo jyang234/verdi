@@ -190,6 +190,12 @@ func TestScopedContextMCPContract_Static(t *testing.T) {
 		if !ok || decision.Verdict != countersign.VerdictViolated {
 			t.Fatalf("violated denial decision = %#v", denied.events[1].Payload)
 		}
+		// SI-189: a non-proven resolution is denied before epoch
+		// re-verification is ever reached — VerifyEpoch(EpochCheck{...}) is
+		// never called for it.
+		if denied.epochChecks != 0 {
+			t.Fatalf("denied resolution reached epoch re-verification: %d calls", denied.epochChecks)
+		}
 	})
 
 	t.Run("unavailable context is recorded as unproven", func(t *testing.T) {
@@ -209,6 +215,11 @@ func TestScopedContextMCPContract_Static(t *testing.T) {
 		}
 		if !reflect.DeepEqual(result.Context.Witnesses, []string{"a witness", "z witness"}) {
 			t.Fatalf("unavailable inspection witnesses = %v", result.Context.Witnesses)
+		}
+		// SI-189: epoch re-verification is never reached for a non-proven
+		// resolution — it is denied first.
+		if unavailable.epochChecks != 0 {
+			t.Fatalf("unavailable resolution reached epoch re-verification: %d calls", unavailable.epochChecks)
 		}
 	})
 
@@ -750,12 +761,20 @@ type mcpFake struct {
 	storeErr            error
 	installs            int
 	installed           []ExpansionInstall
+	epochChecks         int
 }
 
+// ResolveContext answers with a data item only when the resolution is
+// proven (SI-189): ContextResolution.Data stays the zero value on a
+// non-proven answer, exactly as an honest owner must, rather than papering
+// over a denied/unavailable ref with a fabricated item.
 func (f *mcpFake) ResolveContext(_ context.Context, ref string) (ContextResolution, error) {
 	v := f.resolveVerification
 	if v.State == "" {
 		v = proven()
+	}
+	if v.State != contextcompile.ResolutionProven {
+		return ContextResolution{Verification: v, Ref: ref}, nil
 	}
 	item := validDataItem(f.t)
 	item.Content = "declared bytes"
@@ -794,6 +813,7 @@ func (f *mcpFake) CompileChild(_ context.Context, request ChildCompileRequest) (
 	}, nil
 }
 func (f *mcpFake) VerifyEpoch(context.Context, EpochCheck) (Verification, error) {
+	f.epochChecks++
 	if f.verify.State == "" {
 		return proven(), nil
 	}

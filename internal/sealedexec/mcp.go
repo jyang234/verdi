@@ -357,7 +357,12 @@ func (s *FlightState) installExpansionLocked(child ChildManifest, terminal fligh
 	}
 }
 
-// ContextResolution is the resolver's identity-bound data result.
+// ContextResolution is the resolver's identity-bound data result. Data is
+// the resolved item only when Verification.State is proven; on a non-proven
+// resolution (a denied or absent ref) Data stays its zero value
+// (contextcompile.DataItem{}) — the wire codec (contextResolutionToWire/
+// FromWire, SI-189) refuses a non-proven resolution that carries a data item
+// and a proven one that lacks it, so an honest owner never fabricates one.
 type ContextResolution struct {
 	Verification
 	Ref  string

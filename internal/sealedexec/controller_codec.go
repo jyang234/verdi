@@ -207,7 +207,10 @@ type contextResolutionWire struct {
 	Failure   FailureCode               `json:"failure"`
 	Witnesses []string                  `json:"witnesses"`
 	Ref       string                    `json:"ref"`
-	Data      json.RawMessage           `json:"data"`
+	// Data is present (and validated as a full verdi.context-data-item/v1
+	// document) only when State is proven; a non-proven resolution omits
+	// the member entirely rather than nulling it (SI-189).
+	Data json.RawMessage `json:"data,omitempty"`
 }
 
 type flightStateSnapshotWire struct {
@@ -2654,6 +2657,11 @@ func validateContextQuery(q ContextQuery) error {
 	return requireText("context ref", q.Ref)
 }
 
+// contextResolutionToWire encodes r. Data is required and validated as a
+// full data-item document only when r.State is proven; a non-proven
+// resolution must carry no data item at all (its zero value), and the wire
+// then omits the member entirely (SI-189) — a non-proven resolution that
+// carries data, or a proven one that lacks it, is refused by name.
 func contextResolutionToWire(r ContextResolution) (contextResolutionWire, error) {
 	if err := validateControllerVerification(r.Verification); err != nil {
 		return contextResolutionWire{}, err
@@ -2661,20 +2669,40 @@ func contextResolutionToWire(r ContextResolution) (contextResolutionWire, error)
 	if err := requireText("context resolution ref", r.Ref); err != nil {
 		return contextResolutionWire{}, err
 	}
+	if r.State != contextcompile.ResolutionProven {
+		if r.Data != (contextcompile.DataItem{}) {
+			return contextResolutionWire{}, fmt.Errorf("sealedexec: non-proven context resolution must not carry a data item")
+		}
+		return contextResolutionWire{r.State, r.Failure, r.Witnesses, r.Ref, nil}, nil
+	}
 	data, err := contextcompile.EncodeDataItem(r.Data)
 	if err != nil {
 		return contextResolutionWire{}, err
 	}
 	return contextResolutionWire{r.State, r.Failure, r.Witnesses, r.Ref, trimFrame(data)}, nil
 }
+
+// contextResolutionFromWire is contextResolutionToWire's inverse: it
+// requires the data member when (and only when) the decoded state is
+// proven, refusing by name either a proven resolution missing it or a
+// non-proven resolution that carries one — the same rule enforced in the
+// opposite direction.
 func contextResolutionFromWire(w contextResolutionWire) (ContextResolution, error) {
 	v, e := verificationFromWire(verificationWire{w.State, w.Failure, w.Witnesses})
 	if e != nil {
 		return ContextResolution{}, e
 	}
-	data, e := contextcompile.DecodeDataItem(frameNested(w.Data))
-	if e != nil {
-		return ContextResolution{}, e
+	var data contextcompile.DataItem
+	if v.State == contextcompile.ResolutionProven {
+		if len(w.Data) == 0 {
+			return ContextResolution{}, fmt.Errorf("sealedexec: proven context resolution requires a data item")
+		}
+		data, e = contextcompile.DecodeDataItem(frameNested(w.Data))
+		if e != nil {
+			return ContextResolution{}, e
+		}
+	} else if len(w.Data) != 0 {
+		return ContextResolution{}, fmt.Errorf("sealedexec: non-proven context resolution must not carry a data item")
 	}
 	r := ContextResolution{Verification: v, Ref: w.Ref, Data: data}
 	_, e = contextResolutionToWire(r)
