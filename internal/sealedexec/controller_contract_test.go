@@ -2132,6 +2132,11 @@ func TestControllerInstallExpansionRequestV2(t *testing.T) {
 func TestContextResolutionWireDataPresence(t *testing.T) {
 	provenState := Verification{State: contextcompile.ResolutionProven, Witnesses: []string{}}
 	nonProvenState := Verification{State: contextcompile.ResolutionUnproven, Failure: FailureUnavailable, Witnesses: []string{"ref-absent"}}
+	// SI-189 F4: the rule is stated over "non-proven" (any state but
+	// proven), not specifically "unproven" — violated-with-witness gets
+	// its own row rather than relying solely on contextcompile's shared
+	// helper table to cover it.
+	violatedState := Verification{State: contextcompile.ResolutionViolatedWithWitness, Failure: FailureRejected, Witnesses: []string{"rejected"}}
 	item := validDataItem(t)
 
 	t.Run("encode", func(t *testing.T) {
@@ -2144,6 +2149,8 @@ func TestContextResolutionWireDataPresence(t *testing.T) {
 			{name: "proven-without-data refused", res: ContextResolution{Verification: provenState, Ref: "spec/test#ac-1"}, wantErr: true},
 			{name: "non-proven-without-data ok", res: ContextResolution{Verification: nonProvenState, Ref: "spec/test#ac-1"}},
 			{name: "non-proven-with-data refused", res: ContextResolution{Verification: nonProvenState, Ref: "spec/test#ac-1", Data: item}, wantErr: true},
+			{name: "violated-without-data ok", res: ContextResolution{Verification: violatedState, Ref: "spec/test#ac-1"}},
+			{name: "violated-with-data refused", res: ContextResolution{Verification: violatedState, Ref: "spec/test#ac-1", Data: item}, wantErr: true},
 		} {
 			t.Run(tc.name, func(t *testing.T) {
 				wire, err := contextResolutionToWire(tc.res)
@@ -2193,10 +2200,26 @@ func TestContextResolutionWireDataPresence(t *testing.T) {
 		if err != nil {
 			t.Fatalf("build non-proven wire fixture: %v", err)
 		}
+		violatedWire, err := contextResolutionToWire(ContextResolution{Verification: violatedState, Ref: "spec/test#ac-1"})
+		if err != nil {
+			t.Fatalf("build violated wire fixture: %v", err)
+		}
 		missingDataOnProven := provenWire
 		missingDataOnProven.Data = nil
 		dataOnNonProven := nonProvenWire
 		dataOnNonProven.Data = provenWire.Data
+		dataOnViolated := violatedWire
+		dataOnViolated.Data = provenWire.Data
+		// SI-189 F4: "null" (the only illegal shape the existing table
+		// exercised) decodes to a 4-byte json.RawMessage, so it happens to
+		// be caught by the presence gate the same way any other non-empty
+		// value is — these two rows pin that an empty object and an empty
+		// string are refused too, not merely tolerated as some special
+		// case of "absent".
+		emptyObjectOnNonProven := nonProvenWire
+		emptyObjectOnNonProven.Data = []byte("{}")
+		emptyStringOnNonProven := nonProvenWire
+		emptyStringOnNonProven.Data = []byte(`""`)
 
 		for _, tc := range []struct {
 			name    string
@@ -2207,6 +2230,10 @@ func TestContextResolutionWireDataPresence(t *testing.T) {
 			{name: "proven-without-data refused", wire: missingDataOnProven, wantErr: true},
 			{name: "non-proven-without-data ok", wire: nonProvenWire},
 			{name: "non-proven-with-data refused", wire: dataOnNonProven, wantErr: true},
+			{name: "violated-without-data ok", wire: violatedWire},
+			{name: "violated-with-data refused", wire: dataOnViolated, wantErr: true},
+			{name: "non-proven-with-empty-object-data refused", wire: emptyObjectOnNonProven, wantErr: true},
+			{name: "non-proven-with-empty-string-data refused", wire: emptyStringOnNonProven, wantErr: true},
 		} {
 			t.Run(tc.name, func(t *testing.T) {
 				resolution, err := contextResolutionFromWire(tc.wire)
