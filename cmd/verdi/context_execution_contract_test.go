@@ -493,8 +493,8 @@ func TestScopedContextMCPContract_Behavioral(t *testing.T) {
 		}
 	})
 
-	t.Run("real scoped MCP refuses an owner's non-proven resolution that carries a fabricated data item", func(t *testing.T) {
-		runScopedMCPContextIllegalResolution(t, bin)
+	t.Run("a fabricated data item on a non-proven resolution cannot even be encoded for the controller wire, so the run ends operationally", func(t *testing.T) {
+		runScopedMCPContextEncoderRefusesIllegalResolution(t, bin)
 	})
 
 	t.Run("real scoped MCP denies context through the public owner-document bridge", func(t *testing.T) {
@@ -1765,14 +1765,27 @@ func runScopedMCPContextScenario(t *testing.T, bin string, kind sealedexec.Inspe
 	}
 }
 
-// runScopedMCPContextIllegalResolution proves SI-189's wire refusal reaches
-// the real controller boundary, not only the unit-level codec: an owner
-// that answers a non-proven resolution with a fabricated data item cannot
-// produce a reply the shared controller codec will encode
-// (contextResolutionToWire refuses it by name), so the fake controller's own
-// reply fails, the connection closes without one, and the built binary ends
-// the run operationally rather than silently trusting invented context data.
-func runScopedMCPContextIllegalResolution(t *testing.T, bin string) {
+// runScopedMCPContextEncoderRefusesIllegalResolution proves SI-189's wire
+// refusal reaches the real controller boundary's OWN encoder, not only the
+// unit-level codec table: an owner that answers a non-proven resolution
+// with a fabricated data item cannot even produce a reply the shared
+// controller codec will encode (contextResolutionToWire refuses it by
+// name, inside the fake controller's own EncodeControllerResult call) —
+// so the fake never writes a reply frame at all, the connection dies, and
+// the built binary observes that as an operational failure (exit 2) rather
+// than silently trusting invented context data.
+//
+// This is deliberately named for what it proves: the refusal happens at
+// construction, inside the test's own fake controller — not inside the
+// built binary's decode of a hostile reply someone else already wrote to
+// the wire. That narrower claim (a hostile FD-3 owner emitting raw
+// private-wire bytes without going through verdi's own encoder) is instead
+// covered by the unit-level contextResolutionFromWire table
+// (TestContextResolutionWireDataPresence's decode/non-proven-with-data
+// row, controller_contract_test.go) and, for the public document path
+// specifically, by TestContextResolutionDataPresenceDecodeRefusesHostileDocument
+// in internal/contextowner.
+func runScopedMCPContextEncoderRefusesIllegalResolution(t *testing.T, bin string) {
 	t.Helper()
 	fixture := buildCompiledExecutionFixture(t, execworkspace.GrantSet{Grants: []execworkspace.Grant{}})
 	materializer, err := execworkspace.NewMaterializer(fixture.root, fixture.root, execworkspace.NewGitReconciler(fixture.root))
@@ -1813,12 +1826,16 @@ func runScopedMCPContextIllegalResolution(t *testing.T, bin string) {
 	frame := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"request_context","arguments":{"purpose":"fixture expansion","ref":"spec/extra"}}}` + "\n"
 	stdin := append(append([]byte(nil), fixture.requestBytes...), []byte(frame)...)
 	observation := runSealedContextBinaryWithFiles(t, bin, fixture.root, stdin, []*os.File{childFile}, "context", "mcp", "--request", "-")
+	// The refusal itself happens here, inside the fake's own encode step —
+	// EncodeControllerResult refuses before any reply frame is written —
+	// which is why <-served must be the error, not the built binary's exit
+	// code below (a downstream consequence of the connection then dying).
 	if err := <-served; err == nil {
 		t.Fatalf("fake controller encoded a non-proven resolution carrying a data item; observation=%#v", observation)
 	}
 	if observation.exitCode != 2 || observation.stderr != "" ||
 		!strings.Contains(observation.stdout, `"isError":true`) || !strings.Contains(observation.stdout, "resolve declared context") {
-		t.Fatalf("illegal resolution observation = %#v, want an operational refusal", observation)
+		t.Fatalf("illegal resolution observation = %#v, want the operational failure downstream of the encoder's own refusal", observation)
 	}
 }
 
