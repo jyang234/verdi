@@ -4,7 +4,7 @@
 // DATE --approver ROLE=PRINCIPAL_ID [--approver ROLE=PRINCIPAL_ID ...]
 // --id NAME --title TEXT --owner TEXT [--owner TEXT ...] [--root DIR]
 // (Task 3, docs/superpowers/specs/2026-09-05-local-operator-disposition-
-// design.md §2.3; ledger SI-178, SI-180):
+// design.md §2.3; ledger SI-183, SI-185):
 //
 // Records a human's ruling over a kernel-printed policy-conflict witness as
 // one `policy-disposition` artifact. It selects the semantic row named by
@@ -36,7 +36,7 @@
 //
 // --target and --target-digest are this file's two disclosed deviations
 // from the literal task brief, which lists the operand set without them —
-// ledgered as SI-180. The witness's target_digest (authority-design §8:
+// ledgered as SI-185. The witness's target_digest (authority-design §8:
 // "both accepted context and an acceptance candidate supply the target
 // specification artifact's exact content digest... The accepted manifest
 // digest remains separately bound... using it inside the disposition
@@ -122,7 +122,7 @@ type dispositionRecordArgs struct {
 //
 // --root DIR resolves through store.RootAt — an exact-directory check,
 // no ancestor search — exactly like `verdi context project --root DIR`
-// (context_project.go's own cmdContextProject; ledger SI-179, widened at
+// (context_project.go's own cmdContextProject; ledger SI-184, widened at
 // I-3, whole-wave review, to cover this verb too): both verbs' --root
 // names an explicit store-root override, and a subdirectory of a real
 // store must be refused by name rather than silently accepted by

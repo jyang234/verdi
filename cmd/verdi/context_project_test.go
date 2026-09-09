@@ -1,6 +1,6 @@
 // In-process behavioral tests for `verdi context project [--root DIR]`
 // (design doc 2026-09-05-local-operator-disposition-design.md §2.4,
-// ledger SI-178, plan Task 4): a thin CLI wrapper over the read-only
+// ledger SI-183, plan Task 4): a thin CLI wrapper over the read-only
 // internal/instructionprojection.Generate. Mirrors context_test.go/
 // context_conflict_test.go's own cmdX(args, stdout, stderr) direct-call
 // style (context_e2e_test.go owns the real-binary proofs elsewhere in

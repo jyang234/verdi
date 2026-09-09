@@ -372,7 +372,7 @@ func TestClaudeAdapterParityContract_Static(t *testing.T) {
 		}
 	})
 
-	// SI-181: Amendment 002 §3 (as annotated 2026-09-06) accepts the probe
+	// SI-186: Amendment 002 §3 (as annotated 2026-09-06) accepts the probe
 	// line iff it equals the requested adapter version exactly, or equals
 	// that version plus exactly the one fixed suffix " (Claude Code)" (the
 	// real Claude Code CLI 2.1.261 prints "2.1.261 (Claude Code)"). Every
@@ -397,10 +397,10 @@ func TestClaudeAdapterParityContract_Static(t *testing.T) {
 			{name: "trailing content after suffix refused", probeLine: version + " (Claude Code) extra"},
 			{name: "different version with suffix refused", probeLine: differentVersion + " (Claude Code)"},
 			{name: "empty probe line refused", emptyProbeLine: true},
-			// SI-181 review F1: the suffix alone, with no version at all, is
+			// SI-186 review F1: the suffix alone, with no version at all, is
 			// neither accepted form and must refuse like any other variant.
 			{name: "suffix without a version refused", probeLine: " (Claude Code)"},
-			// SI-181 review F1: an otherwise-accepted suffixed line followed by
+			// SI-186 review F1: an otherwise-accepted suffixed line followed by
 			// a second stdout line is still more than the one required line.
 			{name: "accepted suffixed line plus a second line refused", probeLine: version + " (Claude Code)", secondLine: true},
 		}
@@ -632,7 +632,7 @@ func TestClaudeAdapterParityContract_Behavioral(t *testing.T) {
 		}
 	})
 
-	// SI-187, superseding this row's pre-SI-187 name and assertion: a bare
+	// SI-192, superseding this row's pre-SI-192 name and assertion: a bare
 	// unrecognized type — even a dotted, non-identifier-shaped one, and even
 	// carrying an extra unread field — is advisory telemetry, not a stream
 	// contradiction. It produces no telemetry-gap of its own; the frame
@@ -914,10 +914,10 @@ func TestClaudeAdapterParityContract_Behavioral(t *testing.T) {
 	// source/precedence (C6), and I1-I5.
 	// -----------------------------------------------------------------
 
-	// SI-182: an unknown member at the init frame's own object level is
+	// SI-187: an unknown member at the init frame's own object level is
 	// tolerated (never read) and its dotted path is recorded once, under the
 	// closed code `unknown-foreign-member`, in the init provider-summary
-	// detail — replacing the pre-SI-182 refusal this row used to prove.
+	// detail — replacing the pre-SI-187 refusal this row used to prove.
 	t.Run("init_tolerates_unknown_top_level_member_and_records_witness", func(t *testing.T) {
 		launch, envRoot := claudeTestLaunch(t, sealedexec.ActionStart)
 		line := strings.Replace(claudeInitLine("s1", launch.Workspace.Path),
@@ -930,7 +930,7 @@ func TestClaudeAdapterParityContract_Behavioral(t *testing.T) {
 		}
 	})
 
-	// SI-182 test row (a): the exact 8 unknown init members the real Claude
+	// SI-187 test row (a): the exact 8 unknown init members the real Claude
 	// Code CLI 2.1.261 emits (measured offline by the F12 canary track,
 	// 2026-09-06), reproduced here with synthetic values — never the measured
 	// bytes — all decode and are listed sorted and deduplicated.
@@ -950,7 +950,7 @@ func TestClaudeAdapterParityContract_Behavioral(t *testing.T) {
 		}
 	})
 
-	// SI-182 test row (i): a clean fixture with no unknown members discloses
+	// SI-187 test row (i): a clean fixture with no unknown members discloses
 	// no witness entry anywhere in the run.
 	t.Run("no_unknown_members_yields_no_witness_entry", func(t *testing.T) {
 		launch, envRoot := claudeTestLaunch(t, sealedexec.ActionStart)
@@ -969,8 +969,8 @@ func TestClaudeAdapterParityContract_Behavioral(t *testing.T) {
 			if bytes.Contains(obs.ForeignDetail.RedactedJSON, []byte(unknownMemberCode)) {
 				t.Fatalf("observation %s disclosed a witness over a clean fixture: %s", obs.Kind, obs.ForeignDetail.RedactedJSON)
 			}
-			// SI-187: a fixture whose stream carries only known families is
-			// byte-identical to its pre-SI-187 output — its witnesses gain no
+			// SI-192: a fixture whose stream carries only known families is
+			// byte-identical to its pre-SI-192 output — its witnesses gain no
 			// unknown-foreign-family entry either.
 			if bytes.Contains(obs.ForeignDetail.RedactedJSON, []byte(unknownFamilyCode)) {
 				t.Fatalf("observation %s disclosed a family witness over a clean fixture: %s", obs.Kind, obs.ForeignDetail.RedactedJSON)
@@ -978,16 +978,16 @@ func TestClaudeAdapterParityContract_Behavioral(t *testing.T) {
 		}
 	})
 
-	// SI-187: a "system" frame naming no subtype at all names no family the
+	// SI-192: a "system" frame naming no subtype at all names no family the
 	// decoder can be tolerant of (there is nothing to record as advisory
-	// telemetry) and stays refused exactly as before SI-187.
+	// telemetry) and stays refused exactly as before SI-192.
 	t.Run("system_frame_with_no_subtype_still_refused", func(t *testing.T) {
 		launch, envRoot := claudeTestLaunch(t, sealedexec.ActionStart)
 		result := runClaudeLines(t, launch, envRoot, `{"type":"system"}`)
 		assertClaudeGapReason(t, result, "unknown-foreign-family", "decode", claudeSource)
 	})
 
-	// SI-187, superseding the pre-SI-187 "unknown_system_subtype_still_refused"
+	// SI-192, superseding the pre-SI-192 "unknown_system_subtype_still_refused"
 	// row: an unrecognized subtype of a known "system" type is now advisory
 	// provider telemetry rather than a refusal. The frame is skipped — no
 	// projection, no digest, no observation of its own — and its family is
@@ -1013,7 +1013,7 @@ func TestClaudeAdapterParityContract_Behavioral(t *testing.T) {
 		}
 	})
 
-	// SI-187: system/thinking_tokens between init and the first assistant
+	// SI-192: system/thinking_tokens between init and the first assistant
 	// frame — the exact shape that interrupted the F12 canary's eighth
 	// flight — is tolerated and recorded; the assistant frame that follows
 	// keeps its ordinary fixed id.
@@ -1036,10 +1036,10 @@ func TestClaudeAdapterParityContract_Behavioral(t *testing.T) {
 		}
 	})
 
-	// SI-187: tool_progress, status, rate_limit_event and keep_alive are
+	// SI-192: tool_progress, status, rate_limit_event and keep_alive are
 	// further families the real Claude Code CLI 2.1.261 emits; every one is
 	// tolerated. Each distinct family is recorded exactly once, in the
-	// first-seen order they arrived (not sorted, unlike SI-182's member
+	// first-seen order they arrived (not sorted, unlike SI-187's member
 	// paths), and a repeated family (tool_progress recurs here) is never
 	// disclosed a second time.
 	t.Run("further_unknown_families_are_tolerated_and_recorded_once_each", func(t *testing.T) {
@@ -1058,7 +1058,7 @@ func TestClaudeAdapterParityContract_Behavioral(t *testing.T) {
 		}
 	})
 
-	// SI-187: an unknown family discovered with no further accepted frame
+	// SI-192: an unknown family discovered with no further accepted frame
 	// afterward — the stream ends before any result frame arrives — has no
 	// ordinary observation left to carry it. The terminal must drain it into
 	// an advisory summary of its own rather than dropping the disclosure.
@@ -1071,7 +1071,7 @@ func TestClaudeAdapterParityContract_Behavioral(t *testing.T) {
 		assertClaudeTerminalFamilySummary(t, result, `"unknown-foreign-family":["system/thinking_tokens"]`)
 	})
 
-	// SI-187: a frame with no `type` string at all names no family and stays
+	// SI-192: a frame with no `type` string at all names no family and stays
 	// refused exactly as before.
 	t.Run("frame_with_no_type_is_still_refused", func(t *testing.T) {
 		launch, envRoot := claudeTestLaunch(t, sealedexec.ActionStart)
@@ -1079,8 +1079,8 @@ func TestClaudeAdapterParityContract_Behavioral(t *testing.T) {
 		assertClaudeGapReason(t, result, "missing-foreign-field", "decode", claudeSource)
 	})
 
-	// SI-187: a malformed frame of a known family — here, an assistant frame
-	// missing its required message — stays refused exactly as before; SI-187
+	// SI-192: a malformed frame of a known family — here, an assistant frame
+	// missing its required message — stays refused exactly as before; SI-192
 	// only tolerates a family the decoder does not recognize at all.
 	t.Run("malformed_frame_of_a_known_family_still_refused", func(t *testing.T) {
 		launch, envRoot := claudeTestLaunch(t, sealedexec.ActionStart)
@@ -1089,12 +1089,12 @@ func TestClaudeAdapterParityContract_Behavioral(t *testing.T) {
 		assertClaudeGapReason(t, result, "missing-foreign-field", "decode", claudeSource)
 	})
 
-	// SI-187 fix wave (F1): the family is the frame's `type`, subtype-qualified
-	// only for "system" (§I-108 as amended by SI-187). An `assistant` frame is
+	// SI-192 fix wave (F1): the family is the frame's `type`, subtype-qualified
+	// only for "system" (§I-108 as amended by SI-192). An `assistant` frame is
 	// therefore a frame of the KNOWN assistant family whatever `subtype` it
 	// also carries, and is routed by `type` alone into the strict assistant
 	// handler: its content and its fixed ids survive, and the stray `subtype`
-	// is an unknown MEMBER of a known family under SI-182 — recorded, never
+	// is an unknown MEMBER of a known family under SI-187 — recorded, never
 	// read. Before this row, the (type,subtype) switch failed to match such a
 	// frame, the fallback skipped the whole message, "assistant" itself was
 	// named an unknown family, and the run still reported a clean completion.
@@ -1125,7 +1125,7 @@ func TestClaudeAdapterParityContract_Behavioral(t *testing.T) {
 		}
 	})
 
-	// SI-187 fix wave (F1): the same for the known "user" family, in the exact
+	// SI-192 fix wave (F1): the same for the known "user" family, in the exact
 	// shape the 2.1.261 bundle composes (`{type:"user",subtype:i,…}`). The
 	// tool_result decodes and closes its open call, so the run completes;
 	// before the fix the frame was skipped whole, the call stayed open, and
@@ -1156,7 +1156,7 @@ func TestClaudeAdapterParityContract_Behavioral(t *testing.T) {
 		}
 	})
 
-	// SI-187 fix wave (F1), guard: "result" is one family too, routed by
+	// SI-192 fix wave (F1), guard: "result" is one family too, routed by
 	// `type` alone — but unlike assistant and user its `subtype` is a
 	// required member of the accepted shape with a closed value set. An
 	// unrecognized result subtype is therefore a MALFORMED frame of a known
@@ -1174,12 +1174,12 @@ func TestClaudeAdapterParityContract_Behavioral(t *testing.T) {
 		}
 	})
 
-	// SI-187 fix wave (F2): a family drained into an accepted result frame
+	// SI-192 fix wave (F2): a family drained into an accepted result frame
 	// rides an observation §5's terminal precedence may still discard — here
 	// an incomplete tool call outranks the result. The disclosure must not go
 	// with it: the families the discarded result was carrying return to the
 	// queue and the terminal flush emits them in the advisory
-	// `unknown-families/<seq>` summary, so §I-108/SI-187's "recorded once per
+	// `unknown-families/<seq>` summary, so §I-108/SI-192's "recorded once per
 	// run" holds in this reachable state too.
 	t.Run("unknown_family_carried_by_a_result_that_loses_precedence_is_still_disclosed", func(t *testing.T) {
 		launch, envRoot := claudeTestLaunch(t, sealedexec.ActionStart)
@@ -1192,7 +1192,7 @@ func TestClaudeAdapterParityContract_Behavioral(t *testing.T) {
 		assertClaudeTerminalFamilySummary(t, result, `"unknown-foreign-family":["keep_alive"]`)
 	})
 
-	// SI-187 fix wave (F2): the same at the highest-precedence arm, where the
+	// SI-192 fix wave (F2): the same at the highest-precedence arm, where the
 	// result frame itself is flawless — non-empty stderr discards it, and the
 	// family it was carrying still reaches the terminal summary.
 	t.Run("unknown_family_carried_by_a_result_discarded_for_stderr_is_still_disclosed", func(t *testing.T) {
@@ -1211,8 +1211,8 @@ func TestClaudeAdapterParityContract_Behavioral(t *testing.T) {
 		assertClaudeTerminalFamilySummary(t, result, `"unknown-foreign-family":["keep_alive"]`)
 	})
 
-	// SI-182 test row (f): a duplicate JSON key stays refused exactly as
-	// before — SI-182 tolerates unknown members, never duplicate ones.
+	// SI-187 test row (f): a duplicate JSON key stays refused exactly as
+	// before — SI-187 tolerates unknown members, never duplicate ones.
 	t.Run("duplicate_key_still_refused", func(t *testing.T) {
 		launch, envRoot := claudeTestLaunch(t, sealedexec.ActionStart)
 		line := strings.Replace(claudeInitLine("s1", launch.Workspace.Path),
@@ -1221,7 +1221,7 @@ func TestClaudeAdapterParityContract_Behavioral(t *testing.T) {
 		assertClaudeGapReason(t, result, "malformed-foreign-frame", "decode", claudeSource)
 	})
 
-	// SI-182 test row (g): trailing data after one complete frame value stays
+	// SI-187 test row (g): trailing data after one complete frame value stays
 	// refused exactly as before.
 	t.Run("trailing_data_still_refused", func(t *testing.T) {
 		launch, envRoot := claudeTestLaunch(t, sealedexec.ActionStart)
@@ -1268,10 +1268,10 @@ func TestClaudeAdapterParityContract_Behavioral(t *testing.T) {
 		assertClaudeGapReason(t, result, "invalid-foreign-field", "decode", claudeSource)
 	})
 
-	// SI-182: an unknown member of the assistant frame's "message" object is
+	// SI-187: an unknown member of the assistant frame's "message" object is
 	// tolerated and its dotted path ("message.<key>") is recorded once,
 	// attached to the message's provider-message detail — replacing the
-	// pre-SI-182 refusal this row used to prove.
+	// pre-SI-187 refusal this row used to prove.
 	t.Run("assistant_tolerates_unknown_message_field_and_records_witness", func(t *testing.T) {
 		launch, envRoot := claudeTestLaunch(t, sealedexec.ActionStart)
 		bad := `{"type":"assistant","session_id":"s1","uuid":"mu","message":{"id":"msg_1","type":"message","role":"assistant","model":"claude-opus-5-test","content":[{"type":"text","text":"hi"}],"usage":{"input_tokens":1,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":1},"future_key":true}}`
@@ -1283,7 +1283,7 @@ func TestClaudeAdapterParityContract_Behavioral(t *testing.T) {
 		}
 	})
 
-	// SI-182 test row (h): an unknown member nested inside
+	// SI-187 test row (h): an unknown member nested inside
 	// assistant.message.usage — a known nested struct — is tolerated and
 	// recorded with its full dotted path.
 	t.Run("assistant_tolerates_unknown_usage_member_and_records_witness", func(t *testing.T) {
@@ -1297,7 +1297,7 @@ func TestClaudeAdapterParityContract_Behavioral(t *testing.T) {
 		}
 	})
 
-	// SI-182: a content-block member is recorded at the path it actually
+	// SI-187: a content-block member is recorded at the path it actually
 	// occupies in the frame — message.content.<key> — never at a frame-level
 	// content.<key> that names no object the frame contains.
 	t.Run("assistant_records_a_content_block_member_under_message_content", func(t *testing.T) {
@@ -1325,12 +1325,12 @@ func TestClaudeAdapterParityContract_Behavioral(t *testing.T) {
 		}
 	})
 
-	// SI-182/SI-184: modelUsage is keyed by model, so a member unknown to the
+	// SI-187/SI-189: modelUsage is keyed by model, so a member unknown to the
 	// per-model camelCase usage shape is recorded at
 	// modelUsage.<model>.<key>. A bare modelUsage.<key> would name a path the
 	// frame does not contain. costUSD is deliberately NOT used as the
-	// unknown member here: SI-184 makes it a known optional member of this
-	// shape (see the SI-184 tests below), so an outsider member is used
+	// unknown member here: SI-189 makes it a known optional member of this
+	// shape (see the SI-189 tests below), so an outsider member is used
 	// instead.
 	t.Run("result_records_a_per_model_usage_member_under_its_model_key", func(t *testing.T) {
 		launch, envRoot := claudeTestLaunch(t, sealedexec.ActionStart)
@@ -1344,7 +1344,7 @@ func TestClaudeAdapterParityContract_Behavioral(t *testing.T) {
 		}
 	})
 
-	// SI-182 records the path, full stop — the obligation does not depend on
+	// SI-187 records the path, full stop — the obligation does not depend on
 	// what else the frame happens to carry. An accepted assistant frame whose
 	// content is empty has no content-block detail to attach the disclosure
 	// to, so it gets a summary of its own instead of dropping it silently.
@@ -1377,7 +1377,7 @@ func TestClaudeAdapterParityContract_Behavioral(t *testing.T) {
 
 	// The disclosure summary exists only for the disclosure: a clean
 	// empty-content frame still produces no observation of its own, exactly
-	// as it did before SI-182.
+	// as it did before SI-187.
 	t.Run("clean_empty_content_frame_yields_no_disclosure_summary", func(t *testing.T) {
 		launch, envRoot := claudeTestLaunch(t, sealedexec.ActionStart)
 		clean := `{"type":"assistant","session_id":"s1","uuid":"mu","message":{"id":"msg_1","type":"message","role":"assistant","model":"claude-opus-5-test","content":[],"usage":{"input_tokens":1,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":1}}}`
@@ -1414,7 +1414,7 @@ func TestClaudeAdapterParityContract_Behavioral(t *testing.T) {
 		}
 	})
 
-	// SI-182's other half: a tolerated member is NEVER READ. The result
+	// SI-187's other half: a tolerated member is NEVER READ. The result
 	// detail is rebuilt from the typed decode, so a clean frame's projection
 	// is byte-identical to the passthrough it replaced — this row is the
 	// byte-identity ratchet the "never read" rebuild must not disturb.
@@ -1425,7 +1425,7 @@ func TestClaudeAdapterParityContract_Behavioral(t *testing.T) {
 		assertClaudeResultDetail(t, result, claudeCleanResultDetail)
 	})
 
-	// SI-182: an unknown member of the result frame's usage object is
+	// SI-187: an unknown member of the result frame's usage object is
 	// recorded and its value never reaches the detail or the hashed digest.
 	// The whole detail is asserted, so the member's absence is proven, not
 	// sampled: 4242 appears nowhere.
@@ -1458,7 +1458,7 @@ func TestClaudeAdapterParityContract_Behavioral(t *testing.T) {
 	})
 
 	// And for the per-model usage object: modelUsage is rebuilt from the one
-	// accepted model key and its typed camelCase usage (SI-184).
+	// accepted model key and its typed camelCase usage (SI-189).
 	t.Run("result_never_projects_a_tolerated_model_usage_member", func(t *testing.T) {
 		launch, envRoot := claudeTestLaunch(t, sealedexec.ActionStart)
 		line := strings.Replace(claudeResultLine("s1", "success", false), `,"permission_denials":[]`,
@@ -1472,7 +1472,7 @@ func TestClaudeAdapterParityContract_Behavioral(t *testing.T) {
 				`"usage":{"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"input_tokens":1,"output_tokens":1}}`)
 	})
 
-	// SI-184: the per-model modelUsage.<model> value's own camelCase shape —
+	// SI-189: the per-model modelUsage.<model> value's own camelCase shape —
 	// required inputTokens, outputTokens, cacheReadInputTokens,
 	// cacheCreationInputTokens; optional webSearchRequests, costUSD,
 	// contextWindow, maxOutputTokens — accepts a real-shaped value carrying
@@ -1511,7 +1511,7 @@ func TestClaudeAdapterParityContract_Behavioral(t *testing.T) {
 				`"usage":{"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"input_tokens":1,"output_tokens":1}}`)
 	})
 
-	// SI-184 makes modelUsage.<model> its own shape, distinct from the v1
+	// SI-189 makes modelUsage.<model> its own shape, distinct from the v1
 	// usage shape: a snake_case object at that position now leaves every
 	// required camelCase member absent and refuses missing-foreign-field —
 	// it is no longer silently accepted under the old spelling.
@@ -1562,9 +1562,9 @@ func TestClaudeAdapterParityContract_Behavioral(t *testing.T) {
 		assertClaudeGapReason(t, result, "invalid-foreign-field", "decode", claudeSource)
 	})
 
-	// SI-182: an unknown member of the api_retry frame's own object level is
+	// SI-187: an unknown member of the api_retry frame's own object level is
 	// tolerated and its dotted path is recorded once, attached to the retry's
-	// provider-summary detail — replacing the pre-SI-182 refusal this row
+	// provider-summary detail — replacing the pre-SI-187 refusal this row
 	// used to prove.
 	t.Run("retry_tolerates_unknown_field_and_records_witness", func(t *testing.T) {
 		launch, envRoot := claudeTestLaunch(t, sealedexec.ActionStart)
@@ -1577,7 +1577,7 @@ func TestClaudeAdapterParityContract_Behavioral(t *testing.T) {
 		}
 	})
 
-	// SI-183 closes the residual risk the SI-182 row above once flagged: the
+	// SI-188 closes the residual risk the SI-187 row above once flagged: the
 	// real Claude Code CLI 2.1.261's measured system/api_retry frame carries
 	// error as a bare string ("unknown") beside the one unknown member
 	// error_status (both measured offline by the F12 canary track,
@@ -1605,7 +1605,7 @@ func TestClaudeAdapterParityContract_Behavioral(t *testing.T) {
 		}
 	})
 
-	// SI-183: the system/api_retry frame's error member is accepted either as
+	// SI-188: the system/api_retry frame's error member is accepted either as
 	// the v1 object {type,message} (Amendment 002 §5, unchanged) or as a bare
 	// string from the real Claude Code CLI's closed eleven-value enum (read
 	// offline from the bundle's zod schema, measured 2026-09-06). Any other
@@ -1729,7 +1729,7 @@ func TestClaudeAdapterParityContract_Behavioral(t *testing.T) {
 		})
 	})
 
-	// SI-182 test row (e): a known member of the wrong JSON type still
+	// SI-187 test row (e): a known member of the wrong JSON type still
 	// refuses the frame as invalid-foreign-field. This guards the tolerant
 	// decode's removal of DisallowUnknownFields — the typed unmarshal is the
 	// only thing left refusing a wrong-typed known member — so the mistyped
@@ -1906,7 +1906,7 @@ func TestClaudeAdapterParityContract_Behavioral(t *testing.T) {
 		}
 	})
 
-	// SI-185: the real Claude Code CLI 2.1.261 emits one assistant frame per
+	// SI-190: the real Claude Code CLI 2.1.261 emits one assistant frame per
 	// content block, every frame of one message carrying the same
 	// message.id (F12 canary flight 5). Frames sharing one id are the
 	// successive blocks of that one message — the block index continues
@@ -2929,7 +2929,7 @@ type testProbeProcess struct {
 	startStdin     []byte
 	version        string
 	emptyProbeLine bool
-	// secondLine appends an extra stdout line after version (SI-181 review
+	// secondLine appends an extra stdout line after version (SI-186 review
 	// F1): the probe must refuse whenever it prints more than the one
 	// required line, even when that first line is itself an accepted form.
 	secondLine bool
@@ -3071,9 +3071,9 @@ func newTestProcessor(t *testing.T) *sealedexec.DetailProcessor {
 }
 
 // TestClaudeClosedFrameShapeFieldNames pins jsonFieldNames, the single point
-// that keeps SI-182's tolerant walk in sync with the strict typed decode. A
+// that keeps SI-187's tolerant walk in sync with the strict typed decode. A
 // field shape encoding/json reads under a name the walk does not know would
-// invert SI-182 — the member would be recorded as unknown and still read — so
+// invert SI-187 — the member would be recorded as unknown and still read — so
 // the helper must skip exactly what encoding/json skips and refuse everything
 // it cannot mirror, at construction.
 func TestClaudeClosedFrameShapeFieldNames(t *testing.T) {
@@ -3472,7 +3472,7 @@ func claudeStopPayload(t *testing.T, rows []sealedexec.NormalizedObservation) *c
 }
 
 // claudeFindProviderSummary returns the one provider-summary observation with
-// the exact summary id (SI-182 tests inspect its detail for the disclosure).
+// the exact summary id (SI-187 tests inspect its detail for the disclosure).
 func claudeFindProviderSummary(t *testing.T, rows []sealedexec.NormalizedObservation, summaryID string) sealedexec.NormalizedObservation {
 	t.Helper()
 	for _, obs := range rows {
@@ -3484,7 +3484,7 @@ func claudeFindProviderSummary(t *testing.T, rows []sealedexec.NormalizedObserva
 	return sealedexec.NormalizedObservation{}
 }
 
-// claudeFindKind returns the first observation of kind (SI-182 tests inspect
+// claudeFindKind returns the first observation of kind (SI-187 tests inspect
 // its detail for the disclosure).
 func claudeFindKind(t *testing.T, rows []sealedexec.NormalizedObservation, kind contextevent.Kind) sealedexec.NormalizedObservation {
 	t.Helper()
@@ -3537,7 +3537,7 @@ func assertClaudeGapReason(t *testing.T, result sealedexec.AdapterResult, reason
 	}
 }
 
-// assertClaudeTerminalFamilySummary proves SI-187's last-resort advisory
+// assertClaudeTerminalFamilySummary proves SI-192's last-resort advisory
 // summary — the `unknown-families/<seq>` provider-summary the terminal emits
 // when no accepted observation is left to carry the disclosure — discloses
 // exactly want.
@@ -3615,7 +3615,7 @@ const claudeInitSummaryDigest = "sha256:46dcd234620ebd3679a7c82a9a2de8e58f7e73aa
 
 // claudeCleanResultDetail is §5's exact terminal-result detail source for
 // claudeResultLine("s1", "success", false) with no unknown member anywhere.
-// SI-182's rebuild of usage / permission_denials / modelUsage from the typed
+// SI-187's rebuild of usage / permission_denials / modelUsage from the typed
 // decode must leave these bytes untouched.
 const claudeCleanResultDetail = `{"duration_api_ms":9,"duration_ms":10,"family":"result","is_error":false,"num_turns":1,"permission_denials":[],"result":"done","subtype":"success","total_cost_usd":0.001,"usage":{"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"input_tokens":1,"output_tokens":1}}`
 

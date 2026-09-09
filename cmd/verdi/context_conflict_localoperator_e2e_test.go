@@ -1,6 +1,6 @@
 // context_conflict_localoperator_e2e_test.go proves the local-operator
 // lifecycle-gate wiring end-to-end (2026-09-05 local-operator disposition
-// design, ledger SI-178, Task 2 §3) against the committed hermetic fixture
+// design, ledger SI-183, Task 2 §3) against the committed hermetic fixture
 // under testdata/localoperator/: a genuine `context conflict` pass through
 // the real kernel carrying the local-operator-asserted disclosure with
 // every disposition resolution proven, `build start` cutting the build

@@ -1930,7 +1930,7 @@ func TestControllerContractDocument(t *testing.T) {
 }
 
 // TestControllerInstallExpansionRequestV2 freezes the private half of Task 2A
-// (correction §2.2 and §3.3's one ratified exception, SI-177): the
+// (correction §2.2 and §3.3's one ratified exception, SI-182): the
 // install-expansion REQUEST arm advances to v2 carrying exactly the requested
 // ref, the non-empty request purpose, and the canonical installed data item,
 // while its result arm and every other request and result arm stay at the
@@ -2121,7 +2121,7 @@ func TestControllerInstallExpansionRequestV2(t *testing.T) {
 	})
 }
 
-// TestContextResolutionWireDataPresence pins SI-189: on the resolve-context
+// TestContextResolutionWireDataPresence pins SI-194: on the resolve-context
 // result wire (and epoch-check's embedded resolution), `data` is required
 // and validated exactly as before when the resolution is proven, and MUST
 // be absent — the member omitted, not nulled — when the resolution is
@@ -2132,7 +2132,7 @@ func TestControllerInstallExpansionRequestV2(t *testing.T) {
 func TestContextResolutionWireDataPresence(t *testing.T) {
 	provenState := Verification{State: contextcompile.ResolutionProven, Witnesses: []string{}}
 	nonProvenState := Verification{State: contextcompile.ResolutionUnproven, Failure: FailureUnavailable, Witnesses: []string{"ref-absent"}}
-	// SI-189 F4: the rule is stated over "non-proven" (any state but
+	// SI-194 F4: the rule is stated over "non-proven" (any state but
 	// proven), not specifically "unproven" — violated-with-witness gets
 	// its own row rather than relying solely on contextcompile's shared
 	// helper table to cover it.
@@ -2210,7 +2210,7 @@ func TestContextResolutionWireDataPresence(t *testing.T) {
 		dataOnNonProven.Data = provenWire.Data
 		dataOnViolated := violatedWire
 		dataOnViolated.Data = provenWire.Data
-		// SI-189 F4: "null" (the only illegal shape the existing table
+		// SI-194 F4: "null" (the only illegal shape the existing table
 		// exercised) decodes to a 4-byte json.RawMessage, so it happens to
 		// be caught by the presence gate the same way any other non-empty
 		// value is — these two rows pin that an empty object and an empty

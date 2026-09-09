@@ -1,6 +1,6 @@
 // The frozen behavioral producer for the read-only context-item resolver
 // (VATC F12 controller-owner bridge correction §2.2 as amended, PLAN IL-099,
-// sibling ledger SI-177, implementation plan Task 3 Steps 1 and 3).
+// sibling ledger SI-182, implementation plan Task 3 Steps 1 and 3).
 //
 // Every wire expectation below is a literal: the canonical request and result
 // bytes are written out in full rather than produced by the codec under test,
@@ -265,7 +265,7 @@ func (c *fakeCompiler) Compile(_ context.Context, root string, _ contextcompile.
 
 // fixtureExpansion builds one genuine installed row. Every transition
 // identity comes from internal/sealedexec.ProveInstalledExpansion, the single
-// owner SI-177 fixes for these preimages: a fixture that recomputed them here
+// owner SI-182 fixes for these preimages: a fixture that recomputed them here
 // would agree with a resolver that had drifted the same way.
 func fixtureExpansion(t *testing.T, identity Identity, parentRevision uint64, parentDigest, priorRoot, ref, purpose string, item contextcompile.DataItem, global uint64) Expansion {
 	t.Helper()

@@ -209,7 +209,7 @@ type contextResolutionWire struct {
 	Ref       string                    `json:"ref"`
 	// Data is present (and validated as a full verdi.context-data-item/v1
 	// document) only when State is proven; a non-proven resolution omits
-	// the member entirely rather than nulling it (SI-189).
+	// the member entirely rather than nulling it (SI-194).
 	Data json.RawMessage `json:"data,omitempty"`
 }
 
@@ -2660,7 +2660,7 @@ func validateContextQuery(q ContextQuery) error {
 // contextResolutionToWire encodes r. Data is required and validated as a
 // full data-item document only when r.State is proven; a non-proven
 // resolution must carry no data item at all (its zero value), and the wire
-// then omits the member entirely (SI-189) — a non-proven resolution that
+// then omits the member entirely (SI-194) — a non-proven resolution that
 // carries data, or a proven one that lacks it, is refused by name. The
 // presence gate itself (contextcompile.RequireDataOnlyWhenProven) is the
 // one helper this rule shares, textually identical, with

@@ -523,7 +523,7 @@ func TestDataItem_EncodeIgnoresCallerSuppliedDigest(t *testing.T) {
 	}
 }
 
-// TestRequireDataOnlyWhenProven pins the SI-189 rule shared, textually
+// TestRequireDataOnlyWhenProven pins the SI-194 rule shared, textually
 // identical, by internal/sealedexec's private controller-owner wire and
 // internal/contextowner's public republication of it: a resolution's
 // accompanying document is required when (and only when) state is proven,

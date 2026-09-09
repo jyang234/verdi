@@ -206,7 +206,7 @@ func TestVerifyExpansionDataProof(t *testing.T) {
 }
 
 // TestProveInstalledExpansion freezes Task 2A's single owning pure proof of an
-// installed expansion (SI-177, correction §2.2). The helper takes explicit
+// installed expansion (SI-182, correction §2.2). The helper takes explicit
 // flight identity, parent state, the requested ref, the request purpose, the
 // canonical installed item, and the prior expansion root, and returns the
 // request id, child-manifest digest, expansion digest, and next root.

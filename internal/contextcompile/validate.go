@@ -965,7 +965,7 @@ func (item DataItem) Validate() error {
 	return nil
 }
 
-// RequireDataOnlyWhenProven enforces the one SI-189 rule shared, textually
+// RequireDataOnlyWhenProven enforces the one SI-194 rule shared, textually
 // identical, by both of Verdi's controller-owner wire boundaries: a
 // resolution's accompanying document is required — and, at each wire's own
 // seam, validated in full — only when state is proven, and MUST be absent

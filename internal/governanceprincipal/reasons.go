@@ -18,7 +18,7 @@ const (
 	// evidence is a bare self-assertion (the checkout's own git identity),
 	// never independently verified, so the witness says so rather than
 	// overclaiming (2026-09-05 local-operator disposition design §2.1,
-	// ledger SI-178).
+	// ledger SI-183).
 	ReasonLocalOperatorAsserted = "local-operator-asserted"
 
 	// Authorization findings.

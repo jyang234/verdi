@@ -105,7 +105,7 @@ type InstalledExpansionProof struct {
 }
 
 // ProveInstalledExpansion is the one owner of the installed-expansion
-// preimages fixed by PLAN I-84 and SI-177 (VATC F12 correction §2.2).
+// preimages fixed by PLAN I-84 and SI-182 (VATC F12 correction §2.2).
 //
 // The live child compiler above and the read-only context resolver both call
 // it rather than restating these four schema literals and their canonical

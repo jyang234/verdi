@@ -9,7 +9,7 @@
 // blocked-unproven -> record a disposition -> compare it to the committed
 // one -> commit it (and the projection it ripples) -> pass -> cut the build
 // branch -> an unmapped identity stops passing again. 2026-09-05
-// local-operator disposition design §3; ledger SI-178, SI-180; Task 3 I-2
+// local-operator disposition design §3; ledger SI-183, SI-185; Task 3 I-2
 // deferral.
 //
 // Every other local-operator proof in this package (context_conflict_

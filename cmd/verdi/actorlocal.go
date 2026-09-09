@@ -2,7 +2,7 @@
 // conflict-service factory (context_conflict.go) feeds into every
 // lifecycle-gate evaluation (`context conflict`, `build start`, `gate`,
 // `close` all share the one factory) — 2026-09-05 local-operator
-// disposition design §2.1-§2.2, ledger SI-178.
+// disposition design §2.1-§2.2, ledger SI-183.
 //
 // resolveLocalActors runs only when the resolved governance profile itself
 // declares an identity_trust_sources entry of kind local-operator: every

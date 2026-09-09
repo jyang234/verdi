@@ -1,7 +1,7 @@
 // The public owner bridge: the one translation seam between Verdi's private
 // FD-3 controller payloads and the deliberately public owner wire published in
 // internal/contextowner (VATC F12 controller-owner bridge correction §3,
-// sibling invention-ledger row SI-176).
+// sibling invention-ledger row SI-181).
 //
 // The bridge translates. It does not decide, persist, launch, or supervise
 // anything: a call and a reply carry no authority, and neither function here

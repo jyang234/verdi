@@ -109,7 +109,7 @@ func (s Service) Resolve(ctx context.Context, root string, request Request) (Res
 // state it arrives at to be exactly the supplied terminal tuple.
 //
 // Every transition identity comes from internal/sealedexec's one owning pure
-// helper (SI-177). This package restates no request-id, child-manifest,
+// helper (SI-182). This package restates no request-id, child-manifest,
 // expansion or expansion-root preimage: a second copy of those algorithms is
 // precisely the drift that would let a rewritten lineage replay cleanly, and
 // a resolver that had drifted the same way as its own copy would agree with

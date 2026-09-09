@@ -118,7 +118,7 @@ func ControllerOperations() []ControllerOperation {
 
 // controllerRequestSchema derives the request-payload schema for operation.
 //
-// SI-177 adds exactly one exception to the single derivation: the
+// SI-182 adds exactly one exception to the single derivation: the
 // install-expansion request carries the requested ref, the request purpose,
 // and the canonical installed item that make an installed expansion
 // reconstructible after a restart, so it advances to v2. Its v1 spelling is

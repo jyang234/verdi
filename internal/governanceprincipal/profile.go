@@ -52,7 +52,7 @@ const (
 	TrustSourceOwnership        TrustSourceKind = "ownership"
 	TrustSourceIdentityProvider TrustSourceKind = "identity-provider"
 	// TrustSourceLocalOperator is honest about its strength (2026-09-05
-	// local-operator disposition design §2.1, ledger SI-178): its
+	// local-operator disposition design §2.1, ledger SI-183): its
 	// evidence is a bare self-assertion (the checkout's own configured
 	// git identity), never independently verified. validateTrustSources
 	// admits it for solo-class profiles only (§2.1's ratified reading of

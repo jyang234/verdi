@@ -1683,7 +1683,7 @@ func runScopedMCPContextScenario(t *testing.T, bin string, kind sealedexec.Inspe
 	}
 	switch kind {
 	case sealedexec.InspectionContextDenied:
-		// SI-189: the owner's non-proven answer carries no data item — this
+		// SI-194: the owner's non-proven answer carries no data item — this
 		// is the real F12 canary shape (a pinned resolver's exit-1
 		// ref-absent answer), and the run continues to its result rather
 		// than terminating operationally.
@@ -1746,7 +1746,7 @@ func runScopedMCPContextScenario(t *testing.T, bin string, kind sealedexec.Inspe
 		}
 	}
 	if kind == sealedexec.InspectionContextDenied {
-		// SI-189: the owner's data-free non-proven answer still reaches the
+		// SI-194: the owner's data-free non-proven answer still reaches the
 		// provider as InspectionContextDenied carrying its witnesses, and
 		// the run continues to this result rather than failing operationally.
 		if inspection.Context.Data.Digest != "" || !reflect.DeepEqual(inspection.Context.Witnesses, []string{"ref-absent"}) {
@@ -1765,7 +1765,7 @@ func runScopedMCPContextScenario(t *testing.T, bin string, kind sealedexec.Inspe
 	}
 }
 
-// runScopedMCPContextEncoderRefusesIllegalResolution proves SI-189's wire
+// runScopedMCPContextEncoderRefusesIllegalResolution proves SI-194's wire
 // refusal reaches the real controller boundary's OWN encoder, not only the
 // unit-level codec table: an owner that answers a non-proven resolution
 // with a fabricated data item cannot even produce a reply the shared
@@ -1864,11 +1864,11 @@ func runContextOwnerVerbErr(bin, dir, verb, operation string, stdin []byte) ([]b
 }
 
 // resolveContextOwnerBridgeAnswer builds a resolveContextViaOwnerBridge hook
-// (SI-189) that routes the REAL intercepted resolve-context call through
+// (SI-194) that routes the REAL intercepted resolve-context call through
 // the built binary's public `context owner decode`/`encode` verbs — the
 // same two subprocess calls a real external owner's own tooling (e.g. ATC)
 // would invoke around its own decision — answering with a non-proven
-// ref-absent resolution and no fabricated data item. Before the SI-189
+// ref-absent resolution and no fabricated data item. Before the SI-194
 // contextowner fix, the decode step below could not even construct that
 // reply: contextowner.EncodeReply unconditionally required a nested data
 // document for every resolution state.
@@ -1945,7 +1945,7 @@ func resolveContextOwnerBridgeAnswer(bin, dir string) func(sealedexec.Controller
 	}
 }
 
-// runScopedMCPContextViaPublicOwnerBridge proves SI-189 end-to-end over the
+// runScopedMCPContextViaPublicOwnerBridge proves SI-194 end-to-end over the
 // PUBLIC document path: the FD-3 owner's non-proven ref-absent answer is
 // produced and consumed entirely through the built binary's own `context
 // owner decode`/`encode` verbs (real subprocesses — not the in-process
@@ -2091,7 +2091,7 @@ func runScopedMCPLaterCheckpoint(t *testing.T, bin, mutation string, wantExit in
 
 // runScopedMCPProtocolFailure no longer carries an "unknown envelope field"
 // row: that expectation was 548d1c0f's own uncited posture ("Wire sealed
-// execution commands"), the same uncited strictness SI-188 found defective in
+// execution commands"), the same uncited strictness SI-193 found defective in
 // decodeHandlerCall's params envelope and F1 then found one level up in
 // decodeHandlerRequest's outer JSON-RPC frame. The frame it drove is now
 // tolerated end-to-end, and that tolerance — plus its invisibility — is
@@ -2157,9 +2157,9 @@ func runScopedMCPProtocolFailure(t *testing.T, bin string) {
 }
 
 // runScopedMCPToleratedEnvelopeMembers is the end-to-end half of retiring
-// runScopedMCPProtocolFailure's "unknown envelope field" row (SI-188 F1/F5).
+// runScopedMCPProtocolFailure's "unknown envelope field" row (SI-193 F1/F5).
 // Over the built binary and the real request_context path it proves that the
-// tolerance SI-188 established at both envelope seams — an unknown member
+// tolerance SI-193 established at both envelope seams — an unknown member
 // beside jsonrpc/id/method/params in the outer JSON-RPC frame, and MCP's own
 // `_meta` beside name/arguments in the tools/call params envelope, which is
 // what Claude Code 2.1.261 sends on every call — is behaviourally invisible.
@@ -2515,7 +2515,7 @@ type sealedLifecycleController struct {
 	operationRelease  <-chan struct{}
 	// resolveContextViaOwnerBridge, when set, answers
 	// ControllerOperationResolveContext by routing the real intercepted
-	// call through the public owner-document path (SI-189) instead of
+	// call through the public owner-document path (SI-194) instead of
 	// f.resolution directly — see runScopedMCPContextViaPublicOwnerBridge.
 	resolveContextViaOwnerBridge func(sealedexec.ControllerCall) (sealedexec.ControllerResult, error)
 }

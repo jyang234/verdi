@@ -680,7 +680,7 @@ func fixtureExecutionKey() ExecutionKey {
 // fixtureExpansionInstall is Task 2A's widened install arm: every fact the
 // accepted publication base already carried, plus the requested ref, the
 // non-empty request purpose, and the canonical installed data item that make
-// the lineage reconstructible after a restart (correction §2.2, SI-177).
+// the lineage reconstructible after a restart (correction §2.2, SI-182).
 func fixtureExpansionInstall(t *testing.T) ExpansionInstall {
 	t.Helper()
 	return ExpansionInstall{
@@ -2444,7 +2444,7 @@ func TestContextOwnerCopiesDecodedValues(t *testing.T) {
 }
 
 // TestContextOwnerInstallExpansionRequestV2 freezes the public half of Task 2A
-// (correction §2.2 and §3.3's sole publication-rule exception, SI-177). The
+// (correction §2.2 and §3.3's sole publication-rule exception, SI-182). The
 // install-expansion REQUEST arm advances to v2 and publishes exactly the
 // requested ref, the non-empty request purpose, and the canonical installed
 // data item alongside every fact the accepted base already carried. Its result
@@ -2589,7 +2589,7 @@ func TestContextOwnerInstallExpansionRequestV2(t *testing.T) {
 	})
 }
 
-// TestContextResolutionDataPresence pins SI-189 at the public wire: a
+// TestContextResolutionDataPresence pins SI-194 at the public wire: a
 // resolve-context reply's resolution (and epoch-check's embedded
 // resolution) requires `data`, validated in full, only when state is
 // proven, and MUST omit the member otherwise — a non-proven resolution
@@ -2609,7 +2609,7 @@ func TestContextResolutionDataPresence(t *testing.T) {
 	item := fixtureDataItemDoc(t)
 	const ref = "spec/test#ac-1"
 	nonProven := Verification{State: contextcompile.ResolutionUnproven, Failure: FailureUnproven, Witnesses: []string{"ref-absent"}}
-	// SI-189 F4: the rule is stated over "non-proven" (any state but
+	// SI-194 F4: the rule is stated over "non-proven" (any state but
 	// proven), not specifically "unproven" — violated-with-witness gets
 	// its own row too.
 	violated := Verification{State: contextcompile.ResolutionViolatedWithWitness, Failure: FailureRejected, Witnesses: []string{"rejected"}}
@@ -2634,7 +2634,7 @@ func TestContextResolutionDataPresence(t *testing.T) {
 		{name: "non-proven-with-null-data refused", resolution: ContextResolution{
 			State: nonProven.State, Failure: nonProven.Failure, Witnesses: nonProven.Witnesses, Ref: ref, Data: json.RawMessage("null"),
 		}, wantErr: true},
-		// SI-189 F4: "null" (above) decodes to a 4-byte json.RawMessage, so
+		// SI-194 F4: "null" (above) decodes to a 4-byte json.RawMessage, so
 		// it happens to be caught by the presence gate the same way any
 		// other non-empty value is — these two rows pin that an empty
 		// object and an empty string are refused too, not merely
@@ -2729,7 +2729,7 @@ func TestContextResolutionDataPresence(t *testing.T) {
 	}
 }
 
-// TestContextResolutionDataPresenceDecodeRefusesHostileDocument pins SI-189
+// TestContextResolutionDataPresenceDecodeRefusesHostileDocument pins SI-194
 // F2: every row in TestContextResolutionDataPresence reaches
 // DecodeReply/DecodeCall only through a document EncodeReply/EncodeCall had
 // already accepted, so the decode direction's own refusal was pinned only
@@ -2760,6 +2760,6 @@ func TestContextResolutionDataPresenceDecodeRefusesHostileDocument(t *testing.T)
 		t.Fatal("DecodeReply accepted a hostile non-proven resolution carrying a fabricated data item")
 	}
 	if !strings.Contains(err.Error(), "non-proven context resolution must not carry a data item") {
-		t.Fatalf("DecodeReply(hostile document) error = %q, want the named SI-189 refusal", err.Error())
+		t.Fatalf("DecodeReply(hostile document) error = %q, want the named SI-194 refusal", err.Error())
 	}
 }

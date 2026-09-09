@@ -8,7 +8,7 @@
 // successful owner decision.
 //
 // The publication rule is mechanical (VATC F12 controller-owner bridge
-// correction §3.3, sibling invention-ledger row SI-176): take the accepted
+// correction §3.3, sibling invention-ledger row SI-181): take the accepted
 // private request or result payload at the fixed Verdi controller-contract
 // base, replace only its top-level schema literal with the corresponding
 // verdi.context-owner/<operation>-{request,result}/v1 literal, and retain
@@ -49,7 +49,7 @@ const (
 	armSchemaPrefix  = "verdi.context-owner/"
 	requestSchemaTag = "-request/v1"
 	resultSchemaTag  = "-result/v1"
-	// installRequestSchemaTag is SI-177's one ratified exception to the
+	// installRequestSchemaTag is SI-182's one ratified exception to the
 	// publication base: the install-expansion request publishes the requested
 	// ref, the request purpose, and the canonical installed item, so it
 	// advances to v2 in lockstep with the private arm it mirrors.
@@ -479,7 +479,7 @@ func Operations() []Operation {
 // RequestSchema derives the published request-arm schema for operation.
 //
 // Exactly one arm departs from the base tag: install-expansion's request is
-// published at v2 (SI-177). Its v1 spelling is migration-only and is refused
+// published at v2 (SI-182). Its v1 spelling is migration-only and is refused
 // rather than served, and its result arm is unaffected.
 func RequestSchema(operation Operation) string {
 	if operation == OperationInstallExpansion {
@@ -707,7 +707,7 @@ type ContextQuery struct {
 // omits the member entirely — the identical rule, textually and by shared
 // helper (contextcompile.RequireDataOnlyWhenProven), that
 // internal/sealedexec's private wire enforces for the same resolution
-// (SI-189), so a real external owner never has to fabricate one.
+// (SI-194), so a real external owner never has to fabricate one.
 type ContextResolution struct {
 	State     contextcompile.Resolution `json:"state"`
 	Failure   FailureCode               `json:"failure"`
@@ -743,7 +743,7 @@ type EpochCheck struct {
 
 // ExpansionInstall is atomically persisted immediately after a child ack.
 //
-// Ref, Purpose, and Data publish SI-177's restart-reconstructible facts
+// Ref, Purpose, and Data publish SI-182's restart-reconstructible facts
 // mechanically: they are the accepted private members with no projection
 // choice. Data is the nested canonical data-item document, and an item that
 // carries its own optional ref must carry this row's ref.

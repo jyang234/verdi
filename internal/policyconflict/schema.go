@@ -141,7 +141,7 @@ const DisclosureSoloPrincipalCollapse contextcompile.DisclosureCode = "solo-prin
 
 // DisclosureLocalOperatorAsserted is the second disclosure code this
 // package adds beyond contextcompile's fourteen (2026-09-05 local-operator
-// disposition design §2.2, ledger SI-178): every report relying on a
+// disposition design §2.2, ledger SI-183): every report relying on a
 // local-operator principal resolution carries this code, so no consumer
 // can read such a pass as an authenticated-identity pass. This package
 // only defines and validates the code; emitting it onto a real report is

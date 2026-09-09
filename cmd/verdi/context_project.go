@@ -1,5 +1,5 @@
 // verdi context project [--root DIR] (local-operator disposition design
-// 2026-09-05, §2.4; ledger SI-178; plan Task 4): a thin CLI wrapper over
+// 2026-09-05, §2.4; ledger SI-183; plan Task 4): a thin CLI wrapper over
 // the read-only internal/instructionprojection.Generate. Library-only
 // generation forced a throwaway program in every fixture regeneration to
 // date (design §2.4); this verb removes that.

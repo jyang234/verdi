@@ -218,7 +218,7 @@ func newLocalContextConflictProvider(ctx context.Context, root string, request p
 // (actorlocal.go) against the resolved governance profile, wired once here
 // so `context conflict`, `build start`, `gate`, and `close` all share it
 // through this one factory (2026-09-05 local-operator disposition design
-// §2.2, ledger SI-178). A store that has not yet adopted a constitution
+// §2.2, ledger SI-183). A store that has not yet adopted a constitution
 // carries no profile to consult, so it resolves no actors at all — exactly
 // today's Actors: nil — and is left for Evaluate's own adoption probe to
 // report as NotAdoptedError (exit 1), never preempted by an operational

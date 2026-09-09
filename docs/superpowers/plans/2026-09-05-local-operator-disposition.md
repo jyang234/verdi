@@ -1,7 +1,7 @@
 # Local-Operator Disposition Plan
 
 > Owner-ratified 2026-09-05, executing
-> `docs/superpowers/specs/2026-09-05-local-operator-disposition-design.md` (SI-178). Base: 5d49ba94 (the VATC pinned
+> `docs/superpowers/specs/2026-09-05-local-operator-disposition-design.md` (SI-183). Base: 5d49ba94 (the VATC pinned
 > line), branch `agent/lifecycle-gate`, worktree `verdi-lifecycle-gate-20260905`. Routing: Sonnet implements one task
 > each (TDD, small commits), independent Opus review per task, FABLE gates and commits locally while Codex is
 > unavailable; Tier 3 tasks get the fresh-fixer/fresh-re-reviewer chain for Critical/Important findings.
@@ -37,7 +37,7 @@ dirty projection directory it did not write.
 
 ## Task 5 — authority, gates, pin (controller)
 - Apply §12 amendment text to `docs/superpowers/specs/2026-08-12-policy-conflict-gate-authority-design.md` and mark the
-  design ratified; SI-178 already in the ledger.
+  design ratified; SI-183 already in the ledger.
 - `make verify`; `go test -race ./...`; rebuild the VATC pin from the accepted head and record its sha256.
 
 ## Task 6 — ATC follow-through (separate ATC lane, after the pin)

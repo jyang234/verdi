@@ -85,7 +85,7 @@ type Witness struct {
 }
 
 // Identity is the flight, lane, epoch and provider session the durable
-// dispatch bound (correction §2.2, ledger SI-177).
+// dispatch bound (correction §2.2, ledger SI-182).
 //
 // It is carried EXPLICITLY rather than read out of the lineage it authorizes.
 // A replay that took its identity from the rows it is checking would let any
@@ -107,7 +107,7 @@ type Identity struct {
 // It is a separate document from the base manifest on purpose. One canonical
 // manifest cannot be both the compiler's pre-expansion output and the state a
 // lineage arrived at, so a request carrying only one of the two could not
-// express a post-expansion state at all — the defect SI-177 corrects. With no
+// express a post-expansion state at all — the defect SI-182 corrects. With no
 // installed row the tuple is the base state, stated rather than inferred.
 type Terminal struct {
 	Revision       uint64 `json:"revision"`

@@ -34,7 +34,7 @@ const (
 	claudeProcessSource = "claude-process"
 
 	// claudeVersionProbeSuffix is the single fixed product suffix Amendment
-	// 002 §3 (as annotated 2026-09-06, SI-181) admits after the requested
+	// 002 §3 (as annotated 2026-09-06, SI-186) admits after the requested
 	// adapter version in the `--version` probe line. The real Claude Code CLI
 	// 2.1.261 prints "2.1.261 (Claude Code)"; no other suffix or variant is
 	// accepted.
@@ -224,7 +224,7 @@ func (a *Adapter) run(ctx context.Context, launch sealedexec.AdapterLaunch, args
 	if bytes.ContainsAny(probeOut, "\r\n") || !utf8.Valid(probeOut) {
 		return nil, errors.New("sealedexec/claude: version probe: output has unexpected newlines or invalid UTF-8")
 	}
-	// §3 (SI-181): the probe line is accepted iff it equals the requested
+	// §3 (SI-186): the probe line is accepted iff it equals the requested
 	// adapter version exactly, or equals that version plus exactly the one
 	// fixed product suffix. Anything else is refused, naming both accepted
 	// forms.
@@ -537,7 +537,7 @@ type claudeActiveRun struct {
 
 	// Stream-identity uniqueness within the active provider session.
 	//
-	// SI-185: the real Claude Code CLI 2.1.261 emits one assistant frame per
+	// SI-190: the real Claude Code CLI 2.1.261 emits one assistant frame per
 	// content block, every frame of one message carrying the same
 	// message.id (F12 canary flight 5), so a repeated message id is not
 	// itself a contradiction — frames sharing one id are the successive
@@ -556,12 +556,12 @@ type claudeActiveRun struct {
 	pendingToolCalls      map[string]string // call_id -> tool_name, still unmatched
 	closedToolCalls       map[string]bool   // call_id already answered exactly once
 
-	// disclosedUnknownMembers is SI-182's run-wide "recorded once" set: every
+	// disclosedUnknownMembers is SI-187's run-wide "recorded once" set: every
 	// dotted path already surfaced in an earlier witness this launch, so a
 	// later frame repeating the same stray member never re-discloses it.
 	disclosedUnknownMembers map[string]struct{}
 
-	// disclosedUnknownFamilies is SI-187's run-wide "recorded once" set for
+	// disclosedUnknownFamilies is SI-192's run-wide "recorded once" set for
 	// unknown frame families, parallel to disclosedUnknownMembers.
 	// pendingUnknownFamilies is the not-yet-attached queue of freshly
 	// discovered families in first-seen order: an unknown-family frame
@@ -588,7 +588,7 @@ type claudeActiveRun struct {
 
 // pendingTerminal buffers the exact terminal result until the child is reaped.
 // reason is empty for the success family and the closed provider-result reason
-// for the provider-failure family. unknownFamilies is SI-187's disclosure that
+// for the provider-failure family. unknownFamilies is SI-192's disclosure that
 // the buffered detail is carrying: §5's terminal precedence may still discard
 // these observations, and the disclosure must outlive them.
 type pendingTerminal struct {
@@ -716,7 +716,7 @@ func (r *claudeActiveRun) handleProcessTerminal(ctx context.Context, proc *Proce
 	}
 
 	// §5 terminal precedence. No lower-priority terminal event is also
-	// emitted. SI-187's queue is drained by whichever accepted observation
+	// emitted. SI-192's queue is drained by whichever accepted observation
 	// carries it, so for a run that reached a result frame handleResult
 	// drained it well before the child was reaped. Exactly two arms below
 	// emit those buffered result observations, and the disclosure rides them;
@@ -773,10 +773,10 @@ func (r *claudeActiveRun) handleProcessTerminal(ctx context.Context, proc *Proce
 // terminalFailure emits the fixed process gap, adapter-error, and adapter-stop
 // for one closed terminal reason and discards every lower-priority event —
 // including the buffered result observations, whenever a result was accepted
-// at all. SI-187's disclosure is the one thing not discarded with them: the
+// at all. SI-192's disclosure is the one thing not discarded with them: the
 // unknown families that result's detail was provisionally carrying return to
 // the queue, and the flush here emits whatever the queue then holds as the
-// last-resort advisory summary. That keeps §I-108/SI-187's "recorded once per
+// last-resort advisory summary. That keeps §I-108/SI-192's "recorded once per
 // run" true on every arm of §5's terminal precedence, not only on the two that
 // keep the result.
 func (r *claudeActiveRun) terminalFailure(ctx context.Context, result sealedexec.AdapterResult, pending *pendingTerminal, detail contextevent.Detail, seq uint64, reason string, exitCode int) (sealedexec.AdapterResult, error) {
@@ -886,7 +886,7 @@ type claudeRetryFrame struct {
 	Attempt      *uint64 `json:"attempt"`
 	MaxRetries   *uint64 `json:"max_retries"`
 	RetryDelayMS *uint64 `json:"retry_delay_ms"`
-	// Error is decoded as raw bytes rather than typed because SI-183 accepts
+	// Error is decoded as raw bytes rather than typed because SI-188 accepts
 	// TWO distinct shapes here (the v1 object or a bare enum string); which
 	// one applies is decided in decodeRetryError from the sibling generic
 	// parse, not by a single static Go field type.
@@ -903,7 +903,7 @@ type claudeUsage struct {
 	ServiceTier              *string `json:"service_tier"`
 }
 
-// claudeModelUsage is SI-184's own camelCase shape for the result frame's
+// claudeModelUsage is SI-189's own camelCase shape for the result frame's
 // `modelUsage.<model>` value — distinct from claudeUsage's v1 snake_case
 // shape above, which validateUsage keeps applying unchanged to the result
 // frame's top-level `usage` member. Read from the 2.1.261 bundle's own
@@ -1011,16 +1011,16 @@ type claudeToolResultBlock struct {
 }
 
 // ---------------------------------------------------------------------------
-// Tolerant decode (SI-182)
+// Tolerant decode (SI-187)
 //
-// Amendment 002 §5 / §I-108, as amended 2026-09-06 (SI-182, owner-approved
+// Amendment 002 §5 / §I-108, as amended 2026-09-06 (SI-187, owner-approved
 // "option 2"): within a known frame kind, a member absent from the accepted
 // shape at its own object level is tolerated, never read, and its dotted path
 // is collected under the closed code `unknown-foreign-member`. Everything
 // else — an unknown frame type/subtype, a known member of the wrong shape,
 // duplicate keys, and trailing data — stays refused exactly as before.
 //
-// Amendment 002 §5 / §I-108, as amended 2026-09-07 (SI-187, owner-approved
+// Amendment 002 §5 / §I-108, as amended 2026-09-07 (SI-192, owner-approved
 // "amend Verdi"): the same tolerance now applies one level up, to the frame's
 // own family. A frame whose family — its `type`, or `system` paired with its
 // `subtype` — the family switch in normalize does not know is advisory
@@ -1036,10 +1036,10 @@ type claudeToolResultBlock struct {
 // frame of a known family.
 // ---------------------------------------------------------------------------
 
-// unknownMemberCode is SI-182's closed disclosure code.
+// unknownMemberCode is SI-187's closed disclosure code.
 const unknownMemberCode = "unknown-foreign-member"
 
-// unknownFamilyCode is SI-187's closed disclosure code.
+// unknownFamilyCode is SI-192's closed disclosure code.
 const unknownFamilyCode = "unknown-foreign-family"
 
 // jsonFieldNames returns the json member names declared on typ (a struct
@@ -1048,14 +1048,14 @@ const unknownFamilyCode = "unknown-foreign-family"
 //
 // This helper is the sole point keeping those two decodes in sync, so it
 // fails closed at package construction on any field shape that would break
-// the correspondence rather than inverting SI-182 mid-stream:
+// the correspondence rather than inverting SI-187 mid-stream:
 //
 //   - `json:"-"` contributes no name. encoding/json never reads such a field,
 //     so a member literally named "-" is unknown, not known.
 //   - An exported field with no json tag, an empty json name, or an embedded
 //     field is refused: encoding/json would read it under a name this helper
 //     does not know, so the member would be recorded as unknown and still
-//     read — the exact inversion of SI-182's "never read".
+//     read — the exact inversion of SI-187's "never read".
 //
 // Unexported fields are skipped: encoding/json never reads them and they name
 // no member.
@@ -1131,7 +1131,7 @@ func (s *unknownMemberSet) add(path string) {
 }
 
 // sorted returns the deduplicated dotted paths in ascending order, or nil for
-// an empty set (§5/SI-182: empty ⇒ no witness entry).
+// an empty set (§5/SI-187: empty ⇒ no witness entry).
 func (s *unknownMemberSet) sorted() []string {
 	if s == nil || len(s.paths) == 0 {
 		return nil
@@ -1196,7 +1196,7 @@ func scanKnownObjectArray(value any, known map[string]struct{}, prefix string, s
 
 // runNewUnknownMembers filters out every path this launch has already
 // disclosed, records the rest as disclosed, and returns them sorted. This is
-// SI-182's "recorded once" over the life of one launch: a path already
+// SI-187's "recorded once" over the life of one launch: a path already
 // witnessed by an earlier frame is never repeated by a later one.
 func (r *claudeActiveRun) runNewUnknownMembers(found []string) []string {
 	if len(found) == 0 {
@@ -1219,7 +1219,7 @@ func (r *claudeActiveRun) runNewUnknownMembers(found []string) []string {
 	return fresh
 }
 
-// attachUnknownMemberWitness adds SI-182's disclosure to source under its
+// attachUnknownMemberWitness adds SI-187's disclosure to source under its
 // closed code when paths is nonempty; an empty list leaves source untouched.
 func attachUnknownMemberWitness(source map[string]any, paths []string) {
 	if len(paths) == 0 {
@@ -1228,7 +1228,7 @@ func attachUnknownMemberWitness(source map[string]any, paths []string) {
 	source[unknownMemberCode] = paths
 }
 
-// recordUnknownFamily is SI-187's run-wide "recorded once" admission of one
+// recordUnknownFamily is SI-192's run-wide "recorded once" admission of one
 // unknown frame family: a family already disclosed (or already queued)
 // earlier this launch is never queued again; a fresh one is appended to
 // pendingUnknownFamilies in first-seen order to ride on whichever accepted
@@ -1246,7 +1246,7 @@ func (r *claudeActiveRun) recordUnknownFamily(family string) {
 	r.pendingUnknownFamilies = append(r.pendingUnknownFamilies, family)
 }
 
-// drainPendingUnknownFamilies returns SI-187's queued not-yet-attached
+// drainPendingUnknownFamilies returns SI-192's queued not-yet-attached
 // families in first-seen order and empties the queue, so the very next
 // accepted observation carries them and no later one repeats them. An empty
 // queue returns nil, leaving an untouched run's detail sources untouched.
@@ -1263,7 +1263,7 @@ func (r *claudeActiveRun) drainPendingUnknownFamilies() []string {
 
 // requeueUnknownFamilies returns families whose only carrier is being
 // discarded to the FRONT of the pending queue, ahead of anything queued after
-// them, so SI-187's first-seen order survives the return. They are already in
+// them, so SI-192's first-seen order survives the return. They are already in
 // disclosedUnknownFamilies, where recordUnknownFamily would refuse to queue
 // them a second time, so this is the one path that may put a family back.
 func (r *claudeActiveRun) requeueUnknownFamilies(families []string) {
@@ -1275,7 +1275,7 @@ func (r *claudeActiveRun) requeueUnknownFamilies(families []string) {
 	r.pendingUnknownFamilies = append(append([]string(nil), families...), r.pendingUnknownFamilies...)
 }
 
-// attachUnknownFamilyWitness adds SI-187's disclosure to source under its
+// attachUnknownFamilyWitness adds SI-192's disclosure to source under its
 // closed code when families is nonempty; an empty list leaves source
 // untouched (byte-identical to a run that saw only known families).
 func attachUnknownFamilyWitness(source map[string]any, families []string) {
@@ -1286,7 +1286,7 @@ func attachUnknownFamilyWitness(source map[string]any, families []string) {
 }
 
 // terminalUnknownFamilySummary drains any unknown families this run has not
-// yet attached to an accepted observation and, when nonempty, builds SI-187's
+// yet attached to an accepted observation and, when nonempty, builds SI-192's
 // last-resort advisory summary carrying them: the counterpart to
 // unknownMemberSummary for a run that reaches its terminal before any further
 // accepted frame can carry the disclosure itself. Its summary id is derived
@@ -1333,7 +1333,7 @@ func validUniqueStrings(values *[]string) bool {
 // returns its exact projection. object is the same usage value already parsed
 // by DecodeUniqueJSONObject (nil when the caller could not locate it), used
 // only to tolerate and record — under prefix, into set — a member absent from
-// the known usage shape; its value is never read (SI-182).
+// the known usage shape; its value is never read (SI-187).
 //
 // The projection is rebuilt from the typed decode rather than passed through
 // from the frame bytes, which is the other half of "never read": a tolerated
@@ -1374,7 +1374,7 @@ func validateUsage(raw *json.RawMessage, object map[string]any, prefix string, s
 	return projected, ""
 }
 
-// validateModelUsage proves SI-184's exact camelCase result-frame
+// validateModelUsage proves SI-189's exact camelCase result-frame
 // `modelUsage.<model>` shape — required inputTokens, outputTokens,
 // cacheReadInputTokens, cacheCreationInputTokens; optional
 // webSearchRequests, costUSD, contextWindow, maxOutputTokens — and returns
@@ -1382,7 +1382,7 @@ func validateUsage(raw *json.RawMessage, object map[string]any, prefix string, s
 // only when the frame carried them. raw is the per-model value's own bytes;
 // object is the same value already parsed generically by
 // DecodeUniqueJSONObject, used only to tolerate and record — under prefix,
-// into set — a member absent from this shape (SI-182); its value is never
+// into set — a member absent from this shape (SI-187); its value is never
 // read. A snake_case object here (the v1 `usage` shape) leaves every
 // required member nil and so is refused missing-foreign-field, never
 // silently accepted under the wrong spelling.
@@ -1391,7 +1391,7 @@ func validateUsage(raw *json.RawMessage, object map[string]any, prefix string, s
 // is and for the same reason: a tolerated member must never reach a
 // projected detail or the digest taken over it. The top-level result frame
 // `usage` member is unaffected by this shape: it keeps validateUsage's v1
-// snake_case projection, unchanged by SI-184.
+// snake_case projection, unchanged by SI-189.
 func validateModelUsage(raw *json.RawMessage, object map[string]any, prefix string, set *unknownMemberSet) (map[string]any, string) {
 	if raw == nil {
 		return nil, "missing-foreign-field"
@@ -1407,7 +1407,7 @@ func validateModelUsage(raw *json.RawMessage, object map[string]any, prefix stri
 	if usage.CostUSD != nil {
 		// Proves the member's JSON type is number without converting it: the
 		// parsed float is discarded and the original bytes are what the
-		// projection below keeps (SI-184: "do not round").
+		// projection below keeps (SI-189: "do not round").
 		var cost float64
 		if err := json.Unmarshal(*usage.CostUSD, &cost); err != nil {
 			return nil, "invalid-foreign-field"
@@ -1437,7 +1437,7 @@ func validateModelUsage(raw *json.RawMessage, object map[string]any, prefix stri
 	return projected, ""
 }
 
-// claudeRetryErrorStringAccepted is SI-183's exact closed eleven-value
+// claudeRetryErrorStringAccepted is SI-188's exact closed eleven-value
 // system/api_retry `error` string enum the real Claude Code CLI 2.1.261
 // emits in place of the v1 object form, read offline from the bundle's zod
 // schema (measured 2026-09-06). Any other string is refused.
@@ -1452,7 +1452,7 @@ func claudeRetryErrorStringAccepted(value string) bool {
 	}
 }
 
-// decodeRetryError proves SI-183's dual accepted shape of the
+// decodeRetryError proves SI-188's dual accepted shape of the
 // system/api_retry frame's `error` member: the v1 object `{type,message}`
 // (Amendment 002 §5, unchanged — the same closed six-value error.type
 // vocabulary and message validation as before this amendment) or a bare
@@ -1465,7 +1465,7 @@ func claudeRetryErrorStringAccepted(value string) bool {
 // closed decode-failure reason. Any other string, an empty string, or a
 // non-string non-object value refuses invalid-foreign-field exactly as
 // before this amendment (a bare string of any kind already failed the
-// object-typed decode pre-SI-183).
+// object-typed decode pre-SI-188).
 func decodeRetryError(raw json.RawMessage, value any, unknown *unknownMemberSet) (string, string) {
 	switch typed := value.(type) {
 	case map[string]any:
@@ -1541,11 +1541,11 @@ func (r *claudeActiveRun) normalize(ctx context.Context, line []byte, seq uint64
 		return r.handleInit(ctx, line, object, seq)
 	case outer == "system" && subtype == "api_retry":
 		return r.handleRetry(ctx, line, object, seq)
-	// SI-187 fixes the family at the frame's `type`, subtype-qualified only
+	// SI-192 fixes the family at the frame's `type`, subtype-qualified only
 	// for "system". The three non-"system" known families are therefore
 	// routed by `type` alone: a frame of one of them that also carries some
 	// stray `subtype` is a frame of that known family and is decoded
-	// strictly, where the stray member is SI-182's tolerated unknown member
+	// strictly, where the stray member is SI-187's tolerated unknown member
 	// (recorded, never read) and everything else is validated exactly as
 	// before. Matching on the pair here instead would drop such a frame
 	// whole through the tolerant fallback below and name a family the
@@ -1558,7 +1558,7 @@ func (r *claudeActiveRun) normalize(ctx context.Context, line []byte, seq uint64
 		return r.handleResult(ctx, line, object, seq)
 	}
 
-	// SI-187: a frame whose family this switch does not recognize is
+	// SI-192: a frame whose family this switch does not recognize is
 	// advisory provider telemetry, not a stream contradiction, exactly when
 	// its family is well-formed — a nonempty type for any non-"system"
 	// frame, or "system" paired with a nonempty subtype. It is never
@@ -1701,7 +1701,7 @@ func (r *claudeActiveRun) handleRetry(ctx context.Context, line []byte, object m
 		!nonemptyStringValue(*frame.UUID) {
 		return r.decodeFailure(ctx, seq, "invalid-foreign-field", map[string]any{"family": "system/api_retry"})
 	}
-	// SI-183: error is the v1 {type,message} object (unchanged) or a bare
+	// SI-188: error is the v1 {type,message} object (unchanged) or a bare
 	// string from the closed eleven-value enum; any other shape refuses
 	// exactly as it did before this amendment.
 	errorValue, errReason := decodeRetryError(*frame.Error, object["error"], &unknown)
@@ -1784,7 +1784,7 @@ func (r *claudeActiveRun) handleAssistant(ctx context.Context, line []byte, obje
 	}
 	usageObject, _ := messageObject["usage"].(map[string]any)
 	// The assistant detail projects no usage, so only the proof and the
-	// SI-182 recording are wanted here.
+	// SI-187 recording are wanted here.
 	if _, reason := validateUsage(message.Usage, usageObject, "message.usage.", &unknown); reason != "" {
 		return r.decodeFailure(ctx, seq, reason, map[string]any{"field": "message.usage"})
 	}
@@ -1816,14 +1816,14 @@ func (r *claudeActiveRun) handleAssistant(ctx context.Context, line []byte, obje
 	if *frame.SessionID != currentSession {
 		return r.decodeFailure(ctx, seq, "session-mismatch", nil)
 	}
-	// §5/SI-185: frames sharing one message id are the successive blocks of
+	// §5/SI-190: frames sharing one message id are the successive blocks of
 	// one message, so only a frame naming a message id already closed by a
 	// later, different message id is a stream contradiction.
 	if messageClosed {
 		return r.decodeFailure(ctx, seq, "duplicate-message-id", nil)
 	}
 
-	// SI-182: every top-level frame and message-level unknown member found so
+	// SI-187: every top-level frame and message-level unknown member found so
 	// far is disclosed exactly once, attached to whichever content block first
 	// gets the chance below. Its value is never read regardless of which block
 	// that turns out to be.
@@ -1833,7 +1833,7 @@ func (r *claudeActiveRun) handleAssistant(ctx context.Context, line []byte, obje
 	messageID := *message.ID
 	observations := []sealedexec.NormalizedObservation{}
 	for localIndex, rawBlock := range *message.Content {
-		// SI-185: every fixed id and hashed detail below uses the index
+		// SI-190: every fixed id and hashed detail below uses the index
 		// continued across all frames sharing this message id; only this
 		// frame's own raw content array (and the unknown-member scan) is
 		// addressed by the frame-local position.
@@ -2009,7 +2009,7 @@ func (r *claudeActiveRun) handleAssistant(ctx context.Context, line []byte, obje
 			return r.decodeFailure(ctx, seq, "unknown-content-block", nil)
 		}
 	}
-	// SI-182: a frame with no content block has no block detail to attach the
+	// SI-187: a frame with no content block has no block detail to attach the
 	// frame- and message-level disclosure to, so it carries one of its own
 	// rather than dropping the recording obligation on an accepted frame.
 	if len(*message.Content) == 0 {
@@ -2024,7 +2024,7 @@ func (r *claudeActiveRun) handleAssistant(ctx context.Context, line []byte, obje
 	return sealedexec.AdapterResult{Observations: observations}, nil
 }
 
-// unknownMemberSummary carries SI-182's disclosure on an advisory provider
+// unknownMemberSummary carries SI-187's disclosure on an advisory provider
 // summary of its own, for a frame whose content is empty: §I-108 records the
 // path regardless of what else the frame contains, and such a frame has no
 // content-block detail to carry it. Its summary id is derived from the source
@@ -2050,7 +2050,7 @@ func (r *claudeActiveRun) unknownMemberSummary(ctx context.Context, family strin
 // bytes are never inputs to redaction or the digest. Its summary id is derived
 // from the provider message id, so §6/SI-174 checks the exact composed fixed
 // value before it is placed; ok reports that the value was safe. witness is
-// SI-182's already-deduplicated, run-new unknown-member disclosure for this
+// SI-187's already-deduplicated, run-new unknown-member disclosure for this
 // block (and any not-yet-disclosed frame/message-level members), attached
 // when nonempty.
 func (r *claudeActiveRun) omissionSummary(ctx context.Context, contentType, messageID string, blockIndex int, protectedValues [][]byte, witness []string) (obs sealedexec.NormalizedObservation, ok bool, err error) {
@@ -2103,7 +2103,7 @@ func (r *claudeActiveRun) handleToolResult(ctx context.Context, line []byte, obj
 		return r.decodeFailure(ctx, seq, "session-mismatch", nil)
 	}
 
-	// SI-182: as in the assistant family, every not-yet-disclosed frame/
+	// SI-187: as in the assistant family, every not-yet-disclosed frame/
 	// message-level unknown member is attached to whichever tool-result block
 	// first gets the chance below, or to a disclosure summary of its own when
 	// the frame has no block at all.
@@ -2207,7 +2207,7 @@ func (r *claudeActiveRun) handleToolResult(ctx context.Context, line []byte, obj
 			},
 		})
 	}
-	// SI-182: as in the assistant family, an accepted frame with no content
+	// SI-187: as in the assistant family, an accepted frame with no content
 	// block still records its frame- and message-level unknown members.
 	if len(*frame.Message.Content) == 0 {
 		summary, disclosed, err := r.unknownMemberSummary(ctx, "user", seq, r.runNewUnknownMembers(frameUnknown), protectedValues)
@@ -2265,7 +2265,7 @@ func (r *claudeActiveRun) handleResult(ctx context.Context, line []byte, object 
 	if denials == nil {
 		return r.decodeFailure(ctx, seq, "invalid-foreign-field", map[string]any{"field": "permission_denials"})
 	}
-	// SI-182: every projected row is rebuilt from the accepted members of the
+	// SI-187: every projected row is rebuilt from the accepted members of the
 	// typed decode, so a tolerated unknown member of a denial row is recorded
 	// and nothing more — it never rides into the detail or its digest.
 	denialRows := make([]map[string]any, 0, len(denials))
@@ -2292,7 +2292,7 @@ func (r *claudeActiveRun) handleResult(ctx context.Context, line []byte, object 
 		modelUsageObject, _ := object["modelUsage"].(map[string]any)
 		perModelObject, _ := modelUsageObject[r.launch.Profile.Model].(map[string]any)
 		// The member lives at modelUsage.<model>.<key>, so the recorded path
-		// names that level and not a nonexistent modelUsage.<key>. SI-184:
+		// names that level and not a nonexistent modelUsage.<key>. SI-189:
 		// the per-model value is its own camelCase shape, distinct from the
 		// v1 snake_case shape validateUsage still applies to the top-level
 		// `usage` member above.
@@ -2311,11 +2311,11 @@ func (r *claudeActiveRun) handleResult(ctx context.Context, line []byte, object 
 		return r.decodeFailure(ctx, seq, "session-mismatch", nil)
 	}
 
-	// SI-182: usage, permission_denials and modelUsage are the projection's
+	// SI-187: usage, permission_denials and modelUsage are the projection's
 	// three object-shaped members, so each is placed from the rebuilt typed
 	// value above rather than from the frame bytes. Passing the raw bytes
 	// through would project and hash the very members the walk just recorded
-	// as unknown, which is the half of SI-182 that says they are never read.
+	// as unknown, which is the half of SI-187 that says they are never read.
 	// total_cost_usd stays raw: it decoded as a bare float64, so it has no
 	// members that could hide one, and its verbatim numeric form is
 	// deliberately preserved.
@@ -2335,7 +2335,7 @@ func (r *claudeActiveRun) handleResult(ctx context.Context, line []byte, object 
 		projection["modelUsage"] = modelUsageProjection
 	}
 	attachUnknownMemberWitness(projection, r.runNewUnknownMembers(unknown.sorted()))
-	// SI-187: this detail is only a PROVISIONAL carrier. §5's terminal
+	// SI-192: this detail is only a PROVISIONAL carrier. §5's terminal
 	// precedence may still discard the observations built from it below, so
 	// what it drained is remembered on the pending terminal and returned to
 	// the queue if that happens.

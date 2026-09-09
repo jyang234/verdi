@@ -43,7 +43,7 @@ func TestHTTPMCPProtocol(t *testing.T) {
 		}
 	})
 
-	// SI-188 F1: the HTTP transport shares decodeHandlerRequest with the
+	// SI-193 F1: the HTTP transport shares decodeHandlerRequest with the
 	// stdio path, so an unknown top-level frame member — sibling to
 	// jsonrpc/id/method, not nested in params — is tolerated here too,
 	// never observed in the response.
@@ -189,7 +189,7 @@ func TestHTTPMCPRejectsWrongRequestShape(t *testing.T) {
 }
 
 // TestHTTPMCPMalformedAndUnknownJSONRPC no longer includes an unknown-member
-// row (`"extra":true` beside jsonrpc/id/method): SI-188 F1 made
+// row (`"extra":true` beside jsonrpc/id/method): SI-193 F1 made
 // decodeHandlerRequest tolerant of an unknown top-level frame member, and
 // that expectation was 548d1c0f's own uncited posture. The tolerated
 // equivalent is TestHTTPMCPProtocol's "initialize tolerates an unknown

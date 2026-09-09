@@ -53,7 +53,7 @@ func ServeHandler(ctx context.Context, r io.Reader, w io.Writer, handler ToolHan
 }
 
 // decodeHandlerRequest decodes the sealed path's outer JSON-RPC frame —
-// TOLERANT of unknown top-level members (SI-188 F1); see decodeTolerantJSON's
+// TOLERANT of unknown top-level members (SI-193 F1); see decodeTolerantJSON's
 // doc comment for why. jsonrpc/method stay required and exact/non-empty, and
 // rejectDuplicateJSONFields still refuses a duplicate key or trailing data.
 func decodeHandlerRequest(data []byte, request *rpcRequest) error {
@@ -123,7 +123,7 @@ func callHandler(ctx context.Context, handler ToolHandler, params json.RawMessag
 
 // decodeHandlerCall decodes the tools/call PARAMS envelope (name/arguments,
 // plus whatever else the caller put beside them) — TOLERANT of unknown
-// members; see decodeTolerantJSON's doc comment for why (SI-188,
+// members; see decodeTolerantJSON's doc comment for why (SI-193,
 // spec/fail-loud dc-2).
 func decodeHandlerCall(data []byte, target any) error {
 	if err := rejectDuplicateJSONFields(data); err != nil {
@@ -148,7 +148,7 @@ func decodeHandlerCall(data []byte, target any) error {
 // already gives its own params the identical treatment via bare
 // json.Unmarshal.
 //
-// Before SI-188, both call sites here were strict (introduced 548d1c0f,
+// Before SI-193, both call sites here were strict (introduced 548d1c0f,
 // uncited by any ledger row or ratified design). MCP defines a `_meta`
 // member on every request's params, and Claude Code 2.1.261 sends
 // `_meta.progressToken` on EVERY tools/call: decodeHandlerCall's strict

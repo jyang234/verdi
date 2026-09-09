@@ -1697,7 +1697,7 @@ func validateContextQuery(query ContextQuery) error {
 // validContextResolution canonicalizes and validates resolution. data is
 // required — and validated as a full verdi.context-data-item/v1 document —
 // only when State is proven; a non-proven resolution MUST omit the member
-// entirely, refused by name otherwise (SI-189), exactly as
+// entirely, refused by name otherwise (SI-194), exactly as
 // internal/sealedexec's contextResolutionToWire/FromWire enforce it at the
 // private wire: the shared presence gate is
 // contextcompile.RequireDataOnlyWhenProven, the one helper both codecs call

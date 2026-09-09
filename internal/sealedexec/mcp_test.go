@@ -37,7 +37,7 @@ func TestScopedContextMCPContract_Static(t *testing.T) {
 		name string
 		args []byte
 		// wantErrSub, when non-empty, additionally pins that the error text
-		// NAMES the unknown field (SI-188 F2, decode.go's ac-3 promise:
+		// NAMES the unknown field (SI-193 F2, decode.go's ac-3 promise:
 		// "refused NAMING the unknown field") — not just that a refusal
 		// happened.
 		wantErrSub string
@@ -119,7 +119,7 @@ func TestScopedContextMCPContract_Static(t *testing.T) {
 		if result.Kind != InspectionContextApproved || result.InstructionAuthority != nil || result.Context.Data.Content != "declared bytes" {
 			t.Fatalf("approved inspection = %#v", result)
 		}
-		// SI-189 F6: the epochChecks counter used by the non-proven tests'
+		// SI-194 F6: the epochChecks counter used by the non-proven tests'
 		// "never reached" assertions must also be positively live — a
 		// proven resolution's approved path calls VerifyEpoch exactly
 		// once, so a dead counter (always 0) would not silently pass here.
@@ -197,7 +197,7 @@ func TestScopedContextMCPContract_Static(t *testing.T) {
 		if !ok || decision.Verdict != countersign.VerdictViolated {
 			t.Fatalf("violated denial decision = %#v", denied.events[1].Payload)
 		}
-		// SI-189: a non-proven resolution is denied before epoch
+		// SI-194: a non-proven resolution is denied before epoch
 		// re-verification is ever reached — VerifyEpoch(EpochCheck{...}) is
 		// never called for it.
 		if denied.epochChecks != 0 {
@@ -223,7 +223,7 @@ func TestScopedContextMCPContract_Static(t *testing.T) {
 		if !reflect.DeepEqual(result.Context.Witnesses, []string{"a witness", "z witness"}) {
 			t.Fatalf("unavailable inspection witnesses = %v", result.Context.Witnesses)
 		}
-		// SI-189: epoch re-verification is never reached for a non-proven
+		// SI-194: epoch re-verification is never reached for a non-proven
 		// resolution — it is denied first.
 		if unavailable.epochChecks != 0 {
 			t.Fatalf("unavailable resolution reached epoch re-verification: %d calls", unavailable.epochChecks)
@@ -304,7 +304,7 @@ func TestScopedContextMCPContract_Static(t *testing.T) {
 }
 
 // TestScopedMCPInstallsRestartReconstructibleExpansion freezes Task 2A's
-// widened install (correction §2.2, SI-177): the sealed client supplies the
+// widened install (correction §2.2, SI-182): the sealed client supplies the
 // requested ref, the non-empty request purpose, and the exact canonical
 // installed data item from the already-approved transition, so the lineage
 // remains reconstructible after a process restart.
@@ -772,7 +772,7 @@ type mcpFake struct {
 }
 
 // ResolveContext answers with a data item only when the resolution is
-// proven (SI-189): ContextResolution.Data stays the zero value on a
+// proven (SI-194): ContextResolution.Data stays the zero value on a
 // non-proven answer, exactly as an honest owner must, rather than papering
 // over a denied/unavailable ref with a fabricated item.
 func (f *mcpFake) ResolveContext(_ context.Context, ref string) (ContextResolution, error) {
@@ -799,7 +799,7 @@ func (f *mcpFake) ResolveContext(_ context.Context, ref string) (ContextResoluti
 }
 
 // CompileChild answers through the owning transition proof rather than with
-// invented digests. SI-177 makes the scoped tool cross-match its compiler
+// invented digests. SI-182 makes the scoped tool cross-match its compiler
 // against that proof before acknowledging anything, so a fake that fabricated
 // digests would be refused — correctly — and would prove nothing about the
 // ports this fake exists to stand in for.

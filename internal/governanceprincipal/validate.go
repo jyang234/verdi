@@ -89,7 +89,7 @@ func validateTrustSources(p Profile) error {
 		// local-operator's evidence is a bare self-assertion, honest only
 		// under the class whose own definition already collapses
 		// separation of duties (2026-09-05 local-operator disposition
-		// design §2.1, ledger SI-178): every other class refuses it,
+		// design §2.1, ledger SI-183): every other class refuses it,
 		// naming the offending class so the refusal is legible.
 		if ts.Kind == TrustSourceLocalOperator && p.Class != ClassSolo {
 			return fmt.Errorf("governanceprincipal: identity_trust_sources[%d]: local-operator trust source is only permitted for solo profiles, got class %q", i, p.Class)

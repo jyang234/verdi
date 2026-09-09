@@ -361,7 +361,7 @@ func (s *FlightState) installExpansionLocked(child ChildManifest, terminal fligh
 // the resolved item only when Verification.State is proven; on a non-proven
 // resolution (a denied or absent ref) Data stays its zero value
 // (contextcompile.DataItem{}) — the wire codec (contextResolutionToWire/
-// FromWire, SI-189) refuses a non-proven resolution that carries a data item
+// FromWire, SI-194) refuses a non-proven resolution that carries a data item
 // and a proven one that lacks it, so an honest owner never fabricates one.
 type ContextResolution struct {
 	Verification
@@ -394,7 +394,7 @@ type ChildManifest struct {
 
 // ExpansionInstall is atomically persisted immediately after child ack.
 //
-// Ref, Purpose, and Data are SI-177's restart-reconstructible facts: without
+// Ref, Purpose, and Data are SI-182's restart-reconstructible facts: without
 // them a later process holding only this durable row could not replay the
 // transition, because the request id, child-manifest digest, and expansion
 // digest all bind operands the narrow row never carried. Ref stays a separate
@@ -578,7 +578,7 @@ func (m *ScopedMCP) requestContext(ctx context.Context, ref, purpose string) (In
 		snapshot.Invalidated = true
 		return InspectionResult{}, verdict("child manifest transition identity mismatch")
 	}
-	// SI-177: derive the transition independently from the parent state and
+	// SI-182: derive the transition independently from the parent state and
 	// the exact facts this call approved, and require the compiler's answer to
 	// match before anything is acknowledged. The same derivation is what a
 	// restart replays from the durable install row below, so a transition that

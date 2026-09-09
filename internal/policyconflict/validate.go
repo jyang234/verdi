@@ -200,7 +200,7 @@ func (r JudgeRole) Validate() error {
 }
 
 // validateDisclosureCode checks d against the closed vocabulary authority
-// design §10/ledger SI-103 fixes, plus ledger SI-178's local-operator
+// design §10/ledger SI-103 fixes, plus ledger SI-183's local-operator
 // addition: the fourteen existing contextcompile.DisclosureCode values
 // (checked via that type's own exported Validate — DisclosureCode is a
 // genuine alias, so the method is already inherited) plus exactly

@@ -461,34 +461,34 @@ type fakeClaudeSpec struct {
 	// bigText makes the assistant text exceed the fixed inline detail ceiling,
 	// so its projected detail must become a durable controller segment.
 	bigText bool
-	// versionSuffix makes the fake's --version probe line print the SI-181
+	// versionSuffix makes the fake's --version probe line print the SI-186
 	// product suffix (" (Claude Code)") after version instead of the bare
 	// version alone.
 	versionSuffix bool
 	// unknownMembers makes the fake reproduce the 2.1.261-shaped stream the
 	// real Claude Code CLI emits (measured offline by the F12 canary track,
 	// 2026-09-06; values here are synthetic, never the measured bytes): the
-	// init frame carries the exact 8 unknown members (SI-182), the api_retry
+	// init frame carries the exact 8 unknown members (SI-187), the api_retry
 	// frame carries its bare-string `error` plus the 1 unknown member
-	// error_status (SI-183), and the result frame's modelUsage.<model> value
-	// is the camelCase shape (SI-184). The sealed run must still proceed.
+	// error_status (SI-188), and the result frame's modelUsage.<model> value
+	// is the camelCase shape (SI-189). The sealed run must still proceed.
 	unknownMembers bool
 	// multiFrame makes the fake reproduce the real Claude Code CLI 2.1.261's
-	// multi-frame assistant message shape (SI-185, F12 canary flight 5,
+	// multi-frame assistant message shape (SI-190, F12 canary flight 5,
 	// 2026-09-07): one assistant frame per content block, both frames of the
 	// single assistant message carrying the same message.id — a thinking
 	// block (block 0) followed by the text block (block 1). The sealed run
 	// must still proceed to its result frame.
 	multiFrame bool
 	// unknownFamilies makes the fake reproduce the real Claude Code CLI
-	// 2.1.261's further informational frame families (SI-187, F12 canary
+	// 2.1.261's further informational frame families (SI-192, F12 canary
 	// flight 8, 2026-09-07): a system/thinking_tokens frame right after init,
 	// before the first tool call, and a tool_progress frame between the
 	// assistant frame and the result frame — so the two land on two
 	// different accepted carriers. The sealed run must tolerate both and
 	// still proceed to its result frame.
 	unknownFamilies bool
-	// metaOnCalls makes every tools/call this fake issues (SI-188, F12
+	// metaOnCalls makes every tools/call this fake issues (SI-193, F12
 	// canary track, 2026-09-07) carry a top-level `_meta` member beside
 	// `name`/`arguments`, exactly as the real Claude Code CLI 2.1.261 does
 	// on every tools/call (the MCP SDK's request() adds
@@ -524,17 +524,17 @@ const (
 	extraTool = __EXTRA__
 	doCommit  = __COMMIT__
 	bigText   = __BIGTEXT__
-	// versionSuffix selects the SI-181 " (Claude Code)" probe suffix.
+	// versionSuffix selects the SI-186 " (Claude Code)" probe suffix.
 	versionSuffix = __VERSIONSUFFIX__
-	// unknownMembers selects the SI-182 2.1.261-shaped unknown-member frames.
+	// unknownMembers selects the SI-187 2.1.261-shaped unknown-member frames.
 	unknownMembers = __UNKNOWNMEMBERS__
-	// multiFrame selects the SI-185 2.1.261-shaped multi-frame assistant
+	// multiFrame selects the SI-190 2.1.261-shaped multi-frame assistant
 	// message.
 	multiFrame = __MULTIFRAME__
-	// unknownFamilies selects the SI-187 2.1.261-shaped further informational
+	// unknownFamilies selects the SI-192 2.1.261-shaped further informational
 	// frame families.
 	unknownFamilies = __UNKNOWNFAMILIES__
-	// metaOnCalls selects the SI-188 2.1.261-shaped _meta member on every
+	// metaOnCalls selects the SI-193 2.1.261-shaped _meta member on every
 	// tools/call.
 	metaOnCalls = __METAONCALLS__
 )
@@ -622,7 +622,7 @@ func run() error {
 		"agents": []string{}, "skills": []string{}, "plugins": []string{}, "uuid": "init-uuid-e2e",
 	}
 	if unknownMembers {
-		// SI-182: the exact 8 unknown system/init members the real Claude Code
+		// SI-187: the exact 8 unknown system/init members the real Claude Code
 		// CLI 2.1.261 emits (measured offline by the F12 canary track,
 		// 2026-09-06); values here are synthetic, never the measured bytes.
 		initFrame["analytics_disabled"] = false
@@ -638,7 +638,7 @@ func run() error {
 		return err
 	}
 	if unknownFamilies {
-		// SI-187: the real Claude Code CLI 2.1.261 emits further
+		// SI-192: the real Claude Code CLI 2.1.261 emits further
 		// informational frame families an ordinary run (F12 canary flight 8,
 		// 2026-09-07 measured system/thinking_tokens right after init, before
 		// the first tool call). The sealed run must tolerate it — no
@@ -648,7 +648,7 @@ func run() error {
 		}
 	}
 	if unknownMembers {
-		// SI-182/SI-183: the real Claude Code CLI 2.1.261's measured
+		// SI-187/SI-188: the real Claude Code CLI 2.1.261's measured
 		// system/api_retry frame carries error as a bare string ("unknown")
 		// beside the one unknown member error_status (measured offline by
 		// the F12 canary track, 2026-09-06). The run proceeds past this
@@ -732,7 +732,7 @@ func run() error {
 	}
 	usage := map[string]any{"input_tokens": 1, "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0, "output_tokens": 1}
 	if multiFrame {
-		// SI-185: the real Claude Code CLI 2.1.261 emits one assistant frame
+		// SI-190: the real Claude Code CLI 2.1.261 emits one assistant frame
 		// per content block, every frame of the one message carrying the
 		// same message.id (F12 canary flight 5, 2026-09-07) — a thinking
 		// block (block 0) in its own frame, then the text block (block 1) in
@@ -759,7 +759,7 @@ func run() error {
 		return err
 	}
 	if unknownFamilies {
-		// SI-187: a further informational family arriving mid-stream, after
+		// SI-192: a further informational family arriving mid-stream, after
 		// an ACCEPTED assistant frame has already carried the first one
 		// away. This one therefore has to wait for the next accepted
 		// observation of its own — the result frame's — which is the
@@ -777,7 +777,7 @@ func run() error {
 		"permission_denials": []any{},
 	}
 	if unknownMembers {
-		// SI-184: the real Claude Code CLI 2.1.261's result frame
+		// SI-189: the real Claude Code CLI 2.1.261's result frame
 		// modelUsage.<model> value is its own camelCase shape (bundle
 		// literal, measured offline by the F12 canary track, 2026-09-06);
 		// values here are synthetic, never the measured bytes.
@@ -899,7 +899,7 @@ func post(url, authorization, body string) ([]byte, error) {
 }
 
 // callBody builds one tools/call JSON-RPC request body. When metaOnCalls is
-// selected (SI-188) it carries the exact shape the real Claude Code CLI
+// selected (SI-193) it carries the exact shape the real Claude Code CLI
 // 2.1.261 sends on every tools/call: a top-level _meta member
 // (progressToken: 1) beside name and arguments.
 func callBody(id int, name, argsJSON string) string {
@@ -1017,25 +1017,25 @@ type claudeLifecycleOptions struct {
 	// every terminal artifact must bind that revision.
 	approvedContext bool
 	// claudeCodeSuffix makes the fake provider's --version probe line carry
-	// the SI-181 " (Claude Code)" product suffix after the adapter version
+	// the SI-186 " (Claude Code)" product suffix after the adapter version
 	// instead of the bare version; the sealed launch must still succeed.
 	claudeCodeSuffix bool
 	// unknownMembers makes the fake provider's init and api_retry frames
-	// carry the SI-182 2.1.261-shaped unknown members; the sealed run must
+	// carry the SI-187 2.1.261-shaped unknown members; the sealed run must
 	// still proceed.
 	unknownMembers bool
 	// multiFrame makes the fake provider emit its one assistant message as
-	// the real Claude Code CLI 2.1.261 does (SI-185): a thinking block and
+	// the real Claude Code CLI 2.1.261 does (SI-190): a thinking block and
 	// the text block in two separate frames sharing one message.id, instead
 	// of the single all-in-one-frame assistant message. The sealed run must
 	// still proceed to the same successful lifecycle.
 	multiFrame bool
-	// unknownFamilies makes the fake provider emit the SI-187 2.1.261-shaped
+	// unknownFamilies makes the fake provider emit the SI-192 2.1.261-shaped
 	// further informational frame families (system/thinking_tokens right
 	// after init, tool_progress mid-stream); the sealed run must tolerate
 	// both and still proceed to the same successful lifecycle.
 	unknownFamilies bool
-	// metaOnCalls makes the fake provider carry the SI-188 2.1.261-shaped
+	// metaOnCalls makes the fake provider carry the SI-193 2.1.261-shaped
 	// `_meta` member on every tools/call; the sealed run must still proceed
 	// to the same successful lifecycle instead of ending at the first tool
 	// call.
@@ -1218,7 +1218,7 @@ func runClaudeSealedLifecycle(t *testing.T, bin string, options claudeLifecycleO
 	fake := &sealedLifecycleController{
 		t: t, request: fixture.request, profile: profile,
 		fail: options.failOperation, allowQuarantine: true,
-		// SI-189: a non-proven resolution carries no data item — an honest
+		// SI-194: a non-proven resolution carries no data item — an honest
 		// owner denying this ref does not fabricate one.
 		resolution: sealedexec.ContextResolution{
 			Verification: sealedexec.Verification{State: contextcompile.ResolutionUnproven, Failure: sealedexec.FailureUnproven, Witnesses: []string{"fixture context unavailable"}},
@@ -1495,7 +1495,7 @@ func TestClaudeBuiltBinaryLifecycle_Behavioral(t *testing.T) {
 		assertClaudeChildRevisionBinding(t, run)
 	})
 
-	// SI-181: Amendment 002 §3 (as annotated 2026-09-06) also accepts a probe
+	// SI-186: Amendment 002 §3 (as annotated 2026-09-06) also accepts a probe
 	// line carrying the real Claude Code CLI's exact product suffix; the
 	// sealed launch must proceed identically to the bare-form probe above.
 	t.Run("sealed_start_accepts_the_claude_code_suffixed_version_probe", func(t *testing.T) {
@@ -1503,7 +1503,7 @@ func TestClaudeBuiltBinaryLifecycle_Behavioral(t *testing.T) {
 		assertClaudeSuccessfulLifecycle(t, run)
 	})
 
-	// SI-182: the real Claude Code CLI 2.1.261 emits system/init and
+	// SI-187: the real Claude Code CLI 2.1.261 emits system/init and
 	// system/api_retry members Amendment 002 §5's v1 tables do not list
 	// (measured offline by the F12 canary track, 2026-09-06). The sealed run
 	// must tolerate them, record their exact sorted dotted paths in the
@@ -1539,7 +1539,7 @@ func TestClaudeBuiltBinaryLifecycle_Behavioral(t *testing.T) {
 		}
 	})
 
-	// SI-185: the real Claude Code CLI 2.1.261 emits one assistant frame per
+	// SI-190: the real Claude Code CLI 2.1.261 emits one assistant frame per
 	// content block, every frame of the one message carrying the same
 	// message.id (F12 canary flight 5, 2026-09-07). The sealed run must
 	// still complete, continuing the block index across the two frames
@@ -1566,7 +1566,7 @@ func TestClaudeBuiltBinaryLifecycle_Behavioral(t *testing.T) {
 		}
 	})
 
-	// SI-187: the real Claude Code CLI 2.1.261 emits further informational
+	// SI-192: the real Claude Code CLI 2.1.261 emits further informational
 	// frame families in an ordinary run — system/thinking_tokens right after
 	// init, before the first tool call (the exact shape that interrupted the
 	// F12 canary's eighth flight), and tool_progress mid-stream. The sealed
@@ -1610,7 +1610,7 @@ func TestClaudeBuiltBinaryLifecycle_Behavioral(t *testing.T) {
 		}
 	})
 
-	// SI-188: the real Claude Code CLI 2.1.261 sends a top-level `_meta`
+	// SI-193: the real Claude Code CLI 2.1.261 sends a top-level `_meta`
 	// member (progressToken) beside `name`/`arguments` on EVERY tools/call —
 	// the MCP SDK's request() adds params._meta.progressToken whenever
 	// onprogress is supplied (F12 canary track, 2026-09-07). The sealed run

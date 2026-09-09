@@ -102,7 +102,7 @@ func TestServeHandlerProtocolAndHandlerFailures(t *testing.T) {
 // TestServeHandlerRejectsMalformedEnvelopeBeforeToolDispatch no longer
 // includes an "unknown envelope field" row: that expectation was 548d1c0f's
 // own uncited posture ("Wire sealed execution commands"), not an
-// independently-ratified rule, and it is exactly what SI-188 F1 found
+// independently-ratified rule, and it is exactly what SI-193 F1 found
 // defective one level up from the tools/call params envelope. Tolerating an
 // unknown top-level frame member is now covered, and proven unobservable,
 // by TestServeHandlerToolsCallParamsToleranceReachesTheHandlerUnobserved's
@@ -137,7 +137,7 @@ func TestServeHandlerRejectsMalformedEnvelopeBeforeToolDispatch(t *testing.T) {
 	}
 }
 
-// TestDecodeHandlerCallToleratesUnknownParamsMembers is SI-188's core
+// TestDecodeHandlerCallToleratesUnknownParamsMembers is SI-193's core
 // witness at the decode function itself: Claude Code 2.1.261 sends a
 // `_meta` member (e.g. `{"progressToken":1}`) beside `name`/`arguments` on
 // every tools/call — MCP itself defines `_meta` on every request's params —
@@ -220,7 +220,7 @@ func TestDecodeHandlerCallToleratesUnknownParamsMembers(t *testing.T) {
 }
 
 // TestServeHandlerToolsCallParamsToleranceReachesTheHandlerUnobserved proves
-// the SI-188 tolerance end to end over the real framing (ServeHandler, not
+// the SI-193 tolerance end to end over the real framing (ServeHandler, not
 // just the decode function): a tolerated unknown member reaches
 // handler.Call with EXACTLY the enclosed `arguments` bytes and is not
 // observable anywhere in the written frame — no projection, no digest, no

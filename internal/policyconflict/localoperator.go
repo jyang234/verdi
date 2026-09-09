@@ -4,7 +4,7 @@ import "github.com/jyang234/verdi/internal/governanceprincipal"
 
 // localOperatorDisclosures derives the report-level disclosure a
 // local-operator principal resolution requires (2026-09-05 local-operator
-// disposition design §2.2, ledger SI-178): every report whose actor
+// disposition design §2.2, ledger SI-183): every report whose actor
 // resolutions include one claimed against a profile-declared
 // local-operator trust source carries DisclosureLocalOperatorAsserted —
 // regardless of whether that resolution actually succeeded. A violated or

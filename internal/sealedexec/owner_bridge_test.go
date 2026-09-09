@@ -251,10 +251,10 @@ func TestContextOwnerBridgeMapping(t *testing.T) {
 }
 
 // TestContextOwnerBridgeResolveContextNonProven extends the mapping producer
-// above with SI-189's specific arm: an honest owner's non-proven ref-absent
+// above with SI-194's specific arm: an honest owner's non-proven ref-absent
 // answer — no data item — round-trips through the full public-document
 // bridge into the exact private controller result, the same way
-// TestContextOwnerBridgeMapping proves the proven arm. Before SI-189's
+// TestContextOwnerBridgeMapping proves the proven arm. Before SI-194's
 // contextowner fix, an owner could not construct this public reply at all
 // without fabricating a data item (contextowner's own EncodeReply refused
 // it); this proves the corrected public wire, routed through
@@ -731,7 +731,7 @@ func TestContextOwnerBridgeIsPure(t *testing.T) {
 }
 
 // TestContextOwnerBridgeInstallExpansionV2 is the private/public differential
-// for Task 2A's one authority-added exception to §3.3 (SI-177): the
+// for Task 2A's one authority-added exception to §3.3 (SI-182): the
 // install-expansion request advances to v2 on BOTH sides carrying the
 // requested ref, the request purpose, and the canonical installed data item,
 // while its result and all 21 other request arms stay at the publication base.
