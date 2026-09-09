@@ -72,10 +72,16 @@ const localOperatorStoryTargetDigest = "sha256:6ad39873f652dcbf3bb51232abb9905d9
 // across machines and runs), so `verdi context project` regenerating the
 // DISPOSITION-LESS store always reproduces exactly these two digests.
 // Captured from a real run of this exact fixture content through this
-// exact binary (see the task report for the command).
+// exact binary (see the task report for the command). Re-ratcheted at the
+// 2026-09-09 origin/main integration: the fixture's policy prose cites the
+// local-operator disposition ledger row, and that row was renumbered
+// SI-178 -> SI-183 when wave6's own SI-176..SI-180 landed on main, so the
+// projection of that content necessarily moved. Both values were observed
+// identical across repeated runs, and reverting only that two-word
+// citation edit reproduces the prior pair exactly.
 const (
-	localOperatorWaveManifestDigest = "sha256:7cfd0f0465d3cf90127a9f3db32a7b267bf85aedc72160e3636337a5ec26c5c3"
-	localOperatorWaveAGENTSDigest   = "sha256:8d3687c6d30934efac07210eddc48b9216351c95028d2670c55a269369f8a177"
+	localOperatorWaveManifestDigest = "sha256:a400beb8837afd27ed7fbb712f00c9cd41b28816237a2de4b285b5d769c70b9a"
+	localOperatorWaveAGENTSDigest   = "sha256:4a86cf8d36396bca9273ba9fe3056eb8a96a8aae42bb90fe185cfc17b53f7e58"
 )
 
 // buildLocalOperatorRepoNoDisposition is buildLocalOperatorRepo's (context_

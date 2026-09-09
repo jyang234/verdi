@@ -16,7 +16,7 @@ evidence_source_restrictions: []
 escalation_thresholds: []
 ---
 The solo local-operator profile (2026-09-05 local-operator disposition
-design §2.1, ledger SI-178): one authenticated principal fills every role,
+design §2.1, ledger SI-183): one authenticated principal fills every role,
 with the collapsed separation of duties disclosed by the kernel. Its
 evidence is a bare self-assertion (the checkout's own configured Git
 identity), never independently verified — the resolver mints the

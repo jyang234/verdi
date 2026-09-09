@@ -25,7 +25,7 @@ adapters:
     discovery_filenames: [AGENTS.md]
 ---
 The hermetic local-operator fixture constitution (2026-09-05 local-operator
-disposition design, Task 2, ledger SI-178): selects the local-operator
+disposition design, Task 2, ledger SI-183): selects the local-operator
 profile and registers the governance catalog including the
 policy-disposition-approval transition the design assigns the new trust
 source kind.
