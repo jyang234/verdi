@@ -360,7 +360,7 @@ func TestRenderBoardRegion_PlacardFullHiddenElements(t *testing.T) {
 	if err != nil {
 		t.Fatalf("buildProjection: %v", err)
 	}
-	rendered := renderBoardRegion(p, &boardGitState{})
+	rendered := renderBoardRegion(p, &boardGitState{}, testASDView())
 
 	for _, want := range []string{
 		`data-testid="placard-full-problem"`,
@@ -392,7 +392,7 @@ func TestRenderBoardRegion_PlacardFullHiddenElements(t *testing.T) {
 	if err != nil {
 		t.Fatalf("buildProjection (again): %v", err)
 	}
-	if got := renderBoardRegion(again, &boardGitState{}); got != rendered {
+	if got := renderBoardRegion(again, &boardGitState{}, testASDView()); got != rendered {
 		t.Error("renderBoardRegion is not deterministic across identical inputs")
 	}
 }
@@ -409,7 +409,7 @@ func TestRenderBoardRegion_PlacardFullOmittedWhenSectionMissing(t *testing.T) {
 	if err != nil {
 		t.Fatalf("buildProjection: %v", err)
 	}
-	rendered := renderBoardRegion(p, &boardGitState{})
+	rendered := renderBoardRegion(p, &boardGitState{}, testASDView())
 	if !strings.Contains(rendered, `data-testid="placard-full-problem"`) {
 		t.Error("problem placard-full missing even though its section is present")
 	}
@@ -430,7 +430,7 @@ func TestRenderBoardRegion_PlacardFullOmittedWhenSectionMissing(t *testing.T) {
 // nothing about a projection that never populated it.
 func TestRenderBoardRegion_NoPlacardFullWithoutBodyHTML(t *testing.T) {
 	proj := &BoardProjection{Spec: "s", Mode: modeReadOnly, Problem: "p", Outcome: "o"}
-	rendered := renderBoardRegion(proj, &boardGitState{})
+	rendered := renderBoardRegion(proj, &boardGitState{}, testASDView())
 	for _, absent := range []string{"placard-full", `data-testid="placard-full-problem"`, `data-testid="placard-full-outcome"`} {
 		if strings.Contains(rendered, absent) {
 			t.Errorf("rendered board carries %q with no attribute body HTML set", absent)

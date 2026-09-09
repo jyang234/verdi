@@ -64,6 +64,10 @@ test.describe("V1-P6: scratch tier", () => {
 
     await sticky.getByRole("button", { name: "Graduate" }).click();
     await page.getByRole("menuitem", { name: "Open question" }).click();
+    // Wave 6 Task 2: the graduation impact preview confirms the exact
+    // resulting object id before the one typed transaction (F-08).
+    await expect(page.locator("#edge-confirm")).toContainText("Graduate into oq-");
+    await page.locator("#edge-confirm-ok").click();
     await expectAutosaved(page);
 
     // The sticky is gone; a declared object card carries its text now.

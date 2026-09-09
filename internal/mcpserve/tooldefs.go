@@ -1,6 +1,9 @@
 package mcpserve
 
-import "github.com/jyang234/verdi/internal/model"
+import (
+	"github.com/jyang234/verdi/internal/constitutionapp"
+	"github.com/jyang234/verdi/internal/model"
+)
 
 // dataNeverInstructionsNote is 05 §MCP server's normative safety note,
 // carried verbatim into every tool's description (PLAN.md Phase 9:
@@ -41,11 +44,29 @@ func arrOfString(desc string) map[string]any {
 	return map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": desc}
 }
 
-// toolDefs is the "tools/list" result: the nine tools 05 §MCP server's
-// table names, federation boundary respected (verdi serves knowledge
-// artifacts; groundwork serves graph/policy lenses — neither is
-// duplicated here). Every description ends with
-// dataNeverInstructionsNote.
+// constitutionRequestSchemaProperty declares one constitution request
+// envelope's REQUIRED, exact version. The value is pinned as a single-member
+// enum rather than described in prose, so a schema-aware client is refused
+// client-side by the same rule constitutionapp's own decoder enforces
+// server-side (the fail-loud posture obj's additionalProperties: false
+// already establishes for unknown fields).
+func constitutionRequestSchemaProperty(version string) map[string]any {
+	return map[string]any{
+		"type":        "string",
+		"enum":        []string{version},
+		"description": "the request envelope version; must be exactly " + version,
+	}
+}
+
+// toolDefs is the "tools/list" result: 05 §MCP server's original nine
+// tools, plus `experiment` (CSE Wave 5B, SI-145) and the five new ASD
+// tools this file adds for Wave 6 Task 1 — get_design_context,
+// get_design_capabilities, mutate_draft, get_design_provenance, and
+// prepare_design_review (AC-8's exact six-operation surface, of which
+// get_board is the sixth and already existed) — federation boundary
+// respected (verdi serves knowledge artifacts; groundwork serves
+// graph/policy lenses — neither is duplicated here). Every description
+// ends with dataNeverInstructionsNote.
 //
 // Vocabulary (spec/vocabulary-surfaces ac-3; model.DisplayClass's
 // enumeration rule): class words spoken by DESCRIPTION PROSE — tool and
@@ -165,8 +186,73 @@ func toolDefs(mdl *model.Model) []map[string]any {
 			}, "operation", "spike", "experiment", "accepted_head"),
 		},
 		{
+			"name":        "get_design_context",
+			"description": "AI-assisted spec design (ASD, AC-8): the bounded, authoritative material needed to assist with one draft (AC-5) — the current draft, an implements-linked parent feature, any explicitly named child stories, applicable ratified decisions, the spec's declared pinned context references, Verdi-go-derived service/boundary findings, and the context/policy digests. Provenance is deliberately excluded; use get_design_provenance." + dataNeverInstructionsNote,
+			"inputSchema": obj(map[string]any{
+				"ref":           str("a spec ref (kind/name, unpinned) whose bounded design context to return"),
+				"child_stories": arrOfString("optional: already-known child story spec refs to explicitly resolve (never a corpus-wide search)"),
+			}, "ref"),
+		},
+		{
+			"name":        "get_design_capabilities",
+			"description": "ASD (AC-8): declares the active mutation/result schema versions, checkout/branch/HEAD/spec identity, policy digest and design_assistance mode, the resulting permitted operation set, and fixed provenance/review/direct-Markdown posture (AC-3)." + dataNeverInstructionsNote,
+			"inputSchema": obj(map[string]any{
+				"ref": str("a spec ref (kind/name, unpinned) whose capability posture to describe"),
+			}, "ref"),
+		},
+		{
+			"name": "mutate_draft",
+			// vocab:identity — ASD mutation request/field grammar (AC-1's exact wire schema)
+			"description": "ASD (AC-1/AC-8): applies one atomic typed draft-mutation transaction to a spec, using draftmutation's exact verdi.draftmutation/v1 request grammar (schema/spec/base_digest/base_spec_b64/expected/operations/excerpts) plus harness/session. The actor is always minted as a delegated agent — MCP never accepts a caller-supplied actor kind or principal (CO-4). A clean result renders its typed verdi.draftmutation-result/v1 JSON; a stale base digest renders the typed stale-refusal JSON as a tool error; every other refusal is a plain tool error." + dataNeverInstructionsNote,
+			"inputSchema": obj(map[string]any{
+				// vocab:identity — ASD actor/harness field grammar (identity)
+				"harness": str("the calling harness's identifier (e.g. codex, claude-code)"),
+				"session": str("optional session identifier"),
+				// vocab:identity — ASD mutation request-field grammar (identity)
+				"schema":        str("must be exactly verdi.draftmutation/v1"),
+				"spec":          str("the unpinned spec ref (kind/name) to mutate"),
+				"base_digest":   str("the caller's base spec digest (sha256:...)"),
+				"base_spec_b64": str("the exact prior spec bytes, standard base64-encoded"),
+				"expected": map[string]any{
+					"type": "object", "additionalProperties": false,
+					"properties": map[string]any{
+						"checkout": str("expected absolute checkout root"),
+						"branch":   str("expected current branch"),
+						"head":     str("expected full 40-hex current HEAD"),
+					},
+					"required": []string{"checkout", "branch", "head"},
+					// vocab:identity — ASD mutation request-field grammar (identity)
+					"description": "the caller's stale-safe checkout/branch/HEAD assertion",
+				},
+				"operations": map[string]any{
+					"type": "array", "items": map[string]any{"type": "object"},
+					// vocab:identity — ASD closed operation vocabulary (identity)
+					"description": "the ordered typed operation batch (AC-1's closed operation vocabulary)",
+				},
+				"excerpts": map[string]any{
+					"type": "array", "items": map[string]any{"type": "object"},
+					// vocab:identity — ASD provenance excerpt grammar (identity)
+					"description": "optional bounded supporting excerpts to attach to resulting objects (AC-4)",
+				},
+			}, "harness", "schema", "spec", "base_digest", "base_spec_b64", "expected", "operations"),
+		},
+		{
+			"name":        "get_design_provenance",
+			"description": "ASD (AC-4/AC-8): returns the committed, non-authoritative design-provenance sidecar for one spec — every decoded entry, unflattened — only on this explicit request. Never bundled into get_design_context or get_board." + dataNeverInstructionsNote,
+			"inputSchema": obj(map[string]any{
+				"ref": str("a spec ref (kind/name, unpinned) whose provenance sidecar to return"),
+			}, "ref"),
+		},
+		{
+			"name":        "prepare_design_review",
+			"description": "ASD (AC-6/AC-8): derives the semantic review packet (problem/outcome, acceptance criteria, constraints/decisions/open-questions/links/stubs, the semantic diff since the review base, ai-inferred/unresolved provenance flags, and unclassified direct-edit gaps) without changing governance state. This tool cannot mark anything approved, accept a design, or merge a PR — no such operation exists on this server." + dataNeverInstructionsNote,
+			"inputSchema": obj(map[string]any{
+				"ref": str("a spec ref (kind/name, unpinned) whose semantic review packet to derive"),
+			}, "ref"),
+		},
+		{
 			"name":        "add_annotation",
-			"description": "Append a new annotation (verdi.annotation/v1) to the mutable zone — the ONLY write tool on this server. At least one of target or board is required. A target must name a pinned ref (kind/name@commit) that actually resolves; an unresolvable target is rejected." + dataNeverInstructionsNote,
+			"description": "Append a new annotation (verdi.annotation/v1) to the mutable zone — the only ANNOTATION write tool on this server. Since Wave 6 Task 1 it is no longer the server's only write tool at all: mutate_draft is the typed draft-mutation write path (AC-1/AC-8), and these two are the complete write surface. At least one of target or board is required. A target must name a pinned ref (kind/name@commit) that actually resolves; an unresolvable target is rejected." + dataNeverInstructionsNote,
 			"inputSchema": obj(map[string]any{
 				"author":         str("author handle (human) or agent/model id"),
 				"target_ref":     str("optional: a pinned artifact ref (kind/name@commit) this annotation anchors to"),
@@ -178,6 +264,59 @@ func toolDefs(mdl *model.Model) []map[string]any {
 				"type":           str("comment | question | decision-needed | agent-task"),
 				"body":           str("the annotation's text body"),
 			}, "author", "type", "body"),
+		},
+		{
+			"name":        "constitution_inspect",
+			"description": "Constitution (Wave 6 Task 3; spec/context-integrity-v2 AC-1/AC-2): the accepted and proposed constitution states at their exact Git identities — every source layer (policy/overlay/exemption/disposition, with owners/scope/digest) and the complete effective rule ledger, unflattened. Takes no field beyond the required request envelope version." + dataNeverInstructionsNote,
+			"inputSchema": obj(map[string]any{
+				"schema": constitutionRequestSchemaProperty(constitutionapp.InspectRequestSchema),
+			}, "schema"),
+		},
+		{
+			"name":        "constitution_validate",
+			"description": "Constitution (Wave 6 Task 3): strict-decodes and cross-validates the proposed constitution store, reporting a three-valued proof outcome (proven, or a typed corrupted-policy/not-adopted disclosure) — never a second decode or validation pass of internal/policyauthority's own. Takes no field beyond the required request envelope version." + dataNeverInstructionsNote,
+			"inputSchema": obj(map[string]any{
+				"schema": constitutionRequestSchemaProperty(constitutionapp.ValidateRequestSchema),
+			}, "schema"),
+		},
+		{
+			"name":        "constitution_impact_review",
+			"description": "Constitution (Wave 6 Task 3; AC-3/AC-6): diffs the accepted and proposed constitution layers, derives the complete registered-consumer union from both exact-tree inventories, and evaluates every canonical member through the existing policy-conflict path. Caller targets are supplemental previews only: they cannot remove a registered consumer, establish completeness, or improve submission readiness. This tool never merges, approves, or writes anything — constitution_propose and constitution_submit_preparation have no MCP tool at all." + dataNeverInstructionsNote,
+			"inputSchema": obj(map[string]any{
+				"schema": constitutionRequestSchemaProperty(constitutionapp.ImpactReviewRequestSchema),
+				"targets": map[string]any{
+					"type": "array",
+					"items": map[string]any{
+						"type": "object", "additionalProperties": false,
+						"properties": map[string]any{
+							"spec":  str("the accepted spec ref this governed target compiles context for"),
+							"phase": str("design | build | review"),
+							"adapter": map[string]any{
+								"type": "object", "additionalProperties": false,
+								"properties": map[string]any{
+									"id":      str("the constitution-registered adapter id"),
+									"version": str("the constitution-registered adapter version"),
+								},
+								"required":    []string{"id", "version"},
+								"description": "the harness adapter this target compiles for",
+							},
+							"scope": map[string]any{
+								"type": "object", "additionalProperties": false,
+								"properties": map[string]any{
+									"phases":       arrOfString("declared phase scope; [] is unconstrained"),
+									"environments": arrOfString("declared environment scope; [] is unconstrained"),
+									"paths":        arrOfString("declared path scope; [] is unconstrained"),
+									"refs":         arrOfString("declared ref scope; [] is unconstrained"),
+								},
+								"required":    []string{"phases", "environments", "paths", "refs"},
+								"description": "the target's own declared scope (every dimension explicit, never omitted)",
+							},
+						},
+						"required": []string{"spec", "phase", "adapter", "scope"},
+					},
+					"description": "optional supplemental preview targets; canonical coverage always comes from the exact-tree registered-consumer inventories",
+				},
+			}, "schema"),
 		},
 	}
 }

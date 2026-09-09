@@ -16,16 +16,21 @@ const (
 	digestC = "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
 )
 
+// validEntry is this package's shared WRITER fixture. It is a v2 entry
+// because v2 is the only schema any writer may emit: Schema (v1) is strict
+// decode-only history and Seal/EncodeEntry refuse it. Historical v1 coverage
+// lives in entryversion_test.go, pinned as literal committed bytes.
 func validEntry(t *testing.T) Entry {
 	t.Helper()
+	resolved := Policy{State: PolicyResolved, Digest: digestC}
 	e := Entry{
-		Schema:         Schema,
+		Schema:         SchemaV2,
 		Spec:           "spec/widget",
 		PreviousDigest: digestA,
 		ResultDigest:   digestB,
 		Attribution:    governanceprincipal.NewUnauthenticatedAttribution(),
 		Harness:        "codex",
-		PolicyDigest:   digestC,
+		Policy:         &resolved,
 		Context:        UnavailableContext(),
 		Operations: []Operation{{
 			Op:     OpSetProblem,
@@ -62,7 +67,7 @@ func TestEntryStrictDecode(t *testing.T) {
 	}{
 		{"unknown envelope field", strings.Replace(string(raw), `"schema":`, `"mystery":true,"schema":`, 1), "mystery"},
 		{"trailing data", string(raw) + `{}`, "trailing"},
-		{"duplicate envelope key", strings.Replace(string(raw), `"schema":`, `"schema":"verdi.design-provenance/v1","schema":`, 1), "duplicate"},
+		{"duplicate envelope key", strings.Replace(string(raw), `"schema":`, `"schema":"`+SchemaV2+`","schema":`, 1), "duplicate"},
 		{"unknown operation field", strings.Replace(string(raw), `"text":"customers`, `"surprise":true,"text":"customers`, 1), "surprise"},
 		{"noncanonical whitespace", strings.Replace(string(bytes.TrimSuffix(raw, []byte("\n"))), `{`, `{ `, 1), "canonical"},
 		{"optional null", strings.Replace(string(bytes.TrimSuffix(raw, []byte("\n"))), `"spec":`, `"session":null,"spec":`, 1), "canonical"},

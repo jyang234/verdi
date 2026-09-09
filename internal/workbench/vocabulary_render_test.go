@@ -60,7 +60,7 @@ func TestBoardRender_ClassTagModelVocabulary(t *testing.T) {
 	}
 	proj.applyModelVocabulary(vocabTestModel())
 
-	html := renderBoardRegion(proj, &boardGitState{})
+	html := renderBoardRegion(proj, &boardGitState{}, testASDView())
 	if !strings.Contains(html, `<span class="case-class-tag case-class-tag--feature" data-testid="case-class-tag">Initiative</span>`) {
 		t.Fatalf("board region = %q, want the class tag to read Initiative with the id kept in its CSS class", html)
 	}
@@ -82,7 +82,7 @@ func TestBoardRender_ClassTagFallbackUnchanged(t *testing.T) {
 		Problem: "p",
 		Outcome: "o",
 	}
-	plain := renderBoardRegion(proj, &boardGitState{})
+	plain := renderBoardRegion(proj, &boardGitState{}, testASDView())
 
 	enriched := &BoardProjection{
 		Spec:    "vocab-probe",
@@ -94,7 +94,7 @@ func TestBoardRender_ClassTagFallbackUnchanged(t *testing.T) {
 		Outcome: "o",
 	}
 	enriched.applyModelVocabulary(model.Canonical())
-	if got := renderBoardRegion(enriched, &boardGitState{}); got != plain {
+	if got := renderBoardRegion(enriched, &boardGitState{}, testASDView()); got != plain {
 		t.Fatal("canonical model changed the rendered board region; the no-rename path must be byte-identical")
 	}
 	if !strings.Contains(plain, `data-testid="case-class-tag">feature`) {
@@ -115,7 +115,7 @@ func TestBoardRender_TerminalStatusBadgeModelVocabulary(t *testing.T) {
 	}
 	proj.applyModelVocabulary(vocabTestModel())
 
-	page, err := renderBoardSpecPage(proj, &boardGitState{})
+	page, err := renderBoardSpecPage(proj, &boardGitState{}, testASDView())
 	if err != nil {
 		t.Fatalf("renderBoardSpecPage: %v", err)
 	}
@@ -170,7 +170,7 @@ func vocabProseProjection(mode boardModeKind) *BoardProjection {
 func TestBoardRender_ClassWordProseModelVocabulary(t *testing.T) {
 	proj := vocabProseProjection(modeAuthoring)
 	proj.applyModelVocabulary(vocabTestModel())
-	html := renderBoardRegion(proj, &boardGitState{})
+	html := renderBoardRegion(proj, &boardGitState{}, testASDView())
 
 	for _, want := range []string{
 		// Stub-card kind labels (finding site boardspecrender.go:358).
@@ -255,7 +255,7 @@ func TestBoardRender_CreateReceiptVerbModelVocabulary(t *testing.T) {
 
 	renamed := receiptProj()
 	renamed.applyModelVocabulary(vocabTestModel())
-	page, err := renderBoardSpecPage(renamed, &boardGitState{})
+	page, err := renderBoardSpecPage(renamed, &boardGitState{}, testASDView())
 	if err != nil {
 		t.Fatalf("renderBoardSpecPage: %v", err)
 	}
@@ -266,7 +266,7 @@ func TestBoardRender_CreateReceiptVerbModelVocabulary(t *testing.T) {
 		t.Fatal("receipt tracker sentence still speaks the retired bare verb accept")
 	}
 
-	plainPage, err := renderBoardSpecPage(receiptProj(), &boardGitState{})
+	plainPage, err := renderBoardSpecPage(receiptProj(), &boardGitState{}, testASDView())
 	if err != nil {
 		t.Fatalf("renderBoardSpecPage plain: %v", err)
 	}
@@ -306,7 +306,7 @@ func TestBoardRender_ObligationYarnTitleModelVocabulary(t *testing.T) {
 		Stickies: []scratchStickyView{{ID: "a-03", Type: "comment", Body: "c"}},
 	}
 	proj.applyModelVocabulary(vocabTestModel())
-	html := renderBoardRegion(proj, &boardGitState{})
+	html := renderBoardRegion(proj, &boardGitState{}, testASDView())
 	if !strings.Contains(html, `title="drag to a Change Request acceptance criterion to author its evidence obligation"`) {
 		t.Fatalf("obligation yarn handle title not resolved; got:\n%s", html)
 	}
@@ -317,11 +317,11 @@ func TestBoardRender_ObligationYarnTitleModelVocabulary(t *testing.T) {
 // region byte-identically to no model at all — today's literals, including
 // every hand-written plural.
 func TestBoardRender_RegionParityNoRenames(t *testing.T) {
-	plain := renderBoardRegion(vocabProseProjection(modeAuthoring), &boardGitState{})
+	plain := renderBoardRegion(vocabProseProjection(modeAuthoring), &boardGitState{}, testASDView())
 
 	enriched := vocabProseProjection(modeAuthoring)
 	enriched.applyModelVocabulary(model.Canonical())
-	if got := renderBoardRegion(enriched, &boardGitState{}); got != plain {
+	if got := renderBoardRegion(enriched, &boardGitState{}, testASDView()); got != plain {
 		t.Fatal("canonical model changed the rendered board region; the no-rename path must be byte-identical")
 	}
 	for _, want := range []string{
@@ -343,7 +343,7 @@ func TestBoardRender_RegionParityNoRenames(t *testing.T) {
 func TestBoardRender_PageWordsPayloadModelVocabulary(t *testing.T) {
 	proj := vocabProseProjection(modeAuthoring)
 	proj.applyModelVocabulary(vocabTestModel())
-	page, err := renderBoardSpecPage(proj, &boardGitState{})
+	page, err := renderBoardSpecPage(proj, &boardGitState{}, testASDView())
 	if err != nil {
 		t.Fatalf("renderBoardSpecPage: %v", err)
 	}
@@ -363,13 +363,13 @@ func TestBoardRender_PageWordsPayloadModelVocabulary(t *testing.T) {
 
 	// Parity: with no renames the page is byte-identical to no model at
 	// all — no words key, today's consequence literals.
-	plainPage, err := renderBoardSpecPage(vocabProseProjection(modeAuthoring), &boardGitState{})
+	plainPage, err := renderBoardSpecPage(vocabProseProjection(modeAuthoring), &boardGitState{}, testASDView())
 	if err != nil {
 		t.Fatalf("renderBoardSpecPage plain: %v", err)
 	}
 	canonical := vocabProseProjection(modeAuthoring)
 	canonical.applyModelVocabulary(model.Canonical())
-	canonicalPage, err := renderBoardSpecPage(canonical, &boardGitState{})
+	canonicalPage, err := renderBoardSpecPage(canonical, &boardGitState{}, testASDView())
 	if err != nil {
 		t.Fatalf("renderBoardSpecPage canonical: %v", err)
 	}

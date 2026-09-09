@@ -12,6 +12,7 @@ import (
 const (
 	routeBoardPage      = "/board/spec/{name}"
 	routeBoardFragment  = "/board/spec/{name}/fragment"
+	routeBoardSnapshot  = "/board/spec/{name}/snapshot"
 	routeBoardAPI       = "/board/spec/{name}/api/{action}"
 	routeBoardPeek      = "/board/spec/{name}/peek"
 	routeBoardPinSearch = "/board/spec/{name}/pinsearch"
@@ -33,6 +34,7 @@ func boardSpecRoutes() []boardSpecRoute {
 	return []boardSpecRoute{
 		{suffix: routeBoardPage, handler: (*boardSpecServer).boardSpecPageHandler},
 		{suffix: routeBoardFragment, handler: (*boardSpecServer).boardSpecFragmentHandler},
+		{suffix: routeBoardSnapshot, handler: (*boardSpecServer).boardSpecSnapshotHandler, json: true},
 		{suffix: routeBoardAPI, handler: (*boardSpecServer).boardSpecAPIHandler, json: true},
 		{suffix: routeBoardPeek, handler: (*boardSpecServer).boardPeekHandler},
 		{suffix: routeBoardPinSearch, handler: (*boardSpecServer).boardPinSearchHandler},
@@ -134,7 +136,7 @@ func RegisterRoutesWithHome(mux *http.ServeMux, root string, deps Deps, home Hom
 	// design branch's managed worktree (spec/draft-boards ac-1/dc-1: the
 	// existing board server rooted at the branch's tree, never a second
 	// board implementation).
-	bs := &boardSpecServer{root: root, feed: deps.CommentFeed, reviewUnavailable: deps.ReviewUnavailable, supersession: deps.SupersessionCandidates, model: deps.Model}
+	bs := &boardSpecServer{root: root, feed: deps.CommentFeed, reviewUnavailable: deps.ReviewUnavailable, supersession: deps.SupersessionCandidates, model: deps.Model, design: deps.Design}
 	for _, rt := range boardSpecRoutes() {
 		mux.HandleFunc(rt.suffix, rt.handler(bs))
 	}
@@ -184,6 +186,7 @@ func RegisterRoutesWithHome(mux *http.ServeMux, root string, deps Deps, home Hom
 	mux.HandleFunc("/assets/mermaid.min.js", mermaidHandler())
 	mux.HandleFunc("/assets/board.js", boardJSHandler())
 	mux.HandleFunc("/assets/boardspec.js", boardSpecJSHandler())
+	mux.HandleFunc("/assets/boardspecasd.js", boardSpecASDJSHandler())
 	mux.HandleFunc("/assets/boarddiagram.js", boardDiagramJSHandler())
 	mux.HandleFunc("/assets/readiness.js", readinessJSHandler())
 }

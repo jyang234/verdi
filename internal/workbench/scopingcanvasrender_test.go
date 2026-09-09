@@ -82,7 +82,7 @@ func TestScopingCanvas_StubViewPositions(t *testing.T) {
 // are GONE where it used to prove they rendered.
 func TestScopingCanvas_StubCardsRender(t *testing.T) {
 	p := scopingRenderProjection(t, modeReadOnly)
-	body := renderBoardRegion(p, &boardGitState{})
+	body := renderBoardRegion(p, &boardGitState{}, testASDView())
 
 	for _, want := range []string{
 		`data-testid="stub-card-plain-one"`,
@@ -110,7 +110,7 @@ func TestScopingCanvas_StubCardsRender(t *testing.T) {
 		}
 	}
 	// Positions are inline like every card's.
-	if !strings.Contains(body, `data-testid="stub-card-plain-one" data-stub="plain-one" style="left:952px;top:40px"`) {
+	if !strings.Contains(body, `data-testid="stub-card-plain-one" data-stub="plain-one" data-acs="ac-1" data-resolves="" style="left:952px;top:40px"`) {
 		t.Error("plain-one not rendered at the stubs band's first slot")
 	}
 	// The stubs band wears its tape label (occupied, so in every mode).
@@ -153,7 +153,7 @@ func scopingChipsOf(t *testing.T, body string) []string {
 func TestScopingCanvas_ScopingYarnChips(t *testing.T) {
 	for _, mode := range []boardModeKind{modeAuthoring, modeReview, modeReadOnly} {
 		p := scopingRenderProjection(t, mode)
-		body := renderBoardRegion(p, &boardGitState{})
+		body := renderBoardRegion(p, &boardGitState{}, testASDView())
 		for _, want := range []string{
 			`<div class="yarn-chip yarn-chip--scoping" data-edge-type="covers" data-from="stub:plain-one" data-to="ac-1" data-layer="scoping">`,
 			`<div class="yarn-chip yarn-chip--scoping" data-edge-type="resolves" data-from="stub:spike-one" data-to="oq-1" data-layer="scoping">`,
@@ -175,7 +175,7 @@ func TestScopingCanvas_ScopingYarnChips(t *testing.T) {
 func TestScopingCanvas_ScopingEdgesCarryNoAffordances(t *testing.T) {
 	for _, mode := range []boardModeKind{modeAuthoring, modeReview, modeReadOnly} {
 		p := scopingRenderProjection(t, mode)
-		body := renderBoardRegion(p, &boardGitState{})
+		body := renderBoardRegion(p, &boardGitState{}, testASDView())
 		chips := scopingChipsOf(t, body)
 		if len(chips) != 3 {
 			t.Fatalf("%s: found %d scoping chips, want 3", mode, len(chips))
@@ -200,7 +200,7 @@ func TestScopingCanvas_ScopingEdgesCarryNoAffordances(t *testing.T) {
 // both without collapsing them).
 func TestScopingCanvas_YarnKeyScopingEntries(t *testing.T) {
 	p := scopingRenderProjection(t, modeReadOnly)
-	body := renderBoardRegion(p, &boardGitState{})
+	body := renderBoardRegion(p, &boardGitState{}, testASDView())
 	for _, want := range []string{
 		`<li data-layer="scoping" data-edge-type="covers">`,
 		`<li data-layer="scoping" data-edge-type="resolves">`,
@@ -217,7 +217,7 @@ func TestScopingCanvas_YarnKeyScopingEntries(t *testing.T) {
 		Spec: "s", Mode: modeReadOnly,
 		Edges: []edgeView{{Type: "covers", From: "stub:x", To: "ac-1", Layer: "scoping"}},
 	}
-	coversBody := renderBoardRegion(coversOnly, &boardGitState{})
+	coversBody := renderBoardRegion(coversOnly, &boardGitState{}, testASDView())
 	if !strings.Contains(coversBody, `<li data-layer="scoping" data-edge-type="covers">`) {
 		t.Error("covers-only wall lost its covers key entry")
 	}
@@ -233,7 +233,7 @@ func TestScopingCanvas_YarnKeyScopingEntries(t *testing.T) {
 			{Type: "resolves", From: "stub:x", To: "oq-1", Layer: "scoping"},
 		},
 	}
-	bothBody := renderBoardRegion(both, &boardGitState{})
+	bothBody := renderBoardRegion(both, &boardGitState{}, testASDView())
 	if !strings.Contains(bothBody, `<li data-layer="spec" data-edge-type="resolves">`) ||
 		!strings.Contains(bothBody, `<li data-layer="scoping" data-edge-type="resolves">`) {
 		t.Error("spec resolves and scoping resolves collapsed into one key entry")
@@ -253,7 +253,7 @@ func TestScopingCanvas_YarnKeyScopingEntries(t *testing.T) {
 // observation, never a rule).
 func TestScopingCanvas_CoverageChipsAndSmell(t *testing.T) {
 	p := scopingRenderProjection(t, modeReadOnly)
-	body := renderBoardRegion(p, &boardGitState{})
+	body := renderBoardRegion(p, &boardGitState{}, testASDView())
 
 	for _, want := range []string{
 		`data-testid="coverage-ac-1" data-coverage="1"`,
@@ -286,7 +286,7 @@ func TestScopingCanvas_CoverageChipsAndSmell(t *testing.T) {
 	if err != nil {
 		t.Fatalf("buildProjectionFM(story): %v", err)
 	}
-	storyBody := renderBoardRegion(story, &boardGitState{})
+	storyBody := renderBoardRegion(story, &boardGitState{}, testASDView())
 	if strings.Contains(storyBody, "coverage-chip") {
 		t.Error("a story wall wears coverage chips")
 	}
@@ -304,7 +304,7 @@ func TestScopingCanvas_CoverageChipsCountDistinctStubs(t *testing.T) {
 	if err != nil {
 		t.Fatalf("buildProjection: %v", err)
 	}
-	body := renderBoardRegion(p, &boardGitState{})
+	body := renderBoardRegion(p, &boardGitState{}, testASDView())
 
 	for _, want := range []string{
 		`data-testid="coverage-ac-1" data-coverage="1"`,
@@ -337,7 +337,7 @@ func TestScopingCanvas_StubZoneLabelClassAware(t *testing.T) {
 	if err != nil {
 		t.Fatalf("buildProjection: %v", err)
 	}
-	body := renderBoardRegion(feature, &boardGitState{})
+	body := renderBoardRegion(feature, &boardGitState{}, testASDView())
 	if !strings.Contains(body, `zone-label--empty" data-testid="zone-label-stub"`) {
 		t.Error("feature authoring wall missing the empty stubs-band invitation")
 	}
@@ -346,7 +346,7 @@ func TestScopingCanvas_StubZoneLabelClassAware(t *testing.T) {
 	if err != nil {
 		t.Fatalf("buildProjection: %v", err)
 	}
-	storyBody := renderBoardRegion(story, &boardGitState{})
+	storyBody := renderBoardRegion(story, &boardGitState{}, testASDView())
 	if strings.Contains(storyBody, `data-testid="zone-label-stub"`) {
 		t.Error("story wall labels a stubs band it can never file into")
 	}
@@ -374,7 +374,7 @@ func TestScopingCanvas_ProtoStickyAffordances(t *testing.T) {
 	if err != nil {
 		t.Fatalf("buildProjection: %v", err)
 	}
-	body := renderBoardRegion(p, &boardGitState{})
+	body := renderBoardRegion(p, &boardGitState{}, testASDView())
 
 	for _, want := range []string{
 		`sticky--story`,
@@ -421,7 +421,7 @@ func TestScopingCanvas_AttributionThreadHasNoPickerGraduate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("buildProjection: %v", err)
 	}
-	body := renderBoardRegion(p, &boardGitState{})
+	body := renderBoardRegion(p, &boardGitState{}, testASDView())
 	chipStart := strings.Index(body, `data-annotation-id="`+threadID+`"`)
 	if chipStart < 0 {
 		t.Fatal("attribution thread chip not rendered")
@@ -485,7 +485,7 @@ func TestScopingCanvas_StickyEndpointMintsNoRefCard(t *testing.T) {
 // gate instead of discovering it by refusal.
 func TestScopingCanvas_PayloadCarriesClass(t *testing.T) {
 	p := scopingRenderProjection(t, modeAuthoring)
-	page, err := renderBoardSpecPage(p, &boardGitState{Branch: "design/x"})
+	page, err := renderBoardSpecPage(p, &boardGitState{Branch: "design/x"}, testASDView())
 	if err != nil {
 		t.Fatalf("renderBoardSpecPage: %v", err)
 	}
@@ -503,7 +503,7 @@ func TestScopingCanvas_InstantiateAffordance(t *testing.T) {
 	if p.Status != "accepted-pending-build" {
 		t.Fatalf("fixture status = %q", p.Status)
 	}
-	body := renderBoardRegion(p, &boardGitState{})
+	body := renderBoardRegion(p, &boardGitState{}, testASDView())
 	for _, want := range []string{
 		`data-testid="instantiate-plain-one"`,
 		`data-instantiate="plain-one"`,
@@ -516,7 +516,7 @@ func TestScopingCanvas_InstantiateAffordance(t *testing.T) {
 		}
 	}
 
-	page, err := renderBoardSpecPage(p, &boardGitState{Branch: "main"})
+	page, err := renderBoardSpecPage(p, &boardGitState{Branch: "main"}, testASDView())
 	if err != nil {
 		t.Fatalf("renderBoardSpecPage: %v", err)
 	}
@@ -531,7 +531,7 @@ func TestScopingCanvas_InstantiateAffordance(t *testing.T) {
 	// rule: implementations build accepted specs only).
 	draft := scopingRenderProjection(t, modeAuthoring)
 	draft.Status = "draft"
-	draftBody := renderBoardRegion(draft, &boardGitState{})
+	draftBody := renderBoardRegion(draft, &boardGitState{}, testASDView())
 	if strings.Contains(draftBody, "data-instantiate") {
 		t.Error("a draft wall offers instantiate")
 	}
@@ -620,7 +620,7 @@ func TestScopingCanvas_CommittedFixturesRenderStubCards(t *testing.T) {
 			if err != nil {
 				t.Fatalf("buildProjection: %v", err)
 			}
-			body := renderBoardRegion(p, &boardGitState{})
+			body := renderBoardRegion(p, &boardGitState{}, testASDView())
 			for _, slug := range tc.slugs {
 				if !strings.Contains(body, `data-testid="stub-card-`+slug+`"`) {
 					t.Errorf("declared stub %q has no card on the wall", slug)

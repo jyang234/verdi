@@ -510,7 +510,7 @@ func TestRenderBoardRegion_UnservableStoryLink(t *testing.T) {
 			}},
 		}},
 	}
-	html := renderBoardRegion(p, &boardGitState{})
+	html := renderBoardRegion(p, &boardGitState{}, testASDView())
 	if !strings.Contains(html, `data-testid="stub-story-unservable-flx-archived-stub-spec-flx-archived-story"`) {
 		t.Fatalf("unservable card testid missing from rendered board:\n%s", html)
 	}

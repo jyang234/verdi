@@ -37,12 +37,27 @@ import (
 	"golang.org/x/term"
 )
 
-// runDesignVerb dispatches the scaffold `start` and ASD's structured
-// `mutate` adapter; anything else is a usage error.
+// designVerbUsage is the one usage line every unrecognized/absent `design`
+// subcommand prints. Wave 6 Task 1 adds board|context|capabilities|
+// provenance|review — the CLI-equivalent surface AC-8 describes ("the CLI
+// exposes equivalent structured commands") for designapp's five
+// non-mutation operations — as new subcommands inside this SAME existing
+// `design` namespace; no new top-level verb is added, so
+// internal/specalign's CLI-verb inventory (top-level only) needs no
+// change.
+const designVerbUsage = "usage: verdi design start [<ref>] --kind feature|story --name <name> | " + // vocab:identity — CLI usage/flag grammar (--kind enum values, identity)
+	"verdi design mutate --request <path|-> --harness <id> [--session <id>] | " +
+	"verdi design board <spec-ref> | verdi design context <spec-ref> [--child-story <ref>]... | " + // vocab:identity — CLI usage/flag grammar (--child-story flag name, identity)
+	"verdi design capabilities <spec-ref> | verdi design provenance <spec-ref> | verdi design review <spec-ref>"
+
+// runDesignVerb dispatches the scaffold `start` adapter, ASD's structured
+// `mutate` adapter, and the five read-only ASD adapters
+// (board/context/capabilities/provenance/review); anything else is a
+// usage error.
 func runDesignVerb(args []string, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
 		// vocab:identity — CLI usage/flag grammar (--kind enum values, identity)
-		fmt.Fprintln(stderr, "usage: verdi design start [<ref>] --kind feature|story --name <name> | verdi design mutate --request <path|-> --harness <id> [--session <id>]")
+		fmt.Fprintln(stderr, designVerbUsage)
 		return 2
 	}
 	switch args[0] {
@@ -50,9 +65,19 @@ func runDesignVerb(args []string, stdout, stderr io.Writer) int {
 		return cmdDesignStart(args[1:], stdout, stderr)
 	case "mutate":
 		return cmdDesignMutate(args[1:], stdout, stderr)
+	case "board":
+		return cmdDesignBoard(args[1:], stdout, stderr)
+	case "context":
+		return cmdDesignContext(args[1:], stdout, stderr)
+	case "capabilities":
+		return cmdDesignCapabilities(args[1:], stdout, stderr)
+	case "provenance":
+		return cmdDesignProvenance(args[1:], stdout, stderr)
+	case "review":
+		return cmdDesignReview(args[1:], stdout, stderr)
 	default:
 		// vocab:identity — CLI usage/flag grammar (--kind enum values, identity)
-		fmt.Fprintln(stderr, "usage: verdi design start [<ref>] --kind feature|story --name <name> | verdi design mutate --request <path|-> --harness <id> [--session <id>]")
+		fmt.Fprintln(stderr, designVerbUsage)
 		return 2
 	}
 }

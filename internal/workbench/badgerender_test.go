@@ -67,7 +67,7 @@ func TestRenderBadges_ChipsAndStamps(t *testing.T) {
 	for _, mode := range []boardModeKind{modeAuthoring, modeReview, modeReadOnly} {
 		t.Run(string(mode), func(t *testing.T) {
 			p := badgeRenderProjection(mode)
-			html := renderBoardRegion(p, &boardGitState{Branch: "design/x", DefaultBranch: "main"})
+			html := renderBoardRegion(p, &boardGitState{Branch: "design/x", DefaultBranch: "main"}, testASDView())
 
 			// The decision card's chip lives INSIDE that card's element.
 			card := extractElement(t, html, `data-testid="card-dc-1"`)
@@ -131,7 +131,7 @@ func TestRenderBadges_NoBadgesLeavesMarkupUntouched(t *testing.T) {
 	p.Cards[0].Badges = nil
 	p.StubViews[0].Badges = nil
 	p.CaseFileBadges = nil
-	html := renderBoardRegion(p, &boardGitState{})
+	html := renderBoardRegion(p, &boardGitState{}, testASDView())
 	for _, forbidden := range []string{"badge-chip", "case-stamp", "card-badges"} {
 		if strings.Contains(html, forbidden) {
 			t.Errorf("badge-free wall still renders %q", forbidden)
@@ -149,7 +149,7 @@ func TestRenderBadges_EscapesHostileLabel(t *testing.T) {
 	p := badgeRenderProjection(modeReadOnly)
 	p.Cards[0].Badges[0].Label = `"><script>alert(1)</script>`
 	p.Cards[0].Badges[0].Records = []string{`"><script>alert(1)</script>`}
-	html := renderBoardRegion(p, &boardGitState{})
+	html := renderBoardRegion(p, &boardGitState{}, testASDView())
 	if strings.Contains(html, "<script>") {
 		t.Fatalf("hostile badge label reached the markup unescaped:\n%s", html)
 	}

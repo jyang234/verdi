@@ -112,10 +112,26 @@ func (s *Server) callTool(ctx context.Context, params json.RawMessage) map[strin
 		return s.Backend.ListTasks(ctx, call.Arguments)
 	case "get_board":
 		return s.Backend.GetBoard(ctx, call.Arguments)
+	case "get_design_context":
+		return s.Backend.GetDesignContext(ctx, call.Arguments)
+	case "get_design_capabilities":
+		return s.Backend.GetDesignCapabilities(ctx, call.Arguments)
+	case "mutate_draft":
+		return s.Backend.MutateDraft(ctx, call.Arguments)
+	case "get_design_provenance":
+		return s.Backend.GetDesignProvenance(ctx, call.Arguments)
+	case "prepare_design_review":
+		return s.Backend.PrepareDesignReview(ctx, call.Arguments)
 	case "add_annotation":
 		return s.Backend.AddAnnotation(ctx, call.Arguments)
 	case "experiment":
 		return s.Backend.Experiment(ctx, call.Arguments)
+	case "constitution_inspect":
+		return s.Backend.ConstitutionInspect(ctx, call.Arguments)
+	case "constitution_validate":
+		return s.Backend.ConstitutionValidate(ctx, call.Arguments)
+	case "constitution_impact_review":
+		return s.Backend.ConstitutionImpactReview(ctx, call.Arguments)
 	default:
 		return toolError(fmt.Sprintf("unknown tool: %q", call.Name))
 	}

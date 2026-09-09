@@ -279,6 +279,39 @@ var showcaseCoverage = map[string][]coverageEvidence{
 	// over real showcase content).
 	"mcp:experiment": {goE2E("internal/showcasealign/mcp_showcase_test.go")},
 
+	// mcp:get_design_context, mcp:get_design_capabilities,
+	// mcp:get_design_provenance, mcp:prepare_design_review,
+	// mcp:mutate_draft (ASD, AC-8, Wave 6 Task 1): the asdShowcase
+	// subtests in mcp_showcase_test.go drive all five against the same
+	// provisioned examples/showcase store, over spec/stale-decline — its
+	// richest committed feature. examples/showcase carries no
+	// .verdi/policy/ constitution tree and no design/<spec> branch at all
+	// (the same genuine, disclosed facts cli:context's and
+	// mcp:experiment's own mappings already lean on), so four of the five
+	// prove the real binary's typed refusal against real showcase content
+	// rather than a successful mutation the corpus cannot support; only
+	// get_design_provenance succeeds cleanly, since the corpus predates
+	// ASD's provenance sidecar and genuinely has none to report. See that
+	// file's own doc comment for the exact classification/code proven for
+	// each.
+	"mcp:get_design_context":      {goE2E("internal/showcasealign/mcp_showcase_test.go")},
+	"mcp:get_design_capabilities": {goE2E("internal/showcasealign/mcp_showcase_test.go")},
+	"mcp:get_design_provenance":   {goE2E("internal/showcasealign/mcp_showcase_test.go")},
+	"mcp:prepare_design_review":   {goE2E("internal/showcasealign/mcp_showcase_test.go")},
+	"mcp:mutate_draft":            {goE2E("internal/showcasealign/mcp_showcase_test.go")},
+
+	// mcp:constitution_inspect, mcp:constitution_validate,
+	// mcp:constitution_impact_review (Wave 6 Task 3, spec/context-
+	// integrity-v2 AC-1/AC-2/AC-3): driven against the same provisioned
+	// showcase store, which adopts no .verdi/policy/ constitution tree —
+	// all three prove the real clean not-adopted disclosure rather than an
+	// error, since absence of a constitution is a proven fact for these
+	// operations, never a fault. See mcp_showcase_test.go's own doc
+	// comment on these subtests for the exact assertion.
+	"mcp:constitution_inspect":       {goE2E("internal/showcasealign/mcp_showcase_test.go")},
+	"mcp:constitution_validate":      {goE2E("internal/showcasealign/mcp_showcase_test.go")},
+	"mcp:constitution_impact_review": {goE2E("internal/showcasealign/mcp_showcase_test.go")},
+
 	// --- Workbench surfaces ---
 	"wb:board":                {playwright("10-board-projection.spec.ts")},
 	"wb:board-scoping-canvas": {playwright("30-board-scoping-canvas.spec.ts")},

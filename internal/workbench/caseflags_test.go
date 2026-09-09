@@ -109,11 +109,11 @@ func (f fakeCandidateLoader) LoadCandidates(ctx context.Context, featureRef, spe
 func renderCaseFlagsBoard(t *testing.T, root, name string, loader wallbadge.SupersessionCandidateLoader) (*BoardProjection, string) {
 	t.Helper()
 	s := &boardSpecServer{root: root, supersession: loader}
-	proj, git, _, err := s.loadBoard(context.Background(), name)
+	proj, git, _, _, err := s.loadBoard(context.Background(), name)
 	if err != nil {
 		t.Fatalf("loadBoard: %v", err)
 	}
-	return proj, renderBoardRegion(proj, git)
+	return proj, renderBoardRegion(proj, git, testASDView())
 }
 
 // TestCaseFileStamps_SpecStaleFlagged is the ac-1 obligation's outcome
@@ -365,7 +365,7 @@ func TestRenderCaseDisclosures_NoHeaderFallsBackToNotices(t *testing.T) {
 		Class:               "story",
 		CaseFileDisclosures: []string{disclosure.Render(disclosure.PendingSupersessionNoForge())},
 	}
-	html := renderBoardRegion(p, &boardGitState{})
+	html := renderBoardRegion(p, &boardGitState{}, testASDView())
 	if strings.Contains(html, "board-placards") {
 		t.Fatalf("fixture grew a case-file header; the fallback path is untested:\n%s", html)
 	}
@@ -388,7 +388,7 @@ func TestRenderCaseDisclosures_EscapesHostileText(t *testing.T) {
 		Outcome:             "o",
 		CaseFileDisclosures: []string{`"><script>alert(1)</script>`},
 	}
-	html := renderBoardRegion(p, &boardGitState{Branch: "design/x", DefaultBranch: "main"})
+	html := renderBoardRegion(p, &boardGitState{Branch: "design/x", DefaultBranch: "main"}, testASDView())
 	if strings.Contains(html, "<script>") {
 		t.Fatalf("hostile disclosure text reached the markup unescaped:\n%s", html)
 	}

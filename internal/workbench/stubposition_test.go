@@ -94,14 +94,14 @@ func TestBoardSpec_Position_Stub_Happy(t *testing.T) {
 		t.Errorf("layout.json missing the stored stub position: %s", got)
 	}
 
-	if !strings.Contains(getBoard(t, h, stubDragName).Body.String(), `data-testid="stub-card-borrower-update-api" data-stub="borrower-update-api" style="left:700px;top:300px"`) {
+	if !strings.Contains(getBoard(t, h, stubDragName).Body.String(), `data-testid="stub-card-borrower-update-api" data-stub="borrower-update-api" data-acs="ac-1" data-resolves="" style="left:700px;top:300px"`) {
 		body := getBoard(t, h, stubDragName).Body.String()
 		t.Errorf("stored stub position does not render verbatim:\n%s", body)
 	}
 
 	// Reload-determinism: a fresh projection reproduces the exact stored
 	// spot (the same property already proven for object cards).
-	proj, _, _, err := (&boardSpecServer{root: root}).loadBoard(context.Background(), stubDragName)
+	proj, _, _, _, err := (&boardSpecServer{root: root}).loadBoard(context.Background(), stubDragName)
 	if err != nil {
 		t.Fatal(err)
 	}

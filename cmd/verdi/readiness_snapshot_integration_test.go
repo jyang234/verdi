@@ -11,9 +11,7 @@ import (
 	"github.com/jyang234/verdi/internal/artifact"
 	"github.com/jyang234/verdi/internal/boardio"
 	"github.com/jyang234/verdi/internal/contextcompile"
-	"github.com/jyang234/verdi/internal/designprovenance"
 	"github.com/jyang234/verdi/internal/fixturegit"
-	"github.com/jyang234/verdi/internal/governanceprincipal"
 	"github.com/jyang234/verdi/internal/policyconflict"
 	"github.com/jyang234/verdi/internal/readinesspilot"
 	"github.com/jyang234/verdi/internal/store"
@@ -71,11 +69,7 @@ func TestReadinessSnapshotProvenanceMutationAndBoard(t *testing.T) {
 
 	t.Run("direct Markdown gap stays unproven", func(t *testing.T) {
 		repo, requestPath, _, _, _ := readinessSnapshotRepo(t, "feature")
-		entry := readinessProvenanceEntry(t, "spec/feature-alpha")
-		encoded, err := designprovenance.EncodeEntry(entry)
-		if err != nil {
-			t.Fatal(err)
-		}
+		encoded := []byte(readinessProvenanceV1Sidecar)
 		if err := os.WriteFile(store.DesignProvenancePath(repo.Dir, store.ZoneActive, "feature-alpha"), encoded, 0o644); err != nil {
 			t.Fatal(err)
 		}
@@ -305,31 +299,15 @@ func readinessSnapshotRepo(t *testing.T, class string) (*fixturegit.Repo, string
 	return repo, requestPath, requestBytes, targetRef, store.ActiveSpecPath(repo.Dir, name)
 }
 
-func readinessProvenanceEntry(t *testing.T, spec string) designprovenance.Entry {
-	t.Helper()
-	entry := designprovenance.Entry{
-		Schema:         designprovenance.Schema,
-		Spec:           spec,
-		PreviousDigest: "sha256:" + strings.Repeat("a", 64),
-		ResultDigest:   "sha256:" + strings.Repeat("b", 64),
-		Attribution:    governanceprincipal.NewUnauthenticatedAttribution(),
-		Harness:        "codex",
-		PolicyDigest:   "sha256:" + strings.Repeat("c", 64),
-		Context:        designprovenance.UnavailableContext(),
-		Operations: []designprovenance.Operation{{
-			Op: designprovenance.OpSetProblem, Text: "changed problem", Anchor: "problem",
-		}},
-		Changes: []designprovenance.Change{{
-			Target: "problem", Change: designprovenance.ChangeReplaced,
-			BeforeDigest: "sha256:" + strings.Repeat("a", 64), AfterDigest: "sha256:" + strings.Repeat("b", 64),
-		}},
-		Excerpts: []designprovenance.Excerpt{},
-	}
-	if err := entry.Seal(); err != nil {
-		t.Fatalf("Seal provenance entry: %v", err)
-	}
-	return entry
-}
+// readinessProvenanceV1Sidecar is one LITERAL historical
+// `verdi.design-provenance/v1` sidecar line for `spec/feature-alpha`,
+// captured byte-for-byte from the sealed fixture this test previously built
+// in memory. v1 is strict decode-only history and its writer surfaces
+// (designprovenance.Entry.Seal / designprovenance.EncodeEntry) refuse it, so
+// the fixture is pinned as committed bytes instead of being sealed fresh.
+// The readiness builder still decodes it through the ordinary sidecar path.
+const readinessProvenanceV1Sidecar = `{"attribution":{"unauthenticated":true},"changes":[{"after_digest":"sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","before_digest":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","change":"replaced","target":"problem"}],"context":{"reason":"unavailable-before-context-compiler","state":"unavailable"},"digest":"sha256:9b93daccf5d9d75ba2a0d8d20cee8d0ac010c5a40c8898f567b0e527a24f209a","excerpts":[],"harness":"codex","operations":[{"anchor":"problem","op":"set-problem","text":"changed problem"}],"policy_digest":"sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc","previous_digest":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","result_digest":"sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","schema":"verdi.design-provenance/v1","spec":"spec/feature-alpha"}
+`
 
 func assertNoReadinessPersistence(t *testing.T, root string) {
 	t.Helper()

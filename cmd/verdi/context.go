@@ -64,6 +64,8 @@ func cmdContext(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		return cmdContextCompile(args[1:], stdin, stdout, stderr)
 	case "conflict":
 		return cmdContextConflict(args[1:], stdin, stdout, stderr)
+	case "constitution":
+		return cmdContextConstitution(args[1:], stdin, stdout, stderr)
 	case "contract":
 		return cmdContextContract(args[1:], stdout, stderr)
 	case "execution":

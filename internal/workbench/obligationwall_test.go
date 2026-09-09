@@ -127,7 +127,7 @@ func TestObligationWall_StoryACCardRendersObligations(t *testing.T) {
 	if err := attachObligations(proj, root, "refi-decline-replay", fm); err != nil {
 		t.Fatalf("attachObligations: %v", err)
 	}
-	body := renderBoardRegion(proj, &boardGitState{})
+	body := renderBoardRegion(proj, &boardGitState{}, testASDView())
 
 	// ac-1's behavioral kind HAS an obligation: its title is the specific
 	// demand, read on the wall (co-2, legible-without-the-sidecar), and the

@@ -44,6 +44,8 @@ test.describe("V1-P6: layout stability at the UI layer", () => {
     const sticky = await addSticky(page, stickyText);
     await sticky.getByRole("button", { name: "Graduate" }).click();
     await page.getByRole("menuitem", { name: "Constraint" }).click();
+    // Wave 6 Task 2: confirm the graduation impact preview (F-08).
+    await page.locator("#edge-confirm-ok").click();
     await expectAutosaved(page);
 
     const newCard = page

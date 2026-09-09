@@ -1027,7 +1027,10 @@ button:hover { border-color: var(--accent); color: var(--accent); }
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.14em;
-  opacity: 0.75;
+  /* Full ink: the reduced-opacity label failed WCAG AA contrast on the
+     note papers (Wave 6 §5.2's automated scan) — the size and tracking
+     already set the label apart. */
+  opacity: 1;
 }
 /* the scratch tier is HANDWRITTEN: a sticky is unfiled human thought,
    and graduation literally typesets it into the record's serif. The
@@ -1043,7 +1046,10 @@ button:hover { border-color: var(--accent); color: var(--accent); }
   font-size: 0.98rem;
   line-height: 1.35;
 }
-.sticky-meta { font-size: 0.62rem; letter-spacing: 0.05em; opacity: 0.65; }
+/* Author line at full ink: opacity 0.65 failed WCAG AA on the note
+   papers (Wave 6 automated-scan witness); size and tracking already set
+   the meta line apart. */
+.sticky-meta { font-size: 0.62rem; letter-spacing: 0.05em; opacity: 0.9; }
 
 .sticky--comment { background: var(--note-comment-bg); color: var(--note-comment-ink); }
 .sticky--question { background: var(--note-question-bg); color: var(--note-question-ink); }
@@ -2210,8 +2216,11 @@ button.yarn-chip-type {
   padding: 0.12rem 0.55rem;
 }
 .stubcard .card-kind { margin-bottom: 0; }
-.stubcard .card-kind-label { font-weight: 700; color: var(--authored); }
-.stubcard .card-kind-id { color: var(--muted-solid); font-weight: 400; }
+/* Stub ink for the kind lockup: the kraft paper's own ink meets WCAG AA
+   where --authored/--muted-solid dip under 4.5:1 on this stock (the Wave
+   6 automated scan's witness). */
+.stubcard .card-kind-label { font-weight: 700; color: var(--stub-ink); }
+.stubcard .card-kind-id { color: var(--stub-ink); font-weight: 400; }
 /* the spike stub wears the spike's waived-violet ink (the same ink the
    case-class stamp uses for a spike) */
 .stubcard--spike .card-kind-label,
@@ -2330,7 +2339,10 @@ button.yarn-chip-type {
   background: transparent;
 }
 .oq-claims {
-  color: var(--st-nosignal);
+  /* --st-nosignal alone dips under AA on the card paper (automated-scan
+     witness); mixing toward the page ink keeps the no-signal hue while
+     clearing 4.5:1. */
+  color: color-mix(in srgb, var(--st-nosignal) 55%, var(--ink));
   border-style: dashed;
   border-color: color-mix(in srgb, var(--st-nosignal) 60%, transparent);
   background: color-mix(in srgb, var(--st-nosignal-tint) 70%, transparent);
@@ -3556,4 +3568,154 @@ button.yarn-chip-type {
 /* CHROMA-LIGHT-PALETTE */
 @media (prefers-color-scheme: dark) {
 /* CHROMA-DARK-PALETTE */
+}
+
+/* == ASD workbench (Wave 6 Task 2) =======================================
+   The board page's posture header, promoted four-area shell, typed forms,
+   and on-demand panels. Reuses the readiness pilot's shell vocabulary
+   (readiness-*) wholesale; everything here is additive and scoped. */
+
+.skip-link {
+  position: absolute;
+  left: -999em;
+  top: 0;
+  background: var(--paper, #fff);
+  color: inherit;
+  padding: 0.5rem 0.75rem;
+  z-index: 100;
+}
+.skip-link:focus {
+  left: 0.5rem;
+  top: 0.5rem;
+  outline: 2px solid currentColor;
+}
+
+.asd-live { position: absolute; left: -999em; }
+.asd-last-result {
+  font-size: 0.85rem;
+  max-width: 60rem;
+  overflow-wrap: anywhere;
+}
+.asd-last-result[data-result-kind="stale"],
+.asd-last-result[data-result-kind="verdict"] { color: var(--warn-ink, #8a5a00); }
+.asd-last-result[data-result-kind="operational"],
+.asd-last-result[data-result-kind="partial"] { color: var(--fail-ink, #a4262c); }
+
+.asd-posture {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 0.9rem;
+  padding: 0.5rem 0.75rem;
+  margin: 0.5rem 0;
+  border: 1px solid var(--rule, #d5d0c5);
+  border-radius: 6px;
+  font-size: 0.85rem;
+}
+.asd-posture-bytes, .asd-posture-tree { white-space: nowrap; }
+.asd-posture-formal { opacity: 0.7; }
+.asd-posture-tree[data-dirty="dirty"] { font-weight: 600; }
+.asd-posture-tech { flex-basis: 100%; }
+.asd-refresh { margin-left: auto; }
+
+/* The shell sits ALONGSIDE the canvas (task-2 adjudication 1: "the board
+   canvas remains beneath/alongside it"): a two-column grid keeps the
+   working wall inside the initial viewport while the rail/queue stays
+   continuously visible in its own scrollable column. Narrow viewports
+   stack (the 320px contract keeps every fact reachable). */
+#boardv2-region {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(19rem, 22rem);
+  /* dense back-fills .asd-main into the row BESIDE the shell: the shell
+     precedes it in DOM (orientation-first reading order, F-01) but sits
+     in column 2, and sparse auto-placement would otherwise strand the
+     board a full shell-height below the fold. */
+  grid-auto-flow: row dense;
+  gap: 0 1rem;
+  align-items: start;
+}
+#boardv2-region > .board-notices,
+#boardv2-region > .asd-posture {
+  grid-column: 1 / -1;
+}
+#boardv2-region > .asd-shell {
+  grid-column: 2;
+  position: sticky;
+  top: 0.5rem;
+  max-height: calc(100vh - 1rem);
+  overflow-y: auto;
+}
+#boardv2-region > .asd-main {
+  grid-column: 1;
+  min-width: 0;
+}
+@media (max-width: 1023px) {
+  #boardv2-region {
+    display: block;
+  }
+  #boardv2-region > .asd-shell {
+    position: static;
+    max-height: none;
+  }
+}
+
+.asd-shell {
+  margin: 0.5rem 0 1rem;
+  padding: 0.75rem;
+  border: 1px solid var(--rule, #d5d0c5);
+  border-radius: 6px;
+}
+.asd-shell .readiness-rail-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  list-style: none;
+  padding: 0;
+  margin: 0.5rem 0;
+}
+.asd-sequence-note { font-size: 0.85rem; opacity: 0.85; max-width: 60rem; }
+.asd-timing { font-size: 0.8rem; opacity: 0.85; }
+.asd-timing--now { font-weight: 600; }
+.asd-human-review {
+  display: inline-block;
+  font-size: 0.78rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  border: 1px solid currentColor;
+  border-radius: 4px;
+  padding: 0 0.4rem;
+  margin: 0 0 0.25rem;
+}
+.asd-guidance { font-size: 0.85rem; }
+
+.asd-forms button { display: block; margin: 0.3rem 0; }
+.asd-panel { margin: 0.5rem 0; }
+.asd-panel-json {
+  max-height: 24rem;
+  overflow: auto;
+  font-size: 0.75rem;
+}
+.asd-panel-body { overflow-x: auto; }
+.asd-stub-correct { font-size: 0.75rem; margin-top: 0.25rem; }
+.asd-field-error { color: var(--fail-ink, #a4262c); font-size: 0.85rem; }
+.asd-op-dialog textarea { width: 100%; min-height: 6rem; }
+.asd-stub-acs label, .asd-stub-oqs label { display: block; font-size: 0.85rem; }
+
+/* Visible focus everywhere the ASD surfaces add interactivity. */
+.objcard:focus-visible,
+.asd-refresh:focus-visible,
+.asd-shell a:focus-visible,
+.asd-forms button:focus-visible,
+.asd-stub-correct:focus-visible {
+  outline: 2px solid var(--accent, #2f6f4f);
+  outline-offset: 2px;
+}
+
+/* 320px / narrow: the shell and posture stack; the canvas keeps its own
+   contained horizontal scroll (it is intrinsically wide). */
+@media (max-width: 480px) {
+  .asd-posture { flex-direction: column; align-items: flex-start; }
+  .asd-refresh { margin-left: 0; }
+  .asd-shell .readiness-rail-list { flex-direction: column; }
 }

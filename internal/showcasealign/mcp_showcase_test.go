@@ -67,10 +67,16 @@ package showcasealign
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/jyang234/verdi/internal/constitutionapp"
+	"github.com/jyang234/verdi/internal/constitutionimpact"
+	"github.com/jyang234/verdi/internal/draftmutation"
 	"github.com/jyang234/verdi/internal/gitx"
 	"github.com/jyang234/verdi/internal/mcpserve"
 )
@@ -447,6 +453,198 @@ func TestMCPShowcaseCoverage(t *testing.T) {
 		}
 		if cliOut != text {
 			t.Fatalf("CLI and MCP typed result projections differ over real showcase content:\nCLI: %s\nMCP: %s", cliOut, text)
+		}
+	})
+
+	// mcp:get_design_context / mcp:get_design_capabilities /
+	// mcp:get_design_provenance / mcp:prepare_design_review /
+	// mcp:mutate_draft (ASD, AC-8, Wave 6 Task 1): all five driven against
+	// spec/stale-decline, the same real feature every other subtest above
+	// uses. examples/showcase adopts no .verdi/policy/ constitution tree
+	// and cuts no design/<spec> branch (grep-verified against its own
+	// layers.txt and committed .verdi/ tree — the identical disclosed
+	// facts cli:context's and mcp:experiment's own mappings already rest
+	// on), so four of the five tools' most meaningful REAL behavior against
+	// this corpus is their genuine typed refusal, each pinned to the exact
+	// classification/code observed by actually calling the live tool
+	// against the real store (never guessed):
+	//
+	//   - get_design_context fails resolving stale-decline's own committed
+	//     `context: [adr/0002-outbox-events@<sha>]` pin — an operational
+	//     io-failure. This is the SAME unresolvable historical pin
+	//     get_context_bundle's own subtest above discloses and works
+	//     around by using an explicit refs list instead of the spec: form;
+	//     get_design_context has no such alternate form (AC-5's bounded
+	//     context always resolves the spec's OWN declared pins), so the
+	//     genuine failure is the real, disclosed proof for this tool.
+	//   - get_design_capabilities and prepare_design_review both resolve
+	//     the effective design_assistance policy unconditionally
+	//     (AC-3/AC-6); with no constitution adopted, both fail identically
+	//     with the real internal/policyauthority.ErrNotAdopted verdict.
+	//   - mutate_draft, given a well-formed request over stale-decline's
+	//     own real current bytes (a genuine base_digest/base_spec_b64,
+	//     never a synthetic stand-in), fails the mutation kernel's own
+	//     first precondition: stale-decline's checkout sits on "main", not
+	//     the mutable design/stale-decline branch AC-1/CO-3 require —
+	//     draftmutation.AuthorizeState's real state-forbidden verdict,
+	//     proven before policy is ever consulted.
+	//   - get_design_provenance is the one clean, positive case: the
+	//     corpus predates ASD's provenance sidecar entirely, so it
+	//     genuinely has none for stale-decline to report — a real empty
+	//     result, not a synthetic one.
+	t.Run("get_design_context", func(t *testing.T) {
+		text, isError := callMCPTool(t, srv, "get_design_context", map[string]any{"ref": "spec/stale-decline"})
+		var out struct {
+			Classification string `json:"classification"`
+			Code           string `json:"code"`
+			Detail         string `json:"detail"`
+		}
+		decodeToolJSON(t, text, &out)
+		if !isError || out.Classification != "operational" || out.Code != "io-failure" || !strings.Contains(out.Detail, "adr/0002-outbox-events") {
+			t.Fatalf("get_design_context(spec/stale-decline) = isError=%v %+v, want the real operational io-failure resolving stale-decline's own unresolvable historical context: pin", isError, out)
+		}
+	})
+
+	t.Run("get_design_capabilities", func(t *testing.T) {
+		text, isError := callMCPTool(t, srv, "get_design_capabilities", map[string]any{"ref": "spec/stale-decline"})
+		var out struct {
+			Classification string `json:"classification"`
+			Code           string `json:"code"`
+			Detail         string `json:"detail"`
+		}
+		decodeToolJSON(t, text, &out)
+		if !isError || out.Classification != "verdict" || out.Code != "policy-forbidden" || !strings.Contains(out.Detail, "has not adopted policy authority") {
+			t.Fatalf("get_design_capabilities(spec/stale-decline) = isError=%v %+v, want the real verdict refusal for examples/showcase's genuine no-constitution-adopted state", isError, out)
+		}
+	})
+
+	t.Run("prepare_design_review", func(t *testing.T) {
+		text, isError := callMCPTool(t, srv, "prepare_design_review", map[string]any{"ref": "spec/stale-decline"})
+		var out struct {
+			Classification string `json:"classification"`
+			Code           string `json:"code"`
+			Detail         string `json:"detail"`
+		}
+		decodeToolJSON(t, text, &out)
+		if !isError || out.Classification != "verdict" || out.Code != "policy-forbidden" || !strings.Contains(out.Detail, "has not adopted policy authority") {
+			t.Fatalf("prepare_design_review(spec/stale-decline) = isError=%v %+v, want the real verdict refusal for examples/showcase's genuine no-constitution-adopted state", isError, out)
+		}
+	})
+
+	t.Run("get_design_provenance", func(t *testing.T) {
+		text := callMCPToolOK(t, srv, "get_design_provenance", map[string]any{"ref": "spec/stale-decline"})
+		var out struct {
+			Entries  []json.RawMessage `json:"entries"`
+			Identity struct {
+				Spec string `json:"spec"`
+			} `json:"identity"`
+		}
+		decodeToolJSON(t, text, &out)
+		if out.Identity.Spec != "spec/stale-decline" || out.Entries == nil || len(out.Entries) != 0 {
+			t.Fatalf("get_design_provenance(spec/stale-decline) = %+v, want a genuine empty entries array (the corpus predates ASD's provenance sidecar)", out)
+		}
+	})
+
+	t.Run("mutate_draft", func(t *testing.T) {
+		specBytes, err := os.ReadFile(filepath.Join(root, ".verdi", "specs", "active", "stale-decline", "spec.md"))
+		if err != nil {
+			t.Fatalf("reading stale-decline's real committed spec bytes: %v", err)
+		}
+		resolvedRoot, err := filepath.EvalSymlinks(root)
+		if err != nil {
+			t.Fatalf("resolving provisioned store's canonical checkout path: %v", err)
+		}
+		text, isError := callMCPTool(t, srv, "mutate_draft", map[string]any{
+			"harness": "showcase-coverage-test", "schema": draftmutation.RequestSchema, "spec": "spec/stale-decline",
+			"base_digest": draftmutation.DigestBytes(specBytes), "base_spec_b64": base64.StdEncoding.EncodeToString(specBytes),
+			"expected":   map[string]any{"checkout": filepath.ToSlash(resolvedRoot), "branch": "main", "head": head},
+			"operations": []map[string]any{{"op": "set-problem", "text": "showcase-coverage probe", "anchor": "#problem"}},
+		})
+		var out struct {
+			Classification string `json:"classification"`
+			Code           string `json:"code"`
+			Detail         string `json:"detail"`
+		}
+		decodeToolJSON(t, text, &out)
+		if !isError || out.Classification != "verdict" || out.Code != "state-forbidden" || !strings.Contains(out.Detail, "not mutable design branch") {
+			t.Fatalf("mutate_draft(spec/stale-decline, real base bytes) = isError=%v %+v, want the real verdict refusal for stale-decline's genuine absence of a design/ branch", isError, out)
+		}
+	})
+
+	// mcp:constitution_inspect / mcp:constitution_validate /
+	// mcp:constitution_impact_review (Wave 6 Task 3): driven against the
+	// same provisioned showcase store, which adopts no .verdi/policy/
+	// constitution tree at all (the identical genuine fact
+	// get_design_capabilities' and prepare_design_review's own subtests
+	// above already rest on). Unlike those two, "not adopted" is NOT an
+	// error for constitutionapp's own operations — it is a disclosed,
+	// proven fact (CO-1: an honest "no constitution here" is not a
+	// fault) — so all three tools return a CLEAN result naming
+	// Adopted=false on both the accepted and proposed side, never a tool
+	// error. Impact review additionally requires an exact accepted identity;
+	// the fixture's known main branch is declared here just as the other
+	// exact-tree showcase probes above declare it.
+	t.Setenv("CI_DEFAULT_BRANCH", "main")
+	t.Run("constitution_inspect", func(t *testing.T) {
+		text := callMCPToolOK(t, srv, "constitution_inspect", map[string]any{"schema": constitutionapp.InspectRequestSchema})
+		var out struct {
+			Schema   string `json:"schema"`
+			Accepted struct {
+				Adopted bool `json:"adopted"`
+			} `json:"accepted"`
+			Proposed struct {
+				Adopted bool `json:"adopted"`
+			} `json:"proposed"`
+		}
+		decodeToolJSON(t, text, &out)
+		if out.Schema != "verdi.constitution-inspect/v1" || out.Accepted.Adopted || out.Proposed.Adopted {
+			t.Fatalf("constitution_inspect() = %+v, want a clean result disclosing no adopted constitution on either side", out)
+		}
+	})
+
+	t.Run("constitution_validate", func(t *testing.T) {
+		text := callMCPToolOK(t, srv, "constitution_validate", map[string]any{"schema": constitutionapp.ValidateRequestSchema})
+		var out struct {
+			Schema   string `json:"schema"`
+			Snapshot struct {
+				Adopted bool   `json:"adopted"`
+				Reason  string `json:"reason"`
+			} `json:"snapshot"`
+		}
+		decodeToolJSON(t, text, &out)
+		// The result carries no separate affirmative "proven" flag: a
+		// returned result exists only for a store Validate fully resolved,
+		// and the one remaining non-resolved state — no constitution
+		// adopted here — is disclosed on the snapshot with its own reason.
+		if out.Schema != "verdi.constitution-validate/v1" || out.Snapshot.Adopted || out.Snapshot.Reason == "" {
+			t.Fatalf("constitution_validate() = %+v, want a clean result disclosing no adopted constitution with a non-empty reason", out)
+		}
+		if strings.Contains(text, `"proven"`) {
+			t.Fatalf("constitution_validate() must not carry a constant-true proven flag: %s", text)
+		}
+	})
+
+	t.Run("constitution_impact_review", func(t *testing.T) {
+		text := callMCPToolOK(t, srv, "constitution_impact_review", map[string]any{"schema": constitutionapp.ImpactReviewRequestSchema})
+		var out struct {
+			Accepted struct {
+				Adopted bool `json:"adopted"`
+			} `json:"accepted"`
+			Proposed struct {
+				Adopted bool `json:"adopted"`
+			} `json:"proposed"`
+			Coverage          constitutionimpact.Coverage `json:"coverage"`
+			Layers            []json.RawMessage           `json:"layers"`
+			Conflicts         []json.RawMessage           `json:"conflicts"`
+			AffectedConsumers []json.RawMessage           `json:"affected_consumers"`
+		}
+		decodeToolJSON(t, text, &out)
+		if out.Accepted.Adopted || out.Proposed.Adopted || len(out.Layers) != 0 || len(out.Conflicts) != 0 || len(out.AffectedConsumers) != 0 {
+			t.Fatalf("constitution_impact_review() = %+v, want a clean empty-diff result with no declared targets and no adopted constitution", out)
+		}
+		if out.Coverage.Schema != constitutionimpact.CoverageSchema || out.Coverage.State != constitutionimpact.StateDisclosedUnproven ||
+			out.Coverage.Accepted.Presence != constitutionimpact.PresenceMissing || out.Coverage.Proposed.Presence != constitutionimpact.PresenceMissing {
+			t.Fatalf("constitution_impact_review() coverage = %+v, want the canonical missing-inventory disclosure", out.Coverage)
 		}
 	})
 }

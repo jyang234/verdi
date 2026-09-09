@@ -32,10 +32,16 @@ type boardClientPayload struct {
 	// control offers story/spike proto-stickies ONLY on feature-class
 	// walls — the same gate the server enforces (spec/scoping-canvas
 	// dc-5; the menu never offers what the server would refuse).
-	Class        string              `json:"class"`
-	Git          *boardGitState      `json:"git"`
-	Legal        map[string][]string `json:"legal"`
-	Consequences map[string]string   `json:"consequences"`
+	Class string `json:"class"`
+	// DomainRefusal mirrors the projection's domain-write refusal
+	// (review fix I-1): non-empty means the client must not offer any
+	// spec-editing gesture — the server names why, verbatim, so the
+	// constraint is visible at the gesture point rather than after a
+	// doomed round-trip.
+	DomainRefusal string              `json:"domainRefusal,omitempty"`
+	Git           *boardGitState      `json:"git"`
+	Legal         map[string][]string `json:"legal"`
+	Consequences  map[string]string   `json:"consequences"`
 	// Removals are the gate-bearing types' removal consequences — the
 	// confirmation ritual mirrors creation (owner UAT round 6, item 3).
 	Removals map[string]string `json:"removals"`
@@ -49,6 +55,12 @@ type boardClientPayload struct {
 	// Class above, data attributes, API type fields — never read from
 	// here (vocabulary.go's enumeration rule).
 	Words map[string]string `json:"words,omitempty"`
+	// Asd is the ASD workbench's client state (Wave 6 Task 2): the same
+	// facts /snapshot serves — revision token, exact base digest/bytes,
+	// expected identity, the server's slug grammar, and the next free
+	// object ids — so the client constructs typed operations from
+	// server-derived data only.
+	Asd *asdClientPayload `json:"asd,omitempty"`
 }
 
 // legalPairTable flattens legalEdgeTypes over every source/target kind
@@ -88,40 +100,62 @@ var boardSpecPageTemplate = template.Must(template.New("boardspec").Parse(`<!doc
 <link rel="stylesheet" href="/assets/style.css">
 </head>
 <body class="board-page boardv2-page mode-{{.Mode}}">
+<a class="skip-link" href="#boardv2-region">Skip to the board</a>
 <header class="site-head">
 <a class="wordmark" href="/"><span class="leafmark" aria-hidden="true"></span>verdi<span class="wordmark-surface">workbench</span></a>
 <nav class="site-nav workbench-nav"><a href="/">index</a></nav>
 </header>
 <header class="page-header board-head">
 <h1>{{.Title}}</h1>
-<span class="board-mode-tag board-mode-tag--{{.Mode}}">{{.ModeLabel}}</span>
-{{if .StatusBadge}}<span class="badge badge-{{.StatusBadge}} board-status-badge" data-testid="board-status-badge">{{.StatusBadgeLabel}}</span>{{end}}
 <div id="autosave-status" data-testid="autosave-status" role="status" aria-live="polite"></div>
+<div id="asd-live" data-testid="asd-live" role="status" aria-live="polite" class="asd-live"></div>
+<div id="asd-last-result" data-testid="asd-last-result" class="asd-last-result"></div>
 </header>
-<div id="boardv2-region">
+<main id="boardv2-region">
 {{.Region}}
-</div>
+</main>
 {{.Dialogs}}
 <script>
 window.__BOARDV2__ = {{.StateJSON}};
 </script>
 <script src="/assets/boardspec.js"></script>
+<script src="/assets/boardspecasd.js"></script>
 </body>
 </html>
 `))
 
-// renderBoardSpecPage renders the full board page.
-func renderBoardSpecPage(p *BoardProjection, git *boardGitState) ([]byte, error) {
+// renderBoardSpecPage renders the full board page. The embedded ASD
+// state mirrors exactly what /snapshot serves, so the initial page needs
+// no bootstrap fetch and the first conditional poll compares against a
+// genuine revision token.
+func renderBoardSpecPage(p *BoardProjection, git *boardGitState, asd *asdView) ([]byte, error) {
+	region := renderBoardRegion(p, git, asd)
+	revision := snapshotRevision(&asdSnapshot{
+		HTML:        region,
+		BaseDigest:  asd.BaseDigest,
+		BaseSpecB64: asd.BaseSpecB64,
+		Git:         git,
+		Expected:    asdExpectedWire{Checkout: asd.ExpectedCheckout, Branch: asd.ExpectedBranch, Head: asd.ExpectedHead},
+	})
 	payload := boardClientPayload{
-		Spec:         p.Spec,
-		Mode:         string(p.Mode),
-		Class:        p.Class,
-		Git:          git,
-		Legal:        legalPairTable(),
-		Consequences: consequenceLabelsFor(p.words),
-		Removals:     removalConsequenceLabels,
-		Gate:         gateBearingTypes(),
-		Words:        p.words.renamed(),
+		Spec:          p.Spec,
+		Mode:          string(p.Mode),
+		Class:         p.Class,
+		DomainRefusal: p.DomainRefusal,
+		Git:           git,
+		Legal:         legalPairTable(),
+		Consequences:  consequenceLabelsFor(p.words),
+		Removals:      removalConsequenceLabels,
+		Gate:          gateBearingTypes(),
+		Words:         p.words.renamed(),
+		Asd: &asdClientPayload{
+			Revision:    revision,
+			BaseDigest:  asd.BaseDigest,
+			BaseSpecB64: asd.BaseSpecB64,
+			Expected:    asdExpectedWire{Checkout: asd.ExpectedCheckout, Branch: asd.ExpectedBranch, Head: asd.ExpectedHead},
+			SlugPattern: asd.SlugPattern,
+			NextIDs:     asd.NextIDs,
+		},
 	}
 	stateJSON, err := json.Marshal(payload)
 	if err != nil {
@@ -154,7 +188,7 @@ func renderBoardSpecPage(p *BoardProjection, git *boardGitState) ([]byte, error)
 		ModeLabel:        modeStampLabels[p.Mode],
 		StatusBadge:      badge,
 		StatusBadgeLabel: badgeLabel,
-		Region:           template.HTML(renderBoardRegion(p, git)),
+		Region:           template.HTML(region),
 		Dialogs:          template.HTML(renderBoardDialogs(p)),
 		StateJSON:        template.JS(stateJSON),
 	}
@@ -184,12 +218,19 @@ func terminalStatusBadge(status string) string {
 	return ""
 }
 
-// renderBoardRegion renders the placards, canvas, and side rail — the
-// fragment swapped in after every mutation.
-func renderBoardRegion(p *BoardProjection, git *boardGitState) string {
+// renderBoardRegion renders the posture header, four-area shell,
+// placards, canvas, and side rail — the one projection region the page,
+// the fragment, the snapshot, and every mutation response share.
+func renderBoardRegion(p *BoardProjection, git *boardGitState, asd *asdView) string {
 	var b strings.Builder
 	esc := stdhtml.EscapeString
 	authoring := p.Mode == modeAuthoring
+	// The domain-write surface (typed spec mutations) renders only when
+	// the kernel would accept it: an authoring wall on a non-namesake
+	// branch keeps its scratch tier but offers no spec-editing
+	// affordance the mutation core refuses (review fix I-1).
+	domainLive := authoring && p.DomainRefusal == ""
+	edgeFactSeen := map[string]int{}
 
 	// Disclosed-unavailable notices (I-1(b)/I-2/M-4): a configured-but-
 	// unreachable review feed, or an assumed default branch. Rendered
@@ -197,8 +238,19 @@ func renderBoardRegion(p *BoardProjection, git *boardGitState) string {
 	// (renderBoardRegion feeds both page and fragment) so the board never
 	// renders as if a skipped input were simply absent (constitution 2/10).
 	hasCaseFile := p.Problem != "" || p.Outcome != ""
-	if len(p.Notices) > 0 || (!hasCaseFile && len(p.CaseFileDisclosures) > 0) {
+	if p.DomainRefusal != "" || len(p.Notices) > 0 || (!hasCaseFile && len(p.CaseFileDisclosures) > 0) {
 		b.WriteString(`<div class="board-notices">`)
+		// The domain-refusal explanation (review fix I-1): why this live
+		// scratch wall offers no spec edits, named FIRST — before any
+		// gesture is attempted — with the kernel's own branch
+		// precondition, verbatim. It rides INSIDE the .board-notices
+		// wrapper deliberately: #boardv2-region is a placed grid
+		// (style.css), and a new unplaced direct child would derail the
+		// dense auto-placement and strand the canvas below the fold
+		// (owner-witnessed 38-board-size-smell drag regression).
+		if p.DomainRefusal != "" {
+			b.WriteString(`<div class="board-notice asd-domain-refusal" data-testid="asd-domain-refusal" role="status">` + esc(p.DomainRefusal) + `</div>`)
+		}
 		for _, n := range p.Notices {
 			b.WriteString(`<div class="board-notice" data-testid="board-notice" role="status">` + esc(n) + `</div>`)
 		}
@@ -213,6 +265,13 @@ func renderBoardRegion(p *BoardProjection, git *boardGitState) string {
 		}
 		b.WriteString(`</div>`)
 	}
+
+	writeASDPosture(&b, p, git, asd)
+	writeASDShell(&b, asd)
+	// .asd-main wraps the board half (case file + canvas + rail) so the
+	// shell can sit ALONGSIDE it in one grid row — the canvas stays inside
+	// the initial viewport (adjudication 1's "beneath/alongside").
+	b.WriteString(`<div class="asd-main">`)
 
 	// The case file (element taxonomy row 1): the spec's problem and
 	// outcome as ONE header lockup — the folder a murder board opens
@@ -253,7 +312,9 @@ func renderBoardRegion(p *BoardProjection, git *boardGitState) string {
 	// The canvas is sized to its content plus a working margin — a pure
 	// function of the projection's positions (deterministic), so a sparse
 	// board is a shallow board, not a fixed void.
-	b.WriteString(`<div id="board-canvas" class="board-canvas boardv2-canvas" data-testid="board" data-board-mode="` + esc(string(p.Mode)) + `" data-spec="` + esc(p.Spec) + `" style="min-height:` + px(canvasMinHeight(p)) + `">`)
+	b.WriteString(`<div id="board-canvas" class="board-canvas boardv2-canvas" data-testid="board" data-board-mode="` + esc(string(p.Mode)) + `" data-spec="` + esc(p.Spec) + `"` +
+		` data-next-id-ac="` + esc(asd.NextIDs["ac"]) + `" data-next-id-co="` + esc(asd.NextIDs["co"]) + `" data-next-id-dc="` + esc(asd.NextIDs["dc"]) + `" data-next-id-oq="` + esc(asd.NextIDs["oq"]) + `"` +
+		` style="min-height:` + px(canvasMinHeight(p)) + `">`)
 
 	// Zone labels: the filing scheme the zoned layout already uses, made
 	// visible — tape strips over each kind's column band. Authoring
@@ -286,7 +347,11 @@ func renderBoardRegion(p *BoardProjection, git *boardGitState) string {
 	// (spec/scoping-canvas ac-4/ac-5) — writeScopingReceipts.
 	feature := p.Class == string(artifact.ClassFeature)
 	for _, c := range p.Cards {
-		b.WriteString(`<div class="objcard objcard--` + esc(c.Kind) + `" data-testid="card-` + esc(c.ID) + `" data-id="` + esc(c.ID) + `" data-object-kind="` + esc(c.Kind) + `" style="left:` + px(c.X) + `;top:` + px(c.Y) + `">`)
+		b.WriteString(`<div class="objcard objcard--` + esc(c.Kind) + `" id="obj-` + esc(c.ID) + `" tabindex="0" data-testid="card-` + esc(c.ID) + `" data-id="` + esc(c.ID) + `" data-object-kind="` + esc(c.Kind) + `" data-anchor="` + esc(asd.ObjectAnchors[c.ID]) + `"`)
+		if c.Kind == string(boardlayout.ZoneAC) {
+			b.WriteString(` data-evidence="` + esc(asd.ObjectEvidence[c.ID]) + `"`)
+		}
+		b.WriteString(` style="left:` + px(c.X) + `;top:` + px(c.Y) + `">`)
 		b.WriteString(`<span class="card-kind"><span class="card-kind-label">` + esc(strings.ReplaceAll(c.Kind, "-", " ")) + `</span><span class="card-kind-id">` + esc(c.ID) + `</span></span>`)
 		b.WriteString(`<p class="card-text" title="` + esc(c.Text) + `">` + esc(c.Text) + `</p>`)
 		if feature {
@@ -304,7 +369,10 @@ func renderBoardRegion(p *BoardProjection, git *boardGitState) string {
 		// a locus-declaring finding names, so the non-empty slice is the
 		// whole gate, exactly like Obligations above.
 		writeBadgeChips(&b, c.ID, c.Badges)
-		if authoring {
+		// A card's yarn handle draws a typed SPEC edge (add-link) — domain
+		// surface, offered only where the kernel accepts it (proto-sticky
+		// attribution handles stay: those draw annotation threads).
+		if domainLive {
 			b.WriteString(`<button type="button" class="yarn-handle" data-testid="yarn-handle-` + esc(c.ID) + `" aria-label="Draw yarn from ` + esc(c.ID) + `" title="drag to another card to string yarn"></button>`)
 		}
 		for _, rs := range c.Anchored {
@@ -380,7 +448,8 @@ func renderBoardRegion(p *BoardProjection, git *boardGitState) string {
 			kindLabel = p.words.word("spike") + " stub"
 		}
 		title := designscaffold.HumanizeName(sv.Slug)
-		b.WriteString(`<div class="` + cls + `" data-testid="stub-card-` + esc(sv.Slug) + `" data-stub="` + esc(sv.Slug) + `"` + spikeAttr + ` style="left:` + px(sv.X) + `;top:` + px(sv.Y) + `">`)
+		b.WriteString(`<div class="` + cls + `" data-testid="stub-card-` + esc(sv.Slug) + `" data-stub="` + esc(sv.Slug) + `"` + spikeAttr +
+			` data-acs="` + esc(strings.Join(sv.AcceptanceCriteria, ",")) + `" data-resolves="` + esc(strings.Join(sv.Resolves, ",")) + `" style="left:` + px(sv.X) + `;top:` + px(sv.Y) + `">`)
 		b.WriteString(`<span class="stub-tab">` + esc(sv.Slug) + `</span>`)
 		b.WriteString(`<span class="card-kind"><span class="card-kind-label">` + esc(kindLabel) + `</span><span class="card-kind-id">declared</span></span>`)
 		b.WriteString(`<p class="stub-title" title="` + esc(title) + `">` + esc(title) + `</p>`)
@@ -425,6 +494,13 @@ func renderBoardRegion(p *BoardProjection, git *boardGitState) string {
 			}
 			b.WriteString(`</a>`)
 		}
+		if domainLive {
+			// In-place stub correction (F-06, design §6.2): the SAME typed
+			// transaction corrects an existing stub after creation — an
+			// edit-stub for its bindings, an atomic remove+add for a slug
+			// rename — never delete-and-recreate by hand.
+			b.WriteString(`<button type="button" class="asd-stub-correct" data-asd-correct-stub data-testid="correct-stub-` + esc(sv.Slug) + `">Correct stub</button>`)
+		}
 		if sv.InstantiatedNotice != "" {
 			b.WriteString(`<p class="stub-instantiated-notice" data-testid="stub-instantiated-notice-` + esc(sv.Slug) + `">` + esc(sv.InstantiatedNotice) + `</p>`)
 		}
@@ -467,7 +543,7 @@ func renderBoardRegion(p *BoardProjection, git *boardGitState) string {
 		if proto {
 			typeLabel = p.words.word(s.Type)
 		}
-		b.WriteString(`<div class="sticky sticky--` + stickyTypeClass(s.Type) + `" data-testid="sticky-` + esc(s.ID) + `" data-id="` + esc(s.ID) + `" data-annotation-type="` + esc(s.Type) + `" style="left:` + px(s.X) + `;top:` + px(s.Y) + `">`)
+		b.WriteString(`<div class="sticky sticky--` + stickyTypeClass(s.Type) + `" data-testid="sticky-` + esc(s.ID) + `" data-id="` + esc(s.ID) + `" data-annotation-type="` + esc(s.Type) + `" data-slug="` + esc(asd.StickySlugs[s.ID]) + `" style="left:` + px(s.X) + `;top:` + px(s.Y) + `">`)
 		b.WriteString(`<span class="sticky-type">` + esc(typeLabel) + `</span>`)
 		b.WriteString(`<p class="sticky-body">` + esc(s.Body) + `</p>`)
 		if s.Author != "" {
@@ -483,12 +559,16 @@ func renderBoardRegion(p *BoardProjection, git *boardGitState) string {
 		if authoring && obligationYarn {
 			b.WriteString(`<button type="button" class="yarn-handle yarn-handle--proto yarn-handle--obligation" data-testid="yarn-handle-` + esc(s.ID) + `" aria-label="Draw an obligation thread from this sticky" title="drag to ` + esc(p.words.indefinite("story")) + ` acceptance criterion to author its evidence obligation"></button>`)
 		}
-		if authoring {
+		if domainLive {
+			// Graduation writes the spec document (add-ac/-stub/…): the
+			// affordance renders only where the kernel accepts it.
 			if proto {
 				b.WriteString(`<button type="button" class="graduate-btn" data-graduate="stub">Graduate</button>`)
 			} else {
 				b.WriteString(`<button type="button" class="graduate-btn" data-graduate="sticky">Graduate</button>`)
 			}
+		}
+		if authoring {
 			b.WriteString(`<button type="button" class="delete-btn" data-delete="sticky" aria-label="Delete sticky" title="the sticky dies; the spec is untouched">×</button>`)
 		}
 		b.WriteString(`</div>`)
@@ -504,12 +584,20 @@ func renderBoardRegion(p *BoardProjection, git *boardGitState) string {
 	// document-level chip (From "spec") gets neither: its edge lives in
 	// the frontmatter links: block the board cannot edit.
 	for _, e := range p.Edges {
-		editableSpecEdge := authoring && e.Layer == "spec" && e.From != "spec"
+		editableSpecEdge := domainLive && e.Layer == "spec" && e.From != "spec"
 		chipClass := "yarn-chip yarn-chip--" + esc(e.Layer)
 		if e.From == "spec" {
 			chipClass += " yarn-chip--doc"
 		}
 		b.WriteString(`<div class="` + chipClass + `" data-edge-type="` + esc(e.Type) + `" data-from="` + esc(e.From) + `" data-to="` + esc(e.To) + `" data-layer="` + esc(e.Layer) + `"`)
+		if e.Layer == "spec" && e.From != "spec" {
+			key := asdEdgeKey(e.From, e.Type, e.To)
+			if facts := asd.EdgeFacts[key]; edgeFactSeen[key] < len(facts) {
+				fact := facts[edgeFactSeen[key]]
+				edgeFactSeen[key]++
+				b.WriteString(` data-stored-ref="` + esc(fact.Ref) + `" data-note="` + esc(fact.Note) + `"`)
+			}
+		}
 		if e.AnnotationID != "" {
 			b.WriteString(` data-annotation-id="` + esc(e.AnnotationID) + `"`)
 		}
@@ -529,7 +617,9 @@ func renderBoardRegion(p *BoardProjection, git *boardGitState) string {
 			// 5.4) never graduates through the type picker: its meaning IS
 			// the endpoint pair (dc-5), and stub-graduate on the sticky is
 			// what consumes it. It still dies from its own ×.
-			if !artifact.IsAnnotationID(e.From) && !artifact.IsAnnotationID(e.To) {
+			// Thread graduation writes a typed spec link (add-link) —
+			// domain surface, offered only where the kernel accepts it.
+			if domainLive && !artifact.IsAnnotationID(e.From) && !artifact.IsAnnotationID(e.To) {
 				b.WriteString(`<button type="button" class="graduate-btn" data-graduate="thread">Graduate</button>`)
 			}
 			b.WriteString(`<button type="button" class="delete-btn" data-delete="thread" aria-label="Delete thread" title="the thread dies; the spec is untouched">×</button>`)
@@ -553,6 +643,7 @@ func renderBoardRegion(p *BoardProjection, git *boardGitState) string {
 		b.WriteString(`<section class="scratch-panel"><h2>Scratch</h2>` +
 			`<p class="ritual-note">Think here first. Stickies and untyped threads stay in the annotation layer &#8212; they never enter the spec until graduated.</p>` +
 			`<button type="button" id="add-sticky-btn">Add sticky</button></section>`)
+		writeASDForms(&b, p, asd)
 		writeYarnKey(&b, p)
 		writeGuide(&b, p)
 	case modeReview:
@@ -566,8 +657,10 @@ func renderBoardRegion(p *BoardProjection, git *boardGitState) string {
 		writeCreatePanel(&b, p)
 		writeYarnKey(&b, p)
 	}
+	writeASDPanels(&b, p.Spec)
 	b.WriteString(`</aside>`)
 	b.WriteString(`</div>`) // board-layout
+	b.WriteString(`</div>`) // asd-main
 
 	return b.String()
 }
@@ -1064,7 +1157,7 @@ func writeInboxTray(b *strings.Builder, tray []reviewStickyView) {
 // branch switcher behind the guard).
 func writeGitPanel(b *strings.Builder, git *boardGitState) {
 	esc := stdhtml.EscapeString
-	b.WriteString(`<section class="git-panel"><h2>Working tree</h2>`)
+	b.WriteString(`<section class="git-panel" id="asd-git"><h2>Working tree</h2>`)
 	b.WriteString(`<span class="uncommitted" data-testid="uncommitted-indicator"`)
 	if !git.Dirty {
 		b.WriteString(` hidden`)
@@ -1164,7 +1257,24 @@ func renderBoardDialogs(p *BoardProjection) string {
 <div id="board-trash" class="board-trash" data-testid="board-trash" aria-hidden="true">
 <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" focusable="false"><path d="M4 7h16M9 7V5.2A1.2 1.2 0 0 1 10.2 4h3.6A1.2 1.2 0 0 1 15 5.2V7M6.5 7l1 13h9l1-13M10 10.5v6M14 10.5v6" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
 <span class="board-trash-label" aria-hidden="true"></span>
-</div>`
+</div>` + renderASDDialogs(p)
+}
+
+// renderASDDialogs renders the ASD typed-operation dialogs (authoring
+// only — the callers gate on mode).
+func renderASDDialogs(p *BoardProjection) string {
+	// The typed-operation dialogs serve the domain surface alone; a wall
+	// whose domain writes are refused (review fix I-1) renders none of
+	// their entry points, so the chrome would be dead weight dressed as
+	// an affordance.
+	if p.DomainRefusal != "" {
+		return ""
+	}
+	var b strings.Builder
+	writeASDTextDialog(&b)
+	writeASDImpactDialog(&b)
+	writeASDEditStubDialog(&b, p)
+	return b.String()
 }
 
 // refKindOf classifies a ref-card's target kind for the picker's

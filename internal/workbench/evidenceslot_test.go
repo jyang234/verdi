@@ -94,7 +94,7 @@ func newSlotWallFixture(t *testing.T) *fixturegit.Repo {
 func TestEvidenceSlot_JoinsObligationRow(t *testing.T) {
 	repo := newSlotWallFixture(t)
 	s := &boardSpecServer{root: repo.Dir}
-	proj, _, _, err := s.loadBoard(context.Background(), slotWallSpecName)
+	proj, _, _, _, err := s.loadBoard(context.Background(), slotWallSpecName)
 	if err != nil {
 		t.Fatalf("loadBoard: %v", err)
 	}
@@ -145,7 +145,7 @@ func TestEvidenceSlot_JoinsObligationRow(t *testing.T) {
 	// The markup: one renderer emits one row per kind, each carrying both
 	// halves — the obligation content AND the record-state chip, in the
 	// dashed pending register (data-slot-state="empty").
-	body := renderBoardRegion(proj, &boardGitState{})
+	body := renderBoardRegion(proj, &boardGitState{}, testASDView())
 	for _, want := range []string{
 		`data-testid="obligations-ac-1"`,
 		`>a Playwright test drives the widget</span><span class="slot-chip slot-chip--empty" data-testid="slot-ac-1-behavioral" data-slot-state="empty">no record</span>`,
@@ -185,7 +185,7 @@ func TestEvidenceSlot_HeldSlotRendersCount(t *testing.T) {
 	}
 
 	s := &boardSpecServer{root: repo.Dir}
-	proj, _, _, err := s.loadBoard(context.Background(), slotWallSpecName)
+	proj, _, _, _, err := s.loadBoard(context.Background(), slotWallSpecName)
 	if err != nil {
 		t.Fatalf("loadBoard: %v", err)
 	}
@@ -197,7 +197,7 @@ func TestEvidenceSlot_HeldSlotRendersCount(t *testing.T) {
 		t.Errorf("static view = %+v, want empty (the record fills only its own kind)", o)
 	}
 
-	body := renderBoardRegion(proj, &boardGitState{})
+	body := renderBoardRegion(proj, &boardGitState{}, testASDView())
 	for _, want := range []string{
 		`data-testid="slot-ac-1-behavioral" data-slot-state="held">1 record</span>`,
 		`data-testid="slot-ac-1-static" data-slot-state="empty">no record</span>`,

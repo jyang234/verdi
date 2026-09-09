@@ -233,7 +233,7 @@ func TestRenderBoardRegion_DrawerIsHiddenSiblingOfEveryBadge(t *testing.T) {
 		t.Run(string(mode), func(t *testing.T) {
 			p := badgeRenderProjection(mode)
 			git := &boardGitState{Branch: "design/x", DefaultBranch: "main"}
-			html := renderBoardRegion(p, git)
+			html := renderBoardRegion(p, git, testASDView())
 
 			if got, want := strings.Count(html, `class="badge-drawer"`), 3; got != want {
 				t.Fatalf("%d drawers rendered, want %d (one per badge)", got, want)
@@ -246,7 +246,7 @@ func TestRenderBoardRegion_DrawerIsHiddenSiblingOfEveryBadge(t *testing.T) {
 					t.Errorf("badge button is not immediately followed by its drawer sibling: …%s", after[:min(80, len(after))])
 				}
 			}
-			if html != renderBoardRegion(p, git) {
+			if html != renderBoardRegion(p, git, testASDView()) {
 				t.Error("two renders of the same projection differ — the drawer is not a pure function of the record")
 			}
 		})

@@ -197,6 +197,12 @@ func newBranchBoardFixture(t *testing.T) string {
 		".verdi/specs/active/draft-a/spec.md":     draftASpec,
 		".verdi/specs/active/landed-spec/spec.md": landedSpecDraftEdition,
 	})
+	// The kernel's mutable-branch rule (AC-2: identical semantics through
+	// the shared core) permits typed mutations only on design/<spec-name>,
+	// so the WRITE tests ride a branch named for its spec.
+	commitSpecOnBranch(t, root, "design/draft-a", map[string]string{
+		".verdi/specs/active/draft-a/spec.md": draftASpec,
+	})
 	commitSpecOnBranch(t, root, "design/two-b", map[string]string{
 		".verdi/specs/active/draft-b/spec.md": draftBSpec,
 	})
@@ -302,14 +308,23 @@ func TestBranchBoard_AuthoringFromManagedWorktree(t *testing.T) {
 // handlers, mounted per branch.
 func TestBranchBoard_SubroutesBeneathPrefix(t *testing.T) {
 	root := newBranchBoardFixture(t)
-	h := NewHandler(root)
+	h := newBoardTestHandler(root)
 
-	if rec := bPost(t, h, "/b/design%2Ftwo-a/board/spec/draft-a/api/edit-text",
-		`{"id":"ac-1","text":"criterion edited beneath the prefix"}`); rec.Code != http.StatusOK {
-		t.Fatalf("prefixed api edit-text = %d, want 200\n%s", rec.Code, rec.Body.String())
+	// Cut the worktree (lazy, on first request), then build the typed
+	// mutation against the WORKTREE's own state — the branch board's
+	// checkout identity is the worktree, not the serving root.
+	if rec := bGet(t, h, "/b/design%2Fdraft-a/board/spec/draft-a"); rec.Code != http.StatusOK {
+		t.Fatalf("prefixed board = %d\n%s", rec.Code, rec.Body.String())
+	}
+	wtRoot := filepath.Join(root, ".verdi", "data", "worktrees", "draft-a")
+	envelope := mutateEnvelope(t, wtRoot, "draft-a", []map[string]any{
+		{"op": "edit-ac", "id": "ac-1", "text": "criterion edited beneath the prefix", "evidence": []string{"attestation"}, "anchor": "#ac-1"},
+	}, nil, nil)
+	if rec := bPost(t, h, "/b/design%2Fdraft-a/board/spec/draft-a/api/mutate_draft", envelope); rec.Code != http.StatusOK {
+		t.Fatalf("prefixed api mutate_draft = %d, want 200\n%s", rec.Code, rec.Body.String())
 	}
 
-	rec := bGet(t, h, "/b/design%2Ftwo-a/board/spec/draft-a/fragment")
+	rec := bGet(t, h, "/b/design%2Fdraft-a/board/spec/draft-a/fragment")
 	if rec.Code != http.StatusOK {
 		t.Fatalf("prefixed fragment = %d, want 200\n%s", rec.Code, rec.Body.String())
 	}
@@ -318,7 +333,7 @@ func TestBranchBoard_SubroutesBeneathPrefix(t *testing.T) {
 	}
 
 	// The edit landed in the managed worktree's spec.md...
-	wtSpec := filepath.Join(root, ".verdi", "data", "worktrees", "two-a", ".verdi", "specs", "active", "draft-a", "spec.md")
+	wtSpec := filepath.Join(wtRoot, ".verdi", "specs", "active", "draft-a", "spec.md")
 	got, err := os.ReadFile(wtSpec)
 	if err != nil {
 		t.Fatalf("reading worktree spec: %v", err)
@@ -327,10 +342,10 @@ func TestBranchBoard_SubroutesBeneathPrefix(t *testing.T) {
 		t.Error("edit did not land in the managed worktree's spec.md")
 	}
 
-	if rec := bGet(t, h, "/b/design%2Ftwo-a/board/spec/draft-a/peek?ref=spec/landed-spec"); rec.Code != http.StatusOK {
+	if rec := bGet(t, h, "/b/design%2Fdraft-a/board/spec/draft-a/peek?ref=spec/landed-spec"); rec.Code != http.StatusOK {
 		t.Errorf("prefixed peek = %d, want 200", rec.Code)
 	}
-	if rec := bGet(t, h, "/b/design%2Ftwo-a/board/spec/draft-a/pinsearch?q=landed"); rec.Code != http.StatusOK {
+	if rec := bGet(t, h, "/b/design%2Fdraft-a/board/spec/draft-a/pinsearch?q=landed"); rec.Code != http.StatusOK {
 		t.Errorf("prefixed pinsearch = %d, want 200", rec.Code)
 	}
 
@@ -343,10 +358,10 @@ func TestBranchBoard_SubroutesBeneathPrefix(t *testing.T) {
 // checkout's working tree stays clean throughout.
 func TestBranchBoard_TwoBranches_EditIsolation(t *testing.T) {
 	root := newBranchBoardFixture(t)
-	h := NewHandler(root)
+	h := newBoardTestHandler(root)
 
 	// Open both boards ("two tabs").
-	if rec := bGet(t, h, "/b/design%2Ftwo-a/board/spec/draft-a"); rec.Code != http.StatusOK {
+	if rec := bGet(t, h, "/b/design%2Fdraft-a/board/spec/draft-a"); rec.Code != http.StatusOK {
 		t.Fatalf("board A = %d\n%s", rec.Code, rec.Body.String())
 	}
 	if rec := bGet(t, h, "/b/design%2Ftwo-b/board/spec/draft-b"); rec.Code != http.StatusOK {
@@ -359,9 +374,12 @@ func TestBranchBoard_TwoBranches_EditIsolation(t *testing.T) {
 		t.Fatalf("fragment B before = %d", before.Code)
 	}
 
-	// Edit through A.
-	if rec := bPost(t, h, "/b/design%2Ftwo-a/board/spec/draft-a/api/edit-text",
-		`{"id":"ac-1","text":"edited only in branch A"}`); rec.Code != http.StatusOK {
+	// Edit through A (the typed transaction, against A's own worktree).
+	wtA := filepath.Join(root, ".verdi", "data", "worktrees", "draft-a")
+	envelope := mutateEnvelope(t, wtA, "draft-a", []map[string]any{
+		{"op": "edit-ac", "id": "ac-1", "text": "edited only in branch A", "evidence": []string{"attestation"}, "anchor": "#ac-1"},
+	}, nil, nil)
+	if rec := bPost(t, h, "/b/design%2Fdraft-a/board/spec/draft-a/api/mutate_draft", envelope); rec.Code != http.StatusOK {
 		t.Fatalf("edit via A = %d\n%s", rec.Code, rec.Body.String())
 	}
 
@@ -381,7 +399,7 @@ func TestBranchBoard_TwoBranches_EditIsolation(t *testing.T) {
 	}
 
 	// A's tree carries it.
-	gotA, err := os.ReadFile(filepath.Join(root, ".verdi", "data", "worktrees", "two-a", ".verdi", "specs", "active", "draft-a", "spec.md"))
+	gotA, err := os.ReadFile(filepath.Join(root, ".verdi", "data", "worktrees", "draft-a", ".verdi", "specs", "active", "draft-a", "spec.md"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -491,8 +509,7 @@ func TestBranchBoard_RemoteOnly_RendersSealed(t *testing.T) {
 	if rec := bGet(t, h, "/b/design%2Fremote-only/board/spec/remote-spec/fragment"); rec.Code != http.StatusOK {
 		t.Errorf("remote-only fragment = %d, want 200", rec.Code)
 	}
-	apiRec := bPost(t, h, "/b/design%2Fremote-only/board/spec/remote-spec/api/edit-text",
-		`{"id":"ac-1","text":"never lands"}`)
+	apiRec := bPost(t, h, "/b/design%2Fremote-only/board/spec/remote-spec/api/mutate_draft", `{}`)
 	if apiRec.Code != http.StatusForbidden {
 		t.Errorf("write beneath a remote-only address = %d, want 403", apiRec.Code)
 	}
@@ -545,7 +562,7 @@ func TestBranchBoard_NoRef_DisclosedNotice(t *testing.T) {
 	}
 
 	// The api edition of the same absence answers JSON, still 404.
-	rec := bPost(t, h, "/b/design%2Fnever-existed/board/spec/whatever/api/edit-text", `{"id":"x","text":"y"}`)
+	rec := bPost(t, h, "/b/design%2Fnever-existed/board/spec/whatever/api/mutate_draft", `{}`)
 	if rec.Code != http.StatusNotFound {
 		t.Errorf("api under a no-ref branch = %d, want 404", rec.Code)
 	}

@@ -199,3 +199,40 @@ func ChangedTargets(before, after []byte) ([]string, error) {
 	}
 	return changedSnapshotTargets(left, right), nil
 }
+
+// Diff computes the same semantic Change/Warning classification Apply's
+// own final step uses (changeForFinalState/warningsForFinalChange),
+// between two independent spec byte states with no per-operation touch
+// order available to break ties — targets are ordered by their own sorted
+// canonical identity instead, exactly the fallback ordering Apply itself
+// falls into whenever a target has no recorded firstTouches entry
+// (apply.go's sort.Slice comparator). This is the one semantic-diff
+// algorithm; designapp's prepare_design_review (AC-6: "semantic additions,
+// replacements, deletions, reorderings, and relationship changes since
+// the review base") calls this rather than diffing raw Markdown or
+// re-deriving semantic object identity a second time. Exported for Wave 6
+// Task 1 (a narrow, behavior-preserving addition — Apply's own change
+// computation is untouched and this function shares its exact private
+// helpers).
+func Diff(before, after []byte) ([]Change, []Warning, error) {
+	left, err := snapshot(before)
+	if err != nil {
+		return nil, nil, fmt.Errorf("draftmutation: decoding base snapshot: %w", err)
+	}
+	right, err := snapshot(after)
+	if err != nil {
+		return nil, nil, fmt.Errorf("draftmutation: decoding current snapshot: %w", err)
+	}
+	targets := changedSnapshotTargets(left, right)
+	changes := make([]Change, 0, len(targets))
+	warnings := make([]Warning, 0, len(targets))
+	for _, target := range targets {
+		change, err := changeForFinalState(target, left[target], right[target])
+		if err != nil {
+			return nil, nil, err
+		}
+		changes = append(changes, change)
+		warnings = append(warnings, warningsForFinalChange(change, right[target])...)
+	}
+	return changes, warnings, nil
+}

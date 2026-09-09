@@ -1,12 +1,31 @@
 // MCP tool inventory (deliverable 1c): the live server's tools/list
-// result must equal 05-surfaces.md §MCP server's table exactly — the nine
-// named tools, no more, no fewer, same spelling. Grown at V1-P9 (item 4,
-// the spec-align regrowth): get_board (05's own coverage gap, closed at
-// V1-P9 item 1) joins the inventory, and list_annotations' description is
-// now asserted to actually document its mirrored review-sticky population
-// (05: "covers... and (mirrored) review stickies") rather than silently
-// leaving that half of the row unverified — the gate grows, never
-// shrinks (CLAUDE.md).
+// result must equal this file's own `want` list exactly — no more, no
+// fewer, same spelling. Grown at V1-P9 (item 4, the spec-align
+// regrowth): get_board (05's own coverage gap, closed at V1-P9 item 1)
+// joined the inventory, and list_annotations' description is asserted to
+// actually document its mirrored review-sticky population (05: "covers...
+// and (mirrored) review stickies") rather than silently leaving that half
+// of the row unverified. Grown again for CSE Wave 5B's `experiment` tool
+// (SI-145) and Wave 6 Task 1's five new ASD tools (AC-8) — the gate
+// grows, never shrinks (CLAUDE.md).
+//
+// BINDING NOTE — this want-list DIVERGES from verdi-surfaces §MCP server.
+// That specification's tool table is the nominal authority for this
+// inventory, and it does not carry the six ASD rows; its add_annotation
+// row still reads "append to the mutable zone (the only write tool)",
+// which mutate_draft's arrival makes false. The divergence is deliberate
+// and disclosed, not an oversight: the ASD specification
+// (.verdi/specs/active/ai-assisted-spec-design/spec.md, AC-8) fixes the
+// six-operation surface, both specifications are accepted, and reconciling
+// them requires a verdi-surfaces amendment — owner-routed, and outside a
+// Task 1 implementation unit's write set (the Task 1 brief excludes
+// "specifications, plans, invention-ledger entries").
+//
+// Until that amendment lands, THIS self-owned want-list is the operative
+// inventory: it is what the live server is gated against, and a reader
+// must not take verdi-surfaces' table as the current truth for the MCP
+// tool set or for which tools write. When the amendment lands, this note
+// goes away and that table becomes the single authority again.
 package specalign
 
 import (
@@ -67,6 +86,21 @@ func TestMCPToolInventory(t *testing.T) {
 	// gateway over internal/experimentapp, registered in the same commit as
 	// its live tooldefs.go row (the MCP tool inventory is a serialized
 	// shared registry).
+	// Wave 6 Task 1 (docs/superpowers/plans/2026-08-29-wave-6-workbench-
+	// presentation.md §6.1, AC-8): adds the five remaining ASD operations
+	// alongside the pre-existing get_board, completing AC-8's exact
+	// six-operation surface — the MCP tool inventory is a serialized
+	// shared registry; its spec-align row changes in the same commit as
+	// the live tooldefs.go registration.
+	// Wave 6 Task 3 (docs/superpowers/plans/2026-08-29-wave-6-workbench-
+	// presentation.md §7.1, spec/context-integrity-v2 AC-1/AC-2/AC-3): adds
+	// exactly the read/validation/review projection over
+	// internal/constitutionapp — constitution_inspect, constitution_validate,
+	// and constitution_impact_review. constitution_propose and a
+	// submit-preparation tool are deliberately absent: MCP structurally
+	// refuses commit, submission, approval, exemption ownership, and
+	// semantic disposition by never registering a handler that could reach
+	// them.
 	want := []string{
 		"search_artifacts",
 		"get_artifact",
@@ -78,6 +112,14 @@ func TestMCPToolInventory(t *testing.T) {
 		"get_board",
 		"add_annotation",
 		"experiment",
+		"get_design_context",
+		"get_design_capabilities",
+		"mutate_draft",
+		"get_design_provenance",
+		"prepare_design_review",
+		"constitution_inspect",
+		"constitution_validate",
+		"constitution_impact_review",
 	}
 
 	tools := listMCPTools(t)

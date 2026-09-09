@@ -180,7 +180,7 @@ func newStatuslessBoardFixture(t *testing.T, onDesignBranch bool) string {
 // field (which the CLI no longer writes at all).
 func TestBoardSpec_Statusless_DesignBranch_Authoring(t *testing.T) {
 	root := newStatuslessBoardFixture(t, true)
-	h := NewHandler(root)
+	h := newBoardTestHandler(root)
 
 	rec := getBoard(t, h, boardFixtureName)
 	if rec.Code != http.StatusOK {
@@ -196,15 +196,16 @@ func TestBoardSpec_Statusless_DesignBranch_Authoring(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("sticky on statusless authoring board = %d, want 200\n%s", rec.Code, rec.Body.String())
 	}
-	rec = postBoardAPI(t, h, boardFixtureName, "edit-text", `{"id":"ac-1","text":"a declined applicant sees the current reason [statusless]"}`)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("edit-text on statusless authoring board = %d, want 200\n%s", rec.Code, rec.Body.String())
+	if mrec, mout := postMutate(t, h, root, boardFixtureName, []map[string]any{
+		{"op": "edit-ac", "id": "ac-1", "text": "a declined applicant sees the current reason [statusless]", "evidence": []string{"attestation"}, "anchor": "#ac-1"},
+	}, nil, nil); mrec.Code != http.StatusOK || mout.Result == nil {
+		t.Fatalf("mutate_draft on statusless authoring board = %d, want a clean result\n%s", mrec.Code, mrec.Body.String())
 	}
 }
 
 func TestBoardSpec_Statusless_ExactOnDefault_ReadOnly(t *testing.T) {
 	root := newStatuslessBoardFixture(t, false)
-	h := NewHandler(root)
+	h := newBoardTestHandler(root)
 
 	rec := getBoard(t, h, boardFixtureName)
 	if rec.Code != http.StatusOK {
@@ -213,9 +214,10 @@ func TestBoardSpec_Statusless_ExactOnDefault_ReadOnly(t *testing.T) {
 	if body := rec.Body.String(); !strings.Contains(body, `data-board-mode="readonly"`) {
 		t.Errorf("statusless spec exact on the default branch is not read-only:\n%s", body)
 	}
-	rec = postBoardAPI(t, h, boardFixtureName, "edit-text", `{"id":"ac-1","text":"x"}`)
-	if rec.Code != http.StatusForbidden {
-		t.Fatalf("edit-text on exact-on-default statusless board = %d, want 403\n%s", rec.Code, rec.Body.String())
+	if mrec, _ := postMutate(t, h, root, boardFixtureName, []map[string]any{
+		{"op": "edit-ac", "id": "ac-1", "text": "x", "evidence": []string{"attestation"}, "anchor": "#ac-1"},
+	}, nil, nil); mrec.Code != http.StatusForbidden {
+		t.Fatalf("mutate_draft on exact-on-default statusless board = %d, want 403\n%s", mrec.Code, mrec.Body.String())
 	}
 }
 
@@ -270,7 +272,7 @@ func TestLoadBoard_ModeByEffectiveState(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			s := &boardSpecServer{root: root, state: fakeStateResolver{result: tc.result}}
-			proj, _, _, err := s.loadBoard(ctx, boardFixtureName)
+			proj, _, _, _, err := s.loadBoard(ctx, boardFixtureName)
 			if err != nil {
 				t.Fatalf("loadBoard: %v", err)
 			}
@@ -305,7 +307,7 @@ func TestLoadBoard_ModeByEffectiveState(t *testing.T) {
 	}
 	writeWorkingTreeSpec(t, root, boardFixtureName, boardFixtureSpec)
 	s := &boardSpecServer{root: root, state: fakeStateResolver{result: specstate.Result{State: specstate.Proposed, Relation: specstate.RelationNew}}}
-	proj, _, _, err := s.loadBoard(ctx, boardFixtureName)
+	proj, _, _, _, err := s.loadBoard(ctx, boardFixtureName)
 	if err != nil {
 		t.Fatalf("loadBoard on main: %v", err)
 	}
@@ -316,7 +318,7 @@ func TestLoadBoard_ModeByEffectiveState(t *testing.T) {
 	// Negative: a resolver failure is an operational error, never a
 	// silently guessed mode.
 	s = &boardSpecServer{root: root, state: fakeStateResolver{err: fmt.Errorf("boom")}}
-	if _, _, _, err := s.loadBoard(ctx, boardFixtureName); err == nil {
+	if _, _, _, _, err := s.loadBoard(ctx, boardFixtureName); err == nil {
 		t.Fatal("loadBoard with a failing resolver returned no error")
 	}
 }
@@ -337,7 +339,7 @@ func TestLoadBoard_DivergedOnDesignBranch_ReadOnlyWithNotice(t *testing.T) {
 		Relation: specstate.RelationDiverged,
 		Baseline: &specstate.Baseline{Path: ".verdi/specs/active/" + boardFixtureName + "/spec.md", Blob: "1111111111111111111111111111111111aaaa"},
 	}}}
-	proj, _, _, err := s.loadBoard(ctx, boardFixtureName)
+	proj, _, _, _, err := s.loadBoard(ctx, boardFixtureName)
 	if err != nil {
 		t.Fatalf("loadBoard: %v", err)
 	}
@@ -426,7 +428,7 @@ func TestBoardSpecPage_Authoring(t *testing.T) {
 		}
 	}
 	// The stored layout position passes through verbatim.
-	if !strings.Contains(body, `data-testid="card-ac-1" data-id="ac-1" data-object-kind="acceptance-criterion" style="left:40px;top:60px"`) {
+	if !strings.Contains(body, `data-testid="card-ac-1" data-id="ac-1" data-object-kind="acceptance-criterion" data-anchor="#ac-1" data-evidence="attestation" style="left:40px;top:60px"`) {
 		t.Error("stored ac-1 position not rendered verbatim")
 	}
 }
@@ -456,11 +458,11 @@ func TestBoardSpecPage_CollidingStoredPositionsRenderResolved(t *testing.T) {
 	}
 	body := rec.Body.String()
 	// First claimant: stored verbatim.
-	if !strings.Contains(body, `data-testid="card-ac-1" data-id="ac-1" data-object-kind="acceptance-criterion" style="left:40px;top:20px"`) {
+	if !strings.Contains(body, `data-testid="card-ac-1" data-id="ac-1" data-object-kind="acceptance-criterion" data-anchor="#ac-1" data-evidence="attestation" style="left:40px;top:20px"`) {
 		t.Error("ac-1 (first claimant) not rendered at its stored position")
 	}
 	// The collider does NOT render at its stored, overlapping position.
-	if strings.Contains(body, `data-id="ac-2" data-object-kind="acceptance-criterion" style="left:220px;top:20px"`) {
+	if strings.Contains(body, `data-id="ac-2" data-object-kind="acceptance-criterion" data-anchor="#ac-2" data-evidence="behavioral,attestation" style="left:220px;top:20px"`) {
 		t.Error("ac-2 still renders stacked at its stored colliding position")
 	}
 	// Rendering never wrote the store: the colliding record is intact.
@@ -541,18 +543,16 @@ func TestErrBoardNotFound_MatchesThroughWrap(t *testing.T) {
 
 func TestBoardSpec_EditText(t *testing.T) {
 	root := newBoardFixture(t)
-	h := NewHandler(root)
+	h := newBoardTestHandler(root)
 
-	rec := postBoardAPI(t, h, boardFixtureName, "edit-text", `{"id":"ac-1","text":"a declined applicant sees the current reason [edited]"}`)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("edit-text = %d\n%s", rec.Code, rec.Body.String())
+	rec, out := postMutate(t, h, root, boardFixtureName, []map[string]any{
+		{"op": "edit-ac", "id": "ac-1", "text": "a declined applicant sees the current reason [edited]", "evidence": []string{"attestation"}, "anchor": "#ac-1"},
+	}, nil, nil)
+	if rec.Code != http.StatusOK || out.Result == nil {
+		t.Fatalf("mutate_draft(edit-ac) = %d\n%s", rec.Code, rec.Body.String())
 	}
-	var resp boardAPIResponse
-	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("decoding response: %v", err)
-	}
-	if !resp.Dirty {
-		t.Error("edit-text response dirty = false, want true (the spec working tree changed)")
+	if out.Projection == nil || !out.Projection.Dirty {
+		t.Error("mutation projection dirty = false, want true (the spec working tree changed)")
 	}
 
 	specPath := filepath.Join(root, ".verdi", "specs", "active", boardFixtureName, "spec.md")
@@ -571,20 +571,42 @@ func TestBoardSpec_EditText(t *testing.T) {
 
 func TestBoardSpec_EditText_Negative(t *testing.T) {
 	root := newBoardFixture(t)
-	h := NewHandler(root)
-	tests := []struct {
-		name, body string
-		wantCode   int
-	}{
-		{"unknown object", `{"id":"ac-99","text":"x"}`, http.StatusBadRequest},
-		{"unknown field fails closed", `{"id":"ac-1","text":"x","bogus":1}`, http.StatusBadRequest},
-		{"empty text", `{"id":"ac-1","text":""}`, http.StatusBadRequest},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			rec := postBoardAPI(t, h, boardFixtureName, "edit-text", tc.body)
-			if rec.Code != tc.wantCode {
-				t.Fatalf("= %d, want %d\n%s", rec.Code, tc.wantCode, rec.Body.String())
+	h := newBoardTestHandler(root)
+
+	// An unknown object refuses through the kernel: a typed VERDICT in the
+	// body (§4.3 — classification is body content, not an HTTP status).
+	t.Run("unknown object is a typed verdict with zero mutation", func(t *testing.T) {
+		before, _ := os.ReadFile(filepath.Join(root, ".verdi", "specs", "active", boardFixtureName, "spec.md"))
+		rec, out := postMutate(t, h, root, boardFixtureName, []map[string]any{
+			{"op": "edit-ac", "id": "ac-99", "text": "x", "evidence": []string{"attestation"}, "anchor": "#ac-99"},
+		}, nil, nil)
+		if rec.Code != http.StatusOK || out.Failure == nil || out.Failure.Classification != "verdict" {
+			t.Fatalf("= %d %+v, want 200 with a verdict failure\n%s", rec.Code, out.Failure, rec.Body.String())
+		}
+		after, _ := os.ReadFile(filepath.Join(root, ".verdi", "specs", "active", boardFixtureName, "spec.md"))
+		if string(before) != string(after) {
+			t.Error("a refused operation still mutated the spec")
+		}
+	})
+
+	// The strict pre-application grammar (design §3.2): unknown fields,
+	// duplicate keys, nulls, and trailing data fail BEFORE any application
+	// call — HTTP 400, nothing decoded further, zero mutation.
+	valid := mutateEnvelope(t, root, boardFixtureName, []map[string]any{
+		{"op": "edit-ac", "id": "ac-1", "text": "x", "evidence": []string{"attestation"}, "anchor": "#ac-1"},
+	}, nil, nil)
+	for name, body := range map[string]string{
+		"unknown envelope field": `{"bogus":1,` + valid[1:],
+		"duplicate key":          `{"graduate_annotations":[],"graduate_annotations":[],` + valid[1:],
+		"null value":             `{"graduate_annotations":null,` + valid[1:],
+		"trailing data":          valid + `{}`,
+		"wrong spec name":        strings.Replace(valid, `"spec":"spec/`+boardFixtureName+`"`, `"spec":"spec/other-spec"`, 1),
+		"oversized body":         `{"graduate_annotations":["` + strings.Repeat("a", 1<<20) + `"],` + valid[1:],
+	} {
+		t.Run(name, func(t *testing.T) {
+			rec := postBoardAPI(t, h, boardFixtureName, "mutate_draft", body)
+			if rec.Code != http.StatusBadRequest {
+				t.Fatalf("= %d, want 400\n%s", rec.Code, rec.Body.String())
 			}
 		})
 	}
@@ -592,7 +614,7 @@ func TestBoardSpec_EditText_Negative(t *testing.T) {
 
 func TestBoardSpec_WritesRefusedOutsideAuthoring(t *testing.T) {
 	root := newBoardFixture(t)
-	h := NewHandler(root)
+	h := newBoardTestHandler(root)
 	// On the default branch the draft is not authorable (05 §Workbench:
 	// modes keyed by branch state). The draft is dropped UNCOMMITTED into
 	// main's working tree — the fixture's committed draft lives only on
@@ -602,9 +624,11 @@ func TestBoardSpec_WritesRefusedOutsideAuthoring(t *testing.T) {
 		t.Fatal(err)
 	}
 	writeWorkingTreeSpec(t, root, boardFixtureName, boardFixtureSpec)
-	rec := postBoardAPI(t, h, boardFixtureName, "edit-text", `{"id":"ac-1","text":"x"}`)
+	rec, _ := postMutate(t, h, root, boardFixtureName, []map[string]any{
+		{"op": "edit-ac", "id": "ac-1", "text": "x", "evidence": []string{"attestation"}, "anchor": "#ac-1"},
+	}, nil, nil)
 	if rec.Code != http.StatusForbidden {
-		t.Fatalf("edit-text off design branch = %d, want 403", rec.Code)
+		t.Fatalf("mutate_draft off design branch = %d, want 403", rec.Code)
 	}
 	if !strings.Contains(getBoard(t, h, boardFixtureName).Body.String(), `data-board-mode="readonly"`) {
 		t.Error("board off design branch is not read-only")
@@ -613,34 +637,45 @@ func TestBoardSpec_WritesRefusedOutsideAuthoring(t *testing.T) {
 
 func TestBoardSpec_Edge(t *testing.T) {
 	root := newBoardFixture(t)
-	h := NewHandler(root)
+	h := newBoardTestHandler(root)
 
-	// Illegal pair: an AC source offers no typed edge.
-	rec := postBoardAPI(t, h, boardFixtureName, "edge", `{"from":"ac-1","to":"ac-2","type":"implements"}`)
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("illegal edge = %d, want 400", rec.Code)
+	// An illegal source refuses through the kernel's validate-before-write
+	// as a typed verdict (the closed link vocabulary is the kernel's).
+	rec, out := postMutate(t, h, root, boardFixtureName, []map[string]any{
+		{"op": "add-link", "source": "ac-1", "type": "implements", "ref": "spec/" + boardFixtureName + "#ac-2"},
+	}, nil, nil)
+	if rec.Code != http.StatusOK || out.Failure == nil || out.Failure.Classification != "verdict" {
+		t.Fatalf("illegal edge = %d %+v, want a typed verdict\n%s", rec.Code, out.Failure, rec.Body.String())
 	}
-	// Unknown type fails closed even on a legal pair.
-	rec = postBoardAPI(t, h, boardFixtureName, "edge", `{"from":"dc-2","to":"adr/0001-outbox-events","type":"blesses"}`)
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("unknown edge type = %d, want 400", rec.Code)
+	// An unknown link type is refused by the strict operation union at
+	// decode — BEFORE any application call (design §3.2's closed grammar).
+	rec2, _ := postMutate(t, h, root, boardFixtureName, []map[string]any{
+		{"op": "add-link", "source": "dc-2", "type": "blesses", "ref": "adr/0001-outbox-events"},
+	}, nil, nil)
+	if rec2.Code != http.StatusBadRequest {
+		t.Fatalf("unknown edge type = %d, want 400 (pre-application strict decode)\n%s", rec2.Code, rec2.Body.String())
 	}
 
-	// Legal: decision → ADR supersedes (the first yarn on dc-2 — the S7
-	// absent-links splice case, exercised through the full HTTP path).
-	rec = postBoardAPI(t, h, boardFixtureName, "edge", `{"from":"dc-2","to":"adr/0001-outbox-events","type":"supersedes","note":"drawn on the board"}`)
-	if rec.Code != http.StatusOK {
+	// Legal: decision → ADR supersedes, one typed transaction.
+	rec, out = postMutate(t, h, root, boardFixtureName, []map[string]any{
+		{"op": "add-link", "source": "dc-2", "type": "supersedes", "ref": "adr/0001-outbox-events", "note": "drawn on the board"},
+	}, nil, nil)
+	if rec.Code != http.StatusOK || out.Result == nil {
 		t.Fatalf("legal edge = %d\n%s", rec.Code, rec.Body.String())
 	}
 	body := getBoard(t, h, boardFixtureName).Body.String()
 	if !strings.Contains(body, `data-edge-type="supersedes" data-from="dc-2" data-to="adr/0001-outbox-events" data-layer="spec"`) {
 		t.Error("new edge does not project as spec-layer yarn")
 	}
+	// The chip carries the exact stored tuple for later removal/retype.
+	if !strings.Contains(body, `data-stored-ref="adr/0001-outbox-events" data-note="drawn on the board"`) {
+		t.Error("spec-layer chip does not carry its stored link tuple")
+	}
 }
 
 func TestBoardSpec_StickyLifecycle(t *testing.T) {
 	root := newBoardFixture(t)
-	h := NewHandler(root)
+	h := newBoardTestHandler(root)
 
 	// The type is the author's explicit choice at creation (owner UAT
 	// round 6, item 2 — amends R4-I-31's question-by-default).
@@ -668,14 +703,15 @@ func TestBoardSpec_StickyLifecycle(t *testing.T) {
 		t.Error("sticky does not render")
 	}
 
-	// Graduation: the sticky becomes a declared open-question object via
-	// an ordinary edit; the record flips to graduated.
-	rec = postBoardAPI(t, h, boardFixtureName, "sticky-graduate", `{"id":"`+stickyID+`","kind":"open-question"}`)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("sticky-graduate = %d\n%s", rec.Code, rec.Body.String())
+	// Graduation: one typed add-question transaction plus the annotation
+	// flip riding the same gesture (graduate_annotations).
+	grec, gout := postMutate(t, h, root, boardFixtureName, []map[string]any{
+		{"op": "add-question", "id": "oq-1", "text": "open question: partial refunds?", "anchor": "#oq-1"},
+	}, []string{stickyID}, nil)
+	if grec.Code != http.StatusOK || gout.Result == nil {
+		t.Fatalf("graduation mutate_draft = %d\n%s", grec.Code, grec.Body.String())
 	}
-	_ = json.Unmarshal(rec.Body.Bytes(), &resp)
-	if !resp.Dirty {
+	if gout.Projection == nil || !gout.Projection.Dirty {
 		t.Error("graduation did not dirty the spec working tree (it IS a spec edit)")
 	}
 
@@ -919,16 +955,17 @@ func TestBoardSpec_StickyPositionRefusalNamesItsBoard(t *testing.T) {
 // splice write path.
 func TestBoardSpec_EdgeDelete(t *testing.T) {
 	root := newBoardFixture(t)
-	h := NewHandler(root)
+	h := newBoardTestHandler(root)
 
-	// The fixture's dc-1 carries the declared exempts edge.
-	rec := postBoardAPI(t, h, boardFixtureName, "edge-delete", `{"from":"dc-1","to":"adr/0001-outbox-events","type":"exempts"}`)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("edge-delete = %d\n%s", rec.Code, rec.Body.String())
+	// The fixture's dc-1 carries the declared exempts edge; the removal
+	// addresses its EXACT stored tuple (ref + note verbatim).
+	rec, out := postMutate(t, h, root, boardFixtureName, []map[string]any{
+		{"op": "remove-link", "source": "dc-1", "type": "exempts", "ref": "adr/0001-outbox-events", "note": "async by design"},
+	}, nil, nil)
+	if rec.Code != http.StatusOK || out.Result == nil {
+		t.Fatalf("edge removal = %d\n%s", rec.Code, rec.Body.String())
 	}
-	var resp boardAPIResponse
-	_ = json.Unmarshal(rec.Body.Bytes(), &resp)
-	if !resp.Dirty {
+	if out.Projection == nil || !out.Projection.Dirty {
 		t.Error("removing a declared edge did not dirty the working tree (it IS a spec edit)")
 	}
 	specData, _ := os.ReadFile(filepath.Join(root, ".verdi", "specs", "active", boardFixtureName, "spec.md"))
@@ -939,15 +976,15 @@ func TestBoardSpec_EdgeDelete(t *testing.T) {
 		t.Error("removed edge still projects as yarn")
 	}
 
-	// Negatives: unknown edge, undeclared source, document-level source.
-	for name, body := range map[string]string{
-		"already removed":       `{"from":"dc-1","to":"adr/0001-outbox-events","type":"exempts"}`,
-		"undeclared source":     `{"from":"zz-9","to":"adr/0001-outbox-events","type":"exempts"}`,
-		"document-level source": `{"from":"spec","to":"adr/0001-outbox-events","type":"implements"}`,
+	// Negatives refuse through the kernel as typed verdicts with zero
+	// mutation: the tuple is already gone, or the source never carried it.
+	for name, op := range map[string]map[string]any{
+		"already removed":   {"op": "remove-link", "source": "dc-1", "type": "exempts", "ref": "adr/0001-outbox-events", "note": "async by design"},
+		"undeclared source": {"op": "remove-link", "source": "zz-9", "type": "exempts", "ref": "adr/0001-outbox-events"},
 	} {
-		rec := postBoardAPI(t, h, boardFixtureName, "edge-delete", body)
-		if rec.Code != http.StatusBadRequest {
-			t.Errorf("%s = %d, want 400\n%s", name, rec.Code, rec.Body.String())
+		rec, out := postMutate(t, h, root, boardFixtureName, []map[string]any{op}, nil, nil)
+		if rec.Code != http.StatusOK || out.Failure == nil || out.Failure.Classification != "verdict" {
+			t.Errorf("%s = %d %+v, want a typed verdict\n%s", name, rec.Code, out.Failure, rec.Body.String())
 		}
 	}
 }
@@ -957,15 +994,23 @@ func TestBoardSpec_EdgeDelete(t *testing.T) {
 // surviving verbatim.
 func TestBoardSpec_EdgeRetype(t *testing.T) {
 	root := newBoardFixture(t)
-	h := NewHandler(root)
+	h := newBoardTestHandler(root)
 
-	rec := postBoardAPI(t, h, boardFixtureName, "edge-retype", `{"from":"dc-1","to":"adr/0001-outbox-events","type":"exempts","newType":"supersedes"}`)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("edge-retype = %d\n%s", rec.Code, rec.Body.String())
+	// Retype = remove + add in ONE atomic transaction, the stored ref and
+	// note surviving verbatim (task-2 brief adjudication).
+	rec, out := postMutate(t, h, root, boardFixtureName, []map[string]any{
+		{"op": "remove-link", "source": "dc-1", "type": "exempts", "ref": "adr/0001-outbox-events", "note": "async by design"},
+		{"op": "add-link", "source": "dc-1", "type": "supersedes", "ref": "adr/0001-outbox-events", "note": "async by design"},
+	}, nil, nil)
+	if rec.Code != http.StatusOK || out.Result == nil {
+		t.Fatalf("edge retype = %d\n%s", rec.Code, rec.Body.String())
 	}
 	specData, _ := os.ReadFile(filepath.Join(root, ".verdi", "specs", "active", boardFixtureName, "spec.md"))
-	if !strings.Contains(string(specData), `links: [ { type: supersedes, ref: adr/0001-outbox-events, note: "async by design" } ]`) {
+	if !strings.Contains(string(specData), `note: "async by design"`) || !strings.Contains(string(specData), "type: supersedes") {
 		t.Errorf("spec does not carry the retyped edge with ref and note verbatim:\n%s", specData)
+	}
+	if strings.Contains(string(specData), "type: exempts") {
+		t.Errorf("spec still carries the old edge type:\n%s", specData)
 	}
 	body := getBoard(t, h, boardFixtureName).Body.String()
 	if !strings.Contains(body, `data-edge-type="supersedes" data-from="dc-1"`) {
@@ -975,15 +1020,19 @@ func TestBoardSpec_EdgeRetype(t *testing.T) {
 		t.Error("old edge type still projects")
 	}
 
-	// Negatives: an illegal new type, and a type the edge does not carry.
-	for name, req := range map[string]string{
-		"illegal new type":   `{"from":"dc-1","to":"adr/0001-outbox-events","type":"supersedes","newType":"implements"}`,
-		"wrong current type": `{"from":"dc-1","to":"adr/0001-outbox-events","type":"exempts","newType":"supersedes"}`,
-	} {
-		rec := postBoardAPI(t, h, boardFixtureName, "edge-retype", req)
-		if rec.Code != http.StatusBadRequest {
-			t.Errorf("%s = %d, want 400\n%s", name, rec.Code, rec.Body.String())
-		}
+	// A batch whose second half fails lands NOTHING (the ordered batch is
+	// atomic): removing the surviving supersedes edge twice refuses on the
+	// second operation, and the spec keeps the supersedes edge.
+	rec, out = postMutate(t, h, root, boardFixtureName, []map[string]any{
+		{"op": "remove-link", "source": "dc-1", "type": "supersedes", "ref": "adr/0001-outbox-events", "note": "async by design"},
+		{"op": "remove-link", "source": "dc-1", "type": "supersedes", "ref": "adr/0001-outbox-events", "note": "async by design"},
+	}, nil, nil)
+	if rec.Code != http.StatusOK || out.Failure == nil || out.Failure.Classification != "verdict" {
+		t.Fatalf("atomic batch refusal = %d %+v, want a typed verdict\n%s", rec.Code, out.Failure, rec.Body.String())
+	}
+	specData, _ = os.ReadFile(filepath.Join(root, ".verdi", "specs", "active", boardFixtureName, "spec.md"))
+	if !strings.Contains(string(specData), "type: supersedes") {
+		t.Error("the refused batch removed the edge anyway (batch atomicity broken)")
 	}
 }
 
@@ -1009,7 +1058,7 @@ func TestBoardSpec_AffordancesAreAuthoringOnly(t *testing.T) {
 	}
 	for _, mode := range []boardModeKind{modeReadOnly, modeReview} {
 		proj.Mode = mode
-		frozen := renderBoardRegion(proj, &boardGitState{})
+		frozen := renderBoardRegion(proj, &boardGitState{}, testASDView())
 		for _, banned := range []string{`class="delete-btn"`, `data-retype`, `class="graduate-btn"`} {
 			if strings.Contains(frozen, banned) {
 				t.Errorf("%s board renders %s", mode, banned)
@@ -1020,7 +1069,7 @@ func TestBoardSpec_AffordancesAreAuthoringOnly(t *testing.T) {
 
 func TestBoardSpec_RelatesLifecycle(t *testing.T) {
 	root := newBoardFixture(t)
-	h := NewHandler(root)
+	h := newBoardTestHandler(root)
 
 	rec := postBoardAPI(t, h, boardFixtureName, "relates", `{"from":"dc-2","to":"adr/0001-outbox-events"}`)
 	if rec.Code != http.StatusOK {
@@ -1043,10 +1092,13 @@ func TestBoardSpec_RelatesLifecycle(t *testing.T) {
 		t.Error("relates thread does not render as annotation-layer yarn")
 	}
 
-	// Graduation to a typed edge via the picker's pair.
-	rec = postBoardAPI(t, h, boardFixtureName, "relates-graduate", `{"id":"`+threadID+`","type":"exempts","note":"confirmed on the board"}`)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("relates-graduate = %d\n%s", rec.Code, rec.Body.String())
+	// Graduation to a typed edge: one add-link transaction, the thread
+	// flip riding the same gesture.
+	grec, gout := postMutate(t, h, root, boardFixtureName, []map[string]any{
+		{"op": "add-link", "source": "dc-2", "type": "exempts", "ref": "adr/0001-outbox-events", "note": "confirmed on the board"},
+	}, []string{threadID}, nil)
+	if grec.Code != http.StatusOK || gout.Result == nil {
+		t.Fatalf("relates graduation = %d\n%s", grec.Code, grec.Body.String())
 	}
 	body = getBoard(t, h, boardFixtureName).Body.String()
 	if !strings.Contains(body, `data-edge-type="exempts" data-from="dc-2" data-to="adr/0001-outbox-events" data-layer="spec"`) {
@@ -1068,9 +1120,18 @@ func TestBoardSpec_RelatesLifecycle(t *testing.T) {
 			acThread = a.ID
 		}
 	}
-	rec = postBoardAPI(t, h, boardFixtureName, "relates-graduate", `{"id":"`+acThread+`","type":"implements"}`)
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("illegal relates-graduate = %d, want 400", rec.Code)
+	grec, gout = postMutate(t, h, root, boardFixtureName, []map[string]any{
+		{"op": "add-link", "source": "ac-1", "type": "implements", "ref": "spec/" + boardFixtureName + "#ac-2"},
+	}, []string{acThread}, nil)
+	if grec.Code != http.StatusOK || gout.Failure == nil || gout.Failure.Classification != "verdict" {
+		t.Fatalf("illegal graduation = %d %+v, want a typed verdict", grec.Code, gout.Failure)
+	}
+	// The refused transaction flipped NOTHING: the thread is still live.
+	annotations, _ = boardio.ReadAllAnnotations(boardio.AnnotationsDir(root))
+	for _, a := range annotations {
+		if a.ID == acThread && a.Status != artifact.AnnotationOpen {
+			t.Errorf("refused graduation still flipped thread %s to %s", acThread, a.Status)
+		}
 	}
 }
 
@@ -1128,11 +1189,15 @@ func TestBoardSpec_Position(t *testing.T) {
 
 func TestBoardSpec_GitCommitAndSwitch(t *testing.T) {
 	root := newBoardFixture(t)
-	h := NewHandler(root)
+	h := newBoardTestHandler(root)
 	ctx := context.Background()
 
 	// Dirty the tree through the board's own write path.
-	postBoardAPI(t, h, boardFixtureName, "edit-text", `{"id":"co-1","text":"notices never name internal scores [amended]"}`)
+	if rec, out := postMutate(t, h, root, boardFixtureName, []map[string]any{
+		{"op": "edit-constraint", "id": "co-1", "text": "notices never name internal scores [amended]", "anchor": "#co-1"},
+	}, nil, nil); rec.Code != http.StatusOK || out.Result == nil {
+		t.Fatalf("dirtying edit = %d\n%s", rec.Code, rec.Body.String())
+	}
 	dirty, _ := gitx.StatusDirty(ctx, root)
 	if !dirty {
 		t.Fatal("fixture not dirty after edit")
@@ -1194,7 +1259,7 @@ func TestBoardSpec_ReviewMode(t *testing.T) {
 			{ID: "3", Author: "carol", Body: "[vd:zz-99] does this still apply after the split?", Resolved: true},
 		},
 	}}
-	h := NewHandlerWith(root, Deps{CommentFeed: feed})
+	h := NewHandlerWith(root, Deps{CommentFeed: feed, Design: testDesignBridge{}})
 
 	rec := getBoard(t, h, boardFixtureName)
 	if rec.Code != http.StatusOK {
@@ -1230,8 +1295,12 @@ func TestBoardSpec_ReviewMode(t *testing.T) {
 			t.Errorf("review mode still renders %q", absent)
 		}
 	}
-	// And no write goes through.
-	recW := postBoardAPI(t, h, boardFixtureName, "edit-text", `{"id":"ac-1","text":"x"}`)
+	// And no write goes through: the review mirror refuses the typed
+	// mutation at the adapter (CO-1's review-mode refusal is board
+	// knowledge; the kernel cannot see the open MR).
+	recW, _ := postMutate(t, h, root, boardFixtureName, []map[string]any{
+		{"op": "edit-ac", "id": "ac-1", "text": "x", "evidence": []string{"attestation"}, "anchor": "#ac-1"},
+	}, nil, nil)
 	if recW.Code != http.StatusForbidden {
 		t.Fatalf("write in review mode = %d, want 403", recW.Code)
 	}
@@ -1472,38 +1541,71 @@ func TestBoardSpec_ActiveZoneLegacySuperseded_BadgeAndDisclosure(t *testing.T) {
 // mutations against the same spec both land (no lost update). Without the
 // per-server writeMu the second read-modify-write of spec.md could
 // clobber the first (last writer wins).
-func TestBoard_ConcurrentMutations_BothLand(t *testing.T) {
+// TestBoard_ConcurrentMutations_NeverLoseAnUpdate is DC-5's migrated
+// witness: two concurrent typed mutations against the SAME base digest
+// serialize through the kernel — exactly one lands, the other receives
+// the structured stale refusal naming the current digest, and no update
+// is ever silently merged or lost.
+func TestBoard_ConcurrentMutations_NeverLoseAnUpdate(t *testing.T) {
 	root := newBoardFixture(t)
-	h := NewHandler(root)
+	h := newBoardTestHandler(root)
 
-	var wg sync.WaitGroup
-	edits := []struct{ id, text string }{
-		{"ac-1", "a declined applicant sees the current reason [edit-A]"},
-		{"ac-2", "a decline reverses within one day [edit-B]"},
+	// Both envelopes read the SAME base (built before either posts).
+	envelopes := []string{
+		mutateEnvelope(t, root, boardFixtureName, []map[string]any{
+			{"op": "edit-ac", "id": "ac-1", "text": "a declined applicant sees the current reason [edit-A]", "evidence": []string{"attestation"}, "anchor": "#ac-1"},
+		}, nil, nil),
+		mutateEnvelope(t, root, boardFixtureName, []map[string]any{
+			{"op": "edit-ac", "id": "ac-2", "text": "a decline reverses within one day [edit-B]", "evidence": []string{"behavioral", "attestation"}, "anchor": "#ac-2"},
+		}, nil, nil),
 	}
-	for _, e := range edits {
+	results := make([]mutateOutcome, len(envelopes))
+	codes := make([]int, len(envelopes))
+	var wg sync.WaitGroup
+	for i, envelope := range envelopes {
 		wg.Add(1)
-		go func(id, text string) {
+		go func(i int, envelope string) {
 			defer wg.Done()
-			body := `{"id":"` + id + `","text":"` + text + `"}`
 			rec := httptest.NewRecorder()
-			req := httptest.NewRequest(http.MethodPost, "/board/spec/"+boardFixtureName+"/api/edit-text", strings.NewReader(body))
+			req := httptest.NewRequest(http.MethodPost, "/board/spec/"+boardFixtureName+"/api/mutate_draft", strings.NewReader(envelope))
 			h.ServeHTTP(rec, req)
-			if rec.Code != http.StatusOK {
-				t.Errorf("edit-text %s = %d, want 200: %s", id, rec.Code, rec.Body.String())
-			}
-		}(e.id, e.text)
+			codes[i] = rec.Code
+			_ = json.Unmarshal(rec.Body.Bytes(), &results[i])
+		}(i, envelope)
 	}
 	wg.Wait()
+
+	landed, stale := 0, 0
+	for i := range results {
+		if codes[i] != http.StatusOK {
+			t.Fatalf("concurrent mutate %d = %d\n", i, codes[i])
+		}
+		if results[i].Result != nil {
+			landed++
+		}
+		if results[i].Stale != nil {
+			stale++
+			if !strings.Contains(string(results[i].Stale), "current_digest") {
+				t.Errorf("stale refusal carries no current digest: %s", results[i].Stale)
+			}
+		}
+	}
+	if landed != 1 || stale != 1 {
+		t.Fatalf("landed=%d stale=%d, want exactly one of each (DC-5: refuse, never merge)", landed, stale)
+	}
 
 	specData, err := os.ReadFile(filepath.Join(root, ".verdi", "specs", "active", boardFixtureName, "spec.md"))
 	if err != nil {
 		t.Fatalf("read spec: %v", err)
 	}
 	spec := string(specData)
-	for _, e := range edits {
-		if !strings.Contains(spec, e.text) {
-			t.Errorf("edit %q was lost (last-writer-wins) — both concurrent mutations must land:\n%s", e.text, spec)
+	got := 0
+	for _, want := range []string{"[edit-A]", "[edit-B]"} {
+		if strings.Contains(spec, want) {
+			got++
 		}
+	}
+	if got != 1 {
+		t.Errorf("spec carries %d of the two edits, want exactly the winner:\n%s", got, spec)
 	}
 }

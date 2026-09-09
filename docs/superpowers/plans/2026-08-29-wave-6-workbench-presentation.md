@@ -10,12 +10,13 @@
 ASD, CI, GLG, and CSE over the same typed application cores used by CLI and MCP,
 without browser-owned authority or a shadow database.
 
-**Architecture:** Complete four missing browser-neutral predecessor seams, then
-add four fully serialized server-rendered workbench units. Reuse the Wave 3.5
-four-area shell and dependency-free JavaScript. Every read and action delegates
-to a typed application operation; accepted Git, strict artifacts, policies,
-governance kernels, execution receipts, and lifecycle derivations remain the
-only authority.
+**Architecture:** Complete four missing browser-neutral predecessor seams and
+the two ASD stop-gate corrections, then add four fully serialized
+server-rendered workbench units. Reuse the Wave 3.5 four-area shell and
+dependency-free JavaScript. Every read and action delegates to a typed
+application operation; accepted Git, strict artifacts, policies, governance
+kernels, execution receipts, and lifecycle derivations remain the only
+authority.
 
 **Tech stack:** Go, `internal/artifact`, feature application packages,
 `internal/workbench`, `cmd/verdi`, server-rendered HTML, dependency-free
@@ -25,29 +26,36 @@ tests, live MCP tests, and Playwright.
 **Authority:**
 `docs/superpowers/specs/2026-08-29-wave-6-workbench-presentation-design.md`,
 the four effective accepted feature specs, the Wave 5 CSE lifecycle design,
-the Wave 3.5 pilot plan/report, orchestration Wave 6, and SI-162–SI-168.
+the Wave 3.5 pilot plan/report, orchestration Wave 6, SI-162–SI-168, and the
+owner-approved Task 2 stop-gate corrections in SI-176–SI-177.
 
 **Planning base:** `915529f792f7a672e9631f42909995b38ed12655`
 
-**Execution status:** Independently reviewed and owner-approved; blocked only
-until this exact planning head merges to the configured default branch. No
-implementation prompt may execute from an unmerged planning branch.
+**SI-177 amendment base:** `ab7518975b6621aceeef4607cca29d9a87cd75b7`
+
+**Execution status:** The original planning authority and SI-176 amendment are
+independently reviewed, owner-approved, and merged. Task 1B and Task 2 are
+blocked until the consolidated SI-177 amendment passes its one independent
+review and closure and its exact head merges to the configured default branch.
+No implementation prompt may execute from an unmerged authority branch.
 
 ## Contents
 
 1. Global constraints
 2. Unit protocol and evidence bundle
 3. Task 1 — ASD application predecessor
-4. Task 2 — ASD workbench
-5. Task 3 — Constitution application predecessor
-6. Task 4 — Constitution workbench
-7. Task 5 — GLG predecessors
-8. Task 6 — GLG workbench
-9. Task 7 — CSE human-proof coordinator
-10. Task 8 — CSE workbench
-11. Task 9 — Wave 6 integration
-12. Planning authority review gate
-13. Exact Claude Code handoff template
+4. Task 1A — ASD browser-human authority correction
+5. Task 1B — ASD writer-process transaction correction
+6. Task 2 — ASD workbench
+7. Task 3 — Constitution application predecessor
+8. Task 4 — Constitution workbench
+9. Task 5 — GLG predecessors
+10. Task 6 — GLG workbench
+11. Task 7 — CSE human-proof coordinator
+12. Task 8 — CSE workbench
+13. Task 9 — Wave 6 integration
+14. Planning authority review gate
+15. Exact Claude Code handoff template
 
 ## Global constraints
 
@@ -67,12 +75,17 @@ implementation prompt may execute from an unmerged planning branch.
   performance contracts in the design.
 - No push, PR, merge, rebase, amend of reviewed history, or next-unit work from
   a Claude implementation session.
+- Task 2 remains paused until Tasks 1A and 1B are independently reviewed,
+  owner-approved, and merged. Its frontend branch must restart from the Task 1B
+  owner-merge exact head.
 
 ## Unit protocol and evidence bundle
 
 | Task | Branch after predecessor merge | Risk | Report leaf | Commit subject |
 |---:|---|---|---|---|
 | 1 | `agent/wave6-asd-core` | Tier 3 | `task-1-asd-core-report.md` | `Complete AI-assisted design application operations` |
+| 1A | `agent/wave6-asd-human-authority` | Tier 3 | `task-1a-asd-human-authority-report.md` | `Permit explicit browser-human draft mutations` |
+| 1B | `agent/wave6-asd-writer-reentry` | Tier 3 | `task-1b-asd-writer-reentry-report.md` | `Permit mutations inside the writer process` |
 | 2 | `agent/wave6-asd-workbench` | Tier 3 | `task-2-asd-workbench-report.md` | `Present synchronized AI-assisted design` |
 | 3 | `agent/wave6-constitution-core` | Tier 3 | `task-3-constitution-core-report.md` | `Establish the constitution application workflow` |
 | 4 | `agent/wave6-constitution-workbench` | Tier 3 | `task-4-constitution-workbench-report.md` | `Present the project constitution` |
@@ -173,6 +186,210 @@ and fixes. No frontend files.
 **Stop gate:** If semantic review, context, or actor attribution needs a new
 schema/authority choice, stop before production edits and report it.
 
+## Task 1A: Correct ASD browser-human mutation authority
+
+**Owner:** Sonnet implementation worker under FABLE orchestration. Opus reviews
+and fixes. Codex independently adjudicates the completed unit. No frontend
+files.
+
+**Authority:** Wave 6 design §§4.1 and 6.1.1; ASD AC-1/AC-3/AC-4/AC-7,
+DC-9, CO-2–CO-6/CO-9; SI-163 and SI-176.
+
+**Likely files:**
+
+- Modify `internal/draftmutation/policy.go`, `service.go`, and focused tests.
+- Modify `internal/designprovenance` schema/codec/record owners and tests.
+- Modify directly affected `internal/designapp` and adapter conformance tests
+  only for the V2 provenance projection and constructor-call inventory.
+- Modify deterministic fixtures/goldens only when their exact V2 bytes move.
+- Do not modify `internal/workbench`, `cmd/verdi/serve*`, assets, CSS,
+  JavaScript, Playwright, accepted feature specs, this plan, or the ledger.
+
+**Interfaces:**
+
+- Produce `draftmutation.NewUnauthenticatedHuman() (Actor, error)` as the only
+  public constructor for the explicit browser-human actor.
+- Keep `Actor.Kind() == ActorHuman`, kernel unauthenticated attribution, and no
+  harness/session, while sealing a private basis distinct from
+  `NewTrustedHuman` with violated or unproven resolution.
+- Preserve delegated-agent policy behavior and the existing no-bypass matrix
+  for violated/unproven principal resolution.
+- Add strict `verdi.design-provenance/v2`; keep V1 strict decode-only history;
+  make all new writers emit V2.
+- V2 forbids `policy_digest` and instead requires one non-null top-level
+  `policy` object with exactly one arm:
+  `{"state":"resolved","digest":"sha256:..."}` or
+  `{"state":"not-applicable"}`. The latter forbids `digest` and is emitted
+  only for the explicit browser-human actor when policy authority returns the
+  canonical not-adopted condition. V1 retains required `policy_digest` and
+  forbids `policy`; unknown, missing, null, duplicate, cross-arm, and trailing
+  data fail closed in both versions.
+- For explicit browser humans, a valid adopted effective policy contributes
+  only its sealed digest; `design_assistance` presence/mode cannot authorize or
+  refuse the mutation. Malformed adopted authority remains operational.
+
+- [ ] RED the missing constructor, the no-policy browser refusal, and the V2
+      schema symbols before production edits.
+- [ ] RED a mode `off` browser-human mutation against valid adopted authority;
+      it must currently refuse and later succeed while recording the effective
+      digest.
+- [ ] RED a valid adopted effective policy with no `design_assistance` payload;
+      the browser-human mutation must succeed and record the effective-policy
+      digest, while the delegated-agent path retains its missing-payload
+      refusal.
+- [ ] RED an unproven/violated `NewTrustedHuman` mutation under `off` and prove
+      it remains refused after the correction.
+- [ ] RED V1 history decode and mixed V1/V2 log continuity before version
+      dispatch; prove exact historical bytes remain accepted and unchanged.
+- [ ] Implement the sealed actor basis and actor-first authorization split.
+- [ ] Implement one shared effective-policy identity resolution path. Treat
+      only `policyauthority.ErrNotAdopted` as `not-applicable`; reject nil,
+      malformed, unsealed, or otherwise failing adopted authority
+      operationally.
+- [ ] Implement strict V1/V2 dispatch, V2 deterministic encoding, closed policy
+      arms, alias-safe projections, canonical round-trip validation, and own
+      digest binding. Do not hash or synthesize a no-policy sentinel.
+- [ ] Prove agent V2 entries always use `resolved`, browser-human absent-policy
+      entries use `not-applicable`, and valid-policy browser-human entries use
+      `resolved` without mode gating.
+- [ ] Prove the sole production caller inventory for
+      `NewUnauthenticatedHuman`: the resumed workbench handler is not present
+      yet, so this unit exposes the constructor and structurally proves no
+      current CLI/MCP/request-decoder path can call or mint it. Task 2 adds the
+      one browser call and updates the inventory to exactly one.
+- [ ] Run focused and full affected-package races, vet, lint, gofmt, strict
+      fixture/golden ratchets, `internal/specalign`, `internal/showcasealign`,
+      and diff checks.
+- [ ] Complete FABLE/Opus producer review and stop for independent Codex review.
+
+**Required semantic RED:**
+
+```bash
+GOCACHE=/private/tmp/verdi-wave6-task1a-gocache \
+go test ./internal/draftmutation ./internal/designprovenance \
+  -run 'Test.*(UnauthenticatedHuman|HumanPolicyPosture|DesignProvenanceV2)' \
+  -count=1
+```
+
+Expected: compile/test failure on the missing constructor, V2 schema/policy
+union, and no-policy browser authorization path. A sandbox-only cache failure
+is not semantic RED evidence.
+
+**Commit subject:** `Permit explicit browser-human draft mutations`
+
+## Task 1B: Correct ASD writer-process transaction custody
+
+**Owner:** Sonnet implements and fixes `internal/filelock` and
+`internal/draftmutation` under FABLE orchestration. A FABLE frontend worker
+owns the correction and any fix in `internal/workbench/boardspecapi.go` plus
+its browser-handler tests. Opus independently reviews and fixes accepted
+non-frontend defects; Codex independently adjudicates the completed unit. No
+markup, CSS, JavaScript, asset, visual, or Playwright file changes.
+
+**Authority:** Wave 6 design §6.1.2; ASD AC-2/AC-7/AC-8; I-12; SI-69 and
+SI-177.
+
+SI-177 supersedes SI-69 only for a registry-proven outer lock owned by the
+caller process. Every foreign or unproven serve/writer holder retains SI-69's
+existing refusal.
+
+**Likely files:**
+
+- Modify `internal/filelock/filelock.go` and focused tests for synchronized,
+  exact-file process-local ownership registration and its read-only query.
+- Modify `internal/draftmutation/transaction.go` and focused tests for
+  per-checkout in-process serialization and proven outer-lock reuse.
+- Modify only `boardSpecServer.spliceSpec` and its focused tests under
+  `internal/workbench` to run the surviving legacy `spec.md` splice inside
+  `WithWriterLock` until Task 2 deletes that path.
+- Modify `cmd/verdi/serve_integration_test.go` and narrowly related MCP
+  integration fixtures/tests to prove a real served `mutate_draft` succeeds.
+- Modify no other board handler, asset, CSS, JavaScript, Playwright, artifact
+  schema, provenance schema, policy, actor, accepted spec, this plan, design,
+  or ledger file.
+
+**Interfaces:**
+
+- Produce `filelock.HeldByCurrentProcess(path string) (bool, error)` as a
+  read-only ownership query. It returns true only when `path` resolves to the
+  exact still-open file identity registered by this process's successful
+  `Acquire`; matching PID/start bytes without a registry entry return false.
+- Keep `filelock.Acquire(path)` non-reentrant and `Release(file, path)` as the
+  sole owner release. Registration begins only after successful acquisition
+  and ends only when that exact registered handle is released.
+- Keep `draftmutation.WithWriterLock`'s public signature unchanged. Its inner
+  reuse is private and may occur only after ordinary acquisition returns
+  `ErrHeld` and `HeldByCurrentProcess` proves ownership.
+- Derive the in-process mutex key as the cleaned absolute writer-lock path only
+  after the existing component-by-component symlink/non-directory checks. Do
+  not resolve a forbidden symlink into an allowed alternate key.
+- Keep `boardio` annotation JSONL outside the draft spec/provenance transaction;
+  Task 1B makes no system-wide all-file serialization claim. The temporary
+  legacy splice participates because it writes the same `spec.md` bytes that a
+  draft transaction replaces.
+
+- [ ] Read I-12, SI-69/SI-177, filelock acquisition/release/stale-takeover
+      tests, draftmutation transaction/journal tests, `verdi serve`, standalone
+      `verdi mcp`, and the live MCP `mutate_draft` adapter before editing.
+- [ ] RED a process that acquires the checkout writer lock and then calls
+      `WithWriterLock` on that checkout: base must return `ErrHeld`; GREEN must
+      run the callback and leave the outer lock present and owned afterward.
+- [ ] RED two concurrent `WithWriterLock` calls under one outer process-owned
+      lock; prove their callbacks never overlap and both complete in a
+      deterministic order controlled by the test. Also prove different
+      checkout lock paths are not globally serialized.
+- [ ] RED a legacy `boardSpecServer.spliceSpec` read/modify/write racing a live
+      MCP `mutate_draft` on the same spec. At base, deterministically pause both
+      after their reads and prove one silently loses the other's update; GREEN
+      must run the legacy splice first and the MCP transaction second, preserve
+      both ordered results, and leave design provenance matching the final spec.
+- [ ] RED a forged lock file carrying the current PID/start but absent from the
+      process-local registry; it must remain held/unproven and the mutation must
+      refuse with zero journal/spec/provenance effects.
+- [ ] Implement synchronized ownership registration using exact acquired file
+      identity, not PID comparison. Refuse replaced, removed/recreated,
+      unreadable, or path-mismatched lock files.
+- [ ] Implement the per-canonical-lock-path transaction mutex. Hold it across
+      validation, acquisition/reuse, callback/journal work, and any
+      inner-acquired release. Release only a handle acquired by that invocation.
+- [ ] Route only the legacy `spliceSpec` callback through `WithWriterLock` and
+      retain its existing parse/edit/validate/atomic-write behavior inside the
+      callback. Do not create provenance for that legacy path or change its
+      response bytes; Task 2 still deletes it completely.
+- [ ] Prove existing live foreign-holder refusal, malformed-lock refusal,
+      symlink refusal, stale/dead-holder takeover, PID-reuse protection, and
+      crash-retained journal recovery remain unchanged.
+- [ ] Add one real `verdi serve` MCP-socket regression that sends a valid
+      policy-authorized `mutate_draft`, observes the canonical clean result and
+      exact spec/provenance mutation, and proves the outer writer lock remains
+      continuously held. Its base RED must assert the exact typed
+      `operational` / `io-failure` MCP classification and zero mutation, not
+      merely error text. Retain the existing external built-binary mutation
+      refusal while serve owns the lock.
+- [ ] Run focused and full `internal/filelock`, `internal/draftmutation`,
+      `internal/designapp`, `internal/mcpserve`, and `internal/workbench` races;
+      the focused live serve/MCP integration race; `go vet` over affected
+      packages; gofmt, golangci-lint, spec-align, showcase-align, and diff
+      checks.
+- [ ] Complete FABLE/Opus producer review and stop for independent Codex review.
+
+**Required semantic RED:**
+
+```bash
+GOCACHE=/private/tmp/verdi-wave6-task1b-gocache \
+go test ./internal/draftmutation ./internal/workbench ./cmd/verdi \
+  -run 'Test(WithWriterLockReusesCurrentProcessHolder|LegacyBoardSpliceSerializesWithWriterTransaction|ServeMutateDraftUsesHeldWriterLock)' \
+  -count=1
+```
+
+Expected: the draftmutation test returns the existing live-holder refusal and
+the live-serve mutation returns typed `operational` / `io-failure` before any
+mutation, while the deterministic legacy-splice race loses one of the two
+updates. A sandbox-only cache or local-socket denial is not semantic RED
+evidence; rerun the identical command with the required local permissions.
+
+**Commit subject:** `Permit mutations inside the writer process`
+
 ## Task 2: Build the ASD synchronized workbench
 
 **Owner:** FABLE frontend worker. Sonnet may supply only non-visual handler
@@ -186,6 +403,18 @@ wiring if FABLE delegates it explicitly; FABLE owns every resulting UI fix.
 - Add `e2e/*design*` Playwright coverage and deterministic `testdata/` fixtures.
 - Do not change feature schemas, mutation grammar, provenance grammar, context
   compilation, or semantic-review algorithms.
+- Start only from the owner-merged Task 1B head. Call
+  `draftmutation.NewUnauthenticatedHuman` only in the browser mutation adapter;
+  do not reconstruct, wrap, or expose the actor through request data.
+- Consume Task 1B's `WithWriterLock` behavior unchanged. Do not add a frontend
+  lock, release the serve lock, bypass the transaction, or infer ownership from
+  PID/lock-file bytes in the workbench.
+- Delete the now-serialized legacy `spliceSpec` path in the same change that
+  routes every domain mutation through `designapp`; do not retain it as a
+  second serialized writer. Keep annotation append/graduation/deletion on the
+  distinct `boardio` files and preserve their existing explicit
+  post-clean-transaction ordering rather than folding them into the
+  spec/provenance transaction.
 
 - [ ] RED: a built handler/Playwright journey proves unsaved edits are currently
       lost or direct mutation bypasses `designapp`.
@@ -252,9 +481,82 @@ submit-preparation over one exact accepted/proposed Git identity.
 **Stop gate:** Any new rule grammar, precedence, approval record, applicability
 operator, or conflict semantics is `NEEDS_CONTEXT`.
 
+**SI-179/SI-180 closure correction (must merge before Task 4):**
+
+- [ ] RED the nonempty-but-incomplete caller target case: two registered
+      consumers exist, the caller supplies only the passing one, and the
+      pre-correction packet incorrectly reports `ready_for_submission: true`.
+- [ ] Create `internal/constitutionimpact` as the sole owner of strict
+      `verdi.constitution-consumer-inventory/v1` at
+      `.verdi/constitution/consumers.json` and canonical
+      `verdi.constitution-impact-coverage/v1`; reuse the nested
+      `contextcompile.Request`, execution-grant capability document, active
+      action-subject vocabulary, and `policyconflict` result without copying
+      their grammars or algorithms.
+- [ ] Before the inventory can be written, execute the SI-179 D1 ratification
+      clerically under Codex's spec-only ownership: synchronize the source and
+      self-hosted `verdi-store-layout` specifications, add the
+      `08-revision-notes.md` entry, and then have the runtime correction admit
+      `constitution` in `knownTopLevelEntries`/VL-007. Pin that
+      `.verdi/constitution/consumers.json` passes lint while every other new
+      top-level name remains refused. The directory's v1 grammar is exactly
+      `consumers.json` and remains loader-owned by `constitutionimpact`, matching
+      SI-36 rather than creating another VL content grammar.
+- [ ] Load accepted and proposed inventories at the same exact identities as
+      the application operation; for a nonempty constitution layer diff,
+      derive the sorted union and evaluate every member through the existing
+      accepted-context conflict path. A removed row stays in the union. Validate
+      each inventory's `governed_operations` against the constitution catalog
+      in that inventory's own exact tree, so catalog shrinkage is evaluated as
+      impact instead of making the accepted inventory operationally invalid.
+- [ ] Define an entry's canonical identity over all three operands together:
+      the canonical nested context request, the canonical declared environment,
+      and the sorted governed-operation set. Pin otherwise-identical requests
+      with different environments as distinct entries.
+- [ ] For inventory v1, require the nested request's environment scope to
+      contain exactly the one declared environment. Represent a consumer used
+      in multiple environments as separate complete rows; do not add a scalar
+      environment input to `contextcompile` or infer one from a broader scope.
+- [ ] Bind conflict evidence to request plus environment, not to the
+      governed-operation list. Permit operation-distinct consumer identities
+      with identical request/environment operands to reuse the same canonical
+      manifest/report while still requiring one evaluation row per full
+      identity. Refuse reuse across different requests or environments.
+- [ ] Prove the closed coverage states. Missing inventory/unknown evaluation is
+      disclosed-unproven; duplicate, omitted, extra, or identity-mismatched
+      rows are violated-with-witness; malformed present bytes are operational;
+      only complete exact evaluation is proven. With a nonempty constitution
+      diff, a present-but-empty accepted/proposed union is
+      disclosed-as-unproven with `consumer-universe-empty` and never ready;
+      pin that case separately from missing inventory and no-layer-change.
+- [ ] Demote request `targets` to supplemental preview/presentation inputs.
+      They may add output but can never remove canonical rows, establish
+      completeness, or improve submission readiness.
+- [ ] Keep inventory maintenance outside `constitutionapp.Propose`: proposed
+      bytes arrive through ordinary Git proposal custody, and neither the
+      application nor Task 4 infers or repairs rows.
+- [ ] Make `SubmitPreparation` require proven coverage plus passing canonical
+      conflict verdicts. Pin missing inventory, removed-consumer union,
+      malformed inventory, unknown evaluation, omitted/extra evaluation,
+      supplemental-only success, no-layer-change, accepted/proposed identity,
+      CLI/MCP byte parity, and zero-effect behavior.
+- [ ] Keep `policyartifact`, `policyauthority`, `contextcompile`, and
+      `policyconflict` behavior unchanged; this correction consumes their
+      exported contracts and adds no reverse matcher or second evaluator.
+- [ ] Run races for `internal/constitutionimpact`, `internal/constitutionapp`,
+      `internal/contextcompile`, and `internal/policyconflict`; full
+      `cmd/verdi` and `internal/mcpserve` conformance; `internal/lint` plus
+      spec-align and showcase layout/fidelity witnesses; vet, lint, gofmt, and
+      diff checks. Complete the Tier 3 FABLE/Opus chain and stop for independent
+      Codex review.
+
 ## Task 4: Build the Constitution workbench
 
 **Owner:** FABLE frontend worker.
+
+**Precondition:** Task 3 and its SI-179 completeness correction are
+owner-merged. The workbench consumes the canonical coverage witness through
+`constitutionapp`; it cannot derive, substitute, or repair the affected set.
 
 **Likely files:** create `internal/workbench/constitution*.go` plus tests,
 route-scoped assets, `cmd/verdi/serve` injection, Playwright, and fixtures.
@@ -435,9 +737,12 @@ FABLE/worker lane.
 
 ## Planning authority review gate
 
-Before any implementation prompt is issued, Codex freezes this design, plan,
-and SI-162–SI-168 as one exact-head spec-only tranche and creates one immutable
-diff package with a published SHA-256. Claude receives a read-only prompt that:
+The initial planning authority used this gate for the design, plan, and
+SI-162–SI-168. Codex applied the same gate to the consolidated SI-176 amendment
+before Task 1A. Before Task 1B receives an implementation prompt, Codex applies
+it again to the consolidated SI-177 amendment across this design, this plan,
+and the ledger, creating one immutable exact-range diff package with a
+published SHA-256. Claude receives a read-only prompt that:
 
 - names the exact base/head/range and diff-package path;
 - requires `/fable-orchestration` only to structure the read-only challenge;

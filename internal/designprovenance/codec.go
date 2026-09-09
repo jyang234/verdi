@@ -9,7 +9,24 @@ import (
 )
 
 // EncodeEntry returns one canonical JSONL record, including its newline.
+//
+// It is a WRITER surface, so it refuses Schema (v1): that version is strict
+// decode-only history and no writer may emit it, not even by re-encoding an
+// otherwise valid historical record. Reading historical v1 bytes is
+// unaffected — DecodeEntry uses the version-neutral encodeCanonical below.
 func EncodeEntry(entry Entry) ([]byte, error) {
+	if err := refuseDecodeOnlyWrite(entry.Schema); err != nil {
+		return nil, err
+	}
+	return encodeCanonical(entry)
+}
+
+// encodeCanonical is the private, VERSION-NEUTRAL canonical encoder shared by
+// the public writer surface above and by DecodeEntry's canonical re-encode
+// comparison. It carries no writer refusal by design: verifying that a
+// committed v1 line is canonical requires reproducing that line's exact
+// bytes, so this path must keep encoding every accepted schema.
+func encodeCanonical(entry Entry) ([]byte, error) {
 	if err := entry.Validate(); err != nil {
 		return nil, err
 	}
@@ -25,7 +42,7 @@ func DecodeEntry(data []byte) (Entry, error) {
 	if err := entry.Validate(); err != nil {
 		return Entry{}, err
 	}
-	canonical, err := EncodeEntry(entry)
+	canonical, err := encodeCanonical(entry)
 	if err != nil {
 		return Entry{}, err
 	}
