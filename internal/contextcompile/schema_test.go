@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"testing"
 
 	"github.com/jyang234/verdi/internal/canonjson"
@@ -519,6 +520,43 @@ func TestDataItem_EncodeIgnoresCallerSuppliedDigest(t *testing.T) {
 	}
 	if bytes.Contains(out, []byte(`"digest":"sha256:`+hex64('a')+`"`)) {
 		t.Fatalf("EncodeDataItem embedded the caller-supplied digest instead of recomputing it")
+	}
+}
+
+// TestRequireDataOnlyWhenProven pins the SI-194 rule shared, textually
+// identical, by internal/sealedexec's private controller-owner wire and
+// internal/contextowner's public republication of it: a resolution's
+// accompanying document is required when (and only when) state is proven,
+// and forbidden otherwise, refused by name either way.
+func TestRequireDataOnlyWhenProven(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		state   Resolution
+		present bool
+		wantErr bool
+	}{
+		{name: "proven-with-data ok", state: ResolutionProven, present: true},
+		{name: "proven-without-data refused", state: ResolutionProven, present: false, wantErr: true},
+		{name: "non-proven-without-data ok", state: ResolutionUnproven, present: false},
+		{name: "non-proven-with-data refused", state: ResolutionUnproven, present: true, wantErr: true},
+		{name: "violated-without-data ok", state: ResolutionViolatedWithWitness, present: false},
+		{name: "violated-with-data refused", state: ResolutionViolatedWithWitness, present: true, wantErr: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := RequireDataOnlyWhenProven("testpkg", tc.state, tc.present)
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("RequireDataOnlyWhenProven(%q, %v) = nil, want a refusal", tc.state, tc.present)
+				}
+				if !strings.HasPrefix(err.Error(), "testpkg: ") {
+					t.Fatalf("RequireDataOnlyWhenProven error = %q, want the caller's own %q prefix", err.Error(), "testpkg: ")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("RequireDataOnlyWhenProven(%q, %v): %v", tc.state, tc.present, err)
+			}
+		})
 	}
 }
 

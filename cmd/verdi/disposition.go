@@ -69,8 +69,19 @@ const dispositionUsage = "disposition: usage: verdi disposition --rationale <tex
 // in a real invocation; read and set only by this package's own tests.
 var dispositionTestInterleave func(reportPath string)
 
-// cmdDisposition is `verdi disposition`'s entry point, invoked by dispatch.go.
+// cmdDisposition is `verdi disposition`'s entry point, invoked by
+// dispatch.go. It routes the literal first argument "record" to
+// cmdDispositionRecord (disposition_record.go, Task 3) BEFORE this file's
+// own positional/flag parsing ever runs — the same first-argument routing
+// cmdContext (context.go) already established for its own subcommand
+// family. "record" was never a legal first token for this verb's own
+// grammar (a spec-ref must start with "spec/"), so this is purely
+// additive: no existing invocation's behavior changes.
 func cmdDisposition(args []string, stdout, stderr io.Writer) int {
+	if len(args) > 0 && args[0] == "record" {
+		return cmdDispositionRecord(args[1:], stdout, stderr)
+	}
+
 	positional, decision, rationale, amend, rc := parseDispositionArgs(args, stderr)
 	if rc != 0 {
 		return rc

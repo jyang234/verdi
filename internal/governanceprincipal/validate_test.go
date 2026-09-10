@@ -230,6 +230,119 @@ func TestDecodeProfileFieldRules(t *testing.T) {
 	}
 }
 
+// soloLocalOperatorYAML is a valid solo profile declaring a
+// local-operator trust source, with role_mappings binding one subject to
+// it under two roles (2026-09-05 local-operator disposition design
+// §2.1). Shared with resolve_test.go's Resolver tests.
+const soloLocalOperatorYAML = `schema: verdi.governance-profile/v1
+id: solo-local-operator
+class: solo
+applicable_transitions: [accept, close]
+identity_trust_sources:
+  - { id: local, kind: local-operator }
+role_mappings:
+  - role: author
+    trust_source: local
+    subjects: ["alice@example.com"]
+  - role: reviewer
+    trust_source: local
+    subjects: ["alice@example.com"]
+ownership_sources: []
+signature_requirements: []
+required_approvers: []
+distinctness_rules: []
+evidence_source_restrictions: []
+escalation_thresholds: []
+`
+
+// soloMixedSourcesYAML is a valid solo profile declaring TWO trust
+// sources whose role_mappings bind different subjects: alice under the
+// local-operator source, bob under the forge source. It isolates the
+// per-source half of the role-mapping binding rule — bob is a subject
+// the profile binds, but not one it binds to `local` — so a resolver
+// that asked only "is this subject bound anywhere?" would authenticate a
+// local-operator claim for bob (2026-09-05 local-operator disposition
+// design §2.1: bound "to that source"). Used by resolve_test.go.
+const soloMixedSourcesYAML = `schema: verdi.governance-profile/v1
+id: solo-mixed-sources
+class: solo
+applicable_transitions: [accept, close]
+identity_trust_sources:
+  - { id: github, kind: forge }
+  - { id: local, kind: local-operator }
+role_mappings:
+  - role: author
+    trust_source: local
+    subjects: ["alice@example.com"]
+  - role: reviewer
+    trust_source: github
+    subjects: ["bob@example.com"]
+ownership_sources: []
+signature_requirements: []
+required_approvers: []
+distinctness_rules: []
+evidence_source_restrictions: []
+escalation_thresholds: []
+`
+
+// minimalNonSoloWithLocalOperatorYAML builds the smallest profile of class
+// that still decodes structurally (an empty rule set for every family),
+// declaring a local-operator trust source alongside an ordinary forge
+// one. validateTrustSources runs before validateClassCoverage, so this
+// minimal shape is enough to isolate the solo-only rule from every other
+// class-coverage requirement.
+func minimalNonSoloWithLocalOperatorYAML(class, id string) []byte {
+	return []byte(`schema: verdi.governance-profile/v1
+id: ` + id + `
+class: ` + class + `
+applicable_transitions: [accept]
+identity_trust_sources:
+  - { id: github, kind: forge }
+  - { id: local, kind: local-operator }
+role_mappings: []
+ownership_sources: []
+signature_requirements: []
+required_approvers: []
+distinctness_rules: []
+evidence_source_restrictions: []
+escalation_thresholds: []
+`)
+}
+
+// TestDecodeProfileLocalOperatorSoloOnly proves the profile validator
+// refuses a local-operator trust source for every class except solo,
+// naming the offending class in the error (2026-09-05 local-operator
+// disposition design §2.1: "the ratified reading of the solo class").
+func TestDecodeProfileLocalOperatorSoloOnly(t *testing.T) {
+	if _, err := DecodeProfile([]byte(soloLocalOperatorYAML), testCatalog()); err != nil {
+		t.Fatalf("DecodeProfile(solo + local-operator): unexpected error: %v", err)
+	}
+
+	tests := []struct {
+		class Class
+		id    string
+	}{
+		{ClassTeam, "team-local-operator"},
+		{ClassHighAssurance, "ha-local-operator"},
+		{ClassExperimental, "exp-local-operator"},
+	}
+	for _, tt := range tests {
+		t.Run(string(tt.class), func(t *testing.T) {
+			raw := minimalNonSoloWithLocalOperatorYAML(string(tt.class), tt.id)
+			_, err := DecodeProfile(raw, testCatalog())
+			if err == nil {
+				t.Fatalf("DecodeProfile(%s + local-operator): want error, got nil", tt.class)
+			}
+			if !strings.Contains(err.Error(), "local-operator") {
+				t.Errorf("DecodeProfile(%s + local-operator) error %q does not name the kind", tt.class, err)
+			}
+			if !strings.Contains(err.Error(), string(tt.class)) {
+				t.Errorf("DecodeProfile(%s + local-operator) error %q does not name the class", tt.class, err)
+			}
+		})
+	}
+}
+
 func TestDecodeProfileClassCoverage(t *testing.T) {
 	haWithout := func(family, empty string) []byte {
 		return []byte(strings.Replace(highAssuranceYAML, family, empty, 1))

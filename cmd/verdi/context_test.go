@@ -24,6 +24,7 @@ import (
 	"github.com/jyang234/verdi/internal/fixturegit"
 	"github.com/jyang234/verdi/internal/instructionprojection"
 	"github.com/jyang234/verdi/internal/policyartifact"
+	"github.com/jyang234/verdi/internal/sealedexec"
 	"github.com/jyang234/verdi/internal/specstate"
 )
 
@@ -254,6 +255,97 @@ func TestCmdContext_Usage(t *testing.T) {
 				t.Fatalf("stderr = %q, want exactly %q", stderr.String(), contextCompileUsage+"\n")
 			}
 		})
+	}
+}
+
+// TestCmdContextOwnerRouting proves the namespace routes `owner` to the owner
+// bridge's own closed grammar rather than to the compile usage line, and that
+// adding the subcommand did not widen the namespace: `owner` is recognized,
+// every other unknown word still is not.
+//
+// The routing itself is the property under test. `verdi context owner` is the
+// one subcommand an external controller invokes for every FD-3 operation, so a
+// build that silently fell through to the compile arm would answer an owner
+// call with a usage line about a manifest.
+func TestCmdContextOwnerRouting(t *testing.T) {
+	t.Chdir(t.TempDir())
+
+	var stdout, stderr bytes.Buffer
+	if got := cmdContext([]string{"owner"}, strings.NewReader(""), &stdout, &stderr); got != 2 {
+		t.Fatalf("cmdContext(owner) = %d, want 2", got)
+	}
+	if stdout.Len() != 0 {
+		t.Fatalf("stdout = %q, want empty on a usage error", stdout.String())
+	}
+	if stderr.String() != contextOwnerUsage+"\n" {
+		t.Fatalf("stderr = %q, want the owner usage line %q", stderr.String(), contextOwnerUsage+"\n")
+	}
+
+	// A word that merely starts like the new subcommand is still unknown.
+	stdout.Reset()
+	stderr.Reset()
+	if got := cmdContext([]string{"owners"}, strings.NewReader(""), &stdout, &stderr); got != 2 {
+		t.Fatalf("cmdContext(owners) = %d, want 2", got)
+	}
+	if stderr.String() != contextCompileUsage+"\n" {
+		t.Fatalf("stderr = %q, want the namespace usage line %q", stderr.String(), contextCompileUsage+"\n")
+	}
+}
+
+// TestCmdContextResolveRouting proves the namespace routes `resolve` to the
+// read-only context-item resolver's own closed grammar rather than to the
+// compile usage line, and that adding the subcommand did not widen the
+// namespace: `resolve` is recognized, every other unknown word still is not.
+//
+// The routing itself is the property under test. `verdi context resolve` is
+// the one subcommand an external authority owner invokes for a fresh data
+// item, so a build that silently fell through to the compile arm would answer
+// a resolution request with a usage line about a manifest — and would do so
+// only after resolving a store root the resolve grammar had not yet approved.
+func TestCmdContextResolveRouting(t *testing.T) {
+	t.Chdir(t.TempDir())
+
+	var stdout, stderr bytes.Buffer
+	if got := cmdContext([]string{"resolve"}, strings.NewReader(""), &stdout, &stderr); got != 2 {
+		t.Fatalf("cmdContext(resolve) = %d, want 2", got)
+	}
+	if stdout.Len() != 0 {
+		t.Fatalf("stdout = %q, want empty on a usage error", stdout.String())
+	}
+	if stderr.String() != contextResolveUsage+"\n" {
+		t.Fatalf("stderr = %q, want the resolve usage line %q", stderr.String(), contextResolveUsage+"\n")
+	}
+
+	// The usage line names the one accepted argv verbatim. It is the only
+	// grammar an external controller can read off this binary, so it is frozen
+	// as an exact string rather than pattern-matched.
+	if contextResolveUsage != "usage: verdi context resolve --request -" {
+		t.Fatalf("contextResolveUsage = %q, want the exact two-token grammar", contextResolveUsage)
+	}
+
+	// The `=`-joined spelling reaches the resolver's own grammar and is refused
+	// there, from a directory that is not a store — so the refusal is about the
+	// argv and never about a checkout the caller never got to.
+	stdout.Reset()
+	stderr.Reset()
+	if got := cmdContext([]string{"resolve", "--request=-"}, strings.NewReader(""), &stdout, &stderr); got != 2 {
+		t.Fatalf("cmdContext(resolve --request=-) = %d, want 2", got)
+	}
+	if stdout.Len() != 0 {
+		t.Fatalf("stdout = %q, want empty on a usage error", stdout.String())
+	}
+	if stderr.String() != contextResolveUsage+"\n" {
+		t.Fatalf("stderr = %q, want the resolve usage line %q", stderr.String(), contextResolveUsage+"\n")
+	}
+
+	// A word that merely starts like the new subcommand is still unknown.
+	stdout.Reset()
+	stderr.Reset()
+	if got := cmdContext([]string{"resolves"}, strings.NewReader(""), &stdout, &stderr); got != 2 {
+		t.Fatalf("cmdContext(resolves) = %d, want 2", got)
+	}
+	if stderr.String() != contextCompileUsage+"\n" {
+		t.Fatalf("stderr = %q, want the namespace usage line %q", stderr.String(), contextCompileUsage+"\n")
 	}
 }
 
@@ -701,6 +793,91 @@ func TestCmdContextCompile_OutIsOtherAdapterManagedFile_Refused(t *testing.T) {
 				t.Fatal("CLAUDE.md content changed despite the refusal — another adapter's managed projection file must never be overwritten")
 			}
 		})
+	}
+}
+
+// TestCmdContextContract proves the contract query is effect-free and exact.
+//
+// It runs from a directory that is not a store and never becomes one: no root
+// is resolved, no file is read, and nothing is written outside stdout. That is
+// the property a consumer depends on — the query answers about the binary, so a
+// caller must be able to ask it anywhere, including before a checkout exists.
+func TestCmdContextContract(t *testing.T) {
+	dir := t.TempDir()
+	t.Chdir(dir)
+
+	var stdout, stderr bytes.Buffer
+	if got := cmdContext([]string{"contract"}, strings.NewReader(""), &stdout, &stderr); got != 0 {
+		t.Fatalf("cmdContext(contract) = %d, want 0\nstderr: %s", got, stderr.String())
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("stderr = %q, want empty on success", stderr.String())
+	}
+
+	want, err := sealedexec.EncodeControllerContract()
+	if err != nil {
+		t.Fatalf("EncodeControllerContract: %v", err)
+	}
+	if !bytes.Equal(stdout.Bytes(), want) {
+		t.Fatalf("stdout = %q, want the canonical contract %q", stdout.String(), want)
+	}
+
+	// Nothing was created. The query resolves no root, so a directory that was
+	// not a store before is not one after.
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("ReadDir: %v", err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("the contract query created %d entry/entries in the working directory", len(entries))
+	}
+}
+
+// TestCmdContextContract_TakesNoArgument proves the closed empty grammar.
+//
+// Every operand is a usage error rather than something quietly ignored: a verb
+// that accepted an argument it does not honour would answer a question the
+// caller did not ask, and the caller would have no way to tell.
+func TestCmdContextContract_TakesNoArgument(t *testing.T) {
+	t.Chdir(t.TempDir())
+
+	for _, args := range [][]string{
+		{"contract", "--json"},
+		{"contract", "spec/anything"},
+		{"contract", "--out", "contract.json"},
+		{"contract", ""},
+	} {
+		t.Run(strings.Join(args, " "), func(t *testing.T) {
+			var stdout, stderr bytes.Buffer
+			got := cmdContext(args, strings.NewReader(""), &stdout, &stderr)
+			if got != 2 {
+				t.Fatalf("cmdContext(%v) = %d, want 2", args, got)
+			}
+			if stdout.Len() != 0 {
+				t.Fatalf("stdout = %q, want empty on a usage error", stdout.String())
+			}
+			if stderr.String() != contextContractUsage+"\n" {
+				t.Fatalf("stderr = %q, want exactly %q", stderr.String(), contextContractUsage+"\n")
+			}
+		})
+	}
+}
+
+// TestCmdContextContract_StdoutWriteFailure_ExitTwo proves the query never
+// reports success it could not deliver, and never reaches a verdict exit.
+//
+// A contract that could not be written is an operational failure: the caller
+// received no document, and no judgement about any story was made.
+func TestCmdContextContract_StdoutWriteFailure_ExitTwo(t *testing.T) {
+	t.Chdir(t.TempDir())
+
+	var stderr bytes.Buffer
+	got := cmdContext([]string{"contract"}, strings.NewReader(""), contextFailingWriter{}, &stderr)
+	if got != 2 {
+		t.Fatalf("cmdContext(contract) with a failing stdout = %d, want 2", got)
+	}
+	if stderr.Len() == 0 {
+		t.Fatal("a failed write reported nothing on stderr")
 	}
 }
 

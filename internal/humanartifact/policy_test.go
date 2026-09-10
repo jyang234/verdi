@@ -3,12 +3,14 @@ package humanartifact
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/jyang234/verdi/internal/canonjson"
+	"github.com/jyang234/verdi/internal/governanceprincipal"
 	"github.com/jyang234/verdi/internal/policyartifact"
 )
 
@@ -58,27 +60,23 @@ func testExemptionData(scaffold Scaffold) ExemptionScaffoldData {
 	}
 }
 
-// testDispositionWitnessInputID computes the exact witness input_id
-// testDispositionData's witness fields imply — the canonical digest of a
+// testDispositionWitnessInputID computes the exact witness input_id the
+// given claims/exemptions imply — the canonical digest of a
 // policyartifact.SemanticWitness with InputID cleared, exactly what
-// policyartifact's own (unexported) witnessInputID computes internally —
-// so DecodeDisposition's own input_id-agreement check passes. Computed,
-// never hand-typed, mirroring policy_test.go's own testWitnessClaimDigest
-// discipline.
-func testDispositionWitnessInputID(t *testing.T, targetDigest, claimID, claimDigest, category, authorityDigest string) string {
+// policyartifact's own (unexported) witnessInputID computes internally.
+// DecodeDisposition no longer cross-checks this agreement (SI-114), but
+// computing a real, self-consistent value here — never hand-typed —
+// mirrors policy_test.go's own testWitnessClaimDigest discipline and keeps
+// fixtures meaningful. Generalized (Task 3, docs/superpowers/specs/
+// 2026-09-05-local-operator-disposition-design.md §2.3) to accept a
+// complete claims/exemptions set, not only the one placeholder claim the
+// original judge-result skeleton witnessed.
+func testDispositionWitnessInputID(t *testing.T, targetDigest string, claims []policyartifact.SemanticClaimWitness, exemptions []policyartifact.SemanticExemptionWitness) string {
 	t.Helper()
-	universal := policyartifact.Scope{Phases: []string{}, Environments: []string{}, Paths: []string{}, Refs: []string{}}
 	w := policyartifact.SemanticWitness{
 		TargetDigest: targetDigest,
-		Claims: []policyartifact.SemanticClaimWitness{{
-			ID:              claimID,
-			Digest:          claimDigest,
-			Category:        category,
-			AuthorityDigest: authorityDigest,
-			Scope:           universal,
-			Values:          []string{},
-		}},
-		Exemptions: []policyartifact.SemanticExemptionWitness{},
+		Claims:       claims,
+		Exemptions:   exemptions,
 	}
 	id, err := canonjson.Digest(w)
 	if err != nil {
@@ -87,36 +85,136 @@ func testDispositionWitnessInputID(t *testing.T, targetDigest, claimID, claimDig
 	return id
 }
 
+// testDispositionClaim returns the n'th test claim as both the
+// DispositionScaffoldData shape RenderDisposition consumes and the
+// policyartifact.SemanticClaimWitness the same content decodes to — the
+// two must never drift, so every test builds both from this one function.
+// n selects a distinct, kernel-legal policy-instruction claim id
+// ("policy/test-policy#instruction-<n>"); n==1 deliberately reuses the
+// UNSUFFIXED seeds ("test-disposition-claim"/"test-disposition-authority")
+// the pre-multi-claim fixture always used, so
+// TestRenderDisposition_ByteIdentityRegression's golden digests never move
+// underneath it.
+func testDispositionClaim(n int) (DispositionClaimData, policyartifact.SemanticClaimWitness) {
+	claimSeed, authoritySeed := "test-disposition-claim", "test-disposition-authority"
+	if n != 1 {
+		claimSeed = fmt.Sprintf("%s-%d", claimSeed, n)
+		authoritySeed = fmt.Sprintf("%s-%d", authoritySeed, n)
+	}
+	claim := DispositionClaimData{
+		ID:              fmt.Sprintf("policy/test-policy#instruction-%d", n),
+		Digest:          testDigestFor(claimSeed),
+		Category:        "policy-instruction",
+		AuthorityDigest: testDigestFor(authoritySeed),
+		// policy-instruction is the one witness category whose scope is not
+		// pinned to scope.refs == [ID] (validateSemanticClaimScope), so the
+		// universal scope every test fixture used before multi-category
+		// claims existed remains legal here.
+		Scope: universalScope,
+	}
+	witness := policyartifact.SemanticClaimWitness{
+		ID: claim.ID, Digest: claim.Digest, Category: claim.Category, AuthorityDigest: claim.AuthorityDigest,
+		Scope: claim.Scope, Values: []string{},
+	}
+	return claim, witness
+}
+
+// testDispositionExemption returns the n'th test exemption as both the
+// DispositionScaffoldData shape and the policyartifact.SemanticExemptionWitness
+// the same content decodes to, mirroring testDispositionClaim's discipline.
+func testDispositionExemption(n int) (DispositionExemptionData, policyartifact.SemanticExemptionWitness) {
+	id := fmt.Sprintf("policy-exemption/test-exemption-%d", n)
+	digest := testDigestFor(fmt.Sprintf("test-disposition-exemption-%d", n))
+	return DispositionExemptionData{ID: id, Digest: digest}, policyartifact.SemanticExemptionWitness{ID: id, Digest: digest}
+}
+
+// testPrincipal derives a real canonical principal id for subject under a
+// fixed "github-org" trust source — computed via the kernel's own
+// constructor rather than hand-typed base64, so a second approver fixture
+// can never silently carry a malformed principal.
+func testPrincipal(t *testing.T, subject string) string {
+	t.Helper()
+	id, err := governanceprincipal.CanonicalPrincipalID("github-org", subject)
+	if err != nil {
+		t.Fatalf("CanonicalPrincipalID(%q): %v", subject, err)
+	}
+	return string(id)
+}
+
 func testDispositionData(scaffold Scaffold) DispositionScaffoldData {
-	targetDigest := testDigestFor("test-disposition-target")
-	claimDigest := testDigestFor("test-disposition-claim")
-	authorityDigest := testDigestFor("test-disposition-authority")
+	claim, _ := testDispositionClaim(1)
 	// InputID is filled in by the caller below once the other fields are
 	// fixed (it depends on them); tests that need a real DispositionScaffoldData
 	// call testDispositionDataWithInputID(t, scaffold) instead.
 	return DispositionScaffoldData{
-		Name:              "test-disposition",
-		Title:             "Test Disposition",
-		Owners:            []string{"platform-team"},
-		TargetDigest:      targetDigest,
-		ClaimID:           "policy/test-policy#instruction-1",
-		ClaimDigest:       claimDigest,
-		Category:          "policy-instruction",
-		AuthorityDigest:   authorityDigest,
-		ApprovalRole:      "policy-owner",
-		ApprovalPrincipal: "principal/github-org/YWxpY2U",
-		Expiry:            "2099-12-31",
-		TemplateIdentity:  scaffold.Identity,
-		TemplateDigest:    scaffold.Digest,
+		Name:             "test-disposition",
+		Title:            "Test Disposition",
+		Owners:           []string{"platform-team"},
+		TargetDigest:     testDigestFor("test-disposition-target"),
+		Claims:           []DispositionClaimData{claim},
+		Conclusion:       string(policyartifact.DispositionNoConflict),
+		Origin:           string(policyartifact.DispositionJudgeResult),
+		Approvals:        []DispositionApprovalData{{Role: "policy-owner", Principal: "principal/github-org/YWxpY2U"}},
+		Expiry:           "2099-12-31",
+		TemplateIdentity: scaffold.Identity,
+		TemplateDigest:   scaffold.Digest,
 	}
 }
 
 // testDispositionDataWithInputID returns testDispositionData(scaffold) with
-// a real, computed InputID matching its own witness fields.
+// a real, computed InputID matching its own single-claim witness — the
+// exact pre-multi-claim fixture shape, preserved unchanged so
+// TestRenderDisposition_ByteIdentityRegression keeps proving the original
+// rendering path byte-for-byte.
 func testDispositionDataWithInputID(t *testing.T, scaffold Scaffold) DispositionScaffoldData {
 	t.Helper()
 	data := testDispositionData(scaffold)
-	data.InputID = testDispositionWitnessInputID(t, data.TargetDigest, data.ClaimID, data.ClaimDigest, data.Category, data.AuthorityDigest)
+	_, witness := testDispositionClaim(1)
+	data.InputID = testDispositionWitnessInputID(t, data.TargetDigest, []policyartifact.SemanticClaimWitness{witness}, []policyartifact.SemanticExemptionWitness{})
+	return data
+}
+
+// testDispositionDataMultiClaim returns a DispositionScaffoldData with two
+// claims, one exemption, and two approvals — Task 3's multi-claim
+// extension exercised directly against RenderDisposition, independent of
+// the cmd/verdi verb.
+func testDispositionDataMultiClaim(t *testing.T, scaffold Scaffold) DispositionScaffoldData {
+	t.Helper()
+	claim1, w1 := testDispositionClaim(1)
+	claim2, w2 := testDispositionClaim(2)
+	exemption, ew := testDispositionExemption(1)
+	data := DispositionScaffoldData{
+		Name:         "test-disposition-multi",
+		Title:        "Test Disposition Multi",
+		Owners:       []string{"platform-team"},
+		TargetDigest: testDigestFor("test-disposition-target"),
+		Claims:       []DispositionClaimData{claim1, claim2},
+		Exemptions:   []DispositionExemptionData{exemption},
+		Conclusion:   string(policyartifact.DispositionNoConflict),
+		Origin:       string(policyartifact.DispositionJudgeResult),
+		Approvals: []DispositionApprovalData{
+			{Role: "policy-owner", Principal: "principal/github-org/YWxpY2U"},
+			{Role: "security-owner", Principal: testPrincipal(t, "bob")},
+		},
+		Expiry:           "2099-12-31",
+		TemplateIdentity: scaffold.Identity,
+		TemplateDigest:   scaffold.Digest,
+	}
+	data.InputID = testDispositionWitnessInputID(t, data.TargetDigest, []policyartifact.SemanticClaimWitness{w1, w2}, []policyartifact.SemanticExemptionWitness{ew})
+	return data
+}
+
+// testDispositionDataHumanFallback returns a DispositionScaffoldData whose
+// origin is human-fallback with one compensating control — Task 3's
+// human-fallback extension exercised directly against RenderDisposition.
+func testDispositionDataHumanFallback(t *testing.T, scaffold Scaffold) DispositionScaffoldData {
+	t.Helper()
+	data := testDispositionData(scaffold)
+	data.Name = "test-disposition-fallback"
+	data.Origin = string(policyartifact.DispositionHumanFallback)
+	data.CompensatingControls = []string{"Manual review by the policy owner before merge."}
+	_, witness := testDispositionClaim(1)
+	data.InputID = testDispositionWitnessInputID(t, data.TargetDigest, []policyartifact.SemanticClaimWitness{witness}, []policyartifact.SemanticExemptionWitness{})
 	return data
 }
 
@@ -234,8 +332,9 @@ func TestRenderDisposition_RoundTripKernelFields(t *testing.T) {
 		t.Fatalf("Witness.Claims = %+v, want exactly one", d.Witness.Claims)
 	}
 	claim := d.Witness.Claims[0]
-	if claim.ID != data.ClaimID || claim.Digest != data.ClaimDigest || claim.Category != data.Category || claim.AuthorityDigest != data.AuthorityDigest {
-		t.Fatalf("Witness.Claims[0] = %+v, want id/digest/category/authority_digest matching data", claim)
+	want := data.Claims[0]
+	if claim.ID != want.ID || claim.Digest != want.Digest || claim.Category != want.Category || claim.AuthorityDigest != want.AuthorityDigest {
+		t.Fatalf("Witness.Claims[0] = %+v, want id/digest/category/authority_digest matching data.Claims[0] %+v", claim, want)
 	}
 	if !scopesEqual(claim.Scope, universalScope) {
 		t.Fatalf("Witness.Claims[0].Scope = %+v, want universal", claim.Scope)
@@ -252,7 +351,7 @@ func TestRenderDisposition_RoundTripKernelFields(t *testing.T) {
 	if len(d.CompensatingControls) != 0 {
 		t.Fatalf("CompensatingControls = %v, want empty", d.CompensatingControls)
 	}
-	wantApproval := policyartifact.Approval{Role: data.ApprovalRole, Principal: data.ApprovalPrincipal}
+	wantApproval := policyartifact.Approval{Role: data.Approvals[0].Role, Principal: data.Approvals[0].Principal}
 	if len(d.Approvals) != 1 || d.Approvals[0] != wantApproval {
 		t.Fatalf("Approvals = %+v, want exactly [%+v]", d.Approvals, wantApproval)
 	}
@@ -299,7 +398,10 @@ func TestRenderDisposition_StoreOverrideResolution(t *testing.T) {
 
 // testDispositionTemplate is a minimal, valid, self-contained
 // policy-disposition.md-shaped template — the sabotage table's own base,
-// mirroring testPolicyTemplate's role.
+// mirroring testPolicyTemplate's role. Byte-identical to the canonical
+// embedded scaffold (internal/designscaffold/templates/policy-disposition.md)
+// so a sabotage mutation below exercises the same structure the real
+// template renders.
 const testDispositionTemplate = `---
 schema: verdi.policy-disposition/v1
 id: policy-disposition/{{.Name}}
@@ -311,19 +413,21 @@ witness:
   input_id: {{printf "%q" .InputID}}
   target_digest: {{printf "%q" .TargetDigest}}
   claims:
-    - id: {{safe .ClaimID}}
-      digest: {{printf "%q" .ClaimDigest}}
+{{range .Claims}}    - id: {{safe .ID}}
+      digest: {{printf "%q" .Digest}}
       category: {{safe .Category}}
       authority_digest: {{printf "%q" .AuthorityDigest}}
-      scope: {phases: [], environments: [], paths: [], refs: []}
+      scope: {phases: [{{range $i, $v := .Scope.Phases}}{{if $i}}, {{end}}{{safe $v}}{{end}}], environments: [{{range $i, $v := .Scope.Environments}}{{if $i}}, {{end}}{{safe $v}}{{end}}], paths: [{{range $i, $v := .Scope.Paths}}{{if $i}}, {{end}}{{safe $v}}{{end}}], refs: [{{range $i, $v := .Scope.Refs}}{{if $i}}, {{end}}{{safe $v}}{{end}}]}
       values: []
-  exemptions: []
-conclusion: no-conflict
-origin: judge-result
-approvals:
-  - role: {{safe .ApprovalRole}}
-    principal: {{safe .ApprovalPrincipal}}
-expiry: {{printf "%q" .Expiry}}
+{{end}}  exemptions: [{{range $i, $e := .Exemptions}}{{if $i}}, {{end}}{id: {{printf "%q" $e.ID}}, digest: {{printf "%q" $e.Digest}}}{{end}}]
+conclusion: {{.Conclusion}}
+origin: {{.Origin}}
+{{if .CompensatingControls}}compensating_controls:
+{{range .CompensatingControls}}  - {{printf "%q" .}}
+{{end}}{{end}}approvals:
+{{range .Approvals}}  - role: {{safe .Role}}
+    principal: {{safe .Principal}}
+{{end}}expiry: {{printf "%q" .Expiry}}
 template: {identity: {{printf "%q" .TemplateIdentity}}, digest: {{printf "%q" .TemplateDigest}}}
 ---
 Placeholder rationale.
@@ -348,15 +452,17 @@ func TestRenderDisposition_Sabotage(t *testing.T) {
 		},
 		{
 			"hardcode conclusion to conflict",
-			func(s string) string { return strings.Replace(s, "conclusion: no-conflict", "conclusion: conflict", 1) },
+			func(s string) string {
+				return strings.Replace(s, "conclusion: {{.Conclusion}}", "conclusion: conflict", 1)
+			},
 			"conclusion",
 		},
 		{
 			"hardcode origin to human-fallback",
 			func(s string) string {
-				return strings.Replace(s,
-					"origin: judge-result\napprovals:",
-					"origin: human-fallback\ncompensating_controls:\n  - \"A control.\"\napprovals:", 1)
+				old := "origin: {{.Origin}}\n{{if .CompensatingControls}}compensating_controls:\n{{range .CompensatingControls}}  - {{printf \"%q\" .}}\n{{end}}{{end}}approvals:"
+				new := "origin: human-fallback\ncompensating_controls:\n  - \"A control.\"\napprovals:"
+				return strings.Replace(s, old, new, 1)
 			},
 			"origin",
 		},
@@ -375,6 +481,38 @@ review_condition: "synthesized review condition"`, 1)
 			},
 			"review_condition",
 		},
+		{
+			"synthesize an extra claim beyond data.Claims",
+			func(s string) string {
+				old := "{{end}}  exemptions:"
+				extra := fmt.Sprintf(
+					"    - id: policy/test-policy#instruction-99\n"+
+						"      digest: %q\n"+
+						"      category: policy-instruction\n"+
+						"      authority_digest: %q\n"+
+						"      scope: {phases: [], environments: [], paths: [], refs: []}\n"+
+						"      values: []\n"+
+						"  exemptions:",
+					testDigestFor("sabotage-extra-claim-digest"), testDigestFor("sabotage-extra-claim-authority"))
+				return strings.Replace(s, old, "{{end}}"+extra, 1)
+			},
+			"claims",
+		},
+		{
+			"synthesize an extra approval beyond data.Approvals",
+			func(s string) string {
+				old := "{{end}}expiry:"
+				// Reuses testDispositionData's own known-good principal under
+				// a DIFFERENT role, so decode's (role, principal) duplicate
+				// check never fires and the anti-synthesis check below is
+				// reached on a structurally valid, decodable document.
+				extra := "  - role: synthesized-owner\n" +
+					"    principal: principal/github-org/YWxpY2U\n" +
+					"expiry:"
+				return strings.Replace(s, old, "{{end}}"+extra, 1)
+			},
+			"approvals",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -388,6 +526,141 @@ review_condition: "synthesized review condition"`, 1)
 				t.Fatalf("RenderDisposition(sabotaged: %s) error = %v, want containing %q", tt.name, err, tt.wantSub)
 			}
 		})
+	}
+}
+
+// dispositionByteIdentityGoldenFormat is the exact byte output
+// RenderDisposition produced for testDispositionData's single-claim/
+// single-approval/judge-result/no-controls/no-exemptions shape before this
+// file gained multi-claim, multi-approval, exemption, and human-fallback
+// support (Task 3, docs/superpowers/specs/2026-09-05-local-operator-
+// disposition-design.md §2.3). The %q placeholder is the resolved
+// scaffold's own template digest — necessarily different from the
+// pre-change template's digest, since the template itself gained the
+// range/if constructs multi-claim rendering requires — every other byte is
+// pinned exactly as originally captured.
+const dispositionByteIdentityGoldenFormat = `---
+schema: verdi.policy-disposition/v1
+id: policy-disposition/test-disposition
+kind: policy-disposition
+title: "Test Disposition"
+owners: [platform-team]
+scope: {phases: [], environments: [], paths: [], refs: []}
+witness:
+  input_id: "sha256:1ad1cb978571fd924576be3db70ea03ab00a22f69a7f54a383260121fc1a1ee2"
+  target_digest: "sha256:40174022ec741c7a2b05162d805d464ef3c7b63b1ce13792025a23ff3334210d"
+  claims:
+    - id: policy/test-policy#instruction-1
+      digest: "sha256:b10384977978c8ab275438c4d23f9ab7ff0d9da8fc0d4d41ba94b863932d2096"
+      category: policy-instruction
+      authority_digest: "sha256:50158216016971021258dcd62c6862f36f152cdfad77128a7fff1400ebb88ae2"
+      scope: {phases: [], environments: [], paths: [], refs: []}
+      values: []
+  exemptions: []
+conclusion: no-conflict
+origin: judge-result
+approvals:
+  - role: policy-owner
+    principal: principal/github-org/YWxpY2U
+expiry: "2099-12-31"
+template: {identity: "embedded:policy-disposition.md", digest: %q}
+---
+TODO: replace with the real rationale before accept.
+`
+
+// TestRenderDisposition_ByteIdentityRegression is the dispatch's own
+// required proof that extending DispositionScaffoldData/RenderDisposition
+// to a real, possibly-multi-element witness (multi-claim, multi-approval,
+// exemptions, human-fallback) left the pre-existing single-claim/
+// judge-result rendering path byte-for-byte unchanged, up to the
+// necessarily-moved template self-digest (see the golden's own doc
+// comment).
+func TestRenderDisposition_ByteIdentityRegression(t *testing.T) {
+	scaffold, err := ResolveScaffold(t.TempDir(), "policy-disposition.md")
+	if err != nil {
+		t.Fatalf("ResolveScaffold: %v", err)
+	}
+	data := testDispositionDataWithInputID(t, scaffold)
+	content, err := RenderDisposition(scaffold, data)
+	if err != nil {
+		t.Fatalf("RenderDisposition: %v", err)
+	}
+	want := fmt.Sprintf(dispositionByteIdentityGoldenFormat, scaffold.Digest)
+	if content != want {
+		t.Fatalf("RenderDisposition output changed for the pre-existing single-claim/judge-result shape:\n--- got ---\n%s\n--- want ---\n%s", content, want)
+	}
+}
+
+// TestRenderDisposition_MultiClaim proves RenderDisposition's multi-claim
+// extension: every claim, the exemption, and every approval data supplies
+// round-trip to exactly what was given, in order, and the rendered content
+// decodes and validates through the frozen policyartifact decoder.
+func TestRenderDisposition_MultiClaim(t *testing.T) {
+	scaffold, err := ResolveScaffold(t.TempDir(), "policy-disposition.md")
+	if err != nil {
+		t.Fatalf("ResolveScaffold: %v", err)
+	}
+	data := testDispositionDataMultiClaim(t, scaffold)
+	content, err := RenderDisposition(scaffold, data)
+	if err != nil {
+		t.Fatalf("RenderDisposition: %v", err)
+	}
+	d, err := policyartifact.DecodeDisposition([]byte(content))
+	if err != nil {
+		t.Fatalf("DecodeDisposition: %v", err)
+	}
+	if len(d.Witness.Claims) != 2 {
+		t.Fatalf("Witness.Claims = %+v, want exactly 2", d.Witness.Claims)
+	}
+	for i, want := range data.Claims {
+		got := d.Witness.Claims[i]
+		if got.ID != want.ID || got.Digest != want.Digest || got.Category != want.Category || got.AuthorityDigest != want.AuthorityDigest {
+			t.Fatalf("Witness.Claims[%d] = %+v, want matching data.Claims[%d] %+v", i, got, i, want)
+		}
+	}
+	if len(d.Witness.Exemptions) != 1 || d.Witness.Exemptions[0].ID != data.Exemptions[0].ID || d.Witness.Exemptions[0].Digest != data.Exemptions[0].Digest {
+		t.Fatalf("Witness.Exemptions = %+v, want exactly [%+v]", d.Witness.Exemptions, data.Exemptions[0])
+	}
+	wantApprovals := []policyartifact.Approval{
+		{Role: data.Approvals[0].Role, Principal: data.Approvals[0].Principal},
+		{Role: data.Approvals[1].Role, Principal: data.Approvals[1].Principal},
+	}
+	if !approvalSetEqual(d.Approvals, wantApprovals) {
+		t.Fatalf("Approvals = %+v, want the set %+v", d.Approvals, wantApprovals)
+	}
+	if d.Origin != policyartifact.DispositionJudgeResult {
+		t.Fatalf("Origin = %q, want judge-result", d.Origin)
+	}
+}
+
+// TestRenderDisposition_HumanFallback proves RenderDisposition's
+// human-fallback extension: origin and the compensating-control list
+// round-trip to exactly what data supplied, no judgment provenance is
+// fabricated, and the human-fallback-specific decode rules (at least one
+// compensating control, a real expiry or review condition) are satisfied
+// by what this scaffold renders.
+func TestRenderDisposition_HumanFallback(t *testing.T) {
+	scaffold, err := ResolveScaffold(t.TempDir(), "policy-disposition.md")
+	if err != nil {
+		t.Fatalf("ResolveScaffold: %v", err)
+	}
+	data := testDispositionDataHumanFallback(t, scaffold)
+	content, err := RenderDisposition(scaffold, data)
+	if err != nil {
+		t.Fatalf("RenderDisposition: %v", err)
+	}
+	d, err := policyartifact.DecodeDisposition([]byte(content))
+	if err != nil {
+		t.Fatalf("DecodeDisposition: %v", err)
+	}
+	if d.Origin != policyartifact.DispositionHumanFallback {
+		t.Fatalf("Origin = %q, want human-fallback", d.Origin)
+	}
+	if !stringSlicesEqualExact(d.CompensatingControls, data.CompensatingControls) {
+		t.Fatalf("CompensatingControls = %v, want %v", d.CompensatingControls, data.CompensatingControls)
+	}
+	if d.Judgment != nil {
+		t.Fatalf("Judgment = %+v, want none (RenderDisposition never fabricates judgment provenance)", d.Judgment)
 	}
 }
 

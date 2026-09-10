@@ -11,6 +11,8 @@ import (
 	"fmt"
 	"os/exec"
 	"path/filepath"
+	"reflect"
+	"sort"
 	"strings"
 	"sync"
 	"unicode/utf8"
@@ -30,6 +32,13 @@ const (
 	// claudeProcessSource is Amendment 002 §5's telemetry-gap source for
 	// process-level (as opposed to stream-level) conditions.
 	claudeProcessSource = "claude-process"
+
+	// claudeVersionProbeSuffix is the single fixed product suffix Amendment
+	// 002 §3 (as annotated 2026-09-06, SI-186) admits after the requested
+	// adapter version in the `--version` probe line. The real Claude Code CLI
+	// 2.1.261 prints "2.1.261 (Claude Code)"; no other suffix or variant is
+	// accepted.
+	claudeVersionProbeSuffix = " (Claude Code)"
 )
 
 // ProcessResult is the explicit terminal process result. Amendment 002 §5
@@ -96,20 +105,17 @@ func New(process Process, processor *sealedexec.DetailProcessor, mcpConfig MCPCo
 	return &Adapter{process: process, processor: processor, mcpConfig: mcpConfig}, nil
 }
 
-// validateSuppliedMCPConfig proves the supplied configuration is the scoped
-// one StartScopedMCP produced: Amendment 002 §4's exact file name at a clean
-// absolute path, a transport URL, and the scoped capability bearer token.
+// validateSuppliedMCPConfig proves the supplied configuration is the scoped one
+// StartScopedMCP produced: Amendment 002 §4's exact file name at a clean
+// absolute path, and Amendment 003's exact pair of separately owned required
+// registrations with disjoint catalogues and distinct capabilities.
 func validateSuppliedMCPConfig(config MCPConfig) error {
 	if !filepath.IsAbs(config.Path) || filepath.Clean(config.Path) != config.Path ||
 		filepath.Base(config.Path) != claudeMCPConfigName {
 		return fmt.Errorf("sealedexec/claude: scoped MCP config path must be a clean absolute %s", claudeMCPConfigName)
 	}
-	if config.URL == "" {
-		return errors.New("sealedexec/claude: scoped MCP config has no transport URL")
-	}
-	token, ok := strings.CutPrefix(config.Authorization, "Bearer ")
-	if !ok || !claudeMCPDigestRE.MatchString(token) {
-		return errors.New("sealedexec/claude: scoped MCP config lacks the scoped capability authorization")
+	if err := config.Servers.Validate(); err != nil {
+		return fmt.Errorf("sealedexec/claude: scoped MCP config: %w", err)
 	}
 	return nil
 }
@@ -218,8 +224,13 @@ func (a *Adapter) run(ctx context.Context, launch sealedexec.AdapterLaunch, args
 	if bytes.ContainsAny(probeOut, "\r\n") || !utf8.Valid(probeOut) {
 		return nil, errors.New("sealedexec/claude: version probe: output has unexpected newlines or invalid UTF-8")
 	}
-	if string(probeOut) != launch.Request.AdapterVersion {
-		return nil, fmt.Errorf("sealedexec/claude: version probe: output %q != expected %q", string(probeOut), launch.Request.AdapterVersion)
+	// §3 (SI-186): the probe line is accepted iff it equals the requested
+	// adapter version exactly, or equals that version plus exactly the one
+	// fixed product suffix. Anything else is refused, naming both accepted
+	// forms.
+	suffixedVersion := launch.Request.AdapterVersion + claudeVersionProbeSuffix
+	if string(probeOut) != launch.Request.AdapterVersion && string(probeOut) != suffixedVersion {
+		return nil, fmt.Errorf("sealedexec/claude: version probe: output %q != expected %q or %q", string(probeOut), launch.Request.AdapterVersion, suffixedVersion)
 	}
 
 	// Build and encode the typed stdin envelope.
@@ -248,9 +259,13 @@ func (a *Adapter) run(ctx context.Context, launch sealedexec.AdapterLaunch, args
 		return nil, errors.New("sealedexec/claude: process returned a nil active run")
 	}
 
-	// Build the per-run protected value set: classified secrets.
-	// The provider session (extracted from init) is added before init emission.
+	// Build the per-run protected value set: classified secrets plus Amendment
+	// 003's both raw capabilities and both complete authorization strings. The
+	// set is complete before the first provider observation is processed, so no
+	// capability or bearer can reach a projection, event, or receipt. The
+	// provider session (extracted from init) is added before init emission.
 	protectedValues := append([][]byte(nil), launch.Profile.PolicySecretValues...)
+	protectedValues = append(protectedValues, a.mcpConfig.Servers.ProtectedValues()...)
 
 	return &claudeActiveRun{
 		process:         processRun,
@@ -521,9 +536,39 @@ type claudeActiveRun struct {
 	resultReceived  bool
 
 	// Stream-identity uniqueness within the active provider session.
-	seenMessageIDs   map[string]bool
-	pendingToolCalls map[string]string // call_id -> tool_name, still unmatched
-	closedToolCalls  map[string]bool   // call_id already answered exactly once
+	//
+	// SI-190: the real Claude Code CLI 2.1.261 emits one assistant frame per
+	// content block, every frame of one message carrying the same
+	// message.id (F12 canary flight 5), so a repeated message id is not
+	// itself a contradiction — frames sharing one id are the successive
+	// blocks of that one message. openMessageID is the id of the message
+	// still accepting new blocks (the most recently introduced distinct
+	// id); nextMessageBlockIndex is the per-run map message-id -> next
+	// block index, continued across every frame sharing that id, so fixed
+	// ids stay <message-id>:<block-index> and unique across the run. A
+	// message id already present in nextMessageBlockIndex whose value no
+	// longer equals openMessageID has been closed by a later, different
+	// message id: any frame naming it again is refused duplicate-message-id,
+	// whether it offers a fresh block or repeats one the closed message
+	// already produced.
+	openMessageID         string
+	nextMessageBlockIndex map[string]int
+	pendingToolCalls      map[string]string // call_id -> tool_name, still unmatched
+	closedToolCalls       map[string]bool   // call_id already answered exactly once
+
+	// disclosedUnknownMembers is SI-187's run-wide "recorded once" set: every
+	// dotted path already surfaced in an earlier witness this launch, so a
+	// later frame repeating the same stray member never re-discloses it.
+	disclosedUnknownMembers map[string]struct{}
+
+	// disclosedUnknownFamilies is SI-192's run-wide "recorded once" set for
+	// unknown frame families, parallel to disclosedUnknownMembers.
+	// pendingUnknownFamilies is the not-yet-attached queue of freshly
+	// discovered families in first-seen order: an unknown-family frame
+	// yields no observation of its own, so its family rides on whichever
+	// accepted observation the run produces next.
+	disclosedUnknownFamilies map[string]struct{}
+	pendingUnknownFamilies   []string
 
 	// Foreign sequence counter (1-based)
 	foreignSeq uint64
@@ -543,11 +588,14 @@ type claudeActiveRun struct {
 
 // pendingTerminal buffers the exact terminal result until the child is reaped.
 // reason is empty for the success family and the closed provider-result reason
-// for the provider-failure family.
+// for the provider-failure family. unknownFamilies is SI-192's disclosure that
+// the buffered detail is carrying: §5's terminal precedence may still discard
+// these observations, and the disclosure must outlive them.
 type pendingTerminal struct {
-	seq          uint64
-	observations []sealedexec.NormalizedObservation
-	reason       string
+	seq             uint64
+	observations    []sealedexec.NormalizedObservation
+	reason          string
+	unknownFamilies []string
 }
 
 func (r *claudeActiveRun) Next(ctx context.Context) (sealedexec.AdapterResult, error) {
@@ -667,7 +715,16 @@ func (r *claudeActiveRun) handleProcessTerminal(ctx context.Context, proc *Proce
 		Terminal:     &sealedexec.AdapterTerminalResult{ExitCode: proc.ExitCode},
 	}
 
-	// §5 terminal precedence. No lower-priority terminal event is also emitted.
+	// §5 terminal precedence. No lower-priority terminal event is also
+	// emitted. SI-192's queue is drained by whichever accepted observation
+	// carries it, so for a run that reached a result frame handleResult
+	// drained it well before the child was reaped. Exactly two arms below
+	// emit those buffered result observations, and the disclosure rides them;
+	// every other arm discards the result, so terminalFailure returns the
+	// families that detail was carrying to the queue and flushes them into an
+	// advisory summary of their own. A run that never reached a result frame
+	// leaves the queue full and reaches the same flush through `pending ==
+	// nil`. No arm can silently lose the disclosure.
 	switch {
 	case len(proc.Stderr) != 0:
 		// Stderr is hashed while read and discarded; only the fixed digest
@@ -676,21 +733,21 @@ func (r *claudeActiveRun) handleProcessTerminal(ctx context.Context, proc *Proce
 		if err != nil {
 			return sealedexec.AdapterResult{}, err
 		}
-		return r.terminalFailure(result, detail, gapSeq, "provider-stderr", proc.ExitCode), nil
+		return r.terminalFailure(ctx, result, pending, detail, gapSeq, "provider-stderr", proc.ExitCode)
 
 	case incomplete:
 		detail, err := r.fixedSafeDetail(ctx, map[string]any{"reason": "incomplete-tool-call"})
 		if err != nil {
 			return sealedexec.AdapterResult{}, err
 		}
-		return r.terminalFailure(result, detail, gapSeq, "incomplete-tool-call", proc.ExitCode), nil
+		return r.terminalFailure(ctx, result, pending, detail, gapSeq, "incomplete-tool-call", proc.ExitCode)
 
 	case pending == nil:
 		detail, err := r.fixedSafeDetail(ctx, map[string]any{"reason": "missing-terminal-result"})
 		if err != nil {
 			return sealedexec.AdapterResult{}, err
 		}
-		return r.terminalFailure(result, detail, gapSeq, "missing-terminal-result", proc.ExitCode), nil
+		return r.terminalFailure(ctx, result, pending, detail, gapSeq, "missing-terminal-result", proc.ExitCode)
 
 	case pending.reason != "":
 		// Provider-declared failure: adapter-error over the exact result
@@ -705,7 +762,7 @@ func (r *claudeActiveRun) handleProcessTerminal(ctx context.Context, proc *Proce
 		if err != nil {
 			return sealedexec.AdapterResult{}, err
 		}
-		return r.terminalFailure(result, detail, gapSeq, "provider-exit-nonzero", proc.ExitCode), nil
+		return r.terminalFailure(ctx, result, pending, detail, gapSeq, "provider-exit-nonzero", proc.ExitCode)
 	}
 
 	result.Observations = append(result.Observations, pending.observations...)
@@ -714,12 +771,29 @@ func (r *claudeActiveRun) handleProcessTerminal(ctx context.Context, proc *Proce
 }
 
 // terminalFailure emits the fixed process gap, adapter-error, and adapter-stop
-// for one closed terminal reason and discards every lower-priority event.
-func (r *claudeActiveRun) terminalFailure(result sealedexec.AdapterResult, detail contextevent.Detail, seq uint64, reason string, exitCode int) sealedexec.AdapterResult {
+// for one closed terminal reason and discards every lower-priority event —
+// including the buffered result observations, whenever a result was accepted
+// at all. SI-192's disclosure is the one thing not discarded with them: the
+// unknown families that result's detail was provisionally carrying return to
+// the queue, and the flush here emits whatever the queue then holds as the
+// last-resort advisory summary. That keeps §I-108/SI-192's "recorded once per
+// run" true on every arm of §5's terminal precedence, not only on the two that
+// keep the result.
+func (r *claudeActiveRun) terminalFailure(ctx context.Context, result sealedexec.AdapterResult, pending *pendingTerminal, detail contextevent.Detail, seq uint64, reason string, exitCode int) (sealedexec.AdapterResult, error) {
+	if pending != nil {
+		r.requeueUnknownFamilies(pending.unknownFamilies)
+	}
+	summary, disclosed, err := r.terminalUnknownFamilySummary(ctx, seq)
+	if err != nil {
+		return sealedexec.AdapterResult{}, err
+	}
+	if disclosed {
+		result.Observations = append(result.Observations, summary)
+	}
 	result.Observations = append(result.Observations, r.gapObservations(detail, seq, reason, claudeProcessSource)...)
 	result.Observations = append(result.Observations, adapterStopObservation(r.launch, exitCode, reason))
 	result.OperationalFailure = reason
-	return result
+	return result, nil
 }
 
 func (r *claudeActiveRun) Stop(ctx context.Context) (sealedexec.AdapterStopResult, error) {
@@ -807,14 +881,18 @@ type claudeRetryError struct {
 }
 
 type claudeRetryFrame struct {
-	Type         *string           `json:"type"`
-	Subtype      *string           `json:"subtype"`
-	Attempt      *uint64           `json:"attempt"`
-	MaxRetries   *uint64           `json:"max_retries"`
-	RetryDelayMS *uint64           `json:"retry_delay_ms"`
-	Error        *claudeRetryError `json:"error"`
-	UUID         *string           `json:"uuid"`
-	SessionID    *string           `json:"session_id"`
+	Type         *string `json:"type"`
+	Subtype      *string `json:"subtype"`
+	Attempt      *uint64 `json:"attempt"`
+	MaxRetries   *uint64 `json:"max_retries"`
+	RetryDelayMS *uint64 `json:"retry_delay_ms"`
+	// Error is decoded as raw bytes rather than typed because SI-188 accepts
+	// TWO distinct shapes here (the v1 object or a bare enum string); which
+	// one applies is decided in decodeRetryError from the sibling generic
+	// parse, not by a single static Go field type.
+	Error     *json.RawMessage `json:"error"`
+	UUID      *string          `json:"uuid"`
+	SessionID *string          `json:"session_id"`
 }
 
 type claudeUsage struct {
@@ -823,6 +901,24 @@ type claudeUsage struct {
 	CacheReadInputTokens     *uint64 `json:"cache_read_input_tokens"`
 	OutputTokens             *uint64 `json:"output_tokens"`
 	ServiceTier              *string `json:"service_tier"`
+}
+
+// claudeModelUsage is SI-189's own camelCase shape for the result frame's
+// `modelUsage.<model>` value — distinct from claudeUsage's v1 snake_case
+// shape above, which validateUsage keeps applying unchanged to the result
+// frame's top-level `usage` member. Read from the 2.1.261 bundle's own
+// schema (bundle literal, measured offline by the F12 canary track,
+// 2026-09-06). CostUSD stays raw (never parsed into a Go float and
+// re-serialized) so its exact numeric formatting survives untouched.
+type claudeModelUsage struct {
+	InputTokens              *uint64          `json:"inputTokens"`
+	OutputTokens             *uint64          `json:"outputTokens"`
+	CacheReadInputTokens     *uint64          `json:"cacheReadInputTokens"`
+	CacheCreationInputTokens *uint64          `json:"cacheCreationInputTokens"`
+	WebSearchRequests        *uint64          `json:"webSearchRequests"`
+	CostUSD                  *json.RawMessage `json:"costUSD"`
+	ContextWindow            *uint64          `json:"contextWindow"`
+	MaxOutputTokens          *uint64          `json:"maxOutputTokens"`
 }
 
 type claudeAssistantMessage struct {
@@ -914,22 +1010,305 @@ type claudeToolResultBlock struct {
 	IsError   *bool            `json:"is_error"`
 }
 
-// strictDecodeReason decodes raw into target with unknown-field rejection and
-// trailing-data rejection. It returns "" on success or the closed §5 decode
-// reason that describes the refusal.
-func strictDecodeReason(raw []byte, target any) string {
-	decoder := json.NewDecoder(bytes.NewReader(raw))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(target); err != nil {
-		if strings.Contains(err.Error(), "unknown field") {
-			return "unknown-foreign-field"
+// ---------------------------------------------------------------------------
+// Tolerant decode (SI-187)
+//
+// Amendment 002 §5 / §I-108, as amended 2026-09-06 (SI-187, owner-approved
+// "option 2"): within a known frame kind, a member absent from the accepted
+// shape at its own object level is tolerated, never read, and its dotted path
+// is collected under the closed code `unknown-foreign-member`. Everything
+// else — an unknown frame type/subtype, a known member of the wrong shape,
+// duplicate keys, and trailing data — stays refused exactly as before.
+//
+// Amendment 002 §5 / §I-108, as amended 2026-09-07 (SI-192, owner-approved
+// "amend Verdi"): the same tolerance now applies one level up, to the frame's
+// own family. A frame whose family — its `type`, or `system` paired with its
+// `subtype` — the family switch in normalize does not know is advisory
+// provider telemetry: never projected, never hashed into any detail or
+// digest, and never the source of an observation of its own content. Its
+// family NAME alone may ride a last-resort advisory summary, but only when
+// no accepted observation is left to carry it. That name is collected under
+// the closed code `unknown-foreign-family`, recorded once per run
+// (first-seen order, deduplicated) using the same disclosure vehicle as
+// unknown-foreign-member. A frame naming no family at all — no `type`
+// string, or a "system" frame with no `subtype` string — still names nothing
+// the decoder can be tolerant of and stays refused, as does a malformed
+// frame of a known family.
+// ---------------------------------------------------------------------------
+
+// unknownMemberCode is SI-187's closed disclosure code.
+const unknownMemberCode = "unknown-foreign-member"
+
+// unknownFamilyCode is SI-192's closed disclosure code.
+const unknownFamilyCode = "unknown-foreign-family"
+
+// jsonFieldNames returns the json member names declared on typ (a struct
+// type), so the tolerant walk's known-member set can never drift from the
+// exact shape the strict typed decode below already accepts.
+//
+// This helper is the sole point keeping those two decodes in sync, so it
+// fails closed at package construction on any field shape that would break
+// the correspondence rather than inverting SI-187 mid-stream:
+//
+//   - `json:"-"` contributes no name. encoding/json never reads such a field,
+//     so a member literally named "-" is unknown, not known.
+//   - An exported field with no json tag, an empty json name, or an embedded
+//     field is refused: encoding/json would read it under a name this helper
+//     does not know, so the member would be recorded as unknown and still
+//     read — the exact inversion of SI-187's "never read".
+//
+// Unexported fields are skipped: encoding/json never reads them and they name
+// no member.
+func jsonFieldNames(typ reflect.Type) map[string]struct{} {
+	names := make(map[string]struct{}, typ.NumField())
+	for i := 0; i < typ.NumField(); i++ {
+		field := typ.Field(i)
+		if field.Anonymous {
+			panic("sealedexec/claude: " + typ.Name() + ": a frame shape must not embed a struct")
 		}
-		return "invalid-foreign-field"
+		if !field.IsExported() {
+			continue
+		}
+		tag, tagged := field.Tag.Lookup("json")
+		if !tagged {
+			panic("sealedexec/claude: " + typ.Name() + "." + field.Name + ": every exported field of a frame shape needs an explicit json tag")
+		}
+		// encoding/json's exact rule: the whole tag "-" skips the field,
+		// while the tag "-," names the member "-".
+		if tag == "-" {
+			continue
+		}
+		name, _, _ := strings.Cut(tag, ",")
+		if name == "" {
+			panic("sealedexec/claude: " + typ.Name() + "." + field.Name + ": every exported field of a frame shape needs an explicit json name")
+		}
+		names[name] = struct{}{}
 	}
-	if decoder.More() {
-		return "malformed-foreign-frame"
+	return names
+}
+
+// The exact accepted member set of every known frame kind and nested known
+// struct (message, content blocks, usage, error, mcp rows), derived once from
+// the closed structs above.
+var (
+	claudeInitFrameFields             = jsonFieldNames(reflect.TypeOf(claudeInitFrame{}))
+	claudeMCPRowFields                = jsonFieldNames(reflect.TypeOf(claudeMCPRow{}))
+	claudeRetryFrameFields            = jsonFieldNames(reflect.TypeOf(claudeRetryFrame{}))
+	claudeRetryErrorFields            = jsonFieldNames(reflect.TypeOf(claudeRetryError{}))
+	claudeAssistantFrameFields        = jsonFieldNames(reflect.TypeOf(claudeAssistantFrame{}))
+	claudeAssistantMessageFields      = jsonFieldNames(reflect.TypeOf(claudeAssistantMessage{}))
+	claudeUsageFields                 = jsonFieldNames(reflect.TypeOf(claudeUsage{}))
+	claudeModelUsageFields            = jsonFieldNames(reflect.TypeOf(claudeModelUsage{}))
+	claudeUserFrameFields             = jsonFieldNames(reflect.TypeOf(claudeUserFrame{}))
+	claudeUserMessageFields           = jsonFieldNames(reflect.TypeOf(claudeUserMessage{}))
+	claudeResultFrameFields           = jsonFieldNames(reflect.TypeOf(claudeResultFrame{}))
+	claudePermissionDenialFields      = jsonFieldNames(reflect.TypeOf(claudePermissionDenial{}))
+	claudeTextBlockFields             = jsonFieldNames(reflect.TypeOf(claudeTextBlock{}))
+	claudeToolUseBlockFields          = jsonFieldNames(reflect.TypeOf(claudeToolUseBlock{}))
+	claudeThinkingBlockFields         = jsonFieldNames(reflect.TypeOf(claudeThinkingBlock{}))
+	claudeRedactedThinkingBlockFields = jsonFieldNames(reflect.TypeOf(claudeRedactedThinkingBlock{}))
+	claudeToolResultBlockFields       = jsonFieldNames(reflect.TypeOf(claudeToolResultBlock{}))
+)
+
+// unknownMemberSet collects the sorted, deduplicated dotted paths tolerated
+// while decoding one frame. A path is recorded once and never expanded
+// further: an unknown member's value is never read, so nothing beneath it is
+// ever walked, no matter how deep its own foreign shape goes.
+type unknownMemberSet struct {
+	seen  map[string]struct{}
+	paths []string
+}
+
+func (s *unknownMemberSet) add(path string) {
+	if s.seen == nil {
+		s.seen = make(map[string]struct{})
 	}
-	return ""
+	if _, duplicate := s.seen[path]; duplicate {
+		return
+	}
+	s.seen[path] = struct{}{}
+	s.paths = append(s.paths, path)
+}
+
+// sorted returns the deduplicated dotted paths in ascending order, or nil for
+// an empty set (§5/SI-187: empty ⇒ no witness entry).
+func (s *unknownMemberSet) sorted() []string {
+	if s == nil || len(s.paths) == 0 {
+		return nil
+	}
+	out := append([]string(nil), s.paths...)
+	sort.Strings(out)
+	return out
+}
+
+// scanKnownObject records, into set, the prefix-qualified dotted path of
+// every member of object absent from known, and reports whether it found no
+// member requiring the caller to refuse the frame instead. An unknown
+// member's value is never inspected: this is the entire "never read"
+// contract.
+//
+// A member whose key is not byte-identical to any known name but
+// case-insensitively (strings.EqualFold) matches one is never treated as
+// unknown: it reports false instead, recording nothing more. §I-108's known
+// members "keep their strict types" via the sibling typed json.Unmarshal —
+// but encoding/json falls back to a case-insensitive match whenever no
+// exact-cased key is present, so such a member would be READ into the known
+// field despite this scan having just filed it as tolerated-and-never-read.
+// That contradiction — a member simultaneously disclosed as unread and
+// consumed into the projected detail and both digests — is what the false
+// return exists to prevent; the caller must refuse the whole frame
+// (invalid-foreign-field) the moment it sees false, never call set.sorted(),
+// and never build a detail from anything scanned so far (review B-F1).
+func scanKnownObject(object map[string]any, known map[string]struct{}, prefix string, set *unknownMemberSet) bool {
+	for key := range object {
+		if _, ok := known[key]; ok {
+			continue
+		}
+		for name := range known {
+			if strings.EqualFold(key, name) {
+				return false
+			}
+		}
+		set.add(prefix + key)
+	}
+	return true
+}
+
+// scanKnownObjectArray applies scanKnownObject to every object element of an
+// array-shaped member (mcp rows, permission-denial rows). The recorded path
+// never carries an element index: it names the row shape, not one occurrence,
+// so the same stray key in two rows collapses to one entry. It reports false
+// — refuse, do not record further — the moment any row's scan does.
+func scanKnownObjectArray(value any, known map[string]struct{}, prefix string, set *unknownMemberSet) bool {
+	array, ok := value.([]any)
+	if !ok {
+		return true
+	}
+	for _, element := range array {
+		if object, ok := element.(map[string]any); ok {
+			if !scanKnownObject(object, known, prefix, set) {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+// runNewUnknownMembers filters out every path this launch has already
+// disclosed, records the rest as disclosed, and returns them sorted. This is
+// SI-187's "recorded once" over the life of one launch: a path already
+// witnessed by an earlier frame is never repeated by a later one.
+func (r *claudeActiveRun) runNewUnknownMembers(found []string) []string {
+	if len(found) == 0 {
+		return nil
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.disclosedUnknownMembers == nil {
+		r.disclosedUnknownMembers = make(map[string]struct{})
+	}
+	var fresh []string
+	for _, path := range found {
+		if _, already := r.disclosedUnknownMembers[path]; already {
+			continue
+		}
+		r.disclosedUnknownMembers[path] = struct{}{}
+		fresh = append(fresh, path)
+	}
+	sort.Strings(fresh)
+	return fresh
+}
+
+// attachUnknownMemberWitness adds SI-187's disclosure to source under its
+// closed code when paths is nonempty; an empty list leaves source untouched.
+func attachUnknownMemberWitness(source map[string]any, paths []string) {
+	if len(paths) == 0 {
+		return
+	}
+	source[unknownMemberCode] = paths
+}
+
+// recordUnknownFamily is SI-192's run-wide "recorded once" admission of one
+// unknown frame family: a family already disclosed (or already queued)
+// earlier this launch is never queued again; a fresh one is appended to
+// pendingUnknownFamilies in first-seen order to ride on whichever accepted
+// observation the run produces next.
+func (r *claudeActiveRun) recordUnknownFamily(family string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.disclosedUnknownFamilies == nil {
+		r.disclosedUnknownFamilies = make(map[string]struct{})
+	}
+	if _, already := r.disclosedUnknownFamilies[family]; already {
+		return
+	}
+	r.disclosedUnknownFamilies[family] = struct{}{}
+	r.pendingUnknownFamilies = append(r.pendingUnknownFamilies, family)
+}
+
+// drainPendingUnknownFamilies returns SI-192's queued not-yet-attached
+// families in first-seen order and empties the queue, so the very next
+// accepted observation carries them and no later one repeats them. An empty
+// queue returns nil, leaving an untouched run's detail sources untouched.
+func (r *claudeActiveRun) drainPendingUnknownFamilies() []string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if len(r.pendingUnknownFamilies) == 0 {
+		return nil
+	}
+	families := r.pendingUnknownFamilies
+	r.pendingUnknownFamilies = nil
+	return families
+}
+
+// requeueUnknownFamilies returns families whose only carrier is being
+// discarded to the FRONT of the pending queue, ahead of anything queued after
+// them, so SI-192's first-seen order survives the return. They are already in
+// disclosedUnknownFamilies, where recordUnknownFamily would refuse to queue
+// them a second time, so this is the one path that may put a family back.
+func (r *claudeActiveRun) requeueUnknownFamilies(families []string) {
+	if len(families) == 0 {
+		return
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.pendingUnknownFamilies = append(append([]string(nil), families...), r.pendingUnknownFamilies...)
+}
+
+// attachUnknownFamilyWitness adds SI-192's disclosure to source under its
+// closed code when families is nonempty; an empty list leaves source
+// untouched (byte-identical to a run that saw only known families).
+func attachUnknownFamilyWitness(source map[string]any, families []string) {
+	if len(families) == 0 {
+		return
+	}
+	source[unknownFamilyCode] = families
+}
+
+// terminalUnknownFamilySummary drains any unknown families this run has not
+// yet attached to an accepted observation and, when nonempty, builds SI-192's
+// last-resort advisory summary carrying them: the counterpart to
+// unknownMemberSummary for a run that reaches its terminal before any further
+// accepted frame can carry the disclosure itself. Its summary id is derived
+// from the terminal's own gap sequence, never from provider bytes. An empty
+// queue (the ordinary case: a result frame, or any other accepted frame,
+// already drained it) reports no disclosure and builds nothing.
+func (r *claudeActiveRun) terminalUnknownFamilySummary(ctx context.Context, seq uint64) (obs sealedexec.NormalizedObservation, disclosed bool, err error) {
+	families := r.drainPendingUnknownFamilies()
+	if len(families) == 0 {
+		return sealedexec.NormalizedObservation{}, false, nil
+	}
+	r.mu.Lock()
+	protectedValues := append([][]byte(nil), r.protectedValues...)
+	r.mu.Unlock()
+	source := map[string]any{}
+	attachUnknownFamilyWitness(source, families)
+	detail, err := r.processDetail(ctx, source, protectedValues)
+	if err != nil {
+		return sealedexec.NormalizedObservation{}, false, err
+	}
+	summaryID := fmt.Sprintf("unknown-families/%d", seq)
+	return buildProviderSummary(r.launch, summaryID, detail.Digest, contextevent.AuthorityAdvisory, detail), true, nil
 }
 
 // validUniqueStrings proves a non-null array of unique nonempty UTF-8 strings.
@@ -950,27 +1329,173 @@ func validUniqueStrings(values *[]string) bool {
 	return true
 }
 
-// validateUsage proves §5's exact nonnegative-integer usage object.
-func validateUsage(raw *json.RawMessage) string {
+// validateUsage proves §5's exact nonnegative-integer usage object and
+// returns its exact projection. object is the same usage value already parsed
+// by DecodeUniqueJSONObject (nil when the caller could not locate it), used
+// only to tolerate and record — under prefix, into set — a member absent from
+// the known usage shape; its value is never read (SI-187).
+//
+// The projection is rebuilt from the typed decode rather than passed through
+// from the frame bytes, which is the other half of "never read": a tolerated
+// member cannot reach a projected detail or the digest taken over it.
+func validateUsage(raw *json.RawMessage, object map[string]any, prefix string, set *unknownMemberSet) (map[string]any, string) {
 	if raw == nil {
-		return "missing-foreign-field"
+		return nil, "missing-foreign-field"
 	}
 	var usage claudeUsage
-	if reason := strictDecodeReason(*raw, &usage); reason != "" {
-		return reason
+	if err := json.Unmarshal(*raw, &usage); err != nil {
+		return nil, "invalid-foreign-field"
 	}
 	if usage.InputTokens == nil || usage.CacheCreationInputTokens == nil ||
 		usage.CacheReadInputTokens == nil || usage.OutputTokens == nil {
-		return "missing-foreign-field"
+		return nil, "missing-foreign-field"
 	}
 	if usage.ServiceTier != nil {
 		switch *usage.ServiceTier {
 		case "standard", "priority", "batch":
 		default:
-			return "invalid-foreign-field"
+			return nil, "invalid-foreign-field"
 		}
 	}
-	return ""
+	if !scanKnownObject(object, claudeUsageFields, prefix, set) {
+		return nil, "invalid-foreign-field"
+	}
+	projected := map[string]any{
+		"cache_creation_input_tokens": *usage.CacheCreationInputTokens,
+		"cache_read_input_tokens":     *usage.CacheReadInputTokens,
+		"input_tokens":                *usage.InputTokens,
+		"output_tokens":               *usage.OutputTokens,
+	}
+	// §5's one optional accepted member: present in the projection exactly
+	// when the frame carried it, so a frame without it keeps its bytes.
+	if usage.ServiceTier != nil {
+		projected["service_tier"] = *usage.ServiceTier
+	}
+	return projected, ""
+}
+
+// validateModelUsage proves SI-189's exact camelCase result-frame
+// `modelUsage.<model>` shape — required inputTokens, outputTokens,
+// cacheReadInputTokens, cacheCreationInputTokens; optional
+// webSearchRequests, costUSD, contextWindow, maxOutputTokens — and returns
+// its exact projection under those same names, optional members present
+// only when the frame carried them. raw is the per-model value's own bytes;
+// object is the same value already parsed generically by
+// DecodeUniqueJSONObject, used only to tolerate and record — under prefix,
+// into set — a member absent from this shape (SI-187); its value is never
+// read. A snake_case object here (the v1 `usage` shape) leaves every
+// required member nil and so is refused missing-foreign-field, never
+// silently accepted under the wrong spelling.
+//
+// The projection is rebuilt from the typed decode exactly as validateUsage's
+// is and for the same reason: a tolerated member must never reach a
+// projected detail or the digest taken over it. The top-level result frame
+// `usage` member is unaffected by this shape: it keeps validateUsage's v1
+// snake_case projection, unchanged by SI-189.
+func validateModelUsage(raw *json.RawMessage, object map[string]any, prefix string, set *unknownMemberSet) (map[string]any, string) {
+	if raw == nil {
+		return nil, "missing-foreign-field"
+	}
+	var usage claudeModelUsage
+	if err := json.Unmarshal(*raw, &usage); err != nil {
+		return nil, "invalid-foreign-field"
+	}
+	if usage.InputTokens == nil || usage.OutputTokens == nil ||
+		usage.CacheReadInputTokens == nil || usage.CacheCreationInputTokens == nil {
+		return nil, "missing-foreign-field"
+	}
+	if usage.CostUSD != nil {
+		// Proves the member's JSON type is number without converting it: the
+		// parsed float is discarded and the original bytes are what the
+		// projection below keeps (SI-189: "do not round").
+		var cost float64
+		if err := json.Unmarshal(*usage.CostUSD, &cost); err != nil {
+			return nil, "invalid-foreign-field"
+		}
+	}
+	if !scanKnownObject(object, claudeModelUsageFields, prefix, set) {
+		return nil, "invalid-foreign-field"
+	}
+	projected := map[string]any{
+		"cacheCreationInputTokens": *usage.CacheCreationInputTokens,
+		"cacheReadInputTokens":     *usage.CacheReadInputTokens,
+		"inputTokens":              *usage.InputTokens,
+		"outputTokens":             *usage.OutputTokens,
+	}
+	if usage.WebSearchRequests != nil {
+		projected["webSearchRequests"] = *usage.WebSearchRequests
+	}
+	if usage.CostUSD != nil {
+		projected["costUSD"] = json.RawMessage(*usage.CostUSD)
+	}
+	if usage.ContextWindow != nil {
+		projected["contextWindow"] = *usage.ContextWindow
+	}
+	if usage.MaxOutputTokens != nil {
+		projected["maxOutputTokens"] = *usage.MaxOutputTokens
+	}
+	return projected, ""
+}
+
+// claudeRetryErrorStringAccepted is SI-188's exact closed eleven-value
+// system/api_retry `error` string enum the real Claude Code CLI 2.1.261
+// emits in place of the v1 object form, read offline from the bundle's zod
+// schema (measured 2026-09-06). Any other string is refused.
+func claudeRetryErrorStringAccepted(value string) bool {
+	switch value {
+	case "authentication_failed", "oauth_org_not_allowed", "account_on_hold", "billing_error",
+		"rate_limit", "overloaded", "invalid_request", "model_not_found", "server_error",
+		"unknown", "max_output_tokens":
+		return true
+	default:
+		return false
+	}
+}
+
+// decodeRetryError proves SI-188's dual accepted shape of the
+// system/api_retry frame's `error` member: the v1 object `{type,message}`
+// (Amendment 002 §5, unchanged — the same closed six-value error.type
+// vocabulary and message validation as before this amendment) or a bare
+// string from the closed eleven-value enum above. value is the same member
+// already parsed generically by DecodeUniqueJSONObject — read only to select
+// the shape and, for the object form, to record a member scanKnownObject
+// would otherwise miss; raw is frame.Error's own exact bytes, decoded
+// strictly only for the object form. It returns the value to project as
+// `error_category` (reused verbatim as the retry reason-code suffix) or a
+// closed decode-failure reason. Any other string, an empty string, or a
+// non-string non-object value refuses invalid-foreign-field exactly as
+// before this amendment (a bare string of any kind already failed the
+// object-typed decode pre-SI-188).
+func decodeRetryError(raw json.RawMessage, value any, unknown *unknownMemberSet) (string, string) {
+	switch typed := value.(type) {
+	case map[string]any:
+		var errorFrame claudeRetryError
+		if err := json.Unmarshal(raw, &errorFrame); err != nil {
+			return "", "invalid-foreign-field"
+		}
+		if errorFrame.Type == nil || errorFrame.Message == nil {
+			return "", "missing-foreign-field"
+		}
+		if !utf8.ValidString(*errorFrame.Message) {
+			return "", "invalid-foreign-field"
+		}
+		switch *errorFrame.Type {
+		case "authentication", "billing", "rate_limit", "server", "network", "unknown":
+		default:
+			return "", "invalid-foreign-field"
+		}
+		if !scanKnownObject(typed, claudeRetryErrorFields, "error.", unknown) {
+			return "", "invalid-foreign-field"
+		}
+		return *errorFrame.Type, ""
+	case string:
+		if !claudeRetryErrorStringAccepted(typed) {
+			return "", "invalid-foreign-field"
+		}
+		return typed, ""
+	default:
+		return "", "invalid-foreign-field"
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -1013,27 +1538,61 @@ func (r *claudeActiveRun) normalize(ctx context.Context, line []byte, seq uint64
 		if initReceived {
 			return r.decodeFailure(ctx, seq, "duplicate-init", nil)
 		}
-		return r.handleInit(ctx, line, seq)
+		return r.handleInit(ctx, line, object, seq)
 	case outer == "system" && subtype == "api_retry":
-		return r.handleRetry(ctx, line, seq)
-	case outer == "assistant" && subtype == "":
-		return r.handleAssistant(ctx, line, seq)
-	case outer == "user" && subtype == "":
-		return r.handleToolResult(ctx, line, seq)
+		return r.handleRetry(ctx, line, object, seq)
+	// SI-192 fixes the family at the frame's `type`, subtype-qualified only
+	// for "system". The three non-"system" known families are therefore
+	// routed by `type` alone: a frame of one of them that also carries some
+	// stray `subtype` is a frame of that known family and is decoded
+	// strictly, where the stray member is SI-187's tolerated unknown member
+	// (recorded, never read) and everything else is validated exactly as
+	// before. Matching on the pair here instead would drop such a frame
+	// whole through the tolerant fallback below and name a family the
+	// decoder knows.
+	case outer == "assistant":
+		return r.handleAssistant(ctx, line, object, seq)
+	case outer == "user":
+		return r.handleToolResult(ctx, line, object, seq)
 	case outer == "result":
-		return r.handleResult(ctx, line, seq)
+		return r.handleResult(ctx, line, object, seq)
 	}
-	return r.decodeFailure(ctx, seq, "unknown-foreign-family", nil)
+
+	// SI-192: a frame whose family this switch does not recognize is
+	// advisory provider telemetry, not a stream contradiction, exactly when
+	// its family is well-formed — a nonempty type for any non-"system"
+	// frame, or "system" paired with a nonempty subtype. It is never
+	// projected or hashed and produces no observation of its own here;
+	// its family is queued for whichever accepted observation the run
+	// produces next, and source order, message ids, block indexes and call
+	// ids of every accepted frame are unaffected. A "system" frame naming no
+	// subtype at all names no family and stays refused exactly as before.
+	if outer == "system" && subtype == "" {
+		return r.decodeFailure(ctx, seq, "unknown-foreign-family", nil)
+	}
+	family := outer
+	if outer == "system" {
+		family = outer + "/" + subtype
+	}
+	r.recordUnknownFamily(family)
+	return sealedexec.AdapterResult{}, nil
 }
 
 // ---------------------------------------------------------------------------
 // Family handlers
 // ---------------------------------------------------------------------------
 
-func (r *claudeActiveRun) handleInit(ctx context.Context, line []byte, seq uint64) (sealedexec.AdapterResult, error) {
+func (r *claudeActiveRun) handleInit(ctx context.Context, line []byte, object map[string]any, seq uint64) (sealedexec.AdapterResult, error) {
 	var frame claudeInitFrame
-	if reason := strictDecodeReason(line, &frame); reason != "" {
-		return r.decodeFailure(ctx, seq, reason, map[string]any{"family": "system/init"})
+	if err := json.Unmarshal(line, &frame); err != nil {
+		return r.decodeFailure(ctx, seq, "invalid-foreign-field", map[string]any{"family": "system/init"})
+	}
+	var unknown unknownMemberSet
+	if !scanKnownObject(object, claudeInitFrameFields, "", &unknown) {
+		return r.decodeFailure(ctx, seq, "invalid-foreign-field", map[string]any{"family": "system/init"})
+	}
+	if !scanKnownObjectArray(object["mcp_servers"], claudeMCPRowFields, "mcp_servers.", &unknown) {
+		return r.decodeFailure(ctx, seq, "invalid-foreign-field", map[string]any{"field": "mcp_servers"})
 	}
 	if frame.Type == nil || frame.Subtype == nil || frame.SessionID == nil || frame.Model == nil ||
 		frame.MCPServers == nil || frame.CWD == nil || frame.Tools == nil || frame.PermissionMode == nil ||
@@ -1090,13 +1649,22 @@ func (r *claudeActiveRun) handleInit(ctx context.Context, line []byte, seq uint6
 	protectedValues := append([][]byte(nil), r.protectedValues...)
 	r.mu.Unlock()
 
+	// Amendment 003 §exact Claude observation: accepted rows are sorted by name
+	// before projecting or digesting, so either observed order yields identical
+	// provider-summary bytes.
+	projectedRows := make([]map[string]string, 0, len(*frame.MCPServers))
+	for _, name := range sealedexec.SortedMCPNames([]string{sealedexec.RequiredClaimMCPName, sealedexec.RequiredContextMCPName}) {
+		projectedRows = append(projectedRows, map[string]string{"name": name, "status": "connected"})
+	}
 	initDetailSource := map[string]any{
 		"family":          "system/init",
-		"mcp_servers":     []map[string]string{{"name": "verdi-context", "status": "connected"}},
+		"mcp_servers":     projectedRows,
 		"model":           *frame.Model,
 		"permission_mode": *frame.PermissionMode,
 		"session_id":      sessionID,
 	}
+	attachUnknownMemberWitness(initDetailSource, r.runNewUnknownMembers(unknown.sorted()))
+	attachUnknownFamilyWitness(initDetailSource, r.drainPendingUnknownFamilies())
 	detail, err := r.processDetail(ctx, initDetailSource, protectedValues)
 	if err != nil {
 		return r.decodeFailure(ctx, seq, detailFailureReason(err), nil)
@@ -1113,27 +1681,32 @@ func (r *claudeActiveRun) handleInit(ctx context.Context, line []byte, seq uint6
 	}, nil
 }
 
-func (r *claudeActiveRun) handleRetry(ctx context.Context, line []byte, seq uint64) (sealedexec.AdapterResult, error) {
+func (r *claudeActiveRun) handleRetry(ctx context.Context, line []byte, object map[string]any, seq uint64) (sealedexec.AdapterResult, error) {
 	var frame claudeRetryFrame
-	if reason := strictDecodeReason(line, &frame); reason != "" {
-		return r.decodeFailure(ctx, seq, reason, map[string]any{"family": "system/api_retry"})
+	if err := json.Unmarshal(line, &frame); err != nil {
+		return r.decodeFailure(ctx, seq, "invalid-foreign-field", map[string]any{"family": "system/api_retry"})
+	}
+	var unknown unknownMemberSet
+	if !scanKnownObject(object, claudeRetryFrameFields, "", &unknown) {
+		return r.decodeFailure(ctx, seq, "invalid-foreign-field", map[string]any{"family": "system/api_retry"})
 	}
 	if frame.Type == nil || frame.Subtype == nil || frame.Attempt == nil || frame.MaxRetries == nil ||
-		frame.RetryDelayMS == nil || frame.Error == nil || frame.UUID == nil || frame.SessionID == nil ||
-		frame.Error.Type == nil || frame.Error.Message == nil {
+		frame.RetryDelayMS == nil || frame.Error == nil || frame.UUID == nil || frame.SessionID == nil {
 		return r.decodeFailure(ctx, seq, "missing-foreign-field", map[string]any{"family": "system/api_retry"})
 	}
 	if *frame.Type != "system" || *frame.Subtype != "api_retry" {
 		return r.decodeFailure(ctx, seq, "invalid-foreign-field", map[string]any{"field": "type"})
 	}
 	if *frame.Attempt == 0 || *frame.MaxRetries == 0 || *frame.Attempt > *frame.MaxRetries ||
-		!nonemptyStringValue(*frame.UUID) || !utf8.ValidString(*frame.Error.Message) {
+		!nonemptyStringValue(*frame.UUID) {
 		return r.decodeFailure(ctx, seq, "invalid-foreign-field", map[string]any{"family": "system/api_retry"})
 	}
-	switch *frame.Error.Type {
-	case "authentication", "billing", "rate_limit", "server", "network", "unknown":
-	default:
-		return r.decodeFailure(ctx, seq, "invalid-foreign-field", map[string]any{"field": "error.type"})
+	// SI-188: error is the v1 {type,message} object (unchanged) or a bare
+	// string from the closed eleven-value enum; any other shape refuses
+	// exactly as it did before this amendment.
+	errorValue, errReason := decodeRetryError(*frame.Error, object["error"], &unknown)
+	if errReason != "" {
+		return r.decodeFailure(ctx, seq, errReason, map[string]any{"field": "error"})
 	}
 
 	r.mu.Lock()
@@ -1146,13 +1719,15 @@ func (r *claudeActiveRun) handleRetry(ctx context.Context, line []byte, seq uint
 
 	retryDetailSource := map[string]any{
 		"attempt":        *frame.Attempt,
-		"error_category": *frame.Error.Type,
+		"error_category": errorValue,
 		"family":         "system/api_retry",
 		"max_retries":    *frame.MaxRetries,
 		"retry_delay_ms": *frame.RetryDelayMS,
 		"session_id":     *frame.SessionID,
 		"uuid":           *frame.UUID,
 	}
+	attachUnknownMemberWitness(retryDetailSource, r.runNewUnknownMembers(unknown.sorted()))
+	attachUnknownFamilyWitness(retryDetailSource, r.drainPendingUnknownFamilies())
 	detail, err := r.processDetail(ctx, retryDetailSource, protectedValues)
 	if err != nil {
 		return r.decodeFailure(ctx, seq, detailFailureReason(err), nil)
@@ -1163,7 +1738,7 @@ func (r *claudeActiveRun) handleRetry(ctx context.Context, line []byte, seq uint
 		Kind: contextevent.KindRetry,
 		Payload: &contextevent.RetryPayload{
 			Schema:           schema,
-			ReasonCode:       "provider-api-" + *frame.Error.Type,
+			ReasonCode:       "provider-api-" + errorValue,
 			PriorSession:     currentSession,
 			NextSession:      currentSession,
 			ContinuityDigest: detail.Digest,
@@ -1174,10 +1749,18 @@ func (r *claudeActiveRun) handleRetry(ctx context.Context, line []byte, seq uint
 	return sealedexec.AdapterResult{Observations: []sealedexec.NormalizedObservation{retryObs, summaryObs}}, nil
 }
 
-func (r *claudeActiveRun) handleAssistant(ctx context.Context, line []byte, seq uint64) (sealedexec.AdapterResult, error) {
+func (r *claudeActiveRun) handleAssistant(ctx context.Context, line []byte, object map[string]any, seq uint64) (sealedexec.AdapterResult, error) {
 	var frame claudeAssistantFrame
-	if reason := strictDecodeReason(line, &frame); reason != "" {
-		return r.decodeFailure(ctx, seq, reason, map[string]any{"family": "assistant"})
+	if err := json.Unmarshal(line, &frame); err != nil {
+		return r.decodeFailure(ctx, seq, "invalid-foreign-field", map[string]any{"family": "assistant"})
+	}
+	var unknown unknownMemberSet
+	if !scanKnownObject(object, claudeAssistantFrameFields, "", &unknown) {
+		return r.decodeFailure(ctx, seq, "invalid-foreign-field", map[string]any{"family": "assistant"})
+	}
+	messageObject, _ := object["message"].(map[string]any)
+	if !scanKnownObject(messageObject, claudeAssistantMessageFields, "message.", &unknown) {
+		return r.decodeFailure(ctx, seq, "invalid-foreign-field", map[string]any{"field": "message"})
 	}
 	if frame.Type == nil || frame.SessionID == nil || frame.UUID == nil || frame.Message == nil {
 		return r.decodeFailure(ctx, seq, "missing-foreign-field", map[string]any{"family": "assistant"})
@@ -1199,7 +1782,10 @@ func (r *claudeActiveRun) handleAssistant(ctx context.Context, line []byte, seq 
 	if *message.Model != r.launch.Profile.Model {
 		return r.decodeFailure(ctx, seq, "model-mismatch", nil)
 	}
-	if reason := validateUsage(message.Usage); reason != "" {
+	usageObject, _ := messageObject["usage"].(map[string]any)
+	// The assistant detail projects no usage, so only the proof and the
+	// SI-187 recording are wanted here.
+	if _, reason := validateUsage(message.Usage, usageObject, "message.usage.", &unknown); reason != "" {
 		return r.decodeFailure(ctx, seq, reason, map[string]any{"field": "message.usage"})
 	}
 
@@ -1216,35 +1802,55 @@ func (r *claudeActiveRun) handleAssistant(ctx context.Context, line []byte, seq 
 	}
 
 	r.mu.Lock()
-	duplicateMessage := r.seenMessageIDs[*message.ID]
-	if !duplicateMessage {
-		if r.seenMessageIDs == nil {
-			r.seenMessageIDs = make(map[string]bool)
+	blockStart, everOpened := r.nextMessageBlockIndex[*message.ID]
+	messageClosed := everOpened && r.openMessageID != *message.ID
+	if !messageClosed {
+		if r.nextMessageBlockIndex == nil {
+			r.nextMessageBlockIndex = make(map[string]int)
 		}
-		r.seenMessageIDs[*message.ID] = true
+		r.openMessageID = *message.ID
+		r.nextMessageBlockIndex[*message.ID] = blockStart + len(*message.Content)
 	}
 	r.mu.Unlock()
 
 	if *frame.SessionID != currentSession {
 		return r.decodeFailure(ctx, seq, "session-mismatch", nil)
 	}
-	// §5: a repeated provider message id is a stream contradiction.
-	if duplicateMessage {
+	// §5/SI-190: frames sharing one message id are the successive blocks of
+	// one message, so only a frame naming a message id already closed by a
+	// later, different message id is a stream contradiction.
+	if messageClosed {
 		return r.decodeFailure(ctx, seq, "duplicate-message-id", nil)
 	}
 
+	// SI-187: every top-level frame and message-level unknown member found so
+	// far is disclosed exactly once, attached to whichever content block first
+	// gets the chance below. Its value is never read regardless of which block
+	// that turns out to be.
+	messageUnknown := unknown.sorted()
+	contentObjects, _ := messageObject["content"].([]any)
+
 	messageID := *message.ID
 	observations := []sealedexec.NormalizedObservation{}
-	for blockIndex, rawBlock := range *message.Content {
+	for localIndex, rawBlock := range *message.Content {
+		// SI-190: every fixed id and hashed detail below uses the index
+		// continued across all frames sharing this message id; only this
+		// frame's own raw content array (and the unknown-member scan) is
+		// addressed by the frame-local position.
+		blockIndex := blockStart + localIndex
 		var discriminator claudeBlockDiscriminator
 		if err := json.Unmarshal(rawBlock, &discriminator); err != nil || discriminator.Type == nil {
 			return r.decodeFailure(ctx, seq, "unknown-content-block", nil)
 		}
+		var blockObject map[string]any
+		if localIndex < len(contentObjects) {
+			blockObject, _ = contentObjects[localIndex].(map[string]any)
+		}
 		switch *discriminator.Type {
 		case "text":
 			var block claudeTextBlock
-			if reason := strictDecodeReason(rawBlock, &block); reason != "" {
-				return r.decodeFailure(ctx, seq, reason, map[string]any{"field": "content.text"})
+			if err := json.Unmarshal(rawBlock, &block); err != nil {
+				return r.decodeFailure(ctx, seq, "invalid-foreign-field", map[string]any{"field": "content.text"})
 			}
 			if block.Text == nil {
 				return r.decodeFailure(ctx, seq, "missing-foreign-field", map[string]any{"field": "content.text"})
@@ -1252,12 +1858,19 @@ func (r *claudeActiveRun) handleAssistant(ctx context.Context, line []byte, seq 
 			if *block.Text == "" || !utf8.ValidString(*block.Text) {
 				return r.decodeFailure(ctx, seq, "invalid-foreign-field", map[string]any{"field": "content.text"})
 			}
-			detail, err := r.processDetail(ctx, map[string]any{
+			var blockUnknown unknownMemberSet
+			if !scanKnownObject(blockObject, claudeTextBlockFields, "message.content.", &blockUnknown) {
+				return r.decodeFailure(ctx, seq, "invalid-foreign-field", map[string]any{"field": "content.text"})
+			}
+			textDetailSource := map[string]any{
 				"block_index": float64(blockIndex),
 				"family":      "assistant/text",
 				"message_id":  messageID,
 				"text":        *block.Text,
-			}, protectedValues)
+			}
+			attachUnknownMemberWitness(textDetailSource, r.runNewUnknownMembers(append(append([]string(nil), messageUnknown...), blockUnknown.sorted()...)))
+			attachUnknownFamilyWitness(textDetailSource, r.drainPendingUnknownFamilies())
+			detail, err := r.processDetail(ctx, textDetailSource, protectedValues)
 			if err != nil {
 				return r.decodeFailure(ctx, seq, detailFailureReason(err), nil)
 			}
@@ -1281,8 +1894,8 @@ func (r *claudeActiveRun) handleAssistant(ctx context.Context, line []byte, seq 
 
 		case "tool_use":
 			var block claudeToolUseBlock
-			if reason := strictDecodeReason(rawBlock, &block); reason != "" {
-				return r.decodeFailure(ctx, seq, reason, map[string]any{"field": "content.tool_use"})
+			if err := json.Unmarshal(rawBlock, &block); err != nil {
+				return r.decodeFailure(ctx, seq, "invalid-foreign-field", map[string]any{"field": "content.tool_use"})
 			}
 			if block.ID == nil || block.Name == nil || block.Input == nil {
 				return r.decodeFailure(ctx, seq, "missing-foreign-field", map[string]any{"field": "content.tool_use"})
@@ -1304,14 +1917,21 @@ func (r *claudeActiveRun) handleAssistant(ctx context.Context, line []byte, seq 
 			if err != nil {
 				return r.decodeFailure(ctx, seq, "redaction-failed", nil)
 			}
-			detail, err := r.processDetail(ctx, map[string]any{
+			var blockUnknown unknownMemberSet
+			if !scanKnownObject(blockObject, claudeToolUseBlockFields, "message.content.", &blockUnknown) {
+				return r.decodeFailure(ctx, seq, "invalid-foreign-field", map[string]any{"field": "content.tool_use"})
+			}
+			toolUseDetailSource := map[string]any{
 				"block_index": float64(blockIndex),
 				"call_id":     *block.ID,
 				"family":      "assistant/tool_use",
 				"input":       json.RawMessage(redactedInput),
 				"message_id":  messageID,
 				"tool_name":   *block.Name,
-			}, protectedValues)
+			}
+			attachUnknownMemberWitness(toolUseDetailSource, r.runNewUnknownMembers(append(append([]string(nil), messageUnknown...), blockUnknown.sorted()...)))
+			attachUnknownFamilyWitness(toolUseDetailSource, r.drainPendingUnknownFamilies())
+			detail, err := r.processDetail(ctx, toolUseDetailSource, protectedValues)
 			if err != nil {
 				return r.decodeFailure(ctx, seq, detailFailureReason(err), nil)
 			}
@@ -1343,13 +1963,18 @@ func (r *claudeActiveRun) handleAssistant(ctx context.Context, line []byte, seq 
 
 		case "thinking":
 			var block claudeThinkingBlock
-			if reason := strictDecodeReason(rawBlock, &block); reason != "" {
-				return r.decodeFailure(ctx, seq, reason, map[string]any{"field": "content.thinking"})
+			if err := json.Unmarshal(rawBlock, &block); err != nil {
+				return r.decodeFailure(ctx, seq, "invalid-foreign-field", map[string]any{"field": "content.thinking"})
 			}
 			if block.Thinking == nil || block.Signature == nil {
 				return r.decodeFailure(ctx, seq, "missing-foreign-field", map[string]any{"field": "content.thinking"})
 			}
-			observation, safe, err := r.omissionSummary(ctx, "thinking", messageID, blockIndex, protectedValues)
+			var blockUnknown unknownMemberSet
+			if !scanKnownObject(blockObject, claudeThinkingBlockFields, "message.content.", &blockUnknown) {
+				return r.decodeFailure(ctx, seq, "invalid-foreign-field", map[string]any{"field": "content.thinking"})
+			}
+			witness := r.runNewUnknownMembers(append(append([]string(nil), messageUnknown...), blockUnknown.sorted()...))
+			observation, safe, err := r.omissionSummary(ctx, "thinking", messageID, blockIndex, protectedValues, witness)
 			if err != nil {
 				return r.decodeFailure(ctx, seq, detailFailureReason(err), nil)
 			}
@@ -1360,13 +1985,18 @@ func (r *claudeActiveRun) handleAssistant(ctx context.Context, line []byte, seq 
 
 		case "redacted_thinking":
 			var block claudeRedactedThinkingBlock
-			if reason := strictDecodeReason(rawBlock, &block); reason != "" {
-				return r.decodeFailure(ctx, seq, reason, map[string]any{"field": "content.redacted_thinking"})
+			if err := json.Unmarshal(rawBlock, &block); err != nil {
+				return r.decodeFailure(ctx, seq, "invalid-foreign-field", map[string]any{"field": "content.redacted_thinking"})
 			}
 			if block.Data == nil {
 				return r.decodeFailure(ctx, seq, "missing-foreign-field", map[string]any{"field": "content.redacted_thinking"})
 			}
-			observation, safe, err := r.omissionSummary(ctx, "redacted_thinking", messageID, blockIndex, protectedValues)
+			var blockUnknown unknownMemberSet
+			if !scanKnownObject(blockObject, claudeRedactedThinkingBlockFields, "message.content.", &blockUnknown) {
+				return r.decodeFailure(ctx, seq, "invalid-foreign-field", map[string]any{"field": "content.redacted_thinking"})
+			}
+			witness := r.runNewUnknownMembers(append(append([]string(nil), messageUnknown...), blockUnknown.sorted()...))
+			observation, safe, err := r.omissionSummary(ctx, "redacted_thinking", messageID, blockIndex, protectedValues, witness)
 			if err != nil {
 				return r.decodeFailure(ctx, seq, detailFailureReason(err), nil)
 			}
@@ -1379,32 +2009,80 @@ func (r *claudeActiveRun) handleAssistant(ctx context.Context, line []byte, seq 
 			return r.decodeFailure(ctx, seq, "unknown-content-block", nil)
 		}
 	}
+	// SI-187: a frame with no content block has no block detail to attach the
+	// frame- and message-level disclosure to, so it carries one of its own
+	// rather than dropping the recording obligation on an accepted frame.
+	if len(*message.Content) == 0 {
+		summary, disclosed, err := r.unknownMemberSummary(ctx, "assistant", seq, r.runNewUnknownMembers(messageUnknown), protectedValues)
+		if err != nil {
+			return r.decodeFailure(ctx, seq, detailFailureReason(err), nil)
+		}
+		if disclosed {
+			observations = append(observations, summary)
+		}
+	}
 	return sealedexec.AdapterResult{Observations: observations}, nil
+}
+
+// unknownMemberSummary carries SI-187's disclosure on an advisory provider
+// summary of its own, for a frame whose content is empty: §I-108 records the
+// path regardless of what else the frame contains, and such a frame has no
+// content-block detail to carry it. Its summary id is derived from the source
+// sequence and never from provider bytes, so it places no foreign value in a
+// fixed payload field. paths must already be this launch's run-new set; an
+// empty one yields no observation at all, so a clean frame is unchanged.
+func (r *claudeActiveRun) unknownMemberSummary(ctx context.Context, family string, seq uint64, paths []string, protectedValues [][]byte) (obs sealedexec.NormalizedObservation, disclosed bool, err error) {
+	if len(paths) == 0 {
+		return sealedexec.NormalizedObservation{}, false, nil
+	}
+	source := map[string]any{"family": family}
+	attachUnknownMemberWitness(source, paths)
+	attachUnknownFamilyWitness(source, r.drainPendingUnknownFamilies())
+	detail, err := r.processDetail(ctx, source, protectedValues)
+	if err != nil {
+		return sealedexec.NormalizedObservation{}, false, err
+	}
+	summaryID := fmt.Sprintf("unknown-members/%d", seq)
+	return buildProviderSummary(r.launch, summaryID, detail.Digest, contextevent.AuthorityAdvisory, detail), true, nil
 }
 
 // omissionSummary builds the fixed hidden-content omission summary. Hidden
 // bytes are never inputs to redaction or the digest. Its summary id is derived
 // from the provider message id, so §6/SI-174 checks the exact composed fixed
-// value before it is placed; ok reports that the value was safe.
-func (r *claudeActiveRun) omissionSummary(ctx context.Context, contentType, messageID string, blockIndex int, protectedValues [][]byte) (obs sealedexec.NormalizedObservation, ok bool, err error) {
+// value before it is placed; ok reports that the value was safe. witness is
+// SI-187's already-deduplicated, run-new unknown-member disclosure for this
+// block (and any not-yet-disclosed frame/message-level members), attached
+// when nonempty.
+func (r *claudeActiveRun) omissionSummary(ctx context.Context, contentType, messageID string, blockIndex int, protectedValues [][]byte, witness []string) (obs sealedexec.NormalizedObservation, ok bool, err error) {
 	summaryID := fmt.Sprintf("%s:%d", messageID, blockIndex)
 	if !fixedPayloadValuesSafe(protectedValues, summaryID) {
 		return sealedexec.NormalizedObservation{}, false, nil
 	}
-	detail, err := r.processDetail(ctx, map[string]any{
+	omissionSource := map[string]any{
 		"content_type": contentType,
 		"omitted":      true,
-	}, protectedValues)
+	}
+	attachUnknownMemberWitness(omissionSource, witness)
+	attachUnknownFamilyWitness(omissionSource, r.drainPendingUnknownFamilies())
+	detail, err := r.processDetail(ctx, omissionSource, protectedValues)
 	if err != nil {
 		return sealedexec.NormalizedObservation{}, false, err
 	}
 	return buildProviderSummary(r.launch, summaryID, detail.Digest, contextevent.AuthorityAdvisory, detail), true, nil
 }
 
-func (r *claudeActiveRun) handleToolResult(ctx context.Context, line []byte, seq uint64) (sealedexec.AdapterResult, error) {
+func (r *claudeActiveRun) handleToolResult(ctx context.Context, line []byte, object map[string]any, seq uint64) (sealedexec.AdapterResult, error) {
 	var frame claudeUserFrame
-	if reason := strictDecodeReason(line, &frame); reason != "" {
-		return r.decodeFailure(ctx, seq, reason, map[string]any{"family": "user"})
+	if err := json.Unmarshal(line, &frame); err != nil {
+		return r.decodeFailure(ctx, seq, "invalid-foreign-field", map[string]any{"family": "user"})
+	}
+	var unknown unknownMemberSet
+	if !scanKnownObject(object, claudeUserFrameFields, "", &unknown) {
+		return r.decodeFailure(ctx, seq, "invalid-foreign-field", map[string]any{"family": "user"})
+	}
+	messageObject, _ := object["message"].(map[string]any)
+	if !scanKnownObject(messageObject, claudeUserMessageFields, "message.", &unknown) {
+		return r.decodeFailure(ctx, seq, "invalid-foreign-field", map[string]any{"field": "message"})
 	}
 	if frame.Type == nil || frame.SessionID == nil || frame.UUID == nil || frame.Message == nil ||
 		frame.Message.Role == nil || frame.Message.Content == nil {
@@ -1425,8 +2103,15 @@ func (r *claudeActiveRun) handleToolResult(ctx context.Context, line []byte, seq
 		return r.decodeFailure(ctx, seq, "session-mismatch", nil)
 	}
 
+	// SI-187: as in the assistant family, every not-yet-disclosed frame/
+	// message-level unknown member is attached to whichever tool-result block
+	// first gets the chance below, or to a disclosure summary of its own when
+	// the frame has no block at all.
+	frameUnknown := unknown.sorted()
+	contentObjects, _ := messageObject["content"].([]any)
+
 	observations := []sealedexec.NormalizedObservation{}
-	for _, rawBlock := range *frame.Message.Content {
+	for blockIndex, rawBlock := range *frame.Message.Content {
 		var discriminator claudeBlockDiscriminator
 		if err := json.Unmarshal(rawBlock, &discriminator); err != nil || discriminator.Type == nil {
 			return r.decodeFailure(ctx, seq, "unknown-content-block", nil)
@@ -1435,9 +2120,17 @@ func (r *claudeActiveRun) handleToolResult(ctx context.Context, line []byte, seq
 		if *discriminator.Type != "tool_result" {
 			return r.decodeFailure(ctx, seq, "unknown-content-block", nil)
 		}
+		var blockObject map[string]any
+		if blockIndex < len(contentObjects) {
+			blockObject, _ = contentObjects[blockIndex].(map[string]any)
+		}
 		var block claudeToolResultBlock
-		if reason := strictDecodeReason(rawBlock, &block); reason != "" {
-			return r.decodeFailure(ctx, seq, reason, map[string]any{"field": "content.tool_result"})
+		if err := json.Unmarshal(rawBlock, &block); err != nil {
+			return r.decodeFailure(ctx, seq, "invalid-foreign-field", map[string]any{"field": "content.tool_result"})
+		}
+		var blockUnknown unknownMemberSet
+		if !scanKnownObject(blockObject, claudeToolResultBlockFields, "message.content.", &blockUnknown) {
+			return r.decodeFailure(ctx, seq, "invalid-foreign-field", map[string]any{"field": "content.tool_result"})
 		}
 		if block.ToolUseID == nil || block.Content == nil {
 			return r.decodeFailure(ctx, seq, "missing-foreign-field", map[string]any{"field": "content.tool_result"})
@@ -1488,12 +2181,15 @@ func (r *claudeActiveRun) handleToolResult(ctx context.Context, line []byte, seq
 		if block.IsError != nil && *block.IsError {
 			status = "error"
 		}
-		detail, err := r.processDetail(ctx, map[string]any{
+		toolResultDetailSource := map[string]any{
 			"call_id": callID,
 			"content": json.RawMessage(redactedContent),
 			"family":  "user/tool_result",
 			"status":  status,
-		}, protectedValues)
+		}
+		attachUnknownMemberWitness(toolResultDetailSource, r.runNewUnknownMembers(append(append([]string(nil), frameUnknown...), blockUnknown.sorted()...)))
+		attachUnknownFamilyWitness(toolResultDetailSource, r.drainPendingUnknownFamilies())
+		detail, err := r.processDetail(ctx, toolResultDetailSource, protectedValues)
 		if err != nil {
 			return r.decodeFailure(ctx, seq, detailFailureReason(err), nil)
 		}
@@ -1511,13 +2207,31 @@ func (r *claudeActiveRun) handleToolResult(ctx context.Context, line []byte, seq
 			},
 		})
 	}
+	// SI-187: as in the assistant family, an accepted frame with no content
+	// block still records its frame- and message-level unknown members.
+	if len(*frame.Message.Content) == 0 {
+		summary, disclosed, err := r.unknownMemberSummary(ctx, "user", seq, r.runNewUnknownMembers(frameUnknown), protectedValues)
+		if err != nil {
+			return r.decodeFailure(ctx, seq, detailFailureReason(err), nil)
+		}
+		if disclosed {
+			observations = append(observations, summary)
+		}
+	}
 	return sealedexec.AdapterResult{Observations: observations}, nil
 }
 
-func (r *claudeActiveRun) handleResult(ctx context.Context, line []byte, seq uint64) (sealedexec.AdapterResult, error) {
+func (r *claudeActiveRun) handleResult(ctx context.Context, line []byte, object map[string]any, seq uint64) (sealedexec.AdapterResult, error) {
 	var frame claudeResultFrame
-	if reason := strictDecodeReason(line, &frame); reason != "" {
-		return r.decodeFailure(ctx, seq, reason, map[string]any{"family": "result"})
+	if err := json.Unmarshal(line, &frame); err != nil {
+		return r.decodeFailure(ctx, seq, "invalid-foreign-field", map[string]any{"family": "result"})
+	}
+	var unknown unknownMemberSet
+	if !scanKnownObject(object, claudeResultFrameFields, "", &unknown) {
+		return r.decodeFailure(ctx, seq, "invalid-foreign-field", map[string]any{"family": "result"})
+	}
+	if !scanKnownObjectArray(object["permission_denials"], claudePermissionDenialFields, "permission_denials.", &unknown) {
+		return r.decodeFailure(ctx, seq, "invalid-foreign-field", map[string]any{"field": "permission_denials"})
 	}
 	if frame.Type == nil || frame.Subtype == nil || frame.IsError == nil || frame.Result == nil ||
 		frame.SessionID == nil || frame.UUID == nil || frame.DurationMS == nil || frame.DurationAPIMS == nil ||
@@ -1539,33 +2253,54 @@ func (r *claudeActiveRun) handleResult(ctx context.Context, line []byte, seq uin
 	if err := json.Unmarshal(*frame.TotalCostUSD, &totalCost); err != nil || totalCost < 0 {
 		return r.decodeFailure(ctx, seq, "invalid-foreign-field", map[string]any{"field": "total_cost_usd"})
 	}
-	if reason := validateUsage(frame.Usage); reason != "" {
+	usageObject, _ := object["usage"].(map[string]any)
+	usageProjection, reason := validateUsage(frame.Usage, usageObject, "usage.", &unknown)
+	if reason != "" {
 		return r.decodeFailure(ctx, seq, reason, map[string]any{"field": "usage"})
 	}
 	var denials []claudePermissionDenial
-	if reason := strictDecodeReason(*frame.PermissionDenials, &denials); reason != "" {
-		return r.decodeFailure(ctx, seq, reason, map[string]any{"field": "permission_denials"})
+	if err := json.Unmarshal(*frame.PermissionDenials, &denials); err != nil {
+		return r.decodeFailure(ctx, seq, "invalid-foreign-field", map[string]any{"field": "permission_denials"})
 	}
 	if denials == nil {
 		return r.decodeFailure(ctx, seq, "invalid-foreign-field", map[string]any{"field": "permission_denials"})
 	}
+	// SI-187: every projected row is rebuilt from the accepted members of the
+	// typed decode, so a tolerated unknown member of a denial row is recorded
+	// and nothing more — it never rides into the detail or its digest.
+	denialRows := make([]map[string]any, 0, len(denials))
 	for _, denial := range denials {
 		if denial.ToolName == nil || denial.ToolUseID == nil || denial.ToolInput == nil {
 			return r.decodeFailure(ctx, seq, "missing-foreign-field", map[string]any{"field": "permission_denials"})
 		}
+		denialRows = append(denialRows, map[string]any{
+			"tool_input":  json.RawMessage(*denial.ToolInput),
+			"tool_name":   *denial.ToolName,
+			"tool_use_id": *denial.ToolUseID,
+		})
 	}
+	var modelUsageProjection map[string]any
 	if frame.ModelUsage != nil {
 		var modelUsage map[string]json.RawMessage
-		if reason := strictDecodeReason(*frame.ModelUsage, &modelUsage); reason != "" {
-			return r.decodeFailure(ctx, seq, reason, map[string]any{"field": "modelUsage"})
+		if err := json.Unmarshal(*frame.ModelUsage, &modelUsage); err != nil {
+			return r.decodeFailure(ctx, seq, "invalid-foreign-field", map[string]any{"field": "modelUsage"})
 		}
 		usage, sole := modelUsage[r.launch.Profile.Model]
 		if len(modelUsage) != 1 || !sole {
 			return r.decodeFailure(ctx, seq, "invalid-foreign-field", map[string]any{"field": "modelUsage"})
 		}
-		if reason := validateUsage(&usage); reason != "" {
+		modelUsageObject, _ := object["modelUsage"].(map[string]any)
+		perModelObject, _ := modelUsageObject[r.launch.Profile.Model].(map[string]any)
+		// The member lives at modelUsage.<model>.<key>, so the recorded path
+		// names that level and not a nonexistent modelUsage.<key>. SI-189:
+		// the per-model value is its own camelCase shape, distinct from the
+		// v1 snake_case shape validateUsage still applies to the top-level
+		// `usage` member above.
+		perModel, reason := validateModelUsage(&usage, perModelObject, "modelUsage."+r.launch.Profile.Model+".", &unknown)
+		if reason != "" {
 			return r.decodeFailure(ctx, seq, reason, map[string]any{"field": "modelUsage"})
 		}
+		modelUsageProjection = map[string]any{r.launch.Profile.Model: perModel}
 	}
 
 	r.mu.Lock()
@@ -1576,21 +2311,36 @@ func (r *claudeActiveRun) handleResult(ctx context.Context, line []byte, seq uin
 		return r.decodeFailure(ctx, seq, "session-mismatch", nil)
 	}
 
+	// SI-187: usage, permission_denials and modelUsage are the projection's
+	// three object-shaped members, so each is placed from the rebuilt typed
+	// value above rather than from the frame bytes. Passing the raw bytes
+	// through would project and hash the very members the walk just recorded
+	// as unknown, which is the half of SI-187 that says they are never read.
+	// total_cost_usd stays raw: it decoded as a bare float64, so it has no
+	// members that could hide one, and its verbatim numeric form is
+	// deliberately preserved.
 	projection := map[string]any{
 		"duration_api_ms":    *frame.DurationAPIMS,
 		"duration_ms":        *frame.DurationMS,
 		"family":             "result",
 		"is_error":           *frame.IsError,
 		"num_turns":          *frame.NumTurns,
-		"permission_denials": json.RawMessage(*frame.PermissionDenials),
+		"permission_denials": denialRows,
 		"result":             *frame.Result,
 		"subtype":            *frame.Subtype,
 		"total_cost_usd":     json.RawMessage(*frame.TotalCostUSD),
-		"usage":              json.RawMessage(*frame.Usage),
+		"usage":              usageProjection,
 	}
-	if frame.ModelUsage != nil {
-		projection["modelUsage"] = json.RawMessage(*frame.ModelUsage)
+	if modelUsageProjection != nil {
+		projection["modelUsage"] = modelUsageProjection
 	}
+	attachUnknownMemberWitness(projection, r.runNewUnknownMembers(unknown.sorted()))
+	// SI-192: this detail is only a PROVISIONAL carrier. §5's terminal
+	// precedence may still discard the observations built from it below, so
+	// what it drained is remembered on the pending terminal and returned to
+	// the queue if that happens.
+	carriedFamilies := r.drainPendingUnknownFamilies()
+	attachUnknownFamilyWitness(projection, carriedFamilies)
 	detail, err := r.processDetail(ctx, projection, protectedValues)
 	if err != nil {
 		return r.decodeFailure(ctx, seq, detailFailureReason(err), nil)
@@ -1607,6 +2357,7 @@ func (r *claudeActiveRun) handleResult(ctx context.Context, line []byte, seq uin
 			observations: []sealedexec.NormalizedObservation{
 				buildProviderSummary(r.launch, "terminal-result", detail.Digest, contextevent.AuthorityAdvisory, detail),
 			},
+			unknownFamilies: carriedFamilies,
 		}
 		r.mu.Unlock()
 		return sealedexec.AdapterResult{Observations: []sealedexec.NormalizedObservation{}}, nil
@@ -1634,7 +2385,8 @@ func (r *claudeActiveRun) handleResult(ctx context.Context, line []byte, seq uin
 		},
 	}
 	r.mu.Lock()
-	r.pendingResult = &pendingTerminal{seq: seq, observations: []sealedexec.NormalizedObservation{errorObs}, reason: reasonCode}
+	r.pendingResult = &pendingTerminal{seq: seq, observations: []sealedexec.NormalizedObservation{errorObs},
+		reason: reasonCode, unknownFamilies: carriedFamilies}
 	r.mu.Unlock()
 	return sealedexec.AdapterResult{Observations: []sealedexec.NormalizedObservation{}}, nil
 }
@@ -1839,15 +2591,29 @@ func adapterStopObservation(launch sealedexec.AdapterLaunch, exitCode int, reaso
 // Validation helpers for init
 // ---------------------------------------------------------------------------
 
-// validateInitMCPServers proves the observed inventory is exactly the one
-// scoped, connected verdi-context row.
+// validateInitMCPServers proves the observed inventory is exactly Amendment
+// 003's two connected required rows, in either order. Missing, extra,
+// duplicate, disconnected, or renamed rows are all mcp-mismatch.
 func validateInitMCPServers(servers []claudeMCPRow) string {
-	if len(servers) != 1 {
+	want := sealedexec.SortedMCPNames([]string{sealedexec.RequiredClaimMCPName, sealedexec.RequiredContextMCPName})
+	if len(servers) != len(want) {
 		return "mcp-mismatch"
 	}
-	row := servers[0]
-	if row.Name == nil || row.Status == nil || *row.Name != "verdi-context" || *row.Status != "connected" {
-		return "mcp-mismatch"
+	observed := make([]string, 0, len(servers))
+	for _, row := range servers {
+		if row.Name == nil || row.Status == nil || *row.Status != "connected" {
+			return "mcp-mismatch"
+		}
+		observed = append(observed, *row.Name)
+	}
+	// Accepted rows are sorted by name before projection, so either observed
+	// order canonicalizes to the same inventory, and a duplicate never
+	// satisfies a missing peer.
+	observed = sealedexec.SortedMCPNames(observed)
+	for i, name := range want {
+		if observed[i] != name {
+			return "mcp-mismatch"
+		}
 	}
 	return ""
 }

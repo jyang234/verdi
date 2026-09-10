@@ -151,7 +151,8 @@ func (s *Service) Evaluate(ctx context.Context, request Request) (Result, error)
 	if err != nil {
 		return Result{}, operational("derive compiler disclosures", err)
 	}
-	disclosures, err := mergeReportDisclosures(inherited, mechanicalResult.Disclosures, exemptionDisclosures, exemptionApplicationDisclosures, dispositionDisclosures)
+	localOperator := localOperatorDisclosures(view.Profile, view.Actors)
+	disclosures, err := mergeReportDisclosures(inherited, mechanicalResult.Disclosures, exemptionDisclosures, exemptionApplicationDisclosures, dispositionDisclosures, localOperator)
 	if err != nil {
 		return Result{}, operational("combine report disclosures", err)
 	}

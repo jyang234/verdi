@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"math"
 	"reflect"
+	"strings"
 
 	"github.com/jyang234/verdi/internal/canonjson"
 	"github.com/jyang234/verdi/internal/contextcompile"
@@ -49,8 +50,104 @@ func (canonicalChildCompiler) CompileChild(ctx context.Context, request ChildCom
 		return ChildManifest{}, operational("round-trip context child data", errors.New("data item does not round-trip exactly"))
 	}
 
+	proof, err := ProveInstalledExpansion(InstalledExpansionInput{
+		Key:                  request.Snapshot.Key,
+		ParentRevision:       request.Snapshot.Revision,
+		ParentManifestDigest: request.Snapshot.ManifestDigest,
+		Ref:                  request.Ref,
+		Purpose:              request.Purpose,
+		Item:                 request.Data,
+		PriorExpansionRoot:   request.Snapshot.ExpansionRoot,
+	})
+	if err != nil {
+		return ChildManifest{}, operational("prove context child transition", err)
+	}
+
+	return ChildManifest{
+		Verification:         Verification{State: contextcompile.ResolutionProven, Witnesses: []string{}},
+		RequestID:            request.RequestID,
+		ParentManifestDigest: request.Snapshot.ManifestDigest,
+		ChildManifestDigest:  proof.ChildManifestDigest,
+		ParentRevision:       request.Snapshot.Revision,
+		ChildRevision:        request.Snapshot.Revision + 1,
+		ExpansionDigest:      proof.ExpansionDigest,
+		ExpansionRoot:        proof.ExpansionRoot,
+	}, nil
+}
+
+// InstalledExpansionInput is the complete explicit operand set of one
+// installed-expansion transition: the flight identity, the parent manifest
+// state the transition leaves, the requested ref and request purpose, the
+// canonical installed item, and the expansion root the ledger already holds.
+//
+// Nothing here is read from ambient state. That is the point: a durable
+// install row plus the parent state it names is exactly what a restarted
+// process holds, so a replay from these operands either reproduces the
+// recorded identities or proves the row was rewritten.
+type InstalledExpansionInput struct {
+	Key                  ExecutionKey
+	ParentRevision       uint64
+	ParentManifestDigest string
+	Ref                  string
+	Purpose              string
+	Item                 contextcompile.DataItem
+	PriorExpansionRoot   string
+}
+
+// InstalledExpansionProof is the transition identity the operands determine.
+// The child revision is deliberately absent: it is parent+1 by construction,
+// and publishing it here would invite a consumer to carry a second copy.
+type InstalledExpansionProof struct {
+	RequestID           string
+	ChildManifestDigest string
+	ExpansionDigest     string
+	ExpansionRoot       string
+}
+
+// ProveInstalledExpansion is the one owner of the installed-expansion
+// preimages fixed by PLAN I-84 and SI-182 (VATC F12 correction §2.2).
+//
+// The live child compiler above and the read-only context resolver both call
+// it rather than restating these four schema literals and their canonical
+// preimages. A second copy is precisely the drift that would let a replay
+// silently accept a rewritten lineage, so this function computes and no
+// consumer re-derives.
+func ProveInstalledExpansion(input InstalledExpansionInput) (InstalledExpansionProof, error) {
+	if err := validateExecutionKey(input.Key); err != nil {
+		return InstalledExpansionProof{}, err
+	}
+	for field, value := range map[string]string{"installed expansion ref": input.Ref, "installed expansion purpose": input.Purpose} {
+		if err := requireText(field, value); err != nil {
+			return InstalledExpansionProof{}, err
+		}
+	}
+	if err := validateDigest("parent manifest digest", input.ParentManifestDigest); err != nil {
+		return InstalledExpansionProof{}, err
+	}
+	if input.PriorExpansionRoot != "" {
+		if err := validateDigest("prior expansion root", input.PriorExpansionRoot); err != nil {
+			return InstalledExpansionProof{}, err
+		}
+	}
+	if input.ParentRevision == math.MaxUint64 {
+		return InstalledExpansionProof{}, errors.New("sealedexec: parent manifest revision cannot advance")
+	}
+	// The item's own ref is optional in the accepted grammar; when it is
+	// present it names the same context the row requested.
+	if input.Item.Ref != nil && *input.Item.Ref != input.Ref {
+		return InstalledExpansionProof{}, errors.New("sealedexec: installed data item ref does not match the requested ref")
+	}
+	dataBytes, err := contextcompile.EncodeDataItem(input.Item)
+	if err != nil {
+		return InstalledExpansionProof{}, fmt.Errorf("sealedexec: encode installed expansion item: %w", err)
+	}
+
+	requestID, err := installedContextRequestID(input.Key, input.ParentRevision, input.ParentManifestDigest, input.Ref, input.Purpose)
+	if err != nil {
+		return InstalledExpansionProof{}, fmt.Errorf("sealedexec: digest installed expansion request: %w", err)
+	}
 	dataDigest := digestBytes(dataBytes)
-	childRevision := request.Snapshot.Revision + 1
+	childRevision := input.ParentRevision + 1
 	childDigest, err := canonjson.Digest(struct {
 		Schema               string `json:"schema"`
 		RequestID            string `json:"request_id"`
@@ -61,40 +158,55 @@ func (canonicalChildCompiler) CompileChild(ctx context.Context, request ChildCom
 		ChildRevision        uint64 `json:"child_revision"`
 		DataDigest           string `json:"data_digest"`
 	}{
-		Schema: contextChildManifestSchema, RequestID: request.RequestID,
-		Ref: request.Ref, Purpose: request.Purpose,
-		ParentRevision: request.Snapshot.Revision, ParentManifestDigest: request.Snapshot.ManifestDigest,
+		Schema: contextChildManifestSchema, RequestID: requestID,
+		Ref: input.Ref, Purpose: input.Purpose,
+		ParentRevision: input.ParentRevision, ParentManifestDigest: input.ParentManifestDigest,
 		ChildRevision: childRevision, DataDigest: dataDigest,
 	})
 	if err != nil {
-		return ChildManifest{}, operational("digest context child manifest", err)
+		return InstalledExpansionProof{}, fmt.Errorf("sealedexec: digest context child manifest: %w", err)
 	}
 	expansionDigest, err := contextExpansionDigest(contextreceipt.Expansion{
-		RequestID: request.RequestID, ParentRevision: request.Snapshot.Revision, ParentManifestDigest: request.Snapshot.ManifestDigest,
+		RequestID: requestID, ParentRevision: input.ParentRevision, ParentManifestDigest: input.ParentManifestDigest,
 		ChildRevision: childRevision, ChildManifestDigest: childDigest,
 	}, dataDigest)
 	if err != nil {
-		return ChildManifest{}, operational("digest context expansion", err)
+		return InstalledExpansionProof{}, fmt.Errorf("sealedexec: digest context expansion: %w", err)
 	}
 	expansionRoot, err := canonjson.Digest(struct {
 		Schema             string `json:"schema"`
 		PriorExpansionRoot string `json:"prior_expansion_root"`
 		ExpansionDigest    string `json:"expansion_digest"`
-	}{Schema: contextExpansionRootSchema, PriorExpansionRoot: request.Snapshot.ExpansionRoot, ExpansionDigest: expansionDigest})
+	}{Schema: contextExpansionRootSchema, PriorExpansionRoot: input.PriorExpansionRoot, ExpansionDigest: expansionDigest})
 	if err != nil {
-		return ChildManifest{}, operational("digest context expansion root", err)
+		return InstalledExpansionProof{}, fmt.Errorf("sealedexec: digest context expansion root: %w", err)
 	}
-
-	return ChildManifest{
-		Verification:         Verification{State: contextcompile.ResolutionProven, Witnesses: []string{}},
-		RequestID:            request.RequestID,
-		ParentManifestDigest: request.Snapshot.ManifestDigest,
-		ChildManifestDigest:  childDigest,
-		ParentRevision:       request.Snapshot.Revision,
-		ChildRevision:        childRevision,
-		ExpansionDigest:      expansionDigest,
-		ExpansionRoot:        expansionRoot,
+	return InstalledExpansionProof{
+		RequestID: requestID, ChildManifestDigest: childDigest,
+		ExpansionDigest: expansionDigest, ExpansionRoot: expansionRoot,
 	}, nil
+}
+
+// installedContextRequestID is the accepted context-request preimage, taking
+// the flight identity and parent manifest state explicitly. contextRequestID
+// is the flight-state-shaped call site of this same function.
+func installedContextRequestID(key ExecutionKey, revision uint64, manifestDigest, ref, purpose string) (string, error) {
+	digest, err := canonjson.Digest(struct {
+		Flight         string `json:"flight"`
+		Lane           string `json:"lane"`
+		Epoch          string `json:"epoch"`
+		Revision       uint64 `json:"revision"`
+		ManifestDigest string `json:"manifest_digest"`
+		Ref            string `json:"ref"`
+		Purpose        string `json:"purpose"`
+	}{
+		Flight: key.Flight, Lane: key.Lane, Epoch: key.Epoch,
+		Revision: revision, ManifestDigest: manifestDigest, Ref: ref, Purpose: purpose,
+	})
+	if err != nil {
+		return "", err
+	}
+	return "context-request:" + strings.TrimPrefix(digest, "sha256:"), nil
 }
 
 func contextExpansionDigest(expansion contextreceipt.Expansion, dataDigest string) (string, error) {

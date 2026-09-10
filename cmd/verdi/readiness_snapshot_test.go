@@ -108,7 +108,7 @@ func TestReadinessSnapshotExpectedIdentity(t *testing.T) {
 	t.Run("binds absent expected to current design branch and HEAD", func(t *testing.T) {
 		repo, requestPath, _, targetRef, _ := readinessSnapshotRepo(t, "feature")
 		var captured *policyconflict.AcceptanceCandidate
-		factory := func(root string, request policyconflict.Request) (policyconflict.VerdictProvider, error) {
+		factory := func(_ context.Context, root string, request policyconflict.Request) (policyconflict.VerdictProvider, error) {
 			candidate := request.Target.AcceptanceCandidate
 			if candidate != nil {
 				copy := *candidate
@@ -141,7 +141,7 @@ func TestReadinessSnapshotExpectedIdentity(t *testing.T) {
 			Head:   strings.Repeat("a", 40),
 		})
 		called := false
-		builder := localReadinessSnapshotBuilder{providerFactory: func(string, policyconflict.Request) (policyconflict.VerdictProvider, error) {
+		builder := localReadinessSnapshotBuilder{providerFactory: func(context.Context, string, policyconflict.Request) (policyconflict.VerdictProvider, error) {
 			called = true
 			return nil, errors.New("must not construct provider")
 		}}
@@ -204,7 +204,7 @@ func TestReadinessSnapshotCrossSourceIdentity(t *testing.T) {
 
 func readinessSnapshotProviderFactory(t *testing.T, root string, verdict policyconflict.Verdict, mutate func(*policyconflict.Report)) contextConflictProviderFactory {
 	t.Helper()
-	return func(gotRoot string, request policyconflict.Request) (policyconflict.VerdictProvider, error) {
+	return func(_ context.Context, gotRoot string, request policyconflict.Request) (policyconflict.VerdictProvider, error) {
 		if gotRoot != root {
 			t.Fatalf("provider root = %q, want %q", gotRoot, root)
 		}

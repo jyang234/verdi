@@ -11,13 +11,14 @@ import (
 	"github.com/jyang234/verdi/internal/align"
 	"github.com/jyang234/verdi/internal/atomicfile"
 	"github.com/jyang234/verdi/internal/contextcompile"
+	"github.com/jyang234/verdi/internal/governanceprincipal"
 	"github.com/jyang234/verdi/internal/instructionprojection"
 	"github.com/jyang234/verdi/internal/policyauthority"
 	"github.com/jyang234/verdi/internal/policyconflict"
 	"github.com/jyang234/verdi/internal/store"
 )
 
-type contextConflictProviderFactory func(string, policyconflict.Request) (policyconflict.VerdictProvider, error)
+type contextConflictProviderFactory func(context.Context, string, policyconflict.Request) (policyconflict.VerdictProvider, error)
 
 // cmdContextConflict exposes the one Task-9 evaluator as a read-only CLI
 // inspection surface. Dependency construction stays behind a narrow factory
@@ -28,6 +29,7 @@ func cmdContextConflict(args []string, stdin io.Reader, stdout, stderr io.Writer
 }
 
 func cmdContextConflictWithFactory(args []string, stdin io.Reader, stdout, stderr io.Writer, factory contextConflictProviderFactory) int {
+	ctx := context.Background()
 	requestArg, hasRequest, outArg, hasOut, rest, err := extractContextCompileFlags(args)
 	if err != nil {
 		fmt.Fprintln(stderr, "context conflict:", err)
@@ -87,7 +89,7 @@ func cmdContextConflictWithFactory(args []string, stdin io.Reader, stdout, stder
 		printContextCommandDiagnostic(stderr, "conflict", root, errors.New("provider factory is nil"))
 		return 2
 	}
-	provider, err := factory(root, request)
+	provider, err := factory(ctx, root, request)
 	if err != nil {
 		printContextCommandDiagnostic(stderr, "conflict", root, err)
 		return 2
@@ -97,7 +99,7 @@ func cmdContextConflictWithFactory(args []string, stdin io.Reader, stdout, stder
 		return 2
 	}
 
-	result, err := provider.Evaluate(context.Background(), request)
+	result, err := provider.Evaluate(ctx, request)
 	if err != nil {
 		printContextCommandDiagnostic(stderr, "conflict", root, err)
 		if policyconflict.IsNotAdopted(err) {
@@ -177,7 +179,7 @@ func contextConflictManagedProjectionPaths(root string) ([]string, error) {
 	return paths, nil
 }
 
-func newLocalContextConflictProvider(root string, request policyconflict.Request) (policyconflict.VerdictProvider, error) {
+func newLocalContextConflictProvider(ctx context.Context, root string, request policyconflict.Request) (policyconflict.VerdictProvider, error) {
 	manifest, err := loadManifest(root)
 	if err != nil {
 		return nil, err
@@ -198,14 +200,46 @@ func newLocalContextConflictProvider(root string, request policyconflict.Request
 			Runner:  contextConflictJudgeRunner{delegate: align.ExecJudgeRunner{}},
 		}
 	}
+	actors, err := resolveConflictActors(ctx, root)
+	if err != nil {
+		return nil, err
+	}
 	return policyconflict.NewService(root, policyconflict.ServiceDeps{
 		Compiler:   contextcompile.NewCompiler(),
 		Refs:       contextConflictRefResolver{},
 		Primary:    primary,
 		TreeHasher: contextConflictTreeHasher{},
 		Dates:      contextConflictDateSource{},
-		Actors:     nil,
+		Actors:     actors,
 	}), nil
+}
+
+// resolveConflictActors resolves the store's local-operator actor claim
+// (actorlocal.go) against the resolved governance profile, wired once here
+// so `context conflict`, `build start`, `gate`, and `close` all share it
+// through this one factory (2026-09-05 local-operator disposition design
+// §2.2, ledger SI-183). A store that has not yet adopted a constitution
+// carries no profile to consult, so it resolves no actors at all — exactly
+// today's Actors: nil — and is left for Evaluate's own adoption probe to
+// report as NotAdoptedError (exit 1), never preempted by an operational
+// failure here (mirrors policyconflict.ProbeAdoption's own
+// ErrNotAdopted-only distinction). Every other policyauthority.Load or
+// profile-resolution failure (a present-but-incomplete or malformed
+// store) propagates as an operational error, matching what Evaluate would
+// eventually report for the same store anyway.
+func resolveConflictActors(ctx context.Context, root string) ([]governanceprincipal.PrincipalResolution, error) {
+	policyStore, err := policyauthority.Load(root)
+	if err != nil {
+		if errors.Is(err, policyauthority.ErrNotAdopted) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	profile, err := policyStore.SelectedProfile()
+	if err != nil {
+		return nil, err
+	}
+	return resolveLocalActors(ctx, root, profile)
 }
 
 func contextConflictRequestAdapter(request policyconflict.Request) contextcompile.AdapterRef {

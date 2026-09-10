@@ -15,6 +15,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"strconv"
 	"strings"
 	"syscall"
@@ -23,6 +24,7 @@ import (
 
 	"github.com/jyang234/verdi/internal/contextcompile"
 	"github.com/jyang234/verdi/internal/contextevent"
+	"github.com/jyang234/verdi/internal/contextowner"
 	"github.com/jyang234/verdi/internal/contextreceipt"
 	"github.com/jyang234/verdi/internal/execworkspace"
 	gp "github.com/jyang234/verdi/internal/governanceprincipal"
@@ -223,6 +225,21 @@ func TestContextExecutionPublicContract_Behavioral(t *testing.T) {
 		permanentWatcher.Stop()
 		if permanentNotifier.notifyCalls != 1 || permanentNotifier.stopCalls != 1 {
 			t.Fatalf("permanent watcher notify/stop = %d/%d, want 1/1", permanentNotifier.notifyCalls, permanentNotifier.stopCalls)
+		}
+	})
+
+	// Amendment 003: the claim registration is a required prerequisite with no
+	// fallback, so a controller that cannot resolve it ends the run operationally
+	// before any provider is launched.
+	t.Run("unresolvable claim registration is operational before provider launch", func(t *testing.T) {
+		// approvedContext makes the identical run succeed when the claim
+		// registration resolves, so exit 2 here can only come from the refusal.
+		run := runClaudeSealedLifecycle(t, bin, claudeLifecycleOptions{approvedContext: true, failOperation: sealedexec.ControllerOperation("resolve-claim-mcp")})
+		if run.obs.exitCode != 2 || run.obs.stdout != "" {
+			t.Fatalf("unresolvable claim registration = %#v, want operational refusal with clean stdout", run.obs)
+		}
+		if got := countControllerOperation(run.fake.calls, sealedexec.ControllerOperationStoreAdapterSession); got != 0 {
+			t.Fatalf("store-adapter-session calls = %d, want none after a refused claim registration", got)
 		}
 	})
 }
@@ -476,8 +493,20 @@ func TestScopedContextMCPContract_Behavioral(t *testing.T) {
 		}
 	})
 
+	t.Run("a fabricated data item on a non-proven resolution cannot even be encoded for the controller wire, so the run ends operationally", func(t *testing.T) {
+		runScopedMCPContextEncoderRefusesIllegalResolution(t, bin)
+	})
+
+	t.Run("real scoped MCP denies context through the public owner-document bridge", func(t *testing.T) {
+		runScopedMCPContextViaPublicOwnerBridge(t, bin)
+	})
+
 	t.Run("malformed protocol is framed before operational exit", func(t *testing.T) {
 		runScopedMCPProtocolFailure(t, bin)
+	})
+
+	t.Run("tolerated envelope members change nothing observable", func(t *testing.T) {
+		runScopedMCPToleratedEnvelopeMembers(t, bin)
 	})
 
 	t.Run("recorder rejection is framed before operational exit", func(t *testing.T) {
@@ -952,10 +981,10 @@ func runSuccessfulSealedStart(t *testing.T, bin string, outputFile, outputFailur
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantArgv := strings.Join([]string{"exec", "--json", "--strict-config", "--ignore-user-config", "--ignore-rules", "--profile", "compiled-fixture", "--sandbox", "workspace-write", "--cd", execworkspace.UnitPath(root, workspaceID), "-", ""}, "\n")
-	if string(argvBytes) != wantArgv {
-		t.Fatalf("provider argv = %q, want %q", argvBytes, wantArgv)
-	}
+	assertSealedProviderArgv(t, argvBytes,
+		[]string{"exec", "--json", "--strict-config", "--ignore-user-config", "--ignore-rules", "--profile", "compiled-fixture"},
+		[]string{"--sandbox", "workspace-write", "--cd", execworkspace.UnitPath(root, workspaceID), "-"},
+		sealedProviderMCPCrossMatchFor(t, requestBytes, fake.claimURL(), request.Profile.Digest, workspaceID))
 	envBytes, err := os.ReadFile(envPath)
 	if err != nil {
 		t.Fatal(err)
@@ -1165,6 +1194,135 @@ func runInterruptedSealedStart(t *testing.T, bin string, signalBeforeActivation 
 	}
 }
 
+// sealedProviderMCPOperandKeys is Amendment 003's exact ordered operand key
+// list, and sealedProviderMCPFixedValues the operands whose values are fixed
+// literals rather than per-invocation identities.
+var (
+	sealedProviderMCPOperandKeys = []string{
+		"mcp_servers.vatc.url",
+		"mcp_servers.vatc.http_headers",
+		"mcp_servers.vatc.enabled",
+		"mcp_servers.vatc.required",
+		"mcp_servers.vatc.supports_parallel_tool_calls",
+		"mcp_servers.vatc.enabled_tools",
+		"mcp_servers.verdi-context.url",
+		"mcp_servers.verdi-context.http_headers",
+		"mcp_servers.verdi-context.enabled",
+		"mcp_servers.verdi-context.required",
+		"mcp_servers.verdi-context.supports_parallel_tool_calls",
+		"mcp_servers.verdi-context.enabled_tools",
+	}
+	sealedProviderMCPFixedValues = map[string]string{
+		"mcp_servers.vatc.enabled":                               "true",
+		"mcp_servers.vatc.required":                              "true",
+		"mcp_servers.vatc.supports_parallel_tool_calls":          "false",
+		"mcp_servers.vatc.enabled_tools":                         `["claim_paths"]`,
+		"mcp_servers.verdi-context.enabled":                      "true",
+		"mcp_servers.verdi-context.required":                     "true",
+		"mcp_servers.verdi-context.supports_parallel_tool_calls": "false",
+		"mcp_servers.verdi-context.enabled_tools":                `["get_flight_plan","request_context"]`,
+	}
+	sealedProviderMCPURLValue = regexp.MustCompile(`^"http://127\.0\.0\.1:[1-9][0-9]{0,4}/mcp"$`)
+)
+
+// sealedProviderMCPCrossMatch carries the exact per-invocation identities
+// Amendment 003 binds into the Codex argv: the origin the controller returned
+// for operation 23, and both complete authorization strings.
+type sealedProviderMCPCrossMatch struct {
+	claimURL             string
+	claimAuthorization   string
+	contextAuthorization string
+}
+
+// sealedProviderMCPCrossMatchFor derives those identities from fixture inputs
+// alone. RQ is `sha256:` plus the lowercase SHA-256 of the exact canonical
+// request bytes the test handed the built binary — the authority extract's own
+// definition — so nothing here reuses the binary's re-encoding of its decoded
+// request. A canonical-but-lossy re-encode, a swapped capability domain, or any
+// bearer the ATC and context servers would refuse therefore fails the
+// cross-match instead of passing a grammar check.
+func sealedProviderMCPCrossMatchFor(t *testing.T, requestBytes []byte, claimURL, profileDigest, workspaceID string) sealedProviderMCPCrossMatch {
+	t.Helper()
+	sum := sha256.Sum256(requestBytes)
+	requestDigest := "sha256:" + hex.EncodeToString(sum[:])
+	claimCapability, err := sealedexec.ClaimMCPCapability(requestDigest)
+	if err != nil {
+		t.Fatalf("derive claim MCP capability: %v", err)
+	}
+	contextCapability, err := sealedexec.ContextMCPCapability(requestDigest, profileDigest, workspaceID)
+	if err != nil {
+		t.Fatalf("derive context MCP capability: %v", err)
+	}
+	if claimCapability == contextCapability {
+		t.Fatal("the two capability domains collapsed onto one value")
+	}
+	return sealedProviderMCPCrossMatch{
+		claimURL:             claimURL,
+		claimAuthorization:   "Bearer " + claimCapability,
+		contextAuthorization: "Bearer " + contextCapability,
+	}
+}
+
+// assertSealedProviderArgv proves the built binary handed the provider the
+// pinned prefix, Amendment 003's exact twelve ordered `-c` pairs immediately
+// after it, and then the pinned tail. The claim origin and both authorization
+// operands are proven by exact equality against independently derived values;
+// only the context origin, whose port is allocated per run, stays a grammar.
+func assertSealedProviderArgv(t *testing.T, argvBytes []byte, wantPrefix, wantTail []string, cross sealedProviderMCPCrossMatch) {
+	t.Helper()
+	argv := strings.Split(strings.TrimSuffix(string(argvBytes), "\n"), "\n")
+	want := len(wantPrefix) + 2*len(sealedProviderMCPOperandKeys) + len(wantTail)
+	if len(argv) != want {
+		t.Fatalf("provider argv has %d elements, want %d: %q", len(argv), want, argvBytes)
+	}
+	if got := argv[:len(wantPrefix)]; !reflect.DeepEqual(got, wantPrefix) {
+		t.Fatalf("provider argv prefix = %v, want %v", got, wantPrefix)
+	}
+	if got := argv[len(argv)-len(wantTail):]; !reflect.DeepEqual(got, wantTail) {
+		t.Fatalf("provider argv tail = %v, want %v", got, wantTail)
+	}
+	block := argv[len(wantPrefix) : len(argv)-len(wantTail)]
+	values := map[string]string{}
+	for i, key := range sealedProviderMCPOperandKeys {
+		if block[2*i] != "-c" {
+			t.Fatalf("operand %d is not introduced by -c: %q", i, block[2*i])
+		}
+		gotKey, gotValue, ok := strings.Cut(block[2*i+1], "=")
+		if !ok || gotKey != key {
+			t.Fatalf("operand %d = %q, want key %q", i, block[2*i+1], key)
+		}
+		values[key] = gotValue
+	}
+	for key, wantValue := range sealedProviderMCPFixedValues {
+		if values[key] != wantValue {
+			t.Fatalf("operand %s = %q, want %q", key, values[key], wantValue)
+		}
+	}
+	if !sealedProviderMCPURLValue.MatchString(values["mcp_servers.verdi-context.url"]) {
+		t.Fatalf("operand mcp_servers.verdi-context.url = %q, want a quoted IPv4-loopback /mcp origin", values["mcp_servers.verdi-context.url"])
+	}
+	// The cross-match itself: each of these three operands must equal the value
+	// this test derived from the request bytes and the controller reply, byte for
+	// byte. They are reported together so one run exposes every divergence.
+	for _, want := range []struct{ key, value string }{
+		{"mcp_servers.vatc.url", strconv.Quote(cross.claimURL)},
+		{"mcp_servers.vatc.http_headers", "{Authorization=" + strconv.Quote(cross.claimAuthorization) + "}"},
+		{"mcp_servers.verdi-context.http_headers", "{Authorization=" + strconv.Quote(cross.contextAuthorization) + "}"},
+	} {
+		if values[want.key] != want.value {
+			t.Errorf("operand %s = %q, want the independently derived %q", want.key, values[want.key], want.value)
+		}
+	}
+	// The two registrations are separately owned: neither origin nor capability
+	// is ever shared between them.
+	if values["mcp_servers.vatc.url"] == values["mcp_servers.verdi-context.url"] {
+		t.Fatalf("both registrations were injected with one origin: %q", values["mcp_servers.vatc.url"])
+	}
+	if values["mcp_servers.vatc.http_headers"] == values["mcp_servers.verdi-context.http_headers"] {
+		t.Fatalf("both registrations were injected with one capability")
+	}
+}
+
 func countControllerOperation(operations []sealedexec.ControllerOperation, want sealedexec.ControllerOperation) int {
 	count := 0
 	for _, operation := range operations {
@@ -1312,10 +1470,10 @@ func runSuccessfulSealedResume(t *testing.T, bin string) {
 		t.Fatalf("resume result = %#v", result)
 	}
 	argvBytes := mustReadFile(t, argvPath)
-	wantArgv := strings.Join([]string{"exec", "resume", "--json", "--strict-config", "--ignore-user-config", "--ignore-rules", sessionRef, "-", ""}, "\n")
-	if string(argvBytes) != wantArgv {
-		t.Fatalf("resume provider argv = %q, want %q", argvBytes, wantArgv)
-	}
+	assertSealedProviderArgv(t, argvBytes,
+		[]string{"exec", "resume", "--json", "--strict-config", "--ignore-user-config", "--ignore-rules"},
+		[]string{sessionRef, "-"},
+		sealedProviderMCPCrossMatchFor(t, requestBytes, fake.claimURL(), request.Profile.Digest, workspaceID))
 	if _, err := sealedexec.DecodeProviderInput(bytes.NewReader(mustReadFile(t, stdinPath))); err != nil {
 		t.Fatalf("resume provider input: %v", err)
 	}
@@ -1332,6 +1490,9 @@ func runSuccessfulSealedResume(t *testing.T, bin string) {
 		sealedexec.ControllerOperationVerifyExpansion,
 		sealedexec.ControllerOperationVerifyProviderSession,
 		sealedexec.ControllerOperationVerifyOpaqueBoundary,
+		// Amendment 003: the ATC-owned claim registration resolves once, at
+		// adapter verification, before any provider launch or acknowledgment.
+		sealedexec.ControllerOperationResolveClaimMCP,
 		// Amendment 002 §7 prepared-resume: `resume` then `adapter-start`, each
 		// stamped and acknowledged before the provider stream is reduced.
 		sealedexec.ControllerOperationNextStamp,
@@ -1522,7 +1683,11 @@ func runScopedMCPContextScenario(t *testing.T, bin string, kind sealedexec.Inspe
 	}
 	switch kind {
 	case sealedexec.InspectionContextDenied:
-		fake.resolution = sealedexec.ContextResolution{Verification: sealedexec.Verification{State: contextcompile.ResolutionUnproven, Failure: sealedexec.FailureUnproven, Witnesses: []string{"fixture context unavailable"}}, Data: fixture.compiled.DataItems[0]}
+		// SI-194: the owner's non-proven answer carries no data item — this
+		// is the real F12 canary shape (a pinned resolver's exit-1
+		// ref-absent answer), and the run continues to its result rather
+		// than terminating operationally.
+		fake.resolution = sealedexec.ContextResolution{Verification: sealedexec.Verification{State: contextcompile.ResolutionUnproven, Failure: sealedexec.FailureUnproven, Witnesses: []string{"ref-absent"}}}
 	case sealedexec.InspectionEpochInvalidated:
 		fake.epoch = sealedexec.Verification{State: contextcompile.ResolutionViolatedWithWitness, Failure: sealedexec.FailureRejected, Witnesses: []string{"fixture epoch moved"}}
 	}
@@ -1580,6 +1745,14 @@ func runScopedMCPContextScenario(t *testing.T, bin string, kind sealedexec.Inspe
 			t.Fatalf("approved context inspection = %#v", inspection)
 		}
 	}
+	if kind == sealedexec.InspectionContextDenied {
+		// SI-194: the owner's data-free non-proven answer still reaches the
+		// provider as InspectionContextDenied carrying its witnesses, and
+		// the run continues to this result rather than failing operationally.
+		if inspection.Context.Data.Digest != "" || !reflect.DeepEqual(inspection.Context.Witnesses, []string{"ref-absent"}) {
+			t.Fatalf("denied context inspection = %#v", inspection)
+		}
+	}
 	gotKinds := make([]contextevent.Kind, len(fake.events))
 	for i, event := range fake.events {
 		gotKinds[i] = event.Kind
@@ -1589,6 +1762,260 @@ func runScopedMCPContextScenario(t *testing.T, bin string, kind sealedexec.Inspe
 	}
 	if kind == sealedexec.InspectionContextApproved && fake.calls[len(fake.calls)-1] != sealedexec.ControllerOperationInstallExpansion {
 		t.Fatalf("approved context did not install after terminal ack: %v", fake.calls)
+	}
+}
+
+// runScopedMCPContextEncoderRefusesIllegalResolution proves SI-194's wire
+// refusal reaches the real controller boundary's OWN encoder, not only the
+// unit-level codec table: an owner that answers a non-proven resolution
+// with a fabricated data item cannot even produce a reply the shared
+// controller codec will encode (contextResolutionToWire refuses it by
+// name, inside the fake controller's own EncodeControllerResult call) —
+// so the fake never writes a reply frame at all, the connection dies, and
+// the built binary observes that as an operational failure (exit 2) rather
+// than silently trusting invented context data.
+//
+// This is deliberately named for what it proves: the refusal happens at
+// construction, inside the test's own fake controller — not inside the
+// built binary's decode of a hostile reply someone else already wrote to
+// the wire. That narrower claim (a hostile FD-3 owner emitting raw
+// private-wire bytes without going through verdi's own encoder) is instead
+// covered by the unit-level contextResolutionFromWire table
+// (TestContextResolutionWireDataPresence's decode/non-proven-with-data
+// row, controller_contract_test.go) and, for the public document path
+// specifically, by TestContextResolutionDataPresenceDecodeRefusesHostileDocument
+// in internal/contextowner.
+func runScopedMCPContextEncoderRefusesIllegalResolution(t *testing.T, bin string) {
+	t.Helper()
+	fixture := buildCompiledExecutionFixture(t, execworkspace.GrantSet{Grants: []execworkspace.Grant{}})
+	materializer, err := execworkspace.NewMaterializer(fixture.root, fixture.root, execworkspace.NewGitReconciler(fixture.root))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := materializer.Materialize(context.Background(), execworkspace.Request{Identity: fixture.request.ExecutionWorkspaceRequest}); err != nil {
+		t.Fatalf("materialize illegal-resolution workspace: %v", err)
+	}
+	if len(fixture.compiled.DataItems) == 0 {
+		t.Fatal("compiled MCP fixture contains no context data")
+	}
+	fake := &sealedLifecycleController{
+		t: t, request: fixture.request,
+		resolution: sealedexec.ContextResolution{
+			Verification: sealedexec.Verification{State: contextcompile.ResolutionUnproven, Failure: sealedexec.FailureUnproven, Witnesses: []string{"ref-absent"}},
+			Data:         fixture.compiled.DataItems[0],
+		},
+	}
+
+	files, err := syscall.Socketpair(syscall.AF_UNIX, syscall.SOCK_STREAM, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	controllerFile := os.NewFile(uintptr(files[0]), "mcp-illegal-resolution-controller")
+	childFile := os.NewFile(uintptr(files[1]), "mcp-illegal-resolution-child")
+	controllerConn, err := net.FileConn(controllerFile)
+	_ = controllerFile.Close()
+	if err != nil {
+		_ = childFile.Close()
+		t.Fatal(err)
+	}
+	served := make(chan error, 1)
+	go func() {
+		defer controllerConn.Close()
+		served <- fake.serve(controllerConn)
+	}()
+	frame := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"request_context","arguments":{"purpose":"fixture expansion","ref":"spec/extra"}}}` + "\n"
+	stdin := append(append([]byte(nil), fixture.requestBytes...), []byte(frame)...)
+	observation := runSealedContextBinaryWithFiles(t, bin, fixture.root, stdin, []*os.File{childFile}, "context", "mcp", "--request", "-")
+	// The refusal itself happens here, inside the fake's own encode step —
+	// EncodeControllerResult refuses before any reply frame is written —
+	// which is why <-served must be the error, not the built binary's exit
+	// code below (a downstream consequence of the connection then dying).
+	if err := <-served; err == nil {
+		t.Fatalf("fake controller encoded a non-proven resolution carrying a data item; observation=%#v", observation)
+	}
+	if observation.exitCode != 2 || observation.stderr != "" ||
+		!strings.Contains(observation.stdout, `"isError":true`) || !strings.Contains(observation.stdout, "resolve declared context") {
+		t.Fatalf("illegal resolution observation = %#v, want the operational failure downstream of the encoder's own refusal", observation)
+	}
+}
+
+// runContextOwnerVerbErr execs the built binary's `verdi context owner
+// <verb> --operation <operation>` over stdin, returning stdout on a clean
+// exit with an empty stderr, or a descriptive error otherwise. It returns
+// an error rather than failing a *testing.T directly because its caller,
+// resolveContextOwnerBridgeAnswer, runs inside sealedLifecycleController's
+// serve goroutine (see serve/.result above), where calling a T fatal method
+// is unsafe; the top-level test asserts on the error through the existing
+// <-served channel instead.
+func runContextOwnerVerbErr(bin, dir, verb, operation string, stdin []byte) ([]byte, error) {
+	cmd := exec.Command(bin, "context", "owner", verb, "--operation", operation)
+	cmd.Dir = dir
+	cmd.Stdin = bytes.NewReader(stdin)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		return nil, fmt.Errorf("verdi context owner %s --operation %s: %w (stderr: %s)", verb, operation, err, stderr.String())
+	}
+	if stderr.Len() != 0 {
+		return nil, fmt.Errorf("verdi context owner %s --operation %s stderr = %q, want empty", verb, operation, stderr.String())
+	}
+	return stdout.Bytes(), nil
+}
+
+// resolveContextOwnerBridgeAnswer builds a resolveContextViaOwnerBridge hook
+// (SI-194) that routes the REAL intercepted resolve-context call through
+// the built binary's public `context owner decode`/`encode` verbs — the
+// same two subprocess calls a real external owner's own tooling (e.g. ATC)
+// would invoke around its own decision — answering with a non-proven
+// ref-absent resolution and no fabricated data item. Before the SI-194
+// contextowner fix, the decode step below could not even construct that
+// reply: contextowner.EncodeReply unconditionally required a nested data
+// document for every resolution state.
+func resolveContextOwnerBridgeAnswer(bin, dir string) func(sealedexec.ControllerCall) (sealedexec.ControllerResult, error) {
+	return func(call sealedexec.ControllerCall) (sealedexec.ControllerResult, error) {
+		fullCall, err := sealedexec.EncodeControllerCall(call)
+		if err != nil {
+			return sealedexec.ControllerResult{}, fmt.Errorf("owner bridge: encode intercepted call: %w", err)
+		}
+		var envelope struct {
+			Payload json.RawMessage `json:"payload"`
+		}
+		if err := json.Unmarshal(fullCall, &envelope); err != nil {
+			return sealedexec.ControllerResult{}, fmt.Errorf("owner bridge: extract call payload: %w", err)
+		}
+		privateRequest := append(append([]byte(nil), envelope.Payload...), '\n')
+
+		publicCall, err := runContextOwnerVerbErr(bin, dir, "decode", "resolve-context", privateRequest)
+		if err != nil {
+			return sealedexec.ControllerResult{}, fmt.Errorf("owner bridge decode: %w", err)
+		}
+
+		// The honest owner's own answer: non-proven, ref-absent, no data
+		// item — exactly the shape the F12 canary's pinned resolver
+		// returned and the real ATC owner could not, pre-fix, express.
+		resultArm := `{"resolution":{"failure":"unavailable","ref":"` + call.ResolveContext.Query.Ref +
+			`","state":"unproven","witnesses":["ref-absent"]},"schema":"` +
+			contextowner.ResultSchema(contextowner.OperationResolveContext) + `"}`
+		reply := contextOwnerReplyDocument(string(publicCall), resultArm)
+
+		privateResult, err := runContextOwnerVerbErr(bin, dir, "encode", "resolve-context", []byte(reply))
+		if err != nil {
+			return sealedexec.ControllerResult{}, fmt.Errorf("owner bridge encode: %w", err)
+		}
+		// context owner encode's stdout is the operation-specific result
+		// PAYLOAD (the shape sealedexec.EncodeControllerResult produces
+		// internally for one operation), not the full call_sequence-framed
+		// controller-result envelope sealedexec.DecodeControllerResult
+		// expects — so this decodes just that payload's own fields
+		// (through generic, exported-type-only JSON, since
+		// contextResolutionFromWire is unexported and this file cannot
+		// import internal/sealedexec's own unexported wire) and lets the
+		// existing serve()/.result() pipeline's own
+		// EncodeControllerResult call re-derive the exact framed bytes —
+		// itself proof that whatever the subprocess said decodes to a
+		// value the private codec accepts.
+		if bytes.Contains(privateResult, []byte(`"data"`)) {
+			return sealedexec.ControllerResult{}, fmt.Errorf("owner bridge: private result unexpectedly names a data member: %s", privateResult)
+		}
+		var resultPayload struct {
+			Resolution struct {
+				State     contextcompile.Resolution `json:"state"`
+				Failure   sealedexec.FailureCode    `json:"failure"`
+				Witnesses []string                  `json:"witnesses"`
+				Ref       string                    `json:"ref"`
+			} `json:"resolution"`
+		}
+		if err := json.Unmarshal(privateResult, &resultPayload); err != nil {
+			return sealedexec.ControllerResult{}, fmt.Errorf("owner bridge: decode private result payload: %w", err)
+		}
+		return sealedexec.ControllerResult{
+			Schema: sealedexec.ControllerResultSchemaID, CallSequence: call.CallSequence, Operation: call.Operation,
+			ResolveContext: sealedexec.ControllerResolveContextResult{
+				Schema: "verdi.context-controller/resolve-context-result/v1",
+				Resolution: sealedexec.ContextResolution{
+					Verification: sealedexec.Verification{
+						State: resultPayload.Resolution.State, Failure: resultPayload.Resolution.Failure,
+						Witnesses: resultPayload.Resolution.Witnesses,
+					},
+					Ref: resultPayload.Resolution.Ref,
+				},
+			},
+		}, nil
+	}
+}
+
+// runScopedMCPContextViaPublicOwnerBridge proves SI-194 end-to-end over the
+// PUBLIC document path: the FD-3 owner's non-proven ref-absent answer is
+// produced and consumed entirely through the built binary's own `context
+// owner decode`/`encode` verbs (real subprocesses — not the in-process
+// fake's private-wire shortcut every other scenario in this file uses),
+// and the running provider — the same built binary, driving the scoped MCP
+// request_context tool — still receives InspectionContextDenied carrying
+// the witnesses, continuing to its result rather than failing
+// operationally.
+func runScopedMCPContextViaPublicOwnerBridge(t *testing.T, bin string) {
+	t.Helper()
+	fixture := buildCompiledExecutionFixture(t, execworkspace.GrantSet{Grants: []execworkspace.Grant{}})
+	materializer, err := execworkspace.NewMaterializer(fixture.root, fixture.root, execworkspace.NewGitReconciler(fixture.root))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := materializer.Materialize(context.Background(), execworkspace.Request{Identity: fixture.request.ExecutionWorkspaceRequest}); err != nil {
+		t.Fatalf("materialize public-owner-bridge workspace: %v", err)
+	}
+
+	fake := &sealedLifecycleController{
+		t: t, request: fixture.request,
+		resolveContextViaOwnerBridge: resolveContextOwnerBridgeAnswer(bin, t.TempDir()),
+	}
+
+	files, err := syscall.Socketpair(syscall.AF_UNIX, syscall.SOCK_STREAM, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	controllerFile := os.NewFile(uintptr(files[0]), "mcp-public-owner-bridge-controller")
+	childFile := os.NewFile(uintptr(files[1]), "mcp-public-owner-bridge-child")
+	controllerConn, err := net.FileConn(controllerFile)
+	_ = controllerFile.Close()
+	if err != nil {
+		_ = childFile.Close()
+		t.Fatal(err)
+	}
+	served := make(chan error, 1)
+	go func() {
+		defer controllerConn.Close()
+		served <- fake.serve(controllerConn)
+	}()
+	frame := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"request_context","arguments":{"purpose":"fixture expansion","ref":"spec/extra"}}}` + "\n"
+	stdin := append(append([]byte(nil), fixture.requestBytes...), []byte(frame)...)
+	observation := runSealedContextBinaryWithFiles(t, bin, fixture.root, stdin, []*os.File{childFile}, "context", "mcp", "--request", "-")
+	if err := <-served; err != nil {
+		t.Fatalf("public owner bridge controller: %v; observation=%#v", err, observation)
+	}
+	if observation.exitCode != 0 || observation.stderr != "" {
+		t.Fatalf("public owner bridge observation = %#v, want a clean exit", observation)
+	}
+	var response struct {
+		Result struct {
+			Content []struct {
+				Text string `json:"text"`
+			} `json:"content"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal([]byte(strings.TrimSpace(observation.stdout)), &response); err != nil {
+		t.Fatal(err)
+	}
+	if len(response.Result.Content) != 1 {
+		t.Fatalf("public owner bridge response content = %#v", response.Result.Content)
+	}
+	inspection, err := sealedexec.DecodeInspectionResult(bytes.NewReader([]byte(response.Result.Content[0].Text)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if inspection.Kind != sealedexec.InspectionContextDenied || inspection.Context.Data.Digest != "" ||
+		!reflect.DeepEqual(inspection.Context.Witnesses, []string{"ref-absent"}) {
+		t.Fatalf("public owner bridge inspection = %#v, want a data-free denial carrying ref-absent", inspection)
 	}
 }
 
@@ -1662,6 +2089,16 @@ func runScopedMCPLaterCheckpoint(t *testing.T, bin, mutation string, wantExit in
 	}
 }
 
+// runScopedMCPProtocolFailure no longer carries an "unknown envelope field"
+// row: that expectation was 548d1c0f's own uncited posture ("Wire sealed
+// execution commands"), the same uncited strictness SI-193 found defective in
+// decodeHandlerCall's params envelope and F1 then found one level up in
+// decodeHandlerRequest's outer JSON-RPC frame. The frame it drove is now
+// tolerated end-to-end, and that tolerance — plus its invisibility — is
+// proven over this same built binary by
+// runScopedMCPToleratedEnvelopeMembers. Everything still refused (a
+// duplicate key at either level, trailing data, a missing or wrong jsonrpc,
+// unparseable bytes) keeps its row below.
 func runScopedMCPProtocolFailure(t *testing.T, bin string) {
 	t.Helper()
 	fixture := buildCompiledExecutionFixture(t, execworkspace.GrantSet{Grants: []execworkspace.Grant{}})
@@ -1680,7 +2117,6 @@ func runScopedMCPProtocolFailure(t *testing.T, bin string) {
 		{name: "unparseable", frame: `{not-json}`},
 		{name: "missing jsonrpc", frame: `{"id":1,"method":"tools/call",` + mutatingParams + `}`},
 		{name: "wrong jsonrpc", frame: `{"jsonrpc":"1.0","id":1,"method":"tools/call",` + mutatingParams + `}`},
-		{name: "unknown envelope field", frame: `{"jsonrpc":"2.0","id":1,"method":"tools/call","unexpected":true,` + mutatingParams + `}`},
 		{name: "duplicate envelope field", frame: `{"jsonrpc":"2.0","id":1,"method":"tools/list","method":"tools/call",` + mutatingParams + `}`},
 		{name: "duplicate call name", frame: `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"get_flight_plan","name":"request_context","arguments":{"ref":"spec/extra","purpose":"needed"}}}`},
 		{name: "duplicate call arguments", frame: `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"request_context","arguments":{},"arguments":{"ref":"spec/extra","purpose":"needed"}}}`},
@@ -1718,6 +2154,140 @@ func runScopedMCPProtocolFailure(t *testing.T, bin string) {
 			}
 		})
 	}
+}
+
+// runScopedMCPToleratedEnvelopeMembers is the end-to-end half of retiring
+// runScopedMCPProtocolFailure's "unknown envelope field" row (SI-193 F1/F5).
+// Over the built binary and the real request_context path it proves that the
+// tolerance SI-193 established at both envelope seams — an unknown member
+// beside jsonrpc/id/method/params in the outer JSON-RPC frame, and MCP's own
+// `_meta` beside name/arguments in the tools/call params envelope, which is
+// what Claude Code 2.1.261 sends on every call — is behaviourally invisible.
+//
+// Each row runs the sealed binary TWICE against ONE fixture: first the
+// undecorated frame, then the row's decorated one, and demands byte-identical
+// stdout plus the identical recorded event sequence and expansion install.
+// Comparing within a fixture rather than across the table is deliberate: the
+// approved response carries the context request id and the child manifest
+// digest, both derived from the compiled manifest digest, which differs
+// between two fixtures built a clock second apart — so a cross-row baseline
+// would compare the fixture, not the frame. The first row decorates nothing
+// and is therefore the run-to-run stability control for the comparison the
+// other three rely on.
+func runScopedMCPToleratedEnvelopeMembers(t *testing.T, bin string) {
+	t.Helper()
+	arguments := `{"purpose":"fixture expansion","ref":"spec/extra"}`
+	plainParams := `"params":{"name":"request_context","arguments":` + arguments + `}`
+	metaParams := `"params":{"name":"request_context","arguments":` + arguments + `,"_meta":{"progressToken":1}}`
+	undecorated := `{"jsonrpc":"2.0","id":1,"method":"tools/call",` + plainParams + `}`
+	for _, test := range []struct {
+		name  string
+		frame string
+	}{
+		{name: "control: the undecorated frame twice", frame: undecorated},
+		{name: "unknown top-level frame member", frame: `{"jsonrpc":"2.0","id":1,"method":"tools/call","unexpected":true,` + plainParams + `}`},
+		{name: "MCP _meta inside params", frame: `{"jsonrpc":"2.0","id":1,"method":"tools/call",` + metaParams + `}`},
+		{name: "both members at once", frame: `{"jsonrpc":"2.0","id":1,"method":"tools/call","unexpected":true,` + metaParams + `}`},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			fixture := buildCompiledExecutionFixture(t, execworkspace.GrantSet{Grants: []execworkspace.Grant{}})
+			materializer, err := execworkspace.NewMaterializer(fixture.root, fixture.root, execworkspace.NewGitReconciler(fixture.root))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := materializer.Materialize(context.Background(), execworkspace.Request{Identity: fixture.request.ExecutionWorkspaceRequest}); err != nil {
+				t.Fatal(err)
+			}
+			if len(fixture.compiled.DataItems) == 0 {
+				t.Fatal("compiled MCP fixture contains no context data")
+			}
+			control := runScopedMCPApprovedContextFrame(t, bin, fixture, undecorated)
+			decorated := runScopedMCPApprovedContextFrame(t, bin, fixture, test.frame)
+			for _, leak := range []string{"unexpected", "_meta", "progressToken"} {
+				if strings.Contains(decorated, leak) {
+					t.Fatalf("tolerated envelope member %q surfaced in %q", leak, decorated)
+				}
+			}
+			// The whole point: a decorated frame is indistinguishable on the
+			// wire from the undecorated one, byte for byte.
+			if decorated != control {
+				t.Fatalf("tolerated envelope stdout = %q, want the undecorated frame's %q", decorated, control)
+			}
+		})
+	}
+}
+
+// runScopedMCPApprovedContextFrame drives one scoped-MCP frame through the
+// built binary against a freshly primed approving controller and returns the
+// binary's stdout, having asserted the whole approved-expansion path actually
+// ran: clean exit, one framed content item decoding to a context-approved
+// inspection at the child revision, the request/decision/child-manifest event
+// sequence, and the expansion installed after the terminal ack.
+func runScopedMCPApprovedContextFrame(t *testing.T, bin string, fixture sealedCompiledExecutionFixture, frame string) string {
+	t.Helper()
+	files, err := syscall.Socketpair(syscall.AF_UNIX, syscall.SOCK_STREAM, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	controllerFile := os.NewFile(uintptr(files[0]), "mcp-tolerance-controller")
+	childFile := os.NewFile(uintptr(files[1]), "mcp-tolerance-child")
+	controllerConn, err := net.FileConn(controllerFile)
+	_ = controllerFile.Close()
+	if err != nil {
+		_ = childFile.Close()
+		t.Fatal(err)
+	}
+	proven := sealedexec.Verification{State: contextcompile.ResolutionProven, Witnesses: []string{}}
+	fake := &sealedLifecycleController{
+		t: t, request: fixture.request,
+		resolution: sealedexec.ContextResolution{Verification: proven, Data: fixture.compiled.DataItems[0]},
+		epoch:      proven,
+	}
+	served := make(chan error, 1)
+	go func() {
+		defer controllerConn.Close()
+		served <- fake.serve(controllerConn)
+	}()
+	stdin := append(append([]byte(nil), fixture.requestBytes...), []byte(frame+"\n")...)
+	observation := runSealedContextBinaryWithFiles(t, bin, fixture.root, stdin, []*os.File{childFile}, "context", "mcp", "--request", "-")
+	if err := <-served; err != nil {
+		t.Fatalf("approved context controller for %s: %v; observation=%#v", frame, err, observation)
+	}
+	if observation.exitCode != 0 || observation.stderr != "" {
+		t.Fatalf("approved context observation for %s = %#v, want a clean exit", frame, observation)
+	}
+	var response struct {
+		Result struct {
+			Content []struct {
+				Text string `json:"text"`
+			} `json:"content"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal([]byte(strings.TrimSpace(observation.stdout)), &response); err != nil {
+		t.Fatal(err)
+	}
+	if len(response.Result.Content) != 1 {
+		t.Fatalf("approved context response content for %s = %#v", frame, response.Result.Content)
+	}
+	inspection, err := sealedexec.DecodeInspectionResult(bytes.NewReader([]byte(response.Result.Content[0].Text)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if inspection.Kind != sealedexec.InspectionContextApproved || inspection.Context.Data.Digest == "" || inspection.Context.ChildRevision != fixture.request.ManifestRevision+1 {
+		t.Fatalf("approved context inspection for %s = %#v", frame, inspection)
+	}
+	gotKinds := make([]contextevent.Kind, len(fake.events))
+	for i, event := range fake.events {
+		gotKinds[i] = event.Kind
+	}
+	wantKinds := []contextevent.Kind{contextevent.KindContextRequest, contextevent.KindContextDecision, contextevent.KindChildManifest}
+	if !reflect.DeepEqual(gotKinds, wantKinds) {
+		t.Fatalf("approved context event kinds for %s = %v, want %v", frame, gotKinds, wantKinds)
+	}
+	if fake.calls[len(fake.calls)-1] != sealedexec.ControllerOperationInstallExpansion {
+		t.Fatalf("approved context did not install after terminal ack for %s: %v", frame, fake.calls)
+	}
+	return observation.stdout
 }
 
 func runScopedMCPRecorderRejection(t *testing.T, bin string) {
@@ -1931,6 +2501,7 @@ type sealedLifecycleController struct {
 	segments          map[string]sealedexec.RedactedSegment
 	checkpointDigest  string
 	expansionRoot     string
+	claimMCPURL       string
 	calls             []sealedexec.ControllerOperation
 	events            []contextevent.Event
 	eventAcks         []contextevent.EventAck
@@ -1942,6 +2513,11 @@ type sealedLifecycleController struct {
 	pauseBeforeReply  sealedexec.ControllerOperation
 	operationPaused   chan<- sealedexec.ControllerOperation
 	operationRelease  <-chan struct{}
+	// resolveContextViaOwnerBridge, when set, answers
+	// ControllerOperationResolveContext by routing the real intercepted
+	// call through the public owner-document path (SI-194) instead of
+	// f.resolution directly — see runScopedMCPContextViaPublicOwnerBridge.
+	resolveContextViaOwnerBridge func(sealedexec.ControllerCall) (sealedexec.ControllerResult, error)
 }
 
 // The exact stored-segment wire schema and reference grammar the shared
@@ -2001,6 +2577,16 @@ func (f *sealedLifecycleController) serve(conn net.Conn) error {
 	}
 }
 
+// claimURL returns the ATC-owned registration origin. Fixtures whose provider
+// never contacts the claim surface use a structurally valid but unserved
+// loopback origin; fixtures that do exercise it inject a real server.
+func (f *sealedLifecycleController) claimURL() string {
+	if f.claimMCPURL != "" {
+		return f.claimMCPURL
+	}
+	return "http://127.0.0.1:1/mcp"
+}
+
 func (f *sealedLifecycleController) result(call sealedexec.ControllerCall) (sealedexec.ControllerResult, error) {
 	result := sealedexec.ControllerResult{Schema: sealedexec.ControllerResultSchemaID, CallSequence: call.CallSequence, Operation: call.Operation}
 	if call.Operation == f.fail && (call.Operation != sealedexec.ControllerOperationRecorderAppend || f.failEventKind == "" || call.RecorderAppend.Event.Kind == f.failEventKind) {
@@ -2021,6 +2607,14 @@ func (f *sealedLifecycleController) result(call sealedexec.ControllerCall) (seal
 			Verification: proven, ManifestRevision: f.request.ManifestRevision, ManifestDigest: f.request.ManifestDigest,
 			ProjectionDigest: f.request.ProjectionDigest, AuthorityDigest: f.request.AuthorityVerdict.Digest,
 			AcceptedSpecCommit: f.request.Manifest.AcceptedSpec.Commit,
+		}}
+	case sealedexec.ControllerOperationResolveClaimMCP:
+		// Amendment 003 op 23: the ATC-owned registration, cross-matched to this
+		// invocation. It carries no bearer — the capability is derived locally on
+		// both sides from the same request digest.
+		result.ResolveClaimMCP = sealedexec.ControllerResolveClaimMCPResult{Schema: schema, Registration: sealedexec.ClaimMCPRegistration{
+			Name: "vatc", Type: "http", URL: f.claimURL(), Tools: []string{"claim_paths"},
+			RequestDigest: call.ResolveClaimMCP.Query.RequestDigest,
 		}}
 	case sealedexec.ControllerOperationResolveProfile:
 		material := f.profile
@@ -2125,6 +2719,9 @@ func (f *sealedLifecycleController) result(call sealedexec.ControllerCall) (seal
 			ProfileDigest: check.ProfileDigest, WorkspaceID: check.WorkspaceID,
 		}}
 	case sealedexec.ControllerOperationResolveContext:
+		if f.resolveContextViaOwnerBridge != nil {
+			return f.resolveContextViaOwnerBridge(call)
+		}
 		resolution := f.resolution
 		resolution.Ref = call.ResolveContext.Query.Ref
 		result.ResolveContext = sealedexec.ControllerResolveContextResult{Schema: schema, Resolution: resolution}
@@ -2304,6 +2901,9 @@ func (f *sealedLifecycleController) assertSequence() {
 		// reconstructs a second one.
 		sealedexec.ControllerOperationVerifyExpansion,
 		sealedexec.ControllerOperationVerifyOpaqueBoundary,
+		// Amendment 003: the ATC-owned claim registration resolves once, at
+		// adapter verification, before any provider launch or acknowledgment.
+		sealedexec.ControllerOperationResolveClaimMCP,
 		sealedexec.ControllerOperationNextStamp,
 		sealedexec.ControllerOperationRecorderAppend,
 		sealedexec.ControllerOperationStoreAdapterSession,

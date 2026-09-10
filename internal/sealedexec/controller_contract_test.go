@@ -23,6 +23,78 @@ import (
 )
 
 func TestContextControllerWireContract_Static(t *testing.T) {
+	t.Run("resolve-claim-mcp extends the closed registry to exactly 23 operations", func(t *testing.T) {
+		operations := ControllerOperations()
+		if len(operations) != 23 {
+			t.Fatalf("controller operation count = %d, want the Amendment 003 registry of 23", len(operations))
+		}
+		if got := operations[22]; got != ControllerOperation("resolve-claim-mcp") {
+			t.Fatalf("operation 23 = %q, want %q", got, "resolve-claim-mcp")
+		}
+
+		// Amendment 003 §operation 23: the exact canonical request and success
+		// payloads, byte for byte.
+		digest := testDigest("claim-request")
+		call := ControllerCall{Schema: ControllerCallSchemaID, CallSequence: 1, Operation: ControllerOperationResolveClaimMCP}
+		call.ResolveClaimMCP = ControllerResolveClaimMCPRequest{Schema: controllerRequestSchema(call.Operation), Query: ClaimMCPQuery{RequestDigest: digest}}
+		encodedCall, err := EncodeControllerCall(call)
+		if err != nil {
+			t.Fatalf("EncodeControllerCall: %v", err)
+		}
+		wantCall := `{"call_sequence":1,"operation":"resolve-claim-mcp","payload":{"query":{"request_digest":"` + digest +
+			`","schema":"verdi.claim-mcp-query/v1"},"schema":"verdi.context-controller/resolve-claim-mcp-request/v1"},"schema":"verdi.context-controller-call/v1"}` + "\n"
+		if string(encodedCall) != wantCall {
+			t.Fatalf("resolve-claim-mcp call wire =\n%s\nwant\n%s", encodedCall, wantCall)
+		}
+
+		result := ControllerResult{Schema: ControllerResultSchemaID, CallSequence: 1, Operation: ControllerOperationResolveClaimMCP}
+		result.ResolveClaimMCP = ControllerResolveClaimMCPResult{Schema: controllerResultSchema(result.Operation), Registration: ClaimMCPRegistration{
+			Name: RequiredClaimMCPName, Type: RequiredMCPType, URL: "http://127.0.0.1:45001/mcp",
+			Tools: []string{ToolClaimPaths}, RequestDigest: digest,
+		}}
+		encodedResult, err := EncodeControllerResult(result)
+		if err != nil {
+			t.Fatalf("EncodeControllerResult: %v", err)
+		}
+		wantResult := `{"call_sequence":1,"operation":"resolve-claim-mcp","payload":{"result":{"registration":{"name":"vatc","request_digest":"` + digest +
+			`","schema":"verdi.claim-mcp-registration/v1","tools":["claim_paths"],"type":"http","url":"http://127.0.0.1:45001/mcp"},` +
+			`"schema":"verdi.context-controller/resolve-claim-mcp-result/v1"}},"schema":"verdi.context-controller-result/v1"}` + "\n"
+		if string(encodedResult) != wantResult {
+			t.Fatalf("resolve-claim-mcp result wire =\n%s\nwant\n%s", encodedResult, wantResult)
+		}
+		// The result never carries a bearer, credential, or provider state.
+		for _, forbidden := range []string{"Bearer", "authorization", "capability", "token"} {
+			if bytes.Contains(bytes.ToLower(encodedResult), []byte(strings.ToLower(forbidden))) {
+				t.Fatalf("resolve-claim-mcp result wire leaked %q: %s", forbidden, encodedResult)
+			}
+		}
+
+		// Every registration defect fails closed on both encode and decode.
+		for name, mutate := range map[string]func(*ClaimMCPRegistration){
+			"renamed":        func(r *ClaimMCPRegistration) { r.Name = "vatc-shadow" },
+			"wrong type":     func(r *ClaimMCPRegistration) { r.Type = "stdio" },
+			"extra tool":     func(r *ClaimMCPRegistration) { r.Tools = []string{ToolClaimPaths, ToolGetFlightPlan} },
+			"foreign tool":   func(r *ClaimMCPRegistration) { r.Tools = []string{ToolGetFlightPlan} },
+			"no tools":       func(r *ClaimMCPRegistration) { r.Tools = nil },
+			"non-loopback":   func(r *ClaimMCPRegistration) { r.URL = "http://10.1.1.1:45001/mcp" },
+			"query":          func(r *ClaimMCPRegistration) { r.URL = "http://127.0.0.1:45001/mcp?a=1" },
+			"zero port":      func(r *ClaimMCPRegistration) { r.URL = "http://127.0.0.1:0/mcp" },
+			"wrong path":     func(r *ClaimMCPRegistration) { r.URL = "http://127.0.0.1:45001/rpc" },
+			"absent request": func(r *ClaimMCPRegistration) { r.RequestDigest = "" },
+		} {
+			t.Run(name, func(t *testing.T) {
+				bad := result
+				registration := bad.ResolveClaimMCP.Registration
+				registration.Tools = append([]string(nil), registration.Tools...)
+				mutate(&registration)
+				bad.ResolveClaimMCP.Registration = registration
+				if _, err := EncodeControllerResult(bad); err == nil {
+					t.Fatalf("EncodeControllerResult accepted a %s registration", name)
+				}
+			})
+		}
+	})
+
 	t.Run("persist-quarantine carries required non-null preserved bytes", func(t *testing.T) {
 		record := validQuarantineRecord(t, QuarantineExecutionIncomplete)
 		call := ControllerCall{Schema: ControllerCallSchemaID, CallSequence: 1, Operation: ControllerOperationPersistQuarantine}
@@ -88,15 +160,18 @@ func TestContextControllerWireContract_Static(t *testing.T) {
 			{operation: "next-stamp", requestSchema: "verdi.context-controller/next-stamp-request/v1", resultSchema: "verdi.context-controller/next-stamp-result/v1"},
 			{operation: "resolve-context", requestSchema: "verdi.context-controller/resolve-context-request/v1", resultSchema: "verdi.context-controller/resolve-context-result/v1"},
 			{operation: "verify-epoch", requestSchema: "verdi.context-controller/verify-epoch-request/v1", resultSchema: "verdi.context-controller/verify-epoch-result/v1"},
-			{operation: "install-expansion", requestSchema: "verdi.context-controller/install-expansion-request/v1", resultSchema: "verdi.context-controller/install-expansion-result/v1"},
+			// Task 2A's one authority-added exception: only this request arm
+			// advances to v2, and its result arm stays at the publication base.
+			{operation: "install-expansion", requestSchema: "verdi.context-controller/install-expansion-request/v2", resultSchema: "verdi.context-controller/install-expansion-result/v1"},
 			{operation: "resolve-receipt-inputs", requestSchema: "verdi.context-controller/resolve-receipt-inputs-request/v1", resultSchema: "verdi.context-controller/resolve-receipt-inputs-result/v1"},
 			{operation: "append-receipt", requestSchema: "verdi.context-controller/append-receipt-request/v1", resultSchema: "verdi.context-controller/append-receipt-result/v1"},
 			{operation: "resolve-receipt-verification-authority", requestSchema: "verdi.context-controller/resolve-receipt-verification-authority-request/v1", resultSchema: "verdi.context-controller/resolve-receipt-verification-authority-result/v1"},
 			{operation: "persist-handback", requestSchema: "verdi.context-controller/persist-handback-request/v1", resultSchema: "verdi.context-controller/persist-handback-result/v1"},
 			{operation: "persist-quarantine", requestSchema: "verdi.context-controller/persist-quarantine-request/v1", resultSchema: "verdi.context-controller/persist-quarantine-result/v1"},
 			{operation: "persist-abort", requestSchema: "verdi.context-controller/persist-abort-request/v1", resultSchema: "verdi.context-controller/persist-abort-result/v1"},
+			{operation: "resolve-claim-mcp", requestSchema: "verdi.context-controller/resolve-claim-mcp-request/v1", resultSchema: "verdi.context-controller/resolve-claim-mcp-result/v1"},
 		}
-		if got, want := len(ControllerOperations()), 22; got != want {
+		if got, want := len(ControllerOperations()), 23; got != want {
 			t.Fatalf("controller operation count = %d, want %d", got, want)
 		}
 		operations := ControllerOperations()
@@ -345,7 +420,7 @@ func TestContextControllerWireContract_Static(t *testing.T) {
 		sessionRecord := SessionRecord{Key: key, SessionRef: "provider-session", AdapterVersion: request.AdapterVersion, ProfileDigest: request.Profile.Digest, WorkspaceID: "workspace-1", LifecycleAck: eventAck}
 		contextQuery := ContextQuery{Key: key, Ref: "spec/test#ac-1"}
 		epochCheck := controllerEpochCheckFixture(t)
-		expansionInstall := ExpansionInstall{Key: key, RequestID: "request-1", ParentRevision: 0, ParentManifestDigest: request.ManifestDigest, ChildRevision: 1, ChildManifestDigest: testDigest("child-manifest"), ExpansionDigest: testDigest("expansion"), ExpansionRoot: testDigest("expansion-root"), TerminalAck: eventAck}
+		expansionInstall := ExpansionInstall{Key: key, RequestID: "request-1", ParentRevision: 0, ParentManifestDigest: request.ManifestDigest, ChildRevision: 1, ChildManifestDigest: testDigest("child-manifest"), ExpansionDigest: testDigest("expansion"), ExpansionRoot: testDigest("expansion-root"), TerminalAck: eventAck, Ref: "spec/extra", Purpose: "needed for implementation", Data: validDataItem(t)}
 		receiptQuery := ReceiptInputsQuery{Request: request, WorkspaceID: "workspace-1", DispatchDigest: testDigest("dispatch"), TerminalRevision: 0, TerminalSourceSequence: 1, TerminalGlobalSequence: 1, EventChainRoot: receipt.EventChainRoot, ResultFactsDigest: testDigest("result-facts")}
 		receiptAppend := ReceiptAppend{Receipt: receipt, Event: receiptEvent}
 		authorityQuery := contextreceipt.AuthorityQuery{RequestDigest: testDigest("verify-request"), ReceiptDigest: receipt.Digest, CandidateCommit: receipt.OutputCommit, CandidateTree: receipt.OutputTree, ProfileRef: contextreceipt.ProfileRef{Schema: request.Profile.Schema, ID: request.Profile.ID, Digest: request.Profile.Digest}, RunnerClaim: receipt.RunnerPrincipalResolution.Claim}
@@ -422,7 +497,7 @@ func TestContextControllerWireContract_Static(t *testing.T) {
 			{name: "VerifyEpoch", operation: "verify-epoch", requestSchema: "verdi.context-controller/verify-epoch-request/v1", requestField: "check", requestValue: epochCheck, reply: verifyEpochResult, want: verifyEpochResult.VerifyEpoch.Verification, invoke: func(client *ControllerClient) (any, error) {
 				return client.VerifyEpoch(context.Background(), epochCheck)
 			}},
-			{name: "InstallExpansion", operation: "install-expansion", requestSchema: "verdi.context-controller/install-expansion-request/v1", requestField: "install", requestValue: expansionInstall, reply: installExpansionResult, invoke: func(client *ControllerClient) (any, error) {
+			{name: "InstallExpansion", operation: "install-expansion", requestSchema: "verdi.context-controller/install-expansion-request/v2", requestField: "install", requestValue: expansionInstall, reply: installExpansionResult, invoke: func(client *ControllerClient) (any, error) {
 				return nil, client.InstallExpansion(context.Background(), expansionInstall)
 			}},
 			{name: "ResolveReceiptInputs", operation: "resolve-receipt-inputs", requestSchema: "verdi.context-controller/resolve-receipt-inputs-request/v1", requestField: "query", requestValue: receiptQuery, reply: resolveReceiptInputsResult, want: resolveReceiptInputsResult.ResolveReceiptInputs.Inputs, invoke: func(client *ControllerClient) (any, error) {
@@ -1549,7 +1624,7 @@ func controllerCallFixture(t *testing.T, sequence uint64, operation ControllerOp
 	case ControllerOperationVerifyEpoch:
 		call.VerifyEpoch = ControllerVerifyEpochRequest{Schema: controllerRequestSchema(operation), Check: controllerEpochCheckFixture(t)}
 	case ControllerOperationInstallExpansion:
-		call.InstallExpansion = ControllerInstallExpansionRequest{Schema: controllerRequestSchema(operation), Install: ExpansionInstall{Key: executionKey(request), RequestID: "request-1", ParentRevision: 0, ParentManifestDigest: request.ManifestDigest, ChildRevision: 1, ChildManifestDigest: testDigest("child-manifest"), ExpansionDigest: testDigest("expansion"), ExpansionRoot: testDigest("expansion-root"), TerminalAck: ack}}
+		call.InstallExpansion = ControllerInstallExpansionRequest{Schema: controllerRequestSchema(operation), Install: controllerExpansionInstallFixture(t, request, ack)}
 	case ControllerOperationResolveReceiptInputs:
 		call.ResolveReceiptInputs = ControllerResolveReceiptInputsRequest{Schema: controllerRequestSchema(operation), Query: ReceiptInputsQuery{Request: request, WorkspaceID: "workspace-1", DispatchDigest: testDigest("dispatch"), TerminalRevision: 0, TerminalSourceSequence: 1, TerminalGlobalSequence: 1, EventChainRoot: receipt.EventChainRoot, ResultFactsDigest: testDigest("result-facts")}}
 	case ControllerOperationAppendReceipt:
@@ -1564,6 +1639,8 @@ func controllerCallFixture(t *testing.T, sequence uint64, operation ControllerOp
 		quarantine := validQuarantineRecord(t, QuarantineTerminalDurabilityFailed)
 		quarantine = mustCanonicalQuarantine(t, quarantine)
 		call.PersistAbort = ControllerPersistAbortRequest{Schema: controllerRequestSchema(operation), Record: validAbortRecord(t, quarantine)}
+	case ControllerOperationResolveClaimMCP:
+		call.ResolveClaimMCP = ControllerResolveClaimMCPRequest{Schema: controllerRequestSchema(operation), Query: ClaimMCPQuery{RequestDigest: testDigest("claim-request")}}
 	default:
 		t.Fatalf("unknown fixture operation %q", operation)
 	}
@@ -1633,6 +1710,11 @@ func controllerResultFixture(t *testing.T, sequence uint64, operation Controller
 		quarantine := mustCanonicalQuarantine(t, validQuarantineRecord(t, QuarantineTerminalDurabilityFailed))
 		record := mustCanonicalAbort(t, validAbortRecord(t, quarantine))
 		result.PersistAbort = ControllerPersistAbortResult{Schema: controllerResultSchema(operation), Ack: mustCanonicalControlAck(t, validControlAckForAbort(record))}
+	case ControllerOperationResolveClaimMCP:
+		result.ResolveClaimMCP = ControllerResolveClaimMCPResult{Schema: controllerResultSchema(operation), Registration: ClaimMCPRegistration{
+			Name: RequiredClaimMCPName, Type: RequiredMCPType, URL: "http://127.0.0.1:45001/mcp",
+			Tools: []string{ToolClaimPaths}, RequestDigest: testDigest("claim-request"),
+		}}
 	default:
 		t.Fatalf("unknown fixture operation %q", operation)
 	}
@@ -1694,6 +1776,20 @@ func controllerContextResolutionFixture(t *testing.T) ContextResolution {
 	return ContextResolution{Verification: Verification{State: contextcompile.ResolutionProven, Witnesses: []string{}}, Ref: "spec/test#ac-1", Data: decoded}
 }
 
+// controllerExpansionInstallFixture is Task 2A's widened install row: every
+// fact the accepted v1 row already carried, plus the requested ref, the
+// non-empty request purpose, and the canonical installed data item.
+func controllerExpansionInstallFixture(t *testing.T, request ExecutionRequest, ack contextevent.EventAck) ExpansionInstall {
+	t.Helper()
+	return ExpansionInstall{
+		Key: executionKey(request), RequestID: "request-1", ParentRevision: 0,
+		ParentManifestDigest: request.ManifestDigest, ChildRevision: 1,
+		ChildManifestDigest: testDigest("child-manifest"), ExpansionDigest: testDigest("expansion"),
+		ExpansionRoot: testDigest("expansion-root"), TerminalAck: ack,
+		Ref: "spec/extra", Purpose: "needed for implementation", Data: validDataItem(t),
+	}
+}
+
 func controllerEpochCheckFixture(t *testing.T) EpochCheck {
 	t.Helper()
 	request := validExecutionRequest(t, ActionStart)
@@ -1751,4 +1847,449 @@ func controllerReceiptFixture(t *testing.T, request ExecutionRequest) (contextre
 		t.Fatal(err)
 	}
 	return receipt, event, ack
+}
+
+// TestControllerContractDocument freezes the read-only contract projection.
+//
+// The document is the one thing a caller can learn about this build's sealed
+// controller without starting a sealed execution: the three envelope schemas
+// every call and reply is framed in, and the closed operation registry in wire
+// order. It carries nothing else. Per-operation request and result schemas are
+// derived from the operation name by controllerRequestSchema and
+// controllerResultSchema, so publishing them would create a second place for
+// the wire to drift from the derivation that actually encodes it.
+//
+// The bytes are frozen literally because a consumer strict-decodes them and
+// compares the registry element by element. A reordered, renamed, or
+// re-spelled projection is a different contract even when it names the same
+// operations.
+func TestControllerContractDocument(t *testing.T) {
+	encoded, err := EncodeControllerContract()
+	if err != nil {
+		t.Fatalf("EncodeControllerContract: %v", err)
+	}
+
+	if !bytes.HasSuffix(encoded, []byte("\n")) || bytes.HasSuffix(encoded, []byte("\n\n")) {
+		t.Fatalf("contract does not carry exactly one canonical LF: %q", encoded)
+	}
+	for _, literal := range []string{
+		`"schema":"verdi.context-controller-contract/v1"`,
+		`"controller_call_schema":"verdi.context-controller-call/v1"`,
+		`"controller_result_schema":"verdi.context-controller-result/v1"`,
+		`"controller_error_schema":"verdi.context-controller-error/v1"`,
+	} {
+		if !bytes.Contains(encoded, []byte(literal)) {
+			t.Fatalf("contract lacks literal %s: %s", literal, encoded)
+		}
+	}
+
+	// The published registry is the closed one, in wire order, and nothing is
+	// added or dropped on the way out.
+	var doc struct {
+		Schema                 string   `json:"schema"`
+		ControllerCallSchema   string   `json:"controller_call_schema"`
+		ControllerResultSchema string   `json:"controller_result_schema"`
+		ControllerErrorSchema  string   `json:"controller_error_schema"`
+		Operations             []string `json:"operations"`
+	}
+	decoder := json.NewDecoder(bytes.NewReader(encoded))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&doc); err != nil {
+		t.Fatalf("the contract carries a member outside its declared shape: %v", err)
+	}
+	if _, err := decoder.Token(); !errors.Is(err, io.EOF) {
+		t.Fatalf("the contract carries trailing data: %v", err)
+	}
+	if doc.Schema != ControllerContractSchemaID {
+		t.Fatalf("schema = %q, want %q", doc.Schema, ControllerContractSchemaID)
+	}
+	if doc.ControllerCallSchema != ControllerCallSchemaID ||
+		doc.ControllerResultSchema != ControllerResultSchemaID ||
+		doc.ControllerErrorSchema != ControllerErrorSchemaID {
+		t.Fatalf("envelope schemas = %+v", doc)
+	}
+	if got, want := len(doc.Operations), len(ControllerOperations()); got != want {
+		t.Fatalf("published %d operations, want the closed registry's %d", got, want)
+	}
+	for i, op := range ControllerOperations() {
+		if doc.Operations[i] != string(op) {
+			t.Fatalf("operation %d = %q, want %q; the registry is published in wire order",
+				i, doc.Operations[i], op)
+		}
+	}
+
+	// The projection is a pure function of the registry: encoding twice yields
+	// the same bytes, so a caller may address it by digest.
+	again, err := EncodeControllerContract()
+	if err != nil {
+		t.Fatalf("EncodeControllerContract (second): %v", err)
+	}
+	if !bytes.Equal(encoded, again) {
+		t.Fatal("EncodeControllerContract is not deterministic")
+	}
+}
+
+// TestControllerInstallExpansionRequestV2 freezes the private half of Task 2A
+// (correction §2.2 and §3.3's one ratified exception, SI-182): the
+// install-expansion REQUEST arm advances to v2 carrying exactly the requested
+// ref, the non-empty request purpose, and the canonical installed data item,
+// while its result arm and every other request and result arm stay at the
+// publication base. The v1 request is migration-only and cannot be served,
+// because it lacks the operands a restart needs to reconstruct the lineage.
+func TestControllerInstallExpansionRequestV2(t *testing.T) {
+	const (
+		requestV2 = "verdi.context-controller/install-expansion-request/v2"
+		requestV1 = "verdi.context-controller/install-expansion-request/v1"
+	)
+	request := validExecutionRequest(t, ActionStart)
+	_, ack := controllerEventFixture(t, request)
+	install := controllerExpansionInstallFixture(t, request, ack)
+	callFor := func(row ExpansionInstall) ControllerCall {
+		return ControllerCall{
+			Schema: ControllerCallSchemaID, CallSequence: 1, Operation: ControllerOperationInstallExpansion,
+			InstallExpansion: ControllerInstallExpansionRequest{
+				Schema: controllerRequestSchema(ControllerOperationInstallExpansion), Install: row,
+			},
+		}
+	}
+	payloadOf := func(t *testing.T, call ControllerCall) []byte {
+		t.Helper()
+		frame, err := EncodeControllerCall(call)
+		if err != nil {
+			t.Fatalf("EncodeControllerCall: %v", err)
+		}
+		var envelope struct {
+			Payload json.RawMessage `json:"payload"`
+		}
+		if err := json.Unmarshal(frame, &envelope); err != nil {
+			t.Fatalf("read controller call payload: %v", err)
+		}
+		return envelope.Payload
+	}
+
+	t.Run("only the install request arm advances", func(t *testing.T) {
+		if got := controllerRequestSchema(ControllerOperationInstallExpansion); got != requestV2 {
+			t.Fatalf("install request schema = %q, want %q", got, requestV2)
+		}
+		for _, operation := range ControllerOperations() {
+			want := "verdi.context-controller/" + string(operation) + "-result/v1"
+			if got := controllerResultSchema(operation); got != want {
+				t.Fatalf("result schema for %s = %q, want %q", operation, got, want)
+			}
+			if operation == ControllerOperationInstallExpansion {
+				continue
+			}
+			want = "verdi.context-controller/" + string(operation) + "-request/v1"
+			if got := controllerRequestSchema(operation); got != want {
+				t.Fatalf("request schema for %s = %q, want %q", operation, got, want)
+			}
+		}
+	})
+
+	t.Run("widened canonical request bytes", func(t *testing.T) {
+		itemBytes, err := contextcompile.EncodeDataItem(install.Data)
+		if err != nil {
+			t.Fatalf("EncodeDataItem: %v", err)
+		}
+		ackBytes, err := canonjson.Marshal(ack)
+		if err != nil {
+			t.Fatalf("canonjson.Marshal(ack): %v", err)
+		}
+		want := `{"install":{` +
+			`"child_manifest_digest":"` + install.ChildManifestDigest + `",` +
+			`"child_revision":1,` +
+			`"data":` + string(bytes.TrimSuffix(itemBytes, []byte("\n"))) + `,` +
+			`"expansion_digest":"` + install.ExpansionDigest + `",` +
+			`"expansion_root":"` + install.ExpansionRoot + `",` +
+			`"key":{"epoch":"` + install.Key.Epoch + `","flight":"` + install.Key.Flight + `","lane":"` + install.Key.Lane + `"},` +
+			`"parent_manifest_digest":"` + install.ParentManifestDigest + `",` +
+			`"parent_revision":0,` +
+			`"purpose":"` + install.Purpose + `",` +
+			`"ref":"` + install.Ref + `",` +
+			`"request_id":"` + install.RequestID + `",` +
+			`"terminal_ack":` + string(bytes.TrimSuffix(ackBytes, []byte("\n"))) +
+			`},"schema":"` + requestV2 + `"}`
+		if got := string(payloadOf(t, callFor(install))); got != want {
+			t.Fatalf("widened install payload\n got %s\nwant %s", got, want)
+		}
+
+		// Exactly three members were added; nothing the v1 row carried was
+		// dropped or renamed on the way to v2.
+		var members struct {
+			Install map[string]json.RawMessage `json:"install"`
+		}
+		if err := json.Unmarshal(payloadOf(t, callFor(install)), &members); err != nil {
+			t.Fatalf("read install members: %v", err)
+		}
+		for _, name := range []string{
+			"key", "request_id", "parent_revision", "parent_manifest_digest", "child_revision",
+			"child_manifest_digest", "expansion_digest", "expansion_root", "terminal_ack",
+			"ref", "purpose", "data",
+		} {
+			if _, ok := members.Install[name]; !ok {
+				t.Fatalf("install member %q is absent", name)
+			}
+		}
+		if len(members.Install) != 12 {
+			t.Fatalf("install members = %v, want exactly the accepted nine plus ref, purpose, and data", members.Install)
+		}
+	})
+
+	t.Run("round trip preserves the three added facts", func(t *testing.T) {
+		frame, err := EncodeControllerCall(callFor(install))
+		if err != nil {
+			t.Fatalf("EncodeControllerCall: %v", err)
+		}
+		decoded, err := DecodeControllerCall(bytes.NewReader(frame))
+		if err != nil {
+			t.Fatalf("DecodeControllerCall: %v", err)
+		}
+		got := decoded.InstallExpansion.Install
+		if got.Ref != install.Ref || got.Purpose != install.Purpose {
+			t.Fatalf("decoded ref/purpose = %q/%q, want %q/%q", got.Ref, got.Purpose, install.Ref, install.Purpose)
+		}
+		wantItem, err := contextcompile.EncodeDataItem(install.Data)
+		if err != nil {
+			t.Fatalf("EncodeDataItem: %v", err)
+		}
+		gotItem, err := contextcompile.EncodeDataItem(got.Data)
+		if err != nil {
+			t.Fatalf("EncodeDataItem(decoded): %v", err)
+		}
+		if !bytes.Equal(gotItem, wantItem) {
+			t.Fatalf("decoded item\n got %s\nwant %s", gotItem, wantItem)
+		}
+	})
+
+	t.Run("v1 install request is migration-only", func(t *testing.T) {
+		frame, err := EncodeControllerCall(callFor(install))
+		if err != nil {
+			t.Fatalf("EncodeControllerCall: %v", err)
+		}
+		if got := bytes.Count(frame, []byte(`"`+requestV2+`"`)); got != 1 {
+			t.Fatalf("frame declares the v2 request schema %d times, want exactly 1", got)
+		}
+		legacy := bytes.Replace(frame, []byte(`"`+requestV2+`"`), []byte(`"`+requestV1+`"`), 1)
+		if _, err := DecodeControllerCall(bytes.NewReader(legacy)); err == nil {
+			t.Fatal("DecodeControllerCall served a v1 install-expansion request")
+		}
+		stale := callFor(install)
+		stale.InstallExpansion.Schema = requestV1
+		if _, err := EncodeControllerCall(stale); err == nil {
+			t.Fatal("EncodeControllerCall emitted a v1 install-expansion request")
+		}
+	})
+
+	t.Run("the three added facts are required and bound", func(t *testing.T) {
+		refItem, _, err := contextcompile.BuildDataItem(contextcompile.Candidate{
+			Source: contextcompile.SourceDeclaredContext, ID: "ref:" + install.Ref, Ref: install.Ref,
+		}, contextcompile.IncludedDeclaredContextRef, []byte("declared context bytes\n"))
+		if err != nil {
+			t.Fatalf("BuildDataItem declared-context fixture: %v", err)
+		}
+
+		matching := install
+		matching.Data = refItem
+		if _, err := EncodeControllerCall(callFor(matching)); err != nil {
+			t.Fatalf("EncodeControllerCall(item carrying the row ref): %v", err)
+		}
+
+		for _, tc := range []struct {
+			name   string
+			mutate func(*ExpansionInstall)
+		}{
+			{"missing ref", func(in *ExpansionInstall) { in.Ref = "" }},
+			{"padded ref", func(in *ExpansionInstall) { in.Ref = " " + in.Ref }},
+			{"missing purpose", func(in *ExpansionInstall) { in.Purpose = "" }},
+			{"padded purpose", func(in *ExpansionInstall) { in.Purpose += " " }},
+			{"absent data item", func(in *ExpansionInstall) { in.Data = contextcompile.DataItem{} }},
+			{"data item declaring a foreign schema", func(in *ExpansionInstall) { in.Data.Schema = "verdi.other-item/v1" }},
+			{"data item with no content digest", func(in *ExpansionInstall) { in.Data.ContentDigest = "" }},
+			{"item ref contradicts the row ref", func(in *ExpansionInstall) {
+				in.Data = refItem
+				in.Ref = "spec/other"
+			}},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				bad := install
+				tc.mutate(&bad)
+				if _, err := EncodeControllerCall(callFor(bad)); err == nil {
+					t.Fatal("EncodeControllerCall accepted an incomplete or contradicted install row")
+				}
+			})
+		}
+	})
+}
+
+// TestContextResolutionWireDataPresence pins SI-194: on the resolve-context
+// result wire (and epoch-check's embedded resolution), `data` is required
+// and validated exactly as before when the resolution is proven, and MUST
+// be absent — the member omitted, not nulled — when the resolution is
+// non-proven. Before this entry contextResolutionToWire/FromWire
+// unconditionally required a valid contextcompile.DataItem for every
+// resolution state, so an honest external owner could not answer a denied
+// or absent ref without fabricating a data item.
+func TestContextResolutionWireDataPresence(t *testing.T) {
+	provenState := Verification{State: contextcompile.ResolutionProven, Witnesses: []string{}}
+	nonProvenState := Verification{State: contextcompile.ResolutionUnproven, Failure: FailureUnavailable, Witnesses: []string{"ref-absent"}}
+	// SI-194 F4: the rule is stated over "non-proven" (any state but
+	// proven), not specifically "unproven" — violated-with-witness gets
+	// its own row rather than relying solely on contextcompile's shared
+	// helper table to cover it.
+	violatedState := Verification{State: contextcompile.ResolutionViolatedWithWitness, Failure: FailureRejected, Witnesses: []string{"rejected"}}
+	item := validDataItem(t)
+
+	t.Run("encode", func(t *testing.T) {
+		for _, tc := range []struct {
+			name    string
+			res     ContextResolution
+			wantErr bool
+		}{
+			{name: "proven-with-data ok", res: ContextResolution{Verification: provenState, Ref: "spec/test#ac-1", Data: item}},
+			{name: "proven-without-data refused", res: ContextResolution{Verification: provenState, Ref: "spec/test#ac-1"}, wantErr: true},
+			{name: "non-proven-without-data ok", res: ContextResolution{Verification: nonProvenState, Ref: "spec/test#ac-1"}},
+			{name: "non-proven-with-data refused", res: ContextResolution{Verification: nonProvenState, Ref: "spec/test#ac-1", Data: item}, wantErr: true},
+			{name: "violated-without-data ok", res: ContextResolution{Verification: violatedState, Ref: "spec/test#ac-1"}},
+			{name: "violated-with-data refused", res: ContextResolution{Verification: violatedState, Ref: "spec/test#ac-1", Data: item}, wantErr: true},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				wire, err := contextResolutionToWire(tc.res)
+				if tc.wantErr {
+					if err == nil {
+						t.Fatalf("contextResolutionToWire(%+v) = %+v, want a refusal", tc.res, wire)
+					}
+					return
+				}
+				if err != nil {
+					t.Fatalf("contextResolutionToWire(%+v): %v", tc.res, err)
+				}
+				proven := tc.res.State == contextcompile.ResolutionProven
+				if proven && len(wire.Data) == 0 {
+					t.Fatalf("proven wire is missing its data member: %+v", wire)
+				}
+				if !proven && len(wire.Data) != 0 {
+					t.Fatalf("non-proven wire carries a data member: %+v", wire)
+				}
+			})
+		}
+	})
+
+	// The wire encoder must OMIT the member on a non-proven resolution
+	// rather than null it — proven separately from the length check above,
+	// which a `"data":null` payload (4 bytes) would not catch.
+	t.Run("non-proven encoding omits the data member entirely", func(t *testing.T) {
+		wire, err := contextResolutionToWire(ContextResolution{Verification: nonProvenState, Ref: "spec/test#ac-1"})
+		if err != nil {
+			t.Fatalf("contextResolutionToWire: %v", err)
+		}
+		encoded, err := canonjson.Marshal(wire)
+		if err != nil {
+			t.Fatalf("marshal wire: %v", err)
+		}
+		if bytes.Contains(encoded, []byte(`"data"`)) {
+			t.Fatalf("non-proven wire encoding names a data member: %s", encoded)
+		}
+	})
+
+	t.Run("decode", func(t *testing.T) {
+		provenWire, err := contextResolutionToWire(ContextResolution{Verification: provenState, Ref: "spec/test#ac-1", Data: item})
+		if err != nil {
+			t.Fatalf("build proven wire fixture: %v", err)
+		}
+		nonProvenWire, err := contextResolutionToWire(ContextResolution{Verification: nonProvenState, Ref: "spec/test#ac-1"})
+		if err != nil {
+			t.Fatalf("build non-proven wire fixture: %v", err)
+		}
+		violatedWire, err := contextResolutionToWire(ContextResolution{Verification: violatedState, Ref: "spec/test#ac-1"})
+		if err != nil {
+			t.Fatalf("build violated wire fixture: %v", err)
+		}
+		missingDataOnProven := provenWire
+		missingDataOnProven.Data = nil
+		dataOnNonProven := nonProvenWire
+		dataOnNonProven.Data = provenWire.Data
+		dataOnViolated := violatedWire
+		dataOnViolated.Data = provenWire.Data
+		// SI-194 F4: "null" (the only illegal shape the existing table
+		// exercised) decodes to a 4-byte json.RawMessage, so it happens to
+		// be caught by the presence gate the same way any other non-empty
+		// value is — these two rows pin that an empty object and an empty
+		// string are refused too, not merely tolerated as some special
+		// case of "absent".
+		emptyObjectOnNonProven := nonProvenWire
+		emptyObjectOnNonProven.Data = []byte("{}")
+		emptyStringOnNonProven := nonProvenWire
+		emptyStringOnNonProven.Data = []byte(`""`)
+
+		for _, tc := range []struct {
+			name    string
+			wire    contextResolutionWire
+			wantErr bool
+		}{
+			{name: "proven-with-data ok", wire: provenWire},
+			{name: "proven-without-data refused", wire: missingDataOnProven, wantErr: true},
+			{name: "non-proven-without-data ok", wire: nonProvenWire},
+			{name: "non-proven-with-data refused", wire: dataOnNonProven, wantErr: true},
+			{name: "violated-without-data ok", wire: violatedWire},
+			{name: "violated-with-data refused", wire: dataOnViolated, wantErr: true},
+			{name: "non-proven-with-empty-object-data refused", wire: emptyObjectOnNonProven, wantErr: true},
+			{name: "non-proven-with-empty-string-data refused", wire: emptyStringOnNonProven, wantErr: true},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				resolution, err := contextResolutionFromWire(tc.wire)
+				if tc.wantErr {
+					if err == nil {
+						t.Fatalf("contextResolutionFromWire(%+v) = %+v, want a refusal", tc.wire, resolution)
+					}
+					return
+				}
+				if err != nil {
+					t.Fatalf("contextResolutionFromWire(%+v): %v", tc.wire, err)
+				}
+				// Round-trip property: ToWire(FromWire(w)) == w, for both
+				// the proven and the non-proven arm.
+				back, err := contextResolutionToWire(resolution)
+				if err != nil {
+					t.Fatalf("contextResolutionToWire(FromWire(w)): %v", err)
+				}
+				if !reflect.DeepEqual(back, tc.wire) {
+					t.Fatalf("ToWire(FromWire(w)) = %+v, want %+v", back, tc.wire)
+				}
+			})
+		}
+	})
+
+	// epoch-check embeds a resolution and must honor the identical rule
+	// (the Contract explicitly covers "epoch-check's embedded resolution").
+	t.Run("epoch check embeds the same rule", func(t *testing.T) {
+		provenCheck := controllerEpochCheckFixture(t)
+		if _, err := epochCheckToWire(provenCheck); err != nil {
+			t.Fatalf("epochCheckToWire(proven): %v", err)
+		}
+		nonProvenCheck := provenCheck
+		nonProvenCheck.Resolution = ContextResolution{Verification: nonProvenState, Ref: provenCheck.Resolution.Ref}
+		wire, err := epochCheckToWire(nonProvenCheck)
+		if err != nil {
+			t.Fatalf("epochCheckToWire(non-proven, no data): %v", err)
+		}
+		if len(wire.Resolution.Data) != 0 {
+			t.Fatalf("non-proven epoch-check resolution carries data: %+v", wire.Resolution)
+		}
+		illegal := nonProvenCheck
+		illegal.Resolution.Data = provenCheck.Resolution.Data
+		if _, err := epochCheckToWire(illegal); err == nil {
+			t.Fatal("epochCheckToWire accepted a non-proven embedded resolution carrying a data item")
+		}
+		roundTripped, err := epochCheckFromWire(wire)
+		if err != nil {
+			t.Fatalf("epochCheckFromWire: %v", err)
+		}
+		rewired, err := epochCheckToWire(roundTripped)
+		if err != nil {
+			t.Fatalf("re-encode round-tripped epoch check: %v", err)
+		}
+		if !reflect.DeepEqual(rewired, wire) {
+			t.Fatalf("ToWire(FromWire(w)) = %+v, want %+v", rewired, wire)
+		}
+	})
 }

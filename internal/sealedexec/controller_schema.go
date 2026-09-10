@@ -1,6 +1,7 @@
 package sealedexec
 
 import (
+	"github.com/jyang234/verdi/internal/canonjson"
 	"github.com/jyang234/verdi/internal/contextcompile"
 	"github.com/jyang234/verdi/internal/contextevent"
 	"github.com/jyang234/verdi/internal/contextreceipt"
@@ -14,6 +15,46 @@ const (
 	ControllerResultSchemaID = "verdi.context-controller-result/v1"
 	ControllerErrorSchemaID  = "verdi.context-controller-error/v1"
 )
+
+// ControllerContractSchemaID is the read-only projection of this build's
+// sealed-controller wire: the three envelope schemas above and the closed
+// operation registry below.
+//
+// It exists so a caller can learn which controller this build speaks without
+// starting a sealed execution. Publishing it is not a capability: nothing here
+// serves an operation, and the document is a pure function of constants.
+const ControllerContractSchemaID = "verdi.context-controller-contract/v1"
+
+// controllerContract is the exact published shape.
+//
+// Per-operation request and result schemas are deliberately absent. They are
+// derived from the operation name by controllerRequestSchema and
+// controllerResultSchema, so listing them would create a second place for the
+// wire to drift from the derivation that actually encodes it; comparing the
+// registry compares them all.
+type controllerContract struct {
+	Schema                 string                `json:"schema"`
+	ControllerCallSchema   string                `json:"controller_call_schema"`
+	ControllerResultSchema string                `json:"controller_result_schema"`
+	ControllerErrorSchema  string                `json:"controller_error_schema"`
+	Operations             []ControllerOperation `json:"operations"`
+}
+
+// EncodeControllerContract renders this build's controller contract as one
+// canonical document.
+//
+// It reads no file, opens no store, and takes no operand: the answer is the
+// same for one build wherever it runs, which is what lets a caller address the
+// document by digest and compare two builds by their bytes.
+func EncodeControllerContract() ([]byte, error) {
+	return canonjson.Marshal(controllerContract{
+		Schema:                 ControllerContractSchemaID,
+		ControllerCallSchema:   ControllerCallSchemaID,
+		ControllerResultSchema: ControllerResultSchemaID,
+		ControllerErrorSchema:  ControllerErrorSchemaID,
+		Operations:             ControllerOperations(),
+	})
+}
 
 // ControllerOperation is the exact closed FD-3 operation registry.
 type ControllerOperation string
@@ -41,6 +82,7 @@ const (
 	ControllerOperationPersistHandback                     ControllerOperation = "persist-handback"
 	ControllerOperationPersistQuarantine                   ControllerOperation = "persist-quarantine"
 	ControllerOperationPersistAbort                        ControllerOperation = "persist-abort"
+	ControllerOperationResolveClaimMCP                     ControllerOperation = "resolve-claim-mcp"
 )
 
 var controllerOperations = []ControllerOperation{
@@ -66,6 +108,7 @@ var controllerOperations = []ControllerOperation{
 	ControllerOperationPersistHandback,
 	ControllerOperationPersistQuarantine,
 	ControllerOperationPersistAbort,
+	ControllerOperationResolveClaimMCP,
 }
 
 // ControllerOperations returns the exact closed FD-3 operation registry.
@@ -73,7 +116,19 @@ func ControllerOperations() []ControllerOperation {
 	return append([]ControllerOperation(nil), controllerOperations...)
 }
 
+// controllerRequestSchema derives the request-payload schema for operation.
+//
+// SI-182 adds exactly one exception to the single derivation: the
+// install-expansion request carries the requested ref, the request purpose,
+// and the canonical installed item that make an installed expansion
+// reconstructible after a restart, so it advances to v2. Its v1 spelling is
+// migration-only and is never served, because a v1 document cannot carry
+// those operands. Every other request arm, and every result arm including
+// install-expansion's, stays at the accepted publication base.
 func controllerRequestSchema(operation ControllerOperation) string {
+	if operation == ControllerOperationInstallExpansion {
+		return "verdi.context-controller/" + string(operation) + "-request/v2"
+	}
 	return "verdi.context-controller/" + string(operation) + "-request/v1"
 }
 
@@ -351,6 +406,32 @@ type ControllerPersistAbortResult struct {
 	Ack    ControlAck
 }
 
+// ClaimMCPQuery binds one claim-registration lookup to this invocation's exact
+// canonical request digest. It carries no credential and no provider state.
+type ClaimMCPQuery struct {
+	RequestDigest string
+}
+
+// ClaimMCPRegistration is the controller-owned ATC registration row. It carries
+// no bearer, credential, provider state, plan content, claim decision, or any
+// identity beyond the request digest it cross-matches.
+type ClaimMCPRegistration struct {
+	Name          string
+	Type          string
+	URL           string
+	Tools         []string
+	RequestDigest string
+}
+
+type ControllerResolveClaimMCPRequest struct {
+	Schema string
+	Query  ClaimMCPQuery
+}
+type ControllerResolveClaimMCPResult struct {
+	Schema       string
+	Registration ClaimMCPRegistration
+}
+
 // ControllerCall is a closed typed request union. Operation selects exactly
 // one operation-specific value; the wire codec emits only that payload.
 type ControllerCall struct {
@@ -380,6 +461,7 @@ type ControllerCall struct {
 	PersistHandback                     ControllerPersistHandbackRequest
 	PersistQuarantine                   ControllerPersistQuarantineRequest
 	PersistAbort                        ControllerPersistAbortRequest
+	ResolveClaimMCP                     ControllerResolveClaimMCPRequest
 }
 
 // ControllerResult is a closed typed result/error union. A valid reply has
@@ -412,4 +494,5 @@ type ControllerResult struct {
 	PersistHandback                     ControllerPersistHandbackResult
 	PersistQuarantine                   ControllerPersistQuarantineResult
 	PersistAbort                        ControllerPersistAbortResult
+	ResolveClaimMCP                     ControllerResolveClaimMCPResult
 }

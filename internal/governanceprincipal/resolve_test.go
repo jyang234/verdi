@@ -139,6 +139,173 @@ func TestResolveVerdicts(t *testing.T) {
 	}
 }
 
+// localOperatorFact reports subject as the local-operator source's own
+// self-asserted evidence: Available and Valid are always true (there is
+// no independent verification to fail — see resolve.go's local-operator
+// branch), a single Subjects entry naming the bare git-config identity.
+func localOperatorFact(subject string) TrustFact {
+	return TrustFact{
+		SourceID:       "local",
+		SourceKind:     TrustSourceLocalOperator,
+		Subjects:       []string{subject},
+		EvidenceDigest: testDigest,
+		Available:      true,
+		Valid:          true,
+	}
+}
+
+// TestResolveLocalOperatorAuthenticated: a subject role_mappings bind to
+// the local-operator source resolves authenticated, carrying the new
+// local-operator-asserted witness — never trust-subject-verified, which
+// would overclaim independent evidence for a bare self-assertion
+// (2026-09-05 local-operator disposition design §2.1).
+func TestResolveLocalOperatorAuthenticated(t *testing.T) {
+	profile := mustDecode(t, []byte(soloLocalOperatorYAML))
+	r := NewResolver(staticFact(localOperatorFact("alice@example.com")))
+
+	claim := PrincipalClaim{TrustSource: "local", Subject: "alice@example.com"}
+	res, err := r.Resolve(context.Background(), profile, claim)
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	if res.State != ResolutionAuthenticated {
+		t.Fatalf("State = %q, want %q", res.State, ResolutionAuthenticated)
+	}
+	want, err := CanonicalPrincipalID("local", "alice@example.com")
+	if err != nil {
+		t.Fatalf("CanonicalPrincipalID: %v", err)
+	}
+	if res.PrincipalID != want {
+		t.Errorf("PrincipalID = %q, want %q", res.PrincipalID, want)
+	}
+	if len(res.Witnesses) != 1 {
+		t.Fatalf("Witnesses = %+v, want exactly one", res.Witnesses)
+	}
+	w := res.Witnesses[0]
+	if w.Code != ReasonLocalOperatorAsserted {
+		t.Errorf("witness code = %q, want %q: a bare self-assertion must never mint %q", w.Code, ReasonLocalOperatorAsserted, ReasonTrustSubjectVerified)
+	}
+	if w.SourceID != "local" || w.EvidenceDigest != testDigest {
+		t.Errorf("witness = %+v, want source local digest %q", w, testDigest)
+	}
+}
+
+// TestResolveLocalOperatorViolatedUnboundSubject: a self-consistent
+// self-assertion (the evidence names exactly the claimed subject) is
+// still violated-with-witness when that subject is not one the profile's
+// role_mappings bind to the local-operator source — the safety valve a
+// bare self-assertion needs (design §2.1: "mints authenticated only when
+// the subject equals a subject the profile's role_mappings bind").
+func TestResolveLocalOperatorViolatedUnboundSubject(t *testing.T) {
+	profile := mustDecode(t, []byte(soloLocalOperatorYAML))
+	r := NewResolver(staticFact(localOperatorFact("mallory@example.com")))
+
+	claim := PrincipalClaim{TrustSource: "local", Subject: "mallory@example.com"}
+	res, err := r.Resolve(context.Background(), profile, claim)
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	if res.State != ResolutionViolated {
+		t.Fatalf("State = %q, want %q", res.State, ResolutionViolated)
+	}
+	if res.PrincipalID != "" {
+		t.Errorf("PrincipalID = %q, want empty for a violated resolution", res.PrincipalID)
+	}
+	if len(res.Witnesses) != 1 || res.Witnesses[0].Code != ReasonTrustSubjectMismatch {
+		t.Errorf("Witnesses = %+v, want one witness with code %q", res.Witnesses, ReasonTrustSubjectMismatch)
+	}
+}
+
+// TestResolveLocalOperatorViolatedUnattestedSubject: the claimed subject
+// is one the profile's role_mappings DO bind to the local-operator
+// source, but the checkout's own evidence attests somebody else. The
+// role-mapping condition is an ADDITIONAL requirement on top of the
+// evidence comparison, never a replacement for it (design §2.1; the port
+// contract in resolve.go: "the kernel still compares the claimed subject
+// itself"), so this resolves violated-with-witness. Were the kinds
+// swapped, mallory's checkout could mint alice's principal id from
+// mallory's own evidence digest — an impersonation of the one principal
+// a solo profile trusts.
+func TestResolveLocalOperatorViolatedUnattestedSubject(t *testing.T) {
+	profile := mustDecode(t, []byte(soloLocalOperatorYAML))
+	// The checkout's read identity is mallory; the claim names alice,
+	// whom the profile's role_mappings do bind to this source.
+	r := NewResolver(staticFact(localOperatorFact("mallory@example.com")))
+
+	claim := PrincipalClaim{TrustSource: "local", Subject: "alice@example.com"}
+	res, err := r.Resolve(context.Background(), profile, claim)
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	if res.State != ResolutionViolated {
+		t.Fatalf("State = %q, want %q: evidence attesting mallory must never authenticate alice", res.State, ResolutionViolated)
+	}
+	// No principal id: mallory's evidence digest is never attributed to
+	// alice, under any witness code.
+	if res.PrincipalID != "" {
+		t.Errorf("PrincipalID = %q, want empty: no principal is minted from another subject's evidence", res.PrincipalID)
+	}
+	if len(res.Witnesses) != 1 || res.Witnesses[0].Code != ReasonTrustSubjectMismatch {
+		t.Errorf("Witnesses = %+v, want one witness with code %q", res.Witnesses, ReasonTrustSubjectMismatch)
+	}
+}
+
+// TestResolveLocalOperatorViolatedSubjectBoundUnderDifferentSource: a
+// self-consistent self-assertion for a subject the profile binds under a
+// DIFFERENT trust source is still violated. §2.1 requires the subject to
+// be bound "to that source"; a forge subject is not thereby a local
+// operator.
+func TestResolveLocalOperatorViolatedSubjectBoundUnderDifferentSource(t *testing.T) {
+	profile := mustDecode(t, []byte(soloMixedSourcesYAML))
+	// bob is bound by role_mappings, but to the forge source `github`.
+	r := NewResolver(staticFact(localOperatorFact("bob@example.com")))
+
+	claim := PrincipalClaim{TrustSource: "local", Subject: "bob@example.com"}
+	res, err := r.Resolve(context.Background(), profile, claim)
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	if res.State != ResolutionViolated {
+		t.Fatalf("State = %q, want %q: a subject bound to %q is not bound to %q", res.State, ResolutionViolated, "github", "local")
+	}
+	if res.PrincipalID != "" {
+		t.Errorf("PrincipalID = %q, want empty for a violated resolution", res.PrincipalID)
+	}
+	if len(res.Witnesses) != 1 || res.Witnesses[0].Code != ReasonTrustSubjectMismatch {
+		t.Errorf("Witnesses = %+v, want one witness with code %q", res.Witnesses, ReasonTrustSubjectMismatch)
+	}
+}
+
+// TestResolveLocalOperatorUnprovenAbsentIdentity: no configured identity
+// (the port reports the fact unavailable) resolves unproven, exactly the
+// existing generic behavior — local-operator adds no new resolution
+// state (design §2.6 exclusions).
+func TestResolveLocalOperatorUnprovenAbsentIdentity(t *testing.T) {
+	profile := mustDecode(t, []byte(soloLocalOperatorYAML))
+	fact := TrustFact{
+		SourceID:   "local",
+		SourceKind: TrustSourceLocalOperator,
+		Available:  false,
+		Reason:     "no git user.email or user.name is configured",
+	}
+	r := NewResolver(staticFact(fact))
+
+	claim := PrincipalClaim{TrustSource: "local", Subject: "alice@example.com"}
+	res, err := r.Resolve(context.Background(), profile, claim)
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	if res.State != ResolutionUnproven {
+		t.Fatalf("State = %q, want %q", res.State, ResolutionUnproven)
+	}
+	if len(res.Witnesses) != 1 || res.Witnesses[0].Code != ReasonTrustEvidenceUnavailable {
+		t.Errorf("Witnesses = %+v, want one witness with code %q", res.Witnesses, ReasonTrustEvidenceUnavailable)
+	}
+	if res.Witnesses[0].Detail != fact.Reason {
+		t.Errorf("witness detail = %q, want %q", res.Witnesses[0].Detail, fact.Reason)
+	}
+}
+
 // TestResolveForbiddenSourceSkipsReader: a claim naming a source outside
 // the profile is judged without consulting the port.
 func TestResolveForbiddenSourceSkipsReader(t *testing.T) {

@@ -355,6 +355,25 @@ func (c *ControllerClient) PersistAbort(ctx context.Context, record AbortRecord)
 	return result.PersistAbort.Ack, wrapControllerMatchError(call.Operation, err)
 }
 
+// ResolveClaimMCP obtains the ATC-owned claim registration for this exact
+// invocation. The result carries no bearer, credential, provider state, plan
+// content, claim decision, or identity beyond the request digest, and a
+// registration bound to any other request is refused. There is no fallback: an
+// unavailable, malformed, stale, or contradictory answer is operational.
+func (c *ControllerClient) ResolveClaimMCP(ctx context.Context, query ClaimMCPQuery) (ClaimMCPRegistration, error) {
+	call := ControllerCall{Schema: ControllerCallSchemaID, Operation: ControllerOperationResolveClaimMCP}
+	call.ResolveClaimMCP = ControllerResolveClaimMCPRequest{Schema: controllerRequestSchema(call.Operation), Query: query}
+	result, err := c.invoke(ctx, call)
+	registration := result.ResolveClaimMCP.Registration
+	if err == nil && registration.RequestDigest != query.RequestDigest {
+		err = controllerResultMismatch(call.Operation, "claim registration digest contradicts query")
+	}
+	if err != nil {
+		return ClaimMCPRegistration{}, err
+	}
+	return registration, nil
+}
+
 func canonicalControllerEventValue(event contextevent.Event) (contextevent.Event, error) {
 	encoded, err := contextevent.EncodeEvent(event)
 	if err != nil {

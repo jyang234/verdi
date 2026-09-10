@@ -85,6 +85,23 @@ func TestReportDeterminismCompilerDisclosureClassification(t *testing.T) {
 	}
 }
 
+// TestBlockingCompilerDisclosure_LocalOperatorAssertedNonBlocking is M-2's
+// own regression proof (review finding): DisclosureLocalOperatorAsserted
+// must classify as non-blocking (2026-09-05 local-operator disposition
+// design §2.2 — a disclosed self-assertion, never a proof gap), via its
+// own explicit switch arm rather than the default fallthrough, and a
+// report disclosing ONLY that code (no mechanical/semantic rows) must
+// therefore reach VerdictPass, never VerdictBlockedUnproven.
+func TestBlockingCompilerDisclosure_LocalOperatorAssertedNonBlocking(t *testing.T) {
+	if blockingCompilerDisclosure(DisclosureLocalOperatorAsserted) {
+		t.Fatal("blockingCompilerDisclosure(DisclosureLocalOperatorAsserted) = true, want false (non-blocking by design §2.2)")
+	}
+	disclosures := []Disclosure{{Code: DisclosureLocalOperatorAsserted, Witnesses: []string{"local"}}}
+	if got := reportVerdict(nil, nil, disclosures); got != VerdictPass {
+		t.Fatalf("reportVerdict with only local-operator-asserted disclosed = %q, want pass", got)
+	}
+}
+
 func TestReportDeterminismViolatedOutranksUnproven(t *testing.T) {
 	mechanical := []MechanicalEvaluation{{State: ProofViolatedWithWitness}}
 	semantic := []SemanticEvaluation{{State: ProofUnproven}}

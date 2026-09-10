@@ -239,7 +239,12 @@ func NewResolver(facts TrustFactReader) Resolver {
 //  5. an invalid fact, or valid evidence that contradicts or omits the
 //     claimed subject, is violated-with-witness;
 //  6. valid evidence containing the subject is authenticated with the
-//     derived canonical principal ID.
+//     derived canonical principal ID — except for the local-operator
+//     kind, whose self-asserted evidence must additionally name a
+//     subject the profile's own role_mappings bind to that source, and
+//     which carries the local-operator-asserted witness rather than
+//     trust-subject-verified (2026-09-05 local-operator disposition
+//     design §2.1). That additional test never displaces step 5.
 func (r Resolver) Resolve(ctx context.Context, profile Profile, claim PrincipalClaim) (PrincipalResolution, error) {
 	if err := profile.checkSeal(); err != nil {
 		return PrincipalResolution{}, err
@@ -300,6 +305,44 @@ func (r Resolver) Resolve(ctx context.Context, profile Profile, claim PrincipalC
 			EvidenceDigest: fact.EvidenceDigest,
 			Detail:         fmt.Sprintf("valid evidence from %q does not attest claimed subject", source.ID),
 		}}
+	case source.Kind == TrustSourceLocalOperator:
+		// Reached only once the evidence attests the claimed subject:
+		// this case ADDS a requirement, it never replaces the comparison
+		// above (design §2.1; the TrustFact contract: "the kernel still
+		// compares the claimed subject itself"). Ordering it ahead of
+		// that comparison would let any checkout mint the principal id
+		// of any role-mapped subject out of its own evidence digest.
+		//
+		// The added requirement: a local-operator claim is a bare
+		// self-assertion — fact.Subjects is the adapter's own echo of the
+		// same ambient read, so self-consistency proves nothing by
+		// itself. The kernel therefore also requires the subject to be
+		// one the profile's own role_mappings already bind to this
+		// source: a principal the profile author actually named. Never
+		// mints ReasonTrustSubjectVerified for this kind.
+		if !roleMappingsBind(profile, source.ID, claim.Subject) {
+			res.State = ResolutionViolated
+			res.Witnesses = []Witness{{
+				Code:           ReasonTrustSubjectMismatch,
+				SourceID:       source.ID,
+				EvidenceDigest: fact.EvidenceDigest,
+				Detail:         fmt.Sprintf("self-asserted subject is not bound to any role by profile %q's role_mappings for source %q", profile.ID, source.ID),
+			}}
+			break
+		}
+		id, err := CanonicalPrincipalID(claim.TrustSource, claim.Subject)
+		if err != nil {
+			// Unreachable after claim.Validate, kept as a fail-closed guard.
+			return PrincipalResolution{}, err
+		}
+		res.State = ResolutionAuthenticated
+		res.PrincipalID = id
+		res.Witnesses = []Witness{{
+			Code:           ReasonLocalOperatorAsserted,
+			SourceID:       source.ID,
+			EvidenceDigest: fact.EvidenceDigest,
+			Detail:         fmt.Sprintf("self-asserted subject is bound to a role by profile %q's role_mappings for source %q", profile.ID, source.ID),
+		}}
 	default:
 		id, err := CanonicalPrincipalID(claim.TrustSource, claim.Subject)
 		if err != nil {
@@ -320,4 +363,21 @@ func (r Resolver) Resolve(ctx context.Context, profile Profile, claim PrincipalC
 		return PrincipalResolution{}, err
 	}
 	return res, nil
+}
+
+// roleMappingsBind reports whether ANY role mapping in profile binds
+// subject to trustSource, regardless of which role — the "is this a
+// known local operator" membership check the local-operator kind's
+// self-assertion requires before Resolve will trust it (2026-09-05
+// local-operator disposition design §2.1). Distinct from the
+// role-specific holdsRole/HoldsRole query (authorize.go), which asks
+// whether a subject fills one PARTICULAR role rather than any role at
+// all.
+func roleMappingsBind(profile Profile, trustSource, subject string) bool {
+	for _, m := range profile.RoleMappings {
+		if m.TrustSource == trustSource && contains(m.Subjects, subject) {
+			return true
+		}
+	}
+	return false
 }

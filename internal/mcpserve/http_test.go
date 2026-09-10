@@ -43,6 +43,29 @@ func TestHTTPMCPProtocol(t *testing.T) {
 		}
 	})
 
+	// SI-193 F1: the HTTP transport shares decodeHandlerRequest with the
+	// stdio path, so an unknown top-level frame member — sibling to
+	// jsonrpc/id/method, not nested in params — is tolerated here too,
+	// never observed in the response.
+	t.Run("initialize tolerates an unknown top-level frame member", func(t *testing.T) {
+		response := postHTTPMCP(t, httpHandler, `{"jsonrpc":"2.0","id":1,"method":"initialize","extra":true}`)
+		assertHTTPJSONResponse(t, response, http.StatusOK)
+		if strings.Contains(response.Body.String(), "extra") {
+			t.Fatalf("response observed the tolerated member: %s", response.Body.String())
+		}
+		var frame struct {
+			JSONRPC string `json:"jsonrpc"`
+			ID      int    `json:"id"`
+			Result  struct {
+				ProtocolVersion string `json:"protocolVersion"`
+			} `json:"result"`
+		}
+		decodeHTTPFrame(t, response, &frame)
+		if frame.JSONRPC != "2.0" || frame.ID != 1 || frame.Result.ProtocolVersion != ProtocolVersion {
+			t.Fatalf("tolerant initialize frame = %#v", frame)
+		}
+	})
+
 	t.Run("tools list is exact handler registry", func(t *testing.T) {
 		response := postHTTPMCP(t, httpHandler, `{"jsonrpc":"2.0","id":2,"method":"tools/list"}`)
 		assertHTTPJSONResponse(t, response, http.StatusOK)
@@ -165,6 +188,12 @@ func TestHTTPMCPRejectsWrongRequestShape(t *testing.T) {
 	}
 }
 
+// TestHTTPMCPMalformedAndUnknownJSONRPC no longer includes an unknown-member
+// row (`"extra":true` beside jsonrpc/id/method): SI-193 F1 made
+// decodeHandlerRequest tolerant of an unknown top-level frame member, and
+// that expectation was 548d1c0f's own uncited posture. The tolerated
+// equivalent is TestHTTPMCPProtocol's "initialize tolerates an unknown
+// top-level frame member" subtest, over this same HTTP transport.
 func TestHTTPMCPMalformedAndUnknownJSONRPC(t *testing.T) {
 	httpHandler, _, err := NewHTTPHandler(httpTestToken, &httpTestHandler{tools: []HandlerTool{}})
 	if err != nil {
@@ -174,7 +203,6 @@ func TestHTTPMCPMalformedAndUnknownJSONRPC(t *testing.T) {
 		``,
 		`{not-json}`,
 		`{"jsonrpc":"2.0","jsonrpc":"2.0","id":1,"method":"initialize"}`,
-		`{"jsonrpc":"2.0","id":1,"method":"initialize","extra":true}`,
 		`{"jsonrpc":"1.0","id":1,"method":"initialize"}`,
 		`{"jsonrpc":"2.0","id":1}`,
 		"{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\"}\n{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"initialize\"}",

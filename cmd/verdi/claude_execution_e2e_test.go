@@ -20,14 +20,17 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"reflect"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"testing"
+	"time"
 
 	"github.com/jyang234/verdi/internal/fixturegit"
 	"github.com/jyang234/verdi/internal/instructionprojection"
@@ -458,6 +461,40 @@ type fakeClaudeSpec struct {
 	// bigText makes the assistant text exceed the fixed inline detail ceiling,
 	// so its projected detail must become a durable controller segment.
 	bigText bool
+	// versionSuffix makes the fake's --version probe line print the SI-186
+	// product suffix (" (Claude Code)") after version instead of the bare
+	// version alone.
+	versionSuffix bool
+	// unknownMembers makes the fake reproduce the 2.1.261-shaped stream the
+	// real Claude Code CLI emits (measured offline by the F12 canary track,
+	// 2026-09-06; values here are synthetic, never the measured bytes): the
+	// init frame carries the exact 8 unknown members (SI-187), the api_retry
+	// frame carries its bare-string `error` plus the 1 unknown member
+	// error_status (SI-188), and the result frame's modelUsage.<model> value
+	// is the camelCase shape (SI-189). The sealed run must still proceed.
+	unknownMembers bool
+	// multiFrame makes the fake reproduce the real Claude Code CLI 2.1.261's
+	// multi-frame assistant message shape (SI-190, F12 canary flight 5,
+	// 2026-09-07): one assistant frame per content block, both frames of the
+	// single assistant message carrying the same message.id — a thinking
+	// block (block 0) followed by the text block (block 1). The sealed run
+	// must still proceed to its result frame.
+	multiFrame bool
+	// unknownFamilies makes the fake reproduce the real Claude Code CLI
+	// 2.1.261's further informational frame families (SI-192, F12 canary
+	// flight 8, 2026-09-07): a system/thinking_tokens frame right after init,
+	// before the first tool call, and a tool_progress frame between the
+	// assistant frame and the result frame — so the two land on two
+	// different accepted carriers. The sealed run must tolerate both and
+	// still proceed to its result frame.
+	unknownFamilies bool
+	// metaOnCalls makes every tools/call this fake issues (SI-193, F12
+	// canary track, 2026-09-07) carry a top-level `_meta` member beside
+	// `name`/`arguments`, exactly as the real Claude Code CLI 2.1.261 does
+	// on every tools/call (the MCP SDK's request() adds
+	// params._meta.progressToken whenever onprogress is supplied). The
+	// sealed run must still proceed to its result.
+	metaOnCalls bool
 }
 
 const fakeClaudeSource = `package main
@@ -487,6 +524,19 @@ const (
 	extraTool = __EXTRA__
 	doCommit  = __COMMIT__
 	bigText   = __BIGTEXT__
+	// versionSuffix selects the SI-186 " (Claude Code)" probe suffix.
+	versionSuffix = __VERSIONSUFFIX__
+	// unknownMembers selects the SI-187 2.1.261-shaped unknown-member frames.
+	unknownMembers = __UNKNOWNMEMBERS__
+	// multiFrame selects the SI-190 2.1.261-shaped multi-frame assistant
+	// message.
+	multiFrame = __MULTIFRAME__
+	// unknownFamilies selects the SI-192 2.1.261-shaped further informational
+	// frame families.
+	unknownFamilies = __UNKNOWNFAMILIES__
+	// metaOnCalls selects the SI-193 2.1.261-shaped _meta member on every
+	// tools/call.
+	metaOnCalls = __METAONCALLS__
 )
 
 func main() {
@@ -499,7 +549,11 @@ func main() {
 func run() error {
 	args := os.Args[1:]
 	if len(args) == 1 && args[0] == "--version" {
-		fmt.Println(version)
+		if versionSuffix {
+			fmt.Println(version + " (Claude Code)")
+		} else {
+			fmt.Println(version)
+		}
 		return nil
 	}
 	if err := os.WriteFile(argvPath, []byte(strings.Join(args, "\n")+"\n"), 0o644); err != nil {
@@ -517,9 +571,40 @@ func run() error {
 	if err := os.WriteFile(stdinPath, stdin, 0o644); err != nil {
 		return err
 	}
-	url, authorization, err := mcpTransport(args)
+	servers, err := mcpTransport(args)
 	if err != nil {
 		return err
+	}
+	url, authorization := servers["verdi-context"].URL, servers["verdi-context"].Headers["Authorization"]
+	claimURL, claimAuthorization := servers["vatc"].URL, servers["vatc"].Headers["Authorization"]
+	// Amendment 003: both required registrations complete their initialize
+	// handshake before any useful work. Recording them in order is what proves
+	// the ordering to the parent.
+	// The record is append-only: every observation is one write to a file opened
+	// once in append mode, so a row is durable the moment its record call
+	// returns. The parent may interrupt this provider the moment the scoped
+	// surface raises a terminal, and rewriting the whole file per observation
+	// would lose every already-durable row whenever that interruption landed
+	// between the truncate and the write.
+	tools, err := os.OpenFile(toolsPath, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0o644)
+	if err != nil {
+		return err
+	}
+	defer tools.Close()
+	record := func(row string) error {
+		_, err := tools.Write([]byte(row + "\n"))
+		return err
+	}
+	for _, handshake := range []struct{ name, url, authorization string }{
+		{"vatc", claimURL, claimAuthorization},
+		{"verdi-context", url, authorization},
+	} {
+		if _, err := post(handshake.url, handshake.authorization, ` + "`" + `{"jsonrpc":"2.0","id":0,"method":"initialize"}` + "`" + `); err != nil {
+			return err
+		}
+		if err := record("initialize " + handshake.name); err != nil {
+			return err
+		}
 	}
 	// Amendment 002 §4/§7 provider order: a real Claude announces its session
 	// before it can call a scoped tool, so the exact valid system/init frame is
@@ -527,42 +612,114 @@ func run() error {
 	// exercised at all. The parent therefore reduces init into adapter-start
 	// ahead of any MCP-owned context transition, which is what makes a prepared
 	// resume open on resume, adapter-start.
-	if err := emit(map[string]any{
+	initFrame := map[string]any{
 		"type": "system", "subtype": "init", "session_id": session, "model": model,
-		"mcp_servers":    []map[string]string{{"name": "verdi-context", "status": "connected"}},
+		"mcp_servers":    []map[string]string{{"name": "vatc", "status": "connected"}, {"name": "verdi-context", "status": "connected"}},
 		"cwd":            workspace,
 		"tools":          []string{},
 		"permissionMode": "bypassPermissions", "apiKeySource": "ANTHROPIC_API_KEY",
 		"claude_code_version": version, "slash_commands": []string{}, "output_style": "default",
 		"agents": []string{}, "skills": []string{}, "plugins": []string{}, "uuid": "init-uuid-e2e",
-	}); err != nil {
+	}
+	if unknownMembers {
+		// SI-187: the exact 8 unknown system/init members the real Claude Code
+		// CLI 2.1.261 emits (measured offline by the F12 canary track,
+		// 2026-09-06); values here are synthetic, never the measured bytes.
+		initFrame["analytics_disabled"] = false
+		initFrame["capabilities"] = []string{"interrupt_receipt_v1"}
+		initFrame["fast_mode_disabled_reason"] = "sdk_opt_in_required"
+		initFrame["fast_mode_state"] = "off"
+		initFrame["memory_paths"] = map[string]string{"auto": "/synthetic/memory/"}
+		initFrame["messaging_socket_path"] = "/synthetic/cc.sock"
+		initFrame["product_feedback_disabled"] = false
+		initFrame["terminal_slash_commands"] = []string{"doctor"}
+	}
+	if err := emit(initFrame); err != nil {
 		return err
 	}
-	observed := []string{}
+	if unknownFamilies {
+		// SI-192: the real Claude Code CLI 2.1.261 emits further
+		// informational frame families an ordinary run (F12 canary flight 8,
+		// 2026-09-07 measured system/thinking_tokens right after init, before
+		// the first tool call). The sealed run must tolerate it — no
+		// projection, no digest, no observation of its own — and proceed.
+		if err := emit(map[string]any{"type": "system", "subtype": "thinking_tokens"}); err != nil {
+			return err
+		}
+	}
+	if unknownMembers {
+		// SI-187/SI-188: the real Claude Code CLI 2.1.261's measured
+		// system/api_retry frame carries error as a bare string ("unknown")
+		// beside the one unknown member error_status (measured offline by
+		// the F12 canary track, 2026-09-06). The run proceeds past this
+		// frame to the sealed retry observation.
+		if err := emit(map[string]any{
+			"type": "system", "subtype": "api_retry", "session_id": session,
+			"attempt": 1, "max_retries": 10, "retry_delay_ms": 1, "error_status": nil,
+			"error": "unknown",
+			"uuid":  "retry-uuid-e2e",
+		}); err != nil {
+			return err
+		}
+	}
+	claimed, err := post(claimURL, claimAuthorization, callBody(1, "claim_paths", "{}"))
+	if err != nil {
+		return err
+	}
+	if err := record("claim_paths " + compact(claimed)); err != nil {
+		return err
+	}
+	// A cross token must be refused by the server that did not mint it.
+	crossStatus, err := postStatus(claimURL, authorization, ` + "`" + `{"jsonrpc":"2.0","id":2,"method":"initialize"}` + "`" + `)
+	if err != nil {
+		return err
+	}
+	if err := record(fmt.Sprintf("cross_token %d", crossStatus)); err != nil {
+		return err
+	}
+	reverseStatus, err := postStatus(url, claimAuthorization, ` + "`" + `{"jsonrpc":"2.0","id":3,"method":"initialize"}` + "`" + `)
+	if err != nil {
+		return err
+	}
+	if err := record(fmt.Sprintf("reverse_cross_token %d", reverseStatus)); err != nil {
+		return err
+	}
 	listed, err := post(url, authorization, ` + "`" + `{"jsonrpc":"2.0","id":1,"method":"tools/list"}` + "`" + `)
 	if err != nil {
 		return err
 	}
-	observed = append(observed, "tools/list "+toolNames(listed))
-	plan, err := post(url, authorization, ` + "`" + `{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"get_flight_plan","arguments":{}}}` + "`" + `)
+	if err := record("tools/list " + toolNames(listed)); err != nil {
+		return err
+	}
+	plan, err := post(url, authorization, callBody(2, "get_flight_plan", "{}"))
 	if err != nil {
 		return err
 	}
-	observed = append(observed, "get_flight_plan "+compact(plan))
-	expansion, err := post(url, authorization, ` + "`" + `{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"request_context","arguments":{"ref":"spec/feature-alpha","purpose":"sealed claude witness"}}}` + "`" + `)
+	if err := record("get_flight_plan " + compact(plan)); err != nil {
+		return err
+	}
+	expansion, err := post(url, authorization, callBody(3, "request_context", "{\"ref\":\"spec/feature-alpha\",\"purpose\":\"sealed claude witness\"}"))
 	if err != nil {
 		return err
 	}
-	observed = append(observed, "request_context "+compact(expansion))
+	if err := record("request_context " + compact(expansion)); err != nil {
+		return err
+	}
 	if extraTool != "" {
-		refused, err := post(url, authorization, ` + "`" + `{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"` + "`" + `+extraTool+` + "`" + `","arguments":{}}}` + "`" + `)
+		// The undeclared call is recorded before it is issued, so the fact that
+		// this provider made it is durable. Its refusal frame arrives while the
+		// scoped surface is already raising the terminal that interrupts this
+		// provider, so only that last row races the interruption.
+		if err := record("extra_call " + extraTool); err != nil {
+			return err
+		}
+		refused, err := post(url, authorization, callBody(4, extraTool, "{}"))
 		if err != nil {
 			return err
 		}
-		observed = append(observed, "extra "+compact(refused))
-	}
-	if err := os.WriteFile(toolsPath, []byte(strings.Join(observed, "\n")+"\n"), 0o644); err != nil {
-		return err
+		if err := record("extra " + compact(refused)); err != nil {
+			return err
+		}
 	}
 	if doCommit {
 		if err := providerCommit(); err != nil {
@@ -573,23 +730,66 @@ func run() error {
 	if bigText {
 		text = strings.Repeat("a", 20000)
 	}
+	usage := map[string]any{"input_tokens": 1, "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0, "output_tokens": 1}
+	if multiFrame {
+		// SI-190: the real Claude Code CLI 2.1.261 emits one assistant frame
+		// per content block, every frame of the one message carrying the
+		// same message.id (F12 canary flight 5, 2026-09-07) — a thinking
+		// block (block 0) in its own frame, then the text block (block 1) in
+		// a second frame sharing that id.
+		if err := emit(map[string]any{
+			"type": "assistant", "session_id": session, "uuid": "msg-uuid-e2e-0",
+			"message": map[string]any{
+				"id": "msg_e2e", "type": "message", "role": "assistant", "model": model,
+				"content": []map[string]any{{"type": "thinking", "thinking": "sealed reasoning", "signature": "sig-e2e"}},
+				"usage":   usage,
+			},
+		}); err != nil {
+			return err
+		}
+	}
 	if err := emit(map[string]any{
 		"type": "assistant", "session_id": session, "uuid": "msg-uuid-e2e",
 		"message": map[string]any{
 			"id": "msg_e2e", "type": "message", "role": "assistant", "model": model,
 			"content": []map[string]any{{"type": "text", "text": text}},
-			"usage":   map[string]any{"input_tokens": 1, "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0, "output_tokens": 1},
+			"usage":   usage,
 		},
 	}); err != nil {
 		return err
 	}
-	return emit(map[string]any{
+	if unknownFamilies {
+		// SI-192: a further informational family arriving mid-stream, after
+		// an ACCEPTED assistant frame has already carried the first one
+		// away. This one therefore has to wait for the next accepted
+		// observation of its own — the result frame's — which is the
+		// "carried by a later accepted observation" half of the mechanism,
+		// and is why this arm has two carriers rather than one.
+		if err := emit(map[string]any{"type": "tool_progress"}); err != nil {
+			return err
+		}
+	}
+	resultFrame := map[string]any{
 		"type": "result", "subtype": "success", "is_error": false, "result": "success",
 		"session_id": session, "uuid": "result-uuid-e2e", "duration_ms": 1, "duration_api_ms": 1,
 		"num_turns": 1, "total_cost_usd": 0.0,
 		"usage":              map[string]any{"input_tokens": 1, "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0, "output_tokens": 1},
 		"permission_denials": []any{},
-	})
+	}
+	if unknownMembers {
+		// SI-189: the real Claude Code CLI 2.1.261's result frame
+		// modelUsage.<model> value is its own camelCase shape (bundle
+		// literal, measured offline by the F12 canary track, 2026-09-06);
+		// values here are synthetic, never the measured bytes.
+		resultFrame["modelUsage"] = map[string]any{
+			model: map[string]any{
+				"inputTokens": 1, "outputTokens": 1, "cacheReadInputTokens": 0,
+				"cacheCreationInputTokens": 0, "webSearchRequests": 0, "costUSD": 0.0,
+				"contextWindow": 200000, "maxOutputTokens": 8192,
+			},
+		}
+	}
+	return emit(resultFrame)
 }
 
 func providerCommit() error {
@@ -626,7 +826,13 @@ func emit(frame map[string]any) error {
 	return nil
 }
 
-func mcpTransport(args []string) (string, string, error) {
+type mcpServerConfig struct {
+	Type    string            ` + "`json:\"type\"`" + `
+	URL     string            ` + "`json:\"url\"`" + `
+	Headers map[string]string ` + "`json:\"headers\"`" + `
+}
+
+func mcpTransport(args []string) (map[string]mcpServerConfig, error) {
 	path := ""
 	for i, arg := range args {
 		if arg == "--mcp-config" && i+1 < len(args) {
@@ -634,27 +840,47 @@ func mcpTransport(args []string) (string, string, error) {
 		}
 	}
 	if path == "" {
-		return "", "", fmt.Errorf("argv carries no --mcp-config operand")
+		return nil, fmt.Errorf("argv carries no --mcp-config operand")
 	}
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return "", "", err
+		return nil, err
 	}
 	var document struct {
-		MCPServers map[string]struct {
-			Type    string            ` + "`json:\"type\"`" + `
-			URL     string            ` + "`json:\"url\"`" + `
-			Headers map[string]string ` + "`json:\"headers\"`" + `
-		} ` + "`json:\"mcpServers\"`" + `
+		MCPServers map[string]mcpServerConfig ` + "`json:\"mcpServers\"`" + `
 	}
 	if err := json.Unmarshal(data, &document); err != nil {
-		return "", "", err
+		return nil, err
 	}
-	server, ok := document.MCPServers["verdi-context"]
-	if !ok || len(document.MCPServers) != 1 {
-		return "", "", fmt.Errorf("scoped MCP config does not declare exactly verdi-context: %s", data)
+	if len(document.MCPServers) != 2 {
+		return nil, fmt.Errorf("scoped MCP config does not declare exactly two servers: %s", data)
 	}
-	return server.URL, server.Headers["Authorization"], nil
+	for _, name := range []string{"vatc", "verdi-context"} {
+		server, ok := document.MCPServers[name]
+		if !ok || server.Type != "http" || server.URL == "" || server.Headers["Authorization"] == "" {
+			return nil, fmt.Errorf("scoped MCP config does not declare required server %q: %s", name, data)
+		}
+	}
+	if document.MCPServers["vatc"].Headers["Authorization"] == document.MCPServers["verdi-context"].Headers["Authorization"] {
+		return nil, fmt.Errorf("scoped MCP config reused one capability across both servers: %s", data)
+	}
+	return document.MCPServers, nil
+}
+
+func postStatus(url, authorization, body string) (int, error) {
+	request, err := http.NewRequest(http.MethodPost, url, strings.NewReader(body))
+	if err != nil {
+		return 0, err
+	}
+	request.Header.Set("Authorization", authorization)
+	request.Header.Set("Content-Type", "application/json")
+	response, err := http.DefaultClient.Do(request)
+	if err != nil {
+		return 0, err
+	}
+	defer response.Body.Close()
+	_, _ = io.ReadAll(response.Body)
+	return response.StatusCode, nil
 }
 
 func post(url, authorization, body string) ([]byte, error) {
@@ -670,6 +896,17 @@ func post(url, authorization, body string) ([]byte, error) {
 	}
 	defer response.Body.Close()
 	return io.ReadAll(response.Body)
+}
+
+// callBody builds one tools/call JSON-RPC request body. When metaOnCalls is
+// selected (SI-193) it carries the exact shape the real Claude Code CLI
+// 2.1.261 sends on every tools/call: a top-level _meta member
+// (progressToken: 1) beside name and arguments.
+func callBody(id int, name, argsJSON string) string {
+	if metaOnCalls {
+		return fmt.Sprintf("{\"jsonrpc\":\"2.0\",\"id\":%d,\"method\":\"tools/call\",\"params\":{\"name\":\"%s\",\"arguments\":%s,\"_meta\":{\"progressToken\":1}}}", id, name, argsJSON)
+	}
+	return fmt.Sprintf("{\"jsonrpc\":\"2.0\",\"id\":%d,\"method\":\"tools/call\",\"params\":{\"name\":\"%s\",\"arguments\":%s}}", id, name, argsJSON)
 }
 
 func toolNames(frame []byte) string {
@@ -718,6 +955,11 @@ func buildFakeClaude(t *testing.T, dir string, spec fakeClaudeSpec) string {
 		"__EXTRA__", strconv.Quote(spec.extraTool),
 		"__COMMIT__", strconv.FormatBool(spec.commit),
 		"__BIGTEXT__", strconv.FormatBool(spec.bigText),
+		"__VERSIONSUFFIX__", strconv.FormatBool(spec.versionSuffix),
+		"__UNKNOWNMEMBERS__", strconv.FormatBool(spec.unknownMembers),
+		"__MULTIFRAME__", strconv.FormatBool(spec.multiFrame),
+		"__UNKNOWNFAMILIES__", strconv.FormatBool(spec.unknownFamilies),
+		"__METAONCALLS__", strconv.FormatBool(spec.metaOnCalls),
 	).Replace(fakeClaudeSource)
 	moduleDir := filepath.Join(dir, "fake-claude-src")
 	if err := os.MkdirAll(moduleDir, 0o755); err != nil {
@@ -774,6 +1016,30 @@ type claudeLifecycleOptions struct {
 	// shared flight state therefore moves to the child revision mid-run and
 	// every terminal artifact must bind that revision.
 	approvedContext bool
+	// claudeCodeSuffix makes the fake provider's --version probe line carry
+	// the SI-186 " (Claude Code)" product suffix after the adapter version
+	// instead of the bare version; the sealed launch must still succeed.
+	claudeCodeSuffix bool
+	// unknownMembers makes the fake provider's init and api_retry frames
+	// carry the SI-187 2.1.261-shaped unknown members; the sealed run must
+	// still proceed.
+	unknownMembers bool
+	// multiFrame makes the fake provider emit its one assistant message as
+	// the real Claude Code CLI 2.1.261 does (SI-190): a thinking block and
+	// the text block in two separate frames sharing one message.id, instead
+	// of the single all-in-one-frame assistant message. The sealed run must
+	// still proceed to the same successful lifecycle.
+	multiFrame bool
+	// unknownFamilies makes the fake provider emit the SI-192 2.1.261-shaped
+	// further informational frame families (system/thinking_tokens right
+	// after init, tool_progress mid-stream); the sealed run must tolerate
+	// both and still proceed to the same successful lifecycle.
+	unknownFamilies bool
+	// metaOnCalls makes the fake provider carry the SI-193 2.1.261-shaped
+	// `_meta` member on every tools/call; the sealed run must still proceed
+	// to the same successful lifecycle instead of ending at the first tool
+	// call.
+	metaOnCalls bool
 }
 
 // serveWithAcknowledgedExpansionLedger runs the shared lifecycle controller
@@ -890,6 +1156,7 @@ type claudeLifecycleObservation struct {
 	stdinPath string
 	mcpConfig string
 	outPath   string
+	claim     *fakeClaimMCP
 }
 
 // runClaudeSealedLifecycle drives the built candidate binary through one real
@@ -935,7 +1202,9 @@ func runClaudeSealedLifecycle(t *testing.T, bin string, options claudeLifecycleO
 		version: fixture.request.AdapterVersion, model: claudeE2EModel, session: claudeE2ESession,
 		argvPath: argvPath, envPath: envPath, stdinPath: stdinPath, toolsPath: toolsPath,
 		gitPath: gitPath, workspace: workspacePath, extraTool: options.extraTool, commit: true,
-		bigText: options.oversizedDetail,
+		bigText: options.oversizedDetail, versionSuffix: options.claudeCodeSuffix,
+		unknownMembers: options.unknownMembers, multiFrame: options.multiFrame,
+		unknownFamilies: options.unknownFamilies, metaOnCalls: options.metaOnCalls,
 	})
 	if built != claudePath {
 		t.Fatalf("fake claude built at %q, want the granted argv0 %q", built, claudePath)
@@ -949,9 +1218,10 @@ func runClaudeSealedLifecycle(t *testing.T, bin string, options claudeLifecycleO
 	fake := &sealedLifecycleController{
 		t: t, request: fixture.request, profile: profile,
 		fail: options.failOperation, allowQuarantine: true,
+		// SI-194: a non-proven resolution carries no data item — an honest
+		// owner denying this ref does not fabricate one.
 		resolution: sealedexec.ContextResolution{
 			Verification: sealedexec.Verification{State: contextcompile.ResolutionUnproven, Failure: sealedexec.FailureUnproven, Witnesses: []string{"fixture context unavailable"}},
-			Data:         fixture.compiled.DataItems[0],
 		},
 	}
 	if options.approvedContext {
@@ -963,6 +1233,12 @@ func runClaudeSealedLifecycle(t *testing.T, bin string, options claudeLifecycleO
 		}
 		fake.epoch = sealedexec.Verification{State: contextcompile.ResolutionProven, Witnesses: []string{}}
 	}
+	// Amendment 003: vatc is ATC-owned, so the harness — not Verdi — hosts it.
+	// Its capability is derived independently from the same canonical request
+	// bytes, which is exactly how the real ATC parent authenticates the caller.
+	claimServer := startFakeClaimMCP(t, fixture.requestBytes)
+	fake.claimMCPURL = claimServer.url
+
 	fake.expansionRoot = options.expansionRoot
 	if options.resume {
 		// The durable state the prepared continuity asserts: the completed prior
@@ -1013,7 +1289,7 @@ func runClaudeSealedLifecycle(t *testing.T, bin string, options claudeLifecycleO
 		t.Fatalf("claude lifecycle controller: %v; observation=%#v", err, observation)
 	}
 	return claudeLifecycleObservation{
-		fixture: fixture, fake: fake, obs: observation,
+		fixture: fixture, fake: fake, obs: observation, claim: claimServer,
 		argv:      readClaudeFixtureLines(argvPath),
 		env:       readClaudeFixtureLines(envPath),
 		tools:     readClaudeFixtureLines(toolsPath),
@@ -1022,6 +1298,97 @@ func runClaudeSealedLifecycle(t *testing.T, bin string, options claudeLifecycleO
 		mcpConfig: filepath.Join(envRoot, "claude-mcp.json"),
 		outPath:   outPath,
 	}
+}
+
+// fakeClaimMCP is the ATC-owned vatc server. It derives the invocation-scoped
+// capability from the same canonical request bytes Verdi uses, so a token minted
+// for a different request — or the Verdi context token — is refused.
+type fakeClaimMCP struct {
+	url    string
+	server *http.Server
+
+	mu        sync.Mutex
+	accepted  []string
+	rejected  int
+	initCount int
+}
+
+func (f *fakeClaimMCP) observed() ([]string, int, int) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.accepted...), f.rejected, f.initCount
+}
+
+func startFakeClaimMCP(t *testing.T, requestBytes []byte) *fakeClaimMCP {
+	t.Helper()
+	requestDigest, err := sealedexec.CanonicalRequestDigest(requestBytes)
+	if err != nil {
+		t.Fatalf("canonical request digest: %v", err)
+	}
+	capability, err := sealedexec.ClaimMCPCapability(requestDigest)
+	if err != nil {
+		t.Fatalf("claim capability: %v", err)
+	}
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen claim MCP: %v", err)
+	}
+	claim := &fakeClaimMCP{url: "http://" + listener.Addr().String() + "/mcp"}
+	authorization := "Bearer " + capability
+	claim.server = &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/mcp" {
+			http.NotFound(w, r)
+			return
+		}
+		if r.Header.Get("Authorization") != authorization {
+			claim.mu.Lock()
+			claim.rejected++
+			claim.mu.Unlock()
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		var frame struct {
+			ID     any    `json:"id"`
+			Method string `json:"method"`
+			Params struct {
+				Name string `json:"name"`
+			} `json:"params"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&frame); err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		claim.mu.Lock()
+		switch frame.Method {
+		case "initialize":
+			claim.initCount++
+		case "tools/call":
+			claim.accepted = append(claim.accepted, frame.Params.Name)
+		}
+		claim.mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		switch frame.Method {
+		case "initialize":
+			fmt.Fprintf(w, `{"jsonrpc":"2.0","id":%v,"result":{"protocolVersion":"2024-11-05","serverInfo":{"name":"vatc","version":"1"}}}`, frame.ID)
+		case "tools/list":
+			fmt.Fprintf(w, `{"jsonrpc":"2.0","id":%v,"result":{"tools":[{"name":"claim_paths"}]}}`, frame.ID)
+		case "tools/call":
+			if frame.Params.Name != "claim_paths" {
+				fmt.Fprintf(w, `{"jsonrpc":"2.0","id":%v,"error":{"code":-32601,"message":"unknown tool"}}`, frame.ID)
+				return
+			}
+			fmt.Fprintf(w, `{"jsonrpc":"2.0","id":%v,"result":{"content":[{"type":"text","text":"{\"kind\":\"claim-recorded\"}"}]}}`, frame.ID)
+		default:
+			fmt.Fprintf(w, `{"jsonrpc":"2.0","id":%v,"error":{"code":-32601,"message":"unknown method"}}`, frame.ID)
+		}
+	})}
+	go func() { _ = claim.server.Serve(listener) }()
+	t.Cleanup(func() {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		_ = claim.server.Shutdown(shutdownCtx)
+	})
+	return claim
 }
 
 // claudeResumeCheckpoint is the durable state the prepared continuity asserts.
@@ -1128,6 +1495,146 @@ func TestClaudeBuiltBinaryLifecycle_Behavioral(t *testing.T) {
 		assertClaudeChildRevisionBinding(t, run)
 	})
 
+	// SI-186: Amendment 002 §3 (as annotated 2026-09-06) also accepts a probe
+	// line carrying the real Claude Code CLI's exact product suffix; the
+	// sealed launch must proceed identically to the bare-form probe above.
+	t.Run("sealed_start_accepts_the_claude_code_suffixed_version_probe", func(t *testing.T) {
+		run := runClaudeSealedLifecycle(t, bin, claudeLifecycleOptions{claudeCodeSuffix: true})
+		assertClaudeSuccessfulLifecycle(t, run)
+	})
+
+	// SI-187: the real Claude Code CLI 2.1.261 emits system/init and
+	// system/api_retry members Amendment 002 §5's v1 tables do not list
+	// (measured offline by the F12 canary track, 2026-09-06). The sealed run
+	// must tolerate them, record their exact sorted dotted paths in the
+	// acknowledged event stream, and proceed to the same successful
+	// lifecycle. Tolerance alone is not the contract: §I-108 requires the
+	// disclosure, so the recorded details are asserted, not only the exit.
+	t.Run("sealed_start_tolerates_the_2_1_261_unknown_member_frames", func(t *testing.T) {
+		run := runClaudeSealedLifecycle(t, bin, claudeLifecycleOptions{unknownMembers: true})
+		assertClaudeSuccessfulLifecycle(t, run)
+		if countEventKindInFixture(run.fake.events, contextevent.KindRetry) == 0 {
+			t.Fatalf("unknown-member arm should still produce a retry event; kinds = %v", sealedEventKinds(run.fake.events))
+		}
+		const wantInit = `"unknown-foreign-member":["analytics_disabled","capabilities",` +
+			`"fast_mode_disabled_reason","fast_mode_state","memory_paths","messaging_socket_path",` +
+			`"product_feedback_disabled","terminal_slash_commands"]`
+		const wantRetry = `"unknown-foreign-member":["error_status"]`
+		var initDisclosed, retryDisclosed bool
+		for _, event := range run.fake.events {
+			detail := eventDetail(event)
+			if detail == nil {
+				continue
+			}
+			if bytes.Contains(detail.RedactedJSON, []byte(wantInit)) {
+				initDisclosed = true
+			}
+			if bytes.Contains(detail.RedactedJSON, []byte(wantRetry)) {
+				retryDisclosed = true
+			}
+		}
+		if !initDisclosed || !retryDisclosed {
+			t.Fatalf("acknowledged details disclosed init=%v retry=%v, want both; details = %s",
+				initDisclosed, retryDisclosed, sealedEventDetails(run.fake.events))
+		}
+	})
+
+	// SI-190: the real Claude Code CLI 2.1.261 emits one assistant frame per
+	// content block, every frame of the one message carrying the same
+	// message.id (F12 canary flight 5, 2026-09-07). The sealed run must
+	// still complete, continuing the block index across the two frames
+	// rather than refusing the second as a duplicate message id.
+	t.Run("sealed_start_accepts_the_2_1_261_multi_frame_assistant_message", func(t *testing.T) {
+		run := runClaudeSealedLifecycle(t, bin, claudeLifecycleOptions{multiFrame: true})
+		assertClaudeSuccessfulLifecycle(t, run)
+		var thinkingSummaryID, textMessageID string
+		for _, event := range run.fake.events {
+			switch payload := event.Payload.(type) {
+			case *contextevent.ProviderSummaryPayload:
+				if strings.Contains(string(payload.Detail.RedactedJSON), `"content_type":"thinking"`) {
+					thinkingSummaryID = payload.SummaryID
+				}
+			case *contextevent.ProviderMessagePayload:
+				textMessageID = payload.MessageID
+			}
+		}
+		if thinkingSummaryID != "msg_e2e:0" {
+			t.Fatalf("multi-frame thinking summary id = %q, want msg_e2e:0; details = %s", thinkingSummaryID, sealedEventDetails(run.fake.events))
+		}
+		if textMessageID != "msg_e2e:1" {
+			t.Fatalf("multi-frame text message id = %q, want msg_e2e:1; details = %s", textMessageID, sealedEventDetails(run.fake.events))
+		}
+	})
+
+	// SI-192: the real Claude Code CLI 2.1.261 emits further informational
+	// frame families in an ordinary run — system/thinking_tokens right after
+	// init, before the first tool call (the exact shape that interrupted the
+	// F12 canary's eighth flight), and tool_progress mid-stream. The sealed
+	// run must tolerate both — no projection, no digest, no observation of
+	// their own — record each family once in the acknowledged event stream,
+	// and still complete to its result.
+	//
+	// The two families arrive on either side of the assistant frame, so each
+	// is carried by a DIFFERENT accepted observation: the first rides the
+	// assistant frame that follows it, and the second has to wait for the
+	// result frame's own summary. Two carriers, asserted separately, are what
+	// exercise the "queued for whichever accepted observation the run
+	// produces next" half of the mechanism end to end.
+	t.Run("sealed_start_tolerates_the_2_1_261_unknown_family_frames", func(t *testing.T) {
+		run := runClaudeSealedLifecycle(t, bin, claudeLifecycleOptions{unknownFamilies: true})
+		assertClaudeSuccessfulLifecycle(t, run)
+		const wantFirst = `"unknown-foreign-family":["system/thinking_tokens"]`
+		const wantSecond = `"unknown-foreign-family":["tool_progress"]`
+		firstCarrier, secondCarrier := -1, -1
+		for i, event := range run.fake.events {
+			detail := eventDetail(event)
+			if detail == nil {
+				continue
+			}
+			if bytes.Contains(detail.RedactedJSON, []byte(wantFirst)) {
+				firstCarrier = i
+			}
+			if bytes.Contains(detail.RedactedJSON, []byte(wantSecond)) {
+				secondCarrier = i
+			}
+		}
+		if firstCarrier < 0 {
+			t.Fatalf("acknowledged details never disclosed %s; details = %s", wantFirst, sealedEventDetails(run.fake.events))
+		}
+		if secondCarrier < 0 {
+			t.Fatalf("acknowledged details never disclosed %s; details = %s", wantSecond, sealedEventDetails(run.fake.events))
+		}
+		if firstCarrier >= secondCarrier {
+			t.Fatalf("family carriers = events %d and %d, want two distinct carriers in arrival order; details = %s",
+				firstCarrier, secondCarrier, sealedEventDetails(run.fake.events))
+		}
+	})
+
+	// SI-193: the real Claude Code CLI 2.1.261 sends a top-level `_meta`
+	// member (progressToken) beside `name`/`arguments` on EVERY tools/call —
+	// the MCP SDK's request() adds params._meta.progressToken whenever
+	// onprogress is supplied (F12 canary track, 2026-09-07). The sealed run
+	// must tolerate it on every scoped tool call — claim_paths,
+	// get_flight_plan, and request_context alike — and still complete to
+	// its result, instead of ending at the first tool call.
+	t.Run("sealed_start_tolerates_the_2_1_261_progress_meta_member", func(t *testing.T) {
+		run := runClaudeSealedLifecycle(t, bin, claudeLifecycleOptions{metaOnCalls: true})
+		assertClaudeSuccessfulLifecycle(t, run)
+		assertClaudeDurableScopedPrelude(t, run)
+	})
+
+	// Amendment 003: every sealed session resolves exactly one ATC-owned claim
+	// registration over FD 3 and hands the provider exactly two required
+	// registrations, neither of which leaks its capability or bearer.
+	t.Run("amendment_003_resolves_and_projects_both_required_registrations", func(t *testing.T) {
+		run := runClaudeSealedLifecycle(t, bin, claudeLifecycleOptions{approvedContext: true})
+		assertClaudeSuccessfulLifecycle(t, run)
+		if got := countControllerOperation(run.fake.calls, sealedexec.ControllerOperation("resolve-claim-mcp")); got != 1 {
+			t.Fatalf("resolve-claim-mcp calls = %d, want exactly one", got)
+		}
+		assertClaudeDualRegistrationWitness(t, run)
+	})
+
 	// Amendment 002 §9 requires real built sealed-resume evidence, so this row
 	// drives the resume arm itself: --out is only an orthogonal choice of public
 	// output channel and never the thing that distinguishes resume from start.
@@ -1194,8 +1701,23 @@ func TestClaudeBuiltBinaryLifecycle_Behavioral(t *testing.T) {
 	// operational with no completion or receipt.
 	t.Run("undeclared_scoped_tool_ends_the_run_operationally", func(t *testing.T) {
 		run := runClaudeSealedLifecycle(t, bin, claudeLifecycleOptions{extraTool: "not_a_scoped_tool"})
-		if len(run.tools) != 4 || !strings.Contains(run.tools[3], "unknown scoped tool") {
-			t.Fatalf("undeclared scoped observations = %#v", run.tools)
+		// Both required handshakes and every declared-catalogue call are durably
+		// recorded before the undeclared call is issued, and the undeclared call
+		// itself is recorded before it is sent. Those nine rows are proof.
+		assertClaudeDurableScopedPrelude(t, run)
+		if len(run.tools) < 9 || run.tools[8] != "extra_call not_a_scoped_tool" {
+			t.Fatalf("undeclared scoped observations = %#v; observation=%#v", run.tools, run.obs)
+		}
+		// The refusal frame is the one row that races the parent's interruption:
+		// the scoped surface answers `isError` and raises the terminal that kills
+		// this provider in the same instant. It is asserted exactly when the
+		// provider durably recorded it and never invented when it did not, and no
+		// row may follow it either way.
+		if len(run.tools) > 10 {
+			t.Fatalf("provider recorded %d rows past the undeclared call = %#v, want at most its refusal", len(run.tools)-9, run.tools)
+		}
+		if len(run.tools) == 10 && !strings.Contains(run.tools[9], "unknown scoped tool") {
+			t.Fatalf("undeclared scoped refusal = %q, want the scoped surface's refusal", run.tools[9])
 		}
 		if run.obs.exitCode != 2 || run.obs.stdout != "" {
 			t.Fatalf("undeclared scoped tool run = %#v, want the operational terminal", run.obs)
@@ -1226,6 +1748,32 @@ func TestClaudeBuiltBinaryLifecycle_Behavioral(t *testing.T) {
 			t.Fatalf("recorder-append calls before classification = %d, want 0", got)
 		}
 	})
+}
+
+// assertClaudeDurableScopedPrelude proves the eight scoped observations every
+// launched provider records before it can reach any further tool call:
+// Amendment 003's two required initialize handshakes first, then the ATC-owned
+// claim answered on its own server, each server refusing the other's
+// capability, and only then useful work against the Verdi-owned catalogue.
+//
+// Every one of these rows is appended by a write that returned before the next
+// request was issued, so they are durable: a later parent interruption can
+// neither erase nor truncate them, and an empty or short record is a real
+// provider failure rather than a recording race.
+func assertClaudeDurableScopedPrelude(t *testing.T, run claudeLifecycleObservation) {
+	t.Helper()
+	wantPrefix := []string{"initialize vatc", "initialize verdi-context"}
+	if len(run.tools) < 8 || !reflect.DeepEqual(run.tools[:2], wantPrefix) ||
+		!strings.HasPrefix(run.tools[2], "claim_paths ") || run.tools[3] != "cross_token 401" ||
+		run.tools[4] != "reverse_cross_token 401" || run.tools[5] != "tools/list get_flight_plan,request_context" {
+		t.Fatalf("provider scoped MCP observations = %#v", run.tools)
+	}
+	if !strings.HasPrefix(run.tools[6], "get_flight_plan ") || !strings.Contains(run.tools[6], run.fixture.request.ManifestDigest) {
+		t.Fatalf("get_flight_plan observation = %q", run.tools[6])
+	}
+	if !strings.HasPrefix(run.tools[7], "request_context ") {
+		t.Fatalf("request_context observation = %q", run.tools[7])
+	}
 }
 
 // assertClaudeAssemblySurface proves the public Claude assembly reached adapter
@@ -1291,17 +1839,7 @@ func assertClaudeAssemblySurface(t *testing.T, run claudeLifecycleObservation) {
 		}
 	}
 
-	// The provider exercised both declared scoped tools over the parent-hosted
-	// loopback HTTP MCP surface named by its own configuration operand.
-	if len(run.tools) < 3 || run.tools[0] != "tools/list get_flight_plan,request_context" {
-		t.Fatalf("provider scoped MCP observations = %#v", run.tools)
-	}
-	if !strings.HasPrefix(run.tools[1], "get_flight_plan ") || !strings.Contains(run.tools[1], run.fixture.request.ManifestDigest) {
-		t.Fatalf("get_flight_plan observation = %q", run.tools[1])
-	}
-	if !strings.HasPrefix(run.tools[2], "request_context ") {
-		t.Fatalf("request_context observation = %q", run.tools[2])
-	}
+	assertClaudeDurableScopedPrelude(t, run)
 
 	// Exactly one typed stdin line: the Amendment 002 §4 user envelope carrying
 	// the sealed provider input under its fixed marker.
@@ -1355,6 +1893,66 @@ func assertClaudeAssemblySurface(t *testing.T, run claudeLifecycleObservation) {
 // `--resume S` operand, the controller verified that one provider session both
 // before launch and on the live re-check, and Amendment 002 §7's acknowledged
 // prefix is `resume` followed by `adapter-start` continuing the checkpoint.
+// assertClaudeDualRegistrationWitness proves the provider completed exactly one
+// required initialize handshake against each of the two registrations before any
+// useful work, and that no authorization value reached durable or public
+// evidence.
+func assertClaudeDualRegistrationWitness(t *testing.T, run claudeLifecycleObservation) {
+	t.Helper()
+	firstUseful := -1
+	handshakes := map[string]int{}
+	for i, row := range run.tools {
+		name, isHandshake := strings.CutPrefix(row, "initialize ")
+		if !isHandshake {
+			if firstUseful < 0 {
+				firstUseful = i
+			}
+			continue
+		}
+		if _, duplicate := handshakes[name]; duplicate {
+			t.Fatalf("provider repeated the initialize handshake for %q: %v", name, run.tools)
+		}
+		handshakes[name] = i
+	}
+	if len(handshakes) != 2 {
+		t.Fatalf("provider completed %d initialize handshakes, want exactly two: %v", len(handshakes), run.tools)
+	}
+	for _, name := range []string{"vatc", "verdi-context"} {
+		index, ok := handshakes[name]
+		if !ok {
+			t.Fatalf("provider never completed a required initialize handshake for %q: %v", name, run.tools)
+		}
+		if firstUseful >= 0 && index > firstUseful {
+			t.Fatalf("initialize for %q followed useful work at row %d: %v", name, firstUseful, run.tools)
+		}
+	}
+	// The ATC-owned parent service independently observed exactly one successful
+	// initialize handshake and one claim call on its own capability, and refused
+	// the Verdi context capability presented to it.
+	accepted, rejected, inits := run.claim.observed()
+	if inits != 1 {
+		t.Fatalf("claim server observed %d initialize handshakes, want exactly one", inits)
+	}
+	if !reflect.DeepEqual(accepted, []string{"claim_paths"}) {
+		t.Fatalf("claim server tool calls = %v, want exactly [claim_paths]", accepted)
+	}
+	if rejected != 1 {
+		t.Fatalf("claim server rejected %d cross-capability requests, want exactly one", rejected)
+	}
+	for _, event := range run.fake.events {
+		encoded, err := contextevent.EncodeEvent(event)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if bytes.Contains(encoded, []byte("Bearer ")) {
+			t.Fatalf("acknowledged event carried an authorization value: %s", encoded)
+		}
+	}
+	if strings.Contains(run.obs.stdout, "Bearer ") || strings.Contains(run.obs.stderr, "Bearer ") {
+		t.Fatalf("public output carried an authorization value: %#v", run.obs)
+	}
+}
+
 func assertClaudeResumeWitness(t *testing.T, run claudeLifecycleObservation) {
 	t.Helper()
 	request := run.fixture.request
@@ -1419,6 +2017,20 @@ func assertClaudeAcknowledgedPrefix(t *testing.T, events []contextevent.Event, w
 
 // eventDetail returns the acknowledged event's detail, or nil for the kinds
 // that carry none. It fails closed: an unrecognized payload has no detail.
+// sealedEventDetails renders every acknowledged event's inline detail bytes,
+// so a failing assertion can show what the recorded stream actually carried.
+func sealedEventDetails(events []contextevent.Event) string {
+	var parts []string
+	for _, event := range events {
+		detail := eventDetail(event)
+		if detail == nil {
+			continue
+		}
+		parts = append(parts, fmt.Sprintf("%s=%s", event.Kind, detail.RedactedJSON))
+	}
+	return strings.Join(parts, " ")
+}
+
 func eventDetail(event contextevent.Event) *contextevent.Detail {
 	switch payload := event.Payload.(type) {
 	case *contextevent.ProviderSummaryPayload:

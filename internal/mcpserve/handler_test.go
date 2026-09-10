@@ -99,6 +99,14 @@ func TestServeHandlerProtocolAndHandlerFailures(t *testing.T) {
 	}
 }
 
+// TestServeHandlerRejectsMalformedEnvelopeBeforeToolDispatch no longer
+// includes an "unknown envelope field" row: that expectation was 548d1c0f's
+// own uncited posture ("Wire sealed execution commands"), not an
+// independently-ratified rule, and it is exactly what SI-193 F1 found
+// defective one level up from the tools/call params envelope. Tolerating an
+// unknown top-level frame member is now covered, and proven unobservable,
+// by TestServeHandlerToolsCallParamsToleranceReachesTheHandlerUnobserved's
+// "an unknown top-level frame member" row.
 func TestServeHandlerRejectsMalformedEnvelopeBeforeToolDispatch(t *testing.T) {
 	mutatingParams := `"params":{"name":"request_context","arguments":{"ref":"spec/extra","purpose":"needed"}}`
 	for _, test := range []struct {
@@ -107,7 +115,6 @@ func TestServeHandlerRejectsMalformedEnvelopeBeforeToolDispatch(t *testing.T) {
 	}{
 		{name: "missing jsonrpc", input: `{"id":1,"method":"tools/call",` + mutatingParams + `}`},
 		{name: "wrong jsonrpc", input: `{"jsonrpc":"1.0","id":1,"method":"tools/call",` + mutatingParams + `}`},
-		{name: "unknown envelope field", input: `{"jsonrpc":"2.0","id":1,"method":"tools/call","unexpected":true,` + mutatingParams + `}`},
 		{name: "duplicate envelope field", input: `{"jsonrpc":"2.0","id":1,"method":"tools/list","method":"tools/call",` + mutatingParams + `}`},
 		{name: "duplicate call name", input: `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"get_flight_plan","name":"request_context","arguments":{"ref":"spec/extra","purpose":"needed"}}}`},
 		{name: "duplicate call arguments", input: `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"request_context","arguments":{},"arguments":{"ref":"spec/extra","purpose":"needed"}}}`},
@@ -125,6 +132,178 @@ func TestServeHandlerRejectsMalformedEnvelopeBeforeToolDispatch(t *testing.T) {
 			}
 			if !strings.Contains(output.String(), `"error"`) {
 				t.Fatalf("malformed request frame = %q, want protocol error", output.String())
+			}
+		})
+	}
+}
+
+// TestDecodeHandlerCallToleratesUnknownParamsMembers is SI-193's core
+// witness at the decode function itself: Claude Code 2.1.261 sends a
+// `_meta` member (e.g. `{"progressToken":1}`) beside `name`/`arguments` on
+// every tools/call — MCP itself defines `_meta` on every request's params —
+// and spec/fail-loud dc-2 keeps a JSON-RPC/MCP protocol envelope TOLERANT
+// of unknown members, matching this package's own decode.go doc comment and
+// server.go's callTool (bare json.Unmarshal on the identical params shape).
+// Before the fix (decodeHandlerCall's now-removed DisallowUnknownFields
+// step), every "tolerates" case below failed with `json: unknown field
+// "_meta"` (or "x"), which is exactly the RED this table proves and pins
+// against regression. Table-driven per co-1: the tolerated cases sit beside the
+// still-refused ones (duplicate keys, trailing data, a wrong-typed name) so
+// the exact boundary of the tolerance is visible in one place.
+func TestDecodeHandlerCallToleratesUnknownParamsMembers(t *testing.T) {
+	for _, test := range []struct {
+		name       string
+		data       string
+		wantErr    bool
+		wantErrSub string
+		wantName   string
+		wantArgs   string
+	}{
+		{
+			name:     "tolerates the MCP _meta member",
+			data:     `{"name":"request_context","arguments":{"ref":"spec/story-alpha","purpose":"p"},"_meta":{"progressToken":1}}`,
+			wantName: "request_context",
+			wantArgs: `{"ref":"spec/story-alpha","purpose":"p"}`,
+		},
+		{
+			name:     "tolerates an unrelated unknown member",
+			data:     `{"name":"get_flight_plan","arguments":{},"x":1}`,
+			wantName: "get_flight_plan",
+			wantArgs: `{}`,
+		},
+		{
+			name:       "still refuses a duplicate name key",
+			data:       `{"name":"a","arguments":{},"name":"b"}`,
+			wantErr:    true,
+			wantErrSub: "duplicate",
+		},
+		{
+			name:       "still refuses a duplicate arguments key",
+			data:       `{"name":"a","arguments":{},"arguments":{"x":1}}`,
+			wantErr:    true,
+			wantErrSub: "duplicate",
+		},
+		{
+			name:    "still refuses trailing data",
+			data:    `{"name":"a","arguments":{}}{}`,
+			wantErr: true,
+		},
+		{
+			name:    "still refuses a wrong-typed name",
+			data:    `{"name":1,"arguments":{}}`,
+			wantErr: true,
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			var call struct {
+				Name      string          `json:"name"`
+				Arguments json.RawMessage `json:"arguments"`
+			}
+			err := decodeHandlerCall([]byte(test.data), &call)
+			if test.wantErr {
+				if err == nil {
+					t.Fatalf("decodeHandlerCall(%s) = nil error, want refusal", test.data)
+				}
+				if test.wantErrSub != "" && !strings.Contains(err.Error(), test.wantErrSub) {
+					t.Fatalf("decodeHandlerCall(%s) error = %q, want substring %q", test.data, err.Error(), test.wantErrSub)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("decodeHandlerCall(%s): unexpected error: %v", test.data, err)
+			}
+			if call.Name != test.wantName || string(call.Arguments) != test.wantArgs {
+				t.Fatalf("decodeHandlerCall(%s) = name %q arguments %s, want name %q arguments %s", test.data, call.Name, call.Arguments, test.wantName, test.wantArgs)
+			}
+		})
+	}
+}
+
+// TestServeHandlerToolsCallParamsToleranceReachesTheHandlerUnobserved proves
+// the SI-193 tolerance end to end over the real framing (ServeHandler, not
+// just the decode function): a tolerated unknown member reaches
+// handler.Call with EXACTLY the enclosed `arguments` bytes and is not
+// observable anywhere in the written frame — no projection, no digest, no
+// log — while `name` and `arguments` remain required even when `_meta` is
+// present alongside them. leakTerms is asserted absent from the output on
+// EVERY row, success or refusal (F1/F3): a tolerated member must never
+// surface, and a refusal must not accidentally echo it either.
+func TestServeHandlerToolsCallParamsToleranceReachesTheHandlerUnobserved(t *testing.T) {
+	for _, test := range []struct {
+		name        string
+		input       string
+		wantSuccess bool
+		wantName    string
+		wantArgs    string
+		leakTerms   []string
+	}{
+		{
+			name:        "the MCP _meta member",
+			input:       `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"request_context","arguments":{"ref":"spec/story-alpha","purpose":"p"},"_meta":{"progressToken":1}}}`,
+			wantSuccess: true,
+			wantName:    "request_context",
+			wantArgs:    `{"ref":"spec/story-alpha","purpose":"p"}`,
+			leakTerms:   []string{"_meta", "progressToken"},
+		},
+		{
+			name:        "an unrelated unknown member",
+			input:       `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"get_flight_plan","arguments":{},"x":1}}`,
+			wantSuccess: true,
+			wantName:    "get_flight_plan",
+			wantArgs:    `{}`,
+			leakTerms:   []string{`"x":1`},
+		},
+		{
+			name:      "name and arguments stay required beside _meta",
+			input:     `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"_meta":{"progressToken":1}}}`,
+			leakTerms: []string{"_meta", "progressToken"},
+		},
+		{
+			// F1: decodeHandlerRequest (the outer rpcRequest frame, not just
+			// decodeHandlerCall's params) is now tolerant too — an unknown
+			// top-level FRAME member, sibling to jsonrpc/id/method/params
+			// rather than nested in params, must reach the tool call and
+			// never surface.
+			name:        "an unknown top-level frame member",
+			input:       `{"jsonrpc":"2.0","id":1,"method":"tools/call","unexpected":true,"params":{"name":"get_flight_plan","arguments":{}}}`,
+			wantSuccess: true,
+			wantName:    "get_flight_plan",
+			wantArgs:    `{}`,
+			leakTerms:   []string{"unexpected"},
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			handler := &cannedToolHandler{result: HandlerCallResult{Text: "installed"}}
+			var output bytes.Buffer
+			terminal, err := ServeHandler(context.Background(), strings.NewReader(test.input+"\n"), &output, handler)
+			if err != nil {
+				t.Fatalf("ServeHandler: %v", err)
+			}
+			for _, term := range test.leakTerms {
+				if strings.Contains(output.String(), term) {
+					t.Fatalf("response frame observed the tolerated member (%q): %s", term, output.String())
+				}
+			}
+			if test.wantSuccess {
+				if terminal != nil {
+					t.Fatalf("terminal = %#v, want nil (run continues)", terminal)
+				}
+				if handler.calls != 1 || handler.lastName != test.wantName {
+					t.Fatalf("handler calls/name = %d/%q, want exactly one %q call", handler.calls, handler.lastName, test.wantName)
+				}
+				if string(handler.lastArguments) != test.wantArgs {
+					t.Fatalf("handler arguments = %s, want exactly %s (the tolerated member must not bleed in)", handler.lastArguments, test.wantArgs)
+				}
+				return
+			}
+			if terminal == nil || terminal.ExitCode != 2 {
+				t.Fatalf("terminal = %#v, want operational termination", terminal)
+			}
+			if handler.calls != 0 {
+				t.Fatalf("handler calls = %d, want 0 (name/arguments still required)", handler.calls)
+			}
+			if !strings.Contains(output.String(), "name and arguments are required") {
+				t.Fatalf("response = %s, want the name/arguments-required refusal", output.String())
 			}
 		})
 	}

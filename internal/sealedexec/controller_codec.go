@@ -3,6 +3,7 @@ package sealedexec
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"path/filepath"
@@ -206,7 +207,10 @@ type contextResolutionWire struct {
 	Failure   FailureCode               `json:"failure"`
 	Witnesses []string                  `json:"witnesses"`
 	Ref       string                    `json:"ref"`
-	Data      json.RawMessage           `json:"data"`
+	// Data is present (and validated as a full verdi.context-data-item/v1
+	// document) only when State is proven; a non-proven resolution omits
+	// the member entirely rather than nulling it (SI-194).
+	Data json.RawMessage `json:"data,omitempty"`
 }
 
 type flightStateSnapshotWire struct {
@@ -241,6 +245,9 @@ type expansionInstallWire struct {
 	ExpansionDigest      string                `json:"expansion_digest"`
 	ExpansionRoot        string                `json:"expansion_root"`
 	TerminalAck          contextevent.EventAck `json:"terminal_ack"`
+	Ref                  string                `json:"ref"`
+	Purpose              string                `json:"purpose"`
+	Data                 json.RawMessage       `json:"data"`
 }
 
 type receiptInputsQueryWire struct {
@@ -285,6 +292,91 @@ type receiptVerificationAuthorityWire struct {
 }
 
 // EncodeControllerCall validates and canonically encodes one typed call.
+type claimMCPQueryWire struct {
+	RequestDigest string `json:"request_digest"`
+	Schema        string `json:"schema"`
+}
+
+type claimMCPRegistrationWire struct {
+	Name          string   `json:"name"`
+	RequestDigest string   `json:"request_digest"`
+	Schema        string   `json:"schema"`
+	Tools         []string `json:"tools"`
+	Type          string   `json:"type"`
+	URL           string   `json:"url"`
+}
+
+const (
+	claimMCPQuerySchemaID        = "verdi.claim-mcp-query/v1"
+	claimMCPRegistrationSchemaID = "verdi.claim-mcp-registration/v1"
+)
+
+func claimMCPQueryToWire(query ClaimMCPQuery) (claimMCPQueryWire, error) {
+	if !scopedMCPDigestRE.MatchString(query.RequestDigest) {
+		return claimMCPQueryWire{}, errors.New("sealedexec: claim MCP query requires a canonical request digest")
+	}
+	return claimMCPQueryWire{RequestDigest: query.RequestDigest, Schema: claimMCPQuerySchemaID}, nil
+}
+
+func claimMCPQueryFromWire(wire claimMCPQueryWire) (ClaimMCPQuery, error) {
+	if wire.Schema != claimMCPQuerySchemaID || !scopedMCPDigestRE.MatchString(wire.RequestDigest) {
+		return ClaimMCPQuery{}, errors.New("sealedexec: claim MCP query is not a canonical query row")
+	}
+	return ClaimMCPQuery{RequestDigest: wire.RequestDigest}, nil
+}
+
+// validateClaimMCPRegistration enforces the fixed name, transport, catalogue,
+// loopback origin, and request binding. Anything else fails closed.
+func validateClaimMCPRegistration(registration ClaimMCPRegistration) error {
+	if registration.Name != RequiredClaimMCPName {
+		return fmt.Errorf("sealedexec: claim MCP registration name %q, want %q", registration.Name, RequiredClaimMCPName)
+	}
+	if registration.Type != RequiredMCPType {
+		return fmt.Errorf("sealedexec: claim MCP registration type %q, want %q", registration.Type, RequiredMCPType)
+	}
+	if err := ValidateRequiredMCPURL(registration.URL); err != nil {
+		return fmt.Errorf("sealedexec: claim MCP registration: %w", err)
+	}
+	want := requiredClaimTools()
+	if len(registration.Tools) != len(want) {
+		return fmt.Errorf("sealedexec: claim MCP registration declares %d tools, want %d", len(registration.Tools), len(want))
+	}
+	for i, tool := range want {
+		if registration.Tools[i] != tool {
+			return fmt.Errorf("sealedexec: claim MCP registration tool %d = %q, want %q", i, registration.Tools[i], tool)
+		}
+	}
+	if !scopedMCPDigestRE.MatchString(registration.RequestDigest) {
+		return errors.New("sealedexec: claim MCP registration requires a canonical request digest")
+	}
+	return nil
+}
+
+func claimMCPRegistrationToWire(registration ClaimMCPRegistration) (claimMCPRegistrationWire, error) {
+	if err := validateClaimMCPRegistration(registration); err != nil {
+		return claimMCPRegistrationWire{}, err
+	}
+	return claimMCPRegistrationWire{
+		Name: registration.Name, RequestDigest: registration.RequestDigest,
+		Schema: claimMCPRegistrationSchemaID, Tools: append([]string(nil), registration.Tools...),
+		Type: registration.Type, URL: registration.URL,
+	}, nil
+}
+
+func claimMCPRegistrationFromWire(wire claimMCPRegistrationWire) (ClaimMCPRegistration, error) {
+	if wire.Schema != claimMCPRegistrationSchemaID {
+		return ClaimMCPRegistration{}, errors.New("sealedexec: claim MCP registration schema is not canonical")
+	}
+	registration := ClaimMCPRegistration{
+		Name: wire.Name, Type: wire.Type, URL: wire.URL,
+		Tools: append([]string(nil), wire.Tools...), RequestDigest: wire.RequestDigest,
+	}
+	if err := validateClaimMCPRegistration(registration); err != nil {
+		return ClaimMCPRegistration{}, err
+	}
+	return registration, nil
+}
+
 func EncodeControllerCall(call ControllerCall) ([]byte, error) {
 	if call.Schema != ControllerCallSchemaID {
 		return nil, fmt.Errorf("sealedexec: controller call schema must be %q", ControllerCallSchemaID)
@@ -723,6 +815,21 @@ func encodeControllerCallPayload(call ControllerCall) (json.RawMessage, error) {
 			Schema string          `json:"schema"`
 			Record json.RawMessage `json:"record"`
 		}{wantSchema, trimFrame(record)})
+	case ControllerOperationResolveClaimMCP:
+		if err := requireOnlyCallArm(call, call.ResolveClaimMCP); err != nil {
+			return nil, err
+		}
+		if call.ResolveClaimMCP.Schema != wantSchema {
+			return nil, operationSchemaError(call.Operation)
+		}
+		query, err := claimMCPQueryToWire(call.ResolveClaimMCP.Query)
+		if err != nil {
+			return nil, err
+		}
+		return marshalControllerPayload(struct {
+			Query  claimMCPQueryWire `json:"query"`
+			Schema string            `json:"schema"`
+		}{query, wantSchema})
 	default:
 		return nil, fmt.Errorf("sealedexec: unknown controller operation %q", call.Operation)
 	}
@@ -1056,6 +1163,22 @@ func decodeControllerCallPayload(raw json.RawMessage, call *ControllerCall) erro
 			return err
 		}
 		call.PersistAbort = ControllerPersistAbortRequest{schema, record}
+	case ControllerOperationResolveClaimMCP:
+		var wire struct {
+			Query  claimMCPQueryWire `json:"query"`
+			Schema string            `json:"schema"`
+		}
+		if err := unmarshalControllerPayload(raw, &wire); err != nil {
+			return err
+		}
+		if wire.Schema != schema {
+			return operationSchemaError(call.Operation)
+		}
+		query, err := claimMCPQueryFromWire(wire.Query)
+		if err != nil {
+			return err
+		}
+		call.ResolveClaimMCP = ControllerResolveClaimMCPRequest{schema, query}
 	default:
 		return fmt.Errorf("sealedexec: unknown controller operation %q", call.Operation)
 	}
@@ -1321,6 +1444,18 @@ func encodeControllerSuccessPayload(result ControllerResult) (json.RawMessage, e
 			Schema string          `json:"schema"`
 			Ack    json.RawMessage `json:"ack"`
 		}{wantSchema, ack})
+	case ControllerOperationResolveClaimMCP:
+		if result.ResolveClaimMCP.Schema != wantSchema {
+			return nil, operationSchemaError(result.Operation)
+		}
+		registration, err := claimMCPRegistrationToWire(result.ResolveClaimMCP.Registration)
+		if err != nil {
+			return nil, err
+		}
+		return marshalControllerPayload(struct {
+			Registration claimMCPRegistrationWire `json:"registration"`
+			Schema       string                   `json:"schema"`
+		}{registration, wantSchema})
 	default:
 		return nil, fmt.Errorf("sealedexec: unknown controller operation %q", result.Operation)
 	}
@@ -1642,6 +1777,22 @@ func decodeControllerSuccessPayload(raw json.RawMessage, result *ControllerResul
 		case ControllerOperationPersistAbort:
 			result.PersistAbort = ControllerPersistAbortResult{schema, ack}
 		}
+	case ControllerOperationResolveClaimMCP:
+		var wire struct {
+			Registration claimMCPRegistrationWire `json:"registration"`
+			Schema       string                   `json:"schema"`
+		}
+		if err := unmarshalControllerPayload(raw, &wire); err != nil {
+			return err
+		}
+		if wire.Schema != schema {
+			return operationSchemaError(result.Operation)
+		}
+		registration, err := claimMCPRegistrationFromWire(wire.Registration)
+		if err != nil {
+			return err
+		}
+		result.ResolveClaimMCP = ControllerResolveClaimMCPResult{schema, registration}
 	default:
 		return fmt.Errorf("sealedexec: unknown controller operation %q", result.Operation)
 	}
@@ -1779,6 +1930,8 @@ func requireOnlyCallArm(call ControllerCall, selected any) error {
 		want.PersistQuarantine = selected.(ControllerPersistQuarantineRequest)
 	case ControllerOperationPersistAbort:
 		want.PersistAbort = selected.(ControllerPersistAbortRequest)
+	case ControllerOperationResolveClaimMCP:
+		want.ResolveClaimMCP = selected.(ControllerResolveClaimMCPRequest)
 	}
 	if !reflect.DeepEqual(call, want) {
 		return fmt.Errorf("sealedexec: controller call carries wrong or multiple operation payloads")
@@ -1838,6 +1991,8 @@ func controllerSuccessArmsMatch(result ControllerResult) bool {
 		want.PersistQuarantine = result.PersistQuarantine
 	case ControllerOperationPersistAbort:
 		want.PersistAbort = result.PersistAbort
+	case ControllerOperationResolveClaimMCP:
+		want.ResolveClaimMCP = result.ResolveClaimMCP
 	}
 	return reflect.DeepEqual(result, want)
 }
@@ -2502,6 +2657,14 @@ func validateContextQuery(q ContextQuery) error {
 	return requireText("context ref", q.Ref)
 }
 
+// contextResolutionToWire encodes r. Data is required and validated as a
+// full data-item document only when r.State is proven; a non-proven
+// resolution must carry no data item at all (its zero value), and the wire
+// then omits the member entirely (SI-194) — a non-proven resolution that
+// carries data, or a proven one that lacks it, is refused by name. The
+// presence gate itself (contextcompile.RequireDataOnlyWhenProven) is the
+// one helper this rule shares, textually identical, with
+// internal/contextowner's validContextResolution.
 func contextResolutionToWire(r ContextResolution) (contextResolutionWire, error) {
 	if err := validateControllerVerification(r.Verification); err != nil {
 		return contextResolutionWire{}, err
@@ -2509,20 +2672,38 @@ func contextResolutionToWire(r ContextResolution) (contextResolutionWire, error)
 	if err := requireText("context resolution ref", r.Ref); err != nil {
 		return contextResolutionWire{}, err
 	}
+	if err := contextcompile.RequireDataOnlyWhenProven("sealedexec", r.State, r.Data != (contextcompile.DataItem{})); err != nil {
+		return contextResolutionWire{}, err
+	}
+	if r.State != contextcompile.ResolutionProven {
+		return contextResolutionWire{r.State, r.Failure, r.Witnesses, r.Ref, nil}, nil
+	}
 	data, err := contextcompile.EncodeDataItem(r.Data)
 	if err != nil {
 		return contextResolutionWire{}, err
 	}
 	return contextResolutionWire{r.State, r.Failure, r.Witnesses, r.Ref, trimFrame(data)}, nil
 }
+
+// contextResolutionFromWire is contextResolutionToWire's inverse: it
+// requires the data member when (and only when) the decoded state is
+// proven, refusing by name either a proven resolution missing it or a
+// non-proven resolution that carries one — the same rule enforced in the
+// opposite direction.
 func contextResolutionFromWire(w contextResolutionWire) (ContextResolution, error) {
 	v, e := verificationFromWire(verificationWire{w.State, w.Failure, w.Witnesses})
 	if e != nil {
 		return ContextResolution{}, e
 	}
-	data, e := contextcompile.DecodeDataItem(frameNested(w.Data))
-	if e != nil {
-		return ContextResolution{}, e
+	if err := contextcompile.RequireDataOnlyWhenProven("sealedexec", v.State, len(w.Data) != 0); err != nil {
+		return ContextResolution{}, err
+	}
+	var data contextcompile.DataItem
+	if v.State == contextcompile.ResolutionProven {
+		data, e = contextcompile.DecodeDataItem(frameNested(w.Data))
+		if e != nil {
+			return ContextResolution{}, e
+		}
 	}
 	r := ContextResolution{Verification: v, Ref: w.Ref, Data: data}
 	_, e = contextResolutionToWire(r)
@@ -2603,8 +2784,10 @@ func expansionInstallToWire(i ExpansionInstall) (expansionInstallWire, error) {
 	if err := validateExecutionKey(i.Key); err != nil {
 		return expansionInstallWire{}, err
 	}
-	if err := requireText("request_id", i.RequestID); err != nil {
-		return expansionInstallWire{}, err
+	for field, value := range map[string]string{"request_id": i.RequestID, "install ref": i.Ref, "install purpose": i.Purpose} {
+		if err := requireText(field, value); err != nil {
+			return expansionInstallWire{}, err
+		}
 	}
 	if i.ChildRevision != i.ParentRevision+1 {
 		return expansionInstallWire{}, fmt.Errorf("sealedexec: child revision must follow parent")
@@ -2614,14 +2797,44 @@ func expansionInstallToWire(i ExpansionInstall) (expansionInstallWire, error) {
 			return expansionInstallWire{}, err
 		}
 	}
+	// The installed item is carried as its own canonical document, so the
+	// component that owns the data-item grammar validates it. An item that
+	// names a ref must name this row's ref: the row ref stays separate only
+	// because the grammar lets an item omit one, never so the two may differ.
+	data, err := contextcompile.EncodeDataItem(i.Data)
+	if err != nil {
+		return expansionInstallWire{}, err
+	}
+	if i.Data.Ref != nil && *i.Data.Ref != i.Ref {
+		return expansionInstallWire{}, fmt.Errorf("sealedexec: installed data item ref does not match the requested ref")
+	}
 	ack, err := canonicalEventAck(i.TerminalAck)
 	if err != nil {
 		return expansionInstallWire{}, err
 	}
-	return expansionInstallWire{executionKeyToWire(i.Key), i.RequestID, i.ParentRevision, i.ParentManifestDigest, i.ChildRevision, i.ChildManifestDigest, i.ExpansionDigest, i.ExpansionRoot, ack}, nil
+	return expansionInstallWire{
+		Key: executionKeyToWire(i.Key), RequestID: i.RequestID,
+		ParentRevision: i.ParentRevision, ParentManifestDigest: i.ParentManifestDigest,
+		ChildRevision: i.ChildRevision, ChildManifestDigest: i.ChildManifestDigest,
+		ExpansionDigest: i.ExpansionDigest, ExpansionRoot: i.ExpansionRoot,
+		TerminalAck: ack, Ref: i.Ref, Purpose: i.Purpose, Data: trimFrame(data),
+	}, nil
 }
 func expansionInstallFromWire(w expansionInstallWire) (ExpansionInstall, error) {
-	i := ExpansionInstall{executionKeyFromWire(w.Key), w.RequestID, w.ParentRevision, w.ParentManifestDigest, w.ChildRevision, w.ChildManifestDigest, w.ExpansionDigest, w.ExpansionRoot, w.TerminalAck}
+	if len(w.Data) == 0 {
+		return ExpansionInstall{}, fmt.Errorf("sealedexec: installed data item is absent")
+	}
+	data, err := contextcompile.DecodeDataItem(frameNested(w.Data))
+	if err != nil {
+		return ExpansionInstall{}, err
+	}
+	i := ExpansionInstall{
+		Key: executionKeyFromWire(w.Key), RequestID: w.RequestID,
+		ParentRevision: w.ParentRevision, ParentManifestDigest: w.ParentManifestDigest,
+		ChildRevision: w.ChildRevision, ChildManifestDigest: w.ChildManifestDigest,
+		ExpansionDigest: w.ExpansionDigest, ExpansionRoot: w.ExpansionRoot,
+		TerminalAck: w.TerminalAck, Ref: w.Ref, Purpose: w.Purpose, Data: data,
+	}
 	_, e := expansionInstallToWire(i)
 	return i, e
 }
