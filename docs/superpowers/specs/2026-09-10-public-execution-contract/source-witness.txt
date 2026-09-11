@@ -1,0 +1,141 @@
+# Direct public execution contract — source witness
+
+**Status:** Draft amendment accounting, 2026-09-10; no canonical promotion.
+This accompanies the [proposal](2026-09-10-public-execution-contract-design.md).
+Source authority remains in place except for the exact replacements proposed
+below, which take effect only after ratification and the sibling acceptance gate.
+
+Contents: [amendments](#1-named-amendments), [retained sources](#2-retained-authority),
+[operation coverage](#3-operation-and-relation-coverage), [limits](#4-coverage-and-limitations).
+
+## 1. Named amendments
+
+“Bridge” means the
+[2026-09-02 correction](2026-09-02-vatc-f12-controller-owner-bridge-correction.md).
+“Proposal” means the companion design. Verdi workspace PLAN refers to
+`/Users/johnyang/code/verdi-system/PLAN.md`, not this repository's PLAN.
+
+| ID | Source clause | Proposed destination / exact transformation |
+|---|---|---|
+| A01 | Bridge §1: effect-free translation required for production assembly | Proposal §§1–3: public arms go directly over FD3; keep the owner decisions |
+| A02 | Bridge §2: two bridge CLI verbs, arguments, pin, effects, bounds, exits and diagnostics | Proposal §§2, 5–6: preserve every standalone CLI requirement; retire mandatory production invocation only |
+| A03 | Bridge §3.1: decode private payload to public call and bind its SHA-256 | Proposal §2.2: same public call and exact legacy digest preimage, constructed locally from the public arm |
+| A04 | Bridge §3.2: encode public reply, reconstruct request, cross-match, emit private result | Proposal §§2.2–3: preserve standalone command; production validates locally and transmits public result |
+| A05 | Bridge §3.3: publication base, schema substitution, installation v2 and non-proven exception | Proposal §2.1: preserve all arm fields/versions; publish them directly in outer v2 envelopes |
+| A06 | Bridge §3.4: five owners, 22 public arms, locally answered op 23 | Proposal §§1–3: same registry/owners; publish op-23 wrapper exception; remove independent private semantic codec |
+| A07 | Bridge §4 step 1: private request frame and standalone encoding | Proposal §2: v2 frame with public arm, strict validation and local legacy identity preimage |
+| A08 | Bridge §4 step 2: launch pinned decode | Proposal §§1–3: remove launch; public decode is local |
+| A09 | Bridge §4 step 3: decode public call and recompute private digest | Proposal §2.2: construct identical call, recompute frozen preimage |
+| A10 | Bridge §4 step 4: invoke real owner; current controller observes recorder-append before full bridge arm validation | Proposal §3: retain owner action and observer-before-ack; move full arm validation before observation, so malformed arms no longer create recorder rows |
+| A11 | Bridge §4 step 5: encode reply containing exact decoded call | Proposal §2.2: retain as local validation context |
+| A12 | Bridge §4 step 6: launch pinned encode and check private result | Proposal §§2–3: remove launch; ATC independently validates the public result and all 16 published relation branches before success framing; Verdi independently retains its consuming check |
+| A13 | Bridge §4 step 7: wrap private result in sequenced FD3 response | Proposal §2.1: same result/error union and sequence, outer v2 and public success arm |
+| A14 | Bridge §4 subsequent refusal, fact-source and owner-boundary paragraphs | Proposal §§2–3: preserve refusal/no fallback/no payload logging and all decision boundaries; apply later runway correction |
+| A15 | Bridge §5 pieces 1–2 and raw resolver production bridge requirement | Proposal §§3, 6: consolidated public codec and direct controller route; compatibility verbs retained |
+| A16 | Bridge §5 remaining pieces/exclusions and accepted subprocess cost | Proposal §§1, 3, 5: preserve configuration/resolver/owners/exclusions; remove production translation cost, add no helper |
+| A17 | Bridge §6 items 1–7: codec/argv/effects/conformance/owner/live bridge verification | Proposal §6: retain standalone compatibility coverage; production proof becomes direct FD3 plus zero translation launches |
+| A18 | Bridge §6 items 8 onward and §7 ledger | Proposal §§6–7: keep lifecycle/configuration/resolver and full gates; new ledger decision records only named replacement |
+| A19 | One-shot §4.1 contract-v1 document; later IL-123 / sealed-request §6 registry correction | Proposal §2.1: contract v2, same five fields and corrected full 23-operation registry; CLI remains effect-free |
+| A20 | Workspace PLAN §I-80 outer v1 envelopes and controller-prefixed operation arms | Proposal §2.1: outer v2, public arms for 1–22, fixed controller-prefixed op-23 exception; preserve operation bodies and error union |
+| A21 | Verdi SI-181 public bridge ownership and SI-182 / SI-194 amendments | Proposal §§2–3: public schema authority retained; independent private serialization removed; standalone bridge semantics preserved |
+| A22 | Actual-run compatibility behavior, formerly relying on approved dry-run baseline | Proposal §5: new ATC must query at run assembly before flight effects; old ATC limitation expressly disclosed |
+| A23 | Existing exclusive 32 MiB frame limit; Verdi `ControllerClient.invoke` reads replies through unbounded `ReadBytes` | Proposal §§2.1, 6: retain accepted size limit, add incremental reply-read enforcement and oversized/unterminated-stream tests |
+
+All other clauses of these sources remain at their original locations and
+retain their existing precedence. In particular, publishing the v2 error
+**envelope** is not proposed: the nested operational error stays v1.
+
+## 2. Retained authority
+
+These references supply constraints, not additional proposed supersessions.
+
+| ID | Source | Retained meaning / destination |
+|---|---|---|
+| R01 | [ATC PLAN §§2–4, 7](../../../PLAN.md), workspace AGENTS, [ATC AGENTS](../../../AGENTS.md) | Precedence, owner gates, no private imports, implementation assignment, review limits; proposal §§3, 6–7 |
+| R02 | [One-shot executor §§2–9](2026-09-01-vatc-f12-one-shot-executor.md), except A19 | Command/candidate boundary, supervisor ownership, recovery/gates; proposal §§1, 4, 6 |
+| R03 | Bridge §§2.1–2.2 | Config v3, activation, resolver, durable base/lineage; proposal §§3–5; no new config or durable format |
+| R04 | [Sealed request amendment](2026-09-04-vatc-f12-sealed-execution-request.md), except registry negotiation updated by A19 | Public request/dispatch separation and exact sources; proposal §§2.2, 4–5 |
+| R05 | [Runway/compile](2026-09-06-vatc-f12-runway-branch-and-compile-workspace.md), [runway member](2026-09-06-vatc-f12-runway-path-member.md), [execution path](2026-09-06-vatc-f12-execution-workspace-path.md) | Distinct store/runway/provider workspace; resolver runs in runway; proposal §§3–5 |
+| R06 | [Retry amendment](2026-09-07-vatc-f12-retry-classification.md) | F12 replacement-only retry; no new sealed resume; proposal §4 |
+| R07 | [Standing corrections](2026-09-06-vatc-f12-standing-ruling-corrections.md), IL-138..150 as subsequently ratified | Revision/session/root/digest/claims identities, checkpoint and receipt behavior, op-19 limit; proposal §§2–4 |
+| R08 | [Amendment-wave witness](2026-09-07-vatc-f12-amendment-wave-coverage-witness.md), including §6 renumbering | Evidence/history and citation mapping, not new runtime authority; no promotion of the observer draft |
+| R09 | [Amendment 001](../../design/amendments/001-sealed-flight-plans-and-central-recorder.md) | Sealed authority, owner decisions, recorder and declared threat model; proposal §§1, 3–4 |
+| R10 | [Amendment 002](../../design/amendments/002-sealed-claude-vatc-events.md) | Provider isolation, event grammar/redaction and principal boundaries; proposal §§1, 3–4 |
+| R11 | [Amendment 003](../../design/amendments/003-dual-sealed-mcp-registrations.md) | Separate required context/claims registrations and capability checks; proposal §§2.1, 3 |
+| R12 | Workspace PLAN I-74..I-79, I-81..I-89, I-91, I-107, I-109, I-122; Verdi `docs/superpowers/invention-ledger.md` SI-181/182/194 and their cited accepted stories | Existing execution, control, receipt, principal, segment and claims rules remain binding except A20–A21; proposal §§2–5. The receipt-input query digest definition is owner-ratified in workspace PLAN I-107 (2026-09-09 R3/D2(a)); SI-195 is its pending sibling carry-through, not an existing ledger row at the inspected head |
+
+The workspace revision notes' 2026-08-01 acceptance rule remains unchanged:
+an implementation story must complete its acceptance flow before runtime work.
+This proposal neither allocates a speculative SI/IL number nor changes frozen
+source text. Its proposed decisions become ledger entries only on ratification.
+
+## 3. Operation and relation coverage
+
+For each row below, request and result body fields, enums, requiredness,
+nullability, ordering, canonical embedded bytes, and existing validators are
+preserved by reference to Bridge §3.3 at its fixed publication base plus the
+two ratified exceptions. `req/res` names the exact public arm versions.
+Proposal §2 defines the sole schema transformation on the transport.
+
+The relation column inventories the Verdi bridge/client relations at the
+inspected source head. It is not permission to omit nested validators, later
+completion checks, or ATC owner policy. “No extra relation” means the exhaustive
+`crossMatchOwnerResult` branch has no request/result comparison for that
+operation; it does not mean the owner can return an unchecked answer.
+
+| # | Operation | req/res | Existing request/result relation retained |
+|---|---|---|---|
+| 1 | verify-authority | v1/v1 | Manifest revision/digest, projection digest, authority verdict digest, accepted-spec commit |
+| 2 | resolve-profile | v1/v1 | Profile material ref equals query ref |
+| 3 | verify-conflict | v1/v1 | Canonical returned report equals submitted report |
+| 4 | resolve-recorder | v1/v1 | Returned endpoint ref equals requested ref |
+| 5 | recorder-checkpoint | v1/v1 | Active acknowledgments bind flight/lane/epoch |
+| 6 | recorder-append | v1/v1 | Ack binds canonical event identity and digest |
+| 7 | store-redacted-segment | v1/v1 | Stored reference, digest, byte count, media type, redaction profile match submitted segment |
+| 8 | resolve-redacted-segment | v1/v1 | Returned segment content address matches requested reference |
+| 9 | verify-opaque-boundary | v1/v1 | Ordered opaque id/kind/adapter/version rows agree |
+| 10 | verify-provider-session | v1/v1 | Session ref, adapter version, profile digest, workspace id agree |
+| 11 | verify-expansion | v1/v1 | No extra relation; authoritative installed root remains ATC-owned |
+| 12 | store-adapter-session | v1/v1 | No extra result relation; request lifecycle binding and durable first-session rules remain |
+| 13 | next-stamp | v1/v1 | No extra relation; canonical declared stamp grammar remains |
+| 14 | resolve-context | v1/v1 | Result ref equals query ref; non-proven data omission retained |
+| 15 | verify-epoch | v1/v1 | No extra result relation; snapshot/resolution validation and owner checks remain |
+| 16 | install-expansion | v2/v1 | No extra result relation; durable ref/purpose/data and transition replay remain |
+| 17 | resolve-receipt-inputs | v1/v1 | No extra result relation; query digest means sealed request address; completion validates supplied inputs |
+| 18 | append-receipt | v1/v1 | Ack binds exact receipt event and receipt digest; append also validates receipt/event cross-relations |
+| 19 | resolve-receipt-verification-authority | v1/v1 | Trust source, proven isolation profile, nonempty persistence receipt identity agree; unavailable production source is not repaired here |
+| 20 | persist-handback | v1/v1 | Handback acknowledgment binds exact record |
+| 21 | persist-quarantine | v1/v1 | Preserved bytes bind record; acknowledgment binds record |
+| 22 | persist-abort | v1/v1 | Abort acknowledgment binds exact record |
+| 23 | resolve-claim-mcp | existing wrapper v1/v1 | Local registration request digest, exact tool/catalogue and loopback URL checks; outside owner union |
+
+Implementation evidence anchors:
+
+- ATC `internal/verdiproto/{controller.go,contract.go,owner_codec.go,owner_client.go}`;
+  `internal/executor/{ownerimpl.go,ownerstate.go,recovery.go}`;
+  `cmd/vatc/{dispatch.go,assembly.go,ports.go,boundary_e2e_test.go}`.
+- Verdi `internal/sealedexec/{controller_schema.go,controller_codec.go,controller_client.go,owner_bridge.go,completion.go}`;
+  `internal/contextowner/{schema.go,codec.go}`;
+  `cmd/verdi/{context.go,context_owner.go,context_execution.go,context_mcp.go,context_receipt.go}`.
+- [Baseline handoff](../../handoffs/2026-09-10-execution-boundary-baseline.md)
+  and [inventory](../../design/execution-boundary-inventory.md) are evidence
+  and navigation, not authority for a new transport or recovery guarantee.
+
+## 4. Coverage and limitations
+
+Accounting totals: **23/23 named amendment units mapped; 12/12 retained-source
+groups mapped; 22/22 public requests and 22/22 public results mapped, plus
+1/1 local claims operation**. Transformations are named in §1; no preserved
+arm field or owner responsibility is intentionally omitted.
+
+This is amendment-scope accounting. It does not claim clause-level promotion
+of every upstream specification, nor a completed function-by-function validator
+migration. Entire retained sources remain authoritative at their locations.
+If future work replaces those sources with a canonical consolidated contract,
+it must provide the full clause-level losslessness witness first. The runtime
+validator migration must separately provide the check-to-function/test witness
+required by proposal §3 before any validation code is removed.
+
+Known unproven work: v2 codecs, new negotiation ordering, process-crash matrix,
+two-way store replay, performance measurements, and codec deletion. This document
+records a design and implementation obligations, not successful tests.

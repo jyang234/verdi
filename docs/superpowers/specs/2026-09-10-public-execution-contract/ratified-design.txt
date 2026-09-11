@@ -1,133 +1,20 @@
----
-id: spec/public-execution-contract
-kind: spec
-title: "Direct public execution contract"
-owners: [platform-team]
-class: story
-story: jira:VERDI-ATC-7
-problem: { text: "Each owner call currently crosses two translation subprocesses and duplicate serialized operation codecs, increasing boundary maintenance cost.", anchor: problem }
-outcome: { text: "Direct public FD3 v2 and codec consolidation remove the translation launches and duplicate operation wire while preserving validation, identity, policy, and durable recovery.", anchor: outcome }
-acceptance_criteria:
-  - id: ac-1
-    text: "The matched Verdi and ATC pair exchanges the 22 public owner arms and the fixed local claims exception over strict FD3 v2, with zero production owner decode/encode subprocess launches and unchanged standalone bridge commands."
-    evidence: [static, behavioral]
-    anchor: ac-1
-  - id: ac-2
-    text: "Both endpoints preserve structural validation and independently enforce all 16 published request/result relations at their required invocation points; ATC validates a recorder arm before observing its event, and both receivers enforce the exclusive 32 MiB bound while reading with the existing capability-usability distinction."
-    evidence: [static, behavioral]
-    anchor: ac-2
-  - id: ac-3
-    text: "The legacy controller request digest preimage for operations 1–22, every durable format, receipt event/control-triple ordering, recovery authority outcome, and copied-store replay in both directions remain as fixed in contract sections 2.2 and 4–5."
-    evidence: [static, behavioral]
-    anchor: ac-3
-  - id: ac-4
-    text: "New ATC queries the actual pinned v2 contract on every run before flight effects; the release moves all Verdi FD3 consumers together and supports only the specified quiescent matched-pair upgrade and rollback with exact artifact identities."
-    evidence: [static, behavioral]
-    anchor: ac-4
-  - id: ac-5
-    text: "The completed change removes Verdi’s separate private serialized operation representation, preserves required domain conversions and validators, and returns a deletion inventory with each removed check mapped to its new function, invocation point, and rejecting mutation."
-    evidence: [static, behavioral]
-    anchor: ac-5
-links:
-  - { type: implements, ref: "spec/verdi-atc-prerequisites#ac-4" }
-  - { type: implements, ref: "spec/verdi-atc-prerequisites#ac-5" }
-  - { type: implements, ref: "spec/verdi-atc-prerequisites#ac-6" }
-decisions:
-  - { id: dc-1, text: "Contract sections 1–6 below reproduce the owner-ratified protocol without semantic alteration; the source witness fixes the bounded supersessions and retained authority. No other incumbent clause is replaced.", anchor: dc-1 }
-  - { id: dc-2, text: "This story refines the existing execution, receipt, and provider-event prerequisites; it creates no additional feature outcome and does not edit frozen parent or child specification files.", anchor: dc-2 }
-  - { id: dc-3, text: "Owner ratification on 2026-09-10 authorizes this amendment and story preparation. Runtime implementation waits for this story’s Git-derived acceptance on the configured default branch; push, PR, and merge require separate owner authorization.", anchor: dc-3 }
-  - { id: dc-4, text: "The historical source witness and reviewed design are preserved byte-for-byte with pinned hashes in the promotion record. Their historical proposed status is superseded only by the recorded ratification; ATC invention-ledger section references resolve to section 10.", anchor: dc-4 }
-constraints:
-  - { id: co-1, text: "Both implementation flights and all contract section 6 gates must pass before release or completion; evidence producers declared here are future obligations, not assertions of passing tests.", anchor: co-1 }
-  - { id: co-2, text: "No new provider, principal, claims, observable-write producer, review or landing semantics, persistence transaction, or op-19 production-authority repair is authorized; F12 still ends at a durable candidate handoff.", anchor: co-2 }
-  - { id: co-3, text: "The independently implemented public boundary admits no private cross-repository Go imports, no contextowner import of sealedexec, and no durable schema or historical digest rewrite.", anchor: co-3 }
----
 # Direct public execution contract
 
-## Problem
+**Status:** Proposed for owner ratification; no implementation authority yet.
+**Date:** 2026-09-10. **Author:** Codex.
+**Inspected sources:** ATC `b1f9e995a62aaa2f2ea78248f9b784fd3720817d`;
+Verdi `8ab423fefa14f6cee3070ca96754928daf28c062`.
 
-Each owner call currently crosses two translation subprocesses and duplicate
-serialized operation codecs. The duplication increases the number of places
-that must agree on validation and identity.
+This is a bounded amendment proposal, not a canonical promotion of all execution
+authority. The [source witness](2026-09-10-public-execution-contract-source-witness.md)
+names the replaced clauses and retained sources. Until ratification, the
+[bridge correction](2026-09-02-vatc-f12-controller-owner-bridge-correction.md)
+still requires the two translation subprocesses. Neither frozen specifications
+nor active invention ledgers are changed by this proposal.
 
-## Outcome
-
-Direct public FD3 v2 removes the launches; the subsequent codec consolidation
-removes the duplicate serialized operation representation. Both are required.
-
-## Acceptance criteria
-
-### AC-1
-
-The matched Verdi and ATC pair exchanges the 22 public owner arms and the fixed local claims exception over strict FD3 v2, with zero production owner decode/encode subprocess launches and unchanged standalone bridge commands.
-
-FD3 codecs, all openSealedController consumers, ATC routing, standalone bridge compatibility, literal fixtures for all 23 operations, and built-binary launch traces.
-
-### AC-2
-
-Both endpoints preserve structural validation and independently enforce all 16 published request/result relations at their required invocation points; ATC validates a recorder arm before observing its event, and both receivers enforce the exclusive 32 MiB bound while reading with the existing capability-usability distinction.
-
-All 22 owner arms, six explicitly classified no-extra-relation arms, claims registration, recorder observation, incremental reply reading, cancellation, EOF, partial frames, and the check-to-function/invocation/mutation witness.
-
-### AC-3
-
-The legacy controller request digest preimage for operations 1–22, every durable format, receipt event/control-triple ordering, recovery authority outcome, and copied-store replay in both directions remain as fixed in contract sections 2.2 and 4–5.
-
-Golden preimages, dispatch and receipt identities, two receipt writes, all five deterministic process-crash cuts under baseline and candidate, actual re-entry classifiers/exits/rows/launches, and two-way copied-store decode/replay.
-
-### AC-4
-
-New ATC queries the actual pinned v2 contract on every run before flight effects; the release moves all Verdi FD3 consumers together and supports only the specified quiescent matched-pair upgrade and rollback with exact artifact identities.
-
-Actual-run and dry-run version matrix, all Verdi controller hosts, pre-effect refusal evidence, baseline stored-plan limitation, copied stores, exact source commits/binary hashes/contract bytes, and offline rollout instructions.
-
-### AC-5
-
-The completed change removes Verdi’s separate private serialized operation representation, preserves required domain conversions and validators, and returns a deletion inventory with each removed check mapped to its new function, invocation point, and rejecting mutation.
-
-Verdi contextowner and sealedexec seams, ATC independent public validator, standalone compatibility verbs, retained domain/artifact validators, and the completed two-flight release evidence.
-
-## Decisions
-
-### DC-1
-
-Contract sections 1–6 below reproduce the owner-ratified protocol without semantic alteration; the source witness fixes the bounded supersessions and retained authority. No other incumbent clause is replaced.
-
-### DC-2
-
-This story refines the existing execution, receipt, and provider-event prerequisites; it creates no additional feature outcome and does not edit frozen parent or child specification files.
-
-### DC-3
-
-Owner ratification on 2026-09-10 authorizes this amendment and story preparation. Runtime implementation waits for this story’s Git-derived acceptance on the configured default branch; push, PR, and merge require separate owner authorization.
-
-### DC-4
-
-The historical source witness and reviewed design are preserved byte-for-byte with pinned hashes in the promotion record. Their historical proposed status is superseded only by the recorded ratification; ATC invention-ledger section references resolve to section 10.
-
-## Constraints
-
-### CO-1
-
-Both implementation flights and all contract section 6 gates must pass before release or completion; evidence producers declared here are future obligations, not assertions of passing tests.
-
-### CO-2
-
-No new provider, principal, claims, observable-write producer, review or landing semantics, persistence transaction, or op-19 production-authority repair is authorized; F12 still ends at a durable candidate handoff.
-
-### CO-3
-
-The independently implemented public boundary admits no private cross-repository Go imports, no contextowner import of sealedexec, and no durable schema or historical digest rewrite.
-
-## Provenance and contract
-
-The [promotion record](../../../../docs/superpowers/specs/2026-09-10-public-execution-contract/promotion.md)
-records the exact reviewed head, ratification, source hashes, section mapping,
-and remaining acceptance gate. Its byte-exact source witness is incorporated
-for amendment scope and retained authority; it does not replace those sources.
-Source-witness SHA-256: `7f99bcccfdb92c248f8cf4c04c982266d1d7757bc304e3af5f65725f94a8348e`.
-The following contract is the reviewed design’s sections 1–6, reproduced
-verbatim. Internal section numbers refer to that contract.
+Contents: [decision](#1-decision), [wire](#2-wire), [validation](#3-validation-and-ownership),
+[recovery](#4-durability-and-recovery), [compatibility](#5-compatibility-and-rollout),
+[delivery](#6-implementation-and-verification), [ratification](#7-ratification).
 
 ## 1. Decision
 
@@ -452,8 +339,22 @@ No release/completion claim until both steps and their full gates pass. Package
 extraction for receipt/checkpoint or expansion owners is subsequent work; F13/
 F14 and the repeated two-story journey remain required after that.
 
-## Acceptance status
+## 7. Ratification
 
-The design is ratified. This story remains proposed until its exact specification
-completes the configured default-branch acceptance flow; no runtime implementation
-is authorized before that gate.
+Requested decisions: approve direct public FD3 v2; freeze the compatibility
+digest preimage; preserve all durable formats and the bounded recovery posture;
+retain the standalone bridge verbs; use quiescent matched-pair rollout; and
+require codec consolidation before declaring this simplification complete.
+
+This approval would authorize the named amendment and preparation of the
+accepted Verdi implementation story. It does not itself land that story,
+promote frozen specifications, authorize a push/merge/PR, or declare a runtime
+gate passed. Before runtime implementation, record the ratification in ATC
+PLAN §7 and Verdi's invention ledger using fresh non-conflicting identifiers,
+complete the sibling story acceptance required by ATC PLAN §4, and record any
+required specification changes through the established revision flow.
+
+Independent cross-model review is required on the consolidated exact head.
+Codex adjudicates and authors accepted corrections; the same reviewer performs
+one closure check. The review disposition and exact commit IDs accompany the
+ratification request.
