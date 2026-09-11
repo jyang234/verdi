@@ -36,7 +36,7 @@ type declarations struct {
 
 func readDeclarations(data []byte) (declarations, error) {
 	var d declarations
-	if err := artifact.DecodeStrictJSON(data, &d); err != nil {
+	if err := decodeDocument(data, &d); err != nil {
 		return d, err
 	}
 	if len(d.Producers) != 10 {

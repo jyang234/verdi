@@ -118,7 +118,9 @@ func Bootstrap(ctx context.Context, verdiRepo, root string, getenv func(string) 
 		if row.baseline {
 			env = baselineEnvironment()
 		}
-		out, e := x.Run(ctx, command{Dir: row.dir, Name: "build-" + row.name, Args: []string{"go", "build", "-trimpath", "-o", row.path, row.pkg}, Env: env, CleanEnvironment: row.baseline})
+		cmd := candidateBuild(row.name, row.dir, row.path, row.pkg, env)
+		cmd.CleanEnvironment = row.baseline
+		out, e := x.Run(ctx, cmd)
 		if e != nil {
 			return c, e
 		}

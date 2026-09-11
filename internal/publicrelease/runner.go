@@ -12,15 +12,16 @@ import (
 )
 
 type releaseReport struct {
-	Baselines        []baselineRecord  `json:"baseline_source_builds"`
-	Inputs           inputs            `json:"inputs"`
-	Workflow         workflowContext   `json:"workflow"`
-	SourceChecks     []SourceCheck     `json:"source_checks"`
-	Executions       []execution       `json:"executions"`
-	HistoricalSkips  []historicalSkip  `json:"historical_skips"`
-	RuntimeArtifacts map[string]string `json:"runtime_artifacts"`
-	Runtime          runtimeOutcomes   `json:"runtime_outcomes"`
-	Limits           []string          `json:"limits"`
+	CandidateRuntime []candidateRuntime `json:"candidate_atc_runtime_builds"`
+	Baselines        []baselineRecord   `json:"baseline_source_builds"`
+	Inputs           inputs             `json:"inputs"`
+	Workflow         workflowContext    `json:"workflow"`
+	SourceChecks     []SourceCheck      `json:"source_checks"`
+	Executions       []execution        `json:"executions"`
+	HistoricalSkips  []historicalSkip   `json:"historical_skips"`
+	RuntimeArtifacts map[string]string  `json:"runtime_artifacts"`
+	Runtime          runtimeOutcomes    `json:"runtime_outcomes"`
+	Limits           []string           `json:"limits"`
 }
 type producerResult struct {
 	Producer       string                `json:"producer"`
@@ -96,24 +97,14 @@ func Run(ctx context.Context, c Config) (runErr error) {
 	}
 	for _, row := range []struct{ name, dir, path, pkg string }{{"verdi", c.VerdiDir, c.VerdiBinary, "./cmd/verdi"}, {"atc", c.ATCDir, c.ATCBinary, "./cmd/vatc"}, {"checker", c.VerdiDir, checkerPath, "./cmd/public-execution-contract-release"}} {
 		binary := filepath.Join(private, "rebuilt-"+row.name)
-		out, e := x.Run(ctx, command{Dir: row.dir, Name: "build-" + row.name, Args: []string{"go", "build", "-trimpath", "-o", binary, row.pkg}, Env: env})
-		if e != nil {
-			return e
-		}
-		report.Executions = append(report.Executions, out)
-		if out.Exit != 0 {
-			return fmt.Errorf("%w: %s build", ErrVerdict, row.name)
-		}
-		h, e := fileDigest(binary)
-		if e != nil {
-			return e
-		}
 		want := before.Binaries[row.name]
 		if row.name == "checker" {
 			want = before.CheckerSHA
 		}
-		if h != want {
-			return fmt.Errorf("candidate %s executable differs from exact-source rebuild", row.name)
+		out, e := authenticateCandidate(ctx, x, candidateBuild(row.name, row.dir, binary, row.pkg, env), want)
+		report.Executions = append(report.Executions, out)
+		if e != nil {
+			return e
 		}
 	}
 	for _, g := range groups(declarations) {
@@ -142,6 +133,10 @@ func Run(ctx context.Context, c Config) (runErr error) {
 	report.HistoricalSkips = append(report.HistoricalSkips, skips...)
 	if err != nil {
 		return err
+	}
+
+	if report.CandidateRuntime, err = observeCandidateRuntime(report.Executions, before.Binaries["atc"]); err != nil {
+		return fmt.Errorf("%w: %v", ErrVerdict, err)
 	}
 
 	if report.RuntimeArtifacts, err = inventory(boundary); err != nil {

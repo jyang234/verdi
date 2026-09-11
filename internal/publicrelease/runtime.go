@@ -12,8 +12,6 @@ import (
 	"runtime"
 	"sort"
 	"strings"
-
-	"github.com/jyang234/verdi/internal/artifact"
 )
 
 type launchCounts struct{ Total, Sealed, Decode, Encode int }
@@ -72,7 +70,7 @@ func readRuntime(root string, files map[string]string, executions []execution) (
 				return out, err
 			}
 			var rows []cutRow
-			if err = artifact.DecodeStrictJSON(b, &rows); err != nil {
+			if err = decodeDocument(b, &rows); err != nil {
 				return out, err
 			}
 			if err = validateCuts(rows); err != nil {
@@ -147,7 +145,7 @@ func outcome(path string) (rawOutcome, error) {
 	if err != nil {
 		return out, err
 	}
-	err = artifact.DecodeStrictJSON(b, &out)
+	err = decodeDocument(b, &out)
 	return out, err
 }
 func readCopy(dir string) (copyOutcome, error) {
@@ -262,7 +260,7 @@ func baselineRecords(root string, files map[string]string, bound inputs) ([]base
 			return nil, err
 		}
 		var rows []baselineRecord
-		if err = artifact.DecodeStrictJSON(b, &rows); err != nil {
+		if err = decodeDocument(b, &rows); err != nil {
 			return nil, err
 		}
 		if len(rows) != 2 {
