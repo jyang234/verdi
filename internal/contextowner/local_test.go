@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"reflect"
 	"testing"
 
 	"github.com/jyang234/verdi/internal/contextcompile"
@@ -461,6 +462,52 @@ func TestValidateResultArm(t *testing.T) {
 		})
 	}
 	if err := ValidateResultArm(Operation("unknown"), []byte(`{}`)); err == nil {
+		t.Fatal("accepted unknown operation")
+	}
+}
+
+func TestDecodeResultArm(t *testing.T) {
+	for _, op := range Operations() {
+		t.Run(string(op), func(t *testing.T) {
+			raw := fixtureArm(t, string(op)+".result.json")
+			reply, err := DecodeResultArm(op, raw)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(reply.Call, Call{Operation: op}) {
+				t.Fatalf("structural decoder supplied request facts: %#v", reply.Call)
+			}
+			got, err := ResultArm(reply)
+			if err != nil || !bytes.Equal(got, raw) {
+				t.Fatalf("result arm = %s, error = %v; want frozen bytes %s", got, err, raw)
+			}
+			wrong := OperationResolveProfile
+			if op == wrong {
+				wrong = OperationNextStamp
+			}
+			for _, row := range []struct {
+				name string
+				arm  []byte
+			}{
+				{"empty", nil},
+				{"null", []byte("null")},
+				{"malformed", []byte("{")},
+				{"trailing LF", append(append([]byte(nil), raw...), '\n')},
+				{"whitespace", append([]byte(" "), raw...)},
+				{"unknown member", bytes.Replace(raw, []byte("{"), []byte(`{"extra":true,`), 1)},
+				{"duplicate schema", bytes.Replace(raw, []byte("{"), []byte(`{"schema":"wrong",`), 1)},
+				{"wrong arm", fixtureArm(t, string(wrong)+".result.json")},
+			} {
+				t.Run(row.name, func(t *testing.T) {
+					got, err := DecodeResultArm(op, row.arm)
+					if err == nil || !reflect.DeepEqual(got, Reply{}) {
+						t.Fatalf("invalid result returned reply %#v, error %v", got, err)
+					}
+				})
+			}
+		})
+	}
+	if _, err := DecodeResultArm(Operation("unknown"), []byte(`{}`)); err == nil {
 		t.Fatal("accepted unknown operation")
 	}
 }

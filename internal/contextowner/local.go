@@ -128,18 +128,33 @@ func NewReply(call Call, resultArm []byte) (Reply, error) {
 // reusing the exact per-operation decode/encode pair EncodeReply itself
 // calls (decodeResultArm, encodeResultArm).
 func validPublicResultArm(operation Operation, trimmed []byte) ([]byte, error) {
-	reply := Reply{Call: Call{Operation: operation}}
-	if err := decodeResultArm(json.RawMessage(trimmed), &reply); err != nil {
+	if _, err := DecodeResultArm(operation, trimmed); err != nil {
 		return nil, err
+	}
+	return append([]byte(nil), trimmed...), nil
+}
+
+// DecodeResultArm strictly decodes an exact canonical public result arm without
+// a request. resultArm has no trailing LF. The returned Reply carries only the
+// operation in Call; it proves neither request identity nor request/result
+// relations. Bind the result to its actual request with NewReply before use as a
+// response to that request.
+func DecodeResultArm(operation Operation, resultArm []byte) (Reply, error) {
+	if !validOperation(operation) {
+		return Reply{}, fmt.Errorf("contextowner: unknown owner operation %q", operation)
+	}
+	reply := Reply{Call: Call{Operation: operation}}
+	if err := decodeResultArm(json.RawMessage(resultArm), &reply); err != nil {
+		return Reply{}, err
 	}
 	canonical, err := encodeResultArm(reply)
 	if err != nil {
-		return nil, err
+		return Reply{}, err
 	}
-	if !bytes.Equal(trimmed, canonical) {
-		return nil, fmt.Errorf("contextowner: %s result arm is not byte-canonical", operation)
+	if !bytes.Equal(resultArm, canonical) {
+		return Reply{}, fmt.Errorf("contextowner: %s result arm is not byte-canonical", operation)
 	}
-	return canonical, nil
+	return reply, nil
 }
 
 // ValidateResultArm strictly validates an exact canonical public result arm
@@ -147,9 +162,6 @@ func validPublicResultArm(operation Operation, trimmed []byte) ([]byte, error) {
 // response to its outstanding call through NewReply and ValidateRelations.
 // resultArm has no trailing LF. This function does not prove any relation.
 func ValidateResultArm(operation Operation, resultArm []byte) error {
-	if !validOperation(operation) {
-		return fmt.Errorf("contextowner: unknown owner operation %q", operation)
-	}
-	_, err := validPublicResultArm(operation, resultArm)
+	_, err := DecodeResultArm(operation, resultArm)
 	return err
 }
