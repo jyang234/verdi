@@ -149,7 +149,7 @@ func TestContextExecutionPublicContract_Behavioral(t *testing.T) {
 	})
 
 	t.Run("controller result envelope fails closed", func(t *testing.T) {
-		for _, mutation := range []string{"schema", "operation", "call sequence", "unknown field"} {
+		for _, mutation := range []string{"schema", "old v1 host", "operation", "call sequence", "unknown field"} {
 			t.Run(mutation, func(t *testing.T) {
 				observation, call := runWithControllerReply(t, bin, t.TempDir(), requestBytes, []string{"context", "execution", "--request", "-"}, func(call sealedexec.ControllerCall) []byte {
 					return malformedControllerReply(t, call, mutation)
@@ -511,6 +511,15 @@ func TestScopedContextMCPContract_Behavioral(t *testing.T) {
 
 	t.Run("recorder rejection is framed before operational exit", func(t *testing.T) {
 		runScopedMCPRecorderRejection(t, bin)
+	})
+
+	t.Run("old v1 controller is refused before protocol service", func(t *testing.T) {
+		observation, call := runWithControllerReply(t, bin, t.TempDir(), requestBytes, []string{"context", "mcp", "--request", "-"}, func(call sealedexec.ControllerCall) []byte {
+			return malformedControllerReply(t, call, "old v1 host")
+		})
+		if call.Operation != sealedexec.ControllerOperationVerifyAuthority || observation.exitCode != 2 || observation.stdout != "" || !strings.Contains(observation.stderr, "controller") {
+			t.Fatalf("old scoped MCP controller = %#v/%#v", call, observation)
+		}
 	})
 
 	t.Run("controller loss is operational before protocol service", func(t *testing.T) {
@@ -1866,8 +1875,7 @@ func runContextOwnerVerbErr(bin, dir, verb, operation string, stdin []byte) ([]b
 // resolveContextOwnerBridgeAnswer builds a resolveContextViaOwnerBridge hook
 // (SI-194) that routes the REAL intercepted resolve-context call through
 // the built binary's public `context owner decode`/`encode` verbs — the
-// same two subprocess calls a real external owner's own tooling (e.g. ATC)
-// would invoke around its own decision — answering with a non-proven
+// retained standalone compatibility surface — answering with a non-proven
 // ref-absent resolution and no fabricated data item. Before the SI-194
 // contextowner fix, the decode step below could not even construct that
 // reply: contextowner.EncodeReply unconditionally required a nested data
@@ -1884,7 +1892,12 @@ func resolveContextOwnerBridgeAnswer(bin, dir string) func(sealedexec.Controller
 		if err := json.Unmarshal(fullCall, &envelope); err != nil {
 			return sealedexec.ControllerResult{}, fmt.Errorf("owner bridge: extract call payload: %w", err)
 		}
-		privateRequest := append(append([]byte(nil), envelope.Payload...), '\n')
+		// Compatibility verbs still consume standalone legacy payloads. The
+		// v2 host explicitly reconstructs that published identity preimage.
+		privateRequest, err := contextowner.LegacyRequestPreimage(contextowner.OperationResolveContext, envelope.Payload)
+		if err != nil {
+			return sealedexec.ControllerResult{}, fmt.Errorf("owner bridge: legacy request preimage: %w", err)
+		}
 
 		publicCall, err := runContextOwnerVerbErr(bin, dir, "decode", "resolve-context", privateRequest)
 		if err != nil {
@@ -3013,6 +3026,8 @@ func malformedControllerReply(t *testing.T, call sealedexec.ControllerCall, muta
 		t.Fatal(err)
 	}
 	switch mutation {
+	case "old v1 host":
+		encoded = bytes.Replace(encoded, []byte("verdi.context-controller-result/v2"), []byte("verdi.context-controller-result/v1"), 1)
 	case "schema":
 		encoded = bytes.Replace(encoded, []byte(`"schema":"`+sealedexec.ControllerResultSchemaID+`"`), []byte(`"schema":"wrong"`), 1)
 	case "operation":
