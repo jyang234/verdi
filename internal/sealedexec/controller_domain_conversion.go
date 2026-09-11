@@ -3,6 +3,7 @@ package sealedexec
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 
 	"github.com/jyang234/verdi/internal/contextcompile"
 	"github.com/jyang234/verdi/internal/contextevent"
@@ -372,6 +373,11 @@ func receiptInputsQueryFromPublic(value contextowner.ReceiptInputsQuery) (Receip
 	return ReceiptInputsQuery{Request: request, WorkspaceID: value.WorkspaceID, DispatchDigest: value.DispatchDigest, TerminalRevision: value.TerminalRevision, TerminalSourceSequence: value.TerminalSourceSequence, TerminalGlobalSequence: value.TerminalGlobalSequence, EventChainRoot: value.EventChainRoot, ResultFactsDigest: value.ResultFactsDigest}, nil
 }
 func receiptAppendToPublic(value ReceiptAppend) (contextowner.ReceiptAppend, error) {
+	// Appending requires an already authenticated receipt. EncodeReceipt fills a
+	// blank digest, so reject it before encoding can erase that typed omission.
+	if value.Receipt.Digest == "" {
+		return contextowner.ReceiptAppend{}, fmt.Errorf("sealedexec: append-receipt receipt digest is required")
+	}
 	receipt, err := contextreceipt.EncodeReceipt(value.Receipt)
 	if err != nil {
 		return contextowner.ReceiptAppend{}, err
