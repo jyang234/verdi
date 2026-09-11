@@ -1744,38 +1744,8 @@ func validFlightStateSnapshot(snapshot FlightStateSnapshot) (FlightStateSnapshot
 	if err != nil {
 		return FlightStateSnapshot{}, err
 	}
-	if err := validateExecutionKey(snapshot.Key); err != nil {
+	if err := validateFlightStateSnapshotFields(snapshot); err != nil {
 		return FlightStateSnapshot{}, err
-	}
-	if err := requireText("workspace_id", snapshot.WorkspaceID); err != nil {
-		return FlightStateSnapshot{}, err
-	}
-	for _, row := range []struct{ field, value string }{
-		{"candidate_commit", snapshot.CandidateCommit}, {"candidate_tree", snapshot.CandidateTree},
-	} {
-		if err := validateGitOID(row.field, row.value, false); err != nil {
-			return FlightStateSnapshot{}, err
-		}
-	}
-	for _, row := range []struct{ field, value string }{
-		{"manifest_digest", snapshot.ManifestDigest}, {"projection_digest", snapshot.ProjectionDigest},
-	} {
-		if err := validateDigest(row.field, row.value); err != nil {
-			return FlightStateSnapshot{}, err
-		}
-	}
-	if snapshot.ExpansionRoot != "" {
-		if err := validateDigest("expansion_root", snapshot.ExpansionRoot); err != nil {
-			return FlightStateSnapshot{}, err
-		}
-	}
-	if snapshot.NextSourceSequence == 0 {
-		return FlightStateSnapshot{}, fmt.Errorf("contextowner: next_source_sequence must be positive")
-	}
-	if snapshot.PriorEventDigest != "" {
-		if err := validateDigest("prior_event_digest", snapshot.PriorEventDigest); err != nil {
-			return FlightStateSnapshot{}, err
-		}
 	}
 	snapshot.Request = request
 	if snapshot.PriorRevision != nil {
@@ -1783,6 +1753,43 @@ func validFlightStateSnapshot(snapshot FlightStateSnapshot) (FlightStateSnapshot
 		snapshot.PriorRevision = &prior
 	}
 	return snapshot, nil
+}
+
+func validateFlightStateSnapshotFields(snapshot FlightStateSnapshot) error {
+	if err := validateExecutionKey(snapshot.Key); err != nil {
+		return err
+	}
+	if err := requireText("workspace_id", snapshot.WorkspaceID); err != nil {
+		return err
+	}
+	for _, row := range []struct{ field, value string }{
+		{"candidate_commit", snapshot.CandidateCommit}, {"candidate_tree", snapshot.CandidateTree},
+	} {
+		if err := validateGitOID(row.field, row.value, false); err != nil {
+			return err
+		}
+	}
+	for _, row := range []struct{ field, value string }{
+		{"manifest_digest", snapshot.ManifestDigest}, {"projection_digest", snapshot.ProjectionDigest},
+	} {
+		if err := validateDigest(row.field, row.value); err != nil {
+			return err
+		}
+	}
+	if snapshot.ExpansionRoot != "" {
+		if err := validateDigest("expansion_root", snapshot.ExpansionRoot); err != nil {
+			return err
+		}
+	}
+	if snapshot.NextSourceSequence == 0 {
+		return fmt.Errorf("contextowner: next_source_sequence must be positive")
+	}
+	if snapshot.PriorEventDigest != "" {
+		if err := validateDigest("prior_event_digest", snapshot.PriorEventDigest); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func validExpansionInstall(install ExpansionInstall) (ExpansionInstall, error) {

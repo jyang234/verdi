@@ -414,7 +414,7 @@ func validateDomainSnapshot(snapshot FlightStateSnapshot) error {
 	if err != nil {
 		return err
 	}
-	return contextowner.ValidateFlightStateSnapshot(public)
+	return contextowner.ValidateFlightStateSnapshotFields(public)
 }
 func canonicalDomainSegment(segment RedactedSegment) (RedactedSegment, error) {
 	public, err := redactedSegmentToPublic(segment)

@@ -31,3 +31,11 @@ func ValidateFlightStateSnapshot(snapshot FlightStateSnapshot) error {
 	_, err := validFlightStateSnapshot(snapshot)
 	return err
 }
+
+// ValidateFlightStateSnapshotFields checks only snapshot key and scalar fields.
+// It does not validate Request and is incomplete for wire admission. Domain
+// callers must separately validate their typed execution request with its owner;
+// public wire callers must use full snapshot or operation validation instead.
+func ValidateFlightStateSnapshotFields(snapshot FlightStateSnapshot) error {
+	return validateFlightStateSnapshotFields(snapshot)
+}
