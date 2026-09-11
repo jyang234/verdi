@@ -1,0 +1,1 @@
+{"ack":{"epoch":"epoch-1","event_digest":"sha256:301ed869bd08ab15d310ea77164faf5b23bda12d0d7a80280ef06021920f43f3","flight":"flight-1","global_sequence":1,"kind":"adapter-stop","lane":"lane-1","manifest_revision":0,"schema":"verdi.context-event-ack/v1","session":"session-1","source_sequence":1},"schema":"verdi.context-owner/recorder-append-result/v1"}

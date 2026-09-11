@@ -1,0 +1,1 @@
+{"call_sequence":1,"operation":"resolve-redacted-segment","payload":{"reference":"controller-segment/sha256/ecf59a2696ca44a417e20e2a7eabb1b26e82c779f8546bea354a2cc80e8e1eed","schema":"verdi.context-owner/resolve-redacted-segment-request/v1"},"schema":"verdi.context-controller-call/v2"}

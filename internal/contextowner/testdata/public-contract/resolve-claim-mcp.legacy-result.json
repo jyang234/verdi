@@ -1,0 +1,1 @@
+{"registration":{"name":"vatc","request_digest":"sha256:75fb5dc004da550bb47ab0c343ef48a49cdc5201f20d59928bd1c6f20097f64d","schema":"verdi.claim-mcp-registration/v1","tools":["claim_paths"],"type":"http","url":"http://127.0.0.1:45001/mcp"},"schema":"verdi.context-controller/resolve-claim-mcp-result/v1"}

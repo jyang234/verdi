@@ -1,0 +1,1 @@
+{"call_sequence":1,"operation":"verify-opaque-boundary","payload":{"rows":[],"schema":"verdi.context-owner/verify-opaque-boundary-request/v1"},"schema":"verdi.context-controller-call/v2"}

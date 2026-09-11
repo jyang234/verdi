@@ -1,0 +1,1 @@
+{"call_sequence":1,"operation":"store-adapter-session","payload":{"result":{"schema":"verdi.context-controller/store-adapter-session-result/v1"}},"schema":"verdi.context-controller-result/v1"}

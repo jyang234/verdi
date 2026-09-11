@@ -1,0 +1,1 @@
+{"controller_request_digest":"sha256:01bb8a292ed8d8cc24583254ba21cf5b6714d280d425236c4dd1ef00df0fba57","operation":"recorder-checkpoint","request":{"key":{"epoch":"epoch-1","flight":"flight-1","lane":"lane-1"},"schema":"verdi.context-owner/recorder-checkpoint-request/v1"},"schema":"verdi.context-owner-call/v1"}

@@ -1,0 +1,17 @@
+Generated at Verdi commit 4502917a8ec5cb4f34f125d9ba71ed493065b8aa
+(runtime-identical to pinned baseline 8ab423fefa14f6cee3070ca96754928daf28c062)
+by the one-shot env-gated generator test TestFreezePublicContractFixtures, run
+BEFORE any v2 codec change existed in this repository.
+
+Arms, wrappers, legacy payloads, and v1 frames in this directory are the exact
+output of the baseline encoders: contextowner.EncodeCall, contextowner.EncodeReply,
+sealedexec.EncodeControllerCall, sealedexec.EncodeControllerResult, and the
+sealedexec owner bridge (DecodeOwnerCall/EncodeOwnerReply). The v2 call and
+result frames, and the error v2 frame, are literal string compositions
+assembled by hand from those same baseline bytes -- never produced by any
+encoder.
+
+These bytes are the oracle for the v2 transport. They must never be
+regenerated with a later encoder, and this generator refuses to run again
+once this directory already carries a manifest. Task 2 copies these exact
+bytes into ATC testdata.
