@@ -65,6 +65,15 @@ func HasRelations(operation Operation) bool {
 // operations are named explicitly rather than falling through a default, so
 // an operation this package's registry ever grows to include cannot slip
 // through unclassified.
+//
+// Precondition: reply must be one DecodeReply or NewReply produced. This
+// function validates relations only; it never re-runs structural validation,
+// so a hand-built Reply literal that skipped the decode is not structurally
+// validated here and can pass vacuously rather than erroring -- a zero-valued
+// call and result compare two empty refs equal, a nil active revision carries
+// no acknowledgment to check, and zero declared rows match zero reported
+// identities. A caller that checks relations without first decoding therefore
+// proves nothing about the reply.
 func ValidateRelations(reply Reply) error {
 	switch operation := reply.Call.Operation; operation {
 	case OperationVerifyAuthority:
