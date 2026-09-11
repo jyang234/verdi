@@ -662,7 +662,7 @@ func SourceChecks(ctx context.Context, verdiDir, atcDir string) ([]SourceCheck, 
 	if err = sourceDependencyCheck(ctx, atcDir, "github.com/jyang234/verdi"); err != nil {
 		return nil, err
 	}
-	if err = add("ac-5", "sole-owner-wire-and-retained-domain", "verdi", v, []string{"internal/sealedexec/controller_codec.go", "internal/sealedexec/controller_domain_conversion.go", "internal/sealedexec/controller_owner_conversion.go", "internal/sealedexec/detail.go", "internal/sealedexec/mcpcompile.go", "internal/contextowner/fragments.go"}, "Closed framing/claims-only private wire declaration inventory; actual retained nontransport domain validator calls; go list dependency exclusion in both repositories; accepted Task4 witness SHA256 "+sourceWitnessSHA); err != nil {
+	if err = add("ac-5", "sole-owner-wire-and-retained-domain", "verdi", v, []string{"internal/sealedexec/controller_codec.go", "internal/sealedexec/controller_domain_conversion.go", "internal/sealedexec/controller_owner_conversion.go", "internal/sealedexec/detail.go", "internal/sealedexec/mcpcompile.go", "internal/contextowner/fragments.go"}, "Exhaustive framing/claims-only private wire declaration inventory; actual retained nontransport domain validator calls; go list dependency exclusion in both repositories; accepted Task4 witness SHA256 "+sourceWitnessSHA); err != nil {
 		return nil, err
 	}
 	for _, r := range []struct{ prefix, root, path string }{
