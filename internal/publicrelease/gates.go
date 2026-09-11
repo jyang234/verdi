@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"regexp"
 	"sort"
 	"strings"
 )
@@ -159,6 +160,26 @@ func allowedHistoricalSkip(pkg, name, reason string, atc bool) bool {
 	if atc {
 		return pkg == "github.com/jyang234/verdi-atc/internal/verdiproto" && historicalATCSkips[name] && reason != ""
 	}
+
+	// These unchanged, non-required suite cases are disclosures, never passes.
+	// Match the whole captured skip message; only Go's location and elapsed time
+	// may vary. A generator remains disabled and optional integrations stay optional.
+	var message string
+	switch pkg + ":" + name {
+	case "github.com/jyang234/verdi/internal/bundle:TestGenerateBundleGolden":
+		message = "set VERDI_GENGOLDEN=1 to (re)generate testdata/svcfix-canned/bundle-golden/"
+	case "github.com/jyang234/verdi/internal/execworkspace:TestEncodeDecodeSidecar_RoundTripsToAnEqualIdentity/invalid_utf-8":
+		message = `NewExactIdentity("run-\xff\xfe-x") rejected the run id: execworkspace: identity: run id "run-\xff\xfe-x" is not valid UTF-8`
+	case "github.com/jyang234/verdi/internal/execworkspace:TestExecworkspaceHelperSleep":
+		message = "not the re-exec helper: -execworkspace.helper.sleep unset"
+	case "github.com/jyang234/verdi/internal/upstream:TestIntegration_LocalBinaries":
+		message = "VERDI_S1_BIN not set: skipping the optional real-toolchain integration test (disclosed skip, not a silent pass — see localbin_test.go)"
+	}
+	if message != "" {
+		pattern := `^=== RUN   ` + regexp.QuoteMeta(name) + `\n    [^\n]+\.go:[0-9]+: ` + regexp.QuoteMeta(message) + `\n--- SKIP: ` + regexp.QuoteMeta(name) + ` \([0-9]+\.[0-9]{2}s\)\n$`
+		return regexp.MustCompile(pattern).MatchString(reason)
+	}
+
 	if pkg != "github.com/jyang234/verdi/internal/specalign" || !strings.Contains(reason, "DISCLOSURE:") || !strings.Contains(reason, "SKIP, not a pass") {
 		return false
 	}

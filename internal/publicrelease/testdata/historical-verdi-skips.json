@@ -1,0 +1,22 @@
+[
+  {
+    "package": "github.com/jyang234/verdi/internal/bundle",
+    "test": "TestGenerateBundleGolden",
+    "reason": "=== RUN   TestGenerateBundleGolden\n    gengolden_test.go:19: set VERDI_GENGOLDEN=1 to (re)generate testdata/svcfix-canned/bundle-golden/\n--- SKIP: TestGenerateBundleGolden (0.00s)\n"
+  },
+  {
+    "package": "github.com/jyang234/verdi/internal/execworkspace",
+    "test": "TestEncodeDecodeSidecar_RoundTripsToAnEqualIdentity/invalid_utf-8",
+    "reason": "=== RUN   TestEncodeDecodeSidecar_RoundTripsToAnEqualIdentity/invalid_utf-8\n    identity_test.go:303: NewExactIdentity(\"run-\\xff\\xfe-x\") rejected the run id: execworkspace: identity: run id \"run-\\xff\\xfe-x\" is not valid UTF-8\n--- SKIP: TestEncodeDecodeSidecar_RoundTripsToAnEqualIdentity/invalid_utf-8 (0.00s)\n"
+  },
+  {
+    "package": "github.com/jyang234/verdi/internal/execworkspace",
+    "test": "TestExecworkspaceHelperSleep",
+    "reason": "=== RUN   TestExecworkspaceHelperSleep\n    launch_test.go:28: not the re-exec helper: -execworkspace.helper.sleep unset\n--- SKIP: TestExecworkspaceHelperSleep (0.00s)\n"
+  },
+  {
+    "package": "github.com/jyang234/verdi/internal/upstream",
+    "test": "TestIntegration_LocalBinaries",
+    "reason": "=== RUN   TestIntegration_LocalBinaries\n    localbin_test.go:51: VERDI_S1_BIN not set: skipping the optional real-toolchain integration test (disclosed skip, not a silent pass \u2014 see localbin_test.go)\n--- SKIP: TestIntegration_LocalBinaries (0.00s)\n"
+  }
+]
