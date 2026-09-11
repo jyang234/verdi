@@ -155,7 +155,7 @@ func consolidationValidateWitness(t *testing.T, b []byte) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				if consolidationDigest(b) != want {
+				if !consolidationATCSourceMatches(path, want, b) {
 					t.Fatalf("stale ATC witness source %s", path)
 				}
 			}
@@ -276,4 +276,17 @@ func consolidationValidateWitness(t *testing.T, b []byte) {
 			ids[row.ID] = true
 		}
 	}
+}
+
+// The immutable Task4 witness remains historical. This sole later correction
+// binds exact reviewed bytes and proves the inverse edit recovers those bytes.
+func consolidationATCSourceMatches(path, want string, source []byte) bool {
+	if consolidationDigest(source) == want {
+		return true
+	}
+	if path != consolidationATCBoundPath || want != consolidationATCBeforeBound || consolidationDigest(source) != consolidationATCAfterBound {
+		return false
+	}
+	guard := []byte(consolidationATCBoundGuard)
+	return bytes.Count(source, guard) == 1 && consolidationDigest(bytes.Replace(source, guard, nil, 1)) == want
 }

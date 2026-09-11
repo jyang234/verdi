@@ -72,7 +72,9 @@
         "V:internal/sealedexec:TestPublicControllerConsolidationReceiptEventKind",
         "V:internal/sealedexec:TestPublicControllerConsolidationSupplement",
         "V:internal/sealedexec:TestPublicControllerConsolidationWitness",
-        "V:internal/sealedexec:TestPublicControllerConsolidationWitnessSensitivity"
+        "V:internal/sealedexec:TestPublicControllerConsolidationWitnessSensitivity",
+        "A:internal/verdiproto:TestControllerSuccessFrameBoundIsExclusiveAndReusable",
+        "A:internal/verdiproto:TestControllerSuccessMalformedRenderRefuses"
       ]
     },
     {
@@ -229,7 +231,10 @@
         "V:internal/sealedexec:TestPublicControllerConsolidationReceiptEventKind",
         "V:internal/sealedexec:TestPublicControllerConsolidationSupplement",
         "V:internal/sealedexec:TestPublicControllerConsolidationWitness",
-        "V:internal/sealedexec:TestPublicControllerConsolidationWitnessSensitivity"
+        "V:internal/sealedexec:TestPublicControllerConsolidationWitnessSensitivity",
+        "A:internal/verdiproto:TestControllerSuccessFrameBoundIsExclusiveAndReusable",
+        "A:internal/verdiproto:TestControllerSuccessMalformedRenderRefuses",
+        "V:internal/sealedexec:TestPublicControllerConsolidationBoundCorrection"
       ]
     },
     {
@@ -249,7 +254,8 @@
         "V:internal/sealedexec:TestPublicControllerConsolidationReceiptEventKind",
         "V:internal/sealedexec:TestPublicControllerConsolidationSupplement",
         "V:internal/sealedexec:TestPublicControllerConsolidationWitness",
-        "V:internal/sealedexec:TestPublicControllerConsolidationWitnessSensitivity"
+        "V:internal/sealedexec:TestPublicControllerConsolidationWitnessSensitivity",
+        "V:internal/sealedexec:TestPublicControllerConsolidationBoundCorrection"
       ]
     }
   ],
@@ -11433,6 +11439,49 @@
         "TestBoundaryBaselineAuthentication/nonexecutable-binary",
         "TestBoundaryBaselineAuthentication/missing-binary",
         "TestBoundaryBaselineAuthentication/unbuildable-package"
+      ]
+    },
+    "A:internal/verdiproto:TestControllerSuccessFrameBoundIsExclusiveAndReusable": {
+      "repo": "A",
+      "package": "internal/verdiproto",
+      "name": "TestControllerSuccessFrameBoundIsExclusiveAndReusable",
+      "required": [
+        "TestControllerSuccessFrameBoundIsExclusiveAndReusable",
+        "TestControllerSuccessFrameBoundIsExclusiveAndReusable/33554431",
+        "TestControllerSuccessFrameBoundIsExclusiveAndReusable/33554432",
+        "TestControllerSuccessFrameBoundIsExclusiveAndReusable/33554433"
+      ]
+    },
+    "A:internal/verdiproto:TestControllerSuccessMalformedRenderRefuses": {
+      "repo": "A",
+      "package": "internal/verdiproto",
+      "name": "TestControllerSuccessMalformedRenderRefuses",
+      "required": [
+        "TestControllerSuccessMalformedRenderRefuses"
+      ]
+    },
+    "V:internal/sealedexec:TestPublicControllerConsolidationBoundCorrection": {
+      "repo": "V",
+      "package": "internal/sealedexec",
+      "name": "TestPublicControllerConsolidationBoundCorrection",
+      "required": [
+        "TestPublicControllerConsolidationBoundCorrection",
+        "TestPublicControllerConsolidationBoundCorrection/pure",
+        "TestPublicControllerConsolidationBoundCorrection/pure/unchanged-source",
+        "TestPublicControllerConsolidationBoundCorrection/pure/unknown-source-change",
+        "TestPublicControllerConsolidationBoundCorrection/pure/unknown-controller-bytes",
+        "TestPublicControllerConsolidationBoundCorrection/peer",
+        "TestPublicControllerConsolidationBoundCorrection/peer/historical",
+        "TestPublicControllerConsolidationBoundCorrection/peer/corrected",
+        "TestPublicControllerConsolidationBoundCorrection/peer/wrong-path",
+        "TestPublicControllerConsolidationBoundCorrection/peer/wrong-historical-hash",
+        "TestPublicControllerConsolidationBoundCorrection/peer/changed-bound",
+        "TestPublicControllerConsolidationBoundCorrection/peer/repeated-guard",
+        "TestPublicControllerConsolidationBoundCorrection/peer/removed-guard-and-mutated-source",
+        "TestPublicControllerConsolidationBoundCorrection/peer/unknown-mutation",
+        "TestPublicControllerConsolidationBoundCorrection/peer/paired-current",
+        "TestPublicControllerConsolidationBoundCorrection/peer/paired-historical",
+        "TestPublicControllerConsolidationBoundCorrection/peer/paired-unknown-mutation"
       ]
     }
   }

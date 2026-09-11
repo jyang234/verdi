@@ -47,3 +47,39 @@ func TestClosedTenProducerDeclarations(t *testing.T) {
 		})
 	}
 }
+
+func TestFinalFrameBoundCorrectionsAreRequired(t *testing.T) {
+	d, err := readDeclarations(checkBytes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, scope := range []struct {
+		producer string
+		roots    []string
+	}{
+		{"public-execution-contract:ac-2:behavioral", []string{"A:internal/verdiproto:TestControllerSuccessFrameBoundIsExclusiveAndReusable", "A:internal/verdiproto:TestControllerSuccessMalformedRenderRefuses"}},
+		{"public-execution-contract:ac-5:behavioral", []string{"A:internal/verdiproto:TestControllerSuccessFrameBoundIsExclusiveAndReusable", "A:internal/verdiproto:TestControllerSuccessMalformedRenderRefuses", "V:internal/sealedexec:TestPublicControllerConsolidationBoundCorrection"}},
+		{"public-execution-contract:ac-5:static", []string{"V:internal/sealedexec:TestPublicControllerConsolidationBoundCorrection"}},
+	} {
+		t.Run(scope.producer, func(t *testing.T) {
+			found := map[string]bool{}
+			for _, p := range d.Producers {
+				if p.ID == scope.producer {
+					for _, key := range p.Checks {
+						found[key] = true
+					}
+				}
+			}
+			for _, key := range scope.roots {
+				r, ok := d.Tests[key]
+				if !found[key] || !ok {
+					t.Errorf("missing required correction %s", key)
+					continue
+				}
+				if len(r.Required) == 0 {
+					t.Errorf("missing required correction descendants %s", key)
+				}
+			}
+		})
+	}
+}
