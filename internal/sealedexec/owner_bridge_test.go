@@ -650,10 +650,8 @@ func TestContextOwnerBridgeCrossMatch(t *testing.T) {
 	}
 	t.Run("atc-owned operation 23 is refused before classification", func(t *testing.T) {
 		operation := ControllerOperationResolveClaimMCP
-		call := controllerCallFixture(t, 1, operation)
-		result := ownerResultFixture(t, operation)
-		if err := crossMatchOwnerResult(call, result); err == nil {
-			t.Fatal("crossMatchOwnerResult classified the ATC-owned operation instead of refusing it")
+		if _, err := EncodeOwnerReply(operation, contextowner.Reply{}); !errors.Is(err, ErrOwnerReplyRefused) || !strings.Contains(err.Error(), "operation is not published") {
+			t.Fatalf("EncodeOwnerReply must refuse the ATC-owned operation: %v", err)
 		}
 	})
 

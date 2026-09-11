@@ -1024,13 +1024,11 @@ func TestContextControllerWireContract_Static(t *testing.T) {
 		t.Run("represented-byte digest", func(t *testing.T) {
 			receipt, event, _ := controllerReceiptFixture(t, request)
 			appendValue := ReceiptAppend{Receipt: receipt, Event: event}
-			receiptBytes, err := contextreceipt.EncodeReceipt(receipt)
-			if err != nil {
-				t.Fatal(err)
-			}
 			appendValue.Event.Payload.(*contextevent.ReceiptPayload).Detail.Digest = testDigest("wrong-represented-bytes")
-			if err := validateReceiptAppend(appendValue, receiptBytes); err == nil {
-				t.Fatal("validateReceiptAppend accepted a digest that does not authenticate exact carried redacted_json bytes")
+			call := ControllerCall{Schema: ControllerCallSchemaID, CallSequence: 1, Operation: ControllerOperationAppendReceipt}
+			call.AppendReceipt = ControllerAppendReceiptRequest{Schema: controllerRequestSchema(call.Operation), Append: appendValue}
+			if _, err := EncodeControllerCall(call); err == nil {
+				t.Fatal("EncodeControllerCall accepted a digest that does not authenticate exact carried redacted_json bytes")
 			}
 		})
 		for name, mutate := range map[string]func(*ReceiptAppend){
@@ -2145,7 +2143,7 @@ func TestControllerInstallExpansionRequestV2(t *testing.T) {
 // result wire (and epoch-check's embedded resolution), `data` is required
 // and validated exactly as before when the resolution is proven, and MUST
 // be absent — the member omitted, not nulled — when the resolution is
-// non-proven. Before this entry contextResolutionToWire/FromWire
+// non-proven. Before SI-194 the private resolution codec
 // unconditionally required a valid contextcompile.DataItem for every
 // resolution state, so an honest external owner could not answer a denied
 // or absent ref without fabricating a data item.
@@ -2173,15 +2171,15 @@ func TestContextResolutionWireDataPresence(t *testing.T) {
 			{name: "violated-with-data refused", res: ContextResolution{Verification: violatedState, Ref: "spec/test#ac-1", Data: item}, wantErr: true},
 		} {
 			t.Run(tc.name, func(t *testing.T) {
-				wire, err := contextResolutionToWire(tc.res)
+				wire, err := encodeResolutionForContract(tc.res)
 				if tc.wantErr {
 					if err == nil {
-						t.Fatalf("contextResolutionToWire(%+v) = %+v, want a refusal", tc.res, wire)
+						t.Fatalf("encodeResolutionForContract(%+v) = %+v, want a refusal", tc.res, wire)
 					}
 					return
 				}
 				if err != nil {
-					t.Fatalf("contextResolutionToWire(%+v): %v", tc.res, err)
+					t.Fatalf("encodeResolutionForContract(%+v): %v", tc.res, err)
 				}
 				proven := tc.res.State == contextcompile.ResolutionProven
 				if proven && len(wire.Data) == 0 {
@@ -2198,9 +2196,9 @@ func TestContextResolutionWireDataPresence(t *testing.T) {
 	// rather than null it — proven separately from the length check above,
 	// which a `"data":null` payload (4 bytes) would not catch.
 	t.Run("non-proven encoding omits the data member entirely", func(t *testing.T) {
-		wire, err := contextResolutionToWire(ContextResolution{Verification: nonProvenState, Ref: "spec/test#ac-1"})
+		wire, err := encodeResolutionForContract(ContextResolution{Verification: nonProvenState, Ref: "spec/test#ac-1"})
 		if err != nil {
-			t.Fatalf("contextResolutionToWire: %v", err)
+			t.Fatalf("encodeResolutionForContract: %v", err)
 		}
 		encoded, err := canonjson.Marshal(wire)
 		if err != nil {
@@ -2212,15 +2210,15 @@ func TestContextResolutionWireDataPresence(t *testing.T) {
 	})
 
 	t.Run("decode", func(t *testing.T) {
-		provenWire, err := contextResolutionToWire(ContextResolution{Verification: provenState, Ref: "spec/test#ac-1", Data: item})
+		provenWire, err := encodeResolutionForContract(ContextResolution{Verification: provenState, Ref: "spec/test#ac-1", Data: item})
 		if err != nil {
 			t.Fatalf("build proven wire fixture: %v", err)
 		}
-		nonProvenWire, err := contextResolutionToWire(ContextResolution{Verification: nonProvenState, Ref: "spec/test#ac-1"})
+		nonProvenWire, err := encodeResolutionForContract(ContextResolution{Verification: nonProvenState, Ref: "spec/test#ac-1"})
 		if err != nil {
 			t.Fatalf("build non-proven wire fixture: %v", err)
 		}
-		violatedWire, err := contextResolutionToWire(ContextResolution{Verification: violatedState, Ref: "spec/test#ac-1"})
+		violatedWire, err := encodeResolutionForContract(ContextResolution{Verification: violatedState, Ref: "spec/test#ac-1"})
 		if err != nil {
 			t.Fatalf("build violated wire fixture: %v", err)
 		}
@@ -2240,10 +2238,14 @@ func TestContextResolutionWireDataPresence(t *testing.T) {
 		emptyObjectOnNonProven.Data = []byte("{}")
 		emptyStringOnNonProven := nonProvenWire
 		emptyStringOnNonProven.Data = []byte(`""`)
+		nullOnNonProven := nonProvenWire
+		nullOnNonProven.Data = []byte("null")
+		nullOnProven := provenWire
+		nullOnProven.Data = []byte("null")
 
 		for _, tc := range []struct {
 			name    string
-			wire    contextResolutionWire
+			wire    contextowner.ContextResolution
 			wantErr bool
 		}{
 			{name: "proven-with-data ok", wire: provenWire},
@@ -2254,23 +2256,25 @@ func TestContextResolutionWireDataPresence(t *testing.T) {
 			{name: "violated-with-data refused", wire: dataOnViolated, wantErr: true},
 			{name: "non-proven-with-empty-object-data refused", wire: emptyObjectOnNonProven, wantErr: true},
 			{name: "non-proven-with-empty-string-data refused", wire: emptyStringOnNonProven, wantErr: true},
+			{name: "non-proven-with-null-data refused", wire: nullOnNonProven, wantErr: true},
+			{name: "proven-with-null-data refused", wire: nullOnProven, wantErr: true},
 		} {
 			t.Run(tc.name, func(t *testing.T) {
-				resolution, err := contextResolutionFromWire(tc.wire)
+				resolution, err := decodeResolutionForContract(tc.wire)
 				if tc.wantErr {
 					if err == nil {
-						t.Fatalf("contextResolutionFromWire(%+v) = %+v, want a refusal", tc.wire, resolution)
+						t.Fatalf("decodeResolutionForContract(%+v) = %+v, want a refusal", tc.wire, resolution)
 					}
 					return
 				}
 				if err != nil {
-					t.Fatalf("contextResolutionFromWire(%+v): %v", tc.wire, err)
+					t.Fatalf("decodeResolutionForContract(%+v): %v", tc.wire, err)
 				}
 				// Round-trip property: ToWire(FromWire(w)) == w, for both
 				// the proven and the non-proven arm.
-				back, err := contextResolutionToWire(resolution)
+				back, err := encodeResolutionForContract(resolution)
 				if err != nil {
-					t.Fatalf("contextResolutionToWire(FromWire(w)): %v", err)
+					t.Fatalf("encodeResolutionForContract(FromWire(w)): %v", err)
 				}
 				if !reflect.DeepEqual(back, tc.wire) {
 					t.Fatalf("ToWire(FromWire(w)) = %+v, want %+v", back, tc.wire)
@@ -2283,28 +2287,28 @@ func TestContextResolutionWireDataPresence(t *testing.T) {
 	// (the Contract explicitly covers "epoch-check's embedded resolution").
 	t.Run("epoch check embeds the same rule", func(t *testing.T) {
 		provenCheck := controllerEpochCheckFixture(t)
-		if _, err := epochCheckToWire(provenCheck); err != nil {
-			t.Fatalf("epochCheckToWire(proven): %v", err)
+		if _, err := encodeEpochCheckForContract(provenCheck); err != nil {
+			t.Fatalf("encodeEpochCheckForContract(proven): %v", err)
 		}
 		nonProvenCheck := provenCheck
 		nonProvenCheck.Resolution = ContextResolution{Verification: nonProvenState, Ref: provenCheck.Resolution.Ref}
-		wire, err := epochCheckToWire(nonProvenCheck)
+		wire, err := encodeEpochCheckForContract(nonProvenCheck)
 		if err != nil {
-			t.Fatalf("epochCheckToWire(non-proven, no data): %v", err)
+			t.Fatalf("encodeEpochCheckForContract(non-proven, no data): %v", err)
 		}
 		if len(wire.Resolution.Data) != 0 {
 			t.Fatalf("non-proven epoch-check resolution carries data: %+v", wire.Resolution)
 		}
 		illegal := nonProvenCheck
 		illegal.Resolution.Data = provenCheck.Resolution.Data
-		if _, err := epochCheckToWire(illegal); err == nil {
-			t.Fatal("epochCheckToWire accepted a non-proven embedded resolution carrying a data item")
+		if _, err := encodeEpochCheckForContract(illegal); err == nil {
+			t.Fatal("encodeEpochCheckForContract accepted a non-proven embedded resolution carrying a data item")
 		}
-		roundTripped, err := epochCheckFromWire(wire)
+		roundTripped, err := decodeEpochCheckForContract(wire)
 		if err != nil {
-			t.Fatalf("epochCheckFromWire: %v", err)
+			t.Fatalf("decodeEpochCheckForContract: %v", err)
 		}
-		rewired, err := epochCheckToWire(roundTripped)
+		rewired, err := encodeEpochCheckForContract(roundTripped)
 		if err != nil {
 			t.Fatalf("re-encode round-tripped epoch check: %v", err)
 		}
