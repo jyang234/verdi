@@ -1,0 +1,11 @@
+{
+  "Exit": 0,
+  "Stdout": "exact handoff\n",
+  "Stderr": "",
+  "Trace": null,
+  "Records": {
+    "Ledger": [],
+    "Recorder": [],
+    "Controls": []
+  }
+}

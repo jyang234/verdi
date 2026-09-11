@@ -1,0 +1,21 @@
+{
+  "Exit": 0,
+  "Stdout": "exact handoff\n",
+  "Stderr": "",
+  "Trace": [
+    {
+      "kind": "launch",
+      "pid": 42,
+      "args": [
+        "context",
+        "execution",
+        "--request"
+      ]
+    }
+  ],
+  "Records": {
+    "Ledger": [],
+    "Recorder": [],
+    "Controls": []
+  }
+}

@@ -316,3 +316,11 @@ verify: build fmt-check vet lint test fixture lint-store spec-align lint-showcas
 
 tidy:
 	go mod tidy
+
+# Auxiliary local paired release proof. Both source/build identities and baseline
+# paths are mandatory command arguments; ordinary verify composition is unchanged.
+.PHONY: public-execution-contract-release
+public-execution-contract-release:
+	mkdir -p .build
+	go build -trimpath -o .build/public-execution-contract-release ./cmd/public-execution-contract-release
+	.build/public-execution-contract-release $(PUBLIC_RELEASE_ARGS)
