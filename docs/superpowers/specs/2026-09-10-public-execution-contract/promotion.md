@@ -81,3 +81,22 @@ is required because one repository's unit suite cannot establish the other
 endpoint's invocation order or the paired crash/rollback outcomes. The checker
 must reject missing, stale, skipped and unproven required evidence. Both
 repositories' ordinary gates remain independently required.
+
+## Obligation preparation provenance
+
+The ten `frozen: { at, commit }` blocks are the existing obligation artifact's
+mandatory creation stamps, emitted by `verdi obligation scaffold` at
+`f36be8e33f3cebea81b7c9690b5f2b8aeeeee320`. They are retained unchanged.
+They do not claim story acceptance, a completed review, or immutable proposal
+content. `spec/obligation-artifact` AC-1/DC-1 require the stamp;
+`spec/obligation-seam` AC-5 permits pre-merge authoring and derives the refusal
+to overwrite from default-branch reachability. The merge-signaled acceptance
+design moves scaffolding before review and removes the specification's
+acceptance stamp ritual; it does not remove the obligation kind's required field.
+The current shared scaffold implementation expressly stamps creation HEAD/date.
+No content-changing acceptance stamp will be written at merge.
+
+The paired release job emits a distinct result for each of the ten exact
+producer identities. A job-level green status cannot substitute for a missing
+per-obligation result. This restates the declared producer-matching and
+missing-evidence refusal, without adding a public protocol surface.

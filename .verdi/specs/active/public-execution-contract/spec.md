@@ -61,31 +61,31 @@ removes the duplicate serialized operation representation. Both are required.
 
 The matched Verdi and ATC pair exchanges the 22 public owner arms and the fixed local claims exception over strict FD3 v2, with zero production owner decode/encode subprocess launches and unchanged standalone bridge commands.
 
-FD3 codecs, all openSealedController consumers, ATC routing, standalone bridge compatibility, literal fixtures for all 23 operations, and built-binary launch traces.
+Scope: FD3 codecs, all openSealedController consumers, ATC routing, standalone bridge compatibility, literal fixtures for all 23 operations, and built-binary launch traces.
 
 ### AC-2
 
 Both endpoints preserve structural validation and independently enforce all 16 published request/result relations at their required invocation points; ATC validates a recorder arm before observing its event, and both receivers enforce the exclusive 32 MiB bound while reading with the existing capability-usability distinction.
 
-All 22 owner arms, six explicitly classified no-extra-relation arms, claims registration, recorder observation, incremental reply reading, cancellation, EOF, partial frames, and the check-to-function/invocation/mutation witness.
+Scope: All 22 owner arms, six explicitly classified no-extra-relation arms, claims registration, recorder observation, incremental reply reading, cancellation, EOF, partial frames, and the check-to-function/invocation/mutation witness.
 
 ### AC-3
 
 The legacy controller request digest preimage for operations 1–22, every durable format, receipt event/control-triple ordering, recovery authority outcome, and copied-store replay in both directions remain as fixed in contract sections 2.2 and 4–5.
 
-Golden preimages, dispatch and receipt identities, two receipt writes, all five deterministic process-crash cuts under baseline and candidate, actual re-entry classifiers/exits/rows/launches, and two-way copied-store decode/replay.
+Scope: Golden preimages, dispatch and receipt identities, two receipt writes, all five deterministic process-crash cuts under baseline and candidate, actual re-entry classifiers/exits/rows/launches, and two-way copied-store decode/replay.
 
 ### AC-4
 
 New ATC queries the actual pinned v2 contract on every run before flight effects; the release moves all Verdi FD3 consumers together and supports only the specified quiescent matched-pair upgrade and rollback with exact artifact identities.
 
-Actual-run and dry-run version matrix, all Verdi controller hosts, pre-effect refusal evidence, baseline stored-plan limitation, copied stores, exact source commits/binary hashes/contract bytes, and offline rollout instructions.
+Scope: Actual-run and dry-run version matrix, all Verdi controller hosts, pre-effect refusal evidence, baseline stored-plan limitation, copied stores, exact source commits/binary hashes/contract bytes, and offline rollout instructions.
 
 ### AC-5
 
 The completed change removes Verdi’s separate private serialized operation representation, preserves required domain conversions and validators, and returns a deletion inventory with each removed check mapped to its new function, invocation point, and rejecting mutation.
 
-Verdi contextowner and sealedexec seams, ATC independent public validator, standalone compatibility verbs, retained domain/artifact validators, and the completed two-flight release evidence.
+Scope: Verdi contextowner and sealedexec seams, ATC independent public validator, standalone compatibility verbs, retained domain/artifact validators, and the completed two-flight release evidence.
 
 ## Decisions
 
