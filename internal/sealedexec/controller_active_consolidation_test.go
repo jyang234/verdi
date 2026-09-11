@@ -45,6 +45,11 @@ func TestPublicControllerConsolidationActiveChecks(t *testing.T) {
 		mutate     func(*RecorderCheckpoint)
 	}{
 		{"invalid-ack", "events", func(c *RecorderCheckpoint) { c.ActiveRevision.EventAcks[0].Schema = "wrong" }},
+		{"missing-ack-and-prior-event-digest", "events", func(c *RecorderCheckpoint) {
+			c.ActiveRevision.EventAcks[0].EventDigest = ""
+			c.ActiveRevision.PriorEventDigest = ""
+		}},
+		{"prior-event-digest-contradicts-ack", "events", func(c *RecorderCheckpoint) { c.ActiveRevision.PriorEventDigest = "" }},
 		{"first-ack-not-after-complete", "events", func(c *RecorderCheckpoint) {
 			a := c.ActiveRevision
 			a.EventAcks[0].GlobalSequence = c.TerminalGlobalSequence
@@ -58,6 +63,8 @@ func TestPublicControllerConsolidationActiveChecks(t *testing.T) {
 			c.ActiveRevision.PriorRevision = &contextevent.PriorRevision{ManifestRevision: 0, ManifestDigest: testDigest("prior"), EventRoot: testDigest("root"), TerminalSourceSequence: 1, TerminalGlobalSequence: 1}
 		}},
 		{"bridge-zero-terminal", "omitted", func(c *RecorderCheckpoint) { c.ActiveRevision.PriorRevision.TerminalSourceSequence = 0 }},
+		{"bridge-missing-manifest-digest", "omitted", func(c *RecorderCheckpoint) { c.ActiveRevision.PriorRevision.ManifestDigest = "" }},
+		{"bridge-missing-event-root", "omitted", func(c *RecorderCheckpoint) { c.ActiveRevision.PriorRevision.EventRoot = "" }},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

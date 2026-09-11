@@ -74,9 +74,32 @@ func consolidationReadStrict(t *testing.T, path string, value any) []byte {
 // This is the release-runner entrypoint for source-bound deletion preservation.
 // It replays referenced immutable operands and the named negative caller tests;
 // the separately sealed observation packet establishes the old/new call sites.
+// Opaque nested metadata is authenticated by the reviewed document's exact
+// digest, not by a general RawMessage schema validator. Source and test hashes
+// bind its named assertion-bearing roots; this checker is excluded to avoid a
+// self-reference. The immutable metadata binding does not replace fresh replay.
 func TestPublicControllerConsolidationWitness(t *testing.T) {
+	b, err := os.ReadFile(filepath.Join("testdata", "public-consolidation", "checks.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	consolidationValidateWitness(t, b)
+}
+
+func consolidationValidateWitness(t *testing.T, b []byte) {
+	t.Helper()
+	if consolidationDigest(b) != "d293818aefb2950418e1f84d13240b83dac539f5a385b548b2ce73e99eea14a4" {
+		t.Fatal("witness metadata does not match the reviewed immutable document")
+	}
 	var w consolidationWitness
-	consolidationReadStrict(t, filepath.Join("testdata", "public-consolidation", "checks.json"), &w)
+	d := json.NewDecoder(bytes.NewReader(b))
+	d.DisallowUnknownFields()
+	if err := d.Decode(&w); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.Decode(new(any)); err != io.EOF {
+		t.Fatalf("witness trailing JSON: %v", err)
+	}
 	if w.Schema != "verdi.public-consolidation-witness/v1" || w.Baseline != "e671a326418fdfb672a92398228bafcac184c99f" || w.BaselineTree != "0cc835c72aa5ef6f6299026632edf816003d3b32" {
 		t.Fatal("wrong accepted source binding")
 	}
