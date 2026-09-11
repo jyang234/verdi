@@ -430,8 +430,10 @@ type ControllerResolveClaimMCPResult struct {
 	Registration ClaimMCPRegistration
 }
 
-// ControllerCall is a closed typed request union. Operation selects exactly
-// one operation-specific value; the wire codec emits only that payload.
+// ControllerCall is a closed execution-domain request union. These Go-only
+// arguments are converted to contextowner values; they do not define a second
+// serialized operation representation. Schema retains the legacy domain API
+// spelling while the public arm codec owns the actual wire schema.
 type ControllerCall struct {
 	Schema       string
 	CallSequence uint64
@@ -462,8 +464,9 @@ type ControllerCall struct {
 	ResolveClaimMCP                     ControllerResolveClaimMCPRequest
 }
 
-// ControllerResult is a closed typed result/error union. A valid reply has
-// either the operation-selected result value or Error, never both/neither.
+// ControllerResult holds Go-only execution-domain results after conversion
+// from validated public arms. A valid reply carries exactly one selected
+// result or Error. The operation wire representation belongs to contextowner.
 type ControllerResult struct {
 	Schema       string
 	CallSequence uint64

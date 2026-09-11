@@ -254,7 +254,7 @@ func validateChildCompileRequest(request ChildCompileRequest) error {
 	if snapshot.Invalidated {
 		return errors.New("current flight state is invalidated")
 	}
-	if _, err := flightSnapshotToWire(snapshot); err != nil {
+	if err := validateDomainSnapshot(snapshot); err != nil {
 		return fmt.Errorf("invalid current flight-state snapshot: %w", err)
 	}
 	if err := validateExecutionKey(snapshot.Key); err != nil {

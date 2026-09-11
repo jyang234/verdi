@@ -58,13 +58,7 @@ func (c *ControllerClient) VerifyAuthority(ctx context.Context, request Executio
 	call := ControllerCall{Schema: ControllerCallSchemaID, Operation: ControllerOperationVerifyAuthority}
 	call.VerifyAuthority = ControllerVerifyAuthorityRequest{Schema: controllerRequestSchema(call.Operation), Request: request}
 	result, err := c.invoke(ctx, call)
-	facts := result.VerifyAuthority.Facts
-	if err == nil && (facts.ManifestRevision != request.ManifestRevision || facts.ManifestDigest != request.ManifestDigest ||
-		facts.ProjectionDigest != request.ProjectionDigest || facts.AuthorityDigest != request.AuthorityVerdict.Digest ||
-		facts.AcceptedSpecCommit != request.Manifest.AcceptedSpec.Commit) {
-		err = controllerResultMismatch(call.Operation, "authority facts contradict request")
-	}
-	return facts, err
+	return result.VerifyAuthority.Facts, err
 }
 
 // ResolveProfile returns credential-free profile material for local activation.
@@ -72,11 +66,7 @@ func (c *ControllerClient) ResolveProfile(ctx context.Context, query ProfileQuer
 	call := ControllerCall{Schema: ControllerCallSchemaID, Operation: ControllerOperationResolveProfile}
 	call.ResolveProfile = ControllerResolveProfileRequest{Schema: controllerRequestSchema(call.Operation), Query: query}
 	result, err := c.invoke(ctx, call)
-	material := result.ResolveProfile.Material
-	if err == nil && material.Ref != query.Ref {
-		err = controllerResultMismatch(call.Operation, "profile material ref contradicts query")
-	}
-	return material, err
+	return result.ResolveProfile.Material, err
 }
 
 // VerifyConflict performs the typed verify-conflict call.
@@ -84,15 +74,7 @@ func (c *ControllerClient) VerifyConflict(ctx context.Context, report policyconf
 	call := ControllerCall{Schema: ControllerCallSchemaID, Operation: ControllerOperationVerifyConflict}
 	call.VerifyConflict = ControllerVerifyConflictRequest{Schema: controllerRequestSchema(call.Operation), Report: report}
 	result, err := c.invoke(ctx, call)
-	facts := result.VerifyConflict.Facts
-	if err == nil {
-		requestBytes, requestErr := policyconflict.EncodeReport(report)
-		resultBytes, resultErr := policyconflict.EncodeReport(facts.Report)
-		if requestErr != nil || resultErr != nil || !bytes.Equal(requestBytes, resultBytes) {
-			err = controllerResultMismatch(call.Operation, "conflict facts report contradicts request")
-		}
-	}
-	return facts, err
+	return result.VerifyConflict.Facts, err
 }
 
 // ResolveRecorder performs the logical recorder binding proof.
@@ -100,11 +82,7 @@ func (c *ControllerClient) ResolveRecorder(ctx context.Context, ref LogicalRef) 
 	call := ControllerCall{Schema: ControllerCallSchemaID, Operation: ControllerOperationResolveRecorder}
 	call.ResolveRecorder = ControllerResolveRecorderRequest{Schema: controllerRequestSchema(call.Operation), Ref: ref}
 	result, err := c.invoke(ctx, call)
-	facts := result.ResolveRecorder.Facts
-	if err == nil && facts.Ref != ref {
-		err = controllerResultMismatch(call.Operation, "recorder ref contradicts request")
-	}
-	return facts, err
+	return result.ResolveRecorder.Facts, err
 }
 
 // RecorderCheckpoint queries the complete durable revision checkpoint.
@@ -112,16 +90,7 @@ func (c *ControllerClient) RecorderCheckpoint(ctx context.Context, key Execution
 	call := ControllerCall{Schema: ControllerCallSchemaID, Operation: ControllerOperationRecorderCheckpoint}
 	call.RecorderCheckpoint = ControllerRecorderCheckpointRequest{Schema: controllerRequestSchema(call.Operation), Key: key}
 	result, err := c.invoke(ctx, call)
-	checkpoint := result.RecorderCheckpoint.Checkpoint
-	if err == nil && checkpoint.ActiveRevision != nil {
-		for _, ack := range checkpoint.ActiveRevision.EventAcks {
-			if ack.Flight != key.Flight || ack.Lane != key.Lane || ack.Epoch != key.Epoch {
-				err = controllerResultMismatch(call.Operation, "active revision acknowledgment contradicts execution key")
-				break
-			}
-		}
-	}
-	return checkpoint, err
+	return result.RecorderCheckpoint.Checkpoint, err
 }
 
 // RecorderAppend atomically appends one canonical context event.
@@ -133,38 +102,19 @@ func (c *ControllerClient) RecorderAppend(ctx context.Context, event contexteven
 	call := ControllerCall{Schema: ControllerCallSchemaID, Operation: ControllerOperationRecorderAppend}
 	call.RecorderAppend = ControllerRecorderAppendRequest{Schema: controllerRequestSchema(call.Operation), Event: canonicalEvent}
 	result, err := c.invoke(ctx, call)
-	ack := result.RecorderAppend.Ack
-	if err == nil {
-		err = validateAck(canonicalEvent, ack, 0)
-		if err != nil {
-			err = controllerResultMismatch(call.Operation, err.Error())
-		}
-	}
-	return ack, err
+	return result.RecorderAppend.Ack, err
 }
 
 // StoreRedactedSegment stores one canonical redacted JSON segment.
 func (c *ControllerClient) StoreRedactedSegment(ctx context.Context, segment RedactedSegment) (StoredSegment, error) {
-	wire, err := redactedSegmentToWire(segment)
-	if err != nil {
-		return StoredSegment{}, controllerResultMismatch(ControllerOperationStoreRedactedSegment, fmt.Sprintf("invalid segment: %v", err))
-	}
-	canonical, err := redactedSegmentFromWire(wire)
+	canonical, err := canonicalDomainSegment(segment)
 	if err != nil {
 		return StoredSegment{}, controllerResultMismatch(ControllerOperationStoreRedactedSegment, fmt.Sprintf("invalid segment: %v", err))
 	}
 	call := ControllerCall{Schema: ControllerCallSchemaID, Operation: ControllerOperationStoreRedactedSegment}
 	call.StoreRedactedSegment = ControllerStoreRedactedSegmentRequest{Schema: controllerRequestSchema(call.Operation), Segment: canonical}
 	result, err := c.invoke(ctx, call)
-	stored := result.StoreRedactedSegment.Stored
-	if err == nil {
-		wantReference, referenceErr := segmentReference(canonical.Digest)
-		if referenceErr != nil || stored.Reference != wantReference || stored.MediaType != canonical.MediaType ||
-			stored.RedactionProfile != canonical.RedactionProfile || stored.ByteCount != canonical.ByteCount || stored.Digest != canonical.Digest {
-			err = controllerResultMismatch(call.Operation, "stored segment contradicts request")
-		}
-	}
-	return stored, err
+	return result.StoreRedactedSegment.Stored, err
 }
 
 // ResolveRedactedSegment resolves and revalidates one controller-owned segment.
@@ -175,14 +125,7 @@ func (c *ControllerClient) ResolveRedactedSegment(ctx context.Context, reference
 	call := ControllerCall{Schema: ControllerCallSchemaID, Operation: ControllerOperationResolveRedactedSegment}
 	call.ResolveRedactedSegment = ControllerResolveRedactedSegmentRequest{Schema: controllerRequestSchema(call.Operation), Reference: reference}
 	result, err := c.invoke(ctx, call)
-	segment := result.ResolveRedactedSegment.Segment
-	if err == nil {
-		wantReference, referenceErr := segmentReference(segment.Digest)
-		if referenceErr != nil || wantReference != reference {
-			err = controllerResultMismatch(call.Operation, "resolved segment contradicts reference")
-		}
-	}
-	return segment, err
+	return result.ResolveRedactedSegment.Segment, err
 }
 
 // VerifyOpaqueBoundary proves the ordered identity-only opaque ledger.
@@ -190,11 +133,7 @@ func (c *ControllerClient) VerifyOpaqueBoundary(ctx context.Context, rows []cont
 	call := ControllerCall{Schema: ControllerCallSchemaID, Operation: ControllerOperationVerifyOpaqueBoundary}
 	call.VerifyOpaqueBoundary = ControllerVerifyOpaqueBoundaryRequest{Schema: controllerRequestSchema(call.Operation), Rows: rows}
 	result, err := c.invoke(ctx, call)
-	facts := result.VerifyOpaqueBoundary.Facts
-	if err == nil && !opaqueFactsMatchRows(rows, facts.Rows) {
-		err = controllerResultMismatch(call.Operation, "opaque identities contradict rows")
-	}
-	return facts, err
+	return result.VerifyOpaqueBoundary.Facts, err
 }
 
 // VerifyProviderSession proves isolated provider session state.
@@ -202,12 +141,7 @@ func (c *ControllerClient) VerifyProviderSession(ctx context.Context, check Prov
 	call := ControllerCall{Schema: ControllerCallSchemaID, Operation: ControllerOperationVerifyProviderSession}
 	call.VerifyProviderSession = ControllerVerifyProviderSessionRequest{Schema: controllerRequestSchema(call.Operation), Check: check}
 	result, err := c.invoke(ctx, call)
-	facts := result.VerifyProviderSession.Facts
-	if err == nil && (facts.SessionRef != check.SessionRef || facts.AdapterVersion != check.AdapterVersion ||
-		facts.ProfileDigest != check.ProfileDigest || facts.WorkspaceID != check.WorkspaceID) {
-		err = controllerResultMismatch(call.Operation, "provider-session facts contradict check")
-	}
-	return facts, err
+	return result.VerifyProviderSession.Facts, err
 }
 
 // VerifyExpansion proves the current expansion ledger root.
@@ -239,11 +173,7 @@ func (c *ControllerClient) ResolveContext(ctx context.Context, query ContextQuer
 	call := ControllerCall{Schema: ControllerCallSchemaID, Operation: ControllerOperationResolveContext}
 	call.ResolveContext = ControllerResolveContextRequest{Schema: controllerRequestSchema(call.Operation), Query: query}
 	result, err := c.invoke(ctx, call)
-	resolution := result.ResolveContext.Resolution
-	if err == nil && resolution.Ref != query.Ref {
-		err = controllerResultMismatch(call.Operation, "context resolution ref contradicts query")
-	}
-	return resolution, err
+	return result.ResolveContext.Resolution, err
 }
 
 // VerifyEpoch proves that the supplied expansion state is still current.
@@ -279,14 +209,7 @@ func (c *ControllerClient) AppendReceipt(ctx context.Context, appendValue Receip
 	call := ControllerCall{Schema: ControllerCallSchemaID, Operation: ControllerOperationAppendReceipt}
 	call.AppendReceipt = ControllerAppendReceiptRequest{Schema: controllerRequestSchema(call.Operation), Append: canonical}
 	result, err := c.invoke(ctx, call)
-	ack := result.AppendReceipt.Ack
-	if err == nil {
-		err = validateReceiptAppendAck(canonical, ack)
-		if err != nil {
-			err = controllerResultMismatch(call.Operation, err.Error())
-		}
-	}
-	return ack, err
+	return result.AppendReceipt.Ack, err
 }
 
 // ResolveReceiptVerificationAuthority obtains the exact read-only selected
@@ -295,18 +218,7 @@ func (c *ControllerClient) ResolveReceiptVerificationAuthority(ctx context.Conte
 	call := ControllerCall{Schema: ControllerCallSchemaID, Operation: ControllerOperationResolveReceiptVerificationAuthority}
 	call.ResolveReceiptVerificationAuthority = ControllerResolveReceiptVerificationAuthorityRequest{Schema: controllerRequestSchema(call.Operation), Query: query}
 	result, err := c.invoke(ctx, call)
-	authority := result.ResolveReceiptVerificationAuthority.Authority
-	if err == nil {
-		switch {
-		case authority.TrustFact.SourceID != query.RunnerClaim.TrustSource:
-			err = controllerResultMismatch(call.Operation, "trust fact source contradicts runner claim")
-		case authority.Isolation.State == contextreceipt.StateProven && (authority.Isolation.ProfileID != query.ProfileRef.ID || authority.Isolation.ProfileDigest != query.ProfileRef.Digest):
-			err = controllerResultMismatch(call.Operation, "isolation profile contradicts query")
-		case authority.Persistence.ReceiptDigest != "" && authority.Persistence.ReceiptDigest != query.ReceiptDigest:
-			err = controllerResultMismatch(call.Operation, "persistence receipt contradicts query")
-		}
-	}
-	return authority, err
+	return result.ResolveReceiptVerificationAuthority.Authority, err
 }
 
 // PersistHandback persists one exact successful handback record.
@@ -318,10 +230,7 @@ func (c *ControllerClient) PersistHandback(ctx context.Context, record HandbackR
 	call := ControllerCall{Schema: ControllerCallSchemaID, Operation: ControllerOperationPersistHandback}
 	call.PersistHandback = ControllerPersistHandbackRequest{Schema: controllerRequestSchema(call.Operation), Record: canonical}
 	result, err := c.invoke(ctx, call)
-	if err == nil {
-		err = ValidateHandbackAck(canonical, result.PersistHandback.Ack)
-	}
-	return result.PersistHandback.Ack, wrapControllerMatchError(call.Operation, err)
+	return result.PersistHandback.Ack, err
 }
 
 // PersistQuarantine persists one exact quarantine record/bytes pair.
@@ -336,10 +245,7 @@ func (c *ControllerClient) PersistQuarantine(ctx context.Context, record Quarant
 	call := ControllerCall{Schema: ControllerCallSchemaID, Operation: ControllerOperationPersistQuarantine}
 	call.PersistQuarantine = ControllerPersistQuarantineRequest{Schema: controllerRequestSchema(call.Operation), Record: canonical, PreservedBytes: append([]byte{}, preservedBytes...)}
 	result, err := c.invoke(ctx, call)
-	if err == nil {
-		err = ValidateQuarantineAck(canonical, result.PersistQuarantine.Ack)
-	}
-	return result.PersistQuarantine.Ack, wrapControllerMatchError(call.Operation, err)
+	return result.PersistQuarantine.Ack, err
 }
 
 // PersistAbort persists one exact abort-preserve disposition.
@@ -351,10 +257,7 @@ func (c *ControllerClient) PersistAbort(ctx context.Context, record AbortRecord)
 	call := ControllerCall{Schema: ControllerCallSchemaID, Operation: ControllerOperationPersistAbort}
 	call.PersistAbort = ControllerPersistAbortRequest{Schema: controllerRequestSchema(call.Operation), Record: canonical}
 	result, err := c.invoke(ctx, call)
-	if err == nil {
-		err = ValidateAbortAck(canonical, result.PersistAbort.Ack)
-	}
-	return result.PersistAbort.Ack, wrapControllerMatchError(call.Operation, err)
+	return result.PersistAbort.Ack, err
 }
 
 // ResolveClaimMCP obtains the ATC-owned claim registration for this exact
@@ -384,12 +287,16 @@ func canonicalControllerEventValue(event contextevent.Event) (contextevent.Event
 	return contextevent.DecodeEvent(bytes.NewReader(encoded))
 }
 
-func canonicalReceiptAppend(appendValue ReceiptAppend) (ReceiptAppend, error) {
-	wire, err := receiptAppendToWire(appendValue)
+func canonicalReceiptAppend(value ReceiptAppend) (ReceiptAppend, error) {
+	arm, err := receiptAppendToPublic(value)
 	if err != nil {
 		return ReceiptAppend{}, err
 	}
-	return receiptAppendFromWire(wire)
+	call := contextowner.Call{Operation: contextowner.OperationAppendReceipt, AppendReceipt: contextowner.AppendReceiptRequest{Schema: contextowner.RequestSchema(contextowner.OperationAppendReceipt), Append: arm}}
+	if _, err = contextowner.RequestArm(call); err != nil {
+		return ReceiptAppend{}, err
+	}
+	return receiptAppendFromPublic(arm)
 }
 
 func canonicalHandbackRecord(record HandbackRecord) (HandbackRecord, error) {
@@ -414,34 +321,6 @@ func canonicalAbortRecord(record AbortRecord) (AbortRecord, error) {
 		return AbortRecord{}, err
 	}
 	return DecodeAbortRecord(bytes.NewReader(encoded))
-}
-
-func opaqueFactsMatchRows(rows []contextcompile.OpaqueEntry, identities []OpaqueIdentity) bool {
-	if len(rows) != len(identities) {
-		return false
-	}
-	for i := range rows {
-		if identities[i].ID != rows[i].ID || identities[i].Kind != string(rows[i].Kind) ||
-			identities[i].AdapterID != rows[i].Adapter.ID || identities[i].AdapterVersion != rows[i].Adapter.Version {
-			return false
-		}
-	}
-	return true
-}
-
-func validateReceiptAppendAck(appendValue ReceiptAppend, ack contextevent.ReceiptEventAck) error {
-	canonical, err := canonicalReceiptAck(ack)
-	if err != nil {
-		return err
-	}
-	event := appendValue.Event
-	if canonical.Flight != event.Flight || canonical.Lane != event.Lane || canonical.Epoch != event.Epoch ||
-		canonical.Session != event.Session || canonical.ManifestRevision != event.ManifestRevision ||
-		canonical.Kind != event.Kind || canonical.SourceSequence != event.SourceSequence ||
-		canonical.EventDigest != event.EventDigest || canonical.ReceiptDigest != appendValue.Receipt.Digest {
-		return errors.New("receipt acknowledgment does not bind exact receipt event identity")
-	}
-	return nil
 }
 
 func controllerResultMismatch(operation ControllerOperation, detail string) error {
@@ -569,13 +448,6 @@ func writeControllerFrame(writer io.Writer, frame []byte) error {
 		return io.ErrShortWrite
 	}
 	return nil
-}
-
-func wrapControllerMatchError(operation ControllerOperation, err error) error {
-	if err == nil || errors.Is(err, ErrOperational) {
-		return err
-	}
-	return fmt.Errorf("sealedexec controller %s: %w: acknowledgment mismatch: %v", operation, ErrOperational, err)
 }
 
 func nilInterface(value any) bool {

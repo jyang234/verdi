@@ -150,7 +150,7 @@ func (p *DetailProcessor) Resolve(ctx context.Context, detail contextevent.Detai
 	if err != nil {
 		return nil, detailFailure(DetailFailureSegmentResolve, "sealedexec: resolve redacted detail segment: %w", err)
 	}
-	if _, err := redactedSegmentToWire(segment); err != nil {
+	if _, err := canonicalDomainSegment(segment); err != nil {
 		return nil, detailFailure(DetailFailureSegmentMismatch, "sealedexec: validate resolved detail segment: %w", err)
 	}
 	wantReference, err := segmentReference(segment.Digest)
