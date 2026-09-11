@@ -1,12 +1,13 @@
 // Mapping producer for the public owner bridge (VATC F12 controller-owner
 // bridge correction §3, implementation plan Task 2 Steps 1 and 5).
 //
-// Every expectation in this file is written independently of the mapping code
-// it prosecutes: the public arm is derived from the private payload by
+// The comparison public arm is derived from the compatibility payload by
 // replacing the one exact quoted schema literal, and the public call and reply
 // envelopes are assembled as literal canonical JSON in sorted-key order. If
 // DecodeOwnerCall or EncodeOwnerReply ever chose a projection instead of
-// applying the ratified publication rule, these bytes would disagree.
+// applying the ratified publication rule, these bytes would disagree. Fixture
+// setup uses the public codec and a schema-only compatibility substitution;
+// immutable public-contract fixtures separately pin the operation bytes.
 package sealedexec
 
 import (
@@ -33,24 +34,36 @@ func ownerRequestDigest(privateRequest []byte) string {
 	return "sha256:" + hex.EncodeToString(sum[:])
 }
 
-// ownerPrivateRequestBytes renders one fixture call's private request payload
-// as the standalone canonical document that crosses the FD-3 boundary.
+// ownerPrivateRequestBytes renders a fixture call in the retained standalone
+// compatibility format by replacing only its public request schema.
 func ownerPrivateRequestBytes(t *testing.T, call ControllerCall) []byte {
 	t.Helper()
-	payload, err := encodeControllerCallPayload(call)
+	payload, err := encodePublicControllerCallPayload(call)
 	if err != nil {
 		t.Fatalf("encode private request payload for %s: %v", call.Operation, err)
+	}
+	if call.Operation != ControllerOperationResolveClaimMCP {
+		payload, err = republishSchema(payload, contextowner.RequestSchema(contextowner.Operation(call.Operation)), controllerRequestSchema(call.Operation))
+		if err != nil {
+			t.Fatalf("set compatibility request schema for %s: %v", call.Operation, err)
+		}
 	}
 	return frameNested(payload)
 }
 
-// ownerPrivateResultBytes renders one fixture result's private result payload
-// as the standalone canonical document the existing FD-3 codec expects back.
+// ownerPrivateResultBytes renders a fixture result in the retained standalone
+// compatibility format by replacing only its public result schema.
 func ownerPrivateResultBytes(t *testing.T, result ControllerResult) []byte {
 	t.Helper()
-	payload, err := encodeControllerSuccessPayload(result)
+	payload, err := encodePublicControllerSuccessPayload(result)
 	if err != nil {
 		t.Fatalf("encode private result payload for %s: %v", result.Operation, err)
+	}
+	if result.Operation != ControllerOperationResolveClaimMCP {
+		payload, err = republishSchema(payload, contextowner.ResultSchema(contextowner.Operation(result.Operation)), controllerResultSchema(result.Operation))
+		if err != nil {
+			t.Fatalf("set compatibility result schema for %s: %v", result.Operation, err)
+		}
 	}
 	return frameNested(payload)
 }
@@ -312,8 +325,12 @@ func TestContextOwnerBridgeResolveContextNonProven(t *testing.T) {
 	}
 
 	decoded := ControllerResult{Operation: operation}
-	if err := decodeControllerSuccessPayload(gotResult, &decoded); err != nil {
-		t.Fatalf("decodeControllerSuccessPayload(bridged result): %v", err)
+	publicResult, err := republishSchema(gotResult, controllerResultSchema(operation), contextowner.ResultSchema(contextowner.Operation(operation)))
+	if err != nil {
+		t.Fatalf("publish compatibility result schema: %v", err)
+	}
+	if err := decodePublicControllerSuccessPayload(publicResult, &decoded); err != nil {
+		t.Fatalf("decodePublicControllerSuccessPayload(bridged result): %v", err)
 	}
 	resolution := decoded.ResolveContext.Resolution
 	if resolution.State != contextcompile.ResolutionUnproven || resolution.Data != (contextcompile.DataItem{}) ||
