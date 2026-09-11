@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -14,6 +15,7 @@ import (
 
 	"github.com/jyang234/verdi/internal/contextcompile"
 	"github.com/jyang234/verdi/internal/contextevent"
+	"github.com/jyang234/verdi/internal/contextowner"
 	"github.com/jyang234/verdi/internal/contextreceipt"
 	"github.com/jyang234/verdi/internal/policyconflict"
 )
@@ -465,13 +467,26 @@ func (c *ControllerClient) invoke(ctx context.Context, call ControllerCall) (Con
 		return ControllerResult{}, fmt.Errorf("sealedexec controller %s: %w: encode call: %v", call.Operation, ErrOperational, err)
 	}
 
+	var ownerCall contextowner.Call
+	if call.Operation != ControllerOperationResolveClaimMCP {
+		// The frame has already been validated and emitted canonically. Extract
+		// the exact bytes sent, then recompute their legacy standalone identity.
+		var wire controllerCallWire
+		if err := json.Unmarshal(frame, &wire); err != nil {
+			return ControllerResult{}, fmt.Errorf("sealedexec controller %s: %w: extract encoded call: %v", call.Operation, ErrOperational, err)
+		}
+		ownerCall, err = contextowner.NewCall(contextowner.Operation(call.Operation), wire.Payload)
+		if err != nil {
+			return ControllerResult{}, fmt.Errorf("sealedexec controller %s: %w: local call: %v", call.Operation, ErrOperational, err)
+		}
+	}
 	canceled := c.watchCancellation(ctx)
 	if err := writeControllerFrame(c.transport, frame); err != nil {
 		c.poisoned = err
 		canceled(false)
 		return ControllerResult{}, fmt.Errorf("sealedexec controller %s: %w: write call: %v", call.Operation, ErrOperational, err)
 	}
-	replyFrame, err := c.reader.ReadBytes('\n')
+	replyFrame, err := readControllerReply(c.reader)
 	wasCanceled := canceled(true)
 	if err != nil {
 		c.poisoned = err
@@ -499,6 +514,18 @@ func (c *ControllerClient) invoke(ctx context.Context, call ControllerCall) (Con
 	c.next++
 	if reply.Error != nil {
 		return ControllerResult{}, fmt.Errorf("sealedexec controller %s: %w: %s: %s", call.Operation, ErrOperational, reply.Error.Code, strings.Join(reply.Error.Witnesses, "; "))
+	}
+	if call.Operation != ControllerOperationResolveClaimMCP {
+		arm, err := encodePublicControllerSuccessPayload(reply)
+		if err == nil {
+			_, err = contextowner.NewReply(ownerCall, arm)
+		}
+		if err != nil {
+			if !errors.Is(err, contextowner.ErrRelationMismatch) {
+				c.poisoned = err
+			}
+			return ControllerResult{}, fmt.Errorf("sealedexec controller %s: %w: %w", call.Operation, ErrOperational, err)
+		}
 	}
 	return reply, nil
 }

@@ -198,6 +198,12 @@ func EncodeOwnerReply(operation ControllerOperation, reply contextowner.Reply) (
 		return nil, ownerRefusal(ErrOwnerReplyRefused, "reply carries no result arm")
 	}
 
+	// Runtime and compatibility invoke the same pure public relation check.
+	// NewReply also recomputes the supplied call identity before accepting it.
+	if _, err := contextowner.NewReply(reply.Call, resultArm); err != nil {
+		return nil, ownerRefusal(ErrOwnerReplyRefused, err.Error())
+	}
+
 	// The private request is rebuilt from the published arm and re-validated
 	// through the owning private codec, then its digest is recomputed over the
 	// standalone bytes. Without this recomputation a well-formed reply

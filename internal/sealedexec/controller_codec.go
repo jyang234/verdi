@@ -387,17 +387,17 @@ func EncodeControllerCall(call ControllerCall) ([]byte, error) {
 	if !validControllerOperation(call.Operation) {
 		return nil, fmt.Errorf("sealedexec: unknown controller operation %q", call.Operation)
 	}
-	payload, err := encodeControllerCallPayload(call)
+	payload, err := encodePublicControllerCallPayload(call)
 	if err != nil {
 		return nil, err
 	}
-	return canonjson.Marshal(controllerCallWire{Schema: call.Schema, CallSequence: call.CallSequence, Operation: call.Operation, Payload: payload})
+	return boundedControllerFrame(canonjson.Marshal(controllerCallWire{Schema: call.Schema, CallSequence: call.CallSequence, Operation: call.Operation, Payload: payload}))
 }
 
 // DecodeControllerCall strictly decodes one canonical typed call frame.
 func DecodeControllerCall(reader io.Reader) (ControllerCall, error) {
 	var wire controllerCallWire
-	raw, err := decodeStrict(reader, &wire)
+	raw, err := decodeControllerFrame(reader, &wire)
 	if err != nil {
 		return ControllerCall{}, fmt.Errorf("sealedexec: decode controller call: %w", err)
 	}
@@ -408,7 +408,7 @@ func DecodeControllerCall(reader io.Reader) (ControllerCall, error) {
 		return ControllerCall{}, fmt.Errorf("sealedexec: invalid controller call envelope")
 	}
 	call := ControllerCall{Schema: wire.Schema, CallSequence: wire.CallSequence, Operation: wire.Operation}
-	if err := decodeControllerCallPayload(wire.Payload, &call); err != nil {
+	if err := decodePublicControllerCallPayload(wire.Payload, &call); err != nil {
 		return ControllerCall{}, err
 	}
 	canonical, err := EncodeControllerCall(call)
@@ -438,7 +438,7 @@ func EncodeControllerResult(result ControllerResult) ([]byte, error) {
 		}
 		payload.Error, err = encodeControllerError(*result.Error)
 	} else {
-		payload.Result, err = encodeControllerSuccessPayload(result)
+		payload.Result, err = encodePublicControllerSuccessPayload(result)
 	}
 	if err != nil {
 		return nil, err
@@ -447,13 +447,13 @@ func EncodeControllerResult(result ControllerResult) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	return canonjson.Marshal(controllerResultWire{Schema: result.Schema, CallSequence: result.CallSequence, Operation: result.Operation, Payload: payloadBytes})
+	return boundedControllerFrame(canonjson.Marshal(controllerResultWire{Schema: result.Schema, CallSequence: result.CallSequence, Operation: result.Operation, Payload: payloadBytes}))
 }
 
 // DecodeControllerResult strictly decodes one canonical typed reply frame.
 func DecodeControllerResult(reader io.Reader) (ControllerResult, error) {
 	var wire controllerResultWire
-	raw, err := decodeStrict(reader, &wire)
+	raw, err := decodeControllerFrame(reader, &wire)
 	if err != nil {
 		return ControllerResult{}, fmt.Errorf("sealedexec: decode controller result: %w", err)
 	}
@@ -478,7 +478,7 @@ func DecodeControllerResult(reader io.Reader) (ControllerResult, error) {
 			return ControllerResult{}, err
 		}
 		result.Error = &controllerError
-	} else if err := decodeControllerSuccessPayload(outcome.Result, &result); err != nil {
+	} else if err := decodePublicControllerSuccessPayload(outcome.Result, &result); err != nil {
 		return ControllerResult{}, err
 	}
 	canonical, err := EncodeControllerResult(result)

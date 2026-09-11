@@ -11,8 +11,8 @@ import (
 )
 
 const (
-	ControllerCallSchemaID   = "verdi.context-controller-call/v1"
-	ControllerResultSchemaID = "verdi.context-controller-result/v1"
+	ControllerCallSchemaID   = "verdi.context-controller-call/v2"
+	ControllerResultSchemaID = "verdi.context-controller-result/v2"
 	ControllerErrorSchemaID  = "verdi.context-controller-error/v1"
 )
 
@@ -23,15 +23,13 @@ const (
 // It exists so a caller can learn which controller this build speaks without
 // starting a sealed execution. Publishing it is not a capability: nothing here
 // serves an operation, and the document is a pure function of constants.
-const ControllerContractSchemaID = "verdi.context-controller-contract/v1"
+const ControllerContractSchemaID = "verdi.context-controller-contract/v2"
 
 // controllerContract is the exact published shape.
 //
-// Per-operation request and result schemas are deliberately absent. They are
-// derived from the operation name by controllerRequestSchema and
-// controllerResultSchema, so listing them would create a second place for the
-// wire to drift from the derivation that actually encodes it; comparing the
-// registry compares them all.
+// Per-operation arm definitions are fixed by the public execution contract,
+// including the claims exception. This projection advertises their registry;
+// only the matched conformance tests prove the arms actually implemented.
 type controllerContract struct {
 	Schema                 string                `json:"schema"`
 	ControllerCallSchema   string                `json:"controller_call_schema"`

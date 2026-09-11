@@ -42,6 +42,10 @@ func TestNewCall_MatchesFrozenFixtures(t *testing.T) {
 		if err != nil {
 			t.Fatalf("NewCall(verify-epoch nonproven-resolution): %v", err)
 		}
+		resolution := call.VerifyEpoch.Check.Resolution
+		if resolution.State != contextcompile.ResolutionUnproven || len(resolution.Data) != 0 {
+			t.Fatalf("decoded epoch resolution = %#v, want unproven without data", resolution)
+		}
 		got, err := EncodeCall(call)
 		if err != nil {
 			t.Fatalf("EncodeCall: %v", err)
@@ -438,4 +442,25 @@ func removeMemberFrom(t *testing.T, document []byte, parentField, member string)
 func setNestedResolutionDataNull(t *testing.T, document []byte, parentField, resolutionField string) []byte {
 	t.Helper()
 	return addDataToNestedResolutionMember(t, document, parentField, resolutionField, json.RawMessage("null"))
+}
+
+func TestValidateResultArm(t *testing.T) {
+	for _, op := range Operations() {
+		t.Run(string(op), func(t *testing.T) {
+			raw := fixtureArm(t, string(op)+".result.json")
+			if err := ValidateResultArm(op, raw); err != nil {
+				t.Fatal(err)
+			}
+			for name, bad := range map[string][]byte{"empty": nil, "null": []byte("null"), "trailing LF": append(append([]byte(nil), raw...), '\n'), "whitespace": append([]byte(" "), raw...), "unknown member": bytes.Replace(raw, []byte("{"), []byte(`{"extra":true,`), 1)} {
+				t.Run(name, func(t *testing.T) {
+					if err := ValidateResultArm(op, bad); err == nil {
+						t.Fatal("accepted invalid result arm")
+					}
+				})
+			}
+		})
+	}
+	if err := ValidateResultArm(Operation("unknown"), []byte(`{}`)); err == nil {
+		t.Fatal("accepted unknown operation")
+	}
 }

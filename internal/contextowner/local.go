@@ -141,3 +141,15 @@ func validPublicResultArm(operation Operation, trimmed []byte) ([]byte, error) {
 	}
 	return canonical, nil
 }
+
+// ValidateResultArm strictly validates an exact canonical public result arm
+// without a request. Framing uses this structural seam before binding the
+// response to its outstanding call through NewReply and ValidateRelations.
+// resultArm has no trailing LF. This function does not prove any relation.
+func ValidateResultArm(operation Operation, resultArm []byte) error {
+	if !validOperation(operation) {
+		return fmt.Errorf("contextowner: unknown owner operation %q", operation)
+	}
+	_, err := validPublicResultArm(operation, resultArm)
+	return err
+}

@@ -17,6 +17,7 @@ import (
 	"github.com/jyang234/verdi/internal/canonjson"
 	"github.com/jyang234/verdi/internal/contextcompile"
 	"github.com/jyang234/verdi/internal/contextevent"
+	"github.com/jyang234/verdi/internal/contextowner"
 	"github.com/jyang234/verdi/internal/contextreceipt"
 	gp "github.com/jyang234/verdi/internal/governanceprincipal"
 	"github.com/jyang234/verdi/internal/policyconflict"
@@ -42,7 +43,7 @@ func TestContextControllerWireContract_Static(t *testing.T) {
 			t.Fatalf("EncodeControllerCall: %v", err)
 		}
 		wantCall := `{"call_sequence":1,"operation":"resolve-claim-mcp","payload":{"query":{"request_digest":"` + digest +
-			`","schema":"verdi.claim-mcp-query/v1"},"schema":"verdi.context-controller/resolve-claim-mcp-request/v1"},"schema":"verdi.context-controller-call/v1"}` + "\n"
+			`","schema":"verdi.claim-mcp-query/v1"},"schema":"verdi.context-controller/resolve-claim-mcp-request/v1"},"schema":"verdi.context-controller-call/v2"}` + "\n"
 		if string(encodedCall) != wantCall {
 			t.Fatalf("resolve-claim-mcp call wire =\n%s\nwant\n%s", encodedCall, wantCall)
 		}
@@ -58,7 +59,7 @@ func TestContextControllerWireContract_Static(t *testing.T) {
 		}
 		wantResult := `{"call_sequence":1,"operation":"resolve-claim-mcp","payload":{"result":{"registration":{"name":"vatc","request_digest":"` + digest +
 			`","schema":"verdi.claim-mcp-registration/v1","tools":["claim_paths"],"type":"http","url":"http://127.0.0.1:45001/mcp"},` +
-			`"schema":"verdi.context-controller/resolve-claim-mcp-result/v1"}},"schema":"verdi.context-controller-result/v1"}` + "\n"
+			`"schema":"verdi.context-controller/resolve-claim-mcp-result/v1"}},"schema":"verdi.context-controller-result/v2"}` + "\n"
 		if string(encodedResult) != wantResult {
 			t.Fatalf("resolve-claim-mcp result wire =\n%s\nwant\n%s", encodedResult, wantResult)
 		}
@@ -145,30 +146,30 @@ func TestContextControllerWireContract_Static(t *testing.T) {
 			requestSchema string
 			resultSchema  string
 		}{
-			{operation: "verify-authority", requestSchema: "verdi.context-controller/verify-authority-request/v1", resultSchema: "verdi.context-controller/verify-authority-result/v1"},
-			{operation: "resolve-profile", requestSchema: "verdi.context-controller/resolve-profile-request/v1", resultSchema: "verdi.context-controller/resolve-profile-result/v1"},
-			{operation: "verify-conflict", requestSchema: "verdi.context-controller/verify-conflict-request/v1", resultSchema: "verdi.context-controller/verify-conflict-result/v1"},
-			{operation: "resolve-recorder", requestSchema: "verdi.context-controller/resolve-recorder-request/v1", resultSchema: "verdi.context-controller/resolve-recorder-result/v1"},
-			{operation: "recorder-checkpoint", requestSchema: "verdi.context-controller/recorder-checkpoint-request/v1", resultSchema: "verdi.context-controller/recorder-checkpoint-result/v1"},
-			{operation: "recorder-append", requestSchema: "verdi.context-controller/recorder-append-request/v1", resultSchema: "verdi.context-controller/recorder-append-result/v1"},
-			{operation: "store-redacted-segment", requestSchema: "verdi.context-controller/store-redacted-segment-request/v1", resultSchema: "verdi.context-controller/store-redacted-segment-result/v1"},
-			{operation: "resolve-redacted-segment", requestSchema: "verdi.context-controller/resolve-redacted-segment-request/v1", resultSchema: "verdi.context-controller/resolve-redacted-segment-result/v1"},
-			{operation: "verify-opaque-boundary", requestSchema: "verdi.context-controller/verify-opaque-boundary-request/v1", resultSchema: "verdi.context-controller/verify-opaque-boundary-result/v1"},
-			{operation: "verify-provider-session", requestSchema: "verdi.context-controller/verify-provider-session-request/v1", resultSchema: "verdi.context-controller/verify-provider-session-result/v1"},
-			{operation: "verify-expansion", requestSchema: "verdi.context-controller/verify-expansion-request/v1", resultSchema: "verdi.context-controller/verify-expansion-result/v1"},
-			{operation: "store-adapter-session", requestSchema: "verdi.context-controller/store-adapter-session-request/v1", resultSchema: "verdi.context-controller/store-adapter-session-result/v1"},
-			{operation: "next-stamp", requestSchema: "verdi.context-controller/next-stamp-request/v1", resultSchema: "verdi.context-controller/next-stamp-result/v1"},
-			{operation: "resolve-context", requestSchema: "verdi.context-controller/resolve-context-request/v1", resultSchema: "verdi.context-controller/resolve-context-result/v1"},
-			{operation: "verify-epoch", requestSchema: "verdi.context-controller/verify-epoch-request/v1", resultSchema: "verdi.context-controller/verify-epoch-result/v1"},
+			{operation: "verify-authority", requestSchema: "verdi.context-owner/verify-authority-request/v1", resultSchema: "verdi.context-owner/verify-authority-result/v1"},
+			{operation: "resolve-profile", requestSchema: "verdi.context-owner/resolve-profile-request/v1", resultSchema: "verdi.context-owner/resolve-profile-result/v1"},
+			{operation: "verify-conflict", requestSchema: "verdi.context-owner/verify-conflict-request/v1", resultSchema: "verdi.context-owner/verify-conflict-result/v1"},
+			{operation: "resolve-recorder", requestSchema: "verdi.context-owner/resolve-recorder-request/v1", resultSchema: "verdi.context-owner/resolve-recorder-result/v1"},
+			{operation: "recorder-checkpoint", requestSchema: "verdi.context-owner/recorder-checkpoint-request/v1", resultSchema: "verdi.context-owner/recorder-checkpoint-result/v1"},
+			{operation: "recorder-append", requestSchema: "verdi.context-owner/recorder-append-request/v1", resultSchema: "verdi.context-owner/recorder-append-result/v1"},
+			{operation: "store-redacted-segment", requestSchema: "verdi.context-owner/store-redacted-segment-request/v1", resultSchema: "verdi.context-owner/store-redacted-segment-result/v1"},
+			{operation: "resolve-redacted-segment", requestSchema: "verdi.context-owner/resolve-redacted-segment-request/v1", resultSchema: "verdi.context-owner/resolve-redacted-segment-result/v1"},
+			{operation: "verify-opaque-boundary", requestSchema: "verdi.context-owner/verify-opaque-boundary-request/v1", resultSchema: "verdi.context-owner/verify-opaque-boundary-result/v1"},
+			{operation: "verify-provider-session", requestSchema: "verdi.context-owner/verify-provider-session-request/v1", resultSchema: "verdi.context-owner/verify-provider-session-result/v1"},
+			{operation: "verify-expansion", requestSchema: "verdi.context-owner/verify-expansion-request/v1", resultSchema: "verdi.context-owner/verify-expansion-result/v1"},
+			{operation: "store-adapter-session", requestSchema: "verdi.context-owner/store-adapter-session-request/v1", resultSchema: "verdi.context-owner/store-adapter-session-result/v1"},
+			{operation: "next-stamp", requestSchema: "verdi.context-owner/next-stamp-request/v1", resultSchema: "verdi.context-owner/next-stamp-result/v1"},
+			{operation: "resolve-context", requestSchema: "verdi.context-owner/resolve-context-request/v1", resultSchema: "verdi.context-owner/resolve-context-result/v1"},
+			{operation: "verify-epoch", requestSchema: "verdi.context-owner/verify-epoch-request/v1", resultSchema: "verdi.context-owner/verify-epoch-result/v1"},
 			// Task 2A's one authority-added exception: only this request arm
 			// advances to v2, and its result arm stays at the publication base.
-			{operation: "install-expansion", requestSchema: "verdi.context-controller/install-expansion-request/v2", resultSchema: "verdi.context-controller/install-expansion-result/v1"},
-			{operation: "resolve-receipt-inputs", requestSchema: "verdi.context-controller/resolve-receipt-inputs-request/v1", resultSchema: "verdi.context-controller/resolve-receipt-inputs-result/v1"},
-			{operation: "append-receipt", requestSchema: "verdi.context-controller/append-receipt-request/v1", resultSchema: "verdi.context-controller/append-receipt-result/v1"},
-			{operation: "resolve-receipt-verification-authority", requestSchema: "verdi.context-controller/resolve-receipt-verification-authority-request/v1", resultSchema: "verdi.context-controller/resolve-receipt-verification-authority-result/v1"},
-			{operation: "persist-handback", requestSchema: "verdi.context-controller/persist-handback-request/v1", resultSchema: "verdi.context-controller/persist-handback-result/v1"},
-			{operation: "persist-quarantine", requestSchema: "verdi.context-controller/persist-quarantine-request/v1", resultSchema: "verdi.context-controller/persist-quarantine-result/v1"},
-			{operation: "persist-abort", requestSchema: "verdi.context-controller/persist-abort-request/v1", resultSchema: "verdi.context-controller/persist-abort-result/v1"},
+			{operation: "install-expansion", requestSchema: "verdi.context-owner/install-expansion-request/v2", resultSchema: "verdi.context-owner/install-expansion-result/v1"},
+			{operation: "resolve-receipt-inputs", requestSchema: "verdi.context-owner/resolve-receipt-inputs-request/v1", resultSchema: "verdi.context-owner/resolve-receipt-inputs-result/v1"},
+			{operation: "append-receipt", requestSchema: "verdi.context-owner/append-receipt-request/v1", resultSchema: "verdi.context-owner/append-receipt-result/v1"},
+			{operation: "resolve-receipt-verification-authority", requestSchema: "verdi.context-owner/resolve-receipt-verification-authority-request/v1", resultSchema: "verdi.context-owner/resolve-receipt-verification-authority-result/v1"},
+			{operation: "persist-handback", requestSchema: "verdi.context-owner/persist-handback-request/v1", resultSchema: "verdi.context-owner/persist-handback-result/v1"},
+			{operation: "persist-quarantine", requestSchema: "verdi.context-owner/persist-quarantine-request/v1", resultSchema: "verdi.context-owner/persist-quarantine-result/v1"},
+			{operation: "persist-abort", requestSchema: "verdi.context-owner/persist-abort-request/v1", resultSchema: "verdi.context-owner/persist-abort-result/v1"},
 			{operation: "resolve-claim-mcp", requestSchema: "verdi.context-controller/resolve-claim-mcp-request/v1", resultSchema: "verdi.context-controller/resolve-claim-mcp-result/v1"},
 		}
 		if got, want := len(ControllerOperations()), 23; got != want {
@@ -249,22 +250,22 @@ func TestContextControllerWireContract_Static(t *testing.T) {
 			{
 				name: "store call", encode: func() ([]byte, error) { return EncodeControllerCall(storeCall) },
 				decode: func(raw []byte) error { _, err := DecodeControllerCall(bytes.NewReader(raw)); return err },
-				want:   `{"call_sequence":1,"operation":"store-redacted-segment","payload":{"schema":"verdi.context-controller/store-redacted-segment-request/v1","segment":{"byte_count":13,"bytes":"eyJhbnN3ZXIiOjQyfQ==","digest":"` + digest + `","media_type":"application/json","redaction_profile":"verdi.redaction/standard-v1","schema":"verdi.context-redacted-segment/v1"}},"schema":"verdi.context-controller-call/v1"}` + "\n",
+				want:   `{"call_sequence":1,"operation":"store-redacted-segment","payload":{"schema":"verdi.context-owner/store-redacted-segment-request/v1","segment":{"byte_count":13,"bytes":"eyJhbnN3ZXIiOjQyfQ==","digest":"` + digest + `","media_type":"application/json","redaction_profile":"verdi.redaction/standard-v1","schema":"verdi.context-redacted-segment/v1"}},"schema":"verdi.context-controller-call/v2"}` + "\n",
 			},
 			{
 				name: "store result", encode: func() ([]byte, error) { return EncodeControllerResult(storeResult) },
 				decode: func(raw []byte) error { _, err := DecodeControllerResult(bytes.NewReader(raw)); return err },
-				want:   `{"call_sequence":1,"operation":"store-redacted-segment","payload":{"result":{"schema":"verdi.context-controller/store-redacted-segment-result/v1","stored":{"byte_count":13,"digest":"` + digest + `","media_type":"application/json","redaction_profile":"verdi.redaction/standard-v1","reference":"` + reference + `","schema":"verdi.context-redacted-segment-stored/v1"}}},"schema":"verdi.context-controller-result/v1"}` + "\n",
+				want:   `{"call_sequence":1,"operation":"store-redacted-segment","payload":{"result":{"schema":"verdi.context-owner/store-redacted-segment-result/v1","stored":{"byte_count":13,"digest":"` + digest + `","media_type":"application/json","redaction_profile":"verdi.redaction/standard-v1","reference":"` + reference + `","schema":"verdi.context-redacted-segment-stored/v1"}}},"schema":"verdi.context-controller-result/v2"}` + "\n",
 			},
 			{
 				name: "resolve call", encode: func() ([]byte, error) { return EncodeControllerCall(resolveCall) },
 				decode: func(raw []byte) error { _, err := DecodeControllerCall(bytes.NewReader(raw)); return err },
-				want:   `{"call_sequence":1,"operation":"resolve-redacted-segment","payload":{"reference":"` + reference + `","schema":"verdi.context-controller/resolve-redacted-segment-request/v1"},"schema":"verdi.context-controller-call/v1"}` + "\n",
+				want:   `{"call_sequence":1,"operation":"resolve-redacted-segment","payload":{"reference":"` + reference + `","schema":"verdi.context-owner/resolve-redacted-segment-request/v1"},"schema":"verdi.context-controller-call/v2"}` + "\n",
 			},
 			{
 				name: "resolve result", encode: func() ([]byte, error) { return EncodeControllerResult(resolveResult) },
 				decode: func(raw []byte) error { _, err := DecodeControllerResult(bytes.NewReader(raw)); return err },
-				want:   `{"call_sequence":1,"operation":"resolve-redacted-segment","payload":{"result":{"schema":"verdi.context-controller/resolve-redacted-segment-result/v1","segment":{"byte_count":13,"bytes":"eyJhbnN3ZXIiOjQyfQ==","digest":"` + digest + `","media_type":"application/json","redaction_profile":"verdi.redaction/standard-v1","schema":"verdi.context-redacted-segment/v1"}}},"schema":"verdi.context-controller-result/v1"}` + "\n",
+				want:   `{"call_sequence":1,"operation":"resolve-redacted-segment","payload":{"result":{"schema":"verdi.context-owner/resolve-redacted-segment-result/v1","segment":{"byte_count":13,"bytes":"eyJhbnN3ZXIiOjQyfQ==","digest":"` + digest + `","media_type":"application/json","redaction_profile":"verdi.redaction/standard-v1","schema":"verdi.context-redacted-segment/v1"}}},"schema":"verdi.context-controller-result/v2"}` + "\n",
 			},
 		}
 		for _, row := range rows {
@@ -375,12 +376,12 @@ func TestContextControllerWireContract_Static(t *testing.T) {
 			return result
 		}
 		codexBytes := mustEncodeControllerResult(t, resultFor(codex))
-		wantCodex := `{"call_sequence":1,"operation":"resolve-profile","payload":{"result":{"material":{"absolute_codex_home":"/var/lib/verdi/env/codex","absolute_env_root":"/var/lib/verdi/env","absolute_executable":"/usr/local/bin/codex","adapter_version":"codex-cli 1.2.3","decoder_profile":"codex-jsonl-v1","name":"project","ref":{"digest":"sha256:` + strings.Repeat("0", 64) + `","id":"project/default","schema":"verdi.sealed-project-profile-ref/v1"}},"schema":"verdi.context-controller/resolve-profile-result/v1"}},"schema":"verdi.context-controller-result/v1"}` + "\n"
+		wantCodex := `{"call_sequence":1,"operation":"resolve-profile","payload":{"result":{"material":{"absolute_codex_home":"/var/lib/verdi/env/codex","absolute_env_root":"/var/lib/verdi/env","absolute_executable":"/usr/local/bin/codex","adapter_version":"codex-cli 1.2.3","decoder_profile":"codex-jsonl-v1","name":"project","ref":{"digest":"sha256:` + strings.Repeat("0", 64) + `","id":"project/default","schema":"verdi.sealed-project-profile-ref/v1"}},"schema":"verdi.context-owner/resolve-profile-result/v1"}},"schema":"verdi.context-controller-result/v2"}` + "\n"
 		if string(codexBytes) != wantCodex {
 			t.Fatalf("Codex profile bytes changed:\n got %s want %s", codexBytes, wantCodex)
 		}
 		claudeBytes := mustEncodeControllerResult(t, resultFor(claude))
-		wantClaude := `{"call_sequence":1,"operation":"resolve-profile","payload":{"result":{"material":{"absolute_claude_config_dir":"/var/lib/verdi/env/claude","absolute_env_root":"/var/lib/verdi/env","absolute_executable":"/usr/local/bin/claude","adapter_version":"2.0.0","decoder_profile":"claude-stream-json-v1","model":"claude-sonnet-4-5-20250929","name":"project","ref":{"digest":"sha256:` + strings.Repeat("0", 64) + `","id":"project/default","schema":"verdi.sealed-project-profile-ref/v1"}},"schema":"verdi.context-controller/resolve-profile-result/v1"}},"schema":"verdi.context-controller-result/v1"}` + "\n"
+		wantClaude := `{"call_sequence":1,"operation":"resolve-profile","payload":{"result":{"material":{"absolute_claude_config_dir":"/var/lib/verdi/env/claude","absolute_env_root":"/var/lib/verdi/env","absolute_executable":"/usr/local/bin/claude","adapter_version":"2.0.0","decoder_profile":"claude-stream-json-v1","model":"claude-sonnet-4-5-20250929","name":"project","ref":{"digest":"sha256:` + strings.Repeat("0", 64) + `","id":"project/default","schema":"verdi.sealed-project-profile-ref/v1"}},"schema":"verdi.context-owner/resolve-profile-result/v1"}},"schema":"verdi.context-controller-result/v2"}` + "\n"
 		if string(claudeBytes) != wantClaude {
 			t.Fatalf("Claude profile bytes = %s, want %s", claudeBytes, wantClaude)
 		}
@@ -458,64 +459,64 @@ func TestContextControllerWireContract_Static(t *testing.T) {
 		persistAbortResult := controllerResultFixture(t, 1, "persist-abort")
 
 		rows := []controllerWrapperCase{
-			{name: "VerifyAuthority", operation: "verify-authority", requestSchema: "verdi.context-controller/verify-authority-request/v1", requestField: "request", requestValue: request, reply: verifyAuthorityResult, want: verifyAuthorityResult.VerifyAuthority.Facts, invoke: func(client *ControllerClient) (any, error) {
+			{name: "VerifyAuthority", operation: "verify-authority", requestSchema: "verdi.context-owner/verify-authority-request/v1", requestField: "request", requestValue: request, reply: verifyAuthorityResult, want: verifyAuthorityResult.VerifyAuthority.Facts, invoke: func(client *ControllerClient) (any, error) {
 				return client.VerifyAuthority(context.Background(), request)
 			}},
-			{name: "ResolveProfile", operation: "resolve-profile", requestSchema: "verdi.context-controller/resolve-profile-request/v1", requestField: "query", requestValue: profileQuery, reply: resolveProfileResult, want: resolveProfileResult.ResolveProfile.Material, invoke: func(client *ControllerClient) (any, error) {
+			{name: "ResolveProfile", operation: "resolve-profile", requestSchema: "verdi.context-owner/resolve-profile-request/v1", requestField: "query", requestValue: profileQuery, reply: resolveProfileResult, want: resolveProfileResult.ResolveProfile.Material, invoke: func(client *ControllerClient) (any, error) {
 				return client.ResolveProfile(context.Background(), profileQuery)
 			}},
-			{name: "VerifyConflict", operation: "verify-conflict", requestSchema: "verdi.context-controller/verify-conflict-request/v1", requestField: "report", requestValue: request.AuthorityVerdict, reply: verifyConflictResult, want: verifyConflictResult.VerifyConflict.Facts, invoke: func(client *ControllerClient) (any, error) {
+			{name: "VerifyConflict", operation: "verify-conflict", requestSchema: "verdi.context-owner/verify-conflict-request/v1", requestField: "report", requestValue: request.AuthorityVerdict, reply: verifyConflictResult, want: verifyConflictResult.VerifyConflict.Facts, invoke: func(client *ControllerClient) (any, error) {
 				return client.VerifyConflict(context.Background(), request.AuthorityVerdict)
 			}},
-			{name: "ResolveRecorder", operation: "resolve-recorder", requestSchema: "verdi.context-controller/resolve-recorder-request/v1", requestField: "ref", requestValue: request.RecorderEndpoint, reply: resolveRecorderResult, want: resolveRecorderResult.ResolveRecorder.Facts, invoke: func(client *ControllerClient) (any, error) {
+			{name: "ResolveRecorder", operation: "resolve-recorder", requestSchema: "verdi.context-owner/resolve-recorder-request/v1", requestField: "ref", requestValue: request.RecorderEndpoint, reply: resolveRecorderResult, want: resolveRecorderResult.ResolveRecorder.Facts, invoke: func(client *ControllerClient) (any, error) {
 				return client.ResolveRecorder(context.Background(), request.RecorderEndpoint)
 			}},
-			{name: "RecorderCheckpoint", operation: "recorder-checkpoint", requestSchema: "verdi.context-controller/recorder-checkpoint-request/v1", requestField: "key", requestValue: key, reply: recorderCheckpointResult, want: recorderCheckpointResult.RecorderCheckpoint.Checkpoint, invoke: func(client *ControllerClient) (any, error) {
+			{name: "RecorderCheckpoint", operation: "recorder-checkpoint", requestSchema: "verdi.context-owner/recorder-checkpoint-request/v1", requestField: "key", requestValue: key, reply: recorderCheckpointResult, want: recorderCheckpointResult.RecorderCheckpoint.Checkpoint, invoke: func(client *ControllerClient) (any, error) {
 				return client.RecorderCheckpoint(context.Background(), key)
 			}},
-			{name: "RecorderAppend", operation: "recorder-append", requestSchema: "verdi.context-controller/recorder-append-request/v1", requestField: "event", requestValue: event, reply: recorderAppendResult, want: recorderAppendResult.RecorderAppend.Ack, invoke: func(client *ControllerClient) (any, error) { return client.RecorderAppend(context.Background(), event) }},
-			{name: "StoreRedactedSegment", operation: "store-redacted-segment", requestSchema: "verdi.context-controller/store-redacted-segment-request/v1", requestField: "segment", requestValue: segment, reply: storeSegmentResult, want: storedSegment, invoke: func(client *ControllerClient) (any, error) {
+			{name: "RecorderAppend", operation: "recorder-append", requestSchema: "verdi.context-owner/recorder-append-request/v1", requestField: "event", requestValue: event, reply: recorderAppendResult, want: recorderAppendResult.RecorderAppend.Ack, invoke: func(client *ControllerClient) (any, error) { return client.RecorderAppend(context.Background(), event) }},
+			{name: "StoreRedactedSegment", operation: "store-redacted-segment", requestSchema: "verdi.context-owner/store-redacted-segment-request/v1", requestField: "segment", requestValue: segment, reply: storeSegmentResult, want: storedSegment, invoke: func(client *ControllerClient) (any, error) {
 				return client.StoreRedactedSegment(context.Background(), segment)
 			}},
-			{name: "ResolveRedactedSegment", operation: "resolve-redacted-segment", requestSchema: "verdi.context-controller/resolve-redacted-segment-request/v1", requestField: "reference", requestValue: storedSegment.Reference, reply: resolveSegmentResult, want: segment, invoke: func(client *ControllerClient) (any, error) {
+			{name: "ResolveRedactedSegment", operation: "resolve-redacted-segment", requestSchema: "verdi.context-owner/resolve-redacted-segment-request/v1", requestField: "reference", requestValue: storedSegment.Reference, reply: resolveSegmentResult, want: segment, invoke: func(client *ControllerClient) (any, error) {
 				return client.ResolveRedactedSegment(context.Background(), storedSegment.Reference)
 			}},
-			{name: "VerifyOpaqueBoundary", operation: "verify-opaque-boundary", requestSchema: "verdi.context-controller/verify-opaque-boundary-request/v1", requestField: "rows", requestValue: opaqueRows, reply: verifyOpaqueResult, want: verifyOpaqueResult.VerifyOpaqueBoundary.Facts, invoke: func(client *ControllerClient) (any, error) {
+			{name: "VerifyOpaqueBoundary", operation: "verify-opaque-boundary", requestSchema: "verdi.context-owner/verify-opaque-boundary-request/v1", requestField: "rows", requestValue: opaqueRows, reply: verifyOpaqueResult, want: verifyOpaqueResult.VerifyOpaqueBoundary.Facts, invoke: func(client *ControllerClient) (any, error) {
 				return client.VerifyOpaqueBoundary(context.Background(), opaqueRows)
 			}},
-			{name: "VerifyProviderSession", operation: "verify-provider-session", requestSchema: "verdi.context-controller/verify-provider-session-request/v1", requestField: "check", requestValue: providerCheck, reply: verifyProviderResult, want: verifyProviderResult.VerifyProviderSession.Facts, invoke: func(client *ControllerClient) (any, error) {
+			{name: "VerifyProviderSession", operation: "verify-provider-session", requestSchema: "verdi.context-owner/verify-provider-session-request/v1", requestField: "check", requestValue: providerCheck, reply: verifyProviderResult, want: verifyProviderResult.VerifyProviderSession.Facts, invoke: func(client *ControllerClient) (any, error) {
 				return client.VerifyProviderSession(context.Background(), providerCheck)
 			}},
-			{name: "VerifyExpansion", operation: "verify-expansion", requestSchema: "verdi.context-controller/verify-expansion-request/v1", requestField: "key", requestValue: key, reply: verifyExpansionResult, want: verifyExpansionResult.VerifyExpansion.Facts, invoke: func(client *ControllerClient) (any, error) { return client.VerifyExpansion(context.Background(), key) }},
-			{name: "StoreAdapterSession", operation: "store-adapter-session", requestSchema: "verdi.context-controller/store-adapter-session-request/v1", requestField: "record", requestValue: sessionRecord, reply: storeSessionResult, invoke: func(client *ControllerClient) (any, error) {
+			{name: "VerifyExpansion", operation: "verify-expansion", requestSchema: "verdi.context-owner/verify-expansion-request/v1", requestField: "key", requestValue: key, reply: verifyExpansionResult, want: verifyExpansionResult.VerifyExpansion.Facts, invoke: func(client *ControllerClient) (any, error) { return client.VerifyExpansion(context.Background(), key) }},
+			{name: "StoreAdapterSession", operation: "store-adapter-session", requestSchema: "verdi.context-owner/store-adapter-session-request/v1", requestField: "record", requestValue: sessionRecord, reply: storeSessionResult, invoke: func(client *ControllerClient) (any, error) {
 				return nil, client.StoreAdapterSession(context.Background(), sessionRecord)
 			}},
-			{name: "NextStamp", operation: "next-stamp", requestSchema: "verdi.context-controller/next-stamp-request/v1", reply: nextStampResult, want: nextStampResult.NextStamp.Stamp, invoke: func(client *ControllerClient) (any, error) { return client.NextStamp(context.Background()) }},
-			{name: "ResolveContext", operation: "resolve-context", requestSchema: "verdi.context-controller/resolve-context-request/v1", requestField: "query", requestValue: contextQuery, reply: resolveContextResult, want: resolveContextResult.ResolveContext.Resolution, invoke: func(client *ControllerClient) (any, error) {
+			{name: "NextStamp", operation: "next-stamp", requestSchema: "verdi.context-owner/next-stamp-request/v1", reply: nextStampResult, want: nextStampResult.NextStamp.Stamp, invoke: func(client *ControllerClient) (any, error) { return client.NextStamp(context.Background()) }},
+			{name: "ResolveContext", operation: "resolve-context", requestSchema: "verdi.context-owner/resolve-context-request/v1", requestField: "query", requestValue: contextQuery, reply: resolveContextResult, want: resolveContextResult.ResolveContext.Resolution, invoke: func(client *ControllerClient) (any, error) {
 				return client.ResolveContext(context.Background(), contextQuery)
 			}},
-			{name: "VerifyEpoch", operation: "verify-epoch", requestSchema: "verdi.context-controller/verify-epoch-request/v1", requestField: "check", requestValue: epochCheck, reply: verifyEpochResult, want: verifyEpochResult.VerifyEpoch.Verification, invoke: func(client *ControllerClient) (any, error) {
+			{name: "VerifyEpoch", operation: "verify-epoch", requestSchema: "verdi.context-owner/verify-epoch-request/v1", requestField: "check", requestValue: epochCheck, reply: verifyEpochResult, want: verifyEpochResult.VerifyEpoch.Verification, invoke: func(client *ControllerClient) (any, error) {
 				return client.VerifyEpoch(context.Background(), epochCheck)
 			}},
-			{name: "InstallExpansion", operation: "install-expansion", requestSchema: "verdi.context-controller/install-expansion-request/v2", requestField: "install", requestValue: expansionInstall, reply: installExpansionResult, invoke: func(client *ControllerClient) (any, error) {
+			{name: "InstallExpansion", operation: "install-expansion", requestSchema: "verdi.context-owner/install-expansion-request/v2", requestField: "install", requestValue: expansionInstall, reply: installExpansionResult, invoke: func(client *ControllerClient) (any, error) {
 				return nil, client.InstallExpansion(context.Background(), expansionInstall)
 			}},
-			{name: "ResolveReceiptInputs", operation: "resolve-receipt-inputs", requestSchema: "verdi.context-controller/resolve-receipt-inputs-request/v1", requestField: "query", requestValue: receiptQuery, reply: resolveReceiptInputsResult, want: resolveReceiptInputsResult.ResolveReceiptInputs.Inputs, invoke: func(client *ControllerClient) (any, error) {
+			{name: "ResolveReceiptInputs", operation: "resolve-receipt-inputs", requestSchema: "verdi.context-owner/resolve-receipt-inputs-request/v1", requestField: "query", requestValue: receiptQuery, reply: resolveReceiptInputsResult, want: resolveReceiptInputsResult.ResolveReceiptInputs.Inputs, invoke: func(client *ControllerClient) (any, error) {
 				return client.ResolveReceiptInputs(context.Background(), receiptQuery)
 			}},
-			{name: "AppendReceipt", operation: "append-receipt", requestSchema: "verdi.context-controller/append-receipt-request/v1", requestField: "append", requestValue: receiptAppend, reply: appendReceiptResult, want: appendReceiptResult.AppendReceipt.Ack, invoke: func(client *ControllerClient) (any, error) {
+			{name: "AppendReceipt", operation: "append-receipt", requestSchema: "verdi.context-owner/append-receipt-request/v1", requestField: "append", requestValue: receiptAppend, reply: appendReceiptResult, want: appendReceiptResult.AppendReceipt.Ack, invoke: func(client *ControllerClient) (any, error) {
 				return client.AppendReceipt(context.Background(), receiptAppend)
 			}},
-			{name: "ResolveReceiptVerificationAuthority", operation: "resolve-receipt-verification-authority", requestSchema: "verdi.context-controller/resolve-receipt-verification-authority-request/v1", requestField: "query", requestValue: authorityQuery, reply: resolveReceiptAuthorityResult, want: resolveReceiptAuthorityResult.ResolveReceiptVerificationAuthority.Authority, invoke: func(client *ControllerClient) (any, error) {
+			{name: "ResolveReceiptVerificationAuthority", operation: "resolve-receipt-verification-authority", requestSchema: "verdi.context-owner/resolve-receipt-verification-authority-request/v1", requestField: "query", requestValue: authorityQuery, reply: resolveReceiptAuthorityResult, want: resolveReceiptAuthorityResult.ResolveReceiptVerificationAuthority.Authority, invoke: func(client *ControllerClient) (any, error) {
 				return client.ResolveReceiptVerificationAuthority(context.Background(), authorityQuery)
 			}},
-			{name: "PersistHandback", operation: "persist-handback", requestSchema: "verdi.context-controller/persist-handback-request/v1", requestField: "record", requestValue: handbackFrame, reply: persistHandbackResult, want: persistHandbackResult.PersistHandback.Ack, invoke: func(client *ControllerClient) (any, error) {
+			{name: "PersistHandback", operation: "persist-handback", requestSchema: "verdi.context-owner/persist-handback-request/v1", requestField: "record", requestValue: handbackFrame, reply: persistHandbackResult, want: persistHandbackResult.PersistHandback.Ack, invoke: func(client *ControllerClient) (any, error) {
 				return client.PersistHandback(context.Background(), handbackInput)
 			}},
-			{name: "PersistQuarantine", operation: "persist-quarantine", requestSchema: "verdi.context-controller/persist-quarantine-request/v1", requestField: "record", requestValue: quarantineFrame, reply: persistQuarantineResult, want: persistQuarantineResult.PersistQuarantine.Ack, invoke: func(client *ControllerClient) (any, error) {
+			{name: "PersistQuarantine", operation: "persist-quarantine", requestSchema: "verdi.context-owner/persist-quarantine-request/v1", requestField: "record", requestValue: quarantineFrame, reply: persistQuarantineResult, want: persistQuarantineResult.PersistQuarantine.Ack, invoke: func(client *ControllerClient) (any, error) {
 				return client.PersistQuarantine(context.Background(), quarantineInput, []byte{})
 			}},
-			{name: "PersistAbort", operation: "persist-abort", requestSchema: "verdi.context-controller/persist-abort-request/v1", requestField: "record", requestValue: abortFrame, reply: persistAbortResult, want: persistAbortResult.PersistAbort.Ack, invoke: func(client *ControllerClient) (any, error) {
+			{name: "PersistAbort", operation: "persist-abort", requestSchema: "verdi.context-owner/persist-abort-request/v1", requestField: "record", requestValue: abortFrame, reply: persistAbortResult, want: persistAbortResult.PersistAbort.Ack, invoke: func(client *ControllerClient) (any, error) {
 				return client.PersistAbort(context.Background(), abortInput)
 			}},
 		}
@@ -940,6 +941,25 @@ func TestContextControllerWireContract_Static(t *testing.T) {
 					if !client.Usable() {
 						t.Fatalf("%s operation-specific mismatch poisoned a usable controller", mismatch.name)
 					}
+					// Reuse the exact captured request with invoke directly:
+					// no domain wrapper relation check can hide a missing
+					// public relation validator at the runtime boundary.
+					sent, err := DecodeControllerCall(bytes.NewReader(transport.written.Bytes()))
+					if err != nil {
+						t.Fatal(err)
+					}
+					directTransport := &controllerMemoryTransport{read: bytes.NewReader(mustEncodeControllerResult(t, mismatch.reply))}
+					direct, err := NewControllerClient(directTransport)
+					if err != nil {
+						t.Fatal(err)
+					}
+					if _, err := direct.invoke(context.Background(), sent); !errors.Is(err, contextowner.ErrRelationMismatch) {
+						t.Fatalf("%s direct runtime missed shared relation: %v", mismatch.name, err)
+					}
+					if !direct.Usable() || direct.next != 2 {
+						t.Fatal("relation refusal did not preserve next capability sequence")
+					}
+
 				})
 			}
 		})
@@ -957,7 +977,7 @@ func TestContextControllerWireContract_Static(t *testing.T) {
 			"unknown operation":         bytes.Replace(callBytes, []byte(`"operation":"next-stamp"`), []byte(`"operation":"future"`), 1),
 			"operation schema mismatch": bytes.Replace(callBytes, []byte(`next-stamp-request`), []byte(`resolve-context-request`), 1),
 			"zero sequence":             bytes.Replace(callBytes, []byte(`"call_sequence":1`), []byte(`"call_sequence":0`), 1),
-			"duplicate":                 bytes.Replace(callBytes, []byte(`"schema":"verdi.context-controller-call/v1"`), []byte(`"schema":"verdi.context-controller-call/v1","schema":"verdi.context-controller-call/v1"`), 1),
+			"duplicate":                 bytes.Replace(callBytes, []byte(`"schema":"verdi.context-controller-call/v2"`), []byte(`"schema":"verdi.context-controller-call/v2","schema":"verdi.context-controller-call/v2"`), 1),
 			"unknown":                   bytes.Replace(callBytes, []byte(`"payload":`), []byte(`"future":true,"payload":`), 1),
 			"null":                      bytes.Replace(callBytes, []byte(`"payload":{"schema"`), []byte(`"payload":null,"discard":{"schema"`), 1),
 			"trailing":                  append(append([]byte(nil), callBytes...), []byte("{}\n")...),
@@ -974,7 +994,7 @@ func TestContextControllerWireContract_Static(t *testing.T) {
 		resultMutations := map[string][]byte{
 			"wrong result type": bytes.Replace(resultBytes, []byte(`next-stamp-result`), []byte(`resolve-context-result`), 1),
 			"result plus error": bytes.Replace(resultBytes, []byte(`"result":`), []byte(`"error":{"schema":"verdi.context-controller-error/v1","class":"operational","code":"internal","witnesses":["failure"]},"result":`), 1),
-			"neither arm":       []byte(`{"call_sequence":1,"operation":"next-stamp","payload":{},"schema":"verdi.context-controller-result/v1"}` + "\n"),
+			"neither arm":       []byte(`{"call_sequence":1,"operation":"next-stamp","payload":{},"schema":"verdi.context-controller-result/v2"}` + "\n"),
 			"null arm":          bytes.Replace(resultBytes, []byte(`"result":{`), []byte(`"result":null,"discard":{`), 1),
 			"duplicate":         bytes.Replace(resultBytes, []byte(`"call_sequence":1`), []byte(`"call_sequence":1,"call_sequence":1`), 1),
 			"unknown":           bytes.Replace(resultBytes, []byte(`"operation":`), []byte(`"future":true,"operation":`), 1),
@@ -1349,7 +1369,7 @@ func assertLiteralControllerRequestFrame(t *testing.T, frame []byte, want contro
 	if err := decoder.Decode(&envelope); err != nil {
 		t.Fatalf("%s decode captured request envelope: %v", want.name, err)
 	}
-	if envelope.Schema != "verdi.context-controller-call/v1" || envelope.CallSequence != 1 || envelope.Operation != want.operation {
+	if envelope.Schema != "verdi.context-controller-call/v2" || envelope.CallSequence != 1 || envelope.Operation != want.operation {
 		t.Fatalf("%s envelope identity = (%q,%d,%q), want literal operation %q", want.name, envelope.Schema, envelope.CallSequence, envelope.Operation, want.operation)
 	}
 	var payload map[string]json.RawMessage
@@ -1854,10 +1874,8 @@ func controllerReceiptFixture(t *testing.T, request ExecutionRequest) (contextre
 // The document is the one thing a caller can learn about this build's sealed
 // controller without starting a sealed execution: the three envelope schemas
 // every call and reply is framed in, and the closed operation registry in wire
-// order. It carries nothing else. Per-operation request and result schemas are
-// derived from the operation name by controllerRequestSchema and
-// controllerResultSchema, so publishing them would create a second place for
-// the wire to drift from the derivation that actually encodes it.
+// order. It carries nothing else. Actual public arm conformance is independently
+// checked against the literal frozen fixtures by TestControllerPublicFrozenFrames.
 //
 // The bytes are frozen literally because a consumer strict-decodes them and
 // compares the registry element by element. A reordered, renamed, or
@@ -1873,9 +1891,9 @@ func TestControllerContractDocument(t *testing.T) {
 		t.Fatalf("contract does not carry exactly one canonical LF: %q", encoded)
 	}
 	for _, literal := range []string{
-		`"schema":"verdi.context-controller-contract/v1"`,
-		`"controller_call_schema":"verdi.context-controller-call/v1"`,
-		`"controller_result_schema":"verdi.context-controller-result/v1"`,
+		`"schema":"verdi.context-controller-contract/v2"`,
+		`"controller_call_schema":"verdi.context-controller-call/v2"`,
+		`"controller_result_schema":"verdi.context-controller-result/v2"`,
 		`"controller_error_schema":"verdi.context-controller-error/v1"`,
 	} {
 		if !bytes.Contains(encoded, []byte(literal)) {
@@ -1938,8 +1956,10 @@ func TestControllerContractDocument(t *testing.T) {
 // because it lacks the operands a restart needs to reconstruct the lineage.
 func TestControllerInstallExpansionRequestV2(t *testing.T) {
 	const (
-		requestV2 = "verdi.context-controller/install-expansion-request/v2"
-		requestV1 = "verdi.context-controller/install-expansion-request/v1"
+		requestV2       = "verdi.context-controller/install-expansion-request/v2"
+		requestV1       = "verdi.context-controller/install-expansion-request/v1"
+		publicRequestV2 = "verdi.context-owner/install-expansion-request/v2"
+		publicRequestV1 = "verdi.context-owner/install-expansion-request/v1"
 	)
 	request := validExecutionRequest(t, ActionStart)
 	_, ack := controllerEventFixture(t, request)
@@ -2008,7 +2028,7 @@ func TestControllerInstallExpansionRequestV2(t *testing.T) {
 			`"ref":"` + install.Ref + `",` +
 			`"request_id":"` + install.RequestID + `",` +
 			`"terminal_ack":` + string(bytes.TrimSuffix(ackBytes, []byte("\n"))) +
-			`},"schema":"` + requestV2 + `"}`
+			`},"schema":"` + publicRequestV2 + `"}`
 		if got := string(payloadOf(t, callFor(install))); got != want {
 			t.Fatalf("widened install payload\n got %s\nwant %s", got, want)
 		}
@@ -2066,10 +2086,10 @@ func TestControllerInstallExpansionRequestV2(t *testing.T) {
 		if err != nil {
 			t.Fatalf("EncodeControllerCall: %v", err)
 		}
-		if got := bytes.Count(frame, []byte(`"`+requestV2+`"`)); got != 1 {
+		if got := bytes.Count(frame, []byte(`"`+publicRequestV2+`"`)); got != 1 {
 			t.Fatalf("frame declares the v2 request schema %d times, want exactly 1", got)
 		}
-		legacy := bytes.Replace(frame, []byte(`"`+requestV2+`"`), []byte(`"`+requestV1+`"`), 1)
+		legacy := bytes.Replace(frame, []byte(`"`+publicRequestV2+`"`), []byte(`"`+publicRequestV1+`"`), 1)
 		if _, err := DecodeControllerCall(bytes.NewReader(legacy)); err == nil {
 			t.Fatal("DecodeControllerCall served a v1 install-expansion request")
 		}
