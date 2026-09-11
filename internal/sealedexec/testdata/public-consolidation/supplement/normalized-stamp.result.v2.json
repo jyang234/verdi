@@ -1,0 +1,1 @@
+{"call_sequence":1,"operation":"next-stamp","payload":{"result":{"schema":"verdi.context-owner/next-stamp-result/v1","stamp":"2026-08-28T12:34:56.123456789Z"}},"schema":"verdi.context-controller-result/v2"}

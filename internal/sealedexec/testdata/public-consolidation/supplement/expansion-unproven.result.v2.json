@@ -1,0 +1,1 @@
+{"call_sequence":1,"operation":"verify-expansion","payload":{"result":{"facts":{"failure":"unavailable","root":"","state":"unproven","witnesses":["unavailable"]},"schema":"verdi.context-owner/verify-expansion-result/v1"}},"schema":"verdi.context-controller-result/v2"}

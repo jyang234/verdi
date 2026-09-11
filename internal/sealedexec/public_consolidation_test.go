@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -34,6 +35,9 @@ type consolidationCorpus struct {
 
 func consolidationDigest(b []byte) string { h := sha256.Sum256(b); return hex.EncodeToString(h[:]) }
 func consolidationFixture(name string) ([]byte, error) {
+	if strings.HasPrefix(name, "supplement/") {
+		return os.ReadFile(filepath.Join("testdata", "public-consolidation", name))
+	}
 	return os.ReadFile(filepath.Join("..", "contextowner", "testdata", "public-contract", name))
 }
 
@@ -44,6 +48,14 @@ func consolidationMutateTyped(v reflect.Value, path []string, mutation string) e
 		if v.Kind() == reflect.Pointer {
 			v = v.Elem()
 		}
+		if v.Kind() == reflect.Slice {
+			n, e := strconv.Atoi(p)
+			if e != nil || n < 0 || n >= v.Len() {
+				return fmt.Errorf("invalid index %s", p)
+			}
+			v = v.Index(n)
+			continue
+		}
 		if v.Kind() != reflect.Struct {
 			return fmt.Errorf("nonstruct path %v", path)
 		}
@@ -52,9 +64,19 @@ func consolidationMutateTyped(v reflect.Value, path []string, mutation string) e
 			return fmt.Errorf("absent field %s", p)
 		}
 	}
+	if v.Kind() == reflect.Pointer && mutation != "nil" && mutation != "zero-pointer" && mutation != "control" {
+		if v.IsNil() {
+			return fmt.Errorf("nil scalar pointer %v", path)
+		}
+		v = v.Elem()
+	}
 	switch mutation {
 	case "control":
 		return nil
+	case "oid-64":
+		v.SetString(strings.Repeat("a", 64))
+	case "fractional-zero-stamp":
+		v.SetString("2026-01-01T00:00:00.000Z")
 	case "empty":
 		v.SetString("")
 	case "space":
@@ -77,6 +99,10 @@ func consolidationMutateTyped(v reflect.Value, path []string, mutation string) e
 		v.SetUint(0)
 	case "max":
 		v.SetUint(^uint64(0))
+	case "zero-int":
+		v.SetInt(0)
+	case "negative-int":
+		v.SetInt(-1)
 	case "toggle":
 		v.SetBool(!v.Bool())
 	case "nil":
@@ -125,6 +151,49 @@ func consolidationMutateRaw(raw []byte, path []string, mutation string) ([]byte,
 			return append(append([]byte(nil), raw...), []byte("{}\n")...), nil
 		case "duplicate-member":
 			return bytes.Replace(raw, []byte("{"), []byte(`{"schema":"wrong",`), 1), nil
+		}
+	}
+	if len(path) > 0 {
+		if index, e := strconv.Atoi(path[0]); e == nil {
+			var values []json.RawMessage
+			if err := json.Unmarshal(raw, &values); err != nil {
+				return nil, err
+			}
+			if index < 0 || index >= len(values) {
+				return nil, fmt.Errorf("invalid raw index %d", index)
+			}
+			if len(path) > 1 {
+				next, err := consolidationMutateRaw(values[index], path[1:], mutation)
+				if err != nil {
+					return nil, err
+				}
+				values[index] = bytes.TrimSuffix(next, []byte("\n"))
+			} else {
+				wrapper, err := json.Marshal(map[string]json.RawMessage{"value": values[index]})
+				if err != nil {
+					return nil, err
+				}
+				changed, err := consolidationMutateRaw(wrapper, []string{"value"}, mutation)
+				if err != nil {
+					return nil, err
+				}
+				var member map[string]json.RawMessage
+				if err := json.Unmarshal(changed, &member); err != nil {
+					return nil, err
+				}
+				if value, ok := member["value"]; ok {
+					values[index] = value
+				} else {
+					values = append(values[:index], values[index+1:]...)
+				}
+			}
+			var out bytes.Buffer
+			enc := json.NewEncoder(&out)
+			enc.SetEscapeHTML(false)
+			if err := enc.Encode(values); err != nil {
+				return nil, err
+			}
+			return out.Bytes(), nil
 		}
 	}
 	var doc map[string]json.RawMessage
@@ -251,11 +320,16 @@ func consolidationExecute(row consolidationCase) (operand string, accepted bool,
 }
 
 func TestPublicControllerConsolidationCorpus(t *testing.T) {
-	raw, err := os.ReadFile(filepath.Join("testdata", "public-consolidation", "corpus.json"))
+	consolidationReplayCorpus(t, "corpus.json", "7a684a96e75b7afbe9c450c3b51966c58615cab972940fdc2833006c27daec76", 4377, 44)
+}
+
+func consolidationReplayCorpus(t *testing.T, filename, digest string, count, fixtures int) {
+	t.Helper()
+	raw, err := os.ReadFile(filepath.Join("testdata", "public-consolidation", filename))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if consolidationDigest(raw) != "7a684a96e75b7afbe9c450c3b51966c58615cab972940fdc2833006c27daec76" {
+	if consolidationDigest(raw) != digest {
 		t.Fatal("baseline consolidation corpus changed")
 	}
 	var corpus consolidationCorpus
@@ -267,7 +341,7 @@ func TestPublicControllerConsolidationCorpus(t *testing.T) {
 	if err := dec.Decode(new(any)); err != io.EOF {
 		t.Fatalf("trailing corpus document: %v", err)
 	}
-	if corpus.Baseline != "e671a326418fdfb672a92398228bafcac184c99f" || len(corpus.Cases) != 4377 || len(corpus.Fixtures) != 44 {
+	if corpus.Baseline != "e671a326418fdfb672a92398228bafcac184c99f" || len(corpus.Cases) != count || len(corpus.Fixtures) != fixtures {
 		t.Fatal("missing fixed baseline corpus")
 	}
 	for name, want := range corpus.Fixtures {
@@ -298,4 +372,11 @@ func TestPublicControllerConsolidationCorpus(t *testing.T) {
 			}
 		})
 	}
+}
+
+// Supplemental seeds populate controller-owned arrays and optional facts that
+// the original frozen operation fixtures leave empty. Outcomes were measured
+// exclusively against the accepted pre-consolidation source.
+func TestPublicControllerConsolidationSupplement(t *testing.T) {
+	consolidationReplayCorpus(t, "supplement.json", "a04c12b4c8db318addb3bf4ba89e70f9a62ceffa9a495af114641d87081c1196", 3666, 16)
 }
