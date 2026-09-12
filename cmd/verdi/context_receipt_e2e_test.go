@@ -243,6 +243,14 @@ func TestContextReceiptVerifyCLI_BuiltBinary(t *testing.T) {
 			name  string
 			reply func(sealedexec.ControllerCall) []byte
 		}{
+			{name: "old v1 host", reply: func(call sealedexec.ControllerCall) []byte {
+				frame := receiptAuthorityResultBytes(t, call, fixture.authority)
+				return bytes.Replace(frame, []byte("verdi.context-controller-result/v2"), []byte("verdi.context-controller-result/v1"), 1)
+			}},
+			{name: "private arm under v2 envelope", reply: func(call sealedexec.ControllerCall) []byte {
+				frame := receiptAuthorityResultBytes(t, call, fixture.authority)
+				return bytes.Replace(frame, []byte("verdi.context-owner/resolve-receipt-verification-authority-result/v1"), []byte("verdi.context-controller/resolve-receipt-verification-authority-result/v1"), 1)
+			}},
 			{name: "malformed", reply: func(sealedexec.ControllerCall) []byte { return []byte("{}\n") }},
 			{name: "operation", reply: func(call sealedexec.ControllerCall) []byte {
 				result := sealedexec.ControllerResult{Schema: sealedexec.ControllerResultSchemaID, CallSequence: call.CallSequence, Operation: sealedexec.ControllerOperationNextStamp, NextStamp: sealedexec.ControllerNextStampResult{Schema: "verdi.context-controller/next-stamp-result/v1", Stamp: "2026-08-28T12:34:56Z"}}

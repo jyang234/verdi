@@ -1,0 +1,1 @@
+{"schema":"verdi.context-controller/resolve-redacted-segment-result/v1","segment":{"byte_count":13,"bytes":"eyJhbnN3ZXIiOjQyfQ==","digest":"sha256:ecf59a2696ca44a417e20e2a7eabb1b26e82c779f8546bea354a2cc80e8e1eed","media_type":"application/json","redaction_profile":"verdi.redaction/standard-v1","schema":"verdi.context-redacted-segment/v1"}}

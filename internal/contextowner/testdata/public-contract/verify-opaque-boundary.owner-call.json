@@ -1,0 +1,1 @@
+{"controller_request_digest":"sha256:00de1d1d9277138da6fa5e753782a551dd291a9ddefdc22b57c92468551fc7c7","operation":"verify-opaque-boundary","request":{"rows":[],"schema":"verdi.context-owner/verify-opaque-boundary-request/v1"},"schema":"verdi.context-owner-call/v1"}

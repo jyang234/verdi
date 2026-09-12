@@ -1,0 +1,1 @@
+{"call_sequence":1,"operation":"resolve-context","payload":{"query":{"key":{"epoch":"epoch-1","flight":"flight-1","lane":"lane-1"},"ref":"spec/test#ac-1"},"schema":"verdi.context-owner/resolve-context-request/v1"},"schema":"verdi.context-controller-call/v2"}

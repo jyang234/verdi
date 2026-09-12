@@ -1,0 +1,530 @@
+[
+  {
+    "classifier": "resume",
+    "cut": "before-receipt-event",
+    "cut_receipt_control_candidate": [
+      0,
+      0,
+      0
+    ],
+    "evidence": "private:accepted-fixture",
+    "kill_exit": -1,
+    "pair": "baseline",
+    "reentry_exit": 2,
+    "reentry_launches": {
+      "Total": 62,
+      "Sealed": 2,
+      "Decode": 24,
+      "Encode": 24
+    },
+    "reentry_receipt_control_candidate": [
+      1,
+      1,
+      0
+    ],
+    "reentry_shape": {
+      "LedgerKinds": [
+        "vatc.plan.approved",
+        "vatc.flight.planned",
+        "vatc.baseline.checked",
+        "vatc.build_start.intent",
+        "vatc.flight.dispatched",
+        "vatc.flight.resumed",
+        "vatc.flight.retried",
+        "vatc.flight.suspended"
+      ],
+      "RecorderKinds": [
+        "1/1/vatc.recorder.provider.message",
+        "1/2/vatc.recorder.provider.summary",
+        "1/3/vatc.recorder.provider.summary",
+        "1/4/vatc.recorder.provider.message",
+        "1/5/vatc.recorder.provider.message",
+        "1/6/vatc.recorder.retry",
+        "2/1/vatc.recorder.provider.message",
+        "2/2/vatc.recorder.provider.summary",
+        "2/3/vatc.recorder.provider.summary",
+        "2/4/vatc.recorder.provider.message",
+        "2/5/vatc.recorder.provider.message",
+        "2/6/vatc.recorder.provider.message"
+      ],
+      "ControlOperations": [
+        "1/1/store-adapter-session",
+        "2/1/append-receipt",
+        "2/1/persist-handback",
+        "2/1/store-adapter-session"
+      ]
+    }
+  },
+  {
+    "classifier": "resume",
+    "cut": "after-receipt-event",
+    "cut_receipt_control_candidate": [
+      1,
+      0,
+      0
+    ],
+    "evidence": "private:accepted-fixture",
+    "kill_exit": -1,
+    "pair": "baseline",
+    "reentry_exit": 2,
+    "reentry_launches": {
+      "Total": 62,
+      "Sealed": 2,
+      "Decode": 24,
+      "Encode": 24
+    },
+    "reentry_receipt_control_candidate": [
+      2,
+      1,
+      0
+    ],
+    "reentry_shape": {
+      "LedgerKinds": [
+        "vatc.plan.approved",
+        "vatc.flight.planned",
+        "vatc.baseline.checked",
+        "vatc.build_start.intent",
+        "vatc.flight.dispatched",
+        "vatc.flight.resumed",
+        "vatc.flight.retried",
+        "vatc.flight.suspended"
+      ],
+      "RecorderKinds": [
+        "1/1/vatc.recorder.provider.message",
+        "1/2/vatc.recorder.provider.summary",
+        "1/3/vatc.recorder.provider.summary",
+        "1/4/vatc.recorder.provider.message",
+        "1/5/vatc.recorder.provider.message",
+        "1/6/vatc.recorder.provider.message",
+        "1/7/vatc.recorder.retry",
+        "2/1/vatc.recorder.provider.message",
+        "2/2/vatc.recorder.provider.summary",
+        "2/3/vatc.recorder.provider.summary",
+        "2/4/vatc.recorder.provider.message",
+        "2/5/vatc.recorder.provider.message",
+        "2/6/vatc.recorder.provider.message"
+      ],
+      "ControlOperations": [
+        "1/1/store-adapter-session",
+        "2/1/append-receipt",
+        "2/1/persist-handback",
+        "2/1/store-adapter-session"
+      ]
+    }
+  },
+  {
+    "classifier": "resume",
+    "cut": "after-receipt-control",
+    "cut_receipt_control_candidate": [
+      1,
+      1,
+      0
+    ],
+    "evidence": "private:accepted-fixture",
+    "kill_exit": -1,
+    "pair": "baseline",
+    "reentry_exit": 2,
+    "reentry_launches": {
+      "Total": 62,
+      "Sealed": 2,
+      "Decode": 24,
+      "Encode": 24
+    },
+    "reentry_receipt_control_candidate": [
+      2,
+      2,
+      0
+    ],
+    "reentry_shape": {
+      "LedgerKinds": [
+        "vatc.plan.approved",
+        "vatc.flight.planned",
+        "vatc.baseline.checked",
+        "vatc.build_start.intent",
+        "vatc.flight.dispatched",
+        "vatc.flight.resumed",
+        "vatc.flight.retried",
+        "vatc.flight.suspended"
+      ],
+      "RecorderKinds": [
+        "1/1/vatc.recorder.provider.message",
+        "1/2/vatc.recorder.provider.summary",
+        "1/3/vatc.recorder.provider.summary",
+        "1/4/vatc.recorder.provider.message",
+        "1/5/vatc.recorder.provider.message",
+        "1/6/vatc.recorder.provider.message",
+        "1/7/vatc.recorder.retry",
+        "2/1/vatc.recorder.provider.message",
+        "2/2/vatc.recorder.provider.summary",
+        "2/3/vatc.recorder.provider.summary",
+        "2/4/vatc.recorder.provider.message",
+        "2/5/vatc.recorder.provider.message",
+        "2/6/vatc.recorder.provider.message"
+      ],
+      "ControlOperations": [
+        "1/1/append-receipt",
+        "1/1/store-adapter-session",
+        "2/1/append-receipt",
+        "2/1/persist-handback",
+        "2/1/store-adapter-session"
+      ]
+    }
+  },
+  {
+    "classifier": "resume",
+    "cut": "before-candidate-ledger",
+    "cut_receipt_control_candidate": [
+      1,
+      1,
+      0
+    ],
+    "evidence": "private:accepted-fixture",
+    "kill_exit": -1,
+    "pair": "baseline",
+    "reentry_exit": 2,
+    "reentry_launches": {
+      "Total": 6,
+      "Sealed": 0,
+      "Decode": 0,
+      "Encode": 0
+    },
+    "reentry_receipt_control_candidate": [
+      1,
+      1,
+      0
+    ],
+    "reentry_shape": {
+      "LedgerKinds": [
+        "vatc.plan.approved",
+        "vatc.flight.planned",
+        "vatc.baseline.checked",
+        "vatc.build_start.intent",
+        "vatc.flight.dispatched"
+      ],
+      "RecorderKinds": [
+        "1/1/vatc.recorder.provider.message",
+        "1/2/vatc.recorder.provider.summary",
+        "1/3/vatc.recorder.provider.summary",
+        "1/4/vatc.recorder.provider.message",
+        "1/5/vatc.recorder.provider.message",
+        "1/6/vatc.recorder.provider.message"
+      ],
+      "ControlOperations": [
+        "1/1/append-receipt",
+        "1/1/persist-handback",
+        "1/1/store-adapter-session"
+      ]
+    }
+  },
+  {
+    "classifier": "replay",
+    "cut": "after-candidate-ledger",
+    "cut_receipt_control_candidate": [
+      1,
+      1,
+      1
+    ],
+    "evidence": "private:accepted-fixture",
+    "kill_exit": -1,
+    "pair": "baseline",
+    "reentry_exit": 0,
+    "reentry_launches": {
+      "Total": 4,
+      "Sealed": 0,
+      "Decode": 0,
+      "Encode": 0
+    },
+    "reentry_receipt_control_candidate": [
+      1,
+      1,
+      1
+    ],
+    "reentry_shape": {
+      "LedgerKinds": [
+        "vatc.plan.approved",
+        "vatc.flight.planned",
+        "vatc.baseline.checked",
+        "vatc.build_start.intent",
+        "vatc.flight.dispatched",
+        "vatc.candidate.produced"
+      ],
+      "RecorderKinds": [
+        "1/1/vatc.recorder.provider.message",
+        "1/2/vatc.recorder.provider.summary",
+        "1/3/vatc.recorder.provider.summary",
+        "1/4/vatc.recorder.provider.message",
+        "1/5/vatc.recorder.provider.message",
+        "1/6/vatc.recorder.provider.message"
+      ],
+      "ControlOperations": [
+        "1/1/append-receipt",
+        "1/1/persist-handback",
+        "1/1/store-adapter-session"
+      ]
+    }
+  },
+  {
+    "classifier": "resume",
+    "cut": "before-receipt-event",
+    "cut_receipt_control_candidate": [
+      0,
+      0,
+      0
+    ],
+    "evidence": "private:accepted-fixture",
+    "kill_exit": -1,
+    "pair": "candidate",
+    "reentry_exit": 2,
+    "reentry_launches": {
+      "Total": 15,
+      "Sealed": 2,
+      "Decode": 0,
+      "Encode": 0
+    },
+    "reentry_receipt_control_candidate": [
+      1,
+      1,
+      0
+    ],
+    "reentry_shape": {
+      "LedgerKinds": [
+        "vatc.plan.approved",
+        "vatc.flight.planned",
+        "vatc.baseline.checked",
+        "vatc.build_start.intent",
+        "vatc.flight.dispatched",
+        "vatc.flight.resumed",
+        "vatc.flight.retried",
+        "vatc.flight.suspended"
+      ],
+      "RecorderKinds": [
+        "1/1/vatc.recorder.provider.message",
+        "1/2/vatc.recorder.provider.summary",
+        "1/3/vatc.recorder.provider.summary",
+        "1/4/vatc.recorder.provider.message",
+        "1/5/vatc.recorder.provider.message",
+        "1/6/vatc.recorder.retry",
+        "2/1/vatc.recorder.provider.message",
+        "2/2/vatc.recorder.provider.summary",
+        "2/3/vatc.recorder.provider.summary",
+        "2/4/vatc.recorder.provider.message",
+        "2/5/vatc.recorder.provider.message",
+        "2/6/vatc.recorder.provider.message"
+      ],
+      "ControlOperations": [
+        "1/1/store-adapter-session",
+        "2/1/append-receipt",
+        "2/1/persist-handback",
+        "2/1/store-adapter-session"
+      ]
+    }
+  },
+  {
+    "classifier": "resume",
+    "cut": "after-receipt-event",
+    "cut_receipt_control_candidate": [
+      1,
+      0,
+      0
+    ],
+    "evidence": "private:accepted-fixture",
+    "kill_exit": -1,
+    "pair": "candidate",
+    "reentry_exit": 2,
+    "reentry_launches": {
+      "Total": 15,
+      "Sealed": 2,
+      "Decode": 0,
+      "Encode": 0
+    },
+    "reentry_receipt_control_candidate": [
+      2,
+      1,
+      0
+    ],
+    "reentry_shape": {
+      "LedgerKinds": [
+        "vatc.plan.approved",
+        "vatc.flight.planned",
+        "vatc.baseline.checked",
+        "vatc.build_start.intent",
+        "vatc.flight.dispatched",
+        "vatc.flight.resumed",
+        "vatc.flight.retried",
+        "vatc.flight.suspended"
+      ],
+      "RecorderKinds": [
+        "1/1/vatc.recorder.provider.message",
+        "1/2/vatc.recorder.provider.summary",
+        "1/3/vatc.recorder.provider.summary",
+        "1/4/vatc.recorder.provider.message",
+        "1/5/vatc.recorder.provider.message",
+        "1/6/vatc.recorder.provider.message",
+        "1/7/vatc.recorder.retry",
+        "2/1/vatc.recorder.provider.message",
+        "2/2/vatc.recorder.provider.summary",
+        "2/3/vatc.recorder.provider.summary",
+        "2/4/vatc.recorder.provider.message",
+        "2/5/vatc.recorder.provider.message",
+        "2/6/vatc.recorder.provider.message"
+      ],
+      "ControlOperations": [
+        "1/1/store-adapter-session",
+        "2/1/append-receipt",
+        "2/1/persist-handback",
+        "2/1/store-adapter-session"
+      ]
+    }
+  },
+  {
+    "classifier": "resume",
+    "cut": "after-receipt-control",
+    "cut_receipt_control_candidate": [
+      1,
+      1,
+      0
+    ],
+    "evidence": "private:accepted-fixture",
+    "kill_exit": -1,
+    "pair": "candidate",
+    "reentry_exit": 2,
+    "reentry_launches": {
+      "Total": 15,
+      "Sealed": 2,
+      "Decode": 0,
+      "Encode": 0
+    },
+    "reentry_receipt_control_candidate": [
+      2,
+      2,
+      0
+    ],
+    "reentry_shape": {
+      "LedgerKinds": [
+        "vatc.plan.approved",
+        "vatc.flight.planned",
+        "vatc.baseline.checked",
+        "vatc.build_start.intent",
+        "vatc.flight.dispatched",
+        "vatc.flight.resumed",
+        "vatc.flight.retried",
+        "vatc.flight.suspended"
+      ],
+      "RecorderKinds": [
+        "1/1/vatc.recorder.provider.message",
+        "1/2/vatc.recorder.provider.summary",
+        "1/3/vatc.recorder.provider.summary",
+        "1/4/vatc.recorder.provider.message",
+        "1/5/vatc.recorder.provider.message",
+        "1/6/vatc.recorder.provider.message",
+        "1/7/vatc.recorder.retry",
+        "2/1/vatc.recorder.provider.message",
+        "2/2/vatc.recorder.provider.summary",
+        "2/3/vatc.recorder.provider.summary",
+        "2/4/vatc.recorder.provider.message",
+        "2/5/vatc.recorder.provider.message",
+        "2/6/vatc.recorder.provider.message"
+      ],
+      "ControlOperations": [
+        "1/1/append-receipt",
+        "1/1/store-adapter-session",
+        "2/1/append-receipt",
+        "2/1/persist-handback",
+        "2/1/store-adapter-session"
+      ]
+    }
+  },
+  {
+    "classifier": "resume",
+    "cut": "before-candidate-ledger",
+    "cut_receipt_control_candidate": [
+      1,
+      1,
+      0
+    ],
+    "evidence": "private:accepted-fixture",
+    "kill_exit": -1,
+    "pair": "candidate",
+    "reentry_exit": 2,
+    "reentry_launches": {
+      "Total": 7,
+      "Sealed": 0,
+      "Decode": 0,
+      "Encode": 0
+    },
+    "reentry_receipt_control_candidate": [
+      1,
+      1,
+      0
+    ],
+    "reentry_shape": {
+      "LedgerKinds": [
+        "vatc.plan.approved",
+        "vatc.flight.planned",
+        "vatc.baseline.checked",
+        "vatc.build_start.intent",
+        "vatc.flight.dispatched"
+      ],
+      "RecorderKinds": [
+        "1/1/vatc.recorder.provider.message",
+        "1/2/vatc.recorder.provider.summary",
+        "1/3/vatc.recorder.provider.summary",
+        "1/4/vatc.recorder.provider.message",
+        "1/5/vatc.recorder.provider.message",
+        "1/6/vatc.recorder.provider.message"
+      ],
+      "ControlOperations": [
+        "1/1/append-receipt",
+        "1/1/persist-handback",
+        "1/1/store-adapter-session"
+      ]
+    }
+  },
+  {
+    "classifier": "replay",
+    "cut": "after-candidate-ledger",
+    "cut_receipt_control_candidate": [
+      1,
+      1,
+      1
+    ],
+    "evidence": "private:accepted-fixture",
+    "kill_exit": -1,
+    "pair": "candidate",
+    "reentry_exit": 0,
+    "reentry_launches": {
+      "Total": 5,
+      "Sealed": 0,
+      "Decode": 0,
+      "Encode": 0
+    },
+    "reentry_receipt_control_candidate": [
+      1,
+      1,
+      1
+    ],
+    "reentry_shape": {
+      "LedgerKinds": [
+        "vatc.plan.approved",
+        "vatc.flight.planned",
+        "vatc.baseline.checked",
+        "vatc.build_start.intent",
+        "vatc.flight.dispatched",
+        "vatc.candidate.produced"
+      ],
+      "RecorderKinds": [
+        "1/1/vatc.recorder.provider.message",
+        "1/2/vatc.recorder.provider.summary",
+        "1/3/vatc.recorder.provider.summary",
+        "1/4/vatc.recorder.provider.message",
+        "1/5/vatc.recorder.provider.message",
+        "1/6/vatc.recorder.provider.message"
+      ],
+      "ControlOperations": [
+        "1/1/append-receipt",
+        "1/1/persist-handback",
+        "1/1/store-adapter-session"
+      ]
+    }
+  }
+]

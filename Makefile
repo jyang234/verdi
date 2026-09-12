@@ -26,7 +26,7 @@ build:
 # (their buildID covers cmd/verdi's own sources) and are deliberately absent.
 # TestGateCacheHonesty_CrossBinaryPkgsListInSync (internal/specalign) fails if a
 # package that builds+execs cmd/verdi from outside cmd/verdi is missing here.
-CROSS_BINARY_PKGS := ./internal/showcasealign/... ./internal/specalign/... ./internal/experimentapp/... ./internal/designapp/... ./internal/sealedexec/claude/...
+CROSS_BINARY_PKGS := ./internal/showcasealign/... ./internal/specalign/... ./internal/experimentapp/... ./internal/designapp/... ./internal/sealedexec/claude/... ./internal/publicrelease/...
 
 # -race mirrors CI's `go test -race` exactly: a data race that would fail CI
 # must fail `make test`/`make verify` locally first (CLAUDE.md: "go test
@@ -316,3 +316,11 @@ verify: build fmt-check vet lint test fixture lint-store spec-align lint-showcas
 
 tidy:
 	go mod tidy
+
+# Auxiliary local paired release proof. Both source/build identities and baseline
+# paths are mandatory command arguments; ordinary verify composition is unchanged.
+.PHONY: public-execution-contract-release
+public-execution-contract-release:
+	mkdir -p .build
+	go build -trimpath -o .build/public-execution-contract-release ./cmd/public-execution-contract-release
+	.build/public-execution-contract-release $(PUBLIC_RELEASE_ARGS)

@@ -1,0 +1,2 @@
+cuts.json: accepted Flight1 TestBoundaryRecoveryFiveProcessCuts-148924031/matrix.json; only absolute evidence locator replaced by private:accepted-fixture.
+arm-events.jsonl: accepted Task4 task4-main-pair-fe7a9e28.log, exact 25 call/result/legacy digest observations transformed to test-event records. No candidate-generated protocol oracle.

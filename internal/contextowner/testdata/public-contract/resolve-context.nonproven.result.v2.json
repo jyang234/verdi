@@ -1,0 +1,1 @@
+{"call_sequence":1,"operation":"resolve-context","payload":{"result":{"resolution":{"failure":"unavailable","ref":"spec/test#ac-1","state":"unproven","witnesses":["ref-absent"]},"schema":"verdi.context-owner/resolve-context-result/v1"}},"schema":"verdi.context-controller-result/v2"}

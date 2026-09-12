@@ -1,0 +1,73 @@
+name: public-execution-contract-release
+on:
+  workflow_dispatch:
+    inputs:
+      verdi_commit:
+        description: Approved exact candidate Verdi commit
+        required: true
+        type: string
+      atc_commit:
+        description: Approved exact candidate ATC commit in the private bundle
+        required: true
+        type: string
+      baseline_atc_commit:
+        description: Fixed baseline ATC commit
+        required: true
+        type: string
+        default: b1f9e995a62aaa2f2ea78248f9b784fd3720817d
+      atc_bundle_sha256:
+        description: Approved private Git bundle SHA-256
+        required: true
+        type: string
+permissions:
+  contents: read
+jobs:
+  public-execution-contract-release:
+    runs-on: ubuntu-latest
+    environment: public-execution-contract-release
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ inputs.verdi_commit }}
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install the ordinary pinned linter
+        run: |
+          go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.5.0
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+      - name: Build release checker from the candidate source
+        run: go build -trimpath -o "$RUNNER_TEMP/public-execution-contract-release" ./cmd/public-execution-contract-release
+      - name: Authenticate isolated sources and execute all gates and ten scopes
+        env:
+          PUBLIC_RELEASE_VERDI_COMMIT: ${{ inputs.verdi_commit }}
+          PUBLIC_RELEASE_ATC_COMMIT: ${{ inputs.atc_commit }}
+          PUBLIC_RELEASE_BASELINE_ATC_COMMIT: ${{ inputs.baseline_atc_commit }}
+          PUBLIC_RELEASE_ATC_BUNDLE_SHA256: ${{ inputs.atc_bundle_sha256 }}
+          PUBLIC_RELEASE_ATC_BUNDLE_URL: ${{ secrets.ATC_SOURCE_BUNDLE_URL }}
+        run: '"$RUNNER_TEMP/public-execution-contract-release" --verdi-source "$GITHUB_WORKSPACE" --bootstrap "$RUNNER_TEMP/public-execution-contract-pair"'
+      # This allowlist contains only typed source-free reports and the ten
+      # evidence objects created by the checker. Private sources, bundles,
+      # source overlays, executables and arbitrary raw logs are never uploaded.
+      - uses: actions/upload-artifact@v4
+        with:
+          name: public-execution-contract-release-evidence
+          path: |
+            ${{ runner.temp }}/public-execution-contract-pair/run/publish/release.json
+            ${{ runner.temp }}/public-execution-contract-pair/run/publish/verdicts.json
+            ${{ runner.temp }}/public-execution-contract-pair/run/publish/public-execution-contract--ac-1--static.json
+            ${{ runner.temp }}/public-execution-contract-pair/run/publish/public-execution-contract--ac-1--behavioral.json
+            ${{ runner.temp }}/public-execution-contract-pair/run/publish/public-execution-contract--ac-2--static.json
+            ${{ runner.temp }}/public-execution-contract-pair/run/publish/public-execution-contract--ac-2--behavioral.json
+            ${{ runner.temp }}/public-execution-contract-pair/run/publish/public-execution-contract--ac-3--static.json
+            ${{ runner.temp }}/public-execution-contract-pair/run/publish/public-execution-contract--ac-3--behavioral.json
+            ${{ runner.temp }}/public-execution-contract-pair/run/publish/public-execution-contract--ac-4--static.json
+            ${{ runner.temp }}/public-execution-contract-pair/run/publish/public-execution-contract--ac-4--behavioral.json
+            ${{ runner.temp }}/public-execution-contract-pair/run/publish/public-execution-contract--ac-5--static.json
+            ${{ runner.temp }}/public-execution-contract-pair/run/publish/public-execution-contract--ac-5--behavioral.json
+          if-no-files-found: error

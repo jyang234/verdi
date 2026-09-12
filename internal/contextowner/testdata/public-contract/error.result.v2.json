@@ -1,0 +1,1 @@
+{"call_sequence":1,"operation":"next-stamp","payload":{"error":{"class":"operational","code":"unavailable","schema":"verdi.context-controller-error/v1","witnesses":["fixture controller refusal"]}},"schema":"verdi.context-controller-result/v2"}

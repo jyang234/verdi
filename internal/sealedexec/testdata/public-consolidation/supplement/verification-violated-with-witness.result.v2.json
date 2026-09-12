@@ -1,0 +1,1 @@
+{"call_sequence":1,"operation":"verify-epoch","payload":{"result":{"schema":"verdi.context-owner/verify-epoch-result/v1","verification":{"failure":"unavailable","state":"violated-with-witness","witnesses":["witness-a","witness-b"]}}},"schema":"verdi.context-controller-result/v2"}

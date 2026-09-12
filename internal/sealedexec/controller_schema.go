@@ -11,8 +11,8 @@ import (
 )
 
 const (
-	ControllerCallSchemaID   = "verdi.context-controller-call/v1"
-	ControllerResultSchemaID = "verdi.context-controller-result/v1"
+	ControllerCallSchemaID   = "verdi.context-controller-call/v2"
+	ControllerResultSchemaID = "verdi.context-controller-result/v2"
 	ControllerErrorSchemaID  = "verdi.context-controller-error/v1"
 )
 
@@ -23,15 +23,13 @@ const (
 // It exists so a caller can learn which controller this build speaks without
 // starting a sealed execution. Publishing it is not a capability: nothing here
 // serves an operation, and the document is a pure function of constants.
-const ControllerContractSchemaID = "verdi.context-controller-contract/v1"
+const ControllerContractSchemaID = "verdi.context-controller-contract/v2"
 
 // controllerContract is the exact published shape.
 //
-// Per-operation request and result schemas are deliberately absent. They are
-// derived from the operation name by controllerRequestSchema and
-// controllerResultSchema, so listing them would create a second place for the
-// wire to drift from the derivation that actually encodes it; comparing the
-// registry compares them all.
+// Per-operation arm definitions are fixed by the public execution contract,
+// including the claims exception. This projection advertises their registry;
+// only the matched conformance tests prove the arms actually implemented.
 type controllerContract struct {
 	Schema                 string                `json:"schema"`
 	ControllerCallSchema   string                `json:"controller_call_schema"`
@@ -432,8 +430,10 @@ type ControllerResolveClaimMCPResult struct {
 	Registration ClaimMCPRegistration
 }
 
-// ControllerCall is a closed typed request union. Operation selects exactly
-// one operation-specific value; the wire codec emits only that payload.
+// ControllerCall is a closed execution-domain request union. These Go-only
+// arguments are converted to contextowner values; they do not define a second
+// serialized operation representation. Schema retains the legacy domain API
+// spelling while the public arm codec owns the actual wire schema.
 type ControllerCall struct {
 	Schema       string
 	CallSequence uint64
@@ -464,8 +464,9 @@ type ControllerCall struct {
 	ResolveClaimMCP                     ControllerResolveClaimMCPRequest
 }
 
-// ControllerResult is a closed typed result/error union. A valid reply has
-// either the operation-selected result value or Error, never both/neither.
+// ControllerResult holds Go-only execution-domain results after conversion
+// from validated public arms. A valid reply carries exactly one selected
+// result or Error. The operation wire representation belongs to contextowner.
 type ControllerResult struct {
 	Schema       string
 	CallSequence uint64

@@ -1,0 +1,11 @@
+{
+  "Exit": 2,
+  "Stdout": "",
+  "Stderr": "runway is no longer clean",
+  "Trace": null,
+  "Records": {
+    "Ledger": [],
+    "Recorder": [],
+    "Controls": []
+  }
+}
