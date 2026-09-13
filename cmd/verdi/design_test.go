@@ -299,6 +299,80 @@ func TestRunDesignStart_Negative(t *testing.T) {
 	})
 }
 
+// TestRunDesignStart_ExistingBranchPreserved_NoDeleteNoReuse proves R1's
+// "never delete or reuse an existing target branch": when design/<name>
+// already exists from an earlier successful design start — and the
+// caller has since switched away, so specs/active/<name>/ is absent from
+// the CURRENT branch's working tree — a second design start for the same
+// name still refuses (gitx.CheckoutNewBranch's own no-clobber posture),
+// leaving the pre-existing branch and its commit exactly as they were:
+// present and unchanged. This is the distinguishing twin of
+// designstatements_test.go's negative table, whose preparation refusals
+// must instead leave the intended branch ABSENT — the two are opposite
+// facts about the same branch ref, and a fix conflating them (e.g. by
+// deleting/recutting an existing branch to "retry") would pass one
+// witness while violating the other.
+func TestRunDesignStart_ExistingBranchPreserved_NoDeleteNoReuse(t *testing.T) {
+	repo := buildPhase7Repo(t)
+	ctx := context.Background()
+	manifest := phase7Manifest(t)
+
+	const name = "reused-branch-name"
+	branch := "design/" + name
+
+	firstDeps := designDeps{Provider: seedFakeProvider(t), Runner: nil, GoTest: fakeGoTest{}, DeferStatements: true}
+	var stdout1, stderr1 bytes.Buffer
+	if got := runDesignStart(ctx, repo.Dir, artifact.ClassFeature, "jira:LOAN-1482", name, manifest, phase7Model(t), firstDeps, &stdout1, &stderr1); got != 0 {
+		t.Fatalf("first (setup) runDesignStart = %d, want 0; stderr=%s", got, stderr1.String())
+	}
+	firstBranchHead, err := gitx.RevParse(ctx, repo.Dir, branch)
+	if err != nil {
+		t.Fatalf("RevParse(%s): %v", branch, err)
+	}
+
+	// Switch back to the branch design start ran FROM, mirroring an
+	// operator who created the branch, stepped away, and tried the same
+	// name again: specs/active/<name>/ never existed on THIS branch's
+	// working tree, so only the branch-collision refusal below is
+	// exercised, not the (already-covered) spec-directory refusal.
+	if err := gitx.CheckoutExisting(ctx, repo.Dir, "main"); err != nil {
+		t.Fatalf("checking out main: %v", err)
+	}
+	specDir := filepath.Join(repo.Dir, ".verdi", "specs", "active", name)
+	if _, statErr := os.Stat(specDir); !os.IsNotExist(statErr) {
+		t.Fatalf("test setup: %s exists on main, want the branch-collision path exercised alone", specDir)
+	}
+
+	before := snapshotRepoGitState(t, ctx, repo.Dir)
+	retryDeps := designDeps{Provider: seedFakeProvider(t), Runner: nil, GoTest: fakeGoTest{}, Problem: "retry problem", Outcome: "retry outcome"}
+	var stdout2, stderr2 bytes.Buffer
+	got := runDesignStart(ctx, repo.Dir, artifact.ClassFeature, "jira:LOAN-1482", name, manifest, phase7Model(t), retryDeps, &stdout2, &stderr2)
+	if got != 2 {
+		t.Fatalf("second runDesignStart(same name, branch pre-exists) = %d, want 2; stderr=%s", got, stderr2.String())
+	}
+	if !contains(stderr2.String(), "already exists") {
+		t.Fatalf("stderr = %q, want it to name the existing-branch refusal", stderr2.String())
+	}
+
+	after := snapshotRepoGitState(t, ctx, repo.Dir)
+	assertRepoGitStateUnchanged(t, before, after)
+
+	has, err := gitx.HasLocalBranch(ctx, repo.Dir, branch)
+	if err != nil {
+		t.Fatalf("HasLocalBranch: %v", err)
+	}
+	if !has {
+		t.Fatal("the pre-existing branch was deleted — R1 forbids deleting or reusing an existing target branch")
+	}
+	secondBranchHead, err := gitx.RevParse(ctx, repo.Dir, branch)
+	if err != nil {
+		t.Fatalf("RevParse(%s) after the refusal: %v", branch, err)
+	}
+	if secondBranchHead != firstBranchHead {
+		t.Fatalf("the pre-existing branch's commit moved: before=%s after=%s (never delete or reuse)", firstBranchHead, secondBranchHead)
+	}
+}
+
 // TestCmdDesignStart_NameFlagOrdering proves --name/--kind parse correctly
 // in every position relative to the positional story-ref — in particular
 // the "<story-ref> --kind feature --name <name>" ordering 05 §CLI's own
@@ -316,7 +390,13 @@ func TestCmdDesignStart_NameFlagOrdering(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			repo := buildPhase7Repo(t)
+			// buildFakeProviderRepo, not the shared phase7 fixture: every
+			// case here scaffolds SUCCESSFULLY with a real jira: positional,
+			// and cmdDesignStart wires its provider from the MANIFEST, so the
+			// shared fixture's real base_url would resolve that ref over the
+			// network. The arguments and assertions are unchanged — only the
+			// provider mode is.
+			repo := buildFakeProviderRepo(t)
 			t.Chdir(repo.Dir)
 
 			var stdout, stderr bytes.Buffer

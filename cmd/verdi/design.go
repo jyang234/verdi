@@ -327,12 +327,16 @@ func isDesignAssumeTTY() bool {
 
 // runDesignStart is the testable core: given an already-resolved root and
 // injected deps, run the whole design-start ritual and return the exit
-// code. It never partially applies the ritual on failure: a validation
-// failure before the branch is cut leaves the repo untouched; baseline
-// regeneration failures after the scaffold is committed are disclosed but
-// non-fatal (baseline.go), since the baseline is advisory, not the point
-// of this verb. storyRef is "" iff kind is ClassFeature and no ref was
-// given (05 §CLI's documented optionality) — validated by the caller
+// code. Preparation (class/template resolution and statement sourcing,
+// including any TTY interview) runs before gitx.CheckoutNewBranch,
+// provider title resolution, or any write; a preparation refusal leaves
+// the repo untouched. Later steps retain their existing behavior: a
+// failure after preparation succeeds may leave whatever that step already
+// did in place, and baseline regeneration failures after the scaffold is
+// committed are disclosed but non-fatal (baseline.go), since the baseline
+// is advisory, not the point of this verb. storyRef is "" iff kind is
+// ClassFeature and no ref was given (05 §CLI's documented optionality) —
+// validated by the caller
 // (cmdDesignStart), re-asserted here defensively since this function is
 // also driven directly by tests. mdl is the store's already-resolved
 // operating model (store.Open's Config.Model): the class switch below
@@ -376,19 +380,9 @@ func runDesignStart(ctx context.Context, root string, kind artifact.SpecClass, s
 		return 2
 	}
 
-	branch := "design/" + name
-	if err := gitx.CheckoutNewBranch(ctx, root, branch); err != nil {
-		fmt.Fprintln(stderr, "design start:", err)
-		return 2
-	}
-
-	var title string
-	if storyRef != "" {
-		title = resolveStoryTitle(ctx, deps.Provider, storyRef, stderr)
-	} else {
-		title = designscaffold.HumanizeName(name)
-	}
-
+	// Preparation boundary (R1/SI-198): resolve class/template and finish
+	// statement sourcing before any Git mutation, provider call, or write.
+	//
 	// The scaffold template is no longer a Go switch on class name: both
 	// design start and the workbench's stub-instantiate action resolve it
 	// through the same seam, reading Class.Template off the store's
@@ -450,6 +444,21 @@ func runDesignStart(ctx context.Context, root string, kind artifact.SpecClass, s
 			return 2
 		}
 		problemText, outcomeText = answers["Problem"], answers["Outcome"]
+	}
+
+	// Preparation succeeded: only now does design start touch Git or
+	// resolve the provider title.
+	branch := "design/" + name
+	if err := gitx.CheckoutNewBranch(ctx, root, branch); err != nil {
+		fmt.Fprintln(stderr, "design start:", err)
+		return 2
+	}
+
+	var title string
+	if storyRef != "" {
+		title = resolveStoryTitle(ctx, deps.Provider, storyRef, stderr)
+	} else {
+		title = designscaffold.HumanizeName(name)
 	}
 
 	var content string
