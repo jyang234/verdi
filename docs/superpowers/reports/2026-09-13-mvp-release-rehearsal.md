@@ -279,7 +279,19 @@ before execution because permission for its additional private report/evidence
 transfer to Anthropic was not recognized. It was not retried and supplies no
 review verdict. The completed whole-wave review and controller's verified
 clerical correction are the evidence used here; the rejected extra call is not
-counted as a passing review. Final FABLE adjudication is recorded separately.
+counted as a passing review.
+
+The final genuine FABLE 5.1 continuation in session
+`529bf627-ae20-415f-98fd-79c6c6b75355` returned
+**`READY_FOR_OWNER_RISK_GATE`** for the bounded R0–R3 maintenance result.
+It received only a non-sensitive status summary, with tools disabled; no new
+private evidence files were sent. Its verdict explicitly relies on the
+controller's final verification and does not replace the denied Opus closure.
+The controller accepts the bounded result on the direct gate, source/hash,
+review, and rehearsal evidence recorded here. No critical or important finding
+remains open. The diagram stamp has exact handler coverage and its browser path
+was exercised, but no dedicated browser assertion for that stamp was added;
+no browser RED is claimed. Neither residual changes an acceptance verdict.
 
 ## Evidence locations and remaining work
 
@@ -308,6 +320,8 @@ Workspace-local evidence is under
 - `whole-wave-review-cdcab51a/closure/opus5-closure-blocked.json`: optional closure rejection; no model execution or passing verdict.
 - `make-verify-r0-r2.log`: retained initial integration audit failure.
 - `make-verify-r0-r2-final.log` / `final-gate-evidence.json`: final full gate, 278 passing browser tests, disclosures, and recording scan.
+- `r2/final-adjudication.md`, `r2/final-adjudication-result.json`, `r2/final-adjudication-provenance.json`: genuine FABLE 5.1 status-only final adjudication and its reliance limits.
+- `final-controller-checks.json`: clean integration, documentation links, evidence locations, binary equality, unchanged installed pair, and retained memory cleanup.
 
 R0–R2 are implemented, locally verified, and independently reviewed; no blocking
 runtime findings remain. R3 repeated candidate authoring, saved edits, evidence
