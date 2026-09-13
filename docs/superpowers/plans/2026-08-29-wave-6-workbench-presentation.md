@@ -1,5 +1,11 @@
 # Wave 6 Workbench Presentation Implementation Plan
 
+**Release planning update, 2026-09-13:** the proposed
+[MVP release amendment](#mvp-release-amendment--2026-09-13) below separates
+adoption blockers from unfinished Wave 6 delivery. It is pending owner adoption;
+the historical execution status and original task checkboxes are not a current
+implementation inventory. See the measured [baseline report](../reports/2026-09-13-mvp-adoption-baseline.md).
+
 > **For Claude Code:** begin every implementation unit with
 > `/fable-orchestration`. FABLE remains chief architect and final producer-side
 > judge. Dispatch non-frontend production to Sonnet, every frontend production
@@ -40,6 +46,8 @@ review and closure and its exact head merges to the configured default branch.
 No implementation prompt may execute from an unmerged authority branch.
 
 ## Contents
+
+- [MVP release amendment — 2026-09-13](#mvp-release-amendment--2026-09-13)
 
 1. Global constraints
 2. Unit protocol and evidence bundle
@@ -813,3 +821,168 @@ Required RED: <exact command and intended witness>
 Required gates: <exact commands>
 Commit subject: <exact subject>
 ```
+
+## MVP release amendment — 2026-09-13
+
+**Status:** proposed release cut and bounded first-task contract, prepared at the
+owner's request to continue the scope/contract pass. Independent review and owner
+adoption of this exact amendment precede runtime execution under its changed
+sequence. This is not acceptance of a canonical feature, completion of Wave 6,
+or permission to resume hosted testing. SI-198 records the proposal.
+
+**Goal:** on one identified release, adopt Verdi in a real project, define and
+inspect one meaningful feature/story change, and understand its evidence and
+next steps using shipped guidance. Complete the journey twice, the second time
+independently of the development agent. An unexplained intervention or serious
+integrity/usability defect prevents release acceptance.
+
+### Release boundary and evidence
+
+The [fresh-project baseline](../reports/2026-09-13-mvp-adoption-baseline.md) used
+installed Verdi `4fb98233386ffa986d54f231a0f9954f83874fa5`. The local planning base
+is its equivalent merged tree at `b281e7676945018e7594b8aea67879b02321751c`;
+no remote refresh is claimed. Initialization and explicit-statement scaffolding
+ran successfully. A refused start leaves a branch that prevents the instructed
+retry, and the board describes an unproven record as accepted/sealed. These are
+concrete release blockers. The baseline stopped before acceptance, implementation,
+alignment, and evidence completion; those stages remain unproven.
+
+Release requirements are successful installation and configuration, truthful
+authoring and lifecycle presentation, supported editing, reviewed merge-based
+acceptance, implementation, alignment/evidence inspection, and usable corrective
+guidance. Existing gate, human-authorship, identity, and evidence requirements
+apply whenever reached. Missing evidence may be honestly unproven; missing
+required proof can never become a successful gate or closed state.
+
+The current local-first instruction (workspace PLAN I-123 and
+`../docs/superpowers/plans/2026-09-12-local-build-first.md`, relative to the
+repository root) remains in force. Local construction and hermetic forge/Git
+rehearsals proceed first. Real forge review/merge, hosted CI, publication, or a
+real-project acceptance run that needs them waits for the owner's resumption
+of that phase. A synthetic fixture rehearsal is not either of the two final
+adoption runs and cannot manufacture authoritative CI by setting environment
+variables, fabricating approvals, or forcing local closure.
+
+### Delivery order and retained obligations
+
+Upon owner adoption, insert the following bounded release-maintenance sequence
+before resuming unfinished Wave 6 units. It does not reorder the remaining
+Wave 6 feature units relative to each other or mark their predecessors complete.
+
+| Order | Deliverable and owner | Completion witness |
+|---|---|---|
+| R0 | Controller documentation: one version-identified local installation path; correct `init`, statement flags/TTY behavior, forge attributes, default-branch setup, tracker/toolchain prerequisites, and merge-signaled acceptance in the quickstart. | Execute the documented commands against the selected binary; distinguish a local bare-remote fixture from a real forge. No undocumented setup, silent `@latest`, or CI-environment workaround. Bare `init` retains its manifest-only contract. |
+| R1 | Sonnet backend repair, Opus defect review/fixes, controller adjudication: statement/template preparation before design-branch mutation, as specified below. | Built-binary refusal → corrected same-name retry, with unchanged Git/candidate state on preparation refusal. |
+| R2 | FABLE frontend repair: distinguish unavailable lifecycle proof from an accepted/sealed record everywhere the board presents that state. | Real-handler and Playwright missing-default-branch/unknown-state cases remain read-only, show the missing witness and remedy, and never assert acceptance or sealing. Proven accepted/closed cases retain appropriate labels. No new lifecycle state or readiness algorithm. |
+| R3 | Controller adoption rehearsal, then narrowly owned repairs: continue through a meaningful feature/story, supported edit, reviewed acceptance, implementation, alignment, evidence, and a blocked-path correction. | Record release identity, commands/actions, observed results, interventions, and the exact stopping point. Local hermetic stages and deferred hosted/human stages have separate verdicts. |
+| R4 | Controller release verification and independent adoption acceptance, after all required fixes and the applicable hosted phase are authorized. | Fresh required gates and two complete journeys on the same final release, with no serious integrity/usability defects; preserve explicit limits on unproven evidence. |
+
+R3 may add a defect only with a reachable reproduction and a release requirement
+it prevents. A new semantic contract is recorded and reviewed before runtime
+work. Do not implement all open GLG obligations merely because they are listed
+in the older plan; equally, do not waive a governing obligation to finish the
+rehearsal. If actual adoption requires a deferred capability, explicitly enlarge
+the release slice and its dependency order before implementing it.
+
+| Existing obligation | Disposition for this release proposal |
+|---|---|
+| ASD Tasks 1/1A/1B/2 and constitution application Task 3 with impact correction | Implementations exist at the audited base; preserve them and test their use. No fresh complete-gate claim or inference from stale checkboxes. |
+| Task 4 constitution workbench | Remains outstanding in its original order; browser constitution management is not required by the narrow adoption criterion. Existing policy enforcement still applies. |
+| Task 5 / GLG AC-6 current/eventual readiness and feature attestation | Outstanding capability, not a predeclared release dependency. Required present-transition/evidence truth remains mandatory. If the chosen real journey requires feature outcome attestation, complete its governed path; never substitute an agent-written claim. |
+| Task 5 / GLG AC-7 recovery | Full recovery projection remains outstanding. R1 prevents one preparation failure; it does not implement or close AC-7. R3 requires usable correction for encountered states, using existing supported operations. |
+| Task 5 / GLG AC-8 metrics | Outstanding and deferred from this release cut; no metric-derived gate or completeness claim. |
+| Task 6 full lifecycle workbench | Outstanding. R2 is a repair to shipped presentation, not Task 6 completion or a substitute implementation of its application core. |
+| Tasks 7/8 experiment coordinator/workbench | Outstanding, outside the standalone adoption slice. |
+| Task 9 and Wave 7 whole-program acceptance | Remain required for their broader completion claims. R4 does not replace them. |
+| ATC review/landing, sealed-runner expansion, experiment machinery | Separate work; no new ATC capability is an MVP prerequisite. Existing cross-repository gates and pinned compatibility requirements remain in force for components actually changed. |
+
+### R1: first backend contract — prepare before cutting the branch
+
+**Authority:** `spec/cli-creation` AC-1/AC-2 (archived specification, still binding
+on the shipped behavior), `spec/scaffold-templates`, and three-valued honesty.
+The chosen failure boundary is recorded in SI-198 as an explicit proposed
+clarification: the original creation spec requires refusal but does not
+enumerate every Git side effect. No frozen specification is edited here.
+
+**Responsibility/files:** `cmd/verdi/design.go` (`runDesignStart`),
+`cmd/verdi/designstatements_test.go`, and focused cases in
+`cmd/verdi/design_test.go` / `cmd/verdi/designscaffoldoverride_test.go` if template
+validation ordering requires them. Reuse `internal/designscaffold` and
+`internal/designinterview`; change neither their field grammar nor browser
+behavior. Any committed fixture belongs under `cmd/verdi/testdata/`.
+
+**Interface:** preserve `runDesignStart(ctx, root, kind, storyRef, name, manifest,
+mdl, deps, stdout, stderr) int`, its existing typed operands and CLI grammar.
+Consume the resolved operating model/class template plus `designDeps.Problem`,
+`Outcome`, `DeferStatements`, `IsTTY`, and `Stdin`. Produce the existing scaffold
+and 0/1/2 result contract; introduce no public request/result schema, new verb,
+MCP operation, or recovery command.
+
+**Preparation boundary:** resolve the class/template and validate statement
+sourcing, including completing any required interview, before
+`gitx.CheckoutNewBranch`, provider-title resolution, scaffold writes/commits,
+board writes, or baseline generation. Missing statement pairs, conflicting
+deferral flags, missing TTY, interview EOF/error, and template-load failure
+return exit 2 with an explanatory diagnostic and no command-induced change to
+HEAD, current branch, branch refs, index, tracked/untracked candidate files, or
+Verdi data. Prompts/stdout are allowed. Tests inspect state, not only the exit.
+
+After preparation succeeds, retain existing story/provider, rendering,
+self-validation, branch collision, creation, commit, and advisory baseline
+semantics. A pre-existing target branch is still refused; never delete or reuse
+it as a retry workaround. This is a bounded preparation guarantee, not a promise
+of rollback after arbitrary later I/O failures. The change must not add a global
+transaction, automatic branch cleanup, implicit statement deferral, or a second
+spec writer. Preserve unrelated user files/index changes in refusal tests.
+
+**Test-first implementation steps:**
+
+1. Extend the existing negative table to snapshot HEAD, symbolic branch,
+   `refs/heads`, index tree, and candidate/data bytes before and after each
+   preparation refusal. Use valid kebab-case names so name validation cannot
+   hide the intended failure. Add empty and partially supplied TTY input and
+   template-load failure cases; prove no provider/baseline invocation occurs.
+2. Add a built-binary test in `designstatements_test.go` using the existing
+   `buildVerdiBinary` and `buildPhase7Repo` helpers. Run the flagless command with
+   real non-TTY stdin and without `VERDI_DESIGN_ASSUME_TTY`; require exit 2 and
+   unchanged state. Retry the same name with both statement flags; require exit
+   0, the intended branch and one scaffold commit, and strict-decoded supplied
+   statements. The installed baseline exhibits the opposite retry result.
+3. Run the new cases red, then move the existing preparation block ahead of the
+   branch effect. Keep field enumeration shared with the interview owner. Run
+   the same cases green, including paired flags, explicit deferral disclosure,
+   completed interview, story mode, and existing-branch refusal. Assertions must
+   distinguish an absent new branch from a preserved pre-existing branch.
+4. Run focused checks, then the unchanged full release gates; retain outputs:
+
+   ```sh
+   go test -count=1 ./cmd/verdi -run 'Test(RunDesignStart|Run_DesignStart|CmdDesignStart)'
+   go test -race -count=1 ./cmd/verdi -run 'Test(RunDesignStart|Run_DesignStart|CmdDesignStart)'
+   make verify
+   go test -race ./...
+   git diff --check
+   ```
+
+No test uses a live tracker, forge, provider, or network. Frontend follow-up R2
+remains FABLE-owned. R1's producer returns command output and the exact diff for
+controller adjudication; an exit-0 aggregate with skipped required checks is
+not proof of those checks.
+
+### Planning verification and coverage
+
+This amendment and baseline report change documentation/authority records only.
+They require link/diff checks and one independent read-only Claude challenge of
+the consolidated exact head, followed by at most one controller correction pass
+and one closure check by the same reviewer. Runtime gates above are obligations
+of implementation and release, not claimed by this planning change.
+
+Coverage is 10/10 source groups: (1) owner adoption stopping criterion → release
+goal/R4; (2) local-first I-123 → local/hosted boundary; (3) Wave 6 sequence →
+inserted R0–R4 and retained original order; (4) existing ASD/constitution backend
+→ preservation row; (5) Task 4 → outstanding constitution UI; (6) Tasks 5/6 and
+GLG AC-6/7/8 → individually retained capability rows; (7) Tasks 7/8/9 and Wave 7 →
+retained experiment/integration obligations; (8) CLI creation/scaffold authority
+→ R1; (9) init's manifest-only and merge-signaled acceptance contracts → R0;
+(10) fresh CLI/browser observations → baseline report and R1/R2. Transformation:
+release scheduling and defect extraction, not canonical promotion or semantic
+erasure. No source obligation is intentionally omitted or marked complete.
