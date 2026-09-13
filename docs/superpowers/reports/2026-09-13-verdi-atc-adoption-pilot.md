@@ -140,6 +140,12 @@ The new [policy setup checks](../../policy-setup-validation.md) were run
 literally against the unchanged binary and linked from the README/local guide.
 Initial policy adoption and independent no-coaching validation remain open.
 
+The subsequent [adoption repair status](2026-09-13-adoption-repair-status.md)
+records a new runtime candidate, a successful real-clone directory regression,
+and three accepted policy-guide findings. Required FABLE repair is blocked by
+Claude Code usage credits. That candidate has not completed the full gate and
+does not replace the earlier verified release as an accepted release.
+
 ## Source witnesses
 
 - [R0–R3 verification and adoption limits](2026-09-13-mvp-release-rehearsal.md).
