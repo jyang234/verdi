@@ -66,6 +66,7 @@
 // | SIZE_SMELL_SPEC, SIZE_FIT_SPEC, SIZE_SMELL_ESTIMATE,               | EDGE     | size-smell (rule-explicit) |
 // |   SIZE_SMELL_REFERENCE                                             |          | |
 // | STATUSLESS_DRAFT_SPEC, STATUSLESS_SEALED_SPEC                      | EDGE     | statusless-lifecycle rigs (merge-signaled acceptance migration) |
+// | UNPROVEN_BOARD_SPEC                                                | EDGE     | isolated no-default-branch store (CONTROL_URL/unproven-board-fixture): lifecycle unproven, never the sealed record (MVP R2 / AC-7) |
 // | SWEEP_FRESH_SPEC, SWEEP_STALE_SPEC, SWEEP_PARTIAL_SPEC,            | EDGE     | decline-sweep-* (rule-explicit) |
 // |   SWEEP_MISSING_DECISION                                           |          | |
 // | PIN_ADR, PIN_DIAGRAM, PIN_TRASH_ADR                                | SHOWCASE | real corpus artifacts; pin/peek/drag/trash happy-path journeys (the trash's "pure pin" tier, not a stress case) |
@@ -622,6 +623,21 @@ export const EDGE = {
   // zoned EDGE.
   STATUSLESS_DRAFT_SPEC: "decline-statusless-draft",
   STATUSLESS_SEALED_SPEC: "decline-statusless-sealed",
+
+  // -------------------------------------------------------------------------
+  // Workbench (unproven lifecycle — MVP release amendment R2, merge-signaled
+  // acceptance AC-7): the isolated no-default-branch board
+  // -------------------------------------------------------------------------
+
+  // The CLI's statusless scaffold on its design branch in a repository
+  // with NO remote (cmd/e2eharness/unprovenboard.go, reached through
+  // CONTROL_URL/unproven-board-fixture): no default branch resolves, so the
+  // effective lifecycle is Unproven — the baseline report's B-06 shape the
+  // shared store (whose origin/HEAD is deliberately provable) can never
+  // show. Its board must stay read-only, disclose the missing witness and
+  // remedy, and never read as the sealed/accepted record. BINDING: mirrors
+  // unprovenBoardSpecName verbatim — change them together.
+  UNPROVEN_BOARD_SPEC: "unproven-lifecycle-feature",
 
   // -------------------------------------------------------------------------
   // Workbench (derivation drawer, spec/derivation-drawer ac-3)

@@ -146,6 +146,8 @@ test("the same spec is sealed unprefixed and read-only-with-divergence-notice un
 }) => {
   await page.goto(boardPath(SHOWCASE.DB_SAME_SPEC));
   await expect(page.getByTestId("board")).toHaveAttribute("data-board-mode", "readonly");
+  // Landed on the default branch: the proven sealed record, stamped as such.
+  await expect(page.getByTestId("board")).toHaveAttribute("data-readonly-reason", "sealed");
   await expect(page.locator(".board-mode-tag")).toHaveText("read-only · sealed record");
   await expect(page.locator("body")).not.toContainText(SHOWCASE.DB_SAME_SPEC_DRAFT_SNIPPET);
   // No authoring affordances on the sealed record.
@@ -155,6 +157,12 @@ test("the same spec is sealed unprefixed and read-only-with-divergence-notice un
   // bytes), read-only, with the divergence disclosed in the chrome (I6).
   await page.goto(branchBoardPath(SHOWCASE.DB_SAME_SPEC_BRANCH, SHOWCASE.DB_SAME_SPEC));
   await expect(page.getByTestId("board")).toHaveAttribute("data-board-mode", "readonly");
+  // Diverged bytes are a modified accepted revision — read-only, but NOT
+  // the sealed record (MVP release amendment R2): the stamp says so, and
+  // the sealed panel's acceptance claim is absent.
+  await expect(page.getByTestId("board")).toHaveAttribute("data-readonly-reason", "not-accepted");
+  await expect(page.locator(".board-mode-tag")).toHaveText("read-only · not yet accepted");
+  await expect(page.locator(".sealed-panel")).toHaveCount(0);
   await expect(page.getByTestId("placard-outcome")).toContainText(SHOWCASE.DB_SAME_SPEC_DRAFT_SNIPPET);
   await expect(page.locator("body")).toContainText("diverge");
   await expect(page.locator("body")).toContainText("read-only");
@@ -171,11 +179,18 @@ test("the same spec is sealed unprefixed and read-only-with-divergence-notice un
 // remote-tracking ref renders SEALED — read-only, remoteness disclosed in
 // the board chrome, its content the ref's — with no worktree cut and no
 // local branch minted (witnessed by the sealed render itself: a worktree
-// would have made it an authoring wall).
+// would have made it an authoring wall). dc-4's "sealed render" is the
+// render's immutability, never an acceptance claim: the ref's spec has
+// never reached the default branch, so its lifecycle is still a proposal
+// and the stamp names it not-yet-accepted (MVP release amendment R2 —
+// the earlier "read-only · sealed record" expectation here encoded the
+// B-06 defect).
 test("a remote-only branch renders sealed with its remoteness disclosed", async ({ page }) => {
   await page.goto(branchBoardPath(`design/${SHOWCASE.DB_SEALED_REMOTE}`, SHOWCASE.DB_SEALED_REMOTE));
   await expect(page.getByTestId("board")).toHaveAttribute("data-board-mode", "readonly");
-  await expect(page.locator(".board-mode-tag")).toHaveText("read-only · sealed record");
+  await expect(page.getByTestId("board")).toHaveAttribute("data-readonly-reason", "not-accepted");
+  await expect(page.locator(".board-mode-tag")).toHaveText("read-only · not yet accepted");
+  await expect(page.locator(".sealed-panel")).toHaveCount(0);
   await expect(page.getByTestId("board-notice")).toContainText(
     `remote-tracking ref origin/design/${SHOWCASE.DB_SEALED_REMOTE}`,
   );

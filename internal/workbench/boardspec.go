@@ -567,8 +567,12 @@ func (s *boardSpecServer) resolveState(ctx context.Context, name string, raw []b
 // never contradict each other — plus the remedy. Deliberately NO assumed
 // fallback and no new configuration key: purely-local fail-closed
 // behavior is design-mandated; the remedy is to make the default branch
-// provable, never to guess one.
-const unresolvedDefaultBranchNotice = "default branch could not be resolved: CI_DEFAULT_BRANCH is unset, origin/HEAD is not configured, and neither refs/remotes/origin/main nor refs/remotes/origin/master alone identifies it — the spec's effective lifecycle state is unproven and the board renders read-only. Remedy: set CI_DEFAULT_BRANCH, or run `git remote set-head origin <branch>` to configure origin/HEAD"
+// provable, never to guess one. The remedy is the LOCAL one — fetch the
+// configured default branch and point origin/HEAD at it — never a
+// CI-environment variable: adopted R0 (MVP release amendment) forbids a
+// CI-environment workaround for local adoption. CI_DEFAULT_BRANCH stays
+// in the diagnostic half because its absence is part of what was tried.
+const unresolvedDefaultBranchNotice = "default branch could not be resolved: CI_DEFAULT_BRANCH is unset, origin/HEAD is not configured, and neither refs/remotes/origin/main nor refs/remotes/origin/master alone identifies it — the spec's effective lifecycle state is unproven and the board renders read-only. Remedy: fetch the configured default branch from its remote and point origin/HEAD at it (`git remote set-head origin <branch>`), then reload"
 
 // gitState queries the working tree's branch and dirtiness. The default
 // branch comes from specstate.ResolveDefaultBranch — the ONE shared

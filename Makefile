@@ -26,7 +26,10 @@ build:
 # (their buildID covers cmd/verdi's own sources) and are deliberately absent.
 # TestGateCacheHonesty_CrossBinaryPkgsListInSync (internal/specalign) fails if a
 # package that builds+execs cmd/verdi from outside cmd/verdi is missing here.
-CROSS_BINARY_PKGS := ./internal/showcasealign/... ./internal/specalign/... ./internal/experimentapp/... ./internal/designapp/... ./internal/sealedexec/claude/... ./internal/publicrelease/...
+# cmd/e2eharness joined with the unproven-board fixture (MVP release amendment
+# R2): its tests call buildBinary — `go build ./cmd/verdi` in a subprocess —
+# and exec the result as `verdi serve`, the same cache blindness.
+CROSS_BINARY_PKGS := ./internal/showcasealign/... ./internal/specalign/... ./internal/experimentapp/... ./internal/designapp/... ./internal/sealedexec/claude/... ./internal/publicrelease/... ./cmd/e2eharness/...
 
 # -race mirrors CI's `go test -race` exactly: a data race that would fail CI
 # must fail `make test`/`make verify` locally first (CLAUDE.md: "go test

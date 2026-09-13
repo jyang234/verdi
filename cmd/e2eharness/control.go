@@ -21,6 +21,12 @@ package main
 //     (spec/home-status-glance ac-3/co-1; ADJ-40) — see emptyglance.go's
 //     own doc comment for why this is isolated rather than mutating the
 //     shared store above.
+//   - GET  /unproven-board-fixture returns the URL of a separate, hermetic
+//     `verdi serve` subprocess (the binary built from this tree, main.go's
+//     own build-then-exec seam) over a REAL minimal store with NO remote —
+//     no default branch resolves, so the served board's lifecycle is
+//     UNPROVEN (MVP release amendment R2; merge-signaled acceptance AC-7)
+//     — see unprovenboard.go. main.go stops it with the harness.
 
 import (
 	"log"
@@ -50,6 +56,7 @@ type controlServer struct {
 	emptyGlance        *emptyGlanceFixture
 	vocab              *vocabFixture
 	readinessAllProven *readinessAllProvenFixture
+	unprovenBoard      *unprovenBoardFixture
 }
 
 func newControlServer(storeRoot, moduleRoot string) *controlServer {
@@ -58,6 +65,7 @@ func newControlServer(storeRoot, moduleRoot string) *controlServer {
 		emptyGlance:        newEmptyGlanceFixture(),
 		vocab:              newVocabFixture(moduleRoot),
 		readinessAllProven: newReadinessAllProvenFixture(),
+		unprovenBoard:      newUnprovenBoardFixture(moduleRoot),
 	}
 }
 
@@ -75,6 +83,10 @@ func (c *controlServer) handler() http.Handler {
 	// snapshot — the browser posture the shared mixed snapshot can never
 	// show.
 	mux.HandleFunc("/readiness-all-proven-fixture", c.readinessAllProven.handler)
+	// The isolated no-default-branch board (unprovenboard.go): the shipped
+	// binary's own `verdi serve` over a real no-remote store — the unproven
+	// lifecycle posture the shared (provably-defaulted) store can never show.
+	mux.HandleFunc("/unproven-board-fixture", c.unprovenBoard.handler)
 	return mux
 }
 

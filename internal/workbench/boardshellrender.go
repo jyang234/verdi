@@ -49,7 +49,7 @@ func writeASDState(b *strings.Builder, state string) {
 func writeASDPosture(b *strings.Builder, p *BoardProjection, git *boardGitState, asd *asdView) {
 	esc := stdhtml.EscapeString
 	b.WriteString(`<section class="asd-posture" id="asd-posture" data-testid="asd-posture" aria-label="Repository posture">`)
-	b.WriteString(`<span class="board-mode-tag board-mode-tag--` + esc(string(p.Mode)) + `">` + esc(modeStampLabels[p.Mode]) + `</span>`)
+	b.WriteString(`<span class="board-mode-tag board-mode-tag--` + esc(string(p.Mode)) + `">` + esc(modeStampLabel(p)) + `</span>`)
 	if badge := terminalStatusBadge(p.Status); badge != "" {
 		label := badge
 		if p.StatusLabel != "" {
@@ -57,16 +57,9 @@ func writeASDPosture(b *strings.Builder, p *BoardProjection, git *boardGitState,
 		}
 		b.WriteString(`<span class="badge badge-` + esc(badge) + ` board-status-badge" data-testid="board-status-badge">` + esc(label) + `</span>`)
 	}
-	// Proposed vs accepted: what the displayed bytes ARE (design §4.2).
-	proposed := p.Mode != modeReadOnly || asd.StateFormal == "proposed"
-	byteWord := "proposed"
-	if asd.StateFormal == "accepted-pending-build" && !proposed {
-		byteWord = "accepted"
-	}
-	if asd.StateFormal == "accepted-pending-build" {
-		byteWord = "accepted"
-	}
-	b.WriteString(`<span class="asd-posture-bytes" data-testid="asd-posture-bytes" data-state="` + esc(asd.StateFormal) + `">displayed bytes: ` + esc(byteWord) + ` <span class="asd-posture-formal">(` + esc(asd.StateFormal) + `)</span></span>`)
+	// What the displayed bytes ARE (design §4.2): the plain word is derived
+	// from the formal state alone, never from the mode.
+	b.WriteString(`<span class="asd-posture-bytes" data-testid="asd-posture-bytes" data-state="` + esc(asd.StateFormal) + `">displayed bytes: ` + esc(postureByteWord(asd.StateFormal)) + ` <span class="asd-posture-formal">(` + esc(asd.StateFormal) + `)</span></span>`)
 	dirtyWord, dirtyState := "clean", "clean"
 	if asd.Dirty {
 		dirtyWord, dirtyState = "uncommitted changes", "dirty"
@@ -90,6 +83,29 @@ func writeASDPosture(b *strings.Builder, p *BoardProjection, git *boardGitState,
 	writeReadinessFact(b, "Base digest", asd.BaseDigest)
 	b.WriteString(`</dl></details>`)
 	b.WriteString(`</section>`)
+}
+
+// postureByteWord is the posture header's plain word for the displayed
+// bytes, keyed on the formal state and nothing else (MVP release amendment
+// R2: read-only mode is not a lifecycle verdict). StateFormal arrives in
+// two vocabularies — specstate's state ids from the served board's view
+// ("proposed", ...) and the legacy artifact status from the remote-ref
+// render ("draft", ...) — so both spellings of the proposed state map to
+// "proposed". Anything unrecognized, including an absent state, reads as
+// unproven: the plain word never claims more than the formal state does.
+func postureByteWord(stateFormal string) string {
+	switch stateFormal {
+	case "proposed", "draft":
+		return "proposed"
+	case "accepted-pending-build":
+		return "accepted"
+	case "closed":
+		return "closed"
+	case "superseded":
+		return "superseded"
+	default:
+		return "unproven"
+	}
 }
 
 func orUnproven(v string) string {

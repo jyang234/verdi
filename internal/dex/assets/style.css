@@ -1806,6 +1806,17 @@ button.yarn-chip-type {
 }
 .sealed-panel h2 { color: var(--frozen); border-bottom-color: color-mix(in srgb, var(--frozen) 40%, transparent); }
 
+/* a read-only wall that is NOT the sealed record (MVP release amendment
+   R2): its acceptance is unproven, or the revision is not yet accepted —
+   the frozen rule without the filed tint, so the two rooms never read
+   alike at a glance */
+.readonly-panel {
+  border: 1px dashed var(--frozen);
+  border-left: 3px solid var(--frozen);
+}
+.readonly-panel h2 { color: var(--frozen); border-bottom-color: color-mix(in srgb, var(--frozen) 40%, transparent); }
+.readonly-panel code { font-size: 0.78rem; }
+
 /* the yarn key: a legend of THIS wall — only the types present render */
 .yarn-key ul { list-style: none; margin: 0; padding: 0; }
 .yarn-key li {

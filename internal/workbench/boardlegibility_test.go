@@ -303,19 +303,32 @@ func TestBoardLegibility_ModeChrome(t *testing.T) {
 		}
 	}
 
-	for mode, want := range map[boardModeKind]string{
-		modeReview:   "mirror of the MR",
-		modeReadOnly: "sealed record",
+	// The read-only stamp is keyed by the EFFECTIVE status (MVP release
+	// amendment R2): only a revision proven on the default branch is the
+	// sealed record; an unproven or not-yet-accepted read-only wall says so.
+	for _, tc := range []struct {
+		mode   boardModeKind
+		status string
+		want   string
+	}{
+		{modeReview, "draft", "mirror of the MR"},
+		{modeReadOnly, "accepted-pending-build", "sealed record"},
+		{modeReadOnly, "unproven", "lifecycle unproven"},
+		{modeReadOnly, "draft", "not yet accepted"},
 	} {
-		page, err := renderBoardSpecPage(&BoardProjection{Spec: "s", Title: "S", Mode: mode}, &boardGitState{}, testASDView())
+		page, err := renderBoardSpecPage(&BoardProjection{Spec: "s", Title: "S", Mode: tc.mode, Status: tc.status}, &boardGitState{}, testASDView())
 		if err != nil {
-			t.Fatalf("rendering %s page: %v", mode, err)
+			t.Fatalf("rendering %s page: %v", tc.mode, err)
 		}
-		if !strings.Contains(string(page), want) {
-			t.Errorf("%s page stamp missing %q", mode, want)
+		stamp := modeStampOf(string(page))
+		if !strings.Contains(stamp, tc.want) {
+			t.Errorf("%s/%s page stamp = %q, want it to carry %q", tc.mode, tc.status, stamp, tc.want)
 		}
-		if !strings.Contains(string(page), "mode-"+string(mode)) {
-			t.Errorf("%s page body missing its mode class", mode)
+		if tc.want != "sealed record" && strings.Contains(stamp, "sealed record") {
+			t.Errorf("%s/%s page stamp %q claims the sealed record", tc.mode, tc.status, stamp)
+		}
+		if !strings.Contains(string(page), "mode-"+string(tc.mode)) {
+			t.Errorf("%s page body missing its mode class", tc.mode)
 		}
 	}
 }

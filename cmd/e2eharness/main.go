@@ -186,6 +186,10 @@ func run() error {
 	// empty-glance and vocab fixture stores) are cancelled by an interrupt
 	// too — not just the provisioning done inline above.
 	ctrl := newControlServer(storeRoot, moduleRoot)
+	// The unproven-board fixture (unprovenboard.go) spawns its own `verdi
+	// serve` on first use; reap it with the harness so no orphaned listener
+	// outlives the run (the same guarantee the shared serve gets below).
+	defer ctrl.unprovenBoard.stop()
 	ctrlSrv := &http.Server{
 		Addr:        controlAddr,
 		Handler:     ctrl.handler(),

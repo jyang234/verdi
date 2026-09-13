@@ -175,7 +175,7 @@ func (b *branchBoards) serveSealed(w http.ResponseWriter, r *http.Request, branc
 	switch rt.suffix {
 	case routeBoardPage, routeBoardFragment:
 	default:
-		msg := fmt.Sprintf("branch %s resolves only to remote-tracking ref %s: its board is a sealed read-only render of that ref, and this route needs a working tree (none is cut for a remote-only branch)", branch, ref)
+		msg := fmt.Sprintf("branch %s resolves only to remote-tracking ref %s: its board is a read-only render of that ref's committed content, and this route needs a working tree (none is cut for a remote-only branch)", branch, ref)
 		if rt.json {
 			writeJSONError(w, http.StatusForbidden, msg)
 		} else {
@@ -219,7 +219,7 @@ func (b *branchBoards) serveSealed(w http.ResponseWriter, r *http.Request, branc
 // rather than fabricated.
 func sealedASDView(branch, ref string, proj *BoardProjection) *asdView {
 	v := &asdView{
-		Checkout:       ref + " (remote-tracking ref; sealed render, no working tree)",
+		Checkout:       ref + " (remote-tracking ref; read-only render of committed content, no working tree)",
 		Branch:         branch,
 		StateFormal:    proj.Status,
 		SlugPattern:    specNameRe.String(),
@@ -230,7 +230,7 @@ func sealedASDView(branch, ref string, proj *BoardProjection) *asdView {
 		EdgeFacts:      map[string][]asdEdgeFact{},
 		DesignWired:    true,
 		CapsFailure: &DesignFailure{Classification: "operational", Code: "sealed-remote-board",
-			Detail: "a remote-only branch's board is a sealed render of " + ref + "; capabilities require a working tree"},
+			Detail: "a remote-only branch's board is a read-only render of " + ref + "'s committed content; capabilities require a working tree"},
 	}
 	v.Shell = deriveASDShell(asdShellInput{
 		ProblemPresent: proj.Problem != "",
@@ -309,7 +309,10 @@ func (b *branchBoards) loadSealed(ctx context.Context, branch, ref, name string)
 	// instances carry.
 	proj.applyModelVocabulary(b.deps.Model)
 	proj.Notices = append(proj.Notices, fmt.Sprintf(
-		"branch %s exists only as remote-tracking ref %s: this board is rendered sealed (read-only) from that ref's committed content — no worktree was cut and no local branch was created; fetch the branch as a local branch to author. The scratch annotation tier and obligation enrichment are working-tree state and are not read from a remote ref.",
+		// R2: "read-only from committed content" names the render's immutability
+		// only — it is not a lifecycle claim; the stamp and rail speak the
+		// effective state.
+		"branch %s exists only as remote-tracking ref %s: this board is rendered read-only from that ref's committed content — no worktree was cut and no local branch was created; fetch the branch as a local branch to author. The scratch annotation tier and obligation enrichment are working-tree state and are not read from a remote ref.",
 		branch, ref))
 	git := &boardGitState{Branch: ref, DefaultBranch: "", Branches: nil, Dirty: false}
 	return proj, git, nil

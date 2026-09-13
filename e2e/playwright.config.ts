@@ -47,7 +47,15 @@ export default defineConfig({
   reporter: [["list"]],
   use: {
     baseURL: `http://127.0.0.1:${PORTS.workbench}`,
-    trace: "retain-on-failure",
+    // Recording stays OFF in every run (screenshot and video are already
+    // off by Playwright's defaults; trace was retain-on-failure, which
+    // wrote a zipped DOM/network/screenshot recording into test-results/
+    // for any failing case — a recording artifact the orchestration
+    // protocol forbids even for `make verify`). Failures still report the
+    // list reporter's assertion detail, and Playwright may still write a
+    // failing test's textual error-context.md under test-results/ — no
+    // screenshot, video, or trace recording is written.
+    trace: "off",
   },
   // Builds the binary, provisions the scratch store, starts `verdi serve`
   // (workbench, :4173 by default) and a static file server over the built

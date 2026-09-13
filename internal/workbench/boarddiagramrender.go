@@ -45,11 +45,17 @@ type diagramClientPayload struct {
 }
 
 // diagramModeStampLabels: the editor room's state in words, mirroring the
-// board's mode stamp voice.
+// board's mode stamp voice. The read-only stamp is deliberately generic:
+// the editor's mode derives from the diagram's own status plus branch
+// state (boarddiagram.go), and read-only alone proves nothing about the
+// diagram being sealed or accepted — an unresolvable default branch makes
+// a proposed diagram read-only too. The separate status badge beside the
+// stamp carries the diagram's declared status (MVP release amendment R2;
+// board tool surfaces speak all-board truth).
 var diagramModeStampLabels = map[boardModeKind]string{
 	// vocab:identity — editor-mode chrome taxonomy (live working copy), not the spec lifecycle state
 	modeAuthoring: "authoring · live draft",
-	modeReadOnly:  "read-only · sealed record",
+	modeReadOnly:  "read-only · diagram",
 }
 
 var diagramEditorPageTemplate = template.Must(template.New("boarddiagram").Parse(`<!doctype html>
