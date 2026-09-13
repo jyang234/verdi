@@ -140,7 +140,7 @@ session `a6e4d310-93c0-4de4-a99d-57a16fbd85b2`. Fresh independent Opus 5
 review, session `caa62c3b-33c3-4231-a8d0-141d295a349e`, found no blocking
 issues. The controller verified the exact source hash, both projection callers,
 and the unchanged scanner. Focused source-audit/allowlist/classifier tests passed
-in 2.706s. Integrated gate success remains unproven until rerun.
+in 2.706s. The integrated gate subsequently passed as recorded below.
 
 Claude also persisted an unrequested R2 memory file and index entry outside the
 lane. The controller verified their originating session, removed only that file
@@ -149,7 +149,9 @@ were preserved; further memory writes were prohibited.
 
 ## Continued adoption rehearsal (R3)
 
-All project, tracker, and landing data below is synthetic. The project lives in
+The first rehearsal below used installed Verdi source `4fb98233`, with the
+installed binary hash recorded under R0. All project, tracker, and landing data
+below is synthetic. The project lives in
 `/private/var/folders/67/pw7jvbv12d76jpz89mltjtyw0000gn/T/tmp.MbOYtdHQsq/project`;
 its `origin` is the sibling local bare `origin.git`. No hosted repository was
 pushed, reviewed, or merged. No CI, human approval, principal, attestation, or
@@ -207,36 +209,77 @@ following its `verdi align` remedy fixed freshness. Gate still exited 1 for
 proof. No acceptance or implementation was fabricated to advance that step.
 The tab and its loopback server were closed cleanly.
 
+For this repeat, the controller used `verdi serve --http 127.0.0.1:45550` to
+keep the rehearsal separate from automated test servers. An initial
+`verdi serve --help` probe exited 2 (`serve: unknown argument "--help"`);
+the controller inspected the existing argument parser to find the supported
+`--http` option. That setup intervention is recorded in
+`r3-candidate-browser.json`; it is not evidence of uncoached adoption.
+
 This repeat verifies current-candidate authoring, persistence, inspection, and
 correction. It remains synthetic and agent-operated, so it counts as neither
 required real-project adoption journey.
 
 ## Required local verification
 
-Before the R2 patch, `make verify` exited 0 against runtime/source commit
-`6f65c4eea164f099cd7066a4fa30d082a3afd46e`. Only this evidence report changed
-after that commit during the gate. The unchanged target covered build, formatting,
-vet, lint, the full `go test -race ./...` suite, fresh cross-binary integration
-tests, fixtures, store lint/model check, specification alignment, README/showcase
-checks, and Playwright:
+`make verify` exited **0** against clean candidate
+`cdcab51acaa799de8f4df5de900f903d6319229d`. During the gate, only this evidence
+report was edited; runtime and test sources remained unchanged. The target
+covered build, formatting, vet, lint, the full `go test -race ./...` suite,
+seven freshly rerun cross-binary race-test packages, fixtures, store lint/model,
+specification alignment, README/showcase checks, and Playwright:
 
 ```text
-ok  github.com/jyang234/verdi/cmd/verdi  465.060s
-ok  github.com/jyang234/verdi/internal/workbench  109.522s
-276 passed (11.4m)
+ok  github.com/jyang234/verdi/internal/specalign  166.023s  [full race suite]
+ok  github.com/jyang234/verdi/internal/workbench  108.094s  [full race suite]
+ok  github.com/jyang234/verdi/internal/specalign  155.821s  [fresh cross-binary run]
+ok  github.com/jyang234/verdi/cmd/e2eharness       17.020s  [fresh cross-binary run]
+278 passed (11.3m)
 verify OK
 ```
 
-The full transcript is `make-verify.log`. Specification alignment disclosed no
-skipped checks. Store lint explicitly disclosed VL-017 checks as unproven because
-the uncommitted mutable data zone is absent; successful lint is not a pass for
-those missing witnesses. The command used cached Go/npm/browser dependencies,
-disabled module/npm network retrieval, and directed HTTP proxies to a closed
-loopback port with a localhost exception for the test servers. The local browser
-harness shut down normally. These are local test results, not authoritative CI
-or configured-service integration evidence. Passing the existing gate does not
-resolve the R2 presentation defect or verify its subsequent patch. R1's
-independent review has since completed as recorded above.
+The complete transcript is `make-verify-r0-r2-final.log`, SHA-256
+`e4aec31bd4ea39b4f8c3270a649c3952840a706024dbe1b633f0721dd68e9f42`.
+Specification alignment disclosed **zero skipped checks**. Store lint emitted
+**94 VL-017 mutable-zone absence disclosures**; successful lint does not prove
+those missing witnesses. Recording-output scans found no screenshots, videos,
+or traces. The browser harness shut down normally.
+
+The command used cached Go/npm/browser dependencies, disabled module/npm
+retrieval, and directed HTTP proxies to a closed loopback port with a localhost
+exception for the test servers. This is local verification, not authoritative
+CI or actual configured-service integration evidence. The earlier passing
+`6f65c4ee` gate (`make-verify.log`, 276 browser tests) and the `9507f369` audit
+failure (`make-verify-r0-r2.log`) remain separate historical records; neither is
+substituted for the final gate.
+
+The documented clean build was repeated at `cdcab51a`. Its binary SHA-256 is
+identical to the rehearsed `9507f369` binary above; the intervening changes are
+the audit test and evidence report only. No embedded VCS revision or installed
+Verdi/ATC upgrade is claimed.
+
+### Whole-wave review and controller adjudication
+
+Fresh genuine `claude-opus-5`, session
+`5a4e9237-d8d4-443a-bb0a-a6d70bf4f573`, reviewed the integrated changes and
+reported no blocking runtime, composition, provenance, or milestone findings.
+The controller independently checked all 28 source hashes and the fixed commit
+ancestry, and resolved the bounded source/provenance limits by direct inspection.
+
+The reviewer identified a clerical R3 record gap: the dedicated server port,
+failed help probe, and current candidate log references were absent from this
+tracked report. The controller added and directly verified them, including the
+initial rehearsal's binary identity. The correction changes no behavior,
+authority, acceptance rule, or milestone claim. It is handled directly under
+the repository's proportionality rule and the orchestration skill's clerical
+evidence-only exception.
+
+An optional same-reviewer closure call was rejected by automatic approval review
+before execution because permission for its additional private report/evidence
+transfer to Anthropic was not recognized. It was not retried and supplies no
+review verdict. The completed whole-wave review and controller's verified
+clerical correction are the evidence used here; the rejected extra call is not
+counted as a passing review. Final FABLE adjudication is recorded separately.
 
 ## Evidence locations and remaining work
 
@@ -250,18 +293,29 @@ Workspace-local evidence is under
 - `r1-red-behavior.log`, `r1-green-behavior.log`, `r1-focused.log`, `r1-focused-race.log`: refusal regression and focused verification.
 - `r1-consolidated-review.patch`, `r1-final-opus-review-brief.txt`, `r1-final-opus-review-blocked.json`: prepared review and approval rejection.
 - `r0-r1-candidate-install.sh` / `.log`, `candidate-documented-commands.sh` / `.log`, `candidate-retry.json`: clean candidate build, repeated onboarding, and unchanged-state retry witness.
+- `r0-r2-candidate-install.log` / `r0-r2-candidate-documented-commands.log`: current runtime candidate's clean documented build and verbatim setup commands.
+- `final-candidate-install.log` / `final-candidate-identity.json`: clean `cdcab51a` build, byte-identical to the rehearsed `9507f369` binary; intervening changes are evidence and the audit test only.
+- `r3-candidate-browser.json`, `r3-candidate-inspection.json`, `r3-candidate-correction.json`: current runtime candidate's supported edits, setup intervention, CLI results, and stale-alignment correction.
 - `r2/task.txt` / `r2/status.md`: bounded frontend packet and approval-review rejection.
 - `r3-story-inspection.json`: exact argv, cwd, exit codes, stdout/stderr, and binary hash.
 - `r3-correction.json`: stale gate → align refresh → truthful remaining refusal.
-- `make-verify.log`: complete required local gate, including full race and 276 passing browser tests.
+- `make-verify.log`: earlier R1 gate, including full race and 276 browser tests.
+- `r1-final-opus-review-authorized-result.json` / `r1-controller-review-adjudication.json`: genuine completed R1 review and controller checks.
+- `r2/skill-invocation-proof.json` / `r2/final-fixture-fable-result.json`: genuine registered `/fable-orchestration` invocation and FABLE 5.1 execution.
+- `r2/review-9507f369/opus5-review-report.md` / `r2-controller-review-adjudication.json`: independent R2 review and dispositions.
+- `r2/audit-fix-9507f369/` / `r2-audit-fix-controller-adjudication.json`: genuine Opus fix, separate review, exact source identities, and focused GREEN.
+- `whole-wave-review-cdcab51a/opus5-whole-wave-report.md` / `whole-wave-controller-adjudication.json`: independent integrated review and controller disposition of its evidence-only correction.
+- `whole-wave-review-cdcab51a/closure/opus5-closure-blocked.json`: optional closure rejection; no model execution or passing verdict.
+- `make-verify-r0-r2.log`: retained initial integration audit failure.
+- `make-verify-r0-r2-final.log` / `final-gate-evidence.json`: final full gate, 278 passing browser tests, disclosures, and recording scan.
 
-R1 is implemented, locally verified, and independently reviewed with no blocking
-findings. R2 implementation has passed independent lane review and focused browser checks;
-the reviewed audit correction is committed and the full gate remains pending. R3 repeated
-current-candidate authoring and inspection and preserved the local pre-review
-boundary. No R4 release acceptance is claimed: the two real-project journeys on
-one release, including an independent second journey, remain outstanding.
-Actual configured forge approval/merge enforcement and CI production/retrieval
-remain deferred under the owner's instruction. Local execution does not
-automatically supply authoritative CI evidence; any chosen step requiring
-external proof remains incomplete until that specific proof exists.
+R0–R2 are implemented, locally verified, and independently reviewed; no blocking
+runtime findings remain. R3 repeated candidate authoring, saved edits, evidence
+inspection, and a blocked-path correction, preserving the exact local
+pre-review stopping point. No R4 release acceptance is claimed: the two complete
+real-project journeys on one release, including an independent second journey,
+remain outstanding. Actual configured forge approval/merge enforcement and CI
+production/retrieval remain deferred under the owner's instruction. Local
+execution does not automatically supply authoritative CI evidence; a chosen
+step requiring external proof remains incomplete until that specific proof
+exists. Broader Wave 6 and ATC completion is not claimed.
