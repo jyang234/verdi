@@ -831,9 +831,11 @@ Commit subject: <exact subject>
 **Status:** adopted by the owner on 2026-09-13 after independent Claude review
 and closure approval of exact head `4acd6cccc468b39ca61e6d6a9a482b5265377b2d`.
 The owner explicitly authorized R0–R3: onboarding documentation, refused-start
-retry, board labels, and continued local adoption rehearsal. Hosted testing stays
-deferred. This is not acceptance of a canonical feature or completion of Wave 6.
-SI-198 records adoption; the reviewed contract below is unchanged in scope.
+retry, board labels, and continued local adoption rehearsal. SI-198 records that
+adoption. The owner subsequently adopted the R3/R4 milestone clarification below
+(SI-199), leaving R0–R2 unchanged. Testing actual configured forge approvals and
+merge requirements, CI production/retrieval, and tracker integrations remains
+deferred. Neither adoption accepts a canonical feature or completes Wave 6.
 
 **Planning input:** owner-supplied text in this task on 2026-09-13:
 
@@ -846,13 +848,13 @@ integrity or usability defects. The following goal is the controller's proposed
 operationalization, including an independent second run and the intervention
 rule; the owner subsequently adopted that operationalization. The owner's
 earlier “continue” authorized preparation, and the explicit adoption authorizes
-R0–R3 execution with hosted testing deferred.
+R0–R3 execution with actual forge/CI integration testing deferred.
 
 **Adopted goal:** on one identified release, adopt Verdi in a real project, define and
 inspect one meaningful feature/story change, and understand its evidence and
 next steps using shipped guidance. Complete the journey twice, the second time
 independently of the development agent. An unexplained intervention or serious
-integrity/usability defect prevents release acceptance.
+integrity/usability defect prevents Local MVP acceptance.
 
 ### Release boundary and evidence
 
@@ -865,21 +867,40 @@ retry, and the board describes an unproven record as accepted/sealed. These are
 concrete release blockers. The baseline stopped before acceptance, implementation,
 alignment, and evidence completion; those stages remain unproven.
 
-Release requirements are successful installation and configuration, truthful
-authoring and lifecycle presentation, supported editing, reviewed merge-based
-acceptance, implementation, alignment/evidence inspection, and usable corrective
-guidance. Existing gate, human-authorship, identity, and evidence requirements
-apply whenever reached. Missing evidence may be honestly unproven; missing
-required proof can never become a successful gate or closed state.
+The owner adopted two distinct completion milestones on 2026-09-13:
+
+| Milestone | Required evidence |
+|---|---|
+| Local MVP accepted | Two complete adoption journeys on the same identified release in a real project, the second independent of the development agent; required local gates pass; supported edits work; acceptance follows existing rules; evidence and missing proof are presented truthfully. The journey demonstrates defining and inspecting one meaningful change and understanding its next steps. |
+| Forge/CI integration validated | Actual configured approvals, merge requirements, CI evidence production, and evidence retrieval work against the chosen services. Required before claiming those integrations are validated. |
+
+Successful installation/configuration, truthful lifecycle presentation, supported
+editing, alignment/evidence inspection, and usable corrective guidance remain
+required for the chosen local journey. Every governing acceptance, gate,
+human-authorship, identity, and evidence requirement remains binding whenever
+reached. If that journey requires external proof, the specific step stays
+incomplete until the proof exists. Missing required proof can never become a
+successful gate or closed state. Authoritative closure is not a blanket condition
+for the narrower define-and-inspect Local MVP milestone.
+
+Local execution does not automatically constitute authoritative CI evidence.
+A local bare-remote merge can exercise Git projection but cannot prove actual
+GitHub/GitLab approval enforcement or merge requirements. Hermetic evidence
+fixtures do not validate a chosen CI service's production or retrieval. Name the
+specific external authority or integration for each missing witness, rather than
+treating all later work as one undifferentiated external phase.
 
 The current local-first instruction (workspace PLAN I-123 and
 `../docs/superpowers/plans/2026-09-12-local-build-first.md`, relative to the
 repository root) remains in force. Local construction and hermetic forge/Git
-rehearsals proceed first. Real forge review/merge, hosted CI, publication, or a
-real-project acceptance run that needs them waits for the owner's resumption
-of that phase. A synthetic fixture rehearsal is not either of the two final
-adoption runs and cannot manufacture authoritative CI by setting environment
-variables, fabricating approvals, or forcing local closure.
+rehearsals proceed. Actual GitHub/GitLab approval and merge enforcement, configured
+CI evidence production/retrieval, Jira integration testing, and release
+publication remain deferred pending authorization for those specific operations.
+This does not postpone an otherwise complete Local MVP journey merely because
+Forge/CI integration validation is outstanding. A synthetic fixture rehearsal is
+not either of the two final real-project adoption runs and cannot manufacture
+authoritative CI by setting environment variables, fabricating approvals, or
+forcing local closure.
 
 ### Delivery order and retained obligations
 
@@ -895,8 +916,8 @@ application seam. A later change needing one returns to the authority process.
 | R0 | Controller documentation: one version-identified local installation path; correct `init`, statement flags/TTY behavior, forge attributes, default-branch setup, tracker/toolchain prerequisites, and merge-signaled acceptance in the quickstart. | Execute the documented commands against the selected binary; distinguish a local bare-remote fixture from a real forge. No undocumented setup, silent `@latest`, or CI-environment workaround. Bare `init` retains its manifest-only contract. |
 | R1 | Sonnet backend repair, Opus defect review/fixes, controller adjudication: statement/template preparation before design-branch mutation, as specified below. | Built-binary refusal → corrected same-name retry, with unchanged Git/candidate state on preparation refusal. |
 | R2 | FABLE frontend repair: distinguish unavailable lifecycle proof from an accepted/sealed record everywhere the board presents that state. | Real-handler and Playwright missing-default-branch/unknown-state cases remain read-only, show the missing witness and remedy, and never assert acceptance or sealing. Proven accepted/closed cases retain appropriate labels. No new lifecycle state or readiness algorithm. |
-| R3 | Controller adoption rehearsal, then narrowly owned repairs: continue through a meaningful feature/story, supported edit, reviewed acceptance, implementation, alignment, evidence, and a blocked-path correction. | Record release identity, commands/actions, observed results, interventions, and the exact stopping point. Local hermetic stages and deferred hosted/human stages have separate verdicts. |
-| R4 | Controller release verification and independent adoption acceptance, after all required fixes and the applicable hosted phase are authorized. | Fresh required gates and two complete journeys on the same final release, with no serious integrity/usability defects; preserve explicit limits on unproven evidence. |
+| R3 | Controller adoption rehearsal, then narrowly owned repairs: define and inspect a meaningful feature/story, exercise supported editing, alignment/evidence inspection, and a blocked-path correction; follow existing acceptance and implementation rules when those steps are part of the chosen journey. | Record release identity, commands/actions, results, interventions, and the exact stopping point. Give each required witness its own verdict and name the specific missing authority or integration. Do not require authoritative closure merely to demonstrate the narrower journey. |
+| R4 | Controller local verification and independent adoption acceptance after required fixes; track Forge/CI integration validation as its distinct milestone. | Local MVP accepted requires fresh required local gates and two complete real-project journeys on the same final release, the second independent, with supported edits, governing acceptance rules preserved, truthful evidence, and no serious integrity/usability defects. Claim Forge/CI integration validated only on actual configured-service witnesses. A required external proof still blocks the specific journey step until obtained. |
 
 R3 may add a defect only with a reachable reproduction and a release requirement
 it prevents. A new semantic contract is recorded and reviewed before runtime
@@ -1002,7 +1023,7 @@ the consolidated exact head, followed by at most one controller correction pass
 and one closure check by the same reviewer. Runtime gates above are obligations
 of implementation and release, not claimed by this planning change.
 
-Coverage is 12/12 source groups: (1) dated owner-supplied planning input and
+Coverage is 13/13 source groups: (1) dated owner-supplied planning input and
 explicit controller operationalization above → release
 goal/R4; (2) local-first I-123 → local/hosted boundary; (3) Wave 6 sequence →
 inserted R0–R4 and retained original order; (4) existing ASD/constitution backend
@@ -1013,6 +1034,9 @@ retained experiment/integration obligations; (8) CLI creation/scaffold authority
 (10) fresh CLI/browser observations → baseline report and R1/R2;
 (11) archived `spec/init-wizard` AC-1 → R0's manifest-only preservation;
 (12) Wave 6 authority design §§3–4 and §8 → unchanged presentation truth,
-ownership, and outstanding GLG semantics. Transformation:
+ownership, and outstanding GLG semantics; (13) owner-adopted R3/R4 clarification
+on 2026-09-13 → separate Local MVP and Forge/CI milestones, specific external
+witnesses, retained governing requirements, and no blanket closure requirement.
+Transformation:
 release scheduling and defect extraction, not canonical promotion or semantic
 erasure. No source obligation is intentionally omitted or marked complete.
