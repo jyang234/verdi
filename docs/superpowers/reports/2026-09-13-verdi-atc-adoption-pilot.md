@@ -107,6 +107,25 @@ Actual configured forge approvals/merge enforcement and CI evidence
 production/retrieval remain deferred. If a selected step requires one of those
 witnesses, that step remains incomplete until the witness exists.
 
+## First journey progress
+
+The authorized pilot now exists in the isolated real-project clone
+`/Users/johnyang/code/verdi-system/verdi-atc-mvp-adoption-pilot-20260913`.
+At commit `be883fdd3df8e2cedf9bb6eb67455292235a92de` on
+`design/f13-receipt-verification`, Verdi has initialized the store, authored a
+four-criterion feature and one story stub, and recorded a supported board
+outcome edit. Save and full page reload retained the revised text. Model check
+and lint passed; state, journey and matrix reads succeeded with missing proof
+disclosed. The same recorded Verdi binary was used, and the temporary server
+was shut down after the check.
+
+The semantic review panel reports `policy-forbidden` because no project policy
+is adopted. A real tracker item and policy/acceptance setup are still needed.
+The bounded adapter proposal is drafted but unreviewed and unadopted. No
+implementation flight, acceptance merge, hosted action or complete journey is
+claimed. See the [journey record](/Users/johnyang/code/verdi-system/verdi-atc-mvp-adoption-pilot-20260913/docs/superpowers/reports/2026-09-13-verdi-adoption-journey-1.md)
+and [design proposal](/Users/johnyang/code/verdi-system/verdi-atc-mvp-adoption-pilot-20260913/docs/superpowers/specs/2026-09-13-f13-receipt-adapter-proposal.md).
+
 ## Source witnesses
 
 - [R0–R3 verification and adoption limits](2026-09-13-mvp-release-rehearsal.md).
