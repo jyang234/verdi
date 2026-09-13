@@ -71,11 +71,20 @@ baseline before obtaining RED. An earlier helper-name compilation failure was
 repaired and is not counted as behavioral RED. Optional real-Jira fixtures were
 removed or replaced before execution. This was not an uninterrupted TDD sequence.
 
-The required final independent Opus review remains pending. Automatic approval
-review rejected its read-only invocation before the model ran because it would
-send the private R1 patch, source, and test evidence to Anthropic without explicit
-permission for that payload and destination. Earlier producer/fixer permissions
-do not substitute for that permission. No review approval is claimed.
+The required independent review subsequently completed through genuine Claude
+Code 2.1.263, model `claude-opus-5`, session
+`f62ed880-0fbe-4da3-972e-9c694c9d4e1f`: **no blocking findings**. The controller
+accepted that verdict and independently resolved the review's bounded-payload
+limits: strict decoding, ahead/behind count orientation, exact commit parent,
+and the empty-impact early return that prevents upstream execution in these
+built-binary feature fixtures. Optional test/comment improvements do not require
+a contract correction. The R1 source and tests did not change after this review.
+
+Automatic approval review initially rejected this private-source transfer before
+the model ran. The owner then explicitly permitted the described R1/R2 payloads
+to Anthropic and required genuine Claude Code calls with FABLE 5.1 and Opus 5.
+The resumed invocation succeeded with no permission denials. The initial denial
+and successful model/session evidence are retained separately.
 
 The documented installation was repeated from clean source `6f65c4ee`, producing
 candidate SHA-256
@@ -88,14 +97,32 @@ constitute either required real-project adoption journey.
 
 ## Board labels (R2)
 
-No frontend runtime or test changes have been made. Automatic approval review
-rejected the prescribed FABLE invocation before the model ran. The stated reason
-was that the Claude CLI could read and transmit relevant private Verdi source and
-tests to Anthropic without specific authorization for that payload and destination,
-despite the R2 task and FABLE routing authorization. No workaround or substitute
-frontend producer was used. The bounded task packet is ready; this lane needs
-that specific permission before it can execute. The baseline false sealed/accepted
-labels remain a known release blocker.
+The initial FABLE invocation was blocked before execution by automatic approval
+review because the private-source transfer needed explicit permission. The owner
+subsequently granted that permission. Genuine Claude Code 2.1.263 then invoked
+the registered `/fable-orchestration` skill with expanded skill content and actual
+`claude-fable-5-1` responses, session `529bf627-ae20-415f-98fd-79c6c6b75355`.
+An earlier undiscovered-slash-command attempt and interrupted setup attempt did
+not establish FABLE execution; successful session evidence is retained separately.
+
+The R2 patch is now in local verification. Handler RED reproduced false
+accepted/sealed labels for unproven and proposed read-only records. FABLE authored
+the rendering repair, corresponding tests, and isolated fixture. Controller
+corrections preserve uncertainty rather than asserting a proven negative, direct
+diverged revisions to the successor path, use local Git setup guidance, and keep
+new fixture bytes under `testdata/`. Remaining board posture, remote-ref, and
+diagram-mode labels are included in the same presentation repair.
+
+The first controller browser run passed six cases and failed one: the isolated
+fixture's unwired design service returned 500 before the intended read-only
+refusal. FABLE is replacing that fixture with the built `verdi serve` process;
+the expected refusal is not being weakened. Final browser verification,
+independent Opus review, and integrated gates remain pending for this patch.
+
+Claude also persisted an unrequested R2 memory file and index entry outside the
+lane. The controller verified their originating session, removed only that file
+and its single index entry, and retained an audit copy. All other memory bytes
+were preserved; further memory writes were prohibited.
 
 ## Continued adoption rehearsal (R3)
 
@@ -133,7 +160,7 @@ localhost server was shut down cleanly.
 
 ## Required local verification
 
-`make verify` exited 0 against runtime/source commit
+Before the R2 patch, `make verify` exited 0 against runtime/source commit
 `6f65c4eea164f099cd7066a4fa30d082a3afd46e`. Only this evidence report changed
 after that commit during the gate. The unchanged target covered build, formatting,
 vet, lint, the full `go test -race ./...` suite, fresh cross-binary integration
@@ -155,7 +182,8 @@ disabled module/npm network retrieval, and directed HTTP proxies to a closed
 loopback port with a localhost exception for the test servers. The local browser
 harness shut down normally. These are local test results, not authoritative CI
 or configured-service integration evidence. Passing the existing gate does not
-resolve R2's known presentation defect or replace R1's pending independent review.
+resolve the R2 presentation defect or verify its subsequent patch. R1's
+independent review has since completed as recorded above.
 
 ## Evidence locations and remaining work
 
@@ -174,8 +202,8 @@ Workspace-local evidence is under
 - `r3-correction.json`: stale gate → align refresh → truthful remaining refusal.
 - `make-verify.log`: complete required local gate, including full race and 276 passing browser tests.
 
-R1 is implemented with focused local evidence; its required independent review
-is pending. R2 remains blocked. R3 reached and preserved the local pre-review
+R1 is implemented, locally verified, and independently reviewed with no blocking
+findings. R2 implementation is undergoing verification. R3 reached and preserved the local pre-review
 boundary. No R4 release acceptance is claimed: the two real-project journeys on
 one release, including an independent second journey, remain outstanding.
 Actual configured forge approval/merge enforcement and CI production/retrieval
