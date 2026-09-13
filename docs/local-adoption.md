@@ -1,6 +1,14 @@
 # Local adoption rehearsal
 
 Use this guide with the binary built by the [README installation](../README.md#install).
+The owner-adopted milestones are distinct: **Local MVP accepted** requires two
+complete real-project adoption journeys on the same release (second independent),
+passing required local gates, working supported edits, existing acceptance rules,
+and truthful evidence. **Forge/CI integration validated** requires actual
+configured approval/merge enforcement and CI evidence production/retrieval.
+A required external proof still blocks its specific step; authoritative closure
+is not a blanket requirement for defining and inspecting a meaningful change.
+
 This is a disposable synthetic Git project. It can exercise authoring, saved edits,
 Git-derived lifecycle, and honest missing-evidence disclosures. It does not supply
 real forge review, human approval, CI, or either final real-project adoption run.
@@ -40,6 +48,11 @@ receipt is one example: saving a request returns a stable identifier; looking up
 that identifier returns the saved request; unknown identifiers produce a clear
 not-found result. Inspect the board, save a supported draft edit, reload, and
 check that the intended content persisted. Record every intervention.
+
+Opening **Semantic review** without an adopted project policy returns
+`policy-forbidden: project has not adopted policy authority`. Record that
+prerequisite; do not create an approval or relax a policy check to get a packet.
+The initial authoring path does not itself adopt project policy.
 
 Run `verdi lint`, `verdi spec state spec/my-first-feature`,
 `verdi journey --json spec/my-first-feature`, and
@@ -85,7 +98,7 @@ for your selected release. Verdi executes the upstream CLIs through
 roots need `.flowmap.yaml` and the spec's `impacts` must name discovered services.
 A missing toolchain or missing impacted service leaves the advisory baseline
 unproven. The real runner can require the Go proxy even with a warm cache; defer
-that network-dependent validation when hosted testing is deferred. Hermetic
+that network-dependent validation while actual upstream integration testing is deferred. Hermetic
 regression tests use canned upstream outputs and disclose that substitution.
 
 Alignment's optional `align.judge_cmd` is an argv array, for example

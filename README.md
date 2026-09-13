@@ -21,6 +21,8 @@ and binary identity alongside your adoption results:
 
 ```sh
 # Run from the root of the selected Verdi checkout.
+git status --short
+test -z "$(git status --porcelain)"
 git diff --exit-code HEAD
 git rev-parse HEAD
 mkdir -p .build/bin
@@ -157,7 +159,7 @@ fetch the real `origin` and run `git remote set-head origin -a`, then check
 ancestry. A lone fetched `origin/main` or `origin/master` is also supported;
 a local branch named `main` by itself is insufficient. Missing proof produces
 an **unproven** lifecycle and a read-only board. Refresh the genuine remote
-refs to resolve it; do not invent CI environment variables. If hosted access
+refs to resolve it; do not invent CI environment variables. If testing the actual forge
 is deferred, use the explicitly synthetic [local rehearsal](docs/local-adoption.md)
 in a disposable project instead.
 
@@ -205,6 +207,12 @@ and the pinned upstream CLI modules available to `go run`. The
 shows these fields. Without that setup, design creation discloses a skipped
 advisory baseline. That skip is not evidence of alignment or completion.
 
+The board's Semantic review packet requires adopted project policy authority;
+without it, the panel reports `policy-forbidden`. Ordinary draft editing remains
+available. Adopt your project's policy before relying on that review surface.
+Readiness labels such as “Ready” report the listed structural checks; they do
+not establish that placeholder text is meaningful or that human review occurred.
+
 Submit the authored specification and obligations through your repository's
 required review and checks. **Merging the reviewed specification into the
 configured default branch accepts that exact revision.** `verdi accept
@@ -214,8 +222,12 @@ refreshing the default-branch refs. For an accepted story, `verdi build start
 jira:LOAN-42` begins implementation. Inspect `verdi align`, `verdi matrix`, and
 `verdi journey --json` as work proceeds. Their disclosures identify missing
 proof; a successful read command does not mean the gate passed. Real CI evidence
-and the applicable human approvals remain necessary for closure. During a local
-rehearsal, stop at those boundaries and record them as unproven.
+and the applicable human approvals remain necessary for closure. Closure is not
+a blanket requirement for the narrower Local MVP milestone: defining and
+inspecting a meaningful change with truthful evidence. If a chosen step requires
+external proof, that step remains incomplete until the proof exists. The
+[local guide](docs/local-adoption.md) distinguishes Local MVP acceptance from
+validation of actual forge approvals, merge requirements, and CI integration.
 
 ## Core concepts
 
