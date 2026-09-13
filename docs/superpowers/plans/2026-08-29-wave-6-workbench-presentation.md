@@ -39,7 +39,11 @@ owner-approved Task 2 stop-gate corrections in SI-176–SI-177.
 
 **SI-177 amendment base:** `ab7518975b6621aceeef4607cca29d9a87cd75b7`
 
-**Execution status:** The original planning authority and SI-176 amendment are
+**Historical execution status at the SI-177 planning snapshot (not current):**
+The [2026-09-13 source inventory](../reports/2026-09-13-mvp-adoption-baseline.md#source-presence-witness)
+records later ancestor commits; their fresh operational completeness remains
+unproven. The following paragraph preserves the earlier stop-gate history:
+The original planning authority and SI-176 amendment are
 independently reviewed, owner-approved, and merged. Task 1B and Task 2 are
 blocked until the consolidated SI-177 amendment passes its one independent
 review and closure and its exact head merges to the configured default branch.
@@ -830,7 +834,19 @@ adoption of this exact amendment precede runtime execution under its changed
 sequence. This is not acceptance of a canonical feature, completion of Wave 6,
 or permission to resume hosted testing. SI-198 records the proposal.
 
-**Goal:** on one identified release, adopt Verdi in a real project, define and
+**Planning input:** owner-supplied text in this task on 2026-09-13:
+
+> You can adopt Verdi in one real project, use it to define and inspect one
+> meaningful change, and understand its evidence and next steps without the
+> development agent coaching you.
+
+The same input proposed that this work twice on the same release with no serious
+integrity or usability defects. The following goal is the controller's proposed
+operationalization, including an independent second run and the intervention
+rule; those additions are pending owner adoption, not attributed as a verbatim
+owner decision. The owner's subsequent “continue” authorized this preparation.
+
+**Proposed goal:** on one identified release, adopt Verdi in a real project, define and
 inspect one meaningful feature/story change, and understand its evidence and
 next steps using shipped guidance. Complete the journey twice, the second time
 independently of the development agent. An unexplained intervention or serious
@@ -868,6 +884,9 @@ variables, fabricating approvals, or forcing local closure.
 Upon owner adoption, insert the following bounded release-maintenance sequence
 before resuming unfinished Wave 6 units. It does not reorder the remaining
 Wave 6 feature units relative to each other or mark their predecessors complete.
+The existing Wave 6 authority design needs no amendment for this maintenance
+insertion: R0–R4 introduce no architecture, route, actor, public schema, or
+application seam. A later change needing one returns to the authority process.
 
 | Order | Deliverable and owner | Completion witness |
 |---|---|---|
@@ -886,7 +905,7 @@ the release slice and its dependency order before implementing it.
 
 | Existing obligation | Disposition for this release proposal |
 |---|---|
-| ASD Tasks 1/1A/1B/2 and constitution application Task 3 with impact correction | Implementations exist at the audited base; preserve them and test their use. No fresh complete-gate claim or inference from stale checkboxes. |
+| ASD Tasks 1/1A/1B/2 and constitution application Task 3 with impact correction | Source presence and commit ancestry are witnessed in the baseline report's source inventory; fresh operational completeness is unproven. Preserve the existing source and test its use; do not infer completion from those commits or stale checkboxes. |
 | Task 4 constitution workbench | Remains outstanding in its original order; browser constitution management is not required by the narrow adoption criterion. Existing policy enforcement still applies. |
 | Task 5 / GLG AC-6 current/eventual readiness and feature attestation | Outstanding capability, not a predeclared release dependency. Required present-transition/evidence truth remains mandatory. If the chosen real journey requires feature outcome attestation, complete its governed path; never substitute an agent-written claim. |
 | Task 5 / GLG AC-7 recovery | Full recovery projection remains outstanding. R1 prevents one preparation failure; it does not implement or close AC-7. R3 requires usable correction for encountered states, using existing supported operations. |
@@ -910,6 +929,9 @@ enumerate every Git side effect. No frozen specification is edited here.
 validation ordering requires them. Reuse `internal/designscaffold` and
 `internal/designinterview`; change neither their field grammar nor browser
 behavior. Any committed fixture belongs under `cmd/verdi/testdata/`.
+The separate `--from-stub` path is outside R1 and was not probed here; an
+analogous failure there is a separately reproduced R3 defect, not an implicit
+extension of this write set.
 
 **Interface:** preserve `runDesignStart(ctx, root, kind, storyRef, name, manifest,
 mdl, deps, stdout, stderr) int`, its existing typed operands and CLI grammar.
@@ -967,6 +989,8 @@ No test uses a live tracker, forge, provider, or network. Frontend follow-up R2
 remains FABLE-owned. R1's producer returns command output and the exact diff for
 controller adjudication; an exit-0 aggregate with skipped required checks is
 not proof of those checks.
+Any new test outside the focused command's three name families must also run
+explicitly during its red/green cycle; the full gates cover all test names.
 
 ### Planning verification and coverage
 
@@ -976,13 +1000,17 @@ the consolidated exact head, followed by at most one controller correction pass
 and one closure check by the same reviewer. Runtime gates above are obligations
 of implementation and release, not claimed by this planning change.
 
-Coverage is 10/10 source groups: (1) owner adoption stopping criterion → release
+Coverage is 12/12 source groups: (1) dated owner-supplied planning input and
+explicit controller operationalization above → release
 goal/R4; (2) local-first I-123 → local/hosted boundary; (3) Wave 6 sequence →
 inserted R0–R4 and retained original order; (4) existing ASD/constitution backend
 → preservation row; (5) Task 4 → outstanding constitution UI; (6) Tasks 5/6 and
 GLG AC-6/7/8 → individually retained capability rows; (7) Tasks 7/8/9 and Wave 7 →
 retained experiment/integration obligations; (8) CLI creation/scaffold authority
-→ R1; (9) init's manifest-only and merge-signaled acceptance contracts → R0;
-(10) fresh CLI/browser observations → baseline report and R1/R2. Transformation:
+→ R1; (9) merge-signaled acceptance contract → R0;
+(10) fresh CLI/browser observations → baseline report and R1/R2;
+(11) archived `spec/init-wizard` AC-1 → R0's manifest-only preservation;
+(12) Wave 6 authority design §§3–4 and §8 → unchanged presentation truth,
+ownership, and outstanding GLG semantics. Transformation:
 release scheduling and defect extraction, not canonical promotion or semantic
 erasure. No source obligation is intentionally omitted or marked complete.

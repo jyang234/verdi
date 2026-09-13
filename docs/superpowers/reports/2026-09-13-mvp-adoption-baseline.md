@@ -22,6 +22,47 @@ screenshot of the installed binary's real board. No browser mutation or human
 claim was submitted. The script did not set CI authority flags or use the test
 TTY override. No tracker, provider, forge, or hosted service was invoked.
 
+### Source-presence witness
+
+Controller verification ran `git rev-parse '4fb98233^{tree}'` and
+`git rev-parse 'b281e767^{tree}'`. Both printed
+`f1611c79770af9eca906ca138674b4fea43dd82e` (exit 0), establishing source-tree
+identity. For each commit below, `git merge-base --is-ancestor COMMIT b281e767`
+exited 0, and the named path was present in the planning checkout:
+
+| Source unit | Ancestor commit | Present path |
+|---|---|---|
+| ASD application | `1503865a40b68bbff7171195731b09405d90bee3` | `internal/designapp/` |
+| Browser-human attribution | `0aa012bc15556c01971073f07f7f57ab682abd8f` | `internal/draftmutation/` |
+| Writer reentry | `ba96d693c0517cdf973f05fd229ea2ff41874ab6` | `internal/store/` |
+| ASD workbench | `1b53c6784fbd9385463b2861e19051c6bdabf7fd` | `internal/workbench/boardspecasd.go` |
+| Constitution application/corrections | `8f595fc9fbbd6f6ff8bca1cf82313282f87af02b` | `internal/constitutionapp/` |
+
+Raw inventory output is retained beside the baseline as `source-inventory.json`.
+This proves source presence/ancestry only; it proves neither unit completion,
+independent approval, current test success, nor a working end-to-end journey.
+
+### Manual manifest input
+
+The `readme-manual` case copied the README's eight-line manifest directly through
+the probe driver before its recorded `git add`/commit commands:
+
+```yaml
+schema: verdi.layout/v1
+forge: gitlab
+providers:
+  jira:
+    base_url: https://example.atlassian.net
+    rollup_field: customfield_00000
+services:
+  discovery: flowmap
+```
+
+The two bare-init cases instead produced the one-line
+`schema: verdi.layout/v1` manifest. This is a documented input difference, not
+a byte-equivalence claim. Both paths lacked the forge-generated attributes;
+R0 must explain actual configuration rather than equate the two scaffolds.
+
 ## Results
 
 | ID | Observation | Classification / consequence |
@@ -32,7 +73,7 @@ TTY override. No tracker, provider, forge, or hosted service was invoked.
 | B-04 | In a third fresh repo, supplying both statement flags on the first invocation exited 0, created the branch/scaffold, and disclosed absent toolchain baseline regeneration. | Proven scaffold creation only. Its template still contains placeholder AC/stub/body content; this is not a completed meaningful feature. |
 | B-05 | `spec state` and `journey --json` returned exit 0 with explicit unproven state because no default branch resolved; matrix showed no signal and unreconciled stubs. | Honest projection, not a successful acceptance/gate. The quickstart needs supported default-branch/tracker/toolchain setup. No default-branch or CI proof was fabricated to advance the probe. |
 | B-06 | The board disclosed the unresolved default branch and `displayed bytes: proposed (unproven)`, while displaying `READ-ONLY · SEALED RECORD` and “This spec is accepted; the wall is its photograph. Change means supersession (the amendment ladder).” | Violated-with-witness: unknown lifecycle truth is presented as acceptance. R2 owns the FABLE presentation repair; read-only refusal itself stays intact. |
-| B-07 | `accept spec/my-first-feature` exited 0 with the retirement notice; surrounding Git status remained clean in the two refused-start repos. | Proven compatibility notice, not acceptance. README's freeze instruction is false for specs. The command intentionally does not require the referenced spec to exist. |
+| B-07 | `accept spec/my-first-feature` exited 0 with the retirement notice; surrounding Git status remained clean in the two refused-start repos. | Proven compatibility notice, not acceptance. README's freeze instruction is false for specs. The observed invocation returned 0 even though the referenced spec had not been created. |
 
 Source confirmation for B-03: `cmd/verdi/design.go` calls
 `gitx.CheckoutNewBranch` before template loading and the statement/interview
