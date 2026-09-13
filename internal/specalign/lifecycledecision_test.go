@@ -683,6 +683,27 @@ var lifecycleDecisionAllowlist = []lifecycleAllowEntry{
 	{File: "internal/workbench/boardspecrender.go", Func: "renderBoardRegion", Rationale: "p.Status is BoardProjection.Status, populated upstream from specstate's ArtifactStatus() (see boardspec.go's loadBoard entry above); gates the stub card's Instantiate affordance — pure HTML rendering, no re-decode"},
 	{File: "internal/workbench/boardspecrender.go", Func: "renderBoardDialogs", Rationale: "p.Status is BoardProjection.Status, populated upstream from specstate's ArtifactStatus() (see boardspec.go's loadBoard entry above); gates whether the stub-instantiate confirmation dialog is attached — pure HTML rendering, no re-decode"},
 
+	// internal/workbench/boardspecrender.go readOnlyReasonOf: the same
+	// p.Status field as the two entries above, reached by BOTH of the
+	// board's loaders — boardSpecServer.loadBoard and branchBoards.
+	// loadSealed (branchboard.go) — each of which resolves the candidate
+	// through specstate and passes `string(st.ArtifactStatus())` into
+	// buildProjection. Every value this switch can see is therefore a
+	// projection of specstate.Result.State, not a persisted status:
+	// field: ArtifactStatus() maps Result.State alone, and Unproven maps
+	// to "unproven" no matter what frontmatter claimed, so a spec whose
+	// persisted status says "accepted-pending-build" but whose lifecycle
+	// cannot be proven reaches the fail-closed default arm here, never
+	// the sealed one. The function is pure presentation: it picks which
+	// read-only REASON copy the already-read-only board explains itself
+	// with (sealed record vs. branch/divergence vs. unprovable), and
+	// decides neither the mode — boardspec.go fixes modeReadOnly before
+	// this renderer runs — nor the formal state, which buildASDView
+	// (boardspecasd.go) takes from st.State directly. No I/O, no git, no
+	// artifact.DecodeSpec anywhere in this file; no lifecycle decision is
+	// made or re-made. FUNCTION-SCOPED.
+	{File: "internal/workbench/boardspecrender.go", Func: "readOnlyReasonOf", Rationale: "p.Status is BoardProjection.Status, populated by BOTH board loaders (boardspec.go's loadBoard and branchboard.go's loadSealed) from specstate's already-projected Result via string(st.ArtifactStatus()) — Unproven projects to \"unproven\" regardless of persisted frontmatter; selects which read-only reason copy an already-read-only board displays — pure presentation, no re-decode, no new lifecycle decision"},
+
 	// internal/lint/vl002.go checkSpecPath: d.Status is lint.Document.
 	// Status — declared `Status string` (document.go), populated by
 	// walk.go's decodeDocument via an explicit `string(fmv.Status)` cast
