@@ -43,9 +43,48 @@ ok  github.com/jyang234/verdi/internal/showcasealign  61.735s
 
 ## Retry repair (R1)
 
-The prescribed Sonnet producer is implementing the adopted preparation boundary.
-Its actual model and RED/GREEN evidence are recorded in the local evidence bundle.
-Final verification and controller adjudication will be added when available.
+Implemented at `6f65c4eea164f099cd7066a4fa30d082a3afd46e`. Template loading
+and statement preparation now finish before branch creation or provider lookup.
+Preparation refusals preserve HEAD, branch, refs, index, tracked and untracked
+files, and ignored store data. This promise does not extend to arbitrary later
+I/O failures. Existing `--from-stub` behavior is unchanged.
+
+The actual runtime producer was `claude-sonnet-5`; test corrections used
+`claude-opus-5`. The controller inspected the consolidated diff and ran these
+checks with external access disabled:
+
+```text
+New refusal and same-name retry cases against unchanged runtime:
+FAIL github.com/jyang234/verdi/cmd/verdi  3.703s
+Same cases after the preparation reorder:
+ok   github.com/jyang234/verdi/cmd/verdi  3.702s
+go test -count=1 ./cmd/verdi -run 'Test(RunDesignStart|Run_DesignStart|CmdDesignStart)'
+ok   github.com/jyang234/verdi/cmd/verdi  8.258s
+go test -race -count=1 ./cmd/verdi -run 'Test(RunDesignStart|Run_DesignStart|CmdDesignStart)'
+ok   github.com/jyang234/verdi/cmd/verdi  9.466s
+```
+
+The behavioral RED exposed branch mutation in all eight preparation refusals
+and the built-binary retry case. It followed a sequencing correction: the
+producer initially reordered runtime before adding tests, then restored the
+baseline before obtaining RED. An earlier helper-name compilation failure was
+repaired and is not counted as behavioral RED. Optional real-Jira fixtures were
+removed or replaced before execution. This was not an uninterrupted TDD sequence.
+
+The required final independent Opus review remains pending. Automatic approval
+review rejected its read-only invocation before the model ran because it would
+send the private R1 patch, source, and test evidence to Anthropic without explicit
+permission for that payload and destination. Earlier producer/fixer permissions
+do not substitute for that permission. No review approval is claimed.
+
+The documented installation was repeated from clean source `6f65c4ee`, producing
+candidate SHA-256
+`704d69db669a5046e84aabf14bff089b0b1ed77125ccb0d515b2dd171a7d1d0a`.
+The extracted onboarding commands passed again in a new synthetic project.
+A separate candidate smoke check confirmed that a non-terminal start without
+statements exits 2 with repository/store snapshots unchanged; the corrected
+same-name invocation exits 0 and reports a new proposed spec. These checks do not
+constitute either required real-project adoption journey.
 
 ## Board labels (R2)
 
@@ -92,6 +131,32 @@ force authoritative closure; this synthetic project nevertheless cannot count as
 either required real-project adoption run. The temporary browser tab was closed and its own
 localhost server was shut down cleanly.
 
+## Required local verification
+
+`make verify` exited 0 against runtime/source commit
+`6f65c4eea164f099cd7066a4fa30d082a3afd46e`. Only this evidence report changed
+after that commit during the gate. The unchanged target covered build, formatting,
+vet, lint, the full `go test -race ./...` suite, fresh cross-binary integration
+tests, fixtures, store lint/model check, specification alignment, README/showcase
+checks, and Playwright:
+
+```text
+ok  github.com/jyang234/verdi/cmd/verdi  465.060s
+ok  github.com/jyang234/verdi/internal/workbench  109.522s
+276 passed (11.4m)
+verify OK
+```
+
+The full transcript is `make-verify.log`. Specification alignment disclosed no
+skipped checks. Store lint explicitly disclosed VL-017 checks as unproven because
+the uncommitted mutable data zone is absent; successful lint is not a pass for
+those missing witnesses. The command used cached Go/npm/browser dependencies,
+disabled module/npm network retrieval, and directed HTTP proxies to a closed
+loopback port with a localhost exception for the test servers. The local browser
+harness shut down normally. These are local test results, not authoritative CI
+or configured-service integration evidence. Passing the existing gate does not
+resolve R2's known presentation defect or replace R1's pending independent review.
+
 ## Evidence locations and remaining work
 
 Workspace-local evidence is under
@@ -100,10 +165,20 @@ Workspace-local evidence is under
 - `r0-install.sh` / `r0-install.log`: literal documented build and binary identity.
 - `r0-documented-commands.sh` / `.log`: extracted local Git/store/feature commands.
 - `r1-sonnet-brief.txt` / `r1-sonnet-result.json`: producer task and model provenance.
+- `r1-sonnet-runtime-result.json` and `r1-opus-*-result.json`: runtime producer and test-fixer model evidence.
+- `r1-red-behavior.log`, `r1-green-behavior.log`, `r1-focused.log`, `r1-focused-race.log`: refusal regression and focused verification.
+- `r1-consolidated-review.patch`, `r1-final-opus-review-brief.txt`, `r1-final-opus-review-blocked.json`: prepared review and approval rejection.
+- `r0-r1-candidate-install.sh` / `.log`, `candidate-documented-commands.sh` / `.log`, `candidate-retry.json`: clean candidate build, repeated onboarding, and unchanged-state retry witness.
 - `r2/task.txt` / `r2/status.md`: bounded frontend packet and approval-review rejection.
 - `r3-story-inspection.json`: exact argv, cwd, exit codes, stdout/stderr, and binary hash.
 - `r3-correction.json`: stale gate → align refresh → truthful remaining refusal.
+- `make-verify.log`: complete required local gate, including full race and 276 passing browser tests.
 
-R2 remains blocked; R1 needs its final proof. R3 reached and preserved the local
-pre-review boundary. No R4 release acceptance is claimed. Actual configured forge approval/merge enforcement and CI production/retrieval
-remain deferred under the owner's instruction.
+R1 is implemented with focused local evidence; its required independent review
+is pending. R2 remains blocked. R3 reached and preserved the local pre-review
+boundary. No R4 release acceptance is claimed: the two real-project journeys on
+one release, including an independent second journey, remain outstanding.
+Actual configured forge approval/merge enforcement and CI production/retrieval
+remain deferred under the owner's instruction. Local execution does not
+automatically supply authoritative CI evidence; any chosen step requiring
+external proof remains incomplete until that specific proof exists.
