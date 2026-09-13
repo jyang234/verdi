@@ -83,16 +83,22 @@ type pendingDefaultEntry struct {
 // the git-derived Result rather than a persisted `status:` field a
 // statusless scaffold would otherwise omit entirely.
 func computeDefaultBranchEntries(ctx context.Context, root string, deps GitRunner, resolver StateResolver) ([]Entry, error) {
+	// defaultBranch is the ref name the shared resolver selected (port.go's
+	// DefaultBranch contract: e.g. "origin/main", or a local name under the
+	// resolver's permitted fallback), reused for every ListTree/Show
+	// below. A mutable ref name, not an immutable SHA.
 	defaultBranch, err := deps.DefaultBranch(ctx, root)
 	if err != nil {
 		return nil, err
 	}
 	if defaultBranch == "" {
-		// Unconfigured (e.g. no "origin" remote at all): gitx.DefaultBranch's
-		// own contract treats this as "can't prove it", not an operational
+		// Unprovable (no "origin" remote at all, an ambiguous or dangling
+		// origin/HEAD, no ref for the resolved name): specstate's own
+		// contract treats this as "can't prove it", not an operational
 		// failure (I-14's local-otherwise-warns posture) — there is no
-		// default-branch ref to walk, so this walk honestly contributes no
-		// entries rather than fabricating one.
+		// default-branch revision to walk, so this walk honestly
+		// contributes no entries rather than guessing HEAD or a
+		// similarly named local branch.
 		return nil, nil
 	}
 
@@ -217,6 +223,10 @@ func computeDesignBranchEntries(ctx context.Context, root string, deps GitRunner
 
 	sources := mergeDesignSources(local, remote)
 
+	// The same selected ref name the default-branch walk reuses (port.go),
+	// resolved by a separate call — not a transactional snapshot: dc-5's
+	// ancestry test runs against origin/<name> when it exists, never a
+	// diverged same-named local branch.
 	defaultBranch, err := deps.DefaultBranch(ctx, root)
 	if err != nil {
 		return nil, err

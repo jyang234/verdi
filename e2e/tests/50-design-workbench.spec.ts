@@ -466,6 +466,53 @@ test.describe("posture and policy", () => {
     expect(entry.attribution.unauthenticated).toBe(true);
   });
 
+  test("the policy-less notice reaches an inline read-only policy setup guide", async ({ page }) => {
+    // Adoption repair: the context/policy notice used to tell the human to
+    // adopt .verdi/policy with nowhere to go. Its destination link now
+    // lands on an inline guide ON THIS BOARD — plain words first, the
+    // manual initial files and the read-only CLI checks under expandable
+    // detail — with no control that could adopt, propose, or mutate.
+    await page.goto(DRAFT_B());
+    await expect(page.getByTestId("board")).toHaveAttribute("data-board-mode", "authoring");
+    const more = page.locator('[data-testid="asd-more"] > summary');
+    if (await more.count()) await more.click();
+    const policyRow = page.locator('[data-concern-id="context/policy"]').first();
+    await expect(policyRow).toBeVisible();
+    const dest = policyRow.locator("a.asd-dest-link");
+    await expect(dest).toHaveAttribute("href", "#asd-policy-guide");
+    await dest.click();
+
+    const guide = page.getByTestId("asd-policy-guide");
+    await expect(guide).toBeVisible();
+    // This draft's branch tree carries no .verdi/policy at all: the
+    // refusal detail is draftmutation's exact not-adopted discriminant, so
+    // the guide is the not-adopted (initial manual setup) variant.
+    await expect(guide).toHaveAttribute("data-policy-guide", "not-adopted");
+    // Plain summary is visible without opening anything; the command wall
+    // stays folded until asked for.
+    await expect(guide.locator("p.readiness-summary")).toBeVisible();
+    const details = guide.locator("details.readiness-tech");
+    await expect(details).toHaveCount(2);
+    await expect(guide.locator("pre.asd-policy-guide-cmd").first()).toBeHidden();
+    await details.nth(1).locator("summary").click();
+    await expect(guide.locator("pre.asd-policy-guide-cmd").first()).toBeVisible();
+    // One complete copyable command: the request JSON rides a quoted
+    // here-document with its closing delimiter, never a bare command that
+    // would block waiting on stdin.
+    const inspect = guide.locator("pre.asd-policy-guide-cmd").first();
+    await expect(inspect).toContainText("verdi context constitution inspect --request - <<'JSON'");
+    await expect(inspect).toContainText('{"schema":"verdi.constitution-inspect-request/v1"}');
+    expect((await inspect.innerText()).trim().endsWith("\nJSON")).toBe(true);
+    await expect(guide.locator("pre.asd-policy-guide-cmd")).toHaveCount(4);
+    // Truthful, mode-scoped wording — never "editing continues" as an
+    // unconditional claim a read-only wall would belie.
+    await expect(guide.locator("p.readiness-summary")).toContainText(
+      "Ordinary draft editing does not require policy; this board's read-only restrictions still apply.",
+    );
+    // Read-only by construction: no form, button, input, or fetch panel.
+    await expect(guide.locator("form, button, input, select, textarea, [data-asd-panel]")).toHaveCount(0);
+  });
+
   test("direct-Markdown authoring is disclosed as unclassified in the review packet", async ({ page }) => {
     // stale-decline-notices was authored as direct Markdown (provisioning
     // bytes) and nothing ever mutated it through the typed core: AC-4's

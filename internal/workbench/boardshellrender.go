@@ -210,7 +210,96 @@ func writeASDShell(b *strings.Builder, asd *asdView) {
 		writeASDConcern(b, c, asd, 0)
 	}
 	b.WriteString(`</section>`)
+	if shell.PolicySetupGuide != policyGuideNone {
+		writePolicySetupGuide(b, shell.PolicySetupGuide, shell.PolicyDetail)
+	}
 	b.WriteString(`</section>`)
+}
+
+// policySetupGuideID is the in-page anchor the context/policy concern's
+// destination link targets (boardspecasd.go's policy-forbidden case).
+const policySetupGuideID = "asd-policy-guide"
+
+// policySetupCommand is one read-only CLI inspection request the guide
+// shows verbatim: the operation, its real operand shape (--request - with
+// the JSON on stdin, exactly as cmd/verdi/context_constitution.go accepts
+// it), and the result fields to read (internal/constitutionapp's own JSON
+// tags). None of these operations adopts, proposes, or approves anything.
+type policySetupCommand struct {
+	Title   string
+	Command string
+	Request string
+	Read    string
+}
+
+// shell renders the command as ONE complete, copyable shell block: the
+// request rides a quoted here-document (<<'JSON' … JSON) so pasting it
+// never leaves the CLI blocked waiting on stdin, and the delimiter is
+// quoted so the shell expands nothing inside the JSON.
+func (c policySetupCommand) shell() string {
+	return c.Command + " <<'JSON'\n" + c.Request + "\nJSON"
+}
+
+var policySetupCommands = []policySetupCommand{
+	{"Inspect", "verdi context constitution inspect --request -",
+		`{"schema":"verdi.constitution-inspect-request/v1"}`,
+		"accepted.adopted and proposed.adopted, each with its reason and exact Git identity."},
+	{"Validate", "verdi context constitution validate --request -",
+		`{"schema":"verdi.constitution-validate-request/v1"}`,
+		"snapshot.adopted and its reason. exit 0 can still mean no policy is adopted."},
+	{"Impact review", "verdi context constitution impact-review --request -",
+		`{"schema":"verdi.constitution-impact-review-request/v1","targets":[]}`,
+		"coverage.state and coverage.reasons. A missing consumer inventory leaves coverage unproven."},
+	{"Submission preparation", "verdi context constitution submit-preparation --request -",
+		`{"schema":"verdi.constitution-submit-preparation-request/v1","targets":[]}`,
+		"ready_for_submission and blocking_reasons. false means preparation is incomplete."},
+}
+
+// writePolicySetupGuide renders the inline, read-only policy guide (the
+// destination of the policy-forbidden context/policy notice): plain words
+// first — what the refusal means and why review is blocked — then the
+// expandable technical detail and the read-only CLI checks. kind selects
+// the variant the refusal's own discriminant justifies (boardspecasd.go's
+// policyGuideKind): the not-adopted variant names the manual initial
+// files; the no-design-assistance variant carries the refusal detail
+// verbatim and never describes the resolved policy as absent or
+// unaccepted. It is markup only: no form, no button, no fetch wiring, no
+// route — it adopts nothing and preserves every mode's restrictions.
+// Proposed or validated is never presented as accepted; missing authority
+// stays blocked.
+func writePolicySetupGuide(b *strings.Builder, kind policyGuideKind, detail string) {
+	esc := stdhtml.EscapeString
+	b.WriteString(`<section class="asd-policy-guide" id="` + policySetupGuideID + `" data-testid="` + policySetupGuideID + `" data-policy-guide="` + esc(string(kind)) + `" aria-label="Policy setup guide">`)
+	b.WriteString(`<h2 class="readiness-heading">Policy setup guide</h2>`)
+	switch kind {
+	case policyGuideNotAdopted:
+		b.WriteString(`<p class="readiness-summary">This project has not adopted policy authority: there is no accepted <code>.verdi/policy</code> on the default branch. Ordinary draft editing does not require policy; this board&#39;s read-only restrictions still apply. A semantic review packet and delegated-agent design assistance need project policy, so review stays blocked until the project adopts one.</p>`)
+		b.WriteString(`<p class="ritual-note">Initial setup is manual and reviewed. This guide adopts nothing; the workbench has no setup wizard and no adoption control. A policy directory that is proposed or validated is not accepted: acceptance is the owner&#39;s merge to the default branch through the project&#39;s own review process.</p>`)
+
+		b.WriteString(`<details class="readiness-tech"><summary>Files to author (manual initial setup)</summary><dl class="readiness-tech-facts">`)
+		writeReadinessFact(b, ".verdi/policy/constitution.md", "selects the governance profile and declares the project's role, transition, evidence, subject and adapter catalogs.")
+		writeReadinessFact(b, ".verdi/policy/profiles/<profile-id>.md", "declares the supported identity trust sources, role mappings and approval requirements. A mapping is not proof that anyone was authenticated or approved a change.")
+		writeReadinessFact(b, ".verdi/policy/policies/<name>.md", "carries the project's requirements. Overlays, exemptions and dispositions only when actually needed.")
+		writeReadinessFact(b, ".verdi/constitution/consumers.json", "declares the real registered consumers impact coverage needs. Never fabricate an empty or baseline inventory to make preparation look complete.")
+		b.WriteString(`</dl><p class="ritual-note">Keep these on a proposal branch. Do not copy a fixture&#39;s identities, approvals or trust facts into a real project. <code>verdi context constitution propose</code> amends one policy, overlay or exemption; it does not create the initial constitution or profile.</p></details>`)
+	default:
+		b.WriteString(`<p class="readiness-summary">Policy authority resolved for this project, but it does not grant design assistance. The workbench reported: <code>` + esc(detail) + `</code>. Ordinary draft editing does not require policy; this board&#39;s read-only restrictions still apply. A semantic review packet and delegated-agent design assistance need a policy that grants them, so review stays blocked until the project&#39;s policy does.</p>`)
+		b.WriteString(`<p class="ritual-note">This guide changes nothing; the workbench has no policy control. A policy change that is proposed or validated is not accepted: acceptance is the owner&#39;s merge to the default branch through the project&#39;s own review process.</p>`)
+
+		b.WriteString(`<details class="readiness-tech"><summary>What design assistance needs</summary><dl class="readiness-tech-facts">`)
+		writeReadinessFact(b, "design_assistance payload", "exactly one policy in the project's effective policy must carry the typed design_assistance payload (its mode selects what delegated agents may do). Without it, the effective policy resolves but grants no design assistance.")
+		writeReadinessFact(b, ".verdi/policy/policies/<name>.md", "where a project policy's payloads live. Propose the change on a proposal branch through the project's own review; verdi context constitution propose amends one policy, overlay or exemption.")
+		b.WriteString(`</dl></details>`)
+	}
+
+	b.WriteString(`<details class="readiness-tech"><summary>Read-only checks (CLI, from the project root)</summary>`)
+	b.WriteString(`<p class="ritual-note">Each block is one complete command: the request JSON rides a quoted here-document on stdin. Read the returned fields, not just the exit code: a successful command is not readiness, and readiness is not acceptance.</p>`)
+	b.WriteString(`<dl class="readiness-tech-facts">`)
+	for _, c := range policySetupCommands {
+		b.WriteString(`<dt>` + esc(c.Title) + `</dt><dd><pre class="asd-policy-guide-cmd"><code>` + esc(c.shell()) + `</code></pre><p>Read: ` + esc(c.Read) + `</p></dd>`)
+	}
+	b.WriteString(`</dl><p class="ritual-note">An empty <code>targets</code> list asks for no supplemental previews; it does not waive registered-consumer coverage. Neither <code>adopted: true</code> on the proposed snapshot nor <code>ready_for_submission: true</code> is review approval or acceptance on the default branch.</p></details>`)
+	b.WriteString(`<span hidden data-policy-guide-end></span></section>`)
 }
 
 // writeASDConcern renders one shell row: plain summary, plain state chip,

@@ -21,9 +21,18 @@ import (
 // through this interface, not merely undocumented or unused (ac-5's static
 // guarantee, read directly off this method set).
 type GitRunner interface {
-	// DefaultBranch resolves dir's configured default branch short name
-	// (gitx.DefaultBranch), returning ("", nil) — not an error — when
-	// unconfigured.
+	// DefaultBranch returns the git-resolvable REF NAME the shared
+	// resolver (specstate.ResolveDefaultBranch, Branch.Ref) selected for
+	// dir's default branch, reused verbatim for every tree read and
+	// ancestry test below: "origin/<name>" when that remote-tracking ref
+	// exists (preferred over a same-named local shadow), or the local
+	// branch name "<name>" when the resolver's permitted fallback applies
+	// (no remote-tracking ref for that name exists at all). It is a
+	// mutable ref name, not an immutable commit SHA, and the two walks'
+	// separate calls are not a transactional snapshot. It returns
+	// ("", nil) — not an error — when the default branch cannot be proven
+	// (unconfigured, ambiguous, or naming a ref that resolves nowhere); a
+	// dir that is not a git repository at all is an error.
 	DefaultBranch(ctx context.Context, dir string) (string, error)
 	// LocalDesignBranches lists dir's local refs/heads/design/* branch
 	// short names (the "design/<name>" form), scoped from gitx.LocalBranches's
@@ -58,8 +67,23 @@ type gitxRunner struct{}
 // real callers (e.g. a future directory-home handler) need to construct.
 func NewGitRunner() GitRunner { return gitxRunner{} }
 
+// DefaultBranch consumes specstate.ResolveDefaultBranch — the ONE shared
+// default-branch resolution (env, origin/HEAD, single origin/main-or-master
+// fallback; origin/<name> preferred over a same-named local branch, local
+// name only when no remote-tracking ref exists; unresolved otherwise) —
+// and hands back its Ref, the selected ref name the walks reuse. Nothing
+// here moves a ref or a checkout. When specstate cannot prove a default
+// branch, gitx.DefaultBranch's own not-a-repository error is preserved (it
+// is the one operational failure the previous contract surfaced); any
+// other unresolved shape is the honest ("", nil).
 func (gitxRunner) DefaultBranch(ctx context.Context, dir string) (string, error) {
-	return gitx.DefaultBranch(ctx, dir)
+	if branch, ok := specstate.ResolveDefaultBranch(ctx, dir); ok {
+		return branch.Ref, nil
+	}
+	if _, err := gitx.DefaultBranch(ctx, dir); err != nil {
+		return "", err
+	}
+	return "", nil
 }
 
 // designPrefix is the branch-namespace prefix `verdi design start` cuts
