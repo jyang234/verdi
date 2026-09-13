@@ -105,19 +105,42 @@ the registered `/fable-orchestration` skill with expanded skill content and actu
 An earlier undiscovered-slash-command attempt and interrupted setup attempt did
 not establish FABLE execution; successful session evidence is retained separately.
 
-The R2 patch is now in local verification. Handler RED reproduced false
-accepted/sealed labels for unproven and proposed read-only records. FABLE authored
-the rendering repair, corresponding tests, and isolated fixture. Controller
-corrections preserve uncertainty rather than asserting a proven negative, direct
-diverged revisions to the successor path, use local Git setup guidance, and keep
-new fixture bytes under `testdata/`. Remaining board posture, remote-ref, and
-diagram-mode labels are included in the same presentation repair.
+Implemented at `9507f369bba39f76d4413e67afa011e54545861f`. Handler RED
+reproduced false accepted/sealed labels for unproven and proposed read-only
+records. FABLE authored the rendering repair, tests, and isolated fixture.
+Controller corrections preserve uncertainty rather than asserting a proven
+negative, direct diverged revisions to the successor path, use local Git setup
+guidance, and keep fixture bytes under `testdata/`. Board posture, remote-ref,
+and diagram-mode labels now reflect the same distinction. Mutation gates,
+lifecycle projection, public schemas, and acceptance rules are unchanged.
 
-The first controller browser run passed six cases and failed one: the isolated
-fixture's unwired design service returned 500 before the intended read-only
-refusal. FABLE is replacing that fixture with the built `verdi serve` process;
-the expected refusal is not being weakened. Final browser verification,
-independent Opus review, and integrated gates remain pending for this patch.
+The first controller browser run passed six cases and failed one: an unwired
+fixture returned 500 before reaching the intended read-only refusal. FABLE
+replaced it with the built `verdi serve` process. The corrected browser run
+passed **26 tests (52.2s)**, including actual 403 read-only refusals, unchanged
+bytes, drag refusal, and accepted/closed labels. The final fixture's six Go
+cases passed in 6.674s, including inherited-environment isolation. Expanded
+workbench cases passed in 12.294s. No recording artifacts were produced.
+The cross-binary freshness list includes the harness because it builds and
+executes the actual CLI; its existing audit passed in 1.360s.
+
+Independent genuine Claude Code review used `claude-opus-5`, session
+`47e6bcad-1494-4a0c-a2d4-106878c46928`, and reported **no blocking findings**.
+The controller resolved the main payload limit by inspecting
+`specstate.Result.ArtifactStatus`: unproven state cannot inherit a declared
+terminal status. Remaining fixture hygiene and timing observations are
+nonblocking; none changes product authority or permits a false test pass.
+
+The first integrated gate caught a missing named source-audit entry for the new
+pure presentation consumer `readOnlyReasonOf`. The controller traced both board
+loaders to the existing lifecycle projection and authorized one rationale entry
+under the audit's established display-consumer exception. The scanner is not
+being weakened. The correction at `c1397a10` was authored by genuine `claude-opus-5`,
+session `a6e4d310-93c0-4de4-a99d-57a16fbd85b2`. Fresh independent Opus 5
+review, session `caa62c3b-33c3-4231-a8d0-141d295a349e`, found no blocking
+issues. The controller verified the exact source hash, both projection callers,
+and the unchanged scanner. Focused source-audit/allowlist/classifier tests passed
+in 2.706s. Integrated gate success remains unproven until rerun.
 
 Claude also persisted an unrequested R2 memory file and index entry outside the
 lane. The controller verified their originating session, removed only that file
@@ -157,6 +180,36 @@ steps if the chosen journey requires them. The narrower local milestone need not
 force authoritative closure; this synthetic project nevertheless cannot count as
 either required real-project adoption run. The temporary browser tab was closed and its own
 localhost server was shut down cleanly.
+
+### Repeated on the R0–R2 candidate
+
+The exact documented installation and extracted Git/store/feature commands
+passed again from clean source `9507f369`, producing binary SHA-256
+`ff063b0cdcb710988e33d8ca6e53d2430764481296b5e4957f0f0fe2035fe2b3`.
+The source HEAD and binary hash identify this build; its Go metadata does not
+contain an embedded VCS revision. The installed Verdi/ATC pair remains unchanged.
+
+This fresh synthetic project is retained at
+`/var/folders/67/pw7jvbv12d76jpz89mltjtyw0000gn/T/tmp.GUUjEOUuaX/project`.
+The candidate's supported Set outcome → Apply operation reported
+“Saved. Changed: outcome replaced.” The exact lookup/not-found outcome persisted
+after reload. An external draft edit authored a meaningful request-receipt AC
+and stub, and reload displayed both. Semantic review still correctly refused
+because project policy authority is absent.
+
+`lint`, state, journey, matrix, and align exited 0 with their disclosures intact.
+The feature remains proposed; its matrix reports no signal, absent attestation,
+and an unreconciled stub. Alignment reports computed `proven` and judged
+`disclosed-unproven-complete`. After local commit
+`d9571b97953967ef3617b5c1735e5dcbc6e058c3`, gate reported stale alignment;
+following its `verdi align` remedy fixed freshness. Gate still exited 1 for
+`judged-decision-coverage-absent` and disclosed unavailable forge review-thread
+proof. No acceptance or implementation was fabricated to advance that step.
+The tab and its loopback server were closed cleanly.
+
+This repeat verifies current-candidate authoring, persistence, inspection, and
+correction. It remains synthetic and agent-operated, so it counts as neither
+required real-project adoption journey.
 
 ## Required local verification
 
@@ -203,7 +256,9 @@ Workspace-local evidence is under
 - `make-verify.log`: complete required local gate, including full race and 276 passing browser tests.
 
 R1 is implemented, locally verified, and independently reviewed with no blocking
-findings. R2 implementation is undergoing verification. R3 reached and preserved the local pre-review
+findings. R2 implementation has passed independent lane review and focused browser checks;
+the reviewed audit correction is committed and the full gate remains pending. R3 repeated
+current-candidate authoring and inspection and preserved the local pre-review
 boundary. No R4 release acceptance is claimed: the two real-project journeys on
 one release, including an independent second journey, remain outstanding.
 Actual configured forge approval/merge enforcement and CI production/retrieval
