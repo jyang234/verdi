@@ -1,8 +1,8 @@
 # Wave 6 Workbench Presentation Implementation Plan
 
-**Release planning update, 2026-09-13:** the proposed
+**Release planning update, 2026-09-13:** the owner-adopted
 [MVP release amendment](#mvp-release-amendment--2026-09-13) below separates
-adoption blockers from unfinished Wave 6 delivery. It is pending owner adoption;
+adoption blockers from unfinished Wave 6 delivery. R0–R3 are authorized locally;
 the historical execution status and original task checkboxes are not a current
 implementation inventory. See the measured [baseline report](../reports/2026-09-13-mvp-adoption-baseline.md).
 
@@ -828,11 +828,12 @@ Commit subject: <exact subject>
 
 ## MVP release amendment — 2026-09-13
 
-**Status:** proposed release cut and bounded first-task contract, prepared at the
-owner's request to continue the scope/contract pass. Independent review and owner
-adoption of this exact amendment precede runtime execution under its changed
-sequence. This is not acceptance of a canonical feature, completion of Wave 6,
-or permission to resume hosted testing. SI-198 records the proposal.
+**Status:** adopted by the owner on 2026-09-13 after independent Claude review
+and closure approval of exact head `4acd6cccc468b39ca61e6d6a9a482b5265377b2d`.
+The owner explicitly authorized R0–R3: onboarding documentation, refused-start
+retry, board labels, and continued local adoption rehearsal. Hosted testing stays
+deferred. This is not acceptance of a canonical feature or completion of Wave 6.
+SI-198 records adoption; the reviewed contract below is unchanged in scope.
 
 **Planning input:** owner-supplied text in this task on 2026-09-13:
 
@@ -843,10 +844,11 @@ or permission to resume hosted testing. SI-198 records the proposal.
 The same input proposed that this work twice on the same release with no serious
 integrity or usability defects. The following goal is the controller's proposed
 operationalization, including an independent second run and the intervention
-rule; those additions are pending owner adoption, not attributed as a verbatim
-owner decision. The owner's subsequent “continue” authorized this preparation.
+rule; the owner subsequently adopted that operationalization. The owner's
+earlier “continue” authorized preparation, and the explicit adoption authorizes
+R0–R3 execution with hosted testing deferred.
 
-**Proposed goal:** on one identified release, adopt Verdi in a real project, define and
+**Adopted goal:** on one identified release, adopt Verdi in a real project, define and
 inspect one meaningful feature/story change, and understand its evidence and
 next steps using shipped guidance. Complete the journey twice, the second time
 independently of the development agent. An unexplained intervention or serious
@@ -881,7 +883,7 @@ variables, fabricating approvals, or forcing local closure.
 
 ### Delivery order and retained obligations
 
-Upon owner adoption, insert the following bounded release-maintenance sequence
+Under the owner adoption, insert the following bounded release-maintenance sequence
 before resuming unfinished Wave 6 units. It does not reorder the remaining
 Wave 6 feature units relative to each other or mark their predecessors complete.
 The existing Wave 6 authority design needs no amendment for this maintenance
@@ -919,7 +921,7 @@ the release slice and its dependency order before implementing it.
 
 **Authority:** `spec/cli-creation` AC-1/AC-2 (archived specification, still binding
 on the shipped behavior), `spec/scaffold-templates`, and three-valued honesty.
-The chosen failure boundary is recorded in SI-198 as an explicit proposed
+The chosen failure boundary is recorded in SI-198 as an explicit adopted
 clarification: the original creation spec requires refusal but does not
 enumerate every Git side effect. No frozen specification is edited here.
 

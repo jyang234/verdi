@@ -1,0 +1,115 @@
+# Local adoption rehearsal
+
+Use this guide with the binary built by the [README installation](../README.md#install).
+This is a disposable synthetic Git project. It can exercise authoring, saved edits,
+Git-derived lifecycle, and honest missing-evidence disclosures. It does not supply
+real forge review, human approval, CI, or either final real-project adoption run.
+
+## Prepare a local default branch
+
+The following commands create their own local bare remote. Their clone, push,
+and remote-head lookup touch only that directory; they contact no hosted forge.
+Run them in the terminal where the selected Verdi binary is on `PATH`:
+
+<!-- adoption-local-git -->
+```sh
+VERDI_REHEARSAL_DIR="$(mktemp -d)"
+git init --bare --initial-branch=main "$VERDI_REHEARSAL_DIR/origin.git"
+git clone "$VERDI_REHEARSAL_DIR/origin.git" "$VERDI_REHEARSAL_DIR/project"
+cd "$VERDI_REHEARSAL_DIR/project"
+git config user.name "Local rehearsal"
+git config user.email "rehearsal@example.invalid"
+printf '# Local adoption rehearsal\n\nSynthetic project; no human approval or CI is asserted.\n' > README.md
+git add README.md
+git commit -m "Seed local rehearsal"
+git push origin main
+git remote set-head origin -a
+git symbolic-ref refs/remotes/origin/HEAD
+```
+
+Now execute the README's [store setup and feature commands](../README.md#start-your-own-store)
+in this project. Keep `forge: github` for that example's attribute convention;
+a filesystem remote supplies no GitHub review feed. The workbench must disclose
+that absence. Preserve `VERDI_REHEARSAL_DIR` until your results are recorded.
+
+## Author and inspect a meaningful change
+
+Use a small feature you can describe precisely. Replace the scaffold's placeholder
+ACs and story stubs with the outcome and plan you intend to implement. A request
+receipt is one example: saving a request returns a stable identifier; looking up
+that identifier returns the saved request; unknown identifiers produce a clear
+not-found result. Inspect the board, save a supported draft edit, reload, and
+check that the intended content persisted. Record every intervention.
+
+Run `verdi lint`, `verdi spec state spec/my-first-feature`,
+`verdi journey --json spec/my-first-feature`, and
+`verdi matrix spec/my-first-feature`. An exit-0 projection may still contain
+blockers or unproven facts. Inspect the content of the result.
+
+The documented non-terminal refusal can also be exercised in a separate clean
+project: run `verdi design start --kind feature --name my-first-feature` with
+stdin redirected from `/dev/null`; expect exit 2 and no new branch. Retry the
+same name with both statement flags. It should create the proposal normally.
+Do not delete or reuse an unrelated pre-existing branch to force success.
+
+## Evidence and tracker prerequisites
+
+For a real Jira-backed story, the manifest uses these fields, with your actual
+service and field identifiers:
+
+```yaml
+providers:
+  jira:
+    base_url: https://your-team.atlassian.net
+    rollup_field: customfield_12345
+```
+
+Set `VERDI_JIRA_TOKEN` through your environment or secret manager. A purely local
+rehearsal may add `mode: fake` under `providers.jira`; this selects the built-in
+fake tracker. Name that use in your report. Its title fallback and any tracker
+publish/read-back observations are synthetic, not proof from a real issue tracker.
+
+Graph/contract generation needs an explicit upstream pin:
+
+```yaml
+toolchain:
+  module: github.com/jyang234/golang-code-graph
+  commit: cd38b1a56bb782177a207d741a39807821cf2c1c
+services:
+  discovery: flowmap
+```
+
+This pin is the one in this source checkout's own manifest. Use the pin validated
+for your selected release. Verdi executes the upstream CLIs through
+`go run <module>/cmd/<tool>@<commit>` and strict-decodes their results. Service
+roots need `.flowmap.yaml` and the spec's `impacts` must name discovered services.
+A missing toolchain or missing impacted service leaves the advisory baseline
+unproven. The real runner can require the Go proxy even with a warm cache; defer
+that network-dependent validation when hosted testing is deferred. Hermetic
+regression tests use canned upstream outputs and disclose that substitution.
+
+Alignment's optional `align.judge_cmd` is an argv array, for example
+`["your-approved-judge", "--json"]`, not a shell command string. Configure a real
+approved judge for judged alignment. When it is absent, inspect the disclosed
+missing-judge finding rather than treating the computed section as a complete
+alignment proof. Local evidence remains advisory; it cannot discharge a CI gate.
+
+## Acceptance and stopping point
+
+Review the authored feature/story and its obligations before testing Git landing.
+For a story, `verdi obligation scaffold spec/<name>` runs before acceptance;
+complete the obligation content and any required human authorship. Never invent
+a principal, attestation, review approval, or CI record to advance a rehearsal.
+
+A local merge and push to the disposable bare remote can exercise the
+Git-derived acceptance projection. Record it as **synthetic landing**, including
+the exact default-branch commit and spec bytes. It is not the repository's real
+reviewed acceptance. Keep real forge enforcement, required checks, countersigning,
+and accountable-human requirements explicitly unproven.
+
+Continue locally through the available story build, implementation, alignment,
+and matrix inspection. If a supported operation requires real approval or CI,
+record its diagnostic and stop that transition. Do not force closure or fabricate
+CI variables. A useful report identifies the binary SHA-256, source revision,
+commands and browser actions, saved edits, local test results, synthetic inputs,
+blocking facts, and the exact next action requiring a real environment.
