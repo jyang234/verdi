@@ -126,6 +126,20 @@ implementation flight, acceptance merge, hosted action or complete journey is
 claimed. See the [journey record](/Users/johnyang/code/verdi-system/verdi-atc-mvp-adoption-pilot-20260913/docs/superpowers/reports/2026-09-13-verdi-adoption-journey-1.md)
 and [design proposal](/Users/johnyang/code/verdi-system/verdi-atc-mvp-adoption-pilot-20260913/docs/superpowers/specs/2026-09-13-f13-receipt-adapter-proposal.md).
 
+## Policy setup validation
+
+Policy setup was subsequently exercised through the actual CLI and served
+home page. It correctly reports no adopted policy, missing consumer coverage,
+and `ready_for_submission: false`. The home page failed when only the genuine
+remote default branch existed; creating a same-commit local tracking branch
+restored it. That intervention remains a product validation failure, not a
+runtime fix. The served binary has no Constitution setup route; its existing
+CLI operations do not scaffold the initial constitution/profile. See the
+[policy setup findings](/Users/johnyang/code/verdi-system/verdi-atc-mvp-adoption-pilot-20260913/docs/superpowers/reports/2026-09-13-policy-setup-validation.md).
+The new [policy setup checks](../../policy-setup-validation.md) were run
+literally against the unchanged binary and linked from the README/local guide.
+Initial policy adoption and independent no-coaching validation remain open.
+
 ## Source witnesses
 
 - [R0–R3 verification and adoption limits](2026-09-13-mvp-release-rehearsal.md).

@@ -54,6 +54,11 @@ Opening **Semantic review** without an adopted project policy returns
 prerequisite; do not create an approval or relax a policy check to get a packet.
 The initial authoring path does not itself adopt project policy.
 
+Use the [policy setup checks](policy-setup-validation.md) to inspect the actual
+accepted/proposed snapshots and submission blockers. The current binary has no
+first-time Constitution setup page; record any manual policy authoring and
+developer explanation as interventions in the acceptance run.
+
 Run `verdi lint`, `verdi spec state spec/my-first-feature`,
 `verdi journey --json spec/my-first-feature`, and
 `verdi matrix spec/my-first-feature`. An exit-0 projection may still contain

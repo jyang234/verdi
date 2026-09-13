@@ -209,7 +209,9 @@ advisory baseline. That skip is not evidence of alignment or completion.
 
 The board's Semantic review packet requires adopted project policy authority;
 without it, the panel reports `policy-forbidden`. Ordinary draft editing remains
-available. Adopt your project's policy before relying on that review surface.
+available. Follow the [policy setup checks](docs/policy-setup-validation.md) to
+inspect the missing prerequisite and the current manual authoring requirements.
+Adopt your project's policy before relying on that review surface.
 Readiness labels such as “Ready” report the listed structural checks; they do
 not establish that placeholder text is meaningful or that human review occurred.
 
