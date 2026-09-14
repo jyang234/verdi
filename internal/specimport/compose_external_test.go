@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/jyang234/verdi/internal/artifact"
+	"github.com/jyang234/verdi/internal/designscaffold"
 	"github.com/jyang234/verdi/internal/model"
 )
 
@@ -300,6 +301,59 @@ func TestCompose_TemplateWithoutPlaceholderStub(t *testing.T) {
 	}
 	if len(spec.AcceptanceCriteria) != 2 {
 		t.Fatalf("want the 2 mapped acceptance criteria, got %d: %+v\n%s", len(spec.AcceptanceCriteria), spec.AcceptanceCriteria, candidate)
+	}
+}
+
+// TestCompose_TemplateWithNonPlaceholderStub_Refused completes B1's
+// post-condition. A store override differing from the embedded default in
+// nothing but its stub slug renders and validates perfectly, but its stub is
+// not the generated placeholder Compose removes — so the import used to
+// succeed carrying a decomposition nobody requested, against the contract's
+// "the resulting imported feature has `stubs` absent (not a fabricated
+// placeholder or an invented decomposition)".
+//
+// The template is refused explicitly, naming the stub. Silently deleting it
+// is the wrong repair: a configured stub is the store owner's own data, and
+// "reject a template/model that cannot express the candidate rather than
+// dropping content" is the contract's stated posture for exactly this case.
+func TestCompose_TemplateWithNonPlaceholderStub_Refused(t *testing.T) {
+	root := minimalStoreRoot(t)
+	canonical, err := designscaffold.LoadTemplate(root, "feature.md")
+	if err != nil {
+		t.Fatalf("LoadTemplate: %v", err)
+	}
+	override := strings.Replace(string(canonical), placeholderStubSlug, "custom-child", 1)
+	if !strings.Contains(override, "custom-child") {
+		t.Fatal("test fixture assumption broken: the canonical feature template no longer declares the placeholder stub slug")
+	}
+	writeStoreFile(t, root, ".verdi/templates/feature.md", override)
+
+	req := minimalRequest()
+	req.Mappings = []Mapping{
+		{Target: "ac-1", Evidence: []string{"static", "attestation"}},
+		{Target: "ac-2", Evidence: []string{"static", "attestation"}},
+	}
+	plan, err := Normalize(req)
+	if err != nil {
+		t.Fatalf("Normalize: %v", err)
+	}
+
+	candidate, findings, err := Compose(context.Background(), root, req, plan)
+	if err != nil {
+		t.Fatalf("Compose: want a blocking finding, not an error: %v", err)
+	}
+	if candidate != nil {
+		t.Fatalf("Compose imported a template-declared decomposition nobody requested:\n%s", candidate)
+	}
+	var sawRefusal bool
+	for _, f := range findings {
+		if f.Blocking && f.Code == FindingUnsupportedStructure && f.Target == "template" &&
+			strings.Contains(f.Message, "custom-child") {
+			sawRefusal = true
+		}
+	}
+	if !sawRefusal {
+		t.Fatalf("want a blocking %s finding on target \"template\" naming the stub it cannot express, got: %+v", FindingUnsupportedStructure, findings)
 	}
 }
 

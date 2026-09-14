@@ -190,7 +190,8 @@ func mustFrontmatterBytes(rendered string) []byte {
 // stated post-condition is that the imported spec HAS no placeholder stub,
 // which such a template already satisfies. What is never conditional is the
 // error handling: a placeholder that IS declared and cannot be removed
-// still fails closed.
+// still fails closed. A template declaring some OTHER stub is refused
+// outright (see nonPlaceholderStubs) — it cannot express an import at all.
 //
 // A splice error at any round is translated into a blocking Finding —
 // almost always the template/candidate combination could not be composed
@@ -200,6 +201,15 @@ func mustFrontmatterBytes(rendered string) []byte {
 // returned *Finding is nil exactly when result is usable.
 func applyCandidateEdits(rendered string, scaffold *artifact.SpecFrontmatter, request Request, fields []Field) ([]byte, *Finding, error) {
 	problemField, outcomeField, objectFields := splitFields(fields)
+
+	if extra := nonPlaceholderStubs(scaffold); len(extra) > 0 {
+		return nil, &Finding{
+			Code:     FindingUnsupportedStructure,
+			Target:   "template",
+			Message:  fmt.Sprintf("the resolved template declares stub(s) %s that this import cannot express: an imported spec carries no stubs at all, and a configured stub is real data this import never silently discards — remove it from the template, or add the decomposition on the board after import", strings.Join(extra, ", ")),
+			Blocking: true,
+		}, nil
+	}
 
 	var pass1 []designprovenance.Operation
 	if scaffoldDeclaresStub(scaffold, placeholderStubSlug) {
@@ -379,6 +389,30 @@ func scaffoldDeclaresStub(scaffold *artifact.SpecFrontmatter, slug string) bool 
 		}
 	}
 	return false
+}
+
+// nonPlaceholderStubs returns the slugs of every stub the rendered scaffold
+// declares OTHER than the generated placeholder — a store override template
+// that decomposes its own feature by default.
+//
+// Compose removes the placeholder because it is a generated prompt, not
+// content; any other stub is a real decomposition the store owner
+// configured, and an imported spec is required to carry none ("the resulting
+// imported feature has stubs absent (not a fabricated placeholder or an
+// invented decomposition)"). The two cannot both hold, so the template
+// cannot express this candidate — which the contract answers with "reject a
+// template/model that cannot express the candidate rather than dropping
+// content". Deleting the stub to make the import succeed would be exactly
+// the silent drop that rule forbids, and inventing decomposition for a spec
+// whose source never described one is what the post-condition forbids.
+func nonPlaceholderStubs(scaffold *artifact.SpecFrontmatter) []string {
+	var slugs []string
+	for _, s := range scaffold.Stubs {
+		if s.Slug != placeholderStubSlug {
+			slugs = append(slugs, s.Slug)
+		}
+	}
+	return slugs
 }
 
 // scaffoldDeclaresAC reports whether the rendered scaffold's frontmatter
