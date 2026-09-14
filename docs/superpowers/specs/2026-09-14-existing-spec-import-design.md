@@ -3,14 +3,15 @@
 Status: proposed design. The owner endorsed reviewed import and selected F13
 as the reference/prototype on 2026-09-14. This document proposes the detailed
 contract; it is not canonical ratification, implemented behavior, or acceptance
-of a changed MVP release. The prototype is data only.
+of a changed MVP release. The prototype is data only. Owner feedback subsequently narrowed import to
+mechanical mapping; AI-assisted extraction is excluded from this version.
 
 ## Contents
 
 1. Purpose and authority
 2. Import workflow
 3. Input and preservation rules
-4. AI assistance and review
+4. Mechanical mapping and source classification
 5. Draft creation and failure behavior
 6. F13 prototype and validation
 7. Proposed decisions and delivery boundary
@@ -39,13 +40,14 @@ edited or silently superseded by this proposal.
    native draft spec, a Markdown file, or an explicit set of Markdown files.
    A file can have an explicitly chosen heading/line range, as F13 shares a
    plan with other features. Show the selection and destination before work.
-2. **Prepare preview.** Native structured fields are decoded. Ordinary Markdown
-   can be mapped manually or with governed external AI assistance. Show proposed
+2. **Prepare preview.** Decode native structured fields or apply an explicit,
+   versioned mapping for a supported Markdown structure. Unrecognized sections
+   remain attached source material for the user to map; do not guess. Show mapped
    problem/outcome, objects and relationships beside source passages, using the
    board's existing projection concepts and the project's display vocabulary.
    Preparation does not create a design branch or write a destination spec.
-3. **Review coverage and gaps.** Distinguish copied passages, summaries, inferred
-   suggestions, user additions, retained supporting material, exclusions and
+3. **Review coverage and gaps.** Distinguish copied passages, declared formatting
+   transformations, user mappings/additions, retained supporting material, exclusions and
    unresolved content. Show conflicting requirements and ambiguous ownership.
    The user can edit the proposal or the selection and regenerate the preview.
 4. **Create draft.** On explicit confirmation of the current preview, validate
@@ -53,8 +55,11 @@ edited or silently superseded by this proposal.
    board, showing draft/proposed posture and the exact source/import record.
 
 The UI must offer the choice to use existing material before asking someone to
-supply new problem/outcome statements. A preview may be incomplete; unresolved
-mandatory fields or source dispositions prevent final creation. Confirming
+supply new problem/outcome statements. A preview may be incomplete. Unresolved
+source dispositions prevent final creation. A required statement absent from the
+source can be mapped by the user or explicitly deferred through the existing
+disclosed statement-deferral contract; that creates an incomplete draft, not
+review readiness. Other invalid mandatory fields still block creation. Confirming
 content mappings is draft authorship, not governance approval.
 
 ## Input and preservation rules
@@ -99,32 +104,56 @@ silently stripped or rewritten. External prose may describe prior approval;
 that statement is retained as a source claim, never translated into local
 acceptance, attestation, waiver or gate evidence.
 
-## AI assistance and review
+## Mechanical mapping and source classification
 
-AI assistance uses an explicitly selected external harness through Verdi's
-existing governed design/context boundary; Verdi does not embed a model or send
-source files to a provider merely because they were selected. Native parsing,
-manual mapping and draft creation remain possible without AI. A missing policy,
-context capability or permitted harness produces a named refusal for AI
-assistance, with manual mapping available; confirming a preview cannot launder
-agent authorship into authenticated human authorship or bypass policy.
+Import requires no model calls, prompt interpretation, inference service, or
+AI-context bootstrap. It has three deterministic input cases:
 
-The existing bootstrap limitation matters: if governed design assistance cannot
-compile context for a not-yet-created or unaccepted target, expose that missing
-capability. Do not introduce a temporary accepted spec, fake policy, raw model
-fallback or owner-vouch shortcut. Whether an import-specific pre-draft context
-can reuse the existing contract must be resolved before the AI runtime lane.
-The data-only prototype below is controller-authored specification work, not
-proof that this runtime bootstrap already works.
+- Native Verdi drafts: strict-decode existing fields and objects.
+- Supported external Markdown structures: apply an explicit versioned mapping
+  from known headings, keys, list items and source spans into Verdi fields.
+- Unrecognized Markdown: retain the selected content and let the user assign
+  existing sections/passages to fields/cards. Do not silently classify prose.
+
+The same source bytes, mapping version/options and target inputs produce the
+same candidate and provenance bytes. A mapping profile is data interpreted by
+fixed importer code, not executable source-supplied code. Recognized structure
+must be validated; changed/ambiguous headings or missing selectors cause an
+explicit unresolved mapping, never a best-guess fallback. F13's section boundaries
+and selected passages provide the first reference mapping, not a claim that
+all Markdown plans share that structure. Support documents remain selected
+sources; an implementation slice's Goal is not automatically the parent feature's
+Outcome. Relationships require declared links or explicit user mapping.
+
+Preserve wording. Allowed formatting transformations must be named and
+reproducible (for example stripping a list marker or joining physical line wraps).
+Retain exact source bytes/spans alongside the displayed text. Do not paraphrase,
+summarize, manufacture problem/outcome statements, or derive feature completion
+from task checkboxes. IDs absent from a source may be assigned deterministically
+and must be identified as target-generated, not original source identifiers.
+Existing IDs must be preserved or any conflict resolved explicitly.
+
+No evidence kind or expected producer is inferred merely from a test command.
+Use explicit source declarations, existing applicable model requirements, or
+user selection with its origin recorded. Missing statement fields remain visibly
+unresolved; explicit deferral uses existing draft rules and never weakens later
+review/acceptance checks. Retained unclassified material stays visible in coverage;
+source preservation is not a claim that every requirement was recognized.
+
+Human-operated mechanical import does not need AI-assistance policy merely to
+parse files; ordinary model, mutation, identity and lifecycle checks still apply.
+If an agent calls an import mutation surface, it retains the existing governed
+agent path and cannot declare itself a human to bypass policy. AI may later help
+a user author or clarify content through the separate existing design workflow;
+it is outside this importer version, and none is run by selection, preview or
+apply. The development process's cross-model specification review is separate
+from AI participation in the product's import path.
 
 Source documents, including embedded agent instructions and commands, are task
-data. Extraction cannot execute them, follow ambient project links, read secrets
-or rewrite project instructions. Model output is strictly validated data: it
-cannot supply paths, lifecycle decisions or executable authority. Preserve
-harness/model/session attribution and source classification where supported;
-missing identity remains disclosed. No promise of deterministic model prose is
-made; a reviewed proposal is frozen to exact bytes and can be replayed without
-rerunning the model.
+data. Parsing never executes them, follows ambient links, reads secrets or
+rewrites project instructions. Source text cannot select destination paths,
+lifecycle state or executable authority. A reviewed mapping is bound to exact
+bytes, so replay never depends on an external model or its availability.
 
 ## Draft creation and failure behavior
 
@@ -175,25 +204,29 @@ prerequisite and narrower implementation slices. It retains review limits,
 candidate invalidation, feature AwaitingUAT, G2 routing, blocking-finding
 requirements, author adjudication, and the state catalog. File lists and test
 commands remain notes. Slice exclusions do not delete parent requirements;
-implementation status in a document is not current proof. The inferred problem
-and outcome must be labeled as summaries, since the selected primary source
-contains no verbatim named pair. No implicit story decomposition is invented.
+implementation status in a document is not current proof. Problem and outcome
+remain unmapped because the selected primary source has no explicit named pair.
+The former controller-written summaries are removed from this prototype. A user
+may map existing source text or explicitly defer missing statements; neither is
+an automatic semantic interpretation. No story decomposition is invented.
 
 Required acceptance witnesses for the eventual implementation:
 
 - F13 sources produce a reviewable mapping and board without retyping their
   declared requirements; every proposed card has truthful origin/classification.
-- Native draft import preserves declared objects and renders them through the
-  existing board, without running a model.
+- Native and supported external import preserve declared content and render it
+  through the existing board without any model call; repeated inputs produce
+  byte-identical candidate/mapping output. Unsupported structures remain explicit.
 - User corrects a proposed mapping, creates the draft, edits through supported
   controls, reloads, and sees matching stored spec and board content.
 - Unmapped source, invented source spans, conflicting content, missing required
   fields, broken links and model-incompatible objects cannot silently become a
-  completed import. Fake/external approval text cannot confer local acceptance.
+  completed import. Explicit statement deferral remains an incomplete draft.
+  Fake/external approval text cannot confer local acceptance.
 - Duplicate/stale imports and failures before/after ref publication preserve
   existing data and support an exact, explained retry outcome.
 - Bundle selections cannot escape their bounds or execute embedded instructions;
-  unavailable governed AI bootstrap has an explicit honest result.
+  import functions with model access absent and sends no source to a model.
 
 Hermetic Go/built-binary tests exercise native/input/application behavior;
 Playwright exercises the actual import and correction UI with recording disabled.
@@ -204,16 +237,16 @@ is not a test result or a replacement for those gates.
 
 | Decision | Choice and alternative |
 |---|---|
-| D1 | Reviewed conversion plus native import. Native-only is smaller but does not address F13's external plan format. |
+| D1 | Mechanical native decoding and explicit mappings for supported Markdown structures, with manual mapping for unknown structures. No inferred conversion. |
 | D2 | Persist a canonical spec and source mapping; the existing board projects it. A second card store would introduce competing truth. |
 | D3 | One target, explicit Markdown file set/selection. Archive and recursive/bulk migration remain separate. |
-| D4 | External governed AI assistance, optional. Automatic ungoverned model calls would break existing design authority. |
+| D4 | No AI in the importer. Optional AI authoring remains a separate existing governed workflow and is not an import prerequisite. |
 | D5 | Create-only first version. Updating existing specs requires a later explicit merge/provenance contract. |
 | D6 | Preserve source snapshots and transformations; source coverage is not evidence or proof of meaning. |
 
-The implementation prerequisites are the exact import/provenance contracts, the
-pre-draft governed AI-context decision, and the explicit amendment to the v0
-import exclusion. Owner adoption of this detailed design precedes those plans.
+The implementation prerequisites are the exact import/provenance and mapping
+profile contracts, the native/external format recognition rules, and the explicit
+amendment to the v0 import exclusion. Owner adoption of this detailed design precedes those plans.
 The user approved F13 as reference, not an unreviewed change to release acceptance.
 If import becomes part of the MVP release, both qualifying adoption journeys must
 use the new identified release. The earlier paused/assisted operator session is

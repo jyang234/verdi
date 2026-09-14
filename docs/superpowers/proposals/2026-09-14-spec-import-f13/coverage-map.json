@@ -6,8 +6,8 @@
       "id": "title",
       "start_line": 602,
       "end_line": 603,
-      "destination": "F13: bounded gatekeeper state machine",
-      "transformation": "copied meaning; proposed display title"
+      "destination": "Source title retained; problem/outcome unmapped",
+      "transformation": "retained as source; no summary"
     },
     {
       "id": "implementation-notes",
@@ -20,15 +20,15 @@
       "id": "co-inputs",
       "start_line": 614,
       "end_line": 617,
-      "destination": "Consumes committed candidate, align, review, adjudication, receipt and G2 facts; produces next-state decisions and required effects.",
-      "transformation": "summary"
+      "destination": "Interfaces source section retained for explicit mapping",
+      "transformation": "retained as source; no summary"
     },
     {
       "id": "co-state-catalog",
       "start_line": 618,
       "end_line": 643,
-      "destination": "Retain the complete 19-state catalog verbatim in supporting body; no Failed state. Naming later states does not authorize F14 effects.",
-      "transformation": "verbatim catalog retained in source; summary card"
+      "destination": "Complete 19-state catalog retained for explicit mapping",
+      "transformation": "retained as source; no summary"
     },
     {
       "id": "validation-notes",
@@ -42,14 +42,14 @@
       "start_line": 650,
       "end_line": 656,
       "destination": "Proposed criteria ac-1 through ac-6 below, retaining every stated condition.",
-      "transformation": "split and summarized"
+      "transformation": "explicit source-span selection; whitespace-only display normalization, verified in mechanical-field-map.json"
     },
     {
       "id": "finding-criteria",
       "start_line": 657,
       "end_line": 662,
       "destination": "Proposed criteria ac-7 and ac-8 below.",
-      "transformation": "split and summarized"
+      "transformation": "explicit source-span selection; whitespace-only display normalization, verified in mechanical-field-map.json"
     },
     {
       "id": "gate-notes",

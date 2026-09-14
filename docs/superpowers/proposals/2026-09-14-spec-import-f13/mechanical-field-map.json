@@ -1,0 +1,113 @@
+{
+  "purpose": "data-only reference mapping; manually specified selectors, mechanically verified spans; not an implemented parser or runtime schema",
+  "source_id": "primary-f13",
+  "unmapped_fields": [
+    "problem",
+    "outcome"
+  ],
+  "cards": [
+    {
+      "target_id": "ac-1",
+      "target_id_origin": "prototype-assigned; not a source ID",
+      "source_id": "primary-f13",
+      "selection_byte_start": 1485,
+      "selection_byte_end_exclusive": 1549,
+      "original_start_line": 650,
+      "original_end_line": 650,
+      "source_text_sha256": "c2c2bc453bc856ac53dc29837c8ea7a06fe2239a7c3864d16094d5ab9f55b940",
+      "transform": "collapse source whitespace runs to one ASCII space; no word or punctuation changes",
+      "display_text": "Enumerate every allowed edge and representative forbidden edges."
+    },
+    {
+      "target_id": "ac-2",
+      "target_id_origin": "prototype-assigned; not a source ID",
+      "source_id": "primary-f13",
+      "selection_byte_start": 1556,
+      "selection_byte_end_exclusive": 1681,
+      "original_start_line": 650,
+      "original_end_line": 652,
+      "source_text_sha256": "61663084bdd0399181e8d5da50ecb502c3ac6a07339f873f4c34045ce8ef3af3",
+      "transform": "collapse source whitespace runs to one ASCII space; no word or punctuation changes",
+      "display_text": "R0 cannot repeat, R1 count cannot exceed one, R1 candidate re-enters Aligning, R2 cannot produce another automatic correction"
+    },
+    {
+      "target_id": "ac-3",
+      "target_id_origin": "prototype-assigned; not a source ID",
+      "source_id": "primary-f13",
+      "selection_byte_start": 1683,
+      "selection_byte_end_exclusive": 1724,
+      "original_start_line": 652,
+      "original_end_line": 653,
+      "source_text_sha256": "7982283e48651335d8f64f83fcceb9b88d981344b9809b7719d2da6cb3b7ea26",
+      "transform": "collapse source whitespace runs to one ASCII space; no word or punctuation changes",
+      "display_text": "any tree change invalidates bound results"
+    },
+    {
+      "target_id": "ac-4",
+      "target_id_origin": "prototype-assigned; not a source ID",
+      "source_id": "primary-f13",
+      "selection_byte_start": 1726,
+      "selection_byte_end_exclusive": 1775,
+      "original_start_line": 653,
+      "original_end_line": 653,
+      "source_text_sha256": "d80e519ed49fe8fbe82e43e445d15f230598dc4aeff6c37fe2cc652556e175aa",
+      "transform": "collapse source whitespace runs to one ASCII space; no word or punctuation changes",
+      "display_text": "all stories Done moves the feature to AwaitingUAT"
+    },
+    {
+      "target_id": "ac-5",
+      "target_id_origin": "prototype-assigned; not a source ID",
+      "source_id": "primary-f13",
+      "selection_byte_start": 1777,
+      "selection_byte_end_exclusive": 1850,
+      "original_start_line": 653,
+      "original_end_line": 654,
+      "source_text_sha256": "fc0e6413d8b70d3b1cf421951761cde6df7dea0f70cc72652478b422d2da733f",
+      "transform": "collapse source whitespace runs to one ASCII space; no word or punctuation changes",
+      "display_text": "two consecutive operational exits from Align route only that flight to G2"
+    },
+    {
+      "target_id": "ac-6",
+      "target_id_origin": "prototype-assigned; not a source ID",
+      "source_id": "primary-f13",
+      "selection_byte_start": 1852,
+      "selection_byte_end_exclusive": 1924,
+      "original_start_line": 654,
+      "original_end_line": 655,
+      "source_text_sha256": "7396c7b0427133ac28f732b44031d0076d31ad96fcc5033af709c054155d4331",
+      "transform": "collapse source whitespace runs to one ASCII space; no word or punctuation changes",
+      "display_text": "provider summaries never satisfy a gate, and there is no `Failed` state."
+    },
+    {
+      "target_id": "ac-7",
+      "target_id_origin": "prototype-assigned; not a source ID",
+      "source_id": "primary-f13",
+      "selection_byte_start": 1981,
+      "selection_byte_end_exclusive": 2115,
+      "original_start_line": 659,
+      "original_end_line": 660,
+      "source_text_sha256": "4b730b5b58e4a13bbb56860d56a012e49ee78b2ad6303635f393cd80e0855e22",
+      "transform": "collapse source whitespace runs to one ASCII space; no word or punctuation changes",
+      "display_text": "A blocking finding requires nonempty binding-authority cite, reachable-state witness, concrete incorrect result, and threat-model fit."
+    },
+    {
+      "target_id": "ac-8",
+      "target_id_origin": "prototype-assigned; not a source ID",
+      "source_id": "primary-f13",
+      "selection_byte_start": 2116,
+      "selection_byte_end_exclusive": 2200,
+      "original_start_line": 660,
+      "original_end_line": 661,
+      "source_text_sha256": "d8794640a3b6b09260b9ae1f8620e6af3e13db6841aa3ea27a37cbccf0c46e61",
+      "transform": "collapse source whitespace runs to one ASCII space; no word or punctuation changes",
+      "display_text": "The author lane adjudicates each finding. Conflicting blocking findings route to G2."
+    }
+  ],
+  "not_inferred": [
+    "evidence kinds",
+    "story decomposition",
+    "relationships",
+    "lifecycle acceptance",
+    "feature implementation completion"
+  ]
+}
