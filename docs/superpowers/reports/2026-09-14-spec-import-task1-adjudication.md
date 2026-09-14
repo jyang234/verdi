@@ -1,11 +1,10 @@
 # Mechanical import Task 1: owner findings and continuation
 
-Status: **REVISE — M1–M10 closed; two adjacent defects require correction**.
-The distinct Opus 5 re-review closed all ten original finding groups at
-`71d20017`, then returned three adjacent concerns. Main accepts N1/N2 as Important
-source-fidelity defects and adjudicates N3 as the contract's explicit same-target
-override behavior below. Do not start Task 2 until N1/N2 fixes and independent
-re-review close the parser dependency. The adopted design/contract remain unchanged.
+Status: **REVISE — reviewed corrections closed; one empty-item diagnostic open**.
+M1–M10 and N1/N2 are independently closed at `714b16ae`; N3's explicit-override
+regression is accepted. Main's final source-error check reproduced N4: an empty
+bullet is silently omitted with no finding when a valid criterion follows it.
+Correct this bounded required diagnostic before Task 2. Design/contract unchanged.
 
 ## Fixed runtime range and provenance
 
@@ -204,3 +203,34 @@ Duplicate empty-field wording and unusual marker-inclusive selection variants ar
 nonblocking. Preserve the already accepted content-span path and source honesty.
 Next correction is only N1/N2 plus the N3 contract regression, through a fresh
 Opus 5 fixer and distinct re-review. No additional design/adoption is needed.
+
+## Adjacent correction accepted; empty-item diagnostic
+
+Fresh genuine Opus 5 fixer `168e49d8-5ec8-4f58-bec1-c729fdb302bb` produced
+`8aabcb18..714b16ae` (four commits). Main caught an incomplete first-block boundary
+at intermediate f7de2285; the same fixer corrected it before independent review.
+Main's first-block probe at 714b16ae now preserves opening fence and quote syntax.
+Distinct genuine Opus 5 reviewer `16013938-9aac-4a56-9495-729ee5b8354e` returned
+ACCEPT on the exact range, closed N1/N2/N3, passed package tests (0.402s), race
+(2.576s), vet/fmt, all 128 top-level tests and seven F13 pins. Its independent
+shape probes and six deliberately regressed code overlays showed the tests detect
+wrong starts, deindent, emptiness, occurrence resolution and spans. Evidence:
+`execution/task1-rereview2/review-received.md`; no tracked reviewer edits.
+
+**N4 — owner-reproduced, required empty-field diagnostic.** At 714b16ae a complete
+labeled source with Acceptance Criteria body `-` then `- done`, plus user-selected
+attestation on ac-2 and RetainUnmapped=true, yields fields problem/outcome/ac-2 and
+`findings=[]`. Probe: `TestOwnerEmptyBullet` in the local owner first-block overlay;
+it is observational, exit 0 is not a correctness assertion. The source's empty
+first item consumes ordinal 1 but receives no unresolved/empty disclosure.
+
+Contract mapping says one direct item is one object, empty fields are reported,
+and empty objects cannot be made valid merely by RetainUnmapped. Earlier ordinal
+notes left numbering open only; they did not waive empty-object reporting. Emit
+blocking empty-field for the corresponding would-be ordinal object when a direct
+flat-list item is empty. Preserve ordinal continuity, no fabricated Field/text/span.
+A later explicit nonblank mapping to that target may resolve the value through the
+existing M9 demotion; preserve the source-empty disclosure, evidence requirements
+and coverage. Do not classify syntax-bearing empty fenced/quote blocks as empty,
+or change nested-list refusal. Fresh Opus correction and distinct narrow re-review
+remain required; do not reopen the closed source-fidelity changes or add a new API.
