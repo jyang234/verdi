@@ -198,12 +198,26 @@ func headingLabel(h *ast.Heading, source []byte) string {
 }
 
 // sectionContentNodes returns the top-level sibling nodes strictly between
-// top[headingIdx] and the next top-level heading (or the end of top),
-// plus that next heading's index (len(top) if none).
+// top[headingIdx] and the heading that actually CLOSES that section — the
+// next heading at top[headingIdx]'s own level or higher — plus that
+// heading's index (len(top) if none).
+//
+// A deeper subheading does not close a section: the contract recognizes
+// field sections at exactly one level below the title and then requires
+// "the entire section body... preserving all interior bytes and line
+// breaks", so an interior "### Detail" is content. Treating it as a
+// boundary silently truncated the recognized statement and dropped the
+// remainder into retained-only with no finding. For an object section the
+// same rule makes that subheading mixed non-list content, which
+// extractObjectSection reports as unresolved rather than truncating.
 func sectionContentNodes(top []ast.Node, headingIdx int) (content []ast.Node, nextHeadingIdx int) {
+	level := 0
+	if h, ok := top[headingIdx].(*ast.Heading); ok {
+		level = h.Level
+	}
 	nextHeadingIdx = len(top)
 	for j := headingIdx + 1; j < len(top); j++ {
-		if _, ok := top[j].(*ast.Heading); ok {
+		if h, ok := top[j].(*ast.Heading); ok && h.Level <= level {
 			nextHeadingIdx = j
 			break
 		}
@@ -295,15 +309,15 @@ var sourceDeclaredIDRe = regexp.MustCompile(`^((?:ac|co|dc|oq)-[a-z0-9]+(?:-[a-z
 func extractObjectSection(sourceID string, body []byte, bodyStart int, top []ast.Node, headingIdx int, prefix string) ([]Field, *Finding) {
 	name := objectSectionDisplayName[prefix]
 	content, _ := sectionContentNodes(top, headingIdx)
-	if len(content) != 1 || content[0].Kind() != ast.KindList {
+	list, ok := sectionBulletList(content)
+	if !ok {
 		return nil, &Finding{
 			Code:     FindingAmbiguousField,
 			Target:   name,
-			Message:  fmt.Sprintf("the %s section must contain exactly one flat Markdown bullet list and no other content", name),
+			Message:  fmt.Sprintf("the %s section must contain exactly one flat Markdown bullet list and no other content; an ordered list, mixed prose or an interior subheading is not that grammar", name),
 			Blocking: true,
 		}
 	}
-	list := content[0]
 	for item := list.FirstChild(); item != nil; item = item.NextSibling() {
 		if containsNestedList(item) {
 			return nil, &Finding{
@@ -355,11 +369,12 @@ func extractObjectSection(sourceID string, body []byte, bodyStart int, top []ast
 // need to thread an extra return value through its early-return branches.
 func blockedSourceIDFindings(body []byte, top []ast.Node, headingIdx int) []Finding {
 	content, _ := sectionContentNodes(top, headingIdx)
-	if len(content) != 1 || content[0].Kind() != ast.KindList {
+	list, ok := sectionBulletList(content)
+	if !ok {
 		return nil
 	}
 	var findings []Finding
-	for item := content[0].FirstChild(); item != nil; item = item.NextSibling() {
+	for item := list.FirstChild(); item != nil; item = item.NextSibling() {
 		if containsNestedList(item) {
 			return nil
 		}
@@ -378,6 +393,28 @@ func blockedSourceIDFindings(body []byte, top []ast.Node, headingIdx int) []Find
 		}
 	}
 	return findings
+}
+
+// sectionBulletList returns an object section's single flat Markdown BULLET
+// list, if that is exactly what the section contains (spec-import-
+// contract.md: "Object sections accept a flat Markdown bullet list: one
+// direct item = one object... Strip only the bullet marker and its
+// following space"; "Nested lists or mixed non-list prose make that section
+// unresolved").
+//
+// An ordered list is not a bullet list and is deliberately refused rather
+// than promoted: its "1." markers are not the bullet marker the declared
+// transform strips, so accepting it would present items under a grammar
+// this package does not implement.
+func sectionBulletList(content []ast.Node) (ast.Node, bool) {
+	if len(content) != 1 {
+		return nil, false
+	}
+	list, ok := content[0].(*ast.List)
+	if !ok || list.IsOrdered() {
+		return nil, false
+	}
+	return list, true
 }
 
 // containsNestedList reports whether any descendant of n (inclusive of n

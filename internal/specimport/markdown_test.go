@@ -369,6 +369,93 @@ func TestNormalize_MarkdownUnresolvedNestedListDoesNotProduceCriteria(t *testing
 	}
 }
 
+// TestNormalize_MarkdownOrderedListIsNotPromotedToObjects pins the closed
+// grammar: "Object sections accept a flat Markdown bullet list" and "Strip
+// only the bullet marker and its following space". An ordered list is not a
+// bullet list, so that section is unresolved rather than silently promoted
+// with its "1." markers consumed as if they were bullets.
+func TestNormalize_MarkdownOrderedListIsNotPromotedToObjects(t *testing.T) {
+	raw := "# Widget Import\n\n## Problem\n\np\n\n## Outcome\n\no\n\n## Acceptance Criteria\n\n1. First criterion.\n2. Second criterion.\n"
+	req := minimalRequest()
+	req.Sources[0].Data = []byte(raw)
+
+	plan, err := Normalize(req)
+	if err != nil {
+		t.Fatalf("Normalize: unexpected error: %v", err)
+	}
+	for _, target := range []string{"ac-1", "ac-2"} {
+		if f, ok := fieldByTarget(plan.Fields, target); ok {
+			t.Errorf("%s promoted from an ordered list: %+v", target, f)
+		}
+	}
+	f, ok := findingForTarget(plan.Findings, FindingAmbiguousField, "acceptance-criteria")
+	if !ok {
+		t.Fatalf("no ambiguous-field finding for the ordered acceptance-criteria list: %+v", plan.Findings)
+	}
+	if !f.Blocking {
+		t.Errorf("ordered-list finding is not blocking: %+v", f)
+	}
+}
+
+// TestNormalize_MarkdownNestedSubheadingKeepsWholeStatementSection pins that
+// a deeper subheading inside a statement section is interior content, not a
+// section boundary: the contract recognizes field sections at exactly one
+// level below the title and requires the entire section body, "preserving
+// all interior bytes and line breaks". Truncating the statement at the
+// subheading dropped half of it into retained-only with no finding at all.
+func TestNormalize_MarkdownNestedSubheadingKeepsWholeStatementSection(t *testing.T) {
+	raw := "# Widget Import\n\n## Problem\n\np\n\n### Detail\n\nq\n\n## Outcome\n\no\n"
+	req := minimalRequest()
+	req.Sources[0].Data = []byte(raw)
+
+	plan, err := Normalize(req)
+	if err != nil {
+		t.Fatalf("Normalize: unexpected error: %v", err)
+	}
+	problem, ok := fieldByTarget(plan.Fields, "problem")
+	if !ok {
+		t.Fatalf("no problem field: %+v %+v", plan.Fields, plan.Findings)
+	}
+	const want = "p\n\n### Detail\n\nq"
+	if problem.Text != want {
+		t.Fatalf("problem.Text = %q, want the whole section body %q", problem.Text, want)
+	}
+	if len(problem.Spans) != 1 || raw[problem.Spans[0].Start:problem.Spans[0].End] != want {
+		t.Fatalf("problem.Spans = %+v, want a span reproducing the whole section body", problem.Spans)
+	}
+	// The interior bytes are accounted as mapped, not silently retained.
+	cov := coverageForSource(t, plan, "source")
+	for _, iv := range cov.Intervals {
+		if iv.Start <= 33 && 33 < iv.End && iv.Disposition != DispositionMapped {
+			t.Fatalf("the subheading's bytes fell into a %q interval %+v instead of the problem statement", iv.Disposition, iv)
+		}
+	}
+	if got, want := cov.MappedBytes+cov.RetainedBytes+cov.UnresolvedBytes, cov.TotalBytes; got != want {
+		t.Fatalf("mapped+retained+unresolved = %d, want TotalBytes %d", got, want)
+	}
+}
+
+// TestNormalize_MarkdownSubheadingInsideObjectSectionIsUnresolved is the
+// object-section half of the same boundary rule: a subheading inside an
+// object section is mixed non-list content, so the section is reported
+// unresolved rather than quietly truncated to the leading list.
+func TestNormalize_MarkdownSubheadingInsideObjectSectionIsUnresolved(t *testing.T) {
+	raw := "# Widget Import\n\n## Problem\n\np\n\n## Outcome\n\no\n\n## Acceptance Criteria\n\n- First criterion.\n\n### Notes\n\nmore prose\n"
+	req := minimalRequest()
+	req.Sources[0].Data = []byte(raw)
+
+	plan, err := Normalize(req)
+	if err != nil {
+		t.Fatalf("Normalize: unexpected error: %v", err)
+	}
+	if f, ok := fieldByTarget(plan.Fields, "ac-1"); ok {
+		t.Errorf("ac-1 extracted while the rest of its section was dropped: %+v", f)
+	}
+	if _, ok := findingForTarget(plan.Findings, FindingAmbiguousField, "acceptance-criteria"); !ok {
+		t.Fatalf("no ambiguous-field finding for an object section with mixed content: %+v", plan.Findings)
+	}
+}
+
 func TestNormalize_MarkdownNoHeadingIsUnsupportedStructure(t *testing.T) {
 	data := readMarkdownFixture(t, "unsupported-structure.md")
 	req := minimalRequest()
