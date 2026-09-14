@@ -240,37 +240,68 @@ func missingEvidenceFindings(fields []Field) []Finding {
 	return findings
 }
 
-// resolveSourceIDFindings removes a source-id-requires-mapping Finding only
-// when an explicit Mapping names that source-declared id AND selects the
-// item that declared it, in the source that declared it (the closed
-// contract review's residual 4: "An explicit mapping to the source-declared
-// ID OVER THAT ITEM resolves the blocker").
+// declaredID identifies one source-declared object id within one source.
+type declaredID struct{ sourceID, id string }
+
+// unresolvedSourceIDFindings reports one blocking source-id-requires-mapping
+// Finding per declaring ITEM that no explicit Mapping resolved. A finding is
+// withheld only when a Mapping names that source-declared id AND selects the
+// item that declared it, in the source that declared it (the closed contract
+// review's residual 4: "An explicit mapping to the source-declared ID OVER
+// THAT ITEM resolves the blocker").
 //
-// Target equality alone is not resolution. Without the span binding, a
-// spanless user-added mapping cleared the blocker and published invented
-// text under the source's own declared identifier with no span at all,
-// while the source's real item was disposed of as ordinary retained-only —
-// exactly the "silently present a generated ID as the source's identity"
-// outcome the finding exists to prevent. An unrelated item, a partial
-// selection, a whole-source selection and the same id in a different source
-// are all equally insufficient.
-func resolveSourceIDFindings(findings []Finding, mappings []Mapping, blocked []blockedSourceID) []Finding {
-	resolved := make(map[string]bool, len(blocked))
+// Target equality alone is not resolution, in either direction:
+//
+//   - Without the span binding, a spanless user-added mapping cleared the
+//     blocker and published invented text under the source's own declared
+//     identifier with no span at all, while the source's real item was
+//     disposed of as ordinary retained-only. An unrelated item, a partial
+//     selection, a whole-source selection and the same id in a different
+//     source are all equally insufficient.
+//   - Resolution used to be recorded per id and then applied to every
+//     finding carrying that Target, so when two items declared the same id,
+//     mapping one of them silently cleared the other's disclosure too. That
+//     second declared identity then vanished from the preview with no field
+//     and no finding, and validateMappings refuses a second Mapping for the
+//     same target, so the user could not have resolved it on its own terms
+//     either. Resolution is therefore bound to the occurrence, and the
+//     surviving occurrence carries the corrective guidance for a conflict
+//     only the source itself can fix — this package never renumbers a
+//     source's own ids.
+func unresolvedSourceIDFindings(blocked []blockedSourceID, mappings []Mapping) []Finding {
+	declarations := make(map[declaredID]int, len(blocked))
 	for _, b := range blocked {
-		for _, m := range mappings {
-			if m.Target == b.id && m.SourceID == b.sourceID && spansItem(m, b.item) {
-				resolved[b.id] = true
-			}
-		}
+		declarations[declaredID{b.sourceID, b.id}]++
 	}
-	out := findings[:0:0]
-	for _, f := range findings {
-		if f.Code == FindingSourceIDRequiresMap && resolved[f.Target] {
+
+	var findings []Finding
+	for _, b := range blocked {
+		if resolvedByMapping(b, mappings) {
 			continue
 		}
-		out = append(out, f)
+		message := fmt.Sprintf("list item begins with source-declared id %q; an explicit mapping over that item must preserve or resolve it before it can become a field", b.id)
+		if n := declarations[declaredID{b.sourceID, b.id}]; n > 1 {
+			message += fmt.Sprintf("; source %q declares %q on %d list items and a duplicate explicit mapping target is refused, so at most one of them can be resolved — give each of those items a distinct id in the source", b.sourceID, b.id, n)
+		}
+		findings = append(findings, Finding{
+			Code:     FindingSourceIDRequiresMap,
+			Target:   b.id,
+			Message:  message,
+			Blocking: true,
+		})
 	}
-	return out
+	return findings
+}
+
+// resolvedByMapping reports whether any Mapping resolves exactly the
+// declaring item b, in the source that declared it.
+func resolvedByMapping(b blockedSourceID, mappings []Mapping) bool {
+	for _, m := range mappings {
+		if m.Target == b.id && m.SourceID == b.sourceID && spansItem(m, b.item) {
+			return true
+		}
+	}
+	return false
 }
 
 // demotableGapCodes are the findings that report a missing or unusable

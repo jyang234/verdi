@@ -69,7 +69,6 @@ func Normalize(req Request) (Plan, error) {
 
 	var baseline []Field
 	var findings []Finding
-	var blocked []blockedSourceID
 	var native []byte
 
 	switch req.Format {
@@ -87,7 +86,10 @@ func Normalize(req Request) (Plan, error) {
 		}
 		baseline = result.fields
 		findings = append(findings, result.findings...)
-		blocked = result.blocked
+		// One disclosure per still-unresolved DECLARING ITEM. Recognition
+		// locates the declarations; only the request's explicit mappings can
+		// say which of them a user actually selected.
+		findings = append(findings, unresolvedSourceIDFindings(result.blocked, req.Mappings)...)
 
 	case FormatF13Reference:
 		fields, f13findings, err := applyF13Profile(req.Primary, primarySelected)
@@ -108,7 +110,6 @@ func Normalize(req Request) (Plan, error) {
 	}
 	findings = append(findings, emptyFieldFindings(fields)...)
 	findings = append(findings, missingEvidenceFindings(fields)...)
-	findings = resolveSourceIDFindings(findings, req.Mappings, blocked)
 	if req.Format == FormatManualV1 {
 		findings = append(findings, manualMissingStatementFindings(fields)...)
 	}

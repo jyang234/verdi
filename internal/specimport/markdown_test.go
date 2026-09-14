@@ -3,6 +3,7 @@ package specimport
 import (
 	"errors"
 	"os"
+	"strings"
 	"testing"
 )
 
@@ -582,6 +583,158 @@ func TestNormalize_SourceDeclaredIDResolutionRequiresTheCorrespondingItem(t *tes
 		}
 		if ac3, ok := fieldByTarget(plan.Fields, "ac-3"); !ok || ac3.Text != "The importer reports missing fields." {
 			t.Fatalf("ordinal continuity disturbed: ac-3 = %+v ok=%v", ac3, ok)
+		}
+	})
+}
+
+// duplicateDeclaredIDSource declares ac-7 on TWO list items, the shape that
+// makes id-keyed resolution unsound.
+const duplicateDeclaredIDSource = "# T\n\n## Problem\n\np\n\n## Outcome\n\no\n\n" +
+	"## Acceptance Criteria\n\n" +
+	"- ac-7: first declared item\n" +
+	"- ac-7: second declared item\n" +
+	"- plain third\n"
+
+func sourceIDFindings(findings []Finding, target string) []Finding {
+	var out []Finding
+	for _, f := range findings {
+		if f.Code == FindingSourceIDRequiresMap && f.Target == target {
+			out = append(out, f)
+		}
+	}
+	return out
+}
+
+// TestNormalize_SourceDeclaredIDResolutionIsPerOccurrence pins that a
+// mapping resolves the OCCURRENCE it selects, not every item that happens to
+// declare the same id. Resolution used to be recorded in a map keyed by id
+// and then dropped every finding carrying that Target, so mapping the first
+// ac-7 item silently cleared the second item's blocker: that second declared
+// identity disappeared from the preview with no field and no disclosure,
+// while validateMappings refuses a second mapping for the same target, so
+// the user had no way to resolve it on its own terms either.
+func TestNormalize_SourceDeclaredIDResolutionIsPerOccurrence(t *testing.T) {
+	data := []byte(duplicateDeclaredIDSource)
+	firstStart, firstEnd := spanOf(t, data, "ac-7: first declared item")
+	secondStart, secondEnd := spanOf(t, data, "ac-7: second declared item")
+
+	t.Run("both declarations block before any mapping", func(t *testing.T) {
+		req := minimalRequest()
+		req.Sources[0].Data = data
+		plan, err := Normalize(req)
+		if err != nil {
+			t.Fatalf("Normalize: unexpected error: %v", err)
+		}
+		got := sourceIDFindings(plan.Findings, "ac-7")
+		if len(got) != 2 {
+			t.Fatalf("source-id findings for ac-7 = %d, want one per declaring item: %+v", len(got), plan.Findings)
+		}
+		for _, f := range got {
+			if !f.Blocking {
+				t.Errorf("source-id finding is not blocking: %+v", f)
+			}
+		}
+	})
+
+	selected := []struct {
+		name       string
+		start, end int
+		wantText   string
+		keptStart  int
+		keptEnd    int
+	}{
+		{"the first item", firstStart, firstEnd, "ac-7: first declared item", secondStart, secondEnd},
+		{"the second item", secondStart, secondEnd, "ac-7: second declared item", firstStart, firstEnd},
+	}
+	for _, c := range selected {
+		t.Run("mapping "+c.name+" leaves the other declaration blocking", func(t *testing.T) {
+			req := minimalRequest()
+			req.Sources[0].Data = data
+			req.Mappings = []Mapping{
+				{Target: "ac-7", SourceID: "source", Start: c.start, End: c.end, Transform: TransformListItem},
+			}
+			plan, err := Normalize(req)
+			if err != nil {
+				t.Fatalf("Normalize: unexpected error: %v", err)
+			}
+			got := sourceIDFindings(plan.Findings, "ac-7")
+			if len(got) != 1 {
+				t.Fatalf("source-id findings for ac-7 = %d, want exactly the unselected declaration: %+v", len(got), plan.Findings)
+			}
+			if !got[0].Blocking {
+				t.Errorf("the unresolved declaration is no longer blocking: %+v", got[0])
+			}
+			// Useful corrective guidance: the conflict is unsatisfiable by a
+			// second Mapping, so the finding must say what the user can do.
+			if !strings.Contains(got[0].Message, "on 2 list items") || !strings.Contains(got[0].Message, "distinct id") {
+				t.Errorf("no corrective guidance for the unsatisfiable duplicate: %q", got[0].Message)
+			}
+
+			ac7, ok := fieldByTarget(plan.Fields, "ac-7")
+			if !ok || ac7.Text != c.wantText {
+				t.Fatalf("ac-7 = %+v ok=%v, want the selected occurrence %q", ac7, ok, c.wantText)
+			}
+			// The unselected item keeps its bytes under the user's
+			// RetainUnmapped disposition; nothing claims them as ac-7.
+			cov := coverageForSource(t, plan, "source")
+			for _, iv := range cov.Intervals {
+				if iv.Start < c.keptEnd && c.keptStart < iv.End && iv.Disposition != DispositionRetained {
+					t.Errorf("interval %+v over the unselected declaration is %q, want retained-only", iv, iv.Disposition)
+				}
+			}
+		})
+	}
+
+	t.Run("a second mapping for the same target is still refused", func(t *testing.T) {
+		req := minimalRequest()
+		req.Sources[0].Data = data
+		req.Mappings = []Mapping{
+			{Target: "ac-7", SourceID: "source", Start: firstStart, End: firstEnd, Transform: TransformListItem},
+			{Target: "ac-7", SourceID: "source", Start: secondStart, End: secondEnd, Transform: TransformListItem},
+		}
+		if _, err := Normalize(req); !errors.Is(err, ErrInvalidRequest) {
+			t.Fatalf("two mappings for ac-7: got err %v, want ErrInvalidRequest (duplicate explicit target)", err)
+		}
+	})
+
+	t.Run("without retain_unmapped the unselected identity is still named", func(t *testing.T) {
+		req := minimalRequest()
+		req.Sources[0].Data = data
+		req.RetainUnmapped = false
+		req.Mappings = []Mapping{
+			{Target: "ac-7", SourceID: "source", Start: firstStart, End: firstEnd, Transform: TransformListItem},
+		}
+		plan, err := Normalize(req)
+		if err != nil {
+			t.Fatalf("Normalize: unexpected error: %v", err)
+		}
+		if got := sourceIDFindings(plan.Findings, "ac-7"); len(got) != 1 {
+			t.Fatalf("source-id findings for ac-7 = %d, want the unselected declaration named rather than folded into a generic unresolved-coverage finding: %+v", len(got), plan.Findings)
+		}
+	})
+
+	t.Run("distinct declared ids resolve independently", func(t *testing.T) {
+		raw := []byte("# T\n\n## Problem\n\np\n\n## Outcome\n\no\n\n## Acceptance Criteria\n\n" +
+			"- ac-7: first declared item\n- ac-8: second declared item\n")
+		start, end := spanOf(t, raw, "ac-7: first declared item")
+		req := minimalRequest()
+		req.Sources[0].Data = raw
+		req.Mappings = []Mapping{
+			{Target: "ac-7", SourceID: "source", Start: start, End: end, Transform: TransformListItem},
+		}
+		plan, err := Normalize(req)
+		if err != nil {
+			t.Fatalf("Normalize: unexpected error: %v", err)
+		}
+		if got := sourceIDFindings(plan.Findings, "ac-7"); len(got) != 0 {
+			t.Fatalf("ac-7 still blocking after a mapping over its only declaring item: %+v", got)
+		}
+		got := sourceIDFindings(plan.Findings, "ac-8")
+		if len(got) != 1 {
+			t.Fatalf("source-id findings for ac-8 = %d, want its own untouched blocker: %+v", len(got), plan.Findings)
+		}
+		if strings.Contains(got[0].Message, "distinct id") {
+			t.Errorf("a uniquely declared id carries duplicate-conflict guidance: %q", got[0].Message)
 		}
 	})
 }

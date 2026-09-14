@@ -187,16 +187,11 @@ func recognizeMarkdown(sourceID string, selected []byte) (markdownResult, error)
 			if finding != nil {
 				findings = append(findings, *finding)
 			} else {
-				sectionBlocked := blockedSourceIDs(sourceID, body, bodyStart, top, occ[0])
-				for _, b := range sectionBlocked {
-					findings = append(findings, Finding{
-						Code:     FindingSourceIDRequiresMap,
-						Target:   b.id,
-						Message:  fmt.Sprintf("list item begins with source-declared id %q; an explicit mapping over that item must preserve or resolve it before it can become a field", b.id),
-						Blocking: true,
-					})
-				}
-				blocked = append(blocked, sectionBlocked...)
+				// One entry per DECLARING ITEM, not per id: two items can
+				// declare the same id, and each needs its own disclosure.
+				// unresolvedSourceIDFindings turns these into findings once
+				// the request's explicit mappings are known.
+				blocked = append(blocked, blockedSourceIDs(sourceID, body, bodyStart, top, occ[0])...)
 			}
 			fields = append(fields, objFields...)
 		default:
