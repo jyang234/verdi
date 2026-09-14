@@ -3,6 +3,7 @@ package specimport
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/jyang234/verdi/internal/artifact"
 	"github.com/jyang234/verdi/internal/artifact/splice"
@@ -46,13 +47,15 @@ func composeExternal(ctx context.Context, root string, request Request, plan Pla
 		return nil, append(findings, *blocking), nil
 	}
 
-	if decoded, err := artifact.DecodeSpec(mustFrontmatterBytes(rendered)); err != nil {
+	decoded, err := artifact.DecodeSpec(mustFrontmatterBytes(rendered))
+	if err != nil {
 		return nil, append(findings, Finding{Code: FindingUnsupportedStructure, Message: fmt.Sprintf("rendered scaffold does not decode: %v", err), Blocking: true}), nil
-	} else if err := designscaffold.CheckClass(decoded, artifact.SpecClass(request.Target.Class)); err != nil {
+	}
+	if err := designscaffold.CheckClass(decoded, artifact.SpecClass(request.Target.Class)); err != nil {
 		return nil, append(findings, Finding{Code: FindingUnsupportedStructure, Target: "target.class", Message: fmt.Sprintf("the model's template binding is incompatible with the requested class: %v", err), Blocking: true}), nil
 	}
 
-	result, blocking, err := applyCandidateEdits(rendered, request, fields)
+	result, blocking, err := applyCandidateEdits(rendered, decoded, request, fields)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -175,6 +178,19 @@ func mustFrontmatterBytes(rendered string) []byte {
 //     object field, over the previous field's own result: append it
 //     (AppendObject creates both frontmatter entry and body section at
 //     once, so nothing it adds can ever be orphaned).
+//  5. splice.ApplyDraftMutations' existing edit-object operations over the
+//     COMPLETED candidate, rewriting every appended object's anchor to its
+//     bare id (see setBareObjectAnchors).
+//
+// Every placeholder removal in rounds 1-2 is conditional on `scaffold` —
+// the rendered scaffold's own decoded frontmatter — actually declaring that
+// placeholder. The canonical story template renders no stubs: block at all,
+// and a store override template may legitimately declare neither
+// placeholder: absence is not a defect to report, because the contract's
+// stated post-condition is that the imported spec HAS no placeholder stub,
+// which such a template already satisfies. What is never conditional is the
+// error handling: a placeholder that IS declared and cannot be removed
+// still fails closed.
 //
 // A splice error at any round is translated into a blocking Finding —
 // almost always the template/candidate combination could not be composed
@@ -182,10 +198,13 @@ func mustFrontmatterBytes(rendered string) []byte {
 // raw Go error, and never silently dropped (spec-import-contract.md:
 // "Never silently drop an operation to make validation pass"). The
 // returned *Finding is nil exactly when result is usable.
-func applyCandidateEdits(rendered string, request Request, fields []Field) ([]byte, *Finding, error) {
+func applyCandidateEdits(rendered string, scaffold *artifact.SpecFrontmatter, request Request, fields []Field) ([]byte, *Finding, error) {
 	problemField, outcomeField, objectFields := splitFields(fields)
 
-	pass1 := []designprovenance.Operation{{Op: designprovenance.OpRemoveStub, Slug: placeholderStubSlug}}
+	var pass1 []designprovenance.Operation
+	if scaffoldDeclaresStub(scaffold, placeholderStubSlug) {
+		pass1 = append(pass1, designprovenance.Operation{Op: designprovenance.OpRemoveStub, Slug: placeholderStubSlug})
+	}
 	if problemField != nil {
 		pass1 = append(pass1, designprovenance.Operation{Op: designprovenance.OpSetProblem, Text: problemField.Text, Anchor: "problem"})
 	}
@@ -198,26 +217,33 @@ func applyCandidateEdits(rendered string, request Request, fields []Field) ([]by
 		}
 	}
 
-	pass1Result, err := splice.ApplyDraftMutations([]byte(rendered), pass1)
-	if err != nil {
-		return nil, &Finding{Code: FindingInvalidCandidate, Message: fmt.Sprintf("preparing candidate: %v", err), Blocking: true}, nil
+	pass1Result := []byte(rendered)
+	if len(pass1) > 0 {
+		var err error
+		pass1Result, err = splice.ApplyDraftMutations([]byte(rendered), pass1)
+		if err != nil {
+			return nil, &Finding{Code: FindingInvalidCandidate, Message: fmt.Sprintf("preparing candidate: %v", err), Blocking: true}, nil
+		}
 	}
 
-	pass2Doc, err := splice.Parse(pass1Result)
-	if err != nil {
-		return nil, nil, fmt.Errorf("specimport: compose: re-parsing after pass 1: %w", err)
-	}
-	removeFM, err := pass2Doc.RemoveObjectEntry(placeholderACID)
-	if err != nil {
-		return nil, &Finding{Code: FindingUnsupportedStructure, Message: err.Error(), Blocking: true}, nil
-	}
-	removeBody, err := pass2Doc.RemoveSection(placeholderACID)
-	if err != nil {
-		return nil, &Finding{Code: FindingUnsupportedStructure, Message: err.Error(), Blocking: true}, nil
-	}
-	pass2Result, err := pass2Doc.Apply([]splice.Edit{removeFM, removeBody})
-	if err != nil {
-		return nil, &Finding{Code: FindingInvalidCandidate, Message: fmt.Sprintf("removing the placeholder acceptance criterion: %v", err), Blocking: true}, nil
+	pass2Result := pass1Result
+	if scaffoldDeclaresAC(scaffold, placeholderACID) {
+		pass2Doc, err := splice.Parse(pass1Result)
+		if err != nil {
+			return nil, nil, fmt.Errorf("specimport: compose: re-parsing after pass 1: %w", err)
+		}
+		removeFM, err := pass2Doc.RemoveObjectEntry(placeholderACID)
+		if err != nil {
+			return nil, &Finding{Code: FindingUnsupportedStructure, Message: err.Error(), Blocking: true}, nil
+		}
+		removeBody, err := pass2Doc.RemoveSection(placeholderACID)
+		if err != nil {
+			return nil, &Finding{Code: FindingUnsupportedStructure, Message: err.Error(), Blocking: true}, nil
+		}
+		pass2Result, err = pass2Doc.Apply([]splice.Edit{removeFM, removeBody})
+		if err != nil {
+			return nil, &Finding{Code: FindingInvalidCandidate, Message: fmt.Sprintf("removing the placeholder acceptance criterion: %v", err), Blocking: true}, nil
+		}
 	}
 
 	if problemField != nil || outcomeField != nil {
@@ -273,7 +299,94 @@ func applyCandidateEdits(rendered string, request Request, fields []Field) ([]by
 			return nil, &Finding{Code: FindingInvalidCandidate, Target: f.Target, Message: fmt.Sprintf("appending %s: %v", f.Target, err), Blocking: true}, nil
 		}
 	}
+
+	result, blocking, err := setBareObjectAnchors(result, objectFields)
+	if err != nil || blocking != nil {
+		return nil, blocking, err
+	}
 	return result, nil, nil
+}
+
+// setBareObjectAnchors rewrites every appended object's anchor to its bare
+// id — the contract's declared candidate output ("Generated anchors are bare
+// problem, outcome and object IDs with ## Problem, ## Outcome, ## ac-1,
+// etc."). AppendObject writes "#<id>" instead, which the slug-symmetric
+// ResolveObjectAnchors also accepts; its semantics are deliberately left
+// alone for every other caller and this rewrite is applied only to the
+// candidate being prepared, through splice's own existing edit-object
+// operations (edit-ac/-constraint/-decision/-question), never a parser of
+// this package's own. Object body headings are already "## <id>", so no
+// body edit is needed and none is made.
+//
+// One ApplyDraftMutations batch is enough here — unlike pass 4's appends, an
+// edit replaces an element that already exists, and ApplyDraftMutations
+// re-parses between operations itself. It runs over the COMPLETED candidate,
+// so its own validate-before-write gate on the starting buffer sees a whole
+// spec rather than one stripped of its placeholder criterion mid-pipeline.
+func setBareObjectAnchors(candidate []byte, objectFields []Field) ([]byte, *Finding, error) {
+	ops := make([]designprovenance.Operation, 0, len(objectFields))
+	for _, f := range objectFields {
+		op, err := editObjectKind(f.Target)
+		if err != nil {
+			return nil, &Finding{Code: FindingUnsupportedStructure, Target: f.Target, Message: err.Error(), Blocking: true}, nil
+		}
+		operation := designprovenance.Operation{Op: op, ID: f.Target, Text: f.Text, Anchor: f.Target}
+		if op == designprovenance.OpEditAC {
+			operation.Evidence = evidenceKinds(f.Evidence)
+		}
+		ops = append(ops, operation)
+	}
+	if len(ops) == 0 {
+		return candidate, nil, nil
+	}
+	result, err := splice.ApplyDraftMutations(candidate, ops)
+	if err != nil {
+		return nil, &Finding{Code: FindingInvalidCandidate, Message: fmt.Sprintf("setting generated object anchors: %v", err), Blocking: true}, nil
+	}
+	return result, nil, nil
+}
+
+// editObjectKind maps an object id's kind prefix onto splice's existing
+// edit-object operation for that block. An unknown prefix fails closed
+// rather than silently skipping the anchor rewrite; Normalize only ever
+// mints the four ids below.
+func editObjectKind(id string) (designprovenance.OperationKind, error) {
+	switch {
+	case strings.HasPrefix(id, "ac-"):
+		return designprovenance.OpEditAC, nil
+	case strings.HasPrefix(id, "co-"):
+		return designprovenance.OpEditConstraint, nil
+	case strings.HasPrefix(id, "dc-"):
+		return designprovenance.OpEditDecision, nil
+	case strings.HasPrefix(id, "oq-"):
+		return designprovenance.OpEditQuestion, nil
+	default:
+		return "", fmt.Errorf("no object block owns id %q", id)
+	}
+}
+
+// scaffoldDeclaresStub reports whether the rendered scaffold's frontmatter
+// carries a stub with slug — the canonical story template declares none at
+// all, and a store override template may legitimately declare none either.
+func scaffoldDeclaresStub(scaffold *artifact.SpecFrontmatter, slug string) bool {
+	for _, s := range scaffold.Stubs {
+		if s.Slug == slug {
+			return true
+		}
+	}
+	return false
+}
+
+// scaffoldDeclaresAC reports whether the rendered scaffold's frontmatter
+// declares an acceptance criterion with id (the generated placeholder
+// criterion whose entry and orphaned body section are removed together).
+func scaffoldDeclaresAC(scaffold *artifact.SpecFrontmatter, id string) bool {
+	for _, ac := range scaffold.AcceptanceCriteria {
+		if ac.ID == id {
+			return true
+		}
+	}
+	return false
 }
 
 // splitFields separates fields (already resolved by prepareCandidateFields)
