@@ -190,8 +190,13 @@ func mustFrontmatterBytes(rendered string) []byte {
 // stated post-condition is that the imported spec HAS no placeholder stub,
 // which such a template already satisfies. What is never conditional is the
 // error handling: a placeholder that IS declared and cannot be removed
-// still fails closed. A template declaring some OTHER stub is refused
-// outright (see nonPlaceholderStubs) — it cannot express an import at all.
+// still fails closed. A template declaring some OTHER stub, or some other
+// acceptance criterion, is refused outright before any of this (see
+// nonPlaceholderStubs and nonPlaceholderCriteria) — it cannot express an
+// import at all. Those two refusals are also what keeps the conditions
+// above narrow: by the time a round is skipped for a placeholder the
+// scaffold does not declare, the scaffold is known to declare no competing
+// stub or criterion either, so skipping cannot leave one behind.
 //
 // A splice error at any round is translated into a blocking Finding —
 // almost always the template/candidate combination could not be composed
@@ -207,6 +212,14 @@ func applyCandidateEdits(rendered string, scaffold *artifact.SpecFrontmatter, re
 			Code:     FindingUnsupportedStructure,
 			Target:   "template",
 			Message:  fmt.Sprintf("the resolved template declares stub(s) %s that this import cannot express: an imported spec carries no stubs at all, and a configured stub is real data this import never silently discards — remove it from the template, or add the decomposition on the board after import", strings.Join(extra, ", ")),
+			Blocking: true,
+		}, nil
+	}
+	if extra := nonPlaceholderCriteria(scaffold); len(extra) > 0 {
+		return nil, &Finding{
+			Code:     FindingUnsupportedStructure,
+			Target:   "template",
+			Message:  fmt.Sprintf("the resolved template declares acceptance criterion/criteria %s that this import cannot express: it recognizes exactly one generated placeholder criterion, %s, which it removes, and fills the candidate's criteria from the mapped source instead — any other declared criterion would either be imported as a requirement the source never stated or have to be discarded, and this import does neither; use %s for the placeholder, or remove the criterion from the template and add it to the spec after import", strings.Join(extra, ", "), placeholderACID, placeholderACID),
 			Blocking: true,
 		}, nil
 	}
@@ -413,6 +426,35 @@ func nonPlaceholderStubs(scaffold *artifact.SpecFrontmatter) []string {
 		}
 	}
 	return slugs
+}
+
+// nonPlaceholderCriteria returns the ids of every acceptance criterion the
+// rendered scaffold declares OTHER than the generated placeholder — the
+// criterion-side twin of nonPlaceholderStubs, and the same refusal for the
+// same reason.
+//
+// Removal recognizes the placeholder by its exact id, so a declared
+// criterion under any other id is one of two things, and this import can
+// honestly do neither. If it is the generated placeholder under a different
+// name (a store override that renamed ac-1), removal skips it and it is
+// imported verbatim — "Remove generated placeholder ACs/stubs; never retain
+// them as real imported requirements, including their orphaned placeholder
+// body sections". If it is a criterion the store owner really configured,
+// importing it states a requirement the candidate's source never made, and
+// deleting it to avoid that is the silent drop "reject a template/model that
+// cannot express the candidate rather than dropping content" forbids.
+//
+// Declaring NO criteria is not this condition and is not refused here: a
+// template with nothing to remove already satisfies the post-condition, the
+// same way nonPlaceholderStubs leaves a stubless template alone.
+func nonPlaceholderCriteria(scaffold *artifact.SpecFrontmatter) []string {
+	var ids []string
+	for _, ac := range scaffold.AcceptanceCriteria {
+		if ac.ID != placeholderACID {
+			ids = append(ids, ac.ID)
+		}
+	}
+	return ids
 }
 
 // scaffoldDeclaresAC reports whether the rendered scaffold's frontmatter
