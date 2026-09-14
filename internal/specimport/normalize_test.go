@@ -25,6 +25,55 @@ func TestNormalize_CorePlanExample(t *testing.T) {
 	}
 }
 
+// TestNormalize_SnapshotDataIsTheSelectedBytes pins the retained-record
+// coordinate system: Snapshot.Data is the SELECTED bytes, Digest hashes
+// exactly those bytes, and every Span/Coverage offset indexes them. The
+// original input's fingerprint and line coordinates survive as metadata
+// (OriginalDigest/StartLine/EndLine) so an original-file check is still
+// possible, but the bytes later tasks persist and verify in Git are the
+// ones the user actually selected (parent design: "Retain selected source
+// bytes with their path labels, byte digests").
+func TestNormalize_SnapshotDataIsTheSelectedBytes(t *testing.T) {
+	whole := "line one\nline two\n"
+	req := Request{
+		Schema:         RequestSchema,
+		Format:         FormatManualV1,
+		Target:         Target{Slug: "two-lines", Class: "feature", Title: "Two Lines"},
+		Primary:        "source",
+		Sources:        []Source{{ID: "source", Label: "two-lines.md", Data: []byte(whole), StartLine: 2, EndLine: 2}},
+		RetainUnmapped: true,
+	}
+	plan, err := Normalize(req)
+	if err != nil {
+		t.Fatalf("Normalize: unexpected error: %v", err)
+	}
+	if len(plan.Sources) != 1 {
+		t.Fatalf("plan has %d snapshots, want 1", len(plan.Sources))
+	}
+	snap := plan.Sources[0]
+
+	if string(snap.Data) != "line two\n" {
+		t.Errorf("Snapshot.Data = %q, want only the selected line %q", snap.Data, "line two\n")
+	}
+	if got := sha256Hex(snap.Data); got != snap.Digest {
+		t.Errorf("sha256(Snapshot.Data) = %s but Digest = %s; the retained bytes must hash to their own digest", got, snap.Digest)
+	}
+	if snap.OriginalDigest != sha256Hex([]byte(whole)) {
+		t.Errorf("Snapshot.OriginalDigest = %s, want the whole input's digest %s", snap.OriginalDigest, sha256Hex([]byte(whole)))
+	}
+	if snap.OriginalDigest == snap.Digest {
+		t.Error("OriginalDigest and Digest must differ here: a sub-range was selected")
+	}
+	if snap.StartLine != 2 || snap.EndLine != 2 {
+		t.Errorf("Snapshot line coordinates = (%d,%d), want the original (2,2) retained as metadata", snap.StartLine, snap.EndLine)
+	}
+
+	cov := coverageForSource(t, plan, "source")
+	if cov.TotalBytes != len(snap.Data) {
+		t.Errorf("Coverage.TotalBytes = %d but len(Snapshot.Data) = %d; coverage must partition exactly the retained bytes", cov.TotalBytes, len(snap.Data))
+	}
+}
+
 const nativeSpecFixture = `---
 id: spec/native-widget
 kind: spec

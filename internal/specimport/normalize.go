@@ -51,10 +51,14 @@ func Normalize(req Request) (Plan, error) {
 			return Plan{}, fmt.Errorf("%w: sources: %v", ErrInvalidSource, err)
 		}
 		selectedBySourceID[s.ID] = selected
+		// Data is the SELECTED bytes, in the same coordinate system as
+		// Digest, every Span and every Coverage interval; the original
+		// input's fingerprint and line coordinates stay alongside it as
+		// metadata (see Snapshot's doc comment).
 		snapshots = append(snapshots, Snapshot{
 			ID:             s.ID,
 			Label:          s.Label,
-			Data:           s.Data,
+			Data:           selected,
 			OriginalDigest: sha256Hex(s.Data),
 			Digest:         sha256Hex(selected),
 			StartLine:      s.StartLine,

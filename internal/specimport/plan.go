@@ -60,11 +60,20 @@ type Finding struct {
 	Blocking bool   `json:"blocking"`
 }
 
-// Snapshot is one source's retained record: the full original bytes plus
-// its original-file digest, its selected-slice digest, and the original
-// line coordinates that selection came from. This is the value later
-// tasks persist verbatim as the durable, non-authoritative source sidecar
-// (.verdi/imports/<slug>/<preview-digest>/sources/<source-id>.md).
+// Snapshot is one source's retained record. Data is the SELECTED bytes —
+// the sub-range StartLine/EndLine named, or the whole input when they are
+// both zero — and Digest is exactly sha256(Data), so the bytes later tasks
+// persist verbatim as the durable, non-authoritative source sidecar
+// (.verdi/imports/<slug>/<preview-digest>/sources/<source-id>.md) are the
+// bytes its digest attests to and the bytes every Span and Coverage
+// interval indexes (parent design: "Retain selected source bytes with
+// their path labels, byte digests").
+//
+// OriginalDigest and StartLine/EndLine are metadata about the input the
+// selection came from, not about Data: they let a later task distinguish
+// the recorded original-input fingerprint from the selected bytes actually
+// retained and verifiable in Git. OriginalDigest equals Digest exactly when
+// the whole input was selected.
 type Snapshot struct {
 	ID             string `json:"id"`
 	Label          string `json:"label"`
