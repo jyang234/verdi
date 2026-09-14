@@ -1,13 +1,18 @@
 # F13 spec-import prototype handoff
 
-Status: data-only design/prototype prepared; independent review blocked before
-execution; no importer implementation or revised-release acceptance claimed.
+Status: data-only design/prototype; authorized independent Opus 5 review executed
+on `8fd72841f5faf2e7ea9133d686dacdc046de116c`; main correction prepared and
+same-reviewer closure pending. No importer implementation or revised-release
+acceptance claimed.
 
 ## Deliverables
 
 - [Proposed import design](../specs/2026-09-14-existing-spec-import-design.md)
 - [Proposed F13 card content](../proposals/2026-09-14-spec-import-f13/board-content-preview.md)
 - [Pinned source inventory](../proposals/2026-09-14-spec-import-f13/source-inventory.json)
+- [Mechanical field and byte map](../proposals/2026-09-14-spec-import-f13/mechanical-field-map.json)
+- [F13 source-structure finding](../proposals/2026-09-14-spec-import-f13/f13-structure-finding.md)
+- [Review adjudication](2026-09-14-spec-import-review-adjudication.md)
 - [Coverage and transformation map](../proposals/2026-09-14-spec-import-f13/coverage-map.json)
 
 The initial proposal head was `42a7e39efac0bc14dbbd950774f22445e3838cec`.
@@ -54,21 +59,24 @@ not an independent pass on that future release.
 
 ## Independent review status
 
-Prepared one tool-free Claude Code Opus 5 review of the consolidated exact head,
-with the proposal, four pinned source snapshots and relevant Verdi governing
-specifications. Automatic approval review rejected process creation because this
-is a new private payload to Anthropic and the earlier authorization concerned a
-different policy packet. **No Claude review executed, no model provenance or
-review verdict is claimed, and no workaround/retry was attempted.**
+An initial packet transfer was rejected before process creation. After the owner
+explicitly authorized the updated packet and Anthropic destination, genuine
+Claude Code ran the tool-free `claude-opus-5` review successfully (process exit 0,
+result `success`, `is_error: false`). Session:
+`1d605a32-3090-4b17-ab1f-cc5d2f598c6d`. Both review assistant messages name
+`claude-opus-5`; the CLI additionally reports auxiliary Haiku usage. No FABLE
+implementation call has occurred in this spec-only step. The reviewed packet
+SHA-256 is `07f441a2ef84f4775cec3dd02992c416ab98db7a02a2b24bb376cd87d319f9dc`.
 
-Explicit owner permission is needed to send this packet to Anthropic for the
-required one independent review and, after at most one main-authored correction,
-one same-reviewer closure. This is the root AGENTS spec-only reviewer exception;
-Codex retains authoring/adjudication. Runtime work, when authorized, still uses
-`/fable-orchestration` and genuine FABLE 5.1 / Sonnet / Opus 5 assignments.
+Opus reported three blockers and eight nonblocking observations. Main's
+[adjudication](2026-09-14-spec-import-review-adjudication.md) distinguishes accepted
+contract clarifications from the deferral contradiction refuted by the archived
+CLI authority. One consolidated correction is prepared for the same reviewer's
+single closure check. No third review round is authorized by this workflow.
 
-Prepared packet metadata and the rejection record are retained locally in
-`/Users/johnyang/code/verdi-system/.local/verdi-system/development/spec-import-f13-20260914/`.
+Local packet, process/model evidence and reviewer output are retained under
+`/Users/johnyang/code/verdi-system/.local/verdi-system/development/spec-import-f13-20260914/mechanical-review/`.
+The original rejected packet is preserved separately and was never executed.
 
 ## Mechanical-mapping revision after owner feedback
 
@@ -89,12 +97,9 @@ existing text or explicitly use the already-supported statement deferral; the
 latter leaves an incomplete draft, not a ready or accepted design. Inference of
 missing requirements, completion, relationships and evidence is outside import.
 
-The prepared initial Opus packet is now obsolete and must be regenerated for
-the revised exact head before any authorized review. The rejected call was never
-executed; no initial review, author correction round or closure has occurred.
-Design review by another model is a development verification requirement,
-separate from whether importing a document calls a model. The review transfer
-remains pending explicit authorization; no retry occurred during this revision.
+The initial AI-optional packet was superseded before the authorized mechanical
+review. Review by another model is a development verification requirement,
+separate from whether importing a document calls a model.
 
 ## Owner clarification: labeled statements are directly importable
 
@@ -105,3 +110,21 @@ labeled-input tests accompany F13's missing-label case; the importer must not
 mistake F13's structural gap for a general limitation of Markdown import.
 See the [F13 structure finding](../proposals/2026-09-14-spec-import-f13/f13-structure-finding.md).
 No original ATC source or pinned snapshot was changed.
+
+## Fresh verification for the reviewed proposal and correction
+
+At reviewed head `8fd72841f5faf2e7ea9133d686dacdc046de116c`, the local Python
+check passed: 4/4 pinned source snapshots, 8/8 source-span hashes/display texts
+and original line coordinates, and 70/70 primary lines partitioned once.
+`git diff --check 8fd72841^ 8fd72841` exited 0. The source snapshot's original
+trailing blank line remains the already disclosed initial-import exception.
+
+The existing deferral test was rerun while adjudicating B2:
+`go test ./cmd/verdi -run '^TestRunDesignStart_DeferStatements_DisclosesAndKeepsPlaceholders$' -count=1`
+exited 0 (`ok`, one selected test). This confirms existing CLI behavior only.
+It is not an importer test or a full release gate.
+
+The correction makes retained-only destinations and candidate-composition
+prerequisites explicit, adds complete primary-byte disposition accounting and
+10 statement/evidence value gaps, and records the required Wave 6 authority
+return. No source snapshot, canonical/frozen authority or runtime file changed.

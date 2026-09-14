@@ -16,14 +16,16 @@ limitation for specifications that already contain labeled Problem and Outcome
 statements: those must be mapped directly with their content preserved.
 
 The importer does not invent either statement. The user can map an existing
-passage or explicitly defer the statement under Verdi's existing draft rules.
+passage or explicitly defer both statements under Verdi's existing draft rules.
 A narrower slice's Goal is not automatically the whole F13 feature's Outcome.
 The two inferred summaries from the previous prototype have been removed.
 
 ## Acceptance-criterion cards
 
-These passages retain the source's words and punctuation. Only physical
-whitespace is collapsed for display. Card IDs are prototype-assigned; they are
+Within each explicitly selected span, the source's words and punctuation are
+preserved; only physical whitespace is collapsed for display. Selection itself
+omits the introductory `Prove` and separators from the cards, retaining them in
+the source drawer. `primary_byte_dispositions` accounts for those bytes too. Card IDs are prototype-assigned; they are
 not claimed to exist in the source. Evidence declarations remain separate:
 source test commands do not constitute evidence kinds or proof. The feature's
 existing attestation floor still applies.
@@ -39,7 +41,19 @@ existing attestation floor still applies.
 | ac-7 | A blocking finding requires nonempty binding-authority cite, reachable-state witness, concrete incorrect result, and threat-model fit. | 659–660 |
 | ac-8 | The author lane adjudicates each finding. Conflicting blocking findings route to G2. | 660–661 |
 
+The prototype has **10 unsettled required values**: Problem, Outcome and the
+evidence declaration for each of eight criteria. Applicable model requirements
+or explicit user selection must settle the latter; source test commands cannot.
+This is not an exhaustive candidate validation result: target metadata, anchors,
+links and project compatibility have not been validated. It is not one
+confirmation away from a valid draft. The current eight selectors define card
+grouping; they do not demonstrate a generic rule for splitting prose.
+
 ## Retained structure and source material
+
+Retained-only material stays in the source sidecar/drawer, outside the canonical
+spec body and default context. Explicit mapping is required to promote any of
+it into specification fields. Each support is one whole-document retained unit.
 
 - The Interfaces section and complete 19-state catalog remain intact, ready for
   explicit field/constraint mapping. No summary constraint text is invented.

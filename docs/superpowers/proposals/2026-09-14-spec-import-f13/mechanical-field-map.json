@@ -109,5 +109,163 @@
     "relationships",
     "lifecycle acceptance",
     "feature implementation completion"
-  ]
+  ],
+  "unresolved_required_values": [
+    {
+      "target": "problem",
+      "reason": "no explicitly labeled source statement"
+    },
+    {
+      "target": "outcome",
+      "reason": "no explicitly labeled source statement"
+    },
+    {
+      "target": "ac-1.evidence",
+      "reason": "no evidence declaration selected; applicable model requirements or explicit user selection must settle this"
+    },
+    {
+      "target": "ac-2.evidence",
+      "reason": "no evidence declaration selected; applicable model requirements or explicit user selection must settle this"
+    },
+    {
+      "target": "ac-3.evidence",
+      "reason": "no evidence declaration selected; applicable model requirements or explicit user selection must settle this"
+    },
+    {
+      "target": "ac-4.evidence",
+      "reason": "no evidence declaration selected; applicable model requirements or explicit user selection must settle this"
+    },
+    {
+      "target": "ac-5.evidence",
+      "reason": "no evidence declaration selected; applicable model requirements or explicit user selection must settle this"
+    },
+    {
+      "target": "ac-6.evidence",
+      "reason": "no evidence declaration selected; applicable model requirements or explicit user selection must settle this"
+    },
+    {
+      "target": "ac-7.evidence",
+      "reason": "no evidence declaration selected; applicable model requirements or explicit user selection must settle this"
+    },
+    {
+      "target": "ac-8.evidence",
+      "reason": "no evidence declaration selected; applicable model requirements or explicit user selection must settle this"
+    }
+  ],
+  "required_value_gap_count": 10,
+  "gap_count_scope": "these statement/evidence values only; candidate identity, anchors, model compatibility and other creation validations have not been evaluated",
+  "card_grouping": "The exact eight selectors in this prototype define grouping; no generic prose-splitting behavior is demonstrated.",
+  "primary_byte_dispositions": [
+    {
+      "start": 0,
+      "end_exclusive": 1485,
+      "disposition": "retained-only",
+      "sha256": "e3c56a0ac74f7ced2acddd9fb0c75447e4d925cebdd99357713b203dcc5cf67b"
+    },
+    {
+      "start": 1485,
+      "end_exclusive": 1549,
+      "disposition": "mapped",
+      "target": "ac-1",
+      "sha256": "c2c2bc453bc856ac53dc29837c8ea7a06fe2239a7c3864d16094d5ab9f55b940"
+    },
+    {
+      "start": 1549,
+      "end_exclusive": 1556,
+      "disposition": "retained-only",
+      "sha256": "6a3d8cc4c0b0ac8e8720f3a9068c4bc83ad5d26d0d807f98152461dacd8420ee"
+    },
+    {
+      "start": 1556,
+      "end_exclusive": 1681,
+      "disposition": "mapped",
+      "target": "ac-2",
+      "sha256": "61663084bdd0399181e8d5da50ecb502c3ac6a07339f873f4c34045ce8ef3af3"
+    },
+    {
+      "start": 1681,
+      "end_exclusive": 1683,
+      "disposition": "retained-only",
+      "sha256": "0a07f659461970d8d8dcefe4fff96a1745599810dc7d47391e95c803b7b2072c"
+    },
+    {
+      "start": 1683,
+      "end_exclusive": 1724,
+      "disposition": "mapped",
+      "target": "ac-3",
+      "sha256": "7982283e48651335d8f64f83fcceb9b88d981344b9809b7719d2da6cb3b7ea26"
+    },
+    {
+      "start": 1724,
+      "end_exclusive": 1726,
+      "disposition": "retained-only",
+      "sha256": "0a07f659461970d8d8dcefe4fff96a1745599810dc7d47391e95c803b7b2072c"
+    },
+    {
+      "start": 1726,
+      "end_exclusive": 1775,
+      "disposition": "mapped",
+      "target": "ac-4",
+      "sha256": "d80e519ed49fe8fbe82e43e445d15f230598dc4aeff6c37fe2cc652556e175aa"
+    },
+    {
+      "start": 1775,
+      "end_exclusive": 1777,
+      "disposition": "retained-only",
+      "sha256": "0a07f659461970d8d8dcefe4fff96a1745599810dc7d47391e95c803b7b2072c"
+    },
+    {
+      "start": 1777,
+      "end_exclusive": 1850,
+      "disposition": "mapped",
+      "target": "ac-5",
+      "sha256": "fc0e6413d8b70d3b1cf421951761cde6df7dea0f70cc72652478b422d2da733f"
+    },
+    {
+      "start": 1850,
+      "end_exclusive": 1852,
+      "disposition": "retained-only",
+      "sha256": "0a07f659461970d8d8dcefe4fff96a1745599810dc7d47391e95c803b7b2072c"
+    },
+    {
+      "start": 1852,
+      "end_exclusive": 1924,
+      "disposition": "mapped",
+      "target": "ac-6",
+      "sha256": "7396c7b0427133ac28f732b44031d0076d31ad96fcc5033af709c054155d4331"
+    },
+    {
+      "start": 1924,
+      "end_exclusive": 1981,
+      "disposition": "retained-only",
+      "sha256": "30b4f2a78d778e7d643480bb456b2566590bafa98f25178c0942d8e135184095"
+    },
+    {
+      "start": 1981,
+      "end_exclusive": 2115,
+      "disposition": "mapped",
+      "target": "ac-7",
+      "sha256": "4b730b5b58e4a13bbb56860d56a012e49ee78b2ad6303635f393cd80e0855e22"
+    },
+    {
+      "start": 2115,
+      "end_exclusive": 2116,
+      "disposition": "retained-only",
+      "sha256": "36a9e7f1c95b82ffb99743e0c5c4ce95d83c9a430aac59f84ef3cbfab6145068"
+    },
+    {
+      "start": 2116,
+      "end_exclusive": 2200,
+      "disposition": "mapped",
+      "target": "ac-8",
+      "sha256": "d8794640a3b6b09260b9ae1f8620e6af3e13db6841aa3ea27a37cbccf0c46e61"
+    },
+    {
+      "start": 2200,
+      "end_exclusive": 2409,
+      "disposition": "retained-only",
+      "sha256": "d356bf31c4f5988476f644b9a89a2b6cd9d920b83b5d33feef0b6e3b523ca5c2"
+    }
+  ],
+  "selection_transform": "Explicitly select the recorded spans; all other primary bytes, including Prove and list separators, remain retained-only. Whitespace collapse applies only inside selected spans."
 }

@@ -82,6 +82,9 @@
     "sources_retained": 4,
     "sources_selected": 4,
     "silent_source_drops": 0,
-    "scope": "selected inputs only; not all F13 governing authority or implemented behavior"
-  }
+    "scope": "selected inputs only; not all F13 governing authority or implemented behavior",
+    "supporting_retained_only_units": 3
+  },
+  "retention_destination": "All retained-only primary and supporting bytes belong in the source sidecar/drawer, outside canonical spec body and default context; mapped passages become spec content only after reviewed valid creation.",
+  "byte_accounting": "mechanical-field-map.json primary_byte_dispositions partitions the complete primary snapshot. Each supporting snapshot is one explicitly declared whole-document retained-only unit."
 }

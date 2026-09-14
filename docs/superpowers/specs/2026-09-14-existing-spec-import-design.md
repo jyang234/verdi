@@ -29,7 +29,7 @@ frontmatter and resolved anchors, not inferred prose); AI-assisted spec design
 (2026-07-30), especially shared mutations, human governance, model neutrality,
 context integrity and provenance; merge-signaled acceptance (2026-08-01); the
 adopted R3/R4 milestone boundary. Workspace PLAN §OQ-3 excludes import in v0.
-This is a proposed explicit extension of that exclusion for the bounded flow
+This is a proposed bounded exception to that exclusion for the bounded flow
 below. Archive migration, lifecycle import, general document conversion and
 changes to acceptance/evidence rules remain outside it. No frozen authority is
 edited or silently superseded by this proposal.
@@ -61,6 +61,36 @@ source can be mapped by the user or explicitly deferred through the existing
 disclosed statement-deferral contract; that creates an incomplete draft, not
 review readiness. Other invalid mandatory fields still block creation. Confirming
 content mappings is draft authorship, not governance approval.
+
+### Statement deferral: representation and surface scope
+
+The existing CLI authority is archived `spec/cli-creation` AC-1/AC-2
+(`.verdi/specs/archive/cli-creation/spec.md`); R1 explicitly preserves it in
+`docs/superpowers/plans/2026-08-29-wave-6-workbench-presentation.md`,
+§R1. It permits an explicit `--defer-statements` choice for both statements.
+It does not omit either required attribute or bypass validation. The shared
+scaffold emits `{text, anchor}` for each, using `DefaultProblem` and
+`DefaultOutcome` from `internal/designscaffold/designscaffold.go`:
+
+- `TODO: replace with the real problem statement before accept`
+- `TODO: replace with the real outcome statement before accept`
+
+The current feature template binds those attributes to `problem` and `outcome`
+and supplies the corresponding `## Problem` / `## Outcome` sections. Existing
+rendering and anchor validation govern the representation. Deferral deliberately
+keeps placeholder content; it is neither an empty/absent attribute nor a waiver.
+R1 refuses an invalid sourcing choice before branch creation; an explicit valid
+deferral choice is not that refusal case. The consuming CLI disclosure uses the
+project's display vocabulary even though these shared historical constants say
+"accept". Do not silently rewrite those constants in this feature.
+
+This proposal would reuse that representation for import, with explicit disclosure
+and provenance marking the placeholders as generated deferrals, never copied
+source statements. Both statements must be supplied, or both explicitly deferred;
+an available source statement remains retained if the user chooses deferral.
+The existing board creation form does not thereby gain a deferral exception:
+the new import UI's explicit choice requires the authority return below. Required
+field, anchor, review and acceptance checks remain intact on every surface.
 
 ## Input and preservation rules
 
@@ -189,6 +219,40 @@ board projection seams. Do not add a parallel spec parser or bypass the common
 authority checks. The implementation plan must define the request/result and
 provenance schemas before code, including every enum and error category.
 
+### Candidate composition and provenance prerequisites
+
+Before runtime work, the implementation contract must fix candidate composition,
+not just request schemas: native byte/content preservation rules; external
+frontmatter serialization and ordering; target IDs; exact body sections and
+anchor generation; and validation of every anchor through the existing resolver.
+Mapped attributes/objects become canonical frontmatter with corresponding body
+sections containing their reviewed text. Mapped text is specification content.
+It may enter ordinary build context under existing lifecycle/context rules.
+Retained-only source, including unmapped catalogs, file lists and source commands,
+belongs solely to the source sidecar/drawer and is excluded from ordinary design
+and build context. It is not appended wholesale to the candidate body. A user may
+explicitly promote a retained passage through a new reviewed mapping; its origin
+and changed disposition must be recorded. Native draft body content is already
+specification content and is preserved under native validation, not reclassified
+as retained-only attachment text. No second canonical Markdown parser is added.
+
+The contract must also define imported-origin vocabulary without pretending a
+copy was authored by the importing human or by an AI call. It must specify whether
+and how the import record composes with existing design provenance; neither an
+invented existing enum value nor an omitted required provenance transaction is
+permitted. Candidate and every required provenance record publish atomically.
+Source units and byte spans must partition all selected bytes; mapped spans have
+explicit formatting transforms, and their unselected separators/words remain
+accounted for as retained-only. A whole supporting document can be one declared
+retained-only unit; that proves retention, not recognition of its requirements.
+The mapping profile fixes card grouping/splitting rather than deriving semantics.
+
+Adapter identity is another explicit prerequisite. Browser-human authority is
+adapter-controlled; CLI/MCP cannot gain it through a request field or a `--human`
+flag. Reuse existing governed agent/trusted-principal paths where applicable and
+resolve any additional human CLI creation allowance through authority review.
+AI-free parsing does not waive mutation identity checks.
+
 A prepared proposal binds the chosen source bytes, reviewed candidate bytes,
 source mapping, target identity and base repository revision/model identity.
 At apply time revalidate the bound proposal and target; stale revisions or
@@ -225,8 +289,8 @@ are retained byte-for-byte. Primary F13's 70 lines are partitioned into eight
 accounting units with explicit transformations. This is not a claim that all
 cited F13 governing authority is bundled or that semantic extraction is complete.
 
-The expected preview distinguishes the full F13 feature from its receipt-adapter
-prerequisite and narrower implementation slices. It retains review limits,
+The expected preview distinguishes the full F13 feature from its narrower validation, transition-core and persistence/replay
+implementation slices. It retains review limits,
 candidate invalidation, feature AwaitingUAT, G2 routing, blocking-finding
 requirements, author adjudication, and the state catalog. File lists and test
 commands remain notes. Slice exclusions do not delete parent requirements;
@@ -274,9 +338,27 @@ is not a test result or a replacement for those gates.
 | D5 | Create-only first version. Updating existing specs requires a later explicit merge/provenance contract. |
 | D6 | Preserve source snapshots and transformations; source coverage is not evidence or proof of meaning. |
 
-The implementation prerequisites are the exact import/provenance and mapping
-profile contracts, the native/external format recognition rules, and the explicit
-amendment to the v0 import exclusion. Owner adoption of this detailed design precedes those plans.
+The implementation prerequisites are:
+
+- Exact import request/result/provenance schemas and closed enums/errors, including
+  imported-origin classification and composition with existing provenance.
+- Candidate composition, anchor/body validation, native preservation and the
+  retained-source/default-context boundary described above.
+- Versioned format recognition, target-scoped heading rules, card grouping,
+  byte disposition accounting and explicit field/evidence gap handling.
+- Adapter identity/authorization, explicit statement-deferral presentation,
+  deterministic preview/apply binding and atomic publication/retry contracts.
+- An explicit bounded exception to OQ-3 and return through the Wave 6 authority
+  process for the new route, public schemas and application seam. R0–R4's
+  maintenance-only exemption does not authorize this capability.
+
+Import is a proposed R3 scope enlargement arising from the adoption finding,
+sequenced after the R0–R2 repairs and before any resumed R3 journey that depends
+on it. It is a separately authorized capability unit, not completion of the
+outstanding Wave 6 constitution, lifecycle, recovery or experiment units. Their
+original order and obligations remain. The authority return must record the
+scope, contracts and ordering before runtime dispatch. Owner adoption of this
+detailed design precedes those plans.
 The user approved F13 as reference, not an unreviewed change to release acceptance.
 If import becomes part of the MVP release, both qualifying adoption journeys must
 use the new identified release. The earlier paused/assisted operator session is
