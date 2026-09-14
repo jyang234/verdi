@@ -1,0 +1,87 @@
+{
+  "purpose": "prototype accounting, not a runtime schema",
+  "primary_source": "primary-f13",
+  "primary_line_partitions": [
+    {
+      "id": "title",
+      "start_line": 602,
+      "end_line": 603,
+      "destination": "F13: bounded gatekeeper state machine",
+      "transformation": "copied meaning; proposed display title"
+    },
+    {
+      "id": "implementation-notes",
+      "start_line": 604,
+      "end_line": 613,
+      "destination": "Retain source file list as implementation notes, not separate requirements or executable instructions.",
+      "transformation": "retained as source"
+    },
+    {
+      "id": "co-inputs",
+      "start_line": 614,
+      "end_line": 617,
+      "destination": "Consumes committed candidate, align, review, adjudication, receipt and G2 facts; produces next-state decisions and required effects.",
+      "transformation": "summary"
+    },
+    {
+      "id": "co-state-catalog",
+      "start_line": 618,
+      "end_line": 643,
+      "destination": "Retain the complete 19-state catalog verbatim in supporting body; no Failed state. Naming later states does not authorize F14 effects.",
+      "transformation": "verbatim catalog retained in source; summary card"
+    },
+    {
+      "id": "validation-notes",
+      "start_line": 644,
+      "end_line": 649,
+      "destination": "Retain the proposed model-test command as a validation recipe; it is not a recorded test result.",
+      "transformation": "retained as source"
+    },
+    {
+      "id": "review-and-transition-criteria",
+      "start_line": 650,
+      "end_line": 656,
+      "destination": "Proposed criteria ac-1 through ac-6 below, retaining every stated condition.",
+      "transformation": "split and summarized"
+    },
+    {
+      "id": "finding-criteria",
+      "start_line": 657,
+      "end_line": 662,
+      "destination": "Proposed criteria ac-7 and ac-8 below.",
+      "transformation": "split and summarized"
+    },
+    {
+      "id": "gate-notes",
+      "start_line": 663,
+      "end_line": 671,
+      "destination": "Retain race/full-gate and Git commands as implementation instructions; checkboxes and commands are not evidence of execution.",
+      "transformation": "retained as source"
+    }
+  ],
+  "supporting_sources": [
+    {
+      "id": "review-validation",
+      "destination": "source drawer, full retained contract; scope-boundary disclosure",
+      "transformation": "no promotion to new cards or completion evidence"
+    },
+    {
+      "id": "transition-core",
+      "destination": "source drawer, full retained contract; scope-boundary disclosure",
+      "transformation": "no promotion to new cards or completion evidence"
+    },
+    {
+      "id": "review-journal",
+      "destination": "source drawer, full retained contract; scope-boundary disclosure",
+      "transformation": "no promotion to new cards or completion evidence"
+    }
+  ],
+  "coverage": {
+    "primary_selected_lines": 70,
+    "primary_accounted_lines": 70,
+    "sources_retained": 4,
+    "sources_selected": 4,
+    "silent_source_drops": 0,
+    "scope": "selected inputs only; not all F13 governing authority or implemented behavior"
+  }
+}

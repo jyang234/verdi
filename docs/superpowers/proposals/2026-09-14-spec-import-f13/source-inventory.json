@@ -1,0 +1,64 @@
+{
+  "purpose": "data-only design prototype; not a runtime import schema, authority promotion, evidence receipt, or completed importer output",
+  "sources": [
+    {
+      "id": "primary-f13",
+      "repository": "Verdi-ATC",
+      "commit": "c346c005d117dfb090e1dedd5a89f45080875a5e",
+      "path": "docs/superpowers/plans/2026-08-24-verdi-atc-stage-1-orchestration.md",
+      "blob": "d4606176f4aacf819552b089f5cf0c55cc372db5",
+      "file_sha256": "55c8e7ccc6df6c04418c1a217b2f15e332b1e1127934d2af70afd82ad1b4a8de",
+      "start_line": 602,
+      "end_line": 671,
+      "selected_sha256": "7c6d95d4aa516cf682e6d4a33d1c260f1c861d938d46559241a7c764bffca577",
+      "snapshot": "sources/primary-f13.md",
+      "role": "primary feature definition"
+    },
+    {
+      "id": "review-validation",
+      "repository": "Verdi-ATC",
+      "commit": "c346c005d117dfb090e1dedd5a89f45080875a5e",
+      "path": "docs/superpowers/plans/2026-09-12-f13-review-validation.md",
+      "blob": "02277d1e7c933d880f2fb01501d6a9bfc7215df7",
+      "file_sha256": "27ab34f14dc13997e35ae303cb245bff66b979f3e919221627c2c741f1b2c093",
+      "start_line": 1,
+      "end_line": 93,
+      "selected_sha256": "27ab34f14dc13997e35ae303cb245bff66b979f3e919221627c2c741f1b2c093",
+      "snapshot": "sources/review-validation.md",
+      "role": "supporting slice contract"
+    },
+    {
+      "id": "transition-core",
+      "repository": "Verdi-ATC",
+      "commit": "c346c005d117dfb090e1dedd5a89f45080875a5e",
+      "path": "docs/superpowers/plans/2026-09-12-f13-transition-core.md",
+      "blob": "8de9c6f4f7ccd987cc9393c72a1154b871573135",
+      "file_sha256": "1de0f2df410f2c567136f489a9f38f56ef2e4138dbd4fd3aa4540a19412350af",
+      "start_line": 1,
+      "end_line": 248,
+      "selected_sha256": "1de0f2df410f2c567136f489a9f38f56ef2e4138dbd4fd3aa4540a19412350af",
+      "snapshot": "sources/transition-core.md",
+      "role": "supporting slice contract"
+    },
+    {
+      "id": "review-journal",
+      "repository": "Verdi-ATC",
+      "commit": "c346c005d117dfb090e1dedd5a89f45080875a5e",
+      "path": "docs/superpowers/plans/2026-09-12-f13-review-journal.md",
+      "blob": "9e02087729bded4ff180bfba94f5fddce92eadb0",
+      "file_sha256": "82faf090ce5bc178d537299672fd0a47ea8aeca57755741ddfe3d6a9377d69cc",
+      "start_line": 1,
+      "end_line": 257,
+      "selected_sha256": "82faf090ce5bc178d537299672fd0a47ea8aeca57755741ddfe3d6a9377d69cc",
+      "snapshot": "sources/review-journal.md",
+      "role": "supporting slice contract"
+    }
+  ],
+  "coverage": {
+    "selected_sources": 4,
+    "byte_preserved_sources": 4,
+    "selected_lines": 668,
+    "semantic_losslessness": "requires review; byte retention alone does not prove card completeness"
+  },
+  "selection_boundary": "Only F13 lines 602-671 from the Stage 1 plan. F14 and other feature sections intentionally excluded. Three support files retained in full. Their cited authority is not automatically traversed or declared fully bundled."
+}
