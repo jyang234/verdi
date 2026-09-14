@@ -505,6 +505,53 @@ func TestCompose_GeneratedAnchorsAreBareObjectIDs(t *testing.T) {
 	}
 }
 
+// sourceWithNoAcceptanceCriteria labels Problem and Outcome but declares no
+// criteria at all — a feature requirement that is not deferrable.
+const sourceWithNoAcceptanceCriteria = "# Sample Feature\n" +
+	"\n" +
+	"## Problem\n" +
+	"\n" +
+	"First line.\n" +
+	"\n" +
+	"## Outcome\n" +
+	"\n" +
+	"Users get value.\n"
+
+// TestCompose_FeatureWithNoAcceptanceCriteria_Refused proves a
+// non-deferrable requirement blocks rather than being dropped to make
+// validation pass: a feature whose source declares no criteria loses the
+// scaffold's placeholder (it is never retained as a real imported
+// requirement) and is then refused by the shared validate-before-write gate
+// with nil bytes.
+func TestCompose_FeatureWithNoAcceptanceCriteria_Refused(t *testing.T) {
+	root := minimalStoreRoot(t)
+	req := minimalRequest()
+	req.Sources[0].Data = []byte(sourceWithNoAcceptanceCriteria)
+
+	plan, err := Normalize(req)
+	if err != nil {
+		t.Fatalf("Normalize: %v", err)
+	}
+
+	candidate, findings, err := Compose(context.Background(), root, req, plan)
+	if err != nil {
+		t.Fatalf("Compose: want a blocking finding, not an error: %v", err)
+	}
+	if candidate != nil {
+		t.Fatalf("Compose composed a feature with no acceptance criteria:\n%s", candidate)
+	}
+	var sawRefusal bool
+	for _, f := range findings {
+		if f.Blocking && f.Code == FindingInvalidCandidate &&
+			strings.Contains(f.Message, "feature spec must declare at least one acceptance criterion") {
+			sawRefusal = true
+		}
+	}
+	if !sawRefusal {
+		t.Fatalf("want a blocking invalid-candidate finding naming the missing criterion requirement, got: %+v", findings)
+	}
+}
+
 // TestCompose_Story_UnconfiguredTracker proves the story-only rule the
 // shared candidate seam exists to reuse actually fires on a COMPOSED story:
 // with a valid parent and implements edge but no jira provider configured,
