@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/jyang234/verdi/internal/artifact"
 	"github.com/jyang234/verdi/internal/model"
 	"github.com/jyang234/verdi/internal/specstate"
 	"github.com/jyang234/verdi/internal/store"
@@ -153,12 +154,61 @@ func filterCandidateFindings(all []Finding, relPath string) []Finding {
 	return out
 }
 
-// corruptDependencyFindings is filled in by a following commit (its own
-// RED test drives the real body): it will surface a Finding, on the
-// dependency's OWN path, for any spec doc.Base.Links names that exists on
-// disk but fails to decode — the one case filterCandidateFindings' own
-// relPath-only filter would otherwise silently swallow. A placeholder
-// empty slice for now changes nothing about the candidate result.
+// corruptDependencyFindings surfaces, on the dependency's OWN path, every
+// spec doc.Base.Links names (a parent feature, an implements/resolves/
+// supersedes/... target — never a type:story tracker ref, never a svc/...
+// external ref, neither of which is a corpus Document at all) that exists
+// on disk but fails to decode. filterCandidateFindings' own relPath-only
+// filter would otherwise silently swallow this: VL-003's own ByRef lookup
+// treats "exists but corrupt" identically to "does not exist at all" (both
+// are simply absent from ByRef), so without this pass a broken dependency
+// reads only as the candidate's own generic "does not resolve" — never
+// naming which file is broken or why (spec-import-contract: "surface
+// corrupt or unresolvable dependencies ... must not be silent"). The
+// Finding mirrors vl001{}.Check's own shape verbatim for exactly this one
+// document — not a second decode-failure vocabulary, the same fact vl001
+// would report for this file if it ran over the whole corpus, scoped here
+// to only the files this candidate actually depends on.
 func corruptDependencyFindings(snap *Snapshot, doc *Document) []Finding {
+	if doc.DecodeErr != nil {
+		return nil
+	}
+
+	var findings []Finding
+	reported := map[string]bool{}
+	for _, l := range doc.Base.Links {
+		if l.Type == artifact.LinkStory || externalRefShapeRe.MatchString(l.Ref) {
+			continue
+		}
+		ref, err := artifact.ParseRef(l.Ref)
+		if err != nil || ref.Kind != artifact.KindSpec {
+			continue
+		}
+		for _, zone := range []string{store.ZoneActive, store.ZoneArchive} {
+			depRelPath := store.SpecRelPath(zone, ref.Name)
+			if reported[depRelPath] {
+				continue
+			}
+			dep := findDocumentByRelPath(snap, depRelPath)
+			if dep == nil || dep.DecodeErr == nil {
+				continue
+			}
+			reported[depRelPath] = true
+			findings = append(findings, Finding{Rule: "VL-001", Path: dep.RelPath, Message: dep.DecodeErr.Error()})
+		}
+	}
+	return findings
+}
+
+// findDocumentByRelPath returns the Document in snap.Docs whose RelPath is
+// relPath, or nil when no such document was walked at all (as opposed to
+// one that was walked but failed to decode, which IS returned — callers
+// distinguish the two via the returned Document's own DecodeErr).
+func findDocumentByRelPath(snap *Snapshot, relPath string) *Document {
+	for _, d := range snap.Docs {
+		if d.RelPath == relPath {
+			return d
+		}
+	}
 	return nil
 }
