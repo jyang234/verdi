@@ -316,7 +316,11 @@ func applyCandidateEdits(rendered string, scaffold *artifact.SpecFrontmatter, re
 // candidate being prepared, through splice's own existing edit-object
 // operations (edit-ac/-constraint/-decision/-question), never a parser of
 // this package's own. Object body headings are already "## <id>", so no
-// body edit is needed and none is made.
+// body edit is needed and none is made. The edit rewrites the whole entry,
+// which loses nothing: these are objects pass 4 itself just appended, and
+// AppendObject writes exactly the id/text/evidence/anchor fields the edit
+// rewrites — a template's own custom frontmatter keys live outside these
+// object blocks and are never touched.
 //
 // One ApplyDraftMutations batch is enough here — unlike pass 4's appends, an
 // edit replaces an element that already exists, and ApplyDraftMutations

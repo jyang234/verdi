@@ -303,6 +303,87 @@ func TestCompose_TemplateWithoutPlaceholderStub(t *testing.T) {
 	}
 }
 
+// featureTemplateWithCustomFields is a store override carrying a
+// team-sanctioned custom: extension key and its own extra body section, on
+// top of the canonical placeholder shape — the "preserve template-defined
+// custom fields ... rather than dropping content" half of the contract's
+// candidate rules.
+const featureTemplateWithCustomFields = `---
+id: {{safe .Ref}}
+kind: spec
+title: {{printf "%q" .Title}}
+owners: {{safe .Owners}}
+class: feature
+problem: { text: {{printf "%q" .Problem}}, anchor: problem }
+outcome: { text: {{printf "%q" .Outcome}}, anchor: outcome }
+acceptance_criteria:
+  - { id: ac-1, text: "TODO: replace with real acceptance criteria before accept", evidence: [static, attestation], anchor: ac-1 }
+stubs:
+  - { slug: todo-replace-stub-slug, acceptance_criteria: [ac-1] }
+custom:
+  rollout_plan: "staged"
+---
+# {{.Title}}
+
+## Problem
+
+TODO: design notes.
+
+## Outcome
+
+TODO: design notes.
+
+## Ac 1
+
+TODO: design notes.
+
+## Rollout Plan
+
+Ship behind a flag.
+`
+
+// TestCompose_PreservesCustomTemplateFields proves neither the placeholder
+// removal nor the anchor rewrite drops a template's own custom data: the
+// custom: key and the extra body section both survive into the candidate.
+func TestCompose_PreservesCustomTemplateFields(t *testing.T) {
+	root := minimalStoreRoot(t)
+	writeStoreFile(t, root, ".verdi/templates/feature.md", featureTemplateWithCustomFields)
+
+	req := minimalRequest()
+	req.Mappings = []Mapping{
+		{Target: "ac-1", Evidence: []string{"static", "attestation"}},
+		{Target: "ac-2", Evidence: []string{"static", "attestation"}},
+	}
+	plan, err := Normalize(req)
+	if err != nil {
+		t.Fatalf("Normalize: %v", err)
+	}
+
+	candidate, findings, err := Compose(context.Background(), root, req, plan)
+	if err != nil {
+		t.Fatalf("Compose: %v", err)
+	}
+	requireNoBlocking(t, findings, candidate)
+
+	fm, body, err := artifact.SplitFrontmatter(candidate)
+	if err != nil {
+		t.Fatalf("SplitFrontmatter: %v\n%s", err, candidate)
+	}
+	spec, err := artifact.DecodeSpec(fm)
+	if err != nil {
+		t.Fatalf("DecodeSpec: %v\n%s", err, candidate)
+	}
+	if got := spec.Custom["rollout_plan"]; got != "staged" {
+		t.Fatalf("custom.rollout_plan = %v, want %q:\n%s", got, "staged", candidate)
+	}
+	if !strings.Contains(string(body), "## Rollout Plan\n\nShip behind a flag.") {
+		t.Fatalf("the template's own extra body section was dropped:\n%s", body)
+	}
+	if len(spec.Stubs) != 0 {
+		t.Fatalf("the declared placeholder stub was not removed: %+v", spec.Stubs)
+	}
+}
+
 // sourceWithAllObjectKinds labels one object of every generated kind, in a
 // fixed source order, so the composed candidate's anchors, body text and
 // insertion order can all be pinned at once.
@@ -424,11 +505,93 @@ func TestCompose_GeneratedAnchorsAreBareObjectIDs(t *testing.T) {
 	}
 }
 
+// TestCompose_Story_UnconfiguredTracker proves the story-only rule the
+// shared candidate seam exists to reuse actually fires on a COMPOSED story:
+// with a valid parent and implements edge but no jira provider configured,
+// VL-005 refuses the candidate. Before the placeholder-removal fix this rule
+// was unreachable on the external path — every story died at operation[0].
+func TestCompose_Story_UnconfiguredTracker(t *testing.T) {
+	root, parentSlug := storeRootWithComposedParent(t)
+	// Drop the provider configuration the parent's composition needed nothing
+	// from; the story's own jira:SAMPLE-1 tracker now has no configured scheme.
+	writeStoreFile(t, root, ".verdi/verdi.yaml", "schema: verdi.layout/v1\n")
+
+	req := minimalRequest()
+	req.Target = Target{Slug: "sample-story", Class: "story", Title: "Sample Story", Story: "jira:SAMPLE-1"}
+	req.Links = []Link{{Type: "implements", Ref: "spec/" + parentSlug + "#ac-1"}}
+	req.Mappings = []Mapping{
+		{Target: "ac-1", Evidence: []string{"static"}},
+		{Target: "ac-2", Evidence: []string{"static"}},
+	}
+	plan, err := Normalize(req)
+	if err != nil {
+		t.Fatalf("Normalize: %v", err)
+	}
+
+	candidate, findings, err := Compose(context.Background(), root, req, plan)
+	if err != nil {
+		t.Fatalf("Compose: want a blocking finding, not an error: %v", err)
+	}
+	if candidate != nil {
+		t.Fatalf("Compose composed a story whose tracker scheme is not configured:\n%s", candidate)
+	}
+	var sawTracker bool
+	for _, f := range findings {
+		if f.Blocking && f.Code == FindingInvalidCandidate && strings.Contains(f.Message, "VL-005") {
+			sawTracker = true
+		}
+	}
+	if !sawTracker {
+		t.Fatalf("want a blocking VL-005 finding about the unconfigured tracker, got: %+v", findings)
+	}
+}
+
+// TestCompose_Story_UnresolvableParent is the second story-only reachability
+// proof: a configured tracker and a well-formed implements edge naming a
+// parent that does not exist is refused by VL-003 on the composed story,
+// rather than silently accepted.
+func TestCompose_Story_UnresolvableParent(t *testing.T) {
+	root, _ := storeRootWithComposedParent(t)
+
+	req := minimalRequest()
+	req.Target = Target{Slug: "sample-story", Class: "story", Title: "Sample Story", Story: "jira:SAMPLE-1"}
+	req.Links = []Link{{Type: "implements", Ref: "spec/no-such-feature#ac-1"}}
+	req.Mappings = []Mapping{
+		{Target: "ac-1", Evidence: []string{"static"}},
+		{Target: "ac-2", Evidence: []string{"static"}},
+	}
+	plan, err := Normalize(req)
+	if err != nil {
+		t.Fatalf("Normalize: %v", err)
+	}
+
+	candidate, findings, err := Compose(context.Background(), root, req, plan)
+	if err != nil {
+		t.Fatalf("Compose: want a blocking finding, not an error: %v", err)
+	}
+	if candidate != nil {
+		t.Fatalf("Compose composed a story implementing a nonexistent parent:\n%s", candidate)
+	}
+	var sawUnresolved bool
+	for _, f := range findings {
+		if f.Blocking && strings.Contains(f.Message, "VL-003") && strings.Contains(f.Message, "does not resolve") {
+			sawUnresolved = true
+		}
+	}
+	if !sawUnresolved {
+		t.Fatalf("want a blocking VL-003 finding naming the unresolvable parent, got: %+v", findings)
+	}
+}
+
 // TestCompose_Story_MissingImplementsEdge proves a story candidate with no
 // explicit implements (or spike resolves) edge is refused — "Stories
 // require their existing valid parent/implements ... relationship ... no
 // TODO tracker is synthesized" (spec-import-contract.md): Compose never
-// invents one to make the candidate pass.
+// invents one to make the candidate pass. The refusal comes from the
+// rendered-scaffold decode gate, three stages before the candidate lint
+// seam, because a story scaffold with no edge at all cannot even be
+// rendered into a decodable spec — pinned here so a regression cannot move
+// it silently to some other gate.
 func TestCompose_Story_MissingImplementsEdge(t *testing.T) {
 	root := minimalStoreRoot(t)
 	req := Request{
@@ -454,7 +617,9 @@ func TestCompose_Story_MissingImplementsEdge(t *testing.T) {
 	}
 	var sawImplements bool
 	for _, f := range findings {
-		if f.Blocking && strings.Contains(f.Message, "implements") {
+		if f.Blocking && f.Code == FindingUnsupportedStructure &&
+			strings.Contains(f.Message, "rendered scaffold does not decode") &&
+			strings.Contains(f.Message, "story spec requires >=1 implements edge") {
 			sawImplements = true
 		}
 	}
