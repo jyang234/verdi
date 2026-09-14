@@ -1,6 +1,7 @@
 package specimport
 
 import (
+	"bytes"
 	"context"
 	"os"
 	"path/filepath"
@@ -110,6 +111,64 @@ func TestCompose_ExternalFeature_Happy(t *testing.T) {
 	}
 	if strings.Contains(string(candidate), "TODO: replace with real acceptance criteria before accept") {
 		t.Fatalf("the generated placeholder AC text survived:\n%s", candidate)
+	}
+}
+
+// sourceWithRetainedCommand is validMarkdownSource plus one extra,
+// unrecognized section carrying a shell command — content RetainUnmapped
+// keeps as retained-only source, never promoted into the candidate.
+const sourceWithRetainedCommand = "# Sample Feature\n" +
+	"\n" +
+	"## Problem\n" +
+	"\n" +
+	"First line.\n" +
+	"Second line.\n" +
+	"\n" +
+	"## Outcome\n" +
+	"\n" +
+	"Users get value.\n" +
+	"\n" +
+	"## Acceptance Criteria\n" +
+	"\n" +
+	"- Criterion one.\n" +
+	"- Criterion two.\n" +
+	"\n" +
+	"## Appendix\n" +
+	"\n" +
+	"Run `git commit -m \"wip\"` before pushing.\n"
+
+// TestCompose_RetainedCommandNeverPromoted proves a retained-only shell
+// command in the source — never mapped to any target — never enters the
+// composed candidate (spec-import-contract.md's own worked example:
+// "if bytes.Contains(candidate, []byte(\"git commit -m\")) { t.Fatal(...)
+// }"). Compose only ever writes Field.Text values; nothing in its
+// pipeline copies raw, unmapped source bytes into the output at all, so
+// this holds by construction — pinned here as a regression guard.
+func TestCompose_RetainedCommandNeverPromoted(t *testing.T) {
+	root := minimalStoreRoot(t)
+	req := minimalRequest()
+	req.Sources[0].Data = []byte(sourceWithRetainedCommand)
+	req.RetainUnmapped = true
+	req.Mappings = []Mapping{
+		{Target: "ac-1", Evidence: []string{"static", "attestation"}},
+		{Target: "ac-2", Evidence: []string{"static", "attestation"}},
+	}
+
+	plan, err := Normalize(req)
+	if err != nil {
+		t.Fatalf("Normalize: %v", err)
+	}
+
+	candidate, findings, err := Compose(context.Background(), root, req, plan)
+	if err != nil {
+		t.Fatalf("Compose: %v", err)
+	}
+	requireNoBlocking(t, findings, candidate)
+	if candidate == nil {
+		t.Fatal("Compose returned nil bytes alongside zero blocking findings")
+	}
+	if bytes.Contains(candidate, []byte("git commit -m")) {
+		t.Fatalf("retained shell command promoted into the candidate:\n%s", candidate)
 	}
 }
 
