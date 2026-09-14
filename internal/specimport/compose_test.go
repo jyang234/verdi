@@ -112,3 +112,69 @@ func TestCompose_ExternalFeature_Happy(t *testing.T) {
 		t.Fatalf("the generated placeholder AC text survived:\n%s", candidate)
 	}
 }
+
+// TestCompose_BlockingFindings_ReturnsNilBytes pins Compose's own
+// documented contract: an incomplete candidate (here, minimalRequest()'s
+// two automatically-recognized ACs with no evidence mapped at all —
+// Normalize's own missingEvidenceFindings already marks both blocking)
+// returns nil bytes alongside the blocking findings, never a best-effort
+// candidate a caller could mistake for one ready to commit.
+func TestCompose_BlockingFindings_ReturnsNilBytes(t *testing.T) {
+	root := minimalStoreRoot(t)
+	req := minimalRequest() // no evidence mappings supplied
+
+	plan, err := Normalize(req)
+	if err != nil {
+		t.Fatalf("Normalize: %v", err)
+	}
+	if !hasBlocking(plan.Findings) {
+		t.Fatalf("test fixture assumption broken: expected Normalize to already report a blocking missing-evidence finding: %+v", plan.Findings)
+	}
+
+	candidate, findings, err := Compose(context.Background(), root, req, plan)
+	if err != nil {
+		t.Fatalf("Compose: %v", err)
+	}
+	if candidate != nil {
+		t.Fatalf("Compose returned %d bytes alongside a blocking finding, want nil:\n%s", len(candidate), candidate)
+	}
+	if !hasBlocking(findings) {
+		t.Fatalf("want the blocking missing-evidence finding preserved in Compose's own result, got: %+v", findings)
+	}
+	var sawMissingEvidence bool
+	for _, f := range findings {
+		if f.Code == FindingMissingEvidence {
+			sawMissingEvidence = true
+		}
+	}
+	if !sawMissingEvidence {
+		t.Fatalf("want a missing-evidence finding surfaced through Compose, got: %+v", findings)
+	}
+}
+
+// TestCompose_F13PinnedFixture_BlockingFindings_NotAValidCandidate runs
+// the F13 pinned fixture (profile_f13_test.go's own f13Request, already
+// proven by TestNormalize_F13ProfileMissingStatementsAndAllEvidenceGaps to
+// leave problem/outcome unmapped and every AC without evidence) through
+// Compose end to end: the result must carry blocking findings and nil
+// bytes — an F13 recognition pass alone is never a valid candidate.
+func TestCompose_F13PinnedFixture_BlockingFindings_NotAValidCandidate(t *testing.T) {
+	root := minimalStoreRoot(t)
+	req := f13Request(t, true)
+
+	plan, err := Normalize(req)
+	if err != nil {
+		t.Fatalf("Normalize: %v", err)
+	}
+
+	candidate, findings, err := Compose(context.Background(), root, req, plan)
+	if err != nil {
+		t.Fatalf("Compose: %v", err)
+	}
+	if candidate != nil {
+		t.Fatalf("F13 recognition alone composed a valid candidate; want blocking findings and nil bytes:\n%s", candidate)
+	}
+	if !hasBlocking(findings) {
+		t.Fatalf("want at least one blocking finding for the unmapped F13 pinned fixture, got: %+v", findings)
+	}
+}
