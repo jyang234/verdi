@@ -379,93 +379,6 @@ func extractObjectSection(sourceID string, body []byte, bodyStart int, top []ast
 	return fields, nil
 }
 
-// bulletItem is one direct child of a flat Markdown bullet list, located in
-// one source's SELECTED bytes.
-type bulletItem struct {
-	// ordinal is the item's 1-based position among its list's direct
-	// items, counted even when the item itself is not representable, so
-	// generated ids keep their source-position numbering
-	// (spec-import-contract.md residual 4).
-	ordinal int
-	// supported is false for an item this package cannot represent as a
-	// span at all: an empty item, or one containing a nested list.
-	supported bool
-	// markerStart is the offset of the item's own bullet marker; start/end
-	// are its CONTENT span, excluding the marker and the final line's
-	// trailing terminator. start/end is the span automatic extraction
-	// records.
-	markerStart, start, end int
-	// text is the list-item transform's output for this item.
-	text string
-}
-
-// bulletItemsOf returns one bulletItem per direct child of list, in source
-// order, with base added to every offset so the result is expressed in the
-// source's selected-byte coordinates rather than the post-frontmatter
-// body's.
-//
-// text is the declared list-item transform: goldmark's own per-line
-// segments already exclude the bullet marker and each continuation line's
-// indentation, so joining them IS the contract's "declared deterministic
-// deindent transform". Automatic extraction and explicit list-item mappings
-// share this one implementation rather than each deriving a text of their
-// own, which is what made the same named transform produce two different
-// results on the same shape.
-func bulletItemsOf(body []byte, base int, list ast.Node) []bulletItem {
-	var items []bulletItem
-	ordinal := 0
-	for node := list.FirstChild(); node != nil; node = node.NextSibling() {
-		ordinal++
-		segs := leafSegments(node)
-		if len(segs) == 0 || containsNestedList(node) {
-			items = append(items, bulletItem{ordinal: ordinal})
-			continue
-		}
-		start := segs[0].Start
-		items = append(items, bulletItem{
-			ordinal:     ordinal,
-			supported:   true,
-			markerStart: base + lineStartBefore(body, start),
-			start:       base + start,
-			end:         base + trimTrailingLineEnd(body, segs[len(segs)-1].Stop),
-			text:        strings.TrimRight(joinSegments(body, segs), "\r\n"),
-		})
-	}
-	return items
-}
-
-// supportedBulletItems returns every direct item of every top-level flat
-// bullet list in one source's selected bytes — exactly the shape automatic
-// extraction supports. It is the structural validator an explicit
-// list-item Mapping is checked against, so "list-item is valid only for an
-// actual supported direct list item span" (spec-import-contract.md) is
-// enforced against the source's real Markdown structure instead of assumed
-// from the caller's offsets. A list nested inside another list or any other
-// container is not a direct item of a supported flat list and is not
-// returned.
-func supportedBulletItems(selected []byte) ([]bulletItem, error) {
-	bodyStart, err := stripFrontmatter(selected)
-	if err != nil {
-		return nil, err
-	}
-	body := selected[bodyStart:]
-	doc := goldmark.New().Parser().Parse(gmtext.NewReader(body))
-
-	var items []bulletItem
-	for node := doc.FirstChild(); node != nil; node = node.NextSibling() {
-		list, ok := bulletList(node)
-		if !ok {
-			continue
-		}
-		for _, item := range bulletItemsOf(body, bodyStart, list) {
-			if item.supported {
-				items = append(items, item)
-			}
-		}
-	}
-	return items, nil
-}
-
 // blockedSourceIDs returns one blockedSourceID per blocked list item in one
 // object section, computed as a second, lightweight pass so
 // extractObjectSection's happy path does not need to thread an extra return
@@ -592,33 +505,6 @@ func leafSegments(n ast.Node) []gmtext.Segment {
 		segs = append(segs, leafSegments(c)...)
 	}
 	return segs
-}
-
-// joinSegments concatenates each segment's own value over body — this,
-// not a raw contiguous slice, is what correctly reproduces a multi-line
-// list item's deindented continuation lines: goldmark places each
-// continuation segment's Start exactly at its de-indented content, so a
-// raw slice from the first segment's start to the last segment's stop
-// would incorrectly include the raw source indentation goldmark's own
-// per-line segments already exclude.
-func joinSegments(body []byte, segs []gmtext.Segment) string {
-	var buf bytes.Buffer
-	for _, s := range segs {
-		buf.Write(s.Value(body))
-	}
-	return buf.String()
-}
-
-// trimTrailingLineEnd returns end adjusted backward past exactly one
-// trailing line terminator ("\r\n" or "\n") ending at end, if present.
-func trimTrailingLineEnd(data []byte, end int) int {
-	if end > 0 && end <= len(data) && data[end-1] == '\n' {
-		end--
-		if end > 0 && data[end-1] == '\r' {
-			end--
-		}
-	}
-	return end
 }
 
 // trimBodyRange narrows the raw candidate window [start,end) of data to
