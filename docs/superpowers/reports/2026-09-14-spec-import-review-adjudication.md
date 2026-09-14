@@ -1,7 +1,8 @@
 # Spec-import proposal review adjudication
 
 Status: main-authored adjudication of the single independent Opus 5 review of
-`8fd72841f5faf2e7ea9133d686dacdc046de116c`; one correction pass, closure pending.
+`8fd72841f5faf2e7ea9133d686dacdc046de116c`; one correction pass; same-reviewer closure **CLOSED** on
+`23772e693622241f86baccaab8783c32b30563da`.
 This report does not ratify authority or authorize runtime dispatch.
 
 ## Findings and disposition
@@ -39,3 +40,18 @@ CLI authority excerpt. Main retains authorship and adjudication. Closure may
 establish that this direction is suitable for detailed contracts; it cannot
 substitute for adopting those contracts, the required authority return, runtime
 implementation, or two independent/same-release MVP journey witnesses.
+
+## Main closure disposition
+
+Accept the same reviewer's CLOSED result on the corrected head. B1 and B3 are
+closed by explicit prerequisites; B2's alleged contradiction was withdrawn by
+Opus and the documentation gap is closed. O1–O8 are addressed. No third round,
+additional fixer or authority promotion occurred.
+
+Track the four nonblocking contract obligations: existing-resolver anchor syntax;
+explicit promotion preserving input/path/lifecycle restrictions; separate CLI and
+proposed browser deferral authority; and generated-placeholder origin disclosure.
+The fifth observation, stale closure bookkeeping, is addressed by this evidence
+update. The reviewed proposal bytes remain those of `23772e69`; this update only
+records the review outcome. Required design adoption and contract/authority work
+remain separate from runtime and MVP acceptance.

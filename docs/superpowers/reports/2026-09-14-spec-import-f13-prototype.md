@@ -1,8 +1,8 @@
 # F13 spec-import prototype handoff
 
 Status: data-only design/prototype; authorized independent Opus 5 review executed
-on `8fd72841f5faf2e7ea9133d686dacdc046de116c`; main correction prepared and
-same-reviewer closure pending. No importer implementation or revised-release
+on `8fd72841f5faf2e7ea9133d686dacdc046de116c`; main correction `23772e693622241f86baccaab8783c32b30563da`
+received same-reviewer **CLOSED** verdict. No importer implementation or revised-release
 acceptance claimed.
 
 ## Deliverables
@@ -71,8 +71,10 @@ SHA-256 is `07f441a2ef84f4775cec3dd02992c416ab98db7a02a2b24bb376cd87d319f9dc`.
 Opus reported three blockers and eight nonblocking observations. Main's
 [adjudication](2026-09-14-spec-import-review-adjudication.md) distinguishes accepted
 contract clarifications from the deferral contradiction refuted by the archived
-CLI authority. One consolidated correction is prepared for the same reviewer's
-single closure check. No third review round is authorized by this workflow.
+CLI authority. One consolidated correction received the same reviewer's single **CLOSED**
+verdict on `23772e693622241f86baccaab8783c32b30563da`. Opus explicitly withdrew
+its B2 contradiction claim after inspecting the archived CLI authority. No third
+review round was performed.
 
 Local packet, process/model evidence and reviewer output are retained under
 `/Users/johnyang/code/verdi-system/.local/verdi-system/development/spec-import-f13-20260914/mechanical-review/`.
@@ -128,3 +130,27 @@ The correction makes retained-only destinations and candidate-composition
 prerequisites explicit, adds complete primary-byte disposition accounting and
 10 statement/evidence value gaps, and records the required Wave 6 authority
 return. No source snapshot, canonical/frozen authority or runtime file changed.
+
+## Closure and next boundary
+
+The same genuine Claude Code Opus 5 session returned **CLOSED** for corrected
+head `23772e693622241f86baccaab8783c32b30563da` (process exit 0, result `success`,
+`is_error: false`, tools empty; both closure assistant messages `claude-opus-5`).
+Main accepts closure of B1–B3 and disposition of O1–O8. The remaining contract
+work must pin anchor syntax against the current resolver, preserve import safety
+when promoting retained passages, distinguish proposed browser deferral from
+existing CLI authority, and label generated placeholders truthfully. These are
+tracked prerequisites, not remaining defects in the data-only prototype.
+
+The closure packet and results are recorded beside the first review:
+`closure-metadata.json`, `closure-prompt.txt`, `closure-stream.jsonl`,
+`closure-process.json`, `closure-answer.md`. The corrected primary-byte partition
+was checked locally: **2409/2409 bytes accounted for once**, 8/8 criteria unchanged,
+10/10 limited statement/evidence value gaps enumerated. Authored-file whitespace
+checks passed; pinned source bytes remain unchanged.
+
+Next is owner adoption of the reviewed detailed direction and the explicit
+bounded scope/authority return, followed by exact implementation contracts.
+Runtime dispatch has not started; FABLE 5.1 remains the required genuine Claude
+Code model for the later frontend work. The two-journey release criterion and
+hosted-testing deferral remain unchanged.
