@@ -112,6 +112,7 @@ func Normalize(req Request) (Plan, error) {
 	if req.Format == FormatManualV1 {
 		findings = append(findings, manualMissingStatementFindings(fields)...)
 	}
+	findings = demoteResolvedFieldGaps(findings, fields, req.Mappings)
 
 	mappedBySource := make(map[string][]mappedSpan, len(req.Sources))
 	for _, f := range fields {

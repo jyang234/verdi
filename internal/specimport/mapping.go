@@ -273,6 +273,58 @@ func resolveSourceIDFindings(findings []Finding, mappings []Mapping, blocked []b
 	return out
 }
 
+// demotableGapCodes are the findings that report a missing or unusable
+// VALUE for one specific field target. Every other code reports something
+// an explicit mapping does not resolve — a peer/higher heading
+// (multiple-targets), a primary with no heading at all
+// (unsupported-structure), an unresolved object SECTION (ambiguous-field on
+// a section display name, which is never a Mapping target), a
+// source-declared id still needing its own item mapping, or bytes with no
+// disposition (unresolved-coverage on a source id) — so none is ever
+// demoted, whatever its target string happens to be.
+var demotableGapCodes = map[string]bool{
+	FindingMissingStatement: true,
+	FindingAmbiguousField:   true,
+	FindingEmptyField:       true,
+}
+
+// demoteResolvedFieldGaps turns a field-value gap into a truthful
+// NONBLOCKING disclosure when an explicit Mapping actually resolved that
+// exact target to a nonblank value.
+//
+// Without this, Normalize's own output contradicted itself: a Plan carried
+// a resolved Fields entry for problem and, at the same time, a blocking
+// finding asserting problem was missing, so an explicitly mapped statement
+// could never become ready (spec-import-contract.md: "Explicit text/span
+// Mappings override the automatic mapping for the same target"). The source
+// fact is preserved rather than erased — the source really does lack, or
+// ambiguously declare, that section — it simply no longer blocks a value
+// the user supplied. A mapping that resolved to nothing demotes nothing.
+func demoteResolvedFieldGaps(findings []Finding, fields []Field, mappings []Mapping) []Finding {
+	resolved := make(map[string]bool, len(mappings))
+	for _, m := range mappings {
+		if isEvidenceOnlyMapping(m) {
+			continue // evidence-only changes evidence, never a field's value.
+		}
+		resolved[m.Target] = true
+	}
+	for _, f := range fields {
+		if !nonBlankUTF8(f.Text) {
+			delete(resolved, f.Target)
+		}
+	}
+
+	out := make([]Finding, 0, len(findings))
+	for _, f := range findings {
+		if resolved[f.Target] && demotableGapCodes[f.Code] {
+			f.Blocking = false
+			f.Message += "; an explicit mapping supplied this value, so this source-structure gap is disclosed rather than blocking"
+		}
+		out = append(out, f)
+	}
+	return out
+}
+
 // spansItem reports whether m's span names exactly item: either its content
 // span (the span automatic extraction records) or that same item including
 // its own bullet marker.

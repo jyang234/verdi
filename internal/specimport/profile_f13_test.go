@@ -166,6 +166,49 @@ func TestNormalize_F13ProfileMissingStatementsAndAllEvidenceGaps(t *testing.T) {
 	}
 }
 
+// TestNormalize_F13ProfileStatementsMappedFromASupportSource pins the F13
+// half of the same reconciliation: the profile's bound primary genuinely
+// has no labeled Problem/Outcome, and a user may map them from a supporting
+// source. Both facts must survive — the statements resolve, and the
+// profile's structural disclosure stays visible as nonblocking.
+func TestNormalize_F13ProfileStatementsMappedFromASupportSource(t *testing.T) {
+	support := Source{ID: "notes", Label: "notes.md", Data: []byte("The gate cannot be audited.\n\nEvery gate decision is reviewable.\n")}
+	req := f13Request(t, true, support)
+	req.Mappings = []Mapping{
+		{Target: "problem", SourceID: "notes", Start: 0, End: 27, Transform: TransformIdentity},
+		{Target: "outcome", SourceID: "notes", Start: 29, End: 63, Transform: TransformIdentity},
+	}
+
+	plan, err := Normalize(req)
+	if err != nil {
+		t.Fatalf("Normalize: unexpected error: %v", err)
+	}
+	for _, target := range []string{"problem", "outcome"} {
+		field, ok := fieldByTarget(plan.Fields, target)
+		if !ok || field.Text == "" {
+			t.Fatalf("%s = %+v ok=%v, want the explicitly mapped statement", target, field, ok)
+		}
+		f, ok := findingForTarget(plan.Findings, FindingMissingStatement, target)
+		if !ok {
+			t.Fatalf("the profile's structural disclosure for %s was cleared entirely: %+v", target, plan.Findings)
+		}
+		if f.Blocking {
+			t.Errorf("missing-statement for the explicitly mapped %s is still blocking: %+v", target, f)
+		}
+	}
+	// The eight evidence gaps are untouched, and the primary's pinned byte
+	// accounting is unaffected by mapping statements from another source.
+	for _, card := range f13PinnedCards {
+		if f, ok := findingForTarget(plan.Findings, FindingMissingEvidence, card.target); !ok || !f.Blocking {
+			t.Errorf("missing-evidence for %s = %+v ok=%v, want it still blocking", card.target, f, ok)
+		}
+	}
+	cov := coverageForSource(t, plan, "primary-f13")
+	if cov.TotalBytes != 2409 || cov.MappedBytes != 642 || cov.RetainedBytes != 1767 || len(cov.Intervals) != 17 {
+		t.Errorf("primary coverage changed: %+v", cov)
+	}
+}
+
 func TestNormalize_F13ProfileRefusesAlteredPrimaryBytes(t *testing.T) {
 	primary := readF13Fixture(t, "primary-f13.md")
 	altered := append([]byte(nil), primary...)

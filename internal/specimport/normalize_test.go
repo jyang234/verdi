@@ -223,6 +223,124 @@ func TestNormalize_ManualV1ExplicitMappingSuppliesStatement(t *testing.T) {
 	}
 }
 
+// TestNormalize_ExplicitMappingDemotesOnlyItsOwnResolvedGap pins that a
+// single Plan may not simultaneously carry a resolved Fields entry for a
+// target and a blocking finding asserting that target is missing or
+// ambiguous. The contract says "Explicit text/span Mappings override the
+// automatic mapping for the same target" and the parent design says "A
+// required statement absent from the source can be mapped by the user".
+// The source-structure fact stays visible as a nonblocking disclosure; only
+// the corresponding gap is demoted. Deferral remains Task 2's concern.
+func TestNormalize_ExplicitMappingDemotesOnlyItsOwnResolvedGap(t *testing.T) {
+	t.Run("missing statement mapped by the user", func(t *testing.T) {
+		data := readMarkdownFixture(t, "missing-label.md")
+		mapped := "The real problem is latency."
+		req := minimalRequest()
+		req.Sources[0].Data = data
+		req.Mappings = []Mapping{{Target: "problem", Text: &mapped}}
+
+		plan, err := Normalize(req)
+		if err != nil {
+			t.Fatalf("Normalize: unexpected error: %v", err)
+		}
+		if f, ok := fieldByTarget(plan.Fields, "problem"); !ok || f.Text != mapped {
+			t.Fatalf("problem = %+v ok=%v, want the explicitly mapped value", f, ok)
+		}
+		resolved, ok := findingForTarget(plan.Findings, FindingMissingStatement, "problem")
+		if !ok {
+			t.Fatalf("the source-structure disclosure for problem was cleared entirely: %+v", plan.Findings)
+		}
+		if resolved.Blocking {
+			t.Errorf("missing-statement for the explicitly mapped problem is still blocking: %+v", resolved)
+		}
+		unmapped, ok := findingForTarget(plan.Findings, FindingMissingStatement, "outcome")
+		if !ok || !unmapped.Blocking {
+			t.Errorf("missing-statement for the UNMAPPED outcome = %+v ok=%v, want it still blocking", unmapped, ok)
+		}
+	})
+
+	t.Run("ambiguous statement mapped by the user", func(t *testing.T) {
+		data := readMarkdownFixture(t, "duplicate-label.md")
+		start, end := spanOf(t, data, "A second, conflicting problem statement.")
+		req := minimalRequest()
+		req.Sources[0].Data = data
+		req.Mappings = []Mapping{{Target: "problem", SourceID: "source", Start: start, End: end, Transform: TransformIdentity}}
+
+		plan, err := Normalize(req)
+		if err != nil {
+			t.Fatalf("Normalize: unexpected error: %v", err)
+		}
+		f, ok := findingForTarget(plan.Findings, FindingAmbiguousField, "problem")
+		if !ok {
+			t.Fatalf("the ambiguity disclosure for problem was cleared entirely: %+v", plan.Findings)
+		}
+		if f.Blocking {
+			t.Errorf("ambiguous-field for the explicitly mapped problem is still blocking: %+v", f)
+		}
+	})
+
+	t.Run("unrelated structural findings are untouched", func(t *testing.T) {
+		data := readMarkdownFixture(t, "unresolved-list.md")
+		mapped := "A corrected problem."
+		req := minimalRequest()
+		req.Sources[0].Data = data
+		req.RetainUnmapped = false
+		req.Mappings = []Mapping{{Target: "problem", Text: &mapped}}
+
+		plan, err := Normalize(req)
+		if err != nil {
+			t.Fatalf("Normalize: unexpected error: %v", err)
+		}
+		objectAmbiguity, ok := findingForTarget(plan.Findings, FindingAmbiguousField, "acceptance-criteria")
+		if !ok || !objectAmbiguity.Blocking {
+			t.Errorf("object-section ambiguity = %+v ok=%v, want it still blocking", objectAmbiguity, ok)
+		}
+		unresolved, ok := findingForTarget(plan.Findings, FindingUnresolvedCoverage, "source")
+		if !ok || !unresolved.Blocking {
+			t.Errorf("unresolved-coverage = %+v ok=%v, want it still blocking", unresolved, ok)
+		}
+	})
+
+	t.Run("multiple-targets and unsupported-structure are untouched", func(t *testing.T) {
+		for _, fixture := range []string{"multiple-targets.md", "unsupported-structure.md"} {
+			data := readMarkdownFixture(t, fixture)
+			mappedProblem := "A corrected problem."
+			mappedOutcome := "A corrected outcome."
+			req := minimalRequest()
+			req.Sources[0].Data = data
+			req.Mappings = []Mapping{
+				{Target: "problem", Text: &mappedProblem},
+				{Target: "outcome", Text: &mappedOutcome},
+			}
+			plan, err := Normalize(req)
+			if err != nil {
+				t.Fatalf("Normalize(%s): unexpected error: %v", fixture, err)
+			}
+			for _, code := range []string{FindingMultipleTargets, FindingUnsupportedStructure} {
+				if f, ok := findingByCode(plan.Findings, code); ok && !f.Blocking {
+					t.Errorf("%s: %s was demoted by an unrelated statement mapping: %+v", fixture, code, f)
+				}
+			}
+		}
+	})
+
+	t.Run("an empty explicit mapping resolves nothing", func(t *testing.T) {
+		data := readMarkdownFixture(t, "missing-label.md")
+		req := minimalRequest()
+		req.Sources[0].Data = data
+		req.Mappings = []Mapping{{Target: "problem", SourceID: "source", Start: 0, End: 0, Transform: TransformIdentity}}
+
+		plan, err := Normalize(req)
+		if err != nil {
+			t.Fatalf("Normalize: unexpected error: %v", err)
+		}
+		f, ok := findingForTarget(plan.Findings, FindingMissingStatement, "problem")
+		if !ok || !f.Blocking {
+			t.Fatalf("missing-statement for an empty mapping = %+v ok=%v, want it still blocking", f, ok)
+		}
+	})
+}
+
 // TestNormalize_EmptyExplicitMappingsReportBlockingEmptyFields pins that a
 // present mapping target is not a resolved value. An explicit mapping over
 // an empty or blank span produced empty statements and objects with no
