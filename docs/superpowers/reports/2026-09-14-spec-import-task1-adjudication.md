@@ -1,10 +1,10 @@
 # Mechanical import Task 1: owner findings and continuation
 
-Status: **REVISE — implementation present, not accepted**. The parser package is
-committed and its existing tests pass, but main reproduced contract defects.
-Genuine Opus 5 began the independent runtime review and stopped on HTTP 429 before
-returning a verdict. Do not start Task 2 or label the importer/release complete.
-The adopted design and its CLOSED contract review remain unchanged.
+Status: **REVISE — independent review complete, corrections authorized**.
+Task 1's tests pass but ten consolidated finding groups remain open. The resumed
+genuine Opus 5 review returned REVISE; main accepts the corrections below. Do not
+start Task 2 until fixes and distinct re-review close this dependency. The adopted
+design and CLOSED contract review remain unchanged.
 
 ## Fixed runtime range and provenance
 
@@ -111,3 +111,42 @@ new user design adoption is requested.
 Hosted testing stays deferred. The paused independent journey does not count as
 complete; local MVP acceptance still needs two complete journeys on the same new
 release, with the second independent.
+
+## Resumed independent review and owner adjudication
+
+The same reviewer session `be44d409-ddde-4956-8fa1-ac552126e2a4` resumed as actual
+`claude-opus-5` and completed with REVISE, exit 0, at the unchanged runtime range.
+Full returned review: local `execution/task1-review-probes/review-received.md`.
+The reviewer independently reproduced M1–M7, ran 11 additional observational
+probes through a Go overlay, and passed package tests (0.368s) and vet. The probe
+PASS means observations ran, not that the demonstrated behavior is correct.
+No tracked source was changed. Shell temporary-file permission failures were
+stopped; the same reviewer used the ordinary Write tool in its explicitly assigned
+evidence directory. The completed invocation had zero permission denials.
+
+Main adjudicates C2/I1/I3–I7 as duplicates/extensions of M3/M1/M2/M7/M5/M4/M6.
+These do not create additional fix rounds. C1 and C2 carry the reviewer's Critical
+classification; the lane already uses the full Tier 3 reviewer/fixer/re-reviewer
+chain. Main accepts three additional concrete normalization defects:
+
+| Owner ID | Review ID | Accepted correction |
+| --- | --- | --- |
+| M8 | C1 | With a thematic break first in Problem, leafStart returns zero and copies the title and field heading into the statement. Compute the exact section body from real heading boundaries, preserving its interior bytes; pin thematic-break and other unsegmented-first-block cases. The suggested symmetric end-boundary concern is root-cause coverage, not a separately proven defect. |
+| M9 | I2 | Explicitly mapped nonblank statements still carry blocking missing/ambiguous findings from automatic extraction. Reconcile resolved field-value gaps in Normalize while preserving truthful source-structure disclosures as nonblocking where the explicit mapping actually resolves that target. Deferral remains Compose's responsibility. Never blanket-clear multiple-target, unsupported structure, source-ID, object-section ambiguity or unmapped-source findings. |
+| M10 | I8 | Explicit empty/blank source mappings can yield empty fields and no findings. Emit target-specific blocking empty-field findings for every empty final mapped field, including statements and objects; do not mistake a present target for a resolved value. Task 2 still performs all canonical requiredness checks. |
+
+Clarifications against reviewer suggestions: `Source.Data` and ReadSource MUST
+remain the full supplied file so original digest/range validation is possible.
+Only `Snapshot.Data` becomes the selected bytes (M5); do not change the correct
+ReadSource no-preslicing test. Snapshot tests/comments encoding full-file retention
+must change. Evidence origin can remain derivable as user-selected from the closed
+request; no new field is authorized. Explicit override demotion to retained-only
+is compatible with the user's RetainUnmapped disposition. Concurrent external file
+rewrite hardening is not a new acceptance gate; ordinary bounded reads and shared
+validation remain within M6. Native validation/deferral ownership stays in Task 2.
+The empty-list-item ordinal observation adds no new ordinal rule, but existing
+requirements to report empty objects remain binding.
+
+Next: fresh genuine Opus 5 fixer owns only internal/specimport corrections and
+regressions M1–M10, then a distinct genuine Opus 5 re-reviewer. Main/FABLE verify
+the resulting dependency before Task 2. No new design or user adoption is needed.
