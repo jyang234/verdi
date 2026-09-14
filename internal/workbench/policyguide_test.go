@@ -1,6 +1,7 @@
 package workbench
 
 import (
+	stdhtml "html"
 	"regexp"
 	"strings"
 	"testing"
@@ -205,10 +206,12 @@ func TestPolicyGuide_RendersReadOnlyGuidance(t *testing.T) {
 		"has not adopted policy authority",
 		"semantic review",
 		policyGuideScopedWording,
-		// the manual initial setup, by file
+		// the manual initial setup, by file — the placeholder paths in their
+		// ESCAPED form (a raw-prefix check passed even when the browser
+		// swallowed <profile-id> as an element)
 		".verdi/policy/constitution.md",
-		".verdi/policy/profiles/",
-		".verdi/policy/policies/",
+		".verdi/policy/profiles/&lt;profile-id&gt;.md",
+		".verdi/policy/policies/&lt;name&gt;.md",
 		".verdi/constitution/consumers.json",
 		// the real CLI requests as COMPLETE copyable shell blocks: the
 		// operation, its real operand shape, the request JSON on a quoted
@@ -254,6 +257,221 @@ func TestPolicyGuide_RendersReadOnlyGuidance(t *testing.T) {
 	// The concern row's destination link resolves to the guide.
 	if !strings.Contains(html, `<a class="asd-dest-link" href="#`+policyGuideID+`">`) {
 		t.Fatalf("context/policy row has no destination link to #%s; got: %s", policyGuideID, html)
+	}
+}
+
+// visibleText approximates what a browser shows for a markup fragment:
+// tags removed, entities decoded. A label written unescaped into <dt>
+// (F1) loses its angle-bracket placeholder here exactly as it does in
+// the live DOM, where <profile-id> parses as an unknown element.
+func visibleText(html string) string {
+	return stdhtml.UnescapeString(regexp.MustCompile(`<[^>]*>`).ReplaceAllString(html, ""))
+}
+
+// TestPolicyGuide_PlaceholderPathsSurviveRendering (F1): the two
+// placeholder file paths must reach the reader intact in BOTH guide
+// variants — escaped in the markup, complete in the visible text — not
+// as ".verdi/policy/profiles/.md".
+func TestPolicyGuide_PlaceholderPathsSurviveRendering(t *testing.T) {
+	cases := []struct {
+		name  string
+		view  *asdView
+		paths []string
+	}{
+		{"not-adopted", policyForbiddenView(), []string{".verdi/policy/profiles/<profile-id>.md", ".verdi/policy/policies/<name>.md"}},
+		{"no-design-assistance", noDesignAssistanceView(), []string{".verdi/policy/policies/<name>.md"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			html := renderBoardRegion(badgeRenderProjection(modeAuthoring), &boardGitState{Branch: "design/x", DefaultBranch: "main"}, tc.view)
+			guide := policyGuideSection(t, html)
+			text := visibleText(guide)
+			for _, p := range tc.paths {
+				if !strings.Contains(guide, "<dt>"+stdhtml.EscapeString(p)+"</dt>") {
+					t.Errorf("guide markup lacks the escaped label %q; got: %s", stdhtml.EscapeString(p), guide)
+				}
+				if strings.Contains(guide, "<dt>"+p+"</dt>") {
+					t.Errorf("guide writes the placeholder label %q as raw markup", p)
+				}
+				if !strings.Contains(text, p) {
+					t.Errorf("visible guide text lacks %q; visible text: %s", p, text)
+				}
+			}
+		})
+	}
+}
+
+// policyGuideDefaultBranchAbsence matches any claim that policy is absent
+// or unadopted ON THE DEFAULT BRANCH — a fact the refusal cannot prove
+// (F2): production resolves .verdi/policy on the serving checkout's
+// filesystem, so an older design branch can lack policy the project has
+// already accepted. The clause boundary excludes the truthful
+// "not accepted: acceptance is the owner's merge to the default branch".
+var policyGuideDefaultBranchAbsence = regexp.MustCompile(`(?i)\b(no|not|never|without)\b[^.:;]*\b(accepted|adopted)\b[^.:;]*default branch|default branch[^.:;]*\b(no|not|never|without)\b[^.:;]*\b(accepted|adopted)\b`)
+
+// policyGuideSyncRitual matches invented or automatic synchronization
+// commands the guide must never prescribe: bringing a branch up to date is
+// the project's own process, not the workbench's.
+var policyGuideSyncRitual = regexp.MustCompile(`git (pull|merge|rebase|fetch)`)
+
+// TestPolicyGuide_PolicyLessCheckoutIsInspectFirst (F2): the not-adopted
+// refusal proves absence in the SERVING CHECKOUT only. The guide and the
+// concern row must say so, direct the reader to inspect the accepted and
+// proposed snapshots FIRST, keep the initial-setup files conditional on
+// confirmed absence, and never assert absence on the default branch or
+// prescribe an auto pull/merge.
+func TestPolicyGuide_PolicyLessCheckoutIsInspectFirst(t *testing.T) {
+	shell := deriveASDShell(policyForbiddenInput())
+	var row *asdConcern
+	for i := range shell.All {
+		if shell.All[i].ID == "context/policy" {
+			row = &shell.All[i]
+		}
+	}
+	if row == nil {
+		t.Fatal("no context/policy concern")
+	}
+	for _, s := range []string{row.Summary, row.Guidance} {
+		if m := policyGuideDefaultBranchAbsence.FindString(s); m != "" {
+			t.Errorf("context/policy asserts default-branch absence (%q) in %q", m, s)
+		}
+		if strings.Contains(s, "No policy authority is adopted") || strings.Contains(s, "project has not adopted") {
+			t.Errorf("context/policy states project-wide non-adoption the checkout refusal cannot prove: %q", s)
+		}
+		if policyGuideSyncRitual.MatchString(s) {
+			t.Errorf("context/policy prescribes a synchronization command: %q", s)
+		}
+	}
+	if !strings.Contains(row.Summary, "checkout") {
+		t.Errorf("context/policy summary %q is not scoped to the serving checkout", row.Summary)
+	}
+	inspect, adopt := strings.Index(row.Guidance, "Inspect"), strings.Index(row.Guidance, "adopt")
+	if inspect < 0 || (adopt >= 0 && adopt < inspect) {
+		t.Errorf("context/policy guidance %q must direct inspection before any adoption step", row.Guidance)
+	}
+	// accepted.adopted alone proves neither branch lag nor deletion: the
+	// row asks why the checkout lacks the policy and infers no cause.
+	if !strings.Contains(row.Guidance, "inspect why this checkout lacks") || strings.Contains(row.Guidance, "branch lags") || strings.Contains(row.Guidance, "branch may lag") {
+		t.Errorf("context/policy guidance %q must ask why the checkout lacks accepted policy without inferring a cause", row.Guidance)
+	}
+
+	for _, mode := range []boardModeKind{modeAuthoring, modeReadOnly} {
+		t.Run(string(mode), func(t *testing.T) {
+			html := renderBoardRegion(badgeRenderProjection(mode), &boardGitState{Branch: "design/x", DefaultBranch: "main"}, policyForbiddenView())
+			guide := policyGuideSection(t, html)
+			text := visibleText(guide)
+			if m := policyGuideDefaultBranchAbsence.FindString(text); m != "" {
+				t.Errorf("%s: guide asserts default-branch absence: %q", mode, m)
+			}
+			if strings.Contains(text, "This project has not adopted policy authority") {
+				t.Errorf("%s: guide states project-wide non-adoption as its own fact", mode)
+			}
+			if policyGuideSyncRitual.MatchString(text) {
+				t.Errorf("%s: guide prescribes a synchronization command: %q", mode, policyGuideSyncRitual.FindString(text))
+			}
+			// The refusal detail stays visible verbatim, as the discriminant.
+			if !strings.Contains(text, "project has not adopted policy authority") {
+				t.Errorf("%s: guide lost the verbatim refusal detail", mode)
+			}
+			// Checkout-scoped fact, inspect-first, conditional setup.
+			for _, want := range []string{"checkout", "accepted.adopted", "proposed.adopted", "Inspect first", "Only when"} {
+				if !strings.Contains(text, want) {
+					t.Errorf("%s: guide text lacks %q; got: %s", mode, want, text)
+				}
+			}
+			inspectAt := strings.Index(text, "Inspect first")
+			filesAt := strings.Index(text, "Files to author")
+			if filesAt < 0 || inspectAt < 0 || filesAt < inspectAt {
+				t.Errorf("%s: inspect-first (%d) must precede the conditional file list (%d)", mode, inspectAt, filesAt)
+			}
+			// Lagging-branch case: existing project process, never a ritual,
+			// and never an inferred cause.
+			if !strings.Contains(text, "project's own process") {
+				t.Errorf("%s: guide does not defer branch synchronization to the project's own process", mode)
+			}
+			if !strings.Contains(text, "inspect why this checkout lacks the accepted policy") || strings.Contains(text, "this branch lags") {
+				t.Errorf("%s: guide must ask why the checkout lacks accepted policy without inferring a cause; got: %s", mode, text)
+			}
+			// Review's refusal is tied to this checkout RESOLVING governing
+			// policy; loading or editing proposed files is not acceptance.
+			if !strings.Contains(text, "until this checkout resolves governing policy") || strings.Contains(text, "carries an accepted one") {
+				t.Errorf("%s: guide must tie review's refusal to resolved governing policy, not to a loaded store; got: %s", mode, text)
+			}
+			if !strings.Contains(text, "Loading or editing proposed policy files is not acceptance") {
+				t.Errorf("%s: guide must state that loading/editing proposed files is not acceptance", mode)
+			}
+		})
+	}
+}
+
+// TestPolicyConcern_RowsHonorBoardMode (F3): BOTH policy-forbidden concern
+// summaries must scope their editing claim to the board's mode. On a
+// read-only or review board no browser edit proceeds, so the row must not
+// say editing "proceeds"; on an authoring board the row names what a write
+// records. The no-design-assistance row keeps the refusal detail verbatim
+// and never describes the adopted policy as absent, in every mode.
+func TestPolicyConcern_RowsHonorBoardMode(t *testing.T) {
+	kinds := []struct {
+		name   string
+		detail string
+		keep   string
+	}{
+		{"not-adopted", "policy-forbidden: project has not adopted policy authority", "no adopted policy authority"},
+		{"no-design-assistance", noDesignAssistanceDetail, "effective policy has no design_assistance authority"},
+	}
+	for _, k := range kinds {
+		for _, mode := range []boardModeKind{modeAuthoring, modeReview, modeReadOnly} {
+			t.Run(k.name+"/"+string(mode), func(t *testing.T) {
+				in := policyForbiddenInput()
+				in.Mode = string(mode)
+				in.CapsFailure = &DesignFailure{Classification: "verdict", Code: "policy-forbidden", Detail: k.detail}
+				shell := deriveASDShell(in)
+				var row *asdConcern
+				for i := range shell.All {
+					if shell.All[i].ID == "context/policy" {
+						row = &shell.All[i]
+					}
+				}
+				if row == nil {
+					t.Fatal("no context/policy concern")
+				}
+				if !strings.Contains(row.Summary, k.keep) {
+					t.Errorf("summary %q lost its discriminating detail %q", row.Summary, k.keep)
+				}
+				if k.name == "no-design-assistance" {
+					for _, bad := range []string{"No policy authority is adopted", "has not adopted", "not-applicable"} {
+						if strings.Contains(row.Summary, bad) {
+							t.Errorf("summary %q describes an adopted policy as absent (%q)", row.Summary, bad)
+						}
+					}
+				}
+				proceeds := strings.Contains(row.Summary, "editing proceeds")
+				refuses := strings.Contains(row.Summary, "refuses browser writes")
+				if mode == modeAuthoring {
+					if !proceeds || refuses {
+						t.Errorf("authoring summary %q must state that browser editing proceeds here", row.Summary)
+					}
+				} else if proceeds || !refuses {
+					t.Errorf("%s summary %q claims editing proceeds on a board that refuses writes", mode, row.Summary)
+				}
+				// The rendered row, not only the struct.
+				v := testASDView()
+				v.Shell = shell
+				html := renderBoardRegion(badgeRenderProjection(mode), &boardGitState{Branch: "design/x", DefaultBranch: "main"}, v)
+				start := strings.Index(html, `data-concern-id="context/policy"`)
+				if start < 0 {
+					t.Fatalf("no rendered context/policy row; got: %s", html)
+				}
+				rowHTML := html[start:]
+				rowHTML = rowHTML[:strings.Index(rowHTML, "</article>")]
+				if mode != modeAuthoring && strings.Contains(rowHTML, "editing proceeds") {
+					t.Errorf("%s: rendered row still claims editing proceeds: %s", mode, rowHTML)
+				}
+				if !strings.Contains(rowHTML, stdhtml.EscapeString(k.keep)) {
+					t.Errorf("%s: rendered row lost detail %q: %s", mode, k.keep, rowHTML)
+				}
+			})
+		}
 	}
 }
 

@@ -478,6 +478,18 @@ test.describe("posture and policy", () => {
     if (await more.count()) await more.click();
     const policyRow = page.locator('[data-concern-id="context/policy"]').first();
     await expect(policyRow).toBeVisible();
+    // F2/F3: the row states the SERVING-CHECKOUT fact (this branch was cut
+    // before main's policy fixtures landed, so the refusal proves nothing
+    // about the default branch), scopes its editing claim to this
+    // authoring board, and sends the reader to inspect the accepted and
+    // proposed snapshots before any initial setup.
+    const rowSummary = policyRow.locator("p.readiness-summary");
+    await expect(rowSummary).toContainText("This checkout carries no adopted policy authority");
+    await expect(rowSummary).toContainText("browser editing proceeds");
+    await expect(rowSummary).not.toContainText("default branch");
+    const rowGuidance = policyRow.getByTestId("asd-guidance-context/policy");
+    await expect(rowGuidance).toContainText("Inspect the accepted and proposed policy snapshots first");
+    await expect(rowGuidance).not.toContainText("git pull");
     const dest = policyRow.locator("a.asd-dest-link");
     await expect(dest).toHaveAttribute("href", "#asd-policy-guide");
     await dest.click();
@@ -490,9 +502,34 @@ test.describe("posture and policy", () => {
     await expect(guide).toHaveAttribute("data-policy-guide", "not-adopted");
     // Plain summary is visible without opening anything; the command wall
     // stays folded until asked for.
-    await expect(guide.locator("p.readiness-summary")).toBeVisible();
+    const summaries = guide.locator("p.readiness-summary");
+    await expect(summaries.first()).toBeVisible();
+    // F2: checkout-scoped fact, never a default-branch absence claim; the
+    // inspect-first step is visible before any file list is opened.
+    await expect(summaries.first()).toContainText("This checkout carries no adopted policy authority");
+    await expect(summaries.first()).toContainText("not about the default branch");
+    await expect(summaries.nth(1)).toContainText("Inspect first");
+    await expect(summaries.nth(1)).toContainText("accepted.adopted");
+    await expect(summaries.nth(1)).toContainText("inspect why this checkout lacks the accepted policy");
+    await expect(summaries.nth(1)).toContainText("through the project's own process");
+    await expect(summaries.first()).toContainText("until this checkout resolves governing policy");
+    await expect(guide).not.toContainText("git pull");
+    await expect(guide).not.toContainText("git merge");
     const details = guide.locator("details.readiness-tech");
     await expect(details).toHaveCount(2);
+    // F1: with the file disclosure open, the placeholder paths reach the
+    // reader intact — the browser must not swallow <profile-id>/<name> as
+    // unknown elements and show ".verdi/policy/profiles/.md".
+    const files = details.nth(0);
+    await expect(files.locator("summary")).toContainText("only when no policy is accepted");
+    await files.locator("summary").click();
+    const labels = files.locator("dl.readiness-tech-facts > dt");
+    await expect(labels).toHaveCount(4);
+    await expect(labels.nth(1)).toBeVisible();
+    await expect(labels.nth(1)).toHaveText(".verdi/policy/profiles/<profile-id>.md");
+    await expect(labels.nth(2)).toHaveText(".verdi/policy/policies/<name>.md");
+    await expect(files).not.toContainText(".verdi/policy/profiles/.md");
+    await expect(files).not.toContainText(".verdi/policy/policies/.md");
     await expect(guide.locator("pre.asd-policy-guide-cmd").first()).toBeHidden();
     await details.nth(1).locator("summary").click();
     await expect(guide.locator("pre.asd-policy-guide-cmd").first()).toBeVisible();
@@ -506,7 +543,7 @@ test.describe("posture and policy", () => {
     await expect(guide.locator("pre.asd-policy-guide-cmd")).toHaveCount(4);
     // Truthful, mode-scoped wording — never "editing continues" as an
     // unconditional claim a read-only wall would belie.
-    await expect(guide.locator("p.readiness-summary")).toContainText(
+    await expect(summaries.first()).toContainText(
       "Ordinary draft editing does not require policy; this board's read-only restrictions still apply.",
     );
     // Read-only by construction: no form, button, input, or fetch panel.

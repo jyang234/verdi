@@ -133,6 +133,23 @@ const (
 // code-prefixed forms discriminate identically.
 const policyNotAdoptedDetail = "project has not adopted policy authority"
 
+// policyEditingClause scopes a policy-forbidden concern row's editing claim
+// to the board's mode. Ordinary draft editing never requires policy, but
+// only an authoring board accepts browser writes at all: a review or
+// read-only board refuses them regardless of policy, so the row must not
+// say editing "proceeds" there (F3). authoringOutcome is what a write on
+// an authoring board records under this refusal.
+func policyEditingClause(mode, authoringOutcome string) string {
+	switch boardModeKind(mode) {
+	case modeAuthoring:
+		return "ordinary draft editing does not require policy, so " + authoringOutcome
+	case modeReview:
+		return "ordinary draft editing does not require policy, but this review board refuses browser writes regardless."
+	default:
+		return "ordinary draft editing does not require policy, but this read-only board refuses browser writes regardless."
+	}
+}
+
 // asdShellInput is deriveASDShell's complete typed input — assembled from
 // the decoded frontmatter, projection, Git facts, and capabilities view;
 // the derivation itself reads nothing else.
@@ -277,11 +294,16 @@ func deriveASDShell(in asdShellInput) asdShell {
 		}
 	case in.CapsFailure != nil && in.CapsFailure.Code == "policy-forbidden" && strings.Contains(in.CapsFailure.Detail, policyNotAdoptedDetail):
 		// The ONE refusal that means genuine non-adoption (draftmutation's
-		// own discriminant, never the code alone).
+		// own discriminant, never the code alone) — in the SERVING CHECKOUT:
+		// the source resolves .verdi/policy on this checkout's filesystem,
+		// so an older branch can lack policy the project already accepted.
+		// The row states the checkout fact and sends the reader to inspect
+		// the accepted snapshot before any initial setup; it infers no cause
+		// for the gap (branch age, deletion, or otherwise).
 		policySetupGuide, policyDetail = policyGuideNotAdopted, in.CapsFailure.Detail
 		add(asdConcern{ID: "context/policy", Area: asdAreaContext, State: asdStateUnproven, Blocking: false,
-			Summary:   "No policy authority is adopted; browser editing proceeds and records the explicit not-applicable policy posture.",
-			Guidance:  "Adopt a project constitution (.verdi/policy) to govern agent design assistance; human editing does not require one. The policy setup guide below names the manual initial files and the read-only checks.",
+			Summary:   "This checkout carries no adopted policy authority; " + policyEditingClause(in.Mode, "browser editing proceeds and records the explicit not-applicable policy posture."),
+			Guidance:  "Inspect the accepted and proposed policy snapshots first (policy setup guide below): if policy is already accepted, inspect why this checkout lacks it; an older branch may need updating through the project's own process. Only when no policy is accepted does the manual initial setup the guide names apply; human editing does not require one.",
 			Witnesses: []string{in.CapsFailure.Code + ": " + in.CapsFailure.Detail},
 			Dest:      "#" + policySetupGuideID})
 	case in.CapsFailure != nil && in.CapsFailure.Code == "policy-forbidden":
@@ -291,7 +313,7 @@ func deriveASDShell(in asdShellInput) asdShell {
 		// detail is carried verbatim, never rewritten as non-adoption.
 		policySetupGuide, policyDetail = policyGuideNoDesignAssistance, in.CapsFailure.Detail
 		add(asdConcern{ID: "context/policy", Area: asdAreaContext, State: asdStateUnproven, Blocking: false,
-			Summary:   "Policy authority resolved, but it does not grant design assistance (" + in.CapsFailure.Detail + "); browser editing proceeds under that policy's sealed digest.",
+			Summary:   "Policy authority resolved, but it does not grant design assistance (" + in.CapsFailure.Detail + "); " + policyEditingClause(in.Mode, "browser editing proceeds under that policy's sealed digest."),
 			Guidance:  "Design assistance needs a design_assistance payload in the project's effective policy, proposed and reviewed through the project's own process; human editing does not require one. The policy guide below names the read-only checks.",
 			Witnesses: []string{in.CapsFailure.Code + ": " + in.CapsFailure.Detail},
 			Dest:      "#" + policySetupGuideID})
