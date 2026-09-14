@@ -76,21 +76,122 @@ func TestCompose_DeferStatements_DisplacesResolvedStatement(t *testing.T) {
 		if f.Code != FindingStatementsDeferred {
 			continue
 		}
+		requireTruthfulDeferralMessage(t, f)
 		switch f.Target {
 		case "problem":
 			sawProblemDeferred = true
-			if !strings.Contains(f.Message, "First line.") {
-				t.Fatalf("problem deferral disclosure does not retain the displaced source text: %+v", f)
+			if !strings.Contains(f.Message, "First line.") || !strings.Contains(f.Message, OriginCopiedSource) {
+				t.Fatalf("problem deferral disclosure does not name the displaced value and its origin: %+v", f)
 			}
 		case "outcome":
 			sawOutcomeDeferred = true
-			if !strings.Contains(f.Message, "Users get value.") {
-				t.Fatalf("outcome deferral disclosure does not retain the displaced source text: %+v", f)
+			if !strings.Contains(f.Message, "Users get value.") || !strings.Contains(f.Message, OriginCopiedSource) {
+				t.Fatalf("outcome deferral disclosure does not name the displaced value and its origin: %+v", f)
 			}
 		}
 	}
 	if !sawProblemDeferred || !sawOutcomeDeferred {
 		t.Fatalf("want one statements-deferred disclosure per statement, got: %+v", findings)
+	}
+}
+
+// requireTruthfulDeferralMessage fails if a statements-deferred disclosure
+// asserts a disposition Compose cannot establish. Compose holds no coverage
+// witness for a displaced value — only Task 3's Preview recomputes coverage
+// from the candidate-ready fields — so claiming the value "was retained", or
+// calling it "source text" when its origin may be user-added, states as fact
+// what nothing in the call establishes (spec-import-contract.md:
+// "Placeholders are visibly incomplete and not source quotations").
+func requireTruthfulDeferralMessage(t *testing.T, f Finding) {
+	t.Helper()
+	for _, forbidden := range []string{"retained", "source text", "recognized source"} {
+		if strings.Contains(f.Message, forbidden) {
+			t.Fatalf("deferral disclosure claims %q, which Compose cannot establish: %+v", forbidden, f)
+		}
+	}
+	if f.Blocking {
+		t.Fatalf("a statements-deferred disclosure must be nonblocking: %+v", f)
+	}
+}
+
+// TestCompose_DeferStatements_UserAddedValueIsNotASourceQuotation is the
+// decisive B2 case: an explicit USER-ADDED problem Mapping (Text only, no
+// SourceID) carries origin user-added and no spans at all, so no source
+// recognized it and no interval can be retained on its behalf. The deferral
+// disclosure must name the displacement and the origin truthfully rather
+// than presenting user-typed text as a quoted, retained source selection.
+func TestCompose_DeferStatements_UserAddedValueIsNotASourceQuotation(t *testing.T) {
+	root := minimalStoreRoot(t)
+	userText := "Borrowers cannot resubmit a rejected document."
+	req := minimalRequest()
+	req.DeferStatements = true
+	req.Mappings = []Mapping{
+		{Target: "problem", Text: &userText},
+		{Target: "ac-1", Evidence: []string{"static", "attestation"}},
+		{Target: "ac-2", Evidence: []string{"static", "attestation"}},
+	}
+
+	plan, err := Normalize(req)
+	if err != nil {
+		t.Fatalf("Normalize: %v", err)
+	}
+	problem, ok := fieldByTarget(plan.Fields, "problem")
+	if !ok || problem.Origin != OriginUserAdded || len(problem.Spans) != 0 {
+		t.Fatalf("test fixture assumption broken: want a user-added problem field with no spans, got %+v (ok=%v)", problem, ok)
+	}
+
+	_, findings, err := Compose(context.Background(), root, req, plan)
+	if err != nil {
+		t.Fatalf("Compose: %v", err)
+	}
+
+	var sawProblem bool
+	for _, f := range findings {
+		if f.Code != FindingStatementsDeferred || f.Target != "problem" {
+			continue
+		}
+		sawProblem = true
+		requireTruthfulDeferralMessage(t, f)
+		if !strings.Contains(f.Message, OriginUserAdded) {
+			t.Fatalf("deferral disclosure does not name the displaced value's user-added origin: %+v", f)
+		}
+	}
+	if !sawProblem {
+		t.Fatalf("want a statements-deferred disclosure for the displaced problem, got: %+v", findings)
+	}
+}
+
+// TestPrepareCandidateFields_StatementsBeforeObjects pins the contract's
+// declared map order ("statements, then objects in source/explicit insertion
+// order") on the SHARED helper Task 3's Preview consumes — the deferral
+// branch is the only one that reorders, and PreviewResult.fields lands
+// inside the SHA-256-over-canonical-JSON digest domain, so the order must be
+// fixed before a digest freezes it.
+func TestPrepareCandidateFields_StatementsBeforeObjects(t *testing.T) {
+	req := minimalRequest()
+	req.DeferStatements = true
+	req.Mappings = []Mapping{
+		{Target: "ac-1", Evidence: []string{"static", "attestation"}},
+		{Target: "ac-2", Evidence: []string{"static", "attestation"}},
+	}
+	plan, err := Normalize(req)
+	if err != nil {
+		t.Fatalf("Normalize: %v", err)
+	}
+
+	fields, _ := prepareCandidateFields(req, plan)
+	var got []string
+	for _, f := range fields {
+		got = append(got, f.Target)
+	}
+	want := []string{"problem", "outcome", "ac-1", "ac-2"}
+	if len(got) != len(want) {
+		t.Fatalf("candidate-ready field order = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("candidate-ready field order = %v, want %v", got, want)
+		}
 	}
 }
 

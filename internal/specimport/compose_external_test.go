@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/jyang234/verdi/internal/artifact"
 	"github.com/jyang234/verdi/internal/model"
 )
 
@@ -119,6 +120,310 @@ func TestCompose_InvalidLink(t *testing.T) {
 	}
 }
 
+// trackerManifestYAML configures the jira provider VL-005 requires before
+// any story's scheme-qualified tracker ref counts as configured.
+const trackerManifestYAML = "schema: verdi.layout/v1\n" +
+	"providers:\n" +
+	"  jira:\n" +
+	"    base_url: https://example.atlassian.net\n" +
+	"    rollup_field: customfield_00000\n"
+
+// storeRootWithComposedParent returns a store root whose manifest configures
+// the jira tracker and whose corpus already holds one valid parent feature —
+// composed by Compose itself, so a story's parent is exactly what this
+// importer produces rather than a hand-written near-copy — plus that
+// parent's slug.
+func storeRootWithComposedParent(t *testing.T) (root, parentSlug string) {
+	t.Helper()
+	root = minimalStoreRoot(t)
+	writeStoreFile(t, root, ".verdi/verdi.yaml", trackerManifestYAML)
+
+	parent := minimalRequest()
+	parent.Mappings = []Mapping{
+		{Target: "ac-1", Evidence: []string{"static", "attestation"}},
+		{Target: "ac-2", Evidence: []string{"static", "attestation"}},
+	}
+	plan, err := Normalize(parent)
+	if err != nil {
+		t.Fatalf("Normalize parent: %v", err)
+	}
+	candidate, findings, err := Compose(context.Background(), root, parent, plan)
+	if err != nil {
+		t.Fatalf("Compose parent: %v", err)
+	}
+	requireNoBlocking(t, findings, candidate)
+	writeStoreFile(t, root, ".verdi/specs/active/"+parent.Target.Slug+"/spec.md", string(candidate))
+	return root, parent.Target.Slug
+}
+
+// TestCompose_ExternalStory_Happy is the positive half of the import
+// surface the contract's authority return names ("import one feature/story
+// from selected native or Markdown sources"): a markdown-v1 STORY with a
+// configured tracker, a valid parent and implements edge, and explicit
+// evidence composes into a real candidate. The canonical story template
+// renders no stubs: block at all, so unconditional placeholder-stub removal
+// refuses every external story — this test is the reachability proof that
+// TestCompose_Story_MissingImplementsEdge cannot give (it refuses three
+// stages earlier, at the rendered-scaffold decode gate).
+func TestCompose_ExternalStory_Happy(t *testing.T) {
+	root, parentSlug := storeRootWithComposedParent(t)
+
+	req := minimalRequest()
+	req.Target = Target{Slug: "sample-story", Class: "story", Title: "Sample Story", Story: "jira:SAMPLE-1"}
+	req.Links = []Link{{Type: "implements", Ref: "spec/" + parentSlug + "#ac-1"}}
+	req.Mappings = []Mapping{
+		{Target: "ac-1", Evidence: []string{"static"}},
+		{Target: "ac-2", Evidence: []string{"static"}},
+	}
+
+	plan, err := Normalize(req)
+	if err != nil {
+		t.Fatalf("Normalize: %v", err)
+	}
+	requireNoBlocking(t, plan.Findings, nil)
+
+	candidate, findings, err := Compose(context.Background(), root, req, plan)
+	if err != nil {
+		t.Fatalf("Compose: %v", err)
+	}
+	requireNoBlocking(t, findings, candidate)
+	if candidate == nil {
+		t.Fatal("Compose returned nil bytes for a valid external story")
+	}
+
+	fm, body, err := artifact.SplitFrontmatter(candidate)
+	if err != nil {
+		t.Fatalf("SplitFrontmatter: %v\n%s", err, candidate)
+	}
+	spec, err := artifact.DecodeSpec(fm)
+	if err != nil {
+		t.Fatalf("DecodeSpec: %v\n%s", err, candidate)
+	}
+	if err := spec.ResolveObjectAnchors(body); err != nil {
+		t.Fatalf("ResolveObjectAnchors: %v\n%s", err, candidate)
+	}
+	if spec.Class != artifact.ClassStory {
+		t.Fatalf("composed class = %q, want story", spec.Class)
+	}
+	if len(spec.Stubs) != 0 {
+		t.Fatalf("stubs not absent on the story candidate: %+v", spec.Stubs)
+	}
+	if len(spec.AcceptanceCriteria) != 2 {
+		t.Fatalf("want the 2 mapped acceptance criteria, got %d: %+v\n%s", len(spec.AcceptanceCriteria), spec.AcceptanceCriteria, candidate)
+	}
+	if strings.Contains(string(candidate), "TODO: replace with real acceptance criteria before accept") {
+		t.Fatalf("the story template's placeholder criterion survived:\n%s", candidate)
+	}
+	var sawImplements bool
+	for _, l := range spec.Base.Links {
+		if l.Type == artifact.LinkImplements && l.Ref == "spec/"+parentSlug+"#ac-1" {
+			sawImplements = true
+		}
+	}
+	if !sawImplements {
+		t.Fatalf("the story's implements edge is missing from the candidate: %+v", spec.Base.Links)
+	}
+}
+
+// featureTemplateWithoutPlaceholderStub is a store override that declares no
+// stubs: block at all — a template that can express the candidate perfectly,
+// since the contract's own post-condition is "the resulting imported feature
+// has `stubs` absent". Composing against it must succeed: the absence of a
+// placeholder is not a defect to report, and refusing here would be the
+// inverse of "reject a template/model that cannot express the candidate".
+const featureTemplateWithoutPlaceholderStub = `---
+id: {{safe .Ref}}
+kind: spec
+title: {{printf "%q" .Title}}
+owners: {{safe .Owners}}
+class: feature
+problem: { text: {{printf "%q" .Problem}}, anchor: problem }
+outcome: { text: {{printf "%q" .Outcome}}, anchor: outcome }
+acceptance_criteria:
+  - { id: ac-1, text: "TODO: replace with real acceptance criteria before accept", evidence: [static, attestation], anchor: ac-1 }
+---
+# {{.Title}}
+
+## Problem
+
+TODO: design notes.
+
+## Outcome
+
+TODO: design notes.
+
+## Ac 1
+
+TODO: design notes.
+`
+
+// TestCompose_TemplateWithoutPlaceholderStub proves placeholder removal is
+// driven by what the rendered scaffold actually declares, not by an
+// unconditional operation: an override template carrying no stubs: block
+// composes cleanly instead of being refused for lacking a placeholder to
+// remove.
+func TestCompose_TemplateWithoutPlaceholderStub(t *testing.T) {
+	root := minimalStoreRoot(t)
+	writeStoreFile(t, root, ".verdi/templates/feature.md", featureTemplateWithoutPlaceholderStub)
+
+	req := minimalRequest()
+	req.Mappings = []Mapping{
+		{Target: "ac-1", Evidence: []string{"static", "attestation"}},
+		{Target: "ac-2", Evidence: []string{"static", "attestation"}},
+	}
+	plan, err := Normalize(req)
+	if err != nil {
+		t.Fatalf("Normalize: %v", err)
+	}
+
+	candidate, findings, err := Compose(context.Background(), root, req, plan)
+	if err != nil {
+		t.Fatalf("Compose: %v", err)
+	}
+	requireNoBlocking(t, findings, candidate)
+	if candidate == nil {
+		t.Fatal("Compose returned nil bytes for a template that declares no placeholder stub")
+	}
+	fm, body, err := artifact.SplitFrontmatter(candidate)
+	if err != nil {
+		t.Fatalf("SplitFrontmatter: %v\n%s", err, candidate)
+	}
+	spec, err := artifact.DecodeSpec(fm)
+	if err != nil {
+		t.Fatalf("DecodeSpec: %v\n%s", err, candidate)
+	}
+	if err := spec.ResolveObjectAnchors(body); err != nil {
+		t.Fatalf("ResolveObjectAnchors: %v\n%s", err, candidate)
+	}
+	if len(spec.Stubs) != 0 {
+		t.Fatalf("stubs not absent: %+v", spec.Stubs)
+	}
+	if len(spec.AcceptanceCriteria) != 2 {
+		t.Fatalf("want the 2 mapped acceptance criteria, got %d: %+v\n%s", len(spec.AcceptanceCriteria), spec.AcceptanceCriteria, candidate)
+	}
+}
+
+// sourceWithAllObjectKinds labels one object of every generated kind, in a
+// fixed source order, so the composed candidate's anchors, body text and
+// insertion order can all be pinned at once.
+const sourceWithAllObjectKinds = "# Sample Feature\n" +
+	"\n" +
+	"## Problem\n" +
+	"\n" +
+	"First line.\n" +
+	"Second line.\n" +
+	"\n" +
+	"## Outcome\n" +
+	"\n" +
+	"Users get value.\n" +
+	"\n" +
+	"## Acceptance Criteria\n" +
+	"\n" +
+	"- Criterion one.\n" +
+	"\n" +
+	"## Constraints\n" +
+	"\n" +
+	"- Must stay offline.\n" +
+	"\n" +
+	"## Decisions\n" +
+	"\n" +
+	"- Use the existing store.\n" +
+	"\n" +
+	"## Open Questions\n" +
+	"\n" +
+	"- Who owns rollout?\n"
+
+// TestCompose_GeneratedAnchorsAreBareObjectIDs pins the contract's declared
+// candidate output for all four object kinds at once: "Generated anchors are
+// bare `problem`, `outcome` and object IDs with `## Problem`, `## Outcome`,
+// `## ac-1`, etc." ResolveObjectAnchors is slug-symmetric and would accept a
+// "#ac-1" anchor too, so only an explicit assertion keeps the declared
+// output honest. Body text and insertion order are pinned in the same pass
+// ("Map order: statements, then objects in source/explicit insertion order").
+func TestCompose_GeneratedAnchorsAreBareObjectIDs(t *testing.T) {
+	root := minimalStoreRoot(t)
+	req := minimalRequest()
+	req.Sources[0].Data = []byte(sourceWithAllObjectKinds)
+	req.Mappings = []Mapping{{Target: "ac-1", Evidence: []string{"static", "attestation"}}}
+
+	plan, err := Normalize(req)
+	if err != nil {
+		t.Fatalf("Normalize: %v", err)
+	}
+	requireNoBlocking(t, plan.Findings, nil)
+
+	candidate, findings, err := Compose(context.Background(), root, req, plan)
+	if err != nil {
+		t.Fatalf("Compose: %v", err)
+	}
+	requireNoBlocking(t, findings, candidate)
+
+	fm, body, err := artifact.SplitFrontmatter(candidate)
+	if err != nil {
+		t.Fatalf("SplitFrontmatter: %v\n%s", err, candidate)
+	}
+	spec, err := artifact.DecodeSpec(fm)
+	if err != nil {
+		t.Fatalf("DecodeSpec: %v\n%s", err, candidate)
+	}
+	if err := spec.ResolveObjectAnchors(body); err != nil {
+		t.Fatalf("ResolveObjectAnchors: %v\n%s", err, candidate)
+	}
+
+	if spec.Problem == nil || spec.Problem.Anchor != "problem" {
+		t.Fatalf("problem anchor = %+v, want the bare %q", spec.Problem, "problem")
+	}
+	if spec.Outcome == nil || spec.Outcome.Anchor != "outcome" {
+		t.Fatalf("outcome anchor = %+v, want the bare %q", spec.Outcome, "outcome")
+	}
+
+	type objectCheck struct{ id, anchor, text string }
+	got := []objectCheck{}
+	for _, o := range spec.AcceptanceCriteria {
+		got = append(got, objectCheck{o.ID, o.Anchor, o.Text})
+	}
+	for _, o := range spec.Constraints {
+		got = append(got, objectCheck{o.ID, o.Anchor, o.Text})
+	}
+	for _, o := range spec.Decisions {
+		got = append(got, objectCheck{o.ID, o.Anchor, o.Text})
+	}
+	for _, o := range spec.OpenQuestions {
+		got = append(got, objectCheck{o.ID, o.Anchor, o.Text})
+	}
+	want := []objectCheck{
+		{"ac-1", "ac-1", "Criterion one."},
+		{"co-1", "co-1", "Must stay offline."},
+		{"dc-1", "dc-1", "Use the existing store."},
+		{"oq-1", "oq-1", "Who owns rollout?"},
+	}
+	if len(got) != len(want) {
+		t.Fatalf("composed objects = %+v, want %+v\n%s", got, want, candidate)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("object %d = %+v, want %+v (bare anchors, verbatim text)\n%s", i, got[i], want[i], candidate)
+		}
+	}
+
+	bodyStr := string(body)
+	for _, o := range want {
+		section := "## " + o.id + "\n\n" + o.text + "\n"
+		if !strings.Contains(bodyStr, section) {
+			t.Fatalf("body is missing the %q section %q:\n%s", o.id, section, bodyStr)
+		}
+	}
+	// Insertion order: every object section appears in source order.
+	prev := -1
+	for _, o := range want {
+		at := strings.Index(bodyStr, "## "+o.id+"\n")
+		if at <= prev {
+			t.Fatalf("object sections are out of source order at %q (offset %d, previous %d):\n%s", o.id, at, prev, bodyStr)
+		}
+		prev = at
+	}
+}
+
 // TestCompose_Story_MissingImplementsEdge proves a story candidate with no
 // explicit implements (or spike resolves) edge is refused — "Stories
 // require their existing valid parent/implements ... relationship ... no
@@ -211,7 +516,14 @@ TODO: design notes.
 	if candidate != nil {
 		t.Fatalf("Compose composed a candidate under an incompatible model/template binding: %s", candidate)
 	}
-	if !hasBlocking(findings) {
-		t.Fatalf("want a blocking finding refusing the incompatible model/template binding, got: %+v", findings)
+	var sawIncompatible bool
+	for _, f := range findings {
+		if f.Blocking && f.Code == FindingUnsupportedStructure && f.Target == "target.class" &&
+			strings.Contains(f.Message, `rendered content declares class "story", want "feature"`) {
+			sawIncompatible = true
+		}
+	}
+	if !sawIncompatible {
+		t.Fatalf("want a blocking %s finding naming the class mismatch, got: %+v", FindingUnsupportedStructure, findings)
 	}
 }

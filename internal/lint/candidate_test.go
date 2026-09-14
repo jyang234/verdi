@@ -147,33 +147,127 @@ func TestCheckCandidate_SurfacesCorruptDependency(t *testing.T) {
 	}
 }
 
-// TestCheckCandidate_ExcludesUnrelatedCorpusFindings proves an existing
-// corpus document's own, wholly unconnected decode failure — one the
-// candidate's own frontmatter never references at all — is never folded
-// into the candidate's result (spec-import-contract: "Unrelated pre-existing
-// corpus findings are disclosed separately"). Unlike
+// TestCheckCandidate_DisclosesUnrelatedCorpusFindings proves an existing
+// corpus document's own, wholly unconnected failure is DISCLOSED separately
+// rather than discarded (spec-import-contract: "Unrelated pre-existing
+// corpus findings are disclosed separately and cannot silently validate a
+// candidate whose dependencies fail to decode or resolve"): it comes back on
+// its own path, at SeverityDisclosure so it never blocks, while the
+// candidate itself stays usable — no candidate-path finding at all. Unlike
 // TestCheckCandidate_SurfacesCorruptDependency's broken-dep, this fixture's
 // unrelated-broken spec is never named by any link on the clean candidate.
-func TestCheckCandidate_ExcludesUnrelatedCorpusFindings(t *testing.T) {
+func TestCheckCandidate_DisclosesUnrelatedCorpusFindings(t *testing.T) {
 	root := emptyStoreRoot(t)
 	unrelatedRelPath := ".verdi/specs/active/unrelated-broken/spec.md"
 	writeTestFile(t, filepath.Join(root, unrelatedRelPath), strings.Replace(corruptDependencySpec, "spec/broken-dep", "spec/unrelated-broken", 1))
+
+	candidateRelPath := ".verdi/specs/active/widget-a/spec.md"
+	findings, err := CheckCandidate(context.Background(), root, candidateRelPath, []byte(cleanFeatureCandidate))
+	if err != nil {
+		t.Fatalf("CheckCandidate: %v", err)
+	}
+
+	var disclosed *Finding
+	for i, f := range findings {
+		if f.Path == candidateRelPath {
+			t.Fatalf("an unrelated corpus failure was folded onto the candidate's own path:\n%s", findingsString(findings))
+		}
+		if f.Path == unrelatedRelPath {
+			disclosed = &findings[i]
+		}
+	}
+	if disclosed == nil {
+		t.Fatalf("the unrelated corpus decode failure was discarded instead of disclosed:\n%s", findingsString(findings))
+	}
+	if disclosed.Severity != SeverityDisclosure {
+		t.Fatalf("unrelated corpus finding severity = %v, want SeverityDisclosure (it must not block the candidate): %+v", disclosed.Severity, *disclosed)
+	}
+	if disclosed.Rule != "VL-001" {
+		t.Fatalf("unrelated corpus finding lost its originating rule: %+v", *disclosed)
+	}
+	if !strings.Contains(disclosed.Message, unrelatedRelPath) || !strings.Contains(disclosed.Message, "bogus_field") {
+		t.Fatalf("unrelated corpus disclosure does not carry the original path and fact: %+v", *disclosed)
+	}
+}
+
+// oldNativeFeatureCandidate is a v0-shaped feature spec: no problem, no
+// outcome, and one acceptance criterion carrying neither an anchor nor the
+// feature outcome floor's attestation kind. vl006.isNewClassSpec classifies
+// it as grandfathered, so ORDINARY corpus lint skips requiredness and the
+// attestation floor for it — correctly, and unchanged.
+const oldNativeFeatureCandidate = `---
+id: spec/old-widget
+kind: spec
+title: "Old Widget"
+owners: [team-a]
+class: feature
+acceptance_criteria:
+  - { id: ac-1, text: "The widget works.", evidence: [static] }
+---
+# Old Widget
+`
+
+// TestCheckCandidate_OldNativeFeature_MeetsCurrentRequiredness proves a
+// candidate is never grandfathered by shape: "Strict decode, new-spec
+// requiredness, anchors and project checks apply even to old native inputs;
+// no archive grandfathering" (spec-import-contract). The candidate seam runs
+// vl006's OWN requiredness and attestation helpers for a feature
+// isNewClassSpec would otherwise skip — no rule copy, no change to the
+// corpus rule itself (pinned by TestCheckCandidate_OldFeatureInCorpus_
+// StaysGrandfathered).
+func TestCheckCandidate_OldNativeFeature_MeetsCurrentRequiredness(t *testing.T) {
+	root := emptyStoreRoot(t)
+	relPath := ".verdi/specs/active/old-widget/spec.md"
+	findings, err := CheckCandidate(context.Background(), root, relPath, []byte(oldNativeFeatureCandidate))
+	if err != nil {
+		t.Fatalf("CheckCandidate: %v", err)
+	}
+	for _, want := range []string{
+		"new-class spec has no problem attribute",
+		"new-class spec has no outcome attribute",
+		"acceptance criterion ac-1 has no anchor",
+		"does not declare attestation among its expected evidence kinds",
+	} {
+		var saw bool
+		for _, f := range findings {
+			if f.Path == relPath && f.Severity == SeverityViolation && strings.Contains(f.Message, want) {
+				saw = true
+			}
+		}
+		if !saw {
+			t.Fatalf("no blocking candidate finding names %q:\n%s", want, findingsString(findings))
+		}
+	}
+}
+
+// TestCheckCandidate_OldFeatureInCorpus_StaysGrandfathered is the companion
+// containment proof: the SAME old-shaped spec sitting in the corpus as an
+// unrelated existing document is still grandfathered by vl006's ordinary
+// rule — the candidate seam forces requiredness for the CANDIDATE only, and
+// changes no existing corpus behavior.
+func TestCheckCandidate_OldFeatureInCorpus_StaysGrandfathered(t *testing.T) {
+	root := emptyStoreRoot(t)
+	oldRelPath := ".verdi/specs/active/old-widget/spec.md"
+	writeTestFile(t, filepath.Join(root, oldRelPath), oldNativeFeatureCandidate)
 
 	findings, err := CheckCandidate(context.Background(), root, ".verdi/specs/active/widget-a/spec.md", []byte(cleanFeatureCandidate))
 	if err != nil {
 		t.Fatalf("CheckCandidate: %v", err)
 	}
-	if len(findings) != 0 {
-		t.Fatalf("got %d findings, want 0 (the unrelated corpus decode failure must not appear here):\n%s", len(findings), findingsString(findings))
+	for _, f := range findings {
+		if f.Path == oldRelPath {
+			t.Fatalf("the old corpus spec lost its ordinary grandfathering:\n%s", findingsString(findings))
+		}
 	}
 }
 
 // TestCheckCandidate_DuplicateIdentity proves a candidate whose id already
-// belongs to an existing committed spec is flagged on the CANDIDATE's own
-// path by VL-002's existing global-uniqueness check (vl002.go's ByRef loop)
-// — target-specific filtering keeps exactly that one copy, not also the
-// existing document's own mirrored duplicate finding (a conflicting peer is
-// not a "dependency" this candidate references).
+// belongs to an existing committed spec is flagged BLOCKING on the
+// CANDIDATE's own path by VL-002's existing global-uniqueness check
+// (vl002.go's ByRef loop). The existing peer's own mirrored duplicate
+// finding is not a candidate-specific violation, so it comes back as a
+// nonblocking disclosure on the peer's own path — readiness is determined by
+// the candidate's own failures alone.
 func TestCheckCandidate_DuplicateIdentity(t *testing.T) {
 	root := emptyStoreRoot(t)
 	existingRelPath := ".verdi/specs/active/widget-a/spec.md"
@@ -189,10 +283,22 @@ func TestCheckCandidate_DuplicateIdentity(t *testing.T) {
 		t.Fatalf("CheckCandidate: %v", err)
 	}
 	onlyRule(t, findings, "VL-002")
+	var sawCandidateViolation, sawPeerDisclosure bool
 	for _, f := range findings {
-		if f.Path != candidateRelPath {
-			t.Fatalf("finding on unexpected path %s (want only the candidate's own %s):\n%s", f.Path, candidateRelPath, findingsString(findings))
+		switch f.Path {
+		case candidateRelPath:
+			sawCandidateViolation = sawCandidateViolation || f.Severity == SeverityViolation
+		case existingRelPath:
+			sawPeerDisclosure = sawPeerDisclosure || f.Severity == SeverityDisclosure
+		default:
+			t.Fatalf("finding on unexpected path %s:\n%s", f.Path, findingsString(findings))
 		}
+	}
+	if !sawCandidateViolation {
+		t.Fatalf("want a blocking VL-002 duplicate on the candidate's own path:\n%s", findingsString(findings))
+	}
+	if !sawPeerDisclosure {
+		t.Fatalf("want the existing peer's mirrored duplicate as a nonblocking disclosure:\n%s", findingsString(findings))
 	}
 }
 
