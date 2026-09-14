@@ -21,7 +21,7 @@ const policyGuideID = "asd-policy-guide"
 // guide must carry; policyGuideFalseWording is the unconditional claim it
 // must never make (false on a frozen/read-only wall).
 const (
-	policyGuideScopedWording = "Ordinary draft editing does not require policy; this board&#39;s read-only restrictions still apply."
+	policyGuideScopedWording = "Ordinary human editing does not require policy; this board&#39;s read-only restrictions still apply."
 	policyGuideFalseWording  = "Human editing on this wall continues"
 )
 
@@ -445,8 +445,8 @@ func TestPolicyConcern_RowsHonorBoardMode(t *testing.T) {
 						}
 					}
 				}
-				proceeds := strings.Contains(row.Summary, "editing proceeds")
-				refuses := strings.Contains(row.Summary, "refuses browser writes")
+				proceeds := strings.Contains(row.Summary, "policy, so browser editing proceeds")
+				refuses := strings.Contains(row.Summary, "policy, but this ") && strings.Contains(row.Summary, "board refuses browser writes")
 				if mode == modeAuthoring {
 					if !proceeds || refuses {
 						t.Errorf("authoring summary %q must state that browser editing proceeds here", row.Summary)

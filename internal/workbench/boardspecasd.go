@@ -134,7 +134,7 @@ const (
 const policyNotAdoptedDetail = "project has not adopted policy authority"
 
 // policyEditingClause scopes a policy-forbidden concern row's editing claim
-// to the board's mode. Ordinary draft editing never requires policy, but
+// to the board's mode. Ordinary human editing never requires policy, but
 // only an authoring board accepts browser writes at all: a review or
 // read-only board refuses them regardless of policy, so the row must not
 // say editing "proceeds" there (F3). authoringOutcome is what a write on
@@ -142,11 +142,11 @@ const policyNotAdoptedDetail = "project has not adopted policy authority"
 func policyEditingClause(mode, authoringOutcome string) string {
 	switch boardModeKind(mode) {
 	case modeAuthoring:
-		return "ordinary draft editing does not require policy, so " + authoringOutcome
+		return "ordinary human editing does not require policy, so " + authoringOutcome
 	case modeReview:
-		return "ordinary draft editing does not require policy, but this review board refuses browser writes regardless."
+		return "ordinary human editing does not require policy, but this review board refuses browser writes regardless."
 	default:
-		return "ordinary draft editing does not require policy, but this read-only board refuses browser writes regardless."
+		return "ordinary human editing does not require policy, but this read-only board refuses browser writes regardless."
 	}
 }
 

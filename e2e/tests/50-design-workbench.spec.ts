@@ -544,7 +544,7 @@ test.describe("posture and policy", () => {
     // Truthful, mode-scoped wording — never "editing continues" as an
     // unconditional claim a read-only wall would belie.
     await expect(summaries.first()).toContainText(
-      "Ordinary draft editing does not require policy; this board's read-only restrictions still apply.",
+      "Ordinary human editing does not require policy; this board's read-only restrictions still apply.",
     );
     // Read-only by construction: no form, button, input, or fetch panel.
     await expect(guide.locator("form, button, input, select, textarea, [data-asd-panel]")).toHaveCount(0);
