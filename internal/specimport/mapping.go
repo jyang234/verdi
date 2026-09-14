@@ -135,7 +135,7 @@ func reconcileFields(req Request, baseline []Field, selectedBySourceID map[strin
 // transform is reproducible across the automatic and explicit paths.
 func resolveBulletItem(items []bulletItem, m Mapping) (bulletItem, error) {
 	for _, item := range items {
-		if m.End == item.end && (m.Start == item.start || m.Start == item.markerStart) {
+		if spansItem(m, item) {
 			return item, nil
 		}
 	}
@@ -209,17 +209,28 @@ func missingEvidenceFindings(fields []Field) []Finding {
 	return findings
 }
 
-// suppressResolvedSourceIDFindings removes a source-id-requires-mapping
-// Finding when an explicit Mapping targets the same source-declared id
-// (spec-import-contract.md residual 4: "An explicit mapping to the
-// source-declared ID over that item resolves the blocker"). It does not
-// require the mapping's span to exactly match the blocked item's span —
-// the mapping's Target naming the exact source-declared id is the
-// resolution signal.
-func suppressResolvedSourceIDFindings(findings []Finding, mappings []Mapping) []Finding {
-	resolved := make(map[string]bool, len(mappings))
-	for _, m := range mappings {
-		resolved[m.Target] = true
+// resolveSourceIDFindings removes a source-id-requires-mapping Finding only
+// when an explicit Mapping names that source-declared id AND selects the
+// item that declared it, in the source that declared it (the closed
+// contract review's residual 4: "An explicit mapping to the source-declared
+// ID OVER THAT ITEM resolves the blocker").
+//
+// Target equality alone is not resolution. Without the span binding, a
+// spanless user-added mapping cleared the blocker and published invented
+// text under the source's own declared identifier with no span at all,
+// while the source's real item was disposed of as ordinary retained-only —
+// exactly the "silently present a generated ID as the source's identity"
+// outcome the finding exists to prevent. An unrelated item, a partial
+// selection, a whole-source selection and the same id in a different source
+// are all equally insufficient.
+func resolveSourceIDFindings(findings []Finding, mappings []Mapping, blocked []blockedSourceID) []Finding {
+	resolved := make(map[string]bool, len(blocked))
+	for _, b := range blocked {
+		for _, m := range mappings {
+			if m.Target == b.id && m.SourceID == b.sourceID && spansItem(m, b.item) {
+				resolved[b.id] = true
+			}
+		}
 	}
 	out := findings[:0:0]
 	for _, f := range findings {
@@ -229,4 +240,11 @@ func suppressResolvedSourceIDFindings(findings []Finding, mappings []Mapping) []
 		out = append(out, f)
 	}
 	return out
+}
+
+// spansItem reports whether m's span names exactly item: either its content
+// span (the span automatic extraction records) or that same item including
+// its own bullet marker.
+func spansItem(m Mapping, item bulletItem) bool {
+	return m.End == item.end && (m.Start == item.start || m.Start == item.markerStart)
 }

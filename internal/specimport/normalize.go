@@ -69,6 +69,7 @@ func Normalize(req Request) (Plan, error) {
 
 	var baseline []Field
 	var findings []Finding
+	var blocked []blockedSourceID
 	var native []byte
 
 	switch req.Format {
@@ -86,6 +87,7 @@ func Normalize(req Request) (Plan, error) {
 		}
 		baseline = result.fields
 		findings = append(findings, result.findings...)
+		blocked = result.blocked
 
 	case FormatF13Reference:
 		fields, f13findings, err := applyF13Profile(req.Primary, primarySelected)
@@ -105,7 +107,7 @@ func Normalize(req Request) (Plan, error) {
 		return Plan{}, err
 	}
 	findings = append(findings, missingEvidenceFindings(fields)...)
-	findings = suppressResolvedSourceIDFindings(findings, req.Mappings)
+	findings = resolveSourceIDFindings(findings, req.Mappings, blocked)
 	if req.Format == FormatManualV1 {
 		findings = append(findings, manualMissingStatementFindings(fields)...)
 	}

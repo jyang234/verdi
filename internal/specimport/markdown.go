@@ -18,6 +18,20 @@ import (
 type markdownResult struct {
 	fields   []Field
 	findings []Finding
+	// blocked carries the source item behind every
+	// source-id-requires-mapping finding, so resolution can be bound to
+	// that item rather than to its id alone.
+	blocked []blockedSourceID
+}
+
+// blockedSourceID is one list item whose leading token declares an
+// ac-/co-/dc-/oq- ID, together with the source and the exact item that
+// declared it (spec-import-contract.md: "do not silently present a
+// generated ID as the source's identity").
+type blockedSourceID struct {
+	id       string
+	sourceID string
+	item     bulletItem
 }
 
 // objectPrefixes is the fixed processing order for object sections —
@@ -134,6 +148,7 @@ func recognizeMarkdown(sourceID string, selected []byte) (markdownResult, error)
 	}
 
 	var fields []Field
+	var blocked []blockedSourceID
 	for _, key := range []string{"problem", "outcome"} {
 		occ := statementOccurrences[key]
 		switch len(occ) {
@@ -172,7 +187,16 @@ func recognizeMarkdown(sourceID string, selected []byte) (markdownResult, error)
 			if finding != nil {
 				findings = append(findings, *finding)
 			} else {
-				findings = append(findings, blockedSourceIDFindings(body, bodyStart, top, occ[0])...)
+				sectionBlocked := blockedSourceIDs(sourceID, body, bodyStart, top, occ[0])
+				for _, b := range sectionBlocked {
+					findings = append(findings, Finding{
+						Code:     FindingSourceIDRequiresMap,
+						Target:   b.id,
+						Message:  fmt.Sprintf("list item begins with source-declared id %q; an explicit mapping over that item must preserve or resolve it before it can become a field", b.id),
+						Blocking: true,
+					})
+				}
+				blocked = append(blocked, sectionBlocked...)
 			}
 			fields = append(fields, objFields...)
 		default:
@@ -185,7 +209,7 @@ func recognizeMarkdown(sourceID string, selected []byte) (markdownResult, error)
 		}
 	}
 
-	return markdownResult{fields: fields, findings: findings}, nil
+	return markdownResult{fields: fields, findings: findings, blocked: blocked}, nil
 }
 
 // headingLabel returns a heading's trimmed label text. For an ATX heading
@@ -442,31 +466,28 @@ func supportedBulletItems(selected []byte) ([]bulletItem, error) {
 	return items, nil
 }
 
-// blockedSourceIDFindings returns one source-id-requires-mapping Finding
-// per blocked list item across every object section, computed as a
-// second, lightweight pass so extractObjectSection's happy path does not
-// need to thread an extra return value through its early-return branches.
-func blockedSourceIDFindings(body []byte, bodyStart int, top []ast.Node, headingIdx int) []Finding {
+// blockedSourceIDs returns one blockedSourceID per blocked list item in one
+// object section, computed as a second, lightweight pass so
+// extractObjectSection's happy path does not need to thread an extra return
+// value through its early-return branches. It records the declaring item
+// itself, not just its id, so resolution can require a mapping over THAT
+// item in THAT source.
+func blockedSourceIDs(sourceID string, body []byte, bodyStart int, top []ast.Node, headingIdx int) []blockedSourceID {
 	content, _ := sectionContentNodes(top, headingIdx)
 	list, ok := sectionBulletList(content)
 	if !ok {
 		return nil
 	}
-	var findings []Finding
+	var blocked []blockedSourceID
 	for _, item := range bulletItemsOf(body, bodyStart, list) {
 		if !item.supported {
 			continue
 		}
 		if m := sourceDeclaredIDRe.FindStringSubmatch(item.text); m != nil {
-			findings = append(findings, Finding{
-				Code:     FindingSourceIDRequiresMap,
-				Target:   m[1],
-				Message:  fmt.Sprintf("list item begins with source-declared id %q; an explicit mapping must preserve or resolve it before it can become a field", m[1]),
-				Blocking: true,
-			})
+			blocked = append(blocked, blockedSourceID{id: m[1], sourceID: sourceID, item: item})
 		}
 	}
-	return findings
+	return blocked
 }
 
 // sectionBulletList returns an object section's single flat Markdown BULLET

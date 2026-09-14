@@ -521,6 +521,71 @@ func TestNormalize_MarkdownSourceDeclaredIDRequiresMappingAndKeepsPositionalNumb
 	}
 }
 
+// TestNormalize_SourceDeclaredIDResolutionRequiresTheCorrespondingItem pins
+// the closed contract review's residual 4: "An explicit mapping to the
+// source-declared ID OVER THAT ITEM resolves the blocker". Keying resolution
+// on Mapping.Target alone let a spanless user-added mapping publish invented
+// text under the source's own declared identifier while the source's real
+// ac-7 item was disposed of as ordinary retained-only.
+func TestNormalize_SourceDeclaredIDResolutionRequiresTheCorrespondingItem(t *testing.T) {
+	data := readMarkdownFixture(t, "source-id-list-item.md")
+	itemStart, itemEnd := spanOf(t, data, "ac-7: The importer preserves an existing source-declared identifier.")
+	otherStart, otherEnd := spanOf(t, data, "The importer reads a Markdown file.")
+
+	notes := []byte("- ac-7: A different document's own ac-7 item.\n")
+	notesStart, notesEnd := spanOf(t, notes, "ac-7: A different document's own ac-7 item.")
+
+	invented := "Something the source never said"
+	cases := []struct {
+		name    string
+		mapping Mapping
+	}{
+		{"user-added with no span at all", Mapping{Target: "ac-7", Text: &invented}},
+		{"the whole source", Mapping{Target: "ac-7", SourceID: "source", Start: 0, End: len(data), Transform: TransformIdentity}},
+		{"a different item", Mapping{Target: "ac-7", SourceID: "source", Start: otherStart, End: otherEnd, Transform: TransformListItem}},
+		{"a partial selection of the item", Mapping{Target: "ac-7", SourceID: "source", Start: itemStart, End: itemEnd - 5, Transform: TransformIdentity}},
+		{"the same id in another source", Mapping{Target: "ac-7", SourceID: "notes", Start: notesStart, End: notesEnd, Transform: TransformListItem}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			req := minimalRequest()
+			req.Sources[0].Data = data
+			req.Sources = append(req.Sources, Source{ID: "notes", Label: "notes.md", Data: notes})
+			req.Mappings = []Mapping{c.mapping}
+
+			plan, err := Normalize(req)
+			if err != nil {
+				t.Fatalf("Normalize: unexpected error: %v", err)
+			}
+			f, ok := findingForTarget(plan.Findings, FindingSourceIDRequiresMap, "ac-7")
+			if !ok {
+				t.Fatalf("source-id-requires-mapping for ac-7 cleared by %s: %+v", c.name, plan.Findings)
+			}
+			if !f.Blocking {
+				t.Errorf("source-id-requires-mapping for ac-7 is no longer blocking after %s: %+v", c.name, f)
+			}
+		})
+	}
+
+	t.Run("the item including its bullet marker resolves it", func(t *testing.T) {
+		req := minimalRequest()
+		req.Sources[0].Data = data
+		req.Mappings = []Mapping{
+			{Target: "ac-7", SourceID: "source", Start: itemStart - 2, End: itemEnd, Transform: TransformListItem},
+		}
+		plan, err := Normalize(req)
+		if err != nil {
+			t.Fatalf("Normalize: unexpected error: %v", err)
+		}
+		if _, ok := findingForTarget(plan.Findings, FindingSourceIDRequiresMap, "ac-7"); ok {
+			t.Fatalf("a mapping over the blocked item itself did not resolve the blocker: %+v", plan.Findings)
+		}
+		if ac3, ok := fieldByTarget(plan.Fields, "ac-3"); !ok || ac3.Text != "The importer reports missing fields." {
+			t.Fatalf("ordinal continuity disturbed: ac-3 = %+v ok=%v", ac3, ok)
+		}
+	})
+}
+
 func TestNormalize_MarkdownSourceDeclaredIDResolvedByExplicitMapping(t *testing.T) {
 	data := readMarkdownFixture(t, "source-id-list-item.md")
 	req := minimalRequest()
