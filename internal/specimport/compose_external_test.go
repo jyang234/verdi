@@ -357,6 +357,101 @@ func TestCompose_TemplateWithNonPlaceholderStub_Refused(t *testing.T) {
 	}
 }
 
+// TestCompose_TemplateRenamesPlaceholderCriterion_Refused is the
+// criterion-side twin of the stub case above, built the same way: a store
+// override differing from the embedded default in nothing but the id,
+// anchor and body heading of its generated placeholder acceptance
+// criterion (ac-1 -> ac-9). The placeholder STUB slug is untouched, so the
+// refusal above does not fire; the scaffold renders, decodes and satisfies
+// CheckClass, so this is a conforming reachable store configuration.
+//
+// Placeholder removal recognizes the criterion by id, so a renamed one is
+// not removed — and without this refusal the import used to succeed with
+// zero findings, carrying the generated placeholder text into the
+// candidate as a real imported requirement together with its orphaned
+// body section, against "Remove generated placeholder ACs/stubs; never
+// retain them as real imported requirements, including their orphaned
+// placeholder body sections".
+func TestCompose_TemplateRenamesPlaceholderCriterion_Refused(t *testing.T) {
+	root := minimalStoreRoot(t)
+	canonical, err := designscaffold.LoadTemplate(root, "feature.md")
+	if err != nil {
+		t.Fatalf("LoadTemplate: %v", err)
+	}
+	override := strings.ReplaceAll(string(canonical), placeholderACID, "ac-9")
+	override = strings.Replace(override, "## Ac 1", "## Ac 9", 1)
+	if !strings.Contains(override, "ac-9") || !strings.Contains(override, "## Ac 9") ||
+		!strings.Contains(override, placeholderStubSlug) {
+		t.Fatal("test fixture assumption broken: the canonical feature template no longer has the expected placeholder criterion/stub shape")
+	}
+	writeStoreFile(t, root, ".verdi/templates/feature.md", override)
+
+	requireTemplateCriterionRefusal(t, root, "ac-9")
+}
+
+// TestCompose_TemplateWithExtraCriterion_Refused is the second shape of the
+// same defect: the canonical placeholder criterion is left in place and the
+// template declares one further criterion of the store owner's own beside
+// it. The placeholder is still recognized and removed, so the extra
+// criterion used to reach the candidate as an imported requirement the
+// source never stated — and silently deleting it instead would be the
+// content drop "reject a template/model that cannot express the candidate
+// rather than dropping content" forbids. The template is refused, naming
+// the criterion.
+func TestCompose_TemplateWithExtraCriterion_Refused(t *testing.T) {
+	root := minimalStoreRoot(t)
+	canonical, err := designscaffold.LoadTemplate(root, "feature.md")
+	if err != nil {
+		t.Fatalf("LoadTemplate: %v", err)
+	}
+	const extra = "\n  - { id: ac-9, text: \"Team standard: every feature records a rollback note.\", evidence: [static, attestation], anchor: ac-9 }\nstubs:\n"
+	override := strings.Replace(string(canonical), "\nstubs:\n", extra, 1)
+	if !strings.Contains(override, "id: ac-9") || !strings.Contains(override, "id: "+placeholderACID) {
+		t.Fatal("test fixture assumption broken: the canonical feature template no longer declares the placeholder criterion ahead of a stubs: block")
+	}
+	override += "\n## Ac 9\n\nTODO: design notes.\n"
+	writeStoreFile(t, root, ".verdi/templates/feature.md", override)
+
+	requireTemplateCriterionRefusal(t, root, "ac-9")
+}
+
+// requireTemplateCriterionRefusal composes the shared minimal feature
+// request against root's configured template and requires the import to
+// fail closed: no candidate bytes at all, and a blocking
+// unsupported-structure finding on target "template" that names both the
+// criterion id it cannot express and the placeholder shape it does
+// support, so the store owner can act on it.
+func requireTemplateCriterionRefusal(t *testing.T, root, unsupportedID string) {
+	t.Helper()
+	req := minimalRequest()
+	req.Mappings = []Mapping{
+		{Target: "ac-1", Evidence: []string{"static", "attestation"}},
+		{Target: "ac-2", Evidence: []string{"static", "attestation"}},
+	}
+	plan, err := Normalize(req)
+	if err != nil {
+		t.Fatalf("Normalize: %v", err)
+	}
+
+	candidate, findings, err := Compose(context.Background(), root, req, plan)
+	if err != nil {
+		t.Fatalf("Compose: want a blocking finding, not an error: %v", err)
+	}
+	if candidate != nil {
+		t.Fatalf("Compose imported against a template whose acceptance criteria it does not support:\n%s", candidate)
+	}
+	var sawRefusal bool
+	for _, f := range findings {
+		if f.Blocking && f.Code == FindingUnsupportedStructure && f.Target == "template" &&
+			strings.Contains(f.Message, unsupportedID) && strings.Contains(f.Message, placeholderACID) {
+			sawRefusal = true
+		}
+	}
+	if !sawRefusal {
+		t.Fatalf("want a blocking %s finding on target \"template\" naming %q and the supported %q placeholder, got: %+v", FindingUnsupportedStructure, unsupportedID, placeholderACID, findings)
+	}
+}
+
 // featureTemplateWithCustomFields is a store override carrying a
 // team-sanctioned custom: extension key and its own extra body section, on
 // top of the canonical placeholder shape — the "preserve template-defined
