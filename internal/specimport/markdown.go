@@ -227,13 +227,27 @@ func extractStatementField(sourceID string, body []byte, bodyStart int, top []as
 			Blocking: true,
 		}
 	}
-	rawStart := leafStart(content[0])
+	rawStart, ok := blockLineStart(body, content[0])
+	if !ok {
+		return Field{}, &Finding{
+			Code:     FindingUnsupportedStructure,
+			Target:   key,
+			Message:  fmt.Sprintf("the %s section's first content block has no locatable source position; its exact body bytes cannot be determined", key),
+			Blocking: true,
+		}
+	}
 	rawEnd := len(body)
 	if nextHeadingIdx < len(top) {
-		// The next heading's own leaf start is its LABEL's start (past
-		// any ATX "## " marker); back up to that physical line's start so
-		// the marker bytes are never mistaken for trailing body content.
-		rawEnd = lineStartBefore(body, leafStart(top[nextHeadingIdx]))
+		end, ok := blockLineStart(body, top[nextHeadingIdx])
+		if !ok {
+			return Field{}, &Finding{
+				Code:     FindingUnsupportedStructure,
+				Target:   key,
+				Message:  fmt.Sprintf("the heading closing the %s section has no locatable source position; its exact body bytes cannot be determined", key),
+				Blocking: true,
+			}
+		}
+		rawEnd = end
 	}
 	start, end := trimBodyRange(body, rawStart, rawEnd)
 	if start >= end {
@@ -393,16 +407,33 @@ func lineStartBefore(data []byte, pos int) int {
 	return pos
 }
 
-// leafStart returns the byte offset where n's content begins, descending
-// through container nodes (List, ListItem, Blockquote — whose own Lines()
-// is always empty) to the first descendant leaf block that actually
-// carries a line segment (Paragraph, TextBlock, FencedCodeBlock, ...).
-func leafStart(n ast.Node) int {
-	segs := leafSegments(n)
-	if len(segs) == 0 {
-		return 0
+// blockLineStart returns the byte offset of the start of the physical line
+// on which block n begins.
+//
+// It reads goldmark's OWN recorded block position (parser.go sets it for
+// every block it opens), which exists even for blocks that carry no line
+// segment at all — a thematic break, or an ATX heading with an empty label.
+// A section extent must never be derived from a descendant leaf's segment:
+// an unsegmented block has none, so such a boundary silently collapses to
+// offset 0 and the section absorbs everything before it, including the
+// document title and its own heading marker, or collapses to nothing.
+// Paragraph/TextBlock override Pos() with their first line's start, which
+// lineStartBefore then backs up past any indentation; a setext heading's
+// position is its LABEL line, not its underline, so it is the correct
+// closing boundary for the preceding section either way.
+func blockLineStart(body []byte, n ast.Node) (int, bool) {
+	pos := n.Pos()
+	if pos < 0 {
+		segs := leafSegments(n)
+		if len(segs) == 0 {
+			return 0, false
+		}
+		pos = segs[0].Start
 	}
-	return segs[0].Start
+	if pos < 0 || pos > len(body) {
+		return 0, false
+	}
+	return lineStartBefore(body, pos), true
 }
 
 // leafSegments collects every line segment of every Lines()-bearing

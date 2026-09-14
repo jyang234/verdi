@@ -271,6 +271,64 @@ func TestNormalize_MarkdownHeadingInsideFencedBlockIsNotAField(t *testing.T) {
 	}
 }
 
+// TestNormalize_MarkdownSectionBoundariesComeFromRealBlockPositions pins
+// both ends of the section-extent computation against blocks that carry no
+// goldmark line segment at all. A thematic break and an ATX heading with an
+// empty label are exactly such blocks; deriving a boundary from a
+// descendant leaf's segment silently collapses it to offset 0, which made
+// the problem statement absorb the document title and its own "## Problem"
+// marker and publish them as copied-source (spec-import-contract.md:
+// "Problem/outcome select the entire section body excluding leading/
+// trailing blank lines, preserving all interior bytes and line breaks").
+func TestNormalize_MarkdownSectionBoundariesComeFromRealBlockPositions(t *testing.T) {
+	t.Run("thematic break first in the section", func(t *testing.T) {
+		raw := "# Title\n\n## Problem\n\n***\n\nreal problem text\n\n## Outcome\n\no\n"
+		req := minimalRequest()
+		req.Sources[0].Data = []byte(raw)
+
+		plan, err := Normalize(req)
+		if err != nil {
+			t.Fatalf("Normalize: unexpected error: %v", err)
+		}
+		problem, ok := fieldByTarget(plan.Fields, "problem")
+		if !ok {
+			t.Fatalf("no problem field: %+v", plan.Fields)
+		}
+		const want = "***\n\nreal problem text"
+		if problem.Text != want {
+			t.Fatalf("problem.Text = %q, want exactly the section body %q (never the title or its own heading)", problem.Text, want)
+		}
+		if len(problem.Spans) != 1 || problem.Spans[0].Start != 21 || problem.Spans[0].End != 43 {
+			t.Fatalf("problem.Spans = %+v, want one span [21,43)", problem.Spans)
+		}
+		if raw[problem.Spans[0].Start:problem.Spans[0].End] != want {
+			t.Fatalf("the recorded span does not reproduce the reported text")
+		}
+	})
+
+	t.Run("empty heading as the closing boundary", func(t *testing.T) {
+		raw := "# Title\n\n## Problem\n\nreal problem text\n\n##\n\n## Outcome\n\no\n"
+		req := minimalRequest()
+		req.Sources[0].Data = []byte(raw)
+
+		plan, err := Normalize(req)
+		if err != nil {
+			t.Fatalf("Normalize: unexpected error: %v", err)
+		}
+		problem, ok := fieldByTarget(plan.Fields, "problem")
+		if !ok {
+			t.Fatalf("no problem field (an empty heading boundary must not erase the section): %+v %+v", plan.Fields, plan.Findings)
+		}
+		const want = "real problem text"
+		if problem.Text != want {
+			t.Fatalf("problem.Text = %q, want %q", problem.Text, want)
+		}
+		if len(problem.Spans) != 1 || raw[problem.Spans[0].Start:problem.Spans[0].End] != want {
+			t.Fatalf("problem.Spans = %+v, want a span reproducing %q", problem.Spans, want)
+		}
+	})
+}
+
 func TestNormalize_MarkdownMultipleTargetsAfterTitle(t *testing.T) {
 	data := readMarkdownFixture(t, "multiple-targets.md")
 	req := minimalRequest()
