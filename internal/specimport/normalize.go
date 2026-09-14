@@ -106,6 +106,7 @@ func Normalize(req Request) (Plan, error) {
 	if err != nil {
 		return Plan{}, err
 	}
+	findings = append(findings, emptyFieldFindings(fields)...)
 	findings = append(findings, missingEvidenceFindings(fields)...)
 	findings = resolveSourceIDFindings(findings, req.Mappings, blocked)
 	if req.Format == FormatManualV1 {

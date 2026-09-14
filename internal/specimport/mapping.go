@@ -193,6 +193,31 @@ func utf8RuneBoundary(b []byte, i int) bool {
 	return utf8.RuneStart(b[i])
 }
 
+// emptyFieldFindings reports one blocking empty-field Finding per final
+// Field whose resolved value is empty or blank (spec-import-contract.md:
+// "Duplicate aliases for one field, empty fields, unsupported nesting or
+// multiple targets are reported"). Automatic recognition already reports an
+// empty SECTION before it can become a Field; this is the same rule applied
+// to what an explicit mapping actually resolved to, since a present mapping
+// target is not a resolved value. It is computed once, after every
+// automatic and explicit Field is finalized, so it covers statements and
+// objects alike. Task 2 still performs all canonical requiredness checks.
+func emptyFieldFindings(fields []Field) []Finding {
+	var findings []Finding
+	for _, f := range fields {
+		if nonBlankUTF8(f.Text) {
+			continue
+		}
+		findings = append(findings, Finding{
+			Code:     FindingEmptyField,
+			Target:   f.Target,
+			Message:  fmt.Sprintf("%s resolved to an empty value; a present mapping target is not a resolved value", f.Target),
+			Blocking: true,
+		})
+	}
+	return findings
+}
+
 // missingEvidenceFindings reports one missing-evidence Finding per
 // acceptance-criterion Field with no declared Evidence
 // (spec-import-contract.md: "The preview has a missing-evidence finding

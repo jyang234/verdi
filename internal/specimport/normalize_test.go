@@ -223,6 +223,50 @@ func TestNormalize_ManualV1ExplicitMappingSuppliesStatement(t *testing.T) {
 	}
 }
 
+// TestNormalize_EmptyExplicitMappingsReportBlockingEmptyFields pins that a
+// present mapping target is not a resolved value. An explicit mapping over
+// an empty or blank span produced empty statements and objects with no
+// finding at all — a Plan reporting a clean result for content it knows is
+// empty. empty-field is in the closed vocabulary and is already emitted for
+// automatic sections (spec-import-contract.md: "Duplicate aliases for one
+// field, empty fields, unsupported nesting or multiple targets are
+// reported"). Task 2 still owns canonical requiredness.
+func TestNormalize_EmptyExplicitMappingsReportBlockingEmptyFields(t *testing.T) {
+	req := Request{
+		Schema:  RequestSchema,
+		Format:  FormatManualV1,
+		Target:  Target{Slug: "blank-import", Class: "feature", Title: "Blank Import"},
+		Primary: "source",
+		Sources: []Source{{ID: "source", Label: "blank.md", Data: []byte("   \n   \n")}},
+		Mappings: []Mapping{
+			{Target: "problem", SourceID: "source", Start: 0, End: 0, Transform: TransformIdentity},
+			{Target: "outcome", SourceID: "source", Start: 0, End: 8, Transform: TransformTrimBlankLines},
+			{Target: "co-1", SourceID: "source", Start: 0, End: 4, Transform: TransformCollapseWS},
+		},
+		RetainUnmapped: true,
+	}
+	plan, err := Normalize(req)
+	if err != nil {
+		t.Fatalf("Normalize: unexpected error: %v", err)
+	}
+	for _, target := range []string{"problem", "outcome", "co-1"} {
+		field, ok := fieldByTarget(plan.Fields, target)
+		if !ok {
+			t.Fatalf("%s field missing: %+v", target, plan.Fields)
+		}
+		if field.Text != "" {
+			t.Fatalf("%s.Text = %q, want the empty value this fixture actually maps", target, field.Text)
+		}
+		f, ok := findingForTarget(plan.Findings, FindingEmptyField, target)
+		if !ok {
+			t.Fatalf("no empty-field finding for the empty mapped %s: %+v", target, plan.Findings)
+		}
+		if !f.Blocking {
+			t.Errorf("empty-field finding for %s is not blocking: %+v", target, f)
+		}
+	}
+}
+
 // --- Direct Go-struct construction bypassing DecodeRequest entirely. ---
 
 func TestNormalize_RejectsDirectStructWithInvalidDuplicateSourceIDs(t *testing.T) {
