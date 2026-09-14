@@ -45,13 +45,15 @@ files by responsibility. No handlers, CLI dispatch or existing authority edits.
 **Consumes:** artifact strict JSON decoding, current goldmark and canonical JSON.
 Pinned proposal source snapshots/field map as fixture input, never runtime file
 reads from docs. **Produces:** contract Request/Source/Mapping/Target/Link and
-Plan/Snapshot/Field/Span/Coverage/Finding types; `DecodeRequest`, `Normalize` and
+Plan/Snapshot/Field/Span/Coverage/Finding types; `Request.Validate`, `DecodeRequest`, `Normalize` and
 `ReadSource` with exact signatures in the contract.
 
-- [ ] Add a minimal positive labeled fixture, multiline Problem/Outcome and flat criteria; pin source spans and text, not just count. Add the missing/duplicate/fenced/other-target cases before code.
+- [ ] Add a minimal positive labeled fixture, multiline Problem/Outcome and flat criteria; pin source spans and text, not just count. Include leading YAML frontmatter, setext title/fields and retained pre-title prose as positive cases. Add the missing/duplicate/fenced/other-target cases before code.
 - [ ] Capture RED with `go test ./internal/specimport -run 'TestNormalize|TestDecodeRequest|TestReadSource' -count=1`. New behavior must fail before implementation.
 - [ ] Implement strict limits, normalized selections, real Markdown structure, deterministic profiles/explicit mappings and byte partitions. No template rendering or repository writes in this task.
 - [ ] Add exact F13 fixtures and compare 4 snapshots/8 criteria/2409 primary bytes against pinned originals. Add altered-profile-byte refusal, missing evidence, unassigned support, overlap accounting and invalid source-span cases.
+- [ ] Drive Normalize directly with malformed struct values (invalid/duplicate source IDs, enum/size/target violations), not just decoder input. Assert the same refusal. Test evidence-only mappings retain copied origin, all coverage totals balance, and source-ID-looking object labels demand explicit resolution.
+- [ ] Verify both the extracted F13 snapshot and the pinned stage-plan lines 602–671 normalize to the identical selected source digest. Pin 17 byte intervals, of which 8 are mapped; the eight line-accounting units are a different measure.
 - [ ] Exercise safe file reads with hermetic regular files, traversal/symlink rejection and cancellation; no symlink fallback or recursive walk.
 - [ ] Run focused GREEN and `go vet ./internal/specimport`; format touched Go files. Record commands/output, changed paths and exported interface in the lane report before fixed-range review.
 
@@ -75,7 +77,7 @@ if plan.Fields[0].Target != "problem" || plan.Fields[0].Text != "First line.\nSe
 fixtures; create `internal/lint/candidate.go`, `candidate_test.go`; narrowly edit
 `internal/lint/walk.go` only if extracting its existing byte decode helper is
 needed. Reuse `internal/artifact/splice`, `internal/designscaffold`, `internal/store`
-and `internal/model`; no independent canonical parser or rule copies.
+and `internal/model`; a narrow creation-only body helper in `internal/artifact/splice` with tests is allowed if existing operations do not mirror body text. No independent canonical parser or rule copies.
 
 **Consumes:** frozen Task 1 Plan/Request. **Produces:** contract `Compose`, plus
 `lint.CheckCandidate(ctx context.Context, root, relPath string, content []byte)
@@ -84,7 +86,7 @@ reuse existing VL-002/003/005/006 implementations over a Snapshot with the new
 in-memory Document inserted and indexed; filter target-specific findings and
 surface corrupt/unresolvable dependencies explicitly. Existing rules unchanged.
 
-- [ ] Add RED tests showing a labeled native result has matching frontmatter/body, no scaffold placeholder AC/stub, valid resolving anchors and retained-only commands absent from the spec.
+- [ ] Add RED tests showing a labeled native result has matching frontmatter/body, no scaffold placeholder AC/stub or orphaned body placeholders, absent stubs (zero invented decomposition), valid resolving anchors and retained-only commands absent from the spec.
 - [ ] Implement through existing class template/scaffold and typed splice operations. Preserve custom template fields or report an explicit unsupported candidate. Never silently drop an operation to make validation pass.
 - [ ] Add tests for missing evidence, feature attestation floor, missing parent/tracker, duplicate existing identity, incompatible model/template and invalid links. Native tests compare exact bytes and IDs; refuse frozen/closed/old incomplete native input.
 - [ ] Test explicit pair deferral uses current constants/anchors and marks generated origin. An incomplete preview has fields/findings but cannot claim a valid candidate until all non-deferrable requirements pass.
@@ -120,8 +122,9 @@ must retain the one shared validation/mutation/authority algorithm.
 
 - [ ] Write RED integration tests with fixturegit, snapshotting HEAD/branch refs/index/files before preview and refused apply. Include clean/stale/dirty/index-staged contexts and exact deterministic preview recomputation.
 - [ ] Implement preview digest binding, source sidecar record, strict provenance validation and create-only Git publication in sorted path order. Never stage/checkout or invoke source commands.
-- [ ] Drive faults before publication and after successful publication but before response through a hermetic repository port. Same-request retry must return the existing exact commit; mismatched request/actor/moved branch must refuse. Concurrent attempts create at most one branch.
-- [ ] Verify source record after later supported spec edits: historical import remains verifiable, current bytes are disclosed as changed. Corrupt/missing record or snapshot is never a pass. Record/source files cannot enter default context or artifact index even if they contain valid-looking frontmatter.
+- [ ] Test invalid Request structs at Preview and Apply directly, engine-digest changes, and malformed source IDs before any path construction.
+- [ ] Drive faults before publication and after successful publication but before response through a hermetic repository port. Same-request retry must return the existing exact commit even after the checkout becomes dirty; a losing identical CAS must reconcile before collision; mismatched request/actor/moved branch must refuse. Concurrent attempts create at most one branch.
+- [ ] Verify source record after later supported spec edits: historical import remains verifiable, current bytes are disclosed as changed. Corrupt/missing record or snapshot is never a pass. Record/source files cannot enter default context, artifact index or lint Snapshot/ByRef even if they contain valid-looking frontmatter. A retained byte-identical native candidate must cause zero VL-002 duplicate findings.
 - [ ] Exercise browser-human versus delegated-agent policy outcomes without broadening allowed actor constructors. No adopted policy is allowed only on the existing explicit browser-human path; malformed policy fails.
 - [ ] Run `go test ./internal/specimport ./internal/draftmutation ./internal/store ./internal/gitx ./internal/lint -count=1` and relevant context exclusion tests; include race on the new service tests. Record focused command outputs for review.
 
@@ -145,7 +148,7 @@ Separate write sets, sequential inside this task to avoid dispatch conflicts.
 **CLI files (Sonnet):** `cmd/verdi/designimport.go`, `designimport_test.go`, built-
 binary tests and fixtures under `cmd/verdi/testdata/`; minimal `design.go` dispatch/
 usage update. **Consumes:** frozen Task 3 API. **Produces:** contract import source,
-preview and apply commands; canonical JSON and 0/1/2 handling, no human CLI bypass.
+preview and apply commands; canonical JSON and 0/1/2 handling, read-only `record` inspection and explicit deferral disclosure on apply, no human CLI bypass.
 
 - [ ] Add RED built-binary source/preview/apply tests. Preview must work without assistance policy; delegated apply must preserve existing refusal/correction guidance.
 - [ ] Implement thin dispatch and strict request reading. CLI may compose JSON but must not reproduce parsing, publication, evidence or policy logic.
@@ -154,7 +157,7 @@ preview and apply commands; canonical JSON and 0/1/2 handling, no human CLI bypa
 **UI files (FABLE):** new `internal/workbench/specimport.go`, `specimportrender.go`,
 `specimport_test.go`, `assets/specimport.js`; minimal handler.go/index.go/branch-board
 source-record affordance changes; `e2e/tests/72-spec-import.spec.ts`, fixtures under testdata and only necessary harness
-registration. Existing recording-off config remains. All visible HTML/CSS/JS,
+registration. Existing recording-off config remains. Reuse mintBrowserActor from boardspecdesign.go; preserve the exactly-one-constructor structural test unchanged. All visible HTML/CSS/JS,
 UI handler behavior and UI fixes belong to genuine FABLE 5.1.
 
 **Consumes:** the same Task 3 service/API; existing shell, model vocabulary,
@@ -164,7 +167,7 @@ acceptance judgment or direct filesystem draft writer.
 
 - [ ] Write handler and browser RED cases for importing an existing labeled spec, editing a mapping, selecting evidence, acknowledging retained source and requiring a fresh preview after any edit.
 - [ ] Implement accessible labeled file/range/target selection and readable fields/gaps/source coverage. Show F13's missing labels separately from eight unset evidence declarations; provide explicit pair deferral. Escape all source text and error content.
-- [ ] Create the draft, follow the ordinary branch-board link, make a supported edit, reload and inspect persisted spec plus truthful original source record. Test corrupted record, ambiguous headings and correction paths.
+- [ ] Create the draft, follow the ordinary branch-board link, make a supported edit, reload and inspect persisted spec plus truthful original source record. Include its link next to review preparation, explaining ASD unclassified creation versus separately recorded import origin. Test corrupted record, ambiguous headings and correction paths.
 - [ ] Verify one complete human browser import with no model/assistance policy available and zero model/provider calls. No coaching-only hidden command may be required by the happy path.
 - [ ] Run focused Go handler tests and the new Playwright test file with trace/video/screenshot disabled; scan recording artifacts after each invocation. Main checks screenshots were not used and actual FABLE model records before acceptance.
 
@@ -182,7 +185,7 @@ checkout modification.
   command output and identify failures without weakening gates. Scan recording
   artifacts after the browser suite.
 - [ ] Build a separately identified local candidate binary and record SHA-256.
-  Run F13 rehearsal in a disposable real-project pilot checkout, never the user's
+  Verify engine_digest equals that binary hash. Run F13 rehearsal in a disposable real-project pilot checkout, never the user's
   independent checkout. Exercise import, field correction/deferral, supported edit,
   reload, board/evidence inspection and truthful source-record inspection.
 - [ ] Update onboarding with actual supported syntax, Markdown grammar, CLI actor

@@ -39,6 +39,16 @@ The Go API is owned by `internal/specimport`. All public structs use explicit
 snake_case JSON tags; byte slices use standard base64 encoding. Closed enums and
 field-dependent requirements below are validated after `artifact.DecodeExactJSON`.
 Unknown fields/trailing values and null top-level requests fail closed.
+`Request.Validate() error` owns all closed-shape/enum/required-field/limit checks;
+DecodeRequest calls it after decoding, and Normalize calls it unconditionally on
+every input, including direct Go struct construction. Preview and Apply funnel
+through Normalize before any request-derived path or write is constructed (retry
+reconciliation also validates the request first). No service trusts prior decoding.
+For direct struct callers the canonical request JSON must fit the same 12 MiB
+limit; the decoder additionally caps actual supplied envelope bytes. Source.ID is
+a validated identifier used as a trusted path component after validation, unlike
+Label, which is display-only. Duplicate IDs, invalid slugs and invalid source IDs
+fail on every entry path; they can never collapse or escape the commit write set.
 
 ```go
 type Target struct {
@@ -105,10 +115,21 @@ selection. It does not walk directories. Browser labels have no path authority.
 ## Deterministic structural mapping
 
 Use the existing goldmark dependency for Markdown syntax, especially fenced code
-and list boundaries. Only one selected target is recognized: the primary must
-start with one ATX title heading; a peer/higher heading later means multiple
-selected targets and is a named unresolved finding. Leading blank lines are
-allowed. Metadata/source prose before the title is unrecognized, not guessed.
+and list boundaries. In external markdown-v1, a leading YAML frontmatter block
+(beginning with a standalone `---`, ending with a later standalone `---` or `...`)
+is retained-only opaque metadata, never native field authority. Recognize this
+block before goldmark parsing so its closing delimiter cannot become a setext
+heading. An opening delimiter without a closing delimiter is invalid-source.
+Maintain offsets into the original selected bytes when parsing the remainder.
+No YAML metadata is executed or silently promoted. Native mode remains explicit.
+
+Leading blank lines and non-heading prose before the first Markdown heading are
+tolerated and retained-only. The first real heading after optional metadata is
+the title. Both ATX and setext headings participate, with their goldmark levels;
+fenced-code text never does. A peer/higher heading after the title is a multiple-
+target finding. Both heading forms can declare field sections at the direct-child
+level; this supports ordinary labeled Markdown with or without frontmatter and
+without manual mapping. A primary with no real heading has unsupported-structure.
 Field sections are direct child headings of that title, at exactly one deeper
 level. Literal heading labels are case-insensitive after trimming whitespace:
 `Problem`/`Problem Statement`, `Outcome`/`Outcome Statement`,
@@ -124,8 +145,11 @@ one direct item = one object, in source order, with ac-/co-/dc-/oq- plus sequent
 numbers generated per kind. Strip only the bullet marker and its following space;
 multiline continuation indentation is a declared deterministic deindent transform.
 Nested lists or mixed non-list prose make that section unresolved. No punctuation
-or words are paraphrased. Existing IDs outside the supported list grammar are not
-recognized implicitly; choose explicit mappings or native mode to preserve them.
+or words are paraphrased. When a list item's leading token has an ac-/co-/dc-/oq- ID followed by a colon,
+emit `source-id-requires-mapping` and block that automatic object until an explicit
+mapping preserves/resolves its ID; do not silently present a generated ID as the
+source's identity. Native mode also preserves existing IDs. This explicit finding
+is the bounded fallback for labeled object forms outside the list grammar.
 Evidence is not inferred from text. The preview has a missing-evidence finding
 until an explicit Mapping supplies kinds; feature attestation requirements are
 still checked by existing lint. The UI can apply the user's selected kinds to
@@ -140,8 +164,13 @@ Supporting files stay whole retained-only units. Problem/outcome are absent.
 `manual-v1` supplies no automatic mappings and retains all selected source.
 Profiles are shipped data interpreted by fixed code, never uploaded executables.
 
-Explicit Mappings override the automatic mapping for the same target. Duplicate
-explicit targets fail. Targets are `problem`, `outcome` or valid ac-/co-/dc-/oq-
+Explicit text/span Mappings override the automatic mapping for the same target.
+Duplicate explicit targets fail. An evidence-only Mapping names an existing
+automatic AC target and supplies nonempty Evidence, with no SourceID, Text,
+Transform or nonzero offsets. It changes evidence only, preserving the automatic
+text, source span and copied origin. Evidence-only mapping to an absent/non-AC
+target fails; it cannot manufacture content. This is the normal F13 evidence-edit
+path. Other mappings follow the source-backed/user-added rules below. Targets are `problem`, `outcome` or valid ac-/co-/dc-/oq-
 object IDs. With SourceID, Start/End select existing content and Transform is
 `identity`, `trim-blank-lines`, `collapse-whitespace`, or `list-item`; list-item is
 valid only for an actual supported direct list item span. If Text is omitted,
@@ -157,9 +186,14 @@ Text cannot select destination paths, actor, lifecycle or executable authority.
 retained-only; false produces unresolved-coverage findings and prohibits creation.
 It does not resolve missing/ambiguous mapped fields. The coverage record partitions
 every selected source byte exactly once into the union of mapped spans and the
-retained complement; overlapping field references can share a mapped interval,
+retained or unresolved complement; overlapping field references can share a mapped interval,
 with all destinations listed rather than double-counted. Report mapped/retained
-byte totals, unresolved findings and field-value gaps separately. Whole retained
+byte totals, unresolved findings and field-value gaps separately. When
+RetainUnmapped is false, the entire unmapped complement has disposition unresolved;
+when true it has disposition retained-only. For every source assert
+TotalBytes == MappedBytes + RetainedBytes + UnresolvedBytes. An interval is exactly
+one of mapped/retained-only/unresolved; overlapping mapped spans list destinations
+and count bytes once. Whole retained
 support documents are one declared unit each. This is byte coverage, not proof of
 semantic completeness. Empty objects, missing ACs or unresolved duplicate headings
 cannot be made valid merely by ticking RetainUnmapped.
@@ -170,7 +204,16 @@ For external input, resolve the project class/template via `store.Open` and
 `designscaffold.LoadTemplate`. Reuse the template/scaffold renderer and existing
 `artifact/splice` typed draft mutation machinery to populate mapped attributes and
 objects. Remove generated placeholder ACs/stubs; never retain them as real imported
-requirements. Preserve template-defined custom fields; reject a template/model
+requirements, including their orphaned placeholder body sections. Replace the
+Problem/Outcome body placeholders with their mapped text and replace/remove the
+placeholder criterion body together with its frontmatter entry. Do this only in
+the candidate being prepared; do not modify embedded templates or change existing
+creation/mutation semantics. If existing splice operations cannot mirror this
+creation-only body replacement, add a narrow, tested helper to the shared splice
+package and use it here. The resulting imported feature has `stubs` absent (not a
+fabricated placeholder or an invented decomposition); existing decode/lint accept
+zero stubs at draft creation. Later acceptance reconciliation remains unchanged.
+Preserve template-defined custom fields; reject a template/model
 that cannot express the candidate rather than dropping content. Every mapped text
 appears in frontmatter and its body section. Generated anchors are bare `problem`,
 `outcome` and object IDs with `## Problem`, `## Outcome`, `## ac-1`, etc.; validate
@@ -235,14 +278,20 @@ record hashes without checking referenced Git bytes.
 
 `(*Service).Preview(ctx context.Context, root string, request Request) (PreviewResult, error)` is read-only. Its result has schema
 `verdi.spec-import-preview/v1`, `digest`, `base_commit`, `model_digest`,
-`config_digest`, `request_digest`, `spec_ref`, `candidate` (base64; omitted when
+`config_digest`, `engine_digest`, `request_digest`, `spec_ref`, `candidate` (base64; omitted when
 not constructible), `fields`, `sources`, `coverage`, `findings`, `ready`.
 Field views report target/text/origin/source spans/evidence without claiming a
 native candidate exists when mandatory data is missing. Findings have code,
 target, message and blocking boolean. Every field is deterministic; digests are
 SHA-256 lowercase hex over canonical JSON excluding the digest itself. Request
 order is significant; the same bytes/options/project context reproduce the result.
-The base is current HEAD. Model digest uses `model.Model.Digest`; config digest
+The determinism/replay domain includes engine_digest, SHA-256 of the actual
+running executable (through an injectable internal binary-identity reader for
+hermetic tests). It binds embedded templates and parser/version behavior, not just
+repository overrides. Same-release retries use that same binary. A different
+binary refuses automatic reconciliation with provenance-mismatch and directs the
+operator to read-only import-record inspection; it does not create another target.
+Task 5 records the candidate binary SHA-256. The base is current HEAD. Model digest uses `model.Model.Digest`; config digest
 binds the committed manifest, model/template overrides and dependency corpus used
 in validation. Prepare requires a clean tracked checkout/index and no untracked
 corpus/config inputs (ignored `.verdi/data` is allowed); it refuses with correction
@@ -253,8 +302,11 @@ This first version may refuse unrelated tracked edits; it never resets them.
 recomputes preview and rejects a changed digest or any blocking finding before
 Git publication. Client-supplied candidate/provenance/actor fields do not exist.
 Export the existing draftmutation actor-policy dispatcher as a shared function,
-without changing its authorization matrix. Browser adapters alone construct the
-explicit browser-human actor. CLI builds NewDelegatedAgent from harness/session.
+without changing its authorization matrix. Browser adapters obtain the explicit browser-human actor only through the
+existing `workbench.mintBrowserActor()` helper in boardspecdesign.go. Keep
+TestNewUnauthenticatedHumanHasExactlyOneProductionCaller unchanged: the import
+handler must not add a second direct constructor reference. This is reuse of the
+one existing browser adapter, not an additional CLI/MCP constructor allowance. CLI builds NewDelegatedAgent from harness/session.
 Record real attribution/policy posture; neither principal nor source author is
 inferred. Invalid adopted policy remains an operational refusal, not non-adoption.
 
@@ -262,15 +314,25 @@ Commit only `.verdi/specs/active/<slug>/spec.md` plus
 `.verdi/imports/<slug>/<preview-digest>/record.json` and
 `.verdi/imports/<slug>/<preview-digest>/sources/<source-id>.md`.
 Use fixed trusted path constructors in `internal/store`. `.verdi/imports` is an
-admitted top-level provenance area, ignored by artifact index classification and
-normal design/build context. Its sole decoder belongs to specimport. Record schema
-`verdi.spec-import-record/v1` stores preview/base/model/config/request/candidate
+admitted top-level provenance area, ignored by artifact index classification, lint.BuildSnapshot's document walk
+and Snapshot.ByRef, and normal design/build context. Both current corpus walks
+already share artifact.ClassifyPath, which excludes imports paths; preserve this
+one classifier. Pin the exclusion with an actual native source duplicate-ID
+fixture: one published candidate plus its identical retained native snapshot must
+produce one corpus spec entry and zero VL-002 duplicates. Top-level directory
+admission does not mean classifying retained files as corpus artifacts. Its sole decoder belongs to specimport. Record schema
+`verdi.spec-import-record/v1` stores preview/base/model/config/engine/request/candidate
 digests, spec ref, normalized source identities/ranges/digests, mappings/origins,
 coverage, actor attribution and policy posture. No clock/randomness in this record.
 This new creation record supplies import provenance atomically; it does not forge
 an ASD mutation entry for a nonexistent prior draft. Subsequent ordinary mutations
 use existing design provenance unchanged. Source origins are copy claims, not
-third-party authorship proofs. Inspector must validate record/snapshot/candidate
+third-party authorship proofs. Existing ASD review JSON may still classify a
+pre-ASD creation as unclassified; do not falsify that chain. The review UI must
+show an adjacent verified source-record link, and documentation/CLI expose
+`verdi design import record --branch <branch> --spec <slug>` through ReadRecord.
+Explain that the import record separately describes the original copied content;
+it is not an ASD entry or evidence of acceptance. No ASD schema is silently changed. Inspector must validate record/snapshot/candidate
 bindings and disclose unavailable or mismatching proof.
 
 Use shared Git plumbing to build the base tree with the complete write set in
@@ -278,20 +340,27 @@ sorted path order, create one child commit, then create-only publish
 `refs/heads/design/<slug>`. No checkout/index change. Reject any active/archive
 spec identity or target branch collision. Recheck HEAD/context before publication;
 cooperating import operations use one checkout lock, and create-only ref CAS is
-final authority for collisions. Arbitrary simultaneous out-of-process repository
+final authority for collisions. A failed create-only CAS must re-enter the exact
+reconciliation check once before returning target-exists; identical competing
+requests get the same already-created result, never advice to create a duplicate. Arbitrary simultaneous out-of-process repository
 rewrites are outside this local tool's concurrency guarantee, never a claimed
 serializable global Git transaction. Git object/commit timestamps follow existing
 Git machinery; only candidate/provenance bytes are deterministic.
 
-Before ordinary collision/stale handling on retry, an existing target can be
+After validating request shape, but before cleanliness, stale-preview or ordinary
+collision gates on retry, an existing target can be
 reported `already-created` only if its tip is exactly the recorded base plus the
 expected import write set, the recorded preview/request/actor match this call,
-and every candidate/source/record binding verifies. No matching record or a moved
+and every candidate/source/record binding verifies under the same engine identity.
+This reconciliation reads committed bytes and remains available even if the
+caller's checkout/index has since become dirty. No new writes or model/template
+reads from that dirty checkout are allowed during this already-created path. No matching record or a moved
 branch returns collision; never overwrite, reset or mint another identity. Failure
 before ref publication has no visible branch/import; unreachable Git objects are
 ordinary disposable plumbing. An uncertain response is resolved by the same request
 and preview digest. Result schema `verdi.spec-import-result/v1` has status `created`
-or `already-created`, branch, commit, spec_ref, preview_digest and board_path using
+or `already-created`, branch, commit, spec_ref, preview_digest, `statements_deferred` boolean, `disclosures` (Finding values),
+and board_path using
 the existing `/b/design%2F<slug>/board/spec/<slug>` branch-board route convention.
 
 ## Errors and browser behavior
@@ -302,6 +371,14 @@ Operational errors (CLI exit 2) have codes `invalid-request`, `invalid-source`,
 `dirty-context`, `stale-preview`, `target-exists`, `policy-forbidden`, `actor-forbidden`,
 `provenance-mismatch`. Preserve underlying shared refusal reasons. A preview with
 blocking findings is returned as structured output with exit 1; success exit 0.
+Findings/disclosures use these closed codes: missing-statement, empty-field,
+ambiguous-field, multiple-targets, unsupported-structure, missing-evidence,
+unresolved-coverage, source-id-requires-mapping, invalid-candidate,
+existing-corpus-finding, statements-deferred, current-spec-changed,
+import-record-missing. Underlying VL identifiers remain in the message/target;
+do not turn them into invented success states. Successful apply with deferral
+always sets statements_deferred true and emits a nonblocking statements-deferred
+disclosure in its own result, including already-created retries.
 No branch is created by preview. HTTP errors map malformed inputs to 400, oversized
 to 413, policy/actor to 403, stale/collision/dirty to 409, operational I/O to 500.
 A completed preview uses 200 with `ready:false` and its explicit findings.
