@@ -2,7 +2,8 @@
 
 Status: single genuine Claude Code Opus 5 review completed for contract/plan head
 `2256d6a96f17304f89ea962dbc5a673271307bbb`; one main-authored correction prepared,
-same-reviewer closure pending. No runtime implementation dispatched yet.
+same-reviewer **CLOSED** on `ef52a6e083a6a4d49b078e4ba9a2f7e10c5d15cf`.
+Main accepts closure; implementation may proceed under the reviewed contract.
 
 ## Provenance
 
@@ -50,3 +51,39 @@ implementation details and executable tests inside that scope. They do not chang
 acceptance/evidence gates, claim full release validation or require another design
 adoption. The same reviewer receives this one consolidated correction for closure;
 any residual after closure returns to main adjudication, not a third review round.
+
+## Closure disposition and bounded execution decisions
+
+The same genuine Claude Code Opus 5 session returned CLOSED for `ef52a6e0`,
+process exit 0, result success/is_error false. B1–B3 closed; O1–O13 disposed.
+Main accepts the refutation of B2 and the complete closure. No third review round.
+The local closure packet/result are beside the initial contract review artifacts.
+
+Residuals explicitly adjudicated by main before dispatch:
+
+1. Retain invalid-source / exit 2 for an unclosed leading frontmatter delimiter:
+   it is an invalid selected serialization under this closed grammar, consistent
+   with invalid UTF-8/source/envelope handling. Ordinary unresolved mapping is
+   still a completed verdict. No code/contract change is needed.
+2. The record CLI command is binding through the provenance section and Task 4;
+   include it in actual usage/help/docs. Its omission from the introductory list
+   is editorial, not permission to omit implementation.
+3. Zero stubs remains required for imported external features. Task 2 must test
+   both strict decode and existing candidate lint. A discovered conflict returns
+   to main; never invent a decomposition to make creation pass.
+4. For a source-ID-looking blocked list item, do not emit an automatic field.
+   Its bytes are part of the ordinary unmapped complement (retained-only when
+   RetainUnmapped=true, unresolved otherwise); the independent blocking finding
+   prevents ready=true. The item's ordinal is still counted, so following
+   generated IDs keep their source-position numbering. An explicit mapping to
+   the source-declared ID over that item resolves the blocker; test this exact
+   path and neighbouring IDs. This pins the implementation choice without a
+   third review round or silent default.
+5. The old policy.go test-name comment is pre-existing drift. Reuse the current
+   mintBrowserActor helper and preserve the actual exactly-one structural test;
+   no unrelated comment cleanup is assigned.
+
+Source-transfer authorization now includes this contract packet and subsequent
+Verdi source/tests needed for assigned importer work through genuine Claude Code,
+excluding credentials/secrets and unrelated projects. No new design adoption is
+required. Full importer/release evidence remains to be produced by Tasks 1–5.
