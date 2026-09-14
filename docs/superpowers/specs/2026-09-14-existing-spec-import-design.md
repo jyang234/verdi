@@ -1,10 +1,11 @@
 # Import existing specifications into Verdi
 
-Status: proposed design. The owner endorsed reviewed import and selected F13
-as the reference/prototype on 2026-09-14. This document proposes the detailed
-contract; it is not canonical ratification, implemented behavior, or acceptance
-of a changed MVP release. The prototype is data only. Owner feedback subsequently narrowed import to
-mechanical mapping; AI-assisted extraction is excluded from this version.
+Status: **adopted by the owner on 2026-09-14** after the genuine Claude Code
+Opus 5 review and closure of head `23772e693622241f86baccaab8783c32b30563da`.
+The owner's reply was "yes adopted" to adopting this reviewed design as the
+bounded R3 import amendment and proceeding to contracts and implementation.
+Mechanical import is now authorized scope; this is not runtime completion,
+canonical source promotion, or acceptance of a changed MVP release.
 
 ## Contents
 
@@ -29,7 +30,7 @@ frontmatter and resolved anchors, not inferred prose); AI-assisted spec design
 (2026-07-30), especially shared mutations, human governance, model neutrality,
 context integrity and provenance; merge-signaled acceptance (2026-08-01); the
 adopted R3/R4 milestone boundary. Workspace PLAN §OQ-3 excludes import in v0.
-This is a proposed bounded exception to that exclusion for the bounded flow
+This is an adopted bounded exception to that exclusion for the bounded flow
 below. Archive migration, lifecycle import, general document conversion and
 changes to acceptance/evidence rules remain outside it. No frozen authority is
 edited or silently superseded by this proposal.
@@ -352,13 +353,13 @@ The implementation prerequisites are:
   process for the new route, public schemas and application seam. R0–R4's
   maintenance-only exemption does not authorize this capability.
 
-Import is a proposed R3 scope enlargement arising from the adoption finding,
+Import is the adopted R3 scope enlargement arising from the adoption finding,
 sequenced after the R0–R2 repairs and before any resumed R3 journey that depends
 on it. It is a separately authorized capability unit, not completion of the
 outstanding Wave 6 constitution, lifecycle, recovery or experiment units. Their
 original order and obligations remain. The authority return must record the
 scope, contracts and ordering before runtime dispatch. Owner adoption of this
-detailed design precedes those plans.
+detailed design is recorded above; the following contracts implement that scope.
 The user approved F13 as reference, not an unreviewed change to release acceptance.
 If import becomes part of the MVP release, both qualifying adoption journeys must
 use the new identified release. The earlier paused/assisted operator session is
