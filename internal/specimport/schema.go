@@ -276,20 +276,8 @@ func validateSources(r Request) error {
 		if s.ID == r.Primary {
 			primaryFound = true
 		}
-		if !nonBlankUTF8(s.Label) {
-			return fmt.Errorf("%w: sources[%d].label must be a nonblank valid UTF-8 string", ErrInvalidRequest, i)
-		}
-		if len(s.Label) > MaxLabelBytes {
-			return fmt.Errorf("%w: sources[%d].label is %d bytes, over the %d byte limit", ErrInvalidRequest, i, len(s.Label), MaxLabelBytes)
-		}
-		if len(s.Data) == 0 {
-			return fmt.Errorf("%w: sources[%d].data must not be empty", ErrInvalidRequest, i)
-		}
-		if !utf8.Valid(s.Data) {
-			return fmt.Errorf("%w: sources[%d].data must be valid UTF-8", ErrInvalidRequest, i)
-		}
-		if len(s.Data) > MaxSourceBytes {
-			return fmt.Errorf("%w: sources[%d].data is %d bytes, over the %d byte per-source limit", ErrInvalidRequest, i, len(s.Data), MaxSourceBytes)
+		if err := validateSourceContent(s.Label, s.Data); err != nil {
+			return fmt.Errorf("%w: sources[%d]: %v", ErrInvalidRequest, i, err)
 		}
 		totalBytes += len(s.Data)
 		if _, err := selectLineRange(s.Data, s.StartLine, s.EndLine); err != nil {
@@ -301,6 +289,34 @@ func validateSources(r Request) error {
 	}
 	if r.Primary == "" || !primaryFound {
 		return fmt.Errorf("%w: primary %q must name exactly one of sources[].id", ErrInvalidRequest, r.Primary)
+	}
+	return nil
+}
+
+// validateSourceContent enforces one source's label and content
+// constraints (spec-import-contract.md: "There are 1–32 sources, each
+// nonempty valid UTF-8 and no more than 2 MiB"; "Labels are nonblank UTF-8
+// display strings, at most 1024 bytes"). It is the shared seam both entry
+// paths use: Request.Validate applies it to every decoded or hand-built
+// source, and ReadSource applies the identical rules to the file it just
+// read. It returns a bare error so each caller can wrap it with the
+// operational code its own path reports — invalid-request for a supplied
+// request, invalid-source for a file the reader itself selected.
+func validateSourceContent(label string, data []byte) error {
+	if !nonBlankUTF8(label) {
+		return fmt.Errorf("label must be a nonblank valid UTF-8 string")
+	}
+	if len(label) > MaxLabelBytes {
+		return fmt.Errorf("label is %d bytes, over the %d byte limit", len(label), MaxLabelBytes)
+	}
+	if len(data) == 0 {
+		return fmt.Errorf("data must not be empty")
+	}
+	if !utf8.Valid(data) {
+		return fmt.Errorf("data must be valid UTF-8")
+	}
+	if len(data) > MaxSourceBytes {
+		return fmt.Errorf("data is %d bytes, over the %d byte per-source limit", len(data), MaxSourceBytes)
 	}
 	return nil
 }

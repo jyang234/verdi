@@ -80,17 +80,27 @@ func sha256Hex(data []byte) string {
 	return hex.EncodeToString(sum[:])
 }
 
-// idFromFilename derives a Source.ID candidate from a relative path's base
-// filename: lowercase, non [a-z0-9] runs become a single hyphen, leading/
-// trailing hyphens trimmed, truncated to the id grammar's 64-byte limit.
+// idFromFilename derives a Source.ID from a relative path's base filename:
+// lowercase, non [a-z0-9] runs become a single hyphen, leading/trailing
+// hyphens trimmed, truncated to the id grammar's 64-byte limit.
 // ReadSource's signature (spec-import-contract.md, "Shared internal
 // interfaces") takes no id/label parameter, so this package must derive
-// something reversible and deterministic; the lane report flags this as a
-// semantic decision for main, since the CLI (Task 4) may reasonably want
-// to let an operator override it before composing the final Request.
+// something deterministic; the CLI (Task 4) may still let an operator
+// override it before composing the final Request.
+//
+// A basename with no representable [a-z0-9] content at all — a wholly
+// non-ASCII name, for instance — derives fallbackSourceID rather than
+// refusing the file: the contract constrains a source's BYTES ("each
+// nonempty valid UTF-8"), never its filename's script (main's adjudication,
+// task1 report M6/I-127). Label keeps the original relative path, and two
+// such sources in one request still collide on Request.Validate's
+// duplicate-id check.
 var nonSlugRunRe = regexp.MustCompile(`[^a-z0-9]+`)
 
-func idFromFilename(relativePath string) (string, error) {
+// fallbackSourceID is the deterministic id above.
+const fallbackSourceID = "source"
+
+func idFromFilename(relativePath string) string {
 	base := filepath.Base(relativePath)
 	base = strings.TrimSuffix(base, filepath.Ext(base))
 	slug := nonSlugRunRe.ReplaceAllString(strings.ToLower(base), "-")
@@ -99,9 +109,9 @@ func idFromFilename(relativePath string) (string, error) {
 		slug = strings.Trim(slug[:64], "-")
 	}
 	if !sourceIDRe.MatchString(slug) {
-		return "", fmt.Errorf("cannot derive a valid source id from filename %q (got %q)", relativePath, slug)
+		return fallbackSourceID
 	}
-	return slug, nil
+	return slug
 }
 
 // splitRelativePath validates relativePath's shape and returns its
@@ -218,6 +228,13 @@ func checkSafeRegularFile(importRoot string, segments []string) (string, os.File
 // time — Normalize repeats this check regardless, since it never trusts
 // a prior validation.
 //
+// Content constraints go through validateSourceContent, the same seam
+// Request.Validate uses, so a file that is empty, not valid UTF-8, over the
+// per-source cap or has an unusable label is refused here rather than at
+// preview time. The derived ID falls back to a deterministic value when the
+// basename has no representable form (see idFromFilename); the Label is
+// always the original relative path.
+//
 // Path safety: importRoot must exist, be a directory and not be a
 // symlink; relativePath must be a non-empty, non-absolute, traversal-free
 // sequence of plain components, none of which — including the final one
@@ -252,16 +269,15 @@ func ReadSource(ctx context.Context, importRoot, relativePath string, startLine,
 	if err := ctx.Err(); err != nil {
 		return Source{}, fmt.Errorf("%w: %v", ErrIOFailure, err)
 	}
+	if err := validateSourceContent(relativePath, data); err != nil {
+		return Source{}, fmt.Errorf("%w: %s: %v", ErrInvalidSource, path, err)
+	}
 	if _, err := selectLineRange(data, startLine, endLine); err != nil {
 		return Source{}, fmt.Errorf("%w: %v", ErrInvalidSource, err)
 	}
 
-	id, err := idFromFilename(relativePath)
-	if err != nil {
-		return Source{}, fmt.Errorf("%w: %v", ErrInvalidSource, err)
-	}
 	return Source{
-		ID:        id,
+		ID:        idFromFilename(relativePath),
 		Label:     relativePath,
 		Data:      data,
 		StartLine: startLine,

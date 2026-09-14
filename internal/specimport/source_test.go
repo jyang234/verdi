@@ -121,6 +121,81 @@ func TestReadSource_RecordsRequestedRangeWithoutPreSlicing(t *testing.T) {
 	}
 }
 
+// TestReadSource_RejectsEmptyFile and TestReadSource_RejectsInvalidUTF8 pin
+// the shared source-content seam: the contract's source constraints ("each
+// nonempty valid UTF-8 and no more than 2 MiB") apply to what ReadSource
+// hands back, not only to what Request.Validate later sees, so a CLI
+// operator is refused immediately rather than at preview time.
+func TestReadSource_RejectsEmptyFile(t *testing.T) {
+	dir := t.TempDir()
+	writeHermeticFile(t, dir, "empty.md", "")
+
+	if _, err := ReadSource(context.Background(), dir, "empty.md", 0, 0); !errors.Is(err, ErrInvalidSource) {
+		t.Fatalf("ReadSource on an empty file: got err %v, want ErrInvalidSource", err)
+	}
+}
+
+func TestReadSource_RejectsInvalidUTF8(t *testing.T) {
+	dir := t.TempDir()
+	writeHermeticFile(t, dir, "invalid.md", "\xff\xfe not utf-8\n")
+
+	if _, err := ReadSource(context.Background(), dir, "invalid.md", 0, 0); !errors.Is(err, ErrInvalidSource) {
+		t.Fatalf("ReadSource on invalid UTF-8 content: got err %v, want ErrInvalidSource", err)
+	}
+}
+
+// TestReadSource_FallsBackToDeterministicIDForNonASCIIFilename pins main's
+// adjudicated bounded choice (task1 adjudication M6/I-127): a valid UTF-8
+// file whose basename has no representable [a-z0-9-] form is read, with the
+// deterministic fallback id "source" and the ORIGINAL relative path kept as
+// Label. There is no ASCII-filename rule anywhere in the contract.
+func TestReadSource_FallsBackToDeterministicIDForNonASCIIFilename(t *testing.T) {
+	dir := t.TempDir()
+	writeHermeticFile(t, dir, "需求.md", "# 标题\n\ncontent\n")
+
+	src, err := ReadSource(context.Background(), dir, "需求.md", 0, 0)
+	if err != nil {
+		t.Fatalf("ReadSource on a valid UTF-8 file with a non-ASCII basename: unexpected error: %v", err)
+	}
+	if src.ID != "source" {
+		t.Errorf("ReadSource id = %q, want the deterministic fallback %q", src.ID, "source")
+	}
+	if !sourceIDRe.MatchString(src.ID) {
+		t.Errorf("fallback id %q does not match the source id grammar", src.ID)
+	}
+	if src.Label != "需求.md" {
+		t.Errorf("ReadSource label = %q, want the original relative path preserved", src.Label)
+	}
+}
+
+// TestNormalize_ValidateStillRejectsTwoFallbackIDSources proves the fallback
+// id does not weaken request identity: two such sources collide and fail
+// Request.Validate's duplicate-id check exactly as any other duplicate does.
+func TestNormalize_ValidateStillRejectsTwoFallbackIDSources(t *testing.T) {
+	dir := t.TempDir()
+	writeHermeticFile(t, dir, "需求.md", "first\n")
+	writeHermeticFile(t, dir, "仕様.md", "second\n")
+
+	first, err := ReadSource(context.Background(), dir, "需求.md", 0, 0)
+	if err != nil {
+		t.Fatalf("ReadSource(需求.md): %v", err)
+	}
+	second, err := ReadSource(context.Background(), dir, "仕様.md", 0, 0)
+	if err != nil {
+		t.Fatalf("ReadSource(仕様.md): %v", err)
+	}
+	if first.ID != second.ID {
+		t.Fatalf("fallback ids = %q and %q, want both to be the same deterministic value", first.ID, second.ID)
+	}
+
+	req := minimalRequest()
+	req.Primary = first.ID
+	req.Sources = []Source{first, second}
+	if err := req.Validate(); !errors.Is(err, ErrInvalidRequest) {
+		t.Fatalf("Validate with two fallback-id sources: got err %v, want ErrInvalidRequest", err)
+	}
+}
+
 func TestReadSource_RejectsOutOfRangeLineNumbers(t *testing.T) {
 	dir := t.TempDir()
 	writeHermeticFile(t, dir, "short.md", "one\ntwo\n")
