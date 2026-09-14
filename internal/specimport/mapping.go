@@ -1,0 +1,202 @@
+package specimport
+
+import (
+	"bytes"
+	"fmt"
+	"regexp"
+	"strings"
+	"unicode/utf8"
+)
+
+// isEvidenceOnlyMapping reports whether m has the evidence-only shape
+// (spec-import-contract.md: "no SourceID, Text, Transform or nonzero
+// offsets"). Request.Validate already enforces this shape's internal
+// consistency; this helper just re-derives the same predicate for
+// Normalize's content-dependent processing.
+func isEvidenceOnlyMapping(m Mapping) bool {
+	return m.SourceID == "" && m.Text == nil && m.Transform == "" && m.Start == 0 && m.End == 0 && len(m.Evidence) > 0
+}
+
+// reconcileFields overlays req.Mappings, in request order, onto the
+// automatically-extracted baseline fields, producing the final ordered
+// Field list (spec-import-contract.md, "Deterministic structural
+// mapping" / "Map order: statements, then objects in source/explicit
+// insertion order; no map-iteration dependence"). selectedBySourceID
+// supplies each source's SELECTED bytes (post StartLine/EndLine
+// resolution) for source-backed mapping application; every offset a
+// Mapping declares is validated against that source's selected bytes
+// here, never trusted from the request alone.
+func reconcileFields(req Request, baseline []Field, selectedBySourceID map[string][]byte) ([]Field, error) {
+	order := make([]string, 0, len(baseline)+len(req.Mappings))
+	byTarget := make(map[string]Field, len(baseline)+len(req.Mappings))
+	for _, f := range baseline {
+		order = append(order, f.Target)
+		byTarget[f.Target] = f
+	}
+
+	for _, m := range req.Mappings {
+		switch {
+		case isEvidenceOnlyMapping(m):
+			existing, ok := byTarget[m.Target]
+			if !ok || !strings.HasPrefix(m.Target, "ac-") {
+				return nil, fmt.Errorf("%w: evidence-only mapping targets %q, which is not an existing automatic acceptance criterion", ErrInvalidRequest, m.Target)
+			}
+			existing.Evidence = append([]string(nil), m.Evidence...)
+			byTarget[m.Target] = existing
+
+		case m.SourceID != "":
+			selected, ok := selectedBySourceID[m.SourceID]
+			if !ok {
+				return nil, fmt.Errorf("%w: mapping targets unknown source_id %q", ErrInvalidRequest, m.SourceID)
+			}
+			if m.Start < 0 || m.End > len(selected) || m.End < m.Start {
+				return nil, fmt.Errorf("%w: mapping span [%d,%d) is out of range for source %q (%d selected bytes)", ErrInvalidSource, m.Start, m.End, m.SourceID, len(selected))
+			}
+			if !utf8RuneBoundary(selected, m.Start) || !utf8RuneBoundary(selected, m.End) {
+				return nil, fmt.Errorf("%w: mapping span [%d,%d) does not land on a UTF-8 rune boundary in source %q", ErrInvalidSource, m.Start, m.End, m.SourceID)
+			}
+			raw := selected[m.Start:m.End]
+			transformed, err := applyTransform(m.Transform, raw)
+			if err != nil {
+				return nil, err
+			}
+			origin, text := OriginCopiedSource, transformed
+			if m.Text != nil && *m.Text != transformed {
+				origin, text = OriginUserEditedSrc, *m.Text
+			}
+			if _, existed := byTarget[m.Target]; !existed {
+				order = append(order, m.Target)
+			}
+			byTarget[m.Target] = Field{
+				Target: m.Target,
+				Text:   text,
+				Origin: origin,
+				Spans:  []Span{{SourceID: m.SourceID, Start: m.Start, End: m.End, Transform: m.Transform}},
+			}
+
+		case m.Text != nil:
+			if _, existed := byTarget[m.Target]; !existed {
+				order = append(order, m.Target)
+			}
+			byTarget[m.Target] = Field{Target: m.Target, Text: *m.Text, Origin: OriginUserAdded}
+
+		default:
+			// Request.Validate already refuses any mapping matching none
+			// of the three shapes; unreachable in practice.
+			return nil, fmt.Errorf("%w: mapping for %q matches no recognized shape", ErrInvalidRequest, m.Target)
+		}
+	}
+
+	fields := make([]Field, 0, len(order))
+	for _, target := range order {
+		fields = append(fields, byTarget[target])
+	}
+	return fields, nil
+}
+
+// explicitListMarkerRe recognizes a leading bullet/ordered marker plus its
+// following whitespace, for the list-item transform applied to an
+// EXPLICIT mapping's arbitrary span (spec-import-contract.md: "Strip only
+// the bullet marker and its following space"). Independently derived from
+// CommonMark's own marker grammar, not copied from goldmark's internal
+// parseListItem.
+var explicitListMarkerRe = regexp.MustCompile(`^(?:[-*+]|[0-9]{1,9}[.)])[ \t]`)
+
+// applyTransform applies one of the four closed Mapping.Transform values
+// to raw, the exact selected bytes named by a source-backed Mapping's
+// span (spec-import-contract.md, "Deterministic structural mapping").
+//
+// list-item's generality is a documented simplification for an explicit,
+// arbitrary caller-chosen span: it strips a leading marker if present,
+// but — unlike automatic list extraction (markdown.go's
+// extractObjectSection, which walks goldmark's own per-line segments) —
+// it does not re-derive per-continuation-line deindentation for an
+// arbitrary byte offset outside of a freshly re-parsed list structure.
+// The lane report flags this as a residual: the required fixtures only
+// exercise a single-line explicit list-item correction (resolving a
+// blocked source-declared id), which this handles exactly.
+func applyTransform(transform string, raw []byte) (string, error) {
+	switch transform {
+	case TransformIdentity:
+		return string(raw), nil
+	case TransformTrimBlankLines:
+		start, end := trimBodyRange(raw, 0, len(raw))
+		return string(raw[start:end]), nil
+	case TransformCollapseWS:
+		return collapseWhitespace(raw), nil
+	case TransformListItem:
+		if loc := explicitListMarkerRe.FindIndex(raw); loc != nil && loc[0] == 0 {
+			return string(raw[loc[1]:]), nil
+		}
+		return string(raw), nil
+	default:
+		return "", fmt.Errorf("%w: unknown transform %q", ErrInvalidRequest, transform)
+	}
+}
+
+var whitespaceRunRe = regexp.MustCompile(`\s+`)
+
+// collapseWhitespace collapses every run of whitespace to one ASCII space
+// and trims the result, with no word or punctuation change — the F13
+// reference profile's declared transform (mechanical-field-map.json:
+// "collapse source whitespace runs to one ASCII space; no word or
+// punctuation changes"), reused here for an explicit collapse-whitespace
+// Mapping.
+func collapseWhitespace(raw []byte) string {
+	collapsed := whitespaceRunRe.ReplaceAll(raw, []byte(" "))
+	return string(bytes.TrimSpace(collapsed))
+}
+
+// utf8RuneBoundary reports whether i is a valid UTF-8 rune boundary within
+// b (spec-import-contract.md: "must land on rune boundaries"): the start
+// or end of b, or a byte that is not itself a UTF-8 continuation byte.
+func utf8RuneBoundary(b []byte, i int) bool {
+	if i <= 0 || i >= len(b) {
+		return i == 0 || i == len(b)
+	}
+	return utf8.RuneStart(b[i])
+}
+
+// missingEvidenceFindings reports one missing-evidence Finding per
+// acceptance-criterion Field with no declared Evidence
+// (spec-import-contract.md: "The preview has a missing-evidence finding
+// until an explicit Mapping supplies kinds"). This is computed once,
+// after every automatic and explicit Field is finalized, so it applies
+// uniformly to markdown-v1 and f13-reference-v1 acceptance criteria alike
+// rather than being duplicated per format.
+func missingEvidenceFindings(fields []Field) []Finding {
+	var findings []Finding
+	for _, f := range fields {
+		if strings.HasPrefix(f.Target, "ac-") && len(f.Evidence) == 0 {
+			findings = append(findings, Finding{
+				Code:     FindingMissingEvidence,
+				Target:   f.Target,
+				Message:  fmt.Sprintf("%s has no evidence kind declared; an explicit mapping must supply one before creation", f.Target),
+				Blocking: true,
+			})
+		}
+	}
+	return findings
+}
+
+// suppressResolvedSourceIDFindings removes a source-id-requires-mapping
+// Finding when an explicit Mapping targets the same source-declared id
+// (spec-import-contract.md residual 4: "An explicit mapping to the
+// source-declared ID over that item resolves the blocker"). It does not
+// require the mapping's span to exactly match the blocked item's span —
+// the mapping's Target naming the exact source-declared id is the
+// resolution signal.
+func suppressResolvedSourceIDFindings(findings []Finding, mappings []Mapping) []Finding {
+	resolved := make(map[string]bool, len(mappings))
+	for _, m := range mappings {
+		resolved[m.Target] = true
+	}
+	out := findings[:0:0]
+	for _, f := range findings {
+		if f.Code == FindingSourceIDRequiresMap && resolved[f.Target] {
+			continue
+		}
+		out = append(out, f)
+	}
+	return out
+}
