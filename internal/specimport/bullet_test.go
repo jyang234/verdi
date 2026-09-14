@@ -60,6 +60,36 @@ func TestNormalize_ListItemTransformPreservesEveryInteriorByte(t *testing.T) {
 			wantSpan: "alpha\n\n  > quoted",
 		},
 		{
+			name:     "item beginning with a fenced block",
+			list:     "- ```\n  code\n  ```\n- plain\n",
+			wantText: "```\ncode\n```",
+			wantSpan: "```\n  code\n  ```",
+		},
+		{
+			name:     "item beginning with a blockquote",
+			list:     "- > quoted\n- plain\n",
+			wantText: "> quoted",
+			wantSpan: "> quoted",
+		},
+		{
+			name:     "item beginning with a blockquote, then a paragraph",
+			list:     "- > quoted\n\n  after\n- plain\n",
+			wantText: "> quoted\n\nafter",
+			wantSpan: "> quoted\n\n  after",
+		},
+		{
+			name:     "fenced block with an info string and an interior blank line",
+			list:     "- ```go\n  a\n\n  b\n  ```\n- plain\n",
+			wantText: "```go\na\n\nb\n```",
+			wantSpan: "```go\n  a\n\n  b\n  ```",
+		},
+		{
+			name:     "CRLF item beginning with a fenced block",
+			list:     "- ```\r\n  code\r\n  ```\r\n- plain\r\n",
+			wantText: "```\r\ncode\r\n```",
+			wantSpan: "```\r\n  code\r\n  ```",
+		},
+		{
 			name:     "single paragraph over two lines",
 			list:     "- alpha\n  beta\n- plain\n",
 			wantText: "alpha\nbeta",
@@ -134,6 +164,121 @@ func TestNormalize_ListItemTransformPreservesEveryInteriorByte(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestNormalize_ListItemTransformStripsOnlyTheBulletMarker pins the width
+// the declared transform removes: the item's own bullet marker and the
+// spaces that set its content column, and nothing else. The body used to
+// start at goldmark's first leaf SEGMENT, which sits inside whatever block
+// opens the item, so an item opening with a fence or a blockquote silently
+// lost that block's own syntax before it was published as copied-source.
+func TestNormalize_ListItemTransformStripsOnlyTheBulletMarker(t *testing.T) {
+	cases := []struct {
+		name     string
+		list     string
+		wantText string
+		wantSpan string
+	}{
+		{
+			name:     "marker plus one space",
+			list:     "- alpha\n  beta\n- plain\n",
+			wantText: "alpha\nbeta",
+			wantSpan: "alpha\n  beta",
+		},
+		{
+			name:     "marker plus three spaces sets a wider content column",
+			list:     "-   alpha\n    beta\n- plain\n",
+			wantText: "alpha\nbeta",
+			wantSpan: "alpha\n    beta",
+		},
+		{
+			name:     "an indented item keeps its own content column",
+			list:     "  - alpha\n    beta\n  - plain\n",
+			wantText: "alpha\nbeta",
+			wantSpan: "alpha\n    beta",
+		},
+		{
+			name:     "content deferred to the line after the marker",
+			list:     "-\n  alpha\n  beta\n- plain\n",
+			wantText: "alpha\nbeta",
+			wantSpan: "alpha\n  beta",
+		},
+		{
+			name:     "a star marker is stripped like a dash",
+			list:     "* alpha\n  beta\n* plain\n",
+			wantText: "alpha\nbeta",
+			wantSpan: "alpha\n  beta",
+		},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			raw := []byte(bulletFixture(c.list))
+			req := minimalRequest()
+			req.Sources[0].Data = raw
+
+			plan, err := Normalize(req)
+			if err != nil {
+				t.Fatalf("Normalize: unexpected error: %v", err)
+			}
+			ac1, ok := fieldByTarget(plan.Fields, "ac-1")
+			if !ok || len(ac1.Spans) != 1 {
+				t.Fatalf("ac-1 = %+v ok=%v, want one automatically extracted span (findings %+v)", ac1, ok, plan.Findings)
+			}
+			if ac1.Text != c.wantText {
+				t.Fatalf("ac-1.Text = %q, want %q", ac1.Text, c.wantText)
+			}
+			if got := string(raw[ac1.Spans[0].Start:ac1.Spans[0].End]); got != c.wantSpan {
+				t.Fatalf("ac-1 span bytes = %q, want %q", got, c.wantSpan)
+			}
+		})
+	}
+}
+
+// TestNormalize_ListItemTransformKeepsEmptyItemsUnrepresentable pins the
+// other side of the start boundary: an item really is unsupported when it
+// has no body bytes at all, but an item whose body happens to carry no
+// goldmark leaf segment — an empty fenced block, an empty blockquote — is
+// ordinary flat-list content and must not be dropped as if it were empty.
+func TestNormalize_ListItemTransformKeepsEmptyItemsUnrepresentable(t *testing.T) {
+	t.Run("a genuinely empty item contributes nothing and consumes its ordinal", func(t *testing.T) {
+		raw := []byte(bulletFixture("- alpha\n-\n- gamma\n"))
+		req := minimalRequest()
+		req.Sources[0].Data = raw
+		plan, err := Normalize(req)
+		if err != nil {
+			t.Fatalf("Normalize: unexpected error: %v", err)
+		}
+		if ac1, ok := fieldByTarget(plan.Fields, "ac-1"); !ok || ac1.Text != "alpha" {
+			t.Fatalf("ac-1 = %+v ok=%v", ac1, ok)
+		}
+		if ac2, ok := fieldByTarget(plan.Fields, "ac-2"); ok {
+			t.Fatalf("the empty item produced a field %+v; it must contribute nothing", ac2)
+		}
+		if ac3, ok := fieldByTarget(plan.Fields, "ac-3"); !ok || ac3.Text != "gamma" {
+			t.Fatalf("ac-3 = %+v ok=%v, want the empty item's ordinal still consumed", ac3, ok)
+		}
+	})
+
+	t.Run("an item whose only block carries no leaf segment is still content", func(t *testing.T) {
+		raw := []byte(bulletFixture("- ```\n  ```\n- plain\n"))
+		req := minimalRequest()
+		req.Sources[0].Data = raw
+		plan, err := Normalize(req)
+		if err != nil {
+			t.Fatalf("Normalize: unexpected error: %v", err)
+		}
+		ac1, ok := fieldByTarget(plan.Fields, "ac-1")
+		if !ok || len(ac1.Spans) != 1 {
+			t.Fatalf("ac-1 = %+v ok=%v, want the empty fenced block kept as this item's body", ac1, ok)
+		}
+		if ac1.Text != "```\n```" {
+			t.Fatalf("ac-1.Text = %q, want the fence delimiters themselves", ac1.Text)
+		}
+		if got := string(raw[ac1.Spans[0].Start:ac1.Spans[0].End]); got != "```\n  ```" {
+			t.Fatalf("ac-1 span bytes = %q, want the item's complete body", got)
+		}
+	})
 }
 
 // TestNormalize_ListItemTransformKeepsNestedListsUnsupported pins that

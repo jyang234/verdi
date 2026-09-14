@@ -33,15 +33,22 @@ type bulletItem struct {
 // source's selected-byte coordinates rather than the post-frontmatter
 // body's.
 //
-// start/end is the item's COMPLETE body: from its first content byte to the
-// last non-blank byte before the next item (or before whatever closes the
-// list), so a fence delimiter, a blockquote marker and the blank line
-// between two blocks of one item are all inside the recorded span. It is
-// deliberately not derived from goldmark's per-line leaf segments: goldmark
-// trims a paragraph's trailing newline when it closes the block and emits
-// no segment at all for a fence delimiter or a blockquote marker, so a
-// segment-derived extent stopped at the last code line and a
-// segment-derived text fused the item's own words across a block boundary.
+// start/end is the item's COMPLETE body: from the first byte past its own
+// bullet marker to the last non-blank byte before the next item (or before
+// whatever closes the list), so an opening and closing fence delimiter, a
+// blockquote marker and the blank line between two blocks of one item are
+// all inside the recorded span.
+//
+// Neither boundary may be derived from goldmark's per-line leaf segments.
+// Those segments are the INTERIOR of whatever block they belong to:
+// goldmark emits none at all for a fence delimiter or a blockquote marker
+// and trims a paragraph's trailing newline when it closes the block. A
+// segment-derived extent therefore opened past the item's own first-block
+// syntax and closed before its last, and a segment-derived text both
+// dropped that syntax and fused the item's words across a block boundary —
+// all of it published as copied-source. The item's real extent comes from
+// its own recorded line start plus goldmark's recorded content column, and
+// from the real block boundary that follows it.
 //
 // text is the declared list-item transform over exactly those bytes — a
 // bullet-marker strip (start already begins past the marker) plus the
@@ -55,31 +62,73 @@ func bulletItemsOf(body []byte, base int, list ast.Node) []bulletItem {
 	ordinal := 0
 	for node := list.FirstChild(); node != nil; node = node.NextSibling() {
 		ordinal++
-		segs := leafSegments(node)
-		if len(segs) == 0 || containsNestedList(node) {
+		markerStart, contentCol, located := bulletItemMarker(body, node)
+		if !located || containsNestedList(node) {
 			items = append(items, bulletItem{ordinal: ordinal})
 			continue
 		}
-		rawStart := segs[0].Start
 		rawEnd := nextBlockLineStart(body, node, listLimit)
-		if last := segs[len(segs)-1].Stop; rawEnd < last {
-			// Defensive: a sibling whose recorded position somehow lands
-			// before this item's own last segment must never shorten the
-			// item below the bytes goldmark itself attributed to it.
-			rawEnd = last
+		rawStart := markerStart + contentCol
+		if rawStart > rawEnd {
+			rawStart = rawEnd
 		}
 		start, end := trimBodyRange(body, rawStart, rawEnd)
-		markerStart := lineStartBefore(body, rawStart)
+		if start >= end {
+			// No body bytes at all: an empty item contributes nothing, but
+			// its ordinal is still consumed. This is a real emptiness test
+			// over the item's own bytes — an empty fenced block or an empty
+			// blockquote carries no leaf segment yet is ordinary flat-list
+			// content, and must not be dropped as if the item were blank.
+			items = append(items, bulletItem{ordinal: ordinal})
+			continue
+		}
+		if lineStartBefore(body, start) != markerStart {
+			// The marker's own line carried no content, so the body begins
+			// on a later line whose continuation indentation is alignment,
+			// not content.
+			start += leadingSpaceCount(body[start:end], contentCol)
+		}
 		items = append(items, bulletItem{
 			ordinal:     ordinal,
 			supported:   true,
 			markerStart: base + markerStart,
 			start:       base + start,
 			end:         base + end,
-			text:        deindentItemBody(body[start:end], start-markerStart),
+			text:        deindentItemBody(body[start:end], contentCol),
 		})
 	}
 	return items
+}
+
+// bulletItemMarker returns the line start of node's own bullet marker and
+// the content column that marker sets, both in body's coordinates.
+//
+// contentCol is goldmark's own ast.ListItem.Offset — the column, relative
+// to the item's line start, at which the item's content begins. Reading it
+// rather than rescanning the line keeps one CommonMark rule in one place:
+// the marker's width plus the 1-4 spaces after it, or the marker's width
+// plus one when the item opens with a blank line or with more than four
+// spaces (which start an indented code block instead of widening the item).
+func bulletItemMarker(body []byte, node ast.Node) (markerStart, contentCol int, ok bool) {
+	item, isItem := node.(*ast.ListItem)
+	if !isItem || item.Offset <= 0 {
+		return 0, 0, false
+	}
+	lineStart, located := blockLineStart(body, node)
+	if !located || lineStart+item.Offset > len(body) {
+		return 0, 0, false
+	}
+	return lineStart, item.Offset, true
+}
+
+// leadingSpaceCount returns how many leading ASCII spaces data begins with,
+// counting at most limit of them.
+func leadingSpaceCount(data []byte, limit int) int {
+	n := 0
+	for n < limit && n < len(data) && data[n] == ' ' {
+		n++
+	}
+	return n
 }
 
 // nextBlockLineStart returns the line start of the block following n among
@@ -128,11 +177,7 @@ func deindentItemBody(raw []byte, indent int) string {
 		}
 		line := raw[i:lineEnd]
 		if !first {
-			strip := 0
-			for strip < indent && strip < len(line) && line[strip] == ' ' {
-				strip++
-			}
-			line = line[strip:]
+			line = line[leadingSpaceCount(line, indent):]
 		}
 		buf.Write(line)
 		i = lineEnd
