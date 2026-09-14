@@ -5,6 +5,13 @@ adopted policy authority`. Ordinary draft editing remains available. A semantic
 review packet needs project policy. The commands below inspect that prerequisite;
 they do not adopt a policy or approve a specification.
 
+The board's refusal concerns the checkout it is serving. It does not establish
+whether the default branch already contains accepted policy. Inspect both
+snapshots and their reasons first. If policy is accepted but missing here,
+investigate the difference through the project's existing process; an older
+branch is one possible cause. An unresolved default branch is missing proof,
+not confirmation that initial setup is needed.
+
 Run them from the project root with the selected release's `verdi` on `PATH`:
 
 ```sh

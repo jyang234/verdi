@@ -1,93 +1,116 @@
 # Adoption repair status — 2026-09-13
 
-Status: **REVISE; required FABLE repair blocked by Claude Code usage credits.**
-The directory repair is implemented and reproduced successfully in the real
-ATC checkout. The policy guide is implemented but has three accepted review
-findings. This candidate is not a verified release or an MVP acceptance.
+Status: **REVISE; vocabulary gate failed, and automatic approval review blocks
+further Claude calls.** FABLE capacity is restored. The directory repair and
+three reviewed guide corrections are committed and locally exercised. This
+candidate is not a verified release or an MVP acceptance.
 
-## Exact candidate and workflow
+## Current candidate
 
-- Base: `06591bf661ef8573e61ef5c4a5a06013c03b2a35`.
-- Runtime candidate: `f5bd42c975373066261c02d2ff8a59d3e5dd082c`.
+- Original repair base: `06591bf661ef8573e61ef5c4a5a06013c03b2a35`.
+- Initial runtime repair: `f5bd42c975373066261c02d2ff8a59d3e5dd082c`.
+- Corrected runtime candidate: `11831b632928f7428e139b96a69f6d53e53370f3`.
 - Candidate binary SHA-256:
-  `0e1412c96fd1cfd6c70a5122a75b10be3dda16edaf70c09e81284786eb0bdef9`.
-- Genuine Claude Code FABLE 5.1 producer session:
-  `72697c76-58ed-42d7-bd10-97c523b3482f`; the registered
-  `/fable-orchestration` invocation is recorded.
-- Independent genuine Opus 5 lane review session:
-  `50ce5fdb-2047-4824-ab3f-3d4e1e78c053`; verdict **REVISE**.
-- Fresh FABLE 5.1 fixer session:
-  `b43d0655-aa46-46a5-af45-78d4780bd093`; Claude Code reported exhausted
-  usage credits before implementation. No substitute model was used.
+  `4e7a0165733b65053b2c755bda741443a4410f4cc058e1b9c0a148794852bb32`.
 
-The changes reuse `specstate.ResolveDefaultBranch` for directory tree and
-ancestry reads, and add an inline, read-only policy guide to the existing
-board. The shared resolver's permitted local fallback remains unchanged.
-Selecting a resolvable ref name does not create an immutable Git snapshot.
-No policy authority, acceptance rule, route, or adoption operation was added.
+Directory reads now reuse `specstate.ResolveDefaultBranch` for both tree and
+ancestry queries. Its permitted local fallback is unchanged; selecting a ref
+name does not create an immutable Git snapshot. The existing board now has
+expandable, read-only policy guidance. No policy authority, acceptance rule,
+route, or adoption operation was added. The installed Verdi/ATC pair is unchanged.
 
-## Real-project comparison
+## Genuine Claude execution and findings
 
-The comparison used a fresh local clone at
+The FABLE 5.1 producer session `72697c76-58ed-42d7-bd10-97c523b3482f`
+genuinely invoked the registered `/fable-orchestration` skill. Independent
+Opus 5 session `50ce5fdb-2047-4824-ab3f-3d4e1e78c053` reviewed the initial
+candidate and returned three findings, all accepted by main:
+
+| Finding | Correction in the current candidate |
+| --- | --- |
+| F1 / live P04 | Escape static filename placeholders so the browser shows complete profile and policy paths. Add actual visible-text assertions. |
+| F2 | Scope the missing-policy refusal to the serving checkout. Inspect accepted and proposed snapshots and their reasons before choosing initial setup; do not infer why a branch differs or equate resolution with acceptance. |
+| F3 | Make both policy concern rows respect authoring, review, and read-only modes. |
+
+Fresh FABLE 5.1 fixer session `b43d0655-aa46-46a5-af45-78d4780bd093`
+initially stopped on exhausted usage credits without edits. After the owner
+reported restored capacity, the same genuine session completed the four-file
+correction with semantic RED/GREEN evidence. Actual model records identify
+`claude-fable-5-1` and the first-party provider. No substitute model authored
+runtime code or tests.
+
+A fresh Opus 5 re-review was then rejected **before execution** by automatic
+approval review, which required explicit permission for the private source and
+review context sent to Anthropic. A later, distinct FABLE vocabulary-gate
+repair call was also rejected before execution for the same payload/destination
+permission reason. Neither rejected transfer was retried or rerouted. The
+independent re-review and whole-wave review have not run.
+
+## Real ATC validation
+
+The same-operator comparison used
 `/Users/johnyang/code/verdi-system/verdi-atc-mvp-adoption-recheck-20260913`,
-on `design/f13-receipt-verification`, HEAD
+branch `design/f13-receipt-verification`, HEAD
 `35c119bfca313d355ee646dbf1f33a64c4667c83`.
-Its genuine `origin/HEAD` names `origin/main`, at
+`origin/HEAD` names `origin/main`, at
 `5d08b6a40dc476f708fb9019e6a266c5de63eb6f`; there is no local `main`.
 
-The preserved old binary failed to render the directory with
-`fatal: Not a valid object name main`. The new candidate rendered the F13
-draft and its working board link in the same checkout. No local alias or
-default-ref movement was needed. The policy notice reached the expandable
-guide, and its CLI commands were visible. This was a development-agent
+The preserved old binary failed with `fatal: Not a valid object name main`.
+The current binary renders the F13 directory entry and its board link without
+creating a local alias or moving the default ref. The missing-policy notice
+reaches the guide; both filename placeholders now render in full, and its four
+complete quoted here-document commands expand correctly.
+
+Those exact command blocks ran from the real project root. All exited 0 while
+reporting absent policy, unproven consumer coverage, and
+`ready_for_submission: false`. Semantic review still reports
+`policy-forbidden: project has not adopted policy authority`.
+
+`verdi journey --json spec/f13-receipt-verification` reports a proposed feature,
+no adopted profile, unavailable forge facts, and unproven author-vouch evidence.
+`verdi matrix --preview --json spec/f13-receipt-verification` reports four
+`no-signal` criteria, each with absent attestation and no implementing stories.
+Its `violated: false` is not proof of completion.
+
+The ATC working tree remains clean, the default ref is unchanged, and no
+`.verdi/data` file is tracked. The temporary server and browser tab were closed.
+No screenshots, browser traces, or video were recorded. This is a development
 regression check, not an independent adoption journey.
 
-The four real policy inspections all exited 0 while reporting missing policy,
-unproven consumer coverage, and `ready_for_submission: false`. Semantic review
-still returned `policy-forbidden: project has not adopted policy authority`.
-The ATC checkout remained clean, with no tracked `.verdi/data` files. The
-installed Verdi/ATC pair was not changed. No screenshots, traces, or video
-were recorded.
+## Verification and remaining work
 
-## Accepted findings still requiring repair
+Focused Go tests for the guide, concern modes, and design shell passed. The
+corrected Playwright guide test passed: **1 test, 11.3 seconds**, with an empty
+recording-artifact scan.
 
-| Finding | Required correction |
-| --- | --- |
-| F1 / live P04 | Escape the static filename labels: the browser currently drops `<profile-id>` and `<name>`, showing `profiles/.md` and `policies/.md`. Assert the complete visible paths. |
-| F2 | Scope missing-policy statements to the serving checkout. That refusal does not prove absence on the default branch. Guide users to inspect accepted and proposed snapshots before choosing initial setup or updating an older branch. |
-| F3 | Make policy concern rows respect authoring, review, and read-only modes. Do not claim that editing proceeds on a wall that refuses edits. |
+`make verify` on the current candidate exited **2**. Build, formatting, vet,
+and lint passed; 91 Go packages reported success. No data race was reported.
+The test phase failed at `TestVocabProseWitness`: eight new production text
+sites use bare vocabulary words (`draft` or `merge`) without the required
+display resolution or justified identity/homograph classification. The
+`TestGuideClaimsManifest_RowToWitnessBinding` failure is its dependent witness.
+The later complete-gate stages, including the full browser suite, did not run.
 
-Main accepted all three findings. F1 was independently reproduced through
-browser accessibility and visible DOM text. F2 follows the production
-`ConstitutionPolicySource`, which loads the serving checkout filesystem.
-F3 concerns a new unconditional editing statement in the guide's notice row.
-The frontend owner exception requires genuine FABLE 5.1 for these repairs.
+Resume after explicit authorization for the bounded private Verdi source,
+test results, and task/review context to Anthropic through genuine Claude Code:
 
-## Verification and resumption
+1. FABLE 5.1 repairs the eight vocabulary sites. Preserve the witness and its
+   assertions; classify actual Git operations accurately and keep human editing
+   guidance clear. Run the failing witness and focused guide tests.
+2. Freeze the corrected candidate and run its focused browser check and full
+   `make verify`, recording the final binary identity and any material retest.
+3. Obtain fresh independent Opus 5 re-review and bounded whole-wave review;
+   main adjudicates the results. Neither review has occurred yet.
 
-Focused refindex and workbench tests passed after their recorded behavioral
-RED results. The focused Playwright guide test passed: **1 test, 11.2 seconds**;
-its recording-artifact scan was empty. That test missed the rendered filename
-defect and must be strengthened.
-
-`make verify` passed build, formatting, vet, and lint. Main deliberately
-interrupted it during race tests, exit 130, before authorizing reviewed source
-fixes; race and the complete gate remain **unproven** for this candidate.
-No source changes occurred after that interruption because the fixer then
-hit the usage-credit limit.
-
-Resume from the runtime candidate above when genuine FABLE 5.1 capacity is
-available: repair F1–F3 with focused RED/GREEN and browser checks; obtain a
-fresh independent Opus 5 re-review and the bounded whole-wave review; run
-`make verify` against the fixed, unchanged candidate; repeat the real-ATC
-browser comparison and record the final binary identity.
-
-Actual policy adoption, the complete real-project journey, and the independent
-second journey remain open. Both complete journeys must use the same final
-verified release. Hosted integration testing remains deferred; a step requiring
-actual external proof stays incomplete. The guide does not close P02 by itself.
+Actual policy adoption, the complete meaningful-change journey, and the
+independent second journey remain open. Both complete journeys must use the
+same final verified release. Hosted integration testing remains deferred;
+a step requiring external proof stays incomplete. A guide does not close
+initial policy adoption or P02 by itself.
 
 Evidence is retained under
-`/Users/johnyang/code/verdi-system/.local/verdi-system/development/mvp-readiness-20260913/adoption-repair/`,
-including model/session records, the fixed-range review, and the `main/`
-browser observations, CLI results, adjudication, and interrupted gate log.
+`/Users/johnyang/code/verdi-system/.local/verdi-system/development/mvp-readiness-20260913/adoption-repair/`:
+`f2-precision-fable-result.json`, `f2-precision-command-evidence.json`,
+`opus-fix-rereview-approval-block.json`, `vocab-gate-fable-approval-block.json`,
+and `main/` browser observations, CLI results, focused test results,
+`make-verify-fixed.log`, and `make-verify-fixed-result.json`.
