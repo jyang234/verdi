@@ -34,6 +34,21 @@ func reconcileFields(req Request, baseline []Field, selectedBySourceID map[strin
 		byTarget[f.Target] = f
 	}
 
+	// One structural parse per source that an explicit list-item mapping
+	// actually names, reused across that source's mappings.
+	itemsBySourceID := make(map[string][]bulletItem)
+	listItemsOf := func(sourceID string, selected []byte) ([]bulletItem, error) {
+		if items, ok := itemsBySourceID[sourceID]; ok {
+			return items, nil
+		}
+		items, err := supportedBulletItems(selected)
+		if err != nil {
+			return nil, err
+		}
+		itemsBySourceID[sourceID] = items
+		return items, nil
+	}
+
 	for _, m := range req.Mappings {
 		switch {
 		case isEvidenceOnlyMapping(m):
@@ -55,10 +70,23 @@ func reconcileFields(req Request, baseline []Field, selectedBySourceID map[strin
 			if !utf8RuneBoundary(selected, m.Start) || !utf8RuneBoundary(selected, m.End) {
 				return nil, fmt.Errorf("%w: mapping span [%d,%d) does not land on a UTF-8 rune boundary in source %q", ErrInvalidSource, m.Start, m.End, m.SourceID)
 			}
-			raw := selected[m.Start:m.End]
-			transformed, err := applyTransform(m.Transform, raw)
-			if err != nil {
-				return nil, err
+			var transformed string
+			if m.Transform == TransformListItem {
+				items, err := listItemsOf(m.SourceID, selected)
+				if err != nil {
+					return nil, err
+				}
+				item, err := resolveBulletItem(items, m)
+				if err != nil {
+					return nil, err
+				}
+				transformed = item.text
+			} else {
+				t, err := applyTransform(m.Transform, selected[m.Start:m.End])
+				if err != nil {
+					return nil, err
+				}
+				transformed = t
 			}
 			origin, text := OriginCopiedSource, transformed
 			if m.Text != nil && *m.Text != transformed {
@@ -94,27 +122,32 @@ func reconcileFields(req Request, baseline []Field, selectedBySourceID map[strin
 	return fields, nil
 }
 
-// explicitListMarkerRe recognizes a leading bullet/ordered marker plus its
-// following whitespace, for the list-item transform applied to an
-// EXPLICIT mapping's arbitrary span (spec-import-contract.md: "Strip only
-// the bullet marker and its following space"). Independently derived from
-// CommonMark's own marker grammar, not copied from goldmark's internal
-// parseListItem.
-var explicitListMarkerRe = regexp.MustCompile(`^(?:[-*+]|[0-9]{1,9}[.)])[ \t]`)
+// resolveBulletItem binds an explicit list-item Mapping to a real direct
+// bullet list item of its own source (spec-import-contract.md: "list-item
+// is valid only for an actual supported direct list item span"). The
+// mapping's span must name exactly one item — either its content span (the
+// span automatic extraction records) or that same item including its own
+// bullet marker, which is what the "strip only the bullet marker and its
+// following space" transform describes. Arbitrary prose, a fenced block, an
+// ordered item, a nested item, a partial selection and a whole-source
+// selection all fail, so none of them can be published as a copied list
+// item. The returned text comes from the shared extraction, so the declared
+// transform is reproducible across the automatic and explicit paths.
+func resolveBulletItem(items []bulletItem, m Mapping) (bulletItem, error) {
+	for _, item := range items {
+		if m.End == item.end && (m.Start == item.start || m.Start == item.markerStart) {
+			return item, nil
+		}
+	}
+	return bulletItem{}, fmt.Errorf("%w: mapping for %q uses the list-item transform over [%d,%d) of source %q, which is not a supported direct bullet list item span", ErrInvalidRequest, m.Target, m.Start, m.End, m.SourceID)
+}
 
-// applyTransform applies one of the four closed Mapping.Transform values
-// to raw, the exact selected bytes named by a source-backed Mapping's
-// span (spec-import-contract.md, "Deterministic structural mapping").
-//
-// list-item's generality is a documented simplification for an explicit,
-// arbitrary caller-chosen span: it strips a leading marker if present,
-// but — unlike automatic list extraction (markdown.go's
-// extractObjectSection, which walks goldmark's own per-line segments) —
-// it does not re-derive per-continuation-line deindentation for an
-// arbitrary byte offset outside of a freshly re-parsed list structure.
-// The lane report flags this as a residual: the required fixtures only
-// exercise a single-line explicit list-item correction (resolving a
-// blocked source-declared id), which this handles exactly.
+// applyTransform applies one of the three byte-local Mapping.Transform
+// values to raw, the exact selected bytes named by a source-backed
+// Mapping's span (spec-import-contract.md, "Deterministic structural
+// mapping"). list-item is not byte-local: it is resolved against the
+// source's real list structure by resolveBulletItem, so it is refused here
+// rather than silently falling back to a marker strip over arbitrary bytes.
 func applyTransform(transform string, raw []byte) (string, error) {
 	switch transform {
 	case TransformIdentity:
@@ -125,10 +158,7 @@ func applyTransform(transform string, raw []byte) (string, error) {
 	case TransformCollapseWS:
 		return collapseWhitespace(raw), nil
 	case TransformListItem:
-		if loc := explicitListMarkerRe.FindIndex(raw); loc != nil && loc[0] == 0 {
-			return string(raw[loc[1]:]), nil
-		}
-		return string(raw), nil
+		return "", fmt.Errorf("%w: the list-item transform is resolved against the source's real list structure, never applied to arbitrary bytes", ErrInvalidRequest)
 	default:
 		return "", fmt.Errorf("%w: unknown transform %q", ErrInvalidRequest, transform)
 	}

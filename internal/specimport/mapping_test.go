@@ -1,6 +1,146 @@
 package specimport
 
-import "testing"
+import (
+	"bytes"
+	"errors"
+	"testing"
+)
+
+// notesSource is a supporting source holding one of everything a list-item
+// mapping must NOT be able to select, plus one real bullet item.
+const notesSource = "Ordinary prose that is not a list at all.\n" +
+	"\n" +
+	"```sh\n" +
+	"echo hello\n" +
+	"```\n" +
+	"\n" +
+	"1. An ordered item.\n" +
+	"\n" +
+	"- A real bullet item.\n"
+
+func spanOf(t *testing.T, data []byte, substring string) (int, int) {
+	t.Helper()
+	i := bytes.Index(data, []byte(substring))
+	if i < 0 {
+		t.Fatalf("substring %q not present in the fixture", substring)
+	}
+	return i, i + len(substring)
+}
+
+// TestNormalize_ListItemTransformRejectsSpansThatAreNotBulletItems pins
+// "list-item is valid only for an actual supported direct list item span"
+// (spec-import-contract.md). Every rejected span below previously produced
+// a field marked copied-source with a mapped span, so arbitrary prose or a
+// fenced block could be published as if it were a criterion the source
+// declared as a list item.
+func TestNormalize_ListItemTransformRejectsSpansThatAreNotBulletItems(t *testing.T) {
+	notes := []byte(notesSource)
+	proseStart, proseEnd := spanOf(t, notes, "Ordinary prose that is not a list at all.")
+	fenceStart, fenceEnd := spanOf(t, notes, "```sh\necho hello\n```")
+	orderedStart, orderedEnd := spanOf(t, notes, "An ordered item.")
+	itemStart, itemEnd := spanOf(t, notes, "A real bullet item.")
+
+	cases := []struct {
+		name       string
+		start, end int
+	}{
+		{"ordinary prose", proseStart, proseEnd},
+		{"fenced code block", fenceStart, fenceEnd},
+		{"ordered list item", orderedStart, orderedEnd},
+		{"partial bullet item", itemStart, itemEnd - 5},
+		{"whole source", 0, len(notes)},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			req := minimalRequest()
+			req.Sources = append(req.Sources, Source{ID: "notes", Label: "notes.md", Data: notes})
+			req.Mappings = []Mapping{
+				{Target: "ac-9", SourceID: "notes", Start: c.start, End: c.end, Transform: TransformListItem},
+			}
+			plan, err := Normalize(req)
+			if !errors.Is(err, ErrInvalidRequest) {
+				t.Fatalf("Normalize with a list-item mapping over %s: got err %v (fields %+v), want ErrInvalidRequest", c.name, err, plan.Fields)
+			}
+		})
+	}
+
+	t.Run("the real bullet item is accepted", func(t *testing.T) {
+		req := minimalRequest()
+		req.Sources = append(req.Sources, Source{ID: "notes", Label: "notes.md", Data: notes})
+		req.Mappings = []Mapping{
+			{Target: "ac-9", SourceID: "notes", Start: itemStart, End: itemEnd, Transform: TransformListItem},
+		}
+		plan, err := Normalize(req)
+		if err != nil {
+			t.Fatalf("Normalize: unexpected error for a real bullet item span: %v", err)
+		}
+		ac9, ok := fieldByTarget(plan.Fields, "ac-9")
+		if !ok || ac9.Text != "A real bullet item." {
+			t.Fatalf("ac-9 = %+v ok=%v, want the item's own text", ac9, ok)
+		}
+	})
+
+	t.Run("the item including its bullet marker is accepted", func(t *testing.T) {
+		req := minimalRequest()
+		req.Sources = append(req.Sources, Source{ID: "notes", Label: "notes.md", Data: notes})
+		req.Mappings = []Mapping{
+			{Target: "ac-9", SourceID: "notes", Start: itemStart - 2, End: itemEnd, Transform: TransformListItem},
+		}
+		plan, err := Normalize(req)
+		if err != nil {
+			t.Fatalf("Normalize: unexpected error for a marker-inclusive item span: %v", err)
+		}
+		ac9, ok := fieldByTarget(plan.Fields, "ac-9")
+		if !ok || ac9.Text != "A real bullet item." {
+			t.Fatalf("ac-9 = %+v ok=%v, want the bullet marker stripped", ac9, ok)
+		}
+	})
+}
+
+// TestNormalize_ListItemTransformDeindentsLikeAutomaticExtraction pins the
+// parent design's "Allowed formatting transformations must be named and
+// reproducible": the same declared transform over the same shape must yield
+// the same text whether it was applied automatically or asked for
+// explicitly. The explicit path used to return the raw bytes, keeping the
+// continuation line's source indentation the automatic path deindents.
+func TestNormalize_ListItemTransformDeindentsLikeAutomaticExtraction(t *testing.T) {
+	raw := []byte("# Widget Import\n\n## Problem\n\np\n\n## Outcome\n\no\n\n## Acceptance Criteria\n\n- The importer preserves wording\n  across a continuation line.\n- Second criterion.\n")
+
+	automatic := minimalRequest()
+	automatic.Sources[0].Data = raw
+	autoPlan, err := Normalize(automatic)
+	if err != nil {
+		t.Fatalf("Normalize (automatic): unexpected error: %v", err)
+	}
+	ac1, ok := fieldByTarget(autoPlan.Fields, "ac-1")
+	if !ok || len(ac1.Spans) != 1 {
+		t.Fatalf("ac-1 = %+v ok=%v, want one automatically extracted span", ac1, ok)
+	}
+	const wantText = "The importer preserves wording\nacross a continuation line."
+	if ac1.Text != wantText {
+		t.Fatalf("automatic ac-1.Text = %q, want the deindented %q", ac1.Text, wantText)
+	}
+
+	explicit := minimalRequest()
+	explicit.Sources[0].Data = raw
+	explicit.Mappings = []Mapping{
+		{Target: "ac-1", SourceID: "source", Start: ac1.Spans[0].Start, End: ac1.Spans[0].End, Transform: TransformListItem},
+	}
+	explicitPlan, err := Normalize(explicit)
+	if err != nil {
+		t.Fatalf("Normalize (explicit): unexpected error: %v", err)
+	}
+	got, ok := fieldByTarget(explicitPlan.Fields, "ac-1")
+	if !ok {
+		t.Fatalf("explicit ac-1 missing: %+v", explicitPlan.Fields)
+	}
+	if got.Text != ac1.Text {
+		t.Fatalf("explicit list-item text = %q, want the same declared transform's output %q", got.Text, ac1.Text)
+	}
+	if got.Origin != OriginCopiedSource {
+		t.Fatalf("explicit ac-1.Origin = %q, want copied-source (the text is unchanged)", got.Origin)
+	}
+}
 
 func TestNormalize_ExplicitMappingOverlapSharesIntervalWithoutDoubleCounting(t *testing.T) {
 	data := readMarkdownFixture(t, "positive-basic.md")

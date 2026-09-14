@@ -172,7 +172,7 @@ func recognizeMarkdown(sourceID string, selected []byte) (markdownResult, error)
 			if finding != nil {
 				findings = append(findings, *finding)
 			} else {
-				findings = append(findings, blockedSourceIDFindings(body, top, occ[0])...)
+				findings = append(findings, blockedSourceIDFindings(body, bodyStart, top, occ[0])...)
 			}
 			fields = append(fields, objFields...)
 		default:
@@ -330,32 +330,24 @@ func extractObjectSection(sourceID string, body []byte, bodyStart int, top []ast
 	}
 
 	var fields []Field
-	ordinal := 0
-	for item := list.FirstChild(); item != nil; item = item.NextSibling() {
-		ordinal++
-		segs := leafSegments(item)
-		if len(segs) == 0 {
+	for _, item := range bulletItemsOf(body, bodyStart, list) {
+		if !item.supported {
 			continue // an empty list item contributes nothing.
 		}
-		start, end := segs[0].Start, trimTrailingLineEnd(body, segs[len(segs)-1].Stop)
-		text := joinSegments(body, segs)
-		text = strings.TrimRight(text, "\r\n")
-
-		if m := sourceDeclaredIDRe.FindStringSubmatch(text); m != nil {
+		if sourceDeclaredIDRe.MatchString(item.text) {
 			// Blocked: bytes stay in the ordinary unmapped complement; no
 			// automatic field is generated for this ordinal, but the
 			// ordinal is still consumed.
 			continue
 		}
-		target := fmt.Sprintf("%s-%d", prefix, ordinal)
 		fields = append(fields, Field{
-			Target: target,
-			Text:   text,
+			Target: fmt.Sprintf("%s-%d", prefix, item.ordinal),
+			Text:   item.text,
 			Origin: OriginCopiedSource,
 			Spans: []Span{{
 				SourceID:  sourceID,
-				Start:     bodyStart + start,
-				End:       bodyStart + end,
+				Start:     item.start,
+				End:       item.end,
 				Transform: TransformListItem,
 			}},
 		})
@@ -363,27 +355,109 @@ func extractObjectSection(sourceID string, body []byte, bodyStart int, top []ast
 	return fields, nil
 }
 
+// bulletItem is one direct child of a flat Markdown bullet list, located in
+// one source's SELECTED bytes.
+type bulletItem struct {
+	// ordinal is the item's 1-based position among its list's direct
+	// items, counted even when the item itself is not representable, so
+	// generated ids keep their source-position numbering
+	// (spec-import-contract.md residual 4).
+	ordinal int
+	// supported is false for an item this package cannot represent as a
+	// span at all: an empty item, or one containing a nested list.
+	supported bool
+	// markerStart is the offset of the item's own bullet marker; start/end
+	// are its CONTENT span, excluding the marker and the final line's
+	// trailing terminator. start/end is the span automatic extraction
+	// records.
+	markerStart, start, end int
+	// text is the list-item transform's output for this item.
+	text string
+}
+
+// bulletItemsOf returns one bulletItem per direct child of list, in source
+// order, with base added to every offset so the result is expressed in the
+// source's selected-byte coordinates rather than the post-frontmatter
+// body's.
+//
+// text is the declared list-item transform: goldmark's own per-line
+// segments already exclude the bullet marker and each continuation line's
+// indentation, so joining them IS the contract's "declared deterministic
+// deindent transform". Automatic extraction and explicit list-item mappings
+// share this one implementation rather than each deriving a text of their
+// own, which is what made the same named transform produce two different
+// results on the same shape.
+func bulletItemsOf(body []byte, base int, list ast.Node) []bulletItem {
+	var items []bulletItem
+	ordinal := 0
+	for node := list.FirstChild(); node != nil; node = node.NextSibling() {
+		ordinal++
+		segs := leafSegments(node)
+		if len(segs) == 0 || containsNestedList(node) {
+			items = append(items, bulletItem{ordinal: ordinal})
+			continue
+		}
+		start := segs[0].Start
+		items = append(items, bulletItem{
+			ordinal:     ordinal,
+			supported:   true,
+			markerStart: base + lineStartBefore(body, start),
+			start:       base + start,
+			end:         base + trimTrailingLineEnd(body, segs[len(segs)-1].Stop),
+			text:        strings.TrimRight(joinSegments(body, segs), "\r\n"),
+		})
+	}
+	return items
+}
+
+// supportedBulletItems returns every direct item of every top-level flat
+// bullet list in one source's selected bytes — exactly the shape automatic
+// extraction supports. It is the structural validator an explicit
+// list-item Mapping is checked against, so "list-item is valid only for an
+// actual supported direct list item span" (spec-import-contract.md) is
+// enforced against the source's real Markdown structure instead of assumed
+// from the caller's offsets. A list nested inside another list or any other
+// container is not a direct item of a supported flat list and is not
+// returned.
+func supportedBulletItems(selected []byte) ([]bulletItem, error) {
+	bodyStart, err := stripFrontmatter(selected)
+	if err != nil {
+		return nil, err
+	}
+	body := selected[bodyStart:]
+	doc := goldmark.New().Parser().Parse(gmtext.NewReader(body))
+
+	var items []bulletItem
+	for node := doc.FirstChild(); node != nil; node = node.NextSibling() {
+		list, ok := bulletList(node)
+		if !ok {
+			continue
+		}
+		for _, item := range bulletItemsOf(body, bodyStart, list) {
+			if item.supported {
+				items = append(items, item)
+			}
+		}
+	}
+	return items, nil
+}
+
 // blockedSourceIDFindings returns one source-id-requires-mapping Finding
 // per blocked list item across every object section, computed as a
 // second, lightweight pass so extractObjectSection's happy path does not
 // need to thread an extra return value through its early-return branches.
-func blockedSourceIDFindings(body []byte, top []ast.Node, headingIdx int) []Finding {
+func blockedSourceIDFindings(body []byte, bodyStart int, top []ast.Node, headingIdx int) []Finding {
 	content, _ := sectionContentNodes(top, headingIdx)
 	list, ok := sectionBulletList(content)
 	if !ok {
 		return nil
 	}
 	var findings []Finding
-	for item := list.FirstChild(); item != nil; item = item.NextSibling() {
-		if containsNestedList(item) {
-			return nil
-		}
-		segs := leafSegments(item)
-		if len(segs) == 0 {
+	for _, item := range bulletItemsOf(body, bodyStart, list) {
+		if !item.supported {
 			continue
 		}
-		text := strings.TrimRight(joinSegments(body, segs), "\r\n")
-		if m := sourceDeclaredIDRe.FindStringSubmatch(text); m != nil {
+		if m := sourceDeclaredIDRe.FindStringSubmatch(item.text); m != nil {
 			findings = append(findings, Finding{
 				Code:     FindingSourceIDRequiresMap,
 				Target:   m[1],
@@ -410,7 +484,14 @@ func sectionBulletList(content []ast.Node) (ast.Node, bool) {
 	if len(content) != 1 {
 		return nil, false
 	}
-	list, ok := content[0].(*ast.List)
+	return bulletList(content[0])
+}
+
+// bulletList returns n as a flat Markdown bullet list, if that is what it
+// is. An ordered list is deliberately not one: its "1." markers are not the
+// bullet marker the declared list-item transform strips.
+func bulletList(n ast.Node) (ast.Node, bool) {
+	list, ok := n.(*ast.List)
 	if !ok || list.IsOrdered() {
 		return nil, false
 	}
