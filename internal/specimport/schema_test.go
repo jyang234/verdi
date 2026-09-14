@@ -317,20 +317,58 @@ func TestNormalize_ValidateRejectsSourceBackedMappingMissingTransform(t *testing
 	}
 }
 
-func TestNormalize_ValidateRejectsSourceBackedMappingWithEvidence(t *testing.T) {
-	req := minimalRequest()
-	req.Mappings = []Mapping{{Target: "ac-1", SourceID: "source", Start: 0, End: 5, Transform: TransformIdentity, Evidence: []string{"static"}}}
-	if err := req.Validate(); !errors.Is(err, ErrInvalidRequest) {
-		t.Fatalf("Validate: got err %v, want ErrInvalidRequest for a source-backed mapping also carrying evidence", err)
+// TestNormalize_ValidateAcceptsEvidenceOnEveryACMappingForm corrects tests
+// that encoded evidence exclusivity. The contract makes the evidence-only
+// Mapping an ADDITIONAL form ("An evidence-only Mapping names an existing
+// automatic AC target... Other mappings follow the source-backed/user-added
+// rules below"), and states the evidence rule itself without reference to a
+// form: "Evidence accepts only static/behavioral/runtime/attestation,
+// unique, on ACs only". Since duplicate explicit targets fail, refusing
+// evidence here left no request at all that both corrects or adds a
+// criterion and declares its evidence.
+func TestNormalize_ValidateAcceptsEvidenceOnEveryACMappingForm(t *testing.T) {
+	corrected := "The importer reads any Markdown file."
+	added := "New criterion."
+	cases := []struct {
+		name    string
+		mapping Mapping
+	}{
+		{"source-backed", Mapping{Target: "ac-1", SourceID: "source", Start: 0, End: 5, Transform: TransformIdentity, Text: &corrected, Evidence: []string{"static"}}},
+		{"user-added", Mapping{Target: "ac-9", Text: &added, Evidence: []string{"static", "behavioral"}}},
+		{"evidence-only", Mapping{Target: "ac-1", Evidence: []string{"attestation"}}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			req := minimalRequest()
+			req.Mappings = []Mapping{c.mapping}
+			if err := req.Validate(); err != nil {
+				t.Fatalf("Validate: unexpected error for a %s mapping carrying evidence: %v", c.name, err)
+			}
+		})
 	}
 }
 
-func TestNormalize_ValidateRejectsUserAddedMappingWithEvidence(t *testing.T) {
-	req := minimalRequest()
-	text := "New criterion."
-	req.Mappings = []Mapping{{Target: "ac-9", Text: &text, Evidence: []string{"static"}}}
-	if err := req.Validate(); !errors.Is(err, ErrInvalidRequest) {
-		t.Fatalf("Validate: got err %v, want ErrInvalidRequest for a user-added mapping also carrying evidence", err)
+// TestNormalize_ValidateRejectsEvidenceOutsideTheACRules keeps every rule
+// the contract does state about evidence, on every form that can carry it.
+func TestNormalize_ValidateRejectsEvidenceOutsideTheACRules(t *testing.T) {
+	added := "Not a criterion."
+	cases := []struct {
+		name    string
+		mapping Mapping
+	}{
+		{"source-backed, non-AC target", Mapping{Target: "outcome", SourceID: "source", Start: 0, End: 5, Transform: TransformIdentity, Evidence: []string{"static"}}},
+		{"user-added, non-AC target", Mapping{Target: "co-1", Text: &added, Evidence: []string{"static"}}},
+		{"unknown kind", Mapping{Target: "ac-1", SourceID: "source", Start: 0, End: 5, Transform: TransformIdentity, Evidence: []string{"vibes"}}},
+		{"duplicate kind", Mapping{Target: "ac-1", SourceID: "source", Start: 0, End: 5, Transform: TransformIdentity, Evidence: []string{"static", "static"}}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			req := minimalRequest()
+			req.Mappings = []Mapping{c.mapping}
+			if err := req.Validate(); !errors.Is(err, ErrInvalidRequest) {
+				t.Fatalf("Validate: got err %v, want ErrInvalidRequest for %s", err, c.name)
+			}
+		})
 	}
 }
 

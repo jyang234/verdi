@@ -96,17 +96,23 @@ func reconcileFields(req Request, baseline []Field, selectedBySourceID map[strin
 				order = append(order, m.Target)
 			}
 			byTarget[m.Target] = Field{
-				Target: m.Target,
-				Text:   text,
-				Origin: origin,
-				Spans:  []Span{{SourceID: m.SourceID, Start: m.Start, End: m.End, Transform: m.Transform}},
+				Target:   m.Target,
+				Text:     text,
+				Origin:   origin,
+				Spans:    []Span{{SourceID: m.SourceID, Start: m.Start, End: m.End, Transform: m.Transform}},
+				Evidence: append([]string(nil), m.Evidence...),
 			}
 
 		case m.Text != nil:
 			if _, existed := byTarget[m.Target]; !existed {
 				order = append(order, m.Target)
 			}
-			byTarget[m.Target] = Field{Target: m.Target, Text: *m.Text, Origin: OriginUserAdded}
+			byTarget[m.Target] = Field{
+				Target:   m.Target,
+				Text:     *m.Text,
+				Origin:   OriginUserAdded,
+				Evidence: append([]string(nil), m.Evidence...),
+			}
 
 		default:
 			// Request.Validate already refuses any mapping matching none

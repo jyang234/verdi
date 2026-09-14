@@ -247,6 +247,68 @@ func TestNormalize_EvidenceOnlyMappingPreservesCopiedOriginAndSpan(t *testing.T)
 	}
 }
 
+// TestNormalize_CorrectedAndAddedCriteriaKeepTheirEvidence pins the
+// correction journey the parent design requires ("User corrects a proposed
+// mapping, creates the draft") and the declared Task 4 case "editing a
+// mapping, selecting evidence". Because duplicate explicit targets fail, a
+// second evidence-only mapping cannot repair a corrected criterion, so
+// evidence declared on the correcting mapping itself must be preserved.
+func TestNormalize_CorrectedAndAddedCriteriaKeepTheirEvidence(t *testing.T) {
+	data := readMarkdownFixture(t, "positive-basic.md")
+	start, end := spanOf(t, data, "The importer reports missing fields.")
+	corrected := "The importer reports every missing field."
+	added := "The importer refuses an unreadable file."
+
+	req := minimalRequest()
+	req.Sources[0].Data = data
+	req.Mappings = []Mapping{
+		{Target: "ac-3", SourceID: "source", Start: start, End: end, Transform: TransformListItem, Text: &corrected, Evidence: []string{"behavioral"}},
+		{Target: "ac-9", Text: &added, Evidence: []string{"static", "attestation"}},
+	}
+
+	plan, err := Normalize(req)
+	if err != nil {
+		t.Fatalf("Normalize: unexpected error: %v", err)
+	}
+
+	ac3, ok := fieldByTarget(plan.Fields, "ac-3")
+	if !ok {
+		t.Fatalf("ac-3 missing: %+v", plan.Fields)
+	}
+	if ac3.Text != corrected || ac3.Origin != OriginUserEditedSrc {
+		t.Fatalf("ac-3 = %+v, want the correction marked user-edited-source", ac3)
+	}
+	if len(ac3.Spans) != 1 || ac3.Spans[0].Start != start || ac3.Spans[0].End != end {
+		t.Fatalf("ac-3.Spans = %+v, want the original selection retained", ac3.Spans)
+	}
+	if len(ac3.Evidence) != 1 || ac3.Evidence[0] != "behavioral" {
+		t.Fatalf("ac-3.Evidence = %v, want the declared [behavioral]", ac3.Evidence)
+	}
+
+	ac9, ok := fieldByTarget(plan.Fields, "ac-9")
+	if !ok {
+		t.Fatalf("ac-9 missing: %+v", plan.Fields)
+	}
+	if ac9.Origin != OriginUserAdded || len(ac9.Spans) != 0 {
+		t.Fatalf("ac-9 = %+v, want user-added with no fabricated source span", ac9)
+	}
+	if len(ac9.Evidence) != 2 || !containsString(ac9.Evidence, "static") || !containsString(ac9.Evidence, "attestation") {
+		t.Fatalf("ac-9.Evidence = %v, want [static attestation]", ac9.Evidence)
+	}
+
+	for _, target := range []string{"ac-3", "ac-9"} {
+		if _, ok := findingForTarget(plan.Findings, FindingMissingEvidence, target); ok {
+			t.Errorf("missing-evidence still reported for %s after its evidence was declared: %+v", target, plan.Findings)
+		}
+	}
+	// Criteria nobody supplied evidence for are still gap-flagged.
+	for _, target := range []string{"ac-1", "ac-2"} {
+		if _, ok := findingForTarget(plan.Findings, FindingMissingEvidence, target); !ok {
+			t.Errorf("missing-evidence dropped for untouched %s", target)
+		}
+	}
+}
+
 func TestNormalize_EvidenceOnlyMappingToAbsentTargetFails(t *testing.T) {
 	req := minimalRequest()
 	req.Mappings = []Mapping{{Target: "ac-99", Evidence: []string{"static"}}}

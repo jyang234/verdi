@@ -40,7 +40,8 @@ type Source struct {
 // one of three shapes applies (see validateMappings): evidence-only (no
 // SourceID/Text/Transform/offsets, nonempty Evidence, an existing
 // automatic ac- target), source-backed (SourceID plus Start/End/
-// Transform, optional Text), or user-added (Text only, no SourceID).
+// Transform, optional Text), or user-added (Text only, no SourceID). All
+// three may declare Evidence for an acceptance-criterion target.
 type Mapping struct {
 	Target    string   `json:"target"`
 	SourceID  string   `json:"source_id,omitempty"`
@@ -329,10 +330,11 @@ func validateSourceContent(label string, data []byte) error {
 //   - evidence-only: no SourceID/Text/Transform/zero offsets, nonempty
 //     Evidence, target shaped like an acceptance criterion (ac-<id>).
 //   - source-backed: SourceID present, Start/End a valid half-open span,
-//     a known non-empty Transform, no Evidence (evidence is the
-//     evidence-only shape's job, never layered onto a content mapping).
-//   - user-added: no SourceID, nonblank Text, no Transform/offsets/
-//     Evidence.
+//     a known non-empty Transform, optional Text.
+//   - user-added: no SourceID, nonblank Text, no Transform/offsets.
+//
+// Any of the three may declare Evidence, under the same AC-only/closed-kind/
+// unique rules (see validateMappingEvidence).
 //
 // Content-dependent rules this package cannot check without content —
 // whether an evidence-only mapping's target was actually produced by
@@ -377,8 +379,8 @@ func validateMappings(r Request, sourceIDs map[string]bool) error {
 			if m.Transform == TransformListItem && !isObjectTarget {
 				return fmt.Errorf("%w: mappings[%d] uses list-item transform for non-object target %q", ErrInvalidRequest, i, m.Target)
 			}
-			if len(m.Evidence) != 0 {
-				return fmt.Errorf("%w: mappings[%d] is source-backed and must not also carry evidence; use a separate evidence-only mapping", ErrInvalidRequest, i)
+			if err := validateMappingEvidence(i, m); err != nil {
+				return err
 			}
 
 		case m.Text != nil:
@@ -388,8 +390,8 @@ func validateMappings(r Request, sourceIDs map[string]bool) error {
 			if m.Transform != "" || m.Start != 0 || m.End != 0 {
 				return fmt.Errorf("%w: mappings[%d] has no source_id, so transform/start/end must be absent", ErrInvalidRequest, i)
 			}
-			if len(m.Evidence) != 0 {
-				return fmt.Errorf("%w: mappings[%d] is user-added and must not also carry evidence; use a separate evidence-only mapping", ErrInvalidRequest, i)
+			if err := validateMappingEvidence(i, m); err != nil {
+				return err
 			}
 
 		default:
@@ -397,6 +399,25 @@ func validateMappings(r Request, sourceIDs map[string]bool) error {
 		}
 	}
 	return nil
+}
+
+// validateMappingEvidence applies the contract's evidence rules to a
+// source-backed or user-added Mapping that also declares evidence
+// (spec-import-contract.md: "Evidence accepts only static/behavioral/
+// runtime/attestation, unique, on ACs only"). The evidence-only shape is an
+// ADDITIONAL Mapping form — "the normal F13 evidence-edit path", preserving
+// the automatic text/span/origin — not evidence's exclusive home. Refusing
+// evidence here while duplicate explicit targets also fail left no request
+// that could both correct or add a criterion and declare its evidence,
+// which the parent design's correction journey requires.
+func validateMappingEvidence(i int, m Mapping) error {
+	if len(m.Evidence) == 0 {
+		return nil
+	}
+	if !strings.HasPrefix(m.Target, "ac-") {
+		return fmt.Errorf("%w: mappings[%d] declares evidence for target %q, which is not an acceptance criterion (ac-<id>); evidence applies to acceptance criteria only", ErrInvalidRequest, i, m.Target)
+	}
+	return validateEvidenceList(i, m.Evidence)
 }
 
 func validateEvidenceList(i int, evidence []string) error {
