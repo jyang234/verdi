@@ -1,10 +1,11 @@
 # Mechanical import Task 1: owner findings and continuation
 
-Status: **REVISE — independent review complete, corrections authorized**.
-Task 1's tests pass but ten consolidated finding groups remain open. The resumed
-genuine Opus 5 review returned REVISE; main accepts the corrections below. Do not
-start Task 2 until fixes and distinct re-review close this dependency. The adopted
-design and CLOSED contract review remain unchanged.
+Status: **REVISE — M1–M10 closed; two adjacent defects require correction**.
+The distinct Opus 5 re-review closed all ten original finding groups at
+`71d20017`, then returned three adjacent concerns. Main accepts N1/N2 as Important
+source-fidelity defects and adjudicates N3 as the contract's explicit same-target
+override behavior below. Do not start Task 2 until N1/N2 fixes and independent
+re-review close the parser dependency. The adopted design/contract remain unchanged.
 
 ## Fixed runtime range and provenance
 
@@ -150,3 +151,56 @@ requirements to report empty objects remain binding.
 Next: fresh genuine Opus 5 fixer owns only internal/specimport corrections and
 regressions M1–M10, then a distinct genuine Opus 5 re-reviewer. Main/FABLE verify
 the resulting dependency before Task 2. No new design or user adoption is needed.
+
+## First correction and distinct re-review
+
+Fresh genuine Opus 5 fixer session `175b0942-f7f9-4aac-a623-d144c98e6a88` produced
+10 commits `0d55ea45..71d2001796f356a54bc9310e4a20e6f53bc6e98b`, contained to 12
+files under internal/specimport (+1339/-161). Actual assistant records identify
+`claude-opus-5`. Main verified clean tree and diff-check, independently passed
+`go test -race ./internal/specimport -count=1` (2.596s), and reran the seven owner
+probes: every original bad result now has the intended result. Evidence is in
+`execution/owner-probes/task1-fixed-local-checks.json`. Fixer final package/vet/fmt/
+race gates also passed. Its report's claim of no permission denials is inaccurate:
+compound/unallowed commands were refused and ordinary allowed commands succeeded.
+It also wrote personal Claude auto-memory; that material is not authority or
+verification and was excluded from the subsequent review.
+
+Distinct genuine Opus 5 re-review session `2a55e03a-2c65-4147-89cc-af59ce8819d4`
+closed M1–M10 individually at that exact head. Full verdict and overlay probes:
+local `execution/task1-rereview/review-received.md`. Its package run passed 122
+top-level tests, F13 pins were unchanged, and tracked files remained read-only.
+The reviewer nevertheless returned REVISE on adjacent probes. Main adjudicates:
+
+- **N1 — accepted Important.** A loose flat bullet item with paragraphs `alpha`
+  and `beta` becomes `alphabeta`; fenced and quoted blocks also lose syntax and
+  closing-fence bytes. The shared list-item transform must preserve paragraph
+  separators and every interior byte except the declared bullet/deindent transform.
+  Retain the complete item span. Preserve supported flat multi-paragraph items;
+  nested lists remain unsupported. Automatic and explicit transformations must
+  agree. Do not fix this by silently narrowing ordinary flat-list input or by
+  collapsing paragraphs. This is completion of existing source fidelity, not a
+  new input format.
+- **N2 — accepted Important.** Two source items both declare ac-7; mapping the
+  first removes both source-ID blockers because resolution is keyed by target.
+  Resolve the corresponding occurrence only. The second declaration must stay
+  explicitly blocking with correction guidance; duplicate explicit Mapping targets
+  remain invalid. No auto-renumbering or new conflict-resolution UI is authorized.
+- **N3 — nonblocking under the explicit override contract.** The source's first
+  item declares ac-3; its third ordinary item automatically receives ordinal ac-3.
+  An explicit ac-3 mapping over the first item replaces the automatic ac-3 field.
+  The contract explicitly says text/span Mappings override automatic mappings for
+  the same target; residual 4 also preserves positional numbering. This request
+  exercises that authorized replacement. Its origin/span identify the selected
+  first item, and the displaced item's bytes remain covered as retained-only under
+  the user's RetainUnmapped selection. This is the same override demotion accepted
+  in the initial review's nonblocking note, not loss of retained source or an
+  accepted canonical criterion. Do not invent a namespace gate, auto-renumbering,
+  or a second mapping shape here. Add a regression pinning explicit override,
+  preserved source bytes, truthful spans and balanced coverage so the limitation
+  remains reviewable. Later preview must show the actual fields and coverage.
+
+Duplicate empty-field wording and unusual marker-inclusive selection variants are
+nonblocking. Preserve the already accepted content-span path and source honesty.
+Next correction is only N1/N2 plus the N3 contract regression, through a fresh
+Opus 5 fixer and distinct re-review. No additional design/adoption is needed.
