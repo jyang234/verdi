@@ -29,6 +29,22 @@ func TestNormalize_ValidateRejectsInvalidTargetSlug(t *testing.T) {
 	}
 }
 
+// TestNormalize_ValidateRejectsPinnedOrFragmentTargetSlug pins the BARE
+// spec-name rule (spec-import-contract.md: "Target slug follows the existing
+// bare spec-name validator"). artifact.ParseRef accepts "@commit" pins and
+// "#object-id" fragments for ordinary reference use, but Target.Slug is the
+// trusted path component of .verdi/specs/active/<slug>/, .verdi/imports/
+// <slug>/ and refs/heads/design/<slug>, so neither form may pass Validate.
+func TestNormalize_ValidateRejectsPinnedOrFragmentTargetSlug(t *testing.T) {
+	for _, slug := range []string{"probe#ac-1", "probe@abc1234", "probe@abc1234#ac-1"} {
+		req := minimalRequest()
+		req.Target.Slug = slug
+		if err := req.Validate(); !errors.Is(err, ErrInvalidRequest) {
+			t.Errorf("Validate with target.slug %q: got err %v, want ErrInvalidRequest", slug, err)
+		}
+	}
+}
+
 func TestNormalize_ValidateRejectsInvalidTargetClass(t *testing.T) {
 	req := minimalRequest()
 	req.Target.Class = "component"

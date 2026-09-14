@@ -226,8 +226,20 @@ func (r Request) Validate() error {
 }
 
 func validateTarget(t Target) error {
-	if _, err := artifact.ParseRef("spec/" + t.Slug); err != nil {
+	ref, err := artifact.ParseRef("spec/" + t.Slug)
+	if err != nil {
 		return fmt.Errorf("%w: target.slug %q: %v", ErrInvalidRequest, t.Slug, err)
+	}
+	// Target.Slug is a BARE spec name (spec-import-contract.md: "Target slug
+	// follows the existing bare spec-name validator"; "Source.ID is a
+	// validated identifier used as a trusted path component"). The shared
+	// artifact validator also accepts "@commit" pins and "#object-id"
+	// fragments, which are meaningful for a reference but not for the
+	// trusted path component of .verdi/specs/active/<slug>/,
+	// .verdi/imports/<slug>/ and refs/heads/design/<slug>; both are refused
+	// here, on every direct entry path, before any path is constructed.
+	if ref.Pinned() || ref.Fragment() {
+		return fmt.Errorf("%w: target.slug %q must be a bare spec name, not a pinned (@commit) or fragment (#object-id) ref", ErrInvalidRequest, t.Slug)
 	}
 	if t.Class != string(artifact.ClassFeature) && t.Class != string(artifact.ClassStory) {
 		return fmt.Errorf("%w: target.class %q must be feature or story", ErrInvalidRequest, t.Class)
