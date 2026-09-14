@@ -1,9 +1,11 @@
 # Check policy setup during adoption
 
 Use this check when a draft board reports `policy-forbidden: project has not
-adopted policy authority`. Ordinary draft editing remains available. A semantic
-review packet needs project policy. The commands below inspect that prerequisite;
-they do not adopt a policy or approve a specification.
+adopted policy authority`. In authoring mode, ordinary human editing remains
+available; review and read-only modes retain their editing restrictions. A
+semantic review packet needs project policy. The notice's “Go to it” link opens
+inline, read-only setup guidance on the board. The commands below inspect that
+prerequisite; they do not adopt a policy or approve a specification.
 
 The board's refusal concerns the checkout it is serving. It does not establish
 whether the default branch already contains accepted policy. Inspect both

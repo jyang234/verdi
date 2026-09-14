@@ -142,10 +142,16 @@ Initial policy adoption and independent no-coaching validation remain open.
 
 The subsequent [adoption repair status](2026-09-13-adoption-repair-status.md)
 records the directory and policy-guide corrections and their real-ATC retest.
-FABLE capacity was restored and the three guide corrections were committed.
-The full gate then found a vocabulary-consistency failure; automatic approval
-review blocks the remaining FABLE repair and Opus reviews pending explicit
-payload/destination authorization. The candidate is not an accepted release.
+After explicit authorization, genuine FABLE 5.1 repaired the guide and
+vocabulary findings. Both Opus 5 reviews returned no blockers. Final source
+`ce51bb9abadaf0087fe999f36a0bd3496d2e7edf`, binary SHA-256
+`aef8f1a0b57f34f0851e20d51197c1be345852b2a37d438ef2023e6fd053a3c5`,
+passed `make verify`, including 279 browser tests and the race checks. The real
+ATC regression succeeded without a local `main` workaround. This candidate
+supersedes the earlier adoption instrument; both complete acceptance journeys
+must use the same final release. Actual policy adoption, F13 design/acceptance
+and implementation, and independent adoption validation remain open. The local
+MVP is not yet accepted; hosted integration testing remains deferred.
 
 ## Source witnesses
 
