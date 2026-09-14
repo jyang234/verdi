@@ -125,6 +125,32 @@ all Markdown plans share that structure. Support documents remain selected
 sources; an implementation slice's Goal is not automatically the parent feature's
 Outcome. Relationships require declared links or explicit user mapping.
 
+### Explicit statement labels
+
+Problem and Outcome are first-class import fields. When the selected target
+contains properly labeled statements in a supported structure, the importer
+must populate both fields mechanically from their existing content. Native
+Verdi frontmatter uses the current `problem`/`outcome` contract. The Markdown
+mapping contract must include explicit Problem and Outcome sections and define
+its heading/scope rules, so ordinary labeled specifications do not require
+manual re-entry or a per-document hand-authored mapping. No AI is involved.
+
+Recognition is scoped to the selected feature/specification. Do not use a
+supporting implementation slice's statement as the parent feature's merely
+because it has the same label. Duplicate, empty or conflicting labeled fields
+produce a named structural finding instead of choosing the first value. Preserve
+multiline text and its source spans; formatting changes must be declared. Label
+variants supported by a mapping profile must be explicit and tested rather than
+an open-ended synonym or meaning inference.
+
+F13's selected primary definition lacks explicitly labeled Problem and Outcome
+sections. This is a structural finding against that source definition, not a
+reason for Verdi to reject correctly labeled external specs. Report exactly
+which labels are absent. Correcting F13's authoritative source is a separate
+source-authoring/review action; this import proposal does not rewrite it. In an
+incomplete import preview, the existing explicit deferral option remains
+available without calling the source structurally complete.
+
 Preserve wording. Allowed formatting transformations must be named and
 reproducible (for example stripping a list marker or joining physical line wraps).
 Retain exact source bytes/spans alongside the displayed text. Do not paraphrase,
@@ -214,6 +240,10 @@ Required acceptance witnesses for the eventual implementation:
 
 - F13 sources produce a reviewable mapping and board without retyping their
   declared requirements; every proposed card has truthful origin/classification.
+- A positively labeled Markdown fixture imports both Problem and Outcome with
+  matching content/source spans and no manual re-entry. Multiline statements
+  survive import. Missing, empty, duplicate and cross-target labels have explicit
+  results; F13's absent labels are a source-structure finding, not inferred prose.
 - Native and supported external import preserve declared content and render it
   through the existing board without any model call; repeated inputs produce
   byte-identical candidate/mapping output. Unsupported structures remain explicit.

@@ -5,11 +5,15 @@ model extraction ran. `mechanical-field-map.json` binds each proposed criterion
 to exact source byte offsets and records its deterministic formatting transform.
 This is not proof that a general Markdown parser can infer this mapping.
 
-## Statements
+## Source-structure finding: missing labeled statements
 
 **Problem: not explicitly mapped in the selected source.**
 
 **Outcome: not explicitly mapped in the selected source.**
+
+This is a finding against the selected F13 definition. It is not an importer
+limitation for specifications that already contain labeled Problem and Outcome
+statements: those must be mapped directly with their content preserved.
 
 The importer does not invent either statement. The user can map an existing
 passage or explicitly defer the statement under Verdi's existing draft rules.

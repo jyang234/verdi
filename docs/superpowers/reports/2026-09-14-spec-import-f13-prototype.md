@@ -95,3 +95,13 @@ executed; no initial review, author correction round or closure has occurred.
 Design review by another model is a development verification requirement,
 separate from whether importing a document calls a model. The review transfer
 remains pending explicit authorization; no retry occurred during this revision.
+
+## Owner clarification: labeled statements are directly importable
+
+The owner identified F13's absent Problem/Outcome labels as a source-structure
+finding. The design now explicitly requires mechanical extraction when those
+labels exist, including multiline content and exact source mapping. Positive
+labeled-input tests accompany F13's missing-label case; the importer must not
+mistake F13's structural gap for a general limitation of Markdown import.
+See the [F13 structure finding](../proposals/2026-09-14-spec-import-f13/f13-structure-finding.md).
+No original ATC source or pinned snapshot was changed.
