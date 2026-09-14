@@ -192,6 +192,9 @@ func recognizeMarkdown(sourceID string, selected []byte) (markdownResult, error)
 				// unresolvedSourceIDFindings turns these into findings once
 				// the request's explicit mappings are known.
 				blocked = append(blocked, blockedSourceIDs(sourceID, body, bodyStart, top, occ[0])...)
+				// One disclosure per EMPTY ITEM: the ordinal it consumes
+				// names an object this source declared with no content.
+				findings = append(findings, emptyItemFindings(body, bodyStart, top, occ[0], prefix)...)
 			}
 			fields = append(fields, objFields...)
 		default:
@@ -324,7 +327,9 @@ var sourceDeclaredIDRe = regexp.MustCompile(`^((?:ac|co|dc|oq)-[a-z0-9]+(?:-[a-z
 // regardless of whether an earlier item was blocked by a source-declared
 // id (spec-import-contract.md residual 4: "the item's ordinal is still
 // counted, so following generated IDs keep their source-position
-// numbering").
+// numbering"). An item with no body bytes at all yields no Field — there
+// is nothing to copy — and emptyItemFindings reports the object its
+// ordinal names.
 func extractObjectSection(sourceID string, body []byte, bodyStart int, top []ast.Node, headingIdx int, prefix string) ([]Field, *Finding) {
 	name := objectSectionDisplayName[prefix]
 	content, _ := sectionContentNodes(top, headingIdx)
@@ -351,7 +356,7 @@ func extractObjectSection(sourceID string, body []byte, bodyStart int, top []ast
 	var fields []Field
 	for _, item := range bulletItemsOf(body, bodyStart, list) {
 		if !item.supported {
-			continue // an empty list item contributes nothing.
+			continue // no bytes to copy; emptyItemFindings reports an empty item.
 		}
 		if sourceDeclaredIDRe.MatchString(item.text) {
 			// Blocked: bytes stay in the ordinary unmapped complement; no
@@ -396,6 +401,49 @@ func blockedSourceIDs(sourceID string, body []byte, bodyStart int, top []ast.Nod
 		}
 	}
 	return blocked
+}
+
+// emptyItemFindings reports one blocking empty-field Finding per direct
+// item of one object section whose body has no bytes at all
+// (spec-import-contract.md: "one direct item = one object"; "Duplicate
+// aliases for one field, empty fields, unsupported nesting or multiple
+// targets are reported"). Like blockedSourceIDs it is a second, lightweight
+// pass, so extractObjectSection's early-return branches need not thread an
+// extra return value, and like it this runs only for a section that actually
+// resolved: a nested list or mixed prose is refused as a whole section and
+// reports no per-ordinal object at all.
+//
+// An empty item used to consume its ordinal in silence, so the object it
+// declares existed in the numbering and nowhere else — no Field, no Finding,
+// and nothing a reviewer could act on. The Finding names exactly that
+// would-be ordinal target and nothing more: an empty item has no text and no
+// span, so neither is invented for it, and the ordinal itself is unchanged.
+//
+// RetainUnmapped disposes of the source's BYTES and cannot supply a value,
+// so it never clears this. An explicit nonblank Mapping for the same target
+// does, through demoteResolvedFieldGaps, which keeps the source-empty fact
+// as a truthful nonblocking disclosure rather than erasing it.
+func emptyItemFindings(body []byte, bodyStart int, top []ast.Node, headingIdx int, prefix string) []Finding {
+	content, _ := sectionContentNodes(top, headingIdx)
+	list, ok := sectionBulletList(content)
+	if !ok {
+		return nil
+	}
+	name := objectSectionDisplayName[prefix]
+	var findings []Finding
+	for _, item := range bulletItemsOf(body, bodyStart, list) {
+		if !item.empty {
+			continue
+		}
+		target := fmt.Sprintf("%s-%d", prefix, item.ordinal)
+		findings = append(findings, Finding{
+			Code:     FindingEmptyField,
+			Target:   target,
+			Message:  fmt.Sprintf("item %d of the %s list has no content; one direct item is one object, so %s is reported rather than skipped, and retaining the source's bytes does not give it a value", item.ordinal, name, target),
+			Blocking: true,
+		})
+	}
+	return findings
 }
 
 // sectionBulletList returns an object section's single flat Markdown BULLET

@@ -370,6 +370,214 @@ func TestNormalize_MarkdownUnresolvedNestedListDoesNotProduceCriteria(t *testing
 	}
 }
 
+// objectSectionFixture wraps one object section's list in the smallest
+// complete markdown-v1 document, so one empty item's disclosure can be
+// observed through the public Normalize gate for any of the four object
+// kinds rather than only for acceptance criteria.
+func objectSectionFixture(heading, list string) string {
+	return "# T\n\n## Problem\n\np\n\n## Outcome\n\no\n\n## " + heading + "\n\n" + list
+}
+
+// TestNormalize_MarkdownEmptyListItemReportsItsOrdinalObject pins the object
+// grammar over an item the source left blank: "one direct item = one object",
+// "empty fields... are reported", and RetainUnmapped disposes of BYTES, so it
+// can never make an empty OBJECT valid.
+//
+// An empty item used to consume its ordinal in silence: a complete labeled
+// source whose acceptance-criteria list began with a bare "-" normalized to
+// findings=[] under retain_unmapped, so the object that item declares existed
+// in the numbering and nowhere else — no field, no finding, nothing for a
+// reviewer to act on. The disclosure names that would-be ordinal target and
+// invents no Field, text or span for it.
+func TestNormalize_MarkdownEmptyListItemReportsItsOrdinalObject(t *testing.T) {
+	t.Run("every object kind reports the empty item's own ordinal target", func(t *testing.T) {
+		cases := []struct{ heading, prefix, section string }{
+			{"Acceptance Criteria", "ac", "acceptance-criteria"},
+			{"Constraints", "co", "constraints"},
+			{"Decisions", "dc", "decisions"},
+			{"Open Questions", "oq", "open-questions"},
+		}
+		for _, c := range cases {
+			t.Run(c.heading, func(t *testing.T) {
+				req := minimalRequest()
+				req.Sources[0].Data = []byte(objectSectionFixture(c.heading, "-\n- done\n"))
+
+				plan, err := Normalize(req)
+				if err != nil {
+					t.Fatalf("Normalize: unexpected error: %v", err)
+				}
+				empty := c.prefix + "-1"
+				if f, ok := fieldByTarget(plan.Fields, empty); ok {
+					t.Fatalf("%s produced a field %+v; an empty item has no text and no span to publish", empty, f)
+				}
+				f, ok := findingForTarget(plan.Findings, FindingEmptyField, empty)
+				if !ok {
+					t.Fatalf("no empty-field finding for the empty item's ordinal %s: %+v", empty, plan.Findings)
+				}
+				if !f.Blocking {
+					t.Errorf("empty-field finding for %s is not blocking: %+v", empty, f)
+				}
+				if !strings.Contains(f.Message, c.section) {
+					t.Errorf("empty-field message %q does not name the %s section the item came from", f.Message, c.section)
+				}
+				// The empty item still consumes ordinal 1: the item after it
+				// keeps its source-position number.
+				if got, ok := fieldByTarget(plan.Fields, c.prefix+"-2"); !ok || got.Text != "done" {
+					t.Fatalf("%s-2 = %+v ok=%v, want the following item still numbered from its source position", c.prefix, got, ok)
+				}
+			})
+		}
+	})
+
+	t.Run("an interior empty item keeps ordinal continuity and source coverage", func(t *testing.T) {
+		raw := []byte(bulletFixture("- alpha\n-\n- gamma\n"))
+		req := minimalRequest()
+		req.Sources[0].Data = raw
+
+		plan, err := Normalize(req)
+		if err != nil {
+			t.Fatalf("Normalize: unexpected error: %v", err)
+		}
+		f, ok := findingForTarget(plan.Findings, FindingEmptyField, "ac-2")
+		if !ok || !f.Blocking {
+			t.Fatalf("empty-field for the interior empty item = %+v ok=%v, want it blocking on ac-2: %+v", f, ok, plan.Findings)
+		}
+		if got, ok := fieldByTarget(plan.Fields, "ac-2"); ok {
+			t.Fatalf("ac-2 = %+v; the reported ordinal must carry no fabricated field", got)
+		}
+		ac1, ok := fieldByTarget(plan.Fields, "ac-1")
+		if !ok || ac1.Text != "alpha" {
+			t.Fatalf("ac-1 = %+v ok=%v", ac1, ok)
+		}
+		ac3, ok := fieldByTarget(plan.Fields, "ac-3")
+		if !ok || ac3.Text != "gamma" {
+			t.Fatalf("ac-3 = %+v ok=%v, want the empty item's ordinal still consumed", ac3, ok)
+		}
+		// Reporting the gap changes no byte's disposition: both real items
+		// stay mapped and every selected byte still has exactly one.
+		cov := coverageForSource(t, plan, "source")
+		mappedIntervalFor(t, cov, ac1.Spans[0].Start, ac1.Spans[0].End, "ac-1")
+		mappedIntervalFor(t, cov, ac3.Spans[0].Start, ac3.Spans[0].End, "ac-3")
+		if got, want := cov.MappedBytes+cov.RetainedBytes+cov.UnresolvedBytes, cov.TotalBytes; got != want {
+			t.Fatalf("mapped+retained+unresolved = %d, want TotalBytes %d", got, want)
+		}
+	})
+
+	t.Run("retain_unmapped does not make the empty object valid", func(t *testing.T) {
+		// The owner's reproduction: a complete labeled source, an attested
+		// second criterion, and every unmapped byte explicitly retained.
+		raw := []byte(bulletFixture("-\n- done\n"))
+		req := minimalRequest()
+		req.Sources[0].Data = raw
+		req.RetainUnmapped = true
+		req.Mappings = []Mapping{{Target: "ac-2", Evidence: []string{"attestation"}}}
+
+		plan, err := Normalize(req)
+		if err != nil {
+			t.Fatalf("Normalize: unexpected error: %v", err)
+		}
+		if len(plan.Findings) == 0 {
+			t.Fatalf("a source declaring an empty object normalized with no findings at all: fields %+v", plan.Fields)
+		}
+		f, ok := findingForTarget(plan.Findings, FindingEmptyField, "ac-1")
+		if !ok || !f.Blocking {
+			t.Fatalf("empty-field for ac-1 = %+v ok=%v, want retaining the bytes to leave the empty object blocking: %+v", f, ok, plan.Findings)
+		}
+		ac2, ok := fieldByTarget(plan.Fields, "ac-2")
+		if !ok || ac2.Text != "done" || len(ac2.Evidence) != 1 {
+			t.Fatalf("ac-2 = %+v ok=%v, want the attested second criterion untouched", ac2, ok)
+		}
+		cov := coverageForSource(t, plan, "source")
+		if got, want := cov.MappedBytes+cov.RetainedBytes+cov.UnresolvedBytes, cov.TotalBytes; got != want {
+			t.Fatalf("mapped+retained+unresolved = %d, want TotalBytes %d", got, want)
+		}
+	})
+
+	t.Run("an explicit nonblank mapping supplies the value and keeps the disclosure", func(t *testing.T) {
+		raw := []byte(bulletFixture("-\n- done\n"))
+		corrected := "The criterion the source left blank."
+		req := minimalRequest()
+		req.Sources[0].Data = raw
+		req.Mappings = []Mapping{{Target: "ac-1", Text: &corrected, Evidence: []string{"behavioral"}}}
+
+		plan, err := Normalize(req)
+		if err != nil {
+			t.Fatalf("Normalize: unexpected error: %v", err)
+		}
+		ac1, ok := fieldByTarget(plan.Fields, "ac-1")
+		if !ok || ac1.Text != corrected || ac1.Origin != OriginUserAdded {
+			t.Fatalf("ac-1 = %+v ok=%v, want the user's own value for the ordinal the source left empty", ac1, ok)
+		}
+		f, ok := findingForTarget(plan.Findings, FindingEmptyField, "ac-1")
+		if !ok {
+			t.Fatalf("the source-empty disclosure vanished once a mapping supplied the value: %+v", plan.Findings)
+		}
+		if f.Blocking {
+			t.Errorf("empty-field for ac-1 still blocking after an explicit nonblank mapping: %+v", f)
+		}
+		if _, ok := findingForTarget(plan.Findings, FindingMissingEvidence, "ac-1"); ok {
+			t.Errorf("missing-evidence for ac-1 despite the mapping declaring a kind: %+v", plan.Findings)
+		}
+	})
+
+	t.Run("a correction still needs its own evidence", func(t *testing.T) {
+		raw := []byte(bulletFixture("-\n- done\n"))
+		corrected := "The criterion the source left blank."
+		req := minimalRequest()
+		req.Sources[0].Data = raw
+		req.Mappings = []Mapping{{Target: "ac-1", Text: &corrected}}
+
+		plan, err := Normalize(req)
+		if err != nil {
+			t.Fatalf("Normalize: unexpected error: %v", err)
+		}
+		f, ok := findingForTarget(plan.Findings, FindingMissingEvidence, "ac-1")
+		if !ok || !f.Blocking {
+			t.Fatalf("missing-evidence for the corrected ac-1 = %+v ok=%v, want supplying a value not to waive evidence: %+v", f, ok, plan.Findings)
+		}
+	})
+
+	t.Run("a syntax-bearing empty block is not an empty item", func(t *testing.T) {
+		cases := []struct{ name, list, wantText string }{
+			{"empty fenced block", "- ```\n  ```\n- plain\n", "```\n```"},
+			{"empty blockquote", "- >\n- plain\n", ">"},
+		}
+		for _, c := range cases {
+			t.Run(c.name, func(t *testing.T) {
+				req := minimalRequest()
+				req.Sources[0].Data = []byte(bulletFixture(c.list))
+
+				plan, err := Normalize(req)
+				if err != nil {
+					t.Fatalf("Normalize: unexpected error: %v", err)
+				}
+				if ac1, ok := fieldByTarget(plan.Fields, "ac-1"); !ok || ac1.Text != c.wantText {
+					t.Fatalf("ac-1 = %+v ok=%v, want the block's own syntax kept as content", ac1, ok)
+				}
+				if f, ok := findingByCode(plan.Findings, FindingEmptyField); ok {
+					t.Fatalf("empty-field %+v for an item whose body is real syntax", f)
+				}
+			})
+		}
+	})
+
+	t.Run("a nested list is still an unresolved section, not an empty object", func(t *testing.T) {
+		req := minimalRequest()
+		req.Sources[0].Data = []byte(bulletFixture("- outer item\n\n  - inner item\n- plain\n"))
+
+		plan, err := Normalize(req)
+		if err != nil {
+			t.Fatalf("Normalize: unexpected error: %v", err)
+		}
+		if _, ok := findingForTarget(plan.Findings, FindingAmbiguousField, "acceptance-criteria"); !ok {
+			t.Fatalf("no ambiguous-field finding for the nested list: %+v", plan.Findings)
+		}
+		if f, ok := findingByCode(plan.Findings, FindingEmptyField); ok {
+			t.Fatalf("empty-field %+v for an unresolved section; a refused section reports no per-ordinal object", f)
+		}
+	})
+}
+
 // TestNormalize_MarkdownOrderedListIsNotPromotedToObjects pins the closed
 // grammar: "Object sections accept a flat Markdown bullet list" and "Strip
 // only the bullet marker and its following space". An ordered list is not a

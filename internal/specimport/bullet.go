@@ -19,6 +19,12 @@ type bulletItem struct {
 	// supported is false for an item this package cannot represent as a
 	// span at all: an empty item, or one containing a nested list.
 	supported bool
+	// empty separates the one unsupported cause the object grammar still
+	// has to report — an item whose body has no bytes at all — from an item
+	// whose own structure could not be located. Only the first names an
+	// object the source really declared and left without content, so only
+	// the first is reported as an empty field for the ordinal it consumes.
+	empty bool
 	// markerStart is the offset of the item's own bullet marker; start/end
 	// are its CONTENT span, excluding the marker and the final line's
 	// trailing terminator. start/end is the span automatic extraction
@@ -74,12 +80,13 @@ func bulletItemsOf(body []byte, base int, list ast.Node) []bulletItem {
 		}
 		start, end := trimBodyRange(body, rawStart, rawEnd)
 		if start >= end {
-			// No body bytes at all: an empty item contributes nothing, but
-			// its ordinal is still consumed. This is a real emptiness test
+			// No body bytes at all: an empty item contributes no text and no
+			// span, but its ordinal is still consumed and the object that
+			// ordinal names is still disclosed. This is a real emptiness test
 			// over the item's own bytes — an empty fenced block or an empty
 			// blockquote carries no leaf segment yet is ordinary flat-list
 			// content, and must not be dropped as if the item were blank.
-			items = append(items, bulletItem{ordinal: ordinal})
+			items = append(items, bulletItem{ordinal: ordinal, empty: true})
 			continue
 		}
 		if lineStartBefore(body, start) != markerStart {
