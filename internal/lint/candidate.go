@@ -2,6 +2,7 @@ package lint
 
 import (
 	"context"
+	"fmt"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -36,16 +37,25 @@ var candidateRules = []Rule{vl002{}, vl003{}, vl005{}, vl006{}}
 // resolution, configured tracker schemes, evidence floors or stub-target
 // checks itself).
 //
-// The returned findings are filtered to what the candidate's own author can
-// act on: every finding whose own Path is relPath (the candidate itself),
-// plus an explicit surfacing of any dependency the candidate's own
-// frontmatter links reference (a parent feature, an implements/resolves
-// target, ...) that turns out to be present in the committed zone but
-// corrupt — so a broken dependency can never be silently absorbed into the
-// large set of unrelated pre-existing corpus findings this seam does NOT
-// return. A non-nil error is only ever operational (BuildSnapshot/service
-// discovery failure), matching Engine.Run's own contract — a candidate that
-// fails to decode is a Finding, never an error.
+// The returned findings separate readiness from disclosure (spec-import-
+// contract: "Unrelated pre-existing corpus findings are disclosed separately
+// and cannot silently validate a candidate whose dependencies fail to decode
+// or resolve"):
+//
+//   - SeverityViolation, and so blocking, for every finding whose own Path is
+//     relPath (the candidate itself), plus any dependency the candidate's own
+//     frontmatter links reference (a parent feature, an implements/resolves
+//     target, ...) that is present in the committed zone but corrupt. Only
+//     these determine whether the candidate is usable.
+//   - SeverityDisclosure for every finding about some OTHER corpus document,
+//     carrying its original rule, path and fact. These are reported, never
+//     discarded and never blocking: a pre-existing corpus problem wholly
+//     unconnected to this candidate is not the importing author's to fix, but
+//     silence about it is not a pass either.
+//
+// A non-nil error is only ever operational (BuildSnapshot/service discovery
+// failure), matching Engine.Run's own contract — a candidate that fails to
+// decode is a Finding, never an error.
 func CheckCandidate(ctx context.Context, root, relPath string, content []byte) ([]Finding, error) {
 	snap, err := BuildSnapshot(root, Options{})
 	if err != nil {
@@ -89,12 +99,21 @@ func CheckCandidate(ctx context.Context, root, relPath string, content []byte) (
 		for _, r := range candidateRules {
 			all = append(all, r.Check(in)...)
 		}
+		all = append(all, candidateNewSpecFindings(doc, mdl)...)
 	}
 
 	findings := filterCandidateFindings(all, relPath)
-	findings = append(findings, corruptDependencyFindings(snap, doc)...)
+	dependencyFindings := corruptDependencyFindings(snap, doc)
+	findings = append(findings, dependencyFindings...)
+	findings = append(findings, unrelatedCorpusDisclosures(all, snap, relPath, dependencyFindings)...)
 
+	// Severity leads the ordering so the findings that decide readiness come
+	// before the disclosures that do not; within each, the existing
+	// rule/path/message ordering is unchanged.
 	sort.Slice(findings, func(i, j int) bool {
+		if findings[i].Severity != findings[j].Severity {
+			return findings[i].Severity < findings[j].Severity
+		}
 		if findings[i].Rule != findings[j].Rule {
 			return findings[i].Rule < findings[j].Rule
 		}
@@ -104,6 +123,76 @@ func CheckCandidate(ctx context.Context, root, relPath string, content []byte) (
 		return findings[i].Message < findings[j].Message
 	})
 	return findings, nil
+}
+
+// candidateNewSpecFindings applies the CURRENT new-spec floor to a candidate
+// vl006's own isNewClassSpec would otherwise skip (spec-import-contract:
+// "Strict decode, new-spec requiredness, anchors and project checks apply
+// even to old native inputs; no archive grandfathering"). A native primary
+// may be an old v0-shaped feature — no problem/outcome, no object anchors,
+// no attestation kind — which isNewClassSpec reads as grandfathered because
+// it carries no round-four surface field. That reading is correct for the
+// existing corpus and is left exactly as it is; but a candidate is a spec
+// being created NOW, so the floor applies to it.
+//
+// This calls vl006's OWN helpers rather than restating their checks:
+// requiredness, anchor resolution and the feature outcome floor keep their
+// single owner (spec-import-contract: "Ref resolution, configured tracker
+// schemes, feature evidence floors and stub targets have one owner, never
+// copied into the importer"). Scoped to the feature class: a story is
+// already always new-class, and a component has no object model at all, so
+// forcing the floor there would invent a requirement no rule states.
+func candidateNewSpecFindings(doc *Document, mdl *model.Model) []Finding {
+	if doc.Spec == nil || doc.Spec.Class != artifact.ClassFeature || isNewClassSpec(doc.Spec) {
+		return nil
+	}
+	r := vl006{}
+	findings := locusAll(r.checkRequiredness(doc), SpecLocus())
+	return append(findings, r.checkFeatureACAttestation(doc, mdl)...)
+}
+
+// unrelatedCorpusDisclosures returns every finding about a document OTHER
+// than the candidate, restated at SeverityDisclosure with its original rule,
+// path and fact named in the message. Two sources feed it: the findings the
+// candidateRules raised over the augmented Snapshot, and the existing
+// Snapshot's own decode failures — candidateRules deliberately omit vl001
+// (see candidateRules' doc comment), so an unrelated document that does not
+// decode at all would otherwise be the one corpus problem this seam never
+// mentions.
+//
+// dependencyFindings are the candidate's own corrupt dependencies, already
+// returned as blocking above; their decode failure is not repeated here.
+// Locus is dropped: a disclosure never badges a board card (finding.go's
+// locusAll doc comment), and a disclosure about another document's object
+// would otherwise claim a card on the candidate's wall.
+func unrelatedCorpusDisclosures(all []Finding, snap *Snapshot, relPath string, dependencyFindings []Finding) []Finding {
+	reportedDependency := make(map[string]bool, len(dependencyFindings))
+	for _, f := range dependencyFindings {
+		reportedDependency[f.Path] = true
+	}
+
+	var out []Finding
+	disclose := func(f Finding) Finding {
+		return Finding{
+			Rule:     f.Rule,
+			Path:     f.Path,
+			Message:  fmt.Sprintf("unrelated existing corpus finding: %s %s: %s", f.Rule, f.Path, f.Message),
+			Severity: SeverityDisclosure,
+		}
+	}
+	for _, f := range all {
+		if f.Path == relPath {
+			continue
+		}
+		out = append(out, disclose(f))
+	}
+	for _, d := range snap.Docs {
+		if d.RelPath == relPath || d.DecodeErr == nil || reportedDependency[d.RelPath] {
+			continue
+		}
+		out = append(out, disclose(Finding{Rule: "VL-001", Path: d.RelPath, Message: d.DecodeErr.Error()}))
+	}
+	return out
 }
 
 // candidateDocKind classifies relPath into the artifact kind that governs
@@ -137,13 +226,13 @@ func insertCandidateDocument(snap *Snapshot, doc *Document) {
 	}
 }
 
-// filterCandidateFindings keeps only the findings that are about the
-// candidate itself (Path == relPath) — VL-002's own-path checks, a dangling
+// filterCandidateFindings selects the findings that are about the candidate
+// itself (Path == relPath) — VL-002's own-path checks, a dangling
 // links[]/context[] ref on the candidate's own frontmatter, VL-005's own
-// story-tracker check, VL-006's own requiredness/evidence/anchor checks —
-// discarding every other, unrelated finding the augmented Snapshot's corpus
-// may still legitimately carry (a pre-existing corpus document's own
-// problem, wholly unconnected to this candidate).
+// story-tracker check, VL-006's own requiredness/evidence/anchor checks.
+// These are the only findings that decide whether the candidate is usable;
+// every other finding the augmented Snapshot's corpus legitimately carries
+// is routed to unrelatedCorpusDisclosures instead, never dropped.
 func filterCandidateFindings(all []Finding, relPath string) []Finding {
 	var out []Finding
 	for _, f := range all {
