@@ -195,3 +195,87 @@ func TestCheckCandidate_DuplicateIdentity(t *testing.T) {
 		}
 	}
 }
+
+// validDependencyFeature is a real, cleanly-decoding feature spec a
+// candidate story can implement.
+const validDependencyFeature = `---
+id: spec/widget-feature
+kind: spec
+title: "Widget Feature"
+owners: [unassigned]
+class: feature
+problem: { text: "Users cannot do X.", anchor: problem }
+outcome: { text: "Users can do X.", anchor: outcome }
+acceptance_criteria:
+  - { id: ac-1, text: "Given X, when Y, then Z.", evidence: [static, attestation], anchor: ac-1 }
+---
+# Widget Feature
+
+## Problem
+
+Users cannot do X.
+
+## Outcome
+
+Users can do X.
+
+## Ac 1
+
+Given X, when Y, then Z.
+`
+
+// storyImplementingValidFeature is a candidate story implementing
+// validDependencyFeature's own ac-1 fragment.
+const storyImplementingValidFeature = `---
+id: spec/widget-story
+kind: spec
+title: "Widget Story"
+owners: [unassigned]
+class: story
+story: jira:LOAN-1482
+problem: { text: "Users cannot do X today.", anchor: problem }
+outcome: { text: "Users can do X.", anchor: outcome }
+acceptance_criteria:
+  - { id: ac-1, text: "Given X, when Y, then Z.", evidence: [static], anchor: ac-1 }
+links:
+  - { type: implements, ref: "spec/widget-feature#ac-1" }
+---
+# Widget Story
+
+## Problem
+
+Users cannot do X today.
+
+## Outcome
+
+Users can do X.
+
+## Ac 1
+
+Given X, when Y, then Z.
+`
+
+// TestCheckCandidate_ValidDecodingDependency_NoFinding proves a candidate
+// whose implements link names a dependency that exists AND decodes
+// cleanly produces no finding about that dependency at all — the
+// complement of TestCheckCandidate_SurfacesCorruptDependency: a healthy
+// dependency is silent, only a broken one is surfaced.
+func TestCheckCandidate_ValidDecodingDependency_NoFinding(t *testing.T) {
+	root := emptyStoreRoot(t)
+	// The candidate story's own story: jira:LOAN-1482 tracker needs a
+	// configured jira provider (VL-005) — unrelated to the dependency
+	// resolution this test exercises, but otherwise a spurious finding on
+	// the candidate's own path would appear alongside it.
+	writeTestFile(t, filepath.Join(root, ".verdi", "verdi.yaml"), setupManifestYAML)
+	featureRelPath := ".verdi/specs/active/widget-feature/spec.md"
+	writeTestFile(t, filepath.Join(root, featureRelPath), validDependencyFeature)
+
+	relPath := ".verdi/specs/active/widget-story/spec.md"
+	findings, err := CheckCandidate(context.Background(), root, relPath, []byte(storyImplementingValidFeature))
+	if err != nil {
+		t.Fatalf("CheckCandidate: %v", err)
+	}
+	if len(findings) != 0 {
+		t.Fatalf("got %d findings for a candidate whose dependency decodes and resolves cleanly, want 0:\n%s", len(findings), findingsString(findings))
+	}
+}
