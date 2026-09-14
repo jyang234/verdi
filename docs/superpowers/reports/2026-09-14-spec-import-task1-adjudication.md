@@ -1,10 +1,10 @@
 # Mechanical import Task 1: owner findings and continuation
 
-Status: **REVISE — reviewed corrections closed; one empty-item diagnostic open**.
-M1–M10 and N1/N2 are independently closed at `714b16ae`; N3's explicit-override
-regression is accepted. Main's final source-error check reproduced N4: an empty
-bullet is silently omitted with no finding when a valid criterion follows it.
-Correct this bounded required diagnostic before Task 2. Design/contract unchanged.
+Status: **ACCEPTED as the Task 2 parser dependency at `1d6c16df`**.
+M1–M10, N1/N2 and N4 are closed by distinct genuine Opus 5 re-reviews; N3's
+same-target override is adjudicated and tested. Main independently reproduced the
+corrected key paths. FABLE integration verifies containment and consumes this exact
+accepted head before Task 2. This is no importer, release or MVP completion claim.
 
 ## Fixed runtime range and provenance
 
@@ -234,3 +234,23 @@ existing M9 demotion; preserve the source-empty disclosure, evidence requirement
 and coverage. Do not classify syntax-bearing empty fenced/quote blocks as empty,
 or change nested-list refusal. Fresh Opus correction and distinct narrow re-review
 remain required; do not reopen the closed source-fidelity changes or add a new API.
+
+## Final Task 1 owner gate
+
+Fresh N4 fixer `e251881c-094f-4bbf-9765-b266a62110d7` authored
+`293fb773..1d6c16dff59b9686a70f185fc84dac3e0fc9bf9d` (one commit, three package
+files). Distinct reviewer `a154acd1-79b8-41bf-8e7c-280977dc7d1d` returned ACCEPT:
+N4 closed, package test 0.485s, focused 13-subtest regression 0.216s, vet/fmt clean,
+tracked tree unchanged. Main reran its empty-bullet probe and observed the required
+blocking empty-field/ac-1 while ac-2 stayed intact. The sandbox could not read a
+Go cache entry; the same authorized local test passed with host cache access.
+Evidence: `execution/task1-empty-item-review/review-received.md` and associated
+probe/mutant artifacts. The reviewer proved multiple-empty behavior via overlay;
+its absence as a committed multi-empty regression is nonblocking coverage debt,
+not an incorrect result. No runtime correction remains open.
+
+Main accepts the parser API at 1d6c16df for Task 2, retaining the original
+producer's disclosed partial TDD process history. Required behavior is now covered
+by package tests plus independent adversarial evidence; that does not retroactively
+make the original production sequence strictly red-first. Whole-wave review, full
+gates, release identity and both same-release adoption journeys remain ahead.
