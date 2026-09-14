@@ -374,6 +374,114 @@ func TestNormalize_SourceBackedMappingOverridesAutomaticFieldAsUserEdited(t *tes
 	}
 }
 
+// TestNormalize_ExplicitMappingReplacesTheSameTargetAutomaticField pins the
+// adjudicated boundary of "Explicit text/span Mappings override the
+// automatic mapping for the same target" (spec-import-contract.md) in the
+// one shape where it is easy to mistake for data loss: the source declares
+// ac-3 on its FIRST item, so residual 4's positional numbering
+// independently generates ac-3 for its THIRD item, and the contract's own
+// remedy — map the declared id over its declaring item — necessarily
+// replaces that automatic field.
+//
+// The replacement is authorized, so this test deliberately does NOT assert
+// that every automatic field survives an explicit override. What it asserts
+// is that nothing is lost UNRECORDED: the replacement's own origin and span
+// identify the item the user selected, the selected source bytes are
+// retained verbatim in the Snapshot, the displaced item's bytes remain
+// covered under the user's RetainUnmapped disposition, and the byte totals
+// still balance. Preview surfaces read these fields; a later reviewer can
+// see the limitation here rather than infer it.
+func TestNormalize_ExplicitMappingReplacesTheSameTargetAutomaticField(t *testing.T) {
+	const declared = "ac-3: the source's own third criterion"
+	const displaced = "third item"
+	data := []byte("# T\n\n## Problem\n\np\n\n## Outcome\n\no\n\n## Acceptance Criteria\n\n" +
+		"- " + declared + "\n- second item\n- " + displaced + "\n")
+	declaredStart, declaredEnd := spanOf(t, data, declared)
+	displacedStart, displacedEnd := spanOf(t, data, displaced)
+
+	// Baseline: the generated ordinal really does land on ac-3, and the
+	// source's own declaration is blocked rather than silently published.
+	base := minimalRequest()
+	base.Sources[0].Data = data
+	basePlan, err := Normalize(base)
+	if err != nil {
+		t.Fatalf("Normalize (baseline): unexpected error: %v", err)
+	}
+	if ac3, ok := fieldByTarget(basePlan.Fields, "ac-3"); !ok || ac3.Text != displaced {
+		t.Fatalf("baseline ac-3 = %+v ok=%v, want the generated ordinal over %q", ac3, ok, displaced)
+	}
+	if _, ok := findingForTarget(basePlan.Findings, FindingSourceIDRequiresMap, "ac-3"); !ok {
+		t.Fatalf("baseline has no source-id-requires-mapping for the declared ac-3: %+v", basePlan.Findings)
+	}
+
+	req := minimalRequest()
+	req.Sources[0].Data = data
+	req.Mappings = []Mapping{
+		{Target: "ac-3", SourceID: "source", Start: declaredStart, End: declaredEnd, Transform: TransformListItem},
+	}
+	plan, err := Normalize(req)
+	if err != nil {
+		t.Fatalf("Normalize: unexpected error: %v", err)
+	}
+
+	ac3, ok := fieldByTarget(plan.Fields, "ac-3")
+	if !ok {
+		t.Fatalf("ac-3 missing after the explicit mapping: %+v", plan.Fields)
+	}
+	if ac3.Text != declared {
+		t.Fatalf("ac-3.Text = %q, want the explicitly selected item %q", ac3.Text, declared)
+	}
+	if ac3.Origin != OriginCopiedSource {
+		t.Fatalf("ac-3.Origin = %q, want copied-source", ac3.Origin)
+	}
+	if len(ac3.Spans) != 1 || ac3.Spans[0].Start != declaredStart || ac3.Spans[0].End != declaredEnd {
+		t.Fatalf("ac-3.Spans = %+v, want exactly the selected item [%d,%d)", ac3.Spans, declaredStart, declaredEnd)
+	}
+	if _, ok := findingForTarget(plan.Findings, FindingSourceIDRequiresMap, "ac-3"); ok {
+		t.Fatalf("the declaring item's blocker survived a mapping over that item: %+v", plan.Findings)
+	}
+	if ac2, ok := fieldByTarget(plan.Fields, "ac-2"); !ok || ac2.Text != "second item" {
+		t.Fatalf("ac-2 = %+v ok=%v, want the untouched neighbouring ordinal", ac2, ok)
+	}
+
+	if len(plan.Sources) != 1 {
+		t.Fatalf("plan has %d snapshots, want 1", len(plan.Sources))
+	}
+	snap := plan.Sources[0]
+	if !bytes.Equal(snap.Data, data) {
+		t.Fatalf("Snapshot.Data was altered by the override:\n got %q\nwant %q", snap.Data, data)
+	}
+	if got := string(snap.Data[ac3.Spans[0].Start:ac3.Spans[0].End]); got != ac3.Text {
+		t.Fatalf("ac-3's span over Snapshot.Data = %q, want its own text %q", got, ac3.Text)
+	}
+	// The displaced item's bytes are still there and still accounted for:
+	// retained-only, which is exactly the user's RetainUnmapped disposition.
+	if got := string(snap.Data[displacedStart:displacedEnd]); got != displaced {
+		t.Fatalf("the displaced item's bytes = %q, want %q", got, displaced)
+	}
+
+	cov := coverageForSource(t, plan, "source")
+	if cov.TotalBytes != len(snap.Data) {
+		t.Fatalf("Coverage.TotalBytes = %d, want len(Snapshot.Data) %d", cov.TotalBytes, len(snap.Data))
+	}
+	if got := cov.MappedBytes + cov.RetainedBytes + cov.UnresolvedBytes; got != cov.TotalBytes {
+		t.Fatalf("mapped+retained+unresolved = %d, want TotalBytes %d", got, cov.TotalBytes)
+	}
+	if cov.UnresolvedBytes != 0 {
+		t.Fatalf("UnresolvedBytes = %d, want 0 under RetainUnmapped", cov.UnresolvedBytes)
+	}
+	for _, iv := range cov.Intervals {
+		if iv.Start < displacedEnd && displacedStart < iv.End && iv.Disposition != DispositionRetained {
+			t.Fatalf("interval %+v over the displaced item is %q, want retained-only", iv, iv.Disposition)
+		}
+	}
+	for _, iv := range cov.Intervals {
+		if containsString(iv.Targets, "ac-3") && (iv.Start < declaredStart || iv.End > declaredEnd) {
+			t.Fatalf("interval %+v claims ac-3 outside the selected item [%d,%d)", iv, declaredStart, declaredEnd)
+		}
+	}
+}
+
 func TestNormalize_SourceBackedMappingRejectsOutOfRangeOffsets(t *testing.T) {
 	req := minimalRequest()
 	req.Mappings = []Mapping{{Target: "outcome", SourceID: "source", Start: 0, End: 100000, Transform: TransformIdentity}}
