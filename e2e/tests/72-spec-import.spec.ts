@@ -5,6 +5,8 @@ import {
   SPEC_IMPORT_FIXTURE_URL,
   SPEC_IMPORT_FILES,
   SPEC_IMPORT_F13_PRIMARY_BYTES,
+  SPEC_IMPORT_TRACKER_SCHEME,
+  SPEC_IMPORT_PARENT_FEATURE,
   importPagePath,
   importRecordPath,
   importSourceId,
@@ -88,8 +90,10 @@ async function confirmAndApply(page: Page): Promise<{ status: number; body: Reco
   return { status: resp.status(), body: await resp.json() };
 }
 
-// importLabeledViaUI runs the labeled happy path to a created result.
-async function importLabeledViaUI(page: Page, base: string, slug: string) {
+// readyLabeled drives the labeled happy path up to a READY preview
+// (retained, every criterion carrying attestation), leaving confirmation
+// and creation to the caller.
+async function readyLabeled(page: Page, base: string, slug: string): Promise<void> {
   await openImport(page, base);
   await addFiles(page, [SPEC_IMPORT_FILES.LABELED]);
   await fillTarget(page, slug, "Widget Import");
@@ -101,10 +105,36 @@ async function importLabeledViaUI(page: Page, base: string, slug: string) {
   await page.getByTestId("import-evidence-all-ac-1").click();
   expect(await preview(page)).toBe(200);
   await expectReady(page, true);
+}
+
+type CreatedBody = { board_path: string; branch: string; spec_ref: string; commit: string; preview_digest: string; status: string };
+
+// importLabeledViaUI runs the labeled happy path to a created result.
+async function importLabeledViaUI(page: Page, base: string, slug: string): Promise<CreatedBody> {
+  await readyLabeled(page, base, slug);
   const applied = await confirmAndApply(page);
   expect(applied.status, JSON.stringify(applied.body)).toBe(200);
   await expect(page.getByTestId("import-created")).toHaveAttribute("data-status", "created");
-  return applied.body as { board_path: string; branch: string; spec_ref: string; commit: string; preview_digest: string };
+  return applied.body as CreatedBody;
+}
+
+// addMapping appends one explicit mapping row and fills it.
+async function addMapping(
+  page: Page,
+  fields: { target: string; source?: string; start?: number; end?: number; transform?: string; text?: string; evidence?: string[] },
+) {
+  await page.getByTestId("import-add-mapping").click();
+  const row = page.locator("#import-mapping-list li").last();
+  await row.locator(".import-mapping-target").fill(fields.target);
+  if (fields.source) {
+    await row.locator(".import-mapping-source").selectOption(fields.source);
+    await row.locator(".import-mapping-start").fill(String(fields.start));
+    await row.locator(".import-mapping-end").fill(String(fields.end));
+    await row.locator(".import-mapping-transform").selectOption(fields.transform || "identity");
+  }
+  if (fields.text !== undefined) await row.locator(".import-mapping-text").fill(fields.text);
+  for (const kind of fields.evidence || []) await row.locator(`.import-mapping-evidence input[data-kind="${kind}"]`).check();
+  return row;
 }
 
 test.describe("spec import: discoverability", () => {
@@ -569,7 +599,13 @@ test.describe("spec import: transport refusals and the hermetic store", () => {
     // stripped environment — the human import above needed none of them.
     const info = await (await page.request.get(`${CONTROL_URL}/spec-import-fixture/info`)).json();
     expect(info.url).toBe(base);
-    expect(info.manifest).toBe("schema: verdi.layout/v1\n");
+    // The manifest is the layout schema plus ONE synthetic, test-only
+    // tracker provider (never contacted); no forge, policy or model override.
+    expect(info.manifest).toContain("schema: verdi.layout/v1\n");
+    expect(info.manifest).toContain("providers:\n  " + SPEC_IMPORT_TRACKER_SCHEME + ":");
+    expect(info.manifest).not.toContain("forge");
+    expect(info.synthetic_tracker).toBe(SPEC_IMPORT_TRACKER_SCHEME);
+    expect(info.parent_feature).toBe(SPEC_IMPORT_PARENT_FEATURE);
     expect(info.policy_adopted).toBe(false);
     expect(info.model_override).toBe(false);
     expect(info.stripped_env).toEqual(expect.arrayContaining(["VERDI_REVIEW_FEED", "VERDI_OPENMR_FEED", "VERDI_DIAGRAM_VERIFICATION", "CI_DEFAULT_BRANCH"]));
@@ -599,5 +635,242 @@ test.describe("spec import: corrupted record", () => {
     await expect(page.getByTestId("record-current-spec-changed")).toHaveCount(0);
     await expect(page.getByTestId("import-record")).toHaveCount(0);
     await expect(page.locator("body")).not.toContainText("fatal:");
+
+    // The board over that branch (its worktree cut AFTER the tamper) keeps
+    // the source-record link — presence of a record file — but must not
+    // assert verification from that presence: verification is the record
+    // view's own successful read, which here discloses the corruption.
+    await page.goto(at(base, created.board_path));
+    const origin = page.getByTestId("asd-import-origin");
+    await expect(origin).toBeVisible();
+    await expect(origin).not.toContainText("verified against");
+    await expect(origin).toContainText("not verified here");
+    await expect(origin).toContainText("acceptance");
+    await expect(origin).toContainText("unclassified");
+    await origin.locator("a").click();
+    await expect(page.getByTestId("import-record-unavailable")).toBeVisible();
+  });
+});
+
+test.describe("spec import: apply recovery", () => {
+  test("a lost apply response is recoverable by a visible retry that reports already-created without a duplicate", async ({ page }) => {
+    test.setTimeout(90_000);
+    const base = await importBase(page);
+    const slug = "lost-response";
+    await readyLabeled(page, base, slug);
+    // The request reaches the server and publishes; the response never
+    // reaches the page.
+    await page.route("**/design/import/apply", async (route) => {
+      await route.fetch();
+      await route.abort("failed");
+    });
+    await page.getByTestId("import-confirm").check();
+    await page.getByTestId("import-apply-btn").click();
+    const retry = page.getByTestId("import-retry");
+    await expect(retry).toBeVisible();
+    await expect(retry).toContainText("outcome is unknown");
+    await expect(page.getByTestId("import-retry-btn")).toBeEnabled();
+    await expect(page.getByTestId("import-created")).toBeHidden();
+    await expect(page.getByTestId("import-next-action")).toContainText("Retry");
+    await page.unroute("**/design/import/apply");
+
+    // The visible retry resends the SAME request bytes and digest; the
+    // server reconciles to the publication it already made.
+    const response = page.waitForResponse((r) => r.url().includes("/design/import/apply"));
+    await page.getByTestId("import-retry-btn").click();
+    const resp = await response;
+    expect(resp.status()).toBe(200);
+    const body = (await resp.json()) as CreatedBody;
+    expect(body.status).toBe("already-created");
+    await expect(page.getByTestId("import-created")).toHaveAttribute("data-status", "already-created");
+    await expect(page.getByTestId("import-created")).toContainText(body.commit);
+    await expect(page.getByTestId("import-created")).toContainText("design/" + slug);
+    await expect(retry).toBeHidden();
+    // No duplicate: the branch's verified import commit IS that commit, and
+    // one more identical apply still reconciles to it.
+    const record = await page.goto(at(base, importRecordPath(body.branch, slug)));
+    expect(record?.status()).toBe(200);
+    await expect(page.getByTestId("import-record")).toHaveAttribute("data-import-commit", body.commit);
+  });
+
+  test("an edit while apply is in flight never silently loses the publication notice", async ({ page }) => {
+    test.setTimeout(90_000);
+    const base = await importBase(page);
+    const slug = "late-notice";
+    await readyLabeled(page, base, slug);
+    await page.route("**/design/import/apply", async (route) => {
+      await new Promise((resolve) => setTimeout(resolve, 1500));
+      await route.continue();
+    });
+    await page.getByTestId("import-confirm").check();
+    const response = page.waitForResponse((r) => r.url().includes("/design/import/apply"));
+    await page.getByTestId("import-apply-btn").click();
+    await page.waitForTimeout(300);
+    // An edit lands while the publication is in flight.
+    await page.locator("#import-title").fill("Late notice, retitled");
+    const resp = await response;
+    expect(resp.status()).toBe(200);
+    await page.unroute("**/design/import/apply");
+    const created = page.getByTestId("import-created");
+    await expect(created).toBeVisible();
+    await expect(created).toHaveAttribute("data-status", "created");
+    await expect(created).toHaveAttribute("data-late", "true");
+    await expect(created).toContainText("design/" + slug);
+    await expect(created).toContainText("earlier");
+    await expect(page.getByTestId("import-confirm")).toBeDisabled();
+    await expect(page.getByTestId("import-next-action")).toContainText("earlier");
+
+    // The edited inputs are not that proposal: re-creating under the same
+    // name is refused as target-exists, with the existing board offered.
+    expect(await preview(page)).toBe(200);
+    await expectReady(page, true);
+    await page.getByTestId("import-confirm").check();
+    const refused = page.waitForResponse((r) => r.url().includes("/design/import/apply"));
+    await page.getByTestId("import-apply-btn").click();
+    expect((await refused).status()).toBe(409);
+    const error = page.getByTestId("import-error");
+    await expect(error).toHaveAttribute("data-code", "target-exists");
+    await expect(page.getByTestId("import-existing-board-link")).toHaveAttribute("href", `/b/design%2F${slug}/board/spec/${slug}`);
+  });
+});
+
+test.describe("spec import: native, manual and story surfaces", () => {
+  test("native: exact eligible bytes import byte-identically; an identity mismatch is refused and corrected; mappings and deferral are refused", async ({ page }) => {
+    test.setTimeout(90_000);
+    const base = await importBase(page);
+    await openImport(page, base);
+    await addFiles(page, [SPEC_IMPORT_FILES.NATIVE]);
+    await page.locator("#import-format").selectOption("native");
+    await fillTarget(page, "native-gadget", "Native Widget");
+    expect(await preview(page)).toBe(400);
+    const error = page.getByTestId("import-error");
+    await expect(error).toBeVisible();
+    await expect(error).toHaveAttribute("data-code", "invalid-request");
+    await expect(error).toContainText("does not match target slug");
+
+    await page.locator("#import-slug").fill("native-widget");
+    expect(await preview(page)).toBe(200);
+    await expectReady(page, true);
+    // Native content is byte-identical: no per-field views, no edit or
+    // evidence controls (the validator refuses every explicit mapping for
+    // native), and the preview says so rather than reading as "no fields".
+    await expect(page.locator("#import-fields article")).toHaveCount(0);
+    await expect(page.getByTestId("import-fields")).toContainText("byte for byte");
+    await expect(page.locator("#import-fields .import-edit")).toHaveCount(0);
+    await expect(page.locator("#import-fields .import-evidence")).toHaveCount(0);
+    const coverage = page.getByTestId(`import-coverage-${importSourceId("native-widget.md")}`);
+    expect(await coverage.getAttribute("data-mapped")).toBe(await coverage.getAttribute("data-total"));
+    const state = await page.evaluate(() => (window as unknown as { __verdiImport: { state: () => { request: string } } }).__verdiImport.state());
+    const previewed = await (
+      await page.request.post(at(base, "/design/import/preview"), { headers: { "Content-Type": "application/json" }, data: state.request })
+    ).json();
+    expect(previewed.candidate).toBe(previewed.sources[0].data);
+
+    const applied = await confirmAndApply(page);
+    expect(applied.status, JSON.stringify(applied.body)).toBe(200);
+    await expect(page.getByTestId("import-created")).toHaveAttribute("data-status", "created");
+    await page.getByTestId("import-record-link").click();
+    await expect(page.getByTestId("import-record")).toHaveAttribute("data-current-spec-matches", "true");
+    await expect(page.getByTestId(`record-source-${importSourceId("native-widget.md")}`)).toBeVisible();
+
+    // Explicit controls are refused for native, named by the validator.
+    await page.goBack();
+    await expect(page.getByTestId("import-form")).toBeVisible();
+    await addFiles(page, [SPEC_IMPORT_FILES.NATIVE]);
+    await page.locator("#import-format").selectOption("native");
+    await fillTarget(page, "native-widget", "Native Widget");
+    await addMapping(page, { target: "problem", text: "rewritten" });
+    expect(await preview(page)).toBe(400);
+    await expect(page.getByTestId("import-error")).toContainText("refuses explicit mappings");
+  });
+
+  test("manual: source spans and user-authored text with explicit evidence make a ready candidate; coverage counts exactly the mapped bytes", async ({ page }) => {
+    test.setTimeout(90_000);
+    const base = await importBase(page);
+    const bytes: Buffer = require("node:fs").readFileSync(SPEC_IMPORT_FILES.LABELED);
+    const problemStart = bytes.indexOf("Operators currently");
+    const problemEnd = bytes.indexOf("\n\n## Outcome");
+    const acText = "The importer reads a Markdown file.";
+    const acStart = bytes.indexOf(acText);
+    const acEnd = acStart + acText.length;
+    expect(problemStart).toBeGreaterThan(0);
+    expect(acStart).toBeGreaterThan(problemEnd);
+
+    await openImport(page, base);
+    const [sourceId] = await addFiles(page, [SPEC_IMPORT_FILES.LABELED]);
+    await page.locator("#import-format").selectOption("manual-v1");
+    await fillTarget(page, "manual-widget", "Manual Widget");
+    expect(await preview(page)).toBe(200);
+    await expectReady(page, false);
+    // No automatic fields at all: the statements are missing findings.
+    await expect(findings(page, "missing-statement")).toHaveCount(2);
+    await expect(page.locator("#import-fields article")).toHaveCount(0);
+
+    await addMapping(page, { target: "problem", source: sourceId, start: problemStart, end: problemEnd, transform: "identity" });
+    await addMapping(page, { target: "outcome", text: "Operators bring existing specs onto a board without retyping them." });
+    await addMapping(page, { target: "ac-1", source: sourceId, start: acStart, end: acEnd, transform: "identity", evidence: ["attestation"] });
+    await page.getByTestId("import-retain").check();
+    expect(await preview(page)).toBe(200);
+    await expectReady(page, true);
+    await expect(page.getByTestId("import-field-problem")).toHaveAttribute("data-origin", "copied-source");
+    await expect(page.getByTestId("import-field-text-problem")).toContainText("This wastes their afternoon.");
+    await expect(page.getByTestId("import-field-spans-problem")).toContainText(`[${problemStart},${problemEnd})`);
+    await expect(page.getByTestId("import-field-outcome")).toHaveAttribute("data-origin", "user-added");
+    await expect(page.getByTestId("import-field-spans-outcome")).toContainText("no source span");
+    await expect(page.getByTestId("import-field-ac-1")).toHaveAttribute("data-origin", "copied-source");
+    await expect(page.getByTestId("import-evidence-ac-1-attestation")).toBeChecked();
+    const coverage = page.getByTestId(`import-coverage-${sourceId}`);
+    await expect(coverage).toHaveAttribute("data-mapped", String(problemEnd - problemStart + (acEnd - acStart)));
+    await expect(coverage).toHaveAttribute("data-unresolved", "0");
+
+    const applied = await confirmAndApply(page);
+    expect(applied.status, JSON.stringify(applied.body)).toBe(200);
+    await page.getByTestId("import-record-link").click();
+    await expect(page.getByTestId("record-field-outcome")).toHaveAttribute("data-origin", "user-added");
+    await expect(page.getByTestId("record-field-ac-1")).toHaveAttribute("data-origin", "copied-source");
+    await expect(page.getByTestId("import-record")).toContainText("without retyping them");
+  });
+
+  test("story: tracker, parent and implements link are selected explicitly; a missing edge, a dangling ref and an unconfigured scheme are corrected in place", async ({ page }) => {
+    test.setTimeout(90_000);
+    const base = await importBase(page);
+    await openImport(page, base);
+    await addFiles(page, [SPEC_IMPORT_FILES.LABELED]);
+    await page.locator("#import-class").selectOption("story");
+    await fillTarget(page, "widget-story", "Widget Import");
+    await page.locator("#import-story").fill("bogus:WID-1");
+    await page.getByTestId("import-retain").check();
+    expect(await preview(page)).toBe(200);
+    await page.getByTestId("import-evidence-ac-1-static").check();
+    await page.getByTestId("import-evidence-all-ac-1").click();
+    expect(await preview(page)).toBe(200);
+    await expectReady(page, false);
+    await expect(page.locator("#import-findings li[data-blocking='true']").filter({ hasText: "implements edge" })).toHaveCount(1);
+
+    // A declared link to a parent that does not exist is refused by name.
+    await page.getByTestId("import-add-link").click();
+    const link = page.locator("#import-link-list li").last();
+    await link.locator(".import-link-type").selectOption("implements");
+    await link.locator(".import-link-ref").fill("spec/no-such-feature#ac-1");
+    expect(await preview(page)).toBe(200);
+    await expectReady(page, false);
+    await expect(page.locator("#import-findings li[data-blocking='true']").filter({ hasText: "VL-003" })).toHaveCount(1);
+
+    // The landed parent resolves; the tracker scheme is still unconfigured.
+    await link.locator(".import-link-ref").fill(`spec/${SPEC_IMPORT_PARENT_FEATURE}#ac-1`);
+    expect(await preview(page)).toBe(200);
+    await expectReady(page, false);
+    await expect(page.locator("#import-findings li[data-blocking='true']").filter({ hasText: "VL-003" })).toHaveCount(0);
+    await expect(page.locator("#import-findings li[data-blocking='true']").filter({ hasText: "VL-005" })).toHaveCount(1);
+
+    await page.locator("#import-story").fill(`${SPEC_IMPORT_TRACKER_SCHEME}:WID-1`);
+    expect(await preview(page)).toBe(200);
+    await expectReady(page, true);
+    const applied = await confirmAndApply(page);
+    expect(applied.status, JSON.stringify(applied.body)).toBe(200);
+    expect(applied.body.spec_ref).toBe("spec/widget-story");
+    await page.getByTestId("import-board-link").click();
+    await expect(page.getByTestId("board")).toHaveAttribute("data-board-mode", "authoring");
+    await expect(page.locator("body")).toContainText(SPEC_IMPORT_PARENT_FEATURE);
   });
 });

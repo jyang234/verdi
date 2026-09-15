@@ -13,11 +13,12 @@ import (
 // TestProvisionSpecImportStore_CleanMainWithProvableDefaultBranch proves
 // the fixture store is exactly the importer's precondition: a clean
 // checkout on main, a bare origin whose HEAD names main (synthetic
-// default-branch proof), the data zone ignored, and NO policy, model
-// override or forge/tracker configuration of any kind.
+// default-branch proof), the data zone ignored, the one synthetic tracker
+// provider and the one landed parent feature committed, and NO policy,
+// model override or forge configuration.
 func TestProvisionSpecImportStore_CleanMainWithProvableDefaultBranch(t *testing.T) {
 	ctx := context.Background()
-	root, err := provisionSpecImportStore(ctx)
+	root, err := provisionSpecImportStore(ctx, testModuleRoot)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -33,16 +34,29 @@ func TestProvisionSpecImportStore_CleanMainWithProvableDefaultBranch(t *testing.
 		t.Fatalf("origin/HEAD = %q, want refs/remotes/origin/main", head)
 	}
 	manifest, err := os.ReadFile(filepath.Join(root, ".verdi", "verdi.yaml"))
-	if err != nil || string(manifest) != emptyStoreManifest {
+	if err != nil || string(manifest) != specImportStoreManifest {
 		t.Fatalf("manifest = %q, %v", manifest, err)
 	}
-	for _, absent := range []string{"policy", "model.yaml", "specs"} {
+	for _, absent := range []string{"policy", "model.yaml"} {
 		if _, err := os.Stat(filepath.Join(root, ".verdi", absent)); err == nil {
 			t.Fatalf(".verdi/%s must not exist in the hermetic import store", absent)
 		}
 	}
-	if strings.Contains(string(manifest), "forge") || strings.Contains(string(manifest), "tracker") {
-		t.Fatalf("manifest configures a forge or tracker: %q", manifest)
+	if strings.Contains(string(manifest), "forge") {
+		t.Fatalf("manifest configures a forge: %q", manifest)
+	}
+	parent, err := gitOutput(ctx, root, "show", "main:.verdi/specs/active/"+specImportParentSlug+"/spec.md")
+	if err != nil || !strings.Contains(parent, "id: spec/"+specImportParentSlug) {
+		t.Fatalf("landed parent feature missing on main: %v\n%s", err, parent)
+	}
+}
+
+// TestProvisionSpecImportStore_Negative_MissingParentFixture: a module root
+// without the committed parent fixture is a disclosed error before any git
+// work, never a silently parentless store.
+func TestProvisionSpecImportStore_Negative_MissingParentFixture(t *testing.T) {
+	if _, err := provisionSpecImportStore(context.Background(), t.TempDir()); err == nil || !strings.Contains(err.Error(), "parent feature fixture") {
+		t.Fatalf("provisionSpecImportStore(no fixture) = %v, want the missing-fixture reason named", err)
 	}
 }
 
@@ -51,7 +65,7 @@ func TestProvisionSpecImportStore_CleanMainWithProvableDefaultBranch(t *testing.
 // descendant commit, leaving the serving checkout on a clean main.
 func TestSpecImportFixture_TamperTruncatesRecordOnBranchOnly(t *testing.T) {
 	ctx := context.Background()
-	root, err := provisionSpecImportStore(ctx)
+	root, err := provisionSpecImportStore(ctx, testModuleRoot)
 	if err != nil {
 		t.Fatal(err)
 	}

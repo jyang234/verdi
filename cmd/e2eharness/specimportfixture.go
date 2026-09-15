@@ -58,6 +58,32 @@ var specImportSlugRe = regexp.MustCompile(`^[a-z0-9]+(?:-[a-z0-9]+)*$`)
 // on verdi's own runtime state.
 const specImportStoreGitignore = "data/\n"
 
+// specImportStoreManifest is the layout manifest plus ONE synthetic tracker
+// provider — the exact shape internal/specimport/compose_external_test.go's
+// trackerManifestYAML gives its story fixtures, because VL-005 requires a
+// configured scheme before a story's tracker ref counts. Test-only: the
+// base URL is never contacted (lint checks configuration, not reachability),
+// and no forge, model override or policy is configured.
+const specImportStoreManifest = "schema: verdi.layout/v1\n" +
+	"providers:\n" +
+	"  jira:\n" +
+	"    base_url: https://example.atlassian.net\n" +
+	"    rollup_field: customfield_00000\n"
+
+// specImportTrackerScheme/specImportParentSlug name the synthetic tracker
+// scheme and the landed parent feature the browser's story import
+// implements. Mirrored by e2e/tests/fixtures.ts; change them together.
+const (
+	specImportTrackerScheme = "jira"
+	specImportParentSlug    = "widget-parent"
+)
+
+// specImportParentSpecRel is the committed parent feature fixture (a
+// statusless landed feature with one criterion), read from the module root
+// exactly like unprovenBoardSpecRel — shared with internal/workbench's own
+// handler tests so both suites implement the same parent.
+var specImportParentSpecRel = filepath.Join("internal", "workbench", "testdata", "specimport", "parent-feature.md")
+
 type specImportFixture struct {
 	moduleRoot string
 
@@ -93,13 +119,15 @@ func (f *specImportFixture) handler(w http.ResponseWriter, r *http.Request) {
 // browser suite asserts (a manifest-only store, no policy, no model
 // override, no forge/tracker/provider configuration, a hermetic child env).
 type specImportFixtureInfo struct {
-	URL           string   `json:"url"`
-	Manifest      string   `json:"manifest"`
-	PolicyAdopted bool     `json:"policy_adopted"`
-	ModelOverride bool     `json:"model_override"`
-	StrippedEnv   []string `json:"stripped_env"`
-	Branch        string   `json:"branch"`
-	Porcelain     string   `json:"porcelain"`
+	URL              string   `json:"url"`
+	Manifest         string   `json:"manifest"`
+	PolicyAdopted    bool     `json:"policy_adopted"`
+	ModelOverride    bool     `json:"model_override"`
+	SyntheticTracker string   `json:"synthetic_tracker"`
+	ParentFeature    string   `json:"parent_feature"`
+	StrippedEnv      []string `json:"stripped_env"`
+	Branch           string   `json:"branch"`
+	Porcelain        string   `json:"porcelain"`
 }
 
 func (f *specImportFixture) infoHandler(w http.ResponseWriter, r *http.Request) {
@@ -133,13 +161,15 @@ func (f *specImportFixture) infoHandler(w http.ResponseWriter, r *http.Request) 
 	_, policyErr := os.Stat(filepath.Join(root, ".verdi", "policy"))
 	_, modelErr := os.Stat(filepath.Join(root, ".verdi", "model.yaml"))
 	info := specImportFixtureInfo{
-		URL:           url,
-		Manifest:      string(manifest),
-		PolicyAdopted: policyErr == nil,
-		ModelOverride: modelErr == nil,
-		StrippedEnv:   append(append([]string{}, serveInjectionEnvVars...), ciEnvVars...),
-		Branch:        branch,
-		Porcelain:     porcelain,
+		URL:              url,
+		Manifest:         string(manifest),
+		PolicyAdopted:    policyErr == nil,
+		ModelOverride:    modelErr == nil,
+		SyntheticTracker: specImportTrackerScheme,
+		ParentFeature:    specImportParentSlug,
+		StrippedEnv:      append(append([]string{}, serveInjectionEnvVars...), ciEnvVars...),
+		Branch:           branch,
+		Porcelain:        porcelain,
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(info)
@@ -250,7 +280,7 @@ func (f *specImportFixture) ensureStarted(ctx context.Context) (string, error) {
 		return f.url, nil
 	}
 
-	root, err := provisionSpecImportStore(ctx)
+	root, err := provisionSpecImportStore(ctx, f.moduleRoot)
 	if err != nil {
 		return "", err
 	}
@@ -306,11 +336,18 @@ func (f *specImportFixture) stop() {
 }
 
 // provisionSpecImportStore builds the real minimal store and returns its
-// root: git init on main, one commit of the manifest and the data-zone
-// gitignore, a committed identity for the board's commit affordance, and a
-// bare local origin whose HEAD names main (the synthetic default-branch
-// proof). The checkout is left clean on main — the importer's precondition.
-func provisionSpecImportStore(ctx context.Context) (string, error) {
+// root: git init on main, one commit of the manifest (layout plus the one
+// synthetic tracker provider), the data-zone gitignore and the landed
+// parent feature (specImportParentSpecRel, read from moduleRoot), a
+// committed identity for the board's commit affordance, and a bare local
+// origin whose HEAD names main (the synthetic default-branch proof). The
+// checkout is left clean on main — the importer's precondition. No policy,
+// model override or forge is configured.
+func provisionSpecImportStore(ctx context.Context, moduleRoot string) (string, error) {
+	parent, err := os.ReadFile(filepath.Join(moduleRoot, specImportParentSpecRel))
+	if err != nil {
+		return "", fmt.Errorf("reading spec-import parent feature fixture: %w", err)
+	}
 	tmp, err := os.MkdirTemp("", "verdi-e2e-spec-import-*")
 	if err != nil {
 		return "", err
@@ -321,10 +358,17 @@ func provisionSpecImportStore(ctx context.Context) (string, error) {
 	if err := os.MkdirAll(filepath.Join(root, ".verdi"), 0o755); err != nil {
 		return "", err
 	}
-	if err := os.WriteFile(filepath.Join(root, ".verdi", "verdi.yaml"), []byte(emptyStoreManifest), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(root, ".verdi", "verdi.yaml"), []byte(specImportStoreManifest), 0o644); err != nil {
 		return "", err
 	}
 	if err := os.WriteFile(filepath.Join(root, ".verdi", ".gitignore"), []byte(specImportStoreGitignore), 0o644); err != nil {
+		return "", err
+	}
+	parentDir := filepath.Join(root, ".verdi", "specs", "active", specImportParentSlug)
+	if err := os.MkdirAll(parentDir, 0o755); err != nil {
+		return "", err
+	}
+	if err := os.WriteFile(filepath.Join(parentDir, "spec.md"), parent, 0o644); err != nil {
 		return "", err
 	}
 	if err := runGit(ctx, root, nil, "init", "--quiet", "--initial-branch=main"); err != nil {
@@ -341,7 +385,7 @@ func provisionSpecImportStore(ctx context.Context) (string, error) {
 	if err := runGit(ctx, root, nil, "add", "-A"); err != nil {
 		return "", err
 	}
-	if err := runGit(ctx, root, nil, "commit", "--quiet", "--no-verify", "-m", "spec-import store: manifest only, zero specs, no policy"); err != nil {
+	if err := runGit(ctx, root, nil, "commit", "--quiet", "--no-verify", "-m", "spec-import store: manifest with a synthetic tracker, one landed parent feature, no policy"); err != nil {
 		return "", err
 	}
 

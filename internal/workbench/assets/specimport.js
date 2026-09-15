@@ -641,7 +641,11 @@
     (result.fields || []).forEach(function (f) {
       fieldsEl.appendChild(renderField(f, editable));
     });
-    if (!(result.fields || []).length) fieldsEl.appendChild(el("p", { class: "empty" }, "No fields resolved yet."));
+    if (!(result.fields || []).length) {
+      fieldsEl.appendChild(el("p", { class: "empty" }, editable
+        ? "No fields resolved yet."
+        : "Native import: the candidate is the primary source byte for byte, so there are no per-field mappings to show or edit."));
+    }
 
     clear(coverageBody);
     (result.coverage || []).forEach(function (c) {

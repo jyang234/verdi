@@ -892,6 +892,10 @@ export const SPEC_IMPORT_FILES = {
   AMBIGUOUS: path.join(specImportInputRoot, "markdown", "duplicate-label.md"),
   // Markup inside the source: the render-as-text case.
   XSS: path.resolve(__dirname, "..", "..", "internal", "workbench", "testdata", "specimport", "xss.md"),
+  // The exact eligible native primary (internal/specimport's own
+  // newSpecNativeFixture bytes): imports byte-identically as
+  // spec/native-widget, refuses any other target identity.
+  NATIVE: path.resolve(__dirname, "..", "..", "internal", "workbench", "testdata", "specimport", "native-widget.md"),
   // The pinned F13 inputs: the bound primary and its four whole retained
   // supports.
   F13_PRIMARY: path.join(specImportInputRoot, "f13", "primary-f13.md"),
@@ -907,6 +911,13 @@ export const SPEC_IMPORT_FILES = {
 // account for once (spec-import-contract: "2409 primary bytes accounted
 // once").
 export const SPEC_IMPORT_F13_PRIMARY_BYTES = 2409;
+
+// The isolated import store's synthetic, test-only story fixtures
+// (cmd/e2eharness/specimportfixture.go; BINDING: mirrored verbatim there):
+// the one configured tracker scheme VL-005 accepts and the landed parent
+// feature a story import implements. No real tracker is ever contacted.
+export const SPEC_IMPORT_TRACKER_SCHEME = "jira";
+export const SPEC_IMPORT_PARENT_FEATURE = "widget-parent";
 
 // The import page and the read-only record view's addresses.
 export function importPagePath(): string {
