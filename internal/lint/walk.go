@@ -42,6 +42,16 @@ import (
 // content grammar is exactly constitution/consumers.json and remains owned by
 // internal/constitutionimpact; VL-007 admits only the top-level directory and
 // does not create a second content decoder.
+//
+// "imports" is spec-import's non-authoritative provenance area
+// (spec-import-contract.md: ".verdi/imports is an admitted top-level
+// provenance area, ignored by artifact index classification, lint.
+// BuildSnapshot's document walk and Snapshot.ByRef"). Only the top-level
+// directory is admitted here; classifyArtifactPath/artifact.ClassifyPath
+// already excludes every path beneath it from the document walk (no
+// existing case matches an "imports/" prefix), so this entry adds no new
+// content decoder and never reclassifies a retained source sidecar as a
+// corpus artifact.
 var knownTopLevelEntries = map[string]bool{
 	"verdi.yaml":     true,
 	".gitignore":     true,
@@ -57,6 +67,7 @@ var knownTopLevelEntries = map[string]bool{
 	"constitution":   true,
 	"bin":            true,
 	"data":           true,
+	"imports":        true,
 }
 
 // classifyArtifactPath maps a .verdi/-relative slash path to the artifact
