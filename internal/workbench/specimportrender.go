@@ -129,6 +129,11 @@ func renderSpecImportPage(mdl *model.Model) ([]byte, error) {
 	b.WriteString(`</form>`)
 
 	b.WriteString(`<section id="import-error" data-testid="import-error" class="import-error notice" role="alert" hidden></section>`)
+	// The lost-response recovery (a creation request that was sent but
+	// whose answer never arrived): the same request bytes and digest can be
+	// resent visibly while the inputs are unchanged; the server reconciles
+	// an already-made publication to already-created, never a duplicate.
+	b.WriteString(`<section id="import-retry" data-testid="import-retry" class="import-retry notice" role="alert" hidden><p id="import-retry-note"></p><button type="button" id="import-retry-btn" data-testid="import-retry-btn">Retry the same request</button></section>`)
 
 	b.WriteString(`<section id="import-result" data-testid="import-result" class="import-result" data-stale="false" data-ready="false" hidden>`)
 	b.WriteString(`<h2>Preview</h2>`)

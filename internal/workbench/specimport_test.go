@@ -271,7 +271,7 @@ func TestSpecImport_HomeAndPageDiscoverable(t *testing.T) {
 		`id="import-slug"`, `id="import-class"`, `id="import-title"`, `id="import-story"`,
 		`id="import-retain"`, `id="import-defer"`,
 		`id="import-mapping-list"`, `id="import-add-mapping"`, `id="import-link-list"`, `id="import-add-link"`,
-		`id="import-preview-btn"`, `id="import-confirm"`, `id="import-apply-btn"`, `id="import-next-action"`,
+		`id="import-preview-btn"`, `id="import-confirm"`, `id="import-apply-btn"`, `id="import-next-action"`, `id="import-retry-btn"`,
 		`id="import-findings"`, `id="import-fields"`, `id="import-coverage"`,
 		`src="/assets/specimport.js"`,
 	} {

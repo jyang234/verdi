@@ -47,6 +47,9 @@
   var confirmEl = $("import-confirm");
   var applyBtn = $("import-apply-btn");
   var createdEl = $("import-created");
+  var retryEl = $("import-retry");
+  var retryNote = $("import-retry-note");
+  var retryBtn = $("import-retry-btn");
 
   var EVIDENCE_KINDS = ["static", "behavioral", "runtime", "attestation"];
   var TRANSFORMS = ["identity", "trim-blank-lines", "collapse-whitespace", "list-item"];
@@ -87,7 +90,13 @@
     epoch: 0,
     previewSeq: 0,
     preview: null, // {result, request, epoch}
+    // created: the last publication outcome {result, epoch}; it stays
+    // visible (marked stale) across later edits — a publication is never
+    // silently forgotten on this page.
     created: null,
+    // applyAttempt: the one creation request in flight or whose response
+    // was lost {epoch, digest, request, status: "in-flight"|"lost"}.
+    applyAttempt: null,
   };
 
   // -- helpers --------------------------------------------------------------
@@ -160,11 +169,21 @@
   // panel is retired.
   function invalidate() {
     state.epoch++;
-    state.created = null;
     confirmEl.checked = false;
     confirmEl.disabled = true;
     applyBtn.disabled = true;
-    createdEl.hidden = true;
+    if (state.created) {
+      // A publication already made is kept on the page, marked stale
+      // relative to the edited inputs — never hidden.
+      createdEl.setAttribute("data-stale", "true");
+    }
+    if (state.applyAttempt && state.applyAttempt.status === "lost") {
+      // The same request can no longer be retried as-is; the unknown
+      // outcome is still named, never dropped.
+      retryBtn.disabled = true;
+      retryNote.textContent = lostNote(state.applyAttempt) +
+        " The inputs changed since that attempt, so it cannot be retried as-is and its outcome is still unknown: preview again — creating under that name answers already-created if it was published, or target-exists.";
+    }
     if (state.preview) {
       resultEl.setAttribute("data-stale", "true");
       staleNote.hidden = false;
@@ -181,13 +200,35 @@
     }
     return n;
   }
+  function specRefOf(attemptOrRequest) {
+    try {
+      var req = JSON.parse(attemptOrRequest.request);
+      return "spec/" + req.target.slug;
+    } catch (e) {
+      return "the spec";
+    }
+  }
+  function lostNote(attempt) {
+    return "The response to the creation request for " + specRefOf(attempt) + " was lost after the request was sent" +
+      (attempt.error ? " (" + attempt.error + ")" : "") + ", so its outcome is unknown: the server may already have created it.";
+  }
   function setNextAction(text) {
     if (text) {
       nextAction.textContent = text;
       return;
     }
-    if (state.created) {
+    var attempt = state.applyAttempt;
+    if (attempt && attempt.status === "in-flight") {
+      nextAction.textContent = "Creating… an edit now does not cancel the request; its outcome will be reported here.";
+    } else if (attempt && attempt.status === "lost" && attempt.epoch === state.epoch) {
+      nextAction.textContent = "The creation request's outcome is unknown. Retry the same request: an already-created answer means it was published; nothing is duplicated.";
+    } else if (attempt && attempt.status === "lost") {
+      nextAction.textContent = "An earlier creation request's outcome is unknown and the inputs changed since — preview again; a same-name creation answers already-created or target-exists.";
+    } else if (state.created && state.created.epoch === state.epoch) {
       nextAction.textContent = "Created. Open the board to continue, or the source record to inspect the original copied content.";
+    } else if (state.created) {
+      var res = state.created.result;
+      nextAction.textContent = "An earlier request created " + res.spec_ref + " on " + res.branch + "; your current edits are not part of it. To create another proposal, use a new name and preview again.";
     } else if (state.sources.length === 0) {
       nextAction.textContent = "Add at least one source file, then preview.";
     } else if (!state.preview) {
@@ -560,6 +601,16 @@
     var detail = (failure && (failure.error || failure.message)) || "no detail";
     errorEl.setAttribute("data-code", code);
     errorEl.textContent = "Refused (" + code + "): " + detail + (ERROR_GUIDANCE[code] ? " — " + ERROR_GUIDANCE[code] : "");
+    if (code === "target-exists") {
+      // The existing proposal under that name is one click away — the
+      // discoverable path when an earlier attempt on this page may have
+      // been the one that created it.
+      var slug = $("import-slug").value.trim();
+      if (slug) {
+        errorEl.appendChild(document.createTextNode(" "));
+        errorEl.appendChild(el("a", { href: "/b/" + encodeURIComponent("design/" + slug) + "/board/spec/" + encodeURIComponent(slug), "data-testid": "import-existing-board-link" }, "Open the existing board for spec/" + slug));
+      }
+    }
     errorEl.hidden = false;
   }
   function parseJSON(text) {
@@ -791,19 +842,35 @@
     applyBtn.disabled = !(confirmEl.checked && previewCurrent() && state.preview.result.ready);
     setNextAction();
   });
-  applyBtn.addEventListener("click", function () {
-    if (!previewCurrent() || !state.preview.result.ready || !confirmEl.checked) return;
-    var epoch = state.epoch;
-    var digest = state.preview.result.digest;
-    var body = state.preview.request; // the exact bytes previewed, never rebuilt
+  // sendApply posts one creation attempt: the exact previewed bytes and
+  // digest, never rebuilt. A response that arrives after an edit is still
+  // reported (marked late); a lost response leaves the attempt retryable
+  // while the inputs are unchanged.
+  function sendApply(attempt) {
     hideError();
+    retryEl.hidden = true;
     applyBtn.disabled = true;
-    setNextAction("Creating…");
-    post("/design/import/apply", body, { "X-Verdi-Import-Preview": digest })
+    attempt.status = "in-flight";
+    attempt.error = "";
+    state.applyAttempt = attempt;
+    setNextAction();
+    post("/design/import/apply", attempt.request, { "X-Verdi-Import-Preview": attempt.digest })
       .then(function (r) {
-        if (epoch !== state.epoch) return;
-        if (r.status !== 200) {
-          showError(r.data);
+        if (state.applyAttempt !== attempt) return;
+        state.applyAttempt = null;
+        var late = attempt.epoch !== state.epoch;
+        if (r.status === 200) {
+          state.created = { result: r.data, epoch: attempt.epoch };
+          renderCreated(r.data, late);
+          if (!late) {
+            confirmEl.disabled = true;
+            applyBtn.disabled = true;
+          }
+          setNextAction();
+          return;
+        }
+        showError(r.data);
+        if (!late) {
           if (r.data && (r.data.code === "stale-preview" || r.data.code === "dirty-context" || r.data.code === "unresolved")) {
             resultEl.setAttribute("data-stale", "true");
             staleNote.hidden = false;
@@ -812,28 +879,42 @@
           } else {
             applyBtn.disabled = !confirmEl.checked;
           }
-          setNextAction();
-          return;
         }
-        state.created = r.data;
-        renderCreated(r.data);
-        confirmEl.disabled = true;
-        applyBtn.disabled = true;
         setNextAction();
       })
       .catch(function (err) {
-        if (epoch !== state.epoch) return;
-        showError({ code: "transport", error: err.message + ". Nothing favorable is assumed; preview again and retry." });
+        if (state.applyAttempt !== attempt) return;
+        // The request may have reached the server: its outcome is unknown,
+        // and it is retryable as the SAME request while nothing changed.
+        attempt.status = "lost";
+        attempt.error = err.message;
+        retryNote.textContent = lostNote(attempt) + " Retry the same confirmed preview: an already-created answer means it did, and nothing is duplicated.";
+        retryBtn.disabled = attempt.epoch !== state.epoch;
+        retryEl.hidden = false;
         setNextAction();
       });
+  }
+  applyBtn.addEventListener("click", function () {
+    if (!previewCurrent() || !state.preview.result.ready || !confirmEl.checked) return;
+    if (state.applyAttempt && state.applyAttempt.status === "in-flight") return;
+    sendApply({ epoch: state.epoch, digest: state.preview.result.digest, request: state.preview.request, status: "in-flight", error: "" });
+  });
+  retryBtn.addEventListener("click", function () {
+    var attempt = state.applyAttempt;
+    if (!attempt || attempt.status !== "lost" || attempt.epoch !== state.epoch) return;
+    sendApply(attempt);
   });
 
-  function renderCreated(res) {
+  function renderCreated(res, late) {
     createdEl.hidden = false;
     createdEl.setAttribute("data-status", res.status || "");
+    createdEl.setAttribute("data-late", late ? "true" : "false");
+    createdEl.removeAttribute("data-stale");
     var typed = "spec/" + $("import-slug").value.trim();
     var summary = (res.status === "already-created" ? "Already created earlier: " : "Created: ") + res.spec_ref + " on branch " + res.branch + " at commit " + res.commit + ", from preview " + res.preview_digest + ".";
-    if (res.spec_ref !== typed) {
+    if (late) {
+      summary = "Created earlier, for the inputs previewed before your latest edits: " + res.spec_ref + " on branch " + res.branch + " at commit " + res.commit + ", from preview " + res.preview_digest + ". Your current edits are not part of that proposal.";
+    } else if (res.spec_ref !== typed) {
       summary += " Note: the published name " + res.spec_ref + " differs from the name typed here (" + typed + ").";
     } else {
       summary += " The name is exactly the one you confirmed; nothing was renamed.";
