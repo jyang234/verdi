@@ -138,7 +138,7 @@ func cmdDesignImportPreview(args []string, stdout, stderr io.Writer) int {
 
 	raw, err := readDesignImportRequest(requestPath, os.Stdin)
 	if err != nil {
-		return renderDesignImportUsageError(stderr, "preview", err)
+		return renderDesignImportServiceError(stderr, "preview", err)
 	}
 	req, err := specimport.DecodeRequest(raw)
 	if err != nil {
@@ -205,7 +205,7 @@ func cmdDesignImportApply(args []string, stdout, stderr io.Writer) int {
 
 	raw, err := readDesignImportRequest(requestPath, os.Stdin)
 	if err != nil {
-		return renderDesignImportUsageError(stderr, "apply", err)
+		return renderDesignImportServiceError(stderr, "apply", err)
 	}
 	req, err := specimport.DecodeRequest(raw)
 	if err != nil {
@@ -307,33 +307,50 @@ func parseDesignImportFlags(args []string, names ...string) (map[string]string, 
 // from designmutate's own 1 MiB draft-mutation request limit
 // (draftmutation.MaxRequestBytes), so this never reuses
 // readDesignMutationRequest's reader or limit.
+//
+// Every failure is classified by wrapping one of the SAME two specimport
+// sentinels the rest of this file's error table already maps, so
+// renderDesignImportServiceError gives it the contract's own wire code and
+// exit (spec-import-contract.md, "Errors and browser behavior": these are
+// distinct operational exit-2 codes, and its HTTP row maps "malformed
+// inputs to 400, oversized to 413 … operational I/O to 500"):
+//
+//   - ErrIOFailure for a fault reaching the bytes at all — opening,
+//     reading or closing the file, or an unusable stdin. This is the same
+//     answer ReadSource already gives a missing source file and
+//     store.FindRoot already gives an unresolvable root.
+//   - ErrInvalidRequest for an envelope that was read perfectly well and
+//     is simply too big, matching DecodeRequest's own wrapping of the same
+//     size cap (internal/specimport/codec.go).
+//
+// No new vocabulary: both codes, and the detail text, are unchanged.
 func readDesignImportRequest(path string, stdin io.Reader) (_ []byte, resultErr error) {
 	var reader io.Reader
 	var file *os.File
 	if path == "-" {
 		if stdin == nil {
-			return nil, errors.New("reading request from stdin: stdin is unavailable")
+			return nil, fmt.Errorf("%w: reading request from stdin: stdin is unavailable", specimport.ErrIOFailure)
 		}
 		reader = stdin
 	} else {
 		var err error
 		file, err = os.Open(path)
 		if err != nil {
-			return nil, fmt.Errorf("opening request %q: %w", path, err)
+			return nil, fmt.Errorf("%w: opening request %q: %w", specimport.ErrIOFailure, path, err)
 		}
 		defer func() {
 			if closeErr := file.Close(); closeErr != nil && resultErr == nil {
-				resultErr = fmt.Errorf("closing request %q: %w", path, closeErr)
+				resultErr = fmt.Errorf("%w: closing request %q: %w", specimport.ErrIOFailure, path, closeErr)
 			}
 		}()
 		reader = file
 	}
 	raw, err := io.ReadAll(io.LimitReader(reader, specimport.MaxEnvelopeBytes+1))
 	if err != nil {
-		return nil, fmt.Errorf("reading request: %w", err)
+		return nil, fmt.Errorf("%w: reading request: %w", specimport.ErrIOFailure, err)
 	}
 	if len(raw) > specimport.MaxEnvelopeBytes {
-		return nil, fmt.Errorf("request exceeds %d bytes", specimport.MaxEnvelopeBytes)
+		return nil, fmt.Errorf("%w: request exceeds %d bytes", specimport.ErrInvalidRequest, specimport.MaxEnvelopeBytes)
 	}
 	return raw, nil
 }
@@ -358,7 +375,9 @@ func writeDesignImportResult(stdout, stderr io.Writer, op string, result any) in
 // renderDesignImportUsageError renders a CLI-local refusal (flag parsing,
 // actor construction, malformed --preview shape) that never reached
 // specimport at all: these are always the operational invalid-request
-// code at exit 2.
+// code at exit 2. A filesystem fault while reading the request envelope is
+// none of the three — readDesignImportRequest classifies those itself and
+// renders through renderDesignImportServiceError.
 func renderDesignImportUsageError(stderr io.Writer, op string, err error) int {
 	fmt.Fprintf(stderr, "design import %s: invalid-request: %s\n", op, err)
 	return 2
@@ -410,8 +429,9 @@ var designImportSentinels = []designImportSentinel{
 	{specimport.ErrProvenanceMismatch, "provenance-mismatch", 1},
 }
 
-// renderDesignImportServiceError maps err — always an error one of this
-// file's specimport calls returned — to its contract wire code and CLI
+// renderDesignImportServiceError maps err — an error one of this file's
+// specimport calls returned, or one readDesignImportRequest classified
+// with the same sentinels — to its contract wire code and CLI
 // exit classification via errors.Is against designImportSentinels,
 // preserving the sentinel's own appended detail text (the shared refusal
 // reasons carry the correction guidance, e.g. the policy mode that forbids
