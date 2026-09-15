@@ -325,7 +325,10 @@ admission does not mean classifying retained files as corpus artifacts.
 The context compiler's separate HEAD-tree repository-file channel must also
 exclude paths beneath `.verdi/imports/` before reading their bytes. Under SI-200,
 add `spec-import-sidecar` to its closed exclusion-reason vocabulary and record
-these candidates in the excluded partition. Preserve worktree-overlay precedence,
+these candidates in the excluded partition. This SI-200 clause supplements
+[the context-compiler authority design, §5.2](2026-08-11-context-compiler-authority-design.md):
+its closed v1 enum gains this one member; all existing members and fail-closed
+decoding remain. Preserve worktree-overlay precedence,
 the existing ASD `design-provenance-sidecar` reason, and ordinary neighboring
 paths. Implement this in the existing classifier; do not add a context builder or
 silently omit candidates from the partition. This fixes the execution seam for
