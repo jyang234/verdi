@@ -67,6 +67,10 @@ const (
 	dispositionsDir   = "dispositions"
 	cacheDir          = "cache"
 
+	importsDir       = "imports"
+	importSourcesDir = "sources"
+	importRecordFile = "record.json"
+
 	specFile                 = "spec.md"
 	designProvenanceFile     = "design-provenance.jsonl"
 	deviationReportFile      = "deviation-report.md"
@@ -330,7 +334,56 @@ func DerivedSpecDir(root, refSlug string) string {
 	return filepath.Join(DerivedRoot(root), refSlug)
 }
 
+// ImportDir is a spec-import's non-authoritative provenance directory under
+// root: <root>/.verdi/imports/<slug>/<previewDigest>/ (spec-import-
+// contract.md, "Preview, identity and atomic publication": "Commit only
+// .verdi/specs/active/<slug>/spec.md plus .verdi/imports/<slug>/
+// <preview-digest>/record.json and .verdi/imports/<slug>/<preview-digest>/
+// sources/<source-id>.md"). Like AttestationDir/WaiverDir, this is a pure
+// join helper: slug and previewDigest are validated by their own callers
+// (Request.Validate's bare-slug grammar; Preview's own sha256 computation),
+// never re-validated here.
+func ImportDir(root, slug, previewDigest string) string {
+	return filepath.Join(root, verdiDir, importsDir, slug, previewDigest)
+}
+
+// ImportRecordPath is the import's record.json inside ImportDir.
+func ImportRecordPath(root, slug, previewDigest string) string {
+	return filepath.Join(ImportDir(root, slug, previewDigest), importRecordFile)
+}
+
+// ImportSourceDir is the import's retained-source sidecar directory inside
+// ImportDir.
+func ImportSourceDir(root, slug, previewDigest string) string {
+	return filepath.Join(ImportDir(root, slug, previewDigest), importSourcesDir)
+}
+
+// ImportSourcePath is one retained source's sidecar file:
+// <ImportSourceDir>/<sourceID>.md.
+func ImportSourcePath(root, slug, previewDigest, sourceID string) string {
+	return filepath.Join(ImportSourceDir(root, slug, previewDigest), sourceID+".md")
+}
+
 // --- store-relative (slash-canonical, .verdi-rooted) ---
+
+// ImportDirRelPath is ImportDir's store-relative, slash-canonical form —
+// the Git tree-path prefix Apply's write set and ReadRecord's discovery
+// walk both use.
+func ImportDirRelPath(slug, previewDigest string) string {
+	return path.Join(verdiDir, importsDir, slug, previewDigest)
+}
+
+// ImportRecordRelPath is ImportRecordPath's store-relative, slash-canonical
+// form: the one committed record.json Git tree path for (slug, previewDigest).
+func ImportRecordRelPath(slug, previewDigest string) string {
+	return path.Join(ImportDirRelPath(slug, previewDigest), importRecordFile)
+}
+
+// ImportSourceRelPath is ImportSourcePath's store-relative, slash-canonical
+// form.
+func ImportSourceRelPath(slug, previewDigest, sourceID string) string {
+	return path.Join(ImportDirRelPath(slug, previewDigest), importSourcesDir, sourceID+".md")
+}
 
 // SpecDirRelPath is SpecDir's store-relative, slash-canonical form:
 // ".verdi/specs/<zone>/<name>" — the directory prefix a quartet-file path

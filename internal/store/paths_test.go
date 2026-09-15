@@ -393,3 +393,80 @@ func TestPolicyConflictCachePath_EmptyRootDisplayForm(t *testing.T) {
 		t.Errorf("PolicyConflictCachePath(\"\", …) = %q, want %q", got, want)
 	}
 }
+
+// TestImportPaths locks the spec-import provenance area's host-native forms
+// (spec-import-contract.md: "Commit only .verdi/specs/active/<slug>/spec.md
+// plus .verdi/imports/<slug>/<preview-digest>/record.json and
+// .verdi/imports/<slug>/<preview-digest>/sources/<source-id>.md").
+func TestImportPaths(t *testing.T) {
+	const root = "/store"
+	tests := []struct {
+		name      string
+		got       string
+		wantSlash string
+	}{
+		{"ImportDir", ImportDir(root, "widget", "abc123"), "/store/.verdi/imports/widget/abc123"},
+		{"ImportRecordPath", ImportRecordPath(root, "widget", "abc123"), "/store/.verdi/imports/widget/abc123/record.json"},
+		{"ImportSourceDir", ImportSourceDir(root, "widget", "abc123"), "/store/.verdi/imports/widget/abc123/sources"},
+		{"ImportSourcePath", ImportSourcePath(root, "widget", "abc123", "src-one"), "/store/.verdi/imports/widget/abc123/sources/src-one.md"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			want := filepath.FromSlash(tt.wantSlash)
+			if tt.got != want {
+				t.Errorf("got %q, want %q", tt.got, want)
+			}
+		})
+	}
+}
+
+// TestImportRelPaths is TestImportPaths' store-relative, slash-canonical
+// twin, mirroring every other family's *RelPath convention.
+func TestImportRelPaths(t *testing.T) {
+	tests := []struct {
+		name string
+		got  string
+		want string
+	}{
+		{"ImportDirRelPath", ImportDirRelPath("widget", "abc123"), ".verdi/imports/widget/abc123"},
+		{"ImportRecordRelPath", ImportRecordRelPath("widget", "abc123"), ".verdi/imports/widget/abc123/record.json"},
+		{"ImportSourceRelPath", ImportSourceRelPath("widget", "abc123", "src-one"), ".verdi/imports/widget/abc123/sources/src-one.md"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if tt.got != tt.want {
+				t.Errorf("got %q, want %q", tt.got, tt.want)
+			}
+			if strings.ContainsRune(tt.got, '\\') {
+				t.Errorf("relative path %q must be slash-canonical, contains a backslash", tt.got)
+			}
+		})
+	}
+}
+
+// TestImportPaths_RelIsSlashOfAbsBelowRoot is TestRelIsSlashOfAbsBelowRoot's
+// own case for the import provenance family.
+func TestImportPaths_RelIsSlashOfAbsBelowRoot(t *testing.T) {
+	const root = "/store"
+	cases := []struct {
+		name string
+		abs  string
+		rel  string
+	}{
+		{"importdir", ImportDir(root, "widget", "abc123"), ImportDirRelPath("widget", "abc123")},
+		{"importrecord", ImportRecordPath(root, "widget", "abc123"), ImportRecordRelPath("widget", "abc123")},
+		{"importsourcedir", ImportSourceDir(root, "widget", "abc123"), ImportDirRelPath("widget", "abc123") + "/sources"},
+		{"importsource", ImportSourcePath(root, "widget", "abc123", "src-one"), ImportSourceRelPath("widget", "abc123", "src-one")},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			rel, ok := strings.CutPrefix(filepath.ToSlash(c.abs), "/store/")
+			if !ok {
+				t.Fatalf("absolute %q not rooted under /store/", c.abs)
+			}
+			if rel != c.rel {
+				t.Errorf("relative form %q != slash(abs) below root %q", c.rel, rel)
+			}
+		})
+	}
+}
