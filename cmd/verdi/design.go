@@ -48,7 +48,11 @@ import (
 const designVerbUsage = "usage: verdi design start [<ref>] --kind feature|story --name <name> | " + // vocab:identity — CLI usage/flag grammar (--kind enum values, identity)
 	"verdi design mutate --request <path|-> --harness <id> [--session <id>] | " +
 	"verdi design board <spec-ref> | verdi design context <spec-ref> [--child-story <ref>]... | " + // vocab:identity — CLI usage/flag grammar (--child-story flag name, identity)
-	"verdi design capabilities <spec-ref> | verdi design provenance <spec-ref> | verdi design review <spec-ref>"
+	"verdi design capabilities <spec-ref> | verdi design provenance <spec-ref> | verdi design review <spec-ref> | " +
+	"verdi design import source --root <directory> --file <relative-path> [--start-line <n> --end-line <n>] | " +
+	"verdi design import preview --request <path|-> | " +
+	"verdi design import apply --request <path|-> --preview <sha256> --harness <id> [--session <id>] | " +
+	"verdi design import record --branch <branch> --spec <slug>"
 
 // runDesignVerb dispatches the scaffold `start` adapter, ASD's structured
 // `mutate` adapter, and the five read-only ASD adapters
@@ -75,6 +79,8 @@ func runDesignVerb(args []string, stdout, stderr io.Writer) int {
 		return cmdDesignProvenance(args[1:], stdout, stderr)
 	case "review":
 		return cmdDesignReview(args[1:], stdout, stderr)
+	case "import":
+		return cmdDesignImport(args[1:], stdout, stderr)
 	default:
 		// vocab:identity — CLI usage/flag grammar (--kind enum values, identity)
 		fmt.Fprintln(stderr, designVerbUsage)
