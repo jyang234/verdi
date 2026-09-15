@@ -125,6 +125,12 @@ func RegisterRoutesWithHome(mux *http.ServeMux, root string, deps Deps, home Hom
 	// method-prefix note above.
 	mux.HandleFunc("/readiness", readinessHandler(deps.Readiness))
 
+	// The mechanical spec importer's browser adapter (spec-import-contract
+	// "Browser routes"; specimport.go): the import page, the two strict
+	// POST routes and the read-only record view, plus its one script
+	// asset. Method checks live in the handlers, matching the note above.
+	registerSpecImportRoutes(mux, root, deps.Model)
+
 	// The v1 board: the spec-as-source projection (05 §Workbench, R4).
 	// "/board/spec/{name}" is strictly more specific than the v0
 	// "/board/{key}/{action}" patterns below, so ServeMux routes every
