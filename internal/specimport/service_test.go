@@ -59,7 +59,7 @@ func TestPreview_Deterministic_NoMutation(t *testing.T) {
 	if first.BaseCommit != repo.Head {
 		t.Fatalf("BaseCommit = %q, want current HEAD %q", first.BaseCommit, repo.Head)
 	}
-	if first.EngineDigest != "fixed-engine-digest" {
+	if first.EngineDigest != testEngineDigest("default") {
 		t.Fatalf("EngineDigest = %q, want the injected fake's value", first.EngineDigest)
 	}
 	if first.ModelDigest == "" || first.ConfigDigest == "" || first.RequestDigest == "" {

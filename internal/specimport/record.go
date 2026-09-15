@@ -71,11 +71,21 @@ type Record struct {
 	Policy          designprovenance.Policy `json:"policy"`
 }
 
-// validate checks Record's own closed shape: every digest/ref field
-// present, and (transitively, through Policy's own UnmarshalJSON and
-// Actor.Attribution.Validate) the nested union/attribution shapes valid.
-// It is a shape check only — cross-referencing these claims against actual
-// Git bytes is verifyCommittedImport's job, never this method's.
+// validate checks Record's own closed shape: every digest/ref field present
+// and correctly shaped, the closed origin/disposition/transform
+// vocabularies, field and source identity grammar, the coverage invariants
+// the contract states, and (transitively, through Policy's own
+// UnmarshalJSON and Actor.Attribution.Validate) the nested union/
+// attribution shapes. Its checks are drawn from the same constants and
+// validators Request.Validate and Normalize use, never a second grammar.
+//
+// It is a shape and internal-consistency check only — cross-referencing
+// these claims against actual Git bytes is verifyCommittedImport's job,
+// never this method's — and it is deliberately not a claim of authenticity
+// against a rewritten branch: a writer who can forge history can equally
+// write well-formed enums. What it does guarantee is that this package's
+// SOLE record decoder never hands a consumer a record whose own contents
+// are semantically impossible.
 func (r Record) validate() error {
 	if r.Schema != RecordSchema {
 		return fmt.Errorf("record schema %q must be %q", r.Schema, RecordSchema)
@@ -84,20 +94,23 @@ func (r Record) validate() error {
 		r.EngineDigest == "" || r.RequestDigest == "" || r.CandidateDigest == "" || r.SpecRef == "" {
 		return fmt.Errorf("record is missing a required digest or spec_ref field")
 	}
+	if err := validateRecordDigests(r); err != nil {
+		return err
+	}
+	if _, err := artifact.ParseRef(r.SpecRef); err != nil {
+		return fmt.Errorf("record spec_ref %q: %v", r.SpecRef, err)
+	}
 	if err := r.Actor.Attribution.Validate(); err != nil {
 		return fmt.Errorf("record actor attribution: %w", err)
 	}
-	seen := make(map[string]bool, len(r.Sources))
-	for _, s := range r.Sources {
-		if s.ID == "" || s.Digest == "" {
-			return fmt.Errorf("record source entry is missing id or digest")
-		}
-		if seen[s.ID] {
-			return fmt.Errorf("record source id %q is duplicated", s.ID)
-		}
-		seen[s.ID] = true
+	sourceIDs, err := validateRecordSources(r)
+	if err != nil {
+		return err
 	}
-	return nil
+	if err := validateRecordFields(r, sourceIDs); err != nil {
+		return err
+	}
+	return validateRecordCoverage(r, sourceIDs)
 }
 
 // DecodeRecord strict-decodes record.json bytes, mirroring DecodeRequest's

@@ -27,6 +27,13 @@ func buildImportRepo(t *testing.T) *fixturegit.Repo {
 	}})
 }
 
+// testEngineDigest is a deterministic stand-in for one real binary
+// identity: the same 64-hex lowercase SHA-256 shape binaryEngineIdentity
+// produces for the running executable, so a hermetic fixture's record is
+// shaped exactly like a production one. Distinct labels stand for distinct
+// release binaries.
+func testEngineDigest(label string) string { return sha256Hex([]byte("verdi-test-engine/" + label)) }
+
 // fakeEngine is a fixed-value EngineIdentity: hermetic tests must never
 // depend on the actual test binary's own digest, which changes on every
 // rebuild.
@@ -40,7 +47,7 @@ func (f fakeEngine) Digest(context.Context) (string, error) {
 		return "", f.err
 	}
 	if f.digest == "" {
-		return "fixed-engine-digest", nil
+		return testEngineDigest("default"), nil
 	}
 	return f.digest, nil
 }

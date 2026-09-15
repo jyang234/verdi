@@ -34,7 +34,7 @@ func TestApply_RetryUnderDifferentEngine_ProvenanceMismatch(t *testing.T) {
 	actor := testAgent(t)
 	policy := resolvedPolicyFor(t, "draft-write")
 
-	original := &Service{Engine: fakeEngine{digest: "engine-v1"}, Policy: fakePolicySource{policy: policy}}
+	original := &Service{Engine: fakeEngine{digest: testEngineDigest("v1")}, Policy: fakePolicySource{policy: policy}}
 	preview, err := original.Preview(context.Background(), repo.Dir, req)
 	if err != nil {
 		t.Fatal(err)
@@ -44,7 +44,7 @@ func TestApply_RetryUnderDifferentEngine_ProvenanceMismatch(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	differentBinary := &Service{Engine: fakeEngine{digest: "engine-v2"}, Policy: fakePolicySource{policy: policy}}
+	differentBinary := &Service{Engine: fakeEngine{digest: testEngineDigest("v2")}, Policy: fakePolicySource{policy: policy}}
 	_, err = differentBinary.Apply(context.Background(), repo.Dir, req, preview.Digest, actor)
 	if !errors.Is(err, ErrProvenanceMismatch) {
 		t.Fatalf("Apply(retry under a different engine) = %v, want ErrProvenanceMismatch", err)
