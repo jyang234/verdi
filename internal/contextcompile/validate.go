@@ -214,7 +214,8 @@ func (r ExclusionReason) Validate() error {
 	switch r {
 	case ExclusionDesignProvenanceSidecar, ExclusionDataZoneDisposable, ExclusionUncommittedContent,
 		ExclusionOutOfDeclaredScope, ExclusionPhaseInapplicable, ExclusionSupersededSpec,
-		ExclusionArchivedRecord, ExclusionGeneratedProjectionOutput, ExclusionNonTextData, ExclusionNonRegularFile:
+		ExclusionArchivedRecord, ExclusionGeneratedProjectionOutput, ExclusionNonTextData, ExclusionNonRegularFile,
+		ExclusionSpecImportSidecar:
 		return nil
 	}
 	return fmt.Errorf("contextcompile: unknown exclusion reason %q", string(r))
