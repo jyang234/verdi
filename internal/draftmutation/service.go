@@ -85,7 +85,7 @@ func (s Service) Mutate(ctx context.Context, start string, request Request, acto
 		if _, typed := AuthorizeState(ctx, filepath.FromSlash(identity.Checkout), identity, current, s.State); typed != nil {
 			return typed
 		}
-		policy, typed := authorizeMutationPolicy(ctx, filepath.FromSlash(identity.Checkout), identity, actor, s.Policy)
+		policy, typed := AuthorizeMutationPolicy(ctx, filepath.FromSlash(identity.Checkout), identity, actor, s.Policy)
 		if typed != nil {
 			return typed
 		}
@@ -169,14 +169,19 @@ func (s Service) Mutate(ctx context.Context, start string, request Request, acto
 	return response, WrapError(CodeIOFailure, identity, "running checkout-wide draft mutation transaction", transactionErr)
 }
 
-// authorizeMutationPolicy is Mutate's one policy-authorization dispatch: the
-// explicit browser-human actor (isExplicitBrowserHuman) routes through
-// AuthorizeBrowserHuman, independent of design_assistance mode/adoption
-// (§4.1, SI-176); every other actor keeps AuthorizePolicy's existing,
-// unchanged matrix. Both outcomes project onto the same v2 policy union so
-// every current writer emits exactly one closed arm: a resolved digest, or
-// the explicit browser-human's honest not-applicable declaration.
-func authorizeMutationPolicy(ctx context.Context, root string, identity Identity, actor Actor, source PolicySource) (designprovenance.Policy, *Error) {
+// AuthorizeMutationPolicy is Mutate's one policy-authorization dispatch,
+// narrowly exported (spec-import-contract.md: "Export the existing
+// draftmutation actor-policy dispatcher as a shared function, without
+// changing its authorization matrix") so specimport's Preview/Apply reuse
+// the identical decision this package's own Mutate makes, rather than a
+// second copy or a broadened allowance. The explicit browser-human actor
+// (isExplicitBrowserHuman) routes through AuthorizeBrowserHuman, independent
+// of design_assistance mode/adoption (§4.1, SI-176); every other actor keeps
+// AuthorizePolicy's existing, unchanged matrix. Both outcomes project onto
+// the same v2 policy union so every current writer emits exactly one closed
+// arm: a resolved digest, or the explicit browser-human's honest
+// not-applicable declaration.
+func AuthorizeMutationPolicy(ctx context.Context, root string, identity Identity, actor Actor, source PolicySource) (designprovenance.Policy, *Error) {
 	if actor.isExplicitBrowserHuman() {
 		posture, typed := AuthorizeBrowserHuman(ctx, root, identity, actor, source)
 		if typed != nil {
