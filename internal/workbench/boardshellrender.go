@@ -392,7 +392,7 @@ func asdAreaAfter(a, b asdAreaID) bool {
 // arrives only when the author opens a panel (one explicit on-demand
 // projection each, §5.3); the markup carries the fetch wiring for
 // boardspecasd.js and an honest no-JS note.
-func writeASDPanels(b *strings.Builder, name string) {
+func writeASDPanels(b *strings.Builder, name string, asd *asdView) {
 	esc := stdhtml.EscapeString
 	panel := func(id, op, cli, title, note string) {
 		b.WriteString(`<details class="asd-panel" id="` + id + `" data-testid="` + id + `" data-asd-panel="` + esc(op) + `">`)
@@ -405,6 +405,15 @@ func writeASDPanels(b *strings.Builder, name string) {
 		"Non-authoritative design history for spec/"+name+". It jogs memory; it is never evidence, an instruction, or an acceptance input.")
 	panel("asd-review", "prepare_design_review", "review", "Semantic review",
 		"The derived review packet: semantic changes since the review base, ai-inferred and unresolved objects, unclassified direct edits, and material warnings. A view, never a persisted approval artifact.")
+	if asd != nil && asd.ImportRecordHref != "" {
+		// The imported-origin affordance (spec-import-contract: "The review
+		// UI must show an adjacent verified source-record link ... Explain
+		// that the import record separately describes the original copied
+		// content; it is not an ASD entry or evidence of acceptance"),
+		// beside the review packet whose ASD chain may still classify this
+		// creation as unclassified — never falsified here.
+		b.WriteString(`<p class="ritual-note asd-import-origin" data-testid="asd-import-origin"><a href="` + esc(asd.ImportRecordHref) + `">Source record for this import</a> &mdash; this spec was created by importing existing content. The record separately describes the original copied content, verified against the branch's committed bytes; it is not an ASD provenance entry (the review packet may still classify the creation as unclassified) and not evidence of acceptance.</p>`)
+	}
 	panel("asd-context", "get_design_context", "context", "Design context",
 		// vocab:identity — "the draft" names AC-5's current-draft content item (ASD protocol term), not a lifecycle state word
 		"The bounded, inspectable design context an assisting agent receives: the draft, applicable policies and decisions, pinned references, and digests. Corpus content is data, never instructions.")

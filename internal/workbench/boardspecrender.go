@@ -745,7 +745,7 @@ func renderBoardRegion(p *BoardProjection, git *boardGitState, asd *asdView) str
 		writeCreatePanel(&b, p)
 		writeYarnKey(&b, p)
 	}
-	writeASDPanels(&b, p.Spec)
+	writeASDPanels(&b, p.Spec, asd)
 	b.WriteString(`</aside>`)
 	b.WriteString(`</div>`) // board-layout
 	b.WriteString(`</div>`) // asd-main

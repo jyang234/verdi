@@ -503,6 +503,13 @@ type asdView struct {
 	StickySlugs      map[string]string
 	StubSlugs        []string
 	EdgeFacts        map[string][]asdEdgeFact
+
+	// ImportRecordHref is the read-only source-record view's address when
+	// this board's working tree carries a committed import record for the
+	// spec (spec-import-contract: "The review UI must show an adjacent
+	// verified source-record link"); "" for a never-imported spec. A
+	// presence fact from the tree — the record view does the verifying.
+	ImportRecordHref string
 }
 
 // asdEdgeKey builds the chip-fact lookup key.
@@ -528,6 +535,7 @@ func (s *boardSpecServer) buildASDView(ctx context.Context, name string, proj *B
 		SlugPattern:   specNameRe.String(),
 	}
 	v.RelationDiverged = st.State == specstate.Proposed && st.Relation == specstate.RelationDiverged
+	v.ImportRecordHref = specImportRecordHrefFor(s.root, git.Branch, name)
 
 	worktreeHead := ""
 	if head, err := gitx.RevParse(ctx, s.root, "HEAD"); err == nil {
