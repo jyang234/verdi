@@ -120,8 +120,9 @@ func validateRecordSources(r Record) (map[string]bool, error) {
 	return ids, nil
 }
 
-// validateRecordFields checks every resolved field's destination grammar,
-// closed origin and source-identity bindings.
+// validateRecordFields checks every resolved field's and stored mapping's
+// destination grammar, closed origin, evidence and transform vocabularies,
+// and source-identity bindings.
 func validateRecordFields(r Record, sourceIDs map[string]bool) error {
 	for i, f := range r.Fields {
 		if !validFieldTarget(f.Target) {
@@ -141,6 +142,9 @@ func validateRecordFields(r Record, sourceIDs map[string]bool) error {
 				return fmt.Errorf("record field %q span %d transform %q is not a closed transform", f.Target, j, span.Transform)
 			}
 		}
+		if err := validateEvidence(i, f.Target, f.Evidence); err != nil {
+			return fmt.Errorf("record field %q %v", f.Target, err)
+		}
 	}
 	for i, m := range r.Mappings {
 		if !validFieldTarget(m.Target) {
@@ -149,6 +153,31 @@ func validateRecordFields(r Record, sourceIDs map[string]bool) error {
 		if m.SourceID != "" && !sourceIDs[m.SourceID] {
 			return fmt.Errorf("record mapping %d names source %q, which the record does not carry", i, m.SourceID)
 		}
+		// An empty Transform is legitimate on the evidence-only and
+		// user-added mapping shapes; only a declared one must be closed.
+		if m.Transform != "" && !validTransforms[m.Transform] {
+			return fmt.Errorf("record mapping %d (target %q) transform %q is not one of identity, trim-blank-lines, collapse-whitespace, list-item", i, m.Target, m.Transform)
+		}
+		if err := validateEvidence(i, m.Target, m.Evidence); err != nil {
+			return fmt.Errorf("record mapping %d (target %q) %v", i, m.Target, err)
+		}
+	}
+	return nil
+}
+
+// validateEvidence applies the request surface's own evidence rule to a
+// stored field's or mapping's evidence list: the DECISION is
+// validateMappingEvidence's — acceptance-criterion targets only, closed
+// static/behavioral/runtime/attestation kinds, no duplicates, and an empty
+// list always allowed — reused verbatim rather than restated here.
+//
+// Only the diagnostic is re-worded: validateMappingEvidence's own message
+// is phrased for a request's mappings[i], which would misname the stored
+// field or mapping this record actually carries, so the offending list is
+// reported in the record's own terms.
+func validateEvidence(index int, target string, evidence []string) error {
+	if err := validateMappingEvidence(index, Mapping{Target: target, Evidence: evidence}); err != nil {
+		return fmt.Errorf("evidence %v is not a unique list of acceptance-criterion evidence kinds (static, behavioral, runtime, attestation)", evidence)
 	}
 	return nil
 }

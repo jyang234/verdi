@@ -77,6 +77,9 @@ func TestDecodeRecord_RefusesSemanticallyImpossibleRecords(t *testing.T) {
 	if len(base.Fields) == 0 || len(base.Sources) == 0 || len(base.Coverage) == 0 || len(base.Coverage[0].Intervals) == 0 {
 		t.Fatalf("baseline record is too thin to corrupt: %+v", base)
 	}
+	if len(base.Mappings) == 0 || base.Mappings[0].Target != "ac-1" {
+		t.Fatalf("baseline record must carry the evidence-only ac-1 mapping the nested-enum cases corrupt: %+v", base.Mappings)
+	}
 
 	cases := []struct {
 		name    string
@@ -99,6 +102,28 @@ func TestDecodeRecord_RefusesSemanticallyImpossibleRecords(t *testing.T) {
 				r.Fields[0].Spans = []Span{{SourceID: "no-such-source", Start: 0, End: 1, Transform: TransformIdentity}}
 			},
 			want: `span 0 names source "no-such-source"`,
+		},
+		{
+			name: "field evidence kind outside the closed vocabulary",
+			corrupt: func(r *Record) {
+				for i := range r.Fields {
+					if strings.HasPrefix(r.Fields[i].Target, "ac-") {
+						r.Fields[i].Evidence = []string{"invented-proof"}
+						return
+					}
+				}
+			},
+			want: `record field "ac-1" evidence [invented-proof]`,
+		},
+		{
+			name:    "mapping evidence kind outside the closed vocabulary",
+			corrupt: func(r *Record) { r.Mappings[0].Evidence = []string{"invented-proof"} },
+			want:    `record mapping 0 (target "ac-1") evidence [invented-proof]`,
+		},
+		{
+			name:    "mapping transform outside the closed vocabulary",
+			corrupt: func(r *Record) { r.Mappings[0].Transform = "invented-transform" },
+			want:    `record mapping 0 (target "ac-1") transform "invented-transform"`,
 		},
 		{
 			name:    "interval disposition outside the closed vocabulary",
@@ -169,11 +194,13 @@ func TestDecodeRecord_RefusesSemanticallyImpossibleRecords(t *testing.T) {
 }
 
 // TestDecodeRecord_AcceptsEveryConformingRecordShape is the strictness
-// cases' mandatory counterweight: the four record shapes a conforming Apply
+// cases' mandatory counterweight: the record shapes a conforming Apply
 // really produces — external copied/edited source, native, an explicitly
-// user-added field and a generated deferral — must all still decode, and
-// between them must exercise the closed origin vocabulary and native
-// whole-primary coverage the checks above police.
+// user-added field, a generated deferral, and a source-backed explicit
+// mapping alongside an evidence-only one — must all still decode, and
+// between them must exercise the closed origin, evidence, transform and
+// disposition vocabularies and the native whole-primary coverage the
+// checks above police.
 func TestDecodeRecord_AcceptsEveryConformingRecordShape(t *testing.T) {
 	userAdded := evidencedRequest()
 	addedText := "A criterion the operator added with no source backing at all."
@@ -182,12 +209,22 @@ func TestDecodeRecord_AcceptsEveryConformingRecordShape(t *testing.T) {
 	})
 	deferred := evidencedRequest()
 	deferred.DeferStatements = true
+	// ac-1 becomes an explicit source-backed mapping over its own
+	// automatic span (a real list item of validMarkdownSource), so one
+	// record carries BOTH a mapping with a closed non-empty transform and
+	// the evidence-only ac-2 mapping whose transform is legitimately empty.
+	sourceBacked := evidencedRequest()
+	sourceBacked.Mappings[0] = Mapping{
+		Target: "ac-1", SourceID: "source", Start: 112, End: 126,
+		Transform: TransformListItem, Evidence: []string{"static", "attestation"},
+	}
 
 	shapes := map[string]Request{
-		"external":   evidencedRequest(),
-		"native":     newSpecNativeRequest(),
-		"user-added": userAdded,
-		"deferral":   deferred,
+		"external":      evidencedRequest(),
+		"native":        newSpecNativeRequest(),
+		"user-added":    userAdded,
+		"deferral":      deferred,
+		"source-backed": sourceBacked,
 	}
 	names := make([]string, 0, len(shapes))
 	for name := range shapes {
@@ -197,12 +234,26 @@ func TestDecodeRecord_AcceptsEveryConformingRecordShape(t *testing.T) {
 
 	origins := map[string]bool{}
 	dispositions := map[string]bool{}
+	evidenceKinds := map[string]bool{}
+	transforms := map[string]bool{}
 	for _, name := range names {
 		t.Run(name, func(t *testing.T) {
 			repo := buildImportRepo(t)
 			_, record := publishedRecord(t, repo.Dir, shapes[name])
 			for _, f := range record.Fields {
 				origins[f.Origin] = true
+				for _, kind := range f.Evidence {
+					evidenceKinds[kind] = true
+				}
+				for _, span := range f.Spans {
+					transforms[span.Transform] = true
+				}
+			}
+			for _, m := range record.Mappings {
+				transforms[m.Transform] = true
+				for _, kind := range m.Evidence {
+					evidenceKinds[kind] = true
+				}
 			}
 			for _, cov := range record.Coverage {
 				for _, interval := range cov.Intervals {
@@ -218,6 +269,20 @@ func TestDecodeRecord_AcceptsEveryConformingRecordShape(t *testing.T) {
 					t.Fatalf("native interval = %+v, want the whole primary mapped to the native pseudo-target", got)
 				}
 			}
+			if name == "source-backed" {
+				var sawSourceBacked, sawEvidenceOnly bool
+				for _, m := range record.Mappings {
+					if m.SourceID != "" && m.Transform == TransformListItem {
+						sawSourceBacked = true
+					}
+					if m.SourceID == "" && m.Transform == "" && len(m.Evidence) > 0 {
+						sawEvidenceOnly = true
+					}
+				}
+				if !sawSourceBacked || !sawEvidenceOnly {
+					t.Fatalf("mappings = %+v, want both a source-backed transform and a preserved evidence-only mapping with an empty transform", record.Mappings)
+				}
+			}
 		})
 	}
 
@@ -229,6 +294,18 @@ func TestDecodeRecord_AcceptsEveryConformingRecordShape(t *testing.T) {
 	for _, disposition := range []string{DispositionMapped, DispositionRetained} {
 		if !dispositions[disposition] {
 			t.Errorf("no published record exercised disposition %q", disposition)
+		}
+	}
+	for _, kind := range []string{"static", "attestation"} {
+		if !evidenceKinds[kind] {
+			t.Errorf("no published record exercised evidence kind %q", kind)
+		}
+	}
+	// "" is the evidence-only/user-added mapping's legitimately absent
+	// transform, which the closed-vocabulary check must keep accepting.
+	for _, transform := range []string{"", TransformTrimBlankLines, TransformListItem} {
+		if !transforms[transform] {
+			t.Errorf("no published record exercised transform %q", transform)
 		}
 	}
 }
