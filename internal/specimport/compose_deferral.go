@@ -35,11 +35,20 @@ import (
 // objects in source/explicit insertion order"). Task 3's Preview consumes
 // this same slice and reports it inside a SHA-256-over-canonical-JSON
 // digest, so the order is part of what that digest freezes.
+//
+// Task 3 owner-preflight: automatic markdown-v1/f13-reference-v1
+// extraction already produces Plan.Fields statement-first, but manual-v1
+// (no automatic baseline at all) and any format's explicit Mappings order
+// objects before statements the instant a caller lists them that way —
+// reconcileFields appends each newly-mapped target in request order, not a
+// fixed statement/object order. statementFirstOrder below reorders the
+// FINAL non-deferred field list before Preview ever digests it, on every
+// format, pinned by TestPrepareCandidateFields_NonDeferred_StatementsFirst.
 func prepareCandidateFields(request Request, plan Plan) ([]Field, []Finding) {
 	fields := make([]Field, 0, len(plan.Fields))
 
 	if !request.DeferStatements {
-		fields = append(fields, plan.Fields...)
+		fields = append(fields, statementFirstOrder(plan.Fields)...)
 		findings := make([]Finding, len(plan.Findings))
 		copy(findings, plan.Findings)
 		return fields, findings
@@ -105,4 +114,32 @@ func deferredField(target string) Field {
 		text = designscaffold.DefaultOutcome
 	}
 	return Field{Target: target, Text: text, Origin: OriginGeneratedDeferral}
+}
+
+// statementFirstOrder returns fields reordered so problem (if present),
+// then outcome (if present), come first, followed by every other field in
+// its EXISTING relative order — a pure reordering, never a content change
+// or an object re-sort (Task 3 owner-preflight: "Do not re-sort objects").
+// It is a no-op when fields is already statement-first.
+func statementFirstOrder(fields []Field) []Field {
+	var problem, outcome *Field
+	objects := make([]Field, 0, len(fields))
+	for i := range fields {
+		switch fields[i].Target {
+		case "problem":
+			problem = &fields[i]
+		case "outcome":
+			outcome = &fields[i]
+		default:
+			objects = append(objects, fields[i])
+		}
+	}
+	out := make([]Field, 0, len(fields))
+	if problem != nil {
+		out = append(out, *problem)
+	}
+	if outcome != nil {
+		out = append(out, *outcome)
+	}
+	return append(out, objects...)
 }

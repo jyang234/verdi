@@ -231,3 +231,80 @@ func TestCompose_DeferStatements_NothingResolved(t *testing.T) {
 		t.Fatalf("deferred problem placeholder missing:\n%s", candidate)
 	}
 }
+
+// strPtr returns a pointer to s, for Mapping.Text literals.
+func strPtr(s string) *string { return &s }
+
+// TestPrepareCandidateFields_NonDeferred_StatementsFirst pins owner-
+// preflight's Task 3 requirement: on BOTH the deferral and non-deferral
+// branches, prepareCandidateFields' returned Fields are statement-first
+// (problem, then outcome, whichever present) and then objects in their
+// EXISTING relative order — never re-sorted among themselves. manual-v1
+// supplies no automatic baseline at all, so an explicit Mapping order that
+// names objects before statements (a real, reachable shape — see the
+// owner-preflight's "manual-v1 mappings ... append problem/outcome after
+// ACs" note) would otherwise leave Plan.Fields, and so the service-facing
+// preview/candidate fields, objects-first.
+func TestPrepareCandidateFields_NonDeferred_StatementsFirst(t *testing.T) {
+	req := Request{
+		Schema:  RequestSchema,
+		Format:  FormatManualV1,
+		Target:  Target{Slug: "sample", Class: "feature", Title: "Sample"},
+		Primary: "source",
+		Sources: []Source{{ID: "source", Label: "sample.md", Data: []byte("body text")}},
+		Mappings: []Mapping{
+			{Target: "ac-1", Text: strPtr("Criterion one."), Evidence: []string{"static", "attestation"}},
+			{Target: "ac-2", Text: strPtr("Criterion two."), Evidence: []string{"static", "attestation"}},
+			{Target: "problem", Text: strPtr("The problem.")},
+			{Target: "outcome", Text: strPtr("The outcome.")},
+		},
+		RetainUnmapped: true,
+	}
+	plan, err := Normalize(req)
+	if err != nil {
+		t.Fatalf("Normalize: %v", err)
+	}
+	if plan.Fields[0].Target != "ac-1" {
+		t.Fatalf("test fixture assumption broken: want Plan order objects-before-statements (the risk case), got %+v", plan.Fields)
+	}
+
+	fields, findings := prepareCandidateFields(req, plan)
+	requireNoBlocking(t, findings, nil)
+	if len(fields) != 4 {
+		t.Fatalf("fields = %+v, want 4", fields)
+	}
+	if fields[0].Target != "problem" || fields[1].Target != "outcome" {
+		t.Fatalf("fields = %+v, want statement-first order (problem, outcome, ...)", fields)
+	}
+	if fields[2].Target != "ac-1" || fields[3].Target != "ac-2" {
+		t.Fatalf("fields = %+v, want objects preserved in their existing relative order after the statements", fields)
+	}
+	if fields[2].Text != "Criterion one." || fields[3].Text != "Criterion two." {
+		t.Fatalf("object text/order corrupted by reordering: %+v", fields)
+	}
+}
+
+// TestPrepareCandidateFields_NonDeferred_NoStatementsUnaffected proves the
+// reordering fix is a no-op when no statement is present at all (only
+// objects) — it must never invent a problem/outcome entry.
+func TestPrepareCandidateFields_NonDeferred_NoStatementsUnaffected(t *testing.T) {
+	req := Request{
+		Schema:  RequestSchema,
+		Format:  FormatManualV1,
+		Target:  Target{Slug: "sample", Class: "feature", Title: "Sample"},
+		Primary: "source",
+		Sources: []Source{{ID: "source", Label: "sample.md", Data: []byte("body text")}},
+		Mappings: []Mapping{
+			{Target: "ac-1", Text: strPtr("Criterion one."), Evidence: []string{"static", "attestation"}},
+		},
+		RetainUnmapped: true,
+	}
+	plan, err := Normalize(req)
+	if err != nil {
+		t.Fatalf("Normalize: %v", err)
+	}
+	fields, _ := prepareCandidateFields(req, plan)
+	if len(fields) != 1 || fields[0].Target != "ac-1" {
+		t.Fatalf("fields = %+v, want exactly the one object field unchanged", fields)
+	}
+}
