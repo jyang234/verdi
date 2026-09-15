@@ -320,7 +320,18 @@ already share artifact.ClassifyPath, which excludes imports paths; preserve this
 one classifier. Pin the exclusion with an actual native source duplicate-ID
 fixture: one published candidate plus its identical retained native snapshot must
 produce one corpus spec entry and zero VL-002 duplicates. Top-level directory
-admission does not mean classifying retained files as corpus artifacts. Its sole decoder belongs to specimport. Record schema
+admission does not mean classifying retained files as corpus artifacts.
+
+The context compiler's separate HEAD-tree repository-file channel must also
+exclude paths beneath `.verdi/imports/` before reading their bytes. Under SI-200,
+add `spec-import-sidecar` to its closed exclusion-reason vocabulary and record
+these candidates in the excluded partition. Preserve worktree-overlay precedence,
+the existing ASD `design-provenance-sidecar` reason, and ordinary neighboring
+paths. Implement this in the existing classifier; do not add a context builder or
+silently omit candidates from the partition. This fixes the execution seam for
+the already-adopted normal-context exclusion.
+
+The import record's sole decoder belongs to specimport. Record schema
 `verdi.spec-import-record/v1` stores preview/base/model/config/engine/request/candidate
 digests, spec ref, normalized source identities/ranges/digests, mappings/origins,
 coverage, actor attribution and policy posture. No clock/randomness in this record.

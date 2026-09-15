@@ -112,7 +112,11 @@ add `imports` only to `internal/lint/walk.go` top-level admission; narrowly expo
 and test the existing actor-policy dispatch in `internal/draftmutation/service.go`
 without changing decisions. Shared Git helper changes stay in `internal/gitx` with
 hermetic tests. Context exclusion assertions use the existing index/designapp/
-contextcompile test seams; do not create a second context builder.
+contextcompile test seams. The general context compiler also needs a narrow
+`classify.go`, `schema.go`, `validate.go` correction and corresponding tests or
+necessary deterministic fixtures: exclude `.verdi/imports/` HEAD-tree candidates
+with the contract's `spec-import-sidecar` reason before reading their bytes.
+Preserve the complete candidate partition; do not create a second context builder.
 
 **Consumes:** Task 1/2 APIs and existing Git plumbing, actor constructors/policy,
 canonical JSON and writer/file-lock seams. **Produces:** NewService, Service.Preview,
