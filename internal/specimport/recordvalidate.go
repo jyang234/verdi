@@ -186,10 +186,11 @@ func validateEvidence(index int, target string, evidence []string) error {
 // on the stored coverage (spec-import-contract.md: "The coverage record
 // partitions every selected source byte exactly once ... For every source
 // assert TotalBytes == MappedBytes + RetainedBytes + UnresolvedBytes"):
-// each coverage entry names a recorded source exactly once, the three
-// per-disposition totals sum to TotalBytes and are each reproduced by the
-// intervals themselves, and the intervals are a contiguous, non-overlapping,
-// ordered partition of [0,TotalBytes).
+// every recorded source has exactly one coverage entry and every entry
+// names a recorded source, the three per-disposition totals sum to
+// TotalBytes and are each reproduced by the intervals themselves, and the
+// intervals are a contiguous, non-overlapping, ordered partition of
+// [0,TotalBytes).
 //
 // Interval targets are checked for grammar only, and accept the native
 // whole-primary pseudo-target: native content is not decomposed into
@@ -252,6 +253,15 @@ func validateRecordCoverage(r Record, sourceIDs map[string]bool) error {
 				return fmt.Errorf("record coverage for source %q: intervals account %d %s byte(s), but the record claims %d",
 					cov.SourceID, byDisposition[want.disposition], want.disposition, want.total)
 			}
+		}
+	}
+	// Completeness: every recorded source carries its own accounting, so a
+	// retained support document cannot silently lose its byte coverage
+	// while remaining a committed sidecar. Walked in r.Sources order so the
+	// first missing source is reported deterministically.
+	for _, s := range r.Sources {
+		if !seen[s.ID] {
+			return fmt.Errorf("record has no coverage entry for source %q; every recorded source carries its own byte accounting", s.ID)
 		}
 	}
 	return nil

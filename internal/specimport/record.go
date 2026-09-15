@@ -83,9 +83,11 @@ type Record struct {
 // these claims against actual Git bytes is verifyCommittedImport's job,
 // never this method's — and it is deliberately not a claim of authenticity
 // against a rewritten branch: a writer who can forge history can equally
-// write well-formed enums. What it does guarantee is that this package's
-// SOLE record decoder never hands a consumer a record whose own contents
-// are semantically impossible.
+// write well-formed enums. What it guarantees is exactly the invariants
+// enumerated above, no more: a record reaching a consumer through this
+// package's SOLE decoder has passed those closed-vocabulary, identity,
+// digest-shape and coverage-accounting checks. It is not a claim of
+// semantic completeness or of truthfulness about the original source.
 func (r Record) validate() error {
 	if r.Schema != RecordSchema {
 		return fmt.Errorf("record schema %q must be %q", r.Schema, RecordSchema)

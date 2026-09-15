@@ -193,14 +193,29 @@ func TestDecodeRecord_RefusesSemanticallyImpossibleRecords(t *testing.T) {
 	}
 }
 
+// multiSourceRequest adds a retained-only support document alongside the
+// evidenced primary (spec-import-contract.md: "Extra selected supports can
+// be retained"), so a real published record carries TWO sources and their
+// two coverage entries — the shape the completeness check below needs.
+func multiSourceRequest() Request {
+	req := evidencedRequest()
+	req.Sources = append(req.Sources, Source{
+		ID:    "support",
+		Label: "support.md",
+		Data:  []byte("Background the operator retained alongside the primary, mapped to nothing.\n"),
+	})
+	return req
+}
+
 // TestDecodeRecord_AcceptsEveryConformingRecordShape is the strictness
 // cases' mandatory counterweight: the record shapes a conforming Apply
 // really produces — external copied/edited source, native, an explicitly
-// user-added field, a generated deferral, and a source-backed explicit
-// mapping alongside an evidence-only one — must all still decode, and
-// between them must exercise the closed origin, evidence, transform and
-// disposition vocabularies and the native whole-primary coverage the
-// checks above police.
+// user-added field, a generated deferral, a source-backed explicit mapping
+// alongside an evidence-only one, and a retained-only support document
+// beside the primary — must all still decode, and between them must
+// exercise the closed origin, evidence, transform and disposition
+// vocabularies and the native whole-primary coverage the checks above
+// police.
 func TestDecodeRecord_AcceptsEveryConformingRecordShape(t *testing.T) {
 	userAdded := evidencedRequest()
 	addedText := "A criterion the operator added with no source backing at all."
@@ -225,6 +240,7 @@ func TestDecodeRecord_AcceptsEveryConformingRecordShape(t *testing.T) {
 		"user-added":    userAdded,
 		"deferral":      deferred,
 		"source-backed": sourceBacked,
+		"multi-source":  multiSourceRequest(),
 	}
 	names := make([]string, 0, len(shapes))
 	for name := range shapes {
@@ -269,6 +285,11 @@ func TestDecodeRecord_AcceptsEveryConformingRecordShape(t *testing.T) {
 					t.Fatalf("native interval = %+v, want the whole primary mapped to the native pseudo-target", got)
 				}
 			}
+			if name == "multi-source" {
+				if len(record.Sources) != 2 || len(record.Coverage) != 2 {
+					t.Fatalf("multi-source record = %d source(s)/%d coverage entr(ies), want 2/2", len(record.Sources), len(record.Coverage))
+				}
+			}
 			if name == "source-backed" {
 				var sawSourceBacked, sawEvidenceOnly bool
 				for _, m := range record.Mappings {
@@ -308,6 +329,107 @@ func TestDecodeRecord_AcceptsEveryConformingRecordShape(t *testing.T) {
 			t.Errorf("no published record exercised transform %q", transform)
 		}
 	}
+}
+
+// TestDecodeRecord_RequiresOneCoverageEntryPerSource pins the completeness
+// half of the coverage invariant, which checking only the entries that
+// happen to be present cannot reach: the contract accounts for every
+// selected byte of every retained source (spec-import-contract.md: "The
+// coverage record partitions every selected source byte exactly once ...
+// For every source assert TotalBytes == MappedBytes + RetainedBytes +
+// UnresolvedBytes"), so a record that carries a source but no coverage for
+// it has dropped that source's byte accounting entirely.
+//
+// The baseline is a real two-source import — the evidenced primary plus a
+// retained-only support document — so both a mapped and a retained-only
+// source's entry can go missing independently.
+func TestDecodeRecord_RequiresOneCoverageEntryPerSource(t *testing.T) {
+	repo := buildImportRepo(t)
+	_, base := publishedRecord(t, repo.Dir, multiSourceRequest())
+
+	if len(base.Sources) != 2 || base.Sources[0].ID != "source" || base.Sources[1].ID != "support" {
+		t.Fatalf("baseline sources = %+v, want the primary and its retained support", base.Sources)
+	}
+	if len(base.Coverage) != 2 {
+		t.Fatalf("baseline coverage = %+v, want exactly one entry per recorded source", base.Coverage)
+	}
+	support := recordCoverageForSource(t, base, "support")
+	if support.RetainedBytes != support.TotalBytes || support.TotalBytes == 0 {
+		t.Fatalf("support coverage = %+v, want every selected byte retained-only", support)
+	}
+
+	withoutCoverageFor := func(id string) func(*Record) {
+		return func(r *Record) {
+			kept := make([]Coverage, 0, len(r.Coverage))
+			for _, cov := range r.Coverage {
+				if cov.SourceID != id {
+					kept = append(kept, cov)
+				}
+			}
+			r.Coverage = kept
+		}
+	}
+
+	cases := []struct {
+		name    string
+		corrupt func(*Record)
+		want    string
+	}{
+		{
+			name:    "no coverage entries at all",
+			corrupt: func(r *Record) { r.Coverage = nil },
+			want:    `record has no coverage entry for source "source"`,
+		},
+		{
+			name:    "the retained-only support source's entry is missing",
+			corrupt: withoutCoverageFor("support"),
+			want:    `record has no coverage entry for source "support"`,
+		},
+		{
+			name:    "the primary source's entry is missing",
+			corrupt: withoutCoverageFor("source"),
+			want:    `record has no coverage entry for source "source"`,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			tampered := cloneRecord(base)
+			tc.corrupt(&tampered)
+			data, err := encodeRecord(tampered)
+			if err != nil {
+				t.Fatalf("encodeRecord: %v", err)
+			}
+			_, err = DecodeRecord(data)
+			if !errors.Is(err, ErrImportRecordMissing) {
+				t.Fatalf("DecodeRecord(%s) = %v, want a refusal wrapping ErrImportRecordMissing", tc.name, err)
+			}
+			if !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("DecodeRecord(%s) = %v, want a refusal naming %q", tc.name, err, tc.want)
+			}
+		})
+	}
+
+	// The untouched two-source record still decodes: the completeness rule
+	// requires exactly one entry per source, never more than one.
+	data, err := encodeRecord(cloneRecord(base))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := DecodeRecord(data); err != nil {
+		t.Fatalf("DecodeRecord(complete two-source record) = %v, want acceptance", err)
+	}
+}
+
+func recordCoverageForSource(t *testing.T, record Record, id string) Coverage {
+	t.Helper()
+	for _, cov := range record.Coverage {
+		if cov.SourceID == id {
+			return cov
+		}
+	}
+	t.Fatalf("record carries no coverage for source %q: %+v", id, record.Coverage)
+	return Coverage{}
 }
 
 // TestReadRecord_RefusesRebuiltSemanticallyInvalidRecord drives the same
