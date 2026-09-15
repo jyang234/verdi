@@ -202,9 +202,11 @@ func normalizeNative(req Request, selectedPrimary []byte) ([]byte, error) {
 		return nil, fmt.Errorf("%w: native primary title %q does not match target title %q", ErrInvalidRequest, spec.Title, req.Target.Title)
 	}
 	if spec.Story != req.Target.Story {
+		// vocab:identity — "story" names the spec.Story / req.Target.Story field being compared, identity
 		return nil, fmt.Errorf("%w: native primary story %q does not match target story %q", ErrInvalidRequest, spec.Story, req.Target.Story)
 	}
 	if spec.Status != "" && spec.Status != artifact.Status("draft") {
+		// vocab:identity — "draft" is the artifact.Status enum value compared on the line above, identity
 		return nil, fmt.Errorf("%w: native primary status %q must be absent or draft", ErrInvalidRequest, spec.Status)
 	}
 	if spec.Frozen != nil {

@@ -139,6 +139,7 @@ func validateRecordFields(r Record, sourceIDs map[string]bool) error {
 				return fmt.Errorf("record field %q span %d has an invalid half-open range [%d,%d)", f.Target, j, span.Start, span.End)
 			}
 			if span.Transform != "" && !validTransforms[span.Transform] {
+				// vocab:identity — "closed" is closed-set membership (validTransforms), not the lifecycle state
 				return fmt.Errorf("record field %q span %d transform %q is not a closed transform", f.Target, j, span.Transform)
 			}
 		}

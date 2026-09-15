@@ -243,6 +243,7 @@ func validateTarget(t Target) error {
 		return fmt.Errorf("%w: target.slug %q must be a bare spec name, not a pinned (@commit) or fragment (#object-id) ref", ErrInvalidRequest, t.Slug)
 	}
 	if t.Class != string(artifact.ClassFeature) && t.Class != string(artifact.ClassStory) {
+		// vocab:identity — "feature"/"story" are the artifact.ClassFeature/ClassStory enum values compared on the line above, identity
 		return fmt.Errorf("%w: target.class %q must be feature or story", ErrInvalidRequest, t.Class)
 	}
 	if !nonBlankUTF8(t.Title) {

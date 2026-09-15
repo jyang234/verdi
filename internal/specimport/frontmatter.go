@@ -35,6 +35,7 @@ func stripFrontmatter(data []byte) (bodyStart int, err error) {
 			return offsets[i+1], nil
 		}
 	}
+	// vocab:identity — "closed" is delimiter termination (the '---'/'...' line that ends frontmatter), not the lifecycle state
 	return 0, fmt.Errorf("%w: leading frontmatter delimiter on line 1 is never closed by a later standalone '---' or '...' line", ErrInvalidSource)
 }
 
