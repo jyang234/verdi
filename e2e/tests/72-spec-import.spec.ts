@@ -288,6 +288,41 @@ test.describe("spec import: confirmation is bound to the exact current preview",
     await fillTarget(page, "stale-widget", "Stale widget");
     await page.getByTestId("import-retain").check();
     expect(await preview(page)).toBe(200);
+    await expectReady(page, false);
+    const firstDigest = await page.getByTestId("import-digest").textContent();
+
+    // The race: a preview issued for the current inputs answers AFTER a
+    // range edit; the response must be discarded — the shown preview stays
+    // stale and nothing can be confirmed against it.
+    await page.route("**/design/import/preview", async (route) => {
+      await new Promise((resolve) => setTimeout(resolve, 1500));
+      await route.continue();
+    });
+    const delayed = page.waitForResponse((r) => r.url().includes("/design/import/preview"));
+    await page.getByTestId("import-preview-btn").click();
+    await page.waitForTimeout(300);
+    await page.locator(`[data-testid="import-start-${sourceId}"]`).fill("1");
+    await page.locator(`[data-testid="import-end-${sourceId}"]`).fill("10");
+    await expect(page.getByTestId("import-result")).toHaveAttribute("data-stale", "true");
+    await delayed;
+    await page.waitForTimeout(300);
+    await expect(page.getByTestId("import-result")).toHaveAttribute("data-stale", "true");
+    await expect(page.getByTestId("import-digest")).toHaveText(firstDigest!);
+    await expect(page.getByTestId("import-confirm")).not.toBeChecked();
+    await expect(page.getByTestId("import-confirm")).toBeDisabled();
+    await expect(page.getByTestId("import-apply-btn")).toBeDisabled();
+    await page.unroute("**/design/import/preview");
+
+    // A fresh preview over the changed range is honest about it: the
+    // selected slice is smaller and the digest differs.
+    expect(await preview(page)).toBe(200);
+    await expect(page.getByTestId(`import-coverage-${sourceId}`)).not.toHaveAttribute("data-total", "322");
+    await expect(page.getByTestId("import-digest")).not.toHaveText(firstDigest!);
+
+    // Back to the whole file, evidence for every criterion, ready, confirmed.
+    await page.locator(`[data-testid="import-start-${sourceId}"]`).fill("");
+    await page.locator(`[data-testid="import-end-${sourceId}"]`).fill("");
+    expect(await preview(page)).toBe(200);
     await page.getByTestId("import-evidence-ac-1-attestation").check();
     await page.getByTestId("import-evidence-all-ac-1").click();
     expect(await preview(page)).toBe(200);
@@ -303,32 +338,7 @@ test.describe("spec import: confirmation is bound to the exact current preview",
     await expect(page.getByTestId("import-result")).toHaveAttribute("data-stale", "true");
     await expect(page.getByTestId("import-next-action")).toContainText("preview again");
 
-    // The race: a preview issued for the previous inputs answers AFTER
-    // another edit; it must be discarded, never reinstating confirmation.
-    await page.route("**/design/import/preview", async (route) => {
-      await new Promise((resolve) => setTimeout(resolve, 1500));
-      await route.continue();
-    });
-    const delayed = page.waitForResponse((r) => r.url().includes("/design/import/preview"));
-    await page.getByTestId("import-preview-btn").click();
-    await page.waitForTimeout(300);
-    await page.locator(`[data-testid="import-start-${sourceId}"]`).fill("1");
-    await page.locator(`[data-testid="import-end-${sourceId}"]`).fill("10");
-    await delayed;
-    await page.waitForTimeout(300);
-    await expect(page.getByTestId("import-result")).toHaveAttribute("data-stale", "true");
-    await expect(page.getByTestId("import-confirm")).not.toBeChecked();
-    await expect(page.getByTestId("import-confirm")).toBeDisabled();
-    await expect(page.getByTestId("import-apply-btn")).toBeDisabled();
-    await page.unroute("**/design/import/preview");
-
-    // A fresh preview over the changed range is honest about it: the
-    // selected slice is smaller and the digest differs.
-    expect(await preview(page)).toBe(200);
-    await expect(page.getByTestId(`import-coverage-${sourceId}`)).not.toHaveAttribute("data-total", "322");
     // Evidence and deferral edits invalidate just the same.
-    await page.locator(`[data-testid="import-start-${sourceId}"]`).fill("");
-    await page.locator(`[data-testid="import-end-${sourceId}"]`).fill("");
     expect(await preview(page)).toBe(200);
     await expectReady(page, true);
     await page.getByTestId("import-confirm").check();
