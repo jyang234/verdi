@@ -57,6 +57,7 @@ type controlServer struct {
 	vocab              *vocabFixture
 	readinessAllProven *readinessAllProvenFixture
 	unprovenBoard      *unprovenBoardFixture
+	specImport         *specImportFixture
 }
 
 func newControlServer(storeRoot, moduleRoot string) *controlServer {
@@ -66,6 +67,7 @@ func newControlServer(storeRoot, moduleRoot string) *controlServer {
 		vocab:              newVocabFixture(moduleRoot),
 		readinessAllProven: newReadinessAllProvenFixture(),
 		unprovenBoard:      newUnprovenBoardFixture(moduleRoot),
+		specImport:         newSpecImportFixture(moduleRoot),
 	}
 }
 
@@ -87,6 +89,14 @@ func (c *controlServer) handler() http.Handler {
 	// binary's own `verdi serve` over a real no-remote store — the unproven
 	// lifecycle posture the shared (provably-defaulted) store can never show.
 	mux.HandleFunc("/unproven-board-fixture", c.unprovenBoard.handler)
+	// The isolated clean-main import store (specimportfixture.go): the
+	// shipped binary's own `verdi serve` over a real manifest-only store
+	// with a provable (synthetic) default branch and no policy/model/
+	// forge/tracker configuration — the human import journey the shared,
+	// by-then-dirty store can never host.
+	mux.HandleFunc("/spec-import-fixture", c.specImport.handler)
+	mux.HandleFunc("/spec-import-fixture/info", c.specImport.infoHandler)
+	mux.HandleFunc("/spec-import-fixture/tamper", c.specImport.tamperHandler)
 	return mux
 }
 

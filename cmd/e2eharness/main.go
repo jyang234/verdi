@@ -190,6 +190,9 @@ func run() error {
 	// serve` on first use; reap it with the harness so no orphaned listener
 	// outlives the run (the same guarantee the shared serve gets below).
 	defer ctrl.unprovenBoard.stop()
+	// The spec-import fixture (specimportfixture.go) spawns its own serve
+	// the same way; reap it with the harness too.
+	defer ctrl.specImport.stop()
 	ctrlSrv := &http.Server{
 		Addr:        controlAddr,
 		Handler:     ctrl.handler(),

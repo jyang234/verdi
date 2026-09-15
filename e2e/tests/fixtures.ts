@@ -135,6 +135,7 @@
 // (adr/0001-outbox-events, real on main), and provision_board.go's design
 // spec exempts the same one; recorded as a V1-P8 ledger deviation.
 
+import path from "node:path";
 import { resolvePorts } from "../ports";
 
 // ---------------------------------------------------------------------------
@@ -862,4 +863,69 @@ export function worktreeSpecPath(name: string, spec: string): string {
 // where the inspection server reads the branch's committed proposal.
 export function worktreeDiagramPath(name: string, diagram: string): string {
   return `.verdi/data/worktrees/${name}/.verdi/diagrams/${diagram}.mermaid`;
+}
+
+// ---------------------------------------------------------------------------
+// Spec import (spec-import-contract Task 4 UI; 72-spec-import.spec.ts) —
+// top-level, never zoned: route helpers, the control server's isolated
+// import fixture, and the pinned INPUT files the browser uploads. The
+// inputs are the accepted Task 1 fixture bytes under
+// internal/specimport/testdata (the F13 primary is pinned to the exact
+// SHA-256 the reference profile binds, so it is reused verbatim rather than
+// copied) plus the workbench's own escaping fixture.
+// ---------------------------------------------------------------------------
+
+// The control server endpoint that starts (once) and names the isolated
+// clean-main import serve (cmd/e2eharness/specimportfixture.go): a real
+// `verdi serve` over a manifest-only store with a provable — synthetic,
+// never CI or approval — default branch and no policy/model/forge/tracker
+// configuration. Its /info and /tamper siblings serve the honesty cases.
+export const SPEC_IMPORT_FIXTURE_URL = `${CONTROL_URL}/spec-import-fixture`;
+
+const specImportInputRoot = path.resolve(__dirname, "..", "..", "internal", "specimport", "testdata");
+
+export const SPEC_IMPORT_FILES = {
+  // Positive labeled Markdown: multiline Problem, Outcome, three flat
+  // criteria (markdown-v1's happy path).
+  LABELED: path.join(specImportInputRoot, "markdown", "positive-basic.md"),
+  // Two Problem labels: the ambiguous-field correction case.
+  AMBIGUOUS: path.join(specImportInputRoot, "markdown", "duplicate-label.md"),
+  // Markup inside the source: the render-as-text case.
+  XSS: path.resolve(__dirname, "..", "..", "internal", "workbench", "testdata", "specimport", "xss.md"),
+  // The pinned F13 inputs: the bound primary and its four whole retained
+  // supports.
+  F13_PRIMARY: path.join(specImportInputRoot, "f13", "primary-f13.md"),
+  F13_SUPPORTS: [
+    path.join(specImportInputRoot, "f13", "transition-core.md"),
+    path.join(specImportInputRoot, "f13", "review-journal.md"),
+    path.join(specImportInputRoot, "f13", "review-validation.md"),
+    path.join(specImportInputRoot, "f13", "stage-plan-c346c005.md"),
+  ],
+} as const;
+
+// The F13 primary's exact selected byte count the coverage record must
+// account for once (spec-import-contract: "2409 primary bytes accounted
+// once").
+export const SPEC_IMPORT_F13_PRIMARY_BYTES = 2409;
+
+// The import page and the read-only record view's addresses.
+export function importPagePath(): string {
+  return "/design/import";
+}
+export function importRecordPath(branch: string, spec: string): string {
+  return `/design/import/record?branch=${encodeURIComponent(branch)}&spec=${encodeURIComponent(spec)}`;
+}
+
+// The mechanical source-id rule the import page applies to an uploaded
+// file's NAME (never its path): lowercase, every non-alphanumeric run
+// collapsed to one hyphen, leading/trailing hyphens trimmed, at most 64
+// characters — the contract's [a-z0-9][a-z0-9-]{0,63} grammar. Mirrored
+// here so a spec can address a source row by the id the page derives.
+export function importSourceId(fileName: string): string {
+  const id = fileName
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 64);
+  return id || "source";
 }
