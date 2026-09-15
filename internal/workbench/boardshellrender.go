@@ -411,8 +411,12 @@ func writeASDPanels(b *strings.Builder, name string, asd *asdView) {
 		// that the import record separately describes the original copied
 		// content; it is not an ASD entry or evidence of acceptance"),
 		// beside the review packet whose ASD chain may still classify this
-		// creation as unclassified — never falsified here.
-		b.WriteString(`<p class="ritual-note asd-import-origin" data-testid="asd-import-origin"><a href="` + esc(asd.ImportRecordHref) + `">Source record for this import</a> &mdash; this spec was created by importing existing content. The record separately describes the original copied content, verified against the branch's committed bytes; it is not an ASD provenance entry (the review packet may still classify the creation as unclassified) and not evidence of acceptance.</p>`)
+		// creation as unclassified — never falsified here. The href comes
+		// from the PRESENCE of a record file in this working tree
+		// (specImportRecordHrefFor); verification is the record view's own
+		// successful ReadRecord, so this wording claims none and sends the
+		// reader there, where unavailable or tampered proof is disclosed.
+		b.WriteString(`<p class="ritual-note asd-import-origin" data-testid="asd-import-origin"><a href="` + esc(asd.ImportRecordHref) + `">Source record for this import</a> &mdash; this spec was created by importing existing content, and a record file is present in this working tree; it is not verified here. Open the record view to check the original copied content against the branch's committed bytes; it discloses unavailable or tampered proof. The record is not an ASD provenance entry (the review packet may still classify the creation as unclassified) and not evidence of acceptance.</p>`)
 	}
 	panel("asd-context", "get_design_context", "context", "Design context",
 		// vocab:identity — "the draft" names AC-5's current-draft content item (ASD protocol term), not a lifecycle state word
