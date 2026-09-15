@@ -53,7 +53,7 @@ func (s *Service) checkCleanContext(ctx context.Context, root string) error {
 		return fmt.Errorf("%w: checking checkout cleanliness: %v", ErrIOFailure, err)
 	}
 	if len(changed) > 0 {
-		return fmt.Errorf("%w: checkout has %d uncommitted or untracked path(s) (e.g. %q); commit, stage, or remove them before preview/apply — nothing is reset automatically", ErrDirtyContext, len(changed), changed[0])
+		return fmt.Errorf("%w: checkout has %d uncommitted or untracked path(s) (e.g. %q); commit or remove them before preview/apply — an index-staged edit is still uncommitted and is still refused, and nothing is reset automatically", ErrDirtyContext, len(changed), changed[0])
 	}
 	return nil
 }

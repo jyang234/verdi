@@ -204,6 +204,10 @@ func (s *Service) publishNew(ctx context.Context, root string, request Request, 
 		}
 	}
 
+	if err := s.recheckPublicationContext(ctx, root, preview); err != nil {
+		return Result{}, err
+	}
+
 	if err := gitx.UpdateRef(ctx, root, designBranchRef(slug), commit); err != nil {
 		result, ok, reconcileErr := s.reconcileExisting(ctx, root, request, plan, preview.Digest, actor, branch, slug)
 		if reconcileErr != nil {
@@ -226,6 +230,34 @@ func (s *Service) publishNew(ctx context.Context, root string, request Request, 
 		SpecRef: preview.SpecRef, PreviewDigest: preview.Digest, StatementsDeferred: request.DeferStatements,
 		Disclosures: nonBlockingFindings(preview.Findings), BoardPath: boardPath(slug),
 	}, nil
+}
+
+// recheckPublicationContext re-verifies, immediately before the create-only
+// ref update, the two context facts the prepared candidate is bound to
+// (spec-import-contract.md: "Recheck HEAD/context before publication"):
+// the tracked checkout/index is still clean, and HEAD is still exactly the
+// preview's recorded base commit. Neither check subsumes the other — an
+// uncommitted window change leaves HEAD alone, and a committed one leaves
+// the checkout clean — so both run here, after publishNew's fault seam so
+// hermetic tests can drive either one.
+//
+// It refuses; it never re-parents, resets or overwrites. Re-parenting the
+// already-built candidate onto a new HEAD would publish a tree no preview
+// digest binds (and could publish over a spec identity that appeared in
+// the window), so the operator is told to re-preview against the context
+// that actually exists now.
+func (s *Service) recheckPublicationContext(ctx context.Context, root string, preview PreviewResult) error {
+	if err := s.checkCleanContext(ctx, root); err != nil {
+		return err
+	}
+	head, err := gitx.RevParse(ctx, root, "HEAD")
+	if err != nil {
+		return fmt.Errorf("%w: re-reading HEAD before publication: %v", ErrIdentityUnavailable, err)
+	}
+	if head != preview.BaseCommit {
+		return fmt.Errorf("%w: HEAD moved from the preview's base commit %s to %s before publication; the prepared candidate is bound to the old context and is never re-parented — re-run preview against the current HEAD and apply that digest", ErrStalePreview, preview.BaseCommit, head)
+	}
+	return nil
 }
 
 // reconcileExisting attempts the contract's already-created reconciliation
