@@ -105,8 +105,16 @@ var verbUsage = map[string]string{
 	"matrix": "usage: verdi matrix [--preview] --json <story-or-feature-ref>\n       verdi matrix <story-or-feature-ref> [--preview]",
 	"rollup": "usage: verdi rollup <jira:STORY-KEY | spec/name> --publish [--force-local]",
 	// vocab:identity — CLI invocation grammar ("verdi close", identity)
-	"close":           "usage: verdi close <jira:STORY-KEY | spec/name> [--force-local]\n       verdi close --preflight <jira:STORY-KEY | spec/name> [--force-local]\n       verdi close --prepare <jira:STORY-KEY | spec/name> [--force-local]",
-	"disposition":     dispositionUsage + "\n" + dispositionRecordUsage,
+	"close": "usage: verdi close <jira:STORY-KEY | spec/name> [--force-local]\n       verdi close --preflight <jira:STORY-KEY | spec/name> [--force-local]\n       verdi close --prepare <jira:STORY-KEY | spec/name> [--force-local]",
+	// A clean usage line, not dispositionUsage/dispositionRecordUsage
+	// reused verbatim (ac-2 review fix): both those constants carry their
+	// own "disposition: "/"disposition record: " ERROR-prefix (their real
+	// job is prefixing a diagnostic line, not standing alone as help text)
+	// — hand-written here the same way "context" above is, so this entry
+	// reads as a clean "usage: verdi disposition ..." like every other
+	// row, never a stray "disposition: usage: ...".
+	"disposition": "usage: verdi disposition --rationale <text> [--amend] [--] <spec-ref> <finding-id> <fixed|accepted-deviation> (-- ends option parsing)\n" +
+		"       verdi disposition record --report PATH --row INPUT_ID --target REF --target-digest DIGEST --conclusion no-conflict|conflict --compensating-control TEXT [--compensating-control TEXT ...] --expiry DATE --approver ROLE=PRINCIPAL_ID [--approver ROLE=PRINCIPAL_ID ...] --id NAME --title TEXT --owner TEXT [--owner TEXT ...] [--root DIR]",
 	"waivers":         "verdi waivers: not implemented (out of v0 scope)",
 	"verify-artifact": "verdi verify-artifact: not implemented (out of v0 scope)",
 	"dex":             "usage: verdi dex build -o <dir>",
