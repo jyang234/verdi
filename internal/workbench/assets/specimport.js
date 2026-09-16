@@ -1,27 +1,44 @@
 // specimport.js — the spec importer's browser script (spec-import-contract
-// "Errors and browser behavior"; plan Task 4 UI). Dependency-free, no
-// frameworks, no storage authority. It owns
+// "Errors and browser behavior"; plan Task 4 UI; the owner-approved
+// usability correction — main's usability-ui-adjudication over the FABLE
+// D1-D6 proposal). Dependency-free, no frameworks, no storage authority.
+// It owns
 //
 //   - file reading: each chosen file's exact bytes, base64-encoded without
 //     any text decode, labeled by the file NAME (never a path), with a
 //     mechanical source id derived from that name;
 //   - request composition: the exact strict Request JSON the server's ONE
-//     decoder accepts — sources, format, target, dispositions, explicit
+//     decoder accepts — sources, format, target, the two choices, explicit
 //     mappings and declared links — nothing inferred, nothing invented;
-//   - the preview fetch and its rendering: findings with their next
-//     corrective action, fields with their source origins, evidence and
-//     edit controls, byte coverage, sources;
+//   - the preview fetch and its rendering, in reading order: a plain-
+//     language readiness line; the blockers, each with guidance keyed by
+//     finding CODE and TARGET SHAPE (never by message text) and a jump to
+//     the card it concerns or into the advanced controls; the statements
+//     (present cards, or placeholders offering the direct "Write it" and
+//     pair-TODO actions); the evidence helper the page serves BEFORE the
+//     cards; the object cards under an origin-neutral count, each with its
+//     exact provenance, its status, a copy of its own findings beside the
+//     controls that resolve them, and its evidence controls; the rest of
+//     the source with its explicit keep action; and the byte accounting
+//     under a collapsed technical region;
 //   - invalidation: EVERY edit (file, range, primary, format, target,
-//     disposition, mapping, evidence, link) bumps an edit epoch, marks the
-//     shown preview stale, and clears and disables the confirmation; a
-//     preview response for an older epoch — or an older request — is
-//     discarded on arrival, so a stale response can never reinstate a
-//     confirmation;
+//     choice, mapping, evidence, link, written text) bumps an edit epoch,
+//     marks the shown preview stale — replacing the current-sounding
+//     readiness line, marking every earlier finding as such and restating
+//     each card's status from the page's own choices as NOT yet previewed
+//     — and clears and disables the confirmation; a preview response for
+//     an older epoch — or an older request — is discarded on arrival, so a
+//     stale response can never reinstate a confirmation;
 //   - apply: only the exact request bytes previewed, with that preview's
 //     digest in X-Verdi-Import-Preview, and only while confirmed.
 //
-// Everything the server or a source supplies is rendered with textContent;
-// no source byte becomes markup. No polling, no AI, no provider.
+// Nothing is chosen for the user: no evidence kind, no retention, no
+// deferral. The page's own actions (keep the remaining text, leave both
+// statements as TODOs, apply one card's kinds to every criterion) are
+// explicit clicks that set the form's own controls; the request flags and
+// mapping shapes are unchanged. Everything the server or a source supplies
+// is rendered with textContent; no source byte becomes markup. No polling,
+// no AI, no provider, no client-side acceptance judgment.
 (function () {
   "use strict";
   var form = document.getElementById("import-form");
@@ -40,8 +57,12 @@
   var staleNote = $("import-stale-note");
   var readyEl = $("import-ready");
   var digestEl = $("import-digest");
+  var findingsHeading = $("import-findings-heading");
   var findingsEl = $("import-findings");
+  var statementsEl = $("import-statements");
+  var guideEl = $("import-evidence-guide");
   var fieldsEl = $("import-fields");
+  var remainingEl = $("import-remaining");
   var coverageBody = $("import-coverage").querySelector("tbody");
   var sourcesEl = $("import-sources");
   var confirmEl = $("import-confirm");
@@ -50,26 +71,75 @@
   var retryEl = $("import-retry");
   var retryNote = $("import-retry-note");
   var retryBtn = $("import-retry-btn");
+  var advancedEl = $("import-advanced");
+  var mappingCountEl = $("import-mapping-count");
+  var linkCountEl = $("import-link-count");
+  var storyNote = $("import-story-note");
+  var classSelect = $("import-class");
+  var formatSelect = $("import-format");
+  var retainEl = $("import-retain");
+  var deferEl = $("import-defer");
 
   var EVIDENCE_KINDS = ["static", "behavioral", "runtime", "attestation"];
+  // Concrete words with the technical kind in parentheses (the evidence
+  // model's four kinds; meanings in the served helper). The enum values on
+  // the wire and in data-kind stay bare.
+  var KIND_LABELS = {
+    static: "Code fact (static)",
+    behavioral: "Suite test (behavioral)",
+    runtime: "Live probe (runtime)",
+    attestation: "Human sign-off (attestation)",
+  };
   var TRANSFORMS = ["identity", "trim-blank-lines", "collapse-whitespace", "list-item"];
   var LINK_TYPES = ["implements", "resolves", "supersedes", "exempts", "verifies", "derived-from", "annotates", "depends-on", "story", "impacts", "challenges"];
   var MAX_SOURCES = 32;
+  var STATEMENT_NAMES = { problem: "Problem statement", outcome: "Outcome statement" };
+  var OBJECT_GROUPS = [
+    ["ac-", "acceptance criterion", "acceptance criteria"],
+    ["co-", "constraint", "constraints"],
+    ["dc-", "decision", "decisions"],
+    ["oq-", "open question", "open questions"],
+  ];
 
-  // Finding code -> the next corrective action, in plain words.
+  // Finding code -> a plain-language title. The code itself stays visible
+  // beside it; the server's message is always rendered verbatim.
+  var FINDING_TITLES = {
+    "missing-statement": "Statement missing from the source",
+    "empty-field": "Field resolved to nothing",
+    "ambiguous-field": "Field labeled more than once",
+    "multiple-targets": "More than one document selected",
+    "unsupported-structure": "Cannot be composed as selected",
+    "missing-evidence": "Evidence kinds not chosen",
+    "unresolved-coverage": "Leftover source text has no choice yet",
+    "source-id-requires-mapping": "Source id needs an explicit mapping",
+    "invalid-candidate": "Fails the store's validation",
+    "existing-corpus-finding": "Pre-existing store finding",
+    "statements-deferred": "TODO placeholder in place",
+  };
+  // Finding code -> the next corrective action, in plain words. Guidance
+  // is keyed by code (and, for unsupported-structure, by the target's
+  // shape), never by matching message text.
   var GUIDANCE = {
-    "missing-statement": "Add a labeled Problem or Outcome section to the primary source, add an explicit mapping for it below, or tick 'Defer both statements'.",
-    "empty-field": "The labeled section is empty: add its text to the source or map the field explicitly.",
-    "ambiguous-field": "The source labels this field more than once; add an explicit mapping naming the text to use. The importer never picks one.",
+    "missing-statement": "Write it on its card below, add a labeled Problem or Outcome section to the source, or leave both statements as TODOs for now (an explicit choice).",
+    "empty-field": "The labeled section is empty: add its text to the source or map the field explicitly in Advanced.",
+    "ambiguous-field": "The source labels this field more than once; write the text to use on its card, or add an explicit mapping naming it in Advanced. The importer never picks one.",
     "multiple-targets": "The source holds more than one top-level document; narrow the line range to one.",
-    "unsupported-structure": "The primary has no recognizable heading structure for this format; choose another format or map the fields explicitly.",
-    "missing-evidence": "Select the evidence kinds for this criterion below (your selection, never inferred).",
-    "unresolved-coverage": "Map the remaining bytes, or tick 'Retain every unmapped byte' to acknowledge them as retained-only source.",
-    "source-id-requires-mapping": "The item carries its own id; add an explicit mapping that preserves or resolves it.",
-    "invalid-candidate": "The composed spec fails validation; correct the named field or target.",
-    "existing-corpus-finding": "A pre-existing corpus finding, disclosed separately; it was not caused by this import.",
+    "missing-evidence": "Choose the evidence kinds on this criterion's card (your choice, never inferred); the helper above the cards explains them.",
+    "unresolved-coverage": "Choose 'Keep the remaining source text as reference material' (in step 4, or below under the rest of the source), or map the remaining bytes in Advanced.",
+    "source-id-requires-mapping": "The item carries its own id; add an explicit mapping in Advanced that preserves or resolves it.",
+    "invalid-candidate": "The composed spec fails the store's validation; the message names the rule. Correct the named field, target, link or tracker reference.",
+    "existing-corpus-finding": "A pre-existing store finding, disclosed separately; it was not caused by this import.",
     "statements-deferred": "Disclosure only: a TODO placeholder stands in for this statement until it is replaced on the board.",
   };
+  // unsupported-structure is one closed code for several causes. Only the
+  // primary-target finding is the heading fault the Markdown reader
+  // reports; every other target (template, target.class, a field id, or
+  // none) gets neutral, cause-aware guidance that repeats no assumption
+  // about the source or the template being sound.
+  var GUIDANCE_PRIMARY_STRUCTURE =
+    "The primary file has no Markdown heading this profile can read: add a title heading, choose another reading profile, or map the fields explicitly in Advanced.";
+  var GUIDANCE_STRUCTURE_NEUTRAL =
+    "The importer could not compose the candidate as selected; the message names what it could not express (a template, model, class or field). That is not a claim that the source or the template is otherwise sound: correct what the message names, then preview again.";
   var ERROR_GUIDANCE = {
     "dirty-context": "Commit or remove the named paths in the serving checkout, then preview again; nothing was reset.",
     "stale-preview": "The server recomputed a different digest; preview again and confirm the fresh preview.",
@@ -79,7 +149,7 @@
     "actor-forbidden": "This write's actor was refused.",
     "invalid-request": "Correct the named input and preview again.",
     "invalid-source": "The named source cannot be honored as selected (bytes, range or encoding).",
-    "unsupported-format": "Choose one of the listed formats; the F13 profile only accepts its pinned primary bytes.",
+    "unsupported-format": "Choose one of the listed reading profiles; the F13 profile only accepts its pinned primary bytes.",
   };
 
   var state = {
@@ -122,8 +192,53 @@
   function isAC(target) {
     return typeof target === "string" && target.indexOf("ac-") === 0;
   }
+  function isStatement(target) {
+    return target === "problem" || target === "outcome";
+  }
   function slugOf(specRef) {
     return String(specRef || "").replace(/^spec\//, "");
+  }
+  function kindLabel(kind) {
+    return KIND_LABELS[kind] || kind;
+  }
+  function plural(n, one, many) {
+    return n + " " + (n === 1 ? one : many);
+  }
+  function sameKinds(a, b) {
+    var x = (a || []).slice().sort().join(",");
+    var y = (b || []).slice().sort().join(",");
+    return x === y;
+  }
+  function isEditable() {
+    return formatSelect.value !== "native";
+  }
+  // tick sets one of the form's own checkboxes from a page action and lets
+  // the form's ordinary change path (sync, invalidate) run — the same
+  // effect as the user ticking it in step 4.
+  function tick(box) {
+    if (!box || box.checked) return;
+    box.checked = true;
+    box.dispatchEvent(new Event("change", { bubbles: true }));
+  }
+  function openAdvanced(focusId) {
+    if (advancedEl) advancedEl.open = true;
+    var target = focusId ? $(focusId) : null;
+    if (target && typeof target.focus === "function") target.focus();
+  }
+  function syncAdvancedSummary() {
+    if (mappingCountEl) mappingCountEl.textContent = String(state.mappings.length);
+    if (linkCountEl) linkCountEl.textContent = String(state.links.length);
+  }
+  // syncClassNotes shows the class-specific notes the page serves for both
+  // classes: the story's link requirement in the target step, and the
+  // evidence helper's floor sentence for the chosen class.
+  function syncClassNotes() {
+    var cls = classSelect.value;
+    if (storyNote) storyNote.hidden = cls !== "story";
+    var notes = document.querySelectorAll("[data-import-class]");
+    for (var i = 0; i < notes.length; i++) {
+      notes[i].hidden = notes[i].getAttribute("data-import-class") !== cls;
+    }
   }
 
   // The mechanical source id: the file NAME lowercased, every
@@ -185,10 +300,28 @@
         " The inputs changed since that attempt, so it cannot be retried as-is and its outcome is still unknown: preview again — creating under that name answers already-created if it was published, or target-exists.";
     }
     if (state.preview) {
-      resultEl.setAttribute("data-stale", "true");
-      staleNote.hidden = false;
+      markStale("Not previewed since your last edit: the findings and statuses below are earlier results. Preview again to see the current state.");
     }
     setNextAction();
+  }
+  // markStale turns the shown preview into an explicitly EARLIER result:
+  // the current-sounding readiness line is replaced, every finding (in the
+  // list and on the cards) is marked as an earlier result, and each card's
+  // status is restated from the page's own choices as not yet previewed.
+  // The confirmation is never re-enabled here.
+  function markStale(text) {
+    resultEl.setAttribute("data-stale", "true");
+    staleNote.hidden = false;
+    readyEl.setAttribute("data-stale", "true");
+    readyEl.textContent = text;
+    findingsHeading.textContent = "Earlier results (from the last preview)";
+    var items = resultEl.querySelectorAll("#import-findings li[data-code], .import-field-findings li[data-code]");
+    for (var i = 0; i < items.length; i++) {
+      if (items[i].hasAttribute("data-earlier")) continue;
+      items[i].setAttribute("data-earlier", "true");
+      items[i].appendChild(el("span", { class: "import-finding-earlier" }, " (earlier result)"));
+    }
+    refreshCardStatuses();
   }
   function previewCurrent() {
     return state.preview && state.preview.epoch === state.epoch;
@@ -364,6 +497,13 @@
     }
     m.text = text;
   }
+  // setWritten records a statement written on a placeholder card: a
+  // user-added mapping (no source span) for a target no field resolved.
+  function setWritten(target, text) {
+    var m = ensureMapping(target);
+    m.text = text;
+    dropEmptyMapping(target);
+  }
 
   function renderMappings() {
     clear(mappingList);
@@ -379,7 +519,7 @@
       var sourceLabel = el("label");
       sourceLabel.appendChild(document.createTextNode("Source "));
       var source = el("select", { class: "import-mapping-source" });
-      source.appendChild(el("option", { value: "" }, "(none — user text only)"));
+      source.appendChild(el("option", { value: "" }, "(none — your text only)"));
       state.sources.forEach(function (s) {
         source.appendChild(el("option", { value: s.id }, s.label + " (" + s.id + ")"));
       });
@@ -423,12 +563,13 @@
         var box = el("input", { type: "checkbox", "data-kind": kind });
         box.checked = m.evidence.indexOf(kind) >= 0;
         lab.appendChild(box);
-        lab.appendChild(document.createTextNode(" " + kind));
+        lab.appendChild(document.createTextNode(" " + kindLabel(kind)));
         ev.appendChild(lab);
       });
       li.appendChild(ev);
       mappingList.appendChild(li);
     });
+    syncAdvancedSummary();
   }
   function syncMappingRow(li) {
     var index = parseInt(li.getAttribute("data-mapping-index"), 10);
@@ -475,6 +616,7 @@
       li.appendChild(el("button", { type: "button", class: "import-link-remove" }, "Remove"));
       linkList.appendChild(li);
     });
+    syncAdvancedSummary();
   }
   function syncLinkRow(li) {
     var index = parseInt(li.getAttribute("data-link-index"), 10);
@@ -489,6 +631,7 @@
     var t = e.target;
     if (!t || !t.closest) return;
     if (t === filesInput) return; // handled by the change reader above
+    if (t === classSelect) syncClassNotes();
     var sourceRow = t.closest("#import-source-list li");
     if (sourceRow) {
       if (t.name === "import-primary") state.primary = t.value;
@@ -508,6 +651,11 @@
   form.addEventListener("click", function (e) {
     var t = e.target;
     if (!t || !t.closest) return;
+    var opener = t.closest(".import-open-advanced");
+    if (opener) {
+      openAdvanced(opener.getAttribute("data-focus"));
+      return; // the anchor's own navigation to #import-advanced proceeds
+    }
     var removeSrc = t.closest(".import-source-remove");
     if (removeSrc) {
       removeSource(removeSrc.closest("li").getAttribute("data-source-id"));
@@ -563,8 +711,8 @@
   function buildRequest() {
     var req = {
       schema: "verdi.spec-import-request/v1",
-      target: { slug: $("import-slug").value.trim(), class: $("import-class").value, title: $("import-title").value.trim() },
-      format: $("import-format").value,
+      target: { slug: $("import-slug").value.trim(), class: classSelect.value, title: $("import-title").value.trim() },
+      format: formatSelect.value,
       primary: state.primary,
       sources: state.sources.map(function (s) {
         var o = { id: s.id, label: s.label, data: s.data };
@@ -572,8 +720,8 @@
         if (s.endLine) o.end_line = s.endLine;
         return o;
       }),
-      defer_statements: $("import-defer").checked,
-      retain_unmapped: $("import-retain").checked,
+      defer_statements: deferEl.checked,
+      retain_unmapped: retainEl.checked,
     };
     var story = $("import-story").value.trim();
     if (story) req.target.story = story;
@@ -684,40 +832,79 @@
       });
   }
 
+  // readinessSummary states the server's readiness in plain words: the
+  // counts come from the finding CODES the server returned, never from a
+  // judgment of the page's own.
+  function readinessSummary(result) {
+    if (result.ready) return "Ready: no blocking findings. Confirm below to create exactly this proposal.";
+    var counts = {};
+    var blocking = 0;
+    (result.findings || []).forEach(function (f) {
+      if (!f.blocking) return;
+      blocking++;
+      counts[f.code] = (counts[f.code] || 0) + 1;
+    });
+    var parts = [];
+    var named = 0;
+    if (counts["missing-evidence"]) {
+      parts.push(plural(counts["missing-evidence"], "acceptance criterion needs", "acceptance criteria need") + " evidence kinds");
+      named += counts["missing-evidence"];
+    }
+    if (counts["missing-statement"]) {
+      parts.push(plural(counts["missing-statement"], "statement is", "statements are") + " missing");
+      named += counts["missing-statement"];
+    }
+    if (counts["unresolved-coverage"]) {
+      parts.push(plural(counts["unresolved-coverage"], "source has", "sources have") + " leftover text with no choice yet");
+      named += counts["unresolved-coverage"];
+    }
+    if (blocking - named > 0) parts.push(plural(blocking - named, "other blocking finding", "other blocking findings"));
+    return "Not ready: " + parts.join("; ") + ". Correct them below, then preview again.";
+  }
+  function findingTitle(f) {
+    if (f.code === "unsupported-structure" && f.target === "primary") return "No heading structure found in the primary";
+    return FINDING_TITLES[f.code] || f.code;
+  }
+  function guidanceFor(f) {
+    if (f.code === "unsupported-structure") return f.target === "primary" ? GUIDANCE_PRIMARY_STRUCTURE : GUIDANCE_STRUCTURE_NEUTRAL;
+    return GUIDANCE[f.code] || "";
+  }
+  function groupFindings(result) {
+    var byTarget = {};
+    (result.findings || []).forEach(function (f) {
+      if (!f.target) return;
+      if (!byTarget[f.target]) byTarget[f.target] = [];
+      byTarget[f.target].push(f);
+    });
+    return byTarget;
+  }
+  // cardIdFor names the card (or statement placeholder) a finding's target
+  // concerns, once the cards are rendered; "" for targets that are not a
+  // field (template, target.class, a path, nothing).
+  function cardIdFor(target) {
+    if (!target) return "";
+    if ($("import-field-" + target)) return "import-field-" + target;
+    if ($("import-missing-" + target)) return "import-missing-" + target;
+    return "";
+  }
+
   function renderPreview(result) {
     resultEl.hidden = false;
     resultEl.setAttribute("data-stale", "false");
     resultEl.setAttribute("data-ready", String(!!result.ready));
     staleNote.hidden = true;
-    var blocking = blockingCount(result);
     readyEl.setAttribute("data-ready", String(!!result.ready));
-    readyEl.textContent = result.ready
-      ? "Ready: no blocking findings. Confirm below to create exactly this proposal."
-      : "Not ready: " + blocking + " blocking finding" + (blocking === 1 ? "" : "s") + ". Correct them, then preview again.";
+    readyEl.setAttribute("data-stale", "false");
+    readyEl.textContent = readinessSummary(result);
     digestEl.textContent = result.digest || "";
 
-    clear(findingsEl);
-    (result.findings || []).forEach(function (f) {
-      var li = el("li", { "data-code": f.code, "data-target": f.target || "", "data-blocking": String(!!f.blocking) });
-      li.appendChild(el("strong", null, f.code + (f.blocking ? " (blocking)" : " (disclosure)")));
-      li.appendChild(document.createTextNode(" "));
-      if (f.target) li.appendChild(el("span", { class: "import-finding-target" }, f.target + ": "));
-      li.appendChild(el("span", { class: "import-finding-message" }, f.message));
-      if (GUIDANCE[f.code]) li.appendChild(el("span", { class: "import-finding-next" }, "Next: " + GUIDANCE[f.code]));
-      findingsEl.appendChild(li);
-    });
-    if (!(result.findings || []).length) findingsEl.appendChild(el("li", { class: "empty" }, "None."));
-
-    clear(fieldsEl);
-    var editable = $("import-format").value !== "native";
-    (result.fields || []).forEach(function (f) {
-      fieldsEl.appendChild(renderField(f, editable));
-    });
-    if (!(result.fields || []).length) {
-      fieldsEl.appendChild(el("p", { class: "empty" }, editable
-        ? "No fields resolved yet."
-        : "Native import: the candidate is the primary source byte for byte, so there are no per-field mappings to show or edit."));
-    }
+    var editable = isEditable();
+    var findingsByTarget = groupFindings(result);
+    guideEl.hidden = !editable;
+    renderStatements(result, editable, findingsByTarget);
+    renderFields(result, editable, findingsByTarget);
+    renderFindings(result);
+    renderRemaining(result, editable);
 
     clear(coverageBody);
     (result.coverage || []).forEach(function (c) {
@@ -751,40 +938,183 @@
     applyBtn.disabled = true;
   }
 
-  function renderField(f, editable) {
-    var art = el("article", { class: "import-field", "data-testid": "import-field-" + f.target, "data-target": f.target, "data-origin": f.origin });
-    var h = el("h4", null, f.target);
-    h.appendChild(el("span", { class: "import-origin", "data-testid": "import-field-origin-" + f.target }, f.origin));
-    art.appendChild(h);
-    art.appendChild(el("pre", { class: "import-field-text", "data-testid": "import-field-text-" + f.target }, f.text));
-    var spans = el("p", { class: "import-field-spans", "data-testid": "import-field-spans-" + f.target });
-    if (f.origin === "generated-deferral") {
-      spans.textContent = "Generated TODO placeholder — visibly incomplete, not source text.";
-    } else if (f.spans && f.spans.length) {
-      spans.textContent = f.spans
+  // renderFindings lists every finding the server returned: a plain title,
+  // the code, the target, the verbatim message, the next action and a jump
+  // to the card it concerns — or, for a finding that names no card, into
+  // the advanced controls that can change the candidate.
+  function renderFindings(result) {
+    clear(findingsEl);
+    findingsHeading.textContent = result.ready ? "Findings (none blocking)" : "What still blocks creation";
+    (result.findings || []).forEach(function (f) {
+      var li = el("li", { "data-code": f.code, "data-target": f.target || "", "data-blocking": String(!!f.blocking) });
+      li.appendChild(el("strong", { class: "import-finding-title" }, findingTitle(f) + (f.blocking ? " (blocking)" : " (disclosure)")));
+      li.appendChild(el("code", { class: "import-finding-code" }, f.code));
+      li.appendChild(document.createTextNode(" "));
+      if (f.target) li.appendChild(el("span", { class: "import-finding-target" }, f.target + ": "));
+      li.appendChild(el("span", { class: "import-finding-message" }, f.message));
+      var next = guidanceFor(f);
+      if (next) li.appendChild(el("span", { class: "import-finding-next" }, "Next: " + next));
+      var jumps = el("span", { class: "import-finding-jumps" });
+      var cardId = cardIdFor(f.target);
+      if (cardId) {
+        jumps.appendChild(el("a", { class: "import-finding-jump", href: "#" + cardId }, "Go to " + f.target));
+      } else if (f.code === "unresolved-coverage") {
+        jumps.appendChild(el("a", { class: "import-finding-jump", href: "#import-remaining" }, "Go to the rest of the source"));
+      } else if (f.blocking) {
+        jumps.appendChild(el("a", { class: "import-finding-jump import-open-advanced", href: "#import-advanced", "data-focus": "import-add-mapping" }, "Open Advanced (mappings and links)"));
+      }
+      if (jumps.firstChild) li.appendChild(jumps);
+      findingsEl.appendChild(li);
+    });
+    if (!(result.findings || []).length) findingsEl.appendChild(el("li", { class: "empty" }, "None."));
+  }
+
+  // renderStatements: the Problem and Outcome cards when resolved, else a
+  // placeholder per missing statement carrying the direct actions. Native
+  // has neither (the candidate is the file).
+  function renderStatements(result, editable, findingsByTarget) {
+    clear(statementsEl);
+    if (!editable) return;
+    var byTarget = {};
+    (result.fields || []).forEach(function (f) {
+      byTarget[f.target] = f;
+    });
+    ["problem", "outcome"].forEach(function (t) {
+      if (byTarget[t]) statementsEl.appendChild(renderField(byTarget[t], editable, findingsByTarget[t] || [], 0));
+      else statementsEl.appendChild(renderMissingStatement(t, findingsByTarget[t] || []));
+    });
+  }
+  function renderMissingStatement(target, fs) {
+    var name = STATEMENT_NAMES[target] || target;
+    var box = el("section", { class: "import-field import-field-missing", id: "import-missing-" + target, "data-testid": "import-missing-" + target, "data-target": target });
+    box.appendChild(el("h5", null, name));
+    box.appendChild(el("p", { class: "import-field-source" }, "No " + name + " was resolved from the source. Write one here, or leave both statements as TODOs for now; the importer never invents one."));
+    appendMirroredFindings(box, target, fs);
+    var actions = el("div", { class: "import-field-actions" });
+    actions.appendChild(el("button", { type: "button", class: "import-write", "data-write-target": target, "data-testid": "import-write-" + target }, "Write it"));
+    actions.appendChild(el("button", { type: "button", class: "import-defer-action", "data-testid": "import-defer-action-" + target }, "Leave both statements as TODOs for now"));
+    box.appendChild(actions);
+    var existing = findMapping(target);
+    var ta = el("textarea", { class: "import-write-text", "data-write-target": target, "data-testid": "import-write-text-" + target, "aria-label": "Your " + name });
+    ta.value = existing && existing.text ? existing.text : "";
+    ta.hidden = !(existing && existing.text);
+    box.appendChild(ta);
+    box.appendChild(el("p", { class: "import-hint" }, "Written text is recorded as your wording (user-added), never as source text. The TODO choice is the same as in step 4: it replaces both statements, one written here included."));
+    return box;
+  }
+
+  // renderFields: the object cards grouped by kind under an origin-neutral
+  // count (each card names its own source), or the native/empty notes.
+  function renderFields(result, editable, findingsByTarget) {
+    clear(fieldsEl);
+    if (!editable) {
+      fieldsEl.appendChild(el("p", { class: "empty" }, "Native import: the candidate is the primary source byte for byte, so there are no per-field mappings to show or edit."));
+      return;
+    }
+    var objects = (result.fields || []).filter(function (f) {
+      return !isStatement(f.target);
+    });
+    if (!objects.length) {
+      var none = el("p", { class: "empty" });
+      none.appendChild(document.createTextNode("No acceptance criteria or other objects were resolved from the source. Add them as manual field mappings in Advanced; each acceptance criterion also needs its evidence kinds. "));
+      none.appendChild(el("a", { class: "import-open-advanced", href: "#import-advanced", "data-focus": "import-add-mapping" }, "Open Advanced"));
+      fieldsEl.appendChild(none);
+      return;
+    }
+    var placed = {};
+    OBJECT_GROUPS.forEach(function (g) {
+      var members = objects.filter(function (f) {
+        return f.target.indexOf(g[0]) === 0;
+      });
+      if (!members.length) return;
+      var testid = g[0] === "ac-" ? "import-criteria-count" : "import-group-count-" + g[0].replace("-", "");
+      fieldsEl.appendChild(el("h4", { class: "import-group-heading", "data-testid": testid }, plural(members.length, g[1], g[2])));
+      members.forEach(function (f) {
+        placed[f.target] = true;
+        fieldsEl.appendChild(renderField(f, editable, findingsByTarget[f.target] || [], members.length));
+      });
+    });
+    objects.forEach(function (f) {
+      if (!placed[f.target]) fieldsEl.appendChild(renderField(f, editable, findingsByTarget[f.target] || [], 0));
+    });
+  }
+
+  // originSentence states one field's exact provenance in plain words:
+  // copied from a named source, the user's wording replacing a named
+  // source's text, the user's wording with no source text, or a generated
+  // placeholder. Never "from the primary" by assumption.
+  function originSentence(f) {
+    var labels = [];
+    (f.spans || []).forEach(function (sp) {
+      var l = labelOf(sp.source_id);
+      if (labels.indexOf(l) < 0) labels.push(l);
+    });
+    var from = labels.length ? labels.join(", ") : "the source";
+    switch (f.origin) {
+      case "copied-source":
+        return "Copied from " + from + ".";
+      case "user-edited-source":
+        return "Your wording, replacing text copied from " + from + " (the original selection stays in the record).";
+      case "user-added":
+        return "Your wording; no source text was selected for it.";
+      case "generated-deferral":
+        return "Generated TODO placeholder, not source text; it stands in until the real statement is written on the board.";
+      default:
+        return "Origin: " + f.origin + ".";
+    }
+  }
+  function spansSentence(f) {
+    if (f.origin === "generated-deferral") return "Generated TODO placeholder — visibly incomplete, not source text.";
+    if (f.spans && f.spans.length) {
+      return f.spans
         .map(function (sp) {
           return "from " + labelOf(sp.source_id) + " bytes [" + sp.start + "," + sp.end + ")" + (sp.transform ? " transform " + sp.transform : "");
         })
         .join("; ");
-    } else {
-      spans.textContent = "User-supplied text; no source span.";
     }
-    art.appendChild(spans);
+    return "User-supplied text; no source span.";
+  }
+  function appendMirroredFindings(node, target, fs) {
+    if (!fs || !fs.length) return;
+    var ul = el("ul", { class: "import-field-findings", "data-testid": "import-field-findings-" + target });
+    fs.forEach(function (f) {
+      var li = el("li", { "data-code": f.code, "data-blocking": String(!!f.blocking) });
+      li.appendChild(el("strong", null, findingTitle(f) + (f.blocking ? " (blocking): " : " (disclosure): ")));
+      li.appendChild(document.createTextNode(f.message));
+      ul.appendChild(li);
+    });
+    node.appendChild(ul);
+  }
+
+  function renderField(f, editable, fs, acCount) {
+    var art = el("article", { class: "import-field", id: "import-field-" + f.target, "data-testid": "import-field-" + f.target, "data-target": f.target, "data-origin": f.origin });
+    art.appendChild(el("h5", null, STATEMENT_NAMES[f.target] || f.target));
+    var source = el("p", { class: "import-field-source", "data-testid": "import-field-source-" + f.target });
+    source.appendChild(document.createTextNode(originSentence(f)));
+    source.appendChild(el("code", { class: "import-origin", "data-testid": "import-field-origin-" + f.target }, f.origin));
+    art.appendChild(source);
+    art.appendChild(el("pre", { class: "import-field-text", "data-testid": "import-field-text-" + f.target }, f.text));
 
     if (isAC(f.target)) {
+      var status = el("p", { class: "import-field-status", "data-testid": "import-field-status-" + f.target });
+      art.appendChild(status);
       var ev = el("fieldset", { class: "import-evidence" });
-      ev.appendChild(el("legend", null, "Evidence kinds (your selection)"));
+      ev.appendChild(el("legend", null, "Evidence kinds for " + f.target + " (your choice)"));
       EVIDENCE_KINDS.forEach(function (kind) {
         var lab = el("label");
         var box = el("input", { type: "checkbox", "data-evidence-target": f.target, "data-kind": kind, "data-testid": "import-evidence-" + f.target + "-" + kind });
         box.checked = (f.evidence || []).indexOf(kind) >= 0;
         lab.appendChild(box);
-        lab.appendChild(document.createTextNode(" " + kind));
+        lab.appendChild(document.createTextNode(" " + kindLabel(kind)));
         ev.appendChild(lab);
       });
-      ev.appendChild(el("button", { type: "button", class: "import-evidence-all", "data-evidence-target": f.target, "data-testid": "import-evidence-all-" + f.target }, "Use these kinds for every criterion"));
+      if (acCount > 1) {
+        ev.appendChild(el("button", { type: "button", class: "import-evidence-all", "data-evidence-target": f.target, "data-testid": "import-evidence-all-" + f.target },
+          "Apply " + f.target + "'s kinds to all " + plural(acCount, "acceptance criterion", "acceptance criteria")));
+      }
       art.appendChild(ev);
     }
+    appendMirroredFindings(art, f.target, fs);
     if (editable) {
       art.appendChild(el("button", { type: "button", class: "import-edit", "data-edit-target": f.target, "data-testid": "import-edit-" + f.target }, "Edit text"));
       var ta = el("textarea", { class: "import-edit-text", "data-edit-target": f.target, "data-testid": "import-edit-text-" + f.target, "aria-label": "Edited text for " + f.target });
@@ -792,8 +1122,86 @@
       ta.hidden = true;
       art.appendChild(ta);
     }
+    var tech = el("details", { class: "import-tech" });
+    tech.appendChild(el("summary", null, "Exact source bytes"));
+    tech.appendChild(el("p", { class: "import-field-spans", "data-testid": "import-field-spans-" + f.target }, spansSentence(f)));
+    art.appendChild(tech);
     art._field = f;
+    if (isAC(f.target)) renderStatus(art);
     return art;
+  }
+
+  // renderStatus restates one criterion card's evidence status: the kinds
+  // the last preview validated while it is current; after any edit, the
+  // page's own choice for that card, marked as changed (not yet previewed)
+  // when it differs from what the server last saw, else as an earlier
+  // result. The server's readiness is never inferred from this.
+  function renderStatus(art) {
+    var f = art._field;
+    var node = art.querySelector(".import-field-status");
+    if (!f || !node) return;
+    var server = f.evidence || [];
+    var m = findMapping(f.target);
+    var local = m ? m.evidence || [] : [];
+    var fresh = previewCurrent();
+    var chosen = fresh ? server : local;
+    var text = chosen.length ? "Evidence kinds chosen: " + chosen.map(kindLabel).join(", ") : "Evidence kinds: none chosen";
+    var status = "previewed";
+    if (!fresh) {
+      if (!sameKinds(local, server)) {
+        status = "changed";
+        text += " (changed since the last preview; preview again to check it)";
+      } else {
+        status = "earlier";
+        text += " (from the last preview)";
+      }
+    }
+    node.textContent = text;
+    node.setAttribute("data-status", status);
+  }
+  function refreshCardStatuses() {
+    var arts = fieldsEl.querySelectorAll("article[data-target]");
+    for (var i = 0; i < arts.length; i++) {
+      if (arts[i]._field && isAC(arts[i]._field.target)) renderStatus(arts[i]);
+    }
+  }
+
+  // renderRemaining: one plain sentence per source about the bytes that
+  // did not become fields, and — while any have no choice yet — the
+  // explicit keep action, which ticks the form's own checkbox.
+  function renderRemaining(result, editable) {
+    clear(remainingEl);
+    var anyUnresolved = false;
+    (result.coverage || []).forEach(function (c) {
+      var label = labelOf(c.source_id);
+      var text;
+      var stateName;
+      if (!editable) {
+        stateName = "candidate";
+        text = label + ": the whole selection (" + c.total_bytes + " bytes) is the candidate spec itself.";
+      } else if (c.unresolved_bytes > 0) {
+        anyUnresolved = true;
+        stateName = "unresolved";
+        text = label + ": " + c.unresolved_bytes + " bytes did not become a field and have no choice yet; this blocks creation." + (c.mapped_bytes ? " " + c.mapped_bytes + " bytes became fields." : "");
+      } else if (c.mapped_bytes === 0) {
+        stateName = "kept";
+        text = label + ": kept whole as reference material in the import record (" + c.retained_bytes + " bytes); no field was taken from it.";
+      } else if (c.retained_bytes > 0) {
+        stateName = "kept";
+        text = label + ": " + c.mapped_bytes + " bytes became fields; " + c.retained_bytes + " bytes are kept as reference material in the import record, not as spec fields.";
+      } else {
+        stateName = "mapped";
+        text = label + ": every selected byte became a field.";
+      }
+      remainingEl.appendChild(el("p", { "data-testid": "import-remaining-" + c.source_id, "data-state": stateName }, text));
+    });
+    if (anyUnresolved) {
+      var actions = el("div", { class: "import-field-actions" });
+      actions.appendChild(el("button", { type: "button", class: "import-keep-remaining", id: "import-keep-remaining", "data-testid": "import-keep-remaining" }, "Keep the remaining source text as reference material"));
+      actions.appendChild(el("span", { class: "import-hint" }, "The same choice as in step 4: stored with the import record, never promoted into fields, never a substitute for a missing or ambiguous field."));
+      remainingEl.appendChild(actions);
+    }
+    if (!(result.coverage || []).length) remainingEl.appendChild(el("p", { class: "empty" }, "No source coverage was reported."));
   }
 
   function checkedKinds(target) {
@@ -805,12 +1213,15 @@
     return kinds;
   }
   function fieldOf(target) {
-    var art = fieldsEl.querySelector('article[data-target="' + target + '"]');
+    var art = resultEl.querySelector('article[data-target="' + target + '"]');
     return art ? art._field : null;
   }
 
-  // Preview-side controls: evidence selection, apply-to-all, text edits.
-  fieldsEl.addEventListener("change", function (e) {
+  // Preview-side controls (delegated over the whole preview: statements,
+  // cards, the rest of the source): evidence selection, apply-to-all, text
+  // edits, written statements, the pair-TODO and keep actions, and the
+  // jumps into Advanced. Each choice is an explicit click or keystroke.
+  resultEl.addEventListener("change", function (e) {
     var t = e.target;
     if (!t || !t.getAttribute || !t.getAttribute("data-evidence-target") || t.tagName !== "INPUT") return;
     var target = t.getAttribute("data-evidence-target");
@@ -818,18 +1229,31 @@
     renderMappings();
     invalidate();
   });
-  fieldsEl.addEventListener("input", function (e) {
+  resultEl.addEventListener("input", function (e) {
     var t = e.target;
-    if (!t || !t.classList || !t.classList.contains("import-edit-text")) return;
-    var field = fieldOf(t.getAttribute("data-edit-target"));
-    if (!field) return;
-    setText(field, t.value);
-    renderMappings();
-    invalidate();
+    if (!t || !t.classList) return;
+    if (t.classList.contains("import-edit-text")) {
+      var field = fieldOf(t.getAttribute("data-edit-target"));
+      if (!field) return;
+      setText(field, t.value);
+      renderMappings();
+      invalidate();
+      return;
+    }
+    if (t.classList.contains("import-write-text")) {
+      setWritten(t.getAttribute("data-write-target"), t.value);
+      renderMappings();
+      invalidate();
+    }
   });
-  fieldsEl.addEventListener("click", function (e) {
+  resultEl.addEventListener("click", function (e) {
     var t = e.target;
     if (!t || !t.closest) return;
+    var opener = t.closest(".import-open-advanced");
+    if (opener) {
+      openAdvanced(opener.getAttribute("data-focus"));
+      return; // the anchor's own navigation to #import-advanced proceeds
+    }
     var all = t.closest(".import-evidence-all");
     if (all) {
       var from = all.getAttribute("data-evidence-target");
@@ -850,11 +1274,30 @@
     }
     var edit = t.closest(".import-edit");
     if (edit) {
-      var ta = fieldsEl.querySelector('textarea[data-edit-target="' + edit.getAttribute("data-edit-target") + '"]');
+      var ta = resultEl.querySelector('textarea[data-edit-target="' + edit.getAttribute("data-edit-target") + '"]');
       if (ta) {
         ta.hidden = false;
         ta.focus();
       }
+      return;
+    }
+    var write = t.closest(".import-write");
+    if (write) {
+      var wt = resultEl.querySelector('textarea.import-write-text[data-write-target="' + write.getAttribute("data-write-target") + '"]');
+      if (wt) {
+        wt.hidden = false;
+        wt.focus();
+      }
+      return;
+    }
+    if (t.closest(".import-defer-action")) {
+      tick(deferEl);
+      deferEl.focus();
+      return;
+    }
+    if (t.closest(".import-keep-remaining")) {
+      tick(retainEl);
+      retainEl.focus();
     }
   });
 
@@ -893,8 +1336,7 @@
         showError(r.data, attempt.request, late);
         if (!late) {
           if (r.data && (r.data.code === "stale-preview" || r.data.code === "dirty-context" || r.data.code === "unresolved")) {
-            resultEl.setAttribute("data-stale", "true");
-            staleNote.hidden = false;
+            markStale("The server refused this preview as no longer current (" + r.data.code + "): the results below are earlier results. Preview again before creating anything.");
             confirmEl.checked = false;
             confirmEl.disabled = true;
           } else {
@@ -941,7 +1383,7 @@
       summary += " The name is exactly the one you confirmed; nothing was renamed.";
     }
     if (res.statements_deferred) {
-      summary += " Both statements were deferred: TODO placeholders stand in until they are replaced on the board.";
+      summary += " Both statements were left as TODO placeholders: they stand in until they are replaced on the board.";
     }
     $("import-created-summary").textContent = summary;
     $("import-board-link").setAttribute("href", res.board_path || "#");
@@ -971,5 +1413,7 @@
     },
   };
 
+  syncClassNotes();
+  syncAdvancedSummary();
   setNextAction();
 })();
