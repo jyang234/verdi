@@ -3,11 +3,13 @@
 // and exit 0, and NEVER execute the verb. This file owns the two pieces
 // dispatch.go's central intercept needs: the top-level listing
 // (topLevelUsage) and the per-verb usage registry (verbUsage), keyed by
-// the same verb names verbPhase and the "lint" special case already
-// recognize. Neither "help" nor "version" (version.go) is ever added to
-// verbPhase — both are top-level dispatch tokens, never phase-numbered
-// verbs, so internal/specalign's CLI-verb inventory (a serialized shared
-// registry per CLAUDE.md) needs no change for either.
+// every verbPhase name, "lint" (dispatched before the phase map is ever
+// consulted), and — an ac-2 review fix — "help" and "version" themselves,
+// so topLevelUsage's own closing sentence holds for every row it lists.
+// Neither "help" nor "version" (version.go) is ever added to verbPhase —
+// both are top-level dispatch tokens, never phase-numbered verbs, so
+// internal/specalign's CLI-verb inventory (a serialized shared registry
+// per CLAUDE.md) needs no change for either.
 package main
 
 // isHelpToken reports whether tok is one of the three spellings ac-2
@@ -91,6 +93,15 @@ run "verdi <verb> help" (or --help/-h) for that verb's own usage.`
 // rest are fresh literals grounded in each verb's own real argument-shape
 // check, cited in the comment beside anything non-obvious.
 var verbUsage = map[string]string{
+	// "help" and "version" are NOT verbPhase keys (they're top-level
+	// dispatch tokens, dispatch.go), so TestVerbUsageRegistry_CoversEveryVerb
+	// does not require these two — they're here so topLevelUsage's own
+	// closing sentence ("run \"verdi <verb> help\" ... for that verb's own
+	// usage") is true for EVERY row it lists, "help" and "version"
+	// included (ac-2 review fix): dispatch.go's run() now checks
+	// verbHelpRequested(args[1:]) for both before acting on them.
+	"help":    "usage: verdi help\n       verdi --help\n       verdi -h",
+	"version": "usage: verdi version\n       verdi --version",
 	"lint":    "usage: verdi lint",
 	"design":  designVerbUsage,
 	"accept":  "usage: verdi accept <spec-ref|diagram-ref>",

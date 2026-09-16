@@ -246,3 +246,63 @@ func TestVerbUsageRegistry_CoversEveryVerb(t *testing.T) {
 		})
 	}
 }
+
+// TestHelp_VersionRowHelpShowsItsOwnUsage is ACCEPT-WITH-MINOR finding 2:
+// "verdi version --help"/"-h"/"help" (and the same three suffixes on
+// "--version") must print version's OWN verbUsage row, not silently run
+// the version report itself — otherwise topLevelUsage's closing sentence
+// ("run \"verdi <verb> help\" ... for that verb's own usage") would be
+// false for the "version" row specifically.
+func TestHelp_VersionRowHelpShowsItsOwnUsage(t *testing.T) {
+	bin := buildVerdiBinary(t)
+	dir := t.TempDir()
+
+	for _, verbForm := range []string{"version", "--version"} {
+		for _, help := range []string{"--help", "-h", "help"} {
+			t.Run(verbForm+"/"+help, func(t *testing.T) {
+				stdout, stderr, code := runVerdiBinary(t, bin, dir, nil, verbForm, help)
+				if code != 0 {
+					t.Fatalf("verdi %s %s exit = %d, want 0\nstdout: %s\nstderr: %s", verbForm, help, code, stdout, stderr)
+				}
+				if stderr != "" {
+					t.Fatalf("verdi %s %s stderr = %q, want empty", verbForm, help, stderr)
+				}
+				if !strings.Contains(stdout, "usage: verdi version") {
+					t.Fatalf("verdi %s %s stdout = %q, want version's own usage, not the version line itself", verbForm, help, stdout)
+				}
+				if strings.Contains(stdout, "verdi (devel)") || strings.HasPrefix(stdout, "verdi v") {
+					t.Fatalf("verdi %s %s stdout = %q, looks like the version report ran instead of showing usage", verbForm, help, stdout)
+				}
+			})
+		}
+	}
+}
+
+// TestHelp_HelpRowHelpShowsItsOwnUsage is the same finding 2 case for the
+// "help" row: "verdi help help"/"--help"/"-h" (and the same three
+// suffixes on "--help"/"-h" as the opening token) must print help's OWN
+// verbUsage row, not a second dump of topLevelUsage.
+func TestHelp_HelpRowHelpShowsItsOwnUsage(t *testing.T) {
+	bin := buildVerdiBinary(t)
+	dir := t.TempDir()
+
+	for _, opener := range []string{"help", "--help", "-h"} {
+		for _, help := range []string{"--help", "-h", "help"} {
+			t.Run(opener+"/"+help, func(t *testing.T) {
+				stdout, stderr, code := runVerdiBinary(t, bin, dir, nil, opener, help)
+				if code != 0 {
+					t.Fatalf("verdi %s %s exit = %d, want 0\nstdout: %s\nstderr: %s", opener, help, code, stdout, stderr)
+				}
+				if stderr != "" {
+					t.Fatalf("verdi %s %s stderr = %q, want empty", opener, help, stderr)
+				}
+				if !strings.Contains(stdout, "usage: verdi help") {
+					t.Fatalf("verdi %s %s stdout = %q, want help's own usage row", opener, help, stdout)
+				}
+				if strings.Contains(stdout, "verbs:") {
+					t.Fatalf("verdi %s %s stdout = %q, looks like topLevelUsage printed again instead of help's own row", opener, help, stdout)
+				}
+			})
+		}
+	}
+}

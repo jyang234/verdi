@@ -64,8 +64,14 @@ verbs: lint, design, accept, feature, build, align, sync, serve, mcp, matrix,
 // neither is ever added to verbPhase (internal/specalign's CLI-verb
 // inventory, a serialized shared registry per CLAUDE.md, stays untouched):
 // "help"/"--help"/"-h" print topLevelUsage (help.go) and exit 0; "version"/
-// "--version" print buildinfo.Line() (version.go) and exit 0. Right after,
-// the per-verb help intercept (ac-2) fires whenever the token immediately
+// "--version" print buildinfo.Line() (version.go) and exit 0 — UNLESS the
+// very next token is itself one of the three help spellings, in which
+// case each prints its OWN verbUsage row ("help"/"version") instead,
+// exactly like every other verb below (an ac-2 review fix: topLevelUsage's
+// closing sentence, "run `verdi <verb> help` ... for that verb's own
+// usage," must hold for every row it lists, "help" and "version"
+// included, not just the 29 phase-numbered ones). Right after, the
+// per-verb help intercept (ac-2) fires whenever the token immediately
 // following a KNOWN verb is one of those same three spellings: it prints
 // that verb's own registered usage (help.go's verbUsage) and returns
 // before the verb's real implementation is ever called — the fix for
@@ -82,10 +88,26 @@ func run(args []string, stderr io.Writer) int {
 
 	verb := args[0]
 	if isHelpToken(verb) {
+		// ac-2 review fix: "verdi help help"/"--help"/"-h" — and the
+		// three-spelling cross products this same check also reaches,
+		// e.g. "verdi --help help" — ask for the "help" ROW's own usage,
+		// not a second dump of topLevelUsage; makes topLevelUsage's
+		// closing sentence true for the "help" row too.
+		if verbHelpRequested(args[1:]) {
+			fmt.Fprintln(os.Stdout, verbUsageOrFallback("help"))
+			return 0
+		}
 		fmt.Fprintln(os.Stdout, topLevelUsage)
 		return 0
 	}
 	if verb == "version" || verb == "--version" {
+		// ac-2 review fix: "verdi version --help"/"-h"/"help" asks for
+		// the "version" row's own usage, not the version line itself —
+		// same closing-sentence guarantee as above, for the "version" row.
+		if verbHelpRequested(args[1:]) {
+			fmt.Fprintln(os.Stdout, verbUsageOrFallback("version"))
+			return 0
+		}
 		return cmdVersion(os.Stdout)
 	}
 
