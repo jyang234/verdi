@@ -21,6 +21,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -413,6 +414,73 @@ func runDesignStart(ctx context.Context, root string, kind artifact.SpecClass, s
 		return 2
 	}
 
+	// ac-6 (spec/uat-round-1, closing UAT-021) / dc-7 (I-130, amended L5
+	// review): resolve the new branch's BASE before cutting it — hoisted
+	// above statement sourcing (including any TTY interview, just below)
+	// so a refusal here never follows, then discards, an operator's typed
+	// answers. Resolution uses the same specstate.ResolveDefaultBranch
+	// precedence chain build start/gate/lint already share (internal/
+	// specstate/defaultbranch.go) — never the current checkout's HEAD. A
+	// checkout left on a stale side branch must not silently propagate its
+	// missing history into a fresh design branch: the exact UAT
+	// reproduction (checkout on a side branch behind main; `design start`
+	// cut design/<name> from HEAD and left the checkout switched onto it,
+	// disclosing neither fact).
+	//
+	// dc-7 scopes what "unresolvable" means: a repository with NO "origin"
+	// remote configured at all has no truth other than HEAD (a fresh local
+	// project — the README's own "start your own store" flow and
+	// cmd/e2eharness/unprovenboard.go both model exactly this state as
+	// supported, not refused) — this bases on HEAD and discloses the
+	// substitution rather than refusing. A repository that DOES have an
+	// "origin" remote but still cannot resolve (or disambiguate) its
+	// default branch is exactly the stale-default hazard UAT-021
+	// reported — that case still fails operationally (exit 2), reusing
+	// unresolvableDefaultBranchMessage's text (specstate, same wording
+	// every verb shares) so the diagnostic is identical across verbs for
+	// the identical failure.
+	var baseRef string
+	if defaultBranch, ok := specstate.ResolveDefaultBranch(ctx, root); ok {
+		baseCommit, rerr := gitx.RevParse(ctx, root, defaultBranch.Ref)
+		if rerr != nil {
+			fmt.Fprintln(stderr, "design start:", rerr)
+			return 2
+		}
+		// defaultBranch.Ref is already the disclosed choice resolveBranchRef
+		// makes for every other consumer — "origin/<name>" when that
+		// remote-tracking ref exists, otherwise the local branch name — so
+		// printing it verbatim both names the base and discloses which of
+		// the two was used, with no separate annotation needed.
+		fmt.Fprintf(stdout, "design start: base %s @ %s\n", defaultBranch.Ref, shortSHA(baseCommit))
+		baseRef = defaultBranch.Ref
+	} else {
+		// dc-7: distinguish "no origin remote at all" (disclosed HEAD
+		// fallback) from "origin exists but the default branch is
+		// unresolvable or ambiguous" (operational refusal, I-130) —
+		// git remote get-url origin failing with ErrNoSuchRemote is the
+		// signal for the former; any other read failure stays operational
+		// rather than guessed either way.
+		_, remoteErr := gitx.RemoteURL(ctx, root, "origin")
+		switch {
+		case errors.Is(remoteErr, gitx.ErrNoSuchRemote):
+			headCommit, herr := gitx.RevParse(ctx, root, "HEAD")
+			if herr != nil {
+				fmt.Fprintln(stderr, "design start:", herr)
+				return 2
+			}
+			fmt.Fprintf(stdout, "design start: default branch unresolved (no origin remote); basing on current HEAD %s — disclosed, not a default-branch base\n", shortSHA(headCommit))
+			baseRef = "HEAD"
+		case remoteErr != nil:
+			fmt.Fprintln(stderr, "design start:", remoteErr)
+			return 2
+		default:
+			// origin IS configured, but ResolveDefaultBranch still
+			// failed: exactly the stale-default hazard UAT-021 reported.
+			fmt.Fprintf(stderr, "design start: %s\n", unresolvableDefaultBranchMessage(ctx, root))
+			return 2
+		}
+	}
+
 	// Statement sourcing (spec/cli-creation ac-1/ac-2, ledger L-N7): the
 	// scaffold's problem/outcome content comes from exactly one of three
 	// explicit sources — never a silent TODO placeholder by default, the
@@ -459,36 +527,6 @@ func runDesignStart(ctx context.Context, root string, kind artifact.SpecClass, s
 		problemText, outcomeText = answers["Problem"], answers["Outcome"]
 	}
 
-	// ac-6 (spec/uat-round-1, closing UAT-021): resolve the new branch's
-	// BASE before cutting it — the same specstate.ResolveDefaultBranch
-	// precedence chain build start/gate/lint already share (internal/
-	// specstate/defaultbranch.go) — never the current checkout's HEAD. A
-	// checkout left on a stale side branch must not silently propagate its
-	// missing history into a fresh design branch: the exact UAT
-	// reproduction (checkout on a side branch behind main; `design start`
-	// cut design/<name> from HEAD and left the checkout switched onto it,
-	// disclosing neither fact). An unresolvable default branch fails
-	// operationally (exit 2) rather than guessing HEAD; this reuses
-	// buildstart.go's own unresolvableDefaultBranchMessage verbatim (same
-	// package) so the diagnostic text is identical across verbs for the
-	// identical failure.
-	defaultBranch, ok := specstate.ResolveDefaultBranch(ctx, root)
-	if !ok {
-		fmt.Fprintf(stderr, "design start: %s\n", unresolvableDefaultBranchMessage(ctx, root))
-		return 2
-	}
-	baseCommit, err := gitx.RevParse(ctx, root, defaultBranch.Ref)
-	if err != nil {
-		fmt.Fprintln(stderr, "design start:", err)
-		return 2
-	}
-	// defaultBranch.Ref is already the disclosed choice resolveBranchRef
-	// makes for every other consumer — "origin/<name>" when that
-	// remote-tracking ref exists, otherwise the local branch name —
-	// so printing it verbatim both names the base and discloses which of
-	// the two was used, with no separate annotation needed.
-	fmt.Fprintf(stdout, "design start: base %s @ %s\n", defaultBranch.Ref, shortSHA(baseCommit))
-
 	beforeBranch, err := gitx.CurrentBranch(ctx, root)
 	if err != nil {
 		fmt.Fprintln(stderr, "design start:", err)
@@ -511,7 +549,7 @@ func runDesignStart(ctx context.Context, root string, kind artifact.SpecClass, s
 	// separate, out-of-scope design) — CheckoutNewBranchFrom now cuts the
 	// branch from the resolved default branch rather than HEAD.
 	branch := "design/" + name
-	if err := gitx.CheckoutNewBranchFrom(ctx, root, branch, defaultBranch.Ref); err != nil {
+	if err := gitx.CheckoutNewBranchFrom(ctx, root, branch, baseRef); err != nil {
 		fmt.Fprintln(stderr, "design start:", err)
 		return 2
 	}

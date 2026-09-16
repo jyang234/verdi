@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -28,7 +29,7 @@ func seedFakeProvider(t *testing.T) *providerfake.Provider {
 // and stubs per 05 §CLI's own exit criterion), board placeholder printed.
 func TestRunDesignStart_Happy(t *testing.T) {
 	repo := buildPhase7Repo(t)
-	t.Setenv("CI_DEFAULT_BRANCH", "main")
+	t.Setenv("CI_DEFAULT_BRANCH", "")
 	ctx := context.Background()
 	manifest := phase7Manifest(t)
 	deps := designDeps{Provider: seedFakeProvider(t), Runner: nil, GoTest: fakeGoTest{}, DeferStatements: true}
@@ -92,7 +93,7 @@ func TestRunDesignStart_Happy(t *testing.T) {
 // empty story: field.
 func TestRunDesignStart_FeatureWithNoRef(t *testing.T) {
 	repo := buildPhase7Repo(t)
-	t.Setenv("CI_DEFAULT_BRANCH", "main")
+	t.Setenv("CI_DEFAULT_BRANCH", "")
 	ctx := context.Background()
 	manifest := phase7Manifest(t)
 	deps := designDeps{Provider: seedFakeProvider(t), Runner: nil, GoTest: fakeGoTest{}, DeferStatements: true}
@@ -117,7 +118,7 @@ func TestRunDesignStart_FeatureWithNoRef(t *testing.T) {
 // when the store configures that scheme.
 func TestRunDesignStart_FeatureWithEpicRef(t *testing.T) {
 	repo := buildPhase7Repo(t)
-	t.Setenv("CI_DEFAULT_BRANCH", "main")
+	t.Setenv("CI_DEFAULT_BRANCH", "")
 	ctx := context.Background()
 	manifest := phase7Manifest(t)
 	deps := designDeps{Provider: seedFakeProvider(t), Runner: nil, GoTest: fakeGoTest{}, DeferStatements: true}
@@ -138,7 +139,7 @@ func TestRunDesignStart_FeatureWithEpicRef(t *testing.T) {
 // requires (problem/outcome/an implements edge).
 func TestRunDesignStart_Story(t *testing.T) {
 	repo := buildPhase7Repo(t)
-	t.Setenv("CI_DEFAULT_BRANCH", "main")
+	t.Setenv("CI_DEFAULT_BRANCH", "")
 	ctx := context.Background()
 	manifest := phase7Manifest(t)
 	deps := designDeps{Provider: seedFakeProvider(t), Runner: nil, GoTest: fakeGoTest{}, DeferStatements: true}
@@ -186,7 +187,7 @@ func TestRunDesignStart_StoryRequiresRef(t *testing.T) {
 // stderr.
 func TestRunDesignStart_ProviderResolveFails_DegradesToRawRef(t *testing.T) {
 	repo := buildPhase7Repo(t)
-	t.Setenv("CI_DEFAULT_BRANCH", "main")
+	t.Setenv("CI_DEFAULT_BRANCH", "")
 	ctx := context.Background()
 	manifest := phase7Manifest(t)
 
@@ -230,7 +231,7 @@ func TestCmdDesignStart_WiresConfiguredProvider(t *testing.T) {
 // ErrUnknownScheme that reads as "this scheme isn't configured" (D-3).
 func TestRunDesignStart_ConfiguredProviderUnreachable_DegradesForTrueReason(t *testing.T) {
 	repo := buildPhase7Repo(t)
-	t.Setenv("CI_DEFAULT_BRANCH", "main")
+	t.Setenv("CI_DEFAULT_BRANCH", "")
 	ctx := context.Background()
 	manifest := phase7Manifest(t)
 
@@ -254,7 +255,7 @@ func TestRunDesignStart_ConfiguredProviderUnreachable_DegradesForTrueReason(t *t
 // TestRunDesignStart_Negative covers runDesignStart's own operational
 // error paths.
 func TestRunDesignStart_Negative(t *testing.T) {
-	t.Setenv("CI_DEFAULT_BRANCH", "main")
+	t.Setenv("CI_DEFAULT_BRANCH", "")
 	manifest := phase7Manifest(t)
 	deps := designDeps{Provider: seedFakeProvider(t), Runner: nil, GoTest: fakeGoTest{}, DeferStatements: true}
 	ctx := context.Background()
@@ -322,7 +323,7 @@ func TestRunDesignStart_Negative(t *testing.T) {
 // witness while violating the other.
 func TestRunDesignStart_ExistingBranchPreserved_NoDeleteNoReuse(t *testing.T) {
 	repo := buildPhase7Repo(t)
-	t.Setenv("CI_DEFAULT_BRANCH", "main")
+	t.Setenv("CI_DEFAULT_BRANCH", "")
 	ctx := context.Background()
 	manifest := phase7Manifest(t)
 
@@ -389,7 +390,7 @@ func TestRunDesignStart_ExistingBranchPreserved_NoDeleteNoReuse(t *testing.T) {
 // consuming flags at the first non-flag token), hence extractFlags's
 // hand-rolled parse.
 func TestCmdDesignStart_NameFlagOrdering(t *testing.T) {
-	t.Setenv("CI_DEFAULT_BRANCH", "main")
+	t.Setenv("CI_DEFAULT_BRANCH", "")
 	cases := []struct {
 		name string
 		args []string
@@ -498,7 +499,7 @@ func TestRun_DesignDispatchesToRealVerb(t *testing.T) {
 // crash-durability guarantee and no fsync. This proves the fixed write
 // leaves no temp sibling in the spec directory, across both spec classes.
 func TestRunDesignStart_ScaffoldUsesAtomicWrite(t *testing.T) {
-	t.Setenv("CI_DEFAULT_BRANCH", "main")
+	t.Setenv("CI_DEFAULT_BRANCH", "")
 	tests := []struct {
 		name     string
 		kind     artifact.SpecClass
@@ -603,13 +604,14 @@ func TestRunDesignStart_BasesOnDefaultBranch_NotHEAD(t *testing.T) {
 	}
 }
 
-// TestRunDesignStart_UnresolvableDefaultBranch_Exit2 proves ac-6's
-// fail-closed half: when the default branch cannot be resolved at all,
-// design start refuses operationally (exit 2) rather than silently basing
-// the new branch on HEAD, leaving no branch and no spec directory behind —
-// the same preparation-refusal invariant this file's other negative tests
-// already hold this verb to.
-func TestRunDesignStart_UnresolvableDefaultBranch_Exit2(t *testing.T) {
+// TestRunDesignStart_NoOriginRemote_DisclosedHeadBase is dc-7's own driven
+// witness (spec/uat-round-1, I-130, amended after the L5 review): a
+// repository with NO "origin" remote configured at all has no truth other
+// than HEAD (a fresh local project — the README's own "start your own
+// store" flow), so design start bases on HEAD, discloses the substitution
+// by name, and succeeds — never refuses the way it did before this
+// amendment.
+func TestRunDesignStart_NoOriginRemote_DisclosedHeadBase(t *testing.T) {
 	repo := buildPhase7Repo(t)
 	t.Setenv("CI_DEFAULT_BRANCH", "")
 	ctx := context.Background()
@@ -617,22 +619,62 @@ func TestRunDesignStart_UnresolvableDefaultBranch_Exit2(t *testing.T) {
 	deps := designDeps{Provider: seedFakeProvider(t), Runner: nil, GoTest: fakeGoTest{}, DeferStatements: true}
 
 	var stdout, stderr bytes.Buffer
-	got := runDesignStart(ctx, repo.Dir, artifact.ClassFeature, "", "unresolvable-default", manifest, phase7Model(t), deps, &stdout, &stderr)
+	got := runDesignStart(ctx, repo.Dir, artifact.ClassFeature, "", "no-origin-disclosed", manifest, phase7Model(t), deps, &stdout, &stderr)
+	if got != 0 {
+		t.Fatalf("runDesignStart (no origin remote) = %d, want 0; stderr=%s", got, stderr.String())
+	}
+
+	branch := "design/no-origin-disclosed"
+	parent, err := gitx.RevParse(ctx, repo.Dir, branch+"^")
+	if err != nil {
+		t.Fatalf("RevParse(%s^): %v", branch, err)
+	}
+	if parent != repo.Head {
+		t.Fatalf("%s's parent = %s, want repo.Head %s (the disclosed HEAD fallback base)", branch, parent, repo.Head)
+	}
+
+	wantDisclosure := fmt.Sprintf("design start: default branch unresolved (no origin remote); basing on current HEAD %s — disclosed, not a default-branch base", shortSHA(repo.Head))
+	if !contains(stdout.String(), wantDisclosure) {
+		t.Fatalf("stdout = %q, want it to contain %q", stdout.String(), wantDisclosure)
+	}
+}
+
+// TestRunDesignStart_OriginExistsButUnresolvable_Exit2 proves dc-7's other
+// half: a repository that DOES have an "origin" remote configured, but
+// whose default branch is still unresolvable (no CI_DEFAULT_BRANCH, no
+// origin/HEAD symref, no unambiguous origin/main-or-master fallback — here
+// because "origin" was only ever registered, never fetched from), is
+// exactly the stale-default hazard UAT-021 reported: design start still
+// refuses operationally (exit 2), leaving no branch and no spec directory
+// behind — the same preparation-refusal invariant this file's other
+// negative tests already hold this verb to.
+func TestRunDesignStart_OriginExistsButUnresolvable_Exit2(t *testing.T) {
+	repo := buildPhase7Repo(t)
+	t.Setenv("CI_DEFAULT_BRANCH", "")
+	ctx := context.Background()
+	if err := exec.CommandContext(ctx, "git", "-C", repo.Dir, "remote", "add", "origin", "/nonexistent/origin.git").Run(); err != nil {
+		t.Fatalf("git remote add origin: %v", err)
+	}
+	manifest := phase7Manifest(t)
+	deps := designDeps{Provider: seedFakeProvider(t), Runner: nil, GoTest: fakeGoTest{}, DeferStatements: true}
+
+	var stdout, stderr bytes.Buffer
+	got := runDesignStart(ctx, repo.Dir, artifact.ClassFeature, "", "origin-unresolvable", manifest, phase7Model(t), deps, &stdout, &stderr)
 	if got != 2 {
-		t.Fatalf("runDesignStart with an unresolvable default branch = %d, want 2; stdout=%s stderr=%s", got, stdout.String(), stderr.String())
+		t.Fatalf("runDesignStart with origin configured but an unresolvable default branch = %d, want 2; stdout=%s stderr=%s", got, stdout.String(), stderr.String())
 	}
 	for _, want := range []string{"CI_DEFAULT_BRANCH", "origin/main", "origin/master"} {
 		if !contains(stderr.String(), want) {
 			t.Fatalf("stderr = %q, want it to name %q among the default-branch resolution sources", stderr.String(), want)
 		}
 	}
-	if _, statErr := os.Stat(filepath.Join(repo.Dir, ".verdi", "specs", "active", "unresolvable-default")); !os.IsNotExist(statErr) {
-		t.Fatalf("unresolvable-default-branch refusal left a spec directory behind (stat err = %v)", statErr)
+	if _, statErr := os.Stat(filepath.Join(repo.Dir, ".verdi", "specs", "active", "origin-unresolvable")); !os.IsNotExist(statErr) {
+		t.Fatalf("origin-exists-but-unresolvable refusal left a spec directory behind (stat err = %v)", statErr)
 	}
-	if has, err := gitx.HasLocalBranch(ctx, repo.Dir, "design/unresolvable-default"); err != nil {
+	if has, err := gitx.HasLocalBranch(ctx, repo.Dir, "design/origin-unresolvable"); err != nil {
 		t.Fatalf("HasLocalBranch: %v", err)
 	} else if has {
-		t.Fatal("unresolvable-default-branch refusal left a design branch behind")
+		t.Fatal("origin-exists-but-unresolvable refusal left a design branch behind")
 	}
 }
 
