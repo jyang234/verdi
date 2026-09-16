@@ -275,13 +275,21 @@ func renderSpecImportRecord(view specimport.RecordView, branch, slug string) ([]
 	}
 
 	b.WriteString(`<h2>Verified import</h2><dl>`)
-	fact := func(label, value string) {
-		b.WriteString(`<dt>` + esc(label) + `</dt><dd><code>` + esc(value) + `</code></dd>`)
+	factWithID := func(label, value, testid string) {
+		attr := ""
+		if testid != "" {
+			attr = ` data-testid="` + esc(testid) + `"`
+		}
+		b.WriteString(`<dt>` + esc(label) + `</dt><dd` + attr + `><code>` + esc(value) + `</code></dd>`)
 	}
+	fact := func(label, value string) { factWithID(label, value, "") }
 	fact("Import commit", view.ImportCommit)
 	fact("Base commit", rec.BaseCommit)
 	fact("Preview digest", rec.PreviewDigest)
 	fact("Request digest", rec.RequestDigest)
+	format, profileDigest := recordFormatFacts(rec)
+	factWithID("Format", format, "record-format")
+	factWithID("Profile primary digest", profileDigest, "record-profile-primary-digest")
 	fact("Candidate digest", rec.CandidateDigest)
 	fact("Engine digest", rec.EngineDigest)
 	fact("Model digest", rec.ModelDigest)
@@ -363,6 +371,29 @@ func renderSpecImportRecord(view specimport.RecordView, branch, slug string) ([]
 		Nav:      template.HTML(`<a href="` + routeSpecImportPage + `">import</a>`),
 		BodyHTML: template.HTML(b.String()),
 	})
+}
+
+// recordFormatNotRecorded is the record page's explicit value for a record
+// committed before spec/uat-round-1 ac-4 added the format and profile
+// digest fields ("existing records without them decode with the fields
+// absent and the page says so") — a disclosure, never a blank cell.
+const recordFormatNotRecorded = "not recorded (pre-ac-4 record)"
+
+// recordFormatFacts derives the two ac-4 fact values from a verified
+// record: the request format it was produced from and the pinned primary
+// digest of the reference profile that format names. A record with no
+// format is pre-ac-4 for both facts; a format that names no reference
+// profile (specimport's validate() guarantees such a record carries no
+// digest) states the digest as not applicable rather than missing.
+func recordFormatFacts(rec specimport.Record) (format, profileDigest string) {
+	switch {
+	case rec.Format == "":
+		return recordFormatNotRecorded, recordFormatNotRecorded
+	case rec.ProfilePrimaryDigest != "":
+		return rec.Format, rec.ProfilePrimaryDigest
+	default:
+		return rec.Format, "not applicable"
+	}
 }
 
 // renderSpecImportRecordInvalid is the record view's 400: a malformed
