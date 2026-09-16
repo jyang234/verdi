@@ -112,8 +112,14 @@ func run(args []string, stderr io.Writer) int {
 	}
 
 	if verb == "lint" {
+		// The literal "lint", not verb: a pre-phase arm's body must never
+		// mention verb (internal/showcasealign's
+		// TestShowcaseCoverage_EnumerationIsComplete denies it), so the arm
+		// can only TEST verb against its declared spellings and dispatch —
+		// never branch on it a second time, where a verb verbPhase does not
+		// enumerate could escape the showcase-coverage gate.
 		if verbHelpRequested(args[1:]) {
-			fmt.Fprintln(os.Stdout, verbUsageOrFallback(verb))
+			fmt.Fprintln(os.Stdout, verbUsageOrFallback("lint"))
 			return 0
 		}
 		return runLintVerb(args[1:], os.Stdout, stderr)
