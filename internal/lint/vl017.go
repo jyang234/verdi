@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/jyang234/verdi/internal/artifact"
@@ -44,6 +45,24 @@ import (
 // disclosed-unproven or otherwise.
 type vl017 struct{}
 
+// vl017MutableZoneAbsentNotice is ac-3's mandated, neutral description of
+// why the check cannot run here (spec/uat-round-1 ac-3, closing UAT-002):
+// it names the checkout CONDITION alone, never a diagnosis of its cause.
+// The prior wording asserted the checkout was "a bare clone," which is
+// false in general — the mutable zone can be absent from an ordinary
+// local checkout too (a fresh `git clone`, or any checkout before
+// `.verdi/data/mutable/` is first provisioned) — so this text says only
+// what is true unconditionally: the zone is absent, and it is never
+// committed (01 §Zones), never why.
+const vl017MutableZoneAbsentNotice = "the mutable zone (.verdi/data/mutable/) is absent from this checkout; it is never committed (01 §Zones)"
+
+// vl017DisclosureCore is the shared sentence naming WHY the check is
+// disclosed-unproven. Both the per-spec engine Finding (Check, below) and
+// the CLI's once-per-run collapsed Finding (CollapseVL017Disclosures)
+// build their Message from this one string, so the two presentations of
+// the same underlying fact can never drift into two hand-aligned copies.
+const vl017DisclosureCore = "open-question resolved-or-carried check is disclosed-unproven: " + vl017MutableZoneAbsentNotice + " — not a silent pass (constitution 2, three-valued honesty). This is a printed notice, not a verdict failure: a run with no other findings still exits 0 (adjudicated at W2 wave close)."
+
 func (vl017) ID() string { return "VL-017" }
 
 func (vl017) Check(in *RunInput) []Finding {
@@ -62,7 +81,7 @@ func (vl017) Check(in *RunInput) []Finding {
 		var findings []Finding
 		for _, d := range applicable {
 			// vocab:identity — non-vocabulary homograph: "wave close" names when a design wave (W2) concluded (identity)
-			findings = append(findings, Finding{Rule: "VL-017", Path: d.RelPath, Severity: SeverityDisclosure, Message: "open-question resolved-or-carried check is disclosed-unproven: data/mutable/ is absent (bare clone; the mutable zone is never committed, 01 §Zones) — not a silent pass (constitution 2, three-valued honesty). This is a printed notice, not a verdict failure: a run with no other findings still exits 0 (adjudicated at W2 wave close)"})
+			findings = append(findings, Finding{Rule: "VL-017", Path: d.RelPath, Severity: SeverityDisclosure, Message: vl017DisclosureCore})
 		}
 		return findings
 	}
@@ -104,6 +123,54 @@ func (vl017) Check(in *RunInput) []Finding {
 		}
 	}
 	return findings
+}
+
+// CollapseVL017Disclosures returns findings with every VL-017
+// SeverityDisclosure finding (Check's own per-spec granularity above — one
+// per applicable spec) replaced by AT MOST ONE combined Finding naming
+// every affected spec path. This is spec/uat-round-1 ac-3's fix, scoped
+// deliberately narrow: `verdi lint`'s flat CLI text repeated VL-017's
+// identical long disclosure paragraph once per affected spec (UAT-002 —
+// on a checkout with N applicable specs, the paragraph printed N times).
+//
+// Only a caller that prints findings as flat, one-line-per-finding text —
+// cmd/verdi's lint verb — should call this. A caller that renders each
+// disclosure as its own list item (internal/disclosureview's enumeration,
+// consumed by the workbench's live /disclosures page and the dex's static
+// edition) must keep calling the engine directly and enumerating its raw,
+// uncollapsed findings: those views key each rendered item's scope on
+// exactly one spec path (spec/disclosures-panel), and dc-3 is explicit
+// that "a spec ... still receives the disclosure" — only presentation in
+// the CLI changes, not per-spec receipt of it.
+//
+// Every other finding — non-VL-017, or a VL-017 finding that is not a
+// disclosure (the mutable-zone-present violation path above) — passes
+// through unchanged and in its original relative order; the one combined
+// disclosure, if any, is appended at the end. The affected paths are
+// sorted regardless of the input order, so two calls describing the same
+// set of affected specs always produce the identical line (CLAUDE.md:
+// deterministic outputs) — even though Engine.Run's own output already
+// happens to sort findings by (Rule, Path, Message), this function does
+// not depend on that caller behavior.
+func CollapseVL017Disclosures(findings []Finding) []Finding {
+	out := make([]Finding, 0, len(findings))
+	var paths []string
+	for _, f := range findings {
+		if f.Rule == "VL-017" && f.Severity == SeverityDisclosure {
+			paths = append(paths, f.Path)
+			continue
+		}
+		out = append(out, f)
+	}
+	if len(paths) == 0 {
+		return out
+	}
+	sort.Strings(paths)
+	return append(out, Finding{
+		Rule:     "VL-017",
+		Severity: SeverityDisclosure,
+		Message:  fmt.Sprintf("%s Affected specs (%d): %s", vl017DisclosureCore, len(paths), strings.Join(paths, ", ")),
+	})
 }
 
 // carriedAsOpenQuestion reports whether spec declares an open_questions
