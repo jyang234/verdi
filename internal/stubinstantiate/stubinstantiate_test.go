@@ -2,6 +2,7 @@ package stubinstantiate
 
 import (
 	"context"
+	"os/exec"
 	"strings"
 	"testing"
 
@@ -255,6 +256,82 @@ func TestInstantiate_Negative(t *testing.T) {
 			t.Fatalf("error = %v, want it to name the branch as already existing", err)
 		}
 	})
+}
+
+// TestCommitScaffoldBranch_NoOriginRemote_DisclosedHeadFallback is dc-7's
+// own driven witness at the shared-core level (spec/uat-round-1, I-130,
+// amended after the L5 review): a repository with NO "origin" remote
+// configured at all has no truth other than HEAD, so CommitScaffoldBranch
+// bases the new branch on HEAD and discloses the substitution via the
+// returned ResolvedBase.
+//
+// Proven directly against CommitScaffoldBranch rather than through the
+// full --from-stub CLI flow (cmd/verdi/designfromstub_test.go's own
+// TestRunDesignStartFromStub_BasesOnDefaultBranch_NotHEAD covers that
+// flow's happy, resolvable-default-branch path): that flow's OWN
+// accepted-pending-build gate (SealedFeatureWallGuard, fed by
+// specstate.Resolve) independently requires a resolvable default branch
+// to prove the FEATURE's own status, for a reason unrelated to this
+// function's base resolution — so a genuinely remote-less fixture can
+// never reach --from-stub's call into this function at all, and the
+// no-origin fallback is only reachable (and only needs proving) here, at
+// the primitive CommitScaffoldBranch itself, which carries no such
+// precondition.
+func TestCommitScaffoldBranch_NoOriginRemote_DisclosedHeadFallback(t *testing.T) {
+	repo := fixturegit.Build(t, []fixturegit.Layer{{
+		Files:   map[string]string{".verdi/verdi.yaml": "schema: verdi.layout/v1\n"},
+		Message: "seed store root",
+	}})
+	t.Setenv("CI_DEFAULT_BRANCH", "")
+	ctx := context.Background()
+
+	base, err := CommitScaffoldBranch(ctx, repo.Dir, "no-origin-slug", "content\n", "test: commit scaffold branch")
+	if err != nil {
+		t.Fatalf("CommitScaffoldBranch (no origin remote): %v", err)
+	}
+	if !base.HeadDisclosed {
+		t.Fatal("ResolvedBase.HeadDisclosed = false, want true (no origin remote configured)")
+	}
+	if base.Ref != "HEAD" {
+		t.Fatalf("ResolvedBase.Ref = %q, want %q", base.Ref, "HEAD")
+	}
+	if base.Commit != repo.Head {
+		t.Fatalf("ResolvedBase.Commit = %s, want repo.Head %s", base.Commit, repo.Head)
+	}
+	parent, err := gitx.RevParse(ctx, repo.Dir, "design/no-origin-slug^")
+	if err != nil {
+		t.Fatalf("RevParse(design/no-origin-slug^): %v", err)
+	}
+	if parent != repo.Head {
+		t.Fatalf("new branch's parent = %s, want repo.Head %s", parent, repo.Head)
+	}
+}
+
+// TestCommitScaffoldBranch_OriginExistsButUnresolvable_Refuses proves
+// dc-7's other half at the shared-core level: a repository that DOES have
+// an "origin" remote configured, but whose default branch is still
+// unresolvable (here because "origin" was only ever registered, never
+// fetched from), refuses instead of silently guessing — the stale-default
+// hazard UAT-021 reported — and leaves no branch behind.
+func TestCommitScaffoldBranch_OriginExistsButUnresolvable_Refuses(t *testing.T) {
+	repo := fixturegit.Build(t, []fixturegit.Layer{{
+		Files:   map[string]string{".verdi/verdi.yaml": "schema: verdi.layout/v1\n"},
+		Message: "seed store root",
+	}})
+	t.Setenv("CI_DEFAULT_BRANCH", "")
+	ctx := context.Background()
+	if err := exec.CommandContext(ctx, "git", "-C", repo.Dir, "remote", "add", "origin", "/nonexistent/origin.git").Run(); err != nil {
+		t.Fatalf("git remote add origin: %v", err)
+	}
+
+	if _, err := CommitScaffoldBranch(ctx, repo.Dir, "origin-unresolvable-slug", "content\n", "test: commit scaffold branch"); err == nil {
+		t.Fatal("CommitScaffoldBranch (origin exists, unresolvable default branch): want error, got nil")
+	}
+	if has, err := gitx.HasLocalBranch(ctx, repo.Dir, "design/origin-unresolvable-slug"); err != nil {
+		t.Fatalf("HasLocalBranch: %v", err)
+	} else if has {
+		t.Fatal("origin-exists-but-unresolvable refusal left a design branch behind")
+	}
 }
 
 // TestSealedFeatureWallGuard_NilModel proves the guard is nil-receiver-safe

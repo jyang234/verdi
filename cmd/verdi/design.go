@@ -1,11 +1,13 @@
 // verdi design start [<ref>] --kind feature|story --name <name> (05 §CLI,
-// R4-I-1/R4-I-6): cuts the design branch, scaffolds specs/active/<name>/ as
-// a draft spec of the chosen class, resolves a story ref's title via the
-// provider registry (degrading to the raw ref on any resolution failure —
-// 04 §Semantics) when a story ref is given, commits the scaffold, and
-// best-effort regenerates the impacted-service baseline (baseline.go).
-// Kept in its own file per the lint.go/sync.go/matrix.go/dex.go convention,
-// so dispatch.go's diff for wiring this verb in stays a one-line change.
+// R4-I-1/R4-I-6): cuts the design branch from the resolved default branch
+// (ac-6, spec/uat-round-1 — never the current checkout's HEAD), scaffolds
+// specs/active/<name>/ as a draft spec of the chosen class, resolves a
+// story ref's title via the provider registry (degrading to the raw ref
+// on any resolution failure — 04 §Semantics) when a story ref is given,
+// commits the scaffold, and best-effort regenerates the impacted-service
+// baseline (baseline.go). Kept in its own file per the lint.go/sync.go/
+// matrix.go/dex.go convention, so dispatch.go's diff for wiring this verb
+// in stays a one-line change.
 //
 // --kind selects the two-scope spec class (02 §Kind registry: feature spec
 // vs. story spec); ref optionality follows the class exactly as 05 §CLI
@@ -19,6 +21,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -32,6 +35,7 @@ import (
 	"github.com/jyang234/verdi/internal/gitx"
 	"github.com/jyang234/verdi/internal/model"
 	"github.com/jyang234/verdi/internal/provider"
+	"github.com/jyang234/verdi/internal/specstate"
 	"github.com/jyang234/verdi/internal/store"
 	"github.com/jyang234/verdi/internal/upstream"
 	"golang.org/x/term"
@@ -353,21 +357,25 @@ func isDesignAssumeTTY() bool {
 
 // runDesignStart is the testable core: given an already-resolved root and
 // injected deps, run the whole design-start ritual and return the exit
-// code. Preparation (class/template resolution and statement sourcing,
-// including any TTY interview) runs before gitx.CheckoutNewBranch,
-// provider title resolution, or any write; a preparation refusal leaves
-// the repo untouched. Later steps retain their existing behavior: a
-// failure after preparation succeeds may leave whatever that step already
-// did in place, and baseline regeneration failures after the scaffold is
-// committed are disclosed but non-fatal (baseline.go), since the baseline
-// is advisory, not the point of this verb. storyRef is "" iff kind is
-// ClassFeature and no ref was given (05 §CLI's documented optionality) —
-// validated by the caller
-// (cmdDesignStart), re-asserted here defensively since this function is
-// also driven directly by tests. mdl is the store's already-resolved
-// operating model (store.Open's Config.Model): the class switch below
-// reads its own scaffold template off mdl.Classes[kind].Template rather
-// than a hardcoded filename (spec/scaffold-templates ac-1 cont.).
+// code. Preparation (class/template resolution, statement sourcing
+// including any TTY interview, and — ac-6 — resolving the new branch's
+// base via specstate.ResolveDefaultBranch) runs before
+// gitx.CheckoutNewBranchFrom, provider title resolution, or any write; a
+// preparation refusal leaves the repo untouched. The branch is cut from
+// the resolved default branch, never from the current checkout's HEAD
+// (ac-6, closing UAT-021); the checkout-switching behavior itself is
+// retained and disclosed (dc-2). Later steps retain their existing
+// behavior: a failure after preparation succeeds may leave whatever that
+// step already did in place, and baseline regeneration failures after the
+// scaffold is committed are disclosed but non-fatal (baseline.go), since
+// the baseline is advisory, not the point of this verb. storyRef is "" iff
+// kind is ClassFeature and no ref was given (05 §CLI's documented
+// optionality) — validated by the caller (cmdDesignStart), re-asserted
+// here defensively since this function is also driven directly by tests.
+// mdl is the store's already-resolved operating model (store.Open's
+// Config.Model): the class switch below reads its own scaffold template
+// off mdl.Classes[kind].Template rather than a hardcoded filename
+// (spec/scaffold-templates ac-1 cont.).
 func runDesignStart(ctx context.Context, root string, kind artifact.SpecClass, storyRef, name string, manifest *store.Manifest, mdl *model.Model, deps designDeps, stdout, stderr io.Writer) int {
 	if kind != artifact.ClassFeature && kind != artifact.ClassStory {
 		// vocab:identity — CLI usage/flag grammar (--kind enum values, identity)
@@ -426,6 +434,73 @@ func runDesignStart(ctx context.Context, root string, kind artifact.SpecClass, s
 		return 2
 	}
 
+	// ac-6 (spec/uat-round-1, closing UAT-021) / dc-7 (I-130, amended L5
+	// review): resolve the new branch's BASE before cutting it — hoisted
+	// above statement sourcing (including any TTY interview, just below)
+	// so a refusal here never follows, then discards, an operator's typed
+	// answers. Resolution uses the same specstate.ResolveDefaultBranch
+	// precedence chain build start/gate/lint already share (internal/
+	// specstate/defaultbranch.go) — never the current checkout's HEAD. A
+	// checkout left on a stale side branch must not silently propagate its
+	// missing history into a fresh design branch: the exact UAT
+	// reproduction (checkout on a side branch behind main; `design start`
+	// cut design/<name> from HEAD and left the checkout switched onto it,
+	// disclosing neither fact).
+	//
+	// dc-7 scopes what "unresolvable" means: a repository with NO "origin"
+	// remote configured at all has no truth other than HEAD (a fresh local
+	// project — the README's own "start your own store" flow and
+	// cmd/e2eharness/unprovenboard.go both model exactly this state as
+	// supported, not refused) — this bases on HEAD and discloses the
+	// substitution rather than refusing. A repository that DOES have an
+	// "origin" remote but still cannot resolve (or disambiguate) its
+	// default branch is exactly the stale-default hazard UAT-021
+	// reported — that case still fails operationally (exit 2), reusing
+	// unresolvableDefaultBranchMessage's text (specstate, same wording
+	// every verb shares) so the diagnostic is identical across verbs for
+	// the identical failure.
+	var baseRef string
+	if defaultBranch, ok := specstate.ResolveDefaultBranch(ctx, root); ok {
+		baseCommit, rerr := gitx.RevParse(ctx, root, defaultBranch.Ref)
+		if rerr != nil {
+			fmt.Fprintln(stderr, "design start:", rerr)
+			return 2
+		}
+		// defaultBranch.Ref is already the disclosed choice resolveBranchRef
+		// makes for every other consumer — "origin/<name>" when that
+		// remote-tracking ref exists, otherwise the local branch name — so
+		// printing it verbatim both names the base and discloses which of
+		// the two was used, with no separate annotation needed.
+		fmt.Fprintf(stdout, "design start: base %s @ %s\n", defaultBranch.Ref, shortSHA(baseCommit))
+		baseRef = defaultBranch.Ref
+	} else {
+		// dc-7: distinguish "no origin remote at all" (disclosed HEAD
+		// fallback) from "origin exists but the default branch is
+		// unresolvable or ambiguous" (operational refusal, I-130) —
+		// git remote get-url origin failing with ErrNoSuchRemote is the
+		// signal for the former; any other read failure stays operational
+		// rather than guessed either way.
+		_, remoteErr := gitx.RemoteURL(ctx, root, "origin")
+		switch {
+		case errors.Is(remoteErr, gitx.ErrNoSuchRemote):
+			headCommit, herr := gitx.RevParse(ctx, root, "HEAD")
+			if herr != nil {
+				fmt.Fprintln(stderr, "design start:", herr)
+				return 2
+			}
+			fmt.Fprintf(stdout, "design start: default branch unresolved (no origin remote); basing on current HEAD %s — disclosed, not a default-branch base\n", shortSHA(headCommit))
+			baseRef = "HEAD"
+		case remoteErr != nil:
+			fmt.Fprintln(stderr, "design start:", remoteErr)
+			return 2
+		default:
+			// origin IS configured, but ResolveDefaultBranch still
+			// failed: exactly the stale-default hazard UAT-021 reported.
+			fmt.Fprintf(stderr, "design start: %s\n", unresolvableDefaultBranchMessage(ctx, root))
+			return 2
+		}
+	}
+
 	// Statement sourcing (spec/cli-creation ac-1/ac-2, ledger L-N7): the
 	// scaffold's problem/outcome content comes from exactly one of three
 	// explicit sources — never a silent TODO placeholder by default, the
@@ -472,13 +547,36 @@ func runDesignStart(ctx context.Context, root string, kind artifact.SpecClass, s
 		problemText, outcomeText = answers["Problem"], answers["Outcome"]
 	}
 
-	// Preparation succeeded: only now does design start touch Git or
-	// resolve the provider title.
-	branch := "design/" + name
-	if err := gitx.CheckoutNewBranch(ctx, root, branch); err != nil {
+	beforeBranch, err := gitx.CurrentBranch(ctx, root)
+	if err != nil {
 		fmt.Fprintln(stderr, "design start:", err)
 		return 2
 	}
+	beforeDesc := beforeBranch
+	if beforeDesc == "" {
+		// Detached HEAD: name the commit instead of an empty branch name.
+		beforeHead, herr := gitx.RevParse(ctx, root, "HEAD")
+		if herr != nil {
+			fmt.Fprintln(stderr, "design start:", herr)
+			return 2
+		}
+		beforeDesc = shortSHA(beforeHead)
+	}
+
+	// Preparation succeeded: only now does design start touch Git or
+	// resolve the provider title. dc-2: the checkout-switching behavior
+	// itself is retained (moving design start onto managed worktrees is a
+	// separate, out-of-scope design) — CheckoutNewBranchFrom now cuts the
+	// branch from the resolved default branch rather than HEAD.
+	branch := "design/" + name
+	if err := gitx.CheckoutNewBranchFrom(ctx, root, branch, baseRef); err != nil {
+		fmt.Fprintln(stderr, "design start:", err)
+		return 2
+	}
+	// CheckoutNewBranchFrom always lands on a brand-new branch name (it
+	// refuses above if branch already exists), so the checkout has, by
+	// construction, always just changed — this disclosure is unconditional.
+	fmt.Fprintf(stdout, "design start: switched checkout from %s to %s\n", beforeDesc, branch)
 
 	var title string
 	if storyRef != "" {
@@ -598,6 +696,18 @@ func resolveStoryTitle(ctx context.Context, prov provider.StoryProvider, storyRe
 		return storyRef
 	}
 	return story.Title
+}
+
+// shortSHA returns sha's first 7 characters — git's conventional
+// short-SHA length, matching internal/dex's own display convention
+// (temporal.go) for design start's "base <branch> @ <short sha>"
+// disclosure (ac-6). Returns sha unchanged if shorter than 7 (defensive;
+// gitx.RevParse always returns a full 40-character sha in practice).
+func shortSHA(sha string) string {
+	if len(sha) > 7 {
+		return sha[:7]
+	}
+	return sha
 }
 
 // The scaffold-rendering core (feature/story markdown content,

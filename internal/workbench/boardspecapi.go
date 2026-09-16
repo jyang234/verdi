@@ -619,7 +619,13 @@ func (s *boardSpecServer) actionCreate(ctx context.Context, name string, proj *B
 	}
 
 	msg := fmt.Sprintf("create: scaffold spec/%s from the creation form of spec/%s", slug, name)
-	return stubinstantiate.CommitScaffoldBranch(ctx, s.root, slug, content, msg)
+	// dc-7 (spec/uat-round-1, I-130): CommitScaffoldBranch now also
+	// resolves and returns the branch's base, which this action does not
+	// surface (base SELECTION is corrected for every caller; the
+	// disclosure text is a CLI-only concern today — cmd/verdi/
+	// designfromstub.go).
+	_, err = stubinstantiate.CommitScaffoldBranch(ctx, s.root, slug, content, msg)
+	return err
 }
 
 // relatesTarget builds a relates endpoint's pinned target record.
