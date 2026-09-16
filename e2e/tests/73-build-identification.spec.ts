@@ -1,12 +1,13 @@
 import { test, expect, type Page } from "@playwright/test";
-import { SHOWCASE, SPEC_IMPORT_FIXTURE_URL, importPagePath } from "./fixtures";
+import { SHOWCASE, SPEC_IMPORT_FIXTURE_URL, diagramEditorPath, importPagePath } from "./fixtures";
 
 // Build identification in the workbench footer (spec/uat-round-1 ac-1,
 // co-4; closes UAT-003: "Two builds were live during the UAT ... nothing
 // identified which one produced a result"). Every workbench page — the
-// shared read-page shell, the v0 board, the v1 board — carries one footer
-// element whose text is internal/buildinfo.Line(), the SAME string `verdi
-// version` prints and `verdi serve` logs.
+// shared read-page shell, the v0 board, the v1 board and the diagram
+// editor, the four shells that each render their own <html> — carries one
+// footer element whose text is internal/buildinfo.Line(), the SAME string
+// `verdi version` prints and `verdi serve` logs.
 //
 // The browser cannot read the binary's own build info, so the assertion is
 // the line's closed grammar plus agreement: the harness builds ONE binary
@@ -35,7 +36,7 @@ async function footerLine(page: Page): Promise<string> {
 }
 
 test.describe("build identification footer", () => {
-  test("home, the v0 board and the v1 board all carry the same build line in their footer", async ({ page }) => {
+  test("home, the v0 board, the v1 board and the diagram editor all carry the same build line in their footer", async ({ page }) => {
     await page.goto("/");
     await expect(page).toHaveTitle(/Workbench/);
     const home = await footerLine(page);
@@ -46,6 +47,11 @@ test.describe("build identification footer", () => {
 
     await page.goto(DRAFT_BOARD());
     await expect(page.getByTestId("board")).toBeVisible();
+    expect(await footerLine(page)).toBe(home);
+
+    // The fourth shell that renders its own <html>: the diagram editor.
+    await page.goto(diagramEditorPath(SHOWCASE.DIAGRAM_PROPOSAL));
+    await expect(page.getByTestId("diagram-editor")).toBeVisible();
     expect(await footerLine(page)).toBe(home);
   });
 
