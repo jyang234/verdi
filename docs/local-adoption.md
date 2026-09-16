@@ -42,6 +42,16 @@ that absence. Preserve `VERDI_REHEARSAL_DIR` until your results are recorded.
 
 ## Author and inspect a meaningful change
 
+For an existing specification, use [Import existing spec](import-existing-spec.md)
+from the workbench home page. Review the copied fields, correct an input error,
+select expected evidence, acknowledge retained source content and preview before
+creating the proposal. A feature can be imported without an issue tracker; a
+story still needs its configured scheme, tracker reference and required links.
+Follow the returned board link, save a supported edit and reload. Inspect the
+source record separately: it can verify the original import while reporting that
+the current specification has changed. Record retained bytes and missing proof
+truthfully; neither import nor a ready preview establishes acceptance.
+
 Use a small feature you can describe precisely. Replace the scaffold's placeholder
 ACs and story stubs with the outcome and plan you intend to implement. A request
 receipt is one example: saving a request returns a stable identifier; looking up

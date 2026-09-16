@@ -163,8 +163,17 @@ refs to resolve it; do not invent CI environment variables. If testing the actua
 is deferred, use the explicitly synthetic [local rehearsal](docs/local-adoption.md)
 in a disposable project instead.
 
-Create your first feature with both statements supplied; this works in a
-terminal and in scripts:
+If you already have a feature or story specification, run `verdi serve` and choose
+**Import existing spec** on its home page. Import accepts selected native Verdi
+specs or supported Markdown, previews the mapped fields and missing requirements,
+and creates a new proposal on its ordinary board. Labeled Problem and Outcome
+sections prepopulate automatically; no AI is used. See the
+[existing-spec import guide](docs/import-existing-spec.md) for formats, corrections,
+source records and CLI examples. Human browser import needs no AI assistance
+policy; existing story tracker, review and evidence requirements still apply.
+
+To author a new feature, supply both statements; this works in a terminal and in
+scripts:
 
 <!-- adoption-feature -->
 ```sh
@@ -283,6 +292,10 @@ close`; the CLI is that path plus the read surfaces.
 |---|---|
 | `verdi init [--wizard]` | Initialize a store; the optional terminal wizard customizes vocabulary/templates |
 | `verdi design start [<ref>] --kind feature\|story --name <n>` | Cut a design branch and scaffold a draft; supply both statement flags or use the terminal interview |
+| `verdi design import source --root <dir> --file <relative-path>` | Read one source into JSON; optional start/end line flags select a range |
+| `verdi design import preview --request <path\|->` | Preview an import without changing the project; report fields, coverage and missing requirements |
+| `verdi design import apply --request <path\|-> --preview <digest> --harness <id>` | Create the confirmed proposal as a policy-governed delegated agent; humans without that policy use the browser |
+| `verdi design import record --branch <branch> --spec <slug>` | Verify committed import provenance and disclose changes to the current spec |
 | `verdi accept <spec>` | Compatibility notice only; the reviewed spec revision is accepted when merged into the default branch |
 | `verdi build start <story>` | Cut the build branch after acceptance |
 | `verdi align [--freeze]` | Generate/refresh the alignment report (computed + judged); `--freeze` writes the closure edition |
