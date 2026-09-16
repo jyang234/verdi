@@ -85,3 +85,18 @@ L1 Tier 3 fresh re-review: ACCEPT-WITH-MINOR; original finding CLOSED (evasion t
 L1 fix ranges integrated at 84eb72ca (0 drift on lane files; showcasealign race ok 71.2s; focused cmd ok). Fixer follow-ups (87881100..404c4764): F3 disclosure log when build markers reduce to "(devel)" and claim reworded; F4 working-tree fingerprint (porcelain + content) replacing the StatusDirty bool; F1 scope sentence in the witness doc comment.
 
 ### Wave gate run 2 — started 19:22 on 84eb72ca with `VERDI_E2E_PORT_BASE=4390` (log: scratchpad/wave1-verify2.log)
+
+**Result: `verify OK`, VERIFY_EXIT=0** (19:22–19:48 on 84eb72ca). build, fmt-check, vet, lint, test (go test -race across the module: 107 packages ok, 3 with no test files; cmd/verdi 444.145s; showcasealign ok — the run-1 failure is closed), fixture, lint-store, spec-align, lint-showcase, showcase-coverage, e2e (302passed(11.4m)). Recording-artifact scan after the run: 0 files.
+
+## Wave 1 closure (2026-09-16)
+
+- Every required lane accepted: L1 (ACCEPT-WITH-MINOR + Tier 3 gate fix, fresh re-review ACCEPT-WITH-MINOR), L2 (REVISE → Tier 3 fix → fresh re-review ACCEPT), L3 (ACCEPT-WITH-MINOR, minors closed), L4 (ACCEPT-WITH-MINOR, minors closed), L5 (REVISE → original reviewer CLOSED), Fable 1b (ACCEPT-WITH-MINOR, minors closed).
+- Dependency order and patch provenance verified: 0 drift per lane on lane files; design.go = merge-file(L1, L5) byte-for-byte (whole-wave reviewer); controller commits are docs-only except 2cbfcb5f (five lines of contract prose, R-2).
+- Integrated applicable suites: `make verify` run 2 green (above).
+- Whole-wave Opus review: ACCEPT-WITH-MINOR; all six minors dispositioned (UAT-026/027 logged, R-15 corrected, UAT-024 extended, footer drift-guard carried to wave 2, fixtures mirror noted).
+- Critical findings: two (L2 F1, L1 R-19), both gate regressions from cross-binary witnesses, both closed through the Tier 3 chain. No Important finding open.
+- Residual obligations: owner risk gate for the two Tier 3 lanes (L2 vl017, L1 cli) per the protocol; wave-2 items (footer shell drift-guard test; UAT-024..028 low-severity follow-ups); ac-7/ac-8/ac-9 (wave 2) and ac-10/ac-11 (wave 3, blocked on ratification of I-128/I-129).
+- Acceptance criteria status after wave 1: ac-1, ac-2, ac-3, ac-4, ac-5, ac-6 implemented with behavioral witnesses on the integrated head; attestation evidence is the owner's at acceptance/closure per the evidence model.
+- Integration tree clean at close.
+
+Return state: **READY_FOR_OWNER_RISK_GATE**. Base 840c6166 → head (this commit's parent) 84eb72ca + ledger commits. Nothing pushed, no PR opened, no worktree removed, scope unchanged.
