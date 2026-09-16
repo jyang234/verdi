@@ -321,6 +321,12 @@
       items[i].setAttribute("data-earlier", "true");
       items[i].appendChild(el("span", { class: "import-finding-earlier" }, " (earlier result)"));
     }
+    // The remaining-source summary describes the EARLIER preview's inputs
+    // until the next preview; it is never a current or persisted fact.
+    if (remainingEl.firstChild && !remainingEl.hasAttribute("data-earlier")) {
+      remainingEl.setAttribute("data-earlier", "true");
+      remainingEl.insertBefore(el("p", { class: "import-finding-earlier", "data-testid": "import-remaining-earlier" }, "Earlier preview result: preview again to see what the current inputs would keep."), remainingEl.firstChild);
+    }
     refreshCardStatuses();
   }
   function previewCurrent() {
@@ -904,7 +910,7 @@
     renderStatements(result, editable, findingsByTarget);
     renderFields(result, editable, findingsByTarget);
     renderFindings(result);
-    renderRemaining(result, editable);
+    renderRemaining(result, editable, primaryOfRequest(state.preview ? state.preview.request : ""));
 
     clear(coverageBody);
     (result.coverage || []).forEach(function (c) {
@@ -1166,29 +1172,47 @@
     }
   }
 
-  // renderRemaining: one plain sentence per source about the bytes that
-  // did not become fields, and — while any have no choice yet — the
-  // explicit keep action, which ticks the form's own checkbox.
-  function renderRemaining(result, editable) {
+  // primaryOfRequest reads the primary source id out of the exact request
+  // JSON a preview answered — the previewed identity, never the form's
+  // current radio, which may have changed since.
+  function primaryOfRequest(request) {
+    try {
+      var req = JSON.parse(request);
+      return req && typeof req.primary === "string" ? req.primary : "";
+    } catch (e) {
+      return "";
+    }
+  }
+
+  // renderRemaining: one plain, prospective sentence per source about what
+  // the preview would do with the bytes that did not become fields, and —
+  // while any have no choice yet — the explicit keep action, which ticks
+  // the form's own checkbox. In native mode only the previewed request's
+  // primary becomes the candidate; every other source is an ordinary
+  // support (unresolved until kept, then reference material), never spec
+  // content. Nothing here is a persisted fact: no import record exists
+  // until creation.
+  function renderRemaining(result, editable, primary) {
     clear(remainingEl);
+    remainingEl.removeAttribute("data-earlier");
     var anyUnresolved = false;
     (result.coverage || []).forEach(function (c) {
       var label = labelOf(c.source_id);
       var text;
       var stateName;
-      if (!editable) {
+      if (!editable && c.source_id === primary) {
         stateName = "candidate";
-        text = label + ": the whole selection (" + c.total_bytes + " bytes) is the candidate spec itself.";
+        text = label + " (the primary): the whole selection (" + c.total_bytes + " bytes) becomes the candidate spec itself, byte for byte.";
       } else if (c.unresolved_bytes > 0) {
         anyUnresolved = true;
         stateName = "unresolved";
         text = label + ": " + c.unresolved_bytes + " bytes did not become a field and have no choice yet; this blocks creation." + (c.mapped_bytes ? " " + c.mapped_bytes + " bytes became fields." : "");
       } else if (c.mapped_bytes === 0) {
         stateName = "kept";
-        text = label + ": kept whole as reference material in the import record (" + c.retained_bytes + " bytes); no field was taken from it.";
+        text = label + ": will be kept whole with the import as reference material (" + c.retained_bytes + " bytes); no field is taken from it and it does not become spec content.";
       } else if (c.retained_bytes > 0) {
         stateName = "kept";
-        text = label + ": " + c.mapped_bytes + " bytes became fields; " + c.retained_bytes + " bytes are kept as reference material in the import record, not as spec fields.";
+        text = label + ": " + c.mapped_bytes + " bytes became fields; " + c.retained_bytes + " bytes will be kept with the import as reference material, not as spec fields.";
       } else {
         stateName = "mapped";
         text = label + ": every selected byte became a field.";
@@ -1198,7 +1222,7 @@
     if (anyUnresolved) {
       var actions = el("div", { class: "import-field-actions" });
       actions.appendChild(el("button", { type: "button", class: "import-keep-remaining", id: "import-keep-remaining", "data-testid": "import-keep-remaining" }, "Keep the remaining source text as reference material"));
-      actions.appendChild(el("span", { class: "import-hint" }, "The same choice as in step 4: stored with the import record, never promoted into fields, never a substitute for a missing or ambiguous field."));
+      actions.appendChild(el("span", { class: "import-hint" }, "The same choice as in step 4: the text will be kept with the import as reference material, never promoted into fields, never a substitute for a missing or ambiguous field."));
       remainingEl.appendChild(actions);
     }
     if (!(result.coverage || []).length) remainingEl.appendChild(el("p", { class: "empty" }, "No source coverage was reported."));

@@ -143,7 +143,7 @@ func renderSpecImportPage(mdl *model.Model) ([]byte, error) {
 	b.WriteString(`<fieldset class="import-step"><legend>1. Source files</legend>`)
 	b.WriteString(`<label for="import-files">Source files</label>`)
 	b.WriteString(`<input type="file" id="import-files" data-testid="import-files" multiple>`)
-	b.WriteString(`<p class="field-hint">Explicit files only; folders, archives, URLs and commands are never read. Each file's label is its name, never a path. The first file is the primary source; every other file is kept whole as reference material unless you map it in Advanced. Optional line ranges are inclusive and start at 1.</p>`)
+	b.WriteString(`<p class="field-hint">Explicit files only; folders, archives, URLs and commands are never read. Each file's label is its name, never a path. The first file is the primary source. Every other file can be kept whole with the import as reference material when you choose to keep the remaining source text (step 4), or mapped in Advanced. Optional line ranges are inclusive and start at 1.</p>`)
 	b.WriteString(`<ol id="import-source-list" data-testid="import-source-list" class="import-source-list" aria-label="Selected source files"></ol>`)
 	b.WriteString(`</fieldset>`)
 
@@ -153,7 +153,7 @@ func renderSpecImportPage(mdl *model.Model) ([]byte, error) {
 	b.WriteString(`<option value="native">Existing verdi spec.md (native): kept byte-identical; no mappings, links or TODO placeholders</option>`)
 	b.WriteString(`<option value="f13-reference-v1">Pinned F13 reference profile (f13-reference-v1): only the exact reference primary bytes; refuses any other primary</option>`)
 	b.WriteString(`<option value="manual-v1">Manual mappings only (manual-v1): no automatic fields; every value comes from Advanced</option>`)
-	b.WriteString(`</select><span class="field-hint">Nothing is inferred from wording: a profile is fixed code reading declared structure, and any gap it finds is reported, never guessed.</span></div></fieldset>`)
+	b.WriteString(`</select><span class="field-hint">A profile reads only the structure it names: labeled headings and flat lists become fields. A label it cannot find or resolve is reported as missing, never guessed from the wording.</span></div></fieldset>`)
 
 	b.WriteString(`<fieldset class="import-step"><legend>3. Target</legend>`)
 	b.WriteString(`<div class="field"><label for="import-slug">Spec name (slug)</label><input id="import-slug" data-testid="import-slug" spellcheck="false" pattern="` + esc(specNameRe.String()) + `"><span class="field-hint">kebab-case; becomes spec/&lt;slug&gt; on the new design branch design/&lt;slug&gt;. An existing name is refused, never renamed.</span></div>`)
@@ -168,7 +168,7 @@ func renderSpecImportPage(mdl *model.Model) ([]byte, error) {
 
 	b.WriteString(`<fieldset class="import-step"><legend>4. Your choices</legend>`)
 	b.WriteString(`<p class="field-hint">Both are explicit; nothing here is chosen for you. Evidence kinds for acceptance criteria are chosen per criterion in the preview below, which explains them first.</p>`)
-	b.WriteString(`<label class="import-check"><input type="checkbox" id="import-retain" data-testid="import-retain"><span class="import-check-text">Keep the remaining source text as reference material</span><span class="import-hint">Source text that did not become a field is stored with the import record. It is not promoted into spec fields, and keeping it never fills a missing or ambiguous field. Until you choose this, leftover text blocks creation.</span></label>`)
+	b.WriteString(`<label class="import-check"><input type="checkbox" id="import-retain" data-testid="import-retain"><span class="import-check-text">Keep the remaining source text as reference material</span><span class="import-hint">Source text that did not become a field will be kept with the import as reference material. It is not promoted into spec fields, and keeping it never fills a missing or ambiguous field. Until you choose this, leftover text blocks creation.</span></label>`)
 	b.WriteString(`<label class="import-check"><input type="checkbox" id="import-defer" data-testid="import-defer"><span class="import-check-text">Leave Problem and Outcome as TODOs for now</span><span class="import-hint">Replaces both statements with the shared TODO placeholder, including any statement copied from your source or written here; the preview discloses what was displaced. The placeholders are visibly incomplete: the proposal can be created, but it is not ready for review until real statements are written on the board.</span></label>`)
 	b.WriteString(`</fieldset>`)
 
@@ -214,8 +214,8 @@ func renderSpecImportPage(mdl *model.Model) ([]byte, error) {
 	b.WriteString(`<li><strong>Live probe (runtime)</strong>: a probe against a live surface.</li>`)
 	b.WriteString(`<li><strong>Human sign-off (attestation)</strong>: a human sign-off on file.</li>`)
 	b.WriteString(`</ul>`)
-	b.WriteString(`<p data-import-class="feature" data-testid="import-evidence-floor-feature">` + esc("The store's existing validation (VL-006) requires human sign-off (attestation) among every "+featureWord+" criterion's kinds; the preview reports any criterion that lacks it. This page explains that rule; it neither enforces it nor selects anything for you.") + `</p>`)
-	b.WriteString(`<p data-import-class="story" data-testid="import-evidence-floor-story" hidden>` + esc("A "+storyWord+" criterion needs at least one kind; the store's validation sets no attestation floor for a "+storyWord+".") + `</p>`)
+	b.WriteString(`<p data-import-class="feature" data-testid="import-evidence-floor-feature">` + esc("Each "+featureWord+" criterion must include human sign-off (attestation). Selecting it means that sign-off will be required later; it does not record anyone's sign-off. The preview reports a criterion that lacks it.") + `</p>`)
+	b.WriteString(`<p data-import-class="story" data-testid="import-evidence-floor-story" hidden>` + esc("Each "+storyWord+" criterion must include at least one kind.") + `</p>`)
 	b.WriteString(`</section>`)
 	b.WriteString(`<h3>Acceptance criteria and other objects</h3><div id="import-fields" data-testid="import-fields" class="import-fields"></div>`)
 	b.WriteString(`<h3>The rest of the source</h3><div id="import-remaining" data-testid="import-remaining" class="import-remaining"></div>`)
