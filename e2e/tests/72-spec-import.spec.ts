@@ -121,11 +121,23 @@ async function importLabeledViaUI(page: Page, base: string, slug: string): Promi
   return applied.body as CreatedBody;
 }
 
+// openAdvanced opens the collapsed advanced region (manual field mappings
+// and declared links) the page serves shut — the usability correction's
+// intentional collapse — so its controls are actionable. Idempotent.
+async function openAdvanced(page: Page): Promise<void> {
+  const advanced = page.getByTestId("import-advanced");
+  if (!(await advanced.evaluate((el) => (el as HTMLDetailsElement).open))) {
+    await advanced.locator("summary").click();
+  }
+  await expect(advanced).toHaveJSProperty("open", true);
+}
+
 // addMapping appends one explicit mapping row and fills it.
 async function addMapping(
   page: Page,
   fields: { target: string; source?: string; start?: number; end?: number; transform?: string; text?: string; evidence?: string[] },
 ) {
+  await openAdvanced(page);
   await page.getByTestId("import-add-mapping").click();
   const row = page.locator("#import-mapping-list li").last();
   await row.locator(".import-mapping-target").fill(fields.target);
@@ -405,13 +417,20 @@ test.describe("spec import: the F13 reference profile", () => {
     expect(await preview(page)).toBe(200);
     await expectReady(page, false);
     // Two absent labels and eight unset evidence declarations, each its
-    // own blocking finding (the candidate lint's own blocking splice
-    // finding rides beside them until evidence exists).
+    // own blocking finding — and nothing else: the evidence gap is
+    // reported exactly once per criterion as missing-evidence (backend
+    // correction a03dd661), never additionally as an unsupported-structure
+    // (the splice refusal's former misclassification) or invalid-candidate
+    // finding, so exactly ten findings block.
     await expect(findings(page, "missing-statement")).toHaveCount(2);
     await expect(findings(page, "missing-statement").first()).toContainText("Problem");
     await expect(page.locator('#import-findings li[data-code="missing-statement"][data-blocking="true"]')).toHaveCount(2);
     await expect(findings(page, "missing-evidence")).toHaveCount(8);
     await expect(page.locator('#import-findings li[data-code="missing-evidence"][data-blocking="true"]')).toHaveCount(8);
+    await expect(findings(page, "unsupported-structure")).toHaveCount(0);
+    await expect(findings(page, "invalid-candidate")).toHaveCount(0);
+    await expect(page.locator("#import-findings li")).toHaveCount(10);
+    await expect(page.locator('#import-findings li[data-blocking="true"]')).toHaveCount(10);
     for (let i = 1; i <= 8; i++) {
       await expect(page.getByTestId(`import-field-ac-${i}`)).toHaveAttribute("data-origin", "copied-source");
       await expect(page.getByTestId(`import-field-spans-ac-${i}`)).toContainText("primary-f13.md");
@@ -432,6 +451,9 @@ test.describe("spec import: the F13 reference profile", () => {
     await expect(findings(page, "statements-deferred")).toHaveCount(2);
     await expect(findings(page, "statements-deferred").first()).toHaveAttribute("data-blocking", "false");
     await expect(findings(page, "missing-evidence")).toHaveCount(8);
+    await expect(findings(page, "unsupported-structure")).toHaveCount(0);
+    await expect(page.locator("#import-findings li")).toHaveCount(10);
+    await expect(page.locator('#import-findings li[data-blocking="true"]')).toHaveCount(8);
     await expect(page.getByTestId("import-field-problem")).toHaveAttribute("data-origin", "generated-deferral");
     await expect(page.getByTestId("import-field-text-problem")).toContainText("TODO");
     await expect(page.getByTestId("import-field-outcome")).toHaveAttribute("data-origin", "generated-deferral");
@@ -478,7 +500,12 @@ test.describe("spec import: corrections", () => {
     await expect(ambiguous.first()).toHaveAttribute("data-blocking", "true");
     await expect(ambiguous.first()).toContainText("explicit mapping");
     await expect(page.getByTestId("import-field-problem")).toHaveCount(0);
+    // The unresolved statement is offered as a placeholder with its direct
+    // actions; this case takes the advanced mapping route deliberately.
+    await expect(page.getByTestId("import-missing-problem")).toBeVisible();
+    await expect(page.getByTestId("import-write-problem")).toBeVisible();
 
+    await openAdvanced(page);
     await page.getByTestId("import-add-mapping").click();
     const row = page.locator("#import-mapping-list li").last();
     await row.locator(".import-mapping-target").fill("problem");
@@ -804,6 +831,12 @@ test.describe("spec import: native, manual and story surfaces", () => {
     await expect(page.getByTestId("import-fields")).toContainText("byte for byte");
     await expect(page.locator("#import-fields .import-edit")).toHaveCount(0);
     await expect(page.locator("#import-fields .import-evidence")).toHaveCount(0);
+    // Native offers no statement placeholders and no evidence helper: there
+    // is nothing to write or choose, and the remaining-source region says
+    // the file itself is the candidate.
+    await expect(page.locator("#import-statements *")).toHaveCount(0);
+    await expect(page.getByTestId("import-evidence-guide")).toBeHidden();
+    await expect(page.getByTestId("import-remaining")).toContainText("candidate");
     const coverage = page.getByTestId(`import-coverage-${importSourceId("native-widget.md")}`);
     expect(await coverage.getAttribute("data-mapped")).toBe(await coverage.getAttribute("data-total"));
     const state = await page.evaluate(() => (window as unknown as { __verdiImport: { state: () => { request: string } } }).__verdiImport.state());
@@ -893,7 +926,13 @@ test.describe("spec import: native, manual and story surfaces", () => {
     await expectReady(page, false);
     await expect(page.locator("#import-findings li[data-blocking='true']").filter({ hasText: "implements edge" })).toHaveCount(1);
 
+    // The blocking finding names the whole candidate, so the page offers a
+    // visible way into the advanced controls that can change it; the
+    // target step's story note points there as well.
+    await expect(page.getByTestId("import-story-links-jump")).toBeVisible();
+    await expect(page.locator("#import-findings li[data-blocking='true']").filter({ hasText: "implements edge" }).locator(".import-open-advanced")).toHaveCount(1);
     // A declared link to a parent that does not exist is refused by name.
+    await openAdvanced(page);
     await page.getByTestId("import-add-link").click();
     const link = page.locator("#import-link-list li").last();
     await link.locator(".import-link-type").selectOption("implements");
@@ -918,5 +957,252 @@ test.describe("spec import: native, manual and story surfaces", () => {
     await page.getByTestId("import-board-link").click();
     await expect(page.getByTestId("board")).toHaveAttribute("data-board-mode", "authoring");
     await expect(page.locator("body")).toContainText(SPEC_IMPORT_PARENT_FEATURE);
+  });
+});
+
+// The owner-observed usability correction (main's usability-ui-adjudication
+// over the FABLE D1-D6 proposal). Every case below drives the REAL served
+// binary over the isolated store; the one synthetic response is a
+// negative-classification probe of guidance wording and is labeled as such.
+
+test.describe("spec import: usability — the owner's F13 correction path", () => {
+  test("explains evidence before any choice, counts the eight criteria origin-neutrally, selects nothing, and makes retention, evidence and TODO choices explicit actions whose results stay distinguishable from the last preview", async ({
+    page,
+  }) => {
+    test.setTimeout(150_000);
+    const base = await importBase(page);
+    const slug = "gatekeeper-usability";
+    await openImport(page, base);
+    const ids = await addFiles(page, [SPEC_IMPORT_FILES.F13_PRIMARY, ...SPEC_IMPORT_FILES.F13_SUPPORTS]);
+    await page.locator("#import-format").selectOption("f13-reference-v1");
+    await fillTarget(page, slug, "Bounded gatekeeper state machine");
+    // Nothing is chosen for the user: not the choices, not a kind.
+    await expect(page.locator("#import-retain")).not.toBeChecked();
+    await expect(page.locator("#import-defer")).not.toBeChecked();
+    expect(await preview(page)).toBe(200);
+    await expectReady(page, false);
+
+    // Readiness in plain words and an origin-neutral count of the criteria.
+    const ready = page.getByTestId("import-ready");
+    await expect(ready).toContainText("8 acceptance criteria");
+    await expect(ready).toContainText("2 statements");
+    await expect(ready).toHaveAttribute("data-stale", "false");
+    await expect(page.getByTestId("import-criteria-count")).toHaveText(/^8 acceptance criteria$/);
+    await expect(page.locator('#import-fields input[type="checkbox"]:checked')).toHaveCount(0);
+    await expect(page.locator('#import-statements input[type="checkbox"]:checked')).toHaveCount(0);
+
+    // The evidence helper is visible ABOVE the cards, before any kind is
+    // chosen: concrete words with the technical kind, expected proof
+    // versus produced proof, and the existing feature floor named as the
+    // validation the preview reports — never selected by the page.
+    const guide = page.getByTestId("import-evidence-guide");
+    await expect(guide).toBeVisible();
+    await expect(guide).toContainText("Human sign-off (attestation)");
+    await expect(guide).toContainText("does not produce");
+    await expect(page.getByTestId("import-evidence-floor-feature")).toBeVisible();
+    await expect(page.getByTestId("import-evidence-floor-feature")).toContainText("VL-006");
+    await expect(page.getByTestId("import-evidence-floor-story")).toBeHidden();
+    const guideBeforeCards = await page.evaluate(() => {
+      const g = document.querySelector('[data-testid="import-evidence-guide"]')!;
+      const c = document.querySelector('[data-testid="import-field-ac-1"]')!;
+      return Boolean(g.compareDocumentPosition(c) & Node.DOCUMENT_POSITION_FOLLOWING);
+    });
+    expect(guideBeforeCards).toBe(true);
+
+    // Every card names its own source, its own status and carries a copy
+    // of its finding next to the controls that resolve it.
+    for (let i = 1; i <= 8; i++) {
+      await expect(page.getByTestId(`import-field-source-ac-${i}`)).toContainText("Copied from primary-f13.md");
+      await expect(page.getByTestId(`import-field-status-ac-${i}`)).toContainText("none chosen");
+      await expect(page.getByTestId(`import-field-status-ac-${i}`)).toHaveAttribute("data-status", "previewed");
+      await expect(page.getByTestId(`import-field-findings-ac-${i}`).locator('[data-code="missing-evidence"]')).toHaveCount(1);
+    }
+    // A blocker jumps to its card.
+    const jump = page.locator('#import-findings li[data-code="missing-evidence"][data-target="ac-3"] a.import-finding-jump');
+    await expect(jump).toHaveAttribute("href", "#import-field-ac-3");
+    await jump.click();
+    await expect(page.getByTestId("import-field-ac-3")).toBeInViewport();
+
+    // Leftover source has no choice yet: the remaining-source region says
+    // so and offers the explicit choice, which ticks the form's own
+    // checkbox (unchanged request flag) and invalidates the preview.
+    await expect(findings(page, "unresolved-coverage").first()).toHaveAttribute("data-blocking", "true");
+    const remaining = page.getByTestId("import-remaining");
+    await expect(remaining).toContainText("no choice yet");
+    await page.getByTestId("import-keep-remaining").click();
+    await expect(page.locator("#import-retain")).toBeChecked();
+    await expect(page.getByTestId("import-result")).toHaveAttribute("data-stale", "true");
+    // Stale: the current-sounding blocker count is replaced, every earlier
+    // finding is marked as such, and nothing can be confirmed.
+    await expect(ready).toHaveAttribute("data-stale", "true");
+    await expect(ready).toContainText("earlier");
+    await expect(ready).not.toContainText("8 acceptance criteria");
+    await expect(page.locator("#import-findings li[data-earlier='true']")).toHaveCount(await page.locator("#import-findings li").count());
+    await expect(page.getByTestId("import-findings-heading")).toContainText("Earlier");
+    await expect(page.getByTestId("import-confirm")).toBeDisabled();
+    expect(await preview(page)).toBe(200);
+    await expect(findings(page, "unresolved-coverage")).toHaveCount(0);
+    await expect(page.locator("#import-findings li[data-earlier='true']")).toHaveCount(0);
+    await expect(remaining).toContainText("reference material");
+    await expect(page.getByTestId("import-technical")).toHaveJSProperty("open", false);
+    for (const support of ids.slice(1)) {
+      const row = page.getByTestId(`import-coverage-${support}`);
+      expect(await row.getAttribute("data-retained")).toBe(await row.getAttribute("data-total"));
+    }
+
+    // One explicit kind on one card; its status shows the change as NOT yet
+    // previewed while the untouched cards keep their earlier status; the
+    // apply-to-all action states its scope and copies exactly that choice.
+    await page.getByTestId("import-evidence-ac-1-attestation").check();
+    const statusOne = page.getByTestId("import-field-status-ac-1");
+    await expect(statusOne).toContainText("attestation");
+    await expect(statusOne).toContainText("changed since");
+    await expect(statusOne).toHaveAttribute("data-status", "changed");
+    await expect(page.getByTestId("import-field-status-ac-8")).toHaveAttribute("data-status", "earlier");
+    await expect(ready).toHaveAttribute("data-stale", "true");
+    await expect(page.getByTestId("import-confirm")).toBeDisabled();
+    const all = page.getByTestId("import-evidence-all-ac-1");
+    await expect(all).toContainText("all 8 acceptance criteria");
+    await all.click();
+    for (let i = 2; i <= 8; i++) {
+      await expect(page.getByTestId(`import-evidence-ac-${i}-attestation`)).toBeChecked();
+      await expect(page.getByTestId(`import-evidence-ac-${i}-static`)).not.toBeChecked();
+      await expect(page.getByTestId(`import-field-status-ac-${i}`)).toHaveAttribute("data-status", "changed");
+    }
+    // The advanced summary counts the eight evidence mappings without
+    // being opened; the choices themselves live on the cards.
+    await expect(page.getByTestId("import-advanced")).toHaveJSProperty("open", false);
+    await expect(page.locator("#import-mapping-count")).toHaveText("8");
+    expect(await preview(page)).toBe(200);
+    await expect(findings(page, "missing-evidence")).toHaveCount(0);
+    await expect(ready).toHaveAttribute("data-stale", "false");
+    await expect(page.getByTestId("import-field-status-ac-8")).toHaveAttribute("data-status", "previewed");
+    await expect(page.getByTestId("import-field-status-ac-8")).toContainText("attestation");
+    await expect(page.getByTestId("import-field-status-ac-8")).not.toContainText("changed since");
+    await expect(page.locator("#import-fields input[type='checkbox']:checked")).toHaveCount(8);
+
+    // The two missing statements are placeholders with direct actions.
+    await expect(ready).toContainText("2 statements");
+    await expect(page.getByTestId("import-missing-problem")).toBeVisible();
+    await expect(page.getByTestId("import-missing-outcome")).toBeVisible();
+    await expect(page.getByTestId("import-field-problem")).toHaveCount(0);
+    // Write it: the existing user-added mapping path, counted in Advanced.
+    await page.getByTestId("import-write-problem").click();
+    await page.getByTestId("import-write-text-problem").fill("Gatekeeper flight decisions are unbounded today [usability].");
+    await expect(page.locator("#import-mapping-count")).toHaveText("9");
+    await expect(ready).toHaveAttribute("data-stale", "true");
+    expect(await preview(page)).toBe(200);
+    await expect(findings(page, "missing-statement")).toHaveCount(1);
+    await expect(page.getByTestId("import-field-problem")).toHaveAttribute("data-origin", "user-added");
+    await expect(page.getByTestId("import-field-source-problem")).toContainText("Your wording");
+    await expect(page.getByTestId("import-field-source-problem")).not.toContainText("Copied");
+    // The explicit pair TODO choice: it says it replaces BOTH statements,
+    // the written one included, ticks the form's own checkbox, and the
+    // next preview discloses the displaced value.
+    const deferAction = page.getByTestId("import-defer-action-outcome");
+    await expect(deferAction).toContainText("both");
+    await deferAction.click();
+    await expect(page.locator("#import-defer")).toBeChecked();
+    await expect(page.getByTestId("import-confirm")).toBeDisabled();
+    expect(await preview(page)).toBe(200);
+    await expectReady(page, true);
+    await expect(findings(page, "statements-deferred")).toHaveCount(2);
+    await expect(page.locator('#import-findings li[data-code="statements-deferred"][data-target="problem"]')).toContainText("displaced");
+    await expect(page.getByTestId("import-field-problem")).toHaveAttribute("data-origin", "generated-deferral");
+    await expect(page.getByTestId("import-field-source-problem")).toContainText("TODO placeholder");
+    await expect(page.getByTestId("import-missing-problem")).toHaveCount(0);
+    // Ready enables only the confirmation; creation still needs it.
+    await expect(page.getByTestId("import-confirm")).toBeEnabled();
+    await expect(page.getByTestId("import-apply-btn")).toBeDisabled();
+    const applied = await confirmAndApply(page);
+    expect(applied.status, JSON.stringify(applied.body)).toBe(200);
+    await expect(page.getByTestId("import-created")).toHaveAttribute("data-status", "created");
+    expect(applied.body.statements_deferred).toBe(true);
+  });
+});
+
+test.describe("spec import: usability — structure guidance is heading-specific only for the primary", () => {
+  test("a template-target unsupported-structure finding gets neutral, cause-aware guidance with its message and code preserved; only the primary-target finding speaks of headings (synthetic response: a negative classification probe, not a journey)", async ({
+    page,
+  }) => {
+    const base = await importBase(page);
+    await openImport(page, base);
+    await addFiles(page, [SPEC_IMPORT_FILES.LABELED]);
+    await fillTarget(page, "guidance-probe", "Guidance probe");
+    const templateMessage = "the resolved template declares stub(s) later that this import cannot express";
+    const primaryMessage = "the primary source has no Markdown heading; a title heading is required before field sections can be recognized";
+    await page.route("**/design/import/preview", (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: "application/json; charset=utf-8",
+        body: JSON.stringify({
+          schema: "verdi.spec-import-preview/v1",
+          digest: "f".repeat(64),
+          ready: false,
+          fields: [],
+          sources: [],
+          coverage: [],
+          findings: [
+            { code: "unsupported-structure", target: "template", message: templateMessage, blocking: true },
+            { code: "unsupported-structure", target: "primary", message: primaryMessage, blocking: true },
+          ],
+        }),
+      }),
+    );
+    expect(await preview(page)).toBe(200);
+    const template = page.locator('#import-findings li[data-code="unsupported-structure"][data-target="template"]');
+    const primary = page.locator('#import-findings li[data-code="unsupported-structure"][data-target="primary"]');
+    await expect(template).toHaveCount(1);
+    await expect(primary).toHaveCount(1);
+    await expect(template.locator(".import-finding-next")).not.toContainText("heading");
+    await expect(template.locator(".import-finding-next")).toContainText("names");
+    await expect(template.locator(".import-finding-message")).toHaveText(templateMessage);
+    await expect(template.locator(".import-finding-code")).toHaveText("unsupported-structure");
+    await expect(primary.locator(".import-finding-next")).toContainText("heading");
+    await expect(primary.locator(".import-finding-message")).toHaveText(primaryMessage);
+    await expect(primary.locator(".import-finding-code")).toHaveText("unsupported-structure");
+    await page.unroute("**/design/import/preview");
+  });
+});
+
+test.describe("spec import: usability — advanced controls stay reachable and the page reads plainly", () => {
+  test("advanced mappings and links are served shut with visible counts, a story's link requirement jumps into them, the class select swaps the evidence floor note, and labels use the body face in sentence case", async ({
+    page,
+  }) => {
+    const base = await importBase(page);
+    await openImport(page, base);
+    const advanced = page.getByTestId("import-advanced");
+    await expect(advanced).toHaveJSProperty("open", false);
+    await expect(page.locator("#import-mapping-count")).toHaveText("0");
+    await expect(page.locator("#import-link-count")).toHaveText("0");
+    await expect(page.getByTestId("import-story-links-jump")).toBeHidden();
+    await expect(page.getByTestId("import-evidence-floor-feature")).toHaveJSProperty("hidden", false);
+    await expect(page.getByTestId("import-evidence-floor-story")).toHaveJSProperty("hidden", true);
+
+    await page.locator("#import-class").selectOption("story");
+    const jump = page.getByTestId("import-story-links-jump");
+    await expect(jump).toBeVisible();
+    await expect(page.getByTestId("import-evidence-floor-story")).toHaveJSProperty("hidden", false);
+    await expect(page.getByTestId("import-evidence-floor-feature")).toHaveJSProperty("hidden", true);
+    await jump.click();
+    await expect(advanced).toHaveJSProperty("open", true);
+    await page.getByTestId("import-add-link").click();
+    await expect(page.locator("#import-link-count")).toHaveText("1");
+    await expect(page.locator("#import-link-list li").last().locator(".import-link-type")).toBeVisible();
+
+    // Page-local typography: the choice labels render in the ordinary body
+    // face at body size, in sentence case — not the shared uppercase mono
+    // label face — without touching the shared stylesheet.
+    const retainLabel = page.locator("label:has(#import-retain)");
+    const style = await retainLabel.evaluate((el) => {
+      const cs = getComputedStyle(el);
+      return { transform: cs.textTransform, family: cs.fontFamily, size: parseFloat(cs.fontSize), spacing: cs.letterSpacing };
+    });
+    expect(style.transform).toBe("none");
+    expect(style.family).not.toMatch(/mono/i);
+    expect(style.size).toBeGreaterThanOrEqual(15);
+    expect(style.spacing).toBe("normal");
+    await expect(retainLabel).toContainText("Keep the remaining source text as reference material");
+    await expect(page.locator("label:has(#import-defer)")).toContainText("Leave Problem and Outcome as TODOs for now");
   });
 });

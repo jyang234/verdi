@@ -316,6 +316,124 @@ func TestSpecImport_HomeAndPageDiscoverable(t *testing.T) {
 	}
 }
 
+// preCheckedInputRe matches any served input that arrives pre-checked —
+// the page must never preselect a choice, an evidence kind or the
+// confirmation for the user.
+var preCheckedInputRe = regexp.MustCompile(`(?i)<input[^>]*\schecked[\s>/]`)
+
+// TestSpecImport_PageExplainsChoicesBeforeSelection pins the owner-approved
+// usability correction of the import page's served markup (the FABLE D1-D6
+// proposal as accepted in main's usability-ui-adjudication): the two
+// explicit choices are stated in plain words with their consequences (the
+// pair TODO choice says it replaces BOTH statements, copied ones included,
+// and does not make the proposal review-ready); the evidence helper is
+// served BEFORE the field cards it governs, names the four kinds in
+// concrete words with their technical kind, distinguishes expected from
+// produced proof and explains the existing feature attestation floor
+// (VL-006) as validation the preview reports, not as a page rule; the
+// advanced mapping and link controls sit inside one collapsible region
+// whose summary carries their counts; a story's link requirement is
+// discoverable from the target step with a visible jump into that region;
+// and nothing is pre-checked. Plain-language legends replace the protocol
+// vocabulary ("Dispositions"), and the page's own stylesheet — not the
+// shared one — gives its labels the ordinary body face in sentence case.
+func TestSpecImport_PageExplainsChoicesBeforeSelection(t *testing.T) {
+	root := newSpecImportStore(t)
+	c := newImportClient(t, NewHandlerWith(root, Deps{}))
+	status, page := c.get("/design/import")
+	if status != http.StatusOK {
+		t.Fatalf("GET /design/import = %d", status)
+	}
+	// index fails the test outright when a marker is absent: every later
+	// check slices the page around these positions.
+	index := func(marker string) int {
+		t.Helper()
+		i := strings.Index(page, marker)
+		if i < 0 {
+			t.Fatalf("import page missing %q", marker)
+		}
+		return i
+	}
+
+	// The evidence helper precedes the criteria cards, and both statement
+	// and remaining-source regions exist for the script to fill.
+	guide := index(`id="import-evidence-guide"`)
+	fields := index(`id="import-fields"`)
+	statements := index(`id="import-statements"`)
+	remaining := index(`id="import-remaining"`)
+	if !(guide < fields) {
+		t.Errorf("the evidence helper must be served before the field cards (guide at %d, fields at %d)", guide, fields)
+	}
+	if !(statements < guide) {
+		t.Errorf("the statements region must precede the evidence helper (statements at %d, guide at %d)", statements, guide)
+	}
+	if !(fields < remaining) {
+		t.Errorf("the remaining-source region must follow the field cards (fields at %d, remaining at %d)", fields, remaining)
+	}
+	guideEnd := strings.Index(page[guide:], `</section>`)
+	if guideEnd < 0 {
+		t.Fatalf("unterminated evidence helper")
+	}
+	helper := page[guide : guide+guideEnd]
+	for _, want := range []string{
+		"(static)", "(behavioral)", "(runtime)", "(attestation)",
+		"does not produce", "VL-006", "feature", "story",
+		`data-testid="import-evidence-floor-feature"`, `data-testid="import-evidence-floor-story"`,
+	} {
+		if !strings.Contains(helper, want) {
+			t.Errorf("evidence helper missing %q: %s", want, helper)
+		}
+	}
+
+	// The two choices: plain words, explicit consequences, unchanged ids.
+	for _, want := range []string{
+		`id="import-retain"`, "Keep the remaining source text as reference material", "not promoted",
+		`id="import-defer"`, "Leave Problem and Outcome as TODOs for now", "both statements", "not ready for review",
+	} {
+		index(want)
+	}
+	if strings.Contains(page, "Dispositions") {
+		t.Errorf("the choices step still carries the protocol legend 'Dispositions'")
+	}
+
+	// Advanced controls: one collapsible region holding both lists, with
+	// their counts in its summary, and the story link requirement pointing
+	// into it from the target step.
+	advanced := index(`<details id="import-advanced"`)
+	advancedEnd := strings.Index(page[advanced:], `</details>`)
+	if advancedEnd < 0 {
+		t.Fatalf("unterminated advanced region")
+	}
+	region := page[advanced : advanced+advancedEnd]
+	for _, want := range []string{`id="import-mapping-list"`, `id="import-add-mapping"`, `id="import-link-list"`, `id="import-add-link"`, `id="import-mapping-count"`, `id="import-link-count"`} {
+		if !strings.Contains(region, want) {
+			t.Errorf("advanced region missing %q", want)
+		}
+	}
+	openTag := region[:strings.Index(region, ">")+1]
+	if strings.Contains(openTag, " open") {
+		t.Errorf("the advanced region must not be served open: %s", openTag)
+	}
+	jump := index(`data-testid="import-story-links-jump"`)
+	if !strings.Contains(page[jump-200:jump+200], `href="#import-advanced"`) {
+		t.Errorf("the story links jump does not address the advanced region: %s", page[jump-200:jump+200])
+	}
+
+	// Nothing is chosen for the user.
+	if m := preCheckedInputRe.FindString(page); m != "" {
+		t.Errorf("a served input is pre-checked: %s", m)
+	}
+
+	// Page-local typography: the shared stylesheet's uppercase mono label
+	// face is overridden within this page only, in the page's own <style>.
+	style := page[:index(`</style>`)]
+	for _, want := range []string{".import-page label", "text-transform: none", "letter-spacing: normal"} {
+		if !strings.Contains(style, want) {
+			t.Errorf("page-local stylesheet missing %q", want)
+		}
+	}
+}
+
 // TestSpecImport_LabeledMarkdown_PreviewCorrectApplyRecord is the
 // end-to-end handler journey: a labeled Markdown source previews with its
 // truthful blocking findings; explicit evidence selection, retained
@@ -643,17 +761,31 @@ func TestSpecImport_F13Profile_AbsentLabelsSeparateFromEvidenceAndDeferral(t *te
 		t.Fatalf("f13 preview = %d ready=%v %+v", status, preview.Ready, failure)
 	}
 	// The two absent statement labels and the eight unset evidence
-	// declarations are separate blocking findings (the candidate lint adds
-	// its own blocking splice finding until evidence exists; it is reported
-	// beside them, never folded in).
+	// declarations are separate blocking findings — and nothing else. The
+	// evidence gap is reported exactly once per criterion, as
+	// missing-evidence (the backend correction at a03dd661); it never
+	// additionally surfaces as an unsupported-structure (the splice
+	// refusal's former misclassification) or invalid-candidate finding, and
+	// no candidate bytes are claimed while creation is blocked.
 	counts := findingCounts(preview.Findings)
-	if counts[specimport.FindingMissingStatement] != 2 || counts[specimport.FindingMissingEvidence] != 8 {
+	if counts[specimport.FindingMissingStatement] != 2 || counts[specimport.FindingMissingEvidence] != 8 ||
+		counts[specimport.FindingUnsupportedStructure] != 0 || counts[specimport.FindingInvalidCandidate] != 0 {
 		t.Fatalf("f13 findings = %+v", preview.Findings)
 	}
+	blocking := 0
 	for _, f := range preview.Findings {
 		if (f.Code == specimport.FindingMissingStatement || f.Code == specimport.FindingMissingEvidence) && !f.Blocking {
 			t.Fatalf("f13 finding must block: %+v", f)
 		}
+		if f.Blocking {
+			blocking++
+		}
+	}
+	if blocking != 10 || len(preview.Findings) != 10 {
+		t.Fatalf("f13 preview must carry exactly the ten blocking findings (2 statements + 8 evidence), got %d blocking of %d: %+v", blocking, len(preview.Findings), preview.Findings)
+	}
+	if len(preview.Candidate) != 0 {
+		t.Fatalf("a blocked f13 preview must not claim candidate bytes (%d bytes)", len(preview.Candidate))
 	}
 	if len(preview.Fields) != 8 || len(preview.Sources) != 5 || len(preview.Coverage) != 5 {
 		t.Fatalf("f13 shape: %d fields, %d sources, %d coverage", len(preview.Fields), len(preview.Sources), len(preview.Coverage))
@@ -674,7 +806,8 @@ func TestSpecImport_F13Profile_AbsentLabelsSeparateFromEvidenceAndDeferral(t *te
 		t.Fatalf("deferred preview = %d ready=%v", status, deferred.Ready)
 	}
 	counts = findingCounts(deferred.Findings)
-	if counts[specimport.FindingMissingStatement] != 0 || counts[specimport.FindingStatementsDeferred] != 2 || counts[specimport.FindingMissingEvidence] != 8 {
+	if counts[specimport.FindingMissingStatement] != 0 || counts[specimport.FindingStatementsDeferred] != 2 || counts[specimport.FindingMissingEvidence] != 8 ||
+		counts[specimport.FindingUnsupportedStructure] != 0 || len(deferred.Findings) != 10 {
 		t.Fatalf("deferred findings = %+v", deferred.Findings)
 	}
 	problem, _ := fieldByTarget(deferred.Fields, "problem")
