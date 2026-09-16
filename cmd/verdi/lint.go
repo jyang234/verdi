@@ -19,10 +19,19 @@ import (
 // VL-001..VL-020 rule, and prints one line per finding to stdout. Exit
 // contract (CLAUDE.md): 0 clean, 1 findings present, 2 operational error
 // (can't resolve the store root, can't build the snapshot). A
-// SeverityDisclosure finding (VL-017's disclosed-unproven notice on a bare
-// CI clone) is printed but does NOT flip the exit to 1 — disclosure is not
-// failure (adjudicated at W2 wave close); a run whose only findings are
-// disclosures still exits 0.
+// SeverityDisclosure finding (VL-017's disclosed-unproven notice when the
+// mutable zone is absent from this checkout) is printed but does NOT flip
+// the exit to 1 — disclosure is not failure (adjudicated at W2 wave
+// close); a run whose only findings are disclosures still exits 0.
+//
+// spec/uat-round-1 ac-3 (closing UAT-002): VL-017's disclosure is printed
+// at most ONCE per run, naming every affected spec, never once per spec —
+// lint.CollapseVL017Disclosures does the collapsing right before this flat
+// one-line-per-finding print loop runs. The engine itself still reports
+// one Finding per applicable spec (unchanged): internal/disclosureview's
+// enumeration (the workbench's live /disclosures page and the dex's
+// static edition) reads the engine directly and needs that per-spec
+// granularity, so only this CLI printer collapses.
 func runLintVerb(_ []string, stdout, stderr io.Writer) int {
 	ctx := context.Background()
 
@@ -47,6 +56,7 @@ func runLintVerb(_ []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "verdi lint: %v\n", err)
 		return 2
 	}
+	findings = lint.CollapseVL017Disclosures(findings)
 
 	exit := 0
 	for _, f := range findings {

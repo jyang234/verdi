@@ -149,6 +149,83 @@ func TestRunLintVerb_VL017DisclosureOnly_ExitsZero(t *testing.T) {
 	}
 }
 
+// lintTestNewClassFeatureTwo is a second, independent new-class feature
+// spec — distinct from lintTestNewClassFeature only by id/dir/title/prose
+// — that TestRunLintVerb_VL017Disclosure_PrintedOncePerRun needs to prove
+// ac-3's "once per run" collapse against MORE THAN ONE affected spec: a
+// single-spec fixture cannot distinguish "printed once" from "printed
+// once per spec, and this store happens to have exactly one spec."
+const lintTestNewClassFeatureTwo = `---
+id: spec/borrower-update-two
+kind: spec
+class: feature
+title: "Borrower update two"
+status: draft
+owners: [platform-team]
+problem: { text: "the update API has no PATCH route", anchor: "#problem" }
+outcome: { text: "a borrower can partially update their application", anchor: "#outcome" }
+acceptance_criteria:
+  - { id: ac-1, text: "a borrower can partially update their application", evidence: [behavioral, attestation], anchor: "#ac-1" }
+---
+# Borrower update two
+
+## Problem
+
+The update API has no PATCH route.
+
+## Outcome
+
+A borrower can partially update their application.
+
+## AC-1
+
+A borrower can partially update their application.
+`
+
+// TestRunLintVerb_VL017Disclosure_PrintedOncePerRun is spec/uat-round-1
+// ac-3's CLI exerciser, closing UAT-002: "on a normal local checkout with
+// N specs the CLI prints the [VL-017] paragraph N times." On a checkout
+// with the mutable zone absent and TWO applicable specs, `verdi lint`
+// must print VL-017's disclosure exactly ONCE, naming both affected
+// specs, describe the condition as the mutable zone being absent from
+// this checkout (never committed, 01 §Zones), and never assert a bare
+// clone — while still exiting 0 (disclosure is not a verdict failure,
+// co-2/ac-3 unchanged).
+func TestRunLintVerb_VL017Disclosure_PrintedOncePerRun(t *testing.T) {
+	repo := buildMinimalStore(t, map[string]string{
+		".verdi/specs/active/borrower-update/spec.md":     lintTestNewClassFeature,
+		".verdi/specs/active/borrower-update-two/spec.md": lintTestNewClassFeatureTwo,
+	})
+	t.Chdir(repo.Dir)
+
+	var stdout, stderr bytes.Buffer
+	got := runLintVerb(nil, &stdout, &stderr)
+	if got != 0 {
+		t.Fatalf("runLintVerb exit = %d, want 0 (VL-017 disclosure is not a verdict failure); stdout=%q stderr=%q", got, stdout.String(), stderr.String())
+	}
+	out := stdout.String()
+	if n := strings.Count(out, "disclosed-unproven [lint:VL-017]"); n != 1 {
+		t.Fatalf("stdout printed the VL-017 disclosure %d time(s), want exactly 1 (ac-3, closing UAT-002):\n%s", n, out)
+	}
+	for _, path := range []string{
+		".verdi/specs/active/borrower-update/spec.md",
+		".verdi/specs/active/borrower-update-two/spec.md",
+	} {
+		if !strings.Contains(out, path) {
+			t.Fatalf("stdout missing affected spec path %q in the once-per-run disclosure:\n%s", path, out)
+		}
+	}
+	if strings.Contains(out, "bare clone") {
+		t.Fatalf("stdout must not assert a bare clone (ac-3):\n%s", out)
+	}
+	if !strings.Contains(out, "mutable zone (.verdi/data/mutable/) is absent from this checkout") {
+		t.Fatalf("stdout must describe the mutable-zone-absent condition (ac-3):\n%s", out)
+	}
+	if !strings.Contains(out, "never committed") || !strings.Contains(out, "01 §Zones") {
+		t.Fatalf("stdout must cite the never-committed fact and 01 §Zones (ac-3):\n%s", out)
+	}
+}
+
 // TestRunLintVerb_NoStoreRoot_ExitTwo proves an operational failure (no
 // store root findable) exits 2 with a stderr message, not a Finding.
 func TestRunLintVerb_NoStoreRoot_ExitTwo(t *testing.T) {
