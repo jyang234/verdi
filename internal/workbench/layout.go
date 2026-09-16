@@ -9,9 +9,31 @@ package workbench
 import (
 	"bytes"
 	"fmt"
+	stdhtml "html"
 	"html/template"
 	"strings"
+
+	"github.com/jyang234/verdi/internal/buildinfo"
 )
+
+// shellFuncs is the template FuncMap every workbench shell — this shared
+// read-page shell and the three inline shells (board.go's v0 board,
+// boardspecrender.go's v1 board, boarddiagramrender.go's diagram editor)
+// — parses with, so the page footer is defined once and rendered on
+// every page (spec/uat-round-1 ac-1: "the workbench renders it in its
+// page footer").
+var shellFuncs = template.FuncMap{"buildFooter": buildIdentificationFooter}
+
+// buildIdentificationFooter renders the one page footer: the build
+// identification line internal/buildinfo.Line() derives — the SAME string
+// `verdi version` prints and `verdi serve` logs at startup, so the three
+// surfaces can never disagree about which build produced a page (closes
+// UAT-003). From a linked-worktree build it honestly reads "verdi (devel)"
+// (dc-8); the footer never fabricates a version. Quiet chrome in the
+// shell's existing muted note style and monospace code chip.
+func buildIdentificationFooter() template.HTML {
+	return template.HTML(`<footer class="site-foot" data-testid="build-footer"><p class="ritual-note"><small>Build <code data-testid="build-identification">` + stdhtml.EscapeString(buildinfo.Line()) + `</code></small></p></footer>`)
+}
 
 // metaRow is one line of a page's frontmatter card — deliberately the
 // same shape as internal/dex's own metaRow (05 §Verdi-dex page anatomy:
@@ -46,7 +68,7 @@ type pageData struct {
 	HasMermaid bool
 }
 
-var pageTemplate = template.Must(template.New("page").Parse(`<!doctype html>
+var pageTemplate = template.Must(template.New("page").Funcs(shellFuncs).Parse(`<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
@@ -73,6 +95,7 @@ var pageTemplate = template.Must(template.New("page").Parse(`<!doctype html>
 {{.ExtraHTML}}
 </main>
 </div>
+{{buildFooter}}
 {{if .HasMermaid}}<script src="/assets/mermaid.min.js"></script>
 <script>mermaid.initialize({startOnLoad:true,securityLevel:"strict",theme:window.matchMedia&&window.matchMedia("(prefers-color-scheme: dark)").matches?"dark":"default"});</script>
 {{end}}</body>

@@ -179,7 +179,7 @@ func writeReadOnlyPanel(b *strings.Builder, p *BoardProjection) {
 	}
 }
 
-var boardSpecPageTemplate = template.Must(template.New("boardspec").Parse(`<!doctype html>
+var boardSpecPageTemplate = template.Must(template.New("boardspec").Funcs(shellFuncs).Parse(`<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
@@ -202,6 +202,7 @@ var boardSpecPageTemplate = template.Must(template.New("boardspec").Parse(`<!doc
 <main id="boardv2-region">
 {{.Region}}
 </main>
+{{buildFooter}}
 {{.Dialogs}}
 <script>
 window.__BOARDV2__ = {{.StateJSON}};
