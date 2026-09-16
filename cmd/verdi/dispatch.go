@@ -58,6 +58,28 @@ verbs: lint, design, accept, feature, build, align, sync, serve, mcp, matrix,
 // 0 clean / 1 verdict failure / 2 operational error. Phase 1 has no verdicts
 // yet, so every path here is operational: usage (unknown verb, no args) or
 // an honest "not implemented" for a recognized verb.
+//
+// spec/uat-round-1 ac-1/ac-2 add two families of top-level, never-phase-
+// numbered tokens, both checked before the unknown-verb/phase lookup so
+// neither is ever added to verbPhase (internal/specalign's CLI-verb
+// inventory, a serialized shared registry per CLAUDE.md, stays untouched):
+// "help"/"--help"/"-h" print topLevelUsage (help.go) and exit 0; "version"/
+// "--version" print buildinfo.Line() (version.go) and exit 0 — UNLESS the
+// very next token is itself one of the three help spellings, in which
+// case each prints its OWN verbUsage row ("help"/"version") instead,
+// exactly like every other verb below (an ac-2 review fix: topLevelUsage's
+// closing sentence, "run `verdi <verb> help` ... for that verb's own
+// usage," must hold for every row it lists, "help" and "version"
+// included, not just the 29 phase-numbered ones). Right after, the
+// per-verb help intercept (ac-2) fires whenever the token immediately
+// following a KNOWN verb is one of those same three spellings: it prints
+// that verb's own registered usage (help.go's verbUsage) and returns
+// before the verb's real implementation is ever called — the fix for
+// today's "`verdi lint --help` runs a full lint" and "`verdi spec --help`
+// prints only the `spec state` form" (via the usage-error exit/stream,
+// stderr+exit 2, rather than a clean stdout+exit 0 help response).
+// Unknown verb and no-args behavior are untouched (co-2): both still fall
+// through to the existing `usage` banner on stderr, exit 2.
 func run(args []string, stderr io.Writer) int {
 	if len(args) == 0 {
 		fmt.Fprintln(stderr, usage)
@@ -65,7 +87,35 @@ func run(args []string, stderr io.Writer) int {
 	}
 
 	verb := args[0]
+	if isHelpToken(verb) {
+		// ac-2 review fix: "verdi help help"/"--help"/"-h" — and the
+		// three-spelling cross products this same check also reaches,
+		// e.g. "verdi --help help" — ask for the "help" ROW's own usage,
+		// not a second dump of topLevelUsage; makes topLevelUsage's
+		// closing sentence true for the "help" row too.
+		if verbHelpRequested(args[1:]) {
+			fmt.Fprintln(os.Stdout, verbUsageOrFallback("help"))
+			return 0
+		}
+		fmt.Fprintln(os.Stdout, topLevelUsage)
+		return 0
+	}
+	if verb == "version" || verb == "--version" {
+		// ac-2 review fix: "verdi version --help"/"-h"/"help" asks for
+		// the "version" row's own usage, not the version line itself —
+		// same closing-sentence guarantee as above, for the "version" row.
+		if verbHelpRequested(args[1:]) {
+			fmt.Fprintln(os.Stdout, verbUsageOrFallback("version"))
+			return 0
+		}
+		return cmdVersion(os.Stdout)
+	}
+
 	if verb == "lint" {
+		if verbHelpRequested(args[1:]) {
+			fmt.Fprintln(os.Stdout, verbUsageOrFallback(verb))
+			return 0
+		}
 		return runLintVerb(args[1:], os.Stdout, stderr)
 	}
 
@@ -73,6 +123,11 @@ func run(args []string, stderr io.Writer) int {
 	if !known {
 		fmt.Fprintln(stderr, usage)
 		return 2
+	}
+
+	if verbHelpRequested(args[1:]) {
+		fmt.Fprintln(os.Stdout, verbUsageOrFallback(verb))
+		return 0
 	}
 
 	if verb == "sync" {
