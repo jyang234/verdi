@@ -361,13 +361,13 @@ func TestSpecImport_PageExplainsChoicesBeforeSelection(t *testing.T) {
 	fields := index(`id="import-fields"`)
 	statements := index(`id="import-statements"`)
 	remaining := index(`id="import-remaining"`)
-	if !(guide < fields) {
+	if guide >= fields {
 		t.Errorf("the evidence helper must be served before the field cards (guide at %d, fields at %d)", guide, fields)
 	}
-	if !(statements < guide) {
+	if statements >= guide {
 		t.Errorf("the statements region must precede the evidence helper (statements at %d, guide at %d)", statements, guide)
 	}
-	if !(fields < remaining) {
+	if fields >= remaining {
 		t.Errorf("the remaining-source region must follow the field cards (fields at %d, remaining at %d)", fields, remaining)
 	}
 	guideEnd := strings.Index(page[guide:], `</section>`)
