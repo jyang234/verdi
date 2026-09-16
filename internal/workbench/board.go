@@ -128,7 +128,7 @@ type boardClientState struct {
 	Yarn     []artifact.Yarn `json:"yarn"`
 }
 
-var boardPageTemplate = template.Must(template.New("board").Parse(`<!doctype html>
+var boardPageTemplate = template.Must(template.New("board").Funcs(shellFuncs).Parse(`<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
@@ -146,6 +146,7 @@ var boardPageTemplate = template.Must(template.New("board").Parse(`<!doctype htm
 <div id="autosave-status" role="status" aria-live="polite"></div>
 </header>
 {{.Body}}
+{{buildFooter}}
 <script>
 window.__BOARD_KEY__ = {{.KeyJSON}};
 window.__BOARD__ = {{.StateJSON}};

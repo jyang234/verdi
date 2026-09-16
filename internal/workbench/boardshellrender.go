@@ -211,7 +211,7 @@ func writeASDShell(b *strings.Builder, asd *asdView) {
 	}
 	b.WriteString(`</section>`)
 	if shell.PolicySetupGuide != policyGuideNone {
-		writePolicySetupGuide(b, shell.PolicySetupGuide, shell.PolicyDetail)
+		writePolicySetupGuide(b, shell.PolicySetupGuide, shell.PolicyCode, shell.PolicyDetail)
 	}
 	b.WriteString(`</section>`)
 }
@@ -275,9 +275,16 @@ func policyGuidePlaceholderPath(path string) string { return stdhtml.EscapeStrin
 // markup only: no form, no button, no fetch wiring, no route — it adopts
 // nothing, synchronizes nothing, and preserves every mode's restrictions.
 // Proposed or validated is never presented as accepted; missing authority
-// stays blocked.
-func writePolicySetupGuide(b *strings.Builder, kind policyGuideKind, detail string) {
+// stays blocked. The "workbench reported" quote is code + ": " + detail
+// (wave-1 ledger R-5) — code and detail arrive separately so the prefix
+// appears exactly once (ac-5); an absent code degrades to the bare detail.
+func writePolicySetupGuide(b *strings.Builder, kind policyGuideKind, code, detail string) {
 	esc := stdhtml.EscapeString
+	reported := detail
+	if code != "" {
+		reported = code + ": " + detail
+	}
+	reportedHTML := `<code data-testid="asd-policy-guide-report">` + esc(reported) + `</code>`
 	b.WriteString(`<section class="asd-policy-guide" id="` + policySetupGuideID + `" data-testid="` + policySetupGuideID + `" data-policy-guide="` + esc(string(kind)) + `" aria-label="Policy setup guide">`)
 	b.WriteString(`<h2 class="readiness-heading">Policy setup guide</h2>`)
 	switch kind {
@@ -287,7 +294,7 @@ func writePolicySetupGuide(b *strings.Builder, kind policyGuideKind, detail stri
 		// it proves no adopted .verdi/policy in THIS checkout's tree and
 		// nothing about the default branch, which may already carry
 		// accepted policy this branch was cut before.
-		b.WriteString(`<p class="readiness-summary">This checkout carries no adopted policy authority: the workbench resolved <code>.verdi/policy</code> in the tree it is serving and found none. The workbench reported: <code>` + esc(detail) + `</code>. That is a fact about this checkout only, not about the default branch. Ordinary human editing does not require policy; this board&#39;s read-only restrictions still apply. A semantic review packet and delegated-agent design assistance need project policy, so review&#39;s missing-policy refusal remains until this checkout resolves governing policy. Loading or editing proposed policy files is not acceptance and does not by itself authorize review.</p>`)
+		b.WriteString(`<p class="readiness-summary">This checkout carries no adopted policy authority: the workbench resolved <code>.verdi/policy</code> in the tree it is serving and found none. The workbench reported: ` + reportedHTML + `. That is a fact about this checkout only, not about the default branch. Ordinary human editing does not require policy; this board&#39;s read-only restrictions still apply. A semantic review packet and delegated-agent design assistance need project policy, so review&#39;s missing-policy refusal remains until this checkout resolves governing policy. Loading or editing proposed policy files is not acceptance and does not by itself authorize review.</p>`)
 		// vocab:identity — non-vocabulary homograph: "pull, merge or rebase" names the Git operations the workbench never runs, never the `merge` lifecycle transition word
 		b.WriteString(`<p class="readiness-summary">Inspect first: run the read-only Inspect check below and read <code>accepted.adopted</code> against <code>proposed.adopted</code>. If the accepted snapshot is adopted, the project already has policy authority: inspect why this checkout lacks the accepted policy. An older branch may need updating through the project&#39;s own process; the workbench does not pull, merge or rebase anything and infers no cause. Only when the accepted snapshot is also not adopted does initial setup apply.</p>`)
 		// vocab:identity — non-vocabulary homograph: the forge's owner's merge to the default branch (the acceptance decision), never the `merge` lifecycle transition word
@@ -300,7 +307,7 @@ func writePolicySetupGuide(b *strings.Builder, kind policyGuideKind, detail stri
 		writeReadinessFact(b, ".verdi/constitution/consumers.json", "declares the real registered consumers impact coverage needs. Never fabricate an empty or baseline inventory to make preparation look complete.")
 		b.WriteString(`</dl><p class="ritual-note">Author these only after the Inspect check confirms no accepted policy. Keep them on a proposal branch. Do not copy a fixture&#39;s identities, approvals or trust facts into a real project. <code>verdi context constitution propose</code> amends one policy, overlay or exemption; it does not create the initial constitution or profile.</p></details>`)
 	default:
-		b.WriteString(`<p class="readiness-summary">Policy authority resolved for this project, but it does not grant design assistance. The workbench reported: <code>` + esc(detail) + `</code>. Ordinary human editing does not require policy; this board&#39;s read-only restrictions still apply. A semantic review packet and delegated-agent design assistance need a policy that grants them, so review stays blocked until the project&#39;s policy does.</p>`)
+		b.WriteString(`<p class="readiness-summary">Policy authority resolved for this project, but it does not grant design assistance. The workbench reported: ` + reportedHTML + `. Ordinary human editing does not require policy; this board&#39;s read-only restrictions still apply. A semantic review packet and delegated-agent design assistance need a policy that grants them, so review stays blocked until the project&#39;s policy does.</p>`)
 		// vocab:identity — non-vocabulary homograph: the forge's owner's merge to the default branch (the acceptance decision), never the `merge` lifecycle transition word
 		b.WriteString(`<p class="ritual-note">This guide changes nothing; the workbench has no policy control. A policy change that is proposed or validated is not accepted: acceptance is the owner&#39;s merge to the default branch through the project&#39;s own review process.</p>`)
 
