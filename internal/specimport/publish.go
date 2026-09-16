@@ -164,10 +164,18 @@ func (s *Service) publishNew(ctx context.Context, root string, request Request, 
 		})
 	}
 
+	// profileDigest is "" (ok=false) for every format that names no pinned
+	// reference profile — the ordinary case for native/markdown-v1/
+	// manual-v1 — so ProfilePrimaryDigest stays absent for them, exactly
+	// as validateRecordFormat requires. request.Format has already passed
+	// Request.Validate (via this call's own Normalize, above), so it is
+	// always one of the four closed values here.
+	profileDigest, _ := profilePrimaryDigestFor(request.Format)
 	record := Record{
 		Schema: RecordSchema, PreviewDigest: preview.Digest, BaseCommit: preview.BaseCommit,
 		ModelDigest: preview.ModelDigest, ConfigDigest: preview.ConfigDigest, EngineDigest: preview.EngineDigest,
-		RequestDigest: preview.RequestDigest, CandidateDigest: sha256Hex(preview.Candidate), SpecRef: preview.SpecRef,
+		RequestDigest: preview.RequestDigest, Format: request.Format, ProfilePrimaryDigest: profileDigest,
+		CandidateDigest: sha256Hex(preview.Candidate), SpecRef: preview.SpecRef,
 		Sources: recordSources, Fields: append([]Field{}, preview.Fields...), Mappings: append([]Mapping{}, request.Mappings...),
 		Coverage: append([]Coverage{}, preview.Coverage...),
 		Actor:    RecordActor{Attribution: actor.Attribution(), Harness: actor.Harness(), Session: actor.Session()},

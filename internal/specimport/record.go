@@ -53,28 +53,56 @@ type RecordActor struct {
 // attribution and policy posture. No clock/randomness in this record. This
 // new creation record supplies import provenance atomically; it does not
 // forge an ASD mutation entry for a nonexistent prior draft").
+//
+// Format and ProfilePrimaryDigest are a uat-round-1 spec ac-4 addition
+// (closing UAT-005: "no tooling exists to tell from a record which profile
+// produced it"). Both are ADDITIVE and OPTIONAL-ON-READ: a record committed
+// before this change carries neither key at all, decodes with both fields
+// at their zero value ("" — reported as ABSENT, never fabricated as a real
+// value), and remains otherwise valid — validate() imposes no requiredness
+// on either field taken alone. They are REQUIRED-ON-WRITE in the narrow
+// sense that every record Service.Apply produces from here forward always
+// sets Format (Request.Format is itself a required, closed-enum field by
+// the time Normalize has validated it), and sets ProfilePrimaryDigest
+// whenever Format names a pinned reference profile. No other invariant
+// loosens: validate() still enforces that a NON-EMPTY Format is one of the
+// four closed Request.Format values, and that ProfilePrimaryDigest is
+// present, and exactly equal to the profile's own pinned constant (see
+// profilePrimaryDigestFor), whenever — and only whenever — Format names a
+// reference profile.
 type Record struct {
-	Schema          string                  `json:"schema"`
-	PreviewDigest   string                  `json:"preview_digest"`
-	BaseCommit      string                  `json:"base_commit"`
-	ModelDigest     string                  `json:"model_digest"`
-	ConfigDigest    string                  `json:"config_digest"`
-	EngineDigest    string                  `json:"engine_digest"`
-	RequestDigest   string                  `json:"request_digest"`
-	CandidateDigest string                  `json:"candidate_digest"`
-	SpecRef         string                  `json:"spec_ref"`
-	Sources         []RecordSource          `json:"sources"`
-	Fields          []Field                 `json:"fields"`
-	Mappings        []Mapping               `json:"mappings,omitempty"`
-	Coverage        []Coverage              `json:"coverage"`
-	Actor           RecordActor             `json:"actor"`
-	Policy          designprovenance.Policy `json:"policy"`
+	Schema        string `json:"schema"`
+	PreviewDigest string `json:"preview_digest"`
+	BaseCommit    string `json:"base_commit"`
+	ModelDigest   string `json:"model_digest"`
+	ConfigDigest  string `json:"config_digest"`
+	EngineDigest  string `json:"engine_digest"`
+	RequestDigest string `json:"request_digest"`
+	// Format is the Request.Format value ("native", "markdown-v1",
+	// "f13-reference-v1" or "manual-v1") this record's candidate was
+	// produced from. Absent ("") on a pre-ac-4 record.
+	Format string `json:"format,omitempty"`
+	// ProfilePrimaryDigest is the exact pinned primary SHA-256 the named
+	// reference profile in Format was bound to (currently only
+	// f13-reference-v1 names one). Absent ("") for every other format,
+	// and for any pre-ac-4 record regardless of format.
+	ProfilePrimaryDigest string                  `json:"profile_primary_digest,omitempty"`
+	CandidateDigest      string                  `json:"candidate_digest"`
+	SpecRef              string                  `json:"spec_ref"`
+	Sources              []RecordSource          `json:"sources"`
+	Fields               []Field                 `json:"fields"`
+	Mappings             []Mapping               `json:"mappings,omitempty"`
+	Coverage             []Coverage              `json:"coverage"`
+	Actor                RecordActor             `json:"actor"`
+	Policy               designprovenance.Policy `json:"policy"`
 }
 
 // validate checks Record's own closed shape: every digest/ref field present
 // and correctly shaped, the closed origin/disposition/transform
 // vocabularies, field and source identity grammar, the coverage invariants
-// the contract states, and (transitively, through Policy's own
+// the contract states, the optional Format/ProfilePrimaryDigest pairing
+// (see validateRecordFormat — both fields are absent-tolerant, so a
+// pre-ac-4 record is unaffected), and (transitively, through Policy's own
 // UnmarshalJSON and Actor.Attribution.Validate) the nested union/
 // attribution shapes. Its checks are drawn from the same constants and
 // validators Request.Validate and Normalize use, never a second grammar.
@@ -95,6 +123,9 @@ func (r Record) validate() error {
 	if r.PreviewDigest == "" || r.BaseCommit == "" || r.ModelDigest == "" || r.ConfigDigest == "" ||
 		r.EngineDigest == "" || r.RequestDigest == "" || r.CandidateDigest == "" || r.SpecRef == "" {
 		return fmt.Errorf("record is missing a required digest or spec_ref field")
+	}
+	if err := validateRecordFormat(r); err != nil {
+		return err
 	}
 	if err := validateRecordDigests(r); err != nil {
 		return err
