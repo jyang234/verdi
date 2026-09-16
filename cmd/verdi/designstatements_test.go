@@ -479,7 +479,7 @@ func buildPhase7RepoWithBlockedFeatureTemplate(t *testing.T) *fixturegit.Repo {
 // with the real supplied text — never the Default* TODO placeholders.
 func TestRunDesignStart_ProblemOutcomeFlags_TODOFree(t *testing.T) {
 	repo := buildPhase7Repo(t)
-	t.Setenv("CI_DEFAULT_BRANCH", "main")
+	t.Setenv("CI_DEFAULT_BRANCH", "")
 	ctx := context.Background()
 	manifest := phase7Manifest(t)
 	deps := designDeps{Provider: seedFakeProvider(t), Runner: nil, GoTest: fakeGoTest{},
@@ -507,7 +507,7 @@ func TestRunDesignStart_ProblemOutcomeFlags_TODOFree(t *testing.T) {
 // an explicit disclosure line on stdout naming the deferral.
 func TestRunDesignStart_DeferStatements_DisclosesAndKeepsPlaceholders(t *testing.T) {
 	repo := buildPhase7Repo(t)
-	t.Setenv("CI_DEFAULT_BRANCH", "main")
+	t.Setenv("CI_DEFAULT_BRANCH", "")
 	ctx := context.Background()
 	manifest := phase7Manifest(t)
 	deps := designDeps{Provider: seedFakeProvider(t), Runner: nil, GoTest: fakeGoTest{}, DeferStatements: true}
@@ -682,7 +682,7 @@ func TestRunDesignStart_StatementFlags_Negative(t *testing.T) {
 // problem/outcome text.
 func TestRunDesignStart_TTYInterview_CollectsStatements(t *testing.T) {
 	repo := buildPhase7Repo(t)
-	t.Setenv("CI_DEFAULT_BRANCH", "main")
+	t.Setenv("CI_DEFAULT_BRANCH", "")
 	ctx := context.Background()
 	manifest := phase7Manifest(t)
 	deps := designDeps{
@@ -743,7 +743,7 @@ func TestRunDesignStart_TTYInterview_Aborted(t *testing.T) {
 // parse-refusal case below never reaches a provider at all (it exits at
 // extractFlags), so it keeps the shared fixture.
 func TestCmdDesignStart_StatementFlags_ParseAndRoundTrip(t *testing.T) {
-	t.Setenv("CI_DEFAULT_BRANCH", "main")
+	t.Setenv("CI_DEFAULT_BRANCH", "")
 	t.Run("--problem/--outcome round trip", func(t *testing.T) {
 		repo := buildFakeProviderRepo(t)
 		t.Chdir(repo.Dir)
@@ -863,7 +863,7 @@ func TestDesignGo_NoOwnersFlag(t *testing.T) {
 func TestRun_DesignStart_TTYInterview_BuiltBinary(t *testing.T) {
 	bin := buildVerdiBinary(t)
 	repo := buildPhase7Repo(t)
-	t.Setenv("CI_DEFAULT_BRANCH", "main")
+	t.Setenv("CI_DEFAULT_BRANCH", "")
 
 	cmd := exec.Command(bin, "design", "start", "--kind", "feature", "--name", "built-binary-interview")
 	cmd.Dir = repo.Dir
@@ -943,7 +943,7 @@ func TestRun_DesignStart_NoTTY_NoFlags_Refuses_BuiltBinary(t *testing.T) {
 func TestRun_DesignStart_NoTTYRefusalThenSameNameRetry_BuiltBinary(t *testing.T) {
 	bin := buildVerdiBinary(t)
 	repo := buildPhase7Repo(t)
-	t.Setenv("CI_DEFAULT_BRANCH", "main")
+	t.Setenv("CI_DEFAULT_BRANCH", "")
 	ctx := context.Background()
 	const name = "same-name-retry"
 	branch := "design/" + name
