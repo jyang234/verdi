@@ -596,20 +596,41 @@
     errorEl.textContent = "";
     errorEl.removeAttribute("data-code");
   }
-  function showError(failure) {
+  // slugOfRequest reads the target slug out of the exact request JSON a
+  // refusal answers — never the form's current value, which may have
+  // changed since that request was sent.
+  function slugOfRequest(request) {
+    try {
+      var req = JSON.parse(request);
+      return (req && req.target && typeof req.target.slug === "string") ? req.target.slug : "";
+    } catch (e) {
+      return "";
+    }
+  }
+  // showError renders one refusal. request is the exact request JSON the
+  // refusal answers (the previewed or applied bytes); late marks an answer
+  // to a creation request sent before the current inputs. Everything the
+  // refusal names — the spec, the existing-board link — comes from that
+  // request, so a refusal about spec/A never points at a slug edited since.
+  function showError(failure, request, late) {
     var code = (failure && failure.code) || "transport";
     var detail = (failure && (failure.error || failure.message)) || "no detail";
+    var slug = request ? slugOfRequest(request) : "";
+    var about = slug ? "spec/" + slug : "";
     errorEl.setAttribute("data-code", code);
-    errorEl.textContent = "Refused (" + code + "): " + detail + (ERROR_GUIDANCE[code] ? " — " + ERROR_GUIDANCE[code] : "");
-    if (code === "target-exists") {
-      // The existing proposal under that name is one click away — the
-      // discoverable path when an earlier attempt on this page may have
-      // been the one that created it.
-      var slug = $("import-slug").value.trim();
-      if (slug) {
-        errorEl.appendChild(document.createTextNode(" "));
-        errorEl.appendChild(el("a", { href: "/b/" + encodeURIComponent("design/" + slug) + "/board/spec/" + encodeURIComponent(slug), "data-testid": "import-existing-board-link" }, "Open the existing board for spec/" + slug));
-      }
+    if (about) {
+      errorEl.setAttribute("data-request-spec", about);
+    } else {
+      errorEl.removeAttribute("data-request-spec");
+    }
+    var lead = late && about ? "This answers the earlier creation request for " + about + ", sent before your latest edits. " : "";
+    errorEl.textContent = lead + "Refused (" + code + ")" + (about && !late ? " for " + about : "") + ": " + detail + (ERROR_GUIDANCE[code] ? " — " + ERROR_GUIDANCE[code] : "");
+    if (code === "target-exists" && slug) {
+      // The existing proposal under the REFUSED request's name is one
+      // click away — the discoverable path when an earlier attempt on this
+      // page may have been the one that created it.
+      errorEl.appendChild(document.createTextNode(" "));
+      errorEl.appendChild(el("a", { href: "/b/" + encodeURIComponent("design/" + slug) + "/board/spec/" + encodeURIComponent(slug), "data-testid": "import-existing-board-link" }, "Open the existing board for " + about + " (the name in the refused request)"));
     }
     errorEl.hidden = false;
   }
@@ -648,7 +669,7 @@
           return;
         }
         if (r.status !== 200) {
-          showError(r.data);
+          showError(r.data, body, false);
           setNextAction();
           return;
         }
@@ -658,7 +679,7 @@
       })
       .catch(function (err) {
         if (epoch !== state.epoch) return;
-        showError({ code: "transport", error: err.message });
+        showError({ code: "transport", error: err.message }, body, false);
         setNextAction();
       });
   }
@@ -869,7 +890,7 @@
           setNextAction();
           return;
         }
-        showError(r.data);
+        showError(r.data, attempt.request, late);
         if (!late) {
           if (r.data && (r.data.code === "stale-preview" || r.data.code === "dirty-context" || r.data.code === "unresolved")) {
             resultEl.setAttribute("data-stale", "true");
