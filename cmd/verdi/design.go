@@ -37,22 +37,36 @@ import (
 	"golang.org/x/term"
 )
 
-// designVerbUsage is the one usage line every unrecognized/absent `design`
-// subcommand prints. Wave 6 Task 1 adds board|context|capabilities|
-// provenance|review — the CLI-equivalent surface AC-8 describes ("the CLI
-// exposes equivalent structured commands") for designapp's five
-// non-mutation operations — as new subcommands inside this SAME existing
-// `design` namespace; no new top-level verb is added, so
-// internal/specalign's CLI-verb inventory (top-level only) needs no
-// change.
-const designVerbUsage = "usage: verdi design start [<ref>] --kind feature|story --name <name> | " + // vocab:identity — CLI usage/flag grammar (--kind enum values, identity)
-	"verdi design mutate --request <path|-> --harness <id> [--session <id>] | " +
-	"verdi design board <spec-ref> | verdi design context <spec-ref> [--child-story <ref>]... | " + // vocab:identity — CLI usage/flag grammar (--child-story flag name, identity)
-	"verdi design capabilities <spec-ref> | verdi design provenance <spec-ref> | verdi design review <spec-ref> | " +
-	"verdi design import source --root <directory> --file <relative-path> [--start-line <n> --end-line <n>] | " +
-	"verdi design import preview --request <path|-> | " +
-	"verdi design import apply --request <path|-> --preview <sha256> --harness <id> [--session <id>] | " +
-	"verdi design import record --branch <branch> --spec <slug>"
+// designVerbUsage is the one usage text every unrecognized/absent `design`
+// subcommand prints, and (spec/uat-round-1 ac-2) the exact text "verdi
+// design --help"/"-h"/"help" prints too — help.go's verbUsage registry
+// reuses this SAME constant, never a duplicate copy. Wave 6 Task 1 adds
+// board|context|capabilities|provenance|review — the
+// CLI-equivalent surface AC-8 describes ("the CLI exposes equivalent
+// structured commands") for designapp's five non-mutation operations —
+// as new subcommands inside this SAME existing `design` namespace; no new
+// top-level verb is added, so internal/specalign's CLI-verb inventory
+// (top-level only) needs no change.
+//
+// ac-2 reformatted this from a single " | "-joined line to one line per
+// form (still exactly ONE Fprintln call at each existing call site below
+// and in designimport.go — Fprintln on a multi-line string prints it
+// verbatim plus one trailing newline, so the exit code and stream at
+// every call site are unchanged): every form's wording is preserved
+// byte-for-byte, only the separator changed.
+//
+// vocab:identity — CLI usage/flag grammar (identity: --kind's feature|story enum values and the --child-story flag name)
+const designVerbUsage = `usage: verdi design start [<ref>] --kind feature|story --name <name>
+       verdi design mutate --request <path|-> --harness <id> [--session <id>]
+       verdi design board <spec-ref>
+       verdi design context <spec-ref> [--child-story <ref>]...
+       verdi design capabilities <spec-ref>
+       verdi design provenance <spec-ref>
+       verdi design review <spec-ref>
+       verdi design import source --root <directory> --file <relative-path> [--start-line <n> --end-line <n>]
+       verdi design import preview --request <path|->
+       verdi design import apply --request <path|-> --preview <sha256> --harness <id> [--session <id>]
+       verdi design import record --branch <branch> --spec <slug>`
 
 // runDesignVerb dispatches the scaffold `start` adapter, ASD's structured
 // `mutate` adapter, and the five read-only ASD adapters
