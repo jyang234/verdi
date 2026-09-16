@@ -59,11 +59,21 @@ verbs: lint, design, accept, feature, build, align, sync, serve, mcp, matrix,
 // yet, so every path here is operational: usage (unknown verb, no args) or
 // an honest "not implemented" for a recognized verb.
 //
-// spec/uat-round-1 ac-1 adds "version"/"--version" as top-level, never-
-// phase-numbered tokens, checked before the unknown-verb/phase lookup so
+// spec/uat-round-1 ac-1/ac-2 add two families of top-level, never-phase-
+// numbered tokens, both checked before the unknown-verb/phase lookup so
 // neither is ever added to verbPhase (internal/specalign's CLI-verb
 // inventory, a serialized shared registry per CLAUDE.md, stays untouched):
-// both print buildinfo.Line() (version.go) and exit 0.
+// "help"/"--help"/"-h" print topLevelUsage (help.go) and exit 0; "version"/
+// "--version" print buildinfo.Line() (version.go) and exit 0. Right after,
+// the per-verb help intercept (ac-2) fires whenever the token immediately
+// following a KNOWN verb is one of those same three spellings: it prints
+// that verb's own registered usage (help.go's verbUsage) and returns
+// before the verb's real implementation is ever called — the fix for
+// today's "`verdi lint --help` runs a full lint" and "`verdi spec --help`
+// prints only the `spec state` form" (via the usage-error exit/stream,
+// stderr+exit 2, rather than a clean stdout+exit 0 help response).
+// Unknown verb and no-args behavior are untouched (co-2): both still fall
+// through to the existing `usage` banner on stderr, exit 2.
 func run(args []string, stderr io.Writer) int {
 	if len(args) == 0 {
 		fmt.Fprintln(stderr, usage)
@@ -71,11 +81,19 @@ func run(args []string, stderr io.Writer) int {
 	}
 
 	verb := args[0]
+	if isHelpToken(verb) {
+		fmt.Fprintln(os.Stdout, topLevelUsage)
+		return 0
+	}
 	if verb == "version" || verb == "--version" {
 		return cmdVersion(os.Stdout)
 	}
 
 	if verb == "lint" {
+		if verbHelpRequested(args[1:]) {
+			fmt.Fprintln(os.Stdout, verbUsageOrFallback(verb))
+			return 0
+		}
 		return runLintVerb(args[1:], os.Stdout, stderr)
 	}
 
@@ -83,6 +101,11 @@ func run(args []string, stderr io.Writer) int {
 	if !known {
 		fmt.Fprintln(stderr, usage)
 		return 2
+	}
+
+	if verbHelpRequested(args[1:]) {
+		fmt.Fprintln(os.Stdout, verbUsageOrFallback(verb))
+		return 0
 	}
 
 	if verb == "sync" {
