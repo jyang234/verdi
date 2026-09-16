@@ -911,6 +911,11 @@ export const SPEC_IMPORT_FILES = {
 // account for once (spec-import-contract: "2409 primary bytes accounted
 // once").
 export const SPEC_IMPORT_F13_PRIMARY_BYTES = 2409;
+// The f13-reference-v1 profile's pinned primary SHA-256 (internal/
+// specimport/profile_f13.go): the exact profile_primary_digest an f13
+// import record persists and the record page displays (spec/uat-round-1
+// ac-4). Mirrors the Go constant; change them together.
+export const SPEC_IMPORT_F13_PRIMARY_SHA256 = "7c6d95d4aa516cf682e6d4a33d1c260f1c861d938d46559241a7c764bffca577";
 
 // The isolated import store's synthetic, test-only story fixtures
 // (cmd/e2eharness/specimportfixture.go; BINDING: mirrored verbatim there):
