@@ -42,7 +42,7 @@ Controller: FABLE (Claude Fable 5.1). Authority: spec/uat-round-1 (design/uat-ro
 - R-13 (L1 review minor 4): ac-2's "multi-line usage with one line per verb or subverb" is measured per form; a single-form verb printing one line conforms. No change.
 - R-14 (L1 review minor 3): `verdi design board --help` exits 1 treating `--help` as a spec ref (pre-existing, two-level help is outside ac-2). To be logged in the UAT tracker as a follow-up, not fixed this round.
 
-- R-15 (L5 closure note): the board's creation form (actionCreate) is the one live production path to the disclosed-HEAD fallback; `--from-stub` and board stub-instantiate sit behind the accepted-pending-build wall guard, which refuses first in a remote-less store. Recorded so the fallback is not mistaken for dead code.
+- R-15 (L5 closure note, CORRECTED by whole-wave review): all three callers of the shared scaffold core (`--from-stub`, board stub-instantiate, board creation form) sit behind the same accepted-pending-build wall guard, which refuses first in a remote-less store; the disclosed-HEAD fallback is therefore reachable only via the CLI `--kind/--name` path today. The guard is also what makes R-16's base change safe: the parent feature is on the default branch by construction.
 - R-16 (L5 closure residual): board stub-instantiate and creation now base on the resolved default branch instead of the serving checkout's HEAD; e2e specs 31-board-stub-instantiate and 48-board-creation-form assert base-insensitive facts. Playwright is owed at the wave gate (browser behavior changed this wave).
 
 - R-17 (Fable 1b review minor 1): `.site-foot` was undefined. Ruling: widen the Fable lane's write set by one file, internal/dex/assets/style.css, for a single minimal `footer.site-foot` rule; dex tests must pass. Manifest sentence corrected.
@@ -60,3 +60,9 @@ Each with a Playwright path under e2e/.
 ## Wave gate
 
 Integrated head c2a56b3f (six lanes: L3 edd948de, L4 e7b700a2, L2 57f1bd55, L1 3d46f12c, L5 b01ba359, Fable 1b c2a56b3f). Whole-wave Opus review dispatched over 840c6166..c2a56b3f. `make verify` started on the integration worktree (log: scratchpad/wave1-verify.log).
+
+Whole-wave Opus review: ACCEPT-WITH-MINOR, conditional on the gate. Independently verified: design.go merge = `git merge-file` of L1 and L5 byte-for-byte; per-lane blob comparison 0 drift; dc-7 three-way outcome probed live on the integrated binary; co-3 holds (no ac-10/ac-11 code). Minors: (1) stale comment in context_project_test.go → UAT-027; (2) dirty-tree refusal after interview → UAT-026; (3) footer shell set has no drift-guard test → wave-2 obligation for the Fable lane (mirror TestVerbUsageRegistry_CoversEveryVerb); (4) R-15 corrected above; (5) UAT-024 body extended to name `design start --help`; (6) fixtures.ts mirrors f13PrimarySHA256 by hand — pre-existing convention, note only.
+
+## Wave-2 obligations carried
+- Footer shell drift-guard test (whole-wave minor 3).
+- UAT-026, UAT-027 (low) — candidates for a wave-2 cleanup lane alongside UAT-024/025.
