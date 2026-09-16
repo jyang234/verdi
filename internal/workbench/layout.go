@@ -29,10 +29,12 @@ var shellFuncs = template.FuncMap{"buildFooter": buildIdentificationFooter}
 // `verdi version` prints and `verdi serve` logs at startup, so the three
 // surfaces can never disagree about which build produced a page (closes
 // UAT-003). From a linked-worktree build it honestly reads "verdi (devel)"
-// (dc-8); the footer never fabricates a version. Quiet chrome in the
-// shell's existing muted note style and monospace code chip.
+// (dc-8); the footer never fabricates a version. Quiet chrome — the
+// stylesheet's footer.site-foot rule (a top rule mirroring the site
+// head) and the muted note style — at body size in the monospace code
+// chip, since the string exists to be read and pasted into a finding.
 func buildIdentificationFooter() template.HTML {
-	return template.HTML(`<footer class="site-foot" data-testid="build-footer"><p class="ritual-note"><small>Build <code data-testid="build-identification">` + stdhtml.EscapeString(buildinfo.Line()) + `</code></small></p></footer>`)
+	return template.HTML(`<footer class="site-foot" data-testid="build-footer"><p class="ritual-note">Build <code data-testid="build-identification">` + stdhtml.EscapeString(buildinfo.Line()) + `</code></p></footer>`)
 }
 
 // metaRow is one line of a page's frontmatter card — deliberately the
