@@ -55,8 +55,14 @@ import (
 // every call site are unchanged): every form's wording is preserved
 // byte-for-byte, only the separator changed.
 //
+// ac-2 review fix: added the "--from-stub <feature> <stub>" form
+// (designfromstub.go's cmdDesignStartFromStub, dispatched from
+// cmdDesignStart on args[0] == "--from-stub") — a real design-start
+// invocation shape this list omitted.
+//
 // vocab:identity — CLI usage/flag grammar (identity: --kind's feature|story enum values and the --child-story flag name)
 const designVerbUsage = `usage: verdi design start [<ref>] --kind feature|story --name <name>
+       verdi design start --from-stub <feature> <stub>
        verdi design mutate --request <path|-> --harness <id> [--session <id>]
        verdi design board <spec-ref>
        verdi design context <spec-ref> [--child-story <ref>]...
