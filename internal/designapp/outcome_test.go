@@ -76,24 +76,28 @@ func TestMutationFailure(t *testing.T) {
 		err                *draftmutation.Error
 		wantClassification Classification
 		wantCode           string
+		wantDetail         string
 	}{
 		{
 			name:               "verdict code",
 			err:                draftmutation.NewError(draftmutation.CodePolicyForbidden, draftmutation.Identity{}, "policy forbids"),
 			wantClassification: ClassificationVerdict,
 			wantCode:           string(draftmutation.CodePolicyForbidden),
+			wantDetail:         "policy forbids",
 		},
 		{
 			name:               "operational code",
 			err:                draftmutation.NewError(draftmutation.CodeIOFailure, draftmutation.Identity{}, "disk gone"),
 			wantClassification: ClassificationOperational,
 			wantCode:           string(draftmutation.CodeIOFailure),
+			wantDetail:         "disk gone",
 		},
 		{
 			name:               "nil diagnostic fails closed",
 			err:                nil,
 			wantClassification: ClassificationOperational,
 			wantCode:           "result-invalid",
+			wantDetail:         "an unspecified application failure was reported without a diagnostic",
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -106,6 +110,14 @@ func TestMutationFailure(t *testing.T) {
 			}
 			if got.Code != tc.wantCode {
 				t.Fatalf("Code = %q, want %q", got.Code, tc.wantCode)
+			}
+			// ac-5 (spec/uat-round-1): Detail is the BARE draftmutation
+			// detail, never draftmutation's own Error() form ("<code>:
+			// <detail>") — Code already carries the code, so re-embedding
+			// it in Detail doubles the prefix wherever a caller (the CLI,
+			// the workbench board) renders "<code>: <detail>" together.
+			if got.Detail != tc.wantDetail {
+				t.Fatalf("Detail = %q, want %q (must not re-embed Code)", got.Detail, tc.wantDetail)
 			}
 		})
 	}
