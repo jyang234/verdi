@@ -1000,7 +1000,9 @@ test.describe("spec import: usability — the owner's F13 correction path", () =
     await expect(guide).toContainText("Human sign-off (attestation)");
     await expect(guide).toContainText("does not produce");
     await expect(page.getByTestId("import-evidence-floor-feature")).toBeVisible();
-    await expect(page.getByTestId("import-evidence-floor-feature")).toContainText("VL-006");
+    await expect(page.getByTestId("import-evidence-floor-feature")).toContainText("must include human sign-off (attestation)");
+    await expect(page.getByTestId("import-evidence-floor-feature")).toContainText("does not record");
+    await expect(page.getByTestId("import-evidence-floor-feature")).not.toContainText("VL-006");
     await expect(page.getByTestId("import-evidence-floor-story")).toBeHidden();
     const guideBeforeCards = await page.evaluate(() => {
       const g = document.querySelector('[data-testid="import-evidence-guide"]')!;
@@ -1123,6 +1125,81 @@ test.describe("spec import: usability — the owner's F13 correction path", () =
     expect(applied.status, JSON.stringify(applied.body)).toBe(200);
     await expect(page.getByTestId("import-created")).toHaveAttribute("data-status", "created");
     expect(applied.body.statements_deferred).toBe(true);
+  });
+});
+
+test.describe("spec import: usability — native primary plus a supporting file", () => {
+  test("only the native primary is described as the candidate; a support is unresolved until the explicit keep choice, then reference material, matching the coverage and the previewed request's primary", async ({
+    page,
+  }) => {
+    test.setTimeout(90_000);
+    const base = await importBase(page);
+    await openImport(page, base);
+    // The native primary first (so it is the primary), then ordinary
+    // labeled Markdown as an additional support SI-200 permits to be
+    // retained whole in native mode.
+    const [nativeId, supportId] = await addFiles(page, [SPEC_IMPORT_FILES.NATIVE, SPEC_IMPORT_FILES.LABELED]);
+    await page.locator("#import-format").selectOption("native");
+    await fillTarget(page, "native-widget", "Native Widget");
+    await expect(page.getByTestId(`import-primary-${nativeId}`)).toBeChecked();
+    expect(await preview(page)).toBe(200);
+    // Not ready: the support has no choice yet; the primary alone is the
+    // candidate, byte for byte, and nothing native is editable.
+    await expectReady(page, false);
+    await expect(findings(page, "unresolved-coverage")).toHaveCount(1);
+    await expect(findings(page, "unresolved-coverage").first()).toHaveAttribute("data-target", supportId);
+    const primaryRow = page.getByTestId(`import-remaining-${nativeId}`);
+    const supportRow = page.getByTestId(`import-remaining-${supportId}`);
+    // The defect under test: the support must never read as the candidate.
+    await expect(supportRow).not.toContainText("candidate");
+    await expect(supportRow).toHaveAttribute("data-state", "unresolved");
+    await expect(supportRow).toContainText("no choice yet");
+    await expect(primaryRow).toHaveAttribute("data-state", "candidate");
+    await expect(primaryRow).toContainText("candidate");
+    await expect(primaryRow).toContainText("byte for byte");
+    await expect(page.locator("#import-fields article")).toHaveCount(0);
+    await expect(page.locator("#import-statements *")).toHaveCount(0);
+    await expect(page.locator("#import-fields .import-edit")).toHaveCount(0);
+    const primaryCoverage = page.getByTestId(`import-coverage-${nativeId}`);
+    expect(await primaryCoverage.getAttribute("data-mapped")).toBe(await primaryCoverage.getAttribute("data-total"));
+    const supportCoverage = page.getByTestId(`import-coverage-${supportId}`);
+    expect(await supportCoverage.getAttribute("data-unresolved")).toBe(await supportCoverage.getAttribute("data-total"));
+    expect(await supportCoverage.getAttribute("data-mapped")).toBe("0");
+
+    // The explicit keep choice: the summary is marked as an earlier
+    // preview result until the next preview.
+    await page.getByTestId("import-keep-remaining").click();
+    await expect(page.locator("#import-retain")).toBeChecked();
+    await expect(page.getByTestId("import-remaining")).toHaveAttribute("data-earlier", "true");
+    await expect(page.getByTestId("import-remaining-earlier")).toBeVisible();
+    await expect(page.getByTestId("import-confirm")).toBeDisabled();
+    expect(await preview(page)).toBe(200);
+    await expectReady(page, true);
+    await expect(page.getByTestId("import-remaining")).not.toHaveAttribute("data-earlier", "true");
+    await expect(page.getByTestId("import-remaining-earlier")).toHaveCount(0);
+    await expect(primaryRow).toHaveAttribute("data-state", "candidate");
+    await expect(supportRow).toHaveAttribute("data-state", "kept");
+    await expect(supportRow).toContainText("will be kept");
+    await expect(supportRow).toContainText("reference material");
+    await expect(supportRow).not.toContainText("candidate");
+    expect(await supportCoverage.getAttribute("data-retained")).toBe(await supportCoverage.getAttribute("data-total"));
+    expect(await primaryCoverage.getAttribute("data-mapped")).toBe(await primaryCoverage.getAttribute("data-total"));
+
+    // The description matches the previewed request's own primary
+    // identity and the server's candidate: exactly the primary's bytes.
+    const state = await page.evaluate(() => (window as unknown as { __verdiImport: { state: () => { request: string } } }).__verdiImport.state());
+    const request = JSON.parse(state.request) as { primary: string; sources: { id: string; data: string }[]; format: string; retain_unmapped: boolean };
+    expect(request.format).toBe("native");
+    expect(request.primary).toBe(nativeId);
+    expect(request.retain_unmapped).toBe(true);
+    const previewed = await (
+      await page.request.post(at(base, "/design/import/preview"), { headers: { "Content-Type": "application/json" }, data: state.request })
+    ).json();
+    expect(previewed.ready).toBe(true);
+    expect(previewed.candidate).toBe(request.sources.find((s) => s.id === nativeId)!.data);
+    expect(previewed.candidate).not.toBe(request.sources.find((s) => s.id === supportId)!.data);
+    // Preview only: this case publishes nothing.
+    await expect(page.getByTestId("import-created")).toBeHidden();
   });
 });
 

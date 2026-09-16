@@ -377,11 +377,34 @@ func TestSpecImport_PageExplainsChoicesBeforeSelection(t *testing.T) {
 	helper := page[guide : guide+guideEnd]
 	for _, want := range []string{
 		"(static)", "(behavioral)", "(runtime)", "(attestation)",
-		"does not produce", "VL-006", "feature", "story",
+		"does not produce", "feature", "story",
+		"must include human sign-off (attestation)", "does not record",
 		`data-testid="import-evidence-floor-feature"`, `data-testid="import-evidence-floor-story"`,
 	} {
 		if !strings.Contains(helper, want) {
 			t.Errorf("evidence helper missing %q: %s", want, helper)
+		}
+	}
+	// Owner pre-review: the main-flow helper states the concrete
+	// requirement and its consequence; rule ids and implementation
+	// allocation ("who enforces it") belong to technical details and
+	// reports, not to the choice paragraph.
+	for _, banned := range []string{"VL-006", "enforces", "attestation floor", "fixed code"} {
+		if strings.Contains(helper, banned) {
+			t.Errorf("evidence helper exposes implementation detail %q: %s", banned, helper)
+		}
+	}
+	form := page[index(`id="import-form"`):index(`id="import-result"`)]
+	for _, banned := range []string{"fixed code", "is kept whole", "VL-006"} {
+		if strings.Contains(form, banned) {
+			t.Errorf("form copy still carries %q", banned)
+		}
+	}
+	// Retention is prospective until chosen: supports "can be kept" when
+	// the user chooses, and the retain hint says what "will be kept".
+	for _, want := range []string{"can be kept", "when you choose", "will be kept with the import"} {
+		if !strings.Contains(form, want) {
+			t.Errorf("form copy missing prospective retention wording %q", want)
 		}
 	}
 
