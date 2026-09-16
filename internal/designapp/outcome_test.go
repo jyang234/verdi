@@ -1,6 +1,7 @@
 package designapp
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/jyang234/verdi/internal/draftmutation"
@@ -120,6 +121,58 @@ func TestMutationFailure(t *testing.T) {
 				t.Fatalf("Detail = %q, want %q (must not re-embed Code)", got.Detail, tc.wantDetail)
 			}
 		})
+	}
+}
+
+// TestError_ErrorStringSinglePrefixed pins Error()'s rendering against a
+// second, latent doubling an Opus review found on top of ac-5's Detail
+// fix (spec/uat-round-1): the "%s: %s: %v" Cause branch stringifies Cause
+// with %v, and for a translateDraftmutationError result Cause is the
+// exact *draftmutation.Error whose own Error() is already "Code: Detail"
+// — so the WHOLE message repeated, e.g. "policy-forbidden: project has
+// not adopted policy authority: policy-forbidden: project has not
+// adopted policy authority". Nothing stringifies *designapp.Error in
+// production today (this was latent), but Error() must still render
+// single-prefixed. A Cause that is NOT that exact redundant shape keeps
+// its original three-part "code: detail: cause" rendering unchanged.
+func TestError_ErrorStringSinglePrefixed(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		err  *Error
+		want string
+	}{
+		{
+			name: "translated policy-forbidden",
+			err:  translateDraftmutationError(draftmutation.NewError(draftmutation.CodePolicyForbidden, draftmutation.Identity{}, "project has not adopted policy authority")),
+			want: "policy-forbidden: project has not adopted policy authority",
+		},
+		{
+			name: "translated io-failure",
+			err:  translateDraftmutationError(draftmutation.NewError(draftmutation.CodeIOFailure, draftmutation.Identity{}, "disk gone")),
+			want: "io-failure: disk gone",
+		},
+		{
+			name: "generic cause keeps its three-part rendering",
+			err:  operational("io-failure", "reading spec", errors.New("disk gone")),
+			want: "io-failure: reading spec: disk gone",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := tc.err.Error(); got != tc.want {
+				t.Fatalf("Error() = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestError_UnwrapKeepsCauseForDraftmutationTranslation proves the
+// single-prefix fix above only changes Error()'s rendering: Cause stays
+// set, so errors.Is/As chaining through a translated draftmutation error
+// is untouched.
+func TestError_UnwrapKeepsCauseForDraftmutationTranslation(t *testing.T) {
+	inner := draftmutation.NewError(draftmutation.CodePolicyForbidden, draftmutation.Identity{}, "project has not adopted policy authority")
+	if !errors.Is(translateDraftmutationError(inner), inner) {
+		t.Fatal("errors.Is must still find the wrapped draftmutation.Error through Cause")
 	}
 }
 
