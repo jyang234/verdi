@@ -81,3 +81,7 @@ L1 Tier 3 fix range df322c43..87881100 (fixer distinct from reviewer): one produ
 e2e stage re-run on 2621d544 with `VERDI_E2E_PORT_BASE=4390` (18:58–19:11): **302 passed (12.0m), exit 0** — covers R-16 (specs 31, 48), R-18 (spec 50 axe scan over the new footer), and the new specs 73–75. Recording-artifact scan over e2e/test-results: 0 files. The L1 Tier 3 fix changes only dispatch.go and showcasealign tests, so this browser evidence carries to the re-merged head; the full `make verify` re-run will repeat it regardless.
 
 L1 Tier 3 fresh re-review: ACCEPT-WITH-MINOR; original finding CLOSED (evasion table: 11 shapes denied). Minors: F1/F2 pre-existing witness scope gaps → UAT-028; F3 version-assertion claim false in a worktree build (markers reduce to "(devel)") → disclosure log + reworded claim, routed to the fixer; F4 StatusDirty bool cannot see mutations in an already-dirty fixture → porcelain hash, routed to the fixer; F1 doc-comment scope sentence routed to the fixer.
+
+L1 fix ranges integrated at 84eb72ca (0 drift on lane files; showcasealign race ok 71.2s; focused cmd ok). Fixer follow-ups (87881100..404c4764): F3 disclosure log when build markers reduce to "(devel)" and claim reworded; F4 working-tree fingerprint (porcelain + content) replacing the StatusDirty bool; F1 scope sentence in the witness doc comment.
+
+### Wave gate run 2 — started 19:22 on 84eb72ca with `VERDI_E2E_PORT_BASE=4390` (log: scratchpad/wave1-verify2.log)
