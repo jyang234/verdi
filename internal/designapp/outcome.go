@@ -150,6 +150,13 @@ func notFound(code, detail string) *Error {
 // re-deriving it. The wrapped error keeps draftmutation's own code string
 // as this package's Code so a caller can still recognize the exact
 // upstream refusal.
+//
+// Detail is draftmutation's own BARE Detail, never its Error() form
+// ("<code>: <detail>"): Code already carries that code separately, so
+// copying the combined Error() string into Detail would re-embed it,
+// doubling the prefix wherever a caller renders "Code: Detail" together
+// (the CLI's renderDesignAppResult, the workbench board's policy-forbidden
+// witness row — ac-5, spec/uat-round-1).
 func translateDraftmutationError(err *draftmutation.Error) *Error {
 	if err == nil {
 		return nil
@@ -158,5 +165,5 @@ func translateDraftmutationError(err *draftmutation.Error) *Error {
 	if err.Verdict() {
 		classification = ClassificationVerdict
 	}
-	return &Error{Classification: classification, Code: string(err.Code), Detail: err.Error(), Cause: err}
+	return &Error{Classification: classification, Code: string(err.Code), Detail: err.Detail, Cause: err}
 }
