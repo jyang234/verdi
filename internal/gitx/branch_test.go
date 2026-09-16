@@ -545,6 +545,25 @@ func TestCheckoutNewBranchFrom_Negative(t *testing.T) {
 			t.Fatal("CheckoutNewBranchFrom(existing branch name): want error, got nil")
 		}
 	})
+
+	// review F4: a dirty working tree that CONFLICTS with base's tree must
+	// still refuse — git's own pre-existing checkout safety, unchanged by
+	// this function (design start's dc-7/ac-6 fix relies on this staying
+	// exactly as it always was: no new refusal was coded for it).
+	t.Run("dirty tree conflicts with base", func(t *testing.T) {
+		dirtyRepo := buildRepo(t)
+		// buildRepo's own two layers change a.txt: "hello\n" (Heads[0],
+		// committed on the base we'll target) then "hello again\n" (Head,
+		// current). An uncommitted THIRD edit to that same path is a real
+		// conflict with what checking out to Heads[0] — a DIFFERENT base
+		// than HEAD — would need to overwrite.
+		if err := os.WriteFile(filepath.Join(dirtyRepo.Dir, "a.txt"), []byte("uncommitted dirty edit\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := CheckoutNewBranchFrom(ctx, dirtyRepo.Dir, "design/dirty", dirtyRepo.Heads[0]); err == nil {
+			t.Fatal("CheckoutNewBranchFrom with a dirty tree conflicting with base: want error, got nil")
+		}
+	})
 }
 
 func TestMergeBase_Happy(t *testing.T) {
