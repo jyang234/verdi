@@ -2,7 +2,7 @@
 
 Use import when your feature or story already exists in Markdown. Verdi copies the selected content into a new proposed specification and opens its ordinary board. The canonical specification remains the board's source; the importer does not create a second card model or call AI.
 
-On this page: [Browser import](#in-the-browser) · [Supported inputs](#supported-inputs) · [Markdown example](#labeled-markdown-example) · [CLI and source records](#cli-and-source-records)
+On this page: [Browser import](#in-the-browser) · [Review imported content](#review-imported-content) · [F13 bundle](#import-the-f13-reference-bundle) · [Supported inputs](#supported-inputs) · [Markdown example](#labeled-markdown-example) · [CLI and source records](#cli-and-source-records)
 
 ## In the browser
 
@@ -20,6 +20,60 @@ created from the earlier inputs. Inspect the named board and source record befor
 trying to create another proposal with the same name.
 
 Human browser import does not require an AI assistance policy. Existing tracker, requiredness, approval and evidence rules still apply. A feature needs no issue tracker; an imported story must meet the existing story requirements.
+
+## Review imported content
+
+Preview prepares the fields without creating a proposal. Review the statements
+and acceptance criteria, then resolve the items shown beside them. The page's
+advanced controls let you map exact source ranges and add relationships when
+needed; ordinary evidence choices do not require manual mapping.
+
+Evidence choices declare what must be produced later. They do not upload tests,
+create attestations or mark a criterion proven. Existing validation requires
+attestation for every feature criterion. Choose any additional kinds required
+for your change, using the explanations beside the controls. An explicit
+apply-to-all action can apply the same choices to the displayed criteria.
+
+If the source lacks Problem or Outcome, write the missing statement explicitly,
+or choose to leave both as TODOs. That choice replaces both statements, including
+any that were copied; the placeholders remain visibly incomplete. Choose whether
+to keep the remaining source text as reference material stored with the import.
+Retaining text does not turn it into specification fields or resolve missing
+requirements.
+
+Changing an input makes the previous preview out of date. The displayed field
+choices are your current inputs; earlier findings describe the last check.
+Preview again to obtain current findings. Confirm and create only after that
+fresh preview is ready.
+
+## Import the F13 reference bundle
+
+The `f13-reference-v1` profile is a fixed mapping for the Verdi-ATC prototype at
+commit `c346c005d117dfb090e1dedd5a89f45080875a5e`. It supports that exact
+selection, not arbitrary implementation plans. In a clean configured copy of
+that project, choose these files under `docs/superpowers/plans/`:
+
+| File | Selection |
+| --- | --- |
+| `2026-08-24-verdi-atc-stage-1-orchestration.md` | Primary, lines 602–671 inclusive |
+| `2026-09-12-f13-review-validation.md` | Whole supporting file |
+| `2026-09-12-f13-transition-core.md` | Whole supporting file |
+| `2026-09-12-f13-review-journal.md` | Whole supporting file |
+
+Choose the F13 reference format, class `feature`, a new name such as
+`f13-gatekeeper`, and a title. Preview shows eight acceptance criteria. The
+primary lacks labeled Problem and Outcome statements: write them explicitly or
+choose the disclosed pair of TODOs. Review the criteria and choose their expected
+evidence, including the existing feature requirement for attestation. Keeping
+remaining source text preserves the supporting plans as reference material; it
+does not turn them into additional board fields. Preview again after changes,
+then confirm and create when ready.
+
+Changed primary bytes are refused by this profile. Use a properly labeled
+Markdown specification or explicit manual mapping for different content; do not
+assume changing the filename makes it the same reference. Import creates a new
+proposal, so a pre-existing `f13-gatekeeper` target is a collision to inspect,
+not a branch to overwrite.
 
 ## Supported inputs
 
@@ -57,8 +111,8 @@ field authority. Code-fence headings are not treated as fields.
 
 Evidence requirements are selected separately and are never inferred from the
 criterion's wording. If the source already uses IDs such as `ac-1:`, resolve the
-ID explicitly rather than silently replacing it. Supporting sources remain
-retained unless an explicit mapping uses them.
+ID explicitly rather than silently replacing it. Supporting sources can be kept as reference material when you explicitly choose
+to retain the remaining source text, or used by an explicit mapping.
 
 Line selections are inclusive and start at 1; both endpoints are required.
 Limits apply to the supplied file before selection. Source reading rejects
