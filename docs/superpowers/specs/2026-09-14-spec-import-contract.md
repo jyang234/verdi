@@ -337,7 +337,11 @@ the already-adopted normal-context exclusion.
 The import record's sole decoder belongs to specimport. Record schema
 `verdi.spec-import-record/v1` stores preview/base/model/config/engine/request/candidate
 digests, spec ref, normalized source identities/ranges/digests, mappings/origins,
-coverage, actor attribution and policy posture. No clock/randomness in this record.
+coverage, actor attribution and policy posture, plus the request `format` and, for
+a reference profile, the pinned primary digest it was bound to
+(`profile_primary_digest`); both fields are absent on records written before their
+addition (spec/uat-round-1 ac-4) and a present `format` must be one of the four
+closed values. No clock/randomness in this record.
 This new creation record supplies import provenance atomically; it does not forge
 an ASD mutation entry for a nonexistent prior draft. Subsequent ordinary mutations
 use existing design provenance unchanged. Source origins are copy claims, not
