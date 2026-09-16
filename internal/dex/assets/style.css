@@ -262,6 +262,14 @@ blockquote {
   margin-bottom: 1.25rem;
 }
 
+/* the page foot: the build identification line (workbench footer) —
+   the head's rule mirrored, so the line reads as chrome, not content. */
+footer.site-foot {
+  margin-top: 2.5rem;
+  padding-top: 0.8rem;
+  border-top: 1px solid var(--rule);
+}
+
 .wordmark {
   display: inline-flex;
   align-items: baseline;
