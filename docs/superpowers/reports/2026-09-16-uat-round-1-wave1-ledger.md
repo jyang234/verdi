@@ -6,7 +6,7 @@ Controller: FABLE (Claude Fable 5.1). Authority: spec/uat-round-1 (design/uat-ro
 
 | Lane | AC | Tier | Branch | Head | Gate | Review | Ruling |
 |---|---|---|---|---|---|---|---|
-| L1 cli | ac-1 (CLI), ac-2 | 2 | agent/uat-r1-cli | 21ec37e0 (code f9470eeb) | passed | in review | worktree builds print `verdi (devel)` (no vcs stamp) — evidence requested (R-11) |
+| L1 cli | ac-1 (CLI), ac-2 | 2 | agent/uat-r1-cli | 21ec37e0 (code f9470eeb) | passed | ACCEPT-WITH-MINOR (6 minors) | minors 1–5 routed to implementer; minor 4 ruled conforming (R-13); R-11 ruled → dc-8 |
 | L2 vl017 | ac-3 | 1→3 | agent/uat-r1-vl017 | c56c3733 | passed | REVISE (F1 Critical: vocab witness regression) | Tier 3 fix range c56c3733..7698dc76 (fixer distinct from reviewer): F1 marker relocated, F2 gate = rule+severity+exact message, F3 comment, exit-1 test added; controller-verified vocab witness ok, focused lint/cmd ok; fresh re-review dispatched |
 | L3 import-record | ac-4 (backend, CLI) | 2 | agent/uat-r1-import-record | 586ec7c2 | passed | ACCEPT-WITH-MINOR | minors 2,3,5 closed at 9bbb9272 (controller-verified: specimport race ok 26.1s); INTEGRATED at edd948de, 0 lines drift vs reviewed head |
 | L4 policy-prefix | ac-5 | 1 | agent/uat-r1-policy-prefix | 4e1dc62a | passed | ACCEPT-WITH-MINOR | minor 2 closed at b6010cd7 (controller-verified: designapp race ok, vocab witness ok); minor 1 → Fable lane (R-5); INTEGRATED, 0 drift |
@@ -35,9 +35,12 @@ Controller: FABLE (Claude Fable 5.1). Authority: spec/uat-round-1 (design/uat-ro
 - R-9 (L5 review F1): `--from-stub` is dispatched inside `design start` and still based on HEAD; ac-6 amended to name it explicitly; fix in internal/stubinstantiate under the same dc-7 rule; workbench stub-instantiate shares the seam (base selection only, no markup).
 - R-10 (L5 review note 6): `build start` cuts `feature/<name>` from HEAD after resolving the default branch — same shape as UAT-021, out of this round's scope; logged as UAT-023 (plausible, not reproduced).
 
-- R-11 (L1, open): Go embeds no vcs.* settings when building from a linked worktree, so `verdi version` prints the honest placeholder there; all candidate binaries in this workspace are worktree builds. Reviewer asked to reproduce and cost a Makefile ldflags fallback; scope decision pending.
+- R-11 (L1, RULED → spec/uat-round-1 dc-8): candidates build from a real .git checkout; no ldflags stamping this round. Reviewer reproduced: worktree build has zero vcs.* settings even with -buildvcs=true (silent); fresh-repo copy stamps correctly including `modified`. Original note: Go embeds no vcs.* settings when building from a linked worktree, so `verdi version` prints the honest placeholder there; all candidate binaries in this workspace are worktree builds. Reviewer asked to reproduce and cost a Makefile ldflags fallback; scope decision pending.
 
 - R-12 (L2 fixer disclosure): the disclosure sentence still ends "(adjudicated at W2 wave close)", build-process trivia in user-facing output. Predates the lane; ac-3 does not ask for it; left as-is this round. Candidate copy cleanup for the tracker, not a defect.
+
+- R-13 (L1 review minor 4): ac-2's "multi-line usage with one line per verb or subverb" is measured per form; a single-form verb printing one line conforms. No change.
+- R-14 (L1 review minor 3): `verdi design board --help` exits 1 treating `--help` as a spec ref (pre-existing, two-level help is outside ac-2). To be logged in the UAT tracker as a follow-up, not fixed this round.
 
 ## Fable wave-1b backlog (depends on L1, L3, L4 integration)
 
