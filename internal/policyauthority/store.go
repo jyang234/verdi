@@ -183,7 +183,11 @@ func LoadFromSource(source fs.FS) (*Store, error) {
 	}
 
 	if s.Constitution == nil {
-		return nil, fmt.Errorf("policyauthority: %w", ErrIncompleteAdoption)
+		// ErrIncompleteAdoption already carries the "policyauthority: "
+		// package prefix (errors.go) — return it unwrapped rather than
+		// wrapping it a second time (ac-5, spec/uat-round-1: the prefix
+		// appears exactly once, at the sentinel's own layer).
+		return nil, ErrIncompleteAdoption
 	}
 
 	catalog, err := s.Constitution.GovernanceCatalog()
@@ -221,7 +225,11 @@ func policyRootEntry(source fs.FS) (fs.DirEntry, error) {
 	entries, err := fs.ReadDir(source, ".verdi")
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
-			return nil, fmt.Errorf("policyauthority: %w", ErrNotAdopted)
+			// ErrNotAdopted already carries the "policyauthority: " package
+			// prefix (errors.go) — return it unwrapped rather than wrapping
+			// it a second time (ac-5, spec/uat-round-1: the prefix appears
+			// exactly once, at the sentinel's own layer).
+			return nil, ErrNotAdopted
 		}
 		return nil, fmt.Errorf("policyauthority: reading .verdi: %w", err)
 	}
@@ -230,7 +238,7 @@ func policyRootEntry(source fs.FS) (fs.DirEntry, error) {
 			return entry, nil
 		}
 	}
-	return nil, fmt.Errorf("policyauthority: %w", ErrNotAdopted)
+	return nil, ErrNotAdopted
 }
 
 // walkPolicyDir returns the sorted, root-relative slash paths of every
