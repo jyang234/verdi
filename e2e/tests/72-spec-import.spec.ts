@@ -15,12 +15,15 @@ import {
 // Mechanical spec import — the browser adoption path (docs/superpowers/
 // specs/2026-09-14-spec-import-contract.md "Errors and browser behavior";
 // plan Task 4 UI). Every case here drives the REAL `verdi serve` binary
-// built from this tree over an ISOLATED clean-main store with a synthetic
-// default-branch proof and no policy/model/forge/tracker configuration
-// (cmd/e2eharness/specimportfixture.go) — the shared store's serving
-// checkout is dirty by the time this file runs and the importer's own
-// clean-context gate would refuse it. The human import proceeds with zero
-// model or provider calls; the writer lock is serve's own lifetime lock.
+// built from this tree over an ISOLATED clean-main store
+// (cmd/e2eharness/specimportfixture.go): a synthetic default-branch proof
+// (bare local origin whose HEAD names main), the layout manifest plus ONE
+// synthetic, never-contacted tracker scheme (jira) and ONE landed parent
+// feature for the story case, and no adopted policy, model override or
+// forge — the shared store's serving checkout is dirty by the time this
+// file runs and the importer's own clean-context gate would refuse it. The
+// human import proceeds with zero model, provider, forge or tracker calls;
+// the writer lock is serve's own lifetime lock.
 //
 // State assertions ride data attributes, testids and text — never
 // screenshots (recording stays off).
@@ -258,9 +261,10 @@ test.describe("spec import: labeled Markdown journey", () => {
     const origin = page.getByTestId("asd-import-origin");
     await expect(origin).toBeVisible();
     await expect(origin.locator("a")).toHaveAttribute("href", importRecordPath("design/" + slug, slug));
-    await expect(origin).toContainText("not");
-    await expect(origin).toContainText("acceptance");
-    await expect(origin).toContainText("unclassified");
+    await expect(origin).toContainText("not verified here");
+    await expect(origin).toContainText("not an ASD provenance entry");
+    await expect(origin).toContainText("classify the creation as unclassified");
+    await expect(origin).toContainText("not evidence of acceptance");
     const adjacent = await page.evaluate(() => {
       const review = document.querySelector('[data-testid="asd-review"]')!;
       const origin = document.querySelector('[data-testid="asd-import-origin"]')!;
@@ -304,8 +308,9 @@ test.describe("spec import: labeled Markdown journey", () => {
     await expect(record).toContainText("unauthenticated");
     await expect(record).toContainText("not-applicable");
     await expect(record).toContainText("positive-basic.md");
-    await expect(record).toContainText("not");
-    await expect(record).toContainText("acceptance");
+    await expect(record).toContainText("not an ASD provenance entry");
+    await expect(record).toContainText("unclassified direct edit");
+    await expect(record).toContainText("not evidence of acceptance or of review");
   });
 });
 
@@ -594,9 +599,12 @@ test.describe("spec import: transport refusals and the hermetic store", () => {
     expect(missingText).not.toContain("fatal:");
     expect(missingText).not.toContain("gitx:");
 
-    // No configuration dependency: the served store is manifest-only, has
-    // no adopted policy or model override, and its serve runs under the
-    // stripped environment — the human import above needed none of them.
+    // No configuration dependency beyond the synthetic fixture: the served
+    // store is the layout manifest plus the one test-only tracker provider
+    // and the landed parent feature (both for the story case), has no
+    // adopted policy or model override, and its serve runs under the
+    // stripped environment — the human feature import above needed none of
+    // them.
     const info = await (await page.request.get(`${CONTROL_URL}/spec-import-fixture/info`)).json();
     expect(info.url).toBe(base);
     // The manifest is the layout schema plus ONE synthetic, test-only
@@ -645,8 +653,9 @@ test.describe("spec import: corrupted record", () => {
     await expect(origin).toBeVisible();
     await expect(origin).not.toContainText("verified against");
     await expect(origin).toContainText("not verified here");
-    await expect(origin).toContainText("acceptance");
-    await expect(origin).toContainText("unclassified");
+    await expect(origin).toContainText("not an ASD provenance entry");
+    await expect(origin).toContainText("classify the creation as unclassified");
+    await expect(origin).toContainText("not evidence of acceptance");
     await origin.locator("a").click();
     await expect(page.getByTestId("import-record-unavailable")).toBeVisible();
   });
@@ -731,6 +740,43 @@ test.describe("spec import: apply recovery", () => {
     const error = page.getByTestId("import-error");
     await expect(error).toHaveAttribute("data-code", "target-exists");
     await expect(page.getByTestId("import-existing-board-link")).toHaveAttribute("href", `/b/design%2F${slug}/board/spec/${slug}`);
+  });
+
+  test("a late target-exists refusal names and links the originating request, not the edited slug", async ({ page }) => {
+    test.setTimeout(90_000);
+    const base = await importBase(page);
+    const slugA = "late-refusal-a";
+    const slugB = "late-refusal-b";
+    // spec/A exists already, created through this same page.
+    await importLabeledViaUI(page, base, slugA);
+    // A second request under the same name A (retitled, so the server
+    // cannot reconcile it to the earlier publication) goes out slowly...
+    await page.locator("#import-title").fill("Widget Import, second attempt");
+    expect(await preview(page)).toBe(200);
+    await expectReady(page, true);
+    await page.route("**/design/import/apply", async (route) => {
+      await new Promise((resolve) => setTimeout(resolve, 1500));
+      await route.continue();
+    });
+    await page.getByTestId("import-confirm").check();
+    const refused = page.waitForResponse((r) => r.url().includes("/design/import/apply"));
+    await page.getByTestId("import-apply-btn").click();
+    await page.waitForTimeout(300);
+    // ...and the slug is edited to B while that request is in flight.
+    await page.locator("#import-slug").fill(slugB);
+    expect((await refused).status()).toBe(409);
+    await page.unroute("**/design/import/apply");
+    // The refusal is about A: the link and the wording identify the request
+    // that produced it — never the edited form value B, which names no
+    // existing proposal.
+    const error = page.getByTestId("import-error");
+    await expect(error).toHaveAttribute("data-code", "target-exists");
+    const link = page.getByTestId("import-existing-board-link");
+    await expect(link).toHaveAttribute("href", `/b/design%2F${slugA}/board/spec/${slugA}`);
+    await expect(link).toContainText("spec/" + slugA);
+    await expect(error).toHaveAttribute("data-request-spec", "spec/" + slugA);
+    await expect(error).toContainText("earlier creation request");
+    await expect(error).not.toContainText(slugB);
   });
 });
 

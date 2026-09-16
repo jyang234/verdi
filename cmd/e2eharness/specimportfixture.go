@@ -8,19 +8,21 @@ package main
 // The shared harness store is neither by the time the suite reaches this
 // file — earlier specs autosave, mutate and commit onto its serving
 // checkout — so this provisions a SEPARATE, hermetic, REAL minimal store:
-// the manifest and data-zone gitignore committed on main, a bare local
+// the layout manifest plus ONE synthetic, never-contacted tracker provider
+// (specImportStoreManifest), the data-zone gitignore and ONE landed parent
+// feature (specImportParentSpecRel) committed on main, a bare local
 // origin whose HEAD names main (the same synthetic default-branch proof
 // provision_board.go/emptyglance.go give their stores — never CI, never
 // an owner approval), NO adopted assistance policy, NO model override, NO
-// forge/tracker configuration. It serves that store through the SAME
-// build-then-exec seam main.go and unprovenboard.go use: the real `verdi
-// serve` subprocess of the binary built from this tree, under
-// hermeticServeEnv (every feed/verification injection variable and CI
-// identity variable stripped), so the human import the browser drives
-// proceeds with zero model, provider, forge or tracker calls and the
-// writer lock is serve's own lifetime lock. Loopback only; started lazily
-// on GET /spec-import-fixture, reused thereafter, stopped with the
-// harness. Test-only.
+// forge. It serves that store through the SAME build-then-exec seam
+// main.go and unprovenboard.go use: the real `verdi serve` subprocess of
+// the binary built from this tree, under hermeticServeEnv (every
+// feed/verification injection variable and CI identity variable stripped),
+// so the human import the browser drives proceeds with zero model,
+// provider, forge or tracker calls (the tracker scheme exists only for
+// VL-005's configured-scheme check) and the writer lock is serve's own
+// lifetime lock. Loopback only; started lazily on GET /spec-import-fixture,
+// reused thereafter, stopped with the harness. Test-only.
 //
 // Two helper endpoints serve the suite's honesty cases:
 //
@@ -116,8 +118,9 @@ func (f *specImportFixture) handler(w http.ResponseWriter, r *http.Request) {
 }
 
 // specImportFixtureInfo is the info endpoint's shape: the store facts the
-// browser suite asserts (a manifest-only store, no policy, no model
-// override, no forge/tracker/provider configuration, a hermetic child env).
+// browser suite asserts (the layout manifest plus the one synthetic
+// tracker provider and the landed parent feature, no policy, no model
+// override, no forge, a hermetic child env).
 type specImportFixtureInfo struct {
 	URL              string   `json:"url"`
 	Manifest         string   `json:"manifest"`

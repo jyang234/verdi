@@ -480,7 +480,7 @@ func TestSpecImport_LabeledMarkdown_PreviewCorrectApplyRecord(t *testing.T) {
 	if !strings.Contains(panel, recordHref) {
 		t.Fatalf("source-record affordance lacks the record href %s: %s", recordHref, panel)
 	}
-	for _, want := range []string{"not", "acceptance", "unclassified"} {
+	for _, want := range []string{"not verified here", "not an ASD provenance entry", "classify the creation as unclassified", "not evidence of acceptance"} {
 		if !strings.Contains(panel, want) {
 			t.Errorf("source-record affordance must explain the import origin separately from ASD history and acceptance (missing %q): %s", want, panel)
 		}

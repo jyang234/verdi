@@ -309,7 +309,7 @@ func TestSpecImport_BoardAffordanceNeverClaimsVerificationFromPresence(t *testin
 		if !strings.Contains(panel, "not verified here") {
 			t.Errorf("%s: affordance must say the record is not verified on the board: %s", tc.name, panel)
 		}
-		for _, want := range []string{"not", "acceptance", "unclassified"} {
+		for _, want := range []string{"not an ASD provenance entry", "classify the creation as unclassified", "not evidence of acceptance"} {
 			if !strings.Contains(panel, want) {
 				t.Errorf("%s: affordance missing %q", tc.name, want)
 			}
