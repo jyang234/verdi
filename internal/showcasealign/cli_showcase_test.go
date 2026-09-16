@@ -82,6 +82,27 @@
 //     internal/contextcompile.ResolvePolicyAuthority's stage-2 store read
 //     refuses before any spec target is even resolved. There is no
 //     showcase-content shape that reaches a successful compile.
+//   - `verdi help` / `verdi version` (TestCLIShowcaseHelp,
+//     TestCLIShowcaseVersion; spec/uat-round-1 ac-2/ac-1): the two verbs
+//     dispatch.go's run() resolves BEFORE the verbPhase lookup alongside
+//     lint (enumeration_completeness_test.go's prePhaseSpellings — which is
+//     exactly why cliVerbs enumerates them and this file must back them).
+//     Neither reads the store, so what a REAL store buys these two is the
+//     property UAT-004/UAT-003 actually reported: inside a populated
+//     showcase corpus a help spelling must print usage INSTEAD OF the real
+//     work that same corpus genuinely supports, and neither help nor
+//     version may move HEAD or change the working tree's dirty state. Both
+//     ac-2 defects are proven against real content rather than assumed —
+//     `verdi spec --help` against the real, already-landed
+//     spec/stale-decline, whose genuine `spec state` projection the same
+//     test runs for the comparison, and `verdi lint --help` by answering
+//     identically inside the real store and in a store-less directory,
+//     where the real verb cannot even resolve a root. Recorded because the
+//     obvious A/B looks available and is not: a real `verdi lint` over this
+//     store is SILENT and exits 0 (the corpus is clean, and its mutable
+//     zone is present, so VL-017 does not fire either), so
+//     difference-from-lint-output proves nothing and the environment
+//     comparison stands in its place.
 //
 // cli:feature is DELIBERATELY EXCLUDED from the enumerated capability set
 // below (cliVerbs, coverage_test.go) — see that function's own comment and
@@ -101,10 +122,19 @@ package showcasealign
 
 import (
 	"context"
+	"crypto/sha256"
+	// gobuildinfo, not buildinfo: this repo's own internal/buildinfo (the
+	// package `verdi version` formats its line with) shares the base name,
+	// and the alias keeps which one is meant unambiguous at every call site.
+	gobuildinfo "debug/buildinfo"
+	"encoding/hex"
+	"fmt"
 	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
+	"sort"
 	"strings"
 	"testing"
 
@@ -1131,4 +1161,375 @@ func TestCLIShowcaseExperiment(t *testing.T) {
 	if dirtyAfter != dirtyBefore {
 		t.Fatalf("working-tree dirty state changed (before=%v after=%v) — a refused experiment read must never mutate the working tree", dirtyBefore, dirtyAfter)
 	}
+}
+
+// TestCLIShowcaseHelp (cli:help, spec/uat-round-1 ac-2, closing UAT-004)
+// drives every help spelling the CLI recognizes — "help", "--help", "-h",
+// at top level and immediately after a verb — against the REAL provisioned
+// examples/showcase store.
+//
+// Help reads no store, so a real corpus is not what makes the OUTPUT
+// interesting; it is what makes the NON-output provable. ac-2 names two
+// defects and this test grounds each on real showcase content:
+//
+//   - `verdi spec --help` (which used to answer through the usage-ERROR
+//     path, stderr + exit 2) is compared against a real `verdi spec state
+//     spec/stale-decline` run over the same provisioned store — the
+//     genuine, content-derived projection TestCLIShowcaseSpecState also
+//     proves — so "it printed usage instead of running the verb" is a
+//     difference from real output, never an assumption.
+//   - `verdi lint --help` cannot use that A/B: a real `verdi lint` over
+//     this store is SILENT and exits 0 (the corpus is clean, and its
+//     mutable zone is present, so VL-017 does not fire), which is asserted
+//     here as a premise rather than assumed. The decisive comparison is
+//     environmental instead: the real verb answers COMPLETELY differently
+//     inside the real store (exit 0) and in a store-less directory (exit 2,
+//     "verdi lint: store: FindRoot..."), while every help spelling must
+//     answer IDENTICALLY in both — which is only possible if the intercept
+//     fired before lint's store-resolving entry point was ever reached.
+//
+// The top-level listing is bound to the gate's own enumeration rather than
+// to a hand-copied verb list: every capability cliVerbs enumerates
+// (coverage_test.go — verbPhase's phase>0 keys plus the pre-phase
+// lint/help/version) must have its own row, which is ac-2's "one line per
+// verb" measured against the real dispatch surface.
+func TestCLIShowcaseHelp(t *testing.T) {
+	t.Setenv("CI_DEFAULT_BRANCH", "main")
+	root := provisionShowcaseStore(t)
+	rootless := t.TempDir()
+	ctx := context.Background()
+
+	// Premise 1: the real work `verdi spec` does over this real corpus,
+	// which the help spellings must print usage INSTEAD OF.
+	specOut, specErr, specCode := runBinary(t, root, "spec", "state", "spec/stale-decline")
+	if specCode != 0 || !strings.Contains(specOut, `"state":"accepted-pending-build"`) {
+		t.Fatalf("test premise: `verdi spec state spec/stale-decline` against the provisioned showcase store must produce its real projection for the comparison below; exit %d\nstdout:\n%s\nstderr:\n%s", specCode, specOut, specErr)
+	}
+
+	// Premise 2: the real `verdi lint` answers differently in the two
+	// directories, so an identical answer from a help spelling in both is
+	// decisive. Its in-store silence is asserted, not assumed — if this
+	// store ever starts producing findings, the richer difference-based
+	// comparison becomes available and this premise should be revisited.
+	lintOut, _, lintCode := runBinary(t, root, "lint")
+	if lintCode != 0 || lintOut != "" {
+		t.Fatalf("test premise: `verdi lint` over the provisioned showcase store is expected to exit 0 silently (clean corpus, mutable zone present so VL-017 does not fire); got exit %d, stdout %q — re-ground the lint comparison below on the output this now produces", lintCode, lintOut)
+	}
+	_, rootlessLintErr, rootlessLintCode := runBinary(t, rootless, "lint")
+	if rootlessLintCode != 2 || !strings.HasPrefix(rootlessLintErr, "verdi lint: ") {
+		t.Fatalf("test premise: `verdi lint` from a store-less directory must fail operationally for the environment comparison to be decisive; exit %d, stderr %q", rootlessLintCode, rootlessLintErr)
+	}
+
+	headBefore, err := gitx.RevParse(ctx, root, "HEAD")
+	if err != nil {
+		t.Fatalf("test setup: gitx.RevParse(HEAD): %v", err)
+	}
+	// provisionShowcaseStore's fixture is NOT git-clean by construction (its
+	// mutable/derived zones are working-tree-only, per buildShowcaseRepo's
+	// own doc comment), so the mutation proof compares a full BEFORE/AFTER
+	// fingerprint rather than asserting absolute cleanliness — a bool
+	// dirty-flag would read dirty→dirty for a run that wrote inside the
+	// already-dirty tree (worktreeFingerprint's own doc comment).
+	fingerprintBefore, statusBefore := worktreeFingerprint(t, root)
+
+	spellings := []string{"help", "--help", "-h"}
+
+	for _, spelling := range spellings {
+		t.Run("top_level_"+spelling, func(t *testing.T) {
+			stdout, stderr, code := runBinary(t, root, spelling)
+			if code != 0 || stderr != "" {
+				t.Fatalf("verdi %s in the real showcase store: exit/stderr = %d/%q, want 0/\"\" (co-2: help is a clean exit)\nstdout:\n%s", spelling, code, stderr, stdout)
+			}
+			if !strings.HasPrefix(stdout, "usage: verdi <verb>") {
+				t.Fatalf("verdi %s: stdout = %q, want the top-level usage preamble", spelling, stdout)
+			}
+			if len(strings.Split(strings.TrimRight(stdout, "\n"), "\n")) < 2 {
+				t.Fatalf("verdi %s: stdout = %q, want the multi-line listing ac-2 requires", spelling, stdout)
+			}
+			for _, verb := range cliVerbs(t) {
+				row := regexp.MustCompile(`(?m)^\s+` + regexp.QuoteMeta(verb) + `\s`)
+				if !row.MatchString(stdout) {
+					t.Errorf("verdi %s: the listing has no row for the enumerated verb %q (ac-2: one line per verb, measured against cliVerbs' real dispatch-surface enumeration)\nstdout:\n%s", spelling, verb, stdout)
+				}
+			}
+		})
+	}
+
+	for _, spelling := range spellings {
+		t.Run("spec_"+spelling+"_does_not_project", func(t *testing.T) {
+			stdout, stderr, code := runBinary(t, root, "spec", spelling)
+			if code != 0 || stderr != "" {
+				t.Fatalf("verdi spec %s in the real showcase store: exit/stderr = %d/%q, want 0/\"\" — ac-2's second named defect is exactly this answering through the usage-ERROR path (stderr, exit 2)\nstdout:\n%s", spelling, code, stderr, stdout)
+			}
+			if !strings.HasPrefix(stdout, "usage: verdi spec") {
+				t.Fatalf("verdi spec %s: stdout = %q, want spec's own usage", spelling, stdout)
+			}
+			if stdout == specOut || strings.Contains(stdout, `"state":`) {
+				t.Fatalf("verdi spec %s printed the REAL projection over showcase content instead of usage — the help spelling ran the verb instead of intercepting it\nstdout:\n%s", spelling, stdout)
+			}
+		})
+
+		t.Run("lint_"+spelling+"_does_not_lint", func(t *testing.T) {
+			stdout, stderr, code := runBinary(t, root, "lint", spelling)
+			if code != 0 || stderr != "" {
+				t.Fatalf("verdi lint %s in the real showcase store: exit/stderr = %d/%q, want 0/\"\"\nstdout:\n%s", spelling, code, stderr, stdout)
+			}
+			if !strings.HasPrefix(stdout, "usage: verdi lint") {
+				t.Fatalf("verdi lint %s: stdout = %q, want lint's own usage", spelling, stdout)
+			}
+			// The decisive leg (see this test's doc comment): the real verb
+			// answers differently in these two directories; the help
+			// spelling must not, which is only possible if lint's real
+			// entry point — the store resolution the rootless run fails on
+			// — was never reached.
+			outsideOut, outsideErr, outsideCode := runBinary(t, rootless, "lint", spelling)
+			if outsideCode != code || outsideOut != stdout || outsideErr != stderr {
+				t.Fatalf("verdi lint %s answered differently inside the real showcase store (%d/%q/%q) and in a store-less directory (%d/%q/%q) — the help intercept reached lint's real, store-resolving entry point instead of returning before it (UAT-004's defect)", spelling, code, stdout, stderr, outsideCode, outsideOut, outsideErr)
+			}
+		})
+	}
+
+	headAfter, err := gitx.RevParse(ctx, root, "HEAD")
+	if err != nil {
+		t.Fatalf("gitx.RevParse(HEAD) after: %v", err)
+	}
+	if headBefore != headAfter {
+		t.Fatalf("HEAD changed: before=%s after=%s — no help spelling may ever mutate the repository", headBefore, headAfter)
+	}
+	fingerprintAfter, statusAfter := worktreeFingerprint(t, root)
+	if fingerprintAfter != fingerprintBefore {
+		t.Fatalf("working tree changed (fingerprint %s… → %s…) — no help spelling may ever mutate the working tree\n%s", fingerprintBefore[:12], fingerprintAfter[:12], statusDelta(statusBefore, statusAfter))
+	}
+}
+
+// TestCLIShowcaseVersion (cli:version, spec/uat-round-1 ac-1, closing
+// UAT-003) drives `verdi version` and `verdi --version` against the REAL
+// provisioned examples/showcase store.
+//
+// The expected content is derived from the binary under test itself —
+// debug/buildinfo.ReadFile reads the same embedded build info
+// internal/buildinfo.Line() formats at runtime — never from a hardcoded
+// version string, so this stays true for a worktree build (`verdi (devel)`,
+// the honest output dc-8 ratifies) and for a real .git checkout (which
+// additionally embeds a module version and vcs.revision) alike.
+//
+// HOW STRONG THAT IS depends on the environment, and the test SAYS SO
+// rather than implying more: it catches a fabricated or stale version only
+// where the build info carries one. Go embeds no vcs.* settings and no
+// module version for a build from a linked git worktree (dc-8's own
+// subject), so there the markers reduce to Go's "(devel)" placeholder —
+// the exact string internal/buildinfo emits as its honest fallback — and a
+// hardcoded `return "verdi (devel)"` would pass. builtBinaryBuildMarkers
+// emits a DISCLOSURE log line whenever that is the case (never a silent
+// pass); a real .git checkout, e.g. CI, is where the assertion bites in
+// full. A fabricated version distinct from the placeholder (`verdi v9.9.9`)
+// is rejected in every environment.
+//
+// What the real store adds, exactly as for help above: UAT-003's whole
+// point is identifying which build produced a result in a live store, so
+// this proves version answers from inside a real, populated corpus without
+// reading or touching it — both spellings byte-identical, HEAD and the
+// working tree's dirty state unchanged.
+func TestCLIShowcaseVersion(t *testing.T) {
+	root := provisionShowcaseStore(t)
+	ctx := context.Background()
+
+	headBefore, err := gitx.RevParse(ctx, root, "HEAD")
+	if err != nil {
+		t.Fatalf("test setup: gitx.RevParse(HEAD): %v", err)
+	}
+	fingerprintBefore, statusBefore := worktreeFingerprint(t, root)
+
+	markers := builtBinaryBuildMarkers(t)
+
+	var first string
+	for i, spelling := range []string{"version", "--version"} {
+		stdout, stderr, code := runBinary(t, root, spelling)
+		if code != 0 || stderr != "" {
+			t.Fatalf("verdi %s in the real showcase store: exit/stderr = %d/%q, want 0/\"\" (co-2: version is a clean exit)\nstdout:\n%s", spelling, code, stderr, stdout)
+		}
+		if !strings.HasPrefix(stdout, "verdi ") || strings.Count(stdout, "\n") != 1 {
+			t.Fatalf("verdi %s: stdout = %q, want exactly one \"verdi …\" identification line", spelling, stdout)
+		}
+		for _, marker := range markers {
+			if !strings.Contains(stdout, marker) {
+				t.Fatalf("verdi %s: stdout = %q, want it to report the binary's own embedded build info %q (read back from the built binary, never a hardcoded expectation)", spelling, stdout, marker)
+			}
+		}
+		if i == 0 {
+			first = stdout
+			continue
+		}
+		if stdout != first {
+			t.Fatalf("verdi %s printed %q but verdi version printed %q — both spellings are the same capability and must never disagree about which build produced a result (UAT-003)", spelling, stdout, first)
+		}
+	}
+
+	headAfter, err := gitx.RevParse(ctx, root, "HEAD")
+	if err != nil {
+		t.Fatalf("gitx.RevParse(HEAD) after: %v", err)
+	}
+	if headBefore != headAfter {
+		t.Fatalf("HEAD changed: before=%s after=%s — version must never mutate the repository", headBefore, headAfter)
+	}
+	fingerprintAfter, statusAfter := worktreeFingerprint(t, root)
+	if fingerprintAfter != fingerprintBefore {
+		t.Fatalf("working tree changed (fingerprint %s… → %s…) — version must never mutate the working tree\n%s", fingerprintBefore[:12], fingerprintAfter[:12], statusDelta(statusBefore, statusAfter))
+	}
+}
+
+// builtBinaryBuildMarkers reads the build info embedded in the verdi
+// binary TestMain built and returns the substrings its identification line
+// must contain: the main module's version (Go's own "(devel)" placeholder
+// when it carries none, which internal/buildinfo substitutes rather than
+// fabricating one) and, when the build embedded VCS settings at all, the
+// short revision internal/buildinfo prints. Derived from the binary under
+// test so the expectation cannot go stale or be satisfied by any arbitrary
+// "verdi …" line.
+//
+// THE DEGENERATE CASE IS DISCLOSED, not silently accepted: when the only
+// marker available is the "(devel)" placeholder — which is what Go embeds
+// for a build from a linked git worktree, where it omits vcs.* entirely and
+// the main module carries no version — the assertion can no longer tell a
+// genuine fallback from a hardcoded one, and this logs that fact. The
+// package's own convention for exactly this situation is
+// TestShowcaseCoverage's e2e-absent DISCLOSURE line (coverage_test.go):
+// state the unproven leg loudly and keep the proven ones enforced.
+func builtBinaryBuildMarkers(t *testing.T) []string {
+	t.Helper()
+
+	info, err := gobuildinfo.ReadFile(verdiBinPath)
+	if err != nil {
+		t.Fatalf("reading build info from the built verdi binary %s: %v", verdiBinPath, err)
+	}
+	const placeholder = "(devel)" // Go's own, and internal/buildinfo's, honest fallback
+	version := info.Main.Version
+	if version == "" {
+		version = placeholder
+	}
+	markers := []string{version}
+	for _, s := range info.Settings {
+		if s.Key == "vcs.revision" && s.Value != "" {
+			const shortRevisionLen = 12 // internal/buildinfo.shortRevisionLen
+			rev := s.Value
+			if len(rev) > shortRevisionLen {
+				rev = rev[:shortRevisionLen]
+			}
+			markers = append(markers, rev)
+		}
+	}
+	if len(markers) == 1 && markers[0] == placeholder {
+		t.Logf("DISCLOSURE: the binary under test embeds no module version and no vcs.* settings — what Go produces for a build from a linked git worktree (spec/uat-round-1 dc-8) — so the only marker available is its %q placeholder, the exact string internal/buildinfo emits as its honest fallback. The version assertion below is therefore DISCLOSED-AS-UNPROVEN in this environment: it still rejects a version distinct from the placeholder (a fabricated \"verdi v9.9.9\" fails here), but a hardcoded `return \"verdi %s\"` would pass and is caught only where build info carries a real version — a checkout with a real .git directory, e.g. CI. Never a silent pass.", placeholder, placeholder)
+	}
+	return markers
+}
+
+// worktreeFingerprint digests the working tree at root so a "this command
+// mutated nothing" proof can compare a BEFORE and an AFTER state exactly.
+//
+// gitx.StatusDirty is not usable for that here: it answers a single bool,
+// and provisionShowcaseStore's fixture is dirty by construction (its
+// mutable/derived zones are working-tree-only, per buildShowcaseRepo's own
+// doc comment), so dirty→dirty is what a clean run AND a run that wrote a
+// file inside the already-dirty tree both look like — the mutation would be
+// invisible. This returns two things instead:
+//
+//   - digest: sha256 over `git status --porcelain -uall` (index and
+//     untracked state, every untracked file listed individually rather than
+//     collapsed to its directory) FOLDED TOGETHER WITH every non-.git
+//     file's relative path, permission bits and CONTENT. The content leg is
+//     what catches an in-place rewrite of a file that was already untracked
+//     — a change porcelain alone reports identically before and after.
+//   - status: the porcelain text itself, so a failure can name WHICH paths
+//     differ instead of printing two opaque hashes.
+func worktreeFingerprint(t *testing.T, root string) (digest, status string) {
+	t.Helper()
+
+	cmd := exec.Command("git", "status", "--porcelain", "-uall")
+	cmd.Dir = root
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("git status --porcelain -uall in %s: %v", root, err)
+	}
+	status = string(out)
+
+	h := sha256.New()
+	h.Write(out)
+	walkErr := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, err := filepath.Rel(root, path)
+		if err != nil {
+			return err
+		}
+		// .git holds git's own bookkeeping (index mtimes, logs, gc state),
+		// which changes for reasons that are not working-tree mutations;
+		// HEAD is proven separately by gitx.RevParse at each call site.
+		if rel == ".git" {
+			if d.IsDir() {
+				return fs.SkipDir
+			}
+			return nil
+		}
+		if d.IsDir() {
+			return nil
+		}
+		info, err := d.Info()
+		if err != nil {
+			return err
+		}
+		fmt.Fprintf(h, "\x00%s\x00%o\x00", filepath.ToSlash(rel), info.Mode().Perm())
+		if !info.Mode().IsRegular() {
+			return nil
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		h.Write(data)
+		return nil
+	})
+	if walkErr != nil {
+		t.Fatalf("hashing the working tree at %s: %v", root, walkErr)
+	}
+	return hex.EncodeToString(h.Sum(nil)), status
+}
+
+// statusDelta returns the porcelain lines that appear in exactly one of
+// before/after, capped so a failure message stays readable. An empty result
+// means the digests differed on FILE CONTENT alone (an in-place rewrite),
+// which porcelain cannot show — the caller says so rather than printing
+// nothing.
+func statusDelta(before, after string) string {
+	const maxLines = 20
+	count := func(s string) map[string]int {
+		m := map[string]int{}
+		for _, line := range strings.Split(s, "\n") {
+			if line != "" {
+				m[line]++
+			}
+		}
+		return m
+	}
+	b, a := count(before), count(after)
+	var delta []string
+	for line := range b {
+		if a[line] < b[line] {
+			delta = append(delta, "-"+line)
+		}
+	}
+	for line := range a {
+		if b[line] < a[line] {
+			delta = append(delta, "+"+line)
+		}
+	}
+	sort.Strings(delta)
+	if len(delta) == 0 {
+		return "(no porcelain difference — the change is file CONTENT inside an already-untracked or already-modified path)"
+	}
+	if len(delta) > maxLines {
+		delta = append(delta[:maxLines], fmt.Sprintf("… and %d more", len(delta)-maxLines))
+	}
+	return strings.Join(delta, "\n")
 }
