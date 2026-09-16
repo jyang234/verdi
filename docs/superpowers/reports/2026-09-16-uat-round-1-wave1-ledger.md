@@ -9,7 +9,7 @@ Controller: FABLE (Claude Fable 5.1). Authority: spec/uat-round-1 (design/uat-ro
 | L1 cli | ac-1 (CLI), ac-2 | 2 | agent/uat-r1-cli | — | pending | — | — |
 | L2 vl017 | ac-3 | 1→3 | agent/uat-r1-vl017 | c56c3733 | passed | REVISE (F1 Critical: vocab witness regression) | escalated to Tier 3; fresh Opus fixer dispatched for F1–F3 + exit-1 test; fresh re-review to follow |
 | L3 import-record | ac-4 (backend, CLI) | 2 | agent/uat-r1-import-record | 586ec7c2 | passed | ACCEPT-WITH-MINOR | minors 2,3,5 closed at 9bbb9272 (controller-verified: specimport race ok 26.1s); INTEGRATED at edd948de, 0 lines drift vs reviewed head |
-| L4 policy-prefix | ac-5 | 1 | agent/uat-r1-policy-prefix | 5843f159 | passed | ACCEPT-WITH-MINOR | minor 2 routed to implementer; minor 1 → Fable lane |
+| L4 policy-prefix | ac-5 | 1 | agent/uat-r1-policy-prefix | 4e1dc62a | passed | ACCEPT-WITH-MINOR | minor 2 closed at b6010cd7 (controller-verified: designapp race ok, vocab witness ok); minor 1 → Fable lane (R-5); INTEGRATED, 0 drift |
 | L5 design-start | ac-6 | 2 | agent/uat-r1-design-start | bd28e5d5 | passed | REVISE (F1 --from-stub HEAD-based; F2 exit-2 invention unrecorded; F3–F5 minor) | R-3 ruled (dc-7/I-130); fix routed to original implementer; original reviewer confirms closure |
 
 ## Pre-review gate evidence (controller-run)
