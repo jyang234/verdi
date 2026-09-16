@@ -66,3 +66,9 @@ Whole-wave Opus review: ACCEPT-WITH-MINOR, conditional on the gate. Independentl
 ## Wave-2 obligations carried
 - Footer shell drift-guard test (whole-wave minor 3).
 - UAT-026, UAT-027 (low) — candidates for a wave-2 cleanup lane alongside UAT-024/025.
+
+### Wave gate run 1 — FAILED at `make test` (18:16–18:30)
+
+`make verify` on 710b4bf7: build, fmt-check, vet passed; `make test` failed in ONE package — `internal/showcasealign` `TestShowcaseCoverage_EnumerationIsComplete` — everything else ok (cmd/verdi 506.4s ok, lint 174.7s ok, workbench 160.7s ok, sealedexec 164.5s ok). Later stages (fixture, lint-store, spec-align, lint-showcase, showcase-coverage, e2e) did not run.
+
+- R-19 (gate failure, L1): the enumeration-completeness witness default-denies any pre-phase reference to `verb` in `run()` other than `verb := args[0]` and the blessed `if verb == "lint"` arm (whose body must not reference verb), because a verb dispatched before the `verbPhase` lookup escapes the showcase-coverage enumeration. L1's help-token and version intercepts are two new pre-phase arms, and its lint arm body now references `verb`. Same class as R-7 (a cross-binary witness the lane did not run) → L1 escalated to Tier 3: fresh Opus fixer on agent/uat-r1-cli, fresh re-review, re-merge, and a full re-run of `make verify`. Ruling on shape: the gate must stay default-deny; the honest fix blesses exactly the new arms and enumerates help/version in cliVerbs (satisfying whatever coverage that demands); evading the witness by hiding the `verb` reference is rejected. Process correction: the pre-review gate for every remaining lane and wave now runs `go test ./internal/showcasealign/... ./internal/specalign/...` in full, not just the vocab witness.
