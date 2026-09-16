@@ -228,16 +228,36 @@ func emptyFieldFindings(fields []Field) []Finding {
 func missingEvidenceFindings(fields []Field) []Finding {
 	var findings []Finding
 	for _, f := range fields {
-		if strings.HasPrefix(f.Target, "ac-") && len(f.Evidence) == 0 {
-			findings = append(findings, Finding{
-				Code:     FindingMissingEvidence,
-				Target:   f.Target,
-				Message:  fmt.Sprintf("%s has no evidence kind declared; an explicit mapping must supply one before creation", f.Target),
-				Blocking: true,
-			})
+		if fieldMissingEvidence(f) {
+			findings = append(findings, missingEvidenceFinding(f.Target))
 		}
 	}
 	return findings
+}
+
+// fieldMissingEvidence is this package's OWN missing-evidence predicate:
+// an acceptance-criterion Field with no declared Evidence. It is shared
+// rather than restated so the condition Normalize reports and the
+// condition Compose recognizes before appending the same field
+// (compose_external.go's pass 4) can never drift apart into two
+// differently-worded rules for one contract condition.
+func fieldMissingEvidence(f Field) bool {
+	return strings.HasPrefix(f.Target, "ac-") && len(f.Evidence) == 0
+}
+
+// missingEvidenceFinding builds the one blocking missing-evidence Finding
+// for target — the single wording of this rule and its corrective action
+// (spec-import-contract.md: "Preview findings explain the rule, target and
+// next corrective action"), shared by every producer of this condition.
+// This is the importer's own gate, not a second copy of VL-006's feature
+// evidence floor, which keeps its one owner in existing lint.
+func missingEvidenceFinding(target string) Finding {
+	return Finding{
+		Code:     FindingMissingEvidence,
+		Target:   target,
+		Message:  fmt.Sprintf("%s has no evidence kind declared; an explicit mapping must supply one before creation", target),
+		Blocking: true,
+	}
 }
 
 // declaredID identifies one source-declared object id within one source.

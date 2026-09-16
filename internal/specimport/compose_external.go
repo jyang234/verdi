@@ -60,6 +60,9 @@ func composeExternal(ctx context.Context, root string, request Request, plan Pla
 		return nil, nil, err
 	}
 	if blocking != nil {
+		if duplicatesBlockingMissingEvidence(findings, *blocking) {
+			return nil, findings, nil
+		}
 		return nil, append(findings, *blocking), nil
 	}
 
@@ -78,6 +81,38 @@ func composeExternal(ctx context.Context, root string, request Request, plan Pla
 		return nil, findings, nil
 	}
 	return result, findings, nil
+}
+
+// duplicatesBlockingMissingEvidence reports whether blocking is a
+// missing-evidence gap findings ALREADY reports, blocking, for the same
+// target — the one condition both prepareCandidateFields and pass 4's own
+// gate can legitimately produce for one field, since the pass-4 gate fires
+// on the very Field whose absent evidence Normalize already reported.
+// Without this, correcting pass 4's code would merely turn the bogus extra
+// unsupported-structure entry into a visible duplicate: assemblePreview
+// subtracts Compose's copy of the plan findings as a MULTISET, so the
+// plan's own entry consumes the match and Compose's byte-identical one
+// survives into the preview.
+//
+// The test is Code+Target+Blocking and NEVER message text, so wording
+// drift cannot resurrect the duplicate, and it is deliberately confined to
+// this one code: every other blocking finding applyCandidateEdits returns
+// reports a condition no other producer in this package computes, so
+// suppressing any of them could hide a real defect. A nonblocking or
+// differently-targeted entry is not a duplicate either — Compose is
+// exported over an arbitrary Plan, and suppressing against one would drop
+// the only blocking record of the gap and let an incomplete import claim
+// readiness.
+func duplicatesBlockingMissingEvidence(findings []Finding, blocking Finding) bool {
+	if blocking.Code != FindingMissingEvidence || !blocking.Blocking {
+		return false
+	}
+	for _, f := range findings {
+		if f.Blocking && f.Code == FindingMissingEvidence && f.Target == blocking.Target {
+			return true
+		}
+	}
+	return false
 }
 
 // renderScaffold instantiates the target class's template against
@@ -309,6 +344,25 @@ func applyCandidateEdits(rendered string, scaffold *artifact.SpecFrontmatter, re
 	// mapped statements).
 	result := pass2Result
 	for _, f := range objectFields {
+		// The importer's own missing-evidence gate, recognized HERE rather
+		// than left to AppendObject's refusal of the same condition: that
+		// refusal arrives as an opaque error this call site classified as
+		// unsupported-structure, which asserts a defect in the SOURCE's
+		// structure or the TEMPLATE's expressiveness — neither of which is
+		// what an absent evidence kind is. The contract names exactly one
+		// code for this condition ("The preview has a missing-evidence
+		// finding until an explicit Mapping supplies kinds"), and the
+		// browser keys its corrective guidance off the code, so the
+		// misclassification told the operator to abandon a format whose
+		// structure the same preview reported as fully recognized. The
+		// check is the shared fieldMissingEvidence predicate, and it
+		// returns at the same index the append would have failed at, so
+		// every earlier template/model refusal and every other append
+		// failure below is reached exactly as before.
+		if fieldMissingEvidence(f) {
+			gap := missingEvidenceFinding(f.Target)
+			return nil, &gap, nil
+		}
 		doc, err := splice.Parse(result)
 		if err != nil {
 			return nil, nil, fmt.Errorf("specimport: compose: re-parsing before appending %s: %w", f.Target, err)
