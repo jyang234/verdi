@@ -12,7 +12,7 @@ acceptance_criteria:
   - { id: ac-3, text: "When the mutable zone is absent, lint prints the VL-017 disclosure once per run, listing the affected specs, and describes the condition as the mutable zone being absent from this checkout. It does not assert a bare clone. The check's semantics are unchanged.", evidence: [behavioral, attestation], anchor: ac-3 }
   - { id: ac-4, text: "A spec-import record persists the request format and, for a reference profile, the pinned primary digest it was bound to; the record page and `verdi design import record` display them.", evidence: [behavioral, attestation], anchor: ac-4 }
   - { id: ac-5, text: "Policy authority and policy-forbidden error strings carry their package prefix exactly once.", evidence: [behavioral, attestation], anchor: ac-5 }
-  - { id: ac-6, text: "`verdi design start` bases the new design branch on the resolved default branch, not the current HEAD, and prints the base commit and the fact that the primary checkout was switched.", evidence: [behavioral, attestation], anchor: ac-6 }
+  - { id: ac-6, text: "`verdi design start`, including `--from-stub`, bases the new design branch on the resolved default branch, not the current HEAD, and prints the base commit and the fact that the primary checkout was switched. When the default branch is unresolvable it follows dc-7: a disclosed HEAD base when no origin remote exists, an operational refusal when one does.", evidence: [behavioral, attestation], anchor: ac-6 }
   - { id: ac-7, text: "The `f13-reference-v1` field map selects whole sentences: no selector ends mid-sentence, begins mid-clause, or joins two claims, and the test-instruction sentence is not selected as an acceptance criterion. The profile test is re-pinned and an import of the pinned F13 bundle yields the corrected criteria.", evidence: [behavioral, attestation], anchor: ac-7 }
   - { id: ac-8, text: "In the workbench import dialog, selecting text in a rendered source creates a source-backed mapping with the byte range computed, and the mapping target is chosen from a picker that offers the problem and outcome statements and all four object kinds.", evidence: [behavioral, attestation], anchor: ac-8 }
   - { id: ac-9, text: "The board's commit dialog prefills a proposal-shaped message naming the spec, keeps it editable, and shows a non-blocking note when the message contains a lifecycle word (accepted, closed, merged, superseded) that the commit itself cannot make true.", evidence: [behavioral, attestation], anchor: ac-9 }
@@ -31,6 +31,7 @@ decisions:
   - { id: dc-4, text: "The F13 reference profile remains a named, pinned reference profile bound to the exact primary bytes. ac-7 revises its shipped field map and re-pins the test; it does not introduce generic prose splitting.", anchor: dc-4 }
   - { id: dc-5, text: "Risk tiers for orchestration: Tier 1 for ac-2, ac-3, ac-5; Tier 2 for ac-1, ac-4, ac-6, ac-7, ac-8, ac-9; Tier 3 with an owner risk gate for ac-10 (acceptance gating) and ac-11 (provenance and immutable history). Waves: 1 = ac-1..ac-6 in parallel; 2 = ac-7, ac-8, ac-9; 3 = ac-10, ac-11 after their ledger entries are ratified.", anchor: dc-5 }
   - { id: dc-6, text: "The regression witness for the round is a replay of the UAT scenario against the integrated build: import the F13 plan, map constraints and decisions through the UI, accept with a spike stub still claiming an open question, then supersede to add one criterion. Each tracker entry gets a dated status note naming the closing commit.", anchor: dc-6 }
+  - { id: dc-7, text: "Unresolvable default branch at design start (I-130): when the repository has no origin remote, the branch is based on the current HEAD and a disclosure line names that substitution; when an origin remote exists but the default branch is unresolvable or ambiguous, design start exits 2 with the shared unresolvable-default-branch message. The ratified text forbids silent substitution and prescribes disclosure, not refusal; a remote-less fresh project has no truth other than HEAD; a configured-but-unresolvable remote is exactly the stale-HEAD hazard UAT-021 reported. Applies to --from-stub identically.", anchor: dc-7 }
 stubs:
   - { slug: version-verb, acceptance_criteria: [ac-1] }
   - { slug: cli-help, acceptance_criteria: [ac-2] }
@@ -101,7 +102,9 @@ Closes UAT-020.
 
 ## ac-6
 
-`verdi design start` bases the new design branch on the resolved default branch, not the current HEAD, and prints the base commit and the fact that the primary checkout was switched.
+`verdi design start`, including `--from-stub`, bases the new design branch on the resolved default branch, not the current HEAD, and prints the base commit and the fact that the primary checkout was switched. When the default branch is unresolvable it follows dc-7: a disclosed HEAD base when no origin remote exists, an operational refusal when one does.
+
+Amended 2026-09-16 after the L5 review: the first draft was silent on the unresolvable case and named only the `--kind/--name` path; `--from-stub` is dispatched inside the same verb and had the same defect.
 
 Closes UAT-021. Uses the same `specstate.ResolveDefaultBranch` the rest of the tool uses. See dc-2 for the worktree exclusion.
 
@@ -176,6 +179,12 @@ The F13 reference profile remains a named, pinned reference profile bound to the
 ## dc-5
 
 Risk tiers for orchestration: Tier 1 for ac-2, ac-3, ac-5; Tier 2 for ac-1, ac-4, ac-6, ac-7, ac-8, ac-9; Tier 3 with an owner risk gate for ac-10 (acceptance gating) and ac-11 (provenance and immutable history). Waves: 1 = ac-1..ac-6 in parallel; 2 = ac-7, ac-8, ac-9; 3 = ac-10, ac-11 after their ledger entries are ratified.
+
+## dc-7
+
+Unresolvable default branch at design start (I-130): when the repository has no origin remote, the branch is based on the current HEAD and a disclosure line names that substitution; when an origin remote exists but the default branch is unresolvable or ambiguous, design start exits 2 with the shared unresolvable-default-branch message. The ratified text forbids silent substitution and prescribes disclosure, not refusal; a remote-less fresh project has no truth other than HEAD; a configured-but-unresolvable remote is exactly the stale-HEAD hazard UAT-021 reported. Applies to --from-stub identically.
+
+Evidence weighed (L5 review, 2026-09-16): README "Start your own store" flow reaches `design start` with no remote and promises an unproven board, not a refusal, and tells the reader not to invent CI_DEFAULT_BRANCH; docs/local-adoption.md rehearses design start in a separate clean project; cmd/e2eharness/unprovenboard.go models "fresh project, no remote, design start has run" as a supported state. Read-side verbs already degrade to unproven; only verdict verbs (build start, gate) fail closed. Ledger: PLAN.md §7 I-130.
 
 ## dc-6
 
