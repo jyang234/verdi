@@ -226,6 +226,46 @@ func TestRunLintVerb_VL017Disclosure_PrintedOncePerRun(t *testing.T) {
 	}
 }
 
+// TestRunLintVerb_ViolationAlongsideVL017Disclosures_ExitsOne is the
+// mixed-severity path the two single-severity tests above leave open: a
+// store that carries BOTH a real violation and VL-017's once-per-run
+// disclosure. It pins the two halves of the exit contract against each
+// other in one run — the collapse must not swallow, reorder away or mask
+// the violation (exit stays 1, CLAUDE.md's verdict exit), and the
+// violation must not suppress the disclosure or restore its per-spec
+// repetition (printed, exactly once, naming both affected specs —
+// spec/uat-round-1 ac-3 and co-5: a quieter disclosure is still a
+// disclosure).
+func TestRunLintVerb_ViolationAlongsideVL017Disclosures_ExitsOne(t *testing.T) {
+	repo := buildMinimalStore(t, map[string]string{
+		".verdi/adr/0002-bad.md":                          lintTestBadADR,
+		".verdi/specs/active/borrower-update/spec.md":     lintTestNewClassFeature,
+		".verdi/specs/active/borrower-update-two/spec.md": lintTestNewClassFeatureTwo,
+	})
+	t.Chdir(repo.Dir)
+
+	var stdout, stderr bytes.Buffer
+	got := runLintVerb(nil, &stdout, &stderr)
+	if got != 1 {
+		t.Fatalf("runLintVerb exit = %d, want 1 (a real violation is present); stdout=%q stderr=%q", got, stdout.String(), stderr.String())
+	}
+	out := stdout.String()
+	if !strings.Contains(out, "VL-001") || !strings.Contains(out, "0002-bad.md") {
+		t.Fatalf("stdout = %q, want the VL-001 violation line naming 0002-bad.md printed alongside the disclosure", out)
+	}
+	if n := strings.Count(out, "disclosed-unproven [lint:VL-017]"); n != 1 {
+		t.Fatalf("stdout printed the VL-017 disclosure %d time(s), want exactly 1 (ac-3, closing UAT-002):\n%s", n, out)
+	}
+	for _, path := range []string{
+		".verdi/specs/active/borrower-update/spec.md",
+		".verdi/specs/active/borrower-update-two/spec.md",
+	} {
+		if !strings.Contains(out, path) {
+			t.Fatalf("stdout missing affected spec path %q in the once-per-run disclosure:\n%s", path, out)
+		}
+	}
+}
+
 // TestRunLintVerb_NoStoreRoot_ExitTwo proves an operational failure (no
 // store root findable) exits 2 with a stderr message, not a Finding.
 func TestRunLintVerb_NoStoreRoot_ExitTwo(t *testing.T) {
