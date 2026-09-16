@@ -10,7 +10,7 @@ Controller: FABLE (Claude Fable 5.1). Authority: spec/uat-round-1 (design/uat-ro
 | L2 vl017 | ac-3 | 1→3 | agent/uat-r1-vl017 | c56c3733 | passed | REVISE (F1 Critical: vocab witness regression) | Tier 3 fix range c56c3733..7698dc76 (fixer distinct from reviewer): F1 marker relocated, F2 gate = rule+severity+exact message, F3 comment, exit-1 test added; fresh re-review ACCEPT (F1–F3 CLOSED by mutation probes; exit-1 test has teeth); INTEGRATED, 0 drift; Tier 3 owner risk gate owed at wave close |
 | L3 import-record | ac-4 (backend, CLI) | 2 | agent/uat-r1-import-record | 586ec7c2 | passed | ACCEPT-WITH-MINOR | minors 2,3,5 closed at 9bbb9272 (controller-verified: specimport race ok 26.1s); INTEGRATED at edd948de, 0 lines drift vs reviewed head |
 | L4 policy-prefix | ac-5 | 1 | agent/uat-r1-policy-prefix | 4e1dc62a | passed | ACCEPT-WITH-MINOR | minor 2 closed at b6010cd7 (controller-verified: designapp race ok, vocab witness ok); minor 1 → Fable lane (R-5); INTEGRATED, 0 drift |
-| L5 design-start | ac-6 | 2 | agent/uat-r1-design-start | 44c14802 | passed | REVISE (F1 --from-stub HEAD-based; F2 exit-2 invention unrecorded; F3–F5 minor) | fix range bd28e5d5..44c14802 (F1–F4; F5 no-change per ruling); controller gate: 14 files, Go-only workbench call-site change, specalign witnesses ok, gitx/stubinstantiate/specstate race ok, focused cmd ok; closure confirmation requested from original reviewer |
+| L5 design-start | ac-6 | 2 | agent/uat-r1-design-start | 44c14802 | passed | REVISE (F1 --from-stub HEAD-based; F2 exit-2 invention unrecorded; F3–F5 minor) | fix range bd28e5d5..44c14802 (F1–F4; F5 no-change per ruling); controller gate: 14 files, Go-only workbench call-site change, specalign witnesses ok, gitx/stubinstantiate/specstate race ok, focused cmd ok; original reviewer CLOSED (F1–F4 verified; dc-7 implemented identically on both paths; stubinstantiate-level proof for remote-less --from-stub accepted because the CLI wall guard refuses earlier); INTEGRATED at b01ba359 — design.go auto-merged with L1, verified as L1 hunks + L5 hunks only, 0 drift elsewhere |
 
 ## Pre-review gate evidence (controller-run)
 
@@ -41,6 +41,9 @@ Controller: FABLE (Claude Fable 5.1). Authority: spec/uat-round-1 (design/uat-ro
 
 - R-13 (L1 review minor 4): ac-2's "multi-line usage with one line per verb or subverb" is measured per form; a single-form verb printing one line conforms. No change.
 - R-14 (L1 review minor 3): `verdi design board --help` exits 1 treating `--help` as a spec ref (pre-existing, two-level help is outside ac-2). To be logged in the UAT tracker as a follow-up, not fixed this round.
+
+- R-15 (L5 closure note): the board's creation form (actionCreate) is the one live production path to the disclosed-HEAD fallback; `--from-stub` and board stub-instantiate sit behind the accepted-pending-build wall guard, which refuses first in a remote-less store. Recorded so the fallback is not mistaken for dead code.
+- R-16 (L5 closure residual): board stub-instantiate and creation now base on the resolved default branch instead of the serving checkout's HEAD; e2e specs 31-board-stub-instantiate and 48-board-creation-form assert base-insensitive facts. Playwright is owed at the wave gate (browser behavior changed this wave).
 
 ## Fable wave-1b backlog (depends on L1, L3, L4 integration)
 
