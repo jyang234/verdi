@@ -32,6 +32,7 @@ decisions:
   - { id: dc-5, text: "Risk tiers for orchestration: Tier 1 for ac-2, ac-3, ac-5; Tier 2 for ac-1, ac-4, ac-6, ac-7, ac-8, ac-9; Tier 3 with an owner risk gate for ac-10 (acceptance gating) and ac-11 (provenance and immutable history). Waves: 1 = ac-1..ac-6 in parallel; 2 = ac-7, ac-8, ac-9; 3 = ac-10, ac-11 after their ledger entries are ratified.", anchor: dc-5 }
   - { id: dc-6, text: "The regression witness for the round is a replay of the UAT scenario against the integrated build: import the F13 plan, map constraints and decisions through the UI, accept with a spike stub still claiming an open question, then supersede to add one criterion. Each tracker entry gets a dated status note naming the closing commit.", anchor: dc-6 }
   - { id: dc-7, text: "Unresolvable default branch at design start (I-130): when the repository has no origin remote, the branch is based on the current HEAD and a disclosure line names that substitution; when an origin remote exists but the default branch is unresolvable or ambiguous, design start exits 2 with the shared unresolvable-default-branch message. The ratified text forbids silent substitution and prescribes disclosure, not refusal; a remote-less fresh project has no truth other than HEAD; a configured-but-unresolvable remote is exactly the stale-HEAD hazard UAT-021 reported. Applies to --from-stub identically.", anchor: dc-7 }
+  - { id: dc-8, text: "Build identification (ac-1) relies on Go's embedded VCS settings, which Go silently omits when building from a linked git worktree and which no build flag can force. UAT and release candidates are therefore built from a checkout with a real .git directory; a worktree build honestly prints `verdi (devel)`. No linker stamping this round: it would split stamped Makefile builds from the unstamped in-test builds that CROSS_BINARY_PKGS produce, recreating the UAT-003 ambiguity.", anchor: dc-8 }
 stubs:
   - { slug: version-verb, acceptance_criteria: [ac-1] }
   - { slug: cli-help, acceptance_criteria: [ac-2] }
@@ -185,6 +186,12 @@ Risk tiers for orchestration: Tier 1 for ac-2, ac-3, ac-5; Tier 2 for ac-1, ac-4
 Unresolvable default branch at design start (I-130): when the repository has no origin remote, the branch is based on the current HEAD and a disclosure line names that substitution; when an origin remote exists but the default branch is unresolvable or ambiguous, design start exits 2 with the shared unresolvable-default-branch message. The ratified text forbids silent substitution and prescribes disclosure, not refusal; a remote-less fresh project has no truth other than HEAD; a configured-but-unresolvable remote is exactly the stale-HEAD hazard UAT-021 reported. Applies to --from-stub identically.
 
 Evidence weighed (L5 review, 2026-09-16): README "Start your own store" flow reaches `design start` with no remote and promises an unproven board, not a refusal, and tells the reader not to invent CI_DEFAULT_BRANCH; docs/local-adoption.md rehearses design start in a separate clean project; cmd/e2eharness/unprovenboard.go models "fresh project, no remote, design start has run" as a supported state. Read-side verbs already degrade to unproven; only verdict verbs (build start, gate) fail closed. Ledger: PLAN.md §7 I-130.
+
+## dc-8
+
+Build identification (ac-1) relies on Go's embedded VCS settings, which Go silently omits when building from a linked git worktree and which no build flag can force. UAT and release candidates are therefore built from a checkout with a real .git directory; a worktree build honestly prints `verdi (devel)`. No linker stamping this round: it would split stamped Makefile builds from the unstamped in-test builds that CROSS_BINARY_PKGS produce, recreating the UAT-003 ambiguity.
+
+Evidence (L1 review, 2026-09-16): `go version -m` on a worktree build shows no vcs.* settings even with `-buildvcs=true` (exit 0, no warning); the same source copied into a fresh repository yields `verdi v0.0.0-…-<rev> rev=<rev>` and the `modified` marker on a dirty tree. Reversible: a labelled `(stamped)` ldflags fallback can be added later if every in-test build is stamped too.
 
 ## dc-6
 
