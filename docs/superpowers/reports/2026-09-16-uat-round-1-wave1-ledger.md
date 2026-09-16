@@ -7,7 +7,7 @@ Controller: FABLE (Claude Fable 5.1). Authority: spec/uat-round-1 (design/uat-ro
 | Lane | AC | Tier | Branch | Head | Gate | Review | Ruling |
 |---|---|---|---|---|---|---|---|
 | L1 cli | ac-1 (CLI), ac-2 | 2 | agent/uat-r1-cli | — | pending | — | — |
-| L2 vl017 | ac-3 | 1 | agent/uat-r1-vl017 | c56c3733 | passed | in review | — |
+| L2 vl017 | ac-3 | 1→3 | agent/uat-r1-vl017 | c56c3733 | passed | REVISE (F1 Critical: vocab witness regression) | escalated to Tier 3; fresh Opus fixer dispatched for F1–F3 + exit-1 test; fresh re-review to follow |
 | L3 import-record | ac-4 (backend, CLI) | 2 | agent/uat-r1-import-record | 586ec7c2 | passed | ACCEPT-WITH-MINOR | minors 2,3,5 closed at 9bbb9272 (controller-verified: specimport race ok 26.1s); INTEGRATED at edd948de, 0 lines drift vs reviewed head |
 | L4 policy-prefix | ac-5 | 1 | agent/uat-r1-policy-prefix | 5843f159 | passed | ACCEPT-WITH-MINOR | minor 2 routed to implementer; minor 1 → Fable lane |
 | L5 design-start | ac-6 | 2 | agent/uat-r1-design-start | bd28e5d5 | passed | in review | remote-less question open (see R-3) |
@@ -27,6 +27,9 @@ Controller: FABLE (Claude Fable 5.1). Authority: spec/uat-round-1 (design/uat-ro
 - R-4 (L5 precedence): the lane used ResolveDefaultBranch's established remote-tracking-first ref rather than the dispatch's "local first" elaboration. Spec text ac-6 names only the shared resolver, so the lane's reading is the conforming one; the dispatch wording was the error. Pending reviewer confirmation.
 - R-5 (L4 review minor 1): the policy setup guide now quotes the bare detail with no code (boardshellrender.go:290, :303). Information loss introduced by the lane; fix is workbench markup → Fable wave-1b lane (add PolicyCode to asdShell, render code + ": " + detail; keep PolicyDetail bare for the discriminant at boardspecasd.go:299).
 - R-6 (L2 process): RED outputs were reconstructed after implementation rather than captured first. Disclosed by the lane; the reverted-line runs are genuine. Accepted for Tier 1; noted so it is not mistaken for RED-first evidence.
+
+- R-7 (L2 review F1): vl017.go:64 moved the "wave close" literal out from under its `vocab:identity` marker; `go test ./internal/specalign -run TestVocabProseWitness` fails on the lane head and passes on the integration branch (controller-reproduced). Gate-breaking in `make verify`; Critical per reviewer, so the lane escalates to Tier 3 (fresh Opus fixer + fresh re-reviewer). Process correction: the pre-review gate for every remaining lane now includes the specalign vocab witness, since lanes only run their own packages.
+- R-8 (L2 review F2): CollapseVL017Disclosures must gate on the absent-zone message, not severity alone, so a restated mutable-zone-present VL-017 finding can never be replaced by a false "absent" line. Unreachable today; fixed in the same Tier 3 pass.
 
 ## Fable wave-1b backlog (depends on L1, L3, L4 integration)
 
