@@ -64,9 +64,10 @@ Choose the F13 reference format, class `feature`, a new name such as
 `f13-gatekeeper`, and a title. Preview shows eight acceptance criteria. The
 primary lacks labeled Problem and Outcome statements: write them explicitly or
 choose the disclosed pair of TODOs. Review the criteria and choose their expected
-evidence, including the existing feature requirement for attestation. Keeping
-remaining source text preserves the supporting plans as reference material; it
-does not turn them into additional board fields. Preview again after changes,
+evidence, including the existing feature requirement for attestation. Choose **Keep the remaining source text as reference material** to preserve the
+supporting plans and the unmapped primary text. This bundle cannot be created
+while that text has no disposition; retaining it does not turn it into additional
+board fields. Preview again after changes,
 then confirm and create when ready.
 
 Changed primary bytes are refused by this profile. Use a properly labeled
