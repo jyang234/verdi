@@ -6,7 +6,7 @@ Controller: FABLE (Claude Fable 5.1). Authority: spec/uat-round-1 (design/uat-ro
 
 | Lane | AC | Tier | Branch | Head | Gate | Review | Ruling |
 |---|---|---|---|---|---|---|---|
-| L1 cli | ac-1 (CLI), ac-2 | 2 | agent/uat-r1-cli | — | pending | — | — |
+| L1 cli | ac-1 (CLI), ac-2 | 2 | agent/uat-r1-cli | 21ec37e0 (code f9470eeb) | passed | in review | worktree builds print `verdi (devel)` (no vcs stamp) — evidence requested (R-11) |
 | L2 vl017 | ac-3 | 1→3 | agent/uat-r1-vl017 | c56c3733 | passed | REVISE (F1 Critical: vocab witness regression) | escalated to Tier 3; fresh Opus fixer dispatched for F1–F3 + exit-1 test; fresh re-review to follow |
 | L3 import-record | ac-4 (backend, CLI) | 2 | agent/uat-r1-import-record | 586ec7c2 | passed | ACCEPT-WITH-MINOR | minors 2,3,5 closed at 9bbb9272 (controller-verified: specimport race ok 26.1s); INTEGRATED at edd948de, 0 lines drift vs reviewed head |
 | L4 policy-prefix | ac-5 | 1 | agent/uat-r1-policy-prefix | 4e1dc62a | passed | ACCEPT-WITH-MINOR | minor 2 closed at b6010cd7 (controller-verified: designapp race ok, vocab witness ok); minor 1 → Fable lane (R-5); INTEGRATED, 0 drift |
@@ -17,6 +17,7 @@ Controller: FABLE (Claude Fable 5.1). Authority: spec/uat-round-1 (design/uat-ro
 - L3: ancestry ok; tree clean; 10 files all in write set; no workbench/js/html/e2e; `go test -race -count=1 ./internal/specimport/...` ok 28.5s; `go test -race -count=1 ./cmd/verdi/...` ok 519.1s (exit 0).
 - L4: ancestry ok; tree clean; 8 files in write set; `go test -race -count=1 ./internal/policyauthority/... ./internal/designapp/...` ok (3.1s, 21.3s). Full internal/workbench suite taken from lane manifest (139.8s ok), to be re-run at wave gate.
 - L2: ancestry ok; tree clean; 5 files in write set; no "bare clone" in printed text; `go test -race -count=1 ./internal/lint/...` ok 125.0s; `go test ./cmd/verdi -run 'TestRunLintVerb|TestDisclosureSeam'` ok.
+- L1: ancestry ok; tree clean; 11 files in write set; verbPhase and compact usage untouched; specalign vocab + CLI-verb witnesses ok 31.5s; `go test -race -count=1 ./internal/buildinfo/...` ok; focused cmd help/version/serve tests ok; smoke: `version` exit 0, `lint --help` prints usage exit 0 without linting, unknown verb exit 2. Full cmd/verdi race run in background.
 - L5: ancestry ok; tree clean; 7 files in write set; `go test -race -count=1 ./internal/gitx/...` ok 24.4s; `go test ./cmd/verdi -run 'TestRunDesignStart|TestCmdDesignStart|TestRun_Design'` ok.
 
 ## Rulings
@@ -33,6 +34,8 @@ Controller: FABLE (Claude Fable 5.1). Authority: spec/uat-round-1 (design/uat-ro
 
 - R-9 (L5 review F1): `--from-stub` is dispatched inside `design start` and still based on HEAD; ac-6 amended to name it explicitly; fix in internal/stubinstantiate under the same dc-7 rule; workbench stub-instantiate shares the seam (base selection only, no markup).
 - R-10 (L5 review note 6): `build start` cuts `feature/<name>` from HEAD after resolving the default branch — same shape as UAT-021, out of this round's scope; logged as UAT-023 (plausible, not reproduced).
+
+- R-11 (L1, open): Go embeds no vcs.* settings when building from a linked worktree, so `verdi version` prints the honest placeholder there; all candidate binaries in this workspace are worktree builds. Reviewer asked to reproduce and cost a Makefile ldflags fallback; scope decision pending.
 
 ## Fable wave-1b backlog (depends on L1, L3, L4 integration)
 
