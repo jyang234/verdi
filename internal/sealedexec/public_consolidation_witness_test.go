@@ -118,7 +118,7 @@ func consolidationValidateWitness(t *testing.T, b []byte) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if consolidationDigest(b) != want {
+			if !consolidationVerdiSourceMatches(path, want, b) {
 				t.Fatalf("stale witness source %s", path)
 			}
 		}
@@ -278,7 +278,7 @@ func consolidationValidateWitness(t *testing.T, b []byte) {
 	}
 }
 
-// The immutable Task4 witness remains historical. This sole later correction
+// The immutable Task4 witness remains historical. This later correction
 // binds exact reviewed bytes and proves the inverse edit recovers those bytes.
 func consolidationATCSourceMatches(path, want string, source []byte) bool {
 	if consolidationDigest(source) == want {
@@ -289,4 +289,49 @@ func consolidationATCSourceMatches(path, want string, source []byte) bool {
 	}
 	guard := []byte(consolidationATCBoundGuard)
 	return bytes.Count(source, guard) == 1 && consolidationDigest(bytes.Replace(source, guard, nil, 1)) == want
+}
+
+// consolidationVerdiEdit is one exact byte replacement of an inverse edit. From
+// must occur exactly once in the source it is applied to; an empty To deletes it.
+type consolidationVerdiEdit struct{ From, To string }
+
+// consolidationVerdiSuccessor pins one reviewed successor of a source the
+// witness binds by its historical digest. Both digests are exact, and Inverse
+// is the exact edit that turns the successor back into the historical bytes.
+type consolidationVerdiSuccessor struct {
+	Historical string
+	Successor  string
+	Inverse    []consolidationVerdiEdit
+}
+
+// consolidationApplyInverse applies every edit in order, reporting false unless
+// each one matched exactly once. An ambiguous edit recovers nothing.
+func consolidationApplyInverse(source []byte, inverse []consolidationVerdiEdit) ([]byte, bool) {
+	restored := source
+	for _, edit := range inverse {
+		from := []byte(edit.From)
+		if bytes.Count(restored, from) != 1 {
+			return nil, false
+		}
+		restored = bytes.Replace(restored, from, []byte(edit.To), 1)
+	}
+	return restored, true
+}
+
+// consolidationVerdiSourceMatches admits a bound Verdi source the same way
+// consolidationATCSourceMatches admits the peer's: exact historical bytes
+// always, and a later successor only when its path, the witness's historical
+// digest and the reviewed successor digest are all pinned and the pinned
+// inverse edit reproduces exactly those historical bytes. Unknown bytes on a
+// pinned path are still stale.
+func consolidationVerdiSourceMatches(path, want string, source []byte) bool {
+	if consolidationDigest(source) == want {
+		return true
+	}
+	bound, ok := consolidationVerdiSuccessors[path]
+	if !ok || want != bound.Historical || consolidationDigest(source) != bound.Successor {
+		return false
+	}
+	restored, ok := consolidationApplyInverse(source, bound.Inverse)
+	return ok && consolidationDigest(restored) == want
 }
