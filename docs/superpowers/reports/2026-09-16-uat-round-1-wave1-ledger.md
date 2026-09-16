@@ -45,7 +45,9 @@ Controller: FABLE (Claude Fable 5.1). Authority: spec/uat-round-1 (design/uat-ro
 - R-15 (L5 closure note): the board's creation form (actionCreate) is the one live production path to the disclosed-HEAD fallback; `--from-stub` and board stub-instantiate sit behind the accepted-pending-build wall guard, which refuses first in a remote-less store. Recorded so the fallback is not mistaken for dead code.
 - R-16 (L5 closure residual): board stub-instantiate and creation now base on the resolved default branch instead of the serving checkout's HEAD; e2e specs 31-board-stub-instantiate and 48-board-creation-form assert base-insensitive facts. Playwright is owed at the wave gate (browser behavior changed this wave).
 
-## Fable wave-1b backlog (depends on L1, L3, L4 integration)
+## Fable wave-1b lane (agent/uat-r1-fable-1b, base 3d46f12c, head f604fe49)
+
+Gate (controller): ancestry ok; tree clean; 15 files all inside write set (workbench Go + tests, e2e/tests 73–75 + fixtures.ts, report); no assets/CSS/dex touched; no recording artifacts; specalign vocab witness ok; `go test -race -count=1 ./internal/workbench/...` ok 120.5s. Lane ran focused Playwright 73–75 serially (5 passed, trace off) and the recording-artifact scan (0 files). Opus review dispatched. Items:
 
 1. Workbench footer renders internal/buildinfo string (ac-1 UI).
 2. Record page renders Format and ProfilePrimaryDigest (ac-4 UI; R-1).
