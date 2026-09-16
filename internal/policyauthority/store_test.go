@@ -32,6 +32,38 @@ func TestLoad_ErrNotAdopted(t *testing.T) {
 	if !errors.Is(err, ErrNotAdopted) {
 		t.Fatalf("Load() error = %v, want errors.Is(err, ErrNotAdopted)", err)
 	}
+	assertSinglePrefixedNotAdopted(t, err)
+}
+
+// TestLoad_ErrNotAdopted_NoVerdiDir covers policyRootEntry's OTHER
+// ErrNotAdopted return (a completely absent .verdi/, reached through
+// fs.ErrNotExist on the ReadDir itself) rather than TestLoad_ErrNotAdopted's
+// "present .verdi/ with no policy/ entry" path. Both must return the exact
+// same single-prefixed sentinel (ac-5, spec/uat-round-1).
+func TestLoad_ErrNotAdopted_NoVerdiDir(t *testing.T) {
+	root := t.TempDir()
+	_, err := Load(root)
+	if !errors.Is(err, ErrNotAdopted) {
+		t.Fatalf("Load() error = %v, want errors.Is(err, ErrNotAdopted)", err)
+	}
+	assertSinglePrefixedNotAdopted(t, err)
+}
+
+// assertSinglePrefixedNotAdopted proves err is ErrNotAdopted returned
+// UNWRAPPED: direct equality (not just errors.Is) and the exact
+// "policyauthority: " prefix appearing once. Before ac-5's fix,
+// policyRootEntry wrapped this already-prefixed sentinel a second time
+// with "policyauthority: %w", producing "policyauthority: policyauthority:
+// .verdi/policy/ does not exist (constitution store not adopted)".
+func assertSinglePrefixedNotAdopted(t *testing.T, err error) {
+	t.Helper()
+	if err != ErrNotAdopted {
+		t.Fatalf("Load() error = %v (%#v), want the unwrapped ErrNotAdopted sentinel itself", err, err)
+	}
+	const want = "policyauthority: .verdi/policy/ does not exist (constitution store not adopted)"
+	if err.Error() != want {
+		t.Fatalf("Load() error = %q, want %q (single package prefix)", err.Error(), want)
+	}
 }
 
 // TestLoad_PolicyRootSymlinkRejected proves a present authority-root entry
