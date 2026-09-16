@@ -50,9 +50,13 @@ Controller: FABLE (Claude Fable 5.1). Authority: spec/uat-round-1 (design/uat-ro
 
 ## Fable wave-1b lane (agent/uat-r1-fable-1b, base 3d46f12c, head f604fe49)
 
-Gate (controller): ancestry ok; tree clean; 15 files all inside write set (workbench Go + tests, e2e/tests 73–75 + fixtures.ts, report); no assets/CSS/dex touched; no recording artifacts; specalign vocab witness ok; `go test -race -count=1 ./internal/workbench/...` ok 120.5s. Lane ran focused Playwright 73–75 serially (5 passed, trace off) and the recording-artifact scan (0 files). Opus review ACCEPT-WITH-MINOR (reviewer reproduced 5/5 focused specs from a real-.git clone with a stamped footer line, plus specs 72 and 27: 26 passed; spec 50 could not run there for want of @axe-core/playwright). Minors 1–3 routed to the Fable agent; minor 4 accepted as disclosed. Items:
+Gate (controller): ancestry ok; tree clean; 15 files all inside write set (workbench Go + tests, e2e/tests 73–75 + fixtures.ts, report); no assets/CSS/dex touched; no recording artifacts; specalign vocab witness ok; `go test -race -count=1 ./internal/workbench/...` ok 120.5s. Lane ran focused Playwright 73–75 serially (5 passed, trace off) and the recording-artifact scan (0 files). Opus review ACCEPT-WITH-MINOR (reviewer reproduced 5/5 focused specs from a real-.git clone with a stamped footer line, plus specs 72 and 27: 26 passed; spec 50 could not run there for want of @axe-core/playwright). Minors 1–3 closed at 02544fc7..e44b7c3e (controller-verified: dex race ok, focused workbench ok); minor 4 accepted as disclosed; INTEGRATED at c2a56b3f, 0 drift. R-1 and R-5 CLOSED. Items:
 
 1. Workbench footer renders internal/buildinfo string (ac-1 UI).
 2. Record page renders Format and ProfilePrimaryDigest (ac-4 UI; R-1).
 3. Policy guide quotes code + detail (R-5).
 Each with a Playwright path under e2e/.
+
+## Wave gate
+
+Integrated head c2a56b3f (six lanes: L3 edd948de, L4 e7b700a2, L2 57f1bd55, L1 3d46f12c, L5 b01ba359, Fable 1b c2a56b3f). Whole-wave Opus review dispatched over 840c6166..c2a56b3f. `make verify` started on the integration worktree (log: scratchpad/wave1-verify.log).
