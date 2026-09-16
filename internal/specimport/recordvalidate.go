@@ -63,6 +63,33 @@ func validDisposition(disposition string) bool {
 	}
 }
 
+// validateRecordFormat checks Record.Format/ProfilePrimaryDigest (uat-
+// round-1 spec ac-4). Format is optional-on-read — a record committed
+// before this field existed decodes with it absent ("") — but a NON-EMPTY
+// value must be one of Request.Validate's own four closed formats, never a
+// second vocabulary. ProfilePrimaryDigest is meaningful only when Format
+// names a pinned reference profile (profilePrimaryDigestFor): present, it
+// must be EXACTLY that profile's pinned constant — never merely a
+// well-shaped sha256Hex value — since anything else would misreport what
+// the profile actually enforces; a format with no bound reference profile
+// (every non-reference format, and the absent "" of a pre-ac-4 record)
+// must carry no profile digest at all. A record naming a profile digest
+// with nothing to bind it to (or naming the wrong one) is exactly the kind
+// of semantically impossible shape this decoder already refuses elsewhere.
+func validateRecordFormat(r Record) error {
+	if r.Format != "" && !validFormats[r.Format] {
+		return fmt.Errorf("record format %q is not one of native, markdown-v1, f13-reference-v1, manual-v1, or absent", r.Format)
+	}
+	expected, hasProfile := profilePrimaryDigestFor(r.Format)
+	switch {
+	case hasProfile && r.ProfilePrimaryDigest != expected:
+		return fmt.Errorf("record profile_primary_digest %q must be exactly the %q profile's pinned primary %q", r.ProfilePrimaryDigest, r.Format, expected)
+	case !hasProfile && r.ProfilePrimaryDigest != "":
+		return fmt.Errorf("record profile_primary_digest %q is set but format %q names no pinned reference profile", r.ProfilePrimaryDigest, r.Format)
+	}
+	return nil
+}
+
 // validateRecordDigests checks every stored digest/identity field's shape,
 // honouring the format each one actually has: base_commit is a Git OID,
 // model_digest and the policy digest carry canonjson's "sha256:" prefix,
