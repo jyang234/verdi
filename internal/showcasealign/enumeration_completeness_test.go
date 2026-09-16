@@ -73,6 +73,15 @@ func prePhaseVerbs() []string {
 // with a clear "dispatch.go shape changed" message rather than silently
 // enumerating nothing.
 //
+// SCOPE LIMIT, stated plainly so the paragraph above is not read as more
+// than it proves: this witness denies pre-phase statements that NAME the
+// `verb` identifier. A statement branching on the same value WITHOUT naming
+// it — `if args[0] == "frobnicate" { … }`, or a helper taking `args` — is
+// outside its model and PASSES, as does a dispatch placed between the
+// verbPhase lookup and the `!known` guard rather than before the lookup.
+// Both gaps pre-date this file's current shape and are logged in the UAT
+// tracker for separate treatment; neither is closed here.
+//
 // The one helper call blessed as a condition, `isHelpToken(verb)`, is
 // itself PINNED (helpTokenSpellings reads cmd/verdi/help.go's own source):
 // a helper call is exactly what this witness otherwise denies, because it

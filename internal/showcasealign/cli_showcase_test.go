@@ -122,15 +122,19 @@ package showcasealign
 
 import (
 	"context"
+	"crypto/sha256"
 	// gobuildinfo, not buildinfo: this repo's own internal/buildinfo (the
 	// package `verdi version` formats its line with) shares the base name,
 	// and the alias keeps which one is meant unambiguous at every call site.
 	gobuildinfo "debug/buildinfo"
+	"encoding/hex"
+	"fmt"
 	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"testing"
 
@@ -1222,12 +1226,11 @@ func TestCLIShowcaseHelp(t *testing.T) {
 	}
 	// provisionShowcaseStore's fixture is NOT git-clean by construction (its
 	// mutable/derived zones are working-tree-only, per buildShowcaseRepo's
-	// own doc comment), so the mutation proof compares StatusDirty BEFORE and
-	// AFTER rather than asserting absolute cleanliness.
-	dirtyBefore, err := gitx.StatusDirty(ctx, root)
-	if err != nil {
-		t.Fatalf("test setup: gitx.StatusDirty: %v", err)
-	}
+	// own doc comment), so the mutation proof compares a full BEFORE/AFTER
+	// fingerprint rather than asserting absolute cleanliness — a bool
+	// dirty-flag would read dirty→dirty for a run that wrote inside the
+	// already-dirty tree (worktreeFingerprint's own doc comment).
+	fingerprintBefore, statusBefore := worktreeFingerprint(t, root)
 
 	spellings := []string{"help", "--help", "-h"}
 
@@ -1293,12 +1296,9 @@ func TestCLIShowcaseHelp(t *testing.T) {
 	if headBefore != headAfter {
 		t.Fatalf("HEAD changed: before=%s after=%s — no help spelling may ever mutate the repository", headBefore, headAfter)
 	}
-	dirtyAfter, err := gitx.StatusDirty(ctx, root)
-	if err != nil {
-		t.Fatalf("gitx.StatusDirty after: %v", err)
-	}
-	if dirtyAfter != dirtyBefore {
-		t.Fatalf("working-tree dirty state changed (before=%v after=%v) — no help spelling may ever mutate the working tree", dirtyBefore, dirtyAfter)
+	fingerprintAfter, statusAfter := worktreeFingerprint(t, root)
+	if fingerprintAfter != fingerprintBefore {
+		t.Fatalf("working tree changed (fingerprint %s… → %s…) — no help spelling may ever mutate the working tree\n%s", fingerprintBefore[:12], fingerprintAfter[:12], statusDelta(statusBefore, statusAfter))
 	}
 }
 
@@ -1311,8 +1311,19 @@ func TestCLIShowcaseHelp(t *testing.T) {
 // internal/buildinfo.Line() formats at runtime — never from a hardcoded
 // version string, so this stays true for a worktree build (`verdi (devel)`,
 // the honest output dc-8 ratifies) and for a real .git checkout (which
-// additionally embeds vcs.revision) alike, and would catch a fabricated or
-// stale version rather than accepting any "verdi …" line.
+// additionally embeds a module version and vcs.revision) alike.
+//
+// HOW STRONG THAT IS depends on the environment, and the test SAYS SO
+// rather than implying more: it catches a fabricated or stale version only
+// where the build info carries one. Go embeds no vcs.* settings and no
+// module version for a build from a linked git worktree (dc-8's own
+// subject), so there the markers reduce to Go's "(devel)" placeholder —
+// the exact string internal/buildinfo emits as its honest fallback — and a
+// hardcoded `return "verdi (devel)"` would pass. builtBinaryBuildMarkers
+// emits a DISCLOSURE log line whenever that is the case (never a silent
+// pass); a real .git checkout, e.g. CI, is where the assertion bites in
+// full. A fabricated version distinct from the placeholder (`verdi v9.9.9`)
+// is rejected in every environment.
 //
 // What the real store adds, exactly as for help above: UAT-003's whole
 // point is identifying which build produced a result in a live store, so
@@ -1327,10 +1338,7 @@ func TestCLIShowcaseVersion(t *testing.T) {
 	if err != nil {
 		t.Fatalf("test setup: gitx.RevParse(HEAD): %v", err)
 	}
-	dirtyBefore, err := gitx.StatusDirty(ctx, root)
-	if err != nil {
-		t.Fatalf("test setup: gitx.StatusDirty: %v", err)
-	}
+	fingerprintBefore, statusBefore := worktreeFingerprint(t, root)
 
 	markers := builtBinaryBuildMarkers(t)
 
@@ -1364,12 +1372,9 @@ func TestCLIShowcaseVersion(t *testing.T) {
 	if headBefore != headAfter {
 		t.Fatalf("HEAD changed: before=%s after=%s — version must never mutate the repository", headBefore, headAfter)
 	}
-	dirtyAfter, err := gitx.StatusDirty(ctx, root)
-	if err != nil {
-		t.Fatalf("gitx.StatusDirty after: %v", err)
-	}
-	if dirtyAfter != dirtyBefore {
-		t.Fatalf("working-tree dirty state changed (before=%v after=%v) — version must never mutate the working tree", dirtyBefore, dirtyAfter)
+	fingerprintAfter, statusAfter := worktreeFingerprint(t, root)
+	if fingerprintAfter != fingerprintBefore {
+		t.Fatalf("working tree changed (fingerprint %s… → %s…) — version must never mutate the working tree\n%s", fingerprintBefore[:12], fingerprintAfter[:12], statusDelta(statusBefore, statusAfter))
 	}
 }
 
@@ -1381,6 +1386,15 @@ func TestCLIShowcaseVersion(t *testing.T) {
 // short revision internal/buildinfo prints. Derived from the binary under
 // test so the expectation cannot go stale or be satisfied by any arbitrary
 // "verdi …" line.
+//
+// THE DEGENERATE CASE IS DISCLOSED, not silently accepted: when the only
+// marker available is the "(devel)" placeholder — which is what Go embeds
+// for a build from a linked git worktree, where it omits vcs.* entirely and
+// the main module carries no version — the assertion can no longer tell a
+// genuine fallback from a hardcoded one, and this logs that fact. The
+// package's own convention for exactly this situation is
+// TestShowcaseCoverage's e2e-absent DISCLOSURE line (coverage_test.go):
+// state the unproven leg loudly and keep the proven ones enforced.
 func builtBinaryBuildMarkers(t *testing.T) []string {
 	t.Helper()
 
@@ -1388,9 +1402,10 @@ func builtBinaryBuildMarkers(t *testing.T) []string {
 	if err != nil {
 		t.Fatalf("reading build info from the built verdi binary %s: %v", verdiBinPath, err)
 	}
+	const placeholder = "(devel)" // Go's own, and internal/buildinfo's, honest fallback
 	version := info.Main.Version
 	if version == "" {
-		version = "(devel)"
+		version = placeholder
 	}
 	markers := []string{version}
 	for _, s := range info.Settings {
@@ -1403,5 +1418,118 @@ func builtBinaryBuildMarkers(t *testing.T) []string {
 			markers = append(markers, rev)
 		}
 	}
+	if len(markers) == 1 && markers[0] == placeholder {
+		t.Logf("DISCLOSURE: the binary under test embeds no module version and no vcs.* settings — what Go produces for a build from a linked git worktree (spec/uat-round-1 dc-8) — so the only marker available is its %q placeholder, the exact string internal/buildinfo emits as its honest fallback. The version assertion below is therefore DISCLOSED-AS-UNPROVEN in this environment: it still rejects a version distinct from the placeholder (a fabricated \"verdi v9.9.9\" fails here), but a hardcoded `return \"verdi %s\"` would pass and is caught only where build info carries a real version — a checkout with a real .git directory, e.g. CI. Never a silent pass.", placeholder, placeholder)
+	}
 	return markers
+}
+
+// worktreeFingerprint digests the working tree at root so a "this command
+// mutated nothing" proof can compare a BEFORE and an AFTER state exactly.
+//
+// gitx.StatusDirty is not usable for that here: it answers a single bool,
+// and provisionShowcaseStore's fixture is dirty by construction (its
+// mutable/derived zones are working-tree-only, per buildShowcaseRepo's own
+// doc comment), so dirty→dirty is what a clean run AND a run that wrote a
+// file inside the already-dirty tree both look like — the mutation would be
+// invisible. This returns two things instead:
+//
+//   - digest: sha256 over `git status --porcelain -uall` (index and
+//     untracked state, every untracked file listed individually rather than
+//     collapsed to its directory) FOLDED TOGETHER WITH every non-.git
+//     file's relative path, permission bits and CONTENT. The content leg is
+//     what catches an in-place rewrite of a file that was already untracked
+//     — a change porcelain alone reports identically before and after.
+//   - status: the porcelain text itself, so a failure can name WHICH paths
+//     differ instead of printing two opaque hashes.
+func worktreeFingerprint(t *testing.T, root string) (digest, status string) {
+	t.Helper()
+
+	cmd := exec.Command("git", "status", "--porcelain", "-uall")
+	cmd.Dir = root
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("git status --porcelain -uall in %s: %v", root, err)
+	}
+	status = string(out)
+
+	h := sha256.New()
+	h.Write(out)
+	walkErr := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, err := filepath.Rel(root, path)
+		if err != nil {
+			return err
+		}
+		// .git holds git's own bookkeeping (index mtimes, logs, gc state),
+		// which changes for reasons that are not working-tree mutations;
+		// HEAD is proven separately by gitx.RevParse at each call site.
+		if rel == ".git" {
+			if d.IsDir() {
+				return fs.SkipDir
+			}
+			return nil
+		}
+		if d.IsDir() {
+			return nil
+		}
+		info, err := d.Info()
+		if err != nil {
+			return err
+		}
+		fmt.Fprintf(h, "\x00%s\x00%o\x00", filepath.ToSlash(rel), info.Mode().Perm())
+		if !info.Mode().IsRegular() {
+			return nil
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		h.Write(data)
+		return nil
+	})
+	if walkErr != nil {
+		t.Fatalf("hashing the working tree at %s: %v", root, walkErr)
+	}
+	return hex.EncodeToString(h.Sum(nil)), status
+}
+
+// statusDelta returns the porcelain lines that appear in exactly one of
+// before/after, capped so a failure message stays readable. An empty result
+// means the digests differed on FILE CONTENT alone (an in-place rewrite),
+// which porcelain cannot show — the caller says so rather than printing
+// nothing.
+func statusDelta(before, after string) string {
+	const maxLines = 20
+	count := func(s string) map[string]int {
+		m := map[string]int{}
+		for _, line := range strings.Split(s, "\n") {
+			if line != "" {
+				m[line]++
+			}
+		}
+		return m
+	}
+	b, a := count(before), count(after)
+	var delta []string
+	for line := range b {
+		if a[line] < b[line] {
+			delta = append(delta, "-"+line)
+		}
+	}
+	for line := range a {
+		if b[line] < a[line] {
+			delta = append(delta, "+"+line)
+		}
+	}
+	sort.Strings(delta)
+	if len(delta) == 0 {
+		return "(no porcelain difference — the change is file CONTENT inside an already-untracked or already-modified path)"
+	}
+	if len(delta) > maxLines {
+		delta = append(delta[:maxLines], fmt.Sprintf("… and %d more", len(delta)-maxLines))
+	}
+	return strings.Join(delta, "\n")
 }
