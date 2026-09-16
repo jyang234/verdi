@@ -127,10 +127,14 @@ const (
 )
 
 // policyNotAdoptedDetail is draftmutation's exact not-adopted detail
-// (policy.go's policyIdentityNotAdopted), which designapp forwards as
-// "policy-forbidden: project has not adopted policy authority" (its
-// Error() form). Matched by containment so both the bare and the
-// code-prefixed forms discriminate identically.
+// (policy.go's policyIdentityNotAdopted), forwarded by designapp as
+// DesignFailure's bare Detail — never re-embedding the "policy-forbidden:"
+// prefix Code already carries (ac-5, spec/uat-round-1: a package/code
+// prefix appears exactly once, at the outermost layer that owns it;
+// internal/designapp/outcome.go's translateDraftmutationError is that
+// layer). Matched by containment, not equality, so this constant stays a
+// robust discriminant rather than a second place the exact wire shape must
+// be kept in sync.
 const policyNotAdoptedDetail = "project has not adopted policy authority"
 
 // policyEditingClause scopes a policy-forbidden concern row's editing claim
