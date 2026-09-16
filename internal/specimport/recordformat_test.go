@@ -2,7 +2,9 @@ package specimport
 
 import (
 	"context"
+	"fmt"
 	"os"
+	"strings"
 	"testing"
 )
 
@@ -131,5 +133,17 @@ func TestDecodeRecord_F13ReferenceFixture_CarriesFormatAndProfileDigest(t *testi
 	}
 	if record.ProfilePrimaryDigest != f13PrimarySHA256 {
 		t.Fatalf("record.ProfilePrimaryDigest = %q, want the pinned constant %q", record.ProfilePrimaryDigest, f13PrimarySHA256)
+	}
+
+	// Positive serialization: the decoded struct fields alone do not prove
+	// the wire form actually carries the digest under its documented
+	// snake_case key — encodeRecord (canonjson) must emit it literally.
+	encoded, err := encodeRecord(record)
+	if err != nil {
+		t.Fatalf("encodeRecord: %v", err)
+	}
+	wantSubstring := fmt.Sprintf(`"profile_primary_digest":%q`, f13PrimarySHA256)
+	if !strings.Contains(string(encoded), wantSubstring) {
+		t.Fatalf("encodeRecord(record) does not contain %s; got: %s", wantSubstring, encoded)
 	}
 }

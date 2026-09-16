@@ -230,6 +230,34 @@ func multiSourceRequest() Request {
 	return req
 }
 
+// manualRequest is a fully ready manual-v1 Request: manual-v1 "supplies no
+// automatic mappings at all" (spec-import-contract.md), so problem, outcome
+// and the one acceptance criterion all come from explicit user-added
+// mappings (no SourceID) rather than any recognized structure, and the
+// primary's own bytes are entirely retained-only. This gives manual-v1 the
+// same publish-level (Apply) coverage every other format already has in
+// this table.
+func manualRequest() Request {
+	problemText := "A manually added problem statement with no source backing."
+	outcomeText := "A manually added outcome statement with no source backing."
+	ac1Text := "A manually added acceptance criterion with no source backing."
+	return Request{
+		Schema:  RequestSchema,
+		Target:  Target{Slug: "manual-feature", Class: "feature", Title: "Manual Feature"},
+		Format:  FormatManualV1,
+		Primary: "source",
+		Sources: []Source{
+			{ID: "source", Label: "sample.md", Data: []byte("Retained supporting text, mapped to nothing.\n")},
+		},
+		Mappings: []Mapping{
+			{Target: "problem", Text: &problemText},
+			{Target: "outcome", Text: &outcomeText},
+			{Target: "ac-1", Text: &ac1Text, Evidence: []string{"static", "attestation"}},
+		},
+		RetainUnmapped: true,
+	}
+}
+
 // TestDecodeRecord_AcceptsEveryConformingRecordShape is the strictness
 // cases' mandatory counterweight: the record shapes a conforming Apply
 // really produces — external copied/edited source, native, an explicitly
@@ -264,6 +292,7 @@ func TestDecodeRecord_AcceptsEveryConformingRecordShape(t *testing.T) {
 		"deferral":      deferred,
 		"source-backed": sourceBacked,
 		"multi-source":  multiSourceRequest(),
+		"manual":        manualRequest(),
 	}
 	names := make([]string, 0, len(shapes))
 	for name := range shapes {
@@ -338,7 +367,7 @@ func TestDecodeRecord_AcceptsEveryConformingRecordShape(t *testing.T) {
 		})
 	}
 
-	for _, format := range []string{FormatMarkdownV1, FormatNative} {
+	for _, format := range []string{FormatMarkdownV1, FormatNative, FormatManualV1} {
 		if !formats[format] {
 			t.Errorf("no published record exercised format %q", format)
 		}

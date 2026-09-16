@@ -103,6 +103,17 @@ var validFormats = map[string]bool{
 // manual-v1 are deliberately absent: they read whatever primary bytes a
 // request supplies rather than refusing anything not bit-identical to one
 // pinned value, so they have no bound profile digest to record.
+//
+// APPEND-ONLY: an entry's value must never change once it has shipped.
+// Every already-committed record naming that format is validated against
+// this exact map (validateRecordFormat, via profilePrimaryDigestFor) every
+// time it is decoded — changing an existing entry's pinned digest would
+// make every such already-committed record fail to decode, retroactively.
+// Re-pinning a profile's primary bytes (or reusing its name for different
+// bytes) is a NEW named, versioned profile: give it a NEW Format/
+// FormatXxx value (e.g. "f13-reference-v2") and ADD a new entry here,
+// exactly as "f13-reference-v1" itself is named for its one pinned
+// version. Never overwrite or repurpose an existing key.
 var profileReferenceDigests = map[string]string{
 	FormatF13Reference: f13PrimarySHA256,
 }
