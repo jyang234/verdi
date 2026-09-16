@@ -58,6 +58,12 @@ verbs: lint, design, accept, feature, build, align, sync, serve, mcp, matrix,
 // 0 clean / 1 verdict failure / 2 operational error. Phase 1 has no verdicts
 // yet, so every path here is operational: usage (unknown verb, no args) or
 // an honest "not implemented" for a recognized verb.
+//
+// spec/uat-round-1 ac-1 adds "version"/"--version" as top-level, never-
+// phase-numbered tokens, checked before the unknown-verb/phase lookup so
+// neither is ever added to verbPhase (internal/specalign's CLI-verb
+// inventory, a serialized shared registry per CLAUDE.md, stays untouched):
+// both print buildinfo.Line() (version.go) and exit 0.
 func run(args []string, stderr io.Writer) int {
 	if len(args) == 0 {
 		fmt.Fprintln(stderr, usage)
@@ -65,6 +71,10 @@ func run(args []string, stderr io.Writer) int {
 	}
 
 	verb := args[0]
+	if verb == "version" || verb == "--version" {
+		return cmdVersion(os.Stdout)
+	}
+
 	if verb == "lint" {
 		return runLintVerb(args[1:], os.Stdout, stderr)
 	}
