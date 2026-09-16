@@ -268,6 +268,22 @@ func TestDesignImportRecordBuiltBinary(t *testing.T) {
 		if !firstView.CurrentSpecMatches || len(firstView.Disclosures) != 0 {
 			t.Fatalf("record before edit = %+v", firstView)
 		}
+		// uat-round-1 spec ac-4 (closing UAT-005): the record names the
+		// profile that produced it. designImportReadyRequest uses
+		// markdown-v1, which names no pinned reference profile, so
+		// ProfilePrimaryDigest must stay absent for it.
+		if firstView.Record.Format != specimport.FormatMarkdownV1 {
+			t.Fatalf("record.Format = %q, want %q", firstView.Record.Format, specimport.FormatMarkdownV1)
+		}
+		if firstView.Record.ProfilePrimaryDigest != "" {
+			t.Fatalf("record.ProfilePrimaryDigest = %q, want absent for markdown-v1", firstView.Record.ProfilePrimaryDigest)
+		}
+		if !strings.Contains(firstRun.stdout, `"format":"markdown-v1"`) {
+			t.Fatalf("record command's raw JSON output does not carry the format field: %s", firstRun.stdout)
+		}
+		if strings.Contains(firstRun.stdout, `"profile_primary_digest"`) {
+			t.Fatalf("record command's raw JSON output carries profile_primary_digest for a format with no bound profile: %s", firstRun.stdout)
+		}
 
 		designImportEditActiveSpec(t, root, branch, slug, func(data []byte) []byte {
 			edited := bytes.Replace(data, []byte("Users get value."), []byte("Users get updated value."), 1)
