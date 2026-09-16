@@ -61,6 +61,8 @@ const vl017MutableZoneAbsentNotice = "the mutable zone (.verdi/data/mutable/) is
 // the CLI's once-per-run collapsed Finding (CollapseVL017Disclosures)
 // build their Message from this one string, so the two presentations of
 // the same underlying fact can never drift into two hand-aligned copies.
+//
+// vocab:identity — non-vocabulary homograph: "wave close" names when a design wave (W2) concluded (identity)
 const vl017DisclosureCore = "open-question resolved-or-carried check is disclosed-unproven: " + vl017MutableZoneAbsentNotice + " — not a silent pass (constitution 2, three-valued honesty). This is a printed notice, not a verdict failure: a run with no other findings still exits 0 (adjudicated at W2 wave close)."
 
 func (vl017) ID() string { return "VL-017" }
@@ -80,7 +82,6 @@ func (vl017) Check(in *RunInput) []Finding {
 	if !mutableZonePresent(in.Root) {
 		var findings []Finding
 		for _, d := range applicable {
-			// vocab:identity — non-vocabulary homograph: "wave close" names when a design wave (W2) concluded (identity)
 			findings = append(findings, Finding{Rule: "VL-017", Path: d.RelPath, Severity: SeverityDisclosure, Message: vl017DisclosureCore})
 		}
 		return findings
