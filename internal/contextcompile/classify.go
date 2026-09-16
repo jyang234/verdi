@@ -342,6 +342,9 @@ func fixedExclusion(candidate Candidate, material CandidateMaterial, hasMaterial
 	if candidate.Source == SourceHeadTree && designProvenancePath(candidate.Path) {
 		return ExclusionDesignProvenanceSidecar, true, nil
 	}
+	if candidate.Source == SourceHeadTree && specImportSidecarPath(candidate.Path) {
+		return ExclusionSpecImportSidecar, true, nil
+	}
 	if candidate.Source == SourceHeadTree && !regularBlob(candidate) {
 		return ExclusionNonRegularFile, true, nil
 	}
@@ -435,6 +438,22 @@ func setEntryLocation(candidate Candidate, path, ref **string) {
 
 func regularBlob(candidate Candidate) bool {
 	return candidate.Type == "blob" && (candidate.Mode == "100644" || candidate.Mode == "100755")
+}
+
+// specImportSidecarBoundary is the fixed committed import-provenance zone
+// (store.ImportDirRelPath's own .verdi/imports/<slug>/<preview-digest>/
+// root). It is a boundary prefix, not a per-file identity: the whole
+// subtree is non-authoritative import provenance.
+const specImportSidecarBoundary = ".verdi/imports/"
+
+// specImportSidecarPath reports whether repoPath lies beneath the committed
+// import-provenance boundary (spec-import-contract.md: "The context
+// compiler's separate HEAD-tree repository-file channel must also exclude
+// paths beneath .verdi/imports/ before reading their bytes"). Ordinary
+// neighbours whose names merely begin with the same letters
+// (.verdi/imports.md, .verdi/importsomething/...) are not beneath it.
+func specImportSidecarPath(repoPath string) bool {
+	return strings.HasPrefix(repoPath, specImportSidecarBoundary)
 }
 
 func designProvenancePath(repoPath string) bool {

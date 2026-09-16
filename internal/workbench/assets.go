@@ -7,7 +7,7 @@ import (
 	"github.com/jyang234/verdi/internal/dex"
 )
 
-//go:embed assets/board.js assets/boardspec.js assets/boardspecasd.js assets/boarddiagram.js assets/readiness.js
+//go:embed assets/board.js assets/boardspec.js assets/boardspecasd.js assets/boarddiagram.js assets/readiness.js assets/specimport.js
 var embeddedAssets embed.FS
 
 // mermaidHandler serves dex's vendored mermaid.min.js (05 §Workbench:

@@ -95,6 +95,59 @@ type asdShell struct {
 	Attention          []asdConcern
 	All                []asdConcern
 	DownstreamViolated int
+	// PolicySetupGuide is non-empty exactly when the wall reports
+	// policy-forbidden: the shell then renders the inline, read-only
+	// policy guide the context/policy notice links to
+	// (boardshellrender.go's writePolicySetupGuide), in the variant the
+	// refusal's own detail justifies. PolicyDetail is that refusal detail,
+	// verbatim. Guidance only — nothing on this shell adopts a policy.
+	PolicySetupGuide policyGuideKind
+	PolicyDetail     string
+}
+
+// policyGuideKind selects the policy guide variant from the refusal's own
+// discriminant. draftmutation raises policy-forbidden from TWO distinct
+// conditions (internal/draftmutation/policy.go's ResolvePolicyGrant): the
+// canonical not-adopted condition (policyIdentityNotAdopted, the ONLY
+// failure "a caller may read as genuine non-adoption") and an adopted,
+// sealed effective policy that carries no design_assistance payload. The
+// code alone therefore never justifies "no policy is adopted".
+type policyGuideKind string
+
+const (
+	policyGuideNone policyGuideKind = ""
+	// policyGuideNotAdopted: the refusal detail carries draftmutation's
+	// exact not-adopted discriminant — initial manual setup applies.
+	policyGuideNotAdopted policyGuideKind = "not-adopted"
+	// policyGuideNoDesignAssistance: every other policy-forbidden refusal —
+	// policy authority resolved, but design assistance is not granted by
+	// it. The guide must never describe that policy as absent or
+	// unaccepted.
+	policyGuideNoDesignAssistance policyGuideKind = "no-design-assistance"
+)
+
+// policyNotAdoptedDetail is draftmutation's exact not-adopted detail
+// (policy.go's policyIdentityNotAdopted), which designapp forwards as
+// "policy-forbidden: project has not adopted policy authority" (its
+// Error() form). Matched by containment so both the bare and the
+// code-prefixed forms discriminate identically.
+const policyNotAdoptedDetail = "project has not adopted policy authority"
+
+// policyEditingClause scopes a policy-forbidden concern row's editing claim
+// to the board's mode. Ordinary human editing never requires policy, but
+// only an authoring board accepts browser writes at all: a review or
+// read-only board refuses them regardless of policy, so the row must not
+// say editing "proceeds" there (F3). authoringOutcome is what a write on
+// an authoring board records under this refusal.
+func policyEditingClause(mode, authoringOutcome string) string {
+	switch boardModeKind(mode) {
+	case modeAuthoring:
+		return "ordinary human editing does not require policy, so " + authoringOutcome
+	case modeReview:
+		return "ordinary human editing does not require policy, but this review board refuses browser writes regardless."
+	default:
+		return "ordinary human editing does not require policy, but this read-only board refuses browser writes regardless."
+	}
 }
 
 // asdShellInput is deriveASDShell's complete typed input — assembled from
@@ -135,6 +188,8 @@ type asdACFact struct {
 func deriveASDShell(in asdShellInput) asdShell {
 	var all []asdConcern
 	add := func(c asdConcern) { all = append(all, c) }
+	policySetupGuide := policyGuideNone
+	policyDetail := ""
 
 	// -- shape-proposal: Define the work --------------------------------
 	if in.ProblemPresent {
@@ -237,11 +292,31 @@ func deriveASDShell(in asdShellInput) asdShell {
 				Summary:   "Typed draft writes are refused here for humans and agents alike (" + in.Caps.RefusalPrecondition + ").",
 				Witnesses: []string{in.Caps.RefusalDetail}})
 		}
-	case in.CapsFailure != nil && in.CapsFailure.Code == "policy-forbidden":
+	case in.CapsFailure != nil && in.CapsFailure.Code == "policy-forbidden" && strings.Contains(in.CapsFailure.Detail, policyNotAdoptedDetail):
+		// The ONE refusal that means genuine non-adoption (draftmutation's
+		// own discriminant, never the code alone) — in the SERVING CHECKOUT:
+		// the source resolves .verdi/policy on this checkout's filesystem,
+		// so an older branch can lack policy the project already accepted.
+		// The row states the checkout fact and sends the reader to inspect
+		// the accepted snapshot before any initial setup; it infers no cause
+		// for the gap (branch age, deletion, or otherwise).
+		policySetupGuide, policyDetail = policyGuideNotAdopted, in.CapsFailure.Detail
 		add(asdConcern{ID: "context/policy", Area: asdAreaContext, State: asdStateUnproven, Blocking: false,
-			Summary:   "No policy authority is adopted; browser editing proceeds and records the explicit not-applicable policy posture.",
-			Guidance:  "Adopt a project constitution (.verdi/policy) to govern agent design assistance; human editing does not require one.",
-			Witnesses: []string{in.CapsFailure.Code + ": " + in.CapsFailure.Detail}})
+			Summary:   "This checkout carries no adopted policy authority; " + policyEditingClause(in.Mode, "browser editing proceeds and records the explicit not-applicable policy posture."),
+			Guidance:  "Inspect the accepted and proposed policy snapshots first (policy setup guide below): if policy is already accepted, inspect why this checkout lacks it; an older branch may need updating through the project's own process. Only when no policy is accepted does the manual initial setup the guide names apply; human editing does not require one.",
+			Witnesses: []string{in.CapsFailure.Code + ": " + in.CapsFailure.Detail},
+			Dest:      "#" + policySetupGuideID})
+	case in.CapsFailure != nil && in.CapsFailure.Code == "policy-forbidden":
+		// Policy authority resolved, but it grants no design assistance
+		// (ResolvePolicyGrant's missing-design_assistance refusal). The
+		// adopted policy is neither absent nor unaccepted: the refusal's own
+		// detail is carried verbatim, never rewritten as non-adoption.
+		policySetupGuide, policyDetail = policyGuideNoDesignAssistance, in.CapsFailure.Detail
+		add(asdConcern{ID: "context/policy", Area: asdAreaContext, State: asdStateUnproven, Blocking: false,
+			Summary:   "Policy authority resolved, but it does not grant design assistance (" + in.CapsFailure.Detail + "); " + policyEditingClause(in.Mode, "browser editing proceeds under that policy's sealed digest."),
+			Guidance:  "Design assistance needs a design_assistance payload in the project's effective policy, proposed and reviewed through the project's own process; human editing does not require one. The policy guide below names the read-only checks.",
+			Witnesses: []string{in.CapsFailure.Code + ": " + in.CapsFailure.Detail},
+			Dest:      "#" + policySetupGuideID})
 	default:
 		detail := "capabilities unavailable"
 		if in.CapsFailure != nil {
@@ -295,7 +370,10 @@ func deriveASDShell(in asdShellInput) asdShell {
 			Witnesses: []string{"Git-derived state " + in.StateFormal, "AC-6/DC-15: the profile-required review of the exact proposed head authorizes merge; no separate acceptance command exists"}})
 	}
 
-	return assembleASDShell(all)
+	shell := assembleASDShell(all)
+	shell.PolicySetupGuide = policySetupGuide
+	shell.PolicyDetail = policyDetail
+	return shell
 }
 
 // assembleASDShell computes area states, focus, ordering, and the
@@ -425,6 +503,13 @@ type asdView struct {
 	StickySlugs      map[string]string
 	StubSlugs        []string
 	EdgeFacts        map[string][]asdEdgeFact
+
+	// ImportRecordHref is the read-only source-record view's address when
+	// this board's working tree carries a committed import record for the
+	// spec (spec-import-contract: "The review UI must show an adjacent
+	// verified source-record link"); "" for a never-imported spec. A
+	// presence fact from the tree — the record view does the verifying.
+	ImportRecordHref string
 }
 
 // asdEdgeKey builds the chip-fact lookup key.
@@ -450,6 +535,7 @@ func (s *boardSpecServer) buildASDView(ctx context.Context, name string, proj *B
 		SlugPattern:   specNameRe.String(),
 	}
 	v.RelationDiverged = st.State == specstate.Proposed && st.Relation == specstate.RelationDiverged
+	v.ImportRecordHref = specImportRecordHrefFor(s.root, git.Branch, name)
 
 	worktreeHead := ""
 	if head, err := gitx.RevParse(ctx, s.root, "HEAD"); err == nil {

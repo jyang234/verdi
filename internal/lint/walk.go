@@ -42,6 +42,16 @@ import (
 // content grammar is exactly constitution/consumers.json and remains owned by
 // internal/constitutionimpact; VL-007 admits only the top-level directory and
 // does not create a second content decoder.
+//
+// "imports" is spec-import's non-authoritative provenance area
+// (spec-import-contract.md: ".verdi/imports is an admitted top-level
+// provenance area, ignored by artifact index classification, lint.
+// BuildSnapshot's document walk and Snapshot.ByRef"). Only the top-level
+// directory is admitted here; classifyArtifactPath/artifact.ClassifyPath
+// already excludes every path beneath it from the document walk (no
+// existing case matches an "imports/" prefix), so this entry adds no new
+// content decoder and never reclassifies a retained source sidecar as a
+// corpus artifact.
 var knownTopLevelEntries = map[string]bool{
 	"verdi.yaml":     true,
 	".gitignore":     true,
@@ -57,6 +67,7 @@ var knownTopLevelEntries = map[string]bool{
 	"constitution":   true,
 	"bin":            true,
 	"data":           true,
+	"imports":        true,
 }
 
 // classifyArtifactPath maps a .verdi/-relative slash path to the artifact
@@ -124,7 +135,17 @@ func decodeDocument(doc *Document) {
 		doc.DecodeErr = err
 		return
 	}
+	decodeDocumentBytes(doc, data)
+}
 
+// decodeDocumentBytes is decodeDocument's decode core, narrowly split out
+// (behavior unchanged for every existing on-disk caller, which still goes
+// through decodeDocument above) so a candidate that does not yet exist on
+// disk — internal/lint/candidate.go's CheckCandidate, decoding a
+// spec-import candidate's in-memory bytes the identical way an on-disk
+// document decodes — can share this one decode path rather than a second,
+// copied implementation (CLAUDE.md: shared code lives in one place).
+func decodeDocumentBytes(doc *Document, data []byte) {
 	fm, body, err := artifact.SplitFrontmatter(data)
 	if err != nil {
 		doc.DecodeErr = err

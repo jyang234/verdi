@@ -1306,6 +1306,25 @@
   // never a dead-silent immovable element. Spoken through the board's
   // existing notice channel, and transient: it names why, then leaves.
   var refusalTimer = null;
+  // The read-only room's refusal speaks the SAME reason the server stamped
+  // on the canvas (data-readonly-reason: sealed / not-accepted / unproven)
+  // — never "the accepted spec" on a wall whose acceptance is unproven or
+  // not yet given (MVP release amendment R2). Three-valued: the unproven
+  // wording claims neither acceptance nor its opposite; the not-accepted
+  // wording defers to the rail's note, which distinguishes a new spec
+  // (its own design branch) from a modified accepted revision (a
+  // successor). An unknown or missing reason fails closed to the unproven
+  // wording.
+  var READONLY_REFUSALS = {
+    sealed: "positions are frozen with the accepted spec — change means supersession (the amendment ladder)",
+    "not-accepted": "positions are frozen on this read-only view — this revision is not yet accepted; the rail's “Not yet accepted” note says where editing is supported: a new spec from its own design branch, a modified accepted revision only through a successor",
+    unproven: "positions are frozen — this spec's acceptance is unproven, so this view cannot claim acceptance or sealing; see the board notice for the missing witness and the rail's note for the remedy",
+  };
+  function readOnlyRefusal() {
+    var canvas = region.querySelector("#board-canvas");
+    var reason = canvas ? canvas.getAttribute("data-readonly-reason") : null;
+    return READONLY_REFUSALS[reason] || READONLY_REFUSALS.unproven;
+  }
   function refuseDrag() {
     var container = region.querySelector(".board-notices");
     if (!container) {
@@ -1324,7 +1343,7 @@
     note.textContent =
       state.mode === "review"
         ? "this board mirrors the merge request under review — nothing moves here; reply on the MR or wait for the branch"
-        : "positions are frozen with the accepted spec — change means supersession (the amendment ladder)";
+        : readOnlyRefusal();
     if (refusalTimer) clearTimeout(refusalTimer);
     refusalTimer = setTimeout(function () {
       note.remove();

@@ -15,23 +15,37 @@ that could not run says so out loud instead of quietly succeeding.
 
 ## Install
 
-```console
-$ go install github.com/jyang234/verdi/cmd/verdi@latest
+Build from the selected release's clean source checkout with Go 1.25 or newer
+and Git. Keep that checkout at its selected commit; record the source revision
+and binary identity alongside your adoption results:
+
+```sh
+# Run from the root of the selected Verdi checkout.
+git status --short
+test -z "$(git status --porcelain)"
+git diff --exit-code HEAD
+git rev-parse HEAD
+mkdir -p .build/bin
+CGO_ENABLED=0 go build -trimpath -o .build/bin/verdi ./cmd/verdi
+export PATH="$PWD/.build/bin:$PATH"
+go version -m .build/bin/verdi
+shasum -a 256 .build/bin/verdi
 ```
 
-Requires Go 1.25 or newer. Verdi is a single static binary with no cgo — the
-install puts `verdi` on your `GOBIN` path. (Until the repository is public,
-clone it and `go install ./cmd/verdi` from the checkout instead.)
+The binary at `.build/bin/verdi` is the installation used below. Keep this
+absolute directory on `PATH` in each new terminal. The build uses the checkout's
+`go.mod` and `go.sum`; a first build needs its dependencies available through
+your Go module cache or configured proxy. A source build is a local candidate;
+release acceptance still requires the release's recorded verification. For an
+existing ATC installation, retain its verified Verdi/ATC pair until the
+[paired upgrade requirements](docs/handoffs/public-execution-contract-rollout.md#upgrade)
+have been met.
 
 ## See it in two minutes
 
-Clone the repo — the canonical example store ships inside it — build, and
-open the workbench:
+From the same checkout and terminal, open the bundled example store:
 
 ```console
-$ git clone https://github.com/jyang234/verdi
-$ cd verdi
-$ go install ./cmd/verdi          # puts `verdi` on your PATH (GOBIN)
 $ cd examples/showcase
 $ verdi serve                     # http://127.0.0.1:4173 — board, obligation wall, dex
 ```
@@ -105,41 +119,126 @@ branch (drafts are never committed — see "The showcase" below).
 
 ## Start your own store
 
-There is no `verdi init`: a valid store is just `.verdi/verdi.yaml` plus git.
-From the root of any git repository —
+Start in a clean project checkout with at least one Git commit, a configured
+Git author, and no existing `.verdi/` directory. Use the binary installed above.
+`verdi init` is non-interactive and writes only `.verdi/verdi.yaml`; repository
+plumbing is a separate step. `verdi init --wizard` requires a terminal and
+customizes vocabulary and scaffold templates. It does not configure your forge,
+tracker, or evidence producers. Both forms refuse an existing `.verdi/` directory.
 
-```console
-$ mkdir -p .verdi
-$ cat > .verdi/verdi.yaml <<'YAML'
-schema: verdi.layout/v1
-forge: gitlab
-providers:
-  jira:
-    base_url: https://example.atlassian.net
-    rollup_field: customfield_00000
-services:
-  discovery: flowmap
+For a GitHub project, initialize and add the required generated-file attributes:
+
+<!-- adoption-setup -->
+```sh
+verdi init
+cat >> .verdi/verdi.yaml <<'YAML'
+forge: github
 YAML
-$ git add .verdi/verdi.yaml && git commit -m "adopt verdi"
+cat >> .gitattributes <<'ATTRS'
+.verdi/specs/*/*/board.json linguist-generated
+.verdi/specs/*/*/rollup.json linguist-generated
+.verdi/specs/*/*/deviation-report.md linguist-generated
+ATTRS
+cat >> .gitignore <<'IGNORE'
+.verdi/data/
+IGNORE
+verdi model check
+verdi lint
+git add .verdi/verdi.yaml .gitattributes .gitignore
+git commit -m "Adopt Verdi"
 ```
 
-Set `forge` and the `providers` block to your own forge and tracker. Then cut
-your first feature and open its board:
+For GitLab, use `forge: gitlab` and replace each `linguist-generated` token
+with `gitlab-generated`. Preserve existing manifest, attributes, and ignore
+rules when adapting an already configured project. Keep `.verdi/data/` out of
+Git: it contains disposable local state.
 
-```console
-$ verdi design start --kind feature --name my-first-feature
-design start: no toolchain configured (verdi.yaml toolchain: block, I-4); skipping baseline regeneration
-design start: created branch design/my-first-feature
-design start: scaffolded spec/my-first-feature (kind: feature, state: proposed (derived until merge))
-design start: board: http://127.0.0.1:4173/board/spec/my-first-feature (run `verdi serve` from this checkout)
-$ verdi serve      # edit the draft spec and its board at http://127.0.0.1:4173
+Verdi also needs the default branch's identity and history. In a normal clone,
+fetch the real `origin` and run `git remote set-head origin -a`, then check
+`git symbolic-ref refs/remotes/origin/HEAD`. Fetch enough history to establish
+ancestry. A lone fetched `origin/main` or `origin/master` is also supported;
+a local branch named `main` by itself is insufficient. Missing proof produces
+an **unproven** lifecycle and a read-only board. Refresh the genuine remote
+refs to resolve it; do not invent CI environment variables. If testing the actual forge
+is deferred, use the explicitly synthetic [local rehearsal](docs/local-adoption.md)
+in a disposable project instead.
+
+If you already have a feature or story specification, run `verdi serve` and choose
+**Import existing spec** on its home page. Import accepts selected native Verdi
+specs or supported Markdown, previews the mapped fields and missing requirements,
+and creates a new proposal on its ordinary board. Labeled Problem and Outcome
+sections prepopulate automatically; no AI is used. See the
+[existing-spec import guide](docs/import-existing-spec.md) for formats, corrections,
+source records and CLI examples. Human browser import needs no AI assistance
+policy; existing story tracker, review and evidence requirements still apply.
+
+To author a new feature, supply both statements; this works in a terminal and in
+scripts:
+
+<!-- adoption-feature -->
+```sh
+verdi design start --kind feature --name my-first-feature \
+  --problem "People cannot tell whether a submitted request was saved." \
+  --outcome "Every saved request returns a stable identifier that can be looked up."
+verdi spec state spec/my-first-feature
+verdi journey --json spec/my-first-feature
+verdi matrix spec/my-first-feature
 ```
 
-`design start` scaffolds a draft spec under `.verdi/specs/active/` on a new
-`design/…` branch. Author the spec, graduate stickies on the board, then
-`verdi accept spec/my-first-feature` freezes it (merging the spec's MR is
-acceptance). A story is the same flow with `--kind story` and a required
-tracker ref (`verdi design start jira:LOAN-42 --kind story --name …`).
+Then run `verdi serve` and open
+`http://127.0.0.1:4173/board/spec/my-first-feature`. Stop it with Ctrl-C when
+finished. `design start` creates `design/my-first-feature` and commits a draft
+under `.verdi/specs/active/my-first-feature/`. The scaffold still needs meaningful
+acceptance criteria and story stubs. Author those before review. Use the board's
+supported edit controls or edit the draft `spec.md` in your editor; inspect the
+saved changes and run `verdi lint`. The board identifies its displayed revision;
+reload after external changes and resolve unsaved edits before refreshing.
+
+Without the two flags, an attached terminal runs the problem/outcome interview.
+Without a terminal, the command refuses and names the required flags; supply
+both and retry the same name. `--defer-statements` deliberately leaves disclosed
+TODOs that must be authored before review. It cannot be combined with statement
+flags. An unrelated pre-existing `design/<name>` branch is still a collision.
+
+A feature needs no tracker. A story requires a configured scheme and a tracker
+reference, for example `verdi design start jira:LOAN-42 --kind story --name
+request-receipt --problem "…" --outcome "…"`. Configure your actual Jira
+`base_url` and `rollup_field` under `providers.jira` in `.verdi/verdi.yaml`;
+provide credentials through `VERDI_JIRA_TOKEN`, never committed YAML. Replace
+placeholder `implements` edges with the real feature ACs and author the story's
+obligations before review (`verdi obligation scaffold spec/request-receipt`
+prepares missing obligation files; scaffolds alone do not prove their claims).
+
+Evidence generation requires a pinned `toolchain.module` and full
+`toolchain.commit` in the manifest, Go on `PATH`, discoverable impacted services,
+and the pinned upstream CLI modules available to `go run`. The
+[configuration guide](docs/local-adoption.md#evidence-and-tracker-prerequisites)
+shows these fields. Without that setup, design creation discloses a skipped
+advisory baseline. That skip is not evidence of alignment or completion.
+
+The board's Semantic review packet requires adopted project policy authority;
+without it, the panel reports `policy-forbidden`. Ordinary draft editing remains
+available. Follow the [policy setup checks](docs/policy-setup-validation.md) to
+inspect the missing prerequisite and the current manual authoring requirements.
+Adopt your project's policy before relying on that review surface.
+Readiness labels such as “Ready” report the listed structural checks; they do
+not establish that placeholder text is meaningful or that human review occurred.
+
+Submit the authored specification and obligations through your repository's
+required review and checks. **Merging the reviewed specification into the
+configured default branch accepts that exact revision.** `verdi accept
+spec/my-first-feature` only prints a compatibility notice and makes no changes;
+its exit 0 is not acceptance. Inspect acceptance using `verdi spec state` after
+refreshing the default-branch refs. For an accepted story, `verdi build start
+jira:LOAN-42` begins implementation. Inspect `verdi align`, `verdi matrix`, and
+`verdi journey --json` as work proceeds. Their disclosures identify missing
+proof; a successful read command does not mean the gate passed. Real CI evidence
+and the applicable human approvals remain necessary for closure. Closure is not
+a blanket requirement for the narrower Local MVP milestone: defining and
+inspecting a meaningful change with truthful evidence. If a chosen step requires
+external proof, that step remains incomplete until the proof exists. The
+[local guide](docs/local-adoption.md) distinguishes Local MVP acceptance from
+validation of actual forge approvals, merge requirements, and CI integration.
 
 ## Core concepts
 
@@ -191,8 +290,13 @@ close`; the CLI is that path plus the read surfaces.
 
 | Verb | Purpose |
 |---|---|
-| `verdi design start <ref> --kind feature\|story --name <n>` | Cut a design branch; scaffold a draft spec and open its board |
-| `verdi accept <spec>` | Flip `draft → accepted-pending-build` and freeze; merging the spec MR is acceptance |
+| `verdi init [--wizard]` | Initialize a store; the optional terminal wizard customizes vocabulary/templates |
+| `verdi design start [<ref>] --kind feature\|story --name <n>` | Cut a design branch and scaffold a draft; supply both statement flags or use the terminal interview |
+| `verdi design import source --root <dir> --file <relative-path>` | Read one source into JSON; optional start/end line flags select a range |
+| `verdi design import preview --request <path\|->` | Preview an import without changing the project; report fields, coverage and missing requirements |
+| `verdi design import apply --request <path\|-> --preview <digest> --harness <id>` | Create the confirmed proposal as a policy-governed delegated agent; humans without that policy use the browser |
+| `verdi design import record --branch <branch> --spec <slug>` | Verify committed import provenance and disclose changes to the current spec |
+| `verdi accept <spec>` | Compatibility notice only; the reviewed spec revision is accepted when merged into the default branch |
 | `verdi build start <story>` | Cut the build branch after acceptance |
 | `verdi align [--freeze]` | Generate/refresh the alignment report (computed + judged); `--freeze` writes the closure edition |
 | `verdi gate` | The merge gate: spec accepted, no AC violated, every finding dispositioned (exit 0 / 1 / 2) |

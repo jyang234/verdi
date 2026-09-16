@@ -73,6 +73,12 @@ func renderHome(ctx context.Context, root string, home HomeDeps) ([]byte, error)
 	// surface is discoverable, not tribal knowledge.
 	body.WriteString(`<p class="home-disclosures"><a href="/disclosures">Disclosures</a> &mdash; every claim this checkout is currently not proving, in one view.</p>`)
 
+	// The mechanical spec importer (spec-import-contract: "The page is
+	// discoverable from home before new statements are requested"): one
+	// pointer ahead of the glance and directory sections, so an existing
+	// spec can be brought in before anyone is asked to write statements.
+	body.WriteString(`<p class="home-import"><a href="` + routeSpecImportPage + `" data-testid="home-import-link">Import existing spec</a> &mdash; bring an existing Markdown or native spec onto a new design branch as it is: previewed and mapped mechanically, nothing invented, nothing created until you confirm.</p>`)
+
 	// The whole-store directory (spec/directory-home ac-1): the ref-index
 	// seam consumed once, then the per-render forge consultation.
 	entries, indexErr := home.Index(ctx)

@@ -1,0 +1,33 @@
+# Task 4 browser import accepted handoff
+
+Main accepts the UI range `dc08b91bb54b39fc5e4ec9f5ee908f516c77c1ec..828cae3adcd7164402fc0ef81947be8ab485ef47`, with the bounded minor correction at `4e0e05e936f5765b1011574267f2caac0d292ab6`. This supersedes the external pre-review handoff. Task 4 CLI and Tasks 1–3 remain accepted. Task 5 integrated review, required full gates, candidate rehearsal and independent user acceptance remain; no release or Local MVP completion is claimed.
+
+## Provenance and review
+
+Genuine Claude Code FABLE 5.1 (`claude-fable-5-1`), session `0b74fb5a-2bf3-4d86-b03a-76ac5116d84c`, produced and corrected the UI with actual `Skill(fable-orchestration)` invocation. Commits through 828: `4d56b218`, `b9f393f1`, `4a7332ae`, `c39ce73d`, `004cdcdc`, `524e5aad`, `828cae3a`. Quota interruption after the second resume's committed tests did not supply a successful terminal result; main reconstructed the pre-review evidence from actual commits and output.
+
+Independent Opus 5 (`claude-opus-5`) session `d59e9844-5307-4013-a72a-c3e9f083d213` returned ACCEPT on the fixed 20-file range, with 3 Minor and zero Important/Blocking findings. Its terminal is successful and non-error. Main verified model metadata, clean fixed head, write-set containment and report. No native agent substituted for Claude Code.
+
+F1 accepted and corrected: a late target-exists refusal must identify the originating request even if the form slug changed. FABLE captured the wrong A/B recovery link, bound the link to the refused request, and tested the corrected behavior. F2 strengthens four bare-not assertions to concrete proof/acceptance disclosures. Stale fixture comments were corrected. F3 (distinct accessible Remove names) is deferred optional hardening, not a contract or acceptance blocker. Minor corrections do not alter the review verdict or authority; whole-wave review covers their integration.
+
+Correction commits are `4ede8da7` (regression/assertions/comments) and `4e0e05e9` (request-bound recovery). Focused RED shows the wrong B link; focused GREEN passes, then all 14 import cases pass in 28.2s. The 12 Go import tests pass in 8.682s. Main inspected the complete five-file correction, verified its model/Skill and non-error terminal, checked JavaScript syntax and diff formatting, and observed no recording artifacts. The first preliminary RED scan was overtaken by a later run clearing output, so that invocation's post-run artifacts remain unproven; three subsequent scans and main's final scan are empty. Recording configuration stayed off and no screenshot API was invoked. Main accepts the bounded correction; no separate minor-finding review is required.
+
+## Accepted behavior and limits
+
+Home offers import before requesting new statements. Browser imports native, labeled Markdown, manual mappings and the pinned F13 profile through the same core as CLI, with no AI/parser fallback. Both POSTs use the sole strict decoder and a 12 MiB envelope; apply carries the confirmed digest in `X-Verdi-Import-Preview`. Existing browser actor minting, project policy, required fields, parent/tracker and evidence rules remain unchanged. Cross-origin protection has no trusted-origin or bypass additions; serve's existing writer lock is leased rather than nested.
+
+Edits invalidate preview and confirmation. Visible retry preserves the same request/digest while unchanged; late success identifies its original publication. Source text/errors are escaped. The board link says source provenance is not verified there; the record view verifies historical bindings and distinguishes a later committed spec edit from corrupt/missing proof. Import is proposed/unclassified, not acceptance, semantic review, authorship attestation or CI evidence. Retained bytes are not semantic completeness.
+
+The final browser fixture has a synthetic Jira scheme and parent feature plus a local bare remote; it contacts no tracker/forge. It is not a no-tracker configuration or proof of actual integration. The earlier 8-case run was tracker-free; the real F13 rehearsal must still exercise a feature with no external tracker. Harness fixture code preceded its own unit tests; no uniform-TDD claim is made. Native fixture copying is not independently drift-bound to its source fixture.
+
+## Local verification
+
+Main at 828: focused Go: 23 top-level tests across 4 packages pass, zero failures/skips; workbench/harness vet and formatting/diff checks pass. Opus: 12 workbench import tests, 2 actor-boundary tests and 5 harness tests pass, all exit 0. Producer prior expanded browser regression had 10 passes / 3 actual failures then 13 passes; includes native/manual/story coverage, original-record/edit/reload and same-request recovery.
+
+Main's full existing browser suite at 828: 292/292 pass in 12.0 minutes, with fixture/lint-store/spec-align/lint-showcase/showcase-coverage targets exit 0. Recording-artifact scan is empty. Full `make verify` is still FAILED: importer lint findings and immutable consolidation-witness successor binding require Task 5 corrections. Actual whole-repo race command failed only the stale witness package; no data-race report, and the cache-blind second test command was not reached. Passing browser tests do not override these failures.
+
+Protected `.build/bin/verdi` remains SHA256 `aef8f1a0b57f34f0851e20d51197c1be345852b2a37d438ef2023e6fd053a3c5`. No hosted tests, source instruction execution, user ATC/independent-checkout writes, installation replacement, screenshots/trace/video, push/PR/merge or worktree removal. Main prepared a separate real-project clone at the pinned F13 revision; preparation is not a completed journey.
+
+Evidence is preserved under workspace `.local/verdi-system/development/spec-import-f13-20260914/execution/`: task4-ui-review, task4-ui-minor-fix, task4-ui-review-adjudication.md, task4-owner-ui-final-pre-review.json and task5-later-gates-1.{json,txt}/postcheck. Task 5 continues with final onboarding, cross-task Opus review, fixed gates, identified candidate and assisted rehearsal. Second same-release journey remains user-run and independent; hosted integration stays deferred.
+
+Onboarding promotion preserves every substantive block of the prepared guide, removes only its draft-status marker and adds a four-section navigation line. README and the local guide add the supported import entry without removing existing setup or acceptance requirements. Coverage: all guide content preserved, zero substantive omissions; exact hashes and transformations are in `task5-documentation-promotion.json`. Ten local documentation links resolve. The exact CLI example passed on the accepted CLI binary; verification on the final candidate remains required.

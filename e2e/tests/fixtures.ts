@@ -66,6 +66,7 @@
 // | SIZE_SMELL_SPEC, SIZE_FIT_SPEC, SIZE_SMELL_ESTIMATE,               | EDGE     | size-smell (rule-explicit) |
 // |   SIZE_SMELL_REFERENCE                                             |          | |
 // | STATUSLESS_DRAFT_SPEC, STATUSLESS_SEALED_SPEC                      | EDGE     | statusless-lifecycle rigs (merge-signaled acceptance migration) |
+// | UNPROVEN_BOARD_SPEC                                                | EDGE     | isolated no-default-branch store (CONTROL_URL/unproven-board-fixture): lifecycle unproven, never the sealed record (MVP R2 / AC-7) |
 // | SWEEP_FRESH_SPEC, SWEEP_STALE_SPEC, SWEEP_PARTIAL_SPEC,            | EDGE     | decline-sweep-* (rule-explicit) |
 // |   SWEEP_MISSING_DECISION                                           |          | |
 // | PIN_ADR, PIN_DIAGRAM, PIN_TRASH_ADR                                | SHOWCASE | real corpus artifacts; pin/peek/drag/trash happy-path journeys (the trash's "pure pin" tier, not a stress case) |
@@ -134,6 +135,7 @@
 // (adr/0001-outbox-events, real on main), and provision_board.go's design
 // spec exempts the same one; recorded as a V1-P8 ledger deviation.
 
+import path from "node:path";
 import { resolvePorts } from "../ports";
 
 // ---------------------------------------------------------------------------
@@ -624,6 +626,21 @@ export const EDGE = {
   STATUSLESS_SEALED_SPEC: "decline-statusless-sealed",
 
   // -------------------------------------------------------------------------
+  // Workbench (unproven lifecycle — MVP release amendment R2, merge-signaled
+  // acceptance AC-7): the isolated no-default-branch board
+  // -------------------------------------------------------------------------
+
+  // The CLI's statusless scaffold on its design branch in a repository
+  // with NO remote (cmd/e2eharness/unprovenboard.go, reached through
+  // CONTROL_URL/unproven-board-fixture): no default branch resolves, so the
+  // effective lifecycle is Unproven — the baseline report's B-06 shape the
+  // shared store (whose origin/HEAD is deliberately provable) can never
+  // show. Its board must stay read-only, disclose the missing witness and
+  // remedy, and never read as the sealed/accepted record. BINDING: mirrors
+  // unprovenBoardSpecName verbatim — change them together.
+  UNPROVEN_BOARD_SPEC: "unproven-lifecycle-feature",
+
+  // -------------------------------------------------------------------------
   // Workbench (derivation drawer, spec/derivation-drawer ac-3)
   // -------------------------------------------------------------------------
 
@@ -846,4 +863,80 @@ export function worktreeSpecPath(name: string, spec: string): string {
 // where the inspection server reads the branch's committed proposal.
 export function worktreeDiagramPath(name: string, diagram: string): string {
   return `.verdi/data/worktrees/${name}/.verdi/diagrams/${diagram}.mermaid`;
+}
+
+// ---------------------------------------------------------------------------
+// Spec import (spec-import-contract Task 4 UI; 72-spec-import.spec.ts) —
+// top-level, never zoned: route helpers, the control server's isolated
+// import fixture, and the pinned INPUT files the browser uploads. The
+// inputs are the accepted Task 1 fixture bytes under
+// internal/specimport/testdata (the F13 primary is pinned to the exact
+// SHA-256 the reference profile binds, so it is reused verbatim rather than
+// copied) plus the workbench's own escaping fixture.
+// ---------------------------------------------------------------------------
+
+// The control server endpoint that starts (once) and names the isolated
+// clean-main import serve (cmd/e2eharness/specimportfixture.go): a real
+// `verdi serve` over a manifest-only store with a provable — synthetic,
+// never CI or approval — default branch and no policy/model/forge/tracker
+// configuration. Its /info and /tamper siblings serve the honesty cases.
+export const SPEC_IMPORT_FIXTURE_URL = `${CONTROL_URL}/spec-import-fixture`;
+
+const specImportInputRoot = path.resolve(__dirname, "..", "..", "internal", "specimport", "testdata");
+
+export const SPEC_IMPORT_FILES = {
+  // Positive labeled Markdown: multiline Problem, Outcome, three flat
+  // criteria (markdown-v1's happy path).
+  LABELED: path.join(specImportInputRoot, "markdown", "positive-basic.md"),
+  // Two Problem labels: the ambiguous-field correction case.
+  AMBIGUOUS: path.join(specImportInputRoot, "markdown", "duplicate-label.md"),
+  // Markup inside the source: the render-as-text case.
+  XSS: path.resolve(__dirname, "..", "..", "internal", "workbench", "testdata", "specimport", "xss.md"),
+  // The exact eligible native primary (internal/specimport's own
+  // newSpecNativeFixture bytes): imports byte-identically as
+  // spec/native-widget, refuses any other target identity.
+  NATIVE: path.resolve(__dirname, "..", "..", "internal", "workbench", "testdata", "specimport", "native-widget.md"),
+  // The pinned F13 inputs: the bound primary and its four whole retained
+  // supports.
+  F13_PRIMARY: path.join(specImportInputRoot, "f13", "primary-f13.md"),
+  F13_SUPPORTS: [
+    path.join(specImportInputRoot, "f13", "transition-core.md"),
+    path.join(specImportInputRoot, "f13", "review-journal.md"),
+    path.join(specImportInputRoot, "f13", "review-validation.md"),
+    path.join(specImportInputRoot, "f13", "stage-plan-c346c005.md"),
+  ],
+} as const;
+
+// The F13 primary's exact selected byte count the coverage record must
+// account for once (spec-import-contract: "2409 primary bytes accounted
+// once").
+export const SPEC_IMPORT_F13_PRIMARY_BYTES = 2409;
+
+// The isolated import store's synthetic, test-only story fixtures
+// (cmd/e2eharness/specimportfixture.go; BINDING: mirrored verbatim there):
+// the one configured tracker scheme VL-005 accepts and the landed parent
+// feature a story import implements. No real tracker is ever contacted.
+export const SPEC_IMPORT_TRACKER_SCHEME = "jira";
+export const SPEC_IMPORT_PARENT_FEATURE = "widget-parent";
+
+// The import page and the read-only record view's addresses.
+export function importPagePath(): string {
+  return "/design/import";
+}
+export function importRecordPath(branch: string, spec: string): string {
+  return `/design/import/record?branch=${encodeURIComponent(branch)}&spec=${encodeURIComponent(spec)}`;
+}
+
+// The mechanical source-id rule the import page applies to an uploaded
+// file's NAME (never its path): lowercase, every non-alphanumeric run
+// collapsed to one hyphen, leading/trailing hyphens trimmed, at most 64
+// characters — the contract's [a-z0-9][a-z0-9-]{0,63} grammar. Mirrored
+// here so a spec can address a source row by the id the page derives.
+export function importSourceId(fileName: string): string {
+  const id = fileName
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 64);
+  return id || "source";
 }

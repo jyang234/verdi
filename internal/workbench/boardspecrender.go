@@ -84,11 +84,99 @@ func legalPairTable() map[string][]string {
 
 // modeStampLabels is the mode stamp's copy — the room's state in words,
 // not just an enum value: authoring is the live wall, review is a
-// mirror of someone else's MR, read-only is the sealed record.
+// mirror of someone else's MR. The read-only room has no single word:
+// modeStampLabel below speaks it from the spec's EFFECTIVE lifecycle
+// status, because read-only is a mode (a CSS fact the loader fails closed
+// to), not a lifecycle verdict — only a revision proven on the default
+// branch is the sealed record (MVP release amendment R2; merge-signaled
+// acceptance AC-7: missing default-branch or ancestry evidence is an
+// explicit unproven result, never an assumed acceptance).
 var modeStampLabels = map[boardModeKind]string{
 	modeAuthoring: "authoring · live wall",
 	modeReview:    "review · mirror of the MR",
-	modeReadOnly:  "read-only · sealed record",
+}
+
+// readOnlyReason classifies WHY a read-only wall is read-only, from the
+// projection's effective lifecycle status — specstate's verdict, which the
+// I/O loader carries in BoardProjection.Status — never inferred from Mode.
+// Presentation-only: no new lifecycle state, no new algorithm, just the
+// existing verdict spoken truthfully.
+type readOnlyReason string
+
+const (
+	// readOnlySealed: the revision is proven on the default branch —
+	// accepted-pending-build, superseded, or closed — the sealed record.
+	readOnlySealed readOnlyReason = "sealed"
+	// readOnlyNotAccepted: the effective state is still Proposed (new
+	// content served off its design branch, or bytes diverged from the
+	// accepted revision) — read-only for a branch or divergence reason,
+	// not because anything was accepted.
+	readOnlyNotAccepted readOnlyReason = "not-accepted"
+	// readOnlyUnproven: the lifecycle could not be proven (no resolvable
+	// default branch or ancestry), or no effective status was declared at
+	// all. The fail-closed default: an undeclared reason never reads as
+	// the sealed record.
+	readOnlyUnproven readOnlyReason = "unproven"
+)
+
+// readOnlyReasonOf maps the effective status to its read-only reason.
+// Status is specstate.Result.ArtifactStatus's projection — a bare id,
+// never display prose — so the comparison is against the ids.
+func readOnlyReasonOf(p *BoardProjection) readOnlyReason {
+	switch p.Status {
+	case "accepted-pending-build", "superseded", "closed":
+		return readOnlySealed
+	case "draft":
+		return readOnlyNotAccepted
+	default:
+		return readOnlyUnproven
+	}
+}
+
+// modeStampLabel is the stamp's copy for p's room: the fixed authoring
+// and review words, or the read-only room's reason-specific stamp.
+func modeStampLabel(p *BoardProjection) string {
+	if p.Mode != modeReadOnly {
+		return modeStampLabels[p.Mode]
+	}
+	switch readOnlyReasonOf(p) {
+	case readOnlySealed:
+		return "read-only · sealed record"
+	case readOnlyNotAccepted:
+		return "read-only · not yet accepted"
+	default:
+		return "read-only · lifecycle unproven"
+	}
+}
+
+// readOnlyReasonAttr stamps the canvas with the read-only reason — the
+// client's drag refusal and the e2e suite read it — and is empty outside
+// the read-only room. The values are fixed ids; nothing to escape.
+func readOnlyReasonAttr(p *BoardProjection) string {
+	if p.Mode != modeReadOnly {
+		return ""
+	}
+	return ` data-readonly-reason="` + string(readOnlyReasonOf(p)) + `"`
+}
+
+// writeReadOnlyPanel renders the read-only rail's explanation for p's
+// reason. Only the sealed record says it is accepted; the unproven wall
+// says what is missing and the local remedy (the board notice above it
+// carries the witness) — and, three-valued, claims neither acceptance nor
+// its opposite, since missing proof proves no negative; the
+// not-yet-accepted wall says where editing is supported.
+func writeReadOnlyPanel(b *strings.Builder, p *BoardProjection) {
+	esc := stdhtml.EscapeString
+	switch readOnlyReasonOf(p) {
+	case readOnlySealed:
+		b.WriteString(`<section class="scratch-panel sealed-panel"><h2>Sealed record</h2><p class="ritual-note">This spec is accepted; the wall is its photograph. Change means supersession (the amendment ladder).</p></section>`)
+	case readOnlyNotAccepted:
+		b.WriteString(`<section class="scratch-panel readonly-panel readonly-panel--not-accepted" data-testid="readonly-panel" data-readonly-reason="not-accepted"><h2>Not yet accepted</h2>` +
+			`<p class="ritual-note">This revision has not been accepted onto the default branch, so this wall is not a sealed record. It is read-only here: a new spec is edited only from its own design branch checkout (` + esc("design/"+p.Spec) + `), and a modified accepted revision is never edited in place &#8212; start a successor spec instead.</p></section>`)
+	default:
+		b.WriteString(`<section class="scratch-panel readonly-panel readonly-panel--unproven" data-testid="readonly-panel" data-readonly-reason="unproven"><h2>Lifecycle unproven</h2>` +
+			`<p class="ritual-note">Acceptance cannot be proven for this spec: the default branch, or the Git ancestry needed to check it, could not be resolved. The wall is read-only as a precaution &#8212; this view cannot claim acceptance or sealing. The notice above names the missing witness. Remedy: fetch the configured default branch from its remote and point origin/HEAD at it (<code>git remote set-head origin &lt;branch&gt;</code>), then reload.</p></section>`)
+	}
 }
 
 var boardSpecPageTemplate = template.Must(template.New("boardspec").Parse(`<!doctype html>
@@ -185,7 +273,7 @@ func renderBoardSpecPage(p *BoardProjection, git *boardGitState, asd *asdView) (
 		Name:             p.Spec,
 		Title:            p.Title,
 		Mode:             string(p.Mode),
-		ModeLabel:        modeStampLabels[p.Mode],
+		ModeLabel:        modeStampLabel(p),
 		StatusBadge:      badge,
 		StatusBadgeLabel: badgeLabel,
 		Region:           template.HTML(region),
@@ -312,7 +400,7 @@ func renderBoardRegion(p *BoardProjection, git *boardGitState, asd *asdView) str
 	// The canvas is sized to its content plus a working margin — a pure
 	// function of the projection's positions (deterministic), so a sparse
 	// board is a shallow board, not a fixed void.
-	b.WriteString(`<div id="board-canvas" class="board-canvas boardv2-canvas" data-testid="board" data-board-mode="` + esc(string(p.Mode)) + `" data-spec="` + esc(p.Spec) + `"` +
+	b.WriteString(`<div id="board-canvas" class="board-canvas boardv2-canvas" data-testid="board" data-board-mode="` + esc(string(p.Mode)) + `" data-spec="` + esc(p.Spec) + `"` + readOnlyReasonAttr(p) +
 		` data-next-id-ac="` + esc(asd.NextIDs["ac"]) + `" data-next-id-co="` + esc(asd.NextIDs["co"]) + `" data-next-id-dc="` + esc(asd.NextIDs["dc"]) + `" data-next-id-oq="` + esc(asd.NextIDs["oq"]) + `"` +
 		` style="min-height:` + px(canvasMinHeight(p)) + `">`)
 
@@ -653,11 +741,11 @@ func renderBoardRegion(p *BoardProjection, git *boardGitState, asd *asdView) str
 		writeInboxTray(&b, p.Tray)
 		writeYarnKey(&b, p)
 	default:
-		b.WriteString(`<section class="scratch-panel sealed-panel"><h2>Sealed record</h2><p class="ritual-note">This spec is accepted; the wall is its photograph. Change means supersession (the amendment ladder).</p></section>`)
+		writeReadOnlyPanel(&b, p)
 		writeCreatePanel(&b, p)
 		writeYarnKey(&b, p)
 	}
-	writeASDPanels(&b, p.Spec)
+	writeASDPanels(&b, p.Spec, asd)
 	b.WriteString(`</aside>`)
 	b.WriteString(`</div>`) // board-layout
 	b.WriteString(`</div>`) // asd-main

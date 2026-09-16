@@ -69,8 +69,12 @@ const (
 	IncludedInstructionProjection IncludedKind = "instruction-projection"
 )
 
-// ExclusionReason is one of the ten closed exclusion reasons (authority
-// design §5.2). Unknown values fail closed.
+// ExclusionReason is one of the eleven closed exclusion reasons: the ten
+// of authority design §5.2, whose closed v1 enum SI-200 supplements with
+// the single member spec-import-sidecar (spec-import-contract.md: "This
+// SI-200 clause supplements the context-compiler authority design, §5.2:
+// its closed v1 enum gains this one member; all existing members and
+// fail-closed decoding remain"). Unknown values fail closed.
 type ExclusionReason string
 
 const (
@@ -84,6 +88,7 @@ const (
 	ExclusionGeneratedProjectionOutput ExclusionReason = "generated-projection-output"
 	ExclusionNonTextData               ExclusionReason = "non-text-data"
 	ExclusionNonRegularFile            ExclusionReason = "non-regular-file"
+	ExclusionSpecImportSidecar         ExclusionReason = "spec-import-sidecar"
 )
 
 // Applicability is the closed three-valued phase/scope applicability result
