@@ -142,6 +142,25 @@ func CheckoutNewBranch(ctx context.Context, dir, name string) error {
 	return nil
 }
 
+// CheckoutNewBranchFrom creates a new branch named name at base (a
+// git-resolvable ref or commit, resolved independently of dir's current
+// HEAD) and checks it out — `git checkout -b <name> <base>`. It is
+// CheckoutNewBranch's explicit-base twin: spec/uat-round-1 ac-6 needs a
+// design branch cut from the resolved default branch, never from whatever
+// the current checkout happens to be sitting on (the defect a checkout
+// left on a stale side branch exposed — design start silently based the
+// new branch on that stale HEAD). It fails if name already exists, the
+// same no-clobber posture CheckoutNewBranch itself already establishes
+// (D3), or if git refuses the checkout outright (e.g. an unresolvable base,
+// or uncommitted local changes base's tree would overwrite) — that refusal
+// is git's own, unchanged by this function.
+func CheckoutNewBranchFrom(ctx context.Context, dir, name, base string) error {
+	if _, err := run(ctx, dir, "checkout", "-b", name, base); err != nil {
+		return fmt.Errorf("gitx: CheckoutNewBranchFrom(%q, %q): %w", name, base, err)
+	}
+	return nil
+}
+
 // CheckoutExisting switches dir to an already-existing ref (a branch short
 // name or a commit) — `git checkout <ref>` — WITHOUT gitx.Checkout's board
 // branch-switch guard (which refuses any uncommitted working-tree change). It

@@ -490,6 +490,63 @@ func TestDeleteMergedBranch_Negative_CheckedOutElsewhere(t *testing.T) {
 	}
 }
 
+// TestCheckoutNewBranchFrom_Happy proves the ac-6 primitive: the new
+// branch's tip is BASE, never dir's current HEAD, and the checkout
+// switches onto it — CheckoutNewBranch's own HEAD-only contract is the
+// reason design start's bug (spec/uat-round-1 ac-6) existed at all.
+func TestCheckoutNewBranchFrom_Happy(t *testing.T) {
+	repo := buildRepo(t)
+	ctx := context.Background()
+
+	if repo.Heads[0] == repo.Head {
+		t.Fatal("test setup: want repo.Heads[0] to differ from repo.Head (buildRepo's current HEAD)")
+	}
+	if err := CheckoutNewBranchFrom(ctx, repo.Dir, "design/x", repo.Heads[0]); err != nil {
+		t.Fatalf("CheckoutNewBranchFrom: %v", err)
+	}
+
+	gotBranch, err := CurrentBranch(ctx, repo.Dir)
+	if err != nil {
+		t.Fatalf("CurrentBranch: %v", err)
+	}
+	if gotBranch != "design/x" {
+		t.Fatalf("CurrentBranch = %q, want design/x (CheckoutNewBranchFrom must switch the checkout)", gotBranch)
+	}
+	got, err := RevParse(ctx, repo.Dir, "design/x")
+	if err != nil {
+		t.Fatalf("RevParse(design/x): %v", err)
+	}
+	if got != repo.Heads[0] {
+		t.Fatalf("design/x = %s, want it cut at base %s (repo.Heads[0]) — not at repo.Head %s, the current HEAD it did NOT run from", got, repo.Heads[0], repo.Head)
+	}
+}
+
+// TestCheckoutNewBranchFrom_Negative covers an unresolvable base and the
+// existing-branch no-clobber posture CheckoutNewBranch itself already
+// establishes (D3: never silently reuse an existing target branch).
+func TestCheckoutNewBranchFrom_Negative(t *testing.T) {
+	repo := buildRepo(t)
+	ctx := context.Background()
+
+	t.Run("base does not resolve", func(t *testing.T) {
+		if err := CheckoutNewBranchFrom(ctx, repo.Dir, "design/y", "no-such-ref"); err == nil {
+			t.Fatal("CheckoutNewBranchFrom(unresolvable base): want error, got nil")
+		}
+	})
+
+	t.Run("branch already exists", func(t *testing.T) {
+		if err := CheckoutNewBranch(ctx, repo.Dir, "design/z"); err != nil {
+			t.Fatalf("CheckoutNewBranch(design/z) setup: %v", err)
+		}
+		if err := CheckoutExisting(ctx, repo.Dir, "main"); err != nil {
+			t.Fatalf("CheckoutExisting(main) setup: %v", err)
+		}
+		if err := CheckoutNewBranchFrom(ctx, repo.Dir, "design/z", "main"); err == nil {
+			t.Fatal("CheckoutNewBranchFrom(existing branch name): want error, got nil")
+		}
+	})
+}
+
 func TestMergeBase_Happy(t *testing.T) {
 	repo := buildRepo(t)
 	ctx := context.Background()
