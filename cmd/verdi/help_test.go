@@ -193,3 +193,56 @@ func TestHelp_DoesNotInterceptRealSubcommands(t *testing.T) {
 		t.Fatalf("stderr = %q, want design board's own usage message", stderr)
 	}
 }
+
+// topLevelUsageHasRow reports whether verb has its own row in
+// topLevelUsage — a line that, after its leading indent, starts with
+// verb followed by a space (the column-formatted "  <verb><padding>
+// <description>" shape every real row uses) or is exactly verb alone.
+// A plain strings.Contains(topLevelUsage, verb) would false-positive on
+// e.g. "spec" (a substring of design's own "specifications" in its
+// description) and so could not actually catch a deleted row — this
+// checks the LEFT COLUMN specifically.
+func topLevelUsageHasRow(verb string) bool {
+	for _, line := range strings.Split(topLevelUsage, "\n") {
+		trimmed := strings.TrimLeft(line, " ")
+		if trimmed == verb {
+			return true
+		}
+		if rest, ok := strings.CutPrefix(trimmed, verb+" "); ok && rest != "" {
+			return true
+		}
+	}
+	return false
+}
+
+// TestVerbUsageRegistry_CoversEveryVerb is a drift guard (Opus L1 review,
+// ACCEPT-WITH-MINOR finding 1): every verbPhase key, plus "lint"
+// (dispatched before the phase map is ever consulted, dispatch.go), must
+// have its own verbUsage entry AND its own row in topLevelUsage. Without
+// this test, a future verb added to verbPhase with no matching help.go
+// update would silently print verbUsageOrFallback's content-free "usage:
+// verdi <verb>" line (no real form information) and/or be undiscoverable
+// from "verdi help" — both content-free failures a human skimming test
+// output would not necessarily notice, exactly what this guard is for.
+func TestVerbUsageRegistry_CoversEveryVerb(t *testing.T) {
+	verbs := make([]string, 0, len(verbPhase)+1)
+	for v := range verbPhase {
+		verbs = append(verbs, v)
+	}
+	verbs = append(verbs, "lint")
+
+	for _, verb := range verbs {
+		t.Run(verb, func(t *testing.T) {
+			usage, ok := verbUsage[verb]
+			if !ok {
+				t.Fatalf("verbUsage has no entry for %q — dispatch.go recognizes this verb (verbPhase or the lint special case) but help.go's registry does not, so \"verdi %s --help\" would silently fall back to the content-free \"usage: verdi %s\" line", verb, verb, verb)
+			}
+			if strings.TrimSpace(usage) == "" {
+				t.Fatalf("verbUsage[%q] is present but empty", verb)
+			}
+			if !topLevelUsageHasRow(verb) {
+				t.Fatalf("topLevelUsage has no row for %q — \"verdi help\" would not list it", verb)
+			}
+		})
+	}
+}
