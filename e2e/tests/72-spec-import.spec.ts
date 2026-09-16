@@ -1092,7 +1092,12 @@ test.describe("spec import: usability — the owner's F13 correction path", () =
     await expect(page.locator("#import-mapping-count")).toHaveText("9");
     await expect(ready).toHaveAttribute("data-stale", "true");
     expect(await preview(page)).toBe(200);
-    await expect(findings(page, "missing-statement")).toHaveCount(1);
+    // The written value resolves the problem; the source's own gap stays
+    // disclosed, no longer blocking (the same demotion the ambiguous case
+    // pins), and only the outcome still blocks.
+    await expect(page.locator('#import-findings li[data-code="missing-statement"][data-blocking="true"]')).toHaveCount(1);
+    await expect(page.locator('#import-findings li[data-code="missing-statement"][data-target="problem"][data-blocking="false"]')).toHaveCount(1);
+    await expect(ready).toContainText("1 statement is missing");
     await expect(page.getByTestId("import-field-problem")).toHaveAttribute("data-origin", "user-added");
     await expect(page.getByTestId("import-field-source-problem")).toContainText("Your wording");
     await expect(page.getByTestId("import-field-source-problem")).not.toContainText("Copied");
