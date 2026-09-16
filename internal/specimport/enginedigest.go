@@ -43,7 +43,7 @@ func (binaryEngineIdentity) Digest(ctx context.Context) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("%w: opening running executable: %v", ErrIOFailure, err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }() // read-only handle; close error is unactionable
 
 	h := sha256.New()
 	if _, err := io.Copy(h, f); err != nil {

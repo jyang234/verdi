@@ -216,13 +216,13 @@ func TestCompose_ExternalStory_Happy(t *testing.T) {
 		t.Fatalf("the story template's placeholder criterion survived:\n%s", candidate)
 	}
 	var sawImplements bool
-	for _, l := range spec.Base.Links {
+	for _, l := range spec.Links {
 		if l.Type == artifact.LinkImplements && l.Ref == "spec/"+parentSlug+"#ac-1" {
 			sawImplements = true
 		}
 	}
 	if !sawImplements {
-		t.Fatalf("the story's implements edge is missing from the candidate: %+v", spec.Base.Links)
+		t.Fatalf("the story's implements edge is missing from the candidate: %+v", spec.Links)
 	}
 }
 
