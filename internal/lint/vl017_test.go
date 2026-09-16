@@ -1,6 +1,7 @@
 package lint
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -312,5 +313,115 @@ func TestCollapseVL017Disclosures_SingleSpec_StillCollapsesToOne(t *testing.T) {
 	}
 	if !strings.Contains(got[0].Message, "(1)") {
 		t.Fatalf("combined.Message = %q, want the affected-spec count (1)", got[0].Message)
+	}
+}
+
+// vl017RestatedCorpusDisclosure is exactly what candidate.go's
+// unrelatedCorpusDisclosures builds for a VL-017 finding about a document
+// other than the candidate: the ORIGINAL rule id and path, severity forced
+// to SeverityDisclosure, and the original fact wrapped in the "unrelated
+// existing corpus finding" preamble. The wrapped fact here is the real
+// mutable-zone-PRESENT violation — an unresolved, uncarried open-question
+// annotation — i.e. the most damaging thing a rule-plus-severity-only
+// collapse could swallow.
+func vl017RestatedCorpusDisclosure() Finding {
+	violation := Finding{
+		Rule:    "VL-017",
+		Path:    ".verdi/specs/active/other-story/spec.md",
+		Message: `open-question annotation a-01J8Z0K9DDDDDDDDDDDDDDDDDD ("should the retry window be configurable per tenant?") is neither status:resolved nor carried as a declared open_questions object on spec/other-story`,
+	}
+	return Finding{
+		Rule:     violation.Rule,
+		Path:     violation.Path,
+		Message:  fmt.Sprintf("unrelated existing corpus finding: %s %s: %s", violation.Rule, violation.Path, violation.Message),
+		Severity: SeverityDisclosure,
+	}
+}
+
+// TestCollapseVL017Disclosures_OnlyTheAbsentZoneNoticeCollapses pins the
+// collapse's third gate: the MESSAGE must be the mutable-zone-absent
+// notice Check itself raises (vl017DisclosureCore), not merely "some
+// VL-017 finding at SeverityDisclosure".
+//
+// Rule+severity alone is not a safe key, because SeverityDisclosure is not
+// owned by this rule: candidate.go's unrelatedCorpusDisclosures restates
+// ARBITRARY findings — a real mutable-zone-PRESENT VL-017 violation
+// included — at SeverityDisclosure under their original rule id. Keyed on
+// rule and severity alone, such a restatement would be deleted and
+// "replaced" by a zone-absent notice asserting the exact opposite of what
+// it said: the strongest form of the vacuous pass constitution 2 and
+// spec/uat-round-1 co-5 forbid ("a quieter disclosure is still a
+// disclosure, never a vacuous pass"). No caller feeds candidate output to
+// this collapse today; this test is what keeps that from becoming a silent
+// corruption if one ever does.
+//
+// The already-collapsed row additionally pins EXACT equality over a prefix
+// test: the combined finding's own message starts with the core sentence,
+// so a prefix gate would re-collapse it and lose the affected-spec list
+// behind the combined finding's empty Path. Equality makes the function
+// idempotent.
+func TestCollapseVL017Disclosures_OnlyTheAbsentZoneNoticeCollapses(t *testing.T) {
+	absentZoneNotice := Finding{
+		Rule:     "VL-017",
+		Path:     ".verdi/specs/active/borrower-update/spec.md",
+		Severity: SeverityDisclosure,
+		Message:  vl017DisclosureCore,
+	}
+	alreadyCollapsed := CollapseVL017Disclosures([]Finding{absentZoneNotice})[0]
+
+	tests := []struct {
+		name          string
+		in            Finding
+		wantCollapsed bool
+	}{
+		{
+			name:          "absent-zone notice as Check raises it",
+			in:            absentZoneNotice,
+			wantCollapsed: true,
+		},
+		{
+			name:          "restated corpus finding at disclosure severity",
+			in:            vl017RestatedCorpusDisclosure(),
+			wantCollapsed: false,
+		},
+		{
+			name:          "already-collapsed combined disclosure",
+			in:            alreadyCollapsed,
+			wantCollapsed: false,
+		},
+		{
+			name:          "mutable-zone-present violation",
+			in:            Finding{Rule: "VL-017", Path: ".verdi/specs/active/x/spec.md", Message: "open-question annotation a-1 is neither status:resolved nor carried"},
+			wantCollapsed: false,
+		},
+		{
+			name:          "another rule's disclosure carrying the same sentence",
+			in:            Finding{Rule: "VL-009", Path: ".verdi/specs/active/y/spec.md", Severity: SeverityDisclosure, Message: vl017DisclosureCore},
+			wantCollapsed: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := CollapseVL017Disclosures([]Finding{tt.in})
+			if len(got) != 1 {
+				t.Fatalf("len(got) = %d, want 1:\n%s", len(got), findingsString(got))
+			}
+			if !tt.wantCollapsed {
+				if got[0] != tt.in {
+					t.Fatalf("got[0] = %+v, want the finding passed through byte-for-byte: %+v", got[0], tt.in)
+				}
+				return
+			}
+			if got[0] == tt.in {
+				t.Fatalf("got[0] = %+v, want a COMBINED finding, not the input unchanged", got[0])
+			}
+			if got[0].Path != "" {
+				t.Fatalf("combined.Path = %q, want empty (a checkout-wide disclosure)", got[0].Path)
+			}
+			if !strings.Contains(got[0].Message, tt.in.Path) {
+				t.Fatalf("combined.Message = %q, want the affected spec %q named", got[0].Message, tt.in.Path)
+			}
+		})
 	}
 }

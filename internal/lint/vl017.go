@@ -144,8 +144,9 @@ func (vl017) Check(in *RunInput) []Finding {
 // that "a spec ... still receives the disclosure" — only presentation in
 // the CLI changes, not per-spec receipt of it.
 //
-// Every other finding — non-VL-017, or a VL-017 finding that is not a
-// disclosure (the mutable-zone-present violation path above) — passes
+// Every other finding — non-VL-017, a VL-017 finding that is not a
+// disclosure (the mutable-zone-present violation path above), or a VL-017
+// disclosure saying something else (isVL017AbsentZoneDisclosure) — passes
 // through unchanged and in its original relative order; the one combined
 // disclosure, if any, is appended at the end. The affected paths are
 // sorted regardless of the input order, so two calls describing the same
@@ -157,7 +158,7 @@ func CollapseVL017Disclosures(findings []Finding) []Finding {
 	out := make([]Finding, 0, len(findings))
 	var paths []string
 	for _, f := range findings {
-		if f.Rule == "VL-017" && f.Severity == SeverityDisclosure {
+		if isVL017AbsentZoneDisclosure(f) {
 			paths = append(paths, f.Path)
 			continue
 		}
@@ -172,6 +173,33 @@ func CollapseVL017Disclosures(findings []Finding) []Finding {
 		Severity: SeverityDisclosure,
 		Message:  fmt.Sprintf("%s Affected specs (%d): %s", vl017DisclosureCore, len(paths), strings.Join(paths, ", ")),
 	})
+}
+
+// isVL017AbsentZoneDisclosure reports whether f is the mutable-zone-absent
+// notice Check itself raises — the ONE finding shape CollapseVL017Disclosures
+// may fold away. All three fields are gated, because none of them is
+// sufficient alone:
+//
+//   - Rule, because other rules disclose too.
+//   - Severity, because VL-017's mutable-zone-PRESENT path raises real
+//     verdict failures under the same rule id.
+//   - Message, because SeverityDisclosure is not this rule's private
+//     property: candidate.go's unrelatedCorpusDisclosures restates
+//     ARBITRARY findings — a real, uncarried-open-question VL-017
+//     violation included — at SeverityDisclosure under their ORIGINAL rule
+//     id. Folding such a restatement away would delete a true finding and
+//     put a notice asserting the opposite (zone absent) in its place: a
+//     vacuous pass of the exact kind constitution 2 and spec/uat-round-1
+//     co-5 forbid. No caller feeds candidate output to this collapse
+//     today; this gate is why one could without corrupting the verdict.
+//
+// The message test is EXACT equality, not a prefix: the combined finding
+// this function returns begins with the same sentence, so a prefix test
+// would re-fold it on a second pass and replace its affected-spec list
+// with the combined finding's own empty Path. Equality makes the function
+// idempotent.
+func isVL017AbsentZoneDisclosure(f Finding) bool {
+	return f.Rule == "VL-017" && f.Severity == SeverityDisclosure && f.Message == vl017DisclosureCore
 }
 
 // carriedAsOpenQuestion reports whether spec declares an open_questions
