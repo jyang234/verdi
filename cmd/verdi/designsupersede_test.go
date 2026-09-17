@@ -334,9 +334,16 @@ func TestExtractSupersedeFlags(t *testing.T) {
 // branch checked out, successor bytes matching supersede.Compose's own
 // output, the right commit subject, the right stdout lines, and — the
 // point of running through the real binary rather than only the unit-level
-// test above — a real `verdi lint` afterward proving VL-015 raises no
-// finding for the successor and the successor introduces no OTHER finding
-// either.
+// test above — a real `verdi lint` afterward, asserting that NO `VL-`
+// finding line names the successor's own path.
+//
+// That assertion is deliberately scoped to the successor's path and claims
+// nothing about the run's overall verdict: this fixture repo carries a
+// pre-existing VL-012 `.gitattributes` finding of its own (the store
+// declares no generated-file attributes), so `verdi lint` exits 1 here
+// whether or not this verb ever ran. What is proven is the contract
+// ac-11 states — the untouched scaffold raises no finding AGAINST itself,
+// VL-015 included.
 func TestDesignStartSupersedeE2E_Happy(t *testing.T) {
 	bin := buildVerdiBinary(t)
 	repo := buildSupersedeRepo(t)
