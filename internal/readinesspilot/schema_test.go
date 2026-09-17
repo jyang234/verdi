@@ -59,6 +59,34 @@ func TestValidateSnapshotRejectsClosedContractViolations(t *testing.T) {
 			wantErr: "timing",
 		},
 		{
+			// A claimed open question (PLAN.md §7 I-128 option (a);
+			// spec/uat-round-1 ac-10) is non-blocking/eventual; an
+			// unclaimed one is blocking/current — concernIdentity derives
+			// blocking from timing for the shape/question family, so a
+			// current-timed shape/question concern claiming non-blocking
+			// is rejected.
+			name: "shape/question current timing must be blocking",
+			mutate: func(s *Snapshot) {
+				mutateConcern(s, "shape/problem", func(c *Concern) {
+					c.ID = "shape/question/oq-1"
+					c.Timing = TimingCurrent
+					c.Blocking = false
+				})
+			},
+			wantErr: "blocking=",
+		},
+		{
+			name: "shape/question eventual timing must be non-blocking",
+			mutate: func(s *Snapshot) {
+				mutateConcern(s, "shape/problem", func(c *Concern) {
+					c.ID = "shape/question/oq-1"
+					c.Timing = TimingEventual
+					c.Blocking = true
+				})
+			},
+			wantErr: "blocking=",
+		},
+		{
 			name: "unknown target class",
 			mutate: func(s *Snapshot) {
 				s.TargetClass = "initiative"

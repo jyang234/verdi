@@ -311,7 +311,11 @@ func concernIdentity(id string, timing Timing) (AreaID, bool, bool, error) {
 	case id == "shape/provenance" || id == "shape/mutation" || id == "shape/board":
 		return AreaShape, false, false, nil
 	case len(parts) >= 3 && parts[0] == "shape" && parts[1] == "question":
-		return AreaShape, false, true, nil
+		// An unclaimed question blocks now (current); a question a spike
+		// stub claims is a later-timed, non-blocking readiness concern
+		// (PLAN.md §7 I-128 option (a); spec/uat-round-1 ac-10) — the same
+		// timing-derives-blocking shape blockerConcern already uses.
+		return AreaShape, false, current, nil
 	case len(parts) >= 4 && parts[0] == "shape" && parts[1] == "board" && (parts[2] == "question" || parts[2] == "agent-task"):
 		return AreaShape, false, false, nil
 	case len(parts) >= 3 && parts[0] == "success" && parts[1] == "contributor":
