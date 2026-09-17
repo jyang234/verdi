@@ -254,7 +254,12 @@ func runDesignStartSupersede(ctx context.Context, root, predName, newName string
 		return 2
 	}
 
-	if err := gitx.AddAll(ctx, root); err != nil {
+	// UAT-033: stage exactly the scaffolded successor spec directory —
+	// never gitx.AddAll's `git add -A`, which swept every
+	// untracked-or-modified file anywhere in the checkout into the
+	// scaffold commit (design.go's runDesignStart carried the identical
+	// defect and fix; this path reused AddAll from it by parity).
+	if err := gitx.AddPaths(ctx, root, specDir); err != nil {
 		fmt.Fprintln(stderr, "design start --supersedes:", err)
 		return 2
 	}

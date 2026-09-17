@@ -629,3 +629,100 @@ func TestDesignStartSupersedeE2E_EqualsFlagSpellings(t *testing.T) {
 		t.Fatalf("successor spec.md: %v", err)
 	}
 }
+
+// TestRunDesignStartSupersede_ScaffoldCommitStagesOnlySpecDir is UAT-033's
+// own witness for the --supersedes path (design_test.go's
+// TestRunDesignStart_ScaffoldCommitStagesOnlySpecDir proves the identical
+// invariant for the plain --kind/--name path this file's runDesignStartSupersede
+// used to reuse gitx.AddAll from by parity). Plants the same three shapes of
+// working-tree noise the round spec PR's real scaffold commit carried — an
+// untracked file at the repo root, an untracked file in a nested docs
+// directory, and a modified tracked file (here the tracked verdi.yaml,
+// never the predecessor spec.md this ritual reads to compose the successor)
+// — then proves the successor's scaffold commit contains exactly the one
+// path this ritual itself wrote, every planted file rides untouched in the
+// working tree afterward, and the verb's own success disclosure is
+// unchanged.
+func TestRunDesignStartSupersede_ScaffoldCommitStagesOnlySpecDir(t *testing.T) {
+	t.Setenv("CI_DEFAULT_BRANCH", "main")
+	repo := buildSupersedeRepo(t)
+	ctx := context.Background()
+
+	// (a) untracked file at the repo root.
+	if err := os.WriteFile(filepath.Join(repo.Dir, ".DS_Store"), []byte("junk"), 0o644); err != nil {
+		t.Fatalf("planting root untracked file: %v", err)
+	}
+	// (b) untracked file in a nested docs directory.
+	nestedDir := filepath.Join(repo.Dir, "docs", "superpowers", "specs")
+	if err := os.MkdirAll(nestedDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll nested docs dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(nestedDir, "lens.sqlite3"), []byte("junk"), 0o644); err != nil {
+		t.Fatalf("planting nested untracked file: %v", err)
+	}
+	// (c) a modified tracked file — the manifest, never the predecessor
+	// spec.md this ritual reads verbatim to compose the successor.
+	manifestPath := filepath.Join(repo.Dir, ".verdi", "verdi.yaml")
+	original, err := os.ReadFile(manifestPath)
+	if err != nil {
+		t.Fatalf("reading tracked manifest: %v", err)
+	}
+	if err := os.WriteFile(manifestPath, append(original, []byte("\n# local edit\n")...), 0o644); err != nil {
+		t.Fatalf("modifying tracked manifest: %v", err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	got := runDesignStartSupersede(ctx, repo.Dir, "lockbox", "lockbox-v2", phase7Model(t), nil, fakeGoTest{}, &stdout, &stderr)
+	if got != 0 {
+		t.Fatalf("runDesignStartSupersede = %d, want 0; stderr=%s", got, stderr.String())
+	}
+
+	head, err := gitx.RevParse(ctx, repo.Dir, "HEAD")
+	if err != nil {
+		t.Fatalf("RevParse(HEAD): %v", err)
+	}
+	entries, err := gitx.DiffNameStatus(ctx, repo.Dir, repo.Head, head)
+	if err != nil {
+		t.Fatalf("DiffNameStatus: %v", err)
+	}
+	wantPath := ".verdi/specs/active/lockbox-v2/spec.md"
+	if len(entries) != 1 || entries[0].Path != wantPath {
+		t.Fatalf("scaffold commit's changed paths = %+v, want exactly [%s] (never the planted working-tree noise)", entries, wantPath)
+	}
+
+	changed, err := gitx.WorktreeChangedPaths(ctx, repo.Dir)
+	if err != nil {
+		t.Fatalf("WorktreeChangedPaths: %v", err)
+	}
+	changedSet := map[string]bool{}
+	for _, p := range changed {
+		changedSet[p] = true
+	}
+	for _, want := range []string{".DS_Store", "docs/superpowers/specs/lens.sqlite3", ".verdi/verdi.yaml"} {
+		if !changedSet[want] {
+			t.Errorf("WorktreeChangedPaths = %v, want %q still present (untracked/modified, never staged by this ritual)", changed, want)
+		}
+	}
+	if changedSet[wantPath] {
+		t.Errorf("WorktreeChangedPaths = %v, want %q absent (it was committed, so the working tree is clean at that path)", changed, wantPath)
+	}
+
+	if !strings.Contains(stdout.String(), "board:") {
+		t.Fatalf("stdout = %q, want a board URL placeholder line (the verb's own stdout is unchanged by this fix)", stdout.String())
+	}
+}
+
+// TestDesignSupersedeGo_NoAddAll is a source-text witness mirroring
+// design_test.go's TestDesignGo_NoAddAll: designsupersede.go's scaffold
+// commit must stage exactly the successor spec directory via
+// gitx.AddPaths (UAT-033), never gitx.AddAll's blanket `git add -A` sweep
+// of the rest of the working tree.
+func TestDesignSupersedeGo_NoAddAll(t *testing.T) {
+	data, err := os.ReadFile("designsupersede.go")
+	if err != nil {
+		t.Fatalf("reading designsupersede.go: %v", err)
+	}
+	if strings.Contains(string(data), "AddAll(") {
+		t.Error("designsupersede.go calls gitx.AddAll — the scaffold commit must stage exactly the spec directory via gitx.AddPaths instead (UAT-033)")
+	}
+}
