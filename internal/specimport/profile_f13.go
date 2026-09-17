@@ -28,8 +28,12 @@ type f13Selector struct {
 // declares, shipped as fixed package data interpreted by fixed code
 // (spec-import-contract.md: "Profiles are shipped data interpreted by
 // fixed code, never uploaded executables"). Values are pinned directly
-// from mechanical-field-map.json's "cards" array; profile_f13_test.go
-// checks each against the field map's own source_text_sha256/display_text.
+// from mechanical-field-map.json's "cards" array;
+// TestF13Selectors_MatchMechanicalFieldMapJSON (profile_f13_test.go)
+// decodes that JSON file directly at test time and checks these
+// selectors, and profile_f13_test.go's own f13PinnedCards, against it —
+// id, byte range, sha256, and display_text — so the three hand-copies
+// cannot silently diverge.
 //
 // Revised under spec/uat-round-1 ac-7/dc-9: the source states its
 // criteria as one comma-joined sentence led by the instruction word

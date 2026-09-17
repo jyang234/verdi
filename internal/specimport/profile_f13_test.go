@@ -1,8 +1,11 @@
 package specimport
 
 import (
+	"encoding/json"
 	"errors"
 	"os"
+	"path/filepath"
+	"runtime"
 	"testing"
 )
 
@@ -333,5 +336,97 @@ func TestNormalize_LineSelectionParityMatchesStageplanExtraction(t *testing.T) {
 	}
 	if fromStagePlan.OriginalDigest == fromSnapshot.OriginalDigest {
 		t.Error("the two sources' original digests must differ (different files, different sizes); only their SELECTED digest is asserted equal")
+	}
+}
+
+// f13FieldMapCard is the subset of one mechanical-field-map.json "cards"
+// entry this drift gate needs. Decoded loosely (plain json.Unmarshal, not
+// the strict internal/artifact seam): this file is a design-review
+// artifact the owner reads at the PR, not a production Request/Record
+// wire schema, and it carries fields (target_id_origin, transform,
+// original_start_line, ...) this gate has no need to mirror.
+type f13FieldMapCard struct {
+	TargetID    string `json:"target_id"`
+	Start       int    `json:"selection_byte_start"`
+	End         int    `json:"selection_byte_end_exclusive"`
+	SHA256      string `json:"source_text_sha256"`
+	DisplayText string `json:"display_text"`
+}
+
+type f13FieldMap struct {
+	Cards []f13FieldMapCard `json:"cards"`
+}
+
+// f13FieldMapPath resolves docs/superpowers/proposals/2026-09-14-spec-
+// import-f13/mechanical-field-map.json from THIS file's own path via
+// runtime.Caller(0) — the same cwd-independent idiom
+// internal/specalign/helpers_test.go's computeVerdiRoot uses, chosen so
+// this gate reads the actual reviewed bundle rather than a testdata copy
+// that could itself drift. Unlike docs/design/specs (workspace-sibling,
+// outside the verdi module), docs/superpowers/proposals lives inside the
+// verdi module beside go.mod, so no workspace-level ".." is needed.
+func f13FieldMapPath(t *testing.T) string {
+	t.Helper()
+	_, file, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("runtime.Caller(0) failed")
+	}
+	// this file lives at <verdiRoot>/internal/specimport/profile_f13_test.go
+	root := filepath.Clean(filepath.Join(filepath.Dir(file), "..", ".."))
+	if _, err := os.Stat(filepath.Join(root, "go.mod")); err != nil {
+		t.Fatalf("resolving verdi root from %s: %v", file, err)
+	}
+	return filepath.Join(root, "docs", "superpowers", "proposals", "2026-09-14-spec-import-f13", "mechanical-field-map.json")
+}
+
+// TestF13Selectors_MatchMechanicalFieldMapJSON is the drift gate the F4
+// review finding asked for: it decodes the reviewed
+// mechanical-field-map.json directly and asserts profile_f13.go's
+// f13Selectors and this file's own f13PinnedCards both equal its "cards"
+// array one-for-one — id, byte range, sha256, and display_text — so the
+// three hand-copies (the JSON, f13Selectors, f13PinnedCards) cannot
+// silently diverge. It also re-verifies the JSON's own sha256/display_text
+// claims against the actual primary bytes, independent of the Go pins.
+func TestF13Selectors_MatchMechanicalFieldMapJSON(t *testing.T) {
+	data, err := os.ReadFile(f13FieldMapPath(t))
+	if err != nil {
+		t.Fatalf("reading mechanical-field-map.json: %v", err)
+	}
+	var fm f13FieldMap
+	if err := json.Unmarshal(data, &fm); err != nil {
+		t.Fatalf("decoding mechanical-field-map.json: %v", err)
+	}
+	if len(fm.Cards) != len(f13Selectors) || len(fm.Cards) != len(f13PinnedCards) {
+		t.Fatalf("card counts disagree: json=%d f13Selectors=%d f13PinnedCards=%d", len(fm.Cards), len(f13Selectors), len(f13PinnedCards))
+	}
+
+	primary := readF13Fixture(t, "primary-f13.md")
+	for i, jsonCard := range fm.Cards {
+		sel := f13Selectors[i]
+		pinned := f13PinnedCards[i]
+
+		if sel.target != jsonCard.TargetID || sel.start != jsonCard.Start || sel.end != jsonCard.End {
+			t.Errorf("f13Selectors[%d] = %+v, want id/range from mechanical-field-map.json %+v", i, sel, jsonCard)
+		}
+		if pinned.target != jsonCard.TargetID || pinned.start != jsonCard.Start || pinned.end != jsonCard.End {
+			t.Errorf("f13PinnedCards[%d] = %+v, want id/range from mechanical-field-map.json %+v", i, pinned, jsonCard)
+		}
+		if pinned.displayText != jsonCard.DisplayText {
+			t.Errorf("f13PinnedCards[%d].displayText = %q, want mechanical-field-map.json's %q", i, pinned.displayText, jsonCard.DisplayText)
+		}
+		if pinned.rawSHA256 != jsonCard.SHA256 {
+			t.Errorf("f13PinnedCards[%d].rawSHA256 = %q, want mechanical-field-map.json's %q", i, pinned.rawSHA256, jsonCard.SHA256)
+		}
+
+		if jsonCard.Start < 0 || jsonCard.Start > jsonCard.End || jsonCard.End > len(primary) {
+			t.Fatalf("mechanical-field-map.json cards[%d] byte range %d..%d is out of bounds for the %d-byte primary", i, jsonCard.Start, jsonCard.End, len(primary))
+		}
+		raw := primary[jsonCard.Start:jsonCard.End]
+		if got := sha256Hex(raw); got != jsonCard.SHA256 {
+			t.Errorf("mechanical-field-map.json cards[%d] (%s) source_text_sha256 = %s, want %s (recomputed from primary-f13.md)", i, jsonCard.TargetID, jsonCard.SHA256, got)
+		}
+		if got := collapseWhitespace(raw); got != jsonCard.DisplayText {
+			t.Errorf("mechanical-field-map.json cards[%d] (%s) display_text = %q, want %q (recomputed from primary-f13.md)", i, jsonCard.TargetID, jsonCard.DisplayText, got)
+		}
 	}
 }
