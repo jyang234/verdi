@@ -63,11 +63,15 @@ func f13ReadyRequest(t *testing.T) Request {
 // request's selected bytes — as ac-4/co-1/co-2 of spec/uat-round-1 require.
 //
 // It also proves ac-7/dc-9: a real Compose+Apply import of the pinned F13
-// bundle yields the twelve corrected criteria, not just twelve Fields in
-// memory. The composed candidate is committed to the returned branch, so
-// this reads it back with gitx.Show (the same technique
-// recordvalidate_test.go and recordtamper_test.go already use) and checks
-// every f13PinnedCards display_text landed verbatim in the created spec.
+// bundle yields the twelve corrected criteria BOUND to their ids, not
+// just twelve Fields in memory and not just twelve texts present
+// somewhere in the file. The composed candidate is committed to the
+// returned branch, so this reads it back with gitx.Show (the same
+// technique recordvalidate_test.go and recordtamper_test.go already use)
+// and checks, per id, both the frontmatter's `id: ac-N, text: "..."` flow
+// mapping and the body's `## ac-N` heading+paragraph — a text-only
+// Contains check would miss an id permutation or a joined selector;
+// binding the id to the text catches both.
 func TestPublishNew_RecordFormat_F13BindsThePinnedProfileDigest(t *testing.T) {
 	repo := buildImportRepo(t)
 	svc := testService(t)
@@ -107,8 +111,30 @@ func TestPublishNew_RecordFormat_F13BindsThePinnedProfileDigest(t *testing.T) {
 	}
 	spec := string(specBytes)
 	for _, card := range f13PinnedCards {
-		if !strings.Contains(spec, card.displayText) {
-			t.Errorf("created spec is missing %s's corrected text %q", card.target, card.displayText)
+		// Frontmatter binding: the canonical YAML flow-mapping ties this
+		// exact id to this exact text in one line
+		// (`- { id: ac-N, text: "...", evidence: [...], anchor: "ac-N" }`).
+		// A substring match on the whole id+text pair — not text alone —
+		// fails an id permutation (another card's text under this id) and
+		// a joined selector (this id's text merged with a neighbor's).
+		fmField := fmt.Sprintf("id: %s, text: %q", card.target, card.displayText)
+		if !strings.Contains(spec, fmField) {
+			t.Errorf("created spec's frontmatter does not bind %s to %q: want to find %q in:\n%s", card.target, card.displayText, fmField, spec)
+		}
+
+		// Body binding: the "## ac-N" heading is immediately followed (one
+		// blank line later) by the exact text and nothing else on that
+		// line — checked by requiring the byte right after it is a
+		// newline (blank line or EOF), so a joined/trailing extra clause
+		// on the same line is caught too.
+		heading := "## " + card.target + "\n\n" + card.displayText
+		idx := strings.Index(spec, heading)
+		if idx < 0 {
+			t.Errorf("created spec's body does not bind %s to %q: want to find %q in:\n%s", card.target, card.displayText, heading, spec)
+			continue
+		}
+		if end := idx + len(heading); end < len(spec) && spec[end] != '\n' {
+			t.Errorf("%s's body text is not alone on its line (extra content follows before the next newline): %q", card.target, spec[idx:end+20])
 		}
 	}
 }
