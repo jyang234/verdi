@@ -282,6 +282,39 @@ func TestExtractSupersedeFlags(t *testing.T) {
 		}
 	})
 
+	t.Run("happy: every flag in its --flag=value form", func(t *testing.T) {
+		ref, kind, name, incompat, rest, err := extractSupersedeFlags([]string{"--supersedes=spec/lockbox", "--name=lockbox-v2", "--kind=feature"})
+		if err != nil {
+			t.Fatalf("extractSupersedeFlags = %v, want no error", err)
+		}
+		if ref != "spec/lockbox" || name != "lockbox-v2" || kind != "feature" || len(incompat) != 0 || len(rest) != 0 {
+			t.Fatalf("got (%q,%q,%q,%v,%v)", ref, kind, name, incompat, rest)
+		}
+	})
+
+	t.Run("happy: the two forms mix freely", func(t *testing.T) {
+		ref, kind, name, incompat, rest, err := extractSupersedeFlags([]string{"--name=lockbox-v2", "--supersedes", "spec/lockbox", "--kind=feature"})
+		if err != nil {
+			t.Fatalf("extractSupersedeFlags = %v, want no error", err)
+		}
+		if ref != "spec/lockbox" || name != "lockbox-v2" || kind != "feature" || len(incompat) != 0 || len(rest) != 0 {
+			t.Fatalf("got (%q,%q,%q,%v,%v)", ref, kind, name, incompat, rest)
+		}
+	})
+
+	for _, dup := range [][]string{
+		{"--supersedes=spec/a", "--supersedes=spec/b"},
+		{"--supersedes", "spec/a", "--supersedes=spec/b"},
+		{"--name=a", "--name", "b"},
+		{"--kind=feature", "--kind=feature"},
+	} {
+		t.Run("duplicate errors: "+strings.Join(dup, " "), func(t *testing.T) {
+			if _, _, _, _, _, err := extractSupersedeFlags(dup); err == nil {
+				t.Fatal("extractSupersedeFlags = nil error, want a duplicate-flag refusal")
+			}
+		})
+	}
+
 	t.Run("leftover positional captured in rest", func(t *testing.T) {
 		_, _, _, _, rest, err := extractSupersedeFlags([]string{"--supersedes", "spec/a", "--name", "b", "extra-token"})
 		if err != nil {
@@ -563,5 +596,29 @@ func TestDesignStartSupersedeE2E_ComposeFailureLeavesCheckoutUntouched(t *testin
 	}
 	if n := strings.Count(stderr, "internal error"); n != 1 {
 		t.Errorf("stderr says %q %d times, want exactly 1:\n%s", "internal error", n, stderr)
+	}
+}
+
+// TestDesignStartSupersedeE2E_EqualsFlagSpellings proves the whole
+// invocation works through the built binary when every flag is written in
+// the --flag=value form design start's own --kind/--name grammar has always
+// accepted — including the dispatch itself, which matched only the bare
+// `--supersedes` token and so routed `--supersedes=spec/lockbox` into the
+// plain --kind/--name path, where it surfaced as an unrelated story-ref
+// complaint.
+func TestDesignStartSupersedeE2E_EqualsFlagSpellings(t *testing.T) {
+	bin := buildVerdiBinary(t)
+	repo := buildSupersedeRepo(t)
+	env := []string{"CI_DEFAULT_BRANCH=main"}
+
+	stdout, stderr, code := runVerdiBinary(t, bin, repo.Dir, env, "design", "start", "--supersedes=spec/lockbox", "--name=lockbox-v2", "--kind=feature")
+	if code != 0 {
+		t.Fatalf("exit = %d, want 0\nstdout: %s\nstderr: %s", code, stdout, stderr)
+	}
+	if !strings.Contains(stdout, "design start: supersedes spec/lockbox: 5 objects carried, 0 amended, 0 removed") {
+		t.Fatalf("stdout missing the supersedes summary line:\n%s", stdout)
+	}
+	if _, err := os.Stat(filepath.Join(repo.Dir, ".verdi", "specs", "active", "lockbox-v2", "spec.md")); err != nil {
+		t.Fatalf("successor spec.md: %v", err)
 	}
 }

@@ -47,7 +47,16 @@ import (
 // wholly determined by its predecessor, never authored or deferred), and
 // every remaining (unrecognized) positional argument.
 func extractSupersedeFlags(args []string) (supersedesRef, kind, name string, incompatible, rest []string, err error) {
-	take := func(label string, dst *string, i int) (consumed int, err error) {
+	// The same take shape extractFlags uses (design.go): a "--flag=value"
+	// token carries its own value, anything else consumes the next token.
+	take := func(label string, dst *string, i int, a string) (consumed int, err error) {
+		if prefix := "--" + label + "="; strings.HasPrefix(a, prefix) {
+			if *dst != "" {
+				return 0, fmt.Errorf("--%s given more than once", label)
+			}
+			_, *dst, _ = strings.Cut(a, "=")
+			return 0, nil
+		}
 		if *dst != "" {
 			return 0, fmt.Errorf("--%s given more than once", label)
 		}
@@ -57,29 +66,36 @@ func extractSupersedeFlags(args []string) (supersedesRef, kind, name string, inc
 		*dst = args[i+1]
 		return 1, nil
 	}
+	// matches reports whether a is this flag in either of its two accepted
+	// spellings — the "-flag"/"-flag=value" single-dash spellings
+	// extractFlags additionally tolerates are deliberately absent here, as
+	// --supersedes/--from-stub have never had one.
+	matches := func(a, label string) bool {
+		return a == "--"+label || strings.HasPrefix(a, "--"+label+"=")
+	}
 
 	for i := 0; i < len(args); i++ {
 		a := args[i]
-		switch a {
-		case "--supersedes":
-			n, e := take("supersedes", &supersedesRef, i)
+		switch {
+		case matches(a, "supersedes"):
+			n, e := take("supersedes", &supersedesRef, i, a)
 			if e != nil {
 				return "", "", "", nil, nil, e
 			}
 			i += n
-		case "--name":
-			n, e := take("name", &name, i)
+		case matches(a, "name"):
+			n, e := take("name", &name, i, a)
 			if e != nil {
 				return "", "", "", nil, nil, e
 			}
 			i += n
-		case "--kind":
-			n, e := take("kind", &kind, i)
+		case matches(a, "kind"):
+			n, e := take("kind", &kind, i, a)
 			if e != nil {
 				return "", "", "", nil, nil, e
 			}
 			i += n
-		case "--from-stub", "--problem", "--outcome", "--defer-statements":
+		case a == "--from-stub", a == "--problem", a == "--outcome", a == "--defer-statements":
 			incompatible = append(incompatible, a)
 		default:
 			rest = append(rest, a)

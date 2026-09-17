@@ -265,8 +265,12 @@ func cmdDesignStart(args []string, stdout, stderr io.Writer) int {
 	// tokens. designsupersede.go does its own flexible flag parsing from
 	// here, mirroring extractFlags' own "accept every flag, in either
 	// form, in any position" philosophy.
+	// Both spellings dispatch, exactly as extractFlags accepts both for
+	// every flag it parses: matching only the bare token sent
+	// `--supersedes=spec/<name>` down the --kind/--name path, where it
+	// surfaced as an unrelated story-ref complaint.
 	for _, a := range args {
-		if a == "--supersedes" {
+		if a == "--supersedes" || strings.HasPrefix(a, "--supersedes=") {
 			return cmdDesignStartSupersede(args, stdout, stderr)
 		}
 	}
