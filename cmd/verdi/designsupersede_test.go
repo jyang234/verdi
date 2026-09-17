@@ -143,7 +143,7 @@ func TestRunDesignStartSupersede_Happy(t *testing.T) {
 	}
 
 	var stdout, stderr bytes.Buffer
-	got := runDesignStartSupersede(ctx, repo.Dir, "lockbox", "lockbox-v2", nil, fakeGoTest{}, &stdout, &stderr)
+	got := runDesignStartSupersede(ctx, repo.Dir, "lockbox", "lockbox-v2", phase7Model(t), nil, fakeGoTest{}, &stdout, &stderr)
 	if got != 0 {
 		t.Fatalf("runDesignStartSupersede = %d, want 0; stderr=%s", got, stderr.String())
 	}
@@ -202,7 +202,7 @@ func TestRunDesignStartSupersede_Negative(t *testing.T) {
 			t.Fatalf("MkdirAll: %v", err)
 		}
 		var stdout, stderr bytes.Buffer
-		got := runDesignStartSupersede(ctx, repo.Dir, "lockbox", "lockbox-v2", nil, fakeGoTest{}, &stdout, &stderr)
+		got := runDesignStartSupersede(ctx, repo.Dir, "lockbox", "lockbox-v2", phase7Model(t), nil, fakeGoTest{}, &stdout, &stderr)
 		if got != 2 {
 			t.Fatalf("runDesignStartSupersede = %d, want 2", got)
 		}
@@ -215,7 +215,7 @@ func TestRunDesignStartSupersede_Negative(t *testing.T) {
 		repo := buildSupersedeRepo(t)
 		ctx := context.Background()
 		var stdout, stderr bytes.Buffer
-		got := runDesignStartSupersede(ctx, repo.Dir, "lockbox", "Not_A_Valid_Name", nil, fakeGoTest{}, &stdout, &stderr)
+		got := runDesignStartSupersede(ctx, repo.Dir, "lockbox", "Not_A_Valid_Name", phase7Model(t), nil, fakeGoTest{}, &stdout, &stderr)
 		if got != 2 {
 			t.Fatalf("runDesignStartSupersede = %d, want 2", got)
 		}
@@ -225,7 +225,7 @@ func TestRunDesignStartSupersede_Negative(t *testing.T) {
 		repo := buildSupersedeRepo(t)
 		ctx := context.Background()
 		var stdout, stderr bytes.Buffer
-		got := runDesignStartSupersede(ctx, repo.Dir, "does-not-exist", "does-not-exist-v2", nil, fakeGoTest{}, &stdout, &stderr)
+		got := runDesignStartSupersede(ctx, repo.Dir, "does-not-exist", "does-not-exist-v2", phase7Model(t), nil, fakeGoTest{}, &stdout, &stderr)
 		if got != 2 {
 			t.Fatalf("runDesignStartSupersede = %d, want 2", got)
 		}

@@ -54,7 +54,7 @@ func TestResolve_AcceptedFeaturePredecessor_Succeeds(t *testing.T) {
 	repo := buildResolveRepo(t, ".verdi/specs/active/widget/spec.md", minimalPredecessor)
 	ctx := context.Background()
 
-	got, err := Resolve(ctx, repo.Dir, "widget")
+	got, err := Resolve(ctx, repo.Dir, "widget", nil)
 	if err != nil {
 		t.Fatalf("Resolve = %v, want no error", err)
 	}
@@ -129,7 +129,7 @@ func TestResolve_Negative(t *testing.T) {
 		t.Setenv("CI_DEFAULT_BRANCH", "main")
 		repo := buildResolveRepo(t, ".verdi/specs/active/widget/spec.md", minimalPredecessor)
 		ctx := context.Background()
-		_, err := Resolve(ctx, repo.Dir, "does-not-exist")
+		_, err := Resolve(ctx, repo.Dir, "does-not-exist", nil)
 		var rerr *ResolveError
 		if !errors.As(err, &rerr) || rerr.Reason != ReasonNotFound {
 			t.Fatalf("Resolve = %v, want a ReasonNotFound *ResolveError", err)
@@ -140,7 +140,7 @@ func TestResolve_Negative(t *testing.T) {
 		t.Setenv("CI_DEFAULT_BRANCH", "main")
 		repo := buildResolveRepo(t, ".verdi/specs/active/broken/spec.md", "not even frontmatter\n")
 		ctx := context.Background()
-		_, err := Resolve(ctx, repo.Dir, "broken")
+		_, err := Resolve(ctx, repo.Dir, "broken", nil)
 		var rerr *ResolveError
 		if !errors.As(err, &rerr) || rerr.Reason != ReasonNotDecodable {
 			t.Fatalf("Resolve = %v, want a ReasonNotDecodable *ResolveError", err)
@@ -151,7 +151,7 @@ func TestResolve_Negative(t *testing.T) {
 		t.Setenv("CI_DEFAULT_BRANCH", "main")
 		repo := buildResolveRepo(t, ".verdi/specs/active/some-story/spec.md", storyPredecessor)
 		ctx := context.Background()
-		_, err := Resolve(ctx, repo.Dir, "some-story")
+		_, err := Resolve(ctx, repo.Dir, "some-story", nil)
 		var rerr *ResolveError
 		if !errors.As(err, &rerr) || rerr.Reason != ReasonWrongClass {
 			t.Fatalf("Resolve = %v, want a ReasonWrongClass *ResolveError", err)
@@ -165,7 +165,7 @@ func TestResolve_Negative(t *testing.T) {
 		t.Setenv("CI_DEFAULT_BRANCH", "main")
 		repo := buildResolveRepo(t, ".verdi/specs/active/some-component/spec.md", componentPredecessor)
 		ctx := context.Background()
-		_, err := Resolve(ctx, repo.Dir, "some-component")
+		_, err := Resolve(ctx, repo.Dir, "some-component", nil)
 		var rerr *ResolveError
 		if !errors.As(err, &rerr) || rerr.Reason != ReasonWrongClass {
 			t.Fatalf("Resolve = %v, want a ReasonWrongClass *ResolveError", err)
@@ -181,7 +181,7 @@ func TestResolve_Negative(t *testing.T) {
 		}
 		writeAndCommitSpec(t, ctx, repo.Dir, ".verdi/specs/active/widget/spec.md", minimalPredecessor, "draft widget")
 
-		_, err := Resolve(ctx, repo.Dir, "widget")
+		_, err := Resolve(ctx, repo.Dir, "widget", nil)
 		var rerr *ResolveError
 		if !errors.As(err, &rerr) || rerr.Reason != ReasonWrongStatus {
 			t.Fatalf("Resolve = %v, want a ReasonWrongStatus *ResolveError", err)
@@ -230,7 +230,7 @@ func TestResolve_Superseded_Refuses(t *testing.T) {
 	})
 	ctx := context.Background()
 
-	_, err = Resolve(ctx, repo.Dir, "widget")
+	_, err = Resolve(ctx, repo.Dir, "widget", nil)
 	var rerr *ResolveError
 	if !errors.As(err, &rerr) || rerr.Reason != ReasonWrongStatus {
 		t.Fatalf("Resolve = %v, want a ReasonWrongStatus *ResolveError", err)
@@ -255,7 +255,7 @@ func TestResolve_ClosedInActiveZone_Refuses(t *testing.T) {
 	repo := buildResolveRepo(t, ".verdi/specs/active/widget/spec.md", closedSpec)
 	ctx := context.Background()
 
-	_, err := Resolve(ctx, repo.Dir, "widget")
+	_, err := Resolve(ctx, repo.Dir, "widget", nil)
 	var rerr *ResolveError
 	if !errors.As(err, &rerr) || rerr.Reason != ReasonWrongStatus {
 		t.Fatalf("Resolve = %v, want a ReasonWrongStatus *ResolveError", err)

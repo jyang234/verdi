@@ -7,6 +7,7 @@ import (
 	"os"
 
 	"github.com/jyang234/verdi/internal/artifact"
+	"github.com/jyang234/verdi/internal/model"
 	"github.com/jyang234/verdi/internal/specstate"
 	"github.com/jyang234/verdi/internal/store"
 )
@@ -81,7 +82,17 @@ type Predecessor struct {
 // everything before the first Git mutation) — root is whatever checkout
 // the caller currently has, and the read is of THAT checkout's working
 // tree, not any particular branch by name.
-func Resolve(ctx context.Context, root, predName string) (Predecessor, error) {
+//
+// mdl resolves the class/status words BOTH refusal messages below speak
+// through the store's own display vocabulary (spec/vocabulary-surfaces;
+// mirrors internal/stubinstantiate.SealedFeatureWallGuard's identical
+// class/status refusal messages byte-for-byte in shape: model.Indefinite
+// wrapping model.DisplayClass/DisplayState, never a bare class or
+// lifecycle-state word) — never display prose unclassified (ledger
+// L-M13a(6), internal/specalign's TestVocabProseWitness). Nil-safe
+// exactly like every DisplayClass/DisplayState call (falls back to the
+// bare id when no model was resolved).
+func Resolve(ctx context.Context, root, predName string, mdl *model.Model) (Predecessor, error) {
 	specPath := store.ActiveSpecPath(root, predName)
 	raw, err := os.ReadFile(specPath)
 	if err != nil {
@@ -116,7 +127,8 @@ func Resolve(ctx context.Context, root, predName string) (Predecessor, error) {
 		return Predecessor{}, &ResolveError{
 			Reason:          ReasonWrongClass,
 			PredecessorName: predName,
-			Detail:          fmt.Sprintf("supersede: predecessor spec/%s is class %q; supersession is only available on a feature spec (02 §Kind registry: story and component classes refuse it)", predName, spec.Class),
+			Detail: fmt.Sprintf("supersede: predecessor spec/%s: supersession is only available on %s (02 §Kind registry); its class is %s",
+				predName, model.Indefinite(mdl.DisplayClass("feature")), mdl.DisplayClass(string(spec.Class))),
 		}
 	}
 
@@ -130,7 +142,8 @@ func Resolve(ctx context.Context, root, predName string) (Predecessor, error) {
 		return Predecessor{}, &ResolveError{
 			Reason:          ReasonWrongStatus,
 			PredecessorName: predName,
-			Detail:          fmt.Sprintf("supersede: predecessor spec/%s is only available for supersession once accepted-pending-build (implementations build accepted specs only); its effective status is %s", predName, status),
+			Detail: fmt.Sprintf("supersede: predecessor spec/%s: supersession is only available on %s (implementations build accepted specs only); its effective status is %s",
+				predName, model.Indefinite(mdl.DisplayState("feature", "accepted-pending-build")), mdl.DisplayState("feature", status)),
 		}
 	}
 

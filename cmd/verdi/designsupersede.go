@@ -29,6 +29,7 @@ import (
 	"github.com/jyang234/verdi/internal/artifact"
 	"github.com/jyang234/verdi/internal/atomicfile"
 	"github.com/jyang234/verdi/internal/gitx"
+	"github.com/jyang234/verdi/internal/model"
 	"github.com/jyang234/verdi/internal/store"
 	"github.com/jyang234/verdi/internal/supersede"
 	"github.com/jyang234/verdi/internal/upstream"
@@ -117,6 +118,7 @@ func cmdDesignStartSupersede(args []string, stdout, stderr io.Writer) int {
 		// EXPLICIT --kind feature is accepted too (never an error to name
 		// the only legal value).
 	default:
+		// vocab:identity — CLI usage/flag grammar (--kind's only legal value, identity: mirrors design.go's own --kind %q is not feature or story diagnostic)
 		fmt.Fprintf(stderr, "design start --supersedes: --kind %q is not feature (supersession is feature-only, 02 §Kind registry)\n", kindArg)
 		return 2
 	}
@@ -151,18 +153,19 @@ func cmdDesignStartSupersede(args []string, stdout, stderr io.Writer) int {
 		runner = upstream.RealRunner{Module: cfg.Manifest.Toolchain.Module, Commit: cfg.Manifest.Toolchain.Commit, Dir: root}
 	}
 
-	return runDesignStartSupersede(ctx, root, predRef.Name, name, runner, realGoTestRunner{}, stdout, stderr)
+	return runDesignStartSupersede(ctx, root, predRef.Name, name, cfg.Model, runner, realGoTestRunner{}, stdout, stderr)
 }
 
 // runDesignStartSupersede is the testable core: given an already-resolved
-// root, predecessor/successor bare names, and injected baseline-regen
-// dependencies, run the whole supersede-scaffold ritual and return the exit
-// code. Mirrors runDesignStart's own preparation-boundary shape (design.go:
-// resolve/validate everything before the first Git mutation) — predName's
-// guard (supersede.Resolve) runs in the CURRENT checkout, before base
-// resolution or the checkout switch, exactly like supersede.Resolve's own
-// doc comment states it must.
-func runDesignStartSupersede(ctx context.Context, root, predName, newName string, runner upstream.Runner, goTest goTestRunner, stdout, stderr io.Writer) int {
+// root, predecessor/successor bare names, the store's resolved operating
+// model, and injected baseline-regen dependencies, run the whole
+// supersede-scaffold ritual and return the exit code. Mirrors
+// runDesignStart's own preparation-boundary shape (design.go: resolve/
+// validate everything before the first Git mutation) — predName's guard
+// (supersede.Resolve) runs in the CURRENT checkout, before base resolution
+// or the checkout switch, exactly like supersede.Resolve's own doc comment
+// states it must.
+func runDesignStartSupersede(ctx context.Context, root, predName, newName string, mdl *model.Model, runner upstream.Runner, goTest goTestRunner, stdout, stderr io.Writer) int {
 	newRef, err := artifact.ParseRef("spec/" + newName)
 	if err != nil {
 		fmt.Fprintf(stderr, "design start --supersedes: --name %q is not a valid spec name: %v\n", newName, err)
@@ -175,7 +178,7 @@ func runDesignStartSupersede(ctx context.Context, root, predName, newName string
 		return 2
 	}
 
-	pred, err := supersede.Resolve(ctx, root, predName)
+	pred, err := supersede.Resolve(ctx, root, predName, mdl)
 	if err != nil {
 		fmt.Fprintln(stderr, "design start --supersedes:", err)
 		return 2
