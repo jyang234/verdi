@@ -29,3 +29,5 @@ Pre-review gate for every lane (process correction from wave 1): ancestry, clean
 ## Wave gate
 
 Integrated head c0d11f8e (W2-C 067d97c2, W2-B e31bc067, W2-A 3cb55b16 + controller commits). Whole-wave Opus review dispatched over 19dca4f5..c0d11f8e. `make verify` started with VERDI_E2E_PORT_BASE=4390 (log: scratchpad/wave2-verify.log).
+
+Whole-wave Opus review: ACCEPT-WITH-MINOR (blob-level 0 drift for all three lanes; co-3 holds; dc-9 ↔ twelve cards exact; R2-7 ↔ dc-4; lifecycle word list covers the full status enum, so the W2-C residual is a non-defect). Dispositions: F-1 tracker notes for UAT-006/007/019 → DONE in docs/design/uat/uat-findings.md; R2-6 stale "Existing objects" optgroup → UAT-029; F-2 (old-shape decode fixture comment), F-3 (coverage-map.json narrative), F-4 (drift test covers cards only) → routed to the W2-A implementer as test/doc-only follow-ups, integrated after the gate with focused tests since production code is unchanged; F-5 (long line in the contract doc) → controller cosmetic wrap at wave close.
