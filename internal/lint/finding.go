@@ -19,9 +19,9 @@ const (
 	// it is surfaced on every run (never silent — CLAUDE.md constitution 2,
 	// three-valued honesty) but never flips the exit code on its own. A
 	// clean run carrying only disclosures still exits 0. VL-017's
-	// disclosed-unproven report when the mutable zone is absent (a CI clone)
-	// uses this: disclosure is not failure, so CI stays green once a
-	// new-class spec exists (adjudicated at the W2 wave close).
+	// disclosed-unproven report when the mutable zone is absent from this
+	// checkout uses this: disclosure is not failure, so CI stays green once
+	// a new-class spec exists (adjudicated at the W2 wave close).
 	SeverityDisclosure
 )
 

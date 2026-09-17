@@ -56,27 +56,23 @@ type specStateResolver interface {
 
 // unresolvableDefaultBranchMessage restores the D6-6 legible refusal
 // (fix-round-1 finding 4) for the specific Unproven cause every operator
-// hits most often — the default branch could not be resolved AT ALL — by
-// independently re-checking specstate.ResolveDefaultBranch and, if it
-// fails, naming every source the resolution chain tries (CI_DEFAULT_BRANCH,
-// configured git remote HEAD, the unambiguous local origin/main-or-master
-// fallback) plus the `git remote set-head` remedy, exactly as the
-// pre-Task-5 gate.go message did. Returns "" when the default branch DOES
-// resolve — meaning this Unproven verdict has some OTHER cause (an
-// incomplete successor-corpus scan, or an unprovable first-parent landing),
-// which the caller reports via specstate's own per-candidate disclosures
-// instead; this message is never a substitute for those, only an addition
-// for the one cause that has a concrete, actionable remedy.
+// hits most often — the default branch could not be resolved AT ALL.
+// Returns "" when the default branch DOES resolve — meaning this Unproven
+// verdict has some OTHER cause (an incomplete successor-corpus scan, or an
+// unprovable first-parent landing), which the caller reports via
+// specstate's own per-candidate disclosures instead; this message is never
+// a substitute for those, only an addition for the one cause that has a
+// concrete, actionable remedy.
+//
+// Delegates verbatim to specstate.UnresolvedDefaultBranchMessage (moved
+// there, L5 review of spec/uat-round-1 ac-6/dc-7, I-130): design start's
+// --from-stub path, in internal/stubinstantiate, needs the identical
+// wording for the identical failure and cannot reach an unexported
+// cmd/verdi function, so the text now lives in the one package both need.
+// This wrapper is kept so every existing cmd/verdi call site (this file,
+// design.go) stays unchanged.
 func unresolvableDefaultBranchMessage(ctx context.Context, root string) string {
-	if _, ok := specstate.ResolveDefaultBranch(ctx, root); ok {
-		return ""
-	}
-	// D6-6: name every source resolveDefaultBranchName tries — not just the
-	// two GitLab-CI-centric ones — plus the remedy, since this is exactly
-	// the message a fresh GitHub checkout hits (GitHub Actions sets no
-	// CI_DEFAULT_BRANCH, and actions/checkout never runs `git remote
-	// set-head`, so origin/HEAD is unconfigured too).
-	return "cannot determine the default branch (no CI_DEFAULT_BRANCH, no configured git remote HEAD, and no single unambiguous local origin/main or origin/master ref) — failing closed; run `git remote set-head origin <branch>` to configure it"
+	return specstate.UnresolvedDefaultBranchMessage(ctx, root)
 }
 
 // runBuildVerb dispatches `verdi build <subcommand>`. There is exactly one

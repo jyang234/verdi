@@ -58,7 +58,7 @@ var diagramModeStampLabels = map[boardModeKind]string{
 	modeReadOnly:  "read-only · diagram",
 }
 
-var diagramEditorPageTemplate = template.Must(template.New("boarddiagram").Parse(`<!doctype html>
+var diagramEditorPageTemplate = template.Must(template.New("boarddiagram").Funcs(shellFuncs).Parse(`<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
@@ -81,6 +81,7 @@ var diagramEditorPageTemplate = template.Must(template.New("boarddiagram").Parse
 <div id="diagram-editor-region">
 {{.Region}}
 </div>
+{{buildFooter}}
 {{.Dialogs}}
 <script>
 window.__DIAGRAM__ = {{.StateJSON}};

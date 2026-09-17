@@ -172,6 +172,29 @@ func TestDecodeRecord_RefusesSemanticallyImpossibleRecords(t *testing.T) {
 			corrupt: func(r *Record) { r.BaseCommit = "HEAD" },
 			want:    "base_commit",
 		},
+		{
+			name:    "format outside the closed vocabulary",
+			corrupt: func(r *Record) { r.Format = "yaml-v9" },
+			want:    `record format "yaml-v9" is not one of`,
+		},
+		{
+			name:    "profile_primary_digest set for a format with no bound reference profile",
+			corrupt: func(r *Record) { r.ProfilePrimaryDigest = f13PrimarySHA256 },
+			want:    `is set but format "markdown-v1" names no pinned reference profile`,
+		},
+		{
+			name:    "f13-reference-v1 format missing its pinned profile digest",
+			corrupt: func(r *Record) { r.Format = FormatF13Reference },
+			want:    `must be exactly the "f13-reference-v1" profile's pinned primary`,
+		},
+		{
+			name: "f13-reference-v1 format with a mismatched profile digest",
+			corrupt: func(r *Record) {
+				r.Format = FormatF13Reference
+				r.ProfilePrimaryDigest = strings.Repeat("a", 64)
+			},
+			want: `must be exactly the "f13-reference-v1" profile's pinned primary`,
+		},
 	}
 
 	for _, tc := range cases {
@@ -205,6 +228,34 @@ func multiSourceRequest() Request {
 		Data:  []byte("Background the operator retained alongside the primary, mapped to nothing.\n"),
 	})
 	return req
+}
+
+// manualRequest is a fully ready manual-v1 Request: manual-v1 "supplies no
+// automatic mappings at all" (spec-import-contract.md), so problem, outcome
+// and the one acceptance criterion all come from explicit user-added
+// mappings (no SourceID) rather than any recognized structure, and the
+// primary's own bytes are entirely retained-only. This gives manual-v1 the
+// same publish-level (Apply) coverage every other format already has in
+// this table.
+func manualRequest() Request {
+	problemText := "A manually added problem statement with no source backing."
+	outcomeText := "A manually added outcome statement with no source backing."
+	ac1Text := "A manually added acceptance criterion with no source backing."
+	return Request{
+		Schema:  RequestSchema,
+		Target:  Target{Slug: "manual-feature", Class: "feature", Title: "Manual Feature"},
+		Format:  FormatManualV1,
+		Primary: "source",
+		Sources: []Source{
+			{ID: "source", Label: "sample.md", Data: []byte("Retained supporting text, mapped to nothing.\n")},
+		},
+		Mappings: []Mapping{
+			{Target: "problem", Text: &problemText},
+			{Target: "outcome", Text: &outcomeText},
+			{Target: "ac-1", Text: &ac1Text, Evidence: []string{"static", "attestation"}},
+		},
+		RetainUnmapped: true,
+	}
 }
 
 // TestDecodeRecord_AcceptsEveryConformingRecordShape is the strictness
@@ -241,6 +292,7 @@ func TestDecodeRecord_AcceptsEveryConformingRecordShape(t *testing.T) {
 		"deferral":      deferred,
 		"source-backed": sourceBacked,
 		"multi-source":  multiSourceRequest(),
+		"manual":        manualRequest(),
 	}
 	names := make([]string, 0, len(shapes))
 	for name := range shapes {
@@ -252,10 +304,18 @@ func TestDecodeRecord_AcceptsEveryConformingRecordShape(t *testing.T) {
 	dispositions := map[string]bool{}
 	evidenceKinds := map[string]bool{}
 	transforms := map[string]bool{}
+	formats := map[string]bool{}
 	for _, name := range names {
 		t.Run(name, func(t *testing.T) {
 			repo := buildImportRepo(t)
 			_, record := publishedRecord(t, repo.Dir, shapes[name])
+			formats[record.Format] = true
+			if !validFormats[record.Format] {
+				t.Fatalf("record.Format = %q, want one of the closed formats", record.Format)
+			}
+			if record.ProfilePrimaryDigest != "" {
+				t.Fatalf("record.ProfilePrimaryDigest = %q, want absent: shape %q names no reference profile", record.ProfilePrimaryDigest, name)
+			}
 			for _, f := range record.Fields {
 				origins[f.Origin] = true
 				for _, kind := range f.Evidence {
@@ -307,6 +367,11 @@ func TestDecodeRecord_AcceptsEveryConformingRecordShape(t *testing.T) {
 		})
 	}
 
+	for _, format := range []string{FormatMarkdownV1, FormatNative, FormatManualV1} {
+		if !formats[format] {
+			t.Errorf("no published record exercised format %q", format)
+		}
+	}
 	for _, origin := range []string{OriginCopiedSource, OriginUserAdded, OriginGeneratedDeferral} {
 		if !origins[origin] {
 			t.Errorf("no published record exercised origin %q; the strictness table may be policing an unreachable vocabulary", origin)

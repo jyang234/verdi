@@ -42,16 +42,23 @@ func policyForbiddenInput() asdShellInput {
 		Branch:         "design/x",
 		StateFormal:    "proposed",
 		DesignWired:    true,
-		// designapp forwards draftmutation's Error() form: "<code>: <detail>".
-		CapsFailure: &DesignFailure{Classification: "verdict", Code: "policy-forbidden", Detail: "policy-forbidden: project has not adopted policy authority"},
+		// designapp forwards draftmutation's own BARE Detail here, never its
+		// Error() form ("<code>: <detail>") — Code already carries
+		// "policy-forbidden" separately, so embedding it again in Detail
+		// would double the prefix once a caller renders "Code: Detail"
+		// (ac-5, spec/uat-round-1; internal/designapp/outcome.go's
+		// translateDraftmutationError).
+		CapsFailure: &DesignFailure{Classification: "verdict", Code: "policy-forbidden", Detail: "project has not adopted policy authority"},
 	}
 }
 
 // noDesignAssistanceDetail is ResolvePolicyGrant's OTHER policy-forbidden
 // refusal (internal/draftmutation/policy.go): the effective policy
 // resolved — adopted and sealed — but carries no design_assistance
-// payload. Same code, materially different meaning.
-const noDesignAssistanceDetail = "policy-forbidden: effective policy has no design_assistance authority"
+// payload. Same code, materially different meaning. Bare, like
+// policyForbiddenInput's Detail above — never the "policy-forbidden: "-
+// prefixed Error() form.
+const noDesignAssistanceDetail = "effective policy has no design_assistance authority"
 
 func noDesignAssistanceView() *asdView {
 	v := testASDView()
@@ -59,6 +66,53 @@ func noDesignAssistanceView() *asdView {
 	in.CapsFailure = &DesignFailure{Classification: "verdict", Code: "policy-forbidden", Detail: noDesignAssistanceDetail}
 	v.Shell = deriveASDShell(in)
 	return v
+}
+
+// TestPolicyConcern_WitnessCarriesSinglePrefix is the exact regression for
+// the UAT-observed board readiness panel defect (ac-5, spec/uat-round-1,
+// co-1): the context/policy concern's Witnesses entry is Code + ": " +
+// Detail, rendered verbatim into the board's readiness panel
+// (boardshellrender.go's "Witnesses" list). Before the fix, designapp
+// forwarded draftmutation's own Error() form as Detail, so this
+// concatenation doubled the prefix to "policy-forbidden: policy-forbidden:
+// ...". Both policy-forbidden discriminants (genuine non-adoption and
+// adopted-but-no-design_assistance) are pinned to their single-prefix
+// exact string, not merely a substring match.
+func TestPolicyConcern_WitnessCarriesSinglePrefix(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		detail string
+		want   string
+	}{
+		{
+			name:   "not-adopted",
+			detail: "project has not adopted policy authority",
+			want:   "policy-forbidden: project has not adopted policy authority",
+		},
+		{
+			name:   "no-design-assistance",
+			detail: noDesignAssistanceDetail,
+			want:   "policy-forbidden: effective policy has no design_assistance authority",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			in := policyForbiddenInput()
+			in.CapsFailure = &DesignFailure{Classification: "verdict", Code: "policy-forbidden", Detail: tc.detail}
+			shell := deriveASDShell(in)
+			var row *asdConcern
+			for i := range shell.All {
+				if shell.All[i].ID == "context/policy" {
+					row = &shell.All[i]
+				}
+			}
+			if row == nil {
+				t.Fatal("no context/policy concern")
+			}
+			if len(row.Witnesses) != 1 || row.Witnesses[0] != tc.want {
+				t.Fatalf("Witnesses = %v, want exactly [%q] (single package prefix)", row.Witnesses, tc.want)
+			}
+		})
+	}
 }
 
 // TestPolicyGuide_AdoptedPolicyWithoutDesignAssistance_NeverDescribedAsAbsent
@@ -416,7 +470,7 @@ func TestPolicyConcern_RowsHonorBoardMode(t *testing.T) {
 		detail string
 		keep   string
 	}{
-		{"not-adopted", "policy-forbidden: project has not adopted policy authority", "no adopted policy authority"},
+		{"not-adopted", "project has not adopted policy authority", "no adopted policy authority"},
 		{"no-design-assistance", noDesignAssistanceDetail, "effective policy has no design_assistance authority"},
 	}
 	for _, k := range kinds {

@@ -1,6 +1,7 @@
 package policyauthority
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -16,8 +17,18 @@ func TestLoad_IncompleteAdoption(t *testing.T) {
 	if err == nil {
 		t.Fatal("Load() succeeded, want ErrIncompleteAdoption")
 	}
+	if !errors.Is(err, ErrIncompleteAdoption) {
+		t.Fatalf("Load() error = %v, want errors.Is(err, ErrIncompleteAdoption)", err)
+	}
 	if !strings.Contains(err.Error(), "incomplete adoption") {
 		t.Fatalf("error = %v, want incomplete-adoption text", err)
+	}
+	// ac-5 (spec/uat-round-1): the "policyauthority: " package prefix must
+	// appear exactly once — Load must return ErrIncompleteAdoption
+	// unwrapped, never re-prefixed with a second "policyauthority: ".
+	const want = "policyauthority: .verdi/policy/ exists but constitution.md is missing (incomplete adoption)"
+	if err.Error() != want {
+		t.Fatalf("Load() error = %q, want %q (single package prefix)", err.Error(), want)
 	}
 }
 
