@@ -2,14 +2,18 @@ package workbench
 
 // Unit coverage for the ASD workbench's derivation and strictness seams:
 // the four-area shell projection (SI-125 idioms over this board's typed
-// facts), the strict pre-application body grammar (design §3.2), and the
-// fixed-set route/action inventory (SI-167).
+// facts), the wiring that feeds that projection from one real stored spec
+// (buildASDView), the strict pre-application body grammar (design §3.2),
+// and the fixed-set route/action inventory (SI-167).
 
 import (
+	"context"
 	"reflect"
 	"sort"
 	"strings"
 	"testing"
+
+	"github.com/jyang234/verdi/internal/artifact"
 )
 
 func TestDeriveASDShell(t *testing.T) {
@@ -442,5 +446,199 @@ func TestBoardActionInventoryRefusesUnknownGrowth(t *testing.T) {
 	}
 	if len(suffixes) != 6 {
 		t.Errorf("route table has %d rows, want exactly 6 (fixed set)", len(suffixes))
+	}
+}
+
+// --- the wall-side claim wiring, from stored frontmatter -----------------
+
+// claimWallSpec is a draft feature wall carrying the exact shape ac-10
+// speaks about: two declared open questions, one of them claimed by TWO
+// spike stubs (declared zeta-first, so the claim ordering is the
+// derivation's own sort and not the file's order), the other claimed by
+// nothing, plus one plain coverage stub that claims an acceptance
+// criterion and never a question.
+const claimWallSpec = `---
+id: spec/claim-wall
+kind: spec
+class: feature
+title: "Claim wall"
+status: draft
+owners: [platform-team]
+problem: { text: "p", anchor: "#problem" }
+outcome: { text: "o", anchor: "#outcome" }
+acceptance_criteria:
+  - { id: ac-1, text: "ac one", evidence: [attestation], anchor: "#ac-1" }
+open_questions:
+  - { id: oq-1, text: "which decline reasons may be shown verbatim?", anchor: "#oq-1" }
+  - { id: oq-2, text: "what refresh-window SLA applies?", anchor: "#oq-2" }
+stubs:
+  - { slug: plain-coverage-stub, acceptance_criteria: [ac-1] }
+  - { slug: zeta-spike, spike: true, resolves: [oq-2] }
+  - { slug: alpha-spike, spike: true, resolves: [oq-2] }
+---
+# Claim wall
+
+## Problem
+
+Prose.
+
+## Outcome
+
+Prose.
+
+## ac-1
+
+Prose.
+
+## oq-1
+
+Prose.
+
+## oq-2
+
+Prose.
+`
+
+const claimWallName = "claim-wall"
+
+const claimWallPlainStubEntry = "{ slug: plain-coverage-stub, acceptance_criteria: [ac-1] }"
+
+func newClaimWallFixture(t *testing.T) string {
+	t.Helper()
+	return buildAuthoringFixture(t, "design/"+claimWallName,
+		map[string]string{".verdi/.gitignore": "data/\n"},
+		map[string]string{
+			".verdi/specs/active/" + claimWallName + "/spec.md": claimWallSpec,
+		})
+}
+
+// shellConcerns indexes a rendered shell's rows by concern id.
+func shellConcerns(shell asdShell) map[string]asdConcern {
+	byID := make(map[string]asdConcern, len(shell.All))
+	for _, c := range shell.All {
+		byID[c.ID] = c
+	}
+	return byID
+}
+
+// TestBuildASDView_SpikeClaimedQuestions is the WIRING witness for ac-10
+// on the wall (PLAN.md §7 I-128 option (a)): deriveASDShell's own unit
+// tests hand it asdObjectFacts directly, so nothing proved that the view
+// builder reads `stubs:` out of the stored frontmatter at all. This case
+// starts at one real spec.md in a real store and asserts the rendered
+// shell — the claimed question's exact sentences and witnesses, the
+// unclaimed question's unchanged blocking guidance, and the plain stub's
+// silence.
+func TestBuildASDView_SpikeClaimedQuestions(t *testing.T) {
+	root := newClaimWallFixture(t)
+	s := &boardSpecServer{root: root}
+	ctx := context.Background()
+
+	_, _, asd, err := s.loadASD(ctx, claimWallName)
+	if err != nil {
+		t.Fatalf("loadASD: %v", err)
+	}
+	byID := shellConcerns(asd.Shell)
+
+	claimed, ok := byID["shape/question/oq-2"]
+	if !ok {
+		t.Fatalf("no shape/question/oq-2 concern in %+v", asd.Shell.All)
+	}
+	if claimed.State != asdStateUnproven || claimed.Blocking {
+		t.Fatalf("claimed question = %+v, want unproven and non-blocking", claimed)
+	}
+	wantSummary := "Open question oq-2 is claimed by spike stubs alpha-spike, zeta-spike and remains unresolved: what refresh-window SLA applies?"
+	if claimed.Summary != wantSummary {
+		t.Fatalf("claimed summary =\n  %q\nwant\n  %q", claimed.Summary, wantSummary)
+	}
+	wantGuidance := "No wall edit is required to accept: the claiming spike stubs answer it after acceptance."
+	if claimed.Guidance != wantGuidance {
+		t.Fatalf("claimed guidance =\n  %q\nwant\n  %q", claimed.Guidance, wantGuidance)
+	}
+	wantWitnesses := []string{"declared open question oq-2", "alpha-spike", "zeta-spike"}
+	if !reflect.DeepEqual(claimed.Witnesses, wantWitnesses) {
+		t.Fatalf("claimed witnesses = %q, want %q", claimed.Witnesses, wantWitnesses)
+	}
+
+	unclaimed, ok := byID["shape/question/oq-1"]
+	if !ok {
+		t.Fatalf("no shape/question/oq-1 concern in %+v", asd.Shell.All)
+	}
+	if !unclaimed.Blocking {
+		t.Fatalf("unclaimed question = %+v, want blocking", unclaimed)
+	}
+	wantUnclaimedGuidance := "Resolve it on the wall: edit or remove oq-1, or graduate a decision that answers it."
+	if unclaimed.Guidance != wantUnclaimedGuidance {
+		t.Fatalf("unclaimed guidance =\n  %q\nwant\n  %q", unclaimed.Guidance, wantUnclaimedGuidance)
+	}
+	if len(unclaimed.Witnesses) != 1 || unclaimed.Witnesses[0] != "declared open question oq-1" {
+		t.Fatalf("unclaimed witnesses = %q, want the declaration alone", unclaimed.Witnesses)
+	}
+
+	// The plain coverage stub claims an acceptance criterion, so it never
+	// reaches a question row — not in a summary, not as a witness.
+	for _, c := range asd.Shell.All {
+		if strings.Contains(c.Summary, "plain-coverage-stub") {
+			t.Fatalf("%s summary names the plain stub: %q", c.ID, c.Summary)
+		}
+		for _, w := range c.Witnesses {
+			if w == "plain-coverage-stub" {
+				t.Fatalf("%s witnesses the plain stub: %q", c.ID, c.Witnesses)
+			}
+		}
+	}
+}
+
+// TestBuildASDView_NonSpikeStubNeverClaims pins the view builder's
+// fail-closed half. A plain stub CANNOT legally carry `resolves` — the
+// decode seam refuses that frontmatter outright (02 §Kind registry, DC-4,
+// asserted here) — so the builder's spike test is the defense behind a
+// refused state: were such a stub to reach it anyway, the question it
+// names stays the ordinary blocking unclaimed row.
+func TestBuildASDView_NonSpikeStubNeverClaims(t *testing.T) {
+	fmBytes, _, err := artifact.SplitFrontmatter([]byte(claimWallSpec))
+	if err != nil {
+		t.Fatalf("SplitFrontmatter: %v", err)
+	}
+	illegal := strings.Replace(string(fmBytes), claimWallPlainStubEntry,
+		"{ slug: plain-coverage-stub, acceptance_criteria: [ac-1], resolves: [oq-1] }", 1)
+	if illegal == string(fmBytes) {
+		t.Fatal("the plain-stub entry moved: this case never built the refused frontmatter")
+	}
+	if _, err := artifact.DecodeSpec([]byte(illegal)); err == nil || !strings.Contains(err.Error(), "resolves requires spike") {
+		t.Fatalf("DecodeSpec(plain stub with resolves) err = %v, want the DC-4 refusal", err)
+	}
+
+	root := newClaimWallFixture(t)
+	s := &boardSpecServer{root: root}
+	ctx := context.Background()
+	proj, git, _, extras, err := s.loadBoard(ctx, claimWallName)
+	if err != nil {
+		t.Fatalf("loadBoard: %v", err)
+	}
+	// The refused shape, injected past the decode seam.
+	extras.fm.Stubs = append(extras.fm.Stubs, artifact.Stub{
+		Slug:               "smuggled-plain-stub",
+		AcceptanceCriteria: []string{"ac-1"},
+		Resolves:           []string{"oq-1"},
+	})
+	view, err := s.buildASDView(ctx, claimWallName, proj, git, extras.raw, extras.fm, extras.state)
+	if err != nil {
+		t.Fatalf("buildASDView: %v", err)
+	}
+	unclaimed, ok := shellConcerns(view.Shell)["shape/question/oq-1"]
+	if !ok {
+		t.Fatalf("no shape/question/oq-1 concern in %+v", view.Shell.All)
+	}
+	if !unclaimed.Blocking {
+		t.Fatalf("oq-1 = %+v, want the blocking unclaimed row: a non-spike stub claims nothing", unclaimed)
+	}
+	if strings.Contains(unclaimed.Summary, "smuggled-plain-stub") || strings.Contains(unclaimed.Summary, "claimed") {
+		t.Fatalf("oq-1 summary = %q, want the unclaimed sentence", unclaimed.Summary)
+	}
+	for _, w := range unclaimed.Witnesses {
+		if w == "smuggled-plain-stub" {
+			t.Fatalf("oq-1 witnesses = %q, want no claim witness", unclaimed.Witnesses)
+		}
 	}
 }
