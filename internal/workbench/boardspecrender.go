@@ -1353,10 +1353,13 @@ func renderBoardDialogs(p *BoardProjection) string {
 		// creation form (spec/creation-form ac-3 — CreateFields is only
 		// attached on the sealed accepted feature wall, the same gate the
 		// create action enforces), and the revise dialog (spec/uat-round-1
-		// ac-11), which EVERY sealed accepted feature wall carries — so the
-		// wall's class and effective status alone decide; the other two
-		// ride inside.
-		if p.Class == string(artifact.ClassFeature) && p.Status == "accepted-pending-build" {
+		// ac-11). The revise dialog follows the SAME decision its panel
+		// does — renderBoardRegion renders the panel only in its read-only
+		// room (a review-mode wall is a mirror and offers no Revise), so
+		// revise here is that room plus the wall's class and effective
+		// status, never a dead hidden dialog under review.
+		revise := p.Mode == modeReadOnly
+		if p.Class == string(artifact.ClassFeature) && p.Status == "accepted-pending-build" && (len(p.StubViews) > 0 || len(p.CreateFields) > 0 || revise) {
 			var b strings.Builder
 			b.WriteString(`
 <div class="modal-backdrop" id="modal-backdrop" hidden></div>
@@ -1370,7 +1373,9 @@ func renderBoardDialogs(p *BoardProjection) string {
 			if len(p.CreateFields) > 0 {
 				writeCreateDialog(&b, p)
 			}
-			writeReviseDialog(&b, p)
+			if revise {
+				writeReviseDialog(&b, p)
+			}
 			return b.String()
 		}
 		return ""

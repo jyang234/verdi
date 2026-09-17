@@ -458,10 +458,13 @@ func TestBoardRender_ReviseVocabulary(t *testing.T) {
 		t.Errorf("revise affordance does not speak the renamed class word:\n%s", body)
 	}
 	start := strings.Index(body, `id="revise-dialog"`)
+	if start < 0 {
+		t.Fatalf("revise dialog not rendered")
+	}
 	end := strings.Index(body[start:], `</div>
 `)
-	if start < 0 || end < 0 {
-		t.Fatalf("revise dialog not rendered")
+	if end < 0 {
+		t.Fatalf("revise dialog not terminated")
 	}
 	dialog := body[start : start+end]
 	// Attribute values (ids, testids, the design/ branch) are identity and
@@ -472,5 +475,39 @@ func TestBoardRender_ReviseVocabulary(t *testing.T) {
 	}
 	if !strings.Contains(visible, "Initiative") {
 		t.Errorf("revise dialog prose does not speak the renamed class word:\n%s", visible)
+	}
+}
+
+// TestBoardRender_ReviseAbsentInReviewMode: the revise dialog follows the
+// SAME decision the Revise panel does — renderBoardRegion renders the
+// panel only in its read-only room, so an accepted feature wall mirrored
+// under review (modeReview) emits neither the panel nor a dead hidden
+// dialog; the read-only room emits both.
+func TestBoardRender_ReviseAbsentInReviewMode(t *testing.T) {
+	render := func(mode boardModeKind) string {
+		proj := &BoardProjection{
+			Spec:   "review-probe",
+			Title:  "Review probe",
+			Mode:   mode,
+			Status: "accepted-pending-build",
+			Class:  "feature",
+		}
+		page, err := renderBoardSpecPage(proj, &boardGitState{}, testASDView())
+		if err != nil {
+			t.Fatalf("renderBoardSpecPage(%s): %v", mode, err)
+		}
+		return string(page)
+	}
+	review := render(modeReview)
+	for _, w := range []string{`id="revise-dialog"`, `data-testid="revise-spec-btn"`} {
+		if strings.Contains(review, w) {
+			t.Errorf("review-mode accepted wall emits %s; the revise dialog and panel must share one gate", w)
+		}
+	}
+	readOnly := render(modeReadOnly)
+	for _, w := range []string{`id="revise-dialog"`, `data-testid="revise-spec-btn"`} {
+		if !strings.Contains(readOnly, w) {
+			t.Errorf("read-only accepted wall lacks %s", w)
+		}
 	}
 }

@@ -147,3 +147,23 @@ None code-wise. Per I-129's ledger row the 08-revision-notes entry lands
 with the merge (controller). boardspecasd_test.go's +1 line and the
 internal/dex stylesheet edit are the two touches outside the literal
 write set for the controller to accept or redirect.
+
+## Minor closure (Opus lane review at fec11e8f: ACCEPT-WITH-MINOR)
+
+F2 — the revise dialog now follows the SAME decision its panel does:
+renderBoardDialogs gates writeReviseDialog on `p.Mode == modeReadOnly`
+(renderBoardRegion's default room, the only one that renders the panel),
+and the chrome predicate is back to its original shape plus that room —
+a review-mode accepted feature wall emits neither panel nor dialog. No
+new helper; the lifecycle-decision audit stays green. RED observed first:
+`TestBoardRender_ReviseAbsentInReviewMode` — "review-mode accepted wall
+emits id="revise-dialog"", exit 1; GREEN after the fix.
+F3 — `TestBoardRender_ReviseVocabulary` guards `start < 0` before slicing.
+F1/F4/F5 accepted as disclosed, untouched (e2e file not touched; no
+Playwright rerun needed).
+
+Commands (fresh, working tree of this commit): `go test -race -count=1
+./internal/workbench/...` PASS exit 0, 357 top-level / 714 incl. subtests,
+0 failures; `go test -count=1 ./internal/specalign/` (FULL) PASS exit 0,
+69 top-level; `gofmt -l .` empty; `go vet ./internal/workbench/...` exit
+0; `golangci-lint run ./internal/workbench/...` "0 issues.", exit 0.
