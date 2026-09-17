@@ -963,7 +963,7 @@
     if (el) el.hidden = true;
   }
   function hideAllDialogs() {
-    ["edge-picker", "edge-confirm", "commit-dialog", "branch-guard", "graduate-menu", "branch-menu", "create-dialog"].forEach(hide);
+    ["edge-picker", "edge-confirm", "commit-dialog", "branch-guard", "graduate-menu", "branch-menu", "create-dialog", "revise-dialog"].forEach(hide);
     var bd = document.getElementById("modal-backdrop");
     if (bd) bd.hidden = true;
   }
@@ -2185,6 +2185,7 @@
   function onInput(e) {
     if (e.target && e.target.id === "pin-search") fetchPinResults(e.target.value);
     if (e.target && e.target.id === "create-name") onCreateNameInput(e.target);
+    if (e.target && e.target.id === "revise-name") onReviseNameInput(e.target);
     if (e.target && e.target.id === "commit-message") refreshCommitLifecycleNote();
   }
 
@@ -2329,6 +2330,75 @@
         // nothing typed is lost to a failed submit.
         setStatus("");
         createError(err.message);
+      });
+  }
+
+  // -- the revise dialog (spec/uat-round-1 ac-11, board half) ----------------
+  //
+  // The sealed accepted feature wall's Revise action: the server composes
+  // the superseding successor (internal/supersede — the same operation
+  // `verdi design start --supersedes` runs) and cuts its design branch
+  // without moving this checkout. This script only opens/closes the
+  // dialog, live-writes the branch tab, posts the name, and — on success
+  // — links to the successor's own board at the address the server
+  // returned. Every refusal is the server's own wording, landed in the
+  // dialog's error slot; nothing typed is lost. All display prose arrives
+  // server-resolved on the dialog's data attributes.
+
+  function reviseError(msg) {
+    var el = document.getElementById("revise-error");
+    if (!el) return;
+    el.textContent = msg || "";
+    el.hidden = !msg;
+  }
+
+  function onReviseNameInput(input) {
+    var name = input.value.trim();
+    var tab = document.getElementById("revise-branch-tab");
+    if (tab) tab.textContent = "design/" + (name || "…");
+  }
+
+  function openReviseDialog() {
+    reviseError("");
+    var success = document.getElementById("revise-success");
+    if (success) success.hidden = true;
+    var ok = document.getElementById("revise-ok");
+    if (ok) ok.hidden = false;
+    show("revise-dialog");
+    var input = document.getElementById("revise-name");
+    if (input) {
+      // Every open starts from the server's prefilled default (the next
+      // -v<n>); the operator may replace it entirely.
+      input.value = input.getAttribute("data-default") || input.value;
+      onReviseNameInput(input);
+      input.focus();
+      input.select();
+    }
+  }
+
+  function submitRevise() {
+    var dlg = document.getElementById("revise-dialog");
+    if (!dlg) return;
+    var name = document.getElementById("revise-name").value.trim();
+    reviseError("");
+    setStatus("cutting branch…");
+    api("revise", { name: name })
+      .then(function (data) {
+        setStatus("");
+        // The receipt: server-resolved copy with the minted identities
+        // substituted in, and the link to the successor's board at the
+        // address the server named — never composed by hand here.
+        var text = (dlg.getAttribute("data-receipt-body") || "")
+          .replace(/\{branch\}/g, data.branch || "design/" + name)
+          .replace(/\{name\}/g, name);
+        document.getElementById("revise-success-text").textContent = text;
+        document.getElementById("revise-success-link").setAttribute("href", data.boardUrl || "#");
+        document.getElementById("revise-success").hidden = false;
+        document.getElementById("revise-ok").hidden = true;
+      })
+      .catch(function (err) {
+        setStatus("");
+        reviseError(err.message);
       });
   }
 
@@ -2642,6 +2712,15 @@
         submitCreate();
         return;
       case "create-cancel":
+        hideAllDialogs();
+        return;
+      case "revise-spec-btn":
+        openReviseDialog();
+        return;
+      case "revise-ok":
+        submitRevise();
+        return;
+      case "revise-cancel":
         hideAllDialogs();
         return;
     }

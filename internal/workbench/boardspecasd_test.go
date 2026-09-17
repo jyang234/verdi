@@ -398,6 +398,7 @@ func TestBoardActionInventory(t *testing.T) {
 		"pin",
 		"position",
 		"relates",
+		"revise",
 		"sticky",
 		"sticky-graduate",
 		"sticky-position",
