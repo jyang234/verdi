@@ -2185,6 +2185,29 @@
   function onInput(e) {
     if (e.target && e.target.id === "pin-search") fetchPinResults(e.target.value);
     if (e.target && e.target.id === "create-name") onCreateNameInput(e.target);
+    if (e.target && e.target.id === "commit-message") refreshCommitLifecycleNote();
+  }
+
+  // -- the commit dialog's lifecycle note (spec/uat-round-1 ac-9) -----------
+  //
+  // While the message contains a lifecycle word the commit cannot make
+  // true (accepted/closed/merged/superseded and their verb forms), the
+  // note beside the field shows; it leaves when the words do. Advisory
+  // only: the Commit button is never disabled and the payload is
+  // unchanged. The pattern is the server's — compiled once from the
+  // note's data-pattern attribute, the same source text the Go matcher
+  // is proven against — never a second regex kept by hand here.
+  var commitLifecycleRE = null;
+  function refreshCommitLifecycleNote() {
+    var input = document.getElementById("commit-message");
+    var note = document.getElementById("commit-lifecycle-note");
+    if (!input || !note) return;
+    if (!commitLifecycleRE) {
+      // "(?!)" never matches: a missing attribute means no note, not a
+      // note on every message.
+      commitLifecycleRE = new RegExp(note.getAttribute("data-pattern") || "(?!)", "i");
+    }
+    note.hidden = !commitLifecycleRE.test(input.value);
   }
 
   // -- the creation form (spec/creation-form ac-3) ---------------------------
@@ -2576,15 +2599,29 @@
         pendingSticky = null;
         hideAllDialogs();
         return;
-      case "commit-push-btn":
-        document.getElementById("commit-message").value = "";
+      case "commit-push-btn": {
+        // spec/uat-round-1 ac-9: every open starts from the server's
+        // proposal-shaped template ("Propose spec/<name>: "), caret at
+        // the end so the summary is the next keystroke; the author may
+        // replace it entirely. Nothing persists across opens (as before).
+        var cm = document.getElementById("commit-message");
+        cm.value = cm.getAttribute("data-template") || "";
         show("commit-dialog");
-        document.getElementById("commit-message").focus();
+        cm.focus();
+        cm.setSelectionRange(cm.value.length, cm.value.length);
+        refreshCommitLifecycleNote();
         return;
+      }
       case "commit-dialog-ok": {
-        var msg = document.getElementById("commit-message").value.trim();
-        if (!msg) {
-          document.getElementById("commit-message").focus();
+        var cmInput = document.getElementById("commit-message");
+        var msg = cmInput.value.trim();
+        // The untouched template ("Propose spec/<name>: ") trims to a
+        // truthy string; treating it as empty keeps one click from
+        // committing and pushing a summary-less, colon-terminated subject
+        // (ac-9 review minor 2). Client-side only: the server's own
+        // message rule is unchanged.
+        if (!msg || msg === (cmInput.getAttribute("data-template") || "").trim()) {
+          cmInput.focus();
           return;
         }
         hideAllDialogs();
