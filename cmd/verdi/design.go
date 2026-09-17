@@ -606,7 +606,14 @@ func runDesignStart(ctx context.Context, root string, kind artifact.SpecClass, s
 		return 2
 	}
 
-	if err := gitx.AddAll(ctx, root); err != nil {
+	// UAT-033: stage exactly the scaffolded spec directory — never
+	// gitx.AddAll's `git add -A`, which swept every untracked-or-modified
+	// file anywhere in the checkout (a stray .DS_Store, a local sqlite,
+	// unrelated object blobs) into the scaffold commit and on into the spec
+	// PR. Mirrors accept.go's own D6-33 fix (acceptdiagram.go) and close.go's
+	// stageClosureSpec: gitx.AddPaths, never gitx.AddAll, for a ritual commit
+	// that must own only the paths it itself wrote.
+	if err := gitx.AddPaths(ctx, root, specDir); err != nil {
 		fmt.Fprintln(stderr, "design start:", err)
 		return 2
 	}
