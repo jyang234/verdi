@@ -81,6 +81,34 @@ test.describe("commit dialog: proposal template and lifecycle note", () => {
     await expect(dialog).toBeHidden();
   });
 
+  test("the untouched template is refused like an empty message: one click never commits a summary-less subject", async ({
+    page,
+  }) => {
+    const dialog = page.getByRole("dialog", { name: "Commit & push" });
+    const message = dialog.getByRole("textbox", { name: "Commit message" });
+    const indicator = page.getByTestId("uncommitted-indicator");
+    const dirtyBefore = await indicator.isVisible();
+
+    await page.getByRole("button", { name: "Commit & push" }).click();
+    await expect(message).toHaveValue(template);
+    await dialog.getByRole("button", { name: "Commit", exact: true }).click();
+    // "Propose spec/<name>: " trims to a truthy string, so without this
+    // rule a bare colon-terminated subject would be committed and pushed.
+    // The dialog stays open on the field, holding the template, and nothing
+    // was sent: the working-tree indicator is exactly as it was.
+    await expect(dialog).toBeVisible();
+    await expect(message).toBeFocused();
+    await expect(message).toHaveValue(template);
+    await expect(indicator).toBeVisible({ visible: dirtyBefore });
+    // Whitespace around the template earns nothing either.
+    await message.fill("  " + template + "  ");
+    await dialog.getByRole("button", { name: "Commit", exact: true }).click();
+    await expect(dialog).toBeVisible();
+    await expect(message).toBeFocused();
+    await page.keyboard.press("Escape");
+    await expect(dialog).toBeHidden();
+  });
+
   test("the empty message is still refused client-side exactly as before", async ({ page }) => {
     const dialog = page.getByRole("dialog", { name: "Commit & push" });
     const message = dialog.getByRole("textbox", { name: "Commit message" });

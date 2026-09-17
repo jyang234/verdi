@@ -2613,9 +2613,15 @@
         return;
       }
       case "commit-dialog-ok": {
-        var msg = document.getElementById("commit-message").value.trim();
-        if (!msg) {
-          document.getElementById("commit-message").focus();
+        var cmInput = document.getElementById("commit-message");
+        var msg = cmInput.value.trim();
+        // The untouched template ("Propose spec/<name>: ") trims to a
+        // truthy string; treating it as empty keeps one click from
+        // committing and pushing a summary-less, colon-terminated subject
+        // (ac-9 review minor 2). Client-side only: the server's own
+        // message rule is unchanged.
+        if (!msg || msg === (cmInput.getAttribute("data-template") || "").trim()) {
+          cmInput.focus();
           return;
         }
         hideAllDialogs();
