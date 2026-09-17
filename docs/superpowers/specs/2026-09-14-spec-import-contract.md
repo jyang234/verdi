@@ -156,8 +156,10 @@ still checked by existing lint. The UI can apply the user's selected kinds to
 several criteria together, clearly marked as user selection.
 
 `f13-reference-v1` binds the selected primary SHA-256
-`7c6d95d4aa516cf682e6d4a33d1c260f1c861d938d46559241a7c764bffca577` and the eight
-exact selectors in the reviewed `mechanical-field-map.json`. This is a named,
+`7c6d95d4aa516cf682e6d4a33d1c260f1c861d938d46559241a7c764bffca577` and the exact
+selectors in the reviewed `mechanical-field-map.json` (eight at first pinning;
+twelve single-claim selectors since spec/uat-round-1 ac-7 under dc-9,
+2026-09-16). This is a named,
 versioned reference profile, not a recognizer for all ATC plans. Changed primary
 bytes refuse that profile with guidance to use manual mapping or labeled Markdown.
 Supporting files stay whole retained-only units. Problem/outcome are absent.

@@ -69,7 +69,7 @@ test.describe("import record page: format and profile primary digest", () => {
     const base = await importBase(page);
     const slug = "gatekeeper-record-facts";
     const sources = [SPEC_IMPORT_FILES.F13_PRIMARY, ...SPEC_IMPORT_FILES.F13_SUPPORTS].map(source);
-    const mappings = Array.from({ length: 8 }, (_, i) => ({ target: `ac-${i + 1}`, evidence: ["attestation"] }));
+    const mappings = Array.from({ length: 12 }, (_, i) => ({ target: `ac-${i + 1}`, evidence: ["attestation"] }));
     const created = await importAtRequestLevel(page, base, {
       schema: "verdi.spec-import-request/v1",
       target: { slug, class: "feature", title: "Bounded gatekeeper state machine" },

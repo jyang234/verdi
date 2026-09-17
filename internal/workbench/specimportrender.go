@@ -61,6 +61,16 @@ const specImportCSS = `<style>
 .import-source-list, .import-mapping-list, .import-link-list { margin: 0.6rem 0; padding-left: 1.4rem; }
 .import-source-list li, .import-mapping-list li, .import-link-list li { margin: 0.4rem 0; padding: 0.4rem 0.6rem; border: 1px dashed var(--rule); border-radius: 4px; max-width: none; }
 .import-source-label { font-weight: 600; word-break: break-all; }
+.import-source-view { margin: 0.5rem 0 0.2rem; }
+.import-source-view > summary { cursor: pointer; font-size: 0.92rem; color: var(--muted-solid); }
+.import-source-text { white-space: pre-wrap; word-break: break-word; user-select: text; font-family: var(--mono); font-size: 0.85rem; line-height: 1.45; max-height: 24rem; overflow: auto; margin: 0.4rem 0; padding: 0.5rem 0.7rem; border: 1px solid var(--rule); border-radius: 4px; background: var(--code-bg, rgba(127,127,127,0.08)); max-width: none; }
+.import-source-text::selection { background: var(--accent); color: var(--card); }
+.import-map-controls { display: flex; flex-wrap: wrap; gap: 0.6rem; align-items: center; margin: 0.3rem 0; }
+.import-map-controls label { display: inline-flex; gap: 0.3rem; align-items: center; font-size: 0.95rem; }
+.import-map-note { margin: 0.2rem 0 0; font-size: 0.92rem; color: var(--muted-solid); max-width: none; }
+.import-map-note[data-refused="true"] { color: var(--fail-ink, #a4262c); }
+.import-mapping-excerpt { margin: 0.35rem 0 0; font-size: 0.9rem; color: var(--muted-solid); white-space: pre-wrap; word-break: break-word; max-width: none; }
+.import-mapping-excerpt q { font-family: var(--mono); color: var(--ink); }
 .import-inline { display: inline-flex; flex-wrap: wrap; gap: 0.6rem; align-items: center; margin-top: 0.3rem; }
 .import-inline label { display: inline-flex; gap: 0.3rem; align-items: center; font-size: 0.95rem; }
 .import-inline input[type="number"] { width: 6rem; }
@@ -143,7 +153,7 @@ func renderSpecImportPage(mdl *model.Model) ([]byte, error) {
 	b.WriteString(`<fieldset class="import-step"><legend>1. Source files</legend>`)
 	b.WriteString(`<label for="import-files">Source files</label>`)
 	b.WriteString(`<input type="file" id="import-files" data-testid="import-files" multiple>`)
-	b.WriteString(`<p class="field-hint">Explicit files only; folders, archives, URLs and commands are never read. Each file's label is its name, never a path. The first file is the primary source. Every other file can be kept whole with the import as reference material when you choose to keep the remaining source text (step 4), or mapped in Advanced. Optional line ranges are inclusive and start at 1.</p>`)
+	b.WriteString(`<p class="field-hint">Explicit files only; folders, archives, URLs and commands are never read. Each file's label is its name, never a path. The first file is the primary source. Every other file can be kept whole with the import as reference material when you choose to keep the remaining source text (step 4), or mapped in Advanced. Optional line ranges are inclusive and start at 1. Each file's text is shown beneath it exactly as read: select a passage, pick where it belongs (a statement, an existing object, or a new one), and choose Map selection; the byte range is computed for you and listed under Advanced.</p>`)
 	b.WriteString(`<ol id="import-source-list" data-testid="import-source-list" class="import-source-list" aria-label="Selected source files"></ol>`)
 	b.WriteString(`</fieldset>`)
 
@@ -175,7 +185,7 @@ func renderSpecImportPage(mdl *model.Model) ([]byte, error) {
 	b.WriteString(`<details id="import-advanced" data-testid="import-advanced" class="import-advanced"><summary>Advanced: manual field mappings (<span id="import-mapping-count">0</span>) and declared links (<span id="import-link-count">0</span>)</summary>`)
 	b.WriteString(`<p class="field-hint">Byte ranges, transforms and link refs live here. Ordinary choices made on the preview cards (evidence kinds, edited text, written statements) are recorded here as mappings, so the count includes them.</p>`)
 	b.WriteString(`<fieldset class="import-step" id="import-mappings-fieldset"><legend>Manual field mappings</legend>`)
-	b.WriteString(`<p class="field-hint">Override or add a field by hand: name the target (problem, outcome, or an ac-/co-/dc-/oq- id), then either select a byte range of a source with a transform or supply your own text, and choose evidence kinds for acceptance criteria. Offsets count UTF-8 bytes of the selected slice, start inclusive, end exclusive.</p>`)
+	b.WriteString(`<p class="field-hint">Override or add a field by hand: name the target (problem, outcome, or an ac-/co-/dc-/oq- id), then either select a byte range of a source with a transform or supply your own text, and choose evidence kinds for acceptance criteria. Offsets count UTF-8 bytes of the selected slice, start inclusive, end exclusive. Mappings made with Map selection in step 1 appear here with their computed range and the text they cover.</p>`)
 	b.WriteString(`<ol id="import-mapping-list" data-testid="import-mapping-list" class="import-mapping-list" aria-label="Explicit mappings"></ol>`)
 	b.WriteString(`<button type="button" id="import-add-mapping" data-testid="import-add-mapping">Add mapping</button>`)
 	b.WriteString(`</fieldset>`)
