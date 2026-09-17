@@ -119,7 +119,9 @@ var designOperations = []string{
 // legacyBoardActions is the pre-existing non-domain half of the action
 // inventory: annotation writes (boardio — the same owner MCP's
 // add_annotation uses), presentation layout (boardlayout), git affordances
-// (gitx), scaffolding (stubinstantiate/designscaffold), and the
+// (gitx), scaffolding (stubinstantiate/designscaffold), the sealed
+// wall's Revise action (internal/supersede — spec/uat-round-1 ac-11's
+// board half, I-129), and the
 // obligation-artifact arm of sticky-graduate (internal/evidence). Every
 // legacy DOMAIN spec-byte action (edit-text, edge, edge-delete,
 // edge-retype, stub-graduate, relates-graduate, ref-trash, object-trash,
@@ -134,6 +136,7 @@ var legacyBoardActions = []string{
 	"pin",
 	"position",
 	"relates",
+	"revise",
 	"sticky",
 	"sticky-graduate",
 	"sticky-position",
