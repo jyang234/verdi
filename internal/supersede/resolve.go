@@ -12,10 +12,11 @@ import (
 	"github.com/jyang234/verdi/internal/store"
 )
 
-// Reason is a Resolve refusal's classification — a distinguishable,
-// typed value (never only a prose-matched string) so a caller (the CLI
-// today; the board's Revise action, W3-C, later) can branch on WHY a
-// predecessor was refused without parsing Error() text.
+// Reason is a refusal's classification — a distinguishable, typed value
+// (never only a prose-matched string) so a caller (the CLI today; the
+// board's Revise action, W3-C, later) can branch on WHY a predecessor or a
+// successor name was refused without parsing Error() text. Resolve's own
+// reasons are below; ValidateSuccessorName's are in validate.go.
 type Reason string
 
 const (

@@ -20,6 +20,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -166,17 +167,25 @@ func cmdDesignStartSupersede(args []string, stdout, stderr io.Writer) int {
 // or the checkout switch, exactly like supersede.Resolve's own doc comment
 // states it must.
 func runDesignStartSupersede(ctx context.Context, root, predName, newName string, mdl *model.Model, runner upstream.Runner, goTest goTestRunner, stdout, stderr io.Writer) int {
-	newRef, err := artifact.ParseRef("spec/" + newName)
+	// The successor-side preconditions live in internal/supersede beside
+	// the predecessor guard (ValidateSuccessorName), so the board's Revise
+	// action reuses the identical checks rather than re-implementing them;
+	// this verb keeps its OWN wording for each refusal — the operator typed
+	// `--name`, and only the CLI knows that.
+	newRef, err := supersede.ValidateSuccessorName(root, newName)
 	if err != nil {
-		fmt.Fprintf(stderr, "design start --supersedes: --name %q is not a valid spec name: %v\n", newName, err)
+		var nerr *supersede.NameError
+		switch {
+		case errors.As(err, &nerr) && nerr.Reason == supersede.ReasonSuccessorExists:
+			fmt.Fprintf(stderr, "design start --supersedes: %s already exists\n", nerr.Path)
+		case errors.As(err, &nerr) && nerr.Reason == supersede.ReasonInvalidName:
+			fmt.Fprintf(stderr, "design start --supersedes: --name %q is not a valid spec name: %v\n", newName, errors.Unwrap(nerr))
+		default:
+			fmt.Fprintln(stderr, "design start --supersedes:", err)
+		}
 		return 2
 	}
-
 	specDir := store.ActiveSpecDir(root, newName)
-	if _, statErr := os.Stat(specDir); statErr == nil {
-		fmt.Fprintf(stderr, "design start --supersedes: %s already exists\n", specDir)
-		return 2
-	}
 
 	pred, err := supersede.Resolve(ctx, root, predName, mdl)
 	if err != nil {
