@@ -1,8 +1,7 @@
 # W3-C revise-board — ac-11 board half
 
 Status: Implemented and self-verified (every focused gate green at the
-code head 08c01c06; this report is the one commit after it). Awaiting
-independent review.
+code head 08c01c06; the report commits follow it). Awaiting review.
 Risk tier: 3 (provenance and immutable history)
 Base..Head: af1bbcaa..08c01c06 (code) + the report commit (branch agent/uat-r3-revise)
 
@@ -113,9 +112,9 @@ run — disclosed, not claimed as strict RED-first.
 ## GREEN commands and results (all at code head 08c01c06, fresh)
 
 - `go test -race -count=1 ./internal/workbench/...` — PASS, exit 0; 356
-  top-level tests, 713 incl. subtests, 0 failures (15 revise-lane
-  pass lines: Happy, ComposeFailureWritesNoRef, Refusals ×9 subtests,
-  ReviseSuccessorDefault, ReviseAffordance_Rendered, ReviseVocabulary).
+  top-level tests, 713 incl. subtests, 0 failures (15 revise-lane pass
+  lines: Happy, ComposeFailureWritesNoRef, Refusals ×9, SuccessorDefault,
+  Affordance_Rendered, ReviseVocabulary).
 - `go test -count=1 ./internal/specalign/` (FULL) — PASS, exit 0; 69
   top-level tests (TestVocabProseWitness, TestLifecycleDecisionSourceAudit
   and the guide-claims binding included).
@@ -140,12 +139,10 @@ Fix range and closure verdict: (leave blank)
   design-branch set would need to know.
 - `reviseSuccessorDefault` treats only a trailing `-v<n>` as a version
   (`x-v2-final` → `x-v2-final-v2`); the operator can replace the prefill.
-- Compose's failure text reaches the dialog verbatim, prefixed
-  `supersede: internal error:` — accurate (a composition defect), but not
-  operator-actionable prose; unchanged from the CLI's own relay.
-- `writeReviseDialog` reads `p.words.m.DisplayState` directly (classWords
-  has no state-word method); nil-safe, but a second state-word site should
-  add the method rather than repeat the reach-through.
+- Compose's failure text reaches the dialog verbatim (`supersede: internal
+  error: ...`) — accurate, not operator-actionable; same as the CLI's relay.
+- `writeReviseDialog` reaches `p.words.m.DisplayState` directly (classWords
+  has no state-word method); nil-safe, one site.
 
 ## Integration prerequisites
 
