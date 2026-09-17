@@ -357,3 +357,43 @@ All run from `verdi/` in this worktree, foreground:
   existing style rather than reformatting the file.
 - F3 (`fixtures.ts`'s "DESIGN_SPEC's one open question" comment, now two)
   remains open for the controller at integration, as dispatched.
+
+## Wave-gate follow-up
+
+Wave 3 gate on integrated head `4d618bf7` (this lane merged at `637b209c`)
+`make verify` failed one Playwright case:
+`e2e/tests/27-board-legibility.spec.ts:283` "a new sticky lands at the
+bottom of its type's lane", line 330 —
+`expect(qTop).toBe(oqBottom < 0 ? 40 : oqBottom + 24)` → Expected
+`1023.783`, Received `1023.78`. 313 other cases passed; suite 27 run alone
+on the same head passed 8/8.
+
+**Root cause (controller's determination, confirmed here):** this lane's
+enlarged `DESIGN_SPEC` fixture (`oq-2` card + `refresh-window-spike` stub
+card, contract part D) changed the board's obstacle map, moving an
+earlier full-suite drop onto a fractional y-coordinate
+(`boardlayout.ResolveDrop`'s distance-based collision resolution).
+The server persists and renders the full-precision value
+(`top:1023.783px`), but Chrome serializes CSS numbers to six significant
+figures, so `el.style.top` reads back `"1023.78px"` — a pre-existing
+exact-equality fragility on a browser-serialized float, newly exposed by
+this lane's own fixture change (not a defect in `boardlayout` or the
+fixture itself).
+
+**Fix (test-only, this commit):** in that one test, the two coordinate
+assertions (`qTop`/`cTop` against `oqBottom + 24`/`scratchBottom + 24`)
+changed from `toBe` to `toBeCloseTo(expected, 1)` (tolerance < 0.05), each
+with a one-line comment naming the six-significant-figure cause. No other
+`toBe` on a parsed style coordinate exists in that test; `toHaveCSS`
+lane-`x` assertions are untouched (fixed band positions, not
+collision-derived, and a different assertion mechanism). No product code,
+harness fixture, or other test file touched.
+
+**Verified:**
+- `cd e2e && VERDI_E2E_PORT_BASE=4490 npx playwright test tests/27-board-legibility.spec.ts`
+  → **8/8 passed** (29.7s).
+- `cd e2e && VERDI_E2E_PORT_BASE=4490 npx playwright test tests/20-board-drag-robustness.spec.ts tests/27-board-legibility.spec.ts`
+  (cumulative-state path: 20 drops/drags real cards on `DESIGN_SPEC`
+  before 27 runs) → **13/13 passed** (41.9s).
+- `git status --porcelain` → only `e2e/tests/27-board-legibility.spec.ts`;
+  no recording artifacts (`e2e/test-results/` gitignored, untracked).
