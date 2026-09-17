@@ -20,14 +20,23 @@ import { addSticky } from "./helpers";
 // comparators (current-focus area first, then blocking, violated, and
 // area/id order). A reordered, omitted, or extra concern — in either
 // inventory — fails these exact-array oracles. The sha256 semantic id is
-// the digest of committed fixture bytes and is therefore deterministic.
+// the digest of committed fixture bytes and is therefore deterministic —
+// it moved when ac-10's oq-2 + stubs: entries changed the candidate
+// content; the new value was captured from a real harness run, not typed
+// by hand.
 const SEMANTIC_ID =
-  "context/semantic/sha256:a42722bcbc7bf152d376083fab35c04b462cf3f6735880306e78e8bee1815d6a";
+  "context/semantic/sha256:9fe503eb5bb9fcaaf95da12b4f7b695c79abd6c8f793f4018e6c627895e8ef4d";
 
 // The exact focus order: the current-focus area (shape-proposal) leads.
+// shape/question/oq-2 (spec/uat-round-1 ac-10, PLAN.md §7 I-128) is a
+// spike-claimed open question: non-blocking/eventual, so it still groups
+// with the current-focus (shape-proposal) rows but sorts after
+// shape/provenance (blocking ties, current before eventual) — oq-1 stays
+// unclaimed, blocking/current, and first.
 const ATTENTION_QUEUE = [
   "shape/question/oq-1",
   "shape/provenance",
+  "shape/question/oq-2",
   "review/blocker/forge-facts-unavailable/merge",
   "review/blocker/obligation-author-vouch-unproven/merge/attestation/author-vouch",
   "context/verdict",
@@ -219,7 +228,7 @@ test("focus list shows exactly three priorities and the exact disclosed remainde
   // "Show fewer"; collapsing hides it again. No event is recorded.
   const more = page.locator("details.readiness-more");
   const summary = more.locator(".readiness-more-summary");
-  await expect(summary).toHaveText(/9 more items\s*Show fewer/); // both spans in DOM…
+  await expect(summary).toHaveText(/10 more items\s*Show fewer/); // both spans in DOM…
   await expect(more.locator(".readiness-more-closed")).toBeVisible();
   await expect(more.locator(".readiness-more-open")).toBeHidden();
 
@@ -229,8 +238,8 @@ test("focus list shows exactly three priorities and the exact disclosed remainde
   await expect(more.locator(".readiness-more-open")).toBeVisible();
   await expect(more.locator(".readiness-more-closed")).toBeHidden();
   const revealed = more.locator("[data-concern-id]");
-  await expect(revealed).toHaveCount(9);
-  for (let i = 0; i < 9; i++) {
+  await expect(revealed).toHaveCount(10);
+  for (let i = 0; i < 10; i++) {
     await expect(revealed.nth(i)).toHaveAttribute(
       "data-concern-id",
       ATTENTION_QUEUE[i + 3],
@@ -303,15 +312,42 @@ test("plain state labels pair with exact formal technical details", async ({
   await expect(unproven).toHaveCSS("border-top-style", "dashed");
 
   // A violated concern's technical details carry the exact formal facts.
+  // Index 3, not 2: shape/question/oq-2 (non-blocking, spike-claimed) now
+  // occupies index 2, ahead of this still-violated review blocker.
   await page.locator("details.readiness-more > summary").click();
   const blocker = page.locator(
-    `[data-concern-id="${ATTENTION_QUEUE[2]}"]`,
+    `[data-concern-id="${ATTENTION_QUEUE[3]}"]`,
   );
   await blocker.locator(".readiness-tech summary").click();
   const facts = blocker.locator(".readiness-tech-facts");
   await expect(facts).toContainText("violated-with-witness");
-  await expect(facts).toContainText(ATTENTION_QUEUE[2]);
+  await expect(facts).toContainText(ATTENTION_QUEUE[3]);
   await expect(facts).toContainText("request-review");
+});
+
+test("a spike-claimed open question is non-blocking/eventual; the unclaimed one stays blocking (ac-10)", async ({
+  page,
+}) => {
+  await page.goto("/readiness");
+  await page.locator("details.readiness-more > summary").click();
+
+  const claimed = page.locator('[data-concern-id="shape/question/oq-2"]');
+  await claimed.locator(".readiness-tech summary").click();
+  await expect(
+    claimed.locator('dt:text-is("Blocking") + dd'),
+  ).toHaveText("false");
+  await expect(
+    claimed.locator('dt:text-is("Timing") + dd'),
+  ).toHaveText("eventual");
+
+  const unclaimed = page.locator('[data-concern-id="shape/question/oq-1"]');
+  await unclaimed.locator(".readiness-tech summary").click();
+  await expect(
+    unclaimed.locator('dt:text-is("Blocking") + dd'),
+  ).toHaveText("true");
+  await expect(
+    unclaimed.locator('dt:text-is("Timing") + dd'),
+  ).toHaveText("current");
 });
 
 test("board destination opens the editable board in a new tab and both tabs keep their state", async ({
@@ -386,6 +422,11 @@ test("CLI fallback tokens copy as the exact vector, never an invented shell comm
   await context.grantPermissions(["clipboard-read", "clipboard-write"], {
     origin: new URL(page.url()).origin,
   });
+  // The nearest CLI-destination concern (review/blocker/forge-facts-
+  // unavailable/merge) now sits past the top three (ac-10 moved the
+  // spike-claimed shape/question/oq-2 in ahead of it); expand the
+  // disclosure so its rendered tokens are visible, not innerText-empty.
+  await page.locator("details.readiness-more > summary").click();
 
   const cli = page.locator(".readiness-cli").first();
   const tokens = await cli.locator(".readiness-cli-token").allInnerTexts();
@@ -412,6 +453,17 @@ test("CLI fallback tokens copy as the exact vector, never an invented shell comm
 test("keyboard traversal reaches every cockpit landmark", async ({ page }) => {
   await page.goto("/readiness");
   await page.emulateMedia({ reducedMotion: "reduce" });
+
+  // The only CLI-destination landmark in this fixture now sits past the
+  // top three (ac-10 moved the spike-claimed shape/question/oq-2 in
+  // ahead of it), so reaching it needs the disclosure open first — via
+  // the keyboard, consistent with this test's own traversal.
+  await page.locator(".readiness-more-summary").focus();
+  await page.keyboard.press("Enter");
+  await expect(page.locator("details.readiness-more")).toHaveAttribute(
+    "open",
+    "",
+  );
 
   const reached = new Set<string>();
   await page.locator("body").press("Tab");
