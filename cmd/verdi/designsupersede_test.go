@@ -488,3 +488,80 @@ func TestDesignStartSupersedeE2E_Negative(t *testing.T) {
 		}
 	})
 }
+
+// composeBreakingPredecessor decodes cleanly and resolves as an accepted
+// predecessor, but breaks supersede.Compose: its title is a multi-line
+// double-quoted scalar whose continuation line sits at column 0 and reads
+// exactly like a top-level key, the one shape this lane's report discloses
+// the line-level frontmatter splitter cannot see through. It is used here
+// as a REAL predecessor that reaches Compose and fails there — the only
+// way to prove, through the built binary, what happens to the operator's
+// checkout when composition fails.
+const composeBreakingPredecessor = `---
+id: spec/dedent
+kind: spec
+class: feature
+title: "Dedent fixture
+status: this continuation line is inside the title scalar"
+owners: [platform-team]
+problem: { text: "p", anchor: "#problem" }
+outcome: { text: "o", anchor: "#outcome" }
+acceptance_criteria:
+  - { id: ac-1, text: "a", evidence: [attestation], anchor: "#ac-1" }
+---
+# Dedent fixture
+
+Body.
+`
+
+// TestDesignStartSupersedeE2E_ComposeFailureLeavesCheckoutUntouched proves
+// the preparation boundary this verb documents actually holds through the
+// real binary: when composition fails, the operator is left on the branch
+// they started on, with no design/<new> ref and no successor directory —
+// not stranded on an empty new branch they never asked to be on. It also
+// pins the refusal to ONE "internal error" prefix: the CLI relays
+// Compose's own classified message rather than prefixing it a second time.
+func TestDesignStartSupersedeE2E_ComposeFailureLeavesCheckoutUntouched(t *testing.T) {
+	bin := buildVerdiBinary(t)
+	repo := fixturegit.Build(t, []fixturegit.Layer{
+		{
+			Files: map[string]string{
+				".verdi/verdi.yaml":                  supersedeManifestYAML,
+				".verdi/specs/active/dedent/spec.md": composeBreakingPredecessor,
+			},
+			Message: "dedent lands",
+		},
+	})
+	ctx := context.Background()
+	env := []string{"CI_DEFAULT_BRANCH=main"}
+
+	before, err := gitx.CurrentBranch(ctx, repo.Dir)
+	if err != nil {
+		t.Fatalf("CurrentBranch: %v", err)
+	}
+
+	stdout, stderr, code := runVerdiBinary(t, bin, repo.Dir, env, "design", "start", "--supersedes", "spec/dedent", "--name", "dedent-v2")
+	if code != 2 {
+		t.Fatalf("exit = %d, want 2\nstdout: %s\nstderr: %s", code, stdout, stderr)
+	}
+
+	after, err := gitx.CurrentBranch(ctx, repo.Dir)
+	if err != nil {
+		t.Fatalf("CurrentBranch: %v", err)
+	}
+	if after != before {
+		t.Errorf("checkout moved from %q to %q; a composition failure must leave the checkout where it was", before, after)
+	}
+	if sha, err := gitx.RevParse(ctx, repo.Dir, "refs/heads/design/dedent-v2"); err == nil {
+		t.Errorf("design/dedent-v2 exists at %s; a composition failure must cut no branch", sha)
+	}
+	if _, err := os.Stat(filepath.Join(repo.Dir, ".verdi", "specs", "active", "dedent-v2")); err == nil {
+		t.Error("the successor directory exists; a composition failure must write nothing")
+	}
+	if strings.Contains(stdout, "switched checkout") {
+		t.Errorf("stdout discloses a checkout switch that must never have happened:\n%s", stdout)
+	}
+	if n := strings.Count(stderr, "internal error"); n != 1 {
+		t.Errorf("stderr says %q %d times, want exactly 1:\n%s", "internal error", n, stderr)
+	}
+}

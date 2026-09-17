@@ -193,6 +193,23 @@ func runDesignStartSupersede(ctx context.Context, root, predName, newName string
 		return 2
 	}
 
+	// Compose is pure — it needs nothing but the predecessor's bytes — so it
+	// belongs on the READ-ONLY side of the preparation boundary, above every
+	// Git mutation. Composing after the checkout switch stranded an operator
+	// on an empty design/<new> branch they never asked to be on whenever
+	// composition failed; a refusal here now leaves the repository exactly
+	// as it was. Compose's error already classifies itself, so it is relayed
+	// verbatim rather than prefixed a second time.
+	composed, err := supersede.Compose(supersede.ComposeInput{
+		PredecessorName: predName,
+		PredecessorRaw:  pred.Raw,
+		SuccessorName:   newName,
+	})
+	if err != nil {
+		fmt.Fprintln(stderr, "design start --supersedes:", err)
+		return 2
+	}
+
 	// Preparation boundary (mirroring runDesignStart, design.go's own R1/
 	// SI-198 comment): everything above is read-only validation. Only now
 	// does this verb touch Git — base resolution (dc-7) then the checkout
@@ -206,16 +223,6 @@ func runDesignStartSupersede(ctx context.Context, root, predName, newName string
 
 	branch := "design/" + newName
 	if !checkoutNewDesignBranch(ctx, root, branch, baseRef, stdout, stderr) {
-		return 2
-	}
-
-	composed, err := supersede.Compose(supersede.ComposeInput{
-		PredecessorName: predName,
-		PredecessorRaw:  pred.Raw,
-		SuccessorName:   newName,
-	})
-	if err != nil {
-		fmt.Fprintln(stderr, "design start --supersedes: internal error:", err)
 		return 2
 	}
 
