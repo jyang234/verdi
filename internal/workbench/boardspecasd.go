@@ -240,9 +240,22 @@ func deriveASDShell(in asdShellInput) asdShell {
 			// I-128 option (a); spec/uat-round-1 ac-10): non-blocking, and
 			// acceptance does not need a wall edit — the spike answers it
 			// after acceptance.
+			//
+			// Two or more stubs may claim one question (the wall's own
+			// multi-claim observation, boardspecrender.go's oq-claims
+			// chip), so the head noun and its verb agree with the count.
+			// The renameable class word itself stays the attributive
+			// SINGULAR both sibling surfaces speak — readinesspilot's
+			// "<word> stubs" and the stub cards' "<word> stub" — so the
+			// display plural (model.DisplayClassPlural) belongs to the
+			// chip, where that word is the head noun, and never here.
+			stubNoun, answerVerb := "stub", "answers"
+			if len(oq.ClaimedBySlugs) > 1 {
+				stubNoun, answerVerb = "stubs", "answer"
+			}
 			add(asdConcern{ID: "shape/question/" + oq.ID, Area: asdAreaShape, State: asdStateUnproven, Blocking: false,
-				Summary:   "Open question " + oq.ID + " is claimed by " + in.SpikeWord + " stub " + strings.Join(oq.ClaimedBySlugs, ", ") + " and remains unresolved: " + oq.Text,
-				Guidance:  "No wall edit is required to accept: the claiming " + in.SpikeWord + " stub answers it after acceptance.",
+				Summary:   "Open question " + oq.ID + " is claimed by " + in.SpikeWord + " " + stubNoun + " " + strings.Join(oq.ClaimedBySlugs, ", ") + " and remains unresolved: " + oq.Text,
+				Guidance:  "No wall edit is required to accept: the claiming " + in.SpikeWord + " " + stubNoun + " " + answerVerb + " it after acceptance.",
 				Witnesses: append([]string{"declared open question " + oq.ID}, oq.ClaimedBySlugs...),
 				Dest:      "#obj-" + oq.ID})
 			continue

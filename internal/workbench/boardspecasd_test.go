@@ -131,7 +131,7 @@ func TestDeriveASDShell(t *testing.T) {
 		}
 	})
 
-	t.Run("multiple claiming stubs are all named in the summary and witnessed", func(t *testing.T) {
+	t.Run("multiple claiming stubs are named, witnessed, and spoken in the plural", func(t *testing.T) {
 		in := baseInput()
 		in.OpenQuestions = []asdObjectFact{{ID: "oq-1", Text: "t1", ClaimedBySlugs: []string{"alpha-spike", "zeta-spike"}}}
 		shell := deriveASDShell(in)
@@ -154,6 +154,37 @@ func TestDeriveASDShell(t *testing.T) {
 			if !ok {
 				t.Fatalf("witnesses = %q, missing %q", c.Witnesses, want)
 			}
+		}
+		// The sentences are pinned exactly (lane review F2): the head
+		// noun and its verb agree with the number of claiming stubs. The
+		// class word stays the attributive singular every sibling
+		// surface speaks (readinesspilot's "<word> stubs", the stub
+		// cards' "<word> stub"); only "stub"/"stubs" and "answers"/
+		// "answer" move.
+		wantPluralSummary := "Open question oq-1 is claimed by spike stubs alpha-spike, zeta-spike and remains unresolved: t1"
+		if c.Summary != wantPluralSummary {
+			t.Fatalf("two-slug summary =\n  %q\nwant\n  %q", c.Summary, wantPluralSummary)
+		}
+		wantPluralGuidance := "No wall edit is required to accept: the claiming spike stubs answer it after acceptance."
+		if c.Guidance != wantPluralGuidance {
+			t.Fatalf("two-slug guidance =\n  %q\nwant\n  %q", c.Guidance, wantPluralGuidance)
+		}
+
+		one := baseInput()
+		one.OpenQuestions = []asdObjectFact{{ID: "oq-1", Text: "t1", ClaimedBySlugs: []string{"alpha-spike"}}}
+		var single asdConcern
+		for _, row := range deriveASDShell(one).All {
+			if row.ID == "shape/question/oq-1" {
+				single = row
+			}
+		}
+		wantSingleSummary := "Open question oq-1 is claimed by spike stub alpha-spike and remains unresolved: t1"
+		if single.Summary != wantSingleSummary {
+			t.Fatalf("one-slug summary =\n  %q\nwant\n  %q", single.Summary, wantSingleSummary)
+		}
+		wantSingleGuidance := "No wall edit is required to accept: the claiming spike stub answers it after acceptance."
+		if single.Guidance != wantSingleGuidance {
+			t.Fatalf("one-slug guidance =\n  %q\nwant\n  %q", single.Guidance, wantSingleGuidance)
 		}
 	})
 
