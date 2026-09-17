@@ -522,7 +522,8 @@ func renderBoardRegion(p *BoardProjection, git *boardGitState, asd *asdView) str
 	// owner directive: the yarn IS the representation — no chip list on
 	// the card). On a sealed accepted-pending-build feature wall each
 	// card carries the one live affordance a sealed record permits:
-	// Instantiate (ac-6).
+	// Instantiate (ac-6). The same sealed-accepted-feature decision gates
+	// the rail's Revise affordance below (spec/uat-round-1 ac-11).
 	instantiable := feature && p.Status == "accepted-pending-build"
 	for _, sv := range p.StubViews {
 		cls := "stubcard"
@@ -745,7 +746,7 @@ func renderBoardRegion(p *BoardProjection, git *boardGitState, asd *asdView) str
 	default:
 		writeReadOnlyPanel(&b, p)
 		writeCreatePanel(&b, p)
-		writeRevisePanel(&b, p)
+		writeRevisePanel(&b, p, instantiable)
 		writeYarnKey(&b, p)
 	}
 	writeASDPanels(&b, p.Spec, asd)
@@ -776,17 +777,6 @@ func writeCreatePanel(b *strings.Builder, p *BoardProjection) {
 	b.WriteString(`</section>`)
 }
 
-// reviseOffered reports whether p is the sealed accepted feature wall —
-// the ONE wall the revise action serves (spec/uat-round-1 ac-11; 02 §Kind
-// registry: supersession is the only forward path after acceptance, and
-// it is feature-only). The same gate that attaches CreateFields and
-// renders the stub cards' Instantiate affordance, so the rail never
-// offers what the server would refuse. Status is the effective state's
-// bare id (never display prose), compared as such.
-func reviseOffered(p *BoardProjection) bool {
-	return p.Class == string(artifact.ClassFeature) && p.Status == "accepted-pending-build"
-}
-
 // successorVersionRe recognizes a predecessor name already carrying a
 // -v<n> revision suffix, so the next revision counts up from it.
 var successorVersionRe = regexp.MustCompile(`^(.*)-v([0-9]+)$`)
@@ -808,11 +798,15 @@ func reviseSuccessorDefault(pred string) string {
 // writeRevisePanel renders the sealed accepted feature wall's Revise
 // affordance (spec/uat-round-1 ac-11, board half; PLAN.md I-129 option
 // (a)): the rail panel whose button opens the revise dialog, beside the
-// creation panel. Rendered ONLY on the wall the revise action serves
-// (reviseOffered). Every spoken class word is display prose and resolves
-// (vocabulary.go); the testid and element ids stay bare.
-func writeRevisePanel(b *strings.Builder, p *BoardProjection) {
-	if !reviseOffered(p) {
+// creation panel. offered is renderBoardRegion's one sealed-accepted-
+// feature decision (the same gate the stub cards' Instantiate affordance
+// and the create fields ride — 02 §Kind registry: supersession is the
+// only forward path after acceptance, and it is feature-only), so the
+// rail never offers what the server would refuse. Every spoken class
+// word is display prose and resolves (vocabulary.go); the testid and
+// element ids stay bare.
+func writeRevisePanel(b *strings.Builder, p *BoardProjection, offered bool) {
+	if !offered {
 		return
 	}
 	esc := stdhtml.EscapeString
@@ -1359,9 +1353,10 @@ func renderBoardDialogs(p *BoardProjection) string {
 		// creation form (spec/creation-form ac-3 — CreateFields is only
 		// attached on the sealed accepted feature wall, the same gate the
 		// create action enforces), and the revise dialog (spec/uat-round-1
-		// ac-11), which every sealed accepted feature wall carries — so
-		// reviseOffered IS the gate; the other two ride inside it.
-		if reviseOffered(p) {
+		// ac-11), which EVERY sealed accepted feature wall carries — so the
+		// wall's class and effective status alone decide; the other two
+		// ride inside.
+		if p.Class == string(artifact.ClassFeature) && p.Status == "accepted-pending-build" {
 			var b strings.Builder
 			b.WriteString(`
 <div class="modal-backdrop" id="modal-backdrop" hidden></div>
