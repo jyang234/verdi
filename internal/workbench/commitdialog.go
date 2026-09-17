@@ -31,8 +31,13 @@ import (
 // accepted, closed, merged, superseded — and their verb variants. The
 // alternation is deliberately narrow: "acceptance" ("add acceptance
 // criteria") and "closure" are ordinary summary words and stay silent, and
-// \b keeps "unacceptable"/"disclosure" silent too. Written in the dialect
-// RE2 and ECMAScript share: no inline flags, no lookaround, no named groups.
+// \b keeps "unacceptable"/"disclosure" silent too. Written in the SYNTAX
+// RE2 and ECMAScript share: no inline flags, no lookaround, no named
+// groups. Case-folding is NOT shared and is proven for ASCII input only:
+// Go's (?i) applies Unicode simple folding while the browser's /i without
+// the u flag folds ASCII alone (review-measured: "cloſed", U+017F, matches
+// in Go and not in JS). The browser is the only production matcher; the
+// Go regexp below exists for the table test and has no production caller.
 const commitLifecyclePattern = `\b(?:accept(?:ed|s|ing)?|clos(?:e|ed|es|ing)|merg(?:e|ed|es|ing)|supersed(?:e|ed|es|ing))\b`
 
 var commitLifecycleRE = regexp.MustCompile(`(?i)` + commitLifecyclePattern)
