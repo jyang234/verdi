@@ -7,7 +7,7 @@ Controller: FABLE (Claude Fable 5.1). Authority: spec/uat-round-1 (design/uat-ro
 | Lane | AC | Tier | Branch | Head | Gate | Review | Ruling |
 |---|---|---|---|---|---|---|---|
 | W2-A f13map (Sonnet) | ac-7 | 2 | agent/uat-r2-f13map | — | pending | — | selector rule = dc-9; owner reviews the set at the PR |
-| W2-B import-ui (Fable) | ac-8 | 2 | agent/uat-r2-import-ui | — | pending | — | request shape frozen; UTF-8 byte offsets computed from bytes |
+| W2-B import-ui (Fable) | ac-8 | 2 | agent/uat-r2-import-ui | 4b740e70 | passed (5 files in write set; specimport and spec 72 untouched; specalign ok 141.1s; showcasealign ok 71.4s; workbench race ok 131.8s; node --check ok) | in review (byte-offset adversarial cases requested) | request shape frozen; UTF-8 byte offsets computed from bytes |
 | W2-C commit-dialog (Fable) | ac-9 + footer drift guard | 2 | agent/uat-r2-commit-dialog | 7f9bb0a5 | passed (7 files in write set; specalign ok 143.0s; showcasealign ok 73.7s; workbench race ok 137.7s; handler untouched; no artifacts) | in review | note is non-blocking; server rules unchanged |
 
 Pre-review gate for every lane (process correction from wave 1): ancestry, clean tree, write-set containment, prohibited artifacts, focused GREEN re-run by the controller, PLUS full `go test ./internal/specalign/... ./internal/showcasealign/...`.
