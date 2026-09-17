@@ -401,7 +401,7 @@ test.describe("spec import: confirmation is bound to the exact current preview",
 });
 
 test.describe("spec import: the F13 reference profile", () => {
-  test("absent labels are separate from the eight missing evidence declarations; pair deferral discloses TODO placeholders; created and already-created keep the disclosures", async ({
+  test("absent labels are separate from the twelve missing evidence declarations; pair deferral discloses TODO placeholders; created and already-created keep the disclosures", async ({
     page,
   }) => {
     test.setTimeout(120_000);
@@ -416,22 +416,22 @@ test.describe("spec import: the F13 reference profile", () => {
 
     expect(await preview(page)).toBe(200);
     await expectReady(page, false);
-    // Two absent labels and eight unset evidence declarations, each its
+    // Two absent labels and twelve unset evidence declarations, each its
     // own blocking finding — and nothing else: the evidence gap is
     // reported exactly once per criterion as missing-evidence (backend
     // correction a03dd661), never additionally as an unsupported-structure
     // (the splice refusal's former misclassification) or invalid-candidate
-    // finding, so exactly ten findings block.
+    // finding, so exactly fourteen findings block.
     await expect(findings(page, "missing-statement")).toHaveCount(2);
     await expect(findings(page, "missing-statement").first()).toContainText("Problem");
     await expect(page.locator('#import-findings li[data-code="missing-statement"][data-blocking="true"]')).toHaveCount(2);
-    await expect(findings(page, "missing-evidence")).toHaveCount(8);
-    await expect(page.locator('#import-findings li[data-code="missing-evidence"][data-blocking="true"]')).toHaveCount(8);
+    await expect(findings(page, "missing-evidence")).toHaveCount(12);
+    await expect(page.locator('#import-findings li[data-code="missing-evidence"][data-blocking="true"]')).toHaveCount(12);
     await expect(findings(page, "unsupported-structure")).toHaveCount(0);
     await expect(findings(page, "invalid-candidate")).toHaveCount(0);
-    await expect(page.locator("#import-findings li")).toHaveCount(10);
-    await expect(page.locator('#import-findings li[data-blocking="true"]')).toHaveCount(10);
-    for (let i = 1; i <= 8; i++) {
+    await expect(page.locator("#import-findings li")).toHaveCount(14);
+    await expect(page.locator('#import-findings li[data-blocking="true"]')).toHaveCount(14);
+    for (let i = 1; i <= 12; i++) {
       await expect(page.getByTestId(`import-field-ac-${i}`)).toHaveAttribute("data-origin", "copied-source");
       await expect(page.getByTestId(`import-field-spans-ac-${i}`)).toContainText("primary-f13.md");
     }
@@ -450,10 +450,10 @@ test.describe("spec import: the F13 reference profile", () => {
     await expect(findings(page, "missing-statement")).toHaveCount(0);
     await expect(findings(page, "statements-deferred")).toHaveCount(2);
     await expect(findings(page, "statements-deferred").first()).toHaveAttribute("data-blocking", "false");
-    await expect(findings(page, "missing-evidence")).toHaveCount(8);
+    await expect(findings(page, "missing-evidence")).toHaveCount(12);
     await expect(findings(page, "unsupported-structure")).toHaveCount(0);
-    await expect(page.locator("#import-findings li")).toHaveCount(10);
-    await expect(page.locator('#import-findings li[data-blocking="true"]')).toHaveCount(8);
+    await expect(page.locator("#import-findings li")).toHaveCount(14);
+    await expect(page.locator('#import-findings li[data-blocking="true"]')).toHaveCount(12);
     await expect(page.getByTestId("import-field-problem")).toHaveAttribute("data-origin", "generated-deferral");
     await expect(page.getByTestId("import-field-text-problem")).toContainText("TODO");
     await expect(page.getByTestId("import-field-outcome")).toHaveAttribute("data-origin", "generated-deferral");
@@ -966,7 +966,7 @@ test.describe("spec import: native, manual and story surfaces", () => {
 // negative-classification probe of guidance wording and is labeled as such.
 
 test.describe("spec import: usability — the owner's F13 correction path", () => {
-  test("explains evidence before any choice, counts the eight criteria origin-neutrally, selects nothing, and makes retention, evidence and TODO choices explicit actions whose results stay distinguishable from the last preview", async ({
+  test("explains evidence before any choice, counts the twelve criteria origin-neutrally, selects nothing, and makes retention, evidence and TODO choices explicit actions whose results stay distinguishable from the last preview", async ({
     page,
   }) => {
     test.setTimeout(150_000);
@@ -984,10 +984,10 @@ test.describe("spec import: usability — the owner's F13 correction path", () =
 
     // Readiness in plain words and an origin-neutral count of the criteria.
     const ready = page.getByTestId("import-ready");
-    await expect(ready).toContainText("8 acceptance criteria");
+    await expect(ready).toContainText("12 acceptance criteria");
     await expect(ready).toContainText("2 statements");
     await expect(ready).toHaveAttribute("data-stale", "false");
-    await expect(page.getByTestId("import-criteria-count")).toHaveText(/^8 acceptance criteria$/);
+    await expect(page.getByTestId("import-criteria-count")).toHaveText(/^12 acceptance criteria$/);
     await expect(page.locator('#import-fields input[type="checkbox"]:checked')).toHaveCount(0);
     await expect(page.locator('#import-statements input[type="checkbox"]:checked')).toHaveCount(0);
 
@@ -1013,7 +1013,7 @@ test.describe("spec import: usability — the owner's F13 correction path", () =
 
     // Every card names its own source, its own status and carries a copy
     // of its finding next to the controls that resolve it.
-    for (let i = 1; i <= 8; i++) {
+    for (let i = 1; i <= 12; i++) {
       await expect(page.getByTestId(`import-field-source-ac-${i}`)).toContainText("Copied from primary-f13.md");
       await expect(page.getByTestId(`import-field-status-ac-${i}`)).toContainText("none chosen");
       await expect(page.getByTestId(`import-field-status-ac-${i}`)).toHaveAttribute("data-status", "previewed");
@@ -1038,7 +1038,7 @@ test.describe("spec import: usability — the owner's F13 correction path", () =
     // finding is marked as such, and nothing can be confirmed.
     await expect(ready).toHaveAttribute("data-stale", "true");
     await expect(ready).toContainText("earlier");
-    await expect(ready).not.toContainText("8 acceptance criteria");
+    await expect(ready).not.toContainText("12 acceptance criteria");
     await expect(page.locator("#import-findings li[data-earlier='true']")).toHaveCount(await page.locator("#import-findings li").count());
     await expect(page.getByTestId("import-findings-heading")).toContainText("Earlier");
     await expect(page.getByTestId("import-confirm")).toBeDisabled();
@@ -1060,28 +1060,28 @@ test.describe("spec import: usability — the owner's F13 correction path", () =
     await expect(statusOne).toContainText("attestation");
     await expect(statusOne).toContainText("changed since");
     await expect(statusOne).toHaveAttribute("data-status", "changed");
-    await expect(page.getByTestId("import-field-status-ac-8")).toHaveAttribute("data-status", "earlier");
+    await expect(page.getByTestId("import-field-status-ac-12")).toHaveAttribute("data-status", "earlier");
     await expect(ready).toHaveAttribute("data-stale", "true");
     await expect(page.getByTestId("import-confirm")).toBeDisabled();
     const all = page.getByTestId("import-evidence-all-ac-1");
-    await expect(all).toContainText("all 8 acceptance criteria");
+    await expect(all).toContainText("all 12 acceptance criteria");
     await all.click();
-    for (let i = 2; i <= 8; i++) {
+    for (let i = 2; i <= 12; i++) {
       await expect(page.getByTestId(`import-evidence-ac-${i}-attestation`)).toBeChecked();
       await expect(page.getByTestId(`import-evidence-ac-${i}-static`)).not.toBeChecked();
       await expect(page.getByTestId(`import-field-status-ac-${i}`)).toHaveAttribute("data-status", "changed");
     }
-    // The advanced summary counts the eight evidence mappings without
+    // The advanced summary counts the twelve evidence mappings without
     // being opened; the choices themselves live on the cards.
     await expect(page.getByTestId("import-advanced")).toHaveJSProperty("open", false);
-    await expect(page.locator("#import-mapping-count")).toHaveText("8");
+    await expect(page.locator("#import-mapping-count")).toHaveText("12");
     expect(await preview(page)).toBe(200);
     await expect(findings(page, "missing-evidence")).toHaveCount(0);
     await expect(ready).toHaveAttribute("data-stale", "false");
-    await expect(page.getByTestId("import-field-status-ac-8")).toHaveAttribute("data-status", "previewed");
-    await expect(page.getByTestId("import-field-status-ac-8")).toContainText("attestation");
-    await expect(page.getByTestId("import-field-status-ac-8")).not.toContainText("changed since");
-    await expect(page.locator("#import-fields input[type='checkbox']:checked")).toHaveCount(8);
+    await expect(page.getByTestId("import-field-status-ac-12")).toHaveAttribute("data-status", "previewed");
+    await expect(page.getByTestId("import-field-status-ac-12")).toContainText("attestation");
+    await expect(page.getByTestId("import-field-status-ac-12")).not.toContainText("changed since");
+    await expect(page.locator("#import-fields input[type='checkbox']:checked")).toHaveCount(12);
 
     // The two missing statements are placeholders with direct actions.
     await expect(ready).toContainText("2 statements");
@@ -1091,7 +1091,7 @@ test.describe("spec import: usability — the owner's F13 correction path", () =
     // Write it: the existing user-added mapping path, counted in Advanced.
     await page.getByTestId("import-write-problem").click();
     await page.getByTestId("import-write-text-problem").fill("Gatekeeper flight decisions are unbounded today [usability].");
-    await expect(page.locator("#import-mapping-count")).toHaveText("9");
+    await expect(page.locator("#import-mapping-count")).toHaveText("13");
     await expect(ready).toHaveAttribute("data-stale", "true");
     expect(await preview(page)).toBe(200);
     // The written value resolves the problem; the source's own gap stays

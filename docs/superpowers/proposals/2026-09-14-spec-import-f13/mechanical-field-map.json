@@ -1,6 +1,7 @@
 {
   "purpose": "data-only reference mapping; manually specified selectors, mechanically verified spans; not an implemented parser or runtime schema",
   "source_id": "primary-f13",
+  "revision_note": "Revised under spec/uat-round-1 ac-7/dc-9 (2026-09-16): the prior eight selectors split the source's one comma-joined \"Prove ...\" sentence at arbitrary points (ac-2 stopped mid-sentence, ac-3..ac-6 began mid-clause, ac-6 joined two claims, ac-8 joined two sentences) and selected the imperative \"Enumerate every allowed edge...\" test-instruction sentence as a criterion. Every selector below now covers exactly one complete claim and starts/ends at a clause or sentence boundary; \"Prove \" and the Enumerate sentence are retained-only. The primary source, its SHA-256, and the primary_byte_dispositions partition's total bytes are unchanged.",
   "unmapped_fields": [
     "problem",
     "outcome"
@@ -10,28 +11,52 @@
       "target_id": "ac-1",
       "target_id_origin": "prototype-assigned; not a source ID",
       "source_id": "primary-f13",
-      "selection_byte_start": 1485,
-      "selection_byte_end_exclusive": 1549,
+      "selection_byte_start": 1556,
+      "selection_byte_end_exclusive": 1572,
       "original_start_line": 650,
-      "original_end_line": 650,
-      "source_text_sha256": "c2c2bc453bc856ac53dc29837c8ea7a06fe2239a7c3864d16094d5ab9f55b940",
+      "original_end_line": 651,
+      "source_text_sha256": "1240c7be155b26d99dd4198dea9d7fe859874c993420d1e76d65930f6cf161d1",
       "transform": "collapse source whitespace runs to one ASCII space; no word or punctuation changes",
-      "display_text": "Enumerate every allowed edge and representative forbidden edges."
+      "display_text": "R0 cannot repeat"
     },
     {
       "target_id": "ac-2",
       "target_id_origin": "prototype-assigned; not a source ID",
       "source_id": "primary-f13",
-      "selection_byte_start": 1556,
-      "selection_byte_end_exclusive": 1681,
-      "original_start_line": 650,
-      "original_end_line": 652,
-      "source_text_sha256": "61663084bdd0399181e8d5da50ecb502c3ac6a07339f873f4c34045ce8ef3af3",
+      "selection_byte_start": 1574,
+      "selection_byte_end_exclusive": 1600,
+      "original_start_line": 651,
+      "original_end_line": 651,
+      "source_text_sha256": "d99db78b04a90aab45cc504797db96b658d275319d15ae8f77dccaacd7dec11e",
       "transform": "collapse source whitespace runs to one ASCII space; no word or punctuation changes",
-      "display_text": "R0 cannot repeat, R1 count cannot exceed one, R1 candidate re-enters Aligning, R2 cannot produce another automatic correction"
+      "display_text": "R1 count cannot exceed one"
     },
     {
       "target_id": "ac-3",
+      "target_id_origin": "prototype-assigned; not a source ID",
+      "source_id": "primary-f13",
+      "selection_byte_start": 1602,
+      "selection_byte_end_exclusive": 1633,
+      "original_start_line": 651,
+      "original_end_line": 651,
+      "source_text_sha256": "920335b10f43f0d0d37ecfb777bab7daa43617ac1ae80952820636fe2898aa6e",
+      "transform": "collapse source whitespace runs to one ASCII space; no word or punctuation changes",
+      "display_text": "R1 candidate re-enters Aligning"
+    },
+    {
+      "target_id": "ac-4",
+      "target_id_origin": "prototype-assigned; not a source ID",
+      "source_id": "primary-f13",
+      "selection_byte_start": 1635,
+      "selection_byte_end_exclusive": 1681,
+      "original_start_line": 652,
+      "original_end_line": 652,
+      "source_text_sha256": "46dca1df0415f80681414e732f2519769e9fb0f356572ea3f081ac654053e4bf",
+      "transform": "collapse source whitespace runs to one ASCII space; no word or punctuation changes",
+      "display_text": "R2 cannot produce another automatic correction"
+    },
+    {
+      "target_id": "ac-5",
       "target_id_origin": "prototype-assigned; not a source ID",
       "source_id": "primary-f13",
       "selection_byte_start": 1683,
@@ -43,7 +68,7 @@
       "display_text": "any tree change invalidates bound results"
     },
     {
-      "target_id": "ac-4",
+      "target_id": "ac-6",
       "target_id_origin": "prototype-assigned; not a source ID",
       "source_id": "primary-f13",
       "selection_byte_start": 1726,
@@ -55,7 +80,7 @@
       "display_text": "all stories Done moves the feature to AwaitingUAT"
     },
     {
-      "target_id": "ac-5",
+      "target_id": "ac-7",
       "target_id_origin": "prototype-assigned; not a source ID",
       "source_id": "primary-f13",
       "selection_byte_start": 1777,
@@ -67,19 +92,31 @@
       "display_text": "two consecutive operational exits from Align route only that flight to G2"
     },
     {
-      "target_id": "ac-6",
+      "target_id": "ac-8",
       "target_id_origin": "prototype-assigned; not a source ID",
       "source_id": "primary-f13",
       "selection_byte_start": 1852,
-      "selection_byte_end_exclusive": 1924,
+      "selection_byte_end_exclusive": 1891,
       "original_start_line": 654,
       "original_end_line": 655,
-      "source_text_sha256": "7396c7b0427133ac28f732b44031d0076d31ad96fcc5033af709c054155d4331",
+      "source_text_sha256": "16a645629e587b035cdb4b7c25feba5b453e878e96d8daa5a6c3a1b3254d4052",
       "transform": "collapse source whitespace runs to one ASCII space; no word or punctuation changes",
-      "display_text": "provider summaries never satisfy a gate, and there is no `Failed` state."
+      "display_text": "provider summaries never satisfy a gate"
     },
     {
-      "target_id": "ac-7",
+      "target_id": "ac-9",
+      "target_id_origin": "prototype-assigned; not a source ID",
+      "source_id": "primary-f13",
+      "selection_byte_start": 1897,
+      "selection_byte_end_exclusive": 1924,
+      "original_start_line": 655,
+      "original_end_line": 655,
+      "source_text_sha256": "7626b25e56987e75b00b6591ca921d8abc8069ff52e5fbde1f9adce3e02bd193",
+      "transform": "collapse source whitespace runs to one ASCII space; no word or punctuation changes",
+      "display_text": "there is no `Failed` state."
+    },
+    {
+      "target_id": "ac-10",
       "target_id_origin": "prototype-assigned; not a source ID",
       "source_id": "primary-f13",
       "selection_byte_start": 1981,
@@ -91,16 +128,28 @@
       "display_text": "A blocking finding requires nonempty binding-authority cite, reachable-state witness, concrete incorrect result, and threat-model fit."
     },
     {
-      "target_id": "ac-8",
+      "target_id": "ac-11",
       "target_id_origin": "prototype-assigned; not a source ID",
       "source_id": "primary-f13",
       "selection_byte_start": 2116,
-      "selection_byte_end_exclusive": 2200,
+      "selection_byte_end_exclusive": 2157,
       "original_start_line": 660,
       "original_end_line": 661,
-      "source_text_sha256": "d8794640a3b6b09260b9ae1f8620e6af3e13db6841aa3ea27a37cbccf0c46e61",
+      "source_text_sha256": "ac955612933d11b54aabf5b5ee67ccf7eff29463563829a1abc4de75f256180b",
       "transform": "collapse source whitespace runs to one ASCII space; no word or punctuation changes",
-      "display_text": "The author lane adjudicates each finding. Conflicting blocking findings route to G2."
+      "display_text": "The author lane adjudicates each finding."
+    },
+    {
+      "target_id": "ac-12",
+      "target_id_origin": "prototype-assigned; not a source ID",
+      "source_id": "primary-f13",
+      "selection_byte_start": 2158,
+      "selection_byte_end_exclusive": 2200,
+      "original_start_line": 661,
+      "original_end_line": 661,
+      "source_text_sha256": "8e99c87e643c1f81b8a8dd7d43c6becc6ec811d0296ce461ad85aecb1db0f496",
+      "transform": "collapse source whitespace runs to one ASCII space; no word or punctuation changes",
+      "display_text": "Conflicting blocking findings route to G2."
     }
   ],
   "not_inferred": [
@@ -150,37 +199,79 @@
     {
       "target": "ac-8.evidence",
       "reason": "no evidence declaration selected; applicable model requirements or explicit user selection must settle this"
+    },
+    {
+      "target": "ac-9.evidence",
+      "reason": "no evidence declaration selected; applicable model requirements or explicit user selection must settle this"
+    },
+    {
+      "target": "ac-10.evidence",
+      "reason": "no evidence declaration selected; applicable model requirements or explicit user selection must settle this"
+    },
+    {
+      "target": "ac-11.evidence",
+      "reason": "no evidence declaration selected; applicable model requirements or explicit user selection must settle this"
+    },
+    {
+      "target": "ac-12.evidence",
+      "reason": "no evidence declaration selected; applicable model requirements or explicit user selection must settle this"
     }
   ],
-  "required_value_gap_count": 10,
+  "required_value_gap_count": 14,
   "gap_count_scope": "these statement/evidence values only; candidate identity, anchors, model compatibility and other creation validations have not been evaluated",
-  "card_grouping": "The exact eight selectors in this prototype define grouping; no generic prose-splitting behavior is demonstrated.",
+  "card_grouping": "The exact twelve selectors in this prototype define grouping; no generic prose-splitting behavior is demonstrated. Each selector covers exactly one complete claim (spec/uat-round-1 dc-9).",
   "primary_byte_dispositions": [
     {
       "start": 0,
-      "end_exclusive": 1485,
-      "disposition": "retained-only",
-      "sha256": "e3c56a0ac74f7ced2acddd9fb0c75447e4d925cebdd99357713b203dcc5cf67b"
-    },
-    {
-      "start": 1485,
-      "end_exclusive": 1549,
-      "disposition": "mapped",
-      "target": "ac-1",
-      "sha256": "c2c2bc453bc856ac53dc29837c8ea7a06fe2239a7c3864d16094d5ab9f55b940"
-    },
-    {
-      "start": 1549,
       "end_exclusive": 1556,
       "disposition": "retained-only",
-      "sha256": "6a3d8cc4c0b0ac8e8720f3a9068c4bc83ad5d26d0d807f98152461dacd8420ee"
+      "sha256": "e14d5e5353fb6c4ba18ca921b9f7b9c9cd8a96137d97e0d55ee633e5d93184e0"
     },
     {
       "start": 1556,
-      "end_exclusive": 1681,
+      "end_exclusive": 1572,
+      "disposition": "mapped",
+      "target": "ac-1",
+      "sha256": "1240c7be155b26d99dd4198dea9d7fe859874c993420d1e76d65930f6cf161d1"
+    },
+    {
+      "start": 1572,
+      "end_exclusive": 1574,
+      "disposition": "retained-only",
+      "sha256": "0a07f659461970d8d8dcefe4fff96a1745599810dc7d47391e95c803b7b2072c"
+    },
+    {
+      "start": 1574,
+      "end_exclusive": 1600,
       "disposition": "mapped",
       "target": "ac-2",
-      "sha256": "61663084bdd0399181e8d5da50ecb502c3ac6a07339f873f4c34045ce8ef3af3"
+      "sha256": "d99db78b04a90aab45cc504797db96b658d275319d15ae8f77dccaacd7dec11e"
+    },
+    {
+      "start": 1600,
+      "end_exclusive": 1602,
+      "disposition": "retained-only",
+      "sha256": "0a07f659461970d8d8dcefe4fff96a1745599810dc7d47391e95c803b7b2072c"
+    },
+    {
+      "start": 1602,
+      "end_exclusive": 1633,
+      "disposition": "mapped",
+      "target": "ac-3",
+      "sha256": "920335b10f43f0d0d37ecfb777bab7daa43617ac1ae80952820636fe2898aa6e"
+    },
+    {
+      "start": 1633,
+      "end_exclusive": 1635,
+      "disposition": "retained-only",
+      "sha256": "beadba836315747fc95ae304452514b72fe122a6e345974638d70c4e8ebace6a"
+    },
+    {
+      "start": 1635,
+      "end_exclusive": 1681,
+      "disposition": "mapped",
+      "target": "ac-4",
+      "sha256": "46dca1df0415f80681414e732f2519769e9fb0f356572ea3f081ac654053e4bf"
     },
     {
       "start": 1681,
@@ -192,7 +283,7 @@
       "start": 1683,
       "end_exclusive": 1724,
       "disposition": "mapped",
-      "target": "ac-3",
+      "target": "ac-5",
       "sha256": "7982283e48651335d8f64f83fcceb9b88d981344b9809b7719d2da6cb3b7ea26"
     },
     {
@@ -205,7 +296,7 @@
       "start": 1726,
       "end_exclusive": 1775,
       "disposition": "mapped",
-      "target": "ac-4",
+      "target": "ac-6",
       "sha256": "d80e519ed49fe8fbe82e43e445d15f230598dc4aeff6c37fe2cc652556e175aa"
     },
     {
@@ -218,7 +309,7 @@
       "start": 1777,
       "end_exclusive": 1850,
       "disposition": "mapped",
-      "target": "ac-5",
+      "target": "ac-7",
       "sha256": "fc0e6413d8b70d3b1cf421951761cde6df7dea0f70cc72652478b422d2da733f"
     },
     {
@@ -229,10 +320,23 @@
     },
     {
       "start": 1852,
+      "end_exclusive": 1891,
+      "disposition": "mapped",
+      "target": "ac-8",
+      "sha256": "16a645629e587b035cdb4b7c25feba5b453e878e96d8daa5a6c3a1b3254d4052"
+    },
+    {
+      "start": 1891,
+      "end_exclusive": 1897,
+      "disposition": "retained-only",
+      "sha256": "0a63e3f63f232f0c18f3bfe678607aad0b9f7ac6c73e037f74c79c0b2ba103f8"
+    },
+    {
+      "start": 1897,
       "end_exclusive": 1924,
       "disposition": "mapped",
-      "target": "ac-6",
-      "sha256": "7396c7b0427133ac28f732b44031d0076d31ad96fcc5033af709c054155d4331"
+      "target": "ac-9",
+      "sha256": "7626b25e56987e75b00b6591ca921d8abc8069ff52e5fbde1f9adce3e02bd193"
     },
     {
       "start": 1924,
@@ -244,7 +348,7 @@
       "start": 1981,
       "end_exclusive": 2115,
       "disposition": "mapped",
-      "target": "ac-7",
+      "target": "ac-10",
       "sha256": "4b730b5b58e4a13bbb56860d56a012e49ee78b2ad6303635f393cd80e0855e22"
     },
     {
@@ -255,10 +359,23 @@
     },
     {
       "start": 2116,
+      "end_exclusive": 2157,
+      "disposition": "mapped",
+      "target": "ac-11",
+      "sha256": "ac955612933d11b54aabf5b5ee67ccf7eff29463563829a1abc4de75f256180b"
+    },
+    {
+      "start": 2157,
+      "end_exclusive": 2158,
+      "disposition": "retained-only",
+      "sha256": "36a9e7f1c95b82ffb99743e0c5c4ce95d83c9a430aac59f84ef3cbfab6145068"
+    },
+    {
+      "start": 2158,
       "end_exclusive": 2200,
       "disposition": "mapped",
-      "target": "ac-8",
-      "sha256": "d8794640a3b6b09260b9ae1f8620e6af3e13db6841aa3ea27a37cbccf0c46e61"
+      "target": "ac-12",
+      "sha256": "8e99c87e643c1f81b8a8dd7d43c6becc6ec811d0296ce461ad85aecb1db0f496"
     },
     {
       "start": 2200,
@@ -267,5 +384,5 @@
       "sha256": "d356bf31c4f5988476f644b9a89a2b6cd9d920b83b5d33feef0b6e3b523ca5c2"
     }
   ],
-  "selection_transform": "Explicitly select the recorded spans; all other primary bytes, including Prove and list separators, remain retained-only. Whitespace collapse applies only inside selected spans."
+  "selection_transform": "Explicitly select the recorded spans; all other primary bytes, including the lead word Prove, the imperative Enumerate sentence, and list separators, remain retained-only. Whitespace collapse applies only inside selected spans."
 }

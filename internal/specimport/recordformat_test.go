@@ -6,6 +6,9 @@ import (
 	"os"
 	"strings"
 	"testing"
+
+	"github.com/jyang234/verdi/internal/gitx"
+	"github.com/jyang234/verdi/internal/store"
 )
 
 // TestPublishNew_RecordFormat_MarkdownV1HasFormatNoProfileDigest proves
@@ -37,8 +40,9 @@ func TestPublishNew_RecordFormat_NativeHasFormatNoProfileDigest(t *testing.T) {
 // f13ReadyRequest builds a fully ready f13-reference-v1 Request: problem/
 // outcome explicitly mapped from a support source (profile_f13_test.go's
 // own TestNormalize_F13ProfileStatementsMappedFromASupportSource shape)
-// and evidence supplied for all eight pinned criteria, so Preview reports
-// Ready and Apply can actually publish a record to inspect.
+// and evidence supplied for all twelve pinned criteria (f13PinnedCards,
+// spec/uat-round-1 ac-7/dc-9), so Preview reports Ready and Apply can
+// actually publish a record to inspect.
 func f13ReadyRequest(t *testing.T) Request {
 	t.Helper()
 	support := Source{ID: "notes", Label: "notes.md", Data: []byte("The gate cannot be audited.\n\nEvery gate decision is reviewable.\n")}
@@ -57,6 +61,17 @@ func f13ReadyRequest(t *testing.T) Request {
 // for the one shipped reference-profile format, Apply records EXACTLY the
 // profile's own pinned constant — never a digest recomputed from the
 // request's selected bytes — as ac-4/co-1/co-2 of spec/uat-round-1 require.
+//
+// It also proves ac-7/dc-9: a real Compose+Apply import of the pinned F13
+// bundle yields the twelve corrected criteria BOUND to their ids, not
+// just twelve Fields in memory and not just twelve texts present
+// somewhere in the file. The composed candidate is committed to the
+// returned branch, so this reads it back with gitx.Show (the same
+// technique recordvalidate_test.go and recordtamper_test.go already use)
+// and checks, per id, both the frontmatter's `id: ac-N, text: "..."` flow
+// mapping and the body's `## ac-N` heading+paragraph — a text-only
+// Contains check would miss an id permutation or a joined selector;
+// binding the id to the text catches both.
 func TestPublishNew_RecordFormat_F13BindsThePinnedProfileDigest(t *testing.T) {
 	repo := buildImportRepo(t)
 	svc := testService(t)
@@ -85,6 +100,42 @@ func TestPublishNew_RecordFormat_F13BindsThePinnedProfileDigest(t *testing.T) {
 	}
 	if record.ProfilePrimaryDigest != f13PrimarySHA256 {
 		t.Fatalf("record.ProfilePrimaryDigest = %q, want the exact pinned constant %q", record.ProfilePrimaryDigest, f13PrimarySHA256)
+	}
+
+	if len(f13PinnedCards) != 12 {
+		t.Fatalf("f13PinnedCards has %d entries, want the 12 ac-7/dc-9 corrected claims", len(f13PinnedCards))
+	}
+	specBytes, err := gitx.Show(ctx, repo.Dir, result.Branch, store.ActiveSpecRelPath(req.Target.Slug))
+	if err != nil {
+		t.Fatalf("gitx.Show(active spec): %v", err)
+	}
+	spec := string(specBytes)
+	for _, card := range f13PinnedCards {
+		// Frontmatter binding: the canonical YAML flow-mapping ties this
+		// exact id to this exact text in one line
+		// (`- { id: ac-N, text: "...", evidence: [...], anchor: "ac-N" }`).
+		// A substring match on the whole id+text pair — not text alone —
+		// fails an id permutation (another card's text under this id) and
+		// a joined selector (this id's text merged with a neighbor's).
+		fmField := fmt.Sprintf("id: %s, text: %q", card.target, card.displayText)
+		if !strings.Contains(spec, fmField) {
+			t.Errorf("created spec's frontmatter does not bind %s to %q: want to find %q in:\n%s", card.target, card.displayText, fmField, spec)
+		}
+
+		// Body binding: the "## ac-N" heading is immediately followed (one
+		// blank line later) by the exact text and nothing else on that
+		// line — checked by requiring the byte right after it is a
+		// newline (blank line or EOF), so a joined/trailing extra clause
+		// on the same line is caught too.
+		heading := "## " + card.target + "\n\n" + card.displayText
+		idx := strings.Index(spec, heading)
+		if idx < 0 {
+			t.Errorf("created spec's body does not bind %s to %q: want to find %q in:\n%s", card.target, card.displayText, heading, spec)
+			continue
+		}
+		if end := idx + len(heading); end < len(spec) && spec[end] != '\n' {
+			t.Errorf("%s's body text is not alone on its line (extra content follows before the next newline): %q", card.target, spec[idx:end+20])
+		}
 	}
 }
 
