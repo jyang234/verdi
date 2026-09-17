@@ -142,3 +142,35 @@ empty-message refusal) passed before and after, as a characterization should.
 - Fast-forward onto the wave-2 integration head; no shared registries touched.
 - Wave gate: include e2e specs 11, 23, 77 (and 50 for the axe scan over the
   dialog, as in wave 1).
+
+## Review-fix range
+
+Opus review: ACCEPT-WITH-MINOR (drift guard, escaping, prefill-on-open, note
+behaviour, spec 77 at another port base all verified). Range 7f9bb0a5..HEAD,
+new commits only (no amend/rebase):
+
+- 4e389fc5 Refuse the untouched commit template like an empty message
+  (minor 2). `commit-dialog-ok` in boardspec.js now treats a message equal
+  to the trimmed `data-template` as empty: refocus, no `mutate`. Server rule
+  untouched. Spec 77 case 3 pins it (click Commit untouched, then with
+  whitespace padding: dialog stays open, field focused and still holding the
+  template, uncommitted indicator unchanged). No Go seam exists for the
+  client handler, so the e2e case is the only assertion.
+  RED (before the fix, port base 4690): `✘ the untouched template is
+  refused…` — `expect(dialog).toBeVisible() failed / Expected: visible /
+  element(s) not found` (line 99); `1 failed, 2 passed (17.2s)`.
+- 59c8a8da Narrow the commit pattern's dialect claim to shared syntax
+  (minor 1): comment now states shared SYNTAX only; case-insensitive matching
+  proven for ASCII input; Go's (?i) folds Unicode simply vs. the browser's
+  ASCII-only /i (measured "cloſed" U+017F); the Go regexp has no production
+  caller.
+
+GREEN after both fixes:
+- `go test -race -count=1 ./internal/workbench/...` → ok (123.09s).
+- `gofmt -l internal/workbench/` → empty; `go vet ./internal/workbench/` → ok;
+  `golangci-lint run ./internal/workbench/...` → 0 issues (test-only helper
+  does not trip `unused`).
+- `go test ./internal/specalign/ -run TestVocabProseWitness -count=1` → ok.
+- `VERDI_E2E_PORT_BASE=4690 npx playwright test --trace=off --workers=1
+  tests/77-commit-dialog-template.spec.ts` → **3 passed (11.8s)**.
+- Recording-artifact scan over e2e/test-results → **0** (only .last-run.json).
