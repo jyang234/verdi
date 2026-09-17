@@ -175,6 +175,9 @@ decisions:
   - { id: dc-2, text: "reuse the existing notification channel for decline updates", anchor: "#dc-2" }
 open_questions:
   - { id: oq-1, text: "which decline reasons can legally be shown verbatim?", anchor: "#oq-1" }
+  - { id: oq-2, text: "what refresh-window SLA applies to a reversed decline?", anchor: "#oq-2" }
+stubs:
+  - { slug: refresh-window-spike, spike: true, resolves: [oq-2] }
 ---
 # Refinancing decline flow
 
@@ -231,6 +234,10 @@ No second channel.
 ## oq-1
 
 Legal review pending.
+
+## oq-2
+
+Pending the refresh-window spike.
 `
 
 // designSpecLayout stores positions for a SUBSET of the objects (ac-1,

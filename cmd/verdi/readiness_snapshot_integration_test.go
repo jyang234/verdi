@@ -363,3 +363,149 @@ The story works.
 
 Which route applies?
 `
+
+// TestReadinessSnapshotClaimedOpenQuestion covers PLAN.md §7 I-128 (option
+// (a); spec/uat-round-1 ac-10) end to end through the real builder: a
+// feature spec's `stubs:` block, decoded by artifact.DecodeSpec, must reach
+// readinesspilot.ShapeFacts.ClaimedQuestions so a spike stub's `resolves`
+// turns its claimed open question non-blocking/eventual while an unclaimed
+// one stays blocking/current, and the shape-proposal area's aggregated
+// state is driven only by the unclaimed question.
+func TestReadinessSnapshotClaimedOpenQuestion(t *testing.T) {
+	t.Run("claimed question is non-blocking eventual; unclaimed stays blocking current", func(t *testing.T) {
+		repo, requestPath := readinessClaimedQuestionRepo(t, "feature-claim", readinessClaimedQuestionFeatureSpec)
+		snapshot := buildReadinessSnapshot(t, repo, requestPath, policyconflict.VerdictPass, localReadinessSnapshotBuilder{})
+
+		claimed := readinessSnapshotConcern(t, snapshot, "shape/question/oq-2")
+		if claimed.State != readinesspilot.StateUnproven || claimed.Blocking || claimed.Timing != readinesspilot.TimingEventual {
+			t.Fatalf("claimed concern = %+v, want non-blocking eventual unproven", claimed)
+		}
+		assertReadinessStringsContain(t, claimed.Witnesses, "retry-strategy-spike")
+		assertReadinessStringsContain(t, claimed.Witnesses, "oq-2")
+
+		unclaimed := readinessSnapshotConcern(t, snapshot, "shape/question/oq-1")
+		if unclaimed.State != readinesspilot.StateUnproven || !unclaimed.Blocking || unclaimed.Timing != readinesspilot.TimingCurrent {
+			t.Fatalf("unclaimed concern = %+v, want blocking current unproven", unclaimed)
+		}
+
+		// Driven only by the unclaimed question: the area is unproven
+		// because oq-1 blocks, not because oq-2 (claimed, non-blocking)
+		// does — the second subtest below proves the converse.
+		for _, area := range snapshot.Areas {
+			if area.ID == readinesspilot.AreaShape && area.State != readinesspilot.StateUnproven {
+				t.Fatalf("shape area state = %q, want unproven (driven by the unclaimed question)", area.State)
+			}
+		}
+	})
+
+	t.Run("shape area is proven when the only open question is claimed", func(t *testing.T) {
+		repo, requestPath := readinessClaimedQuestionRepo(t, "feature-claim-only", readinessAllClaimedFeatureSpec)
+		snapshot := buildReadinessSnapshot(t, repo, requestPath, policyconflict.VerdictPass, localReadinessSnapshotBuilder{})
+
+		claimed := readinessSnapshotConcern(t, snapshot, "shape/question/oq-1")
+		if claimed.Blocking || claimed.Timing != readinesspilot.TimingEventual {
+			t.Fatalf("claimed concern = %+v, want non-blocking eventual", claimed)
+		}
+		for _, area := range snapshot.Areas {
+			if area.ID == readinesspilot.AreaShape && area.State != readinesspilot.StateProven {
+				t.Fatalf("shape area state = %q, want proven: the only open question is claimed", area.State)
+			}
+		}
+	})
+}
+
+// readinessClaimedQuestionRepo builds a fresh fixturegit repo carrying a
+// single feature spec at .verdi/specs/active/<specName>/spec.md, checks out
+// its design branch, and writes a readiness --context-request targeting
+// it — the same tail readinessSnapshotRepo uses, parameterized so this
+// test never shares the frozen internal/contextcompile feature-alpha
+// fixture (which declares no spike stub) with the claiming-stub cases.
+func readinessClaimedQuestionRepo(t *testing.T, specName, specBody string) (*fixturegit.Repo, string) {
+	t.Helper()
+	repo := buildContextCompileRepo(t, map[string]string{
+		".verdi/specs/active/" + specName + "/spec.md": specBody,
+	})
+	checkoutBranch(t, repo.Dir, "design/"+specName)
+	requestBytes := contextRequestBytes(t, "spec/"+specName, contextcompile.PhaseDesign, nil)
+	requestPath := writeContextRequestFile(t, repo.Dir, "readiness-request.json", requestBytes)
+	return repo, requestPath
+}
+
+// readinessClaimedQuestionFeatureSpec declares two open questions: oq-1
+// unclaimed, oq-2 claimed by the spike stub retry-strategy-spike (the
+// scoping-canvas stub-literal precedent, internal/workbench/scopingcanvas_test.go).
+const readinessClaimedQuestionFeatureSpec = `---
+id: spec/feature-claim
+kind: spec
+title: "Feature Claim"
+owners: [alpha-team]
+class: feature
+problem: {text: "Feature claim is unclear.", anchor: problem}
+outcome: {text: "Feature claim is reviewable.", anchor: outcome}
+acceptance_criteria:
+  - {id: ac-1, text: "the feature works", evidence: [behavioral], anchor: ac-1}
+open_questions:
+  - {id: oq-1, text: "which retry strategy applies?", anchor: oq-1}
+  - {id: oq-2, text: "which timeout applies?", anchor: oq-2}
+stubs:
+  - {slug: retry-strategy-spike, spike: true, resolves: [oq-2]}
+---
+# Feature Claim
+
+## Problem
+
+Feature claim is unclear.
+
+## Outcome
+
+Feature claim is reviewable.
+
+## AC-1
+
+The feature works.
+
+## OQ-1
+
+Which retry strategy applies?
+
+## OQ-2
+
+Which timeout applies?
+`
+
+// readinessAllClaimedFeatureSpec declares exactly one open question,
+// claimed, so the shape-proposal area has no unclaimed blocking question
+// left to drive it unproven.
+const readinessAllClaimedFeatureSpec = `---
+id: spec/feature-claim-only
+kind: spec
+title: "Feature Claim Only"
+owners: [alpha-team]
+class: feature
+problem: {text: "Feature claim only is unclear.", anchor: problem}
+outcome: {text: "Feature claim only is reviewable.", anchor: outcome}
+acceptance_criteria:
+  - {id: ac-1, text: "the feature works", evidence: [behavioral], anchor: ac-1}
+open_questions:
+  - {id: oq-1, text: "which timeout applies?", anchor: oq-1}
+stubs:
+  - {slug: timeout-spike, spike: true, resolves: [oq-1]}
+---
+# Feature Claim Only
+
+## Problem
+
+Feature claim only is unclear.
+
+## Outcome
+
+Feature claim only is reviewable.
+
+## AC-1
+
+The feature works.
+
+## OQ-1
+
+Which timeout applies?
+`

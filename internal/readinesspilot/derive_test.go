@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"sort"
 	"strings"
 	"testing"
 
@@ -104,6 +105,82 @@ func TestDeriveShapeRequiredContentAndQuestions(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestDeriveShapeClaimedOpenQuestion(t *testing.T) {
+	t.Parallel()
+
+	t.Run("claimed question is non-blocking and eventual", func(t *testing.T) {
+		in := baseInput(t)
+		in.Shape.OpenQuestionIDs = []string{"oq-1"}
+		in.Shape.ClaimedQuestions = []ClaimedQuestion{{QuestionID: "oq-1", StubSlugs: []string{"retry-strategy-spike"}}}
+		snapshot := mustDerive(t, in)
+		concern := mustConcern(t, snapshot, "shape/question/oq-1")
+		if concern.State != StateUnproven {
+			t.Fatalf("state = %q, want %q", concern.State, StateUnproven)
+		}
+		if concern.Blocking {
+			t.Fatalf("claimed question concern is blocking, want non-blocking: %+v", concern)
+		}
+		if concern.Timing != TimingEventual {
+			t.Fatalf("timing = %q, want %q", concern.Timing, TimingEventual)
+		}
+		wantWitnesses := []string{"oq-1", "retry-strategy-spike"}
+		sort.Strings(wantWitnesses)
+		if !reflect.DeepEqual(concern.Witnesses, wantWitnesses) {
+			t.Fatalf("witnesses = %q, want %q", concern.Witnesses, wantWitnesses)
+		}
+		if !strings.Contains(concern.Summary, "claimed") || !strings.Contains(concern.Summary, "unresolved") {
+			t.Fatalf("summary = %q, want mention of claimed and unresolved", concern.Summary)
+		}
+		if concern.Destination.BoardPath != in.Target.BoardPath {
+			t.Fatalf("destination = %+v, want board path %q", concern.Destination, in.Target.BoardPath)
+		}
+	})
+
+	t.Run("claimed question does not block the shape area", func(t *testing.T) {
+		in := baseInput(t)
+		in.Shape.OpenQuestionIDs = []string{"oq-1"}
+		in.Shape.ClaimedQuestions = []ClaimedQuestion{{QuestionID: "oq-1", StubSlugs: []string{"retry-strategy-spike"}}}
+		snapshot := mustDerive(t, in)
+		for _, area := range snapshot.Areas {
+			if area.ID == AreaShape && area.State != StateProven {
+				t.Fatalf("shape area state = %q, want proven when the only open question is claimed", area.State)
+			}
+		}
+	})
+
+	t.Run("multiple claiming stubs each appear as a witness", func(t *testing.T) {
+		in := baseInput(t)
+		in.Shape.OpenQuestionIDs = []string{"oq-1"}
+		in.Shape.ClaimedQuestions = []ClaimedQuestion{{QuestionID: "oq-1", StubSlugs: []string{"zeta-spike", "alpha-spike"}}}
+		snapshot := mustDerive(t, in)
+		concern := mustConcern(t, snapshot, "shape/question/oq-1")
+		if !contains(concern.Witnesses, "zeta-spike") || !contains(concern.Witnesses, "alpha-spike") {
+			t.Fatalf("witnesses = %q, want both claiming stub slugs", concern.Witnesses)
+		}
+	})
+
+	t.Run("unclaimed question among a claimed one stays blocking and current", func(t *testing.T) {
+		in := baseInput(t)
+		in.Shape.OpenQuestionIDs = []string{"oq-1", "oq-2"}
+		in.Shape.ClaimedQuestions = []ClaimedQuestion{{QuestionID: "oq-2", StubSlugs: []string{"retry-strategy-spike"}}}
+		snapshot := mustDerive(t, in)
+		claimed := mustConcern(t, snapshot, "shape/question/oq-2")
+		unclaimed := mustConcern(t, snapshot, "shape/question/oq-1")
+		if claimed.Blocking || claimed.Timing != TimingEventual {
+			t.Fatalf("claimed concern = %+v, want non-blocking eventual", claimed)
+		}
+		if !unclaimed.Blocking || unclaimed.Timing != TimingCurrent {
+			t.Fatalf("unclaimed concern = %+v, want blocking current", unclaimed)
+		}
+		// The unclaimed question alone still drives the area unproven.
+		for _, area := range snapshot.Areas {
+			if area.ID == AreaShape && area.State != StateUnproven {
+				t.Fatalf("shape area state = %q, want unproven (driven by the unclaimed question)", area.State)
+			}
+		}
+	})
 }
 
 func TestDeriveProvenanceMutationAndBoardPostures(t *testing.T) {
@@ -581,6 +658,78 @@ func TestValidateInputRejectsInvalidPosturesAndSources(t *testing.T) {
 			wantErr: "target title",
 		},
 		{
+			name: "empty spike word",
+			mutate: func(in *Input) {
+				in.SpikeWord = ""
+			},
+			wantErr: "spike word",
+		},
+		{
+			name: "control-bearing spike word",
+			mutate: func(in *Input) {
+				in.SpikeWord = "spike\nbad"
+			},
+			wantErr: "spike word",
+		},
+		{
+			name: "nil claimed questions",
+			mutate: func(in *Input) {
+				in.Shape.ClaimedQuestions = nil
+			},
+			wantErr: "claimed open questions must be non-nil",
+		},
+		{
+			name: "claimed question id not declared",
+			mutate: func(in *Input) {
+				in.Shape.OpenQuestionIDs = []string{}
+				in.Shape.ClaimedQuestions = []ClaimedQuestion{{QuestionID: "oq-9", StubSlugs: []string{"a-spike"}}}
+			},
+			wantErr: "not a declared open question",
+		},
+		{
+			name: "duplicate claimed question id",
+			mutate: func(in *Input) {
+				in.Shape.OpenQuestionIDs = []string{"oq-1"}
+				in.Shape.ClaimedQuestions = []ClaimedQuestion{
+					{QuestionID: "oq-1", StubSlugs: []string{"a-spike"}},
+					{QuestionID: "oq-1", StubSlugs: []string{"b-spike"}},
+				}
+			},
+			wantErr: "duplicate claimed open question",
+		},
+		{
+			name: "claimed question with no stub slugs",
+			mutate: func(in *Input) {
+				in.Shape.OpenQuestionIDs = []string{"oq-1"}
+				in.Shape.ClaimedQuestions = []ClaimedQuestion{{QuestionID: "oq-1", StubSlugs: []string{}}}
+			},
+			wantErr: "must carry at least one stub slug",
+		},
+		{
+			name: "claimed question with empty stub slug",
+			mutate: func(in *Input) {
+				in.Shape.OpenQuestionIDs = []string{"oq-1"}
+				in.Shape.ClaimedQuestions = []ClaimedQuestion{{QuestionID: "oq-1", StubSlugs: []string{""}}}
+			},
+			wantErr: "empty or control-bearing stub slug",
+		},
+		{
+			name: "claimed question with control-bearing stub slug",
+			mutate: func(in *Input) {
+				in.Shape.OpenQuestionIDs = []string{"oq-1"}
+				in.Shape.ClaimedQuestions = []ClaimedQuestion{{QuestionID: "oq-1", StubSlugs: []string{"bad\nslug"}}}
+			},
+			wantErr: "empty or control-bearing stub slug",
+		},
+		{
+			name: "claimed question with duplicate stub slug",
+			mutate: func(in *Input) {
+				in.Shape.OpenQuestionIDs = []string{"oq-1"}
+				in.Shape.ClaimedQuestions = []ClaimedQuestion{{QuestionID: "oq-1", StubSlugs: []string{"a-spike", "a-spike"}}}
+			},
+			wantErr: "duplicate stub slug",
+		},
+		{
 			name: "invalid chain enum",
 			mutate: func(in *Input) {
 				in.Provenance.ChainState = State("unknown")
@@ -769,6 +918,7 @@ func baseInput(t *testing.T) Input {
 			OutcomePresent:    true,
 			DeclaredObjectIDs: []string{"ac-1"},
 			OpenQuestionIDs:   []string{},
+			ClaimedQuestions:  []ClaimedQuestion{},
 		},
 		Provenance: ProvenanceFacts{
 			ChainState:        StateProven,
@@ -790,6 +940,7 @@ func baseInput(t *testing.T) Input {
 			Review:  []string{"verdi", "journey", "spec/example", "--review"},
 		},
 		RequestDigest: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		SpikeWord:     "spike",
 	}
 }
 
