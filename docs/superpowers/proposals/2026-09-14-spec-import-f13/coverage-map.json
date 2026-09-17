@@ -41,14 +41,14 @@
       "id": "review-and-transition-criteria",
       "start_line": 650,
       "end_line": 656,
-      "destination": "Proposed criteria ac-1 through ac-6 below, retaining every stated condition.",
+      "destination": "Proposed criteria ac-1 through ac-9 below, retaining every stated condition.",
       "transformation": "explicit source-span selection; whitespace-only display normalization, verified in mechanical-field-map.json"
     },
     {
       "id": "finding-criteria",
       "start_line": 657,
       "end_line": 662,
-      "destination": "Proposed criteria ac-7 and ac-8 below.",
+      "destination": "Proposed criteria ac-10 through ac-12 below.",
       "transformation": "explicit source-span selection; whitespace-only display normalization, verified in mechanical-field-map.json"
     },
     {

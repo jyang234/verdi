@@ -353,8 +353,22 @@ type f13FieldMapCard struct {
 	DisplayText string `json:"display_text"`
 }
 
+// f13FieldMapDisposition is one mechanical-field-map.json
+// "primary_byte_dispositions" entry: the complete partition of the
+// primary snapshot into mapped (card) and retained-only spans.
+type f13FieldMapDisposition struct {
+	Start       int    `json:"start"`
+	EndExcl     int    `json:"end_exclusive"`
+	Disposition string `json:"disposition"`
+	Target      string `json:"target"`
+	SHA256      string `json:"sha256"`
+}
+
 type f13FieldMap struct {
-	Cards []f13FieldMapCard `json:"cards"`
+	Cards                    []f13FieldMapCard        `json:"cards"`
+	PrimaryByteDispositions  []f13FieldMapDisposition `json:"primary_byte_dispositions"`
+	RequiredValueGapCount    int                      `json:"required_value_gap_count"`
+	UnresolvedRequiredValues []json.RawMessage        `json:"unresolved_required_values"`
 }
 
 // f13FieldMapPath resolves docs/superpowers/proposals/2026-09-14-spec-
@@ -387,6 +401,16 @@ func f13FieldMapPath(t *testing.T) string {
 // three hand-copies (the JSON, f13Selectors, f13PinnedCards) cannot
 // silently diverge. It also re-verifies the JSON's own sha256/display_text
 // claims against the actual primary bytes, independent of the Go pins.
+//
+// Extended per the wave-2 review's third item: the same JSON also carries
+// primary_byte_dispositions (the complete mapped+retained partition of
+// the primary snapshot), required_value_gap_count and
+// unresolved_required_values (problem, outcome, and one evidence gap per
+// card) — none of which "cards" alone exercises. This checks the
+// dispositions tile [0, len(primary)) with no gap or overlap, that every
+// mapped disposition's target matches the cards in order, that every
+// interval's own sha256 matches the raw bytes, and that both counts equal
+// len(cards)+2 (the two statement gaps).
 func TestF13Selectors_MatchMechanicalFieldMapJSON(t *testing.T) {
 	data, err := os.ReadFile(f13FieldMapPath(t))
 	if err != nil {
@@ -428,5 +452,54 @@ func TestF13Selectors_MatchMechanicalFieldMapJSON(t *testing.T) {
 		if got := collapseWhitespace(raw); got != jsonCard.DisplayText {
 			t.Errorf("mechanical-field-map.json cards[%d] (%s) display_text = %q, want %q (recomputed from primary-f13.md)", i, jsonCard.TargetID, jsonCard.DisplayText, got)
 		}
+	}
+
+	// The two required-value-gap counts: problem, outcome, and one
+	// evidence gap per card.
+	wantGaps := len(fm.Cards) + 2
+	if fm.RequiredValueGapCount != wantGaps {
+		t.Errorf("mechanical-field-map.json required_value_gap_count = %d, want %d (len(cards)+2 statement gaps)", fm.RequiredValueGapCount, wantGaps)
+	}
+	if len(fm.UnresolvedRequiredValues) != wantGaps {
+		t.Errorf("mechanical-field-map.json unresolved_required_values has %d entries, want %d (len(cards)+2 statement gaps)", len(fm.UnresolvedRequiredValues), wantGaps)
+	}
+
+	// primary_byte_dispositions must tile [0, len(primary)) with no gap or
+	// overlap; every mapped entry's target must match the cards in order;
+	// every interval's own declared sha256 must match the raw bytes.
+	cursor := 0
+	mappedIdx := 0
+	for i, disp := range fm.PrimaryByteDispositions {
+		if disp.Start != cursor {
+			t.Fatalf("primary_byte_dispositions[%d] start = %d, want %d (must tile with no gap or overlap)", i, disp.Start, cursor)
+		}
+		if disp.EndExcl <= disp.Start || disp.EndExcl > len(primary) {
+			t.Fatalf("primary_byte_dispositions[%d] range %d..%d is invalid for the %d-byte primary", i, disp.Start, disp.EndExcl, len(primary))
+		}
+		switch disp.Disposition {
+		case "mapped":
+			if mappedIdx >= len(fm.Cards) {
+				t.Fatalf("primary_byte_dispositions[%d] is mapped but only %d cards exist", i, len(fm.Cards))
+			}
+			if disp.Target != fm.Cards[mappedIdx].TargetID {
+				t.Errorf("primary_byte_dispositions[%d].target = %q, want cards[%d]'s %q (mapped dispositions must match cards in order)", i, disp.Target, mappedIdx, fm.Cards[mappedIdx].TargetID)
+			}
+			mappedIdx++
+		case "retained-only":
+			// no target expected
+		default:
+			t.Errorf("primary_byte_dispositions[%d].disposition = %q, want mapped or retained-only", i, disp.Disposition)
+		}
+		raw := primary[disp.Start:disp.EndExcl]
+		if got := sha256Hex(raw); got != disp.SHA256 {
+			t.Errorf("primary_byte_dispositions[%d] (%d..%d) sha256 = %s, want %s (recomputed from primary-f13.md)", i, disp.Start, disp.EndExcl, disp.SHA256, got)
+		}
+		cursor = disp.EndExcl
+	}
+	if cursor != len(primary) {
+		t.Errorf("primary_byte_dispositions ends at byte %d, want %d (must tile the whole primary)", cursor, len(primary))
+	}
+	if mappedIdx != len(fm.Cards) {
+		t.Errorf("primary_byte_dispositions has %d mapped entries, want %d (one per card)", mappedIdx, len(fm.Cards))
 	}
 }
