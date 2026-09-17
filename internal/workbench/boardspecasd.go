@@ -180,6 +180,12 @@ type asdShellInput struct {
 	Caps            *DesignCapabilitiesView
 	CapsFailure     *DesignFailure
 	PinnedContext   int
+	// SpikeWord is the resolved display word for the spike pseudo-class
+	// (spec/vocabulary-surfaces; proj.words.word("spike") at the caller),
+	// so a spike-claimed open question's prose routes through the display
+	// chain rather than hardcoding a bare vocabulary word (ledger
+	// L-M13a(6), the mechanical prose witness).
+	SpikeWord string
 }
 
 type asdObjectFact struct {
@@ -235,8 +241,8 @@ func deriveASDShell(in asdShellInput) asdShell {
 			// acceptance does not need a wall edit — the spike answers it
 			// after acceptance.
 			add(asdConcern{ID: "shape/question/" + oq.ID, Area: asdAreaShape, State: asdStateUnproven, Blocking: false,
-				Summary:   "Open question " + oq.ID + " is claimed by spike stub " + strings.Join(oq.ClaimedBySlugs, ", ") + " and remains unresolved: " + oq.Text,
-				Guidance:  "No wall edit is required to accept: the claiming spike stub answers it after acceptance.",
+				Summary:   "Open question " + oq.ID + " is claimed by " + in.SpikeWord + " stub " + strings.Join(oq.ClaimedBySlugs, ", ") + " and remains unresolved: " + oq.Text,
+				Guidance:  "No wall edit is required to accept: the claiming " + in.SpikeWord + " stub answers it after acceptance.",
 				Witnesses: append([]string{"declared open question " + oq.ID}, oq.ClaimedBySlugs...),
 				Dest:      "#obj-" + oq.ID})
 			continue
@@ -678,6 +684,7 @@ func (s *boardSpecServer) buildASDView(ctx context.Context, name string, proj *B
 		Caps:            v.Caps,
 		CapsFailure:     v.CapsFailure,
 		PinnedContext:   len(fm.Context),
+		SpikeWord:       proj.words.word("spike"),
 	}
 	claimedBy := map[string][]string{}
 	for _, st := range fm.Stubs {

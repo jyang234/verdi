@@ -76,13 +76,20 @@ type Fallbacks struct {
 
 // Input is the complete decoded operand set for one readiness projection.
 type Input struct {
-	Target        TargetFacts
-	Shape         ShapeFacts
-	Provenance    ProvenanceFacts
-	Board         BoardFacts
-	Journey       journey.Record
-	Conflict      policyconflict.Report
-	Fallbacks     Fallbacks
+	Target     TargetFacts
+	Shape      ShapeFacts
+	Provenance ProvenanceFacts
+	Board      BoardFacts
+	Journey    journey.Record
+	Conflict   policyconflict.Report
+	Fallbacks  Fallbacks
+	// SpikeWord is the resolved display word for the spike pseudo-class
+	// (spec/vocabulary-surfaces; model.DisplayClass("spike") at the
+	// adapter), supplied by the caller so this package's claimed-question
+	// prose never hardcodes a bare vocabulary word (ledger L-M13a(6), the
+	// mechanical prose witness internal/specalign.TestVocabProseWitness).
+	// This package stays pure and never imports internal/model itself.
+	SpikeWord     string
 	RequestDigest string
 }
 
@@ -160,6 +167,10 @@ func (in Input) validate() error {
 	}
 	if !digestPattern.MatchString(in.RequestDigest) {
 		return fmt.Errorf("readinesspilot: request digest %q must match sha256:<64 lowercase hex>", in.RequestDigest)
+	}
+	if in.SpikeWord == "" || containsControl(in.SpikeWord) {
+		// vocab:identity — names the SpikeWord operand in a validation diagnostic, not display prose
+		return fmt.Errorf("readinesspilot: spike word must be non-empty and control-free")
 	}
 	if err := validateSourceIDs("declared object ids", in.Shape.DeclaredObjectIDs); err != nil {
 		return err
@@ -245,7 +256,7 @@ func deriveShape(input Input) []Concern {
 		if slugs, ok := claimed[id]; ok {
 			concerns = append(concerns, newConcern(
 				"shape/question/"+id, AreaShape, StateUnproven, false, TimingEventual, "",
-				"Declared open question is claimed by a spike stub and remains unresolved",
+				"Declared open question is claimed by "+input.SpikeWord+" stubs and remains unresolved",
 				append([]string{id}, slugs...), boardDestination(input, input.Fallbacks.Shape),
 			))
 			continue

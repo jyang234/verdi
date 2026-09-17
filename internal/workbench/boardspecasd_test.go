@@ -23,6 +23,7 @@ func TestDeriveASDShell(t *testing.T) {
 			StateFormal:    "proposed",
 			DesignWired:    true,
 			Caps:           &DesignCapabilitiesView{PolicyMode: "proposal-only", PolicyDigest: "sha256:abc", RefusalPrecondition: "policy-mode", RefusalDetail: "mode forbids agent writes"},
+			SpikeWord:      "spike",
 		}
 	}
 

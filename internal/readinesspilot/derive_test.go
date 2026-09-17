@@ -658,6 +658,20 @@ func TestValidateInputRejectsInvalidPosturesAndSources(t *testing.T) {
 			wantErr: "target title",
 		},
 		{
+			name: "empty spike word",
+			mutate: func(in *Input) {
+				in.SpikeWord = ""
+			},
+			wantErr: "spike word",
+		},
+		{
+			name: "control-bearing spike word",
+			mutate: func(in *Input) {
+				in.SpikeWord = "spike\nbad"
+			},
+			wantErr: "spike word",
+		},
+		{
 			name: "nil claimed questions",
 			mutate: func(in *Input) {
 				in.Shape.ClaimedQuestions = nil
@@ -926,6 +940,7 @@ func baseInput(t *testing.T) Input {
 			Review:  []string{"verdi", "journey", "spec/example", "--review"},
 		},
 		RequestDigest: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		SpikeWord:     "spike",
 	}
 }
 

@@ -223,6 +223,11 @@ func (b localReadinessSnapshotBuilder) Build(ctx context.Context, root, requestP
 			Review:  []string{"verdi", "journey", request.Spec},
 		},
 		RequestDigest: readinessDigest(requestBytes),
+		// spec/vocabulary-surfaces: readinesspilot stays pure and never
+		// imports internal/model itself, so this adapter resolves the
+		// spike pseudo-class's display word once, here, through the
+		// store's already-resolved operating model (ledger L-M13a(6)).
+		SpikeWord: cfg.Model.DisplayClass("spike"),
 	}
 	snapshot, err := readinesspilot.Derive(input)
 	if err != nil {
