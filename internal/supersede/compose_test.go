@@ -687,3 +687,47 @@ func TestCompose_PredecessorWithPinnedSupersedesLink_ReplacesIt(t *testing.T) {
 		t.Fatalf("whole-spec supersedes refs = %v, want exactly [spec/pinned]", refs)
 	}
 }
+
+// commentedPredecessor opens its frontmatter with a comment, before any
+// top-level key — the one place a line can sit that belongs to no key's
+// span at all.
+const commentedPredecessor = `---
+# hand-authored 2026-01-02; see adr/0042-why-this-shape
+# do not reformat: the id line is pinned by an external tool
+id: spec/commented
+kind: spec
+class: feature
+title: "Commented (fixture)"
+owners: [platform-team]
+problem: { text: "p", anchor: "#problem" }
+outcome: { text: "o", anchor: "#outcome" }
+acceptance_criteria:
+  - { id: ac-1, text: "a", evidence: [attestation], anchor: "#ac-1" }
+---
+# Commented (fixture)
+
+Body.
+`
+
+// TestCompose_LeadingFrontmatterComment_IsPreserved proves Compose's
+// "everything except the four exceptions is copied byte-for-byte" promise
+// covers the lines BEFORE the first top-level key too. Before the fix
+// round that added this test, the block walk started at the first key's
+// line, so a leading frontmatter comment was silently dropped from the
+// successor — a copy that quietly loses the predecessor's own annotation.
+func TestCompose_LeadingFrontmatterComment_IsPreserved(t *testing.T) {
+	got, err := Compose(ComposeInput{
+		PredecessorName: "commented",
+		PredecessorRaw:  []byte(commentedPredecessor),
+		SuccessorName:   "commented-v2",
+	})
+	if err != nil {
+		t.Fatalf("Compose = %v, want no error", err)
+	}
+
+	content := string(got.Content)
+	want := "---\n# hand-authored 2026-01-02; see adr/0042-why-this-shape\n# do not reformat: the id line is pinned by an external tool\nid: spec/commented-v2\n"
+	if !strings.HasPrefix(content, want) {
+		t.Fatalf("Content does not open with the predecessor's own leading frontmatter lines, verbatim and in place:\ngot:\n%s\nwant prefix:\n%s", content, want)
+	}
+}

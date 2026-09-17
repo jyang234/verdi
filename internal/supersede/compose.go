@@ -133,6 +133,15 @@ func Compose(in ComposeInput) (Composed, error) {
 	keyStarts, keyNames := topLevelKeyLines(lines)
 
 	var blocks []string
+	// Lines before the FIRST top-level key belong to no key's span — in
+	// practice a leading frontmatter comment. They are part of "everything
+	// else is copied byte-for-byte" and are emitted verbatim, in place,
+	// ahead of the first key. (Comments sitting INSIDE a dropped or
+	// replaced key's span still go with that span — a disclosed limit of
+	// span-level surgery, recorded in this lane's report.)
+	if len(keyStarts) > 0 && keyStarts[0] > 0 {
+		blocks = append(blocks, strings.Join(lines[:keyStarts[0]], "\n"))
+	}
 	sawLinks, sawSupersession := false, false
 	for i, name := range keyNames {
 		start := keyStarts[i]
