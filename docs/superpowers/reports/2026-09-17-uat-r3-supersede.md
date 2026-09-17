@@ -1,13 +1,15 @@
 # W3-B supersede-cli — ac-11 CLI half
 
-Status: Implemented, self-verified, ready for independent Opus review.
+Status: Implemented, self-verified, fix round 1 applied, ready for independent Opus review.
 Risk tier: 3 (provenance and immutable history)
-Base..Head: 74fda84a..031b60746f897c9b68b4f545c83ccb3e140f7732 (branch agent/uat-r3-supersede)
+Base..Head: 74fda84a..283c735cf316345ebfd3e61efe638b318fef45e1 (branch agent/uat-r3-supersede)
 
 Commits:
 - b05e15e3 Add internal/supersede.Compose: pure successor-spec composition
 - 0e63270f Add internal/supersede.Resolve: predecessor guard for supersession
 - 031b6074 Add verdi design start --supersedes CLI (spec/uat-round-1 ac-11)
+- 5c2112e1 Add W3-B supersede-cli lane report (spec/uat-round-1 ac-11)
+- 283c735c Route supersede refusal prose through the model display chain (fix round 1)
 
 Files changed:
 - internal/supersede/compose.go, compose_test.go (new package)
@@ -31,12 +33,17 @@ which would have broken byte-identity. Only `id`, `links` (old whole-spec
 `stubs:` — copied byte-for-byte. Self-validates (SplitFrontmatter +
 DecodeSpec + CheckClass) before returning.
 
-`internal/supersede.Resolve(ctx, root, predName) (Predecessor, error)`:
-reads `store.ActiveSpecPath` in the current checkout, decodes, proves
-effective status through `specstate.NewProjector()` exactly like
-designfromstub.go. Refuses with typed `*ResolveError` (`Reason`:
-not-found / not-decodable / wrong-class / wrong-status) unless class is
-feature and status is accepted-pending-build.
+`internal/supersede.Resolve(ctx, root, predName, mdl *model.Model)
+(Predecessor, error)`: reads `store.ActiveSpecPath` in the current
+checkout, decodes, proves effective status through
+`specstate.NewProjector()` exactly like designfromstub.go. Refuses with
+typed `*ResolveError` (`Reason`: not-found / not-decodable / wrong-class /
+wrong-status) unless class is feature and status is
+accepted-pending-build. `mdl` (added in the fix round below) routes the
+class/status words in the wrong-class/wrong-status messages through
+`model.DisplayClass`/`DisplayState` + `model.Indefinite`, mirroring
+`internal/stubinstantiate.SealedFeatureWallGuard`'s identical refusal
+shape byte-for-byte; nil-safe (falls back to the bare id).
 
 CLI: `verdi design start --supersedes spec/<name> --name <new>`,
 dispatched before `extractFlags` by scanning `args` (not position-locked
@@ -113,6 +120,44 @@ scaffold, satisfying the contract exactly as scoped.
 Reviewer verdict:
 Fix range and closure verdict:
 
+## Fix round 1 (controller pre-review gate)
+
+Controller pre-review gate on 5c2112e1 failed: `go test -count=1
+./internal/specalign/` (TestVocabProseWitness, ledger L-M13a(6)) found
+three bare class/status words in new production string literals —
+cmd/verdi/designsupersede.go:120 ("feature"), internal/supersede/
+resolve.go:119 ("feature story"), resolve.go:133
+("accepted-pending-build") — none routed through the model display chain
+or marked `// vocab:identity`.
+
+Fix, following the precedent named (designfromstub.go/
+`SealedFeatureWallGuard`): designsupersede.go:120 is a `--kind` flag-
+grammar diagnostic (the flag's only legal VALUE, identity, not display
+prose — the exact shape design.go's own pre-existing `--kind %q is not
+feature or story` diagnostic already carries a marker for) — marked
+`// vocab:identity`. resolve.go's two refusal messages are genuine
+human-facing prose describing WHY a predecessor was refused — rewritten to
+route through `mdl.DisplayClass("feature")`/`mdl.DisplayState("feature",
+"accepted-pending-build")` wrapped in `model.Indefinite`, byte-for-byte
+mirroring `SealedFeatureWallGuard`'s own two refusal messages. `Resolve`
+gained an `mdl *model.Model` parameter (nil-safe); every call site
+(designsupersede.go, resolve_test.go, designsupersede_test.go) updated —
+existing assertions (e.g. `strings.Contains(rerr.Detail, "story")`) hold
+unchanged under nil since `DisplayClass`/`DisplayState` fall back to the
+bare id.
+
+Re-run (all fresh):
+- `go test -count=1 ./internal/specalign/ -run
+  'TestVocabProseWitness|TestGuideClaimsManifest_RowToWitnessBinding'` —
+  both PASS, exit 0.
+- `go test -count=1 ./internal/specalign/` (full suite) — PASS, exit 0.
+- `go test -race ./internal/supersede/... ./cmd/verdi/ -run
+  'Design|Help|Usage'` — PASS, exit 0 (same 10 + 94 top-level tests as
+  before, all still green).
+- `gofmt -l .` — empty. `golangci-lint run ./internal/supersede/...
+  ./cmd/...` — "0 issues."
+- `go build ./...` / `go vet ./...` — exit 0.
+
 ## Residual risks / integration prerequisites
 
 - Line-splitter assumes no frontmatter value is a multi-line block/folded
@@ -131,8 +176,11 @@ Fix range and closure verdict:
 The board's Revise action must call, in order, exactly what this lane's
 CLI calls minus the checkout switch:
 
-1. `internal/supersede.Resolve(ctx, root, predName)` — validates the
-   predecessor (defense-in-depth even if the board already knows it).
+1. `internal/supersede.Resolve(ctx, root, predName, mdl)` — validates the
+   predecessor (defense-in-depth even if the board already knows it); pass
+   the board's own resolved `*model.Model` so refusal prose (if ever
+   surfaced) uses the store's display vocabulary, or nil (safe fallback
+   to bare ids).
 2. `internal/supersede.Compose(supersede.ComposeInput{PredecessorName,
    PredecessorRaw: pred.Raw, SuccessorName})` — pure byte composition,
    identical output to the CLI's.
