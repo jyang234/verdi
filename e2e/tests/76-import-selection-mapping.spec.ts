@@ -1,5 +1,6 @@
 import { test, expect, type Page } from "@playwright/test";
-import { SPEC_IMPORT_FIXTURE_URL, importPagePath, importSourceId } from "./fixtures";
+import path from "node:path";
+import { SPEC_IMPORT_FIXTURE_URL, SPEC_IMPORT_FILES, importPagePath, importSourceId } from "./fixtures";
 
 // Selection-driven mapping in the import dialog (spec/uat-round-1 ac-8,
 // closing UAT-006: nobody maps by typing byte offsets, and three of four
@@ -36,7 +37,9 @@ const PLAN_TEXT = [
 const PLAN_BYTES = Buffer.from(PLAN_TEXT, "utf8");
 
 const NOTES_NAME = "notes.md";
-const NOTES_TEXT = "Ünrelated notes — a second source.\n";
+// The clef is an astral character (two UTF-16 units, four UTF-8 bytes):
+// a selection boundary inside it is not a character boundary.
+const NOTES_TEXT = "Ünrelated notes — a second source, 𝄞 clef.\n";
 
 // byteRange is the server's coordinate system: UTF-8 byte offsets into the
 // exact bytes, half-open.
@@ -86,6 +89,25 @@ async function selectIn(page: Page, sourceId: string, phrase: string): Promise<v
       sel.addRange(range);
     },
     { sourceId, phrase },
+  );
+}
+
+// selectUnits places the selection over a raw UTF-16 unit range of one
+// rendered source — used to reach whitespace-only and mid-character spans
+// a phrase search cannot express.
+async function selectUnits(page: Page, sourceId: string, start: number, length: number): Promise<void> {
+  await page.evaluate(
+    ({ sourceId, start, length }) => {
+      const pre = document.querySelector(`[data-testid="import-source-text-${sourceId}"]`);
+      if (!pre || !pre.firstChild) throw new Error("no rendered source text for " + sourceId);
+      const range = document.createRange();
+      range.setStart(pre.firstChild, start);
+      range.setEnd(pre.firstChild, start + length);
+      const sel = window.getSelection()!;
+      sel.removeAllRanges();
+      sel.addRange(range);
+    },
+    { sourceId, start, length },
   );
 }
 
@@ -148,8 +170,9 @@ test.describe("spec import: mapping by selection", () => {
     for (const value of ["problem", "outcome", "new:ac-", "new:co-", "new:dc-", "new:oq-"]) {
       await expect(picker.locator(`option[value="${value}"]`)).toHaveCount(1);
     }
-    await expect(picker.locator('option[value="new:co-"]')).toHaveText(/constraint.*\(co-1\)/);
-    await expect(picker.locator('option[value="new:ac-"]')).toHaveText(/acceptance criterion.*\(ac-1\)/);
+    // Before any preview the id is the NEXT one, not proven new.
+    await expect(picker.locator('option[value="new:co-"]')).toHaveText(/^constraint co-1 \(next id; no current preview/);
+    await expect(picker.locator('option[value="new:ac-"]')).toHaveText(/^acceptance criterion ac-1 \(next id/);
 
     await page.locator("#import-format").selectOption("manual-v1");
     await page.locator("#import-slug").fill("selection-widget");
@@ -267,6 +290,23 @@ test.describe("spec import: mapping by selection", () => {
     await expect(page.locator("#import-mapping-count")).toHaveText("0");
     await expect(page.locator("#import-mapping-list li")).toHaveCount(0);
 
+    // Whitespace only: the blank line after the Problem heading.
+    await selectUnits(page, planId, PLAN_TEXT.indexOf("## Problem") + "## Problem".length, 2);
+    const blank = await mapSelection(page, planId, "new:dc-");
+    await expect(blank).toHaveAttribute("data-refused", "true");
+    await expect(blank).toContainText(/whitespace/i);
+    await expect(page.locator("#import-mapping-list li")).toHaveCount(0);
+
+    // Boundary mismatch: a selection starting inside the clef's surrogate
+    // pair falls on no byte boundary of the source.
+    const clef = NOTES_TEXT.indexOf("𝄞");
+    expect(clef).toBeGreaterThan(0);
+    await selectUnits(page, notesId, clef + 1, 3);
+    const split = await mapSelection(page, notesId, "new:dc-");
+    await expect(split).toHaveAttribute("data-refused", "true");
+    await expect(split).toContainText(/character boundaries/i);
+    await expect(page.locator("#import-mapping-list li")).toHaveCount(0);
+
     // A selection in the OTHER source, mapped from this source's controls,
     // is refused too: the controls belong to one source.
     await selectIn(page, notesId, "second source");
@@ -284,5 +324,59 @@ test.describe("spec import: mapping by selection", () => {
     await expect(own).toContainText(`dc-1`);
     await expect(own).toContainText(`[${start},${start + "second source".length})`);
     await expect(page.locator("#import-mapping-count")).toHaveText("1");
+
+    // The note survives a list re-render: adding a third file rebuilds the
+    // source rows, and the notes source's last outcome is still shown.
+    await addInline(page, "third.md", "third\n");
+    await expect(page.getByTestId(`import-map-note-${notesId}`)).toContainText("dc-1");
+    await expect(page.getByTestId(`import-map-note-${notesId}`)).toHaveAttribute("data-refused", "false");
+  });
+
+  test("a 'new' id is only called new once a current preview proves it absent; before that the label and note disclose the possible override, which the preview then shows", async ({ page }) => {
+    test.setTimeout(90_000);
+    const base = await importBase(page);
+    await openImport(page, base);
+    // The labeled fixture's automatic recognition owns ac-1..ac-3.
+    await page.locator("#import-files").setInputFiles([SPEC_IMPORT_FILES.LABELED]);
+    const sourceId = importSourceId(path.basename(SPEC_IMPORT_FILES.LABELED));
+    await expect(page.getByTestId(`import-source-${sourceId}`)).toBeVisible();
+    await page.locator("#import-slug").fill("override-widget");
+    await page.locator("#import-title").fill("Override widget");
+    const picker = page.getByTestId(`import-map-target-${sourceId}`);
+    const newAC = picker.locator('option[value="new:ac-"]');
+
+    // Before any preview: next id, no novelty claim, the override named.
+    await expect(newAC).toHaveText(/ac-1 \(next id; no current preview/);
+    await expect(newAC).not.toHaveText(/New/);
+    const overridden = "This wastes their afternoon.";
+    await selectIn(page, sourceId, overridden);
+    const note = await mapSelection(page, sourceId, "new:ac-");
+    await expect(note).toHaveAttribute("data-refused", "false");
+    await expect(note).toContainText("to ac-1 (next id, unverified until preview; replaces any automatically recognized ac-1)");
+    await expect(note).not.toContainText("(new)");
+
+    // The preview shows the override: ac-1 now carries the mapped text, the
+    // automatic ac-2 and ac-3 remain.
+    await page.getByTestId("import-retain").check();
+    expect(await preview(page)).toBe(200);
+    expect(await page.getByTestId("import-field-text-ac-1").evaluate((el) => el.textContent)).toBe(overridden);
+    await expect(page.getByTestId("import-field-ac-1")).toHaveAttribute("data-origin", "copied-source");
+    await expect(page.getByTestId("import-criteria-count")).toHaveText("3 acceptance criteria");
+    await expect(page.getByTestId("import-field-text-ac-2")).toContainText("preserves exact wording");
+
+    // With a current preview the next id is proven absent: "New" is honest,
+    // and the mapped id is called new.
+    await expect(newAC).toHaveText("New acceptance criterion (ac-4)");
+    await expect(picker.locator('option[value="ac-2"]')).toHaveCount(1);
+    const added = "The importer reports missing fields.";
+    await selectIn(page, sourceId, added);
+    const note2 = await mapSelection(page, sourceId, "new:ac-");
+    await expect(note2).toContainText("to ac-4 (new)");
+    // The edit made the preview stale, so novelty is unverified again.
+    await expect(newAC).toHaveText(/ac-5 \(next id; no current preview/);
+    expect(await preview(page)).toBe(200);
+    expect(await page.getByTestId("import-field-text-ac-4").evaluate((el) => el.textContent)).toBe(added);
+    await expect(page.getByTestId("import-criteria-count")).toHaveText("4 acceptance criteria");
+    await expect(newAC).toHaveText("New acceptance criterion (ac-5)");
   });
 });

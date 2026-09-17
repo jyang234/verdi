@@ -462,9 +462,19 @@
       });
     });
     if (existing.firstChild) select.appendChild(existing);
-    var fresh = el("optgroup", { label: "New object" });
+    // Novelty is only asserted when a CURRENT preview proves the id absent
+    // from the document's automatic recognition; before any preview, or
+    // after an edit, the id is merely the next one, and mapping it replaces
+    // whatever recognition may already own under that id (the contract's
+    // explicit override), which the label says instead of "New".
+    var verified = previewCurrent();
+    var fresh = el("optgroup", { label: verified ? "New object" : "Next id (no current preview)" });
     OBJECT_GROUPS.forEach(function (g) {
-      fresh.appendChild(el("option", { value: NEW_TARGET + g[0] }, "New " + g[1] + " (" + nextIdFor(g[0]) + ")"));
+      var id = nextIdFor(g[0]);
+      var label = verified
+        ? "New " + g[1] + " (" + id + ")"
+        : g[1] + " " + id + " (next id; no current preview — if recognition owns " + id + " this mapping replaces it)";
+      fresh.appendChild(el("option", { value: NEW_TARGET + g[0] }, label));
     });
     select.appendChild(fresh);
     if (prev && select.querySelector('option[value="' + prev + '"]')) select.value = prev;
@@ -473,7 +483,11 @@
     var pickers = sourceList.querySelectorAll(".import-map-target");
     for (var i = 0; i < pickers.length; i++) fillMapPicker(pickers[i]);
   }
-  function setMapNote(note, refused, text) {
+  // setMapNote states one source's last mapping outcome and keeps it on
+  // the source so a re-render of the list (another file added or removed)
+  // restores it.
+  function setMapNote(src, note, refused, text) {
+    src.mapNote = { refused: refused, text: text };
     note.setAttribute("data-refused", refused ? "true" : "false");
     note.textContent = text;
   }
@@ -505,6 +519,8 @@
     if (state.preview) {
       markStale("Not previewed since your last edit: the findings and statuses below are earlier results. Preview again to see the current state.");
     }
+    // The pickers' "new" ids are unverified again until the next preview.
+    refreshMapPickers();
     setNextAction();
   }
   // markStale turns the shown preview into an explicitly EARLIER result:
@@ -661,7 +677,12 @@
     controls.appendChild(pickLabel);
     controls.appendChild(el("button", { type: "button", class: "import-map-selection", "data-testid": "import-map-selection-" + src.id }, "Map selection"));
     view.appendChild(controls);
-    view.appendChild(el("p", { class: "import-map-note", "data-testid": "import-map-note-" + src.id, role: "status", "aria-live": "polite", "data-refused": "false" }));
+    var note = el("p", { class: "import-map-note", "data-testid": "import-map-note-" + src.id, role: "status", "aria-live": "polite", "data-refused": "false" });
+    if (src.mapNote) {
+      note.setAttribute("data-refused", src.mapNote.refused ? "true" : "false");
+      note.textContent = src.mapNote.text;
+    }
+    view.appendChild(note);
     return view;
   }
   // renderSourceText fills one source's block with its selected slice
@@ -703,12 +724,15 @@
     if (!src || !pre || !note || !picker) return;
     var sel = selectionIn(pre, src);
     if (sel.error) {
-      setMapNote(note, true, sel.error);
+      setMapNote(src, note, true, sel.error);
       return;
     }
     var picked = picker.value;
     var created = picked.indexOf(NEW_TARGET) === 0;
     var target = created ? nextIdFor(picked.slice(NEW_TARGET.length)) : picked;
+    // Novelty is known only while the preview is current (see
+    // fillMapPicker); decided before this edit invalidates it.
+    var verified = created && previewCurrent();
     var m = ensureMapping(target);
     var replaced = !!(m.sourceId || m.text);
     m.sourceId = src.id;
@@ -719,8 +743,12 @@
     renderMappings();
     invalidate();
     refreshMapPickers();
-    setMapNote(note, false, "Mapped " + (sel.end - sel.start) + " bytes [" + sel.start + "," + sel.end + ") of " + src.label + " to " + targetName(target) +
-      (created ? " (new)" : "") + (replaced ? ", replacing its earlier mapping" : "") + ". It is listed under Advanced with the text it covers; preview to check it.");
+    var novelty = "";
+    if (created) {
+      novelty = verified ? " (new)" : " (next id, unverified until preview; replaces any automatically recognized " + target + ")";
+    }
+    setMapNote(src, note, false, "Mapped " + (sel.end - sel.start) + " bytes [" + sel.start + "," + sel.end + ") of " + src.label + " to " + targetName(target) +
+      novelty + (replaced ? ", replacing its earlier mapping" : "") + ". It is listed under Advanced with the text it covers; preview to check it.");
   }
 
   function syncSourceRow(li) {
