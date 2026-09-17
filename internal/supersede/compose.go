@@ -54,8 +54,15 @@ type Composed struct {
 }
 
 // topLevelKeyRe matches a frontmatter line that opens a new top-level
-// mapping key: column 0 (no leading whitespace), a lowercase identifier,
-// then a colon. Every spec frontmatter document in this store is a flat
+// mapping key: column 0 (no leading whitespace), a lowercase identifier —
+// bare, single-quoted, or double-quoted, all three of which YAML treats as
+// the SAME key and artifact.DecodeSpec accepts identically — then a colon.
+// The quoted spellings are recognized because a predecessor that writes
+// `"status":` or `"frozen":` would otherwise sail past the drop rule below
+// and hand the successor its predecessor's own acceptance stamp, and one
+// that writes `"id":` would keep the predecessor's identity: legal YAML
+// this package must handle, not a shape it may assume away. Every spec
+// frontmatter document in this store is a flat
 // top-level YAML mapping (02 §Common frontmatter, §feature-spec
 // frontmatter additions) whose nested content is always MORE indented than
 // its parent key — a YAML block-mapping requirement, not merely an
@@ -71,7 +78,7 @@ type Composed struct {
 // exactly, which a full yaml.Node re-marshal was verified NOT to do (it
 // renormalizes indent width and strips flow-mapping padding spaces even
 // for nodes the edit never touches).
-var topLevelKeyRe = regexp.MustCompile(`^([a-z][a-z0-9_]*):`)
+var topLevelKeyRe = regexp.MustCompile(`^(?:"([a-z][a-z0-9_]*)"|'([a-z][a-z0-9_]*)'|([a-z][a-z0-9_]*)):`)
 
 // droppedKeys are the legacy per-kind lifecycle fields a superseding
 // revision never carries forward: the successor is a fresh draft under the
@@ -176,19 +183,105 @@ func Compose(in ComposeInput) (Composed, error) {
 	if err := designscaffold.CheckClass(outSpec, artifact.ClassFeature); err != nil {
 		return Composed{}, fmt.Errorf("supersede: internal error: composed successor failed self-validation: %w", err)
 	}
+	if err := checkComposedPostconditions(outSpec, in.SuccessorName, supersedesRef, carried); err != nil {
+		return Composed{}, fmt.Errorf("supersede: internal error: composed successor failed self-validation: %w", err)
+	}
 
 	return Composed{Content: newDoc, CarriedIDs: carried, SupersedesRef: supersedesRef}, nil
 }
 
+// checkComposedPostconditions asserts, on the DECODED successor, every
+// property the text surgery above is supposed to have established — the
+// backstop that makes a bug in that surgery fail CLOSED, naming the
+// offending field, instead of shipping a successor that silently inherits
+// what it must not.
+//
+// A decode-and-CheckClass self-validation alone is NOT enough, and the
+// quoted-key defect this function was written for is the witness: a
+// predecessor spelling its own lifecycle fields `"status":`/`"frozen":`
+// (ordinary, legal YAML that DecodeSpec accepts) had those spans copied
+// verbatim, and the composed successor still decoded cleanly as a
+// well-formed spec of the right class — so the caller exited 0 on a
+// successor carrying the predecessor's own identity and acceptance stamp.
+// Every property below is therefore asserted on the decode RESULT, never
+// on the rendered text: what the next reader of these bytes sees is what
+// is checked.
+//
+// The properties are exactly the controller's R3-4 ruling (docs/superpowers/
+// reports/2026-09-17-uat-round-1-wave3-ledger.md): only identity fields,
+// the supersedes link, and the supersession block may differ from the
+// predecessor; the legacy lifecycle stamps are dropped; a predecessor
+// already carrying a supersedes link/supersession block has both replaced.
+func checkComposedPostconditions(out *artifact.SpecFrontmatter, successorName, supersedesRef string, carried []string) error {
+	if wantID := "spec/" + successorName; out.ID != wantID {
+		return fmt.Errorf("id is %q, want %q", out.ID, wantID)
+	}
+	if out.Status != "" {
+		return fmt.Errorf("status: is present (%q); a successor must carry no inherited lifecycle stamp", out.Status)
+	}
+	if out.Frozen != nil {
+		return fmt.Errorf("frozen: is present (commit %q); a successor must carry no inherited lifecycle stamp", out.Frozen.Commit)
+	}
+
+	refs := artifact.WholeSpecSupersedesRefs(out.Links)
+	if len(refs) != 1 {
+		return fmt.Errorf("links: declare %d whole-spec supersedes refs, want exactly one naming %s (I-47)", len(refs), supersedesRef)
+	}
+	if got := refs[0].String(); got != supersedesRef {
+		return fmt.Errorf("links: declare the whole-spec supersedes ref %s, want %s", got, supersedesRef)
+	}
+
+	if out.Supersession == nil {
+		return fmt.Errorf("supersession: block is absent, want every predecessor object classified carried (VL-015)")
+	}
+	classified := make(map[string]bool, len(out.Supersession.Carried))
+	for _, id := range out.Supersession.Carried {
+		classified[id] = true
+	}
+	for _, id := range carried {
+		if !classified[id] {
+			return fmt.Errorf("supersession: leaves the predecessor object %s unclassified (VL-015 classifies every predecessor object exactly once)", id)
+		}
+	}
+	if got, want := len(out.Supersession.Carried), len(carried); got != want {
+		return fmt.Errorf("supersession: carried lists %d ids, want the predecessor's own %d", got, want)
+	}
+	for _, bucket := range []struct {
+		name string
+		n    int
+	}{
+		{"amended", len(out.Supersession.Amended)},
+		{"amended_advisory", len(out.Supersession.AmendedAdvisory)},
+		{"removed", len(out.Supersession.Removed)},
+		{"added", len(out.Supersession.Added)},
+	} {
+		if bucket.n != 0 {
+			return fmt.Errorf("supersession: %s lists %d entries, want none at scaffold time (the author reclassifies by hand afterward)", bucket.name, bucket.n)
+		}
+	}
+	return nil
+}
+
 // topLevelKeyLines scans lines (a split, delimiter-free frontmatter body)
 // for topLevelKeyRe matches, returning each match's line index and key
-// name, in document order.
+// name (UNQUOTED, whichever of the three spellings the line used), in
+// document order.
 func topLevelKeyLines(lines []string) (starts []int, names []string) {
 	for i, l := range lines {
-		if m := topLevelKeyRe.FindStringSubmatch(l); m != nil {
-			starts = append(starts, i)
-			names = append(names, m[1])
+		m := topLevelKeyRe.FindStringSubmatch(l)
+		if m == nil {
+			continue
 		}
+		// Exactly one of the three alternatives can have matched.
+		name := ""
+		for _, group := range m[1:] {
+			if group != "" {
+				name = group
+				break
+			}
+		}
+		starts = append(starts, i)
+		names = append(names, name)
 	}
 	return starts, names
 }

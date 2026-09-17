@@ -407,3 +407,210 @@ func TestDeclarationOrderIDs_EmptyBlocksAreFine(t *testing.T) {
 		t.Fatalf("declarationOrderIDs = %v, want %v", got, want)
 	}
 }
+
+// quotedKeyPredecessor writes the very fields Compose must rewrite or drop
+// with QUOTED keys — `"id":`, `"status":`, `'frozen':` — which is ordinary,
+// legal YAML that artifact.DecodeSpec accepts unchanged (proven by the
+// decode assertions below, which read the predecessor's own values back).
+// Before the fix round that added this test, topLevelKeyRe recognized only
+// bare keys, so these three spans were copied VERBATIM: the successor
+// silently inherited the predecessor's own acceptance stamp and id, and
+// Compose's self-validation passed (a spec carrying a quoted `"status":` is
+// decode-valid), so the CLI exited 0 on a successor that claimed its
+// predecessor's identity and acceptance.
+const quotedKeyPredecessor = `---
+"id": spec/quoted
+kind: spec
+class: feature
+title: "Quoted keys (fixture)"
+owners: [platform-team]
+"status": accepted-pending-build
+problem: { text: "p", anchor: "#problem" }
+outcome: { text: "o", anchor: "#outcome" }
+acceptance_criteria:
+  - { id: ac-1, text: "a", evidence: [attestation], anchor: "#ac-1" }
+'frozen': { at: 2026-01-01, commit: 0123456789abcdef0123456789abcdef01234567 }
+---
+# Quoted keys (fixture)
+
+Body.
+`
+
+// TestCompose_QuotedTopLevelKeys_AreHandledLikeUnquotedOnes proves the
+// quoted spelling of every key Compose special-cases is handled exactly
+// like the bare spelling — asserted on the DECODED successor (the shape
+// that actually matters: what the next reader of these bytes sees), not on
+// a substring of the rendered text.
+func TestCompose_QuotedTopLevelKeys_AreHandledLikeUnquotedOnes(t *testing.T) {
+	// The predecessor really does decode with both legacy fields set —
+	// otherwise this fixture would prove nothing about dropping them.
+	predFM, _, err := artifact.SplitFrontmatter([]byte(quotedKeyPredecessor))
+	if err != nil {
+		t.Fatalf("SplitFrontmatter(predecessor) = %v, want no error", err)
+	}
+	predSpec, err := artifact.DecodeSpec(predFM)
+	if err != nil {
+		t.Fatalf("DecodeSpec(predecessor) = %v, want no error (quoted keys are legal YAML)", err)
+	}
+	if predSpec.Status == "" || predSpec.Frozen == nil || predSpec.ID != "spec/quoted" {
+		t.Fatalf("predecessor fixture decoded as status=%q frozen=%v id=%q, want all three set through their quoted keys", predSpec.Status, predSpec.Frozen, predSpec.ID)
+	}
+
+	got, err := Compose(ComposeInput{
+		PredecessorName: "quoted",
+		PredecessorRaw:  []byte(quotedKeyPredecessor),
+		SuccessorName:   "quoted-v2",
+	})
+	if err != nil {
+		t.Fatalf("Compose = %v, want no error", err)
+	}
+
+	outFM, _, err := artifact.SplitFrontmatter(got.Content)
+	if err != nil {
+		t.Fatalf("SplitFrontmatter(successor) = %v, want no error", err)
+	}
+	outSpec, err := artifact.DecodeSpec(outFM)
+	if err != nil {
+		t.Fatalf("DecodeSpec(successor) = %v, want no error", err)
+	}
+	if outSpec.ID != "spec/quoted-v2" {
+		t.Errorf("successor id = %q, want spec/quoted-v2 (a quoted \"id\": key must be rewritten too)", outSpec.ID)
+	}
+	if outSpec.Status != "" {
+		t.Errorf("successor status = %q, want it dropped (a quoted \"status\": key must be dropped too)", outSpec.Status)
+	}
+	if outSpec.Frozen != nil {
+		t.Errorf("successor frozen = %+v, want it dropped (a quoted 'frozen': key must be dropped too)", outSpec.Frozen)
+	}
+}
+
+// TestCheckComposedPostconditions is the direct table test of Compose's
+// own post-condition assertion — the backstop that makes any future text
+// surgery bug fail CLOSED with the offending field named, instead of
+// silently shipping a successor that inherits what it must not. Each row
+// hand-builds an "already composed" decode result and asserts the field
+// name appears in the refusal.
+func TestCheckComposedPostconditions(t *testing.T) {
+	// good is the shape a correct Compose produces for predecessor
+	// spec/pred -> successor spec/succ carrying objects ac-1 and co-1.
+	good := func() *artifact.SpecFrontmatter {
+		return &artifact.SpecFrontmatter{
+			Base: artifact.Base{
+				ID:    "spec/succ",
+				Links: []artifact.Link{{Type: artifact.LinkSupersedes, Ref: "spec/pred"}},
+			},
+			Supersession: &artifact.Supersession{Carried: []string{"ac-1", "co-1"}},
+		}
+	}
+	carried := []string{"ac-1", "co-1"}
+
+	t.Run("a correctly composed successor passes", func(t *testing.T) {
+		if err := checkComposedPostconditions(good(), "succ", "spec/pred", carried); err != nil {
+			t.Fatalf("checkComposedPostconditions = %v, want nil", err)
+		}
+	})
+
+	cases := []struct {
+		name    string
+		mutate  func(*artifact.SpecFrontmatter)
+		wantSub string
+	}{
+		{
+			name:    "successor keeps the predecessor's id",
+			mutate:  func(s *artifact.SpecFrontmatter) { s.ID = "spec/pred" },
+			wantSub: "id",
+		},
+		{
+			name:    "successor inherits a status stamp",
+			mutate:  func(s *artifact.SpecFrontmatter) { s.Status = artifact.Status("accepted-pending-build") },
+			wantSub: "status",
+		},
+		{
+			name: "successor inherits a frozen stamp",
+			mutate: func(s *artifact.SpecFrontmatter) {
+				s.Frozen = &artifact.Frozen{At: "2026-01-01", Commit: "0123456789abcdef0123456789abcdef01234567"}
+			},
+			wantSub: "frozen",
+		},
+		{
+			name:    "no whole-spec supersedes link at all",
+			mutate:  func(s *artifact.SpecFrontmatter) { s.Links = nil },
+			wantSub: "supersedes",
+		},
+		{
+			name: "the predecessor's own inherited supersedes link survived",
+			mutate: func(s *artifact.SpecFrontmatter) {
+				s.Links = append(s.Links, artifact.Link{Type: artifact.LinkSupersedes, Ref: "spec/ancient"})
+			},
+			wantSub: "supersedes",
+		},
+		{
+			name: "the one supersedes link names the wrong predecessor",
+			mutate: func(s *artifact.SpecFrontmatter) {
+				s.Links = []artifact.Link{{Type: artifact.LinkSupersedes, Ref: "spec/somebody-else"}}
+			},
+			wantSub: "supersedes",
+		},
+		{
+			name:    "no supersession block at all",
+			mutate:  func(s *artifact.SpecFrontmatter) { s.Supersession = nil },
+			wantSub: "supersession",
+		},
+		{
+			name: "a predecessor object went unclassified",
+			mutate: func(s *artifact.SpecFrontmatter) {
+				s.Supersession.Carried = []string{"ac-1"}
+			},
+			wantSub: "co-1",
+		},
+		{
+			name: "carried lists an object the predecessor never declared",
+			mutate: func(s *artifact.SpecFrontmatter) {
+				s.Supersession.Carried = []string{"ac-1", "co-1", "ac-99"}
+			},
+			wantSub: "carried",
+		},
+		{
+			name: "a fresh scaffold classifies something amended",
+			mutate: func(s *artifact.SpecFrontmatter) {
+				s.Supersession.Amended = []artifact.SupersessionNote{{ID: "ac-1", Note: "widened"}}
+			},
+			wantSub: "amended",
+		},
+		{
+			name: "a fresh scaffold classifies something amended_advisory",
+			mutate: func(s *artifact.SpecFrontmatter) {
+				s.Supersession.AmendedAdvisory = []artifact.SupersessionNote{{ID: "ac-1", Note: "widened"}}
+			},
+			wantSub: "amended_advisory",
+		},
+		{
+			name: "a fresh scaffold classifies something removed",
+			mutate: func(s *artifact.SpecFrontmatter) {
+				s.Supersession.Removed = []artifact.SupersessionNote{{ID: "co-1", Note: "gone"}}
+			},
+			wantSub: "removed",
+		},
+		{
+			name: "a fresh scaffold classifies something added",
+			mutate: func(s *artifact.SpecFrontmatter) {
+				s.Supersession.Added = []string{"ac-9"}
+			},
+			wantSub: "added",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			spec := good()
+			tc.mutate(spec)
+			err := checkComposedPostconditions(spec, "succ", "spec/pred", carried)
+			if err == nil {
+				t.Fatal("checkComposedPostconditions = nil, want a fail-closed refusal")
+			}
+			if !strings.Contains(err.Error(), tc.wantSub) {
+				t.Fatalf("checkComposedPostconditions = %q, want it to name %q", err.Error(), tc.wantSub)
+			}
+		})
+	}
+}
