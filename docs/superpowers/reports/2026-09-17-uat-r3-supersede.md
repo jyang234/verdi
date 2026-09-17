@@ -343,6 +343,14 @@ Commands re-run at head 4fcecc7a (all fresh, all foreground):
 - An archived predecessor is indistinguishable from `ReasonNotFound`
   (Resolve reads only the active zone) — reviewer finding, adjudicated out
   of scope for this round.
+- The incompatible-flag detection on this path still matches only the BARE
+  `--from-stub`/`--problem`/`--outcome`/`--defer-statements` tokens, so
+  `--problem=p` alongside `--supersedes` is refused as an unrecognized
+  argument rather than with the "cannot be combined with --supersedes"
+  message. Same exit code, same offending token named, less precise
+  diagnostic. Noticed while closing F4 and deliberately left alone: F4's
+  adjudicated scope is the `=` form of `--supersedes`/`--name`/`--kind`,
+  and widening it unasked would change a refusal message no finding covers.
 - `ValidateSuccessorName` inherits `artifact.ParseRef`'s tolerance: a
   `--name` carrying an `@commit` pin or a `#fragment` parses as a ref and
   becomes the successor's directory name verbatim. This is identical,
