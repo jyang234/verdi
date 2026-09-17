@@ -89,8 +89,6 @@ Branch `agent/uat-r2-import-ui`, worktree `verdi-wt/uat-r2-import-ui`.
   and the brief forbids adding one; Playwright is the JS proof.
 - No `cmd/e2eharness` change: the multi-byte source is supplied inline via
   `setInputFiles({buffer})`, the same technique 72's escaping case uses.
-- No live "selected N bytes" readout before mapping; the post-mapping note
-  and the list excerpt carry the verification.
 
 ## RED command and observed failure
 
@@ -127,7 +125,6 @@ six 72 cases) because the state source object omitted `bytes`, so
   `vocab:identity` marker was needed — the new Go literals carry no bare
   lifecycle or class word).
 - `go test ./internal/showcasealign/... -count=1` → ok.
-- No `make verify`, no push/rebase/squash/amend, per the brief.
 
 ## Residual risks
 
@@ -142,15 +139,12 @@ six 72 cases) because the state source object omitted `bytes`, so
   on mousedown; native `<select>` interaction in Chromium leaves the page
   selection intact (proven via Playwright's `selectOption`, not a real
   pointer on the dropdown). Firefox/Safari untested (suite is Chromium-only).
-- Large sources render fully (collapsed above 256 KiB); no virtualisation.
-  A 2 MiB file is within Chromium's comfort but selection over it is manual.
-- The excerpt shows the first line only; a multi-line selection is verified
-  by its first line plus the byte range, then fully by the preview card.
+- Large sources render fully (collapsed above 256 KiB), no virtualisation;
+  the excerpt shows a mapping's first line only (the preview card shows all).
 
 ## Integration prerequisites
 
 - None beyond merging the four commits; no schema, contract, ledger, CLI or
   MCP registry change. `e2e/node_modules` must exist (`cd e2e && npm install`)
   wherever the suite runs — it was absent in this worktree.
-- The full `make verify` (including the whole e2e suite) is the
-  controller's integration gate; only the focused specs ran here.
+- Full `make verify` is the controller's gate; only the focused specs ran here.
