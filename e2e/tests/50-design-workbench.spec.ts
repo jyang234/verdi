@@ -116,6 +116,49 @@ test.describe("shell and posture", () => {
     await expect(page.getByTestId("asd-posture-bytes")).toHaveAttribute("data-state", "proposed");
   });
 
+  test("a spike-claimed open question reads non-blocking with claim-aware guidance (ac-10)", async ({
+    page,
+  }) => {
+    // spec/uat-round-1 ac-10, PLAN.md §7 I-128 option (a): a question a
+    // spike stub's `resolves` claims is not a wall edit standing between
+    // this draft and acceptance, and the shell says so in its own words
+    // AND in its machine facts. oq-2 is claimed by the harness fixture's
+    // refresh-window-spike stub (cmd/e2eharness/provision_board.go).
+    //
+    // Only the oq-2 half is asserted here. oq-1 is this same wall's LIVE
+    // scoping-canvas target: suite 30 graduates two spike stubs claiming
+    // it into this shared store, so oq-1's claim state differs between an
+    // isolated run of this file and a full-suite run. Both branches —
+    // claimed and unclaimed — are pinned deterministically in
+    // internal/workbench's TestBuildASDView_SpikeClaimedQuestions.
+    await page.goto(DESIGN());
+    // A busy wall ranks this non-blocking row below the three-item
+    // preview: expand the exact-count remainder inline (SI-125).
+    const more = page.locator('[data-testid="asd-more"] > summary');
+    if (await more.count()) await more.click();
+
+    const claimed = page.locator('[data-concern-id="shape/question/oq-2"]');
+    await expect(claimed).toHaveCount(1);
+    await expect(
+      claimed.getByTestId("asd-guidance-shape/question/oq-2"),
+    ).toHaveText(
+      "No wall edit is required to accept: the claiming spike stub answers it after acceptance.",
+    );
+    await claimed.locator(".readiness-tech summary").click();
+    await expect(claimed.locator('dt:text-is("Blocking") + dd')).toHaveText(
+      "false",
+    );
+    await expect(claimed.locator(".readiness-witnesses code")).toHaveText([
+      "declared open question oq-2",
+      "refresh-window-spike",
+    ]);
+
+    // Nothing is suppressed: the other question keeps its own row.
+    await expect(
+      page.locator('[data-concern-id="shape/question/oq-1"]'),
+    ).toHaveCount(1);
+  });
+
   test("no browser control claims governance authority", async ({ page }) => {
     await page.goto(DESIGN());
     // The human-review row is a plain label with formal secondary
