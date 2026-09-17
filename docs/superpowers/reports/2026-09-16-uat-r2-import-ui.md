@@ -12,8 +12,8 @@ Tier 2 (spec/uat-round-1 dc-5; ac-8 closes UAT-006).
 
 ## Base..Head
 
-Base `19dca4f5` (wave-1 integration head) .. code head `a38bc6df`; this
-report is committed on top as the last commit (its SHA is in the handback).
+Base `19dca4f5` (wave-1 integration head) .. code head `a38bc6df`, report
+`4b740e70`, review fix `2b72a40b`; this report update is the last commit.
 Branch `agent/uat-r2-import-ui`, worktree `verdi-wt/uat-r2-import-ui`.
 
 ## Commits
@@ -33,62 +33,48 @@ Branch `agent/uat-r2-import-ui`, worktree `verdi-wt/uat-r2-import-ui`.
   pinning the rules and copy above and the surviving free-text grammar.
 - `internal/workbench/assets/specimport.js` (+379/-2): the behavior.
 - `e2e/tests/76-import-selection-mapping.spec.ts` (new): two cases.
-- `internal/dex/assets/style.css`: untouched. The import page's stylesheet
-  lives in `specImportCSS` inside the renderer by the established pattern
-  ("the page's small stylesheet lives here with the component"), so the
-  new rules went there and no shared-stylesheet rule was needed.
+- `internal/dex/assets/style.css`: untouched — the page's stylesheet lives
+  in `specImportCSS` inside the renderer by the established pattern.
 
 ## Contract implemented
 
-1. Each selected source is rendered read-only beneath its row in a
-   `<details>` (open unless the file exceeds 256 KiB) holding a `<pre
-   class="import-source-text">` filled via `textContent` (no source byte
-   becomes markup), `white-space: pre-wrap`, `var(--mono)`,
-   `user-select: text`, scrollable at 24rem. The text shown is the source's
-   SELECTED SLICE: `selectedSlice` mirrors the server's `selectLineRange`
-   byte-for-byte (both lines zero = whole file; inclusive 1-based physical
-   LF lines, unterminated last line counted, CRLF kept), because every
-   mapping offset is slice-relative. Decoding is strict (`TextDecoder`
-   fatal, BOM kept as text) and for display only; invalid UTF-8 or an
-   invalid line range shows a note instead of text.
-2. Map selection: the live selection is resolved against that source's
-   block. Code-unit offsets within the block are turned into byte offsets by
-   `byteOffsetsForUnits`, which walks the byte array rune by rune counting
-   the UTF-16 units each rune occupies (2 for a four-byte sequence, else
-   1); the resulting slice is decoded back and must equal the selected text,
-   otherwise the mapping is refused. Refused with a visible message
-   (`data-refused="true"` on the per-source status line): empty selection,
-   selection outside any source, selection spanning two sources, selection
-   inside another source, whitespace-only selection, boundary mismatch.
-3. Target picker per source: Statements (problem, outcome); Existing
-   objects (ids from the last preview's fields plus current mapping
-   targets, per kind, numerically sorted); New object for each of the four
-   kinds with the id it will take shown in the label. New id = one past the
-   highest numbered id the page knows for that kind (the importer's own
-   1-based ordinal numbering; see Residual risks). The free-text target
-   input under Advanced remains, placeholder now
-   "problem, outcome, ac-1, co-1, dc-1 or oq-1". A mapping made by
-   selection replaces the target's earlier span/text but keeps its evidence
-   kinds; the note says so.
-4. Every source-backed mapping row in the Advanced list carries an excerpt:
-   `Bytes [start,end) of <label>: "<first line, ≤140 chars>"`, computed from
-   the page's own bytes and refreshed when the offsets, the source or the
-   source's line range change; an invalid or boundary-cutting range says
-   so instead.
-5. Unchanged: preview, coverage table, apply, confirmation/race handling,
-   and the request JSON (`mappingWire` untouched; a selection mapping is
-   `{target, source_id, start, end, transform:"identity"}`). Changing the
-   picker is not a request edit and does not invalidate the preview.
+1. Each source is rendered read-only beneath its row in a `<details>` (open
+   unless >256 KiB): a `<pre class="import-source-text">` filled via
+   `textContent`, `pre-wrap`, `var(--mono)`, `user-select: text`, scrollable.
+   The text is the SELECTED SLICE: `selectedSlice` mirrors the server's
+   `selectLineRange` byte-for-byte (offsets are slice-relative). Decoding is
+   strict (`TextDecoder` fatal, BOM kept) and display-only; invalid UTF-8 or
+   an invalid line range shows a note instead of text.
+2. Map selection resolves the live selection against that source's block;
+   `byteOffsetsForUnits` walks the byte array rune by rune, counting the
+   UTF-16 units per rune (2 for four-byte sequences), to turn code-unit
+   offsets into byte offsets; the slice is decoded back and must equal the
+   selected text. Visible refusals (`data-refused="true"`): empty, outside
+   any source, spanning two sources, inside another source, whitespace-only,
+   boundary mismatch.
+3. Per-source picker: Statements; Existing objects (last preview's fields
+   plus current mapping targets, per kind, numerically sorted); next id per
+   kind (one past the highest known — the importer's ordinal numbering),
+   labeled "New" only under a current preview (see Review-fix range). The
+   Advanced free-text target remains; placeholder "problem, outcome, ac-1,
+   co-1, dc-1 or oq-1". A selection mapping replaces the target's earlier
+   span/text, keeps its evidence kinds, and the note says so.
+4. Each source-backed mapping row shows `Bytes [start,end) of <label>:
+   "<first line, ≤140 chars>"` from the page's own bytes, refreshed on
+   offset, source or line-range change; an invalid range says so.
+5. Unchanged: preview, coverage, apply, confirmation/race handling and the
+   request JSON (`mappingWire` untouched; a selection mapping is
+   `{target, source_id, start, end, transform:"identity"}`). The picker is
+   not a request edit and never invalidates the preview.
 
 ## Explicit exclusions
 
 - `internal/specimport/**`, the spec-import contract document, and
   `e2e/tests/72-spec-import.spec.ts` were not edited (72 was only run).
-- No JS-level unit test: the repository has no JS test harness (no
-  vitest/jest/node:test configuration anywhere outside `e2e/node_modules`),
-  and the brief forbids adding one; Playwright is the JS proof.
-- No `cmd/e2eharness` change: the multi-byte source is supplied inline via
-  `setInputFiles({buffer})`, the same technique 72's escaping case uses.
+- No JS-level unit test (the repository has no JS test harness; the brief
+  forbids adding one); Playwright is the JS proof.
+- No `cmd/e2eharness` change: multi-byte sources are supplied inline via
+  `setInputFiles({buffer})`, as 72's escaping case does.
 
 ## RED command and observed failure
 
@@ -101,13 +87,8 @@ the reader back to the selection path`; FAIL.
 
 Playwright (before the script change):
 `cd e2e && VERDI_E2E_PORT_BASE=4390 npx playwright test tests/76-import-selection-mapping.spec.ts --workers=1 --trace=off`
-→ both cases failed at `expect(locator).toBeVisible()` for
-`getByTestId('import-source-text-widget-plan-md')` /
-`('import-source-text-notes-md')`: "element(s) not found". 2 failed.
-
-An intermediate run after the script landed failed 8/20 (both 76 cases and
-six 72 cases) because the state source object omitted `bytes`, so
-`renderSources` threw; fixed in `ae607e36` before commit.
+→ both cases failed at `toBeVisible()` for `import-source-text-widget-plan-md`
+/ `import-source-text-notes-md`: "element(s) not found". 2 failed.
 
 ## GREEN commands and results
 
@@ -128,19 +109,37 @@ six 72 cases) because the state source object omitted `bytes`, so
 
 ## Residual risks
 
-- Next-id rule: the dialog had no explicit rule before this lane; the
-  implemented one (one past the highest numbered id among the last
-  preview's fields and current mapping targets) follows the importer's
-  ordinal numbering. If a stale preview's automatic ids later renumber, a
-  "new" id can coincide with an automatic one; the contract makes that an
-  explicit override, not an error, and the next preview shows it. Worth a
-  one-line note in the ledger if the controller wants it pinned.
+- Next-id rule: one past the highest numbered id among the last preview's
+  fields and current mapping targets (the importer's ordinal numbering); a
+  coincidence with an automatic id is the contract's explicit override and,
+  since the review fix, is disclosed rather than called new.
 - Selection preservation relies on the Map selection button taking no focus
-  on mousedown; native `<select>` interaction in Chromium leaves the page
-  selection intact (proven via Playwright's `selectOption`, not a real
-  pointer on the dropdown). Firefox/Safari untested (suite is Chromium-only).
+  on mousedown; `<select>` interaction proven via Playwright `selectOption`,
+  not a real pointer on the dropdown; Chromium-only suite.
 - Large sources render fully (collapsed above 256 KiB), no virtualisation;
   the excerpt shows a mapping's first line only (the preview card shows all).
+
+## Review-fix range
+
+Opus review returned REVISE on `4b740e70`; fixed in one commit on top (see
+handback for the SHA), no amend/rebase. Important: before any preview or
+with a stale one, the picker's next-id option read "New <kind> (ac-1)" and
+the note "(new)" although automatic recognition may own ac-1 and the
+mapping silently replaces it. Now `fillMapPicker`/`mapSelection` assert
+novelty only while `previewCurrent()`; otherwise the label reads
+"<kind> ac-1 (next id; no current preview — if recognition owns ac-1 this
+mapping replaces it)" and the note "(next id, unverified until preview;
+replaces any automatically recognized ac-1)"; pickers refresh in
+`invalidate()`. Minor 1: whitespace-only and mid-character (astral
+surrogate) refusals added to spec 76. Minor 2: a source's last note is kept
+on state and restored by `renderSourceView`. Spec 76 gained a third case
+(override disclosed, then shown by the preview; "(new)" after a current
+preview; stale again after the edit) and the note-survival check.
+GREEN: `go test -race -count=1 ./internal/workbench/...` ok; gofmt none,
+vet clean, golangci-lint 0 issues; `go test ./internal/specalign/ -run
+TestVocabProseWitness -count=1` ok; `VERDI_E2E_PORT_BASE=4790 npx playwright
+test tests/76-import-selection-mapping.spec.ts tests/72-spec-import.spec.ts
+--workers=1 --trace=off` → 21 passed (72: 18, 76: 3); artifacts 0.
 
 ## Integration prerequisites
 
