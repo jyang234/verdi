@@ -67,6 +67,7 @@ import (
 // vocab:identity — CLI usage/flag grammar (identity: --kind's feature|story enum values and the --child-story flag name)
 const designVerbUsage = `usage: verdi design start [<ref>] --kind feature|story --name <name>
        verdi design start --from-stub <feature> <stub>
+       verdi design start --supersedes spec/<name> --name <new>
        verdi design mutate --request <path|-> --harness <id> [--session <id>]
        verdi design board <spec-ref>
        verdi design context <spec-ref> [--child-story <ref>]...
@@ -252,6 +253,22 @@ func cmdDesignStart(args []string, stdout, stderr io.Writer) int {
 	// sees these tokens.
 	if len(args) > 0 && args[0] == "--from-stub" {
 		return cmdDesignStartFromStub(args[1:], stdout, stderr)
+	}
+	// --supersedes is a wholly distinct invocation shape too (spec/
+	// uat-round-1 ac-11, I-129), but — unlike --from-stub's fixed two
+	// positional args — it coexists with --name (and an optional --kind),
+	// so its own flag position is not fixed the way --from-stub's is:
+	// intercepted here by SCANNING every token, before extractFlags' own
+	// --kind/--name grammar (which does not recognize --supersedes at all
+	// and would otherwise route it into extractFlags' `rest` bucket and
+	// fail with a confusingly unrelated usage error) ever sees these
+	// tokens. designsupersede.go does its own flexible flag parsing from
+	// here, mirroring extractFlags' own "accept every flag, in either
+	// form, in any position" philosophy.
+	for _, a := range args {
+		if a == "--supersedes" {
+			return cmdDesignStartSupersede(args, stdout, stderr)
+		}
 	}
 
 	kindArg, name, problem, outcome, deferStatements, rest, err := extractFlags(args)
@@ -459,46 +476,9 @@ func runDesignStart(ctx context.Context, root string, kind artifact.SpecClass, s
 	// unresolvableDefaultBranchMessage's text (specstate, same wording
 	// every verb shares) so the diagnostic is identical across verbs for
 	// the identical failure.
-	var baseRef string
-	if defaultBranch, ok := specstate.ResolveDefaultBranch(ctx, root); ok {
-		baseCommit, rerr := gitx.RevParse(ctx, root, defaultBranch.Ref)
-		if rerr != nil {
-			fmt.Fprintln(stderr, "design start:", rerr)
-			return 2
-		}
-		// defaultBranch.Ref is already the disclosed choice resolveBranchRef
-		// makes for every other consumer — "origin/<name>" when that
-		// remote-tracking ref exists, otherwise the local branch name — so
-		// printing it verbatim both names the base and discloses which of
-		// the two was used, with no separate annotation needed.
-		fmt.Fprintf(stdout, "design start: base %s @ %s\n", defaultBranch.Ref, shortSHA(baseCommit))
-		baseRef = defaultBranch.Ref
-	} else {
-		// dc-7: distinguish "no origin remote at all" (disclosed HEAD
-		// fallback) from "origin exists but the default branch is
-		// unresolvable or ambiguous" (operational refusal, I-130) —
-		// git remote get-url origin failing with ErrNoSuchRemote is the
-		// signal for the former; any other read failure stays operational
-		// rather than guessed either way.
-		_, remoteErr := gitx.RemoteURL(ctx, root, "origin")
-		switch {
-		case errors.Is(remoteErr, gitx.ErrNoSuchRemote):
-			headCommit, herr := gitx.RevParse(ctx, root, "HEAD")
-			if herr != nil {
-				fmt.Fprintln(stderr, "design start:", herr)
-				return 2
-			}
-			fmt.Fprintf(stdout, "design start: default branch unresolved (no origin remote); basing on current HEAD %s — disclosed, not a default-branch base\n", shortSHA(headCommit))
-			baseRef = "HEAD"
-		case remoteErr != nil:
-			fmt.Fprintln(stderr, "design start:", remoteErr)
-			return 2
-		default:
-			// origin IS configured, but ResolveDefaultBranch still
-			// failed: exactly the stale-default hazard UAT-021 reported.
-			fmt.Fprintf(stderr, "design start: %s\n", unresolvableDefaultBranchMessage(ctx, root))
-			return 2
-		}
+	baseRef, baseOK := resolveDesignStartBase(ctx, root, stdout, stderr)
+	if !baseOK {
+		return 2
 	}
 
 	// Statement sourcing (spec/cli-creation ac-1/ac-2, ledger L-N7): the
@@ -547,36 +527,15 @@ func runDesignStart(ctx context.Context, root string, kind artifact.SpecClass, s
 		problemText, outcomeText = answers["Problem"], answers["Outcome"]
 	}
 
-	beforeBranch, err := gitx.CurrentBranch(ctx, root)
-	if err != nil {
-		fmt.Fprintln(stderr, "design start:", err)
-		return 2
-	}
-	beforeDesc := beforeBranch
-	if beforeDesc == "" {
-		// Detached HEAD: name the commit instead of an empty branch name.
-		beforeHead, herr := gitx.RevParse(ctx, root, "HEAD")
-		if herr != nil {
-			fmt.Fprintln(stderr, "design start:", herr)
-			return 2
-		}
-		beforeDesc = shortSHA(beforeHead)
-	}
-
 	// Preparation succeeded: only now does design start touch Git or
 	// resolve the provider title. dc-2: the checkout-switching behavior
 	// itself is retained (moving design start onto managed worktrees is a
 	// separate, out-of-scope design) — CheckoutNewBranchFrom now cuts the
 	// branch from the resolved default branch rather than HEAD.
 	branch := "design/" + name
-	if err := gitx.CheckoutNewBranchFrom(ctx, root, branch, baseRef); err != nil {
-		fmt.Fprintln(stderr, "design start:", err)
+	if !checkoutNewDesignBranch(ctx, root, branch, baseRef, stdout, stderr) {
 		return 2
 	}
-	// CheckoutNewBranchFrom always lands on a brand-new branch name (it
-	// refuses above if branch already exists), so the checkout has, by
-	// construction, always just changed — this disclosure is unconditional.
-	fmt.Fprintf(stdout, "design start: switched checkout from %s to %s\n", beforeDesc, branch)
 
 	var title string
 	if storyRef != "" {
@@ -675,6 +634,93 @@ func runDesignStart(ctx context.Context, root string, kind artifact.SpecClass, s
 	fmt.Fprintf(stdout, "design start: scaffolded %s (kind: %s, state: proposed (derived until merge))\n", specRef.String(), kind)
 	fmt.Fprintf(stdout, "design start: board: http://%s/board/spec/%s (run `verdi serve` from this checkout)\n", defaultWorkbenchAddr, name)
 	return 0
+}
+
+// resolveDesignStartBase implements dc-7 (I-130): resolves a fresh design
+// branch's base exactly as this verb's --kind/--name path always has,
+// printing the identical disclosure lines to stdout on success and the
+// identical operational-refusal message to stderr on failure. Extracted out
+// of runDesignStart (behavior-preserving: byte-identical logic, only moved)
+// so `verdi design start --supersedes` (designsupersede.go, spec/
+// uat-round-1 ac-11) can reuse it verbatim — the dispatch contract's own
+// words: "reuse runDesignStart's base resolution (dc-7)" — rather than
+// re-implementing (and risking drift from) this same dc-7 precedence chain
+// a second time.
+func resolveDesignStartBase(ctx context.Context, root string, stdout, stderr io.Writer) (baseRef string, ok bool) {
+	if defaultBranch, drOK := specstate.ResolveDefaultBranch(ctx, root); drOK {
+		baseCommit, rerr := gitx.RevParse(ctx, root, defaultBranch.Ref)
+		if rerr != nil {
+			fmt.Fprintln(stderr, "design start:", rerr)
+			return "", false
+		}
+		// defaultBranch.Ref is already the disclosed choice resolveBranchRef
+		// makes for every other consumer — "origin/<name>" when that
+		// remote-tracking ref exists, otherwise the local branch name — so
+		// printing it verbatim both names the base and discloses which of
+		// the two was used, with no separate annotation needed.
+		fmt.Fprintf(stdout, "design start: base %s @ %s\n", defaultBranch.Ref, shortSHA(baseCommit))
+		return defaultBranch.Ref, true
+	}
+	// dc-7: distinguish "no origin remote at all" (disclosed HEAD
+	// fallback) from "origin exists but the default branch is
+	// unresolvable or ambiguous" (operational refusal, I-130) —
+	// git remote get-url origin failing with ErrNoSuchRemote is the
+	// signal for the former; any other read failure stays operational
+	// rather than guessed either way.
+	_, remoteErr := gitx.RemoteURL(ctx, root, "origin")
+	switch {
+	case errors.Is(remoteErr, gitx.ErrNoSuchRemote):
+		headCommit, herr := gitx.RevParse(ctx, root, "HEAD")
+		if herr != nil {
+			fmt.Fprintln(stderr, "design start:", herr)
+			return "", false
+		}
+		fmt.Fprintf(stdout, "design start: default branch unresolved (no origin remote); basing on current HEAD %s — disclosed, not a default-branch base\n", shortSHA(headCommit))
+		return "HEAD", true
+	case remoteErr != nil:
+		fmt.Fprintln(stderr, "design start:", remoteErr)
+		return "", false
+	default:
+		// origin IS configured, but ResolveDefaultBranch still
+		// failed: exactly the stale-default hazard UAT-021 reported.
+		fmt.Fprintf(stderr, "design start: %s\n", unresolvableDefaultBranchMessage(ctx, root))
+		return "", false
+	}
+}
+
+// checkoutNewDesignBranch cuts branch from baseRef and discloses the
+// checkout switch exactly as this verb's --kind/--name path always has
+// (dc-2) — extracted out of runDesignStart (behavior-preserving) so
+// `verdi design start --supersedes` (designsupersede.go) prints the
+// identical disclosure line design start's plain --kind/--name path
+// already does (dispatch contract: "with the existing disclosure lines
+// (dc-2)").
+func checkoutNewDesignBranch(ctx context.Context, root, branch, baseRef string, stdout, stderr io.Writer) bool {
+	beforeBranch, err := gitx.CurrentBranch(ctx, root)
+	if err != nil {
+		fmt.Fprintln(stderr, "design start:", err)
+		return false
+	}
+	beforeDesc := beforeBranch
+	if beforeDesc == "" {
+		// Detached HEAD: name the commit instead of an empty branch name.
+		beforeHead, herr := gitx.RevParse(ctx, root, "HEAD")
+		if herr != nil {
+			fmt.Fprintln(stderr, "design start:", herr)
+			return false
+		}
+		beforeDesc = shortSHA(beforeHead)
+	}
+
+	if err := gitx.CheckoutNewBranchFrom(ctx, root, branch, baseRef); err != nil {
+		fmt.Fprintln(stderr, "design start:", err)
+		return false
+	}
+	// CheckoutNewBranchFrom always lands on a brand-new branch name (it
+	// refuses above if branch already exists), so the checkout has, by
+	// construction, always just changed — this disclosure is unconditional.
+	fmt.Fprintf(stdout, "design start: switched checkout from %s to %s\n", beforeDesc, branch)
+	return true
 }
 
 // resolveStoryTitle resolves storyRef's title through prov, degrading to
