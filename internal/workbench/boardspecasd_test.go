@@ -6,6 +6,8 @@ package workbench
 // fixed-set route/action inventory (SI-167).
 
 import (
+	"reflect"
+	"sort"
 	"strings"
 	"testing"
 )
@@ -90,6 +92,91 @@ func TestDeriveASDShell(t *testing.T) {
 		}
 		if got != 2 {
 			t.Fatalf("question concerns = %d, want 2 (lossless)", got)
+		}
+	})
+
+	t.Run("a spike-claimed open question is non-blocking with claim-aware guidance", func(t *testing.T) {
+		in := baseInput()
+		in.OpenQuestions = []asdObjectFact{{ID: "oq-1", Text: "t1", ClaimedBySlugs: []string{"retry-strategy-spike"}}}
+		shell := deriveASDShell(in)
+		var found *asdConcern
+		for i := range shell.All {
+			if shell.All[i].ID == "shape/question/oq-1" {
+				found = &shell.All[i]
+			}
+		}
+		if found == nil {
+			t.Fatalf("no shape/question/oq-1 concern in %+v", shell.All)
+		}
+		c := *found
+		if c.State != asdStateUnproven || c.Blocking {
+			t.Fatalf("claimed question concern = %+v, want unproven non-blocking", c)
+		}
+		if !strings.Contains(c.Summary, "retry-strategy-spike") || !strings.Contains(c.Summary, "claimed") || !strings.Contains(c.Summary, "unresolved") {
+			t.Fatalf("summary = %q, want it to name the claiming stub and say claimed+unresolved", c.Summary)
+		}
+		if c.Guidance == "" || strings.Contains(c.Guidance, "edit or remove") {
+			t.Fatalf("guidance = %q, want claim-aware guidance, not the unclaimed edit-or-remove text", c.Guidance)
+		}
+		wantWitnesses := []string{"declared open question oq-1", "retry-strategy-spike"}
+		sort.Strings(wantWitnesses)
+		gotWitnesses := append([]string(nil), c.Witnesses...)
+		sort.Strings(gotWitnesses)
+		if !reflect.DeepEqual(gotWitnesses, wantWitnesses) {
+			t.Fatalf("witnesses = %q, want %q", c.Witnesses, wantWitnesses)
+		}
+		if c.Dest == "" {
+			t.Fatalf("claimed question concern lost its destination: %+v", c)
+		}
+	})
+
+	t.Run("multiple claiming stubs are all named in the summary and witnessed", func(t *testing.T) {
+		in := baseInput()
+		in.OpenQuestions = []asdObjectFact{{ID: "oq-1", Text: "t1", ClaimedBySlugs: []string{"alpha-spike", "zeta-spike"}}}
+		shell := deriveASDShell(in)
+		var c asdConcern
+		for _, row := range shell.All {
+			if row.ID == "shape/question/oq-1" {
+				c = row
+			}
+		}
+		if !strings.Contains(c.Summary, "alpha-spike") || !strings.Contains(c.Summary, "zeta-spike") {
+			t.Fatalf("summary = %q, want both claiming stub slugs", c.Summary)
+		}
+		for _, want := range []string{"alpha-spike", "zeta-spike"} {
+			ok := false
+			for _, w := range c.Witnesses {
+				if w == want {
+					ok = true
+				}
+			}
+			if !ok {
+				t.Fatalf("witnesses = %q, missing %q", c.Witnesses, want)
+			}
+		}
+	})
+
+	t.Run("an unclaimed question among a claimed one stays blocking", func(t *testing.T) {
+		in := baseInput()
+		in.OpenQuestions = []asdObjectFact{
+			{ID: "oq-1", Text: "t1"},
+			{ID: "oq-2", Text: "t2", ClaimedBySlugs: []string{"retry-strategy-spike"}},
+		}
+		shell := deriveASDShell(in)
+		var unclaimed, claimed asdConcern
+		for _, row := range shell.All {
+			switch row.ID {
+			case "shape/question/oq-1":
+				unclaimed = row
+			case "shape/question/oq-2":
+				claimed = row
+			}
+		}
+		if !unclaimed.Blocking {
+			t.Fatalf("unclaimed concern = %+v, want blocking", unclaimed)
+		}
+		if claimed.Blocking {
+			t.Fatalf("claimed concern = %+v, want non-blocking", claimed)
 		}
 	})
 
