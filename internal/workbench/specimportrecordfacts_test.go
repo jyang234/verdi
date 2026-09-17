@@ -1,6 +1,7 @@
 package workbench
 
 import (
+	"fmt"
 	"net/http"
 	"strings"
 	"testing"
@@ -116,8 +117,8 @@ func TestSpecImport_RecordView_ShowsFormatAndProfileDigest(t *testing.T) {
 		sources = append(sources, importSource(name, name+".md", readSpecImportFixture(t, "f13/"+name+".md")))
 	}
 	var mappings []any
-	for i := 1; i <= 8; i++ {
-		mappings = append(mappings, map[string]any{"target": "ac-" + string(rune('0'+i)), "evidence": []string{"attestation"}})
+	for i := 1; i <= 12; i++ {
+		mappings = append(mappings, map[string]any{"target": fmt.Sprintf("ac-%d", i), "evidence": []string{"attestation"}})
 	}
 	request := map[string]any{
 		"schema":           specimport.RequestSchema,

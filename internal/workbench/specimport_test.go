@@ -21,6 +21,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -756,7 +757,8 @@ func TestSpecImport_RecordView_CurrentSpecChangedIsDistinctFromCorruption(t *tes
 
 // TestSpecImport_F13Profile_AbsentLabelsSeparateFromEvidenceAndDeferral
 // drives the pinned F13 inputs through the reference profile: the two
-// absent statement labels and the eight unset evidence declarations are
+// absent statement labels and the twelve unset evidence declarations
+// (spec/uat-round-1 ac-7/dc-9's twelve single-claim criteria) are
 // separate findings; explicit pair deferral replaces the statement findings
 // with nonblocking TODO disclosures; evidence selection completes the
 // import, whose created AND already-created results keep the deferral
@@ -783,7 +785,7 @@ func TestSpecImport_F13Profile_AbsentLabelsSeparateFromEvidenceAndDeferral(t *te
 	if status != http.StatusOK || preview.Ready {
 		t.Fatalf("f13 preview = %d ready=%v %+v", status, preview.Ready, failure)
 	}
-	// The two absent statement labels and the eight unset evidence
+	// The two absent statement labels and the twelve unset evidence
 	// declarations are separate blocking findings — and nothing else. The
 	// evidence gap is reported exactly once per criterion, as
 	// missing-evidence (the backend correction at a03dd661); it never
@@ -791,7 +793,7 @@ func TestSpecImport_F13Profile_AbsentLabelsSeparateFromEvidenceAndDeferral(t *te
 	// refusal's former misclassification) or invalid-candidate finding, and
 	// no candidate bytes are claimed while creation is blocked.
 	counts := findingCounts(preview.Findings)
-	if counts[specimport.FindingMissingStatement] != 2 || counts[specimport.FindingMissingEvidence] != 8 ||
+	if counts[specimport.FindingMissingStatement] != 2 || counts[specimport.FindingMissingEvidence] != 12 ||
 		counts[specimport.FindingUnsupportedStructure] != 0 || counts[specimport.FindingInvalidCandidate] != 0 {
 		t.Fatalf("f13 findings = %+v", preview.Findings)
 	}
@@ -804,13 +806,13 @@ func TestSpecImport_F13Profile_AbsentLabelsSeparateFromEvidenceAndDeferral(t *te
 			blocking++
 		}
 	}
-	if blocking != 10 || len(preview.Findings) != 10 {
-		t.Fatalf("f13 preview must carry exactly the ten blocking findings (2 statements + 8 evidence), got %d blocking of %d: %+v", blocking, len(preview.Findings), preview.Findings)
+	if blocking != 14 || len(preview.Findings) != 14 {
+		t.Fatalf("f13 preview must carry exactly the fourteen blocking findings (2 statements + 12 evidence), got %d blocking of %d: %+v", blocking, len(preview.Findings), preview.Findings)
 	}
 	if len(preview.Candidate) != 0 {
 		t.Fatalf("a blocked f13 preview must not claim candidate bytes (%d bytes)", len(preview.Candidate))
 	}
-	if len(preview.Fields) != 8 || len(preview.Sources) != 5 || len(preview.Coverage) != 5 {
+	if len(preview.Fields) != 12 || len(preview.Sources) != 5 || len(preview.Coverage) != 5 {
 		t.Fatalf("f13 shape: %d fields, %d sources, %d coverage", len(preview.Fields), len(preview.Sources), len(preview.Coverage))
 	}
 	for _, cov := range preview.Coverage {
@@ -829,8 +831,8 @@ func TestSpecImport_F13Profile_AbsentLabelsSeparateFromEvidenceAndDeferral(t *te
 		t.Fatalf("deferred preview = %d ready=%v", status, deferred.Ready)
 	}
 	counts = findingCounts(deferred.Findings)
-	if counts[specimport.FindingMissingStatement] != 0 || counts[specimport.FindingStatementsDeferred] != 2 || counts[specimport.FindingMissingEvidence] != 8 ||
-		counts[specimport.FindingUnsupportedStructure] != 0 || len(deferred.Findings) != 10 {
+	if counts[specimport.FindingMissingStatement] != 0 || counts[specimport.FindingStatementsDeferred] != 2 || counts[specimport.FindingMissingEvidence] != 12 ||
+		counts[specimport.FindingUnsupportedStructure] != 0 || len(deferred.Findings) != 14 {
 		t.Fatalf("deferred findings = %+v", deferred.Findings)
 	}
 	problem, _ := fieldByTarget(deferred.Fields, "problem")
@@ -839,8 +841,8 @@ func TestSpecImport_F13Profile_AbsentLabelsSeparateFromEvidenceAndDeferral(t *te
 	}
 
 	var mappings []any
-	for i := 1; i <= 8; i++ {
-		mappings = append(mappings, map[string]any{"target": "ac-" + string(rune('0'+i)), "evidence": []string{"attestation"}})
+	for i := 1; i <= 12; i++ {
+		mappings = append(mappings, map[string]any{"target": fmt.Sprintf("ac-%d", i), "evidence": []string{"attestation"}})
 	}
 	request["mappings"] = mappings
 	status, ready, failure := c.preview(request)
