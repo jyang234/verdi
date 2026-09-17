@@ -180,9 +180,21 @@ type asdShellInput struct {
 	Caps            *DesignCapabilitiesView
 	CapsFailure     *DesignFailure
 	PinnedContext   int
+	// SpikeWord is the resolved display word for the spike pseudo-class
+	// (spec/vocabulary-surfaces; proj.words.word("spike") at the caller),
+	// so a spike-claimed open question's prose routes through the display
+	// chain rather than hardcoding a bare vocabulary word (ledger
+	// L-M13a(6), the mechanical prose witness).
+	SpikeWord string
 }
 
-type asdObjectFact struct{ ID, Text string }
+type asdObjectFact struct {
+	ID, Text string
+	// ClaimedBySlugs names, sorted, every spike stub whose `resolves`
+	// claims this open question (PLAN.md §7 I-128 option (a);
+	// spec/uat-round-1 ac-10). Empty/nil means unclaimed.
+	ClaimedBySlugs []string
+}
 
 type asdACFact struct {
 	ID            string
@@ -223,6 +235,31 @@ func deriveASDShell(in asdShellInput) asdShell {
 			Dest:      "#asd-forms"})
 	}
 	for _, oq := range in.OpenQuestions {
+		if len(oq.ClaimedBySlugs) > 0 {
+			// A spike stub's `resolves` claims this question (PLAN.md §7
+			// I-128 option (a); spec/uat-round-1 ac-10): non-blocking, and
+			// acceptance does not need a wall edit — the spike answers it
+			// after acceptance.
+			//
+			// Two or more stubs may claim one question (the wall's own
+			// multi-claim observation, boardspecrender.go's oq-claims
+			// chip), so the head noun and its verb agree with the count.
+			// The renameable class word itself stays the attributive
+			// SINGULAR both sibling surfaces speak — readinesspilot's
+			// "<word> stubs" and the stub cards' "<word> stub" — so the
+			// display plural (model.DisplayClassPlural) belongs to the
+			// chip, where that word is the head noun, and never here.
+			stubNoun, answerVerb := "stub", "answers"
+			if len(oq.ClaimedBySlugs) > 1 {
+				stubNoun, answerVerb = "stubs", "answer"
+			}
+			add(asdConcern{ID: "shape/question/" + oq.ID, Area: asdAreaShape, State: asdStateUnproven, Blocking: false,
+				Summary:   "Open question " + oq.ID + " is claimed by " + in.SpikeWord + " " + stubNoun + " " + strings.Join(oq.ClaimedBySlugs, ", ") + " and remains unresolved: " + oq.Text,
+				Guidance:  "No wall edit is required to accept: the claiming " + in.SpikeWord + " " + stubNoun + " " + answerVerb + " it after acceptance.",
+				Witnesses: append([]string{"declared open question " + oq.ID}, oq.ClaimedBySlugs...),
+				Dest:      "#obj-" + oq.ID})
+			continue
+		}
 		add(asdConcern{ID: "shape/question/" + oq.ID, Area: asdAreaShape, State: asdStateUnproven, Blocking: true,
 			Summary:   "Open question " + oq.ID + " is unresolved: " + oq.Text,
 			Guidance:  "Resolve it on the wall: edit or remove " + oq.ID + ", or graduate a decision that answers it.",
@@ -660,9 +697,25 @@ func (s *boardSpecServer) buildASDView(ctx context.Context, name string, proj *B
 		Caps:            v.Caps,
 		CapsFailure:     v.CapsFailure,
 		PinnedContext:   len(fm.Context),
+		SpikeWord:       proj.words.word("spike"),
+	}
+	claimedBy := map[string][]string{}
+	for _, st := range fm.Stubs {
+		if !st.Spike {
+			continue
+		}
+		for _, oqID := range st.Resolves {
+			claimedBy[oqID] = append(claimedBy[oqID], st.Slug)
+		}
 	}
 	for _, oq := range fm.OpenQuestions {
-		in.OpenQuestions = append(in.OpenQuestions, asdObjectFact{ID: oq.ID, Text: oq.Text})
+		fact := asdObjectFact{ID: oq.ID, Text: oq.Text}
+		if slugs := claimedBy[oq.ID]; len(slugs) > 0 {
+			sorted := append([]string(nil), slugs...)
+			sort.Strings(sorted)
+			fact.ClaimedBySlugs = sorted
+		}
+		in.OpenQuestions = append(in.OpenQuestions, fact)
 	}
 	for _, ac := range fm.AcceptanceCriteria {
 		in.ACs = append(in.ACs, asdACFact{ID: ac.ID, EvidenceCount: len(ac.Evidence)})

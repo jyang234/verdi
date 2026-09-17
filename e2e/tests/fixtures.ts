@@ -400,8 +400,12 @@ export const SHOWCASE = {
   // Workbench (scoping canvas, spec/scoping-canvas) — the stubs band
   // -------------------------------------------------------------------------
 
-  // DESIGN_SPEC's one open question (provisioned by provision_board.go): the
-  // spike proto-sticky's resolution-yarn target.
+  // DESIGN_SPEC's first declared open question (provisioned by
+  // provision_board.go, which also declares oq-2, claimed at provision time
+  // by the spike stub refresh-window-spike for ac-10): the spike
+  // proto-sticky's resolution-yarn target. oq-1 is unclaimed at provision
+  // time; suite 30 graduates spikes claiming it, so on the live wall its
+  // claimed state is order-dependent after 30 (see 50-design-workbench).
   OQ_ID: "oq-1",
 
   // FEATURE_SPEC (escrow-autopay, on main → sealed wall) declares

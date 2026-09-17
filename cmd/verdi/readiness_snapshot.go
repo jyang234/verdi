@@ -200,6 +200,7 @@ func (b localReadinessSnapshotBuilder) Build(ctx context.Context, root, requestP
 		openQuestionIDs[i] = question.ID
 	}
 	sort.Strings(openQuestionIDs)
+	claimedQuestions := readinessClaimedQuestions(spec.Stubs)
 
 	input := readinesspilot.Input{
 		Target: readinesspilot.TargetFacts{
@@ -209,6 +210,7 @@ func (b localReadinessSnapshotBuilder) Build(ctx context.Context, root, requestP
 		Shape: readinesspilot.ShapeFacts{
 			ProblemPresent: spec.Problem != nil, OutcomePresent: spec.Outcome != nil,
 			DeclaredObjectIDs: declaredIDs, OpenQuestionIDs: openQuestionIDs,
+			ClaimedQuestions: claimedQuestions,
 		},
 		Provenance: provenance,
 		Board:      board,
@@ -221,6 +223,11 @@ func (b localReadinessSnapshotBuilder) Build(ctx context.Context, root, requestP
 			Review:  []string{"verdi", "journey", request.Spec},
 		},
 		RequestDigest: readinessDigest(requestBytes),
+		// spec/vocabulary-surfaces: readinesspilot stays pure and never
+		// imports internal/model itself, so this adapter resolves the
+		// spike pseudo-class's display word once, here, through the
+		// store's already-resolved operating model (ledger L-M13a(6)).
+		SpikeWord: cfg.Model.DisplayClass("spike"),
 	}
 	snapshot, err := readinesspilot.Derive(input)
 	if err != nil {
@@ -369,6 +376,41 @@ func readinessBoardFacts(readAnnotations func(string) ([]*artifact.Annotation, e
 	return readinesspilot.BoardFacts{
 		State: readinesspilot.StateProven, OpenItems: items, Witnesses: []string{"scratch board enumerated"},
 	}, nil
+}
+
+// readinessClaimedQuestions maps a decoded feature spec's spike stubs
+// (`spec.Stubs`, artifact.Stub{Spike,Resolves,Slug}) onto
+// readinesspilot.ShapeFacts.ClaimedQuestions (PLAN.md §7 I-128 option (a);
+// spec/uat-round-1 ac-10): every open-question id a spike stub's
+// `resolves` names, paired with the sorted, deduplicated slugs of every
+// stub that claims it. Always non-nil, matching the field's required
+// posture. VL-006 (internal/lint/vl006.go) already guarantees `resolves`
+// names a declared open question of the same spec; a spec that reaches
+// this builder without having passed lint is refused by
+// readinesspilot.Input.validate's membership check instead of being
+// silently dropped here.
+func readinessClaimedQuestions(stubs []artifact.Stub) []readinesspilot.ClaimedQuestion {
+	bySlug := map[string][]string{}
+	for _, stub := range stubs {
+		if !stub.Spike {
+			continue
+		}
+		for _, id := range stub.Resolves {
+			bySlug[id] = append(bySlug[id], stub.Slug)
+		}
+	}
+	ids := make([]string, 0, len(bySlug))
+	for id := range bySlug {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	claims := make([]readinesspilot.ClaimedQuestion, 0, len(ids))
+	for _, id := range ids {
+		slugs := append([]string(nil), bySlug[id]...)
+		sort.Strings(slugs)
+		claims = append(claims, readinesspilot.ClaimedQuestion{QuestionID: id, StubSlugs: slugs})
+	}
+	return claims
 }
 
 func readinessDigest(data []byte) string {
