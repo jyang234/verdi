@@ -31,3 +31,20 @@ Pre-review gate for every lane (process correction from wave 1): ancestry, clean
 Integrated head c0d11f8e (W2-C 067d97c2, W2-B e31bc067, W2-A 3cb55b16 + controller commits). Whole-wave Opus review dispatched over 19dca4f5..c0d11f8e. `make verify` started with VERDI_E2E_PORT_BASE=4390 (log: scratchpad/wave2-verify.log).
 
 Whole-wave Opus review: ACCEPT-WITH-MINOR (blob-level 0 drift for all three lanes; co-3 holds; dc-9 ↔ twelve cards exact; R2-7 ↔ dc-4; lifecycle word list covers the full status enum, so the W2-C residual is a non-defect). Dispositions: F-1 tracker notes for UAT-006/007/019 → DONE in docs/design/uat/uat-findings.md; R2-6 stale "Existing objects" optgroup → UAT-029; F-2 (old-shape decode fixture comment), F-3 (coverage-map.json narrative), F-4 (drift test covers cards only) → routed to the W2-A implementer as test/doc-only follow-ups, integrated after the gate with focused tests since production code is unchanged; F-5 (long line in the contract doc) → controller cosmetic wrap at wave close.
+
+**Result: `verify OK`, VERIFY_EXIT=0** (21:32–21:56 on c0d11f8e): build, fmt-check, vet, lint, race tests (107 packages ok; cmd/verdi 467.349s), fixture, lint-store, spec-align, lint-showcase, showcase-coverage, e2e (308 passed, 11.6m). Recording-artifact scan: 0 files.
+
+Post-gate: W2-A hygiene range 3516de36..a97c84f8 integrated at 82104092 (coverage-map.json narrative; f13-reference-record.json regenerated deterministically under twelve selectors; drift test now asserts disposition tiling, per-interval sha256, and gap counts; fixture comment). Production code byte-identical to the gated head (`git diff c0d11f8e HEAD -- ':!docs' ':!*_test.go' ':!internal/specimport/testdata'` empty); controller re-ran `go test -race ./internal/specimport/...` ok 24.3s and the full specalign (131.3s) and showcasealign (70.0s) packages. Contract-doc line wrapped at 12f61947 (F-5).
+
+## Wave 2 closure (2026-09-16)
+
+- Every required lane accepted: W2-A (ACCEPT-WITH-MINOR; minors closed; R2-4 widening), W2-B (REVISE → fix → original reviewer CLOSED), W2-C (ACCEPT-WITH-MINOR; minors closed).
+- Provenance: blob-level 0 drift for all three lanes (whole-wave reviewer, 23/23 files); controller commits docs-only except c0d11f8e/12f61947 (one contract sentence, R2-7).
+- Integrated suites: `make verify` green; post-gate hygiene proven non-production with focused re-runs.
+- Whole-wave Opus review: ACCEPT-WITH-MINOR; F-1..F-5 dispositioned; parked residuals classified (UAT-029 promoted).
+- Critical/Important findings open: none.
+- Acceptance criteria after wave 2: ac-1..ac-9 implemented with behavioral witnesses on the integrated head. Remaining: ac-10, ac-11 (wave 3, blocked on owner ratification of PLAN.md §7 I-128/I-129 per co-3).
+- Owner obligations: review the twelve F13 claim boundaries (ac-7; table in docs/superpowers/reports/2026-09-16-uat-r2-f13map.md with the F13-v2 comparison); Tier 3 risk gate from wave 1 (L1, L2) still owed via PR #323.
+- Integration tree clean at close.
+
+Return state: **READY_FOR_OWNER_RISK_GATE**. Head: this commit on agent/uat-round-1 (not pushed; PR #323 head remains 19dca4f5 pending the owner's choice between updating #323 and a second PR).
