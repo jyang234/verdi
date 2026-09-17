@@ -13,8 +13,7 @@ Commits:
 - (this report)
 
 Files changed:
-- internal/workbench/boardspecapi.go (+109/-2), boardspecdesign.go (+4/-1),
-  boardspecrender.go (+93/-4), reviseaction_test.go (new, 476 lines)
+- internal/workbench/boardspecapi.go, boardspecdesign.go, boardspecrender.go, reviseaction_test.go (new)
 - internal/workbench/boardspecasd_test.go (+1: the fixed-set inventory
   witness grows by "revise" — OUTSIDE the declared write set, disclosed:
   that test pins the exact action union by design and must grow with it)
@@ -116,13 +115,11 @@ run — disclosed, not claimed as strict RED-first.
   lines: Happy, ComposeFailureWritesNoRef, Refusals ×9, SuccessorDefault,
   Affordance_Rendered, ReviseVocabulary).
 - `go test -count=1 ./internal/specalign/` (FULL) — PASS, exit 0; 69
-  top-level tests (TestVocabProseWitness, TestLifecycleDecisionSourceAudit
-  and the guide-claims binding included).
+  top-level tests (vocab witness, lifecycle audit, guide-claims binding).
 - `go test -count=1 ./internal/showcasealign/...` — PASS, exit 0.
 - `go test -count=1 ./internal/dex/` — PASS, exit 0 (stylesheet owner).
-- `go build ./...` — exit 0. `gofmt -l .` — empty. `go vet
-  ./internal/workbench/...` — exit 0. `golangci-lint run
-  ./internal/workbench/...` — "0 issues.", exit 0.
+- `go build ./...` exit 0; `gofmt -l .` empty; `go vet ./internal/workbench/...`
+  exit 0; `golangci-lint run ./internal/workbench/...` "0 issues.", exit 0.
 - `node --check internal/workbench/assets/boardspec.js` — exit 0.
 - `cd e2e && VERDI_E2E_PORT_BASE=4690 npx playwright test
   tests/78-board-revise.spec.ts` — 4 passed (19.4s), exit 0. Afterwards
