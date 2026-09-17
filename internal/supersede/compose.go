@@ -323,19 +323,19 @@ func declarationOrderIDs(spec *artifact.SpecFrontmatter) []string {
 // freshly-scaffolded links: block reads exactly like every other scaffold
 // this codebase already produces.
 func renderLinksBlock(predLinks []artifact.Link, supersedesRef string) string {
-	wholeSpecSupersedes := make(map[artifact.Link]bool)
+	// Which of the predecessor's own names WholeSpecSupersedesRefs counts as
+	// whole-spec predecessors — asked of internal/artifact rather than
+	// re-derived here, so this drop rule and I-47's own decode-seam
+	// cardinality check can never disagree about what "whole-spec" means.
+	wholeSpecNames := make(map[string]bool)
 	for _, ref := range artifact.WholeSpecSupersedesRefs(predLinks) {
-		for _, l := range predLinks {
-			if l.Type == artifact.LinkSupersedes && l.Ref == ref.String() {
-				wholeSpecSupersedes[l] = true
-			}
-		}
+		wholeSpecNames[ref.Name] = true
 	}
 
 	var b strings.Builder
 	b.WriteString("links:")
 	for _, l := range predLinks {
-		if wholeSpecSupersedes[l] {
+		if isWholeSpecSupersedesLink(l, wholeSpecNames) {
 			continue
 		}
 		b.WriteString("\n  - { type: ")
@@ -352,6 +352,32 @@ func renderLinksBlock(predLinks []artifact.Link, supersedesRef string) string {
 	b.WriteString(fmt.Sprintf("%q", supersedesRef))
 	b.WriteString(" }")
 	return b.String()
+}
+
+// isWholeSpecSupersedesLink reports whether l is one of the predecessor's
+// own whole-spec supersedes links — the ones renderLinksBlock must drop so
+// the successor names exactly one predecessor (I-47).
+//
+// The match is on the PARSED ref's kind and name, never on its rendered
+// text: `spec/ancient@3e91ab2` and `spec/ancient` are the same whole-spec
+// predecessor (02 §Identity: a pinned ref is the form context manifests,
+// evidence records and board pins use, and WholeSpecSupersedesRefs strips
+// the pin when it reports the name), so a string comparison against the
+// stripped rendering silently kept a pinned inherited link and produced a
+// successor naming two predecessors — which the decode seam then refused,
+// making a conforming pinned revision impossible to supersede at all.
+// Fragment edges are excluded exactly as WholeSpecSupersedesRefs excludes
+// them: a `spec/other#dc-4` supersedes edge is a decision-level override,
+// never a whole-spec predecessor, and survives into the successor untouched.
+func isWholeSpecSupersedesLink(l artifact.Link, wholeSpecNames map[string]bool) bool {
+	if l.Type != artifact.LinkSupersedes {
+		return false
+	}
+	ref, err := artifact.ParseRef(l.Ref)
+	if err != nil || ref.Kind != artifact.KindSpec || ref.Fragment() {
+		return false
+	}
+	return wholeSpecNames[ref.Name]
 }
 
 // renderSupersessionBlock renders a fresh `supersession:` block classifying

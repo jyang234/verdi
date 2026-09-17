@@ -614,3 +614,76 @@ func TestCheckComposedPostconditions(t *testing.T) {
 		})
 	}
 }
+
+// pinnedSupersedesPredecessor is a conforming v2 whose own inherited
+// whole-spec supersedes link is PINNED (`spec/ancient@3e91ab2`) — the form
+// 02 §Identity calls "the only form permitted in context manifests,
+// evidence records, and board pins", and which internal/artifact's own
+// WholeSpecSupersedesRefs treats as whole-spec (supersession_test.go).
+// It also carries a FRAGMENT supersedes edge, which is a decision-level
+// override and never a whole-spec predecessor (I-47), so Compose must keep
+// that one untouched.
+const pinnedSupersedesPredecessor = `---
+id: spec/pinned
+kind: spec
+class: feature
+title: "Pinned predecessor (fixture)"
+owners: [platform-team]
+links:
+  - { type: supersedes, ref: "spec/ancient@3e91ab2" }
+  - { type: supersedes, ref: "spec/other-thing#dc-4" }
+problem: { text: "p", anchor: "#problem" }
+outcome: { text: "o", anchor: "#outcome" }
+acceptance_criteria:
+  - { id: ac-1, text: "a", evidence: [attestation], anchor: "#ac-1" }
+supersession:
+  carried: [ac-1]
+  amended: []
+  amended_advisory: []
+  removed: []
+  added: []
+---
+# Pinned predecessor (fixture)
+
+Body.
+`
+
+// TestCompose_PredecessorWithPinnedSupersedesLink_ReplacesIt proves the
+// v2->v3 replacement rule holds for a PINNED inherited link too. Before the
+// fix round that added this test, renderLinksBlock matched the link to drop
+// by string equality against WholeSpecSupersedesRefs' commit-stripped
+// rendering ("spec/ancient" != "spec/ancient@3e91ab2"), so the pinned link
+// survived alongside the new one: two whole-spec predecessors, which I-47
+// rejects at the decode seam — a conforming accepted revision could not be
+// superseded at all.
+func TestCompose_PredecessorWithPinnedSupersedesLink_ReplacesIt(t *testing.T) {
+	got, err := Compose(ComposeInput{
+		PredecessorName: "pinned",
+		PredecessorRaw:  []byte(pinnedSupersedesPredecessor),
+		SuccessorName:   "pinned-v2",
+	})
+	if err != nil {
+		t.Fatalf("Compose = %v, want no error", err)
+	}
+
+	content := string(got.Content)
+	if strings.Contains(content, "spec/ancient") {
+		t.Errorf("Content still carries the predecessor's own pinned supersedes link to spec/ancient@3e91ab2 — it must be replaced:\n%s", content)
+	}
+	if !strings.Contains(content, `{ type: supersedes, ref: "spec/other-thing#dc-4" }`) {
+		t.Errorf("Content dropped the fragment supersedes edge, which is never a whole-spec predecessor (I-47):\n%s", content)
+	}
+
+	outFM, _, err := artifact.SplitFrontmatter(got.Content)
+	if err != nil {
+		t.Fatalf("SplitFrontmatter(successor) = %v, want no error", err)
+	}
+	outSpec, err := artifact.DecodeSpec(outFM)
+	if err != nil {
+		t.Fatalf("DecodeSpec(successor) = %v, want no error (two whole-spec predecessors would fail here, I-47)", err)
+	}
+	refs := artifact.WholeSpecSupersedesRefs(outSpec.Links)
+	if len(refs) != 1 || refs[0].String() != "spec/pinned" {
+		t.Fatalf("whole-spec supersedes refs = %v, want exactly [spec/pinned]", refs)
+	}
+}
