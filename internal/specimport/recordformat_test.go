@@ -6,6 +6,9 @@ import (
 	"os"
 	"strings"
 	"testing"
+
+	"github.com/jyang234/verdi/internal/gitx"
+	"github.com/jyang234/verdi/internal/store"
 )
 
 // TestPublishNew_RecordFormat_MarkdownV1HasFormatNoProfileDigest proves
@@ -37,8 +40,9 @@ func TestPublishNew_RecordFormat_NativeHasFormatNoProfileDigest(t *testing.T) {
 // f13ReadyRequest builds a fully ready f13-reference-v1 Request: problem/
 // outcome explicitly mapped from a support source (profile_f13_test.go's
 // own TestNormalize_F13ProfileStatementsMappedFromASupportSource shape)
-// and evidence supplied for all eight pinned criteria, so Preview reports
-// Ready and Apply can actually publish a record to inspect.
+// and evidence supplied for all twelve pinned criteria (f13PinnedCards,
+// spec/uat-round-1 ac-7/dc-9), so Preview reports Ready and Apply can
+// actually publish a record to inspect.
 func f13ReadyRequest(t *testing.T) Request {
 	t.Helper()
 	support := Source{ID: "notes", Label: "notes.md", Data: []byte("The gate cannot be audited.\n\nEvery gate decision is reviewable.\n")}
@@ -57,6 +61,13 @@ func f13ReadyRequest(t *testing.T) Request {
 // for the one shipped reference-profile format, Apply records EXACTLY the
 // profile's own pinned constant — never a digest recomputed from the
 // request's selected bytes — as ac-4/co-1/co-2 of spec/uat-round-1 require.
+//
+// It also proves ac-7/dc-9: a real Compose+Apply import of the pinned F13
+// bundle yields the twelve corrected criteria, not just twelve Fields in
+// memory. The composed candidate is committed to the returned branch, so
+// this reads it back with gitx.Show (the same technique
+// recordvalidate_test.go and recordtamper_test.go already use) and checks
+// every f13PinnedCards display_text landed verbatim in the created spec.
 func TestPublishNew_RecordFormat_F13BindsThePinnedProfileDigest(t *testing.T) {
 	repo := buildImportRepo(t)
 	svc := testService(t)
@@ -85,6 +96,20 @@ func TestPublishNew_RecordFormat_F13BindsThePinnedProfileDigest(t *testing.T) {
 	}
 	if record.ProfilePrimaryDigest != f13PrimarySHA256 {
 		t.Fatalf("record.ProfilePrimaryDigest = %q, want the exact pinned constant %q", record.ProfilePrimaryDigest, f13PrimarySHA256)
+	}
+
+	if len(f13PinnedCards) != 12 {
+		t.Fatalf("f13PinnedCards has %d entries, want the 12 ac-7/dc-9 corrected claims", len(f13PinnedCards))
+	}
+	specBytes, err := gitx.Show(ctx, repo.Dir, result.Branch, store.ActiveSpecRelPath(req.Target.Slug))
+	if err != nil {
+		t.Fatalf("gitx.Show(active spec): %v", err)
+	}
+	spec := string(specBytes)
+	for _, card := range f13PinnedCards {
+		if !strings.Contains(spec, card.displayText) {
+			t.Errorf("created spec is missing %s's corrected text %q", card.target, card.displayText)
+		}
 	}
 }
 
