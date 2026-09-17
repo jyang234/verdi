@@ -8,7 +8,11 @@ option (a)); spec/uat-round-1 ac-10; co-5; controller rulings R3-2, R3-3
 ## Status
 
 Implemented and green. All four contract parts (A-D) landed as four small
-TDD commits, each with a genuinely observed RED before GREEN. This report is commit E.
+TDD commits (report = commit E). Controller pre-review at 8c5fde5f found one
+defect — three new production string literals spoke the bare "spike"
+vocabulary word, failing `internal/specalign`'s TestVocabProseWitness
+(L-M13a(6)) — fixed in one bounded commit (F, below); everything else in
+that pre-review passed. See GREEN commands for the fix's own verification.
 
 ## Risk tier
 
@@ -16,7 +20,7 @@ TDD commits, each with a genuinely observed RED before GREEN. This report is com
 
 ## Base..Head
 
-`74fda84a..a103c1cf`, then this report commit E (final SHA at end of message).
+`74fda84a..043d4e41`, then this report update (final SHA at end of message).
 
 ## Commits
 
@@ -24,7 +28,9 @@ TDD commits, each with a genuinely observed RED before GREEN. This report is com
 - `d29a3221` cmd/verdi: populate readiness ClaimedQuestions from spec.Stubs (B)
 - `32d52b12` workbench: wall shell mirrors ac-10 for spike-claimed open questions (C)
 - `a103c1cf` e2e: cover ac-10 on the readiness pilot with a claimed second question (D)
-- (E) this report
+- `8c5fde5f` docs: W3-A readiness lane report (ac-10) (E)
+- `043d4e41` fix: route "spike" through the model display chain (L-M13a(6)) (F, post-pre-review fix)
+- (this update) report GREEN section refreshed
 
 ## Files changed
 
@@ -32,9 +38,10 @@ TDD commits, each with a genuinely observed RED before GREEN. This report is com
 `cmd/verdi/{readiness_snapshot.go,readiness_snapshot_integration_test.go}`;
 `internal/workbench/{boardspecasd.go,boardspecasd_test.go}`;
 `cmd/e2eharness/provision_board.go`; `e2e/tests/49-readiness-pilot.spec.ts`;
-this report — 10 source files, all inside the write set (`git diff --stat
-74fda84a..HEAD` confirms no other path touched). `readiness_test.go` (also
-in-set) is untouched: it builds `Snapshot` fixtures directly, never through
+this report — 10 source files, all inside the write set, plus the fix
+touching 4 of those same files again (`git diff --stat 74fda84a..HEAD`
+confirms no other path touched). `readiness_test.go` (also in-set) is
+untouched: it builds `Snapshot` fixtures directly, never through
 `Input`/`Derive`, so the new `ShapeFacts` field never reaches it.
 
 ## Contract implemented
@@ -74,6 +81,22 @@ technical details show Blocking `false`/Timing `eventual` and oq-1 still
 shows Blocking `true`/Timing `current`. `RAIL`/`COMPLETED_CHECKS` unchanged
 (the new concern is non-blocking, so it drives neither).
 
+**F (pre-review fix)** — routed "spike" through the model display chain at
+both sites, following the one existing "spike" precedent
+(`boardspecrender.go`'s oq-claims chip, `p.words.word("spike")`) rather than
+marking: `asdShellInput`/`boardspecasd.go` gains `SpikeWord`, resolved via
+`proj.words.word("spike")` in `buildASDView` (rendered text unchanged — no
+rename is configured anywhere in this build). `readinesspilot.Input` gains a
+caller-supplied `SpikeWord` (the package stays pure, no `internal/model`
+import), populated by `cmd/verdi/readiness_snapshot.go` via the already-open
+store's `cfg.Model.DisplayClass("spike")` (zero new imports); the
+claimed-question summary reworded "a spike stub"→"spike stubs" (article-free,
+still one sentence saying claimed+unresolved, per the original contract's "or
+equivalent" allowance). The one new bare "spike" this necessarily introduces
+— `SpikeWord`'s own validation error text — is a machinery diagnostic
+(mirrors `schema.go`'s existing "closed"-in-a-diagnostic precedent), marked
+`// vocab:identity`.
+
 ## Explicit exclusions
 
 Confirmed untouched: lint rules, the accept verb, `readinessrender.go`,
@@ -97,6 +120,7 @@ Confirmed untouched: lint rules, the accept verb, `readinessrender.go`,
 
 ## GREEN commands and results
 
+Pre-fix (parts A-E):
 - `go test -race ./internal/readinesspilot/...` → ok (1.6s)
 - `go test -race ./internal/workbench/...` → ok (126.8s)
 - `go test -race ./cmd/verdi/ -run 'Readiness'` → ok (13.8s, all Readiness* incl. new)
@@ -108,6 +132,25 @@ Confirmed untouched: lint rules, the accept verb, `readinessrender.go`,
 - Extra (shared fixture, not contracted): same session, `tests/30-board-
   scoping-canvas.spec.ts tests/49-readiness-pilot.spec.ts` → **21/21**,
   before and after my change.
+
+Post-fix (F, 043d4e41 — controller's exact required commands):
+- `go test -count=1 ./internal/specalign/` → **ok, 127.0s**, every test
+  green; `TestVocabProseWitness` and `TestGuideClaimsManifest_
+  RowToWitnessBinding` individually re-confirmed passing (`-run` each, PASS
+  both).
+- `go test -race ./internal/readinesspilot/... ./internal/workbench/...`
+  → both ok (1.6s / 127.9s).
+- `gofmt -l .` → empty (repo-wide, after one `gofmt -w` for struct-field
+  realignment the new `Input.SpikeWord` field triggered).
+- `golangci-lint run ./internal/readinesspilot/... ./internal/workbench/... ./cmd/...` → 0 issues.
+- `go build ./...`, `go vet ./...` → clean.
+- `go test -race ./cmd/verdi/ -run 'Readiness'` → ok (13.9s) — re-checked
+  since the fix also touches `readiness_snapshot.go`.
+- Summary text changed (readinesspilot side: "a spike stub"→"spike
+  stubs"), so per instruction: workbench race suite re-run (above) and
+  `VERDI_E2E_PORT_BASE=4490 npx playwright test tests/49-readiness-pilot.spec.ts`
+  → **16/16 passed**; `git status --porcelain` after: only the 5 intended
+  fix files, no recording artifacts.
 
 ## Reviewer verdict
 
