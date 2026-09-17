@@ -23,7 +23,7 @@ func f13DeferredNoMappingRequest(t *testing.T) Request {
 
 // TestCompose_F13NoMappings_EvidenceGapIsMissingEvidence pins the one
 // classification this state is allowed to produce. The primary's structure
-// is fully recognized (eight pinned selectors, zero unresolved bytes), so
+// is fully recognized (twelve pinned selectors, zero unresolved bytes), so
 // the only defect is the absent evidence the contract already names
 // missing-evidence; reporting it as unsupported-structure asserts a
 // structural defect the engine never computed and, through the browser's
@@ -74,7 +74,7 @@ func TestCompose_F13NoMappings_EvidenceGapIsMissingEvidence(t *testing.T) {
 }
 
 // TestPreview_F13NoMappings_EvidenceGapsAndDeferralsOnly is the same state
-// at the surface the operator actually sees: eight blocking
+// at the surface the operator actually sees: twelve blocking
 // missing-evidence findings, the two nonblocking statements-deferred
 // disclosures, and nothing else — no extra fabricated structural defect and
 // no duplicate entry for the criterion Compose happened to reach first.
@@ -167,7 +167,7 @@ func TestPreview_F13NoMappings_EvidenceGapsAndDeferralsOnly(t *testing.T) {
 // of its own cannot express an import at all, and that refusal is reported
 // today from inside applyCandidateEdits, long before the evidence gate —
 // with zero evidence mapped, the operator must still learn about it now
-// rather than after selecting all eight evidence sets.
+// rather than after selecting all twelve evidence sets.
 func TestCompose_MissingEvidence_TemplateRefusalStillReported(t *testing.T) {
 	root := minimalStoreRoot(t)
 	canonical, err := designscaffold.LoadTemplate(root, "feature.md")

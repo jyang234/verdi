@@ -9,6 +9,11 @@ import "fmt"
 // mechanical-field-map.json. This is a named, versioned reference profile,
 // not a recognizer for all ATC plans. Changed primary bytes refuse that
 // profile with guidance to use manual mapping or labeled Markdown.").
+// The primary bytes and this digest are unchanged by spec/uat-round-1
+// ac-7/dc-9; only the selector COUNT the quoted sentence above names is
+// historical — dc-9 revised the reviewed mechanical-field-map.json from
+// eight selectors (several spanning more than one claim or starting
+// mid-clause) to twelve, one per complete claim. See f13Selectors below.
 const f13PrimarySHA256 = "7c6d95d4aa516cf682e6d4a33d1c260f1c861d938d46559241a7c764bffca577"
 
 // f13Selector is one fixed, reviewed selector from
@@ -19,21 +24,36 @@ type f13Selector struct {
 	end    int
 }
 
-// f13Selectors are the eight exact selectors the reviewed field map
+// f13Selectors are the twelve exact selectors the reviewed field map
 // declares, shipped as fixed package data interpreted by fixed code
 // (spec-import-contract.md: "Profiles are shipped data interpreted by
 // fixed code, never uploaded executables"). Values are pinned directly
 // from mechanical-field-map.json's "cards" array; profile_f13_test.go
 // checks each against the field map's own source_text_sha256/display_text.
+//
+// Revised under spec/uat-round-1 ac-7/dc-9: the source states its
+// criteria as one comma-joined sentence led by the instruction word
+// "Prove", so a selector covers exactly one complete claim (its own
+// subject and verb) and starts and ends at a clause or sentence boundary,
+// never joining two claims and never beginning mid-clause. "Prove " and
+// the imperative "Enumerate every allowed edge and representative
+// forbidden edges." sentence stay retained-only; ac-1..ac-9 below cover
+// the nine Prove-sentence claims in source order; ac-10 is the
+// (unchanged, already whole) blocking-finding sentence; the former
+// two-sentence ac-8 splits into one selector per sentence (ac-11, ac-12).
 var f13Selectors = []f13Selector{
-	{"ac-1", 1485, 1549},
-	{"ac-2", 1556, 1681},
-	{"ac-3", 1683, 1724},
-	{"ac-4", 1726, 1775},
-	{"ac-5", 1777, 1850},
-	{"ac-6", 1852, 1924},
-	{"ac-7", 1981, 2115},
-	{"ac-8", 2116, 2200},
+	{"ac-1", 1556, 1572},
+	{"ac-2", 1574, 1600},
+	{"ac-3", 1602, 1633},
+	{"ac-4", 1635, 1681},
+	{"ac-5", 1683, 1724},
+	{"ac-6", 1726, 1775},
+	{"ac-7", 1777, 1850},
+	{"ac-8", 1852, 1891},
+	{"ac-9", 1897, 1924},
+	{"ac-10", 1981, 2115},
+	{"ac-11", 2116, 2157},
+	{"ac-12", 2158, 2200},
 }
 
 // applyF13Profile applies the f13-reference-v1 fixed profile to the
