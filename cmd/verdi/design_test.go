@@ -756,6 +756,8 @@ func TestRunDesignStart_ScaffoldCommitStagesOnlySpecDir(t *testing.T) {
 		t.Fatalf("scaffold commit's changed paths = %+v, want exactly [%s] (never the planted working-tree noise)", entries, wantPath)
 	}
 
+	plants := []string{".DS_Store", "docs/superpowers/specs/lens.sqlite3", "loansvc/.flowmap.yaml"}
+
 	changed, err := gitx.WorktreeChangedPaths(ctx, repo.Dir)
 	if err != nil {
 		t.Fatalf("WorktreeChangedPaths: %v", err)
@@ -764,13 +766,35 @@ func TestRunDesignStart_ScaffoldCommitStagesOnlySpecDir(t *testing.T) {
 	for _, p := range changed {
 		changedSet[p] = true
 	}
-	for _, want := range []string{".DS_Store", "docs/superpowers/specs/lens.sqlite3", "loansvc/.flowmap.yaml"} {
+	for _, want := range plants {
 		if !changedSet[want] {
-			t.Errorf("WorktreeChangedPaths = %v, want %q still present (untracked/modified, never staged by this ritual)", changed, want)
+			t.Errorf("WorktreeChangedPaths = %v, want %q still present (an unresolved working-tree change: untracked or modified)", changed, want)
 		}
 	}
 	if changedSet[wantPath] {
 		t.Errorf("WorktreeChangedPaths = %v, want %q absent (it was committed, so the working tree is clean at that path)", changed, wantPath)
+	}
+
+	// WorktreeChangedPaths alone does not prove "never staged": `git status
+	// --porcelain` reports an index-staged-but-uncommitted path too (as
+	// "A "/"M " rather than "??"/" M"), so it would stay green even if a
+	// regression left one of the plants sitting staged in the index (e.g. a
+	// future rewrite that commits via a pathspec scoped to specDir, which
+	// would leave any OTHER staged path uncommitted rather than absent).
+	// gitx.StagedPaths reports exactly the paths whose index entry differs
+	// from HEAD — the precise check for "never staged by this ritual".
+	staged, err := gitx.StagedPaths(ctx, repo.Dir)
+	if err != nil {
+		t.Fatalf("StagedPaths: %v", err)
+	}
+	stagedSet := map[string]bool{}
+	for _, p := range staged {
+		stagedSet[p] = true
+	}
+	for _, want := range plants {
+		if stagedSet[want] {
+			t.Errorf("StagedPaths = %v, want %q absent (this ritual must never stage it, even transiently)", staged, want)
+		}
 	}
 
 	if !contains(stdout.String(), "board:") {
