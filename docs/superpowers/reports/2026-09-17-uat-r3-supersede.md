@@ -216,9 +216,9 @@ amended/amended_advisory/removed/added all empty — failing closed and
 naming the offending field. Tests:
 `TestCompose_QuotedTopLevelKeys_AreHandledLikeUnquotedOnes` (asserted on
 the decode result, not on substrings of the rendered text) and
-`TestCheckComposedPostconditions` (13 rows: one conforming successor plus
-twelve hand-built violations, each proving the field name reaches the
-error).
+`TestCheckComposedPostconditions` (14 subtests: one conforming successor
+plus thirteen hand-built violations, each proving the field name reaches
+the error).
 
 **F2 (Important) — a pinned inherited supersedes link never matched.**
 `renderLinksBlock` chose the link to drop by string equality against
@@ -262,8 +262,9 @@ this path at all: observed RED `design start: story ref
 about something the operator never wrote. Fixed in **4fcecc7a**: dispatch
 on both spellings, and parse `--supersedes`/`--name`/`--kind` with the same
 `take` shape `extractFlags` uses. Tests: six new
-`TestExtractSupersedeFlags` subtests (all-`=` form, mixed forms, and four
-duplicate spellings including mixed ones) plus the built-binary
+`TestExtractSupersedeFlags` subtests, 11 in total (all-`=` form, mixed
+forms, and four duplicate spellings including mixed ones) plus the
+built-binary
 `TestDesignStartSupersedeE2E_EqualsFlagSpellings`.
 
 **F5 (Minor) — the leading frontmatter lines were dropped.** The block walk
