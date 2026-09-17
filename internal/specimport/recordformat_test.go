@@ -169,7 +169,15 @@ func TestDecodeRecord_PreAC4Fixture_DecodesWithFieldsAbsent(t *testing.T) {
 
 // TestDecodeRecord_F13ReferenceFixture_CarriesFormatAndProfileDigest is
 // the fixture-based counterpart proving a real, currently-produced record
-// decodes with both new fields populated and correct.
+// decodes with both new fields populated and correct. The fixture
+// (testdata/record/f13-reference-record.json) is the exact record.json
+// TestPublishNew_RecordFormat_F13BindsThePinnedProfileDigest's own Apply
+// call produces today — captured via gitx.Show, byte-for-byte
+// reproducible across separate `go test` processes because fixturegit
+// fixes commit dates/identity — not hand-edited. Regenerate it the same
+// way (dump that test's result.Branch/store.ImportRecordRelPath bytes)
+// whenever the F13 profile's selector shape changes, so this stays a
+// currently-producible shape rather than a silently stale one.
 func TestDecodeRecord_F13ReferenceFixture_CarriesFormatAndProfileDigest(t *testing.T) {
 	data, err := os.ReadFile("testdata/record/f13-reference-record.json")
 	if err != nil {
