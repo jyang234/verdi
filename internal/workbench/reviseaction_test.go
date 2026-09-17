@@ -15,6 +15,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -337,4 +338,139 @@ func TestBoardSpec_Revise_Refusals(t *testing.T) {
 			t.Fatalf("GET revise = %d, want 405", rec.Code)
 		}
 	})
+}
+
+// TestReviseSuccessorDefault pins the dialog's prefilled successor name:
+// <pred>-v2, or the next -v<n> when the predecessor already carries one.
+func TestReviseSuccessorDefault(t *testing.T) {
+	cases := []struct{ pred, want string }{
+		{"escrow-autopay", "escrow-autopay-v2"},
+		{"escrow-autopay-v2", "escrow-autopay-v3"},
+		{"rate-lock-v9", "rate-lock-v10"},
+		{"x-v0", "x-v1"},
+		// Not a version suffix: no digits, digits without the -v, a bare
+		// v-prefixed segment that is the whole name, or an inner -v<n>.
+		{"x-v", "x-v-v2"},
+		{"x-2", "x-2-v2"},
+		{"v2", "v2-v2"},
+		{"x-v2-final", "x-v2-final-v2"},
+		{"", "-v2"},
+	}
+	for _, tc := range cases {
+		if got := reviseSuccessorDefault(tc.pred); got != tc.want {
+			t.Errorf("reviseSuccessorDefault(%q) = %q, want %q", tc.pred, got, tc.want)
+		}
+	}
+}
+
+// TestBoardSpec_ReviseAffordance_Rendered: the sealed accepted feature
+// wall renders the Revise button and its dialog (prefilled successor
+// name, explanatory line, error slot, OK/cancel, success link); a draft
+// wall, a story wall, and a superseded wall render none of it — the
+// action's guard, mirrored at render so the rail never offers what the
+// server would refuse.
+func TestBoardSpec_ReviseAffordance_Rendered(t *testing.T) {
+	repo := newScopingAcceptedFixture(t)
+	h := NewHandler(repo.Dir)
+	rec := getBoard(t, h, scopingAcceptedName)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET board = %d", rec.Code)
+	}
+	body := rec.Body.String()
+	wants := []string{
+		`data-testid="revise-spec-btn"`,
+		`id="revise-dialog"`,
+		`data-testid="revise-name"`,
+		`value="scoping-accepted-v2"`,
+		`data-testid="revise-error"`,
+		`role="alert"`,
+		`data-testid="revise-ok"`,
+		`data-testid="revise-cancel"`,
+		`data-testid="revise-success-link"`,
+		// The explanatory line: verbatim carry, the supersedes link, a
+		// draft on its own design branch, this checkout unmoved.
+		"carried",
+		"supersedes",
+		"design/scoping-accepted-v2",
+		"never moves",
+	}
+	for _, w := range wants {
+		if !strings.Contains(body, w) {
+			t.Errorf("sealed wall page lacks %q", w)
+		}
+	}
+
+	absent := map[string]string{
+		"draft feature wall": newScopingWallFixture(t),
+		"story wall":         newStoryWallFixture(t),
+	}
+	legacySuperseded := strings.Replace(scopingAcceptedSpec, "status: accepted-pending-build\n", "status: superseded\n", 1)
+	superseded := fixturegit.Build(t, []fixturegit.Layer{{
+		Files: map[string]string{
+			".verdi/specs/active/" + scopingAcceptedName + "/spec.md": legacySuperseded,
+			".verdi/.gitignore": "data/\n",
+			".verdi/verdi.yaml": "schema: verdi.layout/v1\n",
+		},
+		Message: "seed superseded fixture",
+	}})
+	setDefaultBranchSymref(t, superseded.Dir)
+	absent["superseded feature wall"] = superseded.Dir
+	names := map[string]string{
+		"draft feature wall":      scopingWallName,
+		"story wall":              storyWallName,
+		"superseded feature wall": scopingAcceptedName,
+	}
+	for label, root := range absent {
+		rec := getBoard(t, NewHandler(root), names[label])
+		if rec.Code != http.StatusOK {
+			t.Fatalf("%s: GET board = %d", label, rec.Code)
+		}
+		if label == "superseded feature wall" && !strings.Contains(rec.Body.String(), `badge-superseded`) {
+			t.Fatalf("%s fixture did not project as superseded", label)
+		}
+		for _, w := range []string{`data-testid="revise-spec-btn"`, `id="revise-dialog"`} {
+			if strings.Contains(rec.Body.String(), w) {
+				t.Errorf("%s renders %s; revise is sealed-accepted-feature-wall only", label, w)
+			}
+		}
+	}
+}
+
+// TestBoardRender_ReviseVocabulary: every spoken class and state word in
+// the affordance and dialog resolves through the model display chain
+// (L-M13a(6)); the identity layer (testids, ids, the branch name) stays
+// bare.
+func TestBoardRender_ReviseVocabulary(t *testing.T) {
+	proj := &BoardProjection{
+		Spec:   "vocab-probe",
+		Title:  "Vocab probe",
+		Mode:   modeReadOnly,
+		Status: "accepted-pending-build",
+		Class:  "feature",
+	}
+	proj.applyModelVocabulary(vocabTestModel())
+	page, err := renderBoardSpecPage(proj, &boardGitState{}, testASDView())
+	if err != nil {
+		t.Fatalf("renderBoardSpecPage: %v", err)
+	}
+	body := string(page)
+	if !strings.Contains(body, `data-testid="revise-spec-btn">`) || !strings.Contains(body, "Revise this Initiative") {
+		t.Errorf("revise affordance does not speak the renamed class word:\n%s", body)
+	}
+	start := strings.Index(body, `id="revise-dialog"`)
+	end := strings.Index(body[start:], `</div>
+`)
+	if start < 0 || end < 0 {
+		t.Fatalf("revise dialog not rendered")
+	}
+	dialog := body[start : start+end]
+	// Attribute values (ids, testids, the design/ branch) are identity and
+	// legitimately bare; the visible prose between tags must not be.
+	visible := regexp.MustCompile(`<[^>]*>`).ReplaceAllString(dialog, " ")
+	if regexp.MustCompile(`\bfeature\b|\bstory\b`).MatchString(visible) {
+		t.Errorf("revise dialog prose speaks a bare class word:\n%s", visible)
+	}
+	if !strings.Contains(visible, "Initiative") {
+		t.Errorf("revise dialog prose does not speak the renamed class word:\n%s", visible)
+	}
 }
