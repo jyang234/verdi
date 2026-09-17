@@ -32,6 +32,7 @@ import (
 	"github.com/jyang234/verdi/internal/model"
 	"github.com/jyang234/verdi/internal/store"
 	"github.com/jyang234/verdi/internal/stubinstantiate"
+	"github.com/jyang234/verdi/internal/supersede"
 )
 
 // boardAPIRequest is the one strict-decoded body shape every action
@@ -66,9 +67,16 @@ type boardAPIRequest struct {
 }
 
 // boardAPIResponse reports the working tree's dirtiness after the
-// action — the uncommitted-changes indicator's live signal.
+// action — the uncommitted-changes indicator's live signal. Branch and
+// BoardURL are the revise action's receipt only (spec/uat-round-1 ac-11):
+// the successor's fresh design branch and its own per-branch board
+// address, so the client links to the successor rather than composing
+// the address by hand; both omit for every other action, keeping the
+// established {dirty} shape byte-identical there.
 type boardAPIResponse struct {
-	Dirty bool `json:"dirty"`
+	Dirty    bool   `json:"dirty"`
+	Branch   string `json:"branch,omitempty"`
+	BoardURL string `json:"boardUrl,omitempty"`
 }
 
 // boardSpecAPIHandler answers POST /board/spec/{name}/api/{action}.
@@ -131,8 +139,12 @@ func (s *boardSpecServer) boardSpecAPIHandler() http.HandlerFunc {
 		// own guard (class feature, status accepted-pending-build) is
 		// enforced inside each action, against the wall's own state rather
 		// than the generic writes-need-authoring-mode posture every other
-		// action shares.
-		if action != "stub-instantiate" && action != "create" && proj.Mode != modeAuthoring {
+		// action shares. revise (spec/uat-round-1 ac-11, I-129) is the
+		// third of the kind: it composes a superseding successor of THIS
+		// sealed wall on a fresh, un-checked-out branch — the one forward
+		// path 02 §Kind registry permits after acceptance — and never
+		// edits the served spec either.
+		if action != "stub-instantiate" && action != "create" && action != "revise" && proj.Mode != modeAuthoring {
 			// The parenthetical's state word is display and resolves
 			// (L-M13a(6)); the mode word and the board name are the
 			// route's own taxonomy/identity, kept bare.
@@ -141,6 +153,10 @@ func (s *boardSpecServer) boardSpecAPIHandler() http.HandlerFunc {
 		}
 
 		ctx := r.Context()
+		// receipt carries the one action-specific receipt (revise's
+		// successor branch and board address); every other action leaves
+		// it zero so the response stays the established {dirty} shape.
+		var receipt boardAPIResponse
 		switch action {
 		case "sticky":
 			err = s.actionSticky(name, proj, req)
@@ -159,6 +175,8 @@ func (s *boardSpecServer) boardSpecAPIHandler() http.HandlerFunc {
 			err = s.actionStubInstantiate(ctx, name, proj, req)
 		case "create":
 			err = s.actionCreate(ctx, name, proj, req)
+		case "revise":
+			receipt, err = s.actionRevise(ctx, name, proj, req)
 		case "relates":
 			err = s.actionRelates(ctx, name, proj, req)
 		case "pin":
@@ -190,7 +208,8 @@ func (s *boardSpecServer) boardSpecAPIHandler() http.HandlerFunc {
 			writeJSONError(w, http.StatusInternalServerError, derr.Error())
 			return
 		}
-		writeJSON(w, http.StatusOK, boardAPIResponse{Dirty: dirty})
+		receipt.Dirty = dirty
+		writeJSON(w, http.StatusOK, receipt)
 	}
 }
 
@@ -619,7 +638,93 @@ func (s *boardSpecServer) actionCreate(ctx context.Context, name string, proj *B
 	}
 
 	msg := fmt.Sprintf("create: scaffold spec/%s from the creation form of spec/%s", slug, name)
-	return stubinstantiate.CommitScaffoldBranch(ctx, s.root, slug, content, msg)
+	// dc-7 (spec/uat-round-1, I-130): CommitScaffoldBranch now also
+	// resolves and returns the branch's base, which this action does not
+	// surface (base SELECTION is corrected for every caller; the
+	// disclosure text is a CLI-only concern today — cmd/verdi/
+	// designfromstub.go).
+	_, err = stubinstantiate.CommitScaffoldBranch(ctx, s.root, slug, content, msg)
+	return err
+}
+
+// actionRevise starts a superseding revision of this sealed accepted
+// feature wall (spec/uat-round-1 ac-11's board half; PLAN.md I-129,
+// ratified option (a)): the SAME operation `verdi design start
+// --supersedes` runs — internal/supersede's ValidateSuccessorName,
+// Resolve, and Compose, in that order — minus the CLI's checkout switch.
+// The successor carries every predecessor object and stub verbatim as
+// `carried`, a whole-spec `supersedes` link, and lands as one scaffold
+// commit on a fresh design/<new> branch through the same no-checkout
+// git-plumbing primitive stub-instantiate and create use, so the serving
+// checkout never moves (02 §Kind registry: supersession is the only
+// forward path after acceptance, and it is feature-only).
+//
+// Ordering is the preparation-boundary discipline the CLI's own F3 fix
+// established: Compose is pure and runs BEFORE any ref is written, so a
+// composition failure leaves the repository exactly as it was. The
+// branch pre-check is for the refusal's legibility only —
+// CommitScaffoldBranch's create-only UpdateRef stays the fail-closed
+// guard regardless.
+func (s *boardSpecServer) actionRevise(ctx context.Context, name string, proj *BoardProjection, req boardAPIRequest) (boardAPIResponse, error) {
+	if req.Name == "" {
+		// The refusal speaks the class word as display prose (L-M13a(6)).
+		return boardAPIResponse{}, fmt.Errorf("revise requires a kebab-case name for the superseding %s spec", s.model.DisplayClass("feature"))
+	}
+	// The successor-side preconditions live in internal/supersede beside
+	// the predecessor guard, so this action and the CLI check exactly the
+	// same things; each surface renders its own wording from the typed
+	// error rather than relaying the CLI-flavored Detail.
+	if _, err := supersede.ValidateSuccessorName(s.root, req.Name); err != nil {
+		var nerr *supersede.NameError
+		switch {
+		case errors.As(err, &nerr) && nerr.Reason == supersede.ReasonInvalidName:
+			return boardAPIResponse{}, fmt.Errorf("spec name %q must be kebab-case (02 §Identity): %v", req.Name, errors.Unwrap(nerr))
+		case errors.As(err, &nerr) && nerr.Reason == supersede.ReasonSuccessorExists:
+			return boardAPIResponse{}, fmt.Errorf("spec %s already exists under specs/active/ — pick another name", nerr.Name)
+		default:
+			return boardAPIResponse{}, err
+		}
+	}
+	// Names are unique across active and archived specs (guide 6.1) —
+	// the same check create performs; ValidateSuccessorName covers the
+	// active zone only.
+	if _, err := os.Stat(store.ArchiveSpecDir(s.root, req.Name)); err == nil {
+		return boardAPIResponse{}, fmt.Errorf("spec %s already exists under specs/archive/ — names are unique across active and archived specs (guide 6.1)", req.Name)
+	}
+
+	// The wall's own gate, against the projection's effective state
+	// (identical to stub-instantiate and create), then the predecessor
+	// guard re-proven from the store itself (defense in depth: the
+	// projection is a render, the store is the truth).
+	if err := stubinstantiate.SealedFeatureWallGuard(artifact.SpecClass(proj.Class), proj.Status, "revise", s.model); err != nil {
+		return boardAPIResponse{}, err
+	}
+	pred, err := supersede.Resolve(ctx, s.root, name, s.model)
+	if err != nil {
+		return boardAPIResponse{}, err
+	}
+
+	composed, err := supersede.Compose(supersede.ComposeInput{
+		PredecessorName: name,
+		PredecessorRaw:  pred.Raw,
+		SuccessorName:   req.Name,
+	})
+	if err != nil {
+		return boardAPIResponse{}, err
+	}
+
+	// A plain-language pre-check on the branch (the dialog surfaces this
+	// message verbatim); UpdateRef stays the atomic create-only guard.
+	branch := "design/" + req.Name
+	if _, err := gitx.RevParse(ctx, s.root, "refs/heads/"+branch); err == nil {
+		return boardAPIResponse{}, fmt.Errorf("branch %s already exists — a revision with that name was already started; open that branch's board instead, or pick another name", branch)
+	}
+
+	msg := fmt.Sprintf("design start: supersede spec/%s as spec/%s", name, req.Name)
+	if _, err := stubinstantiate.CommitScaffoldBranch(ctx, s.root, req.Name, string(composed.Content), msg); err != nil {
+		return boardAPIResponse{}, err
+	}
+	return boardAPIResponse{Branch: branch, BoardURL: BranchBoardHref(branch, req.Name)}, nil
 }
 
 // relatesTarget builds a relates endpoint's pinned target record.

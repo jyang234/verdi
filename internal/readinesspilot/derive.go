@@ -26,6 +26,22 @@ type ShapeFacts struct {
 	OutcomePresent    bool
 	DeclaredObjectIDs []string
 	OpenQuestionIDs   []string
+	// ClaimedQuestions names, for each declared open question a spike
+	// stub's `resolves` claims, every claiming stub's slug (PLAN.md §7
+	// I-128, option (a); spec/uat-round-1 ac-10). A question id absent
+	// here is unclaimed. Order is insignificant; deriveShape reads it
+	// through a lookup, and the emitted concern's witnesses are
+	// independently sorted.
+	ClaimedQuestions []ClaimedQuestion
+}
+
+// ClaimedQuestion identifies one declared open question a spike stub's
+// `resolves` claims, naming every claiming stub by slug (02 §Kind
+// registry, DC-4's spike-stub grammar). Two or more distinct stubs may
+// claim the same question; StubSlugs then carries all of them.
+type ClaimedQuestion struct {
+	QuestionID string
+	StubSlugs  []string
 }
 
 // ProvenanceFacts carries the already-classified design provenance and draft
@@ -60,13 +76,20 @@ type Fallbacks struct {
 
 // Input is the complete decoded operand set for one readiness projection.
 type Input struct {
-	Target        TargetFacts
-	Shape         ShapeFacts
-	Provenance    ProvenanceFacts
-	Board         BoardFacts
-	Journey       journey.Record
-	Conflict      policyconflict.Report
-	Fallbacks     Fallbacks
+	Target     TargetFacts
+	Shape      ShapeFacts
+	Provenance ProvenanceFacts
+	Board      BoardFacts
+	Journey    journey.Record
+	Conflict   policyconflict.Report
+	Fallbacks  Fallbacks
+	// SpikeWord is the resolved display word for the spike pseudo-class
+	// (spec/vocabulary-surfaces; model.DisplayClass("spike") at the
+	// adapter), supplied by the caller so this package's claimed-question
+	// prose never hardcodes a bare vocabulary word (ledger L-M13a(6), the
+	// mechanical prose witness internal/specalign.TestVocabProseWitness).
+	// This package stays pure and never imports internal/model itself.
+	SpikeWord     string
 	RequestDigest string
 }
 
@@ -145,10 +168,17 @@ func (in Input) validate() error {
 	if !digestPattern.MatchString(in.RequestDigest) {
 		return fmt.Errorf("readinesspilot: request digest %q must match sha256:<64 lowercase hex>", in.RequestDigest)
 	}
+	if in.SpikeWord == "" || containsControl(in.SpikeWord) {
+		// vocab:identity — names the SpikeWord operand in a validation diagnostic, not display prose
+		return fmt.Errorf("readinesspilot: spike word must be non-empty and control-free")
+	}
 	if err := validateSourceIDs("declared object ids", in.Shape.DeclaredObjectIDs); err != nil {
 		return err
 	}
 	if err := validateSourceIDs("open question ids", in.Shape.OpenQuestionIDs); err != nil {
+		return err
+	}
+	if err := validateClaimedQuestions(in.Shape.OpenQuestionIDs, in.Shape.ClaimedQuestions); err != nil {
 		return err
 	}
 	if err := in.Provenance.ChainState.validate("chain state"); err != nil {
@@ -221,7 +251,16 @@ func deriveShape(input Input) []Concern {
 		presenceConcern("shape/problem", "Problem statement is present", "Problem statement is missing", input.Shape.ProblemPresent, input, true),
 		presenceConcern("shape/outcome", "Intended outcome is present", "Intended outcome is missing", input.Shape.OutcomePresent, input, true),
 	}
+	claimed := claimedQuestionSlugs(input.Shape.ClaimedQuestions)
 	for _, id := range sortedCopy(input.Shape.OpenQuestionIDs) {
+		if slugs, ok := claimed[id]; ok {
+			concerns = append(concerns, newConcern(
+				"shape/question/"+id, AreaShape, StateUnproven, false, TimingEventual, "",
+				"Declared open question is claimed by "+input.SpikeWord+" stubs and remains unresolved",
+				append([]string{id}, slugs...), boardDestination(input, input.Fallbacks.Shape),
+			))
+			continue
+		}
 		concerns = append(concerns, newConcern(
 			"shape/question/"+id, AreaShape, StateUnproven, true, TimingCurrent, "",
 			"Declared open question remains unresolved", []string{id}, boardDestination(input, input.Fallbacks.Shape),
@@ -465,6 +504,53 @@ func validateSourceIDs(field string, ids []string) error {
 		seen[id] = true
 	}
 	return nil
+}
+
+// validateClaimedQuestions checks every claim names a declared open
+// question exactly once and carries at least one non-empty, control-free,
+// unique stub slug (PLAN.md §7 I-128 option (a); spec/uat-round-1 ac-10).
+func validateClaimedQuestions(openQuestionIDs []string, claims []ClaimedQuestion) error {
+	if claims == nil {
+		return fmt.Errorf("readinesspilot: claimed open questions must be non-nil")
+	}
+	open := make(map[string]bool, len(openQuestionIDs))
+	for _, id := range openQuestionIDs {
+		open[id] = true
+	}
+	seenQuestion := make(map[string]bool, len(claims))
+	for _, claim := range claims {
+		if !open[claim.QuestionID] {
+			return fmt.Errorf("readinesspilot: claimed open question %q is not a declared open question", claim.QuestionID)
+		}
+		if seenQuestion[claim.QuestionID] {
+			return fmt.Errorf("readinesspilot: duplicate claimed open question %q", claim.QuestionID)
+		}
+		seenQuestion[claim.QuestionID] = true
+		if len(claim.StubSlugs) == 0 {
+			return fmt.Errorf("readinesspilot: claimed open question %q must carry at least one stub slug", claim.QuestionID)
+		}
+		seenSlug := make(map[string]bool, len(claim.StubSlugs))
+		for _, slug := range claim.StubSlugs {
+			if slug == "" || containsControl(slug) {
+				return fmt.Errorf("readinesspilot: claimed open question %q has an empty or control-bearing stub slug", claim.QuestionID)
+			}
+			if seenSlug[slug] {
+				return fmt.Errorf("readinesspilot: claimed open question %q has duplicate stub slug %q", claim.QuestionID, slug)
+			}
+			seenSlug[slug] = true
+		}
+	}
+	return nil
+}
+
+// claimedQuestionSlugs indexes ClaimedQuestions by question id for
+// deriveShape's per-question lookup.
+func claimedQuestionSlugs(claims []ClaimedQuestion) map[string][]string {
+	out := make(map[string][]string, len(claims))
+	for _, claim := range claims {
+		out[claim.QuestionID] = claim.StubSlugs
+	}
+	return out
 }
 
 func validateFallback(name string, tokens []string) error {

@@ -1,6 +1,7 @@
 package designapp
 
 import (
+	"errors"
 	"fmt"
 
 	"github.com/jyang234/verdi/internal/draftmutation"
@@ -41,13 +42,34 @@ func (e *Error) Error() string {
 	if e == nil {
 		return "<nil>"
 	}
-	if e.Cause != nil {
+	if e.Cause != nil && !causeRestatesCodeDetail(e.Cause, e.Code, e.Detail) {
 		return fmt.Sprintf("%s: %s: %v", e.Code, e.Detail, e.Cause)
 	}
 	if e.Detail == "" {
 		return e.Code
 	}
 	return fmt.Sprintf("%s: %s", e.Code, e.Detail)
+}
+
+// causeRestatesCodeDetail reports whether cause is a *draftmutation.Error
+// whose own Error() is already exactly "code: detail" — the shape
+// translateDraftmutationError always produces (Cause is the untranslated
+// draftmutation.Error, Code/Detail are its Code/Detail flattened). %v-ing
+// such a Cause onto Error()'s "code: detail: %v" rendering would repeat
+// the WHOLE message rather than add anything (e.g. "policy-forbidden:
+// project has not adopted policy authority: policy-forbidden: project
+// has not adopted policy authority"): latent today (nothing stringifies
+// *designapp.Error in production), but ac-5 (spec/uat-round-1) requires
+// every policy-authority/policy-forbidden string to carry its prefix
+// exactly once wherever it IS rendered. Cause itself is untouched by this
+// check — only Error()'s string omits the redundant tail — so
+// errors.Is/As chaining through Cause is unaffected. Any other Cause
+// (including a *draftmutation.Error with different Code/Detail, or one
+// reached only via errors.As through further wrapping) keeps the
+// original three-part rendering.
+func causeRestatesCodeDetail(cause error, code, detail string) bool {
+	var de *draftmutation.Error
+	return errors.As(cause, &de) && de.Error() == code+": "+detail
 }
 
 func (e *Error) Unwrap() error {
@@ -150,6 +172,13 @@ func notFound(code, detail string) *Error {
 // re-deriving it. The wrapped error keeps draftmutation's own code string
 // as this package's Code so a caller can still recognize the exact
 // upstream refusal.
+//
+// Detail is draftmutation's own BARE Detail, never its Error() form
+// ("<code>: <detail>"): Code already carries that code separately, so
+// copying the combined Error() string into Detail would re-embed it,
+// doubling the prefix wherever a caller renders "Code: Detail" together
+// (the CLI's renderDesignAppResult, the workbench board's policy-forbidden
+// witness row — ac-5, spec/uat-round-1).
 func translateDraftmutationError(err *draftmutation.Error) *Error {
 	if err == nil {
 		return nil
@@ -158,5 +187,5 @@ func translateDraftmutationError(err *draftmutation.Error) *Error {
 	if err.Verdict() {
 		classification = ClassificationVerdict
 	}
-	return &Error{Classification: classification, Code: string(err.Code), Detail: err.Error(), Cause: err}
+	return &Error{Classification: classification, Code: string(err.Code), Detail: err.Detail, Cause: err}
 }

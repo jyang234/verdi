@@ -400,8 +400,12 @@ export const SHOWCASE = {
   // Workbench (scoping canvas, spec/scoping-canvas) — the stubs band
   // -------------------------------------------------------------------------
 
-  // DESIGN_SPEC's one open question (provisioned by provision_board.go): the
-  // spike proto-sticky's resolution-yarn target.
+  // DESIGN_SPEC's first declared open question (provisioned by
+  // provision_board.go, which also declares oq-2, claimed at provision time
+  // by the spike stub refresh-window-spike for ac-10): the spike
+  // proto-sticky's resolution-yarn target. oq-1 is unclaimed at provision
+  // time; suite 30 graduates spikes claiming it, so on the live wall its
+  // claimed state is order-dependent after 30 (see 50-design-workbench).
   OQ_ID: "oq-1",
 
   // FEATURE_SPEC (escrow-autopay, on main → sealed wall) declares
@@ -911,6 +915,11 @@ export const SPEC_IMPORT_FILES = {
 // account for once (spec-import-contract: "2409 primary bytes accounted
 // once").
 export const SPEC_IMPORT_F13_PRIMARY_BYTES = 2409;
+// The f13-reference-v1 profile's pinned primary SHA-256 (internal/
+// specimport/profile_f13.go): the exact profile_primary_digest an f13
+// import record persists and the record page displays (spec/uat-round-1
+// ac-4). Mirrors the Go constant; change them together.
+export const SPEC_IMPORT_F13_PRIMARY_SHA256 = "7c6d95d4aa516cf682e6d4a33d1c260f1c861d938d46559241a7c764bffca577";
 
 // The isolated import store's synthetic, test-only story fixtures
 // (cmd/e2eharness/specimportfixture.go; BINDING: mirrored verbatim there):

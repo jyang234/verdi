@@ -95,6 +95,44 @@ var validFormats = map[string]bool{
 	FormatManualV1:     true,
 }
 
+// profileReferenceDigests maps every closed Format value that names a
+// pinned, versioned reference profile to the exact primary SHA-256 that
+// profile is bound to (spec-import-contract.md: "f13-reference-v1 binds
+// the selected primary SHA-256 ... This is a named, versioned reference
+// profile, not a recognizer for all ATC plans"). native/markdown-v1/
+// manual-v1 are deliberately absent: they read whatever primary bytes a
+// request supplies rather than refusing anything not bit-identical to one
+// pinned value, so they have no bound profile digest to record.
+//
+// APPEND-ONLY: an entry's value must never change once it has shipped.
+// Every already-committed record naming that format is validated against
+// this exact map (validateRecordFormat, via profilePrimaryDigestFor) every
+// time it is decoded — changing an existing entry's pinned digest would
+// make every such already-committed record fail to decode, retroactively.
+// Re-pinning a profile's primary bytes (or reusing its name for different
+// bytes) is a NEW named, versioned profile: give it a NEW Format/
+// FormatXxx value (e.g. "f13-reference-v2") and ADD a new entry here,
+// exactly as "f13-reference-v1" itself is named for its one pinned
+// version. Never overwrite or repurpose an existing key.
+var profileReferenceDigests = map[string]string{
+	FormatF13Reference: f13PrimarySHA256,
+}
+
+// profilePrimaryDigestFor returns the pinned primary SHA-256 that format's
+// named reference profile is bound to, and whether format names one at
+// all. This is the ONE place Record.ProfilePrimaryDigest's value comes
+// from — Service.Apply (publish.go) uses it to populate a new record and
+// Record.validate (recordvalidate.go) uses it to check a decoded one — so
+// a stored value is always exactly the profile's own pinned constant,
+// never a digest independently recomputed from bytes the record's own
+// strict decode has no way to re-verify (uat-round-1 spec ac-4: "Any
+// digest recorded must be the exact pinned value the profile enforces,
+// not recomputed from bytes you did not verify").
+func profilePrimaryDigestFor(format string) (string, bool) {
+	digest, ok := profileReferenceDigests[format]
+	return digest, ok
+}
+
 // Closed Mapping.Transform values (spec-import-contract.md: "Transform is
 // identity, trim-blank-lines, collapse-whitespace, or list-item").
 const (

@@ -7,6 +7,16 @@
 //   - file reading: each chosen file's exact bytes, base64-encoded without
 //     any text decode, labeled by the file NAME (never a path), with a
 //     mechanical source id derived from that name;
+//   - mapping by selection (spec/uat-round-1 ac-8, UAT-006): each source's
+//     selected slice is rendered read-only beneath its row, decoded as
+//     UTF-8 for display only; a selection inside ONE source, mapped to a
+//     target picked from the statements, the known object ids or a new
+//     object of any of the four kinds, becomes a source-backed mapping
+//     whose start/end are UTF-8 BYTE offsets computed by walking the
+//     source's own byte array (never JS string indices) and cross-checked
+//     against the selected text; an empty, outside, foreign or
+//     two-source selection is refused with a visible message; the mapping
+//     list shows the covered text beside each byte range;
 //   - request composition: the exact strict Request JSON the server's ONE
 //     decoder accepts — sources, format, target, the two choices, explicit
 //     mappings and declared links — nothing inferred, nothing invented;
@@ -100,6 +110,14 @@
     ["dc-", "decision", "decisions"],
     ["oq-", "open question", "open questions"],
   ];
+  // Sources above this size are rendered collapsed (still selectable once
+  // expanded); smaller ones show their text at once.
+  var LARGE_SOURCE_BYTES = 262144;
+  // The mapping list's excerpt shows at most this many characters of the
+  // covered text's first line.
+  var EXCERPT_CHARS = 140;
+  // The value prefix of the picker's "new <kind>" choices.
+  var NEW_TARGET = "new:";
 
   // Finding code -> a plain-language title. The code itself stays visible
   // beside it; the server's message is always rendered verbatim.
@@ -153,7 +171,7 @@
   };
 
   var state = {
-    sources: [], // {id, label, data, size, startLine, endLine}
+    sources: [], // {id, label, data, bytes, size, startLine, endLine}
     primary: "",
     mappings: [], // {target, sourceId, start, end, transform, text, evidence}
     links: [], // {type, ref}
@@ -183,11 +201,15 @@
   function clear(node) {
     while (node.firstChild) node.removeChild(node.firstChild);
   }
-  function labelOf(sourceId) {
+  function sourceById(sourceId) {
     for (var i = 0; i < state.sources.length; i++) {
-      if (state.sources[i].id === sourceId) return state.sources[i].label;
+      if (state.sources[i].id === sourceId) return state.sources[i];
     }
-    return sourceId;
+    return null;
+  }
+  function labelOf(sourceId) {
+    var src = sourceById(sourceId);
+    return src ? src.label : sourceId;
   }
   function isAC(target) {
     return typeof target === "string" && target.indexOf("ac-") === 0;
@@ -274,8 +296,203 @@
   }
   function readFile(file) {
     return file.arrayBuffer().then(function (buf) {
-      return { label: file.name, data: base64Of(new Uint8Array(buf)), size: buf.byteLength };
+      var bytes = new Uint8Array(buf);
+      return { label: file.name, data: base64Of(bytes), bytes: bytes, size: buf.byteLength };
     });
+  }
+
+  // -- bytes, slices and selections -------------------------------------------------
+  // selectedSlice mirrors the server's selectLineRange over a source's
+  // exact bytes: both lines zero is the whole file; otherwise inclusive,
+  // 1-based physical LF-terminated lines with an unterminated final line
+  // counted, CRLF preserved. Every mapping offset is relative to THIS
+  // slice, so the rendered text is this slice and nothing else.
+  function selectedSlice(src) {
+    var data = src.bytes;
+    var s = src.startLine;
+    var e = src.endLine;
+    if (!s && !e) return { bytes: data };
+    if (s <= 0 || e <= 0) return { error: "start line and end line must both be set" };
+    if (s > e) return { error: "start line " + s + " is after end line " + e };
+    var offsets = [0];
+    for (var i = 0; i < data.length; i++) {
+      if (data[i] === 10) offsets.push(i + 1);
+    }
+    if (data.length && data[data.length - 1] !== 10) offsets.push(data.length);
+    var total = offsets.length - 1;
+    if (e > total) return { error: "end line " + e + " exceeds the file's " + total + " lines" };
+    return { bytes: data.subarray(offsets[s - 1], offsets[e]) };
+  }
+  // decodeUTF8 decodes exact bytes for DISPLAY only, strictly (invalid
+  // UTF-8 yields null, never a substituted character that would break the
+  // byte correspondence) and with a leading BOM kept as text for the same
+  // reason. Nothing decoded is ever sent.
+  function decodeUTF8(bytes) {
+    try {
+      return new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(bytes);
+    } catch (e) {
+      return null;
+    }
+  }
+  function runeBoundary(bytes, i) {
+    if (i === bytes.length) return true;
+    if (i < 0 || i > bytes.length) return false;
+    return (bytes[i] & 0xc0) !== 0x80;
+  }
+  // byteOffsetsForUnits walks the byte array rune by rune, counting the
+  // UTF-16 code units each rune occupies in the decoded text (two for a
+  // four-byte sequence, one otherwise), and returns the byte offsets at
+  // which the given code-unit offsets fall — null if either falls inside a
+  // rune. Offsets are thus computed from the bytes, never from string
+  // indices.
+  function byteOffsetsForUnits(bytes, startUnits, endUnits) {
+    var units = 0;
+    var i = 0;
+    var start = -1;
+    var end = -1;
+    for (;;) {
+      if (units === startUnits && start < 0) start = i;
+      if (units === endUnits) {
+        end = i;
+        break;
+      }
+      if (i >= bytes.length || units > endUnits) break;
+      var b = bytes[i];
+      var len = b < 0x80 ? 1 : b >= 0xf0 ? 4 : b >= 0xe0 ? 3 : b >= 0xc0 ? 2 : 1;
+      units += len === 4 ? 2 : 1;
+      i += len;
+    }
+    if (start < 0 || end < 0) return null;
+    return { start: start, end: end };
+  }
+  function sourceTextOf(node) {
+    var elNode = node && node.nodeType === 3 ? node.parentNode : node;
+    return elNode && elNode.closest ? elNode.closest(".import-source-text") : null;
+  }
+  // selectionIn resolves the browser's live selection against one source's
+  // rendered text: refused (with the reason a reader sees) when empty,
+  // outside every source, inside another source, or spanning two; else the
+  // exact byte range of the selected text within the source's selected
+  // slice, verified by decoding those bytes back and comparing them with
+  // the selected text itself.
+  function selectionIn(pre, src) {
+    var sel = window.getSelection();
+    if (!sel || sel.rangeCount === 0 || sel.isCollapsed) {
+      return { error: "Nothing is selected. Select a passage in the text above (click and drag over it), then choose Map selection." };
+    }
+    var range = sel.getRangeAt(0);
+    var startPre = sourceTextOf(range.startContainer);
+    var endPre = sourceTextOf(range.endContainer);
+    if (!startPre && !endPre) {
+      return { error: "The selection is not inside a source's text. Select a passage in the text above, then choose Map selection." };
+    }
+    if (startPre !== endPre) {
+      return { error: "The selection spans two sources or runs outside one; a mapping covers a passage in one source only. Select within this source's text." };
+    }
+    if (startPre !== pre) {
+      return { error: "The selection is in " + labelOf(startPre.getAttribute("data-source-id")) + "; use that source's own Map selection." };
+    }
+    var text = range.toString();
+    if (!text.trim()) return { error: "The selection contains only whitespace; select the passage itself." };
+    var prefix = document.createRange();
+    prefix.selectNodeContents(pre);
+    prefix.setEnd(range.startContainer, range.startOffset);
+    var startUnits = prefix.toString().length;
+    var slice = selectedSlice(src);
+    if (slice.error) return { error: "The line range for this source is not valid (" + slice.error + "), so nothing can be mapped from it." };
+    var offsets = byteOffsetsForUnits(slice.bytes, startUnits, startUnits + text.length);
+    if (!offsets || decodeUTF8(slice.bytes.subarray(offsets.start, offsets.end)) !== text) {
+      return { error: "The selection does not fall on character boundaries of the source's bytes; select the passage again." };
+    }
+    return { start: offsets.start, end: offsets.end, text: text };
+  }
+  // knownTargets lists the object ids the page knows per kind prefix: the
+  // last preview's fields (stale or not — they return on the next
+  // preview) and the current mappings' targets, sorted by number.
+  function knownTargets() {
+    var known = {};
+    OBJECT_GROUPS.forEach(function (g) {
+      known[g[0]] = [];
+    });
+    function add(target) {
+      OBJECT_GROUPS.forEach(function (g) {
+        if (typeof target === "string" && target.indexOf(g[0]) === 0 && known[g[0]].indexOf(target) < 0) known[g[0]].push(target);
+      });
+    }
+    if (state.preview) {
+      (state.preview.result.fields || []).forEach(function (f) {
+        add(f.target);
+      });
+    }
+    state.mappings.forEach(function (m) {
+      add(m.target);
+    });
+    OBJECT_GROUPS.forEach(function (g) {
+      known[g[0]].sort(function (a, b) {
+        var na = parseInt(a.slice(g[0].length), 10);
+        var nb = parseInt(b.slice(g[0].length), 10);
+        if (isNaN(na) || isNaN(nb) || na === nb) return a < b ? -1 : a > b ? 1 : 0;
+        return na - nb;
+      });
+    });
+    return known;
+  }
+  // nextIdFor follows the importer's own numbering (1-based ordinals per
+  // kind): one past the highest numbered id the page knows for that kind.
+  function nextIdFor(prefix) {
+    var max = 0;
+    (knownTargets()[prefix] || []).forEach(function (id) {
+      var n = parseInt(id.slice(prefix.length), 10);
+      if (!isNaN(n) && n > max) max = n;
+    });
+    return prefix + (max + 1);
+  }
+  function fillMapPicker(select) {
+    var prev = select.value;
+    clear(select);
+    var statements = el("optgroup", { label: "Statements" });
+    statements.appendChild(el("option", { value: "problem" }, STATEMENT_NAMES.problem));
+    statements.appendChild(el("option", { value: "outcome" }, STATEMENT_NAMES.outcome));
+    select.appendChild(statements);
+    var known = knownTargets();
+    var existing = el("optgroup", { label: "Existing objects" });
+    OBJECT_GROUPS.forEach(function (g) {
+      known[g[0]].forEach(function (id) {
+        existing.appendChild(el("option", { value: id }, id + " (" + g[1] + ")"));
+      });
+    });
+    if (existing.firstChild) select.appendChild(existing);
+    // Novelty is only asserted when a CURRENT preview proves the id absent
+    // from the document's automatic recognition; before any preview, or
+    // after an edit, the id is merely the next one, and mapping it replaces
+    // whatever recognition may already own under that id (the contract's
+    // explicit override), which the label says instead of "New".
+    var verified = previewCurrent();
+    var fresh = el("optgroup", { label: verified ? "New object" : "Next id (no current preview)" });
+    OBJECT_GROUPS.forEach(function (g) {
+      var id = nextIdFor(g[0]);
+      var label = verified
+        ? "New " + g[1] + " (" + id + ")"
+        : g[1] + " " + id + " (next id; no current preview — if recognition owns " + id + " this mapping replaces it)";
+      fresh.appendChild(el("option", { value: NEW_TARGET + g[0] }, label));
+    });
+    select.appendChild(fresh);
+    if (prev && select.querySelector('option[value="' + prev + '"]')) select.value = prev;
+  }
+  function refreshMapPickers() {
+    var pickers = sourceList.querySelectorAll(".import-map-target");
+    for (var i = 0; i < pickers.length; i++) fillMapPicker(pickers[i]);
+  }
+  // setMapNote states one source's last mapping outcome and keeps it on
+  // the source so a re-render of the list (another file added or removed)
+  // restores it.
+  function setMapNote(src, note, refused, text) {
+    src.mapNote = { refused: refused, text: text };
+    note.setAttribute("data-refused", refused ? "true" : "false");
+    note.textContent = text;
+  }
+  function targetName(target) {
+    return isStatement(target) ? target + " (" + STATEMENT_NAMES[target] + ")" : target;
   }
 
   // -- invalidation -------------------------------------------------------------
@@ -302,6 +519,8 @@
     if (state.preview) {
       markStale("Not previewed since your last edit: the findings and statuses below are earlier results. Preview again to see the current state.");
     }
+    // The pickers' "new" ids are unverified again until the next preview.
+    refreshMapPickers();
     setNextAction();
   }
   // markStale turns the shown preview into an explicitly EARLIER result:
@@ -395,7 +614,7 @@
           showError({ code: "invalid-request", error: "at most " + MAX_SOURCES + " sources per import; the remaining files were not added" });
           break;
         }
-        var src = { id: sourceIdFor(read[i].label), label: read[i].label, data: read[i].data, size: read[i].size, startLine: 0, endLine: 0 };
+        var src = { id: sourceIdFor(read[i].label), label: read[i].label, data: read[i].data, bytes: read[i].bytes, size: read[i].size, startLine: 0, endLine: 0 };
         state.sources.push(src);
         if (!state.primary) state.primary = src.id;
       }
@@ -434,8 +653,102 @@
       line.appendChild(endLabel);
       line.appendChild(el("button", { type: "button", class: "import-source-remove", "data-testid": "import-remove-" + src.id }, "Remove"));
       li.appendChild(line);
+      li.appendChild(renderSourceView(src));
       sourceList.appendChild(li);
+      renderSourceText(li, src);
     });
+  }
+  // renderSourceView builds one source's read-only text block (filled by
+  // renderSourceText) and the controls that map a selection in it: the
+  // target picker and the Map selection action, with a status line for
+  // the outcome or the refusal. Large sources start collapsed.
+  function renderSourceView(src) {
+    var view = el("details", { class: "import-source-view", "data-testid": "import-source-view-" + src.id });
+    if (src.size <= LARGE_SOURCE_BYTES) view.setAttribute("open", "");
+    view.appendChild(el("summary", null, "Text of " + src.label + " — select a passage, pick where it belongs, then Map selection"));
+    view.appendChild(el("p", { class: "import-hint import-source-view-note", "data-testid": "import-source-view-note-" + src.id }));
+    view.appendChild(el("pre", { class: "import-source-text", "data-testid": "import-source-text-" + src.id, "data-source-id": src.id, tabindex: "0", "aria-label": "Text of " + src.label + ", read-only" }));
+    var controls = el("div", { class: "import-map-controls", "data-source-id": src.id });
+    var pickLabel = el("label");
+    pickLabel.appendChild(document.createTextNode("Map the selection to "));
+    var picker = el("select", { class: "import-map-target", "data-testid": "import-map-target-" + src.id });
+    fillMapPicker(picker);
+    pickLabel.appendChild(picker);
+    controls.appendChild(pickLabel);
+    controls.appendChild(el("button", { type: "button", class: "import-map-selection", "data-testid": "import-map-selection-" + src.id }, "Map selection"));
+    view.appendChild(controls);
+    var note = el("p", { class: "import-map-note", "data-testid": "import-map-note-" + src.id, role: "status", "aria-live": "polite", "data-refused": "false" });
+    if (src.mapNote) {
+      note.setAttribute("data-refused", src.mapNote.refused ? "true" : "false");
+      note.textContent = src.mapNote.text;
+    }
+    view.appendChild(note);
+    return view;
+  }
+  // renderSourceText fills one source's block with its selected slice
+  // decoded as text (or says why it cannot be shown). Called on add and
+  // whenever the source's line range changes.
+  function renderSourceText(li, src) {
+    var pre = li.querySelector(".import-source-text");
+    var note = li.querySelector(".import-source-view-note");
+    if (!pre || !note) return;
+    var slice = selectedSlice(src);
+    if (slice.error) {
+      pre.hidden = true;
+      pre.textContent = "";
+      note.textContent = "No text to show: the line range is not valid (" + slice.error + "); the preview refuses it too.";
+      return;
+    }
+    var text = decodeUTF8(slice.bytes);
+    if (text === null) {
+      pre.hidden = true;
+      pre.textContent = "";
+      note.textContent = "This source is not valid UTF-8, so its text cannot be shown or mapped; the importer refuses it as well.";
+      return;
+    }
+    pre.hidden = false;
+    pre.textContent = text;
+    var ranged = src.startLine || src.endLine ? "Lines " + src.startLine + "–" + src.endLine + ": " : "";
+    note.textContent = ranged + slice.bytes.length + " bytes shown exactly as read; a mapped range counts bytes from the start of this text.";
+  }
+  // mapSelection turns the live selection inside one source's text into a
+  // source-backed identity mapping for the picked target (a new id follows
+  // nextIdFor), replacing that target's earlier span or text but keeping
+  // its evidence kinds; every outcome is stated in the source's note.
+  function mapSelection(controls) {
+    var li = controls.closest("li");
+    var src = sourceById(controls.getAttribute("data-source-id"));
+    var pre = li ? li.querySelector(".import-source-text") : null;
+    var note = li ? li.querySelector(".import-map-note") : null;
+    var picker = li ? li.querySelector(".import-map-target") : null;
+    if (!src || !pre || !note || !picker) return;
+    var sel = selectionIn(pre, src);
+    if (sel.error) {
+      setMapNote(src, note, true, sel.error);
+      return;
+    }
+    var picked = picker.value;
+    var created = picked.indexOf(NEW_TARGET) === 0;
+    var target = created ? nextIdFor(picked.slice(NEW_TARGET.length)) : picked;
+    // Novelty is known only while the preview is current (see
+    // fillMapPicker); decided before this edit invalidates it.
+    var verified = created && previewCurrent();
+    var m = ensureMapping(target);
+    var replaced = !!(m.sourceId || m.text);
+    m.sourceId = src.id;
+    m.start = sel.start;
+    m.end = sel.end;
+    m.transform = "identity";
+    m.text = "";
+    renderMappings();
+    invalidate();
+    refreshMapPickers();
+    var novelty = "";
+    if (created) {
+      novelty = verified ? " (new)" : " (next id, unverified until preview; replaces any automatically recognized " + target + ")";
+    }
+    setMapNote(src, note, false, "Mapped " + (sel.end - sel.start) + " bytes [" + sel.start + "," + sel.end + ") of " + src.label + " to " + targetName(target) +
+      novelty + (replaced ? ", replacing its earlier mapping" : "") + ". It is listed under Advanced with the text it covers; preview to check it.");
   }
 
   function syncSourceRow(li) {
@@ -518,7 +831,7 @@
       var head = el("div", { class: "import-inline" });
       var targetLabel = el("label");
       targetLabel.appendChild(document.createTextNode("Target "));
-      var target = el("input", { class: "import-mapping-target", "data-testid": "import-mapping-target-" + index, spellcheck: "false", placeholder: "problem, outcome or ac-1" });
+      var target = el("input", { class: "import-mapping-target", "data-testid": "import-mapping-target-" + index, spellcheck: "false", placeholder: "problem, outcome, ac-1, co-1, dc-1 or oq-1" });
       target.value = m.target;
       targetLabel.appendChild(target);
       head.appendChild(targetLabel);
@@ -556,6 +869,8 @@
       head.appendChild(transformLabel);
       head.appendChild(el("button", { type: "button", class: "import-mapping-remove", "data-testid": "import-mapping-remove-" + index }, "Remove"));
       li.appendChild(head);
+      li.appendChild(el("p", { class: "import-mapping-excerpt", "data-testid": "import-mapping-excerpt-" + index }));
+      renderExcerpt(li, m);
       var textLabel = el("label");
       textLabel.appendChild(document.createTextNode("Text (your wording; with a source range it marks the field user-edited-source)"));
       var text = el("textarea", { class: "import-mapping-text", "data-testid": "import-mapping-text-" + index });
@@ -576,6 +891,60 @@
       mappingList.appendChild(li);
     });
     syncAdvancedSummary();
+    refreshMapPickers();
+  }
+  // renderExcerpt shows, beside a source-backed mapping's byte range, the
+  // first line of the text those bytes cover (from the source's own bytes,
+  // never from the server), so a reader can verify the range — or says
+  // why the range covers nothing showable. Hidden for text-only mappings.
+  function renderExcerpt(li, m) {
+    var p = li.querySelector(".import-mapping-excerpt");
+    if (!p) return;
+    clear(p);
+    if (!m.sourceId) {
+      p.hidden = true;
+      return;
+    }
+    p.hidden = false;
+    var src = sourceById(m.sourceId);
+    var range = "Bytes [" + m.start + "," + m.end + ") of " + labelOf(m.sourceId) + ": ";
+    if (!src) {
+      p.textContent = range + "that source is no longer selected.";
+      return;
+    }
+    var slice = selectedSlice(src);
+    if (slice.error) {
+      p.textContent = range + "the source's line range is not valid, so the covered text cannot be shown.";
+      return;
+    }
+    var b = slice.bytes;
+    if (m.start < 0 || m.end > b.length || m.end <= m.start) {
+      p.textContent = range + "not a range within its " + b.length + " selected bytes; the preview refuses it.";
+      return;
+    }
+    if (!runeBoundary(b, m.start) || !runeBoundary(b, m.end)) {
+      p.textContent = range + "the range cuts through a character; the preview refuses it.";
+      return;
+    }
+    var text = decodeUTF8(b.subarray(m.start, m.end));
+    if (text === null) {
+      p.textContent = range + "not valid UTF-8.";
+      return;
+    }
+    var nl = text.indexOf("\n");
+    var first = nl >= 0 ? text.slice(0, nl) : text;
+    var more = nl >= 0 || first.length > EXCERPT_CHARS;
+    if (first.length > EXCERPT_CHARS) first = first.slice(0, EXCERPT_CHARS);
+    p.appendChild(document.createTextNode(range));
+    p.appendChild(el("q", null, first));
+    if (more) p.appendChild(document.createTextNode(" … (first line shown)"));
+  }
+  function refreshExcerpts() {
+    var rows = mappingList.querySelectorAll("li[data-mapping-index]");
+    for (var i = 0; i < rows.length; i++) {
+      var m = state.mappings[parseInt(rows[i].getAttribute("data-mapping-index"), 10)];
+      if (m) renderExcerpt(rows[i], m);
+    }
   }
   function syncMappingRow(li) {
     var index = parseInt(li.getAttribute("data-mapping-index"), 10);
@@ -595,6 +964,8 @@
     for (var i = 0; i < boxes.length; i++) {
       if (boxes[i].checked) m.evidence.push(boxes[i].getAttribute("data-kind"));
     }
+    renderExcerpt(li, m);
+    refreshMapPickers();
   }
 
   // -- declared links ---------------------------------------------------------
@@ -637,11 +1008,19 @@
     var t = e.target;
     if (!t || !t.closest) return;
     if (t === filesInput) return; // handled by the change reader above
+    // The selection picker chooses where a NEXT mapping goes; it is not an
+    // edit of the request and never invalidates the preview.
+    if (t.closest(".import-map-controls")) return;
     if (t === classSelect) syncClassNotes();
     var sourceRow = t.closest("#import-source-list li");
     if (sourceRow) {
       if (t.name === "import-primary") state.primary = t.value;
       syncSourceRow(sourceRow);
+      var edited = sourceById(sourceRow.getAttribute("data-source-id"));
+      if (edited && (t.classList.contains("import-source-start") || t.classList.contains("import-source-end"))) {
+        renderSourceText(sourceRow, edited);
+        refreshExcerpts();
+      }
     }
     var mappingRow = t.closest("#import-mapping-list li");
     if (mappingRow) syncMappingRow(mappingRow);
@@ -654,6 +1033,13 @@
   form.addEventListener("submit", function (e) {
     e.preventDefault();
   });
+  // Pressing Map selection must not disturb the very selection it maps:
+  // the button takes no focus on mousedown (keyboard activation is
+  // unaffected).
+  form.addEventListener("mousedown", function (e) {
+    var t = e.target;
+    if (t && t.closest && t.closest(".import-map-selection")) e.preventDefault();
+  });
   form.addEventListener("click", function (e) {
     var t = e.target;
     if (!t || !t.closest) return;
@@ -661,6 +1047,11 @@
     if (opener) {
       openAdvanced(opener.getAttribute("data-focus"));
       return; // the anchor's own navigation to #import-advanced proceeds
+    }
+    var mapBtn = t.closest(".import-map-selection");
+    if (mapBtn) {
+      mapSelection(mapBtn.closest(".import-map-controls"));
+      return;
     }
     var removeSrc = t.closest(".import-source-remove");
     if (removeSrc) {
@@ -942,6 +1333,8 @@
     confirmEl.checked = false;
     confirmEl.disabled = !result.ready;
     applyBtn.disabled = true;
+    // The preview's fields are now known object ids for the pickers.
+    refreshMapPickers();
   }
 
   // renderFindings lists every finding the server returned: a plain title,

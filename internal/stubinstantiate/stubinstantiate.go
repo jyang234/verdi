@@ -15,12 +15,14 @@ package stubinstantiate
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/jyang234/verdi/internal/artifact"
 	"github.com/jyang234/verdi/internal/designscaffold"
 	"github.com/jyang234/verdi/internal/gitx"
 	"github.com/jyang234/verdi/internal/model"
+	"github.com/jyang234/verdi/internal/specstate"
 	"github.com/jyang234/verdi/internal/store"
 )
 
@@ -54,33 +56,99 @@ func SealedFeatureWallGuard(class artifact.SpecClass, status, action string, mdl
 	return nil
 }
 
+// ResolvedBase is what CommitScaffoldBranch (and Instantiate) resolved a
+// fresh design branch's base to — dc-7 (spec/uat-round-1, I-130, amended
+// after the L5 review): the identical rule `verdi design start`'s
+// --kind/--name path applies (cmd/verdi/design.go). Ref and Commit are the
+// git-resolvable ref and its resolved commit actually used as the new
+// branch's parent; HeadDisclosed is true iff no "origin" remote was
+// configured at all, so the base fell back to — and this names as a
+// disclosed substitution for — the calling checkout's current HEAD.
+type ResolvedBase struct {
+	Ref           string
+	Commit        string
+	HeadDisclosed bool
+}
+
+// resolveDesignBranchBase implements dc-7 (I-130) for CommitScaffoldBranch:
+// the same specstate.ResolveDefaultBranch precedence `verdi design start`'s
+// --kind/--name path uses (internal/specstate/defaultbranch.go), with the
+// identical unresolvable-branch handling design.go's own resolution
+// carries — never the calling checkout's HEAD by default. A repository
+// with NO "origin" remote configured at all has no truth other than HEAD
+// (a fresh local project) and falls back to it, disclosed via the returned
+// ResolvedBase.HeadDisclosed rather than silently; a repository that DOES
+// have an "origin" remote but still cannot resolve (or disambiguate) its
+// default branch is exactly the stale-default hazard UAT-021 reported and
+// refuses instead, with the one shared diagnostic text every verb that
+// needs it reuses (specstate.UnresolvedDefaultBranchMessage).
+func resolveDesignBranchBase(ctx context.Context, root string) (ResolvedBase, error) {
+	if branch, ok := specstate.ResolveDefaultBranch(ctx, root); ok {
+		commit, err := gitx.RevParse(ctx, root, branch.Ref)
+		if err != nil {
+			return ResolvedBase{}, err
+		}
+		return ResolvedBase{Ref: branch.Ref, Commit: commit}, nil
+	}
+	// dc-7: git remote get-url origin failing with ErrNoSuchRemote is the
+	// signal for "no origin remote at all"; any other read failure stays
+	// operational rather than guessed either way.
+	_, remoteErr := gitx.RemoteURL(ctx, root, "origin")
+	switch {
+	case errors.Is(remoteErr, gitx.ErrNoSuchRemote):
+		head, err := gitx.RevParse(ctx, root, "HEAD")
+		if err != nil {
+			return ResolvedBase{}, err
+		}
+		return ResolvedBase{Ref: "HEAD", Commit: head, HeadDisclosed: true}, nil
+	case remoteErr != nil:
+		return ResolvedBase{}, remoteErr
+	default:
+		// origin IS configured, but ResolveDefaultBranch still failed.
+		return ResolvedBase{}, errors.New(specstate.UnresolvedDefaultBranchMessage(ctx, root))
+	}
+}
+
 // CommitScaffoldBranch lands content as .verdi/specs/active/<slug>/spec.md
 // in exactly one commit on a fresh design/<slug> branch, entirely via git
 // plumbing — the calling checkout's HEAD, working tree, and real index are
 // never touched (spec/scoping-canvas ac-6's mechanism, shared by
-// stub-instantiate and the board's creation form). Fails closed if the
+// stub-instantiate and the board's creation form). The branch's base is
+// resolved via dc-7 (resolveDesignBranchBase above), never blindly the
+// calling checkout's own possibly-stale HEAD — the returned ResolvedBase
+// lets a CLI caller print the identical base/disclosure lines `verdi
+// design start`'s --kind/--name path prints (cmd/verdi/designfromstub.go);
+// the board's own stub-instantiate and creation-form actions (internal/
+// workbench/boardspecapi.go) discard it, since neither surfaces this text
+// today (base SELECTION still corrects for both). Fails closed if the
 // branch already exists (gitx.UpdateRef's create-only atomicity — a
 // caller's own RevParse pre-check only makes the common refusal legible).
-// Moved verbatim from workbench's own unexported commitScaffoldBranch.
-func CommitScaffoldBranch(ctx context.Context, root, slug, content, msg string) error {
-	baseCommit, err := gitx.RevParse(ctx, root, "HEAD")
+// Originally moved verbatim from workbench's own unexported
+// commitScaffoldBranch; its base resolution is the one part no longer
+// byte-identical to that original (dc-7 fixes the shared bug, not just the
+// CLI's own copy of it).
+func CommitScaffoldBranch(ctx context.Context, root, slug, content, msg string) (ResolvedBase, error) {
+	base, err := resolveDesignBranchBase(ctx, root)
 	if err != nil {
-		return err
+		return ResolvedBase{}, err
 	}
 	blobSHA, err := gitx.WriteBlob(ctx, root, []byte(content))
 	if err != nil {
-		return err
+		return ResolvedBase{}, err
 	}
 	path := store.ActiveSpecRelPath(slug)
-	tree, err := gitx.BuildTreeWithFile(ctx, root, baseCommit+"^{tree}", path, blobSHA)
+	tree, err := gitx.BuildTreeWithFile(ctx, root, base.Commit+"^{tree}", path, blobSHA)
 	if err != nil {
-		return err
+		return ResolvedBase{}, err
 	}
-	commit, err := gitx.CommitTree(ctx, root, tree, baseCommit, msg)
+	commit, err := gitx.CommitTree(ctx, root, tree, base.Commit, msg)
 	if err != nil {
-		return err
+		return ResolvedBase{}, err
 	}
-	return gitx.UpdateRef(ctx, root, "refs/heads/design/"+slug, commit)
+	if err := gitx.UpdateRef(ctx, root, "refs/heads/design/"+slug, commit); err != nil {
+		return ResolvedBase{}, err
+	}
+	return base, nil
 }
 
 // buildLinks maps stub's own declared edges to the scaffold's
@@ -115,8 +183,9 @@ func findStub(stubs []artifact.Stub, slug string) (artifact.Stub, bool) {
 
 // Result is what a successful Instantiate produced.
 type Result struct {
-	Branch  string // "design/<slug>"
-	Content string // the rendered, self-validated spec.md content committed at Branch
+	Branch  string       // "design/<slug>"
+	Content string       // the rendered, self-validated spec.md content committed at Branch
+	Base    ResolvedBase // dc-7 (ac-6): the branch's resolved base
 }
 
 // Instantiate scaffolds slug's declared stub — one of featureName's own,
@@ -203,8 +272,9 @@ func Instantiate(ctx context.Context, root, featureName string, featureClass art
 	}
 
 	msg := fmt.Sprintf("stub-instantiate: scaffold spec/%s from stub %q of spec/%s", slug, slug, featureName)
-	if err := CommitScaffoldBranch(ctx, root, slug, content, msg); err != nil {
+	base, err := CommitScaffoldBranch(ctx, root, slug, content, msg)
+	if err != nil {
 		return Result{}, err
 	}
-	return Result{Branch: "design/" + slug, Content: content}, nil
+	return Result{Branch: "design/" + slug, Content: content, Base: base}, nil
 }

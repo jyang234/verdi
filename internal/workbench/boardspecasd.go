@@ -100,8 +100,14 @@ type asdShell struct {
 	// policy guide the context/policy notice links to
 	// (boardshellrender.go's writePolicySetupGuide), in the variant the
 	// refusal's own detail justifies. PolicyDetail is that refusal detail,
-	// verbatim. Guidance only — nothing on this shell adopts a policy.
+	// verbatim and BARE (never the "<code>: <detail>" form): the guide-kind
+	// discriminant below matches it by substring, and designapp forwards
+	// draftmutation's bare Detail (ac-5). PolicyCode is the refusal's code
+	// carried separately, so the guide can quote code + ": " + detail —
+	// the same single-prefix form the context/policy witness uses (wave-1
+	// ledger R-5). Guidance only — nothing on this shell adopts a policy.
 	PolicySetupGuide policyGuideKind
+	PolicyCode       string
 	PolicyDetail     string
 }
 
@@ -127,10 +133,14 @@ const (
 )
 
 // policyNotAdoptedDetail is draftmutation's exact not-adopted detail
-// (policy.go's policyIdentityNotAdopted), which designapp forwards as
-// "policy-forbidden: project has not adopted policy authority" (its
-// Error() form). Matched by containment so both the bare and the
-// code-prefixed forms discriminate identically.
+// (policy.go's policyIdentityNotAdopted), forwarded by designapp as
+// DesignFailure's bare Detail — never re-embedding the "policy-forbidden:"
+// prefix Code already carries (ac-5, spec/uat-round-1: a package/code
+// prefix appears exactly once, at the outermost layer that owns it;
+// internal/designapp/outcome.go's translateDraftmutationError is that
+// layer). Matched by containment, not equality, so this constant stays a
+// robust discriminant rather than a second place the exact wire shape must
+// be kept in sync.
 const policyNotAdoptedDetail = "project has not adopted policy authority"
 
 // policyEditingClause scopes a policy-forbidden concern row's editing claim
@@ -170,9 +180,21 @@ type asdShellInput struct {
 	Caps            *DesignCapabilitiesView
 	CapsFailure     *DesignFailure
 	PinnedContext   int
+	// SpikeWord is the resolved display word for the spike pseudo-class
+	// (spec/vocabulary-surfaces; proj.words.word("spike") at the caller),
+	// so a spike-claimed open question's prose routes through the display
+	// chain rather than hardcoding a bare vocabulary word (ledger
+	// L-M13a(6), the mechanical prose witness).
+	SpikeWord string
 }
 
-type asdObjectFact struct{ ID, Text string }
+type asdObjectFact struct {
+	ID, Text string
+	// ClaimedBySlugs names, sorted, every spike stub whose `resolves`
+	// claims this open question (PLAN.md §7 I-128 option (a);
+	// spec/uat-round-1 ac-10). Empty/nil means unclaimed.
+	ClaimedBySlugs []string
+}
 
 type asdACFact struct {
 	ID            string
@@ -189,7 +211,7 @@ func deriveASDShell(in asdShellInput) asdShell {
 	var all []asdConcern
 	add := func(c asdConcern) { all = append(all, c) }
 	policySetupGuide := policyGuideNone
-	policyDetail := ""
+	policyCode, policyDetail := "", ""
 
 	// -- shape-proposal: Define the work --------------------------------
 	if in.ProblemPresent {
@@ -213,6 +235,31 @@ func deriveASDShell(in asdShellInput) asdShell {
 			Dest:      "#asd-forms"})
 	}
 	for _, oq := range in.OpenQuestions {
+		if len(oq.ClaimedBySlugs) > 0 {
+			// A spike stub's `resolves` claims this question (PLAN.md §7
+			// I-128 option (a); spec/uat-round-1 ac-10): non-blocking, and
+			// acceptance does not need a wall edit — the spike answers it
+			// after acceptance.
+			//
+			// Two or more stubs may claim one question (the wall's own
+			// multi-claim observation, boardspecrender.go's oq-claims
+			// chip), so the head noun and its verb agree with the count.
+			// The renameable class word itself stays the attributive
+			// SINGULAR both sibling surfaces speak — readinesspilot's
+			// "<word> stubs" and the stub cards' "<word> stub" — so the
+			// display plural (model.DisplayClassPlural) belongs to the
+			// chip, where that word is the head noun, and never here.
+			stubNoun, answerVerb := "stub", "answers"
+			if len(oq.ClaimedBySlugs) > 1 {
+				stubNoun, answerVerb = "stubs", "answer"
+			}
+			add(asdConcern{ID: "shape/question/" + oq.ID, Area: asdAreaShape, State: asdStateUnproven, Blocking: false,
+				Summary:   "Open question " + oq.ID + " is claimed by " + in.SpikeWord + " " + stubNoun + " " + strings.Join(oq.ClaimedBySlugs, ", ") + " and remains unresolved: " + oq.Text,
+				Guidance:  "No wall edit is required to accept: the claiming " + in.SpikeWord + " " + stubNoun + " " + answerVerb + " it after acceptance.",
+				Witnesses: append([]string{"declared open question " + oq.ID}, oq.ClaimedBySlugs...),
+				Dest:      "#obj-" + oq.ID})
+			continue
+		}
 		add(asdConcern{ID: "shape/question/" + oq.ID, Area: asdAreaShape, State: asdStateUnproven, Blocking: true,
 			Summary:   "Open question " + oq.ID + " is unresolved: " + oq.Text,
 			Guidance:  "Resolve it on the wall: edit or remove " + oq.ID + ", or graduate a decision that answers it.",
@@ -300,7 +347,7 @@ func deriveASDShell(in asdShellInput) asdShell {
 		// The row states the checkout fact and sends the reader to inspect
 		// the accepted snapshot before any initial setup; it infers no cause
 		// for the gap (branch age, deletion, or otherwise).
-		policySetupGuide, policyDetail = policyGuideNotAdopted, in.CapsFailure.Detail
+		policySetupGuide, policyCode, policyDetail = policyGuideNotAdopted, in.CapsFailure.Code, in.CapsFailure.Detail
 		add(asdConcern{ID: "context/policy", Area: asdAreaContext, State: asdStateUnproven, Blocking: false,
 			Summary:   "This checkout carries no adopted policy authority; " + policyEditingClause(in.Mode, "browser editing proceeds and records the explicit not-applicable policy posture."),
 			Guidance:  "Inspect the accepted and proposed policy snapshots first (policy setup guide below): if policy is already accepted, inspect why this checkout lacks it; an older branch may need updating through the project's own process. Only when no policy is accepted does the manual initial setup the guide names apply; human editing does not require one.",
@@ -311,7 +358,7 @@ func deriveASDShell(in asdShellInput) asdShell {
 		// (ResolvePolicyGrant's missing-design_assistance refusal). The
 		// adopted policy is neither absent nor unaccepted: the refusal's own
 		// detail is carried verbatim, never rewritten as non-adoption.
-		policySetupGuide, policyDetail = policyGuideNoDesignAssistance, in.CapsFailure.Detail
+		policySetupGuide, policyCode, policyDetail = policyGuideNoDesignAssistance, in.CapsFailure.Code, in.CapsFailure.Detail
 		add(asdConcern{ID: "context/policy", Area: asdAreaContext, State: asdStateUnproven, Blocking: false,
 			Summary:   "Policy authority resolved, but it does not grant design assistance (" + in.CapsFailure.Detail + "); " + policyEditingClause(in.Mode, "browser editing proceeds under that policy's sealed digest."),
 			Guidance:  "Design assistance needs a design_assistance payload in the project's effective policy, proposed and reviewed through the project's own process; human editing does not require one. The policy guide below names the read-only checks.",
@@ -372,6 +419,7 @@ func deriveASDShell(in asdShellInput) asdShell {
 
 	shell := assembleASDShell(all)
 	shell.PolicySetupGuide = policySetupGuide
+	shell.PolicyCode = policyCode
 	shell.PolicyDetail = policyDetail
 	return shell
 }
@@ -649,9 +697,25 @@ func (s *boardSpecServer) buildASDView(ctx context.Context, name string, proj *B
 		Caps:            v.Caps,
 		CapsFailure:     v.CapsFailure,
 		PinnedContext:   len(fm.Context),
+		SpikeWord:       proj.words.word("spike"),
+	}
+	claimedBy := map[string][]string{}
+	for _, st := range fm.Stubs {
+		if !st.Spike {
+			continue
+		}
+		for _, oqID := range st.Resolves {
+			claimedBy[oqID] = append(claimedBy[oqID], st.Slug)
+		}
 	}
 	for _, oq := range fm.OpenQuestions {
-		in.OpenQuestions = append(in.OpenQuestions, asdObjectFact{ID: oq.ID, Text: oq.Text})
+		fact := asdObjectFact{ID: oq.ID, Text: oq.Text}
+		if slugs := claimedBy[oq.ID]; len(slugs) > 0 {
+			sorted := append([]string(nil), slugs...)
+			sort.Strings(sorted)
+			fact.ClaimedBySlugs = sorted
+		}
+		in.OpenQuestions = append(in.OpenQuestions, fact)
 	}
 	for _, ac := range fm.AcceptanceCriteria {
 		in.ACs = append(in.ACs, asdACFact{ID: ac.ID, EvidenceCount: len(ac.Evidence)})

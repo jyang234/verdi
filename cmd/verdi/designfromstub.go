@@ -4,7 +4,13 @@
 // the identical internal/stubinstantiate.Instantiate core the board's own
 // stub-instantiate action calls — the ADJ-65 asymmetry closed at the
 // mechanism, not merely at the surface, and proven by an output-equality
-// parity assertion (designfromstub_test.go).
+// parity assertion (designfromstub_test.go). The new branch's base follows
+// the identical dc-7 rule (spec/uat-round-1 ac-6, I-130) the --kind/--name
+// path applies, resolved inside the shared core itself
+// (internal/stubinstantiate.CommitScaffoldBranch) so the board's own
+// stub-instantiate and creation-form actions get the same fix; this path
+// still never switches the calling checkout (dc-2 is about switching,
+// untouched here — the mechanism stays pure git plumbing).
 //
 // Kept in its own file per the accept.go/acceptobligation.go convention
 // (a related but distinct entry point for the same verb, not tangled
@@ -129,6 +135,18 @@ func runDesignStartFromStub(ctx context.Context, root, featureName, slug string,
 		return 2
 	}
 
+	// ac-6/dc-7 (spec/uat-round-1, I-130, amended after the L5 review):
+	// --from-stub is dispatched inside the same `design start` verb and
+	// had the identical base-resolution defect, so it prints the identical
+	// disclosure lines the --kind/--name path does (design.go) — except
+	// the checkout-switch line, which never applies here: this path is
+	// pure git plumbing (internal/stubinstantiate) that never switches the
+	// calling checkout (dc-2 is about switching, untouched by this fix).
+	if result.Base.HeadDisclosed {
+		fmt.Fprintf(stdout, "design start: default branch unresolved (no origin remote); basing on current HEAD %s — disclosed, not a default-branch base\n", shortSHA(result.Base.Commit))
+	} else {
+		fmt.Fprintf(stdout, "design start: base %s @ %s\n", result.Base.Ref, shortSHA(result.Base.Commit))
+	}
 	fmt.Fprintf(stdout, "design start: created branch %s\n", result.Branch)
 	fmt.Fprintf(stdout, "design start: scaffolded spec/%s from stub %q of spec/%s\n", slug, slug, featureName)
 	return 0

@@ -179,6 +179,70 @@ func TestRunDesignStartFromStub_Spike(t *testing.T) {
 	}
 }
 
+// TestRunDesignStartFromStub_BasesOnDefaultBranch_NotHEAD is ac-6/dc-7's
+// own driven witness for --from-stub (spec/uat-round-1, I-130, amended
+// after the L5 review): with the checkout on a side branch BEHIND the
+// resolved default branch, --from-stub must base the new branch on the
+// default branch's tip — never on the current checkout's HEAD — print the
+// same base-disclosure line the --kind/--name path prints, and still never
+// switch the calling checkout (dc-2 doesn't apply to this pure-plumbing
+// path).
+func TestRunDesignStartFromStub_BasesOnDefaultBranch_NotHEAD(t *testing.T) {
+	repo := buildFromStubRepo(t)
+	ctx := context.Background()
+
+	// Cut a side branch from main's current tip, then advance main with a
+	// commit the side branch never sees, and leave the checkout ON the
+	// side branch — behind main.
+	if err := gitx.CheckoutNewBranch(ctx, repo.Dir, "side"); err != nil {
+		t.Fatalf("CheckoutNewBranch(side): %v", err)
+	}
+	if err := gitx.CheckoutExisting(ctx, repo.Dir, "main"); err != nil {
+		t.Fatalf("CheckoutExisting(main): %v", err)
+	}
+	if err := os.WriteFile(repo.Dir+"/advance.txt", []byte("advance\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := gitx.AddAll(ctx, repo.Dir); err != nil {
+		t.Fatalf("AddAll: %v", err)
+	}
+	mainTip, err := gitx.CreateCommit(ctx, repo.Dir, "advance main past side")
+	if err != nil {
+		t.Fatalf("CreateCommit: %v", err)
+	}
+	if err := gitx.CheckoutExisting(ctx, repo.Dir, "side"); err != nil {
+		t.Fatalf("CheckoutExisting(side): %v", err)
+	}
+
+	var stdout, stderr strings.Builder
+	got := runDesignStartFromStub(ctx, repo.Dir, fromStubFeatureName, "fromstub-story", specstate.NewProjector(), model.Canonical(), &stdout, &stderr)
+	if got != 0 {
+		t.Fatalf("runDesignStartFromStub = %d, want 0; stderr=%s", got, stderr.String())
+	}
+
+	branch := "design/fromstub-story"
+	parent, err := gitx.RevParse(ctx, repo.Dir, branch+"^")
+	if err != nil {
+		t.Fatalf("RevParse(%s^): %v", branch, err)
+	}
+	if parent != mainTip {
+		t.Fatalf("%s's parent = %s, want main's tip %s — based on HEAD/side instead of the resolved default branch", branch, parent, mainTip)
+	}
+
+	wantBase := "design start: base main @ " + mainTip[:7]
+	if !contains(stdout.String(), wantBase) {
+		t.Fatalf("stdout = %q, want it to contain %q", stdout.String(), wantBase)
+	}
+
+	curBranch, err := gitx.CurrentBranch(ctx, repo.Dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if curBranch != "side" {
+		t.Fatalf("CurrentBranch = %q, want unchanged %q (this path is pure git plumbing, never a checkout switch)", curBranch, "side")
+	}
+}
+
 // TestRunDesignStartFromStub_Negative covers the refusal paths: unknown
 // slug, an already-existing branch, and a feature spec that cannot be
 // read at all — every case operational (exit 2), design start's own

@@ -21,6 +21,7 @@ import (
 	"strings"
 	"syscall"
 
+	"github.com/jyang234/verdi/internal/buildinfo"
 	"github.com/jyang234/verdi/internal/filelock"
 	"github.com/jyang234/verdi/internal/mcpserve"
 	"github.com/jyang234/verdi/internal/readinesspilot"
@@ -281,6 +282,14 @@ func runServe(root, httpAddr string, readiness *readinesspilot.Snapshot, stdout,
 		ln.Close()
 	}()
 
+	// spec/uat-round-1 ac-1 (closes UAT-003): identify the exact build
+	// serving this checkout, once, on the same stream (stdout) serve
+	// already logs its socket/workbench lines to — the same
+	// internal/buildinfo.Line() `verdi version`/`--version` print
+	// (version.go) and the workbench footer renders (a separate Fable
+	// lane), so no two of the three can ever disagree about which build
+	// produced a result.
+	fmt.Fprintln(stdout, buildinfo.Line())
 	fmt.Fprintf(stdout, "serve: MCP socket at %s (pointer: %s)\n", sockPath, filepath.Join(root, ".verdi", "data", "serve.path"))
 	fmt.Fprintf(stdout, "serve: workbench at http://%s\n", httpLn.Addr())
 

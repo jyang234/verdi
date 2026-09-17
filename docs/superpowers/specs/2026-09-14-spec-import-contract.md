@@ -156,8 +156,10 @@ still checked by existing lint. The UI can apply the user's selected kinds to
 several criteria together, clearly marked as user selection.
 
 `f13-reference-v1` binds the selected primary SHA-256
-`7c6d95d4aa516cf682e6d4a33d1c260f1c861d938d46559241a7c764bffca577` and the eight
-exact selectors in the reviewed `mechanical-field-map.json`. This is a named,
+`7c6d95d4aa516cf682e6d4a33d1c260f1c861d938d46559241a7c764bffca577` and the exact
+selectors in the reviewed `mechanical-field-map.json` (eight at first pinning;
+twelve single-claim selectors since spec/uat-round-1 ac-7 under dc-9,
+2026-09-16). This is a named,
 versioned reference profile, not a recognizer for all ATC plans. Changed primary
 bytes refuse that profile with guidance to use manual mapping or labeled Markdown.
 Supporting files stay whole retained-only units. Problem/outcome are absent.
@@ -337,7 +339,11 @@ the already-adopted normal-context exclusion.
 The import record's sole decoder belongs to specimport. Record schema
 `verdi.spec-import-record/v1` stores preview/base/model/config/engine/request/candidate
 digests, spec ref, normalized source identities/ranges/digests, mappings/origins,
-coverage, actor attribution and policy posture. No clock/randomness in this record.
+coverage, actor attribution and policy posture, plus the request `format` and, for
+a reference profile, the pinned primary digest it was bound to
+(`profile_primary_digest`); both fields are absent on records written before their
+addition (spec/uat-round-1 ac-4) and a present `format` must be one of the four
+closed values. No clock/randomness in this record.
 This new creation record supplies import provenance atomically; it does not forge
 an ASD mutation entry for a nonexistent prior draft. Subsequent ordinary mutations
 use existing design provenance unchanged. Source origins are copy claims, not

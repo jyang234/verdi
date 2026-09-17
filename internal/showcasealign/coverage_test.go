@@ -130,10 +130,26 @@ func (e coverageEvidence) needsPlaywrightDir() bool {
 // excluded from the enumerated set (featureVerbExcluded's doc comment,
 // PLAN-V1.md ledger R4-I-54) rather than mapped.
 var showcaseCoverage = map[string][]coverageEvidence{
-	// --- CLI verbs (verbPhase>0 entries, plus "lint") ---
+	// --- CLI verbs (verbPhase>0 entries, plus prePhaseSpellings' keys:
+	// "lint", "help", "version") ---
 	"cli:lint":   {goE2E("internal/showcasealign/lintclean_test.go")},
 	"cli:matrix": {goE2E("cmd/verdi/matrix_test.go")},
 	"cli:sync":   {goE2E("cmd/verdi/sync_test.go")},
+
+	// cli:help / cli:version (spec/uat-round-1 ac-2 / ac-1, closing
+	// UAT-004 / UAT-003): the two verbs run() dispatches before the
+	// verbPhase lookup alongside lint, so cliVerbs hand-appends them
+	// (prePhaseSpellings, enumeration_completeness_test.go) and they are
+	// enumerated capabilities like any other. TestCLIShowcaseHelp and
+	// TestCLIShowcaseVersion (cli_showcase_test.go) drive every recognized
+	// spelling of each against the real provisioned examples/showcase store
+	// — help proving `verdi lint --help` prints usage instead of the real
+	// lint output that same store genuinely produces (UAT-004's defect,
+	// provable only against a populated corpus), version proving the line
+	// matches the build info embedded in the binary under test — with HEAD
+	// and the working tree's dirty state unchanged by either.
+	"cli:help":    {goE2E("internal/showcasealign/cli_showcase_test.go")},
+	"cli:version": {goE2E("internal/showcasealign/cli_showcase_test.go")},
 
 	// Task 3.4: cli_showcase_test.go drives each of these against a real
 	// provisioned examples/showcase store via runBinary (the exact
@@ -437,9 +453,14 @@ const featureVerbExcluded = "feature"
 // verb name whose verbPhase entry is greater than zero — dispatch.go's own
 // convention for "a real, dispatched v1 verb" (phase 0 means "recognized
 // but explicitly out of v0 scope", PLAN.md §5: waivers, verify-artifact) —
-// plus "lint", which dispatch.go's run() special-cases before verbPhase is
-// even consulted (its own comment: "No verb's semantics live here" is true
-// of every verb except lint, dispatched first). "feature" is filtered back
+// plus every prePhaseSpellings key (enumeration_completeness_test.go):
+// "lint", "help" and "version", which dispatch.go's run() special-cases
+// before verbPhase is even consulted (its own comment: "No verb's semantics
+// live here" is true of every verb except those, dispatched first).
+// prePhaseSpellings is the SINGLE list the two files share:
+// TestShowcaseCoverage_EnumerationIsComplete default-denies any pre-phase
+// arm it does not declare, so this hand-append can never fall behind what
+// run() actually dispatches, in either direction. "feature" is filtered back
 // out immediately below — see featureVerbExcluded's doc comment.
 //
 // Every unexpected shape fails the test outright with a clear message
@@ -519,7 +540,7 @@ func cliVerbs(t *testing.T) []string {
 		t.Fatalf("cliVerbs: found the verbPhase literal but extracted zero phase>0 verbs from %s (dispatch.go shape changed)", path)
 	}
 
-	verbs = append(verbs, "lint")
+	verbs = append(verbs, prePhaseVerbs()...)
 
 	filtered := verbs[:0]
 	for _, v := range verbs {

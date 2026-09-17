@@ -327,7 +327,10 @@ test.describe("board legibility: the wall reads at a glance", () => {
     const q = await addSticky(page, "legibility: does the lane hold?", "question");
     await expect(q).toHaveCSS("left", `${oqX}px`);
     const qTop = parseFloat(await q.evaluate((el) => (el as HTMLElement).style.top));
-    expect(qTop).toBe(oqBottom < 0 ? 40 : oqBottom + 24);
+    // Chrome serializes CSS px to six significant figures, so a fractional
+    // obstacle-derived coordinate (boardlayout.ResolveDrop's collision math)
+    // can lose its last digit on read-back — tolerate that, don't demand it.
+    expect(qTop).toBeCloseTo(oqBottom < 0 ? 40 : oqBottom + 24, 1);
 
     // A comment files into the scratch lane, appended below whatever
     // already sits there.
@@ -336,7 +339,8 @@ test.describe("board legibility: the wall reads at a glance", () => {
     const c = await addSticky(page, "legibility: noted for the wall", "comment");
     await expect(c).toHaveCSS("left", `${scratchX}px`);
     const cTop = parseFloat(await c.evaluate((el) => (el as HTMLElement).style.top));
-    expect(cTop).toBe(scratchBottom < 0 ? 40 : scratchBottom + 24);
+    // Same six-significant-figure Chrome CSS serialization as qTop above.
+    expect(cTop).toBeCloseTo(scratchBottom < 0 ? 40 : scratchBottom + 24, 1);
 
     // The scratch lane's label is no longer an empty invitation.
     await expect(page.getByTestId("zone-label-scratch")).not.toHaveClass(

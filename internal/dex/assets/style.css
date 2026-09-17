@@ -262,6 +262,14 @@ blockquote {
   margin-bottom: 1.25rem;
 }
 
+/* the page foot: the build identification line (workbench footer) —
+   the head's rule mirrored, so the line reads as chrome, not content. */
+footer.site-foot {
+  margin-top: 2.5rem;
+  padding-top: 0.8rem;
+  border-top: 1px solid var(--rule);
+}
+
 .wordmark {
   display: inline-flex;
   align-items: baseline;
@@ -3276,6 +3284,24 @@ button.yarn-chip-type {
   color: var(--st-violated);
   font-size: 0.82rem;
   margin: 0 0 0.7rem;
+}
+
+/* the revise dialog (spec/uat-round-1 ac-11, board half): the sealed
+   feature wall's third live affordance — a superseding successor cut on
+   its own design branch. Wears the creation form's chrome (the same
+   button pill, the same branch tab) plus one success line whose link
+   opens the successor's own board. */
+.revise-panel .ritual-note { margin-bottom: 0.7rem; }
+.revise-success {
+  font-size: 0.85rem;
+  margin: 0 0 0.8rem;
+  padding: 0.5rem 0.7rem;
+  border-left: 3px solid var(--accent);
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+}
+.revise-success a {
+  color: var(--accent-strong);
+  font-weight: 600;
 }
 
 /* ---------- the readiness pilot cockpit (GET /readiness) ----------

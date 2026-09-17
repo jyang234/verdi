@@ -11,6 +11,7 @@ import (
 	"fmt"
 	stdhtml "html"
 	"html/template"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -179,7 +180,7 @@ func writeReadOnlyPanel(b *strings.Builder, p *BoardProjection) {
 	}
 }
 
-var boardSpecPageTemplate = template.Must(template.New("boardspec").Parse(`<!doctype html>
+var boardSpecPageTemplate = template.Must(template.New("boardspec").Funcs(shellFuncs).Parse(`<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
@@ -202,6 +203,7 @@ var boardSpecPageTemplate = template.Must(template.New("boardspec").Parse(`<!doc
 <main id="boardv2-region">
 {{.Region}}
 </main>
+{{buildFooter}}
 {{.Dialogs}}
 <script>
 window.__BOARDV2__ = {{.StateJSON}};
@@ -520,7 +522,8 @@ func renderBoardRegion(p *BoardProjection, git *boardGitState, asd *asdView) str
 	// owner directive: the yarn IS the representation — no chip list on
 	// the card). On a sealed accepted-pending-build feature wall each
 	// card carries the one live affordance a sealed record permits:
-	// Instantiate (ac-6).
+	// Instantiate (ac-6). The same sealed-accepted-feature decision gates
+	// the rail's Revise affordance below (spec/uat-round-1 ac-11).
 	instantiable := feature && p.Status == "accepted-pending-build"
 	for _, sv := range p.StubViews {
 		cls := "stubcard"
@@ -743,6 +746,7 @@ func renderBoardRegion(p *BoardProjection, git *boardGitState, asd *asdView) str
 	default:
 		writeReadOnlyPanel(&b, p)
 		writeCreatePanel(&b, p)
+		writeRevisePanel(&b, p, instantiable)
 		writeYarnKey(&b, p)
 	}
 	writeASDPanels(&b, p.Spec, asd)
@@ -771,6 +775,80 @@ func writeCreatePanel(b *strings.Builder, p *BoardProjection) {
 	b.WriteString(`<p class="ritual-note">` + esc(model.Capitalize(p.words.indefinite("story"))+" this wall's stubs did not plan. The form asks exactly what the "+storyWord+" template needs, cuts a design branch, and never moves this checkout.") + `</p>`)
 	b.WriteString(`<button type="button" id="create-spec-btn" class="create-spec-btn" data-testid="create-spec-btn">&#8853; New ` + esc(storyWord) + `</button>`)
 	b.WriteString(`</section>`)
+}
+
+// successorVersionRe recognizes a predecessor name already carrying a
+// -v<n> revision suffix, so the next revision counts up from it.
+var successorVersionRe = regexp.MustCompile(`^(.*)-v([0-9]+)$`)
+
+// reviseSuccessorDefault is the revise dialog's prefilled successor name:
+// <pred>-v2, or <base>-v<n+1> when the predecessor is itself a -v<n>
+// revision (escrow-autopay-v2 -> escrow-autopay-v3). Kept in Go, not the
+// client, so the rule is one tested function. A suffix whose digits do
+// not fit an int is not treated as a version.
+func reviseSuccessorDefault(pred string) string {
+	if m := successorVersionRe.FindStringSubmatch(pred); m != nil {
+		if n, err := strconv.Atoi(m[2]); err == nil {
+			return m[1] + "-v" + strconv.Itoa(n+1)
+		}
+	}
+	return pred + "-v2"
+}
+
+// writeRevisePanel renders the sealed accepted feature wall's Revise
+// affordance (spec/uat-round-1 ac-11, board half; PLAN.md I-129 option
+// (a)): the rail panel whose button opens the revise dialog, beside the
+// creation panel. offered is renderBoardRegion's one sealed-accepted-
+// feature decision (the same gate the stub cards' Instantiate affordance
+// and the create fields ride — 02 §Kind registry: supersession is the
+// only forward path after acceptance, and it is feature-only), so the
+// rail never offers what the server would refuse. Every spoken class
+// word is display prose and resolves (vocabulary.go); the testid and
+// element ids stay bare.
+func writeRevisePanel(b *strings.Builder, p *BoardProjection, offered bool) {
+	if !offered {
+		return
+	}
+	esc := stdhtml.EscapeString
+	featureWord := p.words.word("feature")
+	b.WriteString(`<section class="scratch-panel revise-panel" data-testid="revise-panel">`)
+	b.WriteString(`<h2>` + esc("Revise this "+featureWord) + `</h2>`)
+	b.WriteString(`<p class="ritual-note">` + esc("Supersession is the only forward path after acceptance: a superseding "+featureWord+" carries everything here verbatim, links back with a supersedes edge, and cuts its own design branch. This checkout never moves.") + `</p>`)
+	b.WriteString(`<button type="button" id="revise-spec-btn" class="create-spec-btn revise-spec-btn" data-testid="revise-spec-btn">&#8635; ` + esc("Revise this "+featureWord) + `</button>`)
+	b.WriteString(`</section>`)
+}
+
+// writeReviseDialog renders the revise dialog (spec/uat-round-1 ac-11,
+// board half): one text input prefilled with the successor's default name
+// (reviseSuccessorDefault), the explanatory line stating exactly what the
+// operation composes, an error slot the server's refusal lands in, and —
+// on success — a link to the successor's own per-branch board. The branch
+// tab live-updates from the name field (boardspec.js) in the stub tab's
+// mono voice: the identity submit will cut. Receipt copy rides a data
+// attribute, resolved server-side so the client speaks display words
+// (the class word through DisplayClass, the state word through
+// DisplayState) without a client-side vocabulary table.
+func writeReviseDialog(b *strings.Builder, p *BoardProjection) {
+	esc := stdhtml.EscapeString
+	featureWord := p.words.word("feature")
+	// The successor starts in the feature lifecycle's initial state; the
+	// state word is display prose and resolves (L-M13a(6)).
+	draftWord := p.words.m.DisplayState("feature", "draft")
+	def := reviseSuccessorDefault(p.Spec)
+	title := "Revise this " + featureWord
+	b.WriteString(`<div role="dialog" aria-label="` + esc(title) + `" class="board-dialog create-dialog revise-dialog" id="revise-dialog" hidden`)
+	b.WriteString(` data-receipt-body="` + esc("Branch {branch} now carries spec/{name}, a "+draftWord+" "+featureWord+" superseding spec/"+p.Spec+". This wall (the serving checkout) has not moved.") + `">`)
+	b.WriteString(`<span class="stub-tab create-branch-tab" id="revise-branch-tab" aria-hidden="true">design/` + esc(def) + `</span>`)
+	b.WriteString(`<h2>` + esc(title) + `</h2>`)
+	b.WriteString(`<p class="ritual-note" data-testid="revise-explainer">` + esc("The successor carries every object and stub of spec/"+p.Spec+" verbatim, each classified carried, links back with a supersedes edge, and starts as "+model.Indefinite(draftWord)+" "+featureWord+" on design/"+def+" — this checkout never moves. Reclassify what changes on the successor's own board.") + `</p>`)
+	b.WriteString(`<div class="field"><label for="revise-name">Successor name</label>`)
+	b.WriteString(`<input id="revise-name" data-testid="revise-name" value="` + esc(def) + `" data-default="` + esc(def) + `" autocomplete="off" spellcheck="false" placeholder="kebab-case-name">`)
+	b.WriteString(`<span class="field-hint">becomes the spec ref and the design branch</span></div>`)
+	b.WriteString(`<p class="create-error" id="revise-error" data-testid="revise-error" role="alert" hidden></p>`)
+	b.WriteString(`<p class="revise-success" id="revise-success" data-testid="revise-success" hidden><span id="revise-success-text"></span> <a id="revise-success-link" data-testid="revise-success-link" href="#">Open its board</a></p>`)
+	b.WriteString(`<div class="dialog-actions"><button type="button" id="revise-ok" class="btn-primary" data-testid="revise-ok">Start the revision</button>`)
+	b.WriteString(`<button type="button" id="revise-cancel" data-testid="revise-cancel">Cancel</button></div>`)
+	b.WriteString(`</div>`)
 }
 
 // createFieldLabel maps an enumerated field descriptor to its form label
@@ -1271,11 +1349,17 @@ func writeGitPanel(b *strings.Builder, git *boardGitState) {
 func renderBoardDialogs(p *BoardProjection) string {
 	if p.Mode != modeAuthoring {
 		// The sealed wall's live affordances need the dialog chrome:
-		// stub-instantiate's confirmation (spec/scoping-canvas ac-6) and
-		// the creation form (spec/creation-form ac-3 — CreateFields is
-		// only attached on the sealed accepted feature wall, the same
-		// gate the create action enforces).
-		if p.Class == string(artifact.ClassFeature) && p.Status == "accepted-pending-build" && (len(p.StubViews) > 0 || len(p.CreateFields) > 0) {
+		// stub-instantiate's confirmation (spec/scoping-canvas ac-6), the
+		// creation form (spec/creation-form ac-3 — CreateFields is only
+		// attached on the sealed accepted feature wall, the same gate the
+		// create action enforces), and the revise dialog (spec/uat-round-1
+		// ac-11). The revise dialog follows the SAME decision its panel
+		// does — renderBoardRegion renders the panel only in its read-only
+		// room (a review-mode wall is a mirror and offers no Revise), so
+		// revise here is that room plus the wall's class and effective
+		// status, never a dead hidden dialog under review.
+		revise := p.Mode == modeReadOnly
+		if p.Class == string(artifact.ClassFeature) && p.Status == "accepted-pending-build" && (len(p.StubViews) > 0 || len(p.CreateFields) > 0 || revise) {
 			var b strings.Builder
 			b.WriteString(`
 <div class="modal-backdrop" id="modal-backdrop" hidden></div>
@@ -1289,11 +1373,15 @@ func renderBoardDialogs(p *BoardProjection) string {
 			if len(p.CreateFields) > 0 {
 				writeCreateDialog(&b, p)
 			}
+			if revise {
+				writeReviseDialog(&b, p)
+			}
 			return b.String()
 		}
 		return ""
 	}
-	return `
+	var b strings.Builder
+	b.WriteString(`
 <div class="modal-backdrop" id="modal-backdrop" hidden></div>
 <div role="dialog" aria-label="Edge type" class="board-dialog picker" id="edge-picker" hidden>
 <h2>Edge type</h2>
@@ -1307,14 +1395,9 @@ func renderBoardDialogs(p *BoardProjection) string {
 <div class="field" id="edge-confirm-reason-field" hidden><label for="edge-confirm-reason">Reason</label><input id="edge-confirm-reason" autocomplete="off"></div>
 <div class="dialog-actions"><button type="button" id="edge-confirm-ok">Confirm</button>
 <button type="button" id="edge-confirm-cancel">Cancel</button></div>
-</div>
-<div role="dialog" aria-label="Commit &amp; push" class="board-dialog" id="commit-dialog" hidden>
-<h2>Commit &amp; push</h2>
-<p class="ritual-note">Commits the working tree on this design branch and pushes it.</p>
-<div class="field"><label for="commit-message">Commit message</label><input id="commit-message" autocomplete="off"></div>
-<div class="dialog-actions"><button type="button" id="commit-dialog-ok">Commit</button>
-<button type="button" id="commit-dialog-cancel">Cancel</button></div>
-</div>
+</div>`)
+	writeCommitDialog(&b, p.Spec)
+	b.WriteString(`
 <div role="alertdialog" aria-label="Uncommitted changes" class="board-dialog confirm" id="branch-guard" hidden>
 <h2>Uncommitted changes</h2>
 <p class="ritual-note">This working tree has uncommitted board work. Switching branches now would carry or lose it — commit first.</p>
@@ -1345,7 +1428,9 @@ func renderBoardDialogs(p *BoardProjection) string {
 <div id="board-trash" class="board-trash" data-testid="board-trash" aria-hidden="true">
 <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" focusable="false"><path d="M4 7h16M9 7V5.2A1.2 1.2 0 0 1 10.2 4h3.6A1.2 1.2 0 0 1 15 5.2V7M6.5 7l1 13h9l1-13M10 10.5v6M14 10.5v6" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
 <span class="board-trash-label" aria-hidden="true"></span>
-</div>` + renderASDDialogs(p)
+</div>`)
+	b.WriteString(renderASDDialogs(p))
+	return b.String()
 }
 
 // renderASDDialogs renders the ASD typed-operation dialogs (authoring
