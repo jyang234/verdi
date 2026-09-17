@@ -1294,7 +1294,8 @@ func renderBoardDialogs(p *BoardProjection) string {
 		}
 		return ""
 	}
-	return `
+	var b strings.Builder
+	b.WriteString(`
 <div class="modal-backdrop" id="modal-backdrop" hidden></div>
 <div role="dialog" aria-label="Edge type" class="board-dialog picker" id="edge-picker" hidden>
 <h2>Edge type</h2>
@@ -1308,14 +1309,9 @@ func renderBoardDialogs(p *BoardProjection) string {
 <div class="field" id="edge-confirm-reason-field" hidden><label for="edge-confirm-reason">Reason</label><input id="edge-confirm-reason" autocomplete="off"></div>
 <div class="dialog-actions"><button type="button" id="edge-confirm-ok">Confirm</button>
 <button type="button" id="edge-confirm-cancel">Cancel</button></div>
-</div>
-<div role="dialog" aria-label="Commit &amp; push" class="board-dialog" id="commit-dialog" hidden>
-<h2>Commit &amp; push</h2>
-<p class="ritual-note">Commits the working tree on this design branch and pushes it.</p>
-<div class="field"><label for="commit-message">Commit message</label><input id="commit-message" autocomplete="off"></div>
-<div class="dialog-actions"><button type="button" id="commit-dialog-ok">Commit</button>
-<button type="button" id="commit-dialog-cancel">Cancel</button></div>
-</div>
+</div>`)
+	writeCommitDialog(&b, p.Spec)
+	b.WriteString(`
 <div role="alertdialog" aria-label="Uncommitted changes" class="board-dialog confirm" id="branch-guard" hidden>
 <h2>Uncommitted changes</h2>
 <p class="ritual-note">This working tree has uncommitted board work. Switching branches now would carry or lose it — commit first.</p>
@@ -1346,7 +1342,9 @@ func renderBoardDialogs(p *BoardProjection) string {
 <div id="board-trash" class="board-trash" data-testid="board-trash" aria-hidden="true">
 <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" focusable="false"><path d="M4 7h16M9 7V5.2A1.2 1.2 0 0 1 10.2 4h3.6A1.2 1.2 0 0 1 15 5.2V7M6.5 7l1 13h9l1-13M10 10.5v6M14 10.5v6" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
 <span class="board-trash-label" aria-hidden="true"></span>
-</div>` + renderASDDialogs(p)
+</div>`)
+	b.WriteString(renderASDDialogs(p))
+	return b.String()
 }
 
 // renderASDDialogs renders the ASD typed-operation dialogs (authoring
