@@ -399,12 +399,14 @@ not call it.
 
 **One prerequisite W3-C must supply itself.** `ValidateSuccessorName` does
 not check whether a `design/<slug>` BRANCH already exists — it is a pure
-filesystem check with no repository handle — and unlike the CLI's
-`gitx.CheckoutNewBranchFrom`, which refuses an existing branch,
-`CommitScaffoldBranch` ends in a bare `gitx.UpdateRef` that OVERWRITES
-`refs/heads/design/<slug>` if it is already there. That is pre-existing
-behavior of that primitive (stub-instantiate and the board's creation form
-share it), not something this lane introduced, but the Revise action
-reaches it with a name the operator chose, so W3-C must check the ref
-itself before calling, or accept that a second Revise silently rewrites the
-first one's branch.
+filesystem check with no repository handle. The CLI's
+`gitx.CheckoutNewBranchFrom` refuses an existing branch. On the board's
+no-checkout path, `CommitScaffoldBranch` ends in `gitx.UpdateRef` with the
+zero OID as the expected old value (create-only), so it FAILS CLOSED on an
+existing ref and a second Revise cannot rewrite the first one's branch
+(controller correction after the re-review's witness: `git update-ref
+<ref> <new> 0000…0` on an existing ref exits 128, ref unchanged; the
+primitive's own doc at internal/stubinstantiate/stubinstantiate.go:124-125
+says so). W3-C should still add the same `gitx.RevParse` pre-check
+`stubinstantiate.Instantiate` performs (stubinstantiate.go:229-231), for a
+legible refusal message only, not as a data-loss guard.
