@@ -1,0 +1,62 @@
+# Lockbox
+
+## Identity
+
+| Field | Value |
+|---|---|
+| Ref | spec/lockbox |
+| Class | feature |
+| Status | not resolved for this render |
+| Commit | 0000000000000000000000000000000000000001 |
+| Supersedes | spec/lockbox-v0 |
+| Revision | 1 carried, 1 amended, 0 amended (advisory), 0 removed, 4 added |
+
+## Problem
+
+Keys are shared.
+
+## Outcome
+
+Each key has one holder.
+
+## Decisions
+
+### dc-1
+
+One holder per key.
+
+Because two holders means no holder.
+
+## Constraints
+
+- **co-1** No network.
+
+## Acceptance criteria
+
+1. **ac-1** A key opens one box. <a id="ac-1"></a>
+   Evidence: behavioral, attestation.
+   Coverage: not computed for this render.
+
+   Proven by opening.
+
+2. **ac-2** A lost key is revoked. <a id="ac-2"></a>
+   Evidence: static.
+   Coverage: not computed for this render.
+
+## Open questions
+
+- **oq-1** Who audits holders? — Claims: not computed for this render.
+- **oq-2** How long is a revocation valid? — Claims: not computed for this render.
+
+## Plan
+
+1. Planned story `key-holder` covers ac-1.
+2. Research spike `audit-probe` answers oq-1.
+
+## Evidence
+
+Evidence was not supplied for this render.
+
+---
+
+Derived from the spec's objects; not authority. Ref `spec/lockbox` · commit `0000000000000000000000000000000000000001` · kind `spec` · engine `sha256:6c69c283478f220da6f301f792fb2714561ba1d652d3a5068998bc38e9d492c9`
