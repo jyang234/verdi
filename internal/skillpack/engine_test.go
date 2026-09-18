@@ -3,6 +3,8 @@ package skillpack
 import (
 	"strings"
 	"testing"
+
+	"github.com/jyang234/verdi/internal/specdoc"
 )
 
 func TestEngineDigestIsStableAndBindsDocumentEngine(t *testing.T) {
@@ -12,6 +14,15 @@ func TestEngineDigestIsStableAndBindsDocumentEngine(t *testing.T) {
 	}
 	if got := engineDescriptorDigest(engineDescriptor{ID: engineID, Version: engineVersion, Skills: Skills(), Hosts: hostStrings(Hosts()), Document: "sha256:other"}); got == a {
 		t.Fatal("EngineDigest must change when the document engine digest changes")
+	}
+	// task-1-review.md finding 9: the two assertions above prove
+	// EngineDigest() is sensitive to the Document field, not that it
+	// actually reads specdoc.EngineDigest() — a mutant that froze
+	// today's specdoc value as a literal would still pass both. Assert
+	// EngineDigest() equals the descriptor digest built directly from
+	// specdoc.EngineDigest(), so a decoupled (frozen-literal) mutant fails.
+	if want := engineDescriptorDigest(engineDescriptor{ID: engineID, Version: engineVersion, Skills: Skills(), Hosts: hostStrings(Hosts()), Document: specdoc.EngineDigest()}); want != a {
+		t.Fatalf("EngineDigest() = %q, want the descriptor digest built from specdoc.EngineDigest() = %q", a, want)
 	}
 }
 
