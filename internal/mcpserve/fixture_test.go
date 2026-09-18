@@ -90,6 +90,16 @@ The retry worker drains the outbox on a fixed interval.
 		Files: map[string]string{
 			".verdi/specs/active/widget-retry/spec.md": spec,
 			".verdi/specs/active/widget-notes/spec.md": fixtureComponentSpec,
+			// get_document (task 3) is the first tool in this fixture that
+			// requires specdocload.Load, which hard-refuses a root with no
+			// .verdi/verdi.yaml at all (its own store-root precondition,
+			// Stat-only — content is never decoded by Load, so the minimal
+			// valid manifest shape used module-wide for hermetic fixtures,
+			// e.g. internal/decisionsweep's test helpers, is enough here
+			// too). Every other tool in this package reads via
+			// internal/index or store.Open with its own soft "nil model on
+			// failure" degrade, so this file was never needed before.
+			".verdi/verdi.yaml": "schema: verdi.layout/v1\n",
 		},
 		Message: "layer 2: specs",
 	}

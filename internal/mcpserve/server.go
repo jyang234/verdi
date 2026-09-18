@@ -100,6 +100,8 @@ func (s *Server) callTool(ctx context.Context, params json.RawMessage) map[strin
 		return s.Backend.SearchArtifacts(ctx, call.Arguments)
 	case "get_artifact":
 		return s.Backend.GetArtifact(ctx, call.Arguments)
+	case "get_document":
+		return s.Backend.GetDocument(ctx, call.Arguments)
 	case "get_links":
 		return s.Backend.GetLinks(ctx, call.Arguments)
 	case "get_matrix":

@@ -129,15 +129,16 @@ func TestServer_ToolsListAndCall(t *testing.T) {
 	result := listResp["result"].(map[string]any)
 	tools, _ := result["tools"].([]any)
 	// 05 §MCP server's nine tools, `experiment` (CSE Wave 5B, design §8,
-	// ledger SI-145), Wave 6 Task 1's five new ASD tools (AC-8), and Wave 6
+	// ledger SI-145), Wave 6 Task 1's five new ASD tools (AC-8), Wave 6
 	// Task 3's three new constitution tools (spec/context-integrity-v2
-	// AC-1/AC-2/AC-3) — registered in the same commit as their tooldefs.go
-	// rows.
-	if len(tools) != 18 {
-		t.Fatalf("tools/list returned %d tools, want 18: %#v", len(tools), tools)
+	// AC-1/AC-2/AC-3), and `get_document` (spec-documents Wave 2 Task 3,
+	// ac-5's Markdown renderer) — registered in the same commit as their
+	// tooldefs.go rows.
+	if len(tools) != 19 {
+		t.Fatalf("tools/list returned %d tools, want 19: %#v", len(tools), tools)
 	}
 	wantNames := map[string]bool{
-		"search_artifacts": true, "get_artifact": true, "get_links": true, "get_matrix": true,
+		"search_artifacts": true, "get_artifact": true, "get_document": true, "get_links": true, "get_matrix": true,
 		"get_context_bundle": true, "list_annotations": true, "list_tasks": true, "get_board": true, "add_annotation": true,
 		"experiment":                 true,
 		"get_design_context":         true,

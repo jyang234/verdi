@@ -101,9 +101,14 @@ func TestMCPToolInventory(t *testing.T) {
 	// refuses commit, submission, approval, exemption ownership, and
 	// semantic disposition by never registering a handler that could reach
 	// them.
+	// spec-documents Wave 2 Task 3 (spec/spec-documents ac-5) adds
+	// `get_document`: the read-only Markdown-document renderer over
+	// internal/specdocload and internal/specdoc, alongside get_artifact in
+	// this want list.
 	want := []string{
 		"search_artifacts",
 		"get_artifact",
+		"get_document",
 		"get_links",
 		"get_matrix",
 		"get_context_bundle",
