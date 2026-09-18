@@ -23,7 +23,7 @@ Each key has one holder.
 
 ## Decisions
 
-### One holder per key. <a id="dc-1"></a>
+### dc-1 — One holder per key. <a id="dc-1"></a>
 
 Because two holders means no holder.
 

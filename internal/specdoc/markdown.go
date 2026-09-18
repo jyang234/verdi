@@ -65,7 +65,7 @@ func RenderMarkdown(doc Document) string {
 				w("No decisions are declared.\n\n")
 			}
 			for _, d := range doc.Decisions {
-				w("### %s <a id=\"%s\"></a>\n\n", d.Text, d.ID)
+				w("### %s — %s <a id=\"%s\"></a>\n\n", d.ID, d.Text, d.ID)
 				if d.Detail != "" {
 					w("%s\n\n", d.Detail)
 				}
