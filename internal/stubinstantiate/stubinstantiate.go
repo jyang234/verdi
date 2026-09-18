@@ -109,6 +109,21 @@ func resolveDesignBranchBase(ctx context.Context, root string) (ResolvedBase, er
 	}
 }
 
+// ResolveDesignBranchBase is resolveDesignBranchBase, exported (UAT-030/
+// 031/032 fix round) so a caller that needs the branch's base ref BEFORE
+// CommitScaffoldBranch itself runs — the board's create and Revise actions,
+// to give internal/specname.ValidateSuccessorName's third check (UAT-031)
+// the SAME ref CommitScaffoldBranch will actually cut the branch from, so
+// the collision check and the cut can never disagree — can call the
+// identical resolution instead of guessing or re-implementing it. Nothing
+// else about this function changes: CommitScaffoldBranch still calls the
+// unexported resolveDesignBranchBase itself, and a caller that goes on to
+// call CommitScaffoldBranch afterward will get this exact same ResolvedBase
+// back a second time (cheap: a couple of git plumbing reads, no writes).
+func ResolveDesignBranchBase(ctx context.Context, root string) (ResolvedBase, error) {
+	return resolveDesignBranchBase(ctx, root)
+}
+
 // CommitScaffoldBranch lands content as .verdi/specs/active/<slug>/spec.md
 // in exactly one commit on a fresh design/<slug> branch, entirely via git
 // plumbing — the calling checkout's HEAD, working tree, and real index are

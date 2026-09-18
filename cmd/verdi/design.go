@@ -35,6 +35,7 @@ import (
 	"github.com/jyang234/verdi/internal/gitx"
 	"github.com/jyang234/verdi/internal/model"
 	"github.com/jyang234/verdi/internal/provider"
+	"github.com/jyang234/verdi/internal/specname"
 	"github.com/jyang234/verdi/internal/specstate"
 	"github.com/jyang234/verdi/internal/store"
 	"github.com/jyang234/verdi/internal/upstream"
@@ -409,11 +410,79 @@ func runDesignStart(ctx context.Context, root string, kind artifact.SpecClass, s
 		return 2
 	}
 
-	specRef, err := artifact.ParseRef("spec/" + name)
-	if err != nil {
-		fmt.Fprintf(stderr, "design start: --name %q is not a valid spec name: %v\n", name, err)
+	// ac-6 (spec/uat-round-1, closing UAT-021) / dc-7 (I-130, amended L5
+	// review): resolve the new branch's BASE before anything else that
+	// depends on it — hoisted above the name/collision check just below
+	// (UAT-031, wave-3 fix round: that check must ask the SAME ref the
+	// branch will actually be cut from, never only the current checkout's
+	// working tree) and above statement sourcing (including any TTY
+	// interview, further below) so a refusal here never follows, then
+	// discards, an operator's typed answers. Resolution uses the same
+	// specstate.ResolveDefaultBranch precedence chain build start/gate/lint
+	// already share (internal/specstate/defaultbranch.go) — never the
+	// current checkout's HEAD. A checkout left on a stale side branch must
+	// not silently propagate its missing history into a fresh design
+	// branch: the exact UAT reproduction (checkout on a side branch behind
+	// main; `design start` cut design/<name> from HEAD and left the
+	// checkout switched onto it, disclosing neither fact).
+	//
+	// dc-7 scopes what "unresolvable" means: a repository with NO "origin"
+	// remote configured at all has no truth other than HEAD (a fresh local
+	// project — the README's own "start your own store" flow and
+	// cmd/e2eharness/unprovenboard.go both model exactly this state as
+	// supported, not refused) — this bases on HEAD and discloses the
+	// substitution rather than refusing. A repository that DOES have an
+	// "origin" remote but still cannot resolve (or disambiguate) its
+	// default branch is exactly the stale-default hazard UAT-021
+	// reported — that case still fails operationally (exit 2), reusing
+	// unresolvableDefaultBranchMessage's text (specstate, same wording
+	// every verb shares) so the diagnostic is identical across verbs for
+	// the identical failure.
+	//
+	// Reordering note (UAT-030/031/032 fix, disclosed in this lane's
+	// report): before this fix, base resolution ran AFTER the name check
+	// (and, for a --kind story request, after the story-ref checks below
+	// too). It now runs first, unconditionally — including ahead of a
+	// request that will go on to fail its OWN kind/story-ref/name checks
+	// for an unrelated reason. A request that was always going to be
+	// refused now does a little more up-front work (this resolution, plus
+	// specname.ValidateSuccessorName's own base-ref probe just below)
+	// before failing; the refusal reasons, messages, and exit code are
+	// unchanged for every case this file's own tests already pinned.
+	baseRef, baseOK := resolveDesignStartBase(ctx, root, stdout, stderr)
+	if !baseOK {
 		return 2
 	}
+
+	// UAT-030/031/032 (wave-3 review fix round): the one shared predicate
+	// (internal/specname.ValidateSuccessorName) replaces the old ad-hoc
+	// artifact.ParseRef call plus the old bare store.ActiveSpecDir stat —
+	// it additionally refuses a "#fragment" or "@commit"-decorated name
+	// (UAT-030), a name already used by an ARCHIVED spec (UAT-032), and a
+	// name already present on baseRef even though this checkout's working
+	// tree shows no collision (UAT-031: the branch is cut from baseRef,
+	// never necessarily this checkout's HEAD). specRef is exactly what the
+	// old inline ParseRef produced on success — every later use below
+	// (content rendering, the commit message, the stdout disclosures) is
+	// unchanged.
+	specRef, err := specname.ValidateSuccessorName(ctx, root, name, baseRef)
+	if err != nil {
+		var nerr *specname.NameError
+		switch {
+		case errors.As(err, &nerr) && nerr.Reason == specname.ReasonSuccessorExists:
+			fmt.Fprintf(stderr, "design start: %s already exists\n", nerr.Path)
+		case errors.As(err, &nerr) && nerr.Reason == specname.ReasonArchivedExists:
+			fmt.Fprintf(stderr, "design start: spec %s already exists under specs/archive/ — names are unique across active and archived specs (guide 6.1)\n", nerr.Name)
+		case errors.As(err, &nerr) && nerr.Reason == specname.ReasonExistsOnBase:
+			fmt.Fprintf(stderr, "design start: %s\n", specname.ExistsOnBaseDetail(nerr.Name, baseRef))
+		case errors.As(err, &nerr) && nerr.Reason == specname.ReasonInvalidName:
+			fmt.Fprintf(stderr, "design start: --name %q is not a valid spec name: %v\n", name, errors.Unwrap(nerr))
+		default:
+			fmt.Fprintln(stderr, "design start:", err)
+		}
+		return 2
+	}
+	specDir := store.ActiveSpecDir(root, name)
 
 	if storyRef != "" {
 		scheme, _, err := provider.ParseStoryRef(provider.StoryRef(storyRef))
@@ -427,12 +496,6 @@ func runDesignStart(ctx context.Context, root string, kind artifact.SpecClass, s
 			fmt.Fprintf(stderr, "design start: story ref %q uses scheme %q, which verdi.yaml's providers: block does not configure\n", storyRef, scheme)
 			return 2
 		}
-	}
-
-	specDir := store.ActiveSpecDir(root, name)
-	if _, statErr := os.Stat(specDir); statErr == nil {
-		fmt.Fprintf(stderr, "design start: %s already exists\n", specDir)
-		return 2
 	}
 
 	// Preparation boundary (R1/SI-198): resolve class/template and finish
@@ -452,36 +515,6 @@ func runDesignStart(ctx context.Context, root string, kind artifact.SpecClass, s
 	tmpl, err := designscaffold.LoadTemplate(root, class.Template)
 	if err != nil {
 		fmt.Fprintln(stderr, "design start:", err)
-		return 2
-	}
-
-	// ac-6 (spec/uat-round-1, closing UAT-021) / dc-7 (I-130, amended L5
-	// review): resolve the new branch's BASE before cutting it — hoisted
-	// above statement sourcing (including any TTY interview, just below)
-	// so a refusal here never follows, then discards, an operator's typed
-	// answers. Resolution uses the same specstate.ResolveDefaultBranch
-	// precedence chain build start/gate/lint already share (internal/
-	// specstate/defaultbranch.go) — never the current checkout's HEAD. A
-	// checkout left on a stale side branch must not silently propagate its
-	// missing history into a fresh design branch: the exact UAT
-	// reproduction (checkout on a side branch behind main; `design start`
-	// cut design/<name> from HEAD and left the checkout switched onto it,
-	// disclosing neither fact).
-	//
-	// dc-7 scopes what "unresolvable" means: a repository with NO "origin"
-	// remote configured at all has no truth other than HEAD (a fresh local
-	// project — the README's own "start your own store" flow and
-	// cmd/e2eharness/unprovenboard.go both model exactly this state as
-	// supported, not refused) — this bases on HEAD and discloses the
-	// substitution rather than refusing. A repository that DOES have an
-	// "origin" remote but still cannot resolve (or disambiguate) its
-	// default branch is exactly the stale-default hazard UAT-021
-	// reported — that case still fails operationally (exit 2), reusing
-	// unresolvableDefaultBranchMessage's text (specstate, same wording
-	// every verb shares) so the diagnostic is identical across verbs for
-	// the identical failure.
-	baseRef, baseOK := resolveDesignStartBase(ctx, root, stdout, stderr)
-	if !baseOK {
 		return 2
 	}
 
@@ -606,7 +639,14 @@ func runDesignStart(ctx context.Context, root string, kind artifact.SpecClass, s
 		return 2
 	}
 
-	if err := gitx.AddAll(ctx, root); err != nil {
+	// UAT-033: stage exactly the scaffolded spec directory — never
+	// gitx.AddAll's `git add -A`, which swept every untracked-or-modified
+	// file anywhere in the checkout (a stray .DS_Store, a local sqlite,
+	// unrelated object blobs) into the scaffold commit and on into the spec
+	// PR. Mirrors accept.go's own D6-33 fix (acceptdiagram.go) and close.go's
+	// stageClosureSpec: gitx.AddPaths, never gitx.AddAll, for a ritual commit
+	// that must own only the paths it itself wrote.
+	if err := gitx.AddPaths(ctx, root, specDir); err != nil {
 		fmt.Fprintln(stderr, "design start:", err)
 		return 2
 	}
