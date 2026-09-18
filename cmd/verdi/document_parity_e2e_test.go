@@ -20,6 +20,7 @@ import (
 	"github.com/jyang234/verdi/internal/dex"
 	"github.com/jyang234/verdi/internal/mcpserve"
 	"github.com/jyang234/verdi/internal/readinesspilot"
+	"github.com/jyang234/verdi/internal/readinesspilot/readinesstest"
 	"github.com/jyang234/verdi/internal/workbench"
 )
 
@@ -305,54 +306,17 @@ func TestDocumentParity_BoardWithForeignReadinessSnapshot(t *testing.T) {
 	}
 }
 
-// validReadinessSnapshotFor returns a Snapshot targeting ref that passes
-// Snapshot.Validate(): every one of the four fixed areas proven, no
-// attention items. Mirrors internal/readinesspilot/schema_test.go's own
-// (unexported) validSnapshot() — reproduced here for the same reason
-// internal/mcpserve/tool_get_document_test.go's validReadinessSnapshot is
-// (that package's own private helper cannot be imported from here either).
-// The closed concern-identity vocabulary (readinesspilot/schema.go's
-// concernIdentity) fixes these four concern ids' areas and blocking flags;
-// they are not arbitrary. TargetTitle/TargetClass/Branch/RequestDigest are
-// Validate()-only fields specdoc.WithReadiness never reads.
-func validReadinessSnapshotFor(ref, head string) readinesspilot.Snapshot {
-	concern := func(id string, area readinesspilot.AreaID, blocking bool) readinesspilot.Concern {
-		return readinesspilot.Concern{
-			ID: id, Area: area, State: readinesspilot.StateProven, Blocking: blocking,
-			Timing: readinesspilot.TimingCurrent, Summary: "source-derived readiness fact",
-			Witnesses: []string{}, Destination: readinesspilot.Destination{CLI: []string{}},
-		}
-	}
-	return readinesspilot.Snapshot{
-		TargetRef:     ref,
-		TargetTitle:   "Parity test target",
-		TargetClass:   "feature",
-		Branch:        "main",
-		Head:          head,
-		RequestDigest: "sha256:" + strings.Repeat("a", 64),
-		Areas: []readinesspilot.Area{
-			{ID: readinesspilot.AreaShape, Label: "Define the work", State: readinesspilot.StateProven},
-			{ID: readinesspilot.AreaSuccess, Label: "Define success", State: readinesspilot.StateProven},
-			{ID: readinesspilot.AreaContext, Label: "Check constraints", State: readinesspilot.StateProven},
-			{ID: readinesspilot.AreaReview, Label: "Get approval", State: readinesspilot.StateProven},
-		},
-		CurrentFocus: "",
-		Attention:    []readinesspilot.Concern{},
-		AllConcerns: []readinesspilot.Concern{
-			concern("shape/problem", readinesspilot.AreaShape, true),
-			concern("success/contributor/static", readinesspilot.AreaSuccess, false),
-			concern("context/verdict", readinesspilot.AreaContext, true),
-			concern("review/action", readinesspilot.AreaReview, true),
-		},
-		StaleNotice: "Startup snapshot at " + head + "; restart verdi serve after an edit.",
-	}
-}
-
-// stripReadinessSection removes the "## Readiness" section (through the
-// next "## " heading, or EOF when Readiness is the last section, which it
-// always is for kind spec — specdoc/kind.go's Sections()) from doc. Used
-// to pin that two renders differ by EXACTLY that section — never
-// elsewhere in the document.
+// stripReadinessSection removes the "## Readiness" section from doc: its
+// heading through whichever comes first of the next "## " heading (never
+// actually reached — Readiness is always the last section, for both the
+// spec and tasks kinds, specdoc/kind.go's Sections()) or the "\n---\n"
+// rule RenderMarkdown appends after the last section, ahead of the
+// "Derived from the spec's objects; not authority. Ref ..." provenance
+// stamp (internal/specdoc/markdown.go). Fix round 1 F2 (task-4-review.md):
+// the original version had no second terminator, so with no further "## "
+// heading the strip ran to EOF and silently discarded that stamp line too
+// — this version keeps it, so what's compared is "identical outside the
+// Readiness section" in fact, not merely in the comment claiming it.
 func stripReadinessSection(t *testing.T, doc string) string {
 	t.Helper()
 	const heading = "## Readiness"
@@ -361,10 +325,13 @@ func stripReadinessSection(t *testing.T, doc string) string {
 		t.Fatalf("document has no %q heading:\n%s", heading, doc)
 	}
 	rest := doc[start+len(heading):]
-	if next := strings.Index(rest, "## "); next >= 0 {
-		return doc[:start] + rest[next:]
+	end := len(rest)
+	for _, terminator := range []string{"## ", "\n---\n"} {
+		if i := strings.Index(rest, terminator); i >= 0 && i < end {
+			end = i
+		}
 	}
-	return doc[:start]
+	return doc[:start] + rest[end:]
 }
 
 // TestDocumentParity_BoardAndMCPShareReadiness is R-W3-3: `verdi serve`
@@ -387,7 +354,7 @@ func TestDocumentParity_BoardAndMCPShareReadiness(t *testing.T) {
 		t.Fatalf("cli exit %d: %s", code, stderr)
 	}
 
-	snap := validReadinessSnapshotFor("spec/lockbox", repo.Head)
+	snap := readinesstest.ValidSnapshot("spec/lockbox", repo.Head)
 	if err := snap.Validate(); err != nil {
 		t.Fatal(err)
 	}
