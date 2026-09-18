@@ -64,7 +64,9 @@ test.describe("board document tab", () => {
 
   test("hidden tabs pause polling; visibility resumes with one immediate refresh", async ({ page }) => {
     await page.goto(docPath(SHOWCASE.READONLY_SPEC));
-    // Count snapshot fetches from inside the page.
+    // Count snapshot fetches from inside the page AND simulate a hidden
+    // tab in the same evaluate, so no 2 s tick can land between the two
+    // (the poll loop reads document.hidden live).
     await page.evaluate(() => {
       const w = window as unknown as { __snapCount: number; fetch: typeof fetch };
       w.__snapCount = 0;
@@ -73,9 +75,6 @@ test.describe("board document tab", () => {
         if (String(input).includes("/document/snapshot")) w.__snapCount++;
         return real(input, init);
       }) as typeof fetch;
-    });
-    // Simulate a hidden tab: the poll loop reads document.hidden live.
-    await page.evaluate(() => {
       Object.defineProperty(document, "hidden", { configurable: true, get: () => true });
       document.dispatchEvent(new Event("visibilitychange"));
     });

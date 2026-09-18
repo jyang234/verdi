@@ -2,6 +2,7 @@ package workbench
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -164,6 +165,38 @@ func TestBoardDocument_PageSnapshotAndDownload(t *testing.T) {
 	if !strings.Contains(dl.body, "not authority") {
 		t.Fatalf("the download carries the not-authority stamp:\n%s", dl.body)
 	}
+	// The hidden Markdown source: the HTML parser drops exactly one
+	// newline after <pre>, so the template emits one deliberately and
+	// the served Markdown itself never begins with one.
+	if strings.HasPrefix(dl.body, "\n") {
+		t.Fatalf("served Markdown must not start with a newline:\n%q", dl.body[:16])
+	}
+	if !strings.Contains(page.body, `class="document-source" hidden>`+"\n# ") {
+		t.Fatalf("the page must emit one deliberate newline after the <pre> tag\n%s", page.body)
+	}
+}
+
+// TestDocumentLoadStatus (F2): only the loader's own not-found phrase for
+// THIS spec (or the board's sentinel) is a 404; every other failure —
+// including one that merely contains "not found", such as a missing git
+// executable — stays operational.
+func TestDocumentLoadStatus(t *testing.T) {
+	for _, c := range []struct {
+		name string
+		err  error
+		want int
+	}{
+		{"lockbox", errors.New("specdocload: spec/lockbox not found in either zone of the working tree (tried a and b)"), http.StatusNotFound},
+		{"lockbox", errors.New("specdocload: spec/lockbox not found at abc123 in either zone"), http.StatusNotFound},
+		{"lockbox", fmt.Errorf("workbench: spec %q not found: %w", "Bad Name", ErrBoardNotFound), http.StatusNotFound},
+		{"lockbox", errors.New(`specdocload: resolving HEAD: exec: "git": executable file not found in $PATH`), http.StatusInternalServerError},
+		{"lockbox", errors.New("specdocload: spec/other not found in either zone of the working tree"), http.StatusInternalServerError},
+		{"lockbox", errors.New("specdocload: reading spec.md: permission denied"), http.StatusInternalServerError},
+	} {
+		if got := documentLoadStatus(c.name, c.err); got != c.want {
+			t.Errorf("documentLoadStatus(%q, %v) = %d, want %d", c.name, c.err, got, c.want)
+		}
+	}
 }
 
 // TestBoardDocument_DownloadMatchesSnapshotMarkdown is the tab's own
@@ -202,14 +235,21 @@ func TestBoardDocument_ReadinessGatedByTarget(t *testing.T) {
 	snap := readinesspilot.Snapshot{TargetRef: "spec/other", Areas: []readinesspilot.Area{{ID: readinesspilot.AreaShape, Label: "Define the work", State: readinesspilot.StateProven}}, CurrentFocus: readinesspilot.AreaShape}
 	h, _, name := newAcceptedWallFixtureWithReadiness(t, &snap)
 	page := getStatus(t, h, "/board/spec/"+name+"/document")
-	if !strings.Contains(page.body, "Readiness was not supplied for this render.") {
-		t.Fatal("a snapshot for another spec must not render here")
+	if !strings.Contains(page.body, "Readiness was not supplied for this render.") || strings.Contains(page.body, "Define the work") || strings.Contains(page.body, "readiness snapshot for") {
+		t.Fatalf("a snapshot for another spec must not render here:\n%s", page.body)
 	}
 	snap.TargetRef = "spec/" + name
 	h, _, name = newAcceptedWallFixtureWithReadiness(t, &snap)
 	page = getStatus(t, h, "/board/spec/"+name+"/document")
 	if !strings.Contains(page.body, "readiness snapshot for") || !strings.Contains(page.body, "Define the work") {
 		t.Fatalf("matching snapshot must render:\n%s", page.body)
+	}
+	// The branch mount carries the same snapshot (branchboard.go passes
+	// deps.Readiness to every per-branch instance; a branch checked out at
+	// the serving root dispatches into the serving instance).
+	page = getStatus(t, h, "/b/main/board/spec/"+name+"/document")
+	if page.code != http.StatusOK || !strings.Contains(page.body, "readiness snapshot for") || !strings.Contains(page.body, "Define the work") {
+		t.Fatalf("branch mount must render the matching snapshot: %d\n%s", page.code, page.body)
 	}
 }
 
@@ -222,11 +262,27 @@ func TestBoardDocument_Refusals(t *testing.T) {
 		{"/board/spec/Not%20A%20Name/document", "not found"},
 		{"/board/spec/" + name + "/document/snapshot?kind=chapter", "unknown document kind"},
 		{"/board/spec/nope/document/snapshot", "not found"},
+		{"/board/spec/" + name + "/document/snapshot?format=pdf", "format"},
 	} {
 		res := getStatus(t, h, c.path)
 		if res.code < 400 || res.code >= 500 || !strings.Contains(res.body, c.want) {
 			t.Errorf("%s: %d %q", c.path, res.code, res.body)
+			continue
 		}
+		// The HTML route fails as the board does — renderError's page —
+		// while /snapshot keeps JSON errors for its fetch client.
+		if strings.Contains(c.path, "/snapshot") {
+			if !strings.HasPrefix(res.contentType, "application/json") || !strings.Contains(res.body, `"error":`) {
+				t.Errorf("%s: snapshot refusal must be JSON: %q %q", c.path, res.contentType, res.body)
+			}
+		} else if !strings.HasPrefix(res.contentType, "text/html") || !strings.Contains(res.body, `class="error-page"`) {
+			t.Errorf("%s: page refusal must be the HTML error page: %q %q", c.path, res.contentType, res.body)
+		}
+	}
+	// ?format=md on /snapshot is accepted and ignored: the projection is
+	// always JSON (documentFormatFromQuery's contract).
+	if res := getStatus(t, h, "/board/spec/"+name+"/document/snapshot?format=md"); res.code != http.StatusOK || !strings.HasPrefix(res.contentType, "application/json") {
+		t.Errorf("snapshot?format=md: %d %q", res.code, res.contentType)
 	}
 	for _, path := range []string{"/board/spec/" + name + "/document", "/board/spec/" + name + "/document/snapshot"} {
 		req := httptest.NewRequest(http.MethodPost, path, nil)

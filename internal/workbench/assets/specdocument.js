@@ -32,18 +32,27 @@
     if (statusEl) statusEl.textContent = text;
   }
 
+  var FOCUSABLE = "a[href],button";
+
+  // apply swaps the region only. Focus inside the region is restored by
+  // id when the element has one, else by its index among the region's
+  // focusable elements (document links carry no ids of their own).
   function apply(snap) {
     var y = window.scrollY;
     var active = document.activeElement;
-    var activeID = active && region.contains(active) ? active.id : "";
+    var activeID = "";
+    var activeIndex = -1;
+    if (active && region.contains(active)) {
+      activeID = active.id || "";
+      activeIndex = Array.prototype.indexOf.call(region.querySelectorAll(FOCUSABLE), active);
+    }
     region.innerHTML = snap.html;
     region.setAttribute("data-revision", snap.revision);
     revision = snap.revision;
     if (mdEl) mdEl.textContent = snap.markdown;
-    if (activeID) {
-      var el = document.getElementById(activeID);
-      if (el && typeof el.focus === "function") el.focus();
-    }
+    var el = activeID ? document.getElementById(activeID) : null;
+    if (!el && activeIndex >= 0) el = region.querySelectorAll(FOCUSABLE)[activeIndex] || null;
+    if (el && typeof el.focus === "function") el.focus();
     window.scrollTo(0, y);
     say("Updated");
   }

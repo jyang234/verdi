@@ -86,16 +86,30 @@ func documentKindFromQuery(r *http.Request) (specdoc.Kind, error) {
 	return specdoc.ParseKind(k)
 }
 
-// documentLoadStatus maps a loadDocument failure to its HTTP status: a
-// spec the working tree does not hold (in either zone) is 404, every
-// other failure is operational. The loader names a missing spec in its
-// error text rather than with a sentinel, so the not-found shape is
-// recognized by that text — confined to this one function.
-func documentLoadStatus(err error) int {
-	if errors.Is(err, ErrBoardNotFound) || strings.Contains(err.Error(), "not found") {
+// documentLoadStatus maps a loadDocument failure for name to its HTTP
+// status: a spec the working tree does not hold (in either zone) is 404,
+// every other failure is operational (500). The loader names a missing
+// spec in its error text rather than with a sentinel ("spec/<name> not
+// found in either zone of the working tree"), so the match is anchored
+// to that exact phrase — never a bare "not found", which would turn an
+// operational failure such as a missing git executable into a 404.
+func documentLoadStatus(name string, err error) int {
+	if errors.Is(err, ErrBoardNotFound) || strings.Contains(err.Error(), "spec/"+name+" not found") {
 		return http.StatusNotFound
 	}
 	return http.StatusInternalServerError
+}
+
+// documentFormatFromQuery reads ?format=: empty (the page or the JSON
+// projection) or "md" (the Markdown download on the page route; accepted
+// and ignored on /snapshot, which is always JSON). Anything else is
+// refused the same way on both routes.
+func documentFormatFromQuery(r *http.Request) (string, error) {
+	format := r.URL.Query().Get("format")
+	if format != "" && format != "md" {
+		return "", fmt.Errorf("format must be md, got %q", format)
+	}
+	return format, nil
 }
 
 // boardDocumentPageHandler answers GET /board/spec/{name}/document: the
@@ -111,17 +125,19 @@ func (s *boardSpecServer) boardDocumentPageHandler() http.HandlerFunc {
 		name := r.PathValue("name")
 		kind, err := documentKindFromQuery(r)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
+			renderError(w, http.StatusBadRequest, err)
 			return
 		}
-		format := r.URL.Query().Get("format")
-		if format != "" && format != "md" {
-			http.Error(w, fmt.Sprintf("format must be md, got %q", format), http.StatusBadRequest)
+		format, err := documentFormatFromQuery(r)
+		if err != nil {
+			renderError(w, http.StatusBadRequest, err)
 			return
 		}
 		snap, err := s.loadDocument(r.Context(), name, kind)
 		if err != nil {
-			http.Error(w, err.Error(), documentLoadStatus(err))
+			// The HTML route fails as the board does: renderError's page,
+			// never a plain-text body (/snapshot keeps JSON errors).
+			renderError(w, documentLoadStatus(name, err), err)
 			return
 		}
 		if format == "md" {
@@ -160,9 +176,14 @@ func (s *boardSpecServer) boardDocumentSnapshotHandler() http.HandlerFunc {
 			writeJSONError(w, http.StatusBadRequest, err.Error())
 			return
 		}
-		snap, err := s.loadDocument(r.Context(), r.PathValue("name"), kind)
+		if _, err := documentFormatFromQuery(r); err != nil {
+			writeJSONError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		name := r.PathValue("name")
+		snap, err := s.loadDocument(r.Context(), name, kind)
 		if err != nil {
-			writeJSONError(w, documentLoadStatus(err), err.Error())
+			writeJSONError(w, documentLoadStatus(name, err), err.Error())
 			return
 		}
 		etag := `"` + snap.Revision + `"`

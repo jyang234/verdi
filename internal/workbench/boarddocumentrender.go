@@ -38,7 +38,8 @@ var boardDocumentPageTemplate = template.Must(template.New("boarddocument").Func
 </div>
 </header>
 <main id="document-region" class="content document-region" data-revision="{{.Revision}}" data-snapshot-href="{{.SnapshotHref}}" data-testid="document-region">{{.HTML}}</main>
-<pre id="document-markdown" class="document-source" hidden>{{.Markdown}}</pre>
+<pre id="document-markdown" class="document-source" hidden>
+{{.Markdown}}</pre>
 {{buildFooter}}
 <script src="/assets/specdocument.js"></script>
 </body>
@@ -68,7 +69,10 @@ type documentPageData struct {
 // so the page works identically under the root and the /b/{branch}
 // mounts. The Markdown rides a hidden <pre> as HTML text — entity-escaped
 // on the way out and decoded back by the parser — so Copy hands over the
-// exact bytes the download and the snapshot carry.
+// exact bytes the download and the snapshot carry. The template emits one
+// deliberate newline right after the <pre> tag: the HTML parser drops
+// exactly one newline there, so without it a Markdown that began with
+// "\n" would lose that byte on the way to the clipboard.
 func renderBoardDocumentPage(requestPath, name string, snap documentSnapshot) ([]byte, error) {
 	boardHref := strings.TrimSuffix(requestPath, "/document")
 	kinds := []documentKindLink{
