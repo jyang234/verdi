@@ -10,17 +10,11 @@
 // proves the no -o path: the store root is found by ancestor search
 // (newIntegrationStoreRoot, a real git checkout via fixturegit) and the
 // render commit is stamped from that repository's real HEAD, not "none".
-//
-// Deliberately NOT examples/showcase: harness's own behavior (R-W3-7) is
-// independent of any store or corpus content — it renders the four
-// skillpack templates embedded in this binary to an explicit -o
-// directory or, absent one, the ambient store root alone, and never
-// reads a spec, a model, or any other store byte. A scratch tempdir (or
-// a minimal fixturegit checkout carrying nothing but .verdi/verdi.yaml)
-// is therefore the genuine, most direct evidence for this verb, not a
-// workaround — the same disclosed-scratch-fixture posture
-// rollup_test.go's rollupFixtureSpec and mcpserve/fixture_test.go's
-// buildFixture already use for their own verbs.
+// The showcase-backed cli:harness proof — driving the real binary
+// against a real provisioned examples/showcase store — lives in
+// internal/showcasealign/cli_showcase_test.go instead; these two tests
+// exist to cover the grammar and root-resolution behavior a showcase
+// store cannot exercise any more directly than a scratch one can.
 package main
 
 import (

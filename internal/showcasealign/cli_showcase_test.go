@@ -1163,6 +1163,40 @@ func TestCLIShowcaseExperiment(t *testing.T) {
 	}
 }
 
+// TestCLIShowcaseHarness (cli:harness, spec/spec-documents ac-7, wave 3)
+// drives `verdi harness check`/`render` against the real provisioned
+// examples/showcase store. The showcase corpus carries no .claude/skills
+// or .agents/skills tree of its own — a genuine, disclosed fact about the
+// store (examples/showcase has no such directories at all), the same
+// "real, disclosed fact about the showcase store" pattern cli:context's
+// and cli:experiment's own mappings above use — so a check before any
+// render genuinely finds all eight skills missing against the real store
+// root, and render-then-check proves the real round trip (skillpack's
+// embedded templates written to, and then verified against, the real
+// showcase store's own directory) rather than a synthetic fixture.
+func TestCLIShowcaseHarness(t *testing.T) {
+	root := provisionShowcaseStore(t)
+
+	if _, err := os.Stat(filepath.Join(root, ".claude", "skills")); !os.IsNotExist(err) {
+		t.Fatalf("test setup: provisioned showcase store unexpectedly carries a .claude/skills tree (stat err=%v) — this test's whole premise is the nothing-rendered-yet path", err)
+	}
+
+	stdout, stderr, code := runBinary(t, root, "harness", "check", "-o", root)
+	if code != 1 || strings.Count(stdout, "missing  ") != 8 {
+		t.Fatalf("verdi harness check (nothing rendered yet) against the real showcase store: exit %d, want 1 with 8 missing findings\nstdout:\n%s\nstderr:\n%s", code, stdout, stderr)
+	}
+
+	stdout, stderr, code = runBinary(t, root, "harness", "render", "-o", root)
+	if code != 0 || strings.Count(stdout, "\n") != 8 {
+		t.Fatalf("verdi harness render against the real showcase store: exit %d, want 0 with 8 lines\nstdout:\n%s\nstderr:\n%s", code, stdout, stderr)
+	}
+
+	stdout, stderr, code = runBinary(t, root, "harness", "check", "-o", root)
+	if code != 0 || stdout != "" {
+		t.Fatalf("verdi harness check (after render) against the real showcase store: exit %d, want 0 with empty stdout\nstdout:\n%s\nstderr:\n%s", code, stdout, stderr)
+	}
+}
+
 // TestCLIShowcaseHelp (cli:help, spec/uat-round-1 ac-2, closing UAT-004)
 // drives every help spelling the CLI recognizes — "help", "--help", "-h",
 // at top level and immediately after a verb — against the REAL provisioned

@@ -259,18 +259,20 @@ var showcaseCoverage = map[string][]coverageEvidence{
 	// mutated.
 	"cli:experiment": {goE2E("internal/showcasealign/cli_showcase_test.go")},
 
-	// cli:harness (spec/spec-documents ac-7, wave 3): `verdi harness
-	// render|check` renders/drift-checks internal/skillpack's four
-	// embedded skill templates against an explicit -o directory or the
-	// store root — behavior that is, by design (R-W3-7), independent of
-	// any store or corpus content: TestHarnessRenderAndCheck and
-	// TestHarnessDefaultsToStoreRoot (cmd/verdi/harness_test.go) drive
-	// the real built binary over a scratch tempdir and a minimal
-	// fixturegit checkout, never examples/showcase — the same disclosed,
-	// deliberately-not-showcase posture rollup_test.go's
-	// rollupFixtureSpec and mcpserve/fixture_test.go's buildFixture
-	// already use for their own verbs.
-	"cli:harness": {goE2E("cmd/verdi/harness_test.go")},
+	// cli:harness (spec/spec-documents ac-7, wave 3): TestCLIShowcaseHarness
+	// (cli_showcase_test.go) drives `verdi harness check`/`render` against
+	// the real provisioned examples/showcase store: a check before any
+	// render finds all eight skills genuinely missing under that real
+	// store root (examples/showcase carries no .claude/skills or
+	// .agents/skills tree of its own — a real, disclosed fact, the same
+	// pattern cli:context's/cli:experiment's own mappings above use), and
+	// render-then-check proves the real round trip against real store
+	// plumbing rather than a scratch fixture — the gate's own accepted
+	// form for a capability the showcase carries no dedicated content for
+	// (coverage_test.go's gap-kind-3 note above: a Go test whose marker
+	// match comes only from a doc comment disclosing it does NOT touch
+	// examples/showcase is a closed gap, not a valid mapping).
+	"cli:harness": {goE2E("internal/showcasealign/cli_showcase_test.go")},
 
 	// cli:serve: `cmd/e2eharness/main.go` launches the real `verdi serve
 	// --http <addr>` subprocess every Playwright spec in the suite runs
