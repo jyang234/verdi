@@ -464,7 +464,7 @@ Use this skill when a draft spec has acceptance criteria that no stub covers and
 
 ## Steps
 
-1. Call `get_design_context` with `spec/<slug>`; keep `identity`, and read the draft's bytes for `base_spec_b64`/`base_digest` exactly as verdi-clarify step 1 describes.
+1. Call `get_design_context` with `spec/<slug>`. Keep `identity` (`checkout`, `branch`, `head`): every `mutate_draft` call carries exactly those three as `expected`. Then read the draft's bytes from `<checkout>/.verdi/specs/active/<slug>/spec.md`: `base_spec_b64` is their standard base64, and `base_digest` is `sha256:` followed by the lowercase hex SHA-256 of those exact bytes. Re-read them before every call; a stale base is refused.
 2. Call `get_document` with `ref` `spec/<slug>`, `kind` `plan`, and `proposed` true, and show the human the plan as it stands. The plan document lists only what is planned, so call `get_document` again with `kind` `spec` and `proposed` true: in its criteria section, an uncovered criterion's coverage line reads "not yet planned."; a covered one reads "covered by …"; "not computed for this render." means the facts were unavailable, in which case say so and stop. Collect the uncovered criterion ids in document order.
 3. For each uncovered criterion, prepare exactly one stub: `{"op":"add-stub","slug":"<kebab-slug describing the deliverable>","acceptance_criteria":["<ac-id>"]}`. A stub may cover several criteria when they are one deliverable; say why.
 4. Show the human the criterion text and the operation JSON. Ask for confirmation.
@@ -500,7 +500,7 @@ Use this skill when the user asks what to work on next for a spec. It reads and 
 
 1. Call `get_document` with `ref` `spec/<slug>` and `kind` `tasks`, adding `proposed` true when the spec is a draft on its design branch (omit it for an accepted spec).
 2. From the plan section, list each stub with the criteria it covers. From the evidence section, note each criterion's evidence state and what is still unproven. From the readiness section, list the concerns that need attention, blocking ones first; if readiness was not supplied for this render, say so.
-3. Present a work list in this order: blocking readiness concerns, criteria whose evidence detail reads "no implementing story", stubs whose criteria are still unproven, then everything else. Quote ids so the human can find each item on the board.
+3. Present a work list in this order: blocking readiness concerns; criteria whose evidence table row has "—" in its Detail column (nothing implements or evidences them yet); criteria whose Detail column names an unsatisfied evidence kind ("<kind> unsatisfied"); then everything else, keeping each criterion's State column word as the document prints it. Quote ids so the human can find each item on the board.
 4. If the human wants any of it changed, hand off to verdi-clarify or verdi-plan; this skill writes nothing.
 
 ```verdi-sequence
