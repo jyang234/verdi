@@ -308,12 +308,26 @@ func TestSpecDoc_FlagsAfterRef(t *testing.T) {
 	})
 
 	t.Run("--proposed after ref", func(t *testing.T) {
+		// An UNCOMMITTED edit, not merely the branch's already-committed
+		// "revised" text (spec-documents wave 2, R-W2-4): Stamp.Proposed
+		// is now derived from specstate — true only when the working
+		// tree's bytes actually diverge from the default branch's, so
+		// --proposed on an exact-match checkout is correctly NOT
+		// proposed (TestSpecDoc_ProposedAndAt covers that arm; this
+		// subtest exists to prove the F1 flag-after-ref parsing
+		// regression, which needs a genuine divergence to observe
+		// --proposed actually reading the working tree, not HEAD).
+		specPath := filepath.Join(repo.Dir, ".verdi/specs/active/lockbox/spec.md")
+		uncommitted := strings.Replace(revised, "revised", "revised, UNCOMMITTED", 1)
+		if err := os.WriteFile(specPath, []byte(uncommitted), 0o644); err != nil {
+			t.Fatal(err)
+		}
 		stdout, stderr, code := run("spec", "doc", "--format", "md", "spec/lockbox", "--proposed")
 		if code != 0 {
 			t.Fatalf("exit %d: %s", code, stderr)
 		}
-		if !strings.Contains(stdout, "Proposed, not accepted") {
-			t.Errorf("--proposed after the ref must still be applied:\n%s", stdout)
+		if !strings.Contains(stdout, "Proposed, not accepted") || !strings.Contains(stdout, "UNCOMMITTED") {
+			t.Errorf("--proposed after the ref must still be applied (read the dirty working tree, not HEAD):\n%s", stdout)
 		}
 	})
 
