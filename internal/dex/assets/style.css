@@ -408,6 +408,40 @@ footer.site-foot {
 }
 .copy-ref:hover { border-color: var(--accent); }
 
+/* the spec page's way into its Document view (spec/spec-documents ac-4),
+   and the view's own quiet chrome: the provenance note a reader meets
+   first, then the three Markdown files offered as downloads */
+.document-link { font-family: var(--mono); font-size: 0.74rem; letter-spacing: 0.02em; color: var(--muted-solid); margin-left: 0.9rem; }
+.document-link:hover { color: var(--accent); }
+.document-note {
+  font-size: 0.92rem;
+  color: var(--muted-solid);
+  border-left: 3px solid var(--living);
+  padding: 0.2rem 0 0.2rem 0.9rem;
+  margin: 0 0 1rem;
+}
+.document-note code { color: var(--accent); }
+.document-files {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.4rem 0.7rem;
+  margin: 0 0 1.8rem;
+  font-family: var(--mono);
+  font-size: 0.74rem;
+  letter-spacing: 0.02em;
+}
+.document-files span { font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.09em; color: var(--muted-solid); }
+.document-files a {
+  color: var(--ink);
+  text-decoration: none;
+  padding: 0.3rem 0.65rem;
+  border: 1px solid var(--rule);
+  border-radius: 3px;
+  background: var(--card);
+}
+.document-files a:hover { border-color: var(--accent); color: var(--accent); }
+
 /* reading column (~70ch) + rail */
 .page-body { display: flex; gap: 3rem; align-items: flex-start; }
 .content { flex: 1 1 auto; min-width: 0; max-width: 70ch; }

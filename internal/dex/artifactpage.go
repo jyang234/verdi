@@ -70,6 +70,7 @@ func writeArtifactPage(ctx context.Context, outDir, root, buildCommit string, st
 		Connections:      connections,
 		TOC:              extractTOC(bodyHTML),
 		CopyRef:          p.Entry.Ref + "@" + pinCommit,
+		DocumentURL:      specDocumentURL(p.Entry.Ref),
 	}
 	out, err := renderPage(mdl, data)
 	if err != nil {
