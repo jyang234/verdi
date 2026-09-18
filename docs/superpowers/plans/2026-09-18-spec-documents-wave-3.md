@@ -422,7 +422,7 @@ Use this skill on a draft spec on its design branch when the user asks what is s
 
 ## Steps
 
-1. Call `get_design_context` with the draft's ref (`spec/<slug>`). Keep `identity` (`checkout`, `branch`, `head`) and `current_draft` (the exact spec bytes and their digest): every `mutate_draft` call must carry them as `expected`, `base_spec_b64`, and `base_digest`.
+1. Call `get_design_context` with the draft's ref (`spec/<slug>`). Keep `identity` (`checkout`, `branch`, `head`): every `mutate_draft` call carries exactly those three as `expected`. Then read the draft's bytes from `<checkout>/.verdi/specs/active/<slug>/spec.md`: `base_spec_b64` is their standard base64, and `base_digest` is `sha256:` followed by the lowercase hex SHA-256 of those exact bytes. Re-read them before every call; a stale base is refused.
 2. Call `get_document` with `ref` `spec/<slug>`, `kind` `spec`, and `proposed` true (the working-tree draft on this branch, never the accepted bytes). Read three sections:
    - **Readiness.** Each concern is listed with its state, timing, blocking flag, summary, and witnesses. Collect every concern whose state is not proven. If the section says "Readiness was not supplied for this render.", say so to the human and continue with the next two sections.
    - **Open questions.** A question is unclaimed when its line ends with "unclaimed; blocks acceptance until a … claims it or a decision answers it." Collect them.
@@ -464,8 +464,8 @@ Use this skill when a draft spec has acceptance criteria that no stub covers and
 
 ## Steps
 
-1. Call `get_design_context` with `spec/<slug>`; keep `identity` and `current_draft` for the mutation calls.
-2. Call `get_document` with `ref` `spec/<slug>`, `kind` `plan`, and `proposed` true. In the criteria section, an uncovered criterion's coverage line reads "not yet planned."; a covered one reads "covered by …"; "not computed for this render." means the facts were unavailable, in which case say so and stop. Collect the uncovered criterion ids in document order.
+1. Call `get_design_context` with `spec/<slug>`; keep `identity`, and read the draft's bytes for `base_spec_b64`/`base_digest` exactly as verdi-clarify step 1 describes.
+2. Call `get_document` with `ref` `spec/<slug>`, `kind` `plan`, and `proposed` true, and show the human the plan as it stands. The plan document lists only what is planned, so call `get_document` again with `kind` `spec` and `proposed` true: in its criteria section, an uncovered criterion's coverage line reads "not yet planned."; a covered one reads "covered by …"; "not computed for this render." means the facts were unavailable, in which case say so and stop. Collect the uncovered criterion ids in document order.
 3. For each uncovered criterion, prepare exactly one stub: `{"op":"add-stub","slug":"<kebab-slug describing the deliverable>","acceptance_criteria":["<ac-id>"]}`. A stub may cover several criteria when they are one deliverable; say why.
 4. Show the human the criterion text and the operation JSON. Ask for confirmation.
 5. On confirmation, call `mutate_draft` with that one operation (same argument shape as verdi-clarify). On a stale-base refusal, repeat from step 1.
@@ -474,6 +474,7 @@ Use this skill when a draft spec has acceptance criteria that no stub covers and
 ```verdi-sequence
 call get_design_context
 call get_document kind=plan proposed=true
+call get_document kind=spec proposed=true
 loop
 show
 confirm
@@ -499,7 +500,7 @@ Use this skill when the user asks what to work on next for a spec. It reads and 
 
 1. Call `get_document` with `ref` `spec/<slug>` and `kind` `tasks`, adding `proposed` true when the spec is a draft on its design branch (omit it for an accepted spec).
 2. From the plan section, list each stub with the criteria it covers. From the evidence section, note each criterion's evidence state and what is still unproven. From the readiness section, list the concerns that need attention, blocking ones first; if readiness was not supplied for this render, say so.
-3. Present a work list in this order: blocking readiness concerns, uncovered criteria (nothing covers them), stubs whose criteria have no evidence yet, then everything else. Quote ids so the human can find each item on the board.
+3. Present a work list in this order: blocking readiness concerns, criteria whose evidence detail reads "no implementing story", stubs whose criteria are still unproven, then everything else. Quote ids so the human can find each item on the board.
 4. If the human wants any of it changed, hand off to verdi-clarify or verdi-plan; this skill writes nothing.
 
 ```verdi-sequence
@@ -2189,7 +2190,10 @@ func TestTranscript_Plan(t *testing.T) {
 	tr := &transcript{t: t, srv: mcpserve.NewServer(root)}
 	seq := sequenceFor(t, "plan")
 	tr.call("get_design_context", map[string]any{"ref": "spec/" + draftSpecName})
-	text, _ := tr.call("get_document", map[string]any{"ref": "spec/" + draftSpecName, "kind": "plan", "proposed": true})
+	if text, isErr := tr.call("get_document", map[string]any{"ref": "spec/" + draftSpecName, "kind": "plan", "proposed": true}); isErr || !strings.Contains(text, "## Plan") {
+		t.Fatalf("plan document: %v\n%s", isErr, text)
+	}
+	text, _ := tr.call("get_document", map[string]any{"ref": "spec/" + draftSpecName, "kind": "spec", "proposed": true})
 	if strings.Count(text, "not yet planned.") != 1 || !strings.Contains(text, "ac-2") {
 		t.Fatalf("fixture must render exactly one uncovered criterion (ac-2):\n%s", text)
 	}
@@ -2197,8 +2201,8 @@ func TestTranscript_Plan(t *testing.T) {
 		t.Fatal(text)
 	}
 	text, _ = tr.call("get_document", map[string]any{"ref": "spec/" + draftSpecName, "kind": "plan", "proposed": true})
-	if strings.Contains(text, "not yet planned.") {
-		t.Fatalf("ac-2 still uncovered:\n%s", text)
+	if !strings.Contains(text, "cover-ac-2") {
+		t.Fatalf("plan document does not list the new stub:\n%s", text)
 	}
 	tr.assertFollows(seq, 1)
 	tr.write(t.TempDir(), "plan")
