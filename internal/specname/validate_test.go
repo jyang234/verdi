@@ -280,6 +280,119 @@ func TestValidateSuccessorName_ExistsOnBase(t *testing.T) {
 	})
 }
 
+// TestExistsOnBaseDetail is F1's own table (the wave-3 review's fix
+// round on this lane): both wordings ExistsOnBaseDetail can render,
+// side by side. The non-HEAD case is asserted byte-for-byte identical to
+// the wording every caller used before F1 (the review's own instruction:
+// "leave the non-HEAD text byte-identical").
+func TestExistsOnBaseDetail(t *testing.T) {
+	cases := []struct {
+		name, baseRef, want string
+	}{
+		{
+			name: "taken", baseRef: "main",
+			want: `spec/taken already exists on main — this checkout is behind main; fetch/pull before starting a new spec of this name`,
+		},
+		{
+			name: "taken", baseRef: "origin/main",
+			want: `spec/taken already exists on origin/main — this checkout is behind origin/main; fetch/pull before starting a new spec of this name`,
+		},
+		{
+			// dc-7's disclosed no-origin fallback: baseRef IS the calling
+			// checkout's own current HEAD, so "behind HEAD" is backwards
+			// (the checkout is AT HEAD by definition) and there is no
+			// remote to fetch/pull from.
+			name: "taken", baseRef: "HEAD",
+			want: `spec/taken already exists at this branch's base (HEAD) though it is absent from the working tree; commit or restore it before reusing this name`,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.baseRef, func(t *testing.T) {
+			got := ExistsOnBaseDetail(tc.name, tc.baseRef)
+			if got != tc.want {
+				t.Fatalf("ExistsOnBaseDetail(%q, %q) = %q, want %q", tc.name, tc.baseRef, got, tc.want)
+			}
+			if tc.baseRef != "HEAD" && (containsAll(got, "HEAD") || containsAll(got, "restore")) {
+				t.Fatalf("ExistsOnBaseDetail(%q, %q) = %q leaks HEAD-fallback wording into a real-ref case", tc.name, tc.baseRef, got)
+			}
+		})
+	}
+}
+
+// TestValidateSuccessorName_ExistsOnBase_HeadFallback is F1's end-to-end
+// witness, reproducing the reviewer's exact proof scenario: a fresh,
+// remote-less store (dc-7's disclosed HEAD fallback — no "origin" remote
+// configured at all) where a spec is committed, then its working-tree
+// directory is deleted WITHOUT committing that deletion. The two
+// working-tree checks (store.Active/ArchiveSpecDir stats) find nothing —
+// the name looks free — but it is still exactly as taken as it was, one
+// commit ago, at this branch's own base (HEAD). Before F1 this refused
+// with "already exists on HEAD — this checkout is behind HEAD; fetch/pull
+// …" — true nowhere (the checkout IS at HEAD; there is no remote at all)
+// and actively misleading (there is nothing to fetch or pull).
+func TestValidateSuccessorName_ExistsOnBase_HeadFallback(t *testing.T) {
+	ctx := context.Background()
+	repo := fixturegit.Build(t, []fixturegit.Layer{{
+		Files: map[string]string{
+			store.ActiveSpecRelPath("deleted-locally"): "committed, then deleted from the working tree\n",
+			".verdi/verdi.yaml":                        "schema: verdi.layout/v1\n",
+		},
+		Message: "seed store with deleted-locally",
+	}})
+	// No "origin" remote at all — dc-7's own precondition for baseRef to
+	// resolve to the literal string "HEAD" (resolveDesignStartBase /
+	// stubinstantiate.ResolveDesignBranchBase's own disclosed fallback);
+	// this test drives ValidateSuccessorName directly with that same
+	// literal, exactly as every one of the four callers would pass it.
+	if err := os.RemoveAll(filepath.Join(repo.Dir, ".verdi", "specs", "active", "deleted-locally")); err != nil {
+		t.Fatalf("RemoveAll: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(repo.Dir, ".verdi", "specs", "active", "deleted-locally")); !os.IsNotExist(err) {
+		t.Fatalf("test setup: deleted-locally must be ABSENT from the working tree")
+	}
+
+	_, err := ValidateSuccessorName(ctx, repo.Dir, "deleted-locally", "HEAD")
+	var nerr *NameError
+	if !errors.As(err, &nerr) || nerr.Reason != ReasonExistsOnBase {
+		t.Fatalf("ValidateSuccessorName = %v, want a *NameError with reason %q", err, ReasonExistsOnBase)
+	}
+	want := "specname: spec/deleted-locally already exists at this branch's base (HEAD) though it is absent from the working tree; commit or restore it before reusing this name"
+	if got := nerr.Error(); got != want {
+		t.Fatalf("Detail = %q, want %q", got, want)
+	}
+	if containsAll(nerr.Error(), "behind HEAD") || containsAll(nerr.Error(), "fetch") {
+		t.Fatalf("Detail = %q, still carries the wrong-advice wording F1 closes", nerr.Error())
+	}
+}
+
+// TestValidateSuccessorName_BaseRefOperationalErrorFailsClosed (F4,
+// optional half, the wave-3 review's own fix round on this lane) proves
+// the base-ref probe's OTHER failure shape: gitx.BlobAt returning a real
+// operational error (as opposed to found=true/false) propagates as a
+// plain wrapped Go error, never silently swallowed or misreported as a
+// *NameError refusal. root is a plain t.TempDir() with no git repository
+// at all — the simplest reproduction of BlobAt's own "gitx: BlobAt(...)"
+// wrapped failure (a real `git ls-tree` invocation against a directory
+// that is not a repository), reached only after the two working-tree
+// checks (both vacuously pass: nothing exists in an empty temp dir).
+func TestValidateSuccessorName_BaseRefOperationalErrorFailsClosed(t *testing.T) {
+	root := t.TempDir()
+	_, err := ValidateSuccessorName(context.Background(), root, "fresh-name", "main")
+	if err == nil {
+		t.Fatal("ValidateSuccessorName = nil error, want BlobAt's operational failure propagated")
+	}
+	var nerr *NameError
+	if errors.As(err, &nerr) {
+		t.Fatalf("ValidateSuccessorName = %v (*NameError, reason %q), want a plain operational error — a git-plumbing failure is not a naming refusal", err, nerr.Reason)
+	}
+	if !containsAll(err.Error(), "specname:") || !containsAll(err.Error(), "main") {
+		t.Fatalf("error = %q, want it to name the base ref it was checking", err.Error())
+	}
+	if !containsAll(err.Error(), "gitx: BlobAt") {
+		t.Fatalf("error = %q, want gitx.BlobAt's own wrapped context preserved (%%w)", err.Error())
+	}
+}
+
 // containsAll is strings.Contains under this file's own established name
 // (mirrors cmd/verdi's own test-local "contains" helper convention).
 func containsAll(s, substr string) bool {

@@ -14,6 +14,11 @@ misleading "internal error" wording for a pinned `--name` on the
 `--supersedes` path (this lane's fourth item) is closed as a corollary: the
 predicate now catches it before `supersede.Compose` ever runs.
 
+Opus review at `4c041daf` returned ACCEPT-WITH-MINOR (no Critical/Important;
+four Minor findings F1-F4, all addressed in one fix commit below; F5 and a
+new UAT-035 tracking note accepted as disclosed, no code change). See
+"Review-fix wave" below.
+
 ## Risk tier
 
 2 (name validation and collision predicates on every branch-cutting
@@ -42,6 +47,8 @@ F-1's UAT-033 fix, per the dispatch.
 - `cmd/verdi/designsupersede.go` — same reorder and predicate-call shape, via the `supersede.` re-export (this caller IS supersede-flavored). `cmd/verdi/designsupersede_test.go` — five new subtests in `TestRunDesignStartSupersede_Negative`, plus a new minimal-valid-spec fixture constant (see "Judgment call 6" below).
 - `internal/workbench/boardspecapi.go` — `actionCreate`: old inline `specNameRe` regex plus two bare zone stats replaced by `stubinstantiate.ResolveDesignBranchBase` + `specname.ValidateSuccessorName` (this caller supersedes nothing, so it imports `specname` directly rather than through the `supersede` re-export). `actionRevise`: base resolved first, then the `supersede.` re-export call with the base ref, folding the action's own separate archive-zone stat into the one predicate call. `internal/workbench/createaction_test.go` (+2 tests), `internal/workbench/reviseaction_test.go` (+2 tests, one with a custom two-branch fixturegit fixture).
 - `docs/superpowers/reports/2026-09-17-uat-fu-names.md` — this report.
+
+**Review-fix wave (one commit on top of `4c041daf`):** `internal/specname/validate.go` (F1 — new exported `ExistsOnBaseDetail`), `internal/specname/validate_test.go` (F1's table + end-to-end HEAD-fallback test; F4's optional `BaseRefOperationalErrorFailsClosed`); `internal/supersede/validate.go` (F2 — func var → forwarding func); `internal/stubinstantiate/stubinstantiate.go` (F3 — comment-attachment reorder only, no behavior change); `cmd/verdi/design.go`, `cmd/verdi/designsupersede.go` (+ new `specname` import), `internal/workbench/boardspecapi.go` (all four callers now call `specname.ExistsOnBaseDetail` instead of re-deriving the wording); `internal/workbench/createaction_test.go` (F4 — the behind-checkout regression lock for `create`).
 
 ## Contract implemented
 
@@ -346,13 +353,143 @@ dispatch, "e2e 78 runs at the wave gate") and `internal/showcasealign`'s
 `lint-showcase`/`showcase-coverage` targets (a separate corpus, untouched
 by this lane, not in the dispatched command list).
 
+### Review-fix wave GREEN (the reviewer's own requested command set, run at the fix commit)
+
+```
+$ go test -race -count=1 ./internal/specname/... ./internal/supersede/... ./internal/stubinstantiate/... ./internal/workbench/ -run 'Create|Revise|BehindCheckout'
+ok  	github.com/jyang234/verdi/internal/specname	[no tests match the filter — its own suite verified separately above]
+ok  	github.com/jyang234/verdi/internal/supersede	[no tests match the filter — its own suite verified separately above]
+ok  	github.com/jyang234/verdi/internal/stubinstantiate	[no tests match the filter — its own suite verified separately above]
+ok  	github.com/jyang234/verdi/internal/workbench	20.0s (every Create/Revise/BehindCheckout test, including the two new F1/F4 witnesses)
+
+$ go test -race -count=1 ./cmd/verdi/ -run 'Design|Supersede'
+ok  	github.com/jyang234/verdi/cmd/verdi	35.4s
+
+$ go test -count=1 ./internal/specalign/ -run TestVocabProseWitness
+ok  	github.com/jyang234/verdi/internal/specalign	1.3s
+
+$ gofmt -l .
+(empty — one alignment fix applied to internal/specname/validate_test.go before this run, via gofmt -w)
+
+$ go vet ./cmd/verdi/ ./internal/supersede/ ./internal/stubinstantiate/ ./internal/workbench/ ./internal/specname/
+(clean)
+
+$ golangci-lint run ./cmd/... ./internal/supersede/... ./internal/stubinstantiate/... ./internal/workbench/... ./internal/specname/...
+0 issues.
+```
+
+Re-run for full confidence beyond the reviewer's exact list: `go test -race -count=1 ./internal/specname/...` (all 11 tests including the three new ones, ok); `go build ./...` (clean); full `go test -race -count=1 ./internal/workbench/...` (146.3s, ok); full `go test -count=1 ./internal/specalign/` (143.6s, ok, not just the one vocab-witness test).
+
 ## Reviewer verdict
 
-(blank — awaiting the independent Opus review this risk tier requires)
+Opus review at `4c041daf` returned **ACCEPT-WITH-MINOR**: no Critical or
+Important findings; UAT-030/031/032 confirmed met on all four callers; the
+base-ref probe independently falsified (by the reviewer's own probe) on
+three of the four surfaces before F1's fix. Four Minor findings (F1-F4)
+required a fix; two items were accepted as disclosed with no code change
+(F5; the UAT-035 tracking note) — see "Review-fix wave" below.
+
+## Review-fix wave (Opus ACCEPT-WITH-MINOR at 4c041daf → fix commit)
+
+**F1** (`internal/specname/validate.go:183`, `ReasonExistsOnBase`'s
+`Detail`, rendered by all four callers): in dc-7's no-origin fallback
+`baseRef == "HEAD"`, the pre-fix wording ("...already exists on HEAD —
+this checkout is behind HEAD; fetch/pull...") is backwards (the checkout
+IS at HEAD by definition) and cites a remedy (fetch/pull) that does not
+exist (no remote is configured at all) — reachable, per the reviewer's own
+proof, whenever a no-origin store has a spec committed at HEAD but its
+working-tree directory deleted without committing that deletion. Fixed by
+extracting the wording into one new exported function,
+`specname.ExistsOnBaseDetail(name, baseRef string) string`, branching on
+`baseRef == "HEAD"`; the non-HEAD branch is byte-identical to the old
+inline text. All four callers (design.go, designsupersede.go,
+boardspecapi.go's `actionCreate` and `actionRevise`) now call this ONE
+function instead of each re-deriving the same string, closing a
+copy-paste seam that predated this finding. Table-proven in
+`internal/specname/validate_test.go`: `TestExistsOnBaseDetail` (both
+wordings, plus a negative assertion that the HEAD wording never leaks into
+a real-ref case) and `TestValidateSuccessorName_ExistsOnBase_HeadFallback`
+(the reviewer's exact end-to-end scenario, fixturegit-backed: a
+remote-less repo, a spec committed then deleted from the working tree
+without committing the deletion, `ValidateSuccessorName(ctx, root, name,
+"HEAD")` refusing with the corrected wording, asserted to contain neither
+"behind HEAD" nor "fetch").
+
+**F2** (`internal/supersede/validate.go:56`): `var ValidateSuccessorName =
+specname.ValidateSuccessorName` was a mutable package-level func var —
+reassignable by any importer, an unnecessary monkey-patch surface for a
+predicate every branch-cutting creation surface depends on. Replaced with
+a forwarding function of the identical signature
+(`func ValidateSuccessorName(ctx context.Context, root, name, baseRef
+string) (artifact.Ref, error) { return specname.ValidateSuccessorName(ctx,
+root, name, baseRef) }`); the `NameError` type alias and the `ReasonXxx`
+constants are unaffected (F2 named only the func var).
+
+**F3** (`internal/stubinstantiate/stubinstantiate.go:73-100`): my own
+earlier insertion put `ResolveDesignBranchBase`'s new doc comment directly
+below `resolveDesignBranchBase`'s existing one with no intervening blank
+line — Go's doc-comment attachment rule (a comment block with no blank
+line before a declaration attaches to THAT declaration) merged the two
+into one combined block and attached the whole thing to
+`ResolveDesignBranchBase`, leaving `resolveDesignBranchBase` with no doc
+comment godoc would show at all. Fixed by moving `ResolveDesignBranchBase`
+(and its own comment) to AFTER `resolveDesignBranchBase`'s full body, with
+a blank line separating the two — verified with `go doc -all .` from
+inside the package (only `ResolveDesignBranchBase` is exported and listed,
+carrying exactly its own text; a direct read of the source confirms
+`resolveDesignBranchBase`'s original comment is now correctly, and
+solely, attached to itself).
+
+**F4** (regression lock + optional BlobAt-operational-error case): added
+`TestBoardSpec_Create_BehindCheckout_NameOnMainRefused` to
+`internal/workbench/createaction_test.go`, mirroring
+`TestBoardSpec_Revise_BehindCheckout_NameOnMainRefused`'s exact fixture
+shape (reusing the same `behindCheckoutFillerSpec` constant, same package)
+— all four callers now carry an identical UAT-031 regression lock. Also
+took the optional half: `TestValidateSuccessorName_BaseRefOperationalErrorFailsClosed`
+in `internal/specname/validate_test.go` proves `gitx.BlobAt` returning a
+genuine operational error (not `found=true`/`found=false`) propagates as a
+plain wrapped Go error — never a `*NameError`, never swallowed — via the
+simplest reproduction (a `t.TempDir()` with no git repository at all, so
+`git ls-tree` itself fails); asserts the error is NOT a `*NameError`
+(`errors.As` false) and that `gitx.BlobAt`'s own `%w`-wrapped context
+survives through `specname`'s own wrap.
+
+**F5, accepted as disclosed (no code change):** hoisting base resolution
+ahead of the name check (and, on the plain path, ahead of the unrelated
+`--kind story` ref checks — Judgment call 4) means `design start`'s own
+"design start: base main @ ..." disclosure line now prints to stdout on
+some refusal paths that used to print nothing there at all — any request
+refused for a bad name, or (plain path only) a bad/unconfigured story ref,
+where before this lane's fix the relevant check ran BEFORE base resolution
+and short-circuited it. Exit codes and stderr are unchanged on every such
+path (verified: every pre-existing test in `design_test.go` and
+`designsupersede_test.go` still passes unmodified). The board's
+`create`/`revise` actions have no stdout-disclosure concept (HTTP
+responses only), so F5 does not apply there.
+
+**Tracked out of this lane (UAT-035):** `verdi design start --from-stub`
+(`cmd/verdi/designfromstub.go`) and the board's `stub-instantiate` action
+(`internal/workbench/boardspecapi.go actionStubInstantiate`) both scaffold
+a spec by SLUG through `internal/stubinstantiate.Instantiate`/
+`CommitScaffoldBranch` directly, without ever calling
+`specname.ValidateSuccessorName` — so neither the archive-zone check
+(UAT-032) nor the base-ref check (UAT-031) covers them, and a stub slug is
+never parsed as a ref at all (UAT-030's fragment/pin decorations are not
+even reachable there today, since a stub's own declared `slug:` is
+kebab-case-constrained at the frontmatter-decode layer, but the archive
+and base-ref gaps are real). Out of this lane's dispatched write set
+(neither file is named in the contract); recorded here as the review's own
+instruction, under a new tracker id (UAT-035) for a future lane.
 
 ## Fix range and closure verdict
 
-(blank)
+Fix range: `4c041daf..<this commit>` (one commit, `internal/specname`,
+`internal/supersede`, `internal/stubinstantiate`, `cmd/verdi/design.go`,
+`cmd/verdi/designsupersede.go`, `internal/workbench/boardspecapi.go`, and
+the three touched test files carrying F1's/F4's new coverage).
+
+Closure verdict: (blank — awaiting the reviewer's one closure check)
 
 ## Residual risks
 
@@ -372,19 +509,24 @@ by this lane, not in the dispatched command list).
   once for the check and once inside `CommitScaffoldBranch`, per that
   function's own doc comment: "cheap: a couple of git plumbing reads, no
   writes").
-- No test exercises `ValidateSuccessorName`'s `baseRef != ""` path failing
-  with an operational `BlobAt` error (as opposed to `found=false`/`found=true`) —
-  the wrapped-`%w` branch in `internal/specname/validate.go`. `gitx.BlobAt`'s
-  own tests already cover its operational-failure shapes; this predicate's
-  own wrap of that error was judged not to need a duplicate fixture within
-  this lane's scope.
+- ~~No test exercises `ValidateSuccessorName`'s `baseRef != ""` path
+  failing with an operational `BlobAt` error~~ — **closed in the
+  review-fix wave** (F4's optional half):
+  `TestValidateSuccessorName_BaseRefOperationalErrorFailsClosed`.
 - I did not add a test for `actionCreate`/`actionRevise` reporting a
   `stubinstantiate.ResolveDesignBranchBase` failure (e.g. an unresolvable
   default branch) as a 400 — this failure mode already existed identically
   at `CommitScaffoldBranch`'s own call inside both actions before this fix
   (same error, surfacing slightly later); moving it earlier does not change
   its shape or the HTTP status every other error in this dispatch already
-  maps to (400, uniformly, confirmed by reading `boardSpecAPIHandler`).
+  maps to (400, uniformly, confirmed by reading `boardSpecAPIHandler`). Not
+  raised by the reviewer; left as originally disclosed.
+- **UAT-035 (new, tracked, out of this lane):** `--from-stub` and the
+  board's `stub-instantiate` action still scaffold by slug without calling
+  `specname.ValidateSuccessorName` — neither the archive-zone nor the
+  base-ref check covers them. See "Review-fix wave" above for the full
+  disclosure; recorded here per the reviewer's instruction, for whoever
+  picks up UAT-035.
 
 ## Integration prerequisites
 

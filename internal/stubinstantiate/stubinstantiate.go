@@ -82,21 +82,6 @@ type ResolvedBase struct {
 // default branch is exactly the stale-default hazard UAT-021 reported and
 // refuses instead, with the one shared diagnostic text every verb that
 // needs it reuses (specstate.UnresolvedDefaultBranchMessage).
-// ResolveDesignBranchBase is resolveDesignBranchBase, exported (UAT-030/
-// 031/032 fix round) so a caller that needs the branch's base ref BEFORE
-// CommitScaffoldBranch itself runs — the board's create and Revise actions,
-// to give internal/specname.ValidateSuccessorName's third check (UAT-031)
-// the SAME ref CommitScaffoldBranch will actually cut the branch from, so
-// the collision check and the cut can never disagree — can call the
-// identical resolution instead of guessing or re-implementing it. Nothing
-// else about this function changes: CommitScaffoldBranch still calls the
-// unexported resolveDesignBranchBase itself, and a caller that goes on to
-// call CommitScaffoldBranch afterward will get this exact same ResolvedBase
-// back a second time (cheap: a couple of git plumbing reads, no writes).
-func ResolveDesignBranchBase(ctx context.Context, root string) (ResolvedBase, error) {
-	return resolveDesignBranchBase(ctx, root)
-}
-
 func resolveDesignBranchBase(ctx context.Context, root string) (ResolvedBase, error) {
 	if branch, ok := specstate.ResolveDefaultBranch(ctx, root); ok {
 		commit, err := gitx.RevParse(ctx, root, branch.Ref)
@@ -122,6 +107,21 @@ func resolveDesignBranchBase(ctx context.Context, root string) (ResolvedBase, er
 		// origin IS configured, but ResolveDefaultBranch still failed.
 		return ResolvedBase{}, errors.New(specstate.UnresolvedDefaultBranchMessage(ctx, root))
 	}
+}
+
+// ResolveDesignBranchBase is resolveDesignBranchBase, exported (UAT-030/
+// 031/032 fix round) so a caller that needs the branch's base ref BEFORE
+// CommitScaffoldBranch itself runs — the board's create and Revise actions,
+// to give internal/specname.ValidateSuccessorName's third check (UAT-031)
+// the SAME ref CommitScaffoldBranch will actually cut the branch from, so
+// the collision check and the cut can never disagree — can call the
+// identical resolution instead of guessing or re-implementing it. Nothing
+// else about this function changes: CommitScaffoldBranch still calls the
+// unexported resolveDesignBranchBase itself, and a caller that goes on to
+// call CommitScaffoldBranch afterward will get this exact same ResolvedBase
+// back a second time (cheap: a couple of git plumbing reads, no writes).
+func ResolveDesignBranchBase(ctx context.Context, root string) (ResolvedBase, error) {
+	return resolveDesignBranchBase(ctx, root)
 }
 
 // CommitScaffoldBranch lands content as .verdi/specs/active/<slug>/spec.md

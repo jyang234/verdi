@@ -16,6 +16,7 @@ import (
 	"testing"
 
 	"github.com/jyang234/verdi/internal/artifact"
+	"github.com/jyang234/verdi/internal/fixturegit"
 	"github.com/jyang234/verdi/internal/gitx"
 )
 
@@ -435,6 +436,78 @@ func TestBoardSpec_Create_ArchivedNameRefused(t *testing.T) {
 		t.Errorf("refusal %q does not name the archive collision (guide 6.1)", rec.Body.String())
 	}
 	if _, err := gitx.RevParse(context.Background(), repo.Dir, "refs/heads/design/retired"); err == nil {
+		t.Fatal("refused create still cut a design branch")
+	}
+}
+
+// TestBoardSpec_Create_BehindCheckout_NameOnMainRefused is UAT-031's own
+// witness on the board's create action (F4, the wave-3 review's own fix
+// round on this lane): the same fixture shape as reviseaction_test.go's
+// TestBoardSpec_Revise_BehindCheckout_NameOnMainRefused, so all four
+// branch-cutting callers (plain design start, --supersedes, board revise,
+// board create) carry the identical UAT-031 regression lock. The
+// collision check used to stat only the serving checkout's working tree,
+// while the new branch is actually cut from the resolved default branch
+// (stubinstantiate.ResolveDesignBranchBase — the SAME resolution
+// CommitScaffoldBranch itself uses to cut the branch, so the check and
+// the cut can never disagree). A serving checkout left behind main could
+// therefore create into a name whose tree silently replaced a same-named
+// spec already landed there.
+func TestBoardSpec_Create_BehindCheckout_NameOnMainRefused(t *testing.T) {
+	ctx := context.Background()
+	repo := fixturegit.Build(t, []fixturegit.Layer{{
+		Files: map[string]string{
+			".verdi/specs/active/" + scopingAcceptedName + "/spec.md": scopingAcceptedSpec,
+			".verdi/.gitignore": "data/\n",
+			".verdi/verdi.yaml": "schema: verdi.layout/v1\n",
+		},
+		Message: "seed scoping accepted fixture",
+	}})
+	t.Setenv("CI_DEFAULT_BRANCH", "main")
+
+	// Cut the serving checkout's own branch, then land a spec of the
+	// target successor name on main ONLY, and leave the checkout ON the
+	// serving branch — behind main, exactly as the UAT reproduction found
+	// it (a serving checkout, or a /b/{branch} managed worktree, cut
+	// before the spec landed).
+	if err := gitx.CheckoutNewBranch(ctx, repo.Dir, "behind"); err != nil {
+		t.Fatalf("CheckoutNewBranch(behind): %v", err)
+	}
+	if err := gitx.CheckoutExisting(ctx, repo.Dir, "main"); err != nil {
+		t.Fatalf("CheckoutExisting(main): %v", err)
+	}
+	specDir := filepath.Join(repo.Dir, ".verdi", "specs", "active", "taken-on-main")
+	if err := os.MkdirAll(specDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// behindCheckoutFillerSpec (reviseaction_test.go, same package) is a
+	// real strict-decodable spec, not a one-line placeholder: create does
+	// not corpus-scan the default branch the way supersede.Resolve does,
+	// but reusing the identical fixture constant keeps the two tests'
+	// shape byte-comparable and costs nothing.
+	if err := os.WriteFile(filepath.Join(specDir, "spec.md"), []byte(behindCheckoutFillerSpec), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := gitx.AddAll(ctx, repo.Dir); err != nil {
+		t.Fatalf("AddAll: %v", err)
+	}
+	if _, err := gitx.CreateCommit(ctx, repo.Dir, "land taken-on-main on main"); err != nil {
+		t.Fatalf("CreateCommit: %v", err)
+	}
+	if err := gitx.CheckoutExisting(ctx, repo.Dir, "behind"); err != nil {
+		t.Fatalf("CheckoutExisting(behind): %v", err)
+	}
+
+	h := NewHandler(repo.Dir)
+	rec := postBoardAPI(t, h, scopingAcceptedName, "create",
+		`{"name":"taken-on-main","values":{"Problem":"P","Outcome":"O"},"acs":["ac-1"]}`)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("create(name on main, absent from behind checkout) = %d, want 400\n%s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "main") {
+		t.Errorf("refusal does not name the base ref the checkout is behind:\n%s", rec.Body.String())
+	}
+	if _, err := gitx.RevParse(ctx, repo.Dir, "refs/heads/design/taken-on-main"); err == nil {
 		t.Fatal("refused create still cut a design branch")
 	}
 }

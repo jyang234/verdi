@@ -95,6 +95,35 @@ func (e *NameError) Error() string { return e.Detail }
 
 func (e *NameError) Unwrap() error { return e.Err }
 
+// ExistsOnBaseDetail renders ReasonExistsOnBase's operator-facing "why" —
+// exported (F1, the wave-3 review's own fix round on this lane) so every
+// caller's own switch-case rendering reuses the identical wording instead
+// of each re-deriving it (as all four originally did, byte-for-byte
+// identical apart from their own verb-name prefix — this is that shared
+// text, now the single place it is spelled).
+//
+// baseRef == "HEAD" is dc-7's own disclosed fallback (stubinstantiate.
+// ResolvedBase.HeadDisclosed / resolveDesignStartBase's "HEAD" return): no
+// "origin" remote is configured at all, so the branch's base IS the
+// calling checkout's own current HEAD. In that shape "this checkout is
+// behind HEAD" is not just imprecise, it is backwards — the checkout IS at
+// HEAD by definition — and "fetch/pull" names a remote that does not
+// exist. The reachable witness: a fresh, remote-less store where the spec
+// is committed at HEAD but its working-tree directory was since deleted
+// without committing that deletion — store.ActiveSpecDir's stat (the
+// second check, above) finds nothing, yet the name is still exactly as
+// taken as it was, one commit ago, at this branch's own base. Every OTHER
+// baseRef (a real branch or remote-tracking ref name, e.g. "main" or
+// "origin/main") keeps the original wording byte-for-byte: there the
+// checkout genuinely can be behind that ref, and fetch/pull is the correct
+// remedy.
+func ExistsOnBaseDetail(name, baseRef string) string {
+	if baseRef == "HEAD" {
+		return fmt.Sprintf("spec/%s already exists at this branch's base (HEAD) though it is absent from the working tree; commit or restore it before reusing this name", name)
+	}
+	return fmt.Sprintf("spec/%s already exists on %s — this checkout is behind %s; fetch/pull before starting a new spec of this name", name, baseRef, baseRef)
+}
+
 // ValidateSuccessorName proves every precondition a branch-cutting creation
 // surface shares before composing or scaffolding anything under name: it
 // parses as a plain (unpinned, unfragmented) spec name — returned as an
@@ -180,7 +209,7 @@ func ValidateSuccessorName(ctx context.Context, root, name, baseRef string) (art
 					Reason: ReasonExistsOnBase,
 					Name:   name,
 					Path:   relPath,
-					Detail: fmt.Sprintf("specname: spec/%s already exists on %s — this checkout is behind %s; fetch/pull before starting a new spec of this name", name, baseRef, baseRef),
+					Detail: "specname: " + ExistsOnBaseDetail(name, baseRef),
 				}
 			}
 		}

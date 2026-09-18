@@ -31,6 +31,7 @@ import (
 	"github.com/jyang234/verdi/internal/atomicfile"
 	"github.com/jyang234/verdi/internal/gitx"
 	"github.com/jyang234/verdi/internal/model"
+	"github.com/jyang234/verdi/internal/specname"
 	"github.com/jyang234/verdi/internal/store"
 	"github.com/jyang234/verdi/internal/supersede"
 	"github.com/jyang234/verdi/internal/upstream"
@@ -219,7 +220,7 @@ func runDesignStartSupersede(ctx context.Context, root, predName, newName string
 		case errors.As(err, &nerr) && nerr.Reason == supersede.ReasonArchivedExists:
 			fmt.Fprintf(stderr, "design start --supersedes: spec %s already exists under specs/archive/ — names are unique across active and archived specs (guide 6.1)\n", nerr.Name)
 		case errors.As(err, &nerr) && nerr.Reason == supersede.ReasonExistsOnBase:
-			fmt.Fprintf(stderr, "design start --supersedes: spec/%s already exists on %s — this checkout is behind %s; fetch/pull before starting a new spec of this name\n", nerr.Name, baseRef, baseRef)
+			fmt.Fprintf(stderr, "design start --supersedes: %s\n", specname.ExistsOnBaseDetail(nerr.Name, baseRef))
 		case errors.As(err, &nerr) && nerr.Reason == supersede.ReasonInvalidName:
 			fmt.Fprintf(stderr, "design start --supersedes: --name %q is not a valid spec name: %v\n", newName, errors.Unwrap(nerr))
 		default:

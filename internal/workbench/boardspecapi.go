@@ -539,7 +539,7 @@ func (s *boardSpecServer) actionCreate(ctx context.Context, name string, proj *B
 		case errors.As(err, &nerr) && nerr.Reason == specname.ReasonArchivedExists:
 			return fmt.Errorf("spec %s already exists under specs/archive/ — names are unique across active and archived specs (guide 6.1)", nerr.Name)
 		case errors.As(err, &nerr) && nerr.Reason == specname.ReasonExistsOnBase:
-			return fmt.Errorf("spec/%s already exists on %s — this checkout is behind %s; fetch/pull before starting a new spec of this name", nerr.Name, base.Ref, base.Ref)
+			return errors.New(specname.ExistsOnBaseDetail(nerr.Name, base.Ref))
 		default:
 			return err
 		}
@@ -714,7 +714,7 @@ func (s *boardSpecServer) actionRevise(ctx context.Context, name string, proj *B
 		case errors.As(err, &nerr) && nerr.Reason == supersede.ReasonArchivedExists:
 			return boardAPIResponse{}, fmt.Errorf("spec %s already exists under specs/archive/ — names are unique across active and archived specs (guide 6.1)", nerr.Name)
 		case errors.As(err, &nerr) && nerr.Reason == supersede.ReasonExistsOnBase:
-			return boardAPIResponse{}, fmt.Errorf("spec/%s already exists on %s — this checkout is behind %s; fetch/pull before starting a new spec of this name", nerr.Name, base.Ref, base.Ref)
+			return boardAPIResponse{}, errors.New(specname.ExistsOnBaseDetail(nerr.Name, base.Ref))
 		default:
 			return boardAPIResponse{}, err
 		}

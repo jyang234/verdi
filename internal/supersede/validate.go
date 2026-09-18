@@ -28,7 +28,12 @@
 // the two never collide.
 package supersede
 
-import "github.com/jyang234/verdi/internal/specname"
+import (
+	"context"
+
+	"github.com/jyang234/verdi/internal/artifact"
+	"github.com/jyang234/verdi/internal/specname"
+)
 
 // NameError is specname.NameError, re-exported under this package's own
 // established name (see the package doc comment above).
@@ -48,9 +53,15 @@ const (
 	ReasonExistsOnBase    = specname.ReasonExistsOnBase
 )
 
-// ValidateSuccessorName is specname.ValidateSuccessorName, re-exported
-// (see the package doc comment above). ctx is required (BlobAt's base-ref
-// probe, run only when baseRef != ""); baseRef is the ref the caller's new
-// branch will actually be cut from, or "" to skip that third check
-// (UAT-031).
-var ValidateSuccessorName = specname.ValidateSuccessorName
+// ValidateSuccessorName forwards to specname.ValidateSuccessorName, one
+// call deep (see the package doc comment above) — a plain function, not a
+// package-level func var (F2, the wave-3 review's own fix round on this
+// lane): a var of function type is reassignable by any code that imports
+// this package, an accidental monkey-patch hazard this predicate's own
+// callers (every branch-cutting creation surface) must never be exposed
+// to. ctx is required (BlobAt's base-ref probe, run only when baseRef !=
+// ""); baseRef is the ref the caller's new branch will actually be cut
+// from, or "" to skip that third check (UAT-031).
+func ValidateSuccessorName(ctx context.Context, root, name, baseRef string) (artifact.Ref, error) {
+	return specname.ValidateSuccessorName(ctx, root, name, baseRef)
+}

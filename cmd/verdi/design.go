@@ -474,7 +474,7 @@ func runDesignStart(ctx context.Context, root string, kind artifact.SpecClass, s
 		case errors.As(err, &nerr) && nerr.Reason == specname.ReasonArchivedExists:
 			fmt.Fprintf(stderr, "design start: spec %s already exists under specs/archive/ — names are unique across active and archived specs (guide 6.1)\n", nerr.Name)
 		case errors.As(err, &nerr) && nerr.Reason == specname.ReasonExistsOnBase:
-			fmt.Fprintf(stderr, "design start: spec/%s already exists on %s — this checkout is behind %s; fetch/pull before starting a new spec of this name\n", nerr.Name, baseRef, baseRef)
+			fmt.Fprintf(stderr, "design start: %s\n", specname.ExistsOnBaseDetail(nerr.Name, baseRef))
 		case errors.As(err, &nerr) && nerr.Reason == specname.ReasonInvalidName:
 			fmt.Fprintf(stderr, "design start: --name %q is not a valid spec name: %v\n", name, errors.Unwrap(nerr))
 		default:
