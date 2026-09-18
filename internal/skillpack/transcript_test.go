@@ -337,13 +337,43 @@ func sequenceFor(t *testing.T, skill string) skillpack.Sequence {
 	return seq
 }
 
-func mutateArgs(t *testing.T, root string, op map[string]any) map[string]any {
+// designContextIdentity decodes the `identity` object out of a
+// get_design_context RESULT and returns exactly the three fields
+// mutate_draft's `expected` carries. This is the hand-off the
+// clarify/plan skills' step 1 instructs ("Keep `identity` (`checkout`,
+// `branch`, `head`) ... every `mutate_draft` call carries exactly those
+// three as `expected`"): before final-review F9 the replay rebuilt
+// `expected` from draftmutation.ResolveCanonicalIdentity instead, so
+// the two sides agreed by construction — both being the same
+// draftmutation.Identity — and the transcript proved the call sequence
+// but never that what get_design_context HANDS an agent is what
+// mutate_draft accepts.
+func designContextIdentity(t *testing.T, contextResult string) map[string]any {
+	t.Helper()
+	var res struct {
+		Identity struct {
+			Checkout string `json:"checkout"`
+			Branch   string `json:"branch"`
+			Head     string `json:"head"`
+		} `json:"identity"`
+	}
+	if err := json.Unmarshal([]byte(contextResult), &res); err != nil {
+		t.Fatalf("decoding get_design_context result: %v\n%s", err, contextResult)
+	}
+	id := res.Identity
+	if id.Checkout == "" || id.Branch == "" || id.Head == "" {
+		t.Fatalf("get_design_context returned an incomplete identity %+v — the skills tell the agent to carry all three:\n%s", id, contextResult)
+	}
+	return map[string]any{"checkout": id.Checkout, "branch": id.Branch, "head": id.Head}
+}
+
+// mutateArgs builds a mutate_draft request carrying op. The base bytes
+// and their digest come from the spec file on disk (the draft the agent
+// is editing); `expected` is whatever get_design_context handed back,
+// never a second, independent resolution of the same identity (F9).
+func mutateArgs(t *testing.T, root string, identity map[string]any, op map[string]any) map[string]any {
 	t.Helper()
 	base, err := os.ReadFile(store.SpecPath(root, store.ZoneActive, draftSpecName))
-	if err != nil {
-		t.Fatal(err)
-	}
-	identity, err := draftmutation.ResolveCanonicalIdentity(context.Background(), root, "spec/"+draftSpecName, draftmutation.GitIdentityReader{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -351,7 +381,7 @@ func mutateArgs(t *testing.T, root string, op map[string]any) map[string]any {
 		"harness": "claude-code", "session": "transcript",
 		"schema": draftmutation.RequestSchema, "spec": "spec/" + draftSpecName,
 		"base_digest": draftmutation.DigestBytes(base), "base_spec_b64": base64.StdEncoding.EncodeToString(base),
-		"expected":   map[string]any{"checkout": identity.Checkout, "branch": identity.Branch, "head": identity.Head},
+		"expected":   identity,
 		"operations": []map[string]any{op},
 	}
 }
@@ -428,9 +458,11 @@ func TestTranscript_Clarify(t *testing.T) {
 	root := draftStore(t)
 	tr := &transcript{t: t, srv: mcpserve.NewServer(root)}
 	seq := sequenceFor(t, "clarify")
-	if text, isErr := tr.call("get_design_context", map[string]any{"ref": "spec/" + draftSpecName}); isErr {
-		t.Fatal(text)
+	contextText, isContextErr := tr.call("get_design_context", map[string]any{"ref": "spec/" + draftSpecName})
+	if isContextErr {
+		t.Fatal(contextText)
 	}
+	identity := designContextIdentity(t, contextText)
 	text, isErr := tr.call("get_document", map[string]any{"ref": "spec/" + draftSpecName, "kind": "spec", "proposed": true})
 	if isErr {
 		t.Fatal(text)
@@ -450,7 +482,7 @@ func TestTranscript_Clarify(t *testing.T) {
 	}
 	// One proposal, shown and confirmed, then written: a research stub claiming oq-2.
 	spike := true
-	if text, isErr := tr.call("mutate_draft", mutateArgs(t, root, map[string]any{"op": "add-stub", "slug": "answer-oq-2", "spike": spike, "resolves": []string{"oq-2"}})); isErr {
+	if text, isErr := tr.call("mutate_draft", mutateArgs(t, root, identity, map[string]any{"op": "add-stub", "slug": "answer-oq-2", "spike": spike, "resolves": []string{"oq-2"}})); isErr {
 		t.Fatal(text)
 	}
 	tr.assertFollows(seq, 1)
@@ -469,9 +501,11 @@ func TestTranscript_Plan(t *testing.T) {
 	root := draftStore(t)
 	tr := &transcript{t: t, srv: mcpserve.NewServer(root)}
 	seq := sequenceFor(t, "plan")
-	if text, isErr := tr.call("get_design_context", map[string]any{"ref": "spec/" + draftSpecName}); isErr {
-		t.Fatal(text)
+	contextText, isContextErr := tr.call("get_design_context", map[string]any{"ref": "spec/" + draftSpecName})
+	if isContextErr {
+		t.Fatal(contextText)
 	}
+	identity := designContextIdentity(t, contextText)
 	if text, isErr := tr.call("get_document", map[string]any{"ref": "spec/" + draftSpecName, "kind": "plan", "proposed": true}); isErr || !strings.Contains(text, "## Plan") {
 		t.Fatalf("plan document: %v\n%s", isErr, text)
 	}
@@ -490,7 +524,7 @@ func TestTranscript_Plan(t *testing.T) {
 	if !strings.Contains(objectBlock(t, text, "ac-2"), "Coverage: not yet planned.") {
 		t.Fatalf("ac-2 must be the uncovered criterion:\n%s", text)
 	}
-	if text, isErr := tr.call("mutate_draft", mutateArgs(t, root, map[string]any{"op": "add-stub", "slug": "cover-ac-2", "acceptance_criteria": []string{"ac-2"}})); isErr {
+	if text, isErr := tr.call("mutate_draft", mutateArgs(t, root, identity, map[string]any{"op": "add-stub", "slug": "cover-ac-2", "acceptance_criteria": []string{"ac-2"}})); isErr {
 		t.Fatal(text)
 	}
 	text, isErr = tr.call("get_document", map[string]any{"ref": "spec/" + draftSpecName, "kind": "plan", "proposed": true})
