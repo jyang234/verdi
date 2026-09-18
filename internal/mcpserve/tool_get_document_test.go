@@ -10,7 +10,7 @@ import (
 	"testing"
 
 	"github.com/jyang234/verdi/internal/fixturegit"
-	"github.com/jyang234/verdi/internal/readinesspilot"
+	"github.com/jyang234/verdi/internal/readinesspilot/readinesstest"
 	"github.com/jyang234/verdi/internal/store"
 )
 
@@ -285,61 +285,6 @@ func getDocumentDraftStore(t *testing.T) string {
 	return repo.Dir
 }
 
-// validReadinessConcern builds one PROVEN concern for the closed concern-
-// identity vocabulary (internal/readinesspilot/schema.go's
-// concernIdentity): id fixes the derived area and blocking flag, so these
-// are not arbitrary — mirrors that package's own (unexported, so
-// reproduced rather than imported) schema_test.go validConcern helper.
-func validReadinessConcern(id string, area readinesspilot.AreaID, blocking bool) readinesspilot.Concern {
-	return readinesspilot.Concern{
-		ID:        id,
-		Area:      area,
-		State:     readinesspilot.StateProven,
-		Blocking:  blocking,
-		Timing:    readinesspilot.TimingCurrent,
-		Summary:   "source-derived readiness fact",
-		Witnesses: []string{},
-		Destination: readinesspilot.Destination{
-			CLI: []string{},
-		},
-	}
-}
-
-// validReadinessSnapshot returns a Snapshot targeting ref that passes
-// Snapshot.Validate(): every one of the four fixed areas proven, no
-// attention items. Mirrors internal/readinesspilot/schema_test.go's own
-// (unexported) validSnapshot() — reproduced here for the same reason
-// validReadinessConcern is. TargetTitle/TargetClass/Branch/RequestDigest
-// are Validate()-only fields specdoc.WithReadiness never reads (it copies
-// only TargetRef/Head/CurrentFocus/StaleNotice/Areas/Attention into the
-// rendered document), so their exact values do not matter beyond
-// satisfying Validate().
-func validReadinessSnapshot(ref, head string) readinesspilot.Snapshot {
-	return readinesspilot.Snapshot{
-		TargetRef:     ref,
-		TargetTitle:   "Readiness test target",
-		TargetClass:   "feature",
-		Branch:        "main",
-		Head:          head,
-		RequestDigest: "sha256:" + strings.Repeat("a", 64),
-		Areas: []readinesspilot.Area{
-			{ID: readinesspilot.AreaShape, Label: "Define the work", State: readinesspilot.StateProven},
-			{ID: readinesspilot.AreaSuccess, Label: "Define success", State: readinesspilot.StateProven},
-			{ID: readinesspilot.AreaContext, Label: "Check constraints", State: readinesspilot.StateProven},
-			{ID: readinesspilot.AreaReview, Label: "Get approval", State: readinesspilot.StateProven},
-		},
-		CurrentFocus: "",
-		Attention:    []readinesspilot.Concern{},
-		AllConcerns: []readinesspilot.Concern{
-			validReadinessConcern("shape/problem", readinesspilot.AreaShape, true),
-			validReadinessConcern("success/contributor/static", readinesspilot.AreaSuccess, false),
-			validReadinessConcern("context/verdict", readinesspilot.AreaContext, true),
-			validReadinessConcern("review/action", readinesspilot.AreaReview, true),
-		},
-		StaleNotice: "Startup snapshot at " + head + "; restart verdi serve after an edit.",
-	}
-}
-
 // TestGetDocument_ReadinessWhenSnapshotTargetsSpec is R-W3-3: Backend.Readiness
 // reaches the loader (tool_get_document.go's Readiness: b.Readiness), which
 // supplies the Readiness section only when the snapshot's TargetRef names
@@ -348,7 +293,7 @@ func validReadinessSnapshot(ref, head string) readinesspilot.Snapshot {
 func TestGetDocument_ReadinessWhenSnapshotTargetsSpec(t *testing.T) {
 	t.Setenv("CI_DEFAULT_BRANCH", "main")
 	root := getDocumentFixtureStore(t)
-	snap := validReadinessSnapshot("spec/widget-retry", strings.Repeat("a", 40))
+	snap := readinesstest.ValidSnapshot("spec/widget-retry", strings.Repeat("a", 40))
 	if err := snap.Validate(); err != nil {
 		t.Fatal(err)
 	}
@@ -382,8 +327,8 @@ func TestGetDocument_ProposedRendersTheWorkingTreeDraft(t *testing.T) {
 	b := &Backend{Root: root}
 	// Accepted mode cannot see a draft main does not carry.
 	raw, _ := json.Marshal(map[string]any{"ref": "spec/sample", "kind": "spec"})
-	if text, isErr := decodeText(t, b.GetDocument(context.Background(), raw)); !isErr {
-		t.Fatalf("accepted mode must refuse a draft absent from the default branch: %s", text)
+	if text, isErr := decodeText(t, b.GetDocument(context.Background(), raw)); !isErr || !strings.Contains(text, "not found at") {
+		t.Fatalf("accepted mode must refuse a draft absent from the default branch (want an error containing %q): isErr=%v text=%q", "not found at", isErr, text)
 	}
 	// proposed:true renders the working tree, marked proposed.
 	raw, _ = json.Marshal(map[string]any{"ref": "spec/sample", "kind": "spec", "proposed": true})
