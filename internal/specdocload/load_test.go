@@ -12,6 +12,7 @@ import (
 	"github.com/jyang234/verdi/internal/fixturegit"
 	"github.com/jyang234/verdi/internal/readinesspilot"
 	"github.com/jyang234/verdi/internal/specdoc"
+	"github.com/jyang234/verdi/internal/store"
 )
 
 const manifestYAML = "schema: verdi.config/v1\nforge: none\n"
@@ -44,6 +45,38 @@ One holder.
 Proven by opening.
 `
 
+// archivedLockboxSpec is lockboxSpec's twin for the archive zone
+// (fix-round-1 F2's zone-precedence witnesses): a distinguishable problem
+// statement so a test can prove WHICH zone's bytes were actually read,
+// not just that some read succeeded.
+const archivedLockboxSpec = `---
+id: spec/lockbox
+kind: spec
+title: "Lockbox"
+owners: [platform-team]
+class: feature
+problem: { text: "ARCHIVED: keys were shared.", anchor: problem }
+outcome: { text: "Each key has one holder.", anchor: outcome }
+acceptance_criteria:
+  - { id: ac-1, text: "A key opens one box.", evidence: [behavioral, attestation], anchor: ac-1 }
+stubs:
+  - { slug: key-holder, acceptance_criteria: [ac-1] }
+---
+# Lockbox
+
+## Problem
+
+Keys were shared once, now archived.
+
+## Outcome
+
+One holder.
+
+## ac-1
+
+Proven by opening.
+`
+
 func buildRepo(t *testing.T) *fixturegit.Repo {
 	t.Helper()
 	t.Setenv("CI_DEFAULT_BRANCH", "main")
@@ -54,6 +87,20 @@ func buildRepo(t *testing.T) *fixturegit.Repo {
 			".verdi/specs/active/lockbox/spec.md": lockboxSpec,
 		},
 	}})
+}
+
+// buildRepoWithFiles is buildRepo generalized over the store's own files,
+// for fixtures that need a specific zone layout (fix-round-1 F2) rather
+// than buildRepo's fixed one-active-spec shape. Always carries the
+// manifest; the caller supplies everything else.
+func buildRepoWithFiles(t *testing.T, files map[string]string) *fixturegit.Repo {
+	t.Helper()
+	t.Setenv("CI_DEFAULT_BRANCH", "main")
+	all := map[string]string{".verdi/verdi.yaml": manifestYAML}
+	for k, v := range files {
+		all[k] = v
+	}
+	return fixturegit.Build(t, []fixturegit.Layer{{Message: "adopt store", Files: all}})
 }
 
 func git(t *testing.T, dir string, args ...string) string {
@@ -191,7 +238,10 @@ func TestLoadReadinessGating(t *testing.T) {
 		t.Fatal("matching snapshot must be supplied")
 	}
 	snap.TargetRef = "spec/other"
-	res, _ = Load(context.Background(), Request{Root: repo.Dir, Name: "lockbox", Mode: ModeWorkingTree, Kind: specdoc.KindSpec, Readiness: &snap})
+	res, err = Load(context.Background(), Request{Root: repo.Dir, Name: "lockbox", Mode: ModeWorkingTree, Kind: specdoc.KindSpec, Readiness: &snap})
+	if err != nil {
+		t.Fatal(err)
+	}
 	if res.Input.Facts.Readiness != nil {
 		t.Fatal("a snapshot for another spec must not be supplied")
 	}
@@ -208,7 +258,9 @@ func TestLoadRefusals(t *testing.T) {
 		{"bad commit", Request{Root: repo.Dir, Name: "lockbox", Mode: ModeAt, At: "deadbeef", Kind: specdoc.KindSpec}, "deadbeef"},
 		{"bad kind", Request{Root: repo.Dir, Name: "lockbox", Mode: ModeAccepted, Kind: "chapter"}, "unknown document kind"},
 		{"empty name", Request{Root: repo.Dir, Mode: ModeAccepted, Kind: specdoc.KindSpec}, "spec name"},
-		{"no store", Request{Root: t.TempDir(), Name: "lockbox", Mode: ModeAccepted, Kind: specdoc.KindSpec}, ""},
+		{"no store", Request{Root: t.TempDir(), Name: "lockbox", Mode: ModeAccepted, Kind: specdoc.KindSpec}, "is not a verdi store root"},
+		{"ModeAt without a commit", Request{Root: repo.Dir, Name: "lockbox", Mode: ModeAt, Kind: specdoc.KindSpec}, "ModeAt requires a commit"},
+		{"unknown mode", Request{Root: repo.Dir, Name: "lockbox", Mode: Mode(99), Kind: specdoc.KindSpec}, "unknown mode 99"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -220,5 +272,156 @@ func TestLoadRefusals(t *testing.T) {
 				t.Fatalf("err %q does not name %q", err, c.want)
 			}
 		})
+	}
+}
+
+// TestLoadAcceptedModeSurvivesUnresolvableHEAD is fix-round-1 F1's ruled
+// witness: a HEAD that cannot be resolved must not block a ModeAccepted
+// (or ModeAt) render when the default branch itself resolves via a real
+// ref. refs/remotes/origin/main stands in for a genuine remote-tracking
+// ref — gitx.HasRemoteTrackingBranch only checks the ref's existence, no
+// configured "origin" remote required (internal/gitx/branch.go) — and
+// repointing HEAD at a branch that was never created reproduces an
+// unborn HEAD (the reachable case the finding names: a checkout whose
+// HEAD points at a branch that was never checked out) without disturbing
+// the already-committed "main" branch specstate.ResolveDefaultBranch can
+// still find locally too; the remote-tracking ref is what actually
+// resolves it here, per resolveBranchRef's remote-wins-over-local
+// precedence, proving this isn't accidentally passing via the local
+// branch instead.
+func TestLoadAcceptedModeSurvivesUnresolvableHEAD(t *testing.T) {
+	repo := buildRepo(t)
+	git(t, repo.Dir, "update-ref", "refs/remotes/origin/main", repo.Head)
+	git(t, repo.Dir, "symbolic-ref", "HEAD", "refs/heads/nonexistent-branch")
+
+	res, err := Load(context.Background(), Request{Root: repo.Dir, Name: "lockbox", Mode: ModeAccepted, Kind: specdoc.KindSpec})
+	if err != nil {
+		t.Fatalf("Load must still render when only HEAD (not the default branch) is unresolvable: %v", err)
+	}
+	if res.Input.Spec == nil || res.Input.Spec.Title != "Lockbox" {
+		t.Fatalf("the render itself must still succeed: %+v", res.Input.Spec)
+	}
+	if res.Head != "" {
+		t.Fatalf("Result.Head = %q, want empty when HEAD could not be resolved", res.Head)
+	}
+	if res.Input.Facts.Evidence != nil {
+		t.Fatalf("Facts.Evidence = %v, want nil — WithMatrix must be skipped", res.Input.Facts.Evidence)
+	}
+	found := false
+	for _, d := range res.Disclosures {
+		if strings.HasPrefix(d, "evidence not computed: resolving HEAD: ") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("disclosures = %v, want one starting \"evidence not computed: resolving HEAD: \"", res.Disclosures)
+	}
+}
+
+// TestLoadZonePrecedence is fix-round-1 F2's witness: loadSource's
+// active-then-archive precedence is duplicated (once for the
+// ModeWorkingTree disk read, once for the ModeAccepted/ModeAt git-show
+// read), so swapping either list alone stays green under the existing
+// tests — none of them ever loads from the archive zone at all.
+func TestLoadZonePrecedence(t *testing.T) {
+	t.Run("archive-only spec resolves from the archive zone", func(t *testing.T) {
+		repo := buildRepoWithFiles(t, map[string]string{
+			".verdi/specs/archive/lockbox/spec.md": archivedLockboxSpec,
+		})
+		wantRel := store.SpecRelPath(store.ZoneArchive, "lockbox")
+
+		wt, err := Load(context.Background(), Request{Root: repo.Dir, Name: "lockbox", Mode: ModeWorkingTree, Kind: specdoc.KindSpec})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if wt.RelPath != wantRel {
+			t.Fatalf("ModeWorkingTree RelPath = %q, want %q", wt.RelPath, wantRel)
+		}
+
+		accepted, err := Load(context.Background(), Request{Root: repo.Dir, Name: "lockbox", Mode: ModeAccepted, Kind: specdoc.KindSpec})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if accepted.RelPath != wantRel {
+			t.Fatalf("ModeAccepted RelPath = %q, want %q", accepted.RelPath, wantRel)
+		}
+	})
+
+	t.Run("working tree not-found names both zones tried", func(t *testing.T) {
+		repo := buildRepo(t)
+		_, err := Load(context.Background(), Request{Root: repo.Dir, Name: "nope", Mode: ModeWorkingTree, Kind: specdoc.KindSpec})
+		if err == nil {
+			t.Fatal("want error")
+		}
+		for _, want := range []string{
+			"not found in either zone of the working tree",
+			store.ActiveSpecPath(repo.Dir, "nope"),
+			store.ArchiveSpecPath(repo.Dir, "nope"),
+		} {
+			if !strings.Contains(err.Error(), want) {
+				t.Errorf("err %q does not name %q", err, want)
+			}
+		}
+	})
+
+	t.Run("both zones present: the active zone wins", func(t *testing.T) {
+		repo := buildRepoWithFiles(t, map[string]string{
+			".verdi/specs/active/lockbox/spec.md":  lockboxSpec,
+			".verdi/specs/archive/lockbox/spec.md": archivedLockboxSpec,
+		})
+		wantRel := store.ActiveSpecRelPath("lockbox")
+
+		wt, err := Load(context.Background(), Request{Root: repo.Dir, Name: "lockbox", Mode: ModeWorkingTree, Kind: specdoc.KindSpec})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if wt.RelPath != wantRel || wt.Input.Spec.Problem.Text != "Keys are shared." {
+			t.Fatalf("ModeWorkingTree must read the active zone: relpath %q, problem %q", wt.RelPath, wt.Input.Spec.Problem.Text)
+		}
+
+		accepted, err := Load(context.Background(), Request{Root: repo.Dir, Name: "lockbox", Mode: ModeAccepted, Kind: specdoc.KindSpec})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if accepted.RelPath != wantRel || accepted.Input.Spec.Problem.Text != "Keys are shared." {
+			t.Fatalf("ModeAccepted must read the active zone: relpath %q, problem %q", accepted.RelPath, accepted.Input.Spec.Problem.Text)
+		}
+	})
+}
+
+// TestLoadDisclosuresOrderAndContent is fix-round-1 F4's witness: the
+// Disclosures contract (what content an entry carries, and that it is
+// Disclosures[0] when evidence is the only thing that degrades) is
+// otherwise asserted nowhere. Deleting the working tree's own copy of
+// the spec leaves ModeAccepted's content read (git-show against main)
+// unaffected, but matrixprojection.Project's storyresolve.Resolve reads
+// the working tree directly and so fails — degrading evidence alone;
+// status still resolves (specstate never reads the working tree), so
+// this fixture cannot also independently pin the status-before-evidence
+// append ORDER Load's source carries when both degrade at once — that
+// relative order is a source-reading invariant, not something a live
+// dual-failure fixture could cheaply force here (specstate.Resolve's
+// only genuine error paths are git-plumbing failures in successor
+// scanning, which risk breaking loadSource's own git-show/rev-parse
+// calls on the same repo; a merely-unresolvable default branch is itself
+// a disclosed Result, not a Go error, so it never reaches this path at
+// all). Disclosed, not silently assumed proven.
+func TestLoadDisclosuresOrderAndContent(t *testing.T) {
+	repo := buildRepo(t)
+	if err := os.Remove(filepath.Join(repo.Dir, ".verdi/specs/active/lockbox/spec.md")); err != nil {
+		t.Fatal(err)
+	}
+	res, err := Load(context.Background(), Request{Root: repo.Dir, Name: "lockbox", Mode: ModeAccepted, Kind: specdoc.KindSpec})
+	if err != nil {
+		t.Fatalf("git-show must still find the spec on main even though the working tree's copy is gone: %v", err)
+	}
+	if len(res.Disclosures) == 0 || !strings.HasPrefix(res.Disclosures[0], "evidence not computed: ") {
+		t.Fatalf("disclosures = %v, want Disclosures[0] to start \"evidence not computed: \"", res.Disclosures)
+	}
+	if res.Input.Facts.Evidence != nil {
+		t.Fatalf("Facts.Evidence = %v, want nil", res.Input.Facts.Evidence)
+	}
+	if res.Input.Status != "accepted-pending-build" {
+		t.Fatalf("status must still resolve (it never reads the working tree): %q", res.Input.Status)
 	}
 }

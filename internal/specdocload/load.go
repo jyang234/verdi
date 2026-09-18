@@ -99,23 +99,46 @@ func Load(ctx context.Context, req Request) (Result, error) {
 		}
 	}
 
-	head, err := gitx.RevParse(ctx, req.Root, "HEAD")
-	if err != nil {
-		return Result{}, fmt.Errorf("specdocload: resolving HEAD: %w", err)
-	}
-	facts := specdoc.FactsFromSpec(fm)
-	// The matrix's preview flag is the derived `proposed` value, never
-	// the raw req.Mode == ModeWorkingTree test (controller ruling,
-	// spec-documents wave 2 task 2): a working-tree render of the exact
-	// accepted bytes (proposed == false) must fold evidence identically
-	// to the accepted reading, so every consumer that lands on the
-	// accepted bytes — whichever mode it asked in — sees the same
-	// evidence.
-	preview := proposed
-	if proj, perr := matrixprojection.Project(ctx, req.Root, ref, preview, req.Model); perr == nil {
-		facts = specdoc.WithMatrix(facts, proj.Record, head)
+	// HEAD is resolved separately from src.commit (which, under ModeAt or
+	// ModeAccepted, names a possibly different — older or newer — commit
+	// than HEAD): the matrix always evaluates the working tree's current
+	// HEAD. Fix-round-1 F1: a HEAD that cannot be resolved (e.g. a
+	// checkout whose HEAD points at a branch that was never created,
+	// while the default branch itself still resolves cleanly via a
+	// remote-tracking ref) must not block a ModeAccepted/ModeAt render —
+	// only evidence, which depends on HEAD, degrades: Result.Head stays
+	// empty and WithMatrix is skipped, exactly Wave 1's CLI behavior
+	// before this package existed. ModeWorkingTree is different:
+	// loadSource above already resolved this exact HEAD to read the
+	// working tree's bytes, so a failure here can only mean HEAD moved
+	// between the two calls — stay conservative and fail the whole
+	// render rather than stamp facts with a HEAD that no longer means
+	// anything.
+	var head string
+	if h, herr := gitx.RevParse(ctx, req.Root, "HEAD"); herr != nil {
+		if req.Mode == ModeWorkingTree {
+			return Result{}, fmt.Errorf("specdocload: resolving HEAD: %w", herr)
+		}
+		disclosures = append(disclosures, "evidence not computed: resolving HEAD: "+herr.Error())
 	} else {
-		disclosures = append(disclosures, "evidence not computed: "+perr.Error())
+		head = h
+	}
+
+	facts := specdoc.FactsFromSpec(fm)
+	if head != "" {
+		// The matrix's preview flag is the derived `proposed` value, never
+		// the raw req.Mode == ModeWorkingTree test (controller ruling,
+		// spec-documents wave 2 task 2): a working-tree render of the exact
+		// accepted bytes (proposed == false) must fold evidence identically
+		// to the accepted reading, so every consumer that lands on the
+		// accepted bytes — whichever mode it asked in — sees the same
+		// evidence.
+		preview := proposed
+		if proj, perr := matrixprojection.Project(ctx, req.Root, ref, preview, req.Model); perr == nil {
+			facts = specdoc.WithMatrix(facts, proj.Record, head)
+		} else {
+			disclosures = append(disclosures, "evidence not computed: "+perr.Error())
+		}
 	}
 	if req.Readiness != nil {
 		facts = specdoc.WithReadiness(facts, *req.Readiness, ref)
@@ -144,10 +167,13 @@ type source struct {
 }
 
 // loadSource picks the bytes for the mode: active zone first, archive
-// second, in every mode.
+// second, in every mode (fix-round-1 F2 pins this precedence with tests
+// covering both the working-tree read below and the git-show read after
+// it, including a both-zones fixture proving the active zone wins).
 func loadSource(ctx context.Context, req Request) (source, error) {
 	name := req.Name
-	if req.Mode == ModeWorkingTree {
+	switch req.Mode {
+	case ModeWorkingTree:
 		for _, p := range []struct{ abs, rel string }{
 			{store.ActiveSpecPath(req.Root, name), store.ActiveSpecRelPath(name)},
 			{store.ArchiveSpecPath(req.Root, name), store.SpecRelPath(store.ZoneArchive, name)},
@@ -164,9 +190,26 @@ func loadSource(ctx context.Context, req Request) (source, error) {
 				return source{}, fmt.Errorf("specdocload: reading %s: %w", p.abs, rerr)
 			}
 		}
-		return source{}, fmt.Errorf("specdocload: spec/%s not found in either zone of the working tree", name)
+		// fix-round-1 F6: name both paths actually tried, not just the
+		// zone-agnostic claim that neither held the spec.
+		return source{}, fmt.Errorf("specdocload: spec/%s not found in either zone of the working tree (tried %s and %s)", name, store.ActiveSpecPath(req.Root, name), store.ArchiveSpecPath(req.Root, name))
+	case ModeAccepted, ModeAt:
+		// handled below — both read via git-show at a resolved commit.
+	default:
+		// fix-round-1 F9: an unknown Mode value fails closed, named,
+		// rather than silently falling through to ModeAt's git-show path
+		// with whatever req.At happens to hold (CLAUDE.md: "unknown enum
+		// values fail closed").
+		return source{}, fmt.Errorf("specdocload: unknown mode %d", req.Mode)
 	}
+
 	rev := req.At
+	if req.Mode == ModeAt && rev == "" {
+		// fix-round-1 F9: named refusal instead of letting an empty
+		// revision string reach gitx.RevParse and fail with a generic
+		// git error that never names which field was missing.
+		return source{}, errors.New("specdocload: ModeAt requires a commit")
+	}
 	if req.Mode == ModeAccepted {
 		branch, ok := specstate.ResolveDefaultBranch(ctx, req.Root)
 		if !ok {

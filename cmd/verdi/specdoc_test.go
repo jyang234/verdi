@@ -357,3 +357,32 @@ func TestSpecDoc_NoStoreExitsOperational(t *testing.T) {
 		t.Fatalf("exit %d stderr %q, want 2 with a message", code, stderr)
 	}
 }
+
+// TestSpecDoc_EvidenceDisclosureStillRenders is fix-round-1 F4's CLI half:
+// a degraded disclosure (specdocload.Result.Disclosures) must reach the
+// verb's stderr with its "spec doc: " prefix while the render itself
+// still succeeds and exits 0 — a document is a projection, never a
+// verdict, so a fact this verb could not compute is disclosed, not
+// fatal (CLAUDE.md's 0/1/2 exit contract: this verb has no verdict of
+// its own to fail). Deleting the working tree's own copy of the spec
+// leaves git-show's read of main untouched but makes
+// matrixprojection.Project's working-tree read of the spec fail,
+// degrading evidence alone (the same mechanism
+// TestLoadDisclosuresOrderAndContent proves at the loader level).
+func TestSpecDoc_EvidenceDisclosureStillRenders(t *testing.T) {
+	repo := buildSpecDocRepo(t)
+	bin := buildVerdiBinary(t)
+	if err := os.Remove(filepath.Join(repo.Dir, ".verdi/specs/active/lockbox/spec.md")); err != nil {
+		t.Fatal(err)
+	}
+	stdout, stderr, code := runVerdiBinary(t, bin, repo.Dir, []string{"CI_DEFAULT_BRANCH=main"}, "spec", "doc", "spec/lockbox")
+	if code != 0 {
+		t.Fatalf("exit %d, stderr:\n%s", code, stderr)
+	}
+	if !strings.Contains(stderr, "spec doc: evidence not computed:") {
+		t.Errorf("stderr missing the disclosure:\n%s", stderr)
+	}
+	if !strings.Contains(stdout, "# Lockbox") {
+		t.Errorf("the render must still succeed despite the disclosure:\n%s", stdout)
+	}
+}
