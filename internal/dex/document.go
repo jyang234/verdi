@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"html/template"
 	"path"
+	"runtime"
 	"strings"
+	"sync"
 
 	"github.com/jyang234/verdi/internal/model"
 	"github.com/jyang234/verdi/internal/specdoc"
@@ -27,6 +29,70 @@ func specDocumentURL(ref string) string {
 	return documentPageDir + "/"
 }
 
+// writeAllSpecDocuments renders every spec page's documents (see
+// writeSpecDocuments), concurrently across pages with a bounded pool.
+// Each spec's loader call resolves its status and folds the matrix over
+// the whole store (seconds each on a large store, 103 specs in this
+// repository's own), so a sequential pass multiplied the site's build
+// time several times over and pushed the self-hosted spec-align gate past
+// Go's default test timeout. The pool changes only wall time: every
+// spec's files are its own, written from its own result, so the output
+// tree is byte-identical to a sequential pass (the rebuild tests prove
+// it). The first error cancels the rest and is returned.
+func writeAllSpecDocuments(parent context.Context, outDir, root string, stamp buildStamp, mdl *model.Model, pages []*artifactPage) error {
+	ctx, cancel := context.WithCancel(parent)
+	defer cancel()
+	sem := make(chan struct{}, documentWorkers())
+	var (
+		wg       sync.WaitGroup
+		mu       sync.Mutex
+		firstErr error
+	)
+schedule:
+	for _, p := range pages {
+		if specDocumentURL(p.Entry.Ref) == "" {
+			continue
+		}
+		// A slot, or the pass is over (a worker failed, or the caller
+		// cancelled): stop scheduling — never spawn a worker that holds
+		// no slot, since its release would then block or steal one.
+		select {
+		case sem <- struct{}{}:
+		case <-ctx.Done():
+			break schedule
+		}
+		wg.Add(1)
+		go func(p *artifactPage) {
+			defer wg.Done()
+			defer func() { <-sem }()
+			if ctx.Err() != nil {
+				return
+			}
+			if err := writeSpecDocuments(ctx, outDir, root, stamp, mdl, p); err != nil {
+				mu.Lock()
+				if firstErr == nil {
+					firstErr = err
+					cancel()
+				}
+				mu.Unlock()
+			}
+		}(p)
+	}
+	wg.Wait()
+	if firstErr != nil {
+		return firstErr
+	}
+	return parent.Err() // nil unless the caller itself cancelled
+}
+
+// documentWorkers is the pool's width: one per CPU, never fewer than one.
+func documentWorkers() int {
+	if n := runtime.NumCPU(); n > 1 {
+		return n
+	}
+	return 1
+}
+
 // writeSpecDocuments writes the three Markdown documents and the Document
 // view beside a spec's page, rendered at the site's build commit through
 // the shared loader so the bytes match the CLI, the board, and MCP
@@ -37,19 +103,28 @@ func specDocumentURL(ref string) string {
 // disclosures are not surfaced separately: the document itself already
 // says, section by section, which facts were unavailable (ac-1), and the
 // static site has no per-page disclosure slot to hang them on.
+//
+// The loader runs ONCE per spec and its Input is reused for the three
+// kinds: nothing the loader assembles varies with the requested kind
+// except Input.Kind itself (the kind only selects which sections Build
+// renders), so the plan and tasks bytes are exactly what a per-kind load
+// would render — TestWriteSpecDocuments_KindsShareOneLoad proves it
+// against the per-kind path the CLI and MCP take.
 func writeSpecDocuments(ctx context.Context, outDir, root string, stamp buildStamp, mdl *model.Model, p *artifactPage) error {
 	if specDocumentURL(p.Entry.Ref) == "" {
 		return nil
 	}
 	name := strings.TrimPrefix(p.Entry.Ref, "spec/")
 	base := path.Dir(permalinkOutPath(p.Entry.Ref)) // a/spec/<name>
+	res, err := specdocload.Load(ctx, specdocload.Request{Root: root, Name: name, Mode: specdocload.ModeAt, At: stamp.SHA, Kind: specdoc.KindSpec, Model: mdl})
+	if err != nil {
+		return fmt.Errorf("dex: document for %s: %w", p.Entry.Ref, err)
+	}
 	var specHTML string
 	for _, kind := range []specdoc.Kind{specdoc.KindSpec, specdoc.KindPlan, specdoc.KindTasks} {
-		res, err := specdocload.Load(ctx, specdocload.Request{Root: root, Name: name, Mode: specdocload.ModeAt, At: stamp.SHA, Kind: kind, Model: mdl})
-		if err != nil {
-			return fmt.Errorf("dex: document for %s: %w", p.Entry.Ref, err)
-		}
-		doc, err := specdoc.Build(res.Input)
+		in := res.Input
+		in.Kind = kind
+		doc, err := specdoc.Build(in)
 		if err != nil {
 			return fmt.Errorf("dex: document for %s: %w", p.Entry.Ref, err)
 		}

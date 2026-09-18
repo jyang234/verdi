@@ -106,9 +106,9 @@ func Build(ctx context.Context, opts Options) error {
 		if err := writeArtifactPage(ctx, opts.OutDir, opts.Root, stamp.SHA, stamp, ix, known, lens, mdl, p); err != nil {
 			return err
 		}
-		if err := writeSpecDocuments(ctx, opts.OutDir, opts.Root, stamp, mdl, p); err != nil {
-			return err
-		}
+	}
+	if err := writeAllSpecDocuments(ctx, opts.OutDir, opts.Root, stamp, mdl, pages); err != nil {
+		return err
 	}
 	if err := writeExemptionPages(opts.OutDir, stamp, pages, lens.exemptions, known, mdl); err != nil {
 		return err
