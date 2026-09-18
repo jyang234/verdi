@@ -707,9 +707,9 @@ one shared file.
 | 5 | CSE adapters, ratification, and retention |
 | 5 | GLG `continuous-readiness` |
 | 5 | GLG `lifecycle-recovery` |
-| 5 | GLG `journey-metrics` | deferred (Post-MVP value subset, 2026-09-19) |
+| 5 | GLG `journey-metrics` — deferred (Post-MVP value subset, 2026-09-19) |
 | 6 | ASD workbench |
-| 6 | CI `constitution-workbench` | deferred (Post-MVP value subset, 2026-09-19) |
-| 6 | GLG workbench journeys | after the Claude Design pass (Post-MVP value subset, 2026-09-19) |
+| 6 | CI `constitution-workbench` — deferred (Post-MVP value subset, 2026-09-19) |
+| 6 | GLG workbench journeys — after the Claude Design pass (Post-MVP value subset, 2026-09-19) |
 | 6 | CSE workbench |
 | 7 | Integrated dogfood and whole-branch approval |
