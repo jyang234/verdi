@@ -190,10 +190,12 @@ func TestBoardProjectionCloneCoverage(t *testing.T) {
 			name: "BoardProjection",
 			typ:  reflect.TypeOf(proj),
 			want: []string{
-				// DomainRefusal is a plain string: the clone's initial
-				// struct assignment value-copies it (reviewed for the
-				// I-1 domain-refusal field, Wave 6 Task 2 correction).
-				"Spec", "Title", "Mode", "Status", "DomainRefusal",
+				// DomainRefusal and DocumentHref are plain strings: the
+				// clone's initial struct assignment value-copies them
+				// (reviewed for the I-1 domain-refusal field, Wave 6
+				// Task 2 correction; and for the spec-documents Wave 2
+				// Document tab link, which is json:"-" and never shared).
+				"Spec", "Title", "Mode", "Status", "DocumentHref", "DomainRefusal",
 				"Class", "StoryRef", "Spike",
 				"ClassLabel", "StatusLabel", "Problem", "Outcome",
 				"ProblemBodyHTML", "OutcomeBodyHTML",
