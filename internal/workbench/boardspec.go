@@ -132,6 +132,12 @@ type boardSpecServer struct {
 	// renders bare ids everywhere (spec/vocabulary-surfaces' fallback).
 	model *model.Model
 
+	// readiness is Deps.Readiness (the startup snapshot, or nil): the
+	// Document tab hands it to the shared loader, which supplies it to the
+	// document only when its TargetRef names the served spec. Nothing
+	// here recomputes readiness.
+	readiness *readinesspilot.Snapshot
+
 	// reviewUnavailable, when non-empty, is a disclosed reason the review
 	// feed is CONFIGURED (a forge is named in verdi.yaml) but cannot be
 	// consulted — no credentials to build a live adapter at startup. The
@@ -631,6 +637,7 @@ func (s *boardSpecServer) boardSpecPageHandler() http.HandlerFunc {
 			renderError(w, http.StatusInternalServerError, err)
 			return
 		}
+		proj.DocumentHref = r.URL.EscapedPath() + "/document"
 		out, err := renderBoardSpecPage(proj, git, asd)
 		if err != nil {
 			renderError(w, http.StatusInternalServerError, err)

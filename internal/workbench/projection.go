@@ -327,6 +327,15 @@ type BoardProjection struct {
 	// status is always "draft", by Mode's own construction, so Status only
 	// adds information off the authoring path).
 	Status string `json:"status,omitempty"`
+
+	// DocumentHref is the board page's link to its Document tab
+	// (spec/spec-documents ac-4), set by the page handler from the
+	// request's escaped path so the /b/{branch} mount's encoded branch
+	// segment survives — never derived from a raw ref. Empty renders no
+	// link: the sealed remote-only render has no working tree for the
+	// document route to read, so a link there would be a dead one. Page
+	// chrome, not projection content: never on the wire.
+	DocumentHref string `json:"-"`
 	// DomainRefusal, when non-empty, is the disclosed reason this
 	// authoring wall's DOMAIN surface (typed spec mutations: forms, card
 	// editors, spec-layer yarn, object/ref trash) is refused even though

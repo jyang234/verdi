@@ -192,7 +192,7 @@ var boardSpecPageTemplate = template.Must(template.New("boardspec").Funcs(shellF
 <a class="skip-link" href="#boardv2-region">Skip to the board</a>
 <header class="site-head">
 <a class="wordmark" href="/"><span class="leafmark" aria-hidden="true"></span>verdi<span class="wordmark-surface">workbench</span></a>
-<nav class="site-nav workbench-nav"><a href="/">index</a></nav>
+<nav class="site-nav workbench-nav"><a href="/">index</a>{{if .DocumentHref}} · <a href="{{.DocumentHref}}" data-testid="board-tab-document">Document</a>{{end}}</nav>
 </header>
 <header class="page-header board-head">
 <h1>{{.Title}}</h1>
@@ -268,6 +268,7 @@ func renderBoardSpecPage(p *BoardProjection, git *boardGitState, asd *asdView) (
 		ModeLabel        string
 		StatusBadge      string
 		StatusBadgeLabel string
+		DocumentHref     string
 		Region           template.HTML
 		Dialogs          template.HTML
 		StateJSON        template.JS
@@ -278,6 +279,7 @@ func renderBoardSpecPage(p *BoardProjection, git *boardGitState, asd *asdView) (
 		ModeLabel:        modeStampLabel(p),
 		StatusBadge:      badge,
 		StatusBadgeLabel: badgeLabel,
+		DocumentHref:     p.DocumentHref,
 		Region:           template.HTML(region),
 		Dialogs:          template.HTML(renderBoardDialogs(p)),
 		StateJSON:        template.JS(stateJSON),

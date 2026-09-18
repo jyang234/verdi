@@ -440,13 +440,13 @@ func TestBoardActionInventoryRefusesUnknownGrowth(t *testing.T) {
 	for _, rt := range boardSpecRoutes() {
 		suffixes[rt.suffix] = true
 	}
-	for _, want := range []string{routeBoardPage, routeBoardFragment, routeBoardSnapshot, routeBoardAPI, routeBoardPeek, routeBoardPinSearch} {
+	for _, want := range []string{routeBoardPage, routeBoardFragment, routeBoardSnapshot, routeBoardAPI, routeBoardPeek, routeBoardPinSearch, routeBoardDocument, routeBoardDocumentSnapshot} {
 		if !suffixes[want] {
 			t.Errorf("route table missing %s", want)
 		}
 	}
-	if len(suffixes) != 6 {
-		t.Errorf("route table has %d rows, want exactly 6 (fixed set)", len(suffixes))
+	if len(suffixes) != 8 {
+		t.Errorf("route table has %d rows, want exactly 8 (fixed set: the six board rows plus spec/spec-documents' document page and snapshot)", len(suffixes))
 	}
 }
 

@@ -344,12 +344,13 @@ var showcaseCoverage = map[string][]coverageEvidence{
 	// payoff-quote-portal (Task 2.1's fully-vetted showcase draft), not the
 	// rudimentary DB_* draft-boards family — the same /b/<branch>/ routing
 	// capability, proven on genuinely showcase-bar content instead.
-	"wb:draft-boards": {playwright("40-showcase-draft.spec.ts")},
-	"wb:dex":          {playwright("16-dex-v2.spec.ts")},
-	"wb:dex-by-story": {playwright("18-dex-by-story.spec.ts")},
-	"wb:dex-document": {playwright("80-dex-document.spec.ts")},
-	"wb:presentation": {playwright("06-presentation.spec.ts")},
-	"wb:ref-peek":     {playwright("25-board-ref-peek.spec.ts")},
+	"wb:draft-boards":   {playwright("40-showcase-draft.spec.ts")},
+	"wb:dex":            {playwright("16-dex-v2.spec.ts")},
+	"wb:dex-by-story":   {playwright("18-dex-by-story.spec.ts")},
+	"wb:dex-document":   {playwright("80-dex-document.spec.ts")},
+	"wb:board-document": {playwright("79-board-document.spec.ts")},
+	"wb:presentation":   {playwright("06-presentation.spec.ts")},
+	"wb:ref-peek":       {playwright("25-board-ref-peek.spec.ts")},
 
 	// The three registered corpus/verdict/matrix pages that complete the
 	// workbench axis (handler.go's RegisterRoutesWithHome mounts them at
@@ -434,7 +435,7 @@ var workbenchSurfaces = []string{
 	"board", "board-review-mode", "board-scoping-canvas", "obligation-wall",
 	"wall-badges", "wall-receipts", "evidence-slot", "diagram-editor",
 	"diagram-tier", "derivation-drawer", "directory-home", "draft-boards",
-	"dex", "dex-by-story", "dex-document", "disclosures", "presentation", "ref-peek",
+	"dex", "dex-by-story", "dex-document", "board-document", "disclosures", "presentation", "ref-peek",
 	"corpus", "verdict", "matrix",
 }
 
