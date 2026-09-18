@@ -102,10 +102,21 @@ func Build(ctx context.Context, opts Options) error {
 		mdl = cfg.Model
 	}
 
+	// Which specs get a Document view: those present at the build commit
+	// (documentSet). Resolved once, before the pages, so a spec page and
+	// its documents agree on whether the "document/" link exists.
+	docs, err := documentedSpecs(ctx, opts.Root, stamp.SHA, pages)
+	if err != nil {
+		return err
+	}
+
 	for _, p := range pages {
-		if err := writeArtifactPage(ctx, opts.OutDir, opts.Root, stamp.SHA, stamp, ix, known, lens, mdl, p); err != nil {
+		if err := writeArtifactPage(ctx, opts.OutDir, opts.Root, stamp.SHA, stamp, ix, known, lens, mdl, docs, p); err != nil {
 			return err
 		}
+	}
+	if err := writeAllSpecDocuments(ctx, opts.OutDir, opts.Root, stamp, mdl, pages, docs); err != nil {
+		return err
 	}
 	if err := writeExemptionPages(opts.OutDir, stamp, pages, lens.exemptions, known, mdl); err != nil {
 		return err

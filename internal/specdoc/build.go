@@ -113,6 +113,17 @@ func Build(in Input) (Document, error) {
 			})
 		}
 	}
+	if in.Facts.Readiness != nil {
+		doc.ReadinessKnown = true
+		rf := *in.Facts.Readiness
+		rf.Areas = append([]ReadinessArea(nil), in.Facts.Readiness.Areas...)
+		rf.Attention = make([]ReadinessConcern, len(in.Facts.Readiness.Attention))
+		for i, c := range in.Facts.Readiness.Attention {
+			c.Witnesses = append([]string(nil), c.Witnesses...)
+			rf.Attention[i] = c
+		}
+		doc.Readiness = &rf
+	}
 	return doc, nil
 }
 

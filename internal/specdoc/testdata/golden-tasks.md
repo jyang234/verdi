@@ -27,6 +27,10 @@ Source: matrix over the working tree at 000000000000.
 | ac-1 — A key opens one box. | eligible | one implementing story, not yet closed | implementing story: `spec/key-holder` |
 | ac-2 — A lost key is revoked. | violated | no implementing story | — |
 
+## Readiness
+
+Readiness was not supplied for this render.
+
 ---
 
-Derived from the spec's objects; not authority. Ref `spec/lockbox` · commit `0000000000000000000000000000000000000001` · kind `tasks` · engine `sha256:6c69c283478f220da6f301f792fb2714561ba1d652d3a5068998bc38e9d492c9`
+Derived from the spec's objects; not authority. Ref `spec/lockbox` · commit `0000000000000000000000000000000000000001` · kind `tasks` · engine `sha256:898025e67e47ef63e98b26bef1940eb1718006ab27be85f0de5af1509772f9d7`

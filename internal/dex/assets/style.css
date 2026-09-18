@@ -408,6 +408,82 @@ footer.site-foot {
 }
 .copy-ref:hover { border-color: var(--accent); }
 
+/* the spec page's way into its Document view (spec/spec-documents ac-4),
+   and the view's own quiet chrome: the provenance note a reader meets
+   first, then the three Markdown files offered as downloads */
+.document-link { font-family: var(--mono); font-size: 0.74rem; letter-spacing: 0.02em; color: var(--muted-solid); margin-left: 0.9rem; }
+.document-link:hover { color: var(--accent); }
+.document-note {
+  font-size: 0.92rem;
+  color: var(--muted-solid);
+  border-left: 3px solid var(--living);
+  padding: 0.2rem 0 0.2rem 0.9rem;
+  margin: 0 0 1rem;
+}
+.document-note code { color: var(--accent); }
+.document-files {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.4rem 0.7rem;
+  margin: 0 0 1.8rem;
+  font-family: var(--mono);
+  font-size: 0.74rem;
+  letter-spacing: 0.02em;
+}
+.document-files span { font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.09em; color: var(--muted-solid); }
+.document-files a {
+  color: var(--ink);
+  text-decoration: none;
+  padding: 0.3rem 0.65rem;
+  border: 1px solid var(--rule);
+  border-radius: 3px;
+  background: var(--card);
+}
+.document-files a:hover { border-color: var(--accent); color: var(--accent); }
+
+/* the board's Document tab (spec/spec-documents ac-4): a reading
+   surface beside the board's working surface. One quiet header row —
+   ref, kind switch, three controls — then the document carries the page. */
+.document-page .workbench-nav .current { color: var(--ink); margin-left: 1.1rem; }
+.document-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.6rem 1.4rem;
+  margin: 0 0 1.6rem;
+  padding-bottom: 0.8rem;
+  border-bottom: 1px solid var(--rule);
+}
+.document-head .eyebrow { margin: 0; }
+.document-kinds { display: flex; gap: 0.2rem; font-family: var(--mono); font-size: 0.78rem; letter-spacing: 0.04em; }
+.document-kinds a, .document-kinds .current {
+  padding: 0.25rem 0.6rem;
+  border-radius: 3px;
+  text-decoration: none;
+  color: var(--muted-solid);
+}
+.document-kinds a:hover, .document-kinds a:focus-visible { color: var(--accent); }
+.document-kinds .current { color: var(--ink); background: var(--card); border: 1px solid var(--rule); }
+.document-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; margin-left: auto; }
+.document-actions button, .document-actions a {
+  font-family: var(--mono);
+  font-size: 0.74rem;
+  letter-spacing: 0.02em;
+  color: var(--ink);
+  text-decoration: none;
+  padding: 0.3rem 0.65rem;
+  border: 1px solid var(--rule);
+  border-radius: 3px;
+  background: var(--card);
+  cursor: pointer;
+}
+.document-actions button:hover, .document-actions a:hover,
+.document-actions button:focus-visible, .document-actions a:focus-visible { border-color: var(--accent); color: var(--accent); }
+.document-status { font-family: var(--mono); font-size: 0.74rem; color: var(--muted-solid); min-height: 1em; }
+.document-region { max-width: 70ch; }
+.document-source { display: none; }
+
 /* reading column (~70ch) + rail */
 .page-body { display: flex; gap: 3rem; align-items: flex-start; }
 .content { flex: 1 1 auto; min-width: 0; max-width: 70ch; }

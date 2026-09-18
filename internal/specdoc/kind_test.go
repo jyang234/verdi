@@ -29,7 +29,7 @@ func TestParseKind(t *testing.T) {
 
 func TestKindSections(t *testing.T) {
 	all := KindSpec.Sections()
-	wantAll := []SectionID{SectionIdentity, SectionProblem, SectionOutcome, SectionDecisions, SectionConstraints, SectionCriteria, SectionQuestions, SectionPlan, SectionEvidence}
+	wantAll := []SectionID{SectionIdentity, SectionProblem, SectionOutcome, SectionDecisions, SectionConstraints, SectionCriteria, SectionQuestions, SectionPlan, SectionEvidence, SectionReadiness}
 	if len(all) != len(wantAll) {
 		t.Fatalf("spec sections = %v, want %v", all, wantAll)
 	}
@@ -44,7 +44,7 @@ func TestKindSections(t *testing.T) {
 		t.Fatalf("plan sections = %v, want %v", plan, wantPlan)
 	}
 	tasks := KindTasks.Sections()
-	wantTasks := []SectionID{SectionIdentity, SectionPlan, SectionEvidence}
+	wantTasks := []SectionID{SectionIdentity, SectionPlan, SectionEvidence, SectionReadiness}
 	if len(tasks) != len(wantTasks) {
 		t.Fatalf("tasks sections = %v, want %v", tasks, wantTasks)
 	}

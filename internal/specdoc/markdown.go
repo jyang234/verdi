@@ -162,6 +162,48 @@ func RenderMarkdown(doc Document) string {
 				w("| %s | %s | %s | %s |\n", escapeCell(criterionCell(e.ID, criterionText)), escapeCell(orDash(e.Status)), escapeCell(orDash(e.Summary)), escapeCell(evidenceDetail(e, doc.Words)))
 			}
 			w("\n")
+		case SectionReadiness:
+			w("## Readiness\n\n")
+			if !doc.ReadinessKnown || doc.Readiness == nil {
+				w("Readiness was not supplied for this render.\n\n")
+				break
+			}
+			rf := doc.Readiness
+			w("Source: readiness snapshot for `%s` at `%s`. Current focus: %s.\n\n", rf.TargetRef, shortCommit(rf.Head), areaLabel(rf, rf.CurrentFocus))
+			w("| Area | State |\n|---|---|\n")
+			for _, a := range rf.Areas {
+				w("| %s | %s |\n", escapeCell(a.Label), escapeCell(a.State))
+			}
+			w("\n")
+			if len(rf.Attention) == 0 {
+				w("Nothing needs attention.\n\n")
+			} else {
+				w("Attention:\n\n")
+				for i, c := range rf.Attention {
+					posture := "advisory"
+					if c.Blocking {
+						posture = "blocking"
+					}
+					// Every user-authored field on this line goes through
+					// escapeCell, the same guard the Areas table's cells
+					// use (fix round, F5). The collapse is what matters
+					// most here: one concern is ONE numbered item, and a
+					// summary or witness carrying a line break would
+					// otherwise split it into several, silently renumbering
+					// the queue a reader counts. The "|" escape rides along
+					// so the same declared value reads identically here and
+					// in a table cell.
+					witnesses := make([]string, 0, len(c.Witnesses))
+					for _, wit := range c.Witnesses {
+						witnesses = append(witnesses, escapeCell(wit))
+					}
+					w("%d. %s — %s; %s; %s; %s; witnesses: %s <a id=\"%s\"></a>\n", i+1, escapeCell(c.Summary), areaLabel(rf, c.Area), posture, c.Timing, c.State, joinOr(witnesses, "none"), escapeAttr(c.ID))
+				}
+				w("\n")
+			}
+			if rf.StaleNotice != "" {
+				w("%s\n\n", escapeCell(rf.StaleNotice))
+			}
 		}
 	}
 
@@ -273,9 +315,42 @@ func orDash(s string) string {
 // a Markdown table row (fix round 1, F8), and collapses any run of
 // embedded line breaks to a single space (fix round, F5) so a
 // multi-line declared value can never turn one table row into several.
+//
+// It guards the renderer's PROSE lines too, not only table cells (fix
+// round, F5): the readiness attention queue writes a concern's summary
+// and witnesses into one numbered item, and the stale notice into one
+// paragraph, where an embedded line break splits one item into several
+// exactly as it splits one row into several. Both escapes are safe
+// outside a table — CommonMark renders "\\|" as a plain "|" anywhere —
+// so one helper covers both placements rather than two rules drifting
+// apart. Escaping for an HTML attribute is a different job: escapeAttr.
 func escapeCell(s string) string {
 	s = cellNewlineRun.ReplaceAllString(s, " ")
 	return strings.ReplaceAll(s, "|", "\\|")
+}
+
+// attrEscaper replaces the characters that could let a value break out of
+// a double-quoted HTML attribute.
+var attrEscaper = strings.NewReplacer("&", "&amp;", "\"", "&quot;", "<", "&lt;", ">", "&gt;")
+
+// escapeAttr guards a value placed inside `<a id="...">` against breaking
+// out of the attribute (fix round 1, F4). Every other id this package
+// anchors (decision/constraint/criterion/question ids) comes from
+// internal/artifact's own id patterns (acIDRe, oqIDRe, objectIDRe:
+// lowercase, digits, and "-" only), a closed charset that can never carry
+// a `"`, so those call sites are safe left raw. A readiness concern id
+// (readinesspilot.Concern.ID) has no such guarantee here: readinesspilot's
+// own validateIdentity only requires it non-empty, control-free, and
+// "/"-structured — this package cannot see, and must not assume, that
+// every producer of a Snapshot keeps concern ids inside the same slug
+// charset. escapeCell is deliberately not reused for this: its job is
+// collapsing embedded newlines and escaping "|" for Markdown, which does
+// nothing about the attribute-breakout risk a value placed inside
+// `<a id="...">` carries. The two guards are complementary, not
+// alternatives — the same attention line applies escapeCell to its prose
+// fields and escapeAttr to the id it anchors.
+func escapeAttr(s string) string {
+	return attrEscaper.Replace(s)
 }
 
 // itemIndent is the continuation indent for numbered-list item n: the
@@ -325,4 +400,25 @@ func pluralIf(singular, plural string, n int) string {
 		return plural
 	}
 	return singular
+}
+
+// shortCommit is the 12-hex prefix every stamp line uses (the readiness
+// Source line here, and facts.go's WithMatrix for EvidenceSource); a
+// shorter value is returned whole rather than sliced out of range.
+func shortCommit(commit string) string {
+	if len(commit) > 12 {
+		return commit[:12]
+	}
+	return commit
+}
+
+// areaLabel resolves an area id to its plain label, falling back to the
+// id so an unknown id is still visible rather than blank.
+func areaLabel(rf *ReadinessFacts, id string) string {
+	for _, a := range rf.Areas {
+		if a.ID == id {
+			return a.Label
+		}
+	}
+	return id
 }

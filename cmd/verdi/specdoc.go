@@ -1,12 +1,12 @@
 // verdi spec doc SPEC_REF (Task 7, spec/spec-documents): the thin CLI
-// consumer of internal/specdoc — it loads one spec's bytes (the default
-// branch's, a pinned commit's via --at, or the working tree's via
-// --proposed), resolves its effective status through the same
-// specstate.Projector every other status decision in this package routes
-// through, gathers the coverage/claims facts the spec's own stubs supply
-// and (best effort) the matrix's evidence facts, and writes the render.
-// It computes nothing specdoc itself does not already compute; this file
-// only wires bytes in and text out.
+// consumer of internal/specdocload and internal/specdoc — it delegates
+// picking the spec's bytes (the default branch's, a pinned commit's via
+// --at, or the working tree's via --proposed), resolving its effective
+// status, and gathering the coverage/claims/evidence facts to
+// specdocload.Load (spec-documents wave 2 task 2: the same assembler the
+// board's Document tab, the docs site, and the MCP get_document tool
+// share, so the four outputs stay byte-identical), then writes the
+// render. This file only wires the flags in and the rendered text out.
 package main
 
 import (
@@ -19,10 +19,8 @@ import (
 	"strings"
 
 	"github.com/jyang234/verdi/internal/artifact"
-	"github.com/jyang234/verdi/internal/gitx"
-	"github.com/jyang234/verdi/internal/matrixprojection"
 	"github.com/jyang234/verdi/internal/specdoc"
-	"github.com/jyang234/verdi/internal/specstate"
+	"github.com/jyang234/verdi/internal/specdocload"
 	"github.com/jyang234/verdi/internal/store"
 )
 
@@ -116,52 +114,22 @@ func cmdSpecDoc(args []string, stdout, stderr io.Writer) int {
 	}
 	ctx := context.Background()
 
-	src, err := loadSpecDocSource(ctx, root, parsed.Name, *atFlag, *proposedFlag)
+	mode := specdocload.ModeAccepted
+	switch {
+	case *proposedFlag:
+		mode = specdocload.ModeWorkingTree
+	case *atFlag != "":
+		mode = specdocload.ModeAt
+	}
+	res, err := specdocload.Load(ctx, specdocload.Request{Root: root, Name: parsed.Name, Mode: mode, At: *atFlag, Kind: kind, Model: cfg.Model})
 	if err != nil {
 		fmt.Fprintln(stderr, "spec doc:", err)
 		return 2
 	}
-	fm, err := artifact.DecodeSpec(src.content)
-	if err != nil {
-		fmt.Fprintf(stderr, "spec doc: %s at %s: %v\n", parsed.String(), src.commit, err)
-		return 2
+	for _, d := range res.Disclosures {
+		fmt.Fprintln(stderr, "spec doc:", d)
 	}
-	_, body, err := artifact.SplitFrontmatter(src.content)
-	if err != nil {
-		fmt.Fprintln(stderr, "spec doc:", err)
-		return 2
-	}
-
-	status := ""
-	if res, rerr := specstate.NewProjector().Resolve(ctx, root, specstate.Candidate{Path: src.relPath, Content: src.content}); rerr == nil {
-		status = string(res.ArtifactStatus())
-	} else {
-		fmt.Fprintf(stderr, "spec doc: status not resolved: %v\n", rerr)
-	}
-
-	facts := specdoc.FactsFromSpec(fm)
-	// The matrix always evaluates HEAD, resolved once here — never
-	// src.commit, which under --at names a possibly different (older or
-	// newer) commit than HEAD (spec-documents wave-1 fix round, F1). When
-	// HEAD cannot be resolved, evidence stays unavailable rather than
-	// mislabeling its source.
-	if head, herr := gitx.RevParse(ctx, root, "HEAD"); herr != nil {
-		fmt.Fprintf(stderr, "spec doc: evidence not computed: resolving HEAD: %v\n", herr)
-	} else if proj, perr := matrixprojection.Project(ctx, root, parsed.String(), *proposedFlag, cfg.Model); perr == nil {
-		facts = specdoc.WithMatrix(facts, proj.Record, head)
-	} else {
-		fmt.Fprintf(stderr, "spec doc: evidence not computed: %v\n", perr)
-	}
-
-	doc, err := specdoc.Build(specdoc.Input{
-		Spec:   fm,
-		Body:   body,
-		Status: status,
-		Stamp:  specdoc.Stamp{Ref: parsed.String(), Commit: src.commit, Proposed: *proposedFlag},
-		Facts:  facts,
-		Model:  cfg.Model,
-		Kind:   kind,
-	})
+	doc, err := specdoc.Build(res.Input)
 	if err != nil {
 		fmt.Fprintln(stderr, "spec doc:", err)
 		return 2
@@ -262,48 +230,4 @@ func resolveExistingPrefix(path string) (string, error) {
 		}
 		p = parent
 	}
-}
-
-// specDocSource is one spec's bytes, where they came from, and the full
-// commit the stamp names.
-type specDocSource struct {
-	relPath string
-	content []byte
-	commit  string
-}
-
-// loadSpecDocSource picks the bytes: the default branch's (the accepted
-// reading), a pinned commit's (--at), or the working tree's (--proposed,
-// stamped with HEAD). Active zone first, archive second, in every mode.
-func loadSpecDocSource(ctx context.Context, root, name, at string, proposed bool) (specDocSource, error) {
-	if proposed {
-		relPath, content, err := readSpecBytesEitherZone(root, name)
-		if err != nil {
-			return specDocSource{}, err
-		}
-		head, err := gitx.RevParse(ctx, root, "HEAD")
-		if err != nil {
-			return specDocSource{}, fmt.Errorf("resolving HEAD: %w", err)
-		}
-		return specDocSource{relPath: relPath, content: content, commit: head}, nil
-	}
-	rev := at
-	if rev == "" {
-		branch, ok := specstate.ResolveDefaultBranch(ctx, root)
-		if !ok {
-			return specDocSource{}, fmt.Errorf("the default branch could not be resolved; pass --at <commit> or --proposed")
-		}
-		rev = branch.Ref
-	}
-	commit, err := gitx.RevParse(ctx, root, rev)
-	if err != nil {
-		return specDocSource{}, fmt.Errorf("resolving %q: %w", rev, err)
-	}
-	for _, relPath := range []string{store.ActiveSpecRelPath(name), store.SpecRelPath(store.ZoneArchive, name)} {
-		content, err := gitx.Show(ctx, root, commit, relPath)
-		if err == nil {
-			return specDocSource{relPath: relPath, content: content, commit: commit}, nil
-		}
-	}
-	return specDocSource{}, fmt.Errorf("spec/%s not found at %s in either zone", name, commit)
 }

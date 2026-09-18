@@ -94,4 +94,7 @@ type Document struct {
 	Evidence       []EvidenceRow
 	EvidenceKnown  bool
 	EvidenceSource string
+
+	Readiness      *ReadinessFacts
+	ReadinessKnown bool
 }

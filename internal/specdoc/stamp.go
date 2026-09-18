@@ -17,7 +17,7 @@ type Stamp struct {
 
 const (
 	engineID      = "verdi.specdoc"
-	engineVersion = 1
+	engineVersion = 2
 )
 
 type engineDescriptor struct {

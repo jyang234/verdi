@@ -51,3 +51,28 @@ func TestRenderHTMLMatchesMarkdownEngine(t *testing.T) {
 		t.Fatalf("RenderHTML(doc) must equal render.RenderMarkdown(RenderMarkdown(doc))")
 	}
 }
+
+// TestRenderHTMLReadiness is the fix-round-1 closing proof: a supplied
+// readiness snapshot renders through the real goldmark path (RenderHTML),
+// not just RenderMarkdown — the Area table becomes a real <table>, and a
+// concern's <a id="..."> anchor survives goldmark's WithUnsafe() raw-HTML
+// passthrough intact.
+func TestRenderHTMLReadiness(t *testing.T) {
+	fm, body := loadFixture(t)
+	commit := strings.Repeat("0", 39) + "1"
+	with := WithReadiness(FactsFromSpec(fm), readinessFixture(), "spec/lockbox")
+	doc, err := Build(Input{Spec: fm, Body: body, Status: "accepted-pending-build", Stamp: Stamp{Ref: "spec/lockbox", Commit: commit}, Facts: with, Kind: KindSpec})
+	if err != nil {
+		t.Fatal(err)
+	}
+	html, err := RenderHTML(doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := strings.Count(html, "<table"); n != 2 {
+		t.Errorf("want 2 <table> elements (Identity + readiness), got %d:\n%s", n, html)
+	}
+	if !strings.Contains(html, `id="shape/question/oq-2"`) {
+		t.Errorf("concern anchor missing from HTML:\n%s", html)
+	}
+}

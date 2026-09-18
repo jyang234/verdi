@@ -278,8 +278,15 @@ var showcaseCoverage = map[string][]coverageEvidence{
 	// asserting a genuine showcase-derived result per tool — see that
 	// file's own doc comment for the specific real content and assertion
 	// behind each one. ---
-	"mcp:search_artifacts":   {goE2E("internal/showcasealign/mcp_showcase_test.go")},
-	"mcp:get_artifact":       {goE2E("internal/showcasealign/mcp_showcase_test.go")},
+	"mcp:search_artifacts": {goE2E("internal/showcasealign/mcp_showcase_test.go")},
+	"mcp:get_artifact":     {goE2E("internal/showcasealign/mcp_showcase_test.go")},
+	// mcp:get_document (spec-documents Wave 2 Task 3, spec/spec-documents
+	// ac-5): the get_document subtest in mcp_showcase_test.go renders
+	// spec/escrow-autopay (the corpus's real accepted feature spec) via
+	// the live tool, asserting the real ref/kind/commit/proposed stamp and
+	// its real ac-1 criterion text, plus that kind: tasks narrows the
+	// section set against the same real content.
+	"mcp:get_document":       {goE2E("internal/showcasealign/mcp_showcase_test.go")},
 	"mcp:get_links":          {goE2E("internal/showcasealign/mcp_showcase_test.go")},
 	"mcp:get_matrix":         {goE2E("internal/showcasealign/mcp_showcase_test.go")},
 	"mcp:get_context_bundle": {goE2E("internal/showcasealign/mcp_showcase_test.go")},
@@ -337,11 +344,13 @@ var showcaseCoverage = map[string][]coverageEvidence{
 	// payoff-quote-portal (Task 2.1's fully-vetted showcase draft), not the
 	// rudimentary DB_* draft-boards family — the same /b/<branch>/ routing
 	// capability, proven on genuinely showcase-bar content instead.
-	"wb:draft-boards": {playwright("40-showcase-draft.spec.ts")},
-	"wb:dex":          {playwright("16-dex-v2.spec.ts")},
-	"wb:dex-by-story": {playwright("18-dex-by-story.spec.ts")},
-	"wb:presentation": {playwright("06-presentation.spec.ts")},
-	"wb:ref-peek":     {playwright("25-board-ref-peek.spec.ts")},
+	"wb:draft-boards":   {playwright("40-showcase-draft.spec.ts")},
+	"wb:dex":            {playwright("16-dex-v2.spec.ts")},
+	"wb:dex-by-story":   {playwright("18-dex-by-story.spec.ts")},
+	"wb:dex-document":   {playwright("80-dex-document.spec.ts")},
+	"wb:board-document": {playwright("79-board-document.spec.ts")},
+	"wb:presentation":   {playwright("06-presentation.spec.ts")},
+	"wb:ref-peek":       {playwright("25-board-ref-peek.spec.ts")},
 
 	// The three registered corpus/verdict/matrix pages that complete the
 	// workbench axis (handler.go's RegisterRoutesWithHome mounts them at
@@ -426,7 +435,7 @@ var workbenchSurfaces = []string{
 	"board", "board-review-mode", "board-scoping-canvas", "obligation-wall",
 	"wall-badges", "wall-receipts", "evidence-slot", "diagram-editor",
 	"diagram-tier", "derivation-drawer", "directory-home", "draft-boards",
-	"dex", "dex-by-story", "disclosures", "presentation", "ref-peek",
+	"dex", "dex-by-story", "dex-document", "board-document", "disclosures", "presentation", "ref-peek",
 	"corpus", "verdict", "matrix",
 }
 

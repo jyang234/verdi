@@ -64,6 +64,10 @@ type pageData struct {
 	Connections []connection
 	TOC         []TOCEntry
 	CopyRef     string // "" suppresses the copy-reference button
+	// DocumentURL is a spec page's page-relative link to its Document view
+	// ("document/", spec/spec-documents ac-4), rendered beside the
+	// copy-reference control; "" (every other page) renders no link.
+	DocumentURL string
 	// CopyRefDisplay is CopyRef with its pin sha visually shortened for the
 	// button label. The full pinned form stays in data-copy-ref (what the
 	// clipboard receives) and in title/aria-label; only the visible text is
@@ -129,7 +133,7 @@ var pageTemplate = template.Must(template.New("page").Parse(`<!doctype html>
 {{range .LadderBadges}}<span class="badge badge-{{.ID}}" data-testid="badge-{{.ID}}">{{if .Label}}{{.Label}}{{else}}{{.ID}}{{end}}</span>{{end}}
 </header>
 <div class="temporal-banner {{.BannerClass}}"><span class="temporal-dot" aria-hidden="true"></span>{{.Banner}}</div>
-{{if .CopyRef}}<div><button type="button" class="copy-ref" data-copy-ref="{{.CopyRef}}" title="{{.CopyRef}}" aria-label="Copy full reference {{.CopyRef}}">Copy reference <code>{{.CopyRefDisplay}}</code></button></div>{{end}}
+{{if .CopyRef}}<div><button type="button" class="copy-ref" data-copy-ref="{{.CopyRef}}" title="{{.CopyRef}}" aria-label="Copy full reference {{.CopyRef}}">Copy reference <code>{{.CopyRefDisplay}}</code></button>{{if .DocumentURL}} <a class="document-link" href="{{.DocumentURL}}">read as a document</a>{{end}}</div>{{end}}
 <div class="page-body">
 <main class="content">
 {{if .MetaRows}}<aside class="metadata-card"><dl>

@@ -1,6 +1,9 @@
 package artifact
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestParseRef_Happy(t *testing.T) {
 	cases := []struct {
@@ -181,5 +184,48 @@ func TestRef_String_Unpinned(t *testing.T) {
 	r := Ref{Kind: KindSpec, Name: "foo"}
 	if got, want := r.String(), "spec/foo"; got != want {
 		t.Fatalf("String() = %q, want %q", got, want)
+	}
+}
+
+// TestValidCommit is ValidCommit's own table: the exported form of the
+// pinned-ref commit rule must accept exactly what `kind/name@commit`
+// accepts and refuse everything else — in particular the revision
+// expressions and option-shaped strings a caller might otherwise hand
+// straight to git (final-review F2).
+func TestValidCommit(t *testing.T) {
+	for _, c := range []struct {
+		name string
+		in   string
+		want bool
+	}{
+		{"full sha", strings.Repeat("a", 40), true},
+		{"short sha at the minimum", "0123456", true},
+		{"mixed hex digits", "deadbe0f1234", true},
+		{"empty", "", false},
+		{"six characters is too short", "012345", false},
+		{"forty-one characters is too long", strings.Repeat("a", 41), false},
+		{"uppercase hex", strings.Repeat("A", 40), false},
+		{"non-hex letter", "g123456", false},
+		{"symbolic revision", "HEAD", false},
+		{"revision expression", "HEAD~3", false},
+		{"branch name", "main", false},
+		{"option shaped", "--git-dir", false},
+		{"path traversal", "../x", false},
+		{"trailing newline", strings.Repeat("a", 40) + "\n", false},
+		{"surrounding whitespace", " " + strings.Repeat("a", 40) + " ", false},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			if got := ValidCommit(c.in); got != c.want {
+				t.Errorf("ValidCommit(%q) = %v, want %v", c.in, got, c.want)
+			}
+			// The exported predicate and the ref grammar agree by
+			// construction: a value ValidCommit accepts is exactly a value
+			// `spec/x@<value>` parses, and one it refuses is one that ref
+			// form refuses too.
+			_, err := ParseRef("spec/x@" + c.in)
+			if c.in != "" && (err == nil) != c.want {
+				t.Errorf("ParseRef(\"spec/x@%s\") err = %v, but ValidCommit = %v", c.in, err, c.want)
+			}
+		})
 	}
 }

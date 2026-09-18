@@ -308,12 +308,26 @@ func TestSpecDoc_FlagsAfterRef(t *testing.T) {
 	})
 
 	t.Run("--proposed after ref", func(t *testing.T) {
+		// An UNCOMMITTED edit, not merely the branch's already-committed
+		// "revised" text (spec-documents wave 2, R-W2-4): Stamp.Proposed
+		// is now derived from specstate — true only when the working
+		// tree's bytes actually diverge from the default branch's, so
+		// --proposed on an exact-match checkout is correctly NOT
+		// proposed (TestSpecDoc_ProposedAndAt covers that arm; this
+		// subtest exists to prove the F1 flag-after-ref parsing
+		// regression, which needs a genuine divergence to observe
+		// --proposed actually reading the working tree, not HEAD).
+		specPath := filepath.Join(repo.Dir, ".verdi/specs/active/lockbox/spec.md")
+		uncommitted := strings.Replace(revised, "revised", "revised, UNCOMMITTED", 1)
+		if err := os.WriteFile(specPath, []byte(uncommitted), 0o644); err != nil {
+			t.Fatal(err)
+		}
 		stdout, stderr, code := run("spec", "doc", "--format", "md", "spec/lockbox", "--proposed")
 		if code != 0 {
 			t.Fatalf("exit %d: %s", code, stderr)
 		}
-		if !strings.Contains(stdout, "Proposed, not accepted") {
-			t.Errorf("--proposed after the ref must still be applied:\n%s", stdout)
+		if !strings.Contains(stdout, "Proposed, not accepted") || !strings.Contains(stdout, "UNCOMMITTED") {
+			t.Errorf("--proposed after the ref must still be applied (read the dirty working tree, not HEAD):\n%s", stdout)
 		}
 	})
 
@@ -341,5 +355,34 @@ func TestSpecDoc_NoStoreExitsOperational(t *testing.T) {
 	_, stderr, code := runVerdiBinary(t, bin, t.TempDir(), nil, "spec", "doc", "spec/lockbox")
 	if code != 2 || stderr == "" {
 		t.Fatalf("exit %d stderr %q, want 2 with a message", code, stderr)
+	}
+}
+
+// TestSpecDoc_EvidenceDisclosureStillRenders is fix-round-1 F4's CLI half:
+// a degraded disclosure (specdocload.Result.Disclosures) must reach the
+// verb's stderr with its "spec doc: " prefix while the render itself
+// still succeeds and exits 0 — a document is a projection, never a
+// verdict, so a fact this verb could not compute is disclosed, not
+// fatal (CLAUDE.md's 0/1/2 exit contract: this verb has no verdict of
+// its own to fail). Deleting the working tree's own copy of the spec
+// leaves git-show's read of main untouched but makes
+// matrixprojection.Project's working-tree read of the spec fail,
+// degrading evidence alone (the same mechanism
+// TestLoadDisclosuresOrderAndContent proves at the loader level).
+func TestSpecDoc_EvidenceDisclosureStillRenders(t *testing.T) {
+	repo := buildSpecDocRepo(t)
+	bin := buildVerdiBinary(t)
+	if err := os.Remove(filepath.Join(repo.Dir, ".verdi/specs/active/lockbox/spec.md")); err != nil {
+		t.Fatal(err)
+	}
+	stdout, stderr, code := runVerdiBinary(t, bin, repo.Dir, []string{"CI_DEFAULT_BRANCH=main"}, "spec", "doc", "spec/lockbox")
+	if code != 0 {
+		t.Fatalf("exit %d, stderr:\n%s", code, stderr)
+	}
+	if !strings.Contains(stderr, "spec doc: evidence not computed:") {
+		t.Errorf("stderr missing the disclosure:\n%s", stderr)
+	}
+	if !strings.Contains(stdout, "# Lockbox") {
+		t.Errorf("the render must still succeed despite the disclosure:\n%s", stdout)
 	}
 }
