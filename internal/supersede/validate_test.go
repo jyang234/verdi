@@ -1,22 +1,28 @@
 package supersede
 
 import (
+	"context"
 	"errors"
 	"os"
-	"path/filepath"
 	"testing"
 
 	"github.com/jyang234/verdi/internal/store"
 )
 
-// TestValidateSuccessorName is the table proof of the successor-side
-// precondition both callers of this package share (the CLI today, the
-// board's Revise action at W3-C): the successor's name must parse as a
-// spec ref, and its store directory must not already exist.
-func TestValidateSuccessorName(t *testing.T) {
-	t.Run("a fresh, well-formed successor name passes", func(t *testing.T) {
+// TestValidateSuccessorName_ReExportWiring proves this package's thin
+// re-export of internal/specname.ValidateSuccessorName wires correctly —
+// happy path, and one refusal per the reason constants this package itself
+// re-exports (invalid name, active exists, archived exists) — so a caller
+// still reading supersede.ValidateSuccessorName/supersede.NameError/
+// supersede.ReasonXxx (designsupersede.go; the board's actionRevise) gets
+// the exact same behavior as a direct internal/specname caller. The
+// exhaustive table (every refusal shape, including the base-ref check) is
+// internal/specname/validate_test.go's own; this file does not duplicate
+// it.
+func TestValidateSuccessorName_ReExportWiring(t *testing.T) {
+	t.Run("happy", func(t *testing.T) {
 		root := t.TempDir()
-		ref, err := ValidateSuccessorName(root, "lockbox-v2")
+		ref, err := ValidateSuccessorName(context.Background(), root, "lockbox-v2", "")
 		if err != nil {
 			t.Fatalf("ValidateSuccessorName = %v, want no error", err)
 		}
@@ -25,67 +31,41 @@ func TestValidateSuccessorName(t *testing.T) {
 		}
 	})
 
-	t.Run("an existing successor directory refuses, naming the path", func(t *testing.T) {
+	t.Run("invalid name (fragment, UAT-030)", func(t *testing.T) {
+		root := t.TempDir()
+		_, err := ValidateSuccessorName(context.Background(), root, "foo#dc-1", "")
+		var nerr *NameError
+		if !errors.As(err, &nerr) || nerr.Reason != ReasonInvalidName {
+			t.Fatalf("ValidateSuccessorName = %v, want a *NameError with reason %q", err, ReasonInvalidName)
+		}
+	})
+
+	t.Run("active zone exists", func(t *testing.T) {
 		root := t.TempDir()
 		dir := store.ActiveSpecDir(root, "lockbox-v2")
 		if err := os.MkdirAll(dir, 0o755); err != nil {
-			t.Fatalf("MkdirAll: %v", err)
+			t.Fatal(err)
 		}
-		_, err := ValidateSuccessorName(root, "lockbox-v2")
+		_, err := ValidateSuccessorName(context.Background(), root, "lockbox-v2", "")
 		var nerr *NameError
-		if !errors.As(err, &nerr) {
-			t.Fatalf("ValidateSuccessorName = %v, want a *NameError", err)
-		}
-		if nerr.Reason != ReasonSuccessorExists {
-			t.Fatalf("Reason = %q, want %q", nerr.Reason, ReasonSuccessorExists)
+		if !errors.As(err, &nerr) || nerr.Reason != ReasonSuccessorExists {
+			t.Fatalf("ValidateSuccessorName = %v, want a *NameError with reason %q", err, ReasonSuccessorExists)
 		}
 		if nerr.Path != dir {
 			t.Fatalf("Path = %q, want %q", nerr.Path, dir)
 		}
 	})
 
-	t.Run("an existing successor FILE refuses too", func(t *testing.T) {
+	t.Run("archive zone exists (UAT-032)", func(t *testing.T) {
 		root := t.TempDir()
-		dir := store.ActiveSpecDir(root, "lockbox-v2")
-		if err := os.MkdirAll(filepath.Dir(dir), 0o755); err != nil {
-			t.Fatalf("MkdirAll: %v", err)
+		dir := store.ArchiveSpecDir(root, "retired")
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
 		}
-		if err := os.WriteFile(dir, []byte("not a directory"), 0o644); err != nil {
-			t.Fatalf("WriteFile: %v", err)
-		}
-		_, err := ValidateSuccessorName(root, "lockbox-v2")
+		_, err := ValidateSuccessorName(context.Background(), root, "retired", "")
 		var nerr *NameError
-		if !errors.As(err, &nerr) || nerr.Reason != ReasonSuccessorExists {
-			t.Fatalf("ValidateSuccessorName = %v, want a *NameError with reason %q", err, ReasonSuccessorExists)
+		if !errors.As(err, &nerr) || nerr.Reason != ReasonArchivedExists {
+			t.Fatalf("ValidateSuccessorName = %v, want a *NameError with reason %q", err, ReasonArchivedExists)
 		}
 	})
-
-	badNames := []struct {
-		name string
-		why  string
-	}{
-		{"", "empty"},
-		{"Not_A_Valid_Name", "not kebab-case"},
-		{"nested/name", "a path separator"},
-		{"UPPER", "uppercase"},
-	}
-	for _, bad := range badNames {
-		t.Run("refuses a name that is "+bad.why, func(t *testing.T) {
-			root := t.TempDir()
-			_, err := ValidateSuccessorName(root, bad.name)
-			var nerr *NameError
-			if !errors.As(err, &nerr) {
-				t.Fatalf("ValidateSuccessorName(%q) = %v, want a *NameError", bad.name, err)
-			}
-			if nerr.Reason != ReasonInvalidName {
-				t.Fatalf("Reason = %q, want %q", nerr.Reason, ReasonInvalidName)
-			}
-			if nerr.Name != bad.name {
-				t.Fatalf("Name = %q, want %q", nerr.Name, bad.name)
-			}
-			if errors.Unwrap(nerr) == nil {
-				t.Fatal("NameError wraps no parse error; the caller cannot report WHY the name was refused")
-			}
-		})
-	}
 }
