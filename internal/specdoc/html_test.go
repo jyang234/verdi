@@ -9,7 +9,8 @@ import (
 
 func TestRenderHTMLGolden(t *testing.T) {
 	fm, body := loadFixture(t)
-	doc, err := Build(Input{Spec: fm, Body: body, Status: "accepted-pending-build", Stamp: Stamp{Ref: "spec/lockbox", Commit: strings.Repeat("0", 39) + "1"}, Facts: WithMatrix(FactsFromSpec(fm), matrixFixture(), "matrix at 00000000"), Kind: KindSpec})
+	commit := strings.Repeat("0", 39) + "1"
+	doc, err := Build(Input{Spec: fm, Body: body, Status: "accepted-pending-build", Stamp: Stamp{Ref: "spec/lockbox", Commit: commit}, Facts: WithMatrix(FactsFromSpec(fm), matrixFixture(), commit), Kind: KindSpec})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -33,7 +34,8 @@ func TestRenderHTMLGolden(t *testing.T) {
 // RenderMarkdown's own output — no second, divergent rendering path.
 func TestRenderHTMLMatchesMarkdownEngine(t *testing.T) {
 	fm, body := loadFixture(t)
-	doc, err := Build(Input{Spec: fm, Body: body, Status: "accepted-pending-build", Stamp: Stamp{Ref: "spec/lockbox", Commit: strings.Repeat("8", 40)}, Facts: WithMatrix(FactsFromSpec(fm), matrixFixture(), "matrix at 88888888"), Kind: KindSpec})
+	commit := strings.Repeat("8", 40)
+	doc, err := Build(Input{Spec: fm, Body: body, Status: "accepted-pending-build", Stamp: Stamp{Ref: "spec/lockbox", Commit: commit}, Facts: WithMatrix(FactsFromSpec(fm), matrixFixture(), commit), Kind: KindSpec})
 	if err != nil {
 		t.Fatal(err)
 	}

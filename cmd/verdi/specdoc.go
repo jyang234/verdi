@@ -127,8 +127,15 @@ func cmdSpecDoc(args []string, stdout, stderr io.Writer) int {
 	}
 
 	facts := specdoc.FactsFromSpec(fm)
-	if proj, perr := matrixprojection.Project(ctx, root, parsed.String(), *proposedFlag, cfg.Model); perr == nil {
-		facts = specdoc.WithMatrix(facts, proj.Record, "matrix at "+src.commit[:12])
+	// The matrix always evaluates HEAD, resolved once here — never
+	// src.commit, which under --at names a possibly different (older or
+	// newer) commit than HEAD (spec-documents wave-1 fix round, F1). When
+	// HEAD cannot be resolved, evidence stays unavailable rather than
+	// mislabeling its source.
+	if head, herr := gitx.RevParse(ctx, root, "HEAD"); herr != nil {
+		fmt.Fprintf(stderr, "spec doc: evidence not computed: resolving HEAD: %v\n", herr)
+	} else if proj, perr := matrixprojection.Project(ctx, root, parsed.String(), *proposedFlag, cfg.Model); perr == nil {
+		facts = specdoc.WithMatrix(facts, proj.Record, head)
 	} else {
 		fmt.Fprintf(stderr, "spec doc: evidence not computed: %v\n", perr)
 	}

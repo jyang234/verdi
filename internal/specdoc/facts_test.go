@@ -61,12 +61,12 @@ func TestWithMatrixFeature(t *testing.T) {
 	rec := matrixprojection.Record{Feature: &matrixprojection.FeatureBody{ACs: []matrixprojection.FeatureAC{
 		{ID: "ac-1", Status: "violated", Summary: "no implementing story", ImplementingStories: []string{"spec/b", "spec/a"}},
 	}}}
-	got := WithMatrix(base, rec, "matrix at abc123")
+	got := WithMatrix(base, rec, "abc123def4567890")
 	want := map[string]ACEvidence{"ac-1": {Status: "violated", Summary: "no implementing story", Stories: []string{"spec/a", "spec/b"}}}
 	if !reflect.DeepEqual(got.Evidence, want) {
 		t.Errorf("Evidence = %+v, want %+v", got.Evidence, want)
 	}
-	if got.EvidenceSource != "matrix at abc123" {
+	if got.EvidenceSource != "matrix over the working tree at abc123def456" {
 		t.Errorf("EvidenceSource = %q", got.EvidenceSource)
 	}
 	if !reflect.DeepEqual(got.Coverage, base.Coverage) {
@@ -83,6 +83,11 @@ func TestWithMatrixStory(t *testing.T) {
 	want := map[string]ACEvidence{"ac-1": {Status: "satisfied", Summary: "all kinds proven", Kinds: []KindEvidence{{Kind: "behavioral", Satisfied: true}, {Kind: "attestation", Satisfied: false}}}}
 	if !reflect.DeepEqual(got.Evidence, want) {
 		t.Errorf("Evidence = %+v, want %+v", got.Evidence, want)
+	}
+	// headCommit shorter than 12 chars is used whole, never sliced out of
+	// range.
+	if got.EvidenceSource != "matrix over the working tree at s" {
+		t.Errorf("EvidenceSource = %q, want the short headCommit used whole", got.EvidenceSource)
 	}
 }
 

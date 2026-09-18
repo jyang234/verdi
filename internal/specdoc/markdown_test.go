@@ -50,7 +50,7 @@ func checkGolden(t *testing.T, name, got string) {
 func TestRenderMarkdownGoldens(t *testing.T) {
 	fm, body := loadFixture(t)
 	commit := strings.Repeat("0", 39) + "1"
-	facts := WithMatrix(FactsFromSpec(fm), matrixFixture(), "matrix at "+commit[:8])
+	facts := WithMatrix(FactsFromSpec(fm), matrixFixture(), commit)
 	for _, k := range []Kind{KindSpec, KindPlan, KindTasks} {
 		doc, err := Build(Input{Spec: fm, Body: body, Status: "accepted-pending-build", Stamp: Stamp{Ref: "spec/lockbox", Commit: commit}, Facts: facts, Kind: k})
 		if err != nil {
@@ -166,13 +166,14 @@ func TestPluralIf(t *testing.T) {
 // test, per the finding's own instruction.
 func TestRenderMarkdownPluralBranches(t *testing.T) {
 	fm, body := loadFixture(t)
+	commit := strings.Repeat("4", 40)
 	facts := FactsFromSpec(fm)
 	facts.Coverage["ac-1"] = []string{"key-holder", "other"}
 	facts = WithMatrix(facts, matrixprojection.Record{Feature: &matrixprojection.FeatureBody{ACs: []matrixprojection.FeatureAC{
 		{ID: "ac-1", Status: "eligible", Summary: "two implementing stories", ImplementingStories: []string{"spec/a", "spec/b"}},
 		{ID: "ac-2", Status: "violated", Summary: "no implementing story"},
-	}}}, "matrix at plural-test")
-	doc, err := Build(Input{Spec: fm, Body: body, Stamp: Stamp{Ref: "spec/lockbox", Commit: strings.Repeat("4", 40)}, Facts: facts, Kind: KindSpec})
+	}}}, commit)
+	doc, err := Build(Input{Spec: fm, Body: body, Stamp: Stamp{Ref: "spec/lockbox", Commit: commit}, Facts: facts, Kind: KindSpec})
 	if err != nil {
 		t.Fatal(err)
 	}

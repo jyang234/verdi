@@ -55,7 +55,7 @@ Each story in this plan becomes `spec/<slug>` when it is instantiated.
 
 ## Evidence
 
-Source: matrix at 00000000.
+Source: matrix over the working tree at 000000000000.
 
 | Criterion | State | Summary | Detail |
 |---|---|---|---|

@@ -20,8 +20,8 @@ type Facts struct {
 	Claims map[string][]string
 	// Evidence maps a criterion id to its state in the matrix projection.
 	Evidence map[string]ACEvidence
-	// EvidenceSource names where Evidence came from, e.g. "matrix at
-	// <commit>"; empty when Evidence is nil.
+	// EvidenceSource names where Evidence came from, e.g. "matrix over the
+	// working tree at <commit-prefix>"; empty when Evidence is nil.
 	EvidenceSource string
 }
 
@@ -85,8 +85,13 @@ func FactsFromSpec(fm *artifact.SpecFrontmatter) Facts {
 
 // WithMatrix copies f and fills Evidence from a matrix projection record.
 // A record with neither a feature nor a story body leaves Evidence
-// unavailable. source is recorded verbatim as EvidenceSource.
-func WithMatrix(f Facts, rec matrixprojection.Record, source string) Facts {
+// unavailable. headCommit is the working tree's current HEAD — the commit
+// the matrix projection actually evaluated, which the caller resolves
+// once and which is never the (possibly older or newer) commit the spec
+// text itself was read at (spec-documents wave-1 fix round, F1). Its
+// first 12 hex characters name EvidenceSource; a shorter string is used
+// whole rather than sliced out of range.
+func WithMatrix(f Facts, rec matrixprojection.Record, headCommit string) Facts {
 	out := f
 	switch {
 	case rec.Feature != nil:
@@ -108,6 +113,10 @@ func WithMatrix(f Facts, rec matrixprojection.Record, source string) Facts {
 	default:
 		return out
 	}
-	out.EvidenceSource = source
+	prefix := headCommit
+	if len(headCommit) >= 12 {
+		prefix = headCommit[:12]
+	}
+	out.EvidenceSource = "matrix over the working tree at " + prefix
 	return out
 }

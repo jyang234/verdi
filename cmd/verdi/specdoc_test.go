@@ -154,6 +154,48 @@ func TestSpecDoc_ProposedAndAt(t *testing.T) {
 	}
 }
 
+// TestSpecDoc_EvidenceSourceNamesHEADNotAt is the F1 CLI proof (spec-
+// documents wave-1 final fix round): matrixprojection.Project always
+// evaluates the working tree's current HEAD, never the (possibly older)
+// commit the rendered spec text itself came from under --at, so the
+// Evidence section's Source line must always name HEAD's own prefix, not
+// --at's.
+func TestSpecDoc_EvidenceSourceNamesHEADNotAt(t *testing.T) {
+	revised := strings.Replace(specDocFixture, "Keys are shared.", "Keys are shared, revised.", 1)
+	repo := fixturegit.Build(t, []fixturegit.Layer{
+		{
+			Message: "adopt store with one accepted spec",
+			Files: map[string]string{
+				".verdi/verdi.yaml":                   supersedeManifestYAML,
+				".verdi/specs/active/lockbox/spec.md": specDocFixture,
+			},
+		},
+		{
+			Message: "revise lockbox problem statement",
+			Files: map[string]string{
+				".verdi/specs/active/lockbox/spec.md": revised,
+			},
+		},
+	})
+	old := repo.Heads[0]
+	if old == repo.Head {
+		t.Fatal("fixture must have two distinct commits for this proof")
+	}
+	bin := buildVerdiBinary(t)
+	stdout, stderr, code := runVerdiBinary(t, bin, repo.Dir, []string{"CI_DEFAULT_BRANCH=main"}, "spec", "doc", "spec/lockbox", "--at", old)
+	if code != 0 {
+		t.Fatalf("exit %d: %s", code, stderr)
+	}
+	wantSource := "Source: matrix over the working tree at " + repo.Head[:12]
+	if !strings.Contains(stdout, wantSource) {
+		t.Errorf("Source line must name HEAD's prefix %q, got:\n%s", wantSource, stdout)
+	}
+	dontWantSource := "Source: matrix over the working tree at " + old[:12]
+	if strings.Contains(stdout, dontWantSource) {
+		t.Errorf("Source line must not name --at's commit %q, got:\n%s", dontWantSource, stdout)
+	}
+}
+
 func TestSpecDoc_Refusals(t *testing.T) {
 	repo := buildSpecDocRepo(t)
 	bin := buildVerdiBinary(t)
