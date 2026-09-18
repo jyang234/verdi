@@ -9,7 +9,7 @@
 | Status | accepted-pending-build |
 | Commit | 0000000000000000000000000000000000000001 |
 | Supersedes | spec/lockbox-v0 |
-| Revision | 1 carried, 1 amended, 0 amended (advisory), 0 removed, 4 added |
+| Revision | vs spec/lockbox-v0: 1 objects carried, 1 amended, 0 amended (advisory), 0 removed, 4 added |
 
 ## Problem
 
@@ -21,37 +21,37 @@ Each key has one holder.
 
 ## Decisions
 
-### dc-1
-
-One holder per key.
+### One holder per key. <a id="dc-1"></a>
 
 Because two holders means no holder.
 
 ## Constraints
 
-- **co-1** No network.
+- **co-1** No network. <a id="co-1"></a>
 
 ## Acceptance criteria
 
 1. **ac-1** A key opens one box. <a id="ac-1"></a>
-   Evidence: behavioral, attestation.
-   Coverage: planned in story `key-holder`.
+   - Evidence: behavioral, attestation.
+   - Coverage: planned in story `key-holder`.
 
    Proven by opening.
 
 2. **ac-2** A lost key is revoked. <a id="ac-2"></a>
-   Evidence: static.
-   Coverage: not yet planned.
+   - Evidence: static.
+   - Coverage: not yet planned.
 
 ## Open questions
 
-- **oq-1** Who audits holders? — claimed by research spike `audit-probe`; answered after acceptance.
-- **oq-2** How long is a revocation valid? — unclaimed; blocks acceptance until a research spike claims it or a decision answers it.
+- **oq-1** Who audits holders? <a id="oq-1"></a> — Claims: claimed by spike `audit-probe`; answered after acceptance.
+- **oq-2** How long is a revocation valid? <a id="oq-2"></a> — Claims: unclaimed; blocks acceptance until a spike claims it or a decision answers it.
 
 ## Plan
 
-1. Planned story `key-holder` covers ac-1.
-2. Research spike `audit-probe` answers oq-1.
+Each planned story becomes `spec/<slug>` when it is instantiated.
+
+1. Story `key-holder` covers ac-1 (A key opens one box.).
+2. Spike `audit-probe` answers oq-1 (Who audits holders?).
 
 ## Evidence
 
@@ -59,8 +59,8 @@ Source: matrix at 00000000.
 
 | Criterion | State | Summary | Detail |
 |---|---|---|---|
-| ac-1 | eligible | one implementing story, not yet closed | implementing story: `spec/key-holder` |
-| ac-2 | violated | no implementing story | — |
+| ac-1 — A key opens one box. | eligible | one implementing story, not yet closed | implementing story: `spec/key-holder` |
+| ac-2 — A lost key is revoked. | violated | no implementing story | — |
 
 ---
 

@@ -30,7 +30,7 @@
 </tr>
 <tr>
 <td>Revision</td>
-<td>1 carried, 1 amended, 0 amended (advisory), 0 removed, 4 added</td>
+<td>vs spec/lockbox-v0: 1 objects carried, 1 amended, 0 amended (advisory), 0 removed, 4 added</td>
 </tr>
 </tbody>
 </table>
@@ -39,36 +39,40 @@
 <h2 id="outcome">Outcome</h2>
 <p>Each key has one holder.</p>
 <h2 id="decisions">Decisions</h2>
-<h3 id="dc-1">dc-1</h3>
-<p>One holder per key.</p>
+<h3 id="one-holder-per-key-a-iddc-1a">One holder per key. <a id="dc-1"></a></h3>
 <p>Because two holders means no holder.</p>
 <h2 id="constraints">Constraints</h2>
 <ul>
-<li><strong>co-1</strong> No network.</li>
+<li><strong>co-1</strong> No network. <a id="co-1"></a></li>
 </ul>
 <h2 id="acceptance-criteria">Acceptance criteria</h2>
 <ol>
 <li>
-<p><strong>ac-1</strong> A key opens one box. <a id="ac-1"></a>
-Evidence: behavioral, attestation.
-Coverage: planned in story <code>key-holder</code>.</p>
+<p><strong>ac-1</strong> A key opens one box. <a id="ac-1"></a></p>
+<ul>
+<li>Evidence: behavioral, attestation.</li>
+<li>Coverage: planned in story <code>key-holder</code>.</li>
+</ul>
 <p>Proven by opening.</p>
 </li>
 <li>
-<p><strong>ac-2</strong> A lost key is revoked. <a id="ac-2"></a>
-Evidence: static.
-Coverage: not yet planned.</p>
+<p><strong>ac-2</strong> A lost key is revoked. <a id="ac-2"></a></p>
+<ul>
+<li>Evidence: static.</li>
+<li>Coverage: not yet planned.</li>
+</ul>
 </li>
 </ol>
 <h2 id="open-questions">Open questions</h2>
 <ul>
-<li><strong>oq-1</strong> Who audits holders? — claimed by research spike <code>audit-probe</code>; answered after acceptance.</li>
-<li><strong>oq-2</strong> How long is a revocation valid? — unclaimed; blocks acceptance until a research spike claims it or a decision answers it.</li>
+<li><strong>oq-1</strong> Who audits holders? <a id="oq-1"></a> — Claims: claimed by spike <code>audit-probe</code>; answered after acceptance.</li>
+<li><strong>oq-2</strong> How long is a revocation valid? <a id="oq-2"></a> — Claims: unclaimed; blocks acceptance until a spike claims it or a decision answers it.</li>
 </ul>
 <h2 id="plan">Plan</h2>
+<p>Each planned story becomes <code>spec/&lt;slug&gt;</code> when it is instantiated.</p>
 <ol>
-<li>Planned story <code>key-holder</code> covers ac-1.</li>
-<li>Research spike <code>audit-probe</code> answers oq-1.</li>
+<li>Story <code>key-holder</code> covers ac-1 (A key opens one box.).</li>
+<li>Spike <code>audit-probe</code> answers oq-1 (Who audits holders?).</li>
 </ol>
 <h2 id="evidence">Evidence</h2>
 <p>Source: matrix at 00000000.</p>
@@ -83,13 +87,13 @@ Coverage: not yet planned.</p>
 </thead>
 <tbody>
 <tr>
-<td>ac-1</td>
+<td>ac-1 — A key opens one box.</td>
 <td>eligible</td>
 <td>one implementing story, not yet closed</td>
 <td>implementing story: <code>spec/key-holder</code></td>
 </tr>
 <tr>
-<td>ac-2</td>
+<td>ac-2 — A lost key is revoked.</td>
 <td>violated</td>
 <td>no implementing story</td>
 <td>—</td>

@@ -72,11 +72,37 @@ func TestRenderMarkdownGoldens(t *testing.T) {
 
 func TestRenderMarkdownIsDeterministic(t *testing.T) {
 	fm, body := loadFixture(t)
-	in := Input{Spec: fm, Body: body, Stamp: Stamp{Ref: "spec/lockbox", Commit: strings.Repeat("d", 40)}, Facts: FactsFromSpec(fm), Kind: KindSpec}
-	a, _ := Build(in)
-	b, _ := Build(in)
-	if RenderMarkdown(a) != RenderMarkdown(b) {
-		t.Fatal("two renders of the same input differ")
+	for _, k := range []Kind{KindSpec, KindPlan, KindTasks} {
+		in := Input{Spec: fm, Body: body, Stamp: Stamp{Ref: "spec/lockbox", Commit: strings.Repeat("d", 40)}, Facts: FactsFromSpec(fm), Kind: k}
+		a, err := Build(in)
+		if err != nil {
+			t.Fatalf("%s: Build: %v", k, err)
+		}
+		b, err := Build(in)
+		if err != nil {
+			t.Fatalf("%s: Build: %v", k, err)
+		}
+		if RenderMarkdown(a) != RenderMarkdown(b) {
+			t.Fatalf("%s: two renders of the same input differ", k)
+		}
+	}
+}
+
+// TestRenderMarkdownEndsWithSingleNewline is half of F10 (fix round 1);
+// the other half, RenderHTML(doc) == render.RenderMarkdown(RenderMarkdown(doc)),
+// lives in html_test.go alongside the RenderHTML it exercises.
+func TestRenderMarkdownEndsWithSingleNewline(t *testing.T) {
+	fm, body := loadFixture(t)
+	doc, err := Build(Input{Spec: fm, Body: body, Stamp: Stamp{Ref: "spec/lockbox", Commit: strings.Repeat("9", 40)}, Facts: FactsFromSpec(fm), Kind: KindSpec})
+	if err != nil {
+		t.Fatal(err)
+	}
+	md := RenderMarkdown(doc)
+	if !strings.HasSuffix(md, "\n") {
+		t.Fatalf("RenderMarkdown must end with a newline")
+	}
+	if strings.HasSuffix(md, "\n\n") {
+		t.Fatalf("RenderMarkdown must end with exactly one newline, not more")
 	}
 }
 

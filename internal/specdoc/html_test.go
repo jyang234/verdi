@@ -3,6 +3,8 @@ package specdoc
 import (
 	"strings"
 	"testing"
+
+	"github.com/jyang234/verdi/internal/render"
 )
 
 func TestRenderHTMLGolden(t *testing.T) {
@@ -23,5 +25,27 @@ func TestRenderHTMLGolden(t *testing.T) {
 	}
 	if strings.Contains(html, "<html") || strings.Contains(html, "<body") {
 		t.Errorf("RenderHTML must return a fragment, not a page")
+	}
+}
+
+// TestRenderHTMLMatchesMarkdownEngine is the other half of F10 (fix
+// round 1): RenderHTML must be exactly render.RenderMarkdown applied to
+// RenderMarkdown's own output — no second, divergent rendering path.
+func TestRenderHTMLMatchesMarkdownEngine(t *testing.T) {
+	fm, body := loadFixture(t)
+	doc, err := Build(Input{Spec: fm, Body: body, Status: "accepted-pending-build", Stamp: Stamp{Ref: "spec/lockbox", Commit: strings.Repeat("8", 40)}, Facts: WithMatrix(FactsFromSpec(fm), matrixFixture(), "matrix at 88888888"), Kind: KindSpec})
+	if err != nil {
+		t.Fatal(err)
+	}
+	html, err := RenderHTML(doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, err := render.RenderMarkdown(RenderMarkdown(doc))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if html != want {
+		t.Fatalf("RenderHTML(doc) must equal render.RenderMarkdown(RenderMarkdown(doc))")
 	}
 }

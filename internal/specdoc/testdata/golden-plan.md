@@ -9,24 +9,24 @@
 | Status | accepted-pending-build |
 | Commit | 0000000000000000000000000000000000000001 |
 | Supersedes | spec/lockbox-v0 |
-| Revision | 1 carried, 1 amended, 0 amended (advisory), 0 removed, 4 added |
+| Revision | vs spec/lockbox-v0: 1 objects carried, 1 amended, 0 amended (advisory), 0 removed, 4 added |
 
 ## Decisions
 
-### dc-1
-
-One holder per key.
+### One holder per key. <a id="dc-1"></a>
 
 Because two holders means no holder.
 
 ## Constraints
 
-- **co-1** No network.
+- **co-1** No network. <a id="co-1"></a>
 
 ## Plan
 
-1. Planned story `key-holder` covers ac-1.
-2. Research spike `audit-probe` answers oq-1.
+Each planned story becomes `spec/<slug>` when it is instantiated.
+
+1. Story `key-holder` covers ac-1 (A key opens one box.).
+2. Spike `audit-probe` answers oq-1 (Who audits holders?).
 
 ---
 
