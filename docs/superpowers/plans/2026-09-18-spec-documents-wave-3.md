@@ -1431,7 +1431,7 @@ In `cmd/verdi/help.go`: add the `topLevelUsage` row `  harness      render or dr
 
 In `internal/specalign/verbs_test.go`: add `"harness"` to `inV0` and a package-doc paragraph in the file's changelog style: "`harness` (spec/spec-documents ac-7, wave 3, phase 25) renders and drift-checks the four verdi skills; a bare `verdi harness` fails on usage parsing alone (exit 2) BEFORE resolving a store root, so the inventory proof stays hermetic."
 
-In `internal/showcasealign/coverage_test.go`: add the row `"cli:harness": {goE2E("cmd/verdi/harness_test.go")},` in the `cli:` group, sorted with its neighbours; read `coverage_test.go:744-760` (`realCapabilities`) to confirm the key form.
+In `internal/showcasealign/coverage_test.go`: add the row `"cli:harness": {goE2E("internal/showcasealign/cli_showcase_test.go")},` in the `cli:` group, sorted with its neighbours, and add a harness case to `internal/showcasealign/cli_showcase_test.go` in the shape of the `cli:experiment`/`cli:context` cases (against the provisioned showcase store root: `harness check -o <root>` → exit 1 with eight `missing  ` lines; `harness render -o <root>` → exit 0, eight lines; `harness check -o <root>` → exit 0, empty stdout). A test that only names `examples/showcase` in a disclosure comment is the gap pattern `coverage_test.go:48-53` records as closed; the row must map to a test that drives the real binary against the real showcase store. Read `coverage_test.go:744-760` (`realCapabilities`) to confirm the key form.
 
 In `CLAUDE.md` (repo), extend the "CLI verbs:" sentence: "…`journey` (GLG AC-1), and `harness` (spec/spec-documents ac-7 — rendered, drift-checked agent skills) are real too; …".
 
