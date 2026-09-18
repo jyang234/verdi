@@ -75,3 +75,43 @@ func TestCheckFindings(t *testing.T) {
 		t.Fatalf("Check(codex) = %+v", rep2)
 	}
 }
+
+// TestCheckDetectsInjectedMultilineRenderCommitBlock is task-1-review.md
+// finding 3's negative case: the render-commit mask must bound itself to
+// the one well-formed line Render wrote, never an unbounded run of bytes
+// ending in "-->\n". Widening the render-commit comment into a multi-line
+// block — as an edit landing directly in a file an agent reads would —
+// must be reported as drift, not masked away as if it were an ordinary
+// render-commit value change.
+func TestCheckDetectsInjectedMultilineRenderCommitBlock(t *testing.T) {
+	root := t.TempDir()
+	if _, err := Write(context.Background(), root, Hosts()); err != nil {
+		t.Fatal(err)
+	}
+	p := filepath.Join(root, filepath.FromSlash(Path(HostClaude, "specify")))
+	b, err := os.ReadFile(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	injected := bytes.Replace(b, []byte("<!-- verdi:render-commit none -->"), []byte("<!-- verdi:render-commit none\nINJECTED\n-->"), 1)
+	if bytes.Equal(injected, b) {
+		t.Fatal("test setup: render-commit line not found to replace")
+	}
+	if err := os.WriteFile(p, injected, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	rep, err := Check(root, Hosts())
+	if err != nil {
+		t.Fatal(err)
+	}
+	code, found := "", false
+	for _, f := range rep.Findings {
+		if f.Path == Path(HostClaude, "specify") {
+			code, found = f.Code, true
+		}
+	}
+	if !found || code != "drift" {
+		t.Fatalf("Check did not report the injected multi-line render-commit block as drift (path %s): findings = %+v", Path(HostClaude, "specify"), rep.Findings)
+	}
+}

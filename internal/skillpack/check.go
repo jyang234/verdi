@@ -31,7 +31,15 @@ type Report struct {
 // Clean reports zero findings.
 func (r Report) Clean() bool { return len(r.Findings) == 0 }
 
-var renderCommitLine = regexp.MustCompile(`(?m)^<!-- verdi:render-commit [^>]*-->\n`)
+// renderCommitLine matches exactly one well-formed render-commit stamp
+// line: the value must be 40 lowercase hex or "none" (Render's own
+// grammar), so the match can never span more than the one line Render
+// wrote. `[^>]*` alone would match across newlines — R-W3-2 exempts the
+// render-commit *value* from the drift comparison, not an unbounded run
+// of bytes ending in "-->\n" (task-1-review.md finding 3: an injected
+// multi-line block between a genuine open and close was masked away
+// entirely, hiding an instruction planted in a file the agent reads).
+var renderCommitLine = regexp.MustCompile(`(?m)^<!-- verdi:render-commit (?:[0-9a-f]{40}|none) -->\n`)
 
 // maskRenderCommit removes the render-commit stamp line (R-W3-2).
 func maskRenderCommit(b []byte) []byte { return renderCommitLine.ReplaceAll(b, nil) }
