@@ -391,6 +391,54 @@ func TestBoardSpec_CreateForm_Rendered(t *testing.T) {
 	}
 }
 
+// -- UAT-030/031/032 fix coverage -------------------------------------------
+
+// TestBoardSpec_Create_FragmentNameRefused is UAT-030's own witness on the
+// board's create action: specNameRe's plain kebab-case regex already
+// rejected a "#"/"@" character outright (so create was never the surface
+// UAT-030 named), but this proves the SHARED predicate that replaces it
+// keeps refusing the same input, in the same voice this action already
+// used for "malformed name".
+func TestBoardSpec_Create_FragmentNameRefused(t *testing.T) {
+	repo := newScopingAcceptedFixture(t)
+	h := NewHandler(repo.Dir)
+	rec := postBoardAPI(t, h, scopingAcceptedName, "create",
+		`{"name":"plainfrag#dc-1","values":{"Problem":"P","Outcome":"O"},"acs":["ac-1"]}`)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("create(name with #fragment) = %d, want 400\n%s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "kebab") {
+		t.Errorf("refusal %q does not name the kebab-case requirement", rec.Body.String())
+	}
+	if _, err := gitx.RevParse(context.Background(), repo.Dir, "refs/heads/design/plainfrag#dc-1"); err == nil {
+		t.Fatal("refused create still cut a design branch")
+	}
+}
+
+// TestBoardSpec_Create_ArchivedNameRefused is UAT-032's own witness: create
+// already checked the archive zone (boardspecapi.go's own pre-existing
+// inline stat), but this test did not previously exist for this action —
+// added here so the shared predicate's archive check stays proven at this
+// call site too, not only at revise's.
+func TestBoardSpec_Create_ArchivedNameRefused(t *testing.T) {
+	repo := newScopingAcceptedFixture(t)
+	if err := os.MkdirAll(filepath.Join(repo.Dir, ".verdi", "specs", "archive", "retired"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	h := NewHandler(repo.Dir)
+	rec := postBoardAPI(t, h, scopingAcceptedName, "create",
+		`{"name":"retired","values":{"Problem":"P","Outcome":"O"},"acs":["ac-1"]}`)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("create(archived name) = %d, want 400\n%s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "specs/archive/") {
+		t.Errorf("refusal %q does not name the archive collision (guide 6.1)", rec.Body.String())
+	}
+	if _, err := gitx.RevParse(context.Background(), repo.Dir, "refs/heads/design/retired"); err == nil {
+		t.Fatal("refused create still cut a design branch")
+	}
+}
+
 // writeStoreTemplate drops a .verdi/templates/<filename> override into
 // root's working tree (untracked — template resolution reads the
 // filesystem, exactly like the real store).

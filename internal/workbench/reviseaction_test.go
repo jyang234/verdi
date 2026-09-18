@@ -251,6 +251,19 @@ func TestBoardSpec_Revise_Refusals(t *testing.T) {
 		noRef(t, repo.Dir, "design/taken")
 	})
 
+	t.Run("fragment successor name (UAT-030)", func(t *testing.T) {
+		repo := newScopingAcceptedFixture(t)
+		h := NewHandler(repo.Dir)
+		rec := postBoardAPI(t, h, scopingAcceptedName, "revise", `{"name":"scoping-accepted-v2#dc-1"}`)
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("revise(fragment name) = %d, want 400\n%s", rec.Code, rec.Body.String())
+		}
+		if !strings.Contains(rec.Body.String(), "kebab-case") {
+			t.Errorf("refusal %q does not name the kebab-case rule", rec.Body.String())
+		}
+		noRef(t, repo.Dir, "design/scoping-accepted-v2#dc-1")
+	})
+
 	t.Run("archived successor name exists", func(t *testing.T) {
 		repo := newScopingAcceptedFixture(t)
 		if err := os.MkdirAll(filepath.Join(repo.Dir, ".verdi", "specs", "archive", "retired"), 0o755); err != nil {
@@ -338,6 +351,103 @@ func TestBoardSpec_Revise_Refusals(t *testing.T) {
 			t.Fatalf("GET revise = %d, want 405", rec.Code)
 		}
 	})
+}
+
+// behindCheckoutFillerSpec is a minimal, strict-decodable feature spec used
+// only as UAT-031's own "a name already landed on main" collision probe
+// (TestBoardSpec_Revise_BehindCheckout_NameOnMainRefused) — its content is
+// never inspected, only its presence at the target path, but it must still
+// strict-decode: supersede.Resolve's predecessor-status projection
+// corpus-scans every spec on the default branch (both zones) looking for
+// successors, and a malformed spec anywhere in that scan fails the scan
+// closed (disclosed-unproven) rather than merely skipping it — which would
+// refuse this test's revise call for an unrelated reason before ever
+// reaching the name check the test means to exercise.
+const behindCheckoutFillerSpec = `---
+id: spec/taken-on-main
+kind: spec
+class: feature
+title: "Taken on main (fixture)"
+owners: [platform-team]
+problem: { text: "p", anchor: "#problem" }
+outcome: { text: "o", anchor: "#outcome" }
+acceptance_criteria:
+  - { id: ac-1, text: "a", evidence: [static], anchor: "#ac-1" }
+---
+# Taken on main (fixture)
+
+## Problem
+
+p
+
+## Outcome
+
+o
+
+## AC-1
+
+a
+`
+
+// TestBoardSpec_Revise_BehindCheckout_NameOnMainRefused is UAT-031's own
+// witness on the board: the collision check used to stat only the serving
+// checkout's working tree, while the new branch is actually cut from the
+// resolved default branch (stubinstantiate.ResolveDesignBranchBase — the
+// SAME resolution CommitScaffoldBranch itself uses to cut the branch, so
+// the check and the cut agree). A serving checkout left behind main could
+// therefore revise into a name whose tree silently replaced a same-named
+// spec already landed there.
+func TestBoardSpec_Revise_BehindCheckout_NameOnMainRefused(t *testing.T) {
+	ctx := context.Background()
+	repo := fixturegit.Build(t, []fixturegit.Layer{{
+		Files: map[string]string{
+			".verdi/specs/active/" + scopingAcceptedName + "/spec.md": scopingAcceptedSpec,
+			".verdi/.gitignore": "data/\n",
+			".verdi/verdi.yaml": "schema: verdi.layout/v1\n",
+		},
+		Message: "seed scoping accepted fixture",
+	}})
+	t.Setenv("CI_DEFAULT_BRANCH", "main")
+
+	// Cut the serving checkout's own branch, then land a spec of the
+	// target successor name on main ONLY, and leave the checkout ON the
+	// serving branch — behind main, exactly as the UAT reproduction found
+	// it (a serving checkout, or a /b/{branch} managed worktree, cut
+	// before the spec landed).
+	if err := gitx.CheckoutNewBranch(ctx, repo.Dir, "behind"); err != nil {
+		t.Fatalf("CheckoutNewBranch(behind): %v", err)
+	}
+	if err := gitx.CheckoutExisting(ctx, repo.Dir, "main"); err != nil {
+		t.Fatalf("CheckoutExisting(main): %v", err)
+	}
+	specDir := filepath.Join(repo.Dir, ".verdi", "specs", "active", "taken-on-main")
+	if err := os.MkdirAll(specDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(specDir, "spec.md"), []byte(behindCheckoutFillerSpec), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := gitx.AddAll(ctx, repo.Dir); err != nil {
+		t.Fatalf("AddAll: %v", err)
+	}
+	if _, err := gitx.CreateCommit(ctx, repo.Dir, "land taken-on-main on main"); err != nil {
+		t.Fatalf("CreateCommit: %v", err)
+	}
+	if err := gitx.CheckoutExisting(ctx, repo.Dir, "behind"); err != nil {
+		t.Fatalf("CheckoutExisting(behind): %v", err)
+	}
+
+	h := NewHandler(repo.Dir)
+	rec := postBoardAPI(t, h, scopingAcceptedName, "revise", `{"name":"taken-on-main"}`)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("revise(name on main, absent from behind checkout) = %d, want 400\n%s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "main") {
+		t.Errorf("refusal does not name the base ref the checkout is behind:\n%s", rec.Body.String())
+	}
+	if _, err := gitx.RevParse(ctx, repo.Dir, "refs/heads/design/taken-on-main"); err == nil {
+		t.Fatal("refused revise still cut a design branch")
+	}
 }
 
 // TestReviseSuccessorDefault pins the dialog's prefilled successor name:

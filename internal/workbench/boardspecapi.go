@@ -30,6 +30,7 @@ import (
 	"github.com/jyang234/verdi/internal/designscaffold"
 	"github.com/jyang234/verdi/internal/gitx"
 	"github.com/jyang234/verdi/internal/model"
+	"github.com/jyang234/verdi/internal/specname"
 	"github.com/jyang234/verdi/internal/store"
 	"github.com/jyang234/verdi/internal/stubinstantiate"
 	"github.com/jyang234/verdi/internal/supersede"
@@ -515,14 +516,33 @@ func (s *boardSpecServer) actionCreate(ctx context.Context, name string, proj *B
 		// The refusal speaks the class word as display prose (L-M13a(6)).
 		return fmt.Errorf("create requires a kebab-case name for the new %s spec", s.model.DisplayClass("story"))
 	}
-	if !specNameRe.MatchString(slug) {
-		return fmt.Errorf("spec name %q must be kebab-case (02 §Identity)", slug)
+	// UAT-030/031/032 (wave-3 review fix round): the one shared predicate
+	// (internal/specname.ValidateSuccessorName) replaces the old inline
+	// specNameRe regex plus the two bare store.Active/ArchiveSpecDir
+	// stats — it additionally refuses a name already present on the
+	// branch's own resolved base even though this serving checkout's
+	// working tree shows no collision (UAT-031). base is resolved through
+	// the SAME primitive CommitScaffoldBranch itself uses below (dc-7), so
+	// the check and the cut can never disagree about which ref the branch
+	// is actually cut from.
+	base, err := stubinstantiate.ResolveDesignBranchBase(ctx, s.root)
+	if err != nil {
+		return err
 	}
-	if _, err := os.Stat(store.ActiveSpecDir(s.root, slug)); err == nil {
-		return fmt.Errorf("spec %s already exists under specs/active/ — pick another name", slug)
-	}
-	if _, err := os.Stat(store.ArchiveSpecDir(s.root, slug)); err == nil {
-		return fmt.Errorf("spec %s already exists under specs/archive/ — names are unique across active and archived specs (guide 6.1)", slug)
+	if _, err := specname.ValidateSuccessorName(ctx, s.root, slug, base.Ref); err != nil {
+		var nerr *specname.NameError
+		switch {
+		case errors.As(err, &nerr) && nerr.Reason == specname.ReasonInvalidName:
+			return fmt.Errorf("spec name %q must be kebab-case (02 §Identity)", slug)
+		case errors.As(err, &nerr) && nerr.Reason == specname.ReasonSuccessorExists:
+			return fmt.Errorf("spec %s already exists under specs/active/ — pick another name", nerr.Name)
+		case errors.As(err, &nerr) && nerr.Reason == specname.ReasonArchivedExists:
+			return fmt.Errorf("spec %s already exists under specs/archive/ — names are unique across active and archived specs (guide 6.1)", nerr.Name)
+		case errors.As(err, &nerr) && nerr.Reason == specname.ReasonExistsOnBase:
+			return fmt.Errorf("spec/%s already exists on %s — this checkout is behind %s; fetch/pull before starting a new spec of this name", nerr.Name, base.Ref, base.Ref)
+		default:
+			return err
+		}
 	}
 	// A plain-language pre-check on the branch (the form surfaces this
 	// message verbatim); UpdateRef stays the atomic create-only guard.
@@ -670,26 +690,34 @@ func (s *boardSpecServer) actionRevise(ctx context.Context, name string, proj *B
 		// The refusal speaks the class word as display prose (L-M13a(6)).
 		return boardAPIResponse{}, fmt.Errorf("revise requires a kebab-case name for the superseding %s spec", s.model.DisplayClass("feature"))
 	}
-	// The successor-side preconditions live in internal/supersede beside
-	// the predecessor guard, so this action and the CLI check exactly the
-	// same things; each surface renders its own wording from the typed
-	// error rather than relaying the CLI-flavored Detail.
-	if _, err := supersede.ValidateSuccessorName(s.root, req.Name); err != nil {
+	// UAT-030/031/032 (wave-3 review fix round): base is resolved through
+	// the SAME primitive CommitScaffoldBranch itself uses below (dc-7), so
+	// the check and the cut can never disagree about which ref the branch
+	// is actually cut from — fed into ValidateSuccessorName's third check
+	// (UAT-031). The successor-side preconditions live in internal/
+	// supersede beside the predecessor guard, so this action and the CLI
+	// check exactly the same things (the predicate now also covers the
+	// archive zone, UAT-032, folded in here rather than as this action's
+	// own separate stat); each surface renders its own wording from the
+	// typed error rather than relaying the CLI-flavored Detail.
+	base, err := stubinstantiate.ResolveDesignBranchBase(ctx, s.root)
+	if err != nil {
+		return boardAPIResponse{}, err
+	}
+	if _, err := supersede.ValidateSuccessorName(ctx, s.root, req.Name, base.Ref); err != nil {
 		var nerr *supersede.NameError
 		switch {
 		case errors.As(err, &nerr) && nerr.Reason == supersede.ReasonInvalidName:
 			return boardAPIResponse{}, fmt.Errorf("spec name %q must be kebab-case (02 §Identity): %v", req.Name, errors.Unwrap(nerr))
 		case errors.As(err, &nerr) && nerr.Reason == supersede.ReasonSuccessorExists:
 			return boardAPIResponse{}, fmt.Errorf("spec %s already exists under specs/active/ — pick another name", nerr.Name)
+		case errors.As(err, &nerr) && nerr.Reason == supersede.ReasonArchivedExists:
+			return boardAPIResponse{}, fmt.Errorf("spec %s already exists under specs/archive/ — names are unique across active and archived specs (guide 6.1)", nerr.Name)
+		case errors.As(err, &nerr) && nerr.Reason == supersede.ReasonExistsOnBase:
+			return boardAPIResponse{}, fmt.Errorf("spec/%s already exists on %s — this checkout is behind %s; fetch/pull before starting a new spec of this name", nerr.Name, base.Ref, base.Ref)
 		default:
 			return boardAPIResponse{}, err
 		}
-	}
-	// Names are unique across active and archived specs (guide 6.1) —
-	// the same check create performs; ValidateSuccessorName covers the
-	// active zone only.
-	if _, err := os.Stat(store.ArchiveSpecDir(s.root, req.Name)); err == nil {
-		return boardAPIResponse{}, fmt.Errorf("spec %s already exists under specs/archive/ — names are unique across active and archived specs (guide 6.1)", req.Name)
 	}
 
 	// The wall's own gate, against the projection's effective state
