@@ -15,7 +15,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"strings"
 
 	"github.com/jyang234/verdi/internal/artifact"
 	"github.com/jyang234/verdi/internal/gitx"
@@ -26,16 +25,15 @@ import (
 )
 
 // vocab:identity — CLI usage grammar (identity arg placeholders)
-const specDocUsage = "usage: verdi spec doc <spec-ref> [--kind spec|plan|tasks] [--format md|html] [--at <commit>] [--proposed] [-o <path>]"
+const specDocForm = "verdi spec doc <spec-ref> [--kind spec|plan|tasks] [--format md|html] [--at <commit>] [--proposed] [-o <path>]"
+
+// vocab:identity — CLI usage grammar (identity arg placeholders)
+const specDocUsage = "usage: " + specDocForm
 
 // cmdSpecDoc renders one spec as a document (spec/spec-documents ac-2).
 // Exit 0 on a render, 2 on an unresolvable ref, commit, kind, format, or
 // store. Never 1: a document is a projection, not a verdict.
 func cmdSpecDoc(args []string, stdout, stderr io.Writer) int {
-	ref := ""
-	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
-		ref, args = args[0], args[1:]
-	}
 	fs := flag.NewFlagSet("spec doc", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	kindFlag := fs.String("kind", "spec", "document kind: spec, plan, or tasks")
@@ -44,11 +42,31 @@ func cmdSpecDoc(args []string, stdout, stderr io.Writer) int {
 	// vocab:identity — non-vocabulary homograph: "draft" names an unmerged branch's edit in English prose, never the model's "draft" lifecycle-state id
 	proposedFlag := fs.Bool("proposed", false, "render the working tree's bytes (a design-branch draft)")
 	outFlag := fs.String("o", "", "write the document to this path instead of stdout")
-	if err := fs.Parse(args); err != nil {
-		return 2
-	}
-	if ref == "" && fs.NArg() > 0 {
+
+	// The single positional <spec-ref> may appear anywhere among the
+	// flags: flag.FlagSet.Parse stops at the first non-flag token, so a
+	// flag placed AFTER the ref would otherwise never reach fs.Parse at
+	// all and would silently keep its zero value (fix round 1, F1).
+	// Repeatedly parse the remainder instead: each round consumes every
+	// flag up to the next non-flag token, then peels off exactly one
+	// positional (the ref, the first time) before parsing again: a
+	// second positional is a usage error, never a second, silently
+	// accepted ref.
+	ref := ""
+	remaining := args
+	for {
+		if err := fs.Parse(remaining); err != nil {
+			return 2
+		}
+		if fs.NArg() == 0 {
+			break
+		}
+		if ref != "" {
+			fmt.Fprintln(stderr, specDocUsage)
+			return 2
+		}
 		ref = fs.Arg(0)
+		remaining = fs.Args()[1:]
 	}
 	if ref == "" {
 		fmt.Fprintln(stderr, specDocUsage)

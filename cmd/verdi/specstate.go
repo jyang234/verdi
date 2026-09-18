@@ -55,7 +55,7 @@ func runSpecVerb(args []string, stdout, stderr io.Writer) int {
 }
 
 // vocab:identity — CLI usage grammar (identity arg placeholders)
-const specVerbUsage = "usage: verdi spec state <spec-ref>\n       " + specDocUsage
+const specVerbUsage = "usage: verdi spec state <spec-ref>\n       " + specDocForm
 
 // cmdSpecState is `verdi spec state`'s entry point: it validates the
 // single positional spec-ref argument, resolves the store root, reads the
