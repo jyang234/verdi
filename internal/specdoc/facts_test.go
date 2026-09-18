@@ -17,6 +17,18 @@ func TestFactsFromSpec(t *testing.T) {
 			{Slug: "alpha", AcceptanceCriteria: []string{"ac-1"}},
 			{Slug: "probe", Spike: true, Resolves: []string{"oq-2"}},
 			{Slug: "again", Spike: true, Resolves: []string{"oq-2"}},
+			// Mutation-resistance fixtures (spec-documents wave-1 task-1
+			// review F2): "plain" is not a spike, so its Resolves must be
+			// ignored — proves the st.Spike discriminator actually gates
+			// the Resolves/AcceptanceCriteria branches rather than both
+			// running unconditionally. "probe2" is a spike declaring
+			// AcceptanceCriteria instead of Resolves — proves a spike
+			// stub's AcceptanceCriteria is never read. "stray" names an
+			// undeclared criterion id — proves the coverage `declared`
+			// guard actually filters rather than always passing.
+			{Slug: "plain", Resolves: []string{"oq-1"}},
+			{Slug: "probe2", Spike: true, AcceptanceCriteria: []string{"ac-3"}},
+			{Slug: "stray", AcceptanceCriteria: []string{"ac-9"}},
 		},
 	}
 	got := FactsFromSpec(fm)
