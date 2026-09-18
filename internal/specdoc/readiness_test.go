@@ -181,6 +181,20 @@ func TestReadinessDoesNotAliasCallerSlices(t *testing.T) {
 				}
 			},
 		},
+		{
+			name: "Build copies Facts.Readiness.Attention[].Witnesses",
+			run: func(t *testing.T) {
+				facts := WithReadiness(FactsFromSpec(fm), readinessFixture(), "spec/lockbox")
+				doc, err := Build(Input{Spec: fm, Body: body, Stamp: Stamp{Ref: "spec/lockbox", Commit: commit}, Facts: facts, Kind: KindSpec})
+				if err != nil {
+					t.Fatal(err)
+				}
+				facts.Readiness.Attention[0].Witnesses[0] = "MUTATED"
+				if doc.Readiness.Attention[0].Witnesses[0] == "MUTATED" {
+					t.Error("Build must copy Facts.Readiness.Attention[].Witnesses, not alias the caller's slice")
+				}
+			},
+		},
 	}
 	for _, c := range cases {
 		t.Run(c.name, c.run)

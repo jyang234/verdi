@@ -69,8 +69,8 @@ func TestRenderHTMLReadiness(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(html, "<table") {
-		t.Errorf("readiness area table missing from HTML:\n%s", html)
+	if n := strings.Count(html, "<table"); n != 2 {
+		t.Errorf("want 2 <table> elements (Identity + readiness), got %d:\n%s", n, html)
 	}
 	if !strings.Contains(html, `id="shape/question/oq-2"`) {
 		t.Errorf("concern anchor missing from HTML:\n%s", html)
