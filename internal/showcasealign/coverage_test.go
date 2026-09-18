@@ -338,6 +338,24 @@ var showcaseCoverage = map[string][]coverageEvidence{
 	"mcp:prepare_design_review":   {goE2E("internal/showcasealign/mcp_showcase_test.go")},
 	"mcp:mutate_draft":            {goE2E("internal/showcasealign/mcp_showcase_test.go")},
 
+	// mcp:import_preview, mcp:import_apply (spec-documents Wave 3 Task 3,
+	// ac-9): the import_preview_then_import_apply subtest in
+	// mcp_showcase_test.go drives both live tools, over the real
+	// provisioned examples/showcase store, against a genuine spec-import
+	// request (the same committed internal/mcpserve/testdata/specimport/
+	// sample.md fixture tool_import_test.go's own unit tests use). Both
+	// tools' most meaningful REAL behavior against this corpus is their
+	// genuine dirty-context refusal: buildShowcaseRepo (helpers_test.go)
+	// unconditionally writes an untracked loansvc service-discovery
+	// fixture into the working tree with no root .gitignore to exclude
+	// it, so provisionShowcaseStore's checkout is never clean — the same
+	// disclosed-real-refusal pattern get_design_context/
+	// get_design_capabilities/prepare_design_review/mutate_draft's own
+	// mappings above already rest on — proven by actually calling the
+	// live tools, never guessed. No design/ branch is created either way.
+	"mcp:import_preview": {goE2E("internal/showcasealign/mcp_showcase_test.go")},
+	"mcp:import_apply":   {goE2E("internal/showcasealign/mcp_showcase_test.go")},
+
 	// mcp:constitution_inspect, mcp:constitution_validate,
 	// mcp:constitution_impact_review (Wave 6 Task 3, spec/context-
 	// integrity-v2 AC-1/AC-2/AC-3): driven against the same provisioned

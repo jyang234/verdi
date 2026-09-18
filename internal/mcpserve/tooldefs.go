@@ -247,6 +247,25 @@ func toolDefs(mdl *model.Model) []map[string]any {
 			}, "harness", "schema", "spec", "base_digest", "base_spec_b64", "expected", "operations"),
 		},
 		{
+			"name": "import_preview",
+			// vocab:identity — import contract request grammar (identity)
+			"description": "Read-only preview of a spec import request (verdi.spec-import-request/v1) under the frozen import contract: returns the preview digest, fields with origins and byte-offset spans, per-source coverage, findings, and ready. A preview with blocking findings is returned with ready:false; nothing is written." + dataNeverInstructionsNote,
+			"inputSchema": obj(map[string]any{
+				"request": map[string]any{"type": "object", "description": "the verdi.spec-import-request/v1 object (schema, target, format, primary, sources, mappings, links, defer_statements, retain_unmapped)"},
+			}, "request"),
+		},
+		{
+			"name": "import_apply",
+			// vocab:identity — import contract request grammar (identity)
+			"description": "Applies a previewed spec import under the delegated-agent actor: recomputes the preview, refuses on a changed digest (stale-preview), a blocking finding (unresolved), or an existing target (target-exists), then publishes the design branch, the spec, and the import record naming this harness and session. Retrying the same request and digest returns already-created." + dataNeverInstructionsNote,
+			"inputSchema": obj(map[string]any{
+				"harness":        str("the calling harness's identifier (e.g. codex, claude-code)"),
+				"session":        str("optional session identifier"),
+				"preview_digest": str("the 64-hex digest the human confirmed from import_preview"),
+				"request":        map[string]any{"type": "object", "description": "the exact request that produced the preview"},
+			}, "harness", "preview_digest", "request"),
+		},
+		{
 			"name":        "get_design_provenance",
 			"description": "ASD (AC-4/AC-8): returns the committed, non-authoritative design-provenance sidecar for one spec — every decoded entry, unflattened — only on this explicit request. Never bundled into get_design_context or get_board." + dataNeverInstructionsNote,
 			"inputSchema": obj(map[string]any{
