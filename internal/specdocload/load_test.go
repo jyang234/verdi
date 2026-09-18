@@ -425,3 +425,30 @@ func TestLoadDisclosuresOrderAndContent(t *testing.T) {
 		t.Fatalf("status must still resolve (it never reads the working tree): %q", res.Input.Status)
 	}
 }
+
+// TestLoadDecodesFrontmatterNotWholeFile pins the decode seam to the split
+// frontmatter bytes (every other DecodeSpec caller in the module already
+// does this). Decoding the whole file let the YAML parser peek one token
+// past the closing "---" to find the document end, so a body whose first
+// token opens with "*" (Markdown bold — examples/showcase's
+// borrower-update-mobile) failed as a bogus alias; dex, the first consumer
+// to render every spec, found it (wave 2 task 4).
+func TestLoadDecodesFrontmatterNotWholeFile(t *testing.T) {
+	spec := strings.Replace(lockboxSpec, "# Lockbox\n", "# Lockbox\n\n**Deviating fixture** opens the body with an emphasis marker.\n", 1)
+	if spec == lockboxSpec {
+		t.Fatal("fixture body was not rewritten")
+	}
+	repo := buildRepoWithFiles(t, map[string]string{".verdi/specs/active/lockbox/spec.md": spec})
+	for _, mode := range []Mode{ModeAccepted, ModeAt, ModeWorkingTree} {
+		res, err := Load(context.Background(), Request{Root: repo.Dir, Name: "lockbox", Mode: mode, At: repo.Head, Kind: specdoc.KindSpec})
+		if err != nil {
+			t.Fatalf("mode %d: %v", mode, err)
+		}
+		if !strings.Contains(string(res.Input.Body), "**Deviating fixture**") {
+			t.Fatalf("mode %d: body lost the bold opener: %q", mode, res.Input.Body)
+		}
+		if res.Input.Spec.Title != "Lockbox" {
+			t.Fatalf("mode %d: title = %q", mode, res.Input.Spec.Title)
+		}
+	}
+}

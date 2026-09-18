@@ -75,13 +75,17 @@ func Load(ctx context.Context, req Request) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
-	fm, err := artifact.DecodeSpec(src.content)
+	// Split first, decode the frontmatter bytes only — the module's one
+	// DecodeSpec convention. Decoding the whole file let the YAML parser
+	// peek past the closing "---" into the Markdown body to find the
+	// document end, so a body opening with "*" (bold) failed as an alias.
+	fmBytes, body, err := artifact.SplitFrontmatter(src.content)
 	if err != nil {
 		return Result{}, fmt.Errorf("specdocload: %s at %s: %w", ref, src.commit, err)
 	}
-	_, body, err := artifact.SplitFrontmatter(src.content)
+	fm, err := artifact.DecodeSpec(fmBytes)
 	if err != nil {
-		return Result{}, fmt.Errorf("specdocload: %w", err)
+		return Result{}, fmt.Errorf("specdocload: %s at %s: %w", ref, src.commit, err)
 	}
 
 	var disclosures []string
