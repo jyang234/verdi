@@ -26,6 +26,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jyang234/verdi/internal/contextcompile"
 	"github.com/jyang234/verdi/internal/designprovenance"
 	"github.com/jyang234/verdi/internal/filelock"
 	"github.com/jyang234/verdi/internal/fixturegit"
@@ -272,6 +273,92 @@ func TestServeContextRequestSnapshotRemainsImmutableAcrossRequests(t *testing.T)
 	}
 }
 
+// TestServeContextRequestReadinessReachesGetDocumentOverSocket is fix
+// round 1 F1 (task-4-review.md): runServe's own wiring
+// (`srv.Backend.Readiness = readiness`, serve.go:297 — R-W3-3) had zero
+// coverage. Every other readiness/get_document test either injects a fake
+// `run` into cmdServeWithDeps (this file's TestServeContextRequest* trio
+// above, which therefore never reach the real runServe body the wiring
+// line lives in) or builds mcpserve.Backend{Readiness: ...} by hand
+// (internal/mcpserve, cmd/verdi/document_parity_e2e_test.go) — reviewer
+// mutant M5 (delete the wiring line) left the entire ./cmd/verdi/ and
+// ./internal/mcpserve/ suites green. This test starts a REAL `verdi
+// serve --context-request <fixture>` subprocess — so it goes through the
+// genuine, unfaked localReadinessSnapshotBuilder{} runServe always uses —
+// and drives a REAL get_document call over its live MCP socket, exactly
+// mirroring TestServeMutateDraftUsesHeldWriterLock's real-socket-dial
+// pattern below. A regression that drops the wiring line makes this test
+// fail (verified directly: see the fix-round report).
+//
+// The readiness fixture recipe (buildContextCompileRepo +
+// writeContextConflictJudge + configureContextConflictJudge +
+// checkoutBranch) is the SAME hermetic, no-network recipe
+// TestReadinessSnapshotPersistenceBoundaryAndD4Cache's "real semantic
+// miss" subtest (readiness_snapshot_integration_test.go) already proves,
+// in-process, resolves through the real (unfaked) policy-conflict
+// provider: a local shell script configured as align.judge_cmd stands in
+// for a live judge, so no network or LLM call is ever made.
+func TestServeContextRequestReadinessReachesGetDocumentOverSocket(t *testing.T) {
+	bin := buildVerdiBinary(t)
+
+	repo := buildContextCompileRepo(t, map[string]string{
+		".verdi/specs/active/feature-alpha/spec.md": contextFeatureAlphaSpec(t),
+	})
+	judge := writeContextConflictJudge(t, "printf '%s\\n' '"+contextConflictNoConflictJudgeResult+"'")
+	configureContextConflictJudge(t, repo, judge, 0)
+	checkoutBranch(t, repo.Dir, "design/feature-alpha")
+	requestPath := writeContextRequestFile(t, repo.Dir, "readiness-request.json", contextRequestBytes(t, "spec/feature-alpha", contextcompile.PhaseDesign, nil))
+
+	serveCmd := exec.Command(bin, "serve", "--http", "127.0.0.1:0", "--context-request", requestPath)
+	serveCmd.Dir = filepath.FromSlash(repo.Dir)
+	serveCmd.Env = commandEnvironment(map[string]string{"CI_DEFAULT_BRANCH": "main"})
+	var stdout, stderr syncBuffer
+	serveCmd.Stdout, serveCmd.Stderr = &stdout, &stderr
+	if err := serveCmd.Start(); err != nil {
+		t.Fatalf("starting verdi serve --context-request: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = serveCmd.Process.Signal(syscall.SIGTERM)
+		_ = serveCmd.Wait()
+	})
+
+	sockPath := waitForPointerFile(t, repo.Dir, 10*time.Second)
+
+	conn, err := net.Dial("unix", sockPath)
+	if err != nil {
+		t.Fatalf("dialing serve's MCP socket: %v", err)
+	}
+	defer conn.Close()
+	sc := bufio.NewScanner(conn)
+	sc.Buffer(make([]byte, 0, 1<<16), 1<<24)
+
+	initResp := ndjsonRPC(t, conn, sc, 1, "initialize", map[string]any{"protocolVersion": mcpserve.ProtocolVersion})
+	if _, ok := initResp["result"].(map[string]any); !ok {
+		t.Fatalf("initialize: no result: %#v", initResp)
+	}
+
+	callResp := ndjsonRPC(t, conn, sc, 2, "tools/call", map[string]any{
+		"name":      "get_document",
+		"arguments": map[string]any{"ref": "spec/feature-alpha"},
+	})
+	result, ok := callResp["result"].(map[string]any)
+	if !ok {
+		t.Fatalf("tools/call get_document: no result: %#v\nserve stdout:\n%s\nserve stderr:\n%s", callResp, stdout.String(), stderr.String())
+	}
+	if isErr, _ := result["isError"].(bool); isErr {
+		t.Fatalf("get_document over the live serve MCP socket returned an error result: %s", toolCallResultText(t, result))
+	}
+	var doc struct {
+		Markdown string `json:"markdown"`
+	}
+	if err := json.Unmarshal([]byte(toolCallResultText(t, result)), &doc); err != nil {
+		t.Fatalf("decoding get_document result: %v", err)
+	}
+	if !strings.Contains(doc.Markdown, "## Readiness") || strings.Contains(doc.Markdown, "Readiness was not supplied for this render.") {
+		t.Fatalf("get_document over the REAL served MCP socket did not carry the startup readiness snapshot's populated section — exactly the regression runServe's srv.Backend.Readiness wiring (serve.go:297) guards against:\n%s", doc.Markdown)
+	}
+}
+
 var (
 	buildOnce sync.Once
 	builtBin  string
@@ -477,18 +564,19 @@ func TestD3_ConcurrentSecondProcessRoutesThroughSocket(t *testing.T) {
 	// authoritative live inventory: 05 §MCP server's nine tools,
 	// `experiment` (CSE Wave 5B, ledger SI-145), Wave 6 Task 1's five new
 	// ASD tools (AC-8), Wave 6 Task 3's three new constitution tools
-	// (spec/context-integrity-v2 AC-1/AC-2/AC-3), and `get_document`
-	// (spec-documents Wave 2 Task 3, ac-5's Markdown renderer) — the same
-	// nineteen mcpserve/server_test.go and specalign's TestMCPToolInventory
-	// pin.
+	// (spec/context-integrity-v2 AC-1/AC-2/AC-3), `get_document`
+	// (spec-documents Wave 2 Task 3, ac-5's Markdown renderer), and
+	// `import_preview`/`import_apply` (spec-documents Wave 3 Task 3, ac-9)
+	// — the same twenty-one mcpserve/server_test.go and specalign's
+	// TestMCPToolInventory pin.
 	toolsResp := ndjsonRPC(t, stdin, sc, 2, "tools/list", nil)
 	toolsResult, ok := toolsResp["result"].(map[string]any)
 	if !ok {
 		t.Fatalf("verdi mcp tools/list: no result: %#v", toolsResp)
 	}
 	tools, _ := toolsResult["tools"].([]any)
-	if len(tools) != 19 {
-		t.Fatalf("verdi mcp tools/list returned %d tools through the socket, want 19", len(tools))
+	if len(tools) != 21 {
+		t.Fatalf("verdi mcp tools/list returned %d tools through the socket, want 21", len(tools))
 	}
 
 	// Clean up process B: closing stdin signals EOF on the stdin->socket

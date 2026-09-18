@@ -8,6 +8,7 @@ import (
 	"github.com/jyang234/verdi/internal/boardio"
 	"github.com/jyang234/verdi/internal/forge"
 	"github.com/jyang234/verdi/internal/index"
+	"github.com/jyang234/verdi/internal/readinesspilot"
 )
 
 // Backend is the one real implementation behind every MCP tool: a store
@@ -37,6 +38,15 @@ type Backend struct {
 	// than erroring.
 	Forge forge.Forge
 
+	// Readiness is the startup readiness snapshot verdi serve built (nil
+	// when serving without --context-request or under standalone verdi
+	// mcp); get_document passes it to the loader for its live readings
+	// only — the accepted bytes and the working tree — and the loader
+	// uses it only when its TargetRef is the rendered spec (R-W3-3). A
+	// pinned-commit render never receives it: a live snapshot is not a
+	// fact about historical bytes (final-review F10).
+	Readiness *readinesspilot.Snapshot
+
 	// ReviewUnavailable, when non-empty, is the disclosed reason a
 	// CONFIGURED forge (named in verdi.yaml) could not be reached to build
 	// a live Forge (I-1(b)). Set by cmd/verdi's serve.go/mcp.go when
@@ -47,14 +57,24 @@ type Backend struct {
 	// in the response, never silence: constitution 2/10).
 	ReviewUnavailable string
 
-	// writeMu serializes add_annotation, the one write path: two
-	// concurrent connections calling it are ordinary (Server.Serve
+	// writeMu serializes the two tools that take it — add_annotation
+	// (tool_add_annotation.go) and import_apply (tool_import.go): two
+	// concurrent connections calling either are ordinary (Server.Serve
 	// spawns a goroutine per connection), and while a single O_APPEND
 	// write() of one JSONL line is already atomic at the syscall level
 	// on a local filesystem, this mutex removes any doubt and keeps the
 	// D3 "one writer" story simple to reason about — the process-level
 	// lock (I-12) keeps other PROCESSES out; this keeps this process's
 	// own goroutines from interleaving.
+	//
+	// mutate_draft deliberately does NOT take it: its entire write runs
+	// inside the checkout-wide writer lock (draftmutation.WithWriterLock,
+	// internal/draftmutation/service.go), which already excludes this
+	// process's other goroutines as well as other processes. import_apply
+	// holds this mutex as well, around a call whose own body acquires
+	// that same checkout-wide lock (internal/specimport/publish.go); the
+	// two only ever nest in that one order — mutex, then file lock — so
+	// the pair cannot invert.
 	writeMu sync.Mutex
 }
 

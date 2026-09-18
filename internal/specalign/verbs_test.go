@@ -114,6 +114,11 @@
 // or reading any file, falling straight into the plain default case
 // below — the same safety property model/spec/journey/context already
 // rely on there.
+//
+// `harness` (spec/spec-documents ac-7, wave 3, phase 25) renders and
+// drift-checks the four verdi skills; a bare `verdi harness` fails on
+// usage parsing alone (exit 2) BEFORE resolving a store root, so the
+// inventory proof stays hermetic.
 package specalign
 
 import (
@@ -132,7 +137,7 @@ func TestV0CLIVerbInventory(t *testing.T) {
 		"lint", "design", "accept", "feature", "build", "align", "sync",
 		"serve", "mcp", "matrix", "rollup", "dex", "gate", "board", "audit",
 		"close", "gc", "attest", "disposition", "model", "spec", "obligation",
-		"journey", "context", "experiment",
+		"journey", "context", "experiment", "harness",
 	}
 	// PLAN.md §5 scope discipline, verbatim (as amended: `close`/`gc`
 	// graduated to real, round 6): "Explicitly out of v0 (not stubbed —

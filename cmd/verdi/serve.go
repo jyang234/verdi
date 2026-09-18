@@ -294,7 +294,8 @@ func runServe(root, httpAddr string, readiness *readinesspilot.Snapshot, stdout,
 	fmt.Fprintf(stdout, "serve: workbench at http://%s\n", httpLn.Addr())
 
 	srv := mcpserve.NewServer(root)
-	srv.ErrLog = os.Stderr // spec/fail-loud dc-3: a dropped socket connection leaves a trace, matching mcp.go's stdio scrutiny
+	srv.Backend.Readiness = readiness // R-W3-3: get_document's readiness section, same startup snapshot the board already renders (workbench.Deps{Readiness: readiness} above)
+	srv.ErrLog = os.Stderr            // spec/fail-loud dc-3: a dropped socket connection leaves a trace, matching mcp.go's stdio scrutiny
 	// Best-effort (V1-P7): see mcp.go's identical comment — a
 	// missing/unreachable forge never blocks `verdi serve` from starting;
 	// list_annotations' review-sticky mirrored population (05 §MCP

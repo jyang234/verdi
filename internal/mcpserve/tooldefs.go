@@ -101,6 +101,8 @@ func toolDefs(mdl *model.Model) []map[string]any {
 				"ref":    str("spec/<name>, or spec/<name>@<commit>"),
 				"kind":   str("spec (default), plan, or tasks"),
 				"commit": str("optional commit sha to render at, 7-40 lowercase hex — the same form a pinned ref takes; must agree with a pinned ref"),
+				// vocab:identity — "proposed"/"accepted" name which bytes are read (working-tree draft vs. default-branch bytes), not a DisplayClass word
+				"proposed": boolean("render the serving checkout's working-tree bytes (a draft on its design branch) instead of the accepted bytes; the result's proposed flag is derived from the store, never from this argument; incompatible with `commit` or a pinned `@<commit>` ref"),
 			}, "ref"),
 		},
 		{
@@ -245,6 +247,25 @@ func toolDefs(mdl *model.Model) []map[string]any {
 					"description": "optional bounded supporting excerpts to attach to resulting objects (AC-4)",
 				},
 			}, "harness", "schema", "spec", "base_digest", "base_spec_b64", "expected", "operations"),
+		},
+		{
+			"name": "import_preview",
+			// vocab:identity — import contract request grammar (identity)
+			"description": "Read-only preview of a spec import request (verdi.spec-import-request/v1) under the frozen import contract: returns the preview digest, fields with origins and byte-offset spans, per-source coverage, findings, and ready. A preview with blocking findings is returned with ready:false; nothing is written." + dataNeverInstructionsNote,
+			"inputSchema": obj(map[string]any{
+				"request": map[string]any{"type": "object", "description": "the verdi.spec-import-request/v1 object (schema, target, format, primary, sources, mappings, links, defer_statements, retain_unmapped)"},
+			}, "request"),
+		},
+		{
+			"name": "import_apply",
+			// vocab:identity — import contract request grammar (identity)
+			"description": "Applies a previewed spec import under the delegated-agent actor: recomputes the preview, refuses on a changed digest (stale-preview), a blocking finding (unresolved), or an existing target (target-exists), then publishes the design branch, the spec, and the import record naming this harness and session. Retrying the same request and digest returns already-created." + dataNeverInstructionsNote,
+			"inputSchema": obj(map[string]any{
+				"harness":        str("the calling harness's identifier (e.g. codex, claude-code)"),
+				"session":        str("optional session identifier"),
+				"preview_digest": str("the 64-hex digest the human confirmed from import_preview"),
+				"request":        map[string]any{"type": "object", "description": "the exact request that produced the preview"},
+			}, "harness", "preview_digest", "request"),
 		},
 		{
 			"name":        "get_design_provenance",

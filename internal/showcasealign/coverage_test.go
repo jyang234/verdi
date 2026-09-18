@@ -259,6 +259,21 @@ var showcaseCoverage = map[string][]coverageEvidence{
 	// mutated.
 	"cli:experiment": {goE2E("internal/showcasealign/cli_showcase_test.go")},
 
+	// cli:harness (spec/spec-documents ac-7, wave 3): TestCLIShowcaseHarness
+	// (cli_showcase_test.go) drives `verdi harness check`/`render` against
+	// the real provisioned examples/showcase store: a check before any
+	// render finds all eight skills genuinely missing under that real
+	// store root (examples/showcase carries no .claude/skills or
+	// .agents/skills tree of its own — a real, disclosed fact, the same
+	// pattern cli:context's/cli:experiment's own mappings above use), and
+	// render-then-check proves the real round trip against real store
+	// plumbing rather than a scratch fixture — the gate's own accepted
+	// form for a capability the showcase carries no dedicated content for
+	// (coverage_test.go's gap-kind-3 note above: a Go test whose marker
+	// match comes only from a doc comment disclosing it does NOT touch
+	// examples/showcase is a closed gap, not a valid mapping).
+	"cli:harness": {goE2E("internal/showcasealign/cli_showcase_test.go")},
+
 	// cli:serve: `cmd/e2eharness/main.go` launches the real `verdi serve
 	// --http <addr>` subprocess every Playwright spec in the suite runs
 	// against (never a fake/stub server) — so any SHOWCASE.-marked spec
@@ -322,6 +337,24 @@ var showcaseCoverage = map[string][]coverageEvidence{
 	"mcp:get_design_provenance":   {goE2E("internal/showcasealign/mcp_showcase_test.go")},
 	"mcp:prepare_design_review":   {goE2E("internal/showcasealign/mcp_showcase_test.go")},
 	"mcp:mutate_draft":            {goE2E("internal/showcasealign/mcp_showcase_test.go")},
+
+	// mcp:import_preview, mcp:import_apply (spec-documents Wave 3 Task 3,
+	// ac-9): the import_preview_then_import_apply subtest in
+	// mcp_showcase_test.go drives both live tools, over the real
+	// provisioned examples/showcase store, against a genuine spec-import
+	// request (the same committed internal/mcpserve/testdata/specimport/
+	// sample.md fixture tool_import_test.go's own unit tests use). Both
+	// tools' most meaningful REAL behavior against this corpus is their
+	// genuine dirty-context refusal: buildShowcaseRepo (helpers_test.go)
+	// unconditionally writes an untracked loansvc service-discovery
+	// fixture into the working tree with no root .gitignore to exclude
+	// it, so provisionShowcaseStore's checkout is never clean — the same
+	// disclosed-real-refusal pattern get_design_context/
+	// get_design_capabilities/prepare_design_review/mutate_draft's own
+	// mappings above already rest on — proven by actually calling the
+	// live tools, never guessed. No design/ branch is created either way.
+	"mcp:import_preview": {goE2E("internal/showcasealign/mcp_showcase_test.go")},
+	"mcp:import_apply":   {goE2E("internal/showcasealign/mcp_showcase_test.go")},
 
 	// mcp:constitution_inspect, mcp:constitution_validate,
 	// mcp:constitution_impact_review (Wave 6 Task 3, spec/context-

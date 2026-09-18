@@ -20,6 +20,7 @@ import (
 	"github.com/jyang234/verdi/internal/dex"
 	"github.com/jyang234/verdi/internal/mcpserve"
 	"github.com/jyang234/verdi/internal/readinesspilot"
+	"github.com/jyang234/verdi/internal/readinesspilot/readinesstest"
 	"github.com/jyang234/verdi/internal/workbench"
 )
 
@@ -302,5 +303,107 @@ func TestDocumentParity_BoardWithForeignReadinessSnapshot(t *testing.T) {
 		if strings.Contains(board, leaked) {
 			t.Errorf("another spec's snapshot leaked %q into spec/lockbox's document:\n%s", leaked, board)
 		}
+	}
+}
+
+// stripReadinessSection removes the "## Readiness" section from doc: its
+// heading through whichever comes first of the next "## " heading (never
+// actually reached — Readiness is always the last section, for both the
+// spec and tasks kinds, specdoc/kind.go's Sections()) or the "\n---\n"
+// rule RenderMarkdown appends after the last section, ahead of the
+// "Derived from the spec's objects; not authority. Ref ..." provenance
+// stamp (internal/specdoc/markdown.go). Fix round 1 F2 (task-4-review.md):
+// the original version had no second terminator, so with no further "## "
+// heading the strip ran to EOF and silently discarded that stamp line too
+// — this version keeps it, so what's compared is "identical outside the
+// Readiness section" in fact, not merely in the comment claiming it.
+func stripReadinessSection(t *testing.T, doc string) string {
+	t.Helper()
+	const heading = "## Readiness"
+	start := strings.Index(doc, heading)
+	if start < 0 {
+		t.Fatalf("document has no %q heading:\n%s", heading, doc)
+	}
+	rest := doc[start+len(heading):]
+	end := len(rest)
+	for _, terminator := range []string{"## ", "\n---\n"} {
+		if i := strings.Index(rest, terminator); i >= 0 && i < end {
+			end = i
+		}
+	}
+	return doc[:start] + rest[end:]
+}
+
+// TestDocumentParity_BoardAndMCPShareReadiness is R-W3-3: `verdi serve`
+// wires the SAME startup readiness snapshot into both the board
+// (workbench.Deps{Readiness: ...}) and get_document (Backend.Readiness,
+// cmd/verdi/serve.go:296-297) — so a snapshot targeting the rendered spec
+// produces byte-identical Markdown from both legs, carrying a populated
+// Readiness section, and the CLI's readiness-less render (spec doc has no
+// snapshot input at all) differs from them by EXACTLY that section.
+func TestDocumentParity_BoardAndMCPShareReadiness(t *testing.T) {
+	t.Setenv("CI_DEFAULT_BRANCH", "main")
+	repo := buildSpecDocRepo(t)
+	ctx := context.Background()
+	env := []string{"CI_DEFAULT_BRANCH=main"}
+
+	// 1. CLI — no readiness input exists on this path at all.
+	bin := buildVerdiBinary(t)
+	cliOut, stderr, code := runVerdiBinary(t, bin, repo.Dir, env, "spec", "doc", "spec/lockbox")
+	if code != 0 {
+		t.Fatalf("cli exit %d: %s", code, stderr)
+	}
+
+	snap := readinesstest.ValidSnapshot("spec/lockbox", repo.Head)
+	if err := snap.Validate(); err != nil {
+		t.Fatal(err)
+	}
+
+	// 2. MCP
+	backend := &mcpserve.Backend{Root: repo.Dir, Readiness: &snap}
+	res := backend.GetDocument(ctx, json.RawMessage(`{"ref":"spec/lockbox"}`))
+	var payload struct {
+		Content []struct {
+			Text string `json:"text"`
+		} `json:"content"`
+		IsError bool `json:"isError"`
+	}
+	raw, err := json.Marshal(res)
+	if err != nil {
+		t.Fatalf("marshalling the mcp tool result: %v", err)
+	}
+	if err := json.Unmarshal(raw, &payload); err != nil || payload.IsError || len(payload.Content) == 0 {
+		t.Fatalf("mcp result: %s", raw)
+	}
+	var mcpDoc struct {
+		Markdown string `json:"markdown"`
+	}
+	if err := json.Unmarshal([]byte(payload.Content[0].Text), &mcpDoc); err != nil {
+		t.Fatal(err)
+	}
+
+	// 3. Board, wired the way serve.go wires it: the identical snapshot.
+	h := workbench.NewHandlerWith(repo.Dir, workbench.Deps{Readiness: &snap})
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/board/spec/lockbox/document?format=md", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("board: %d %s", rec.Code, rec.Body.String())
+	}
+	board := rec.Body.String()
+
+	if board != mcpDoc.Markdown {
+		t.Errorf("board and MCP differ under the SAME readiness snapshot:\n--- board ---\n%s\n--- mcp ---\n%s", board, mcpDoc.Markdown)
+	}
+	for name, doc := range map[string]string{"board": board, "mcp": mcpDoc.Markdown} {
+		if !strings.Contains(doc, "## Readiness") || strings.Contains(doc, "Readiness was not supplied for this render.") {
+			t.Fatalf("%s must carry a populated Readiness section:\n%s", name, doc)
+		}
+	}
+
+	// The CLI leg carries no snapshot, so stripping each leg's Readiness
+	// section must leave byte-identical remainders — the divergence is
+	// exactly that section, nowhere else in the document.
+	if boardStripped, cliStripped := stripReadinessSection(t, board), stripReadinessSection(t, cliOut); boardStripped != cliStripped {
+		t.Errorf("board and CLI diverge by more than the Readiness section:\n--- board (stripped) ---\n%s\n--- cli (stripped) ---\n%s", boardStripped, cliStripped)
 	}
 }

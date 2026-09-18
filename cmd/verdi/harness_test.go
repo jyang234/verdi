@@ -1,0 +1,216 @@
+// Real, built-binary end-to-end tests for `verdi harness render|check`
+// (spec/spec-documents ac-7): mirrors this package's own
+// serve_integration_test.go/gc_test.go convention — buildVerdiBinary +
+// runVerdi drive the actual compiled binary, never a package-internal
+// stand-in, so the proof covers cmd/verdi's real wiring (flag parsing,
+// dispatch, exit codes) over internal/skillpack's Write/Check.
+// TestHarnessRenderAndCheck exercises usage-error grammar, render/check
+// over both hosts and a single host, and the render-repairs-drift cycle,
+// all against a bare t.TempDir() via -o. TestHarnessDefaultsToStoreRoot
+// proves the no -o path: the store root is found by ancestor search
+// (newIntegrationStoreRoot, a real git checkout via fixturegit) and the
+// render commit is stamped from that repository's real HEAD, not "none".
+// The showcase-backed cli:harness proof — driving the real binary
+// against a real provisioned examples/showcase store — lives in
+// internal/showcasealign/cli_showcase_test.go instead; these two tests
+// exist to cover the grammar and root-resolution behavior a showcase
+// store cannot exercise any more directly than a scratch one can.
+package main
+
+import (
+	"bytes"
+	"os"
+	"path/filepath"
+	"sort"
+	"strings"
+	"testing"
+)
+
+func TestHarnessRenderAndCheck(t *testing.T) {
+	bin := buildVerdiBinary(t)
+	root := t.TempDir()
+
+	// Usage errors exit 2 before any root is resolved.
+	for _, args := range [][]string{{"harness"}, {"harness", "frobnicate"}, {"harness", "render", "--host", "cursor", "-o", root}, {"harness", "render", "-o"}, {"harness", "check", "extra", "-o", root}} {
+		code, _, stderr := runVerdi(t, bin, root, args...)
+		if code != 2 || !strings.Contains(stderr, "usage: verdi harness") {
+			t.Fatalf("%v: code %d stderr %q", args, code, stderr)
+		}
+	}
+
+	// -o must exist.
+	if code, _, stderr := runVerdi(t, bin, root, "harness", "render", "-o", filepath.Join(root, "nope")); code != 2 || !strings.Contains(stderr, "harness render:") {
+		t.Fatalf("missing -o: code %d stderr %q", code, stderr)
+	}
+
+	// check before render: every skill missing, exit 1, one line per finding on stdout.
+	code, stdout, _ := runVerdi(t, bin, root, "harness", "check", "-o", root)
+	if code != 1 || strings.Count(stdout, "missing  ") != 8 {
+		t.Fatalf("check before render: code %d stdout %q", code, stdout)
+	}
+
+	// render all: 8 sorted "<digest>  <path>" lines on stdout, exit 0.
+	code, stdout, stderr := runVerdi(t, bin, root, "harness", "render", "-o", root)
+	if code != 0 {
+		t.Fatalf("render: code %d stderr %q", code, stderr)
+	}
+	lines := strings.Split(strings.TrimRight(stdout, "\n"), "\n")
+	if len(lines) != 8 {
+		t.Fatalf("render printed %d lines: %q", len(lines), stdout)
+	}
+	paths := make([]string, 0, len(lines))
+	for i, l := range lines {
+		digest, path, ok := strings.Cut(l, "  ")
+		if !ok || !strings.HasPrefix(digest, "sha256:") || len(digest) != len("sha256:")+64 || path == "" {
+			t.Fatalf("line %d %q is not '<digest>  <path>'", i, l)
+		}
+		paths = append(paths, path)
+	}
+	if !sort.StringsAreSorted(paths) {
+		t.Fatalf("render output not sorted by path: %q", stdout)
+	}
+	if _, err := os.Stat(filepath.Join(root, ".agents", "skills", "verdi-clarify", "SKILL.md")); err != nil {
+		t.Fatal(err)
+	}
+
+	// check clean: exit 0, empty stdout.
+	if code, stdout, _ := runVerdi(t, bin, root, "harness", "check", "-o", root); code != 0 || stdout != "" {
+		t.Fatalf("check clean: code %d stdout %q", code, stdout)
+	}
+
+	// --host codex only renders four; a later claude check still passes (untouched).
+	code, stdout, _ = runVerdi(t, bin, root, "harness", "render", "--host", "codex", "-o", root)
+	if code != 0 || strings.Count(stdout, "\n") != 4 {
+		t.Fatalf("render codex: code %d stdout %q", code, stdout)
+	}
+
+	// drift: edit one file → exit 1, "drift  <path>".
+	p := filepath.Join(root, ".claude", "skills", "verdi-plan", "SKILL.md")
+	b, _ := os.ReadFile(p)
+	if err := os.WriteFile(p, append(b, []byte("edit\n")...), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	code, stdout, _ = runVerdi(t, bin, root, "harness", "check", "-o", root)
+	if code != 1 || strings.TrimSpace(stdout) != "drift  .claude/skills/verdi-plan/SKILL.md" {
+		t.Fatalf("check drift: code %d stdout %q", code, stdout)
+	}
+	// scoped to codex the drift is invisible.
+	if code, stdout, _ := runVerdi(t, bin, root, "harness", "check", "--host", "codex", "-o", root); code != 0 || stdout != "" {
+		t.Fatalf("check codex after claude drift: code %d stdout %q", code, stdout)
+	}
+	// a codex-host file can drift too, and a --host codex check must catch
+	// it — proves Check's drift comparison isn't scoped to one host.
+	p2 := filepath.Join(root, ".agents", "skills", "verdi-plan", "SKILL.md")
+	b2, _ := os.ReadFile(p2)
+	if err := os.WriteFile(p2, append(b2, []byte("edit\n")...), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	code, stdout, _ = runVerdi(t, bin, root, "harness", "check", "--host", "codex", "-o", root)
+	if code != 1 || strings.TrimSpace(stdout) != "drift  .agents/skills/verdi-plan/SKILL.md" {
+		t.Fatalf("check codex drift: code %d stdout %q", code, stdout)
+	}
+	// re-render repairs it.
+	runVerdi(t, bin, root, "harness", "render", "-o", root)
+	if code, _, _ := runVerdi(t, bin, root, "harness", "check", "-o", root); code != 0 {
+		t.Fatalf("check after re-render: code %d", code)
+	}
+}
+
+func TestHarnessDefaultsToStoreRoot(t *testing.T) {
+	bin := buildVerdiBinary(t)
+	root := newIntegrationStoreRoot(t)
+	sub := filepath.Join(root, "cmd")
+	if err := os.MkdirAll(sub, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// From a subdirectory, no -o: the store root is found by ancestor search.
+	if code, _, stderr := runVerdi(t, bin, sub, "harness", "render"); code != 0 {
+		t.Fatalf("render from subdir: code %d stderr %q", code, stderr)
+	}
+	if _, err := os.Stat(filepath.Join(root, ".claude", "skills", "verdi-tasks", "SKILL.md")); err != nil {
+		t.Fatal(err)
+	}
+	// Inside a git repository the render commit is HEAD, not none.
+	b, _ := os.ReadFile(filepath.Join(root, ".claude", "skills", "verdi-tasks", "SKILL.md"))
+	if strings.Contains(string(b), "verdi:render-commit none") {
+		t.Fatal("render inside a git repo must stamp HEAD")
+	}
+	if code, _, _ := runVerdi(t, bin, sub, "harness", "check"); code != 0 {
+		t.Fatalf("check from subdir: code %d", code)
+	}
+	// Outside any store and without -o: operational error, exit 2.
+	if code, _, stderr := runVerdi(t, bin, t.TempDir(), "harness", "check"); code != 2 || !strings.Contains(stderr, "harness check:") {
+		t.Fatalf("no store: code %d stderr %q", code, stderr)
+	}
+}
+
+// TestCmdHarness_FlagShapeFailures is parseHarnessFlags'/harnessRoot's own
+// negative-path unit test, mirroring TestCmdContextProject_FlagShapeFailures
+// (context_project_test.go:216): cmdHarness called in-process with
+// bytes.Buffer streams, table-driven, over grammar corners the slow
+// built-binary tests above never individually isolate (they only ever
+// pass `--host codex`/`-o <dir>` space-separated, once each).
+func TestCmdHarness_FlagShapeFailures(t *testing.T) {
+	// A directory `check` can succeed against, proving the two accepted
+	// inline-flag spellings really reach Check rather than merely failing
+	// to be rejected by the parser.
+	rendered := t.TempDir()
+	var setupOut, setupErr bytes.Buffer
+	if code := cmdHarness([]string{"render", "-o", rendered}, &setupOut, &setupErr); code != 0 {
+		t.Fatalf("test setup: rendering into %s: exit %d stderr %q", rendered, code, setupErr.String())
+	}
+
+	regularFile := filepath.Join(t.TempDir(), "not-a-dir")
+	if err := os.WriteFile(regularFile, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cases := []struct {
+		name string
+		args []string
+		// wantCode 0 marks the two accepted-inline-flag cases, which must
+		// reach a clean Check against the pre-rendered dir above; every
+		// other value is the exact exit code a flag-shape or root-
+		// resolution error must produce.
+		wantCode   int
+		wantStderr string
+		// noUsage: harnessRoot's own error path (an -o that exists but
+		// isn't a directory) reports only "harness <sub>: <err>", never
+		// the usage line — unlike every flag-SHAPE failure below it
+		// (parseHarnessFlags/skillpack.ParseHosts), which always appends
+		// harnessUsage. Mirrors the asymmetry cmdHarness itself already
+		// has between its two error-printing call sites.
+		noUsage bool
+	}{
+		{name: "--host=all inline accepted, reaches a clean check", args: []string{"check", "--host=all", "-o", rendered}, wantCode: 0},
+		{name: "-o=<dir> inline accepted, reaches a clean check", args: []string{"check", "-o=" + rendered}, wantCode: 0},
+		{name: "--host given twice", args: []string{"check", "--host", "claude", "--host", "codex", "-o", rendered}, wantCode: 2, wantStderr: "--host given twice"},
+		{name: "-o given twice", args: []string{"check", "-o", rendered, "-o", rendered}, wantCode: 2, wantStderr: "-o given twice"},
+		{name: "--host= empty inline value", args: []string{"check", "--host=", "-o", rendered}, wantCode: 2, wantStderr: "--host requires a value"},
+		{name: "--host at end without a value", args: []string{"check", "-o", rendered, "--host"}, wantCode: 2, wantStderr: "--host requires a value"},
+		{name: "-o names a regular file", args: []string{"check", "-o", regularFile}, wantCode: 2, wantStderr: "is not a directory", noUsage: true},
+		{name: "unknown --hosts flag", args: []string{"check", "--hosts", "claude", "-o", rendered}, wantCode: 2, wantStderr: `unexpected argument "--hosts"`},
+		{name: "positional junk", args: []string{"check", "junk", "-o", rendered}, wantCode: 2, wantStderr: `unexpected argument "junk"`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var stdout, stderr bytes.Buffer
+			got := cmdHarness(tc.args, &stdout, &stderr)
+			if got != tc.wantCode {
+				t.Fatalf("cmdHarness(%v) = %d, want %d; stdout=%q stderr=%q", tc.args, got, tc.wantCode, stdout.String(), stderr.String())
+			}
+			if stdout.Len() != 0 {
+				t.Fatalf("stdout = %q, want empty (a flag/root error prints nothing to stdout; a clean check finds nothing to report)", stdout.String())
+			}
+			if tc.wantCode == 0 {
+				return
+			}
+			if !strings.Contains(stderr.String(), tc.wantStderr) {
+				t.Fatalf("stderr = %q, want it to contain %q", stderr.String(), tc.wantStderr)
+			}
+			if !tc.noUsage && !strings.Contains(stderr.String(), harnessUsage) {
+				t.Fatalf("stderr = %q, want it to contain the usage line %q", stderr.String(), harnessUsage)
+			}
+		})
+	}
+}

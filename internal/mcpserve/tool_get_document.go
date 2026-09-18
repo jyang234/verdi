@@ -13,9 +13,10 @@ import (
 )
 
 type getDocumentArgs struct {
-	Ref    string `json:"ref"`
-	Kind   string `json:"kind"`
-	Commit string `json:"commit"`
+	Ref      string `json:"ref"`
+	Kind     string `json:"kind"`
+	Commit   string `json:"commit"`
+	Proposed bool   `json:"proposed"`
 }
 
 type getDocumentResult struct {
@@ -65,6 +66,18 @@ func (b *Backend) GetDocument(ctx context.Context, argsRaw json.RawMessage) map[
 		}
 		commit = ref.Commit
 	}
+	// proposed selects the loader's working-tree mode (R-W3-9), which reads
+	// the serving checkout's live bytes — incompatible with a request for a
+	// SPECIFIC commit's bytes, whether that commit arrived as the `commit`
+	// argument or as a ref pin (both are folded into `commit` above by this
+	// point), so this check covers both forms with the one guard. Silently
+	// letting `proposed` win would drop the caller's pin without saying so;
+	// silently letting the pin win would render historical bytes while
+	// still reporting the working-tree Stamp.Proposed derivation the
+	// tooldefs.go description promises — refused by name instead.
+	if args.Proposed && commit != "" {
+		return toolError("get_document: proposed and commit are mutually exclusive")
+	}
 	kindName := args.Kind
 	if kindName == "" {
 		kindName = string(specdoc.KindSpec)
@@ -82,7 +95,24 @@ func (b *Backend) GetDocument(ctx context.Context, argsRaw json.RawMessage) map[
 	if commit != "" {
 		mode = specdocload.ModeAt
 	}
-	res, err := specdocload.Load(ctx, specdocload.Request{Root: b.Root, Name: ref.Name, Mode: mode, At: commit, Kind: kind, Model: mdl})
+	if args.Proposed {
+		mode = specdocload.ModeWorkingTree
+	}
+	// Readiness is a LIVE fact about the serving checkout — the snapshot
+	// verdi serve built at startup (R-W3-3) — so it accompanies the
+	// accepted and working-tree readings only. A pinned commit asks for
+	// a historical document, and specdoc.WithReadiness gates on
+	// TargetRef alone, not on mode: passing the snapshot here rendered
+	// the pinned commit's bytes beside today's readiness section, two
+	// different commits in one document (final-review F10). The pinned
+	// reading now states the absence ("Readiness was not supplied for
+	// this render.") rather than supplying a fact that is not about the
+	// bytes being rendered.
+	readiness := b.Readiness
+	if mode == specdocload.ModeAt {
+		readiness = nil
+	}
+	res, err := specdocload.Load(ctx, specdocload.Request{Root: b.Root, Name: ref.Name, Mode: mode, At: commit, Kind: kind, Model: mdl, Readiness: readiness})
 	if err != nil {
 		return toolError("get_document: " + err.Error())
 	}
