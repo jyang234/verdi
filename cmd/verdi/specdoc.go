@@ -15,6 +15,8 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
+	"strings"
 
 	"github.com/jyang234/verdi/internal/artifact"
 	"github.com/jyang234/verdi/internal/gitx"
@@ -96,6 +98,17 @@ func cmdSpecDoc(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, "spec doc:", err)
 		return 2
 	}
+	if *outFlag != "" {
+		inside, ierr := outPathInStore(root, *outFlag)
+		if ierr != nil {
+			fmt.Fprintln(stderr, "spec doc:", ierr)
+			return 2
+		}
+		if inside {
+			fmt.Fprintln(stderr, "spec doc: -o must not point inside the store (.verdi/): a rendered document is never a store artifact")
+			return 2
+		}
+	}
 	cfg, err := store.Open(root)
 	if err != nil {
 		fmt.Fprintln(stderr, "spec doc:", err)
@@ -176,6 +189,79 @@ func cmdSpecDoc(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 	return 0
+}
+
+// outPathInStore reports whether out's real, absolute path lies inside
+// root's .verdi/ store directory (spec-documents wave-1 fix round, F3): a
+// rendered document is a projection, never a store artifact, so -o must
+// never write into the store it was rendered from. filepath.Rel between
+// the two resolved absolute paths names the containment: a result of "."
+// or one that never starts with ".." is inside.
+//
+// Both sides are resolved through resolveExistingPrefix, not bare
+// filepath.Abs, before the Rel comparison: root is frequently reached
+// through a symlinked ancestor (a macOS temp/build directory — e.g.
+// testing.T.TempDir()'s own /var/folders/... — is one; so is any
+// developer checkout under a symlinked home or mount), and store.FindRoot
+// resolves it (via os.Getwd()) to that symlink's real target. Comparing
+// the real store path against an -o argument built from the same
+// unresolved, symlinked logical path would wrongly compute "outside" and
+// let the write through the very check meant to refuse it.
+func outPathInStore(root, out string) (bool, error) {
+	absStore, err := filepath.Abs(filepath.Join(root, ".verdi"))
+	if err != nil {
+		return false, fmt.Errorf("resolving the store path: %w", err)
+	}
+	realStore, err := resolveExistingPrefix(absStore)
+	if err != nil {
+		return false, fmt.Errorf("resolving the store path: %w", err)
+	}
+	absOut, err := filepath.Abs(out)
+	if err != nil {
+		return false, fmt.Errorf("resolving -o path: %w", err)
+	}
+	realOut, err := resolveExistingPrefix(absOut)
+	if err != nil {
+		return false, fmt.Errorf("resolving -o path: %w", err)
+	}
+	rel, err := filepath.Rel(realStore, realOut)
+	if err != nil {
+		return false, fmt.Errorf("comparing -o path to the store: %w", err)
+	}
+	if rel == "." {
+		return true, nil
+	}
+	return rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)), nil
+}
+
+// resolveExistingPrefix returns path (already absolute and clean) with
+// its longest existing ancestor — path itself, if it exists — resolved
+// through filepath.EvalSymlinks, and any non-existent tail reattached
+// unresolved: a path component that does not exist yet cannot itself be
+// a symlink, and -o's own target file is typically not expected to exist
+// before the render writes it.
+func resolveExistingPrefix(path string) (string, error) {
+	for p := path; ; {
+		resolved, err := filepath.EvalSymlinks(p)
+		if err == nil {
+			if p == path {
+				return resolved, nil
+			}
+			suffix, rerr := filepath.Rel(p, path)
+			if rerr != nil {
+				return "", rerr
+			}
+			return filepath.Join(resolved, suffix), nil
+		}
+		if !os.IsNotExist(err) {
+			return "", err
+		}
+		parent := filepath.Dir(p)
+		if parent == p {
+			return "", err
+		}
+		p = parent
+	}
 }
 
 // specDocSource is one spec's bytes, where they came from, and the full

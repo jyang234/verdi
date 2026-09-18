@@ -213,6 +213,7 @@ func TestSpecDoc_Refusals(t *testing.T) {
 		{"bad commit", []string{"spec", "doc", "spec/lockbox", "--at", "deadbeef"}, "deadbeef"},
 		{"at and proposed", []string{"spec", "doc", "spec/lockbox", "--at", repo.Head, "--proposed"}, "--at and --proposed cannot be combined"},
 		{"extra positional", []string{"spec", "doc", "spec/lockbox", "spec/bogus"}, "usage: verdi spec doc"},
+		{"o inside store", []string{"spec", "doc", "spec/lockbox", "-o", filepath.Join(repo.Dir, ".verdi", "evil.md")}, "-o must not point inside the store"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -222,6 +223,47 @@ func TestSpecDoc_Refusals(t *testing.T) {
 			}
 			if !strings.Contains(stderr, c.want) {
 				t.Errorf("stderr %q does not name %q", stderr, c.want)
+			}
+		})
+	}
+}
+
+// TestOutPathInStore is the F3 unit-level table proof for outPathInStore
+// itself: happy path (outside the store, allowed), negative path (inside
+// the store, refused, at both a direct child and a not-yet-existing
+// nested path), the store directory itself, and — the specific case
+// filepath.Rel-based containment exists to get right where a bare
+// strings.HasPrefix(out, storeDir) would not — a sibling directory
+// (".verdi-other") that shares the store directory's name as a string
+// prefix without being inside it.
+func TestOutPathInStore(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, ".verdi", "specs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(root, ".verdi-other"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	outside := t.TempDir()
+	tests := []struct {
+		name string
+		out  string
+		want bool
+	}{
+		{"direct child of the store", filepath.Join(root, ".verdi", "evil.md"), true},
+		{"a not-yet-existing nested path under the store", filepath.Join(root, ".verdi", "specs", "active", "evil.md"), true},
+		{"the store directory itself", filepath.Join(root, ".verdi"), true},
+		{"a sibling directory sharing the store's name as a string prefix", filepath.Join(root, ".verdi-other", "fine.md"), false},
+		{"outside the root entirely", filepath.Join(outside, "fine.md"), false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := outPathInStore(root, tt.out)
+			if err != nil {
+				t.Fatalf("outPathInStore(%q) error: %v", tt.out, err)
+			}
+			if got != tt.want {
+				t.Errorf("outPathInStore(%q) = %v, want %v", tt.out, got, tt.want)
 			}
 		})
 	}
