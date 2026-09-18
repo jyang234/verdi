@@ -143,7 +143,14 @@ func identityRows(in Input) []KV {
 		if len(refs) > 0 {
 			predecessor = refs[0].String()
 		}
-		rows = append(rows, KV{Label: "Revision", Value: fmt.Sprintf("vs %s: %d objects carried, %d amended, %d amended (advisory), %d removed, %d added", predecessor, len(s.Carried), len(s.Amended), len(s.AmendedAdvisory), len(s.Removed), len(s.Added))})
+		// "object" is an ordinary English noun, not a vocabulary word
+		// (fix round 2, N2): pluralise it by the carried count like any
+		// other count in this sentence.
+		objectWord := "objects"
+		if len(s.Carried) == 1 {
+			objectWord = "object"
+		}
+		rows = append(rows, KV{Label: "Revision", Value: fmt.Sprintf("vs %s: %d %s carried, %d amended, %d amended (advisory), %d removed, %d added", predecessor, len(s.Carried), objectWord, len(s.Amended), len(s.AmendedAdvisory), len(s.Removed), len(s.Added))})
 	}
 	return rows
 }

@@ -22,8 +22,6 @@ No decisions are declared.
 
 ## Plan
 
-Each planned story in this plan becomes `spec/<slug>` when it is instantiated.
-
 No planned stories or research spikes are planned.
 
 ---

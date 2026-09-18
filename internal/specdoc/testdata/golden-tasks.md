@@ -9,14 +9,14 @@
 | Status | accepted-pending-build |
 | Commit | 0000000000000000000000000000000000000001 |
 | Supersedes | spec/lockbox-v0 |
-| Revision | vs spec/lockbox-v0: 1 objects carried, 1 amended, 0 amended (advisory), 0 removed, 4 added |
+| Revision | vs spec/lockbox-v0: 1 object carried, 1 amended, 0 amended (advisory), 0 removed, 4 added |
 
 ## Plan
 
 Each story in this plan becomes `spec/<slug>` when it is instantiated.
 
-1. Story `key-holder` covers ac-1 (A key opens one box.).
-2. Spike `audit-probe` answers oq-1 (Who audits holders?).
+1. Story `key-holder` covers ac-1 (A key opens one box.)
+2. Spike `audit-probe` answers oq-1 (Who audits holders?)
 
 ## Evidence
 

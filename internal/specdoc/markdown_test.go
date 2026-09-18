@@ -126,6 +126,80 @@ func TestRenderMarkdownHonestyLines(t *testing.T) {
 	}
 }
 
+// TestPluralIf is fix round 2's F1(a): a table-driven proof that
+// pluralIf's plural branch is reachable and correct, for n = 0, 1, 2,
+// under both the default and a renamed (multi-word) vocabulary. Before
+// this test, no committed golden ever built a Document whose Coverage,
+// Claims, or Evidence.Stories held more than one entry, so an
+// always-singular mutant of pluralIf survived the whole suite; see
+// TestRenderMarkdownPluralBranches for the same proof at the rendered-
+// output level, and the fix-round report for the mutant kill transcript.
+func TestPluralIf(t *testing.T) {
+	tests := []struct {
+		name             string
+		singular, plural string
+		n                int
+		want             string
+	}{
+		{"n=0, default", "story", "stories", 0, "stories"},
+		{"n=1, default", "story", "stories", 1, "story"},
+		{"n=2, default", "story", "stories", 2, "stories"},
+		{"n=0, renamed", "planned story", "planned stories", 0, "planned stories"},
+		{"n=1, renamed", "planned story", "planned stories", 1, "planned story"},
+		{"n=2, renamed", "planned story", "planned stories", 2, "planned stories"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := pluralIf(tt.singular, tt.plural, tt.n); got != tt.want {
+				t.Errorf("pluralIf(%q, %q, %d) = %q, want %q", tt.singular, tt.plural, tt.n, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestRenderMarkdownPluralBranches is fix round 2's F1(b): a rendered
+// proof, not just a unit test on pluralIf in isolation. Neither
+// committed fixture ever gives a criterion more than one covering stub
+// or more than one implementing story, so this builds the lockbox
+// fixture with Facts overridden to give ac-1 two of each and asserts the
+// exact plural lines render. No golden changes — a focused assertion
+// test, per the finding's own instruction.
+func TestRenderMarkdownPluralBranches(t *testing.T) {
+	fm, body := loadFixture(t)
+	facts := FactsFromSpec(fm)
+	facts.Coverage["ac-1"] = []string{"key-holder", "other"}
+	facts = WithMatrix(facts, matrixprojection.Record{Feature: &matrixprojection.FeatureBody{ACs: []matrixprojection.FeatureAC{
+		{ID: "ac-1", Status: "eligible", Summary: "two implementing stories", ImplementingStories: []string{"spec/a", "spec/b"}},
+		{ID: "ac-2", Status: "violated", Summary: "no implementing story"},
+	}}}, "matrix at plural-test")
+	doc, err := Build(Input{Spec: fm, Body: body, Stamp: Stamp{Ref: "spec/lockbox", Commit: strings.Repeat("4", 40)}, Facts: facts, Kind: KindSpec})
+	if err != nil {
+		t.Fatal(err)
+	}
+	md := RenderMarkdown(doc)
+	if !strings.Contains(md, "covered by stories `key-holder`, `other`") {
+		t.Errorf("missing plural coverage line, got:\n%s", md)
+	}
+	if !strings.Contains(md, "implementing stories: `spec/a`, `spec/b`") {
+		t.Errorf("missing plural evidence-detail line, got:\n%s", md)
+	}
+}
+
+// TestCriterionCellAndIdsWithTextMissingID is fix round 2's A3 minor
+// proof: an id absent from the id->text map (a dangling stub coverage/
+// resolves entry, or an evidence row naming an id the spec never
+// declared) must render an explicit, honest gap — never a bare trailing
+// "id — " separator or empty "id ()" parentheses.
+func TestCriterionCellAndIdsWithTextMissingID(t *testing.T) {
+	textByID := map[string]string{"ac-1": "A key opens one box."}
+	if got, want := criterionCell("ac-9", textByID), "ac-9 — (not declared on this spec)"; got != want {
+		t.Errorf("criterionCell(missing id) = %q, want %q", got, want)
+	}
+	if got, want := idsWithText([]string{"ac-9"}, textByID, "no declared criterion."), "ac-9 (not declared on this spec)"; got != want {
+		t.Errorf("idsWithText(missing id) = %q, want %q", got, want)
+	}
+}
+
 func matrixFixture() matrixprojection.Record {
 	return matrixprojection.Record{Feature: &matrixprojection.FeatureBody{ACs: []matrixprojection.FeatureAC{
 		{ID: "ac-1", Status: "eligible", Summary: "one implementing story, not yet closed", ImplementingStories: []string{"spec/key-holder"}},

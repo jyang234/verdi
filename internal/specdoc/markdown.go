@@ -115,20 +115,30 @@ func RenderMarkdown(doc Document) string {
 			}
 		case SectionPlan:
 			w("## Plan\n\n")
-			// `spec/<slug>` is wrapped as a code span (fix round 1
-			// golden review: bare "spec/<slug>" parses as an inline
-			// raw-HTML tag under goldmark's WithUnsafe() passthrough,
-			// so the placeholder text never reaches a browser's DOM —
-			// a code span's contents are never parsed as HTML).
-			w("Each %s in this plan becomes `spec/<slug>` when it is instantiated.\n\n", doc.Words.Story)
 			if len(doc.Plan) == 0 {
 				w("No %s or %s are planned.\n\n", doc.Words.StoryPlural, doc.Words.SpikePlural)
+			} else {
+				// `spec/<slug>` is wrapped as a code span (fix round 1
+				// golden review: bare "spec/<slug>" parses as an inline
+				// raw-HTML tag under goldmark's WithUnsafe() passthrough,
+				// so the placeholder text never reaches a browser's DOM —
+				// a code span's contents are never parsed as HTML). The
+				// lead sentence itself only prints when there is a plan
+				// to lead (fix round 2, N1) — an empty plan has nothing
+				// for "in this plan" to refer to.
+				w("Each %s in this plan becomes `spec/<slug>` when it is instantiated.\n\n", doc.Words.Story)
 			}
 			for i, p := range doc.Plan {
+				// No trailing period after the closing parenthesis (fix
+				// round 2, N3): the covered criterion's/resolved
+				// question's own declared text already ends the
+				// sentence, e.g. "covers ac-1 (A key opens one box.)" —
+				// idsWithText's "not declared"/empty fallbacks below
+				// carry their own terminal period instead.
 				if p.Spike {
-					w("%d. %s `%s` answers %s.\n", i+1, capitalize(doc.Words.Spike), p.Slug, idsWithText(p.Resolves, questionText, "no declared question"))
+					w("%d. %s `%s` answers %s\n", i+1, capitalize(doc.Words.Spike), p.Slug, idsWithText(p.Resolves, questionText, "no declared question."))
 				} else {
-					w("%d. %s `%s` covers %s.\n", i+1, capitalize(doc.Words.Story), p.Slug, idsWithText(p.Criteria, criterionText, "no declared criterion"))
+					w("%d. %s `%s` covers %s\n", i+1, capitalize(doc.Words.Story), p.Slug, idsWithText(p.Criteria, criterionText, "no declared criterion."))
 				}
 			}
 			if len(doc.Plan) > 0 {
@@ -195,11 +205,22 @@ func evidenceDetail(e EvidenceRow, words Words) string {
 	return "—"
 }
 
+// notDeclaredFallback is what criterionCell/idsWithText show for an id
+// that names no entry in the id->text map (fix round 2, A3 minor): a
+// dangling reference (a stub or evidence row naming an id the spec never
+// declared) must read as an explicit, honest gap, never as a bare
+// trailing separator or empty parentheses.
+const notDeclaredFallback = "not declared on this spec"
+
 // criterionCell is the Evidence table's Criterion column (fix round 1,
 // A3): the id plus its declared text, so the Evidence section reads
 // standalone instead of forcing a reader back to Acceptance criteria.
 func criterionCell(id string, textByID map[string]string) string {
-	return fmt.Sprintf("%s — %s", id, textByID[id])
+	text, ok := textByID[id]
+	if !ok {
+		text = "(" + notDeclaredFallback + ")"
+	}
+	return fmt.Sprintf("%s — %s", id, text)
 }
 
 // idsWithText renders a Plan line's covered-criteria/resolved-questions
@@ -210,7 +231,11 @@ func idsWithText(ids []string, textByID map[string]string, empty string) string 
 	}
 	parts := make([]string, 0, len(ids))
 	for _, id := range ids {
-		parts = append(parts, fmt.Sprintf("%s (%s)", id, textByID[id]))
+		text, ok := textByID[id]
+		if !ok {
+			text = notDeclaredFallback
+		}
+		parts = append(parts, fmt.Sprintf("%s (%s)", id, text))
 	}
 	return strings.Join(parts, ", ")
 }
