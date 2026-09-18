@@ -259,6 +259,19 @@ var showcaseCoverage = map[string][]coverageEvidence{
 	// mutated.
 	"cli:experiment": {goE2E("internal/showcasealign/cli_showcase_test.go")},
 
+	// cli:harness (spec/spec-documents ac-7, wave 3): `verdi harness
+	// render|check` renders/drift-checks internal/skillpack's four
+	// embedded skill templates against an explicit -o directory or the
+	// store root — behavior that is, by design (R-W3-7), independent of
+	// any store or corpus content: TestHarnessRenderAndCheck and
+	// TestHarnessDefaultsToStoreRoot (cmd/verdi/harness_test.go) drive
+	// the real built binary over a scratch tempdir and a minimal
+	// fixturegit checkout, never examples/showcase — the same disclosed,
+	// deliberately-not-showcase posture rollup_test.go's
+	// rollupFixtureSpec and mcpserve/fixture_test.go's buildFixture
+	// already use for their own verbs.
+	"cli:harness": {goE2E("cmd/verdi/harness_test.go")},
+
 	// cli:serve: `cmd/e2eharness/main.go` launches the real `verdi serve
 	// --http <addr>` subprocess every Playwright spec in the suite runs
 	// against (never a fake/stub server) — so any SHOWCASE.-marked spec
