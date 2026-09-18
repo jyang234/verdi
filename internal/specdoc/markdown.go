@@ -34,7 +34,7 @@ func RenderMarkdown(doc Document) string {
 	w("# %s\n\n", doc.Title)
 	if doc.Stamp.Proposed {
 		// vocab:identity — "proposed"/"accepted" here name the merge event of the spec MR, not a lifecycle state label
-		w("> **Proposed, not accepted.** These bytes come from an unmerged design branch (`%s`); nothing here is accepted authority yet.\n\n", doc.Stamp.Commit)
+		w("> **Proposed, not accepted.** These are the working tree's bytes at %s, not the accepted bytes on the default branch; nothing here is accepted authority yet.\n\n", doc.Stamp.Commit)
 	}
 
 	for _, s := range doc.Sections {

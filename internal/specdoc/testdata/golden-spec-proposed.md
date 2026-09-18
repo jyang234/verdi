@@ -1,6 +1,6 @@
 # Lockbox
 
-> **Proposed, not accepted.** These bytes come from an unmerged design branch (`0000000000000000000000000000000000000001`); nothing here is accepted authority yet.
+> **Proposed, not accepted.** These are the working tree's bytes at 0000000000000000000000000000000000000001, not the accepted bytes on the default branch; nothing here is accepted authority yet.
 
 ## Identity
 
