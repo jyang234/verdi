@@ -14,11 +14,14 @@
 // (spec-documents Wave 2 Task 3, ac-5), three constitution tools (Wave 6
 // Task 3, spec/context-integrity-v2 AC-1/AC-2/AC-3), and
 // `import_preview`/`import_apply` (spec-documents Wave 3 Task 3, ac-9 —
-// the third write, over the frozen spec-import contract). `verdi serve`
-// is the process that owns both;
-// `verdi mcp` (cmd/verdi/mcp.go) is a stdio<->socket shim that proxies to
-// a running serve, or falls back to acquiring the lock and serving
-// standalone.
+// the third spec-object write tool, over the frozen spec-import
+// contract). That ordinal counts co-3's closed spec-object write surface
+// (mutate_draft, add_annotation, import_apply), not every tool that
+// persists a byte: `experiment` publishes a capsule manifest of its own
+// under the same writer lock (internal/experimentapp/release.go).
+// `verdi serve` is the process that owns both; `verdi mcp`
+// (cmd/verdi/mcp.go) is a stdio<->socket shim that proxies to a running
+// serve, or falls back to acquiring the lock and serving standalone.
 //
 // Concurrency, per the binding S4 findings (PLAN.md Phase 9): a goroutine
 // per accepted connection (a serial accept loop starves a second client),

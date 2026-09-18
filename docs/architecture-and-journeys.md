@@ -63,7 +63,7 @@ flowchart TD
 
     subgraph surfaces ["Surfaces"]
         WB["Workbench<br/><i>directory · draft walls ·<br/>diagram editor · receipts</i>"]
-        MCP["MCP server<br/><i>21 tools · annotation + import writes ·<br/>experiment gateway</i>"]
+        MCP["MCP server<br/><i>21 tools · draft + annotation + import writes ·<br/>experiment gateway</i>"]
         CLI["CLI verbs<br/><i>= CI gates</i>"]
         DEX["Verdi-dex<br/><i>static site</i>"]
     end
@@ -357,10 +357,11 @@ attributes the load-bearing ones to the component that embodies them.
    drift), `list_tasks`, `get_board` — the wall projection, badges included
    — and `import_preview`, a read-only preview of a mechanical spec import
    (spec-documents Wave 3 Task 3).
-3. **Two write tools**: `add_annotation` appends to the mutable zone —
-   stickies, notes, tasks; `import_apply` publishes a previewed spec import
-   under a delegated-agent actor. Durable writes happen only through MRs.
-   Everything returned is data, never instructions.
+3. **Two of the three write tools** (co-3 closes the write surface at exactly
+   `mutate_draft`, `add_annotation`, `import_apply`): `add_annotation` appends
+   to the mutable zone — stickies, notes, tasks; `import_apply` publishes a
+   previewed spec import under a delegated-agent actor. Durable writes happen
+   only through MRs. Everything returned is data, never instructions.
 
 ### G — The reader journey  *(merge · dex · team)*
 
