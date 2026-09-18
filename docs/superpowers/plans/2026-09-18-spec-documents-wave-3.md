@@ -38,6 +38,7 @@
 - **R-W3-6 (the sequence block binds the proof to the skill).** Each template carries one fenced block with info string `verdi-sequence`. The transcript test parses that block from the embedded template bytes and replays it; if the prose and the block disagree, the block is wrong and the test is the witness that finds it in review. Cost if wrong: one parser.
 - **R-W3-7 (render root).** `harness render|check` default to `store.FindRoot(".")`; `-o <repo root>` names an existing directory with no ancestor search and no store requirement (rendering reads nothing from a store). The render commit is `gitx.RevParse(ctx, root, "HEAD")` or the literal `none` when the root is not inside a git repository. Cost if wrong: one flag semantics note.
 - **R-W3-9 (get_document renders drafts on request).** ac-8's clarify, plan, and tasks skills read a draft on its design branch, but ac-5's `get_document(ref, kind, commit?)` renders only the accepted bytes or a pinned commit. The tool gains an optional boolean `proposed` (the CLI's `--proposed` flag by name): true selects the loader's working-tree mode over the serving checkout, with Proposed derived exactly as the CLI derives it (R-W2-4); `proposed` and `commit` together are refused by name. Recorded as SI-202 (a public MCP interface extension). Cost if wrong: one optional argument.
+- **R-W3-10 (no re-encoding before the sole decoder).** The import tools pass the caller's `request` bytes untouched to `specimport.DecodeRequest`, and decode their own argument objects with `artifact.DecodeExactJSON` (duplicate keys and invalid UTF-8 refused), because canonicalizing first erases exactly the evidence the contract's decoder refuses on and lets a mangled reading reach the write path and the record. Found in Task 3's review; the plan's original code was the defect. Cost if wrong: none (strictness only increases).
 - **R-W3-8 (this repository carries its own rendered skills).** `make verify` runs `verdi harness check` from `lint-store`, so `.claude/skills/verdi-*/SKILL.md` and `.agents/skills/verdi-*/SKILL.md` are committed in this repository and re-rendered whenever a template changes; the check is the drift gate. They are subject to spec/instruction-conformance's enumeration. Cost if wrong: eight files to delete.
 
 ---
@@ -1651,7 +1652,7 @@ import (
 	"fmt"
 	"regexp"
 
-	"github.com/jyang234/verdi/internal/canonjson"
+	"github.com/jyang234/verdi/internal/artifact"
 	"github.com/jyang234/verdi/internal/draftmutation"
 	"github.com/jyang234/verdi/internal/specimport"
 )
@@ -1713,21 +1714,16 @@ func importToolError(tool string, err error) map[string]any {
 	return toolError(fmt.Sprintf("%s: io-failure: %s", tool, err.Error()))
 }
 
-// decodeImportRequest re-canonicalizes the inner request object and hands
-// it to specimport's own strict decoder (the contract's sole decoder).
+// decodeImportRequest hands the caller's request bytes, untouched, to
+// specimport's own strict decoder — the contract's sole decoder (R-W3-10:
+// re-encoding the object first would erase the duplicate-key and
+// invalid-UTF-8 evidence artifact.DecodeExactJSON refuses on, letting a
+// mangled reading reach the write path and be attested by the record).
 func decodeImportRequest(tool string, raw json.RawMessage) (specimport.Request, map[string]any) {
 	if len(raw) == 0 {
 		return specimport.Request{}, toolError(tool + ": request is required")
 	}
-	var generic any
-	if err := json.Unmarshal(raw, &generic); err != nil {
-		return specimport.Request{}, toolError(tool + ": malformed request: " + err.Error())
-	}
-	canon, err := canonjson.Marshal(generic)
-	if err != nil {
-		return specimport.Request{}, toolError(tool + ": malformed request: " + err.Error())
-	}
-	req, err := specimport.DecodeRequest(canon)
+	req, err := specimport.DecodeRequest(raw)
 	if err != nil {
 		return specimport.Request{}, importToolError(tool, err)
 	}
@@ -1742,7 +1738,7 @@ func (b *Backend) ImportPreview(ctx context.Context, argsRaw json.RawMessage) ma
 		return toolError("import_preview: arguments exceed the 12 MiB import envelope")
 	}
 	var args importPreviewArgs
-	if err := strictUnmarshal(argsRaw, &args); err != nil {
+	if err := artifact.DecodeExactJSON(argsRaw, &args); err != nil {
 		return toolError("import_preview: malformed arguments: " + err.Error())
 	}
 	req, failure := decodeImportRequest("import_preview", args.Request)
@@ -1764,7 +1760,7 @@ func (b *Backend) ImportApply(ctx context.Context, argsRaw json.RawMessage) map[
 		return toolError("import_apply: arguments exceed the 12 MiB import envelope")
 	}
 	var args importApplyArgs
-	if err := strictUnmarshal(argsRaw, &args); err != nil {
+	if err := artifact.DecodeExactJSON(argsRaw, &args); err != nil {
 		return toolError("import_apply: malformed arguments: " + err.Error())
 	}
 	if args.Harness == "" {
