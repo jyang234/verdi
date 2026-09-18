@@ -103,6 +103,17 @@ func TestHarnessRenderAndCheck(t *testing.T) {
 	if code, stdout, _ := runVerdi(t, bin, root, "harness", "check", "--host", "codex", "-o", root); code != 0 || stdout != "" {
 		t.Fatalf("check codex after claude drift: code %d stdout %q", code, stdout)
 	}
+	// a codex-host file can drift too, and a --host codex check must catch
+	// it — proves Check's drift comparison isn't scoped to one host.
+	p2 := filepath.Join(root, ".agents", "skills", "verdi-plan", "SKILL.md")
+	b2, _ := os.ReadFile(p2)
+	if err := os.WriteFile(p2, append(b2, []byte("edit\n")...), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	code, stdout, _ = runVerdi(t, bin, root, "harness", "check", "--host", "codex", "-o", root)
+	if code != 1 || strings.TrimSpace(stdout) != "drift  .agents/skills/verdi-plan/SKILL.md" {
+		t.Fatalf("check codex drift: code %d stdout %q", code, stdout)
+	}
 	// re-render repairs it.
 	runVerdi(t, bin, root, "harness", "render", "-o", root)
 	if code, _, _ := runVerdi(t, bin, root, "harness", "check", "-o", root); code != 0 {
