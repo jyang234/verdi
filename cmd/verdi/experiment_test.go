@@ -75,7 +75,12 @@ func TestExperimentTopLevelUsageRowBuiltBinary(t *testing.T) {
 	if strings.Contains(stderr, "\t") {
 		t.Fatalf("top-level usage contains a tab, legacy usage bytes must stay space-indented: %q", stderr)
 	}
-	if !strings.Contains(stderr, "\n       context, experiment\n") {
+	// spec-documents Wave 3 Task 2 added the `harness` verb after
+	// `experiment` in the usage banner's own verb list (dispatch.go), so
+	// the row this test pins now ends "... experiment, harness" — the
+	// experiment row's presence is still what this test proves, just no
+	// longer the last word in that line.
+	if !strings.Contains(stderr, "\n       context, experiment, harness\n") {
 		t.Fatalf("top-level usage omits the experiment inventory row: %q", stderr)
 	}
 }
