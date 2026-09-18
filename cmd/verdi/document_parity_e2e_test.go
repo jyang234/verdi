@@ -304,3 +304,139 @@ func TestDocumentParity_BoardWithForeignReadinessSnapshot(t *testing.T) {
 		}
 	}
 }
+
+// validReadinessSnapshotFor returns a Snapshot targeting ref that passes
+// Snapshot.Validate(): every one of the four fixed areas proven, no
+// attention items. Mirrors internal/readinesspilot/schema_test.go's own
+// (unexported) validSnapshot() — reproduced here for the same reason
+// internal/mcpserve/tool_get_document_test.go's validReadinessSnapshot is
+// (that package's own private helper cannot be imported from here either).
+// The closed concern-identity vocabulary (readinesspilot/schema.go's
+// concernIdentity) fixes these four concern ids' areas and blocking flags;
+// they are not arbitrary. TargetTitle/TargetClass/Branch/RequestDigest are
+// Validate()-only fields specdoc.WithReadiness never reads.
+func validReadinessSnapshotFor(ref, head string) readinesspilot.Snapshot {
+	concern := func(id string, area readinesspilot.AreaID, blocking bool) readinesspilot.Concern {
+		return readinesspilot.Concern{
+			ID: id, Area: area, State: readinesspilot.StateProven, Blocking: blocking,
+			Timing: readinesspilot.TimingCurrent, Summary: "source-derived readiness fact",
+			Witnesses: []string{}, Destination: readinesspilot.Destination{CLI: []string{}},
+		}
+	}
+	return readinesspilot.Snapshot{
+		TargetRef:     ref,
+		TargetTitle:   "Parity test target",
+		TargetClass:   "feature",
+		Branch:        "main",
+		Head:          head,
+		RequestDigest: "sha256:" + strings.Repeat("a", 64),
+		Areas: []readinesspilot.Area{
+			{ID: readinesspilot.AreaShape, Label: "Define the work", State: readinesspilot.StateProven},
+			{ID: readinesspilot.AreaSuccess, Label: "Define success", State: readinesspilot.StateProven},
+			{ID: readinesspilot.AreaContext, Label: "Check constraints", State: readinesspilot.StateProven},
+			{ID: readinesspilot.AreaReview, Label: "Get approval", State: readinesspilot.StateProven},
+		},
+		CurrentFocus: "",
+		Attention:    []readinesspilot.Concern{},
+		AllConcerns: []readinesspilot.Concern{
+			concern("shape/problem", readinesspilot.AreaShape, true),
+			concern("success/contributor/static", readinesspilot.AreaSuccess, false),
+			concern("context/verdict", readinesspilot.AreaContext, true),
+			concern("review/action", readinesspilot.AreaReview, true),
+		},
+		StaleNotice: "Startup snapshot at " + head + "; restart verdi serve after an edit.",
+	}
+}
+
+// stripReadinessSection removes the "## Readiness" section (through the
+// next "## " heading, or EOF when Readiness is the last section, which it
+// always is for kind spec — specdoc/kind.go's Sections()) from doc. Used
+// to pin that two renders differ by EXACTLY that section — never
+// elsewhere in the document.
+func stripReadinessSection(t *testing.T, doc string) string {
+	t.Helper()
+	const heading = "## Readiness"
+	start := strings.Index(doc, heading)
+	if start < 0 {
+		t.Fatalf("document has no %q heading:\n%s", heading, doc)
+	}
+	rest := doc[start+len(heading):]
+	if next := strings.Index(rest, "## "); next >= 0 {
+		return doc[:start] + rest[next:]
+	}
+	return doc[:start]
+}
+
+// TestDocumentParity_BoardAndMCPShareReadiness is R-W3-3: `verdi serve`
+// wires the SAME startup readiness snapshot into both the board
+// (workbench.Deps{Readiness: ...}) and get_document (Backend.Readiness,
+// cmd/verdi/serve.go:296-297) — so a snapshot targeting the rendered spec
+// produces byte-identical Markdown from both legs, carrying a populated
+// Readiness section, and the CLI's readiness-less render (spec doc has no
+// snapshot input at all) differs from them by EXACTLY that section.
+func TestDocumentParity_BoardAndMCPShareReadiness(t *testing.T) {
+	t.Setenv("CI_DEFAULT_BRANCH", "main")
+	repo := buildSpecDocRepo(t)
+	ctx := context.Background()
+	env := []string{"CI_DEFAULT_BRANCH=main"}
+
+	// 1. CLI — no readiness input exists on this path at all.
+	bin := buildVerdiBinary(t)
+	cliOut, stderr, code := runVerdiBinary(t, bin, repo.Dir, env, "spec", "doc", "spec/lockbox")
+	if code != 0 {
+		t.Fatalf("cli exit %d: %s", code, stderr)
+	}
+
+	snap := validReadinessSnapshotFor("spec/lockbox", repo.Head)
+	if err := snap.Validate(); err != nil {
+		t.Fatal(err)
+	}
+
+	// 2. MCP
+	backend := &mcpserve.Backend{Root: repo.Dir, Readiness: &snap}
+	res := backend.GetDocument(ctx, json.RawMessage(`{"ref":"spec/lockbox"}`))
+	var payload struct {
+		Content []struct {
+			Text string `json:"text"`
+		} `json:"content"`
+		IsError bool `json:"isError"`
+	}
+	raw, err := json.Marshal(res)
+	if err != nil {
+		t.Fatalf("marshalling the mcp tool result: %v", err)
+	}
+	if err := json.Unmarshal(raw, &payload); err != nil || payload.IsError || len(payload.Content) == 0 {
+		t.Fatalf("mcp result: %s", raw)
+	}
+	var mcpDoc struct {
+		Markdown string `json:"markdown"`
+	}
+	if err := json.Unmarshal([]byte(payload.Content[0].Text), &mcpDoc); err != nil {
+		t.Fatal(err)
+	}
+
+	// 3. Board, wired the way serve.go wires it: the identical snapshot.
+	h := workbench.NewHandlerWith(repo.Dir, workbench.Deps{Readiness: &snap})
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/board/spec/lockbox/document?format=md", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("board: %d %s", rec.Code, rec.Body.String())
+	}
+	board := rec.Body.String()
+
+	if board != mcpDoc.Markdown {
+		t.Errorf("board and MCP differ under the SAME readiness snapshot:\n--- board ---\n%s\n--- mcp ---\n%s", board, mcpDoc.Markdown)
+	}
+	for name, doc := range map[string]string{"board": board, "mcp": mcpDoc.Markdown} {
+		if !strings.Contains(doc, "## Readiness") || strings.Contains(doc, "Readiness was not supplied for this render.") {
+			t.Fatalf("%s must carry a populated Readiness section:\n%s", name, doc)
+		}
+	}
+
+	// The CLI leg carries no snapshot, so stripping each leg's Readiness
+	// section must leave byte-identical remainders — the divergence is
+	// exactly that section, nowhere else in the document.
+	if boardStripped, cliStripped := stripReadinessSection(t, board), stripReadinessSection(t, cliOut); boardStripped != cliStripped {
+		t.Errorf("board and CLI diverge by more than the Readiness section:\n--- board (stripped) ---\n%s\n--- cli (stripped) ---\n%s", boardStripped, cliStripped)
+	}
+}

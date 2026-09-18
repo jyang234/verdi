@@ -4,9 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/jyang234/verdi/internal/fixturegit"
+	"github.com/jyang234/verdi/internal/readinesspilot"
+	"github.com/jyang234/verdi/internal/store"
 )
 
 // These tests use spec/widget-retry, the accepted feature spec
@@ -184,4 +189,225 @@ func TestGetDocument_RejectsNonHexCommitArgument(t *testing.T) {
 			t.Fatalf("a well-formed commit must render: %s", toolResultText(t, res))
 		}
 	})
+}
+
+// getDocumentFixtureStore builds this file's existing accepted-spec
+// fixture (buildFixture, fixture_test.go) and returns its store root, for
+// tests that only need the root rather than newTestBackend's full
+// (*Backend, *fixturegit.Repo, string) triple.
+func getDocumentFixtureStore(t *testing.T) string {
+	t.Helper()
+	backend, _, _ := newTestBackend(t)
+	return backend.Root
+}
+
+// acceptedFixtureRef returns the ref this file's happy-path test
+// (TestGetDocument_Happy) renders: the fixture's one accepted feature
+// spec, spec/widget-retry (widget-notes, the fixture's other spec, is
+// class "component", not "feature" — see this file's top-of-file note).
+// Confirms root actually carries it so a fixture-shape change fails
+// loudly here rather than as a confusing ref-not-found error deeper in a
+// caller's test.
+func acceptedFixtureRef(t *testing.T, root string) string {
+	t.Helper()
+	const ref = "spec/widget-retry"
+	if _, err := os.Stat(store.ActiveSpecPath(root, "widget-retry")); err != nil {
+		t.Fatalf("acceptedFixtureRef: %s does not carry %s: %v", root, ref, err)
+	}
+	return ref
+}
+
+// getDocumentDraftStoreSpec is a minimal valid spec, the same shape
+// internal/designapp/conformance_test.go's conformanceSpec uses (id
+// spec/sample, class feature, one AC, one constraint) — copied rather
+// than imported, since conformanceSpec is unexported inside another
+// package's own external _test package.
+const getDocumentDraftStoreSpec = `---
+id: spec/sample
+kind: spec
+class: feature
+title: Sample
+owners: [platform-team]
+problem: { text: "old problem", anchor: "#problem" }
+outcome: { text: "old outcome", anchor: "#outcome" }
+acceptance_criteria:
+  - { id: ac-1, text: "first", evidence: [static], anchor: "#ac-1" }
+constraints:
+  - { id: co-1, text: "bounded", anchor: "#co-1" }
+---
+# Sample
+
+## Problem
+
+Old prose stays.
+
+## Outcome
+
+Old prose stays.
+
+## ac-1
+
+First.
+
+## co-1
+
+Bounded.
+`
+
+// getDocumentDraftStore builds internal/designapp/conformance_test.go's
+// conformanceStore recipe (committed store on main, checked out onto
+// design/sample, then an UNCOMMITTED draft written directly to
+// .verdi/specs/active/sample/spec.md) — without that fixture's unrelated
+// ASD policy content (internal/policyauthority's testdata store), which
+// GetDocument never reads. main carries only .verdi/verdi.yaml, so
+// spec/sample does not exist on the default branch at all: ModeAccepted
+// must refuse it, and only ModeWorkingTree (the checkout's own working
+// tree, currently design/sample) can read the draft.
+func getDocumentDraftStore(t *testing.T) string {
+	t.Helper()
+	repo := fixturegit.Build(t, []fixturegit.Layer{{
+		Files:   map[string]string{".verdi/verdi.yaml": "schema: verdi.layout/v1\n"},
+		Message: "layer 1: store root",
+	}})
+
+	checkout := exec.Command("git", "checkout", "-b", "design/sample")
+	checkout.Dir = repo.Dir
+	if output, err := checkout.CombinedOutput(); err != nil {
+		t.Fatalf("git checkout design/sample: %v\n%s", err, output)
+	}
+
+	if err := os.MkdirAll(store.ActiveSpecDir(repo.Dir, "sample"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(store.ActiveSpecPath(repo.Dir, "sample"), []byte(getDocumentDraftStoreSpec), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return repo.Dir
+}
+
+// validReadinessConcern builds one PROVEN concern for the closed concern-
+// identity vocabulary (internal/readinesspilot/schema.go's
+// concernIdentity): id fixes the derived area and blocking flag, so these
+// are not arbitrary — mirrors that package's own (unexported, so
+// reproduced rather than imported) schema_test.go validConcern helper.
+func validReadinessConcern(id string, area readinesspilot.AreaID, blocking bool) readinesspilot.Concern {
+	return readinesspilot.Concern{
+		ID:        id,
+		Area:      area,
+		State:     readinesspilot.StateProven,
+		Blocking:  blocking,
+		Timing:    readinesspilot.TimingCurrent,
+		Summary:   "source-derived readiness fact",
+		Witnesses: []string{},
+		Destination: readinesspilot.Destination{
+			CLI: []string{},
+		},
+	}
+}
+
+// validReadinessSnapshot returns a Snapshot targeting ref that passes
+// Snapshot.Validate(): every one of the four fixed areas proven, no
+// attention items. Mirrors internal/readinesspilot/schema_test.go's own
+// (unexported) validSnapshot() — reproduced here for the same reason
+// validReadinessConcern is. TargetTitle/TargetClass/Branch/RequestDigest
+// are Validate()-only fields specdoc.WithReadiness never reads (it copies
+// only TargetRef/Head/CurrentFocus/StaleNotice/Areas/Attention into the
+// rendered document), so their exact values do not matter beyond
+// satisfying Validate().
+func validReadinessSnapshot(ref, head string) readinesspilot.Snapshot {
+	return readinesspilot.Snapshot{
+		TargetRef:     ref,
+		TargetTitle:   "Readiness test target",
+		TargetClass:   "feature",
+		Branch:        "main",
+		Head:          head,
+		RequestDigest: "sha256:" + strings.Repeat("a", 64),
+		Areas: []readinesspilot.Area{
+			{ID: readinesspilot.AreaShape, Label: "Define the work", State: readinesspilot.StateProven},
+			{ID: readinesspilot.AreaSuccess, Label: "Define success", State: readinesspilot.StateProven},
+			{ID: readinesspilot.AreaContext, Label: "Check constraints", State: readinesspilot.StateProven},
+			{ID: readinesspilot.AreaReview, Label: "Get approval", State: readinesspilot.StateProven},
+		},
+		CurrentFocus: "",
+		Attention:    []readinesspilot.Concern{},
+		AllConcerns: []readinesspilot.Concern{
+			validReadinessConcern("shape/problem", readinesspilot.AreaShape, true),
+			validReadinessConcern("success/contributor/static", readinesspilot.AreaSuccess, false),
+			validReadinessConcern("context/verdict", readinesspilot.AreaContext, true),
+			validReadinessConcern("review/action", readinesspilot.AreaReview, true),
+		},
+		StaleNotice: "Startup snapshot at " + head + "; restart verdi serve after an edit.",
+	}
+}
+
+// TestGetDocument_ReadinessWhenSnapshotTargetsSpec is R-W3-3: Backend.Readiness
+// reaches the loader (tool_get_document.go's Readiness: b.Readiness), which
+// supplies the Readiness section only when the snapshot's TargetRef names
+// the spec being rendered (internal/specdoc/readiness.go's WithReadiness,
+// Wave 2) — never another spec's facts.
+func TestGetDocument_ReadinessWhenSnapshotTargetsSpec(t *testing.T) {
+	t.Setenv("CI_DEFAULT_BRANCH", "main")
+	root := getDocumentFixtureStore(t)
+	snap := validReadinessSnapshot("spec/widget-retry", strings.Repeat("a", 40))
+	if err := snap.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	b := &Backend{Root: root, Readiness: &snap}
+	raw, _ := json.Marshal(map[string]any{"ref": snap.TargetRef, "kind": "spec"})
+	text, isErr := decodeText(t, b.GetDocument(context.Background(), raw))
+	if isErr {
+		t.Fatal(text)
+	}
+	if !strings.Contains(text, "## Readiness") || strings.Contains(text, "Readiness was not supplied for this render.") {
+		t.Fatalf("readiness section not rendered from the snapshot:\n%s", text)
+	}
+	// A snapshot targeting another spec leaves the document untouched.
+	other := snap
+	other.TargetRef = "spec/other"
+	b2 := &Backend{Root: root, Readiness: &other}
+	text2, _ := decodeText(t, b2.GetDocument(context.Background(), raw))
+	if !strings.Contains(text2, "Readiness was not supplied for this render.") {
+		t.Fatalf("foreign snapshot must not leak:\n%s", text2)
+	}
+}
+
+// TestGetDocument_ProposedRendersTheWorkingTreeDraft is R-W3-9 (ledger
+// SI-202): proposed:true selects specdocload.ModeWorkingTree, so
+// get_document can render a draft still sitting only on its design
+// branch's working tree — never committed to the default branch, so the
+// accepted (default) reading cannot see it at all.
+func TestGetDocument_ProposedRendersTheWorkingTreeDraft(t *testing.T) {
+	t.Setenv("CI_DEFAULT_BRANCH", "main")
+	root := getDocumentDraftStore(t)
+	b := &Backend{Root: root}
+	// Accepted mode cannot see a draft main does not carry.
+	raw, _ := json.Marshal(map[string]any{"ref": "spec/sample", "kind": "spec"})
+	if text, isErr := decodeText(t, b.GetDocument(context.Background(), raw)); !isErr {
+		t.Fatalf("accepted mode must refuse a draft absent from the default branch: %s", text)
+	}
+	// proposed:true renders the working tree, marked proposed.
+	raw, _ = json.Marshal(map[string]any{"ref": "spec/sample", "kind": "spec", "proposed": true})
+	text, isErr := decodeText(t, b.GetDocument(context.Background(), raw))
+	if isErr {
+		t.Fatal(text)
+	}
+	var res getDocumentResult
+	if err := json.Unmarshal([]byte(text), &res); err != nil {
+		t.Fatal(err)
+	}
+	if !res.Proposed || !strings.Contains(res.Markdown, "Proposed, not accepted") {
+		t.Fatalf("proposed render = %+v", res)
+	}
+	// proposed and commit together are refused by name.
+	raw, _ = json.Marshal(map[string]any{"ref": "spec/sample", "kind": "spec", "proposed": true, "commit": strings.Repeat("a", 40)})
+	if text, isErr := decodeText(t, b.GetDocument(context.Background(), raw)); !isErr || !strings.Contains(text, "proposed and commit") {
+		t.Fatalf("proposed+commit: isErr %v text %q", isErr, text)
+	}
+	// An accepted spec with proposed:true renders unmarked (Proposed derived, R-W2-4).
+	root2 := getDocumentFixtureStore(t)
+	raw, _ = json.Marshal(map[string]any{"ref": acceptedFixtureRef(t, root2), "kind": "spec", "proposed": true})
+	text, _ = decodeText(t, (&Backend{Root: root2}).GetDocument(context.Background(), raw))
+	if strings.Contains(text, `"proposed":true`) {
+		t.Fatalf("exact accepted bytes must not be marked proposed:\n%s", text)
+	}
 }

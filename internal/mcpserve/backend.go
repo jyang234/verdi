@@ -8,6 +8,7 @@ import (
 	"github.com/jyang234/verdi/internal/boardio"
 	"github.com/jyang234/verdi/internal/forge"
 	"github.com/jyang234/verdi/internal/index"
+	"github.com/jyang234/verdi/internal/readinesspilot"
 )
 
 // Backend is the one real implementation behind every MCP tool: a store
@@ -36,6 +37,12 @@ type Backend struct {
 	// zero value: every tool degrades to "no review population" rather
 	// than erroring.
 	Forge forge.Forge
+
+	// Readiness is the startup readiness snapshot verdi serve built (nil
+	// when serving without --context-request or under standalone verdi
+	// mcp); get_document passes it to the loader, which uses it only when
+	// its TargetRef is the rendered spec (R-W3-3).
+	Readiness *readinesspilot.Snapshot
 
 	// ReviewUnavailable, when non-empty, is the disclosed reason a
 	// CONFIGURED forge (named in verdi.yaml) could not be reached to build
