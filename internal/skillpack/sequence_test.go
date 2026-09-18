@@ -45,10 +45,52 @@ func TestParseSequence(t *testing.T) {
 		"```verdi-sequence\ncall\n```\n",                                   // call without tool
 		"```verdi-sequence\nloop\nshow\n```\n",                             // unclosed loop
 		"```verdi-sequence\ncall a\n```\n```verdi-sequence\ncall b\n```\n", // two blocks
+		"```verdi-sequence\ncall a k=1 k=2\n```\n",                         // duplicate argument key
 	} {
 		if _, err := ParseSequence([]byte(bad)); err == nil {
 			t.Fatalf("ParseSequence must refuse %q", bad)
 		}
+	}
+}
+
+// TestParseSequenceToleratesOnDiskVariation is task-1-review.md finding
+// 6's positive table: ParseSequence must still succeed on a CRLF copy of
+// a template and on a block whose closing fence is the template's very
+// last bytes, with no trailing newline — both shapes a checked-out
+// SKILL.md a human or editor has lightly touched can carry, even though
+// Template()'s own embedded bytes are always LF and newline-terminated.
+func TestParseSequenceToleratesOnDiskVariation(t *testing.T) {
+	want := Sequence{
+		{Kind: "call", Tool: "a", Args: map[string]string{}},
+		{Kind: "show"},
+	}
+	for _, tc := range []struct {
+		name string
+		in   string
+	}{
+		{
+			name: "CRLF line endings",
+			in:   "---\r\nname: x\r\n---\r\n\r\n```verdi-sequence\r\ncall a\r\nshow\r\n```\r\n",
+		},
+		{
+			name: "closing fence at EOF with no trailing newline",
+			in:   "---\nname: x\n---\n\n```verdi-sequence\ncall a\nshow\n```",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := ParseSequence([]byte(tc.in))
+			if err != nil {
+				t.Fatalf("ParseSequence(%q): %v", tc.in, err)
+			}
+			if len(got) != len(want) {
+				t.Fatalf("got %+v, want %+v", got, want)
+			}
+			for i := range want {
+				if got[i].Kind != want[i].Kind || got[i].Tool != want[i].Tool || len(got[i].Args) != len(want[i].Args) {
+					t.Fatalf("step %d = %+v, want %+v", i, got[i], want[i])
+				}
+			}
+		})
 	}
 }
 

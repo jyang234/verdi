@@ -27,23 +27,41 @@ type Sequence []Step
 var (
 	fenceOpen  = []byte("```verdi-sequence\n")
 	fenceClose = []byte("```\n")
+	// fenceCloseBare is the fenceClose fallback for a block whose closing
+	// fence is the template's very last bytes, with no trailing newline.
+	fenceCloseBare = []byte("```")
 )
 
 // ParseSequence extracts and parses the single verdi-sequence block of a
 // template. Zero or two blocks, an empty block, an unknown step, a call
-// without a tool, or an unbalanced loop is an error.
+// without a tool, a call with a repeated argument key, or an unbalanced
+// loop is an error.
+//
+// Line endings are normalized (CRLF tolerated, stripped to LF) and a
+// closing fence at end-of-input with no trailing newline is accepted, so
+// a checked-out SKILL.md a human or a text editor has lightly touched
+// still parses (task-1-review.md finding 6); the embedded templates
+// Template() serves are always LF and newline-terminated, so this only
+// widens what a copy on disk may look like, never what this package
+// itself produces.
 func ParseSequence(template []byte) (Sequence, error) {
+	template = bytes.ReplaceAll(template, []byte("\r"), nil)
 	start := bytes.Index(template, fenceOpen)
 	if start < 0 {
 		return nil, fmt.Errorf("skillpack: template has no verdi-sequence block")
 	}
 	rest := template[start+len(fenceOpen):]
-	stop := bytes.Index(rest, fenceClose)
+	stop, closeLen := -1, 0
+	if i := bytes.Index(rest, fenceClose); i >= 0 {
+		stop, closeLen = i, len(fenceClose)
+	} else if bytes.HasSuffix(rest, fenceCloseBare) {
+		stop, closeLen = len(rest)-len(fenceCloseBare), len(fenceCloseBare)
+	}
 	if stop < 0 {
 		// vocab:identity — "closed" names the unterminated code fence, not the lifecycle state
 		return nil, fmt.Errorf("skillpack: verdi-sequence block is not closed")
 	}
-	if bytes.Contains(rest[stop+len(fenceClose):], fenceOpen) {
+	if bytes.Contains(rest[stop+closeLen:], fenceOpen) {
 		return nil, fmt.Errorf("skillpack: template has more than one verdi-sequence block")
 	}
 	var seq Sequence
@@ -63,6 +81,9 @@ func ParseSequence(template []byte) (Sequence, error) {
 				k, v, ok := strings.Cut(kv, "=")
 				if !ok || k == "" || v == "" {
 					return nil, fmt.Errorf("skillpack: verdi-sequence: bad argument %q", kv)
+				}
+				if _, dup := st.Args[k]; dup {
+					return nil, fmt.Errorf("skillpack: verdi-sequence: duplicate argument %q", k)
 				}
 				st.Args[k] = v
 			}
