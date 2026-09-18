@@ -465,7 +465,7 @@ Use this skill when a draft spec has acceptance criteria that no stub covers and
 ## Steps
 
 1. Call `get_design_context` with `spec/<slug>`; keep `identity` and `current_draft` for the mutation calls.
-2. Call `get_document` with `ref` `spec/<slug>`, `kind` `plan`, and `proposed` true. In the criteria section, an uncovered criterion reads "known: nothing covers it"; a covered one reads "covered by …". Collect the uncovered criterion ids in document order.
+2. Call `get_document` with `ref` `spec/<slug>`, `kind` `plan`, and `proposed` true. In the criteria section, an uncovered criterion's coverage line reads "not yet planned."; a covered one reads "covered by …"; "not computed for this render." means the facts were unavailable, in which case say so and stop. Collect the uncovered criterion ids in document order.
 3. For each uncovered criterion, prepare exactly one stub: `{"op":"add-stub","slug":"<kebab-slug describing the deliverable>","acceptance_criteria":["<ac-id>"]}`. A stub may cover several criteria when they are one deliverable; say why.
 4. Show the human the criterion text and the operation JSON. Ask for confirmation.
 5. On confirmation, call `mutate_draft` with that one operation (same argument shape as verdi-clarify). On a stale-base refusal, repeat from step 1.
@@ -2190,14 +2190,14 @@ func TestTranscript_Plan(t *testing.T) {
 	seq := sequenceFor(t, "plan")
 	tr.call("get_design_context", map[string]any{"ref": "spec/" + draftSpecName})
 	text, _ := tr.call("get_document", map[string]any{"ref": "spec/" + draftSpecName, "kind": "plan", "proposed": true})
-	if strings.Count(text, "nothing covers it") != 1 || !strings.Contains(text, "ac-2") {
+	if strings.Count(text, "not yet planned.") != 1 || !strings.Contains(text, "ac-2") {
 		t.Fatalf("fixture must render exactly one uncovered criterion (ac-2):\n%s", text)
 	}
 	if text, isErr := tr.call("mutate_draft", mutateArgs(t, root, map[string]any{"op": "add-stub", "slug": "cover-ac-2", "acceptance_criteria": []string{"ac-2"}})); isErr {
 		t.Fatal(text)
 	}
 	text, _ = tr.call("get_document", map[string]any{"ref": "spec/" + draftSpecName, "kind": "plan", "proposed": true})
-	if strings.Contains(text, "nothing covers it") {
+	if strings.Contains(text, "not yet planned.") {
 		t.Fatalf("ac-2 still uncovered:\n%s", text)
 	}
 	tr.assertFollows(seq, 1)
