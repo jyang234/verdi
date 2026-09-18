@@ -91,7 +91,7 @@ No decisions are declared.
 
 ## Plan
 
-No planned stories or research spikes are planned.
+This spec declares no planned stories and no research spikes.
 
 ## Evidence
 

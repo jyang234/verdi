@@ -116,7 +116,7 @@ func RenderMarkdown(doc Document) string {
 		case SectionPlan:
 			w("## Plan\n\n")
 			if len(doc.Plan) == 0 {
-				w("No %s or %s are planned.\n\n", doc.Words.StoryPlural, doc.Words.SpikePlural)
+				w("This spec declares no %s and no %s.\n\n", doc.Words.StoryPlural, doc.Words.SpikePlural)
 			} else {
 				// `spec/<slug>` is wrapped as a code span (fix round 1
 				// golden review: bare "spec/<slug>" parses as an inline
