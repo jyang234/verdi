@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -205,13 +206,49 @@ func (tr *transcript) assertWritten(path string) {
 	}
 }
 
-// objectBlock returns the rendered document's segment starting at the
-// bold "**id**" marker through (not including) the next blank line — the
-// one line a criterion's Coverage or a question's Claims is on — so a
-// caller can assert a fact scoped to THAT object rather than the whole
-// document (F7: a bare strings.Contains(doc, id) matches the id anywhere
-// it is mentioned, and a whole-document phrase count can collide with
-// unrelated prose using similar words).
+// documentMarkdown returns the RENDERED DOCUMENT carried by a
+// get_document result. The result text is canonical JSON
+// (internal/mcpserve/toolresult.go), so the document's own newlines
+// arrive escaped as the two characters `\` `n`; every assertion about
+// the document's line structure has to run on the decoded string, not on
+// the envelope (final-review F2).
+func documentMarkdown(t *testing.T, result string) string {
+	t.Helper()
+	var res struct {
+		Markdown string `json:"markdown"`
+	}
+	if err := json.Unmarshal([]byte(result), &res); err != nil {
+		t.Fatalf("decoding get_document result: %v\n%s", err, result)
+	}
+	if res.Markdown == "" {
+		t.Fatalf("get_document result carries no markdown:\n%s", result)
+	}
+	return res.Markdown
+}
+
+// nextObjectMarkerRe matches the start of the NEXT list item carrying a
+// bold object id — `- **id**` (constraints, open questions) or
+// `1. **id**` (acceptance criteria), the two shapes
+// internal/specdoc/markdown.go writes.
+var nextObjectMarkerRe = regexp.MustCompile(`\n(?:- |\d+\. )\*\*`)
+
+// objectBlock returns the segment of a rendered document (decoded
+// markdown, from documentMarkdown — never the JSON envelope) starting at
+// the bold "**id**" marker and ending at whichever comes first: the next
+// blank line, or the next list item introducing a different object. A
+// caller can then assert a fact scoped to THAT object rather than to the
+// whole document (F7: a bare strings.Contains(doc, id) matches the id
+// anywhere it is mentioned, and a whole-document phrase count can
+// collide with unrelated prose using similar words).
+//
+// Both terminators are needed. A criterion's block is blank-line
+// delimited (markdown.go writes "\n" after each one), but consecutive
+// open questions with no detail are adjacent lines with no blank between
+// them, so the blank-line rule alone would let one question's block
+// swallow the next one's Claims line. Passing the JSON envelope here was
+// the bug this doc comment used to over-claim past: "\n\n" never occurs
+// in it, so the function always returned marker-to-end-of-document and
+// contributed nothing but "the phrase appears somewhere after the id".
 func objectBlock(t *testing.T, doc, id string) string {
 	t.Helper()
 	marker := "**" + id + "**"
@@ -220,10 +257,70 @@ func objectBlock(t *testing.T, doc, id string) string {
 		t.Fatalf("no %q marker in document:\n%s", marker, doc)
 	}
 	rest := doc[start:]
-	if end := strings.Index(rest, "\n\n"); end >= 0 {
-		return rest[:end]
+	end := len(rest)
+	if i := strings.Index(rest, "\n\n"); i >= 0 {
+		end = i
 	}
-	return rest
+	if loc := nextObjectMarkerRe.FindStringIndex(rest[len(marker):]); loc != nil && len(marker)+loc[0] < end {
+		end = len(marker) + loc[0]
+	}
+	return rest[:end]
+}
+
+// TestObjectBlockScopes is objectBlock's own unit proof, on a synthetic
+// document in both list shapes internal/specdoc/markdown.go writes: a
+// blank-line-delimited criterion block, and two adjacent question lines
+// with no blank line between them. Both terminators fire here, so
+// neither is dead defensive code; each case also asserts the block
+// EXCLUDES the neighbouring object's payload, which is the whole point
+// of scoping (final-review F2).
+func TestObjectBlockScopes(t *testing.T) {
+	const doc = "## Acceptance criteria\n\n" +
+		"1. **ac-1** first <a id=\"ac-1\"></a>\n   - Evidence: static.\n   - Coverage: covered by story `s-1`.\n\n" +
+		"2. **ac-2** second <a id=\"ac-2\"></a>\n   - Evidence: static.\n   - Coverage: not yet planned.\n\n" +
+		"## Open questions\n\n" +
+		"- **oq-1** first? <a id=\"oq-1\"></a> — Claims: claimed by spike `p-1`; answered after acceptance.\n" +
+		"- **oq-2** second? <a id=\"oq-2\"></a> — Claims: unclaimed; blocks acceptance.\n\n"
+
+	tests := []struct {
+		id      string
+		want    string
+		exclude string
+	}{
+		{id: "ac-1", want: "covered by story `s-1`.", exclude: "not yet planned."},
+		{id: "ac-2", want: "not yet planned.", exclude: "covered by story `s-1`."},
+		{id: "oq-1", want: "claimed by spike `p-1`", exclude: "unclaimed; blocks acceptance"},
+		{id: "oq-2", want: "unclaimed; blocks acceptance", exclude: "claimed by spike `p-1`"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.id, func(t *testing.T) {
+			block := objectBlock(t, doc, tc.id)
+			if !strings.Contains(block, tc.want) {
+				t.Errorf("block for %s does not carry its own payload %q:\n%s", tc.id, tc.want, block)
+			}
+			if strings.Contains(block, tc.exclude) {
+				t.Errorf("block for %s leaked the neighbouring object's %q — it is not scoped:\n%s", tc.id, tc.exclude, block)
+			}
+		})
+	}
+}
+
+// TestDocumentMarkdownDecodesTheEnvelope pins the mechanism F2 turned on:
+// a get_document result is canonical JSON whose document newlines are
+// escaped, so scanning the envelope for "\n\n" finds nothing. The decoded
+// markdown carries real newlines, and objectBlock scopes only on that.
+func TestDocumentMarkdownDecodesTheEnvelope(t *testing.T) {
+	const envelope = `{"markdown":"1. **ac-1** first\n   - Coverage: not yet planned.\n\n2. **ac-2** second\n   - Coverage: covered.\n","ref":"spec/sample"}`
+	if strings.Contains(envelope, "\n\n") {
+		t.Fatal("the envelope is supposed to carry ESCAPED newlines; this test's own fixture is wrong")
+	}
+	md := documentMarkdown(t, envelope)
+	if !strings.Contains(md, "\n\n") {
+		t.Fatalf("decoded markdown has no real blank line:\n%q", md)
+	}
+	if block := objectBlock(t, md, "ac-1"); strings.Contains(block, "ac-2") {
+		t.Fatalf("scoping over decoded markdown still ran to end of document:\n%q", block)
+	}
 }
 
 const draftSpecName = "sample"
@@ -467,18 +564,19 @@ func TestTranscript_Clarify(t *testing.T) {
 	if isErr {
 		t.Fatal(text)
 	}
-	if !strings.Contains(text, "Readiness was not supplied for this render.") {
-		t.Fatalf("standalone server must disclose absent readiness:\n%s", text)
+	doc := documentMarkdown(t, text)
+	if !strings.Contains(doc, "Readiness was not supplied for this render.") {
+		t.Fatalf("standalone server must disclose absent readiness:\n%s", doc)
 	}
 	// Exactly one unclaimed question in the fixture: oq-2 (oq-1 is claimed
 	// by the fixture's spike stub). F7: located to oq-2's own line rather
-	// than a bare strings.Contains(text, "oq-2"), which matches the id
+	// than a bare strings.Contains(doc, "oq-2"), which matches the id
 	// anywhere it is mentioned in the document.
-	if strings.Count(text, "unclaimed; blocks acceptance") != 1 {
-		t.Fatalf("fixture must render exactly one unclaimed question:\n%s", text)
+	if strings.Count(doc, "unclaimed; blocks acceptance") != 1 {
+		t.Fatalf("fixture must render exactly one unclaimed question:\n%s", doc)
 	}
-	if !strings.Contains(objectBlock(t, text, "oq-2"), "unclaimed; blocks acceptance") {
-		t.Fatalf("oq-2 must be the unclaimed question:\n%s", text)
+	if !strings.Contains(objectBlock(t, doc, "oq-2"), "unclaimed; blocks acceptance") {
+		t.Fatalf("oq-2 must be the unclaimed question:\n%s", doc)
 	}
 	// One proposal, shown and confirmed, then written: a research stub claiming oq-2.
 	spike := true
@@ -492,8 +590,9 @@ func TestTranscript_Clarify(t *testing.T) {
 	if isErr {
 		t.Fatal(text)
 	}
-	if strings.Contains(text, "unclaimed; blocks acceptance") {
-		t.Fatalf("oq-2 still unclaimed after the stub:\n%s", text)
+	after := documentMarkdown(t, text)
+	if strings.Contains(after, "unclaimed; blocks acceptance") {
+		t.Fatalf("oq-2 still unclaimed after the stub:\n%s", after)
 	}
 }
 
@@ -517,12 +616,15 @@ func TestTranscript_Plan(t *testing.T) {
 	// ac-2's own block — the bare phrase "not yet planned." also matches
 	// the fixture's own outcome prose ("...honestly reported as not yet
 	// planned, and...", testdata/store/spec.md), and a bare
-	// strings.Contains(text, "ac-2") matches the id anywhere.
-	if strings.Count(text, "- Coverage: not yet planned.") != 1 {
-		t.Fatalf("fixture must render exactly one uncovered criterion:\n%s", text)
+	// strings.Contains(doc, "ac-2") matches the id anywhere. Both halves
+	// run on the decoded document, so the block really is ac-2's own
+	// (F2).
+	doc := documentMarkdown(t, text)
+	if strings.Count(doc, "- Coverage: not yet planned.") != 1 {
+		t.Fatalf("fixture must render exactly one uncovered criterion:\n%s", doc)
 	}
-	if !strings.Contains(objectBlock(t, text, "ac-2"), "Coverage: not yet planned.") {
-		t.Fatalf("ac-2 must be the uncovered criterion:\n%s", text)
+	if !strings.Contains(objectBlock(t, doc, "ac-2"), "Coverage: not yet planned.") {
+		t.Fatalf("ac-2 must be the uncovered criterion:\n%s", doc)
 	}
 	if text, isErr := tr.call("mutate_draft", mutateArgs(t, root, identity, map[string]any{"op": "add-stub", "slug": "cover-ac-2", "acceptance_criteria": []string{"ac-2"}})); isErr {
 		t.Fatal(text)
