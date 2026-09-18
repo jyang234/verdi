@@ -1,4 +1,3 @@
-// internal/specdoc/stamp.go
 package specdoc
 
 import "github.com/jyang234/verdi/internal/canonjson"

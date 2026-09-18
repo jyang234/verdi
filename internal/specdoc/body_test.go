@@ -1,4 +1,3 @@
-// internal/specdoc/body_test.go
 package specdoc
 
 import "testing"

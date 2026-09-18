@@ -1,4 +1,3 @@
-// internal/specdoc/kind.go
 package specdoc
 
 import "fmt"

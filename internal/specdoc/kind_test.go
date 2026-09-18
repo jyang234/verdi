@@ -1,4 +1,3 @@
-// internal/specdoc/kind_test.go
 package specdoc
 
 import "testing"

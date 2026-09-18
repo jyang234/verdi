@@ -1,4 +1,3 @@
-// internal/specdoc/body.go
 package specdoc
 
 import (

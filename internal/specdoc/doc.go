@@ -1,4 +1,3 @@
-// internal/specdoc/doc.go
 // Package specdoc renders a spec as a human-readable document from its
 // decoded objects, its body, a stamp, and facts supplied by the caller.
 //

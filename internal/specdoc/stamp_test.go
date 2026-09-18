@@ -1,4 +1,3 @@
-// internal/specdoc/stamp_test.go
 package specdoc
 
 import (

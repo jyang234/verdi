@@ -1,4 +1,3 @@
-// internal/specdoc/facts.go
 package specdoc
 
 import (
