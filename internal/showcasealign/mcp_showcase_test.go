@@ -244,8 +244,8 @@ func TestMCPShowcaseCoverage(t *testing.T) {
 		if !strings.Contains(out.Markdown, "not authority") {
 			t.Fatalf("get_document(spec/escrow-autopay).Markdown missing its \"not authority\" projection stamp: %q", out.Markdown)
 		}
-		if !strings.Contains(out.Markdown, "ac-1") {
-			t.Fatalf("get_document(spec/escrow-autopay).Markdown missing its real ac-1 criterion (\"an autopay mandate is created\"): %q", out.Markdown)
+		if !strings.Contains(out.Markdown, "an autopay mandate is created against a submitted application's escrow account") {
+			t.Fatalf("get_document(spec/escrow-autopay).Markdown missing its real ac-1 criterion text: %q", out.Markdown)
 		}
 		if out.Disclosures == nil {
 			t.Fatal("get_document(spec/escrow-autopay).Disclosures decoded as JSON null, want a JSON array (possibly empty)")
@@ -260,6 +260,9 @@ func TestMCPShowcaseCoverage(t *testing.T) {
 			Markdown string `json:"markdown"`
 		}
 		decodeToolJSON(t, tasksText, &tasksOut)
+		if !strings.Contains(tasksOut.Markdown, "## Plan") {
+			t.Fatalf("get_document(spec/escrow-autopay, kind=tasks) missing its ## Plan section: %q", tasksOut.Markdown)
+		}
 		if strings.Contains(tasksOut.Markdown, "## Problem") {
 			t.Fatalf("get_document(spec/escrow-autopay, kind=tasks) still carries a ## Problem section, want the tasks kind's narrower section set: %q", tasksOut.Markdown)
 		}

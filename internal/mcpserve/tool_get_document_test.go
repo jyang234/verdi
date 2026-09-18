@@ -3,6 +3,8 @@ package mcpserve
 import (
 	"context"
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -39,6 +41,54 @@ func TestGetDocument_Happy(t *testing.T) {
 	if toolResultText(t, res) != toolResultText(t, again) {
 		t.Fatal("two calls over unchanged state must be byte-identical")
 	}
+
+	// F1 (review, fix round 2): in this fixture the checkout and HEAD
+	// start byte-identical, so nothing above can fail if ModeAccepted were
+	// swapped for ModeWorkingTree — dirty the checkout's own spec.md
+	// (never committed) and prove the render still reflects the accepted
+	// commit's title, not the dirty working tree's.
+	specPath := filepath.Join(backend.Root, ".verdi", "specs", "active", "widget-retry", "spec.md")
+	original, err := os.ReadFile(specPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(original), `title: "Widget retry"`) {
+		t.Fatalf("fixture spec.md missing the expected title line: %s", original)
+	}
+	dirty := strings.Replace(string(original), `title: "Widget retry"`, `title: "UNCOMMITTED"`, 1)
+	if err := os.WriteFile(specPath, []byte(dirty), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	dirtyRes := backend.GetDocument(context.Background(), mustArgs(t, map[string]any{"ref": "spec/widget-retry"}))
+	if isToolError(dirtyRes) {
+		t.Fatalf("tool error after dirtying the working tree: %s", toolResultText(t, dirtyRes))
+	}
+	var dirtyGot struct{ Markdown string }
+	if err := json.Unmarshal([]byte(toolResultText(t, dirtyRes)), &dirtyGot); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(dirtyGot.Markdown, "# Widget retry\n") {
+		t.Fatalf("get_document(spec/widget-retry) read the dirty working tree instead of the accepted commit:\n%s", dirtyGot.Markdown)
+	}
+}
+
+// TestGetDocument_MalformedManifestDegradesToNilModel proves the
+// model-resolution branch tool_get_document.go's `if cfg, cerr :=
+// store.Open(b.Root); cerr == nil` takes when store.Open fails: a
+// present-but-malformed verdi.yaml (decodable YAML, wrong schema value)
+// still satisfies specdocload.Load's own Stat-only precondition, so the
+// render must still succeed with a nil model rather than erroring.
+func TestGetDocument_MalformedManifestDegradesToNilModel(t *testing.T) {
+	t.Setenv("CI_DEFAULT_BRANCH", "main")
+	backend, _, _ := newTestBackend(t)
+	manifestPath := filepath.Join(backend.Root, ".verdi", "verdi.yaml")
+	if err := os.WriteFile(manifestPath, []byte("schema: not-a-real-schema/v1\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	res := backend.GetDocument(context.Background(), mustArgs(t, map[string]any{"ref": "spec/widget-retry"}))
+	if isToolError(res) {
+		t.Fatalf("tool error with a malformed (but present) verdi.yaml: %s", toolResultText(t, res))
+	}
 }
 
 func TestGetDocument_KindsAndPin(t *testing.T) {
@@ -66,7 +116,7 @@ func TestGetDocument_Refusals(t *testing.T) {
 		args map[string]any
 		want string
 	}{
-		{"missing ref", map[string]any{}, "ref"},
+		{"missing ref", map[string]any{}, "ref is required"},
 		{"not a spec", map[string]any{"ref": "adr/0001"}, "spec/<name>"},
 		{"fragment", map[string]any{"ref": "spec/widget-retry#ac-1"}, "spec/<name>"},
 		{"unknown field", map[string]any{"ref": "spec/widget-retry", "format": "html"}, "unknown field"},
