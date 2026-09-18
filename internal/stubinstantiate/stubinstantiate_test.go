@@ -307,6 +307,45 @@ func TestCommitScaffoldBranch_NoOriginRemote_DisclosedHeadFallback(t *testing.T)
 	}
 }
 
+// TestResolveDesignBranchBase_ExportedWrapper proves the exported wrapper
+// (UAT-030/031/032 fix round: the board's create and Revise actions need
+// the branch's base ref BEFORE CommitScaffoldBranch itself runs, to feed
+// internal/specname.ValidateSuccessorName's base-ref check) returns exactly
+// what CommitScaffoldBranch itself would resolve — same Ref, same Commit —
+// so the two can never disagree about which ref the branch is cut from.
+func TestResolveDesignBranchBase_ExportedWrapper(t *testing.T) {
+	repo := fixturegit.Build(t, []fixturegit.Layer{{
+		Files:   map[string]string{".verdi/verdi.yaml": "schema: verdi.layout/v1\n"},
+		Message: "seed store root",
+	}})
+	t.Setenv("CI_DEFAULT_BRANCH", "main")
+	ctx := context.Background()
+
+	got, err := ResolveDesignBranchBase(ctx, repo.Dir)
+	if err != nil {
+		t.Fatalf("ResolveDesignBranchBase: %v", err)
+	}
+	if got.Ref != "main" {
+		t.Fatalf("Ref = %q, want main", got.Ref)
+	}
+	if got.Commit != repo.Head {
+		t.Fatalf("Commit = %s, want repo.Head %s", got.Commit, repo.Head)
+	}
+	if got.HeadDisclosed {
+		t.Fatal("HeadDisclosed = true, want false (a real default branch resolved)")
+	}
+
+	// CommitScaffoldBranch, called right after, resolves the identical
+	// base — the check-then-cut agreement this wrapper exists for.
+	want, err := CommitScaffoldBranch(ctx, repo.Dir, "agree-slug", "content\n", "test: commit scaffold branch")
+	if err != nil {
+		t.Fatalf("CommitScaffoldBranch: %v", err)
+	}
+	if want.Ref != got.Ref || want.Commit != got.Commit {
+		t.Fatalf("CommitScaffoldBranch resolved base %+v, want it to agree with the wrapper's own %+v", want, got)
+	}
+}
+
 // TestCommitScaffoldBranch_OriginExistsButUnresolvable_Refuses proves
 // dc-7's other half at the shared-core level: a repository that DOES have
 // an "origin" remote configured, but whose default branch is still
