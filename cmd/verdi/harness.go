@@ -12,7 +12,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"sort"
 	"strings"
 
 	"github.com/jyang234/verdi/internal/skillpack"
@@ -54,23 +53,9 @@ func cmdHarness(args []string, stdout, stderr io.Writer) int {
 			fmt.Fprintf(stderr, "harness render: %v\n", err)
 			return 2
 		}
-		// res.Files is sorted by Path (skillpack.Write's own contract), but
-		// the printed line leads with the digest ("<digest>  <path>", proven
-		// by the HasPrefix(l, "sha256:") check every caller relies on), so a
-		// Path-major order does not imply the PRINTED LINES are themselves
-		// in sorted (byte-comparable) order — the digest varies
-		// independently of path. Sort the formatted lines directly so two
-		// runs' stdout stays byte-for-byte diffable in the one order the
-		// line's own leading field actually determines.
-		lines := make([]string, 0, len(res.Files))
-		for _, f := range res.Files {
-			lines = append(lines, fmt.Sprintf("%s  %s", f.Digest, f.Path))
-		}
-		sort.Strings(lines)
 		var b strings.Builder
-		for _, l := range lines {
-			b.WriteString(l)
-			b.WriteByte('\n')
+		for _, f := range res.Files {
+			fmt.Fprintf(&b, "%s  %s\n", f.Digest, f.Path)
 		}
 		if _, err := io.WriteString(stdout, b.String()); err != nil {
 			fmt.Fprintf(stderr, "harness render: writing output: %v\n", err)
