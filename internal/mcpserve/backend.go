@@ -47,14 +47,24 @@ type Backend struct {
 	// in the response, never silence: constitution 2/10).
 	ReviewUnavailable string
 
-	// writeMu serializes add_annotation, the one write path: two
-	// concurrent connections calling it are ordinary (Server.Serve
+	// writeMu serializes the two tools that take it — add_annotation
+	// (tool_add_annotation.go) and import_apply (tool_import.go): two
+	// concurrent connections calling either are ordinary (Server.Serve
 	// spawns a goroutine per connection), and while a single O_APPEND
 	// write() of one JSONL line is already atomic at the syscall level
 	// on a local filesystem, this mutex removes any doubt and keeps the
 	// D3 "one writer" story simple to reason about — the process-level
 	// lock (I-12) keeps other PROCESSES out; this keeps this process's
 	// own goroutines from interleaving.
+	//
+	// mutate_draft deliberately does NOT take it: its entire write runs
+	// inside the checkout-wide writer lock (draftmutation.WithWriterLock,
+	// internal/draftmutation/service.go), which already excludes this
+	// process's other goroutines as well as other processes. import_apply
+	// holds this mutex as well, around a call whose own body acquires
+	// that same checkout-wide lock (internal/specimport/publish.go); the
+	// two only ever nest in that one order — mutex, then file lock — so
+	// the pair cannot invert.
 	writeMu sync.Mutex
 }
 
