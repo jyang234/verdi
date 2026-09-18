@@ -119,7 +119,7 @@ func TestBuildSpecKind(t *testing.T) {
 		{Label: "Status", Value: "accepted-pending-build"},
 		{Label: "Commit", Value: strings.Repeat("a", 40)},
 		{Label: "Supersedes", Value: "spec/lockbox-v0"},
-		{Label: "Revision", Value: "1 carried, 1 amended, 0 amended (advisory), 0 removed, 4 added"},
+		{Label: "Revision", Value: "vs spec/lockbox-v0: 1 objects carried, 1 amended, 0 amended (advisory), 0 removed, 4 added"},
 	}
 	if !reflect.DeepEqual(doc.Identity, wantIdentity) {
 		t.Fatalf("identity rows = %+v, want %+v", doc.Identity, wantIdentity)

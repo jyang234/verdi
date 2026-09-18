@@ -2,10 +2,15 @@ package specdoc
 
 // Words carries every class word the renderer speaks, resolved through the
 // model display chain at Build time so no renderer literal names a class.
+// StoryPlural/SpikePlural are the model's own DisplayClassPlural result
+// (irregular-plural-aware, e.g. "story" -> "stories"); the renderer never
+// hand-pluralizes a class word itself (fix round 1, F1).
 type Words struct {
-	Feature string
-	Story   string
-	Spike   string
+	Feature     string
+	Story       string
+	StoryPlural string
+	Spike       string
+	SpikePlural string
 }
 
 // KV is one identity row.

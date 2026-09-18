@@ -46,9 +46,11 @@ func Build(in Input) (Document, error) {
 		Stamp:    in.Stamp,
 		Sections: in.Kind.Sections(),
 		Words: Words{
-			Feature: in.Model.DisplayClass(string(artifact.ClassFeature)),
-			Story:   in.Model.DisplayClass(string(artifact.ClassStory)),
-			Spike:   in.Model.DisplayClass("spike"),
+			Feature:     in.Model.DisplayClass(string(artifact.ClassFeature)),
+			Story:       in.Model.DisplayClass(string(artifact.ClassStory)),
+			StoryPlural: in.Model.DisplayClassPlural(string(artifact.ClassStory)),
+			Spike:       in.Model.DisplayClass("spike"),
+			SpikePlural: in.Model.DisplayClassPlural("spike"),
 		},
 		Title: in.Spec.Title,
 	}
@@ -127,12 +129,21 @@ func identityRows(in Input) []KV {
 		rows = append(rows, KV{Label: "Status", Value: "not resolved for this render"})
 	}
 	rows = append(rows, KV{Label: "Commit", Value: in.Stamp.Commit})
-	for _, ref := range artifact.WholeSpecSupersedesRefs(in.Spec.Links) {
+	refs := artifact.WholeSpecSupersedesRefs(in.Spec.Links)
+	for _, ref := range refs {
 		rows = append(rows, KV{Label: "Supersedes", Value: ref.String()})
 	}
 	if in.Spec.Supersession != nil {
 		s := in.Spec.Supersession
-		rows = append(rows, KV{Label: "Revision", Value: fmt.Sprintf("%d carried, %d amended, %d amended (advisory), %d removed, %d added", len(s.Carried), len(s.Amended), len(s.AmendedAdvisory), len(s.Removed), len(s.Added))})
+		// predecessor is the first whole-spec supersedes ref; a
+		// Supersession block with no such ref (a legal, if unusual,
+		// shape) falls back to the bare word rather than an empty
+		// "vs :" prefix (fix round 1, A4).
+		predecessor := "predecessor"
+		if len(refs) > 0 {
+			predecessor = refs[0].String()
+		}
+		rows = append(rows, KV{Label: "Revision", Value: fmt.Sprintf("vs %s: %d objects carried, %d amended, %d amended (advisory), %d removed, %d added", predecessor, len(s.Carried), len(s.Amended), len(s.AmendedAdvisory), len(s.Removed), len(s.Added))})
 	}
 	return rows
 }
