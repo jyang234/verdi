@@ -4,8 +4,8 @@ description: Turn a brief, a Markdown draft, or an existing spec file into a pro
 ---
 <!-- verdi:generated-skill host=claude skill=specify -->
 <!-- verdi:engine-digest sha256:d805fb1ae60f08b6a2db8f122cd01f2c332314942b619debe5f6538bcb2e4856 -->
-<!-- verdi:template-digest sha256:bb99defaa2c7eca1568c9a1a73f62e928b807df953e6d286423c4627311f12cf -->
-<!-- verdi:render-commit 6bb05048f283c6c1e522d46fd1838a14a2ae8fdf -->
+<!-- verdi:template-digest sha256:2a2f64296196cdac873198d00b8ef0c850977ddf5d7ea05bf6d08fd2ced41ee7 -->
+<!-- verdi:render-commit bd29162f8f404ac4357ecde553d787b50d90b2a4 -->
 <!-- verdi: this is a generated skill; edits here never change verdi, and any difference is reported as drift by `verdi harness check` until this file is regenerated with `verdi harness render`. -->
 
 # verdi-specify
@@ -30,7 +30,7 @@ Use this skill when the user has a brief or a document and wants a verdi spec dr
 
 ## Refusals you must relay verbatim
 
-`invalid-request`, `invalid-source`, `unsupported-format`, `unresolved`, `dirty-context`, `stale-preview`, `target-exists`, `policy-forbidden`, `actor-forbidden`, `provenance-mismatch`. Each names its cause; do not retry blindly. A dirty checkout must be committed or cleaned by the human first.
+`invalid-request`, `invalid-source`, `unsupported-format`, `invalid-model`, `identity-unavailable`, `authority-invalid`, `io-failure`, `unresolved`, `dirty-context`, `stale-preview`, `target-exists`, `policy-forbidden`, `actor-forbidden`, `provenance-mismatch`. That is the whole vocabulary: every refusal names one of these codes, and `io-failure` is also the code an error the contract maps to no named refusal arrives under. Each names its cause; do not retry blindly. A dirty checkout must be committed or cleaned by the human first.
 
 ```verdi-sequence
 call import_preview

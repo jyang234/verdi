@@ -5,7 +5,7 @@ description: Surface what a draft spec still leaves unproven — readiness conce
 <!-- verdi:generated-skill host=codex skill=clarify -->
 <!-- verdi:engine-digest sha256:d805fb1ae60f08b6a2db8f122cd01f2c332314942b619debe5f6538bcb2e4856 -->
 <!-- verdi:template-digest sha256:ab283755270bfd10f6e43778690e9d2823badd9f3fb0c33c5cb8e860e9580599 -->
-<!-- verdi:render-commit 6bb05048f283c6c1e522d46fd1838a14a2ae8fdf -->
+<!-- verdi:render-commit bd29162f8f404ac4357ecde553d787b50d90b2a4 -->
 <!-- verdi: this is a generated skill; edits here never change verdi, and any difference is reported as drift by `verdi harness check` until this file is regenerated with `verdi harness render`. -->
 
 # verdi-clarify

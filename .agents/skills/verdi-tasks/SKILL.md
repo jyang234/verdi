@@ -5,7 +5,7 @@ description: Read a spec's tasks document — plan, evidence, and readiness — 
 <!-- verdi:generated-skill host=codex skill=tasks -->
 <!-- verdi:engine-digest sha256:d805fb1ae60f08b6a2db8f122cd01f2c332314942b619debe5f6538bcb2e4856 -->
 <!-- verdi:template-digest sha256:cb1bf3d68d8b31630340e6c6f46abfc865b8b4b41bbcab004cf395ae2ef970cd -->
-<!-- verdi:render-commit 6bb05048f283c6c1e522d46fd1838a14a2ae8fdf -->
+<!-- verdi:render-commit bd29162f8f404ac4357ecde553d787b50d90b2a4 -->
 <!-- verdi: this is a generated skill; edits here never change verdi, and any difference is reported as drift by `verdi harness check` until this file is regenerated with `verdi harness render`. -->
 
 # verdi-tasks

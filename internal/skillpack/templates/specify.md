@@ -25,7 +25,7 @@ Use this skill when the user has a brief or a document and wants a verdi spec dr
 
 ## Refusals you must relay verbatim
 
-`invalid-request`, `invalid-source`, `unsupported-format`, `unresolved`, `dirty-context`, `stale-preview`, `target-exists`, `policy-forbidden`, `actor-forbidden`, `provenance-mismatch`. Each names its cause; do not retry blindly. A dirty checkout must be committed or cleaned by the human first.
+`invalid-request`, `invalid-source`, `unsupported-format`, `invalid-model`, `identity-unavailable`, `authority-invalid`, `io-failure`, `unresolved`, `dirty-context`, `stale-preview`, `target-exists`, `policy-forbidden`, `actor-forbidden`, `provenance-mismatch`. That is the whole vocabulary: every refusal names one of these codes, and `io-failure` is also the code an error the contract maps to no named refusal arrives under. Each names its cause; do not retry blindly. A dirty checkout must be committed or cleaned by the human first.
 
 ```verdi-sequence
 call import_preview

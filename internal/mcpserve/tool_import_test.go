@@ -9,11 +9,13 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
 	"github.com/jyang234/verdi/internal/fixturegit"
 	"github.com/jyang234/verdi/internal/gitx"
+	"github.com/jyang234/verdi/internal/skillpack"
 	"github.com/jyang234/verdi/internal/specimport"
 )
 
@@ -459,5 +461,64 @@ func TestImportToolError_UnknownSentinelIsIOFailure(t *testing.T) {
 	wrapped := fmt.Errorf("%w: detail", specimport.ErrTargetExists)
 	if text, isErr := decodeText(t, importToolError("import_apply", wrapped)); !isErr || !strings.HasPrefix(text, "import_apply: target-exists:") {
 		t.Fatalf("named sentinel: isErr %v text %q", isErr, text)
+	}
+}
+
+// refusalSectionRe captures the body of the verdi-specify template's
+// "Refusals you must relay verbatim" section: everything up to the next
+// heading or fenced block.
+var refusalSectionRe = regexp.MustCompile("(?s)## Refusals you must relay verbatim\n(.*?)(?:\n## |\n```)")
+
+// refusalCodeSpanRe captures each backticked token in that section. Every
+// token there is a refusal code — the section names nothing else.
+var refusalCodeSpanRe = regexp.MustCompile("`([a-z-]+)`")
+
+// TestImportRefusalVocabularyMatchesTheSpecifySkill closes final-review
+// F3 in both directions: the verdi-specify skill tells an agent to relay
+// import refusals verbatim, so the closed vocabulary it prints must be
+// exactly the set of codes importSentinels emits — no code the agent can
+// meet and not find on the list (the shipped list omitted four, including
+// `io-failure`, which is ALSO importToolError's fallback prefix for every
+// error the contract does not map, so it is the code an agent is most
+// likely to see), and no code on the list the tool cannot produce.
+//
+// The template is read through skillpack.Template — the same embedded
+// bytes verdi harness render writes and verdi harness check gates — so
+// this test binds the instruction to the implementation, not to a copy.
+func TestImportRefusalVocabularyMatchesTheSpecifySkill(t *testing.T) {
+	tmpl, err := skillpack.Template("specify")
+	if err != nil {
+		t.Fatal(err)
+	}
+	section := refusalSectionRe.FindSubmatch(tmpl)
+	if section == nil {
+		t.Fatalf("the verdi-specify template has no %q section", "Refusals you must relay verbatim")
+	}
+
+	emitted := map[string]bool{}
+	for _, s := range importSentinels {
+		emitted[s.code] = true
+	}
+	if len(emitted) == 0 {
+		t.Fatal("importSentinels is empty; this test would pass vacuously")
+	}
+
+	listed := map[string]bool{}
+	for _, m := range refusalCodeSpanRe.FindAllSubmatch(section[1], -1) {
+		listed[string(m[1])] = true
+	}
+	if len(listed) == 0 {
+		t.Fatalf("no backticked refusal code found in the section:\n%s", section[1])
+	}
+
+	for code := range emitted {
+		if !listed[code] {
+			t.Errorf("import refusal code %q is emitted by importSentinels but not listed in the verdi-specify template's refusal section — an agent told to relay refusals verbatim would not find it", code)
+		}
+	}
+	for code := range listed {
+		if !emitted[code] {
+			t.Errorf("the verdi-specify template lists refusal code %q, which importSentinels never emits", code)
+		}
 	}
 }

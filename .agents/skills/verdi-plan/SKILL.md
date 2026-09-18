@@ -5,7 +5,7 @@ description: Read a spec's plan document and propose, one at a time through muta
 <!-- verdi:generated-skill host=codex skill=plan -->
 <!-- verdi:engine-digest sha256:d805fb1ae60f08b6a2db8f122cd01f2c332314942b619debe5f6538bcb2e4856 -->
 <!-- verdi:template-digest sha256:d12f0a521c6bdc6e77cb85b07214c209caaa714cac2d5f1e031023574c1e0ede -->
-<!-- verdi:render-commit 6bb05048f283c6c1e522d46fd1838a14a2ae8fdf -->
+<!-- verdi:render-commit bd29162f8f404ac4357ecde553d787b50d90b2a4 -->
 <!-- verdi: this is a generated skill; edits here never change verdi, and any difference is reported as drift by `verdi harness check` until this file is regenerated with `verdi harness render`. -->
 
 # verdi-plan
