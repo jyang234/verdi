@@ -29,6 +29,7 @@ func TestFactsFromSpec(t *testing.T) {
 			{Slug: "plain", Resolves: []string{"oq-1"}},
 			{Slug: "probe2", Spike: true, AcceptanceCriteria: []string{"ac-3"}},
 			{Slug: "stray", AcceptanceCriteria: []string{"ac-9"}},
+			{Slug: "strayspike", Spike: true, Resolves: []string{"oq-9"}},
 		},
 	}
 	got := FactsFromSpec(fm)
