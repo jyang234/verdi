@@ -24,6 +24,7 @@ const (
 	SectionQuestions   SectionID = "questions"
 	SectionPlan        SectionID = "plan"
 	SectionEvidence    SectionID = "evidence"
+	SectionReadiness   SectionID = "readiness"
 )
 
 // ParseKind accepts exactly the three lowercase kind names.
@@ -42,8 +43,8 @@ func (k Kind) Sections() []SectionID {
 	case KindPlan:
 		return []SectionID{SectionIdentity, SectionDecisions, SectionConstraints, SectionPlan}
 	case KindTasks:
-		return []SectionID{SectionIdentity, SectionPlan, SectionEvidence}
+		return []SectionID{SectionIdentity, SectionPlan, SectionEvidence, SectionReadiness}
 	default:
-		return []SectionID{SectionIdentity, SectionProblem, SectionOutcome, SectionDecisions, SectionConstraints, SectionCriteria, SectionQuestions, SectionPlan, SectionEvidence}
+		return []SectionID{SectionIdentity, SectionProblem, SectionOutcome, SectionDecisions, SectionConstraints, SectionCriteria, SectionQuestions, SectionPlan, SectionEvidence, SectionReadiness}
 	}
 }

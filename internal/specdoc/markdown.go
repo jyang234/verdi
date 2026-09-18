@@ -162,6 +162,35 @@ func RenderMarkdown(doc Document) string {
 				w("| %s | %s | %s | %s |\n", escapeCell(criterionCell(e.ID, criterionText)), escapeCell(orDash(e.Status)), escapeCell(orDash(e.Summary)), escapeCell(evidenceDetail(e, doc.Words)))
 			}
 			w("\n")
+		case SectionReadiness:
+			w("## Readiness\n\n")
+			if !doc.ReadinessKnown || doc.Readiness == nil {
+				w("Readiness was not supplied for this render.\n\n")
+				break
+			}
+			rf := doc.Readiness
+			w("Source: readiness snapshot for `%s` at `%s`. Current focus: %s.\n\n", rf.TargetRef, shortCommit(rf.Head), areaLabel(rf, rf.CurrentFocus))
+			w("| Area | State |\n|---|---|\n")
+			for _, a := range rf.Areas {
+				w("| %s | %s |\n", escapeCell(a.Label), escapeCell(a.State))
+			}
+			w("\n")
+			if len(rf.Attention) == 0 {
+				w("Nothing needs attention.\n\n")
+			} else {
+				w("Attention:\n\n")
+				for i, c := range rf.Attention {
+					posture := "advisory"
+					if c.Blocking {
+						posture = "blocking"
+					}
+					w("%d. %s — %s; %s; %s; %s; witnesses: %s <a id=\"%s\"></a>\n", i+1, c.Summary, areaLabel(rf, c.Area), posture, c.Timing, c.State, joinOr(c.Witnesses, "none"), c.ID)
+				}
+				w("\n")
+			}
+			if rf.StaleNotice != "" {
+				w("%s\n\n", rf.StaleNotice)
+			}
 		}
 	}
 
@@ -325,4 +354,24 @@ func pluralIf(singular, plural string, n int) string {
 		return plural
 	}
 	return singular
+}
+
+// shortCommit is the 12-hex prefix every stamp line uses; a shorter
+// value is printed whole.
+func shortCommit(commit string) string {
+	if len(commit) > 12 {
+		return commit[:12]
+	}
+	return commit
+}
+
+// areaLabel resolves an area id to its plain label, falling back to the
+// id so an unknown id is still visible rather than blank.
+func areaLabel(rf *ReadinessFacts, id string) string {
+	for _, a := range rf.Areas {
+		if a.ID == id {
+			return a.Label
+		}
+	}
+	return id
 }

@@ -57,6 +57,10 @@ Each story in this plan becomes `spec/<slug>` when it is instantiated.
 
 Evidence was not supplied for this render.
 
+## Readiness
+
+Readiness was not supplied for this render.
+
 ---
 
-Derived from the spec's objects; not authority. Ref `spec/lockbox` · commit `0000000000000000000000000000000000000001` · kind `spec` · engine `sha256:6c69c283478f220da6f301f792fb2714561ba1d652d3a5068998bc38e9d492c9`
+Derived from the spec's objects; not authority. Ref `spec/lockbox` · commit `0000000000000000000000000000000000000001` · kind `spec` · engine `sha256:898025e67e47ef63e98b26bef1940eb1718006ab27be85f0de5af1509772f9d7`

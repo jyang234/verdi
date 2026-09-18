@@ -113,6 +113,13 @@ func Build(in Input) (Document, error) {
 			})
 		}
 	}
+	if in.Facts.Readiness != nil {
+		doc.ReadinessKnown = true
+		rf := *in.Facts.Readiness
+		rf.Areas = append([]ReadinessArea(nil), in.Facts.Readiness.Areas...)
+		rf.Attention = append([]ReadinessConcern(nil), in.Facts.Readiness.Attention...)
+		doc.Readiness = &rf
+	}
 	return doc, nil
 }
 

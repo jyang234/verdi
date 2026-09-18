@@ -23,6 +23,9 @@ type Facts struct {
 	// EvidenceSource names where Evidence came from, e.g. "matrix over the
 	// working tree at <commit-prefix>"; empty when Evidence is nil.
 	EvidenceSource string
+	// Readiness is the snapshot's facts when a caller supplied one for
+	// this spec; nil means "not supplied for this render".
+	Readiness *ReadinessFacts
 }
 
 // ACEvidence is one criterion's evidence state as the matrix reports it.
