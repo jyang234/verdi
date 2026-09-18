@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -66,6 +67,12 @@ func TestExperimentOperationGrammarBuiltBinary(t *testing.T) {
 	}
 }
 
+// experimentUsageRowRe is the shape of dispatch.go's usage-banner row
+// that carries `experiment`: a line break, the banner's seven-space
+// continuation indent, then `context, experiment` closed by either a
+// comma (a further verb follows) or the line end (experiment is last).
+var experimentUsageRowRe = regexp.MustCompile(`\n {7}context, experiment(,|\n)`)
+
 func TestExperimentTopLevelUsageRowBuiltBinary(t *testing.T) {
 	bin := buildVerdiBinary(t)
 	stdout, stderr, code := runExperimentBuiltBinary(t, bin, t.TempDir(), nil, "definitely-not-a-verb")
@@ -75,13 +82,17 @@ func TestExperimentTopLevelUsageRowBuiltBinary(t *testing.T) {
 	if strings.Contains(stderr, "\t") {
 		t.Fatalf("top-level usage contains a tab, legacy usage bytes must stay space-indented: %q", stderr)
 	}
-	// spec-documents Wave 3 Task 2 added the `harness` verb after
-	// `experiment` in the usage banner's own verb list (dispatch.go), so
-	// the row this test pins now ends "... experiment, harness" — the
-	// experiment row's presence is still what this test proves, just no
-	// longer the last word in that line.
-	if !strings.Contains(stderr, "\n       context, experiment, harness\n") {
-		t.Fatalf("top-level usage omits the experiment inventory row: %q", stderr)
+	// The claim is "the experiment row is present", which does not depend
+	// on what follows `experiment` in dispatch.go's verb list. A tail
+	// literal made it depend on that: spec-documents Wave 3 Task 2 added
+	// `harness` after `experiment` and broke this pin for a reason the
+	// claim never cared about (final-review F4). Pinned as a regexp
+	// instead — the row's own indentation and the `context, experiment`
+	// pair, terminated by either the separating comma of a later verb or
+	// the end of the line — so the next verb addition leaves it green
+	// while a dropped or re-indented experiment row still fails.
+	if !experimentUsageRowRe.MatchString(stderr) {
+		t.Fatalf("top-level usage omits the experiment inventory row (want %s): %q", experimentUsageRowRe, stderr)
 	}
 }
 
