@@ -3,9 +3,10 @@
 //
 // The package computes nothing it can receive: criteria coverage and
 // open-question claims come from the spec's own stubs (FactsFromSpec),
-// evidence state from the matrix projection (WithMatrix), readiness from a
-// snapshot the caller owns. It never reads the store, never runs git, and
-// never writes anything. A rendered document is a projection of the
+// evidence state from the matrix projection (WithMatrix). Readiness facts
+// are not part of this package yet; the board consumer adds that seam
+// (spec/spec-documents Wave 2). It never reads the store, never runs git,
+// and never writes anything. A rendered document is a projection of the
 // objects and carries a stamp saying so; it is never authority
 // (spec/spec-documents co-2).
 package specdoc
