@@ -184,7 +184,7 @@ func RenderMarkdown(doc Document) string {
 					if c.Blocking {
 						posture = "blocking"
 					}
-					w("%d. %s — %s; %s; %s; %s; witnesses: %s <a id=\"%s\"></a>\n", i+1, c.Summary, areaLabel(rf, c.Area), posture, c.Timing, c.State, joinOr(c.Witnesses, "none"), c.ID)
+					w("%d. %s — %s; %s; %s; %s; witnesses: %s <a id=\"%s\"></a>\n", i+1, c.Summary, areaLabel(rf, c.Area), posture, c.Timing, c.State, joinOr(c.Witnesses, "none"), escapeAttr(c.ID))
 				}
 				w("\n")
 			}
@@ -307,6 +307,28 @@ func escapeCell(s string) string {
 	return strings.ReplaceAll(s, "|", "\\|")
 }
 
+// attrEscaper replaces the characters that could let a value break out of
+// a double-quoted HTML attribute.
+var attrEscaper = strings.NewReplacer("&", "&amp;", "\"", "&quot;", "<", "&lt;", ">", "&gt;")
+
+// escapeAttr guards a value placed inside `<a id="...">` against breaking
+// out of the attribute (fix round 1, F4). Every other id this package
+// anchors (decision/constraint/criterion/question ids) comes from
+// internal/artifact's own id patterns (acIDRe, oqIDRe, objectIDRe:
+// lowercase, digits, and "-" only), a closed charset that can never carry
+// a `"`, so those call sites are safe left raw. A readiness concern id
+// (readinesspilot.Concern.ID) has no such guarantee here: readinesspilot's
+// own validateIdentity only requires it non-empty, control-free, and
+// "/"-structured — this package cannot see, and must not assume, that
+// every producer of a Snapshot keeps concern ids inside the same slug
+// charset. escapeCell is deliberately not reused for this: its job is
+// collapsing embedded newlines and escaping "|" for a Markdown table
+// cell, which neither addresses the attribute-breakout risk here nor
+// belongs in prose outside a table row.
+func escapeAttr(s string) string {
+	return attrEscaper.Replace(s)
+}
+
 // itemIndent is the continuation indent for numbered-list item n: the
 // width of "<n>. " itself, so a continuation or nested-bullet line lines
 // up under the item's own text at every item number, not just 1-9 (fix
@@ -356,8 +378,9 @@ func pluralIf(singular, plural string, n int) string {
 	return singular
 }
 
-// shortCommit is the 12-hex prefix every stamp line uses; a shorter
-// value is printed whole.
+// shortCommit is the 12-hex prefix every stamp line uses (the readiness
+// Source line here, and facts.go's WithMatrix for EvidenceSource); a
+// shorter value is returned whole rather than sliced out of range.
 func shortCommit(commit string) string {
 	if len(commit) > 12 {
 		return commit[:12]

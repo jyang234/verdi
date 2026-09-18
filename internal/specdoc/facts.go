@@ -92,8 +92,12 @@ func FactsFromSpec(fm *artifact.SpecFrontmatter) Facts {
 // the matrix projection actually evaluated, which the caller resolves
 // once and which is never the (possibly older or newer) commit the spec
 // text itself was read at (spec-documents wave-1 fix round, F1). Its
-// first 12 hex characters name EvidenceSource; a shorter string is used
-// whole rather than sliced out of range.
+// first 12 hex characters name EvidenceSource, via the same shortCommit
+// (markdown.go) the readiness Source line uses; a shorter string is used
+// whole rather than sliced out of range (spec-documents wave-2 fix round
+// 1, F3 — the two call sites shared one prefix rule under two different,
+// accidentally-inequivalent predicate spellings; shortCommit is now the
+// one place that rule is written).
 func WithMatrix(f Facts, rec matrixprojection.Record, headCommit string) Facts {
 	out := f
 	switch {
@@ -116,10 +120,6 @@ func WithMatrix(f Facts, rec matrixprojection.Record, headCommit string) Facts {
 	default:
 		return out
 	}
-	prefix := headCommit
-	if len(headCommit) >= 12 {
-		prefix = headCommit[:12]
-	}
-	out.EvidenceSource = "matrix over the working tree at " + prefix
+	out.EvidenceSource = "matrix over the working tree at " + shortCommit(headCommit)
 	return out
 }
