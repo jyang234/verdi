@@ -102,7 +102,7 @@ func toolDefs(mdl *model.Model) []map[string]any {
 				"kind":   str("spec (default), plan, or tasks"),
 				"commit": str("optional commit sha to render at, 7-40 lowercase hex — the same form a pinned ref takes; must agree with a pinned ref"),
 				// vocab:identity — "proposed"/"accepted" name which bytes are read (working-tree draft vs. default-branch bytes), not a DisplayClass word
-				"proposed": boolean("render the serving checkout's working-tree bytes (a draft on its design branch) instead of the accepted bytes; the result's proposed flag is derived from the store, never from this argument; incompatible with commit"),
+				"proposed": boolean("render the serving checkout's working-tree bytes (a draft on its design branch) instead of the accepted bytes; the result's proposed flag is derived from the store, never from this argument; incompatible with `commit` or a pinned `@<commit>` ref"),
 			}, "ref"),
 		},
 		{
