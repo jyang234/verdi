@@ -1157,6 +1157,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 )
@@ -1193,13 +1194,16 @@ func TestHarnessRenderAndCheck(t *testing.T) {
 	if len(lines) != 8 {
 		t.Fatalf("render printed %d lines: %q", len(lines), stdout)
 	}
+	paths := make([]string, 0, len(lines))
 	for i, l := range lines {
-		if !strings.HasPrefix(l, "sha256:") || !strings.Contains(l, "  ") {
+		digest, path, ok := strings.Cut(l, "  ")
+		if !ok || !strings.HasPrefix(digest, "sha256:") || len(digest) != len("sha256:")+64 || path == "" {
 			t.Fatalf("line %d %q is not '<digest>  <path>'", i, l)
 		}
-		if i > 0 && lines[i-1] >= l {
-			t.Fatalf("render output not sorted: %q", stdout)
-		}
+		paths = append(paths, path)
+	}
+	if !sort.StringsAreSorted(paths) {
+		t.Fatalf("render output not sorted by path: %q", stdout)
 	}
 	if _, err := os.Stat(filepath.Join(root, ".agents", "skills", "verdi-clarify", "SKILL.md")); err != nil {
 		t.Fatal(err)
