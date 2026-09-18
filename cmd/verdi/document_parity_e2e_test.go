@@ -50,7 +50,12 @@ func TestDocumentParity_FourConsumers(t *testing.T) {
 		} `json:"content"`
 		IsError bool `json:"isError"`
 	}
-	raw, _ := json.Marshal(res)
+	// The refusal diagnostic below prints raw, so a marshal failure
+	// must not be swallowed into an empty one (final-review F8).
+	raw, err := json.Marshal(res)
+	if err != nil {
+		t.Fatalf("marshalling the mcp tool result: %v", err)
+	}
 	if err := json.Unmarshal(raw, &payload); err != nil || payload.IsError || len(payload.Content) == 0 {
 		t.Fatalf("mcp result: %s", raw)
 	}
@@ -136,7 +141,12 @@ func TestDocumentParity_PinnedCommit(t *testing.T) {
 		} `json:"content"`
 		IsError bool `json:"isError"`
 	}
-	raw, _ := json.Marshal(res)
+	// The refusal diagnostic below prints raw, so a marshal failure
+	// must not be swallowed into an empty one (final-review F8).
+	raw, err := json.Marshal(res)
+	if err != nil {
+		t.Fatalf("marshalling the mcp tool result: %v", err)
+	}
 	if err := json.Unmarshal(raw, &payload); err != nil || payload.IsError || len(payload.Content) == 0 {
 		t.Fatalf("mcp result: %s", raw)
 	}
