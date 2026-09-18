@@ -6,8 +6,9 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"strings"
 
-	"github.com/jyang234/verdi/internal/canonjson"
+	"github.com/jyang234/verdi/internal/artifact"
 	"github.com/jyang234/verdi/internal/draftmutation"
 	"github.com/jyang234/verdi/internal/specimport"
 )
@@ -20,6 +21,14 @@ import (
 // under the digest handshake. The record's actor.harness/actor.session
 // are populated by specimport itself. Nothing here touches the request
 // or result schemas.
+//
+// Both tools decode their OWN argument object with
+// artifact.DecodeExactJSON rather than this package's default
+// strictUnmarshal (decode.go): these are the import contract's write
+// surface, where a duplicated argument key would silently select the
+// recorded actor identity, so two spellings of one arguments object are
+// refused here exactly as the contract refuses two spellings of one
+// request (R-W3-10).
 
 type importPreviewArgs struct {
 	Request json.RawMessage `json:"request"`
@@ -69,21 +78,18 @@ func importToolError(tool string, err error) map[string]any {
 	return toolError(fmt.Sprintf("%s: io-failure: %s", tool, err.Error()))
 }
 
-// decodeImportRequest re-canonicalizes the inner request object and hands
-// it to specimport's own strict decoder (the contract's sole decoder).
+// decodeImportRequest hands the caller's request bytes, untouched, to
+// specimport's own strict decoder — the contract's sole decoder (R-W3-10:
+// re-encoding the object first would erase the duplicate-key and
+// invalid-UTF-8 evidence artifact.DecodeExactJSON refuses on, letting a
+// mangled reading reach the write path and be attested by the record).
+// json.RawMessage already holds the exact sub-document, and DecodeRequest
+// does its own envelope cap, whitespace trim and top-level-object check.
 func decodeImportRequest(tool string, raw json.RawMessage) (specimport.Request, map[string]any) {
 	if len(raw) == 0 {
 		return specimport.Request{}, toolError(tool + ": request is required")
 	}
-	var generic any
-	if err := json.Unmarshal(raw, &generic); err != nil {
-		return specimport.Request{}, toolError(tool + ": malformed request: " + err.Error())
-	}
-	canon, err := canonjson.Marshal(generic)
-	if err != nil {
-		return specimport.Request{}, toolError(tool + ": malformed request: " + err.Error())
-	}
-	req, err := specimport.DecodeRequest(canon)
+	req, err := specimport.DecodeRequest(raw)
 	if err != nil {
 		return specimport.Request{}, importToolError(tool, err)
 	}
@@ -98,7 +104,7 @@ func (b *Backend) ImportPreview(ctx context.Context, argsRaw json.RawMessage) ma
 		return toolError("import_preview: arguments exceed the 12 MiB import envelope")
 	}
 	var args importPreviewArgs
-	if err := strictUnmarshal(argsRaw, &args); err != nil {
+	if err := artifact.DecodeExactJSON(argsRaw, &args); err != nil {
 		return toolError("import_preview: malformed arguments: " + err.Error())
 	}
 	req, failure := decodeImportRequest("import_preview", args.Request)
@@ -120,10 +126,10 @@ func (b *Backend) ImportApply(ctx context.Context, argsRaw json.RawMessage) map[
 		return toolError("import_apply: arguments exceed the 12 MiB import envelope")
 	}
 	var args importApplyArgs
-	if err := strictUnmarshal(argsRaw, &args); err != nil {
+	if err := artifact.DecodeExactJSON(argsRaw, &args); err != nil {
 		return toolError("import_apply: malformed arguments: " + err.Error())
 	}
-	if args.Harness == "" {
+	if strings.TrimSpace(args.Harness) == "" {
 		return toolError("import_apply: harness is required")
 	}
 	if !importPreviewDigestRe.MatchString(args.PreviewDigest) {

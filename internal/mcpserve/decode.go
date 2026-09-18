@@ -29,6 +29,12 @@ import (
 // copy-paste". This wrapper's only job is to give every call site in this
 // package one name to call and one place to point the ac-3/dc-2 doc
 // comment at.
+//
+// One deliberate exception: import_preview/import_apply (tool_import.go)
+// decode their arguments with artifact.DecodeExactJSON, which adds
+// duplicate-key and invalid-UTF-8 rejection on top of this posture —
+// R-W3-10, because those two tools carry the frozen import contract's
+// write surface and its recorded actor identity.
 func strictUnmarshal(raw json.RawMessage, dst any) error {
 	return artifact.DecodeStrictJSON(raw, dst)
 }
