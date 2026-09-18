@@ -214,6 +214,57 @@ func TestMCPShowcaseCoverage(t *testing.T) {
 		}
 	})
 
+	t.Run("get_document", func(t *testing.T) {
+		t.Setenv("CI_DEFAULT_BRANCH", "main")
+		text := callMCPToolOK(t, srv, "get_document", map[string]any{"ref": "spec/escrow-autopay"})
+		var out struct {
+			Ref         string   `json:"ref"`
+			Kind        string   `json:"kind"`
+			Commit      string   `json:"commit"`
+			Proposed    bool     `json:"proposed"`
+			Markdown    string   `json:"markdown"`
+			Disclosures []string `json:"disclosures"`
+		}
+		decodeToolJSON(t, text, &out)
+		if out.Ref != "spec/escrow-autopay" {
+			t.Fatalf("get_document(spec/escrow-autopay).Ref = %q, want spec/escrow-autopay", out.Ref)
+		}
+		if out.Kind != "spec" {
+			t.Fatalf("get_document(spec/escrow-autopay).Kind = %q, want spec (the default kind)", out.Kind)
+		}
+		if out.Commit != head {
+			t.Fatalf("get_document(spec/escrow-autopay).Commit = %q, want the provisioned store's real accepted-branch HEAD %q", out.Commit, head)
+		}
+		if out.Proposed {
+			t.Fatal("get_document(spec/escrow-autopay).Proposed = true, want false — this is the accepted default-branch reading, not a design-branch preview")
+		}
+		if !strings.HasPrefix(out.Markdown, "# ") {
+			t.Fatalf("get_document(spec/escrow-autopay).Markdown does not start with a title heading: %q", out.Markdown)
+		}
+		if !strings.Contains(out.Markdown, "not authority") {
+			t.Fatalf("get_document(spec/escrow-autopay).Markdown missing its \"not authority\" projection stamp: %q", out.Markdown)
+		}
+		if !strings.Contains(out.Markdown, "ac-1") {
+			t.Fatalf("get_document(spec/escrow-autopay).Markdown missing its real ac-1 criterion (\"an autopay mandate is created\"): %q", out.Markdown)
+		}
+		if out.Disclosures == nil {
+			t.Fatal("get_document(spec/escrow-autopay).Disclosures decoded as JSON null, want a JSON array (possibly empty)")
+		}
+
+		// kind: tasks narrows the section set (spec/spec-documents dc-3):
+		// plan + evidence + readiness, never problem/outcome/decisions/
+		// constraints/criteria/questions — proven against real showcase
+		// content, not a synthetic fixture.
+		tasksText := callMCPToolOK(t, srv, "get_document", map[string]any{"ref": "spec/escrow-autopay", "kind": "tasks"})
+		var tasksOut struct {
+			Markdown string `json:"markdown"`
+		}
+		decodeToolJSON(t, tasksText, &tasksOut)
+		if strings.Contains(tasksOut.Markdown, "## Problem") {
+			t.Fatalf("get_document(spec/escrow-autopay, kind=tasks) still carries a ## Problem section, want the tasks kind's narrower section set: %q", tasksOut.Markdown)
+		}
+	})
+
 	t.Run("get_links", func(t *testing.T) {
 		text := callMCPToolOK(t, srv, "get_links", map[string]any{"ref": "spec/stale-decline"})
 		var out struct {

@@ -278,8 +278,15 @@ var showcaseCoverage = map[string][]coverageEvidence{
 	// asserting a genuine showcase-derived result per tool — see that
 	// file's own doc comment for the specific real content and assertion
 	// behind each one. ---
-	"mcp:search_artifacts":   {goE2E("internal/showcasealign/mcp_showcase_test.go")},
-	"mcp:get_artifact":       {goE2E("internal/showcasealign/mcp_showcase_test.go")},
+	"mcp:search_artifacts": {goE2E("internal/showcasealign/mcp_showcase_test.go")},
+	"mcp:get_artifact":     {goE2E("internal/showcasealign/mcp_showcase_test.go")},
+	// mcp:get_document (spec-documents Wave 2 Task 3, spec/spec-documents
+	// ac-5): the get_document subtest in mcp_showcase_test.go renders
+	// spec/escrow-autopay (the corpus's real accepted feature spec) via
+	// the live tool, asserting the real ref/kind/commit/proposed stamp and
+	// its real ac-1 criterion text, plus that kind: tasks narrows the
+	// section set against the same real content.
+	"mcp:get_document":       {goE2E("internal/showcasealign/mcp_showcase_test.go")},
 	"mcp:get_links":          {goE2E("internal/showcasealign/mcp_showcase_test.go")},
 	"mcp:get_matrix":         {goE2E("internal/showcasealign/mcp_showcase_test.go")},
 	"mcp:get_context_bundle": {goE2E("internal/showcasealign/mcp_showcase_test.go")},
