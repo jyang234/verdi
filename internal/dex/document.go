@@ -141,12 +141,14 @@ schedule:
 	return parent.Err() // nil unless the caller itself cancelled
 }
 
-// documentWorkers is the pool's width: one per CPU, never fewer than one.
+// documentWorkers is the pool's width: one per CPU, never fewer than one
+// and never more than eight — the loader's per-spec work is git- and
+// filesystem-bound, so wider pools stop paying off, and the cap keeps the
+// cancellation witness (TestWriteAllSpecDocuments_CallerCancel, which
+// schedules 64 pages and expects fewer than all to render) deterministic
+// on any host, however many cores it has.
 func documentWorkers() int {
-	if n := runtime.NumCPU(); n > 1 {
-		return n
-	}
-	return 1
+	return max(1, min(runtime.NumCPU(), 8))
 }
 
 // writeSpecDocuments writes the three Markdown documents and the Document
