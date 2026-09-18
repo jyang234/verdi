@@ -36,16 +36,26 @@ import (
 	"github.com/jyang234/verdi/internal/store"
 )
 
-// runSpecVerb dispatches `verdi spec <subcommand>`. There is exactly one
-// subcommand, `state` — anything else is a usage error.
+// runSpecVerb dispatches `verdi spec <subcommand>`. Two subcommands:
+// `state` (Task 5) and `doc` (Task 7, spec/spec-documents) — anything
+// else is a usage error.
 func runSpecVerb(args []string, stdout, stderr io.Writer) int {
-	if len(args) == 0 || args[0] != "state" {
-		// vocab:identity — CLI usage grammar (identity arg placeholders)
-		fmt.Fprintln(stderr, "usage: verdi spec state <spec-ref>")
+	if len(args) == 0 {
+		fmt.Fprintln(stderr, specVerbUsage)
 		return 2
 	}
-	return cmdSpecState(args[1:], stdout, stderr)
+	switch args[0] {
+	case "state":
+		return cmdSpecState(args[1:], stdout, stderr)
+	case "doc":
+		return cmdSpecDoc(args[1:], stdout, stderr)
+	}
+	fmt.Fprintln(stderr, specVerbUsage)
+	return 2
 }
+
+// vocab:identity — CLI usage grammar (identity arg placeholders)
+const specVerbUsage = "usage: verdi spec state <spec-ref>\n       " + specDocForm
 
 // cmdSpecState is `verdi spec state`'s entry point: it validates the
 // single positional spec-ref argument, resolves the store root, reads the

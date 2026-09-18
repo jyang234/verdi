@@ -73,7 +73,7 @@ verbs:
   init             scaffold a new verdi store
   obligation       author or scaffold an evidence obligation
   waive            create or reaffirm a waiver record
-  spec             inspect a spec's effective lifecycle state
+  spec             inspect a spec's effective lifecycle state or render it as a document
   journey          show the guided-lifecycle journey for a tracked item
   context          compile and inspect context-integrity artifacts
   experiment       run a comparative experiment operation
@@ -87,9 +87,11 @@ run "verdi <verb> help" (or --help/-h) for that verb's own usage.`
 // "verdi <verb> --help"/"-h"/"help", one line per subverb/form. Every
 // verbPhase key has an entry, plus "lint" (dispatched before the phase
 // map is ever consulted). Entries with an existing, already-ratified
-// usage constant (design, obligation, waive, experiment) reuse it
+// usage constant (design, obligation, waive, experiment, spec) reuse it
 // directly rather than duplicating its text — the SAME constant its own
-// usage-error call site prints, so the two can never drift apart; the
+// usage-error call site prints, so the two can never drift apart (fix
+// round 1, F5: a hand-duplicated "spec" literal here once drifted from
+// specVerbUsage's own text); the
 // rest are fresh literals grounded in each verb's own real argument-shape
 // check, cited in the comment beside anything non-obvious.
 var verbUsage = map[string]string{
@@ -139,7 +141,7 @@ var verbUsage = map[string]string{
 	"init":       "usage: verdi init [--wizard]",
 	"obligation": obligationVerbUsage,
 	"waive":      waiveUsage,
-	"spec":       "usage: verdi spec state <spec-ref>",
+	"spec":       specVerbUsage,
 	// vocab:identity — CLI usage/flag grammar (identity)
 	"journey": "usage: verdi journey [--json] <feature-or-story-ref>",
 	"context": "usage: verdi context compile --request <path|-> [--out <path>]\n" +
