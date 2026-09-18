@@ -282,6 +282,35 @@ func TestRenderReadinessEdgeCases(t *testing.T) {
 				`<a id="shape/question/oq-&quot;&gt;&lt;script&gt;"></a>`,
 			},
 		},
+		{
+			// final-review F5: the attention line and the stale notice are
+			// the readiness section's PROSE, and every user-authored field
+			// in them — the concern summary, each witness, the notice
+			// itself — reaches the renderer as declared text, like the
+			// table cells above. Route them through the same escapeCell:
+			// a run of line breaks collapses to one space (a summary must
+			// never fracture one numbered item into several, which would
+			// silently renumber the queue a reader sees) and a literal "|"
+			// is escaped (the same declared value can appear in a table
+			// cell elsewhere on the page, and goldmark renders "\|" as a
+			// plain pipe). The Areas table already escaped its cells; this
+			// closes the asymmetry one field over.
+			name: "a summary, a witness, and a stale notice carrying newlines and pipes",
+			doc: base(&ReadinessFacts{
+				TargetRef: "spec/x", Head: strings.Repeat("f", 40), CurrentFocus: "shape-proposal",
+				Areas: []ReadinessArea{{ID: "shape-proposal", Label: "Define the work", State: "unproven"}},
+				Attention: []ReadinessConcern{{
+					ID: "shape/question/oq-3", Area: "shape-proposal", State: "unproven", Blocking: true, Timing: "current",
+					Summary:   "First line\nSecond | line",
+					Witnesses: []string{"oq-3\n| forged", "audit-probe"},
+				}},
+				StaleNotice: "Startup snapshot.\r\n\r\nRestart | verdi serve.",
+			}),
+			want: []string{
+				"1. First line Second \\| line — Define the work; blocking; current; unproven; witnesses: oq-3 \\| forged, audit-probe <a id=\"shape/question/oq-3\"></a>\n",
+				"Startup snapshot. Restart \\| verdi serve.\n\n",
+			},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

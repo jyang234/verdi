@@ -184,12 +184,25 @@ func RenderMarkdown(doc Document) string {
 					if c.Blocking {
 						posture = "blocking"
 					}
-					w("%d. %s — %s; %s; %s; %s; witnesses: %s <a id=\"%s\"></a>\n", i+1, c.Summary, areaLabel(rf, c.Area), posture, c.Timing, c.State, joinOr(c.Witnesses, "none"), escapeAttr(c.ID))
+					// Every user-authored field on this line goes through
+					// escapeCell, the same guard the Areas table's cells
+					// use (fix round, F5). The collapse is what matters
+					// most here: one concern is ONE numbered item, and a
+					// summary or witness carrying a line break would
+					// otherwise split it into several, silently renumbering
+					// the queue a reader counts. The "|" escape rides along
+					// so the same declared value reads identically here and
+					// in a table cell.
+					witnesses := make([]string, 0, len(c.Witnesses))
+					for _, wit := range c.Witnesses {
+						witnesses = append(witnesses, escapeCell(wit))
+					}
+					w("%d. %s — %s; %s; %s; %s; witnesses: %s <a id=\"%s\"></a>\n", i+1, escapeCell(c.Summary), areaLabel(rf, c.Area), posture, c.Timing, c.State, joinOr(witnesses, "none"), escapeAttr(c.ID))
 				}
 				w("\n")
 			}
 			if rf.StaleNotice != "" {
-				w("%s\n\n", rf.StaleNotice)
+				w("%s\n\n", escapeCell(rf.StaleNotice))
 			}
 		}
 	}
@@ -302,6 +315,15 @@ func orDash(s string) string {
 // a Markdown table row (fix round 1, F8), and collapses any run of
 // embedded line breaks to a single space (fix round, F5) so a
 // multi-line declared value can never turn one table row into several.
+//
+// It guards the renderer's PROSE lines too, not only table cells (fix
+// round, F5): the readiness attention queue writes a concern's summary
+// and witnesses into one numbered item, and the stale notice into one
+// paragraph, where an embedded line break splits one item into several
+// exactly as it splits one row into several. Both escapes are safe
+// outside a table — CommonMark renders "\\|" as a plain "|" anywhere —
+// so one helper covers both placements rather than two rules drifting
+// apart. Escaping for an HTML attribute is a different job: escapeAttr.
 func escapeCell(s string) string {
 	s = cellNewlineRun.ReplaceAllString(s, " ")
 	return strings.ReplaceAll(s, "|", "\\|")
@@ -322,9 +344,11 @@ var attrEscaper = strings.NewReplacer("&", "&amp;", "\"", "&quot;", "<", "&lt;",
 // "/"-structured — this package cannot see, and must not assume, that
 // every producer of a Snapshot keeps concern ids inside the same slug
 // charset. escapeCell is deliberately not reused for this: its job is
-// collapsing embedded newlines and escaping "|" for a Markdown table
-// cell, which neither addresses the attribute-breakout risk here nor
-// belongs in prose outside a table row.
+// collapsing embedded newlines and escaping "|" for Markdown, which does
+// nothing about the attribute-breakout risk a value placed inside
+// `<a id="...">` carries. The two guards are complementary, not
+// alternatives — the same attention line applies escapeCell to its prose
+// fields and escapeAttr to the id it anchors.
 func escapeAttr(s string) string {
 	return attrEscaper.Replace(s)
 }
