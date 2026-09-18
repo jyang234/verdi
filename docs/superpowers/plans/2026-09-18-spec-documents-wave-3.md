@@ -37,6 +37,7 @@
 - **R-W3-5 (a completed preview with findings is a result, not an error).** `import_preview` returns the `PreviewResult` JSON with `ready:false` and `isError:false` when the preview completes with blocking findings (the contract's HTTP mapping: 200 with `ready:false`); operational and validation failures return `isError:true` with the CLI's closed code vocabulary as the message prefix (`invalid-request: …`, `stale-preview: …`, …). `import_apply` refusals are `isError:true` with the same prefixes. Cost if wrong: one boolean.
 - **R-W3-6 (the sequence block binds the proof to the skill).** Each template carries one fenced block with info string `verdi-sequence`. The transcript test parses that block from the embedded template bytes and replays it; if the prose and the block disagree, the block is wrong and the test is the witness that finds it in review. Cost if wrong: one parser.
 - **R-W3-7 (render root).** `harness render|check` default to `store.FindRoot(".")`; `-o <repo root>` names an existing directory with no ancestor search and no store requirement (rendering reads nothing from a store). The render commit is `gitx.RevParse(ctx, root, "HEAD")` or the literal `none` when the root is not inside a git repository. Cost if wrong: one flag semantics note.
+- **R-W3-9 (get_document renders drafts on request).** ac-8's clarify, plan, and tasks skills read a draft on its design branch, but ac-5's `get_document(ref, kind, commit?)` renders only the accepted bytes or a pinned commit. The tool gains an optional boolean `proposed` (the CLI's `--proposed` flag by name): true selects the loader's working-tree mode over the serving checkout, with Proposed derived exactly as the CLI derives it (R-W2-4); `proposed` and `commit` together are refused by name. Recorded as SI-202 (a public MCP interface extension). Cost if wrong: one optional argument.
 - **R-W3-8 (this repository carries its own rendered skills).** `make verify` runs `verdi harness check` from `lint-store`, so `.claude/skills/verdi-*/SKILL.md` and `.agents/skills/verdi-*/SKILL.md` are committed in this repository and re-rendered whenever a template changes; the check is the drift gate. They are subject to spec/instruction-conformance's enumeration. Cost if wrong: eight files to delete.
 
 ---
@@ -422,7 +423,7 @@ Use this skill on a draft spec on its design branch when the user asks what is s
 ## Steps
 
 1. Call `get_design_context` with the draft's ref (`spec/<slug>`). Keep `identity` (`checkout`, `branch`, `head`) and `current_draft` (the exact spec bytes and their digest): every `mutate_draft` call must carry them as `expected`, `base_spec_b64`, and `base_digest`.
-2. Call `get_document` with `ref` `spec/<slug>` and `kind` `spec`. Read three sections:
+2. Call `get_document` with `ref` `spec/<slug>`, `kind` `spec`, and `proposed` true (the working-tree draft on this branch, never the accepted bytes). Read three sections:
    - **Readiness.** Each concern is listed with its state, timing, blocking flag, summary, and witnesses. Collect every concern whose state is not proven. If the section says "Readiness was not supplied for this render.", say so to the human and continue with the next two sections.
    - **Open questions.** A question is unclaimed when its line ends with "unclaimed; blocks acceptance until a … claims it or a decision answers it." Collect them.
    - **Decisions.** Read them so a proposal never duplicates a ratified decision.
@@ -440,7 +441,7 @@ Never batch several operations into one `mutate_draft` call in this skill. Never
 
 ```verdi-sequence
 call get_design_context
-call get_document kind=spec
+call get_document kind=spec proposed=true
 loop
 show
 confirm
@@ -464,21 +465,21 @@ Use this skill when a draft spec has acceptance criteria that no stub covers and
 ## Steps
 
 1. Call `get_design_context` with `spec/<slug>`; keep `identity` and `current_draft` for the mutation calls.
-2. Call `get_document` with `ref` `spec/<slug>` and `kind` `plan`. In the criteria section, an uncovered criterion reads "known: nothing covers it"; a covered one reads "covered by …". Collect the uncovered criterion ids in document order.
+2. Call `get_document` with `ref` `spec/<slug>`, `kind` `plan`, and `proposed` true. In the criteria section, an uncovered criterion reads "known: nothing covers it"; a covered one reads "covered by …". Collect the uncovered criterion ids in document order.
 3. For each uncovered criterion, prepare exactly one stub: `{"op":"add-stub","slug":"<kebab-slug describing the deliverable>","acceptance_criteria":["<ac-id>"]}`. A stub may cover several criteria when they are one deliverable; say why.
 4. Show the human the criterion text and the operation JSON. Ask for confirmation.
 5. On confirmation, call `mutate_draft` with that one operation (same argument shape as verdi-clarify). On a stale-base refusal, repeat from step 1.
-6. When every criterion is covered, call `get_document` with `kind` `plan` once more and show the human the plan section as it now reads.
+6. When every criterion is covered, call `get_document` with `kind` `plan` and `proposed` true once more and show the human the plan section as it now reads.
 
 ```verdi-sequence
 call get_design_context
-call get_document kind=plan
+call get_document kind=plan proposed=true
 loop
 show
 confirm
 call mutate_draft operations=1
 end
-call get_document kind=plan
+call get_document kind=plan proposed=true
 ```
 ````
 
@@ -496,13 +497,13 @@ Use this skill when the user asks what to work on next for a spec. It reads and 
 
 ## Steps
 
-1. Call `get_document` with `ref` `spec/<slug>` and `kind` `tasks`.
+1. Call `get_document` with `ref` `spec/<slug>` and `kind` `tasks`, adding `proposed` true when the spec is a draft on its design branch (omit it for an accepted spec).
 2. From the plan section, list each stub with the criteria it covers. From the evidence section, note each criterion's evidence state and what is still unproven. From the readiness section, list the concerns that need attention, blocking ones first; if readiness was not supplied for this render, say so.
 3. Present a work list in this order: blocking readiness concerns, uncovered criteria (nothing covers them), stubs whose criteria have no evidence yet, then everything else. Quote ids so the human can find each item on the board.
 4. If the human wants any of it changed, hand off to verdi-clarify or verdi-plan; this skill writes nothing.
 
 ```verdi-sequence
-call get_document kind=tasks
+call get_document kind=tasks proposed=true
 show
 ```
 ````
@@ -1833,14 +1834,14 @@ git commit -m "Add import_preview and import_apply MCP tools over the import con
 
 ---
 
-### Task 4: Readiness reaches `get_document` over MCP (R-W3-3)
+### Task 4: Readiness and the `proposed` argument reach `get_document` over MCP (R-W3-3, R-W3-9)
 
 **Files:**
-- Modify: `internal/mcpserve/backend.go` (`Readiness *readinesspilot.Snapshot`), `internal/mcpserve/tool_get_document.go` (pass `Readiness: b.Readiness`), `cmd/verdi/serve.go:296` (`srv.Backend.Readiness = readiness`), `internal/mcpserve/tool_get_document_test.go`, `cmd/verdi/document_parity_e2e_test.go` (new arm)
+- Modify: `internal/mcpserve/backend.go` (`Readiness *readinesspilot.Snapshot`), `internal/mcpserve/tool_get_document.go` (pass `Readiness: b.Readiness`; the `proposed` argument), `internal/mcpserve/tooldefs.go` (the `get_document` entry's `proposed` property — an argument on an existing tool, not an inventory change), `cmd/verdi/serve.go:296` (`srv.Backend.Readiness = readiness`), `internal/mcpserve/tool_get_document_test.go`, `cmd/verdi/document_parity_e2e_test.go` (new arm)
 
 **Interfaces:**
 - Consumes: `specdocload.Request.Readiness`, `specdoc.WithReadiness` gating (Wave 2), `readinesspilot.Snapshot`, the parity test's board leg with `workbench.Deps{Readiness: &snap}` (`document_parity_e2e_test.go:147-245`).
-- Produces: `Backend.Readiness`.
+- Produces: `Backend.Readiness`; `get_document` argument `proposed` (boolean, optional; the transcript replays of Task 5 pass `"proposed": true`).
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -1871,16 +1872,55 @@ func TestGetDocument_ReadinessWhenSnapshotTargetsSpec(t *testing.T) {
 		t.Fatalf("foreign snapshot must not leak:\n%s", text2)
 	}
 }
+
+func TestGetDocument_ProposedRendersTheWorkingTreeDraft(t *testing.T) {
+	root := getDocumentDraftStore(t) // internal/designapp/conformance_test.go:110-160's conformanceStore recipe: committed store on main, checked out on design/sample, an UNCOMMITTED draft at .verdi/specs/active/sample/spec.md that main does not carry
+	b := &Backend{Root: root}
+	// Accepted mode cannot see a draft main does not carry.
+	raw, _ := json.Marshal(map[string]any{"ref": "spec/sample", "kind": "spec"})
+	if text, isErr := decodeText(t, b.GetDocument(context.Background(), raw)); !isErr {
+		t.Fatalf("accepted mode must refuse a draft absent from the default branch: %s", text)
+	}
+	// proposed:true renders the working tree, marked proposed.
+	raw, _ = json.Marshal(map[string]any{"ref": "spec/sample", "kind": "spec", "proposed": true})
+	text, isErr := decodeText(t, b.GetDocument(context.Background(), raw))
+	if isErr {
+		t.Fatal(text)
+	}
+	var res getDocumentResult
+	if err := json.Unmarshal([]byte(text), &res); err != nil {
+		t.Fatal(err)
+	}
+	if !res.Proposed || !strings.Contains(res.Markdown, "Proposed, not accepted") {
+		t.Fatalf("proposed render = %+v", res)
+	}
+	// proposed and commit together are refused by name.
+	raw, _ = json.Marshal(map[string]any{"ref": "spec/sample", "kind": "spec", "proposed": true, "commit": strings.Repeat("a", 40)})
+	if text, isErr := decodeText(t, b.GetDocument(context.Background(), raw)); !isErr || !strings.Contains(text, "proposed and commit") {
+		t.Fatalf("proposed+commit: isErr %v text %q", isErr, text)
+	}
+	// An accepted spec with proposed:true renders unmarked (Proposed derived, R-W2-4).
+	root2 := getDocumentFixtureStore(t)
+	raw, _ = json.Marshal(map[string]any{"ref": acceptedFixtureRef(t, root2), "kind": "spec", "proposed": true})
+	text, _ = decodeText(t, (&Backend{Root: root2}).GetDocument(context.Background(), raw))
+	if strings.Contains(text, `"proposed":true`) {
+		t.Fatalf("exact accepted bytes must not be marked proposed:\n%s", text)
+	}
+}
 ```
+
+`acceptedFixtureRef` returns the ref the file's existing happy-path test renders; read `tool_get_document_test.go` and reuse its literal.
 
 In `cmd/verdi/document_parity_e2e_test.go`, add a fourth test `TestDocumentParity_BoardAndMCPShareReadiness`: build the same `snap` targeting the rendered spec, the board leg via `workbench.Deps{Readiness: &snap}` and the MCP leg via `Backend{Root: root, Readiness: &snap}`; assert the two Markdown bodies are byte-identical AND contain a populated Readiness section; assert the CLI leg (no readiness) differs from them ONLY by that section (strip from `## Readiness` to the next `## ` heading or EOF on the board bytes and compare with the CLI bytes after the same strip — pin that the divergence is exactly the section).
 
 - [ ] **Step 2: Run to verify they fail**
 
-Run: `go test ./internal/mcpserve/ -run TestGetDocument_Readiness -count=1 && go test ./cmd/verdi/ -run TestDocumentParity_BoardAndMCP -count=1`
-Expected: FAIL (`Backend` has no `Readiness` field).
+Run: `go test ./internal/mcpserve/ -run 'TestGetDocument_Readiness|TestGetDocument_Proposed' -count=1 && go test ./cmd/verdi/ -run TestDocumentParity_BoardAndMCP -count=1`
+Expected: FAIL (`Backend` has no `Readiness` field; `proposed` is an unknown argument).
 
 - [ ] **Step 3: Implement**
+
+`tool_get_document.go`: `getDocumentArgs` gains `Proposed bool `json:"proposed"``; after the commit guard, `if args.Proposed && commit != "" { return toolError("get_document: proposed and commit are mutually exclusive") }`; `mode = specdocload.ModeWorkingTree` when `args.Proposed`. `tooldefs.go`'s `get_document` entry gains `"proposed": boolean("render the serving checkout's working-tree bytes (a draft on its design branch) instead of the accepted bytes; the result's proposed flag is derived from the store, never from this argument; incompatible with commit")` — read `tooldefs.go:26` for `boolean`'s exact signature.
 
 `backend.go`: add `Readiness *readinesspilot.Snapshot` with the doc comment "the startup readiness snapshot verdi serve built (nil when serving without --context-request or under standalone verdi mcp); get_document passes it to the loader, which uses it only when its TargetRef is the rendered spec (R-W3-3)". `tool_get_document.go:85`: `Readiness: b.Readiness` in the `specdocload.Request`. `cmd/verdi/serve.go:296`: after `srv := mcpserve.NewServer(root)`, `srv.Backend.Readiness = readiness` (the `runServe` parameter).
 
@@ -1893,7 +1933,7 @@ Expected: PASS (all parity arms).
 
 ```bash
 git add internal/mcpserve/backend.go internal/mcpserve/tool_get_document.go internal/mcpserve/tool_get_document_test.go cmd/verdi/serve.go cmd/verdi/document_parity_e2e_test.go
-git commit -m "Pass the serve-time readiness snapshot through get_document"
+git commit -m "Pass the serve-time readiness snapshot and a proposed argument through get_document"
 ```
 
 ---
@@ -2004,6 +2044,9 @@ func (tr *transcript) assertFollows(seq skillpack.Sequence, loopCount int) {
 		}
 		if k := want[i].Args["kind"]; k != "" && tr.calls[i].Args["kind"] != k {
 			tr.t.Fatalf("call %d kind %v, template declares %s", i, tr.calls[i].Args["kind"], k)
+		}
+		if p := want[i].Args["proposed"]; p != "" && fmt.Sprint(tr.calls[i].Args["proposed"]) != p {
+			tr.t.Fatalf("call %d proposed %v, template declares %s", i, tr.calls[i].Args["proposed"], p)
 		}
 		if n := want[i].Args["operations"]; n != "" {
 			ops, _ := tr.calls[i].Args["operations"].([]map[string]any)
@@ -2116,7 +2159,7 @@ func TestTranscript_Clarify(t *testing.T) {
 	if text, isErr := tr.call("get_design_context", map[string]any{"ref": "spec/" + draftSpecName}); isErr {
 		t.Fatal(text)
 	}
-	text, isErr := tr.call("get_document", map[string]any{"ref": "spec/" + draftSpecName, "kind": "spec"})
+	text, isErr := tr.call("get_document", map[string]any{"ref": "spec/" + draftSpecName, "kind": "spec", "proposed": true})
 	if isErr {
 		t.Fatal(text)
 	}
@@ -2135,7 +2178,7 @@ func TestTranscript_Clarify(t *testing.T) {
 	tr.assertFollows(seq, 1)
 	tr.write(t.TempDir(), "clarify")
 	// The document now shows the question claimed.
-	text, _ = tr.call("get_document", map[string]any{"ref": "spec/" + draftSpecName, "kind": "spec"})
+	text, _ = tr.call("get_document", map[string]any{"ref": "spec/" + draftSpecName, "kind": "spec", "proposed": true})
 	if strings.Contains(text, "unclaimed; blocks acceptance") {
 		t.Fatalf("oq-2 still unclaimed after the stub:\n%s", text)
 	}
@@ -2146,14 +2189,14 @@ func TestTranscript_Plan(t *testing.T) {
 	tr := &transcript{t: t, srv: mcpserve.NewServer(root)}
 	seq := sequenceFor(t, "plan")
 	tr.call("get_design_context", map[string]any{"ref": "spec/" + draftSpecName})
-	text, _ := tr.call("get_document", map[string]any{"ref": "spec/" + draftSpecName, "kind": "plan"})
+	text, _ := tr.call("get_document", map[string]any{"ref": "spec/" + draftSpecName, "kind": "plan", "proposed": true})
 	if strings.Count(text, "nothing covers it") != 1 || !strings.Contains(text, "ac-2") {
 		t.Fatalf("fixture must render exactly one uncovered criterion (ac-2):\n%s", text)
 	}
 	if text, isErr := tr.call("mutate_draft", mutateArgs(t, root, map[string]any{"op": "add-stub", "slug": "cover-ac-2", "acceptance_criteria": []string{"ac-2"}})); isErr {
 		t.Fatal(text)
 	}
-	text, _ = tr.call("get_document", map[string]any{"ref": "spec/" + draftSpecName, "kind": "plan"})
+	text, _ = tr.call("get_document", map[string]any{"ref": "spec/" + draftSpecName, "kind": "plan", "proposed": true})
 	if strings.Contains(text, "nothing covers it") {
 		t.Fatalf("ac-2 still uncovered:\n%s", text)
 	}
@@ -2166,7 +2209,7 @@ func TestTranscript_Tasks(t *testing.T) {
 	tr := &transcript{t: t, srv: mcpserve.NewServer(root)}
 	seq := sequenceFor(t, "tasks")
 	before, _ := os.ReadFile(store.SpecPath(root, store.ZoneActive, draftSpecName))
-	text, isErr := tr.call("get_document", map[string]any{"ref": "spec/" + draftSpecName, "kind": "tasks"})
+	text, isErr := tr.call("get_document", map[string]any{"ref": "spec/" + draftSpecName, "kind": "tasks", "proposed": true})
 	if isErr || !strings.Contains(text, "## Plan") || !strings.Contains(text, "## Readiness") {
 		t.Fatalf("tasks document: %v\n%s", isErr, text)
 	}
@@ -2235,10 +2278,10 @@ git commit -m "Report spec-documents wave 3: harness skills, import MCP tools, t
 
 ## Self-review
 
-**Spec coverage.** ac-7: Task 1 (templates in the binary, three stamps, generated marker, both hosts), Task 2 (`harness render [--host] [-o]`, `harness check` exit 1 on drift, `make verify` via `lint-store`). ac-8: Task 1's templates carry each skill's behaviour and sequence; Task 5 proves each sequence by a hermetic MCP transcript (specify: preview → show → confirm → apply with the confirmed digest and a stale-digest refusal; clarify: readiness disclosure, unclaimed questions, one operation per `mutate_draft`; plan: uncovered criteria, one stub per call; tasks: reads only, store bytes unchanged); the static test `TestEveryWriteIsShownAndConfirmedFirst` pins "shown before written" in every template. ac-9: Task 3 (two tools over `specimport.Preview/Apply`, delegated-agent actor from `harness`/`session`, digest handshake, record naming harness and session, schemas untouched), Task 4 gives `clarify` its readiness source. oq-1: Task 0 records SI-201; R-W3-1 pins the Codex location and marker. co-3: the only new write tool is `import_apply`. dc-5: no import schema changes.
+**Spec coverage.** ac-7: Task 1 (templates in the binary, three stamps, generated marker, both hosts), Task 2 (`harness render [--host] [-o]`, `harness check` exit 1 on drift, `make verify` via `lint-store`). ac-8: Task 1's templates carry each skill's behaviour and sequence; Task 5 proves each sequence by a hermetic MCP transcript (specify: preview → show → confirm → apply with the confirmed digest and a stale-digest refusal; clarify: readiness disclosure, unclaimed questions, one operation per `mutate_draft`; plan: uncovered criteria, one stub per call; tasks: reads only, store bytes unchanged); the static test `TestEveryWriteIsShownAndConfirmedFirst` pins "shown before written" in every template. ac-9: Task 3 (two tools over `specimport.Preview/Apply`, delegated-agent actor from `harness`/`session`, digest handshake, record naming harness and session, schemas untouched), Task 4 gives `clarify` its readiness source. oq-1: Task 0 records SI-201; R-W3-1 pins the Codex location and marker. Drafts over MCP: R-W3-9/SI-202 (`get_document proposed`), found by the preflight scan. co-3: the only new write tool is `import_apply`. dc-5: no import schema changes.
 
 **Placeholders.** Three helper bodies in Task 3 and Task 5 (`importFixtureStore`, `draftStore`, `importStore`) are specified by pointing at the exact existing recipe to copy (`internal/designapp/conformance_test.go:110-160`) with the one substitution named; the readiness snapshot literal in Task 4 points at the Wave 2 parity test's existing literal. Everything else carries its code.
 
-**Type consistency.** `skillpack.ParseHosts/Write/Check/Render/RenderCommit/Template/ParseSequence/Sequence/Step` (Task 1) are what Task 2 and Task 5 call. `Backend.ImportPreview/ImportApply` (Task 3) are what `server.go`'s arms and Task 5's replays call by tool name `import_preview`/`import_apply` with keys `request`, `harness`, `session`, `preview_digest`. `Backend.Readiness` (Task 4) is what `serve.go` sets and `tool_get_document.go` reads. The `verdi-sequence` blocks in the four templates are the exact sequences `assertFollows` compares.
+**Type consistency.** `skillpack.ParseHosts/Write/Check/Render/RenderCommit/Template/ParseSequence/Sequence/Step` (Task 1) are what Task 2 and Task 5 call. `Backend.ImportPreview/ImportApply` (Task 3) are what `server.go`'s arms and Task 5's replays call by tool name `import_preview`/`import_apply` with keys `request`, `harness`, `session`, `preview_digest`. `Backend.Readiness` (Task 4) is what `serve.go` sets and `tool_get_document.go` reads; `get_document`'s `proposed` argument (Task 4) is what the clarify/plan/tasks sequences declare (`proposed=true`) and Task 5's replays pass. The `verdi-sequence` blocks in the four templates are the exact sequences `assertFollows` compares.
 
 **Known limits carried.** The transcript proves the tool sequence, not the agent's prose behaviour; the static show/confirm test pins the declared ordering. `clarify` under standalone `verdi mcp` sees no readiness (disclosed, R-W3-3). Codex's `.codex/skills` root is source-proven but doc-implicit; the plan renders only `.agents/skills` (SI-201). The instruction-conformance gate scans this repository's rendered skills; a consuming repository's own gates are its own.
