@@ -147,6 +147,17 @@ func (r Ref) Validate() error {
 	return nil
 }
 
+// ValidCommit reports whether s is a well-formed git commit sha in the
+// ONE form a pinned ref accepts: 7-40 lowercase hex characters (commitRe,
+// enforced on Ref.Commit by validate above). Exported so a surface that
+// takes a commit OUTSIDE a ref — an MCP tool argument, a CLI flag — holds
+// it to exactly the rule `kind/name@commit` is held to, instead of
+// copying the pattern into its own package or handing an unvalidated
+// string to git as a revision expression.
+func ValidCommit(s string) bool {
+	return commitRe.MatchString(s)
+}
+
 // ParseRef parses "kind/name", "kind/name@commit", "kind/name#object-id",
 // or "kind/name@commit#object-id", and validates the result. An "@" with
 // nothing after it, or a "#" with nothing after it, is a format error, not

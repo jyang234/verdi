@@ -99,7 +99,7 @@ func toolDefs(mdl *model.Model) []map[string]any {
 			"inputSchema": obj(map[string]any{
 				"ref":    str("spec/<name>, or spec/<name>@<commit>"),
 				"kind":   str("spec (default), plan, or tasks"),
-				"commit": str("optional full commit sha to render at; must agree with a pinned ref"),
+				"commit": str("optional commit sha to render at, 7-40 lowercase hex — the same form a pinned ref takes; must agree with a pinned ref"),
 			}, "ref"),
 		},
 		{

@@ -137,3 +137,51 @@ func TestGetDocument_Refusals(t *testing.T) {
 		})
 	}
 }
+
+// TestGetDocument_RejectsNonHexCommitArgument (final-review F2): the
+// `commit` argument names a commit, so it is held to the SAME rule the
+// pinned ref form `spec/<name>@<commit>` is held to
+// (internal/artifact/ref.go's commitRe, 7-40 lowercase hex, reached
+// through artifact.ValidCommit) — refused as an argument error before it
+// reaches git, never handed to `git rev-parse --verify` as a revision
+// expression or, worse, as an option. Without the check `commit: "HEAD"`
+// and `commit: "--git-dir"` both behave unlike the pinned form: the one
+// silently resolves a symbolic revision the documented contract does not
+// offer, the other is consumed by git as a flag rather than a revision.
+func TestGetDocument_RejectsNonHexCommitArgument(t *testing.T) {
+	t.Setenv("CI_DEFAULT_BRANCH", "main")
+	backend, repo, _ := newTestBackend(t)
+	for _, c := range []struct {
+		name   string
+		commit string
+	}{
+		{"option-shaped", "--git-dir"},
+		{"leading dash", "-n"},
+		{"path traversal", "../x"},
+		{"symbolic revision", "HEAD"},
+		{"revision expression", "HEAD~3"},
+		{"branch name", "main"},
+		{"uppercase hex", strings.ToUpper(repo.Head)},
+		{"too short", "abcdef"},
+		{"too long", strings.Repeat("a", 41)},
+		{"empty-ish whitespace", " "},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			res := backend.GetDocument(context.Background(), mustArgs(t, map[string]any{"ref": "spec/widget-retry", "commit": c.commit}))
+			if !isToolError(res) {
+				t.Fatalf("commit %q must be an argument error, got %s", c.commit, toolResultText(t, res))
+			}
+			if got := toolResultText(t, res); !strings.Contains(got, "7-40 lowercase hex") {
+				t.Fatalf("commit %q: error %q must name the pinned-ref commit rule", c.commit, got)
+			}
+		})
+	}
+	// Happy path: a well-formed sha still renders, so the guard refuses a
+	// shape, never a legitimate pin.
+	t.Run("well-formed sha still renders", func(t *testing.T) {
+		res := backend.GetDocument(context.Background(), mustArgs(t, map[string]any{"ref": "spec/widget-retry", "commit": repo.Head}))
+		if isToolError(res) {
+			t.Fatalf("a well-formed commit must render: %s", toolResultText(t, res))
+		}
+	})
+}

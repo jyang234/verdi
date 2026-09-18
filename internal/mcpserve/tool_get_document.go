@@ -45,6 +45,19 @@ func (b *Backend) GetDocument(ctx context.Context, argsRaw json.RawMessage) map[
 	if err != nil || ref.Kind != artifact.KindSpec || ref.Fragment() {
 		return toolError(fmt.Sprintf("get_document: %q is not a spec/<name> ref (optionally @commit)", args.Ref))
 	}
+	// The commit ARGUMENT names a commit, so it is held to the same rule
+	// the pinned ref form holds Ref.Commit to (artifact.ValidCommit, the
+	// exported form of ref.go's commitRe) — refused here as an argument
+	// error rather than handed to `git rev-parse --verify` downstream
+	// (final-review F2). Two things this closes: the documented contract
+	// ("a full commit sha") was unenforced, so `commit: "HEAD"` or a
+	// branch name silently resolved and behaved unlike the pinned form;
+	// and an option-shaped value ("--git-dir") reached git as a flag
+	// rather than as a revision. ParseRef already applies the identical
+	// rule to the pin, so the two forms now agree by construction.
+	if args.Commit != "" && !artifact.ValidCommit(args.Commit) {
+		return toolError(fmt.Sprintf("get_document: commit %q must be 7-40 lowercase hex characters", args.Commit))
+	}
 	commit := args.Commit
 	if ref.Pinned() {
 		if commit != "" && commit != ref.Commit {
