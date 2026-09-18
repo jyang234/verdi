@@ -1208,7 +1208,7 @@ func writeSpecDocuments(ctx context.Context, outDir, root string, stamp buildSta
 	page, err := renderPage(mdl, pageData{
 		Title:    p.Entry.Title + " — document",
 		BodyHTML: template.HTML(body),
-		// copy-ref: fill the same field writeArtifactPage fills (artifactpage.go), value p.Entry.Ref + "@" + stamp.SHA
+		CopyRef:  p.Entry.Ref + "@" + stamp.SHA,
 	})
 	if err != nil {
 		return err
@@ -1230,7 +1230,7 @@ func documentViewChrome(ref string) string {
 }
 ```
 
-`pageData` (`internal/dex/layout.go:34`) has `Title`, `Status`, `StatusLabel`, `LadderBadges`, `Breadcrumb`, `Banner`, `BannerClass`, `MetaRows`, `BodyHTML`, `Connections`, `TOC`, `CopyRefDisplay`, `DispositionsHTML`, `FeatureLensHTML`, `OpenAPIJSONPath`, `HasMermaid`, `NavByStory`; set `Title`, `BodyHTML`, and the copy-ref field the spec page sets (read how `writeArtifactPage` fills it, `artifactpage.go:17+`), leave the rest zero. Relative hrefs inside `a/spec/<name>/document/index.html`: `../spec.md` resolves to `a/spec/<name>/spec.md`. In the test above the document page assertion is `href="spec.md"`; change the test to `href="../spec.md"` to match this chrome, or emit the links relative to the spec dir — pick the version that resolves in a browser and assert that.
+`pageData` (`internal/dex/layout.go:34`) has `Title`, `Status`, `StatusLabel`, `LadderBadges`, `Breadcrumb`, `Banner`, `BannerClass`, `MetaRows`, `BodyHTML`, `Connections`, `TOC`, `CopyRefDisplay`, `DispositionsHTML`, `FeatureLensHTML`, `OpenAPIJSONPath`, `HasMermaid`, `NavByStory`; set `Title`, `BodyHTML`, and `CopyRef` (`layout.go:66`; the layout derives `CopyRefDisplay` itself if it does so for artifact pages — check `writeArtifactPage`), leave the rest zero. Relative hrefs inside `a/spec/<name>/document/index.html`: `../spec.md` resolves to `a/spec/<name>/spec.md`. In the test above the document page assertion is `href="spec.md"`; change the test to `href="../spec.md"` to match this chrome, or emit the links relative to the spec dir — pick the version that resolves in a browser and assert that.
 
 In `build.go`, right after each `writeArtifactPage` call (`build.go:105-109`):
 
