@@ -108,38 +108,49 @@ func TestSpecDoc_KindsFormatsAndOutputFile(t *testing.T) {
 func TestSpecDoc_ProposedAndAt(t *testing.T) {
 	repo := buildSpecDocRepo(t)
 	bin := buildVerdiBinary(t)
-	// A design branch with an edited spec.
+	// A design branch with a COMMITTED edit, then a further UNCOMMITTED
+	// edit on top (fix round 1, F2). Without the second, uncommitted
+	// layer, an implementation that silently read HEAD instead of the
+	// actual working tree for --proposed would still see "widely" and
+	// pass a weaker version of this test; only the uncommitted marker
+	// text can catch that, since it exists nowhere in git history.
 	branch := "design/lockbox-edit"
 	run := func(args ...string) (string, string, int) {
 		return runVerdiBinary(t, bin, repo.Dir, []string{"CI_DEFAULT_BRANCH=main"}, args...)
 	}
+	specPath := filepath.Join(repo.Dir, ".verdi/specs/active/lockbox/spec.md")
 	runGitCmd(t, repo.Dir, "checkout", "-q", "-b", branch)
 	edited := strings.Replace(specDocFixture, "Keys are shared.", "Keys are shared widely.", 1)
-	if err := os.WriteFile(filepath.Join(repo.Dir, ".verdi/specs/active/lockbox/spec.md"), []byte(edited), 0o644); err != nil {
+	if err := os.WriteFile(specPath, []byte(edited), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	runGitCmd(t, repo.Dir, "commit", "-qam", "edit problem")
 	head := strings.TrimSpace(gitOutput(t, repo.Dir, "rev-parse", "HEAD"))
 
+	uncommitted := strings.Replace(edited, "Keys are shared widely.", "Keys are shared UNCOMMITTED.", 1)
+	if err := os.WriteFile(specPath, []byte(uncommitted), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
 	stdout, stderr, code := run("spec", "doc", "spec/lockbox", "--proposed")
 	if code != 0 {
 		t.Fatalf("--proposed exit %d: %s", code, stderr)
 	}
-	if !strings.Contains(stdout, "Proposed, not accepted") || !strings.Contains(stdout, "Keys are shared widely.") || !strings.Contains(stdout, "commit `"+head+"`") {
-		t.Errorf("--proposed render wrong:\n%s", stdout)
+	if !strings.Contains(stdout, "Proposed, not accepted") || !strings.Contains(stdout, "Keys are shared UNCOMMITTED.") || !strings.Contains(stdout, "commit `"+head+"`") {
+		t.Errorf("--proposed render must read the dirty working tree, not HEAD:\n%s", stdout)
 	}
 
 	stdout, stderr, code = run("spec", "doc", "spec/lockbox")
 	if code != 0 {
 		t.Fatalf("default exit %d: %s", code, stderr)
 	}
-	if strings.Contains(stdout, "widely") || !strings.Contains(stdout, "commit `"+repo.Head+"`") {
+	if strings.Contains(stdout, "widely") || strings.Contains(stdout, "UNCOMMITTED") || !strings.Contains(stdout, "commit `"+repo.Head+"`") {
 		t.Errorf("default render must read main's bytes, not the branch's:\n%s", stdout)
 	}
 
 	stdout, stderr, code = run("spec", "doc", "spec/lockbox", "--at", head)
-	if code != 0 || !strings.Contains(stdout, "widely") || !strings.Contains(stdout, "commit `"+head+"`") {
-		t.Errorf("--at render wrong (exit %d, %s):\n%s", code, stderr, stdout)
+	if code != 0 || !strings.Contains(stdout, "widely") || strings.Contains(stdout, "UNCOMMITTED") || !strings.Contains(stdout, "commit `"+head+"`") {
+		t.Errorf("--at render must read the committed blob, not the dirty working tree (exit %d, %s):\n%s", code, stderr, stdout)
 	}
 }
 
@@ -159,6 +170,7 @@ func TestSpecDoc_Refusals(t *testing.T) {
 		{"bad format", []string{"spec", "doc", "spec/lockbox", "--format", "pdf"}, "--format must be md or html"},
 		{"bad commit", []string{"spec", "doc", "spec/lockbox", "--at", "deadbeef"}, "deadbeef"},
 		{"at and proposed", []string{"spec", "doc", "spec/lockbox", "--at", repo.Head, "--proposed"}, "--at and --proposed cannot be combined"},
+		{"extra positional", []string{"spec", "doc", "spec/lockbox", "spec/bogus"}, "usage: verdi spec doc"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -171,6 +183,73 @@ func TestSpecDoc_Refusals(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestSpecDoc_FlagsAfterRef is fix round 1, F1's regression: a flag
+// placed AFTER the positional <spec-ref> must still take effect, not be
+// silently dropped. Uses a two-commit fixture (rather than
+// buildSpecDocRepo's single layer) so --at has a genuinely OLD commit,
+// distinct from HEAD, to prove it actually read.
+func TestSpecDoc_FlagsAfterRef(t *testing.T) {
+	revised := strings.Replace(specDocFixture, "Keys are shared.", "Keys are shared, revised.", 1)
+	repo := fixturegit.Build(t, []fixturegit.Layer{
+		{
+			Message: "adopt store with one accepted spec",
+			Files: map[string]string{
+				".verdi/verdi.yaml":                   supersedeManifestYAML,
+				".verdi/specs/active/lockbox/spec.md": specDocFixture,
+			},
+		},
+		{
+			Message: "revise lockbox problem statement",
+			Files: map[string]string{
+				".verdi/specs/active/lockbox/spec.md": revised,
+			},
+		},
+	})
+	old := repo.Heads[0]
+	bin := buildVerdiBinary(t)
+	run := func(args ...string) (string, string, int) {
+		return runVerdiBinary(t, bin, repo.Dir, []string{"CI_DEFAULT_BRANCH=main"}, args...)
+	}
+
+	t.Run("--at after ref", func(t *testing.T) {
+		stdout, stderr, code := run("spec", "doc", "--format", "md", "spec/lockbox", "--at", old)
+		if code != 0 {
+			t.Fatalf("exit %d: %s", code, stderr)
+		}
+		if !strings.Contains(stdout, "Keys are shared.") || strings.Contains(stdout, "revised") || !strings.Contains(stdout, "commit `"+old+"`") {
+			t.Errorf("--at after the ref must still render the OLD bytes/commit, not HEAD's:\n%s", stdout)
+		}
+	})
+
+	t.Run("--proposed after ref", func(t *testing.T) {
+		stdout, stderr, code := run("spec", "doc", "--format", "md", "spec/lockbox", "--proposed")
+		if code != 0 {
+			t.Fatalf("exit %d: %s", code, stderr)
+		}
+		if !strings.Contains(stdout, "Proposed, not accepted") {
+			t.Errorf("--proposed after the ref must still be applied:\n%s", stdout)
+		}
+	})
+
+	t.Run("-o after ref", func(t *testing.T) {
+		out := filepath.Join(t.TempDir(), "plan.md")
+		stdout, stderr, code := run("spec", "doc", "--kind", "plan", "spec/lockbox", "-o", out)
+		if code != 0 {
+			t.Fatalf("exit %d: %s", code, stderr)
+		}
+		if stdout != "" {
+			t.Errorf("-o after the ref must still suppress stdout, got %q", stdout)
+		}
+		data, err := os.ReadFile(out)
+		if err != nil {
+			t.Fatalf("-o after the ref must still write the file: %v", err)
+		}
+		if !strings.Contains(string(data), "## Plan") {
+			t.Errorf("-o file wrong shape:\n%s", data)
+		}
+	})
 }
 
 func TestSpecDoc_NoStoreExitsOperational(t *testing.T) {

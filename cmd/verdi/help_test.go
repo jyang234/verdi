@@ -124,8 +124,12 @@ func TestHelp_LintNeverExecutes(t *testing.T) {
 // TestHelp_SpecShowsEveryForm is the other exact regression the spec
 // names: "`verdi spec --help` prints only the `spec state` form" — today
 // via the usage-error path (stderr, exit 2). After the fix it must be a
-// clean exit (stdout, exit 0), never the operational-error path, even
-// though `spec` has only the one real form.
+// clean exit (stdout, exit 0). `spec` now has two real forms (`state`
+// and `doc`, Task 7); --help must show both. It must also be
+// byte-identical to what a bare `verdi spec` invocation (no subcommand)
+// prints to stderr (fix round 1, F5): both read the SAME specVerbUsage
+// constant — help.go's verbUsage["spec"] entry is that constant, not a
+// hand-duplicated literal — so the two call sites can never drift apart.
 func TestHelp_SpecShowsEveryForm(t *testing.T) {
 	bin := buildVerdiBinary(t)
 	dir := t.TempDir()
@@ -139,6 +143,20 @@ func TestHelp_SpecShowsEveryForm(t *testing.T) {
 	}
 	if !strings.Contains(stdout, "usage: verdi spec state <spec-ref>") {
 		t.Fatalf("stdout = %q, want the spec state form", stdout)
+	}
+	if !strings.Contains(stdout, "verdi spec doc <spec-ref>") {
+		t.Fatalf("stdout = %q, want the spec doc form", stdout)
+	}
+
+	bareStdout, bareStderr, bareCode := runVerdiBinary(t, bin, dir, nil, "spec")
+	if bareCode != 2 {
+		t.Fatalf("bare verdi spec exit = %d, want 2", bareCode)
+	}
+	if bareStdout != "" {
+		t.Fatalf("bare verdi spec stdout = %q, want empty", bareStdout)
+	}
+	if bareStderr != stdout {
+		t.Fatalf("bare `verdi spec` stderr and `verdi spec --help` stdout must be byte-identical (fix round 1, F5):\nbare stderr:   %q\n--help stdout: %q", bareStderr, stdout)
 	}
 }
 
