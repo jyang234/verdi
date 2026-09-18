@@ -120,9 +120,9 @@ func RenderMarkdown(doc Document) string {
 			// raw-HTML tag under goldmark's WithUnsafe() passthrough,
 			// so the placeholder text never reaches a browser's DOM —
 			// a code span's contents are never parsed as HTML).
-			w("Each %s becomes `spec/<slug>` when it is instantiated.\n\n", withPlannedAdjective(doc.Words.Story))
+			w("Each %s in this plan becomes `spec/<slug>` when it is instantiated.\n\n", doc.Words.Story)
 			if len(doc.Plan) == 0 {
-				w("No %s or %s are declared.\n\n", withPlannedAdjective(doc.Words.StoryPlural), doc.Words.SpikePlural)
+				w("No %s or %s are planned.\n\n", doc.Words.StoryPlural, doc.Words.SpikePlural)
 			}
 			for i, p := range doc.Plan {
 				if p.Spike {
@@ -161,7 +161,7 @@ func coverageLine(c Criterion, words Words) string {
 	if len(c.Coverage) == 0 {
 		return "not yet planned."
 	}
-	return fmt.Sprintf("planned in %s %s.", pluralIf(words.Story, words.StoryPlural, len(c.Coverage)), joinCode(c.Coverage))
+	return fmt.Sprintf("covered by %s %s.", pluralIf(words.Story, words.StoryPlural, len(c.Coverage)), joinCode(c.Coverage))
 }
 
 // claimsLine returns only the predicate; RenderMarkdown writes the
@@ -266,24 +266,6 @@ func indentLines(s, indent string) string {
 		}
 	}
 	return strings.Join(lines, "\n")
-}
-
-// withPlannedAdjective prefixes word with "planned " unless word itself
-// already begins with that same word (whole word, case-insensitive).
-// Fix round 1 golden review: A2/F6 each hard-code a "planned "/"Each
-// planned " prefix immediately before a Words.Story-derived value; the
-// fix round's own renamed-vocabulary fixture renames story to "planned
-// story", and a bare concatenation doubled it ("Each planned planned
-// story becomes...", "No planned planned stories..."). This is the
-// smallest correction that reproduces the two dictated sentences
-// byte-for-byte under the default (unrenamed) vocabulary while never
-// doubling under a rename that already carries the word.
-func withPlannedAdjective(word string) string {
-	lower := strings.ToLower(word)
-	if lower == "planned" || strings.HasPrefix(lower, "planned ") {
-		return word
-	}
-	return "planned " + word
 }
 
 // capitalize upper-cases only the first rune, leaving the rest of a

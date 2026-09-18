@@ -33,7 +33,7 @@ Because two holders means no holder.
 
 1. **ac-1** A key opens one box. <a id="ac-1"></a>
    - Evidence: behavioral, attestation.
-   - Coverage: planned in story `key-holder`.
+   - Coverage: covered by story `key-holder`.
 
    Proven by opening.
 
@@ -48,7 +48,7 @@ Because two holders means no holder.
 
 ## Plan
 
-Each planned story becomes `spec/<slug>` when it is instantiated.
+Each story in this plan becomes `spec/<slug>` when it is instantiated.
 
 1. Story `key-holder` covers ac-1 (A key opens one box.).
 2. Spike `audit-probe` answers oq-1 (Who audits holders?).

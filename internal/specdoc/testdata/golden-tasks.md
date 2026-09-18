@@ -13,7 +13,7 @@
 
 ## Plan
 
-Each planned story becomes `spec/<slug>` when it is instantiated.
+Each story in this plan becomes `spec/<slug>` when it is instantiated.
 
 1. Story `key-holder` covers ac-1 (A key opens one box.).
 2. Spike `audit-probe` answers oq-1 (Who audits holders?).
