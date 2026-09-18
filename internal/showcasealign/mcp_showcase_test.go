@@ -398,6 +398,81 @@ func TestMCPShowcaseCoverage(t *testing.T) {
 		}
 	})
 
+	// mcp:import_preview / mcp:import_apply (spec-documents Wave 3 Task 3,
+	// ac-9): driven against the same provisioned showcase store, over a
+	// genuine spec-import request built from the exact committed sample
+	// fixture internal/mcpserve/tool_import_test.go's own unit tests use
+	// (internal/mcpserve/testdata/specimport/sample.md) — never a synthetic
+	// inline stand-in.
+	//
+	// Both tools' most meaningful REAL behavior against this corpus is
+	// their genuine dirty-context refusal, verified by actually calling the
+	// live tools against the real store (never guessed): buildShowcaseRepo
+	// (helpers_test.go) unconditionally calls writeLoansvcFixture, which
+	// writes loansvc/.flowmap.yaml and loansvc/.flowmap/boundary-
+	// contract.json into the working tree WITHOUT committing them and
+	// without any root .gitignore to exclude them (setupLayer's own doc
+	// comment lists only .gitattributes) — so provisionShowcaseStore's
+	// checkout is never clean, from the very first call. The frozen import
+	// contract's Prepare precondition (spec-import-contract.md, "Preview,
+	// identity and atomic publication": "Prepare requires a clean tracked
+	// checkout/index... it refuses with correction guidance instead of
+	// reading an uncommitted context that cannot be reproduced") therefore
+	// refuses BOTH import_preview and import_apply before either ever
+	// builds a preview or compares a digest — proven here, rather than
+	// asserted by guesswork, and consistent with this file's own established
+	// pattern for get_design_context/get_design_capabilities/
+	// prepare_design_review/mutate_draft above: a genuine, disclosed fact
+	// about examples/showcase's real state is the real assertion, never
+	// forced synthetic success. Either way, no design/ branch is created —
+	// asked of git itself (gitx.HasLocalBranch, i.e. `git show-ref
+	// --verify refs/heads/<branch>`), which sees a packed ref a loose-ref
+	// stat would miss.
+	t.Run("import_preview_then_import_apply", func(t *testing.T) {
+		sampleData, err := os.ReadFile(filepath.Join(verdiRepoRoot, "internal", "mcpserve", "testdata", "specimport", "sample.md"))
+		if err != nil {
+			t.Fatalf("reading the committed spec-import sample fixture: %v", err)
+		}
+		const slug = "showcase-import-probe"
+		req := map[string]any{
+			"schema":  "verdi.spec-import-request/v1",
+			"target":  map[string]any{"slug": slug, "class": "feature", "title": "Showcase import probe"},
+			"format":  "markdown-v1",
+			"primary": "brief",
+			"sources": []map[string]any{{"id": "brief", "label": "brief.md", "data": base64.StdEncoding.EncodeToString(sampleData)}},
+			"mappings": []map[string]any{
+				{"target": "ac-1", "evidence": []string{"static", "attestation"}},
+				{"target": "ac-2", "evidence": []string{"static", "attestation"}},
+			},
+			"retain_unmapped": true,
+		}
+		branch := "design/" + slug
+		assertNoBranch := func(after string) {
+			t.Helper()
+			exists, err := gitx.HasLocalBranch(ctx, root, branch)
+			if err != nil {
+				t.Fatalf("checking for %s after %s: %v", branch, after, err)
+			}
+			if exists {
+				t.Fatalf("%s must not create %s in the showcase store", after, branch)
+			}
+		}
+
+		previewText, previewIsError := callMCPTool(t, srv, "import_preview", map[string]any{"request": req})
+		if !previewIsError || !strings.HasPrefix(previewText, "import_preview: dirty-context:") || !strings.Contains(previewText, "loansvc/.flowmap") {
+			t.Fatalf("import_preview against the real showcase store = isError=%v %q, want the real dirty-context refusal naming the real untracked loansvc fixture", previewIsError, previewText)
+		}
+		assertNoBranch("import_preview")
+
+		applyText, applyIsError := callMCPTool(t, srv, "import_apply", map[string]any{
+			"harness": "showcase-coverage-test", "preview_digest": strings.Repeat("a", 64), "request": req,
+		})
+		if !applyIsError || !strings.HasPrefix(applyText, "import_apply: dirty-context:") {
+			t.Fatalf("import_apply against the real showcase store = isError=%v %q, want the real dirty-context refusal (the same precondition gates apply before any digest is ever compared)", applyIsError, applyText)
+		}
+		assertNoBranch("import_apply's dirty-context refusal")
+	})
+
 	// add_annotation, list_annotations, and list_tasks are exercised as
 	// plain sequential Go code within two subtests (not three independent
 	// t.Run bodies) so the write genuinely precedes its read — never

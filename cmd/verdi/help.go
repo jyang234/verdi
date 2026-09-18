@@ -77,6 +77,7 @@ verbs:
   journey          show the guided-lifecycle journey for a tracked item
   context          compile and inspect context-integrity artifacts
   experiment       run a comparative experiment operation
+  harness          render or drift-check the verdi skills for Claude Code and Codex
   version          print the build identification line
   help             print this message
 
@@ -155,6 +156,7 @@ var verbUsage = map[string]string{
 		"       verdi context receipt verify --request <path|-> [--out <path>]\n" +
 		"       verdi context resolve --request -",
 	"experiment": experimentUsage,
+	"harness":    harnessUsage,
 }
 
 // verbUsageOrFallback returns the registered usage for verb, or a bare

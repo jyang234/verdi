@@ -120,6 +120,10 @@ func (s *Server) callTool(ctx context.Context, params json.RawMessage) map[strin
 		return s.Backend.GetDesignCapabilities(ctx, call.Arguments)
 	case "mutate_draft":
 		return s.Backend.MutateDraft(ctx, call.Arguments)
+	case "import_preview":
+		return s.Backend.ImportPreview(ctx, call.Arguments)
+	case "import_apply":
+		return s.Backend.ImportApply(ctx, call.Arguments)
 	case "get_design_provenance":
 		return s.Backend.GetDesignProvenance(ctx, call.Arguments)
 	case "prepare_design_review":

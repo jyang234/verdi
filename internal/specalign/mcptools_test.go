@@ -105,6 +105,10 @@ func TestMCPToolInventory(t *testing.T) {
 	// `get_document`: the read-only Markdown-document renderer over
 	// internal/specdocload and internal/specdoc, alongside get_artifact in
 	// this want list.
+	// spec-documents Wave 3 Task 3 (spec/spec-documents ac-9) adds
+	// `import_preview`/`import_apply`: the MCP wrapper over the frozen
+	// spec-import contract (docs/superpowers/specs/2026-09-14-spec-import-
+	// contract.md), using the same delegated-agent actor mutate_draft uses.
 	want := []string{
 		"search_artifacts",
 		"get_artifact",
@@ -120,6 +124,8 @@ func TestMCPToolInventory(t *testing.T) {
 		"get_design_context",
 		"get_design_capabilities",
 		"mutate_draft",
+		"import_preview",
+		"import_apply",
 		"get_design_provenance",
 		"prepare_design_review",
 		"constitution_inspect",
