@@ -9,7 +9,7 @@ Use this skill on a draft spec on its design branch when the user asks what is s
 
 ## Steps
 
-1. Call `get_design_context` with the draft's ref (`spec/<slug>`). Keep `identity` (`checkout`, `branch`, `head`) and `current_draft` (the exact spec bytes and their digest): every `mutate_draft` call must carry them as `expected`, `base_spec_b64`, and `base_digest`.
+1. Call `get_design_context` with the draft's ref (`spec/<slug>`). Keep `identity` (`checkout`, `branch`, `head`): every `mutate_draft` call carries exactly those three as `expected`. Then read the draft's bytes from `<checkout>/.verdi/specs/active/<slug>/spec.md`: `base_spec_b64` is their standard base64, and `base_digest` is `sha256:` followed by the lowercase hex SHA-256 of those exact bytes. Re-read them before every call; a stale base is refused.
 2. Call `get_document` with `ref` `spec/<slug>`, `kind` `spec`, and `proposed` true (the working-tree draft on this branch, never the accepted bytes). Read three sections:
    - **Readiness.** Each concern is listed with its state, timing, blocking flag, summary, and witnesses. Collect every concern whose state is not proven. If the section says "Readiness was not supplied for this render.", say so to the human and continue with the next two sections.
    - **Open questions.** A question is unclaimed when its line ends with "unclaimed; blocks acceptance until a … claims it or a decision answers it." Collect them.

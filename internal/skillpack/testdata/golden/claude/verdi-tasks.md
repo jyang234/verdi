@@ -4,7 +4,7 @@ description: Read a spec's tasks document — plan, evidence, and readiness — 
 ---
 <!-- verdi:generated-skill host=claude skill=tasks -->
 <!-- verdi:engine-digest sha256:d805fb1ae60f08b6a2db8f122cd01f2c332314942b619debe5f6538bcb2e4856 -->
-<!-- verdi:template-digest sha256:4b6ced43aec060595768490de01cd70f4644014e99702d68148c3863d5406282 -->
+<!-- verdi:template-digest sha256:97ce7ff5053d54b0ac8980ebea2b45db73461587bd302e0af6c2c9ec5a902f17 -->
 <!-- verdi:render-commit 0123456789abcdef0123456789abcdef01234567 -->
 <!-- verdi: this is a generated skill; edits here never change verdi, and any difference is reported as drift by `verdi harness check` until this file is regenerated with `verdi harness render`. -->
 
@@ -16,7 +16,7 @@ Use this skill when the user asks what to work on next for a spec. It reads and 
 
 1. Call `get_document` with `ref` `spec/<slug>` and `kind` `tasks`, adding `proposed` true when the spec is a draft on its design branch (omit it for an accepted spec).
 2. From the plan section, list each stub with the criteria it covers. From the evidence section, note each criterion's evidence state and what is still unproven. From the readiness section, list the concerns that need attention, blocking ones first; if readiness was not supplied for this render, say so.
-3. Present a work list in this order: blocking readiness concerns, uncovered criteria (nothing covers them), stubs whose criteria have no evidence yet, then everything else. Quote ids so the human can find each item on the board.
+3. Present a work list in this order: blocking readiness concerns, criteria whose evidence detail reads "no implementing story", stubs whose criteria are still unproven, then everything else. Quote ids so the human can find each item on the board.
 4. If the human wants any of it changed, hand off to verdi-clarify or verdi-plan; this skill writes nothing.
 
 ```verdi-sequence

@@ -9,8 +9,8 @@ Use this skill when a draft spec has acceptance criteria that no stub covers and
 
 ## Steps
 
-1. Call `get_design_context` with `spec/<slug>`; keep `identity` and `current_draft` for the mutation calls.
-2. Call `get_document` with `ref` `spec/<slug>`, `kind` `plan`, and `proposed` true. In the criteria section, an uncovered criterion reads "known: nothing covers it"; a covered one reads "covered by …". Collect the uncovered criterion ids in document order.
+1. Call `get_design_context` with `spec/<slug>`; keep `identity`, and read the draft's bytes for `base_spec_b64`/`base_digest` exactly as verdi-clarify step 1 describes.
+2. Call `get_document` with `ref` `spec/<slug>`, `kind` `plan`, and `proposed` true, and show the human the plan as it stands. The plan document lists only what is planned, so call `get_document` again with `kind` `spec` and `proposed` true: in its criteria section, an uncovered criterion's coverage line reads "not yet planned."; a covered one reads "covered by …"; "not computed for this render." means the facts were unavailable, in which case say so and stop. Collect the uncovered criterion ids in document order.
 3. For each uncovered criterion, prepare exactly one stub: `{"op":"add-stub","slug":"<kebab-slug describing the deliverable>","acceptance_criteria":["<ac-id>"]}`. A stub may cover several criteria when they are one deliverable; say why.
 4. Show the human the criterion text and the operation JSON. Ask for confirmation.
 5. On confirmation, call `mutate_draft` with that one operation (same argument shape as verdi-clarify). On a stale-base refusal, repeat from step 1.
@@ -19,6 +19,7 @@ Use this skill when a draft spec has acceptance criteria that no stub covers and
 ```verdi-sequence
 call get_design_context
 call get_document kind=plan proposed=true
+call get_document kind=spec proposed=true
 loop
 show
 confirm
