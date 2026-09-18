@@ -493,3 +493,122 @@ func TestFreezeBoard_ModelDigestDeterministic(t *testing.T) {
 		t.Fatalf("Provenance.Model = %q, want %q", first.Provenance.Model, modelDigest)
 	}
 }
+
+// -- UAT-034 fix coverage ----------------------------------------------
+
+// TestRun_ScaffoldCommitStagesOnlySpecDir is UAT-034's own witness,
+// mirroring UAT-033's TestRunDesignStart_ScaffoldCommitStagesOnlySpecDir
+// (cmd/verdi/design_test.go) at this ritual's own level: Run used to
+// commit with gitx.AddAll ("git add -A"), sweeping every
+// untracked-or-modified file anywhere in the checkout into the
+// "commit-to-design: ..." commit alongside the two files it actually
+// wrote — specDir/spec.md and specDir/board.json (docs/design/uat/
+// uat-findings.md, UAT-034; boardio.GraduateStickies' annotation writes
+// live under the gitignored data/mutable/annotations, so they were never
+// part of this ritual's own tracked write set to begin with). This plants
+// the same three shapes of working-tree noise F-1's witness used — an
+// untracked file at the repo root, an untracked file in a nested docs
+// directory, and a modified tracked file — then proves the commit's tree
+// contains exactly the two paths this ritual itself wrote, every planted
+// file rides untouched (still untracked/modified) in the working tree
+// afterward, and none of them was ever staged (gitx.StagedPaths), even
+// transiently.
+func TestRun_ScaffoldCommitStagesOnlySpecDir(t *testing.T) {
+	repo := buildRepo(t)
+	seedBoard(t, repo)
+	ctx := context.Background()
+
+	// (a) untracked file at the repo root.
+	if err := os.WriteFile(filepath.Join(repo.Dir, ".DS_Store"), []byte("junk"), 0o644); err != nil {
+		t.Fatalf("planting root untracked file: %v", err)
+	}
+	// (b) untracked file in a nested docs directory.
+	nestedDir := filepath.Join(repo.Dir, "docs", "superpowers", "specs")
+	if err := os.MkdirAll(nestedDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll nested docs dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(nestedDir, "lens.sqlite3"), []byte("junk"), 0o644); err != nil {
+		t.Fatalf("planting nested untracked file: %v", err)
+	}
+	// (c) a modified tracked file (buildRepo's own committed fixture spec).
+	otherSpecPath := filepath.Join(repo.Dir, ".verdi", "specs", "active", "other", "spec.md")
+	original, err := os.ReadFile(otherSpecPath)
+	if err != nil {
+		t.Fatalf("reading tracked fixture file: %v", err)
+	}
+	if err := os.WriteFile(otherSpecPath, append(original, []byte("\n<!-- local edit -->\n")...), 0o644); err != nil {
+		t.Fatalf("modifying tracked fixture file: %v", err)
+	}
+
+	res, err := Run(ctx, Input{Root: repo.Dir, BoardKey: "STORY-1482", SpecName: "stages-only-specdir", StoryRef: "jira:LOAN-1482", ModelDigest: testModelDigest(t, repo.Dir)})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	entries, err := gitx.DiffNameStatus(ctx, repo.Dir, repo.Head, res.Commit)
+	if err != nil {
+		t.Fatalf("DiffNameStatus: %v", err)
+	}
+	gotPaths := map[string]bool{}
+	for _, e := range entries {
+		gotPaths[e.Path] = true
+	}
+	if len(entries) != 2 || !gotPaths[res.SpecRelPath] || !gotPaths[res.BoardRelPath] {
+		t.Fatalf("scaffold commit's changed paths = %+v, want exactly [%s %s] (never the planted working-tree noise)", entries, res.SpecRelPath, res.BoardRelPath)
+	}
+
+	plants := []string{".DS_Store", "docs/superpowers/specs/lens.sqlite3", ".verdi/specs/active/other/spec.md"}
+
+	changed, err := gitx.WorktreeChangedPaths(ctx, repo.Dir)
+	if err != nil {
+		t.Fatalf("WorktreeChangedPaths: %v", err)
+	}
+	changedSet := map[string]bool{}
+	for _, p := range changed {
+		changedSet[p] = true
+	}
+	for _, want := range plants {
+		if !changedSet[want] {
+			t.Errorf("WorktreeChangedPaths = %v, want %q still present (an unresolved working-tree change: untracked or modified)", changed, want)
+		}
+	}
+	for _, want := range []string{res.SpecRelPath, res.BoardRelPath} {
+		if changedSet[want] {
+			t.Errorf("WorktreeChangedPaths = %v, want %q absent (it was committed, so the working tree is clean at that path)", changed, want)
+		}
+	}
+
+	// WorktreeChangedPaths alone does not prove "never staged" — see
+	// TestRunDesignStart_ScaffoldCommitStagesOnlySpecDir's own comment on
+	// this in cmd/verdi/design_test.go. gitx.StagedPaths reports exactly
+	// the paths whose index entry differs from HEAD — the precise check
+	// for "never staged by this ritual".
+	staged, err := gitx.StagedPaths(ctx, repo.Dir)
+	if err != nil {
+		t.Fatalf("StagedPaths: %v", err)
+	}
+	stagedSet := map[string]bool{}
+	for _, p := range staged {
+		stagedSet[p] = true
+	}
+	for _, want := range plants {
+		if stagedSet[want] {
+			t.Errorf("StagedPaths = %v, want %q absent (this ritual must never stage it, even transiently)", staged, want)
+		}
+	}
+}
+
+// TestCommitDesignGo_NoAddAll is a source-text witness mirroring
+// cmd/verdi/design_test.go's TestDesignGo_NoAddAll: commitdesign.go's
+// scaffold commit must stage exactly the spec directory via gitx.AddPaths
+// (UAT-034), never gitx.AddAll's blanket `git add -A` sweep of the rest of
+// the working tree.
+func TestCommitDesignGo_NoAddAll(t *testing.T) {
+	data, err := os.ReadFile("commitdesign.go")
+	if err != nil {
+		t.Fatalf("reading commitdesign.go: %v", err)
+	}
+	if strings.Contains(string(data), "AddAll(") {
+		t.Error("commitdesign.go calls gitx.AddAll — the scaffold commit must stage exactly the spec directory via gitx.AddPaths instead (UAT-034)")
+	}
+}
