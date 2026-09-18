@@ -139,7 +139,7 @@ var verbUsage = map[string]string{
 	"init":       "usage: verdi init [--wizard]",
 	"obligation": obligationVerbUsage,
 	"waive":      waiveUsage,
-	"spec":       "usage: verdi spec state <spec-ref>",
+	"spec":       "usage: verdi spec state <spec-ref>\n       verdi spec doc <spec-ref> [--kind spec|plan|tasks] [--format md|html] [--at <commit>] [--proposed] [-o <path>]",
 	// vocab:identity — CLI usage/flag grammar (identity)
 	"journey": "usage: verdi journey [--json] <feature-or-story-ref>",
 	"context": "usage: verdi context compile --request <path|-> [--out <path>]\n" +
