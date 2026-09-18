@@ -112,9 +112,22 @@ func documentFormatFromQuery(r *http.Request) (string, error) {
 	return format, nil
 }
 
+// documentNotModified reports whether r's If-None-Match names etag. Both
+// document responses that stamp a validator — the ?format=md download
+// and the /snapshot projection — answer the SAME revision token for the
+// same (spec, kind), so a client may carry one between them and the two
+// routes must agree on when it is unchanged; hence one comparison, not a
+// copy per handler.
+func documentNotModified(r *http.Request, etag string) bool {
+	match := r.Header.Get("If-None-Match")
+	return match != "" && match == etag
+}
+
 // boardDocumentPageHandler answers GET /board/spec/{name}/document: the
 // Document tab, or — under ?format=md — the raw Markdown as a download
-// (the exact bytes the snapshot carries, stamped with the same ETag).
+// (the exact bytes the snapshot carries, stamped with the same ETag and
+// answering the same conditional request). The tab page itself stamps no
+// validator and is unconditional.
 func (s *boardSpecServer) boardDocumentPageHandler() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
@@ -141,9 +154,21 @@ func (s *boardSpecServer) boardDocumentPageHandler() http.HandlerFunc {
 			return
 		}
 		if format == "md" {
+			// Stamping a validator obliges honouring the conditional
+			// request it invites: an unchanged token answers 304 with no
+			// body, exactly as /snapshot does, so re-downloading the same
+			// document does not re-transfer it. The entity headers below
+			// are deliberately not set on the 304 — RFC 7232 requires only
+			// the validator there, which is set first so both arms carry
+			// it.
+			etag := `"` + snap.Revision + `"`
+			w.Header().Set("ETag", etag)
+			if documentNotModified(r, etag) {
+				w.WriteHeader(http.StatusNotModified)
+				return
+			}
 			w.Header().Set("Content-Type", "text/markdown; charset=utf-8")
 			w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s-%s.md"`, name, kind))
-			w.Header().Set("ETag", `"`+snap.Revision+`"`)
 			_, _ = w.Write([]byte(snap.Markdown)) // response body write; post-header error is unactionable
 			return
 		}
@@ -188,7 +213,7 @@ func (s *boardSpecServer) boardDocumentSnapshotHandler() http.HandlerFunc {
 		}
 		etag := `"` + snap.Revision + `"`
 		w.Header().Set("ETag", etag)
-		if match := r.Header.Get("If-None-Match"); match != "" && match == etag {
+		if documentNotModified(r, etag) {
 			w.WriteHeader(http.StatusNotModified)
 			return
 		}

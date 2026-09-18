@@ -373,3 +373,72 @@ func TestBoardDocumentAssetBudget(t *testing.T) {
 		t.Fatalf("asset route: %d %q", rec.Code, rec.Header().Get("Content-Type"))
 	}
 }
+
+// TestBoardDocument_DownloadHonoursIfNoneMatch (final-review F6): the
+// ?format=md download stamps the revision ETag, so it must also HONOUR
+// the conditional request that ETag invites — the /snapshot arm's own
+// idiom, shared through notModified. Before this, a repeat download
+// re-transferred the whole document however many times a client asked,
+// while advertising a validator that promised otherwise.
+func TestBoardDocument_DownloadHonoursIfNoneMatch(t *testing.T) {
+	h, _, name := newAcceptedWallFixture(t)
+	path := "/board/spec/" + name + "/document?format=md"
+
+	first := getStatus(t, h, path)
+	if first.code != http.StatusOK || first.etag == "" || !strings.HasPrefix(first.body, "# ") {
+		t.Fatalf("first download: %d etag %q\n%s", first.code, first.etag, first.body)
+	}
+
+	conditional := func(t *testing.T, url, match string) *httptest.ResponseRecorder {
+		t.Helper()
+		req := httptest.NewRequest(http.MethodGet, url, nil)
+		req.Header.Set("If-None-Match", match)
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		return rec
+	}
+
+	rec := conditional(t, path, first.etag)
+	if rec.Code != http.StatusNotModified {
+		t.Fatalf("unchanged token must 304, got %d\n%s", rec.Code, rec.Body.String())
+	}
+	if rec.Body.Len() != 0 {
+		t.Fatalf("304 must carry no body, got %q", rec.Body.String())
+	}
+	// RFC 7232: a 304 still carries the validator, so the next
+	// conditional request can reuse it.
+	if rec.Header().Get("ETag") != first.etag {
+		t.Fatalf("304 etag %q, want %q", rec.Header().Get("ETag"), first.etag)
+	}
+
+	// Negative path: a token that does not match still transfers, and the
+	// download's own headers come with it.
+	rec = conditional(t, path, `"not-the-revision"`)
+	if rec.Code != http.StatusOK || rec.Body.String() != first.body {
+		t.Fatalf("stale token must transfer: %d\n%s", rec.Code, rec.Body.String())
+	}
+	if !strings.HasPrefix(rec.Header().Get("Content-Type"), "text/markdown") || !strings.Contains(rec.Header().Get("Content-Disposition"), `attachment; filename="`+name+`-spec.md"`) {
+		t.Fatalf("200 must keep the download headers: %q %q", rec.Header().Get("Content-Type"), rec.Header().Get("Content-Disposition"))
+	}
+
+	// A different kind is a different document: the spec's token must
+	// never 304 the tasks download.
+	rec = conditional(t, "/board/spec/"+name+"/document?format=md&kind=tasks", first.etag)
+	if rec.Code != http.StatusOK || strings.Contains(rec.Body.String(), "## Problem") {
+		t.Fatalf("tasks download against the spec token: %d\n%s", rec.Code, rec.Body.String())
+	}
+
+	// The download and the snapshot answer the SAME token, so a client
+	// may carry one between them — the shared comparison, not two.
+	snapRes := getStatus(t, h, "/board/spec/"+name+"/document/snapshot")
+	if snapRes.etag != first.etag {
+		t.Fatalf("snapshot etag %q, download etag %q", snapRes.etag, first.etag)
+	}
+
+	// The page route (no ?format=md) is unconditional: it stamps no ETag
+	// and must answer 200 with the page whatever a client sends.
+	rec = conditional(t, "/board/spec/"+name+"/document", first.etag)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `id="document-region"`) {
+		t.Fatalf("page route must stay unconditional: %d", rec.Code)
+	}
+}
