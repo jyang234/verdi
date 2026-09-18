@@ -356,3 +356,64 @@ func TestGetDocument_ProposedRendersTheWorkingTreeDraft(t *testing.T) {
 		t.Fatalf("exact accepted bytes must not be marked proposed:\n%s", text)
 	}
 }
+
+// TestGetDocument_PinnedCommitOmitsTheLiveReadinessSnapshot is
+// final-review F10: readiness is a LIVE fact about the serving checkout
+// (verdi serve's startup snapshot, Backend.Readiness), so it belongs to
+// the accepted and working-tree readings, never beside a historical
+// document. specdoc.WithReadiness gates only on TargetRef, so before
+// this fix `get_document(ref, commit=<old sha>)` — or a `spec/<name>@<sha>`
+// pinned ref — rendered the pinned commit's bytes with today's readiness
+// section, disclosing the mismatch only by printing two different
+// commits (the stamp's and the snapshot's) and leaving the reader to
+// notice. The pinned reading now states the absence instead, which is
+// co-6's "an unavailable fact is stated, never omitted".
+func TestGetDocument_PinnedCommitOmitsTheLiveReadinessSnapshot(t *testing.T) {
+	t.Setenv("CI_DEFAULT_BRANCH", "main")
+	backend, repo, _ := newTestBackend(t)
+	ref := acceptedFixtureRef(t, backend.Root)
+	snap := readinesstest.ValidSnapshot(ref, strings.Repeat("a", 40))
+	if err := snap.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	backend.Readiness = &snap
+
+	const absent = "Readiness was not supplied for this render."
+	cases := []struct {
+		name       string
+		args       map[string]any
+		wantAbsent bool
+	}{
+		{name: "accepted reading carries the live snapshot", args: map[string]any{"ref": ref}},
+		{name: "working-tree reading carries the live snapshot", args: map[string]any{"ref": ref, "proposed": true}},
+		{name: "commit argument is a historical reading", args: map[string]any{"ref": ref, "commit": repo.Head}, wantAbsent: true},
+		{name: "pinned ref is a historical reading", args: map[string]any{"ref": ref + "@" + repo.Head}, wantAbsent: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			res := backend.GetDocument(context.Background(), mustArgs(t, tc.args))
+			if isToolError(res) {
+				t.Fatalf("tool error: %s", toolResultText(t, res))
+			}
+			var got getDocumentResult
+			if err := json.Unmarshal([]byte(toolResultText(t, res)), &got); err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(got.Markdown, "## Readiness") {
+				t.Fatalf("no Readiness section at all:\n%s", got.Markdown)
+			}
+			switch stated := strings.Contains(got.Markdown, absent); {
+			case tc.wantAbsent && !stated:
+				t.Fatalf("a pinned-commit render must not carry the live readiness snapshot; want %q:\n%s", absent, got.Markdown)
+			case !tc.wantAbsent && stated:
+				t.Fatalf("a live reading must carry the readiness snapshot, not %q:\n%s", absent, got.Markdown)
+			}
+			// The snapshot's own source line is the positive witness: a
+			// live reading names the snapshot's head, a historical one
+			// names nothing.
+			if sourced := strings.Contains(got.Markdown, "Source: readiness snapshot for"); sourced == tc.wantAbsent {
+				t.Fatalf("readiness source line present=%v, want %v:\n%s", sourced, !tc.wantAbsent, got.Markdown)
+			}
+		})
+	}
+}

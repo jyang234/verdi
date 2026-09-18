@@ -98,7 +98,21 @@ func (b *Backend) GetDocument(ctx context.Context, argsRaw json.RawMessage) map[
 	if args.Proposed {
 		mode = specdocload.ModeWorkingTree
 	}
-	res, err := specdocload.Load(ctx, specdocload.Request{Root: b.Root, Name: ref.Name, Mode: mode, At: commit, Kind: kind, Model: mdl, Readiness: b.Readiness})
+	// Readiness is a LIVE fact about the serving checkout — the snapshot
+	// verdi serve built at startup (R-W3-3) — so it accompanies the
+	// accepted and working-tree readings only. A pinned commit asks for
+	// a historical document, and specdoc.WithReadiness gates on
+	// TargetRef alone, not on mode: passing the snapshot here rendered
+	// the pinned commit's bytes beside today's readiness section, two
+	// different commits in one document (final-review F10). The pinned
+	// reading now states the absence ("Readiness was not supplied for
+	// this render.") rather than supplying a fact that is not about the
+	// bytes being rendered.
+	readiness := b.Readiness
+	if mode == specdocload.ModeAt {
+		readiness = nil
+	}
+	res, err := specdocload.Load(ctx, specdocload.Request{Root: b.Root, Name: ref.Name, Mode: mode, At: commit, Kind: kind, Model: mdl, Readiness: readiness})
 	if err != nil {
 		return toolError("get_document: " + err.Error())
 	}

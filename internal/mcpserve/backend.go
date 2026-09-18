@@ -40,8 +40,11 @@ type Backend struct {
 
 	// Readiness is the startup readiness snapshot verdi serve built (nil
 	// when serving without --context-request or under standalone verdi
-	// mcp); get_document passes it to the loader, which uses it only when
-	// its TargetRef is the rendered spec (R-W3-3).
+	// mcp); get_document passes it to the loader for its live readings
+	// only — the accepted bytes and the working tree — and the loader
+	// uses it only when its TargetRef is the rendered spec (R-W3-3). A
+	// pinned-commit render never receives it: a live snapshot is not a
+	// fact about historical bytes (final-review F10).
 	Readiness *readinesspilot.Snapshot
 
 	// ReviewUnavailable, when non-empty, is the disclosed reason a
