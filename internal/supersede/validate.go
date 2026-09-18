@@ -1,85 +1,67 @@
+// ValidateSuccessorName and its typed refusal now live in
+// internal/specname (moved there by the UAT-030/031/032 fix round): the
+// predicate widened to cover the plain `design start` path and the
+// board's create action, neither of which supersedes anything, so
+// validating a bare name's shape and uniqueness no longer belongs to THIS
+// package's own concern (CLAUDE.md: "one package = one concern ... split
+// before a package accumulates a second concern").
+//
+// This file is a thin re-export so the two callers that ARE
+// supersede-flavored — `design start --supersedes`
+// (cmd/verdi/designsupersede.go) and the board's Revise action
+// (internal/workbench/boardspecapi.go actionRevise) — keep reading
+// supersede.ValidateSuccessorName / supersede.NameError / supersede.ReasonXxx
+// exactly as before, with no import-path or call-site rename forced on
+// them; the two callers with no supersede semantics of their own (the
+// plain `design start` path, the board's create action) import
+// internal/specname directly instead. See internal/specname/validate.go
+// for the implementation and its own exhaustive tests — this package's own
+// validate_test.go only proves the re-export wires correctly.
+//
+// Note for a reader of resolve.go's own package doc comment ("Resolve's
+// own reasons are below; ValidateSuccessorName's are in validate.go"):
+// that sentence is still true in spirit (this file is still where they are
+// FOUND, from this package), but the two Reason types are no longer the
+// same Go type — ResolveError.Reason stays this package's own
+// supersede.Reason (resolve.go, untouched by this move); NameError.Reason
+// is specname.Reason, aliased in below under different constant names so
+// the two never collide.
 package supersede
 
 import (
-	"fmt"
-	"os"
+	"context"
 
 	"github.com/jyang234/verdi/internal/artifact"
-	"github.com/jyang234/verdi/internal/store"
+	"github.com/jyang234/verdi/internal/specname"
 )
 
+// NameError is specname.NameError, re-exported under this package's own
+// established name (see the package doc comment above).
+type NameError = specname.NameError
+
+// Reason values specname.ValidateSuccessorName's NameError.Reason can
+// carry — re-exported so a caller comparing against
+// supersede.ReasonSuccessorExists (etc.) needs no second import. Each
+// constant's own static type is specname.Reason (inherited from the
+// right-hand side), distinct from this package's OWN Reason type
+// (resolve.go, ResolveError's predecessor-side reasons) — the two never
+// collide because they are different identifiers.
 const (
-	// ReasonInvalidName means the proposed successor name does not parse
-	// as a spec ref (02 §Identity and references: kebab-case, and VL-002's
-	// path-bound identity means the name IS the store directory).
-	ReasonInvalidName Reason = "invalid-name"
-	// ReasonSuccessorExists means the successor's own store directory is
-	// already present in the active zone — the collision that must refuse
-	// BEFORE anything is written or any branch is cut.
-	ReasonSuccessorExists Reason = "successor-exists"
+	ReasonInvalidName     = specname.ReasonInvalidName
+	ReasonSuccessorExists = specname.ReasonSuccessorExists
+	ReasonArchivedExists  = specname.ReasonArchivedExists
+	ReasonExistsOnBase    = specname.ReasonExistsOnBase
 )
 
-// NameError is ValidateSuccessorName's typed refusal, the successor-side
-// twin of ResolveError: Reason classifies why, Name carries the rejected
-// name, Path names the colliding directory (ReasonSuccessorExists only),
-// and Unwrap exposes the underlying ref-parse failure
-// (ReasonInvalidName only).
-//
-// Each caller renders its OWN message from these fields rather than
-// relaying Detail verbatim: a CLI names the flag the operator typed
-// (`--name`), the workbench names its own form field, and neither has to
-// borrow the other's vocabulary to reuse this one check.
-type NameError struct {
-	Reason Reason
-	Name   string
-	Path   string
-	Detail string
-	Err    error
-}
-
-func (e *NameError) Error() string { return e.Detail }
-
-func (e *NameError) Unwrap() error { return e.Err }
-
-// ValidateSuccessorName proves the two successor-side preconditions every
-// caller of this package shares before composing anything: name parses as
-// a spec ref (returned, so the caller need not re-parse it to render the
-// successor's canonical ref), and no spec directory of that name already
-// exists in root's active zone.
-//
-// It lives here, beside Resolve's predecessor-side guard, because the
-// board's Revise action (W3-C, spec/uat-round-1 ac-11's board half) needs
-// exactly these two checks and must not re-implement them: a second copy
-// is a second thing to drift, and this one is the seam where both surfaces
-// meet — the same "one shared core, two callers" shape this package's own
-// doc comment states.
-//
-// NOT covered here, deliberately: whether a `design/<name>` BRANCH already
-// exists. That is a Git question this pure-filesystem check has no context
-// or repository handle for, and each caller's own branch-creation
-// primitive already owns it — the CLI's gitx.CheckoutNewBranchFrom refuses
-// an existing branch before switching. A caller that updates a ref
-// directly instead must make that check itself; see this lane's report.
-func ValidateSuccessorName(root, name string) (artifact.Ref, error) {
-	ref, err := artifact.ParseRef("spec/" + name)
-	if err != nil {
-		return artifact.Ref{}, &NameError{
-			Reason: ReasonInvalidName,
-			Name:   name,
-			Detail: fmt.Sprintf("supersede: successor name %q is not a valid spec name: %v", name, err),
-			Err:    err,
-		}
-	}
-
-	dir := store.ActiveSpecDir(root, name)
-	if _, statErr := os.Stat(dir); statErr == nil {
-		return artifact.Ref{}, &NameError{
-			Reason: ReasonSuccessorExists,
-			Name:   name,
-			Path:   dir,
-			Detail: fmt.Sprintf("supersede: %s already exists", dir),
-		}
-	}
-
-	return ref, nil
+// ValidateSuccessorName forwards to specname.ValidateSuccessorName, one
+// call deep (see the package doc comment above) — a plain function, not a
+// package-level func var (F2, the wave-3 review's own fix round on this
+// lane): a var of function type is reassignable by any code that imports
+// this package, an accidental monkey-patch hazard this predicate's own
+// callers (every branch-cutting creation surface) must never be exposed
+// to. ctx is required (BlobAt's base-ref probe, run only when baseRef !=
+// ""); baseRef is the ref the caller's new branch will actually be cut
+// from, or "" to skip that third check (UAT-031).
+func ValidateSuccessorName(ctx context.Context, root, name, baseRef string) (artifact.Ref, error) {
+	return specname.ValidateSuccessorName(ctx, root, name, baseRef)
 }

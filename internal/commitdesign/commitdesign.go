@@ -208,7 +208,15 @@ func Run(ctx context.Context, in Input) (*Result, error) {
 		}
 	}
 
-	if err := gitx.AddAll(ctx, in.Root); err != nil {
+	// UAT-034: stage exactly the scaffolded spec directory — never
+	// gitx.AddAll's `git add -A`, which swept every untracked-or-modified
+	// file anywhere in the checkout (a stray .DS_Store, a local sqlite,
+	// unrelated object blobs) into this commit. Mirrors design.go's own
+	// UAT-033 fix: gitx.AddPaths, never gitx.AddAll, for a ritual commit
+	// that must own only the paths it itself wrote — here, specDir alone
+	// (spec.md and board.json; GraduateStickies' annotation writes live
+	// under the gitignored data/mutable/annotations and are never staged).
+	if err := gitx.AddPaths(ctx, in.Root, specDir); err != nil {
 		return nil, fmt.Errorf("commitdesign: %w", err)
 	}
 	commit, err := gitx.CreateCommit(ctx, in.Root, fmt.Sprintf("commit-to-design: %s from board %s", specRef, in.BoardKey))

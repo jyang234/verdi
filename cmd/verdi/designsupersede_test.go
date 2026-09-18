@@ -99,6 +99,40 @@ owners: [platform-team]
 body
 `
 
+// behindCheckoutFixtureSpec is a minimal, strict-decodable feature spec used
+// only as UAT-031's own "a name already landed on main" collision probe
+// (TestRunDesignStartSupersede_Negative's "behind checkout" case) — its
+// content is never inspected, only its presence at the target path, but it
+// must still strict-decode: supersede.Resolve's predecessor-status
+// projection corpus-scans every spec on the default branch (both zones)
+// looking for successors, and a malformed spec anywhere in that scan fails
+// the scan closed (disclosed-unproven) rather than merely skipping it.
+const behindCheckoutFixtureSpec = `---
+id: spec/taken-on-main
+kind: spec
+class: feature
+title: "Taken on main (fixture)"
+owners: [platform-team]
+problem: { text: "p", anchor: "#problem" }
+outcome: { text: "o", anchor: "#outcome" }
+acceptance_criteria:
+  - { id: ac-1, text: "a", evidence: [static], anchor: "#ac-1" }
+---
+# Taken on main (fixture)
+
+## Problem
+
+p
+
+## Outcome
+
+o
+
+## AC-1
+
+a
+`
+
 // buildSupersedeRepo builds a one-layer fixturegit repo carrying verdi.yaml
 // plus the lockbox predecessor, landed directly on main (the merge-signaled
 // "accepted" shape: no frozen:/status:, exact bytes already on the default
@@ -231,6 +265,126 @@ func TestRunDesignStartSupersede_Negative(t *testing.T) {
 		}
 		if !strings.Contains(stderr.String(), "not found") {
 			t.Fatalf("stderr = %q, want the Resolve not-found refusal forwarded", stderr.String())
+		}
+	})
+
+	// -- UAT-030/031/032 fix coverage ---------------------------------------
+
+	// "fragment successor name" is UAT-030's own witness on --supersedes: a
+	// "#fragment" suffix decorates a REFERENCE (02 §Identity and
+	// references), never a spec's own name, but used to inherit
+	// artifact.ParseRef's tolerance via the old 2-arg
+	// supersede.ValidateSuccessorName.
+	t.Run("fragment successor name", func(t *testing.T) {
+		repo := buildSupersedeRepo(t)
+		ctx := context.Background()
+		var stdout, stderr bytes.Buffer
+		got := runDesignStartSupersede(ctx, repo.Dir, "lockbox", "lockbox-v2#dc-1", phase7Model(t), nil, fakeGoTest{}, &stdout, &stderr)
+		if got != 2 {
+			t.Fatalf("runDesignStartSupersede(fragment name) = %d, want 2; stdout=%s stderr=%s", got, stdout.String(), stderr.String())
+		}
+		if !strings.Contains(stderr.String(), "lockbox-v2#dc-1") {
+			t.Fatalf("stderr = %q, want it to name the rejected successor name", stderr.String())
+		}
+		if strings.Contains(strings.ToLower(stderr.String()), "internal error") {
+			t.Fatalf("stderr = %q, want operator-facing wording, never \"internal error\"", stderr.String())
+		}
+	})
+
+	// "pinned successor name" is UAT-030's other half, and the one that
+	// closes this lane's fourth item: before this fix, a pinned --name
+	// DID already fail closed, but only deep inside supersede.Compose's
+	// own self-validation (artifact.DecodeSpec refusing a pinned id:
+	// field), surfacing as "internal error: composed successor failed
+	// self-validation" — blaming the tool for operator input. The shared
+	// predicate now catches it first, before Compose ever runs.
+	t.Run("pinned successor name", func(t *testing.T) {
+		repo := buildSupersedeRepo(t)
+		ctx := context.Background()
+		var stdout, stderr bytes.Buffer
+		got := runDesignStartSupersede(ctx, repo.Dir, "lockbox", "lockbox-v2@abc1234", phase7Model(t), nil, fakeGoTest{}, &stdout, &stderr)
+		if got != 2 {
+			t.Fatalf("runDesignStartSupersede(pinned name) = %d, want 2; stdout=%s stderr=%s", got, stdout.String(), stderr.String())
+		}
+		if strings.Contains(strings.ToLower(stderr.String()), "internal error") {
+			t.Fatalf("stderr = %q, want operator-facing wording, never \"internal error\" (the old bug this lane closes)", stderr.String())
+		}
+		if !strings.Contains(stderr.String(), "lockbox-v2@abc1234") {
+			t.Fatalf("stderr = %q, want it to name the rejected successor name", stderr.String())
+		}
+	})
+
+	// "archived successor name exists" is UAT-032's own witness: the CLI
+	// checked only the active zone (supersede.ValidateSuccessorName's own
+	// half), never the archive zone the board already checked.
+	t.Run("archived successor name exists", func(t *testing.T) {
+		repo := buildSupersedeRepo(t)
+		ctx := context.Background()
+		if err := os.MkdirAll(filepath.Join(repo.Dir, ".verdi", "specs", "archive", "retired"), 0o755); err != nil {
+			t.Fatalf("MkdirAll: %v", err)
+		}
+		var stdout, stderr bytes.Buffer
+		got := runDesignStartSupersede(ctx, repo.Dir, "lockbox", "retired", phase7Model(t), nil, fakeGoTest{}, &stdout, &stderr)
+		if got != 2 {
+			t.Fatalf("runDesignStartSupersede(archived name) = %d, want 2; stdout=%s stderr=%s", got, stdout.String(), stderr.String())
+		}
+		if !strings.Contains(stderr.String(), "specs/archive/") {
+			t.Fatalf("stderr = %q, want it to name the archive collision (guide 6.1)", stderr.String())
+		}
+	})
+
+	// "behind checkout" is UAT-031's own witness on --supersedes: the
+	// collision check used to stat only the current checkout's working
+	// tree, while the new branch is cut from the resolved default branch.
+	t.Run("successor name present on main, absent from behind checkout", func(t *testing.T) {
+		repo := buildSupersedeRepo(t)
+		ctx := context.Background()
+		if err := gitx.CheckoutNewBranch(ctx, repo.Dir, "side"); err != nil {
+			t.Fatalf("CheckoutNewBranch(side): %v", err)
+		}
+		if err := gitx.CheckoutExisting(ctx, repo.Dir, "main"); err != nil {
+			t.Fatalf("CheckoutExisting(main): %v", err)
+		}
+		specDir := filepath.Join(repo.Dir, ".verdi", "specs", "active", "taken-on-main")
+		if err := os.MkdirAll(specDir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		// A real (strict-decodable) spec, not a one-line placeholder: this
+		// lands on main's ACTIVE zone, which supersede.Resolve's own
+		// predecessor-status projection also corpus-scans (internal/
+		// specstate's successorCorpus, both zones) to check whether
+		// "lockbox" itself is superseded by anything — a malformed spec
+		// anywhere in that scan makes the corpus scan fail closed
+		// (disclosed-unproven), which would refuse this call for an
+		// UNRELATED reason before ever reaching the name check this test
+		// means to exercise.
+		if err := os.WriteFile(filepath.Join(specDir, "spec.md"), []byte(behindCheckoutFixtureSpec), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := gitx.AddAll(ctx, repo.Dir); err != nil {
+			t.Fatalf("AddAll: %v", err)
+		}
+		if _, err := gitx.CreateCommit(ctx, repo.Dir, "land taken-on-main on main"); err != nil {
+			t.Fatalf("CreateCommit: %v", err)
+		}
+		if err := gitx.CheckoutExisting(ctx, repo.Dir, "side"); err != nil {
+			t.Fatalf("CheckoutExisting(side): %v", err)
+		}
+
+		var stdout, stderr bytes.Buffer
+		got := runDesignStartSupersede(ctx, repo.Dir, "lockbox", "taken-on-main", phase7Model(t), nil, fakeGoTest{}, &stdout, &stderr)
+		if got != 2 {
+			t.Fatalf("runDesignStartSupersede(name on main, absent from behind checkout) = %d, want 2; stdout=%s stderr=%s", got, stdout.String(), stderr.String())
+		}
+		if !strings.Contains(stderr.String(), "main") {
+			t.Fatalf("stderr = %q, want it to name the base ref the checkout is behind", stderr.String())
+		}
+		branch, err := gitx.CurrentBranch(ctx, repo.Dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if branch != "side" {
+			t.Fatalf("current branch = %q, want the checkout left on side (preparation refusal, no switch)", branch)
 		}
 	})
 }
@@ -627,5 +781,126 @@ func TestDesignStartSupersedeE2E_EqualsFlagSpellings(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(repo.Dir, ".verdi", "specs", "active", "lockbox-v2", "spec.md")); err != nil {
 		t.Fatalf("successor spec.md: %v", err)
+	}
+}
+
+// TestRunDesignStartSupersede_ScaffoldCommitStagesOnlySpecDir is UAT-033's
+// own witness for the --supersedes path (design_test.go's
+// TestRunDesignStart_ScaffoldCommitStagesOnlySpecDir proves the identical
+// invariant for the plain --kind/--name path this file's runDesignStartSupersede
+// used to reuse gitx.AddAll from by parity). Plants the same three shapes of
+// working-tree noise the round spec PR's real scaffold commit carried — an
+// untracked file at the repo root, an untracked file in a nested docs
+// directory, and a modified tracked file (here the tracked verdi.yaml,
+// never the predecessor spec.md this ritual reads to compose the successor)
+// — then proves the successor's scaffold commit contains exactly the one
+// path this ritual itself wrote, every planted file rides untouched in the
+// working tree afterward, and the verb's own success disclosure is
+// unchanged.
+func TestRunDesignStartSupersede_ScaffoldCommitStagesOnlySpecDir(t *testing.T) {
+	t.Setenv("CI_DEFAULT_BRANCH", "main")
+	repo := buildSupersedeRepo(t)
+	ctx := context.Background()
+
+	// (a) untracked file at the repo root.
+	if err := os.WriteFile(filepath.Join(repo.Dir, ".DS_Store"), []byte("junk"), 0o644); err != nil {
+		t.Fatalf("planting root untracked file: %v", err)
+	}
+	// (b) untracked file in a nested docs directory.
+	nestedDir := filepath.Join(repo.Dir, "docs", "superpowers", "specs")
+	if err := os.MkdirAll(nestedDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll nested docs dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(nestedDir, "lens.sqlite3"), []byte("junk"), 0o644); err != nil {
+		t.Fatalf("planting nested untracked file: %v", err)
+	}
+	// (c) a modified tracked file — the manifest, never the predecessor
+	// spec.md this ritual reads verbatim to compose the successor.
+	manifestPath := filepath.Join(repo.Dir, ".verdi", "verdi.yaml")
+	original, err := os.ReadFile(manifestPath)
+	if err != nil {
+		t.Fatalf("reading tracked manifest: %v", err)
+	}
+	if err := os.WriteFile(manifestPath, append(original, []byte("\n# local edit\n")...), 0o644); err != nil {
+		t.Fatalf("modifying tracked manifest: %v", err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	got := runDesignStartSupersede(ctx, repo.Dir, "lockbox", "lockbox-v2", phase7Model(t), nil, fakeGoTest{}, &stdout, &stderr)
+	if got != 0 {
+		t.Fatalf("runDesignStartSupersede = %d, want 0; stderr=%s", got, stderr.String())
+	}
+
+	head, err := gitx.RevParse(ctx, repo.Dir, "HEAD")
+	if err != nil {
+		t.Fatalf("RevParse(HEAD): %v", err)
+	}
+	entries, err := gitx.DiffNameStatus(ctx, repo.Dir, repo.Head, head)
+	if err != nil {
+		t.Fatalf("DiffNameStatus: %v", err)
+	}
+	wantPath := ".verdi/specs/active/lockbox-v2/spec.md"
+	if len(entries) != 1 || entries[0].Path != wantPath {
+		t.Fatalf("scaffold commit's changed paths = %+v, want exactly [%s] (never the planted working-tree noise)", entries, wantPath)
+	}
+
+	plants := []string{".DS_Store", "docs/superpowers/specs/lens.sqlite3", ".verdi/verdi.yaml"}
+
+	changed, err := gitx.WorktreeChangedPaths(ctx, repo.Dir)
+	if err != nil {
+		t.Fatalf("WorktreeChangedPaths: %v", err)
+	}
+	changedSet := map[string]bool{}
+	for _, p := range changed {
+		changedSet[p] = true
+	}
+	for _, want := range plants {
+		if !changedSet[want] {
+			t.Errorf("WorktreeChangedPaths = %v, want %q still present (an unresolved working-tree change: untracked or modified)", changed, want)
+		}
+	}
+	if changedSet[wantPath] {
+		t.Errorf("WorktreeChangedPaths = %v, want %q absent (it was committed, so the working tree is clean at that path)", changed, wantPath)
+	}
+
+	// WorktreeChangedPaths alone does not prove "never staged": `git status
+	// --porcelain` reports an index-staged-but-uncommitted path too (as
+	// "A "/"M " rather than "??"/" M"), so it would stay green even if a
+	// regression left one of the plants sitting staged in the index (e.g. a
+	// future rewrite that commits via a pathspec scoped to specDir, which
+	// would leave any OTHER staged path uncommitted rather than absent).
+	// gitx.StagedPaths reports exactly the paths whose index entry differs
+	// from HEAD — the precise check for "never staged by this ritual".
+	staged, err := gitx.StagedPaths(ctx, repo.Dir)
+	if err != nil {
+		t.Fatalf("StagedPaths: %v", err)
+	}
+	stagedSet := map[string]bool{}
+	for _, p := range staged {
+		stagedSet[p] = true
+	}
+	for _, want := range plants {
+		if stagedSet[want] {
+			t.Errorf("StagedPaths = %v, want %q absent (this ritual must never stage it, even transiently)", staged, want)
+		}
+	}
+
+	if !strings.Contains(stdout.String(), "board:") {
+		t.Fatalf("stdout = %q, want a board URL placeholder line (the verb's own stdout is unchanged by this fix)", stdout.String())
+	}
+}
+
+// TestDesignSupersedeGo_NoAddAll is a source-text witness mirroring
+// design_test.go's TestDesignGo_NoAddAll: designsupersede.go's scaffold
+// commit must stage exactly the successor spec directory via
+// gitx.AddPaths (UAT-033), never gitx.AddAll's blanket `git add -A` sweep
+// of the rest of the working tree.
+func TestDesignSupersedeGo_NoAddAll(t *testing.T) {
+	data, err := os.ReadFile("designsupersede.go")
+	if err != nil {
+		t.Fatalf("reading designsupersede.go: %v", err)
+	}
+	if strings.Contains(string(data), "AddAll(") {
+		t.Error("designsupersede.go calls gitx.AddAll — the scaffold commit must stage exactly the spec directory via gitx.AddPaths instead (UAT-033)")
 	}
 }

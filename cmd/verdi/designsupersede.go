@@ -31,6 +31,7 @@ import (
 	"github.com/jyang234/verdi/internal/atomicfile"
 	"github.com/jyang234/verdi/internal/gitx"
 	"github.com/jyang234/verdi/internal/model"
+	"github.com/jyang234/verdi/internal/specname"
 	"github.com/jyang234/verdi/internal/store"
 	"github.com/jyang234/verdi/internal/supersede"
 	"github.com/jyang234/verdi/internal/upstream"
@@ -179,21 +180,47 @@ func cmdDesignStartSupersede(args []string, stdout, stderr io.Writer) int {
 // supersede-scaffold ritual and return the exit code. Mirrors
 // runDesignStart's own preparation-boundary shape (design.go: resolve/
 // validate everything before the first Git mutation) — predName's guard
-// (supersede.Resolve) runs in the CURRENT checkout, before base resolution
-// or the checkout switch, exactly like supersede.Resolve's own doc comment
-// states it must.
+// (supersede.Resolve) runs in the CURRENT checkout, before the checkout
+// switch, exactly like supersede.Resolve's own doc comment states it must.
+//
+// Reordering note (UAT-030/031/032 fix, disclosed in this lane's report):
+// base resolution (dc-7) used to run AFTER the successor-name check and
+// AFTER Resolve/Compose, immediately before the checkout switch. It now
+// runs FIRST, because the name check itself needs the base ref (UAT-031:
+// it must ask the SAME ref the branch will actually be cut from, not only
+// the current checkout's working tree) — Resolve keeps its own documented
+// invariant (runs in the current checkout, before the checkout switch;
+// nothing here reads or writes any checkout state until
+// checkoutNewDesignBranch, still the last preparation step before it).
 func runDesignStartSupersede(ctx context.Context, root, predName, newName string, mdl *model.Model, runner upstream.Runner, goTest goTestRunner, stdout, stderr io.Writer) int {
+	baseRef, ok := resolveDesignStartBase(ctx, root, stdout, stderr)
+	if !ok {
+		return 2
+	}
+
 	// The successor-side preconditions live in internal/supersede beside
 	// the predecessor guard (ValidateSuccessorName), so the board's Revise
 	// action reuses the identical checks rather than re-implementing them;
 	// this verb keeps its OWN wording for each refusal — the operator typed
-	// `--name`, and only the CLI knows that.
-	newRef, err := supersede.ValidateSuccessorName(root, newName)
+	// `--name`, and only the CLI knows that. UAT-030/031/032 (wave-3 review
+	// fix round): ValidateSuccessorName now also refuses a "#fragment" or
+	// "@commit"-decorated successor name (UAT-030 — this is also this
+	// lane's fix for item 4: a pinned --name used to fail only deep inside
+	// Compose's own self-validation, surfacing as a misleading "internal
+	// error"; it is now caught here, before Compose ever runs), a name
+	// already used by an ARCHIVED spec (UAT-032), and a name already
+	// present on baseRef even though this checkout's working tree shows no
+	// collision (UAT-031).
+	newRef, err := supersede.ValidateSuccessorName(ctx, root, newName, baseRef)
 	if err != nil {
 		var nerr *supersede.NameError
 		switch {
 		case errors.As(err, &nerr) && nerr.Reason == supersede.ReasonSuccessorExists:
 			fmt.Fprintf(stderr, "design start --supersedes: %s already exists\n", nerr.Path)
+		case errors.As(err, &nerr) && nerr.Reason == supersede.ReasonArchivedExists:
+			fmt.Fprintf(stderr, "design start --supersedes: spec %s already exists under specs/archive/ — names are unique across active and archived specs (guide 6.1)\n", nerr.Name)
+		case errors.As(err, &nerr) && nerr.Reason == supersede.ReasonExistsOnBase:
+			fmt.Fprintf(stderr, "design start --supersedes: %s\n", specname.ExistsOnBaseDetail(nerr.Name, baseRef))
 		case errors.As(err, &nerr) && nerr.Reason == supersede.ReasonInvalidName:
 			fmt.Fprintf(stderr, "design start --supersedes: --name %q is not a valid spec name: %v\n", newName, errors.Unwrap(nerr))
 		default:
@@ -228,15 +255,8 @@ func runDesignStartSupersede(ctx context.Context, root, predName, newName string
 
 	// Preparation boundary (mirroring runDesignStart, design.go's own R1/
 	// SI-198 comment): everything above is read-only validation. Only now
-	// does this verb touch Git — base resolution (dc-7) then the checkout
-	// switch (dc-2), both the identical shared helpers runDesignStart's
-	// own --kind/--name path uses, so the two paths' disclosure wording can
-	// never drift apart.
-	baseRef, ok := resolveDesignStartBase(ctx, root, stdout, stderr)
-	if !ok {
-		return 2
-	}
-
+	// does this verb touch Git — the checkout switch (dc-2), using the base
+	// ref already resolved above.
 	branch := "design/" + newName
 	if !checkoutNewDesignBranch(ctx, root, branch, baseRef, stdout, stderr) {
 		return 2
@@ -254,7 +274,12 @@ func runDesignStartSupersede(ctx context.Context, root, predName, newName string
 		return 2
 	}
 
-	if err := gitx.AddAll(ctx, root); err != nil {
+	// UAT-033: stage exactly the scaffolded successor spec directory —
+	// never gitx.AddAll's `git add -A`, which swept every
+	// untracked-or-modified file anywhere in the checkout into the
+	// scaffold commit (design.go's runDesignStart carried the identical
+	// defect and fix; this path reused AddAll from it by parity).
+	if err := gitx.AddPaths(ctx, root, specDir); err != nil {
 		fmt.Fprintln(stderr, "design start --supersedes:", err)
 		return 2
 	}
