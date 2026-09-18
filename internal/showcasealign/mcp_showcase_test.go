@@ -425,7 +425,9 @@ func TestMCPShowcaseCoverage(t *testing.T) {
 	// prepare_design_review/mutate_draft above: a genuine, disclosed fact
 	// about examples/showcase's real state is the real assertion, never
 	// forced synthetic success. Either way, no design/ branch is created —
-	// checked directly against the checkout's own refs.
+	// asked of git itself (gitx.HasLocalBranch, i.e. `git show-ref
+	// --verify refs/heads/<branch>`), which sees a packed ref a loose-ref
+	// stat would miss.
 	t.Run("import_preview_then_import_apply", func(t *testing.T) {
 		sampleData, err := os.ReadFile(filepath.Join(verdiRepoRoot, "internal", "mcpserve", "testdata", "specimport", "sample.md"))
 		if err != nil {
@@ -444,15 +446,23 @@ func TestMCPShowcaseCoverage(t *testing.T) {
 			},
 			"retain_unmapped": true,
 		}
-		branchRef := filepath.Join(root, ".git", "refs", "heads", "design", slug)
+		branch := "design/" + slug
+		assertNoBranch := func(after string) {
+			t.Helper()
+			exists, err := gitx.HasLocalBranch(ctx, root, branch)
+			if err != nil {
+				t.Fatalf("checking for %s after %s: %v", branch, after, err)
+			}
+			if exists {
+				t.Fatalf("%s must not create %s in the showcase store", after, branch)
+			}
+		}
 
 		previewText, previewIsError := callMCPTool(t, srv, "import_preview", map[string]any{"request": req})
 		if !previewIsError || !strings.HasPrefix(previewText, "import_preview: dirty-context:") || !strings.Contains(previewText, "loansvc/.flowmap") {
 			t.Fatalf("import_preview against the real showcase store = isError=%v %q, want the real dirty-context refusal naming the real untracked loansvc fixture", previewIsError, previewText)
 		}
-		if _, err := os.Stat(branchRef); err == nil {
-			t.Fatal("import_preview must not create the design branch in the showcase store")
-		}
+		assertNoBranch("import_preview")
 
 		applyText, applyIsError := callMCPTool(t, srv, "import_apply", map[string]any{
 			"harness": "showcase-coverage-test", "preview_digest": strings.Repeat("a", 64), "request": req,
@@ -460,9 +470,7 @@ func TestMCPShowcaseCoverage(t *testing.T) {
 		if !applyIsError || !strings.HasPrefix(applyText, "import_apply: dirty-context:") {
 			t.Fatalf("import_apply against the real showcase store = isError=%v %q, want the real dirty-context refusal (the same precondition gates apply before any digest is ever compared)", applyIsError, applyText)
 		}
-		if _, err := os.Stat(branchRef); err == nil {
-			t.Fatal("import_apply must not create a branch in the showcase store when refused on a dirty checkout")
-		}
+		assertNoBranch("import_apply's dirty-context refusal")
 	})
 
 	// add_annotation, list_annotations, and list_tasks are exercised as

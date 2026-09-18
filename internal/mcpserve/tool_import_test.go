@@ -158,6 +158,11 @@ func TestImportPreviewThenApply_RecordNamesHarnessAndSession(t *testing.T) {
 	if result.Status != specimport.StatusCreated || result.Branch != "design/imported-sample" || result.PreviewDigest != preview.Digest {
 		t.Fatalf("apply = %+v", result)
 	}
+	// The positive arm of the same branch check the refusal paths use,
+	// so "no branch was created" is never a vacuous answer.
+	if exists, err := gitx.HasLocalBranch(context.Background(), root, result.Branch); err != nil || !exists {
+		t.Fatalf("apply must create %s (exists=%v err=%v)", result.Branch, exists, err)
+	}
 	view, err := specimport.ReadRecord(context.Background(), root, result.Branch, "imported-sample")
 	if err != nil {
 		t.Fatal(err)
