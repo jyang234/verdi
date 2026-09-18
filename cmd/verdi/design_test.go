@@ -816,3 +816,148 @@ func TestDesignGo_NoAddAll(t *testing.T) {
 		t.Error("design.go calls gitx.AddAll — the scaffold commit must stage exactly the spec directory via gitx.AddPaths instead (UAT-033)")
 	}
 }
+
+// -- UAT-030/031/032 fix coverage -------------------------------------------
+
+// TestRunDesignStart_FragmentNameRefused is UAT-030's own witness on the
+// plain --kind/--name path: a "#fragment" suffix decorates a REFERENCE to a
+// spec (02 §Identity and references), never a spec's own name, but used to
+// parse straight through artifact.ParseRef and land verbatim as both the
+// directory name and the id. Refused now, operator-facing, before any
+// branch is cut or anything is written.
+func TestRunDesignStart_FragmentNameRefused(t *testing.T) {
+	repo := buildPhase7Repo(t)
+	t.Setenv("CI_DEFAULT_BRANCH", "")
+	ctx := context.Background()
+	manifest := phase7Manifest(t)
+	deps := designDeps{Provider: seedFakeProvider(t), Runner: nil, GoTest: fakeGoTest{}, DeferStatements: true}
+
+	var stdout, stderr bytes.Buffer
+	got := runDesignStart(ctx, repo.Dir, artifact.ClassFeature, "", "plainfrag#dc-1", manifest, phase7Model(t), deps, &stdout, &stderr)
+	if got != 2 {
+		t.Fatalf("runDesignStart(name with #fragment) = %d, want 2; stdout=%s stderr=%s", got, stdout.String(), stderr.String())
+	}
+	if !contains(stderr.String(), "plainfrag#dc-1") {
+		t.Fatalf("stderr = %q, want it to name the rejected name", stderr.String())
+	}
+	if contains(strings.ToLower(stderr.String()), "internal error") {
+		t.Fatalf("stderr = %q, want operator-facing wording, never \"internal error\"", stderr.String())
+	}
+	if _, err := os.Stat(filepath.Join(repo.Dir, ".verdi", "specs", "active", "plainfrag#dc-1")); !os.IsNotExist(err) {
+		t.Fatal("the refused name still landed a spec directory")
+	}
+	if has, err := gitx.HasLocalBranch(ctx, repo.Dir, "design/plainfrag#dc-1"); err != nil {
+		t.Fatalf("HasLocalBranch: %v", err)
+	} else if has {
+		t.Fatal("the refused name still cut a design branch")
+	}
+}
+
+// TestRunDesignStart_PinnedNameRefused proves the sibling decoration
+// (an "@commit" pin) refuses too, on the same path.
+func TestRunDesignStart_PinnedNameRefused(t *testing.T) {
+	repo := buildPhase7Repo(t)
+	t.Setenv("CI_DEFAULT_BRANCH", "")
+	ctx := context.Background()
+	manifest := phase7Manifest(t)
+	deps := designDeps{Provider: seedFakeProvider(t), Runner: nil, GoTest: fakeGoTest{}, DeferStatements: true}
+
+	var stdout, stderr bytes.Buffer
+	got := runDesignStart(ctx, repo.Dir, artifact.ClassFeature, "", "pinned@abc1234", manifest, phase7Model(t), deps, &stdout, &stderr)
+	if got != 2 {
+		t.Fatalf("runDesignStart(name with @commit) = %d, want 2; stdout=%s stderr=%s", got, stdout.String(), stderr.String())
+	}
+	if contains(strings.ToLower(stderr.String()), "internal error") {
+		t.Fatalf("stderr = %q, want operator-facing wording, never \"internal error\"", stderr.String())
+	}
+}
+
+// TestRunDesignStart_ArchivedNameRefused is UAT-032's own witness on the
+// plain path: design start previously checked only the active zone, so a
+// name already retired under specs/archive/ could be reused, shadowing the
+// archived spec (guide 6.1: names are unique across active and archived
+// specs).
+func TestRunDesignStart_ArchivedNameRefused(t *testing.T) {
+	repo := buildPhase7Repo(t)
+	t.Setenv("CI_DEFAULT_BRANCH", "")
+	ctx := context.Background()
+	if err := os.MkdirAll(filepath.Join(repo.Dir, ".verdi", "specs", "archive", "retired"), 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	manifest := phase7Manifest(t)
+	deps := designDeps{Provider: seedFakeProvider(t), Runner: nil, GoTest: fakeGoTest{}, DeferStatements: true}
+
+	var stdout, stderr bytes.Buffer
+	got := runDesignStart(ctx, repo.Dir, artifact.ClassFeature, "", "retired", manifest, phase7Model(t), deps, &stdout, &stderr)
+	if got != 2 {
+		t.Fatalf("runDesignStart(archived name) = %d, want 2; stdout=%s stderr=%s", got, stdout.String(), stderr.String())
+	}
+	if !contains(stderr.String(), "specs/archive/") {
+		t.Fatalf("stderr = %q, want it to name the archive collision (guide 6.1)", stderr.String())
+	}
+	if has, err := gitx.HasLocalBranch(ctx, repo.Dir, "design/retired"); err != nil {
+		t.Fatalf("HasLocalBranch: %v", err)
+	} else if has {
+		t.Fatal("the refused archived name still cut a design branch")
+	}
+}
+
+// TestRunDesignStart_BehindCheckout_NameOnMainRefused is UAT-031's own
+// witness on the plain path: the collision check used to stat only the
+// CURRENT checkout's working tree, while the new branch is actually cut
+// from the resolved default branch (dc-7). A checkout left behind main
+// (mirroring TestRunDesignStart_BasesOnDefaultBranch_NotHEAD's own "side"
+// branch setup) could therefore cut a design/<name> branch whose tree
+// silently replaced a same-named spec already landed on main.
+func TestRunDesignStart_BehindCheckout_NameOnMainRefused(t *testing.T) {
+	repo := buildPhase7Repo(t)
+	t.Setenv("CI_DEFAULT_BRANCH", "main")
+	ctx := context.Background()
+
+	// Cut a side branch from main's current tip, then land a spec of the
+	// target name on main ONLY, and leave the checkout ON the side branch
+	// — behind main, exactly as the UAT reproduction found it.
+	if err := gitx.CheckoutNewBranch(ctx, repo.Dir, "side"); err != nil {
+		t.Fatalf("CheckoutNewBranch(side): %v", err)
+	}
+	if err := gitx.CheckoutExisting(ctx, repo.Dir, "main"); err != nil {
+		t.Fatalf("CheckoutExisting(main): %v", err)
+	}
+	specDir := filepath.Join(repo.Dir, ".verdi", "specs", "active", "taken-on-main")
+	if err := os.MkdirAll(specDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(specDir, "spec.md"), []byte("landed on main only\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := gitx.AddAll(ctx, repo.Dir); err != nil {
+		t.Fatalf("AddAll: %v", err)
+	}
+	if _, err := gitx.CreateCommit(ctx, repo.Dir, "land taken-on-main on main"); err != nil {
+		t.Fatalf("CreateCommit: %v", err)
+	}
+	if err := gitx.CheckoutExisting(ctx, repo.Dir, "side"); err != nil {
+		t.Fatalf("CheckoutExisting(side): %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(repo.Dir, ".verdi", "specs", "active", "taken-on-main")); !os.IsNotExist(err) {
+		t.Fatalf("test setup: taken-on-main must be ABSENT from the side checkout's working tree")
+	}
+
+	manifest := phase7Manifest(t)
+	deps := designDeps{Provider: seedFakeProvider(t), Runner: nil, GoTest: fakeGoTest{}, DeferStatements: true}
+	var stdout, stderr bytes.Buffer
+	got := runDesignStart(ctx, repo.Dir, artifact.ClassFeature, "", "taken-on-main", manifest, phase7Model(t), deps, &stdout, &stderr)
+	if got != 2 {
+		t.Fatalf("runDesignStart(name present on main, absent from behind checkout) = %d, want 2; stdout=%s stderr=%s", got, stdout.String(), stderr.String())
+	}
+	if !contains(stderr.String(), "main") {
+		t.Fatalf("stderr = %q, want it to name the base ref the checkout is behind", stderr.String())
+	}
+	branch, err := gitx.CurrentBranch(ctx, repo.Dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if branch != "side" {
+		t.Fatalf("current branch = %q, want the checkout left on side (preparation refusal, no switch)", branch)
+	}
+}
