@@ -110,10 +110,16 @@ fixture-regen:
 # Task 7) runs in the same step: this repo carries no .verdi/model.yaml
 # of its own, so this exercises the embedded-canonical-default path on
 # every gate run (the gate grows, never shrinks — PLAN.md §2/§5).
+#
+# `verdi harness check` (spec/spec-documents ac-7, wave 3) verifies that
+# this repository's own rendered skills (.claude/skills/verdi-*/SKILL.md,
+# .agents/skills/verdi-*/SKILL.md) match the templates embedded in the
+# binary just built — the drift gate; regenerate with `verdi harness render`.
 lint-store:
 	go build -o $(LINT_STORE_BIN) ./cmd/verdi
 	$(LINT_STORE_BIN) lint
 	$(LINT_STORE_BIN) model check
+	$(LINT_STORE_BIN) harness check
 
 # spec-align (wave 7, PLAN.md §2/§5: "make verify grows ... to include
 # ... spec-align by the end of the build") is internal/specalign's Go
