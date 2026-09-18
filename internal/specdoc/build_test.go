@@ -1,6 +1,7 @@
 package specdoc
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 
@@ -17,6 +18,7 @@ owners: [platform-team]
 class: feature
 links:
   - { type: supersedes, ref: "spec/lockbox-v0" }
+  - { type: supersedes, ref: "spec/lockbox-v0#dc-1" }
 problem: { text: "Keys are shared.", anchor: problem }
 outcome: { text: "Each key has one holder.", anchor: outcome }
 acceptance_criteria:
@@ -111,16 +113,18 @@ func TestBuildSpecKind(t *testing.T) {
 	if doc.EvidenceKnown {
 		t.Fatalf("evidence must be unknown when facts carry none")
 	}
-	var supersedes string
-	for _, kv := range doc.Identity {
-		if kv.Label == "Supersedes" {
-			supersedes = kv.Value
-		}
+	wantIdentity := []KV{
+		{Label: "Ref", Value: "spec/lockbox"},
+		{Label: "Class", Value: "feature"},
+		{Label: "Status", Value: "accepted-pending-build"},
+		{Label: "Commit", Value: strings.Repeat("a", 40)},
+		{Label: "Supersedes", Value: "spec/lockbox-v0"},
+		{Label: "Revision", Value: "1 carried, 1 amended, 0 amended (advisory), 0 removed, 4 added"},
 	}
-	if supersedes != "spec/lockbox-v0" {
-		t.Fatalf("identity rows = %+v", doc.Identity)
+	if !reflect.DeepEqual(doc.Identity, wantIdentity) {
+		t.Fatalf("identity rows = %+v, want %+v", doc.Identity, wantIdentity)
 	}
-	if doc.Words.Story == "" || doc.Words.Spike == "" || doc.Words.Feature == "" {
+	if doc.Words.Feature != "feature" || doc.Words.Story != "story" || doc.Words.Spike != "spike" {
 		t.Fatalf("words must resolve through a nil model to the bare ids: %+v", doc.Words)
 	}
 }
@@ -132,8 +136,8 @@ func TestBuildKindsSelectSections(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if len(doc.Sections) != len(k.Sections()) {
-			t.Errorf("%s sections = %v", k, doc.Sections)
+		if !reflect.DeepEqual(doc.Sections, k.Sections()) {
+			t.Errorf("%s sections = %v, want %v", k, doc.Sections, k.Sections())
 		}
 	}
 }
@@ -146,6 +150,15 @@ func TestBuildUnknownFactsAndEvidence(t *testing.T) {
 	}
 	if doc.Criteria[0].CoverageKnown || doc.Questions[0].ClaimsKnown {
 		t.Fatalf("nil facts must render as unknown coverage/claims: %+v", doc.Criteria[0])
+	}
+	var status string
+	for _, kv := range doc.Identity {
+		if kv.Label == "Status" {
+			status = kv.Value
+		}
+	}
+	if status != "not resolved for this render" {
+		t.Fatalf("empty Status must render as %q, got %q", "not resolved for this render", status)
 	}
 	withEvidence := Facts{Evidence: map[string]ACEvidence{"ac-2": {Status: "violated", Summary: "nothing implements it"}}, EvidenceSource: "matrix at c"}
 	doc, err = Build(Input{Spec: fm, Body: body, Kind: KindTasks, Stamp: Stamp{Ref: "spec/lockbox", Commit: strings.Repeat("c", 40)}, Facts: withEvidence})

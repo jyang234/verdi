@@ -102,7 +102,13 @@ func Build(in Input) (Document, error) {
 		doc.EvidenceSource = in.Facts.EvidenceSource
 		for _, ac := range in.Spec.AcceptanceCriteria {
 			ev := in.Facts.Evidence[ac.ID]
-			doc.Evidence = append(doc.Evidence, EvidenceRow{ID: ac.ID, Status: ev.Status, Summary: ev.Summary, Stories: ev.Stories, Kinds: ev.Kinds})
+			doc.Evidence = append(doc.Evidence, EvidenceRow{
+				ID:      ac.ID,
+				Status:  ev.Status,
+				Summary: ev.Summary,
+				Stories: append([]string(nil), ev.Stories...),
+				Kinds:   append([]KindEvidence(nil), ev.Kinds...),
+			})
 		}
 	}
 	return doc, nil
