@@ -24,6 +24,7 @@
 package main
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"sort"
@@ -146,5 +147,76 @@ func TestHarnessDefaultsToStoreRoot(t *testing.T) {
 	// Outside any store and without -o: operational error, exit 2.
 	if code, _, stderr := runVerdi(t, bin, t.TempDir(), "harness", "check"); code != 2 || !strings.Contains(stderr, "harness check:") {
 		t.Fatalf("no store: code %d stderr %q", code, stderr)
+	}
+}
+
+// TestCmdHarness_FlagShapeFailures is parseHarnessFlags'/harnessRoot's own
+// negative-path unit test, mirroring TestCmdContextProject_FlagShapeFailures
+// (context_project_test.go:216): cmdHarness called in-process with
+// bytes.Buffer streams, table-driven, over grammar corners the slow
+// built-binary tests above never individually isolate (they only ever
+// pass `--host codex`/`-o <dir>` space-separated, once each).
+func TestCmdHarness_FlagShapeFailures(t *testing.T) {
+	// A directory `check` can succeed against, proving the two accepted
+	// inline-flag spellings really reach Check rather than merely failing
+	// to be rejected by the parser.
+	rendered := t.TempDir()
+	var setupOut, setupErr bytes.Buffer
+	if code := cmdHarness([]string{"render", "-o", rendered}, &setupOut, &setupErr); code != 0 {
+		t.Fatalf("test setup: rendering into %s: exit %d stderr %q", rendered, code, setupErr.String())
+	}
+
+	regularFile := filepath.Join(t.TempDir(), "not-a-dir")
+	if err := os.WriteFile(regularFile, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cases := []struct {
+		name string
+		args []string
+		// wantCode 0 marks the two accepted-inline-flag cases, which must
+		// reach a clean Check against the pre-rendered dir above; every
+		// other value is the exact exit code a flag-shape or root-
+		// resolution error must produce.
+		wantCode   int
+		wantStderr string
+		// noUsage: harnessRoot's own error path (an -o that exists but
+		// isn't a directory) reports only "harness <sub>: <err>", never
+		// the usage line — unlike every flag-SHAPE failure below it
+		// (parseHarnessFlags/skillpack.ParseHosts), which always appends
+		// harnessUsage. Mirrors the asymmetry cmdHarness itself already
+		// has between its two error-printing call sites.
+		noUsage bool
+	}{
+		{name: "--host=all inline accepted, reaches a clean check", args: []string{"check", "--host=all", "-o", rendered}, wantCode: 0},
+		{name: "-o=<dir> inline accepted, reaches a clean check", args: []string{"check", "-o=" + rendered}, wantCode: 0},
+		{name: "--host given twice", args: []string{"check", "--host", "claude", "--host", "codex", "-o", rendered}, wantCode: 2, wantStderr: "--host given twice"},
+		{name: "-o given twice", args: []string{"check", "-o", rendered, "-o", rendered}, wantCode: 2, wantStderr: "-o given twice"},
+		{name: "--host= empty inline value", args: []string{"check", "--host=", "-o", rendered}, wantCode: 2, wantStderr: "--host requires a value"},
+		{name: "--host at end without a value", args: []string{"check", "-o", rendered, "--host"}, wantCode: 2, wantStderr: "--host requires a value"},
+		{name: "-o names a regular file", args: []string{"check", "-o", regularFile}, wantCode: 2, wantStderr: "is not a directory", noUsage: true},
+		{name: "unknown --hosts flag", args: []string{"check", "--hosts", "claude", "-o", rendered}, wantCode: 2, wantStderr: `unexpected argument "--hosts"`},
+		{name: "positional junk", args: []string{"check", "junk", "-o", rendered}, wantCode: 2, wantStderr: `unexpected argument "junk"`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var stdout, stderr bytes.Buffer
+			got := cmdHarness(tc.args, &stdout, &stderr)
+			if got != tc.wantCode {
+				t.Fatalf("cmdHarness(%v) = %d, want %d; stdout=%q stderr=%q", tc.args, got, tc.wantCode, stdout.String(), stderr.String())
+			}
+			if stdout.Len() != 0 {
+				t.Fatalf("stdout = %q, want empty (a flag/root error prints nothing to stdout; a clean check finds nothing to report)", stdout.String())
+			}
+			if tc.wantCode == 0 {
+				return
+			}
+			if !strings.Contains(stderr.String(), tc.wantStderr) {
+				t.Fatalf("stderr = %q, want it to contain %q", stderr.String(), tc.wantStderr)
+			}
+			if !tc.noUsage && !strings.Contains(stderr.String(), harnessUsage) {
+				t.Fatalf("stderr = %q, want it to contain the usage line %q", stderr.String(), harnessUsage)
+			}
+		})
 	}
 }
