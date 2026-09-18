@@ -94,7 +94,8 @@ func toolDefs(mdl *model.Model) []map[string]any {
 			}, "ref"),
 		},
 		{
-			"name":        "get_document",
+			"name": "get_document",
+			// vocab:identity — "accepted" here names the bytes merged onto the default branch (the spec MR's merge event), not a lifecycle state label
 			"description": "Render a spec as its human-readable document (Markdown) from its objects and computed facts: the accepted bytes on the default branch by default, or a pinned commit via kind/name@commit or the commit argument. kind selects spec (everything), plan (decisions, constraints, plan), or tasks (plan and evidence). The result carries the render's stamp (ref, commit, engine digest) and is a projection, never authority." + dataNeverInstructionsNote,
 			"inputSchema": obj(map[string]any{
 				"ref":    str("spec/<name>, or spec/<name>@<commit>"),
