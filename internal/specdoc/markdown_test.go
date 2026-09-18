@@ -201,6 +201,65 @@ func TestCriterionCellAndIdsWithTextMissingID(t *testing.T) {
 	}
 }
 
+// TestRenderMarkdownEvidenceDetailKinds is the spec-documents wave-1
+// final-fix-round F2 proof: a story criterion's Evidence row carries
+// per-kind satisfaction (Kinds), never an implementing-story list
+// (Stories), and evidenceDetail must render each kind's own
+// satisfied/unsatisfied state rather than falling through to its "—"
+// default. Neither committed golden ever builds a Document whose
+// Evidence carries Kinds without Stories (matrixFixture is a feature
+// record, Stories-only), so this is exercised synthetically. Mutation
+// witness (fix-round report): temporarily hard-coding evidenceDetail to
+// `return "—"` reds this test with
+// `evidenceDetail(Kinds) missing "behavioral satisfied, attestation unsatisfied" in:` —
+// see the report for the full failure transcript; the change was reverted
+// after capturing it.
+func TestRenderMarkdownEvidenceDetailKinds(t *testing.T) {
+	doc := Document{
+		Kind:     KindSpec,
+		Stamp:    Stamp{Ref: "spec/x", Commit: strings.Repeat("2", 40)},
+		Sections: []SectionID{SectionEvidence},
+		Words:    Words{Story: "story", StoryPlural: "stories", Spike: "spike", SpikePlural: "spikes"},
+		Evidence: []EvidenceRow{{ID: "ac-1", Status: "eligible", Kinds: []KindEvidence{
+			{Kind: "behavioral", Satisfied: true},
+			{Kind: "attestation", Satisfied: false},
+		}}},
+		EvidenceKnown: true,
+	}
+	md := RenderMarkdown(doc)
+	if !strings.Contains(md, "behavioral satisfied, attestation unsatisfied") {
+		t.Errorf("evidenceDetail(Kinds) missing %q in:\n%s", "behavioral satisfied, attestation unsatisfied", md)
+	}
+}
+
+// TestEscapeCell is fix round F5's table-driven proof: escapeCell escapes
+// a literal "|" (fix round 1, F8) and collapses any run of embedded line
+// breaks (LF or CRLF) to a single space, so neither can ever fracture a
+// rendered Markdown table row.
+func TestEscapeCell(t *testing.T) {
+	tests := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{"no special characters", "plain text", "plain text"},
+		{"single pipe", "a|b", "a\\|b"},
+		{"multiple pipes", "a|b|c", "a\\|b\\|c"},
+		{"single lf", "a\nb", "a b"},
+		{"single crlf", "a\r\nb", "a b"},
+		{"a run of blank lines collapses to one space", "a\n\n\nb", "a b"},
+		{"a mixed lf/crlf run collapses to one space", "a\n\r\nb", "a b"},
+		{"newline then pipe: both rules apply", "a\n|b", "a \\|b"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := escapeCell(tt.in); got != tt.want {
+				t.Errorf("escapeCell(%q) = %q, want %q", tt.in, got, tt.want)
+			}
+		})
+	}
+}
+
 func matrixFixture() matrixprojection.Record {
 	return matrixprojection.Record{Feature: &matrixprojection.FeatureBody{ACs: []matrixprojection.FeatureAC{
 		{ID: "ac-1", Status: "eligible", Summary: "one implementing story, not yet closed", ImplementingStories: []string{"spec/key-holder"}},

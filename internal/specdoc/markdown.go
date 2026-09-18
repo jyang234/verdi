@@ -2,10 +2,17 @@ package specdoc
 
 import (
 	"fmt"
+	"regexp"
 	"strconv"
 	"strings"
 	"unicode"
 )
+
+// cellNewlineRun matches one or more consecutive line breaks (LF or CRLF)
+// so escapeCell can collapse them to a single space (fix round, F5): a
+// declared value carrying embedded newlines must never fracture a
+// Markdown table row into extra, unintended rows.
+var cellNewlineRun = regexp.MustCompile(`(?:\r?\n)+`)
 
 // RenderMarkdown writes the canonical text form. The layout is the
 // cross-consumer contract (spec/spec-documents ac-6): CLI, board, docs
@@ -263,8 +270,11 @@ func orDash(s string) string {
 }
 
 // escapeCell escapes a literal "|" so a declared value can never fracture
-// a Markdown table row (fix round 1, F8).
+// a Markdown table row (fix round 1, F8), and collapses any run of
+// embedded line breaks to a single space (fix round, F5) so a
+// multi-line declared value can never turn one table row into several.
 func escapeCell(s string) string {
+	s = cellNewlineRun.ReplaceAllString(s, " ")
 	return strings.ReplaceAll(s, "|", "\\|")
 }
 
