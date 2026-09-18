@@ -14,7 +14,7 @@ import (
 
 // writeArtifactPage renders and writes one committed-zone permalink page
 // (05 §Verdi-dex mechanics: "/a/<kind>/<name>").
-func writeArtifactPage(ctx context.Context, outDir, root, buildCommit string, stamp buildStamp, ix *index.Index, known map[string]bool, lens *lensData, mdl *model.Model, p *artifactPage) error {
+func writeArtifactPage(ctx context.Context, outDir, root, buildCommit string, stamp buildStamp, ix *index.Index, known map[string]bool, lens *lensData, mdl *model.Model, docs documentSet, p *artifactPage) error {
 	bodyHTML, err := renderBody(p.Entry.Kind, p.Entry.DiagramClass, p.Entry.Body)
 	if err != nil {
 		return fmt.Errorf("dex: rendering %s: %w", p.Entry.Ref, err)
@@ -70,7 +70,7 @@ func writeArtifactPage(ctx context.Context, outDir, root, buildCommit string, st
 		Connections:      connections,
 		TOC:              extractTOC(bodyHTML),
 		CopyRef:          p.Entry.Ref + "@" + pinCommit,
-		DocumentURL:      specDocumentURL(p.Entry.Ref),
+		DocumentURL:      specDocumentURL(p.Entry.Ref, docs),
 	}
 	out, err := renderPage(mdl, data)
 	if err != nil {

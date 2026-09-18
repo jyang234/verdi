@@ -9,25 +9,71 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/jyang234/verdi/internal/gitx"
 	"github.com/jyang234/verdi/internal/model"
 	"github.com/jyang234/verdi/internal/specdoc"
 	"github.com/jyang234/verdi/internal/specdocload"
+	"github.com/jyang234/verdi/internal/store"
 )
 
 // documentPageDir is the subdirectory, beside a spec's permalink page,
 // that serves its Document view: /a/spec/<name>/document/.
 const documentPageDir = "document"
 
+// documentSet is the set of spec refs this build writes documents for:
+// the specs whose spec.md exists at the build commit. ac-4 pins the
+// Document view to "the site's pinned commit", so a spec the index found
+// in the working tree but that the build commit does not carry (a draft
+// not yet committed, or a build of an older commit) has no document to
+// render from — its page is still built from the working tree, exactly
+// as before this feature, but it gets no files and no dangling
+// "document/" link, rather than aborting the whole site (fix round 1,
+// F1: degrade honestly like every other dex writer — cf. noHistoryBanner).
+type documentSet map[string]bool
+
+// documentedSpecs resolves the documentSet once per build: one
+// `git ls-tree` per spec zone at sha (the zone directory is the store
+// accessor's parent, never a literal), matched against each spec page's
+// name through the same accessors — never by parsing tree paths.
+func documentedSpecs(ctx context.Context, root, sha string, pages []*artifactPage) (documentSet, error) {
+	present := make(map[string]bool)
+	for _, zone := range []string{store.ZoneActive, store.ZoneArchive} {
+		paths, err := gitx.LsTree(ctx, root, sha, path.Dir(store.SpecDirRelPath(zone, "any")))
+		if err != nil {
+			return nil, fmt.Errorf("dex: listing %s specs at %s: %w", zone, sha, err)
+		}
+		for _, p := range paths {
+			present[p] = true
+		}
+	}
+	docs := make(documentSet)
+	for _, p := range pages {
+		if !strings.HasPrefix(p.Entry.Ref, "spec/") {
+			continue
+		}
+		name := strings.TrimPrefix(p.Entry.Ref, "spec/")
+		if present[store.ActiveSpecRelPath(name)] || present[store.SpecRelPath(store.ZoneArchive, name)] {
+			docs[p.Entry.Ref] = true
+		}
+	}
+	return docs, nil
+}
+
 // specDocumentURL returns the page-relative URL of ref's Document view
 // ("document/", resolving under the spec page's directory-form permalink),
-// or "" for any page that is not a spec — only specs have documents
-// (spec/spec-documents ac-4).
-func specDocumentURL(ref string) string {
-	if !strings.HasPrefix(ref, "spec/") {
+// or "" for a page that gets no document: anything that is not a spec —
+// only specs have documents (spec/spec-documents ac-4) — or a spec absent
+// at the build commit (documentSet).
+func specDocumentURL(ref string, docs documentSet) string {
+	if !docs[ref] {
 		return ""
 	}
 	return documentPageDir + "/"
 }
+
+// renderSpecDocuments is the pool's per-spec step, a variable so tests can
+// stand in a render that panics or cancels (fix round 1, F4/F5).
+var renderSpecDocuments = writeSpecDocuments
 
 // writeAllSpecDocuments renders every spec page's documents (see
 // writeSpecDocuments), concurrently across pages with a bounded pool.
@@ -38,8 +84,10 @@ func specDocumentURL(ref string) string {
 // Go's default test timeout. The pool changes only wall time: every
 // spec's files are its own, written from its own result, so the output
 // tree is byte-identical to a sequential pass (the rebuild tests prove
-// it). The first error cancels the rest and is returned.
-func writeAllSpecDocuments(parent context.Context, outDir, root string, stamp buildStamp, mdl *model.Model, pages []*artifactPage) error {
+// it). The first error cancels the rest and is returned; a worker panic
+// is folded into that error (naming the spec) so the build still exits 2
+// through the normal path instead of killing the process.
+func writeAllSpecDocuments(parent context.Context, outDir, root string, stamp buildStamp, mdl *model.Model, pages []*artifactPage, docs documentSet) error {
 	ctx, cancel := context.WithCancel(parent)
 	defer cancel()
 	sem := make(chan struct{}, documentWorkers())
@@ -48,9 +96,17 @@ func writeAllSpecDocuments(parent context.Context, outDir, root string, stamp bu
 		mu       sync.Mutex
 		firstErr error
 	)
+	fail := func(err error) {
+		mu.Lock()
+		if firstErr == nil {
+			firstErr = err
+			cancel()
+		}
+		mu.Unlock()
+	}
 schedule:
 	for _, p := range pages {
-		if specDocumentURL(p.Entry.Ref) == "" {
+		if specDocumentURL(p.Entry.Ref, docs) == "" {
 			continue
 		}
 		// A slot, or the pass is over (a worker failed, or the caller
@@ -65,16 +121,16 @@ schedule:
 		go func(p *artifactPage) {
 			defer wg.Done()
 			defer func() { <-sem }()
+			defer func() {
+				if r := recover(); r != nil {
+					fail(fmt.Errorf("dex: document for %s: panic: %v", p.Entry.Ref, r))
+				}
+			}()
 			if ctx.Err() != nil {
 				return
 			}
-			if err := writeSpecDocuments(ctx, outDir, root, stamp, mdl, p); err != nil {
-				mu.Lock()
-				if firstErr == nil {
-					firstErr = err
-					cancel()
-				}
-				mu.Unlock()
+			if err := renderSpecDocuments(ctx, outDir, root, stamp, mdl, p); err != nil {
+				fail(err)
 			}
 		}(p)
 	}
@@ -111,7 +167,7 @@ func documentWorkers() int {
 // would render — TestWriteSpecDocuments_KindsShareOneLoad proves it
 // against the per-kind path the CLI and MCP take.
 func writeSpecDocuments(ctx context.Context, outDir, root string, stamp buildStamp, mdl *model.Model, p *artifactPage) error {
-	if specDocumentURL(p.Entry.Ref) == "" {
+	if !strings.HasPrefix(p.Entry.Ref, "spec/") {
 		return nil
 	}
 	name := strings.TrimPrefix(p.Entry.Ref, "spec/")
@@ -152,13 +208,28 @@ func writeSpecDocuments(ctx context.Context, outDir, root string, stamp buildSta
 		// the same class as every listing page (01 §Temporal classes).
 		Banner:   livingGatedBanner(stamp),
 		BodyHTML: template.HTML(documentViewChrome(p.Entry.Ref) + stripLeadingH1(specHTML)),
-		TOC:      extractTOC(specHTML),
+		TOC:      documentTOC(extractTOC(specHTML)),
 		CopyRef:  p.Entry.Ref + "@" + stamp.SHA,
 	})
 	if err != nil {
 		return err
 	}
 	return writeFile(outDir, path.Join(base, documentPageDir, "index.html"), page)
+}
+
+// documentTOC keeps only the document's section headings (level 2) for
+// the side rail: the document's h3s are whole sentences (a decision's
+// text, a criterion's text — hundreds of characters), which would turn
+// the rail into a wall of prose and defeat its sticky positioning (fix
+// round 1, F2). The headings themselves stay in the body, with their ids.
+func documentTOC(entries []TOCEntry) []TOCEntry {
+	var out []TOCEntry
+	for _, e := range entries {
+		if e.Level == 2 {
+			out = append(out, e)
+		}
+	}
+	return out
 }
 
 // documentViewChrome is the quiet header a reader meets before the
