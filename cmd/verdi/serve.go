@@ -25,7 +25,6 @@ import (
 	"github.com/jyang234/verdi/internal/filelock"
 	"github.com/jyang234/verdi/internal/mcpserve"
 	"github.com/jyang234/verdi/internal/readinessload"
-	"github.com/jyang234/verdi/internal/readinesspilot"
 	"github.com/jyang234/verdi/internal/store"
 	"github.com/jyang234/verdi/internal/workbench"
 )
@@ -72,21 +71,28 @@ func parseServeOptions(args []string) (serveOptions, error) {
 	return options, nil
 }
 
-type serveRunner func(root, httpAddr string, readiness *readinesspilot.Snapshot, stdout, stderr io.Writer) int
+// serveRunner is threaded the fully-resolved readiness loader and default
+// spec (spec/readiness-recovery Task 3 exit obligation: no package-level
+// hand-off) alongside the server's other startup facts — never a single
+// startup-frozen snapshot (ac-2's per-request derivation).
+type serveRunner func(root, httpAddr string, loader readinessload.Loader, defaultSpec string, stdout, stderr io.Writer) int
 
-// readinessSnapshotBuilder is the serve command's one startup projection
-// boundary. Implementations return an immutable value; callers never retain
-// a path, decoder, provider, or live fact source behind the snapshot.
-type readinessSnapshotBuilder interface {
-	Build(ctx context.Context, root, requestPath string) (readinesspilot.Snapshot, error)
+// readinessWarmBuilder is the serve command's one startup warm-up
+// boundary: it runs the real judge once (JudgeRun) over a supplied
+// --context-request so a later per-request JudgeCacheOnly derivation for
+// the SAME request finds a cache hit, and reports that request's own
+// target spec ref for ReadinessDefaultSpec. Called only when a
+// --context-request path was supplied.
+type readinessWarmBuilder interface {
+	Build(ctx context.Context, root, requestPath string) (defaultSpec string, err error)
 }
 
-// serveCommandDeps is the narrow startup-order seam. Building readiness is
-// completed before run is entered; run owns every server effect from data-dir
-// creation onward.
+// serveCommandDeps is the narrow startup-order seam. The readiness warm-up
+// (when requested) is completed before run is entered; run owns every
+// server effect from data-dir creation onward.
 type serveCommandDeps struct {
 	findRoot  func(string) (string, error)
-	readiness readinessSnapshotBuilder
+	readiness readinessWarmBuilder
 	run       serveRunner
 }
 
@@ -99,59 +105,42 @@ func cmdServe(args []string, stdout, stderr io.Writer) int {
 	})
 }
 
-// readinessLoadBuilder is readinessSnapshotBuilder's one production
+// readinessLoadBuilder is readinessWarmBuilder's one production
 // implementation: internal/readinessload.Load under JudgeRun, warming the
 // judge cache exactly as the predecessor startup adapter did (spec/
-// readiness-recovery Task 2). Build also stashes the cache-only Loader
-// value and the request's own target spec into the package-level
-// serveReadinessLoader/serveReadinessDefaultSpec variables below, since
-// runServe's signature carries only the startup snapshot — Task 3 threads
-// them into the workbench/MCP deps properly; this is the narrow hand-off
-// seam until then.
+// readiness-recovery Task 2).
 type readinessLoadBuilder struct{}
 
-func (readinessLoadBuilder) Build(ctx context.Context, root, requestPath string) (readinesspilot.Snapshot, error) {
+func (readinessLoadBuilder) Build(ctx context.Context, root, requestPath string) (string, error) {
 	// ContextRequestSpec reads and decodes requestPath exactly once; the
 	// Predecoded bundle it returns flows into warmOpts below so Load does
 	// not read the same file a second time (fix round 1, Minor 6). The
-	// stashed cacheOnlyOpts deliberately does NOT carry it: every later
-	// per-request Loader.Load call must read the checkout's then-current
-	// request file fresh, never a startup-frozen copy.
+	// warm-up's own opts deliberately are not reused for the per-request
+	// loader cmdServeWithDeps builds below: every later per-request
+	// Loader.Load call must read the checkout's then-current request file
+	// fresh, never a startup-frozen copy.
 	targetSpec, predecoded, err := readinessload.ContextRequestSpec(root, requestPath)
 	if err != nil {
-		return readinesspilot.Snapshot{}, err
+		return "", err
 	}
-	cacheOnlyOpts := readinessload.Options{
+	warmOpts := readinessload.Options{
 		ContextRequestPath: requestPath,
 		BoardHref:          workbench.BranchBoardHref,
 		Actors:             resolveConflictActors,
-		Judge:              readinessload.JudgeCacheOnly,
+		Judge:              readinessload.JudgeRun,
+		PredecodedRequest:  predecoded,
 	}
-	warmOpts := cacheOnlyOpts
-	warmOpts.Judge = readinessload.JudgeRun
-	warmOpts.PredecodedRequest = predecoded
-	snapshot, err := readinessload.Load(ctx, root, targetSpec, warmOpts)
-	if err != nil {
-		return readinesspilot.Snapshot{}, err
+	if _, err := readinessload.Load(ctx, root, targetSpec, warmOpts); err != nil {
+		return "", err
 	}
-	serveReadinessLoader = readinessload.Loader{Root: root, Opts: cacheOnlyOpts}
-	serveReadinessDefaultSpec = targetSpec
-	return snapshot, nil
+	return targetSpec, nil
 }
 
-// serveReadinessLoader and serveReadinessDefaultSpec are runServe's hand-off
-// to Task 3's consumers (workbench/MCP deps): the cache-only Loader value
-// and default target spec a per-request readiness route uses, set by
-// readinessLoadBuilder.Build before deps.run is ever called. Package-level
-// rather than threaded through serveRunner's own signature (kept unchanged
-// this task) — see readinessLoadBuilder's own doc comment.
-var (
-	serveReadinessLoader      readinessload.Loader
-	serveReadinessDefaultSpec string
-)
-
-// cmdServeWithDeps parses the additive readiness input, captures its one
-// immutable startup snapshot, and only then enters the effectful server run.
+// cmdServeWithDeps parses the additive readiness input, runs the optional
+// startup warm-up, and only then enters the effectful server run — always
+// with a working readiness loader (spec/readiness-recovery ac-2: general
+// per-ref derivation needs no request at all), bound to the supplied
+// --context-request only when one was given.
 func cmdServeWithDeps(args []string, stdout, stderr io.Writer, deps serveCommandDeps) int {
 	options, err := parseServeOptions(args)
 	if err != nil {
@@ -169,29 +158,36 @@ func cmdServeWithDeps(args []string, stdout, stderr io.Writer, deps serveCommand
 		return 2
 	}
 
-	var readiness *readinesspilot.Snapshot
+	loaderOpts := readinessload.Options{
+		BoardHref: workbench.BranchBoardHref,
+		Actors:    resolveConflictActors,
+	}
+	defaultSpec := ""
 	if options.contextRequestPath != "" {
 		if deps.readiness == nil {
-			fmt.Fprintln(stderr, "serve: readiness snapshot builder is nil")
+			fmt.Fprintln(stderr, "serve: readiness warm-up builder is nil")
 			return 2
 		}
-		snapshot, buildErr := deps.readiness.Build(context.Background(), root, options.contextRequestPath)
+		spec, buildErr := deps.readiness.Build(context.Background(), root, options.contextRequestPath)
 		if buildErr != nil {
 			fmt.Fprintln(stderr, "serve:", buildErr)
 			return 2
 		}
-		readiness = &snapshot
+		defaultSpec = spec
+		loaderOpts.ContextRequestPath = options.contextRequestPath
 	}
+	loader := readinessload.Loader{Root: root, Opts: loaderOpts}
+
 	if deps.run == nil {
 		fmt.Fprintln(stderr, "serve: server runner is nil")
 		return 2
 	}
-	return deps.run(root, options.httpAddr, readiness, stdout, stderr)
+	return deps.run(root, options.httpAddr, loader, defaultSpec, stdout, stderr)
 }
 
 // runServe contains the existing single-writer runtime. It is entered only
-// after any requested readiness snapshot has been fully built.
-func runServe(root, httpAddr string, readiness *readinesspilot.Snapshot, stdout, stderr io.Writer) int {
+// after any requested readiness warm-up has fully completed.
+func runServe(root, httpAddr string, readinessLoader readinessload.Loader, readinessDefaultSpec string, stdout, stderr io.Writer) int {
 	dataDir := filepath.Join(root, ".verdi", "data")
 	if err := os.MkdirAll(dataDir, 0o755); err != nil {
 		fmt.Fprintln(stderr, "serve:", err)
@@ -247,7 +243,7 @@ func runServe(root, httpAddr string, readiness *readinesspilot.Snapshot, stdout,
 	// neither, no spec is ever under review and the board keys purely off
 	// branch state.
 	forgePort, configuredKind := forgeBestEffort(context.Background(), root)
-	deps := workbench.Deps{Readiness: readiness}
+	deps := workbench.Deps{ReadinessLoader: readinessLoader, ReadinessDefaultSpec: readinessDefaultSpec}
 	// The ASD design bridge (Wave 6 Task 2): the one application core the
 	// CLI and MCP already use, injected behind the workbench's port.
 	deps.Design = newServeDesignBridge()
@@ -353,8 +349,8 @@ func runServe(root, httpAddr string, readiness *readinesspilot.Snapshot, stdout,
 	fmt.Fprintf(stdout, "serve: workbench at http://%s\n", httpLn.Addr())
 
 	srv := mcpserve.NewServer(root)
-	srv.Backend.Readiness = readiness // R-W3-3: get_document's readiness section, same startup snapshot the board already renders (workbench.Deps{Readiness: readiness} above)
-	srv.ErrLog = os.Stderr            // spec/fail-loud dc-3: a dropped socket connection leaves a trace, matching mcp.go's stdio scrutiny
+	srv.Backend.ReadinessLoader = readinessLoader // spec/readiness-recovery ac-4: get_document's readiness section, the SAME loader the board renders through (workbench.Deps{ReadinessLoader: readinessLoader} above)
+	srv.ErrLog = os.Stderr                        // spec/fail-loud dc-3: a dropped socket connection leaves a trace, matching mcp.go's stdio scrutiny
 	// Best-effort (V1-P7): see mcp.go's identical comment — a
 	// missing/unreachable forge never blocks `verdi serve` from starting;
 	// list_annotations' review-sticky mirrored population (05 §MCP
