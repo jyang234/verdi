@@ -19,9 +19,10 @@ import { addSticky, expectAutosaved } from "./helpers";
 // Pinned INDEPENDENTLY of the rendered DOM, from the committed hermetic
 // harness fixtures (provision_board.go's refi-decline-flow design branch
 // + provision_readiness.go's policy fixtures) and the corrected
-// comparators (current-focus area first, then blocking, violated, and
-// area/id order). A reordered, omitted, or extra concern — in either
-// inventory — fails these exact-array oracles. The sha256 semantic id is
+// comparators (current-focus area first, then blocking before
+// non-blocking, current before eventual, violated before unproven, then
+// area order, then id). A reordered, omitted, or extra concern — in
+// either inventory — fails these exact-array oracles. The sha256 semantic id is
 // the digest of committed fixture bytes and is therefore deterministic —
 // it moved when ac-10's oq-2 + stubs: entries changed the candidate
 // content; the new value was captured from a real harness run, not typed
@@ -29,12 +30,35 @@ import { addSticky, expectAutosaved } from "./helpers";
 const SEMANTIC_ID =
   "context/semantic/sha256:9fe503eb5bb9fcaaf95da12b4f7b695c79abd6c8f793f4018e6c627895e8ef4d";
 
+// The eventual closure blockers (spec/readiness-recovery ac-1): the
+// journey now derives, for the draft feature refi-decline-flow, what will
+// block its closure later — later-transition obligations, the unsatisfied
+// outcome floor of each criterion, principal resolution, the spike-claimed
+// oq-2, and the request's own semantic conflict row (present only because
+// the harness serves with --context-request; a bare `verdi journey`
+// discloses "no policy-conflict report was supplied" and lists the other
+// seven). readinesspilot surfaces each as a non-blocking, eventual,
+// violated-with-witness review/blocker/* concern, so they all sort after
+// every current row and among themselves by id. Read from the harness's
+// own derivation at design/refi-decline-flow (2026-09-19), not typed.
+const EVENTUAL_REVIEW_BLOCKERS = [
+  "review/blocker/conflict-semantic/sha256-9fe503eb5bb9fcaaf95da12b4f7b695c79abd6c8f793f4018e6c627895e8ef4d",
+  "review/blocker/obligation-countersign-unproven/close/attestation/countersign",
+  "review/blocker/obligation-fold-green-unproven/close/behavioral/fold-green",
+  "review/blocker/outcome-floor/ac-1",
+  "review/blocker/outcome-floor/ac-2",
+  "review/blocker/outcome-floor/ac-3",
+  "review/blocker/principal-resolution-unproven/close",
+  "review/blocker/question-claimed/oq-2",
+];
+
 // The exact focus order: the current-focus area (shape-proposal) leads.
 // shape/question/oq-2 (spec/uat-round-1 ac-10, PLAN.md §7 I-128) is a
 // spike-claimed open question: non-blocking/eventual, so it still groups
 // with the current-focus (shape-proposal) rows but sorts after
 // shape/provenance (blocking ties, current before eventual) — oq-1 stays
-// unclaimed, blocking/current, and first.
+// unclaimed, blocking/current, and first. The eventual review blockers
+// close the list.
 const ATTENTION_QUEUE = [
   "shape/question/oq-1",
   "shape/provenance",
@@ -49,6 +73,7 @@ const ATTENTION_QUEUE = [
   "context/disclosure/repository-remote-unknown",
   SEMANTIC_ID,
   "review/role/merge/attestation/author-vouch",
+  ...EVENTUAL_REVIEW_BLOCKERS,
 ];
 
 // Every and only the proven concerns, in existing AllConcerns order.
@@ -220,9 +245,10 @@ test("focus list shows exactly three priorities and the exact disclosed remainde
   }
 
   // Downstream disclosure: exactly the violated concerns in areas after
-  // the current focus (the two review blockers) — nothing else counted.
+  // the current focus (the two current review blockers plus the eight
+  // eventual ones) — nothing else counted.
   await expect(page.locator(".readiness-downstream")).toHaveText(
-    "Known problems in later steps: 2",
+    "Known problems in later steps: 10",
   );
 
   // The inline control carries the exact remaining count; expanding
@@ -230,7 +256,7 @@ test("focus list shows exactly three priorities and the exact disclosed remainde
   // "Show fewer"; collapsing hides it again. No event is recorded.
   const more = page.locator("details.readiness-more");
   const summary = more.locator(".readiness-more-summary");
-  await expect(summary).toHaveText(/10 more items\s*Show fewer/); // both spans in DOM…
+  await expect(summary).toHaveText(/18 more items\s*Show fewer/); // both spans in DOM…
   await expect(more.locator(".readiness-more-closed")).toBeVisible();
   await expect(more.locator(".readiness-more-open")).toBeHidden();
 
@@ -240,8 +266,8 @@ test("focus list shows exactly three priorities and the exact disclosed remainde
   await expect(more.locator(".readiness-more-open")).toBeVisible();
   await expect(more.locator(".readiness-more-closed")).toBeHidden();
   const revealed = more.locator("[data-concern-id]");
-  await expect(revealed).toHaveCount(10);
-  for (let i = 0; i < 10; i++) {
+  await expect(revealed).toHaveCount(18);
+  for (let i = 0; i < 18; i++) {
     await expect(revealed.nth(i)).toHaveAttribute(
       "data-concern-id",
       ATTENTION_QUEUE[i + 3],
@@ -350,6 +376,29 @@ test("a spike-claimed open question is non-blocking/eventual; the unclaimed one 
   await expect(
     unclaimed.locator('dt:text-is("Timing") + dd'),
   ).toHaveText("current");
+});
+
+test("every eventual review blocker is non-blocking with Timing eventual in its technical details (ac-1)", async ({
+  page,
+}) => {
+  await page.goto("/readiness");
+  await page.locator("details.readiness-more > summary").click();
+
+  for (const id of EVENTUAL_REVIEW_BLOCKERS) {
+    const row = page.locator(`[data-concern-id="${id}"]`);
+    await expect(row).toHaveAttribute("data-area-id", "request-review");
+    await expect(row.locator(".readiness-state")).toHaveText("Needs attention");
+    await row.locator(".readiness-tech summary").click();
+    const facts = row.locator(".readiness-tech-facts");
+    await expect(facts.locator('dt:text-is("Blocking") + dd')).toHaveText(
+      "false",
+    );
+    await expect(facts.locator('dt:text-is("Timing") + dd')).toHaveText(
+      "eventual",
+    );
+    await expect(facts).toContainText("violated-with-witness");
+    await expect(facts).toContainText(id);
+  }
 });
 
 test("board destination opens the editable board in a new tab and both tabs keep their state", async ({
