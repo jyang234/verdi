@@ -119,6 +119,18 @@
 // drift-checks the four verdi skills; a bare `verdi harness` fails on
 // usage parsing alone (exit 2) BEFORE resolving a store root, so the
 // inventory proof stays hermetic.
+//
+// `policy` (spec/spec-documents ac-10, dc-6, SI-204, phase 26): `verdi
+// policy adopt --starter` is a brand-new, mutating verb — dispatch.go's
+// verbPhase gains a `policy` key in the same change this inV0 addition
+// rides. Unlike harness above, its own happy path cuts a real branch and
+// commits (R-W4-3), so this inventory check never risks that against the
+// shared self-hosted checkout; but that mutating path is gated behind the
+// literal "adopt" subcommand (R-W4-9), and a bare `verdi policy` (no
+// subcommand at all) fails on usage parsing alone (exit 2, cmdPolicy)
+// BEFORE resolving a store root or touching any file — the same
+// hermetic-bare-invocation property model/spec/journey/context/
+// experiment/harness already rely on in the default case below.
 package specalign
 
 import (
@@ -137,7 +149,7 @@ func TestV0CLIVerbInventory(t *testing.T) {
 		"lint", "design", "accept", "feature", "build", "align", "sync",
 		"serve", "mcp", "matrix", "rollup", "dex", "gate", "board", "audit",
 		"close", "gc", "attest", "disposition", "model", "spec", "obligation",
-		"journey", "context", "experiment", "harness",
+		"journey", "context", "experiment", "harness", "policy",
 	}
 	// PLAN.md §5 scope discipline, verbatim (as amended: `close`/`gc`
 	// graduated to real, round 6): "Explicitly out of v0 (not stubbed —
