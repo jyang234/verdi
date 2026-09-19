@@ -1011,6 +1011,55 @@ func TestCLIShowcaseSpecState(t *testing.T) {
 	}
 }
 
+// TestCLIShowcaseSpecDoc (cli:spec, spec/readiness-recovery ac-4) drives
+// `verdi spec doc` against the real, already-landed spec/escrow-autopay
+// accepted feature from examples/showcase — the same target
+// mcp_showcase_test.go's get_document subtest renders — proving the
+// default render's own real internal/readinessload.Loader genuinely
+// derives readiness against the provisioned store: a populated
+// ## Readiness section naming its own source line, never "not supplied".
+// Mutates nothing (a document render is read-only).
+func TestCLIShowcaseSpecDoc(t *testing.T) {
+	t.Setenv("CI_DEFAULT_BRANCH", "main")
+	root := provisionShowcaseStore(t)
+	ctx := context.Background()
+
+	headBefore, err := gitx.RevParse(ctx, root, "HEAD")
+	if err != nil {
+		t.Fatalf("test setup: gitx.RevParse(HEAD): %v", err)
+	}
+	dirtyBefore, err := gitx.StatusDirty(ctx, root)
+	if err != nil {
+		t.Fatalf("test setup: gitx.StatusDirty: %v", err)
+	}
+
+	stdout, stderr, code := runBinary(t, root, "spec", "doc", "spec/escrow-autopay")
+	if code != 0 {
+		t.Fatalf("verdi spec doc against the real showcase store: exit %d, want 0\nstdout:\n%s\nstderr:\n%s", code, stdout, stderr)
+	}
+	if !strings.Contains(stdout, "## Readiness") || strings.Contains(stdout, "Readiness was not supplied for this render.") {
+		t.Fatalf("stdout must carry a populated Readiness section derived from the real showcase store:\n%s", stdout)
+	}
+	if !strings.Contains(stdout, "Source: readiness snapshot for") {
+		t.Fatalf("populated Readiness section must name its own source line:\n%s", stdout)
+	}
+
+	headAfter, err := gitx.RevParse(ctx, root, "HEAD")
+	if err != nil {
+		t.Fatalf("gitx.RevParse(HEAD) after: %v", err)
+	}
+	if headBefore != headAfter {
+		t.Fatalf("HEAD changed: before=%s after=%s — spec doc must never mutate the repository", headBefore, headAfter)
+	}
+	dirtyAfter, err := gitx.StatusDirty(ctx, root)
+	if err != nil {
+		t.Fatalf("gitx.StatusDirty after: %v", err)
+	}
+	if dirtyAfter != dirtyBefore {
+		t.Fatalf("working-tree dirty state changed (before=%v after=%v) — spec doc must never mutate the working tree", dirtyBefore, dirtyAfter)
+	}
+}
+
 // TestCLIShowcaseJourney (GLG v3 AC-1, journey-projection delivery unit)
 // drives `verdi journey` against the real, already-landed
 // spec/stale-decline feature from examples/showcase — the same target

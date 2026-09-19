@@ -79,6 +79,8 @@ import (
 	"github.com/jyang234/verdi/internal/draftmutation"
 	"github.com/jyang234/verdi/internal/gitx"
 	"github.com/jyang234/verdi/internal/mcpserve"
+	"github.com/jyang234/verdi/internal/readinessload"
+	"github.com/jyang234/verdi/internal/workbench"
 )
 
 // mcpToolCallResult is the minimal tools/call envelope this file decodes:
@@ -216,6 +218,10 @@ func TestMCPShowcaseCoverage(t *testing.T) {
 
 	t.Run("get_document", func(t *testing.T) {
 		t.Setenv("CI_DEFAULT_BRANCH", "main")
+		// spec/readiness-recovery ac-4: a real loader, never a nil one, so
+		// the populated-Readiness assertions below prove genuine
+		// derivation against the provisioned showcase store.
+		srv.Backend.ReadinessLoader = readinessload.Loader{Root: root, Opts: readinessload.Options{BoardHref: workbench.BranchBoardHref}}
 		text := callMCPToolOK(t, srv, "get_document", map[string]any{"ref": "spec/escrow-autopay"})
 		var out struct {
 			Ref         string   `json:"ref"`
@@ -249,6 +255,12 @@ func TestMCPShowcaseCoverage(t *testing.T) {
 		}
 		if out.Disclosures == nil {
 			t.Fatal("get_document(spec/escrow-autopay).Disclosures decoded as JSON null, want a JSON array (possibly empty)")
+		}
+		if !strings.Contains(out.Markdown, "## Readiness") || strings.Contains(out.Markdown, "Readiness was not supplied for this render.") {
+			t.Fatalf("get_document(spec/escrow-autopay).Markdown must carry a populated Readiness section derived from the real showcase store: %q", out.Markdown)
+		}
+		if !strings.Contains(out.Markdown, "Source: readiness snapshot for") {
+			t.Fatalf("get_document(spec/escrow-autopay).Markdown's populated Readiness section must name its own source line: %q", out.Markdown)
 		}
 
 		// kind: tasks narrows the section set (spec/spec-documents dc-3):

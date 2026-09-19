@@ -9,12 +9,16 @@ package main
 // a SEPARATE, hermetic, in-process workbench instance following the
 // established isolated-fixture pattern (emptyglance.go): the REAL
 // workbench.NewHandlerWith wiring with a strictly valid, immutable,
-// fully proven readinesspilot.Snapshot injected through the same
-// Deps.Readiness seam production serve uses. Loopback only, started
-// lazily on the control server's GET /readiness-all-proven-fixture and
-// reused thereafter. Test-only; production serve behavior is untouched.
+// fully proven readinesspilot.Snapshot, wrapped in a fixed-answer loader
+// (spec/readiness-recovery ac-4 dropped Deps.Readiness for a per-request
+// Deps.ReadinessLoader) and injected through the same production seam
+// serve uses, plus Deps.ReadinessDefaultSpec naming its own target so the
+// default (no ?spec=) render reaches it. Loopback only, started lazily on
+// the control server's GET /readiness-all-proven-fixture and reused
+// thereafter. Test-only; production serve behavior is untouched.
 
 import (
+	"context"
 	"fmt"
 	"net"
 	"net/http"
@@ -25,6 +29,16 @@ import (
 	"github.com/jyang234/verdi/internal/readinesspilot"
 	"github.com/jyang234/verdi/internal/workbench"
 )
+
+// fixedReadinessLoader is a test-only workbench.ReadinessLoader that
+// always answers snap, regardless of the requested ref — this fixture
+// serves only GET /readiness with no ?spec= query, so the route always
+// asks for the one default spec ReadinessDefaultSpec names.
+type fixedReadinessLoader struct{ snap readinesspilot.Snapshot }
+
+func (f fixedReadinessLoader) Load(context.Context, string) (readinesspilot.Snapshot, error) {
+	return f.snap, nil
+}
 
 // readinessAllProvenHead is the fixture's pinned startup HEAD — a fixed
 // literal, so the browser oracle can assert the exact stale-notice text.
@@ -100,8 +114,9 @@ func (f *readinessAllProvenFixture) handler(w http.ResponseWriter, r *http.Reque
 }
 
 // ensureStarted validates the snapshot, binds a loopback listener, and
-// serves the real workbench handler with the snapshot injected through
-// Deps.Readiness — exactly the production seam.
+// serves the real workbench handler with the snapshot wrapped in a fixed
+// loader and injected through Deps.ReadinessLoader/Deps.ReadinessDefaultSpec
+// — exactly the production seam.
 func (f *readinessAllProvenFixture) ensureStarted() (string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -123,7 +138,8 @@ func (f *readinessAllProvenFixture) ensureStarted() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	srv := &http.Server{Handler: workbench.NewHandlerWith(root, workbench.Deps{Readiness: &snap})}
+	deps := workbench.Deps{ReadinessLoader: fixedReadinessLoader{snap: snap}, ReadinessDefaultSpec: snap.TargetRef}
+	srv := &http.Server{Handler: workbench.NewHandlerWith(root, deps)}
 	go func() { _ = srv.Serve(ln) }()
 
 	f.url = "http://" + ln.Addr().String() + "/"
