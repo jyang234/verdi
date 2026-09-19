@@ -88,6 +88,9 @@ func TestPolicyAdopt_SoloWritesFourPathsOnPolicyAdopt(t *testing.T) {
 	if names != ".verdi/constitution/consumers.json\n.verdi/policy/constitution.md\n.verdi/policy/policies/starter.md\n.verdi/policy/profiles/starter-solo.md" {
 		t.Fatalf("committed paths:\n%s", names)
 	}
+	if subject := strings.TrimSpace(gitOutput(t, repo.Dir, "show", "-s", "--format=%s", "HEAD")); subject != "policy adopt: starter constitution (solo profile)" {
+		t.Fatalf("commit subject = %q", subject)
+	}
 	if strings.TrimSpace(gitOutput(t, repo.Dir, "rev-parse", "main")) != repo.Head {
 		t.Fatal("main moved")
 	}
@@ -168,6 +171,9 @@ func TestPolicyAdopt_TeamRequiresOwnerAndProposesOnly(t *testing.T) {
 	sp := store.Profiles["starter-team"]
 	if sp == nil || len(sp.Profile.RoleMappings) != 0 {
 		t.Fatalf("team profile = %+v, want zero role mappings", sp)
+	}
+	if subject := strings.TrimSpace(gitOutput(t, repo.Dir, "show", "-s", "--format=%s", "HEAD")); subject != "policy adopt: starter constitution (team profile)" {
+		t.Fatalf("commit subject = %q", subject)
 	}
 }
 
