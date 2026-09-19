@@ -1,0 +1,332 @@
+package readinessload
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
+	"sort"
+
+	"github.com/jyang234/verdi/internal/artifact"
+	"github.com/jyang234/verdi/internal/boardio"
+	"github.com/jyang234/verdi/internal/contextcompile"
+	"github.com/jyang234/verdi/internal/journey"
+	"github.com/jyang234/verdi/internal/policyconflict"
+	"github.com/jyang234/verdi/internal/readinesspilot"
+	"github.com/jyang234/verdi/internal/store"
+)
+
+// noContextRequestWitness is R-RR1-5's fixed witness sentence for a
+// derivation with no supplied --context-request.
+const noContextRequestWitness = "no context request supplied for this derivation"
+
+// noContextRequestCLI is R-RR1-5's fixed context/verdict destination when
+// no request was supplied: an instructive vector naming the verb and flag a
+// caller would use to supply one, not a runnable command against any real
+// file (there is none).
+var noContextRequestCLI = []string{"verdi", "context", "conflict", "--request", "<path>"}
+
+// Load derives readiness for ref (an unpinned whole spec ref) at the
+// checkout's HEAD, on whatever branch is currently checked out — any active
+// feature or story spec, any branch (spec/readiness-recovery ac-2). Two
+// derivations for the same ref at the same HEAD are byte-identical: every
+// source read is deterministic and Derive itself is pure.
+func Load(ctx context.Context, root, ref string, opts Options) (readinesspilot.Snapshot, error) {
+	return loader{}.load(ctx, root, ref, opts)
+}
+
+// Loader is the consumer-side port every surface (workbench, MCP, cmd/verdi
+// itself) defines for itself; this is the production value.
+type Loader struct {
+	Root string
+	Opts Options
+}
+
+// Load derives readiness for ref through l's own Root/Opts.
+func (l Loader) Load(ctx context.Context, ref string) (readinesspilot.Snapshot, error) {
+	return Load(ctx, l.Root, ref, l.Opts)
+}
+
+// loader is the package's own narrow test seam: its optional function
+// fields are hermetic-testing hooks; the useful zero value selects every
+// production predecessor (mirrors cmd/verdi's old
+// localReadinessSnapshotBuilder, which this type's load method's body is
+// lifted from).
+type loader struct {
+	readFile            func(string) ([]byte, error)
+	gatherFacts         func(context.Context, *store.Config, string) (journey.Facts, error)
+	projectJourney      func(context.Context, *store.Config, string, journey.Extras) (journey.Record, error)
+	newConflictProvider func(context.Context, string, policyconflict.Request, JudgeMode, ActorsResolver) (policyconflict.VerdictProvider, error)
+	readAnnotations     func(string) ([]*artifact.Annotation, error)
+}
+
+// load captures one complete readiness derivation. All source reads and
+// the predecessor-owned policy evaluation finish before the value is
+// returned; nothing is retained or persisted (co-2).
+func (l loader) load(ctx context.Context, root, ref string, opts Options) (readinesspilot.Snapshot, error) {
+	if err := ctx.Err(); err != nil {
+		return readinesspilot.Snapshot{}, fmt.Errorf("readinessload: loading readiness: %w", err)
+	}
+	parsedRef, err := artifact.ParseRef(ref)
+	if err != nil || parsedRef.Kind != artifact.KindSpec || parsedRef.Pinned() || parsedRef.Fragment() {
+		return readinesspilot.Snapshot{}, fmt.Errorf("readinessload: loading readiness: ref %q is not an unpinned whole spec ref", ref)
+	}
+	name := parsedRef.Name
+
+	readFile := l.readFile
+	if readFile == nil {
+		readFile = os.ReadFile
+	}
+
+	// The request path is validated, read, and decoded far enough to check
+	// phase/spec identity BEFORE store.Open touches the filesystem at all
+	// (mirrors cmd/verdi's old adapter: "..\"/symlink refusal before any
+	// read" is a hard requirement, not just "before any request read").
+	// request/haveRequest carry the decoded request into the second half of
+	// conflict handling below, which needs branch/head from gatherFacts
+	// first to compute Expected.
+	var request contextcompile.Request
+	haveRequest := false
+	var requestBytes []byte
+	switch opts.ContextRequestPath {
+	case "":
+	case "-":
+		return readinesspilot.Snapshot{}, errors.New("readinessload: loading readiness: --context-request does not accept stdin ('-')")
+	default:
+		validatedPath, err := ValidatedContextRequestPath(root, opts.ContextRequestPath)
+		if err != nil {
+			return readinesspilot.Snapshot{}, fmt.Errorf("readinessload: loading readiness: %w", err)
+		}
+		requestBytes, err = readFile(validatedPath)
+		if err != nil {
+			return readinesspilot.Snapshot{}, fmt.Errorf("readinessload: loading readiness: reading --context-request: %w", err)
+		}
+		request, err = contextcompile.DecodeRequest(requestBytes)
+		if err != nil {
+			return readinesspilot.Snapshot{}, fmt.Errorf("readinessload: loading readiness: decoding --context-request: %w", err)
+		}
+		if request.Phase != contextcompile.PhaseDesign {
+			return readinesspilot.Snapshot{}, fmt.Errorf("readinessload: loading readiness: request must use phase %q, got %q", contextcompile.PhaseDesign, request.Phase)
+		}
+		if request.Spec != ref {
+			return readinesspilot.Snapshot{}, fmt.Errorf("readinessload: loading readiness: request target %q does not match ref %q", request.Spec, ref)
+		}
+		haveRequest = true
+	}
+
+	cfg, err := store.Open(root)
+	if err != nil {
+		return readinesspilot.Snapshot{}, fmt.Errorf("readinessload: loading readiness: opening store: %w", err)
+	}
+
+	projector := journey.NewProjector()
+	gatherFacts := l.gatherFacts
+	if gatherFacts == nil {
+		gatherFacts = projector.GatherFacts
+	}
+	facts, err := gatherFacts(ctx, cfg, ref)
+	if err != nil {
+		return readinesspilot.Snapshot{}, fmt.Errorf("readinessload: loading readiness: gathering repository facts: %w", err)
+	}
+	if !facts.Repository.Branch.Known || !facts.Repository.Head.Known {
+		return readinesspilot.Snapshot{}, errors.New("readinessload: loading readiness: repository branch and HEAD must both be proven")
+	}
+	branch := facts.Repository.Branch.Value
+	head := facts.Repository.Head.Value
+	// ac-2: the design-branch gate is gone — Load derives readiness for ref
+	// on whatever branch is currently checked out. The one gate that
+	// remains is "active": an archived spec's Target.Path resolves under a
+	// different zone and is refused here exactly as it always was (in
+	// practice journey.GatherFacts itself already refuses a spec absent
+	// from the active zone before this ever runs; this stays as a
+	// defensive invariant against a future GatherFacts that resolves an
+	// archived spec by path instead).
+	if facts.Target.Path != store.ActiveSpecRelPath(name) {
+		return readinesspilot.Snapshot{}, fmt.Errorf("readinessload: loading readiness: target %q is not an active spec", ref)
+	}
+
+	var report policyconflict.Report
+	conflictUnavailable := ""
+	contextFallback := noContextRequestCLI
+
+	if !haveRequest {
+		conflictUnavailable = noContextRequestWitness
+	} else {
+		computed := contextcompile.Expected{Branch: branch, Head: head}
+		if request.Expected != nil && *request.Expected != computed {
+			return readinesspilot.Snapshot{}, fmt.Errorf("readinessload: loading readiness: --context-request expected repository %+v does not match computed repository %+v", *request.Expected, computed)
+		}
+		request.Expected = &computed
+
+		conflictRequest := policyconflict.Request{
+			Schema: policyconflict.RequestSchema,
+			Target: policyconflict.Target{
+				Kind: policyconflict.TargetAcceptanceCandidate,
+				AcceptanceCandidate: &policyconflict.AcceptanceCandidate{
+					Adapter: request.Adapter, Expected: computed, Grants: request.Grants, Scope: request.Scope, Spec: request.Spec,
+				},
+			},
+		}
+		if err := conflictRequest.Validate(); err != nil {
+			return readinesspilot.Snapshot{}, fmt.Errorf("readinessload: loading readiness: constructing conflict request: %w", err)
+		}
+
+		newConflictProvider := l.newConflictProvider
+		if newConflictProvider == nil {
+			newConflictProvider = NewConflictProvider
+		}
+		provider, err := newConflictProvider(ctx, root, conflictRequest, opts.Judge, opts.Actors)
+		if err != nil {
+			return readinesspilot.Snapshot{}, fmt.Errorf("readinessload: loading readiness: constructing policy-conflict provider: %w", err)
+		}
+		if provider == nil {
+			return readinesspilot.Snapshot{}, errors.New("readinessload: loading readiness: policy-conflict provider is nil")
+		}
+		conflictResult, err := provider.Evaluate(ctx, conflictRequest)
+		if err != nil {
+			return readinesspilot.Snapshot{}, fmt.Errorf("readinessload: loading readiness: evaluating policy conflicts: %w", err)
+		}
+		if err := reportIdentity(conflictResult.Report, ref, facts.Target.Path, branch, head); err != nil {
+			return readinesspilot.Snapshot{}, fmt.Errorf("readinessload: loading readiness: %w", err)
+		}
+		report = conflictResult.Report
+		contextFallback = []string{"verdi", "context", "conflict", "--request", opts.ContextRequestPath}
+	}
+
+	specPath := filepath.Join(root, filepath.FromSlash(facts.Target.Path))
+	specBytes, err := readFile(specPath)
+	if err != nil {
+		return readinesspilot.Snapshot{}, fmt.Errorf("readinessload: loading readiness: reading target spec: %w", err)
+	}
+	frontmatter, _, err := artifact.SplitFrontmatter(specBytes)
+	if err != nil {
+		return readinesspilot.Snapshot{}, fmt.Errorf("readinessload: loading readiness: splitting target spec: %w", err)
+	}
+	spec, err := artifact.DecodeSpec(frontmatter)
+	if err != nil {
+		return readinesspilot.Snapshot{}, fmt.Errorf("readinessload: loading readiness: decoding target spec: %w", err)
+	}
+	if spec.ID != ref || string(spec.Class) != facts.Target.Class {
+		return readinesspilot.Snapshot{}, fmt.Errorf("readinessload: loading readiness: decoded spec identity (%q, %q) does not match resolved target identity (%q, %q)", spec.ID, spec.Class, ref, facts.Target.Class)
+	}
+	if spec.Class != artifact.ClassFeature && spec.Class != artifact.ClassStory {
+		// vocab:identity — operational diagnostic naming the fixed artifact class identities
+		return readinesspilot.Snapshot{}, fmt.Errorf("readinessload: loading readiness: decoded spec class %q is not feature or story", spec.Class)
+	}
+	if conflictUnavailable == "" {
+		candidate := report.Input.Target.Candidate
+		if candidate.ContentDigest != readinessDigest(specBytes) {
+			return readinesspilot.Snapshot{}, fmt.Errorf("readinessload: loading readiness: conflict report target content digest %q does not match decoded spec bytes %q", candidate.ContentDigest, readinessDigest(specBytes))
+		}
+	}
+
+	provenance, err := provenanceFacts(readFile, root, name, ref, specBytes)
+	if err != nil {
+		return readinesspilot.Snapshot{}, err
+	}
+	mutation, err := mutationFacts(root, name)
+	if err != nil {
+		return readinesspilot.Snapshot{}, err
+	}
+	provenance.MutationState = mutation.MutationState
+	provenance.MutationWitnesses = mutation.MutationWitnesses
+	readAnnotations := l.readAnnotations
+	if readAnnotations == nil {
+		readAnnotations = boardio.ReadAllAnnotations
+	}
+	board, err := boardFacts(readAnnotations, root, name)
+	if err != nil {
+		return readinesspilot.Snapshot{}, err
+	}
+
+	declared := artifact.DeclaredObjectIDs(spec)
+	declaredIDs := make([]string, 0, len(declared))
+	for id := range declared {
+		declaredIDs = append(declaredIDs, id)
+	}
+	sort.Strings(declaredIDs)
+	openQuestionIDs := make([]string, len(spec.OpenQuestions))
+	for i, question := range spec.OpenQuestions {
+		openQuestionIDs[i] = question.ID
+	}
+	sort.Strings(openQuestionIDs)
+	claimedQuestions := claimedQuestionsOf(spec.Stubs)
+
+	boardPath := ""
+	if opts.BoardHref != nil {
+		boardPath = opts.BoardHref(branch, name)
+	}
+
+	var conflictPtr *policyconflict.Report
+	if conflictUnavailable == "" {
+		conflictPtr = &report
+	}
+	projectJourney := l.projectJourney
+	if projectJourney == nil {
+		projectJourney = projector.ProjectWith
+	}
+	record, err := projectJourney(ctx, cfg, ref, journey.Extras{Conflict: conflictPtr})
+	if err != nil {
+		return readinesspilot.Snapshot{}, fmt.Errorf("readinessload: loading readiness: projecting journey: %w", err)
+	}
+	if record.Target.Ref != ref || record.Target.Path != facts.Target.Path {
+		return readinesspilot.Snapshot{}, fmt.Errorf("readinessload: loading readiness: journey target (%q, %q) does not match resolved target (%q, %q)", record.Target.Ref, record.Target.Path, ref, facts.Target.Path)
+	}
+	if !record.Repository.Branch.Known || record.Repository.Branch.Value != branch || !record.Repository.Head.Known || record.Repository.Head.Value != head {
+		return readinesspilot.Snapshot{}, fmt.Errorf("readinessload: loading readiness: journey repository (%q, %q) does not match resolved repository (%q, %q)", record.Repository.Branch.Value, record.Repository.Head.Value, branch, head)
+	}
+
+	input := readinesspilot.Input{
+		Target: readinesspilot.TargetFacts{
+			Ref: ref, Title: spec.Title, Class: string(spec.Class), Branch: branch, Head: head, BoardPath: boardPath,
+		},
+		Shape: readinesspilot.ShapeFacts{
+			ProblemPresent: spec.Problem != nil, OutcomePresent: spec.Outcome != nil,
+			DeclaredObjectIDs: declaredIDs, OpenQuestionIDs: openQuestionIDs,
+			ClaimedQuestions: claimedQuestions,
+		},
+		Provenance: provenance,
+		Board:      board,
+		Journey:    record,
+		Conflict:   report,
+		Fallbacks: readinesspilot.Fallbacks{
+			Shape:   []string{"verdi", "journey", ref},
+			Success: []string{"verdi", "journey", ref},
+			Context: contextFallback,
+			Review:  []string{"verdi", "journey", ref},
+		},
+		RequestDigest: readinessDigest(requestBytes),
+		// spec/vocabulary-surfaces: readinesspilot stays pure and never
+		// imports internal/model itself, so this loader resolves the spike
+		// pseudo-class's display word once, here, through the store's
+		// already-resolved operating model (ledger L-M13a(6)).
+		SpikeWord:           cfg.Model.DisplayClass("spike"),
+		ConflictUnavailable: conflictUnavailable,
+	}
+	snapshot, err := readinesspilot.Derive(input)
+	if err != nil {
+		return readinesspilot.Snapshot{}, fmt.Errorf("readinessload: loading readiness: deriving projection: %w", err)
+	}
+	// R-RR1-6: shape has no registered corrective inspection command. When
+	// the caller supplied a board-href function, route every unresolved
+	// shape concern to the existing selected-branch board instead of
+	// exposing Derive's required CLI fallback outside this package; when it
+	// did not, the CLI fallback vector stays (input.Target.BoardPath is
+	// already "" either way, so deriveShape's own board-vs-CLI fallback
+	// already produced it for every concern this loop would otherwise
+	// touch).
+	if opts.BoardHref != nil {
+		for _, concerns := range [][]readinesspilot.Concern{snapshot.AllConcerns, snapshot.Attention} {
+			for i := range concerns {
+				if concerns[i].Area == readinesspilot.AreaShape && concerns[i].State != readinesspilot.StateProven {
+					concerns[i].Destination = readinesspilot.Destination{BoardPath: input.Target.BoardPath, CLI: []string{}}
+				}
+			}
+		}
+	}
+	if err := snapshot.Validate(); err != nil {
+		return readinesspilot.Snapshot{}, fmt.Errorf("readinessload: loading readiness: routing shape destinations: %w", err)
+	}
+	return snapshot, nil
+}

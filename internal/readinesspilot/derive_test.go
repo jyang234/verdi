@@ -453,6 +453,53 @@ func TestDeriveConflictVerdictsAndRows(t *testing.T) {
 	}
 }
 
+// TestDeriveConflictUnavailable covers R-RR1-5 (spec/readiness-recovery
+// ac-2/ac-3): when the caller has no policy-conflict report to supply — the
+// readiness loader's own no-request-supplied posture — Input.Conflict stays
+// the pure zero value and Input.ConflictUnavailable names a witness
+// sentence instead. deriveContext must then emit EXACTLY the single
+// unproven context/verdict concern, carrying that witness verbatim and the
+// context fallback destination, with no mechanical/semantic/disclosure rows
+// (there is no real report to derive them from).
+func TestDeriveConflictUnavailable(t *testing.T) {
+	t.Parallel()
+
+	in := baseInput(t)
+	in.Conflict = policyconflict.Report{}
+	in.ConflictUnavailable = "no context request supplied for this derivation"
+	snapshot := mustDerive(t, in)
+
+	verdict := mustConcern(t, snapshot, "context/verdict")
+	if verdict.State != StateUnproven || !verdict.Blocking {
+		t.Fatalf("verdict concern = %+v, want unproven and blocking", verdict)
+	}
+	if len(verdict.Witnesses) != 1 || verdict.Witnesses[0] != in.ConflictUnavailable {
+		t.Fatalf("verdict witnesses = %v, want exactly [%q]", verdict.Witnesses, in.ConflictUnavailable)
+	}
+	if !reflect.DeepEqual(verdict.Destination.CLI, in.Fallbacks.Context) {
+		t.Fatalf("verdict destination = %+v, want context fallback %v", verdict.Destination, in.Fallbacks.Context)
+	}
+	for _, concern := range snapshot.AllConcerns {
+		if concern.Area == AreaContext && concern.ID != "context/verdict" {
+			t.Fatalf("unexpected context concern %q alongside an unavailable conflict report", concern.ID)
+		}
+	}
+}
+
+// TestDeriveConflictUnavailableRejectsNonZeroReport proves the two fields
+// are mutually exclusive: a caller that sets ConflictUnavailable must leave
+// Conflict at its pure zero value, never a half-supplied report.
+func TestDeriveConflictUnavailableRejectsNonZeroReport(t *testing.T) {
+	t.Parallel()
+
+	in := baseInput(t)
+	in.ConflictUnavailable = "no context request supplied for this derivation"
+	// in.Conflict is baseInput's non-zero conflictReport(t, VerdictPass).
+	if _, err := Derive(in); err == nil {
+		t.Fatal("Derive accepted ConflictUnavailable alongside a non-zero conflict report")
+	}
+}
+
 func TestDeriveReviewPrincipalAndActionFacts(t *testing.T) {
 	t.Parallel()
 
