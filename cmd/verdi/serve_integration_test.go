@@ -405,8 +405,8 @@ func readinessLoadPassReport(t *testing.T, root string, request policyconflict.R
 
 // TestReadinessLoadBuilderHandsOffTheCacheOnlyLoaderAndDefaultSpec proves
 // readinessLoadBuilder.Build's own side of the Task-3 hand-off (threaded
-// through runServe's own return path — exit obligation: no package-level
-// serveReadinessLoader/serveReadinessDefaultSpec vars): Build's returned
+// through runServe's own return path — exit obligation: no more
+// package-level loader/default-spec hand-off variables): Build's returned
 // ref names the request's own target, and after Build's real JudgeRun
 // warm-up, a Loader constructed the SAME way cmdServeWithDeps constructs
 // its own (root, the request path, BoardHref, Actors — Judge left at its
