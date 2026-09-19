@@ -32,6 +32,16 @@ var knownPhases = map[string]bool{
 // name shape, reused rather than re-invented).
 var kebabRe = regexp.MustCompile(`^[a-z0-9]+(?:-[a-z0-9]+)*$`)
 
+// IsOwnerHandle reports whether handle matches the kebab-case owner-handle
+// grammar kernel.go's own toKernel enforces on every committed artifact's
+// owners: field ("owner %q must be a kebab-case owner handle"). Exported
+// so a caller validating a caller-supplied owner handle up front (a CLI
+// flag parser, say) can share this package's own grammar rather than
+// copying the regexp.
+func IsOwnerHandle(handle string) bool {
+	return kebabRe.MatchString(handle)
+}
+
 // Scope is the applicability boundary every constitution artifact and
 // claim carries (AC-1's kernel scope field). Each dimension is a semantic
 // set; the EXPLICIT empty set means unconstrained on that dimension —
