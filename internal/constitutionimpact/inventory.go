@@ -68,13 +68,20 @@ func DecodeInventory(data []byte) (Inventory, error) {
 	return inventory, nil
 }
 
-// EncodeInventory returns canonical bytes for a strict v1 inventory.
+// EncodeInventory returns canonical bytes for a strict v1 inventory. A
+// present template record is validated here as well as in DecodeInventory:
+// encode must never write a document its own decoder would refuse on read.
 func EncodeInventory(inventory Inventory) ([]byte, error) {
 	if inventory.Schema != InventorySchema {
 		return nil, fmt.Errorf("constitutionimpact: encoding inventory: schema %q, want %q", inventory.Schema, InventorySchema)
 	}
 	if inventory.Consumers == nil {
 		return nil, fmt.Errorf("constitutionimpact: encoding inventory: consumers must be non-nil")
+	}
+	if inventory.Template != nil {
+		if err := inventory.Template.Validate(); err != nil {
+			return nil, fmt.Errorf("constitutionimpact: encoding inventory: %w", err)
+		}
 	}
 	rows := make([]consumerDoc, len(inventory.Consumers))
 	for i, consumer := range inventory.Consumers {

@@ -147,7 +147,10 @@ func TestDecodePolicy_Negative(t *testing.T) {
 		{"empty instruction", strings.Replace(validPolicyDoc(), "- \"Run make verify before claiming completion.\"", "- \"\"", 1), "instruction"},
 		{"multiline instruction", strings.Replace(validPolicyDoc(), "- \"Run make verify before claiming completion.\"", "- \"line one\\nline two\"", 1), "single line"},
 		{"instructions null entry", strings.Replace(validPolicyDoc(), "- \"Run make verify before claiming completion.\"", "- null", 1), "instruction"},
-		{"template with bad digest", strings.Replace(validPolicyDoc(), policyTemplateLine, "template: {identity: \"embedded:policy.md\", digest: \"nothex\"}", 1), "digest"},
+		// The prefix is part of the expectation: TemplateRecord lives in
+		// governanceprincipal, but its Validate message is unprefixed so
+		// this package names the artifact it decoded (review Minor 2).
+		{"template with bad digest", strings.Replace(validPolicyDoc(), policyTemplateLine, "template: {identity: \"embedded:policy.md\", digest: \"nothex\"}", 1), "policyartifact: policy template.digest"},
 		{"template missing identity", strings.Replace(validPolicyDoc(), policyTemplateLine, "template: {digest: \"sha256:0000000000000000000000000000000000000000000000000000000000000000\"}", 1), "identity"},
 		// AC-1: "A created artifact records the resolved template identity
 		// and digest" — unconditional for the scaffold-backed kinds, and

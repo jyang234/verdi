@@ -156,7 +156,9 @@ func (d kernelDoc) toKernel(wantSchema, wantKind string) (kernel, error) {
 			return kernel{}, fmt.Errorf("policyartifact: %s field template is missing: a scaffold-backed artifact records the resolved template identity and digest it was created from", wantKind)
 		}
 	} else if err := k.Template.Validate(); err != nil {
-		return kernel{}, err
+		// TemplateRecord's Validate names the field only; this package
+		// names the artifact it was decoding.
+		return kernel{}, fmt.Errorf("policyartifact: %s %w", wantKind, err)
 	}
 	return k, nil
 }

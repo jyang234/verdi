@@ -20,13 +20,18 @@ type TemplateRecord struct {
 	Digest   string `yaml:"digest" json:"digest"`
 }
 
-// Validate checks the record's grammar.
+// Validate checks the record's grammar. The message names the offending
+// FIELD (template.identity / template.digest) and nothing else: this type
+// is carried by artifacts three packages own, so each caller supplies the
+// prefix naming the artifact it was decoding. Prefixing here instead would
+// print this package's name on a policy or an inventory error and double
+// it on a profile one.
 func (t TemplateRecord) Validate() error {
 	if t.Identity == "" {
-		return fmt.Errorf("governanceprincipal: template.identity is required")
+		return fmt.Errorf("template.identity is required")
 	}
 	if !sha256Re.MatchString(t.Digest) {
-		return fmt.Errorf("governanceprincipal: template.digest %q is not sha256:<64 hex> form", t.Digest)
+		return fmt.Errorf("template.digest %q is not sha256:<64 hex> form", t.Digest)
 	}
 	return nil
 }

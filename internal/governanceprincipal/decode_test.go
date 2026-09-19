@@ -343,9 +343,16 @@ template: {identity: "embedded:governance-profile-solo.md", digest: "sha256:` + 
 	if d1 == d2 {
 		t.Fatal("template record must be digest-bound")
 	}
-	// A malformed digest fails closed, naming the field.
+	// A malformed digest fails closed, naming the field — once. Validate's
+	// own message is unprefixed so each caller names its own artifact, so
+	// this one reads "governanceprincipal: profile template.digest ..."
+	// rather than repeating the package (review Minor 2).
 	bad := bytes.Replace(raw, []byte("sha256:"), []byte("md5:"), 1)
-	if _, err := DecodeProfile(bad, catalog); err == nil || !strings.Contains(err.Error(), "template.digest") {
+	_, err = DecodeProfile(bad, catalog)
+	if err == nil || !strings.Contains(err.Error(), "template.digest") {
 		t.Fatalf("bad digest: %v", err)
+	}
+	if got := err.Error(); !strings.HasPrefix(got, "governanceprincipal: profile template.digest ") || strings.Count(got, "governanceprincipal:") != 1 {
+		t.Fatalf("bad digest error = %q, want exactly one governanceprincipal: prefix naming the profile", got)
 	}
 }

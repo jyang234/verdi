@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"reflect"
+	"sort"
 	"strings"
 	"testing"
 
@@ -22,8 +24,21 @@ func starterScaffold(t *testing.T, name string) Scaffold {
 	return s
 }
 
+// starterCatalog is the governance vocabulary the starter profiles are
+// validated against. It is not an independent literal: TestRender-
+// Constitution_RoundTrip asserts the constitution template declares
+// exactly this catalog, so dropping policy-owner or policy-disposition-
+// approval from policy-constitution.md fails there instead of leaving
+// every test green while `verdi policy adopt --starter` writes a
+// constitution whose vocabulary cannot validate the profile it selects.
 func starterCatalog() governanceprincipal.Catalog {
 	return governanceprincipal.Catalog{Roles: []string{"author", "reviewer", "policy-owner"}, Transitions: []string{"accept", "policy-disposition-approval"}}
+}
+
+func sortedCopy(in []string) []string {
+	out := append([]string{}, in...)
+	sort.Strings(out)
+	return out
 }
 
 func TestRenderConstitution_RoundTrip(t *testing.T) {
@@ -38,6 +53,21 @@ func TestRenderConstitution_RoundTrip(t *testing.T) {
 	}
 	if c.SelectedProfile != "starter-solo" || c.Template == nil || c.Template.Digest != s.Digest || len(c.Adapters) != 0 || len(c.Environments) != 1 {
 		t.Fatalf("decoded = %+v", c)
+	}
+	// The template's catalog IS the vocabulary the starter profiles are
+	// validated against — they are written to select this constitution, so
+	// the two cannot drift apart silently. DecodeConstitution canonicalizes
+	// every catalog set by sorting it, so compare sorted copies: in a set
+	// membership is the meaning, order is not.
+	vocab := starterCatalog()
+	wantCatalog := policyartifact.GovernanceCatalog{
+		Roles:             sortedCopy(vocab.Roles),
+		Transitions:       sortedCopy(vocab.Transitions),
+		EvidenceSources:   []string{},
+		EscalationMetrics: []string{},
+	}
+	if !reflect.DeepEqual(c.Catalog, wantCatalog) {
+		t.Fatalf("constitution catalog = %+v, want exactly the vocabulary the starter profiles are validated against %+v", c.Catalog, wantCatalog)
 	}
 	// Anti-synthesis: a template that changes the selected profile fails by name.
 	bad := s
@@ -69,6 +99,12 @@ func TestRenderProfile_SoloBindsTheSubjectAndTeamMapsNoOne(t *testing.T) {
 			t.Fatalf("mapping %+v binds a subject the caller did not supply", m)
 		}
 	}
+	// R-W4-1: the solo profile's one trust source is the local operator —
+	// a bare self-assertion the resolver reports as local-operator-asserted,
+	// never an independently verified identity.
+	if len(sp.Profile.IdentityTrustSources) != 1 || sp.Profile.IdentityTrustSources[0].Kind != governanceprincipal.TrustSourceLocalOperator {
+		t.Fatalf("solo identity_trust_sources = %+v, want exactly one %q source", sp.Profile.IdentityTrustSources, governanceprincipal.TrustSourceLocalOperator)
+	}
 	// A subject containing a quote or newline is rendered safely (printf %q), never a second key.
 	if _, err := RenderProfile(solo, ProfileScaffoldData{ProfileID: "starter-solo", Class: governanceprincipal.ClassSolo, Subject: "a\"b\nrole_mappings: []", TemplateIdentity: solo.Identity, TemplateDigest: solo.Digest}, starterCatalog()); err != nil {
 		t.Fatalf("quoted subject: %v", err)
@@ -91,6 +127,10 @@ func TestRenderProfile_SoloBindsTheSubjectAndTeamMapsNoOne(t *testing.T) {
 	}
 	if tp.Profile.Class != governanceprincipal.ClassTeam || len(tp.Profile.RoleMappings) != 0 || len(tp.Profile.DistinctnessRules) != 2 || len(tp.Profile.RequiredApprovers) != 2 {
 		t.Fatalf("team = %+v", tp.Profile)
+	}
+	// R-W4-1: the team profile authenticates through the forge.
+	if len(tp.Profile.IdentityTrustSources) != 1 || tp.Profile.IdentityTrustSources[0].Kind != governanceprincipal.TrustSourceForge {
+		t.Fatalf("team identity_trust_sources = %+v, want exactly one %q source", tp.Profile.IdentityTrustSources, governanceprincipal.TrustSourceForge)
 	}
 	// Class mismatch between data and template fails by name.
 	if _, err := RenderProfile(team, ProfileScaffoldData{ProfileID: "starter-team", Class: governanceprincipal.ClassSolo, TemplateIdentity: team.Identity, TemplateDigest: team.Digest}, starterCatalog()); err == nil || !strings.Contains(err.Error(), "class") {
@@ -167,7 +207,10 @@ func TestStarterTemplates_StoreOverrideChangesIdentity(t *testing.T) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	canon, _ := designscaffold.Canonical(StarterPolicyTemplate)
+	canon, err := designscaffold.Canonical(StarterPolicyTemplate)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := os.WriteFile(filepath.Join(dir, StarterPolicyTemplate), bytes.Replace(canon, []byte("Starter policy: one real rule"), []byte("Our policy: one real rule"), 1), 0o644); err != nil {
 		t.Fatal(err)
 	}

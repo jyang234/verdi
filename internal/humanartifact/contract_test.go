@@ -75,7 +75,11 @@ func TestContractValidate_Negative(t *testing.T) {
 func TestContractFor_PreRegisteredKinds(t *testing.T) {
 	kinds := []string{
 		"feature", "story", "adr", "attestation", "waiver", "reaffirmation", "obligation",
-		"policy", "policy-overlay", "policy-exemption",
+		"policy", "policy-overlay", "policy-exemption", "policy-disposition",
+		"policy-constitution", "governance-profile",
+	}
+	if len(kinds) != len(kernelFieldTable) {
+		t.Fatalf("pre-registered kinds = %d, kernelFieldTable = %d: init() derives the registry from that table, so every row must be listed here", len(kinds), len(kernelFieldTable))
 	}
 	for _, k := range kinds {
 		t.Run(k, func(t *testing.T) {
