@@ -308,6 +308,7 @@ close`; the CLI is that path plus the read surfaces.
 | `verdi close <story\|feature>` | Closure ritual: every AC evidenced, frozen rollup, archived quartet |
 | `verdi lint` | Artifactlint (VL-001..021) — the CI gate for artifact validity; each finding line reads `<message> (<path>) [VL-xxx]` |
 | `verdi matrix <story\|feature>` | Compute and print the evidence fold |
+| `verdi spec doc <spec-ref> [--kind …] [--no-readiness]` | Render a spec, plan, or task document with its live readiness section |
 | `verdi sync` | Pull the CI evidence bundle into `derived/` |
 | `verdi audit` | Audit ADR exemptions and mid-build deviations |
 | `verdi serve` | Localhost workbench (board, obligation wall) + lens/dex pages |

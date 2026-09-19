@@ -358,6 +358,109 @@ func TestSpecDoc_NoStoreExitsOperational(t *testing.T) {
 	}
 }
 
+// TestSpecDoc_ReadinessDefaultPopulatesSection is spec/readiness-recovery
+// ac-4/R-RR1-9: `verdi spec doc` derives readiness by default for the
+// accepted reading, over the real internal/readinessload.Loader (no
+// injection seam — this is a real built-binary render, exactly what a
+// user sees), producing a genuinely populated ## Readiness section, not
+// merely the heading.
+func TestSpecDoc_ReadinessDefaultPopulatesSection(t *testing.T) {
+	repo := buildSpecDocRepo(t)
+	bin := buildVerdiBinary(t)
+	stdout, stderr, code := runVerdiBinary(t, bin, repo.Dir, []string{"CI_DEFAULT_BRANCH=main"}, "spec", "doc", "spec/lockbox")
+	if code != 0 {
+		t.Fatalf("exit %d, stderr:\n%s", code, stderr)
+	}
+	if !strings.Contains(stdout, "## Readiness") || strings.Contains(stdout, "Readiness was not supplied for this render.") {
+		t.Fatalf("default render must carry a populated Readiness section:\n%s", stdout)
+	}
+	if !strings.Contains(stdout, "Source: readiness snapshot for") {
+		t.Fatalf("populated Readiness section must name its own source line:\n%s", stdout)
+	}
+}
+
+// TestSpecDoc_NoReadinessFlagOmitsSection is R-RR1-9: --no-readiness
+// omits the section outright — the CLI's own loader is never given a
+// chance to derive anything (proven indirectly: the render states the
+// absence exactly as a store with no loader wired at all would).
+func TestSpecDoc_NoReadinessFlagOmitsSection(t *testing.T) {
+	repo := buildSpecDocRepo(t)
+	bin := buildVerdiBinary(t)
+	stdout, stderr, code := runVerdiBinary(t, bin, repo.Dir, []string{"CI_DEFAULT_BRANCH=main"}, "spec", "doc", "spec/lockbox", "--no-readiness")
+	if code != 0 {
+		t.Fatalf("exit %d, stderr:\n%s", code, stderr)
+	}
+	if !strings.Contains(stdout, "## Readiness\n\nReadiness was not supplied for this render.") {
+		t.Fatalf("--no-readiness must render the section's honest absence:\n%s", stdout)
+	}
+	if strings.Contains(stderr, "readiness:") {
+		t.Fatalf("--no-readiness is an intentional omission, never a disclosed failure:\n%s", stderr)
+	}
+}
+
+// TestSpecDoc_AtNeverAppliesReadiness is spec/readiness-recovery ac-4: a
+// historical --at reading never carries a live readiness fact (final-
+// review F10's rule, shared with the board and MCP) — proven against the
+// SAME fixture TestSpecDoc_ReadinessDefaultPopulatesSection proves DOES
+// derive successfully for the accepted reading, so this is a genuine
+// mode-gated refusal, not an accident of an unreadable fixture.
+func TestSpecDoc_AtNeverAppliesReadiness(t *testing.T) {
+	repo := buildSpecDocRepo(t)
+	bin := buildVerdiBinary(t)
+	stdout, stderr, code := runVerdiBinary(t, bin, repo.Dir, []string{"CI_DEFAULT_BRANCH=main"}, "spec", "doc", "spec/lockbox", "--at", repo.Head)
+	if code != 0 {
+		t.Fatalf("exit %d, stderr:\n%s", code, stderr)
+	}
+	if !strings.Contains(stdout, "## Readiness\n\nReadiness was not supplied for this render.") {
+		t.Fatalf("--at must never carry a live readiness fact:\n%s", stdout)
+	}
+	if strings.Contains(stderr, "readiness:") {
+		t.Fatalf("--at skips the loader outright, so it discloses nothing about it:\n%s", stderr)
+	}
+}
+
+// TestSpecDoc_ReadinessLoaderErrorIsDisclosedNotFatal is R-RR1-9: a
+// loader failure is a disclosure on stderr, never a failed render — a
+// document is not a verdict. A "component"-class spec is valid input for
+// specdocload (it has no class restriction) but readinessload.Load
+// explicitly refuses any class but feature/story, so this is a genuine
+// loader failure over an otherwise-renderable spec, not a contrived one.
+func TestSpecDoc_ReadinessLoaderErrorIsDisclosedNotFatal(t *testing.T) {
+	const componentSpec = `---
+id: spec/widget-notes
+kind: spec
+class: component
+title: "Widget notes"
+status: active
+owners: [platform-team]
+---
+# Widget notes
+
+Some component notes.
+`
+	repo := fixturegit.Build(t, []fixturegit.Layer{{
+		Message: "adopt store with one accepted component",
+		Files: map[string]string{
+			".verdi/verdi.yaml":                        supersedeManifestYAML,
+			".verdi/specs/active/widget-notes/spec.md": componentSpec,
+		},
+	}})
+	bin := buildVerdiBinary(t)
+	stdout, stderr, code := runVerdiBinary(t, bin, repo.Dir, []string{"CI_DEFAULT_BRANCH=main"}, "spec", "doc", "spec/widget-notes")
+	if code != 0 {
+		t.Fatalf("a readiness failure must not fail the render: exit %d, stderr:\n%s", code, stderr)
+	}
+	if !strings.Contains(stdout, "# Widget notes") {
+		t.Fatalf("the render must still succeed despite the readiness disclosure:\n%s", stdout)
+	}
+	if !strings.Contains(stdout, "## Readiness\n\nReadiness was not supplied for this render.") {
+		t.Fatalf("a loader failure must state the section's honest absence:\n%s", stdout)
+	}
+	if !strings.Contains(stderr, "spec doc: readiness:") {
+		t.Fatalf("a loader failure must be disclosed on stderr with the exact prefix:\n%s", stderr)
+	}
+}
+
 // TestSpecDoc_EvidenceDisclosureStillRenders is fix-round-1 F4's CLI half:
 // a degraded disclosure (specdocload.Result.Disclosures) must reach the
 // verb's stderr with its "spec doc: " prefix while the render itself
