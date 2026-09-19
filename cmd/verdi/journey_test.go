@@ -1130,3 +1130,54 @@ func TestCmdJourney_EventualBlockersDerived(t *testing.T) {
 		t.Fatalf("Blockers.Eventual.Items = %v, want outcome-floor/ac-1 (no attestation, no passing outcome record planted for this fixture's only AC)", journeyBlockerIDs(rec.Blockers.Eventual.Items))
 	}
 }
+
+// journeyDigitStubFeatureSpecMD declares a stub whose slug begins with a
+// DIGIT — legal by internal/artifact's own simpleNameRe
+// (^[a-z0-9]+(?:-[a-z0-9]+)*$) and refused by nothing in internal/lint.
+const journeyDigitStubFeatureSpecMD = `---
+id: spec/auth
+kind: spec
+class: feature
+title: "Auth"
+owners: [platform-team]
+acceptance_criteria:
+  - { id: ac-1, text: "static obligation holds", evidence: [static] }
+stubs:
+  - { slug: 2fa-login, acceptance_criteria: [ac-1] }
+---
+# body
+`
+
+// TestCmdJourney_DigitLeadingStubSlugStillProjects is C1's end-to-end
+// regression, driven through the CLI verb itself: a feature whose stub
+// slug begins with a digit and has no implementing story used to compose
+// the blocker id "stub-unreconciled/2fa-login", which fails the journey
+// id grammar (record.go's blockerIDRe requires each segment to start with
+// a letter) — so Record.Validate refused the assembled record and
+// `verdi journey` exited 2 on a perfectly legal store. The id segment is
+// normalized now; exit 0, and the raw slug is still named to the
+// operator.
+func TestCmdJourney_DigitLeadingStubSlugStillProjects(t *testing.T) {
+	buildJourneyRepo(t, map[string]string{".verdi/specs/active/auth/spec.md": journeyDigitStubFeatureSpecMD})
+
+	var stdout, stderr bytes.Buffer
+	got := cmdJourney([]string{"spec/auth"}, &stdout, &stderr)
+	if got != 0 {
+		t.Fatalf("cmdJourney = %d, want 0; stderr=%s", got, stderr.String())
+	}
+
+	rec, err := journey.Decode(bytes.TrimRight(stdout.Bytes(), "\n"))
+	if err != nil {
+		t.Fatalf("journey.Decode(stdout): %v\nstdout=%s", err, stdout.String())
+	}
+	blocker := journeyFindBlocker(rec.Blockers.Eventual.Items, "stub-unreconciled/s-2fa-login")
+	if blocker == nil {
+		t.Fatalf("Blockers.Eventual.Items = %v, want stub-unreconciled/s-2fa-login", journeyBlockerIDs(rec.Blockers.Eventual.Items))
+	}
+	if !strings.Contains(blocker.ClearingCondition, "2fa-login") {
+		t.Fatalf("clearing condition = %q, want the raw slug named", blocker.ClearingCondition)
+	}
+	if blocker.Transition != "close" {
+		t.Fatalf("transition = %q, want close (the gate that consumes stub reconciliation)", blocker.Transition)
+	}
+}

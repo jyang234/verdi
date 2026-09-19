@@ -10,6 +10,7 @@ import (
 	"github.com/jyang234/verdi/internal/evidence"
 	"github.com/jyang234/verdi/internal/model"
 	"github.com/jyang234/verdi/internal/policyconflict"
+	"github.com/jyang234/verdi/internal/specstate"
 )
 
 // noConflictReportDisclosure is R-RR1-2's fixed disclosure: with no
@@ -20,6 +21,28 @@ import (
 // disclosed, never silently skipped — CO-1).
 const noConflictReportDisclosure = "conflict rows and exemption bounds were not evaluated by this projection: no policy-conflict report was supplied"
 
+// storyClassID and spikeClassID are the two class IDS whose DISPLAY words
+// appear in a clearing condition below. They are identity-layer ids (the
+// operating model's own class keys); every use resolves through
+// model.DisplayClass before it reaches an operator's eye, so a store that
+// renamed its vocabulary never sees the bare word.
+const (
+	storyClassID = "story"
+	spikeClassID = "spike"
+)
+
+// acceptedStatus and closedStatus are the two lifecycle STATE ids this
+// derivation resolves transitions by TARGET rather than by verb name
+// (R-RR1-12, ledger SI-207: "do not hard-code merge" — a store may rename
+// a verb's display word, and a later model may name the acceptance
+// transition differently). Both are joined through specstate's own
+// Result.ArtifactStatus mapping (DC-15), never written here as a second
+// literal-to-literal status table of this package's own.
+var (
+	acceptedStatus = string(specstate.Result{State: specstate.AcceptedPendingBuild}.ArtifactStatus())
+	closedStatus   = string(specstate.Result{State: specstate.Closed}.ArtifactStatus())
+)
+
 // eventualInput is deriveEventual's complete, already-gathered input. Every
 // field is a value the caller (ProjectWith) resolved before calling in —
 // deriveEventual itself performs no I/O, no wall-clock read, and no
@@ -27,9 +50,22 @@ const noConflictReportDisclosure = "conflict rows and exemption bounds were not 
 // output.
 type eventualInput struct {
 	// Class is the target's class ("feature" or "story"). The three
-	// feature-only sources (stub reconciliation, the outcome floor, claimed
-	// questions) derive only when Class == "feature" (R-RR1-3).
+	// feature-only sources (stub reconciliation, the outcome floor,
+	// claimed questions) derive only when Class is the feature class
+	// (R-RR1-3).
 	Class string
+	// Model is the operating-model catalog: the ONLY source of transition
+	// verbs and lifecycle shape (DC-3), and the display chain every class
+	// and verb WORD in a derived clearing condition routes through (co-5).
+	// A nil model declares no lifecycle for any class, exactly as an
+	// absent key does.
+	Model *model.Model
+	// State is the target's CURRENT lifecycle state id, joined through
+	// specstate.Result.ArtifactStatus() by the caller (DC-15) — the origin
+	// of R-RR1-11's forward-reachability walk. A state the class's
+	// lifecycle does not declare (specstate's own "unproven") reaches
+	// nothing and is disclosed.
+	State string
 	// Owner is shared by every derived blocker (mirrors deriveBlockers'
 	// own single-owner convention).
 	Owner Owner
@@ -39,14 +75,12 @@ type eventualInput struct {
 	// later-transition obligation/principal blocker can never collide with
 	// (or shadow) a current one.
 	Candidates []model.Transition
-	// LaterTransitions are the class's lifecycle transitions that are NOT
-	// candidates (resolution (a): the model's declared transitions minus
-	// Candidates, in the model's declared order) — the caller computes
-	// this via laterTransitions. The first entry names the transition
-	// every derived item's own Transition field attaches to (mirroring
-	// deriveBlockers' own "first candidate" convention for
-	// forge-facts-unavailable): a debt named for a feature or a story is
-	// framed as blocking whatever comes next in the declared catalog.
+	// LaterTransitions are the transitions FORWARD-REACHABLE from State in
+	// the class's lifecycle, minus Candidates — R-RR1-11's set, which the
+	// caller computes via laterTransitions. Each one contributes its own
+	// obligation and principal debts, naming its own verb; a transition
+	// already behind the state is never in this set, so an accepted spec
+	// never carries the acceptance verb as a debt.
 	LaterTransitions []model.Transition
 	// Spec is the target's own decoded frontmatter — needed for the
 	// question-claimed-by-spike source (OpenQuestions x spike Stubs), both
@@ -70,56 +104,193 @@ type eventualInput struct {
 	Disclosures []string
 }
 
-// laterTransitions returns class's declared lifecycle transitions that are
-// NOT in candidates (resolution (a) of task-1-brief.md), in the model's
-// own declared order — never candidateTransitions' verb-sorted order. A
-// class the model declares no lifecycle for yields nil, same as
-// candidateTransitions' own classDeclared-false reading.
-func laterTransitions(mdl *model.Model, class string, candidates []model.Transition) []model.Transition {
+// lifecycleFor returns class's declared lifecycle. A nil model, a nil
+// Lifecycle map and an absent key all read the same way — "declared for
+// nothing" — never a panic (candidateTransitions' own reading).
+func lifecycleFor(mdl *model.Model, class string) (model.Lifecycle, bool) {
+	if mdl == nil {
+		return model.Lifecycle{}, false
+	}
 	lifecycle, ok := mdl.Lifecycle[class]
+	return lifecycle, ok
+}
+
+// reachableStates returns the lifecycle states reachable from state by
+// following declared transitions FORWARD (state itself included). A state
+// the lifecycle does not declare — specstate's "unproven" status, or any
+// state outside this class's own machine — reaches nothing: there is no
+// from-state to walk from, and inventing one would forecast a lifecycle
+// the target is not in. The walk runs to a fixed point over a membership
+// map, so its result never depends on map iteration order.
+func reachableStates(lifecycle model.Lifecycle, state string) map[string]bool {
+	reached := map[string]bool{}
+	for _, s := range lifecycle.States {
+		if s == state {
+			reached[state] = true
+			break
+		}
+	}
+	if len(reached) == 0 {
+		return reached
+	}
+	for changed := true; changed; {
+		changed = false
+		for _, tr := range lifecycle.Transitions {
+			if reached[tr.From] && !reached[tr.To] {
+				reached[tr.To] = true
+				changed = true
+			}
+		}
+	}
+	return reached
+}
+
+// laterTransitions returns the transitions FORWARD-REACHABLE from state in
+// class's declared lifecycle, minus the immediate candidates — R-RR1-11
+// (ledger SI-207), superseding the original "every declared transition
+// minus the candidates" reading, which named transitions already BEHIND
+// the state (an accepted feature's own acceptance verb among them). Order
+// is the model's own declared transition order, never candidateTransitions'
+// verb-sorted order. Candidates are subtracted by VERB, which is also what
+// keeps an eventual obligation id (whose segments are verb/scheme/kind)
+// distinct from its current counterpart. A class the model declares no
+// lifecycle for yields nil, same as candidateTransitions' own
+// classDeclared-false reading.
+func laterTransitions(mdl *model.Model, class, state string, candidates []model.Transition) []model.Transition {
+	lifecycle, ok := lifecycleFor(mdl, class)
 	if !ok {
 		return nil
 	}
+	reached := reachableStates(lifecycle, state)
 	isCandidate := make(map[string]bool, len(candidates))
 	for _, tr := range candidates {
 		isCandidate[tr.Verb] = true
 	}
 	var out []model.Transition
 	for _, tr := range lifecycle.Transitions {
-		if !isCandidate[tr.Verb] {
-			out = append(out, tr)
+		if !reached[tr.From] || isCandidate[tr.Verb] {
+			continue
+		}
+		out = append(out, tr)
+	}
+	return out
+}
+
+// verbToState returns the verb of the first declared transition whose
+// target is state, in the model's own declared order.
+func verbToState(lifecycle model.Lifecycle, state string) (string, bool) {
+	for _, tr := range lifecycle.Transitions {
+		if tr.To == state {
+			return tr.Verb, true
+		}
+	}
+	return "", false
+}
+
+// eventualScopeResult carries R-RR1-12's per-source verb table for one
+// class at one lifecycle state, plus the disclosure (if any) naming what
+// could not be resolved. resolved false means no verb could be named at
+// all, so every source that must name one derives nothing — the literal
+// "unknown" is never emitted (SI-207).
+type eventualScopeResult struct {
+	closureVerb string
+	policyVerb  string
+	resolved    bool
+	disclosure  string
+}
+
+// resolveEventualScope resolves R-RR1-12's verb table (ledger SI-207):
+//
+//   - closureVerb — the transition whose target is the CLOSED state. Stub
+//     reconciliation, the outcome floor and a spike-claimed question are
+//     all consumed by the closure gate (the parent's AC-6 makes them
+//     eventual even when close is the next legal transition), so each
+//     names this verb whatever the current state.
+//   - policyVerb — the EARLIEST forward-reachable transition whose gate
+//     evaluates policy: the ACCEPTANCE transition (resolved as the one
+//     whose target is the accepted state, never the hard-coded literal
+//     "merge") while acceptance is still ahead of the target, the closure
+//     verb once acceptance is behind it. Conflict rows and ineffective
+//     exemptions name it.
+//
+// A class with no declared lifecycle — or a lifecycle declaring no
+// closure transition at all — resolves nothing and discloses why; a
+// declared lifecycle whose current state is not one of its own declared
+// states (specstate's "unproven") still resolves both verbs, with the
+// narrowing it could not perform disclosed.
+func resolveEventualScope(mdl *model.Model, class, state string) eventualScopeResult {
+	lifecycle, ok := lifecycleFor(mdl, class)
+	if !ok {
+		return eventualScopeResult{disclosure: noClosureTransitionDisclosure(mdl, class)}
+	}
+	closure, ok := verbToState(lifecycle, closedStatus)
+	if !ok {
+		return eventualScopeResult{disclosure: noClosureTransitionDisclosure(mdl, class)}
+	}
+
+	out := eventualScopeResult{closureVerb: closure, policyVerb: closure, resolved: true}
+	reached := reachableStates(lifecycle, state)
+	if len(reached) == 0 {
+		out.disclosure = stateNotDeclaredDisclosure(mdl, class, state)
+		return out
+	}
+	for _, tr := range lifecycle.Transitions {
+		if tr.To == acceptedStatus && reached[tr.From] {
+			out.policyVerb = tr.Verb
+			break
 		}
 	}
 	return out
+}
+
+// noClosureTransitionDisclosure names the sources a missing closure
+// transition silences. The class word routes through the display chain
+// (co-5) — with the model in scope there is nothing to mark.
+func noClosureTransitionDisclosure(mdl *model.Model, class string) string {
+	classWord := mdl.DisplayClass(class)
+	return fmt.Sprintf(
+		"the operating model declares no closure transition for %s: stub, outcome-floor, claimed-question and policy-conflict debts were not derived for this target",
+		classWord,
+	)
+}
+
+// stateNotDeclaredDisclosure names what an unresolvable from-state costs:
+// no transition can be walked forward from it, so no later-transition debt
+// is derived and the earliest policy-evaluating transition cannot be
+// narrowed below the closure gate.
+func stateNotDeclaredDisclosure(mdl *model.Model, class, state string) string {
+	classWord := mdl.DisplayClass(class)
+	return fmt.Sprintf(
+		"lifecycle state %q is not a declared state of the %s lifecycle: no later transition was derived from it, and the earliest policy-evaluating transition could not be narrowed below closure",
+		state, classWord,
+	)
+}
+
+// duplicateBlockerIDDisclosure is the last line of defence for CO-1: two
+// derived debts that resolve to one blocker id cannot both be listed (the
+// record's ids are unique by schema), so the one that is dropped is named
+// rather than silently lost.
+func duplicateBlockerIDDisclosure(id string) string {
+	return fmt.Sprintf("two derived debts resolved to the same blocker id %q; only the first is listed", id)
 }
 
 // deriveEventual derives the record's eventual-blocker section
 // (spec/readiness-recovery ac-1, parent spec/guided-lifecycle-governance-v3
 // AC-6/DC-11): the named debts that will block a later transition, drawn
 // ONLY from already-declared requirements — never a forecast of
-// unimplemented behavior or a manufactured future failure. The section is
-// always Derived: true (a partial derivation still discloses what it could
-// not evaluate — CO-1 — rather than presenting the whole section as
-// underived).
+// unimplemented behavior or a manufactured future failure. Each item names
+// the transition whose gate CONSUMES it (R-RR1-12), never a shared "first
+// later verb" and never the literal "unknown". The section is always
+// Derived: true (a partial derivation still discloses what it could not
+// evaluate — CO-1 — rather than presenting the whole section as underived).
 func deriveEventual(in eventualInput) EventualBlockers {
-	// F-verb: the transition every derived item's Transition field names —
-	// the first later transition in the model's declared order, or the
-	// literal "unknown" when none exists (mirrors deriveBlockers'
-	// forge-facts-unavailable "first candidate, else unknown" fallback).
-	verb := "unknown"
-	if len(in.LaterTransitions) > 0 {
-		verb = in.LaterTransitions[0].Verb
-	}
-	candidateVerbs := make(map[string]bool, len(in.Candidates))
-	for _, tr := range in.Candidates {
-		candidateVerbs[tr.Verb] = true
-	}
-
 	var items []Blocker
+	disclosures := append([]string(nil), in.Disclosures...)
 	seen := map[string]bool{}
 	add := func(bs ...Blocker) {
 		for _, b := range bs {
 			if seen[b.ID] {
+				disclosures = append(disclosures, duplicateBlockerIDDisclosure(b.ID))
 				continue
 			}
 			seen[b.ID] = true
@@ -127,14 +298,21 @@ func deriveEventual(in eventualInput) EventualBlockers {
 		}
 	}
 
-	disclosures := append([]string(nil), in.Disclosures...)
-
-	if in.Class == "feature" {
-		add(stubUnreconciledBlockers(in, verb)...)
-		add(outcomeFloorBlockers(in, verb)...)
-		add(questionClaimedBlockers(in, verb)...)
+	scope := resolveEventualScope(in.Model, in.Class, in.State)
+	if scope.disclosure != "" {
+		disclosures = append(disclosures, scope.disclosure)
 	}
 
+	if scope.resolved && in.Class == string(artifact.ClassFeature) {
+		add(stubUnreconciledBlockers(in, scope.closureVerb)...)
+		add(outcomeFloorBlockers(in, scope.closureVerb)...)
+		add(questionClaimedBlockers(in, scope.closureVerb)...)
+	}
+
+	candidateVerbs := make(map[string]bool, len(in.Candidates))
+	for _, tr := range in.Candidates {
+		candidateVerbs[tr.Verb] = true
+	}
 	for _, tr := range in.LaterTransitions {
 		if candidateVerbs[tr.Verb] {
 			// Defensive: a later transition that duplicates a candidate
@@ -148,20 +326,21 @@ func deriveEventual(in eventualInput) EventualBlockers {
 		}
 	}
 
-	if in.Conflict != nil {
-		mech, mechDisc := conflictMechanicalBlockers(in.Conflict, verb, in.Owner)
+	switch {
+	case in.Conflict == nil:
+		disclosures = append(disclosures, noConflictReportDisclosure)
+	case scope.resolved:
+		mech, mechDisc := conflictMechanicalBlockers(in.Conflict, scope.policyVerb, in.Owner)
 		add(mech...)
 		disclosures = append(disclosures, mechDisc...)
 
-		sem, semDisc := conflictSemanticBlockers(in.Conflict, verb, in.Owner)
+		sem, semDisc := conflictSemanticBlockers(in.Conflict, scope.policyVerb, in.Owner)
 		add(sem...)
 		disclosures = append(disclosures, semDisc...)
 
-		exempt, exemptDisc := exemptionIneffectiveBlockers(in.Conflict, verb, in.Owner)
+		exempt, exemptDisc := exemptionIneffectiveBlockers(in.Conflict, scope.policyVerb, in.Owner)
 		add(exempt...)
 		disclosures = append(disclosures, exemptDisc...)
-	} else {
-		disclosures = append(disclosures, noConflictReportDisclosure)
 	}
 
 	sort.Slice(items, func(i, j int) bool { return items[i].ID < items[j].ID })
@@ -201,6 +380,7 @@ func stubUnreconciledBlockers(in eventualInput, verb string) []Blocker {
 	if in.Stubs == nil {
 		return nil
 	}
+	storyWord := in.Model.DisplayClass(storyClassID)
 	spikeSlugs := spikeStubSlugs(in.Spec)
 	var out []Blocker
 	for _, sr := range in.Stubs.Stubs {
@@ -208,13 +388,22 @@ func stubUnreconciledBlockers(in eventualInput, verb string) []Blocker {
 			continue
 		}
 		out = append(out, Blocker{
-			ID:        "stub-unreconciled/" + sr.Slug,
+			// C1: a stub slug is validated by internal/artifact's own
+			// simpleNameRe (^[a-z0-9]+(?:-[a-z0-9]+)*$), which admits a
+			// LEADING DIGIT, while a blocker-id segment must start with a
+			// letter (record.go's blockerIDRe). The id segment is
+			// normalized; the witness and clearing condition below name
+			// the raw slug, so the operator still reads the slug they
+			// wrote.
+			ID:        "stub-unreconciled/" + sanitizeStubSlug(sr.Slug),
 			Reason:    ReasonStubUnreconciled,
 			Class:     ClassMechanical,
 			Witnesses: []string{fmt.Sprintf("stub %s: unreconciled (no realized-by coverage, no withdrawal note)", sr.Slug)},
 			Owner:     in.Owner,
-			// vocab:identity — 03 §Stub reconciliation's own closure-gate clearing prose (task-1-brief.md's verbatim sentence), naming the implementing-spec class informally, not routed through *model.Model since deriveEventual carries no model reference
-			ClearingCondition: fmt.Sprintf("reconcile stub %s: instantiate a story that claims it, or withdraw it with a note", sr.Slug),
+			// 03 §Stub reconciliation's own closure-gate clearing prose
+			// (task-1-brief.md's sentence), with the implementing class
+			// word routed through the display chain (co-5).
+			ClearingCondition: fmt.Sprintf("reconcile stub %s: instantiate a %s that claims it, or withdraw it with a note", sr.Slug, storyWord),
 			Transition:        verb,
 		})
 	}
@@ -229,17 +418,25 @@ func stubUnreconciledBlockers(in eventualInput, verb string) []Blocker {
 // meaning evidence.FeatureInput.FeatureSlug documents. Spec is preferred
 // (the authoritative source); Fold.SpecRef (evidence.FoldFeature always
 // sets this to the folded spec's own ID) is the fallback for a caller that
-// supplies Fold without Spec.
+// supplies Fold without Spec. When NEITHER parses as a ref, the raw ref
+// text is named rather than composing an empty path segment into the
+// clearing condition: a sentence that names something unparseable is still
+// actionable, one that names nothing is not.
 func eventualFeatureName(in eventualInput) string {
-	if in.Spec != nil {
-		if ref, err := artifact.ParseRef(in.Spec.ID); err == nil {
+	var raws []string
+	if in.Spec != nil && in.Spec.ID != "" {
+		raws = append(raws, in.Spec.ID)
+	}
+	if in.Fold != nil && in.Fold.SpecRef != "" {
+		raws = append(raws, in.Fold.SpecRef)
+	}
+	for _, raw := range raws {
+		if ref, err := artifact.ParseRef(raw); err == nil {
 			return ref.Name
 		}
 	}
-	if in.Fold != nil {
-		if ref, err := artifact.ParseRef(in.Fold.SpecRef); err == nil {
-			return ref.Name
-		}
+	if len(raws) > 0 {
+		return raws[0]
 	}
 	return ""
 }
@@ -292,6 +489,8 @@ func questionClaimedBlockers(in eventualInput, verb string) []Blocker {
 			claimedBy[oq] = append(claimedBy[oq], s.Slug)
 		}
 	}
+	spikeWord := in.Model.DisplayClass(spikeClassID)
+	closeWord := in.Model.DisplayVerb(verb)
 
 	var out []Blocker
 	for _, oq := range in.Spec.OpenQuestions {
@@ -310,13 +509,12 @@ func questionClaimedBlockers(in eventualInput, verb string) []Blocker {
 			witnesses = append(witnesses, fmt.Sprintf("spike stub %s claims %s via its resolves edge", s, oq.ID))
 		}
 		out = append(out, Blocker{
-			ID:        "question-claimed/" + oq.ID,
-			Reason:    ReasonQuestionClaimedBySpike,
-			Class:     ClassMechanical,
-			Witnesses: sortDedupStrings(witnesses),
-			Owner:     in.Owner,
-			// vocab:identity — task-1-brief.md's verbatim clearing-condition sentence, naming the Stub.Spike field/resolves edge and (literal prose) the closure the open question must be resolved before; deriveEventual carries no *model.Model to route the word through
-			ClearingCondition: fmt.Sprintf("spike stub %s resolves %s before close", strings.Join(sortedStubs, ", "), oq.ID),
+			ID:                "question-claimed/" + oq.ID,
+			Reason:            ReasonQuestionClaimedBySpike,
+			Class:             ClassMechanical,
+			Witnesses:         sortDedupStrings(witnesses),
+			Owner:             in.Owner,
+			ClearingCondition: fmt.Sprintf("%s stub %s resolves %s before %s", spikeWord, strings.Join(sortedStubs, ", "), oq.ID, closeWord),
 			Transition:        verb,
 		})
 	}
@@ -381,42 +579,66 @@ func laterPrincipalBlocker(tr model.Transition, owner Owner) Blocker {
 // mechanical half of resolution (d)'s row/exemption-id normalization.
 var conflictIDInvalidRe = regexp.MustCompile(`[^a-z0-9]+`)
 
-// sanitizeConflictID lowercases raw and maps every run of characters
-// outside [a-z0-9] to a single '-', trimming leading/trailing '-'
-// (resolution (d)): policyconflict's own row and exemption ids are
-// validated only as non-empty strings (internal/policyconflict/
-// validate.go's validateNonEmpty), never constrained to this package's
-// blockerIDRe grammar. An empty result, or one that does not start with a
-// lowercase letter, is prefixed "row-" so the composed blocker id always
-// satisfies ^[a-z][a-z0-9-]*$.
-func sanitizeConflictID(raw string) string {
+// sanitizeIDSegment lowercases raw and maps every run of characters
+// outside [a-z0-9] to a single '-', trimming leading/trailing '-'. An
+// empty result, or one that does not start with a lowercase letter, takes
+// fallbackPrefix so the composed blocker id always satisfies
+// ^[a-z][a-z0-9-]*$ (record.go's blockerIDRe). The transformation is
+// deterministic and leaves a letter-led, already-kebab-case input
+// byte-identical, so the id an operator reads is still the id they wrote
+// wherever the grammar allows it.
+func sanitizeIDSegment(raw, fallbackPrefix string) string {
 	s := conflictIDInvalidRe.ReplaceAllString(strings.ToLower(raw), "-")
 	s = strings.Trim(s, "-")
 	if s == "" {
-		s = "row"
+		return fallbackPrefix
 	}
 	if s[0] < 'a' || s[0] > 'z' {
-		s = "row-" + s
+		s = fallbackPrefix + "-" + s
 	}
 	return s
 }
 
+// sanitizeConflictID normalizes a policy-conflict row or exemption id
+// (resolution (d)): policyconflict's own ids are validated only as
+// non-empty strings (internal/policyconflict/validate.go's
+// validateNonEmpty), never constrained to this package's grammar.
+func sanitizeConflictID(raw string) string { return sanitizeIDSegment(raw, "row") }
+
+// sanitizeStubSlug normalizes a feature stub slug (C1). A slug is already
+// validated by internal/artifact's simpleNameRe
+// (^[a-z0-9]+(?:-[a-z0-9]+)*$), so the ONLY reachable normalization is
+// the letter prefix a DIGIT-led slug needs ("2fa-login" -> "s-2fa-login");
+// every letter-led slug passes through unchanged.
+func sanitizeStubSlug(raw string) string { return sanitizeIDSegment(raw, "s") }
+
 // dedupeConflictIDs sanitizes each raw id in report order, appending -2,
 // -3, ... deterministically (resolution (d)) when normalization collides
 // two DISTINCT raw ids onto the same sanitized form; the first occurrence
-// of any sanitized id keeps its bare form. Returns the resolved id per
-// input index, plus one disclosure sentence per collision.
+// of any sanitized id keeps its bare form. The suffixed candidate is
+// itself checked for use and incremented until it is free, so a raw id
+// that already reads like an earlier id's disambiguated form can never
+// re-collide with it. Returns the resolved id per input index, plus one
+// disclosure sentence per collision. Callers pass only the rows that will
+// actually produce a blocker, so a skipped (proven) row never consumes an
+// id or emits a disclosure with no item behind it.
 func dedupeConflictIDs(raw []string) (ids []string, disclosures []string) {
-	counts := map[string]int{}
+	used := make(map[string]bool, len(raw))
 	ids = make([]string, len(raw))
 	for i, r := range raw {
 		base := sanitizeConflictID(r)
-		counts[base]++
 		id := base
-		if counts[base] > 1 {
-			id = fmt.Sprintf("%s-%d", base, counts[base])
+		if used[id] {
+			for n := 2; ; n++ {
+				candidate := fmt.Sprintf("%s-%d", base, n)
+				if !used[candidate] {
+					id = candidate
+					break
+				}
+			}
 			disclosures = append(disclosures, fmt.Sprintf("conflict-report row/exemption id %q normalized to %q, which collided with an earlier row; disambiguated as %q", r, base, id))
 		}
+		used[id] = true
 		ids[i] = id
 	}
 	return ids, disclosures
@@ -434,17 +656,19 @@ func joinPolicyReasons(reasons []policyconflict.ReasonCode) string {
 }
 
 func conflictMechanicalBlockers(report *policyconflict.Report, verb string, owner Owner) ([]Blocker, []string) {
-	raw := make([]string, len(report.Mechanical))
-	for i, m := range report.Mechanical {
-		raw[i] = m.ID
-	}
-	ids, disclosures := dedupeConflictIDs(raw)
-
-	var out []Blocker
-	for i, m := range report.Mechanical {
+	var rows []policyconflict.MechanicalEvaluation
+	var raw []string
+	for _, m := range report.Mechanical {
 		if m.State == policyconflict.ProofProven {
 			continue
 		}
+		rows = append(rows, m)
+		raw = append(raw, m.ID)
+	}
+	ids, disclosures := dedupeConflictIDs(raw)
+
+	out := make([]Blocker, 0, len(rows))
+	for i, m := range rows {
 		out = append(out, Blocker{
 			ID:                "conflict-mechanical/" + ids[i],
 			Reason:            ReasonConflictMechanicalUnresolved,
@@ -459,17 +683,19 @@ func conflictMechanicalBlockers(report *policyconflict.Report, verb string, owne
 }
 
 func conflictSemanticBlockers(report *policyconflict.Report, verb string, owner Owner) ([]Blocker, []string) {
-	raw := make([]string, len(report.Semantic))
-	for i, s := range report.Semantic {
-		raw[i] = s.ID
-	}
-	ids, disclosures := dedupeConflictIDs(raw)
-
-	var out []Blocker
-	for i, s := range report.Semantic {
+	var rows []policyconflict.SemanticEvaluation
+	var raw []string
+	for _, s := range report.Semantic {
 		if s.State == policyconflict.ProofProven {
 			continue
 		}
+		rows = append(rows, s)
+		raw = append(raw, s.ID)
+	}
+	ids, disclosures := dedupeConflictIDs(raw)
+
+	out := make([]Blocker, 0, len(rows))
+	for i, s := range rows {
 		out = append(out, Blocker{
 			ID:                "conflict-semantic/" + ids[i],
 			Reason:            ReasonConflictSemanticUnresolved,
@@ -495,17 +721,17 @@ func exemptionIneffectiveBlockers(report *policyconflict.Report, verb string, ow
 	var resolutions []policyconflict.ExemptionResolution
 	for _, m := range report.Mechanical {
 		for _, ex := range m.Exemptions {
+			if !exemptionIneffective(ex.Resolution) {
+				continue
+			}
 			raw = append(raw, ex.ID)
 			resolutions = append(resolutions, ex)
 		}
 	}
 	ids, disclosures := dedupeConflictIDs(raw)
 
-	var out []Blocker
+	out := make([]Blocker, 0, len(resolutions))
 	for i, ex := range resolutions {
-		if !exemptionIneffective(ex.Resolution) {
-			continue
-		}
 		out = append(out, Blocker{
 			ID:                "exemption-ineffective/" + ids[i],
 			Reason:            ReasonExemptionIneffective,

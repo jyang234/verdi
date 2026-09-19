@@ -2,6 +2,9 @@ package journey
 
 import (
 	"context"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/jyang234/verdi/internal/fixturegit"
@@ -75,12 +78,13 @@ frozen: { at: 2024-01-01, commit: ` + scaffoldSHA + ` }
 `
 }
 
-// eventualFixtureStorySpecMDCandidate renders a SECOND target for the
-// "story spec ... gets only later-transition items" half of
-// TestProject_FeatureEventualFromStore — a plain, un-closed story implementing
-// nothing, statusless and landed exactly like the feature above (so it
-// resolves accepted-pending-build too, joining the SAME candidate/later
-// split the feature does), carrying only an author-vouch obligation.
+// eventualFixtureStorySpecMDCandidate renders a SECOND target for
+// TestProject_FeatureEventualFromStore — a plain, un-closed story
+// implementing nothing, statusless and LANDED exactly like the feature
+// above (so it resolves accepted-pending-build too). Under R-RR1-11 its
+// only forward transition is its own immediate candidate close, so it
+// carries no later-transition debt at all — and above all never merge's,
+// the transition it has already made.
 const eventualFixtureStorySpecMDCandidate = `---
 id: spec/checkout-story-two
 kind: spec
@@ -96,6 +100,29 @@ acceptance_criteria:
   - { id: ac-1, text: "the story's own obligation holds", evidence: [static] }
 ---
 # Checkout story two
+`
+
+// eventualFixtureProposedStorySpecMD renders a THIRD target: a story that
+// has never landed on the default branch, so it resolves PROPOSED. Its
+// candidate is merge and close is genuinely still ahead of it — the one
+// shape that carries real later-transition obligation and principal debts
+// under R-RR1-11. It is written into the working tree UNCOMMITTED (never a
+// fixturegit layer), which is exactly what makes it un-landed.
+const eventualFixtureProposedStorySpecMD = `---
+id: spec/checkout-story-three
+kind: spec
+class: story
+title: "Checkout story three"
+owners: [platform-team]
+story: jira:CHECKOUT-3
+problem: { text: "x", anchor: "#problem" }
+outcome: { text: "y", anchor: "#outcome" }
+links:
+  - { type: implements, ref: "spec/checkout#ac-2" }
+acceptance_criteria:
+  - { id: ac-1, text: "the story's own obligation holds", evidence: [static] }
+---
+# Checkout story three
 `
 
 // eventualFixtureAttestationMD renders an AUTHORED (no scaffold marker)
@@ -126,7 +153,7 @@ func buildEventualFixtureRepo(t *testing.T) *fixturegit.Repo {
 	t.Helper()
 	scaffoldSHA := eventualFixtureScaffoldSHA(t)
 	t.Setenv("CI_DEFAULT_BRANCH", "main")
-	return fixturegit.Build(t, []fixturegit.Layer{
+	repo := fixturegit.Build(t, []fixturegit.Layer{
 		eventualFixtureScaffoldLayer,
 		{
 			Files: map[string]string{
@@ -138,6 +165,21 @@ func buildEventualFixtureRepo(t *testing.T) *fixturegit.Repo {
 			Message: "add checkout feature + its implementing stories",
 		},
 	})
+	writeUncommitted(t, repo.Dir, ".verdi/specs/active/checkout-story-three/spec.md", eventualFixtureProposedStorySpecMD)
+	return repo
+}
+
+// writeUncommitted writes rel into the built repo's WORKING TREE without
+// committing it — the fixture shape a proposed (never-landed) spec needs.
+func writeUncommitted(t *testing.T, dir, rel, content string) {
+	t.Helper()
+	path := filepath.Join(dir, filepath.FromSlash(rel))
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
 }
 
 // TestProject_FeatureEventualFromStore proves the whole wiring end to end
@@ -188,23 +230,54 @@ func TestProject_FeatureEventualFromStore(t *testing.T) {
 		}
 	})
 
-	t.Run("story target gets only later-transition items", func(t *testing.T) {
-		rec, err := NewProjector().Project(context.Background(), cfg, "spec/checkout-story-two")
+	t.Run("proposed story target gets only later-transition items", func(t *testing.T) {
+		rec, err := NewProjector().Project(context.Background(), cfg, "spec/checkout-story-three")
 		if err != nil {
 			t.Fatalf("Project: %v", err)
+		}
+		if rec.Lifecycle.State != "proposed" {
+			t.Fatalf("Lifecycle.State = %q, want proposed (close must be genuinely ahead of this target)", rec.Lifecycle.State)
 		}
 		if !rec.Blockers.Eventual.Derived {
 			t.Fatalf("Blockers.Eventual.Derived = false, want true: %+v", rec.Blockers.Eventual)
 		}
+		ids := blockerIDs(rec.Blockers.Eventual.Items)
 		for _, b := range rec.Blockers.Eventual.Items {
 			for _, prefix := range []string{"stub-unreconciled/", "outcome-floor/", "question-claimed/"} {
-				if len(b.ID) >= len(prefix) && b.ID[:len(prefix)] == prefix {
-					t.Fatalf("story target items = %v, must carry NO feature-only source item, got %q", blockerIDs(rec.Blockers.Eventual.Items), b.ID)
+				if strings.HasPrefix(b.ID, prefix) {
+					t.Fatalf("story target items = %v, must carry NO feature-only source item, got %q", ids, b.ID)
 				}
 			}
 		}
-		if len(rec.Blockers.Eventual.Items) == 0 {
-			t.Fatalf("story target items = %v, want at least the later-transition obligation item (a non-vacuous proof)", rec.Blockers.Eventual.Items)
+		// A non-vacuous proof: close is the one forward-reachable
+		// non-candidate transition, so its own obligations and principal
+		// resolution are the eventual debts (R-RR1-11/12).
+		for _, want := range []string{
+			"obligation-countersign-unproven/close/attestation/countersign",
+			"obligation-fold-green-unproven/close/behavioral/fold-green",
+			"principal-resolution-unproven/close",
+		} {
+			if findBlocker(rec.Blockers.Eventual.Items, want) == nil {
+				t.Fatalf("story target items = %v, want %q", ids, want)
+			}
+		}
+	})
+
+	t.Run("accepted story carries no later-transition debt", func(t *testing.T) {
+		rec, err := NewProjector().Project(context.Background(), cfg, "spec/checkout-story-two")
+		if err != nil {
+			t.Fatalf("Project: %v", err)
+		}
+		if rec.Lifecycle.State != "accepted-pending-build" {
+			t.Fatalf("Lifecycle.State = %q, want accepted-pending-build", rec.Lifecycle.State)
+		}
+		if !rec.Blockers.Eventual.Derived {
+			t.Fatalf("Blockers.Eventual.Derived = false, want true: %+v", rec.Blockers.Eventual)
+		}
+		// R-RR1-11: merge is BEHIND an accepted spec, so it is never a
+		// later transition and never an eventual debt.
+		if got := blockerIDs(rec.Blockers.Eventual.Items); len(got) != 0 {
+			t.Fatalf("accepted story items = %v, want none: its only forward transition is its own candidate close", got)
 		}
 	})
 }

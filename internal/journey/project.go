@@ -72,6 +72,10 @@ func (p Projector) ProjectWith(ctx context.Context, cfg *store.Config, arg strin
 	}
 
 	candidates, classDeclared := candidateTransitions(cfg.Model, facts.Target.Class, facts.LifecycleResult)
+	// DC-15: the from-state every transition walk starts at is joined
+	// through specstate's own Result.ArtifactStatus(), never re-derived
+	// here — the SAME join candidateTransitions performs internally.
+	lifecycleState := string(facts.LifecycleResult.ArtifactStatus())
 	current := deriveBlockers(facts.Repository.DefaultBranch.Known, profileAdopted, facts.LifecycleResult, candidates, owner)
 	current = mergeObligationQualityBlockers(current, deriveObligationQualityBlockers(qualityFacts, owner))
 	principals := derivePrincipals(candidates)
@@ -110,9 +114,11 @@ func (p Projector) ProjectWith(ctx context.Context, cfg *store.Config, arg strin
 			Current: current,
 			Eventual: deriveEventual(eventualInput{
 				Class:            facts.Target.Class,
+				Model:            cfg.Model,
+				State:            lifecycleState,
 				Owner:            owner,
 				Candidates:       candidates,
-				LaterTransitions: laterTransitions(cfg.Model, facts.Target.Class, candidates),
+				LaterTransitions: laterTransitions(cfg.Model, facts.Target.Class, lifecycleState, candidates),
 				Spec:             facts.Spec,
 				Stubs:            facts.Stubs,
 				Fold:             facts.FeatureFold,
