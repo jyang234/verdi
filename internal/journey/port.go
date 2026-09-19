@@ -343,9 +343,18 @@ type StubReconciler interface {
 // stubReconciler is the production StubReconciler: discovers a feature's
 // implementing stories the same way `verdi matrix <feature>` does
 // (matrixprojection.DiscoverImplementingStories, project.go:181), then
-// folds the result through evidence.ReconcileStubs — mirroring
-// cmd/verdi/closefeature.go's own reconcileFeatureStubs (that function now
-// delegates here, so the logic has one home).
+// folds the result through evidence.ReconcileStubs.
+//
+// DUPLICATION, DELIBERATE AND DISCLOSED: cmd/verdi/closefeature.go's own
+// reconcileFeatureStubs keeps its own copy of this fold, under
+// task-1-brief.md's explicit escape hatch. It takes an ALREADY-discovered
+// []implementingStoryEdges — the same single discovery pass runCloseFeature
+// feeds to the fold and the closure gate — while this port's interface is
+// self-contained and discovers internally, so routing closefeature.go
+// through it would discard that shared pass and add a second
+// DiscoverImplementingStories walk to every close. Anyone editing one copy
+// must edit the other; a future shared seam would have to give the port an
+// optional pre-discovered-stories path.
 type stubReconciler struct{}
 
 // NewStubReconciler returns the production StubReconciler.
