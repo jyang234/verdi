@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strings"
 
 	"github.com/jyang234/verdi/internal/gitx"
 	"github.com/jyang234/verdi/internal/governanceprincipal"
@@ -22,6 +23,26 @@ import (
 
 // vocab:identity — CLI usage/flag grammar (identity)
 const policyUsage = "usage: verdi policy adopt --starter [--profile solo|team] [--owner <kebab-handle>]"
+
+// policyAdoptWrittenState is the state clause every refusal AFTER a
+// complete write appends. A refusal that leaves the operator on a branch
+// they did not start on must say so — the same disclosure duty close.go's
+// own AddPaths/CreateCommit pair carries — and naming the clause once
+// keeps its two sites from drifting apart.
+const policyAdoptWrittenState = "; the checkout is on policy/adopt with the four files written but not committed"
+
+// policyAdoptAddPaths and policyAdoptCommit are this verb's two post-write
+// git write ops as package-level seams, so a test can force the exact
+// AddPaths/CreateCommit failure whose disclosure the verb owes the
+// operator. The house pattern verbatim (close.go's closeAddPaths/
+// closeCreateCommit, accept.go's accept* pair, spec/obligation-seam ac-3):
+// a real `git add`/`git commit` cannot be made to fail deterministically
+// in a clean hermetic fixture repo. Production is gitx's own; tests
+// override and restore.
+var (
+	policyAdoptAddPaths = gitx.AddPaths
+	policyAdoptCommit   = gitx.CreateCommit
+)
 
 // policyAdoptOptions is parsePolicyAdoptFlags' complete, validated operand
 // set for `verdi policy adopt --starter`.
@@ -68,7 +89,7 @@ func parsePolicyAdoptFlags(args []string) (policyAdoptOptions, error) {
 	for i := 0; i < len(args); i++ {
 		a := args[i]
 		name, value, inline := a, "", false
-		if k, v, ok := cutFlagValue(a); ok && (k == "--profile" || k == "--owner") {
+		if k, v, ok := strings.Cut(a, "="); ok && (k == "--profile" || k == "--owner") {
 			name, value, inline = k, v, true
 		}
 		switch name {
@@ -141,17 +162,6 @@ func parsePolicyAdoptFlags(args []string) (policyAdoptOptions, error) {
 	return policyAdoptOptions{profile: profile, owner: owner}, nil
 }
 
-// cutFlagValue splits an inline "--flag=value" spelling; ok is false for
-// any other shape (including a bare "--flag").
-func cutFlagValue(a string) (flag, value string, ok bool) {
-	for i := 0; i < len(a); i++ {
-		if a[i] == '=' {
-			return a[:i], a[i+1:], true
-		}
-	}
-	return "", "", false
-}
-
 // nextFlagValue consumes the argument immediately after args[i] as that
 // flag's value, returning the advanced index.
 func nextFlagValue(args []string, i int) (int, string, error) {
@@ -214,26 +224,33 @@ func runPolicyAdopt(ctx context.Context, root string, opts policyAdoptOptions, s
 			fmt.Fprintln(stderr, "policy adopt: the default branch already carries policy; left the checkout on policy/adopt with nothing written")
 			return 1
 		}
-		fmt.Fprintln(stderr, "policy adopt:", err)
+		fmt.Fprintf(stderr, "policy adopt: %v; the checkout is on policy/adopt with nothing written\n", err)
 		return 2
 	}
 
 	paths, err := policyadopt.Write(root, plan)
 	if err != nil {
-		fmt.Fprintf(stderr, "policy adopt: %v; the checkout is on policy/adopt with partial files\n", err)
+		// Write attempts no rollback, so whatever landed is still on the
+		// checked-out branch. Name those files: they are the only state
+		// this refusal leaves behind, and without their names the
+		// operator cannot clean up or continue by hand.
+		for _, rel := range paths {
+			fmt.Fprintf(stderr, "policy adopt: wrote %s before the failure\n", rel)
+		}
+		fmt.Fprintf(stderr, "policy adopt: %v; the checkout is on policy/adopt with %d of %d starter files written and nothing committed\n", err, len(paths), len(plan.Files))
 		return 2
 	}
-	for i, rel := range paths {
-		fmt.Fprintf(stdout, "policy adopt: wrote %s (%s %s)\n", rel, plan.Files[i].Template.Identity, plan.Files[i].Template.Digest)
+	for _, f := range plan.Files {
+		fmt.Fprintf(stdout, "policy adopt: wrote %s (%s %s)\n", f.RelPath, f.Template.Identity, f.Template.Digest)
 	}
 
-	if err := gitx.AddPaths(ctx, root, paths...); err != nil {
-		fmt.Fprintln(stderr, "policy adopt:", err)
+	if err := policyAdoptAddPaths(ctx, root, paths...); err != nil {
+		fmt.Fprintf(stderr, "policy adopt: %v%s\n", err, policyAdoptWrittenState)
 		return 2
 	}
-	sha, err := gitx.CreateCommit(ctx, root, fmt.Sprintf("policy adopt: starter constitution (%s profile)", opts.profile))
+	sha, err := policyAdoptCommit(ctx, root, fmt.Sprintf("policy adopt: starter constitution (%s profile)", opts.profile))
 	if err != nil {
-		fmt.Fprintln(stderr, "policy adopt:", err)
+		fmt.Fprintf(stderr, "policy adopt: %v%s\n", err, policyAdoptWrittenState)
 		return 2
 	}
 	fmt.Fprintf(stdout, "policy adopt: committed %s on policy/adopt\n", shortSHA(sha))
@@ -251,7 +268,7 @@ func runPolicyAdopt(ctx context.Context, root string, opts policyAdoptOptions, s
 		fmt.Fprintln(stdout, "policy adopt: the team profile maps no subjects yet — add role_mappings to .verdi/policy/profiles/starter-team.md before any approval can be proven")
 	}
 	fmt.Fprintln(stdout, "policy adopt: the consumers inventory registers no consumers yet — register real consumers before impact review")
-	// vocab:identity — git branch merge (repository mechanics), not the spec lifecycle transition verb
+	// vocab:identity — TWO deliberate vocabulary words in one plan-mandated sentence. "merge" is the git branch merge the owner performs (repository mechanics), not the spec lifecycle transition verb — that is the hit this marker actually classifies. "accepted" is the lifecycle state word in its own lifecycle sense, spoken to DENY that this verb confers it; the witness skips that hit today under its compound-punctuation rule ("accepted:"), so this half of the rationale classifies it prospectively, for whoever repunctuates the sentence
 	fmt.Fprintln(stdout, "policy adopt: nothing here is accepted: acceptance is the owner's merge of policy/adopt to the default branch")
 
 	return 0

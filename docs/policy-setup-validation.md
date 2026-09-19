@@ -53,10 +53,10 @@ constitutes review approval or acceptance on the default branch.
 `verdi policy adopt --starter [--profile solo|team]` writes the initial
 constitution, one governance profile, one starter policy, and the consumers
 inventory in a single commit on a fresh `policy/adopt` branch (spec/spec-
-documents ac-10, dc-6). Its `context constitution propose` operation creates
-or amends one policy, overlay or exemption once that initial store exists; it
-does not create the initial constitution or governance profile itself. The
-starter writes:
+documents ac-10, dc-6). The binary's `context constitution propose` operation
+creates or amends one policy, overlay or exemption once that initial store
+exists; it does not create the initial constitution or governance profile
+itself. The starter writes:
 
 - `.verdi/policy/constitution.md` selects the governance profile and declares
   the project's role, transition, evidence, subject and adapter catalogs.

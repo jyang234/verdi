@@ -5,10 +5,17 @@
 // per test (the other verb tests' env form, e.g.
 // TestVocabularyCLI_RenamedStateLabels) since these fixtures carry no
 // "origin" remote for specstate.ResolveDefaultBranch to resolve from.
+//
+// One exception drives runPolicyAdopt in process instead:
+// TestPolicyAdopt_PostWriteGitFailuresDiscloseTheWrittenCheckout, which
+// forces the verb's git seams to fail — a fault no separate process can
+// be made to take deterministically.
 package main
 
 import (
+	"bytes"
 	"context"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -18,6 +25,7 @@ import (
 	"github.com/jyang234/verdi/internal/designscaffold"
 	"github.com/jyang234/verdi/internal/draftmutation"
 	"github.com/jyang234/verdi/internal/fixturegit"
+	"github.com/jyang234/verdi/internal/governanceprincipal"
 	"github.com/jyang234/verdi/internal/humanartifact"
 	"github.com/jyang234/verdi/internal/policyauthority"
 )
@@ -58,7 +66,7 @@ func runVerdiStdin(t *testing.T, bin, dir, stdin string, args ...string) (int, s
 func TestPolicyAdopt_UsageAndFlagShape(t *testing.T) {
 	bin := buildVerdiBinary(t)
 	dir := t.TempDir() // no store, no git: every case below must fail before touching either
-	for _, args := range [][]string{{"policy"}, {"policy", "adopt"}, {"policy", "frobnicate"}, {"policy", "adopt", "--starter", "--profile", "solo", "--profile", "team"}, {"policy", "adopt", "--starter", "--profile", "high-assurance"}, {"policy", "adopt", "--starter", "--owner"}, {"policy", "adopt", "--starter", "--profile", "team"}} {
+	for _, args := range [][]string{{"policy"}, {"policy", "adopt"}, {"policy", "frobnicate"}, {"policy", "adopt", "--starter", "--profile", "solo", "--profile", "team"}, {"policy", "adopt", "--starter", "--profile", "high-assurance"}, {"policy", "adopt", "--starter", "--profile=frobnicate"}, {"policy", "adopt", "--starter", "--owner"}, {"policy", "adopt", "--starter", "--profile", "team"}} {
 		code, _, stderr := runVerdi(t, bin, dir, args...)
 		if code != 2 || !strings.Contains(stderr, "usage: verdi policy adopt --starter") {
 			t.Fatalf("%v: code %d stderr %q", args, code, stderr)
@@ -349,5 +357,224 @@ func TestPolicyAdopt_DefaultBranchAlreadyAdoptedCaughtAfterCheckout(t *testing.T
 	}
 	if gitOutput(t, repo.Dir, "status", "--porcelain") != "" {
 		t.Fatal("the post-checkout refusal left the tree dirty")
+	}
+}
+
+// TestPolicyAdopt_InlineFlagValuesAdoptTheTeamProfile proves the
+// documented inline `--flag=value` spelling is real and not merely
+// documented: parsePolicyAdoptFlags' strings.Cut branch carries both
+// --profile=team and --owner=platform-team all the way into the rendered
+// artifacts. Its refusal twin (`--profile=frobnicate`) is in
+// TestPolicyAdopt_UsageAndFlagShape's table.
+func TestPolicyAdopt_InlineFlagValuesAdoptTheTeamProfile(t *testing.T) {
+	bin := buildVerdiBinary(t)
+	repo := adoptFixture(t)
+	t.Setenv("CI_DEFAULT_BRANCH", "main")
+
+	code, stdout, stderr := runVerdi(t, bin, repo.Dir, "policy", "adopt", "--starter", "--profile=team", "--owner=platform-team")
+	if code != 0 {
+		t.Fatalf("code %d\n%s\n%s", code, stdout, stderr)
+	}
+	if !strings.Contains(stdout, "design_assistance mode proposal-only") {
+		t.Fatalf("stdout missing the proposal-only mode disclosure:\n%s", stdout)
+	}
+	store, err := policyauthority.Load(repo.Dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sp := store.Profiles["starter-team"]; sp == nil || len(sp.Profile.RoleMappings) != 0 {
+		t.Fatalf("team profile = %+v, want the team profile with zero role mappings", sp)
+	}
+	// The inline --owner value reached the rendered artifacts, so the
+	// inline spelling is parsed rather than merely tolerated.
+	data, err := os.ReadFile(filepath.Join(repo.Dir, ".verdi", "policy", "constitution.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "platform-team") {
+		t.Fatalf("the inline --owner value never reached the constitution:\n%s", data)
+	}
+}
+
+// TestPolicyAdopt_WriteFailureDisclosesWhatLandedAndWhereTheCheckoutIs
+// proves the write-failure refusal discloses the state it leaves behind
+// rather than only the error: every path that landed, and the fact that
+// the checkout is now on policy/adopt.
+//
+// Reaching a PARTIAL write through the verb needs a root that Compose
+// accepts but Write cannot finish. `.verdi/policy/policies` as a regular
+// file (the obvious shape) is unreachable here — refuseAdopted stats
+// `.verdi/policy` itself and refuses the whole adoption at exit 1 long
+// before Write runs. An existing-but-unwritable `.verdi/constitution` is
+// reachable: refuseAdopted only stats `.verdi/constitution/consumers.json`
+// inside it (absent; 0o555 still permits the stat), so Compose passes,
+// the branch is cut, the first three artifacts land, and only the fourth
+// write fails.
+//
+// This covers one of the verb's four post-checkout refusals; the other
+// three have their own tests —
+// TestPolicyAdopt_PostWriteGitFailuresDiscloseTheWrittenCheckout for
+// the AddPaths and CreateCommit pair, and
+// TestPolicyAdopt_PostCheckoutComposeFailureDisclosesTheBranch for the
+// non-ErrAlreadyAdopted re-prove. None is left to inspection.
+func TestPolicyAdopt_WriteFailureDisclosesWhatLandedAndWhereTheCheckoutIs(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("DISCLOSURE: running as root — os.Chmod(0o555) does not restrict root's own writes, so this permission-based partial-write path cannot be exercised under this user")
+	}
+	bin := buildVerdiBinary(t)
+	repo := adoptFixture(t)
+	t.Setenv("CI_DEFAULT_BRANCH", "main")
+
+	invDir := filepath.Join(repo.Dir, ".verdi", "constitution")
+	if err := os.MkdirAll(invDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(invDir, 0o555); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(invDir, 0o755) }) // restore so t.TempDir()'s own cleanup can remove it
+
+	code, _, stderr := runVerdi(t, bin, repo.Dir, "policy", "adopt", "--starter")
+	if code != 2 {
+		t.Fatalf("code %d, want 2 (operational)\n%s", code, stderr)
+	}
+	landed := []string{".verdi/policy/constitution.md", ".verdi/policy/profiles/starter-solo.md", ".verdi/policy/policies/starter.md"}
+	for _, rel := range landed {
+		if want := "policy adopt: wrote " + rel + " before the failure"; !strings.Contains(stderr, want) {
+			t.Fatalf("stderr does not disclose the landed path %q:\n%s", want, stderr)
+		}
+	}
+	for _, want := range []string{".verdi/constitution/consumers.json", "the checkout is on policy/adopt"} {
+		if !strings.Contains(stderr, want) {
+			t.Fatalf("stderr missing %q:\n%s", want, stderr)
+		}
+	}
+	// The disclosure is true, not merely printed.
+	if br := strings.TrimSpace(gitOutput(t, repo.Dir, "rev-parse", "--abbrev-ref", "HEAD")); br != "policy/adopt" {
+		t.Fatalf("branch = %s, but the refusal said the checkout is on policy/adopt", br)
+	}
+	if strings.TrimSpace(gitOutput(t, repo.Dir, "rev-parse", "policy/adopt")) != repo.Head {
+		t.Fatal("a failed write still produced a commit on policy/adopt")
+	}
+	for _, rel := range landed {
+		if _, err := os.Stat(filepath.Join(repo.Dir, filepath.FromSlash(rel))); err != nil {
+			t.Fatalf("%s was disclosed as written but is not on disk: %v", rel, err)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(repo.Dir, ".verdi", "constitution", "consumers.json")); !os.IsNotExist(err) {
+		t.Fatalf("the inventory Write failed on exists anyway (stat err=%v)", err)
+	}
+}
+
+// TestPolicyAdopt_PostWriteGitFailuresDiscloseTheWrittenCheckout drives
+// runPolicyAdopt in process with the verb's own git seams forced to fail,
+// the house pattern for exactly this (close_test.go's closeAddPaths /
+// closeCreateCommit overrides). Both post-write refusals must say where
+// the operator now is and what exists there: a bare wrapped git error
+// would leave them on a branch they did not ask for, holding four
+// uncommitted files, with nothing in the output saying so.
+func TestPolicyAdopt_PostWriteGitFailuresDiscloseTheWrittenCheckout(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		install func(t *testing.T)
+		wantErr string
+	}{
+		{
+			name: "AddPaths",
+			install: func(t *testing.T) {
+				restore := policyAdoptAddPaths
+				policyAdoptAddPaths = func(context.Context, string, ...string) error {
+					return fmt.Errorf("forced stage failure")
+				}
+				t.Cleanup(func() { policyAdoptAddPaths = restore })
+			},
+			wantErr: "forced stage failure",
+		},
+		{
+			name: "CreateCommit",
+			install: func(t *testing.T) {
+				restore := policyAdoptCommit
+				policyAdoptCommit = func(context.Context, string, string) (string, error) {
+					return "", fmt.Errorf("forced commit failure")
+				}
+				t.Cleanup(func() { policyAdoptCommit = restore })
+			},
+			wantErr: "forced commit failure",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := adoptFixture(t)
+			t.Setenv("CI_DEFAULT_BRANCH", "main")
+			tc.install(t)
+
+			var stdout, stderr bytes.Buffer
+			code := runPolicyAdopt(context.Background(), repo.Dir, policyAdoptOptions{profile: governanceprincipal.ClassSolo, owner: "local-operator"}, &stdout, &stderr)
+			if code != 2 {
+				t.Fatalf("code %d, want 2 (operational)\nstdout=%s\nstderr=%s", code, stdout.String(), stderr.String())
+			}
+			for _, want := range []string{tc.wantErr, "the checkout is on policy/adopt with the four files written but not committed"} {
+				if !strings.Contains(stderr.String(), want) {
+					t.Fatalf("stderr missing %q:\n%s", want, stderr.String())
+				}
+			}
+			// The disclosure is true: that branch, those four files, no commit.
+			if br := strings.TrimSpace(gitOutput(t, repo.Dir, "rev-parse", "--abbrev-ref", "HEAD")); br != "policy/adopt" {
+				t.Fatalf("branch = %s, but the refusal said the checkout is on policy/adopt", br)
+			}
+			if strings.TrimSpace(gitOutput(t, repo.Dir, "rev-parse", "policy/adopt")) != repo.Head {
+				t.Fatal("a refused adopt committed onto policy/adopt anyway")
+			}
+			for _, rel := range []string{".verdi/policy/constitution.md", ".verdi/policy/profiles/starter-solo.md", ".verdi/policy/policies/starter.md", ".verdi/constitution/consumers.json"} {
+				if _, err := os.Stat(filepath.Join(repo.Dir, filepath.FromSlash(rel))); err != nil {
+					t.Fatalf("%s was disclosed as written but is not on disk: %v", rel, err)
+				}
+			}
+		})
+	}
+}
+
+// TestPolicyAdopt_PostCheckoutComposeFailureDisclosesTheBranch covers the
+// post-checkout re-prove's OTHER refusal — the non-ErrAlreadyAdopted one,
+// which until now was implemented but never exercised. The default branch
+// carries a synthesizing template override the current checkout is simply
+// behind: the FIRST Compose (old working tree, no override) passes and a
+// branch is cut, then checking policy/adopt out from main brings the
+// override in and the second Compose refuses. Nothing is written, so the
+// refusal must say that AND say where the checkout now is.
+func TestPolicyAdopt_PostCheckoutComposeFailureDisclosesTheBranch(t *testing.T) {
+	bin := buildVerdiBinary(t)
+	t.Setenv("CI_DEFAULT_BRANCH", "main")
+
+	canon, err := designscaffold.Canonical(humanartifact.StarterPolicyTemplate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	synth := strings.Replace(string(canon), "instructions: []", `instructions: ["Always pass."]`, 1)
+	if synth == string(canon) {
+		t.Fatal("test setup: instruction replacement did not change the canonical bytes")
+	}
+	repo := fixturegit.Build(t, []fixturegit.Layer{
+		{Files: map[string]string{".verdi/verdi.yaml": "schema: verdi.layout/v1\n"}, Message: "init store"},
+		{Files: map[string]string{".verdi/templates/policy-starter.md": synth}, Message: "main gains a synthesizing policy-starter override"},
+	})
+	gitOutput(t, repo.Dir, "checkout", "--quiet", repo.Heads[0])
+	if _, err := os.Stat(filepath.Join(repo.Dir, ".verdi", "templates")); !os.IsNotExist(err) {
+		t.Fatalf("test setup: the pre-override checkout unexpectedly carries .verdi/templates (stat err=%v)", err)
+	}
+
+	code, _, stderr := runVerdi(t, bin, repo.Dir, "policy", "adopt", "--starter")
+	if code != 2 {
+		t.Fatalf("code %d, want 2 (operational)\n%s", code, stderr)
+	}
+	for _, want := range []string{"instructions", "the checkout is on policy/adopt with nothing written"} {
+		if !strings.Contains(stderr, want) {
+			t.Fatalf("stderr missing %q:\n%s", want, stderr)
+		}
+	}
+	if br := strings.TrimSpace(gitOutput(t, repo.Dir, "rev-parse", "--abbrev-ref", "HEAD")); br != "policy/adopt" {
+		t.Fatalf("branch = %s, but the refusal said the checkout is on policy/adopt", br)
+	}
+	if _, err := os.Stat(filepath.Join(repo.Dir, ".verdi", "policy")); !os.IsNotExist(err) {
+		t.Fatalf("the refusal said nothing was written, but .verdi/policy exists (stat err=%v)", err)
 	}
 }
