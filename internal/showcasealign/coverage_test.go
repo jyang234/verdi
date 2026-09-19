@@ -274,6 +274,20 @@ var showcaseCoverage = map[string][]coverageEvidence{
 	// examples/showcase is a closed gap, not a valid mapping).
 	"cli:harness": {goE2E("internal/showcasealign/cli_showcase_test.go")},
 
+	// cli:policy (spec/spec-documents ac-10, dc-6, SI-204): TestCLIShowcasePolicyAdopt
+	// (cli_showcase_test.go) drives `verdi policy adopt --starter` against
+	// the real provisioned examples/showcase store: the showcase corpus
+	// carries no .verdi/policy/ constitution tree of its own — the same
+	// genuine, disclosed fact cli:context's own mapping above already
+	// grounds its refusal proof on — so a real commit landing the four
+	// starter artifacts on a fresh policy/adopt branch is the meaningful
+	// real behavior this corpus demonstrates, cross-checked by `verdi
+	// lint` staying clean over the freshly-adopted store, `verdi context
+	// constitution inspect` reporting the proposed snapshot adopted, and a
+	// second adopt refusing as a verdict (exit 1), never an operational
+	// fault.
+	"cli:policy": {goE2E("internal/showcasealign/cli_showcase_test.go")},
+
 	// cli:serve: `cmd/e2eharness/main.go` launches the real `verdi serve
 	// --http <addr>` subprocess every Playwright spec in the suite runs
 	// against (never a fake/stub server) — so any SHOWCASE.-marked spec

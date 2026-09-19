@@ -10,10 +10,13 @@ import (
 // The policy setup guide: when a wall reports policy-forbidden ("project
 // has not adopted policy authority"), the board's context/policy notice
 // must lead somewhere usable — an inline, read-only guide on the same
-// board naming the manual initial setup (constitution, profile, policy,
-// consumer inventory) and the existing read-only CLI inspection requests
-// with their real operand shape and result fields. It adopts nothing,
-// mutates nothing, and never presents proposed/validated as accepted.
+// board naming the one verb that performs initial setup (verdi policy
+// adopt --starter), the four files it writes — which a project may
+// instead author by hand, the fallback rather than the route
+// (constitution, profile, policy, consumer inventory) — and the existing
+// read-only CLI inspection requests with their real operand shape and
+// result fields. It adopts nothing, mutates nothing, and never presents
+// proposed/validated as accepted.
 
 const policyGuideID = "asd-policy-guide"
 
@@ -168,6 +171,8 @@ func TestPolicyGuide_AdoptedPolicyWithoutDesignAssistance_NeverDescribedAsAbsent
 				"has not adopted policy authority",
 				"there is no accepted <code>.verdi/policy</code>",
 				"Files to author",
+				"Files the starter writes",
+				"verdi policy adopt",
 				".verdi/policy/constitution.md",
 				policyGuideFalseWording,
 			} {
@@ -245,11 +250,12 @@ func policyGuideSection(t *testing.T, html string) string {
 }
 
 // TestPolicyGuide_RendersReadOnlyGuidance pins the guide's content: plain
-// summary first (what is missing, why review is blocked), the manual
-// initial files, the four read-only CLI inspection requests with their
-// real operand shape and result fields under expandable technical
-// detail, and the proposed/validated-is-not-accepted line — with no
-// control that could mutate anything.
+// summary first (what is missing, why review is blocked), then the one
+// setup verb and the files it writes — hand-authoring named only as the
+// fallback — the four read-only CLI inspection requests with their real
+// operand shape and result fields under expandable technical detail, and
+// the proposed/validated-is-not-accepted line — with no control that
+// could mutate anything.
 func TestPolicyGuide_RendersReadOnlyGuidance(t *testing.T) {
 	html := renderBoardRegion(badgeRenderProjection(modeAuthoring), &boardGitState{Branch: "design/x", DefaultBranch: "main"}, policyForbiddenView())
 	guide := policyGuideSection(t, html)
@@ -260,9 +266,10 @@ func TestPolicyGuide_RendersReadOnlyGuidance(t *testing.T) {
 		"has not adopted policy authority",
 		"semantic review",
 		policyGuideScopedWording,
-		// the manual initial setup, by file — the placeholder paths in their
-		// ESCAPED form (a raw-prefix check passed even when the browser
-		// swallowed <profile-id> as an element)
+		// the files the setup verb writes — the same four a project may
+		// author by hand as the fallback — by path, in their ESCAPED form
+		// (a raw-prefix check passed even when the browser swallowed
+		// <profile-id> as an element)
 		".verdi/policy/constitution.md",
 		".verdi/policy/profiles/&lt;profile-id&gt;.md",
 		".verdi/policy/policies/&lt;name&gt;.md",
@@ -434,7 +441,7 @@ func TestPolicyGuide_PolicyLessCheckoutIsInspectFirst(t *testing.T) {
 				}
 			}
 			inspectAt := strings.Index(text, "Inspect first")
-			filesAt := strings.Index(text, "Files to author")
+			filesAt := strings.Index(text, "Files the starter writes")
 			if filesAt < 0 || inspectAt < 0 || filesAt < inspectAt {
 				t.Errorf("%s: inspect-first (%d) must precede the conditional file list (%d)", mode, inspectAt, filesAt)
 			}
@@ -564,5 +571,26 @@ func TestPolicyGuide_ReadOnlyAndReviewModes_KeepRestrictions(t *testing.T) {
 				t.Fatalf("%s: policy guide closes %d here-documents, want 4", mode, n)
 			}
 		})
+	}
+}
+
+// TestPolicyGuide_NamesTheAdoptVerb (spec/spec-documents ac-10, R-W4-8):
+// the not-adopted guide's "no setup wizard" disclaimer becomes a pointer
+// at the real verb, verdi policy adopt --starter, while the guide stays
+// read-only markup with its four read-only check blocks; the verb is a
+// pointer, not a fifth here-document.
+func TestPolicyGuide_NamesTheAdoptVerb(t *testing.T) {
+	html := renderBoardRegion(badgeRenderProjection(modeAuthoring), &boardGitState{Branch: "design/x", DefaultBranch: "main"}, policyForbiddenView())
+	guide := policyGuideSection(t, html)
+	for _, want := range []string{"verdi policy adopt --starter [--profile solo|team]", "policy/adopt", "no adoption control", "not accepted"} {
+		if !strings.Contains(guide, want) {
+			t.Fatalf("guide missing %q", want)
+		}
+	}
+	if strings.Contains(guide, "no setup wizard") {
+		t.Fatal("the no-wizard disclaimer survived")
+	}
+	if n := strings.Count(guide, `<pre class="asd-policy-guide-cmd">`); n != 4 {
+		t.Fatalf("read-only check blocks = %d, want 4 (adopt is a pointer, not a here-doc)", n)
 	}
 }

@@ -37,6 +37,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 
 	"github.com/jyang234/verdi/internal/initwizard"
 	"github.com/jyang234/verdi/internal/model"
@@ -47,24 +48,68 @@ import (
 // check (W-3/W-3b) and the final promotion (W-2) key on.
 const verdiDirName = ".verdi"
 
+// initUsageText is this verb's own one-line usage — the exact text every
+// init-side error message cites AND (review round 1, Minor 2)
+// help.go's verbUsage["init"] row derives ("usage: " + initUsageText,
+// not a second hand-typed literal), so dispatch's help output and every
+// hand-printed refusal here can never silently drift apart.
+const initUsageText = "verdi init [--wizard] [--vocabulary plain|canonical]"
+
 // cmdInit is `verdi init`'s real entry point, invoked by dispatch.go. It
-// parses --wizard, resolves the real working directory and the real TTY
-// predicate (isRealStdinTTY — term.IsTerminal, with the disclosed
-// VERDI_INIT_ASSUME_TTY test override), and delegates to runInit, the
-// testable core every built-binary test in init_test.go drives through
-// the compiled binary rather than calling directly (CLAUDE.md: CLI
-// behavioral paths get built-binary Go e2e tests).
+// parses --wizard and --vocabulary (spec/spec-documents ac-11: the
+// `plain` preset by default, `--vocabulary canonical` opting out —
+// initwizard.ParseVocabularyPreset resolves the flag's value), resolves
+// the real working directory and the real TTY predicate (isRealStdinTTY —
+// term.IsTerminal, with the disclosed VERDI_INIT_ASSUME_TTY test
+// override), and delegates to runInit, the testable core every
+// built-binary test in init_test.go drives through the compiled binary
+// rather than calling directly (CLAUDE.md: CLI behavioral paths get
+// built-binary Go e2e tests).
 func cmdInit(args []string, stdout, stderr io.Writer) int {
 	wizard := false
-	for _, a := range args {
-		switch a {
-		case "--wizard":
+	vocabularyName := "plain"
+	vocabularySet := false
+
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		switch {
+		case a == "--wizard":
 			wizard = true
+		case a == "--vocabulary" || strings.HasPrefix(a, "--vocabulary="):
+			if vocabularySet {
+				fmt.Fprintf(stderr, "init: --vocabulary given more than once (usage: %s)\n", initUsageText)
+				return 2
+			}
+			if _, val, ok := strings.Cut(a, "="); ok {
+				// An explicit "=" is unambiguously a value, even a
+				// malformed one: --vocabulary=--wizard is an invalid
+				// value, not a missing one.
+				vocabularyName = val
+			} else {
+				// A following argument that looks like a flag is a
+				// MISSING value, never the value: consuming it would
+				// report the wrong defect ("invalid --vocabulary value
+				// \"--wizard\"") and silently swallow a flag the operator
+				// did type. No legal preset name begins with "--".
+				if i+1 >= len(args) || strings.HasPrefix(args[i+1], "--") {
+					fmt.Fprintf(stderr, "init: --vocabulary requires a value (usage: %s)\n", initUsageText)
+					return 2
+				}
+				i++
+				vocabularyName = args[i]
+			}
+			vocabularySet = true
 		default:
 			// vocab:identity — CLI usage/flag grammar (identity)
-			fmt.Fprintf(stderr, "init: unknown argument %q (usage: verdi init [--wizard])\n", a)
+			fmt.Fprintf(stderr, "init: unknown argument %q (usage: %s)\n", a, initUsageText)
 			return 2
 		}
+	}
+
+	preset, err := initwizard.ParseVocabularyPreset(vocabularyName)
+	if err != nil {
+		fmt.Fprintln(stderr, "init:", err)
+		return 2
 	}
 
 	cwd, err := os.Getwd()
@@ -73,7 +118,7 @@ func cmdInit(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 
-	return runInit(cwd, wizard, os.Stdin, isRealStdinTTY(), stdout, stderr)
+	return runInit(cwd, wizard, preset, os.Stdin, isRealStdinTTY(), stdout, stderr)
 }
 
 // isRealStdinTTY reports whether the real os.Stdin is attached to an
@@ -97,13 +142,18 @@ func isRealStdinTTY() bool {
 
 // runInit is the testable core: given an already-resolved cwd (the
 // directory that will become the store root — .verdi lands directly
-// under it) and injected TTY/stdin, runs the whole init ritual and
-// returns the exit code. It never partially writes to the real root: a
-// refusal or any staging/gate failure leaves cwd exactly as it found it
-// (the sibling temp directory is always cleaned up), and the only write
-// that ever touches the real .verdi path is the single terminal
-// os.Rename.
-func runInit(cwd string, wizard bool, stdin io.Reader, isTTY bool, stdout, stderr io.Writer) int {
+// under it), the resolved --vocabulary preset (PlainPreset() by default;
+// the empty model.Vocabulary for --vocabulary canonical), and injected
+// TTY/stdin, runs the whole init ritual and returns the exit code. It
+// never partially writes to the real root: a refusal or any staging/gate
+// failure leaves cwd exactly as it found it (the sibling temp directory
+// is always cleaned up), and the only write that ever touches the real
+// .verdi path is the single terminal os.Rename. preset applies identically
+// to both the bare and --wizard paths (dc-7: a preset is configuration,
+// not a kernel change) — the up-front existing-store refusal below runs
+// before preset is ever consulted, so --vocabulary can never resurrect a
+// write to an existing store.
+func runInit(cwd string, wizard bool, preset model.Vocabulary, stdin io.Reader, isTTY bool, stdout, stderr io.Writer) int {
 	verdiDir := filepath.Join(cwd, verdiDirName)
 
 	if desc, exists := describeExistingVerdiDir(verdiDir); exists {
@@ -127,7 +177,7 @@ func runInit(cwd string, wizard bool, stdin io.Reader, isTTY bool, stdout, stder
 		}
 	}()
 
-	candidate, err := stageCandidateStore(tempRoot, wizard, stdin, stdout, stderr)
+	candidate, err := stageCandidateStore(tempRoot, wizard, preset, stdin, stdout, stderr)
 	if err != nil {
 		// A deliberate "no" at the wizard's final write confirmation is a
 		// clean, considered no-op — neither operational trouble nor a
@@ -155,10 +205,13 @@ func runInit(cwd string, wizard bool, stdin io.Reader, isTTY bool, stdout, stder
 		return 2
 	}
 
-	// W-4: when the wizard diverged from canonical, the staged
-	// model.yaml must decode back to a value identical to the
-	// interview's own in-memory candidate — proven by re-reading and
-	// re-decoding the ACTUAL staged bytes, never trusting what was
+	// W-4: when either path staged a model.yaml — the bare path direct
+	// from cmdInit's resolved --vocabulary preset, or the wizard path from
+	// the interview's own confirmed result.Vocabulary (review round 1,
+	// Minor 8: both paths stage model.yaml now and ride this identical
+	// check, not the wizard alone) — the staged bytes must decode back to
+	// a value identical to that in-memory candidate, proven by re-reading
+	// and re-decoding the ACTUAL staged bytes, never trusting what was
 	// rendered in memory.
 	if candidate != nil {
 		stagedPath := filepath.Join(tempRoot, verdiDirName, "model.yaml")
@@ -253,16 +306,45 @@ func describeExistingVerdiDir(path string) (description string, exists bool) {
 	return fmt.Sprintf("%s (a directory with no verdi.yaml inside it)", path), true
 }
 
+// stageVocabularyIfDiverged writes tempRoot/.verdi/model.yaml — with the
+// same "model.yaml" crash-simulation hook name every model.yaml write in
+// this file has always used — and returns its in-memory *model.Model
+// candidate when vocab diverges from the canonical, unrenamed vocabulary
+// (!initwizard.VocabularyEmpty); nil, nil when it does not (the
+// "model.yaml only on divergence" contract, unchanged by this story).
+// Shared by both of stageCandidateStore's paths: the bare path applies it
+// directly to cmdInit's resolved --vocabulary preset, the wizard path
+// applies it to the interview's own confirmed result.Vocabulary — so the
+// two can never hand-duplicate, and drift apart on, this write.
+func stageVocabularyIfDiverged(tempRoot string, vocab model.Vocabulary) (*model.Model, error) {
+	if initwizard.VocabularyEmpty(vocab) {
+		return nil, nil
+	}
+	if err := initwizard.WriteModelYAML(tempRoot, vocab); err != nil {
+		return nil, &initStageError{file: "model.yaml", err: err}
+	}
+	if err := simulateCrashAfter("model.yaml"); err != nil {
+		return nil, &initStageError{file: "model.yaml", err: err}
+	}
+	return initwizard.CandidateModel(vocab), nil
+}
+
 // stageCandidateStore writes the complete candidate store under
-// tempRoot/.verdi/ — verdi.yaml always, and, for the wizard path, a
-// model.yaml (only on divergence from canonical) and template overrides
-// per the interview's own choices — returning the in-memory candidate
-// *model.Model the W-4 decode-compare step proves the staged bytes
-// against (nil for the bare path, which never stages a model.yaml at
-// all). Every returned error is already a *initError naming which
-// staged file (if any) is implicated, so the caller can report it
-// without re-deriving that context.
-func stageCandidateStore(tempRoot string, wizard bool, stdin io.Reader, stdout, stderr io.Writer) (*model.Model, error) {
+// tempRoot/.verdi/ — verdi.yaml always, a model.yaml (only on divergence
+// from the canonical, unrenamed vocabulary — stageVocabularyIfDiverged),
+// and, for the wizard path, template overrides per the interview's own
+// choices — returning the in-memory candidate *model.Model the W-4
+// decode-compare step proves the staged bytes against (nil when no
+// model.yaml was staged at all). Both paths resolve their vocabulary from
+// preset (cmdInit's own resolved --vocabulary value, PlainPreset() by
+// default — spec/spec-documents ac-11, dc-7): the bare path stages preset
+// directly; the wizard path seeds RunInterview with it (R-W4-6) and
+// stages whatever the interview confirms, which may differ from preset
+// (every rename stays editable) or reproduce it exactly (every prompt
+// left at its default). Every returned error is already a *initStageError
+// naming which staged file (if any) is implicated, so the caller can
+// report it without re-deriving that context.
+func stageCandidateStore(tempRoot string, wizard bool, preset model.Vocabulary, stdin io.Reader, stdout, stderr io.Writer) (*model.Model, error) {
 	if err := initwizard.WriteVerdiYAML(tempRoot); err != nil {
 		return nil, &initStageError{file: "verdi.yaml", err: err}
 	}
@@ -271,23 +353,17 @@ func stageCandidateStore(tempRoot string, wizard bool, stdin io.Reader, stdout, 
 	}
 
 	if !wizard {
-		return nil, nil
+		return stageVocabularyIfDiverged(tempRoot, preset)
 	}
 
-	result, err := initwizard.RunInterview(stdin, stdout)
+	result, err := initwizard.RunInterview(stdin, stdout, preset)
 	if err != nil {
 		return nil, &initStageError{interview: true, err: err}
 	}
 
-	var candidate *model.Model
-	if !initwizard.VocabularyEmpty(result.Vocabulary) {
-		if err := initwizard.WriteModelYAML(tempRoot, result.Vocabulary); err != nil {
-			return nil, &initStageError{file: "model.yaml", err: err}
-		}
-		if err := simulateCrashAfter("model.yaml"); err != nil {
-			return nil, &initStageError{file: "model.yaml", err: err}
-		}
-		candidate = initwizard.CandidateModel(result.Vocabulary)
+	candidate, err := stageVocabularyIfDiverged(tempRoot, result.Vocabulary)
+	if err != nil {
+		return nil, err
 	}
 
 	if result.CopyTemplates {

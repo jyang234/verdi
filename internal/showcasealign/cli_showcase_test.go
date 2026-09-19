@@ -133,6 +133,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"sort"
 	"strings"
@@ -142,6 +143,7 @@ import (
 	"github.com/jyang234/verdi/internal/boardio"
 	"github.com/jyang234/verdi/internal/contextcompile"
 	"github.com/jyang234/verdi/internal/gitx"
+	"github.com/jyang234/verdi/internal/initwizard"
 	"github.com/jyang234/verdi/internal/journey"
 	"github.com/jyang234/verdi/internal/model"
 	"github.com/jyang234/verdi/internal/policyartifact"
@@ -823,7 +825,7 @@ func TestCLIShowcaseInit(t *testing.T) {
 		t.Fatalf("reading the real showcase store's verdi.yaml: %v", err)
 	}
 
-	for _, args := range [][]string{{"init"}, {"init", "--wizard"}} {
+	for _, args := range [][]string{{"init"}, {"init", "--wizard"}, {"init", "--vocabulary", "plain"}} {
 		stdout, stderr, code := runBinary(t, root, args...)
 		if code != 2 {
 			t.Fatalf("verdi %v against the real showcase store: exit %d, want 2 (create-only refusal)\nstdout:\n%s\nstderr:\n%s", args, code, stdout, stderr)
@@ -843,7 +845,8 @@ func TestCLIShowcaseInit(t *testing.T) {
 
 	// The creation path: init's whole point is to work BEFORE any store
 	// exists, so it is proven here, against a fresh empty directory,
-	// using the same real compiled binary.
+	// using the same real compiled binary. Bare (no --vocabulary flag)
+	// writes the plain preset by default (spec/spec-documents ac-11).
 	scratch := t.TempDir()
 	stdout, stderr, code := runBinary(t, scratch, "init")
 	if code != 0 {
@@ -855,6 +858,27 @@ func TestCLIShowcaseInit(t *testing.T) {
 	}
 	if string(data) != "schema: verdi.layout/v1\n" {
 		t.Fatalf("freshly-init'd verdi.yaml = %q, want exactly %q", data, "schema: verdi.layout/v1\n")
+	}
+	modelData, err := os.ReadFile(filepath.Join(scratch, ".verdi", "model.yaml"))
+	if err != nil {
+		t.Fatalf("reading the freshly-init'd model.yaml: %v", err)
+	}
+	decoded, err := model.DecodeModel(modelData)
+	if err != nil {
+		t.Fatalf("freshly-init'd model.yaml does not decode: %v", err)
+	}
+	if !reflect.DeepEqual(decoded.Vocabulary, initwizard.PlainPreset()) {
+		t.Fatalf("freshly-init'd model.yaml Vocabulary = %+v, want the plain preset %+v (ac-11)", decoded.Vocabulary, initwizard.PlainPreset())
+	}
+
+	// --vocabulary canonical opts out: no model.yaml at all.
+	scratchCanonical := t.TempDir()
+	stdout, stderr, code = runBinary(t, scratchCanonical, "init", "--vocabulary", "canonical")
+	if code != 0 {
+		t.Fatalf("verdi init --vocabulary canonical (fresh scratch dir): exit %d, want 0\nstdout:\n%s\nstderr:\n%s", code, stdout, stderr)
+	}
+	if _, err := os.Stat(filepath.Join(scratchCanonical, ".verdi", "model.yaml")); !os.IsNotExist(err) {
+		t.Fatalf("verdi init --vocabulary canonical wrote a model.yaml (err=%v), want none — opting out of the plain preset", err)
 	}
 }
 
@@ -1194,6 +1218,84 @@ func TestCLIShowcaseHarness(t *testing.T) {
 	stdout, stderr, code = runBinary(t, root, "harness", "check", "-o", root)
 	if code != 0 || stdout != "" {
 		t.Fatalf("verdi harness check (after render) against the real showcase store: exit %d, want 0 with empty stdout\nstdout:\n%s\nstderr:\n%s", code, stdout, stderr)
+	}
+}
+
+// TestCLIShowcasePolicyAdopt (cli:policy, spec/spec-documents ac-10,
+// dc-6, SI-204) drives `verdi policy adopt --starter` against the real
+// provisioned examples/showcase store. The showcase corpus carries no
+// .verdi/policy/ constitution tree of its own — a genuine, disclosed
+// fact about the store (examples/showcase has no such directory at
+// all), the same "real, disclosed fact about the showcase store"
+// pattern cli:context's own mapping above uses — so the starter's happy
+// path is the real capability this corpus can demonstrate: a real commit
+// landing exactly the four starter artifacts on a fresh policy/adopt
+// branch, `verdi lint` staying clean over the freshly-adopted store,
+// `verdi context constitution inspect` reporting the proposed snapshot
+// adopted, and a second adopt refusing as a verdict (exit 1) rather than
+// an operational fault.
+func TestCLIShowcasePolicyAdopt(t *testing.T) {
+	t.Setenv("CI_DEFAULT_BRANCH", "main")
+	root := provisionShowcaseStore(t)
+	ctx := context.Background()
+
+	if _, err := os.Stat(filepath.Join(root, ".verdi", "policy")); !os.IsNotExist(err) {
+		t.Fatalf("test setup: provisioned showcase store unexpectedly carries a .verdi/policy/ tree (stat err=%v) — this test's whole premise is the not-yet-adopted path", err)
+	}
+
+	headBefore, err := gitx.RevParse(ctx, root, "HEAD")
+	if err != nil {
+		t.Fatalf("test setup: gitx.RevParse(HEAD): %v", err)
+	}
+
+	stdout, stderr, code := runBinary(t, root, "policy", "adopt", "--starter")
+	if code != 0 {
+		t.Fatalf("verdi policy adopt --starter against the real showcase store: exit %d\nstdout:\n%s\nstderr:\n%s", code, stdout, stderr)
+	}
+
+	headAfter, err := gitx.RevParse(ctx, root, "HEAD")
+	if err != nil {
+		t.Fatalf("gitx.RevParse(HEAD) after: %v", err)
+	}
+	entries, err := gitx.DiffNameStatus(ctx, root, headBefore, headAfter)
+	if err != nil {
+		t.Fatalf("gitx.DiffNameStatus: %v", err)
+	}
+	gotPaths := make([]string, len(entries))
+	for i, e := range entries {
+		if e.Status != "A" {
+			t.Fatalf("entry %+v: want an added file — the adopt commit only ever creates paths", e)
+		}
+		gotPaths[i] = e.Path
+	}
+	sort.Strings(gotPaths)
+	wantPaths := []string{".verdi/constitution/consumers.json", ".verdi/policy/constitution.md", ".verdi/policy/policies/starter.md", ".verdi/policy/profiles/starter-solo.md"}
+	if len(gotPaths) != len(wantPaths) {
+		t.Fatalf("committed paths = %v, want %v", gotPaths, wantPaths)
+	}
+	for i := range wantPaths {
+		if gotPaths[i] != wantPaths[i] {
+			t.Fatalf("committed paths = %v, want %v", gotPaths, wantPaths)
+		}
+	}
+
+	lintOut, lintErr, lintCode := runBinary(t, root, "lint")
+	if lintCode != 0 {
+		t.Fatalf("verdi lint against the freshly-adopted showcase store: exit %d\nstdout:\n%s\nstderr:\n%s", lintCode, lintOut, lintErr)
+	}
+
+	reqPath := filepath.Join(t.TempDir(), "inspect-request.json")
+	if err := os.WriteFile(reqPath, []byte(`{"schema":"verdi.constitution-inspect-request/v1"}`), 0o644); err != nil {
+		t.Fatalf("writing request file: %v", err)
+	}
+	inspectOut, inspectErr, inspectCode := runBinary(t, root, "context", "constitution", "inspect", "--request", reqPath)
+	if inspectCode != 0 || !strings.Contains(inspectOut, `"adopted":true`) {
+		t.Fatalf("verdi context constitution inspect after adopt: exit %d\nstdout:\n%s\nstderr:\n%s", inspectCode, inspectOut, inspectErr)
+	}
+
+	_, secondErr, secondCode := runBinary(t, root, "policy", "adopt", "--starter")
+	if secondCode != 1 || !strings.Contains(secondErr, "already carries") {
+		t.Fatalf("second adopt against the real showcase store: exit %d, want 1\nstderr:\n%s", secondCode, secondErr)
 	}
 }
 

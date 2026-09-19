@@ -1573,11 +1573,10 @@ func TestStageClosureSpec_UntrackedActiveZoneStillStagesTheArchive(t *testing.T)
 // unwind gap: a staging failure after the branch cut left HEAD on
 // close/<name>, the spec physically moved to the archive, the report frozen,
 // rollup.json written — and no unwindClosureBranchCut call at all, so the
-// retry died at CheckoutNewBranch's no-clobber refusal. `verdi accept` already
-// solved the identical shape by exposing its two post-flip git write ops as
-// package-level seams (accept.go's acceptAddPaths/acceptCreateCommit,
-// spec/obligation-seam ac-3); this mirrors that proven pattern rather than
-// inventing a new one.
+// retry died at CheckoutNewBranch's no-clobber refusal. The fix exposes
+// close's own two post-archive-move git write ops as package-level seams
+// (closeAddPaths/closeCreateCommit), the only way to force a staging failure
+// a clean hermetic fixture repo will never take on its own.
 func TestRunClose_StagingFailure_UnwindsBranchCut(t *testing.T) {
 	repo := buildCloseFixtureRepo(t)
 	ctx := context.Background()

@@ -9,12 +9,19 @@ import (
 	"testing"
 )
 
-// consolidationVerdiSuccessors pins the reviewed SI-200 successors of three
-// sources the immutable Task4 witness still binds by their historical digests
-// (spec-import-contract.md's SI-200 clause, adopted and Task3 reviewed). The
-// witness document itself is unchanged: its digest, corpora, totals and
-// replay operands stay exactly as reviewed, and every other bound source is
-// still admitted only on an exact historical match.
+// consolidationVerdiSuccessors pins the reviewed successors of the sources the
+// immutable Task4 witness still binds by their historical digests. Two waves
+// of accepted work are pinned here:
+//
+//   - SI-200 (spec-import-contract.md's import-sidecar clause, adopted and
+//     Task3 reviewed): contextcompile's classify.go, schema.go, validate.go.
+//   - SI-204 / spec/spec-documents ac-10 (ruling R-W4-11): governanceprincipal's
+//     decode.go and profile.go, whose Profile.Template seam the wave-4 Task 1
+//     review read and approved for this binding.
+//
+// The witness document itself is unchanged in both waves: its digest, corpora,
+// totals and replay operands stay exactly as reviewed, and every other bound
+// source is still admitted only on an exact historical match.
 var consolidationVerdiSuccessors = map[string]consolidationVerdiSuccessor{
 	"internal/contextcompile/classify.go": {
 		Historical: "451ca5f22e4e2ef14408d312686b871009418e2b8edde216627e45581ecf5c76",
@@ -63,6 +70,32 @@ var consolidationVerdiSuccessors = map[string]consolidationVerdiSuccessor{
 			{From: "\t\tExclusionArchivedRecord, ExclusionGeneratedProjectionOutput, ExclusionNonTextData, ExclusionNonRegularFile,\n" +
 				"\t\tExclusionSpecImportSidecar:\n",
 				To: "\t\tExclusionArchivedRecord, ExclusionGeneratedProjectionOutput, ExclusionNonTextData, ExclusionNonRegularFile:\n"},
+		},
+	},
+	"internal/governanceprincipal/decode.go": {
+		Historical: "d69540dd109971b7bf36f40f44366345a32f1501c3b08e2d9eda7eec19c65043",
+		Successor:  "d0b9e48a966885089c658ff4e0d0240e55b519b7a9237cbe9f50e2e68551a3bb",
+		Inverse: []consolidationVerdiEdit{
+			{From: "\tTemplate                   *TemplateRecord           `yaml:\"template\"`\n"},
+			{From: "\tif doc.Template != nil {\n" +
+				"\t\tif err := doc.Template.Validate(); err != nil {\n" +
+				"\t\t\treturn Profile{}, fmt.Errorf(\"governanceprincipal: profile %w\", err)\n" +
+				"\t\t}\n" +
+				"\t}\n" +
+				"\n"},
+			{From: "\t\tTemplate:                   doc.Template,\n"},
+		},
+	},
+	"internal/governanceprincipal/profile.go": {
+		Historical: "91960126159351d7def440918c7d9141095939609ebdb949799d43607662f89d",
+		Successor:  "6ee7192e0fce13271089bdf54bda538846fc0d4d16cf9d82dbb411b19ee093c2",
+		Inverse: []consolidationVerdiEdit{
+			{From: "\t// Template is the resolved scaffold record a starter-written profile\n" +
+				"\t// carries (spec/spec-documents ac-10, SI-204); optional \u2014 a\n" +
+				"\t// hand-authored profile carries none; digest-bound like every other\n" +
+				"\t// exported field.\n" +
+				"\tTemplate *TemplateRecord `json:\"template,omitempty\"`\n" +
+				"\n"},
 		},
 	},
 }
@@ -215,9 +248,25 @@ func TestPublicControllerConsolidationImportSuccessor(t *testing.T) {
 }
 
 // consolidationMutateFirstEdit changes one byte inside the reviewed delta, so
-// the result is neither the historical nor the reviewed successor source.
+// the result is neither the historical nor the reviewed successor source. The
+// byte is the delta's first ASCII letter, case-flipped: a mutation every pinned
+// delta admits whatever its text, since the waves pinned above share no
+// vocabulary to key on.
 func consolidationMutateFirstEdit(source []byte, edit consolidationVerdiEdit) []byte {
-	mutated := []byte(strings.Replace(edit.From, "Exclusion", "exclusion", 1))
+	mutated := []byte(edit.From)
+	for i, b := range mutated {
+		if b >= 'a' && b <= 'z' {
+			mutated[i] = b - ('a' - 'A')
+			break
+		}
+		if b >= 'A' && b <= 'Z' {
+			mutated[i] = b + ('a' - 'A')
+			break
+		}
+	}
+	if bytes.Equal(mutated, []byte(edit.From)) {
+		panic("consolidationMutateFirstEdit: delta carries no ASCII letter to change")
+	}
 	return bytes.Replace(source, []byte(edit.From), mutated, 1)
 }
 

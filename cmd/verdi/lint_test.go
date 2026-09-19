@@ -76,7 +76,8 @@ func TestRunLintVerb_CleanExitsZero(t *testing.T) {
 }
 
 // TestRunLintVerb_FindingsExitOne proves a store with a violation prints a
-// "VL-xxx path: message" line to stdout and exits 1.
+// "message (path) [VL-xxx]" line (R-W4-5's sentence-first grammar) to
+// stdout and exits 1.
 func TestRunLintVerb_FindingsExitOne(t *testing.T) {
 	repo := buildMinimalStore(t, map[string]string{
 		".verdi/adr/0001-example.md": lintTestCleanADR,

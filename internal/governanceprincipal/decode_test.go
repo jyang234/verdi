@@ -1,6 +1,7 @@
 package governanceprincipal
 
 import (
+	"bytes"
 	"reflect"
 	"regexp"
 	"strings"
@@ -301,5 +302,57 @@ func TestProfileDigestSensitivity(t *testing.T) {
 				t.Errorf("digest did not change when %s changed", tt.name)
 			}
 		})
+	}
+}
+
+// TestDecodeProfile_TemplateRecordRoundTrips proves the profile's optional
+// template record (spec/spec-documents ac-10, SI-204) is digest-bound
+// content — present when a starter-written profile carries one, absent
+// for a hand-authored profile — and fails closed on a malformed digest,
+// naming the field.
+func TestDecodeProfile_TemplateRecordRoundTrips(t *testing.T) {
+	catalog := Catalog{Roles: []string{"author"}, Transitions: []string{"accept"}}
+	raw := []byte(`schema: verdi.governance-profile/v1
+id: p
+class: solo
+applicable_transitions: [accept]
+identity_trust_sources: [{id: local, kind: local-operator}]
+role_mappings: [{role: author, trust_source: local, subjects: [a@x]}]
+ownership_sources: []
+signature_requirements: []
+required_approvers: []
+distinctness_rules: []
+evidence_source_restrictions: []
+escalation_thresholds: []
+template: {identity: "embedded:governance-profile-solo.md", digest: "sha256:` + strings.Repeat("a", 64) + `"}
+`)
+	p, err := DecodeProfile(raw, catalog)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.Template == nil || p.Template.Identity != "embedded:governance-profile-solo.md" {
+		t.Fatalf("template = %+v", p.Template)
+	}
+	// The record is content: a profile with and without it digests differently.
+	without, err := DecodeProfile(bytes.Replace(raw, []byte("template:"), []byte("#template:"), 1), catalog)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d1, _ := p.Digest()
+	d2, _ := without.Digest()
+	if d1 == d2 {
+		t.Fatal("template record must be digest-bound")
+	}
+	// A malformed digest fails closed, naming the field — once. Validate's
+	// own message is unprefixed so each caller names its own artifact, so
+	// this one reads "governanceprincipal: profile template.digest ..."
+	// rather than repeating the package (review Minor 2).
+	bad := bytes.Replace(raw, []byte("sha256:"), []byte("md5:"), 1)
+	_, err = DecodeProfile(bad, catalog)
+	if err == nil || !strings.Contains(err.Error(), "template.digest") {
+		t.Fatalf("bad digest: %v", err)
+	}
+	if got := err.Error(); !strings.HasPrefix(got, "governanceprincipal: profile template.digest ") || strings.Count(got, "governanceprincipal:") != 1 {
+		t.Fatalf("bad digest error = %q, want exactly one governanceprincipal: prefix naming the profile", got)
 	}
 }

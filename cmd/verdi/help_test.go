@@ -94,6 +94,35 @@ func TestHelp_PerVerb(t *testing.T) {
 	}
 }
 
+// TestHelp_InitUsageMatchesConstant is review round 1, Minor 2's closure:
+// help.go's verbUsage["init"] row now derives from init.go's own
+// initUsageText constant ("usage: " + initUsageText, not a second
+// hand-typed literal), so the two cannot drift apart structurally — this
+// test pins the whole plumbing end to end at the built-binary level, on
+// top of that compile-time guarantee: "verdi init --help"/"-h"/"help"
+// must print EXACTLY "usage: " + initUsageText, the identical string
+// cmdInit's own flag-parsing refusals cite.
+func TestHelp_InitUsageMatchesConstant(t *testing.T) {
+	bin := buildVerdiBinary(t)
+	dir := t.TempDir()
+
+	want := "usage: " + initUsageText + "\n"
+	for _, help := range []string{"--help", "-h", "help"} {
+		t.Run(help, func(t *testing.T) {
+			stdout, stderr, code := runVerdiBinary(t, bin, dir, nil, "init", help)
+			if code != 0 {
+				t.Fatalf("verdi init %s exit = %d, want 0\nstdout: %s\nstderr: %s", help, code, stdout, stderr)
+			}
+			if stderr != "" {
+				t.Fatalf("verdi init %s stderr = %q, want empty", help, stderr)
+			}
+			if stdout != want {
+				t.Fatalf("verdi init %s stdout = %q, want exactly %q", help, stdout, want)
+			}
+		})
+	}
+}
+
 // TestHelp_LintNeverExecutes is the exact regression the spec names:
 // "today `verdi lint --help` runs a full lint" (ac-2). Run from a
 // directory with NO .verdi/ ancestor at all: if lint actually ran, it

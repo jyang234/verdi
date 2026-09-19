@@ -526,7 +526,9 @@ test.describe("posture and policy", () => {
     // about the default branch), scopes its editing claim to this
     // authoring board, and sends the reader to inspect the accepted and
     // proposed snapshots before any initial setup.
-    const rowSummary = policyRow.locator("p.readiness-summary");
+    // ac-12: the guidance leads the card as its primary line and the
+    // checkout fact stays visible as the secondary .asd-fact line.
+    const rowSummary = policyRow.getByTestId("asd-fact-context/policy");
     await expect(rowSummary).toContainText("This checkout carries no adopted policy authority");
     await expect(rowSummary).toContainText("browser editing proceeds");
     await expect(rowSummary).not.toContainText("default branch");

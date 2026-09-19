@@ -102,9 +102,54 @@ func TestInit_Bare_EmptyDir_CreatesMinimalSkeleton(t *testing.T) {
 	}
 
 	got := listDirEntries(t, dir)
+	want := []string{".verdi", filepath.Join(".verdi", "model.yaml"), filepath.Join(".verdi", "verdi.yaml")}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("bare init tree = %v, want exactly %v (the plain preset, spec/spec-documents ac-11; no templates/, no specs/)", got, want)
+	}
+
+	data, err := os.ReadFile(filepath.Join(dir, ".verdi", "verdi.yaml"))
+	if err != nil {
+		t.Fatalf("reading .verdi/verdi.yaml: %v", err)
+	}
+	if string(data) != initwizard.VerdiYAMLContent {
+		t.Fatalf(".verdi/verdi.yaml = %q, want %q", data, initwizard.VerdiYAMLContent)
+	}
+
+	modelData, err := os.ReadFile(filepath.Join(dir, ".verdi", "model.yaml"))
+	if err != nil {
+		t.Fatalf("reading .verdi/model.yaml: %v", err)
+	}
+	if want := initwizard.RenderModelYAML(initwizard.PlainPreset()); !bytes.Equal(modelData, want) {
+		t.Fatalf("bare init's .verdi/model.yaml = %q, want the plain preset's own render %q (ac-11: plain by default)", modelData, want)
+	}
+
+	checkOut, checkErr, checkCode := runModelCheckBinary(t, bin, dir)
+	if checkCode != 0 {
+		t.Fatalf("verdi model check over the freshly-init'd store exit = %d, want 0\nstdout: %s\nstderr: %s", checkCode, checkOut, checkErr)
+	}
+	if !strings.HasPrefix(checkOut, "model: OK — verdi.model/v1, ") {
+		t.Fatalf("verdi model check stdout = %q, want it to start with the canonical OK line", checkOut)
+	}
+}
+
+// TestInit_Bare_VocabularyCanonical_WritesNoModelYAML is ac-11's opt-out
+// pin: "--vocabulary canonical" against a bare (non-wizard) init writes
+// exactly the pre-preset tree — no model.yaml at all, the unrenamed
+// canonical vocabulary — mirroring TestInit_Bare_EmptyDir_CreatesMinimalSkeleton's
+// old expectations byte for byte.
+func TestInit_Bare_VocabularyCanonical_WritesNoModelYAML(t *testing.T) {
+	bin := buildVerdiBinary(t)
+	dir := t.TempDir()
+
+	stdout, stderr, code := runInitBinary(t, bin, dir, "", nil, "--vocabulary", "canonical")
+	if code != 0 {
+		t.Fatalf("verdi init --vocabulary canonical (bare, empty dir) exit = %d, want 0\nstdout: %s\nstderr: %s", code, stdout, stderr)
+	}
+
+	got := listDirEntries(t, dir)
 	want := []string{".verdi", filepath.Join(".verdi", "verdi.yaml")}
 	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("bare init tree = %v, want exactly %v (no model.yaml, no templates/, no specs/)", got, want)
+		t.Fatalf("--vocabulary canonical bare init tree = %v, want exactly %v (no model.yaml — opting out of the plain preset)", got, want)
 	}
 
 	data, err := os.ReadFile(filepath.Join(dir, ".verdi", "verdi.yaml"))
@@ -118,9 +163,6 @@ func TestInit_Bare_EmptyDir_CreatesMinimalSkeleton(t *testing.T) {
 	checkOut, checkErr, checkCode := runModelCheckBinary(t, bin, dir)
 	if checkCode != 0 {
 		t.Fatalf("verdi model check over the freshly-init'd store exit = %d, want 0\nstdout: %s\nstderr: %s", checkCode, checkOut, checkErr)
-	}
-	if !strings.HasPrefix(checkOut, "model: OK — verdi.model/v1, ") {
-		t.Fatalf("verdi model check stdout = %q, want it to start with the canonical OK line", checkOut)
 	}
 }
 
@@ -212,8 +254,10 @@ func TestInit_Wizard_NoTTY_Refuses(t *testing.T) {
 
 // TestInit_Wizard_AllDefaults_MatchesBarePath is obligation/init-wizard--
 // ac-2--behavioral's zero-divergence pin: a wizard run answering every
-// prompt with its default produces the SAME store bare init would — no
-// model.yaml at all.
+// prompt with its default produces the SAME store bare init would — the
+// plain preset's own model.yaml (ac-11), byte-identical, since both paths
+// resolve the same default --vocabulary preset and neither diverges from
+// it here.
 func TestInit_Wizard_AllDefaults_MatchesBarePath(t *testing.T) {
 	bin := buildVerdiBinary(t)
 	dir := t.TempDir()
@@ -224,9 +268,50 @@ func TestInit_Wizard_AllDefaults_MatchesBarePath(t *testing.T) {
 	}
 
 	got := listDirEntries(t, dir)
+	want := []string{".verdi", filepath.Join(".verdi", "model.yaml"), filepath.Join(".verdi", "verdi.yaml")}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("all-defaults wizard tree = %v, want exactly %v (the plain preset, same as the bare path — ac-11)", got, want)
+	}
+
+	modelBytes, err := os.ReadFile(filepath.Join(dir, ".verdi", "model.yaml"))
+	if err != nil {
+		t.Fatalf("reading promoted model.yaml: %v", err)
+	}
+	if want := initwizard.RenderModelYAML(initwizard.PlainPreset()); !bytes.Equal(modelBytes, want) {
+		t.Fatalf("all-defaults wizard model.yaml = %q, want the plain preset's own render %q", modelBytes, want)
+	}
+}
+
+// TestInit_Wizard_VocabularyCanonical_MatchesBareCanonicalPath is review
+// round 1, Minor 7's closure: "--wizard --vocabulary canonical" is only
+// proven by composition today (the empty-seed transcript at the package
+// level, the flag-to-preset mapping, the bare canonical tree) — this runs
+// the actual composed invocation once, at the CLI level: an all-defaults
+// wizard run seeded from the EMPTY (canonical) vocabulary must produce
+// exactly the pre-preset tree (no model.yaml at all, unlike the default
+// --wizard run just above), and its own transcript must show the bare id
+// "story" as the default — never the plain preset's "planned story" —
+// proving --vocabulary canonical really did seed an empty vocabulary and
+// not silently fall back to the plain preset.
+func TestInit_Wizard_VocabularyCanonical_MatchesBareCanonicalPath(t *testing.T) {
+	bin := buildVerdiBinary(t)
+	dir := t.TempDir()
+
+	stdout, stderr, code := runInitBinary(t, bin, dir, wizardAllDefaultsScript, []string{"VERDI_INIT_ASSUME_TTY=1"}, "--wizard", "--vocabulary", "canonical")
+	if code != 0 {
+		t.Fatalf("verdi init --wizard --vocabulary canonical (all defaults) exit = %d, want 0\nstdout: %s\nstderr: %s", code, stdout, stderr)
+	}
+
+	got := listDirEntries(t, dir)
 	want := []string{".verdi", filepath.Join(".verdi", "verdi.yaml")}
 	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("all-defaults wizard tree = %v, want exactly %v (no model.yaml)", got, want)
+		t.Fatalf("--wizard --vocabulary canonical (all defaults) tree = %v, want exactly %v (no model.yaml)", got, want)
+	}
+	if !strings.Contains(stdout, `class "story" [Enter to keep "story"]`) {
+		t.Fatalf("stdout = %q, want the story prompt's default to be the bare id \"story\" (an empty seed), not the plain preset's \"planned story\"", stdout)
+	}
+	if strings.Contains(stdout, "planned story") {
+		t.Fatalf("stdout = %q, must never show the plain preset's display words when --vocabulary canonical seeds an empty vocabulary", stdout)
 	}
 }
 
@@ -285,7 +370,12 @@ func TestInit_Wizard_RealRenames_AndTemplateCopy(t *testing.T) {
 		t.Fatalf("promoted model.yaml failed to decode: %v", err)
 	}
 	wantVocab := model.Vocabulary{
-		Classes: map[string]string{"feature": "Epic", "story": "Task"},
+		// "spike" is not touched by the script (a blank Enter at that
+		// prompt) — the seed's own "research spike" (the plain preset,
+		// ac-11) survives untouched, exactly like an id the seed never
+		// mentions keeps ITS id: an untouched prompt always keeps
+		// whatever default it showed.
+		Classes: map[string]string{"feature": "Epic", "story": "Task", "spike": "research spike"},
 		Verbs:   map[string]string{"merge": "Sign off"},
 	}
 	if !reflect.DeepEqual(decoded.Vocabulary, wantVocab) {
@@ -390,6 +480,31 @@ func TestInit_Wizard_SimulatedCrash_AfterVerdiYAML_AlsoLeavesNothing(t *testing.
 	}
 }
 
+// TestInit_Bare_SimulatedCrash_LeavesNothing is review round 1, Minor 4's
+// closure: this story is what first put a "model.yaml" write — and so a
+// simulateCrashAfter("model.yaml") injection point — on the BARE
+// (non-wizard) path (stageVocabularyIfDiverged), but every existing
+// crash-injection test drives --wizard. Proves the identical property on
+// the bare path: a crash simulated right after model.yaml is staged, but
+// before promotion, exits 2, names the file, and leaves nothing at all at
+// the real root (the sibling temp directory is discarded exactly like
+// every other pre-promotion failure).
+func TestInit_Bare_SimulatedCrash_LeavesNothing(t *testing.T) {
+	bin := buildVerdiBinary(t)
+	dir := t.TempDir()
+
+	stdout, stderr, code := runInitBinary(t, bin, dir, "", []string{"VERDI_INIT_SIMULATE_CRASH_AFTER=model.yaml"})
+	if code != 2 {
+		t.Fatalf("verdi init (bare, simulated crash after model.yaml) exit = %d, want 2\nstdout: %s\nstderr: %s", code, stdout, stderr)
+	}
+	if !strings.Contains(stderr, "model.yaml") {
+		t.Fatalf("crash refusal stderr = %q, want it to name the simulated-crash file", stderr)
+	}
+	if entries := listDirEntries(t, dir); len(entries) != 0 {
+		t.Fatalf("simulated crash (bare path) left something behind: %v, want nothing at the real root", entries)
+	}
+}
+
 // TestInit_Wizard_PromotionIsSingleRename_AndDecodeComparesEqual is
 // obligation/init-wizard--ac-3--behavioral's W-4/W-2 pin: after a real,
 // successful run, no sibling temp directory is left behind (the whole
@@ -427,23 +542,97 @@ func TestInit_Wizard_PromotionIsSingleRename_AndDecodeComparesEqual(t *testing.T
 	if err != nil {
 		t.Fatalf("promoted model.yaml failed to decode: %v", err)
 	}
-	want2 := initwizard.CandidateModel(model.Vocabulary{Classes: map[string]string{"feature": "Epic"}})
+	// The script only answers the feature prompt; spike and story stay at
+	// their SEEDED defaults (the plain preset, ac-11) rather than the bare
+	// ids — an untouched prompt always keeps whatever default it showed.
+	want2 := initwizard.CandidateModel(model.Vocabulary{Classes: map[string]string{"feature": "Epic", "spike": "research spike", "story": "planned story"}})
 	if !reflect.DeepEqual(decoded, want2) {
 		t.Fatalf("promoted model.yaml decode-compare mismatch:\ngot:  %+v\nwant: %+v", decoded, want2)
 	}
 }
 
 // TestInit_UnknownArgument_UsageError proves a malformed invocation
-// refuses cleanly rather than being silently ignored.
+// refuses cleanly rather than being silently ignored — an unrecognized
+// flag, an unrecognized --vocabulary value, a --vocabulary flag with no
+// value at all, --vocabulary given twice, and an empty value via
+// "--vocabulary=" must all exit 2 with a stderr message naming the
+// specific defect (review round 1, Minor 3 — the last two rows mirror
+// cmd/verdi/context_project_test.go's identical "--root"
+// duplicate/empty-via-"=" table rows).
 func TestInit_UnknownArgument_UsageError(t *testing.T) {
+	bin := buildVerdiBinary(t)
+
+	cases := []struct {
+		name       string
+		args       []string
+		wantStderr string
+	}{
+		{"unknown flag", []string{"--bogus"}, "unknown argument"},
+		{"vocabulary unrecognized value", []string{"--vocabulary", "bogus"}, "invalid --vocabulary value"},
+		{"vocabulary missing value", []string{"--vocabulary"}, "--vocabulary requires a value"},
+		{"vocabulary given twice", []string{"--vocabulary", "plain", "--vocabulary", "canonical"}, "--vocabulary given more than once"},
+		{"vocabulary empty value via =", []string{"--vocabulary="}, "invalid --vocabulary value"},
+		// A following flag is a MISSING value, not a value: `--vocabulary
+		// --wizard` used to swallow --wizard and report `invalid
+		// --vocabulary value "--wizard"`, naming the wrong defect and
+		// silently dropping the flag the operator did type.
+		{"vocabulary followed by another flag", []string{"--vocabulary", "--wizard"}, "--vocabulary requires a value"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			_, stderr, code := runInitBinary(t, bin, dir, "", nil, tc.args...)
+			if code != 2 {
+				t.Fatalf("verdi init %v exit = %d, want 2\nstderr: %s", tc.args, code, stderr)
+			}
+			if !strings.Contains(stderr, tc.wantStderr) {
+				t.Fatalf("verdi init %v stderr = %q, want it to contain %q", tc.args, stderr, tc.wantStderr)
+			}
+			if entries := listDirEntries(t, dir); len(entries) != 0 {
+				t.Fatalf("verdi init %v (a flag-shape refusal) wrote something: %v, want nothing", tc.args, entries)
+			}
+		})
+	}
+}
+
+// TestInit_ExistingStore_VocabularyFlagStillRefuses proves the
+// --vocabulary flag never bypasses init's create-only refusal (dc-7:
+// "existing stores are never rewritten") — against a directory that
+// already carries a real store, "--vocabulary plain" exits 2 exactly like
+// a bare invocation would, leaves the existing verdi.yaml byte-untouched,
+// and never lets a model.yaml appear.
+func TestInit_ExistingStore_VocabularyFlagStillRefuses(t *testing.T) {
 	bin := buildVerdiBinary(t)
 	dir := t.TempDir()
 
-	_, stderr, code := runInitBinary(t, bin, dir, "", nil, "--bogus")
-	if code != 2 {
-		t.Fatalf("verdi init --bogus exit = %d, want 2", code)
+	if err := os.MkdirAll(filepath.Join(dir, ".verdi"), 0o755); err != nil {
+		t.Fatal(err)
 	}
-	if stderr == "" {
-		t.Fatal("verdi init --bogus produced no stderr message")
+	manifestPath := filepath.Join(dir, ".verdi", "verdi.yaml")
+	if err := os.WriteFile(manifestPath, []byte("schema: verdi.layout/v1\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	before, err := os.ReadFile(manifestPath)
+	if err != nil {
+		t.Fatalf("test setup: reading manifest: %v", err)
+	}
+
+	stdout, stderr, code := runInitBinary(t, bin, dir, "", nil, "--vocabulary", "plain")
+	if code != 2 {
+		t.Fatalf("verdi init --vocabulary plain against an existing store: exit = %d, want 2\nstdout: %s\nstderr: %s", code, stdout, stderr)
+	}
+	if !strings.Contains(stderr, ".verdi") {
+		t.Fatalf("refusal stderr = %q, want it to name the existing .verdi path", stderr)
+	}
+
+	after, err := os.ReadFile(manifestPath)
+	if err != nil {
+		t.Fatalf("reading manifest after refusal: %v", err)
+	}
+	if string(after) != string(before) {
+		t.Fatalf("verdi init --vocabulary plain modified the existing store's verdi.yaml — dc-7: existing stores are never rewritten")
+	}
+	if _, err := os.Stat(filepath.Join(dir, ".verdi", "model.yaml")); !os.IsNotExist(err) {
+		t.Fatalf("verdi init --vocabulary plain against an existing store produced a model.yaml (err=%v) — dc-7: existing stores are never rewritten", err)
 	}
 }

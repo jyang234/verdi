@@ -350,7 +350,7 @@ func deriveASDShell(in asdShellInput) asdShell {
 		policySetupGuide, policyCode, policyDetail = policyGuideNotAdopted, in.CapsFailure.Code, in.CapsFailure.Detail
 		add(asdConcern{ID: "context/policy", Area: asdAreaContext, State: asdStateUnproven, Blocking: false,
 			Summary:   "This checkout carries no adopted policy authority; " + policyEditingClause(in.Mode, "browser editing proceeds and records the explicit not-applicable policy posture."),
-			Guidance:  "Inspect the accepted and proposed policy snapshots first (policy setup guide below): if policy is already accepted, inspect why this checkout lacks it; an older branch may need updating through the project's own process. Only when no policy is accepted does the manual initial setup the guide names apply; human editing does not require one.",
+			Guidance:  "Inspect the accepted and proposed policy snapshots first (policy setup guide below): if policy is already accepted, inspect why this checkout lacks it; an older branch may need updating through the project's own process. Only when no policy is accepted, run verdi policy adopt --starter from the project root; human editing does not require one.",
 			Witnesses: []string{in.CapsFailure.Code + ": " + in.CapsFailure.Detail},
 			Dest:      "#" + policySetupGuideID})
 	case in.CapsFailure != nil && in.CapsFailure.Code == "policy-forbidden":

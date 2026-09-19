@@ -234,6 +234,12 @@ type Profile struct {
 	EvidenceSourceRestrictions []EvidenceSourceRestriction `json:"evidence_source_restrictions"`
 	EscalationThresholds       []EscalationThreshold       `json:"escalation_thresholds"`
 
+	// Template is the resolved scaffold record a starter-written profile
+	// carries (spec/spec-documents ac-10, SI-204); optional — a
+	// hand-authored profile carries none; digest-bound like every other
+	// exported field.
+	Template *TemplateRecord `json:"template,omitempty"`
+
 	// seal is the unexported integrity seal DecodeProfile mints: the
 	// canonical content digest of every exported field at decode time.
 	// External packages cannot set it, and any post-decode mutation of the

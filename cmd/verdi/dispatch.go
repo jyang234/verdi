@@ -45,6 +45,7 @@ var verbPhase = map[string]int{
 	"context":         23, // Context Integrity Wave-3 (context-compiler and policy-conflict authority designs, ledger SI-78..SI-122) — `context compile` and `context conflict` are read-only inspection surfaces, mutating nothing but their own explicit --out destination and conflict's existing immutable cache
 	"experiment":      24, // Comparative Spike Experiments Wave 5B — bounded CLI adapter over internal/experimentapp
 	"harness":         25, // spec/spec-documents ac-7 — generated, stamped, drift-checked skills for Claude Code and Codex
+	"policy":          26, // spec/spec-documents ac-10 (dc-6, SI-204) — verdi policy adopt --starter writes the starter constitution store on a policy/adopt branch; closes tracker UAT-018
 }
 
 // vocab:identity — CLI verb names (identity)
@@ -53,7 +54,7 @@ const usage = `usage: verdi <verb> [args...]
 verbs: lint, design, accept, feature, build, align, sync, serve, mcp, matrix,
        rollup, close, disposition, waivers, verify-artifact, dex, gc, gate,
        board, audit, attest, model, init, obligation, waive, spec, journey,
-       context, experiment, harness`
+       context, experiment, harness, policy`
 
 // run parses args and returns the exit code per the CLAUDE.md contract:
 // 0 clean / 1 verdict failure / 2 operational error. Phase 1 has no verdicts
@@ -217,6 +218,9 @@ func run(args []string, stderr io.Writer) int {
 	}
 	if verb == "harness" {
 		return cmdHarness(args[1:], os.Stdout, stderr)
+	}
+	if verb == "policy" {
+		return cmdPolicy(args[1:], os.Stdout, stderr)
 	}
 
 	if phase == 0 {

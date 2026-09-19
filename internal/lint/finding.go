@@ -105,19 +105,22 @@ func locusAll(fs []Finding, locus *WallLocus) []Finding {
 	return fs
 }
 
-// String formats f as "VL-xxx path: message" — the CLI's one-line-per-
-// finding output format. A disclosure renders through the shared
-// internal/disclosure seam (spec/disclosure-seam-v2, ac-1) instead of a
-// locally-authored prefix, so it shares its exact phrasing with the gate's
-// disclosed conditions and the mcp/workbench review_unavailable field —
-// never coincidentally-matching hand-aligned strings (see
-// conflict/disclosure-seam-rename-insufficient for why the earlier
-// rename-only attempt was insufficient).
+// String formats f as "message (path) [VL-xxx]" — the CLI's one-line-
+// per-finding output format, sentence-first with the rule code trailing
+// in brackets (spec/spec-documents ac-11, R-W4-5): a reader scans the
+// human sentence first and the rule code stays available at the end for
+// grep/reference, never leading. A disclosure renders through the shared
+// internal/disclosure seam (spec/disclosure-seam-v2, ac-1) instead —
+// UNCHANGED by R-W4-5, which reshapes only the violation branch — so it
+// shares its exact phrasing with the gate's disclosed conditions and the
+// mcp/workbench review_unavailable field — never coincidentally-matching
+// hand-aligned strings (see conflict/disclosure-seam-rename-insufficient
+// for why the earlier rename-only attempt was insufficient).
 func (f Finding) String() string {
 	if f.Severity == SeverityDisclosure {
 		return disclosure.Render(f.Disclosure())
 	}
-	return fmt.Sprintf("%s %s: %s", f.Rule, f.Path, f.Message)
+	return fmt.Sprintf("%s (%s) [%s]", f.Message, f.Path, f.Rule)
 }
 
 // Disclosure maps f onto the shared seam value: rule id as source

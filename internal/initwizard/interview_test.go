@@ -2,6 +2,7 @@ package initwizard
 
 import (
 	"errors"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -13,10 +14,13 @@ import (
 // story's spec discloses, exercised here at the package level (the
 // built-binary twin lives in cmd/verdi/init_test.go, driving the real
 // compiled binary with the same shaped scripts over a real OS pipe).
-func scriptedInterview(t *testing.T, script string) (InterviewResult, string, error) {
+// seed is passed straight through to RunInterview (R-W4-6); every test
+// written before the seed parameter existed passes model.Vocabulary{},
+// reproducing its own prior, unseeded behavior exactly.
+func scriptedInterview(t *testing.T, script string, seed model.Vocabulary) (InterviewResult, string, error) {
 	t.Helper()
 	var out strings.Builder
-	result, err := RunInterview(strings.NewReader(script), &out)
+	result, err := RunInterview(strings.NewReader(script), &out, seed)
 	return result, out.String(), err
 }
 
@@ -34,7 +38,7 @@ func allDefaultsScript() string {
 // CopyTemplates false — the property that makes "a wizard run with every
 // answer defaulted writes the same store as bare init" true.
 func TestRunInterview_AllDefaults_EmptyVocabulary(t *testing.T) {
-	result, _, err := scriptedInterview(t, allDefaultsScript())
+	result, _, err := scriptedInterview(t, allDefaultsScript(), model.Vocabulary{})
 	if err != nil {
 		t.Fatalf("RunInterview(all defaults) = %v, want nil error", err)
 	}
@@ -58,7 +62,7 @@ func TestRunInterview_RenamesAndTemplateCopy(t *testing.T) {
 		"n\n" + // structural probe: no
 		"y\n" // confirm write
 
-	result, _, err := scriptedInterview(t, script)
+	result, _, err := scriptedInterview(t, script, model.Vocabulary{})
 	if err != nil {
 		t.Fatalf("RunInterview(renames) = %v, want nil error", err)
 	}
@@ -93,7 +97,7 @@ func TestRunInterview_RenamesAndTemplateCopy(t *testing.T) {
 func TestRunInterview_StructuralRequest_RefusedButContinues(t *testing.T) {
 	script := strings.Repeat("\n", 9) + "n\n" + "y\n" /* structural: yes */ + "y\n" /* confirm write */
 
-	result, out, err := scriptedInterview(t, script)
+	result, out, err := scriptedInterview(t, script, model.Vocabulary{})
 	if err != nil {
 		t.Fatalf("RunInterview(structural request) = %v, want nil error (the interview must continue, not abort)", err)
 	}
@@ -120,7 +124,7 @@ func TestRunInterview_DeclinedWrite(t *testing.T) {
 	script := allDefaultsScript()
 	script = strings.TrimSuffix(script, "y\n") + "n\n" // decline the final confirm instead
 
-	_, _, err := scriptedInterview(t, script)
+	_, _, err := scriptedInterview(t, script, model.Vocabulary{})
 	if !errors.Is(err, ErrDeclinedWrite) {
 		t.Fatalf("RunInterview(declined) = %v, want ErrDeclinedWrite", err)
 	}
@@ -144,7 +148,7 @@ func TestRunInterview_Aborted_TruncatedAtEveryPoint(t *testing.T) {
 			truncated += "\n"
 		}
 		t.Run("cutAfterLine", func(t *testing.T) {
-			_, _, err := scriptedInterview(t, truncated)
+			_, _, err := scriptedInterview(t, truncated, model.Vocabulary{})
 			if !errors.Is(err, ErrAborted) {
 				t.Fatalf("truncated after %d line(s) (script %q): RunInterview = %v, want ErrAborted", cut, truncated, err)
 			}
@@ -160,12 +164,12 @@ func TestRunInterview_Aborted_TruncatedAtEveryPoint(t *testing.T) {
 // "ok" printed unconditionally before any answer is read.
 func TestRunInterview_LiveValidationPreview(t *testing.T) {
 	scriptRenamed := "Epic\n" + strings.Repeat("\n", 8) + "n\nn\ny\n"
-	_, outRenamed, err := scriptedInterview(t, scriptRenamed)
+	_, outRenamed, err := scriptedInterview(t, scriptRenamed, model.Vocabulary{})
 	if err != nil {
 		t.Fatalf("RunInterview: %v", err)
 	}
 
-	_, outDefault, err := scriptedInterview(t, allDefaultsScript())
+	_, outDefault, err := scriptedInterview(t, allDefaultsScript(), model.Vocabulary{})
 	if err != nil {
 		t.Fatalf("RunInterview: %v", err)
 	}
@@ -179,5 +183,157 @@ func TestRunInterview_LiveValidationPreview(t *testing.T) {
 	}
 	if strings.Contains(outDefault, wantDigest) {
 		t.Fatalf("the all-defaults run's output should never contain the renamed candidate's digest")
+	}
+}
+
+// TestRunInterview_SeedIsTheDefault is R-W4-6's own behavioral pin:
+// RunInterview's seed model.Vocabulary parameter supplies each rename
+// prompt's Enter-default (the seed's own value for that id when present,
+// else the id unchanged — today's fallback, now just the zero-seed special
+// case), and the interview's own result STARTS as a deep copy of the seed
+// rather than the zero value, so an untouched (Enter-only) prompt leaves
+// the seeded entry in place rather than silently dropping it.
+func TestRunInterview_SeedIsTheDefault(t *testing.T) {
+	seed := PlainPreset()
+
+	t.Run("all defaults reproduces the seed exactly", func(t *testing.T) {
+		result, out, err := scriptedInterview(t, allDefaultsScript(), seed)
+		if err != nil {
+			t.Fatalf("RunInterview(seeded, all defaults) = %v, want nil error", err)
+		}
+		if !reflect.DeepEqual(result.Vocabulary, seed) {
+			t.Fatalf("result.Vocabulary = %+v, want the seed %+v unchanged", result.Vocabulary, seed)
+		}
+		if !strings.Contains(out, `class "story" [Enter to keep "planned story"]`) {
+			t.Fatalf("transcript does not show the seed's own value as the story prompt's default:\n%s", out)
+		}
+		if !strings.Contains(out, `class "feature" [Enter to keep "feature"]`) {
+			t.Fatalf("transcript does not fall back to the id for an id the seed does not carry:\n%s", out)
+		}
+
+		// Review round 1, Minor 5: an Enter that confirms a SEEDED default
+		// (story, spike) goes through the same live-validation preview a
+		// typed rename takes — an Enter against an UNSEEDED id (feature,
+		// every state, every verb) does not. Nothing in this all-Enters run
+		// ever changes vocab from the seed itself, so both seeded
+		// confirmations preview the SAME unchanged candidate: exactly the
+		// seed's own digest, appearing exactly twice (once per seeded class).
+		wantDigest, derr := CandidateModel(seed).Digest()
+		if derr != nil {
+			t.Fatalf("computing want digest: %v", derr)
+		}
+		if n := strings.Count(out, "-> valid"); n != 2 {
+			t.Fatalf("transcript has %d \"-> valid\" preview line(s), want exactly 2 (the seed's own two class renames, spike and story; feature and every state/verb carry no seed entry and must not preview):\n%s", n, out)
+		}
+		if n := strings.Count(out, wantDigest); n != 2 {
+			t.Fatalf("transcript does not show the seed's own unchanged candidate digest %q exactly twice (once per seeded Enter-confirmation):\n%s", wantDigest, out)
+		}
+	})
+
+	t.Run("an explicit answer overrides the seeded default", func(t *testing.T) {
+		// Order: classes [feature, spike, story]. Blank, blank, "Task": leave
+		// feature absent and spike at its seeded default, rename story.
+		script := "\n\nTask\n" + strings.Repeat("\n", 6) + "n\nn\ny\n"
+		result, _, err := scriptedInterview(t, script, seed)
+		if err != nil {
+			t.Fatalf("RunInterview(seeded, story renamed) = %v, want nil error", err)
+		}
+		want := map[string]string{"story": "Task", "spike": "research spike"}
+		if !reflect.DeepEqual(result.Vocabulary.Classes, want) {
+			t.Fatalf("result.Vocabulary.Classes = %+v, want %+v", result.Vocabulary.Classes, want)
+		}
+		// Review round 1, Important 1: the interview must never mutate the
+		// caller's own seed value — this is the one sub-test that renames a
+		// SEEDED id (spike is confirmed by Enter, story is retyped), so it
+		// is the sub-test most likely to reveal an aliased, shared-map copy.
+		if !reflect.DeepEqual(seed, PlainPreset()) {
+			t.Fatalf("RunInterview mutated the caller's seed: %+v", seed)
+		}
+	})
+
+	t.Run("an empty seed reproduces today's transcript byte-for-byte", func(t *testing.T) {
+		_, out, err := scriptedInterview(t, allDefaultsScript(), model.Vocabulary{})
+		if err != nil {
+			t.Fatalf("RunInterview(empty seed, all defaults) = %v, want nil error", err)
+		}
+		want := `verdi init --wizard — configuring a store in this directory.
+Every answer is written to editable config; nothing here is final.
+
+Vocabulary — class display words (Enter to keep the id unchanged):
+  class "feature" [Enter to keep "feature"]:   class "spike" [Enter to keep "spike"]:   class "story" [Enter to keep "story"]: Vocabulary — state display words (Enter to keep the id unchanged):
+  state "accepted-pending-build" [Enter to keep "accepted-pending-build"]:   state "closed" [Enter to keep "closed"]:   state "draft" [Enter to keep "draft"]:   state "superseded" [Enter to keep "superseded"]: Vocabulary — verb display words (Enter to keep the id unchanged):
+  verb "close" [Enter to keep "close"]:   verb "merge" [Enter to keep "merge"]: Copy the canonical templates into .verdi/templates/ for local customization? [y/N]: Add, remove, or restructure the class hierarchy, lifecycle states, or per-transition obligations? [y/N]: 
+Summary:
+  vocabulary: unchanged (every rename left at its default)
+  templates: unchanged (no local override copies)
+
+Write .verdi/ ? [Y/n]: `
+		if out != want {
+			t.Fatalf("empty-seed transcript drifted from the pre-seed-parameter baseline:\n--- got ---\n%s\n--- want ---\n%s", out, want)
+		}
+	})
+}
+
+// TestDeepCopyVocabulary_NilMapsStayNil_AndAreFresh is deepCopyVocabulary's
+// own direct unit test (review round 1, Important 1): a nil map stays
+// nil (never silently allocated into an empty, non-nil one — the zero
+// InterviewResult produced by a fully-unseeded interview must still
+// compare VocabularyEmpty/reflect.DeepEqual to the pre-seed-parameter
+// zero value), and — the negative-path half — mutating the copy's own
+// maps must never reach back into the source's. Verified adversarially
+// against a plain `return v` struct-copy body before writing this test:
+// the "mutation" sub-test fails against that body (shared map storage)
+// and passes against the real implementation.
+func TestDeepCopyVocabulary_NilMapsStayNil_AndAreFresh(t *testing.T) {
+	t.Run("nil maps stay nil", func(t *testing.T) {
+		got := deepCopyVocabulary(model.Vocabulary{})
+		if got.Classes != nil || got.States != nil || got.Verbs != nil {
+			t.Fatalf("deepCopyVocabulary(zero value) = %+v, want every map nil", got)
+		}
+	})
+
+	t.Run("mutating the copy leaves the source untouched", func(t *testing.T) {
+		src := model.Vocabulary{
+			Classes: map[string]string{"story": "planned story"},
+			States:  map[string]string{"draft": "Draft"},
+			Verbs:   map[string]string{"merge": "Sign off"},
+		}
+		got := deepCopyVocabulary(src)
+		got.Classes["story"] = "mutated"
+		got.Classes["new"] = "added"
+		got.States["draft"] = "mutated"
+		got.Verbs["merge"] = "mutated"
+
+		if src.Classes["story"] != "planned story" || len(src.Classes) != 1 {
+			t.Fatalf("source Classes mutated through the copy: %+v", src.Classes)
+		}
+		if src.States["draft"] != "Draft" || len(src.States) != 1 {
+			t.Fatalf("source States mutated through the copy: %+v", src.States)
+		}
+		if src.Verbs["merge"] != "Sign off" || len(src.Verbs) != 1 {
+			t.Fatalf("source Verbs mutated through the copy: %+v", src.Verbs)
+		}
+	})
+}
+
+// TestCopyStringMap_NilInNilOut_AndIsAFreshCopy is copyStringMap's own
+// direct unit test: nil in, nil out (happy path for the common "this
+// vocabulary section was never touched" case), and a non-nil map comes
+// back equal in content but distinct in storage — the negative path a
+// plain `return m` body fails (mutating the result would mutate src too).
+func TestCopyStringMap_NilInNilOut_AndIsAFreshCopy(t *testing.T) {
+	if got := copyStringMap(nil); got != nil {
+		t.Fatalf("copyStringMap(nil) = %+v, want nil", got)
+	}
+
+	src := map[string]string{"a": "1"}
+	got := copyStringMap(src)
+	if !reflect.DeepEqual(got, src) {
+		t.Fatalf("copyStringMap(src) = %+v, want a copy equal to %+v", got, src)
+	}
+	got["a"] = "mutated"
+	got["b"] = "added"
+	if src["a"] != "1" || len(src) != 1 {
+		t.Fatalf("source map mutated through the copy: %+v", src)
 	}
 }

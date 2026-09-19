@@ -70,7 +70,7 @@ verbs:
   audit            audit ADR exemptions, deviations, and closure hygiene
   attest           scaffold an attestation skeleton for a story/AC pair
   model            validate the store's operating model
-  init             scaffold a new verdi store
+  init             scaffold a new verdi store (plain vocabulary by default)
   obligation       author or scaffold an evidence obligation
   waive            create or reaffirm a waiver record
   spec             inspect a spec's effective lifecycle state or render it as a document
@@ -78,6 +78,7 @@ verbs:
   context          compile and inspect context-integrity artifacts
   experiment       run a comparative experiment operation
   harness          render or drift-check the verdi skills for Claude Code and Codex
+  policy           adopt a starter constitution on a policy/adopt branch
   version          print the build identification line
   help             print this message
 
@@ -135,11 +136,16 @@ var verbUsage = map[string]string{
 	"gc":              "usage: verdi gc [--reclaim-unmanaged [--apply]]",
 	"gate":            "usage: verdi gate",
 	// vocab:identity — CLI usage/flag grammar (--story-ref flag name, identity)
-	"board":      "usage: verdi board commit <board-key> --name <spec-name> [--story-ref <scheme:key>]",
-	"audit":      "usage: verdi audit",
-	"attest":     "usage: verdi attest <story-ref> <ac-id>",
-	"model":      "usage: verdi model check",
-	"init":       "usage: verdi init [--wizard]",
+	"board":  "usage: verdi board commit <board-key> --name <spec-name> [--story-ref <scheme:key>]",
+	"audit":  "usage: verdi audit",
+	"attest": "usage: verdi attest <story-ref> <ac-id>",
+	"model":  "usage: verdi model check",
+	// "usage: " + initUsageText (init.go) — review round 1, Minor 2: this
+	// row and every hand-printed init refusal now cite the SAME constant,
+	// so they cannot silently drift apart (TestHelp_InitUsageMatchesConstant
+	// pins the same equality from the other direction, at the built-binary
+	// level, in help_test.go).
+	"init":       "usage: " + initUsageText,
 	"obligation": obligationVerbUsage,
 	"waive":      waiveUsage,
 	"spec":       specVerbUsage,
@@ -157,6 +163,7 @@ var verbUsage = map[string]string{
 		"       verdi context resolve --request -",
 	"experiment": experimentUsage,
 	"harness":    harnessUsage,
+	"policy":     policyUsage,
 }
 
 // verbUsageOrFallback returns the registered usage for verb, or a bare

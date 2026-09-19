@@ -304,3 +304,38 @@ func TestRender_DelegatesToRenderValue(t *testing.T) {
 		t.Fatalf("Render = %q, RenderValue = %q, want identical", viaRender, viaValue)
 	}
 }
+
+// TestCanonical_EveryTemplateFileIsEmbedded proves every canonical scaffold
+// template — the seven pre-existing ones plus the five starter templates
+// (spec/spec-documents ac-10) — resolves through the embedded filesystem,
+// including the one non-.md member (constitution-consumers.json), which is
+// why the embed pattern widened from templates/*.md to templates/* (ac-10).
+func TestCanonical_EveryTemplateFileIsEmbedded(t *testing.T) {
+	names := []string{
+		// pre-existing
+		"commitdesign.md",
+		"feature.md",
+		"policy-disposition.md",
+		"policy-exemption.md",
+		"policy-overlay.md",
+		"policy.md",
+		"story.md",
+		// starter templates (Task 1)
+		"policy-constitution.md",
+		"governance-profile-solo.md",
+		"governance-profile-team.md",
+		"policy-starter.md",
+		"constitution-consumers.json",
+	}
+	for _, name := range names {
+		t.Run(name, func(t *testing.T) {
+			data, err := Canonical(name)
+			if err != nil {
+				t.Fatalf("Canonical(%q): %v", name, err)
+			}
+			if len(data) == 0 {
+				t.Fatalf("Canonical(%q) returned no bytes", name)
+			}
+		})
+	}
+}

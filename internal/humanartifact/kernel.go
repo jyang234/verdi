@@ -70,6 +70,10 @@ func withFields(base []string, extra ...string) []string {
 // impacts, context, open_questions, stubs, supersession, dispositions
 // are not yet in this table); widening further is later, narrowly-
 // scoped work.
+//
+// The constitution and governance-profile rows below were added by
+// spec/spec-documents ac-10 (SI-204): the starter scaffold creates both
+// kinds, so both resolve through this one renderer.
 var kernelFieldTable = map[string][]string{
 	string(artifact.ClassFeature):      withFields(withStatus(specBaseFields), "class", "custom"),
 	string(artifact.ClassStory):        withFields(withStatus(specBaseFields), "class", "custom"),
@@ -83,6 +87,9 @@ var kernelFieldTable = map[string][]string{
 	policyartifact.KindOverlay:     {"schema", "id", "kind", "title", "owners", "template", "refines", "scope", "refinements"},
 	policyartifact.KindExemption:   {"schema", "id", "kind", "title", "owners", "template", "scope", "witnesses", "compensating_controls", "approvals", "expiry", "review_condition"},
 	policyartifact.KindDisposition: {"schema", "id", "kind", "title", "owners", "template", "scope", "witness", "conclusion", "origin", "judgment", "compensating_controls", "approvals", "expiry", "review_condition"},
+
+	policyartifact.KindConstitution:   {"schema", "id", "kind", "title", "owners", "template", "selected_profile", "environments", "catalog", "subjects", "adapters"},
+	policyartifact.KindProfileStorage: {"schema", "id", "class", "applicable_transitions", "identity_trust_sources", "role_mappings", "ownership_sources", "signature_requirements", "required_approvers", "distinctness_rules", "evidence_source_restrictions", "escalation_thresholds", "template"},
 }
 
 // KernelFields returns the immutable kernel frontmatter field NAMES for

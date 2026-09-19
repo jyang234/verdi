@@ -39,11 +39,15 @@ type InterviewResult struct {
 // "verb" — never a vocabulary WORD itself, so no vocab-prose hit is
 // possible here by construction: the actual ids are runtime data from
 // RenameableIDs(), never literal tokens in this source), ids is the
-// phase's own renameable id list, and apply mutates vocab in place with
-// a confirmed, non-empty answer.
+// phase's own renameable id list, get reads the phase's own current entry
+// for one id out of a model.Vocabulary (ok is false when unset — the R-
+// W4-6 default-display lookup runRenamePrompt uses, mirroring apply's own
+// per-phase map selection), and apply mutates vocab in place with a
+// confirmed, non-empty answer.
 type vocabPhase struct {
 	label string
 	ids   []string
+	get   func(vocab model.Vocabulary, id string) (string, bool)
 	apply func(vocab *model.Vocabulary, id, val string)
 }
 
@@ -57,7 +61,18 @@ type vocabPhase struct {
 // hermetically by a stdin-script built-binary test (this story's own
 // disclosed harness choice) without any real terminal or temp directory
 // at all.
-func RunInterview(in io.Reader, out io.Writer) (InterviewResult, error) {
+//
+// seed (R-W4-6, spec/spec-documents ac-11) is the vocabulary the
+// interview starts from — cmd/verdi/init.go's own resolved --vocabulary
+// preset (PlainPreset() by default, the empty model.Vocabulary for
+// --vocabulary canonical). The result starts as a deep copy of seed
+// (fresh maps: mutating it, or the vocab this function builds up, can
+// never corrupt the caller's own seed value), and each rename prompt's
+// Enter-default is the seed's own value for that id when present, else
+// the id unchanged (today's fallback, now just the zero-seed special
+// case) — so an Enter at an already-seeded prompt leaves the seeded entry
+// in place instead of silently discarding it.
+func RunInterview(in io.Reader, out io.Writer, seed model.Vocabulary) (InterviewResult, error) {
 	sc := bufio.NewScanner(in)
 
 	fmt.Fprintln(out, "verdi init --wizard — configuring a store in this directory.")
@@ -66,27 +81,33 @@ func RunInterview(in io.Reader, out io.Writer) (InterviewResult, error) {
 
 	ids := RenameableIDs()
 	phases := []vocabPhase{
-		{label: "class", ids: ids.Classes, apply: func(v *model.Vocabulary, id, val string) {
-			if v.Classes == nil {
-				v.Classes = map[string]string{}
-			}
-			v.Classes[id] = val
-		}},
-		{label: "state", ids: ids.States, apply: func(v *model.Vocabulary, id, val string) {
-			if v.States == nil {
-				v.States = map[string]string{}
-			}
-			v.States[id] = val
-		}},
-		{label: "verb", ids: ids.Verbs, apply: func(v *model.Vocabulary, id, val string) {
-			if v.Verbs == nil {
-				v.Verbs = map[string]string{}
-			}
-			v.Verbs[id] = val
-		}},
+		{label: "class", ids: ids.Classes,
+			get: func(v model.Vocabulary, id string) (string, bool) { s, ok := v.Classes[id]; return s, ok },
+			apply: func(v *model.Vocabulary, id, val string) {
+				if v.Classes == nil {
+					v.Classes = map[string]string{}
+				}
+				v.Classes[id] = val
+			}},
+		{label: "state", ids: ids.States,
+			get: func(v model.Vocabulary, id string) (string, bool) { s, ok := v.States[id]; return s, ok },
+			apply: func(v *model.Vocabulary, id, val string) {
+				if v.States == nil {
+					v.States = map[string]string{}
+				}
+				v.States[id] = val
+			}},
+		{label: "verb", ids: ids.Verbs,
+			get: func(v model.Vocabulary, id string) (string, bool) { s, ok := v.Verbs[id]; return s, ok },
+			apply: func(v *model.Vocabulary, id, val string) {
+				if v.Verbs == nil {
+					v.Verbs = map[string]string{}
+				}
+				v.Verbs[id] = val
+			}},
 	}
 
-	var vocab model.Vocabulary
+	vocab := deepCopyVocabulary(seed)
 	for _, phase := range phases {
 		fmt.Fprintf(out, "Vocabulary — %s display words (Enter to keep the id unchanged):\n", phase.label)
 		for _, id := range phase.ids {
@@ -139,15 +160,43 @@ func RunInterview(in io.Reader, out io.Writer) (InterviewResult, error) {
 // doc comment promises, mirroring model.Canonical()'s own "packaging
 // defect, never a user-facing condition" posture for its one
 // unreachable-in-practice failure path.
+//
+// The prompt's own "[Enter to keep %q]" default (R-W4-6) is vocab's
+// CURRENT entry for id via phase.get — vocab already started as a deep
+// copy of RunInterview's seed and no earlier prompt in this same phase
+// can have touched id (each id is asked exactly once per phase) — falling
+// back to id itself when the seed carried no entry, exactly the fallback
+// every id had before the seed parameter existed.
+//
+// Review round 1, Minor 5 (controller ruling, spec/init-wizard ac-2): an
+// Enter that confirms a SEEDED default is not a no-op — it goes through
+// the identical live-validation preview a typed rename takes (val is set
+// to the seeded value and falls through to the same render/decode/
+// digest block below), so the transcript's "-> valid (candidate digest
+// …)" line covers every value the run ultimately confirms, seeded or
+// typed, exactly as ac-2 promises. An Enter against an UNSEEDED id (or a
+// seed carrying only an empty-string entry — never produced by
+// ParseVocabularyPreset today, but not assumed away) still short-circuits
+// with no preview at all, byte-identical to every RunInterview call
+// before the seed parameter existed — this is what keeps the empty-seed
+// transcript golden (TestRunInterview_SeedIsTheDefault) unchanged.
 func runRenamePrompt(sc *bufio.Scanner, out io.Writer, phase vocabPhase, id string, vocab *model.Vocabulary) error {
+	seededVal, seeded := phase.get(*vocab, id)
+	def := id
+	if seeded && seededVal != "" {
+		def = seededVal
+	}
 	for {
-		fmt.Fprintf(out, "  %s %q [Enter to keep %q]: ", phase.label, id, id)
+		fmt.Fprintf(out, "  %s %q [Enter to keep %q]: ", phase.label, id, def)
 		val, ok := readLine(sc)
 		if !ok {
 			return ErrAborted
 		}
 		if val == "" {
-			return nil
+			if !seeded || seededVal == "" {
+				return nil
+			}
+			val = seededVal
 		}
 
 		candidate := *vocab
@@ -243,4 +292,34 @@ func readLine(sc *bufio.Scanner) (line string, ok bool) {
 		return "", false
 	}
 	return strings.TrimSpace(sc.Text()), true
+}
+
+// deepCopyVocabulary returns a copy of v with fresh, independently
+// mutable Classes/States/Verbs maps (R-W4-6) — a plain struct copy shares
+// each map's underlying storage with v, so RunInterview's own in-progress
+// vocab (built from this copy) would otherwise silently mutate the
+// caller's seed value the first time a rename is applied. Mirrors
+// PlainPreset's own "fresh maps each call" contract, extended here to
+// every seed, not just that one preset.
+func deepCopyVocabulary(v model.Vocabulary) model.Vocabulary {
+	return model.Vocabulary{
+		Classes: copyStringMap(v.Classes),
+		States:  copyStringMap(v.States),
+		Verbs:   copyStringMap(v.Verbs),
+	}
+}
+
+// copyStringMap returns a fresh copy of m, or nil when m is nil — nil in,
+// nil out, so a seed phase the operator never touched at all (a nil map,
+// not merely an empty one) renders identically to today's pre-seed zero
+// value through RenderModelYAML's own nil-vs-empty-map indifference.
+func copyStringMap(m map[string]string) map[string]string {
+	if m == nil {
+		return nil
+	}
+	out := make(map[string]string, len(m))
+	for k, v := range m {
+		out[k] = v
+	}
+	return out
 }

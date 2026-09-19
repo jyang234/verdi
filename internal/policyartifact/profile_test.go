@@ -61,6 +61,37 @@ func TestDecodeStoredProfile_Happy(t *testing.T) {
 	}
 }
 
+// TestDecodeStoredProfile_TemplateLine proves a stored profile's optional
+// template record (ac-10, SI-204) reaches StoredProfile.Profile.Template
+// unchanged through this package's own DecodeStoredProfile wrapper —
+// which decodes exclusively through governanceprincipal.DecodeProfile,
+// never a second decoder — and that a hand-authored profile with no
+// template line still decodes cleanly with a nil record.
+func TestDecodeStoredProfile_TemplateLine(t *testing.T) {
+	digest := "sha256:" + strings.Repeat("c", 64)
+	withTemplate := strings.Replace(validProfileDoc(), "escalation_thresholds: []\n", "escalation_thresholds: []\ntemplate: {identity: \"embedded:governance-profile-solo.md\", digest: \""+digest+"\"}\n", 1)
+	if withTemplate == validProfileDoc() {
+		t.Fatal("test fixture template substitution did not apply")
+	}
+	sp, err := DecodeStoredProfile([]byte(withTemplate), testGovCatalog())
+	if err != nil {
+		t.Fatalf("DecodeStoredProfile: %v", err)
+	}
+	if sp.Profile.Template == nil || sp.Profile.Template.Identity != "embedded:governance-profile-solo.md" || sp.Profile.Template.Digest != digest {
+		t.Fatalf("Template = %+v", sp.Profile.Template)
+	}
+
+	// A hand-authored profile (no template line) still decodes clean,
+	// with a nil record — the field is optional (SI-204).
+	sp2, err := DecodeStoredProfile([]byte(validProfileDoc()), testGovCatalog())
+	if err != nil {
+		t.Fatalf("DecodeStoredProfile (no template): %v", err)
+	}
+	if sp2.Profile.Template != nil {
+		t.Fatalf("Template = %+v, want nil for a hand-authored profile", sp2.Profile.Template)
+	}
+}
+
 func TestDecodeStoredProfile_Negative(t *testing.T) {
 	tests := []struct {
 		name    string
