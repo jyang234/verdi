@@ -3,8 +3,10 @@
 // constitution, one profile, one policy, and the consumers inventory
 // through internal/policyadopt, cuts policy/adopt from the resolved
 // default branch (design start's own dc-7 chain, R-W4-3), writes exactly
-// those four paths, stages exactly them, and commits. Kept in its own
-// file per the harness.go convention.
+// those four paths, stages exactly them, and commits exactly them (a
+// pathspec commit: whatever the operator already had staged stays staged
+// and out of the adoption commit). Kept in its own file per the
+// harness.go convention.
 package main
 
 import (
@@ -33,15 +35,24 @@ const policyAdoptWrittenState = "; the checkout is on policy/adopt with the four
 
 // policyAdoptAddPaths and policyAdoptCommit are this verb's two post-write
 // git write ops as package-level seams, so a test can force the exact
-// AddPaths/CreateCommit failure whose disclosure the verb owes the
+// AddPaths/CreateCommitPaths failure whose disclosure the verb owes the
 // operator. The house pattern verbatim (close.go's closeAddPaths/
 // closeCreateCommit, accept.go's accept* pair, spec/obligation-seam ac-3):
 // a real `git add`/`git commit` cannot be made to fail deterministically
 // in a clean hermetic fixture repo. Production is gitx's own; tests
 // override and restore.
+//
+// The commit seam is gitx.CreateCommitPaths, NOT CreateCommit: ac-10 says
+// the verb "commits exactly those paths", the CLI and the workbench's
+// policy setup guide both say so to the operator, and a pathspec-less
+// `git commit` records the whole index — so an unrelated change the
+// operator had already staged rode into the adoption commit and defeated
+// the isolation policy/adopt exists to provide. Task 2's M9 parking of
+// that inherited shape is reversed for THIS verb only; design start,
+// close and accept are unchanged.
 var (
 	policyAdoptAddPaths = gitx.AddPaths
-	policyAdoptCommit   = gitx.CreateCommit
+	policyAdoptCommit   = gitx.CreateCommitPaths
 )
 
 // policyAdoptOptions is parsePolicyAdoptFlags' complete, validated operand
@@ -248,7 +259,7 @@ func runPolicyAdopt(ctx context.Context, root string, opts policyAdoptOptions, s
 		fmt.Fprintf(stderr, "policy adopt: %v%s\n", err, policyAdoptWrittenState)
 		return 2
 	}
-	sha, err := policyAdoptCommit(ctx, root, fmt.Sprintf("policy adopt: starter constitution (%s profile)", opts.profile))
+	sha, err := policyAdoptCommit(ctx, root, fmt.Sprintf("policy adopt: starter constitution (%s profile)", opts.profile), paths...)
 	if err != nil {
 		fmt.Fprintf(stderr, "policy adopt: %v%s\n", err, policyAdoptWrittenState)
 		return 2

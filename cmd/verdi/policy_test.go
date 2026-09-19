@@ -30,6 +30,13 @@ import (
 	"github.com/jyang234/verdi/internal/policyauthority"
 )
 
+// adoptCommittedPaths is the complete, sorted `git show --name-only`
+// listing the adoption commit must carry: exactly the four starter paths
+// the verb itself wrote, never a fifth. Named once because two tests
+// assert it — the solo happy path and the pre-staged-index proof — and
+// "exactly" is the claim ac-10, the CLI and the workbench guide all make.
+const adoptCommittedPaths = ".verdi/constitution/consumers.json\n.verdi/policy/constitution.md\n.verdi/policy/policies/starter.md\n.verdi/policy/profiles/starter-solo.md"
+
 // adoptFixture builds a minimal, real store root (fixturegit) carrying
 // nothing under .verdi/policy or .verdi/constitution — every adopt test
 // below starts from an unadopted checkout.
@@ -93,8 +100,8 @@ func TestPolicyAdopt_SoloWritesFourPathsOnPolicyAdopt(t *testing.T) {
 		t.Fatalf("branch = %s", branch)
 	}
 	names := strings.TrimSpace(gitOutput(t, repo.Dir, "show", "--name-only", "--format=", "HEAD"))
-	if names != ".verdi/constitution/consumers.json\n.verdi/policy/constitution.md\n.verdi/policy/policies/starter.md\n.verdi/policy/profiles/starter-solo.md" {
-		t.Fatalf("committed paths:\n%s", names)
+	if names != adoptCommittedPaths {
+		t.Fatalf("committed paths:\n%s\nwant:\n%s", names, adoptCommittedPaths)
 	}
 	if subject := strings.TrimSpace(gitOutput(t, repo.Dir, "show", "-s", "--format=%s", "HEAD")); subject != "policy adopt: starter constitution (solo profile)" {
 		t.Fatalf("commit subject = %q", subject)
@@ -148,6 +155,47 @@ func TestPolicyAdopt_SoloWritesFourPathsOnPolicyAdopt(t *testing.T) {
 	code, _, stderr = runVerdi(t, bin, repo.Dir, "policy", "adopt", "--starter")
 	if code != 1 || !strings.Contains(stderr, "already carries") {
 		t.Fatalf("second adopt: %d %s", code, stderr)
+	}
+}
+
+// TestPolicyAdopt_PreStagedUnrelatedChangeStaysOutOfTheAdoptCommit proves
+// the word "exactly" in ac-10's "commits exactly those paths" — and in the
+// policy setup guide's own browser-facing "commits exactly those files"
+// (internal/workbench/boardshellrender.go) — against the state that used
+// to falsify it: an operator with an unrelated change already staged.
+//
+// A bare `git commit -m <msg>` records the WHOLE index, so the adoption
+// commit carried five paths instead of four and the isolation that is
+// policy/adopt's entire purpose was silently lost. The pathspec form
+// (gitx.CreateCommitPaths) records exactly the four and leaves the
+// operator's own staged work in the index, untouched and uncommitted.
+func TestPolicyAdopt_PreStagedUnrelatedChangeStaysOutOfTheAdoptCommit(t *testing.T) {
+	bin := buildVerdiBinary(t)
+	repo := adoptFixture(t)
+	t.Setenv("CI_DEFAULT_BRANCH", "main")
+
+	if err := os.WriteFile(filepath.Join(repo.Dir, "notes.md"), []byte("unrelated work in progress\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gitOutput(t, repo.Dir, "add", "notes.md")
+
+	code, stdout, stderr := runVerdi(t, bin, repo.Dir, "policy", "adopt", "--starter")
+	if code != 0 {
+		t.Fatalf("code %d\n%s\n%s", code, stdout, stderr)
+	}
+	if names := strings.TrimSpace(gitOutput(t, repo.Dir, "show", "--name-only", "--format=", "HEAD")); names != adoptCommittedPaths {
+		t.Fatalf("the adoption commit records:\n%s\nwant exactly the four starter paths:\n%s", names, adoptCommittedPaths)
+	}
+	// The operator's own staged change survives the verb: still staged on
+	// policy/adopt, still absent from the commit it was staged before.
+	if staged := strings.TrimSpace(gitOutput(t, repo.Dir, "diff", "--cached", "--name-only")); staged != "notes.md" {
+		t.Fatalf("staged after adopt = %q, want the operator's own notes.md still staged and nothing else", staged)
+	}
+	if br := strings.TrimSpace(gitOutput(t, repo.Dir, "rev-parse", "--abbrev-ref", "HEAD")); br != "policy/adopt" {
+		t.Fatalf("branch = %s", br)
+	}
+	if strings.TrimSpace(gitOutput(t, repo.Dir, "rev-parse", "main")) != repo.Head {
+		t.Fatal("main moved")
 	}
 }
 
@@ -491,10 +539,16 @@ func TestPolicyAdopt_PostWriteGitFailuresDiscloseTheWrittenCheckout(t *testing.T
 			wantErr: "forced stage failure",
 		},
 		{
-			name: "CreateCommit",
+			name: "CreateCommitPaths",
 			install: func(t *testing.T) {
 				restore := policyAdoptCommit
-				policyAdoptCommit = func(context.Context, string, string) (string, error) {
+				policyAdoptCommit = func(_ context.Context, _, _ string, paths ...string) (string, error) {
+					// The seam also witnesses WHAT the verb asks git to
+					// record: exactly the four paths it wrote, never a
+					// bare whole-index commit.
+					if len(paths) != 4 {
+						return "", fmt.Errorf("commit seam received %d paths (%v), want exactly the four the verb wrote", len(paths), paths)
+					}
 					return "", fmt.Errorf("forced commit failure")
 				}
 				t.Cleanup(func() { policyAdoptCommit = restore })
