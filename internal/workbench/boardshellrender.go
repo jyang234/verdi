@@ -327,44 +327,61 @@ func writePolicySetupGuide(b *strings.Builder, kind policyGuideKind, code, detai
 	b.WriteString(`<span hidden data-policy-guide-end></span></section>`)
 }
 
-// writeASDConcern renders one shell row: plain summary, plain state chip,
-// explicit timing/dependency (F-02), source-derived guidance (F-03), the
-// plain human-review label (F-05), and the complete technical details.
+// writeASDConcern renders one shell row (spec/spec-documents ac-12,
+// R-W4-7): the plain primary line is the source-derived guidance (F-03)
+// when the row carries one, otherwise the summary; when both exist the
+// fact stays visible as a secondary line, never hidden behind the
+// instruction. The plain state chip, the plain human-review label (F-05),
+// and the complete technical details follow; explicit timing/dependency
+// (F-02) rides the disclosure as a Timing row and data-timing on the
+// article — proven rows carry none. No derivation changes here.
 func writeASDConcern(b *strings.Builder, c asdConcern, asd *asdView, rank int) {
 	esc := stdhtml.EscapeString
 	class := "readiness-row"
 	if rank > 0 {
 		class = "readiness-card"
 	}
-	b.WriteString(`<article class="` + class + ` readiness-concern--` + esc(c.State) + `" data-concern-id="` + esc(c.ID) + `" data-area-id="` + esc(string(c.Area)) + `">`)
+	// Explicit timing and dependency (F-02): current-step rows say "now";
+	// later-step rows name what they wait on. Same condition the former
+	// inline stage-line span used.
+	timing, timingFact := "", ""
+	if asd.Shell.CurrentFocus != "" && c.State != asdStateProven {
+		if c.Area == asd.Shell.CurrentFocus {
+			timing, timingFact = "now", "now"
+		} else if asdAreaAfter(c.Area, asd.Shell.CurrentFocus) {
+			timing, timingFact = "later", "later — waits on "+asdAreaLabels[asd.Shell.CurrentFocus]
+		}
+	}
+	b.WriteString(`<article class="` + class + ` readiness-concern--` + esc(c.State) + `" data-concern-id="` + esc(c.ID) + `" data-area-id="` + esc(string(c.Area)) + `"`)
+	if timing != "" {
+		b.WriteString(` data-timing="` + timing + `"`)
+	}
+	b.WriteString(`>`)
 	if rank > 0 {
 		b.WriteString(`<span class="readiness-rank">` + strconv.Itoa(rank) + `</span>`)
 	}
 	b.WriteString(`<div class="readiness-copy">`)
-	b.WriteString(`<p class="readiness-stage">` + esc(asdAreaLabels[c.Area]))
-	// Explicit timing and dependency (F-02): current-step rows say "now";
-	// later-step rows name what they wait on.
-	if asd.Shell.CurrentFocus != "" && c.State != asdStateProven {
-		if c.Area == asd.Shell.CurrentFocus {
-			b.WriteString(` <span class="asd-timing asd-timing--now" data-timing="now">· now</span>`)
-		} else if asdAreaAfter(c.Area, asd.Shell.CurrentFocus) {
-			b.WriteString(` <span class="asd-timing asd-timing--later" data-timing="later">· later — waits on ` + esc(asdAreaLabels[asd.Shell.CurrentFocus]) + `</span>`)
-		}
-	}
-	b.WriteString(`</p>`)
+	b.WriteString(`<p class="readiness-stage">` + esc(asdAreaLabels[c.Area]) + `</p>`)
 	if c.HumanReview {
 		b.WriteString(`<p class="asd-human-review" data-testid="asd-human-review">Human review</p>`)
 	}
-	b.WriteString(`<p class="readiness-summary">` + esc(c.Summary) + `</p>`)
+	if c.Guidance != "" {
+		b.WriteString(`<p class="readiness-summary" data-testid="asd-guidance-` + esc(c.ID) + `">` + esc(c.Guidance) + `</p>`)
+	} else {
+		b.WriteString(`<p class="readiness-summary" data-testid="asd-summary-` + esc(c.ID) + `">` + esc(c.Summary) + `</p>`)
+	}
 	writeASDState(b, c.State)
 	if c.Guidance != "" {
-		b.WriteString(`<p class="asd-guidance" data-testid="asd-guidance-` + esc(c.ID) + `">` + esc(c.Guidance) + `</p>`)
+		b.WriteString(`<p class="asd-fact" data-testid="asd-fact-` + esc(c.ID) + `">` + esc(c.Summary) + `</p>`)
 	}
 	b.WriteString(`<details class="readiness-tech"><summary>Technical details</summary><dl class="readiness-tech-facts">`)
 	writeReadinessFact(b, "State", c.State)
 	writeReadinessFact(b, "Concern", c.ID)
 	writeReadinessFact(b, "Area", string(c.Area))
 	writeReadinessFact(b, "Blocking", strconv.FormatBool(c.Blocking))
+	if timingFact != "" {
+		writeReadinessFact(b, "Timing", timingFact)
+	}
 	if len(c.Witnesses) > 0 {
 		b.WriteString(`<dt>Witnesses</dt><dd><ul class="readiness-witnesses">`)
 		for _, wtn := range c.Witnesses {

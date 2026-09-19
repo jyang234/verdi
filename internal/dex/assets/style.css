@@ -3787,8 +3787,6 @@ button.yarn-chip-type {
   margin: 0.5rem 0;
 }
 .asd-sequence-note { font-size: 0.85rem; opacity: 0.85; max-width: 60rem; }
-.asd-timing { font-size: 0.8rem; opacity: 0.85; }
-.asd-timing--now { font-weight: 600; }
 .asd-human-review {
   display: inline-block;
   font-size: 0.78rem;
@@ -3800,7 +3798,14 @@ button.yarn-chip-type {
   padding: 0 0.4rem;
   margin: 0 0 0.25rem;
 }
-.asd-guidance { font-size: 0.85rem; }
+/* the secondary fact line under a guidance-led card (ac-12): quieter than
+   the primary .readiness-summary, same wrapping rule, token ink only */
+.asd-fact {
+  margin: 0.3rem 0 0;
+  font-size: 0.85rem;
+  color: var(--muted-solid);
+  overflow-wrap: anywhere;
+}
 
 .asd-forms button { display: block; margin: 0.3rem 0; }
 .asd-panel { margin: 0.5rem 0; }
