@@ -1101,3 +1101,32 @@ func TestCmdJourney_StoryRef_UnmatchedExitsTwo(t *testing.T) {
 		t.Fatalf("stderr = %q, but the story-ref form never searches the default branch", stderr.String())
 	}
 }
+
+// TestCmdJourney_EventualBlockersDerived proves the CLI end to end wires
+// the real eventual-blocker derivation (spec/readiness-recovery ac-1,
+// internal/journey/eventual.go): journeyFeatureSpecMD declares no
+// attestation kind on its single AC and plants no evidence records at
+// all, so that AC's outcome floor is unsatisfied (neither an authored
+// attestation nor a passing outcome record) — the record's eventual
+// section must be Derived: true and must name outcome-floor/ac-1, never
+// the retired Derived: false stub.
+func TestCmdJourney_EventualBlockersDerived(t *testing.T) {
+	buildJourneyRepo(t, map[string]string{".verdi/specs/active/payments/spec.md": journeyFeatureSpecMD})
+
+	var stdout, stderr bytes.Buffer
+	got := cmdJourney([]string{"spec/payments"}, &stdout, &stderr)
+	if got != 0 {
+		t.Fatalf("cmdJourney = %d, want 0; stderr=%s", got, stderr.String())
+	}
+
+	rec, err := journey.Decode(bytes.TrimRight(stdout.Bytes(), "\n"))
+	if err != nil {
+		t.Fatalf("journey.Decode(stdout): %v\nstdout=%s", err, stdout.String())
+	}
+	if !rec.Blockers.Eventual.Derived {
+		t.Fatalf("Blockers.Eventual.Derived = false, want true (the eventual section is no longer a hard-coded stub): %+v", rec.Blockers.Eventual)
+	}
+	if journeyFindBlocker(rec.Blockers.Eventual.Items, "outcome-floor/ac-1") == nil {
+		t.Fatalf("Blockers.Eventual.Items = %v, want outcome-floor/ac-1 (no attestation, no passing outcome record planted for this fixture's only AC)", journeyBlockerIDs(rec.Blockers.Eventual.Items))
+	}
+}
