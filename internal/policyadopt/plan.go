@@ -210,6 +210,16 @@ func Compose(root string, in Input) (*Plan, error) {
 // plumbing this in-memory, pre-write proof does not have. cmd/verdi's own
 // showcase/build-binary tests run the REAL ResolvePolicyGrant against the
 // written store afterward and pin its answer equal to this one.
+//
+// One deliberate difference, disclosed rather than silently claimed as
+// parity: ResolvePolicyGrant also guards its typed assertion with
+// `payload == nil`, so a typed-nil payload trips its duplicate check;
+// this loop's assertion does not, and such a payload would instead be
+// recorded as `found` and then fail the mode comparison below (fail
+// closed, with a less specific message). No input Compose can build
+// reaches it — policyartifact's decode seam Validate()s every payload
+// and never yields a nil typed payload — so the guard is omitted rather
+// than added as a branch no test could exercise.
 func prove(files []File, mode string) (string, error) {
 	tree := fstest.MapFS{}
 	for _, f := range files {

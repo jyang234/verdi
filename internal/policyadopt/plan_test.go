@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -143,5 +144,50 @@ func TestWrite_ThenLoadResolvesTheGrant(t *testing.T) {
 	// Writing twice is refused (the checkout is now adopted).
 	if _, err := Compose(root, Input{Profile: governanceprincipal.ClassSolo, Owner: "local-operator", Subject: "s"}); !errors.Is(err, ErrAlreadyAdopted) {
 		t.Fatalf("second compose: %v", err)
+	}
+}
+
+// TestWrite_PartialFailureNamesThePathAndReturnsWhatLanded exercises
+// Write's documented failure contract — the one path Compose's own tests
+// cannot reach, because Compose refuses outright any root that already
+// carries .verdi/policy. The hostile state is therefore built AFTER a
+// clean Compose: .verdi/policy/policies is a regular file, so the third
+// artifact's own parent directory cannot be created and only the first
+// two land. Write must name the offending path and hand back exactly
+// those two, having rolled nothing back — cmd/verdi's policy adopt
+// prints them as the state its refusal leaves behind.
+func TestWrite_PartialFailureNamesThePathAndReturnsWhatLanded(t *testing.T) {
+	root := t.TempDir()
+	p, err := Compose(root, Input{Profile: governanceprincipal.ClassSolo, Owner: "local-operator", Subject: "dev@example.invalid"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(root, ".verdi", "policy"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, ".verdi", "policy", "policies"), []byte("a regular file where a directory belongs\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	paths, err := Write(root, p)
+	if err == nil {
+		t.Fatal("Write succeeded although .verdi/policy/policies is a regular file")
+	}
+	if !strings.Contains(err.Error(), policyRel) {
+		t.Fatalf("error does not name the offending path %s: %v", policyRel, err)
+	}
+	want := []string{constitutionRel, profileRel(ProfileSoloID)}
+	if !slices.Equal(paths, want) {
+		t.Fatalf("landed paths = %v, want exactly %v", paths, want)
+	}
+	// The report is true in both directions: what it named is on disk,
+	// what it stopped before is not.
+	for _, rel := range want {
+		if _, statErr := os.Stat(filepath.Join(root, filepath.FromSlash(rel))); statErr != nil {
+			t.Fatalf("%s reported as written but is not on disk: %v", rel, statErr)
+		}
+	}
+	if _, statErr := os.Stat(filepath.Join(root, filepath.FromSlash(inventoryRel))); !os.IsNotExist(statErr) {
+		t.Fatalf("%s exists although Write stopped before it (stat err=%v)", inventoryRel, statErr)
 	}
 }
