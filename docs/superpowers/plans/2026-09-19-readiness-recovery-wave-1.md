@@ -323,3 +323,6 @@ and compare byte-for-byte with the golden; on mismatch print both and fail. Run 
 ## Amendments during execution
 
 Recorded here by the controller as they happen; where a code block here disagrees with HEAD, HEAD is right.
+
+- Task 1 (R-RR1-11): "later transitions" are the transitions reachable forward from the spec's current lifecycle state (walk the class lifecycle's from→to graph from the current state), minus the immediate candidates — never a transition already behind the state, so an accepted feature never carries `merge` as an eventual blocker. Task 1's resolution (a) ("lifecycle transitions minus candidates") is superseded.
+- Task 1 → Task 4: the harness readiness page now carries the eventual `review/blocker/*` concerns, so `e2e/tests/49-readiness-pilot.spec.ts`'s pinned `ATTENTION_QUEUE`/`COMPLETED_CHECKS` arrays are updated in Task 4 (Fable) together with the stamp; `make verify` is expected red at e2e between Task 1 and Task 4.
