@@ -310,13 +310,14 @@ required_approvers:
   - {transitions: [policy-disposition-approval], roles: [policy-owner], minimum: 1}
 distinctness_rules:
   - {transitions: [accept], left_role: author, right_role: reviewer, relation: different-principal}
+  - {transitions: [policy-disposition-approval], left_role: author, right_role: policy-owner, relation: different-principal}
 evidence_source_restrictions: []
 escalation_thresholds: []
 template: {identity: {{printf "%q" .TemplateIdentity}}, digest: {{printf "%q" .TemplateDigest}}}
 ---
 Starter team profile: acceptance needs one reviewer who is not the author,
-and a policy disposition needs the policy owner, all authenticated through
-the forge. It maps no subjects yet — this file names no one — so every
+and a policy disposition needs a policy owner who is not its author, all
+authenticated through the forge. It maps no subjects yet — this file names no one — so every
 role resolves unproven until the team adds its own role_mappings through
 the project's review process. Nothing here is a fabricated identity.
 ```
@@ -432,7 +433,7 @@ func TestRenderProfile_SoloBindsTheSubjectAndTeamMapsNoOne(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if tp.Profile.Class != governanceprincipal.ClassTeam || len(tp.Profile.RoleMappings) != 0 || len(tp.Profile.DistinctnessRules) != 1 || len(tp.Profile.RequiredApprovers) != 2 {
+	if tp.Profile.Class != governanceprincipal.ClassTeam || len(tp.Profile.RoleMappings) != 0 || len(tp.Profile.DistinctnessRules) != 2 || len(tp.Profile.RequiredApprovers) != 2 {
 		t.Fatalf("team = %+v", tp.Profile)
 	}
 	// Class mismatch between data and template fails by name.
@@ -1188,3 +1189,5 @@ Write `docs/superpowers/reports/2026-09-19-spec-documents-wave-4.md` in the evid
 ## Amendments during execution
 
 Recorded here by the controller as they happen; where a code block here disagrees with HEAD, HEAD is right.
+
+- Task 1 (R-W4-10): `governanceprincipal.validateClassCoverage` requires, for a team profile, an approval rule AND a different-principal rule covering EVERY applicable transition; the team template as first written covered only `accept`. The template gains `{transitions: [policy-disposition-approval], left_role: author, right_role: policy-owner, relation: different-principal}` — a disposition's author and its approving policy owner must be different people, the same separation the accept rule already states. Task 2's `prove` and the wave report inherit the two-rule shape.
