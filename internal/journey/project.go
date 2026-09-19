@@ -87,8 +87,13 @@ func (p Projector) Project(ctx context.Context, cfg *store.Config, arg string) (
 		Lifecycle:  facts.Lifecycle,
 		Evidence:   facts.Evidence,
 		Blockers: Blockers{
-			Current:  current,
-			Eventual: deriveEventual(),
+			Current: current,
+			Eventual: deriveEventual(eventualInput{
+				Class:            facts.Target.Class,
+				Owner:            owner,
+				Candidates:       candidates,
+				LaterTransitions: laterTransitions(cfg.Model, facts.Target.Class, candidates),
+			}),
 		},
 		Principals:  principals,
 		Actions:     actions,
