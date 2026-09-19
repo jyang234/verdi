@@ -3,11 +3,14 @@ package workbench
 import (
 	"context"
 	"errors"
+	stdhtml "html"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 
+	"github.com/jyang234/verdi/internal/artifact"
 	"github.com/jyang234/verdi/internal/dex"
 	"github.com/jyang234/verdi/internal/journey"
 	"github.com/jyang234/verdi/internal/readinesspilot"
@@ -756,6 +759,53 @@ func TestReadinessRoute_QuerySpecDerivesPerRequest(t *testing.T) {
 		}
 		if loader.calls != 0 {
 			t.Fatalf("loader.calls = %d, want 0 (a bad name must never reach the loader)", loader.calls)
+		}
+		_, parseErr := artifact.ParseRef("spec/Not A Valid Name")
+		if parseErr == nil {
+			t.Fatal("fixture no longer malformed: ParseRef accepted it")
+		}
+		if !strings.Contains(rec.Body.String(), stdhtml.EscapeString(parseErr.Error())) {
+			t.Fatalf("the 400 page must disclose WHY the name was refused (%q):\n%s", parseErr.Error(), rec.Body.String())
+		}
+	})
+
+	// A pinned or fragment ?spec= parses fine but is not a whole spec ref,
+	// which is the route's own shape rule: the loader refuses it one layer
+	// down (readinessload: "not an unpinned whole spec ref") and that
+	// arrives as a 503 — the wrong code for a malformed query, and a
+	// derivation attempt the handler never had to make. The gate owns both.
+	for _, tc := range []struct{ name, query, want string }{
+		{name: "pinned", query: "pilot@" + strings.Repeat("a", 40), want: "commit pin"},
+		{name: "fragment", query: "pilot#ac-1", want: "fragment"},
+	} {
+		t.Run("a "+tc.name+" spec ref is a 400, never reaches the loader", func(t *testing.T) {
+			loader := &countingReadinessLoader{snap: snap}
+			h := NewHandlerWith(t.TempDir(), Deps{ReadinessLoader: loader})
+			rec := get(t, h, "/readiness?spec="+url.QueryEscape(tc.query))
+			if rec.Code != http.StatusBadRequest {
+				t.Fatalf("status = %d, want 400 (body: %s)", rec.Code, rec.Body.String())
+			}
+			if loader.calls != 0 {
+				t.Fatalf("loader.calls = %d, want 0 (a %s ref must never reach the loader)", loader.calls, tc.name)
+			}
+			if !strings.Contains(rec.Body.String(), tc.want) {
+				t.Fatalf("the 400 page must disclose why a %s ref was refused (naming %q):\n%s", tc.name, tc.want, rec.Body.String())
+			}
+		})
+	}
+
+	t.Run("a valid ?spec= reaches the loader in canonical form", func(t *testing.T) {
+		loader := &countingReadinessLoader{snap: snap}
+		h := NewHandlerWith(t.TempDir(), Deps{ReadinessLoader: loader})
+		if rec := get(t, h, "/readiness?spec=pilot"); rec.Code != http.StatusOK {
+			t.Fatalf("status = %d, body=%s", rec.Code, rec.Body.String())
+		}
+		parsed, err := artifact.ParseRef("spec/pilot")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(loader.refs) != 1 || loader.refs[0] != parsed.String() {
+			t.Fatalf("loader.refs = %v, want exactly the parsed ref's own canonical form [%q]", loader.refs, parsed.String())
 		}
 	})
 

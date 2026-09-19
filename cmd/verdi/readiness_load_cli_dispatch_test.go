@@ -93,6 +93,15 @@ func TestReadinessLoadCLIVectorsReachRegisteredCommands(t *testing.T) {
 			if seen[key] {
 				continue
 			}
+			if cli[0] != "verdi" {
+				// runVerdiBinary is handed cli[1:], so a vector that did
+				// not begin with the binary's own name would silently lose
+				// a real argument here and could still pass (fix round 1,
+				// M4). Every vector readinesspilot emits today starts with
+				// "verdi"; this keeps the round trip self-guarding if one
+				// ever does not.
+				t.Fatalf("emitted CLI %q does not begin with %q — this round trip strips cli[0] as the binary's own name", cli, "verdi")
+			}
 			seen[key] = true
 			executedAreas[concern.Area] = true
 			t.Run(tc.name+"/"+concern.ID, func(t *testing.T) {

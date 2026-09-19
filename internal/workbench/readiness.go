@@ -10,6 +10,7 @@ package workbench
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 
 	"github.com/jyang234/verdi/internal/artifact"
@@ -25,9 +26,14 @@ var errReadinessNotWired = errors.New(
 // readinessHandler serves GET /readiness by deriving readiness through
 // loader for the request's own ref: ?spec=<name> when present, else
 // defaultSpec when non-empty, else neither — the existing 503 disclosure,
-// unchanged. A malformed ?spec= name is a 400 (never reaches the loader);
-// a loader error (an unknown spec, a derivation failure) is a 503 naming
-// the error's own text.
+// unchanged. A ?spec= that is not one whole spec name — malformed, or
+// carrying a commit pin or an object fragment, both of which select part
+// of a spec rather than the spec the loader derives — is a 400 disclosing
+// which of those it was, and never reaches the loader (the loader's own
+// "not an unpinned whole spec ref" refusal would arrive as a 503, the
+// wrong code for a malformed query, after a derivation attempt the
+// handler never had to make). A loader error (an unknown spec, a
+// derivation failure) is a 503 naming the error's own text.
 func readinessHandler(loader ReadinessLoader, defaultSpec string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
@@ -37,11 +43,23 @@ func readinessHandler(loader ReadinessLoader, defaultSpec string) http.HandlerFu
 
 		ref := ""
 		if name := r.URL.Query().Get("spec"); name != "" {
-			if _, err := artifact.ParseRef("spec/" + name); err != nil {
+			parsed, err := artifact.ParseRef("spec/" + name)
+			if err != nil {
 				renderError(w, http.StatusBadRequest, err)
 				return
 			}
-			ref = "spec/" + name
+			if parsed.Pinned() {
+				renderError(w, http.StatusBadRequest, fmt.Errorf("?spec= names one whole spec, but %s carries a commit pin", name))
+				return
+			}
+			if parsed.Fragment() {
+				renderError(w, http.StatusBadRequest, fmt.Errorf("?spec= names one whole spec, but %s carries an object fragment", name))
+				return
+			}
+			// The parsed ref's own canonical spelling, never the raw query
+			// text: what the loader is asked for is exactly what the gate
+			// above accepted.
+			ref = parsed.String()
 		} else {
 			ref = defaultSpec
 		}

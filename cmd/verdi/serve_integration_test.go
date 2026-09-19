@@ -262,6 +262,11 @@ func TestServeReadinessRouteRederivesLiveOnEveryRequest(t *testing.T) {
 	checkoutBranch(t, repo.Dir, "design/feature-alpha")
 	requestPath := writeContextRequestFile(t, repo.Dir, "readiness-request.json", contextRequestBytes(t, "spec/feature-alpha", contextcompile.PhaseDesign, nil))
 	specPath := store.ActiveSpecPath(repo.Dir, "feature-alpha")
+	specSource, err := os.ReadFile(specPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const mutatedTitle = "Feature Alpha, retitled between two requests"
 
 	builds := 0
 	builder := readinessSnapshotBuilderFunc(func(ctx context.Context, root, gotRequestPath string) (string, error) {
@@ -302,16 +307,29 @@ func TestServeReadinessRouteRederivesLiveOnEveryRequest(t *testing.T) {
 			if !strings.Contains(first.Body.String(), repo.Head) || !strings.Contains(first.Body.String(), "for this request") {
 				t.Fatalf("first body misses derivation HEAD or stamp: %q", first.Body.String())
 			}
-			if err := os.WriteFile(specPath, []byte("changed after startup; no longer a valid spec\n"), 0o644); err != nil {
+			// A VALID mutation, never a corruption: the spec keeps
+			// deriving, so the second response is a 200 carrying the NEW
+			// title. A route that merely failed every request after a
+			// write would satisfy "the two responses differ" without
+			// re-deriving anything (fix round 1, M5), which is why the
+			// positive value is asserted here rather than a failure.
+			mutated := strings.Replace(string(specSource), `title: "Feature Alpha"`, `title: "`+mutatedTitle+`"`, 1)
+			if mutated == string(specSource) {
+				t.Fatal("fixture drift: the spec's title line no longer matches, so nothing was mutated")
+			}
+			if err := os.WriteFile(specPath, []byte(mutated), 0o644); err != nil {
 				t.Fatal(err)
 			}
 			second := httptest.NewRecorder()
 			handler.ServeHTTP(second, httptest.NewRequest(http.MethodGet, "/readiness", nil))
-			if second.Code != http.StatusServiceUnavailable {
-				t.Fatalf("second readiness request after a source mutation must re-derive and surface the failure honestly, got status=%d body=%q", second.Code, second.Body.String())
+			if second.Code != http.StatusOK {
+				t.Fatalf("second readiness request after a valid source mutation must re-derive successfully, got status=%d body=%q", second.Code, second.Body.String())
 			}
-			if second.Body.String() == first.Body.String() {
-				t.Fatal("second readiness response is byte-identical to the first after a source mutation — the route is not re-deriving live (ac-2 regression)")
+			if !strings.Contains(second.Body.String(), mutatedTitle) {
+				t.Fatalf("second readiness response does not carry the title written between the two requests — the route is not re-deriving live (ac-2 regression):\n%s", second.Body.String())
+			}
+			if strings.Contains(first.Body.String(), mutatedTitle) {
+				t.Fatalf("the FIRST response already carried the post-mutation title, so the assertion above proves nothing:\n%s", first.Body.String())
 			}
 			return 0
 		},
@@ -540,7 +558,7 @@ func TestServeContextRequestReadinessReachesGetDocumentOverSocket(t *testing.T) 
 		t.Fatalf("decoding get_document result: %v", err)
 	}
 	if !strings.Contains(doc.Markdown, "## Readiness") || strings.Contains(doc.Markdown, "Readiness was not supplied for this render.") {
-		t.Fatalf("get_document over the REAL served MCP socket did not carry the startup readiness snapshot's populated section — exactly the regression runServe's srv.Backend.Readiness wiring (serve.go:297) guards against:\n%s", doc.Markdown)
+		t.Fatalf("get_document over the REAL served MCP socket did not carry a populated readiness section — exactly the regression runServe's `srv.Backend.ReadinessLoader = readinessLoader` wiring guards against:\n%s", doc.Markdown)
 	}
 }
 
