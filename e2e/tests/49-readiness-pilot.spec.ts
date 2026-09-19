@@ -1,14 +1,16 @@
 import { test, expect, type Page } from "@playwright/test";
 import { CONTROL_URL, SHOWCASE, branchBoardPath } from "./fixtures";
-import { addSticky } from "./helpers";
+import { addSticky, expectAutosaved } from "./helpers";
 
 // The Wave 3.5 readiness pilot cockpit (GET /readiness), F-01 corrected
 // form (SI-125): orientation first ("where am I?"), the four-step
 // process rail with plain labels, a ranked focus list showing the top
 // three priorities with the exact remainder behind one inline
 // disclosure, and completed checks holding every proven fact. The page
-// is a GET-only view of ONE immutable startup snapshot; the only
-// interactive state is the ephemeral open state of native disclosures.
+// is a GET-only view of readiness derived fresh for each request
+// (spec/readiness-recovery ac-2 — the stamp names the HEAD the request
+// looked at); the only interactive state is the ephemeral open state of
+// native disclosures.
 //
 // Closed instrumentation vocabulary (unchanged): readiness-opened,
 // area-inspected, concern-inspected, board-link-followed,
@@ -131,7 +133,7 @@ function focusIds(page: Page): Promise<Array<string | null>> {
     .evaluateAll((els) => els.map((el) => el.getAttribute("data-concern-id")));
 }
 
-async function startupHead(page: Page): Promise<string> {
+async function derivedHead(page: Page): Promise<string> {
   const head = await page
     .locator('.readiness-target-tech dt:text-is("Head") + dd')
     .textContent();
@@ -150,7 +152,7 @@ test("orientation and rail answer where-am-I with plain labels", async ({
     "Step 1 of 4 — Define the work",
   );
   await expect(page.locator(".readiness-purpose")).toHaveText(
-    "This is a startup snapshot of readiness for the current design work.",
+    "This page derives readiness for the current design work on every request.",
   );
   // REAL DOM order: title → step → purpose all precede the target
   // technical metadata, and the shell's old leading metadata card is
@@ -568,17 +570,25 @@ test("instrumentation keeps the closed vocabulary, exact shape, 200-cap, and pag
   expect(await page.evaluate(() => document.body.innerHTML)).toBe(htmlBefore);
 });
 
-test("an edit through the existing board leaves the preserved cockpit and its snapshot unchanged", async ({
+test("an edit through the existing board leaves the open cockpit tab unchanged while the next request derives it afresh at the same HEAD", async ({
   page,
 }) => {
   await page.goto("/readiness");
-  const head = await startupHead(page);
+  const head = await derivedHead(page);
 
+  // The derivation stamp (ac-2): plain label first, the exact HEAD this
+  // request looked at, nothing about restarting.
   const notice = page.locator(".readiness-stale");
-  await expect(notice).toContainText(`Startup snapshot at ${head}`);
-  await expect(notice).toContainText("restart verdi serve");
+  await expect(notice).toHaveAttribute("aria-label", "Derivation stamp");
+  await expect(notice.locator("strong")).toHaveText("Derivation stamp.");
+  await expect(notice).toContainText(
+    `Derived at HEAD ${head} for this request.`,
+  );
+  await expect(notice).not.toContainText("Startup snapshot");
+  await expect(notice).not.toContainText("restart verdi serve");
 
   const bodyBefore = await (await page.request.get("/readiness")).text();
+  expect(bodyBefore).not.toMatch(/data-concern-id="shape\/board\/question\//);
   const eventsBefore = await pilotEvents(page);
   const domBefore = await page.evaluate(
     () => document.querySelector("main.content")!.outerHTML,
@@ -589,21 +599,40 @@ test("an edit through the existing board leaves the preserved cockpit and its sn
     page.locator(".readiness-board-link").first().click(),
   ]);
   await popup.waitForLoadState();
-  await addSticky(popup, "readiness pilot probe: cockpit must not notice this");
-  await popup.close();
+  const probe = await addSticky(
+    popup,
+    "readiness pilot probe: an open board question",
+  );
 
+  // The already-rendered tab never refreshes itself (no live refresh, no
+  // polling, no recording): its DOM and its event log are exactly what
+  // they were before the edit.
   const domAfter = await page.evaluate(
     () => document.querySelector("main.content")!.outerHTML,
   );
   expect(domAfter).toBe(domBefore);
   await expect(page.locator(".readiness-stale")).toContainText(
-    `Startup snapshot at ${head}`,
+    `Derived at HEAD ${head} for this request.`,
   );
   const events = await pilotEvents(page);
   expect(events.slice(0, eventsBefore.length)).toEqual(eventsBefore);
 
+  // But the NEXT request derives afresh (ac-2): the same HEAD — the
+  // sticky is working-tree scratch, nothing was committed — and the new
+  // open board question is now a shape concern of its own.
   const bodyAfter = await (await page.request.get("/readiness")).text();
-  expect(bodyAfter).toBe(bodyBefore);
+  expect(bodyAfter).not.toBe(bodyBefore);
+  expect(bodyAfter).toContain(`Derived at HEAD ${head} for this request.`);
+  expect(bodyAfter).toMatch(/data-concern-id="shape\/board\/question\/[^"]+"/);
+
+  // Deleting the probe through the same board restores the store, and the
+  // same ref at the same HEAD derives identical bytes again (ac-2) — so
+  // every later test inherits the pinned posture, not this probe.
+  await probe.getByRole("button", { name: "Delete sticky" }).click();
+  await expectAutosaved(popup);
+  await popup.close();
+  const bodyRestored = await (await page.request.get("/readiness")).text();
+  expect(bodyRestored).toBe(bodyBefore);
 });
 
 test("420px shows exactly the first three priorities before expansion", async ({
@@ -641,8 +670,12 @@ test("the all-proven snapshot renders the honest complete posture", async ({
     0,
   );
   await expect(page.locator(".readiness-downstream")).toHaveCount(0);
+  await expect(page.locator(".readiness-stale")).toHaveAttribute(
+    "aria-label",
+    "Derivation stamp",
+  );
   await expect(page.locator(".readiness-stale")).toContainText(
-    `Startup snapshot at ${ALL_PROVEN.head}`,
+    `Derived at HEAD ${ALL_PROVEN.head} for this request.`,
   );
 
   // Every concern is present under completed checks with its exact

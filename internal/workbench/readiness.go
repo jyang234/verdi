@@ -17,16 +17,22 @@ import (
 )
 
 // errReadinessNotWired is the existing (pre-loader) 503 disclosure body,
-// unchanged byte-for-byte: no loader is wired for this process, or a
-// loader is wired but neither a ?spec= query nor a default spec names
-// anything to derive.
+// unchanged byte-for-byte: no loader is wired for this process at all.
 var errReadinessNotWired = errors.New(
 	"no readiness snapshot was injected at startup: this verdi serve process runs without the readiness pilot wired, so there is nothing honest to render")
 
+// errReadinessNoSpec is the other 503 disclosure (co-6): a loader IS
+// wired, but neither a ?spec= query nor a default spec named anything to
+// derive — a different missing fact from "no loader", so it says so and
+// names both ways to supply one.
+var errReadinessNoSpec = errors.New(
+	"no spec was named: add ?spec=<name> to derive readiness for one active spec, or start verdi serve with --context-request to name a default")
+
 // readinessHandler serves GET /readiness by deriving readiness through
 // loader for the request's own ref: ?spec=<name> when present, else
-// defaultSpec when non-empty, else neither — the existing 503 disclosure,
-// unchanged. A ?spec= that is not one whole spec name — malformed, or
+// defaultSpec when non-empty, else neither — a 503 disclosing that no
+// spec was named (a process with no loader at all keeps the existing
+// 503 disclosure unchanged). A ?spec= that is not one whole spec name — malformed, or
 // carrying a commit pin or an object fragment, both of which select part
 // of a spec rather than the spec the loader derives — is a 400 disclosing
 // which of those it was, and never reaches the loader (the loader's own
@@ -64,8 +70,12 @@ func readinessHandler(loader ReadinessLoader, defaultSpec string) http.HandlerFu
 			ref = defaultSpec
 		}
 
-		if ref == "" || loader == nil {
+		if loader == nil {
 			renderError(w, http.StatusServiceUnavailable, errReadinessNotWired)
+			return
+		}
+		if ref == "" {
+			renderError(w, http.StatusServiceUnavailable, errReadinessNoSpec)
 			return
 		}
 

@@ -50,7 +50,7 @@ func readinessFixture() readinesspilot.Snapshot {
 			readinessConcernAction(),
 			readinessConcernSignoff(),
 		},
-		StaleNotice: "Startup snapshot at " + readinessFixtureHead + "; restart verdi serve after an edit.",
+		StaleNotice: "Derived at HEAD " + readinessFixtureHead + " for this request.",
 	}
 }
 
@@ -155,7 +155,7 @@ func readinessAllProvenFixture() readinesspilot.Snapshot {
 		CurrentFocus: "",
 		Attention:    []readinesspilot.Concern{},
 		AllConcerns:  []readinesspilot.Concern{problem, contributor, verdict, action},
-		StaleNotice:  "Startup snapshot at " + readinessFixtureHead + "; restart verdi serve after an edit.",
+		StaleNotice:  "Derived at HEAD " + readinessFixtureHead + " for this request.",
 	}
 }
 
@@ -209,7 +209,7 @@ func TestReadinessRender_OrientationLeadsWithTitle(t *testing.T) {
 	// precede the target technical metadata.
 	title := strings.Index(html, `<h2 class="readiness-title">Pilot decline flow</h2>`)
 	step := strings.Index(html, `Step 1 of 4 — Define the work`)
-	purpose := strings.Index(html, `This is a startup snapshot of readiness for the current design work.`)
+	purpose := strings.Index(html, `This page derives readiness for the current design work on every request.`)
 	target := strings.Index(html, `readiness-target-tech`)
 	if title < 0 || step < 0 || purpose < 0 || target < 0 {
 		t.Fatalf("page is missing orientation pieces (title=%d step=%d purpose=%d target=%d)", title, step, purpose, target)
@@ -596,17 +596,35 @@ func TestReadinessRender_DestinationActionsUsable(t *testing.T) {
 	}
 }
 
-func TestReadinessRender_StaleNoticeNamesHead(t *testing.T) {
+// TestReadinessRender_DerivationStampNamesHead is spec/readiness-recovery
+// ac-2: the page's notice is a derivation stamp naming the HEAD this
+// request looked at — never a startup notice telling the author to
+// restart. The chrome (class names, role, data attribute, tabindex) is
+// unchanged so the stale-notice-inspected instrumentation and the CSS
+// keep working; only the visible label and the accessible name move.
+func TestReadinessRender_DerivationStampNamesHead(t *testing.T) {
 	html := renderReadinessFixture(t, readinessFixture())
 	notice := sectionOf(t, html, `class="readiness-stale"`, `</aside>`)
-	if !strings.Contains(notice, readinessFixtureHead) {
-		t.Fatalf("stale notice does not name the exact HEAD:\n%s", notice)
+	for _, want := range []string{
+		"Derived at HEAD " + readinessFixtureHead + " for this request.",
+		`<strong>Derivation stamp.</strong>`,
+		`aria-label="Derivation stamp"`,
+		`role="note"`,
+		`data-readiness-stale="1"`,
+		`class="readiness-stale-text"`,
+		`tabindex="0"`,
+	} {
+		if !strings.Contains(notice, want) {
+			t.Fatalf("derivation stamp is missing %q:\n%s", want, notice)
+		}
 	}
-	if !strings.Contains(notice, "restart") || !strings.Contains(notice, "verdi serve") {
-		t.Fatalf("stale notice does not tell the author to restart verdi serve:\n%s", notice)
+	for _, forbidden := range []string{"Startup snapshot", "restart"} {
+		if strings.Contains(notice, forbidden) {
+			t.Fatalf("derivation stamp still carries the startup notice text %q:\n%s", forbidden, notice)
+		}
 	}
-	if !strings.Contains(notice, `tabindex="0"`) {
-		t.Fatalf("stale notice is not keyboard-reachable:\n%s", notice)
+	if strings.Contains(html, "startup snapshot") {
+		t.Fatalf("page still describes itself as a startup snapshot:\n%s", html)
 	}
 }
 
@@ -815,8 +833,39 @@ func TestReadinessRoute_QuerySpecDerivesPerRequest(t *testing.T) {
 		if rec.Code != http.StatusServiceUnavailable {
 			t.Fatalf("status = %d, want 503", rec.Code)
 		}
-		if !strings.Contains(rec.Body.String(), "snapshot") || !strings.Contains(rec.Body.String(), "verdi serve") {
-			t.Fatalf("503 page does not honestly disclose the missing loader: %s", rec.Body.String())
+		body := rec.Body.String()
+		if !strings.Contains(body, stdhtml.EscapeString(errReadinessNotWired.Error())) {
+			t.Fatalf("503 page does not carry the no-loader disclosure verbatim: %s", body)
+		}
+		if strings.Contains(body, "no spec was named") {
+			t.Fatalf("no-loader 503 page wrongly blames a missing spec name: %s", body)
+		}
+	})
+
+	// co-6: a loader that IS wired but has nothing to derive — no ?spec=
+	// and no default — is a different missing fact from "no loader", and
+	// the disclosure must say which one it is and how to supply it.
+	t.Run("a wired loader with no spec named is a 503 naming the missing spec", func(t *testing.T) {
+		loader := &countingReadinessLoader{snap: snap}
+		h := NewHandlerWith(t.TempDir(), Deps{ReadinessLoader: loader})
+		rec := get(t, h, "/readiness")
+		if rec.Code != http.StatusServiceUnavailable {
+			t.Fatalf("status = %d, want 503 (body: %s)", rec.Code, rec.Body.String())
+		}
+		if loader.calls != 0 {
+			t.Fatalf("loader.calls = %d, want 0 (nothing was named, so nothing is derived)", loader.calls)
+		}
+		body := rec.Body.String()
+		if !strings.Contains(body, stdhtml.EscapeString(errReadinessNoSpec.Error())) {
+			t.Fatalf("503 page does not carry the no-spec disclosure verbatim: %s", body)
+		}
+		for _, want := range []string{"no spec was named", "?spec=", "--context-request"} {
+			if !strings.Contains(body, stdhtml.EscapeString(want)) {
+				t.Fatalf("503 page does not tell the author how to name a spec (%q): %s", want, body)
+			}
+		}
+		if strings.Contains(body, "without the readiness pilot wired") {
+			t.Fatalf("no-spec 503 page wrongly claims no loader is wired: %s", body)
 		}
 	})
 }

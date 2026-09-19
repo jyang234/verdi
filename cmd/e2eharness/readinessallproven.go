@@ -40,8 +40,8 @@ func (f fixedReadinessLoader) Load(context.Context, string) (readinesspilot.Snap
 	return f.snap, nil
 }
 
-// readinessAllProvenHead is the fixture's pinned startup HEAD — a fixed
-// literal, so the browser oracle can assert the exact stale-notice text.
+// readinessAllProvenHead is the fixture's pinned HEAD — a fixed literal,
+// so the browser oracle can assert the exact derivation-stamp text.
 const readinessAllProvenHead = "e2eallproven0001"
 
 // readinessAllProvenSnapshot builds the strictly valid, fully proven
@@ -81,7 +81,7 @@ func readinessAllProvenSnapshot() readinesspilot.Snapshot {
 			proven("review/action", readinesspilot.AreaReview, true,
 				"Lifecycle and safe-action posture can advance review", []string{"journey-advance"}),
 		},
-		StaleNotice: "Startup snapshot at " + readinessAllProvenHead + "; restart verdi serve after an edit.",
+		StaleNotice: "Derived at HEAD " + readinessAllProvenHead + " for this request.",
 	}
 }
 
