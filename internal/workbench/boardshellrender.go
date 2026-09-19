@@ -269,7 +269,8 @@ func policyGuidePlaceholderPath(path string) string { return stdhtml.EscapeStrin
 // the variant the refusal's own discriminant justifies (boardspecasd.go's
 // policyGuideKind): the not-adopted variant states the serving-checkout
 // fact only, directs inspection of the accepted and proposed snapshots
-// first, and names the manual initial files as a conditional detail; the
+// first, and points at verdi policy adopt --starter (the starter's files
+// listed as a conditional detail); the
 // no-design-assistance variant carries the refusal detail verbatim and
 // never describes the resolved policy as absent or unaccepted. It is
 // markup only: no form, no button, no fetch wiring, no route — it adopts
@@ -298,14 +299,14 @@ func writePolicySetupGuide(b *strings.Builder, kind policyGuideKind, code, detai
 		// vocab:identity — non-vocabulary homograph: "pull, merge or rebase" names the Git operations the workbench never runs, never the `merge` lifecycle transition word
 		b.WriteString(`<p class="readiness-summary">Inspect first: run the read-only Inspect check below and read <code>accepted.adopted</code> against <code>proposed.adopted</code>. If the accepted snapshot is adopted, the project already has policy authority: inspect why this checkout lacks the accepted policy. An older branch may need updating through the project&#39;s own process; the workbench does not pull, merge or rebase anything and infers no cause. Only when the accepted snapshot is also not adopted does initial setup apply.</p>`)
 		// vocab:identity — non-vocabulary homograph: the forge's owner's merge to the default branch (the acceptance decision), never the `merge` lifecycle transition word
-		b.WriteString(`<p class="ritual-note">Initial setup is manual and reviewed. This guide adopts nothing; the workbench has no setup wizard and no adoption control. A policy directory that is proposed or validated is not accepted: acceptance is the owner&#39;s merge to the default branch through the project&#39;s own review process.</p>`)
+		b.WriteString(`<p class="ritual-note">Initial setup is one verb: run <code>verdi policy adopt --starter [--profile solo|team]</code> from the project root. It writes a starter constitution, one profile, one policy, and the consumers inventory, and commits exactly those files on a <code>policy/adopt</code> branch. This guide adopts nothing and the workbench has no adoption control; a policy directory that is proposed or validated is not accepted: acceptance is the owner&#39;s merge to the default branch through the project&#39;s own review process.</p>`)
 
-		b.WriteString(`<details class="readiness-tech"><summary>Files to author (manual initial setup, only when no policy is accepted)</summary><dl class="readiness-tech-facts">`)
+		b.WriteString(`<details class="readiness-tech"><summary>Files the starter writes (or author by hand, only when no policy is accepted)</summary><dl class="readiness-tech-facts">`)
 		writeReadinessFact(b, ".verdi/policy/constitution.md", "selects the governance profile and declares the project's role, transition, evidence, subject and adapter catalogs.")
 		writeReadinessFact(b, policyGuidePlaceholderPath(".verdi/policy/profiles/<profile-id>.md"), "declares the supported identity trust sources, role mappings and approval requirements. A mapping is not proof that anyone was authenticated or approved a change.")
 		writeReadinessFact(b, policyGuidePlaceholderPath(".verdi/policy/policies/<name>.md"), "carries the project's requirements. Overlays, exemptions and dispositions only when actually needed.")
 		writeReadinessFact(b, ".verdi/constitution/consumers.json", "declares the real registered consumers impact coverage needs. Never fabricate an empty or baseline inventory to make preparation look complete.")
-		b.WriteString(`</dl><p class="ritual-note">Author these only after the Inspect check confirms no accepted policy. Keep them on a proposal branch. Do not copy a fixture&#39;s identities, approvals or trust facts into a real project. <code>verdi context constitution propose</code> amends one policy, overlay or exemption; it does not create the initial constitution or profile.</p></details>`)
+		b.WriteString(`</dl><p class="ritual-note">Run the verb only after the Inspect check confirms no accepted policy. It leaves you on the policy/adopt branch; open the project&#39;s own review from there. Do not copy a fixture&#39;s identities, approvals or trust facts into a real project. <code>verdi context constitution propose</code> amends one policy, overlay or exemption; <code>verdi policy adopt --starter</code> creates the initial constitution and profile.</p></details>`)
 	default:
 		b.WriteString(`<p class="readiness-summary">Policy authority resolved for this project, but it does not grant design assistance. The workbench reported: ` + reportedHTML + `. Ordinary human editing does not require policy; this board&#39;s read-only restrictions still apply. A semantic review packet and delegated-agent design assistance need a policy that grants them, so review stays blocked until the project&#39;s policy does.</p>`)
 		// vocab:identity — non-vocabulary homograph: the forge's owner's merge to the default branch (the acceptance decision), never the `merge` lifecycle transition word
