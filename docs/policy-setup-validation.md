@@ -50,10 +50,13 @@ constitutes review approval or acceptance on the default branch.
 
 ## What initial setup requires
 
-The current binary has no first-time Constitution setup wizard/page. Its
-`context constitution propose` operation creates or amends one policy, overlay
-or exemption. It does not create the initial constitution or governance profile.
-Those initial files require reviewed project authoring:
+`verdi policy adopt --starter [--profile solo|team]` writes the initial
+constitution, one governance profile, one starter policy, and the consumers
+inventory in a single commit on a fresh `policy/adopt` branch (spec/spec-
+documents ac-10, dc-6). Its `context constitution propose` operation creates
+or amends one policy, overlay or exemption once that initial store exists; it
+does not create the initial constitution or governance profile itself. The
+starter writes:
 
 - `.verdi/policy/constitution.md` selects the governance profile and declares
   the project's role, transition, evidence, subject and adapter catalogs.
@@ -63,8 +66,8 @@ Those initial files require reviewed project authoring:
 - `.verdi/policy/policies/<name>.md` carries project requirements. Additional
   overlays, exemptions and dispositions are included only when actually needed.
 - `.verdi/constitution/consumers.json` declares the real registered consumers
-  needed for impact coverage. Do not fabricate a baseline or empty inventory
-  to make submission preparation look complete.
+  needed for impact coverage. The starter writes this file EMPTY and discloses
+  that it did so; register real consumers here before impact review.
 
 Keep the initial files on a proposal branch, retain their source authority,
 and use the commands above to inspect and validate them. A missing or incomplete

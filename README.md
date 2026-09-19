@@ -308,6 +308,7 @@ close`; the CLI is that path plus the read surfaces.
 | `verdi serve` | Localhost workbench (board, obligation wall) + lens/dex pages |
 | `verdi mcp` | MCP server over stdio |
 | `verdi dex build -o <dir>` | Emit the static docs site |
+| `verdi policy adopt --starter [--profile solo\|team]` | Adopt a starter constitution (constitution, profile, policy, consumers inventory) on a policy/adopt branch |
 
 ## MCP server
 
