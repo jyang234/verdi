@@ -89,7 +89,7 @@ func TestRenderProfile_SoloBindsTheSubjectAndTeamMapsNoOne(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if tp.Profile.Class != governanceprincipal.ClassTeam || len(tp.Profile.RoleMappings) != 0 || len(tp.Profile.DistinctnessRules) != 1 || len(tp.Profile.RequiredApprovers) != 2 {
+	if tp.Profile.Class != governanceprincipal.ClassTeam || len(tp.Profile.RoleMappings) != 0 || len(tp.Profile.DistinctnessRules) != 2 || len(tp.Profile.RequiredApprovers) != 2 {
 		t.Fatalf("team = %+v", tp.Profile)
 	}
 	// Class mismatch between data and template fails by name.
