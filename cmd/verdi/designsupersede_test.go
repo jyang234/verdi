@@ -544,16 +544,18 @@ func TestDesignStartSupersedeE2E_Happy(t *testing.T) {
 	t.Logf("verdi lint exit=%d\nstdout:\n%s\nstderr:\n%s", lintCode, lintStdout, lintStderr)
 	successorRelPath := store.ActiveSpecRelPath("lockbox-v2")
 	for _, line := range strings.Split(lintStdout, "\n") {
-		// Only a genuine per-file Finding line (internal/lint's Finding.String():
-		// "RULE path: message", e.g. "VL-015 .verdi/specs/.../spec.md: ...")
-		// counts here — a "disclosed-unproven [lint:VL-017]: ..." NOTICE
-		// (disclosure.Render's own distinct format) is printed, not a
-		// verdict failure (lint.go's own doc comment: "a run with no other
-		// findings still exits 0"), and may legitimately NAME the successor's
-		// path in its prose (e.g. an infrastructure-absence notice covering
-		// every spec in the checkout) without that being a finding AGAINST
-		// the successor's own content.
-		if strings.HasPrefix(line, "VL-") && strings.Contains(line, successorRelPath) {
+		// Only a genuine per-file Finding line (internal/lint's Finding.String(),
+		// R-W4-5's sentence-first grammar: "message (path) [RULE]", e.g.
+		// "... (.verdi/specs/.../spec.md) [VL-015]") counts here — a
+		// "disclosed-unproven [lint:VL-017]: ..." NOTICE (disclosure.Render's
+		// own distinct format) is printed, not a verdict failure (lint.go's
+		// own doc comment: "a run with no other findings still exits 0"), and
+		// may legitimately NAME the successor's path in its prose (e.g. an
+		// infrastructure-absence notice covering every spec in the checkout)
+		// without that being a finding AGAINST the successor's own content.
+		// The bracketed "[VL-...]" tail (never present on a disclosure line,
+		// which brackets "lint:VL-...") is what distinguishes the two.
+		if strings.HasSuffix(line, "]") && strings.Contains(line, "[VL-") && strings.Contains(line, successorRelPath) {
 			t.Errorf("verdi lint raised a finding against the untouched successor scaffold (must lint clean under VL-015, ac-11): %s", line)
 		}
 	}

@@ -306,7 +306,7 @@ close`; the CLI is that path plus the read surfaces.
 | `verdi align [--freeze]` | Generate/refresh the alignment report (computed + judged); `--freeze` writes the closure edition |
 | `verdi gate` | The merge gate: spec accepted, no AC violated, every finding dispositioned (exit 0 / 1 / 2) |
 | `verdi close <story\|feature>` | Closure ritual: every AC evidenced, frozen rollup, archived quartet |
-| `verdi lint` | Artifactlint (VL-001..021) — the CI gate for artifact validity |
+| `verdi lint` | Artifactlint (VL-001..021) — the CI gate for artifact validity; each finding line reads `<message> (<path>) [VL-xxx]` |
 | `verdi matrix <story\|feature>` | Compute and print the evidence fold |
 | `verdi sync` | Pull the CI evidence bundle into `derived/` |
 | `verdi audit` | Audit ADR exemptions and mid-build deviations |
