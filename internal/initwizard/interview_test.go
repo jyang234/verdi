@@ -2,6 +2,7 @@ package initwizard
 
 import (
 	"errors"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -13,10 +14,13 @@ import (
 // story's spec discloses, exercised here at the package level (the
 // built-binary twin lives in cmd/verdi/init_test.go, driving the real
 // compiled binary with the same shaped scripts over a real OS pipe).
-func scriptedInterview(t *testing.T, script string) (InterviewResult, string, error) {
+// seed is passed straight through to RunInterview (R-W4-6); every test
+// written before the seed parameter existed passes model.Vocabulary{},
+// reproducing its own prior, unseeded behavior exactly.
+func scriptedInterview(t *testing.T, script string, seed model.Vocabulary) (InterviewResult, string, error) {
 	t.Helper()
 	var out strings.Builder
-	result, err := RunInterview(strings.NewReader(script), &out)
+	result, err := RunInterview(strings.NewReader(script), &out, seed)
 	return result, out.String(), err
 }
 
@@ -34,7 +38,7 @@ func allDefaultsScript() string {
 // CopyTemplates false — the property that makes "a wizard run with every
 // answer defaulted writes the same store as bare init" true.
 func TestRunInterview_AllDefaults_EmptyVocabulary(t *testing.T) {
-	result, _, err := scriptedInterview(t, allDefaultsScript())
+	result, _, err := scriptedInterview(t, allDefaultsScript(), model.Vocabulary{})
 	if err != nil {
 		t.Fatalf("RunInterview(all defaults) = %v, want nil error", err)
 	}
@@ -58,7 +62,7 @@ func TestRunInterview_RenamesAndTemplateCopy(t *testing.T) {
 		"n\n" + // structural probe: no
 		"y\n" // confirm write
 
-	result, _, err := scriptedInterview(t, script)
+	result, _, err := scriptedInterview(t, script, model.Vocabulary{})
 	if err != nil {
 		t.Fatalf("RunInterview(renames) = %v, want nil error", err)
 	}
@@ -93,7 +97,7 @@ func TestRunInterview_RenamesAndTemplateCopy(t *testing.T) {
 func TestRunInterview_StructuralRequest_RefusedButContinues(t *testing.T) {
 	script := strings.Repeat("\n", 9) + "n\n" + "y\n" /* structural: yes */ + "y\n" /* confirm write */
 
-	result, out, err := scriptedInterview(t, script)
+	result, out, err := scriptedInterview(t, script, model.Vocabulary{})
 	if err != nil {
 		t.Fatalf("RunInterview(structural request) = %v, want nil error (the interview must continue, not abort)", err)
 	}
@@ -120,7 +124,7 @@ func TestRunInterview_DeclinedWrite(t *testing.T) {
 	script := allDefaultsScript()
 	script = strings.TrimSuffix(script, "y\n") + "n\n" // decline the final confirm instead
 
-	_, _, err := scriptedInterview(t, script)
+	_, _, err := scriptedInterview(t, script, model.Vocabulary{})
 	if !errors.Is(err, ErrDeclinedWrite) {
 		t.Fatalf("RunInterview(declined) = %v, want ErrDeclinedWrite", err)
 	}
@@ -144,7 +148,7 @@ func TestRunInterview_Aborted_TruncatedAtEveryPoint(t *testing.T) {
 			truncated += "\n"
 		}
 		t.Run("cutAfterLine", func(t *testing.T) {
-			_, _, err := scriptedInterview(t, truncated)
+			_, _, err := scriptedInterview(t, truncated, model.Vocabulary{})
 			if !errors.Is(err, ErrAborted) {
 				t.Fatalf("truncated after %d line(s) (script %q): RunInterview = %v, want ErrAborted", cut, truncated, err)
 			}
@@ -160,12 +164,12 @@ func TestRunInterview_Aborted_TruncatedAtEveryPoint(t *testing.T) {
 // "ok" printed unconditionally before any answer is read.
 func TestRunInterview_LiveValidationPreview(t *testing.T) {
 	scriptRenamed := "Epic\n" + strings.Repeat("\n", 8) + "n\nn\ny\n"
-	_, outRenamed, err := scriptedInterview(t, scriptRenamed)
+	_, outRenamed, err := scriptedInterview(t, scriptRenamed, model.Vocabulary{})
 	if err != nil {
 		t.Fatalf("RunInterview: %v", err)
 	}
 
-	_, outDefault, err := scriptedInterview(t, allDefaultsScript())
+	_, outDefault, err := scriptedInterview(t, allDefaultsScript(), model.Vocabulary{})
 	if err != nil {
 		t.Fatalf("RunInterview: %v", err)
 	}
@@ -180,4 +184,67 @@ func TestRunInterview_LiveValidationPreview(t *testing.T) {
 	if strings.Contains(outDefault, wantDigest) {
 		t.Fatalf("the all-defaults run's output should never contain the renamed candidate's digest")
 	}
+}
+
+// TestRunInterview_SeedIsTheDefault is R-W4-6's own behavioral pin:
+// RunInterview's seed model.Vocabulary parameter supplies each rename
+// prompt's Enter-default (the seed's own value for that id when present,
+// else the id unchanged — today's fallback, now just the zero-seed special
+// case), and the interview's own result STARTS as a deep copy of the seed
+// rather than the zero value, so an untouched (Enter-only) prompt leaves
+// the seeded entry in place rather than silently dropping it.
+func TestRunInterview_SeedIsTheDefault(t *testing.T) {
+	seed := PlainPreset()
+
+	t.Run("all defaults reproduces the seed exactly", func(t *testing.T) {
+		result, out, err := scriptedInterview(t, allDefaultsScript(), seed)
+		if err != nil {
+			t.Fatalf("RunInterview(seeded, all defaults) = %v, want nil error", err)
+		}
+		if !reflect.DeepEqual(result.Vocabulary, seed) {
+			t.Fatalf("result.Vocabulary = %+v, want the seed %+v unchanged", result.Vocabulary, seed)
+		}
+		if !strings.Contains(out, `class "story" [Enter to keep "planned story"]`) {
+			t.Fatalf("transcript does not show the seed's own value as the story prompt's default:\n%s", out)
+		}
+		if !strings.Contains(out, `class "feature" [Enter to keep "feature"]`) {
+			t.Fatalf("transcript does not fall back to the id for an id the seed does not carry:\n%s", out)
+		}
+	})
+
+	t.Run("an explicit answer overrides the seeded default", func(t *testing.T) {
+		// Order: classes [feature, spike, story]. Blank, blank, "Task": leave
+		// feature absent and spike at its seeded default, rename story.
+		script := "\n\nTask\n" + strings.Repeat("\n", 6) + "n\nn\ny\n"
+		result, _, err := scriptedInterview(t, script, seed)
+		if err != nil {
+			t.Fatalf("RunInterview(seeded, story renamed) = %v, want nil error", err)
+		}
+		want := map[string]string{"story": "Task", "spike": "research spike"}
+		if !reflect.DeepEqual(result.Vocabulary.Classes, want) {
+			t.Fatalf("result.Vocabulary.Classes = %+v, want %+v", result.Vocabulary.Classes, want)
+		}
+	})
+
+	t.Run("an empty seed reproduces today's transcript byte-for-byte", func(t *testing.T) {
+		_, out, err := scriptedInterview(t, allDefaultsScript(), model.Vocabulary{})
+		if err != nil {
+			t.Fatalf("RunInterview(empty seed, all defaults) = %v, want nil error", err)
+		}
+		want := `verdi init --wizard — configuring a store in this directory.
+Every answer is written to editable config; nothing here is final.
+
+Vocabulary — class display words (Enter to keep the id unchanged):
+  class "feature" [Enter to keep "feature"]:   class "spike" [Enter to keep "spike"]:   class "story" [Enter to keep "story"]: Vocabulary — state display words (Enter to keep the id unchanged):
+  state "accepted-pending-build" [Enter to keep "accepted-pending-build"]:   state "closed" [Enter to keep "closed"]:   state "draft" [Enter to keep "draft"]:   state "superseded" [Enter to keep "superseded"]: Vocabulary — verb display words (Enter to keep the id unchanged):
+  verb "close" [Enter to keep "close"]:   verb "merge" [Enter to keep "merge"]: Copy the canonical templates into .verdi/templates/ for local customization? [y/N]: Add, remove, or restructure the class hierarchy, lifecycle states, or per-transition obligations? [y/N]: 
+Summary:
+  vocabulary: unchanged (every rename left at its default)
+  templates: unchanged (no local override copies)
+
+Write .verdi/ ? [Y/n]: `
+		if out != want {
+			t.Fatalf("empty-seed transcript drifted from the pre-seed-parameter baseline:\n--- got ---\n%s\n--- want ---\n%s", out, want)
+		}
+	})
 }
