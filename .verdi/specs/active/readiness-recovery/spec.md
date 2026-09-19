@@ -28,7 +28,7 @@ decisions:
   - { id: dc-1, text: "Two loaders beside the existing packages, not one application layer: internal/readinessload mirrors specdocload and serves every surface; internal/recovery owns the projection schema and executor wiring; journey owns the eventual derivation; evidence owns the feature scaffold. Chosen over an internal/journeyapp composition (four concerns in one package) and over folding readiness and recovery into the journey record (a declared-requirement projection and a residue diagnosis are different things).", anchor: dc-1 }
   - { id: dc-2, text: "Attestation symmetry is CLI-level in this feature (scaffold verb, chip, lint, preflight, readiness); the workbench authoring flow for both classes lands in the Fable lane after the owner's design pass so presentation is built once over the final API.", anchor: dc-2 }
   - { id: dc-3, text: "The three snapshot consumers and the CLI switch to the continuous loader; the wall shell keeps its derivation with a pinned gap witness (ac-5). Replacing the wall's grammar now would pull the workbench lane ahead of the redesign.", anchor: dc-3 }
-  - { id: dc-4, text: "Recovery executes exactly two existing executors and nothing else: the branch-cut unwind close already proves, and delegation to the reclaim plan's dry-run and --apply. Staged-but-uncommitted and archive-without-commit states get diagnosis and manual commands because no reversible primitive for them exists and inventing one (git restore) would violate the parent's no-invented-recovery rule.", anchor: dc-4 }
+  - { id: dc-4, text: "Recovery executes exactly two existing executors and nothing else: the branch-cut unwind close already proves, and delegation to the reclaim plan's dry-run and --apply. Staged-but-uncommitted and archive-without-commit states get diagnosis and manual commands because no reversible primitive for them exists and inventing one (git restore) would violate the parent's no-invented-recovery rule. Legibility is the aim of this feature (owner, 2026-09-19): every recognized state must be explained completely before any executor is considered, and a later feature may add executors behind the same projection.", anchor: dc-4 }
   - { id: dc-5, text: "Per-request readiness must not run an external process: the judge cache is the only semantic source at request time; the deliberate judge run stays in verdi context conflict and the optional serve pre-run.", anchor: dc-5 }
   - { id: dc-6, text: "Risk tiers: Tier 3 with an owner risk gate for ac-9 and ac-10's executable choices; Tier 2 for ac-1 through ac-4, ac-6, ac-8; Tier 1 for ac-5 and ac-7's lint and chip fixes. Waves: 1 = ac-1..ac-5 (readiness); 2 = ac-6, ac-7 (attestations); 3 = ac-8..ac-10 (recovery); each ends with the full gate; the integration unit of the orchestration index follows against the merged head.", anchor: dc-6 }
   - { id: dc-7, text: "Recognized recovery states are the ones the ritual inventory proves the lifecycle leaves behind (design start, build start, close, policy adopt, board commit and push, locks, draft-mutation journals, execution workspaces, constitution proposals); a state outside that inventory is unrecognized and reported as such, never classified by resemblance.", anchor: dc-7 }
@@ -154,7 +154,8 @@ Snapshot consumers go continuous; the wall waits with a gap witness.
 
 ## dc-4
 
-Two executors only.
+Two executors only. Legibility first: the projection is the deliverable;
+executors are conveniences added only where already proven.
 
 ## dc-5
 
