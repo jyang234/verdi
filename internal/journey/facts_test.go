@@ -707,6 +707,26 @@ func TestGatherFacts_HappyPath(t *testing.T) {
 	if len(facts.Owners) != 1 || facts.Owners[0] != "platform-team" {
 		t.Fatalf("Owners = %v", facts.Owners)
 	}
+	// This fixture is a FEATURE, so GatherFacts reaches both eventual-
+	// source ports; both noOp fakes return their benign error, so this
+	// happy path deliberately carries exactly two disclosures and no
+	// stub/fold facts at all (co-6: an unavailable source is disclosed,
+	// never a gathering failure). Asserted rather than ignored — a
+	// disclosure nothing examines is the silence CO-1 forbids.
+	if facts.Stubs != nil || facts.FeatureFold != nil {
+		t.Fatalf("Stubs = %v, FeatureFold = %v, want both nil", facts.Stubs, facts.FeatureFold)
+	}
+	if len(facts.EventualDisclosures) != 2 {
+		t.Fatalf("EventualDisclosures = %v, want exactly two", facts.EventualDisclosures)
+	}
+	for _, want := range []string{
+		"stub reconciliation for payments could not be computed: journey: fake stub reconciler has no reconcileFn wired for this test",
+		"the outcome-floor fold for payments could not be computed: journey: fake feature folder has no foldFn wired for this test",
+	} {
+		if !containsString(facts.EventualDisclosures, want) {
+			t.Fatalf("EventualDisclosures = %v, want %q", facts.EventualDisclosures, want)
+		}
+	}
 }
 
 func TestGatherFacts_NotFound(t *testing.T) {

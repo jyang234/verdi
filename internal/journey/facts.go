@@ -160,6 +160,15 @@ func (p Projector) GatherFacts(ctx context.Context, cfg *store.Config, arg strin
 // value stays nil and the source yields no eventual items for this record
 // (eventual.go's stubUnreconciledBlockers/outcomeFloorBlockers both treat
 // a nil input as "nothing to derive from," not an error of their own).
+//
+// Both errors routinely carry this process's own ABSOLUTE store path
+// (internal/index/walk.go's "index: walking <root>/.verdi",
+// internal/evidence/records.go's "evidence: reading <derivedRoot>"), and
+// the disclosure they become flows into the canonical bytes and the
+// record digest — so it is sanitized here exactly as
+// gatherLifecycleFacts sanitizes specstate's own disclosures (F1(b),
+// CO-2/CO-4: two checkouts of the same store at different paths must
+// derive identical bytes).
 func (p Projector) gatherEventualFeatureFacts(ctx context.Context, root, name string, spec *artifact.SpecFrontmatter, mdl *model.Model, repo RepositoryFacts) (*evidence.StubReconciliation, *evidence.FeatureResult, []string) {
 	commit := ""
 	if repo.Head.Known {
@@ -184,7 +193,7 @@ func (p Projector) gatherEventualFeatureFacts(ctx context.Context, root, name st
 		foldOut = &fold
 	}
 
-	return stubsOut, foldOut, disclosures
+	return stubsOut, foldOut, sanitizeDisclosures(root, disclosures)
 }
 
 // --- target resolution --------------------------------------------------
