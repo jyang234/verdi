@@ -293,3 +293,63 @@ func TestDeriveEventual_OrderingAndUniqueness(t *testing.T) {
 		t.Fatalf("validate() = %v, want a duplicate-id refusal when an eventual item's ID equals a current blocker's ID", err)
 	}
 }
+
+// --- sanitizeConflictID / dedupeConflictIDs (resolution (d)) --------------
+
+func TestSanitizeConflictID(t *testing.T) {
+	tests := []struct {
+		name string
+		raw  string
+		want string
+	}{
+		{"already valid kebab-case", "mech-1", "mech-1"},
+		{"uppercase lowercased", "MECH-1", "mech-1"},
+		{"internal punctuation collapses to one dash", "Mech Row #1", "mech-row-1"},
+		{"run of punctuation collapses to one dash", "a!!!b", "a-b"},
+		{"leading/trailing punctuation trimmed", "!!!abc!!!", "abc"},
+		{"leading digit gets a letter prefix", "3xyz", "row-3xyz"},
+		{"empty string falls back to row", "", "row"},
+		{"all punctuation falls back to row", "###", "row"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := sanitizeConflictID(tt.raw)
+			if got != tt.want {
+				t.Fatalf("sanitizeConflictID(%q) = %q, want %q", tt.raw, got, tt.want)
+			}
+			if !blockerIDRe.MatchString("conflict-mechanical/" + got) {
+				t.Fatalf("sanitizeConflictID(%q) = %q does not compose into a valid blocker id", tt.raw, got)
+			}
+		})
+	}
+}
+
+// TestDedupeConflictIDs proves resolution (d)'s collision rule: two DISTINCT
+// raw ids that normalize to the same sanitized form are disambiguated
+// deterministically in report order (-2, -3, ...), each collision disclosed;
+// a raw id that normalizes uniquely keeps its bare sanitized form.
+func TestDedupeConflictIDs(t *testing.T) {
+	raw := []string{"Mech-1", "mech-1", "sem/1", "mech_1", "sem-1"}
+	ids, disclosures := dedupeConflictIDs(raw)
+	want := []string{"mech-1", "mech-1-2", "sem-1", "mech-1-3", "sem-1-2"}
+	if !reflect.DeepEqual(ids, want) {
+		t.Fatalf("ids = %v, want %v", ids, want)
+	}
+	if len(disclosures) != 3 {
+		t.Fatalf("disclosures = %v, want exactly 3 (one per collision)", disclosures)
+	}
+	for i, id := range ids {
+		if !blockerIDRe.MatchString("conflict-mechanical/" + id) {
+			t.Fatalf("ids[%d] = %q does not compose into a valid blocker id", i, id)
+		}
+	}
+	// Every id in the returned slice must be pairwise-unique — the whole
+	// point of the collision suffix.
+	seen := map[string]bool{}
+	for _, id := range ids {
+		if seen[id] {
+			t.Fatalf("ids = %v, contains a duplicate after dedup: %q", ids, id)
+		}
+		seen[id] = true
+	}
+}
