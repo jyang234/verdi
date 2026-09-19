@@ -133,6 +133,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"sort"
 	"strings"
@@ -142,6 +143,7 @@ import (
 	"github.com/jyang234/verdi/internal/boardio"
 	"github.com/jyang234/verdi/internal/contextcompile"
 	"github.com/jyang234/verdi/internal/gitx"
+	"github.com/jyang234/verdi/internal/initwizard"
 	"github.com/jyang234/verdi/internal/journey"
 	"github.com/jyang234/verdi/internal/model"
 	"github.com/jyang234/verdi/internal/policyartifact"
@@ -823,7 +825,7 @@ func TestCLIShowcaseInit(t *testing.T) {
 		t.Fatalf("reading the real showcase store's verdi.yaml: %v", err)
 	}
 
-	for _, args := range [][]string{{"init"}, {"init", "--wizard"}} {
+	for _, args := range [][]string{{"init"}, {"init", "--wizard"}, {"init", "--vocabulary", "plain"}} {
 		stdout, stderr, code := runBinary(t, root, args...)
 		if code != 2 {
 			t.Fatalf("verdi %v against the real showcase store: exit %d, want 2 (create-only refusal)\nstdout:\n%s\nstderr:\n%s", args, code, stdout, stderr)
@@ -843,7 +845,8 @@ func TestCLIShowcaseInit(t *testing.T) {
 
 	// The creation path: init's whole point is to work BEFORE any store
 	// exists, so it is proven here, against a fresh empty directory,
-	// using the same real compiled binary.
+	// using the same real compiled binary. Bare (no --vocabulary flag)
+	// writes the plain preset by default (spec/spec-documents ac-11).
 	scratch := t.TempDir()
 	stdout, stderr, code := runBinary(t, scratch, "init")
 	if code != 0 {
@@ -855,6 +858,27 @@ func TestCLIShowcaseInit(t *testing.T) {
 	}
 	if string(data) != "schema: verdi.layout/v1\n" {
 		t.Fatalf("freshly-init'd verdi.yaml = %q, want exactly %q", data, "schema: verdi.layout/v1\n")
+	}
+	modelData, err := os.ReadFile(filepath.Join(scratch, ".verdi", "model.yaml"))
+	if err != nil {
+		t.Fatalf("reading the freshly-init'd model.yaml: %v", err)
+	}
+	decoded, err := model.DecodeModel(modelData)
+	if err != nil {
+		t.Fatalf("freshly-init'd model.yaml does not decode: %v", err)
+	}
+	if !reflect.DeepEqual(decoded.Vocabulary, initwizard.PlainPreset()) {
+		t.Fatalf("freshly-init'd model.yaml Vocabulary = %+v, want the plain preset %+v (ac-11)", decoded.Vocabulary, initwizard.PlainPreset())
+	}
+
+	// --vocabulary canonical opts out: no model.yaml at all.
+	scratchCanonical := t.TempDir()
+	stdout, stderr, code = runBinary(t, scratchCanonical, "init", "--vocabulary", "canonical")
+	if code != 0 {
+		t.Fatalf("verdi init --vocabulary canonical (fresh scratch dir): exit %d, want 0\nstdout:\n%s\nstderr:\n%s", code, stdout, stderr)
+	}
+	if _, err := os.Stat(filepath.Join(scratchCanonical, ".verdi", "model.yaml")); !os.IsNotExist(err) {
+		t.Fatalf("verdi init --vocabulary canonical wrote a model.yaml (err=%v), want none — opting out of the plain preset", err)
 	}
 }
 

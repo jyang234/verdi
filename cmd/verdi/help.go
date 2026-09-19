@@ -70,7 +70,7 @@ verbs:
   audit            audit ADR exemptions, deviations, and closure hygiene
   attest           scaffold an attestation skeleton for a story/AC pair
   model            validate the store's operating model
-  init             scaffold a new verdi store
+  init             scaffold a new verdi store (plain vocabulary by default)
   obligation       author or scaffold an evidence obligation
   waive            create or reaffirm a waiver record
   spec             inspect a spec's effective lifecycle state or render it as a document
@@ -140,7 +140,7 @@ var verbUsage = map[string]string{
 	"audit":      "usage: verdi audit",
 	"attest":     "usage: verdi attest <story-ref> <ac-id>",
 	"model":      "usage: verdi model check",
-	"init":       "usage: verdi init [--wizard]",
+	"init":       "usage: verdi init [--wizard] [--vocabulary plain|canonical]",
 	"obligation": obligationVerbUsage,
 	"waive":      waiveUsage,
 	"spec":       specVerbUsage,

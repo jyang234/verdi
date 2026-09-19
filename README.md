@@ -121,10 +121,15 @@ branch (drafts are never committed — see "The showcase" below).
 
 Start in a clean project checkout with at least one Git commit, a configured
 Git author, and no existing `.verdi/` directory. Use the binary installed above.
-`verdi init` is non-interactive and writes only `.verdi/verdi.yaml`; repository
-plumbing is a separate step. `verdi init --wizard` requires a terminal and
-customizes vocabulary and scaffold templates. It does not configure your forge,
-tracker, or evidence producers. Both forms refuse an existing `.verdi/` directory.
+`verdi init` is non-interactive and writes `.verdi/verdi.yaml` plus a
+`.verdi/model.yaml` carrying the `plain` vocabulary preset (renamed display
+words for `story`/`spike`; `--vocabulary canonical` opts out and writes no
+model.yaml); repository plumbing is a separate step. `verdi init --wizard`
+requires a terminal, is seeded from the same preset, and customizes
+vocabulary and scaffold templates from there. It does not configure your
+forge, tracker, or evidence producers. Both forms refuse an existing
+`.verdi/` directory, including with `--vocabulary`: an existing store is
+never rewritten.
 
 For a GitHub project, initialize and add the required generated-file attributes:
 
@@ -290,7 +295,7 @@ close`; the CLI is that path plus the read surfaces.
 
 | Verb | Purpose |
 |---|---|
-| `verdi init [--wizard]` | Initialize a store; the optional terminal wizard customizes vocabulary/templates |
+| `verdi init [--wizard] [--vocabulary plain\|canonical]` | Initialize a store with the `plain` vocabulary preset by default (`--vocabulary canonical` opts out); the optional terminal wizard customizes vocabulary/templates from there |
 | `verdi design start [<ref>] --kind feature\|story --name <n>` | Cut a design branch and scaffold a draft; supply both statement flags or use the terminal interview |
 | `verdi design import source --root <dir> --file <relative-path>` | Read one source into JSON; optional start/end line flags select a range |
 | `verdi design import preview --request <path\|->` | Preview an import without changing the project; report fields, coverage and missing requirements |
