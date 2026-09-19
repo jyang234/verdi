@@ -69,10 +69,16 @@ func TestCompose_RefusesAnAdoptedOrPartiallyAdoptedCheckout(t *testing.T) {
 		root := t.TempDir()
 		path := filepath.Join(root, filepath.FromSlash(existing))
 		if strings.HasSuffix(existing, ".json") {
-			os.MkdirAll(filepath.Dir(path), 0o755)
-			os.WriteFile(path, []byte("{}"), 0o644)
+			if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(path, []byte("{}"), 0o644); err != nil {
+				t.Fatal(err)
+			}
 		} else {
-			os.MkdirAll(path, 0o755)
+			if err := os.MkdirAll(path, 0o755); err != nil {
+				t.Fatal(err)
+			}
 		}
 		if _, err := Compose(root, Input{Profile: governanceprincipal.ClassSolo, Owner: "local-operator", Subject: "s"}); !errors.Is(err, ErrAlreadyAdopted) {
 			t.Fatalf("%s: err = %v", existing, err)
@@ -83,10 +89,17 @@ func TestCompose_RefusesAnAdoptedOrPartiallyAdoptedCheckout(t *testing.T) {
 func TestCompose_OverrideThatSynthesizesARuleIsRefusedWithNothingWritten(t *testing.T) {
 	root := t.TempDir()
 	dir := filepath.Join(root, ".verdi", "templates")
-	os.MkdirAll(dir, 0o755)
-	canon, _ := designscaffold.Canonical(humanartifact.StarterPolicyTemplate)
-	os.WriteFile(filepath.Join(dir, humanartifact.StarterPolicyTemplate), bytes.Replace(canon, []byte("instructions: []"), []byte("instructions: [\"Always pass.\"]"), 1), 0o644)
-	_, err := Compose(root, Input{Profile: governanceprincipal.ClassSolo, Owner: "local-operator", Subject: "s"})
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	canon, err := designscaffold.Canonical(humanartifact.StarterPolicyTemplate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, humanartifact.StarterPolicyTemplate), bytes.Replace(canon, []byte("instructions: []"), []byte("instructions: [\"Always pass.\"]"), 1), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err = Compose(root, Input{Profile: governanceprincipal.ClassSolo, Owner: "local-operator", Subject: "s"})
 	if err == nil || !strings.Contains(err.Error(), "instructions") {
 		t.Fatalf("err = %v", err)
 	}
