@@ -680,21 +680,21 @@ func runDesignStart(ctx context.Context, root string, kind artifact.SpecClass, s
 	return 0
 }
 
-// resolveDesignStartBase implements dc-7 (I-130): resolves a fresh design
-// branch's base exactly as this verb's --kind/--name path always has,
-// printing the identical disclosure lines to stdout on success and the
-// identical operational-refusal message to stderr on failure. Extracted out
-// of runDesignStart (behavior-preserving: byte-identical logic, only moved)
-// so `verdi design start --supersedes` (designsupersede.go, spec/
-// uat-round-1 ac-11) can reuse it verbatim — the dispatch contract's own
-// words: "reuse runDesignStart's base resolution (dc-7)" — rather than
-// re-implementing (and risking drift from) this same dc-7 precedence chain
-// a second time.
-func resolveDesignStartBase(ctx context.Context, root string, stdout, stderr io.Writer) (baseRef string, ok bool) {
+// resolveBranchBase implements dc-7 (I-130): resolves a fresh branch's
+// base exactly as design start's --kind/--name path always has, printing
+// the identical disclosure lines to stdout on success and the identical
+// operational-refusal message to stderr on failure, under whichever verb
+// prefix the caller supplies. Generalized from resolveDesignStartBase
+// (R-W4-3, spec/spec-documents ac-10) so `verdi policy adopt --starter`
+// can reuse design start's own dc-7 chain, and resolveDesignStartBase
+// below is design start's own byte-identical wrapper (behavior-
+// preserving: every existing "design start:"-prefixed disclosure and
+// caller is unchanged).
+func resolveBranchBase(ctx context.Context, root, verb string, stdout, stderr io.Writer) (baseRef string, ok bool) {
 	if defaultBranch, drOK := specstate.ResolveDefaultBranch(ctx, root); drOK {
 		baseCommit, rerr := gitx.RevParse(ctx, root, defaultBranch.Ref)
 		if rerr != nil {
-			fmt.Fprintln(stderr, "design start:", rerr)
+			fmt.Fprintln(stderr, verb+":", rerr)
 			return "", false
 		}
 		// defaultBranch.Ref is already the disclosed choice resolveBranchRef
@@ -702,7 +702,7 @@ func resolveDesignStartBase(ctx context.Context, root string, stdout, stderr io.
 		// remote-tracking ref exists, otherwise the local branch name — so
 		// printing it verbatim both names the base and discloses which of
 		// the two was used, with no separate annotation needed.
-		fmt.Fprintf(stdout, "design start: base %s @ %s\n", defaultBranch.Ref, shortSHA(baseCommit))
+		fmt.Fprintf(stdout, "%s: base %s @ %s\n", verb, defaultBranch.Ref, shortSHA(baseCommit))
 		return defaultBranch.Ref, true
 	}
 	// dc-7: distinguish "no origin remote at all" (disclosed HEAD
@@ -716,33 +716,40 @@ func resolveDesignStartBase(ctx context.Context, root string, stdout, stderr io.
 	case errors.Is(remoteErr, gitx.ErrNoSuchRemote):
 		headCommit, herr := gitx.RevParse(ctx, root, "HEAD")
 		if herr != nil {
-			fmt.Fprintln(stderr, "design start:", herr)
+			fmt.Fprintln(stderr, verb+":", herr)
 			return "", false
 		}
-		fmt.Fprintf(stdout, "design start: default branch unresolved (no origin remote); basing on current HEAD %s — disclosed, not a default-branch base\n", shortSHA(headCommit))
+		fmt.Fprintf(stdout, "%s: default branch unresolved (no origin remote); basing on current HEAD %s — disclosed, not a default-branch base\n", verb, shortSHA(headCommit))
 		return "HEAD", true
 	case remoteErr != nil:
-		fmt.Fprintln(stderr, "design start:", remoteErr)
+		fmt.Fprintln(stderr, verb+":", remoteErr)
 		return "", false
 	default:
 		// origin IS configured, but ResolveDefaultBranch still
 		// failed: exactly the stale-default hazard UAT-021 reported.
-		fmt.Fprintf(stderr, "design start: %s\n", unresolvableDefaultBranchMessage(ctx, root))
+		fmt.Fprintf(stderr, "%s: %s\n", verb, unresolvableDefaultBranchMessage(ctx, root))
 		return "", false
 	}
 }
 
-// checkoutNewDesignBranch cuts branch from baseRef and discloses the
-// checkout switch exactly as this verb's --kind/--name path always has
-// (dc-2) — extracted out of runDesignStart (behavior-preserving) so
-// `verdi design start --supersedes` (designsupersede.go) prints the
-// identical disclosure line design start's plain --kind/--name path
-// already does (dispatch contract: "with the existing disclosure lines
-// (dc-2)").
-func checkoutNewDesignBranch(ctx context.Context, root, branch, baseRef string, stdout, stderr io.Writer) bool {
+// resolveDesignStartBase is resolveBranchBase under design start's own
+// "design start" verb prefix — kept so both existing callers
+// (runDesignStart below, designsupersede.go) are unchanged.
+func resolveDesignStartBase(ctx context.Context, root string, stdout, stderr io.Writer) (baseRef string, ok bool) {
+	return resolveBranchBase(ctx, root, "design start", stdout, stderr)
+}
+
+// checkoutNewBranchDisclosed cuts branch from baseRef and discloses the
+// checkout switch exactly as design start's --kind/--name path always has
+// (dc-2), under whichever verb prefix the caller supplies. Generalized
+// from checkoutNewDesignBranch (R-W4-3, spec/spec-documents ac-10) so
+// `verdi policy adopt --starter` prints the identical disclosure shape;
+// checkoutNewDesignBranch below is design start's own byte-identical
+// wrapper.
+func checkoutNewBranchDisclosed(ctx context.Context, root, verb, branch, baseRef string, stdout, stderr io.Writer) bool {
 	beforeBranch, err := gitx.CurrentBranch(ctx, root)
 	if err != nil {
-		fmt.Fprintln(stderr, "design start:", err)
+		fmt.Fprintln(stderr, verb+":", err)
 		return false
 	}
 	beforeDesc := beforeBranch
@@ -750,21 +757,28 @@ func checkoutNewDesignBranch(ctx context.Context, root, branch, baseRef string, 
 		// Detached HEAD: name the commit instead of an empty branch name.
 		beforeHead, herr := gitx.RevParse(ctx, root, "HEAD")
 		if herr != nil {
-			fmt.Fprintln(stderr, "design start:", herr)
+			fmt.Fprintln(stderr, verb+":", herr)
 			return false
 		}
 		beforeDesc = shortSHA(beforeHead)
 	}
 
 	if err := gitx.CheckoutNewBranchFrom(ctx, root, branch, baseRef); err != nil {
-		fmt.Fprintln(stderr, "design start:", err)
+		fmt.Fprintln(stderr, verb+":", err)
 		return false
 	}
 	// CheckoutNewBranchFrom always lands on a brand-new branch name (it
 	// refuses above if branch already exists), so the checkout has, by
 	// construction, always just changed — this disclosure is unconditional.
-	fmt.Fprintf(stdout, "design start: switched checkout from %s to %s\n", beforeDesc, branch)
+	fmt.Fprintf(stdout, "%s: switched checkout from %s to %s\n", verb, beforeDesc, branch)
 	return true
+}
+
+// checkoutNewDesignBranch is checkoutNewBranchDisclosed under design
+// start's own "design start" verb prefix — kept so both existing callers
+// (runDesignStart below, designsupersede.go) are unchanged.
+func checkoutNewDesignBranch(ctx context.Context, root, branch, baseRef string, stdout, stderr io.Writer) bool {
+	return checkoutNewBranchDisclosed(ctx, root, "design start", branch, baseRef, stdout, stderr)
 }
 
 // resolveStoryTitle resolves storyRef's title through prov, degrading to
