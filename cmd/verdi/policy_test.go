@@ -301,3 +301,47 @@ func TestPolicyAdopt_ExistingBranchRefused(t *testing.T) {
 		t.Fatal("checkout moved off main despite the refusal")
 	}
 }
+
+// TestPolicyAdopt_DefaultBranchAlreadyAdoptedCaughtAfterCheckout proves
+// R-W4-3's own reason for existing: Compose is proved once BEFORE the
+// branch is cut (against whatever the CURRENT checkout's working tree
+// shows) and again AFTER (against policy/adopt's own checked-out tree,
+// cut from the resolved default branch) — these can disagree when the
+// current checkout predates a default branch that has already adopted
+// policy. The pre-checkout working tree here carries no .verdi/policy at
+// all (so the first Compose call passes and a branch IS cut), but main
+// itself already does (a prior commit this checkout is simply behind);
+// checking out policy/adopt from main brings that policy tree into the
+// working directory, and the second Compose call must catch it — exit 1,
+// the distinct post-checkout message, branch left in place, nothing
+// written or committed onto it.
+func TestPolicyAdopt_DefaultBranchAlreadyAdoptedCaughtAfterCheckout(t *testing.T) {
+	bin := buildVerdiBinary(t)
+	t.Setenv("CI_DEFAULT_BRANCH", "main")
+
+	repo := fixturegit.Build(t, []fixturegit.Layer{
+		{Files: map[string]string{".verdi/verdi.yaml": "schema: verdi.layout/v1\n"}, Message: "init store"},
+		{Files: map[string]string{".verdi/policy/constitution.md": "placeholder\n"}, Message: "main already carries a policy tree"},
+	})
+	// Move the current checkout back to the pre-policy commit: "main"
+	// itself still points at the policy-carrying head (repo.Head), but
+	// the working tree this test drives adopt from does not show it yet.
+	gitOutput(t, repo.Dir, "checkout", "--quiet", repo.Heads[0])
+	if _, err := os.Stat(filepath.Join(repo.Dir, ".verdi", "policy")); !os.IsNotExist(err) {
+		t.Fatalf("test setup: the pre-policy checkout unexpectedly carries .verdi/policy (stat err=%v)", err)
+	}
+
+	code, _, stderr := runVerdi(t, bin, repo.Dir, "policy", "adopt", "--starter")
+	if code != 1 || !strings.Contains(stderr, "left the checkout on policy/adopt with nothing written") {
+		t.Fatalf("code %d stderr %q, want 1 naming the post-checkout refusal", code, stderr)
+	}
+	if strings.TrimSpace(gitOutput(t, repo.Dir, "rev-parse", "--abbrev-ref", "HEAD")) != "policy/adopt" {
+		t.Fatal("expected the checkout to remain on policy/adopt after the post-checkout refusal (no rollback, disclosed)")
+	}
+	if strings.TrimSpace(gitOutput(t, repo.Dir, "rev-parse", "policy/adopt")) != strings.TrimSpace(gitOutput(t, repo.Dir, "rev-parse", "main")) {
+		t.Fatal("policy/adopt should sit exactly at main — nothing was committed onto it")
+	}
+	if gitOutput(t, repo.Dir, "status", "--porcelain") != "" {
+		t.Fatal("the post-checkout refusal left the tree dirty")
+	}
+}
