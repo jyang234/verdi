@@ -23,6 +23,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/jyang234/verdi/internal/contextcompile"
 	"github.com/jyang234/verdi/internal/dex"
 	"github.com/jyang234/verdi/internal/mcpserve"
 	"github.com/jyang234/verdi/internal/readinessload"
@@ -462,4 +463,138 @@ func TestDocumentParity_FourConsumersWithReadiness(t *testing.T) {
 	if stripReadinessSection(t, cliOut) != stripReadinessSection(t, cliNoReadiness) {
 		t.Errorf("readiness-populated and --no-readiness renders diverge by more than the Readiness section:\n--- populated (stripped) ---\n%s\n--- --no-readiness (stripped) ---\n%s", stripReadinessSection(t, cliOut), stripReadinessSection(t, cliNoReadiness))
 	}
+}
+
+// TestDocumentParity_ServedWithContextRequest is ac-4 under the one
+// shipped posture no other parity arm covers: `verdi serve
+// --context-request <a request for spec X>`, whose ONE loader
+// (cmd/verdi/serve.go) is threaded into the board, the board's Document
+// tab and MCP alike. R-RR1-15 fixes what that loader owes each ref:
+//
+//   - Spec Y, which the request does not name, derives exactly as if no
+//     request existed — so the CLI (which never has one), MCP and the
+//     board are byte-identical, ac-4's own clause. Before the fix the
+//     shared loader refused every ref but X, so Y's readiness was a loader
+//     error on both served surfaces while the CLI rendered it in full: a
+//     reachable byte divergence in normal operation, which this arm pins.
+//   - Spec X, the request's own, keeps the whole request path on both
+//     served surfaces (they agree byte for byte), and diverges from a CLI
+//     that carries no request — in EXACTLY the Readiness section and
+//     nowhere else, which stripReadinessSection states rather than
+//     assumes. That divergence is inherent to ac-4's own "the startup spec
+//     when --context-request is given": the CLI has no such flag, so the
+//     two readings answer different questions about the same ref.
+//
+// Both request-bound legs run through Options.ConflictProvider (R-RR1-14's
+// hermetic seam, readinessLoadPassProviderFunc) so no judge process is
+// ever launchable here (co-1), and they are INDEPENDENTLY constructed, so
+// byte-equality is a property of the derivation rather than of a shared
+// Go value. dex is excluded throughout: the static docs site never
+// carries readiness at all (spec/spec-documents ac-4).
+func TestDocumentParity_ServedWithContextRequest(t *testing.T) {
+	repo := buildContextCompileRepo(t, map[string]string{
+		".verdi/specs/active/feature-alpha/spec.md": contextFeatureAlphaSpec(t),
+		".verdi/specs/active/lockbox/spec.md":       specDocFixture,
+	})
+	env := []string{"CI_DEFAULT_BRANCH=main"}
+	bin := buildVerdiBinary(t)
+	requestPath := writeContextRequestFile(t, repo.Dir, "readiness-request.json", contextRequestBytes(t, "spec/feature-alpha", contextcompile.PhaseDesign, nil))
+
+	// The loader cmdServeWithDeps builds when --context-request is given:
+	// root, BoardHref, the request path — plus the hermetic conflict seam
+	// in place of the real provider. A fresh value per leg, never shared.
+	servedLoader := func() readinessload.Loader {
+		return readinessload.Loader{Root: repo.Dir, Opts: readinessload.Options{
+			BoardHref:          workbench.BranchBoardHref,
+			ContextRequestPath: requestPath,
+			ConflictProvider:   readinessLoadPassProviderFunc(t),
+		}}
+	}
+
+	// --- spec Y: not the request's spec ---------------------------------
+	cliY, stderr, code := runVerdiBinary(t, bin, repo.Dir, env, "spec", "doc", "spec/lockbox")
+	if code != 0 {
+		t.Fatalf("cli exit %d: %s", code, stderr)
+	}
+	mcpY := mcpDocumentMarkdown(t, &mcpserve.Backend{Root: repo.Dir, ReadinessLoader: servedLoader()}, "spec/lockbox")
+	boardY := boardDocumentMarkdown(t, workbench.NewHandlerWith(repo.Dir, workbench.Deps{ReadinessLoader: servedLoader()}), "lockbox")
+
+	if cliY != mcpY {
+		t.Errorf("spec Y: CLI and MCP-under-a-foreign-request differ:\n--- cli ---\n%s\n--- mcp ---\n%s", cliY, mcpY)
+	}
+	if cliY != boardY {
+		t.Errorf("spec Y: CLI and board-under-a-foreign-request differ:\n--- cli ---\n%s\n--- board ---\n%s", cliY, boardY)
+	}
+	for name, doc := range map[string]string{"cli": cliY, "mcp": mcpY, "board": boardY} {
+		if !strings.Contains(doc, "Source: readiness snapshot for `spec/lockbox`") || strings.Contains(doc, "Readiness was not supplied for this render.") {
+			t.Fatalf("spec Y's %s render must carry ITS OWN populated Readiness section:\n%s", name, doc)
+		}
+	}
+
+	// --- spec X: the request's own spec ---------------------------------
+	cliX, stderrX, codeX := runVerdiBinary(t, bin, repo.Dir, env, "spec", "doc", "spec/feature-alpha")
+	if codeX != 0 {
+		t.Fatalf("cli exit %d: %s", codeX, stderrX)
+	}
+	mcpX := mcpDocumentMarkdown(t, &mcpserve.Backend{Root: repo.Dir, ReadinessLoader: servedLoader()}, "spec/feature-alpha")
+	boardX := boardDocumentMarkdown(t, workbench.NewHandlerWith(repo.Dir, workbench.Deps{ReadinessLoader: servedLoader()}), "feature-alpha")
+
+	if mcpX != boardX {
+		t.Errorf("spec X: the two served surfaces differ under the request they share:\n--- mcp ---\n%s\n--- board ---\n%s", mcpX, boardX)
+	}
+	if !strings.Contains(boardX, "Source: readiness snapshot for `spec/feature-alpha`") {
+		t.Fatalf("spec X's served render must carry its own populated Readiness section:\n%s", boardX)
+	}
+	if cliX == boardX {
+		t.Fatalf("spec X read identically with and without the startup request — the served loader is not applying it to its own spec:\n%s", boardX)
+	}
+	if stripReadinessSection(t, cliX) != stripReadinessSection(t, boardX) {
+		t.Errorf("spec X: a startup request must change EXACTLY the Readiness section:\n--- cli (stripped) ---\n%s\n--- board (stripped) ---\n%s", stripReadinessSection(t, cliX), stripReadinessSection(t, boardX))
+	}
+}
+
+// mcpDocumentMarkdown returns get_document's rendered Markdown for ref
+// through backend — the same decode dance the arms above spell out inline,
+// factored here for the two-spec arm that needs it four times.
+func mcpDocumentMarkdown(t *testing.T, backend *mcpserve.Backend, ref string) string {
+	t.Helper()
+	args, err := json.Marshal(map[string]string{"ref": ref})
+	if err != nil {
+		t.Fatal(err)
+	}
+	res := backend.GetDocument(context.Background(), json.RawMessage(args))
+	var payload struct {
+		Content []struct {
+			Text string `json:"text"`
+		} `json:"content"`
+		IsError bool `json:"isError"`
+	}
+	// The refusal diagnostic below prints raw, so a marshal failure must
+	// not be swallowed into an empty one (final-review F8).
+	raw, err := json.Marshal(res)
+	if err != nil {
+		t.Fatalf("marshalling the mcp tool result: %v", err)
+	}
+	if err := json.Unmarshal(raw, &payload); err != nil || payload.IsError || len(payload.Content) == 0 {
+		t.Fatalf("mcp result for %s: %s", ref, raw)
+	}
+	var doc struct {
+		Markdown string `json:"markdown"`
+	}
+	if err := json.Unmarshal([]byte(payload.Content[0].Text), &doc); err != nil {
+		t.Fatal(err)
+	}
+	return doc.Markdown
+}
+
+// boardDocumentMarkdown returns the board Document tab's Markdown for the
+// spec named name.
+func boardDocumentMarkdown(t *testing.T, h http.Handler, name string) string {
+	t.Helper()
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/board/spec/"+name+"/document?format=md", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("board document for %s: %d %s", name, rec.Code, rec.Body.String())
+	}
+	return rec.Body.String()
 }

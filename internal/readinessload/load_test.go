@@ -288,6 +288,67 @@ func TestLoad_WithRequestCacheHit(t *testing.T) {
 	}
 }
 
+// --- R-RR1-15: a supplied request binds to its own spec only ----------------
+
+// TestLoad_RequestForAnotherSpecDerivesAsIfAbsent is R-RR1-15: a supplied
+// --context-request binds to its OWN spec only. `verdi serve
+// --context-request <a request for X>` threads ONE loader into the board,
+// the Document tab and MCP, so every OTHER spec's readiness is derived
+// through that same request-bound loader; deriving Y must therefore
+// proceed exactly as if no request had been supplied — never a loader
+// error (the defect this pins), and never a request-specific witness
+// either: ac-4 requires spec Y to read byte-identically here and on a CLI
+// that has no request at all, so the two derivations must agree to the
+// byte, which the DeepEqual below states directly rather than leaving to
+// a reader of the two assertions above it. The request's own spec keeps
+// the whole request path (the positive control at the end), so this is a
+// binding rule, not a disabled feature.
+func TestLoad_RequestForAnotherSpecDerivesAsIfAbsent(t *testing.T) {
+	repo := buildCompileRepo(t, map[string]string{
+		".verdi/specs/active/feature-alpha/spec.md": featureAlphaSpec(t),
+		".verdi/specs/active/story-alpha/spec.md":   readinessStorySpec,
+	})
+	requestData := requestBytes(t, "spec/feature-alpha", contextcompile.PhaseDesign)
+	requestPath := writeRequestFile(t, repo.Dir, "readiness-request.json", requestData)
+
+	foreign, err := Load(context.Background(), repo.Dir, "spec/story-alpha", Options{ContextRequestPath: requestPath})
+	if err != nil {
+		t.Fatalf("Load for a spec the request does not name must succeed, got: %v", err)
+	}
+	verdict := concernByID(t, foreign, "context/verdict")
+	if verdict.State != readinesspilot.StateUnproven || !reflect.DeepEqual(verdict.Witnesses, []string{noContextRequestWitness}) {
+		t.Fatalf("context/verdict = %+v, want unproven carrying exactly the fixed no-request witness %q", verdict, noContextRequestWitness)
+	}
+	assertCLI(t, verdict.Destination.CLI, noContextRequestCLI)
+	if foreign.RequestDigest != testDigest(nil) {
+		t.Fatalf("RequestDigest = %q, want the digest of zero bytes %q (R-RR1-5's no-request value)", foreign.RequestDigest, testDigest(nil))
+	}
+
+	absent, err := Load(context.Background(), repo.Dir, "spec/story-alpha", Options{})
+	if err != nil {
+		t.Fatalf("Load with no request at all: %v", err)
+	}
+	if !reflect.DeepEqual(foreign, absent) {
+		t.Fatalf("a request naming another spec perturbed this ref's derivation:\n--- through the request-bound loader ---\n%+v\n--- with no request at all ---\n%+v", foreign, absent)
+	}
+
+	// Positive control: the request's own spec still travels the whole
+	// request path — the fall-through above narrows the request to its own
+	// target, it does not ignore the request.
+	own, err := Load(context.Background(), repo.Dir, "spec/feature-alpha", Options{ContextRequestPath: requestPath})
+	if err != nil {
+		t.Fatalf("Load for the request's own spec: %v", err)
+	}
+	if own.RequestDigest != testDigest(requestData) {
+		t.Fatalf("the request's own spec: RequestDigest = %q, want the digest of the request's exact bytes %q", own.RequestDigest, testDigest(requestData))
+	}
+	ownVerdict := concernByID(t, own, "context/verdict")
+	if contains(ownVerdict.Witnesses, noContextRequestWitness) {
+		t.Fatalf("the request's own spec must never carry the no-request witness: %+v", ownVerdict)
+	}
+	assertCLI(t, ownVerdict.Destination.CLI, []string{"verdi", "context", "conflict", "--request", requestPath})
+}
+
 // --- operational refusals ---------------------------------------------------
 
 func TestLoad_RefusesPinnedOrFragmentRef(t *testing.T) {

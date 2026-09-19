@@ -74,13 +74,18 @@ type PredecodedRequest struct {
 // Options is every optional posture Load needs beyond (root, ref).
 type Options struct {
 	// ContextRequestPath is the optional --context-request file naming an
-	// acceptance-candidate policy-conflict evaluation for this ref
+	// acceptance-candidate policy-conflict evaluation for ONE spec
 	// (R-RR1-5). Empty means no conflict request is synthesized — inventing
 	// adapter, grants, or scope would be authority the store never
 	// declared — and the check-context area carries exactly one unproven
-	// context/verdict concern instead. Still required (for its own
-	// destination text and identity checks) even when PredecodedRequest is
-	// also set.
+	// context/verdict concern instead. A supplied request binds to its own
+	// spec only: a Load for any OTHER ref derives exactly as if this field
+	// were empty (R-RR1-15), so the ONE loader `verdi serve
+	// --context-request` threads into the board, the Document tab and MCP
+	// still serves every active spec, and each of those specs reads
+	// identically through it and through a caller carrying no request at
+	// all (ac-4). Still required (for its own destination text and identity
+	// checks) even when PredecodedRequest is also set.
 	ContextRequestPath string
 	// PredecodedRequest, when non-nil, is the exact bytes and decoded value
 	// of the file ContextRequestPath names — supplied by a caller that

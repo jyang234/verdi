@@ -8,10 +8,14 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/jyang234/verdi/internal/contextcompile"
 	"github.com/jyang234/verdi/internal/fixturegit"
+	"github.com/jyang234/verdi/internal/policyartifact"
 	"github.com/jyang234/verdi/internal/readinessload"
 	"github.com/jyang234/verdi/internal/readinesspilot"
 )
@@ -320,6 +324,16 @@ AC for ` + title + `.
 // snapshot replayed under two names.
 func newTwoSpecReadinessFixture(t *testing.T) (h http.Handler, root, specA, specB string) {
 	t.Helper()
+	root, specA, specB = newTwoSpecReadinessStore(t)
+	loader := readinessload.Loader{Root: root, Opts: readinessload.Options{BoardHref: BranchBoardHref}}
+	return NewHandlerWith(root, Deps{ReadinessLoader: loader}), root, specA, specB
+}
+
+// newTwoSpecReadinessStore builds that same two-spec store without wiring
+// any loader, for the tests that need to construct their own posture (a
+// request-bound loader, below).
+func newTwoSpecReadinessStore(t *testing.T) (root, specA, specB string) {
+	t.Helper()
 	t.Setenv("CI_DEFAULT_BRANCH", "main")
 	specA, specB = "wall-alpha", "wall-bravo"
 	repo := fixturegit.Build(t, []fixturegit.Layer{{
@@ -330,8 +344,7 @@ func newTwoSpecReadinessFixture(t *testing.T) (h http.Handler, root, specA, spec
 			".verdi/specs/active/" + specB + "/spec.md": twoSpecReadinessFixtureSpec(specB, "Wall Bravo"),
 		},
 	}})
-	loader := readinessload.Loader{Root: repo.Dir, Opts: readinessload.Options{BoardHref: BranchBoardHref}}
-	return NewHandlerWith(repo.Dir, Deps{ReadinessLoader: loader}), repo.Dir, specA, specB
+	return repo.Dir, specA, specB
 }
 
 // TestBoardDocument_ReadinessPerRefWithRealLoader is spec/readiness-
@@ -363,6 +376,81 @@ func TestBoardDocument_ReadinessPerRefWithRealLoader(t *testing.T) {
 	if strings.Contains(pageB.body, "spec/"+specA) {
 		t.Fatalf("spec B document must not name spec A at all:\n%s", pageB.body)
 	}
+}
+
+// TestBoardDocument_ReadinessLoaderBoundToAnotherSpecsRequest is R-RR1-15
+// at the consumer that made the defect reachable: `verdi serve
+// --context-request <a request for spec A>` threads ONE request-bound
+// loader into the board, so spec B's Document tab and /readiness?spec=B
+// both run through a loader carrying A's request. B must still derive its
+// own readiness — the request binds to A only. Before the fix the loader
+// refused every ref but A's, so B's document silently lost its Readiness
+// section and ?spec=B answered 503 for as long as that server ran; the
+// /readiness (no query, so the default spec A) leg is the positive
+// control: the SAME loader still serves the request's own spec.
+func TestBoardDocument_ReadinessLoaderBoundToAnotherSpecsRequest(t *testing.T) {
+	root, specA, specB := newTwoSpecReadinessStore(t)
+	requestPath := writeDesignContextRequest(t, root, "spec/"+specA)
+	loader := readinessload.Loader{Root: root, Opts: readinessload.Options{
+		BoardHref: BranchBoardHref, ContextRequestPath: requestPath,
+	}}
+	h := NewHandlerWith(root, Deps{ReadinessLoader: loader, ReadinessDefaultSpec: "spec/" + specA})
+
+	page := getStatus(t, h, "/board/spec/"+specB+"/document")
+	if page.code != http.StatusOK {
+		t.Fatalf("spec B document under a loader bound to spec A's request: %d\n%s", page.code, page.body)
+	}
+	if !strings.Contains(page.body, "readiness snapshot for `spec/"+specB+"`") {
+		t.Fatalf("spec B document must still carry ITS OWN derived readiness:\n%s", page.body)
+	}
+
+	route := getStatus(t, h, "/readiness?spec="+specB)
+	if route.code != http.StatusOK {
+		t.Fatalf("/readiness?spec=%s under a loader bound to spec A's request: %d\n%s", specB, route.code, route.body)
+	}
+	if !strings.Contains(route.body, "spec/"+specB) {
+		t.Fatalf("/readiness?spec=%s must render spec B's own readiness:\n%s", specB, route.body)
+	}
+
+	// Control against vacuity: the request really is bound to this loader.
+	// Asked for the request's OWN spec (no query, so the default spec A),
+	// the same loader takes the whole request path and reaches the
+	// policy-conflict evaluation — a step a no-request derivation never
+	// performs at all. This minimal two-spec store adopts no constitution,
+	// so that evaluation cannot complete and the route discloses the
+	// failure honestly (R-RR1-9); a store that can evaluate is proven
+	// elsewhere (internal/readinessload's own
+	// TestLoad_RequestForAnotherSpecDerivesAsIfAbsent positive control and
+	// cmd/verdi's TestDocumentParity_ServedWithContextRequest). Without
+	// this leg, a loader that silently dropped ContextRequestPath would
+	// pass everything above.
+	own := getStatus(t, h, "/readiness")
+	if own.code != http.StatusServiceUnavailable || !strings.Contains(own.body, "evaluating policy conflicts") {
+		t.Fatalf("the request's own spec %s must take the request path through the SAME loader (reaching the conflict evaluation this store cannot satisfy), got %d:\n%s", specA, own.code, own.body)
+	}
+}
+
+// writeDesignContextRequest writes a canonical design-phase
+// verdi.context-compile-request/v1 document for spec into root, through
+// internal/contextcompile's own EncodeRequest seam (never a hand-typed
+// JSON literal), and returns its path.
+func writeDesignContextRequest(t *testing.T, root, spec string) string {
+	t.Helper()
+	data, err := contextcompile.EncodeRequest(contextcompile.Request{
+		Schema:  contextcompile.RequestSchema,
+		Adapter: contextcompile.AdapterRef{ID: "codex", Version: "1"},
+		Phase:   contextcompile.PhaseDesign,
+		Scope:   policyartifact.Scope{Phases: []string{}, Environments: []string{}, Paths: []string{}, Refs: []string{}},
+		Spec:    spec,
+	})
+	if err != nil {
+		t.Fatalf("EncodeRequest: %v", err)
+	}
+	path := filepath.Join(root, "readiness-request.json")
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		t.Fatalf("write request file: %v", err)
+	}
+	return path
 }
 
 // TestBoardDocument_ReadinessLoaderErrorBecomesDisclosure is R-RR1-9's

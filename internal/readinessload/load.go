@@ -119,7 +119,22 @@ func (l loader) load(ctx context.Context, root, ref string, opts Options) (readi
 			return readinesspilot.Snapshot{}, fmt.Errorf("readinessload: loading readiness: request must use phase %q, got %q", contextcompile.PhaseDesign, request.Phase)
 		}
 		if request.Spec != ref {
-			return readinesspilot.Snapshot{}, fmt.Errorf("readinessload: loading readiness: request target %q does not match ref %q", request.Spec, ref)
+			// R-RR1-15: a supplied request binds to its OWN spec only.
+			// `verdi serve --context-request <a request for X>` threads one
+			// loader into the board, the Document tab and MCP, so every
+			// OTHER spec is derived through this same request-bound loader
+			// — and must be derived exactly as if no request had been
+			// supplied (the fixed no-request witness and destination below,
+			// RequestDigest over zero bytes), never refused. Refusing here
+			// made every other spec's readiness a loader error for as long
+			// as that server ran; carrying a request-specific witness
+			// instead would break ac-4 the other way, since this ref must
+			// read byte-identically here and on a CLI that has no request
+			// at all (TestLoad_RequestForAnotherSpecDerivesAsIfAbsent
+			// states both halves). Dropping the bytes keeps RequestDigest
+			// the digest of zero bytes, R-RR1-5's no-request value.
+			requestBytes = nil
+			break // haveRequest stays false: this derivation carries no request
 		}
 		haveRequest = true
 	}
