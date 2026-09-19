@@ -81,13 +81,21 @@ func cmdInit(args []string, stdout, stderr io.Writer) int {
 				return 2
 			}
 			if _, val, ok := strings.Cut(a, "="); ok {
+				// An explicit "=" is unambiguously a value, even a
+				// malformed one: --vocabulary=--wizard is an invalid
+				// value, not a missing one.
 				vocabularyName = val
 			} else {
-				i++
-				if i >= len(args) {
+				// A following argument that looks like a flag is a
+				// MISSING value, never the value: consuming it would
+				// report the wrong defect ("invalid --vocabulary value
+				// \"--wizard\"") and silently swallow a flag the operator
+				// did type. No legal preset name begins with "--".
+				if i+1 >= len(args) || strings.HasPrefix(args[i+1], "--") {
 					fmt.Fprintf(stderr, "init: --vocabulary requires a value (usage: %s)\n", initUsageText)
 					return 2
 				}
+				i++
 				vocabularyName = args[i]
 			}
 			vocabularySet = true

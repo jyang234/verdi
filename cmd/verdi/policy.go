@@ -37,10 +37,9 @@ const policyAdoptWrittenState = "; the checkout is on policy/adopt with the four
 // git write ops as package-level seams, so a test can force the exact
 // AddPaths/CreateCommitPaths failure whose disclosure the verb owes the
 // operator. The house pattern verbatim (close.go's closeAddPaths/
-// closeCreateCommit, accept.go's accept* pair, spec/obligation-seam ac-3):
-// a real `git add`/`git commit` cannot be made to fail deterministically
-// in a clean hermetic fixture repo. Production is gitx's own; tests
-// override and restore.
+// closeCreateCommit, spec/obligation-seam ac-3): a real `git add`/`git
+// commit` cannot be made to fail deterministically in a clean hermetic
+// fixture repo. Production is gitx's own; tests override and restore.
 //
 // The commit seam is gitx.CreateCommitPaths, NOT CreateCommit: ac-10 says
 // the verb "commits exactly those paths", the CLI and the workbench's

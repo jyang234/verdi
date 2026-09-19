@@ -150,13 +150,13 @@ type closeDeps struct {
 // closeAddPaths and closeCreateCommit are the closure ritual's two post-
 // archive-move git write ops as package-level seams, so a test can force the
 // exact AddPaths/CreateCommit failure each ritual's recovery path must
-// survive. This mirrors `verdi accept`'s already-proven pattern verbatim
-// (accept.go's acceptAddPaths/acceptCreateCommit, spec/obligation-seam ac-3)
-// rather than inventing a second injection style: a real `git add`/`git
-// commit` cannot be made to fail deterministically in a clean hermetic fixture
-// repo, and closeDeps is reserved for real runtime dependencies (a runner, a
-// forge, a provider registry), never for pure fault injection. Production is
-// gitx's own; tests override and restore via defer.
+// survive — the forced-fault proof spec/obligation-seam ac-3 requires of a
+// ritual's own refusal path. Package-level seams rather than a second
+// injection style: a real `git add`/`git commit` cannot be made to fail
+// deterministically in a clean hermetic fixture repo, and closeDeps is
+// reserved for real runtime dependencies (a runner, a forge, a provider
+// registry), never for pure fault injection. Production is gitx's own; tests
+// override and restore via defer.
 var (
 	closeAddPaths     = gitx.AddPaths
 	closeCreateCommit = gitx.CreateCommit

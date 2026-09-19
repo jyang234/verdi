@@ -572,6 +572,11 @@ func TestInit_UnknownArgument_UsageError(t *testing.T) {
 		{"vocabulary missing value", []string{"--vocabulary"}, "--vocabulary requires a value"},
 		{"vocabulary given twice", []string{"--vocabulary", "plain", "--vocabulary", "canonical"}, "--vocabulary given more than once"},
 		{"vocabulary empty value via =", []string{"--vocabulary="}, "invalid --vocabulary value"},
+		// A following flag is a MISSING value, not a value: `--vocabulary
+		// --wizard` used to swallow --wizard and report `invalid
+		// --vocabulary value "--wizard"`, naming the wrong defect and
+		// silently dropping the flag the operator did type.
+		{"vocabulary followed by another flag", []string{"--vocabulary", "--wizard"}, "--vocabulary requires a value"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
