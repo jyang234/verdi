@@ -1,0 +1,1 @@
+{"consumers":[],"schema":"verdi.constitution-consumer-inventory/v1","template":{"digest":{{printf "%q" .TemplateDigest}},"identity":{{printf "%q" .TemplateIdentity}}}}

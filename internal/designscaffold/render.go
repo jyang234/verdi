@@ -18,7 +18,9 @@ import (
 // own, precedent internal/dex/assets.go / internal/model/embed.go's
 // Canonical().
 //
-//go:embed templates/*.md
+// Widened from *.md for the consumers-inventory JSON template (ac-10).
+//
+//go:embed templates/*
 var embeddedTemplates embed.FS
 
 // ScaffoldData is Render's one input shape (fixed signature, docs/design/
