@@ -5,6 +5,8 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+
+	"github.com/jyang234/verdi/internal/governanceprincipal"
 )
 
 // Artifact kind names and schema IDs for the constitution store's own
@@ -27,6 +29,10 @@ const (
 	SchemaDisposition  = "verdi.policy-disposition/v1"
 )
 
+// sha256Re is this package's own copy of the content-digest form (also
+// declared, unexported, in governanceprincipal — claim/witness/authority/
+// disposition digests here have no reason to depend on that package for
+// it).
 var sha256Re = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
 
 // TemplateRecord is the resolved-scaffold provenance a created human
@@ -34,21 +40,13 @@ var sha256Re = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
 // template identity and digest"). Identity is the shared scaffold
 // resolver's source identity (internal/humanartifact); Digest is the
 // sha256 of the resolved template bytes.
-type TemplateRecord struct {
-	Identity string `yaml:"identity" json:"identity"`
-	Digest   string `yaml:"digest" json:"digest"`
-}
-
-// Validate checks the record's grammar.
-func (t TemplateRecord) Validate() error {
-	if t.Identity == "" {
-		return fmt.Errorf("policyartifact: template.identity is required")
-	}
-	if !sha256Re.MatchString(t.Digest) {
-		return fmt.Errorf("policyartifact: template.digest %q is not sha256:<64 hex> form", t.Digest)
-	}
-	return nil
-}
+//
+// Declared in governanceprincipal (below this package, spec/spec-
+// documents ac-10) so the governance profile can carry the same record;
+// this is that type's alias, kept so every existing policyartifact
+// caller (constitution, policy, overlay, exemption, disposition) compiles
+// unchanged.
+type TemplateRecord = governanceprincipal.TemplateRecord
 
 // kernelDoc is the strict decode target for the immutable kernel fields
 // every constitution artifact shares (AC-1/DC-4: identity, authority —

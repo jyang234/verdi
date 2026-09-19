@@ -26,6 +26,7 @@ type profileDoc struct {
 	DistinctnessRules          *[]DistinctnessRule       `yaml:"distinctness_rules"`
 	EvidenceSourceRestrictions *[]evidenceRestrictionDoc `yaml:"evidence_source_restrictions"`
 	EscalationThresholds       *[]escalationDoc          `yaml:"escalation_thresholds"`
+	Template                   *TemplateRecord           `yaml:"template"`
 }
 
 // evidenceRestrictionDoc mirrors EvidenceSourceRestriction with a pointer
@@ -114,6 +115,12 @@ func docToProfile(doc profileDoc) (Profile, error) {
 		return Profile{}, missing("escalation_thresholds")
 	}
 
+	if doc.Template != nil {
+		if err := doc.Template.Validate(); err != nil {
+			return Profile{}, fmt.Errorf("governanceprincipal: profile %w", err)
+		}
+	}
+
 	restrictions := make([]EvidenceSourceRestriction, 0, len(*doc.EvidenceSourceRestrictions))
 	for i, e := range *doc.EvidenceSourceRestrictions {
 		if e.AllowedSources == nil {
@@ -157,6 +164,7 @@ func docToProfile(doc profileDoc) (Profile, error) {
 		DistinctnessRules:          *doc.DistinctnessRules,
 		EvidenceSourceRestrictions: restrictions,
 		EscalationThresholds:       thresholds,
+		Template:                   doc.Template,
 	}, nil
 }
 

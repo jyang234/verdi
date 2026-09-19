@@ -11,11 +11,13 @@ import (
 	"github.com/jyang234/verdi/internal/canonjson"
 	"github.com/jyang234/verdi/internal/contextcompile"
 	"github.com/jyang234/verdi/internal/execworkspace"
+	"github.com/jyang234/verdi/internal/policyartifact"
 )
 
 type inventoryDoc struct {
-	Schema    *string        `json:"schema"`
-	Consumers *[]consumerDoc `json:"consumers"`
+	Schema    *string                        `json:"schema"`
+	Consumers *[]consumerDoc                 `json:"consumers"`
+	Template  *policyartifact.TemplateRecord `json:"template,omitempty"`
 }
 
 type consumerDoc struct {
@@ -42,6 +44,11 @@ func DecodeInventory(data []byte) (Inventory, error) {
 	if *doc.Schema != InventorySchema {
 		return Inventory{}, fmt.Errorf("constitutionimpact: decoding inventory: schema %q, want %q", *doc.Schema, InventorySchema)
 	}
+	if doc.Template != nil {
+		if err := doc.Template.Validate(); err != nil {
+			return Inventory{}, fmt.Errorf("constitutionimpact: decoding inventory: %w", err)
+		}
+	}
 	consumers := make([]Consumer, len(*doc.Consumers))
 	for i, row := range *doc.Consumers {
 		consumer, err := consumerFromDoc(row)
@@ -50,7 +57,7 @@ func DecodeInventory(data []byte) (Inventory, error) {
 		}
 		consumers[i] = consumer
 	}
-	inventory := Inventory{Schema: InventorySchema, Consumers: consumers}
+	inventory := Inventory{Schema: InventorySchema, Consumers: consumers, Template: doc.Template}
 	canonical, err := EncodeInventory(inventory)
 	if err != nil {
 		return Inventory{}, fmt.Errorf("constitutionimpact: decoding inventory: %w", err)
@@ -83,7 +90,7 @@ func EncodeInventory(inventory Inventory) ([]byte, error) {
 		return left < right
 	})
 	schema := InventorySchema
-	return canonjson.Marshal(inventoryDoc{Schema: &schema, Consumers: &rows})
+	return canonjson.Marshal(inventoryDoc{Schema: &schema, Consumers: &rows, Template: inventory.Template})
 }
 
 // Identity returns the canonical digest of request, environment, and sorted

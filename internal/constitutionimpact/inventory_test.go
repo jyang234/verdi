@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/jyang234/verdi/internal/execworkspace"
+	"github.com/jyang234/verdi/internal/policyartifact"
 )
 
 func TestInventoryCanonicalRoundTripAndIdentity(t *testing.T) {
@@ -136,5 +137,38 @@ func TestEncodeInventoryRefusesEnvironmentOutsideExactRequestScope(t *testing.T)
 	consumer.Request.Scope.Environments = []string{"production"}
 	if _, err := EncodeInventory(Inventory{Schema: InventorySchema, Consumers: []Consumer{consumer}}); err == nil || !strings.Contains(err.Error(), "environment") {
 		t.Fatalf("EncodeInventory environment mismatch error = %v", err)
+	}
+}
+
+// TestInventory_TemplateFieldRoundTrips proves the inventory's optional
+// template record (ac-10, SI-204) round-trips through Encode/Decode,
+// participates in the canonical encoding only when present (no "template"
+// key when absent), and fails closed on a malformed record before the
+// canonical-bytes check ever runs.
+func TestInventory_TemplateFieldRoundTrips(t *testing.T) {
+	rec := &policyartifact.TemplateRecord{Identity: "embedded:constitution-consumers.json", Digest: "sha256:" + strings.Repeat("b", 64)}
+	enc, err := EncodeInventory(Inventory{Schema: InventorySchema, Consumers: []Consumer{}, Template: rec})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `{"consumers":[],"schema":"verdi.constitution-consumer-inventory/v1","template":{"digest":"sha256:` + strings.Repeat("b", 64) + `","identity":"embedded:constitution-consumers.json"}}` + "\n"
+	if string(enc) != want {
+		t.Fatalf("encoded = %s", enc)
+	}
+	dec, err := DecodeInventory(enc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if dec.Template == nil || *dec.Template != *rec {
+		t.Fatalf("decoded template = %+v", dec.Template)
+	}
+	// Absent template still encodes exactly as before (no "template" key).
+	enc0, _ := EncodeInventory(Inventory{Schema: InventorySchema, Consumers: []Consumer{}})
+	if string(enc0) != `{"consumers":[],"schema":"verdi.constitution-consumer-inventory/v1"}`+"\n" {
+		t.Fatalf("no-template encoding changed: %s", enc0)
+	}
+	// A bad record fails closed before the canonical-bytes check.
+	if _, err := DecodeInventory([]byte(`{"consumers":[],"schema":"verdi.constitution-consumer-inventory/v1","template":{"digest":"nope","identity":"x"}}` + "\n")); err == nil {
+		t.Fatal("bad template digest accepted")
 	}
 }

@@ -7,6 +7,7 @@ import (
 	"io/fs"
 
 	"github.com/jyang234/verdi/internal/contextcompile"
+	"github.com/jyang234/verdi/internal/policyartifact"
 	"github.com/jyang234/verdi/internal/policyconflict"
 )
 
@@ -75,6 +76,10 @@ type Consumer struct {
 type Inventory struct {
 	Schema    string
 	Consumers []Consumer
+	// Template is the resolved scaffold record a starter-written
+	// inventory carries (ac-10, SI-204); optional; encoded as the
+	// canonical `template` key when present.
+	Template *policyartifact.TemplateRecord
 }
 
 // ExactTree couples immutable Git identities to a filesystem view of that
