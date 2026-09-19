@@ -105,7 +105,11 @@ func RenderConstitution(scaffold Scaffold, data ConstitutionScaffoldData) (strin
 // mapping's subjects must equal exactly the caller's single supplied
 // subject when data.Subject is non-empty (solo) — or there must be no
 // role mappings at all when it is empty (team: the template maps no
-// one). verifyKernelRoundTrip is not reused here: a stored profile
+// one). That subject rule is symmetric in both directions: a non-empty
+// Subject the rendered profile binds to NO role is refused too, so a
+// caller that hands an identity to a template which maps no one is told
+// so rather than receiving a profile that silently discarded it.
+// verifyKernelRoundTrip is not reused here: a stored profile
 // carries no title/owners for it to check, and calling it with vacuous
 // values would pass those checks trivially rather than proving anything,
 // so the id/template comparisons are written out explicitly instead.
@@ -138,6 +142,9 @@ func RenderProfile(scaffold Scaffold, data ProfileScaffoldData, catalog governan
 			return "", fmt.Errorf("humanartifact: rendered profile kernel mismatch: role_mappings = %d entries, want none: no subject was supplied", len(sp.Profile.RoleMappings))
 		}
 		return content, nil
+	}
+	if len(sp.Profile.RoleMappings) == 0 {
+		return "", fmt.Errorf("humanartifact: rendered profile kernel mismatch: role_mappings = 0 entries, want the caller's subject %q bound: this template maps no one; the supplied subject cannot be bound", data.Subject)
 	}
 	for i, m := range sp.Profile.RoleMappings {
 		if len(m.Subjects) != 1 || m.Subjects[0] != data.Subject {

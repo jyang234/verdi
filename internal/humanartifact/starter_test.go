@@ -96,6 +96,15 @@ func TestRenderProfile_SoloBindsTheSubjectAndTeamMapsNoOne(t *testing.T) {
 	if _, err := RenderProfile(team, ProfileScaffoldData{ProfileID: "starter-team", Class: governanceprincipal.ClassSolo, TemplateIdentity: team.Identity, TemplateDigest: team.Digest}, starterCatalog()); err == nil || !strings.Contains(err.Error(), "class") {
 		t.Fatalf("class mismatch accepted: %v", err)
 	}
+	// Symmetry: a subject the rendered profile binds to no one is refused,
+	// not silently discarded. Task 2 composes both renderers from one
+	// ProfileScaffoldData, so passing the resolved local identity to the
+	// team renderer is the natural mistake; this seam reports it by name
+	// rather than returning a profile that names no one.
+	if _, err := RenderProfile(team, ProfileScaffoldData{ProfileID: "starter-team", Class: governanceprincipal.ClassTeam, Subject: "dev@example.invalid", TemplateIdentity: team.Identity, TemplateDigest: team.Digest}, starterCatalog()); err == nil ||
+		!strings.Contains(err.Error(), "role_mappings") || !strings.Contains(err.Error(), "dev@example.invalid") {
+		t.Fatalf("supplied subject silently discarded: %v", err)
+	}
 }
 
 func TestRenderStarterPolicy_ExactlyOneRealRule(t *testing.T) {
