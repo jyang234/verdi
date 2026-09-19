@@ -84,12 +84,13 @@ review, hermetic Go tests, Playwright, `make verify`, and `go test -race ./...`.
 5. [Execution surfaces and security](#execution-surfaces-and-security)
 6. [Ten-hour acceleration window](#ten-hour-acceleration-window)
 7. [Delivery waves](#delivery-waves)
-8. [Wave orchestration and review cadence](#wave-orchestration-and-review-cadence)
-9. [Per-unit pull request protocol](#per-unit-pull-request-protocol)
-10. [Producer-to-reviewer handoff contract](#producer-to-reviewer-handoff-contract)
-11. [Review and merge gates](#review-and-merge-gates)
-12. [Stop conditions](#stop-conditions)
-13. [Completion ledger](#completion-ledger)
+8. [Post-MVP value subset (2026-09-19)](#post-mvp-value-subset-2026-09-19)
+9. [Wave orchestration and review cadence](#wave-orchestration-and-review-cadence)
+10. [Per-unit pull request protocol](#per-unit-pull-request-protocol)
+11. [Producer-to-reviewer handoff contract](#producer-to-reviewer-handoff-contract)
+12. [Review and merge gates](#review-and-merge-gates)
+13. [Stop conditions](#stop-conditions)
+14. [Completion ledger](#completion-ledger)
 
 ## How to use this index
 
@@ -448,9 +449,9 @@ extends one application core and because the later units consume the prior
 unit's reviewed public seam. ASD and GLG Wave 5 lanes may still use the other
 concurrency slots when their file/package ownership is disjoint; no lane may
 overlap CSE Wave 5B's CLI or MCP registry edits.
-- [ ] Deliver GLG `continuous-readiness` and feature-attestation scaffolding without agent-authored human claims.
-- [ ] Deliver GLG `lifecycle-recovery` as diagnosis-first, read-only-by-default projection over observable state.
-- [ ] Deliver GLG `journey-metrics` only after stable action, blocker, and outcome-event identifiers exist.
+- [ ] Deliver GLG `continuous-readiness` and feature-attestation scaffolding without agent-authored human claims. **Pulled forward** by the Post-MVP value subset (2026-09-19): it is that subset's first unit.
+- [ ] Deliver GLG `lifecycle-recovery` as diagnosis-first, read-only-by-default projection over observable state. **Pulled forward and scoped** by the Post-MVP value subset (2026-09-19): reversible actions only where an executor already exists; diagnosis-only elsewhere.
+- [ ] Deliver GLG `journey-metrics` only after stable action, blocker, and outcome-event identifiers exist. **Deferred** by the Post-MVP value subset (2026-09-19): a measurement instrument, not a user capability; spec/spec-documents dc-9 already placed it out of that program's scope.
 
 **Exit gate:** Every adapter passes conformance against its application core; human-only actions are absent or refused through every agent surface; recovery never guesses; metric events never drive lifecycle truth.
 
@@ -461,8 +462,8 @@ focused implementation plan only when the unit's complexity materially
 benefits from one:
 
 - [ ] ASD board synchronization, unsaved-edit protection, semantic review, and on-demand provenance.
-- [ ] CI Constitution rule ledger, derivation trail, impact review, and Git-backed proposal workflow.
-- [ ] GLG journey, readiness, attestation, and recovery projections.
+- [ ] CI Constitution rule ledger, derivation trail, impact review, and Git-backed proposal workflow. **Deferred** by the Post-MVP value subset (2026-09-19): spec/spec-documents ac-10 (`verdi policy adopt --starter`) closes the adoption pain that motivated it, and the MCP constitution tools already cover inspect, validate, and impact review.
+- [ ] GLG journey, readiness, attestation, and recovery projections. **Re-sequenced** by the Post-MVP value subset (2026-09-19): delivered as one FABLE lane after the owner's Claude Design pass over the workbench, presenting the subset's backend capabilities over the existing API.
 - [ ] CSE registration lock, execution state, result explanation, and ratification surfaces.
 
 The Wave 3.5 cockpit shell and solo-author navigation language are promoted
@@ -491,6 +492,50 @@ authorization are serialized.
 - [ ] Obtain human authorization before merge or release.
 
 **Exit gate:** Every feature AC has fresh evidence, every disclosure is explicit, no important Codex finding remains, and the human owner approves the integrated result.
+
+## Post-MVP value subset (2026-09-19)
+
+Owner decision, recorded here because this index is the program's ordering
+authority. With spec/spec-documents Waves 1–3 merged (PRs #329, #330, #331)
+and Wave 4 (ac-10 `policy adopt --starter`, ac-11 plain vocabulary, ac-12
+guidance-first readiness cards) specified, the owner asked which of the
+remaining post-MVP capabilities carries the most product value. The answer,
+ranked against the product's point — a human-readable, machine-verifiable spec
+workbench that is the only one of its comparators to prove the built thing
+matches the spec — is roughly a third of the estimated list. The rest is
+deferred or re-sequenced, not dropped; every deferred row keeps its
+specification obligation and its place in the completion ledger.
+
+**Chosen (one spec-driven wave after spec/spec-documents Wave 4):**
+
+| Unit | Authority | Scope and boundary | LOE |
+|---|---|---|---:|
+| GLG `continuous-readiness` | spec/guided-lifecycle-governance-v3 ac-6 | Readiness derived continuously from feature acceptance onward, not a startup snapshot: current and eventual blockers with uncertainty preserved; CLI parity with the board and MCP (`get_document` already carries the snapshot on MCP since spec-documents Wave 3); feature outcome attestations get the same guided authoring and review ergonomics as story attestations, with no Verdi- or agent-authored human claim. | 3–6 days |
+| GLG `lifecycle-recovery` (scoped) | spec/guided-lifecycle-governance-v3 ac-7 | Deterministic recovery projection for every recognized interrupted state; reversible or explicitly confirmed actions wired only through executors that already exist; diagnosis-only for states without one, disclosed as such. | 2–3 days |
+| Integration and acceptance | this index, Gate I | Combined journeys across board, CLI, and MCP for the two units; required gates; one consolidated Codex exact-head review. | 2 days |
+
+Total: 7–11 engineer-days, against 16–31 for the full list.
+
+**Deferred (kept in the completion ledger):** GLG `journey-metrics` (ac-8), the
+CI constitution workbench row of Wave 6, and the shared experiment human-proof
+coordinator (CSE track). **Re-sequenced:** the GLG workbench journeys row of
+Wave 6 lands as one FABLE lane after the owner's Claude Design pass over the
+workbench (the static baseline for that pass was produced 2026-09-18), so that
+readiness, attestation, and recovery presentation are built once over the
+existing API rather than before the redesign.
+
+**Ordering and dependencies.** Nothing in the chosen units depends on the
+constitution workbench: spec-documents ac-10 supplies the starter policy the
+readiness "Check constraints" item needs. `continuous-readiness` precedes
+`lifecycle-recovery` only where recovery reuses readiness's blocker
+identifiers; otherwise the two may run as disjoint lanes under Wave 5's
+ownership check. The GLG end-to-end journey of Wave 7 begins after both merge.
+
+**Estimation uncertainty.** Recovery's estimate depends on which corrective
+operations already have executors; the unit's design step enumerates them
+first and the plan carries that inventory. Readiness's continuous derivation
+must not regress the startup-snapshot path the board and MCP consume today;
+its spec-align and parity proofs are the guard.
 
 ## Wave orchestration and review cadence
 
@@ -662,9 +707,9 @@ one shared file.
 | 5 | CSE adapters, ratification, and retention |
 | 5 | GLG `continuous-readiness` |
 | 5 | GLG `lifecycle-recovery` |
-| 5 | GLG `journey-metrics` |
+| 5 | GLG `journey-metrics` — deferred (Post-MVP value subset, 2026-09-19) |
 | 6 | ASD workbench |
-| 6 | CI `constitution-workbench` |
-| 6 | GLG workbench journeys |
+| 6 | CI `constitution-workbench` — deferred (Post-MVP value subset, 2026-09-19) |
+| 6 | GLG workbench journeys — after the Claude Design pass (Post-MVP value subset, 2026-09-19) |
 | 6 | CSE workbench |
 | 7 | Integrated dogfood and whole-branch approval |
