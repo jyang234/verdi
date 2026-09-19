@@ -406,6 +406,68 @@ func TestPolicyAdopt_NoLocalIdentityRefusesSolo(t *testing.T) {
 	}
 }
 
+// TestPolicyAdopt_NoCommitterIdentityRefusesBeforeWriting proves the
+// committer preflight: when git can mint no identity at all, the refusal
+// happens BEFORE the branch is cut and before a single file is written,
+// and says so.
+//
+// Without the preflight the verb learned this only from its very last
+// step — after composing, cutting policy/adopt, writing four files and
+// staging them — and the operator was left on a branch they never asked
+// to be on, holding four uncommitted files, for a fault git could have
+// been asked about up front. R-W4-2's posture is that a refusal leaves
+// the checkout untouched; this is the state that used to falsify it, and
+// it is not exotic: a CI runner configures no identity in any scope and
+// has no OS full-name field to derive one from.
+//
+// The team profile is what this drives, because the solo profile refuses
+// earlier and for its own reason — the LOCAL identity it binds as its
+// subject is missing too (TestPolicyAdopt_NoLocalIdentityRefusesSolo's
+// first half, whose message must keep winning for solo).
+func TestPolicyAdopt_NoCommitterIdentityRefusesBeforeWriting(t *testing.T) {
+	bin := buildVerdiBinary(t) // built BEFORE the identity is masked: `go build` is not what is under test
+	repo := adoptFixture(t)
+	t.Setenv("CI_DEFAULT_BRANCH", "main")
+	clearLocalOperatorGitIdentity(t, repo.Dir)
+	// Every scope git could mint an identity from, closed: no global or
+	// system config, and names exported EMPTY rather than left unset (an
+	// unset name is derived from the OS account on a developer's machine,
+	// which is exactly the host difference that hid this defect).
+	t.Setenv("GIT_CONFIG_GLOBAL", "/dev/null")
+	t.Setenv("GIT_CONFIG_SYSTEM", "/dev/null")
+	t.Setenv("GIT_AUTHOR_NAME", "")
+	t.Setenv("GIT_COMMITTER_NAME", "")
+
+	code, stdout, stderr := runVerdi(t, bin, repo.Dir, "policy", "adopt", "--starter", "--profile", "team", "--owner", "platform-team")
+	if code != 2 {
+		t.Fatalf("code %d, want 2 (operational)\nstdout:\n%s\nstderr:\n%s", code, stdout, stderr)
+	}
+	for _, want := range []string{
+		"policy adopt: git cannot mint a committer identity for the adoption commit",
+		"configure user.name and user.email, or set GIT_COMMITTER_NAME/GIT_COMMITTER_EMAIL",
+		"nothing was written and no branch was cut",
+	} {
+		if !strings.Contains(stderr, want) {
+			t.Fatalf("stderr missing %q:\n%s", want, stderr)
+		}
+	}
+	// The disclosure is true, not merely printed.
+	for _, rel := range []string{".verdi/policy", ".verdi/constitution"} {
+		if _, err := os.Stat(filepath.Join(repo.Dir, filepath.FromSlash(rel))); !os.IsNotExist(err) {
+			t.Fatalf("%s exists, but the refusal said nothing was written (stat err=%v)", rel, err)
+		}
+	}
+	if strings.TrimSpace(gitOutput(t, repo.Dir, "branch", "--list", "policy/adopt")) != "" {
+		t.Fatal("the refusal said no branch was cut, but policy/adopt exists")
+	}
+	if br := strings.TrimSpace(gitOutput(t, repo.Dir, "rev-parse", "--abbrev-ref", "HEAD")); br != "main" {
+		t.Fatalf("branch = %s, want the checkout left on main", br)
+	}
+	if gitOutput(t, repo.Dir, "status", "--porcelain") != "" {
+		t.Fatal("the refusal left the tree dirty")
+	}
+}
+
 // TestPolicyAdopt_ExistingBranchRefused proves the branch-cut step's own
 // no-clobber posture (gitx.CheckoutNewBranchFrom): a pre-existing
 // policy/adopt branch is refused by git's own "already exists" error
@@ -414,6 +476,7 @@ func TestPolicyAdopt_ExistingBranchRefused(t *testing.T) {
 	bin := buildVerdiBinary(t)
 	repo := adoptFixture(t)
 	t.Setenv("CI_DEFAULT_BRANCH", "main")
+	pinGitCommitIdentity(t)
 	gitOutput(t, repo.Dir, "branch", "policy/adopt")
 
 	code, _, stderr := runVerdi(t, bin, repo.Dir, "policy", "adopt", "--starter")
@@ -447,6 +510,7 @@ func TestPolicyAdopt_ExistingBranchRefused(t *testing.T) {
 func TestPolicyAdopt_DefaultBranchAlreadyAdoptedCaughtAfterCheckout(t *testing.T) {
 	bin := buildVerdiBinary(t)
 	t.Setenv("CI_DEFAULT_BRANCH", "main")
+	pinGitCommitIdentity(t)
 
 	repo := fixturegit.Build(t, []fixturegit.Layer{
 		{Files: map[string]string{".verdi/verdi.yaml": "schema: verdi.layout/v1\n"}, Message: "init store"},
@@ -540,6 +604,7 @@ func TestPolicyAdopt_WriteFailureDisclosesWhatLandedAndWhereTheCheckoutIs(t *tes
 	bin := buildVerdiBinary(t)
 	repo := adoptFixture(t)
 	t.Setenv("CI_DEFAULT_BRANCH", "main")
+	pinGitCommitIdentity(t)
 
 	invDir := filepath.Join(repo.Dir, ".verdi", "constitution")
 	if err := os.MkdirAll(invDir, 0o755); err != nil {
@@ -627,6 +692,7 @@ func TestPolicyAdopt_PostWriteGitFailuresDiscloseTheWrittenCheckout(t *testing.T
 		t.Run(tc.name, func(t *testing.T) {
 			repo := adoptFixture(t)
 			t.Setenv("CI_DEFAULT_BRANCH", "main")
+			pinGitCommitIdentity(t)
 			tc.install(t)
 
 			var stdout, stderr bytes.Buffer
@@ -666,6 +732,7 @@ func TestPolicyAdopt_PostWriteGitFailuresDiscloseTheWrittenCheckout(t *testing.T
 func TestPolicyAdopt_PostCheckoutComposeFailureDisclosesTheBranch(t *testing.T) {
 	bin := buildVerdiBinary(t)
 	t.Setenv("CI_DEFAULT_BRANCH", "main")
+	pinGitCommitIdentity(t)
 
 	canon, err := designscaffold.Canonical(humanartifact.StarterPolicyTemplate)
 	if err != nil {

@@ -1,11 +1,14 @@
 // verdi policy adopt --starter [--profile solo|team] [--owner <handle>]
-// (spec/spec-documents ac-10, dc-6; SI-204): renders a starter
-// constitution, one profile, one policy, and the consumers inventory
-// through internal/policyadopt, cuts policy/adopt from the resolved
-// default branch (design start's own dc-7 chain, R-W4-3), writes exactly
-// those four paths, stages exactly them, and commits exactly them (a
-// pathspec commit: whatever the operator already had staged stays staged
-// and out of the adoption commit). Kept in its own file per the
+// (spec/spec-documents ac-10, dc-6; SI-204): clears its preconditions
+// first — the solo profile's bound --local git identity, then git's own
+// ability to mint a committer for the adoption commit, both refused
+// before anything is composed, written or branched — then renders a
+// starter constitution, one profile, one policy, and the consumers
+// inventory through internal/policyadopt, cuts policy/adopt from the
+// resolved default branch (design start's own dc-7 chain, R-W4-3), writes
+// exactly those four paths, stages exactly them, and commits exactly them
+// (a pathspec commit: whatever the operator already had staged stays
+// staged and out of the adoption commit). Kept in its own file per the
 // harness.go convention.
 package main
 
@@ -181,12 +184,23 @@ func nextFlagValue(args []string, i int) (int, string, error) {
 	return i + 1, args[i+1], nil
 }
 
-// runPolicyAdopt composes the starter store, proves it, cuts policy/adopt
-// from the resolved default branch, re-proves the checked-out tree
-// (R-W4-3: the pre-checkout Compose above proved the OLD working tree; the
-// checkout just switched, and a template override or an already-adopted
-// state may exist only on the base branch), writes and commits exactly
-// those four paths, and discloses what was granted.
+// runPolicyAdopt clears both preconditions that can be known without
+// touching anything (the solo profile's bound local identity, then git's
+// own ability to author the adoption commit at all), composes the starter
+// store, proves it, cuts policy/adopt from the resolved default branch,
+// re-proves the checked-out tree (R-W4-3: the pre-checkout Compose proved
+// the OLD working tree; the checkout just switched, and a template
+// override or an already-adopted state may exist only on the base
+// branch), writes and commits exactly those four paths, and discloses
+// what was granted.
+//
+// The two identity checks are different questions and both are asked
+// before any write. The solo one reads the checkout's own --local scope
+// because that profile BINDS that identity as its subject, and it runs
+// first so its own message keeps naming the missing binding. The
+// committer one asks git — across every scope and the environment —
+// whether a commit is possible at all, which the team profile needs just
+// as much even though it binds no local identity.
 func runPolicyAdopt(ctx context.Context, root string, opts policyAdoptOptions, stdout, stderr io.Writer) int {
 	in := policyadopt.Input{Profile: opts.profile, Owner: opts.owner}
 
@@ -205,6 +219,24 @@ func runPolicyAdopt(ctx context.Context, root string, opts policyAdoptOptions, s
 			return 2
 		}
 		in.Subject = identity
+	}
+
+	// R-W4-2's refusal posture applied to git's own precondition: a verb
+	// that will end in a commit asks up front whether git can name a
+	// committer for it, while refusing still costs the operator nothing.
+	// Asked only at commit time — where it used to be answered — the
+	// refusal arrives with policy/adopt cut and four files sitting on it
+	// uncommitted, which is a disclosed state but an avoidable one, and
+	// one a CI runner (no global identity, no OS full-name field to
+	// derive a name from) reaches on its first attempt.
+	committerAvailable, err := gitx.CommitIdentityAvailable(ctx, root)
+	if err != nil {
+		fmt.Fprintln(stderr, "policy adopt:", err)
+		return 2
+	}
+	if !committerAvailable {
+		fmt.Fprintln(stderr, "policy adopt: git cannot mint a committer identity for the adoption commit (configure user.name and user.email, or set GIT_COMMITTER_NAME/GIT_COMMITTER_EMAIL); nothing was written and no branch was cut")
+		return 2
 	}
 
 	if _, err := policyadopt.Compose(root, in); err != nil {
