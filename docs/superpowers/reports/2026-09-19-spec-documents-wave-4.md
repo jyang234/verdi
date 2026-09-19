@@ -19,6 +19,14 @@ Provenance: controller commits are plan, ledger, and report only (Fable 5.1 trai
 
 Integration prerequisites: none. Follow-on work consumes `verdi policy adopt --starter` for any fixture that needs an adopted store, `initwizard.PlainPreset` for the default vocabulary, and the `asd-guidance-<id>` / `asd-summary-<id>` / `asd-fact-<id>` testids on wall cards.
 
+## CI correction after PR #333 opened (2026-09-19)
+
+CI (`verify` and `merge-gate`, both `make verify`) failed on `cmd/verdi` `TestPolicyAdopt_NoLocalIdentityRefusesSolo`: after clearing the repo-local `user.email`/`user.name` the test ran a team adopt expecting exit 0, but the adoption commit needs a git author from some scope; macOS derives a fallback name from the OS account's full-name field (so the local gate passed on c7da8cd6), the Linux runner has no such name, and git refused with `fatal: empty ident name`. Reproduced locally with `GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null GIT_AUTHOR_NAME= GIT_COMMITTER_NAME= go test ./cmd/verdi/ -run TestPolicyAdopt` (exit 1, same message). Two defects, one Opus fix seat (`Co-Authored-By: Claude Opus 5`), one scoped re-review:
+- Test: the adopt tests that commit receive an explicit identity through the environment the child binary inherits (`pinGitCommitIdentity`), in the identity test only after the solo assertions — the property under test is that the team profile needs no repo-local (local-operator) identity, not that git needs none (e20f71a5).
+- Verb: `runPolicyAdopt` gains a committer-identity preflight (`gitx.CommitIdentityAvailable`, `git var GIT_COMMITTER_IDENT`) before `Compose` and before the branch cut, so a checkout where git cannot name a committer is refused with exit 2 and nothing written, no branch — R-W4-2 applied to the one precondition the verb was not asking about (19e94abd). Disclosed limit: an exported-empty `GIT_AUTHOR_NAME` with a mintable committer still fails at commit time and falls back on the written-checkout disclosure (artificial environment; ruled acceptable).
+Scoped re-review (Opus): ACCEPT; residuals: an unparseable `.git/config` folds into "unavailable" with a remedy that cannot fix it (ADJ-64 forbids matching git prose; a structural second probe is the future discriminator); one doc phrase in `policy.go` says "a commit is possible at all" where the probe answers only for the committer; on a host with no mintable identity an already-adopted store now exits 2 (operational) before the exit-1 verdict — ruled correct precedence.
+Gate: `VERDI_E2E_PORT_BASE=4390 make verify` on 19e94abd → `verify OK`, exit 0 (race tests 114 packages ok, lint 0 issues, fixture, lint-store, spec-align, showcase gates, e2e 328 passed); recording-artifact scan 0 files; CI re-run on the pushed head is the definitive proof.
+
 ## Ledger (verbatim from the plan workspace)
 
 # SDD ledger — plan: docs/superpowers/plans/2026-09-19-spec-documents-wave-4.md
