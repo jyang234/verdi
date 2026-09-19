@@ -136,11 +136,16 @@ var verbUsage = map[string]string{
 	"gc":              "usage: verdi gc [--reclaim-unmanaged [--apply]]",
 	"gate":            "usage: verdi gate",
 	// vocab:identity — CLI usage/flag grammar (--story-ref flag name, identity)
-	"board":      "usage: verdi board commit <board-key> --name <spec-name> [--story-ref <scheme:key>]",
-	"audit":      "usage: verdi audit",
-	"attest":     "usage: verdi attest <story-ref> <ac-id>",
-	"model":      "usage: verdi model check",
-	"init":       "usage: verdi init [--wizard] [--vocabulary plain|canonical]",
+	"board":  "usage: verdi board commit <board-key> --name <spec-name> [--story-ref <scheme:key>]",
+	"audit":  "usage: verdi audit",
+	"attest": "usage: verdi attest <story-ref> <ac-id>",
+	"model":  "usage: verdi model check",
+	// "usage: " + initUsageText (init.go) — review round 1, Minor 2: this
+	// row and every hand-printed init refusal now cite the SAME constant,
+	// so they cannot silently drift apart (TestHelp_InitUsageMatchesConstant
+	// pins the same equality from the other direction, at the built-binary
+	// level, in help_test.go).
+	"init":       "usage: " + initUsageText,
 	"obligation": obligationVerbUsage,
 	"waive":      waiveUsage,
 	"spec":       specVerbUsage,

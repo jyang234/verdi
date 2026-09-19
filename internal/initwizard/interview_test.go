@@ -210,6 +210,24 @@ func TestRunInterview_SeedIsTheDefault(t *testing.T) {
 		if !strings.Contains(out, `class "feature" [Enter to keep "feature"]`) {
 			t.Fatalf("transcript does not fall back to the id for an id the seed does not carry:\n%s", out)
 		}
+
+		// Review round 1, Minor 5: an Enter that confirms a SEEDED default
+		// (story, spike) goes through the same live-validation preview a
+		// typed rename takes — an Enter against an UNSEEDED id (feature,
+		// every state, every verb) does not. Nothing in this all-Enters run
+		// ever changes vocab from the seed itself, so both seeded
+		// confirmations preview the SAME unchanged candidate: exactly the
+		// seed's own digest, appearing exactly twice (once per seeded class).
+		wantDigest, derr := CandidateModel(seed).Digest()
+		if derr != nil {
+			t.Fatalf("computing want digest: %v", derr)
+		}
+		if n := strings.Count(out, "-> valid"); n != 2 {
+			t.Fatalf("transcript has %d \"-> valid\" preview line(s), want exactly 2 (the seed's own two class renames, spike and story; feature and every state/verb carry no seed entry and must not preview):\n%s", n, out)
+		}
+		if n := strings.Count(out, wantDigest); n != 2 {
+			t.Fatalf("transcript does not show the seed's own unchanged candidate digest %q exactly twice (once per seeded Enter-confirmation):\n%s", wantDigest, out)
+		}
 	})
 
 	t.Run("an explicit answer overrides the seeded default", func(t *testing.T) {
@@ -223,6 +241,13 @@ func TestRunInterview_SeedIsTheDefault(t *testing.T) {
 		want := map[string]string{"story": "Task", "spike": "research spike"}
 		if !reflect.DeepEqual(result.Vocabulary.Classes, want) {
 			t.Fatalf("result.Vocabulary.Classes = %+v, want %+v", result.Vocabulary.Classes, want)
+		}
+		// Review round 1, Important 1: the interview must never mutate the
+		// caller's own seed value — this is the one sub-test that renames a
+		// SEEDED id (spike is confirmed by Enter, story is retyped), so it
+		// is the sub-test most likely to reveal an aliased, shared-map copy.
+		if !reflect.DeepEqual(seed, PlainPreset()) {
+			t.Fatalf("RunInterview mutated the caller's seed: %+v", seed)
 		}
 	})
 
@@ -247,4 +272,68 @@ Write .verdi/ ? [Y/n]: `
 			t.Fatalf("empty-seed transcript drifted from the pre-seed-parameter baseline:\n--- got ---\n%s\n--- want ---\n%s", out, want)
 		}
 	})
+}
+
+// TestDeepCopyVocabulary_NilMapsStayNil_AndAreFresh is deepCopyVocabulary's
+// own direct unit test (review round 1, Important 1): a nil map stays
+// nil (never silently allocated into an empty, non-nil one — the zero
+// InterviewResult produced by a fully-unseeded interview must still
+// compare VocabularyEmpty/reflect.DeepEqual to the pre-seed-parameter
+// zero value), and — the negative-path half — mutating the copy's own
+// maps must never reach back into the source's. Verified adversarially
+// against a plain `return v` struct-copy body before writing this test:
+// the "mutation" sub-test fails against that body (shared map storage)
+// and passes against the real implementation.
+func TestDeepCopyVocabulary_NilMapsStayNil_AndAreFresh(t *testing.T) {
+	t.Run("nil maps stay nil", func(t *testing.T) {
+		got := deepCopyVocabulary(model.Vocabulary{})
+		if got.Classes != nil || got.States != nil || got.Verbs != nil {
+			t.Fatalf("deepCopyVocabulary(zero value) = %+v, want every map nil", got)
+		}
+	})
+
+	t.Run("mutating the copy leaves the source untouched", func(t *testing.T) {
+		src := model.Vocabulary{
+			Classes: map[string]string{"story": "planned story"},
+			States:  map[string]string{"draft": "Draft"},
+			Verbs:   map[string]string{"merge": "Sign off"},
+		}
+		got := deepCopyVocabulary(src)
+		got.Classes["story"] = "mutated"
+		got.Classes["new"] = "added"
+		got.States["draft"] = "mutated"
+		got.Verbs["merge"] = "mutated"
+
+		if src.Classes["story"] != "planned story" || len(src.Classes) != 1 {
+			t.Fatalf("source Classes mutated through the copy: %+v", src.Classes)
+		}
+		if src.States["draft"] != "Draft" || len(src.States) != 1 {
+			t.Fatalf("source States mutated through the copy: %+v", src.States)
+		}
+		if src.Verbs["merge"] != "Sign off" || len(src.Verbs) != 1 {
+			t.Fatalf("source Verbs mutated through the copy: %+v", src.Verbs)
+		}
+	})
+}
+
+// TestCopyStringMap_NilInNilOut_AndIsAFreshCopy is copyStringMap's own
+// direct unit test: nil in, nil out (happy path for the common "this
+// vocabulary section was never touched" case), and a non-nil map comes
+// back equal in content but distinct in storage — the negative path a
+// plain `return m` body fails (mutating the result would mutate src too).
+func TestCopyStringMap_NilInNilOut_AndIsAFreshCopy(t *testing.T) {
+	if got := copyStringMap(nil); got != nil {
+		t.Fatalf("copyStringMap(nil) = %+v, want nil", got)
+	}
+
+	src := map[string]string{"a": "1"}
+	got := copyStringMap(src)
+	if !reflect.DeepEqual(got, src) {
+		t.Fatalf("copyStringMap(src) = %+v, want a copy equal to %+v", got, src)
+	}
+	got["a"] = "mutated"
+	got["b"] = "added"
+	if src["a"] != "1" || len(src) != 1 {
+		t.Fatalf("source map mutated through the copy: %+v", src)
+	}
 }

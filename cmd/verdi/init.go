@@ -49,9 +49,10 @@ import (
 const verdiDirName = ".verdi"
 
 // initUsageText is this verb's own one-line usage — the exact text every
-// init-side error message cites, so dispatch's help.go registry
-// (verbUsage["init"]) and every hand-printed refusal here can never
-// silently drift apart.
+// init-side error message cites AND (review round 1, Minor 2)
+// help.go's verbUsage["init"] row derives ("usage: " + initUsageText,
+// not a second hand-typed literal), so dispatch's help output and every
+// hand-printed refusal here can never silently drift apart.
 const initUsageText = "verdi init [--wizard] [--vocabulary plain|canonical]"
 
 // cmdInit is `verdi init`'s real entry point, invoked by dispatch.go. It
@@ -196,10 +197,13 @@ func runInit(cwd string, wizard bool, preset model.Vocabulary, stdin io.Reader, 
 		return 2
 	}
 
-	// W-4: when the wizard diverged from canonical, the staged
-	// model.yaml must decode back to a value identical to the
-	// interview's own in-memory candidate — proven by re-reading and
-	// re-decoding the ACTUAL staged bytes, never trusting what was
+	// W-4: when either path staged a model.yaml — the bare path direct
+	// from cmdInit's resolved --vocabulary preset, or the wizard path from
+	// the interview's own confirmed result.Vocabulary (review round 1,
+	// Minor 8: both paths stage model.yaml now and ride this identical
+	// check, not the wizard alone) — the staged bytes must decode back to
+	// a value identical to that in-memory candidate, proven by re-reading
+	// and re-decoding the ACTUAL staged bytes, never trusting what was
 	// rendered in memory.
 	if candidate != nil {
 		stagedPath := filepath.Join(tempRoot, verdiDirName, "model.yaml")

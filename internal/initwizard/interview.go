@@ -166,12 +166,25 @@ func RunInterview(in io.Reader, out io.Writer, seed model.Vocabulary) (Interview
 // copy of RunInterview's seed and no earlier prompt in this same phase
 // can have touched id (each id is asked exactly once per phase) — falling
 // back to id itself when the seed carried no entry, exactly the fallback
-// every id had before the seed parameter existed. An Enter (val == "")
-// leaves vocab untouched, so a seeded entry stays exactly as seeded.
+// every id had before the seed parameter existed.
+//
+// Review round 1, Minor 5 (controller ruling, spec/init-wizard ac-2): an
+// Enter that confirms a SEEDED default is not a no-op — it goes through
+// the identical live-validation preview a typed rename takes (val is set
+// to the seeded value and falls through to the same render/decode/
+// digest block below), so the transcript's "-> valid (candidate digest
+// …)" line covers every value the run ultimately confirms, seeded or
+// typed, exactly as ac-2 promises. An Enter against an UNSEEDED id (or a
+// seed carrying only an empty-string entry — never produced by
+// ParseVocabularyPreset today, but not assumed away) still short-circuits
+// with no preview at all, byte-identical to every RunInterview call
+// before the seed parameter existed — this is what keeps the empty-seed
+// transcript golden (TestRunInterview_SeedIsTheDefault) unchanged.
 func runRenamePrompt(sc *bufio.Scanner, out io.Writer, phase vocabPhase, id string, vocab *model.Vocabulary) error {
+	seededVal, seeded := phase.get(*vocab, id)
 	def := id
-	if v, ok := phase.get(*vocab, id); ok && v != "" {
-		def = v
+	if seeded && seededVal != "" {
+		def = seededVal
 	}
 	for {
 		fmt.Fprintf(out, "  %s %q [Enter to keep %q]: ", phase.label, id, def)
@@ -180,7 +193,10 @@ func runRenamePrompt(sc *bufio.Scanner, out io.Writer, phase vocabPhase, id stri
 			return ErrAborted
 		}
 		if val == "" {
-			return nil
+			if !seeded || seededVal == "" {
+				return nil
+			}
+			val = seededVal
 		}
 
 		candidate := *vocab
