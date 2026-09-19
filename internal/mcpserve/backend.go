@@ -1,6 +1,7 @@
 package mcpserve
 
 import (
+	"context"
 	"fmt"
 	"sync"
 
@@ -10,6 +11,19 @@ import (
 	"github.com/jyang234/verdi/internal/index"
 	"github.com/jyang234/verdi/internal/readinesspilot"
 )
+
+// ReadinessLoader is the per-request readiness port (spec/readiness-
+// recovery ac-2/ac-4, 04 §port pattern: defined at this consumer — an
+// identical interface is declared independently in internal/workbench,
+// never a shared interface package). get_document asks for its OWN
+// rendered ref on every call (R-RR1-8), never a shared or foreign ref.
+// internal/readinessload.Loader is the one production implementation;
+// nil means no loader is wired (a headless verdi mcp with nothing
+// configured), which get_document renders as an honest "not supplied"
+// rather than an error.
+type ReadinessLoader interface {
+	Load(ctx context.Context, ref string) (readinesspilot.Snapshot, error)
+}
 
 // Backend is the one real implementation behind every MCP tool: a store
 // root plus the read (internal/index, internal/evidence,
@@ -38,14 +52,13 @@ type Backend struct {
 	// than erroring.
 	Forge forge.Forge
 
-	// Readiness is the startup readiness snapshot verdi serve built (nil
-	// when serving without --context-request or under standalone verdi
-	// mcp); get_document passes it to the loader for its live readings
-	// only — the accepted bytes and the working tree — and the loader
-	// uses it only when its TargetRef is the rendered spec (R-W3-3). A
-	// pinned-commit render never receives it: a live snapshot is not a
-	// fact about historical bytes (final-review F10).
-	Readiness *readinesspilot.Snapshot
+	// ReadinessLoader derives readiness fresh for get_document's own
+	// rendered ref on its live readings only — the accepted bytes and the
+	// working tree (spec/readiness-recovery ac-2/ac-4). A pinned-commit
+	// render never calls it: a live derivation is not a fact about
+	// historical bytes (final-review F10). nil means no loader is wired:
+	// the document states the absence rather than erroring.
+	ReadinessLoader ReadinessLoader
 
 	// ReviewUnavailable, when non-empty, is the disclosed reason a
 	// CONFIGURED forge (named in verdi.yaml) could not be reached to build

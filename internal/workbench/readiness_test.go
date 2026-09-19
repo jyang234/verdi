@@ -1,6 +1,8 @@
 package workbench
 
 import (
+	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -661,7 +663,7 @@ func TestReadinessRender_KeyboardLandmarksAndScript(t *testing.T) {
 
 func TestReadinessRoute_GetHappy(t *testing.T) {
 	snap := readinessFixture()
-	h := NewHandlerWith(t.TempDir(), Deps{Readiness: &snap})
+	h := NewHandlerWith(t.TempDir(), Deps{ReadinessLoader: fixedSnapshotLoader{snap: snap}, ReadinessDefaultSpec: snap.TargetRef})
 	req := httptest.NewRequest(http.MethodGet, "/readiness", nil)
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
@@ -692,9 +694,101 @@ func TestReadinessRoute_MissingSnapshot503(t *testing.T) {
 	}
 }
 
+// TestReadinessRoute_QuerySpecDerivesPerRequest is spec/readiness-recovery
+// ac-2/ac-4: the readiness route asks the loader fresh for every request
+// (never a startup-frozen snapshot) — a counting fake proves two GETs
+// trigger two loads, ?spec=<name> passes exactly "spec/"+name, an unknown
+// spec surfaces the loader's own error text as a 503, and a process with
+// no loader wired at all keeps the existing 503 disclosure unchanged.
+func TestReadinessRoute_QuerySpecDerivesPerRequest(t *testing.T) {
+	snap := readinessFixture()
+	get := func(t *testing.T, h http.Handler, path string) *httptest.ResponseRecorder {
+		t.Helper()
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
+		return rec
+	}
+
+	t.Run("two GETs trigger two loads", func(t *testing.T) {
+		loader := &countingReadinessLoader{snap: snap}
+		h := NewHandlerWith(t.TempDir(), Deps{ReadinessLoader: loader, ReadinessDefaultSpec: snap.TargetRef})
+		first := get(t, h, "/readiness")
+		second := get(t, h, "/readiness")
+		if first.Code != http.StatusOK || second.Code != http.StatusOK {
+			t.Fatalf("status = %d, %d, want 200, 200", first.Code, second.Code)
+		}
+		if loader.calls != 2 {
+			t.Fatalf("loader.calls = %d, want exactly 2 (one per GET)", loader.calls)
+		}
+	})
+
+	t.Run("?spec=x passes spec/x", func(t *testing.T) {
+		loader := &countingReadinessLoader{snap: snap}
+		h := NewHandlerWith(t.TempDir(), Deps{ReadinessLoader: loader})
+		rec := get(t, h, "/readiness?spec=pilot")
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status = %d, body=%s", rec.Code, rec.Body.String())
+		}
+		if len(loader.refs) != 1 || loader.refs[0] != "spec/pilot" {
+			t.Fatalf("loader.refs = %v, want exactly [\"spec/pilot\"]", loader.refs)
+		}
+	})
+
+	t.Run("unknown spec surfaces the loader's own error as a 503", func(t *testing.T) {
+		wantErr := errors.New("readinessload: loading readiness: gathering repository facts: no such spec")
+		loader := erroringReadinessLoader{err: wantErr}
+		h := NewHandlerWith(t.TempDir(), Deps{ReadinessLoader: loader, ReadinessDefaultSpec: "spec/pilot"})
+		rec := get(t, h, "/readiness?spec=nope")
+		if rec.Code != http.StatusServiceUnavailable {
+			t.Fatalf("status = %d, want 503", rec.Code)
+		}
+		if !strings.Contains(rec.Body.String(), wantErr.Error()) {
+			t.Fatalf("503 body does not carry the loader's own error text:\n%s", rec.Body.String())
+		}
+	})
+
+	t.Run("a bad spec name is a 400, never reaches the loader", func(t *testing.T) {
+		loader := &countingReadinessLoader{snap: snap}
+		h := NewHandlerWith(t.TempDir(), Deps{ReadinessLoader: loader})
+		rec := get(t, h, "/readiness?spec=Not%20A%20Valid%20Name")
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("status = %d, want 400", rec.Code)
+		}
+		if loader.calls != 0 {
+			t.Fatalf("loader.calls = %d, want 0 (a bad name must never reach the loader)", loader.calls)
+		}
+	})
+
+	t.Run("no loader keeps the existing 503 disclosure unchanged", func(t *testing.T) {
+		h := NewHandlerWith(t.TempDir(), Deps{ReadinessDefaultSpec: "spec/pilot"})
+		rec := get(t, h, "/readiness")
+		if rec.Code != http.StatusServiceUnavailable {
+			t.Fatalf("status = %d, want 503", rec.Code)
+		}
+		if !strings.Contains(rec.Body.String(), "snapshot") || !strings.Contains(rec.Body.String(), "verdi serve") {
+			t.Fatalf("503 page does not honestly disclose the missing loader: %s", rec.Body.String())
+		}
+	})
+}
+
+// countingReadinessLoader is a test-only ReadinessLoader recording every
+// ref it was asked to Load, in order, and always returning the same fixed
+// snapshot.
+type countingReadinessLoader struct {
+	snap  readinesspilot.Snapshot
+	calls int
+	refs  []string
+}
+
+func (c *countingReadinessLoader) Load(_ context.Context, ref string) (readinesspilot.Snapshot, error) {
+	c.calls++
+	c.refs = append(c.refs, ref)
+	return c.snap, nil
+}
+
 func TestReadinessRoute_WrongMethod405(t *testing.T) {
 	snap := readinessFixture()
-	h := NewHandlerWith(t.TempDir(), Deps{Readiness: &snap})
+	h := NewHandlerWith(t.TempDir(), Deps{ReadinessLoader: fixedSnapshotLoader{snap: snap}, ReadinessDefaultSpec: snap.TargetRef})
 	for _, path := range []string{"/readiness", "/assets/readiness.js"} {
 		for _, method := range []string{http.MethodPost, http.MethodPut, http.MethodDelete} {
 			req := httptest.NewRequest(method, path, nil)

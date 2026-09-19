@@ -59,6 +59,10 @@ type ConflictProviderFunc func(ctx context.Context, root string, request policyc
 // Options.PredecodedRequest — the "exactly one canonical read" seam a
 // caller that has already called ContextRequestSpec (to learn Load's own
 // required ref parameter) uses to avoid a second read of the same file.
+// Supplying it skips Load's own read AND its ValidatedContextRequestPath
+// safety check (the ".."/symlink refusal): the path check is the
+// caller's too, already performed by the ContextRequestSpec call that
+// produced this bundle, exactly once, before Load ever runs.
 type PredecodedRequest struct {
 	// Bytes is the exact byte sequence RequestDigest is computed from —
 	// never re-encoded or reformatted.
@@ -110,6 +114,11 @@ type Options struct {
 	// hermetic seam of its own, forcing every consumer test that needed a
 	// specific conflict outcome to either replicate cmd/verdi's deleted
 	// fake-provider machinery or spawn a real judge subprocess). nil (the
-	// ordinary case) uses NewConflictProvider under Judge/Actors above.
+	// ordinary case) uses NewConflictProvider under Judge/Actors above. A
+	// PRODUCTION caller that sets this (as opposed to a test) takes over
+	// ac-3's no-launch guarantee for its own provider: Load itself never
+	// launches a judge through this seam, so a production ConflictProvider
+	// that does so owns that decision and its consequences, not this
+	// package.
 	ConflictProvider ConflictProviderFunc
 }
