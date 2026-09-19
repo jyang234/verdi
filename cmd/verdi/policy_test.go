@@ -45,6 +45,48 @@ func adoptFixture(t *testing.T) *fixturegit.Repo {
 	return fixturegit.Build(t, []fixturegit.Layer{{Files: map[string]string{".verdi/verdi.yaml": "schema: verdi.layout/v1\n"}, Message: "init store"}})
 }
 
+// pinGitCommitIdentity pins, in the environment the child binary
+// inherits, the author/committer identity git needs to record the
+// adoption commit at all. Every test below that lets the verb reach its
+// commit — or reach any step the committer preflight now guards — calls
+// it; the one test proving the preflight's own refusal
+// (TestPolicyAdopt_NoCommitterIdentityRefusesBeforeWriting) deliberately
+// does not.
+//
+// It answers a requirement of GIT's, entirely separate from the
+// local-operator identity the solo profile BINDS as its subject: git
+// composes an author and a committer from the GIT_AUTHOR_*/GIT_COMMITTER_*
+// environment, then the --local, --global and --system config scopes, and
+// finally a name derived from the OS account. Two states break that here,
+// and neither says anything about the verb:
+//
+//   - No identity to fall back on. fixturegit.Build configures
+//     user.name/user.email in the fixture's own --local scope, but
+//     TestPolicyAdopt_NoLocalIdentityRefusesSolo clears exactly those
+//     keys; on a developer's macOS machine git then derives a name from
+//     the OS account's full-name field and commits anyway, while a
+//     GitHub runner's account has that field empty and git refuses
+//     ("fatal: empty ident name (for <runner@...>) not allowed"). That
+//     host difference, not the verb, is what reddened CI.
+//   - An ambient GIT_AUTHOR_NAME/GIT_COMMITTER_NAME exported EMPTY. Those
+//     variables override every config scope even when empty, so a shell
+//     (or a gate command masking the host's own identity) that exports
+//     them turns the fixture's --local identity back into that same fatal
+//     error.
+//
+// The pinned values are fixturegit's own identity, so nothing observable
+// about the resulting commits changes. They are invisible to the
+// local-operator binding: readLocalGitIdentity goes through
+// gitx.ConfigValue, which reads `git config --local` and never the
+// environment.
+func pinGitCommitIdentity(t *testing.T) {
+	t.Helper()
+	t.Setenv("GIT_AUTHOR_NAME", "Verdi Fixture")
+	t.Setenv("GIT_AUTHOR_EMAIL", "fixture@verdi.invalid")
+	t.Setenv("GIT_COMMITTER_NAME", "Verdi Fixture")
+	t.Setenv("GIT_COMMITTER_EMAIL", "fixture@verdi.invalid")
+}
+
 // runVerdiStdin execs bin with args, cwd=dir, piping stdin, and returns
 // runVerdi's own (code, stdout, stderr) order — this package's
 // runVerdiBinaryStdin (context_resolve_test.go) returns a different order
@@ -85,6 +127,7 @@ func TestPolicyAdopt_SoloWritesFourPathsOnPolicyAdopt(t *testing.T) {
 	bin := buildVerdiBinary(t)
 	repo := adoptFixture(t)
 	t.Setenv("CI_DEFAULT_BRANCH", "main")
+	pinGitCommitIdentity(t)
 	code, stdout, stderr := runVerdi(t, bin, repo.Dir, "policy", "adopt", "--starter")
 	if code != 0 {
 		t.Fatalf("code %d\n%s\n%s", code, stdout, stderr)
@@ -173,6 +216,7 @@ func TestPolicyAdopt_PreStagedUnrelatedChangeStaysOutOfTheAdoptCommit(t *testing
 	bin := buildVerdiBinary(t)
 	repo := adoptFixture(t)
 	t.Setenv("CI_DEFAULT_BRANCH", "main")
+	pinGitCommitIdentity(t)
 
 	if err := os.WriteFile(filepath.Join(repo.Dir, "notes.md"), []byte("unrelated work in progress\n"), 0o644); err != nil {
 		t.Fatal(err)
@@ -208,6 +252,7 @@ func TestPolicyAdopt_TeamRequiresOwnerAndProposesOnly(t *testing.T) {
 	bin := buildVerdiBinary(t)
 	repo := adoptFixture(t)
 	t.Setenv("CI_DEFAULT_BRANCH", "main")
+	pinGitCommitIdentity(t)
 
 	code, stdout, stderr := runVerdi(t, bin, repo.Dir, "policy", "adopt", "--starter", "--profile", "team", "--owner", "platform-team")
 	if code != 0 {
@@ -242,6 +287,7 @@ func TestPolicyAdopt_TeamRequiresOwnerAndProposesOnly(t *testing.T) {
 func TestPolicyAdopt_OverrideRecordedAndSynthesisRefusedBeforeBranching(t *testing.T) {
 	bin := buildVerdiBinary(t)
 	t.Setenv("CI_DEFAULT_BRANCH", "main")
+	pinGitCommitIdentity(t)
 
 	t.Run("benign override recorded", func(t *testing.T) {
 		canon, err := designscaffold.Canonical(humanartifact.StarterPolicyTemplate)
@@ -314,8 +360,16 @@ func TestPolicyAdopt_OverrideRecordedAndSynthesisRefusedBeforeBranching(t *testi
 // identity precondition: with neither user.email nor user.name configured
 // in the checkout's own --local git scope, adopt refuses operationally
 // (exit 2) naming the missing configuration, writes nothing, and cuts no
-// branch — while the team profile, which needs no local git identity,
-// still succeeds against that same checkout.
+// branch — while the team profile, which binds no LOCAL identity of its
+// own, still succeeds against that same checkout.
+//
+// "Needs no local identity" is the whole team claim, and it is narrower
+// than "needs no identity": git still has to name an author and a
+// committer for the adoption commit. That requirement is supplied
+// explicitly below (pinGitCommitIdentity) rather than borrowed from the
+// host, because a host that happens to supply one — macOS derives a name
+// from the OS account — makes this test pass for a reason CI does not
+// have.
 func TestPolicyAdopt_NoLocalIdentityRefusesSolo(t *testing.T) {
 	bin := buildVerdiBinary(t)
 	repo := adoptFixture(t)
@@ -333,9 +387,22 @@ func TestPolicyAdopt_NoLocalIdentityRefusesSolo(t *testing.T) {
 		t.Fatal("no branch should have been cut")
 	}
 
+	// AFTER the solo assertions: the solo refusal above must see a
+	// checkout with no repo-local identity, which is exactly what it still
+	// sees — these variables live in the environment, and the local-operator
+	// read is `git config --local` only (gitx.ConfigValue), which never
+	// consults the environment. They give git what IT needs to author the
+	// team profile's commit.
+	pinGitCommitIdentity(t)
+
 	code, _, stderr = runVerdi(t, bin, repo.Dir, "policy", "adopt", "--starter", "--profile", "team", "--owner", "platform-team")
 	if code != 0 {
 		t.Fatalf("team adopt after clearing identity: code %d stderr %s", code, stderr)
+	}
+	// The team profile committed with the identity the environment
+	// supplied, never one derived from the cleared --local scope.
+	if got := strings.TrimSpace(gitOutput(t, repo.Dir, "show", "-s", "--format=%an <%ae>", "HEAD")); got != "Verdi Fixture <fixture@verdi.invalid>" {
+		t.Fatalf("adoption commit author = %q, want the environment-supplied identity", got)
 	}
 }
 
@@ -418,6 +485,7 @@ func TestPolicyAdopt_InlineFlagValuesAdoptTheTeamProfile(t *testing.T) {
 	bin := buildVerdiBinary(t)
 	repo := adoptFixture(t)
 	t.Setenv("CI_DEFAULT_BRANCH", "main")
+	pinGitCommitIdentity(t)
 
 	code, stdout, stderr := runVerdi(t, bin, repo.Dir, "policy", "adopt", "--starter", "--profile=team", "--owner=platform-team")
 	if code != 0 {
