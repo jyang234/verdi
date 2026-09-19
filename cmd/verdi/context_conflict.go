@@ -51,7 +51,7 @@ func cmdContextConflictWithFactory(args []string, stdin io.Reader, stdout, stder
 		fmt.Fprintln(stderr, "context conflict: --out requires a value")
 		return 2
 	}
-	if hasOut && hasDotDotElement(outArg) {
+	if hasOut && store.HasDotDotElement(outArg) {
 		fmt.Fprintln(stderr, "context conflict:", errContextOutDotDot)
 		return 2
 	}

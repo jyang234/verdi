@@ -10,8 +10,9 @@
 //
 // This file's flag grammar and diagnostic-redaction plumbing reuse
 // context.go's own extractContextCompileFlags/canonicalOutPath/
-// validateContextOutputStoreZone/sameFileArg/hasDotDotElement helpers
-// byte-for-byte (the exact --request/--out grammar `context compile` and
+// validateContextOutputStoreZone/sameFileArg helpers and
+// store.HasDotDotElement byte-for-byte (the exact --request/--out grammar
+// `context compile` and
 // `context conflict` already share) — never a second flag parser or a
 // second checkout-path redaction rule.
 //
@@ -75,7 +76,7 @@ func runConstitutionOp(op string, args []string, stdin io.Reader, stdout, stderr
 		fmt.Fprintln(stderr, "context constitution "+op+": --out requires a value")
 		return 2
 	}
-	if hasOut && hasDotDotElement(outArg) {
+	if hasOut && store.HasDotDotElement(outArg) {
 		fmt.Fprintln(stderr, "context constitution "+op+":", errContextOutDotDot)
 		return 2
 	}

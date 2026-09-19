@@ -111,7 +111,13 @@ func cmdServe(args []string, stdout, stderr io.Writer) int {
 type readinessLoadBuilder struct{}
 
 func (readinessLoadBuilder) Build(ctx context.Context, root, requestPath string) (readinesspilot.Snapshot, error) {
-	targetSpec, err := readinessload.ContextRequestSpec(root, requestPath)
+	// ContextRequestSpec reads and decodes requestPath exactly once; the
+	// Predecoded bundle it returns flows into warmOpts below so Load does
+	// not read the same file a second time (fix round 1, Minor 6). The
+	// stashed cacheOnlyOpts deliberately does NOT carry it: every later
+	// per-request Loader.Load call must read the checkout's then-current
+	// request file fresh, never a startup-frozen copy.
+	targetSpec, predecoded, err := readinessload.ContextRequestSpec(root, requestPath)
 	if err != nil {
 		return readinesspilot.Snapshot{}, err
 	}
@@ -123,6 +129,7 @@ func (readinessLoadBuilder) Build(ctx context.Context, root, requestPath string)
 	}
 	warmOpts := cacheOnlyOpts
 	warmOpts.Judge = readinessload.JudgeRun
+	warmOpts.PredecodedRequest = predecoded
 	snapshot, err := readinessload.Load(ctx, root, targetSpec, warmOpts)
 	if err != nil {
 		return readinesspilot.Snapshot{}, err

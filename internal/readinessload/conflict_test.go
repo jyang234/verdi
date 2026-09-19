@@ -9,6 +9,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -50,19 +51,29 @@ func TestValidatedContextRequestPath_RefusesDotDotAndSymlink(t *testing.T) {
 
 func TestContextRequestSpec_ReportsTheDeclaredTarget(t *testing.T) {
 	repo, ref := readinessRepo(t, "feature")
-	requestPath := writeRequestFile(t, repo.Dir, "request.json", requestBytes(t, ref, contextcompile.PhaseDesign))
+	data := requestBytes(t, ref, contextcompile.PhaseDesign)
+	requestPath := writeRequestFile(t, repo.Dir, "request.json", data)
 
-	got, err := ContextRequestSpec(repo.Dir, requestPath)
+	got, predecoded, err := ContextRequestSpec(repo.Dir, requestPath)
 	if err != nil {
 		t.Fatalf("ContextRequestSpec: %v", err)
 	}
 	if got != ref {
-		t.Fatalf("ContextRequestSpec = %q, want %q", got, ref)
+		t.Fatalf("ContextRequestSpec ref = %q, want %q", got, ref)
+	}
+	if predecoded == nil {
+		t.Fatal("ContextRequestSpec predecoded = nil, want a bundle")
+	}
+	if !reflect.DeepEqual(predecoded.Bytes, data) {
+		t.Fatalf("predecoded.Bytes = %q, want the exact canonical request bytes %q", predecoded.Bytes, data)
+	}
+	if predecoded.Request.Spec != ref {
+		t.Fatalf("predecoded.Request.Spec = %q, want %q", predecoded.Request.Spec, ref)
 	}
 }
 
 func TestContextRequestSpec_RefusesStdin(t *testing.T) {
-	if _, err := ContextRequestSpec(t.TempDir(), "-"); err == nil || !strings.Contains(err.Error(), "stdin") {
+	if _, _, err := ContextRequestSpec(t.TempDir(), "-"); err == nil || !strings.Contains(err.Error(), "stdin") {
 		t.Fatalf("error = %v, want a stdin refusal", err)
 	}
 }
@@ -73,8 +84,48 @@ func TestContextRequestSpec_NeverReadsPastAPathRefusal(t *testing.T) {
 	// is built by string concatenation instead — the same technique
 	// load_test.go's own ".."/symlink pin uses.
 	traversal := root + string(filepath.Separator) + "nested" + string(filepath.Separator) + ".." + string(filepath.Separator) + "request.json"
-	if _, err := ContextRequestSpec(root, traversal); err == nil || !strings.Contains(err.Error(), `".."`) {
+	if _, _, err := ContextRequestSpec(root, traversal); err == nil || !strings.Contains(err.Error(), `".."`) {
 		t.Fatalf("error = %v, want a \"..\" refusal", err)
+	}
+}
+
+// TestContextRequestSpec_PredecodedRequestAvoidsASecondRead re-pins fix
+// round 1's Minor 6 fix: Load, given the Predecoded bundle ContextRequestSpec
+// already read once, does not read the file again. It corrupts the file on
+// disk immediately after the one read ContextRequestSpec performs — if Load
+// re-read it, decoding would fail; instead Load succeeds and its
+// RequestDigest is the digest of the ORIGINAL (predecoded) bytes, proving
+// the corrupted on-disk bytes were never touched.
+func TestContextRequestSpec_PredecodedRequestAvoidsASecondRead(t *testing.T) {
+	repo, ref := readinessRepo(t, "feature")
+	checkoutBranch(t, repo.Dir, "design/feature-alpha")
+	requestPath := writeRequestFile(t, repo.Dir, "readiness-request.json", requestBytes(t, ref, contextcompile.PhaseDesign))
+
+	gotRef, predecoded, err := ContextRequestSpec(repo.Dir, requestPath)
+	if err != nil {
+		t.Fatalf("ContextRequestSpec: %v", err)
+	}
+	if gotRef != ref {
+		t.Fatalf("ContextRequestSpec ref = %q, want %q", gotRef, ref)
+	}
+
+	if err := os.WriteFile(requestPath, []byte("not json, and not even the same length"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	fakeProvider := func(_ context.Context, root string, request policyconflict.Request) (policyconflict.VerdictProvider, error) {
+		return providerFunc(func(context.Context, policyconflict.Request) (policyconflict.Result, error) {
+			return fixtureReport(t, root, request, policyconflict.VerdictPass, nil), nil
+		}), nil
+	}
+	snap, err := Load(context.Background(), repo.Dir, ref, Options{
+		ContextRequestPath: requestPath, PredecodedRequest: predecoded, ConflictProvider: fakeProvider,
+	})
+	if err != nil {
+		t.Fatalf("Load with PredecodedRequest after the file was corrupted on disk: %v", err)
+	}
+	if snap.RequestDigest != testDigest(predecoded.Bytes) {
+		t.Fatalf("RequestDigest = %q, want the digest of the predecoded bytes %q", snap.RequestDigest, testDigest(predecoded.Bytes))
 	}
 }
 

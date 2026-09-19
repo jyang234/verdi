@@ -3,7 +3,9 @@ package readinessload
 import (
 	"context"
 
+	"github.com/jyang234/verdi/internal/contextcompile"
 	"github.com/jyang234/verdi/internal/governanceprincipal"
+	"github.com/jyang234/verdi/internal/policyconflict"
 )
 
 // JudgeMode selects how a supplied --context-request's policy-conflict
@@ -46,6 +48,25 @@ func (m JudgeMode) normalize() JudgeMode {
 // trust source already has today.
 type ActorsResolver func(ctx context.Context, root string) ([]governanceprincipal.PrincipalResolution, error)
 
+// ConflictProviderFunc constructs a policy-conflict VerdictProvider for one
+// request — the same shape NewConflictProvider itself has, minus the
+// mode/actors parameters a caller-supplied provider has already baked in
+// (or has no use for). It is the seam Options.ConflictProvider carries.
+type ConflictProviderFunc func(ctx context.Context, root string, request policyconflict.Request) (policyconflict.VerdictProvider, error)
+
+// PredecodedRequest bundles an already-read, already-decoded
+// --context-request's exact canonical bytes and decoded value, for
+// Options.PredecodedRequest — the "exactly one canonical read" seam a
+// caller that has already called ContextRequestSpec (to learn Load's own
+// required ref parameter) uses to avoid a second read of the same file.
+type PredecodedRequest struct {
+	// Bytes is the exact byte sequence RequestDigest is computed from —
+	// never re-encoded or reformatted.
+	Bytes []byte
+	// Request is Bytes decoded through contextcompile.DecodeRequest.
+	Request contextcompile.Request
+}
+
 // Options is every optional posture Load needs beyond (root, ref).
 type Options struct {
 	// ContextRequestPath is the optional --context-request file naming an
@@ -53,8 +74,18 @@ type Options struct {
 	// (R-RR1-5). Empty means no conflict request is synthesized — inventing
 	// adapter, grants, or scope would be authority the store never
 	// declared — and the check-context area carries exactly one unproven
-	// context/verdict concern instead.
+	// context/verdict concern instead. Still required (for its own
+	// destination text and identity checks) even when PredecodedRequest is
+	// also set.
 	ContextRequestPath string
+	// PredecodedRequest, when non-nil, is the exact bytes and decoded value
+	// of the file ContextRequestPath names — supplied by a caller that
+	// already read it once (ContextRequestSpec returns this bundle) so Load
+	// does not read it a second time. Load still validates phase/spec
+	// identity against it exactly as it would a freshly read request; only
+	// the read itself is skipped. Leave nil for the ordinary case (Load
+	// reads ContextRequestPath itself).
+	PredecodedRequest *PredecodedRequest
 	// BoardHref computes a design branch's board href for an unresolved
 	// shape concern's destination (R-RR1-6: this package never imports
 	// internal/workbench, so it never calls workbench.BranchBoardHref
@@ -63,9 +94,22 @@ type Options struct {
 	BoardHref func(branch, name string) string
 	// Judge selects how a supplied context request's conflict evaluation
 	// may reach a semantic judgment. The zero value behaves as
-	// JudgeCacheOnly.
+	// JudgeCacheOnly. Ignored when ConflictProvider is set (the caller's
+	// own provider owns that decision).
 	Judge JudgeMode
 	// Actors resolves the store's opt-in local-operator actor claim. nil
-	// resolves no actors.
+	// resolves no actors. Ignored when ConflictProvider is set.
 	Actors ActorsResolver
+	// ConflictProvider, when non-nil, replaces NewConflictProvider as the
+	// policy-conflict VerdictProvider construction Load uses for a
+	// supplied context request — Load's own hermetic test seam, exported
+	// so a consumer (cmd/verdi's serve.go, and Task 3's workbench/MCP
+	// wiring) and ITS OWN tests can inject a fake or in-process-only
+	// provider instead of exercising the real align.judge_cmd process
+	// transport (fix round 1, Important 2: readinessload previously had no
+	// hermetic seam of its own, forcing every consumer test that needed a
+	// specific conflict outcome to either replicate cmd/verdi's deleted
+	// fake-provider machinery or spawn a real judge subprocess). nil (the
+	// ordinary case) uses NewConflictProvider under Judge/Actors above.
+	ConflictProvider ConflictProviderFunc
 }

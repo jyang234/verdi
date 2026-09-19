@@ -148,7 +148,7 @@ func (conflictRefResolver) Covers(context.Context, string, string) (policyconfli
 // the checkout start at the already-resolved store root, avoiding false
 // positives from platform-level aliases above the checkout.
 func ValidatedContextRequestPath(root, requestPath string) (string, error) {
-	if hasDotDotElement(requestPath) {
+	if store.HasDotDotElement(requestPath) {
 		return "", errors.New(`--context-request must not contain a ".." path element`)
 	}
 	requestAbs, err := filepath.Abs(requestPath)
@@ -221,46 +221,32 @@ func ValidatedContextRequestPath(root, requestPath string) (string, error) {
 	return requestAbs, nil
 }
 
-// hasDotDotElement reports whether p contains a ".." PATH ELEMENT under
-// either separator convention. It is element-wise, never a substring test:
-// a file honestly named "..notes.json" or "a..b" carries no traversal and
-// stays allowed. A small, deliberate duplicate of cmd/verdi/context.go's
-// own helper: that file's other three call sites (--out path validation for
-// unrelated verbs) stay in cmd/verdi, so moving the shared name here would
-// only add a reverse cmd/verdi -> internal/readinessload dependency for an
-// unrelated concern.
-func hasDotDotElement(p string) bool {
-	for _, seg := range strings.FieldsFunc(p, func(r rune) bool {
-		return r == '/' || r == filepath.Separator
-	}) {
-		if seg == ".." {
-			return true
-		}
-	}
-	return false
-}
-
 // ContextRequestSpec safely validates path (refusing ".." and symlink path
-// components, exactly as Load's own request handling does) and decodes it
-// far enough to report the request's declared target spec ref, without
-// evaluating any conflict. cmd/verdi's serve startup pre-run uses this to
-// learn which spec to warm before calling Load, since Load itself requires
-// ref as an explicit, already-known parameter.
-func ContextRequestSpec(root, path string) (string, error) {
+// components, exactly as Load's own request handling does), reads it
+// exactly once, and decodes it — reporting the request's declared target
+// spec ref (Load's own required ref parameter) alongside a Predecoded
+// bundle of the exact bytes and decoded value. cmd/verdi's serve startup
+// pre-run uses ref to learn which spec to warm before calling Load, and
+// passes predecoded back through Options.PredecodedRequest so Load does not
+// read the same file a second time (fix round 1, Minor 6: "exactly one
+// canonical read" now holds per startup, not merely per Load call — see
+// TestContextRequestSpec_PredecodedRequestAvoidsASecondRead). A caller that
+// only needs ref may discard predecoded.
+func ContextRequestSpec(root, path string) (ref string, predecoded *PredecodedRequest, err error) {
 	if path == "-" {
-		return "", errors.New("readinessload: --context-request does not accept stdin ('-')")
+		return "", nil, errors.New("readinessload: --context-request does not accept stdin ('-')")
 	}
 	validated, err := ValidatedContextRequestPath(root, path)
 	if err != nil {
-		return "", fmt.Errorf("readinessload: %w", err)
+		return "", nil, fmt.Errorf("readinessload: %w", err)
 	}
 	data, err := os.ReadFile(validated)
 	if err != nil {
-		return "", fmt.Errorf("readinessload: reading --context-request: %w", err)
+		return "", nil, fmt.Errorf("readinessload: reading --context-request: %w", err)
 	}
 	request, err := contextcompile.DecodeRequest(data)
 	if err != nil {
-		return "", fmt.Errorf("readinessload: decoding --context-request: %w", err)
+		return "", nil, fmt.Errorf("readinessload: decoding --context-request: %w", err)
 	}
-	return request.Spec, nil
+	return request.Spec, &PredecodedRequest{Bytes: data, Request: request}, nil
 }

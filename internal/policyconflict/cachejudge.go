@@ -24,11 +24,11 @@ package policyconflict
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
 
+	"github.com/jyang234/verdi/internal/artifact"
 	"github.com/jyang234/verdi/internal/canonjson"
 	"github.com/jyang234/verdi/internal/store"
 )
@@ -93,9 +93,15 @@ func (j cacheOnlyJudge) Judge(ctx context.Context, prompt, input []byte) (Judgme
 // port receives: prompt is carried as-is, and input is decoded back through
 // the same semanticInputWitnessDoc shape CachedJudge/runValidatedJudge
 // encode it with (a plain, undecorated JSON shape — see semantic.go).
+// Decoded strictly (artifact.DecodeExactJSON: unknown fields, trailing
+// data, and duplicate keys all refused) per CLAUDE.md's "JSON via
+// DisallowUnknownFields + trailing-data rejection" — stated without a
+// test-only-path exception, and this reconstruction feeds a witness
+// cross-check, so a permissively decoded extra or duplicate field could
+// otherwise pass silently instead of failing closed.
 func semanticInputFromNormalizedBytes(prompt, input []byte) (SemanticInput, error) {
 	var shown semanticInputWitnessDoc
-	if err := json.Unmarshal(input, &shown); err != nil {
+	if err := artifact.DecodeExactJSON(input, &shown); err != nil {
 		return SemanticInput{}, fmt.Errorf("decoding normalized semantic input: %w", err)
 	}
 	return SemanticInput{
@@ -110,6 +116,19 @@ func semanticInputFromNormalizedBytes(prompt, input []byte) (SemanticInput, erro
 // refusal machinery, and NEVER falls through to adapter.Judge on a miss —
 // it reports ErrJudgeCacheMiss instead. It never touches the D3 writer
 // lock: there is nothing to publish on a miss.
+//
+// Unlike CachedJudge, it does NOT validate adapter's own operands (role,
+// adapter.id/version/model, argv, or the profile id/digests) before
+// computing the key — those checks exist to fail malformed CONFIGURATION
+// loudly before a real judge process would otherwise run, and cache-only
+// mode never runs one. A malformed adapter here simply computes a key that
+// cannot match any real entry, so it degrades to loadCachedJudgment's own
+// "not found" path: ErrJudgeCacheMiss, and from there the same unproven/
+// judge-unavailable posture a genuinely absent cache entry gets — never an
+// operational error, and never a fabricated pass, where CachedJudge (a real
+// run) would report ErrCacheOperational instead. Key parity with a real
+// run (R-RR1-4) is unaffected either way, since judgeCacheKeyDigest itself
+// performs no validation.
 func cacheOnlyLookup(adapter JudgeAdapter, input SemanticInput, treeHash, profileID, profileDigest, authorityDigest string) (ValidatedExchange, error) {
 	inputBytes, err := canonjson.Marshal(semanticInputWitnessDoc{
 		Claims: input.Claims, UnknownMechanicals: input.UnknownMechanicals, Exemptions: input.Exemptions,

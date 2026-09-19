@@ -9,6 +9,8 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -26,13 +28,16 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jyang234/verdi/internal/artifact"
 	"github.com/jyang234/verdi/internal/contextcompile"
 	"github.com/jyang234/verdi/internal/designprovenance"
 	"github.com/jyang234/verdi/internal/filelock"
 	"github.com/jyang234/verdi/internal/fixturegit"
 	"github.com/jyang234/verdi/internal/mcpserve"
+	"github.com/jyang234/verdi/internal/policyconflict"
 	"github.com/jyang234/verdi/internal/readinessload"
 	"github.com/jyang234/verdi/internal/readinesspilot"
+	"github.com/jyang234/verdi/internal/repositoryfacts"
 	"github.com/jyang234/verdi/internal/store"
 	"github.com/jyang234/verdi/internal/workbench"
 )
@@ -229,20 +234,22 @@ func TestServeContextRequestBuilderFailureStopsBeforeServerEffects(t *testing.T)
 	}
 }
 
-// TestServeContextRequestSnapshotRemainsImmutableAcrossRequests drives the
-// real internal/readinessload.Load (JudgeRun) through a hermetic
-// align.judge_cmd script — the same recipe
-// TestServeContextRequestReadinessReachesGetDocumentOverSocket below uses
-// against the real binary — rather than a hand-built fake provider
-// (internal/readinessload's own Options carries no provider-factory
-// override seam; construction is always the real
-// readinessload.NewConflictProvider, spec/readiness-recovery Task 2).
+// TestServeContextRequestSnapshotRemainsImmutableAcrossRequests drives
+// internal/readinessload.Load entirely in-process, through
+// Options.ConflictProvider (fix round 1, Important 2: readinessload's own
+// hermetic seam) — no shell script, no judge process. Before that seam
+// existed this test briefly ran a real align.judge_cmd fake through
+// readinessload.NewConflictProvider(JudgeRun); that recipe is now reserved
+// for TestReadinessLoadBuilderHandsOffTheCacheOnlyLoaderAndDefaultSpec below
+// (whose own subject IS the JudgeRun pre-run) and
+// TestServeContextRequestReadinessReachesGetDocumentOverSocket (the real
+// binary end to end) — this test's own subject is cmdServeWithDeps's
+// build-once/immutable-snapshot sequencing, which needs no real judge at
+// all.
 func TestServeContextRequestSnapshotRemainsImmutableAcrossRequests(t *testing.T) {
 	repo := buildContextCompileRepo(t, map[string]string{
 		".verdi/specs/active/feature-alpha/spec.md": contextFeatureAlphaSpec(t),
 	})
-	judge := writeContextConflictJudge(t, "printf '%s\\n' '"+contextConflictNoConflictJudgeResult+"'")
-	configureContextConflictJudge(t, repo, judge, 0)
 	checkoutBranch(t, repo.Dir, "design/feature-alpha")
 	requestPath := writeContextRequestFile(t, repo.Dir, "readiness-request.json", contextRequestBytes(t, "spec/feature-alpha", contextcompile.PhaseDesign, nil))
 	specPath := store.ActiveSpecPath(repo.Dir, "feature-alpha")
@@ -250,12 +257,13 @@ func TestServeContextRequestSnapshotRemainsImmutableAcrossRequests(t *testing.T)
 	builds := 0
 	builder := readinessSnapshotBuilderFunc(func(ctx context.Context, root, gotRequestPath string) (readinesspilot.Snapshot, error) {
 		builds++
-		targetSpec, err := readinessload.ContextRequestSpec(root, gotRequestPath)
+		targetSpec, predecoded, err := readinessload.ContextRequestSpec(root, gotRequestPath)
 		if err != nil {
 			return readinesspilot.Snapshot{}, err
 		}
 		return readinessload.Load(ctx, root, targetSpec, readinessload.Options{
-			ContextRequestPath: gotRequestPath, Judge: readinessload.JudgeRun, BoardHref: workbench.BranchBoardHref,
+			ContextRequestPath: gotRequestPath, PredecodedRequest: predecoded, BoardHref: workbench.BranchBoardHref,
+			ConflictProvider: readinessLoadPassProviderFunc(t),
 		})
 	})
 	deps := serveCommandDeps{
@@ -292,6 +300,84 @@ func TestServeContextRequestSnapshotRemainsImmutableAcrossRequests(t *testing.T)
 	if builds != 1 {
 		t.Fatalf("readiness builds = %d after two HTTP requests, want exactly 1", builds)
 	}
+}
+
+// readinessLoadPassProviderFunc builds a readinessload.ConflictProviderFunc
+// (fix round 1, Important 2's seam) whose Evaluate always returns a
+// self-consistent VerdictPass report re-targeted at the caller's own
+// request — an in-process, no-subprocess fake, mirroring the real
+// internal/policyconflict/testdata/report.json fixture cmd/verdi's deleted
+// readiness_snapshot_test.go once re-targeted the same way
+// (readinessSnapshotReport) and internal/readinessload's own load_test.go
+// still does (fixtureReport) — never a hand-authored duplicate of the fixed
+// report shape.
+func readinessLoadPassProviderFunc(t *testing.T) readinessload.ConflictProviderFunc {
+	t.Helper()
+	return func(_ context.Context, root string, request policyconflict.Request) (policyconflict.VerdictProvider, error) {
+		return contextConflictProviderFunc(func(context.Context, policyconflict.Request) (policyconflict.Result, error) {
+			return readinessLoadPassReport(t, root, request), nil
+		}), nil
+	}
+}
+
+// readinessLoadPassReport decodes the real, already-cross-validated
+// internal/policyconflict/testdata/report.json fixture and re-targets its
+// Input.Target/Repository at request's own acceptance candidate, forcing an
+// empty Semantic slice and VerdictPass. readinessload.Load cross-checks the
+// report's target identity against the resolved journey target/repository
+// (load.go's reportIdentity) before it will accept the report at all, so
+// this re-targeting is required, not optional.
+func readinessLoadPassReport(t *testing.T, root string, request policyconflict.Request) policyconflict.Result {
+	t.Helper()
+	candidate := request.Target.AcceptanceCandidate
+	if request.Target.Kind != policyconflict.TargetAcceptanceCandidate || candidate == nil {
+		t.Fatalf("provider request target = %+v, want one acceptance candidate", request.Target)
+	}
+	ref, err := artifact.ParseRef(candidate.Spec)
+	if err != nil {
+		t.Fatalf("ParseRef(%q): %v", candidate.Spec, err)
+	}
+	specBytes, err := os.ReadFile(store.ActiveSpecPath(root, ref.Name))
+	if err != nil {
+		t.Fatalf("read report target: %v", err)
+	}
+	fixture, err := os.ReadFile(filepath.Join("..", "..", "internal", "policyconflict", "testdata", "report.json"))
+	if err != nil {
+		t.Fatalf("read report fixture: %v", err)
+	}
+	report, err := policyconflict.DecodeReport(fixture)
+	if err != nil {
+		t.Fatalf("DecodeReport fixture: %v", err)
+	}
+	report.Digest = ""
+	sum := sha256.Sum256(specBytes)
+	report.Input.Target = policyconflict.TargetIdentity{
+		Kind: policyconflict.TargetAcceptanceCandidate,
+		Candidate: &policyconflict.CandidateIdentity{
+			Ref:           candidate.Spec,
+			Path:          store.ActiveSpecRelPath(ref.Name),
+			Branch:        candidate.Expected.Branch,
+			Head:          candidate.Expected.Head,
+			Blob:          strings.Repeat("b", 40),
+			ContentDigest: "sha256:" + hex.EncodeToString(sum[:]),
+			Scope:         candidate.Scope,
+			Adapter:       candidate.Adapter,
+			GrantDigest:   "sha256:" + strings.Repeat("d", 64),
+		},
+	}
+	report.Input.Repository.Branch = repositoryfacts.StringFact{Known: true, Value: candidate.Expected.Branch}
+	report.Input.Repository.Head = repositoryfacts.StringFact{Known: true, Value: candidate.Expected.Head}
+	report.Semantic = []policyconflict.SemanticEvaluation{}
+	report.Verdict = policyconflict.VerdictPass
+	encoded, err := policyconflict.EncodeReport(report)
+	if err != nil {
+		t.Fatalf("EncodeReport: %v", err)
+	}
+	decoded, err := policyconflict.DecodeReport(encoded)
+	if err != nil {
+		t.Fatalf("DecodeReport: %v", err)
+	}
+	return policyconflict.Result{Report: decoded, ReportBytes: encoded}
 }
 
 // TestReadinessLoadBuilderHandsOffTheCacheOnlyLoaderAndDefaultSpec proves
@@ -343,7 +429,7 @@ func TestReadinessLoadBuilderHandsOffTheCacheOnlyLoaderAndDefaultSpec(t *testing
 // mutant M5 (delete the wiring line) left the entire ./cmd/verdi/ and
 // ./internal/mcpserve/ suites green. This test starts a REAL `verdi
 // serve --context-request <fixture>` subprocess — so it goes through the
-// genuine, unfaked localReadinessSnapshotBuilder{} runServe always uses —
+// genuine, unfaked readinessLoadBuilder{} runServe always uses —
 // and drives a REAL get_document call over its live MCP socket, exactly
 // mirroring TestServeMutateDraftUsesHeldWriterLock's real-socket-dial
 // pattern below. A regression that drops the wiring line makes this test

@@ -94,17 +94,26 @@ func (l loader) load(ctx context.Context, root, ref string, opts Options) (readi
 	case "-":
 		return readinesspilot.Snapshot{}, errors.New("readinessload: loading readiness: --context-request does not accept stdin ('-')")
 	default:
-		validatedPath, err := ValidatedContextRequestPath(root, opts.ContextRequestPath)
-		if err != nil {
-			return readinesspilot.Snapshot{}, fmt.Errorf("readinessload: loading readiness: %w", err)
-		}
-		requestBytes, err = readFile(validatedPath)
-		if err != nil {
-			return readinesspilot.Snapshot{}, fmt.Errorf("readinessload: loading readiness: reading --context-request: %w", err)
-		}
-		request, err = contextcompile.DecodeRequest(requestBytes)
-		if err != nil {
-			return readinesspilot.Snapshot{}, fmt.Errorf("readinessload: loading readiness: decoding --context-request: %w", err)
+		if opts.PredecodedRequest != nil {
+			// The caller (e.g. serve's startup pre-run, via
+			// ContextRequestSpec) already validated the path and read/decoded
+			// this exact file once; every check below still applies to its
+			// own bytes/value, just without a second read (Minor 6).
+			requestBytes = opts.PredecodedRequest.Bytes
+			request = opts.PredecodedRequest.Request
+		} else {
+			validatedPath, err := ValidatedContextRequestPath(root, opts.ContextRequestPath)
+			if err != nil {
+				return readinesspilot.Snapshot{}, fmt.Errorf("readinessload: loading readiness: %w", err)
+			}
+			requestBytes, err = readFile(validatedPath)
+			if err != nil {
+				return readinesspilot.Snapshot{}, fmt.Errorf("readinessload: loading readiness: reading --context-request: %w", err)
+			}
+			request, err = contextcompile.DecodeRequest(requestBytes)
+			if err != nil {
+				return readinesspilot.Snapshot{}, fmt.Errorf("readinessload: loading readiness: decoding --context-request: %w", err)
+			}
 		}
 		if request.Phase != contextcompile.PhaseDesign {
 			return readinesspilot.Snapshot{}, fmt.Errorf("readinessload: loading readiness: request must use phase %q, got %q", contextcompile.PhaseDesign, request.Phase)
@@ -172,11 +181,20 @@ func (l loader) load(ctx context.Context, root, ref string, opts Options) (readi
 			return readinesspilot.Snapshot{}, fmt.Errorf("readinessload: loading readiness: constructing conflict request: %w", err)
 		}
 
-		newConflictProvider := l.newConflictProvider
-		if newConflictProvider == nil {
-			newConflictProvider = NewConflictProvider
+		var provider policyconflict.VerdictProvider
+		var err error
+		switch {
+		case opts.ConflictProvider != nil:
+			// The caller's own seam (Important 2): a hermetic test or a
+			// consumer with an already-resolved provider replaces
+			// NewConflictProvider entirely — opts.Judge/opts.Actors are the
+			// caller's own concern in that case, not this package's.
+			provider, err = opts.ConflictProvider(ctx, root, conflictRequest)
+		case l.newConflictProvider != nil:
+			provider, err = l.newConflictProvider(ctx, root, conflictRequest, opts.Judge, opts.Actors)
+		default:
+			provider, err = NewConflictProvider(ctx, root, conflictRequest, opts.Judge, opts.Actors)
 		}
-		provider, err := newConflictProvider(ctx, root, conflictRequest, opts.Judge, opts.Actors)
 		if err != nil {
 			return readinesspilot.Snapshot{}, fmt.Errorf("readinessload: loading readiness: constructing policy-conflict provider: %w", err)
 		}

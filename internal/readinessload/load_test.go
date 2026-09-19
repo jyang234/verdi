@@ -99,6 +99,29 @@ func testDigest(data []byte) string {
 	return "sha256:" + hex.EncodeToString(sum[:])
 }
 
+// TestJudgeMode_Normalize directly pins Options' single most security-
+// relevant line (fix round 1, Minor 10): only the exact "run" spelling
+// enables process execution. The zero value and any garbage/near-miss
+// spelling both fail closed to JudgeCacheOnly — process execution can never
+// be enabled by omission or a struct-literal typo.
+func TestJudgeMode_Normalize(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		mode JudgeMode
+		want JudgeMode
+	}{
+		{name: "zero value", mode: "", want: JudgeCacheOnly},
+		{name: "exact JudgeRun spelling", mode: JudgeRun, want: JudgeRun},
+		{name: "near-miss garbage", mode: JudgeMode("RUN"), want: JudgeCacheOnly},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := tc.mode.normalize(); got != tc.want {
+				t.Fatalf("JudgeMode(%q).normalize() = %q, want %q", tc.mode, got, tc.want)
+			}
+		})
+	}
+}
+
 // --- R-RR1-5: the optional context request ---------------------------------
 
 // TestLoad_AnyBranchNoRequest is the brief's own verbatim case (ac-2/ac-3):
@@ -154,6 +177,7 @@ func TestLoad_WithRequestCacheMissNeverRunsJudge(t *testing.T) {
 	checkoutBranch(t, repo.Dir, "design/feature-alpha")
 	requestPath := writeRequestFile(t, repo.Dir, "readiness-request.json", requestBytes(t, "spec/feature-alpha", contextcompile.PhaseDesign))
 
+	before := snapshotDataTree(t, repo.Dir)
 	snap, err := Load(context.Background(), repo.Dir, "spec/feature-alpha", Options{ContextRequestPath: requestPath})
 	if err != nil {
 		t.Fatalf("Load: %v", err)
@@ -165,41 +189,98 @@ func TestLoad_WithRequestCacheMissNeverRunsJudge(t *testing.T) {
 	if semantic.State != readinesspilot.StateUnproven || !contains(semantic.Witnesses, "judge-unavailable") {
 		t.Fatalf("semantic concern = %+v, want unproven judge-unavailable", semantic)
 	}
-	assertNoPersistence(t, repo.Dir)
+	assertNoPersistence(t, repo.Dir, before)
 }
 
-// TestLoad_WithRequestCacheHit proves the converse: a judgment the D4
-// cache already holds is used without ever running the judge a second
-// time. It warms the cache through a real JudgeRun evaluation (mirroring
-// `verdi context conflict`/serve's own startup pre-run) and confirms a
-// later, default (cache-only) Load reflects the identical semantic state.
+// fakeJudgeRunner is a hermetic, deterministic policyconflict.JudgeRunner:
+// every call is recorded, and fn decides the response — no real process, no
+// network. internal/policyconflict's own same-named, same-shaped test
+// helper is unexported and unreachable from here; this is this package's
+// own small instance of the same pattern (fix round 1, Important 2: the
+// pattern the dispatch named explicitly, not a copy of policyconflict's
+// code).
+type fakeJudgeRunner struct {
+	calls int
+	fn    func(ctx context.Context, argv []string, stdin []byte) ([]byte, int, error)
+}
+
+func (f *fakeJudgeRunner) Run(ctx context.Context, argv []string, stdin []byte) ([]byte, int, error) {
+	f.calls++
+	return f.fn(ctx, argv, stdin)
+}
+
+// TestLoad_WithRequestCacheHit proves the converse of
+// TestLoad_WithRequestCacheMissNeverRunsJudge: a judgment the D4 cache
+// already holds is used without ever running the judge a second time. It
+// warms the cache through an in-process JudgeAdapter evaluation backed by
+// fakeJudgeRunner (fix round 1, Important 2 — no subprocess), built the
+// same way readinessload.NewConflictProvider itself builds a JudgeRun
+// service (this package's own conflictTreeHasher/conflictDateSource/
+// conflictRefResolver, same package, reachable), then confirms a second
+// Load — whose provider wraps the identical adapter identity in
+// NewCacheOnlyJudge, mirroring NewConflictProvider's own JudgeCacheOnly
+// wiring — reflects the same semantic state without a second runner call.
 func TestLoad_WithRequestCacheHit(t *testing.T) {
-	repo := buildCompileRepo(t, map[string]string{
-		".verdi/specs/active/feature-alpha/spec.md": featureAlphaSpec(t),
-	})
-	runs := filepath.Join(t.TempDir(), "judge-runs")
-	judge := writeJudgeScript(t, "printf x >> "+runs+" && printf '%s\\n' '"+noConflictJudgeResult+"'")
-	configureJudge(t, repo, judge)
+	repo, ref := readinessRepo(t, "feature")
 	checkoutBranch(t, repo.Dir, "design/feature-alpha")
-	requestPath := writeRequestFile(t, repo.Dir, "readiness-request.json", requestBytes(t, "spec/feature-alpha", contextcompile.PhaseDesign))
+	requestPath := writeRequestFile(t, repo.Dir, "readiness-request.json", requestBytes(t, ref, contextcompile.PhaseDesign))
 
-	warm, err := Load(context.Background(), repo.Dir, "spec/feature-alpha", Options{ContextRequestPath: requestPath, Judge: JudgeRun})
+	runner := &fakeJudgeRunner{fn: func(context.Context, []string, []byte) ([]byte, int, error) {
+		// DecodeJudgeResult requires the exact canonical re-encoding of
+		// whatever it decodes (authority design §6's strict-decode rule), so
+		// the fake stdout is built through EncodeJudgeResult itself — never a
+		// hand-typed string literal that might drift from canonical form.
+		out, err := policyconflict.EncodeJudgeResult(policyconflict.JudgeResult{
+			Schema: policyconflict.JudgeResultSchema, Recommendation: policyconflict.RecommendationNoConflict, Findings: []policyconflict.JudgeFinding{},
+		})
+		if err != nil {
+			return nil, 0, err
+		}
+		return out, 0, nil
+	}}
+	adapterFor := func(request policyconflict.Request) policyconflict.JudgeAdapter {
+		return policyconflict.JudgeAdapter{
+			Role: string(policyconflict.JudgePrimary), Adapter: requestAdapter(request), Model: "fake-judge",
+			Argv: []string{"fake-judge"}, Root: repo.Dir, Runner: runner,
+		}
+	}
+	serviceFor := func(primary policyconflict.Judge) ConflictProviderFunc {
+		return func(_ context.Context, root string, _ policyconflict.Request) (policyconflict.VerdictProvider, error) {
+			return policyconflict.NewService(root, policyconflict.ServiceDeps{
+				Compiler: contextcompile.NewCompiler(), Refs: conflictRefResolver{},
+				Primary: primary, TreeHasher: conflictTreeHasher{}, Dates: conflictDateSource{},
+			}), nil
+		}
+	}
+
+	// Warm-up: a plain JudgeAdapter — CachedJudge's own miss path (reached
+	// via service.go's case JudgeAdapter: arm) runs the process and
+	// publishes the result to the D4 cache, mirroring what
+	// NewConflictProvider builds under JudgeRun.
+	warmProvider := func(ctx context.Context, root string, request policyconflict.Request) (policyconflict.VerdictProvider, error) {
+		return serviceFor(adapterFor(request))(ctx, root, request)
+	}
+	warm, err := Load(context.Background(), repo.Dir, ref, Options{ContextRequestPath: requestPath, ConflictProvider: warmProvider})
 	if err != nil {
-		t.Fatalf("warm Load (JudgeRun): %v", err)
+		t.Fatalf("warm Load: %v", err)
 	}
-	runCount, rerr := os.ReadFile(runs)
-	if rerr != nil || len(runCount) != 1 {
-		t.Fatalf("judge run marker = %q (err=%v), want exactly one run", runCount, rerr)
+	if runner.calls != 1 {
+		t.Fatalf("runner calls after warm-up = %d, want 1", runner.calls)
 	}
 
-	cached, err := Load(context.Background(), repo.Dir, "spec/feature-alpha", Options{ContextRequestPath: requestPath})
+	// Cache-only: NewCacheOnlyJudge wrapping the identical adapter identity
+	// — mirroring what NewConflictProvider builds under JudgeCacheOnly.
+	cacheOnlyProvider := func(ctx context.Context, root string, request policyconflict.Request) (policyconflict.VerdictProvider, error) {
+		return serviceFor(policyconflict.NewCacheOnlyJudge(adapterFor(request)))(ctx, root, request)
+	}
+	cached, err := Load(context.Background(), repo.Dir, ref, Options{ContextRequestPath: requestPath, ConflictProvider: cacheOnlyProvider})
 	if err != nil {
 		t.Fatalf("cache-only Load: %v", err)
 	}
-	runCount2, rerr := os.ReadFile(runs)
-	if rerr != nil || len(runCount2) != 1 {
-		t.Fatalf("judge run marker after cache-only Load = %q (err=%v), want still exactly one run", runCount2, rerr)
+	if runner.calls != 1 {
+		t.Fatalf("runner calls after cache-only Load = %d, want still 1 (found the warm-up's cache entry)", runner.calls)
 	}
+
 	warmSemantic := theSemanticConcern(t, warm)
 	cachedSemantic := theSemanticConcern(t, cached)
 	if cachedSemantic.State != warmSemantic.State {
@@ -629,12 +710,15 @@ func fixtureReport(t *testing.T, root string, request policyconflict.Request, ve
 	return policyconflict.Result{Report: decoded, ReportBytes: encoded}
 }
 
-// assertNoPersistence proves co-2: a derivation writes nothing readiness-
-// owned under .verdi/data — mirrors cmd/verdi's old
-// assertNoReadinessPersistence.
-func assertNoPersistence(t *testing.T, root string) {
+// snapshotDataTree captures every regular file under root's .verdi/data
+// tree — its path relative to root, mapped to its size — or an empty map
+// when the tree is absent (or empty). Call it immediately before the
+// derivation under test runs; assertNoPersistence compares its return
+// value against a fresh snapshot taken after.
+func snapshotDataTree(t *testing.T, root string) map[string]int64 {
 	t.Helper()
 	dataRoot := filepath.Join(root, ".verdi", "data")
+	files := map[string]int64{}
 	err := filepath.WalkDir(dataRoot, func(path string, entry os.DirEntry, err error) error {
 		if errors.Is(err, os.ErrNotExist) {
 			return filepath.SkipDir
@@ -642,13 +726,39 @@ func assertNoPersistence(t *testing.T, root string) {
 		if err != nil {
 			return err
 		}
-		if strings.Contains(strings.ToLower(entry.Name()), "readiness") {
-			t.Fatalf("readiness-owned persistence found at %s", path)
+		if entry.IsDir() {
+			return nil
 		}
+		info, ierr := entry.Info()
+		if ierr != nil {
+			return ierr
+		}
+		rel, rerr := filepath.Rel(root, path)
+		if rerr != nil {
+			return rerr
+		}
+		files[filepath.ToSlash(rel)] = info.Size()
 		return nil
 	})
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("walk .verdi/data: %v", err)
+	}
+	return files
+}
+
+// assertNoPersistence proves co-2 directly (fix round 1, Important 1): the
+// full set of regular-file paths and sizes under root's .verdi/data tree is
+// unchanged from before, the snapshotDataTree result captured immediately
+// before the derivation under test ran. Its predecessor only failed on a
+// path whose NAME happened to contain the substring "readiness" — a
+// derivation could have written .verdi/data/anything-else.json or a stray
+// lock file and that check would still pass; this one does not have that
+// gap, because it compares the complete tree, not a name filter.
+func assertNoPersistence(t *testing.T, root string, before map[string]int64) {
+	t.Helper()
+	after := snapshotDataTree(t, root)
+	if !reflect.DeepEqual(before, after) {
+		t.Fatalf(".verdi/data changed during a derivation that must persist nothing:\nbefore=%v\nafter= %v", before, after)
 	}
 }
 
@@ -843,8 +953,9 @@ func TestLoad_PersistenceBoundary(t *testing.T) {
 	repo, ref := readinessRepo(t, "feature")
 	checkoutBranch(t, repo.Dir, "design/feature-alpha")
 	requestPath := writeRequestFile(t, repo.Dir, "readiness-request.json", requestBytes(t, ref, contextcompile.PhaseDesign))
+	before := snapshotDataTree(t, repo.Dir)
 	_ = mustLoadWithPassProvider(t, repo, ref, requestPath)
-	assertNoPersistence(t, repo.Dir)
+	assertNoPersistence(t, repo.Dir, before)
 }
 
 // --- moved: claimed open questions ------------------------------------------
