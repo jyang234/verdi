@@ -24,6 +24,7 @@ import (
 	"github.com/jyang234/verdi/internal/buildinfo"
 	"github.com/jyang234/verdi/internal/filelock"
 	"github.com/jyang234/verdi/internal/mcpserve"
+	"github.com/jyang234/verdi/internal/readinessload"
 	"github.com/jyang234/verdi/internal/readinesspilot"
 	"github.com/jyang234/verdi/internal/store"
 	"github.com/jyang234/verdi/internal/workbench"
@@ -73,6 +74,13 @@ func parseServeOptions(args []string) (serveOptions, error) {
 
 type serveRunner func(root, httpAddr string, readiness *readinesspilot.Snapshot, stdout, stderr io.Writer) int
 
+// readinessSnapshotBuilder is the serve command's one startup projection
+// boundary. Implementations return an immutable value; callers never retain
+// a path, decoder, provider, or live fact source behind the snapshot.
+type readinessSnapshotBuilder interface {
+	Build(ctx context.Context, root, requestPath string) (readinesspilot.Snapshot, error)
+}
+
 // serveCommandDeps is the narrow startup-order seam. Building readiness is
 // completed before run is entered; run owns every server effect from data-dir
 // creation onward.
@@ -86,10 +94,54 @@ type serveCommandDeps struct {
 func cmdServe(args []string, stdout, stderr io.Writer) int {
 	return cmdServeWithDeps(args, stdout, stderr, serveCommandDeps{
 		findRoot:  store.FindRoot,
-		readiness: localReadinessSnapshotBuilder{},
+		readiness: readinessLoadBuilder{},
 		run:       runServe,
 	})
 }
+
+// readinessLoadBuilder is readinessSnapshotBuilder's one production
+// implementation: internal/readinessload.Load under JudgeRun, warming the
+// judge cache exactly as the predecessor startup adapter did (spec/
+// readiness-recovery Task 2). Build also stashes the cache-only Loader
+// value and the request's own target spec into the package-level
+// serveReadinessLoader/serveReadinessDefaultSpec variables below, since
+// runServe's signature carries only the startup snapshot — Task 3 threads
+// them into the workbench/MCP deps properly; this is the narrow hand-off
+// seam until then.
+type readinessLoadBuilder struct{}
+
+func (readinessLoadBuilder) Build(ctx context.Context, root, requestPath string) (readinesspilot.Snapshot, error) {
+	targetSpec, err := readinessload.ContextRequestSpec(root, requestPath)
+	if err != nil {
+		return readinesspilot.Snapshot{}, err
+	}
+	cacheOnlyOpts := readinessload.Options{
+		ContextRequestPath: requestPath,
+		BoardHref:          workbench.BranchBoardHref,
+		Actors:             resolveConflictActors,
+		Judge:              readinessload.JudgeCacheOnly,
+	}
+	warmOpts := cacheOnlyOpts
+	warmOpts.Judge = readinessload.JudgeRun
+	snapshot, err := readinessload.Load(ctx, root, targetSpec, warmOpts)
+	if err != nil {
+		return readinesspilot.Snapshot{}, err
+	}
+	serveReadinessLoader = readinessload.Loader{Root: root, Opts: cacheOnlyOpts}
+	serveReadinessDefaultSpec = targetSpec
+	return snapshot, nil
+}
+
+// serveReadinessLoader and serveReadinessDefaultSpec are runServe's hand-off
+// to Task 3's consumers (workbench/MCP deps): the cache-only Loader value
+// and default target spec a per-request readiness route uses, set by
+// readinessLoadBuilder.Build before deps.run is ever called. Package-level
+// rather than threaded through serveRunner's own signature (kept unchanged
+// this task) — see readinessLoadBuilder's own doc comment.
+var (
+	serveReadinessLoader      readinessload.Loader
+	serveReadinessDefaultSpec string
+)
 
 // cmdServeWithDeps parses the additive readiness input, captures its one
 // immutable startup snapshot, and only then enters the effectful server run.

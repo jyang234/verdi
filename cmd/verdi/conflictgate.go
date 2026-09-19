@@ -6,12 +6,12 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 	"sort"
 	"strings"
 
 	"github.com/jyang234/verdi/internal/contextcompile"
 	"github.com/jyang234/verdi/internal/policyconflict"
+	"github.com/jyang234/verdi/internal/readinessload"
 )
 
 type conflictGateInput struct {
@@ -71,7 +71,7 @@ func runConflictGate(ctx context.Context, root string, input conflictGateInput, 
 	if input.RequestPath == "-" {
 		return conflictGateResult{}, errors.New("--context-request does not accept stdin ('-')")
 	}
-	requestPath, err := validatedConflictRequestPath(root, input.RequestPath)
+	requestPath, err := readinessload.ValidatedContextRequestPath(root, input.RequestPath)
 	if err != nil {
 		return conflictGateResult{}, err
 	}
@@ -153,93 +153,16 @@ func probeConflictGate(root, requestPath string) (bool, error) {
 	return true, nil
 }
 
-// validatedConflictRequestPath returns the one absolute request path used by
-// both validation and reading. It refuses traversal elements before Abs can
-// collapse them lexically: the kernel follows a symlink before applying "..",
-// so validating the cleaned spelling but reading the original could select a
-// different file. It also refuses a linked request file or caller-selected
-// ancestor. Paths inside the checkout start at the already-resolved store root,
-// avoiding false positives from platform-level aliases above the checkout.
-func validatedConflictRequestPath(root, requestPath string) (string, error) {
-	if hasDotDotElement(requestPath) {
-		return "", errors.New(`--context-request must not contain a ".." path element`)
-	}
-	requestAbs, err := filepath.Abs(requestPath)
-	if err != nil {
-		return "", fmt.Errorf("resolving --context-request path: %w", err)
-	}
-	rootAbs, err := filepath.Abs(root)
-	if err != nil {
-		return "", fmt.Errorf("resolving store root: %w", err)
-	}
-	rootInfo, err := os.Stat(rootAbs)
-	if err != nil {
-		return "", fmt.Errorf("inspecting store root: %w", err)
-	}
-
-	// Walk upward from the caller-selected file until the physical store root
-	// inode is reached. This checks every selectable component below the root,
-	// but deliberately stops before platform aliases above it (macOS commonly
-	// exposes /var through /private/var). A lexical Rel check cannot distinguish
-	// that harmless host alias from a symlink selected inside the checkout.
-	current := requestAbs
-	for {
-		info, statErr := os.Lstat(current)
-		if statErr == nil {
-			if os.SameFile(rootInfo, info) {
-				return requestAbs, nil
-			}
-			if info.Mode()&os.ModeSymlink != 0 {
-				return "", errors.New("--context-request must not contain a symlink path component")
-			}
-		} else if !errors.Is(statErr, os.ErrNotExist) {
-			return "", fmt.Errorf("inspecting --context-request path: %w", statErr)
-		}
-		parent := filepath.Dir(current)
-		if parent == current {
-			break
-		}
-		current = parent
-	}
-
-	start := filepath.Clean(string(filepath.Separator))
-	var remainder string
-	if rel, relErr := filepath.Rel(rootAbs, requestAbs); relErr == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-		start = rootAbs
-		remainder = rel
-	} else if volume := filepath.VolumeName(requestAbs); volume != "" {
-		start = volume + string(filepath.Separator)
-		remainder = strings.TrimPrefix(requestAbs, start)
-	} else {
-		remainder = strings.TrimPrefix(requestAbs, string(filepath.Separator))
-	}
-
-	current = start
-	for _, component := range strings.Split(remainder, string(filepath.Separator)) {
-		if component == "" || component == "." {
-			continue
-		}
-		current = filepath.Join(current, component)
-		info, statErr := os.Lstat(current)
-		if statErr != nil {
-			if errors.Is(statErr, os.ErrNotExist) {
-				return requestAbs, nil
-			}
-			return "", fmt.Errorf("inspecting --context-request path: %w", statErr)
-		}
-		if info.Mode()&os.ModeSymlink != 0 {
-			return "", errors.New("--context-request must not contain a symlink path component")
-		}
-	}
-	return requestAbs, nil
-}
-
 // localLifecycleConflictProvider preserves the VerdictProvider boundary while
 // reusing Task 10's exact request-aware production dependency construction.
 type localLifecycleConflictProvider struct{ root string }
 
 func (p localLifecycleConflictProvider) Evaluate(ctx context.Context, request policyconflict.Request) (policyconflict.Result, error) {
-	provider, err := newLocalContextConflictProvider(ctx, p.root, request)
+	// The lifecycle gate is a JudgeRun caller (`build start`, `gate`,
+	// `close`), exactly like `verdi context conflict` — provider
+	// construction moved to internal/readinessload.NewConflictProvider
+	// (spec/readiness-recovery Task 2) so there is one home for it.
+	provider, err := readinessload.NewConflictProvider(ctx, p.root, request, readinessload.JudgeRun, resolveConflictActors)
 	if err != nil {
 		return policyconflict.Result{}, err
 	}

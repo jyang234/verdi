@@ -31,7 +31,7 @@ import (
 	"github.com/jyang234/verdi/internal/filelock"
 	"github.com/jyang234/verdi/internal/fixturegit"
 	"github.com/jyang234/verdi/internal/mcpserve"
-	"github.com/jyang234/verdi/internal/policyconflict"
+	"github.com/jyang234/verdi/internal/readinessload"
 	"github.com/jyang234/verdi/internal/readinesspilot"
 	"github.com/jyang234/verdi/internal/store"
 	"github.com/jyang234/verdi/internal/workbench"
@@ -229,13 +229,34 @@ func TestServeContextRequestBuilderFailureStopsBeforeServerEffects(t *testing.T)
 	}
 }
 
+// TestServeContextRequestSnapshotRemainsImmutableAcrossRequests drives the
+// real internal/readinessload.Load (JudgeRun) through a hermetic
+// align.judge_cmd script — the same recipe
+// TestServeContextRequestReadinessReachesGetDocumentOverSocket below uses
+// against the real binary — rather than a hand-built fake provider
+// (internal/readinessload's own Options carries no provider-factory
+// override seam; construction is always the real
+// readinessload.NewConflictProvider, spec/readiness-recovery Task 2).
 func TestServeContextRequestSnapshotRemainsImmutableAcrossRequests(t *testing.T) {
-	repo, requestPath, _, _, specPath := readinessSnapshotRepo(t, "feature")
-	providerFactory := readinessSnapshotProviderFactory(t, repo.Dir, policyconflict.VerdictPass, nil)
+	repo := buildContextCompileRepo(t, map[string]string{
+		".verdi/specs/active/feature-alpha/spec.md": contextFeatureAlphaSpec(t),
+	})
+	judge := writeContextConflictJudge(t, "printf '%s\\n' '"+contextConflictNoConflictJudgeResult+"'")
+	configureContextConflictJudge(t, repo, judge, 0)
+	checkoutBranch(t, repo.Dir, "design/feature-alpha")
+	requestPath := writeContextRequestFile(t, repo.Dir, "readiness-request.json", contextRequestBytes(t, "spec/feature-alpha", contextcompile.PhaseDesign, nil))
+	specPath := store.ActiveSpecPath(repo.Dir, "feature-alpha")
+
 	builds := 0
 	builder := readinessSnapshotBuilderFunc(func(ctx context.Context, root, gotRequestPath string) (readinesspilot.Snapshot, error) {
 		builds++
-		return (localReadinessSnapshotBuilder{providerFactory: providerFactory}).Build(ctx, root, gotRequestPath)
+		targetSpec, err := readinessload.ContextRequestSpec(root, gotRequestPath)
+		if err != nil {
+			return readinesspilot.Snapshot{}, err
+		}
+		return readinessload.Load(ctx, root, targetSpec, readinessload.Options{
+			ContextRequestPath: gotRequestPath, Judge: readinessload.JudgeRun, BoardHref: workbench.BranchBoardHref,
+		})
 	})
 	deps := serveCommandDeps{
 		findRoot:  func(string) (string, error) { return repo.Dir, nil },
@@ -250,8 +271,8 @@ func TestServeContextRequestSnapshotRemainsImmutableAcrossRequests(t *testing.T)
 			if first.Code != http.StatusOK {
 				t.Fatalf("first readiness status = %d, body=%q", first.Code, first.Body.String())
 			}
-			if !strings.Contains(first.Body.String(), repo.Head) || !strings.Contains(first.Body.String(), "restart verdi serve after an edit") {
-				t.Fatalf("first body misses startup HEAD or stale notice: %q", first.Body.String())
+			if !strings.Contains(first.Body.String(), repo.Head) || !strings.Contains(first.Body.String(), "for this request") {
+				t.Fatalf("first body misses derivation HEAD or stamp: %q", first.Body.String())
 			}
 			if err := os.WriteFile(specPath, []byte("changed after startup; no longer a valid spec\n"), 0o644); err != nil {
 				t.Fatal(err)
@@ -270,6 +291,44 @@ func TestServeContextRequestSnapshotRemainsImmutableAcrossRequests(t *testing.T)
 	}
 	if builds != 1 {
 		t.Fatalf("readiness builds = %d after two HTTP requests, want exactly 1", builds)
+	}
+}
+
+// TestReadinessLoadBuilderHandsOffTheCacheOnlyLoaderAndDefaultSpec proves
+// readinessLoadBuilder.Build's own side of the Task-3 hand-off seam (serve.go's
+// package-level serveReadinessLoader/serveReadinessDefaultSpec, set before
+// runServe is ever entered): after a real JudgeRun warm-up, the stashed
+// Loader carries the SAME root and JudgeCacheOnly mode a later per-request
+// route would need, and it independently reaches the same semantic outcome
+// as the warm-up did — without ever running the judge process a second
+// time — and serveReadinessDefaultSpec names the request's own target.
+func TestReadinessLoadBuilderHandsOffTheCacheOnlyLoaderAndDefaultSpec(t *testing.T) {
+	repo := buildContextCompileRepo(t, map[string]string{
+		".verdi/specs/active/feature-alpha/spec.md": contextFeatureAlphaSpec(t),
+	})
+	judge := writeContextConflictJudge(t, "printf '%s\\n' '"+contextConflictNoConflictJudgeResult+"'")
+	configureContextConflictJudge(t, repo, judge, 0)
+	checkoutBranch(t, repo.Dir, "design/feature-alpha")
+	requestPath := writeContextRequestFile(t, repo.Dir, "readiness-request.json", contextRequestBytes(t, "spec/feature-alpha", contextcompile.PhaseDesign, nil))
+
+	serveReadinessLoader = readinessload.Loader{}
+	serveReadinessDefaultSpec = ""
+	warm, err := (readinessLoadBuilder{}).Build(context.Background(), repo.Dir, requestPath)
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	if serveReadinessDefaultSpec != "spec/feature-alpha" {
+		t.Fatalf("serveReadinessDefaultSpec = %q, want %q", serveReadinessDefaultSpec, "spec/feature-alpha")
+	}
+	if serveReadinessLoader.Root != repo.Dir || serveReadinessLoader.Opts.Judge != readinessload.JudgeCacheOnly || serveReadinessLoader.Opts.ContextRequestPath != requestPath {
+		t.Fatalf("serveReadinessLoader = %+v, want root %q, JudgeCacheOnly, and the request path", serveReadinessLoader, repo.Dir)
+	}
+	cached, err := serveReadinessLoader.Load(context.Background(), "spec/feature-alpha")
+	if err != nil {
+		t.Fatalf("serveReadinessLoader.Load: %v", err)
+	}
+	if cached.StaleNotice != warm.StaleNotice || cached.Branch != warm.Branch || cached.Head != warm.Head {
+		t.Fatalf("hand-off loader snapshot identity = %+v, want it to match the warm-up %+v", cached, warm)
 	}
 }
 
