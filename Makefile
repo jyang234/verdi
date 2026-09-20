@@ -1,4 +1,4 @@
-.PHONY: build test vet fmt fmt-check lint verify tidy fixture lint-store fixture-regen spec-align e2e-check-node e2e lint-showcase showcase-coverage
+.PHONY: build test vet fmt fmt-check lint verify tidy fixture lint-store fixture-regen spec-align e2e-check-node e2e lint-showcase showcase-coverage hooks
 
 # Pin for the lint target. Both CI workflows install golangci-lint at this
 # exact version before `make verify` (see .github/workflows/), so in CI the
@@ -320,8 +320,43 @@ e2e: e2e-check-node
 # server round-trip) and every faster gate should fail first when
 # something's broken, so a run that fails early doesn't pay e2e's cost
 # for nothing.
-verify: build fmt-check vet lint test fixture lint-store spec-align lint-showcase showcase-coverage e2e
-	@echo "verify OK"
+#
+# The gate runs its steps SERIALLY through a recursive make and records the
+# wall-clock of every step (process-audit PA-025: gate duration was measured
+# nowhere, so its growth had no trend). Each run appends one row per step to
+# $(GATE_TIMINGS) — `<utc-time> <head> <step> <seconds> <ok|fail>` — under
+# .verdi/data/, which the store's own .gitignore already excludes, and prints
+# a summary table at the end so a CI log carries the same series. Steps, their
+# order, and fail-fast on the first red step are unchanged: VERIFY_STEPS is the
+# former prerequisite list, verbatim.
+VERIFY_STEPS := build fmt-check vet lint test fixture lint-store spec-align lint-showcase showcase-coverage e2e
+GATE_TIMINGS ?= .verdi/data/gate/timings.tsv
+
+verify:
+	@mkdir -p $(dir $(GATE_TIMINGS)); \
+	run=$$(date -u +%Y-%m-%dT%H:%M:%SZ); head=$$(git rev-parse --short=12 HEAD 2>/dev/null || echo unknown); \
+	total=0; summary=""; \
+	for step in $(VERIFY_STEPS); do \
+		start=$$(date +%s); \
+		if $(MAKE) --no-print-directory $$step; then status=ok; else status=fail; fi; \
+		secs=$$(( $$(date +%s) - start )); total=$$(( total + secs )); \
+		printf '%s\t%s\t%s\t%s\t%s\n' "$$run" "$$head" "$$step" "$$secs" "$$status" >> $(GATE_TIMINGS); \
+		summary="$$summary$$(printf '  %-18s %6ss  %s' "$$step" "$$secs" "$$status")\n"; \
+		if [ "$$status" = fail ]; then \
+			printf 'verify: step %s FAILED after %ss\n%b' "$$step" "$$secs" "$$summary" >&2; exit 1; \
+		fi; \
+	done; \
+	printf 'verify timings (run %s @ %s, appended to %s):\n%b  %-18s %6ss\n' "$$run" "$$head" "$(GATE_TIMINGS)" "$$summary" total "$$total"; \
+	echo "verify OK"
+
+# hooks installs this repository's git hooks (scripts/githooks/) into the
+# SHARED hooks folder — `git rev-parse --git-common-dir`/hooks — so every
+# worktree of the repository runs them, whatever branch it has checked out.
+# Today: pre-commit, which builds the STAGED tree (process-audit PA-004).
+hooks:
+	@dir="$$(git rev-parse --git-common-dir)/hooks"; mkdir -p "$$dir"; \
+	install -m 0755 scripts/githooks/pre-commit "$$dir/pre-commit"; \
+	echo "hooks: installed pre-commit -> $$dir/pre-commit"
 
 tidy:
 	go mod tidy
