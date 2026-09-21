@@ -1,0 +1,11 @@
+commit 9d6ca1d1af5ff77b18bae69ade4b0dd07a8fd456
+Author: Spike Operator <spike-operator@example.invalid>
+Date:   Sun Sep 20 20:18:54 2026 -0400
+
+    policy adopt: starter constitution (team profile)
+
+ .verdi/constitution/consumers.json     |  1 +
+ .verdi/policy/constitution.md          | 30 ++++++++++++++++++++++++++++++
+ .verdi/policy/policies/starter.md      | 19 +++++++++++++++++++
+ .verdi/policy/profiles/starter-team.md | 26 ++++++++++++++++++++++++++
+ 4 files changed, 76 insertions(+)

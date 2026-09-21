@@ -1,0 +1,150 @@
+=== oq-2: five CLAUDE.md ground rules through the real policyartifact.DecodePolicy seam ===
+
+--- rule 1-context-first-param ---
+text: context is the first parameter of anything doing I/O
+yaml:
+---
+schema: verdi.policy/v1
+id: policy/ctx-first-param
+kind: policy
+title: "oq-2 scratch: ctx-first-param"
+owners: [platform-team]
+scope: {phases: [], environments: [], paths: [], refs: []}
+claims:
+  - id: ctx-first-param
+    family: action
+    operator: required-values
+    subject: io-function-signature
+    values: [context-first-parameter]
+    scope: {phases: [], environments: [], paths: [], refs: []}
+    overridable: false
+instructions: []
+payloads: {}
+template: {identity: "embedded:policy.md", digest: "sha256:0e1b83a8e41d5ecfe9f14cb4973b7a584bfcb471247fa064b5fe273e4d322561"}
+---
+Scratch decode probe for spec/self-governance oq-2; not a real policy.
+
+result: DECODED OK — claim id=ctx-first-param family=action operator=required-values subject=io-function-signature values=[context-first-parameter] policy_digest=sha256:7c4f608861d7dfb36a00c9b7cabdeae8256385ab343b2d97571936190ef68175
+
+--- rule 2-errors-wrap-percent-w ---
+text: errors wrap with %w
+yaml:
+---
+schema: verdi.policy/v1
+id: policy/error-wrap-verb
+kind: policy
+title: "oq-2 scratch: error-wrap-verb"
+owners: [platform-team]
+scope: {phases: [], environments: [], paths: [], refs: []}
+claims:
+  - id: error-wrap-verb
+    family: action
+    operator: equals
+    subject: error-wrap-format-verb
+    values: ["percent-w"]
+    scope: {phases: [], environments: [], paths: [], refs: []}
+    overridable: false
+instructions: []
+payloads: {}
+template: {identity: "embedded:policy.md", digest: "sha256:0e1b83a8e41d5ecfe9f14cb4973b7a584bfcb471247fa064b5fe273e4d322561"}
+---
+Scratch decode probe for spec/self-governance oq-2; not a real policy.
+
+result: DECODED OK — claim id=error-wrap-verb family=action operator=equals subject=error-wrap-format-verb values=[percent-w] policy_digest=sha256:5bf0c42b8ef7e2b14d7cde8dad2352b143d5f01386aa9ac7c257f91e4eb17e12
+
+--- rule 3-no-god-packages ---
+text: no god packages ("a package you would need two sentences to describe is two packages")
+yaml:
+---
+schema: verdi.policy/v1
+id: policy/single-responsibility-packages
+kind: policy
+title: "oq-2 scratch: single-responsibility-packages"
+owners: [platform-team]
+scope: {phases: [], environments: [], paths: [], refs: []}
+claims:
+  - id: single-responsibility-packages
+    family: configuration
+    operator: equals
+    subject: package-scope-discipline
+    values: ["single-concern"]
+    scope: {phases: [], environments: [], paths: [], refs: []}
+    overridable: false
+instructions: []
+payloads: {}
+template: {identity: "embedded:policy.md", digest: "sha256:0e1b83a8e41d5ecfe9f14cb4973b7a584bfcb471247fa064b5fe273e4d322561"}
+---
+Scratch decode probe for spec/self-governance oq-2; not a real policy.
+
+result: DECODED OK — claim id=single-responsibility-packages family=configuration operator=equals subject=package-scope-discipline values=[single-concern] policy_digest=sha256:cb11fa349bc47bd6f76206240a1e861f7603f890efc5a4b4d135af7ac2b8cf9b
+
+--- rule 4-every-commit-builds ---
+text: every commit builds
+yaml:
+---
+schema: verdi.policy/v1
+id: policy/commit-must-build
+kind: policy
+title: "oq-2 scratch: commit-must-build"
+owners: [platform-team]
+scope: {phases: [], environments: [], paths: [], refs: []}
+claims:
+  - id: commit-must-build
+    family: action
+    operator: required-values
+    subject: commit-build-status
+    values: ["clean-exit"]
+    scope: {phases: [build], environments: [], paths: [], refs: []}
+    overridable: false
+instructions: []
+payloads: {}
+template: {identity: "embedded:policy.md", digest: "sha256:0e1b83a8e41d5ecfe9f14cb4973b7a584bfcb471247fa064b5fe273e4d322561"}
+---
+Scratch decode probe for spec/self-governance oq-2; not a real policy.
+
+result: DECODED OK — claim id=commit-must-build family=action operator=required-values subject=commit-build-status values=[clean-exit] policy_digest=sha256:3405c5d10ad69d45d59a55d16562b5b159c7c4c83b5d73c7fd337c03425c6815
+
+--- rule 5-never-bare-git-stash ---
+text: never bare git stash
+yaml:
+---
+schema: verdi.policy/v1
+id: policy/no-bare-git-stash
+kind: policy
+title: "oq-2 scratch: no-bare-git-stash"
+owners: [platform-team]
+scope: {phases: [], environments: [], paths: [], refs: []}
+claims:
+  - id: no-bare-git-stash
+    family: action
+    operator: forbidden-values
+    subject: git-stash-invocation
+    values: ["bare"]
+    scope: {phases: [], environments: [], paths: [], refs: []}
+    overridable: false
+instructions: []
+payloads: {}
+template: {identity: "embedded:policy.md", digest: "sha256:0e1b83a8e41d5ecfe9f14cb4973b7a584bfcb471247fa064b5fe273e4d322561"}
+---
+Scratch decode probe for spec/self-governance oq-2; not a real policy.
+
+result: DECODED OK — claim id=no-bare-git-stash family=action operator=forbidden-values subject=git-stash-invocation values=[bare] policy_digest=sha256:4ff4d38f5990e22b189d67aabec71dd48f69cff9c85b936ac5157282525ddb66
+
+=== payload-kind probe: is a feature-owned "ground_rule" payload registered today? ===
+yaml:
+---
+schema: verdi.policy/v1
+id: policy/payload-probe
+kind: policy
+title: "oq-2 scratch: payload probe"
+owners: [platform-team]
+scope: {phases: [], environments: [], paths: [], refs: []}
+claims: []
+instructions: []
+payloads:
+  ground_rule: {rule_id: ctx-first-param, enforcing_mechanism: "golangci-lint:contextcheck"}
+template: {identity: "embedded:policy.md", digest: "sha256:0e1b83a8e41d5ecfe9f14cb4973b7a584bfcb471247fa064b5fe273e4d322561"}
+---
+Scratch probe: is the ground_rule payload kind registered?
+
+result: DECODE ERROR (expected if unregistered): policyartifact: unknown payload kind "ground_rule" (typed feature payloads must be registered; there is no untyped fallback)
