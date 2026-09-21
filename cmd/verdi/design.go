@@ -30,13 +30,13 @@ import (
 
 	"github.com/jyang234/verdi/internal/artifact"
 	"github.com/jyang234/verdi/internal/atomicfile"
+	"github.com/jyang234/verdi/internal/branchbase"
 	"github.com/jyang234/verdi/internal/designinterview"
 	"github.com/jyang234/verdi/internal/designscaffold"
 	"github.com/jyang234/verdi/internal/gitx"
 	"github.com/jyang234/verdi/internal/model"
 	"github.com/jyang234/verdi/internal/provider"
 	"github.com/jyang234/verdi/internal/specname"
-	"github.com/jyang234/verdi/internal/specstate"
 	"github.com/jyang234/verdi/internal/store"
 	"github.com/jyang234/verdi/internal/upstream"
 	"golang.org/x/term"
@@ -690,43 +690,34 @@ func runDesignStart(ctx context.Context, root string, kind artifact.SpecClass, s
 // below is design start's own byte-identical wrapper (behavior-
 // preserving: every existing "design start:"-prefixed disclosure and
 // caller is unchanged).
+//
+// The read-only resolution itself (Task 2, readiness-recovery wave 3) now
+// lives in internal/branchbase.Resolve, shared with internal/recovery's
+// own fact-gathering (R-RR3-5) so the two can never diverge (CLAUDE.md:
+// shared logic lives in one internal/ package, never copy-pasted) — this
+// function is now a thin delegating wrapper that adds only the disclosure
+// prose this CLI verb prints.
 func resolveBranchBase(ctx context.Context, root, verb string, stdout, stderr io.Writer) (baseRef string, ok bool) {
-	if defaultBranch, drOK := specstate.ResolveDefaultBranch(ctx, root); drOK {
-		baseCommit, rerr := gitx.RevParse(ctx, root, defaultBranch.Ref)
-		if rerr != nil {
-			fmt.Fprintln(stderr, verb+":", rerr)
-			return "", false
-		}
-		// defaultBranch.Ref is already the disclosed choice resolveBranchRef
-		// makes for every other consumer — "origin/<name>" when that
+	res, err := branchbase.Resolve(ctx, root)
+	if err != nil {
+		fmt.Fprintln(stderr, verb+":", err)
+		return "", false
+	}
+	switch res.Kind {
+	case branchbase.ResolvedDefault:
+		// res.Ref is already the disclosed choice resolveBranchRef makes
+		// for every other consumer — "origin/<name>" when that
 		// remote-tracking ref exists, otherwise the local branch name — so
 		// printing it verbatim both names the base and discloses which of
 		// the two was used, with no separate annotation needed.
-		fmt.Fprintf(stdout, "%s: base %s @ %s\n", verb, defaultBranch.Ref, shortSHA(baseCommit))
-		return defaultBranch.Ref, true
-	}
-	// dc-7: distinguish "no origin remote at all" (disclosed HEAD
-	// fallback) from "origin exists but the default branch is
-	// unresolvable or ambiguous" (operational refusal, I-130) —
-	// git remote get-url origin failing with ErrNoSuchRemote is the
-	// signal for the former; any other read failure stays operational
-	// rather than guessed either way.
-	_, remoteErr := gitx.RemoteURL(ctx, root, "origin")
-	switch {
-	case errors.Is(remoteErr, gitx.ErrNoSuchRemote):
-		headCommit, herr := gitx.RevParse(ctx, root, "HEAD")
-		if herr != nil {
-			fmt.Fprintln(stderr, verb+":", herr)
-			return "", false
-		}
-		fmt.Fprintf(stdout, "%s: default branch unresolved (no origin remote); basing on current HEAD %s — disclosed, not a default-branch base\n", verb, shortSHA(headCommit))
+		fmt.Fprintf(stdout, "%s: base %s @ %s\n", verb, res.Ref, shortSHA(res.Commit))
+		return res.Ref, true
+	case branchbase.HeadFallback:
+		fmt.Fprintf(stdout, "%s: default branch unresolved (no origin remote); basing on current HEAD %s — disclosed, not a default-branch base\n", verb, shortSHA(res.Commit))
 		return "HEAD", true
-	case remoteErr != nil:
-		fmt.Fprintln(stderr, verb+":", remoteErr)
-		return "", false
 	default:
-		// origin IS configured, but ResolveDefaultBranch still
-		// failed: exactly the stale-default hazard UAT-021 reported.
+		// origin IS configured, but the default branch still could not be
+		// resolved: exactly the stale-default hazard UAT-021 reported.
 		fmt.Fprintf(stderr, "%s: %s\n", verb, unresolvableDefaultBranchMessage(ctx, root))
 		return "", false
 	}
