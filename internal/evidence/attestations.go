@@ -271,25 +271,42 @@ func RenderAttestationScaffold(in AttestationScaffold) string {
 
 // renderCriterionSection renders the feature-only quoted-criterion section
 // appended after the fixed instructional body prose (R-RR2-1): a labeled
-// heading, the criterion text as one or more "> "-quoted lines (never
-// interpreted — quoting, not templating), and the criterion's own declared
-// evidence kinds. Never claim-shaped: every word here is either fixed
-// prose or the criterion's own accepted text/evidence kinds, copied
-// verbatim (dc-2, guided-lifecycle-governance-v3 dc-12).
+// heading, the criterion text as zero or more "> "-quoted lines (never
+// interpreted — quoting, not templating), and, only when at least one is
+// declared, the criterion's own declared evidence kinds. Never claim-shaped:
+// every word here is either fixed prose or the criterion's own accepted
+// text/evidence kinds, copied verbatim (dc-2, guided-lifecycle-governance-v3
+// dc-12).
+//
+// criterionText is normalized before quoting (review fix round 1, M-3):
+// CRLF is folded to LF (so a stray "\r" never reaches a quoted line) and
+// trailing newlines are trimmed (so an empty or newline-only criterion text
+// renders no "> " line at all, rather than one or more bare "> " lines).
+// Interior blank lines are left alone — only the trailing run is trimmed.
+//
+// When kinds is empty, the "Declared evidence kinds:" line is omitted
+// entirely (review fix round 1, M-2) — R-RR2-2 explicitly contemplates a
+// feature criterion that declares no evidence kind at all, and a label with
+// nothing after it is worse than no label.
 func renderCriterionSection(criterionText string, kinds []artifact.EvidenceKind) string {
 	var b strings.Builder
 	b.WriteString("\nCriterion under attestation (accepted text, quoted for context):\n")
-	for _, line := range strings.Split(criterionText, "\n") {
-		b.WriteString("> ")
-		b.WriteString(line)
+	normalized := strings.TrimRight(strings.ReplaceAll(criterionText, "\r\n", "\n"), "\n")
+	if normalized != "" {
+		for _, line := range strings.Split(normalized, "\n") {
+			b.WriteString("> ")
+			b.WriteString(line)
+			b.WriteString("\n")
+		}
+	}
+	if len(kinds) > 0 {
+		kindWords := make([]string, len(kinds))
+		for i, k := range kinds {
+			kindWords[i] = string(k)
+		}
+		b.WriteString("\nDeclared evidence kinds: ")
+		b.WriteString(strings.Join(kindWords, ", "))
 		b.WriteString("\n")
 	}
-	kindWords := make([]string, len(kinds))
-	for i, k := range kinds {
-		kindWords[i] = string(k)
-	}
-	b.WriteString("\nDeclared evidence kinds: ")
-	b.WriteString(strings.Join(kindWords, ", "))
-	b.WriteString("\n")
 	return b.String()
 }

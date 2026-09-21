@@ -262,14 +262,19 @@ func classifyPair(root, storyRefArg, acID string, mdl *model.Model) (spec *artif
 	// (the L-M14 remedy 2 feature-refusal branch this replaced — pointing
 	// at the true-closure hand-authoring precedent — no longer applies:
 	// this verb now scaffolds the feature AC's own outcome attestation
-	// directly, at attestations/<feature-name>/<ac-id>.md). By this point
-	// spec.Class can only be ClassComponent among the remaining
-	// possibilities (resolveBuildTarget's own storyresolve.Resolve call
-	// already turns a class: component spec-ref into a ComponentSpecError,
-	// handled separately above, before this branch is ever reached) — the
-	// check stays explicit rather than assumed, so a future spec class
-	// added here falls back to this generic refusal rather than silently
-	// being admitted.
+	// directly, at attestations/<feature-name>/<ac-id>.md).
+	//
+	// Review fix round 1, M-1: stated exactly, this branch is reached by NO
+	// class the decoder admits today. artifact.SpecFrontmatter.Validate
+	// rejects any Class outside {feature, story, component} at decode time
+	// (internal/artifact/spec.go's validSpecClasses), so classifyPair can
+	// never observe an unrecognized Class from a real resolution — and
+	// ClassComponent is already intercepted above as a ComponentSpecError
+	// before spec is ever assigned here. This generic refusal is therefore
+	// dead code on every path reachable today, kept anyway as a fail-closed
+	// default: if a future spec class is ever added to the decoder without
+	// a matching update here, it refuses with a generic message rather than
+	// silently falling through to be admitted and scaffolded.
 	if spec.Class != artifact.ClassStory && spec.Class != artifact.ClassFeature {
 		// Display resolution (L-M13(1)): both class words resolve, with
 		// model.Indefinite composing each article-word pair; the emphatic

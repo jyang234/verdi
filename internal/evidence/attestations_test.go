@@ -2,6 +2,7 @@ package evidence
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -356,6 +357,27 @@ func TestRenderAttestationScaffold_StoryBytesUnchanged(t *testing.T) {
 			}
 		})
 	}
+
+	// Review fix round 1, M-4: this function's own doc comment (and
+	// R-RR2-1) claim byte-identity for BOTH the empty-Class zero value AND
+	// an explicit Class: artifact.ClassStory, but until this fix only the
+	// zero value was ever exercised above — attestationScaffoldCases()
+	// never sets Class. Proven directly here, against the SAME golden
+	// bytes the zero-value case already pins, rather than adding a second
+	// hand-typed golden literal that could itself drift from the first.
+	t.Run("explicit Class: story matches the zero-value golden", func(t *testing.T) {
+		cases := attestationScaffoldCases()
+		in := cases[0].in
+		in.Class = artifact.ClassStory
+		want, ok := storyClassGoldenBytes[cases[0].name]
+		if !ok {
+			t.Fatalf("test setup: no golden captured for case %q", cases[0].name)
+		}
+		got := RenderAttestationScaffold(in)
+		if got != want {
+			t.Fatalf("explicit Class: story render bytes differ from the zero-value golden (R-RR2-1 requires byte-identity):\n--- got ---\n%s\n--- want ---\n%s", got, want)
+		}
+	})
 }
 
 // TestRenderAttestationScaffold_FeatureQuotesTheCriterion proves ac-6/
@@ -468,6 +490,134 @@ func TestRenderAttestationScaffold_FeatureEscapesCriterionText(t *testing.T) {
 	// still carries exactly one frontmatter/body split.
 	if delimCount := strings.Count(content, "\n---\n"); delimCount != 1 {
 		t.Fatalf("content contains %d bare \"---\" delimiter lines, want exactly 1 (the criterion's own \"---\" line must stay quoted, never a second frontmatter delimiter):\n%s", delimCount, content)
+	}
+}
+
+// TestRenderAttestationScaffold_FeatureOmitsEmptyEvidenceKinds is review fix
+// round 1, M-2's own witness: a feature criterion that declares no evidence
+// kind at all (R-RR2-2 explicitly contemplates this) renders NO "Declared
+// evidence kinds:" line at all — never a dangling label with nothing after
+// it — while a criterion that DOES declare kinds still gets the line
+// exactly as before.
+func TestRenderAttestationScaffold_FeatureOmitsEmptyEvidenceKinds(t *testing.T) {
+	base := AttestationScaffold{
+		StorySlug:     "kinds-feature",
+		ACID:          "ac-1",
+		StoryRefArg:   "spec/kinds-feature",
+		VerifiesRef:   "spec/kinds-feature",
+		Owners:        []string{"platform-team"},
+		Frozen:        artifact.Frozen{At: "2026-07-16", Commit: "e606a109dbc28ea08cc86265c4fa2dd026f8373a"},
+		Class:         artifact.ClassFeature,
+		CriterionText: "the ledger rejects a decline older than 30 days",
+	}
+
+	t.Run("empty EvidenceKinds omits the line entirely", func(t *testing.T) {
+		in := base
+		in.EvidenceKinds = nil
+		content := RenderAttestationScaffold(in)
+
+		fm, bodyBytes, err := artifact.SplitFrontmatter([]byte(content))
+		if err != nil {
+			t.Fatalf("SplitFrontmatter: %v\ncontent:\n%s", err, content)
+		}
+		if _, err := artifact.DecodeAttestation(fm); err != nil {
+			t.Fatalf("DecodeAttestation: %v\ncontent:\n%s", err, content)
+		}
+		body := string(bodyBytes)
+
+		if strings.Contains(body, "Declared evidence kinds") {
+			t.Errorf("body contains a dangling \"Declared evidence kinds\" line for an empty EvidenceKinds slice:\n%s", body)
+		}
+		if !strings.HasSuffix(body, "> the ledger rejects a decline older than 30 days\n") {
+			t.Errorf("body does not end with the quoted criterion line once the kinds line is omitted:\n%s", body)
+		}
+	})
+
+	t.Run("non-empty EvidenceKinds still renders the line exactly as before", func(t *testing.T) {
+		in := base
+		in.EvidenceKinds = []artifact.EvidenceKind{artifact.EvidenceStatic, artifact.EvidenceAttestation}
+		content := RenderAttestationScaffold(in)
+
+		fm, bodyBytes, err := artifact.SplitFrontmatter([]byte(content))
+		if err != nil {
+			t.Fatalf("SplitFrontmatter: %v\ncontent:\n%s", err, content)
+		}
+		if _, err := artifact.DecodeAttestation(fm); err != nil {
+			t.Fatalf("DecodeAttestation: %v\ncontent:\n%s", err, content)
+		}
+		body := string(bodyBytes)
+
+		if !strings.Contains(body, "Declared evidence kinds: static, attestation") {
+			t.Errorf("body missing the declared evidence kinds line:\n%s", body)
+		}
+	})
+}
+
+// TestRenderAttestationScaffold_FeatureNormalizesCriterionText is review fix
+// round 1, M-3's own witness: the criterion text is normalized before
+// quoting — CRLF folded to LF so a stray "\r" never reaches a quoted line,
+// and trailing newlines trimmed so an empty or newline-only criterion text
+// renders no "> " line at all — asserting the EXACT resulting body bytes in
+// each case, and that the scaffold still strict-decodes.
+func TestRenderAttestationScaffold_FeatureNormalizesCriterionText(t *testing.T) {
+	const storyRefArg = "spec/normalize-feature"
+	const acID = "ac-1"
+	base := AttestationScaffold{
+		StorySlug:     "normalize-feature",
+		ACID:          acID,
+		StoryRefArg:   storyRefArg,
+		VerifiesRef:   "spec/normalize-feature",
+		Owners:        []string{"platform-team"},
+		Frozen:        artifact.Frozen{At: "2026-07-16", Commit: "e606a109dbc28ea08cc86265c4fa2dd026f8373a"},
+		Class:         artifact.ClassFeature,
+		EvidenceKinds: []artifact.EvidenceKind{artifact.EvidenceAttestation},
+	}
+	wantPrefix := fmt.Sprintf(attestationScaffoldBody, UnauthoredAttestationMarker, storyRefArg, acID)
+
+	tests := []struct {
+		name          string
+		criterionText string
+		wantSection   string
+	}{
+		{
+			name:          "empty text renders no quoted line",
+			criterionText: "",
+			wantSection:   "\nCriterion under attestation (accepted text, quoted for context):\n\nDeclared evidence kinds: attestation\n",
+		},
+		{
+			name:          "trailing newline is trimmed",
+			criterionText: "the ledger rejects a decline older than 30 days\n",
+			wantSection:   "\nCriterion under attestation (accepted text, quoted for context):\n> the ledger rejects a decline older than 30 days\n\nDeclared evidence kinds: attestation\n",
+		},
+		{
+			name:          "CRLF is folded to LF",
+			criterionText: "line one\r\nline two",
+			wantSection:   "\nCriterion under attestation (accepted text, quoted for context):\n> line one\n> line two\n\nDeclared evidence kinds: attestation\n",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			in := base
+			in.CriterionText = tc.criterionText
+			content := RenderAttestationScaffold(in)
+
+			fm, bodyBytes, err := artifact.SplitFrontmatter([]byte(content))
+			if err != nil {
+				t.Fatalf("SplitFrontmatter: %v\ncontent:\n%s", err, content)
+			}
+			if _, err := artifact.DecodeAttestation(fm); err != nil {
+				t.Fatalf("DecodeAttestation: %v\ncontent:\n%s", err, content)
+			}
+
+			wantBody := wantPrefix + tc.wantSection
+			gotBody := string(bodyBytes)
+			if gotBody != wantBody {
+				t.Fatalf("body bytes differ:\n--- got ---\n%q\n--- want ---\n%q", gotBody, wantBody)
+			}
+			if strings.ContainsRune(gotBody, '\r') {
+				t.Errorf("body contains a stray '\\r':\n%q", gotBody)
+			}
+		})
 	}
 }
 
