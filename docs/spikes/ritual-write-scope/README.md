@@ -58,6 +58,18 @@ line head/tail sample; the full deduplicated `(who, subcommand, flags)`
 reduction — 524 lines, well under the evidence cap — is
 `gitlog-dedup-all-verbs.tsv`). Per-ritual reduction is `inventory.tsv`.
 
+That `(who, subcommand, flags)` reduction is **operand-free by
+construction**, which drops exactly the tokens `refs_create` and
+`stage_paths` are made of. A second, operand-preserving reduction of the
+same log — `inventory-operands.tsv`, 37 rows, produced by
+`reduce-operands.sh` whose rule it states in full — keeps the complete
+argument vector of every mutating invocation of the five rituals, branch
+names, bases, pathspecs and `--` separators intact. The whole sweep was
+re-run independently in fix round 1 (recorder patch re-applied in a fresh
+`/tmp` clone; exit 0, all five packages `ok`, 21173 raw lines against the
+first run's 21174), and the reduction over both raw logs is byte-identical
+— so every operand cited below reproduced across two independent runs.
+
 **Timing/load disclosure (constraint 7):** this run crossed a session
 interruption (an API billing error unrelated to this spike); the
 controller's contemporaneous observation put the 1-minute load average
@@ -363,7 +375,7 @@ Summary:
 | `build_start` | `feature/<name>` | — | **true (open defect, UAT-023: implicit HEAD base)** | n/a (never stages) | `no_commit` | false (moot) | false |
 | `close` | `close/<name>` (`--force-local` only) | unmeasured (plain/CI publish path not traced) | true | yes | **`refused` (requireCleanIndex, close.go:655 — exit 2 before any mutation)** | false | **false (confirmed by source: close.go:915-916 prints a "push it yourself" instruction, never calls `gitx.Push`)** |
 | `commit_to_design` | — | — | false (never checks out) | yes | **`carried` (open defect, UAT-036)** | false | false |
-| `policy_adopt` | `<adopt-branch>` (name not yet isolated — see Deviations) | — | true | yes | **`scoped` (`commit -m ... -- <paths>`, policy.go:57)** | false | false |
+| `policy_adopt` | `policy/adopt` (base: resolved default branch; `policy.go:255`, 10/10 observed) | — | true | yes | **`scoped` (`commit -m ... -- <paths>`, policy.go:57)** | false | false |
 
 **Fields the five needed that the shape lacked: one — and this README's
 first issue said "none", which is withdrawn.** The story's
@@ -616,13 +628,17 @@ existing text corroborated, not just asserted).
   "Wave 3 plan" note anticipated; ac-9's spec text and the wave-2 plan
   (read at the path the brief named, in the separate `readiness-
   recovery-w2` worktree, read-only) were used instead, as instructed.
-- **`internal/policyadopt`'s branch name for `refs_create`** was not
-  isolated from the flags-only reduction script (`inventory.tsv`/
-  `declarations.yaml` both record this as an open, disclosed gap rather
-  than a guess) — the reduction strips non-flag tokens, and re-deriving
-  the exact branch-naming convention from the raw log was judged not worth
-  the added script complexity inside this spike's one-day timebox; the
-  *mutation* (a new ref is created) is still correctly captured.
+- **`internal/policyadopt`'s branch name for `refs_create`** was recorded
+  as unmeasured in this README's first issue, because the flags-only
+  reduction strips non-flag tokens and re-deriving the name was judged not
+  worth the script complexity. That judgement was wrong: the gap was
+  self-inflicted and one reduction pass closes it. **Now measured**:
+  `checkout -b policy/adopt main`, 10 of 10 observed invocations
+  (`inventory-operands.tsv`), corroborated by source (`policy.go:255`
+  passes the literal `"policy/adopt"`, with `resolveBranchBase` supplying
+  the base). The deviation is kept here as a record of the method lesson
+  — a reduction that discards operands cannot answer questions about
+  operands — not as an open gap.
 - **`close`'s plain/CI publish path was not dynamically exercised.**
   `--force-local` is this run's only observed `close` mutation path;
   `refs_move` for the plain, CI-gated `PublishRollup` path is recorded as
@@ -635,8 +651,10 @@ existing text corroborated, not just asserted).
 | `recorder.patch` | The reverted-before-every-commit gitx patch (73 lines) |
 | `inventory.tsv` | Per-ritual git subcommand/flags/mutation table (69 rows), oq-1's primary artifact |
 | `declarations.yaml` | Five hand-written scope declarations, oq-3's primary artifact |
-| `gitlog-dedup-all-verbs.tsv` | Deduplicated (who, subcommand, flags) across the whole test sweep, all verbs (524 lines) |
-| `gitlog-raw-sample.tsv` | Head(300)+tail(100) of the 21174-line raw recorder log, with the full-file line count and reduction pointer stated inline |
+| `gitlog-dedup-all-verbs.tsv` | Deduplicated (who, subcommand, flags) across the whole test sweep, all verbs (524 lines). Operand-free by construction — use `inventory-operands.tsv` for branch names and pathspecs |
+| `inventory-operands.tsv` | Every mutating invocation of the five rituals with its **full argument vector**, deduplicated (37 rows): branch names, their bases, pathspecs and `--` separators intact. The evidence `refs_create` and `stage_paths` values are actually checkable against |
+| `reduce-operands.sh` | The reduction that produces it, with its rule stated in full and re-runnable over any raw recorder log |
+| `gitlog-raw-sample.tsv` | Head(300)+tail(100) of the 21174-line raw recorder log, with the full-file line count and reduction pointer stated inline. The raw log itself is not committed (5.9 MB); an independent re-run in fix round 1 reproduced it at 21173 lines and produced a byte-identical `inventory-operands.tsv` |
 | `test-run-stdout.log` | `go test`'s own summary line per package (all `ok`) |
 | `state-diff/sd-*`, `state-diff/diff.*` (no `seeded` in the name) | Trial 1, the PRISTINE fixture: before/after `for-each-ref`/`ls-files -s`/`status` snapshots and diffs for the `design start` trial, plus that trial's command log and stdout/stderr. Both `status` snapshots are 0 bytes — which is the trial's limitation, not a clean result |
 | `state-diff/seeded-trial.sh` | Trial 2's re-runnable script: seeds ac-2's three conditions in a fresh `/tmp` clone, runs `close` then `design start` against the same seeded state, snapshots three ways around each |
@@ -645,7 +663,9 @@ existing text corroborated, not just asserted).
 
 ## Status summary (three-valued, constraint 8)
 
-- oq-1: **ANSWERED** — `inventory.tsv` + recorder log evidence.
+- oq-1: **ANSWERED** — `inventory.tsv` (subcommands and flags) plus
+  `inventory-operands.tsv` (full argument vectors), backed by a recorder
+  run reproduced independently in fix round 1.
 - oq-2: **ANSWERED** — census table + two state-diff trials (pristine and
   ac-2-seeded) + sensor ruling (log plus state diff required, and the
   commit's own file list alongside them; log-only refuted by the rituals'

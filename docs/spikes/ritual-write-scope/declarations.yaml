@@ -197,9 +197,16 @@ policy_adopt:
   verb: "policy adopt"
   source: cmd/verdi/policy.go, internal/policyadopt/{plan,write}.go
   refs_create:
-    - "<adopt-branch>"            # checkout -b observed; exact naming not isolated from the
-                                   # flags-only reduction (see inventory.tsv), branch name itself
-                                   # was masked out by the reduction script, unmeasured precisely
+    - "policy/adopt"              # MEASURED (fix round 1, F-3): `checkout -b policy/adopt main`,
+                                   # 10 of 10 observed invocations, inventory-operands.tsv. The
+                                   # first issue of this file said "<adopt-branch>, unmeasured"
+                                   # because the flags-only reduction had masked the operand out;
+                                   # one operand-preserving pass over the same raw log recovers it.
+                                   # Confirmed from source too: the name is the literal
+                                   # "policy/adopt" at cmd/verdi/policy.go:255, and the base is
+                                   # resolveBranchBase(...) -- the same UAT-021-fixed default-branch
+                                   # resolution design start uses, which is why the observed base is
+                                   # `main` rather than an implicit HEAD.
   refs_move: []
   head_may_switch: true
   stage_paths:
