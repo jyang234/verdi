@@ -210,13 +210,17 @@ func TestAttachBadges_VLPartition(t *testing.T) {
 		t.Errorf("stub.Badges[0].Inputs = %+v, want one input with a non-empty revision", stub.Badges[0].Inputs)
 	}
 
-	ac1 := badgeCardByID(t, proj, "ac-1")
-	if len(ac1.Badges) != 0 {
-		t.Errorf("ac-1.Badges = %+v, want none (ac-1 names no locus-bearing finding)", ac1.Badges)
-	}
-	ac2 := badgeCardByID(t, proj, "ac-2")
-	if len(ac2.Badges) != 0 {
-		t.Errorf("ac-2.Badges = %+v, want none", ac2.Badges)
+	// Neither AC names a locus-bearing VL finding, so neither wears a
+	// lint badge. (Since R-RR2-3 the evidence-slot compute runs on feature
+	// walls too, so each card legitimately wears its own fold:empty-slot
+	// badge — a different source, pinned by obligationrow_test.go — which
+	// is why this is a no-lint-badge check rather than a bare-card check.)
+	for _, id := range []string{"ac-1", "ac-2"} {
+		for _, b := range badgeCardByID(t, proj, id).Badges {
+			if strings.HasPrefix(b.Source, "lint:") {
+				t.Errorf("%s carries lint badge %+v, want none (%s names no locus-bearing finding)", id, b, id)
+			}
+		}
 	}
 
 	// VL-018's dangling "stub:dangling-not-a-real-stub" layout key fires

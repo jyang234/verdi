@@ -1,8 +1,8 @@
 package workbench
 
 // Render + load tests for the obligation wall (spec/obligation-wall ac-2):
-// a STORY AC card discloses, per declared evidence kind, that kind's
-// obligation — the authored title for a kind that HAS one, a disclosed
+// an AC card — story, and since R-RR2-7 feature too — discloses, per
+// declared evidence kind, that kind's obligation — the authored title for a kind that HAS one, a disclosed
 // "no obligation" badge for one that does not (dc-2). The obligations are
 // loaded from disk by the ONE reader both this surface and `verdi matrix`
 // consume (evidence.Obligations, dc-1) and projected onto cardView, then
@@ -203,24 +203,29 @@ func TestAttachObligations_LoadsDeclaredKinds(t *testing.T) {
 	}
 }
 
-// TestAttachObligations_NoOpOffStoryClass proves obligations are a STORY-AC
-// concept: a feature wall's AC cards are left untouched (a feature AC wears
-// its coverage receipt instead), gating identically to the projection's own
-// feature/story split.
-func TestAttachObligations_NoOpOffStoryClass(t *testing.T) {
+// TestAttachObligations_AttachesOffStoryClass proves R-RR2-7 (SI-210): the
+// obligation row is no longer a story-only concept. A feature wall's AC
+// cards carry one view per declared kind — here scopingProjectionFixtureSpec's
+// ac-1/ac-2 each declare attestation — with Present reflecting the store
+// exactly as for stories: the store below holds an obligation for a
+// DIFFERENT spec only, so both feature cards read the disclosed absence.
+// The full feature path (badges, slot chips, an on-disk feature
+// obligation) is obligationrow_test.go's.
+func TestAttachObligations_AttachesOffStoryClass(t *testing.T) {
 	fm := mustDecodeSpecForTest(t, scopingProjectionFixtureSpec) // class: feature
 	proj, err := buildProjectionFM("scoping-fixture", fm, nil, nil, nil, nil, modeReadOnly)
 	if err != nil {
 		t.Fatalf("buildProjection: %v", err)
 	}
-	// Even pointed at a store with an obligation on disk, a feature wall
-	// discloses nothing on its AC cards.
-	root := obligationStoreWithBehavioral(t)
+	root := obligationStoreWithBehavioral(t) // refi-decline-replay's obligation, not this spec's
 	if err := attachObligations(proj, root, "scoping-fixture", fm); err != nil {
 		t.Fatalf("attachObligations: %v", err)
 	}
-	if got := obligationCard(t, proj, "ac-1").Obligations; got != nil {
-		t.Errorf("feature AC card carries obligations %+v, want none", got)
+	for _, id := range []string{"ac-1", "ac-2"} {
+		got := obligationCard(t, proj, id).Obligations
+		if len(got) != 1 || got[0].Kind != "attestation" || got[0].Present {
+			t.Errorf("feature %s obligations = %+v, want exactly [attestation, absent]", id, got)
+		}
 	}
 }
 

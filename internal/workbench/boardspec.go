@@ -492,10 +492,11 @@ func (s *boardSpecServer) loadASD(ctx context.Context, name string) (*BoardProje
 	return proj, git, asd, nil
 }
 
-// attachObligations enriches a STORY board's AC cards with their evidence
-// obligations (spec/obligation-wall ac-2), so what each AC demands is read on
-// the wall itself (feature co-3, legible-without-the-sidecar) rather than
-// recovered by opening the obligation file. For each evidence kind an AC
+// attachObligations enriches a board's AC cards — every class alike, story
+// and feature (R-RR2-7, SI-210) — with their evidence obligations
+// (spec/obligation-wall ac-2), so what each AC demands is read on the wall
+// itself (feature co-3, legible-without-the-sidecar) rather than recovered
+// by opening the obligation file. For each evidence kind an AC
 // DECLARES it projects onto that card either the kind's authored obligation
 // (title + prose) or a disclosed "no obligation" marker — the wall-receipts
 // posture (dc-2): the read surface DISCLOSES, it never refuses; the
@@ -511,16 +512,18 @@ func (s *boardSpecServer) loadASD(ctx context.Context, name string) (*BoardProje
 // three-valued posture, propagated here as loadBoard's error, never silently
 // swallowed.
 //
-// This is a no-op on any non-story wall: obligations attach to STORY
-// acceptance criteria (a feature AC wears its coverage receipt instead), so
-// gating on class here mirrors the projection's own feature/story split. It
-// runs AFTER buildProjection — the projector stays a pure function of its
-// four in-memory inputs; this store-derived enrichment lives in the I/O
-// layer, exactly like proj.Notices.
+// No class gate (R-RR2-7): a feature AC card carries one view per declared
+// kind exactly as a story card does — the loader is spec-name generic, so a
+// feature kind with no obligation document on disk reads as the same
+// disclosed "no obligation" fact — and the evidence-slot chip (spec/
+// evidence-slot ac-7's feature-wall widening) has its row to land on;
+// the feature card still wears its coverage receipt beside it. The
+// story-only concern that remains story-only is the ladder-flag compute
+// in internal/wallbadge, not this attachment. It runs AFTER
+// buildProjection — the projector stays a pure function of its four
+// in-memory inputs; this store-derived enrichment lives in the I/O layer,
+// exactly like proj.Notices.
 func attachObligations(proj *BoardProjection, root, specName string, fm *artifact.SpecFrontmatter) error {
-	if fm.Class != artifact.ClassStory {
-		return nil
-	}
 	declaredKinds := make(map[string][]artifact.EvidenceKind, len(fm.AcceptanceCriteria))
 	for _, ac := range fm.AcceptanceCriteria {
 		declaredKinds[ac.ID] = ac.Evidence
