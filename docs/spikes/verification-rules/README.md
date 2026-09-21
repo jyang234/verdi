@@ -458,6 +458,19 @@ spike's write set.
 
 ## Deviations from the investigation plan (constraint 10)
 
+- **Session interruption.** The lane was stopped mid-run by an API billing
+  error and resumed in place once credit was restored; the worktree,
+  branch and fence state were re-verified against the controller's
+  inventory before continuing, and the measurements taken on either side
+  of the outage are so labelled where timing matters.
+- **Evidence anchored on an unpushed local branch (whole-wave review
+  W-3).** The commits b810c302, 1be75d01, 410db101 and e963f4d0 this
+  spike measures against live only on the local branch
+  `agent/readiness-recovery-wave-1`; origin carries wave 2, not wave 1,
+  and no remote ref or tag contained them at wave close. The controller
+  tagged all four locally as `spike-evidence/readiness-recovery-wave-1/
+  <sha>` so worktree reclamation cannot lose them; pushing those tags is
+  an owner action.
 1. **"28 active specs" vs. 39 directories found.** `ls .verdi/specs/active
    | wc -l` = 39 (`active-specs-count.out`). Reconciled exactly: 39 total
    − 5 additional version-revision directories (`comparative-spike-
