@@ -1,0 +1,17 @@
+# Fix-round-1 evidence for R-7: baseline.draft.jsonl's own sort collation.
+
+Command: echo '["designimport_test.go","designimport.go"]' > /tmp/sorttest.json
+  LC_ALL=C jq 'sort' /tmp/sorttest.json           -> ["designimport.go","designimport_test.go"]
+  LC_ALL=en_US.UTF-8 jq 'sort' /tmp/sorttest.json -> ["designimport.go","designimport_test.go"]  (same — jq is locale-independent)
+  LC_ALL=C sort (shell, same two lines)           -> designimport.go first
+  LC_ALL=en_US.UTF-8 sort (shell, same two lines) -> designimport_test.go first (different order)
+
+Conclusion: baseline.draft.jsonl was built with jq's own `sort_by`
+(docs/spikes/strict-lint-target/README.md's oq-3 section), which is
+already locale-independent — verified above, same result under `LC_ALL=C`
+and `LC_ALL=en_US.UTF-8`. The risk the review names (R-7) is specifically
+in the *described* regeneration protocol, which did not say how a future
+implementer should sort: if that implementation ever swaps in a
+shell-level `sort` instead of jq's, `LC_ALL=C` must be pinned for it, or a
+regeneration on a different machine's default locale would reorder (and
+so diff-churn) the entire file for no semantic reason.

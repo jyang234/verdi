@@ -1,0 +1,8 @@
+{"file":"internal/draftmutation/transaction.go","line":71,"col":2,"text":"found a struct that contains a context.Context field","src":"\tctx         context.Context"}
+{"file":"internal/evidence/fold.go","line":19,"col":2,"text":"found a struct that contains a context.Context field","src":"\tContext context.Context"}
+{"file":"internal/experimentevaluator/adapter_test.go","line":37,"col":2,"text":"found a struct that contains a context.Context field","src":"\trunCtx        context.Context"}
+{"file":"internal/lint/engine.go","line":17,"col":2,"text":"found a struct that contains a context.Context field","src":"\tCtx      context.Context"}
+{"file":"internal/sealedexec/claude/mcp_test.go","line":172,"col":3,"text":"found a struct that contains a context.Context field","src":"\t\tctx       context.Context"}
+{"file":"internal/sealedexec/codex/adapter_test.go","line":454,"col":2,"text":"found a struct that contains a context.Context field","src":"\tctx     context.Context"}
+{"file":"internal/sealedexec/mcp_test.go","line":955,"col":2,"text":"found a struct that contains a context.Context field","src":"\tcontext.Context"}
+{"file":"internal/sealedexec/scoped_mcp_test.go","line":314,"col":3,"text":"found a struct that contains a context.Context field","src":"\t\tctx       context.Context"}

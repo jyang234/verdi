@@ -1,0 +1,38 @@
+# Fix-round-1 evidence for R-5: errorlint's second, rule-not-stated check
+# (type-assertion safety, samples.md's contextcheck/errorlint "3 of 10"
+# rows) is behind settings, same as exhaustive's default-signifies-
+# exhaustive. contextcheck has no equivalent knob found (probed below);
+# disclosed as unmeasured, not asserted absent.
+
+## errorlint: asserts:false, comparison:false
+
+Config:
+  version: "2"
+  linters:
+    default: none
+    enable: [errorlint]
+    settings:
+      errorlint:
+        asserts: false
+        comparison: false
+
+Command: golangci-lint run --config <above> --enable-only errorlint \
+  --max-issues-per-linter=0 --max-same-issues=0 ./...
+Result: exit=1, 173 -> 132 findings (41 fewer — the type-assertion-safety
+class this spike's ten-sample judged "rule-not-stated" against CLAUDE.md's
+literal "wrap with %w" sentence).
+Load before/after: 7.56/22.29/30.90 (both — same minute).
+
+## contextcheck: no equivalent knob found
+
+Probed a placeholder settings key
+(`settings.contextcheck.bogus_setting_probe: true`) against
+`golangci-lint run --config <probe>.yml`: the run completed without a
+config-validation error (unknown-key rejection would have been informative
+either way; its absence here is not proof contextcheck accepts no real
+settings, just that this specific probe was not rejected). No documented
+contextcheck setting analogous to errorlint's asserts/comparison split was
+found. Disclosed as unmeasured, per the review (R-5): the symmetric
+question for contextcheck's 3/10 rule-not-stated share ("propagate an
+inherited ctx, don't refabricate Background()") has no obvious knob to
+separate it from the other 7/10, and this spike did not find one.
