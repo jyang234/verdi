@@ -1,0 +1,41 @@
+# exhaustive: does 'default:' already satisfy CLAUDE.md's fail-closed rule?
+# supplementary check for oq-2 (not one of the four named oqs; strengthens the exhaustive verdict above)
+
+== config: /tmp/exhaustive-defaultsig.yml ==
+version: "2"
+linters:
+  default: none
+  enable: [exhaustive]
+  settings:
+    exhaustive:
+      default-signifies-exhaustive: true
+
+== command: golangci-lint run --config docs/spikes/strict-lint-target/golangci.strict.yml --enable-only exhaustive --max-issues-per-linter=0 --max-same-issues=0 ./cmd/verdi/... ==
+			^
+15 issues:
+* exhaustive: 15
+
+== command: golangci-lint run --config /tmp/exhaustive-defaultsig.yml --enable-only exhaustive --max-issues-per-linter=0 --max-same-issues=0 ./cmd/verdi/... ==
+../../Users/johnyang/code/verdi-system/verdi-wt/spike-strict-lint-target/cmd/verdi/claude_execution_e2e_test.go:1119:4: missing cases in switch of type sealedexec.ControllerOperation: sealedexec.ControllerOperationVerifyAuthority, sealedexec.ControllerOperationResolveProfile, sealedexec.ControllerOperationVerifyConflict, sealedexec.ControllerOperationResolveRecorder, sealedexec.ControllerOperationRecorderAppend, sealedexec.ControllerOperationStoreRedactedSegment, sealedexec.ControllerOperationResolveRedactedSegment, sealedexec.ControllerOperationVerifyOpaqueBoundary, sealedexec.ControllerOperationVerifyProviderSession, sealedexec.ControllerOperationVerifyExpansion, sealedexec.ControllerOperationStoreAdapterSession, sealedexec.ControllerOperationNextStamp, sealedexec.ControllerOperationResolveContext, sealedexec.ControllerOperationVerifyEpoch, sealedexec.ControllerOperationInstallExpansion, sealedexec.ControllerOperationAppendReceipt, sealedexec.ControllerOperationResolveReceiptVerificationAuthority, sealedexec.ControllerOperationPersistHandback, sealedexec.ControllerOperationPersistQuarantine, sealedexec.ControllerOperationPersistAbort, sealedexec.ControllerOperationResolveClaimMCP (exhaustive)
+			switch call.Operation {
+			^
+../../Users/johnyang/code/verdi-system/verdi-wt/spike-strict-lint-target/cmd/verdi/context_execution_contract_test.go:1693:2: missing cases in switch of type sealedexec.InspectionKind: sealedexec.InspectionFlightPlan, sealedexec.InspectionContextApproved (exhaustive)
+	switch kind {
+	^
+../../Users/johnyang/code/verdi-system/verdi-wt/spike-strict-lint-target/cmd/verdi/context_execution_contract_test.go:2794:2: missing cases in switch of type sealedexec.PreservedState: sealedexec.PreservedNone (exhaustive)
+	switch state {
+	^
+../../Users/johnyang/code/verdi-system/verdi-wt/spike-strict-lint-target/cmd/verdi/readiness_snapshot.go:369:3: missing cases in switch of type artifact.AnnotationType: artifact.AnnotationComment, artifact.AnnotationDecisionNeeded, artifact.AnnotationPin, artifact.AnnotationRelates, artifact.AnnotationReview, artifact.AnnotationStory, artifact.AnnotationSpike (exhaustive)
+		switch annotation.Type {
+		^
+../../Users/johnyang/code/verdi-system/verdi-wt/spike-strict-lint-target/cmd/verdi/selfevidence_test.go:120:3: missing cases in switch of type artifact.EvidenceKind: artifact.EvidenceRuntime, artifact.EvidenceAttestation (exhaustive)
+		switch r.Kind {
+		^
+../../Users/johnyang/code/verdi-system/verdi-wt/spike-strict-lint-target/cmd/verdi/stubmatch.go:164:3: missing cases in switch of type artifact.LinkType: artifact.LinkImplements, artifact.LinkResolves, artifact.LinkVerifies, artifact.LinkDerivedFrom, artifact.LinkAnnotates, artifact.LinkDependsOn, artifact.LinkStory, artifact.LinkImpacts, artifact.LinkChallenges (exhaustive)
+		switch l.Type {
+		^
+../../Users/johnyang/code/verdi-system/verdi-wt/spike-strict-lint-target/cmd/verdi/sync_quarantine.go:157:4: missing cases in switch of type gitx.Reachability: gitx.Unreachable (exhaustive)
+			switch reach {
+			^
+7 issues:
+* exhaustive: 7

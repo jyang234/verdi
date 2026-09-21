@@ -1,0 +1,24 @@
+# Throwaway evidence file for spec/strict-lint-target-spike (VL-016 fence).
+# NOT the deliverable: the feature's own plan authors the real strict config
+# under test with a digest witness (see the spike's "Throwaway rule").
+#
+# Enables exactly the seven oq-1 candidate linters, each mapped to the
+# CLAUDE.md ground rule it is meant to enforce (see the parent feature spec
+# .verdi/specs/active/strict-lint-target/spec.md's table):
+#   containedctx, noctx, contextcheck -> context.Context rules
+#   errorlint                         -> "Errors: wrap with `%w`..."
+#   exhaustive                        -> "unknown enum values fail closed"
+#   dupl                              -> "never copy-paste across packages"
+#   gochecknoglobals                  -> no package-level mutable state
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - containedctx
+    - noctx
+    - contextcheck
+    - errorlint
+    - exhaustive
+    - dupl
+    - gochecknoglobals

@@ -1,0 +1,10 @@
+{"file":"cmd/e2eharness/git.go","line":31,"col":5,"text":"deterministicGitEnv is a global variable","src":"var deterministicGitEnv = []string{"}
+{"file":"cmd/e2eharness/main.go","line":266,"col":5,"text":"ciEnvVars is a global variable","src":"var ciEnvVars = []string{"}
+{"file":"cmd/e2eharness/specimportfixture.go","line":87,"col":5,"text":"specImportParentSpecRel is a global variable","src":"var specImportParentSpecRel = filepath.Join(\"internal\", \"workbench\", \"testdata\", \"specimport\", \"parent-feature.md\")"}
+{"file":"cmd/e2eharness/unprovenboard.go","line":51,"col":5,"text":"serveInjectionEnvVars is a global variable","src":"var serveInjectionEnvVars = []string{\"VERDI_REVIEW_FEED\", \"VERDI_OPENMR_FEED\", \"VERDI_DIAGRAM_VERIFICATION\"}"}
+{"file":"cmd/e2eharness/unprovenboard.go","line":90,"col":5,"text":"unprovenBoardSpecRel is a global variable","src":"var unprovenBoardSpecRel = filepath.Join(\"cmd\", \"e2eharness\", \"testdata\", \"unproven-board\", \"spec.md\")"}
+{"file":"cmd/verdi/aligndiagramsweepstatic_test.go","line":15,"col":5,"text":"forbiddenDiagramSweepReferences is a global variable","src":"var forbiddenDiagramSweepReferences = []string{"}
+{"file":"cmd/verdi/audit_test.go","line":18,"col":5,"text":"auditTestNow is a global variable","src":"var auditTestNow = time.Date(2026, 7, 22, 12, 0, 0, 0, time.UTC)"}
+{"file":"cmd/verdi/close.go","line":161,"col":2,"text":"closeAddPaths is a global variable","src":"\tcloseAddPaths     = gitx.AddPaths"}
+{"file":"cmd/verdi/close.go","line":162,"col":2,"text":"closeCreateCommit is a global variable","src":"\tcloseCreateCommit = gitx.CreateCommit"}
+{"file":"cmd/verdi/closeexperiment_test.go","line":66,"col":5,"text":"closeExperimentWaiverSlug is a global variable","src":"var closeExperimentWaiverSlug = store.RefSlug(\"jira:EXP-1\")"}
