@@ -20,6 +20,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"unicode"
 
 	"github.com/jyang234/verdi/internal/artifact"
 	"github.com/jyang234/verdi/internal/boardio"
@@ -551,23 +552,249 @@ func TestLoad_BindsAbsentExpectedToCurrentBranchAndHead(t *testing.T) {
 	}
 }
 
-func TestLoad_RefusesExpectedMismatch(t *testing.T) {
-	repo, ref := readinessRepo(t, "feature")
-	checkoutBranch(t, repo.Dir, "design/feature-alpha")
-	mismatched := contextcompile.Expected{Branch: "design/other", Head: strings.Repeat("a", 40)}
-	requestPath := writeRequestFile(t, repo.Dir, "mismatched-request.json", requestWithExpected(t, ref, &mismatched))
+// TestLoad_ExpectedMismatchPostureIsTheExplicitOption is R-RRF-3's
+// (SI-214) single knob, from both sides. The moved pin
+// (TestLoad_RefusesExpectedMismatch) becomes the strict row: the refusal
+// survives, but only under Options.RequireExpectedMatch, which `verdi
+// serve`'s startup warm-up alone sets. Every per-request load leaves the
+// option at its zero value and discloses the mismatch instead. In BOTH
+// rows the policy-conflict provider must never be constructed: nothing was
+// evaluated for these bytes, so no report may exist to speak for them.
+//
+// The control-character row is the reachable negative path the witness
+// format has to survive: contextcompile requires `expected.branch` only to
+// be non-empty, so a canonical request may carry a control character
+// there, and readinesspilot refuses a control-bearing witness — an
+// unescaped sentence would turn this very disclosure back into the
+// operational failure the ruling removes. Derive runs inside load, so
+// load returning no error IS the proof.
+func TestLoad_ExpectedMismatchPostureIsTheExplicitOption(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		expected     contextcompile.Expected
+		requireMatch bool
+		wantErr      bool
+	}{
+		{
+			name:         "the warm-up option still refuses a stale request",
+			expected:     contextcompile.Expected{Branch: "design/other", Head: strings.Repeat("a", 40)},
+			requireMatch: true,
+			wantErr:      true,
+		},
+		{
+			name:     "a per-request load discloses it unproven",
+			expected: contextcompile.Expected{Branch: "design/other", Head: strings.Repeat("a", 40)},
+		},
+		{
+			name:     "a control character in the request's branch stays display-safe",
+			expected: contextcompile.Expected{Branch: "design/ot\nher", Head: strings.Repeat("a", 40)},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			repo, ref := readinessRepo(t, "feature")
+			checkoutBranch(t, repo.Dir, "design/feature-alpha")
+			requestPath := writeRequestFile(t, repo.Dir, "mismatched-request.json", requestWithExpected(t, ref, &tc.expected))
 
-	called := false
-	l := loader{newConflictProvider: func(context.Context, string, policyconflict.Request, JudgeMode, ActorsResolver) (policyconflict.VerdictProvider, error) {
-		called = true
-		return nil, errors.New("must not construct provider")
-	}}
-	_, err := l.load(context.Background(), repo.Dir, ref, Options{ContextRequestPath: requestPath})
-	if err == nil || !strings.Contains(err.Error(), "expected repository") {
-		t.Fatalf("load error = %v, want expected identity mismatch", err)
+			called := false
+			l := loader{newConflictProvider: func(context.Context, string, policyconflict.Request, JudgeMode, ActorsResolver) (policyconflict.VerdictProvider, error) {
+				called = true
+				return nil, errors.New("must not construct provider")
+			}}
+			snap, err := l.load(context.Background(), repo.Dir, ref, Options{
+				ContextRequestPath:   requestPath,
+				RequireExpectedMatch: tc.requireMatch,
+			})
+			if called {
+				t.Fatal("provider constructed for a request whose expected repository does not match")
+			}
+			if tc.wantErr {
+				if err == nil || !strings.Contains(err.Error(), "expected repository") {
+					t.Fatalf("load error = %v, want expected identity mismatch", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("a stale expected claim must be disclosed, not a loader error, got: %v", err)
+			}
+			if err := snap.Validate(); err != nil {
+				t.Fatalf("snapshot Validate: %v", err)
+			}
+			// Every other area still derives, at the repository this
+			// derivation actually read.
+			if snap.Branch != "design/feature-alpha" || snap.Head != repo.Head {
+				t.Fatalf("snapshot repository = %q@%q, want the CURRENT checkout design/feature-alpha@%s", snap.Branch, snap.Head, repo.Head)
+			}
+			if got := concernByID(t, snap, "shape/problem"); got.State != readinesspilot.StateProven {
+				t.Fatalf("shape/problem = %+v, want proven — a stale context request must not blank unrelated areas", got)
+			}
+			verdict := concernByID(t, snap, "context/verdict")
+			if verdict.State != readinesspilot.StateUnproven {
+				t.Fatalf("context/verdict state = %q, want unproven", verdict.State)
+			}
+			want := staleExpectedRepositoryWitness(tc.expected, contextcompile.Expected{Branch: snap.Branch, Head: snap.Head})
+			if !reflect.DeepEqual(verdict.Witnesses, []string{want}) {
+				t.Fatalf("context/verdict witnesses = %q, want exactly [%q]", verdict.Witnesses, want)
+			}
+			// The destination stays the request-bound vector: re-running
+			// the context-conflict verb against this file IS how the
+			// operator refreshes the request.
+			assertCLI(t, verdict.Destination.CLI, []string{"verdi", "context", "conflict", "--request", requestPath})
+			for _, concern := range snap.AllConcerns {
+				if strings.HasPrefix(concern.ID, "context/") && concern.ID != "context/verdict" {
+					t.Fatalf("concern %q derived from a policy evaluation that never ran", concern.ID)
+				}
+			}
+		})
 	}
-	if called {
-		t.Fatal("provider constructed after expected identity mismatch")
+}
+
+// TestStaleExpectedRepositoryWitness pins R-RRF-3's sentence itself: a
+// fixed format naming both repositories, and control-free for any request
+// contextcompile's decoder accepts (readinesspilot rejects a
+// control-bearing witness outright, so this property is load-bearing, not
+// cosmetic). It carries no path and no digest, for SI-208's reasons.
+func TestStaleExpectedRepositoryWitness(t *testing.T) {
+	head1, head2 := strings.Repeat("a", 40), strings.Repeat("b", 40)
+	for _, tc := range []struct {
+		name               string
+		expected, computed contextcompile.Expected
+		want               string
+	}{
+		{
+			name:     "fixed sentence naming both repositories",
+			expected: contextcompile.Expected{Branch: "main", Head: head1},
+			computed: contextcompile.Expected{Branch: "main", Head: head2},
+			want:     `the context request expected repository "main@` + head1 + `"; the repository now reads "main@` + head2 + `": the policy-conflict evaluation was not derived for these bytes`,
+		},
+		{
+			name:     "a differing branch is named on both sides",
+			expected: contextcompile.Expected{Branch: "design/feature-alpha", Head: head1},
+			computed: contextcompile.Expected{Branch: "main", Head: head2},
+			want:     `the context request expected repository "design/feature-alpha@` + head1 + `"; the repository now reads "main@` + head2 + `": the policy-conflict evaluation was not derived for these bytes`,
+		},
+		{
+			name:     "a control character in the request's branch is escaped, never emitted",
+			expected: contextcompile.Expected{Branch: "ma\nin", Head: head1},
+			computed: contextcompile.Expected{Branch: "main", Head: head2},
+			want:     `the context request expected repository "ma\nin@` + head1 + `"; the repository now reads "main@` + head2 + `": the policy-conflict evaluation was not derived for these bytes`,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := staleExpectedRepositoryWitness(tc.expected, tc.computed)
+			if got != tc.want {
+				t.Fatalf("witness =\n%q\nwant\n%q", got, tc.want)
+			}
+			if i := strings.IndexFunc(got, unicode.IsControl); i >= 0 {
+				t.Fatalf("witness %q carries a control character at %d — readinesspilot refuses it", got, i)
+			}
+			// SI-208's reasoning: the request-bound destination already
+			// names the file, and a digest tells an operator nothing they
+			// can act on.
+			for _, forbidden := range []string{"sha256:", ".json", "/"} {
+				if tc.expected.Branch == "design/feature-alpha" && forbidden == "/" {
+					continue // a branch name legitimately contains one
+				}
+				if strings.Contains(got, forbidden) {
+					t.Fatalf("witness %q must not contain %q", got, forbidden)
+				}
+			}
+		})
+	}
+}
+
+// TestLoad_PinnedStartupRequestSurvivesAnOrdinaryCommit is independent
+// review R3's probe (TestIndependentReview_PinnedStartupSurvivesCommit),
+// rehomed here. `verdi serve` retains the request bundle it validated at
+// startup (R-RR1-17), so a request carrying the optional `expected` claim
+// pinned the server to its startup branch and HEAD: one ORDINARY commit
+// then turned every later load of that spec into an operational error —
+// a 503 readiness page and a missing Readiness section in the Document
+// tab and MCP — until the server was restarted, and editing the request
+// file could not repair a running server because the bytes are retained
+// deliberately. R-RRF-3 (SI-214) makes the mismatch the ac-3
+// ConflictUnavailable posture instead (the SI-208 shape): the context
+// area alone goes unproven and every other area derives at the
+// repository this derivation actually read.
+func TestLoad_PinnedStartupRequestSurvivesAnOrdinaryCommit(t *testing.T) {
+	repo, ref := readinessRepo(t, "feature")
+	pinned := contextcompile.Expected{Branch: "main", Head: repo.Head}
+	requestPath := writeRequestFile(t, repo.Dir, "startup-request.json", requestWithExpected(t, ref, &pinned))
+	// Exactly serve's own startup hand-off: ContextRequestSpec reads and
+	// decodes the file once, and the bundle it returns is what every later
+	// per-request load carries.
+	targetSpec, predecoded, err := ContextRequestSpec(repo.Dir, requestPath)
+	if err != nil {
+		t.Fatalf("ContextRequestSpec: %v", err)
+	}
+	if targetSpec != ref {
+		t.Fatalf("ContextRequestSpec ref = %q, want %q", targetSpec, ref)
+	}
+	opts := Options{ContextRequestPath: requestPath, PredecodedRequest: predecoded}
+
+	stale := false
+	l := loader{newConflictProvider: func(_ context.Context, root string, request policyconflict.Request, _ JudgeMode, _ ActorsResolver) (policyconflict.VerdictProvider, error) {
+		if stale {
+			return nil, errors.New("provider constructed for a request whose expected repository no longer matches")
+		}
+		return providerFunc(func(context.Context, policyconflict.Request) (policyconflict.Result, error) {
+			return fixtureReport(t, root, request, policyconflict.VerdictPass, nil), nil
+		}), nil
+	}}
+
+	// Positive control: at the pinned HEAD the request is honoured in full.
+	first, err := l.load(context.Background(), repo.Dir, ref, opts)
+	if err != nil {
+		t.Fatalf("startup load: %v", err)
+	}
+	if got := concernByID(t, first, "context/verdict"); got.State != readinesspilot.StateProven {
+		t.Fatalf("startup context/verdict = %+v, want proven", got)
+	}
+
+	if err := os.WriteFile(filepath.Join(repo.Dir, "ordinary-change.txt"), []byte("change\n"), 0o644); err != nil {
+		t.Fatalf("write ordinary change: %v", err)
+	}
+	newHead := commitAll(t, repo.Dir, "ordinary change after serve startup")
+	if newHead == repo.Head {
+		t.Fatal("the ordinary commit did not move HEAD: the probe would prove nothing")
+	}
+
+	// The retained bundle is now stale. Nothing may be evaluated for these
+	// bytes, so the provider must never be constructed.
+	stale = true
+	second, err := l.load(context.Background(), repo.Dir, ref, opts)
+	if err != nil {
+		t.Fatalf("readiness stopped after an ordinary commit: %v", err)
+	}
+	if err := second.Validate(); err != nil {
+		t.Fatalf("snapshot Validate: %v", err)
+	}
+	if second.Head != newHead || second.Branch != "main" {
+		t.Fatalf("snapshot repository = %q@%q, want the CURRENT checkout main@%s", second.Branch, second.Head, newHead)
+	}
+	if second.RequestDigest != first.RequestDigest {
+		t.Fatalf("RequestDigest = %q, want the retained startup request's own %q — the derivation must still travel the request, not fall back to the no-request posture", second.RequestDigest, first.RequestDigest)
+	}
+	verdict := concernByID(t, second, "context/verdict")
+	if verdict.State != readinesspilot.StateUnproven {
+		t.Fatalf("context/verdict state = %q, want unproven", verdict.State)
+	}
+	// The fixed sentence names the request's OWN pinned repository and the
+	// one this derivation actually read — never the no-request witness,
+	// which would claim no request was supplied at all.
+	want := staleExpectedRepositoryWitness(pinned, contextcompile.Expected{Branch: "main", Head: newHead})
+	if !reflect.DeepEqual(verdict.Witnesses, []string{want}) {
+		t.Fatalf("context/verdict witnesses = %q, want exactly [%q]", verdict.Witnesses, want)
+	}
+	if want == noContextRequestWitness || !strings.Contains(want, repo.Head) || !strings.Contains(want, newHead) {
+		t.Fatalf("witness %q must name both the pinned HEAD %q and the current one %q", want, repo.Head, newHead)
+	}
+	// The destination stays the request-bound vector: re-running the
+	// context-conflict verb IS how the operator refreshes the request.
+	assertCLI(t, verdict.Destination.CLI, []string{"verdi", "context", "conflict", "--request", requestPath})
+	for _, concern := range second.AllConcerns {
+		if strings.HasPrefix(concern.ID, "context/") && concern.ID != "context/verdict" {
+			t.Fatalf("concern %q derived from a policy evaluation that never ran", concern.ID)
+		}
 	}
 }
 

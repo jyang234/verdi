@@ -95,6 +95,30 @@ type Options struct {
 	// the read itself is skipped. Leave nil for the ordinary case (Load
 	// reads ContextRequestPath itself).
 	PredecodedRequest *PredecodedRequest
+	// RequireExpectedMatch turns a supplied request's optional `expected`
+	// branch/HEAD claim that no longer matches the checkout back into an
+	// operational error, instead of R-RRF-3's (SI-214) disclosure. It is
+	// the one knob that separates the two postures, and it is explicit
+	// precisely because the two callers need opposite answers:
+	//
+	//   false (every PER-REQUEST load — the useful zero value): the
+	//   mismatch is the ac-3 ConflictUnavailable posture. `verdi serve`
+	//   keeps deriving against the request bundle it validated at startup
+	//   (R-RR1-17), so one ordinary commit or branch change makes that
+	//   pinned claim stale; refusing there returned a 503 readiness page
+	//   and dropped the Readiness section from the Document tab and MCP for
+	//   the startup spec until the server was restarted, even though every
+	//   area except check-context still derived perfectly. False derives
+	//   all of them and discloses the context area unproven with a fixed
+	//   witness naming the request's expected repository and the
+	//   repository's current one; `expected` is never rebound.
+	//
+	//   true (ONLY `verdi serve`'s startup warm-up, cmd/verdi/serve.go's
+	//   readinessLoadBuilder.Build): a request that is ALREADY stale when
+	//   the server starts is a misconfiguration the operator must see at
+	//   once, so the warm-up still refuses it and serve exits 2 rather than
+	//   starting against a request that can never be honoured.
+	RequireExpectedMatch bool
 	// BoardHref computes a design branch's board href for an unresolved
 	// shape concern's destination (R-RR1-6: this package never imports
 	// internal/workbench, so it never calls workbench.BranchBoardHref
