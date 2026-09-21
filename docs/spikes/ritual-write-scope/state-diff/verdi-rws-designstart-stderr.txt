@@ -1,0 +1,1 @@
+design start: spec spec/spike-trial declares no impacted service discoverable under this store; skipping baseline regeneration

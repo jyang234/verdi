@@ -1,0 +1,5 @@
+ok  	github.com/jyang234/verdi/cmd/verdi	384.014s
+ok  	github.com/jyang234/verdi/internal/designapp	15.853s
+ok  	github.com/jyang234/verdi/internal/wtmanager	4.795s
+ok  	github.com/jyang234/verdi/internal/commitdesign	3.978s
+ok  	github.com/jyang234/verdi/internal/policyadopt	1.093s

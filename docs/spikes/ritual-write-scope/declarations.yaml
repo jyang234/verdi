@@ -1,0 +1,182 @@
+# Five hand-written scope declarations (oq-3), drawn field-by-field from
+# inventory.tsv's empirical per-verb git command inventory (oq-1) and the
+# raw/reduced recorder logs beside it. NEVER committed as product data —
+# this file is spike evidence under the VL-016 fence (docs/spikes/).
+#
+# Grammar shape is the seven fields the story's investigation plan names:
+# refs_create, refs_move, head_may_switch, stage_paths,
+# index_carry_foreign, untracked_may_enter, may_push.
+#
+# Framing: each declaration below describes OBSERVED CURRENT BEHAVIOR at
+# base 5f60c76c (an empirical snapshot, matching co-1: "declarations
+# describe what existing rituals do"), not a proposed target policy. Three
+# of the six UAT findings the parent spec lists (UAT-021, UAT-033, UAT-034)
+# are ALREADY FIXED at this base commit (confirmed by source comments and
+# existing regression tests — see README's oq-1 section); this file
+# records that as observed fact. UAT-036 (pre-staged foreign index entries
+# riding along in an unscoped `git commit`) and UAT-023/UAT-031's
+# build-start half are OPEN at this base commit — also observed fact, each
+# annotated inline below with "OPEN DEFECT" so the eventual feature build
+# does not mistake a faithful transcription of current behavior for an
+# endorsement of it (ac-4 must close these before ac-1's registry ships
+# the tightened value, per co-1's "never a widening... without an
+# owner-visible decision" read in reverse: narrowing a declaration to
+# close a defect IS the owner-visible decision ac-4 already recorded).
+
+design_start:
+  verb: "design start"
+  source: cmd/verdi/design.go (runDesignStart), cmd/verdi/designsupersede.go
+  refs_create:
+    - "design/<name>"          # gitx.CheckoutNewBranchFrom; --supersedes path also creates design/<name>
+  refs_move: []                # never moves an existing ref
+  head_may_switch: true        # checkout -b always switches HEAD (ac-6/UAT-021 fix: base is
+                                # the resolved default branch, or disclosed HEAD fallback when
+                                # no origin remote — never a stale current checkout)
+  stage_paths:
+    - ".verdi/specs/active/<name>/"   # gitx.AddPaths, scoped — UAT-033 fix confirmed present
+                                       # (design_test.go: TestRunDesignStart_ScaffoldCommitStagesOnlySpecDir
+                                       # asserts gitx.AddAll is never called)
+  index_carry_foreign: true    # OPEN DEFECT (UAT-036): `git commit -m <msg>` carries no `--`
+                                # pathspec, so it commits the whole index, not only what
+                                # stage_paths staged. policy_adopt below shows the fixed shape.
+  untracked_may_enter: false   # add is scoped (see stage_paths); nothing untracked outside
+                                # stage_paths is ever `git add`-ed by this ritual itself
+  may_push: false              # no push/fetch/remote-mutating subcommand observed
+
+build_start:
+  verb: "build start"
+  source: cmd/verdi/buildstart.go
+  refs_create:
+    - "feature/<name>"         # gitx.CheckoutNewBranch(ctx, root, branch) — note: NOT
+                                # CheckoutNewBranchFrom
+  refs_move: []
+  head_may_switch: true        # OPEN DEFECT (UAT-023): gitx.CheckoutNewBranch is `git checkout
+                                # -b <name>` with NO explicit base — git's own implicit-HEAD
+                                # default. build start never calls resolveBranchBase/
+                                # CheckoutNewBranchFrom the way design start does (grepped: zero
+                                # hits in buildstart.go), so the branch is cut from whatever the
+                                # current checkout happens to be sitting on — the exact defect
+                                # class UAT-021 already fixed for design start (gitx/branch.go's
+                                # own doc comment on CheckoutNewBranchFrom narrates that fix).
+  stage_paths: []               # never calls add — confirmed: zero `add`/`commit` lines for
+                                 # "verdi build start" across the whole recorder run
+  index_carry_foreign: false    # moot: this ritual never commits, so nothing can ride along
+  untracked_may_enter: false    # moot, same reason
+  may_push: false                # no push observed
+
+close:
+  verb: "close"                 # covers plain close, --preflight, --prepare, --force-local,
+                                 # --context-request: one verb, several flags, union of effects
+  source: cmd/verdi/close.go, closefeature.go, closepreflight.go, closeprepare.go
+  refs_create:
+    - "close/<spec-name>"       # OBSERVED ONLY under --force-local (git checkout -b close/<name>);
+                                 # plain close's own merge/push path was not exercised by this
+                                 # test sweep's fixtures — see README oq-1 caveat
+  refs_move: []                  # none observed in this run's fixtures (--force-local only;
+                                  # --preflight/--prepare are read-only per inventory.tsv). The
+                                  # plain, CI-run publish path (PublishRollup) was not traced or
+                                  # exercised by this sweep — UNMEASURED for that path specifically,
+                                  # disclosed rather than guessed (constraint 8)
+  head_may_switch: true          # same checkout -b as design/build start, under --force-local
+  stage_paths:
+    - ".verdi/specs/active/<name>/"     # the two observed --force-local `add --` paths
+    - ".verdi/specs/archive/<name>/"
+  index_carry_foreign: true      # OPEN DEFECT, same shape as design_start: `git commit -m <msg>`
+                                  # under --force-local carries no `--` pathspec (UAT-036's own
+                                  # text names close's sibling rituals, not just design start;
+                                  # this spike's inventory confirms close shares the defect)
+  untracked_may_enter: false     # add is scoped to the two spec-dir paths above
+  may_push: false                 # CONFIRMED BY SOURCE, not just by this run's fixtures:
+                                   # close.go:915-916 — the verb deliberately "stops at the
+                                   # branch (dc-3): push it and open the closure MR/PR yourself",
+                                   # printing `git push -u origin <branch>` as an instruction FOR
+                                   # THE OPERATOR rather than ever calling gitx.Push itself.
+                                   # gitx.Push's only two callers in the whole tree are
+                                   # internal/gitx/remotedesignbranches.go and
+                                   # internal/workbench/boardspecapi.go (the workbench's own push
+                                   # button) — neither is any of the five rituals here.
+
+commit_to_design:
+  verb: "commit-to-design (board action)"
+  source: internal/commitdesign/commitdesign.go — no direct CLI verb; invoked from
+    cmd/verdi/board.go, cmd/verdi/forgeboot.go, internal/workbench/board.go
+  refs_create: []                # never creates or moves a ref itself — it commits onto
+  refs_move: []                  # whatever branch the caller already has checked out
+  head_may_switch: false          # never calls checkout; the workbench's serving checkout is
+                                   # deliberately left exactly where it was (this is the ritual
+                                   # plumbing.go's own doc comment describes for the SIBLING
+                                   # stub-instantiate feature — commit_to_design itself confirmed
+                                   # NOT to use plumbing.go's scratch-index path; it commits
+                                   # directly via the real index, see README)
+  stage_paths:
+    - ".verdi/specs/active/<name>/"   # gitx.AddPaths, scoped — UAT-034 fix confirmed present
+                                       # (commitdesign_test.go: TestRun_ScaffoldCommitStagesOnlySpecDir
+                                       # asserts gitx.AddAll is never called)
+  index_carry_foreign: true       # OPEN DEFECT, same UAT-036 shape as design_start: `git commit
+                                   # -m <msg>` carries no `--` pathspec
+  untracked_may_enter: false      # add is scoped to stage_paths
+  may_push: false                  # no push observed; this ritual never pushes (board.go/
+                                    # forgeboot.go own the push decision, if any, separately)
+
+policy_adopt:
+  verb: "policy adopt"
+  source: cmd/verdi/policy.go, internal/policyadopt/{plan,write}.go
+  refs_create:
+    - "<adopt-branch>"            # checkout -b observed; exact naming not isolated from the
+                                   # flags-only reduction (see inventory.tsv), branch name itself
+                                   # was masked out by the reduction script, unmeasured precisely
+  refs_move: []
+  head_may_switch: true
+  stage_paths:
+    - ".verdi/policy/constitution.md"
+    - ".verdi/policy/profiles/<profile>.md"
+    - ".verdi/policy/policies/starter.md"
+    - ".verdi/constitution/consumers.json"
+  index_carry_foreign: false      # FIXED SHAPE (the target other rituals should match): `git
+                                   # commit -m <msg> -- <the exact 4 stage_paths>` — the ONLY
+                                   # ritual of the five whose commit itself is pathspec-scoped,
+                                   # so a pre-staged foreign index entry is NEVER swept in even
+                                   # though internal/policyadopt never explicitly checks the index
+                                   # is otherwise clean first
+  untracked_may_enter: false      # add is scoped to stage_paths
+  may_push: false                  # no push observed
+
+# --- Fields the five rituals needed that the base shape lacked ---
+#
+# None. The seven-field shape (refs_create, refs_move, head_may_switch,
+# stage_paths, index_carry_foreign, untracked_may_enter, may_push) covers
+# every mutating effect this spike's inventory observed across all five
+# rituals: ref creation, HEAD movement, index staging (scoped or not),
+# foreign-index carry, untracked-file entry, and push. No ritual produced
+# an effect (e.g. a tag, a note, a config write, a submodule change) this
+# shape has no field for.
+#
+# One near-miss, not a missing field: `close`'s --force-local branch name
+# ("close/<name>") differs from every other ritual's branch-naming
+# CONVENTION, but that is a *value* refs_create already holds (a string),
+# not a new field.
+
+# --- Fields no ritual used ---
+#
+# refs_move: empty for all five. None of the five rituals ever moves an
+# EXISTING ref (fast-forwards, resets, or force-updates something that
+# already points somewhere) — every refs_create is a brand-new branch, and
+# nothing observed here moves one after creating it. This does not mean
+# the field is useless for the grammar as a whole: spec/readiness-recovery's
+# own ac-9 text names "unwinding an empty branch cut... returning to the
+# original branch and deleting it" as a recovery effect, which DOES move
+# HEAD back and delete a ref — a refs_move-shaped effect outside these five
+# rituals. The field stays in the shape; it is simply always [] for the
+# five write-scope declares here.
+#
+# may_push: false for all five. design_start/build_start/commit_to_design/
+# policy_adopt: false, confirmed by a full green recorder run with no
+# push/fetch line logged. close: false, confirmed more strongly by source
+# (close.go:915-916 prints a "push it yourself" instruction instead of
+# calling gitx.Push; gitx.Push's only two callers in the whole tree are
+# internal/gitx/remotedesignbranches.go and the workbench's own push
+# button, internal/workbench/boardspecapi.go — neither is one of these
+# five). The field is real (ac-1's own text names it explicitly, and co-3
+# requires push testing against a local bare remote) — it is simply false
+# for every one of these five specific rituals; a sixth ritual (the
+# workbench board push action) is where may_push: true would first appear.

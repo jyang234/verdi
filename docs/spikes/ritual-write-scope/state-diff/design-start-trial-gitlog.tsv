@@ -1,0 +1,10 @@
+verdi-rws design start	/tmp/verdi-rws-clone	symbolic-ref --short -q refs/remotes/origin/HEAD
+verdi-rws design start	/tmp/verdi-rws-clone	show-ref --verify --quiet refs/remotes/origin/spike/ritual-write-scope
+verdi-rws design start	/tmp/verdi-rws-clone	rev-parse --verify origin/spike/ritual-write-scope
+verdi-rws design start	/tmp/verdi-rws-clone	ls-tree origin/spike/ritual-write-scope -- .verdi/specs/active/spike-trial/spec.md
+verdi-rws design start	/tmp/verdi-rws-clone	ls-tree origin/spike/ritual-write-scope -- .verdi/specs/archive/spike-trial/spec.md
+verdi-rws design start	/tmp/verdi-rws-clone	symbolic-ref --short -q HEAD
+verdi-rws design start	/tmp/verdi-rws-clone	checkout -b design/spike-trial origin/spike/ritual-write-scope
+verdi-rws design start	/tmp/verdi-rws-clone	add -- /tmp/verdi-rws-clone/.verdi/specs/active/spike-trial
+verdi-rws design start	/tmp/verdi-rws-clone	commit -m design start: scaffold spec/spike-trial (feature spec, no tracker ref)
+verdi-rws design start	/tmp/verdi-rws-clone	rev-parse --verify HEAD
