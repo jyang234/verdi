@@ -216,10 +216,20 @@ func TestAttachBadges_VLPartition(t *testing.T) {
 	// badge — a different source, pinned by obligationrow_test.go — which
 	// is why this is a no-lint-badge check rather than a bare-card check.)
 	for _, id := range []string{"ac-1", "ac-2"} {
+		slot := false
 		for _, b := range badgeCardByID(t, proj, id).Badges {
 			if strings.HasPrefix(b.Source, "lint:") {
 				t.Errorf("%s carries lint badge %+v, want none (%s names no locus-bearing finding)", id, b, id)
 			}
+			if b.Source == "fold:empty-slot" && b.Target == id {
+				slot = true
+			}
+		}
+		// The positive half of that same partition, and R-RR2-3's own
+		// workbench-level witness: a FEATURE wall's AC card does wear
+		// the evidence-slot badge, anchored on its own card.
+		if !slot {
+			t.Errorf("%s.Badges = %+v, want a fold:empty-slot badge targeting %s (R-RR2-3: slot chips on every class)", id, badgeCardByID(t, proj, id).Badges, id)
 		}
 	}
 

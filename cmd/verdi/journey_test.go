@@ -1279,6 +1279,12 @@ func TestCmdJourney_OutcomeFloorBlockerFollowsTheScaffold(t *testing.T) {
 	if err != nil {
 		t.Fatalf("journey.Decode(stdout): %v\nstdout=%s", err, stdout3.String())
 	}
+	// The blocker is gone because it CLEARED, not because the third
+	// record came back empty: the same spec is still the projected
+	// target, class and path included.
+	if rec3.Target != rec1.Target {
+		t.Fatalf("rec3.Target = %+v, want the same projected spec as the first record %+v (the blocker must clear, never vanish with the projection)", rec3.Target, rec1.Target)
+	}
 	if b3 := journeyFindBlocker(rec3.Blockers.Eventual.Items, "outcome-floor/ac-1"); b3 != nil {
 		t.Fatalf("Blockers.Eventual.Items = %v, want NO outcome-floor/ac-1 blocker once the attestation is authored: %+v", journeyBlockerIDs(rec3.Blockers.Eventual.Items), b3)
 	}
