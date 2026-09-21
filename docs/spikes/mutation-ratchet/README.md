@@ -1,34 +1,72 @@
 # Mutation-ratchet spike — answer
 
 Resolves `spec/mutation-ratchet#oq-1` through `#oq-5` (spike story
-`spec/mutation-ratchet-spike`). Investigation ran in two worktrees per the
-lane brief: `verdi-wt/spike-mutation-ratchet` (this deliverable, branch
-`spike/mutation-ratchet`, base `5f60c76c`) for everything committed, and
-`verdi-wt/scratch-mutation-w1` (detached at `e963f4d0`, the wave-1 head)
-for every mutation-tool run. Evidence files referenced below live beside
-this README under `docs/spikes/mutation-ratchet/`.
+`spec/mutation-ratchet-spike`). Everything committed lives in
+`verdi-wt/spike-mutation-ratchet` (this deliverable, branch
+`spike/mutation-ratchet`, base `5f60c76c`). Every mutation-tool run
+happened at the wave-1 head `e963f4d0`, outside any deliverable worktree:
+the first round ran in the scratch worktree `verdi-wt/scratch-mutation-w1`
+(detached at `e963f4d0`, left clean and detached there), and **fix round 1
+ran exclusively in a throwaway local clone of it** — `git clone -q
+--no-hardlinks <scratch> /tmp/fix-mr && git -C /tmp/fix-mr checkout
+--detach e963f4d0` — because deviation 8 below records a candidate that
+mutates sources in place, and no such tool should run anywhere refs are
+shared. Evidence files referenced below live beside this README under
+`docs/spikes/mutation-ratchet/`.
+
+**FIX ROUND 1 (this revision).** An independent review found one Critical
+and eleven further defects in the first version of this document. The
+Critical one is now root-caused: gremlins v0.6.0 reports a FALSE 100% kill
+rate for every `package main` directory in this module, because it derives
+the wrong `go test` target. Full mechanism, instrumented trace, and
+counterfactual: `oq1-gremlins-mainpkg-defect.txt`. Every number, count and
+disposition below has been re-derived or restated accordingly; the
+per-finding map is in the lane's fix report. Where the first version was
+wrong, this one says so in place rather than quietly overwriting it.
 
 ## Recommendation (summary)
 
-- **oq-1**: `gremlins@v0.6.0` (`github.com/go-gremlins/gremlins/cmd/gremlins`).
-  It is the only one of the three named candidates that installs, runs,
-  and leaves the tree clean on Go 1.25 against this module. Both
-  go-mutesting forks and ooze are disqualified with witnesses (a runtime
-  panic for one; two independent, source-verified false-positive result
-  mechanisms for the other two).
-- **oq-2**: measured, real per-mutant tables exist for three of the nine
-  touched packages (store, readinessload, journey); the rest are
-  timing-bounded but not mutant-counted within this session — see that
-  section for why (sustained, independently-observed shared-machine load
-  in the 1-minute-load-average 40-80 range, an order of magnitude over
-  constraint 7's "under 4" target, for most of this spike's oq-2 window).
-  cmd/verdi's own coverage baseline alone exceeded Go's 10-minute default
-  test timeout and is reported NOT ANSWERED / infeasible as measured.
-- **oq-3**: YES, with a caveat — the deciding mutant is hand-seeded, not
-  organically produced by any candidate's operator catalog, because
-  `internal/readinessload` genuinely has no file-write statement anywhere
-  for such an operator to perturb. The seeded mutant survives at 1be75d01
-  and is killed at 410db101 by two independent tests.
+- **oq-1**: `gremlins@v0.6.0` (`github.com/go-gremlins/gremlins/cmd/gremlins`)
+  **fits only with two named, mandatory mitigations**, not as shipped. It
+  is the only one of the three named candidates that installs, runs, and
+  leaves the tree clean on Go 1.25 against this module; both go-mutesting
+  forks and ooze are disqualified with witnesses (a runtime panic for one;
+  two independent, source-verified false-positive result mechanisms for
+  the other two). But gremlins has the SAME class of defect as the two it
+  beat, in two places: (1) it computes the package under test from the Go
+  package-clause identifier, so every `package main` directory — here
+  `cmd/verdi`, `cmd/e2eharness`, `cmd/public-execution-contract-release` —
+  is tested by running `go test github.com/jyang234/verdi`, a path with no
+  package, which fails `[setup failed]` in ~80 ms and is scored KILLED;
+  (2) it expects exit code 2 to mean "mutant does not compile", which Go
+  1.25 never returns, so non-viable mutants are also scored KILLED. Both
+  produce 100.00% efficacy indistinguishable from a real perfect score.
+  The mitigations: exclude the three `package main` directories from the
+  mutation set (costing 9 of the 33 touched files), and make every
+  package's report prove itself with a canary mutant that MUST be reported
+  LIVED. co-2's pin is therefore `gremlins@v0.6.0` **plus** an explicit
+  operator set, **plus** that exclusion list, **plus** the canary — a
+  version string alone does not reproduce a baseline.
+- **oq-2**: the touched set is **33 non-test `.go` files across 10 package
+  directories** (one of the 33 is a deletion). Real per-mutant tables
+  exist for three of the ten (store, readinessload, journey), re-measured
+  in this round with the operator set and the file scoping both pinned
+  explicitly. `cmd/verdi` and `cmd/e2eharness` are not measurable by this
+  tool at all (the defect above). The remaining five are bounded by real
+  baseline-timing evidence but not mutant-counted, under shared-machine
+  load. `cmd/verdi`'s coverage pass, re-probed in this round with
+  `-timeout 30m`, **passes in 431.731 s** — the earlier 600.587 s FAIL was
+  Go's unconfigurable 10-minute default being blown by load, not a suite
+  that cannot finish.
+- **oq-3**: the *technique* can kill a write-path mutant when one exists —
+  proven with a hand-seeded fixture that survives at 1be75d01 and is
+  killed at 410db101. But the parent's ac-3 as written, a mutant surviving
+  the pre-410db101 test **organically**, is NOT reproduced, and cannot be:
+  `internal/readinessload` has no write statement for any catalogue
+  operator to perturb. The parent's own oq-3 rule ("If the technique
+  cannot reproduce the known witness the feature has no evidence it
+  addresses PA-017 and should not be built") therefore lands on the side
+  that needs owner adjudication, not on a YES. See that section.
 - **oq-4**: recommend the `testdata/mutation-baseline.json` idiom's
   *structure* (a list of `{file, line, column, operator, reason}` records,
   reusing ac-1's own canonical-report shape plus one field), but reject
@@ -38,9 +76,9 @@ this README under `docs/spikes/mutation-ratchet/`.
   requirement. Regeneration should merge (drop killed entries, keep
   reasons for still-surviving ones, fail closed on any new, unreasoned
   survivor) rather than overwrite.
-- **oq-5**: 0 of 30 touched files resolve to exactly one tier by the
-  intended mechanical chain; 0 resolve to several by that same chain; 30
-  of 30 (100%) resolve to none, because `spec/readiness-recovery` — the
+- **oq-5**: 0 of **33** touched files resolve to exactly one tier by the
+  intended mechanical chain; 0 resolve to several by that same chain; **33
+  of 33** (100%) resolve to none, because `spec/readiness-recovery` — the
   owning spec of every touched file — has no `verdi.bindings.yaml` entry
   at all yet. The manifest must be hand-authored.
 
@@ -57,41 +95,165 @@ inside the scratch worktree (detached at `e963f4d0`).
 github.com/go-gremlins/gremlins/cmd/gremlins@v0.6.0`), runs with no
 network after install, and leaves the tree byte-identical after every run
 in this spike (`git status --porcelain` / `git diff --stat` both empty,
-checked after every single invocation, dozens of times). Runtime on the
-two named packages, mutating every non-test file in each (oq-1's own step
-1 scopes to the whole of these two packages, unlike oq-2's touched-files
-filtering below — journey in particular has two files, `codec.go` and
-`record.go`, that are not part of the wave-1 diff and are excluded from
-oq-2's own journey row for exactly that reason): `internal/readinessload`
-87.6s (101 tested mutants: 96 killed, 5 lived, plus 14 more
+checked after every single invocation, dozens of times; it mutates only
+inside its own `wd-*` copies under `TMPDIR`). Runtime on the two named
+packages, mutating every non-test file in each (oq-1's own step 1 scopes
+to the whole of these two packages, unlike oq-2's touched-files scoping
+below — journey in particular has two files, `codec.go` and `record.go`,
+that are not part of the wave-1 diff and are excluded from oq-2's own
+journey row for exactly that reason): `internal/readinessload` 87.6s (115
+mutants found; 101 tested, of which 96 killed and 5 lived; plus 14
 found-but-not-covered; `Mutation testing completed in 1 minute 27
-seconds`), `internal/journey` 136s (267 tested mutants: 243 killed, 19
-lived, plus 5 not-covered; `2 minutes 16 seconds`).
-Neither package's tests exec a built `cmd/verdi` binary (`grep -rln
-"exec.Command\|TestMain"` finds only `git`-subprocess helpers in both), so
-the story's "handles a package whose tests exec a built binary without
-hanging" criterion is not exercised by the two mandated packages —
-recorded as a discrepancy below; oq-2's own sweep separately covers
-`cmd/e2eharness`, which IS in the Makefile's `CROSS_BINARY_PKGS` list, and
-gremlins handled it without hanging (see oq-2).
+seconds`), `internal/journey` 136s (**267 mutants found; 262 tested, of
+which 243 killed and 19 lived; plus 5 not-covered** — the first version of
+this document wrote "267 tested", which is the total, not the tested
+count; `2 minutes 16 seconds`). Both figures used gremlins' DEFAULT
+operator set; see "Operator catalogue" below, and oq-2 for the re-measured
+figures with the set pinned.
 
-A bonus finding worth carrying into the real feature's design: gremlins
-has a built-in `-D/--diff <ref>` flag that looks purpose-built for dc-2's
-"only files the change touched are mutated." This spike could not get it
-to select anything but `SKIPPED` for every single mutant in a package,
+### The criterion the story singles out: gremlins fails it (fix round 1)
+
+The story's oq-1 asks specifically whether the tool "handles a package
+whose tests exec a built binary without hanging"; the parent spec names
+that cluster `CROSS_BINARY_PKGS`. The first version of this document
+claimed oq-2's sweep had witnessed `cmd/e2eharness` passing that test.
+**That claim was false twice over, and the truth is worse than a gap.**
+
+First, `cmd/e2eharness`'s TESTS do not exec a built binary at all.
+`buildBinary` (`cmd/e2eharness/main.go:326`) is called only from
+`main.go:91`, `unprovenboard.go:146` and `specimportfixture.go:291`, all
+production paths driven by the harness binary; `grep -rn "func TestMain"
+cmd/e2eharness/` is empty. The genuine cross-binary witness in this module
+is a package like `internal/designapp`, whose `conformance_test.go:54`
+runs `exec.Command("go", "build", "-o", bin, ".../cmd/verdi")` from a
+test.
+
+Second, and decisively: **gremlins cannot measure `cmd/e2eharness` at
+all.** Reproducing the reviewer's run in a throwaway clone at `e963f4d0`:
+
+```
+$ /tmp/fix-mr-bin/gremlins unleash --timeout-coefficient 10 --workers 2 \
+    --output /tmp/fix-mr-e2eharness.json ./cmd/e2eharness
+Mutation testing completed in 2 seconds 906 milliseconds
+Killed: 354, Lived: 0, Not covered: 233
+Timed out: 0, Not viable: 0, Skipped: 0
+Test efficacy: 100.00%
+```
+
+354 mutants in 2.9 s, for a package whose own suite costs 13.747 s per
+run. Root cause, with the instrumented `go`-wrapper trace, gremlins' own
+source, and a like-for-like counterfactual, in
+`oq1-gremlins-mainpkg-defect.txt`; in one paragraph:
+`internal/engine/engine.go:160` derives the package under test by walking
+the file's directory upward for a component that ends with the file's Go
+**package-clause identifier**. For `cmd/e2eharness/*.go`, whose clause is
+`package main`, no component ends with "main", so the loop falls through
+to `pkg = mu.module.Name` and every per-mutant command becomes
+
+```
+CWD=.../gremlins-2094269129/wd-3585363107/cmd/e2eharness
+ARGV=test -timeout 5.37614084s -failfast github.com/jyang234/verdi
+RC=1
+# github.com/jyang234/verdi
+no required module provides package github.com/jyang234/verdi; to add it:
+	go get github.com/jyang234/verdi
+FAIL	github.com/jyang234/verdi [setup failed]
+```
+
+— a `[setup failed]` in ~80 ms that never compiles the code under test.
+`internal/engine/executor.go:257` maps `go test` exit code 1 to KILLED, so
+all 354 "kills" are that error. The same mapping expects exit code 2 to
+mean "does not compile" (NOT VIABLE); Go 1.25.5 returns 1 for build
+failures, test failures and missing packages alike (measured), so NOT
+VIABLE is unreachable on this toolchain and non-viable mutants are scored
+as kills too. Every gremlins report in this spike says "Not viable: 0";
+that zero is a property of the tool, not of the mutants.
+
+Same 11 mutants (the one touched file of that package), scoped with
+`-E`, `--workers 1`, as shipped versus with a wrapper that corrects only
+the final `go test` argument:
+
+| run | wall clock | per mutant | what actually ran |
+|---|---|---|---|
+| as shipped | 904 ms | 82 ms | 11/11 `[setup failed]` |
+| path corrected | 46.057 s | 4.2 s | 5 compile failures + 6 genuine test failures |
+
+Both print `Killed: 11, Lived: 0 ... Test efficacy: 100.00%`. Even the
+corrected run's honest kill rate is 6 of 11, not 11 of 11. The control —
+`internal/designapp`, the genuine cross-binary package, whose directory
+basename does equal its clause name — gets the correct target
+(`ARGV=test ... github.com/jyang234/verdi/internal/designapp`), real
+failures (`--- FAIL: TestGetBoard ... board_test.go:19`), and 21.457 s for
+11 mutants. So gremlins DOES handle a package whose tests build and exec
+`cmd/verdi` (it copies the whole module root per worker,
+`workdir.NewCachedDealer(workDir, mod.Root)`), and it does NOT handle a
+`package main` directory.
+
+Blast radius here: 3 of this module's 105 packages are `package main`
+(`cmd/verdi`, `cmd/e2eharness`, `cmd/public-execution-contract-release`);
+two of them hold 9 of the 33 touched files. No other package in the module
+has a clause name differing from its directory basename, so nothing else
+in the touched set is affected — but the general rule is "the directory
+path must end with the package-clause identifier", not "must not be
+`main`".
+
+**Re-ruling on oq-1 (this is the answer, replacing the first version's
+unqualified ANSWERED): gremlins v0.6.0 FITS WITH NAMED MITIGATIONS.** The
+mitigations, and why the alternatives were rejected, are in
+`oq1-gremlins-mainpkg-defect.txt` §6:
+
+1. **Exclude the three `package main` directories** from the mutation set.
+   This is the only correct-and-affordable configuration. It costs
+   coverage of 9 of the 33 touched files, `cmd/verdi`'s 8 among them.
+2. **Require a canary** per package: seed one mutant that must survive and
+   fail the gate unless the run reports it LIVED. Under this defect a
+   package reports 100.00% efficacy, so "efficacy == 100%" is the alarm,
+   not the goal — and ac-1's byte-identical report cannot be trusted
+   without it.
+3. Rejected: `-i/--integration` genuinely avoids the defect
+   (`executor.go:199-201,234-237` replace both cwd and package argument
+   with `rootDir` and `./...`), but runs the whole module suite per
+   mutant — ~40 hours for `cmd/e2eharness` alone at this module's 820 s
+   `make test`. Rejected: patching gremlins, which would break co-2's
+   "pinned like golangci-lint" property unless the fork is itself pinned
+   and published. There is no flag for the package argument; the complete
+   `unleash` flag list is quoted in that evidence file.
+
+### Operator catalogue (fix round 1)
+
+Every measurement in the first version of this document used gremlins'
+DEFAULT operator set, and did not say so. 6 of gremlins' 11 operators are
+off by default: `INVERT_ASSIGNMENTS`, `INVERT_BITWISE`, `INVERT_BWASSIGN`,
+`INVERT_LOGICAL`, `INVERT_LOOPCTRL`, `REMOVE_SELF_ASSIGNMENTS`. The 5
+default-on ones are `ARITHMETIC_BASE`, `CONDITIONALS_BOUNDARY`,
+`CONDITIONALS_NEGATION`, `INCREMENT_DECREMENT`, `INVERT_NEGATIVES`, and
+those are the only five appearing in any committed report. So the first
+version's yield was a partial-catalogue yield. A pinned version string
+alone therefore does NOT reproduce a baseline, which is exactly what ac-1
+(byte-identical report) and ac-2 (ratchet) require: **co-2's pin must name
+the tool version, the operator set, the exclusion list and the canary.**
+oq-2's re-measured table below states its operator set explicitly on the
+command line, and `run-oq2.sh` does the same.
+
+A finding worth carrying into the real feature's design: gremlins has a
+built-in `-D/--diff <ref>` flag that looks purpose-built for dc-2's "only
+files the change touched are mutated." This spike could not get it to
+select anything but `SKIPPED` for every single mutant in a package,
 including mutants on the one file that genuinely changed between
 `b810c302` and `e963f4d0` (`internal/store/paths.go`) — full transcript:
 `oq2-evidence/gremlins-diff-flag-attempt.log`
 (`gremlins unleash --diff b810c302 --output ... ./internal/store`, all
-101 mutants across all 9 of the package's files came back `SKIPPED`, 0
-killed/lived/not-covered). This spike did not have time to root-cause `--diff`
-inside gremlins' own source the way it did for ooze's defect (three
-disqualifying findings already existed; a fourth investigation into a
-*working* candidate's optional flag was lower priority under the timebox).
-The real feature should not assume `--diff` works as documented without
-its own, dedicated verification; oq-2's own touched-files scoping in this
-spike was done by post-filtering gremlins' per-file JSON report instead,
-which is unaffected by whatever `--diff` is doing.
+101 mutants across the 9 files gremlins' own report names came back
+`SKIPPED`, 0 killed/lived/not-covered). `--diff`'s root cause is not
+investigated: it is a working candidate's optional flag, and fix round 1
+found the flag that DOES work. The real feature should not assume
+`--diff` works as documented without its own, dedicated verification.
+**Touched-file scoping in this spike is now done with
+`-E/--exclude-files`, natively, before mutant generation** — see oq-2's
+dc-2 section and `oq2-evidence/exclude-files-scoping.txt`. (The first
+version of this document post-filtered gremlins' per-file JSON report
+instead and described that as honoring dc-2; it does not, and it is no
+longer what `run-oq2.sh` does.)
 
 **go-mutesting, zimmski fork (`github.com/zimmski/go-mutesting`,
 `v0.0.0-20210610104036-6d9217011a00`, the only version that resolves — no
@@ -116,6 +278,24 @@ indistinguishably from a real one. Full transcript and root-cause:
 `oq1-gomutesting-avito-defect.txt`. DISQUALIFIED: results are not
 trustworthy for this module's package layout (any package with more than
 one non-test file is at risk).
+
+It is also DISQUALIFIED a second, independent way, which the first
+version of this document failed to record: **this fork mutates sources in
+place in the working tree.** The first version recorded the clean-tree
+check for gremlins and, vacuously, for zimmski (which crashed before
+mutating anything), but never for the one fork that actually generated
+mutants; its evidence file attributed a dirty tree to an interrupted run.
+Witnessed directly in fix round 1, DURING a normal run in a throwaway
+clone:
+
+```
+$ git -C /tmp/fix-mr status --porcelain
+ M internal/readinessload/facts.go
+?? internal/readinessload/facts.go.tmp
+```
+
+The story's step 1 makes the clean-tree check a disqualifier in its own
+right, so this fork fails step 1 twice.
 
 **ooze v0.2.0 (`github.com/gtramontina/ooze`)** — not a standalone CLI at
 all; it is a library you `go get` and drive from your own
@@ -145,137 +325,235 @@ candidates are disqualified with a concrete, reproducible witness each.
 
 ## oq-2: yield and cost over the wave-1 diff
 
-Touched non-test `.go` files: `git diff --name-only b810c302 e963f4d0 --
-'*.go' | grep -v _test.go` returns 30 files across 9 package directories
-(`cmd/e2eharness`, `cmd/verdi`, `internal/journey`, `internal/mcpserve`,
-`internal/policyconflict`, `internal/readinessload`, `internal/readinesspilot`,
-`internal/readinesspilot/readinesstest`, `internal/store`,
-`internal/workbench`). gremlins mutates a whole package at a time (it has
-no single-file target); this spike's `run-oq2.sh` runs it once per
-touched package and then filters that package's own per-file JSON report
-down to just the touched files before tallying, so dc-2's "never mutates
-files the change did not touch" is honored by post-filtering, not by
-gremlins' `--diff` flag (see oq-1's finding on that flag).
+**The touched set is 33 non-test `.go` files across 10 package
+directories** (the first version of this document said 30 across 9, while
+its own per-package lists summed to 33 and named 10). Recomputed in fix
+round 1:
 
-**Load discipline actually followed (constraint 7):** `uptime` was polled
-before starting; it read 2.35 / 2.99 / 2.78 at various points early in
-this session (1-minute average under 4, as required) and the sweep was
-started at one of those windows. It did not stay quiet: over the course
-of running the sweep, `uptime`'s 1-minute figure was observed at 4.90,
-12.02, 15.53, 46.35, 62.05, 75.19, and 78.84 — other lanes' own gate/review
-work on this same machine (confirmed directly: `ps aux` during this
-window shows a concurrent `git clone .../spike-self-governance` review
-run and several `go test ./...` invocations from a different lane's PID
-tree, neither started nor controlled by this spike). Two full sweep
-attempts were made; the first (gremlins `--timeout-coefficient 10
---workers 2`) spent over 30 minutes on `internal/store` and
-`internal/mcpserve` alone before being interrupted; the second
-(`--timeout-coefficient 5 --workers 1`, chosen to reduce gremlins' own
-self-contention) is disclosed per-package below. Every number below
-carries the load at the time it was actually produced; none is
-extrapolated from a quiet-window measurement elsewhere.
+```
+$ git diff --name-only b810c302 e963f4d0 -- '*.go' | grep -v _test.go | wc -l
+33
+$ git diff --name-only b810c302 e963f4d0 -- '*.go' | grep -v _test.go \
+    | xargs -n1 dirname | sort -u | wc -l
+10
+$ git diff --name-status b810c302 e963f4d0 -- '*.go' | grep -v _test.go \
+    | awk '{print $1}' | sort | uniq -c
+   7 A
+   1 D
+  25 M
+```
 
-### Fully measured (mutant-level kill/survive/timeout counts)
+The 10 directories are `cmd/e2eharness`, `cmd/verdi`, `internal/journey`,
+`internal/mcpserve`, `internal/policyconflict`, `internal/readinessload`,
+`internal/readinesspilot`, `internal/readinesspilot/readinesstest`,
+`internal/store`, `internal/workbench`. One of the 33 is a DELETION
+(`cmd/verdi/readiness_snapshot.go`): it is in the denominator the story
+asks for and has no content at `e963f4d0` to mutate.
 
-Counts below are filtered to touched files only, per-mutant, from
-gremlins' own per-file JSON (`oq2-evidence/*.json`); "mutants" is
-killed+survived (gremlins' own convention: a not-covered mutant is found
-but never actually run against the test suite, so it is kept as its own
-column, not folded into "mutants"). Seconds is the WHOLE PACKAGE's wall
-clock (gremlins reports no per-file timing), so for any package with
-touched AND untouched files it is an upper bound on the touched-files-only
-cost, not an exact figure — flagged per row.
+**Load discipline (constraint 7), disclosed once for this whole section.**
+Every timing below was measured on a machine shared with other lanes of
+this build, and is reported as such. `uptime`'s 1-minute figure was
+observed across this spike's two sessions at 2.35, 2.78, 2.99, 4.90,
+7.21, 8.06, 8.47, 12.02, 13.19, 15.53, 29.53, 46.35, 62.05, 75.19 and
+78.84 — the high end being other lanes' own concurrent gate and review
+runs, confirmed at the time with `ps aux` (a concurrent
+`git clone …/spike-self-governance` review run and several `go test
+./...` invocations from a different lane's PID tree, neither started nor
+controlled by this spike). Configuration B's table carries a before →
+after reading on every row; configuration A's does not, and is marked
+accordingly. No figure anywhere in this section is extrapolated from a
+quiet-window measurement taken elsewhere, and the measuring command is
+left re-runnable as `run-oq2.sh`.
 
-| package | touched files | mutants | killed | survived | not covered | timed out | seconds (package-level; see caveat) | load (1-min) at run |
+### How files are scoped: natively, with `-E` (dc-2)
+
+The first version said dc-2's "never mutates files the change did not
+touch" was "honored by post-filtering," and that gremlins "has no
+single-file target". **Both are withdrawn.** Post-filtering mutates every
+file in the package and drops rows from the report afterwards — for
+`internal/store` it generated 101 mutants and kept 16 — and dc-2
+constrains what RUNS, not what is reported. gremlins does have a
+file-scoping mechanism, `-E/--exclude-files`, which the first version
+never tried; `internal/engine/engine.go`'s `WalkDir` consults the
+exclusion rules BEFORE `runOnFile`, so an excluded file is never parsed
+and never produces a mutant. Proof, semantics, and the three limitations
+that matter (the regexps match paths relative to the target package dir;
+it is an exclude-list so the keep-set is expressed by enumerating the
+others; and it does NOT scope gremlins' whole-package coverage pass):
+`oq2-evidence/exclude-files-scoping.txt`. `run-oq2.sh` now builds that
+exclusion list per package from `git diff --name-only` and asserts
+afterwards that the report names no untouched file.
+
+**Ruling for dc-2: "only touched files are mutated" is achievable
+natively.** Not with `-D/--diff`, which returned `SKIPPED` for every
+mutant including touched ones (see oq-1), but with `-E`.
+
+### Configuration A — the first version's figures (gremlins defaults, whole package, post-filtered)
+
+Settings: gremlins' DEFAULT operator set (5 of 11 — see "Operator
+catalogue" in oq-1); whole-package runs; counts post-filtered to the
+touched files; `--timeout-coefficient 10 --workers 2` for store, oq-1's
+defaults for the other two. Counts are per-mutant from
+`oq2-evidence/gremlins-*.json`; "mutants" is killed+survived, with
+not-covered kept as its own column.
+
+| package | touched files | mutants | killed | survived | not covered | timed out | seconds (whole package) | load (1-min) before → after |
 |---|---|---|---|---|---|---|---|---|
-| internal/store | paths.go (1 of 9 files in the package) | 16 | 16 | 0 | 0 | 0 | 29 (whole package; touched file is 16 of the package's 101 total mutants, ~16%, so 29s meaningfully overstates paths.go's own cost) | ~3–12 (second, tuned attempt; see below for the first) |
-| internal/readinessload | conflict.go, doc.go, facts.go, load.go, options.go (all 5 non-test files in the package) | 101 | 96 | 5 | 14 | 0 | 88 (whole package = touched-files cost exactly; nothing to filter) | load unrecorded (run predates this spike's load-logging discipline; disclosed as a gap, not hidden) |
-| internal/journey | derive.go, eventual.go, facts.go, port.go, project.go, reason.go (6 of 8 files in the package) | 169 | 155 | 14 | 5 | 0 | 136 (whole package; the touched files are 169 of the package's 262 tested mutants, ~65%, so 136s overstates the touched-only cost by roughly a third — the other 93 tested mutants belong to `codec.go`/`record.go`, neither touched by this diff) | load unrecorded, same caveat |
-| **measured total** | | **286** | **267** | **19** | **19** | **0** | **253** (upper bound; see per-row caveats) | |
+| internal/store | paths.go (1 of **10** non-test files) | 16 | 16 | 0 | 0 | 0 | 29 | ~3 → unrecorded |
+| internal/readinessload | conflict.go, doc.go, facts.go, load.go, options.go (all 5) | 101 | 96 | 5 | 14 | 0 | 88 | **unrecorded → unrecorded** |
+| internal/journey | derive.go, eventual.go, facts.go, port.go, project.go, reason.go (6 of 8) | 169 | 155 | 14 | 5 | 0 | 136 | **unrecorded → unrecorded** |
+| **total** | | **286** | **267** | **19** | **19** | **0** | **253** | |
 
-readinessload's touched-file set is its whole package's non-test file
-list (nothing to filter out), so its row needs no filtering — the
-whole-package run already equals the touched-files run, both in mutant
-counts and in wall clock. store's and journey's do not: both packages
-have untouched sibling files that gremlins mutated anyway (because it
-mutates a whole package at a time), so both rows' mutant/kill/survive/
-not-covered counts are correctly filtered down to the touched files only,
-but both rows' *seconds* column still reflects the whole package's run
-(gremlins gives no finer-grained timing) and is therefore an overstatement
-of what a truly file-scoped run would cost — see each row's own note.
+Two of those three rows carry no load reading at all, which constraint 7
+does not admit; and the rows come from two different tool configurations,
+which the first version's table never stated. The counts reproduce
+exactly (an independent reviewer re-tallied every row and the total from
+the committed JSON). **The seconds column does not.** Re-running the
+lane's own script at its own defaults, an independent reviewer measured
+`internal/journey` at **397 s** against this table's 136 s — identical
+mutant counts, 2.9x the wall clock, at a 1-minute load that walked from
+3.21 to 66.4 during the sweep. Both figures are real; neither is the
+number a budget can be set from. (The first version's "1 of 9 files" for
+store was gremlins' own report file count, not the package's file count:
+`internal/store` has 10 non-test `.go` files.)
 
-internal/store's own before/after: the FIRST attempt, at gremlins'
-default timeout calibration under a load average of ~12–17, produced 87
-of 101 mutants `TIMED OUT` and 0 killed/lived — a result this spike does
-NOT report as real survivor data, because it is a timing artifact, not a
-finding about the code (see `oq2-evidence/store-run1-spurious-timeouts.log`).
-Raising `--timeout-coefficient` to 10 and lowering `--workers` to 2
-(reducing gremlins' own self-contention) under a calmer moment (load
-~3) brought it down to 6 residual timeouts out of 101 — still nonzero
-under any settings tried, which is itself the finding: **a per-wave gate
-step that hard-fails on any survivor cannot safely run gremlins at
-default timeout settings on a contended CI runner; the real feature's
-co-3 budget decision needs its own timeout-coefficient tuned against real
-CI hardware, not this spike's laptop-under-load numbers.**
+### Configuration B — fix round 1 (operator set pinned, files scoped natively)
 
-### Bounded by baseline timing, not mutant-counted within this session
+Settings, stated once for the whole table and printed by the script that
+produced it: `gremlins@v0.6.0`; **all eleven operators explicitly
+enabled**; `-E` exclusion of every untouched non-test file in each
+package, so the mutants ARE the touched files' mutants and the seconds
+are the touched-files cost, not a whole-package upper bound;
+`--timeout-coefficient 10 --workers 2`; 10 cores. Verbatim sweep:
+`oq2-evidence/run-oq2-operators-all.log`.
 
-The remaining touched packages' own full-suite baseline pass (the
-prerequisite gremlins runs before it can generate a single mutant) was
-measured directly (`go test -cover` timing, captured incidentally from
-this spike's earlier whole-module `--diff` dry-run attempt before that
-attempt aborted on two unrelated pre-existing failures elsewhere in the
-tree, one of which is itself a load-sensitivity finding worth carrying
-forward — see "Deviations" below):
+| package | touched files | mutants | killed | survived | not covered | timed out | seconds | load (1-min) before → after |
+|---|---|---|---|---|---|---|---|---|
+| internal/journey | 6 of 8 (codec.go, record.go excluded) | 220 | 192 | 28 | 12 | 2 | 587 | 8.47 → 13.19 |
+| internal/readinessload | all 5 (nothing excluded) | 133 | 111 | 22 | 21 | 0 | 454 | 13.19 → 8.06 |
+| internal/store | paths.go (9 excluded) | 17 | 17 | 0 | 0 | 0 | 7 | 8.06 → 7.90 |
+| **total** | **12 of 33 touched files** | **370** | **320** | **50** | **33** | **2** | **1048** | sweep wall clock 1050 s |
+
+What changes, and why it matters to the spec:
+
+- **Survivors nearly triple, 19 → 50.** The six default-off operators
+  find 31 more surviving mutants in the same three packages. ac-2's
+  ratchet baseline would have been seeded from a partial catalogue.
+- **Native scoping is cheaper where it bites.** `internal/store` falls
+  from 29 s to 7 s: 17 mutants generated instead of 101 generated-then-
+  discarded. Where the touched set IS the package (readinessload), there
+  is nothing to save.
+- **Two TIMED OUT appear in journey** where configuration A had none, at
+  the same `--timeout-coefficient 10`. Together with store's first,
+  untuned attempt (below), that is three independent observations that
+  gremlins' timeout calibration is load-sensitive — on a contended
+  runner a timeout is indistinguishable from a survivor, which a
+  hard-failing gate cannot tolerate.
+- **The seconds are still load-bearing, not settled.** readinessload
+  reads 454 s here against configuration A's 88 s for 1.32x the mutants.
+  That spread is the machine, not the tool.
+
+### Packages the pinned tool cannot measure at all
+
+`cmd/verdi` (8 touched files) and `cmd/e2eharness` (1) are `package main`
+directories, which gremlins v0.6.0 scores 100% KILLED without compiling
+or running anything — root cause, trace and counterfactual in
+`oq1-gremlins-mainpkg-defect.txt`, summarised in oq-1. **9 of the 33
+touched files are therefore out of reach of the recommended tool as
+pinned**, and no measurement of them is reported here. `run-oq2.sh`
+refuses them by default and labels the row `DEFECT`.
+
+### Packages not reached: bounded by baseline timing only
+
+The remaining five touched packages' own full-suite baseline pass — the
+prerequisite gremlins runs before it can generate a single mutant — was
+measured directly (`go test -cover` timing, captured from this spike's
+earlier whole-module dry-run attempt before that attempt aborted on two
+unrelated pre-existing failures elsewhere in the tree; see "Deviations"):
 
 | package | touched files | baseline pass (coverage-gather only) | mutant-level counts |
 |---|---|---|---|
-| cmd/e2eharness | readinessallproven.go | 30.9s | not completed this session |
 | internal/mcpserve | backend.go, tool_get_document.go | 72.5s | not completed this session (two attempts each ran >15 min without finishing under load averages of 40–80; interrupted rather than let run further) |
 | internal/policyconflict | cachejudge.go, service.go | 56.7s | not completed this session |
 | internal/readinesspilot | derive.go | 0.45s | not completed this session (package itself is tiny; not reached before this spike's time budget ran out) |
-| internal/readinesspilot/readinesstest | readinesstest.go | (not separately measured; package is 72 lines) | not completed this session |
-| internal/workbench | boarddocument.go, boardspec.go, branchboard.go, handler.go, readiness.go, readinessrender.go | 269.8s (4.5 min, just for ONE full-suite pass) | not completed this session |
+| internal/readinesspilot/readinesstest | readinesstest.go | **0.240s** (`ok … readinesstest 0.240s`, `whole-module-dryrun.log:106` — the first version wrote "not separately measured" although the log it cited has it) | not completed this session |
+| internal/workbench | boarddocument.go, boardspec.go, branchboard.go, handler.go, readiness.go, readinessrender.go | 269.8s (4.5 min for ONE full-suite pass) | not completed this session |
 
-**cmd/verdi (conflictgate.go, context.go, context_conflict.go,
-context_constitution.go, mcp.go, readiness_snapshot.go, serve.go,
-specdoc.go): NOT ANSWERED / infeasible as measured.** Its own
-coverage-gathering baseline pass — the step *before* gremlins can generate
-a single mutant — ran for 600.587s and was killed by Go's own default
-10-minute per-package test timeout (`FAIL github.com/jyang234/verdi/cmd/verdi
-600.587s`), under the same shared-load conditions as everything else in
-this table. This is not a mutation-tool finding; it is evidence that
-`cmd/verdi`'s own test suite is already at (or past) the edge of what a
-single `go test` invocation tolerates on contended hardware, independent
-of mutation testing. Full transcript: `oq2-evidence/whole-module-dryrun.log`
-(reduced; see the file's own header for how).
+### cmd/verdi's timeout: probed, not assumed
 
-**Ratio to the gate baseline (lane specifics, PR #337 @ 01211bd8: test
-820s, spec-align 176s, e2e 776s, total 1820s):** using only the fully
-measured total (253s across store+readinessload+journey — a strict
-under-count, since it excludes 6 of 9 touched packages and all of
-cmd/verdi), the ratio is 253/1820 ≈ 0.14 (14%). This ratio is **not**
-usable as a ceiling estimate for the real feature: it excludes exactly
-the packages (workbench, cmd/verdi) that this spike's own baseline timing
-shows are the expensive ones. A defensible upper bound, adding the
-baseline-only packages' own coverage-gather time (which is a lower bound
-on their real mutation cost, since mutation testing costs at least one
-baseline pass plus N mutant re-runs) — 253 + 30.9 + 72.5 + 56.7 + 0.45 +
-269.8 ≈ 683s, excluding cmd/verdi entirely — gives a ratio of
-683/1820 ≈ 0.38 (38%), still excluding cmd/verdi, still a per-touched-package
-cost that must be paid on EVERY wave whose diff touches that package, not
-a one-time cost.
+The first version reported `cmd/verdi` infeasible on the strength of a
+600.587 s FAIL. 600 s is Go's DEFAULT per-package test timeout, and
+gremlins passes **no `-timeout` flag at all** on its coverage pass — the
+instrumented argv is `test -cover -coverprofile <f> ./<pkg>/...`, quoted
+verbatim in `oq1-gremlins-mainpkg-defect.txt`. `gremlins unleash --help`
+exposes `--timeout-coefficient`, but that scales only the PER-MUTANT
+timeout (`executor.go:227`); there is no knob for the coverage pass.
 
-**Answered, with caveat.** Three packages have real, decisive mutant
-tables proving the technique is fast and effective when it runs (store:
-6% residual-timeout rate after tuning; readinessload/journey: 0 timeouts,
-sensible kill rates). The other six packages, including the two most
-expensive ones this module has (workbench, cmd/verdi), are bounded by real
-baseline-timing evidence but not mutant-counted, because this spike's
-session ran out of tolerable wall-clock budget under sustained,
-independently-confirmed heavy shared-machine load — recorded here as
-NOT ANSWERED for those packages' mutant counts specifically, per
-constraint 8, rather than guessed or extrapolated.
+So the probe was run once, directly:
+
+```
+$ go test -timeout 30m -cover -coverprofile /tmp/fix-mr-cmdverdi.cov ./cmd/verdi/...
+ok  	github.com/jyang234/verdi/cmd/verdi	431.731s	coverage: 61.3% of statements
+exit status: 0            uptime before 29.53  after 3.96
+```
+
+**cmd/verdi's suite is not out of reach: it passes in 431.731 s.** The
+earlier FAIL was the unconfigurable 10-minute wall being blown under
+load, at 1.39x of headroom — reproducible whenever the machine is ~40%
+busier. But that is a secondary risk: the binding blocker for `cmd/verdi`
+is the `package main` defect, and if it were fixed, gremlins' per-mutant
+timeout at this spike's settings would be `2s + 431.731s × 10` ≈ 72
+minutes per mutant, each run paying up to one full suite. Full reasoning:
+`oq2-evidence/cmd-verdi-timeout-probe.log`.
+
+### Spurious timeouts under load (unchanged finding, restated)
+
+`internal/store`'s FIRST attempt, at gremlins' default timeout
+calibration under a load average of ~12–17, produced 87 of 101 mutants
+`TIMED OUT` and 0 killed/lived — a timing artifact, not a finding about
+the code (`oq2-evidence/store-run1-spurious-timeouts.log`). Raising
+`--timeout-coefficient` to 10 and lowering `--workers` to 2 brought it to
+6 residual timeouts out of 101; configuration B's native scoping brought
+store to 0 of 17, but journey to 2 of 234. Still nonzero under every
+setting tried, which is the finding: **a per-wave gate step that
+hard-fails on any survivor cannot run gremlins at default timeout
+settings on a contended runner; co-3's budget needs its own coefficient
+tuned against real CI hardware, not this spike's laptop-under-load
+numbers.**
+
+### Ratio to the gate baseline, as a range with an honest lower bound
+
+Gate baseline (lane specifics, PR #337 @ 01211bd8): test 820 s,
+spec-align 176 s, e2e 776 s, **total 1820 s**.
+
+| basis | seconds | ratio | what it covers |
+|---|---|---|---|
+| configuration A total | 253 | **14%** | 3 of 10 packages, default operators, one row's load unrecorded, journey's 136 s not reproducible |
+| configuration A with the reviewer's journey re-run (397 s) substituted | 514 | **28%** | same coverage, same counts, a different machine-hour |
+| **configuration B total (this round's best evidence)** | **1048** | **58%** | 3 of 10 packages, 12 of 33 files, full operator catalogue, native file scoping, load recorded on every row |
+
+**58% is the honest LOWER bound**, and it is a lower bound three times
+over: it excludes 7 of the 10 touched packages, it excludes the 9 touched
+files the tool cannot measure at all, and it is a per-wave cost paid on
+every wave whose diff touches those packages, not once. The first
+version's "14%–38%" range was optimistic, not conservative: 14% came from
+a partial operator catalogue over whole-package runs with two unrecorded
+loads, and 38% added only the missing packages' coverage-gather time,
+which is a floor on their mutation cost, not an estimate of it.
+
+**There is no defensible UPPER bound from this spike's evidence.** The
+two largest touched packages by suite cost (`internal/workbench` at
+269.8 s per pass, `cmd/verdi` at 431.731 s) were never mutated, and
+gremlins' cost model is one baseline pass plus up to one full suite per
+mutant.
+
+**Disposition: ANSWERED-WITH-CAVEAT.** Three packages have real, decisive
+mutant tables under a fully stated configuration. Two are unmeasurable by
+the pinned tool. Five are bounded by real baseline-timing evidence but
+not mutant-counted, because this spike's session ran out of tolerable
+wall-clock budget under sustained, independently-confirmed shared-machine
+load — recorded as NOT ANSWERED for those packages' mutant counts
+specifically, per constraint 8, rather than guessed or extrapolated.
 
 ## oq-3: does the technique reach the PA-017 witness
 
@@ -321,16 +599,56 @@ below).
   at all — it checks judge-call counts — so its continued pass is
   expected, not a gap.)
 
-**Answered, with caveat.** YES: the technique reaches PA-017's exact
-witness class, demonstrated with the seeded mutant quoted above. Caveat:
-this is necessarily a hand-seeded fixture, not an organically
-tool-discovered mutant, and that is not a shortfall specific to this
-spike's three candidates — it follows from the target file's own content
-containing no exploitable write statement for any catalog operator to
-perturb. The real feature's ac-3 should be written expecting a hand-seeded
-regression fixture (which matches its own wording, "a committed
-regression fixture," already) rather than a promise that mutation testing
-will spontaneously rediscover this exact defect class on unrelated code.
+### Restated for fix round 1: what is proven, and which side of the parent's own rule this lands on
+
+The first version of this section answered "YES: the technique reaches
+PA-017's exact witness class." That overstates the proof and skips a
+decision the parent spec reserves. Restated precisely:
+
+**Proven.** (a) The pre-410db101 `assertNoPersistence` misses an
+arbitrary-file write: it greps written file *names* for the substring
+"readiness". (b) The fixed test catches it, with an exact before/after
+file-tree diff. (c) Therefore the *technique* — a committed fixture that
+performs an unexpected write — can kill a write-path mutant **when one
+exists**. That is a property of the TESTS, demonstrated with a
+hand-written statement insertion.
+
+**Not proven, and not provable here.** The parent's ac-3 as written asks
+for a mutant that survives the pre-410db101 test **organically** — one the
+pinned tool generates. That is not reproduced. gremlins' catalogue is 11
+expression/statement perturbations (see "Operator catalogue" above); none
+synthesises an I/O call, and `internal/readinessload` contains no write
+statement anywhere at either commit for one to perturb (`grep -niE
+"os\.(WriteFile|Create|Mkdir|OpenFile|Remove)|ioutil\."`, zero matches).
+So "the technique reaches the witness" is the wrong verb: the technique
+*detects* the witness class once a fixture supplies it; the *tool* cannot
+*produce* it here.
+
+**The rule this triggers.** Parent §oq-3: "If the technique cannot
+reproduce the known witness the feature has no evidence it addresses
+PA-017 and should not be built." The Spec seed makes oq-3 binary —
+"confirms ac-3 verbatim or closes the feature as not-doing." The evidence
+above does NOT confirm ac-3 verbatim. The first version took a silent
+third path (keep the feature, rewrite ac-3's expectation) without naming
+it as a departure or citing the rule it departed from. Named now:
+
+- The "not-doing" branch is live and **needs owner adjudication.** This
+  spike does not have the authority to take it or to refuse it.
+- If the owner keeps the feature, ac-3 must be rewritten to say what the
+  fixture actually tests — that the persistence assertion is strong enough
+  to catch an unexpected write — and must NOT promise that mutation
+  testing rediscovers PA-017's defect class on unrelated code. The
+  fixture would then be a regression test for the *test*, valuable but a
+  different deliverable from a mutation ratchet.
+- Weighing on that decision, from oq-1: the pinned tool also cannot
+  measure `cmd/verdi` or `cmd/e2eharness` at all, and scores non-viable
+  mutants as kills everywhere. PA-017's own witness lived in
+  `internal/readinessload`, which the tool does handle.
+
+**Disposition: ANSWERED-WITH-CAVEAT on the narrow question (the fixture
+kills the seeded mutant, evidence above), NOT ANSWERED on ac-3 as
+written** — recorded as a spec-seed decision for the owner, not as a
+softened yes.
 
 ## oq-4: baseline record shape
 
@@ -404,21 +722,35 @@ package → `verdi.bindings.yaml` producer → the producer's bound
 acceptance criteria → `dc-6` tier of the criteria's owning spec. There is
 exactly one real `verdi.bindings.yaml` in this repository (store root;
 2235 lines, one `spec:`/`bindings:` block per spec that has had evidence
-authored so far). It has zero mentions of "readiness" anywhere — not a
-package name, not a spec reference, not even in a comment — and zero
-mentions of `journey`, `policyconflict`, `mcpserve`, or `e2eharness` as an
-owning spec either. `workbench` appears 62 times, but every one of those
-62 hits is a comment justifying evidence for a DIFFERENT, pre-existing
-spec (workbench-directory, workbench-legibility, draft-boards, and
-others) that also happens to touch `internal/workbench` — none of them is
-`spec/readiness-recovery`.
+authored so far).
 
-**Counts, per the story's own bins, over the 30 touched files:**
+The decisive grep, re-run in fix round 1 in a throwaway clone at
+`e963f4d0`: `grep -in "readiness" verdi.bindings.yaml | wc -l` → **0**.
+Not a package name, not a spec reference, not a comment.
+
+Two other greps quoted in the first version of this section, and in
+`oq5-tier-mapping-evidence.txt`, **did not reproduce**; both are corrected
+in place there with fresh transcripts. `grep -in
+"journey\|policyconflict\|mcpserve\|e2eharness" verdi.bindings.yaml` was
+recorded as zero matches; it prints **9** lines (49, 90, 211, 404, 442,
+645, 799, 1876, 1938), every one a `#` comment inside another spec's
+block. `grep -in "workbench" … | wc -l` was recorded as 62; it prints
+**56** (57 raw occurrences). Worse for the first version's reasoning, 8 of
+those 56 are NOT comments but real bound criteria —
+`spec/workbench-directory#ac-2..ac-6` and
+`spec/workbench-legibility#ac-1..ac-3`. They belong to pre-existing specs
+that also touch `internal/workbench`; none belongs to
+`spec/readiness-recovery`. The ruling is unchanged and now rests on the
+`readiness` zero, which does reproduce — but the hazard below is sharper
+than first written, because a naive by-package-name script would find real
+criteria references, not just prose, and believe it had succeeded.
+
+**Counts, per the story's own bins, over the 33 touched files:**
 - Resolve to exactly one tier via the correct chain: **0**.
 - Resolve to several tiers via the correct chain: **0** (nothing to be
   ambiguous between — step 2 of the chain is already empty for every
   file).
-- Resolve to none: **30 of 30 (100%)** — the chain breaks at
+- Resolve to none: **33 of 33 (100%)** — the chain breaks at
   "package → producer," before `dc-6` is ever consulted, because
   `spec/readiness-recovery` (the owning spec of every touched file) has
   authored no `verdi.bindings.yaml` entry at all as of this diff.
@@ -443,25 +775,34 @@ does not change the count above (the count is about `verdi.bindings.yaml`,
 which is identical prose at both points — no bindings block for this spec
 exists at either commit).
 
-**Answered.** 0 / 0 / 30. The manifest must be hand-authored; ac-4's
+**Answered.** 0 / 0 / 33. The manifest must be hand-authored; ac-4's
 "names the tier" is a citation a human writes, not a derivation any
 script in this repository could currently produce.
 
 ## Deviations from the investigation plan
 
-1. **oq-1's "handles a package whose tests exec a built binary" criterion**
-   is not exercised by the two mandated packages (`internal/readinessload`,
-   `internal/journey`) — neither execs a built `cmd/verdi` binary (both
-   only shell out to `git`). Substitution: relied on oq-2's mandatory
-   coverage of `cmd/e2eharness` (a real `CROSS_BINARY_PKGS` member) for
-   this specific criterion instead of adding a third package to oq-1's own
-   scope.
-2. **oq-2's per-mutant seconds could not be fully measured for 6 of 9
-   touched packages** (including the two most expensive, `cmd/verdi` and
-   `internal/workbench`) within this session's practical wall-clock
-   budget, because of sustained, independently-confirmed heavy
+1. **oq-1's "handles a package whose tests exec a built binary" criterion
+   is now measured, and gremlins FAILS it for `package main` directories.**
+   (Superseded, fix round 1. The first version of this deviation said the
+   criterion was "not exercised by the two mandated packages" and leaned on
+   oq-2's supposed coverage of `cmd/e2eharness`; that coverage did not
+   exist, and when run, it is a false 100%-kill result.) What is measured
+   now: `cmd/e2eharness` — whose own tests do NOT in fact exec a built
+   binary — is unmeasurable by gremlins because it is `package main`;
+   `internal/designapp`, whose tests DO `go build ./cmd/verdi` and exec it,
+   is measured and gremlins handles it correctly. Both in
+   `oq1-gremlins-mainpkg-defect.txt`. Neither mandated package
+   (`internal/readinessload`, `internal/journey`) execs a built binary, so
+   the substitution the story's step 1 needed was a third package; the
+   third package is `internal/designapp`, not `cmd/e2eharness`.
+2. **oq-2's per-mutant seconds could not be fully measured for 7 of 10
+   touched packages** — 2 of those 7 (`cmd/verdi`, `cmd/e2eharness`) are
+   not measurable by the pinned tool at all (deviation 1), and 5
+   (including the most expensive one still reachable,
+   `internal/workbench`) were not reached within this session's practical
+   wall-clock budget, because of sustained, independently-confirmed heavy
    shared-machine load (other lanes' own concurrent gate/review runs; see
-   the oq-2 section's load table). Substitution: those packages are
+   the oq-2 section's load readings). Substitution: those packages are
    reported with real baseline-timing evidence (a genuine lower bound on
    their mutation cost) and an explicit NOT ANSWERED for their mutant-level
    counts, rather than an extrapolated or invented number. That baseline
@@ -480,14 +821,15 @@ script in this repository could currently produce.
    was asked to measure.
 3. **gremlins' `--diff` flag does not select what its own `--help` text
    describes** — every mutant in every test of it, including mutants on a
-   genuinely touched file, came back `SKIPPED`. Substitution: touched-file
-   scoping in this spike's own `run-oq2.sh` is done by post-filtering
-   gremlins' per-file JSON report to the touched-file set computed
-   directly from `git diff --name-only`, not by `--diff`. Root cause not
-   investigated (three disqualifying findings already existed among the
-   candidates; this is a *working* candidate's optional flag, lower
-   priority under the timebox) — recorded as a finding for the real
-   feature to verify independently, not silently worked around.
+   genuinely touched file, came back `SKIPPED`. Substitution (revised, fix
+   round 1): touched-file scoping is now done with gremlins' own
+   `-E/--exclude-files`, which works, is applied before mutant generation,
+   and therefore satisfies dc-2 natively. The first version used a
+   post-filter over whole-package runs and wrongly described that as
+   honoring dc-2; see the oq-2 section. `--diff`'s root cause is still not
+   investigated (it is a working candidate's optional flag, and `-E` makes
+   it unnecessary) — recorded as a finding for the real feature to verify
+   independently if it wants `--diff`, not silently worked around.
 4. **`.verdi/data/gate/timings.tsv`** (the file the story's step 2 names)
    does not exist at either worktree's base. Substitution: used the exact
    numbers the lane brief supplies directly (PR #337 @ 01211bd8: test
@@ -513,9 +855,41 @@ script in this repository could currently produce.
    with `git checkout -- . && git clean -fd` and reconfirmed clean and
    detached at `e963f4d0` before any further tool ran, per the brief's own
    scratch-worktree discipline.
+8. **The avito go-mutesting fork mutates sources IN PLACE in the working
+   tree, which is a step-1 disqualifier in its own right** (fix round 1).
+   The first version recorded the clean-tree check for gremlins and,
+   vacuously, for zimmski (which crashed before mutating anything), but
+   never for the one fork that actually generated mutants; its evidence
+   file said the fork "DID restore the working tree correctly on a normal
+   exit," attributing the dirty tree to an interrupted run. Witnessed
+   directly this round, DURING a normal run in a throwaway clone:
+
+   ```
+   $ git -C /tmp/fix-mr status --porcelain
+    M internal/readinessload/facts.go
+   ?? internal/readinessload/facts.go.tmp
+   ```
+
+   So the fork dirties the tree for the duration of every mutant, not only
+   when interrupted. Step 1 of the story's plan makes the clean-tree check
+   a disqualifier on its own; this fork fails it independently of the
+   compile-failure-as-kill defect already recorded against it.
+9. **This fix round ran every mutation tool in a throwaway `/tmp` clone of
+   the scratch worktree, not in the scratch worktree itself** (`git clone
+   -q --no-hardlinks <scratch> /tmp/fix-mr && git -C /tmp/fix-mr checkout
+   --detach e963f4d0`). Deviation 8 is why that matters: a tool that
+   mutates in place cannot be allowed near a worktree whose refs are
+   shared. `run-oq2.sh` now refuses a path whose `.git` is a file (a
+   worktree) rather than a directory (a clone).
 
 ## Evidence index
 
+- `oq1-gremlins-mainpkg-defect.txt` — **fix round 1, the Critical
+  finding's root cause**: the instrumented `go`-wrapper trace, gremlins'
+  own `pkgName`/`getTestFailedStatus` source, the measured Go 1.25 exit
+  codes, the like-for-like counterfactual (same 11 mutants, 904 ms broken
+  vs 46.057 s corrected), the `internal/designapp` control, the blast
+  radius, the complete `unleash` flag list, and the mitigations tried.
 - `oq1-tool-installs.txt` — exact install commands, exit statuses, version
   output, for all four tool/fork candidates.
 - `oq1-gomutesting-zimmski-panic.txt` — complete, unedited crash trace.
@@ -524,34 +898,39 @@ script in this repository could currently produce.
   mechanism.
 - `oq1-ooze-defect.txt` — installed-module source excerpts proving the
   vacuous-pass mechanism, plus the timing transcript that first exposed it.
-- `oq2-evidence/` — retained raw JSON/log output backing the oq-2 tables:
-  per-package gremlins JSON reports (`gremlins-*.json`), the whole-module
-  dry-run log this spike's baseline timings and the `cmd/verdi` timeout
-  witness are drawn from (`whole-module-dryrun.log`), the spurious-timeout
-  log from store's first, untuned attempt
-  (`store-run1-spurious-timeouts.log`), and the `--diff` flag transcript
-  referenced in oq-1 (`gremlins-diff-flag-attempt.log`).
+- `oq2-evidence/` — retained raw JSON/log output backing the oq-2 tables.
+  From the first version: per-package gremlins JSON reports for
+  configuration A (`gremlins-*.json`), the whole-module dry-run log
+  (`whole-module-dryrun.log`), the spurious-timeout log from store's
+  first, untuned attempt (`store-run1-spurious-timeouts.log`), and the
+  `--diff` flag transcript referenced in oq-1
+  (`gremlins-diff-flag-attempt.log`). Added in fix round 1:
+  `exclude-files-scoping.txt` (dc-2's native file scoping, proven, with
+  the `-E` semantics read out of gremlins' source),
+  `run-oq2-operators-all.log` (the configuration-B sweep, verbatim, the
+  source of every configuration-B figure), and
+  `cmd-verdi-timeout-probe.log` (the `-timeout 30m` cover probe).
 - `oq3-reach-evidence.txt` — full before/after commands, the exact seeded
   mutant, and both test-run transcripts (survives / killed).
 - `oq4-baseline-drafts/` — both idioms, filled with real survivor data,
   plus a real one-survivor-killed diff for each.
 - `oq5-tier-mapping-evidence.txt` — the exact `grep`s over
   `verdi.bindings.yaml`, the dc-6 discrepancy, and the full count.
-- `run-oq2.sh` — re-runnable: `run-oq2.sh <scratch-worktree-path>
-  [<gremlins-bin>]`; `GREMLINS_TIMEOUT_COEFFICIENT`/`GREMLINS_WORKERS`
-  env vars tune gremlins' own timeout/concurrency (defaults 10/2; this
-  spike's second attempt used 5/1 under heavier load — see oq-2). Its
-  end-to-end orchestration (package discovery, touched-file filtering,
-  totals) is verified against a stub tool standing in for gremlins (writes
-  an instant, minimal JSON instead of actually mutating anything) — real
-  gremlins runs under this session's load never completed for every
-  touched package in one sweep (see oq-2), so this is the only
-  full-script run this spike actually completed. That stub run caught and
-  fixed a real bug: the touched-files-per-package filter originally
-  matched by path *prefix*, which wrongly folded
-  `internal/readinesspilot/readinesstest`'s own touched file into
-  `internal/readinesspilot`'s row (a subpackage swallowed by its parent's
-  prefix); it now matches by exact `dirname`.
+- `run-oq2.sh` — re-runnable, and in fix round 1 it is the script that
+  produced configuration B's figures, not a stub: `run-oq2.sh
+  <clone-path> [<gremlins-bin>]`, where `<clone-path>` is a throwaway
+  `/tmp` clone detached at `e963f4d0` (the script refuses a worktree).
+  It now pins the operator set explicitly (`OPERATORS=all|default`),
+  scopes files with gremlins' own `-E` instead of post-filtering, asserts
+  the report contains no untouched file, records `uptime` before and after
+  every package, and refuses `package main` directories with the defect
+  named (`MEASURE_MAIN_PKGS=1` to see the false result).
+  `GREMLINS_TIMEOUT_COEFFICIENT`/`GREMLINS_WORKERS` still tune
+  timeout/concurrency (defaults 10/2); `ONLY_PKGS` restricts the sweep.
+  Retained from the first version: its touched-files-per-package grouping
+  matches by exact `dirname`, not by path prefix, after a stub-tool run
+  caught a real bug where `internal/readinesspilot/readinesstest`'s own
+  touched file was folded into `internal/readinesspilot`'s row.
 
 ## Throwaway rule
 
