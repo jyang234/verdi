@@ -140,6 +140,26 @@ for ac-1's linter-list decision**: at default settings exhaustive's TP rate
 against the written rule is 0% in this sample; the fix is a one-line setting,
 not dropping the linter.
 
+**Fix-round-1 correction to the 7 survivors' split** (an earlier version of
+the README's oq-2 section mischaracterized all 7 as test fixtures; this
+section's own per-row labels were already correct, but the aggregate split
+was never stated plainly): the 7 split **4 test / 3 production**. Test:
+`claude_execution_e2e_test.go:1119`, `context_execution_contract_test.go:1693`,
+`context_execution_contract_test.go:2794`, `selfevidence_test.go:120`.
+Production: `readiness_snapshot.go:369`, `stubmatch.go:164`,
+`sync_quarantine.go:157` — each judged individually in
+`oq2-exhaustive-survivors.txt` (not merely asserted): `stubmatch.go`'s
+switch is unambiguous (the function's own name states its two-type scope);
+`sync_quarantine.go`'s is a deliberate, currently-correct
+elimination-by-`continue` pattern over a doc-commented closed three-value
+enum, with a named latent risk if a fourth value is ever added;
+`readiness_snapshot.go`'s most likely is deliberate but its exclusion of
+`AnnotationDecisionNeeded` specifically is left an open question, not a
+ruling this sample has the context to make. None of the three is argued to
+be a fail-open bug today — the sentence above ("none of which are
+production fail-open bugs") already held under the corrected split, it was
+just never spelled out.
+
 ## dupl — 10 of 37
 
 > CLAUDE.md: "Anything used by two or more packages lives in a shared
@@ -162,12 +182,20 @@ not dropping the linter.
 (`package` clause of every file involved — all five files are `package
 main` or `package contextcompile`, and every pairing is within one
 directory, two pairs within one file). CLAUDE.md's sentence specifically
-prohibits **cross-package** copy-paste; dupl does not distinguish
-same-package from cross-package duplication, so none of the ten sampled
-findings are true positives against the sentence as written, though several
-are legitimate same-file/same-package "extract a helper" opportunities under
-ordinary Go hygiene (a rule CLAUDE.md does not separately state). See oq-2's
-retro-witness below for a second, independent data point on dupl's reach.
+prohibits **cross-package** copy-paste, and this is not a sampling
+artifact: golangci-lint dispatches `dupl` per package, so it structurally
+cannot report a cross-package pair at all, ever — verified over the full
+`./...` run, not just this ten-sample draw: 0 of all 37 dupl findings are
+cross-package (`oq2-dupl-package-scope.py`, output in
+`oq2-dupl-package-scope-output.txt`), and 0 of 13,521 remain cross-package
+even at `dupl.threshold: 10` over the retro-witness's restricted scope
+(`oq2-dupl-overlap-check-output.txt`), while cross-file same-package pairs
+are abundant at that threshold. None of the ten sampled findings are true
+positives against the sentence as written, and none *can* be, at any
+setting; several are legitimate same-file/same-package "extract a helper"
+opportunities under ordinary Go hygiene (a rule CLAUDE.md does not
+separately state). See oq-2's retro-witness below for the corrected,
+line-range-overlap-verified second data point on dupl's reach.
 
 ## gochecknoglobals — 10 of 404
 
@@ -175,11 +203,14 @@ retro-witness below for a second, independent data point on dupl's reach.
 > this rule.** The parent feature spec's own problem statement maps
 > gochecknoglobals to "no package-level mutable state," but that phrase (or
 > an equivalent) does not appear in `/Users/johnyang/code/verdi-system/CLAUDE.md`
-> — confirmed by reading the file in full (Go style: 8 bullets; Testing
+> — confirmed by reading the file in full (Go style: 9 bullets; Testing
 > rules: 4 bullets; neither mentions globals, package-level state, or
 > mutability). This is a discrepancy in the parent spec's own premise, not
 > something this spike can resolve by writing a rule CLAUDE.md does not
-> contain — recorded here, not silently patched.
+> contain — recorded here, not silently patched. (The parent spec's table
+> does not quote CLAUDE.md for *any* of its six rows; the other five differ
+> from this one only in that their paraphrases trace to sentences that
+> actually exist.)
 
 Because there is no sentence to hold a finding against, all ten are formally
 **rule-not-stated** by construction. What follows is the mechanical-accuracy

@@ -21,14 +21,26 @@ proposed it going in:
   `exhaustive`'s default posture does not treat a `default:` as
   exhaustive. Set `settings.exhaustive.default-signifies-exhaustive: true`
   first; re-measure before deciding further (see oq-2).
-- **Reconsider `dupl` before gating it, or scope it explicitly to
-  cross-package pairs.** 0/10 sampled findings are cross-package (all are
-  same-package or same-file); the CLAUDE.md sentence specifically forbids
-  cross-package copy-paste. Separately, `dupl` never reproduces the
-  feature's own motivating retro-witness case (`hasDotDotElement`) at any
-  threshold from 150 down to 10 — a reach gap, not a config knob.
-  ac-1 explicitly permits report-only placement for a linter whose true
-  positive rate is low; this spike's evidence says `dupl` qualifies.
+- **`dupl` cannot enforce CLAUDE.md's cross-package sentence at all —
+  "scope it to cross-package pairs" is not an available remedy.**
+  golangci-lint dispatches `dupl` per package, so it structurally can
+  never compare files across a package boundary; every finding it ever
+  produces is same-package by construction. Verified from this lane's own
+  data: 0 of 37 findings in the full `./...` run are cross-package
+  (`oq2-dupl-package-scope-output.txt`), and 0 of 13,521 remain
+  cross-package even at `dupl.threshold: 10` over the retro-witness's
+  restricted scope, while cross-*file*, same-package pairs are abundant at
+  that threshold. This is also why `dupl` never reaches the feature's own
+  motivating case: the two `hasDotDotElement` copies at `1be75d01` are in
+  *different* packages (`cmd/verdi` and `internal/readinessload`), so no
+  threshold could ever make `dupl` see them as a pair — proven directly by
+  a line-range-overlap check against `dupl`'s actual output at every
+  threshold from 150 down to 10 (`oq2-dupl-overlap-check-output.txt`), not
+  inferred from the absence of a length knob. Consequence for the spec
+  seed: ac-3's `dupl` half is unreachable by `dupl` at any setting; ac-1
+  must drop `dupl`, keep it report-only for same-package duplicate hygiene
+  (a real but CLAUDE.md-silent rule), or name a different tool for the
+  cross-package sentence.
 - **`gochecknoglobals` cannot be ruled on the same axis as the other six**:
   CLAUDE.md's Go style and Testing rules sections contain no sentence
   banning package-level variables. This is a gap in the parent spec's own
@@ -95,6 +107,35 @@ sixfold difference in 1-minute load average — sub-1.1s-per-linter over 104
 packages is cheap enough that this measurement does not appear to be
 load-sensitive at this scale, though neither run is a clean single-tenant
 measurement and a true idle-machine baseline was not captured.
+
+**This per-linter table cannot fill co-3's budget and was never claimed
+to: `make lint-strict` will run one combined invocation of all seven, not
+seven separate `--enable-only` passes, and the number that matters is
+dominated by cache state, not by linter count or load average.** Measured
+directly (`run-oq1-combined.sh` for the cold shape; full transcript
+`oq1-combined-summary.txt`), one combined `golangci-lint run --config
+golangci.strict.yml ./...` invocation, three cache states:
+
+| cache state | elapsed | issues | load before → after |
+|---|---|---|---|
+| cold (isolated, empty `GOCACHE`+`GOLANGCI_LINT_CACHE`, the fresh-CI-runner shape) | **32.65s** | 1050 | 40.67/45.04/39.66 → 47.95/46.30/40.33 |
+| warm (same isolated dirs, immediately re-run) | 1.29s | 1050 | 23.78/40.08/38.37 → 23.78/40.08/38.37 |
+| shared (this machine's ordinary, already-warm caches) | 1.41s | 1048* | 21.89/39.14/38.06 → 20.78/38.62/37.88 |
+
+(*2 fewer than the isolated runs — a cache-state-dependent discrepancy in
+two `exhaustive` findings, disclosed but not chased further in
+`oq1-combined-summary.txt`; it does not affect the timing conclusion.)
+
+The independent review's own re-derivation (different moment, same
+machine) reports 50.19s cold / 5.66s warm / 14.98s shared — different
+exact seconds (different ambient load at that moment) but the same
+qualitative shape, corroborating that cache state, not load, dominates.
+**co-3's budget should be stated as a range, roughly 1.3s–33s, with the
+top bound being the cold-CI-runner case**, and staying near the bottom in
+practice requires caching golangci-lint's own analysis cache directory
+across CI runs (`.github/workflows/merge-gate.yml` currently caches only
+the golangci-lint *binary*, per its `Cache golangci-lint` step, not its
+analysis cache) — a co-3 follow-up to name, not assume already solved.
 
 ### Other linters mapping to a written CLAUDE.md ground rule
 
@@ -165,26 +206,52 @@ Full ten-sample tables with per-finding rationale for all seven linters:
 
 `contextcheck` and `errorlint` each bundle two distinct checks under one
 linter name — one matching CLAUDE.md's sentence, one a different (real,
-sensible) Go idiom the sentence does not state. `exhaustive` and `dupl`
-each score 0% against the literal sentence in this sample for reasons that
-are themselves decision-relevant (a settings fix for `exhaustive`; a scope
-mismatch plus a reach gap for `dupl`) rather than the linters being noisy
-or wrong. `gochecknoglobals` cannot be scored at all: CLAUDE.md's Go style
-and Testing rules sections were read in full (9 + 4 bullets) and contain no
-sentence about global variables, package-level state, or mutability — the
-parent feature spec's problem statement asserts this mapping but does not
-quote CLAUDE.md for it, unlike its other five rows. This is recorded as a
-discrepancy, not resolved by inventing or paraphrasing a CLAUDE.md sentence
-that is not there.
+sensible) Go idiom the sentence does not state. Both are behind a settings
+knob for `errorlint` (`settings.errorlint.asserts: false, comparison:
+false` drops its count `173 → 132` over `./...`, verified —
+`oq2-errorlint-settings.txt` — removing exactly the type-assertion-safety
+class this sample's 3/10 rule-not-stated share names); `contextcheck` has
+no equivalent knob found, disclosed as unmeasured rather than assumed
+absent. `exhaustive` and `dupl` each score 0% against the literal sentence
+in this sample, but for structurally different reasons: `exhaustive` is a
+settings fix (below); `dupl` cannot enforce the sentence at all, by
+construction — golangci-lint runs `dupl` per package, so it never sees a
+cross-package pair regardless of threshold (see the Recommendation
+section above for the verified 0/37 and 0/13,521 counts). `gochecknoglobals`
+cannot be scored at all: CLAUDE.md's Go style (9 bullets) and Testing
+rules (4 bullets) sections were read in full and contain no sentence about
+global variables, package-level state, or mutability — the parent
+feature spec's problem statement asserts this mapping, but so does its
+paraphrase for every one of its other five rows; the real difference is
+that those five paraphrases trace to CLAUDE.md sentences that actually
+exist, and this one does not. This is recorded as a discrepancy, not
+resolved by inventing or paraphrasing a CLAUDE.md sentence that is not
+there.
 
 **Supplementary, not one of the four named oqs but load-bearing for the
 `exhaustive` verdict above:** re-running with
 `settings.exhaustive.default-signifies-exhaustive: true` over
 `./cmd/verdi/...` drops the count from 15 to 7 (command and full output:
 `oq3-and-exhaustive-extra.txt`) — every `specstate.State`/`Classification`
-finding with an explicit `default:` disappears; the 7 that remain are
-switches with no default at all (test fixtures in this sample, not
-production fail-open bugs).
+finding with an explicit `default:` disappears. The 7 that remain split
+**4 test / 3 production** (corrected — this README previously miscounted
+all 7 as test fixtures; the file:line list was already right in
+`oq3-and-exhaustive-extra.txt`, the prose reading it was not). The three
+production sites (`cmd/verdi/readiness_snapshot.go:369`,
+`cmd/verdi/stubmatch.go:164`, `cmd/verdi/sync_quarantine.go:157`) are
+judged individually, not asserted, in `oq2-exhaustive-survivors.txt`:
+`stubmatch.go`'s switch is unambiguously a deliberate filter (the
+function's own name, `disqualifyingSupersedesOrExempts`, states its
+two-type scope directly); `sync_quarantine.go`'s switch is a deliberate,
+currently-correct elimination-by-`continue` pattern over a type
+(`gitx.Reachability`) whose doc comments describe it as a closed
+three-value enum, with a named latent risk if a fourth value is ever
+added; `readiness_snapshot.go`'s switch most likely is a deliberate filter
+(selecting only the two annotation kinds that read as readiness-blocking)
+but its exclusion of `AnnotationDecisionNeeded` specifically is not
+self-evidently justified from the code alone and is left as an open
+question, not a ruling. The verdict survives: none of the three is argued
+to be a fail-open bug today.
 
 ### Retro-witness: 1be75d01 vs 410db101
 
@@ -195,19 +262,33 @@ after). Scope: `./internal/readinessload/... ./cmd/verdi/...
 
 | commit | gochecknoglobals: `serveReadinessLoader`? | dupl: `hasDotDotElement`? |
 |---|---|---|
-| 1be75d01 | **yes** (`cmd/verdi/serve.go:142:2: serveReadinessLoader is a global variable`) | **no** — silent at every threshold tried: 150 (default), 30, 20, 15, 10 |
+| 1be75d01 | **yes** (`cmd/verdi/serve.go:142:2: serveReadinessLoader is a global variable`) | **no** — silent at every threshold tried: 150 (default), 30, 20, 15, 10, verified by line-range overlap, not by the broken `grep hasDotDotElement` an earlier version of this evidence used (see below) |
 | 410db101 | **yes, still** (`cmd/verdi/serve.go:149:2: ...`) | no (the function no longer exists anywhere in the tree at this commit) |
 
 **Both predictions are violated-with-witness**, for two independent
 reasons, neither of which is "the underlying feature premise is wrong":
 
 1. `dupl` never reaches the `hasDotDotElement` duplicate
-   (`cmd/verdi/context.go:485` / `internal/readinessload/conflict.go:232`,
-   byte-identical 9-line bodies — the file's own comment at 1be75d01 calls
-   it "a small, deliberate duplicate") at any tested threshold, including
-   far below golangci-lint's default of 150. Disclosed-as-unproven exactly
-   *why* dupl's clone detector misses a function this short; proven and
-   reproducible *that* it does.
+   (`cmd/verdi/context.go:485-494` / `internal/readinessload/conflict.go:232-241`,
+   byte-identical 10-line bodies — the file's own comment at 1be75d01 calls
+   it "a small, deliberate duplicate") at any tested threshold from 150
+   down to 10. The mechanism is structural, not a length limit: the two
+   copies are in *different* packages (`cmd/verdi`'s `package main` vs
+   `internal/readinessload`'s `package readinessload`), and golangci-lint
+   runs `dupl` per package — see the Recommendation section's R-1 fix for
+   the 0/37, 0/13,521 counts proving this generally. **Witness
+   correction:** the original evidence for "silent at every threshold"
+   was `golangci-lint run ... | grep hasDotDotElement`, but `dupl`'s own
+   message text never contains a function name (it prints `` N-M lines
+   are duplicate of `file:line-line` ``), so that grep could not have
+   discriminated the outcome either way — it happened to print nothing
+   (exit 1) for the right underlying reason, but the artifact could not
+   prove it. Replaced with a line-range-overlap query
+   (`oq2-dupl-overlap-check.py`, run against each threshold's JSON output;
+   full transcript `oq2-dupl-overlap-check-output.txt`) that checks
+   whether any finding's own range or its cited partner's range overlaps
+   either function's true extent — confirmed `NO OVERLAP` at every
+   threshold, on both commits.
 2. `serveReadinessLoader` is still a global at 410db101 because that
    commit's own fix (confirmed via `git diff 1be75d01 410db101 --
    internal/readinessload/conflict.go`) is real but is the *other* half of
@@ -301,7 +382,17 @@ comparison tool is real feature-plan work, out of this spike's scope): a
 command, overwrites the committed baseline, and a CI check (or a second,
 simple script) asserts the new baseline is a subset of the old one per
 linter — "only shrinks" enforced as a set-containment check on commit, not
-by trusting the author.
+by trusting the author. **Collation must be pinned, or the whole file
+churns on regeneration for no semantic reason:** verified directly (`jq
+sort` vs `sort` on `["designimport_test.go","designimport.go"]`) that this
+draft's own sort (`jq`'s `sort_by`, used to build `baseline.draft.jsonl`)
+is locale-independent — byte order regardless of `LC_ALL` — while a shell-
+level `sort` on the same two strings gives byte order under `LC_ALL=C`
+but a different order under `LC_ALL=en_US.UTF-8`. The regeneration
+protocol should either keep sorting inside `jq` (as this draft did, for
+exactly this reason) or, if any shell-level sort is ever used instead,
+pin `LC_ALL=C` for it explicitly — not left to whatever the invoking
+shell happens to have set.
 
 **Judgment: committed baseline over `--new-from-rev`.** Both are
 deterministic in the narrow byte-for-byte sense. `--new-from-rev` has a
@@ -425,3 +516,15 @@ extracts feeding `samples.md`), `samples.md` (full oq-2 tables),
 `oq3-and-exhaustive-extra.txt`, `oq4-coexistence.txt`,
 `oq1-summary-heavyload.txt` (the first oq-1 run; `oq1-summary.txt` itself
 holds the second, lower-load run — see oq-1's timing note above).
+
+**Added in fix round 1** (review findings R-1 through R-7):
+`run-oq1-combined.sh` (re-runnable, cold-cache shape),
+`oq1-combined-cold.txt` + `oq1-combined-summary.txt` (R-2: combined-run
+timing across cold/warm/shared caches), `oq2-dupl-package-scope.py` +
+`-output.txt` (R-1: the per-package mechanism, verified over all 37
+findings), `oq2-dupl-overlap-check.py` + `-output.txt` (R-4: the
+line-range-overlap witness replacing the broken `grep`),
+`oq2-exhaustive-survivors.txt` (R-3: the 4-test/3-production split, each
+production site judged individually), `oq2-errorlint-settings.txt` (R-5:
+the errorlint settings remedy, and contextcheck disclosed as unmeasured),
+`oq3-baseline-locale-check.txt` (R-7: the collation verification).
