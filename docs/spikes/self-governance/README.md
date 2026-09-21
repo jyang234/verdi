@@ -163,6 +163,16 @@ comparison semantics correspond to what the rule actually says, well
 enough that a future Wave-3 evaluator could check it against a real
 repository fact using only today's vocabulary?
 
+- **Provenance of the five rules (whole-wave review W-1).** The five
+  rules are the parent spec's own oq-2 list, taken verbatim. Rules 1–3
+  paraphrase sentences in CLAUDE.md's Go style section; rules 4 ("every
+  commit builds") and 5 ("never bare git stash") appear in NEITHER
+  workspace nor verdi CLAUDE.md (grep over both: zero hits). ac-3's drift
+  witness, as written, fails when a policy claim has no CLAUDE.md
+  sentence, so seeding the policy set with rules 4 and 5 fails that
+  witness on day one unless CLAUDE.md gains the two sentences or ac-2's
+  source list is widened beyond CLAUDE.md. This is the parent's
+  imprecision, recorded here for its author, not resolved by this spike.
 - **Rules 4 and 5 are the genuine fits.** "Every commit builds" is a
   gate's own pass/fail verdict (PA-016's pre-commit hook already exists)
   — `required-values`/`clean-exit` names a real, eventually-resolvable
@@ -572,6 +582,17 @@ ledger's own lifecycle. Wiring `verdi journey` to read it, and adding one
 real `ReasonCode`, is real but small follow-on work — smaller than either
 inventing a story spec for (a) or building robust prose-parsing for (c).
 
+## co-3 — the exemptions list (whole-wave review W-2)
+
+The parent's co-3 ("a blocker the new policy set raises against this
+repository is fixed or exempted with a review window") names an
+exemptions list as a seed item. This spike does not supply it: oq-1 found
+adoption inert (zero new blockers), so no blocker-driven exemption
+exists to list; the one exemption authored here, oq-4's golangci-lint
+parity exception, is the first candidate row and the only one measured.
+Any further rows are UNMEASURED until the feature's adoption raises a
+blocker.
+
 ## Deviations from the investigation plan
 
 - The story's "nine deferred, residual and parked items" names the wave-1
@@ -617,7 +638,10 @@ inventing a story spec for (a) or building robust prose-parsing for (c).
   the story's count predates was not reached inside this round's timebox)
   — the discrepancy is recorded, per Global Constraint 10, rather than
   either silently keeping "28" or silently asserting a reconciliation
-  this spike did not actually verify.
+  this spike did not actually verify. The verification-rules spike in the
+  same wave reconciles it exactly (39 − 5 version-revision directories
+  − 6 spike-sibling directories = 28; its `active-specs-count.out`), and
+  the whole-wave review re-verified that arithmetic.
 - (Fix round 1) An independent Opus review of the base..head this spike
   had already committed returned REVISE with seven findings (F1-F7,
   `lane-self-governance-review.md`); the controller accepted all seven
