@@ -33,7 +33,7 @@ The independent review of readiness-recovery waves 1 and 2
 finding R4) showed that the shipped parity test
 `TestDocumentParity_ServedWithContextRequest` (`cmd/verdi/document_parity_e2e_test.go`)
 passes only by asserting that the CLI and served readings of the startup
-spec differ. Ledger row SI-217 (`docs/superpowers/invention-ledger.md`)
+spec differ. Ledger row SI-215 (`docs/superpowers/invention-ledger.md`)
 records the conflict, the four options (keep and disclose; drop the request
 from the Document tab and MCP; add a request flag to `verdi spec doc`; amend
 ac-4 to define parity over equivalent request inputs), and the interim
