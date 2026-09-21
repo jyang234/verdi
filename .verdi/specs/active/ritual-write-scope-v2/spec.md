@@ -88,7 +88,7 @@ the predecessor's premises:
 - The seven-field grammar the spike story proposed needed one change: the
   boolean `index_carry_foreign` cannot express the four states the five
   rituals occupy. ac-1 and dc-3 adopt the enum (owner decision, 2026-09-21;
-  invention ledger I-131).
+  invention ledger SI-207, mirrored as PLAN.md §7 I-131).
 
 The remaining answers landed as decisions: dc-4 (registry home, no
 ratification), dc-5 (seam shape and sequencing against readiness-recovery
