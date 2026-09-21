@@ -506,6 +506,24 @@ func outcomeFloorWitness(ac evidence.FeatureACResult) string {
 	return fmt.Sprintf("AC %s: outcome floor unsatisfied; no passing outcome record and no attestation declared", ac.ID)
 }
 
+// outcomeFloorClearingCondition composes the floor's remedy from the
+// routes that can actually clear it (R-RRF-5, independent review
+// 2026-09-21 R5). evidence.foldFeatureAC reads
+// attestations/<feature>/<ac>.md only for a criterion that DECLARES the
+// attestation evidence kind, so naming that path for a criterion that
+// does not declare it advertises a remedy the fold ignores — an
+// instruction an operator can follow to completion without clearing the
+// debt it names. ac-7's "names the attestation path or a passing outcome
+// record" is therefore read as the EFFECTIVE route(s): both when the kind
+// is declared, the passing-record route alone when it is not.
+func outcomeFloorClearingCondition(ac evidence.FeatureACResult, featureName string) string {
+	record := fmt.Sprintf("land a passing outcome record for %s", ac.ID)
+	if !ac.Floor.DeclaresAttestation {
+		return record
+	}
+	return fmt.Sprintf("author attestations/%s/%s.md or %s", featureName, ac.ID, record)
+}
+
 func outcomeFloorBlockers(in eventualInput, verb string) []Blocker {
 	if in.Fold == nil {
 		return nil
@@ -522,7 +540,7 @@ func outcomeFloorBlockers(in eventualInput, verb string) []Blocker {
 			Class:             ClassJudgmental,
 			Witnesses:         []string{outcomeFloorWitness(ac)},
 			Owner:             in.Owner,
-			ClearingCondition: fmt.Sprintf("author attestations/%s/%s.md or land a passing outcome record for %s", featureName, ac.ID, ac.ID),
+			ClearingCondition: outcomeFloorClearingCondition(ac, featureName),
 			Transition:        verb,
 		})
 	}
