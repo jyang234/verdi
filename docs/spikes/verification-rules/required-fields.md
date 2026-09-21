@@ -54,10 +54,21 @@ pre-existing, table-consistent carve-out, not a new divergence
 (`attestation.go:3-7`).
 
 Spec kind is where the split lives, and it is class-conditional:
-- **spec/component**: unconditionally required (package doc,
-  `internal/artifact/status.go:8-16`, "this enum only governs an EXPLICIT
-  status value on those two classes [feature/story] — ... unlike the
-  component class, which still requires it").
+- **spec/component**: unconditionally required —
+  `internal/artifact/spec.go:194-196` (the `SpecFrontmatter.Status` field
+  comment), quoted verbatim: "Status is REQUIRED for the component class
+  (validateComponent still checks specComponentStatuses unconditionally)
+  but OPTIONAL for the feature and story classes"; enforced at
+  `spec.go:519`, `if !specComponentStatuses[fm.Status] { ...error... }`
+  (unconditional — no `fm.Status != ""` guard, unlike the two classes
+  below). `status.go:8-16`'s own package-doc comment makes the same
+  point in different words ("this enum only governs an EXPLICIT status
+  value on those two classes... since a feature/story's authoritative
+  proposed-versus-accepted state is Git-derived") but never uses the
+  word "component" or "requires" — the earlier draft of this row
+  fabricated a continuation attributed to that comment; corrected per
+  independent review VR-4 to cite spec.go instead, where the component
+  contrast is actually written.
 - **spec/feature, spec/story**: **REJECT explicit-unknown, ACCEPT
   absence** — `spec.go` `validateFeature`/`validateStory` both open with
   `if fm.Status != "" && !specFeatureStatuses[fm.Status] { ...error... }`

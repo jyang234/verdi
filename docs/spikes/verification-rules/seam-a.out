@@ -16,8 +16,8 @@ declared object ids overall (artifact.DeclaredObjectIDs — ac+co+dc+oq): [ac-1 
 is "co-2" in the AC-only set VL-003's targetACSet checks against? false
 is "co-2" in DeclaredObjectIDs (what VL-003's checkLink fragment path for links[].ref DOES use)? true
 
-=== step 6: what the VL-003 message would read (replicating checkOneBindingsFile's exact format string) ===
-evidence-for binding "scratch-seam-a-witness": ac entry "spec/readiness-recovery#co-2" names ac "co-2", which "spec/readiness-recovery" does not declare
+=== step 6: the real VL-003 message (internal/lint/vl003.go:305, format string and arguments quoted verbatim) ===
+evidence-for binding "scratch-seam-a-witness-single" names ac "spec/readiness-recovery#co-2", which "spec/readiness-recovery" does not declare
 
 === step 7: DecodeBindings a scratch verdi.bindings.yaml carrying all nine co-2/c1..c9 two-level fragments ===
 --- scratch verdi.bindings.yaml ---

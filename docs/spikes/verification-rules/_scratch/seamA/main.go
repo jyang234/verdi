@@ -8,11 +8,14 @@
 // whether a CONSTRAINT id resolves through the AC-only binding-resolution
 // path at all, even at one level.
 //
-// It also inlines a copy of internal/lint/vl003.go's unexported
-// targetACSet (cited by source line in the comment on it below) because
-// that function is unexported and this is a different package; the inline
-// copy is marked as a replica, not a reimplementation the spike is
-// proposing.
+// Step 5 also builds an AC-only id set from the real, decoded spec's
+// AcceptanceCriteria field, to show what internal/lint/vl003.go's
+// unexported targetACSet (cited by source line where used below) would
+// see — that function is unexported and this is a different package, so
+// this is a short hand-written loop with the SAME AC-only behavior, not
+// a copy of targetACSet's own code; the message step 6 prints is the
+// real vl003.go:305 format string with the real arguments, quoted
+// verbatim from source (VR-3 correction), not a re-derivation.
 //
 // Usage: go run ./docs/spikes/verification-rules/_scratch/seamA [root]
 package main
@@ -76,9 +79,16 @@ func main() {
 	fmt.Printf("is %q in the AC-only set VL-003's targetACSet checks against? %v\n", "co-2", acIDs["co-2"])
 	fmt.Printf("is %q in DeclaredObjectIDs (what VL-003's checkLink fragment path for links[].ref DOES use)? %v\n", "co-2", declaredAll["co-2"])
 
-	fmt.Println("\n=== step 6: what the VL-003 message would read (replicating checkOneBindingsFile's exact format string) ===")
+	fmt.Println("\n=== step 6: the real VL-003 message (internal/lint/vl003.go:305, format string and arguments quoted verbatim) ===")
 	if !acIDs["co-2"] {
-		fmt.Printf("evidence-for binding %q: ac entry %q names ac %q, which %q does not declare\n", "scratch-seam-a-witness", oneLevel, "co-2", "spec/readiness-recovery")
+		// Real source: findings = append(findings, Finding{Rule: "VL-003",
+		// Path: path, Message: fmt.Sprintf("evidence-for binding %q names ac
+		// %q, which %q does not declare", b.Producer, entry, specRef)}) —
+		// vl003.go:296-306's checkOneBindingsFile, the !acs[acID] branch.
+		// entry is the WHOLE original binding-list string (not the bare
+		// acID `ResolveBindingAC` parsed out of it); specRef is the target
+		// spec ResolveBindingAC resolved (step 3 above: "spec/readiness-recovery").
+		fmt.Printf("evidence-for binding %q names ac %q, which %q does not declare\n", "scratch-seam-a-witness-single", oneLevel, specRef)
 	}
 
 	fmt.Println("\n=== step 7: DecodeBindings a scratch verdi.bindings.yaml carrying all nine co-2/c1..c9 two-level fragments ===")

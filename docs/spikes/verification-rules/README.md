@@ -114,11 +114,13 @@ changes to already-shared code before it can express even one clause
 citation; Seam B works today, fully additively, with a total blast radius
 of one new test file and one-line comments.
 
-**Trial setup:** readiness-recovery co-2's text ("no readiness file,
-cache, status field, transition, receipt, event log, or artifact kind is
-added; no recovery lifecycle state is invented; a projection is never
-authority", `.verdi/specs/active/readiness-recovery/spec.md`) enumerates
-**exactly nine** prohibitions matching the story's count: (c1) no
+**Trial setup:** readiness-recovery co-2's text (`.verdi/specs/active/
+readiness-recovery/spec.md`; opens "Readiness and recovery are
+projections of facts that already exist:" before listing "...no
+readiness file, cache, status field, transition, receipt, event log, or
+artifact kind is added; no recovery lifecycle state is invented; a
+projection is never authority.") enumerates **exactly nine** prohibitions
+matching the story's count: (c1) no
 readiness file, (c2) no cache, (c3) no status field, (c4) no transition,
 (c5) no receipt, (c6) no event log, (c7) no artifact kind, (c8) no
 invented recovery lifecycle state, (c9) a projection is never authority.
@@ -200,11 +202,15 @@ Real code, real calls (`_scratch/seamA/main.go`, `go run
    `artifact.DecodeBindings` of a scratch `verdi.bindings.yaml` carrying
    all nine `co-2/c1..c9` entries both fail the same way, at decode time,
    with a clear, actionable, fail-closed error — this is also exactly
-   what `internal/lint` VL-003 would report (`internal/lint/snapshot.go:135`
-   assigns `artifact.DecodeBindings`'s own error verbatim to
-   `Snapshot.RootBindingsErr`, which `vl003.go`'s `checkBindings` surfaces
-   as `"verdi.bindings.yaml (root): does not decode: ..."` — traced by
-   source, not separately re-run, since the decode call is identical).
+   what `internal/lint` VL-003 would report (`internal/lint/snapshot.go:134`
+   calls `artifact.DecodeBindings`; line 137 assigns its error verbatim to
+   `Snapshot.RootBindingsErr`; `vl003.go:235` wraps it as
+   `Finding{Rule: "VL-003", Path: "verdi.bindings.yaml (root)", Message:
+   fmt.Sprintf("does not decode: %v", ...)}`, which `Finding.String()`
+   (`finding.go:123`, format `"%s (%s) [%s]"` on Message/Path/Rule) prints
+   as `"does not decode: <the DecodeBindings error> (verdi.bindings.yaml
+   (root)) [VL-003]"` — traced by source, not separately re-run, since
+   the decode call is identical).
 2. **One-level `spec/readiness-recovery#co-2` (bare constraint, no clause
    suffix) parses and resolves shape-wise, but is structurally blocked
    one layer later, with a MISLEADING message.** `ParseRef`/
@@ -212,9 +218,13 @@ Real code, real calls (`_scratch/seamA/main.go`, `go run
    (`internal/lint/vl003.go:317-327`) builds its declared-id set from
    `Spec.AcceptanceCriteria` **only** — never `Constraints` — so even a
    plain, undecomposed constraint citation is rejected today, with a
-   message that reads as if `co-2` were undeclared
-   (`"... names ac \"co-2\", which \"spec/readiness-recovery\" does not
-   declare"`) when it is declared, just not as an AC. Confirmed against
+   message that echoes the whole entry, not the bare id, and reads as if
+   the entry were entirely undeclared
+   (`internal/lint/vl003.go:305` verbatim: `"evidence-for binding
+   \"scratch-seam-a-witness-single\" names ac
+   \"spec/readiness-recovery#co-2\", which \"spec/readiness-recovery\"
+   does not declare"`) when `co-2` is in fact declared, just not as an
+   AC. Confirmed against
    the real committed `readiness-recovery/spec.md`: its declared AC set
    is `{ac-1..ac-10}`; `co-2` sits only in `artifact.DeclaredObjectIDs`
    (which does include constraints) — a set VL-003's bindings path never
@@ -471,7 +481,7 @@ spike's write set.
    traces VL-003's exact call path by source citation — `Snapshot.
    RootBindingsErr` is assigned the identical `DecodeBindings` error
    VL-003 surfaces verbatim, confirmed by reading `internal/lint/
-   snapshot.go:135` — rather than re-deriving the same answer through a
+   snapshot.go:137` — rather than re-deriving the same answer through a
    slower, harder-to-audit end-to-end run. Recorded because it is a
    scope choice a reader might expect done differently, not because it
    weakens the answer.
