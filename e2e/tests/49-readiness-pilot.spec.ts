@@ -89,7 +89,13 @@ const ATTENTION_QUEUE = [
   ...EVENTUAL_REVIEW_BLOCKERS,
 ];
 
-// Every and only the proven concerns, in existing AllConcerns order.
+// Every and only the proven concerns, in existing AllConcerns order (area
+// order, then id). review/eventual-derivation (spec/readiness-recovery
+// ac-1/co-6, SI-213 / R-RRF-1) is the review area's one proven row here:
+// the fixture's eventual section derives with nothing unavailable (its
+// stub reconciliation and outcome-floor fold both compute — the
+// outcome-floor blockers above are that fold's output), so it closes the
+// list after the context rows.
 const COMPLETED_CHECKS = [
   "shape/board",
   "shape/mutation",
@@ -97,6 +103,7 @@ const COMPLETED_CHECKS = [
   "shape/problem",
   "context/mechanical/action:make-verify#complete",
   "context/mechanical/configuration:go-version#complete",
+  "review/eventual-derivation",
 ];
 
 // The four stations in snapshot order: id, plain label, formal state.
