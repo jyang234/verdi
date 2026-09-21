@@ -8,6 +8,12 @@ package workbench
 // KNOWN and EXPLICIT, so a change to either derivation that shrinks or
 // grows the gap fails this test until the committed golden is
 // deliberately updated.
+//
+// R-RR1-20 (fix round 1): the wall side derives with the design bridge
+// wired (readinessGapCapsBridge, below) — the same posture `verdi serve`
+// always establishes — rather than the bare, unwired boardSpecServer the
+// original round used, which left DesignWired false and under-reported the
+// wall's real concern vocabulary.
 
 import (
 	"context"
@@ -67,14 +73,30 @@ func family(id string) string {
 	return strings.Join(parts[:keep], "/") + "/<id>"
 }
 
+// readinessGapCapsBridge is R-RR1-20's fixture bridge: the wall side must
+// be derived with the design bridge wired (as `verdi serve` always wires
+// it), never with the brief's original bare `&boardSpecServer{root: root}`
+// literal, which left DesignWired false and under-reported the wall's real
+// concern vocabulary (context/policy, context/agent-writes,
+// context/draft-writes never fired — boardspecasd.go:307-337). The scripted
+// outcome mirrors asdcorrection_test.go:131-137's Mutable:true posture, so
+// the wall's context/agent-writes row (boardspecasd.go:318-323) fires.
+func readinessGapCapsBridge() *scriptedCapsBridge {
+	return &scriptedCapsBridge{script: func(int) (DesignReadOutcome, *DesignCapabilitiesView) {
+		return DesignReadOutcome{JSON: []byte(`{}`)}, &DesignCapabilitiesView{Mutable: true, PolicyMode: "draft-write", PolicyDigest: "sha256:caps-gap"}
+	}}
+}
+
 // renderReadinessGap renders the gap witness's exact committed text layout:
-// a two-line header comment, then the wall-only, loader-only, and
-// blocking-disagreement sections, each a sorted, two-space-indented list
-// of families.
+// a three-line header comment (R-RR1-20's third line disclosing the design
+// bridge is wired for this derivation), then the wall-only, loader-only,
+// and blocking-disagreement sections, each a sorted, two-space-indented
+// list of families.
 func renderReadinessGap(wallOnly, loaderOnly, disagreement []string) string {
 	var b strings.Builder
 	b.WriteString("# readiness gap — the wall shell versus the continuous derivation (spec/readiness-recovery ac-5)\n")
 	b.WriteString("# This is a GAP LIST, not parity. The post-design workbench lane consumes it; a change here must be deliberate.\n")
+	b.WriteString("# Derived on the claim-wall fixture with the design bridge wired (R-RR1-20); families neither side emits on that fixture are not listed.\n")
 	b.WriteString("wall-only:\n")
 	for _, f := range wallOnly {
 		fmt.Fprintf(&b, "  %s\n", f)
@@ -95,7 +117,7 @@ func TestReadinessGap_WallVersusLoader(t *testing.T) {
 	addClaimWallManifest(t, root)
 	ctx := context.Background()
 
-	_, _, asd, err := (&boardSpecServer{root: root}).loadASD(ctx, claimWallName)
+	_, _, asd, err := (&boardSpecServer{root: root, design: readinessGapCapsBridge()}).loadASD(ctx, claimWallName)
 	if err != nil {
 		t.Fatalf("loadASD: %v", err)
 	}

@@ -1,7 +1,9 @@
 # readiness gap — the wall shell versus the continuous derivation (spec/readiness-recovery ac-5)
 # This is a GAP LIST, not parity. The post-design workbench lane consumes it; a change here must be deliberate.
+# Derived on the claim-wall fixture with the design bridge wired (R-RR1-20); families neither side emits on that fixture are not listed.
 wall-only:
-  context/capabilities
+  context/agent-writes
+  context/policy
   review/acceptance
   review/worktree
   success/criteria
