@@ -1,0 +1,5 @@
+../../../../../../../../../private/tmp/spike-lint-ratchet/internal/lint/spike_ratchet_trial.go:7:5: spikeRatchetTrialGlobal is a global variable (gochecknoglobals)
+var spikeRatchetTrialGlobal = "trial"
+    ^
+1 issues:
+* gochecknoglobals: 1

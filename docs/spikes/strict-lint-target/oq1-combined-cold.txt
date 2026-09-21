@@ -1,0 +1,19 @@
+# oq-1 combined run, cold cache — GOCACHE=/tmp/oq1-combined-cache.WC7wJW/gocache GOLANGCI_LINT_CACHE=/tmp/oq1-combined-cache.WC7wJW/golangci-cache
+# both created fresh and empty immediately before this run
+load before: 21:11  up 16 days, 13:58, 6 users, load averages: 40.67 45.04 39.66
+core count: 10
+# [4308 per-finding lines (the 1050 findings' file:line:message text, identical
+#  in substance to oq1-raw/<linter>.txt) reduced out here to respect the ~2000-
+#  line evidence cap; the full per-finding text already lives under oq1-raw/.]
+1050 issues:
+* containedctx: 8
+* contextcheck: 43
+* dupl: 37
+* errorlint: 173
+* exhaustive: 129
+* gochecknoglobals: 404
+* noctx: 256
+exit=1
+elapsed seconds: 32.652369000
+load after: 21:11  up 16 days, 13:59, 6 users, load averages: 47.95 46.30 40.33
+cache dir used (not cleaned up — rerun against the same $WORKDIR for a warm measurement): /tmp/oq1-combined-cache.WC7wJW

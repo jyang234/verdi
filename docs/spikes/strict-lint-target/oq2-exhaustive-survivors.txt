@@ -1,0 +1,79 @@
+# Fix-round-1 evidence for R-3: the 7 exhaustive survivors under
+# default-signifies-exhaustive: true over ./cmd/verdi/... (README's oq-2
+# section originally, and wrongly, called all 7 test fixtures with no
+# production fail-open risk; the lane's own oq3-and-exhaustive-extra.txt
+# already listed all 7 file:line locations — the miscount was in reading
+# that list, not in producing it). Correct split: 4 test, 3 production.
+
+## The 7, by file (from oq3-and-exhaustive-extra.txt)
+
+Test (4):
+  cmd/verdi/claude_execution_e2e_test.go:1119
+  cmd/verdi/context_execution_contract_test.go:1693
+  cmd/verdi/context_execution_contract_test.go:2794
+  cmd/verdi/selfevidence_test.go:120
+
+Production (3):
+  cmd/verdi/readiness_snapshot.go:369
+  cmd/verdi/stubmatch.go:164
+  cmd/verdi/sync_quarantine.go:157
+
+## Judged individually (source read at HEAD, verdi-wt/spike-strict-lint-target)
+
+**cmd/verdi/readiness_snapshot.go:369** — `switch annotation.Type` inside a
+loop building a readiness board's open-item list, with cases only for
+`AnnotationQuestion` and `AnnotationAgentTask`; every other annotation type
+(Comment, DecisionNeeded, Pin, Relates, Review, Story, Spike) falls through
+and is silently skipped (no default, no counter, nothing). The surrounding
+code's purpose (collecting the OPEN items a readiness board must resolve)
+and the two chosen types both read as blocking-item kinds support this
+being a deliberate, narrow filter rather than an oversight. But
+`AnnotationDecisionNeeded` (internal/artifact/annotation.go:15, also
+special-cased elsewhere as a blocking kind in
+internal/workbench/boardspecapi.go:274,363) reads, on its name alone, like
+a plausible candidate for the same treatment, and this function's own
+comments do not say why it is excluded. **Judgment: most likely a
+deliberate filter, but DecisionNeeded's exclusion is not self-evidently
+justified from this code alone — disclosed as an open question this spike
+surfaces, not a ruling this spike has the context to make.**
+
+**cmd/verdi/stubmatch.go:164** — `switch l.Type` inside
+`disqualifyingSupersedesOrExempts`, cases only for `LinkExempts` and
+`LinkSupersedes`. The function's own name states its complete scope: it
+checks exactly these two link types for a disqualification rule, nothing
+else. The doc comment two lines above the switch spells out the same rule
+in prose ("Every `exempts` edge, and every `supersedes` edge targeting
+anything else... still disqualifies"). **Judgment: unambiguously a
+deliberate filter — the function's name and its own doc comment both state
+the two-type scope directly; the other 9 link types are correctly out of
+scope for this specific disqualification check, not a fail-open gap.**
+
+**cmd/verdi/sync_quarantine.go:157** — `switch reach` (type
+`gitx.Reachability`) with cases for `Reachable` (→ `continue`) and
+`UnprovableShallow` (→ increment `unprovable`, `continue`); the third and
+only remaining value, `Unreachable`, is handled by the code immediately
+*after* the switch block (quarantining the record), reached precisely
+because the other two cases both `continue` past it — an
+elimination-by-continue pattern, not a missing case. The line right above
+that post-switch code is an explicit comment: `// gitx.Unreachable —
+proven gone`. `internal/gitx/reachable.go` declares `Reachability` as
+exactly three values (`Unreachable`, `Reachable`, `UnprovableShallow`,
+verified) with doc comments describing it as a deliberately closed
+three-outcome type ("a shallow clone folds it into UnprovableShallow",
+"a full clone folds the negative into the honest Unreachable"). **Judgment:
+deliberate and currently correct — the switch's two `continue` cases plus
+post-switch handling is a complete, exhaustive treatment of a 3-value type
+today. Named latent risk (not a current bug): exhaustive's own check
+exists precisely because a 4th value added to this type later would fall
+through to the post-switch "proven gone" quarantine code without
+triggering any switch-shaped warning at the call site — the type's own
+"deliberately closed" comments make this unlikely, not impossible.**
+
+## Net effect on the README's exhaustive verdict
+
+The corrected 4/3 split does not reverse the recommendation (do not gate
+exhaustive at default settings; set default-signifies-exhaustive first) —
+all three production survivors are argued, not merely assumed, to be
+deliberate rather than fail-open, and two of the three are unambiguous.
+readiness_snapshot.go's DecisionNeeded question is recorded as a genuine
+open item for whoever authors the real strict config, not resolved here.

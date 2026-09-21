@@ -1,0 +1,45 @@
+$ grep -n '# required' docs/design/specs/02-artifact-contract.md (workspace-root file, read-only)
+81:id: <kind>/<name>          # required, must agree with path
+83:title: string              # required
+85:status: <per-kind enum>    # required
+86:owners: [string]           # required; team or CODEOWNERS-resolvable handles
+89:problem: { text: string, anchor: string }   # required; feature/story only — §Object model
+90:outcome: { text: string, anchor: string }   # required; feature/story only — §Object model
+99:frozen: { at: date, commit: sha }   # required iff temporal class is frozen
+100:provenance:                # required iff generated
+328:supersession:            # required only on a superseding revision (R4-I-4)
+EXIT:0
+
+$ grep -n 'fm.Problem == nil\|fm.Outcome == nil' internal/artifact/spec.go
+424:	if fm.Problem == nil {
+431:	if fm.Outcome == nil {
+EXIT:0
+
+$ grep -rn requireProvenance internal/artifact/*.go | wc -l
+       0
+
+$ grep -n requireFrozen( internal/artifact/*.go | grep -v _test
+internal/artifact/adr.go:51:	if err := requireFrozen(fm.Frozen, decided, "adr", string(fm.Status)); err != nil {
+internal/artifact/adr.go:60:func requireFrozen(frozen *Frozen, required bool, kind, status string) error {
+internal/artifact/attestation.go:31:	return requireFrozen(fm.Frozen, true, "attestation", "")
+internal/artifact/diagram.go:107:// {active, superseded} enum and requireFrozen(..., false, ...) exactly as
+internal/artifact/diagram.go:125:		return requireFrozen(fm.Frozen, false, "diagram", string(fm.Status))
+internal/artifact/diagram.go:131:		return requireFrozen(fm.Frozen, frozenRequired, "proposal diagram", string(fm.Status))
+internal/artifact/conflict.go:52:	return requireFrozen(fm.Frozen, resolved, "conflict", string(fm.Status))
+internal/artifact/obligation.go:247:	return requireFrozen(fm.Frozen, true, "obligation", "")
+internal/artifact/reaffirmation.go:74:	return requireFrozen(fm.Frozen, true, "reaffirmation", "")
+internal/artifact/spec.go:408:	return requireFrozen(fm.Frozen, frozenRequired, "feature spec", string(fm.Status))
+internal/artifact/spec.go:500:	return requireFrozen(fm.Frozen, frozenRequired, "story spec", string(fm.Status))
+internal/artifact/spec.go:536:	return requireFrozen(fm.Frozen, false, "component spec", string(fm.Status))
+internal/artifact/waiver.go:43:	return requireFrozen(fm.Frozen, true, "waiver", string(fm.Status))
+EXIT:0
+
+$ grep -n UAT-008 -A6 /Users/johnyang/code/verdi-system/docs/design/uat/uat-findings.md | head -8
+47:| UAT-008 | artifact contract | docs | low | open | 02 says `status` required; decoder accepts a statusless proposal |
+48-| UAT-009 | artifact contract | contract | medium | open | Constraints and open questions cannot carry `links:` |
+49-| UAT-010 | stubs | contract | medium | open | Story stubs cannot claim open questions; stub-match is exact-set and slug-equal |
+50-| UAT-011 | zones / worktrees | contract | low | open | CLI lint inside a Verdi-managed design worktree can never see the mutable zone |
+51-| UAT-012 | store compatibility | plausible | low | open | Older build rejects `.verdi/imports` written by a newer build (VL-007); no store version stamp |
+52-| UAT-017 | readiness / acceptance | contract | high | fixed pending merge | Every declared open question blocks acceptance even when a spike stub claims it; 02 allows accepted features with spike-resolved questions |
+53-| UAT-018 | policy / adoption | defect | medium | fixed pending merge | Adopting Verdi establishes no policy authority; every board then carries an unproven policy item with a manual setup guide, and semantic review is refused |
+--

@@ -1,0 +1,124 @@
+oq-1 evidence: ooze (github.com/gtramontina/ooze v0.2.0) disqualification
+witness. Unlike the other two candidates this is a source-code-verified
+mechanism, not a crash trace — reduction below keeps the exact installed
+module source (small; each excerpt is the complete function) plus the
+command transcript that exposed the symptom.
+
+Setup (in the scratch worktree, detached at e963f4d0):
+  $ go get github.com/gtramontina/ooze@v0.2.0        # exit 0
+  $ cat > internal/readinessload/mutation_test.go <<'EOF'
+  //go:build mutation
+  package readinessload
+  import "testing"
+  import "github.com/gtramontina/ooze"
+  func TestMutation(t *testing.T) { ooze.Release(t) }
+  EOF
+
+Run 1 (default flags):
+  $ go test -tags=mutation ./internal/readinessload/...
+  ok  	github.com/jyang234/verdi/internal/readinessload	20.908s
+  (no report at all is printed without -v — this is ooze's own documented
+  behavior: go test buffers stdout and only flushes it on failure, unless
+  -v is passed. Already notable: the story's oq-1 asks for a runtime per
+  package, and ooze's default invocation gives none.)
+
+Run 2 (-v, to get ooze's own report):
+  $ go test -v -tags=mutation ./internal/readinessload/...
+  ok  	github.com/jyang234/verdi/internal/readinessload	21.082s
+  ... hundreds of subtests, ALL of the form:
+      --- PASS: TestMutation/load.go_→_Comparison_Invert#05 (0.01s)
+  (every one of ooze's own per-mutant subtests: 0.01s. This is the
+  symptom: readinessload's real, non-mutated test suite takes multiple
+  seconds per test just above these lines in the same -v output
+  (TestLoad_WithRequestCacheHit alone: 1.29s) — a genuine re-run of that
+  suite per mutant cannot plausibly complete at 0.01s.)
+
+Why: ooze's default configuration (`internal/release.go`, installed at
+$(go env GOMODCACHE)/github.com/gtramontina/ooze@v0.2.0/release.go):
+
+  var defaultOptions = Options{
+  	Repository:               fsrepository.New("."),
+  	TestRunner:               cmdtestrunner.New("go", "test", "-count=1", "./..."),
+  	TemporaryDir:             fstemporarydir.New("ooze-"),
+  	MinimumThreshold:         1.0,
+  	...
+  }
+
+fsrepository's `LinkAllToTemporaryRepository` (internal/fsrepository/fsrepository.go):
+
+  func (r *FSRepository) LinkAllToTemporaryRepository(temporaryPath string) ooze.TemporaryRepository {
+  	rootSize := len(strings.Split(r.root, string(os.PathSeparator)))
+  	err := filepath.WalkDir(r.root, func(path string, entry fs.DirEntry, err error) error {
+  		...
+  		linkPath := filepath.Join(temporaryPath, filepath.Join(strings.Split(path, string(os.PathSeparator))[rootSize:]...))
+  		...
+  		err = os.Symlink(absolutePath, linkPath)
+  		...
+  	})
+  	...
+  }
+
+`r.root` is `fsrepository.New(".")`'s argument resolved to an absolute
+path — "." at the moment `ooze.Release(t)` runs, which for a Go test
+binary is always the PACKAGE's own source directory (a Go testing
+convention, not an ooze choice): here, .../internal/readinessload. So
+LinkAllToTemporaryRepository symlinks only the files inside
+internal/readinessload/ into the temp dir — it does not walk upward to
+the module root, so go.mod, go.sum, and every OTHER package
+internal/readinessload imports (internal/store, internal/journey,
+internal/policyconflict, internal/contextcompile,
+internal/governanceprincipal, internal/artifact, internal/boardio) are
+absent from the temp copy.
+
+fstemporarydir.New("ooze-") (internal/fstemporarydir/fstemporarydir.go):
+
+  func (f *FSTemporaryDir) New() string {
+  	temporaryDir, err := os.MkdirTemp("", f.prefix)
+  	...
+  	return temporaryDir
+  }
+
+`os.MkdirTemp("", ...)` creates the directory under the OS temp root
+(/var/folders/.../T on this machine) — nowhere near the module's own
+go.mod, so there is no ancestor go.mod to be found either.
+
+cmdtestrunner.Test (internal/cmdtestrunner/cmdtestrunner.go), the piece
+that turns a subprocess result into a verdict:
+
+  func (t *CMDTestRunner) Test(repository ooze.TemporaryRepository) result.Result[string] {
+  	command := exec.Command(t.name, t.args...)
+  	command.Dir = repository.Root()
+  	command.Env = os.Environ()
+  	output, err := command.CombinedOutput()
+  	if err != nil {
+  		return result.Ok(string(output))       // non-zero exit -> "Ok" (= mutant KILLED, ooze's own README: "A failing test suite is a good sign ... it killed the mutant")
+  	}
+  	return result.Err[string](string(output))  // exit 0 -> "Err" (= mutant SURVIVED)
+  }
+
+Putting the three together: every mutant's "go test -count=1 ./..." runs
+inside a directory with no go.mod anywhere in its ancestry, so the Go
+toolchain fails immediately ("go.mod file not found ...", a sub-second,
+no-compilation failure) — a NON-ZERO exit for a reason that has nothing to
+do with the mutation — and cmdtestrunner.Test reports that as "Ok" =
+killed. This reproduces the 0.01s timing exactly (no real build or test
+execution happens) and the 100% "kill" rate this spike observed for
+internal/readinessload — neither is evidence the package's tests are any
+good; both are an artifact of ooze's default repository-root/temp-dir
+wiring never working for a module with more than one internal package
+(gremlins avoided this because it operates in place, inside the real
+module checkout, never in a linked-out temp copy).
+
+Transparency gap this spike separately confirms: even ooze's own -v
+("verbose") mode does not print the underlying command's output for a
+"killed" mutant — internal/verbosetestrunner/verbosetestrunner.go logs
+only "running tests on '%s'…" / "tests for '%s' failed; mutant killed",
+never the command's stdout/stderr — so a user cannot see the "go.mod file
+not found" text even by turning on every verbosity flag ooze exposes; it
+had to be found by reading this vendored source, not by running the tool
+harder.
+
+Restore performed after this experiment:
+  $ git checkout -- .   (reverts go.mod, go.sum, deletes mutation_test.go via git clean)
+  $ git clean -fd
+  $ git status --porcelain   (empty)

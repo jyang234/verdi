@@ -1,0 +1,81 @@
+# Fix-round-1 evidence for R-4: line-range-overlap check replacing the
+# broken `grep hasDotDotElement` retro-witness (dupl's own message text
+# never carries a function name, so that grep could not discriminate the
+# outcome either way — see the review, R-4).
+#
+# Query: docs/spikes/strict-lint-target/oq2-dupl-overlap-check.py <dupl.json>
+# Target ranges (the full function, declaration through closing brace,
+# verified by `awk 'NR==485,NR==495{print NR": "$0}' cmd/verdi/context.go`
+# and the equivalent for internal/readinessload/conflict.go, both at
+# 1be75d01, in verdi-wt/scratch-lint-w1):
+#   cmd/verdi/context.go:485-494
+#   internal/readinessload/conflict.go:232-241
+#
+# Inputs regenerated in verdi-wt/scratch-lint-w1 (checked out --detach to
+# each commit, restored to --detach e963f4d0 clean afterward — same
+# discipline as oq2-retro-witness.txt); JSON outputs themselves are not
+# committed (the threshold=10 one alone is 6.6MB) — every one is exactly
+# reproducible from the command below plus the commit + threshold named.
+
+## 1be75d01, scope ./internal/readinessload/... ./cmd/verdi/... ./internal/store/...
+
+Command (repeated per threshold, --config swapped for a settings.dupl.threshold=<N> override at 30/20/15/10):
+  golangci-lint run --config <strict-config-or-threshold-override> --enable-only dupl \
+    --max-issues-per-linter=0 --max-same-issues=0 \
+    --output.json.path=<path>.json \
+    ./internal/readinessload/... ./cmd/verdi/... ./internal/store/...
+
+| dupl.threshold | total findings | overlap-check result |
+|---|---|---|
+| 150 (default, the strict config as committed) | 6 | NO OVERLAP |
+| 30 | 944 | NO OVERLAP |
+| 20 | 3765 | NO OVERLAP |
+| 15 | 6919 | NO OVERLAP |
+| 10 | 13521 | NO OVERLAP |
+
+Raw tool output, each threshold:
+
+== threshold=150 ==
+NO OVERLAP
+(checked 6 total findings in /tmp/dupl-1be75d01-t150.json)
+
+== threshold=30 ==
+NO OVERLAP
+(checked 944 total findings in /tmp/dupl-1be75d01-t30.json)
+
+== threshold=20 ==
+NO OVERLAP
+(checked 3765 total findings in /tmp/dupl-1be75d01-t20.json)
+
+== threshold=15 ==
+NO OVERLAP
+(checked 6919 total findings in /tmp/dupl-1be75d01-t15.json)
+
+== threshold=10 ==
+NO OVERLAP
+(checked 13521 total findings in /tmp/dupl-1be75d01-t10.json)
+
+## 410db101, same scope, default threshold (150)
+
+hasDotDotElement no longer exists anywhere in the tree at this commit (both
+copies were replaced by calls to the new exported store.HasDotDotElement —
+see oq2-retro-witness.txt), so the target ranges above no longer name that
+function; the overlap check is run anyway, against the same fixed ranges,
+for a like-for-like comparison with the first head:
+
+== threshold=150 ==
+NO OVERLAP
+(checked 6 total findings in /tmp/dupl-410db101-t150.json)
+
+## Conclusion
+
+The line-range-overlap check confirms, discriminately this time, exactly
+what the withdrawn grep-based witness claimed by accident: dupl never
+reports the hasDotDotElement pair at 1be75d01, at any threshold from the
+default 150 down to 10. Combined with R-1's package-scope finding
+(oq2-dupl-package-scope-output.txt: 0/37 of this same lane's own full-tree
+dupl findings are cross-package, and the hasDotDotElement pair is itself
+cross-package — cmd/verdi's `package main` vs internal/readinessload's
+`package readinessload`), the mechanism is now the correct one: dupl runs
+per package and structurally cannot see this pair, at any threshold,
+regardless of the function's length.

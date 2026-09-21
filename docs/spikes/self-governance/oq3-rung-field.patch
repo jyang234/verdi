@@ -1,0 +1,154 @@
+diff --git a/internal/policyartifact/claim.go b/internal/policyartifact/claim.go
+index fc6af1e8..8ac7a689 100644
+--- a/internal/policyartifact/claim.go
++++ b/internal/policyartifact/claim.go
+@@ -3,6 +3,7 @@ package policyartifact
+ import (
+ 	"fmt"
+ 	"sort"
++	"strings"
+ 
+ 	"github.com/jyang234/verdi/internal/canonjson"
+ )
+@@ -98,27 +99,63 @@ func (o Operator) setValued() bool {
+ // the default is not overridable, and the field is mandatory-explicit so
+ // silence never grants refinement).
+ type Claim struct {
+-	ID          string   `yaml:"id" json:"id"`
+-	Family      Family   `yaml:"family" json:"family"`
+-	Operator    Operator `yaml:"operator" json:"operator"`
+-	Subject     string   `yaml:"subject" json:"subject"`
+-	Values      []string `yaml:"values" json:"values"`
+-	Bound       *int     `yaml:"bound,omitempty" json:"bound,omitempty"`
+-	Scope       Scope    `yaml:"scope" json:"scope"`
+-	Overridable bool     `yaml:"overridable" json:"overridable"`
++	ID                 string   `yaml:"id" json:"id"`
++	Family             Family   `yaml:"family" json:"family"`
++	Operator           Operator `yaml:"operator" json:"operator"`
++	Subject            string   `yaml:"subject" json:"subject"`
++	Values             []string `yaml:"values" json:"values"`
++	Bound              *int     `yaml:"bound,omitempty" json:"bound,omitempty"`
++	Scope              Scope    `yaml:"scope" json:"scope"`
++	Overridable        bool     `yaml:"overridable" json:"overridable"`
++	Rung               Rung     `yaml:"rung" json:"rung"`
++	ViolationLooksLike string   `yaml:"violation_looks_like,omitempty" json:"violation_looks_like,omitempty"`
++}
++
++// Rung is a policy claim's closed-enum enforcement strength (spec/self-
++// governance dc-1 SPIKE DRAFT — oq-3), strongest first. This type and the
++// two Claim fields below are a throwaway draft: spike/self-governance
++// scratch evidence only, never committed outside a .patch file under
++// docs/spikes/self-governance/ (see that spike's oq-3 section for the
++// amendment-order ruling this draft supports).
++type Rung string
++
++const (
++	RungUnrepresentable Rung = "unrepresentable"
++	RungAnalyzer        Rung = "analyzer"
++	RungGateAssertion   Rung = "gate-assertion"
++	RungReview          Rung = "review"
++	RungProse           Rung = "prose"
++)
++
++var knownRungs = map[Rung]bool{
++	RungUnrepresentable: true,
++	RungAnalyzer:        true,
++	RungGateAssertion:   true,
++	RungReview:          true,
++	RungProse:           true,
++}
++
++// Validate reports whether r is one of the five closed rungs.
++func (r Rung) Validate() error {
++	if !knownRungs[r] {
++		return fmt.Errorf("policyartifact: unknown enforcement rung %q (known: unrepresentable, analyzer, gate-assertion, review, prose)", r)
++	}
++	return nil
+ }
+ 
+ // claimDoc is Claim's strict decode target: pointers make every field's
+ // presence explicit.
+ type claimDoc struct {
+-	ID          *string   `yaml:"id"`
+-	Family      *string   `yaml:"family"`
+-	Operator    *string   `yaml:"operator"`
+-	Subject     *string   `yaml:"subject"`
+-	Values      *[]string `yaml:"values"`
+-	Bound       *int      `yaml:"bound"`
+-	Scope       *scopeDoc `yaml:"scope"`
+-	Overridable *bool     `yaml:"overridable"`
++	ID                 *string   `yaml:"id"`
++	Family             *string   `yaml:"family"`
++	Operator           *string   `yaml:"operator"`
++	Subject            *string   `yaml:"subject"`
++	Values             *[]string `yaml:"values"`
++	Bound              *int      `yaml:"bound"`
++	Scope              *scopeDoc `yaml:"scope"`
++	Overridable        *bool     `yaml:"overridable"`
++	Rung               *string   `yaml:"rung"`
++	ViolationLooksLike *string   `yaml:"violation_looks_like"`
+ }
+ 
+ func (d claimDoc) toClaim(field string) (Claim, error) {
+@@ -140,20 +177,28 @@ func (d claimDoc) toClaim(field string) (Claim, error) {
+ 		return Claim{}, missing("scope")
+ 	case d.Overridable == nil:
+ 		return Claim{}, missing("overridable")
++	case d.Rung == nil:
++		return Claim{}, missing("rung")
+ 	}
+ 	scope, err := d.Scope.toScope(field + ".scope")
+ 	if err != nil {
+ 		return Claim{}, err
+ 	}
++	violation := ""
++	if d.ViolationLooksLike != nil {
++		violation = *d.ViolationLooksLike
++	}
+ 	return Claim{
+-		ID:          *d.ID,
+-		Family:      Family(*d.Family),
+-		Operator:    Operator(*d.Operator),
+-		Subject:     *d.Subject,
+-		Values:      emptyIfNil(*d.Values),
+-		Bound:       d.Bound,
+-		Scope:       scope,
+-		Overridable: *d.Overridable,
++		ID:                 *d.ID,
++		Family:             Family(*d.Family),
++		Operator:           Operator(*d.Operator),
++		Subject:            *d.Subject,
++		Values:             emptyIfNil(*d.Values),
++		Bound:              d.Bound,
++		Scope:              scope,
++		Overridable:        *d.Overridable,
++		Rung:               Rung(*d.Rung),
++		ViolationLooksLike: violation,
+ 	}, nil
+ }
+ 
+@@ -174,6 +219,24 @@ func (c Claim) Validate() error {
+ 	if err := c.Operator.Validate(); err != nil {
+ 		return err
+ 	}
++	if err := c.Rung.Validate(); err != nil {
++		return err
++	}
++	// dc-2 (owner amendment to remedy design 6.1): a rule that stays on the
++	// review or prose rung must state what a violation looks like, or a
++	// human reader cannot hunt for it either; the two mechanically-
++	// enforced rungs carry no such sentence because their witness IS the
++	// analyzer/gate-assertion result, not a human-read description.
++	switch c.Rung {
++	case RungReview, RungProse:
++		if strings.TrimSpace(c.ViolationLooksLike) == "" {
++			return fmt.Errorf("policyartifact: claim %s: rung %q requires a violation_looks_like sentence (dc-2)", c.ID, c.Rung)
++		}
++	default:
++		if c.ViolationLooksLike != "" {
++			return fmt.Errorf("policyartifact: claim %s: violation_looks_like is only valid on the review/prose rungs, got rung %q", c.ID, c.Rung)
++		}
++	}
+ 	if c.Subject == "" {
+ 		return fmt.Errorf("policyartifact: claim %s: subject is required", c.ID)
+ 	}

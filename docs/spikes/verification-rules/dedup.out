@@ -1,0 +1,64 @@
+raw objects scored: 277
+frozen-predecessor directories (supersedes-link targets): 5 -> [comparative-spike-experiments comparative-spike-experiments-v2 context-integrity guided-lifecycle-governance guided-lifecycle-governance-v2]
+distinct texts: 206
+live-distinct texts (excluding frozen predecessors, re-pointed to a live sibling where one exists): 206
+
+threshold sweep on raw-277 (n=277):
+  T=13: 23
+  T=14: 17
+  T=15: 13
+  T=16: 12
+  T=17: 7
+  T=18: 4
+  T=19: 3
+
+threshold sweep on distinct-206 (n=206):
+  T=13: 16
+  T=14: 14
+  T=15: 11
+  T=16: 10
+  T=17: 7
+  T=18: 4
+  T=19: 3
+
+threshold sweep on live-distinct (n=206):
+  T=13: 16
+  T=14: 14
+  T=15: 11
+  T=16: 10
+  T=17: 7
+  T=18: 4
+  T=19: 3
+
+top-20 sample, deduplicated:
+  #1  claims=24 DISTINCT label=true  ai-assisted-spec-design#co-3
+  #2  claims=22 DISTINCT label=true  readiness-recovery#ac-8
+  #3  claims=21 DISTINCT label=true  ai-assisted-spec-design#co-9
+  #4  claims=19 DISTINCT label=true  ai-assisted-spec-design#co-5
+  #5  claims=18 DISTINCT label=true  readiness-recovery#ac-9
+  #6  claims=18 DISTINCT label=false sealed-claude-vatc-events#ac-3
+  #7  claims=18 DISTINCT label=false sealed-codex-execution#ac-3
+  #8  claims=17 DISTINCT label=true  ai-assisted-spec-design#co-2
+  #9  claims=17 DISTINCT label=true  comparative-spike-experiments#ac-6
+  #10 claims=17 DUP    label=true  comparative-spike-experiments-v2#ac-6
+  #11 claims=17 DUP    label=true  comparative-spike-experiments-v3#ac-6
+  #12 claims=17 DISTINCT label=true  spec-documents#ac-1
+  #13 claims=16 DISTINCT label=false sealed-claude-vatc-events#ac-2
+  #14 claims=15 DISTINCT label=false context-integrity#ac-2
+  #15 claims=15 DUP    label=false context-integrity-v2#ac-2
+  #16 claims=15 DISTINCT label=false context-receipts-review#ac-1
+  #17 claims=15 DISTINCT label=false readiness-recovery#ac-1
+  #18 claims=14 DISTINCT label=true  comparative-spike-experiments#ac-1
+  #19 claims=14 DUP    label=true  comparative-spike-experiments-v2#ac-1
+  #20 claims=14 DUP    label=true  comparative-spike-experiments-v3#ac-1
+distinct judgments in top-20 sample: 15
+of which TRUE=9 FALSE=6 (unconditioned FP rate 40.0%)
+
+FP rate by threshold on the deduplicated 15-judgment sample:
+  T=13: sample=15 false=6 rate=40.0%
+  T=14: sample=14 false=6 rate=42.9%
+  T=15: sample=11 false=3 rate=27.3%
+  T=16: sample=10 false=2 rate=20.0%
+  T=17: sample=7 false=2 rate=28.6%
+  T=18: sample=4 false=0 rate=0.0%
+  T=19: sample=3 false=0 rate=0.0%

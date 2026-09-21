@@ -1,0 +1,81 @@
+diff --git a/internal/readinessload/clausewitness_test.go b/internal/readinessload/clausewitness_test.go
+new file mode 100644
+index 00000000..0fde5c1a
+--- /dev/null
++++ b/internal/readinessload/clausewitness_test.go
+@@ -0,0 +1,47 @@
++package readinessload
++
++import (
++	"fmt"
++	"os"
++	"path/filepath"
++	"regexp"
++	"strings"
++	"testing"
++)
++
++// TestClauseWitnessCoverage is spike/verification-rules oq-2 Seam B
++// evidence, REVISION per lane-verification-rules-review.md VR-2
++// (docs/spikes/verification-rules/, THROWAWAY — this whole checkout is a
++// /tmp clone detached at e963f4d0 on agent/readiness-recovery-wave-1;
++// nothing here is ever committed to any real branch). It collects every
++// `// verdi:clause <ref>` marker under internal/ and reports, for
++// readiness-recovery co-2's nine prohibitions (c1..c9), which have a
++// marked witness in the REAL wave-1 codebase.
++func TestClauseWitnessCoverage(t *testing.T) {
++	markerRe := regexp.MustCompile(`verdi:clause (\S+)`)
++	found := map[string]bool{}
++	err := filepath.Walk("..", func(path string, info os.FileInfo, walkErr error) error {
++		if walkErr != nil || info.IsDir() || !strings.HasSuffix(path, "_test.go") {
++			return nil
++		}
++		data, rerr := os.ReadFile(path)
++		if rerr != nil {
++			return rerr
++		}
++		for _, m := range markerRe.FindAllStringSubmatch(string(data), -1) {
++			found[m[1]] = true
++		}
++		return nil
++	})
++	if err != nil {
++		t.Fatalf("walking internal/ for clause markers: %v", err)
++	}
++	for i := 1; i <= 9; i++ {
++		ref := fmt.Sprintf("spec/readiness-recovery#co-2/c%d", i)
++		if found[ref] {
++			t.Logf("WITNESSED: %s", ref)
++		} else {
++			t.Errorf("MISSING WITNESS: %s", ref)
++		}
++	}
++}
+diff --git a/internal/readinessload/load_test.go b/internal/readinessload/load_test.go
+index 18f3dfae..00ad3c29 100644
+--- a/internal/readinessload/load_test.go
++++ b/internal/readinessload/load_test.go
+@@ -807,6 +807,23 @@ func snapshotDataTree(t *testing.T, root string) map[string]int64 {
+ 	return files
+ }
+ 
++// verdi:clause spec/readiness-recovery#co-2/c1 — SPIKE-INFERRED, not
++// author-attributed: the wave-1 author's own comment below cites co-2 in
++// aggregate ("proves co-2 directly"), never a specific c1..c9 sub-clause
++// (co-2 is not enumerated into named clauses in the frontmatter today —
++// exactly the gap spec/verification-rules oq-1/oq-3 examines). This spike
++// infers c1/c2/c5/c6 coverage from the check's own MECHANISM (a full,
++// name-independent .verdi/data tree sweep before/after Load(), so it
++// structurally catches any new file-shaped artifact regardless of what
++// it would have been named): no readiness file (c1), no cache (c2), no
++// receipt (c5), no event log (c6). It does not and cannot witness a
++// schema-field addition (c3 status field, c4 transition), a new artifact
++// KIND (c7), an invented recovery lifecycle state (c8 — no recover verb
++// exists anywhere in this checkout), or the projection-authority claim
++// (c9) — those five have no witness anywhere in this package.
++// verdi:clause spec/readiness-recovery#co-2/c2
++// verdi:clause spec/readiness-recovery#co-2/c5
++// verdi:clause spec/readiness-recovery#co-2/c6
+ // assertNoPersistence proves co-2 directly (fix round 1, Important 1): the
+ // full set of regular-file paths and sizes under root's .verdi/data tree is
+ // unchanged from before, the snapshotDataTree result captured immediately

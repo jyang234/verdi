@@ -1,0 +1,14 @@
+Load average immediately before/after each battery run (10 cores; other
+spike lanes ran concurrently on this machine throughout — every timing
+below is measured under shared load, per this lane's evidence discipline):
+
+solo before-battery : before 30.66 47.51 31.80  ->  after 23.13 44.41 31.14
+solo adopt + after-battery : before 18:28 up... 17.02 41.26 30.39 -> after 13.53 38.89 29.79
+team before-battery : before 10.03 34.40 28.60  ->  after  8.59 32.50 28.05
+team adopt (retried after an unrelated billing interruption; ~1h50m gap) :
+  after 2.26 2.30 1.94 -> after 4.67 2.82 2.14 (machine much quieter by
+  this point — other lanes had largely finished)
+
+None of the commands measured here are timing-sensitive (all are
+correctness/content checks: exit code and JSON/text diffs), so shared
+load affects wall-clock duration only, never the reported result.

@@ -1,0 +1,69 @@
+oq-2 evidence (fix round 1): the cmd/verdi "infeasible" claim, re-probed
+with Go's per-package test timeout raised.
+
+WHY. The first version of the README reported cmd/verdi as NOT ANSWERED /
+infeasible on the strength of a 600.587s FAIL inside gremlins' own
+coverage-gathering pass (whole-module-dryrun.log:137-149). 600s is Go's
+DEFAULT per-package test timeout, and gremlins passes no -timeout flag on
+that pass at all — the instrumented trace in
+oq1-gremlins-mainpkg-defect.txt shows the coverage argv verbatim:
+
+  ARGV=test -cover -coverprofile /var/folders/.../coverage ./cmd/e2eharness/...
+
+No -timeout. `gremlins unleash --help` exposes --timeout-coefficient, but
+that only scales the timeout of the PER-MUTANT runs
+(internal/engine/executor.go:227, `args = append(args, "-timeout",
+(2*time.Second + m.testExecutionTime).String())`); there is no knob for
+the coverage pass. So the question the spec needs answered is whether
+cmd/verdi's suite is "slow today under load" or "out of reach", and that
+is answerable without gremlins: run the same pass with the timeout raised.
+
+WHAT WAS RUN. In a throwaway local clone of the scratch worktree detached
+at e963f4d0 (/tmp/fix-mr), nothing else started by this session running
+concurrently:
+
+  $ uptime
+  22:23  up 16 days, 15:10, 6 users, load averages: 29.53 27.76 23.52
+  $ go test -timeout 30m -cover -coverprofile /tmp/fix-mr-cmdverdi.cov ./cmd/verdi/...
+  ok  	github.com/jyang234/verdi/cmd/verdi	431.731s	coverage: 61.3% of statements
+  real 439.59
+  user 170.51
+  sys 172.55
+  exit status: 0
+  $ uptime
+  22:30  up 16 days, 15:18, 6 users, load averages: 3.96 11.46 17.03
+
+Load fell from 29.53 to 3.96 across the run (other lanes' work finishing,
+not this session's).
+
+WHAT IT MEANS.
+
+1. cmd/verdi's suite is NOT out of reach: it passes in 431.731s, 7.2
+   minutes, with coverage. The earlier 600.587s FAIL was the default
+   10-minute wall being blown under heavier load, not a suite that cannot
+   finish.
+
+2. But the margin is thin and the wall is unconfigurable. 431.731s against
+   a hard 600s default is 1.39x of headroom, in a pass gremlins gives no
+   flag to extend. The earlier FAIL is therefore reproducible whenever the
+   machine is ~40% busier than it was here — which it was, for most of this
+   spike's session.
+
+3. It is not the binding blocker anyway. cmd/verdi is `package main`, so
+   gremlins v0.6.0 cannot measure it at all: every mutant would be scored
+   KILLED by a `[setup failed]` that never compiles the code
+   (oq1-gremlins-mainpkg-defect.txt). Raising the coverage timeout would
+   buy a 431.731s baseline pass followed by a report that is 100% false.
+
+4. If the main-package defect were fixed, the per-mutant cost would be set
+   by this same figure: gremlins' per-mutant timeout is
+   2s + elapsed*coefficient, i.e. 2s + 431.731s*10 = ~72 minutes per
+   mutant at the settings this spike used, and each mutant run pays up to
+   one full suite. That is the number co-3's budget has to survive, and it
+   is why cmd/verdi-sized packages need a different strategy (a -run-scoped
+   subset, or exclusion) rather than a bigger timeout.
+
+STATUS: the probe was RUN, once, not declared untried. cmd/verdi's oq-2
+row stays NOT ANSWERED for mutant counts, but the reason is corrected: the
+tool cannot measure `package main`, and the timeout is a secondary,
+quantified risk rather than the cause.

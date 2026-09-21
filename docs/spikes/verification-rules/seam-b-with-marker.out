@@ -1,0 +1,17 @@
+=== RUN   TestClauseWitnessCoverage
+    clausewitness_test.go:42: MISSING WITNESS: spec/readiness-recovery#co-2/c1
+    clausewitness_test.go:42: MISSING WITNESS: spec/readiness-recovery#co-2/c2
+    clausewitness_test.go:42: MISSING WITNESS: spec/readiness-recovery#co-2/c3
+    clausewitness_test.go:42: MISSING WITNESS: spec/readiness-recovery#co-2/c4
+    clausewitness_test.go:42: MISSING WITNESS: spec/readiness-recovery#co-2/c5
+    clausewitness_test.go:42: MISSING WITNESS: spec/readiness-recovery#co-2/c6
+    clausewitness_test.go:42: MISSING WITNESS: spec/readiness-recovery#co-2/c7
+    clausewitness_test.go:42: MISSING WITNESS: spec/readiness-recovery#co-2/c8
+    clausewitness_test.go:40: WITNESSED: spec/readiness-recovery#co-2/c9
+--- FAIL: TestClauseWitnessCoverage (0.10s)
+FAIL
+FAIL	github.com/jyang234/verdi/internal/readinesspilot	0.311s
+testing: warning: no tests to run
+PASS
+ok  	github.com/jyang234/verdi/internal/readinesspilot/readinesstest	(cached) [no tests to run]
+FAIL

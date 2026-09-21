@@ -1,0 +1,21 @@
+$ ls .verdi/specs/active | wc -l
+      39
+
+$ ls .verdi/specs/active | grep -E "\-v[23]\$"
+comparative-spike-experiments-v2
+comparative-spike-experiments-v3
+context-integrity-v2
+guided-lifecycle-governance-v2
+guided-lifecycle-governance-v3
+count: 5
+
+$ ls .verdi/specs/active | grep -E "\-spike\$"
+disclosure-enumeration-spike
+mutation-ratchet-spike
+ritual-write-scope-spike
+self-governance-spike
+strict-lint-target-spike
+verification-rules-spike
+count: 6
+
+reconciliation: 39 - 5 - 6 = 28

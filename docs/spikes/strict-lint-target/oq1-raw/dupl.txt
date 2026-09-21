@@ -1,0 +1,3 @@
+37 issues:
+* dupl: 37
+exit=1

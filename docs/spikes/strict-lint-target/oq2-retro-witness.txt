@@ -1,0 +1,111 @@
+# oq-2 retro-witness raw evidence
+# scratch worktree: verdi-wt/scratch-lint-w1, checked out --detach per commit, restored to e963f4d0 after
+# config: /Users/johnyang/code/verdi-system/verdi-wt/spike-strict-lint-target/docs/spikes/strict-lint-target/golangci.strict.yml (golangci-lint v2.5.0)
+# scope: ./internal/readinessload/... ./cmd/verdi/... ./internal/store/...
+
+== git checkout --detach 1be75d01 ==
+Previous HEAD position was e963f4d0 Pin the eventual readiness concerns in the cockpit Playwright suite
+HEAD is now at 1be75d01 Warm the judge cache at serve startup and hand the loader to the server
+1be75d01e884376a1e2bb32835c04b4c5b69a543
+
+== command: golangci-lint run --config $CONFIG --enable-only gochecknoglobals --max-issues-per-linter=0 --max-same-issues=0 ./internal/readinessload/... ./cmd/verdi/... ./internal/store/... | grep serveReadinessLoader ==
+../../../../scratch-lint-w1/cmd/verdi/serve.go:142:2: serveReadinessLoader is a global variable (gochecknoglobals)
+	serveReadinessLoader      readinessload.Loader
+grep exit=0 (0=reported, 1=silent)
+
+== command: golangci-lint run --config $CONFIG --enable-only dupl --max-issues-per-linter=0 --max-same-issues=0 (default threshold=150) ./internal/readinessload/... ./cmd/verdi/... ./internal/store/... | grep hasDotDotElement ==
+grep exit=1 (0=reported, 1=silent)
+
+== where hasDotDotElement is defined at 1be75d01 (grep -rn, whole tree) ==
+cmd/verdi/context.go:485:func hasDotDotElement(p string) bool {
+internal/readinessload/conflict.go:232:func hasDotDotElement(p string) bool {
+
+== git checkout --detach 410db101 ==
+Previous HEAD position was 1be75d01 Warm the judge cache at serve startup and hand the loader to the server
+HEAD is now at 410db101 Fix round 1: harden co-2 persistence check, add a hermetic conflict-provider seam
+410db101019797a35fc6c3ce8cd367864f38331c
+
+== command: golangci-lint run ... --enable-only gochecknoglobals ... | grep serveReadinessLoader ==
+../../../../scratch-lint-w1/cmd/verdi/serve.go:149:2: serveReadinessLoader is a global variable (gochecknoglobals)
+	serveReadinessLoader      readinessload.Loader
+grep exit=0 (0=reported, 1=silent)
+
+== command: golangci-lint run ... --enable-only dupl ... | grep hasDotDotElement ==
+grep exit=1 (0=reported, 1=silent)
+
+== whole-tree search for hasDotDotElement at 410db101 ==
+(empty = name no longer exists anywhere in the tree)
+
+== the fix: git diff 1be75d01 410db101 -- internal/readinessload/conflict.go (relevant hunk) ==
+diff --git a/internal/readinessload/conflict.go b/internal/readinessload/conflict.go
+index a541c517..4bb0bb37 100644
+--- a/internal/readinessload/conflict.go
++++ b/internal/readinessload/conflict.go
+@@ -148,7 +148,7 @@ func (conflictRefResolver) Covers(context.Context, string, string) (policyconfli
+ // the checkout start at the already-resolved store root, avoiding false
+ // positives from platform-level aliases above the checkout.
+ func ValidatedContextRequestPath(root, requestPath string) (string, error) {
+-	if hasDotDotElement(requestPath) {
++	if store.HasDotDotElement(requestPath) {
+ 		return "", errors.New(`--context-request must not contain a ".." path element`)
+ 	}
+ 	requestAbs, err := filepath.Abs(requestPath)
+@@ -221,46 +221,32 @@ func ValidatedContextRequestPath(root, requestPath string) (string, error) {
+ 	return requestAbs, nil
+ }
+ 
+-// hasDotDotElement reports whether p contains a ".." PATH ELEMENT under
+-// either separator convention. It is element-wise, never a substring test:
+-// a file honestly named "..notes.json" or "a..b" carries no traversal and
+-// stays allowed. A small, deliberate duplicate of cmd/verdi/context.go's
+-// own helper: that file's other three call sites (--out path validation for
+-// unrelated verbs) stay in cmd/verdi, so moving the shared name here would
+-// only add a reverse cmd/verdi -> internal/readinessload dependency for an
+-// unrelated concern.
+-func hasDotDotElement(p string) bool {
+-	for _, seg := range strings.FieldsFunc(p, func(r rune) bool {
+-		return r == '/' || r == filepath.Separator
+-	}) {
+-		if seg == ".." {
+-			return true
+-		}
+-	}
+-	return false
+-}
+-
+ // ContextRequestSpec safely validates path (refusing ".." and symlink path
+-// components, exactly as Load's own request handling does) and decodes it
+-// far enough to report the request's declared target spec ref, without
+-// evaluating any conflict. cmd/verdi's serve startup pre-run uses this to
+-// learn which spec to warm before calling Load, since Load itself requires
+-// ref as an explicit, already-known parameter.
+-func ContextRequestSpec(root, path string) (string, error) {
++// components, exactly as Load's own request handling does), reads it
++// exactly once, and decodes it — reporting the request's declared target
+
+== 410db101 ancestry ==
+410db101 is NOT an ancestor of main 5f60c76c (topic-branch commit; net changes landed later/differently)
+* (HEAD detached at 410db101)
++ agent/readiness-recovery-wave-1
+
+== restore scratch worktree to e963f4d0, detached ==
+Previous HEAD position was 410db101 Fix round 1: harden co-2 persistence check, add a hermetic conflict-provider seam
+HEAD is now at e963f4d0 Pin the eventual readiness concerns in the cockpit Playwright suite
+## HEAD (no branch)
+e963f4d093c6b93726d63a5079654c9c09202452
+
+== supplementary: is dupl's silence on hasDotDotElement at 1be75d01 a threshold artifact? ==
+== git checkout --detach 1be75d01 ==
+Previous HEAD position was e963f4d0 Pin the eventual readiness concerns in the cockpit Playwright suite
+HEAD is now at 1be75d01 Warm the judge cache at serve startup and hand the loader to the server
+dupl.settings.threshold=150: total-issues=6 hasDotDotElement-region-hits=0
+dupl.settings.threshold=30: total-issues=944 hasDotDotElement-region-hits=0
+dupl.settings.threshold=20: total-issues=3765 hasDotDotElement-region-hits=0
+dupl.settings.threshold=15: total-issues=6919 hasDotDotElement-region-hits=0
+dupl.settings.threshold=10: total-issues=13521 hasDotDotElement-region-hits=0
+
+== restore scratch worktree to e963f4d0, detached ==
+Previous HEAD position was 1be75d01 Warm the judge cache at serve startup and hand the loader to the server
+HEAD is now at e963f4d0 Pin the eventual readiness concerns in the cockpit Playwright suite
+## HEAD (no branch)
+e963f4d093c6b93726d63a5079654c9c09202452

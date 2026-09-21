@@ -1,0 +1,11 @@
+commit d75d8686f6b68919b0c67f025f748ea02eaeb3b2
+Author: Spike Operator <spike-operator@example.invalid>
+Date:   Sun Sep 20 18:28:37 2026 -0400
+
+    policy adopt: starter constitution (solo profile)
+
+ .verdi/constitution/consumers.json     |  1 +
+ .verdi/policy/constitution.md          | 30 ++++++++++++++++++++++++++++++
+ .verdi/policy/policies/starter.md      | 19 +++++++++++++++++++
+ .verdi/policy/profiles/starter-solo.md | 26 ++++++++++++++++++++++++++
+ 4 files changed, 76 insertions(+)

@@ -1,0 +1,163 @@
+oq-2 / dc-2 evidence (fix round 1): "only the files the change touched are
+mutated" IS achievable natively, with gremlins' own -E/--exclude-files.
+
+WHAT THE FIRST VERSION CLAIMED, AND WHY IT WAS WRONG
+
+The first version of the README said dc-2's "never mutates files the change
+did not touch" was "honored by post-filtering" gremlins' per-file JSON
+report. That is not compliance. Post-filtering runs every mutant in the
+package and then drops rows from the report: for internal/store it
+generated 101 mutants and kept 16. dc-2 constrains what RUNS, not what is
+reported, and the whole-package run is also why every "seconds" cell in
+that version was a whole-package figure rather than a touched-files cost.
+The README further asserted gremlins "has no single-file target". It has
+a file-scoping mechanism; the first version never tried it.
+
+THE MECHANISM, FROM GREMLINS' OWN SOURCE
+
+  $ gremlins unleash --help
+  ...
+  -E, --exclude-files stringArray   exclude files from Gremlins run by filepath regexp
+
+$GOMODCACHE/github.com/go-gremlins/gremlins@v0.6.0/internal/exclusion/
+rules.go, verbatim:
+
+  // New creates exclusion rules from the configuration.
+  func New() (Rules, error) {
+  	var rules Rules
+  	flagValues := viper.GetStringSlice(configuration.UnleashExcludeFiles)
+  	for i, s := range flagValues {
+  		r, err := regexp.Compile(s)
+  		if err != nil {
+  			return nil, fmt.Errorf("error in exclude-files param value #%d: %w", i, err)
+  		}
+  		rules = append(rules, r)
+  	}
+  	return rules, nil
+  }
+
+  // IsFileExcluded returns true if the given path matches any of the exclusion rules.
+  func (r Rules) IsFileExcluded(path string) bool {
+  	if len(r) == 0 {
+  		return false
+  	}
+  	for _, rule := range r {
+  		if rule.MatchString(path) {
+  			return true
+  		}
+  	}
+  	return false
+  }
+
+internal/engine/engine.go's Run, verbatim, is where it is applied:
+
+  		_ = fs.WalkDir(mu.fs, ".", func(path string, _ fs.DirEntry, _ error) error {
+  			isGoCode := filepath.Ext(path) == ".go" && !strings.HasSuffix(path, "_test.go")
+
+  			if isGoCode && !mu.codeData.Exclusion.IsFileExcluded(path) {
+  				mu.runOnFile(path)
+  			}
+
+  			return nil
+  		})
+
+Three properties follow, and all three matter to dc-2:
+
+ (a) The exclusion is consulted BEFORE runOnFile, so an excluded file is
+     never parsed and never produces a mutant. Nothing is generated and
+     then discarded. This is a constraint on what runs.
+ (b) `path` comes from `fs.WalkDir(mu.fs, ".")` where `mu.fs` is
+     `os.DirFS(filepath.Join(mod.Root, mod.CallingDir))` (engine.go's New),
+     i.e. it is relative to the TARGET PACKAGE directory. So for
+     `gremlins unleash ./internal/store` the regexps match bare file names
+     like `paths.go`, not `internal/store/paths.go`. Anchor them:
+     `-E '^paths\.go$'`.
+ (c) It is an EXCLUDE list and Go's regexp has no negative lookahead, so
+     "mutate only these files" is expressed by enumerating the package's
+     other non-test files and excluding each. That is mechanical (the
+     file list comes from the package directory, the keep-list from
+     `git diff --name-only`), which is what run-oq2.sh now does.
+
+  Limitation, stated plainly: -E scopes MUTATION, not the baseline. gremlins
+  still runs one whole-package `go test -cover -coverprofile <f> ./<pkg>/...`
+  before generating any mutant (argv quoted verbatim in
+  oq1-gremlins-mainpkg-defect.txt), and -E does not touch that pass. So a
+  file-scoped run's cost is one whole-package coverage pass plus only the
+  touched files' mutants. dc-2 is about mutation; the coverage pass reads,
+  it does not mutate.
+
+DEMONSTRATION 1 — a 10-file package scoped to 1 file
+
+internal/designapp has 11 non-test .go files. Whole package, dry run:
+
+  $ gremlins unleash --dry-run --output /tmp/fix-mr-designapp-dry.json ./internal/designapp
+  Dry run completed in 6 seconds 607 milliseconds
+  Runnable: 131, Not covered: 10
+  Mutator coverage: 92.91%
+
+  per-file (from that JSON):
+    service.go {'RUNNABLE': 2}
+    board.go {'RUNNABLE': 11}
+    context.go {'RUNNABLE': 42, 'NOT COVERED': 2}
+    provenance.go {'RUNNABLE': 10, 'NOT COVERED': 1}
+    review.go {'RUNNABLE': 27, 'NOT COVERED': 3}
+    capabilities.go {'RUNNABLE': 21, 'NOT COVERED': 3}
+    mutate.go {'RUNNABLE': 1}
+    outcome.go {'RUNNABLE': 9, 'NOT COVERED': 1}
+    projection.go {'RUNNABLE': 8}
+
+Same package with the other ten files excluded:
+
+  $ gremlins unleash --timeout-coefficient 10 --workers 2 \
+      -E '^capabilities\.go$' -E '^context\.go$' -E '^doc\.go$' -E '^mutate\.go$' \
+      -E '^outcome\.go$' -E '^projection\.go$' -E '^provenance\.go$' \
+      -E '^review\.go$' -E '^schema\.go$' -E '^service\.go$' \
+      --output /tmp/fix-mr-designapp-board.json ./internal/designapp
+  exit status: 0
+  uptime before: 15.55 14.73 18.32   after: 29.95 18.14 19.44
+  Gathering coverage... done in 1.024117333s
+        KILLED CONDITIONALS_NEGATION at board.go:41:9
+        ... (11 lines, all board.go)
+  Mutation testing completed in 21 seconds 457 milliseconds
+  Killed: 11, Lived: 0, Not covered: 0
+  Mutator coverage: 100.00%
+
+  report contents: board.go {'KILLED': 11}    <- only the kept file
+
+131 runnable mutants down to 11, all from the one kept file, and the report
+names no other file. That is native scoping, not a post-filter.
+
+DEMONSTRATION 2 — the 18-file package, scoped to its one touched file
+
+cmd/e2eharness has 18 non-test .go files; the wave-1 diff touches one,
+readinessallproven.go. Whole package: 354 + 233 mutants. Excluding the
+other 17: 11 mutants, all on readinessallproven.go. That scoping is what
+made the like-for-like F-1 counterfactual affordable — see
+oq1-gremlins-mainpkg-defect.txt §4. (Its RESULTS are still false for that
+package: it is `package main`. -E fixes the scoping, not the defect.)
+
+DEMONSTRATION 3 — the three measured touched packages
+
+run-oq2.sh now builds the -E list per package from the diff and then
+ASSERTS the report names no untouched file (a SCOPE-LEAK row if it does).
+Full verbatim sweep: run-oq2-operators-all.log. Excluded counts as the
+script reported them:
+
+  internal/journey:       excluded 2 untouched file(s): codec.go record.go
+  internal/readinessload: excluded 0 untouched file(s): none
+  internal/store:         excluded 9 untouched file(s): archivemove.go
+                          discovery.go doc.go manifest.go open.go refpath.go
+                          root.go slug.go treehash.go
+
+No SCOPE-LEAK row appeared, so for all three packages the mutants gremlins
+generated were exactly those in the touched files.
+
+RULING FOR dc-2
+
+"Only files the change touched are mutated" is ACHIEVABLE NATIVELY with
+-E/--exclude-files, given a keep-list computed from `git diff --name-only`
+and the package's own file listing. It is not achievable with -D/--diff,
+which returned SKIPPED for every mutant including touched ones (see the
+README's oq-1 note and gremlins-diff-flag-attempt.log). The README's
+"honored by post-filtering" sentence is withdrawn: post-filtering does not
+honor dc-2, and it is no longer what this spike's script does.

@@ -1,0 +1,10 @@
+{"file":"cmd/e2eharness/draftboards_test.go","line":96,"col":26,"text":"os/exec.Command must not be called. use os/exec.CommandContext","src":"\tout, err := exec.Command(\"git\", \"-C\", storeRoot, \"rev-parse\", \"--abbrev-ref\", \"HEAD\").Output()"}
+{"file":"cmd/e2eharness/emptyglance.go","line":82,"col":23,"text":"net.Listen must not be called. use (*net.ListenConfig).Listen","src":"\tln, err := net.Listen(\"tcp\", \"127.0.0.1:0\")"}
+{"file":"cmd/e2eharness/emptyglance_test.go","line":33,"col":23,"text":"net/http.Get must not be called. use net/http.NewRequestWithContext and (*net/http.Client).Do(*http.Request)","src":"\tresp, err := http.Get(url)"}
+{"file":"cmd/e2eharness/familyboardlinks_test.go","line":36,"col":26,"text":"os/exec.Command must not be called. use os/exec.CommandContext","src":"\tout, err := exec.Command(\"git\", \"-C\", storeRoot, \"rev-parse\", \"--abbrev-ref\", \"HEAD\").Output()"}
+{"file":"cmd/e2eharness/git_test.go","line":31,"col":26,"text":"os/exec.Command must not be called. use os/exec.CommandContext","src":"\tout, err := exec.Command(\"git\", \"-C\", dir, \"log\", \"-1\", \"--format=%at|%ct\").CombinedOutput()"}
+{"file":"cmd/e2eharness/main.go","line":174,"col":26,"text":"net.Listen must not be called. use (*net.ListenConfig).Listen","src":"\tdexLn, err := net.Listen(\"tcp\", dexAddr)"}
+{"file":"cmd/e2eharness/main.go","line":201,"col":27,"text":"net.Listen must not be called. use (*net.ListenConfig).Listen","src":"\tctrlLn, err := net.Listen(\"tcp\", controlAddr)"}
+{"file":"cmd/e2eharness/main.go","line":216,"col":30,"text":"net.Listen must not be called. use (*net.ListenConfig).Listen","src":"\tinspectLn, err := net.Listen(\"tcp\", inspectAddr)"}
+{"file":"cmd/e2eharness/provision_vocab.go","line":230,"col":23,"text":"net.Listen must not be called. use (*net.ListenConfig).Listen","src":"\tln, err := net.Listen(\"tcp\", \"127.0.0.1:0\")"}
+{"file":"cmd/e2eharness/provision_vocab_test.go","line":32,"col":23,"text":"net/http.Get must not be called. use net/http.NewRequestWithContext and (*net/http.Client).Do(*http.Request)","src":"\tresp, err := http.Get(url)"}

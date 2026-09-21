@@ -1,0 +1,4 @@
+verdi-fix-rws close --force-local	/tmp/fix-rws-trial	remote
+verdi-fix-rws close --force-local	/tmp/fix-rws-trial	remote get-url origin
+verdi-fix-rws close --force-local	/tmp/fix-rws-trial	status --porcelain -z --untracked-files=no
+verdi-fix-rws close --force-local	/tmp/fix-rws-trial	rev-parse --show-prefix

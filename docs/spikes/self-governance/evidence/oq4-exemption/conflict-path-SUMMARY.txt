@@ -1,0 +1,134 @@
+Fix round 1 (review finding F2): the policy-conflict path DOES read an
+exemption's review window today, through `verdi context conflict`
+(the doc comment on cmd/verdi/context_conflict.go:207 names build start,
+gate, and close as the same factory's other callers; readiness_snapshot.go
+feeds the same Report into readinesspilot, which serve/workbench/specdoc/
+MCP consume). This corrects the original README's over-generalized "no,
+an exemption's review window does not work end to end today" — that
+sentence was proven true for `verdi lint`/`verdi journey` only, and this
+file's transcripts prove the opposite is true on the conflict path.
+
+## Setup (all in the existing throwaway clone /tmp/spike-sg-exempt, on
+## branch policy/adopt; every step below is a real git commit in that
+## /tmp clone, never in the lane worktree)
+
+1. Registered a `codex` adapter in the constitution (adapters: [{id:
+   codex, version: "1", managed: [AGENTS.md], discovery_filenames:
+   [AGENTS.md]}], copied from the real, tested
+   cmd/verdi/testdata/localoperator/policy/constitution.md fixture) —
+   `context conflict` refuses with "adapter mismatch: requested codex/1;
+   registered []" otherwise.
+2. Ran `verdi context project` to generate the managed AGENTS.md/
+   codex.json projection the adapter registration now requires (this IS
+   a real verdi verb: cmd/verdi/context_project.go, "a thin CLI wrapper
+   over the read-only internal/instructionprojection.Generate").
+3. Registered `policy-exemption-approval` in the constitution's
+   catalog.transitions AND the starter-solo profile's
+   applicable_transitions + a required_approvers row (role: policy-owner,
+   minimum 1) — the untouched starter-solo profile only maps `accept` and
+   `policy-disposition-approval`; without this, EVERY exemption approval
+   resolves "violated-with-witness" regardless of the review window,
+   which would have made the window's own effect unobservable through
+   this path. This is a genuine, disclosed limitation of the untouched
+   starter profile, not a defect this spike is claiming against the
+   product.
+4. Fixed the exemption's `approvals[0].principal` to the REAL canonical
+   principal ID for this clone's own bound git identity —
+   `principal/local/c3Bpa2Utb3BlcmF0b3JAZXhhbXBsZS5pbnZhbGlk` =
+   governanceprincipal.CanonicalPrincipalID("local",
+   "spike-operator@example.invalid") — an earlier draft used a
+   plausible-looking but never-checked `principal/github-org/...` value
+   that resolved authorization "violated-with-witness" for an unrelated
+   reason (wrong trust source), which would have confounded the
+   window-only comparison this section reports.
+5. Pointed `.verdi/verdi.yaml`'s `align.judge_cmd` at a hermetic local
+   `/bin/sh` script that echoes a canned
+   `{"findings":[],"recommendation":"no-conflict",...}` result — the
+   REPOSITORY'S OWN committed `judge_cmd: [claude, -p, --output-format,
+   json]` would otherwise shell out to the real Claude Code CLI on the
+   first `context conflict` attempt (confirmed: that attempt failed on
+   an unrelated real-CLI response-schema mismatch,
+   "unknown field \"duration_api_ms\"", before this fix — never repeated
+   after the fake judge was configured). Constraint 6 (no network in any
+   spike run) is honored from this point on; the one real-CLI invocation
+   that happened before this fix is disclosed here rather than hidden.
+6. Built the request document through the real exported seams
+   (contextcompile.Request/EncodeRequest/DecodeRequest,
+   policyconflict.Request/EncodeRequest — never hand-typed JSON), via
+   `_scratch/oq4context`:
+     go run ./docs/spikes/self-governance/_scratch/oq4context spec/self-governance-spike /tmp/spike-sg-exempt/conflict-request.json
+   (conflict-request.json in this directory is the exact output.)
+
+## The two runs (identical in every field except the exemption's `expiry`)
+
+  cd /tmp/spike-sg-exempt && verdi context conflict --request conflict-request.json
+
+Future window (expiry 2027-06-30, exemption-future-window.md):
+  exit: 1
+  mechanical claim state: proven
+  exemption resolution: {"authorization":"proven","bound":"proven","freshness":"proven","match":"proven","scope":"proven"}
+  removed_claims: [{"policy_id":"policy/starter","claim_id":"golangci-lint-standard-set","claim_digest":"sha256:9f1d..."}]
+  → the claim IS excused.
+  Full report: conflict-future-window-report.json (483 lines pretty-printed)
+
+Lapsed window (expiry 2026-01-01, exemption-lapsed-window.md): after
+swapping the exemption file, `verdi context project` MUST be re-run before
+`context conflict`, or the second run refuses with "instruction projection
+drift" (found by the closure check when following these steps verbatim). Same
+request, same commit history pattern, only the exemption's expiry edited:
+  exit: 1
+  mechanical claim state: proven
+  exemption resolution: {"authorization":"proven","bound":"violated-with-witness","freshness":"proven","match":"proven","scope":"proven"}
+  removed_claims: []
+  → the claim is NOT excused.
+  Full report: conflict-lapsed-window-report.json (483 lines pretty-printed)
+
+`diff` between the two full reports (command: `diff future-window-report
+lapsed-window-report`, both pretty-printed with `python3 -m json.tool` in
+this directory) shows two kinds of change, and only two:
+
+- Meaningful, exactly where F2 said to look: `resolution.bound` (proven
+  vs. violated-with-witness), `removed_claims` (populated vs. empty), and
+  — one level up, a consequence of removal this spike had not
+  anticipated but is exactly what "removed" should mean — the mechanical
+  domain proof itself: `open_domain` flips true (future: the claim is
+  gone, so the "golangci-lint-linter-set" subject is unconstrained) vs.
+  false (lapsed: the claim's own required value is still the active
+  constraint), and `values`/`witnesses` go from `[]`/`[]` to
+  `["standard"]`/`["standard"]` to match.
+- Incidental content-address churn: the report's own top-level `digest`,
+  `effective_policy_digest`, the exact commit `value` named under
+  `repository.head`, `manifest_digest`, and the judge's `input_digest`/
+  `id` all differ — expected and uninteresting, since every one of them
+  is a canonical hash over content that includes the edited `expiry`
+  byte, not a sign that anything else in the evaluation changed.
+
+Nothing else differs: `mechanical[0].state` ("proven" both times —
+neither run's underlying fact was ever actually violated, only whether
+the exemption stood between it and the evaluation), `verdict`,
+`semantic`, and `disclosures` are byte-identical. This is the isolated,
+single-variable proof review finding F2 asked for: resolveBound(e.Expiry,
+...) really does flip between ProofProven and ProofViolatedWithWitness by
+calendar date, and allProven really does gate whether the claim is
+removed — and, one level up, whether the domain the mechanical evaluator
+reasons over is open or still constrained — on the real `verdi context
+conflict` path, through a real store.
+
+## What this does NOT show
+
+Both runs' overall `verdict` is "blocked-unproven" — unrelated to this
+exemption entirely. `spec/self-governance-spike`'s own prose (co-1..co-4,
+dc-1..dc-3, five open questions, problem/outcome) all register as
+semantic candidates needing a disposition; the fake judge's "no-conflict"
+finding is not itself a disposition, so those candidates stay "unproven"
+regardless of the window. A target with no semantic candidates at all
+(a minimal fixture spec, the way cmd/verdi/testdata/localoperator/ builds
+one) would very likely reach verdict "pass" for the future window and
+something else for the lapsed one — not attempted here; this spike's
+mechanical-block-level comparison above is sufficient to answer oq-4
+without adding that extra fixture-authoring step within the timebox.
+
+`verdi lint` and `verdi journey --json` remain byte-identical between the
+lapsed and future windows (unaffected by anything above — see the
+lapsed-/future-lint.stdout and lapsed-/future-journey.stdout files in this
+same directory, produced before this fix round and not touched by it).

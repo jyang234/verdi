@@ -1,0 +1,14 @@
+=== RUN   TestClauseWitnessCoverage
+    clausewitness_test.go:44: MISSING WITNESS: spec/readiness-recovery#co-2/c1
+    clausewitness_test.go:44: MISSING WITNESS: spec/readiness-recovery#co-2/c2
+    clausewitness_test.go:44: MISSING WITNESS: spec/readiness-recovery#co-2/c3
+    clausewitness_test.go:44: MISSING WITNESS: spec/readiness-recovery#co-2/c4
+    clausewitness_test.go:44: MISSING WITNESS: spec/readiness-recovery#co-2/c5
+    clausewitness_test.go:44: MISSING WITNESS: spec/readiness-recovery#co-2/c6
+    clausewitness_test.go:44: MISSING WITNESS: spec/readiness-recovery#co-2/c7
+    clausewitness_test.go:44: MISSING WITNESS: spec/readiness-recovery#co-2/c8
+    clausewitness_test.go:44: MISSING WITNESS: spec/readiness-recovery#co-2/c9
+--- FAIL: TestClauseWitnessCoverage (0.13s)
+FAIL
+FAIL	github.com/jyang234/verdi/internal/readinessload	0.354s
+FAIL

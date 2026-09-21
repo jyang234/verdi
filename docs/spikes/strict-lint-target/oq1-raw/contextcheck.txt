@@ -1,0 +1,3 @@
+43 issues:
+* contextcheck: 43
+exit=1

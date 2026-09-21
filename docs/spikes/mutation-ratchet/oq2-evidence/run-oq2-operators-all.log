@@ -1,0 +1,43 @@
+oq-2 evidence (fix round 1): the configuration-B sweep, verbatim.
+
+Produced by the committed docs/spikes/mutation-ratchet/run-oq2.sh, not by
+a stub and not by hand. Command, in a throwaway local clone of the scratch
+worktree detached at e963f4d0 (never in a worktree):
+
+  $ OPERATORS=all ONLY_PKGS="internal/store internal/readinessload internal/journey" \
+      bash run-oq2.sh /tmp/fix-mr /tmp/fix-mr-bin/gremlins
+  exit status: 0
+
+ONLY_PKGS restricts the sweep to the three packages that have real
+mutant-level data; the other seven touched packages are covered in the
+README's oq-2 section (two are unmeasurable by this tool, five were not
+reached). Unreduced output follows.
+
+----------------------------------------------------------------------
+run-oq2.sh configuration (every figure below is produced under exactly this):
+  clone:              /tmp/fix-mr @ e963f4d0
+  gremlins:           /tmp/fix-mr-bin/gremlins -> gremlins version dev darwin/arm64
+  range:              b810c302..e963f4d0
+  touched non-test files: 33 across 10 package directories
+  operator set:       all -> --arithmetic-base=true --conditionals-boundary=true --conditionals-negation=true --increment-decrement=true --invert-negatives=true --invert-assignments=true --invert-bitwise=true --invert-bwassign=true --invert-logical=true --invert-loopctrl=true --remove-self-assignments=true
+  timeout-coefficient: 10   workers: 2
+  cores:              10
+  main-pkg defect:    MEASURE_MAIN_PKGS=0
+
+  internal/journey: excluded 2 untouched file(s): codec.go record.go
+  internal/readinessload: excluded 0 untouched file(s): none
+  internal/store: excluded 9 untouched file(s): archivemove.go discovery.go doc.go manifest.go open.go refpath.go root.go slug.go treehash.go
+
+package	touched_files	mutants	killed	survived	not_covered	timed_out	seconds	load_1min_before_after
+internal/journey	derive.go eventual.go facts.go port.go project.go reason.go	220	192	28	12	2	587	8.47 11.29 11.86 -> 13.19 12.24 12.23
+internal/readinessload	conflict.go doc.go facts.go load.go options.go	133	111	22	21	0	454	13.19 12.24 12.23 -> 8.06 8.27 9.98
+internal/store	paths.go	17	17	0	0	0	7	8.06 8.27 9.98 -> 7.90 8.24 9.95
+TOTAL(measured rows only)	-	370	320	50	33	2	1048	-
+wall clock for whole sweep (seconds): 1050
+
+NOTE: 'seconds' is now the touched-files-only cost, because -E kept
+mutation inside the touched set. It still includes gremlins' own
+whole-package coverage pass, which -E does not scope: gremlins runs
+`go test -cover -coverprofile <f> ./<pkg>/...` once per package
+before generating a mutant, with no -timeout flag, so Go's
+unconfigurable 10-minute default applies to that pass.
