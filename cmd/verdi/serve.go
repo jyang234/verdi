@@ -136,6 +136,20 @@ func (readinessLoadBuilder) Build(ctx context.Context, root, requestPath string)
 	return targetSpec, nil
 }
 
+// startupRequestTarget renders the warm-up's own spec ref for R-RR1-16's
+// stdout line. ContextRequestSpec returns the request's `spec` field,
+// which is already a whole spec ref ("spec/<name>") in every request the
+// decoder accepts; the prefix is added only for a value that somehow does
+// not carry it, and never doubled for one that does.
+func startupRequestTarget(ref string) string {
+	// vocab:identity — "spec/" is the artifact-ref grammar's own kind prefix (02 §Refs), not a display word
+	const specRefPrefix = "spec/"
+	if strings.HasPrefix(ref, specRefPrefix) {
+		return ref
+	}
+	return specRefPrefix + ref
+}
+
 // cmdServeWithDeps parses the additive readiness input, runs the optional
 // startup warm-up, and only then enters the effectful server run — always
 // with a working readiness loader (spec/readiness-recovery ac-2: general
@@ -175,6 +189,17 @@ func cmdServeWithDeps(args []string, stdout, stderr io.Writer, deps serveCommand
 		}
 		defaultSpec = spec
 		loaderOpts.ContextRequestPath = options.contextRequestPath
+		// R-RR1-16: the fact that THIS server was started with a context
+		// request bound to one spec is disclosed exactly once, here, on
+		// the same stdout stream runServe logs its socket/workbench lines
+		// to. It deliberately does not travel in any derived document's
+		// bytes: a request-specific witness inside a document would make
+		// the request's own spec read differently through this loader than
+		// through a CLI carrying no request, which is the ac-4 parity
+		// divergence R-RR1-15 closed. Every other spec this server derives
+		// still derives as if no request had been supplied, which is what
+		// the second clause tells the operator.
+		fmt.Fprintf(stdout, "readiness: the startup context request targets %s; every other spec derives without a request\n", startupRequestTarget(defaultSpec))
 	}
 	loader := readinessload.Loader{Root: root, Opts: loaderOpts}
 
