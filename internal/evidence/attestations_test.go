@@ -327,6 +327,150 @@ func TestRenderAttestationScaffold_FrontmatterShape(t *testing.T) {
 	}
 }
 
+// storyClassGoldenBytes pins the exact story-class rendering byte-for-byte
+// (R-RR2-1): captured from HEAD, before this change ever touches
+// RenderAttestationScaffold, so TestRenderAttestationScaffold_StoryBytesUnchanged
+// proves the story render's contract (spec/attest-helper dc-2's byte
+// contract, the showcase proof, TestRenderAttestationScaffold_FrontmatterShape's
+// own goldens) is untouched by the feature-class addition below.
+var storyClassGoldenBytes = map[string]string{
+	"scheme-prefixed story-ref arg, single owner": "---\nid: attestation/jira-loan-1482--ac-2\nkind: attestation\ntitle: \"unauthored attestation scaffold: jira:LOAN-1482 ac-2\"\nowners: [\"platform-team\"]\nschema: verdi.attestation/v1\nlinks:\n  - { type: verifies, ref: \"spec/borrower-update-api\" }\nfrozen: { at: 2026-07-16, commit: e606a109dbc28ea08cc86265c4fa2dd026f8373a }\n---\n<!-- verdi:attestation-unauthored -->\nThis attestation was scaffolded by `verdi attest` for jira:LOAN-1482 ac-2\nand has not been authored. Replace this entire paragraph, and delete the\nmarker comment above, with your own first-person account of what you\nverified, how, and why this acceptance criterion is satisfied. Until the\nmarker above is removed, this file folds as absent, with disclosure — it\nis not evidence of anything.\n\nThe `frozen.commit` stamped above is a convenience: it was pre-filled with\nthe repository HEAD when this scaffold was written. By the store's\nattestation convention that field names the tree your claim was verified\nagainst — not this file's own commit — so set it to the exact commit you\nactually reviewed when you author your claim. The stamp is yours to\ncorrect: nothing here is frozen until this file's first commit (VL-010\nbinds only committed frozen artifacts), so updating it in this same\nauthoring pass is always legitimate.\n",
+	"bare spec-ref story-ref arg, multiple owners": "---\nid: attestation/borrower-update-api--ac-1\nkind: attestation\ntitle: \"unauthored attestation scaffold: spec/borrower-update-api ac-1\"\nowners: [\"platform-team\", \"qa-lead\"]\nschema: verdi.attestation/v1\nlinks:\n  - { type: verifies, ref: \"spec/borrower-update-api\" }\nfrozen: { at: 2026-07-16, commit: e606a109dbc28ea08cc86265c4fa2dd026f8373a }\n---\n<!-- verdi:attestation-unauthored -->\nThis attestation was scaffolded by `verdi attest` for spec/borrower-update-api ac-1\nand has not been authored. Replace this entire paragraph, and delete the\nmarker comment above, with your own first-person account of what you\nverified, how, and why this acceptance criterion is satisfied. Until the\nmarker above is removed, this file folds as absent, with disclosure — it\nis not evidence of anything.\n\nThe `frozen.commit` stamped above is a convenience: it was pre-filled with\nthe repository HEAD when this scaffold was written. By the store's\nattestation convention that field names the tree your claim was verified\nagainst — not this file's own commit — so set it to the exact commit you\nactually reviewed when you author your claim. The stamp is yours to\ncorrect: nothing here is frozen until this file's first commit (VL-010\nbinds only committed frozen artifacts), so updating it in this same\nauthoring pass is always legitimate.\n",
+}
+
+// TestRenderAttestationScaffold_StoryBytesUnchanged is R-RR2-1's own
+// witness: the story render (Class: story, and the empty-Class zero value
+// so untouched callers stay byte-stable) produces bytes IDENTICAL to
+// storyClassGoldenBytes above, captured from HEAD before this feature-class
+// addition. A story-render byte drift here is a merge blocker on its own.
+func TestRenderAttestationScaffold_StoryBytesUnchanged(t *testing.T) {
+	for _, tc := range attestationScaffoldCases() {
+		t.Run(tc.name, func(t *testing.T) {
+			want, ok := storyClassGoldenBytes[tc.name]
+			if !ok {
+				t.Fatalf("test setup: no golden captured for case %q", tc.name)
+			}
+			got := RenderAttestationScaffold(tc.in)
+			if got != want {
+				t.Fatalf("story-class render bytes changed (R-RR2-1 pins them byte-for-byte):\n--- got ---\n%s\n--- want ---\n%s", got, want)
+			}
+		})
+	}
+}
+
+// TestRenderAttestationScaffold_FeatureQuotesTheCriterion proves ac-6/
+// R-RR2-1: a Class: feature scaffold carries the exact same unauthored
+// marker and fixed instructional prose as the story form, plus an appended,
+// clearly-labeled quoted-context section — the criterion's own accepted
+// text and its declared evidence kinds — that can never be mistaken for the
+// claim itself (dc-2's never-a-claim contract extended to quoted context).
+func TestRenderAttestationScaffold_FeatureQuotesTheCriterion(t *testing.T) {
+	in := AttestationScaffold{
+		StorySlug:     "loan-workflow",
+		ACID:          "ac-1",
+		StoryRefArg:   "spec/loan-workflow",
+		VerifiesRef:   "spec/loan-workflow",
+		Owners:        []string{"platform-team"},
+		Frozen:        artifact.Frozen{At: "2026-07-16", Commit: "e606a109dbc28ea08cc86265c4fa2dd026f8373a"},
+		Class:         artifact.ClassFeature,
+		CriterionText: "the ledger rejects a decline older than 30 days",
+		EvidenceKinds: []artifact.EvidenceKind{artifact.EvidenceStatic, artifact.EvidenceAttestation},
+	}
+	content := RenderAttestationScaffold(in)
+
+	fm, bodyBytes, err := artifact.SplitFrontmatter([]byte(content))
+	if err != nil {
+		t.Fatalf("SplitFrontmatter: %v\ncontent:\n%s", err, content)
+	}
+	decoded, err := artifact.DecodeAttestation(fm)
+	if err != nil {
+		t.Fatalf("DecodeAttestation: %v\ncontent:\n%s", err, content)
+	}
+	body := string(bodyBytes)
+
+	if wantID := "attestation/loan-workflow--ac-1"; decoded.ID != wantID {
+		t.Errorf("id = %q, want %q", decoded.ID, wantID)
+	}
+	if wantTitle := "unauthored outcome attestation scaffold: spec/loan-workflow ac-1"; decoded.Title != wantTitle {
+		t.Errorf("title = %q, want %q", decoded.Title, wantTitle)
+	}
+
+	markerIdx := strings.Index(body, UnauthoredAttestationMarker)
+	if markerIdx != 0 {
+		t.Fatalf("body does not start with the unauthored marker:\n%s", body)
+	}
+	if !strings.Contains(body, "This attestation was scaffolded by `verdi attest`") {
+		t.Errorf("body dropped the fixed instructional prose:\n%s", body)
+	}
+
+	sectionIdx := strings.Index(body, "Criterion under attestation (accepted text, quoted for context):")
+	if sectionIdx == -1 {
+		t.Fatalf("body missing the quoted-criterion section header:\n%s", body)
+	}
+	if sectionIdx < markerIdx {
+		t.Fatalf("quoted-criterion section appears before the unauthored marker:\n%s", body)
+	}
+	if !strings.Contains(body, "> the ledger rejects a decline older than 30 days") {
+		t.Errorf("body does not quote the criterion text on its own quoted line:\n%s", body)
+	}
+	if !strings.Contains(body, "Declared evidence kinds: static, attestation") {
+		t.Errorf("body missing the declared evidence kinds line:\n%s", body)
+	}
+
+	if strings.Contains(body, "I verified") || strings.Contains(body, "observed in staging") {
+		t.Errorf("body contains claim-shaped prose — dc-2 forbids this:\n%s", body)
+	}
+	for _, line := range strings.Split(body, "\n") {
+		if strings.HasPrefix(strings.TrimSpace(line), "The outcome") {
+			t.Errorf("body contains a claim-shaped sentence starting with %q — dc-2 forbids this:\n%s", "The outcome", body)
+		}
+	}
+}
+
+// TestRenderAttestationScaffold_FeatureEscapesCriterionText proves the
+// quoted section never lets a criterion's own text reopen a second
+// frontmatter block or otherwise get interpreted: a criterion carrying a
+// bare "---" line, backticks, and a YAML-looking "key: value" line all
+// render as inert, "> "-quoted body prose — SplitFrontmatter must still
+// find exactly one frontmatter/body split.
+func TestRenderAttestationScaffold_FeatureEscapesCriterionText(t *testing.T) {
+	tricky := "line one\n---\nkey: value\n`backtick`"
+	in := AttestationScaffold{
+		StorySlug:     "tricky-feature",
+		ACID:          "ac-1",
+		StoryRefArg:   "spec/tricky-feature",
+		VerifiesRef:   "spec/tricky-feature",
+		Owners:        []string{"platform-team"},
+		Frozen:        artifact.Frozen{At: "2026-07-16", Commit: "e606a109dbc28ea08cc86265c4fa2dd026f8373a"},
+		Class:         artifact.ClassFeature,
+		CriterionText: tricky,
+		EvidenceKinds: []artifact.EvidenceKind{artifact.EvidenceAttestation},
+	}
+	content := RenderAttestationScaffold(in)
+
+	fm, bodyBytes, err := artifact.SplitFrontmatter([]byte(content))
+	if err != nil {
+		t.Fatalf("SplitFrontmatter: %v\ncontent:\n%s", err, content)
+	}
+	if _, err := artifact.DecodeAttestation(fm); err != nil {
+		t.Fatalf("DecodeAttestation: %v\ncontent:\n%s", err, content)
+	}
+	body := string(bodyBytes)
+
+	for _, line := range strings.Split(tricky, "\n") {
+		if !strings.Contains(body, "> "+line) {
+			t.Errorf("body does not quote criterion line %q on its own quoted line:\n%s", line, body)
+		}
+	}
+
+	// The tricky "---" line must render only as the quoted "> ---" — never
+	// a second bare frontmatter delimiter line — so the whole document
+	// still carries exactly one frontmatter/body split.
+	if delimCount := strings.Count(content, "\n---\n"); delimCount != 1 {
+		t.Fatalf("content contains %d bare \"---\" delimiter lines, want exactly 1 (the criterion's own \"---\" line must stay quoted, never a second frontmatter delimiter):\n%s", delimCount, content)
+	}
+}
+
 // TestRenderAttestationScaffold_SelfValidates is spec/attest-helper AC-4's
 // own static register: the rendered bytes always strict-decode and
 // validate as kind: attestation frontmatter WHILE THE UNAUTHORED MARKER IS
