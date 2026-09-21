@@ -1,0 +1,35 @@
+{
+  "schema": "verdi.mutation-baseline/v1",
+  "tool": "gremlins",
+  "tool_pin": "github.com/go-gremlins/gremlins/cmd/gremlins@v0.6.0",
+  "survivors": [
+    {
+      "file": "internal/readinessload/conflict.go",
+      "line": 50,
+      "column": 41,
+      "operator": "CONDITIONALS_NEGATION",
+      "reason": "illustrative baseline entry (spike/mutation-ratchet oq-4) — not yet triaged as equivalent-mutant or real test gap; a real baseline entry must give the specific reason (co-4: 'a mutant that cannot be killed is baselined with a one-line reason')"
+    },
+    {
+      "file": "internal/readinessload/facts.go",
+      "line": 79,
+      "column": 20,
+      "operator": "CONDITIONALS_NEGATION",
+      "reason": "illustrative baseline entry (spike/mutation-ratchet oq-4) — not yet triaged"
+    },
+    {
+      "file": "internal/readinessload/facts.go",
+      "line": 83,
+      "column": 28,
+      "operator": "CONDITIONALS_NEGATION",
+      "reason": "illustrative baseline entry (spike/mutation-ratchet oq-4) — not yet triaged"
+    },
+    {
+      "file": "internal/readinessload/load.go",
+      "line": 295,
+      "column": 25,
+      "operator": "CONDITIONALS_NEGATION",
+      "reason": "illustrative baseline entry (spike/mutation-ratchet oq-4) — not yet triaged"
+    }
+  ]
+}

@@ -1,0 +1,392 @@
+oq-1 evidence (fix round 1): gremlins v0.6.0 reports a FALSE 100% kill rate
+for every `package main` directory, and counts non-test errors as kills.
+
+Root-caused with an instrumented `go` wrapper, gremlins' own source, and a
+like-for-like counterfactual. Every run below happened in a throwaway local
+clone of the scratch worktree, /tmp/fix-mr, `git clone -q --no-hardlinks
+<scratch> /tmp/fix-mr && git -C /tmp/fix-mr checkout --detach e963f4d0`,
+never in any worktree. Binary: /tmp/fix-mr-bin/gremlins, installed
+`GOBIN=/tmp/fix-mr-bin go install github.com/go-gremlins/gremlins/cmd/
+gremlins@v0.6.0` (exit 0; `gremlins --version` -> "gremlins version dev
+darwin/arm64", the same `dev` string the lane already disclosed).
+Toolchain: `go version go1.25.5 darwin/arm64`.
+
+
+========================================================================
+1. The symptom, reproduced
+========================================================================
+
+  $ cd /tmp/fix-mr && uptime
+  22:12  up 16 days, 15 hrs, 6 users, load averages: 7.21 26.06 23.19
+  $ time /tmp/fix-mr-bin/gremlins unleash --timeout-coefficient 10 \
+      --workers 2 --output /tmp/fix-mr-e2eharness.json ./cmd/e2eharness
+  exit status: 0
+  ...
+  Mutation testing completed in 2 seconds 906 milliseconds
+  Killed: 354, Lived: 0, Not covered: 233
+  Timed out: 0, Not viable: 0, Skipped: 0
+  Test efficacy: 100.00%
+  Mutator coverage: 60.31%
+  (wall clock 21.360 total; uptime after: 8.97 24.93 22.87)
+
+That package's own suite costs 13.747s per run in the same clone (from
+gremlins' own coverage pass, quoted in section 2). 354 sequential test
+runs at 2 workers cannot complete in 2.9s. This is the
+implausible-speed / 100%-kill signature this spike used to disqualify
+ooze and the avito go-mutesting fork.
+
+
+========================================================================
+2. Instrumentation: what gremlins actually executes
+========================================================================
+
+A wrapper named `go`, first on PATH, tees CWD, argv, exit status and the
+head of combined output for every `go` invocation, then delegates to
+/usr/local/go/bin/go (script kept at the end of this file). Re-run of the
+same command with PATH=/tmp/fix-mr-shim:$PATH: identical verdict
+("Killed: 354, Lived: 0 ... Test efficacy: 100.00%"), 356 `go`
+invocations recorded.
+
+The three distinct argv shapes, verbatim from the trace:
+
+  ARGV=mod download
+  ARGV=test -cover -coverprofile /var/folders/.../gremlins-2070712655/coverage ./cmd/e2eharness/...
+  ARGV=test -timeout 2m26.12691084s -failfast github.com/jyang234/verdi
+
+The coverage pass is correct and is where the suite's own cost is
+visible:
+
+  CWD=/tmp/fix-mr
+  ARGV=test -cover -coverprofile .../coverage ./cmd/e2eharness/...
+  RC=0
+  OUTPUT_HEAD<<
+  ok  	github.com/jyang234/verdi/cmd/e2eharness	13.747s	coverage: 50.5% of statements
+  >>OUTPUT_HEAD
+
+Every per-mutant run is not. One block verbatim (single-worker capture,
+so nothing is interleaved):
+
+  CWD=/private/var/folders/.../gremlins-2094269129/wd-3585363107/cmd/e2eharness
+  ARGV=test -timeout 5.37614084s -failfast github.com/jyang234/verdi
+  RC=1
+  GOTMPDIR=/var/folders/.../gremlins-2094269129 GOFLAGS=
+  OUTPUT_HEAD<<
+  # github.com/jyang234/verdi
+  no required module provides package github.com/jyang234/verdi; to add it:
+  	go get github.com/jyang234/verdi
+  FAIL	github.com/jyang234/verdi [setup failed]
+  FAIL
+  >>OUTPUT_HEAD
+
+The package argument is the MODULE PATH, `github.com/jyang234/verdi`.
+This module has no Go package at its root (`ls /tmp/fix-mr/*.go` -> no
+matches), so `go test` fails to load a package at all, in ~80ms, without
+compiling or running one line of the code under test. All 11 per-mutant
+runs in that capture were `[setup failed]`; all 354 in the full run were
+the same.
+
+
+========================================================================
+3. Root cause in gremlins' own source
+========================================================================
+
+(a) The wrong package path.
+$GOMODCACHE/github.com/go-gremlins/gremlins@v0.6.0/internal/engine/
+engine.go:160-180, verbatim:
+
+  func (mu *Engine) pkgName(fileName, fPkg string) string {
+  	var pkg string
+  	fn := fmt.Sprintf("%s/%s", mu.module.CallingDir, fileName)
+  	p := filepath.Dir(fn)
+  	for {
+  		if strings.HasSuffix(p, fPkg) {
+  			pkg = fmt.Sprintf("%s/%s", mu.module.Name, p)
+
+  			break
+  		}
+  		d := filepath.Dir(p)
+  		if d == p {
+  			pkg = mu.module.Name
+
+  			break
+  		}
+  		p = d
+  	}
+
+  	return normalisePkgPath(pkg)
+  }
+
+`fPkg` is the Go PACKAGE CLAUSE identifier, taken from the parsed AST
+(engine.go:146 `pkg := mu.pkgName(fileName, file.Name.Name)`). The
+function walks the directory path upward looking for a component that
+ends with that identifier. For `cmd/e2eharness/readinessallproven.go`,
+whose clause is `package main`:
+
+  p = "cmd/e2eharness"  -> HasSuffix(..., "main")? no
+  p = "cmd"             -> HasSuffix(..., "main")? no
+  p = "."               -> HasSuffix(..., "main")? no; Dir(".") == "." ->
+                           pkg = mu.module.Name = "github.com/jyang234/verdi"
+
+So the import path collapses to the bare module path for every `package
+main` directory whose basename is not literally "main". It is not a
+timeout, a load artefact, or a build-tag problem: it is a deterministic
+path-derivation defect.
+
+(b) Why the failure is scored as a kill.
+internal/engine/executor.go:193-217 and :257-266, verbatim:
+
+  	rel, err := run(cmd)
+  	defer rel()
+
+  	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+  		return mutator.TimedOut
+  	}
+  	var exitErr *exec.ExitError
+  	if errors.As(err, &exitErr) {
+  		return getTestFailedStatus(exitErr.ExitCode())
+  	}
+
+  	return mutator.Lived
+
+  func getTestFailedStatus(exitCode int) mutator.Status {
+  	switch exitCode {
+  	case 1:
+  		return mutator.Killed
+  	case 2:
+  		return mutator.NotViable
+  	default:
+  		return mutator.Lived
+  	}
+  }
+
+gremlins expects exit code 2 to mean "this mutant does not compile"
+(NOT VIABLE). On Go 1.25.5 that distinction does not exist. Measured
+directly in a three-file scratch module (/tmp/fix-mr-exitprobe):
+
+  build failure    -> `go test ./...` rc=1
+  test failure     -> `go test ./...` rc=1
+  missing package  -> `go test example.com/nope` rc=1
+
+Exit 1 for all three, so `getTestFailedStatus` maps EVERY non-test error
+onto KILLED and `NOT VIABLE` is unreachable on this toolchain. Every
+gremlins report this spike produced says "Not viable: 0"; that zero is a
+property of the tool on Go 1.25, not of the mutants.
+
+
+========================================================================
+4. Like-for-like counterfactual: the same 11 mutants, path corrected
+========================================================================
+
+Scope both sides to the one file of cmd/e2eharness that the wave-1 diff
+touches, `readinessallproven.go`, using gremlins' own `-E/--exclude-files`
+for the other 17 non-test files (see oq2-evidence/exclude-files-scoping.txt).
+`--workers 1` so the trace is serialized. The counterfactual uses a second
+wrapper that rewrites ONLY the final argument, `github.com/jyang234/verdi`
+-> `github.com/jyang234/verdi/cmd/e2eharness`, when the cwd is the
+package's own directory; everything else — flags, env, cwd, the mutated
+source in the `wd-*` copy — is untouched.
+
+  A. AS SHIPPED (broken path)                       uptime before 12.56
+     Mutation testing completed in 904 milliseconds 360 microseconds
+     Killed: 11, Lived: 0, Not covered: 0
+     Timed out: 0, Not viable: 0, Skipped: 0
+     Test efficacy: 100.00%
+     real 1.61
+     -> 11/11 per-mutant runs `[setup failed]`, 82ms each.
+
+  B. PATH CORRECTED BY WRAPPER                      uptime before 11.01
+     Mutation testing completed in 46 seconds 57 milliseconds
+     Killed: 11, Lived: 0, Not covered: 0
+     Timed out: 0, Not viable: 0, Skipped: 0
+     Test efficacy: 100.00%
+     real 60.88                                     uptime after 8.45
+     -> 11/11 runs actually compiled and ran the suite, 4.2s each,
+        consistent with the package's own 13.7s suite under `-failfast`.
+
+51x. gremlins prints the SAME verdict line for both — "Killed: 11,
+Lived: 0 ... Test efficacy: 100.00%" — which is exactly why the defect is
+dangerous: the report is indistinguishable from a genuine perfect score.
+
+Classified from the corrected trace, 11 runs:
+  5 KILLED by a COMPILE error, e.g. verbatim
+     # github.com/jyang234/verdi/cmd/e2eharness [.../e2eharness.test]
+     ./readinessallproven.go:65:18: invalid operation: operator - not
+        defined on "sha256:" (constant of type string)
+     FAIL	github.com/jyang234/verdi/cmd/e2eharness [build failed]
+     (ARITHMETIC_BASE applied to string concatenation: `+` -> `-`. These
+      are non-viable mutants that section 3(b) mis-scores as kills.)
+  6 KILLED by a genuine test failure, e.g. verbatim
+     --- FAIL: TestReadinessAllProvenFixture_Handler_Happy (0.00s)
+         readinessallproven_test.go:39: status = 405, want 200; body=method not allowed
+     FAIL
+     FAIL	github.com/jyang234/verdi/cmd/e2eharness	6.350s
+
+So even a corrected run over this file yields a 6/11 genuine kill rate,
+not 11/11. Reported efficacy over-counts by 45% on this file alone.
+
+A control, same tool, same flags, a package whose directory basename DOES
+equal its clause name (`internal/designapp`, clause `designapp`), scoped
+to board.go:
+
+  ARGV=test -timeout 4m59.73482542s -failfast github.com/jyang234/verdi/internal/designapp
+  RC=1
+  OUTPUT_HEAD<<
+  --- FAIL: TestGetBoard (0.19s)
+      --- FAIL: TestGetBoard/happy_path_returns_the_board_projection_with_identity (0.00s)
+          board_test.go:19: GetBoard: input-invalid: designapp: get_board spec must be an unpinned whole spec ref
+  FAIL
+  FAIL	github.com/jyang234/verdi/internal/designapp	0.538s
+  >>OUTPUT_HEAD
+
+  Mutation testing completed in 21 seconds 457 milliseconds
+  Killed: 11, Lived: 0, Not covered: 0     (10 genuine test failures /
+  Test efficacy: 100.00%                    1 build failure)
+
+Correct import path, real suite execution, real failures. The defect is
+specific to the path derivation, not to the machine or to this module.
+
+
+========================================================================
+5. Blast radius in this module
+========================================================================
+
+  $ cd /tmp/fix-mr && go list -f '{{.ImportPath}} {{.Name}} {{.Dir}}' ./... \
+      | awk '{n=split($3,a,"/"); if (a[n] != $2) print}'
+  (the three lines below are the command's output re-annotated by hand as
+   pkgclause=/dirbase= for legibility; the literal output prints the
+   import path, package clause and directory)
+  github.com/jyang234/verdi/cmd/e2eharness pkgclause=main dirbase=e2eharness
+  github.com/jyang234/verdi/cmd/public-execution-contract-release pkgclause=main dirbase=public-execution-contract-release
+  github.com/jyang234/verdi/cmd/verdi pkgclause=main dirbase=verdi
+
+3 of the module's 105 packages are silently unmeasurable by gremlins
+v0.6.0. Two of them, `cmd/e2eharness` and `cmd/verdi`, are in the wave-1
+touched set (9 of the 33 touched files live in them). No other package in
+this module has a clause name that differs from its directory basename,
+so the rest of the touched set is unaffected — but the general rule is
+"directory basename must end with the package clause identifier", not
+"must not be main": a hypothetical `internal/foo/bar` declaring `package
+foo` would resolve upward to `.../internal/foo` and mutate one package
+while testing another, equally silently.
+
+CROSS_BINARY_PKGS cross-check (Makefile:32). Of that list, only
+`cmd/e2eharness` is a main package, and it is the only member this defect
+hits. The others (`internal/showcasealign`, `internal/specalign`,
+`internal/experimentapp`, `internal/designapp`, `internal/sealedexec/
+claude`, `internal/publicrelease`) all have matching basenames and run
+correctly, as section 4's designapp control shows.
+
+Separate but load-bearing for oq-1's own criterion: `cmd/e2eharness`'s
+TESTS DO NOT build or exec the verdi binary. `buildBinary` (main.go:326,
+`exec.CommandContext(ctx, "go", "build", "-o", out, "./cmd/verdi")`) is
+called only from main.go:91, unprovenboard.go:146 and
+specimportfixture.go:291 — all production paths driven by the harness
+binary itself, none from a `_test.go`; `grep -rn "func TestMain"
+cmd/e2eharness/` is empty. The genuine cross-binary witness in this
+module is a package like `internal/designapp`, whose
+`conformance_test.go:54` runs `exec.Command("go", "build", "-o", bin,
+"github.com/jyang234/verdi/cmd/verdi")` from a test. That package is
+section 4's control and gremlins handles it: it copies the whole module
+root per worker (`workdir.NewCachedDealer(workDir, mod.Root)`,
+cmd/unleash.go:179), so `./cmd/verdi` is present and buildable inside
+each `wd-*`.
+
+
+========================================================================
+6. Mitigations tried and their cost
+========================================================================
+
+`gremlins unleash --help` exposes no knob for the package argument. The
+complete flag list is -d/--dry-run, -S/--output-statuses, -t/--tags,
+--coverpkg, -D/--diff, -o/--output, -i/--integration, -E/--exclude-files,
+--threshold-efficacy, --threshold-mcover, --workers, --test-cpu,
+--timeout-coefficient, and the eleven per-operator toggles. Of these:
+
+  * `-i/--integration` IS a real mitigation, by accident. executor.go:
+    199-201 and :234-237 replace both the cwd and the package argument in
+    integration mode:
+        cmd.Dir = m.mutant.Workdir()
+        if m.integrationMode {
+        	cmd.Dir = rootDir
+        }
+      ...
+        path := pkg
+        if m.integrationMode {
+        	path = "./..."
+        }
+    so the broken `pkgName` result is never used. The cost is that every
+    mutant runs the WHOLE module suite: at this module's 820s `make test`
+    figure, 354 mutants at 2 workers is ~40 hours for one package. Not a
+    gate option; recorded because it is the only in-tool knob that avoids
+    the defect.
+  * `-E/--exclude-files` scopes which FILES are mutated (and is the right
+    answer to dc-2 — see oq2-evidence/exclude-files-scoping.txt), but it
+    cannot repair the package argument for the files it keeps.
+  * Excluding the three main packages from the mutation set entirely is
+    the only configuration that is both correct and affordable. It costs
+    coverage of 9 of the 33 wave-1 touched files.
+  * A canary check is the only way to make the exclusion self-enforcing:
+    before trusting any package's report, seed one mutant that MUST
+    survive and assert the run reports it LIVED. Under this defect every
+    package reports 100.00% efficacy, so "efficacy == 100%" is itself the
+    alarm, not the goal.
+
+Not tried: patching gremlins. Out of scope for a spike, and it would
+break co-2's "pinned like golangci-lint" property unless the fork is
+itself pinned and published.
+
+
+========================================================================
+7. The instrumentation, verbatim (both wrappers)
+========================================================================
+
+/tmp/fix-mr-shim/go — passive tee:
+
+  #!/bin/bash
+  LOGDIR="${GO_SHIM_LOGDIR:-/tmp/fix-mr-shimlog}"
+  id="$$-$RANDOM"
+  start=$EPOCHREALTIME
+  out="$LOGDIR/out-$id.txt"
+  /usr/local/go/bin/go "$@" >"$out" 2>&1
+  rc=$?
+  end=$EPOCHREALTIME
+  {
+    printf 'CWD=%s\n' "$PWD"
+    printf 'ARGV=%s\n' "$*"
+    printf 'RC=%s\n' "$rc"
+    printf 'START=%s END=%s\n' "$start" "$end"
+    printf 'GOTMPDIR=%s GOFLAGS=%s\n' "${GOTMPDIR:-}" "${GOFLAGS:-}"
+    printf 'OUTPUT_HEAD<<\n'
+    head -c 1500 "$out"
+    printf '\n>>OUTPUT_HEAD\n----\n'
+  } >> "$LOGDIR/trace.log"
+  cat "$out"
+  rm -f "$out"
+  exit $rc
+
+/tmp/fix-mr-shim2/go — the counterfactual; identical except for the
+rewrite of the final argument:
+
+  args=("$@")
+  n=$((${#args[@]}-1))
+  if [[ "${args[0]}" == "test" && "${args[$n]}" == "github.com/jyang234/verdi" \
+        && "$PWD" == */cmd/e2eharness ]]; then
+    args[$n]="github.com/jyang234/verdi/cmd/e2eharness"
+    printf 'REWROTE last arg -> %s (cwd=%s)\n' "${args[$n]}" "$PWD" >> "$LOGDIR/trace.log"
+  fi
+  /usr/local/go/bin/go "${args[@]}" ...
+
+Reduction: the raw traces hold one block per `go` invocation (356 for the
+full cmd/e2eharness run; 11 each for the two single-worker captures).
+Quoted above: every distinct argv shape, one verbatim block per outcome
+class, and the tallies. Nothing else was reduced away that changes a
+count. The tallies were produced by classifying each block on the strings
+`[setup failed]`, `[build failed]` and `--- FAIL`:
+
+  BROKEN:    runs=11 setup-failed=11 build-failed=0 genuine-test-fail=0
+  CORRECTED: runs=11 setup-failed=0  build-failed=5 genuine-test-fail=6
+
+Clean-tree check after every run in this file:
+  $ git -C /tmp/fix-mr status --porcelain   (empty)
+gremlins mutates only inside its own `wd-*` copies under TMPDIR; that
+property, which the lane recorded, still holds.
