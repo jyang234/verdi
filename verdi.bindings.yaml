@@ -656,10 +656,11 @@ bindings:
       # empty-bucket suite — the exact 1:1 stub/AC mapping the feature's
       # own `stubs:` list declares. The attestation legs, once authored,
       # will live at .verdi/attestations/workbench-legibility/ac-{1,2,3}.md
-      # — no scaffold exists yet, since `verdi attest` is scoped to
-      # story-class specs only (spec/attest-helper dc-5); a feature-level
-      # outcome attestation is hand-authored, mirroring the true-closure/
-      # diagram-proposals precedent (PR #19, PR #81).
+      # — as of spec/readiness-recovery ac-6 (ledger SI-211), `verdi
+      # attest` scaffolds feature outcome attestations too (`verdi attest
+      # <feature-ref> <ac-id>`); this feature's three legs are still
+      # unauthored/hand-authored until someone runs it, mirroring the
+      # true-closure/diagram-proposals precedent (PR #19, PR #81).
       - "spec/workbench-legibility#ac-1"
       - "spec/workbench-legibility#ac-2"
       - "spec/workbench-legibility#ac-3"

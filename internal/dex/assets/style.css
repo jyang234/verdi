@@ -23,6 +23,9 @@
   --ink: #232920;
   --muted: #67706675;
   --muted-solid: #666f66;
+  /* the obligation row's kind label: the muted register, darkened one step
+     so it meets AA (4.89:1) on --living-tint — R-RR2-8 */
+  --obligation-kind-ink: #5f685f;
   --rule: #dbded2;
   --panel: #eef0e7;
   --card: #fbfcf8;
@@ -98,6 +101,7 @@
     --ink: #d7ddd1;
     --muted: #8d968c80;
     --muted-solid: #96a094;
+    --obligation-kind-ink: var(--muted-solid); /* 5.47:1 on --living-tint already */
     --rule: #2c312a;
     --panel: #1b1f19;
     --card: #20251e;
@@ -2477,7 +2481,7 @@ button.yarn-chip-type {
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.08em;
-  color: var(--muted-solid);
+  color: var(--obligation-kind-ink);
 }
 .obligation-title {
   min-width: 0;

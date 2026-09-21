@@ -744,3 +744,86 @@ func TestEvidenceKindParityWithArtifact(t *testing.T) {
 		t.Fatalf("journey evidence kinds = %v, internal/artifact evidence kinds = %v", got, want)
 	}
 }
+
+// --- R-RRF-1 / SI-213: the eventual section's unavailable-source list -----
+
+// TestEventualUnavailableValidateHappyPath is SI-213's positive shape: a
+// DERIVED section may name the sources it could not compute, kept apart
+// from the benign disclosures beside them.
+func TestEventualUnavailableValidateHappyPath(t *testing.T) {
+	r := validRecord(t)
+	r.Blockers.Eventual = EventualBlockers{
+		Derived:     true,
+		Items:       []Blocker{},
+		Disclosures: []string{},
+		Unavailable: []string{"the outcome-floor fold for example could not be computed: permission denied"},
+	}
+	if err := r.Validate(); err != nil {
+		t.Fatalf("Validate() with a derived section naming one unavailable source: %v", err)
+	}
+}
+
+// TestEventualUnavailableValidateNegative is the negative half: the list is
+// explicit (never nil), ordered, deduplicated, free of empty entries, and —
+// SI-213's own rule — empty whenever Derived is false, because an underived
+// section is unavailable AS A WHOLE and says so through Disclosures.
+func TestEventualUnavailableValidateNegative(t *testing.T) {
+	tests := []struct {
+		name    string
+		mutate  func(*Record)
+		wantSub string
+	}{
+		{
+			name:    "nil unavailable list",
+			mutate:  func(r *Record) { r.Blockers.Eventual.Unavailable = nil },
+			wantSub: "must be non-nil",
+		},
+		{
+			name: "unsorted unavailable list",
+			mutate: func(r *Record) {
+				r.Blockers.Eventual.Derived = true
+				r.Blockers.Eventual.Disclosures = []string{}
+				r.Blockers.Eventual.Unavailable = []string{"b source failed", "a source failed"}
+			},
+			wantSub: "sorted and deduplicated",
+		},
+		{
+			name: "duplicated unavailable entry",
+			mutate: func(r *Record) {
+				r.Blockers.Eventual.Derived = true
+				r.Blockers.Eventual.Disclosures = []string{}
+				r.Blockers.Eventual.Unavailable = []string{"a source failed", "a source failed"}
+			},
+			wantSub: "sorted and deduplicated",
+		},
+		{
+			name: "empty unavailable entry",
+			mutate: func(r *Record) {
+				r.Blockers.Eventual.Derived = true
+				r.Blockers.Eventual.Disclosures = []string{}
+				r.Blockers.Eventual.Unavailable = []string{""}
+			},
+			wantSub: "must be non-empty",
+		},
+		{
+			name: "unavailable set on an underived section",
+			mutate: func(r *Record) {
+				r.Blockers.Eventual.Unavailable = []string{"the outcome-floor fold for example could not be computed: permission denied"}
+			},
+			wantSub: "derived is false but unavailable is non-empty",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			r := validRecord(t)
+			tt.mutate(&r)
+			err := r.Validate()
+			if err == nil {
+				t.Fatal("Validate(): want an error")
+			}
+			if !strings.Contains(err.Error(), tt.wantSub) {
+				t.Fatalf("Validate() error = %q, want it to name %q", err, tt.wantSub)
+			}
+		})
+	}
+}

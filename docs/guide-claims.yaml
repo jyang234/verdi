@@ -183,10 +183,11 @@ rows:
 
   - id: 7.3-attest
     section: "7.3"
-    capability: "`verdi attest`, existence-is-the-record, CODEOWNERS oracle routing"
+    capability: "`verdi attest`, existence-is-the-record, CODEOWNERS oracle routing, feature criteria (spec/readiness-recovery ac-6)"
     status: EXISTS
     witnesses:
       - name: TestRunAttest_Happy
+      - name: TestRunAttest_FeatureHappy
 
   - id: 7.4-gate-close-rollup
     section: "7.4"

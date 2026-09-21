@@ -21,7 +21,9 @@ import (
 
 	"github.com/jyang234/verdi/internal/filelock"
 	"github.com/jyang234/verdi/internal/mcpserve"
+	"github.com/jyang234/verdi/internal/readinessload"
 	"github.com/jyang234/verdi/internal/store"
+	"github.com/jyang234/verdi/internal/workbench"
 )
 
 // cmdMcp is `verdi mcp`'s real entry point, invoked by dispatch.go.
@@ -116,6 +118,12 @@ func serveStandalone(root string, stdin io.Reader, stdout, stderr io.Writer) int
 	defer func() { _ = filelock.Release(lockFile, lockPath) }()
 
 	srv := mcpserve.NewServer(root)
+	// A headless `verdi mcp` also derives readiness for get_document
+	// (spec/readiness-recovery ac-4): no --context-request concept exists
+	// standalone, so the loader never carries one — every ref's
+	// context/verdict area stays the fixed unproven witness, exactly the
+	// same posture `verdi spec doc`'s own default loader has.
+	srv.Backend.ReadinessLoader = readinessload.Loader{Root: root, Opts: readinessload.Options{BoardHref: workbench.BranchBoardHref}}
 	// Best-effort (V1-P7): list_annotations' review-sticky mirrored
 	// population (05 §MCP server) needs a live forge; nil is a fully
 	// valid Backend.Forge zero value (review.go degrades to "no review

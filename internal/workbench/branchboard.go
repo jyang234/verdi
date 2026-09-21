@@ -101,7 +101,7 @@ func (b *branchBoards) server(ctx context.Context, branch string) (*boardSpecSer
 		supersession:      b.deps.SupersessionCandidates,
 		model:             b.deps.Model,
 		design:            b.deps.Design,
-		readiness:         b.deps.Readiness,
+		readinessLoader:   b.deps.ReadinessLoader,
 		fixedBranch:       branch,
 	}
 	b.servers[branch] = s

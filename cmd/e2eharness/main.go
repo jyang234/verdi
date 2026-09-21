@@ -92,83 +92,31 @@ func run() error {
 		return fmt.Errorf("building verdi binary: %w", err)
 	}
 
-	storeRoot := filepath.Join(scratch, "store")
-	if err := provisionStore(ctx, moduleRoot, storeRoot); err != nil {
-		return fmt.Errorf("provisioning scratch store: %w", err)
-	}
-
-	// The pending-supersession fixture (e2e/tests/16-dex-v2.spec.ts): one
-	// open MR against main carrying examples/showcase/mr/'s candidate v2
-	// spec for escrow-autopay, served through internal/forge's
-	// hermetic fake — no network (CLAUDE.md), same seam the Go tests use.
-	supersessionForge, err := seedSupersessionForge(moduleRoot)
-	if err != nil {
-		return fmt.Errorf("seeding supersession forge: %w", err)
-	}
-
+	// The shared store (sharedstore.go): examples/showcase on main, then
+	// the design-branch provisioners in their fixed order. The static dex
+	// build runs in the afterMain stage — after the base store, before the
+	// v1 board fixtures land on a design branch — so the static site keeps
+	// reflecting main while `verdi serve`'s working tree sits on the design
+	// branch (authoring mode's branch state — 05 §Workbench "Two modes").
 	dexOut := filepath.Join(scratch, "dexsite")
-	if err := dex.Build(ctx, dex.Options{Root: storeRoot, OutDir: dexOut, Forge: supersessionForge, DefaultBranch: "main"}); err != nil {
-		return fmt.Errorf("building dex site: %w", err)
-	}
-
-	// The v1 board fixtures land on a design branch AFTER the dex build,
-	// so the static site keeps reflecting main while `verdi serve`'s
-	// working tree sits on the design branch (authoring mode's branch
-	// state — 05 §Workbench "Two modes").
-	feedPath, err := provisionBoard(ctx, scratch, storeRoot)
+	store, err := provisionSharedStore(ctx, moduleRoot, scratch, func(ctx context.Context, storeRoot string) error {
+		// The pending-supersession fixture (e2e/tests/16-dex-v2.spec.ts): one
+		// open MR against main carrying examples/showcase/mr/'s candidate v2
+		// spec for escrow-autopay, served through internal/forge's
+		// hermetic fake — no network (CLAUDE.md), same seam the Go tests use.
+		supersessionForge, err := seedSupersessionForge(moduleRoot)
+		if err != nil {
+			return fmt.Errorf("seeding supersession forge: %w", err)
+		}
+		if err := dex.Build(ctx, dex.Options{Root: storeRoot, OutDir: dexOut, Forge: supersessionForge, DefaultBranch: "main"}); err != nil {
+			return fmt.Errorf("building dex site: %w", err)
+		}
+		return nil
+	})
 	if err != nil {
-		return fmt.Errorf("provisioning v1 board fixtures: %w", err)
+		return err
 	}
-
-	// The diagram editor's fixtures (spec/board-editor) land on the same
-	// design branch provisionBoard just checked out, plus the canned
-	// verification report the rail consumes through its dc-4 port.
-	verificationPath, err := provisionDiagrams(ctx, scratch, storeRoot)
-	if err != nil {
-		return fmt.Errorf("provisioning diagram editor fixtures: %w", err)
-	}
-
-	// The family-board-links fixtures (spec/family-board-links; see
-	// provision_familyboardlinks.go) — the archived-match feature/story
-	// pair, the instantiated-but-unlanded stub's own design branch, and
-	// the dangling-implements-target story. Lands on the same design
-	// branch provisionBoard/provisionDiagrams just used, restoring it
-	// when done.
-	if err := provisionFamilyBoardLinks(ctx, storeRoot); err != nil {
-		return fmt.Errorf("provisioning family-board-links fixtures: %w", err)
-	}
-
-	// The directory-home ref fixtures (local-only / remote-only / empty /
-	// doomed design branches) — after the board fixtures, restoring the
-	// board suite's serving checkout when done.
-	if err := provisionDirectory(ctx, storeRoot); err != nil {
-		return fmt.Errorf("provisioning directory fixtures: %w", err)
-	}
-
-	// The draft-boards branch fixtures (spec/draft-boards; see
-	// provision_draftboards.go) — cut from main AFTER the dex build like
-	// the board fixtures above, restoring the serving checkout when done.
-	if err := provisionDraftBoards(ctx, storeRoot); err != nil {
-		return fmt.Errorf("provisioning draft-boards fixtures: %w", err)
-	}
-
-	// The showcase live-draft feature (payoff-quote-portal) on its own
-	// design branch — the "one live draft on a design branch" lifecycle
-	// stage (see provision_showcase_draft.go). Runs last among the branch
-	// provisioners; it pre-cuts and seeds its worktree and restores the
-	// serving checkout to designBranch when done.
-	if err := provisionShowcaseDraft(ctx, storeRoot); err != nil {
-		return fmt.Errorf("provisioning showcase draft fixtures: %w", err)
-	}
-
-	// The readiness pilot consumes one strict design-phase context request
-	// against the serving branch. Provision the existing policy fixture and
-	// managed projection, then pass the caller-owned request to serve; the
-	// snapshot itself remains startup-only and in memory.
-	readinessRequestPath, err := provisionReadiness(ctx, moduleRoot, storeRoot)
-	if err != nil {
-		return fmt.Errorf("provisioning readiness fixtures: %w", err)
-	}
+	storeRoot, readinessRequestPath := store.storeRoot, store.readinessRequestPath
 
 	dexSrv := &http.Server{Addr: dexAddr, Handler: http.FileServer(http.Dir(dexOut))}
 	dexLn, err := net.Listen("tcp", dexAddr)
@@ -185,7 +133,8 @@ func run() error {
 	// git calls its handlers make (delete-branch; the lazily-provisioned
 	// empty-glance and vocab fixture stores) are cancelled by an interrupt
 	// too — not just the provisioning done inline above.
-	ctrl := newControlServer(storeRoot, moduleRoot)
+	openMRFeedURL := "http://" + controlAddr + "/openmrs"
+	ctrl := newControlServer(storeRoot, moduleRoot, openMRFeedURL)
 	// The unproven-board fixture (unprovenboard.go) spawns its own `verdi
 	// serve` on first use; reap it with the harness so no orphaned listener
 	// outlives the run (the same guarantee the shared serve gets below).
@@ -193,6 +142,9 @@ func run() error {
 	// The spec-import fixture (specimportfixture.go) spawns its own serve
 	// the same way; reap it with the harness too.
 	defer ctrl.specImport.stop()
+	// The readiness-pilot fixture (readinesspilotfixture.go) spawns its own
+	// serve over its own shared-shape store; reap it with the harness too.
+	defer ctrl.readinessPilot.stop()
 	ctrlSrv := &http.Server{
 		Addr:        controlAddr,
 		Handler:     ctrl.handler(),
@@ -228,17 +180,11 @@ func run() error {
 	serveCmd.Cancel = func() error { return serveCmd.Process.Signal(syscall.SIGTERM) }
 	serveCmd.WaitDelay = 5 * time.Second
 	serveCmd.Dir = storeRoot
-	// The hermetic review-mode feed (workbench.CommentFeed's canned-file
-	// implementation): REVIEW_SPEC reads as under MR review, with the
-	// three fixtures.ts comments — no network (CLAUDE.md).
-	serveCmd.Env = append(os.Environ(),
-		"VERDI_REVIEW_FEED="+feedPath,
-		// The directory home's hermetic in-review feed (openmrfeed.go's
-		// httpOpenMRFeed) — served by the control server above, loopback
-		// only, no network (CLAUDE.md).
-		"VERDI_OPENMR_FEED=http://"+controlAddr+"/openmrs",
-		"VERDI_DIAGRAM_VERIFICATION="+verificationPath,
-	)
+	// The shared serve's environment (sharedServeEnv, sharedstore.go): the
+	// hermetic review-mode feed, the directory home's hermetic in-review
+	// feed served by the control server above, and the canned diagram
+	// verification report — loopback only, no network (CLAUDE.md).
+	serveCmd.Env = sharedServeEnv(os.Environ(), store, openMRFeedURL)
 	serveCmd.Stdout = os.Stdout
 	serveCmd.Stderr = os.Stderr
 	if err := serveCmd.Start(); err != nil {

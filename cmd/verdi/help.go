@@ -68,7 +68,7 @@ verbs:
   gate             check the current build branch's gate conditions
   board            commit a board card to start a design branch
   audit            audit ADR exemptions, deviations, and closure hygiene
-  attest           scaffold an attestation skeleton for a story/AC pair
+  attest           scaffold an attestation skeleton for a story or feature criterion
   model            validate the store's operating model
   init             scaffold a new verdi store (plain vocabulary by default)
   obligation       author or scaffold an evidence obligation
@@ -138,7 +138,7 @@ var verbUsage = map[string]string{
 	// vocab:identity — CLI usage/flag grammar (--story-ref flag name, identity)
 	"board":  "usage: verdi board commit <board-key> --name <spec-name> [--story-ref <scheme:key>]",
 	"audit":  "usage: verdi audit",
-	"attest": "usage: verdi attest <story-ref> <ac-id>",
+	"attest": "usage: verdi attest <spec-ref> <ac-id>",
 	"model":  "usage: verdi model check",
 	// "usage: " + initUsageText (init.go) — review round 1, Minor 2: this
 	// row and every hand-printed init refusal now cite the SAME constant,

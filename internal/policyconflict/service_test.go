@@ -192,6 +192,37 @@ func TestServiceEvaluateMissingJudgeIsCompletedUnproven(t *testing.T) {
 	}
 }
 
+// TestServiceEvaluateCacheOnlyJudgeMissIsCompletedUnproven proves a
+// cache-only judge (Task 2, spec/readiness-recovery ac-3) behaves exactly
+// like a nil judge on a cache miss: runValidatedJudge treats
+// ErrJudgeCacheMiss as "no exchange" (nil, nil), never as an operational
+// failure, so the semantic row still completes unproven/judge-unavailable
+// rather than aborting the whole Evaluate call.
+func TestServiceEvaluateCacheOnlyJudgeMissIsCompletedUnproven(t *testing.T) {
+	adapter := baseAdapter(&fakeJudgeRunner{fn: func(context.Context, []string, []byte) ([]byte, int, error) {
+		t.Fatal("a cache-only judge must never run its adapter's process")
+		return nil, 0, nil
+	}})
+	service, repo := newServiceFixture(t, nil)
+	adapter.Root = repo.Dir
+	service.Deps.Primary = NewCacheOnlyJudge(adapter)
+	service.Deps.TreeHasher = &serviceTreeHasher{hash: cacheTestTreeHash}
+
+	result, err := service.Evaluate(context.Background(), serviceAcceptedRequest())
+	if err != nil {
+		t.Fatalf("Evaluate: %v", err)
+	}
+	if result.Report.Verdict != VerdictBlockedUnproven || len(result.Report.Semantic) != 1 {
+		t.Fatalf("result = %+v, want one blocked-unproven semantic row", result.Report)
+	}
+	if result.Report.Semantic[0].Primary != nil {
+		t.Fatalf("semantic row primary = %+v, want no exchange on a cache miss", result.Report.Semantic[0].Primary)
+	}
+	if !containsReason(result.Report.Semantic[0].Reasons, ReasonJudgeUnavailable) {
+		t.Fatalf("reasons = %v, want %q", result.Report.Semantic[0].Reasons, ReasonJudgeUnavailable)
+	}
+}
+
 func TestServiceEvaluateInconclusiveJudgeIsCompletedUnproven(t *testing.T) {
 	service, _ := newServiceFixture(t, serviceInconclusiveJudge(JudgePrimary))
 	result, err := service.Evaluate(context.Background(), serviceAcceptedRequest())

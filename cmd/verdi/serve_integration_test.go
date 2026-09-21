@@ -9,6 +9,8 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -26,20 +28,23 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jyang234/verdi/internal/artifact"
 	"github.com/jyang234/verdi/internal/contextcompile"
 	"github.com/jyang234/verdi/internal/designprovenance"
 	"github.com/jyang234/verdi/internal/filelock"
 	"github.com/jyang234/verdi/internal/fixturegit"
 	"github.com/jyang234/verdi/internal/mcpserve"
+	"github.com/jyang234/verdi/internal/policyartifact"
 	"github.com/jyang234/verdi/internal/policyconflict"
-	"github.com/jyang234/verdi/internal/readinesspilot"
+	"github.com/jyang234/verdi/internal/readinessload"
+	"github.com/jyang234/verdi/internal/repositoryfacts"
 	"github.com/jyang234/verdi/internal/store"
 	"github.com/jyang234/verdi/internal/workbench"
 )
 
-type readinessSnapshotBuilderFunc func(context.Context, string, string) (readinesspilot.Snapshot, error)
+type readinessSnapshotBuilderFunc func(context.Context, string, string) (string, *readinessload.PredecodedRequest, error)
 
-func (f readinessSnapshotBuilderFunc) Build(ctx context.Context, root, requestPath string) (readinesspilot.Snapshot, error) {
+func (f readinessSnapshotBuilderFunc) Build(ctx context.Context, root, requestPath string) (string, *readinessload.PredecodedRequest, error) {
 	return f(ctx, root, requestPath)
 }
 
@@ -59,14 +64,14 @@ func TestServeContextRequestFlagGrammar(t *testing.T) {
 						calls = append(calls, "find-root")
 						return "/store", nil
 					},
-					readiness: readinessSnapshotBuilderFunc(func(_ context.Context, root, requestPath string) (readinesspilot.Snapshot, error) {
+					readiness: readinessSnapshotBuilderFunc(func(_ context.Context, root, requestPath string) (string, *readinessload.PredecodedRequest, error) {
 						calls = append(calls, "build:"+root+":"+requestPath)
-						return readinesspilot.Snapshot{Head: "startup-head"}, nil
+						return "spec/startup-target", &readinessload.PredecodedRequest{}, nil
 					}),
-					run: func(root, httpAddr string, readiness *readinesspilot.Snapshot, _, _ io.Writer) int {
+					run: func(root, httpAddr string, loader readinessload.Loader, defaultSpec string, _, _ io.Writer) int {
 						calls = append(calls, "run:"+root+":"+httpAddr)
-						if readiness == nil || readiness.Head != "startup-head" {
-							t.Fatalf("run readiness = %+v, want injected startup snapshot", readiness)
+						if loader.Root != root || defaultSpec != "spec/startup-target" {
+							t.Fatalf("run loader=%+v defaultSpec=%q, want root %q and the built default spec", loader, defaultSpec, root)
 						}
 						return 0
 					},
@@ -96,13 +101,16 @@ func TestServeContextRequestFlagGrammar(t *testing.T) {
 			t.Run(tc.name, func(t *testing.T) {
 				deps := serveCommandDeps{
 					findRoot: func(string) (string, error) { return "/store", nil },
-					readiness: readinessSnapshotBuilderFunc(func(context.Context, string, string) (readinesspilot.Snapshot, error) {
+					readiness: readinessSnapshotBuilderFunc(func(context.Context, string, string) (string, *readinessload.PredecodedRequest, error) {
 						t.Fatal("readiness builder called without --context-request")
-						return readinesspilot.Snapshot{}, nil
+						return "", nil, nil
 					}),
-					run: func(_ string, gotHTTP string, readiness *readinesspilot.Snapshot, _, _ io.Writer) int {
-						if gotHTTP != tc.wantHTTP || readiness != nil {
-							t.Fatalf("run(http=%q, readiness=%+v), want http=%q and nil readiness", gotHTTP, readiness, tc.wantHTTP)
+					run: func(_ string, gotHTTP string, loader readinessload.Loader, defaultSpec string, _, _ io.Writer) int {
+						if gotHTTP != tc.wantHTTP || defaultSpec != "" {
+							t.Fatalf("run(http=%q, defaultSpec=%q), want http=%q and no default spec", gotHTTP, defaultSpec, tc.wantHTTP)
+						}
+						if loader.Root != "/store" {
+							t.Fatalf("run loader.Root = %q, want /store — a working loader is always wired even with no --context-request", loader.Root)
 						}
 						return 0
 					},
@@ -137,11 +145,11 @@ func TestServeContextRequestFlagGrammar(t *testing.T) {
 				called := false
 				deps := serveCommandDeps{
 					findRoot: func(string) (string, error) { called = true; return "", errors.New("must not run") },
-					readiness: readinessSnapshotBuilderFunc(func(context.Context, string, string) (readinesspilot.Snapshot, error) {
+					readiness: readinessSnapshotBuilderFunc(func(context.Context, string, string) (string, *readinessload.PredecodedRequest, error) {
 						called = true
-						return readinesspilot.Snapshot{}, errors.New("must not run")
+						return "", nil, errors.New("must not run")
 					}),
-					run: func(string, string, *readinesspilot.Snapshot, io.Writer, io.Writer) int { called = true; return 0 },
+					run: func(string, string, readinessload.Loader, string, io.Writer, io.Writer) int { called = true; return 0 },
 				}
 				var stdout, stderr bytes.Buffer
 				if code := cmdServeWithDeps(tc.args, &stdout, &stderr, deps); code != 2 {
@@ -160,7 +168,7 @@ func TestServeContextRequestBuildsBeforeEveryServerEffect(t *testing.T) {
 	lockPath := store.WriterLockPath(root)
 	var calls []string
 	builds := 0
-	builder := readinessSnapshotBuilderFunc(func(context.Context, string, string) (readinesspilot.Snapshot, error) {
+	builder := readinessSnapshotBuilderFunc(func(context.Context, string, string) (string, *readinessload.PredecodedRequest, error) {
 		builds++
 		calls = append(calls, "builder-start")
 		if err := os.MkdirAll(filepath.Dir(lockPath), 0o755); err != nil {
@@ -174,12 +182,12 @@ func TestServeContextRequestBuildsBeforeEveryServerEffect(t *testing.T) {
 			t.Fatalf("builder transient lock release: %v", err)
 		}
 		calls = append(calls, "builder-lock-released", "builder-complete")
-		return readinesspilot.Snapshot{Head: "startup-head"}, nil
+		return "spec/startup-target", &readinessload.PredecodedRequest{}, nil
 	})
 	deps := serveCommandDeps{
 		findRoot:  func(string) (string, error) { return root, nil },
 		readiness: builder,
-		run: func(string, string, *readinesspilot.Snapshot, io.Writer, io.Writer) int {
+		run: func(string, string, readinessload.Loader, string, io.Writer, io.Writer) int {
 			lock, err := filelock.Acquire(lockPath)
 			if err != nil {
 				t.Fatalf("server could not acquire writer lock after builder returned: %v", err)
@@ -212,10 +220,10 @@ func TestServeContextRequestBuilderFailureStopsBeforeServerEffects(t *testing.T)
 	var serverEffects int
 	deps := serveCommandDeps{
 		findRoot: func(string) (string, error) { return t.TempDir(), nil },
-		readiness: readinessSnapshotBuilderFunc(func(context.Context, string, string) (readinesspilot.Snapshot, error) {
-			return readinesspilot.Snapshot{}, errors.New("snapshot unavailable")
+		readiness: readinessSnapshotBuilderFunc(func(context.Context, string, string) (string, *readinessload.PredecodedRequest, error) {
+			return "", nil, errors.New("snapshot unavailable")
 		}),
-		run: func(string, string, *readinesspilot.Snapshot, io.Writer, io.Writer) int {
+		run: func(string, string, readinessload.Loader, string, io.Writer, io.Writer) int {
 			serverEffects++
 			return 0
 		},
@@ -229,37 +237,100 @@ func TestServeContextRequestBuilderFailureStopsBeforeServerEffects(t *testing.T)
 	}
 }
 
-func TestServeContextRequestSnapshotRemainsImmutableAcrossRequests(t *testing.T) {
-	repo, requestPath, _, _, specPath := readinessSnapshotRepo(t, "feature")
-	providerFactory := readinessSnapshotProviderFactory(t, repo.Dir, policyconflict.VerdictPass, nil)
+// TestServeReadinessRouteRederivesLiveOnEveryRequest is spec/readiness-
+// recovery ac-2/ac-4: the served /readiness route re-derives fresh
+// through Deps.ReadinessLoader on EVERY request — the opposite property
+// from what this test proved before Task 3 (its old name was
+// TestServeContextRequestSnapshotRemainsImmutableAcrossRequests): under
+// the pre-Task-3 design, one startup snapshot was handed into
+// workbench.Deps{Readiness: ...} and replayed byte-identically forever;
+// ac-2's whole point is that a source mutation between two requests IS
+// now picked up live, without restarting verdi serve. The startup
+// warm-up itself still runs exactly once regardless
+// (TestServeContextRequestBuildsBeforeEveryServerEffect already proves
+// that in isolation) — this test's own subject is the SERVED route's
+// live re-derivation. Drives internal/readinessload.Load entirely
+// in-process, through Options.ConflictProvider (fix round 1, Important
+// 2's hermetic seam) — no shell script, no judge process; that recipe is
+// reserved for TestReadinessLoadBuilderHandsOffTheCacheOnlyLoaderAndDefaultSpec
+// below (whose own subject IS the JudgeRun pre-run) and
+// TestServeContextRequestReadinessReachesGetDocumentOverSocket (the real
+// binary end to end).
+func TestServeReadinessRouteRederivesLiveOnEveryRequest(t *testing.T) {
+	repo := buildContextCompileRepo(t, map[string]string{
+		".verdi/specs/active/feature-alpha/spec.md": contextFeatureAlphaSpec(t),
+	})
+	checkoutBranch(t, repo.Dir, "design/feature-alpha")
+	requestPath := writeContextRequestFile(t, repo.Dir, "readiness-request.json", contextRequestBytes(t, "spec/feature-alpha", contextcompile.PhaseDesign, nil))
+	specPath := store.ActiveSpecPath(repo.Dir, "feature-alpha")
+	specSource, err := os.ReadFile(specPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const mutatedTitle = "Feature Alpha, retitled between two requests"
+
 	builds := 0
-	builder := readinessSnapshotBuilderFunc(func(ctx context.Context, root, gotRequestPath string) (readinesspilot.Snapshot, error) {
+	builder := readinessSnapshotBuilderFunc(func(ctx context.Context, root, gotRequestPath string) (string, *readinessload.PredecodedRequest, error) {
 		builds++
-		return (localReadinessSnapshotBuilder{providerFactory: providerFactory}).Build(ctx, root, gotRequestPath)
+		targetSpec, predecoded, err := readinessload.ContextRequestSpec(root, gotRequestPath)
+		if err != nil {
+			return "", nil, err
+		}
+		_, err = readinessload.Load(ctx, root, targetSpec, readinessload.Options{
+			ContextRequestPath: gotRequestPath, PredecodedRequest: predecoded, BoardHref: workbench.BranchBoardHref,
+			Judge: readinessload.JudgeRun, ConflictProvider: readinessLoadPassProviderFunc(t),
+		})
+		if err != nil {
+			return "", nil, err
+		}
+		return targetSpec, predecoded, nil
 	})
 	deps := serveCommandDeps{
 		findRoot:  func(string) (string, error) { return repo.Dir, nil },
 		readiness: builder,
-		run: func(root, _ string, readiness *readinesspilot.Snapshot, _, _ io.Writer) int {
-			if readiness == nil {
-				t.Fatal("run received nil readiness snapshot")
+		run: func(root, _ string, loader readinessload.Loader, defaultSpec string, _, _ io.Writer) int {
+			if loader.Root != root || defaultSpec == "" {
+				t.Fatalf("run loader=%+v defaultSpec=%q, want root %q and a non-empty default spec", loader, defaultSpec, root)
 			}
-			handler := workbench.NewHandlerWith(root, workbench.Deps{Readiness: readiness})
+			// The production loader cmdServeWithDeps built carries no
+			// ConflictProvider (that seam is test-only); overlay the same
+			// hermetic pass-provider the warm-up used onto this LOCAL copy
+			// so the route's own re-derivation needs no real judge either
+			// — everything else (Root, ContextRequestPath, BoardHref) is
+			// exactly what production wired.
+			loader.Opts.ConflictProvider = readinessLoadPassProviderFunc(t)
+			handler := workbench.NewHandlerWith(root, workbench.Deps{ReadinessLoader: loader, ReadinessDefaultSpec: defaultSpec})
 			first := httptest.NewRecorder()
 			handler.ServeHTTP(first, httptest.NewRequest(http.MethodGet, "/readiness", nil))
 			if first.Code != http.StatusOK {
 				t.Fatalf("first readiness status = %d, body=%q", first.Code, first.Body.String())
 			}
-			if !strings.Contains(first.Body.String(), repo.Head) || !strings.Contains(first.Body.String(), "restart verdi serve after an edit") {
-				t.Fatalf("first body misses startup HEAD or stale notice: %q", first.Body.String())
+			if !strings.Contains(first.Body.String(), repo.Head) || !strings.Contains(first.Body.String(), "for this request") {
+				t.Fatalf("first body misses derivation HEAD or stamp: %q", first.Body.String())
 			}
-			if err := os.WriteFile(specPath, []byte("changed after startup; no longer a valid spec\n"), 0o644); err != nil {
+			// A VALID mutation, never a corruption: the spec keeps
+			// deriving, so the second response is a 200 carrying the NEW
+			// title. A route that merely failed every request after a
+			// write would satisfy "the two responses differ" without
+			// re-deriving anything (fix round 1, M5), which is why the
+			// positive value is asserted here rather than a failure.
+			mutated := strings.Replace(string(specSource), `title: "Feature Alpha"`, `title: "`+mutatedTitle+`"`, 1)
+			if mutated == string(specSource) {
+				t.Fatal("fixture drift: the spec's title line no longer matches, so nothing was mutated")
+			}
+			if err := os.WriteFile(specPath, []byte(mutated), 0o644); err != nil {
 				t.Fatal(err)
 			}
 			second := httptest.NewRecorder()
 			handler.ServeHTTP(second, httptest.NewRequest(http.MethodGet, "/readiness", nil))
-			if second.Code != http.StatusOK || second.Body.String() != first.Body.String() {
-				t.Fatalf("second readiness response changed after source mutation: status=%d\nfirst=%q\nsecond=%q", second.Code, first.Body.String(), second.Body.String())
+			if second.Code != http.StatusOK {
+				t.Fatalf("second readiness request after a valid source mutation must re-derive successfully, got status=%d body=%q", second.Code, second.Body.String())
+			}
+			if !strings.Contains(second.Body.String(), mutatedTitle) {
+				t.Fatalf("second readiness response does not carry the title written between the two requests — the route is not re-deriving live (ac-2 regression):\n%s", second.Body.String())
+			}
+			if strings.Contains(first.Body.String(), mutatedTitle) {
+				t.Fatalf("the FIRST response already carried the post-mutation title, so the assertion above proves nothing:\n%s", first.Body.String())
 			}
 			return 0
 		},
@@ -269,22 +340,320 @@ func TestServeContextRequestSnapshotRemainsImmutableAcrossRequests(t *testing.T)
 		t.Fatalf("exit = %d, stderr=%q", code, stderr.String())
 	}
 	if builds != 1 {
-		t.Fatalf("readiness builds = %d after two HTTP requests, want exactly 1", builds)
+		t.Fatalf("readiness warm-up builds = %d after two HTTP requests, want exactly 1", builds)
 	}
+}
+
+// TestServeReadinessSurvivesTheRequestFileVanishingAfterStartup is
+// R-RR1-17: the per-request loader `verdi serve` threads into the board,
+// the Document tab and MCP carries the PredecodedRequest bundle the
+// startup warm-up already validated, so it never re-reads the request
+// file. A request file deleted (or edited, or moved) mid-run must not
+// turn the request's own spec — nor, through the same loader, any other
+// spec — into a loader error for as long as that server runs. The file is
+// removed INSIDE the fake run, i.e. after startup completed, and the
+// per-request Load that follows must still derive; the RequestDigest
+// assertion proves it derived through the request (the startup-validated
+// bytes), not merely that the error went away. Hermetic per co-1 and
+// R-RR1-14: the conflict verdict comes from Options.ConflictProvider
+// in-process — no judge process, no network.
+func TestServeReadinessSurvivesTheRequestFileVanishingAfterStartup(t *testing.T) {
+	repo := buildContextCompileRepo(t, map[string]string{
+		".verdi/specs/active/feature-alpha/spec.md": contextFeatureAlphaSpec(t),
+	})
+	checkoutBranch(t, repo.Dir, "design/feature-alpha")
+	requestData := contextRequestBytes(t, "spec/feature-alpha", contextcompile.PhaseDesign, nil)
+	requestPath := writeContextRequestFile(t, repo.Dir, "readiness-request.json", requestData)
+	requestSum := sha256.Sum256(requestData)
+	wantDigest := "sha256:" + hex.EncodeToString(requestSum[:])
+
+	builder := readinessSnapshotBuilderFunc(func(ctx context.Context, root, gotRequestPath string) (string, *readinessload.PredecodedRequest, error) {
+		targetSpec, predecoded, err := readinessload.ContextRequestSpec(root, gotRequestPath)
+		if err != nil {
+			return "", nil, err
+		}
+		if _, err := readinessload.Load(ctx, root, targetSpec, readinessload.Options{
+			ContextRequestPath: gotRequestPath, PredecodedRequest: predecoded, BoardHref: workbench.BranchBoardHref,
+			Judge: readinessload.JudgeRun, ConflictProvider: readinessLoadPassProviderFunc(t),
+		}); err != nil {
+			return "", nil, err
+		}
+		return targetSpec, predecoded, nil
+	})
+	deps := serveCommandDeps{
+		findRoot:  func(string) (string, error) { return repo.Dir, nil },
+		readiness: builder,
+		run: func(_, _ string, loader readinessload.Loader, defaultSpec string, _, _ io.Writer) int {
+			if loader.Opts.ContextRequestPath != requestPath {
+				t.Fatalf("loader ContextRequestPath = %q, want %q — Load's contextFallback vector still names it", loader.Opts.ContextRequestPath, requestPath)
+			}
+			// The mid-run event this ruling exists for.
+			if err := os.Remove(requestPath); err != nil {
+				t.Fatalf("removing the request file after startup: %v", err)
+			}
+			loader.Opts.ConflictProvider = readinessLoadPassProviderFunc(t)
+			snap, err := loader.Load(context.Background(), defaultSpec)
+			if err != nil {
+				t.Fatalf("per-request Load after the request file was removed must still derive, got: %v", err)
+			}
+			if snap.RequestDigest != wantDigest {
+				t.Fatalf("RequestDigest = %q, want the startup-validated request's own %q — the derivation must travel the request path, not fall back to no request", snap.RequestDigest, wantDigest)
+			}
+			return 0
+		},
+	}
+	var stdout, stderr bytes.Buffer
+	if code := cmdServeWithDeps([]string{"--http", "127.0.0.1:0", "--context-request", requestPath}, &stdout, &stderr, deps); code != 0 {
+		t.Fatalf("exit = %d, stderr=%q", code, stderr.String())
+	}
+}
+
+// readinessLoadPassProviderFunc builds a readinessload.ConflictProviderFunc
+// (fix round 1, Important 2's seam) whose Evaluate always returns a
+// self-consistent VerdictPass report re-targeted at the caller's own
+// request — an in-process, no-subprocess fake, mirroring the real
+// internal/policyconflict/testdata/report.json fixture cmd/verdi's deleted
+// readiness_snapshot_test.go once re-targeted the same way
+// (readinessSnapshotReport) and internal/readinessload's own load_test.go
+// still does (fixtureReport) — never a hand-authored duplicate of the fixed
+// report shape.
+func readinessLoadPassProviderFunc(t *testing.T) readinessload.ConflictProviderFunc {
+	t.Helper()
+	return func(_ context.Context, root string, request policyconflict.Request) (policyconflict.VerdictProvider, error) {
+		return contextConflictProviderFunc(func(context.Context, policyconflict.Request) (policyconflict.Result, error) {
+			return readinessLoadPassReport(t, root, request), nil
+		}), nil
+	}
+}
+
+// readinessLoadPassReport decodes the real, already-cross-validated
+// internal/policyconflict/testdata/report.json fixture and re-targets its
+// Input.Target/Repository at request's own acceptance candidate, forcing an
+// empty Semantic slice and VerdictPass. readinessload.Load cross-checks the
+// report's target identity against the resolved journey target/repository
+// (load.go's reportIdentity) before it will accept the report at all, so
+// this re-targeting is required, not optional.
+func readinessLoadPassReport(t *testing.T, root string, request policyconflict.Request) policyconflict.Result {
+	t.Helper()
+	candidate := request.Target.AcceptanceCandidate
+	if request.Target.Kind != policyconflict.TargetAcceptanceCandidate || candidate == nil {
+		t.Fatalf("provider request target = %+v, want one acceptance candidate", request.Target)
+	}
+	ref, err := artifact.ParseRef(candidate.Spec)
+	if err != nil {
+		t.Fatalf("ParseRef(%q): %v", candidate.Spec, err)
+	}
+	specBytes, err := os.ReadFile(store.ActiveSpecPath(root, ref.Name))
+	if err != nil {
+		t.Fatalf("read report target: %v", err)
+	}
+	fixture, err := os.ReadFile(filepath.Join("..", "..", "internal", "policyconflict", "testdata", "report.json"))
+	if err != nil {
+		t.Fatalf("read report fixture: %v", err)
+	}
+	report, err := policyconflict.DecodeReport(fixture)
+	if err != nil {
+		t.Fatalf("DecodeReport fixture: %v", err)
+	}
+	report.Digest = ""
+	sum := sha256.Sum256(specBytes)
+	report.Input.Target = policyconflict.TargetIdentity{
+		Kind: policyconflict.TargetAcceptanceCandidate,
+		Candidate: &policyconflict.CandidateIdentity{
+			Ref:           candidate.Spec,
+			Path:          store.ActiveSpecRelPath(ref.Name),
+			Branch:        candidate.Expected.Branch,
+			Head:          candidate.Expected.Head,
+			Blob:          strings.Repeat("b", 40),
+			ContentDigest: "sha256:" + hex.EncodeToString(sum[:]),
+			Scope:         candidate.Scope,
+			Adapter:       candidate.Adapter,
+			GrantDigest:   "sha256:" + strings.Repeat("d", 64),
+		},
+	}
+	report.Input.Repository.Branch = repositoryfacts.StringFact{Known: true, Value: candidate.Expected.Branch}
+	report.Input.Repository.Head = repositoryfacts.StringFact{Known: true, Value: candidate.Expected.Head}
+	report.Semantic = []policyconflict.SemanticEvaluation{}
+	report.Verdict = policyconflict.VerdictPass
+	encoded, err := policyconflict.EncodeReport(report)
+	if err != nil {
+		t.Fatalf("EncodeReport: %v", err)
+	}
+	decoded, err := policyconflict.DecodeReport(encoded)
+	if err != nil {
+		t.Fatalf("DecodeReport: %v", err)
+	}
+	return policyconflict.Result{Report: decoded, ReportBytes: encoded}
+}
+
+// TestReadinessLoadBuilderHandsOffTheCacheOnlyLoaderAndDefaultSpec proves
+// readinessLoadBuilder.Build's own side of the Task-3 hand-off (threaded
+// through runServe's own return path — exit obligation: no more
+// package-level loader/default-spec hand-off variables): Build's returned
+// ref names the request's own target, and after Build's real JudgeRun
+// warm-up, a Loader constructed the SAME way cmdServeWithDeps constructs
+// its own (root, the request path, BoardHref, Actors — Judge left at its
+// zero value, JudgeCacheOnly) independently reaches a real, successful
+// derivation for that ref WITHOUT ever launching the judge process a
+// second time — proven directly with a counting judge script, not merely
+// by comparing two outcomes that could coincidentally agree.
+func TestReadinessLoadBuilderHandsOffTheCacheOnlyLoaderAndDefaultSpec(t *testing.T) {
+	repo := buildContextCompileRepo(t, map[string]string{
+		".verdi/specs/active/feature-alpha/spec.md": contextFeatureAlphaSpec(t),
+	})
+	counterPath := filepath.Join(t.TempDir(), "judge-calls")
+	judge := writeContextConflictJudge(t, "c=$(cat '"+counterPath+"' 2>/dev/null || echo 0); echo $((c+1)) > '"+counterPath+"'; printf '%s\\n' '"+contextConflictNoConflictJudgeResult+"'")
+	configureContextConflictJudge(t, repo, judge, 0)
+	checkoutBranch(t, repo.Dir, "design/feature-alpha")
+	requestPath := writeContextRequestFile(t, repo.Dir, "readiness-request.json", contextRequestBytes(t, "spec/feature-alpha", contextcompile.PhaseDesign, nil))
+
+	defaultSpec, predecoded, err := (readinessLoadBuilder{}).Build(context.Background(), repo.Dir, requestPath)
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	if defaultSpec != "spec/feature-alpha" {
+		t.Fatalf("defaultSpec = %q, want %q", defaultSpec, "spec/feature-alpha")
+	}
+	// R-RR1-17: Build hands back the exact bytes it validated, so the
+	// per-request loader below never re-reads the request file.
+	if predecoded == nil || len(predecoded.Bytes) == 0 || predecoded.Request.Spec != defaultSpec {
+		t.Fatalf("Build predecoded = %+v, want the startup-validated bundle for %q", predecoded, defaultSpec)
+	}
+	callsAfterWarm, err := os.ReadFile(counterPath)
+	if err != nil || strings.TrimSpace(string(callsAfterWarm)) != "1" {
+		t.Fatalf("judge calls after the warm-up = %q (err %v), want exactly 1", callsAfterWarm, err)
+	}
+
+	// The SAME loader construction cmdServeWithDeps itself performs when a
+	// --context-request was supplied (serve.go).
+	loader := readinessload.Loader{Root: repo.Dir, Opts: readinessload.Options{
+		ContextRequestPath: requestPath, BoardHref: workbench.BranchBoardHref, Actors: resolveConflictActors,
+		PredecodedRequest: predecoded,
+	}}
+	if loader.Opts.Judge != "" {
+		t.Fatalf("hand-off loader Judge = %q, want the zero value (normalizes to JudgeCacheOnly)", loader.Opts.Judge)
+	}
+	cached, err := loader.Load(context.Background(), defaultSpec)
+	if err != nil {
+		t.Fatalf("hand-off loader.Load: %v", err)
+	}
+	if cached.Head != repo.Head || cached.TargetRef != defaultSpec {
+		t.Fatalf("hand-off loader snapshot = %+v, want Head %q and TargetRef %q", cached, repo.Head, defaultSpec)
+	}
+	callsAfterCacheOnly, err := os.ReadFile(counterPath)
+	if err != nil || strings.TrimSpace(string(callsAfterCacheOnly)) != "1" {
+		t.Fatalf("judge calls after the cache-only hand-off load = %q (err %v), want STILL exactly 1 (no second launch)", callsAfterCacheOnly, err)
+	}
+}
+
+// TestReadinessLoadBuilderRefusesAnAlreadyStaleStartupRequest is R-RRF-3's
+// (SI-214) warm-up half. A per-request load now DISCLOSES a stale
+// `expected` branch/HEAD claim instead of failing
+// (internal/readinessload's own
+// TestLoad_ExpectedMismatchPostureIsTheExplicitOption), so the startup
+// warm-up became the ONE caller that must still refuse one: a request that
+// cannot describe the checkout the server is about to serve is a
+// misconfiguration the operator has to see at once, not something a page
+// discloses quietly for the life of the process.
+// readinessLoadBuilder.Build sets Options.RequireExpectedMatch on its
+// warmOpts alone — cmdServeWithDeps' per-request loaderOpts never does —
+// and deleting that one line leaves the refusing rows below red while the
+// disclosure behaviour stays green.
+func TestReadinessLoadBuilderRefusesAnAlreadyStaleStartupRequest(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		branch  string // "" keeps the checkout's own branch
+		head    string // "" keeps the repository's own HEAD
+		wantErr bool
+	}{
+		{name: "an expected claim describing the checkout warms up"},
+		{name: "an already-stale expected HEAD is refused", head: strings.Repeat("a", 40), wantErr: true},
+		{name: "an already-stale expected branch is refused", branch: "design/other", wantErr: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := buildContextCompileRepo(t, map[string]string{
+				".verdi/specs/active/feature-alpha/spec.md": contextFeatureAlphaSpec(t),
+			})
+			judge := writeContextConflictJudge(t, "printf '%s\\n' '"+contextConflictNoConflictJudgeResult+"'")
+			configureContextConflictJudge(t, repo, judge, 0)
+			checkoutBranch(t, repo.Dir, "design/feature-alpha")
+			expected := contextcompile.Expected{Branch: "design/feature-alpha", Head: repo.Head}
+			if tc.branch != "" {
+				expected.Branch = tc.branch
+			}
+			if tc.head != "" {
+				expected.Head = tc.head
+			}
+			requestPath := writeContextRequestFile(t, repo.Dir, "readiness-request.json",
+				contextRequestBytesWithExpected(t, "spec/feature-alpha", expected))
+
+			defaultSpec, predecoded, err := (readinessLoadBuilder{}).Build(context.Background(), repo.Dir, requestPath)
+			if !tc.wantErr {
+				if err != nil {
+					t.Fatalf("Build: %v", err)
+				}
+				if defaultSpec != "spec/feature-alpha" || predecoded == nil || predecoded.Request.Expected == nil {
+					t.Fatalf("Build = (%q, %+v), want the warmed startup bundle for spec/feature-alpha", defaultSpec, predecoded)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), "expected repository") {
+				t.Fatalf("Build error = %v, want the warm-up's expected-identity refusal", err)
+			}
+			// …and `verdi serve` itself exits 2 on it, never entering the
+			// run: an operational failure, the exit code every verb owes a
+			// misconfiguration (CLAUDE.md 0/1/2).
+			var stdout, stderr bytes.Buffer
+			deps := serveCommandDeps{
+				findRoot:  func(string) (string, error) { return repo.Dir, nil },
+				readiness: readinessLoadBuilder{},
+				run: func(string, string, readinessload.Loader, string, io.Writer, io.Writer) int {
+					t.Error("serve entered its run with an already-stale --context-request")
+					return 0
+				},
+			}
+			if code := cmdServeWithDeps([]string{"--http", "127.0.0.1:0", "--context-request", requestPath}, &stdout, &stderr, deps); code != 2 {
+				t.Fatalf("serve exit = %d, want 2; stderr=%q", code, stderr.String())
+			}
+			if !strings.Contains(stderr.String(), "expected repository") {
+				t.Fatalf("serve stderr = %q, want the expected-identity refusal", stderr.String())
+			}
+		})
+	}
+}
+
+// contextRequestBytesWithExpected is contextRequestBytes plus the optional
+// `expected` repository claim R-RRF-3 turns on — built through
+// contextcompile's own EncodeRequest seam, never hand-authored JSON.
+func contextRequestBytesWithExpected(t *testing.T, spec string, expected contextcompile.Expected) []byte {
+	t.Helper()
+	data, err := contextcompile.EncodeRequest(contextcompile.Request{
+		Schema:   contextcompile.RequestSchema,
+		Adapter:  contextcompile.AdapterRef{ID: "codex", Version: "1"},
+		Phase:    contextcompile.PhaseDesign,
+		Scope:    policyartifact.Scope{Phases: []string{}, Environments: []string{}, Paths: []string{}, Refs: []string{}},
+		Spec:     spec,
+		Expected: &expected,
+	})
+	if err != nil {
+		t.Fatalf("EncodeRequest: %v", err)
+	}
+	return data
 }
 
 // TestServeContextRequestReadinessReachesGetDocumentOverSocket is fix
 // round 1 F1 (task-4-review.md): runServe's own wiring
-// (`srv.Backend.Readiness = readiness`, serve.go:297 — R-W3-3) had zero
-// coverage. Every other readiness/get_document test either injects a fake
-// `run` into cmdServeWithDeps (this file's TestServeContextRequest* trio
-// above, which therefore never reach the real runServe body the wiring
-// line lives in) or builds mcpserve.Backend{Readiness: ...} by hand
-// (internal/mcpserve, cmd/verdi/document_parity_e2e_test.go) — reviewer
-// mutant M5 (delete the wiring line) left the entire ./cmd/verdi/ and
+// (`srv.Backend.ReadinessLoader = readinessLoader`, serve.go — spec/
+// readiness-recovery ac-4) had zero coverage. Every other readiness/
+// get_document test either injects a fake `run` into cmdServeWithDeps
+// (this file's TestServeContextRequest* trio above, which therefore
+// never reach the real runServe body the wiring line lives in) or builds
+// mcpserve.Backend{ReadinessLoader: ...} by hand (internal/mcpserve,
+// cmd/verdi/document_parity_e2e_test.go) — reviewer mutant M5 (delete
+// the wiring line) left the entire ./cmd/verdi/ and
 // ./internal/mcpserve/ suites green. This test starts a REAL `verdi
 // serve --context-request <fixture>` subprocess — so it goes through the
-// genuine, unfaked localReadinessSnapshotBuilder{} runServe always uses —
+// genuine, unfaked readinessLoadBuilder{} runServe always uses —
 // and drives a REAL get_document call over its live MCP socket, exactly
 // mirroring TestServeMutateDraftUsesHeldWriterLock's real-socket-dial
 // pattern below. A regression that drops the wiring line makes this test
@@ -355,7 +724,7 @@ func TestServeContextRequestReadinessReachesGetDocumentOverSocket(t *testing.T) 
 		t.Fatalf("decoding get_document result: %v", err)
 	}
 	if !strings.Contains(doc.Markdown, "## Readiness") || strings.Contains(doc.Markdown, "Readiness was not supplied for this render.") {
-		t.Fatalf("get_document over the REAL served MCP socket did not carry the startup readiness snapshot's populated section — exactly the regression runServe's srv.Backend.Readiness wiring (serve.go:297) guards against:\n%s", doc.Markdown)
+		t.Fatalf("get_document over the REAL served MCP socket did not carry a populated readiness section — exactly the regression runServe's `srv.Backend.ReadinessLoader = readinessLoader` wiring guards against:\n%s", doc.Markdown)
 	}
 }
 

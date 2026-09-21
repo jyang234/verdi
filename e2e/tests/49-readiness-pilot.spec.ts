@@ -1,25 +1,41 @@
-import { test, expect, type Page } from "@playwright/test";
+import { test, expect, request, type Page } from "@playwright/test";
 import { CONTROL_URL, SHOWCASE, branchBoardPath } from "./fixtures";
-import { addSticky } from "./helpers";
+import { addSticky, expectAutosaved } from "./helpers";
 
 // The Wave 3.5 readiness pilot cockpit (GET /readiness), F-01 corrected
 // form (SI-125): orientation first ("where am I?"), the four-step
 // process rail with plain labels, a ranked focus list showing the top
 // three priorities with the exact remainder behind one inline
 // disclosure, and completed checks holding every proven fact. The page
-// is a GET-only view of ONE immutable startup snapshot; the only
-// interactive state is the ephemeral open state of native disclosures.
+// is a GET-only view of readiness derived fresh for each request
+// (spec/readiness-recovery ac-2 — the stamp names the HEAD the request
+// looked at); the only interactive state is the ephemeral open state of
+// native disclosures.
 //
 // Closed instrumentation vocabulary (unchanged): readiness-opened,
 // area-inspected, concern-inspected, board-link-followed,
 // cli-fallback-copied, stale-notice-inspected — page memory only.
+//
+// Because the page derives per request, its exact-array oracles below
+// describe a FRESH store — and by the time the alphabetical full run
+// reaches this file, earlier suites have left open board stickies, a
+// spike claim, an extra open question and an edited spec in the shared
+// store, all of which the page honestly shows. So every test here (except
+// the all-proven one, which has its own fixture) runs against the
+// ISOLATED readiness-pilot store (cmd/e2eharness/readinesspilotfixture.go,
+// R-RR1-23): the real `verdi serve` over a store provisioned by the
+// shared store's own sequence, in the shared serve's own posture,
+// discovered through the control server — never the shared serve. The
+// board the cockpit links to is that isolated serve's board, so the
+// edit test's probe lands in the isolated store too.
 
 // Pinned INDEPENDENTLY of the rendered DOM, from the committed hermetic
 // harness fixtures (provision_board.go's refi-decline-flow design branch
 // + provision_readiness.go's policy fixtures) and the corrected
-// comparators (current-focus area first, then blocking, violated, and
-// area/id order). A reordered, omitted, or extra concern — in either
-// inventory — fails these exact-array oracles. The sha256 semantic id is
+// comparators (current-focus area first, then blocking before
+// non-blocking, current before eventual, violated before unproven, then
+// area order, then id). A reordered, omitted, or extra concern — in
+// either inventory — fails these exact-array oracles. The sha256 semantic id is
 // the digest of committed fixture bytes and is therefore deterministic —
 // it moved when ac-10's oq-2 + stubs: entries changed the candidate
 // content; the new value was captured from a real harness run, not typed
@@ -27,12 +43,35 @@ import { addSticky } from "./helpers";
 const SEMANTIC_ID =
   "context/semantic/sha256:9fe503eb5bb9fcaaf95da12b4f7b695c79abd6c8f793f4018e6c627895e8ef4d";
 
+// The eventual closure blockers (spec/readiness-recovery ac-1): the
+// journey now derives, for the draft feature refi-decline-flow, what will
+// block its closure later — later-transition obligations, the unsatisfied
+// outcome floor of each criterion, principal resolution, the spike-claimed
+// oq-2, and the request's own semantic conflict row (present only because
+// the harness serves with --context-request; a bare `verdi journey`
+// discloses "no policy-conflict report was supplied" and lists the other
+// seven). readinesspilot surfaces each as a non-blocking, eventual,
+// violated-with-witness review/blocker/* concern, so they all sort after
+// every current row and among themselves by id. Read from the harness's
+// own derivation at design/refi-decline-flow (2026-09-19), not typed.
+const EVENTUAL_REVIEW_BLOCKERS = [
+  "review/blocker/conflict-semantic/sha256-9fe503eb5bb9fcaaf95da12b4f7b695c79abd6c8f793f4018e6c627895e8ef4d",
+  "review/blocker/obligation-countersign-unproven/close/attestation/countersign",
+  "review/blocker/obligation-fold-green-unproven/close/behavioral/fold-green",
+  "review/blocker/outcome-floor/ac-1",
+  "review/blocker/outcome-floor/ac-2",
+  "review/blocker/outcome-floor/ac-3",
+  "review/blocker/principal-resolution-unproven/close",
+  "review/blocker/question-claimed/oq-2",
+];
+
 // The exact focus order: the current-focus area (shape-proposal) leads.
 // shape/question/oq-2 (spec/uat-round-1 ac-10, PLAN.md §7 I-128) is a
 // spike-claimed open question: non-blocking/eventual, so it still groups
 // with the current-focus (shape-proposal) rows but sorts after
 // shape/provenance (blocking ties, current before eventual) — oq-1 stays
-// unclaimed, blocking/current, and first.
+// unclaimed, blocking/current, and first. The eventual review blockers
+// close the list.
 const ATTENTION_QUEUE = [
   "shape/question/oq-1",
   "shape/provenance",
@@ -47,9 +86,16 @@ const ATTENTION_QUEUE = [
   "context/disclosure/repository-remote-unknown",
   SEMANTIC_ID,
   "review/role/merge/attestation/author-vouch",
+  ...EVENTUAL_REVIEW_BLOCKERS,
 ];
 
-// Every and only the proven concerns, in existing AllConcerns order.
+// Every and only the proven concerns, in existing AllConcerns order (area
+// order, then id). review/eventual-derivation (spec/readiness-recovery
+// ac-1/co-6, SI-213 / R-RRF-1) is the review area's one proven row here:
+// the fixture's eventual section derives with nothing unavailable (its
+// stub reconciliation and outcome-floor fold both compute — the
+// outcome-floor blockers above are that fold's output), so it closes the
+// list after the context rows.
 const COMPLETED_CHECKS = [
   "shape/board",
   "shape/mutation",
@@ -57,6 +103,7 @@ const COMPLETED_CHECKS = [
   "shape/problem",
   "context/mechanical/action:make-verify#complete",
   "context/mechanical/configuration:go-version#complete",
+  "review/eventual-derivation",
 ];
 
 // The four stations in snapshot order: id, plain label, formal state.
@@ -81,6 +128,41 @@ const ALL_PROVEN = {
     "review/action",
   ],
 };
+
+const READINESS_PILOT_FIXTURE_URL = `${CONTROL_URL}/readiness-pilot-fixture`;
+
+// The isolated readiness-pilot serve's base URL (http://127.0.0.1:<port>/),
+// started lazily by the control server on first use and reused thereafter.
+// A non-200 answer carries the harness's own reason in its body (a
+// provisioning, build, or health-wait failure), so the assertion names it.
+async function readinessPilotBase(page: Page): Promise<string> {
+  const res = await page.request.get(READINESS_PILOT_FIXTURE_URL);
+  expect(res.ok(), await res.text()).toBe(true);
+  const base = (await res.text()).trim();
+  expect(base).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/$/);
+  return base;
+}
+
+// The first call provisions a whole shared-shape store and builds the
+// binary — seconds on a warm cache, longer cold — so warm the fixture ONCE
+// here, under its own allowance, rather than inside the first test's
+// default 30s budget (the pattern 72-spec-import.spec.ts uses for its
+// fixture-touching tests). Every test then finds the serve already up.
+test.beforeAll(async () => {
+  test.setTimeout(90_000);
+  const api = await request.newContext();
+  try {
+    const res = await api.get(READINESS_PILOT_FIXTURE_URL);
+    expect(res.ok(), await res.text()).toBe(true);
+    expect((await res.text()).trim()).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/$/);
+  } finally {
+    await api.dispose();
+  }
+});
+
+async function readinessPilotURL(page: Page): Promise<string> {
+  return (await readinessPilotBase(page)) + "readiness";
+}
 
 async function allProvenReadinessURL(page: Page): Promise<string> {
   const res = await page.request.get(
@@ -131,7 +213,7 @@ function focusIds(page: Page): Promise<Array<string | null>> {
     .evaluateAll((els) => els.map((el) => el.getAttribute("data-concern-id")));
 }
 
-async function startupHead(page: Page): Promise<string> {
+async function derivedHead(page: Page): Promise<string> {
   const head = await page
     .locator('.readiness-target-tech dt:text-is("Head") + dd')
     .textContent();
@@ -142,7 +224,7 @@ async function startupHead(page: Page): Promise<string> {
 test("orientation and rail answer where-am-I with plain labels", async ({
   page,
 }) => {
-  await page.goto("/readiness");
+  await page.goto(await readinessPilotURL(page));
 
   // Orientation: exact title first, current step, exact purpose copy.
   await expect(page.locator("h2.readiness-title")).toHaveText(TARGET_TITLE);
@@ -150,7 +232,7 @@ test("orientation and rail answer where-am-I with plain labels", async ({
     "Step 1 of 4 — Define the work",
   );
   await expect(page.locator(".readiness-purpose")).toHaveText(
-    "This is a startup snapshot of readiness for the current design work.",
+    "This page derives readiness for the current design work on every request.",
   );
   // REAL DOM order: title → step → purpose all precede the target
   // technical metadata, and the shell's old leading metadata card is
@@ -199,7 +281,7 @@ test("orientation and rail answer where-am-I with plain labels", async ({
 test("focus list shows exactly three priorities and the exact disclosed remainder", async ({
   page,
 }) => {
-  await page.goto("/readiness");
+  await page.goto(await readinessPilotURL(page));
 
   // Exactly the first three, in the pinned order, ranked 1..3.
   expect(await focusIds(page)).toEqual(ATTENTION_QUEUE); // complete list is in the DOM…
@@ -218,9 +300,10 @@ test("focus list shows exactly three priorities and the exact disclosed remainde
   }
 
   // Downstream disclosure: exactly the violated concerns in areas after
-  // the current focus (the two review blockers) — nothing else counted.
+  // the current focus (the two current review blockers plus the eight
+  // eventual ones) — nothing else counted.
   await expect(page.locator(".readiness-downstream")).toHaveText(
-    "Known problems in later steps: 2",
+    "Known problems in later steps: 10",
   );
 
   // The inline control carries the exact remaining count; expanding
@@ -228,7 +311,7 @@ test("focus list shows exactly three priorities and the exact disclosed remainde
   // "Show fewer"; collapsing hides it again. No event is recorded.
   const more = page.locator("details.readiness-more");
   const summary = more.locator(".readiness-more-summary");
-  await expect(summary).toHaveText(/10 more items\s*Show fewer/); // both spans in DOM…
+  await expect(summary).toHaveText(/18 more items\s*Show fewer/); // both spans in DOM…
   await expect(more.locator(".readiness-more-closed")).toBeVisible();
   await expect(more.locator(".readiness-more-open")).toBeHidden();
 
@@ -238,8 +321,8 @@ test("focus list shows exactly three priorities and the exact disclosed remainde
   await expect(more.locator(".readiness-more-open")).toBeVisible();
   await expect(more.locator(".readiness-more-closed")).toBeHidden();
   const revealed = more.locator("[data-concern-id]");
-  await expect(revealed).toHaveCount(10);
-  for (let i = 0; i < 10; i++) {
+  await expect(revealed).toHaveCount(18);
+  for (let i = 0; i < 18; i++) {
     await expect(revealed.nth(i)).toHaveAttribute(
       "data-concern-id",
       ATTENTION_QUEUE[i + 3],
@@ -256,7 +339,7 @@ test("focus list shows exactly three priorities and the exact disclosed remainde
 test("focus and completed checks are lossless, disjoint, and complete", async ({
   page,
 }) => {
-  await page.goto("/readiness");
+  await page.goto(await readinessPilotURL(page));
 
   const queueIds = await focusIds(page);
   expect(queueIds).toEqual(ATTENTION_QUEUE);
@@ -287,7 +370,7 @@ test("focus and completed checks are lossless, disjoint, and complete", async ({
 test("plain state labels pair with exact formal technical details", async ({
   page,
 }) => {
-  await page.goto("/readiness");
+  await page.goto(await readinessPilotURL(page));
 
   // Every chip pairs its formal modifier class with the plain label.
   const chips = await page
@@ -328,7 +411,7 @@ test("plain state labels pair with exact formal technical details", async ({
 test("a spike-claimed open question is non-blocking/eventual; the unclaimed one stays blocking (ac-10)", async ({
   page,
 }) => {
-  await page.goto("/readiness");
+  await page.goto(await readinessPilotURL(page));
   await page.locator("details.readiness-more > summary").click();
 
   const claimed = page.locator('[data-concern-id="shape/question/oq-2"]');
@@ -350,10 +433,33 @@ test("a spike-claimed open question is non-blocking/eventual; the unclaimed one 
   ).toHaveText("current");
 });
 
+test("every eventual review blocker is non-blocking with Timing eventual in its technical details (ac-1)", async ({
+  page,
+}) => {
+  await page.goto(await readinessPilotURL(page));
+  await page.locator("details.readiness-more > summary").click();
+
+  for (const id of EVENTUAL_REVIEW_BLOCKERS) {
+    const row = page.locator(`[data-concern-id="${id}"]`);
+    await expect(row).toHaveAttribute("data-area-id", "request-review");
+    await expect(row.locator(".readiness-state")).toHaveText("Needs attention");
+    await row.locator(".readiness-tech summary").click();
+    const facts = row.locator(".readiness-tech-facts");
+    await expect(facts.locator('dt:text-is("Blocking") + dd')).toHaveText(
+      "false",
+    );
+    await expect(facts.locator('dt:text-is("Timing") + dd')).toHaveText(
+      "eventual",
+    );
+    await expect(facts).toContainText("violated-with-witness");
+    await expect(facts).toContainText(id);
+  }
+});
+
 test("board destination opens the editable board in a new tab and both tabs keep their state", async ({
   page,
 }) => {
-  await page.goto("/readiness");
+  await page.goto(await readinessPilotURL(page));
   const before = await pilotEvents(page);
   expect(before[0]).toMatchObject({ sequence: 1, event: "readiness-opened" });
 
@@ -393,7 +499,7 @@ test("board destination opens the editable board in a new tab and both tabs keep
 test("middle-button appends exactly one event; right-click appends none", async ({
   page,
 }) => {
-  await page.goto("/readiness");
+  await page.goto(await readinessPilotURL(page));
   const boardLink = page.locator(".readiness-board-link").first();
 
   const beforeMiddle = await pilotEvents(page);
@@ -418,7 +524,7 @@ test("CLI fallback tokens copy as the exact vector, never an invented shell comm
   page,
   context,
 }) => {
-  await page.goto("/readiness");
+  await page.goto(await readinessPilotURL(page));
   await context.grantPermissions(["clipboard-read", "clipboard-write"], {
     origin: new URL(page.url()).origin,
   });
@@ -451,7 +557,7 @@ test("CLI fallback tokens copy as the exact vector, never an invented shell comm
 });
 
 test("keyboard traversal reaches every cockpit landmark", async ({ page }) => {
-  await page.goto("/readiness");
+  await page.goto(await readinessPilotURL(page));
   await page.emulateMedia({ reducedMotion: "reduce" });
 
   // The only CLI-destination landmark in this fixture now sits past the
@@ -510,7 +616,7 @@ test("keyboard traversal reaches every cockpit landmark", async ({ page }) => {
 test("instrumentation keeps the closed vocabulary, exact shape, 200-cap, and page-memory-only posture", async ({
   page,
 }) => {
-  await page.goto("/readiness");
+  await page.goto(await readinessPilotURL(page));
   await page.waitForLoadState("networkidle");
 
   const requests: string[] = [];
@@ -568,17 +674,26 @@ test("instrumentation keeps the closed vocabulary, exact shape, 200-cap, and pag
   expect(await page.evaluate(() => document.body.innerHTML)).toBe(htmlBefore);
 });
 
-test("an edit through the existing board leaves the preserved cockpit and its snapshot unchanged", async ({
+test("an edit through the existing board leaves the open cockpit tab unchanged while the next request derives it afresh at the same HEAD", async ({
   page,
 }) => {
-  await page.goto("/readiness");
-  const head = await startupHead(page);
+  const base = await readinessPilotBase(page);
+  await page.goto(`${base}readiness`);
+  const head = await derivedHead(page);
 
+  // The derivation stamp (ac-2): plain label first, the exact HEAD this
+  // request looked at, nothing about restarting.
   const notice = page.locator(".readiness-stale");
-  await expect(notice).toContainText(`Startup snapshot at ${head}`);
-  await expect(notice).toContainText("restart verdi serve");
+  await expect(notice).toHaveAttribute("aria-label", "Derivation stamp");
+  await expect(notice.locator("strong")).toHaveText("Derivation stamp.");
+  await expect(notice).toContainText(
+    `Derived at HEAD ${head} for this request.`,
+  );
+  await expect(notice).not.toContainText("Startup snapshot");
+  await expect(notice).not.toContainText("restart verdi serve");
 
-  const bodyBefore = await (await page.request.get("/readiness")).text();
+  const bodyBefore = await (await page.request.get(`${base}readiness`)).text();
+  expect(bodyBefore).not.toMatch(/data-concern-id="shape\/board\/question\//);
   const eventsBefore = await pilotEvents(page);
   const domBefore = await page.evaluate(
     () => document.querySelector("main.content")!.outerHTML,
@@ -589,28 +704,64 @@ test("an edit through the existing board leaves the preserved cockpit and its sn
     page.locator(".readiness-board-link").first().click(),
   ]);
   await popup.waitForLoadState();
-  await addSticky(popup, "readiness pilot probe: cockpit must not notice this");
-  await popup.close();
-
-  const domAfter = await page.evaluate(
-    () => document.querySelector("main.content")!.outerHTML,
+  const probe = await addSticky(
+    popup,
+    "readiness pilot probe: an open board question",
   );
-  expect(domAfter).toBe(domBefore);
-  await expect(page.locator(".readiness-stale")).toContainText(
-    `Startup snapshot at ${head}`,
-  );
-  const events = await pilotEvents(page);
-  expect(events.slice(0, eventsBefore.length)).toEqual(eventsBefore);
 
-  const bodyAfter = await (await page.request.get("/readiness")).text();
-  expect(bodyAfter).toBe(bodyBefore);
+  // From here the isolated store carries the probe. Every assertion runs
+  // inside the try so that a failure anywhere below still reaches the
+  // finally, which deletes the probe through the same board exactly once
+  // — a red here must never leak a shape/board/question/<id> concern into
+  // the later tests' exact-array oracles.
+  try {
+    // The already-rendered tab never refreshes itself (no live refresh, no
+    // polling, no recording): its DOM and its event log are exactly what
+    // they were before the edit.
+    const domAfter = await page.evaluate(
+      () => document.querySelector("main.content")!.outerHTML,
+    );
+    expect(domAfter).toBe(domBefore);
+    await expect(page.locator(".readiness-stale")).toContainText(
+      `Derived at HEAD ${head} for this request.`,
+    );
+    const events = await pilotEvents(page);
+    expect(events.slice(0, eventsBefore.length)).toEqual(eventsBefore);
+
+    // But the NEXT request derives afresh (ac-2): the same HEAD — the
+    // sticky is working-tree scratch, nothing was committed — and the new
+    // open board question is now a shape concern of its own.
+    const bodyAfter = await (await page.request.get(`${base}readiness`)).text();
+    expect(bodyAfter).not.toBe(bodyBefore);
+    expect(bodyAfter).toContain(`Derived at HEAD ${head} for this request.`);
+    expect(bodyAfter).toMatch(
+      /data-concern-id="shape\/board\/question\/[^"]+"/,
+    );
+  } finally {
+    // Delete the probe through the same board, as the happy path always
+    // did. Each step swallows its own error so a cleanup failure cannot
+    // mask the assertion that brought us here; on the happy path the
+    // bodyRestored check below still catches a cleanup that did not land.
+    await probe
+      .getByRole("button", { name: "Delete sticky" })
+      .click()
+      .catch(() => {});
+    await expectAutosaved(popup).catch(() => {});
+    await popup.close().catch(() => {});
+  }
+
+  // Deleting the probe restored the store, and the same ref at the same
+  // HEAD derives identical bytes again (ac-2) — so every later test
+  // inherits the pinned posture, not this probe.
+  const bodyRestored = await (await page.request.get(`${base}readiness`)).text();
+  expect(bodyRestored).toBe(bodyBefore);
 });
 
 test("420px shows exactly the first three priorities before expansion", async ({
   page,
 }) => {
   await page.setViewportSize({ width: 420, height: 800 });
-  await page.goto("/readiness");
+  await page.goto(await readinessPilotURL(page));
 
   const visible = page.locator(".readiness-queue [data-concern-id]:visible");
   await expect(visible).toHaveCount(3);
@@ -641,8 +792,12 @@ test("the all-proven snapshot renders the honest complete posture", async ({
     0,
   );
   await expect(page.locator(".readiness-downstream")).toHaveCount(0);
+  await expect(page.locator(".readiness-stale")).toHaveAttribute(
+    "aria-label",
+    "Derivation stamp",
+  );
   await expect(page.locator(".readiness-stale")).toContainText(
-    `Startup snapshot at ${ALL_PROVEN.head}`,
+    `Derived at HEAD ${ALL_PROVEN.head} for this request.`,
   );
 
   // Every concern is present under completed checks with its exact
@@ -678,7 +833,7 @@ test("light and dark schemes keep the cockpit legible with identical facts", asy
     });
 
   await page.emulateMedia({ colorScheme: "light" });
-  await page.goto("/readiness");
+  await page.goto(await readinessPilotURL(page));
   const light = await palette();
   const lightIds = await focusIds(page);
 
@@ -701,7 +856,7 @@ test("light and dark schemes keep the cockpit legible with identical facts", asy
 test("keyboard traversal reaches technical details for every priority and completed check", async ({
   page,
 }) => {
-  await page.goto("/readiness");
+  await page.goto(await readinessPilotURL(page));
 
   // Expand the remainder with the keyboard so every priority's control
   // is in the tab order.
@@ -737,7 +892,7 @@ test("420px: pinned rail hides nothing, anchors reveal disclosed rows, long valu
 }) => {
   await page.setViewportSize({ width: 420, height: 800 });
   await page.emulateMedia({ reducedMotion: "reduce" });
-  await page.goto("/readiness");
+  await page.goto(await readinessPilotURL(page));
 
   const widths = await page.evaluate(() => ({
     doc: document.documentElement.scrollWidth,

@@ -1,34 +1,90 @@
-// The Wave 3.5 readiness pilot cockpit: GET /readiness renders the
-// startup snapshot injected by the caller (Deps.Readiness) — a read-only
-// projection of internal/readinesspilot's contract. The page mutates
-// nothing, fetches nothing, and never recomputes readiness: an edit to
-// the store is only reflected after the author restarts verdi serve,
-// which the page's stale notice says out loud.
+// The Wave 3.5 readiness pilot cockpit: GET /readiness renders readiness
+// derived fresh, per request, through the injected ReadinessLoader
+// (spec/readiness-recovery ac-2/ac-4) — never a startup-frozen snapshot.
+// ?spec=<name> names the ref explicitly; with no query the process's own
+// default spec (typically `verdi serve --context-request`'s target)
+// stands in; with neither, the page discloses that honestly rather than
+// rendering anything vacuous (three-valued honesty — silence is never a
+// pass).
 package workbench
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 
-	"github.com/jyang234/verdi/internal/readinesspilot"
+	"github.com/jyang234/verdi/internal/artifact"
 )
 
-// readinessHandler serves GET /readiness from the immutable startup
-// snapshot. nil means the pilot is not wired for this process: the page
-// discloses that as an honest 503 rather than rendering anything vacuous
-// (three-valued honesty — silence is never a pass).
-func readinessHandler(snap *readinesspilot.Snapshot) http.HandlerFunc {
+// errReadinessNotWired is the existing (pre-loader) 503 disclosure body,
+// unchanged byte-for-byte: no loader is wired for this process at all.
+var errReadinessNotWired = errors.New(
+	"no readiness snapshot was injected at startup: this verdi serve process runs without the readiness pilot wired, so there is nothing honest to render")
+
+// errReadinessNoSpec is the other 503 disclosure (co-6): a loader IS
+// wired, but neither a ?spec= query nor a default spec named anything to
+// derive — a different missing fact from "no loader", so it says so and
+// names both ways to supply one.
+var errReadinessNoSpec = errors.New(
+	"no spec was named: add ?spec=<name> to derive readiness for one active spec, or start verdi serve with --context-request to name a default")
+
+// readinessHandler serves GET /readiness by deriving readiness through
+// loader for the request's own ref: ?spec=<name> when present, else
+// defaultSpec when non-empty, else neither — a 503 disclosing that no
+// spec was named (a process with no loader at all keeps the existing
+// 503 disclosure unchanged). A ?spec= that is not one whole spec name — malformed, or
+// carrying a commit pin or an object fragment, both of which select part
+// of a spec rather than the spec the loader derives — is a 400 disclosing
+// which of those it was, and never reaches the loader (the loader's own
+// "not an unpinned whole spec ref" refusal would arrive as a 503, the
+// wrong code for a malformed query, after a derivation attempt the
+// handler never had to make). A loader error (an unknown spec, a
+// derivation failure) is a 503 naming the error's own text.
+func readinessHandler(loader ReadinessLoader, defaultSpec string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
-		if snap == nil {
-			renderError(w, http.StatusServiceUnavailable, errors.New(
-				"no readiness snapshot was injected at startup: this verdi serve process runs without the readiness pilot wired, so there is nothing honest to render"))
+
+		ref := ""
+		if name := r.URL.Query().Get("spec"); name != "" {
+			parsed, err := artifact.ParseRef("spec/" + name)
+			if err != nil {
+				renderError(w, http.StatusBadRequest, err)
+				return
+			}
+			if parsed.Pinned() {
+				renderError(w, http.StatusBadRequest, fmt.Errorf("?spec= names one whole spec, but %s carries a commit pin", name))
+				return
+			}
+			if parsed.Fragment() {
+				renderError(w, http.StatusBadRequest, fmt.Errorf("?spec= names one whole spec, but %s carries an object fragment", name))
+				return
+			}
+			// The parsed ref's own canonical spelling, never the raw query
+			// text: what the loader is asked for is exactly what the gate
+			// above accepted.
+			ref = parsed.String()
+		} else {
+			ref = defaultSpec
+		}
+
+		if loader == nil {
+			renderError(w, http.StatusServiceUnavailable, errReadinessNotWired)
 			return
 		}
-		out, err := renderReadiness(*snap)
+		if ref == "" {
+			renderError(w, http.StatusServiceUnavailable, errReadinessNoSpec)
+			return
+		}
+
+		snap, err := loader.Load(r.Context(), ref)
+		if err != nil {
+			renderError(w, http.StatusServiceUnavailable, err)
+			return
+		}
+		out, err := renderReadiness(snap)
 		if err != nil {
 			renderError(w, http.StatusInternalServerError, err)
 			return

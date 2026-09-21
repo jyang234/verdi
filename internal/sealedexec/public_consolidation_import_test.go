@@ -18,8 +18,14 @@ import (
 //   - SI-204 / spec/spec-documents ac-10 (ruling R-W4-11): governanceprincipal's
 //     decode.go and profile.go, whose Profile.Template seam the wave-4 Task 1
 //     review read and approved for this binding.
+//   - spec/readiness-recovery wave 1 (ruling R-RR1-22): policyconflict's
+//     service.go, whose cache-only judge b0681e61 added, and cmd/verdi's
+//     context.go, context_conflict.go and context_constitution.go, which
+//     410db101's reviewed round-1 fix (the hermetic conflict-provider seam and
+//     the move of the file-local hasDotDotElement to store.HasDotDotElement)
+//     and 1be75d01's startup judge-cache warm changed together.
 //
-// The witness document itself is unchanged in both waves: its digest, corpora,
+// The witness document itself is unchanged in every wave: its digest, corpora,
 // totals and replay operands stay exactly as reviewed, and every other bound
 // source is still admitted only on an exact historical match.
 var consolidationVerdiSuccessors = map[string]consolidationVerdiSuccessor{
@@ -96,6 +102,199 @@ var consolidationVerdiSuccessors = map[string]consolidationVerdiSuccessor{
 				"\t// exported field.\n" +
 				"\tTemplate *TemplateRecord `json:\"template,omitempty\"`\n" +
 				"\n"},
+		},
+	},
+	"internal/policyconflict/service.go": {
+		Historical: "c9bccee4f99c1b1b22b17e1e19451d7254d70504fd5cc1029209aaa013a2bc54",
+		Successor:  "1c3ae85440649b240d2cc8970224e100b00781e9181ccf44d0b54c77e5ebbb61",
+		Inverse: []consolidationVerdiEdit{
+			{From: "\t\tcase cacheOnlyJudge:\n" +
+				"\t\t\tadapters = append(adapters, adapter.adapter)\n"},
+			{From: "\tcase cacheOnlyJudge:\n" +
+				"\t\t// AC-3/R-RR1-4: the cache-only judge is recognized here, alongside\n" +
+				"\t\t// JudgeAdapter/*JudgeAdapter, so it gets the SAME tree-hash/profile/\n" +
+				"\t\t// authority axes a real run's CachedJudge call above uses — the\n" +
+				"\t\t// cache key a request computes is byte-identical to the one a real\n" +
+				"\t\t// run (`verdi context conflict`, or serve's startup pre-run)\n" +
+				"\t\t// published under. It never runs adapter.Argv: cacheOnlyLookup only\n" +
+				"\t\t// performs CachedJudge's hit-check.\n" +
+				"\t\tif !cache.enabled {\n" +
+				"\t\t\treturn nil, fmt.Errorf(\"concrete judge adapter has no prepared cache context\")\n" +
+				"\t\t}\n" +
+				"\t\tlookupAdapter := adapter.adapter\n" +
+				"\t\tlookupAdapter.Root = cache.root\n" +
+				"\t\tvalidated, cacheErr := cacheOnlyLookup(lookupAdapter, input, cache.treeHash, view.Profile.ID, view.Snapshot.ProfileDigest, view.Snapshot.EffectivePolicyDigest)\n" +
+				"\t\texchange, err = validated.Exchange, cacheErr\n"},
+			{From: "\t// A cache miss (from the cache-only judge, in production always the\n" +
+				"\t// case above — the default arm's own direct callers can, in principle,\n" +
+				"\t// return the same sentinel) is \"no judgment\", exactly like a nil judge,\n" +
+				"\t// never an operational failure (service.go:354, R-RR1-4).\n" +
+				"\tif errors.Is(err, ErrJudgeCacheMiss) {\n" +
+				"\t\treturn nil, nil\n" +
+				"\t}\n"},
+		},
+	},
+	"cmd/verdi/context_constitution.go": {
+		Historical: "78137e4e88905f9dcdf2a7d111d2d6f0244e2aa27d9625cae86041141180a98b",
+		Successor:  "ccf68869ba6d29bcc05383149bd379e4ac4bcddf8b454d71a8663b92a8d688d0",
+		Inverse: []consolidationVerdiEdit{
+			{From: "// validateContextOutputStoreZone/sameFileArg helpers and\n" +
+				"// store.HasDotDotElement byte-for-byte (the exact --request/--out grammar\n" +
+				"// `context compile` and\n",
+				To: "// validateContextOutputStoreZone/sameFileArg/hasDotDotElement helpers\n" +
+					"// byte-for-byte (the exact --request/--out grammar `context compile` and\n"},
+			{From: "\tif hasOut && store.HasDotDotElement(outArg) {\n",
+				To: "\tif hasOut && hasDotDotElement(outArg) {\n"},
+		},
+	},
+	"cmd/verdi/context_conflict.go": {
+		Historical: "6453b4a780c7375d5eb9ce457ab68ba28d366e1f59010d757b1cc507b7beec62",
+		Successor:  "94f3c9653a0ca999437ab4c73823eeab71823fea31d33185c48c988dccfacbcd",
+		Inverse: []consolidationVerdiEdit{
+			{From: "\t\"os\"\n",
+				To: "\t\"os\"\n" +
+					"\t\"time\"\n"},
+			{From: "\t\"github.com/jyang234/verdi/internal/atomicfile\"\n",
+				To: "\t\"github.com/jyang234/verdi/internal/align\"\n" +
+					"\t\"github.com/jyang234/verdi/internal/atomicfile\"\n"},
+			{From: "\t\"github.com/jyang234/verdi/internal/governanceprincipal\"\n",
+				To: "\t\"github.com/jyang234/verdi/internal/contextcompile\"\n" +
+					"\t\"github.com/jyang234/verdi/internal/governanceprincipal\"\n"},
+			{From: "\t\"github.com/jyang234/verdi/internal/readinessload\"\n"},
+			{From: "// globals or bypassing the real request codec. Provider construction itself\n" +
+				"// is internal/readinessload.NewConflictProvider (moved from this file's old\n" +
+				"// newLocalContextConflictProvider, spec/readiness-recovery Task 2): `verdi\n" +
+				"// context conflict` is a JudgeRun caller, exactly like it always was — it\n" +
+				"// may launch the manifest's configured judge on a cache miss.\n",
+				To: "// globals or bypassing the real request codec.\n"},
+			{From: "\treturn cmdContextConflictWithFactory(args, stdin, stdout, stderr, func(ctx context.Context, root string, request policyconflict.Request) (policyconflict.VerdictProvider, error) {\n" +
+				"\t\treturn readinessload.NewConflictProvider(ctx, root, request, readinessload.JudgeRun, resolveConflictActors)\n" +
+				"\t})\n",
+				To: "\treturn cmdContextConflictWithFactory(args, stdin, stdout, stderr, newLocalContextConflictProvider)\n"},
+			{From: "\tif hasOut && store.HasDotDotElement(outArg) {\n",
+				To: "\tif hasOut && hasDotDotElement(outArg) {\n"},
+			{From: "// resolveConflictActors resolves the store's local-operator actor claim\n",
+				To: "func newLocalContextConflictProvider(ctx context.Context, root string, request policyconflict.Request) (policyconflict.VerdictProvider, error) {\n" +
+					"\tmanifest, err := loadManifest(root)\n" +
+					"\tif err != nil {\n" +
+					"\t\treturn nil, err\n" +
+					"\t}\n" +
+					"\tvar primary policyconflict.Judge\n" +
+					"\tif manifest.Align != nil && len(manifest.Align.JudgeCmd) != 0 {\n" +
+					"\t\ttimeout := align.DefaultJudgeTimeout\n" +
+					"\t\tif manifest.Align.JudgeTimeoutSeconds != 0 {\n" +
+					"\t\t\ttimeout = time.Duration(manifest.Align.JudgeTimeoutSeconds) * time.Second\n" +
+					"\t\t}\n" +
+					"\t\tprimary = policyconflict.JudgeAdapter{\n" +
+					"\t\t\tRole:    string(policyconflict.JudgePrimary),\n" +
+					"\t\t\tAdapter: contextConflictRequestAdapter(request),\n" +
+					"\t\t\tModel:   \"align.judge_cmd\",\n" +
+					"\t\t\tArgv:    append([]string(nil), manifest.Align.JudgeCmd...),\n" +
+					"\t\t\tTimeout: timeout,\n" +
+					"\t\t\tRoot:    root,\n" +
+					"\t\t\tRunner:  contextConflictJudgeRunner{delegate: align.ExecJudgeRunner{}},\n" +
+					"\t\t}\n" +
+					"\t}\n" +
+					"\tactors, err := resolveConflictActors(ctx, root)\n" +
+					"\tif err != nil {\n" +
+					"\t\treturn nil, err\n" +
+					"\t}\n" +
+					"\treturn policyconflict.NewService(root, policyconflict.ServiceDeps{\n" +
+					"\t\tCompiler:   contextcompile.NewCompiler(),\n" +
+					"\t\tRefs:       contextConflictRefResolver{},\n" +
+					"\t\tPrimary:    primary,\n" +
+					"\t\tTreeHasher: contextConflictTreeHasher{},\n" +
+					"\t\tDates:      contextConflictDateSource{},\n" +
+					"\t\tActors:     actors,\n" +
+					"\t}), nil\n" +
+					"}\n" +
+					"\n" +
+					"// resolveConflictActors resolves the store's local-operator actor claim\n"},
+			{From: "\treturn resolveLocalActors(ctx, root, profile)\n" +
+				"}\n",
+				To: "\treturn resolveLocalActors(ctx, root, profile)\n" +
+					"}\n" +
+					"\n" +
+					"func contextConflictRequestAdapter(request policyconflict.Request) contextcompile.AdapterRef {\n" +
+					"\tif request.Target.AcceptedContext != nil {\n" +
+					"\t\treturn request.Target.AcceptedContext.Adapter\n" +
+					"\t}\n" +
+					"\tif request.Target.AcceptanceCandidate != nil {\n" +
+					"\t\treturn request.Target.AcceptanceCandidate.Adapter\n" +
+					"\t}\n" +
+					"\treturn contextcompile.AdapterRef{}\n" +
+					"}\n" +
+					"\n" +
+					"type contextConflictJudgeRunner struct{ delegate align.JudgeRunner }\n" +
+					"\n" +
+					"func (r contextConflictJudgeRunner) Run(ctx context.Context, argv []string, stdin []byte) ([]byte, int, error) {\n" +
+					"\tif r.delegate == nil {\n" +
+					"\t\treturn nil, 0, errors.New(\"context conflict judge runner is nil\")\n" +
+					"\t}\n" +
+					"\tresult, err := r.delegate.RunJudge(ctx, argv, stdin)\n" +
+					"\treturn result.Stdout, result.ExitCode, err\n" +
+					"}\n" +
+					"\n" +
+					"type contextConflictTreeHasher struct{}\n" +
+					"\n" +
+					"func (contextConflictTreeHasher) TreeHash(ctx context.Context, root string) (string, error) {\n" +
+					"\tservices, err := store.DiscoverServices(root)\n" +
+					"\tif err != nil {\n" +
+					"\t\treturn \"\", err\n" +
+					"\t}\n" +
+					"\treturn store.TreeHash(ctx, root, services)\n" +
+					"}\n" +
+					"\n" +
+					"type contextConflictDateSource struct{}\n" +
+					"\n" +
+					"func (contextConflictDateSource) TodayUTC(ctx context.Context) (string, error) {\n" +
+					"\tif err := ctx.Err(); err != nil {\n" +
+					"\t\treturn \"\", err\n" +
+					"\t}\n" +
+					"\treturn time.Now().UTC().Format(\"2006-01-02\"), nil\n" +
+					"}\n" +
+					"\n" +
+					"// contextConflictRefResolver makes absent local graph proof explicit. Exact\n" +
+					"// ref equality is settled before this port is called; every different pair\n" +
+					"// remains unknown and is therefore sent to semantic evaluation, never treated\n" +
+					"// as favorable overlap/disjointness. Managed callers may inject a stronger\n" +
+					"// graph resolver directly into ServiceDeps.\n" +
+					"type contextConflictRefResolver struct{}\n" +
+					"\n" +
+					"func (contextConflictRefResolver) Relate(context.Context, string, string) (policyconflict.ScopeState, []string, error) {\n" +
+					"\treturn policyconflict.ScopeUnknown, []string{\"ref-relation-unproven\"}, nil\n" +
+					"}\n" +
+					"\n" +
+					"func (contextConflictRefResolver) Covers(context.Context, string, string) (policyconflict.ProofState, []string, error) {\n" +
+					"\treturn policyconflict.ProofUnproven, []string{\"ref-coverage-unproven\"}, nil\n" +
+					"}\n"},
+		},
+	},
+	"cmd/verdi/context.go": {
+		Historical: "555cb3c6baa7c7d3e25cf12d62e29b4fd69309c548852cceaaa855247315b53a",
+		Successor:  "234d4daea5d5d5aa5f76a5a4553855cd80b1b0b4a0392ff2b1d90a119b64330b",
+		Inverse: []consolidationVerdiEdit{
+			{From: "\tif hasOut && store.HasDotDotElement(outArg) {\n",
+				To: "\tif hasOut && hasDotDotElement(outArg) {\n"},
+			{From: "// canonicalOutPath returns the single absolute, alias-resolved destination\n",
+				To: "// hasDotDotElement reports whether p contains a \"..\" PATH ELEMENT under\n" +
+					"// either separator convention. It is element-wise, never a substring test:\n" +
+					"// a file honestly named \"..notes.json\" or \"a..b\" carries no traversal and\n" +
+					"// stays allowed.\n" +
+					"func hasDotDotElement(p string) bool {\n" +
+					"\tfor _, seg := range strings.FieldsFunc(p, func(r rune) bool {\n" +
+					"\t\treturn r == '/' || r == filepath.Separator\n" +
+					"\t}) {\n" +
+					"\t\tif seg == \"..\" {\n" +
+					"\t\t\treturn true\n" +
+					"\t\t}\n" +
+					"\t}\n" +
+					"\treturn false\n" +
+					"}\n" +
+					"\n" +
+					"// canonicalOutPath returns the single absolute, alias-resolved destination\n"},
+			{From: "// store.HasDotDotElement rejects such spellings earlier still, so this function's\n",
+				To: "// hasDotDotElement rejects such spellings earlier still, so this function's\n"},
 		},
 	},
 }

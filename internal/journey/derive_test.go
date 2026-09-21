@@ -369,23 +369,11 @@ func blockerIDs(blockers []Blocker) []string {
 	return ids
 }
 
-// --- deriveEventual -----------------------------------------------------
-
-func TestDeriveEventual(t *testing.T) {
-	eb := deriveEventual()
-	if eb.Derived {
-		t.Fatal("Derived must be false")
-	}
-	if len(eb.Items) != 0 {
-		t.Fatalf("Items = %v, want empty", eb.Items)
-	}
-	if len(eb.Disclosures) == 0 {
-		t.Fatal("Disclosures must be non-empty for an underived section")
-	}
-	if err := eb.validate(); err != nil {
-		t.Fatalf("EventualBlockers.validate: %v", err)
-	}
-}
+// --- deriveEventual -------------------------------------------------------
+//
+// deriveEventual's own tests live in eventual_test.go, alongside the
+// function itself (eventual.go): the eventual-blocker section is no
+// longer a hard-coded stub (see that file's TestDeriveEventual_* suite).
 
 // --- derivePrincipals ---------------------------------------------------
 

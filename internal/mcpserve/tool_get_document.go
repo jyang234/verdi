@@ -7,6 +7,7 @@ import (
 
 	"github.com/jyang234/verdi/internal/artifact"
 	"github.com/jyang234/verdi/internal/model"
+	"github.com/jyang234/verdi/internal/readinesspilot"
 	"github.com/jyang234/verdi/internal/specdoc"
 	"github.com/jyang234/verdi/internal/specdocload"
 	"github.com/jyang234/verdi/internal/store"
@@ -98,19 +99,26 @@ func (b *Backend) GetDocument(ctx context.Context, argsRaw json.RawMessage) map[
 	if args.Proposed {
 		mode = specdocload.ModeWorkingTree
 	}
-	// Readiness is a LIVE fact about the serving checkout — the snapshot
-	// verdi serve built at startup (R-W3-3) — so it accompanies the
-	// accepted and working-tree readings only. A pinned commit asks for
-	// a historical document, and specdoc.WithReadiness gates on
-	// TargetRef alone, not on mode: passing the snapshot here rendered
-	// the pinned commit's bytes beside today's readiness section, two
-	// different commits in one document (final-review F10). The pinned
-	// reading now states the absence ("Readiness was not supplied for
-	// this render.") rather than supplying a fact that is not about the
-	// bytes being rendered.
-	readiness := b.Readiness
-	if mode == specdocload.ModeAt {
-		readiness = nil
+	// Readiness is a LIVE fact about the serving checkout, derived fresh
+	// for THIS document's own ref (spec/readiness-recovery ac-2/ac-4,
+	// R-RR1-8), so it accompanies the accepted and working-tree readings
+	// only. A pinned commit asks for a historical document — a live
+	// derivation is not a fact about historical bytes (final-review F10)
+	// — so ModeAt never calls the loader at all; the pinned reading
+	// states the absence ("Readiness was not supplied for this render.")
+	// rather than supplying an unrelated fact. A derivation error never
+	// fails the call: it becomes a "readiness: <err>" disclosure and the
+	// section states its own absence, exactly like any other degraded
+	// fact a document is not a verdict over (R-RR1-9).
+	var readiness *readinesspilot.Snapshot
+	var readinessDisclosure string
+	if b.ReadinessLoader != nil && mode != specdocload.ModeAt {
+		snap, rerr := b.ReadinessLoader.Load(ctx, "spec/"+ref.Name)
+		if rerr != nil {
+			readinessDisclosure = "readiness: " + rerr.Error()
+		} else {
+			readiness = &snap
+		}
 	}
 	res, err := specdocload.Load(ctx, specdocload.Request{Root: b.Root, Name: ref.Name, Mode: mode, At: commit, Kind: kind, Model: mdl, Readiness: readiness})
 	if err != nil {
@@ -121,6 +129,9 @@ func (b *Backend) GetDocument(ctx context.Context, argsRaw json.RawMessage) map[
 		return toolError("get_document: " + err.Error())
 	}
 	disclosures := res.Disclosures
+	if readinessDisclosure != "" {
+		disclosures = append(disclosures, readinessDisclosure)
+	}
 	if disclosures == nil {
 		disclosures = []string{}
 	}

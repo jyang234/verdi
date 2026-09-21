@@ -78,7 +78,7 @@ func TestBlockersValidateObligationQualityDeclarationOrder(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			bs := Blockers{Current: tt.current, Eventual: deriveEventual()}
+			bs := Blockers{Current: tt.current, Eventual: deriveEventual(eventualInput{})}
 			err := bs.validate()
 			if tt.wantErr == "" {
 				if err != nil {

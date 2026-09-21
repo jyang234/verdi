@@ -1136,39 +1136,11 @@ func contextRunGit(t *testing.T, dir string, args ...string) {
 	}
 }
 
-// TestHasDotDotElement covers the belt-and-braces `--out` traversal ban
-// element-wise in both directions: every spelling that carries a real ".."
-// path element, and every honest name that merely CONTAINS two dots and
-// must stay allowed.
-func TestHasDotDotElement(t *testing.T) {
-	for _, tc := range []struct {
-		in   string
-		want bool
-	}{
-		{"..", true},
-		{"../x.json", true},
-		{"a/../x.json", true},
-		{"a/b/..", true},
-		{"./a/../b/x.json", true},
-		{filepath.Join("a", "b") + string(filepath.Separator) + ".." + string(filepath.Separator) + "x.json", true},
-
-		{"", false},
-		{"x.json", false},
-		{"./x.json", false},
-		{"a/b/x.json", false},
-		{"..notes.json", false},
-		{"notes...json", false},
-		{"a..b/x.json", false},
-		{"...", false},
-		{"/abs/path/x.json", false},
-	} {
-		t.Run(tc.in, func(t *testing.T) {
-			if got := hasDotDotElement(tc.in); got != tc.want {
-				t.Fatalf("hasDotDotElement(%q) = %v, want %v", tc.in, got, tc.want)
-			}
-		})
-	}
-}
+// TestHasDotDotElement moved to internal/store/paths_test.go when
+// store.HasDotDotElement moved there (fix round 1, Minor 12): cmd/verdi's
+// own --out traversal refusal is still covered end to end by
+// TestCmdContextCompile_OutTraversesSymlinkedParentWithDotDot_Refused and
+// friends.
 
 // TestRedactCheckoutRoot covers the stderr sanitizer's happy path (every
 // absolute spelling of the root replaced by the fixed token), its
