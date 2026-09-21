@@ -81,10 +81,12 @@ type serveRunner func(root, httpAddr string, loader readinessload.Loader, defaul
 // boundary: it runs the real judge once (JudgeRun) over a supplied
 // --context-request so a later per-request JudgeCacheOnly derivation for
 // the SAME request finds a cache hit, and reports that request's own
-// target spec ref for ReadinessDefaultSpec. Called only when a
+// target spec ref for ReadinessDefaultSpec. It also hands back the exact
+// bytes and decoded value it validated (R-RR1-17), which cmdServeWithDeps
+// carries into every per-request load. Called only when a
 // --context-request path was supplied.
 type readinessWarmBuilder interface {
-	Build(ctx context.Context, root, requestPath string) (defaultSpec string, err error)
+	Build(ctx context.Context, root, requestPath string) (defaultSpec string, predecoded *readinessload.PredecodedRequest, err error)
 }
 
 // serveCommandDeps is the narrow startup-order seam. The readiness warm-up
@@ -111,17 +113,22 @@ func cmdServe(args []string, stdout, stderr io.Writer) int {
 // readiness-recovery Task 2).
 type readinessLoadBuilder struct{}
 
-func (readinessLoadBuilder) Build(ctx context.Context, root, requestPath string) (string, error) {
-	// ContextRequestSpec reads and decodes requestPath exactly once; the
-	// Predecoded bundle it returns flows into warmOpts below so Load does
-	// not read the same file a second time (fix round 1, Minor 6). The
-	// warm-up's own opts deliberately are not reused for the per-request
-	// loader cmdServeWithDeps builds below: every later per-request
-	// Loader.Load call must read the checkout's then-current request file
-	// fresh, never a startup-frozen copy.
+func (readinessLoadBuilder) Build(ctx context.Context, root, requestPath string) (string, *readinessload.PredecodedRequest, error) {
+	// ContextRequestSpec reads, path-validates and decodes requestPath
+	// exactly once. The Predecoded bundle it returns flows into warmOpts
+	// below so the warm-up Load does not read the same file a second time,
+	// and is handed back to cmdServeWithDeps so every later per-request
+	// load carries it too (R-RR1-17). An earlier comment here required the
+	// opposite — a fresh read of the request file on every per-request
+	// load; R-RR1-17 supersedes it, because a request file deleted, moved
+	// or edited mid-run then turned EVERY spec's derivation through this
+	// one server-wide loader into an operational failure for as long as
+	// the server ran. The startup-validated bytes are the ones this server
+	// was started with, so they are the honest thing to keep deriving
+	// against; the store itself is still re-read on every request (ac-2).
 	targetSpec, predecoded, err := readinessload.ContextRequestSpec(root, requestPath)
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
 	warmOpts := readinessload.Options{
 		ContextRequestPath: requestPath,
@@ -131,9 +138,9 @@ func (readinessLoadBuilder) Build(ctx context.Context, root, requestPath string)
 		PredecodedRequest:  predecoded,
 	}
 	if _, err := readinessload.Load(ctx, root, targetSpec, warmOpts); err != nil {
-		return "", err
+		return "", nil, err
 	}
-	return targetSpec, nil
+	return targetSpec, predecoded, nil
 }
 
 // startupRequestTarget renders the warm-up's own spec ref for R-RR1-16's
@@ -182,13 +189,19 @@ func cmdServeWithDeps(args []string, stdout, stderr io.Writer, deps serveCommand
 			fmt.Fprintln(stderr, "serve: readiness warm-up builder is nil")
 			return 2
 		}
-		spec, buildErr := deps.readiness.Build(context.Background(), root, options.contextRequestPath)
+		spec, predecoded, buildErr := deps.readiness.Build(context.Background(), root, options.contextRequestPath)
 		if buildErr != nil {
 			fmt.Fprintln(stderr, "serve:", buildErr)
 			return 2
 		}
 		defaultSpec = spec
+		// ContextRequestPath stays set: Load's contextFallback vector
+		// names it as the context-conflict verb's own --request argument,
+		// and the path is still this server's request identity.
 		loaderOpts.ContextRequestPath = options.contextRequestPath
+		// R-RR1-17: the startup-validated request bundle, carried into
+		// every per-request load so none of them re-reads the file.
+		loaderOpts.PredecodedRequest = predecoded
 		// R-RR1-16: the fact that THIS server was started with a context
 		// request bound to one spec is disclosed exactly once, here, on
 		// the same stdout stream runServe logs its socket/workbench lines

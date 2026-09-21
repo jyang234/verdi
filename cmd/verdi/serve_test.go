@@ -32,8 +32,8 @@ func TestServeStartupRequestLine(t *testing.T) {
 		t.Helper()
 		return serveCommandDeps{
 			findRoot: func(string) (string, error) { return "/store", nil },
-			readiness: readinessSnapshotBuilderFunc(func(context.Context, string, string) (string, error) {
-				return targetSpec, nil
+			readiness: readinessSnapshotBuilderFunc(func(context.Context, string, string) (string, *readinessload.PredecodedRequest, error) {
+				return targetSpec, &readinessload.PredecodedRequest{}, nil
 			}),
 			run: run,
 		}
@@ -75,9 +75,9 @@ func TestServeStartupRequestLine(t *testing.T) {
 		var stdout, stderr bytes.Buffer
 		deps := serveCommandDeps{
 			findRoot: func(string) (string, error) { return "/store", nil },
-			readiness: readinessSnapshotBuilderFunc(func(context.Context, string, string) (string, error) {
+			readiness: readinessSnapshotBuilderFunc(func(context.Context, string, string) (string, *readinessload.PredecodedRequest, error) {
 				t.Fatal("readiness builder called without --context-request")
-				return "", nil
+				return "", nil, nil
 			}),
 			run: func(string, string, readinessload.Loader, string, io.Writer, io.Writer) int { return 0 },
 		}
@@ -93,8 +93,8 @@ func TestServeStartupRequestLine(t *testing.T) {
 		var stdout, stderr bytes.Buffer
 		deps := serveCommandDeps{
 			findRoot: func(string) (string, error) { return "/store", nil },
-			readiness: readinessSnapshotBuilderFunc(func(context.Context, string, string) (string, error) {
-				return "", errors.New("warm-up refused")
+			readiness: readinessSnapshotBuilderFunc(func(context.Context, string, string) (string, *readinessload.PredecodedRequest, error) {
+				return "", nil, errors.New("warm-up refused")
 			}),
 			run: func(string, string, readinessload.Loader, string, io.Writer, io.Writer) int {
 				t.Fatal("run entered after a failed warm-up")
