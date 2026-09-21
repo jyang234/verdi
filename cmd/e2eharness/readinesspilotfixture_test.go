@@ -129,6 +129,27 @@ func TestReadinessPilotFixture_Handler_Negative_StartFails(t *testing.T) {
 	f.stop() // never started: safe
 }
 
+// TestReadinessPilotFixture_ZeroValue_DefaultsToRealStart: a struct
+// literal with no starter never nil-panics — ensureStarted defaults to the
+// real sequence, which here discloses its provisioning failure (the
+// module root carries no corpus) as a 500, and stop stays safe.
+func TestReadinessPilotFixture_ZeroValue_DefaultsToRealStart(t *testing.T) {
+	f := &readinessPilotFixture{moduleRoot: t.TempDir()}
+	t.Cleanup(f.stop)
+	rec := getReadinessPilotFixture(t, f, http.MethodGet)
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500; body=%s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "provisioning the readiness-pilot fixture store") {
+		t.Fatalf("body = %q, want the real starter's provisioning failure named", rec.Body.String())
+	}
+	if f.start == nil {
+		t.Fatal("ensureStarted left start unset")
+	}
+	var zero readinessPilotFixture
+	zero.stop() // never started, no starter: safe
+}
+
 // TestReadinessPilotFixture_Handler_Negative_WrongMethod: a non-GET
 // request is refused before any start.
 func TestReadinessPilotFixture_Handler_Negative_WrongMethod(t *testing.T) {

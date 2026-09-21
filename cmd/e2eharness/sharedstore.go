@@ -88,8 +88,9 @@ func provisionSharedStore(ctx context.Context, moduleRoot, scratch string, after
 	}
 
 	// The draft-boards branch fixtures (spec/draft-boards; see
-	// provision_draftboards.go) — cut from main AFTER the dex build like
-	// the board fixtures above, restoring the serving checkout when done.
+	// provision_draftboards.go) — cut from main after the afterMain stage
+	// like the board fixtures above, restoring the serving checkout when
+	// done.
 	if err := provisionDraftBoards(ctx, storeRoot); err != nil {
 		return sharedStore{}, fmt.Errorf("provisioning draft-boards fixtures: %w", err)
 	}

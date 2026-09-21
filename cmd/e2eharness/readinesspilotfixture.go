@@ -90,11 +90,15 @@ func (f *readinessPilotFixture) handler(w http.ResponseWriter, r *http.Request) 
 // thereafter, unchanged. A failed start caches nothing, so the next call
 // retries. ctx bounds provisioning, the build, and the readiness wait —
 // the request's own lifetime; the subprocess itself lives until stop().
+// The zero value is usable: an unset start defaults to the real sequence.
 func (f *readinessPilotFixture) ensureStarted(ctx context.Context) (string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.serve != nil {
 		return f.serve.url, nil
+	}
+	if f.start == nil {
+		f.start = f.startServe
 	}
 	serve, err := f.start(ctx)
 	if err != nil {

@@ -1,4 +1,4 @@
-import { test, expect, type Page } from "@playwright/test";
+import { test, expect, request, type Page } from "@playwright/test";
 import { CONTROL_URL, SHOWCASE, branchBoardPath } from "./fixtures";
 import { addSticky, expectAutosaved } from "./helpers";
 
@@ -122,15 +122,36 @@ const ALL_PROVEN = {
   ],
 };
 
+const READINESS_PILOT_FIXTURE_URL = `${CONTROL_URL}/readiness-pilot-fixture`;
+
 // The isolated readiness-pilot serve's base URL (http://127.0.0.1:<port>/),
 // started lazily by the control server on first use and reused thereafter.
+// A non-200 answer carries the harness's own reason in its body (a
+// provisioning, build, or health-wait failure), so the assertion names it.
 async function readinessPilotBase(page: Page): Promise<string> {
-  const res = await page.request.get(`${CONTROL_URL}/readiness-pilot-fixture`);
-  expect(res.ok()).toBe(true);
+  const res = await page.request.get(READINESS_PILOT_FIXTURE_URL);
+  expect(res.ok(), await res.text()).toBe(true);
   const base = (await res.text()).trim();
   expect(base).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/$/);
   return base;
 }
+
+// The first call provisions a whole shared-shape store and builds the
+// binary — seconds on a warm cache, longer cold — so warm the fixture ONCE
+// here, under its own allowance, rather than inside the first test's
+// default 30s budget (the pattern 72-spec-import.spec.ts uses for its
+// fixture-touching tests). Every test then finds the serve already up.
+test.beforeAll(async () => {
+  test.setTimeout(90_000);
+  const api = await request.newContext();
+  try {
+    const res = await api.get(READINESS_PILOT_FIXTURE_URL);
+    expect(res.ok(), await res.text()).toBe(true);
+    expect((await res.text()).trim()).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/$/);
+  } finally {
+    await api.dispose();
+  }
+});
 
 async function readinessPilotURL(page: Page): Promise<string> {
   return (await readinessPilotBase(page)) + "readiness";
