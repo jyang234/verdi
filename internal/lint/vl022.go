@@ -109,10 +109,14 @@ func (vl022) Check(in *RunInput) []Finding {
 // id/path names), and reports whether the attestation is refused, and why,
 // always naming the offending value (D6-18: never a silent absence). The
 // only accepted shape is a WHOLE spec ref (no object fragment) that
-// resolves to a story- or feature-class spec in the committed zone (R-RR2-2:
-// any other class — component, or unresolvable — fails closed); a target
-// class the AC-declared check and slug rule are then computed for, per
-// class (badStoryAttestationTarget/badFeatureAttestationTarget below).
+// resolves in the committed zone: a target that does not parse, carries a
+// fragment, or does not resolve at all fails closed (a refusal naming what
+// it found), and a target that resolves to any class other than story or
+// feature — component, say, which declares no acceptance criteria to
+// attest against at all — is outside this rule and is SKIPPED, never
+// refused (R-RR2-2). For a story or feature target, the AC-declared check
+// and the slug rule are then computed per class
+// (badStoryAttestationTarget/badFeatureAttestationTarget below).
 func badAttestationVerifiesTarget(root, verifiesRef, slugSeg, acID string, mdl *model.Model) (reason string, bad bool) {
 	r, err := artifact.ParseRef(verifiesRef)
 	if err != nil {
@@ -134,7 +138,7 @@ func badAttestationVerifiesTarget(root, verifiesRef, slugSeg, acID string, mdl *
 	case artifact.ClassStory:
 		return badStoryAttestationTarget(target, slugSeg, acID)
 	case artifact.ClassFeature:
-		return badFeatureAttestationTarget(target, slugSeg, acID)
+		return badFeatureAttestationTarget(target, slugSeg, acID, mdl)
 	default:
 		// Out of scope: neither class VL-022 tracks (e.g. component —
 		// which has no acceptance criteria to attest against at all).
@@ -172,12 +176,12 @@ func badStoryAttestationTarget(target *artifact.SpecFrontmatter, slugSeg, acID s
 // (artifact.ParseRef(target.ID).Name — the exact segment FoldFeature's
 // caller passes as FeatureSlug), never a story-ref derivation a feature
 // carries no obligation to set.
-func badFeatureAttestationTarget(target *artifact.SpecFrontmatter, slugSeg, acID string) (reason string, bad bool) {
+func badFeatureAttestationTarget(target *artifact.SpecFrontmatter, slugSeg, acID string, mdl *model.Model) (reason string, bad bool) {
 	ac, declared := findDeclaredAC(target, acID)
 	if !declared {
 		return fmt.Sprintf("but its own id names ac %q, which %s does not declare as an acceptance criterion", acID, target.ID), true
 	}
-	if !declaresAttestation(ac) {
+	if !hasAttestationKind(ac.Evidence) {
 		// Out of scope (R-RR2-2): this AC has no fold reading an
 		// attestation path at all, so a directory disagreement here is
 		// not a misfiling — it is simply outside every consumer (the
@@ -190,8 +194,14 @@ func badFeatureAttestationTarget(target *artifact.SpecFrontmatter, slugSeg, acID
 		wantName = ref.Name
 	}
 	if slugSeg != wantName {
-		// vocab:identity — feature-name path grammar (R-RR2-2's own attestations/<feature-name>/<ac-id>.md segment, the exact path the feature fold reads)
-		return fmt.Sprintf("whose own name is %q, but this attestation's own directory/id segment is %q (a feature outcome attestation lives at attestations/<feature-name>/<ac-id>.md, the path the feature fold reads)", wantName, slugSeg), true
+		// The spoken class word is display and routes through the model
+		// (L-M13a(6), checkFeatureACAttestation's own pattern one file
+		// over); everything else in this literal is identity the rename
+		// must never touch — both quoted values, R-RR2-2's own
+		// attestations/<feature-name>/<ac-id>.md path grammar, and 03
+		// §The feature fold's section title, cited here as that section
+		// names the reading consumer.
+		return fmt.Sprintf("whose own name is %q, but this attestation's own directory/id segment is %q (a %s outcome attestation lives at attestations/<feature-name>/<ac-id>.md, the path the feature fold reads)", wantName, slugSeg, mdl.DisplayClass("feature")), true
 	}
 
 	return "", false
@@ -207,16 +217,4 @@ func findDeclaredAC(target *artifact.SpecFrontmatter, acID string) (artifact.Acc
 		}
 	}
 	return artifact.AcceptanceCriterion{}, false
-}
-
-// declaresAttestation reports whether ac's own declared evidence kinds
-// include attestation — the fold's own consumer boundary (03 §The feature
-// fold) an attestation's mis-slug protection is scoped to (R-RR2-2).
-func declaresAttestation(ac artifact.AcceptanceCriterion) bool {
-	for _, k := range ac.Evidence {
-		if k == artifact.EvidenceAttestation {
-			return true
-		}
-	}
-	return false
 }

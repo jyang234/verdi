@@ -4,6 +4,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/jyang234/verdi/internal/artifact"
+	"github.com/jyang234/verdi/internal/model"
 )
 
 // TestVL022_MisslugFixture is spec/attest-helper AC-3's primary witness:
@@ -301,6 +304,57 @@ func TestVL022_FeatureMisslug(t *testing.T) {
 	}
 	if !strings.Contains(findings[0].Message, "spec/vl-022-feature") {
 		t.Errorf("finding does not name the feature target: %s", findings[0].Message)
+	}
+}
+
+// TestVL022_FeatureMisslugRoutesTheClassWord is the mis-slug wording's
+// own co-5 witness, exercised at the rule helper because the lint
+// engine's Model is whatever the store resolved (engine.go's RunInput
+// .Model) and no committed fixture declares a rename: the finding's
+// SPOKEN class word is display and resolves through the model's display
+// chain (vl006.go's checkFeatureACAttestation is the pattern), so a
+// store that renames the feature class renames that word too — while
+// every identity token the finding carries stays byte-exact under the
+// rename: both quoted values, R-RR2-2's own attestations/<feature-name>
+// /<ac-id>.md path grammar, and 03 §The feature fold's section title.
+// The canonical model (no display overrides — model's own
+// TestCanonicalDisplayLayerEmpty) still renders R-RR2-2's ruled bytes
+// exactly, so routing changes no shipped message.
+func TestVL022_FeatureMisslugRoutesTheClassWord(t *testing.T) {
+	target := &artifact.SpecFrontmatter{
+		Base:  artifact.Base{ID: "spec/vl-022-feature", Kind: artifact.KindSpec},
+		Class: artifact.ClassFeature,
+		AcceptanceCriteria: []artifact.AcceptanceCriterion{
+			{ID: "ac-1", Text: "the outcome holds", Evidence: []artifact.EvidenceKind{artifact.EvidenceAttestation}},
+		},
+	}
+
+	renamed := &model.Model{Vocabulary: model.Vocabulary{Classes: map[string]string{"feature": "Initiative"}}}
+	reason, bad := badFeatureAttestationTarget(target, "wrong-name", "ac-1", renamed)
+	if !bad {
+		t.Fatalf("badFeatureAttestationTarget(wrong-name) = (%q, false), want a refusal", reason)
+	}
+	if !strings.Contains(reason, "a Initiative outcome attestation lives at") {
+		t.Errorf("reason does not speak the renamed class word: %s", reason)
+	}
+	if strings.Contains(reason, "a feature outcome attestation") {
+		t.Errorf("reason still speaks the bare class id where the store renamed it: %s", reason)
+	}
+	for _, want := range []string{
+		`whose own name is "vl-022-feature"`,
+		`this attestation's own directory/id segment is "wrong-name"`,
+		"attestations/<feature-name>/<ac-id>.md",
+		"the path the feature fold reads",
+	} {
+		if !strings.Contains(reason, want) {
+			t.Errorf("rename dropped the identity token %q: %s", want, reason)
+		}
+	}
+
+	const wantCanonical = `whose own name is "vl-022-feature", but this attestation's own directory/id segment is "wrong-name" (a feature outcome attestation lives at attestations/<feature-name>/<ac-id>.md, the path the feature fold reads)`
+	got, bad := badFeatureAttestationTarget(target, "wrong-name", "ac-1", model.Canonical())
+	if !bad || got != wantCanonical {
+		t.Errorf("canonical-model reason = (%q, %v), want R-RR2-2's ruled bytes unchanged:\n%q", got, bad, wantCanonical)
 	}
 }
 
